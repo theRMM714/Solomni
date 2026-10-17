@@ -976,6 +976,7 @@ mod tests {
             net: true,
             engine_path: None,
             share_path: None,
+            shares: Vec::new(),
             seed: None,
             isolated: false,
         };

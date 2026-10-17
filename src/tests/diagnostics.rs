@@ -106,8 +106,11 @@ fn host_build_makes_the_entry_and_hits_the_cache() {
     )
     .scan();
     assert!(
-        crate::capabilities::vm::api::missing_entries(&scanned.modules, &|p| probe
-            .is_executable(p))
+        crate::capabilities::vm::api::missing_entries_for(
+            &scanned.modules,
+            std::env::consts::OS,
+            &|p| probe.is_executable(p)
+        )
         .is_empty(),
         "构建完入口判据要放行"
     );

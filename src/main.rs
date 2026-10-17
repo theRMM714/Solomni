@@ -25,9 +25,8 @@ fn main() {
         std::process::exit(guard::fence_run(&args, i));
     }
     // 自检（机器可读）：把"这台机器能承载哪些测试"如实交出来——测试入口据此判定，不靠猜（见 TESTING.md）。
-    if args.iter().any(|a| a == "--doctor") {
-        std::process::exit(diagnostics::doctor());
-    }
+    // 放在根解析之后：它要按**产品根**读"项目内已装了什么"（与就绪判据同一份来源）。
+    let doctor = args.iter().any(|a| a == "--doctor");
     // 隐藏模式：走**产品自己那套**出站链路打一次最小 HTTPS 请求，三态如实回报
     // （ok / no-net / tls-fail|fail）——CI 三平台据此验本构建的 TLS 栈，不需要任何密钥。
     if let Some(i) = args.iter().position(|a| a == "--https-check") {
@@ -62,6 +61,9 @@ fn main() {
         .unwrap_or_else(|| PathBuf::from("."));
     // 产品根规范化成**干净的绝对路径**：提示词里给 AI 的、以及各适配器给出的根都是它。
     let (root, root_note) = entry::root::resolve_root(&raw_root);
+    if doctor {
+        std::process::exit(diagnostics::doctor(&root));
+    }
     let home = root.join(".home");
     // 隐藏模式：依赖补齐的状态（机器可读，只报事实）——缺什么、装到哪、从哪来。
     if args.iter().any(|a| a == "--provision") {
@@ -169,11 +171,12 @@ fn main() {
         &capabilities::provision::ProvisionService::new(&root),
     )
     .unwrap_or_default();
+    // 清单里的 probe 是**相对产品根**的写法：这里拼成绝对路径再当登记值用（否则只在 CWD = 产品根时才成立）。
     let picked = |prefix: &str| {
         installed
             .iter()
             .find(|d| d.present && d.id.starts_with(prefix))
-            .map(|d| d.probe.clone())
+            .map(|d| root.join(&d.probe).to_string_lossy().into_owned())
     };
     registry.apply_discovered(
         picked("vm.qemu."),
@@ -253,42 +256,30 @@ fn main() {
             }
         };
 
-    // **虚拟机档能力**：运行包库来源、VM 引擎与共享后端三个出站端口只由它的 service 持有（R12）。
-    // 共享后端按平台的组合回退链选：与就绪检测共用 share_available——virtiofsd 不在场时如实退到 9p / copy。
-    let app = capabilities::registry::api::Registry::app(&registry);
-    let virtiofsd = app.virtiofsd_path.clone();
-    let smbd = app.smbd_path.clone();
-    // 组合选择与就绪检测共用同一份判据：本平台共享档要用的外部工具（Windows = smbd，其余 = virtiofsd）。
-    let share_tool = if std::env::consts::OS == "windows" {
-        smbd.clone()
-    } else {
-        virtiofsd.clone()
-    };
-    let picked = capabilities::vm::domain::exec::choose_combo(
-        capabilities::vm::domain::exec::default_combos(std::env::consts::OS),
-        &|engine| engine == "qemu",
-        &|_engine, share| {
-            capabilities::vm::domain::exec::share_available(
-                share,
-                Some(share_tool.as_str()),
-                &kernel::detail::HostProbeAdapter,
-            )
-        },
-    );
-    let share: Arc<dyn capabilities::vm::ports::ShareBackend + Send + Sync> =
-        match picked.map(|c| c.share) {
-            Some("smb") => Arc::new(capabilities::vm::detail::SmbShare::new()),
-            Some("virtiofs") => Arc::new(capabilities::vm::detail::VirtioFsShare::new()),
-            Some("copy") => Arc::new(capabilities::vm::detail::CopyShare::new()),
-            _ => Arc::new(capabilities::vm::detail::NinePShare::new()),
+    // **虚拟机档能力**：运行包库来源、VM 引擎与共享后端这些出站端口只由它的 service 持有（R12）；
+    // 共享后端**全部**按平台回退链顺序装配进来：哪一档落得上在起 guest 那一刻选（见 GuestSpec.shares）。
+    let order = capabilities::vm::domain::exec::default_combos(std::env::consts::OS);
+    let mut shares: Vec<Arc<dyn capabilities::vm::ports::ShareBackend + Send + Sync>> = Vec::new();
+    for combo in order.iter().filter(|c| c.engine == "qemu") {
+        let share: Arc<dyn capabilities::vm::ports::ShareBackend + Send + Sync> = match combo.share
+        {
+            "smb" => Arc::new(capabilities::vm::detail::SmbShare::new()),
+            "virtiofs" => Arc::new(capabilities::vm::detail::VirtioFsShare::new()),
+            "9p" => Arc::new(capabilities::vm::detail::NinePShare::new()),
+            "copy" => Arc::new(capabilities::vm::detail::CopyShare::new()),
+            _ => continue,
         };
+        if !shares.iter().any(|s| s.id() == share.id()) {
+            shares.push(share);
+        }
+    }
     let vm: Arc<dyn capabilities::vm::api::Vm + Send + Sync> =
         Arc::new(capabilities::vm::service::VmService::new(
             Arc::new(packages),
             Arc::new(capabilities::vm::detail::QemuEngine::with_overlay_dir(
                 root.join(".vm").join("overlays"),
             )),
-            share,
+            shares,
         ));
 
     // **工作区能力**：目录布局与版本库两个出站端口只由它的 service 持有（R12）。

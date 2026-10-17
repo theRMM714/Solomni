@@ -36,11 +36,13 @@ impl Conductor {
             }
             missing.retain(|_, caps| !caps.is_empty());
         }
+        let qemu = self.qemu_path();
+        let share_tool = self.share_tool_path();
         let readiness = crate::capabilities::vm::api::tier_readiness(
             &self.root,
             spec,
-            self.qemu_path(),
-            self.share_tool_path(),
+            qemu.as_deref(),
+            share_tool.as_deref(),
             self.probe.as_ref(),
         );
         RuntimeReport {
@@ -69,9 +71,11 @@ impl Conductor {
     pub fn tier_choices(&self) -> TierChoices {
         let default = self.registry.app().tier;
         // 这是**与某条会话无关的机器能力**：虚拟根属于会话选型，不在这里判（创建时另行收集）。
+        let qemu = self.qemu_path();
+        let share_tool = self.share_tool_path();
         let inputs = crate::capabilities::vm::api::VmInputs {
-            qemu: self.qemu_path(),
-            share_tool: self.share_tool_path(),
+            qemu: qemu.as_deref(),
+            share_tool: share_tool.as_deref(),
             probe: self.probe.as_ref(),
         };
         let cap = crate::capabilities::vm::api::vm_capability(&inputs);
@@ -172,9 +176,11 @@ impl Conductor {
         let (meta, events) = self.history_open(sid)?;
         let tier = meta.exec.tier;
         // 机器能力（与某条会话无关）：界面据此决定虚拟机档能不能**选**；虚拟根是会话级，另行校验。
+        let qemu = self.qemu_path();
+        let share_tool = self.share_tool_path();
         let inputs = crate::capabilities::vm::api::VmInputs {
-            qemu: self.qemu_path(),
-            share_tool: self.share_tool_path(),
+            qemu: qemu.as_deref(),
+            share_tool: share_tool.as_deref(),
             probe: self.probe.as_ref(),
         };
         let cap = crate::capabilities::vm::api::vm_capability(&inputs);
@@ -182,6 +188,14 @@ impl Conductor {
         let vm_reason =
             crate::capabilities::vm::api::capability_refusal(&inputs).unwrap_or_default();
         let vm_requirements = cap.requirements;
+        // 会话级判据（机器能力 + 这条会话选的虚拟根）只算一次：两处读同一个结论，不各算一遍。
+        let readiness = crate::capabilities::vm::api::tier_readiness(
+            &self.root,
+            &meta.exec,
+            qemu.as_deref(),
+            share_tool.as_deref(),
+            self.probe.as_ref(),
+        );
         Ok(SessionConfig {
             sid: meta.name.clone(),
             mode: meta.mode.clone(),
@@ -204,25 +218,8 @@ impl Conductor {
             pins: meta.exec.pins.clone(),
             runtime: self.runtime_report_for(&meta.exec),
             runtimes_dir: crate::kernel::api::slash(&self.vm.runtimes_dir()),
-            tier_ready: crate::capabilities::vm::api::tier_readiness(
-                &self.root,
-                &meta.exec,
-                self.qemu_path(),
-                self.share_tool_path(),
-                self.probe.as_ref(),
-            )
-            .ready(),
-            tier_missing: crate::capabilities::vm::api::tier_readiness(
-                &self.root,
-                &meta.exec,
-                self.qemu_path(),
-                self.share_tool_path(),
-                self.probe.as_ref(),
-            )
-            .missing()
-            .iter()
-            .map(|s| s.to_string())
-            .collect(),
+            tier_ready: readiness.ready(),
+            tier_missing: readiness.missing().iter().map(|s| s.to_string()).collect(),
             // 虚拟机档能不能选**与当前档位无关**：本机档会话也要如实告诉用户 vm 现在不可用（界面据此禁用）。
             // 逐项清单一起给出：界面照抄"缺哪几项、每项怎么补"，不自己编话。
             vm_available,
@@ -339,11 +336,13 @@ impl Conductor {
         if staying_vm {
             // 留在 vm 档：只校验用户这次填的基础根（填错路径就是填错路径），
             // 不拿"本机能不能提供 vm 档"去拦一条已经存在的会话。
+            let qemu = self.qemu_path();
+            let share_tool = self.share_tool_path();
             let base_item = crate::capabilities::vm::api::tier_readiness(
                 &self.root,
                 &spec,
-                self.qemu_path(),
-                self.share_tool_path(),
+                qemu.as_deref(),
+                share_tool.as_deref(),
                 self.probe.as_ref(),
             )
             .requirements
@@ -357,8 +356,8 @@ impl Conductor {
         } else if let Some(why) = crate::capabilities::vm::api::tier_refusal(
             &self.root,
             &spec,
-            self.qemu_path(),
-            self.share_tool_path(),
+            self.qemu_path().as_deref(),
+            self.share_tool_path().as_deref(),
             self.probe.as_ref(),
         ) {
             return Err(why);
@@ -369,9 +368,15 @@ impl Conductor {
             .filter(|m| seen.iter().any(|id| id == &m.manifest.id))
             .cloned()
             .collect();
+        // 入口按**目标环境**判：虚拟机档在 guest 里跑（guest 的 os），本机档在宿主；
+        // 跨平台时还要看文件形式——宿主编出来的产物（如 Windows 的 .exe）在 linux guest 里跑不了。
+        let guest = self.guest_os_of(&spec).map(|g| g.as_str());
+        let target_os = guest.unwrap_or(std::env::consts::OS);
         let missing: Vec<crate::capabilities::vm::api::MissingEntry> =
-            crate::capabilities::vm::api::missing_entries(&session_modules, &|p| {
+            crate::capabilities::vm::api::missing_entries_for(&session_modules, target_os, &|p| {
                 self.probe.is_executable(p)
+                    && (target_os == std::env::consts::OS
+                        || crate::capabilities::vm::api::runs_on_target(p, target_os))
             });
         let plan = crate::capabilities::vm::api::plan(
             &spec,
@@ -380,7 +385,7 @@ impl Conductor {
             &self.guest_runtimes_of(&spec),
             &missing,
         )
-        .map_err(|diags| crate::capabilities::vm::api::diagnose_text(&diags))?;
+        .map_err(|diags| crate::capabilities::vm::api::diagnose_text_for(&diags, guest))?;
         self.log.info(
             "conductor::edit_session",
             &format!(
@@ -481,8 +486,14 @@ impl Conductor {
             image,
             mounts,
             net: meta.exec.net,
-            engine_path: self.qemu_path().map(str::to_string),
-            share_path: self.share_tool_path().map(str::to_string),
+            engine_path: self.qemu_path(),
+            share_path: self.share_tool_path(),
+            // 共享档在起 guest 这一刻按"已实现 + 工具在场"的优先序选：补齐装完下一次启动就用上。
+            shares: crate::capabilities::vm::api::share_chain(
+                std::env::consts::OS,
+                self.share_tool_path().as_deref(),
+                self.probe.as_ref(),
+            ),
             seed: None,
             // 会话要每租约可写层：多台并发不能同写一份基础镜像。
             isolated: true,
@@ -552,44 +563,53 @@ impl Conductor {
         }
     }
 
-    /// 设置里登记的 QEMU 可执行文件路径（默认空 = 兜底看 PATH，或由 provision 能力装进项目内）。
-    pub(crate) fn qemu_path(&self) -> Option<&str> {
-        let p = self.registry.app().qemu_path.trim();
-        if p.is_empty() {
-            None
-        } else {
-            Some(p)
-        }
+    /// 目的：本机实际要用的 QEMU 可执行文件：设置里登记了就用它，没登记就采用依赖补齐装进项目内的那一个。
+    /// 约束：**每次判据取用时现算**（不是启动时定一次）——补齐作业装完即生效，不需要重启进程；
+    ///   显式登记永远优先，这里不改用户的 `settings.yaml`。
+    pub(crate) fn qemu_path(&self) -> Option<String> {
+        self.registered_or_installed("qemu_path", "vm.qemu.")
     }
 
-    /// 目的：设置里登记的 virtiofs 守护进程路径（默认空 = 兜底看 PATH，或由 provision 能力装进项目内）。
-    pub(crate) fn virtiofsd_path(&self) -> Option<&str> {
-        let p = self.registry.app().virtiofsd_path.trim();
-        if p.is_empty() {
-            None
-        } else {
-            Some(p)
-        }
+    /// 目的：同 `qemu_path`，virtiofs 守护进程。
+    pub(crate) fn virtiofsd_path(&self) -> Option<String> {
+        self.registered_or_installed("virtiofsd_path", "vm.virtiofsd.")
     }
 
-    /// 目的：设置里登记的 SMB helper 路径（默认空 = 兜底看 PATH，或由 provision 能力装进项目内）。
-    pub(crate) fn smbd_path(&self) -> Option<&str> {
-        let p = self.registry.app().smbd_path.trim();
-        if p.is_empty() {
-            None
-        } else {
-            Some(p)
-        }
+    /// 目的：同 `qemu_path`，SMB helper。
+    pub(crate) fn smbd_path(&self) -> Option<String> {
+        self.registered_or_installed("smbd_path", "vm.smbd.")
     }
 
     /// 目的：本平台共享档要用的外部工具路径（Windows = smbd；其余 = virtiofsd）；都不在场给 None。
     /// 约束：组合选择与就绪检测共用这一份，避免"说要验 A、实际跑 B"。
-    pub(crate) fn share_tool_path(&self) -> Option<&str> {
+    pub(crate) fn share_tool_path(&self) -> Option<String> {
         if cfg!(windows) {
             self.smbd_path()
         } else {
             self.virtiofsd_path()
         }
+    }
+
+    /// 目的：一个外部工具路径的**唯一**取法：设置里登记优先，空了就用补齐面报的"已装在项目内"的那个。
+    /// 参数：which = 设置字段名（只用于说明）；prefix = 清单 id 前缀（`vm.qemu.` 这类，按平台后缀区分）。
+    /// 约束：每次现算——补完立刻能被判据看见，也就没有"装完还得重启"这一步。
+    fn registered_or_installed(&self, which: &str, prefix: &str) -> Option<String> {
+        let app = self.registry.app();
+        let registered = match which {
+            "virtiofsd_path" => app.virtiofsd_path.trim(),
+            "smbd_path" => app.smbd_path.trim(),
+            _ => app.qemu_path.trim(),
+        };
+        if !registered.is_empty() {
+            return Some(registered.to_string());
+        }
+        // 没登记：按补齐面报的在场条目取（**绝对路径**——清单里的 probe 是相对产品根的写法）。
+        self.provision
+            .status()
+            .ok()?
+            .iter()
+            .find(|d| d.present && d.id.starts_with(prefix))
+            .map(|d| self.root.join(&d.probe).to_string_lossy().into_owned())
     }
 
     /// 用户显式授权的只读根（`settings.yaml` 的 `fence_read`）。
@@ -643,11 +663,13 @@ impl Conductor {
                     .to_string();
                 // 记的档位来自落盘 meta（权威）：环境变了也要如实提示——**不拦打开**（记录是用户的）。
                 let exec = entry.map(|h| h.exec.clone()).unwrap_or_default();
+                let qemu = self.qemu_path();
+                let share_tool = self.share_tool_path();
                 let readiness = crate::capabilities::vm::api::tier_readiness(
                     &self.root,
                     &exec,
-                    self.qemu_path(),
-                    self.share_tool_path(),
+                    qemu.as_deref(),
+                    share_tool.as_deref(),
                     self.probe.as_ref(),
                 );
                 // 「改需求」能力位：有本次需求行才给。在表里看会话种类；不在表里（生成中/未打开）
@@ -834,8 +856,8 @@ impl Conductor {
         if let Some(why) = crate::capabilities::vm::api::tier_refusal(
             &self.root,
             &meta.exec,
-            self.qemu_path(),
-            self.share_tool_path(),
+            self.qemu_path().as_deref(),
+            self.share_tool_path().as_deref(),
             self.probe.as_ref(),
         ) {
             return Err(why);
@@ -862,11 +884,15 @@ impl Conductor {
                 );
             }
         }
-        // 执行选型的完整性检查（「开始」即冻结）：虚拟机档的选型不成立（多版本未定版 / 定版不存在 /
-        // 路径冲突）如实拒绝；**缺包同样拒绝**（没有工具用户完不成工作，不降级）。装配阶段按同一份计划取包。
+        // 执行选型完整性（「开始」即冻结）：选型不成立或**缺包**都如实拒绝（没有工具，用户完不成工作）。
+        // 入口**按目标环境**判：虚拟机档按 guest 的 os 解析名字，跨平台还看文件形式（宿主编的产物跑不了）。
+        let guest = self.guest_os_of(&meta.exec).map(|g| g.as_str());
+        let target_os = guest.unwrap_or(std::env::consts::OS);
         let missing: Vec<crate::capabilities::vm::api::MissingEntry> =
-            crate::capabilities::vm::api::missing_entries(&session_modules, &|p| {
+            crate::capabilities::vm::api::missing_entries_for(&session_modules, target_os, &|p| {
                 self.probe.is_executable(p)
+                    && (target_os == std::env::consts::OS
+                        || crate::capabilities::vm::api::runs_on_target(p, target_os))
             });
         let plan = crate::capabilities::vm::api::plan(
             &meta.exec,
@@ -875,7 +901,7 @@ impl Conductor {
             &self.guest_runtimes_of(&meta.exec),
             &missing,
         )
-        .map_err(|diags| crate::capabilities::vm::api::diagnose_text(&diags))?;
+        .map_err(|diags| crate::capabilities::vm::api::diagnose_text_for(&diags, guest))?;
         self.log.info(
             "conductor::create_work",
             &crate::capabilities::vm::api::plan_summary(&plan),

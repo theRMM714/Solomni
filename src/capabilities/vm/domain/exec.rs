@@ -46,18 +46,10 @@ pub struct MissingEntry {
     pub buildable: bool,
 }
 
-/// 目的：按宿主事实挑出"入口不在场"的模块工具——相对路径入口必须存在且**能直接执行**。
-/// 参数：is_executable = 宿主侧"这个路径能不能直接跑"的事实（由端口给；本函数不碰文件系统）。
+/// 目的：挑出"入口不在场"的模块工具——相对路径入口必须在**目标环境**里存在且能直接执行。
+/// 参数：os = 目标系统（本机档 = 宿主，虚拟机档 = guest 的 os）；is_executable = "这个路径在目标环境里能不能直接跑"的事实。
 /// 约束：裸名（`python` / `node` / `indexer`）走 PATH 与运行能力，不在本判据里；绝对路径同样不在模块目录里找。
-pub fn missing_entries(
-    modules: &[Module],
-    is_executable: &dyn Fn(&Path) -> bool,
-) -> Vec<MissingEntry> {
-    missing_entries_for(modules, std::env::consts::OS, is_executable)
-}
-
-/// 目的：同上，但**目标系统**由调用方给——判据跟着那台机器的壳解析走（用例据此在别的平台上验 Windows 语义）。
-/// 参数：os = 目标系统（`std::env::consts::OS` 的取值）；其余同上。
+/// 约束：名字按目标环境的壳解析（见 `entry_candidates`），跨平台时调用方还要按文件形式筛（见 `runs_on_target`）。
 pub fn missing_entries_for(
     modules: &[Module],
     os: &str,
@@ -415,18 +407,6 @@ pub fn guest_platform(
     format!("{}-{}", os.as_str(), arch.as_str())
 }
 
-/// 目的：在排好的顺序里挑第一个"引擎与共享都在场"的组合（在不在场由调用方给）。
-/// 返回：选中的组合；都不在场就是 None。
-pub fn choose_combo<'a>(
-    order: &'a [Combo],
-    engine_ok: &dyn Fn(&str) -> bool,
-    share_ok: &dyn Fn(&str, &str) -> bool,
-) -> Option<&'a Combo> {
-    order
-        .iter()
-        .find(|c| engine_ok(c.engine) && share_ok(c.engine, c.share))
-}
-
 /// 目的：本平台的 guest 后端是否已经过真机验收。
 /// 约束：记录的是"验过没有"的事实，不是环境探测。
 fn guest_backend_verified() -> bool {
@@ -458,6 +438,60 @@ fn tool_available(name: &str, registered: Option<&str>, probe: &dyn HostProbe) -
         // 否则组合会选它、到启动那一步才炸；这里如实判"不在场"，让回退链与就绪文案说真话。
         Some(p) if !p.is_empty() => probe.is_executable(Path::new(p)),
         _ => probe.has_exe(name),
+    }
+}
+
+/// 目的：这次启动**可试**的共享后端 id，按本平台"性能优先"的已实现顺序；工具不在场的档不列。
+/// 参数：host = 宿主平台（std::env::consts::OS 的取值）；share_tool = 本平台共享工具路径（None = 兜底 PATH）；probe = 宿主事实。
+/// 约束：只判"已实现 + 工具在场"（share_available）；落不落到这台引擎 / 这份 guest 上由共享后端自己判
+///   （ShareBackend::supports）——所以**选档发生在起 guest 那一刻**，不是装配期定一次。
+/// 约束：引擎恒按 qemu 筛（当前唯一已实现引擎）；返回空表 = 本平台这一份没有可试的共享档。
+pub fn share_chain(
+    host: &str,
+    share_tool: Option<&str>,
+    probe: &dyn HostProbe,
+) -> Vec<&'static str> {
+    default_combos(host)
+        .iter()
+        .filter(|c| c.engine == "qemu" && share_available(c.share, share_tool, probe))
+        .map(|c| c.share)
+        .collect()
+}
+
+/// 目的：这个文件在**目标平台**上能直接跑吗——看形式（ELF / Mach-O / PE / 脚本头 / Windows 的批处理扩展名）。
+/// 参数：path = 模块目录里的入口文件；target_os = 目标平台（`std::env::consts::OS` 的取值）。
+/// 约束：名字层面的解析由 `entry_candidates` 管，这里只管**内容**；跨平台时"宿主编出来的产物"与目标格式不符，
+///   必须在预检就判否，而不是等 guest 里报 `not found` / `Exec format error`。
+pub fn runs_on_target(path: &Path, target_os: &str) -> bool {
+    use std::io::Read;
+    let Ok(mut f) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut head = [0u8; 4];
+    let n = f.read(&mut head).unwrap_or(0);
+    let head = &head[..n];
+    let elf = head == b"\x7fELF";
+    let pe = head.starts_with(b"MZ");
+    let script = head.starts_with(b"#!");
+    let mach = matches!(
+        head,
+        [0xfe, 0xed, 0xfa, 0xce]
+            | [0xcf, 0xfa, 0xed, 0xfe]
+            | [0xca, 0xfe, 0xba, 0xbe]
+            | [0xbe, 0xba, 0xfe, 0xca]
+    );
+    match target_os {
+        // Windows 的壳按扩展名认批处理与命令脚本；可执行体是 PE。
+        "windows" => {
+            pe || script
+                || path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| matches!(e.to_ascii_lowercase().as_str(), "cmd" | "bat" | "com"))
+                    .unwrap_or(false)
+        }
+        "macos" => mach || script,
+        _ => elf || script,
     }
 }
 
@@ -544,8 +578,9 @@ fn hypervisor_how() -> &'static str {
 
 /// QEMU 检测：登记了就用登记的路径，没登记就看 PATH（依赖不预置、不分发，可由 setup 脚本装进项目内）。
 fn qemu_requirement(registered: Option<&str>, probe: &dyn HostProbe) -> VmRequirement {
+    // "登记的路径" 也包含核心在没登记时自动采用的那一份（项目内补齐的包）：对用户是同一件事——按路径找到了。
     let (found, where_from) = match registered.map(str::trim) {
-        Some(p) if !p.is_empty() => (probe.is_file(Path::new(p)), "设置里登记的路径"),
+        Some(p) if !p.is_empty() => (probe.is_file(Path::new(p)), "设置登记或项目内补齐的路径"),
         _ => (probe.has_exe(QEMU_BIN), "PATH"),
     };
     VmRequirement {
@@ -559,7 +594,7 @@ fn qemu_requirement(registered: Option<&str>, probe: &dyn HostProbe) -> VmRequir
         how: if found {
             String::new()
         } else {
-            "自行安装 QEMU 并放进 PATH，或在设置里登记它的完整路径；也可跑 solomni --provision --ensure --yes 把它下载进项目内（需用户同意）"
+            "在创建向导或配置界面点「补齐虚拟机依赖」把它下载进项目内（只写项目内，需用户同意）；也可自行安装 QEMU 并放进 PATH，或在设置里登记它的完整路径。集成环境里没有界面时可用 solomni --provision --ensure --yes"
                 .to_string()
         },
     }
@@ -591,7 +626,7 @@ pub fn resolve_guest(root: &Path, guest: &str) -> Result<std::path::PathBuf, Str
 /// 目的：虚拟根就绪检测——名字认得、那一格目录在场、布局可用（rootfs + 内核或磁盘镜像）。
 /// 约束：检测顺序 = 名字合法性 → 在场 → 布局；三种失败给三种可操作的说明，不混成一句。
 fn guest_requirement(root: &Path, guest: Option<&str>, probe: &dyn HostProbe) -> VmRequirement {
-    let how = "跑 solomni --provision --ensure --yes 把虚拟根装进项目内（需用户同意），或换一个已装好的虚拟根";
+    let how = "在创建向导或配置界面点「补齐虚拟机依赖」把虚拟根装进项目内（只写项目内，需用户同意），或换一个已装好的虚拟根；集成环境里没有界面时可用 solomni --provision --ensure --yes";
     let name = guest.map(str::trim).filter(|g| !g.is_empty());
     let Some(name) = name else {
         return VmRequirement {
@@ -667,7 +702,7 @@ pub fn capability_refusal(vm: &VmInputs<'_>) -> Option<String> {
         return None;
     }
     Some(format!(
-        "虚拟机档现在不可用（{}）：请换本机档。各项前置与怎么补见配置界面的「虚拟机档前置」与 --doctor",
+        "虚拟机档现在不可用（{}）：请换本机档，或在创建向导 / 配置界面的「虚拟机档前置」里点「补齐虚拟机依赖」把缺的装进项目内",
         cap.missing().join("；")
     ))
 }
@@ -711,7 +746,7 @@ pub fn tier_refusal(
         return None;
     }
     Some(format!(
-        "虚拟机档现在不可用（{}）：请换本机档。各项前置与怎么补见配置界面的「虚拟机档前置」与 --doctor",
+        "虚拟机档现在不可用（{}）：请换本机档，或在创建向导 / 配置界面的「虚拟机档前置」里点「补齐虚拟机依赖」把缺的装进项目内",
         readiness.missing().join("；")
     ))
 }
@@ -865,6 +900,12 @@ pub fn unavailable(
 
 /// 目的：诊断的可读说法（面向界面/CLI 的 Err，与 conductor 其它 Err 同一做法）。
 pub fn diagnose_text(diags: &[Diagnosis]) -> String {
+    diagnose_text_for(diags, None)
+}
+
+/// 目的：同上，但"怎么补"按**目标环境**说：虚拟机档的入口要在那个虚拟根里编（宿主上编出来的产物在 guest 里跑不了）。
+/// 参数：guest = 这次会话的虚拟根名（None = 本机档，在宿主编）。
+pub fn diagnose_text_for(diags: &[Diagnosis], guest: Option<&str>) -> String {
     let lines: Vec<String> = diags
         .iter()
         .map(|d| match d {
@@ -899,10 +940,17 @@ pub fn diagnose_text(diags: &[Diagnosis]) -> String {
                 command,
                 buildable,
             } => {
-                let how = if *buildable {
-                    format!("跑 solomni --build={} 让系统照模块声明的构建方法编一次", module)
-                } else {
-                    "模块要自带这个产物，或先按模块自己的 README 构建一次".to_string()
+                let how = match (buildable, guest) {
+                    (true, Some(g)) => format!(
+                        "跑 solomni --build={} --guest={} 让系统在虚拟根里照模块声明编一次（宿主上编出来的产物在 guest 里跑不了）",
+                        module, g
+                    ),
+                    (true, None) => {
+                        format!("跑 solomni --build={} 让系统照模块声明的构建方法编一次", module)
+                    }
+                    (false, _) => {
+                        "模块要自带这个产物，或先按模块自己的 README 构建一次".to_string()
+                    }
                 };
                 format!("模块 {} 的工具 {} 入口不在场：{}（{}）", module, tool, command, how)
             }

@@ -191,6 +191,10 @@ pub struct GuestSpec {
     /// 目的：设置里登记的**共享后端**要用的外部可执行文件路径（如 virtiofsd；空 = 兜底按 PATH 找）。
     /// 约束：与 qemu_path 同样与就绪检测共用一份登记；不需要外部工具的共享档忽略它。
     pub share_path: Option<String>,
+    /// 目的：这次启动**可试**的共享后端 id，按优先序（第一个落得到这台引擎与这份 guest 上的就用它）。
+    /// 约束：候选由调用方按"已实现 + 工具在场"排好（vm::api::share_chain）；空表 = 按 service 持有的顺序全试。
+    ///   选档因此发生在起 guest 那一刻：补齐作业装完共享工具后，下一次启动就用上，不必重启进程。
+    pub shares: Vec<&'static str>,
     /// 目的：首启要投喂的 cloud-init 种子；None = 不投种子（正常会话启动）。
     /// 约束：投种子要求 `net = true`（guest 要能连到宿主的小 HTTP 服务）。
     pub seed: Option<SeedDocs>,

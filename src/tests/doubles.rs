@@ -77,6 +77,13 @@ impl InMemorySettings {
         self.fail = Some(msg.to_string());
         self
     }
+    /// 目的：指定登记的外部工具路径（断言"显式登记优先"）。
+    pub(crate) fn with_qemu_path(qemu: &str) -> InMemorySettings {
+        let s = InMemorySettings::new();
+        s.s.lock().expect("锁").app.qemu_path = qemu.to_string();
+        s
+    }
+
     /// 指定默认执行档位的登记处（断言虚拟机档下的诊断与工具回执）。
     pub(crate) fn with_tier(tier: Tier) -> InMemorySettings {
         let s = InMemorySettings::new();
@@ -1108,10 +1115,17 @@ pub(crate) fn work(name: &str, mode: WorkMode, modules: &[&str]) -> WorkSpec {
 /// 目的：假依赖补齐面——清单为空、动作不能真跑（conductor 只读它的虚拟根清单；测试不碰网络与下载）。
 pub(crate) fn test_provision(
 ) -> Arc<dyn crate::capabilities::provision::api::Provision + Send + Sync> {
-    struct EmptyProvision;
-    impl crate::capabilities::provision::api::Provision for EmptyProvision {
+    test_provision_with(Vec::new())
+}
+
+/// 目的：同上，但报一份给定的清单（验"设置里没登记时采用项目内已装的那一个"）。
+pub(crate) fn test_provision_with(
+    deps: Vec<crate::capabilities::provision::api::DepStatus>,
+) -> Arc<dyn crate::capabilities::provision::api::Provision + Send + Sync> {
+    struct FixedProvision(Vec<crate::capabilities::provision::api::DepStatus>);
+    impl crate::capabilities::provision::api::Provision for FixedProvision {
         fn status(&self) -> Result<Vec<crate::capabilities::provision::api::DepStatus>, String> {
-            Ok(Vec::new())
+            Ok(self.0.clone())
         }
         fn guest_bases(
             &self,
@@ -1126,7 +1140,25 @@ pub(crate) fn test_provision(
         }
         fn cancel(&self) {}
     }
-    Arc::new(EmptyProvision)
+    Arc::new(FixedProvision(deps))
+}
+
+/// 目的：一条"已装在项目内"的依赖（`probe` 是相对产品根的写法，与清单同构）。
+pub(crate) fn installed_dep(
+    id: &str,
+    probe: &str,
+) -> crate::capabilities::provision::api::DepStatus {
+    crate::capabilities::provision::api::DepStatus {
+        id: id.to_string(),
+        guest: None,
+        present: true,
+        install: String::new(),
+        probe: probe.to_string(),
+        source: String::new(),
+        url: None,
+        size_mb: 0,
+        note: String::new(),
+    }
 }
 
 /// 协作工作规格（含需求）。
@@ -1501,6 +1533,100 @@ impl crate::capabilities::vm::ports::ShareBackend for FakeShare {
     }
 }
 
+/// 目的：带名字与"落得上吗"开关的共享替身——验起 guest 时按候选挑档、同步走**这一台**选中的那一档。
+pub(crate) struct NamedShare {
+    name: &'static str,
+    ok: bool,
+    pub(crate) calls: Arc<Mutex<Vec<String>>>,
+}
+
+impl NamedShare {
+    /// 目的：建一个替身：`name` 是它的 id，`ok` 是 `supports` 的答案。
+    pub(crate) fn new(name: &'static str, ok: bool) -> NamedShare {
+        NamedShare {
+            name,
+            ok,
+            calls: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    /// 目的：它被调用过的动作（按发生顺序）。
+    pub(crate) fn calls(&self) -> Vec<String> {
+        self.calls.lock().expect("锁").clone()
+    }
+}
+
+impl crate::capabilities::vm::ports::ShareBackend for NamedShare {
+    fn id(&self) -> &'static str {
+        self.name
+    }
+
+    fn supports(
+        &self,
+        _engine: &str,
+        _guest: &crate::capabilities::vm::domain::guest::GuestImage,
+    ) -> bool {
+        self.ok
+    }
+
+    fn prepare(
+        &self,
+        _engine: &str,
+        _mounts: &[crate::capabilities::vm::domain::guest::GuestMount],
+        _share_tool: Option<&str>,
+    ) -> Result<
+        (
+            crate::capabilities::vm::ports::SharePlan,
+            Box<dyn crate::capabilities::vm::ports::ShareGuard>,
+        ),
+        String,
+    > {
+        self.calls.lock().expect("锁").push("prepare".to_string());
+        Ok((
+            crate::capabilities::vm::ports::SharePlan {
+                kind: self.name,
+                engine_args: Vec::new(),
+                net_options: Vec::new(),
+                guest_scripts: Vec::new(),
+                needs_net: false,
+                needs_shared_mem: false,
+            },
+            Box::new(crate::tests::doubles::FakeGuard2 {
+                calls: self.calls.clone(),
+            }),
+        ))
+    }
+
+    fn sync_in(
+        &self,
+        _channel: &mut dyn crate::capabilities::vm::ports::GuestChannel,
+        _mounts: &[crate::capabilities::vm::domain::guest::GuestMount],
+    ) -> Result<(), String> {
+        self.calls.lock().expect("锁").push("sync_in".to_string());
+        Ok(())
+    }
+
+    fn sync_out(
+        &self,
+        _channel: &mut dyn crate::capabilities::vm::ports::GuestChannel,
+        _mounts: &[crate::capabilities::vm::domain::guest::GuestMount],
+    ) -> Result<(), String> {
+        self.calls.lock().expect("锁").push("sync_out".to_string());
+        Ok(())
+    }
+}
+
+/// 目的：NamedShare 的凭据替身——释放记一笔（与 FakeGuard 同形，不复用是为了不共用同一个记录）。
+pub(crate) struct FakeGuard2 {
+    calls: Arc<Mutex<Vec<String>>>,
+}
+
+impl crate::capabilities::vm::ports::ShareGuard for FakeGuard2 {
+    fn release(&mut self) {
+        self.calls.lock().expect("锁").push("release".to_string());
+    }
+}
+
 /// 目的：共享凭据替身——释放记录一笔。
 struct FakeGuard {
     calls: Arc<Mutex<Vec<String>>>,
@@ -1608,13 +1734,15 @@ impl crate::capabilities::vm::api::Vm for RecordingVm {
 }
 
 /// 目的：测试用的 **vm 能力面**——把运行包库来源与 guest 替身装进 `VmService`（与生产同一条路，R12）。
+/// 约束：共享档用一个恒可落、id 是 `copy` 的替身——`copy` 在每个平台的候选链里（不需要外部工具），
+///   所以 conductor 按真实链路给出的候选总能挑到它；要验"挑哪一档"的用例自己装配替身。
 pub(crate) fn test_vm(
     packages: Arc<dyn PackageSource + Send + Sync>,
 ) -> Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync> {
     Arc::new(crate::capabilities::vm::service::VmService::new(
         packages,
         Arc::new(FakeEngine::new()),
-        Arc::new(FakeShare::new()),
+        vec![Arc::new(NamedShare::new("copy", true))],
     ))
 }
 

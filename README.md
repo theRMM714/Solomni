@@ -53,8 +53,9 @@ Solomni 是一个**跑在自己机器上的 agent 运行环境（AgentOS）**：
   弹一张卡让你选「本轮无围栏跑一次 / 放弃这次调用」，没有可回答的前端就拒绝执行（命令不落进程）。
 - **两档执行**：**本机档**（默认，脚本直接在宿主上跑）与**虚拟机档**（模块工具在 guest 里跑，进程与宿主隔离）。
   虚拟机档按**宿主 × 引擎 × guest × 通道 × 共享**五轴可插：Linux（QEMU/KVM + virtiofs，缺 virtiofsd 时退 9p）与 Windows（QEMU/WHPX + SMB 实时共享，缺 smbd 时退 QGA 复制）
-  已真机跑通，macOS 尚未做（见 [tests/gaps.yaml](tests/gaps.yaml)）。`node start.js --provision --ensure --yes`
-  按平台把 QEMU 与 Debian guest 装进项目内 `.vm/`（下载前要 `--yes`）；宿主路径与 guest 路径由**同一座桥**正反换算（同方言恒等，跨方言编进镜像根），
+  已真机跑通，macOS 尚未做（见 [tests/gaps.yaml](tests/gaps.yaml)）。虚拟机档不可用时，网页在**说缺什么的地方**直接给「补齐虚拟机依赖」
+  这个动作（配置面板与新建工作向导：先看清单与体积、确认后下载、按进度长轮询），同一份清单也走 `node start.js --provision --ensure --yes`
+  按平台装进项目内 `.vm/`（下载前要 `--yes`）；宿主路径与 guest 路径由**同一座桥**正反换算（同方言恒等，跨方言编进镜像根），
   工作环境提示词只讲**本环境一种写法**，系统工具在寻址前把 guest 写法译回宿主路径再校验。细节见 [docs/vm/README.md](docs/vm/README.md)，运行包契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)。
 - **登记处**：供应商 / 模型 / agent / 设置四份 YAML，全在 `.home/`，由界面管理。
   密钥只在本机登记处与核心的出站调用里（边界见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)）。
@@ -76,6 +77,7 @@ node start.js            # 任意平台；Windows 也可双击 start.bat，macOS
 node start.js -webUI     # 直接进本地网页（127.0.0.1:3081）
 node start.js --provision                # 可选：虚拟机档只读状态（JSON：QEMU / guest 镜像 / agent 与运行包）
 node start.js --provision --ensure --yes # 可选：把 QEMU 与 Debian guest 装进项目内 .vm/（下载前要 --yes）
+# 网页里也能直接补：虚拟机档不可用时，配置面板 / 创建向导给的「补齐虚拟机依赖」就是这条（不必开终端）
 ```
 
 - 工具链与缓存收敛在**项目内**：检测到可用的 Rust 就**只读借用**，缓存与产物仍落 `platform/<os>/`；没有或有问题的才先征求同意装进项目内，不动系统；**无交互终端时不做安装**，打印手动步骤后退出。

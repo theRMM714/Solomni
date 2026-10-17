@@ -20,10 +20,10 @@
 
 **当前状态**：五轴已按可插的形状落地——`QemuEngine`（当前唯一引擎）、`GuestImage`（虚拟根里可放 `guest.yaml` 声明 id / arch / os / agent / clients / runtimes）、
 `QemuHandle`（QEMU + QGA，命令通道；chardev 就绪前连上的那条会被 QEMU RST，故握手失败即重连再握手——不把通道被换掉当故障）、`NinePShare`（目录根）、`CopyShare`（QGA 复制，三平台通用）、`VirtioFsShare`（QEMU vhost-user-fs，Linux/macOS 宿主）与 `SmbShare`（用户态 SMB helper + guestfwd 隧道，Windows 宿主的实时共享档）。
-按平台的组合回退链是数据（`default_combos` / `choose_combo`），加速器按平台给（`accel=kvm:tcg` / `accel=whpx:tcg` / `accel=hvf:tcg`），共享要隧道时给 `restrict=on` 网卡。
+按平台的组合回退链是数据（`default_combos` / `share_chain`），**共享档在起 guest 那一刻按候选挑**（不是装配期定一次），加速器按平台给（`accel=kvm:tcg` / `accel=whpx:tcg` / `accel=hvf:tcg`），共享要隧道时给 `restrict=on` 网卡。
 执行分派已接线（会话在 `tier == Vm` 时把模块命令交给 guest；建会话时装配并拉起，会话删除时销毁）；就绪项 `guest` 按**已验平台数据表**（`VERIFIED_HOSTS`）放开，并带上本平台上**已实现**的组合。
 判据分两层：**机器能力**（`vm_capability`：hypervisor / guest 后端 / 引擎 / 共享档）决定虚拟机档能不能**选**；**虚拟根是会话级**，创建或会话配置里从清单选（界面给下拉），保存 /「开始」时才合并进严格判据（`tier_readiness`）。
-**静态预检**在「开始」那一刻一次走完：机器能力 × 虚拟根（名字 → `.vm/guest/<名>`，`resolve_guest`）× guest 声明的运行能力（`guest.yaml` 的 `runtimes`）× 模块声明 × 包库 × **模块工具的入口**（相对路径入口必须在场且能跑；两档都查）——
+**静态预检**在「开始」那一刻一次走完：机器能力 × 虚拟根（名字 → `.vm/guest/<名>`，`resolve_guest`）× guest 声明的运行能力（`guest.yaml` 的 `runtimes`）× 模块声明 × 包库 × **模块工具的入口**（相对路径入口必须在场且能跑；两档都查——虚拟机档按 **guest 的 os** 解析名字、跨平台还看文件形式，宿主编出来的产物在 guest 里跑不了，一样算缺）——
 缺任何一项都**如实拒绝、先预检再启动**（不拉一台跑不了工具的 guest）：`plan` 对缺包同样返回拒绝，`diagnose_text` 给出「把包放进 `runtimes/`、或让镜像声明」的说法。
 
 **当前状态**：Linux（QEMU/KVM + virtiofs，默认共享档；virtiofsd 不在场或**不能执行**时自动退 9p）与 Windows（QEMU/WHPX + SMB guestfwd 实时共享，缺 smbd 时自动退 QGA 复制）已真机验收——引擎级探针与 e2e 的 vm 会话场景都过
@@ -79,7 +79,11 @@ virtiofsd 与默认虚拟根 `debian`（目录 rootfs + 内核 + 9p initrd + qem
 - **路径桥**（`domain/paths.rs`）：宿主路径 ↔ guest 路径只有一座桥——宿主与 guest 同方言时**恒等**（宿主路径原样在 guest 里成立），跨方言时编进镜像根（宿主 `D:\a\b` → POSIX guest `/solomni-host/d/a/b`；POSIX 宿主 → Windows guest `C:\solomni-host\…`，非法字符转义）。挂载点与命令装配（`cwd` / 路径型 `env`）都走它。**反向也走它**：系统工具跑在宿主侧，靠它把模型给的 guest 写法译回宿主路径（`PathCodec`，见 [docs/tools/tools-and-roles.md](../tools/tools-and-roles.md) 的「路径模型」）。
 - **工作环境提示词按环境分发**（`prompts/shared/tools.yaml` 的 `env_hosts` / `env_guests` / `envs`）：本机档按宿主平台给，虚拟机档按 guest 的 os 给——虚拟机档给出的路径就是 guest 内路径；**系统工具与模块工具同一套写法**（路径规矩只在提示词册的 `tool_texts.path_rules` 里说一次，核心在寻址前翻译）。
 - **虚拟根一格一个目录**（`.vm/guest/<名>/`，名字由清单的 `guest:` 字段给，多条条目可共用一个根）；目录里的 `guest.yaml` 声明画像（`id` / `arch` / `agent` / `os` / `clients` / `runtimes`）：用户自备镜像自己写；产品供的由 provision 落盘（`guest-rootfs` / `guest-disk` 写基础画像），Windows 的 `guest-runtime` 编排再写入 `clients: [cifs]` 与**逐个自证过**的 `runtimes`。`runtimes` 是 guest 里确实可用的运行能力，选型诊断据此不必再要 `runtimes/` 包；缺省按目录名与 Debian 默认（linux + QGA + 9p + virtiofs），不认识的值如实拒收。
-- 依赖（QEMU / `virtiofsd` / SMB helper / 镜像）**不预置、不分发**，由 `provision` 能力按清单下载并解包进项目内 `.vm/`（清单 `dependencies.yaml`、下载源 `links.yaml`，需用户同意）：CLI `solomni --provision`，Web `/api/setup/status|ensure|job`。设置里没登记 `qemu_path` / `virtiofsd_path` / `smbd_path` 时，**启动即自动采用**项目内补齐的可执行文件（显式登记优先）。
+- 依赖（QEMU / `virtiofsd` / SMB helper / 镜像）**不预置、不分发**，由 `provision` 能力按清单下载并解包进项目内 `.vm/`（清单 `dependencies.yaml`、下载源 `links.yaml`，需用户同意）。
+  入口是**界面里的一个动作**：虚拟机档不可用时，配置面板与创建向导给出「补齐虚拟机依赖」（先看清单与体积、再确认下载、按进度长轮询）；
+  CLI `solomni --provision --ensure --yes` 是没有界面时的等价路径。设置里没登记 `qemu_path` / `virtiofsd_path` / `smbd_path` 时，
+  **判据每次取用时**自动采用项目内补齐的那个可执行文件（显式登记优先）——装完即生效，不必重启。
+  共享后端也在此列：全部适配器在装配期持有，哪一档在起 guest 那一刻按 `share_chain` 的候选挑——装完 virtiofsd / smbd，**下一次启动就用上**。
 
 ## 本目录
 
