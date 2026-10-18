@@ -4,6 +4,55 @@
 //! 不管：CLI 参数解析（在 main.rs）、模块清单校验（在 `modules.rs`）、围栏机制本身（在 kernel）。
 //! 联动：模块契约见 MODULE_SPEC 的「构建」；状态落 `.vm/build-state/<模块>.json`。
 
+/// 目的：--work-gc 默认 dry-run、--yes 才删；只删不可达对象。
+#[test]
+fn work_gc_cli_dry_run_then_applies() {
+    use crate::capabilities::workspace::api::{content_hash, Workspace};
+    use crate::capabilities::workspace::detail::fs_workspace::FsWorkspace;
+    use crate::capabilities::workspace::detail::fs_workstore::FsWorkStore;
+    use crate::capabilities::workspace::ports::WorkStore;
+    use crate::capabilities::workspace::service::WorkspaceService;
+    use std::sync::Arc;
+
+    let root = crate::tests::scratch("work-gc-cli");
+    let dirs = Arc::new(FsWorkspace::new(root.join("session")));
+    let store = Arc::new(FsWorkStore::new());
+    let ws = WorkspaceService::new(dirs, store.clone());
+    ws.prepare("w", &[]).unwrap();
+    ws.work_commit_user("w", "keep.txt", b"keep", 1, 0).unwrap();
+    let store_path = root.join("session").join("w").join(".work");
+    let orphan = content_hash(b"orphan");
+    store.write_object(&store_path, &orphan, b"orphan").unwrap();
+    let keep = content_hash(b"keep");
+    assert!(store_path.join("objects").join(&orphan).exists());
+
+    let dry = crate::diagnostics::work_gc(&root, &["--work-gc".to_string(), "w".to_string()], 0);
+    assert_eq!(dry, 0);
+    assert!(
+        store_path.join("objects").join(&orphan).exists(),
+        "dry-run 不能删"
+    );
+
+    let applied = crate::diagnostics::work_gc(
+        &root,
+        &[
+            "--work-gc".to_string(),
+            "w".to_string(),
+            "--yes".to_string(),
+        ],
+        0,
+    );
+    assert_eq!(applied, 0);
+    assert!(
+        !store_path.join("objects").join(&orphan).exists(),
+        "apply 要删不可达对象"
+    );
+    assert!(
+        store_path.join("objects").join(&keep).exists(),
+        "可达对象必须保留"
+    );
+}
+
 /// 目的：构建契约用的夹具模块——清单只声明 `build.command: tools/build`，**平台各一份脚本**并排放
 ///   （与 MODULE_SPEC「构建」里模块作者的跨平台写法、随仓 indexer 一致：unix 由 sh 直接跑 `tools/build`，
 ///   Windows 由 cmd 按 PATHEXT 落到 `tools/build.cmd`）。

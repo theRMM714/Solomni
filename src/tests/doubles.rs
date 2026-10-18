@@ -270,7 +270,10 @@ pub(crate) struct InMemoryWorkStore {
     commits: Mutex<BTreeMap<String, crate::capabilities::workspace::domain::workstore::Commit>>,
     heads: Mutex<BTreeMap<String, u64>>,
     index: Mutex<BTreeMap<String, crate::capabilities::workspace::domain::workstore::Index>>,
+    pending: Mutex<BTreeMap<String, crate::capabilities::workspace::domain::workstore::Pending>>,
+    next_ids: Mutex<BTreeMap<String, u64>>,
     fail: Option<String>,
+    fail_times: Mutex<BTreeMap<String, usize>>,
 }
 
 fn ws_key(root: &std::path::Path, rel: &str) -> String {
@@ -295,6 +298,28 @@ impl InMemoryWorkStore {
             .expect("锁")
             .insert(ws_key(root, rel), text.as_bytes().to_vec());
     }
+
+    /// 目的：按方法名注入 N 次失败，用于把提交/恢复钉在指定一步。
+    pub(crate) fn fail_times(&self, method: &str, times: usize) {
+        self.fail_times
+            .lock()
+            .expect("锁")
+            .insert(method.to_string(), times);
+    }
+
+    fn enter(&self, method: &str) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        let mut counts = self.fail_times.lock().expect("锁");
+        if let Some(n) = counts.get_mut(method) {
+            if *n > 0 {
+                *n -= 1;
+                return Err(format!("注入失败：{}", method));
+            }
+        }
+        Ok(())
+    }
 }
 
 impl WorkStore for InMemoryWorkStore {
@@ -314,6 +339,7 @@ impl WorkStore for InMemoryWorkStore {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
+        self.enter("write_under")?;
         self.files
             .lock()
             .expect("锁")
@@ -359,6 +385,7 @@ impl WorkStore for InMemoryWorkStore {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
+        self.enter("set_head")?;
         self.heads
             .lock()
             .expect("锁")
@@ -401,6 +428,7 @@ impl WorkStore for InMemoryWorkStore {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
+        self.enter("write_commit")?;
         self.commits
             .lock()
             .expect("锁")
@@ -426,6 +454,7 @@ impl WorkStore for InMemoryWorkStore {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
+        self.enter("remove_commit")?;
         self.commits
             .lock()
             .expect("锁")
@@ -459,6 +488,7 @@ impl WorkStore for InMemoryWorkStore {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
+        self.enter("write_index")?;
         self.index
             .lock()
             .expect("锁")
@@ -475,6 +505,7 @@ impl WorkStore for InMemoryWorkStore {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
+        self.enter("write_object")?;
         self.objects
             .lock()
             .expect("锁")
@@ -493,6 +524,132 @@ impl WorkStore for InMemoryWorkStore {
             .get(&ws_key(store, hash))
             .cloned()
             .ok_or_else(|| format!("对象不存在：{}", hash))
+    }
+
+    fn lock(&self, _store: &std::path::Path) -> Result<Option<std::fs::File>, String> {
+        self.enter("lock")?;
+        Ok(None)
+    }
+
+    fn read_pending(
+        &self,
+        store: &std::path::Path,
+    ) -> Result<Option<crate::capabilities::workspace::domain::workstore::Pending>, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        Ok(self
+            .pending
+            .lock()
+            .expect("锁")
+            .get(&store.to_string_lossy().to_string())
+            .cloned())
+    }
+
+    fn write_pending(
+        &self,
+        store: &std::path::Path,
+        pending: &crate::capabilities::workspace::domain::workstore::Pending,
+    ) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.enter("write_pending")?;
+        self.pending
+            .lock()
+            .expect("锁")
+            .insert(store.to_string_lossy().to_string(), pending.clone());
+        Ok(())
+    }
+
+    fn clear_pending(&self, store: &std::path::Path) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.enter("clear_pending")?;
+        self.pending
+            .lock()
+            .expect("锁")
+            .remove(&store.to_string_lossy().to_string());
+        Ok(())
+    }
+
+    fn read_next_id(&self, store: &std::path::Path) -> Result<Option<u64>, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        Ok(self
+            .next_ids
+            .lock()
+            .expect("锁")
+            .get(&store.to_string_lossy().to_string())
+            .copied())
+    }
+
+    fn write_next_id(&self, store: &std::path::Path, id: u64) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.enter("write_next_id")?;
+        self.next_ids
+            .lock()
+            .expect("锁")
+            .insert(store.to_string_lossy().to_string(), id);
+        Ok(())
+    }
+
+    fn list_indexes(
+        &self,
+        store: &std::path::Path,
+    ) -> Result<BTreeMap<String, crate::capabilities::workspace::domain::workstore::Index>, String>
+    {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        let prefix = format!("{}|", store.to_string_lossy());
+        let index = self.index.lock().expect("锁");
+        let mut out = BTreeMap::new();
+        for (k, v) in index.iter() {
+            if let Some(agent) = k.strip_prefix(&prefix) {
+                out.insert(agent.to_string(), v.clone());
+            }
+        }
+        Ok(out)
+    }
+
+    fn list_objects(
+        &self,
+        store: &std::path::Path,
+    ) -> Result<Vec<crate::capabilities::workspace::domain::workstore::ObjectInfo>, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        let prefix = format!("{}|", store.to_string_lossy());
+        let objects = self.objects.lock().expect("锁");
+        let mut out = Vec::new();
+        for (k, v) in objects.iter() {
+            if let Some(hash) = k.strip_prefix(&prefix) {
+                out.push(
+                    crate::capabilities::workspace::domain::workstore::ObjectInfo {
+                        hash: hash.to_string(),
+                        size: v.len() as u64,
+                    },
+                );
+            }
+        }
+        out.sort_by(|a, b| a.hash.cmp(&b.hash));
+        Ok(out)
+    }
+
+    fn remove_object(&self, store: &std::path::Path, hash: &str) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.objects
+            .lock()
+            .expect("锁")
+            .remove(&ws_key(store, hash));
+        Ok(())
     }
 }
 

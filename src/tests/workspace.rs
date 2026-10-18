@@ -981,6 +981,197 @@ pub(crate) fn work_resolve_refuses_empty_and_reports_missing() {
     assert_eq!(rep.missing, vec!["nope"]);
 }
 
+/// 目的：用户投喂同样走事务；收尾失败后下一次操作恢复提交与主副本。
+#[test]
+pub(crate) fn abandoned_user_commit_pending_is_recovered() {
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    store.fail_times("write_commit", 2);
+    assert!(ws.work_commit_user("w", "note.md", b"v1", 1, 0).is_err());
+    let st = ws.work_status("w", "a", &[]).unwrap();
+    assert_eq!(st.head.unwrap().id, 1);
+    assert!(ws.work_has("w", "note.md"), "恢复后主副本要有文件");
+}
+
+/// 目的：提交号只增不复用；丢弃 / 恢复都不重置计数器。
+#[test]
+pub(crate) fn commit_ids_stay_monotonic_after_discard_and_restore() {
+    let (ws, _dirs, _store) = work_ws();
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    let id1 = ws.work_commit_user("w", "a.txt", b"1", 1, 0).unwrap();
+    let id2 = ws.work_commit_user("w", "b.txt", b"2", 2, 0).unwrap();
+    let id3 = ws.work_commit_user("w", "c.txt", b"3", 3, 0).unwrap();
+    assert_eq!((id1, id2, id3), (1, 2, 3));
+
+    ws.work_discard_after("w", Some(id1)).unwrap();
+    let id4 = ws.work_commit_user("w", "d.txt", b"4", 4, 0).unwrap();
+    assert_eq!(id4, 4, "丢弃最高提交后不能复用 2/3");
+
+    ws.work_restore_point("w", None).unwrap();
+    let id5 = ws.work_commit_user("w", "e.txt", b"5", 5, 0).unwrap();
+    assert_eq!(id5, 5, "清空共享区也不重置计数器");
+}
+
+/// 目的：提交收尾失败留下 pending；下一次 status 先恢复，再给出新 head。
+#[test]
+pub(crate) fn abandoned_commit_pending_is_recovered_by_next_status() {
+    use crate::capabilities::workspace::ports::WorkStore;
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
+    let sb = sandbox_of(&ws, "w", "a");
+    ws.work_pull("w", "a", &["note.md".to_string()]).unwrap();
+    store.write_under(&sb, "note.md", b"v2").unwrap();
+
+    store.fail_times("write_commit", 2);
+    let err = ws
+        .work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "v2", 2))
+        .unwrap_err();
+    assert!(err.contains("恢复"), "{}", err);
+
+    let st = ws.work_status("w", "a", &[]).unwrap();
+    assert_eq!(st.head.unwrap().id, 2, "status 要先恢复 pending 再读 head");
+    assert_eq!(
+        store
+            .read_under(&shared_of(&ws, "w"), "note.md")
+            .unwrap()
+            .as_deref(),
+        Some(&b"v2"[..])
+    );
+    assert_eq!(
+        store.head(&ws.roots("w", &[]).unwrap().store).unwrap(),
+        Some(2)
+    );
+}
+
+/// 目的：一次失败后立即重放成功时，提交按成功返回。
+#[test]
+pub(crate) fn commit_pending_recovers_immediately_when_the_failure_clears() {
+    use crate::capabilities::workspace::ports::WorkStore;
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
+    let sb = sandbox_of(&ws, "w", "a");
+    ws.work_pull("w", "a", &["note.md".to_string()]).unwrap();
+    store.write_under(&sb, "note.md", b"v2").unwrap();
+
+    store.fail_times("write_commit", 1);
+    let rep = ws
+        .work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "v2", 2))
+        .expect("一次失败后应立即重放成功");
+    assert_eq!(rep.id, 2);
+    assert_eq!(
+        store.head(&ws.roots("w", &[]).unwrap().store).unwrap(),
+        Some(2)
+    );
+}
+
+/// 目的：restore 的 pending 在崩溃后由下一次操作补完，head 与主副本一起到达目标点。
+#[test]
+pub(crate) fn abandoned_restore_pending_is_recovered_by_next_head_read() {
+    use crate::capabilities::workspace::ports::WorkStore;
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    let id1 = ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
+    ws.work_commit_user("w", "note.md", b"v2", 2, 0).unwrap();
+
+    store.fail_times("set_head", 2);
+    assert!(ws.work_restore("w", id1).is_err());
+    let head = ws.work_head("w").unwrap();
+    assert_eq!(head, Some(id1), "恢复 pending 后 head 回到目标点");
+    assert_eq!(
+        store
+            .read_under(&shared_of(&ws, "w"), "note.md")
+            .unwrap()
+            .as_deref(),
+        Some(&b"v1"[..])
+    );
+}
+
+/// 目的：discard 先物化再删提交；崩溃后不会留下 dangling head，下一次操作补完删除。
+#[test]
+pub(crate) fn abandoned_discard_pending_keeps_head_valid_and_is_recovered() {
+    use crate::capabilities::workspace::ports::WorkStore;
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    let id1 = ws.work_commit_user("w", "a.txt", b"1", 1, 0).unwrap();
+    let id2 = ws.work_commit_user("w", "b.txt", b"2", 2, 0).unwrap();
+    let id3 = ws.work_commit_user("w", "c.txt", b"3", 3, 0).unwrap();
+
+    store.fail_times("remove_commit", 2);
+    assert!(ws.work_discard_after("w", Some(id1)).is_err());
+
+    // 恢复前 head 已经先物化到 id1，不能指向待删的 id2/id3。
+    assert_eq!(ws.work_head("w").unwrap(), Some(id1));
+    let _ = ws.work_status("w", "a", &[]).unwrap();
+    let root = ws.roots("w", &[]).unwrap().store;
+    assert_eq!(store.list_commits(&root).unwrap(), vec![id1]);
+    assert!(id2 > id1 && id3 > id2);
+}
+
+/// 目的：对象回收只删不可达对象；只被 agent 基线引用的对象、以及可达提交树的对象都要保留。
+#[test]
+pub(crate) fn work_gc_keeps_index_and_commit_objects_and_removes_the_rest() {
+    use crate::capabilities::workspace::ports::WorkStore;
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    let root = ws.roots("w", &[]).unwrap().store;
+    let id1 = ws.work_commit_user("w", "keep.txt", b"k1", 1, 0).unwrap();
+    let id2 = ws.work_commit_user("w", "gone.txt", b"g1", 2, 0).unwrap();
+    let id3 = ws.work_commit_user("w", "gone.txt", b"g2", 3, 0).unwrap();
+    assert_eq!((id1, id2, id3), (1, 2, 3));
+    // a 的基线引用 gone 的 g2；这个对象在丢弃提交后仍必须保留。
+    ws.work_pull("w", "a", &["keep.txt".to_string(), "gone.txt".to_string()])
+        .unwrap();
+    // 一个非指纹杂项文件（模拟原子写崩溃留下的临时文件）。
+    store.write_object(&root, ".tmp-stale", b"x").unwrap();
+    ws.work_discard_after("w", Some(id1)).unwrap();
+
+    let dry = ws.work_gc("w", false).unwrap();
+    assert!(!dry.applied);
+    assert_eq!(dry.objects, 3, "k1/g1/g2");
+    assert_eq!(dry.reachable_objects, 2, "k1 + 基线引用的 g2");
+    assert_eq!(dry.unreachable_objects, 1, "g1 只属于被丢弃的提交");
+    assert_eq!(dry.removed_objects, 0);
+    assert_eq!(dry.ignored_files, 1);
+    assert!(store
+        .read_object(
+            &root,
+            &crate::capabilities::workspace::api::content_hash(b"g1")
+        )
+        .is_ok());
+
+    let applied = ws.work_gc("w", true).unwrap();
+    assert!(applied.applied);
+    assert_eq!(applied.removed_objects, 1);
+    assert_eq!(applied.removed_ignored, 1);
+    assert!(
+        store
+            .read_object(
+                &root,
+                &crate::capabilities::workspace::api::content_hash(b"g1")
+            )
+            .is_err(),
+        "g1 应被回收"
+    );
+    assert!(
+        store
+            .read_object(
+                &root,
+                &crate::capabilities::workspace::api::content_hash(b"g2")
+            )
+            .is_ok(),
+        "基线引用的 g2 必须保留"
+    );
+    // 基线仍能看三方；保留提交仍能物化。
+    let v = ws.work_versions("w", "a", "gone.txt").unwrap();
+    assert!(
+        v.base.is_some(),
+        "index-only 对象被删会让 work_versions 失效"
+    );
+    ws.work_restore("w", id1).unwrap();
+}
+
 // ---------- 主副本对 agent 只读：工具层与围栏层两处收口 ----------
 
 /// 只读共享区：读得到、写不进；写自己的沙箱照旧；围栏也不含主副本。
@@ -1076,6 +1267,43 @@ pub(crate) fn version_gate_is_per_work() {
     assert!(b.try_lock().is_ok(), "不同工作互不阻塞");
     let a2 = ws.gate("a");
     assert!(a2.try_lock().is_err(), "同一个工作要串行");
+}
+
+/// 目的：work_status 也要过 per-work 写闸，不能与提交并发读到撕裂快照。
+#[test]
+pub(crate) fn work_status_waits_for_the_per_work_gate() {
+    use crate::capabilities::workspace::api::Workspace;
+    use std::sync::{mpsc, Arc};
+    use std::time::Duration;
+    let ws = Arc::new(
+        crate::capabilities::workspace::service::WorkspaceService::new(
+            Arc::new(InMemoryWorkspace::new()),
+            Arc::new(InMemoryWorkStore::new()),
+        ),
+    );
+    let gate = ws.gate("w");
+    let guard = gate.lock().unwrap_or_else(|e| e.into_inner());
+    let (started_tx, started_rx) = mpsc::channel();
+    let (done_tx, done_rx) = mpsc::channel();
+    let worker = {
+        let ws = Arc::clone(&ws);
+        std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            let ok = ws.work_status("w", "a", &[]).is_ok();
+            done_tx.send(ok).unwrap();
+        })
+    };
+    started_rx.recv().unwrap();
+    assert!(
+        done_rx.recv_timeout(Duration::from_millis(500)).is_err(),
+        "status 不能绕过写闸"
+    );
+    drop(guard);
+    assert!(
+        done_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+        "释放后 status 要完成"
+    );
+    worker.join().unwrap();
 }
 
 /// 目的：虚拟机档下模型给的 guest 写法要能寻址——译成宿主路径**再过同一道根校验**；越界仍拒。

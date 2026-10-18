@@ -7,14 +7,14 @@
 //! pull / commit 的三方比较与 resolve 的选边规则在 `domain::workstore`（纯逻辑），落盘在 `WorkStore` 端口后面。
 
 use crate::capabilities::workspace::api::{
-    Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, FileVersion, PullReport,
-    ResolveAction, ResolveEntry, ResolveReport, ResolveRequest, ResolveTake, StatusEntry,
-    StatusReport, VersionView, WorkFiles, WorkRoots, WorkUsage, Workspace,
+    Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, FileVersion, GcReport,
+    PullReport, ResolveAction, ResolveEntry, ResolveReport, ResolveRequest, ResolveTake,
+    StatusEntry, StatusReport, VersionView, WorkFiles, WorkRoots, WorkUsage, Workspace,
 };
-use crate::capabilities::workspace::domain::hash::content_hash;
+use crate::capabilities::workspace::domain::hash::{content_hash, is_content_hash};
 use crate::capabilities::workspace::domain::workstore::{
     clean_rel, expand_paths, plan_commit, pull_verdict, status_of, Commit, CommitAnchor, Conflict,
-    ConflictAt, Index, PullVerdict, Tree,
+    ConflictAt, Index, Pending, PendingIndex, PullVerdict, Tree,
 };
 use crate::capabilities::workspace::ports::{WorkStore, Workdirs};
 use std::collections::{BTreeMap, BTreeSet};
@@ -86,10 +86,12 @@ impl WorkspaceService {
         target: Option<u64>,
     ) -> Result<(), String> {
         let tree = match target {
-            Some(id) => store_port
-                .read_commit(store, id)?
-                .map(|c| c.tree)
-                .unwrap_or_default(),
+            Some(id) => {
+                store_port
+                    .read_commit(store, id)?
+                    .ok_or_else(|| format!("没有提交点 {}", id))?
+                    .tree
+            }
             None => Tree::new(),
         };
         for rel in store_port.list(shared)? {
@@ -106,6 +108,126 @@ impl WorkspaceService {
             None => store_port.clear_head(store)?,
         }
         Ok(())
+    }
+
+    /// 目的：预留一个单调递增的提交号；只增不复用，允许空洞。
+    fn reserve_id(&self, store: &Path) -> Result<u64, String> {
+        let max = self.store.list_commits(store)?.last().copied().unwrap_or(0);
+        let next = self
+            .store
+            .read_next_id(store)?
+            .unwrap_or(max + 1)
+            .max(max + 1);
+        self.store.write_next_id(store, next + 1)?;
+        Ok(next)
+    }
+
+    /// 目的：把一条待恢复提交幂等地应用到主副本、提交记录、head 与基线。
+    /// 约束：调用方已持有工作锁与跨进程锁；不删除 pending（由恢复方或收尾方删）。
+    fn apply_commit_pending(
+        &self,
+        work: &str,
+        shared: &Path,
+        store: &Path,
+        commit: &Commit,
+        index: Option<&PendingIndex>,
+    ) -> Result<(), String> {
+        if let Some(head) = self.store.head(store)? {
+            if head > commit.id {
+                return Err(format!(
+                    "待恢复提交 {} 小于当前 head {}，拒绝倒推共享区",
+                    commit.id, head
+                ));
+            }
+        }
+        for ch in &commit.changes {
+            match ch.kind {
+                ChangeKind::Add | ChangeKind::Modify => {
+                    let bytes = self.store.read_object(store, &ch.hash)?;
+                    if commit.author == "user" {
+                        self.dirs.write_work(work, &ch.path, &bytes)?;
+                    } else {
+                        self.store.write_under(shared, &ch.path, &bytes)?;
+                    }
+                }
+                ChangeKind::Delete => {
+                    self.store.remove_under(shared, &ch.path)?;
+                }
+            }
+        }
+        self.store.write_commit(store, commit)?;
+        self.store.set_head(store, commit.id)?;
+        if let Some(index) = index {
+            self.store.write_index(store, &index.agent, &index.index)?;
+        }
+        Ok(())
+    }
+
+    /// 目的：删除 keep 祖先链之外的提交记录（keep=None 时全部删）。
+    /// 约束：调用方已先物化到 keep，head 不再指向被删的提交。
+    fn discard_commits_locked(&self, store: &Path, keep: Option<u64>) -> Result<(), String> {
+        let mut keep_set: BTreeSet<u64> = BTreeSet::new();
+        let mut cur = keep;
+        while let Some(id) = cur {
+            if !keep_set.insert(id) {
+                break;
+            }
+            cur = self.store.read_commit(store, id)?.and_then(|c| c.parent);
+        }
+        for id in self.store.list_commits(store)? {
+            if !keep_set.contains(&id) {
+                self.store.remove_commit(store, id)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// 目的：重放该工作尚未完成的版本库事务；没有 = 无操作。
+    /// 约束：调用方已持有工作锁与跨进程锁。
+    fn recover_locked(&self, work: &str, shared: &Path, store: &Path) -> Result<(), String> {
+        let Some(pending) = self.store.read_pending(store)? else {
+            return Ok(());
+        };
+        match &pending {
+            Pending::Commit { commit, index } => {
+                self.apply_commit_pending(work, shared, store, commit.as_ref(), index.as_ref())?
+            }
+            Pending::Restore { target } => {
+                WorkspaceService::materialize(self.store.as_ref(), shared, store, *target)?
+            }
+            Pending::Discard { keep } => {
+                WorkspaceService::materialize(self.store.as_ref(), shared, store, *keep)?;
+                self.discard_commits_locked(store, *keep)?;
+            }
+        }
+        self.store.clear_pending(store)
+    }
+
+    /// 目的：事务收尾；失败时尝试一次重放，重放成功就按成功返回。
+    /// 约束：只在 pending 已经写下去之后调用。
+    fn settle(
+        &self,
+        work: &str,
+        shared: &Path,
+        store: &Path,
+        result: Result<(), String>,
+    ) -> Result<(), String> {
+        match result {
+            Ok(()) => match self.store.clear_pending(store) {
+                Ok(()) => Ok(()),
+                Err(e) => match self.recover_locked(work, shared, store) {
+                    Ok(()) => Ok(()),
+                    Err(_) => Err(format!("收尾失败：{}；已留下恢复日志", e)),
+                },
+            },
+            Err(e) => match self.recover_locked(work, shared, store) {
+                Ok(()) => Ok(()),
+                Err(_) => Err(format!(
+                    "版本库写未完成：{}；已留下恢复日志，下一次操作会继续",
+                    e
+                )),
+            },
+        }
     }
 
     /// 读 head 的整棵树；空仓库 = 空树。
@@ -170,7 +292,9 @@ impl Workspace for WorkspaceService {
         }
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
-        let (_, store, sandbox) = self.agent_roots(work, agent)?;
+        let (shared, store, sandbox) = self.agent_roots(work, agent)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)?;
         let (head, tree) = self.head_tree(&store)?;
         let Some(head) = head else {
             return Err("共享区还没有任何提交：没有可拉取的内容".to_string());
@@ -231,6 +355,8 @@ impl Workspace for WorkspaceService {
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
         let (shared, store, sandbox) = self.agent_roots(work, agent)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)?;
         let (head_id, tree) = self.head_tree(&store)?;
         let index: Index = self.store.read_index(&store, agent)?;
         // 沙箱里的文件全集（paths 里的文件夹据此展开）。
@@ -267,14 +393,8 @@ impl Workspace for WorkspaceService {
         if changes.is_empty() {
             return Err("没有可提交的改动：这些路径与主副本一致".to_string());
         }
-        // 全部就绪 → 落对象、改主副本、追加提交、更新基线与 head（任一步失败即如实报错）。
-        let id = self
-            .store
-            .list_commits(&store)?
-            .last()
-            .copied()
-            .unwrap_or(0)
-            + 1;
+        // 先落对象，再写事务日志；主副本与元数据由事务统一应用/恢复。
+        let id = self.reserve_id(&store)?;
         let mut new_tree = tree.clone();
         for ch in &changes {
             match ch.kind {
@@ -284,12 +404,21 @@ impl Workspace for WorkspaceService {
                         .and_then(|v| v.as_ref())
                         .ok_or_else(|| format!("内部错误：{} 没有本地内容", ch.path))?;
                     self.store.write_object(&store, &ch.hash, bytes)?;
-                    self.store.write_under(&shared, &ch.path, bytes)?;
                     new_tree.insert(ch.path.clone(), ch.hash.clone());
                 }
                 ChangeKind::Delete => {
-                    self.store.remove_under(&shared, &ch.path)?;
                     new_tree.remove(&ch.path);
+                }
+            }
+        }
+        let mut new_index = index;
+        for ch in &changes {
+            match ch.kind {
+                ChangeKind::Delete => {
+                    new_index.remove(&ch.path);
+                }
+                _ => {
+                    new_index.insert(ch.path.clone(), ch.hash.clone());
                 }
             }
         }
@@ -307,20 +436,18 @@ impl Workspace for WorkspaceService {
                 line: req.line,
             }),
         };
-        self.store.write_commit(&store, &commit)?;
-        self.store.set_head(&store, id)?;
-        let mut new_index = index;
-        for ch in &changes {
-            match ch.kind {
-                ChangeKind::Delete => {
-                    new_index.remove(&ch.path);
-                }
-                _ => {
-                    new_index.insert(ch.path.clone(), ch.hash.clone());
-                }
-            }
-        }
-        self.store.write_index(&store, agent, &new_index)?;
+        let pending_index = PendingIndex {
+            agent: agent.to_string(),
+            index: new_index,
+        };
+        let pending = Pending::Commit {
+            commit: Box::new(commit.clone()),
+            index: Some(pending_index.clone()),
+        };
+        self.store.write_pending(&store, &pending)?;
+        let result =
+            self.apply_commit_pending(work, &shared, &store, &commit, Some(&pending_index));
+        self.settle(work, &shared, &store, result)?;
         Ok(CommitReport { id, changes })
     }
 
@@ -338,24 +465,18 @@ impl Workspace for WorkspaceService {
         }
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
-        let (_, store) = self.work_roots(work)?;
+        let (shared, store) = self.work_roots(work)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)?;
         let (head_id, tree) = self.head_tree(&store)?;
         let hash = content_hash(bytes);
         self.store.write_object(&store, &hash, bytes)?;
-        // 主副本的可见文件走目录布局端口写（与既有投喂落点一致）。
-        self.dirs.write_work(work, &rel, bytes)?;
         let kind = if tree.contains_key(&rel) {
             ChangeKind::Modify
         } else {
             ChangeKind::Add
         };
-        let id = self
-            .store
-            .list_commits(&store)?
-            .last()
-            .copied()
-            .unwrap_or(0)
-            + 1;
+        let id = self.reserve_id(&store)?;
         let mut new_tree = tree;
         new_tree.insert(rel.clone(), hash.clone());
         let commit = Commit {
@@ -366,7 +487,7 @@ impl Workspace for WorkspaceService {
             time,
             message: format!("用户投喂：{}", rel),
             changes: vec![Change {
-                path: rel,
+                path: rel.clone(),
                 kind,
                 hash,
             }],
@@ -376,8 +497,13 @@ impl Workspace for WorkspaceService {
                 line,
             }),
         };
-        self.store.write_commit(&store, &commit)?;
-        self.store.set_head(&store, id)?;
+        let pending = Pending::Commit {
+            commit: Box::new(commit.clone()),
+            index: None,
+        };
+        self.store.write_pending(&store, &pending)?;
+        let result = self.apply_commit_pending(work, &shared, &store, &commit, None);
+        self.settle(work, &shared, &store, result)?;
         Ok(id)
     }
 
@@ -387,7 +513,11 @@ impl Workspace for WorkspaceService {
         agent: &str,
         paths: &[String],
     ) -> Result<StatusReport, String> {
-        let (_, store, sandbox) = self.agent_roots(work, agent)?;
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let (shared, store, sandbox) = self.agent_roots(work, agent)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)?;
         let (head_id, tree) = self.head_tree(&store)?;
         let head = match head_id {
             Some(id) => self
@@ -458,7 +588,9 @@ impl Workspace for WorkspaceService {
         let rel = clean_rel(path)?;
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
-        let (_, store, sandbox) = self.agent_roots(work, agent)?;
+        let (shared, store, sandbox) = self.agent_roots(work, agent)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)?;
         let (_, tree) = self.head_tree(&store)?;
         let index: Index = self.store.read_index(&store, agent)?;
         let base = match index.get(&rel) {
@@ -495,7 +627,9 @@ impl Workspace for WorkspaceService {
         }
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
-        let (_, store, sandbox) = self.agent_roots(work, agent)?;
+        let (shared, store, sandbox) = self.agent_roots(work, agent)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)?;
         let (_, tree) = self.head_tree(&store)?;
         let mut index: Index = self.store.read_index(&store, agent)?;
         let sandbox_files: BTreeSet<String> = self.store.list(&sandbox)?.into_iter().collect();
@@ -589,18 +723,91 @@ impl Workspace for WorkspaceService {
         })
     }
 
+    fn work_recover(&self, work: &str) -> Result<(), String> {
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let (shared, store) = self.work_roots(work)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)
+    }
+
+    fn work_gc(&self, work: &str, apply: bool) -> Result<GcReport, String> {
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let (shared, store) = self.work_roots(work)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)?;
+
+        // 可达 = 所有现存提交树的 hash + 所有 agent 基线的 hash；只被基线引用的对象也必须保留。
+        let mut reachable: BTreeSet<String> = BTreeSet::new();
+        for id in self.store.list_commits(&store)? {
+            if let Some(commit) = self.store.read_commit(&store, id)? {
+                reachable.extend(commit.tree.values().cloned());
+            }
+        }
+        for (_, index) in self.store.list_indexes(&store)? {
+            reachable.extend(index.values().cloned());
+        }
+
+        let mut report = GcReport {
+            applied: apply,
+            ..GcReport::default()
+        };
+        for object in self.store.list_objects(&store)? {
+            if !is_content_hash(&object.hash) {
+                report.ignored_files += 1;
+                if apply {
+                    self.store
+                        .remove_object(&store, &object.hash)
+                        .map_err(|e| format!("清临时文件 {} 失败：{}", object.hash, e))?;
+                    report.removed_ignored += 1;
+                }
+                continue;
+            }
+            report.objects += 1;
+            report.bytes += object.size;
+            if reachable.contains(&object.hash) {
+                report.reachable_objects += 1;
+                report.reachable_bytes += object.size;
+            } else {
+                report.unreachable_objects += 1;
+                report.unreachable_bytes += object.size;
+                if apply {
+                    self.store
+                        .remove_object(&store, &object.hash)
+                        .map_err(|e| format!("回收对象 {} 失败：{}", object.hash, e))?;
+                    report.removed_objects += 1;
+                    report.removed_bytes += object.size;
+                }
+            }
+        }
+        Ok(report)
+    }
+
     fn work_restore(&self, work: &str, commit: u64) -> Result<(), String> {
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
         let (shared, store) = self.work_roots(work)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)?;
         if self.store.read_commit(&store, commit)?.is_none() {
             return Err(format!("没有提交点 {}", commit));
         }
-        WorkspaceService::materialize(self.store.as_ref(), &shared, &store, Some(commit))
+        let pending = Pending::Restore {
+            target: Some(commit),
+        };
+        self.store.write_pending(&store, &pending)?;
+        let result =
+            WorkspaceService::materialize(self.store.as_ref(), &shared, &store, Some(commit));
+        self.settle(work, &shared, &store, result)
     }
 
     fn work_head(&self, work: &str) -> Result<Option<u64>, String> {
-        let (_, store) = self.work_roots(work)?;
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let (shared, store) = self.work_roots(work)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)?;
         self.store.head(&store)
     }
 
@@ -612,6 +819,8 @@ impl Workspace for WorkspaceService {
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
         let (shared, store) = self.work_roots(work)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)?;
         // 提交按 id 升序：取"各会话都还没越过自己保留行"的最后一个提交点。
         let mut target = None;
         for id in self.store.list_commits(&store)? {
@@ -630,7 +839,10 @@ impl Workspace for WorkspaceService {
                 target = Some(id);
             }
         }
-        WorkspaceService::materialize(self.store.as_ref(), &shared, &store, target)?;
+        let pending = Pending::Restore { target };
+        self.store.write_pending(&store, &pending)?;
+        let result = WorkspaceService::materialize(self.store.as_ref(), &shared, &store, target);
+        self.settle(work, &shared, &store, result)?;
         Ok(target)
     }
 
@@ -638,27 +850,37 @@ impl Workspace for WorkspaceService {
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
         let (shared, store) = self.work_roots(work)?;
-        WorkspaceService::materialize(self.store.as_ref(), &shared, &store, commit)
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)?;
+        if let Some(id) = commit {
+            if self.store.read_commit(&store, id)?.is_none() {
+                return Err(format!("没有提交点 {}", id));
+            }
+        }
+        let pending = Pending::Restore { target: commit };
+        self.store.write_pending(&store, &pending)?;
+        let result = WorkspaceService::materialize(self.store.as_ref(), &shared, &store, commit);
+        self.settle(work, &shared, &store, result)
     }
 
     fn work_discard_after(&self, work: &str, keep: Option<u64>) -> Result<(), String> {
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
         let (shared, store) = self.work_roots(work)?;
-        // 保留 keep 的祖先链；其余提交记录真的删掉（删除 / 恢复的"丢弃历史"）。
-        let mut keep_set: BTreeSet<u64> = BTreeSet::new();
-        let mut cur = keep;
-        while let Some(id) = cur {
-            if !keep_set.insert(id) {
-                break; // 防环
-            }
-            cur = self.store.read_commit(&store, id)?.and_then(|c| c.parent);
-        }
-        for id in self.store.list_commits(&store)? {
-            if !keep_set.contains(&id) {
-                self.store.remove_commit(&store, id)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)?;
+        if let Some(id) = keep {
+            if self.store.read_commit(&store, id)?.is_none() {
+                return Err(format!("没有提交点 {}", id));
             }
         }
-        WorkspaceService::materialize(self.store.as_ref(), &shared, &store, keep)
+        // 先物化到 keep、写 head，再删非祖先提交；崩溃时 head 不会指向被删提交。
+        let pending = Pending::Discard { keep };
+        self.store.write_pending(&store, &pending)?;
+        let result = (|| {
+            WorkspaceService::materialize(self.store.as_ref(), &shared, &store, keep)?;
+            self.discard_commits_locked(&store, keep)
+        })();
+        self.settle(work, &shared, &store, result)
     }
 }

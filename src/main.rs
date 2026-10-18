@@ -77,6 +77,13 @@ fn main() {
     if args.iter().any(|a| a == "--provision") {
         std::process::exit(diagnostics::provision(&root, &args));
     }
+    // 维护动作：显式回收一个工作里不再可达的内容对象（默认 dry-run，--yes 才删）。
+    if let Some(i) = args
+        .iter()
+        .position(|a| a == "--work-gc" || a.starts_with("--work-gc="))
+    {
+        std::process::exit(diagnostics::work_gc(&root, &args, i));
+    }
     // 隐藏模式：构建一个模块声明的产物（**系统动作**：在目标环境里跑 module.yaml 的 build.command）。
     if let Some(i) = args
         .iter()

@@ -8,9 +8,17 @@
 //!
 //! 纯逻辑（三方比较、路径校验）在 `domain::workstore`；本文件只做机制。
 
-use crate::capabilities::workspace::domain::workstore::{join_rel, Commit, Index};
+use crate::capabilities::workspace::domain::workstore::{
+    join_rel, Commit, Index, ObjectInfo, Pending,
+};
 use crate::capabilities::workspace::ports::WorkStore;
+use serde::de::DeserializeOwned;
+use std::collections::BTreeMap;
+use std::fs::File;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 pub struct FsWorkStore;
 
@@ -48,6 +56,83 @@ fn write_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
         std::fs::create_dir_all(dir).map_err(|e| format!("建目录失败：{}", e))?;
     }
     std::fs::write(path, bytes).map_err(|e| format!("写入失败：{}", e))
+}
+
+/// 临时文件名的序号（同一进程内不重名；配合 pid 避免跨进程碰撞）。
+static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// 目的：同目录临时文件 + rename；半个 JSON / 半个对象比没有更糟。
+/// 约束：rename 目标与临时文件必须同目录（同一卷），否则 rename 不成立。
+fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let dir = path
+        .parent()
+        .ok_or_else(|| format!("落点没有父目录：{}", path.display()))?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("建目录失败：{}", e))?;
+    let tmp = dir.join(format!(
+        ".tmp-{}-{}",
+        std::process::id(),
+        TMP_SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
+    let written = (|| -> std::io::Result<()> {
+        let mut file = File::create(&tmp)?;
+        file.write_all(bytes)?;
+        file.sync_all()
+    })();
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("写入临时文件失败（{}）：{}", tmp.display(), e));
+    }
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("替换文件失败（{}）：{}", path.display(), e));
+    }
+    // Unix 上 rename 的目录项也要刷一次，才能在掉电后稳定；失败只当尽力而为。
+    #[cfg(unix)]
+    {
+        if let Ok(dir_file) = File::open(dir) {
+            let _ = dir_file.sync_all();
+        }
+    }
+    Ok(())
+}
+
+/// 目的：读一个 JSON 文件；不存在 = None。
+fn read_json<T: DeserializeOwned>(path: &Path, what: &str) -> Result<Option<T>, String> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => serde_json::from_str(&text)
+            .map(Some)
+            .map_err(|e| format!("{}非法（{}）：{}", what, path.display(), e)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("读{}失败（{}）：{}", what, path.display(), e)),
+    }
+}
+
+/// 目的：拿住该工作的跨进程文件锁；有界等待，拿不到就如实报错。
+fn lock_store(store: &Path) -> Result<File, String> {
+    std::fs::create_dir_all(store).map_err(|e| format!("建版本库目录失败：{}", e))?;
+    let path = store.join("lock");
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&path)
+        .map_err(|e| format!("打开版本库锁失败（{}）：{}", path.display(), e))?;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(file),
+            Err(std::fs::TryLockError::WouldBlock) => {
+                if Instant::now() >= deadline {
+                    return Err(
+                        "版本库被另一个进程占用，等待超时（稍后重试或关闭另一个核心）".to_string(),
+                    );
+                }
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            Err(std::fs::TryLockError::Error(e)) => return Err(format!("版本库加锁失败：{}", e)),
+        }
+    }
 }
 
 /// 递归列文件（只列文件），相对路径用 / 分隔，稳定排序。
@@ -122,7 +207,7 @@ impl WorkStore for FsWorkStore {
     }
 
     fn set_head(&self, store: &Path, id: u64) -> Result<(), String> {
-        write_bytes(&store.join("head"), id.to_string().as_bytes())
+        write_atomic(&store.join("head"), id.to_string().as_bytes())
     }
 
     fn clear_head(&self, store: &Path) -> Result<(), String> {
@@ -148,7 +233,7 @@ impl WorkStore for FsWorkStore {
         let text = serde_json::to_string_pretty(commit)
             .map_err(|e| format!("提交记录序列化失败：{}", e))?;
         let path = store.join("commits").join(format!("{}.json", commit.id));
-        write_bytes(&path, text.as_bytes())
+        write_atomic(&path, text.as_bytes())
     }
 
     fn list_commits(&self, store: &Path) -> Result<Vec<u64>, String> {
@@ -189,19 +274,110 @@ impl WorkStore for FsWorkStore {
         let text = serde_json::to_string_pretty(index)
             .map_err(|e| format!("拉取基线序列化失败：{}", e))?;
         let path = store.join("index").join(format!("{}.json", agent));
-        write_bytes(&path, text.as_bytes())
+        write_atomic(&path, text.as_bytes())
     }
 
     fn write_object(&self, store: &Path, hash: &str, bytes: &[u8]) -> Result<(), String> {
         let path = store.join("objects").join(hash);
-        if path.exists() {
-            return Ok(());
+        if let Ok(meta) = std::fs::metadata(&path) {
+            if meta.is_file() && meta.len() == bytes.len() as u64 {
+                return Ok(());
+            }
         }
-        write_bytes(&path, bytes)
+        write_atomic(&path, bytes)
     }
 
     fn read_object(&self, store: &Path, hash: &str) -> Result<Vec<u8>, String> {
         std::fs::read(store.join("objects").join(hash))
             .map_err(|e| format!("读对象 {} 失败：{}", hash, e))
+    }
+
+    fn lock(&self, store: &Path) -> Result<Option<File>, String> {
+        lock_store(store).map(Some)
+    }
+
+    fn read_pending(&self, store: &Path) -> Result<Option<Pending>, String> {
+        read_json(&store.join("pending.json"), "待恢复事务")
+    }
+
+    fn write_pending(&self, store: &Path, pending: &Pending) -> Result<(), String> {
+        let text = serde_json::to_string_pretty(pending)
+            .map_err(|e| format!("待恢复事务序列化失败：{}", e))?;
+        write_atomic(&store.join("pending.json"), text.as_bytes())
+    }
+
+    fn clear_pending(&self, store: &Path) -> Result<(), String> {
+        match std::fs::remove_file(store.join("pending.json")) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(format!("删待恢复事务失败：{}", e)),
+        }
+    }
+
+    fn read_next_id(&self, store: &Path) -> Result<Option<u64>, String> {
+        match std::fs::read_to_string(store.join("next-id")) {
+            Ok(text) => text
+                .trim()
+                .parse::<u64>()
+                .map(Some)
+                .map_err(|e| format!("提交号计数器非法：{}", e)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(format!("读提交号计数器失败：{}", e)),
+        }
+    }
+
+    fn write_next_id(&self, store: &Path, id: u64) -> Result<(), String> {
+        write_atomic(&store.join("next-id"), id.to_string().as_bytes())
+    }
+
+    fn list_indexes(&self, store: &Path) -> Result<BTreeMap<String, Index>, String> {
+        let dir = store.join("index");
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return Ok(BTreeMap::new());
+        };
+        let mut out = BTreeMap::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let Some(agent) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if let Some(index) = read_json::<Index>(&path, "拉取基线")? {
+                out.insert(agent.to_string(), index);
+            }
+        }
+        Ok(out)
+    }
+
+    fn list_objects(&self, store: &Path) -> Result<Vec<ObjectInfo>, String> {
+        let dir = store.join("objects");
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return Ok(Vec::new());
+        };
+        let mut out = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(hash) = path.file_name().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            out.push(ObjectInfo {
+                hash: hash.to_string(),
+                size,
+            });
+        }
+        out.sort_by(|a, b| a.hash.cmp(&b.hash));
+        Ok(out)
+    }
+
+    fn remove_object(&self, store: &Path, hash: &str) -> Result<(), String> {
+        let path = store.join("objects").join(hash);
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(format!("删对象 {} 失败：{}", hash, e)),
+        }
     }
 }

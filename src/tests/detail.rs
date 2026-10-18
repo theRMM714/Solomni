@@ -204,6 +204,28 @@ fn fs_work_store_round_trips_and_refuses_symlink_escapes() {
     s.write_index(&store, "a", &idx).unwrap();
     assert_eq!(s.read_index(&store, "a").unwrap(), idx);
 
+    // 事务日志 / 提交号 / 文件锁：真实适配器都要能往返。
+    use crate::capabilities::workspace::domain::workstore::Pending;
+    let lock = s.lock(&store).expect("拿锁");
+    assert!(lock.is_some(), "真实适配器有跨进程锁文件");
+    let pending = Pending::Restore { target: Some(1) };
+    s.write_pending(&store, &pending).unwrap();
+    assert_eq!(s.read_pending(&store).unwrap(), Some(pending));
+    s.clear_pending(&store).unwrap();
+    assert!(s.read_pending(&store).unwrap().is_none());
+    assert_eq!(s.read_next_id(&store).unwrap(), None);
+    s.write_next_id(&store, 9).unwrap();
+    assert_eq!(s.read_next_id(&store).unwrap(), Some(9));
+    // 原子写不能留下临时文件。
+    let leftovers: Vec<String> = std::fs::read_dir(&store)
+        .unwrap()
+        .flatten()
+        .filter_map(|e| e.file_name().to_str().map(str::to_string))
+        .filter(|n| n.starts_with(".tmp-"))
+        .collect();
+    assert!(leftovers.is_empty(), "临时文件要清掉：{:?}", leftovers);
+    drop(lock);
+
     // 符号链接逃逸：根外的目录被链接进沙箱，写它必须被拒（绝不写进根外）。
     #[cfg(unix)]
     {

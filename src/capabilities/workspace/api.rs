@@ -5,9 +5,9 @@ pub use crate::capabilities::workspace::domain::workspace::{
     safe_file_name, AreaUsage, Place, Sandbox, Sandboxes, WorkFiles, WorkRoots, WorkUsage,
 };
 pub use crate::capabilities::workspace::domain::workstore::{
-    Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, FileVersion, PullReport,
-    ResolveAction, ResolveEntry, ResolveReport, ResolveRequest, ResolveTake, StatusEntry,
-    StatusReport, VersionView, VERSION_TEXT_LIMIT,
+    Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, FileVersion, GcReport,
+    PullReport, ResolveAction, ResolveEntry, ResolveReport, ResolveRequest, ResolveTake,
+    StatusEntry, StatusReport, VersionView, VERSION_TEXT_LIMIT,
 };
 
 /// 工作区的**用例面**（`service.rs` 实现）：别的能力要工作区目录与版本化，走这里；
@@ -37,6 +37,10 @@ pub trait Workspace: Send + Sync {
         session: &str,
         req: &CommitRequest,
     ) -> Result<CommitReport, String>;
+    /// 目的：把该工作未完成的版本库事务重放到一致状态；没有待恢复事务 = 无操作。
+    fn work_recover(&self, work: &str) -> Result<(), String>;
+    /// 目的：回收该工作中不再可达的内容对象；apply=false 只统计不删除。
+    fn work_gc(&self, work: &str, apply: bool) -> Result<GcReport, String>;
     /// **用户投喂**：一次权威提交（作者 = user），不做冲突拦截；返回提交号。
     fn work_commit_user(
         &self,

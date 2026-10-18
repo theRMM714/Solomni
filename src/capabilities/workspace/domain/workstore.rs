@@ -434,6 +434,75 @@ pub struct ResolveReport {
     pub missing: Vec<String>,
 }
 
+/// 目的：一个 agent 的基线与 agent 名的配对，供待恢复事务写回。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PendingIndex {
+    /// 目的：agent 实例名。
+    pub agent: String,
+    /// 目的：这次提交后的新基线。
+    pub index: Index,
+}
+
+/// 目的：版本库写事务的待恢复日志；一个工作同时最多一条。
+/// 约束：重放必须幂等；成功后由恢复方删除 pending。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
+pub enum Pending {
+    /// 目的：一次提交（主副本改动 + 可选基线更新）。
+    Commit {
+        /// 目的：已经算好的提交记录（box 住，避免 pending 枚举被整棵提交树撑大）。
+        commit: Box<Commit>,
+        /// 目的：提交后的 agent 基线；用户投喂为 None。
+        index: Option<PendingIndex>,
+    },
+    /// 目的：把主副本物化到某个提交点（None = 清空）。
+    Restore {
+        /// 目的：目标提交号。
+        target: Option<u64>,
+    },
+    /// 目的：丢弃 keep 之外的提交并物化到 keep。
+    Discard {
+        /// 目的：要保留的提交点。
+        keep: Option<u64>,
+    },
+}
+
+/// 目的：一个内容寻址对象的事实（对象回收用）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObjectInfo {
+    /// 目的：内容指纹（文件名）。
+    pub hash: String,
+    /// 目的：对象字节数。
+    pub size: u64,
+}
+
+/// 目的：一次对象回收的报告；apply=false 时只统计不删除。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GcReport {
+    /// 目的：是否真的执行了删除。
+    pub applied: bool,
+    /// 目的：对象总数。
+    pub objects: usize,
+    /// 目的：对象总字节。
+    pub bytes: u64,
+    /// 目的：可达对象数。
+    pub reachable_objects: usize,
+    /// 目的：可达对象字节。
+    pub reachable_bytes: u64,
+    /// 目的：不可达对象数。
+    pub unreachable_objects: usize,
+    /// 目的：不可达对象字节。
+    pub unreachable_bytes: u64,
+    /// 目的：本次实际删除的对象数。
+    pub removed_objects: usize,
+    /// 目的：本次实际删除的字节。
+    pub removed_bytes: u64,
+    /// 目的：对象目录里不是内容指纹的杂项文件数（临时文件等）。
+    pub ignored_files: usize,
+    /// 目的：本次实际清掉的杂项文件数。
+    pub removed_ignored: usize,
+}
+
 /// 提交点摘要（work_status 用）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CommitSummary {

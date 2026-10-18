@@ -345,6 +345,19 @@ fn work_store_double_round_trips_files_commits_index_and_objects() {
     s.write_index(&store, "a", &idx).unwrap();
     assert_eq!(s.read_index(&store, "a").unwrap(), idx);
 
+    // 事务日志 / 提交号 / 跨进程锁（内存替身无文件锁）。
+    use crate::capabilities::workspace::domain::workstore::Pending;
+    assert!(s.lock(&store).unwrap().is_none());
+    assert!(s.read_pending(&store).unwrap().is_none());
+    let pending = Pending::Restore { target: Some(1) };
+    s.write_pending(&store, &pending).unwrap();
+    assert_eq!(s.read_pending(&store).unwrap(), Some(pending));
+    s.clear_pending(&store).unwrap();
+    assert!(s.read_pending(&store).unwrap().is_none());
+    assert_eq!(s.read_next_id(&store).unwrap(), None);
+    s.write_next_id(&store, 7).unwrap();
+    assert_eq!(s.read_next_id(&store).unwrap(), Some(7));
+
     // 失败注入：每个端口调用都如实传播。
     let bad = InMemoryWorkStore::new().fail_with("版本库不可用");
     assert_eq!(
@@ -353,6 +366,8 @@ fn work_store_double_round_trips_files_commits_index_and_objects() {
     );
     assert_eq!(bad.head(&store).unwrap_err(), "版本库不可用");
     assert_eq!(bad.read_object(&store, "h").unwrap_err(), "版本库不可用");
+    assert_eq!(bad.read_pending(&store).unwrap_err(), "版本库不可用");
+    assert_eq!(bad.lock(&store).unwrap_err(), "版本库不可用");
 }
 
 // ---------- SysIo ----------

@@ -1113,12 +1113,14 @@ impl Conductor {
         if !self.sessions.contains_key(sid) && self.history.load(sid).is_err() {
             return Err(format!("无此会话：{}", sid));
         }
-        if self.workspace.work_has(sid, &name) && !overwrite {
+        // 先恢复未完成的版本库事务，再做同名文件判定：否则 pending 里的文件会被当成不存在。
+        let work = self.work_root(sid).unwrap_or_else(|_| sid.to_string());
+        self.workspace.work_recover(&work)?;
+        if self.workspace.work_has(&work, &name) && !overwrite {
             return Ok(false);
         }
         // 用户投喂 = 一次**权威提交**（作者 user）：共享区只有提交这一条写路径。
         // 锚到主会话当时的下一条行号，回档才能把这次投喂算进某个转录点。
-        let work = self.work_root(sid).unwrap_or_else(|_| sid.to_string());
         let line = match self.sessions.get(sid) {
             Some(Session::Single(s)) => s.next_line,
             Some(Session::Collab(c)) => c.next_line,

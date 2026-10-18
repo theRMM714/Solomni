@@ -4,6 +4,15 @@
 //! 是一个完整、可对照标准测试向量验证的 SHA-256，不引入加密库（项目依赖刻意保持最小）。
 //! 用它做键的是**用户与 AI 的产物**，不是攻击面。
 
+/// 目的：判定一个名字是不是内容指纹（64 位小写十六进制）。
+/// 约束：对象目录里的临时文件、锁文件等不能被当成内容对象。
+pub fn is_content_hash(name: &str) -> bool {
+    name.len() == 64
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 /// 空内容的指纹也稳定（标准向量 e3b0c442…）。
 pub fn content_hash(bytes: &[u8]) -> String {
     let digest = sha256(bytes);

@@ -120,8 +120,17 @@ impl WorkHandler {
             Ok(p) => p,
             Err(e) => return outcome(false, e),
         };
+        if let Err(e) = check_readable(&self.permissions, &paths) {
+            return outcome(false, e);
+        }
         match self.workspace.work_status(&self.work, &self.agent, &paths) {
-            Ok(r) => outcome(true, dw::render_status(&r)),
+            Ok(mut r) => {
+                // 路径清单也受读作用域约束：不能靠 work_status 看到读不到的路径名。
+                r.tree.retain(|p| self.permissions.read_ok(p));
+                r.entries.retain(|e| self.permissions.read_ok(&e.path));
+                r.local_only.retain(|p| self.permissions.read_ok(p));
+                outcome(true, dw::render_status(&r))
+            }
             Err(e) => outcome(false, e),
         }
     }

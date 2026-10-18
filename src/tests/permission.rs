@@ -8,7 +8,8 @@ use crate::capabilities::permission::api::{
 };
 use crate::capabilities::workspace::api::Place;
 use crate::tests::doubles::{
-    abs, run_builtin, test_sandbox, test_workspace, InMemorySysIo, InMemoryWorkspace,
+    abs, run_builtin, test_sandbox, test_workspace, test_workspace_store, InMemorySysIo,
+    InMemoryWorkStore, InMemoryWorkspace,
 };
 
 fn paths(v: &[&str]) -> Vec<String> {
@@ -294,6 +295,75 @@ fn work_commit_and_pull_are_scoped() {
     assert!(check_writable(&p, &[], &paths(&["src/a"])).is_err());
     // 任一条越界 → 整次拒绝。
     assert!(check_writable(&p, &paths(&["docs/a", "src/b"]), &[]).is_err());
+}
+
+/// 目的：work_status 的路径清单按读作用域过滤，显式越界路径直接拒绝。
+#[test]
+fn work_status_filters_paths_outside_read_scope() {
+    use crate::capabilities::conductor::service::work_tools::WorkHandler;
+    use crate::capabilities::workspace::api::CommitRequest;
+    use crate::capabilities::workspace::ports::WorkStore;
+    use crate::kernel::ports::{ToolCtx, ToolHandler};
+
+    let dirs = std::sync::Arc::new(InMemoryWorkspace::new());
+    let store = std::sync::Arc::new(InMemoryWorkStore::new());
+    let ws = test_workspace_store(dirs, store.clone());
+    ws.prepare("w", &["a".to_string(), "b".to_string()])
+        .unwrap();
+    let sb_b = ws
+        .roots("w", &["b".to_string()])
+        .unwrap()
+        .agents
+        .get("b")
+        .cloned()
+        .unwrap();
+    store.write_under(&sb_b, "public.txt", b"p").unwrap();
+    store.write_under(&sb_b, "secret.txt", b"s").unwrap();
+    let req = CommitRequest {
+        paths: vec!["public.txt".to_string(), "secret.txt".to_string()],
+        deletes: Vec::new(),
+        message: "提交".to_string(),
+        time: 1,
+        line: 1,
+    };
+    ws.work_commit("w", "b", "w--b", &req).unwrap();
+    ws.work_pull(
+        "w",
+        "a",
+        &["public.txt".to_string(), "secret.txt".to_string()],
+    )
+    .unwrap();
+    let sb_a = ws
+        .roots("w", &["a".to_string()])
+        .unwrap()
+        .agents
+        .get("a")
+        .cloned()
+        .unwrap();
+    store.write_under(&sb_a, "extra-secret.txt", b"x").unwrap();
+
+    let p = Permissions {
+        allow_read: paths(&["public.txt"]),
+        ..Default::default()
+    };
+    let h = WorkHandler::new(ws, "w", "a", p);
+    let ctx = ToolCtx {
+        work: "w",
+        agent: "a",
+        line: 1,
+    };
+    let out = h.run(&ctx, "work_status", "{}");
+    assert!(out.ok, "{}", out.output);
+    assert!(out.output.contains("public.txt"), "{}", out.output);
+    assert!(!out.output.contains("secret.txt"), "{}", out.output);
+    assert!(!out.output.contains("extra-secret.txt"), "{}", out.output);
+
+    let denied = h.run(&ctx, "work_status", r#"{"paths":["secret.txt"]}"#);
+    assert!(
+        !denied.ok && denied.output.contains("读取被拒"),
+        "{}",
+        denied.output
+    );
 }
 
 /// 目的：work_versions / work_resolve 也按读作用域收口，不能拿它们绕过白名单。

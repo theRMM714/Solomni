@@ -1,7 +1,9 @@
 //! 工作区的**出站端口**：目录布局与共享区版本库（机制在适配层）。
 
 use crate::capabilities::workspace::domain::workspace::{WorkFiles, WorkRoots, WorkUsage};
-use crate::capabilities::workspace::domain::workstore::{Commit, Index};
+use crate::capabilities::workspace::domain::workstore::{Commit, Index, ObjectInfo, Pending};
+use std::collections::BTreeMap;
+use std::fs::File;
 use std::path::Path;
 
 /// 工作区**目录布局**端口：一次工作的 work 目录与各 agent 沙箱（机制在适配层）。
@@ -56,4 +58,23 @@ pub trait WorkStore: Send + Sync {
     /// 内容寻址对象：同指纹只写一次。
     fn write_object(&self, store: &Path, hash: &str, bytes: &[u8]) -> Result<(), String>;
     fn read_object(&self, store: &Path, hash: &str) -> Result<Vec<u8>, String>;
+    /// 目的：拿住该工作的跨进程写闸；返回 None = 内存替身没有文件锁。
+    /// 约束：guard 要活到这次操作结束，drop 即释放。
+    fn lock(&self, store: &Path) -> Result<Option<File>, String>;
+    /// 目的：读待恢复事务；没有 = None。
+    fn read_pending(&self, store: &Path) -> Result<Option<Pending>, String>;
+    /// 目的：写待恢复事务（同目录临时文件 + rename）。
+    fn write_pending(&self, store: &Path, pending: &Pending) -> Result<(), String>;
+    /// 目的：清掉待恢复事务；不存在 = 幂等成功。
+    fn clear_pending(&self, store: &Path) -> Result<(), String>;
+    /// 目的：读下一个提交号计数器；没有 = None。
+    fn read_next_id(&self, store: &Path) -> Result<Option<u64>, String>;
+    /// 目的：写下一个提交号计数器（同目录临时文件 + rename）。
+    fn write_next_id(&self, store: &Path, id: u64) -> Result<(), String>;
+    /// 目的：读出全部 agent 基线；没有 index 目录 = 空。
+    fn list_indexes(&self, store: &Path) -> Result<BTreeMap<String, Index>, String>;
+    /// 目的：列出对象目录里的文件（含非指纹杂项；回收方自己过滤）。
+    fn list_objects(&self, store: &Path) -> Result<Vec<ObjectInfo>, String>;
+    /// 目的：删一个对象目录里的文件；不存在 = 幂等成功。
+    fn remove_object(&self, store: &Path, hash: &str) -> Result<(), String>;
 }
