@@ -13,7 +13,7 @@ Solomni is an **agent runtime environment (AgentOS) that runs on your own machin
   People use it through the UI and agents through the contract, from one declaration (contract in [MODULE_SPEC.md](MODULE_SPEC.md)).
 - **Several agents working on one job.** Every agent has its own sandbox (`session/<name>/<agent-instance>/`), which is also its **working copy** of the shared area;
   the shared area `work/` is the **main copy and read-only for agents**. Pull what you need with `work_pull`, edit in the sandbox, then commit with `work_commit`.
-  Commits use a file-level three-way comparison: a conflict rejects the whole commit and names each path instead of silently overwriting; merge by hand, inspect all three sides with `work_versions`, and resolve explicitly with `work_resolve` — no automatic merge.
+  Commits use a file-level three-way comparison: a conflict rejects the whole commit and names each path instead of silently overwriting; merge text by hand, inspect all three sides with `work_versions`, and resolve explicitly with `work_resolve` — images / video / binary can only choose a side; no automatic merge.
   Text, images, video and other binaries are handled as bytes; any commit point can be restored.
   The only two roads across agents are the shared area and the transcript that enters the context; "who may write which part" is enforced by session permissions
   (see [docs/permission/README.md](docs/permission/README.md)).

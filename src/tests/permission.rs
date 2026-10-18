@@ -302,7 +302,6 @@ fn work_commit_and_pull_are_scoped() {
 fn work_status_filters_paths_outside_read_scope() {
     use crate::capabilities::conductor::service::work_tools::WorkHandler;
     use crate::capabilities::workspace::api::CommitRequest;
-    use crate::capabilities::workspace::ports::WorkStore;
     use crate::kernel::ports::{ToolCtx, ToolHandler};
 
     let dirs = std::sync::Arc::new(InMemoryWorkspace::new());

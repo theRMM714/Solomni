@@ -7,6 +7,7 @@ use super::*;
 use crate::capabilities::conductor::domain::proxy as d;
 use crate::capabilities::registry::api::{AppSettings, RegistryOps};
 use crate::capabilities::tools::api::{arg_fault_text, ToolSchema};
+use crate::capabilities::workspace::api::MAX_ASSET_BYTES;
 
 /// 极简 base64 解码（上传动作的参数是 base64；标准字母表，容忍换行与缺失填充）。
 fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
@@ -503,7 +504,15 @@ impl ConductorHandle {
                 Ok(Acted::Done(serde_json::json!({ "ok": true })))
             }
             "upload" => {
-                let bytes = base64_decode(&s("data_base64"))?;
+                let data = s("data_base64");
+                let max_encoded = MAX_ASSET_BYTES.div_ceil(3) * 4;
+                if data.len() as u64 > max_encoded {
+                    return Err(format!(
+                        "文件超过单文件上限（{} MiB）",
+                        MAX_ASSET_BYTES / 1024 / 1024
+                    ));
+                }
+                let bytes = base64_decode(&data)?;
                 let overwrite = args
                     .get("overwrite")
                     .and_then(|v| v.as_bool())

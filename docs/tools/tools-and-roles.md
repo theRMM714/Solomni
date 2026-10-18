@@ -167,6 +167,7 @@ roles:
   - 语义见 [docs/permission/README.md](../permission/README.md)。
 - **编码**：内置 `read` / `write` 读严格 UTF-8（非法字节按替换字符呈现并如实标注——**本程序不猜编码**），写一律 UTF-8；
   `work_pull` / `work_commit` / `work_versions` / `work_resolve` 按**字节**处理，图片、视频与其它二进制不走 UTF-8 假设。
+  内容按块流式读写、不整份进上下文；单文件有上限（`MAX_ASSET_BYTES`，见 [workspace](../workspace/README.md)），超限提交 / 上传整次拒绝。
   **二进制内容由模块工具或用户投喂产出**，内置 `write` 不是二进制通道；产出后用 `work_commit` 提交。
 - **用户也能引用**：
   - 输入框里用 `@` 挑文件：`@work:相对路径` / `@sandbox:<agent>/相对路径`（**给人用**）。
@@ -228,8 +229,8 @@ prompts/
 
 - 主副本 `work/` 对 agent 只读，agent 只写自己的沙箱（工作副本）。
 - `work_pull` / `work_commit` / `work_status` / `work_versions` / `work_resolve` 五个**核心自有工具**做同步、查看、三方比较与显式解决冲突。
-- 冲突按文件级三方比较判定，**整体拒绝并逐条点名**，不做自动合并；人工合并后用 `work_resolve` 选边（细则见 [workspace](../workspace/README.md) 与 [PRODUCT.md](../../PRODUCT.md)）。
-- 文本、图片、视频与其它二进制都按字节处理；二进制冲突只能显式选边。
+- 冲突按文件级三方比较判定，**整体拒绝并逐条点名**，不做自动合并；文本可人工合并后用 `take=local`，图片 / 视频 / 二进制只能显式选边（细则见 [workspace](../workspace/README.md) 与 [PRODUCT.md](../../PRODUCT.md)）。
+- 文本、图片、视频与其它二进制都按字节处理；`work_versions` 给 hash、大小与扩展名媒体类型提示，文本预览最多 16 KiB；单文件超过 64 MiB 时提交 / 上传明确拒绝。
 - 用户投喂是同一条提交路径里的**权威提交**（作者 = user）。
 
 - 工具面**按回合按身份注入**（总表不进提示词）；越权调用如实拒绝并落工具行；悬空引用由结构审查硬失败挡下。

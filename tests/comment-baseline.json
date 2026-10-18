@@ -526,12 +526,6 @@
     "头块：槽外有行或自造槽": 1,
     "头块：缺文件头": 1
   },
-  "src/capabilities/workspace/domain/hash.rs": {
-    "头块：槽外有行或自造槽": 5,
-    "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 1,
-    "条目：首行不是目的": 1
-  },
   "src/capabilities/workspace/domain/workspace.rs": {
     "头块：槽外有行或自造槽": 7,
     "头块：缺文件头": 1,

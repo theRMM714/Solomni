@@ -634,7 +634,6 @@ pub(crate) fn work_rewind_to_materializes_by_line_anchor_and_discards_later_comm
 /// 用户投喂 = 权威提交；agent 拉取后按基线提交，新路径是新增。
 #[test]
 pub(crate) fn work_user_commit_is_authoritative_and_pull_tracks_the_baseline() {
-    use crate::capabilities::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
@@ -667,7 +666,6 @@ pub(crate) fn work_user_commit_is_authoritative_and_pull_tracks_the_baseline() {
 /// 拉取绝不静默覆盖本地已有内容；提交空集与空说明都如实拒绝。
 #[test]
 pub(crate) fn work_pull_never_clobbers_and_empty_commits_are_refused() {
-    use crate::capabilities::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string(), "b".to_string()])
         .unwrap();
@@ -717,7 +715,6 @@ pub(crate) fn work_pull_never_clobbers_and_empty_commits_are_refused() {
 #[test]
 pub(crate) fn work_status_separates_local_and_upstream_changes() {
     use crate::capabilities::workspace::domain::workstore::StatusState;
-    use crate::capabilities::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
@@ -761,7 +758,6 @@ pub(crate) fn work_delete_is_explicit_in_the_commit_request() {
 /// 目的：work_versions 给文本预览、二进制只给指纹与大小；不把二进制冒充文本。
 #[test]
 pub(crate) fn work_versions_reports_text_and_binary_without_guessing() {
-    use crate::capabilities::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
@@ -774,21 +770,126 @@ pub(crate) fn work_versions_reports_text_and_binary_without_guessing() {
 
     let v = ws.work_versions("w", "a", "image.bin").unwrap();
     assert_eq!(v.path, "image.bin");
+    assert!(v.media_type.is_none(), "未知扩展名没有类型提示");
     assert!(v.base.is_some() && v.head.is_some() && v.local.is_some());
     let head = v.head.unwrap();
     assert!(head.text.is_none(), "二进制不能给文本预览");
     assert_eq!(head.size, binary.len() as u64);
 
     let note = ws.work_versions("w", "a", "note.md").unwrap();
+    assert_eq!(note.media_type.as_deref(), Some("text/markdown"));
     assert_eq!(note.head.unwrap().text.as_deref(), Some("v1"));
     assert!(ws.work_versions("w", "a", "nope.bin").is_err());
+}
+
+/// 目的：work_versions 按扩展名给媒体类型；既有超限对象只给指纹/大小/类型，不再读内容。
+#[test]
+pub(crate) fn work_versions_reports_media_type_and_marks_oversize_metadata_only() {
+    let dirs = Arc::new(InMemoryWorkspace::new());
+    let store = Arc::new(InMemoryWorkStore::new());
+    let ws = test_workspace_store_with_max(dirs.clone(), store.clone(), 1024);
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    let png = [0x89u8, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+    ws.work_commit_user("w", "cover.png", &png, 1, 0).unwrap();
+    ws.work_pull("w", "a", &["cover.png".to_string()]).unwrap();
+    let v = ws.work_versions("w", "a", "cover.png").unwrap();
+    assert_eq!(v.media_type.as_deref(), Some("image/png"));
+    let head = v.head.unwrap();
+    assert!(head.text.is_none(), "已知媒体不给文本预览");
+    assert_eq!(head.size, png.len() as u64);
+
+    // 用更小的上限重新装配同一个版本库：既有对象只给元数据，不读内容。
+    let strict = test_workspace_store_with_max(dirs, store.clone(), 4);
+    let v = strict.work_versions("w", "a", "cover.png").unwrap();
+    assert_eq!(v.media_type.as_deref(), Some("image/png"));
+    let head = v.head.unwrap();
+    assert!(head.too_large, "超过新上限要标记");
+    assert!(head.text.is_none());
+    assert_eq!(head.size, png.len() as u64);
+
+    // 超限提交与上传都被拒绝；head 不前进。
+    let before = strict.work_head("w").unwrap();
+    let sb = sandbox_of(&strict, "w", "a");
+    store.write_under(&sb, "big.bin", &[0u8; 5]).unwrap();
+    let err = strict
+        .work_commit("w", "a", "w--a", &commit_req(&["big.bin"], &[], "big", 2))
+        .unwrap_err();
+    assert!(err.contains("上限") && err.contains("big.bin"), "{}", err);
+    let err = strict
+        .work_commit_user("w", "up.bin", &[0u8; 5], 3, 0)
+        .unwrap_err();
+    assert!(err.contains("上限"), "{}", err);
+    assert_eq!(strict.work_head("w").unwrap(), before, "拒绝不能推进 head");
+}
+
+/// 目的：媒体资产的冲突也只能显式选边；三方视图按媒体类型给元数据，不做内容合并。
+#[test]
+pub(crate) fn work_media_conflict_requires_explicit_side() {
+    use crate::capabilities::workspace::api::{ResolveAction, ResolveTake};
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string(), "b".to_string()])
+        .unwrap();
+    let base: &[u8] = &[0, 0, 0, 24, b'f', b't', b'y', b'p'];
+    ws.work_commit_user("w", "clip.mp4", base, 1, 0).unwrap();
+    let both = ["clip.mp4".to_string()];
+    ws.work_pull("w", "a", &both).unwrap();
+    ws.work_pull("w", "b", &both).unwrap();
+    let sb_a = sandbox_of(&ws, "w", "a");
+    let sb_b = sandbox_of(&ws, "w", "b");
+    store.write_under(&sb_a, "clip.mp4", &[1, 2, 3]).unwrap();
+    store.write_under(&sb_b, "clip.mp4", &[4, 5, 6]).unwrap();
+    ws.work_commit("w", "a", "w--a", &commit_req(&["clip.mp4"], &[], "a", 2))
+        .unwrap();
+    let err = ws
+        .work_commit("w", "b", "w--b", &commit_req(&["clip.mp4"], &[], "b", 3))
+        .unwrap_err();
+    assert!(err.contains("clip.mp4") && err.contains("冲突"), "{}", err);
+
+    let v = ws.work_versions("w", "b", "clip.mp4").unwrap();
+    assert_eq!(v.media_type.as_deref(), Some("video/mp4"));
+    assert!(v.head.unwrap().text.is_none(), "媒体不给文本");
+    assert!(v.local.unwrap().text.is_none(), "媒体不给文本");
+
+    let rep = ws
+        .work_resolve("w", "b", &resolve_req(&["clip.mp4"], ResolveTake::Upstream))
+        .unwrap();
+    assert_eq!(rep.entries[0].action, ResolveAction::WroteUpstream);
+    assert_eq!(
+        store.read_under(&sb_b, "clip.mp4").unwrap().as_deref(),
+        Some(&[1, 2, 3][..])
+    );
+}
+
+/// 目的：资产路径（pull / status / versions / commit / resolve / restore）不走整文件读取。
+#[test]
+pub(crate) fn work_asset_paths_do_not_use_whole_file_reads() {
+    use crate::capabilities::workspace::api::ResolveTake;
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
+    // 之后任何整文件读取都会失败：生产资产路径必须走 stat / scan / ingest / copy。
+    store.fail_times("read_under", 100);
+    store.fail_times("read_object", 100);
+
+    let sb = sandbox_of(&ws, "w", "a");
+    ws.work_pull("w", "a", &["note.md".to_string()]).unwrap();
+    store.write_under(&sb, "note.md", b"v2").unwrap();
+    let _ = ws.work_status("w", "a", &[]).unwrap();
+    let _ = ws.work_versions("w", "a", "note.md").unwrap();
+    let rep = ws
+        .work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "v2", 2))
+        .unwrap();
+    assert_eq!(rep.changes.len(), 1);
+    let _ = ws
+        .work_resolve("w", "a", &resolve_req(&["note.md"], ResolveTake::Upstream))
+        .unwrap();
+    ws.work_restore("w", rep.id).unwrap();
 }
 
 /// 目的：两边都改时，人工合并后用 take=local 推进基线，提交成功且主副本拿到合并结果。
 #[test]
 pub(crate) fn work_resolve_local_marks_merged_result_and_commit_succeeds() {
     use crate::capabilities::workspace::api::{ResolveAction, ResolveTake};
-    use crate::capabilities::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string(), "b".to_string()])
         .unwrap();
@@ -827,7 +928,6 @@ pub(crate) fn work_resolve_local_marks_merged_result_and_commit_succeeds() {
 pub(crate) fn work_resolve_upstream_overwrites_local_and_then_is_clean() {
     use crate::capabilities::workspace::api::{ResolveAction, ResolveTake};
     use crate::capabilities::workspace::domain::workstore::StatusState;
-    use crate::capabilities::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string(), "b".to_string()])
         .unwrap();
@@ -861,7 +961,6 @@ pub(crate) fn work_resolve_upstream_overwrites_local_and_then_is_clean() {
 #[test]
 pub(crate) fn work_resolve_handles_upstream_deletion_by_side() {
     use crate::capabilities::workspace::api::{ResolveAction, ResolveTake};
-    use crate::capabilities::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string(), "b".to_string()])
         .unwrap();
@@ -921,7 +1020,6 @@ pub(crate) fn work_resolve_handles_upstream_deletion_by_side() {
 pub(crate) fn work_status_exposes_both_present_and_local_only_then_resolve_clears_it() {
     use crate::capabilities::workspace::api::{ResolveAction, ResolveTake};
     use crate::capabilities::workspace::domain::workstore::StatusState;
-    use crate::capabilities::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
@@ -1069,7 +1167,6 @@ pub(crate) fn commit_pending_recovers_immediately_when_the_failure_clears() {
 /// 目的：restore 的 pending 在崩溃后由下一次操作补完，head 与主副本一起到达目标点。
 #[test]
 pub(crate) fn abandoned_restore_pending_is_recovered_by_next_head_read() {
-    use crate::capabilities::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string()]).unwrap();
     let id1 = ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();

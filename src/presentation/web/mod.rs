@@ -6,14 +6,20 @@
 
 use crate::capabilities::conductor::api::{Acted, ActionCall, Caller, SessionEvent, WorkMode};
 use crate::capabilities::conductor::api::{Ops, Output};
+use crate::capabilities::workspace::api::MAX_ASSET_BYTES;
 pub mod routes;
 use serde_json::json;
+use std::io::Read;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tiny_http::{Header, Response, Server};
 
 /// 默认监听端口（CLI 的 webui 命令与启动参数共用这一个来源）。
 pub const DEFAULT_PORT: u16 = 3081;
+
+/// 请求体上限：上传走 base64，按单文件上限的编码体积留一点余量。
+/// 超过就在读入前挡掉，不把整个 body 读进内存。
+const MAX_BODY_BYTES: usize = ((MAX_ASSET_BYTES / 3 + 1) * 4) as usize + 64 * 1024;
 
 /// 本机工具围栏能力（由组合根注入；呈现层如实显示，不假装）。
 #[derive(Debug, Clone, serde::Serialize)]
@@ -78,10 +84,16 @@ pub(crate) fn serve_until(
             let url = request.url().to_string();
             let method = request.method().to_string();
             let mut body = String::new();
-            let _ = request.as_reader().read_to_string(&mut body);
+            let mut reader = request.as_reader().take(MAX_BODY_BYTES as u64 + 1);
+            let read_ok = reader.read_to_string(&mut body).is_ok();
             log.info("web::request", &format!("{} {}", method, url));
 
-            let (code, headers, text) = route(&ops, &fence, &log, &method, &url, &body);
+            let reply = if !read_ok || body.len() > MAX_BODY_BYTES {
+                complaint(400, "请求体过大或不是 UTF-8")
+            } else {
+                route(&ops, &fence, &log, &method, &url, &body)
+            };
+            let (code, headers, text) = reply;
             let mut response = Response::from_string(text).with_status_code(code);
             for (k, v) in headers {
                 if let Ok(h) = Header::from_bytes(k.as_bytes(), v.as_bytes()) {

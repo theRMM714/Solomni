@@ -1,5 +1,6 @@
 //! 工作区的**出站端口**：目录布局与共享区版本库（机制在适配层）。
 
+use crate::capabilities::workspace::domain::asset::FileVersion;
 use crate::capabilities::workspace::domain::workspace::{WorkFiles, WorkRoots, WorkUsage};
 use crate::capabilities::workspace::domain::workstore::{Commit, Index, ObjectInfo, Pending};
 use std::collections::BTreeMap;
@@ -25,20 +26,54 @@ pub trait Workdirs {
     fn usage(&self, session: &str, agents: &[String]) -> Result<WorkUsage, String>;
 }
 
-/// 共享区**版本库**的落盘端口：文件原语（主副本与沙箱都经它）+ 内容寻址对象 / 提交记录 / 每个 agent 的拉取基线。
+/// 共享区**版本库**的落盘端口：流式资产原语（主副本与沙箱都经它）+ 内容寻址对象 / 提交记录 / 每个 agent 的拉取基线。
 ///
 /// 策略不在这一层：三方比较、路径校验、冲突判定都在 `domain::workstore`；本端口只保证
 /// "按给定根与相对路径读写"，并拒绝一切**符号链接逃逸**（相对路径本身干净不等于落点安全）。
 /// **只有 `service.rs` 持有它**（R12）。
 pub trait WorkStore: Send + Sync {
-    /// 读 root 下的一条干净相对路径；不存在 = None。
-    fn read_under(&self, root: &Path, rel: &str) -> Result<Option<Vec<u8>>, String>;
-    /// 写 root 下的一条干净相对路径（需要时建父目录）。
-    fn write_under(&self, root: &Path, rel: &str, bytes: &[u8]) -> Result<(), String>;
     /// 删 root 下的一条干净相对路径（不存在 = 幂等成功）。
     fn remove_under(&self, root: &Path, rel: &str) -> Result<(), String>;
     /// 递归列 root 下的文件（相对路径、/ 分隔、稳定排序）。
     fn list(&self, root: &Path) -> Result<Vec<String>, String>;
+    /// 目的：读 root 下文件的大小；不存在 = None。
+    /// 约束：只读元数据，不读内容；上限预检用它。
+    fn stat_under(&self, root: &Path, rel: &str) -> Result<Option<u64>, String>;
+    /// 目的：流式扫描 root 下文件：指纹、大小、可选文本预览；不存在 = None。
+    /// 约束：`preview = None` 只算指纹与大小；`Some(n)` 才做 NUL/UTF-8 判定并保留最多 n 字节预览。
+    fn scan_under(
+        &self,
+        root: &Path,
+        rel: &str,
+        preview: Option<usize>,
+    ) -> Result<Option<FileVersion>, String>;
+    /// 目的：读一个内容对象的大小；对象不存在 = Err。
+    fn stat_object(&self, store: &Path, hash: &str) -> Result<u64, String>;
+    /// 目的：流式扫描一个内容对象；`preview = None` 只算指纹与大小。
+    fn scan_object(
+        &self,
+        store: &Path,
+        hash: &str,
+        preview: Option<usize>,
+    ) -> Result<FileVersion, String>;
+    /// 目的：把 root 下文件流式写成内容对象（对象名 = `expected_hash`），并校验实际指纹与上限。
+    /// 约束：超上限或指纹不符时删临时文件并报错；对象已存在则直接返回其大小。
+    fn ingest_under(
+        &self,
+        store: &Path,
+        root: &Path,
+        rel: &str,
+        expected_hash: &str,
+        max_bytes: u64,
+    ) -> Result<u64, String>;
+    /// 目的：把一个内容对象流式复制到 root 下同相对路径（需要时建父目录）。
+    fn copy_object_to_under(
+        &self,
+        store: &Path,
+        hash: &str,
+        root: &Path,
+        rel: &str,
+    ) -> Result<(), String>;
     /// 当前 head 提交号；空仓库 = None。
     fn head(&self, store: &Path) -> Result<Option<u64>, String>;
     fn set_head(&self, store: &Path, id: u64) -> Result<(), String>;

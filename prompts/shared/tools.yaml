@@ -16,8 +16,8 @@ envs:
       {{module_roots}}
       {{path_rules}}
       **共享区是版本化工作区，你不能直接写它**：要用的内容先 work_pull 拉进沙箱（同一相对路径，文件或文件夹；
-      文本、图片、视频与其它二进制都按字节处理），在沙箱里改完再用 work_commit 提交回共享区；提交做三方比较，冲突会如实报出、不会覆盖别人。
-      冲突不自动合并：先用 work_versions 看基线 / 主副本 / 沙箱三方，再用 work_resolve 选边（take=upstream 取主副本，take=local 保留本地）。
+      文本、图片、视频与其它二进制都按字节处理，内容流式读写、不整份进上下文；单文件有上限，超限会明确拒绝），在沙箱里改完再用 work_commit 提交回共享区；提交做三方比较，冲突会如实报出、不会覆盖别人。
+      冲突不自动合并：文本可人工合并后用 take=local；图片 / 视频 / 其它二进制不能合并，只能选边（take=upstream 取主副本，take=local 保留本地）。先用 work_versions 看三方。
       用 work_status 看共享区当前提交、你的逐条状态与沙箱里未跟踪的文件。模块目录里的 userdata/ 是模块自己的跨任务私有状态（缓存/记忆/配置），
       不是本次工作的成品区，不要把任务成果往里写。
       当前工作：{{work_name}}；agent 名：{{agent}}
@@ -29,8 +29,8 @@ envs:
       {{module_roots}}
       {{path_rules}}
       **共享区是版本化工作区，你不能直接写它**：要用的内容先 work_pull 拉进沙箱（同一相对路径，文件或文件夹；
-      文本、图片、视频与其它二进制都按字节处理），在沙箱里改完再用 work_commit 提交回共享区；提交做三方比较，冲突会如实报出、不会覆盖别人。
-      冲突不自动合并：先用 work_versions 看基线 / 主副本 / 沙箱三方，再用 work_resolve 选边（take=upstream 取主副本，take=local 保留本地）。
+      文本、图片、视频与其它二进制都按字节处理，内容流式读写、不整份进上下文；单文件有上限，超限会明确拒绝），在沙箱里改完再用 work_commit 提交回共享区；提交做三方比较，冲突会如实报出、不会覆盖别人。
+      冲突不自动合并：文本可人工合并后用 take=local；图片 / 视频 / 其它二进制不能合并，只能选边（take=upstream 取主副本，take=local 保留本地）。先用 work_versions 看三方。
       用 work_status 看共享区当前提交、你的逐条状态与沙箱里未跟踪的文件。模块目录里的 userdata/ 是模块自己的跨任务私有状态（缓存/记忆/配置），
       不是本次工作的成品区，不要把任务成果往里写。
       当前工作：{{work_name}}；agent 名：{{agent}}
@@ -42,8 +42,8 @@ envs:
       {{module_roots}}
       {{path_rules}}
       **共享区是版本化工作区，你不能直接写它**：要用的内容先 work_pull 拉进沙箱（同一相对路径，文件或文件夹；
-      文本、图片、视频与其它二进制都按字节处理），在沙箱里改完再用 work_commit 提交回共享区；提交做三方比较，冲突会如实报出、不会覆盖别人。
-      冲突不自动合并：先用 work_versions 看基线 / 主副本 / 沙箱三方，再用 work_resolve 选边（take=upstream 取主副本，take=local 保留本地）。
+      文本、图片、视频与其它二进制都按字节处理，内容流式读写、不整份进上下文；单文件有上限，超限会明确拒绝），在沙箱里改完再用 work_commit 提交回共享区；提交做三方比较，冲突会如实报出、不会覆盖别人。
+      冲突不自动合并：文本可人工合并后用 take=local；图片 / 视频 / 其它二进制不能合并，只能选边（take=upstream 取主副本，take=local 保留本地）。先用 work_versions 看三方。
       用 work_status 看共享区当前提交、你的逐条状态与沙箱里未跟踪的文件。模块目录里的 userdata/ 是模块自己的跨任务私有状态（缓存/记忆/配置），
       不是本次工作的成品区，不要把任务成果往里写。
       当前工作：{{work_name}}；agent 名：{{agent}}
@@ -57,8 +57,8 @@ envs:
       宿主文件在 guest 里的位置由路径桥决定（宿主 D:\a\b → guest /solomni-host/d/a/b）。
       {{path_rules}}
       **共享区是版本化工作区，你不能直接写它**：要用的内容先 work_pull 拉进沙箱（同一相对路径，文件或文件夹；
-      文本、图片、视频与其它二进制都按字节处理），在沙箱里改完再用 work_commit 提交回共享区；提交做三方比较，冲突会如实报出、不会覆盖别人。
-      冲突不自动合并：先用 work_versions 看基线 / 主副本 / 沙箱三方，再用 work_resolve 选边（take=upstream 取主副本，take=local 保留本地）。
+      文本、图片、视频与其它二进制都按字节处理，内容流式读写、不整份进上下文；单文件有上限，超限会明确拒绝），在沙箱里改完再用 work_commit 提交回共享区；提交做三方比较，冲突会如实报出、不会覆盖别人。
+      冲突不自动合并：文本可人工合并后用 take=local；图片 / 视频 / 其它二进制不能合并，只能选边（take=upstream 取主副本，take=local 保留本地）。先用 work_versions 看三方。
       用 work_status 看共享区当前提交、你的逐条状态与沙箱里未跟踪的文件。模块目录里的 userdata/ 是模块自己的跨任务私有状态（缓存/记忆/配置），
       不是本次工作的成品区，不要把任务成果往里写。
       当前工作：{{work_name}}；agent 名：{{agent}}
@@ -72,8 +72,7 @@ envs:
       宿主文件在 guest 里的位置由路径桥决定。
       {{path_rules}}
       **共享区是版本化工作区，你不能直接写它**：要用的内容先 work_pull 拉进沙箱（同一相对路径，文件或文件夹；
-      文本、图片、视频与其它二进制都按字节处理），改完再用 work_commit 提交回共享区；冲突不自动合并，
-      先用 work_versions 看基线 / 主副本 / 沙箱三方，再用 work_resolve 选边（take=upstream 取主副本，take=local 保留本地）。
+      文本、图片、视频与其它二进制都按字节处理，内容流式读写、不整份进上下文；单文件有上限，超限会明确拒绝），改完再用 work_commit 提交回共享区；冲突不自动合并：文本可人工合并后用 take=local，图片 / 视频 / 其它二进制不能合并，只能选边（take=upstream 取主副本，take=local 保留本地）；先用 work_versions 看三方。
       用 work_status 看共享区当前提交、你的逐条状态与沙箱里未跟踪的文件。模块目录里的 userdata/ 是模块自己的跨任务私有状态，不要往里写成果。
       当前工作：{{work_name}}；agent 名：{{agent}}
   - guest: windows
@@ -86,8 +85,7 @@ envs:
       宿主文件在 guest 里的位置由路径桥决定（宿主 /home/u/a → guest C:\solomni-host\home\u\a）。
       {{path_rules}}
       **共享区是版本化工作区，你不能直接写它**：要用的内容先 work_pull 拉进沙箱（同一相对路径，文件或文件夹；
-      文本、图片、视频与其它二进制都按字节处理），改完再用 work_commit 提交回共享区；冲突不自动合并，
-      先用 work_versions 看基线 / 主副本 / 沙箱三方，再用 work_resolve 选边（take=upstream 取主副本，take=local 保留本地）。
+      文本、图片、视频与其它二进制都按字节处理，内容流式读写、不整份进上下文；单文件有上限，超限会明确拒绝），改完再用 work_commit 提交回共享区；冲突不自动合并：文本可人工合并后用 take=local，图片 / 视频 / 其它二进制不能合并，只能选边（take=upstream 取主副本，take=local 保留本地）；先用 work_versions 看三方。
       用 work_status 看共享区当前提交、你的逐条状态与沙箱里未跟踪的文件。模块目录里的 userdata/ 是模块自己的跨任务私有状态，不要往里写成果。
       当前工作：{{work_name}}；agent 名：{{agent}}
 

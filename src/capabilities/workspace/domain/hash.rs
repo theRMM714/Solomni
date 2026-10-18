@@ -1,8 +1,7 @@
-//! 内容指纹：SHA-256（十六进制小写）。共享区**内容寻址**的唯一键。
-//!
-//! 纯逻辑、无依赖：内容寻址只需要"同内容同键、异内容异键"，不用于认证 / 签名，所以本文件
-//! 是一个完整、可对照标准测试向量验证的 SHA-256，不引入加密库（项目依赖刻意保持最小）。
-//! 用它做键的是**用户与 AI 的产物**，不是攻击面。
+//! 目的：内容指纹 SHA-256（十六进制小写），共享区**内容寻址**的唯一键。
+//! 管：增量摘要、十六进制输出与内容指纹判定；纯逻辑、无依赖，可对照标准测试向量。
+//! 不管：内容扫描、媒体类型与预览（在 `asset`）；对象落盘（在 `detail`）。
+//! 联动：`asset::AssetScanner` 用它算 hash；`service` 用 `content_hash` 给用户投喂定键。
 
 /// 目的：判定一个名字是不是内容指纹（64 位小写十六进制）。
 /// 约束：对象目录里的临时文件、锁文件等不能被当成内容对象。
@@ -13,41 +12,97 @@ pub fn is_content_hash(name: &str) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
-/// 空内容的指纹也稳定（标准向量 e3b0c442…）。
-pub fn content_hash(bytes: &[u8]) -> String {
-    let digest = sha256(bytes);
-    let mut out = String::with_capacity(64);
-    for b in digest {
-        out.push_str(&format!("{:02x}", b));
-    }
-    out
+/// 目的：增量 SHA-256：分块喂入，内存只保留一个 64 字节块。
+/// 约束：`finish` 之后不再复用；长度按字节累计，内部按位长补位。
+pub struct Sha256 {
+    state: [u32; 8],
+    buffer: [u8; 64],
+    buffered: usize,
+    length: u64,
 }
 
-const K: [u32; 64] = [
-    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
-];
-
-fn sha256(msg: &[u8]) -> [u8; 32] {
-    let mut h: [u32; 8] = [
-        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
-        0x5be0cd19,
-    ];
-    // 填充：0x80 + 若干 0 + 64 位大端比特长度。
-    let bit_len = (msg.len() as u64).wrapping_mul(8);
-    let mut data = msg.to_vec();
-    data.push(0x80);
-    while data.len() % 64 != 56 {
-        data.push(0);
+impl Default for Sha256 {
+    fn default() -> Sha256 {
+        Sha256::new()
     }
-    data.extend_from_slice(&bit_len.to_be_bytes());
-    for chunk in data.chunks(64) {
+}
+
+impl Sha256 {
+    /// 目的：新建一个空输入的状态。
+    pub fn new() -> Sha256 {
+        Sha256 {
+            state: [
+                0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+                0x5be0cd19,
+            ],
+            buffer: [0u8; 64],
+            buffered: 0,
+            length: 0,
+        }
+    }
+
+    /// 目的：喂入一段输入；不要求对齐 64 字节。
+    pub fn update(&mut self, data: &[u8]) {
+        self.length = self.length.wrapping_add(data.len() as u64);
+        let mut rest = data;
+        if self.buffered > 0 {
+            let need = 64 - self.buffered;
+            let take = need.min(rest.len());
+            self.buffer[self.buffered..self.buffered + take].copy_from_slice(&rest[..take]);
+            self.buffered += take;
+            rest = &rest[take..];
+            if self.buffered == 64 {
+                let block = self.buffer;
+                self.compress(&block);
+                self.buffered = 0;
+            }
+        }
+        while rest.len() >= 64 {
+            let (block, tail) = rest.split_at(64);
+            self.compress(block);
+            rest = tail;
+        }
+        if !rest.is_empty() {
+            self.buffer[..rest.len()].copy_from_slice(rest);
+            self.buffered = rest.len();
+        }
+    }
+
+    /// 目的：补位并输出十六进制摘要（共享区对象名用）。
+    pub fn finish_hex(self) -> String {
+        hex(self.finish())
+    }
+
+    /// 目的：补位并输出最终摘要。
+    pub fn finish(mut self) -> [u8; 32] {
+        let bit_len = self.length.wrapping_mul(8);
+        let mut pad = Vec::with_capacity(72);
+        pad.push(0x80);
+        while (self.buffered + pad.len()) % 64 != 56 {
+            pad.push(0);
+        }
+        pad.extend_from_slice(&bit_len.to_be_bytes());
+        self.update(&pad);
+        let mut out = [0u8; 32];
+        for (i, word) in self.state.iter().enumerate() {
+            out[i * 4..i * 4 + 4].copy_from_slice(&word.to_be_bytes());
+        }
+        out
+    }
+
+    fn compress(&mut self, chunk: &[u8]) {
+        const K: [u32; 64] = [
+            0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
+            0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
+            0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
+            0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+            0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+            0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+            0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
+            0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+            0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
+            0xc67178f2,
+        ];
         let mut w = [0u32; 64];
         for (i, slot) in w.iter_mut().take(16).enumerate() {
             *slot = u32::from_be_bytes([
@@ -65,14 +120,14 @@ fn sha256(msg: &[u8]) -> [u8; 32] {
                 .wrapping_add(w[i - 7])
                 .wrapping_add(s1);
         }
-        let mut a = h[0];
-        let mut b = h[1];
-        let mut c = h[2];
-        let mut d = h[3];
-        let mut e = h[4];
-        let mut f = h[5];
-        let mut g = h[6];
-        let mut hh = h[7];
+        let mut a = self.state[0];
+        let mut b = self.state[1];
+        let mut c = self.state[2];
+        let mut d = self.state[3];
+        let mut e = self.state[4];
+        let mut f = self.state[5];
+        let mut g = self.state[6];
+        let mut hh = self.state[7];
         for (i, wi) in w.iter().enumerate() {
             let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
             let ch = (e & f) ^ ((!e) & g);
@@ -93,20 +148,30 @@ fn sha256(msg: &[u8]) -> [u8; 32] {
             b = a;
             a = t1.wrapping_add(t2);
         }
-        for (slot, add) in h.iter_mut().zip([a, b, c, d, e, f, g, hh]) {
+        for (slot, add) in self.state.iter_mut().zip([a, b, c, d, e, f, g, hh]) {
             *slot = slot.wrapping_add(add);
         }
     }
-    let mut out = [0u8; 32];
-    for (i, word) in h.iter().enumerate() {
-        out[i * 4..i * 4 + 4].copy_from_slice(&word.to_be_bytes());
+}
+
+/// 目的：一次算完整份内容的指纹。
+pub fn content_hash(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hex(hasher.finish())
+}
+
+fn hex(digest: [u8; 32]) -> String {
+    let mut out = String::with_capacity(64);
+    for b in digest {
+        out.push_str(&format!("{:02x}", b));
     }
     out
 }
 
 #[cfg(test)]
 mod tests {
-    use super::content_hash;
+    use super::{content_hash, Sha256};
 
     /// 标准测试向量：空串 / "abc" / 长于一个分块（跨填充边界）。
     #[test]
@@ -129,5 +194,35 @@ mod tests {
             content_hash(&million),
             "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0"
         );
+    }
+
+    /// 目的：分块边界不影响结果；覆盖块内、跨块、补齐前后与跨多块。
+    #[test]
+    fn chunked_updates_match_one_shot() {
+        let data: Vec<u8> = (0..=255u8).cycle().take(1_000).collect();
+        let want = content_hash(&data);
+        for cuts in [
+            vec![1usize, 1, 1],
+            vec![55, 1, 1],
+            vec![56, 1, 1],
+            vec![63, 1, 1],
+            vec![64, 1, 1],
+            vec![65, 1, 1],
+            vec![127, 1],
+            vec![128, 1],
+            vec![333, 333, 334],
+        ] {
+            let mut at = 0;
+            let mut h = Sha256::new();
+            for &c in &cuts {
+                let end = (at + c).min(data.len());
+                h.update(&data[at..end]);
+                at = end;
+            }
+            if at < data.len() {
+                h.update(&data[at..]);
+            }
+            assert_eq!(super::hex(h.finish()), want, "cuts {:?}", cuts);
+        }
     }
 }

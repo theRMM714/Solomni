@@ -9,7 +9,7 @@
 //!
 //! 本文件没有 IO，也不加 trait（纯派生逻辑）。
 
-use crate::capabilities::workspace::domain::hash::content_hash;
+use crate::capabilities::workspace::domain::asset::FileVersion;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -183,12 +183,12 @@ pub fn expand_paths(paths: &[String], available: &BTreeSet<String>) -> (Vec<Stri
     (out.into_iter().collect(), missing)
 }
 
-/// 文件级三方比较（提交侧）：`locals` = 路径 → 要写的字节（`None` = 显式删除）。
+/// 文件级三方比较（提交侧）：`locals` = 路径 → 要写的**内容指纹**（`None` = 显式删除）。
 /// Ok(改动清单) 为空 = 没有可提交的改动；Err = 冲突清单（**整个提交都拒绝**）。
 pub fn plan_commit(
     index: &Index,
     tree: &Tree,
-    locals: &BTreeMap<String, Option<Vec<u8>>>,
+    locals: &BTreeMap<String, Option<String>>,
 ) -> Result<Vec<Change>, Vec<ConflictAt>> {
     let mut changes: Vec<Change> = Vec::new();
     let mut conflicts: Vec<(String, Conflict)> = Vec::new();
@@ -209,13 +209,13 @@ pub fn plan_commit(
                     (Some(_), Some(_)) => conflicts.push((path.clone(), Conflict::DeleteVsModify)),
                 }
             }
-            Some(bytes) => {
-                let local_hash = content_hash(bytes);
+            Some(local_hash) => {
+                let local_hash = local_hash.as_str();
                 match (base, head) {
                     (None, None) => changes.push(Change {
                         path: path.clone(),
                         kind: ChangeKind::Add,
-                        hash: local_hash,
+                        hash: local_hash.to_string(),
                     }),
                     (None, Some(h)) => {
                         if local_hash == h {
@@ -240,7 +240,7 @@ pub fn plan_commit(
                             changes.push(Change {
                                 path: path.clone(),
                                 kind: ChangeKind::Modify,
-                                hash: local_hash,
+                                hash: local_hash.to_string(),
                             });
                         } else {
                             conflicts.push((path.clone(), Conflict::BothModified));
@@ -300,60 +300,13 @@ pub fn pull_verdict(base: Option<&str>, head: Option<&str>, local: Option<&str>)
     }
 }
 
-/// 目的：一条路径某一方的版本视图（work_versions 用）。
-/// 约束：文本只给有上限的预览；二进制/非 UTF-8 只给指纹与大小，不冒充文本。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FileVersion {
-    /// 目的：内容指纹。
-    pub hash: String,
-    /// 目的：内容字节数。
-    pub size: u64,
-    /// 目的：文本预览；二进制 / 非 UTF-8 为 None。
-    pub text: Option<String>,
-    /// 目的：文本预览是否因超过上限被截断。
-    pub truncated: bool,
-}
-
-/// 目的：单次文本预览上限（超出如实标注截断，不把大文件整块灌进上下文）。
-pub const VERSION_TEXT_LIMIT: usize = 16 * 1024;
-
-impl FileVersion {
-    /// 目的：从内容构造版本视图；文本按 UTF-8 判定，含 NUL 视为二进制。
-    pub fn from_bytes(hash: String, bytes: &[u8]) -> FileVersion {
-        let size = bytes.len() as u64;
-        let text = if bytes.contains(&0) {
-            None
-        } else {
-            std::str::from_utf8(bytes).ok().map(|s| {
-                if s.len() <= VERSION_TEXT_LIMIT {
-                    s.to_string()
-                } else {
-                    let mut end = VERSION_TEXT_LIMIT;
-                    while end > 0 && !s.is_char_boundary(end) {
-                        end -= 1;
-                    }
-                    s[..end].to_string()
-                }
-            })
-        };
-        let truncated = text
-            .as_ref()
-            .map(|t| t.len() < bytes.len())
-            .unwrap_or(false);
-        FileVersion {
-            hash,
-            size,
-            text,
-            truncated,
-        }
-    }
-}
-
 /// 目的：一条路径的三方版本：基线（上次拉取/提交）/ 主副本当前 / 沙箱本地。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VersionView {
     /// 目的：共享区相对路径。
     pub path: String,
+    /// 目的：按扩展名给出的媒体类型提示；未知 = None（内容以 hash / size 为准）。
+    pub media_type: Option<String>,
     /// 目的：基线版本；没拉取过 = None。
     pub base: Option<FileVersion>,
     /// 目的：主副本当前版本；主副本已删除 = None。
@@ -680,10 +633,10 @@ mod tests {
             .map(|(p, h)| (p.to_string(), h.to_string()))
             .collect()
     }
-    fn locals(entries: &[(&str, Option<&str>)]) -> BTreeMap<String, Option<Vec<u8>>> {
+    fn locals(entries: &[(&str, Option<&str>)]) -> BTreeMap<String, Option<String>> {
         entries
             .iter()
-            .map(|(p, v)| (p.to_string(), v.map(|s| s.as_bytes().to_vec())))
+            .map(|(p, v)| (p.to_string(), v.map(|s| s.to_string())))
             .collect()
     }
 
@@ -722,12 +675,12 @@ mod tests {
             vec![Change {
                 path: "f1".into(),
                 kind: ChangeKind::Modify,
-                hash: content_hash(b"h2")
+                hash: "h2".to_string()
             }]
         );
         // 本地没改 → 没得提交。
         let changes = plan_commit(
-            &index(&[("f1", &content_hash(b"h2"))]),
+            &index(&[("f1", "h2")]),
             &tree(&[("f1", "h1")]),
             &locals(&[("f1", Some("h2"))]),
         )
@@ -850,20 +803,5 @@ mod tests {
             status_of(Some("h1"), None, Some("h2")),
             StatusState::Conflict
         );
-    }
-
-    #[test]
-    fn file_version_previews_text_and_never_pretends_binary_is_text() {
-        let text = FileVersion::from_bytes("h1".to_string(), "你好".as_bytes());
-        assert_eq!(text.text.as_deref(), Some("你好"));
-        assert!(!text.truncated);
-
-        let binary = FileVersion::from_bytes("h2".to_string(), &[0, 159, 146, 150]);
-        assert!(binary.text.is_none(), "含 NUL 的二进制不能给文本");
-
-        let long = "a".repeat(VERSION_TEXT_LIMIT + 10);
-        let cut = FileVersion::from_bytes("h3".to_string(), long.as_bytes());
-        assert!(cut.truncated);
-        assert_eq!(cut.text.as_ref().map(String::len), Some(VERSION_TEXT_LIMIT));
     }
 }

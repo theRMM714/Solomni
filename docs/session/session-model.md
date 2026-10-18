@@ -42,7 +42,8 @@ session/<工作名>/
   各 agent 沙箱也建在它下面；实例名因此在**整棵子树**里唯一（重名自动带尾号，见 registry 的命名策略）。
 - **共享区是版本化工作区**：主副本 `work/` 与版本库 `.work/` 都锚在顶层工作上；agent 只写自己的沙箱，
   `work_pull` / `work_commit` 与主副本同步（文件级三方比较），`work_versions` 看三方，`work_resolve` 显式选边，`work_status` 看状态。
-  文本、图片、视频与其它二进制都按字节处理；二进制冲突只能选边，不做自动合并。
+  文本、图片、视频与其它二进制都按字节处理（内容流式读写、不整份进上下文；单文件有上限）；
+  `work_versions` 给 hash、大小与扩展名媒体类型提示；文本可人工合并后用 `take=local`，图片 / 视频 / 二进制只能选边，不做自动合并。
 - **逐 agent 的权限覆盖**写在 `meta.yaml` 的 `agents[].permissions`（读/提交白名单、黑名单、模块写授权、决定粒度）：
   只覆盖显式给出的字段，缺省继承 `settings.yaml` 的全局默认；语义见 [docs/permission/README.md](../permission/README.md)。
 - **出站网络**（`exec.net`，默认 false）：虚拟机档决定 guest 网卡；本机档 Windows 授 `internetClient`、

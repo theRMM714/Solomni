@@ -103,7 +103,7 @@ secrets:                # 【可选】隐秘字段：字段名 → 注入该模�
   **没有额外的独立入口声明节**（有意少一层契约：声明了哪个工具，就是能直跑哪个）。
 - `userdata/` 是模块私有的**跨任务**状态区（缓存 / 记忆 / 配置）：git 忽略、数据不出工作区；载入模块时**确保它存在**（产品唯一的自动写盘，幂等；建不了不阻断加载、如实标注）；
   `userdata/` **恒可写**——模块目录默认只读时也照写（否则模块的跨任务状态区就废了）；
-  一次工作的产物写该 agent 的沙箱（工作副本）再用 `work_commit` 提交回共享区；文本、图片、视频与其它二进制都按字节处理，冲突用 `work_versions` 看三方、`work_resolve` 选边。不要塞进 `userdata/`。**密钥永不落在模块。**
+  一次工作的产物写该 agent 的沙箱（工作副本）再用 `work_commit` 提交回共享区；文本、图片、视频与其它二进制都按字节处理（内容流式读写、不整份进上下文；单文件有上限，超限会明确拒绝），冲突用 `work_versions` 看三方、`work_resolve` 选边。不要塞进 `userdata/`。**密钥永不落在模块。**
 - 模块损坏或 yaml 非法 → 不进清单，菜单少一项，永不崩溃。
 
 ## 二、模块与工具的身份
@@ -177,7 +177,7 @@ tools:
   模块作者仍应把工具写成只碰自己工作区的样子。
 - **工具看到的路径**：可读写的是该 agent 的私有沙箱（工作副本，**永远全权**）；模块目录**默认只读**
   （`module_write` 授权才整块可写，`<module>/userdata/` 恒可写）；共享区**主副本对 agent 只读**
-  （要改先 `work_pull` 拉进沙箱，改完 `work_commit`；冲突用 `work_versions` / `work_resolve`；提交白名单可限定"只准提交哪一块"，见 [docs/permission/README.md](docs/permission/README.md)）；
+  （要改先 `work_pull` 拉进沙箱，改完 `work_commit`；文本 / 图片 / 视频 / 二进制同一套字节规则，单文件有上限；冲突用 `work_versions` / `work_resolve`；提交白名单可限定"只准提交哪一块"，见 [docs/permission/README.md](docs/permission/README.md)）；
   **这些目录本身与它们的直接父目录可以判断存在性**（`exists` / `stat` 得到真实结果），所以"产物目录不存在就先建"这类写法在围栏里也能正常工作。
   写进未被授权的目录仍会失败——失败在**该失败的那一层**，不连累无关路径。内置工具清单与路径模型见 [docs/tools/tools-and-roles.md](docs/tools/tools-and-roles.md) 的「路径模型」。
 

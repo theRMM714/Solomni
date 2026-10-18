@@ -4,6 +4,7 @@
 //       → 外部工具 cwd / 绝对路径 / 自由格式补丁 / 正文+信封 / 原生多调用（协议形状由假供应商核对）
 //       → 工具级确认（与本通道同形）：生成中停下等 allow / deny / full；快照带那张卡（刷新能重建）；full 本轮不再问
 //       → MCP 常驻服务：模块声明的服务操作进工具面，经真进程调用，回执与本地计算的摘要对账。
+//       → 通用资产：PNG / MP4 上传 → work_pull → work_versions 媒体类型 / 指纹 / 大小，二进制产物走 work_commit。
 //       → 父死子亡：核心被强杀后，常驻服务的进程跟着消失（最后一步，核心一死就没有后续场景了）。
 //       → 代理模式：核心自己挑人、建子工作、转达，来源如实落档，停止即全停。
 const BASE = process.env.E2E_BASE || 'http://127.0.0.1:3099';
@@ -11,6 +12,7 @@ const BASE = process.env.E2E_BASE || 'http://127.0.0.1:3099';
 const MOCK_BASE = process.env.E2E_MOCK_BASE || 'http://127.0.0.1:8397';
 const fs = require('fs');
 const path = require('path');
+const { PNG_1X1_BASE64, MP4_FTYP_HEX } = require('../../fixtures/assets.js');
 // 夹具根：本目录下的 root/（隔离根：prompts/、.home、modules 都在里面）。
 const ROOT = path.join(__dirname, 'root');
 
@@ -766,6 +768,13 @@ async function approvePlan(name) {
   assert((await act(nameR, 'upload', {
     name: '乙.md', data_base64: Buffer.from('# 乙\n\n本地优先的检索：离线查更稳。\n', 'utf8').toString('base64'),
   })).status === 200, '投喂乙.md');
+  // 通用资产 fixture：1×1 PNG 与最小 MP4（ftyp 盒）走同一条上传 / pull / work_versions。
+  const PNG_1X1 = PNG_1X1_BASE64;
+  const MP4_FTYP = MP4_FTYP_HEX;
+  assert((await act(nameR, 'upload', { name: 'cover.png', data_base64: PNG_1X1 })).status === 200, '投喂 cover.png（真实 PNG）');
+  assert((await act(nameR, 'upload', {
+    name: 'clip.mp4', data_base64: Buffer.from(MP4_FTYP, 'hex').toString('base64'),
+  })).status === 200, '投喂 clip.mp4（MP4 ftyp 盒）');
   const corpusPath = path.join(workDir, 'corpus.jsonl');
   const reportPath = path.join(workDir, 'report.html');
   const indexPath = path.join(workDir, 'index.bin');
@@ -778,6 +787,18 @@ async function approvePlan(name) {
     console.log('   工具 ' + (r.module || '') + '.' + r.name + (r.ok ? ' 成功' : ' 失败') + ' → '
       + String(r.output || '').replace(/\s+/g, ' ').slice(0, 1500));
   }
+  // 图片 / 视频走同一套资产契约：work_versions 给媒体类型、指纹与大小，不冒充文本。
+  const versionRows = rowsR.filter((r) => r.name === 'work_versions');
+  const pngV = versionRows.find((r) => String(r.output || '').includes('cover.png'));
+  assert(!!pngV && pngV.ok === true && String(pngV.output).includes('image/png')
+    && String(pngV.output).includes('hash=') && String(pngV.output).includes('大小=')
+    && !String(pngV.output).includes('--- 主副本内容'),
+    'work_versions 对 PNG 给媒体类型 / 指纹 / 大小，不给文本', String((pngV && pngV.output) || '').replace(/\s+/g, ' ').slice(0, 400));
+  const mp4V = versionRows.find((r) => String(r.output || '').includes('clip.mp4'));
+  assert(!!mp4V && mp4V.ok === true && String(mp4V.output).includes('video/mp4')
+    && String(mp4V.output).includes('hash=') && String(mp4V.output).includes('大小=')
+    && !String(mp4V.output).includes('--- 主副本内容'),
+    'work_versions 对 MP4 给媒体类型 / 指纹 / 大小，不给文本', String((mp4V && mp4V.output) || '').replace(/\s+/g, ' ').slice(0, 400));
   // 失败时要能一眼分清"目录不在"与"在但没权限"——两者的修法完全不同。
   console.log('   共享区存在吗：' + fs.existsSync(workDir) + '（' + workDir + '）');
   assert(rowsR.some((r) => r.name === 'scan'), 'harvest.scan 真的跑了（python 工具进程）', JSON.stringify(rowsR.map((r) => r.name)));

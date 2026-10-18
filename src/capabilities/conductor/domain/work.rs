@@ -70,7 +70,7 @@ pub fn render_pull(r: &PullReport) -> String {
             lines.push(format!("…（共 {} 条）", r.conflicts.len()));
         }
         out.push_str(&format!(
-            "\n冲突（未覆盖）：{}——冲突不会因为把两边内容合进沙箱就消失：\n先用 work_versions 看基线 / 主副本 / 沙箱三方，人工合并后用 work_resolve（take=local）声明已解决；\n要放弃本地改动用 take=upstream。二进制冲突只能选边，不做自动合并。",
+            "\n冲突（未覆盖）：{}——冲突不会因为把两边内容合进沙箱就消失：\n先用 work_versions 看基线 / 主副本 / 沙箱三方；文本可人工合并后用 work_resolve（take=local）声明已解决，图片 / 视频 / 二进制不能合并，只能选边（take=upstream 取主副本，take=local 保留本地）。",
             lines.join("、")
         ));
     }
@@ -160,6 +160,10 @@ pub fn render_status(r: &StatusReport) -> String {
 /// 返回：基线 / 主副本 / 沙箱的指纹、大小与文本预览；二进制只给指纹与大小。
 pub fn render_versions(v: &VersionView) -> String {
     let mut out = format!("路径：{}", v.path);
+    match &v.media_type {
+        Some(t) => out.push_str(&format!("（媒体类型：{}，按扩展名提示）", t)),
+        None => out.push_str("（媒体类型：未识别）"),
+    }
     for (label, item) in [("基线", &v.base), ("主副本", &v.head), ("沙箱", &v.local)] {
         match item {
             None => out.push_str(&format!(
@@ -172,7 +176,9 @@ pub fn render_versions(v: &VersionView) -> String {
                 }
             )),
             Some(f) => {
-                let kind = if f.text.is_some() {
+                let kind = if f.too_large {
+                    "超过单文件上限"
+                } else if f.text.is_some() {
                     "文本"
                 } else {
                     "二进制/非 UTF-8"
@@ -181,6 +187,9 @@ pub fn render_versions(v: &VersionView) -> String {
                     "\n{}：{}，hash={}，大小={} 字节",
                     label, kind, f.hash, f.size
                 ));
+                if f.too_large {
+                    out.push_str("（只给指纹、大小与类型，不预览）");
+                }
                 if let Some(text) = &f.text {
                     let kb = VERSION_TEXT_LIMIT / 1024;
                     if f.truncated {
@@ -195,9 +204,10 @@ pub fn render_versions(v: &VersionView) -> String {
             }
         }
     }
-    out.push_str(
-        "\n提示：图片 / 视频 / 其它二进制只给指纹与大小；冲突时用 work_resolve 选边（take=upstream / local），不做自动合并。",
-    );
+    out.push_str(&format!(
+        "\n提示：文本预览最多 {} KiB；图片 / 视频 / 其它二进制只给指纹、大小与类型，不冒充文本；冲突只能显式选边：文本可人工合并后用 take=local，二进制 / 媒体只能 take=upstream 或 take=local，不做自动合并。",
+        VERSION_TEXT_LIMIT / 1024
+    ));
     out
 }
 
@@ -233,7 +243,7 @@ pub fn render_resolve(r: &ResolveReport) -> String {
         ));
     }
     out.push_str(
-        "\n下一步：take=local 保留的是沙箱当前内容，可直接 work_commit；take=upstream 已把沙箱对齐主副本，若没有其它改动就不必提交。",
+        "\n下一步：take=local 保留的是沙箱当前内容（文本合并结果或二进制选边结果），可直接 work_commit；take=upstream 已把沙箱对齐主副本，若没有其它改动就不必提交。",
     );
     out
 }
@@ -262,4 +272,73 @@ pub fn str_arg(args: &serde_json::Value, key: &str) -> Option<String> {
     args.get(key)
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::capabilities::workspace::api::FileVersion;
+
+    fn version(hash: &str, size: u64, text: Option<&str>, too_large: bool) -> FileVersion {
+        FileVersion {
+            hash: hash.to_string(),
+            size,
+            text: text.map(str::to_string),
+            truncated: false,
+            too_large,
+        }
+    }
+
+    /// 目的：回执按媒体类型说人话；二进制不给“内容”段，也不假装文本。
+    #[test]
+    fn versions_receipt_reports_media_type_and_never_previews_binary() {
+        let v = VersionView {
+            path: "clip.mp4".to_string(),
+            media_type: Some("video/mp4".to_string()),
+            base: None,
+            head: Some(version("h", 9, None, false)),
+            local: None,
+        };
+        let text = render_versions(&v);
+        assert!(text.contains("video/mp4"), "{}", text);
+        assert!(text.contains("二进制/非 UTF-8"), "{}", text);
+        assert!(
+            !text.contains("--- 主副本内容"),
+            "二进制不能给内容段：{}",
+            text
+        );
+    }
+
+    /// 目的：超过上限只给元数据，回执明确说“不预览”。
+    #[test]
+    fn versions_receipt_marks_oversize_metadata_only() {
+        let v = VersionView {
+            path: "big.bin".to_string(),
+            media_type: None,
+            base: None,
+            head: Some(version("h", 70_000_000, None, true)),
+            local: None,
+        };
+        let text = render_versions(&v);
+        assert!(text.contains("超过单文件上限"), "{}", text);
+        assert!(text.contains("不预览"), "{}", text);
+        assert!(!text.contains("--- 主副本内容"), "{}", text);
+    }
+
+    /// 目的：文本预览仍按上限显示，并在截断时说明。
+    #[test]
+    fn versions_receipt_keeps_text_preview_with_limit() {
+        let mut f = version("h", (VERSION_TEXT_LIMIT + 10) as u64, Some("开头"), false);
+        f.truncated = true;
+        let v = VersionView {
+            path: "note.md".to_string(),
+            media_type: Some("text/markdown".to_string()),
+            base: None,
+            head: Some(f),
+            local: None,
+        };
+        let text = render_versions(&v);
+        assert!(text.contains("--- 主副本内容"), "{}", text);
+        assert!(text.contains("只显示前"), "{}", text);
+    }
 }

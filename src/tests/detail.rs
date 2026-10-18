@@ -162,17 +162,13 @@ fn fs_work_store_round_trips_and_refuses_symlink_escapes() {
     assert!(s.read_commit(&store, 1).unwrap().is_none());
     assert!(s.read_object(&store, "nope").is_err());
 
-    // 文件原语：写要建父目录，读不到 = None，删除幂等，列目录相对 / 分隔。
-    assert_eq!(s.read_under(&sandbox, "sub/out.txt").unwrap(), None);
-    s.write_under(&sandbox, "sub/out.txt", b"hi").unwrap();
-    assert_eq!(
-        s.read_under(&sandbox, "sub/out.txt").unwrap().as_deref(),
-        Some(&b"hi"[..])
-    );
+    // 文件原语：列目录相对 / 分隔，删除幂等。
+    std::fs::create_dir_all(sandbox.join("sub")).expect("建子目录");
+    std::fs::write(sandbox.join("sub").join("out.txt"), b"hi").expect("写文件");
     assert_eq!(s.list(&sandbox).unwrap(), vec!["sub/out.txt"]);
     s.remove_under(&sandbox, "sub/out.txt").unwrap();
     s.remove_under(&sandbox, "sub/out.txt").unwrap();
-    assert_eq!(s.read_under(&sandbox, "sub/out.txt").unwrap(), None);
+    assert!(!sandbox.join("sub").join("out.txt").exists());
 
     // 对象 / 提交 / head / 拉取基线。
     s.write_object(&store, "h1", b"obj").unwrap();
@@ -232,9 +228,109 @@ fn fs_work_store_round_trips_and_refuses_symlink_escapes() {
         let outside = root.join("outside");
         std::fs::create_dir_all(&outside).expect("建根外目录");
         std::os::unix::fs::symlink(&outside, sandbox.join("link")).expect("造链接");
-        let err = s.write_under(&sandbox, "link/pwn.txt", b"x").unwrap_err();
+        let err = s
+            .copy_object_to_under(&store, "h1", &sandbox, "link/pwn.txt")
+            .unwrap_err();
         assert!(err.contains("符号链接") || err.contains("越过"), "{}", err);
         assert!(!outside.join("pwn.txt").exists(), "绝不能写进根外");
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 目的：真实适配器的资产流式原语：扫描不整份返回、对象写入校验指纹与上限、复制清临时文件。
+#[test]
+fn fs_work_store_streams_assets_and_rejects_oversize_or_mismatch() {
+    use crate::capabilities::workspace::api::content_hash;
+    use crate::capabilities::workspace::detail::fs_workstore::FsWorkStore;
+    use crate::capabilities::workspace::ports::WorkStore;
+
+    let root = scratch("fs-workstore-assets");
+    let shared = root.join("work");
+    let sandbox = root.join("a");
+    let store = root.join(".work");
+    std::fs::create_dir_all(&shared).expect("建共享区");
+    std::fs::create_dir_all(&sandbox).expect("建沙箱");
+    let s = FsWorkStore::new();
+
+    let data: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
+    std::fs::write(sandbox.join("clip.bin"), &data).expect("写大文件");
+    assert_eq!(
+        s.stat_under(&sandbox, "clip.bin").unwrap(),
+        Some(data.len() as u64)
+    );
+    assert_eq!(s.scan_under(&sandbox, "nope.bin", None).unwrap(), None);
+
+    let scanned = s.scan_under(&sandbox, "clip.bin", None).unwrap().unwrap();
+    assert_eq!(scanned.hash, content_hash(&data));
+    assert_eq!(scanned.size, data.len() as u64);
+    assert!(scanned.text.is_none(), "含 NUL 的字节流不给文本");
+    let hash = scanned.hash;
+
+    let size = s
+        .ingest_under(&store, &sandbox, "clip.bin", &hash, 1_000_000)
+        .unwrap();
+    assert_eq!(size, data.len() as u64);
+    assert_eq!(s.stat_object(&store, &hash).unwrap(), data.len() as u64);
+    let object = s.scan_object(&store, &hash, None).unwrap();
+    assert_eq!(object.hash, hash);
+    assert_eq!(object.size, data.len() as u64);
+
+    s.copy_object_to_under(&store, &hash, &shared, "copy/clip.bin")
+        .unwrap();
+    assert_eq!(
+        std::fs::read(shared.join("copy").join("clip.bin")).unwrap(),
+        data
+    );
+
+    // 指纹不符：不落对象，临时文件清掉。
+    let bad = content_hash(b"different");
+    let err = s
+        .ingest_under(&store, &sandbox, "clip.bin", &bad, 1_000_000)
+        .unwrap_err();
+    assert!(err.contains("改动"), "{}", err);
+    assert!(s.stat_object(&store, &bad).is_err());
+
+    // 上限：换一个新文件，确保不是“对象已存在”的短路。
+    std::fs::write(sandbox.join("big.bin"), [0u8; 32]).expect("写超限文件");
+    let big = content_hash(&[0u8; 32]);
+    let err = s
+        .ingest_under(&store, &sandbox, "big.bin", &big, 16)
+        .unwrap_err();
+    assert!(err.contains("上限"), "{}", err);
+    assert!(s.stat_object(&store, &big).is_err());
+
+    assert!(s.scan_object(&store, "nope", None).is_err());
+    assert!(s
+        .copy_object_to_under(&store, "nope", &shared, "x")
+        .is_err());
+
+    // 临时文件不留在对象目录或目标目录。
+    let leftovers = |dir: &std::path::Path| -> Vec<String> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .filter_map(|e| e.file_name().to_str().map(str::to_string))
+            .filter(|n| n.starts_with(".tmp-"))
+            .collect()
+    };
+    assert!(leftovers(&store.join("objects")).is_empty());
+    assert!(leftovers(&shared.join("copy")).is_empty());
+
+    #[cfg(unix)]
+    {
+        let outside = root.join("outside");
+        std::fs::create_dir_all(&outside).expect("建根外目录");
+        std::fs::write(outside.join("pwn.bin"), b"x").expect("写根外文件");
+        std::os::unix::fs::symlink(&outside, sandbox.join("link")).expect("造链接");
+        assert!(
+            s.scan_under(&sandbox, "link/pwn.bin", None).is_err(),
+            "扫描也不能越过符号链接"
+        );
+        assert!(
+            s.ingest_under(&store, &sandbox, "link/pwn.bin", &content_hash(b"x"), 999)
+                .is_err(),
+            "写对象也不能越过符号链接"
+        );
     }
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -263,6 +359,16 @@ fn fs_sys_io_reads_utf8_flags_lossy_and_truncation_and_creates_parents() {
     assert!(cut.cut, "超出上限要如实标注 cut");
     assert_eq!(cut.bytes, "你好，世界".len(), "bytes 仍是整个文件的字节数");
     assert!(cut.text.chars().count() < 6, "只读了开头：{}", cut.text);
+
+    // 大文件也只读开头：
+    let big = root.join("big.bin");
+    std::fs::write(&big, vec![b'a'; 100_000]).expect("造大文件");
+    let r = small.read(&big).expect("大文件截断读取成功");
+    assert!(
+        r.cut && r.bytes == 100_000 && r.text.len() == 3,
+        "{:?}",
+        r.text
+    );
 
     assert!(
         io.read(&root.join("nope.txt"))

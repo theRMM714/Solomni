@@ -1,13 +1,16 @@
 //! 入站能力面：**其它能力与呈现层只准用这里**（不许碰 `domain` / `ports`）。
 
+pub use crate::capabilities::workspace::domain::asset::{
+    media_hint, FileVersion, MAX_ASSET_BYTES, VERSION_TEXT_LIMIT,
+};
 pub use crate::capabilities::workspace::domain::hash::content_hash;
 pub use crate::capabilities::workspace::domain::workspace::{
     safe_file_name, AreaUsage, Place, Sandbox, Sandboxes, WorkFiles, WorkRoots, WorkUsage,
 };
 pub use crate::capabilities::workspace::domain::workstore::{
-    Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, FileVersion, GcReport,
-    PullReport, ResolveAction, ResolveEntry, ResolveReport, ResolveRequest, ResolveTake,
-    StatusEntry, StatusReport, VersionView, VERSION_TEXT_LIMIT,
+    Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, GcReport, PullReport,
+    ResolveAction, ResolveEntry, ResolveReport, ResolveRequest, ResolveTake, StatusEntry,
+    StatusReport, VersionView,
 };
 
 /// 工作区的**用例面**（`service.rs` 实现）：别的能力要工作区目录与版本化，走这里；

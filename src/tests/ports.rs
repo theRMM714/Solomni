@@ -370,6 +370,67 @@ fn work_store_double_round_trips_files_commits_index_and_objects() {
     assert_eq!(bad.lock(&store).unwrap_err(), "版本库不可用");
 }
 
+/// 目的：内存版本库替身与真实适配器同一份资产流式契约：扫描、写入校验、复制、超限与缺失。
+#[test]
+fn work_store_double_streams_assets_and_rejects_oversize_or_mismatch() {
+    use crate::capabilities::workspace::api::content_hash;
+    use crate::capabilities::workspace::ports::WorkStore;
+    let s = InMemoryWorkStore::new();
+    let root = abs(&["w", "a"]);
+    let other = abs(&["w", "b"]);
+    let store = abs(&["w", ".work"]);
+    let data: Vec<u8> = (0..10_000u32).map(|i| (i % 251) as u8).collect();
+    s.write_under(&root, "clip.bin", &data).unwrap();
+
+    assert_eq!(s.stat_under(&root, "clip.bin").unwrap(), Some(10_000));
+    assert_eq!(s.scan_under(&root, "nope", None).unwrap(), None);
+    let scanned = s.scan_under(&root, "clip.bin", None).unwrap().unwrap();
+    assert_eq!(scanned.hash, content_hash(&data));
+    assert!(scanned.text.is_none());
+    let hash = scanned.hash.clone();
+
+    assert_eq!(
+        s.ingest_under(&store, &root, "clip.bin", &hash, 20_000)
+            .unwrap(),
+        10_000
+    );
+    assert_eq!(s.stat_object(&store, &hash).unwrap(), 10_000);
+    assert_eq!(s.scan_object(&store, &hash, None).unwrap().hash, hash);
+    s.copy_object_to_under(&store, &hash, &other, "sub/clip.bin")
+        .unwrap();
+    assert_eq!(
+        s.scan_under(&other, "sub/clip.bin", None)
+            .unwrap()
+            .unwrap()
+            .hash,
+        hash
+    );
+
+    let bad = content_hash(b"different");
+    let err = s
+        .ingest_under(&store, &root, "clip.bin", &bad, 20_000)
+        .unwrap_err();
+    assert!(err.contains("改动"), "{}", err);
+    assert!(s.stat_object(&store, &bad).is_err());
+
+    s.write_under(&root, "big.bin", &[0u8; 32]).unwrap();
+    let big = content_hash(&[0u8; 32]);
+    let err = s
+        .ingest_under(&store, &root, "big.bin", &big, 16)
+        .unwrap_err();
+    assert!(err.contains("上限"), "{}", err);
+    assert!(s.stat_object(&store, &big).is_err());
+    assert!(s.scan_object(&store, "nope", None).is_err());
+    assert!(s.copy_object_to_under(&store, "nope", &other, "x").is_err());
+
+    let bad = InMemoryWorkStore::new().fail_with("版本库不可用");
+    assert_eq!(
+        bad.scan_under(&root, "x", None).unwrap_err(),
+        "版本库不可用"
+    );
+    assert_eq!(bad.stat_object(&store, "h").unwrap_err(), "版本库不可用");
+}
+
 // ---------- SysIo ----------
 
 #[test]

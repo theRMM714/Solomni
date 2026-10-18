@@ -3,6 +3,7 @@
 //! 写：一律 UTF-8，需要时建父目录，覆盖同名文件。
 
 use crate::capabilities::tools::ports::{DirEntry, FileRead, SysIo};
+use std::io::Read;
 use std::path::Path;
 
 pub struct FsSysIo {
@@ -20,10 +21,18 @@ impl Default for FsSysIo {
 
 impl SysIo for FsSysIo {
     fn read(&self, path: &Path) -> Result<FileRead, String> {
-        let bytes = std::fs::read(path).map_err(|e| format!("读取失败：{}", e))?;
-        let total = bytes.len();
+        // 先看大小、只读开头：大文件不因为一次 read 就整份进内存。
+        let total = std::fs::metadata(path)
+            .map(|m| m.len() as usize)
+            .map_err(|e| format!("读取失败：{}", e))?;
         let n = self.max_read_bytes.min(total);
-        let (text, lossy) = match std::str::from_utf8(&bytes[..n]) {
+        let mut bytes = Vec::with_capacity(n);
+        std::fs::File::open(path)
+            .map_err(|e| format!("读取失败：{}", e))?
+            .take(n as u64)
+            .read_to_end(&mut bytes)
+            .map_err(|e| format!("读取失败：{}", e))?;
+        let (text, lossy) = match std::str::from_utf8(&bytes[..]) {
             Ok(t) => (t.to_string(), false),
             Err(e) => {
                 if e.error_len().is_none() && n < total {
@@ -33,7 +42,7 @@ impl SysIo for FsSysIo {
                         false,
                     )
                 } else {
-                    (String::from_utf8_lossy(&bytes[..n]).into_owned(), true)
+                    (String::from_utf8_lossy(&bytes[..]).into_owned(), true)
                 }
             }
         };

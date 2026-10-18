@@ -27,6 +27,7 @@ use crate::capabilities::tools::ports::SystoolsSource;
 use crate::capabilities::tools::ports::{FileRead, SysIo};
 use crate::capabilities::vm::domain::packages::{Library, PackageManifest};
 use crate::capabilities::vm::ports::PackageSource;
+use crate::capabilities::workspace::domain::asset::{AssetScanner, FileVersion};
 use crate::capabilities::workspace::ports::{WorkStore, Workdirs};
 use crate::kernel::api::Tier;
 use crate::kernel::ports::ProcessRunner;
@@ -280,6 +281,19 @@ fn ws_key(root: &std::path::Path, rel: &str) -> String {
     format!("{}|{}", root.to_string_lossy(), rel)
 }
 
+fn scan_bytes(bytes: &[u8], preview: Option<usize>) -> FileVersion {
+    let mut scanner = AssetScanner::new(preview);
+    scanner.feed(bytes);
+    let scanned = scanner.finish();
+    FileVersion {
+        hash: scanned.hash,
+        size: scanned.size,
+        text: scanned.text,
+        truncated: scanned.truncated,
+        too_large: false,
+    }
+}
+
 impl InMemoryWorkStore {
     pub(crate) fn new() -> InMemoryWorkStore {
         InMemoryWorkStore::default()
@@ -320,13 +334,14 @@ impl InMemoryWorkStore {
         }
         Ok(())
     }
-}
 
-impl WorkStore for InMemoryWorkStore {
-    fn read_under(&self, root: &std::path::Path, rel: &str) -> Result<Option<Vec<u8>>, String> {
-        if let Some(m) = &self.fail {
-            return Err(m.clone());
-        }
+    /// 目的：测试直接查看/布置沙箱内容用；生产资产路径走 scan / ingest / copy。
+    pub(crate) fn read_under(
+        &self,
+        root: &std::path::Path,
+        rel: &str,
+    ) -> Result<Option<Vec<u8>>, String> {
+        self.enter("read_under")?;
         Ok(self
             .files
             .lock()
@@ -335,10 +350,13 @@ impl WorkStore for InMemoryWorkStore {
             .cloned())
     }
 
-    fn write_under(&self, root: &std::path::Path, rel: &str, bytes: &[u8]) -> Result<(), String> {
-        if let Some(m) = &self.fail {
-            return Err(m.clone());
-        }
+    /// 目的：测试直接布置沙箱内容用；生产写入走 ingest / copy。
+    pub(crate) fn write_under(
+        &self,
+        root: &std::path::Path,
+        rel: &str,
+        bytes: &[u8],
+    ) -> Result<(), String> {
         self.enter("write_under")?;
         self.files
             .lock()
@@ -346,7 +364,9 @@ impl WorkStore for InMemoryWorkStore {
             .insert(ws_key(root, rel), bytes.to_vec());
         Ok(())
     }
+}
 
+impl WorkStore for InMemoryWorkStore {
     fn remove_under(&self, root: &std::path::Path, rel: &str) -> Result<(), String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
@@ -367,6 +387,126 @@ impl WorkStore for InMemoryWorkStore {
             .collect();
         out.sort();
         Ok(out)
+    }
+
+    fn stat_under(&self, root: &std::path::Path, rel: &str) -> Result<Option<u64>, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        Ok(self
+            .files
+            .lock()
+            .expect("锁")
+            .get(&ws_key(root, rel))
+            .map(|v| v.len() as u64))
+    }
+
+    fn scan_under(
+        &self,
+        root: &std::path::Path,
+        rel: &str,
+        preview: Option<usize>,
+    ) -> Result<Option<FileVersion>, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        let files = self.files.lock().expect("锁");
+        Ok(files
+            .get(&ws_key(root, rel))
+            .map(|bytes| scan_bytes(bytes, preview)))
+    }
+
+    fn stat_object(&self, store: &std::path::Path, hash: &str) -> Result<u64, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.objects
+            .lock()
+            .expect("锁")
+            .get(&ws_key(store, hash))
+            .map(|v| v.len() as u64)
+            .ok_or_else(|| format!("对象不存在：{}", hash))
+    }
+
+    fn scan_object(
+        &self,
+        store: &std::path::Path,
+        hash: &str,
+        preview: Option<usize>,
+    ) -> Result<FileVersion, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.objects
+            .lock()
+            .expect("锁")
+            .get(&ws_key(store, hash))
+            .map(|bytes| scan_bytes(bytes, preview))
+            .ok_or_else(|| format!("对象不存在：{}", hash))
+    }
+
+    fn ingest_under(
+        &self,
+        store: &std::path::Path,
+        root: &std::path::Path,
+        rel: &str,
+        expected_hash: &str,
+        max_bytes: u64,
+    ) -> Result<u64, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.enter("ingest_under")?;
+        let bytes = self
+            .files
+            .lock()
+            .expect("锁")
+            .get(&ws_key(root, rel))
+            .cloned()
+            .ok_or_else(|| format!("沙箱里没有：{}", rel))?;
+        if bytes.len() as u64 > max_bytes {
+            return Err(format!(
+                "文件超过单文件上限（{} 字节 > {} 字节）：{}",
+                bytes.len(),
+                max_bytes,
+                rel
+            ));
+        }
+        let scanned = scan_bytes(&bytes, None);
+        if scanned.hash != expected_hash {
+            return Err(format!("文件在提交过程中被改动，请重试：{}", rel));
+        }
+        self.objects
+            .lock()
+            .expect("锁")
+            .entry(ws_key(store, expected_hash))
+            .or_insert(bytes);
+        Ok(scanned.size)
+    }
+
+    fn copy_object_to_under(
+        &self,
+        store: &std::path::Path,
+        hash: &str,
+        root: &std::path::Path,
+        rel: &str,
+    ) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.enter("copy_object_to_under")?;
+        let bytes = self
+            .objects
+            .lock()
+            .expect("锁")
+            .get(&ws_key(store, hash))
+            .cloned()
+            .ok_or_else(|| format!("对象不存在：{}", hash))?;
+        self.files
+            .lock()
+            .expect("锁")
+            .insert(ws_key(root, rel), bytes);
+        Ok(())
     }
 
     fn head(&self, store: &std::path::Path) -> Result<Option<u64>, String> {
@@ -518,6 +658,7 @@ impl WorkStore for InMemoryWorkStore {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
+        self.enter("read_object")?;
         self.objects
             .lock()
             .expect("锁")
@@ -1581,6 +1722,19 @@ pub(crate) fn test_workspace_store(
     store: Arc<dyn WorkStore + Send + Sync>,
 ) -> Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync> {
     Arc::new(crate::capabilities::workspace::service::WorkspaceService::new(dirs, store))
+}
+
+/// 目的：用指定的单文件上限装配 workspace 面（测试超限分支时避免造 64 MiB 数据）。
+pub(crate) fn test_workspace_store_with_max(
+    dirs: Arc<dyn Workdirs + Send + Sync>,
+    store: Arc<dyn WorkStore + Send + Sync>,
+    max: u64,
+) -> Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync> {
+    Arc::new(
+        crate::capabilities::workspace::service::WorkspaceService::with_max_asset_bytes(
+            dirs, store, max,
+        ),
+    )
 }
 
 /// 目的：VM 引擎的测试替身——不起真 VM，只记录 start / run / stop。

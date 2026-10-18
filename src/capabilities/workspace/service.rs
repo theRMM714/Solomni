@@ -7,9 +7,10 @@
 //! pull / commit 的三方比较与 resolve 的选边规则在 `domain::workstore`（纯逻辑），落盘在 `WorkStore` 端口后面。
 
 use crate::capabilities::workspace::api::{
-    Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, FileVersion, GcReport,
-    PullReport, ResolveAction, ResolveEntry, ResolveReport, ResolveRequest, ResolveTake,
+    media_hint, Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, FileVersion,
+    GcReport, PullReport, ResolveAction, ResolveEntry, ResolveReport, ResolveRequest, ResolveTake,
     StatusEntry, StatusReport, VersionView, WorkFiles, WorkRoots, WorkUsage, Workspace,
+    MAX_ASSET_BYTES, VERSION_TEXT_LIMIT,
 };
 use crate::capabilities::workspace::domain::hash::{content_hash, is_content_hash};
 use crate::capabilities::workspace::domain::workstore::{
@@ -32,20 +33,32 @@ const MAX_LOCAL_ONLY: usize = 50;
 pub struct WorkspaceService {
     dirs: Arc<dyn Workdirs + Send + Sync>,
     store: Arc<dyn WorkStore + Send + Sync>,
+    /// 单文件进入共享区的上限（生产用 `MAX_ASSET_BYTES`；测试可注入小值）。
+    max_asset_bytes: u64,
     /// 版本库写入的串行闸（**每个工作一把**）：不同工作互不相干、可并行；同一个工作的
     /// 提交 / 拉取 / 回档严格串行。它保护的是**版本库状态**（head、基线、对象），不是核心状态。
     version_gates: Mutex<BTreeMap<String, Arc<Mutex<()>>>>,
 }
 
 impl WorkspaceService {
-    /// 组合根专用。
+    /// 组合根专用：单文件上限取生产默认值。
     pub fn new(
         dirs: Arc<dyn Workdirs + Send + Sync>,
         store: Arc<dyn WorkStore + Send + Sync>,
     ) -> WorkspaceService {
+        WorkspaceService::with_max_asset_bytes(dirs, store, MAX_ASSET_BYTES)
+    }
+
+    /// 目的：用指定的单文件上限装配；生产走 `new`，测试用小值钉超限分支。
+    pub fn with_max_asset_bytes(
+        dirs: Arc<dyn Workdirs + Send + Sync>,
+        store: Arc<dyn WorkStore + Send + Sync>,
+        max_asset_bytes: u64,
+    ) -> WorkspaceService {
         WorkspaceService {
             dirs,
             store,
+            max_asset_bytes,
             version_gates: Mutex::new(BTreeMap::new()),
         }
     }
@@ -100,8 +113,7 @@ impl WorkspaceService {
             }
         }
         for (rel, hash) in &tree {
-            let bytes = store_port.read_object(store, hash)?;
-            store_port.write_under(shared, rel, &bytes)?;
+            store_port.copy_object_to_under(store, hash, shared, rel)?;
         }
         match target {
             Some(id) => store_port.set_head(store, id)?,
@@ -143,11 +155,12 @@ impl WorkspaceService {
         for ch in &commit.changes {
             match ch.kind {
                 ChangeKind::Add | ChangeKind::Modify => {
-                    let bytes = self.store.read_object(store, &ch.hash)?;
                     if commit.author == "user" {
+                        let bytes = self.store.read_object(store, &ch.hash)?;
                         self.dirs.write_work(work, &ch.path, &bytes)?;
                     } else {
-                        self.store.write_under(shared, &ch.path, &bytes)?;
+                        self.store
+                            .copy_object_to_under(store, &ch.hash, shared, &ch.path)?;
                     }
                 }
                 ChangeKind::Delete => {
@@ -241,6 +254,55 @@ impl WorkspaceService {
             .ok_or_else(|| format!("head 指向不存在的提交 {}", id))?;
         Ok((Some(id), commit.tree))
     }
+
+    /// 目的：把一条对象的版本视图收成 `FileVersion`；已知媒体类型或超限时不读内容。
+    fn version_of_object(
+        &self,
+        store: &Path,
+        hash: &str,
+        rel: &str,
+    ) -> Result<FileVersion, String> {
+        let size = self.store.stat_object(store, hash)?;
+        let too_large = size > self.max_asset_bytes;
+        let binary_hint = media_hint(rel).map(|h| h.binary).unwrap_or(false);
+        if too_large || binary_hint {
+            return Ok(FileVersion {
+                hash: hash.to_string(),
+                size,
+                text: None,
+                truncated: false,
+                too_large,
+            });
+        }
+        let mut version = self
+            .store
+            .scan_object(store, hash, Some(VERSION_TEXT_LIMIT))?;
+        if version.hash != hash {
+            return Err(format!("对象内容与指纹不符：{}", hash));
+        }
+        version.too_large = false;
+        Ok(version)
+    }
+
+    /// 目的：把沙箱本地文件收成 `FileVersion`；不存在 = None。
+    fn version_of_local(&self, sandbox: &Path, rel: &str) -> Result<Option<FileVersion>, String> {
+        let Some(size) = self.store.stat_under(sandbox, rel)? else {
+            return Ok(None);
+        };
+        let too_large = size > self.max_asset_bytes;
+        let binary_hint = media_hint(rel).map(|h| h.binary).unwrap_or(false);
+        let mut version = if too_large || binary_hint {
+            self.store
+                .scan_under(sandbox, rel, None)?
+                .ok_or_else(|| format!("沙箱里没有：{}", rel))?
+        } else {
+            self.store
+                .scan_under(sandbox, rel, Some(VERSION_TEXT_LIMIT))?
+                .ok_or_else(|| format!("沙箱里没有：{}", rel))?
+        };
+        version.too_large = too_large;
+        Ok(Some(version))
+    }
 }
 
 /// 冲突清单渲染成模型侧回执（核心自有工具的文案，与代理工具同一口径）。
@@ -250,15 +312,23 @@ fn render_conflicts(conflicts: &[ConflictAt]) -> String {
         out.push_str(&format!("\n- {}（{}）", c.path, c.kind.reason()));
     }
     out.push_str(
-        "\n先用 work_versions 看基线 / 主副本 / 沙箱三方，人工合并后再用 work_resolve（take=local）声明已解决；\n要放弃本地改动用 take=upstream。二进制冲突只能选边，不做自动合并。",
+        "\n先用 work_versions 看基线 / 主副本 / 沙箱三方：文本可人工合并后用 work_resolve（take=local）声明已解决，要放弃本地改动用 take=upstream；\n图片 / 视频 / 二进制不能合并，只能选边（take=upstream 取主副本，take=local 保留本地），不做自动合并。",
     );
     out
 }
 
-/// 读一个内容寻址对象并收成版本视图（调用方已持有工作锁）。
-fn object_version(store: &dyn WorkStore, root: &Path, hash: &str) -> Result<FileVersion, String> {
-    let bytes = store.read_object(root, hash)?;
-    Ok(FileVersion::from_bytes(hash.to_string(), &bytes))
+/// 把超限清单渲染成模型侧回执（点名路径、大小与上限，并给替代路径）。
+fn render_oversize(items: &[(String, u64)], limit: u64) -> String {
+    let mut out = format!(
+        "提交被拒（文件过大）：共享区单文件上限 {} 字节（{} MiB）。",
+        limit,
+        limit / 1024 / 1024
+    );
+    for (path, size) in items {
+        out.push_str(&format!("\n- {}：{} 字节", path, size));
+    }
+    out.push_str("\n共享区不做分块存储；请压缩或拆分后重试。");
+    out
 }
 
 impl Workspace for WorkspaceService {
@@ -309,13 +379,13 @@ impl Workspace for WorkspaceService {
         };
         for rel in want {
             let head_hash = tree.get(&rel).cloned().unwrap_or_default();
-            let local = self.store.read_under(&sandbox, &rel)?;
-            let local_hash = local.as_ref().map(|b| content_hash(b));
+            let local = self.store.scan_under(&sandbox, &rel, None)?;
+            let local_hash = local.as_ref().map(|v| v.hash.clone());
             let base = index.get(&rel).map(String::as_str);
             match pull_verdict(base, Some(&head_hash), local_hash.as_deref()) {
                 PullVerdict::Update => {
-                    let bytes = self.store.read_object(&store, &head_hash)?;
-                    self.store.write_under(&sandbox, &rel, &bytes)?;
+                    self.store
+                        .copy_object_to_under(&store, &head_hash, &sandbox, &rel)?;
                     index.insert(rel.clone(), head_hash);
                     report.updated.push(rel);
                 }
@@ -368,13 +438,25 @@ impl Workspace for WorkspaceService {
                 missing.join("、")
             ));
         }
-        let mut locals: BTreeMap<String, Option<Vec<u8>>> = BTreeMap::new();
+        let mut locals: BTreeMap<String, Option<String>> = BTreeMap::new();
+        let mut oversize: Vec<(String, u64)> = Vec::new();
         for rel in want {
-            let bytes = self
+            let size = self
                 .store
-                .read_under(&sandbox, &rel)?
+                .stat_under(&sandbox, &rel)?
                 .ok_or_else(|| format!("沙箱里没有：{}", rel))?;
-            locals.insert(rel, Some(bytes));
+            if size > self.max_asset_bytes {
+                oversize.push((rel, size));
+                continue;
+            }
+            let scanned = self
+                .store
+                .scan_under(&sandbox, &rel, None)?
+                .ok_or_else(|| format!("沙箱里没有：{}", rel))?;
+            locals.insert(rel, Some(scanned.hash));
+        }
+        if !oversize.is_empty() {
+            return Err(render_oversize(&oversize, self.max_asset_bytes));
         }
         for raw in &req.deletes {
             let rel = clean_rel(raw)?;
@@ -399,11 +481,13 @@ impl Workspace for WorkspaceService {
         for ch in &changes {
             match ch.kind {
                 ChangeKind::Add | ChangeKind::Modify => {
-                    let bytes = locals
-                        .get(&ch.path)
-                        .and_then(|v| v.as_ref())
-                        .ok_or_else(|| format!("内部错误：{} 没有本地内容", ch.path))?;
-                    self.store.write_object(&store, &ch.hash, bytes)?;
+                    self.store.ingest_under(
+                        &store,
+                        &sandbox,
+                        &ch.path,
+                        &ch.hash,
+                        self.max_asset_bytes,
+                    )?;
                     new_tree.insert(ch.path.clone(), ch.hash.clone());
                 }
                 ChangeKind::Delete => {
@@ -462,6 +546,12 @@ impl Workspace for WorkspaceService {
         let rel = clean_rel(path)?;
         if rel.contains('/') {
             return Err(format!("用户投喂只收顶层文件名：{}", rel));
+        }
+        if bytes.len() as u64 > self.max_asset_bytes {
+            return Err(render_oversize(
+                &[(rel.clone(), bytes.len() as u64)],
+                self.max_asset_bytes,
+            ));
         }
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
@@ -539,8 +629,8 @@ impl Workspace for WorkspaceService {
         };
         let mut entries: Vec<StatusEntry> = Vec::new();
         for rel in want {
-            let local = self.store.read_under(&sandbox, &rel)?;
-            let local_hash = local.as_ref().map(|b| content_hash(b));
+            let local = self.store.scan_under(&sandbox, &rel, None)?;
+            let local_hash = local.as_ref().map(|v| v.hash.clone());
             let state = status_of(
                 index.get(&rel).map(String::as_str),
                 tree.get(&rel).map(String::as_str),
@@ -593,23 +683,22 @@ impl Workspace for WorkspaceService {
         self.recover_locked(work, &shared, &store)?;
         let (_, tree) = self.head_tree(&store)?;
         let index: Index = self.store.read_index(&store, agent)?;
+        let media_type = media_hint(&rel).map(|h| h.mime.to_string());
         let base = match index.get(&rel) {
-            Some(hash) => Some(object_version(self.store.as_ref(), &store, hash)?),
+            Some(hash) => Some(self.version_of_object(&store, hash, &rel)?),
             None => None,
         };
         let head = match tree.get(&rel) {
-            Some(hash) => Some(object_version(self.store.as_ref(), &store, hash)?),
+            Some(hash) => Some(self.version_of_object(&store, hash, &rel)?),
             None => None,
         };
-        let local = self
-            .store
-            .read_under(&sandbox, &rel)?
-            .map(|bytes| FileVersion::from_bytes(content_hash(&bytes), &bytes));
+        let local = self.version_of_local(&sandbox, &rel)?;
         if base.is_none() && head.is_none() && local.is_none() {
             return Err(format!("基线、主副本与沙箱都没有这个文件：{}", rel));
         }
         Ok(VersionView {
             path: rel,
+            media_type,
             base,
             head,
             local,
@@ -651,14 +740,15 @@ impl Workspace for WorkspaceService {
         for rel in want {
             let head_hash = tree.get(&rel).cloned();
             let base_hash = index.get(&rel).cloned();
-            let local = self.store.read_under(&sandbox, &rel)?;
+            let local = self.store.scan_under(&sandbox, &rel, None)?;
+            let local_hash = local.as_ref().map(|v| v.hash.clone());
             let action = match req.take {
                 ResolveTake::Upstream => match head_hash {
                     Some(hash) => {
-                        let head_bytes = self.store.read_object(&store, &hash)?;
-                        let same = local.as_deref() == Some(head_bytes.as_slice());
+                        let same = local_hash.as_deref() == Some(hash.as_str());
                         if !same {
-                            self.store.write_under(&sandbox, &rel, &head_bytes)?;
+                            self.store
+                                .copy_object_to_under(&store, &hash, &sandbox, &rel)?;
                         }
                         let base_changed = base_hash.as_deref() != Some(hash.as_str());
                         if base_changed {
@@ -674,7 +764,7 @@ impl Workspace for WorkspaceService {
                         }
                     }
                     None => {
-                        let had_local = local.is_some();
+                        let had_local = local_hash.is_some();
                         if had_local {
                             self.store.remove_under(&sandbox, &rel)?;
                         }
