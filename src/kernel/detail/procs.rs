@@ -1,7 +1,8 @@
 //! 目的：长驻子进程的账与回收——谁在跑、属于谁、什么时候起的；核心没了也不留孤儿。
-//! 管：登记表（`.home/processes.json`）、父死子亡（Linux 内核信号 / macOS 守门进程 / Windows 作业对象）、存活探测与终止、启动时对账。
+//! 管：登记表（`.home/processes.json`）、父死子亡的接线与结论（Linux 内核信号 / macOS 守门进程 / Windows 作业对象）、
+//!   进程身份（Unix 命令行标记 / Windows 创建时间）、存活探测与终止、启动时对账。
 //! 不管：进程怎么起（各适配器自己 new Command）、业务语义（purpose / owner 只是标签，不参与决策）。
-//! 联动：vm 的引擎与共享适配器在起进程处登记；组合根启动时对一次账，`--doctor` 与 `/api/processes` 把它读出来；
+//! 联动：vm 的引擎、共享适配器与常驻服务的守门进程在起进程处登记；组合根启动时对一次账，`--doctor` 与 `/api/processes` 把它读出来；
 //!   macOS 的父死子亡由本文件的守门模式实现，入口层只做 argv 分发（`main.rs` / `guard::proc_watch`）。
 
 use std::path::{Path, PathBuf};
@@ -13,18 +14,25 @@ use std::sync::{Arc, Mutex};
 pub const WATCHDOG_FLAG: &str = "--proc-watchdog";
 
 /// 目的：一条登记——一个我们亲手起的长驻子进程。
-/// 约束：`marker` 要能在它的命令行里找到（Unix 对账时靠它确认"这个 pid 还是我们那一个"，避免误杀别人的进程）。
+/// 约束：身份按平台用**能证明的判据**——Unix 是命令行里的 `marker`，Windows 是进程创建时间 `created`；
+///   两者都用来确认"这个 pid 还是我们那一个"，避免误杀别人的进程。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Entry {
     pub pid: u32,
     /// 目的：起的时间（unix 秒）——只作呈现与"新旧"判断，不参与身份确认。
     pub since: u64,
-    /// 目的：用途标签（guest / share:virtiofs / share:smb）。
+    /// 目的：用途标签（guest / share:virtiofs / share:smb / resident）。
     pub purpose: String,
-    /// 目的：归属（租约 = 会话名；共享则记落点）。
+    /// 目的：归属（租约 = 会话名；共享则记落点；常驻服务记 `resident/<模块>/<服务>`）。
     pub owner: String,
     /// 目的：命令行里应出现的标记。
     pub marker: String,
+    /// 目的：身份（Windows：进程创建时间，FILETIME）；Unix 为 None（身份靠 `marker`）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<u64>,
+    /// 目的：父死子亡这一层没挂上的原因（None = 挂上了，或本平台由内核信号 / 守门进程兜）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guard_note: Option<String>,
 }
 
 /// 目的：启动对账的结果——死条目删掉几条、收掉几个孤儿、还有哪些"账上有且活着"的（如实报，不假装）。
@@ -96,9 +104,9 @@ impl ProcessBook {
         out
     }
 
-    /// 目的：启动时对账——已经不在的删掉；还在的按平台收掉或如实报出来。
-    /// 约束：Unix 上先确认命令行里有我们的标记才动手（pid 会被复用，误杀别人的进程是硬伤）；
-    ///   Windows 上有作业对象兜底（核心一死它就跟着死），所以只报不动手。
+    /// 目的：启动时对账——已经不在的删掉；还在的确认身份后收掉，认不出来就如实报出来。
+    /// 约束：误杀别人的进程是硬伤，所以先证明"这个 pid 还是我们那一个"：Unix 看命令行里的标记，
+    ///   Windows 看进程创建时间；两者都证明不了（账上没记身份）就只报不动手。
     pub fn reconcile(&self) -> Report {
         let list = self.list();
         let mut report = Report::default();
@@ -109,7 +117,29 @@ impl ProcessBook {
                 continue;
             }
             if cfg!(windows) {
-                report.alive.push(entry);
+                // Windows 没有便宜的命令行可读：身份靠创建时间。
+                // 账上没有创建时间的条目（更早的账）只报不动手——宁可不收，也不误杀别人的进程。
+                match (entry.created, created(entry.pid)) {
+                    (Some(expected), Some(actual)) if expected == actual => {
+                        if terminate(entry.pid).is_ok() {
+                            report.killed += 1;
+                            self.forget(entry.pid);
+                        } else {
+                            report.alive.push(entry);
+                        }
+                    }
+                    // 创建时间对不上：这个 pid 已经是别人的了，账上的条目作废。
+                    (Some(_), Some(_)) => {
+                        report.dropped += 1;
+                        self.forget(entry.pid);
+                    }
+                    // 对账前一瞬退掉了：当作死条目清掉。
+                    (Some(_), None) => {
+                        report.dropped += 1;
+                        self.forget(entry.pid);
+                    }
+                    (None, _) => report.alive.push(entry),
+                }
                 continue;
             }
             match cmdline(entry.pid) {
@@ -219,45 +249,39 @@ fn launcher() -> &'static std::sync::mpsc::Sender<Launch> {
     })
 }
 
+/// 目的：一把起进程之后要记下的事实：身份（Windows 创建时间）与父死子亡兜底的结论。
+pub struct Launched {
+    pub created: Option<u64>,
+    pub guard_note: Option<String>,
+}
+
+/// 目的：给刚起的子进程挂上"父死子亡"这一层（Windows 作业对象 / macOS 守门进程；Linux 在 spawn 之前由内核信号兜）。
+/// 约束：挂不上只如实报一条、**不阻断启动**——这层兜底缺失时核心被强杀会留下这个进程，
+///   所以把原因交给调用方记进账：`--doctor` 与界面据此把该条标成"会留孤儿"。
+pub fn attach(child: &Child, purpose: &str) -> Launched {
+    let guard_note = match bind(child).and_then(|()| watch(child)) {
+        Ok(()) => None,
+        Err(e) => {
+            eprintln!(
+                "[进程] {} 的父死子亡没挂上：{}（核心被强杀时这个进程会留下）",
+                purpose, e
+            );
+            Some(e)
+        }
+    };
+    Launched {
+        created: created(child.id()),
+        guard_note,
+    }
+}
+
 /// 目的：把刚起的子进程绑到本进程的作业对象上（Windows：核心一死，它们跟着死，不留孤儿）。
-/// 约束：作业对象只建一次（KILL_ON_JOB_CLOSE）；绑失败只返回错误，由调用方如实记一条、不阻断起 guest。
+/// 约束：作业对象只建一次（KILL_ON_JOB_CLOSE）；绑失败只返回错误，由 `attach` 如实报出来、不阻断启动。
 pub fn bind(child: &Child) -> Result<(), String> {
     #[cfg(windows)]
     {
         use std::os::windows::io::AsRawHandle;
-        use std::sync::OnceLock;
-        use windows_sys::Win32::System::JobObjects::{
-            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-            SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-        };
-        static JOB: OnceLock<usize> = OnceLock::new();
-        let job = *JOB.get_or_init(|| unsafe {
-            let h = CreateJobObjectW(std::ptr::null_mut(), std::ptr::null());
-            if h.is_null() {
-                return 0;
-            }
-            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
-            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-            let ok = SetInformationJobObject(
-                h,
-                JobObjectExtendedLimitInformation,
-                &info as *const _ as *const std::ffi::c_void,
-                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-            );
-            if ok == 0 {
-                return 0;
-            }
-            h as usize
-        });
-        if job == 0 {
-            return Err("建作业对象失败（子进程不会被作业兜底）".to_string());
-        }
-        if unsafe { AssignProcessToJobObject(job as *mut _, child.as_raw_handle() as *mut _) } == 0
-        {
-            return Err("把子进程绑进作业对象失败".to_string());
-        }
-        Ok(())
+        assign(child.as_raw_handle())
     }
     #[cfg(not(windows))]
     {
@@ -266,11 +290,88 @@ pub fn bind(child: &Child) -> Result<(), String> {
     }
 }
 
+/// 目的：本进程唯一的作业对象（0 = 建不起来；只建一次，核心一死句柄一关，里面的进程跟着死）。
+#[cfg(windows)]
+fn job_object() -> usize {
+    use std::sync::OnceLock;
+    use windows_sys::Win32::System::JobObjects::{
+        CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+    static JOB: OnceLock<usize> = OnceLock::new();
+    *JOB.get_or_init(|| unsafe {
+        let h = CreateJobObjectW(std::ptr::null_mut(), std::ptr::null());
+        if h.is_null() {
+            return 0;
+        }
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let ok = SetInformationJobObject(
+            h,
+            JobObjectExtendedLimitInformation,
+            &info as *const _ as *const std::ffi::c_void,
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        );
+        if ok == 0 {
+            return 0;
+        }
+        h as usize
+    })
+}
+
+/// 目的：把一个进程句柄绑进作业对象；系统按句柄的访问权决定成败（权不够就拒绝）。
+/// 约束：拆出来是为了让失败分支可注入——传一个只带查询权的句柄就能造出真实失败，不需要测试开关。
+#[cfg(windows)]
+pub(crate) fn assign(process: *mut std::ffi::c_void) -> Result<(), String> {
+    use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
+    let job = job_object();
+    if job == 0 {
+        return Err("建作业对象失败（子进程不会被作业兜底）".to_string());
+    }
+    if unsafe { AssignProcessToJobObject(job as *mut _, process) } == 0 {
+        return Err("把子进程绑进作业对象失败".to_string());
+    }
+    Ok(())
+}
+
+/// 目的：进程身份（Windows：创建时间 FILETIME）——对账时用它区分"还是我们那一个"与"pid 被复用"。
+/// 约束：Unix 没有同样便宜可信的读法，身份改由命令行标记证明，这里如实返回 None。
+pub fn created(pid: u32) -> Option<u64> {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{CloseHandle, FILETIME};
+        use windows_sys::Win32::System::Threading::{
+            GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+        unsafe {
+            let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if h.is_null() {
+                return None;
+            }
+            let mut birth: FILETIME = std::mem::zeroed();
+            let mut exit: FILETIME = std::mem::zeroed();
+            let mut kernel: FILETIME = std::mem::zeroed();
+            let mut user: FILETIME = std::mem::zeroed();
+            let ok = GetProcessTimes(h, &mut birth, &mut exit, &mut kernel, &mut user);
+            CloseHandle(h);
+            if ok == 0 {
+                return None;
+            }
+            Some(((birth.dwHighDateTime as u64) << 32) | birth.dwLowDateTime as u64)
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = pid;
+        None
+    }
+}
+
 /// 目的：macOS 的父死子亡——另起一个本程序的守门进程（`--proc-watchdog`）盯住核心，核心一死就收掉子进程组。
 /// 约束：Linux 由内核的 `PR_SET_PDEATHSIG` 兜、Windows 由作业对象兜，这里只对 macOS 生效；
 ///   守门进程自己**不**挂 PDEATHSIG（它要活过发起 spawn 的线程），进独立进程组（终端信号不会先把它带走），
-///   不继承环境（密钥与凭据不跟着它走）。起不来只如实报一条，不阻断起 guest——少的是这层兜底，不是启动。
-pub fn watch(child: &Child) {
+///   不继承环境（密钥与凭据不跟着它走）。起不来如实返回原因（由 `attach` 记一条），不阻断启动。
+pub fn watch(child: &Child) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         use std::os::unix::process::CommandExt;
@@ -288,19 +389,17 @@ pub fn watch(child: &Child) {
                     .process_group(0);
                 cmd.spawn().map_err(|e| format!("起不了守门进程（{}）", e))
             });
-        match started {
-            // 收尸：子进程或核心收场时守门进程就退出，别让它变成僵尸。
-            Ok(mut dog) => {
-                std::thread::spawn(move || {
-                    let _ = dog.wait();
-                });
-            }
-            Err(e) => eprintln!("[进程] {}：核心被强杀时这个子进程不会跟着死", e),
-        }
+        // 收尸：子进程或核心收场时守门进程就退出，别让它变成僵尸。
+        let mut dog = started?;
+        std::thread::spawn(move || {
+            let _ = dog.wait();
+        });
+        Ok(())
     }
     #[cfg(not(target_os = "macos"))]
     {
         let _ = child;
+        Ok(())
     }
 }
 
@@ -429,6 +528,8 @@ pub fn alive(pid: u32) -> bool {
 }
 
 /// 目的：收掉一个进程（先礼后兵：Unix 先 TERM 再 KILL；Windows 连整棵树）。
+/// 约束：Unix 先按**进程组**发信号（我们起的长驻子进程都是组长：`guard` 里 `process_group(0)`，
+///   组员含守门进程拉起的服务）；不是组长（测试里直接 spawn 的）就退回单 pid。
 pub fn terminate(pid: u32) -> Result<(), String> {
     #[cfg(windows)]
     {
@@ -446,17 +547,25 @@ pub fn terminate(pid: u32) -> Result<(), String> {
     }
     #[cfg(not(windows))]
     {
-        let pid_s = pid.to_string();
-        let _ = Command::new("kill").args(["-TERM", &pid_s]).status();
-        // 给它几秒落盘；还赖着就 KILL。
+        // 组号 = 组长 pid：组长自己也在这一组里，按组发就等于连它一起发。
+        let group = |sig: libc::c_int| unsafe { libc::kill(-(pid as i32), sig) == 0 };
+        let one = |sig: libc::c_int| {
+            unsafe { libc::kill(pid as i32, sig) };
+        };
+        if !group(libc::SIGTERM) {
+            one(libc::SIGTERM);
+        }
+        // 给它几秒落盘；组长还在、或组里还有不理会 TERM 的成员，就继续等。
         for _ in 0..30 {
-            if !alive(pid) {
+            if !alive(pid) && unsafe { libc::kill(-(pid as i32), 0) } != 0 {
                 return Ok(());
             }
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
-        let _ = Command::new("kill").args(["-KILL", &pid_s]).status();
-        if alive(pid) {
+        if !group(libc::SIGKILL) {
+            one(libc::SIGKILL);
+        }
+        if alive(pid) || unsafe { libc::kill(-(pid as i32), 0) } == 0 {
             return Err(format!("收不掉进程 {}", pid));
         }
         Ok(())
@@ -514,6 +623,8 @@ mod tests {
             purpose: "guest".to_string(),
             owner: "w-1".to_string(),
             marker: "solomni:w-1".to_string(),
+            created: None,
+            guard_note: None,
         });
         let reopened = ProcessBook::open(&home);
         assert_eq!(reopened.list(), book.list(), "落了盘就该读得回来");
@@ -544,6 +655,8 @@ mod tests {
             purpose: "guest".to_string(),
             owner: "w".to_string(),
             marker: "genuinely-not-in-any-cmdline".to_string(),
+            created: None,
+            guard_note: None,
         });
         let rep = book.reconcile();
         assert_eq!(rep.dropped, 1, "死条目要清掉");
@@ -562,14 +675,16 @@ mod tests {
             .expect("起一个长命令");
         let pid = child.id();
         // fork 到 exec 之间 /proc/<pid>/cmdline 还是测试进程自己的：必须等它真 exec 完再对账，
-        // 否则并行跑用例时会把活着的自己的进程当认不出的死条目丢掉（用例随机红）。
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while std::time::Instant::now() < deadline {
-            if cmdline(pid)
-                .map(|l| l.contains("sleep 30"))
-                .unwrap_or(false)
-            {
+        // 否则并行跑用例时会把活着的自己的进程当认不出的死条目丢掉；等不到就当场红并说清卡在哪一步。
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            let line = cmdline(pid).unwrap_or_default();
+            // exec 之后 argv 是 `sleep 30`（有的 sh 会先 fork 再 exec：那时是 `sh -c sleep 30`）。
+            if line.ends_with("sleep 30") {
                 break;
+            }
+            if std::time::Instant::now() >= deadline {
+                panic!("子进程 30 秒内没 exec 成 sleep 30（现在读到：{:?}）", line);
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
@@ -583,6 +698,8 @@ mod tests {
             purpose: "guest".to_string(),
             owner: "w".to_string(),
             marker: "sleep 30".to_string(),
+            created: None,
+            guard_note: None,
         });
         let rep = book.reconcile();
         assert_eq!(rep.killed, 1, "认出来就该收掉：{:?}", rep);
@@ -609,6 +726,8 @@ mod tests {
             purpose: "guest".to_string(),
             owner: "w".to_string(),
             marker: "definitely-not-in-this-cmdline".to_string(),
+            created: None,
+            guard_note: None,
         });
         let rep = book.reconcile();
         assert_eq!(rep.killed, 0, "认不出来就不该动手：{:?}", rep);
@@ -717,6 +836,169 @@ mod tests {
         // 等父测试强杀本进程：孙进程随 PDEATHSIG 一起没。
         std::thread::sleep(std::time::Duration::from_secs(30));
         let _ = terminate(child.id());
+        let _ = child.wait();
+    }
+
+    /// 目的：起进程这一处要把"父死子亡挂上没有"交回来，而不是丢掉——挂不上时账与 `--doctor` 靠它标出会留孤儿的条目。
+    /// 约束：Linux 由 spawn 之前的内核信号兜（这层本来就成立），Windows 靠作业对象；身份只在 Windows 由创建时间给出。
+    #[test]
+    fn attach_reports_the_deadman_state_and_the_identity() {
+        let mut child = Command::new(if cfg!(windows) { "cmd" } else { "sh" })
+            .args(if cfg!(windows) {
+                vec!["/C", "ping -n 20 127.0.0.1"]
+            } else {
+                vec!["-c", "sleep 20"]
+            })
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("起一个长命令");
+        let launched = attach(&child, "test");
+        assert!(
+            launched.guard_note.is_none(),
+            "本平台这层该挂得上：{:?}",
+            launched.guard_note
+        );
+        if cfg!(windows) {
+            assert!(
+                launched.created.is_some(),
+                "Windows 要交出创建时间（对账的身份）"
+            );
+        } else {
+            assert!(
+                launched.created.is_none(),
+                "Unix 的身份来自命令行标记，不是创建时间"
+            );
+        }
+        // 谁起的谁收尸：收尸前是僵尸，判活会失真（与本文件对那一条用例同一条路）。
+        let pid = child.id();
+        let waiter = std::thread::spawn(move || child.wait());
+        let _ = terminate(pid);
+        let _ = waiter.join();
+    }
+
+    /// 目的：Windows 上对账按**创建时间**确认身份后直接收掉上次留下的孤儿（作业对象兜底之外的那条路）。
+    #[cfg(windows)]
+    #[test]
+    fn reconcile_reclaims_a_leftover_it_identifies_by_creation_time() {
+        let dir = crate::tests::scratch("procs-windows-identity");
+        let mut child = Command::new("cmd")
+            .args(["/C", "ping -n 30 127.0.0.1"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("起一个长命令");
+        let launched = attach(&child, "test");
+        let pid = child.id();
+        // 谁起的谁收尸：被收掉的进程在收尸前是僵尸，判活会失真。
+        let waiter = std::thread::spawn(move || child.wait());
+        let book = ProcessBook::open(&dir.join(".home"));
+        book.record(Entry {
+            pid,
+            since: 1,
+            purpose: "guest".to_string(),
+            owner: "w".to_string(),
+            marker: String::new(),
+            created: launched.created,
+            guard_note: None,
+        });
+        let rep = book.reconcile();
+        assert_eq!(rep.killed, 1, "身份对得上就该收掉：{:?}", rep);
+        assert!(book.list().is_empty());
+        let _ = waiter.join();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 目的：Windows 上创建时间对不上 = pid 已被复用：作废条目，但**绝不动手**（误杀别人的进程是硬伤）。
+    #[cfg(windows)]
+    #[test]
+    fn reconcile_never_kills_a_pid_whose_creation_time_differs() {
+        let dir = crate::tests::scratch("procs-windows-reused");
+        let mut child = Command::new("cmd")
+            .args(["/C", "ping -n 30 127.0.0.1"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("起一个长命令");
+        let launched = attach(&child, "test");
+        let pid = child.id();
+        let book = ProcessBook::open(&dir.join(".home"));
+        book.record(Entry {
+            pid,
+            since: 1,
+            purpose: "guest".to_string(),
+            owner: "w".to_string(),
+            marker: String::new(),
+            created: launched.created.map(|t| t.wrapping_add(1)),
+            guard_note: None,
+        });
+        let rep = book.reconcile();
+        assert_eq!(rep.killed, 0, "认出来不是那一个就不该动手：{:?}", rep);
+        assert_eq!(rep.dropped, 1, "复用掉的条目要作废");
+        assert!(alive(pid), "那个进程要还活着");
+        let _ = terminate(pid);
+        let _ = child.wait();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 目的：账上没记身份（更早的账 / 读不到创建时间）时只报不动手——宁可不收，也不误杀。
+    #[cfg(windows)]
+    #[test]
+    fn reconcile_only_reports_an_entry_without_identity() {
+        let dir = crate::tests::scratch("procs-windows-no-identity");
+        let mut child = Command::new("cmd")
+            .args(["/C", "ping -n 30 127.0.0.1"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("起一个长命令");
+        let pid = child.id();
+        let book = ProcessBook::open(&dir.join(".home"));
+        book.record(Entry {
+            pid,
+            since: 1,
+            purpose: "guest".to_string(),
+            owner: "w".to_string(),
+            marker: String::new(),
+            created: None,
+            guard_note: None,
+        });
+        let rep = book.reconcile();
+        assert_eq!(rep.killed, 0, "没有身份就不动手：{:?}", rep);
+        assert_eq!(rep.alive.len(), 1, "只如实报出来");
+        assert!(alive(pid));
+        let _ = terminate(pid);
+        let _ = child.wait();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 目的：作业对象绑不上的失败分支能被造出来（只带查询权的句柄，系统会拒绝），
+    ///   起进程处据此如实报"没挂上"而不是静默——不引入测试开关，失败原因就是真实的那一条。
+    #[cfg(windows)]
+    #[test]
+    fn assign_rejects_a_handle_without_the_rights() {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+        let mut child = Command::new("cmd")
+            .args(["/C", "ping -n 30 127.0.0.1"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("起一个长命令");
+        let pid = child.id();
+        let h = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        assert!(!h.is_null(), "拿得到只带查询权的句柄");
+        let r = assign(h);
+        unsafe { CloseHandle(h) };
+        assert!(r.is_err(), "权不够的句柄不该绑得进去：{:?}", r);
+        let _ = terminate(pid);
         let _ = child.wait();
     }
 

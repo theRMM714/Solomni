@@ -67,6 +67,8 @@ pub fn doctor_json(root: &std::path::Path) -> serde_json::Value {
                 "purpose": e.purpose,
                 "owner": e.owner,
                 "since": e.since,
+                "orphanRisk": e.guard_note.is_some(),
+                "guardNote": e.guard_note,
             })
         })
         .collect();

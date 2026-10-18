@@ -100,12 +100,14 @@ fn mcp_adapter_talks_to_a_real_stdio_server() {
         return;
     };
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let book = crate::kernel::detail::procs::ProcessBook::open(&crate::tests::scratch("mcp-book"));
     let adapter = McpAdapter::new(
         Arc::new(ProcessSessions::new(
             exe,
             crate::tests::doubles::test_process_texts(),
             std::path::PathBuf::new(),
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            Arc::clone(&book),
         )) as Arc<dyn SessionHost + Send + Sync>,
         Arc::new(crate::kernel::ports::NoopLog),
     );
@@ -126,7 +128,15 @@ fn mcp_adapter_talks_to_a_real_stdio_server() {
     );
     let out = instance.call("echo", &json!({ "ping": 1 })).expect("调用");
     assert!(out.contains("ping"), "回显应含参数：{}", out);
+    let listed = book.list();
+    assert_eq!(listed.len(), 1, "守门进程起时进账：{:?}", listed);
+    assert_eq!(listed[0].purpose, "resident", "用途要标成常驻服务");
+    assert_eq!(
+        listed[0].guard_note, None,
+        "unix 由内核信号兜，不该报没挂上"
+    );
     instance.stop();
+    assert!(book.list().is_empty(), "收掉时要注销账上那条");
 }
 
 /// 模型侧工具面：已就绪服务的操作进原生声明与可用清单，调用路由到常驻服务能力。
@@ -350,11 +360,14 @@ fn residents_mcp_service_end_to_end() {
             options: BTreeMap::new(),
         },
     );
+    let book =
+        crate::kernel::detail::procs::ProcessBook::open(&crate::tests::scratch("mcp-chain-book"));
     let host: Arc<dyn SessionHost + Send + Sync> = Arc::new(ProcessSessions::new(
         exe,
         crate::tests::doubles::test_process_texts(),
         std::path::PathBuf::new(),
         Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        Arc::clone(&book),
     ));
     let residents: Arc<dyn ResidentOps + Send + Sync> = Arc::new(ResidentsService::new(
         vec![Arc::new(McpAdapter::new(
@@ -382,5 +395,12 @@ fn residents_mcp_service_end_to_end() {
         "{}",
         receipt.output
     );
+    let listed = book.list();
+    assert_eq!(listed.len(), 1, "守门进程起时进账：{:?}", listed);
+    assert_eq!(
+        listed[0].owner, "resident/m1/echo",
+        "归属要能指出哪个模块的哪个服务"
+    );
     residents.stop("m1", "echo").expect("停止");
+    assert!(book.list().is_empty(), "停止后要注销账上那条");
 }

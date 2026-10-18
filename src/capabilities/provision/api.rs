@@ -12,12 +12,16 @@ pub struct ProcInfo {
     pub pid: u32,
     /// 目的：还活着吗（账上有、进程没了 = 上次没收干净的死条目）。
     pub alive: bool,
-    /// 目的：用途（guest / share:virtiofs / share:smb）。
+    /// 目的：用途（guest / share:virtiofs / share:smb / resident）。
     pub purpose: String,
     /// 目的：归属（租约 = 会话名；共享则记落点）。
     pub owner: String,
     /// 目的：起的时间（unix 秒）。
     pub since: u64,
+    /// 目的：父死子亡这一层没挂上（核心被强杀时这条会留成孤儿）。
+    pub orphan_risk: bool,
+    /// 目的：没挂上的原因（正常时为空）。
+    pub guard_note: Option<String>,
 }
 
 /// 目的：一条依赖在本机的状态（给界面看：缺什么、装到哪、从哪来）。

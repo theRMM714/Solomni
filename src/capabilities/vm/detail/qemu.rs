@@ -244,9 +244,8 @@ impl VmEngine for QemuEngine {
         // 父死子亡（Unix）与独立进程组：核心被强杀时不许 QEMU 继续攥着镜像。
         procs::guard(&mut cmd);
         let child = procs::spawn(cmd).map_err(|e| format!("起不了 QEMU（{}）：{}", exe, e))?;
-        // 作业对象（Windows）/ 守门进程（macOS）：核心一死，它跟着死。接不上只如实少一层兜底，不阻断启动。
-        let _ = procs::bind(&child);
-        procs::watch(&child);
+        // 作业对象（Windows）/ 守门进程（macOS）：核心一死，它跟着死；挂不上只如实少一层兜底，不阻断启动。
+        let launched = procs::attach(&child, "guest");
         let pid = child.id();
         if let Some(book) = &self.book {
             book.record(Entry {
@@ -255,6 +254,8 @@ impl VmEngine for QemuEngine {
                 purpose: "guest".to_string(),
                 owner: spec.lease.clone(),
                 marker: format!("solomni:{}", spec.lease),
+                created: launched.created,
+                guard_note: launched.guard_note,
             });
         }
         drop(listener);

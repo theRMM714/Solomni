@@ -124,22 +124,6 @@
     `--fence-verify` / `--doctor` 的结论与真实行为一致；文档不再把 net 写成 Windows 上生效。
   blocked_by: 需要产品决定（放行出站 vs 明确恒断网）
 
-- id: kernel.job-bind-failure-silent
-  scope: global
-  level: T2
-  why: |
-    `procs::bind` 把子进程绑进 Windows 作业对象（KILL_ON_JOB_CLOSE，父死子亡的兜底）。四个调用点
-    （QEMU、SMB helper、virtiofsd、常驻服务守门进程）都用 `let _ =` 丢掉错误；绑定失败时父死子亡悄悄失效，
-    没有日志、没有 `--doctor` 事实，核心被强杀后可能留下孤儿。
-  how: |
-    1) 定失败语义：绑不上是拒绝启动（fail-closed）还是启动但如实告警并记进进程账 / `--doctor`；
-    2) 把 bind 的错误传到调用方（返回 Result 或收集进启动报告），给它一个可注入失败的测试面（端口或测试钩子）；
-    3) 同步 docs/kernel/README.md 的父死子亡接线说明与 docs/entry 的启动报告字段。
-  accept: |
-    Windows 上作业对象绑定失败可被观察到（日志 / `--doctor` / 拒绝启动，按定下的语义），
-    且有用例钉住；文档写明失败时的行为。
-  blocked_by: 需要产品决定（fail-closed 还是降级告警）
-
 - id: kernel.startup-fence-report-mismatch
   scope: global
   level: T3

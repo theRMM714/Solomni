@@ -28,7 +28,7 @@
 - 起服务时的围栏与「人直接跑模块工具」同一条口径：模块根递归只读、`userdata/` 可写，并挂上本次实例的会话租约（`lease`）。
 - 模块动作 `module.<id>.<service>.<op>` 转给 `ResidentOps::call`。
 - MCP stdio 适配器（`detail::McpAdapter`）：握手 / `tools/list` / `tools/call`；长驻会话走 kernel 的 `SessionHost`。
-- 父死子亡：`SessionHost::open` 走 `procs::guard` → `spawn` → `bind` → `watch`（Linux `PR_SET_PDEATHSIG` / macOS `--proc-watchdog` / Windows 作业对象）；核心被强杀不留服务进程。机制见 [kernel 的「长驻子进程的账与回收」](../kernel/README.md)。
+- 父死子亡：`SessionHost::open` 走 `procs::guard` → `spawn` → `attach`（Linux `PR_SET_PDEATHSIG` / macOS `--proc-watchdog` / Windows 作业对象）；核心被强杀不留服务进程。守门进程登记进进程账（`purpose = resident`，归属 `resident/<模块>/<服务>`）：会话收掉时注销，挂不上父死子亡时如实记进账，孤儿由启动对账按身份收掉。机制见 [kernel 的「长驻子进程的账与回收」](../kernel/README.md)。
 - 模型侧工具面：已就绪服务的操作以 `<服务>.<操作>` 进成员工具面，**参数契约原样声明**给模型，调用路由到 `ResidentOps::call`。
 - 崩溃检测与 `tools/list_changed` 刷新。
 - 适配器约束：`services.<名>.adapter` 只认组合根注册过的适配器（当前 `mcp`）；未知适配器在服务视图里如实报「未知适配器」并拒收启动。其它协议的适配器属于缺口，见 `tests/gaps.yaml` 的 `module.acp-adapter`。

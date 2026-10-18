@@ -1,5 +1,5 @@
 //! 目的：**长驻外部进程**的机制实现——拉起守门进程并保住它，按行收发，关闭时连根杀树。
-//! 管：`ProcessSessions`（实现 `SessionHost`）：守门进程协议、管道、进程组与父死子亡、环境白名单与隐私字段注入。
+//! 管：`ProcessSessions`（实现 `SessionHost`）：守门进程协议、管道、进程组与父死子亡、进程账的登记与注销、环境白名单与隐私字段注入。
 //! 不管：端口定义（在 `ports`）；按行协议的语义（MCP / ACP 在各自适配器里）。
 //! 联动：由入口层的组合根构造并注入适配器；一次性执行仍走 `process.rs` 的 `ProcTools`；父死子亡与进程组走 `procs.rs`。
 
@@ -13,6 +13,8 @@ use std::sync::Mutex;
 /// 目的：拉起长驻守门进程的实现（守门进程就是本程序自己的 --fence-run 模式）。
 pub struct ProcessSessions {
     exe: PathBuf,
+    /// 目的：长驻子进程的账——守门进程起时登记、收时注销，核心被强杀留下的孤儿由启动对账按它回收。
+    book: std::sync::Arc<procs::ProcessBook>,
     /// 提示词册里的围栏失败文案（只在 Windows 的拒绝路径用）。
     #[cfg(windows)]
     texts: std::sync::Arc<dyn crate::kernel::ports::ProcessTexts>,
@@ -28,18 +30,21 @@ pub struct ProcessSessions {
 }
 
 impl ProcessSessions {
-    /// 目的：组合根注入：当前可执行文件（守门进程就是它自己）、提示词册文案、产品私有区与写权限开关。
-    /// 约束：与一次执行（`ProcTools::new`）同一份装配事实；非 Windows 平台忽略后三项（显式忽略以免被误读成漏用）。
+    /// 目的：组合根注入：当前可执行文件（守门进程就是它自己）、提示词册文案、产品私有区、写权限开关与进程账。
+    /// 约束：与一次执行（`ProcTools::new`）同一份装配事实；非 Windows 平台忽略文案 / 私有区 / 写权限（显式忽略以免被误读成漏用）；
+    ///   账必须与组合根用**同一个**实例（账本是整份文件写回，两份会互相覆盖）。
     pub fn new(
         exe: PathBuf,
         texts: std::sync::Arc<dyn crate::kernel::ports::ProcessTexts>,
         home: PathBuf,
         write_allowed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        book: std::sync::Arc<procs::ProcessBook>,
     ) -> ProcessSessions {
         #[cfg(not(windows))]
         let _ = (texts, home, write_allowed);
         ProcessSessions {
             exe,
+            book,
             #[cfg(windows)]
             texts,
             #[cfg(windows)]
@@ -59,6 +64,30 @@ struct FencedSession {
     stdout: BufReader<ChildStdout>,
     /// 见过 EOF 或读错误 = 这个会话已经不可用了（崩溃检测的判据）。
     eof: bool,
+    /// 目的：账上那条的 pid——收掉时按它注销。
+    pid: u32,
+    /// 目的：同一份进程账（收掉时注销本会话那条）。
+    book: std::sync::Arc<procs::ProcessBook>,
+}
+
+/// 目的：常驻服务守门进程在账上的一条——身份与父死子亡的结论来自起进程那一刻的事实。
+fn resident_entry(agent: &str, pid: u32, since: u64, launched: procs::Launched) -> procs::Entry {
+    // 标记要在守门进程的命令行里找得到：agent 名出现在 FenceJob 的 JSON 里；没有 agent（不经过常驻服务的调用方）
+    // 就退回它一定是的那一段。
+    let marker = if agent.is_empty() {
+        "--fence-run".to_string()
+    } else {
+        agent.to_string()
+    };
+    procs::Entry {
+        pid,
+        since,
+        purpose: "resident".to_string(),
+        owner: agent.to_string(),
+        marker,
+        created: launched.created,
+        guard_note: launched.guard_note,
+    }
 }
 
 impl Session for FencedSession {
@@ -94,6 +123,14 @@ impl Session for FencedSession {
         if let Ok(mut child) = self.child.lock() {
             crate::kernel::detail::process::kill_tree(&mut child);
         }
+        self.book.forget(self.pid);
+    }
+}
+
+impl Drop for FencedSession {
+    /// 目的：会话被丢掉（正常关闭，或握手失败后丢了句柄）时同样连根收掉并注销——不留孤儿、不留死条目。
+    fn drop(&mut self) {
+        self.kill();
     }
 }
 
@@ -161,22 +198,76 @@ impl SessionHost for ProcessSessions {
         // 父死子亡与独立进程组：核心被强杀时，守门进程连同它拉起的服务不该留下。
         procs::guard(&mut cmd);
         let mut child = procs::spawn(cmd).map_err(|e| format!("服务进程启动失败：{}", e))?;
-        // 作业对象（Windows）/ 守门进程（macOS）：核心一死，它与服务一起收。
-        let _ = procs::bind(&child);
-        procs::watch(&child);
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| "无法取得服务进程 stdin".to_string())?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| "无法取得服务进程 stdout".to_string())?;
+        // 作业对象（Windows）/ 守门进程（macOS）：核心一死，它与服务一起收；挂不上只如实报一条并记进账。
+        let launched = procs::attach(&child, &spec.fence.agent);
+        let pid = child.id();
+        self.book.record(resident_entry(
+            &spec.fence.agent,
+            pid,
+            procs::now_ts(),
+            launched,
+        ));
+        // 取不到管道就没有会话可用：连刚起的守门进程与账上那条一起收掉，不留半步。
+        let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
+            crate::kernel::detail::process::kill_tree(&mut child);
+            self.book.forget(pid);
+            return Err("无法取得服务进程的 stdin / stdout".to_string());
+        };
         Ok(Box::new(FencedSession {
             child: Mutex::new(child),
             stdin,
             stdout: BufReader::new(stdout),
             eof: false,
+            pid,
+            book: std::sync::Arc::clone(&self.book),
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 目的：常驻服务守门进程在账上的那条——用途 / 归属 / 标记 / 兜底结论都来自起进程那一刻的事实。
+    #[test]
+    fn a_resident_guard_is_recorded_with_its_service_identity() {
+        let e = resident_entry(
+            "resident/m1/echo",
+            42,
+            7,
+            procs::Launched {
+                created: Some(11),
+                guard_note: Some("把子进程绑进作业对象失败".to_string()),
+            },
+        );
+        assert_eq!(e.purpose, "resident");
+        assert_eq!(e.owner, "resident/m1/echo");
+        assert_eq!(
+            e.marker, "resident/m1/echo",
+            "标记要在守门进程的命令行里找得到（对账靠它确认身份）"
+        );
+        assert_eq!(e.created, Some(11));
+        assert_eq!(
+            e.guard_note.as_deref(),
+            Some("把子进程绑进作业对象失败"),
+            "没挂上的原因要如实进账"
+        );
+    }
+
+    /// 目的：不经过常驻服务的调用方没有 agent 名时，标记退回守门进程一定有的那一段，免得对账认不出这个 pid。
+    #[test]
+    fn a_resident_guard_without_an_agent_still_has_a_marker() {
+        let e = resident_entry(
+            "",
+            43,
+            8,
+            procs::Launched {
+                created: None,
+                guard_note: None,
+            },
+        );
+        assert_eq!(e.marker, "--fence-run");
+        assert_eq!(e.owner, "");
+        assert!(e.guard_note.is_none());
     }
 }

@@ -79,9 +79,8 @@ impl ShareBackend for VirtioFsShare {
             // 先把套接字与子进程交给凭据：中途任一步失败，Drop 都会把它们一起收掉，不留残留。
             guard.paths.push(sock.clone());
             let child = spawn_virtiofsd(&exe, &m.host, &sock, m.read_only)?;
-            // 作业对象（Windows）/ 守门进程（macOS）：核心一死，守护进程跟着死；接不上只少一层兜底。
-            let _ = procs::bind(&child);
-            procs::watch(&child);
+            // 作业对象（Windows）/ 守门进程（macOS）：核心一死，守护进程跟着死；挂不上只少一层兜底。
+            let launched = procs::attach(&child, "share:virtiofs");
             if let Some(book) = &guard.book {
                 let sock_txt = sock.display().to_string();
                 book.record(Entry {
@@ -90,6 +89,8 @@ impl ShareBackend for VirtioFsShare {
                     purpose: "share:virtiofs".to_string(),
                     owner: m.guest.clone(),
                     marker: format!("--socket-path {}", sock_txt),
+                    created: launched.created,
+                    guard_note: launched.guard_note,
                 });
             }
             guard.children.push(child);

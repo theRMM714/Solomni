@@ -226,6 +226,8 @@ impl Provision for ProvisionService {
                 purpose: e.purpose,
                 owner: e.owner,
                 since: e.since,
+                orphan_risk: e.guard_note.is_some(),
+                guard_note: e.guard_note,
             })
             .collect())
     }

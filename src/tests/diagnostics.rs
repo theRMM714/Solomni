@@ -315,6 +315,8 @@ pub(crate) fn doctor_reports_the_recorded_processes() {
         purpose: "guest".to_string(),
         owner: "w-doctor".to_string(),
         marker: "solomni:w-doctor".to_string(),
+        created: None,
+        guard_note: Some("把子进程绑进作业对象失败".to_string()),
     });
     let doc = crate::diagnostics::doctor_json(&root);
     let procs = doc
@@ -334,6 +336,16 @@ pub(crate) fn doctor_reports_the_recorded_processes() {
         procs[0].get("alive").and_then(|v| v.as_bool()),
         Some(false),
         "进程早没了就要如实报 false"
+    );
+    assert_eq!(
+        procs[0].get("orphanRisk").and_then(|v| v.as_bool()),
+        Some(true),
+        "父死子亡没挂上的条目要标出来（这条会留成孤儿）"
+    );
+    assert_eq!(
+        procs[0].get("guardNote").and_then(|v| v.as_str()),
+        Some("把子进程绑进作业对象失败"),
+        "原因要原样报出来"
     );
     let _ = std::fs::remove_dir_all(&root);
 }

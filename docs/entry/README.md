@@ -26,7 +26,7 @@
 - 装配期失败一律打印 `[装配失败]` 并以 1 退出：登记处四份 yaml 读不了、提示词册缺文件 / 缺键、工具总表与角色表不自洽、模块清单装配失败、隐秘字段加载失败、核心执行线程起不来。日志文件起不来只降级到 stderr（进程继续）。
 - **启动对账**在会话开工前跑两份：围栏授权台账（`confine::reconcile`）与长驻子进程账（`ProcessBook::reconcile`，`.home/processes.json`）。
   - 围栏台账只回收归属明确已死的授权。
-  - 进程账清掉已不在的登记；Unix 上按命令行标记收掉上次留下的孤儿；Windows 只报不动手（作业对象兜底）。机制见 [kernel 的「长驻子进程的账与回收」](../kernel/README.md)。
+  - 进程账清掉已不在的登记，并按**能证明的身份**收掉上次留下的孤儿：Unix 看命令行标记，Windows 看进程创建时间；认不出身份的只报不动手（不误杀别人的进程）。机制见 [kernel 的「长驻子进程的账与回收」](../kernel/README.md)。
 - **围栏写权限**：`SOLOMNI_FENCE_WRITE=1/0` 优先，否则读设置里的 `fence_write`；它只决定 Windows 是否写目录 ACL（Linux / macOS 的围栏在守门进程里自足）。启动报告把「本机能力」与「本次实际」分开打印。
 - **常驻服务**按有效启停拉起（`ResidentOps::start_enabled`，进程级租约，不属于任何会话）。
 - **核心**搬到自己的执行线程（`ConductorHandle::spawn`）；呈现层只拿 `Ops` 与入站能力面。
@@ -68,7 +68,7 @@
 
 **进程账的呈现**：
 
-- `--doctor` 的 `processes` 字段列出账上每一条（`pid` / `alive` / `purpose` / `owner` / `since`）；覆盖范围见 [kernel 的「长驻子进程的账与回收」](../kernel/README.md)。
+- `--doctor` 的 `processes` 字段列出账上每一条（`pid` / `alive` / `purpose` / `owner` / `since` / `orphanRisk` / `guardNote`）；`orphanRisk` 为真 = 父死子亡没挂上（核心被强杀会留下它），`guardNote` 是原因。覆盖范围见 [kernel 的「长驻子进程的账与回收」](../kernel/README.md)。
 - Web 经 `GET /api/processes` 读同一份（`Provision::processes`）；响应形状以 [contracts.md](../presentation/contracts.md) 为准。
 
 ## 四、依赖图位置（由源码的 `::api` 引用推导）

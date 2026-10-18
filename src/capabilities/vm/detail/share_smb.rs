@@ -153,8 +153,7 @@ impl ShareBackend for SmbShare {
             .stderr(Stdio::null());
         let mut child = procs::spawn(cmd)
             .map_err(|e| format!("起不了 SMB helper（{}）：{}", exe.display(), e))?;
-        let _ = procs::bind(&child);
-        procs::watch(&child);
+        let launched = procs::attach(&child, "share:smb");
         if let Some(book) = &self.book {
             let first_mount = mounts
                 .first()
@@ -166,6 +165,8 @@ impl ShareBackend for SmbShare {
                 purpose: "share:smb".to_string(),
                 owner: first_mount.clone(),
                 marker: format!("--share s0={}", first_mount),
+                created: launched.created,
+                guard_note: launched.guard_note,
             });
         }
         let stdout = child

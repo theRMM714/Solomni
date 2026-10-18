@@ -1444,7 +1444,8 @@ function openSettingsModal() {
     api('GET', '/api/processes').then((r) => {
       const list = (r && r.procs) || [];
       procsBox.textContent = list.length ? list.map((p) =>
-        (p.alive ? '在跑' : '已退出（等对账清）') + ' · ' + p.purpose + ' · ' + p.owner + ' · pid ' + p.pid
+        (p.alive ? '在跑' : '已退出（等对账清）') + ' · ' + p.purpose + ' · ' + p.owner + ' · pid ' + p.pid +
+        (p.orphanRisk ? ' · 父死子亡未挂上（核心被强杀会留下）：' + (p.guardNote || '') : '')
       ).join('\n') : '没有产品起的长驻进程。';
     }).catch((e) => { procsBox.textContent = '读不到：' + e.message; });
     c.body.appendChild(save);

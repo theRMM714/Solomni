@@ -123,37 +123,39 @@
 
 账本（`.home/processes.json`，`ProcessBook`）：
 
-- 一条登记：`pid` / `since`（unix 秒，只作呈现与先后判断）/ `purpose` / `owner` / `marker`（命令行里应出现的标记）。
-- `purpose` 的当前取值：`guest`（QEMU）、`share:smb`、`share:virtiofs`。
-- `owner`：QEMU 记租约；共享 helper 记落点（首个挂载 / guest）。
+- 一条登记：`pid` / `since`（unix 秒，只作呈现与先后判断）/ `purpose` / `owner` / `marker`（命令行里应出现的标记）/ `created`（身份）/ `guard_note`（父死子亡没挂上的原因，空 = 挂上了）。
+- 身份按平台用**能证明的判据**：Unix 是命令行里的 `marker`，Windows 是进程创建时间 `created`（`GetProcessTimes`）。
+- `purpose` 的当前取值：`guest`（QEMU）、`share:smb`、`share:virtiofs`、`resident`（常驻服务的守门进程）。
+- `owner`：QEMU 记租约；共享 helper 记落点（首个挂载 / guest）；常驻服务记 `resident/<模块>/<服务>`。
 - 打开时读不懂就当空账；父目录不存在就补建。落盘用同目录临时文件 + rename。
 - 同一 pid 只留最新一条；`list` 按 `(since, pid)` 升序。
 
-父死子亡（`procs::guard` / `bind` / `watch`）：
+父死子亡（`procs::guard` / `bind` / `watch`，接线走 `attach`）：
 
 - Unix 起进程前开独立进程组（`process_group(0)`），收树不牵连核心。
 - Linux：`pre_exec` 里设 `PR_SET_PDEATHSIG=SIGKILL`，核心一死由内核收掉子进程。
-- macOS：`procs::watch` 另起本程序的守门进程 `--proc-watchdog <核心 pid> <子进程 pid>`；它用 kqueue 的 `EVFILT_PROC` / `NOTE_EXIT` 同时盯核心与子进程，核心先退就按进程组 `SIGKILL` 子进程。守门进程清空环境、独立进程组、不挂 PDEATHSIG；起不来只报一条，不阻断启动。
-- Windows：`procs::bind` 把子进程绑进一个 `KILL_ON_JOB_CLOSE` 作业对象；核心一死，作业关闭，子进程跟着死。绑失败只返回错误，调用方不阻断启动（这层兜底缺失时当前没有告警）。
+- macOS：`procs::watch` 另起本程序的守门进程 `--proc-watchdog <核心 pid> <子进程 pid>`；它用 kqueue 的 `EVFILT_PROC` / `NOTE_EXIT` 同时盯核心与子进程，核心先退就按进程组 `SIGKILL` 子进程。守门进程清空环境、独立进程组、不挂 PDEATHSIG；起不来如实返回原因，不阻断启动。
+- Windows：`procs::bind` 把子进程绑进一个 `KILL_ON_JOB_CLOSE` 作业对象；核心一死，作业关闭，子进程跟着死。
+- `procs::attach` 是起进程之后唯一的接线点（`bind` + `watch`，并读一次身份）：挂不上只打一条 `[进程]` 并把原因交回调用方，**不阻断启动**。调用方把它记进账的 `guard_note`——`--doctor` 与界面据此把该条标成「核心被强杀会留下孤儿」，下次启动对账再按身份收掉它。
 - Unix 上 `procs::spawn` 统一切到常驻的 `solomni-proc-launcher` 线程上 spawn：`PR_SET_PDEATHSIG` 绑的是**发起 spawn 的线程**；在 Web 每请求一线程或短命工作线程上直接 spawn，线程一退就会把 QEMU / 共享 helper / 常驻服务守门进程一并杀掉。
 
 启动对账（`ProcessBook::reconcile`，组合根在会话开工前跑一次）：
 
 - 进程已不在（`alive` 为假）：删掉条目。
-- Windows：还活着的只进报告的 `alive`，不动手（有作业对象兜底）。
-- Unix：读该 pid 的命令行；含该条 `marker` 才 `terminate`（TERM，最多等 3 秒，再 KILL）；不含就按 pid 已被复用作废条目。
+- Windows：读该 pid 的创建时间，与账上 `created` 对得上才 `taskkill /PID <pid> /T /F` 收掉；对不上按 pid 已被复用作废；账上没有 `created`（更早的账）只报不动手。
+- Unix：读该 pid 的命令行；含该条 `marker` 才 `terminate`（按进程组先 TERM，最多等 3 秒，再 KILL——守门进程拉起的服务跟着收）；不含就按 pid 已被复用作废条目。
 - 报告三项：`dropped` / `killed` / `alive`；有动静才打印一行。
 
 存活探测与终止：
 
 - 存活探测：Unix 用 `kill -0`；Windows 用 `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` + `GetExitCodeProcess`。
-- 终止：Unix 先 TERM 再 KILL；Windows 用 `taskkill /PID <pid> /T /F`。
+- 终止：Unix 按进程组先 TERM 再 KILL（不是组长的就发单 pid）；Windows 用 `taskkill /PID <pid> /T /F`。
 
 接线点：
 
-- QEMU 引擎、SMB helper、virtiofsd 在起进程处走 `guard` → `spawn` → `bind` → `watch`，并在 `ProcessBook` 里 `record`；销毁时 `forget`。
-- 常驻服务的守门进程（`src/kernel/detail/session.rs` 的 `ProcessSessions::open`）同样走 `guard` → `spawn` → `bind` → `watch`，但**不登记**进 `.home/processes.json`：它靠父死子亡收，不在启动对账的覆盖范围。
-- 观测：`--doctor` 的 `processes` 与 `GET /api/processes` 读同一份账本；响应形状见 [contracts.md](../presentation/contracts.md)。条目只覆盖虚拟机档的 QEMU 与共享 helper。
+- QEMU 引擎、SMB helper、virtiofsd 在起进程处走 `guard` → `spawn` → `attach`，并在 `ProcessBook` 里 `record`（带 `created` / `guard_note`）；销毁时 `forget`。
+- 常驻服务的守门进程（`src/kernel/detail/session.rs` 的 `ProcessSessions::open`）同样走 `guard` → `spawn` → `attach`，并登记进同一份账本（`purpose = resident`）：会话收掉时注销，核心被强杀留下的孤儿由启动对账按身份收掉。
+- 观测：`--doctor` 的 `processes` 与 `GET /api/processes` 读同一份账本，每条带 `orphanRisk` / `guardNote`；覆盖 QEMU、共享 helper 与常驻服务守门进程。
 
 ## 本目录
 

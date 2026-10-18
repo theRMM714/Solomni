@@ -342,6 +342,7 @@ fn main() {
                     std::sync::Arc::clone(&process_texts),
                     home.clone(),
                     std::sync::Arc::clone(&write_allowed),
+                    std::sync::Arc::clone(&book),
                 )),
                 std::sync::Arc::clone(&log),
             ))
