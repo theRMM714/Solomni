@@ -190,8 +190,10 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 
 ### CI（GitHub Actions）：跨平台与真机的唯一事实来源
 
-跨平台验收工作流是 `.github/workflows/test.yml`，**两种触发：PR（目标 `main`）与手动 `workflow_dispatch`**；
-`push` 不触发。PR 验收 PR head 提交（`SOURCE_SHA`），报告的 `sha` 因此等于 PR 头；手动派发验收 `github.sha`。
+跨平台验收工作流是 `.github/workflows/test.yml`，**两种触发：PR（目标 `main`，且已 Ready for review）与手动
+`workflow_dispatch`**；`push` 不触发。Draft PR 的 `opened` / `synchronize` 仍会创建 run，但所有 job 跳过
+（不耗 runner，也不发布 `ci-report`）；标 Ready（`ready_for_review`）才跑验收，之后的推送同样重跑。
+PR 验收 PR head 提交（`SOURCE_SHA`），报告的 `sha` 因此等于 PR 头；手动派发验收 `github.sha`。
 矩阵 `windows-latest / ubuntu-latest / macos-latest`（`fail-fast: false`，一个平台失败不影响另外两个出结论）。
 来自 fork 的 PR 照跑测试，但不发布 `ci-report`（token 只读）。
 
@@ -204,6 +206,7 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 
 `publish-report` 把两个 job 的产物（`test-report-<os>` 与 `e2e-report-<os>`）用 `tests/ci-merge.mjs` 合并成该平台
 唯一的 `test-report.json`，再交给 `tests/ci-publish.mjs` 发布。**任一半缺报告都补一条 `fail` 步骤**——"没跑到"不能读成"通过"。
+Draft 的 run 里两个依赖 job 都跳过，`publish-report` 也跳过：不拿空产物发报告。
 
 `workflow_dispatch` 的 `clean` 输入（`true`）跳过 `actions/cache` 按干净机器跑；PR 触发没有这个输入，缓存照用。缓存只覆盖**项目内**路径
 （`platform/ci/cargo`：借用 runner 自带 Rust 时的 `CARGO_HOME`，含 registry / git / 工具；以及 `target/debug`），
@@ -223,21 +226,22 @@ CI 借 runner 自带 Rust（`CARGO_HOME` / `SOLOMNI_CARGO_HOME` 指项目内）�
 | 三种语言的模块（python / node / C++）在真进程里跑 | 本机只代表本平台的解释器与编译器 | 三平台各跑一次真工具链路，indexer 现场编译 |
 | 发布前验收 | 本地通过 ≠ 三平台通过 | 三平台报告 + 三平台 `TEST-REPORT-ACCEPTED` |
 
-**什么时候手动派发**：PR 会自动跑一次 CI；手动派发只用于「没有 PR 也要单独验证某个分支或干净机器」。
+**什么时候手动派发**：Draft 阶段不自动跑 CI，需要他平台结论时手动派发；PR 标 Ready 后自动跑，不必再派发。
+手动派发还用于「没有 PR 的分支」与「干净机器复验」。
 判据只有一条——这次改动的验收结论**是否依赖本机之外**（其它平台能不能编译通过、真机围栏与解释器链路、TLS 出站）：
 
-- **依赖** → 走 PR（自动）或在分支上手动派发一次，并按下面的读法比对 `sha`；
-- **不依赖** → 不必额外手动派发；PR 照跑，但本地入口就是验收结论，不把 CI 的 `env-skip` 当通过。
+- **依赖** → Draft 期手动派发一次（或直接 Ready 让 PR 跑），并按下面的读法比对 `sha`；
+- **不依赖** → 本地入口就是验收结论；PR 标 Ready 时会照跑，但不把 CI 的 `env-skip` 当通过。
 - 用户明确要求派发时例外。
 
-**触发**：开 PR（目标 `main`）即自动跑；需要单独验证某个分支或干净机器时手动派发，用 `gh` 发起，`--ref` 指向要验证的分支
-（`main` 禁止直接 push，通常是 `development`）：
+**触发**：PR 标 Ready（或对 Ready 的 PR 推送）即自动跑；Draft 不跑。需要单独验证某个分支或干净机器时手动派发，
+用 `gh` 发起，`--ref` 指向要验证的分支（`main` 禁止直接 push，通常是 `development`）：
 
 ```text
 gh workflow run test.yml --ref <分支>
 ```
 
-按干净机器跑（跳过缓存）时加 `-f clean=true`。PR 触发不用另派发；触发后按下面的读法比对 `sha`。
+按干净机器跑（跳过缓存）时加 `-f clean=true`。Ready 的 PR 不必另派发；触发后按下面的读法比对 `sha`。
 
 **报告怎么读（硬规矩）**：只用 `git` 或 git CLI 拉 `ci-report` 分支，**禁止轮询网页**；时机无法确认时委托用户拉取（见 `AGENTS.md`）。
 
@@ -262,7 +266,7 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 > （包 SID 在令牌的 `TokenAppContainerSid` 字段里，不在组列表里），按它判会把生效的容器记成降级。
 > 容器是否生效用**行为对照**（授权落点写得进、父目录按名可用、父目录内容不可见），见 [levels.md](levels.md) 的 T4。
 
-**等多久再拉（推荐节奏）**：触发之后（PR 自动或手动派发）**先等 5 分钟**再拉 `ci-report`；若某个平台的 `meta.json` 的 `sha` 还对不上
+**等多久再拉（推荐节奏）**：触发之后（PR 标 Ready 或手动派发）**先等 5 分钟**再拉 `ci-report`；若某个平台的 `meta.json` 的 `sha` 还对不上
 （这次 run 没结束），**每次再等 2 分钟**重拉一次，直到三平台的 `sha` 都对得上，或确认 run 已失败/取消。
 等的是 git 拉取，不是网页轮询——`AGENTS.md` 禁止查网页；时间上拿不准（比如 runner 排队很久）就委托用户拉取。
 
@@ -270,10 +274,10 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 
 - Actions 注释：失败逐条 `::error::`（带断言原文），通过一条 `::notice::` 概览——匿名可读，不需要凭据；
 - `ci-report` 滚动分支：同一路径每次覆盖，**只留最近一次**（要历史看 Actions 产物 `test-report-<os>`）；
-- **PR 与手动派发的 run 都发布** `ci-report`（`push` 不触发）；PR 报告的 `sha` 是 PR head（fork PR 不发布，见上）；
+- **PR（Ready）与手动派发的 run 都发布** `ci-report`（`push` 不触发；Draft 的 run 全部跳过，不发布）；PR 报告的 `sha` 是 PR head（fork PR 不发布，见上）；
 - 报告发布失败（例如 token 权限不对）只是 `::warning::`，**不影响**测试本身的成败——所以"没读到报告"不等于"测试没过"。
 
-**本地与 CI 的关系**：本地入口是快速反馈；CI 在 PR 上自动跑，给出**跨平台与真机**的最终判据。
+**本地与 CI 的关系**：本地入口是快速反馈；CI 在 Ready 的 PR 上自动跑（Draft 期按需手动派发），给出**跨平台与真机**的最终判据。
 本次改动若结论依赖本机之外，则本地 + CI 两边都跑通、且 CI 的 `sha` 对得上才算验收完成；
 否则本地入口通过即验收完成（PR 的 CI 结果照读，`env-skip` 不算通过；判据见 [gaps-acceptance.md](gaps-acceptance.md)）。
 

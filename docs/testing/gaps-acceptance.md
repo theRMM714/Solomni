@@ -104,7 +104,7 @@ dependency-baseline.json # 依赖方向门禁的基线
 7. 失败时修代码或测试；环境不允许时记录 `env-skip`；未实现时建立 `gap`；不要把任何一种写成通过。
 8. 运行完整入口并阅读 `target/test-report.json`，确认报告与日志能解释结果。
 9. 测试完成后检查 `git status` 和 `.gitignore`，确保没有测试产物被跟踪。
-10. 需要 CI 的场景（见本文「验收清单」）：PR 会自动跑一次；需要单独验证某分支或干净机器时再按 [execution-ci.md](execution-ci.md) 用 `gh` 手动派发。拉 `ci-report` 后**先比对 `sha`**，再按平台核对 steps / envSkips。
+10. 需要 CI 的场景（见本文「验收清单」）：PR 标 Ready 后自动跑；Draft 阶段或没有 PR 时，按 [execution-ci.md](execution-ci.md) 用 `gh` 手动派发。拉 `ci-report` 后**先比对 `sha`**，再按平台核对 steps / envSkips。
 11. 只有当目标行为、质量门禁、当前平台缺口与（需要时）CI 三平台结论都符合要求，才可宣称本次测试验收完成。
 
 ## 十四、验收清单
@@ -126,7 +126,7 @@ dependency-baseline.json # 依赖方向门禁的基线
 未能回答的问题不是"以后再说"，而是测试设计或观察面仍不完整，应进入缺口账。
 
 **需要 CI 才算验收的场景**（其余按 [execution-ci.md](execution-ci.md) 的 CI 表）：改了平台专属代码（`kernel/detail/confine/` 或 `tests/<平台>/`）、
-改了平台围栏机制、改了 HTTPS/TLS 链路、改了只在其它平台编译的 `#[cfg]` 分支——**这些本机跑不出结论，必须走 CI（PR 自动触发，或手动派发）并比对 `sha`**。
+改了平台围栏机制、改了 HTTPS/TLS 链路、改了只在其它平台编译的 `#[cfg]` 分支——**这些本机跑不出结论，必须走 CI（Ready 的 PR 自动触发，或手动派发）并比对 `sha`**。
 
 反过来同样要守：**本机能跑出结论的改动不必为此额外手动派发 CI**。纯逻辑、文档、当前平台的用例，以及**质量门禁与卫生工具自身的改动**
-（本机跑的就是同一份 `node run-tests.js` / `run-hygiene.js`，本地入口即判据）都不构成额外派发的理由；PR 照跑一次，按结果读，但不把 `env-skip` 当通过。
+（本机跑的就是同一份 `node run-tests.js` / `run-hygiene.js`，本地入口即判据）都不构成额外派发的理由；PR 标 Ready 时照跑一次，按结果读，但不把 `env-skip` 当通过。
