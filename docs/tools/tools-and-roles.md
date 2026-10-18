@@ -163,8 +163,11 @@ roles:
 - **会话权限叠加在落点之上**：
   - 共享区读写受该 agent 的白名单 / 黑名单约束（默认整棵放行；白名单一出现就取代默认，黑名单只做减法）。
   - `work_commit` 只接受白名单内的相对路径（越界**整条拒绝**）；`work_pull` 只拉白名单内的路径。
+  - `work_versions` / `work_resolve` 走读作用域（它们不写共享主副本，提交仍由 `work_commit` 收口）。
   - 语义见 [docs/permission/README.md](../permission/README.md)。
-- **编码**：读严格 UTF-8（非法字节按替换字符呈现并如实标注——**本程序不猜编码**）；写一律 UTF-8。
+- **编码**：内置 `read` / `write` 读严格 UTF-8（非法字节按替换字符呈现并如实标注——**本程序不猜编码**），写一律 UTF-8；
+  `work_pull` / `work_commit` / `work_versions` / `work_resolve` 按**字节**处理，图片、视频与其它二进制不走 UTF-8 假设。
+  **二进制内容由模块工具或用户投喂产出**，内置 `write` 不是二进制通道；产出后用 `work_commit` 提交。
 - **用户也能引用**：
   - 输入框里用 `@` 挑文件：`@work:相对路径` / `@sandbox:<agent>/相对路径`（**给人用**）。
   - 核心按**本环境的写法**渲染成绝对路径之后才进转录与上下文：本机档 = 宿主真实路径；虚拟机档 = guest 写法（同一座路径桥，模块工具在 guest 里直接能用）。
@@ -192,8 +195,8 @@ prompts/
 | 角色 | 何时 | 工具面（`systools/roles.yaml`） |
 | --- | --- | --- |
 | `discussant` | 讨论阶段 | `say` `agree` `leave` `ask` `read` `list` `search` |
-| `executor` | 任务链节点（agent 子会话） | `read` `list` `write` `edit` `patch` `search` `work_pull` `work_commit` `work_status` `submit_report` + 该 agent 的模块工具 |
-| `solo` | 用户建的单 agent 工作 | `read` `list` `write` `edit` `patch` `search` `work_pull` `work_commit` `work_status` + 该 agent 的模块工具（**不发** `submit_report`） |
+| `executor` | 任务链节点（agent 子会话） | `read` `list` `write` `edit` `patch` `search` `work_pull` `work_commit` `work_status` `work_versions` `work_resolve` `submit_report` + 该 agent 的模块工具 |
+| `solo` | 用户建的单 agent 工作 | `read` `list` `write` `edit` `patch` `search` `work_pull` `work_commit` `work_status` `work_versions` `work_resolve` + 该 agent 的模块工具（**不发** `submit_report`） |
 | `planner` | 核心整理派发 | `read` `search` `plan` `slate` `verdict` |
 | `orchestrator` | 核心链中推进 | `read` `search` `node_verdict` `checklist` |
 | `core_proxy` | 核心代理（用户把决定权整块交给它，代用户决定） | `catalog_agents` `create_session` `send_session_message` `observe_session` `read_session_messages` `control_session` `read` `list` `search`（**不发**模块工具） |
@@ -224,8 +227,9 @@ prompts/
 **共享区是版本化工作区**：
 
 - 主副本 `work/` 对 agent 只读，agent 只写自己的沙箱（工作副本）。
-- `work_pull` / `work_commit` / `work_status` 三个**核心自有工具**做同步与查看。
-- 冲突按文件级三方比较判定，**整体拒绝并逐条点名**，不做自动合并（细则见 [workspace](../workspace/README.md) 与 [PRODUCT.md](../../PRODUCT.md)）。
+- `work_pull` / `work_commit` / `work_status` / `work_versions` / `work_resolve` 五个**核心自有工具**做同步、查看、三方比较与显式解决冲突。
+- 冲突按文件级三方比较判定，**整体拒绝并逐条点名**，不做自动合并；人工合并后用 `work_resolve` 选边（细则见 [workspace](../workspace/README.md) 与 [PRODUCT.md](../../PRODUCT.md)）。
+- 文本、图片、视频与其它二进制都按字节处理；二进制冲突只能显式选边。
 - 用户投喂是同一条提交路径里的**权威提交**（作者 = user）。
 
 - 工具面**按回合按身份注入**（总表不进提示词）；越权调用如实拒绝并落工具行；悬空引用由结构审查硬失败挡下。

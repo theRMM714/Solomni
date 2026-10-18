@@ -6,7 +6,7 @@
 
 ## 一、管什么 / 不管什么
 
-**管**：工作区与沙箱寻址（含越界判定）、建工作与上传、文件视图，以及**共享区版本化工作区**（内容寻址的提交记录、各 agent 的拉取基线、文件级三方比较与按提交点还原）。
+**管**：工作区与沙箱寻址（含越界判定）、建工作与上传、文件视图，以及**共享区版本化工作区**（内容寻址的提交记录、各 agent 的拉取基线、文件级三方比较、三方视图与显式冲突解决、按提交点还原）。
 
 **不管**：模块清单与 `module.yaml`（在 `modules`，本能力只消费它给的模块事实）、不执行工具（`tools`）、不写会话流水（`session`）、不决定谁能用哪些工具（`tools` 的角色表）。
 
@@ -15,7 +15,8 @@
 `api::Workspace`：
 
 - 目录与视图：`prepare` / **`discard`**（撤销一次准备：只删空目录，建会话失败时用）/ `work_has` / `files` / `usage` / `roots`。
-- 共享区版本化：`work_pull` / `work_commit` / `work_commit_user` / `work_status` / `work_restore` / `work_head` / `work_rewind_to` / `work_restore_point` / `work_discard_after`。
+- 共享区版本化：`work_pull` / `work_commit` / `work_commit_user` / `work_status` / `work_versions` / `work_resolve` / `work_restore` / `work_head` / `work_rewind_to` / `work_restore_point` / `work_discard_after`。
+- **三方视图与冲突解决**：`work_versions` 只看（文本预览有上限；图片/视频/二进制只给指纹与大小），`work_resolve` 显式选边——`take=upstream` 用主副本覆盖沙箱，`take=local` 保留本地并把基线推进到主副本；不做自动合并。
 - 提交记录带 `CommitAnchor(agent, line)`，回档据此按行精确定位。
 - 出站端口 `Workdirs` / **`WorkStore`**（版本库落盘：文件原语 + 内容寻址对象 + 提交记录 + 拉取基线 + 删提交 / 清 head）**只由 `service.rs` 持有**（R12）。
 

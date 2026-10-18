@@ -1,18 +1,23 @@
 //! 目的：共享区版本化工作区三个核心自有工具（`work_pull` / `work_commit` / `work_status`）的纯逻辑——
 //! 工具名、入参解析与回执拼装。
 //! 管：工具名常量与 `is_work_tool`、取参（`str_list` / `str_arg`）、三份回执的拼装。
-//! 不管：真正的拉取 / 提交 / 状态（走 `conductor::service::work_tools` → `workspace::api::Workspace`）；冲突与状态判定（在 `workspace`）。
+//! 不管：真正的拉取 / 提交 / 状态 / 三方视图 / 解决（走 `conductor::service::work_tools` → `workspace::api::Workspace`）；冲突与状态判定（在 `workspace`）。
 //! 联动：由本能力的 `service/` 调用；工具名与 `systools/tools.yaml` 同一份名单。
 
-use crate::capabilities::workspace::api::{ChangeKind, CommitReport, PullReport, StatusReport};
+use crate::capabilities::workspace::api::{
+    ChangeKind, CommitReport, PullReport, ResolveAction, ResolveReport, StatusReport, VersionView,
+    VERSION_TEXT_LIMIT,
+};
 
 pub const PULL: &str = "work_pull";
 pub const COMMIT: &str = "work_commit";
 pub const STATUS: &str = "work_status";
+pub const VERSIONS: &str = "work_versions";
+pub const RESOLVE: &str = "work_resolve";
 
 /// 目的：判定这个名字是不是共享区版本化的工具面（角色表 executor / solo 引用它们）。
 pub fn is_work_tool(name: &str) -> bool {
-    matches!(name, PULL | COMMIT | STATUS)
+    matches!(name, PULL | COMMIT | STATUS | VERSIONS | RESOLVE)
 }
 
 /// 回执里最多逐个列出的路径数（超出只说数量，不把整棵共享区灌进上下文）。
@@ -52,18 +57,28 @@ pub fn render_pull(r: &PullReport) -> String {
     }
     if !r.occupied.is_empty() {
         out.push_str(&format!(
-            "\n跳过（沙箱里已有未被跟踪的同名文件，未覆盖）：{}",
+            "\n跳过（沙箱里已有未被跟踪的同名文件，未覆盖）：{}——先用 work_versions 看主副本与本地，\n合并后用 work_resolve（take=local）登记；放弃本地改动用 take=upstream。",
             paths(&r.occupied)
         ));
     }
     if !r.conflicts.is_empty() {
+        let mut lines = Vec::new();
+        for c in r.conflicts.iter().take(MAX_LISTED) {
+            lines.push(format!("{}（{}）", c.path, c.kind.reason()));
+        }
+        if r.conflicts.len() > MAX_LISTED {
+            lines.push(format!("…（共 {} 条）", r.conflicts.len()));
+        }
         out.push_str(&format!(
-            "\n冲突（本地改了、上游也改了，未覆盖）：{}——先 read 主副本对应路径取上游版本，人工合进沙箱，再 commit。",
-            paths(&r.conflicts)
+            "\n冲突（未覆盖）：{}——冲突不会因为把两边内容合进沙箱就消失：\n先用 work_versions 看基线 / 主副本 / 沙箱三方，人工合并后用 work_resolve（take=local）声明已解决；\n要放弃本地改动用 take=upstream。二进制冲突只能选边，不做自动合并。",
+            lines.join("、")
         ));
     }
     if !r.missing.is_empty() {
-        out.push_str(&format!("\n主副本没有这些路径：{}", paths(&r.missing)));
+        out.push_str(&format!(
+            "\n主副本没有这些路径：{}——可能上游已删除；用 work_versions 看本地与基线，\n再用 work_resolve 选择 take=upstream（删本地）或 take=local（保留为新增）。",
+            paths(&r.missing)
+        ));
     }
     out
 }
@@ -123,12 +138,103 @@ pub fn render_status(r: &StatusReport) -> String {
             out.push_str(&format!("\n- {}：{}", e.path, e.state.as_str()));
         }
     }
+    if !r.local_only.is_empty() {
+        out.push_str(&format!(
+            "\n沙箱里未跟踪（还没拉取、也没提交）的文件：{}",
+            paths(&r.local_only)
+        ));
+        if r.local_only_truncated {
+            out.push_str("…（已截断，只列了一部分）");
+        }
+    }
     if !r.recent.is_empty() {
         out.push_str("\n最近提交：");
         for c in &r.recent {
             out.push_str(&format!("\n- {} {}：{}", c.id, c.author, c.message));
         }
     }
+    out
+}
+
+/// 目的：把 work_versions 的三方视图说成人能读的几行。
+/// 返回：基线 / 主副本 / 沙箱的指纹、大小与文本预览；二进制只给指纹与大小。
+pub fn render_versions(v: &VersionView) -> String {
+    let mut out = format!("路径：{}", v.path);
+    for (label, item) in [("基线", &v.base), ("主副本", &v.head), ("沙箱", &v.local)] {
+        match item {
+            None => out.push_str(&format!(
+                "\n{}：{}",
+                label,
+                if label == "基线" {
+                    "未拉取"
+                } else {
+                    "不存在"
+                }
+            )),
+            Some(f) => {
+                let kind = if f.text.is_some() {
+                    "文本"
+                } else {
+                    "二进制/非 UTF-8"
+                };
+                out.push_str(&format!(
+                    "\n{}：{}，hash={}，大小={} 字节",
+                    label, kind, f.hash, f.size
+                ));
+                if let Some(text) = &f.text {
+                    let kb = VERSION_TEXT_LIMIT / 1024;
+                    if f.truncated {
+                        out.push_str(&format!(
+                            "\n--- {}内容（只显示前 {} KiB，共 {} 字节）---\n{}",
+                            label, kb, f.size, text
+                        ));
+                    } else {
+                        out.push_str(&format!("\n--- {}内容 ---\n{}", label, text));
+                    }
+                }
+            }
+        }
+    }
+    out.push_str(
+        "\n提示：图片 / 视频 / 其它二进制只给指纹与大小；冲突时用 work_resolve 选边（take=upstream / local），不做自动合并。",
+    );
+    out
+}
+
+/// 目的：把 work_resolve 的结果说成人能读的几行。
+/// 返回：按动作分组的路径，以及下一步。
+pub fn render_resolve(r: &ResolveReport) -> String {
+    let mut out = format!(
+        "已按 take={} 解决 {} 条路径。",
+        r.take.as_str(),
+        r.entries.len()
+    );
+    for action in [
+        ResolveAction::WroteUpstream,
+        ResolveAction::RemovedLocal,
+        ResolveAction::Marked,
+        ResolveAction::Cleared,
+        ResolveAction::NoChange,
+    ] {
+        let list: Vec<String> = r
+            .entries
+            .iter()
+            .filter(|e| e.action == action)
+            .map(|e| e.path.clone())
+            .collect();
+        if !list.is_empty() {
+            out.push_str(&format!("\n{}：{}", action.as_str(), paths(&list)));
+        }
+    }
+    if !r.missing.is_empty() {
+        out.push_str(&format!(
+            "\n基线、主副本与沙箱都没有：{}",
+            paths(&r.missing)
+        ));
+    }
+    out.push_str(
+        "\n下一步：take=local 保留的是沙箱当前内容，可直接 work_commit；take=upstream 已把沙箱对齐主副本，若没有其它改动就不必提交。",
+    );
     out
 }
 

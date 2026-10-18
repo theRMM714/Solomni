@@ -300,6 +300,140 @@ pub fn pull_verdict(base: Option<&str>, head: Option<&str>, local: Option<&str>)
     }
 }
 
+/// 目的：一条路径某一方的版本视图（work_versions 用）。
+/// 约束：文本只给有上限的预览；二进制/非 UTF-8 只给指纹与大小，不冒充文本。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileVersion {
+    /// 目的：内容指纹。
+    pub hash: String,
+    /// 目的：内容字节数。
+    pub size: u64,
+    /// 目的：文本预览；二进制 / 非 UTF-8 为 None。
+    pub text: Option<String>,
+    /// 目的：文本预览是否因超过上限被截断。
+    pub truncated: bool,
+}
+
+/// 目的：单次文本预览上限（超出如实标注截断，不把大文件整块灌进上下文）。
+pub const VERSION_TEXT_LIMIT: usize = 16 * 1024;
+
+impl FileVersion {
+    /// 目的：从内容构造版本视图；文本按 UTF-8 判定，含 NUL 视为二进制。
+    pub fn from_bytes(hash: String, bytes: &[u8]) -> FileVersion {
+        let size = bytes.len() as u64;
+        let text = if bytes.contains(&0) {
+            None
+        } else {
+            std::str::from_utf8(bytes).ok().map(|s| {
+                if s.len() <= VERSION_TEXT_LIMIT {
+                    s.to_string()
+                } else {
+                    let mut end = VERSION_TEXT_LIMIT;
+                    while end > 0 && !s.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    s[..end].to_string()
+                }
+            })
+        };
+        let truncated = text
+            .as_ref()
+            .map(|t| t.len() < bytes.len())
+            .unwrap_or(false);
+        FileVersion {
+            hash,
+            size,
+            text,
+            truncated,
+        }
+    }
+}
+
+/// 目的：一条路径的三方版本：基线（上次拉取/提交）/ 主副本当前 / 沙箱本地。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VersionView {
+    /// 目的：共享区相对路径。
+    pub path: String,
+    /// 目的：基线版本；没拉取过 = None。
+    pub base: Option<FileVersion>,
+    /// 目的：主副本当前版本；主副本已删除 = None。
+    pub head: Option<FileVersion>,
+    /// 目的：沙箱本地版本；本地不存在 = None。
+    pub local: Option<FileVersion>,
+}
+
+/// 目的：解决冲突时的取法：取主副本，或保留本地并把基线推进到主副本。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolveTake {
+    Upstream,
+    Local,
+}
+
+impl ResolveTake {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ResolveTake::Upstream => "upstream",
+            ResolveTake::Local => "local",
+        }
+    }
+}
+
+/// 目的：一条路径被解决后实际发生了什么。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolveAction {
+    /// 目的：用主副本覆盖了沙箱（或写回了已删除的本地文件）。
+    WroteUpstream,
+    /// 目的：主副本已删除，删掉了沙箱里的本地文件。
+    RemovedLocal,
+    /// 目的：没有动文件，只把基线推进到主副本。
+    Marked,
+    /// 目的：主副本已删除，清掉了基线（本地文件保留时，下一步会成为新增）。
+    Cleared,
+    /// 目的：本来就已经一致，什么都没做。
+    NoChange,
+}
+
+impl ResolveAction {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ResolveAction::WroteUpstream => "用主副本覆盖沙箱",
+            ResolveAction::RemovedLocal => "删掉本地文件",
+            ResolveAction::Marked => "推进基线到主副本",
+            ResolveAction::Cleared => "清掉基线",
+            ResolveAction::NoChange => "无需改动",
+        }
+    }
+}
+
+/// 目的：一条路径的解决结果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolveEntry {
+    /// 目的：共享区相对路径。
+    pub path: String,
+    /// 目的：实际发生的动作。
+    pub action: ResolveAction,
+}
+
+/// 目的：work_resolve 的请求。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolveRequest {
+    /// 目的：要解决的路径（文件或文件夹）。
+    pub paths: Vec<String>,
+    /// 目的：取主副本还是保留本地。
+    pub take: ResolveTake,
+}
+
+/// 目的：work_resolve 的结果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolveReport {
+    /// 目的：本次使用的取法。
+    pub take: ResolveTake,
+    /// 目的：逐条路径的解决结果。
+    pub entries: Vec<ResolveEntry>,
+    /// 目的：请求了、但基线 / 主副本 / 沙箱三方都没有的路径。
+    pub missing: Vec<String>,
+}
+
 /// 提交点摘要（work_status 用）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CommitSummary {
@@ -323,15 +457,21 @@ impl From<&Commit> for CommitSummary {
 /// 一条路径在 agent 眼里的状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatusState {
-    /// 共享区有，但本 agent 没拉过。
+    /// 共享区有，但本 agent 没拉过，沙箱里也没有同名文件。
     NotPulled,
+    /// 目的：共享区有、本 agent 没拉过，但沙箱里已有同名且内容不同的文件（pull 会跳过）。
+    BothPresent,
     /// 拉过且本地没改、上游没动。
     Clean,
+    /// 目的：沙箱里有、基线与主副本都没有（下一次提交会成为新增）。
+    LocalOnly,
     /// 拉过之后本地改了。
     LocalModified,
     /// 拉过之后上游又动了。
     UpstreamMoved,
-    /// 本地改了、上游也动了。
+    /// 目的：上游删了，本地没有改过（本地可能还留着旧副本）。
+    UpstreamDeleted,
+    /// 本地改了、上游也动了（或一边删、一边改）。
     Conflict,
 }
 
@@ -339,9 +479,12 @@ impl StatusState {
     pub fn as_str(&self) -> &'static str {
         match self {
             StatusState::NotPulled => "未拉取",
+            StatusState::BothPresent => "未拉取（沙箱有同名且内容不同）",
             StatusState::Clean => "一致",
+            StatusState::LocalOnly => "本地新增（未跟踪）",
             StatusState::LocalModified => "本地有修改",
             StatusState::UpstreamMoved => "上游有更新",
+            StatusState::UpstreamDeleted => "上游已删除",
             StatusState::Conflict => "冲突",
         }
     }
@@ -357,8 +500,15 @@ pub struct StatusEntry {
 /// 一条路径在"基线 / 上游 / 本地"下的状态（只读展示用，与提交判定分开）。
 pub fn status_of(base: Option<&str>, head: Option<&str>, local: Option<&str>) -> StatusState {
     match (base, head) {
-        (None, Some(_)) => StatusState::NotPulled,
-        (None, None) => StatusState::Clean,
+        (None, None) => match local {
+            None => StatusState::Clean,
+            Some(_) => StatusState::LocalOnly,
+        },
+        (None, Some(h)) => match local {
+            None => StatusState::NotPulled,
+            Some(l) if l == h => StatusState::NotPulled,
+            Some(_) => StatusState::BothPresent,
+        },
         (Some(b), Some(h)) => match local {
             None => {
                 if b == h {
@@ -384,8 +534,8 @@ pub fn status_of(base: Option<&str>, head: Option<&str>, local: Option<&str>) ->
             }
         },
         (Some(b), None) => match local {
-            None => StatusState::Clean,
-            Some(l) if l == b => StatusState::UpstreamMoved,
+            None => StatusState::UpstreamDeleted,
+            Some(l) if l == b => StatusState::UpstreamDeleted,
             Some(_) => StatusState::Conflict,
         },
     }
@@ -404,8 +554,8 @@ pub struct PullReport {
     pub no_change: Vec<String>,
     /// 沙箱里已有未跟踪 / 无关的同名文件，未覆盖。
     pub occupied: Vec<String>,
-    /// 本地已改、上游也改了，未覆盖。
-    pub conflicts: Vec<String>,
+    /// 目的：本地已改、上游也改了，未覆盖；逐条带冲突类型。
+    pub conflicts: Vec<ConflictAt>,
     /// 主副本里没有这些路径。
     pub missing: Vec<String>,
 }
@@ -437,6 +587,10 @@ pub struct StatusReport {
     pub tree: Vec<String>,
     pub tree_truncated: bool,
     pub entries: Vec<StatusEntry>,
+    /// 目的：沙箱里有、基线与主副本都没有的路径（下一次提交会成为新增；有上限）。
+    pub local_only: Vec<String>,
+    /// 目的：`local_only` 是否被截断（如实标注，不假装列全）。
+    pub local_only_truncated: bool,
     /// 最近几条提交（新→旧）。
     pub recent: Vec<CommitSummary>,
 }
@@ -610,5 +764,37 @@ mod tests {
             status_of(Some("h1"), Some("h2"), Some("h3")),
             StatusState::Conflict
         );
+        assert_eq!(
+            status_of(None, Some("h1"), Some("h2")),
+            StatusState::BothPresent
+        );
+        assert_eq!(status_of(None, None, Some("h1")), StatusState::LocalOnly);
+        assert_eq!(
+            status_of(Some("h1"), None, None),
+            StatusState::UpstreamDeleted
+        );
+        assert_eq!(
+            status_of(Some("h1"), None, Some("h1")),
+            StatusState::UpstreamDeleted
+        );
+        assert_eq!(
+            status_of(Some("h1"), None, Some("h2")),
+            StatusState::Conflict
+        );
+    }
+
+    #[test]
+    fn file_version_previews_text_and_never_pretends_binary_is_text() {
+        let text = FileVersion::from_bytes("h1".to_string(), "你好".as_bytes());
+        assert_eq!(text.text.as_deref(), Some("你好"));
+        assert!(!text.truncated);
+
+        let binary = FileVersion::from_bytes("h2".to_string(), &[0, 159, 146, 150]);
+        assert!(binary.text.is_none(), "含 NUL 的二进制不能给文本");
+
+        let long = "a".repeat(VERSION_TEXT_LIMIT + 10);
+        let cut = FileVersion::from_bytes("h3".to_string(), long.as_bytes());
+        assert!(cut.truncated);
+        assert_eq!(cut.text.as_ref().map(String::len), Some(VERSION_TEXT_LIMIT));
     }
 }

@@ -7,7 +7,9 @@ use crate::capabilities::permission::api::{
     validate, Granularity, Permissions, PermissionsOverride,
 };
 use crate::capabilities::workspace::api::Place;
-use crate::tests::doubles::{abs, run_builtin, test_sandbox, InMemorySysIo};
+use crate::tests::doubles::{
+    abs, run_builtin, test_sandbox, test_workspace, InMemorySysIo, InMemoryWorkspace,
+};
 
 fn paths(v: &[&str]) -> Vec<String> {
     v.iter().map(|s| s.to_string()).collect()
@@ -292,6 +294,42 @@ fn work_commit_and_pull_are_scoped() {
     assert!(check_writable(&p, &[], &paths(&["src/a"])).is_err());
     // 任一条越界 → 整次拒绝。
     assert!(check_writable(&p, &paths(&["docs/a", "src/b"]), &[]).is_err());
+}
+
+/// 目的：work_versions / work_resolve 也按读作用域收口，不能拿它们绕过白名单。
+#[test]
+fn work_versions_and_resolve_are_scoped_by_read_permission() {
+    use crate::capabilities::conductor::service::work_tools::WorkHandler;
+    use crate::kernel::ports::{ToolCtx, ToolHandler};
+    let ws = test_workspace(std::sync::Arc::new(InMemoryWorkspace::new()));
+    let p = Permissions {
+        allow_read: paths(&["docs"]),
+        ..Default::default()
+    };
+    let h = WorkHandler::new(ws, "w", "a", p);
+    let ctx = ToolCtx {
+        work: "w",
+        agent: "a",
+        line: 1,
+    };
+    let v = h.run(&ctx, "work_versions", r#"{"path":"secret/x"}"#);
+    assert!(!v.ok && v.output.contains("读取被拒"), "{}", v.output);
+    let r = h.run(
+        &ctx,
+        "work_resolve",
+        r#"{"paths":["secret/x"],"take":"local"}"#,
+    );
+    assert!(!r.ok && r.output.contains("读取被拒"), "{}", r.output);
+
+    // 参数错误在权限检查之前收口：未知 take 与缺 path 都不执行。
+    let bad_take = h.run(
+        &ctx,
+        "work_resolve",
+        r#"{"paths":["docs/a"],"take":"nope"}"#,
+    );
+    assert!(!bad_take.ok && bad_take.output.contains("upstream 或 local"));
+    let no_path = h.run(&ctx, "work_versions", "{}");
+    assert!(!no_path.ok && no_path.output.contains("path"));
 }
 
 /// `full` 不确认任何工具；`ask` 只确认表里命中的（空表 = 不确认）。

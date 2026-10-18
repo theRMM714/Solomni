@@ -12,7 +12,8 @@ Solomni 是一个**跑在自己机器上的 agent 运行环境（AgentOS）**：
   同一个能力，人走界面用、agent 走契约用，共用同一份声明（契约见 [MODULE_SPEC.md](MODULE_SPEC.md)）。
 - **多个 agent 一起干一件活。** 每个 agent 有自己的沙箱（`session/<工作名>/<agent 实例名>/`），它同时是共享区的**工作副本**；
   共享区 `work/` 是**主副本、对 agent 只读**。要用的内容先 `work_pull` 拉进沙箱，改完 `work_commit` 提交回共享区。
-  提交按**文件级三方比较**判定：冲突整个拒绝并逐条点名，不会静默覆盖；任一提交点都能还原。
+  提交按**文件级三方比较**判定：冲突整个拒绝并逐条点名，不会静默覆盖；冲突后人工合并，用 `work_versions` 看三方、`work_resolve` 显式选边，不做自动合并。
+  文本、图片、视频与其它二进制都按字节处理；任一提交点都能还原。
   跨 agent 流动只有共享区与进入上下文的转录两条明路；"谁只写哪一块"由**会话权限**落实（见 [docs/permission/README.md](docs/permission/README.md)）。
 - **过程可审计。** 转录**只追加**；删除 / 恢复是显式动作，会真的重写流水。任意一行可「回档到此处」：
   **留档**（追加标记、折叠之前的行，字节全留）/ **删除**（真的截断）/ **恢复**（在标记处截断，撤掉留档期间的新工作）。
@@ -32,7 +33,7 @@ Solomni 是一个**跑在自己机器上的 agent 运行环境（AgentOS）**：
 
 - **三种形态**：单 agent / 小组协作 / 代理（决定权整块交给核心）。形态、流程与用户旅程见 [PRODUCT.md](PRODUCT.md)。
 - **模块即插即用**：`modules/` 里放一个带合法 `module.yaml` 的文件夹就出现，移走就消失——不注册、不编译、不重启（契约见 [MODULE_SPEC.md](MODULE_SPEC.md)）。
-- **会话与历史**：一个工作一个目录 `session/<工作名>/`；回档 / 留档 / 删除 / 恢复、转录回放、上下文压缩、共享区版本化（`work_pull` / `work_commit`）。
+- **会话与历史**：一个工作一个目录 `session/<工作名>/`；回档 / 留档 / 删除 / 恢复、转录回放、上下文压缩、共享区版本化（`work_pull` / `work_commit` / `work_versions` / `work_resolve`）。
 - **三重隔离**：内置工具越界拒绝 → 工具进程走守门进程（环境白名单 / 进程树 / 超时杀整棵树）→ 平台围栏（Windows AppContainer、Linux Landlock、macOS seatbelt）；装不上就如实报告能力等级。
 - **两档执行**：本机档（默认）与虚拟机档（模块工具在 guest 里跑）。虚拟机档按宿主 × 引擎 × guest × 通道 × 共享五轴可插；
   Linux（QEMU/KVM + virtiofs，缺 virtiofsd 时退 9p）与 Windows（QEMU/WHPX + SMB 实时共享，缺 smbd 时退 QGA 复制）已真机验收，macOS 未验（`VERIFIED_HOSTS` 只放开 Linux / Windows；缺 QEMU 取包与 Apple vz 引擎，见 [tests/macos/gaps.yaml](tests/macos/gaps.yaml)）；
@@ -101,7 +102,7 @@ tools:                       # 可选：模块工具表
 ```
 
 - 模块工具只有一条调用约定：**启动命令 + 参数 + stdin/stdout 回执**；长驻 MCP 服务写进 `services`。
-- 工具进程可达该 agent 的私有沙箱与它自己的模块目录；共享区主副本要先 `work_pull` / `work_commit`。`userdata/` 恒可写，模块目录默认只读。
+- 工具进程可达该 agent 的私有沙箱与它自己的模块目录；共享区主副本要先 `work_pull` / `work_commit`（冲突用 `work_versions` / `work_resolve`）。`userdata/` 恒可写，模块目录默认只读。
 - 能跑通就是合法模块；跑不通时核心如实报错，不猜、不兜底。
 
 ### 跑一遍演示

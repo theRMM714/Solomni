@@ -506,32 +506,43 @@ pub(crate) fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
         notes(&e3)
     );
 }
-/// 共享区版本化的三个工具：executor / solo 发到，讨论席与核心角色不发；
+/// 共享区版本化的五个工具：executor / solo 发到，讨论席与核心角色不发；
 /// 声明在工具总表里（角色表的悬空引用由结构审查兜底）。
 #[test]
 pub(crate) fn work_versioning_tools_are_granted_to_the_working_roles_only() {
     use crate::capabilities::tools::api::Tools;
     let tools = test_tools_svc();
     let book = tools.book();
-    for id in ["work_pull", "work_commit", "work_status"] {
+    let ids = [
+        "work_pull",
+        "work_commit",
+        "work_status",
+        "work_versions",
+        "work_resolve",
+    ];
+    for id in ids {
         assert!(book.contains_key(id), "{} 必须在工具总表里", id);
     }
     for role in ["executor", "solo"] {
-        let (ids, _) = tools.role_face(role);
-        for id in ["work_pull", "work_commit", "work_status"] {
-            assert!(ids.contains(&id.to_string()), "{} 该有 {}", role, id);
+        let (face, _) = tools.role_face(role);
+        for id in ids {
+            assert!(face.contains(&id.to_string()), "{} 该有 {}", role, id);
         }
     }
     for role in ["discussant", "core_proxy", "planner", "orchestrator"] {
-        let (ids, _) = tools.role_face(role);
+        let (face, _) = tools.role_face(role);
         assert!(
-            !ids.iter().any(|t| t.starts_with("work_")),
+            !face.iter().any(|t| t.starts_with("work_")),
             "{} 不该发共享区版本化工具：{:?}",
             role,
-            ids
+            face
         );
     }
-    // work_status 只读、可并发；pull / commit 会改状态，不并发。
-    assert!(book["work_status"].parallel);
-    assert!(!book["work_pull"].parallel && !book["work_commit"].parallel);
+    // 只读、无副作用的并发；pull / commit / resolve 会改状态，不并发。
+    assert!(book["work_status"].parallel && book["work_versions"].parallel);
+    assert!(
+        !book["work_pull"].parallel
+            && !book["work_commit"].parallel
+            && !book["work_resolve"].parallel
+    );
 }

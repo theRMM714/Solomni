@@ -6,7 +6,7 @@
 use super::now_ts;
 use crate::capabilities::conductor::domain::work as dw;
 use crate::capabilities::permission::api::Permissions;
-use crate::capabilities::workspace::api::{CommitRequest, Workspace};
+use crate::capabilities::workspace::api::{CommitRequest, ResolveRequest, ResolveTake, Workspace};
 use crate::kernel::api::ToolOutcome;
 use crate::kernel::ports::ToolHandler;
 use std::sync::Arc;
@@ -27,7 +27,7 @@ pub(crate) fn check_readable(permissions: &Permissions, paths: &[String]) -> Res
     for p in paths {
         if !permissions.read_ok(p) {
             return Err(format!(
-                "拉取被拒：{} 不在允许读取的路径内（允许：{}）",
+                "读取被拒：{} 不在允许读取的路径内（允许：{}）",
                 p,
                 permissions.read_roots_listing()
             ));
@@ -125,6 +125,56 @@ impl WorkHandler {
             Err(e) => outcome(false, e),
         }
     }
+
+    fn versions(&self, args: &serde_json::Value) -> ToolOutcome {
+        let path = match dw::str_arg(args, "path") {
+            Some(p) if !p.trim().is_empty() => p,
+            _ => {
+                return outcome(
+                    false,
+                    "work_versions 要给出一个文件路径（path）".to_string(),
+                )
+            }
+        };
+        if let Err(e) = check_readable(&self.permissions, std::slice::from_ref(&path)) {
+            return outcome(false, e);
+        }
+        match self.workspace.work_versions(&self.work, &self.agent, &path) {
+            Ok(v) => outcome(true, dw::render_versions(&v)),
+            Err(e) => outcome(false, e),
+        }
+    }
+
+    fn resolve(&self, args: &serde_json::Value) -> ToolOutcome {
+        let paths = match dw::str_list(args, "paths") {
+            Ok(p) => p,
+            Err(e) => return outcome(false, e),
+        };
+        let take = match dw::str_arg(args, "take").as_deref() {
+            Some("upstream") => ResolveTake::Upstream,
+            Some("local") => ResolveTake::Local,
+            Some(other) => {
+                return outcome(
+                    false,
+                    format!("take 只认 upstream 或 local，收到：{}", other),
+                )
+            }
+            None => {
+                return outcome(
+                    false,
+                    "work_resolve 要给出 take（upstream = 取主副本，local = 保留本地）".to_string(),
+                )
+            }
+        };
+        if let Err(e) = check_readable(&self.permissions, &paths) {
+            return outcome(false, e);
+        }
+        let req = ResolveRequest { paths, take };
+        match self.workspace.work_resolve(&self.work, &self.agent, &req) {
+            Ok(r) => outcome(true, dw::render_resolve(&r)),
+            Err(e) => outcome(false, e),
+        }
+    }
 }
 
 fn outcome(ok: bool, output: String) -> ToolOutcome {
@@ -145,6 +195,8 @@ impl ToolHandler for WorkHandler {
             dw::PULL => self.pull(&args),
             dw::COMMIT => self.commit(ctx.work, ctx.agent, ctx.line, &args),
             dw::STATUS => self.status(&args),
+            dw::VERSIONS => self.versions(&args),
+            dw::RESOLVE => self.resolve(&args),
             other => outcome(false, format!("未知的工作区工具：{}", other)),
         }
     }

@@ -478,7 +478,7 @@ pub(crate) fn session_config_reports_tier_missing_and_runtimes_dir() {
     assert!(core.session_config("没有这个会话").is_err());
 }
 
-// ---------- 共享区版本化工作区（work_pull / work_commit / work_status） ----------
+// ---------- 共享区版本化工作区（work_pull / work_commit / work_status / work_versions / work_resolve） ----------
 
 type WorkFace = Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync>;
 
@@ -502,6 +502,16 @@ fn commit_req(
         message: message.to_string(),
         time,
         line: 0,
+    }
+}
+
+fn resolve_req(
+    paths: &[&str],
+    take: crate::capabilities::workspace::api::ResolveTake,
+) -> crate::capabilities::workspace::api::ResolveRequest {
+    crate::capabilities::workspace::api::ResolveRequest {
+        paths: paths.iter().map(|s| s.to_string()).collect(),
+        take,
     }
 }
 
@@ -683,7 +693,8 @@ pub(crate) fn work_pull_never_clobbers_and_empty_commits_are_refused() {
     ws.work_commit_user("w", "note.md", USER_EDIT, 2, 0)
         .unwrap(); // 上游也改
     let r = ws.work_pull("w", "b", &["note.md".to_string()]).unwrap();
-    assert_eq!(r.conflicts, vec!["note.md"]);
+    assert_eq!(r.conflicts.len(), 1);
+    assert_eq!(r.conflicts[0].path, "note.md");
     assert_eq!(
         store.read_under(&sb_b, "note.md").unwrap().as_deref(),
         Some(B_VERSION)
@@ -747,6 +758,229 @@ pub(crate) fn work_delete_is_explicit_in_the_commit_request() {
     let st = ws.work_status("w", "a", &[]).unwrap();
     assert!(!st.tree.contains(&"note.md".to_string()));
 }
+/// 目的：work_versions 给文本预览、二进制只给指纹与大小；不把二进制冒充文本。
+#[test]
+pub(crate) fn work_versions_reports_text_and_binary_without_guessing() {
+    use crate::capabilities::workspace::ports::WorkStore;
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
+    let binary: &[u8] = &[0, 159, 146, 150, 0, 255];
+    ws.work_commit_user("w", "image.bin", binary, 2, 0).unwrap();
+    ws.work_pull("w", "a", &["note.md".to_string(), "image.bin".to_string()])
+        .unwrap();
+    let sb = sandbox_of(&ws, "w", "a");
+    store.write_under(&sb, "image.bin", &[0, 1, 2]).unwrap();
+
+    let v = ws.work_versions("w", "a", "image.bin").unwrap();
+    assert_eq!(v.path, "image.bin");
+    assert!(v.base.is_some() && v.head.is_some() && v.local.is_some());
+    let head = v.head.unwrap();
+    assert!(head.text.is_none(), "二进制不能给文本预览");
+    assert_eq!(head.size, binary.len() as u64);
+
+    let note = ws.work_versions("w", "a", "note.md").unwrap();
+    assert_eq!(note.head.unwrap().text.as_deref(), Some("v1"));
+    assert!(ws.work_versions("w", "a", "nope.bin").is_err());
+}
+
+/// 目的：两边都改时，人工合并后用 take=local 推进基线，提交成功且主副本拿到合并结果。
+#[test]
+pub(crate) fn work_resolve_local_marks_merged_result_and_commit_succeeds() {
+    use crate::capabilities::workspace::api::{ResolveAction, ResolveTake};
+    use crate::capabilities::workspace::ports::WorkStore;
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string(), "b".to_string()])
+        .unwrap();
+    ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
+    let sb_a = sandbox_of(&ws, "w", "a");
+    let sb_b = sandbox_of(&ws, "w", "b");
+    ws.work_pull("w", "a", &["note.md".to_string()]).unwrap();
+    ws.work_pull("w", "b", &["note.md".to_string()]).unwrap();
+    store.write_under(&sb_a, "note.md", b"a-change").unwrap();
+    ws.work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "a", 2))
+        .unwrap();
+    store.write_under(&sb_b, "note.md", b"merged").unwrap();
+    assert!(ws
+        .work_commit("w", "b", "w--b", &commit_req(&["note.md"], &[], "b", 3))
+        .is_err());
+
+    let rep = ws
+        .work_resolve("w", "b", &resolve_req(&["note.md"], ResolveTake::Local))
+        .unwrap();
+    assert_eq!(rep.entries[0].action, ResolveAction::Marked);
+    let commit = ws
+        .work_commit("w", "b", "w--b", &commit_req(&["note.md"], &[], "合并", 4))
+        .unwrap();
+    assert_eq!(commit.changes[0].path, "note.md");
+    assert_eq!(
+        store
+            .read_under(&shared_of(&ws, "w"), "note.md")
+            .unwrap()
+            .as_deref(),
+        Some(&b"merged"[..])
+    );
+}
+
+/// 目的：take=upstream 用主副本覆盖本地；覆盖后与主副本一致，不需要再提交。
+#[test]
+pub(crate) fn work_resolve_upstream_overwrites_local_and_then_is_clean() {
+    use crate::capabilities::workspace::api::{ResolveAction, ResolveTake};
+    use crate::capabilities::workspace::domain::workstore::StatusState;
+    use crate::capabilities::workspace::ports::WorkStore;
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string(), "b".to_string()])
+        .unwrap();
+    ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
+    let sb_a = sandbox_of(&ws, "w", "a");
+    let sb_b = sandbox_of(&ws, "w", "b");
+    ws.work_pull("w", "a", &["note.md".to_string()]).unwrap();
+    ws.work_pull("w", "b", &["note.md".to_string()]).unwrap();
+    store.write_under(&sb_a, "note.md", b"a-change").unwrap();
+    ws.work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "a", 2))
+        .unwrap();
+    store.write_under(&sb_b, "note.md", b"b-change").unwrap();
+
+    let rep = ws
+        .work_resolve("w", "b", &resolve_req(&["note.md"], ResolveTake::Upstream))
+        .unwrap();
+    assert_eq!(rep.entries[0].action, ResolveAction::WroteUpstream);
+    assert_eq!(
+        store.read_under(&sb_b, "note.md").unwrap().as_deref(),
+        Some(&b"a-change"[..])
+    );
+    let st = ws.work_status("w", "b", &[]).unwrap();
+    assert_eq!(st.entries[0].state, StatusState::Clean);
+    assert!(ws
+        .work_commit("w", "b", "w--b", &commit_req(&["note.md"], &[], "noop", 3))
+        .unwrap_err()
+        .contains("没有可提交"));
+}
+
+/// 目的：上游删文件时，take=upstream 删本地并清基线；take=local 清基线、让本地成为新增。
+#[test]
+pub(crate) fn work_resolve_handles_upstream_deletion_by_side() {
+    use crate::capabilities::workspace::api::{ResolveAction, ResolveTake};
+    use crate::capabilities::workspace::ports::WorkStore;
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string(), "b".to_string()])
+        .unwrap();
+    ws.work_commit_user("w", "gone.txt", b"v1", 1, 0).unwrap();
+    ws.work_commit_user("w", "keep.bin", b"bin1", 2, 0).unwrap();
+    let sb_a = sandbox_of(&ws, "w", "a");
+    let both = ["gone.txt".to_string(), "keep.bin".to_string()];
+    ws.work_pull("w", "a", &both).unwrap();
+    ws.work_pull("w", "b", &both).unwrap();
+    store.write_under(&sb_a, "gone.txt", b"local").unwrap();
+    store.write_under(&sb_a, "keep.bin", b"bin-local").unwrap();
+    ws.work_commit(
+        "w",
+        "b",
+        "w--b",
+        &commit_req(&[], &["gone.txt", "keep.bin"], "上游删", 3),
+    )
+    .unwrap();
+    let pulled = ws.work_pull("w", "a", &both).unwrap();
+    assert_eq!(pulled.missing, both.to_vec());
+
+    let gone = ws
+        .work_resolve("w", "a", &resolve_req(&["gone.txt"], ResolveTake::Upstream))
+        .unwrap();
+    assert_eq!(gone.entries[0].action, ResolveAction::RemovedLocal);
+    assert!(store.read_under(&sb_a, "gone.txt").unwrap().is_none());
+
+    let keep = ws
+        .work_resolve("w", "a", &resolve_req(&["keep.bin"], ResolveTake::Local))
+        .unwrap();
+    assert_eq!(keep.entries[0].action, ResolveAction::Cleared);
+    assert_eq!(
+        store.read_under(&sb_a, "keep.bin").unwrap().as_deref(),
+        Some(&b"bin-local"[..]),
+        "take=local 不能动本地文件"
+    );
+    let commit = ws
+        .work_commit(
+            "w",
+            "a",
+            "w--a",
+            &commit_req(&["keep.bin"], &[], "保留为新增", 4),
+        )
+        .unwrap();
+    assert_eq!(commit.changes[0].path, "keep.bin");
+    assert_eq!(
+        store
+            .read_under(&shared_of(&ws, "w"), "keep.bin")
+            .unwrap()
+            .as_deref(),
+        Some(&b"bin-local"[..])
+    );
+}
+
+/// 目的：未拉取但沙箱有同名文件时状态直说，take=local 后可提交；未跟踪文件单列。
+#[test]
+pub(crate) fn work_status_exposes_both_present_and_local_only_then_resolve_clears_it() {
+    use crate::capabilities::workspace::api::{ResolveAction, ResolveTake};
+    use crate::capabilities::workspace::domain::workstore::StatusState;
+    use crate::capabilities::workspace::ports::WorkStore;
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
+    let sb = sandbox_of(&ws, "w", "a");
+    store.write_under(&sb, "note.md", b"local").unwrap();
+    store.write_under(&sb, "extra.bin", &[0, 1, 2]).unwrap();
+
+    let st = ws.work_status("w", "a", &[]).unwrap();
+    let note = st
+        .entries
+        .iter()
+        .find(|e| e.path == "note.md")
+        .expect("主副本有的路径要出现");
+    assert_eq!(note.state, StatusState::BothPresent);
+    assert!(st.local_only.contains(&"extra.bin".to_string()));
+    let only = ws
+        .work_status("w", "a", &["extra.bin".to_string()])
+        .unwrap();
+    assert_eq!(only.entries[0].state, StatusState::LocalOnly);
+
+    let rep = ws
+        .work_resolve("w", "a", &resolve_req(&["note.md"], ResolveTake::Local))
+        .unwrap();
+    assert_eq!(rep.entries[0].action, ResolveAction::Marked);
+    ws.work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "合并", 2))
+        .unwrap();
+    assert_eq!(
+        store
+            .read_under(&shared_of(&ws, "w"), "note.md")
+            .unwrap()
+            .as_deref(),
+        Some(&b"local"[..])
+    );
+}
+
+/// 目的：空路径与三方都不存在的路径都被如实拒绝；部分存在时报告 missing。
+#[test]
+pub(crate) fn work_resolve_refuses_empty_and_reports_missing() {
+    use crate::capabilities::workspace::api::ResolveTake;
+    let (ws, _dirs, _store) = work_ws();
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
+    assert!(ws
+        .work_resolve("w", "a", &resolve_req(&[], ResolveTake::Local))
+        .is_err());
+    assert!(ws
+        .work_resolve("w", "a", &resolve_req(&["nope"], ResolveTake::Local))
+        .is_err());
+    let rep = ws
+        .work_resolve(
+            "w",
+            "a",
+            &resolve_req(&["note.md", "nope"], ResolveTake::Local),
+        )
+        .unwrap();
+    assert_eq!(rep.entries.len(), 1);
+    assert_eq!(rep.missing, vec!["nope"]);
+}
+
 // ---------- 主副本对 agent 只读：工具层与围栏层两处收口 ----------
 
 /// 只读共享区：读得到、写不进；写自己的沙箱照旧；围栏也不含主副本。

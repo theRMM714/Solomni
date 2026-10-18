@@ -4,26 +4,29 @@
 //! 装配（new 出适配器）在组合根；这里只收注入的端口。
 //!
 //! 共享区是**版本化工作区**：主副本 `work/` 只在提交时改写，agent 的沙箱是它的工作副本，
-//! pull / commit 的三方比较规则在 `domain::workstore`（纯逻辑），落盘在 `WorkStore` 端口后面。
+//! pull / commit 的三方比较与 resolve 的选边规则在 `domain::workstore`（纯逻辑），落盘在 `WorkStore` 端口后面。
 
 use crate::capabilities::workspace::api::{
-    Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, PullReport, StatusEntry,
-    StatusReport, WorkFiles, WorkRoots, WorkUsage, Workspace,
+    Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, FileVersion, PullReport,
+    ResolveAction, ResolveEntry, ResolveReport, ResolveRequest, ResolveTake, StatusEntry,
+    StatusReport, VersionView, WorkFiles, WorkRoots, WorkUsage, Workspace,
 };
 use crate::capabilities::workspace::domain::hash::content_hash;
 use crate::capabilities::workspace::domain::workstore::{
-    clean_rel, expand_paths, plan_commit, pull_verdict, status_of, Commit, CommitAnchor,
+    clean_rel, expand_paths, plan_commit, pull_verdict, status_of, Commit, CommitAnchor, Conflict,
     ConflictAt, Index, PullVerdict, Tree,
 };
 use crate::capabilities::workspace::ports::{WorkStore, Workdirs};
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 /// 一次 status 里主副本路径清单的上限（超出如实标注截断，不假装列全）。
 const MAX_STATUS_TREE: usize = 200;
 /// status 里附带的最近提交条数。
 const RECENT_COMMITS: usize = 5;
+/// status 里列出的“沙箱未跟踪文件”上限（超出如实标注截断）。
+const MAX_LOCAL_ONLY: usize = 50;
 
 /// 工作区能力：持四个端口，按用例答话。
 pub struct WorkspaceService {
@@ -124,8 +127,16 @@ fn render_conflicts(conflicts: &[ConflictAt]) -> String {
     for c in conflicts {
         out.push_str(&format!("\n- {}（{}）", c.path, c.kind.reason()));
     }
-    out.push_str("\n先 work_pull（拉不到的就 read 主副本对应路径）取上游版本，人工合进你的沙箱文件，再提交一次。");
+    out.push_str(
+        "\n先用 work_versions 看基线 / 主副本 / 沙箱三方，人工合并后再用 work_resolve（take=local）声明已解决；\n要放弃本地改动用 take=upstream。二进制冲突只能选边，不做自动合并。",
+    );
     out
+}
+
+/// 读一个内容寻址对象并收成版本视图（调用方已持有工作锁）。
+fn object_version(store: &dyn WorkStore, root: &Path, hash: &str) -> Result<FileVersion, String> {
+    let bytes = store.read_object(root, hash)?;
+    Ok(FileVersion::from_bytes(hash.to_string(), &bytes))
 }
 
 impl Workspace for WorkspaceService {
@@ -190,7 +201,15 @@ impl Workspace for WorkspaceService {
                 }
                 PullVerdict::NoChange => report.no_change.push(rel),
                 PullVerdict::Occupied => report.occupied.push(rel),
-                PullVerdict::Conflict => report.conflicts.push(rel),
+                PullVerdict::Conflict => {
+                    // pull 侧能落到 Conflict 的形态：本地删了/上游改了，或两边都改了。
+                    let kind = if local_hash.is_none() {
+                        Conflict::DeleteVsModify
+                    } else {
+                        Conflict::BothModified
+                    };
+                    report.conflicts.push(ConflictAt { path: rel, kind });
+                }
                 PullVerdict::Missing => report.missing.push(rel),
             }
         }
@@ -378,11 +397,14 @@ impl Workspace for WorkspaceService {
             None => None,
         };
         let index: Index = self.store.read_index(&store, agent)?;
+        let sandbox_files: BTreeSet<String> = self.store.list(&sandbox)?.into_iter().collect();
         let all: BTreeSet<String> = index.keys().chain(tree.keys()).cloned().collect();
+        // 显式给路径时，把沙箱里未跟踪的文件也算进候选（能如实报“本地新增”）。
+        let available: BTreeSet<String> = all.iter().chain(sandbox_files.iter()).cloned().collect();
         let want: Vec<String> = if paths.is_empty() {
             all.iter().cloned().collect()
         } else {
-            let (got, _) = expand_paths(paths, &all);
+            let (got, _) = expand_paths(paths, &available);
             got
         };
         let mut entries: Vec<StatusEntry> = Vec::new();
@@ -396,6 +418,18 @@ impl Workspace for WorkspaceService {
             );
             entries.push(StatusEntry { path: rel, state });
         }
+        // 沙箱里未跟踪的文件：只在不带 paths 时列出，避免把一次筛选变成整盘清单。
+        let mut local_only: Vec<String> = if paths.is_empty() {
+            sandbox_files
+                .iter()
+                .filter(|p| !index.contains_key(*p) && !tree.contains_key(*p))
+                .cloned()
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let local_only_truncated = local_only.len() > MAX_LOCAL_ONLY;
+        local_only.truncate(MAX_LOCAL_ONLY);
         // 主副本路径清单：截断如实标注。
         let mut all_tree: Vec<String> = tree.keys().cloned().collect();
         let truncated = all_tree.len() > MAX_STATUS_TREE;
@@ -414,7 +448,144 @@ impl Workspace for WorkspaceService {
             tree: all_tree,
             tree_truncated: truncated,
             entries,
+            local_only,
+            local_only_truncated,
             recent,
+        })
+    }
+
+    fn work_versions(&self, work: &str, agent: &str, path: &str) -> Result<VersionView, String> {
+        let rel = clean_rel(path)?;
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let (_, store, sandbox) = self.agent_roots(work, agent)?;
+        let (_, tree) = self.head_tree(&store)?;
+        let index: Index = self.store.read_index(&store, agent)?;
+        let base = match index.get(&rel) {
+            Some(hash) => Some(object_version(self.store.as_ref(), &store, hash)?),
+            None => None,
+        };
+        let head = match tree.get(&rel) {
+            Some(hash) => Some(object_version(self.store.as_ref(), &store, hash)?),
+            None => None,
+        };
+        let local = self
+            .store
+            .read_under(&sandbox, &rel)?
+            .map(|bytes| FileVersion::from_bytes(content_hash(&bytes), &bytes));
+        if base.is_none() && head.is_none() && local.is_none() {
+            return Err(format!("基线、主副本与沙箱都没有这个文件：{}", rel));
+        }
+        Ok(VersionView {
+            path: rel,
+            base,
+            head,
+            local,
+        })
+    }
+
+    fn work_resolve(
+        &self,
+        work: &str,
+        agent: &str,
+        req: &ResolveRequest,
+    ) -> Result<ResolveReport, String> {
+        if req.paths.is_empty() {
+            return Err("work_resolve 要给出要解决的路径（文件或文件夹）".to_string());
+        }
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let (_, store, sandbox) = self.agent_roots(work, agent)?;
+        let (_, tree) = self.head_tree(&store)?;
+        let mut index: Index = self.store.read_index(&store, agent)?;
+        let sandbox_files: BTreeSet<String> = self.store.list(&sandbox)?.into_iter().collect();
+        let available: BTreeSet<String> = index
+            .keys()
+            .chain(tree.keys())
+            .chain(sandbox_files.iter())
+            .cloned()
+            .collect();
+        let (want, missing) = expand_paths(&req.paths, &available);
+        if want.is_empty() {
+            return Err(format!(
+                "这些路径在基线、主副本与沙箱里都没有：{}",
+                missing.join("、")
+            ));
+        }
+        let mut entries: Vec<ResolveEntry> = Vec::new();
+        let mut changed = false;
+        for rel in want {
+            let head_hash = tree.get(&rel).cloned();
+            let base_hash = index.get(&rel).cloned();
+            let local = self.store.read_under(&sandbox, &rel)?;
+            let action = match req.take {
+                ResolveTake::Upstream => match head_hash {
+                    Some(hash) => {
+                        let head_bytes = self.store.read_object(&store, &hash)?;
+                        let same = local.as_deref() == Some(head_bytes.as_slice());
+                        if !same {
+                            self.store.write_under(&sandbox, &rel, &head_bytes)?;
+                        }
+                        let base_changed = base_hash.as_deref() != Some(hash.as_str());
+                        if base_changed {
+                            index.insert(rel.clone(), hash);
+                            changed = true;
+                        }
+                        if !same {
+                            ResolveAction::WroteUpstream
+                        } else if base_changed {
+                            ResolveAction::Marked
+                        } else {
+                            ResolveAction::NoChange
+                        }
+                    }
+                    None => {
+                        let had_local = local.is_some();
+                        if had_local {
+                            self.store.remove_under(&sandbox, &rel)?;
+                        }
+                        let had_base = index.remove(&rel).is_some();
+                        changed |= had_local || had_base;
+                        if had_local {
+                            ResolveAction::RemovedLocal
+                        } else if had_base {
+                            ResolveAction::Cleared
+                        } else {
+                            ResolveAction::NoChange
+                        }
+                    }
+                },
+                ResolveTake::Local => match head_hash {
+                    Some(hash) => {
+                        let base_changed = base_hash.as_deref() != Some(hash.as_str());
+                        if base_changed {
+                            index.insert(rel.clone(), hash);
+                            changed = true;
+                            ResolveAction::Marked
+                        } else {
+                            ResolveAction::NoChange
+                        }
+                    }
+                    None => {
+                        let had_base = index.remove(&rel).is_some();
+                        changed |= had_base;
+                        if had_base {
+                            ResolveAction::Cleared
+                        } else {
+                            ResolveAction::NoChange
+                        }
+                    }
+                },
+            };
+            entries.push(ResolveEntry { path: rel, action });
+        }
+        if changed {
+            self.store.write_index(&store, agent, &index)?;
+        }
+        Ok(ResolveReport {
+            take: req.take,
+            entries,
+            missing,
         })
     }
 

@@ -5,8 +5,9 @@ pub use crate::capabilities::workspace::domain::workspace::{
     safe_file_name, AreaUsage, Place, Sandbox, Sandboxes, WorkFiles, WorkRoots, WorkUsage,
 };
 pub use crate::capabilities::workspace::domain::workstore::{
-    Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, PullReport, StatusEntry,
-    StatusReport,
+    Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, FileVersion, PullReport,
+    ResolveAction, ResolveEntry, ResolveReport, ResolveRequest, ResolveTake, StatusEntry,
+    StatusReport, VersionView, VERSION_TEXT_LIMIT,
 };
 
 /// 工作区的**用例面**（`service.rs` 实现）：别的能力要工作区目录与版本化，走这里；
@@ -52,6 +53,17 @@ pub trait Workspace: Send + Sync {
         agent: &str,
         paths: &[String],
     ) -> Result<StatusReport, String>;
+    /// 目的：一条路径的三方版本（基线 / 主副本 / 沙箱内容或指纹）。
+    /// 约束：文本有上限预览；二进制只给指纹与大小。
+    fn work_versions(&self, work: &str, agent: &str, path: &str) -> Result<VersionView, String>;
+    /// 目的：解决冲突——取主副本覆盖本地，或保留本地并把基线推进到主副本。
+    /// 约束：不做自动合并。
+    fn work_resolve(
+        &self,
+        work: &str,
+        agent: &str,
+        req: &ResolveRequest,
+    ) -> Result<ResolveReport, String>;
     /// 把主副本物化回某个提交点（只改共享区，不动各会话）。
     /// **消费方是回档对齐与提交历史（缺口 `work.rewind-and-file-state`）**：机制先就位、进测试，
     /// 生产调用点随回档重做接入——二进制 crate 里暂时没有生产调用点的接口方法会被 dead_code 误报。

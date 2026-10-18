@@ -97,7 +97,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 
 **布局**（机制口径）只在 [docs/session/session-model.md](docs/session/session-model.md) 的「形态」画一次：
 `session/<工作名>/` 下是 `meta.yaml`、`transcript.jsonl`、共享区主副本 `work/`、版本库 `.work/`、各 agent 沙箱与 `children/`。
-共享区是**版本化工作区**：主副本对 agent 只读，agent 的沙箱就是它的工作副本，`work_pull` / `work_commit` 做同步；
+共享区是**版本化工作区**：主副本对 agent 只读，agent 的沙箱就是它的工作副本，`work_pull` / `work_commit` 做同步，`work_versions` / `work_resolve` 看三方与显式解决冲突；
 提交点是内容寻址的整棵树，每条记录带 `(agent, line)` 行锚；回档按锚把共享区**精确物化**到那一刻
 （留档 / 删除 / 恢复三种模式见 [docs/session/session-model.md](docs/session/session-model.md) 的五）。
 **目录保留名**（`work` / `children`）的名单在 `systools/names.yaml`：布局一改就改表，代码里不硬编码。
@@ -122,7 +122,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
   可达范围 = 自己的私有沙箱（永远全权）+ 自己的模块目录（**默认只读**；`module_write` 授权才整块可写，`<module>/userdata/` 恒可写）+ 用户显式授权的只读根（`.home/settings.yaml` 的 `fence_read`，默认空）；
   共享主副本**只有在"这一席可写"时**才进 rw（核心会话），agent 会话默认只读——工具层与围栏层两处都挡住直接写。
   **会话权限**（`capabilities/permission/`，纯领域）统一裁定：整棵工作区默认可读可提交，**白名单一出现就取代默认、黑名单只做减法**；
-  内置读/写、`work_pull` / `work_commit`（提交白名单）与围栏派生都读同一份生效态（`Sandbox.permissions` / `FenceSpec`）。
+  内置读/写、`work_pull` / `work_commit`（提交白名单）、`work_versions` / `work_resolve`（读作用域）与围栏派生都读同一份生效态（`Sandbox.permissions` / `FenceSpec`）。
   **工具级确认**（`granularity: ask`）命中 `ask` 表就把这次调用**当一关进裁决队**并阻塞；回答 `allow` / `deny` / `full`
   （`full` 只对**本轮**生效，到 agent 停下输出为止，不落盘；停止把整队解成拒绝；没人答时按 `Ask.on_unanswered` 收场）。
   工具进程走**守门进程**（本程序 `--fence-run`），环境不继承父进程（**密钥与凭据不进工具进程**），`HOME` / `TEMP` 等落进该 agent 的沙箱。

@@ -541,8 +541,8 @@
   "src/capabilities/workspace/domain/workstore.rs": {
     "头块：槽外有行或自造槽": 10,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 41,
-    "条目：首行不是目的": 37,
+    "条目：槽外有行或自造槽": 40,
+    "条目：首行不是目的": 36,
     "行内：历史或待办措辞": 1
   },
   "src/capabilities/workspace/mod.rs": {

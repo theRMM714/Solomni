@@ -13,7 +13,8 @@ Solomni is an **agent runtime environment (AgentOS) that runs on your own machin
   People use it through the UI and agents through the contract, from one declaration (contract in [MODULE_SPEC.md](MODULE_SPEC.md)).
 - **Several agents working on one job.** Every agent has its own sandbox (`session/<name>/<agent-instance>/`), which is also its **working copy** of the shared area;
   the shared area `work/` is the **main copy and read-only for agents**. Pull what you need with `work_pull`, edit in the sandbox, then commit with `work_commit`.
-  Commits use a file-level three-way comparison: a conflict rejects the whole commit and names each path instead of silently overwriting; any commit point can be restored.
+  Commits use a file-level three-way comparison: a conflict rejects the whole commit and names each path instead of silently overwriting; merge by hand, inspect all three sides with `work_versions`, and resolve explicitly with `work_resolve` — no automatic merge.
+  Text, images, video and other binaries are handled as bytes; any commit point can be restored.
   The only two roads across agents are the shared area and the transcript that enters the context; "who may write which part" is enforced by session permissions
   (see [docs/permission/README.md](docs/permission/README.md)).
 - **The process is auditable.** The transcript is **append-only**; delete and restore are explicit actions that really rewrite the log. On any line, "rewind to here" offers
@@ -36,7 +37,7 @@ Solomni is an **agent runtime environment (AgentOS) that runs on your own machin
 - **Modules are drop-in**: a folder with a valid `module.yaml` under `modules/` appears; remove it and it is gone — no registration, no build, no restart
   (contract in [MODULE_SPEC.md](MODULE_SPEC.md)).
 - **Sessions and history**: one directory per piece of work (`session/<name>/`); rewind / archive / delete / restore, transcript replay, context compaction,
-  versioned shared area (`work_pull` / `work_commit`).
+  versioned shared area (`work_pull` / `work_commit` / `work_versions` / `work_resolve`).
 - **Three isolation layers**: path checks inside the built-in tools → every tool process runs behind the gate process (environment allowlist / process tree / timeout kills the whole tree)
   → platform fences (Windows AppContainer, Linux Landlock, macOS seatbelt); if a mechanism cannot be installed, the capability grade is reported honestly.
 - **Two execution tiers**: host tier (default) and vm tier (module tools run inside a guest). The vm tier is pluggable along host × engine × guest × channel × share;
@@ -123,7 +124,7 @@ tools:                       # optional: external tool table
 ```
 
 - External tools have one calling convention: **start command + arguments + a stdin/stdout receipt**; a long-running MCP service goes under `services`.
-- A tool process can reach that agent's private sandbox and its own module directory; the shared main copy needs `work_pull` / `work_commit`. `userdata/` is always writable;
+- A tool process can reach that agent's private sandbox and its own module directory; the shared main copy needs `work_pull` / `work_commit` (conflicts: `work_versions` / `work_resolve`). `userdata/` is always writable;
   module directories are read-only by default.
 - If it runs, it is a valid module; if it does not, the core reports the reason plainly — no guessing, no fallback.
 
