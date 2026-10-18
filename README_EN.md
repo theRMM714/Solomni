@@ -184,6 +184,9 @@ real-machine fence probes run on three CI platforms (see [TESTING.md](TESTING.md
 | Manage providers / models / agents / settings (and key boundaries) | [REGISTRY_SPEC.md](REGISTRY_SPEC.md) |
 | Change code (layers, ports, logging, prompts, on-disk contracts) | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Write tests and acceptance (levels, doubles, gates, gaps, CI) | [TESTING.md](TESTING.md) |
+| Development workflow, PR and start gates | [docs/workflow/README.md](docs/workflow/README.md) |
+| Documentation layers, terminology and references | [docs/conventions.md](docs/conventions.md) |
+| Full unit and cross-cutting index | [docs/README.md](docs/README.md) |
 | Repository rules and document routing | [AGENTS.md](AGENTS.md) |
 
 > **Two layers**: the repository root holds **portals** (positioning + references), `docs/` holds the **details**
