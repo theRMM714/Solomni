@@ -126,7 +126,7 @@ files:                      # 包内文件指纹：用于可复现与呈现
 与 e2e 的虚拟机档会话场景都过（虚拟根默认 `debian`，`SOLOMNI_VM_GUEST` 可换）；两端的 QEMU 与 guest 镜像由 provision 能力按清单装入，
 Windows 的首启 / 维护启动与 Linux 的 `guest-rootfs` 打包、维护启动见上；Linux 镜像是普通 ext4 磁盘根，由 `unshare -r` + `mke2fs -d` 打包（镜像里的属主才是 root），打包后按源镜像回填特权位与 uid/gid——rdump 与 mke2fs 都拿不到它们。整段编排在 Rust 侧。
 多台虚拟机档会话并发时各写自己的**每租约可写层**（不共写基础镜像），同时台上限 `max_guests`（见 [docs/vm/README.md](docs/vm/README.md) 的「并发」）。
-**macOS 未验**：`VERIFIED_HOSTS` 只放开 linux / windows；缺 QEMU 取包与 Apple vz 引擎 + 自研 agent（vsock 通道）。缺口与验收标准只记在 `tests/gaps.yaml`。
+**macOS 未验**：`VERIFIED_HOSTS` 只放开 linux / windows；缺 QEMU 取包与 Apple vz 引擎 + 自研 agent（vsock 通道）。缺口与验收标准只记在 `tests/macos/gaps.yaml`。
 
 ## 六、校验与拒收
 

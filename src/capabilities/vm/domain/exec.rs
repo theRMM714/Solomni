@@ -306,7 +306,7 @@ pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
                 String::new()
             } else {
                 format!(
-                    "在该平台真机上跑通一次 vm 档工具（默认组合 {}）后再放开（现状与验收见 tests/gaps.yaml）",
+                    "在该平台真机上跑通一次 vm 档工具（默认组合 {}）后再放开（现状与验收见 tests/macos/gaps.yaml）",
                     combo
                 )
             },
@@ -331,7 +331,7 @@ fn hypervisor_kind() -> &'static str {
     }
 }
 
-/// 目的：已通过真机验收的宿主平台（**数据，不是平台 cfg**）——新平台验收后在这里加一行，并同步 tests/gaps.yaml。
+/// 目的：已通过真机验收的宿主平台（**数据，不是平台 cfg**）——新平台验收后在这里加一行，并同步对应平台的缺口账（tests/<平台>/gaps.yaml）。
 const VERIFIED_HOSTS: &[&str] = &["linux", "windows"];
 
 /// 目的：给定宿主平台名（std::env::consts::OS），这个平台的 guest 后端是否已真机验收。

@@ -41,7 +41,7 @@ Solomni is an **agent runtime environment (AgentOS) that runs on your own machin
   → platform fences (Windows AppContainer, Linux Landlock, macOS seatbelt); if a mechanism cannot be installed, the capability grade is reported honestly.
 - **Two execution tiers**: host tier (default) and vm tier (module tools run inside a guest). The vm tier is pluggable along host × engine × guest × channel × share;
   Linux (QEMU/KVM + virtiofs, falling back to 9p when virtiofsd is absent) and Windows (QEMU/WHPX + SMB live share, falling back to QGA copy when smbd is absent) are verified on real machines;
-  macOS is unverified (`VERIFIED_HOSTS` only admits Linux / Windows; QEMU packaging and the Apple vz engine are missing — see [tests/gaps.yaml](tests/gaps.yaml)). When the vm tier is unavailable on Linux / Windows, the web UI and the CLI install the same manifest into the project's `.vm/`.
+  macOS is unverified (`VERIFIED_HOSTS` only admits Linux / Windows; QEMU packaging and the Apple vz engine are missing — see [tests/macos/gaps.yaml](tests/macos/gaps.yaml)). When the vm tier is unavailable on Linux / Windows, the web UI and the CLI install the same manifest into the project's `.vm/`.
   Details in [docs/vm/README.md](docs/vm/README.md); runtime package contract in [RUNTIME_SPEC.md](RUNTIME_SPEC.md).
 - **Registry**: four YAML files for providers / models / agents / settings, all under `.home/`, managed from the UI; channel keys live only in the local registry and in the core's outbound calls
   (boundaries in [REGISTRY_SPEC.md](REGISTRY_SPEC.md)).
@@ -155,7 +155,7 @@ The C++ module has to be compiled once (the artifact is not committed); the comm
 ## Not wired up yet
 
 Every unfinished item, how to fix it and its acceptance criteria have exactly one authority:
-[tests/gaps.yaml](tests/gaps.yaml); the planned core-proxy system tools are in [systool_gaps.yaml](systool_gaps.yaml).
+[tests/gaps.yaml](tests/gaps.yaml) for global items and [tests/macos/gaps.yaml](tests/macos/gaps.yaml) for platform-specific ones; the planned core-proxy system tools are in [systool_gaps.yaml](systool_gaps.yaml).
 
 ## What it is not
 
@@ -177,7 +177,7 @@ real-machine fence probes run on three CI platforms (see [TESTING.md](TESTING.md
 | Use the product / see user journeys and interfaces | [PRODUCT.md](PRODUCT.md) |
 | Write a module (YAML contract and module tools) | [MODULE_SPEC.md](MODULE_SPEC.md) |
 | System tools, roles and the path model (reports and acceptance too) | [SYSTOOL.md](SYSTOOL.md) |
-| Unfinished items, how to fix them and acceptance criteria | [tests/gaps.yaml](tests/gaps.yaml) |
+| Unfinished items, how to fix them and acceptance criteria | [tests/gaps.yaml](tests/gaps.yaml) (global) and [tests/macos/gaps.yaml](tests/macos/gaps.yaml) (per platform) |
 | The planned core-proxy system tools | [systool_gaps.yaml](systool_gaps.yaml) (planned, not current capability) |
 | Build a runtime package (`package.yaml`) | [RUNTIME_SPEC.md](RUNTIME_SPEC.md) |
 | Manage providers / models / agents / settings (and key boundaries) | [REGISTRY_SPEC.md](REGISTRY_SPEC.md) |

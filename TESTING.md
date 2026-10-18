@@ -63,7 +63,8 @@
 - 门禁之外另有一个**仓库卫生审查**脚本 `run-hygiene.js`（注释契约存量棘轮 + 内容卫生；报告只报不拦、收紧只能往下，也不进 `TEST-REPORT-*`）：
   判据与用法见 [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md) 的「门禁之外」。
 
-**逐平台**与**跨平台**缺口账（`tests/<平台>/gaps.yaml`、`tests/cross-platform/gaps.yaml`）**都为空**：
+**逐平台**与**跨平台**缺口账（`tests/<平台>/gaps.yaml`、`tests/cross-platform/gaps.yaml`）决定 `TEST-REPORT-ACCEPTED`：
+`tests/macos/gaps.yaml` 现有 3 条虚拟机档组合缺口（macOS 未验）；Linux、Windows 与跨平台层为空。
 Linux Landlock、macOS seatbelt 与 Windows 的目录 ACL 授权/撤权、落点清单都已由三平台 CI 真跑通过。
 判「环境不允许」的判据只有一条：**看被测试进程自己的令牌与行为**，不拿二手字符串特征当判据。
 - Windows 容器里 `whoami /groups` 不含包 SID 组是**正常**的（包 SID 在令牌的 `TokenAppContainerSid` 字段，
@@ -73,7 +74,8 @@ Linux Landlock、macOS seatbelt 与 Windows 的目录 ACL 授权/撤权、落点
   Low 完整性标签；判据、后果与处置见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md) 的「真机入口」一节。
 - Windows 的「模块目录只读 + `userdata/` 可写 + 另一席不可达」由容器往返探针在真机上验收。
 
-仍未完成的缺口全部记在 `tests/gaps.yaml`（长期目标、已确认但尚未实施的产品/机制缺口都在那里，细则不复述条目内容）。
+仍未完成的缺口记在两处账上：全局项（长期目标、已确认但尚未实施的产品/机制缺口）在 `tests/gaps.yaml`，
+平台机制或平台专属验收缺口在 `tests/<平台>/gaps.yaml`（细则不复述条目内容）。
 条目存在 = 尚未完成；补齐后删除条目，不保留完成历史。
 全局账**不**影响 `TEST-REPORT-ACCEPTED`：那个标记只看平台与跨平台层的缺口账。
 

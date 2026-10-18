@@ -1,5 +1,59 @@
 # macos 平台的缺口账（当前状态：条目存在 = 这条测试还没有；补上就删条目）。
 #
-# 当前为空：本平台围栏探针（tests/macos/probes/fence.rs）与整仓全量测试都已在真机跑通。
+# 平台围栏探针（tests/macos/probes/fence.rs）与整仓全量测试都已在真机跑通；
+# 下面三条是虚拟机档 macOS 组合的机制与验收缺口（全局账 tests/gaps.yaml 不再重复）。
 # 探针只在"本机该私有 ABI 失效"时如实跳过，并出现在报告的 envSkips 里；
 # profile 被 sandbox_init 拒绝会直接 panic（那是 profile 写错）。
+
+- id: fence.guest-tier-not-wired
+  scope: macos
+  level: T4
+  why: |
+    macOS 的五轴组合（宿主 × VmEngine × GuestImage × GuestChannel × ShareBackend）尚未真机验收：
+    Apple vz 引擎与自研 agent（vm.macos-vz-engine）、QEMU 取包（vm.qemu-provisioning-macos）都还没做。
+    未验平台在 vm::tier_readiness 上把 guest 项判否。
+  how: |
+    在 macOS 真机上按顺序补齐并验收：先用 QEMU/HVF + 9p 把备选链跑通（依赖取包），
+    再上 Apple vz + 原生 virtiofs + 自研 agent（vsock）。
+    依赖不预置、不分发；macOS 仍是检测 + 指路（见 vm.qemu-provisioning-macos）。
+    契约与组合矩阵见 docs/vm/README.md 的「多平台组合」。
+  accept: |
+    macOS 组合单独判定：vm 档会话里模块工具真在 guest 内跑（进程与宿主隔离）、删会话即销毁 guest 与其磁盘；
+    同一组合的 `solomni --build=<模块 id> --guest=<虚拟根>` 一并判（在 guest 里编出产物、经挂载落回宿主那份）；
+    就绪面板按组合逐项列出缺什么、每项怎么补；探针覆盖"组合可用 / 不可用"两种结论。
+    macOS 通过后销账，并同步 PRODUCT.md / RUNTIME_SPEC.md / docs/vm/ 的当前状态。
+  blocked_by: |
+    需要一台 macOS 机器（验收环境）。macOS 侧的取包、vz 引擎与自研 agent 分别在
+    vm.qemu-provisioning-macos / vm.macos-vz-engine 两条缺口里。
+
+- id: vm.qemu-provisioning-macos
+  scope: macos
+  level: T4
+  why: |
+    macOS 仍是检测 + 指路（provision 能力只报缺什么、怎么装），QEMU 要用户自行安装。
+    已定方向：macOS 本期保持"检测 + 指路 + 手动"，不在本期做自动补齐；
+    将来做需要 macOS 真机确定来源与 .app / 框架形态。
+  how: |
+    本期只做检测与指路：缺什么、怎么装，如实列出，不假装可自动装。
+    将来若做自动补齐：按平台取包（Homebrew 或官方包）解到 .vm/qemu/，只写项目内、下载要用户同意，来源进 links.yaml；
+    具体来源需要一台 macOS 真机确定。macOS 的 QEMU 是 .app / 框架形态，打包与落地方式要和 Linux / Windows 分开设计。
+  accept: |
+    本期：macOS 上就绪检测如实报"QEMU 不在场 + 怎么补"，不把"未实现自动补齐"写成能力。
+    将来：macOS 上能把 QEMU 装进项目内 .vm/ 并被就绪检测认出来，且不需要管理员权限。
+  blocked_by: |
+    本期不做（macOS 保持检测 + 指路）；将来做需要一台 macOS 机器确定来源与 .app / 框架形态的落地方式。
+
+- id: vm.macos-vz-engine
+  scope: macos
+  level: T4
+  why: |
+    macOS 的默认组合是 Apple vz（Virtualization.framework）+ 原生 virtiofs + 自研 guest agent（vsock 通道）——
+    比 QEMU/HVF 更省、更贴近系统；现在既没有 VzEngine，也没有自研 agent 与它的通道实现。
+  how: |
+    1) 加 VzEngine 实现 VmEngine（机器 / 磁盘 / 网卡 / 目录共享 / 加速器，走 Virtualization.framework 的绑定）；
+    2) 加自研 guest agent + vsock 通道（GuestChannel 的第三个实现）；
+    3) 在 macOS 真机上钉定 API 与镜像格式（vz 对磁盘与共享目录的要求与 QEMU 不同）再写适配。
+  accept: |
+    macOS 真机 vm 档会话跑通（模块工具在 guest 内执行、删会话销毁 guest），e2e 的 vm 场景在该平台通过。
+  blocked_by: |
+    需要一台 macOS 机器才能钉定 API 与验收。

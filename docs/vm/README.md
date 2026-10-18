@@ -1,7 +1,7 @@
 # vm（虚拟机档）
 
 > 运行包库、执行档位与计划、就绪检测与诊断、guest 生命周期。
-> 五轴组合（宿主 × 引擎 × guest × 通道 × 共享）可插：Linux 与 Windows 已真机验收，macOS 未验（见「五」与 `tests/gaps.yaml`）。
+> 五轴组合（宿主 × 引擎 × guest × 通道 × 共享）可插：Linux 与 Windows 已真机验收，macOS 未验（见「五」与 `tests/macos/gaps.yaml`）。
 > 本目录是该单元的唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）→ 其它细则。
 > 分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九；契约见 [RUNTIME_SPEC.md](../../RUNTIME_SPEC.md)。
 
@@ -35,7 +35,7 @@
 - 会话在 `tier == Vm` 时把模块命令交给 guest；建会话时装配并拉起，改配时重建，删除会话时销毁。
 - 就绪项 `guest` 按**已验平台数据表**（`VERIFIED_HOSTS` = linux / windows）放开，并带上本平台**已实现**的组合。
 - 已验组合：Linux QEMU/KVM + virtiofs（virtiofsd 不在场或**不能执行**时退 9p）；Windows QEMU/WHPX + SMB guestfwd（缺 smbd 时退 QGA 复制）。
-- macOS 未验，缺口见 [tests/gaps.yaml](../../tests/gaps.yaml)。
+- macOS 未验，缺口见 [tests/macos/gaps.yaml](../../tests/macos/gaps.yaml)。
 
 ### 判据与预检
 
@@ -68,7 +68,7 @@
 - Linux：QEMU（pkgforge Anylinux AppImage）、virtiofsd 与默认虚拟根 `debian`（cloud 镜像 rootfs → `rootfs.ext4` 磁盘镜像 + 通用内核 + initrd + qemu-guest-agent，装进 `.vm/guest/debian/`；会话的可写层叠在镜像上）。
 - Windows：官方源码在 MSYS2（mingw-w64）下自建的 QEMU 11.1.1 便携包（`--enable-slirp`，固件按真实文件打包）、Debian cloud qcow2（虚拟根 `windows`，装进 `.vm/guest/windows/`）与 `guest.yaml`。
 - 虚拟根的真实运行能力由 `guest-runtime` 编排自证后写进 `guest.yaml` 的 `runtimes`：Windows 走 cloud-init 首启 + 维护启动装包；Linux 的 agent 由 `guest-rootfs` 装进镜像，维护启动装 python3、尽力装 node。构造细节见 [docs/provision/README.md](../provision/README.md)。
-- macOS 保持检测 + 指路（缺口见 `tests/gaps.yaml`）。
+- macOS 保持检测 + 指路（缺口见 `tests/macos/gaps.yaml`）。
 - 真机探针的门槛：`SOLOMNI_VM_LIVE=1` + `SOLOMNI_VM_QEMU` / `SOLOMNI_VM_VIRTIOFSD` / `SOLOMNI_VM_SMBD` 指向 `.vm/`；虚拟根默认 `debian`，可用 `SOLOMNI_VM_GUEST` 换；默认 `[探针]` 跳过。
 
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
