@@ -11,6 +11,18 @@ fn expect_granted(prep: &FencePrep, what: &str) {
     assert!(prep.ok(), "{}：必要落点授不上 {:?}", what, prep.blocked);
 }
 
+/// 目的：网络能力 SID 只在 `net=true` 时建出来；`net=false` 不授任何 capability（断网）。
+#[test]
+fn internet_client_capability_is_only_built_when_net_is_true() {
+    assert!(container::internet_client_sid(false)
+        .expect("net=false 不该失败")
+        .is_none());
+    let sid = container::internet_client_sid(true)
+        .expect("建 internetClient 能力 SID")
+        .expect("net=true 应该有一个能力");
+    assert!(!sid.is_empty(), "能力 SID 不该是空字节");
+}
+
 /// 把对象 DACL 里的 ACE 逐条转储成可读文本（残留调查用：原始权限位 + 继承标志 + SID + 对象 GUID）。
 /// 走 acl_scan：**偏移与认不出的条数都由它一处给出**，诊断不会另抄一套读法而看不出对象 ACE。
 fn dump_aces(path: &Path) -> String {

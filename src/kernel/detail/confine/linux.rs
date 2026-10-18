@@ -1,6 +1,6 @@
 //! 目的：Linux 后端——Landlock（内核 5.13+）把「可达到哪些路径」变成内核强制，无需 root、无需额外二进制。
 //! 管：规则——spec.rw 的每个根读写与目录操作；运行基线（系统只读区）只读可执行；其余一律拒绝。
-//! 不管：网络——spec.net 为假时靠调用方（虚拟机档）断网，本档不承诺。
+//! 不管：网络——本机档不围栏（`capability().net=false`）；虚拟机档由 QEMU 网卡决定。
 //! 联动：机制不可用时（老内核、或规则被内核拒）如实降级并打印说明；能力等级在启动报告里已如实告知。
 
 use super::{shell_command, Capability, FenceVerdict, FENCE_FAILED};

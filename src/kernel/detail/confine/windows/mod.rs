@@ -1,5 +1,5 @@
 //! 目的：Windows 后端——AppContainer（文件系统与网络围栏）+ Job Object（进程树围栏）。
-//! 管：按 agent 派生容器 SID，逐条授权可达范围（共享区/沙箱/模块目录/解释器目录），再用 STARTUPINFOEX 启动工具（不给 capability = 断网）。
+//! 管：按 agent 派生容器 SID，逐条授权可达范围（共享区/沙箱/模块目录/解释器目录），再用 STARTUPINFOEX 启动工具（按 net 授/不授 internetClient）。
 //! 不管：祖先目录不用授权（容器令牌自带 SeChangeNotifyPrivilege）；授权只落在用户自己拥有的目录上。
 //! 联动：授权与撤销由外层进程做（见 confine::prepare_fence），守门进程只按同一个名字派生同一个 SID；机制不可用时一律如实降级。
 
@@ -81,7 +81,7 @@ pub fn capability() -> Capability {
             fs: true,
             net: true,
             tree: true,
-            note: "Windows：AppContainer（文件系统可达范围 + 默认断网）与 Job Object（进程树）都由内核强制".to_string(),
+            note: "Windows：AppContainer（文件系统可达范围；net 决定是否授 internetClient）与 Job Object（进程树）都由内核强制".to_string(),
         },
         Err(e) => Capability {
             fs: false,
@@ -274,12 +274,18 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
     prep
 }
 
-/// 目的：本机能不能强制住容器围栏（**不写任何目录 ACL**）：建容器 profile + 派生容器 SID 就是容器能起来的全部前提。
-///   三态：profile 建不起来（环境拒绝建）= 环境结论；profile 建得起来却派生不出 SID = 我们的步骤写错了。
+/// 目的：本机能不能强制住容器围栏（**不写任何目录 ACL**）：建容器 profile + 派生容器 SID 是容器能起来的全部前提；
+///   `net=true` 还要能建出 internetClient 能力 SID（建不出就是我们写错了，不静默按断网/无围栏跑）。
+///   三态：profile 建不起来（环境拒绝建）= 环境结论；profile 建得起来却派生不出 SID / 能力 = 我们的步骤写错了。
 pub fn verify(spec: &FenceSpec, _command: &str) -> FenceVerdict {
     let name = container_name(spec);
     if let Err(e) = ensure_profile(&name) {
         return FenceVerdict::EnvUnavailable(format!("容器 profile 建不起来：{}", e));
+    }
+    if spec.net {
+        if let Err(e) = internet_client_sid(true) {
+            return FenceVerdict::Broken(format!("internetClient 能力建不起来：{}", e));
+        }
     }
     match container_sid(&name) {
         Ok(sid) => {
@@ -325,8 +331,15 @@ pub fn run_fenced(spec: &FenceSpec, prepared: bool, home: Option<&Path>, command
             code
         }
         Err(e) => {
-            // 容器起不来也要如实说清，并退回普通方式执行（能力等级已在启动报告里说明）。
-            eprintln!("[围栏] 容器围栏未生效（{}）：按如实降级继续执行", e);
+            // 容器起不来要如实说清；net=true 时不能退回无围栏（那样会连文件系统围栏一起丢掉），直接拒绝。
+            eprintln!("[围栏] 容器围栏未生效（{}）", e);
+            if spec.net {
+                eprintln!(
+                    "[围栏] 本次要求放行出站网络，但能力/容器授不上：拒绝执行（不按无围栏跑）"
+                );
+                return FENCE_FAILED;
+            }
+            eprintln!("[围栏] 按如实降级继续执行");
             run_unfenced(spec, command)
         }
     }

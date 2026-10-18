@@ -104,22 +104,3 @@
     三平台各有一份覆盖率报告，且报告明确标注"仅进程内 / 仅当前平台"或已聚合子进程；
     未覆盖的生产路径逐条有补测或缺口结论。
   blocked_by: 缺少观察面（子进程插桩与合并尚未实现）
-
-- id: fence.windows-net-flag-ignored
-  scope: global
-  level: T4
-  why: |
-    `FenceSpec.net` 在三个平台上的实际行为不一致：macOS 按它决定 seatbelt profile 要不要放行网络；
-    Linux 本来就不围栏网络（能力表里 net=false）；Windows 容器恒用 `CapabilityCount: 0`，
-    等于**永远断网**，`net: true` 被静默忽略。需要出站网络的模块工具在 Windows 上拿不到，
-    而接口仍让人以为 net 生效。
-  how: |
-    1) 先定语义：要么 net=true 时给容器加 internetClient（并明确 privateNetwork 等边界），
-       要么明确 Windows 虚拟机档恒断网、把 net 在 Windows 上标成"不支持"并由就绪诊断如实报；
-    2) 按定下的语义改 `src/kernel/detail/confine/windows/container.rs` 与 FenceSpec 的文档，
-       补 Windows 真机探针（net=true / false 各一条）；
-    3) 同步 docs/kernel/README.md、docs/tools/ 与 RUNTIME_SPEC.md 的围栏口径。
-  accept: |
-    Windows 真机探针能区分 net=true / false 的实际出站能力（或明确断网并由诊断如实报）；
-    `--fence-verify` / `--doctor` 的结论与真实行为一致；文档不再把 net 写成 Windows 上生效。
-  blocked_by: 需要产品决定（放行出站 vs 明确恒断网）

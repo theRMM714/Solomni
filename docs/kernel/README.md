@@ -13,7 +13,7 @@
 - 跨业务共享的**事实类型**与路径的对外书写形式。
 - **外部进程执行**：一次性的 `ProcessRunner` 与长驻的 `SessionHost`。
 - **长驻子进程的账与回收**（`procs`）。
-- **围栏机制**（`confine`）：可达范围、断网、进程树、平台实现与 Windows 授权台账。
+- **围栏机制**（`confine`）：可达范围、出站网络、进程树、平台实现与 Windows 授权台账。
 
 **不管**：
 
@@ -102,20 +102,22 @@
 - 守门进程用系统 shell 执行模块作者写的命令行（`sh -c` / `cmd /C`）——命令行是模块声明的一部分。
 - 环境白名单：外层 `env_clear`，只注入 `fence_env`（PATH / PATHEXT / 系统根 / LANG / TZ 等，`HOME` 与 `TEMP` 指向该 agent 私有沙箱）与模块隐秘字段；其它环境与凭据不进工具进程。
 - 收尾：stdout / stderr 分别读；超时 30 秒（`ProcTools::timeout`）后连根杀树；输出上限 16000 字符。超时、截断、围栏失败的文案经 `ProcessTexts` 注入，机制不硬编码。
-- 围栏装不上（本机不支持 / 容器起不来 / Windows 外层未授权）：守门进程如实降级，按无围栏执行；能力等级已在启动报告里说明。
+- 围栏装不上（本机不支持 / 容器起不来）：`net=false` 时守门进程如实降级，按无围栏执行；`net=true` 时能力授不上则**拒绝执行**（不能把文件系统围栏一起丢掉）。能力等级已在启动报告里说明。
+- Windows 外层未授权（`fence_write=false`）：容器不装，按无围栏执行；`net` 不生效，启动报告的「本次实际」已标出。
 - Windows 未授权时段先自检（`confine::verify`）：`EnvUnavailable` = 本机不支持，降级照跑；`Broken` = 自检说机制有效却装不上（我们写错了），**拒绝执行**，不按无围栏跑。
 - 固定退出码 `111`（`FENCE_FAILED`）只用于：`FenceJob` JSON 非法、守门进程里工具命令起不来、或工具被信号结束拿不到退出码。
 - 围栏生效且工具非零退出：守门进程往 stderr 补一条边界说明（可达范围 + 范围外被围栏拒绝）；成功不打扰。
 
 平台差异：
 
-| 平台 | 文件系统 | 断网 | 机制 |
+| 平台 | 文件系统 | 出站网络 | 机制 |
 | --- | --- | --- | --- |
 | Linux | Landlock（内核不支持或规则被拒时如实降级） | 不围栏 | 守门进程内装 Landlock |
-| macOS | seatbelt（`sandbox_init` 是私有且已弃用的 ABI；失效时如实降级） | 按 `net` | 守门进程内装 seatbelt；祖先元数据放行 `file-read-metadata` |
-| Windows | AppContainer（外层 `prepare_fence` 把可达范围写进目录 ACL） | 断（容器不授网络能力；当前不按 `net` 放行） | 守门进程建容器 profile 并在容器内跑；作业对象管进程树与进程数上限 |
+| macOS | seatbelt（`sandbox_init` 是私有且已弃用的 ABI；失效时如实降级） | 按 `net`（真 = 放行 `network-outbound`；假 = 拒绝） | 守门进程内装 seatbelt；祖先元数据放行 `file-read-metadata` |
+| Windows | AppContainer（外层 `prepare_fence` 把可达范围写进目录 ACL） | 按 `net`（真 = 授 `internetClient` 公网出站；假 = 不授） | 守门进程建容器 profile 并在容器内跑；作业对象管进程树与进程数上限 |
 | 其它 | 无（如实降级） | 无 | 只有超时与整棵树终止 |
 
+- **网络边界**：只放行出站（Windows `internetClient` / macOS `network-outbound`），不授 private network，也不做 loopback 豁免；Linux 本机档不围栏网络（`capability().net=false`），如实报告。Windows 未授权 `fence_write` 时容器不装，`net` 同样不生效（启动报告的「本次实际」会标出）。
 - 进程树：Unix 起进程时开独立进程组，超时 / 退出时对负 pid 发 `SIGKILL`；Windows 把工具进程放进守门进程的作业对象（`KILL_ON_JOB_CLOSE`），守门进程一死整棵树随之消亡。
 - **本机能力**与**本次实际**分开报（见 `src/main.rs` 的启动报告）：`fence_write` 只决定 Windows 是否写目录 ACL；Linux / macOS 的围栏在守门进程里自足。所以「本次实际」在 Linux / macOS 上等于本机能力；Windows 未授权时 fs/net 为假，进程树、资源上限与环境白名单照旧生效。
 

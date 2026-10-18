@@ -839,7 +839,7 @@ function buildConfigForm(sid, cfg, c, box) {
   // 网络
   const secN = cfgDiv('cfg-sec');
   secN.appendChild(cfgDiv('cfg-sec-title', '网络'));
-  const net = checkbox('放行出站网络（默认不放行：虚拟机 guest 无网卡，脚本连不出去；本机档不隔离网络，这个开关只对虚拟机档有意义）', draft.net);
+  const net = checkbox('放行出站网络（默认不放行。虚拟机档：guest 网卡；本机档：Windows / macOS 按此开关放行/断网，Linux 不隔离网络；只放行公网出站，不授局域网/回环；Windows 未授权本机写权限时容器不装，断网不生效）', draft.net);
   net.box.addEventListener('change', () => { draft.net = net.box.checked; });
   secN.appendChild(net.wrap);
   box.appendChild(secN);

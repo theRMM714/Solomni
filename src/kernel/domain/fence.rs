@@ -33,7 +33,9 @@ pub struct FenceSpec {
     pub private: PathBuf,
     /// 目的：工具进程的工作目录（它所属模块的根目录）。
     pub cwd: PathBuf,
-    /// 目的：是否放行出站网络（默认否）。
+    /// 目的：是否放行出站网络（默认否）。能强制的本机档：Windows 授 `internetClient`、macOS 放行
+    ///   `network-outbound`；Linux 本机档不围栏网络（`capability().net=false`）；虚拟机档由 QEMU 网卡决定。
+    ///   只放行出站，不授 private network / loopback。
     pub net: bool,
 }
 

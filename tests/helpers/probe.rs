@@ -33,12 +33,18 @@ pub fn scratch(name: &str) -> PathBuf {
 /// 验容器机制传 true（ACL 授权是产品在真实会话里做的，探针不写本机权限项）；验协议与降级路径传 false
 /// ——那正是未授权机器上的真实路径。
 pub fn job_json(rw: &[PathBuf], cwd: &PathBuf, prepared: bool) -> String {
+    job_json_net(rw, cwd, prepared, false)
+}
+
+/// 目的：带网络开关的守门进程入参——net 为真时由平台机制放行出站（Windows internetClient / macOS network-outbound）。
+pub fn job_json_net(rw: &[PathBuf], cwd: &PathBuf, prepared: bool, net: bool) -> String {
     let esc = |p: &PathBuf| p.to_string_lossy().replace('\\', "/");
     let roots: Vec<String> = rw.iter().map(|p| format!("\"{}\"", esc(p))).collect();
     format!(
-        "{{\"agent\":\"probe\",\"rw\":[{}],\"ro\":[],\"cwd\":\"{}\",\"net\":false,\"prepared\":{},\"home\":null}}",
+        "{{\"agent\":\"probe\",\"rw\":[{}],\"ro\":[],\"cwd\":\"{}\",\"net\":{},\"prepared\":{},\"home\":null}}",
         roots.join(","),
         esc(cwd),
+        net,
         prepared
     )
 }

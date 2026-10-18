@@ -92,6 +92,9 @@ agent 实例名不得占用 `work` / `children`（名单在 `systools/names.yaml
   **启动时自检并如实报告能力等级**：装不上就说装不上；自检确认机制有效却仍装不上 = 程序自己写错了，那一路**拒绝执行**。
   **必要落点授不上不静默降级**：经统一裁决通道问一次（本轮无围栏跑一次 / 放弃这次调用）；拒绝、没人答或没有可回答的前端一律不执行；**可选落点**授不上只记事实。
   机制细节见 [ARCHITECTURE.md](ARCHITECTURE.md)，三平台真机探针见 [TESTING.md](TESTING.md)。
+- **出站网络**（`exec.net`，默认 false）：虚拟机档决定 guest 网卡；本机档 Windows 授 `internetClient`、
+  macOS 放行 `network-outbound`、Linux 不围栏网络（能力表如实报 `net=false`）。只放行出站，
+  不授 private network / loopback；Windows 未授权 `fence_write` 时容器不装，`net` 不生效。
 - **未授权不等于无围栏**：Windows 的容器围栏（路径级可达范围与断网）要授权才装得上；
   Linux / macOS 的围栏在守门进程里自足，不受授权影响。进程树与环境白名单两种时段都生效；
   启动报告把"本机能力"与"本次实际"分两行说清。

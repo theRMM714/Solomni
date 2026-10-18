@@ -139,6 +139,8 @@ tools:
 - **谁编**：**系统**（不是 agent）——`solomni --build=<模块 id>`。产品在**目标环境**里跑 `command`
   （本机档在宿主；虚拟机档用 `--guest=<虚拟根>` 在 **guest 里用它的编译包**编），围栏由产品给
   （只写模块目录与状态目录、按 `net` 声明）；**工具链不进 agent 的工具围栏**。
+  `net` 的平台落点：虚拟机档决定 guest 网卡；本机档 Windows 授 `internetClient`、macOS 放行
+  `network-outbound`、Linux 不围栏网络。默认 false；只放行出站，不授 private network / loopback。
 - **入口判据**：`tools.<名>.command` 的首个 token 是**相对路径**时，它就是模块内的产物，模块目录下必须有那个
   **在目标环境里能直接跑**的文件——名字按**目标环境**的壳解析（本机档 = 宿主；虚拟机档 = guest 的 `os`）：
   unix 要求可执行位，Windows 补 `.exe` / `.cmd` / `.bat` / `.com`；跨平台时还要看**文件形式**（ELF / Mach-O / PE / 脚本头）——

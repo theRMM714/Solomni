@@ -94,7 +94,7 @@ impl crate::kernel::ports::FenceHost for FenceHostAdapter {
 pub struct Capability {
     /// 目的：文件系统可达范围是否被真正强制。
     pub fs: bool,
-    /// 目的：出站网络是否被真正强制关闭。
+    /// 目的：出站网络是否受围栏控制（按 `net` 断/放）。
     pub net: bool,
     /// 目的：进程树是否连根围住（超时/退出能杀整棵）。
     pub tree: bool,

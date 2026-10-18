@@ -188,7 +188,7 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 
 两个范围都只作调查：全捕获 = `MUTATION-OK`，否则 `MUTATION-FOUND`；`capability` 范围按需派发。棘轮基线只在出现「已知容忍」的未捕获时再建。
 
-### CI（GitHub Actions）：跨平台与真机的唯一事实来源
+### CI（GitHub Actions）：跨平台与真机的参考事实来源
 
 跨平台验收工作流是 `.github/workflows/test.yml`，**两种触发：PR（目标 `main`，且已 Ready for review）与手动
 `workflow_dispatch`**；`push` 不触发。Draft PR 的 `opened` / `synchronize` 仍会创建 run，但所有 job 跳过

@@ -151,16 +151,15 @@
 ### （五）收口与销账
 
 1. 按 `TESTING.md` 运行适用测试和质量检查：本地 `node run-tests.js` 全绿；失败则继续修复，不得把 `env-skip`、`gap` 或 `blocked` 写成通过。
-2. 缺口销账：`tests/gaps.yaml` 删已补条目，并按规则同步门户与现状描述；权威文档里删掉过期、临时和矛盾的说法。
-3. 差异自查：`git status` 干净、无无关改动、无机器路径与用户信息、PR 只含本任务。
-4. 把 PR 正文改成最终状态（做了什么 / 未做 / 风险），并写明验收证据（本地报告标记、CI run 与 `sha`）。
-5. 交用户确认。
+2. 差异自查：`git status` 干净、无无关改动、无机器路径与用户信息、PR 只含本任务。
+3. 交用户确认。
+4. 用户确认后缺口销账：`tests/gaps.yaml` 删已补条目，并按规则同步门户与现状描述；权威文档里删掉过期、临时和矛盾的说法。
+5. 把 PR 正文改成最终状态（做了什么 / 未做 / 风险），并写明验收证据。
 
 ### （六）Ready、CI 与合并
 
-1. 用户确认后才标 Ready for review；**agent 不自行 Ready、不自行合并**（用户明确要求时除外）。
-2. Ready 触发三平台 CI，之后的推送也会自动重跑；CI 绿且 `ci-report` 的 `sha` 等于分支头才算验收（读法见 §七）。
-3. 合并由用户执行，方式 squash：PR 标题即主线提交信息，必须能独立说明改了什么。合并后删任务分支。
+1. **agent 不自行 Ready、不自行合并**（用户明确要求时除外）。
+2. 合并由用户执行，方式 squash：PR 标题即主线提交信息，必须能独立说明改了什么。合并后删任务分支。
 
 ### 例外
 
@@ -175,7 +174,7 @@
 - 提交前检查 `.gitignore`，并用 `git status` 确认没有意外跟踪文件或无关修改。
 - 不覆盖、删除或提交用户已有且不属于当前范围的工作区修改。
 - 完成修改和适用测试后提交。
-- CI 触发：需要真机或 GitHub Actions 验证时推推送后用  `gh workflow run test.yml --ref <分支>` 手动派发；`push` 本身不触发。触发细节与判据见 `docs/testing/execution-ci.md`。
+- CI 触发：本地环境无法测试验证，需要真机或 GitHub Actions 时，使用  `gh workflow run test.yml --ref <分支>` 手动派发；`push` 本身不触发。触发细节与判据见 `docs/testing/execution-ci.md`。
 - PR：开工即建 Draft（正文 = 方案），收口后改成最终状态；Draft 期不跑 CI。
 - actions 的 `ci-report` 直接用 git 或 git CLI 拉取，禁止轮询网页；先比对 `sha`，时机无法确认时委托用户拉取。
 - 拉取节奏与判定顺序一律以 `docs/testing/execution-ci.md` 为准。

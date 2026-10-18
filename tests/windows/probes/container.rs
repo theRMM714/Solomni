@@ -1,8 +1,10 @@
-//! AppContainer 探针：容器真起来了、允许范围之外读不到也写不进、不给 capability 就是断网。
+//! AppContainer 探针：容器真起来了、允许范围之外读不到也写不进，`net` 决定是否授 internetClient（断网/放行）。
 //! 这些断言不需要写目录 ACL（ACL 授权由产品在真实会话里做），但要**建一个 AppContainer profile**——
 //! 那是改本机状态的动作，所以默认不跑：必须显式开启（node run-tests.js --fence-live 会把它传进来）。
 
-use crate::probe::{env_blocks_container, job_json, run_launcher, runtime_env, scratch};
+use crate::probe::{
+    env_blocks_container, job_json, job_json_net, run_launcher, runtime_env, scratch,
+};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -27,11 +29,17 @@ fn skip_unless_live(name: &str) -> bool {
 
 /// 探针用的围栏：rw 给一个落点；cwd 用系统目录（容器默认可读，避免把"CWD 能不能读"混进断言）。
 fn spec_for(rw: &PathBuf) -> String {
+    spec_for_net(rw, false)
+}
+
+/// 同上，但显式给 `net`：`true` 授 internetClient，`false` 不授（断网）。
+fn spec_for_net(rw: &PathBuf, net: bool) -> String {
     // prepared = true：这些探针就是要验容器机制本身；ACL 授权由产品在真实会话里做。
-    job_json(
+    job_json_net(
         std::slice::from_ref(rw),
         &PathBuf::from("C:\\Windows\\System32"),
         true,
+        net,
     )
 }
 
@@ -152,13 +160,14 @@ fn container_keeps_the_shared_area_out_of_reach() {
     );
 }
 
+/// **网络开关**：`net=false` 断网；`net=true` 只授 internetClient（公网出站）。
+/// 先在本机证明外网可达，再分别验两种模式；本机没有可比对的外网时如实跳过。
 #[test]
-fn container_has_no_network() {
-    if skip_unless_live("container_has_no_network") {
+fn container_network_follows_the_net_flag() {
+    if skip_unless_live("container_network_follows_the_net_flag") {
         return;
     }
-    // 先在本机（容器外）证明那个监听确实连得上，再在容器里证明连不上——否则这条断言没有意义。
-    // 用外网（IP 直连，避开 DNS）而不是回环：AppContainer 的回环本来就可能可连，拿它当断网证据不成立。
+    // 用外网（IP 直连，避开 DNS）而不是回环：AppContainer 的回环行为另有一条边界探针。
     let cmd = "curl -s -m 4 -o NUL -w %{http_code} http://1.1.1.1/".to_string();
     let outside = Command::new("cmd")
         .arg("/C")
@@ -168,23 +177,91 @@ fn container_has_no_network() {
     let outside_code = String::from_utf8_lossy(&outside.stdout).trim().to_string();
     if outside_code.is_empty() || outside_code == "000" {
         eprintln!(
-            "[探针] 容器外也连不上外网（{}）：本机没有可比对的网络，跳过断网断言（不静默当作通过）",
+            "[探针] 容器外也连不上外网（{}）：本机没有可比对的网络，跳过网络开关断言（不静默当作通过）",
             outside_code
         );
         return;
     }
     let dir = scratch("container-net");
-    let (_, out, err) = run_launcher(&spec_for(&dir), &cmd);
+    let (_, out, err) = run_launcher(&spec_for_net(&dir, false), &cmd);
     if env_blocks_container(&err) {
-        eprintln!("[探针] 本环境不允许容器围栏，跳过断网断言：{}", err.trim());
+        eprintln!(
+            "[探针] 本环境不允许容器围栏，跳过网络开关断言：{}",
+            err.trim()
+        );
         return;
     }
-    let inside_code = out.trim().to_string();
+    assert_eq!(
+        out.trim(),
+        "000",
+        "net=false 不该连得上外网（容器外={}）：stderr={}",
+        outside_code,
+        err
+    );
+    let (_, out, err) = run_launcher(&spec_for_net(&dir, true), &cmd);
+    if env_blocks_container(&err) {
+        eprintln!(
+            "[探针] 本环境不允许容器围栏，跳过网络开关断言：{}",
+            err.trim()
+        );
+        return;
+    }
+    let inside_code = out.trim();
     assert!(
-        inside_code == "000",
-        "容器不给 capability，就不该连得上外网（容器外={}，容器内={}）：stderr={}",
+        !inside_code.is_empty() && inside_code != "000",
+        "net=true 应授 internetClient 出站（容器外={}，容器内={}）：stderr={}",
         outside_code,
         inside_code,
+        err
+    );
+}
+
+/// **网络边界**：只授 internetClient，不授 privateNetworkClientServer，也不做 loopback 豁免。
+/// 先让本机回环监听真的应答，再验容器里连不上；连不上才算边界成立。
+#[test]
+fn internet_client_does_not_open_loopback() {
+    if skip_unless_live("internet_client_does_not_open_loopback") {
+        return;
+    }
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("占回环端口");
+    let port = listener.local_addr().expect("取回环端口").port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut buf = [0u8; 1024];
+            let _ = std::io::Read::read(&mut stream, &mut buf);
+            let _ = std::io::Write::write_all(
+                &mut stream,
+                b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok",
+            );
+        }
+    });
+    let cmd = format!(
+        "curl -s -m 4 -o NUL -w %{{http_code}} http://127.0.0.1:{}/",
+        port
+    );
+    let host = Command::new("cmd")
+        .arg("/C")
+        .arg(&cmd)
+        .output()
+        .expect("容器外跑一遍");
+    if String::from_utf8_lossy(&host.stdout).trim() != "200" {
+        eprintln!("[探针] 本机回环监听没有应答，跳过 loopback 边界断言");
+        return;
+    }
+    let dir = scratch("container-net-loopback");
+    let (_, out, err) = run_launcher(&spec_for_net(&dir, true), &cmd);
+    if env_blocks_container(&err) {
+        eprintln!(
+            "[探针] 本环境不允许容器围栏，跳过 loopback 边界断言：{}",
+            err.trim()
+        );
+        return;
+    }
+    assert_eq!(
+        out.trim(),
+        "000",
+        "只授 internetClient，不该打开 loopback：stderr={}",
         err
     );
 }

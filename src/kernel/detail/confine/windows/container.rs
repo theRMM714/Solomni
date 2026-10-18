@@ -12,7 +12,10 @@ use windows_sys::Win32::Foundation::{CloseHandle, LocalFree};
 use windows_sys::Win32::Security::Isolation::{
     CreateAppContainerProfile, DeriveAppContainerSidFromAppContainerName,
 };
-use windows_sys::Win32::Security::{PSID, SECURITY_CAPABILITIES};
+use windows_sys::Win32::Security::{
+    CreateWellKnownSid, WinCapabilityInternetClientSid, PSID, SECURITY_CAPABILITIES,
+    SID_AND_ATTRIBUTES,
+};
 use windows_sys::Win32::System::Console::{
     GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
 };
@@ -168,7 +171,35 @@ pub(crate) fn join_kill_on_close_job(max_processes: u32) -> Result<(), String> {
     }
 }
 
-/// 目的：把工具进程放进容器里跑：不给任何 capability（= 断网），stdio 用外层给的那三个句柄；环境用运行期白名单显式给出。
+/// 目的：`SID_AND_ATTRIBUTES.Attributes` 的启用位（winnt.h 的 SE_GROUP_ENABLED）。
+const SE_GROUP_ENABLED: u32 = 0x0000_0004;
+/// 目的：SID 缓冲上限（winnt.h 的 SECURITY_MAX_SID_SIZE；能力 SID 也在上限内）。
+const MAX_SID_BYTES: u32 = 68;
+
+/// 目的：按 `net` 准备容器的网络能力：`true` 只授 `internetClient`（公网出站），`false` 不授（断网）。
+///   不授 `privateNetworkClientServer`，也不做 loopback 豁免；返回的 SID 存储必须活到 `CreateProcessW` 返回。
+pub(crate) fn internet_client_sid(enabled: bool) -> Result<Option<Vec<u8>>, String> {
+    if !enabled {
+        return Ok(None);
+    }
+    let mut sid = vec![0u8; MAX_SID_BYTES as usize];
+    let mut size = MAX_SID_BYTES;
+    let ok = unsafe {
+        CreateWellKnownSid(
+            WinCapabilityInternetClientSid,
+            std::ptr::null_mut(),
+            sid.as_mut_ptr() as PSID,
+            &mut size,
+        )
+    };
+    if ok == 0 {
+        return Err("CreateWellKnownSid(internetClient) 失败".to_string());
+    }
+    sid.truncate(size as usize);
+    Ok(Some(sid))
+}
+
+/// 目的：把工具进程放进容器里跑：按 `net` 授/不授 `internetClient`，stdio 用外层给的那三个句柄；环境用运行期白名单显式给出。
 pub(crate) fn run_in_container(sid: PSID, spec: &FenceSpec, command: &str) -> Result<i32, String> {
     // 环境块显式给（见 fence_env）：子进程拿到的就是白名单本身，不靠"守门进程恰好继承了什么"。
     let mut block: Vec<u16> = Vec::new();
@@ -179,10 +210,21 @@ pub(crate) fn run_in_container(sid: PSID, spec: &FenceSpec, command: &str) -> Re
         block.push(0);
     }
     block.push(0);
+    // 网络：net=true 只授 internetClient（公网出站）；net=false 不授任何 capability（断网）。
+    // 不授 privateNetworkClientServer，也不做 loopback 豁免——边界见 FenceSpec::net 的文档。
+    let network_sid = internet_client_sid(spec.net)?;
+    let mut network_attr = network_sid.as_ref().map(|sid| SID_AND_ATTRIBUTES {
+        Sid: sid.as_ptr() as PSID,
+        Attributes: SE_GROUP_ENABLED,
+    });
+    let capability_count = if network_attr.is_some() { 1 } else { 0 };
+    let capabilities = network_attr
+        .as_mut()
+        .map_or(std::ptr::null_mut(), |attr| attr as *mut SID_AND_ATTRIBUTES);
     let mut caps = SECURITY_CAPABILITIES {
         AppContainerSid: sid,
-        Capabilities: std::ptr::null_mut(),
-        CapabilityCount: 0,
+        Capabilities: capabilities,
+        CapabilityCount: capability_count,
         Reserved: 0,
     };
     let mut size: usize = 0;

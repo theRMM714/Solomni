@@ -34,6 +34,7 @@
 
 - 工具表 / 角色表的同步见 [tools-and-roles.md](tools-and-roles.md) 与 `systools/`。
 - 围栏机制的同步细则（平台探针、台账、ACE、解释器基线）与围栏落点（必要 / 可选、授不上的行为、平台差异）都在 [kernel](../kernel/README.md) 的「围栏落点：必要与可选」与「工具进程与守门协议」。
+- `FenceSpec.net` 的平台落点以 kernel 的「工具进程与守门协议」为准；tools 只派生描述符，不解释平台能力。
 - 授权面按**注入的事实**派生：
   - `<module>/userdata/` 由 modules 在**扫描载入时确保存在**（产品唯一的自动写盘，幂等）；建不了如实标注、不阻断加载。
   - domain 不读盘：`has_userdata` 作为事实随沙箱注入。

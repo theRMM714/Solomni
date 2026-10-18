@@ -44,6 +44,9 @@ session/<工作名>/
   `work_pull` / `work_commit` 与主副本同步（文件级三方比较），`work_status` 看状态。
 - **逐 agent 的权限覆盖**写在 `meta.yaml` 的 `agents[].permissions`（读/提交白名单、黑名单、模块写授权、决定粒度）：
   只覆盖显式给出的字段，缺省继承 `settings.yaml` 的全局默认；语义见 [docs/permission/README.md](../permission/README.md)。
+- **出站网络**（`exec.net`，默认 false）：虚拟机档决定 guest 网卡；本机档 Windows 授 `internetClient`、
+  macOS 放行 `network-outbound`、Linux 不围栏网络（`capability().net=false`）。只放行出站，不授 private network /
+  loopback；Windows 未授权 `fence_write` 时容器不装，`net` 不生效。
 - 侧栏**可见**：agent 会话挂在主会话下（`meta.parent`），用户可进入查看与发言干预。
 - 侧栏顺序是**树序**，由核心给出（父会话紧跟它的子会话，深度优先、各自按时间倒序）：
   顺序与缩进是同一件事的两面，各排各的就会出现"子会话排在父会话上面"的错位。

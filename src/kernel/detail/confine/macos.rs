@@ -1,6 +1,7 @@
 //! 目的：macOS 后端——seatbelt（sandbox_init，私有且已弃用的 ABI）把「可达到哪些路径」变成内核强制。
-//! 管：生成 profile 文本——默认拒绝一切，再逐条放行运行基线（只读）与 spec.rw（读写）。
-//! 不管：网络——spec.net 为假时连网络一起拒；本档不承诺别的东西。
+//! 管：生成 profile 文本——默认拒绝一切，再逐条放行运行基线（只读）与 spec.rw（读写）；
+//!   网络按 spec.net：真 = 放行出站，假 = 拒绝。
+//! 不管：入站 / 局域网 / 回环的细分策略——本档只按 spec.net 放行出站。
 //! 联动：装不上时如实降级（打印说明后照常执行）；降级原因分「本机 ABI 失效」（环境结论）与「profile 被拒」（写错，探针硬失败）。
 
 use super::{shell_command, Capability, FenceVerdict, FENCE_FAILED};
@@ -43,7 +44,7 @@ pub fn capability() -> Capability {
             fs: true,
             net: true,
             tree: true,
-            note: "macOS：seatbelt（sandbox_init，私有且已弃用的 ABI）强制可达范围并按档位断网"
+            note: "macOS：seatbelt（sandbox_init，私有且已弃用的 ABI）强制可达范围，并按 net 断网/放行出站"
                 .to_string(),
         }
     } else {
@@ -281,7 +282,10 @@ fn profile_text(spec: &FenceSpec, command: &str) -> String {
             escape(m)
         ));
     }
-    if !spec.net {
+    if spec.net {
+        // 只放行出站（DNS / HTTP 等客户端连接）；入站与绑定仍由 (deny default) 拒绝。
+        out.push_str("(allow network-outbound)\n");
+    } else {
         out.push_str("(deny network*)\n");
     }
     out

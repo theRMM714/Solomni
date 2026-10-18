@@ -20,7 +20,7 @@ pub const DEFAULT_PORT: u16 = 3081;
 pub struct FenceInfo {
     /// 本机能力：这台机器**能不能**强制文件系统围栏。
     pub fs: bool,
-    /// 本机能力：这台机器**能不能**断网。
+    /// 本机能力：这台机器**能不能**按 `net` 控制出站网络（断/放）。
     pub net: bool,
     /// 本机能力：进程树围栏（未授权时段同样生效）。
     pub tree: bool,
@@ -28,7 +28,7 @@ pub struct FenceInfo {
     pub note: String,
     /// **本次实际**生效的文件系统围栏（只有 Windows 未授权时为假：容器围栏要写目录 ACL；Unix 围栏自足）。
     pub effective_fs: bool,
-    /// **本次实际**生效的断网（只有 Windows 受授权影响）。
+    /// **本次实际**生效的网络控制（只有 Windows 受授权影响）。
     pub effective_net: bool,
     /// 用户有没有授权在本机写权限项（只影响 Windows 的容器围栏）。
     pub write_allowed: bool,
