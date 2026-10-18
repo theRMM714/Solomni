@@ -123,19 +123,3 @@
     Windows 真机探针能区分 net=true / false 的实际出站能力（或明确断网并由诊断如实报）；
     `--fence-verify` / `--doctor` 的结论与真实行为一致；文档不再把 net 写成 Windows 上生效。
   blocked_by: 需要产品决定（放行出站 vs 明确恒断网）
-
-- id: kernel.startup-fence-report-mismatch
-  scope: global
-  level: T3
-  why: |
-    `src/main.rs` 的启动报告在 `fence_write` 未开时把 fs/net 报成不可用；但 Unix（Landlock / seatbelt）的围栏
-    不依赖 fence_write，`--doctor` 与真实执行仍会装围栏。同一台机器上启动报告与 `--doctor` 结论不一致，
-    容易让人以为围栏没生效。
-  how: |
-    1) 启动报告按平台取实际能力（`fence_write` 只影响 Windows 的 ACL 写入），与 `capability()` / `--doctor` 共用一份判据；
-    2) 补用例：`fence_write=false` 时 Unix 的启动报告与 `--doctor` 一致；Windows 上仍如实报 ACL 不写；
-    3) 同步 docs/entry 与 docs/kernel 的启动报告口径。
-  accept: |
-    三平台启动报告与 `--doctor` 对 fs/net 的结论一致（同一份能力判据）；有用例钉住；
-    文档不再出现"fence_write 关 = 路径级围栏关闭"的口径。
-  blocked_by: 缺少实现（报告与能力判据没有共用）

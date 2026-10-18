@@ -1,5 +1,6 @@
 //! 目的：守门进程——把围栏装进工具进程，然后才跑模块声明的命令（实现 tools 的围栏策略）。
-//! 管：按平台把围栏（可读可写的根、断网、进程树围栏、资源上限）装好；平台实现分文件 linux.rs / macos.rs / windows/ / other.rs。
+//! 管：按平台把围栏（可读可写的根、断网、进程树围栏、资源上限）装好，并给出「本机能力」与
+//!   「本次实际」（effective_paths）的同一份判据；平台实现分文件 linux.rs / macos.rs / windows/ / other.rs。
 //! 不管：策略（哪些根可达、放不放网）——由 conductor 派生后经命令行传入。
 //! 联动：能力不足时如实上报（capability），降级而非崩溃——绝不静默假装有围栏。
 
@@ -104,6 +105,26 @@ pub struct Capability {
 /// 目的：本机能力（装配期如实告知）。
 pub fn capability() -> Capability {
     backend::capability()
+}
+
+impl Capability {
+    /// 目的：本次实际生效的路径级围栏（文件系统, 断网）——本机能力 × 授权。
+    ///   只有 Windows 的容器围栏依赖外层写目录 ACL；Linux / macOS 的 Landlock / seatbelt 在守门进程里自足。
+    ///   进程树围栏不受授权影响，调用方直接用 `Capability::tree`。
+    #[cfg(windows)]
+    pub fn effective_paths(&self, write_allowed: bool) -> (bool, bool) {
+        if write_allowed {
+            (self.fs, self.net)
+        } else {
+            (false, false)
+        }
+    }
+
+    /// 目的：同上（非 Windows：没有外层授权这一步，授权值不参与判据）。
+    #[cfg(not(windows))]
+    pub fn effective_paths(&self, _write_allowed: bool) -> (bool, bool) {
+        (self.fs, self.net)
+    }
 }
 
 /// 目的：守门进程的入参：conductor 的围栏策略 + **外层是否已把本机授权做完** + 产品私有区（台账落点）。

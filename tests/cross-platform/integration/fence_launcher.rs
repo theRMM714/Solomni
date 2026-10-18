@@ -36,7 +36,7 @@ fn fence_failure_is_reported_honestly() {
 
 #[test]
 fn launcher_runs_the_command_and_passes_its_exit_code() {
-    // prepared = false = 未授权机器上的真实路径：守门进程不装容器，按平台围栏如实降级跑命令。
+    // prepared = false = Windows 未授权机器上的真实路径：守门进程不装容器；Unix 仍按平台围栏跑，Windows 如实降级。
     let dir = scratch("ok");
     let (code, out, err) = run_launcher(
         &job_json(std::slice::from_ref(&dir), &dir, false),

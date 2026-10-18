@@ -26,11 +26,11 @@ pub struct FenceInfo {
     pub tree: bool,
     /// 如实说明（机制名 + 限制）。
     pub note: String,
-    /// **本次实际**生效的文件系统围栏（未授权本机写权限时为假：路径级围栏要写目录 ACL 才装得上）。
+    /// **本次实际**生效的文件系统围栏（只有 Windows 未授权时为假：容器围栏要写目录 ACL；Unix 围栏自足）。
     pub effective_fs: bool,
-    /// **本次实际**生效的断网。
+    /// **本次实际**生效的断网（只有 Windows 受授权影响）。
     pub effective_net: bool,
-    /// 用户有没有授权在本机写权限项。
+    /// 用户有没有授权在本机写权限项（只影响 Windows 的容器围栏）。
     pub write_allowed: bool,
     /// 用户显式授权的只读根个数（`settings.yaml` 的 `fence_read`）；0 = 一个都没授。
     pub read_only_roots: usize,

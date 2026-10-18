@@ -31,7 +31,15 @@ pub fn doctor(root: &std::path::Path) -> i32 {
 
 /// 目的：自检的事实本体（`--doctor` 打印它；用例也读它——不必抓 stdout）。
 pub fn doctor_json(root: &std::path::Path) -> serde_json::Value {
-    let cap = crate::kernel::detail::confine::capability();
+    doctor_json_with(root, crate::kernel::detail::confine::capability())
+}
+
+/// 目的：自检事实本体；本机能力由调用方传入——生产取一次 `capability()`，用例复用同一份值，
+///   不必再触发一次围栏自检（Windows 的自检会写临时目录 ACL）。
+pub(crate) fn doctor_json_with(
+    root: &std::path::Path,
+    cap: crate::kernel::detail::confine::Capability,
+) -> serde_json::Value {
     // 虚拟机档的逐项前置（**只读事实**）：项目内补齐过就按那一份问，否则按 PATH 问（与核心同一把尺子）。
     let installed = crate::capabilities::provision::api::Provision::status(
         &crate::capabilities::provision::ProvisionService::new(root),

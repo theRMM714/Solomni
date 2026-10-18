@@ -98,7 +98,7 @@ agents:
 streaming: true        # 流式传输：向供应商请求逐片返回（默认 true）
 show_reasoning: true   # 思维链显示（默认 true；界面上永远默认折叠、点击才展开）
 tier: host             # 默认执行档位：host（本机）| vm（虚拟机）（默认 host）
-fence_write: false     # 是否允许围栏在本机写权限（默认 false：不动本机任何权限项）
+fence_write: false     # 是否允许 Windows 容器围栏在本机写目录 ACL（默认 false：不动本机任何权限项；Linux / macOS 不需要）
 fence_read: []         # 用户显式授权的只读根（默认空：一个都不放行）
 qemu_path: ""          # 虚拟机档用的 QEMU 可执行文件路径（默认空 = 判据每次取用时采用项目内补齐的可运行包；否则兜底看 PATH。显式登记优先）
 virtiofsd_path: ""     # 虚拟机档共享后端要用的外部程序路径（如 virtiofsd；默认同 qemu_path：登记优先，否则用项目内补齐的那个）
@@ -120,7 +120,7 @@ permissions:           # 【可选】会话权限的全局默认（可被会话 
   （见 [ARCHITECTURE.md](ARCHITECTURE.md)「状态与落盘契约」与 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)）。
 - **模型调用次数没有上限**：工具循环跑到模型不再发起调用为止（执行席与讨论席一样），
   用户随时可以点「停止」。`discuss_remind_cap` 只是**提醒次数**：提醒到顶就如实记一行"未回应"放过它，整轮继续。
-- `fence_write` 可被环境变量 `SOLOMNI_FENCE_WRITE=1/0` 临时覆盖（优先级高于设置，测试与 CI 用得到）。
+- `fence_write` 可被环境变量 `SOLOMNI_FENCE_WRITE=1/0` 临时覆盖（优先级高于设置，测试与 CI 用得到）；它只影响 Windows 的目录 ACL。
 - `llm_timeout_secs` 是**单次模型调用的总预算**，全局通用：连接之外，等响应头 / 读响应体 / 整体都用它。
   **为什么是一个预算**：非流式下供应商要等整段生成完才发响应头，单独设一个小的「头超时」会把几十秒的正常长回复误判成不通。
   预算用尽 = **中断**这一轮并如实告知（用户可以点「继续」重试），不是把会话作废。

@@ -23,7 +23,7 @@
 | `src/kernel/detail/process.rs` | 外部进程执行机制（守门进程、stdin 送参、隐秘字段 env 注入、超时杀树、截断），实现 `ProcessRunner` |
 | `src/kernel/detail/procs.rs` | 长驻子进程的账（`.home/processes.json`）与回收：父死子亡的接线（`attach`：Linux 内核信号 / macOS 守门进程 / Windows 作业对象）、身份（Unix 命令行标记 / Windows 创建时间）、存活探测、终止、启动对账；登记虚拟机档的 QEMU、共享 helper 与常驻服务守门进程 |
 | `src/kernel/detail/session.rs` | 长驻外部进程机制（守门进程长跑、按行收发、关闭杀树、父死子亡、进程账登记与注销、Windows 容器预授权），实现 `SessionHost`；常驻服务的守门进程经它拉起 |
-| `src/kernel/detail/confine/mod.rs` | 围栏机制入口（策略由调用方传入；实现 `FenceHost` 释放） |
+| `src/kernel/detail/confine/mod.rs` | 围栏机制入口：本机能力与本次实际（`effective_paths`）的判据；策略由调用方传入，实现 `FenceHost` 释放 |
 | `src/kernel/detail/confine/linux.rs` | Linux 围栏后端：用 Landlock 把可达范围变成内核强制（`spec.rw` 读写、运行基线只读、其余拒绝），机制不可用时如实降级 |
 | `src/kernel/detail/confine/macos.rs` | macOS 围栏后端：生成 seatbelt profile（默认拒绝，再逐条放行运行基线与 `spec.rw`）交 `sandbox_init` 装上，装不上如实降级 |
 | `src/kernel/detail/confine/other.rs` | 其他平台后端：如实降级——只保证超时与整棵进程树终止，绝不作有文件系统围栏的假装 |

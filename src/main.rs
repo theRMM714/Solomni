@@ -223,8 +223,8 @@ fn main() {
     // 围栏是否允许在本机写权限：设置里授权过、或环境变量显式指定（SOLOMNI_FENCE_WRITE=1/0 可取反）。
     // 默认不准——没经过用户同意，本程序不动本机任何权限项。
     let write_allowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    // 启动报告已经算过的同一个事实：Web 概览要按它区分"本机能力"与"本次实际"（下面那块必定赋值）。
-    let allow_fence_write;
+    // 启动报告算出的同一份围栏事实：Web 概览按它取「本机能力」与「本次实际」（下面那块必定赋值）。
+    let fence_report;
     // 进程机制共用的文案（一次执行与长驻会话同一份）。
     let process_texts: std::sync::Arc<dyn kernel::ports::ProcessTexts> = std::sync::Arc::new(
         capabilities::tools::detail::PromptProcessTexts::new(prompt.tools()),
@@ -464,32 +464,28 @@ fn main() {
             _ => conductor.registry().app_settings().fence_write,
         };
         write_allowed.store(allow, std::sync::atomic::Ordering::Relaxed);
-        allow_fence_write = allow;
-        let cap = kernel::detail::confine::capability();
-        // 能力与本次实际**分开报**：授权与否决定路径级围栏装不装，但进程树围栏、资源上限与环境白名单
-        // 在两种时段都生效（未授权不等于无围栏）。只说"本机能力"会让用户以为未授权时什么都没有。
+        // 能力与本次实际**分开报**：授权只影响 Windows 的目录 ACL；Linux / macOS 的围栏在守门进程里自足，
+        // 未授权不等于无围栏。两行都用同一份 FenceReport，Web 概览也照它取。
+        let report = FenceReport::new(fence_cap, allow);
         let usable = |ok: bool| if ok { "可用" } else { "不可用" };
-        let (fs, net) = if allow {
-            (cap.fs, cap.net)
-        } else {
-            (false, false)
-        };
         println!(
             "[围栏] 本机能力：文件系统={} 断网={} 进程树={}（{}）",
-            usable(cap.fs),
-            usable(cap.net),
-            usable(cap.tree),
-            cap.note
+            usable(report.cap.fs),
+            usable(report.cap.net),
+            usable(report.cap.tree),
+            report.cap.note
         );
         let ro = conductor.registry().app_settings().fence_read.len();
         println!(
-            "[围栏] 本次实际：文件系统={} 断网={} 进程树={}；容器授权={}；只读根={} 个（未授权时只放行进程树与资源上限，不写本机任何权限项；要启用：设置里打开，或 .home/settings.yaml 写 fence_write: true / fence_read: [路径…]）",
-            usable(fs),
-            usable(net),
-            usable(cap.tree),
-            if allow { "已授权" } else { "未授权" },
-            ro
+            "[围栏] 本次实际：文件系统={} 断网={} 进程树={}；容器授权={}；只读根={} 个（{}）",
+            usable(report.fs),
+            usable(report.net),
+            usable(report.cap.tree),
+            fence_auth_label(report.write_allowed),
+            ro,
+            fence_auth_note(report.write_allowed)
         );
+        fence_report = report;
     }
 
     let port_flag = |args: &[String]| {
@@ -520,7 +516,7 @@ fn main() {
     // 工具级确认要有地方被作答：网页有裁决卡，CLI 在生成中就地按选项答——两边都接上了。
     handle.allow_tool_cards();
     if web {
-        serve_web(ops, port_flag(&args), allow_fence_write);
+        serve_web(ops, port_flag(&args), &fence_report);
     } else {
         // CLI 里输入 webui 可直接转入 Web，无需重启进程（能力面可克隆，两份呈现共用同一个核心）。
         // 在 Web 里按 Ctrl+C = **回到 CLI**（web::serve 收到中断就正常返回）；在 CLI 提示符下再按 = 退出。
@@ -528,30 +524,79 @@ fn main() {
             match presentation::cli::run(ops.clone(), presentation::web::DEFAULT_PORT) {
                 presentation::cli::CliExit::Exit => break,
                 presentation::cli::CliExit::Web(port) => {
-                    serve_web(ops.clone(), port, allow_fence_write);
+                    serve_web(ops.clone(), port, &fence_report);
                 }
             }
         }
     }
 }
 
-fn serve_web(ops: capabilities::conductor::api::Ops, port: u16, write_allowed: bool) {
-    let cap = kernel::detail::confine::capability();
-    // 能力与本次实际**分开报**（与启动报告同一套说法）：未授权时路径级围栏是关的，
-    // 但进程树与资源上限照旧生效——概览里必须让用户看到这个区别，不能只看"本机能力"。
-    let (fs, net) = if write_allowed {
-        (cap.fs, cap.net)
-    } else {
-        (false, false)
-    };
+/// 目的：启动报告与 Web 概览共用的一份围栏事实：本机能力 + 本次实际（授权后的路径级围栏）。
+/// 约束：授权只影响 Windows 的目录 ACL；其它平台由 `Capability::effective_paths` 判成与本机能力相同。
+struct FenceReport {
+    cap: kernel::detail::confine::Capability,
+    write_allowed: bool,
+    fs: bool,
+    net: bool,
+}
+
+impl FenceReport {
+    /// 目的：按本机能力与本次授权算出同一份事实；启动报告与 Web 不再各编一套。
+    fn new(cap: kernel::detail::confine::Capability, write_allowed: bool) -> Self {
+        let (fs, net) = cap.effective_paths(write_allowed);
+        Self {
+            cap,
+            write_allowed,
+            fs,
+            net,
+        }
+    }
+}
+
+/// 目的：本次授权状态的人类可读标签——Unix 没有外层写 ACL 这一步，不能显示成"未授权"。
+fn fence_auth_label(write_allowed: bool) -> &'static str {
+    #[cfg(windows)]
+    {
+        if write_allowed {
+            "已授权"
+        } else {
+            "未授权"
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = write_allowed;
+        "不适用"
+    }
+}
+
+/// 目的：本次授权影响的说明——只讲 Windows 的目录 ACL，避免让 Unix 读者以为还有一步授权没做。
+fn fence_auth_note(write_allowed: bool) -> &'static str {
+    #[cfg(windows)]
+    {
+        if write_allowed {
+            "容器围栏按本机能力装，写入的权限项逐条记台账"
+        } else {
+            "不写本机任何权限项，容器围栏不装，只放行进程树、资源上限与环境白名单；要启用：设置里打开，或 .home/settings.yaml 写 fence_write: true"
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = write_allowed;
+        "fence_write 只影响 Windows 的目录 ACL；本平台围栏在守门进程里自足，与授权无关"
+    }
+}
+
+fn serve_web(ops: capabilities::conductor::api::Ops, port: u16, report: &FenceReport) {
+    // 与启动报告同一份事实：能力取本机，实际取授权后的路径级围栏。
     let fence = presentation::web::FenceInfo {
-        fs: cap.fs,
-        net: cap.net,
-        tree: cap.tree,
-        note: cap.note,
-        effective_fs: fs,
-        effective_net: net,
-        write_allowed,
+        fs: report.cap.fs,
+        net: report.cap.net,
+        tree: report.cap.tree,
+        note: report.cap.note.clone(),
+        effective_fs: report.fs,
+        effective_net: report.net,
+        write_allowed: report.write_allowed,
         read_only_roots: ops
             .registry
             .settings()
