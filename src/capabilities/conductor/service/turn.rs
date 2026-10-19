@@ -381,7 +381,18 @@ impl Conductor {
 
     /// 协作中途改需求：回到需求行并追加一条新需求（旧需求留在流水里，派生以最后一条为准）。
     /// 返回重放后的完整事件流（前端整体重建，再吸收新产生的门事件）。
+    #[cfg(test)]
     pub fn update_task(&mut self, sid: &str, text: &str) -> Result<Vec<serde_json::Value>, String> {
+        Ok(self.update_task_outcome(sid, text)?.main)
+    }
+
+    /// 目的：改需求的完整结果——主视图 + 受影响的子会话视图。
+    /// 约束：改需求内部走删除回档，子会话也按同一回合收窗；事件台要按同一份结果推重置快照。
+    pub(crate) fn update_task_outcome(
+        &mut self,
+        sid: &str,
+        text: &str,
+    ) -> Result<crate::capabilities::conductor::api::RewindOutcome, String> {
         let text = text.trim();
         if text.is_empty() {
             return Err("需求不能为空".to_string());
@@ -395,7 +406,8 @@ impl Conductor {
         .ok_or("该会话没有需求行")?;
         // 回档语义是「保留 id < keep」：需求行本身要留下（新需求随后追加），所以传 keep + 1。
         // 改需求走**删除**模式：真的截掉旧需求之后的派生，再按新需求重新展开。
-        let mut out = self.rewind(sid, RewindTarget::Delete(keep + 1))?;
+        let crate::capabilities::conductor::api::RewindOutcome { mut main, children } =
+            self.rewind_outcome(sid, RewindTarget::Delete(keep + 1))?;
         let mut fresh = Vec::new();
         {
             let s = self.sessions.get_mut(sid).ok_or("无此会话")?;
@@ -405,8 +417,8 @@ impl Conductor {
             }
         }
         self.record_events(sid, &mut fresh);
-        out.extend(fresh.iter().map(|e| e.to_json()));
-        Ok(out)
+        main.extend(fresh.iter().map(|e| e.to_json()));
+        Ok(crate::capabilities::conductor::api::RewindOutcome { main, children })
     }
 
     /// 撤回某 agent 的「同意」：转录追加一条撤回行并提醒（模型/用户都看得到）。

@@ -143,6 +143,11 @@ pub enum SessionEvent {
     DecisionVoid { cards: Vec<String>, reason: String },
     /// **一次裁决回答**（推 + 落盘）：谁答的、选了哪个 id、附言。
     DecisionAnswer(DecisionAnswer),
+    /// **回档重置**（短暂，不落盘）：回档成功后，事件台用它携带该会话回档后的**活动视图**。
+    /// 前端收到后清空当前视图并按 `events` 重建；历史合流以它为**重置点**，不把回档前的旧事实
+    /// 当成实时尾巴再拼回来。为什么要有它：回档改的是盘上转录，事件台本身不能回退——
+    /// 没有这条事实，刷新/多端就无法知道"从这里开始，旧事件已经作废"。
+    Rewound { events: Vec<serde_json::Value> },
     /// **正在工作**（短暂，不落盘）：主会话据此知道"现在是谁在干活"。
     /// 为什么要有它：成员回合跑在它自己的会话里，主会话在整回合里一个事件都收不到——
     /// 前端只能靠"有增量"去猜运行态，猜不到就不切按钮、也没有占位动画（用户完全不知道在干什么）。
@@ -435,6 +440,9 @@ impl SessionEvent {
                 text,
             } => {
                 serde_json::json!({ "type": "delta", "speaker": speaker, "kind": kind, "text": text })
+            }
+            SessionEvent::Rewound { events } => {
+                serde_json::json!({ "type": "rewound", "events": events })
             }
             SessionEvent::Working { agent } => {
                 serde_json::json!({ "type": "working", "agent": agent })

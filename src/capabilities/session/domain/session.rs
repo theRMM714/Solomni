@@ -539,25 +539,40 @@ impl AgentSession {
         matches!(self.dialogue.last().map(|m| m.role.as_str()), Some("user"))
     }
 
-    /// **删除模式**的精确回退（不重建，保住通道）：只保留前 keep_id 行（= 删该行及其后），
-    /// 对话与 marks 同步截断；keep_id = 0 → 转录清空、对话清空。**按回复原子**：截在一次回复
-    /// 内部时退到该回复第一行之前，绝不留下孤儿工具结果。
+    /// 目的：**删除模式**的精确回退（不重建，保住通道）。
+    /// 参数：`keep_id` = 只保留前 keep_id 行（= 删该行及其后）；0 = 转录清空、对话清空。
+    /// 约束：**按回复原子**截断（不留下孤儿工具结果）；`line_reply`、`marks`、`dialogue` 与
+    /// 工具行锚必须同步回退——`keep_whole_replies` 依赖 `line_reply` 与 `marks` 逐行一一对应。
     pub fn apply_rewind(&mut self, keep_id: u64) {
         // 转录里那段"我完整读过哪些文件"的证据随删除作废（保守，宁肯让模型重读）。
         if let Some(t) = self.tools.as_mut() {
             t.observations.clear();
         }
-        let keep = keep_whole_replies(&self.line_reply, keep_id as usize);
+        let rows = self.marks.len();
+        self.line_reply.truncate(rows);
+        let keep = if keep_id == u64::MAX {
+            // `align_keep` 的「不截」语义：保留全部，不能拿 line_reply 的长度当行数。
+            rows
+        } else {
+            keep_whole_replies(&self.line_reply, keep_id as usize).min(rows)
+        };
+        self.line_reply.truncate(keep);
         if keep == 0 {
             self.marks.clear();
             self.dialogue.clear();
-            self.next_line = 0;
+            self.set_next_line(0);
+            return;
+        }
+        if keep == rows {
+            // 「保留全部」：内容不动；line_reply 已在上面与真实行数对齐。
             return;
         }
         let hist = self.marks[keep - 1];
         self.marks.truncate(keep);
         self.dialogue.truncate(hist);
-        self.next_line = keep as u64;
+        // 工具行锚也是派生状态：必须走 set_next_line 更新，否则回档后第一轮工具调用
+        // （如 work_commit）仍会按旧行号写共享区提交锚。
+        self.set_next_line(keep as u64);
     }
 }
 

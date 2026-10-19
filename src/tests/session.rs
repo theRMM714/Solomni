@@ -487,6 +487,55 @@ pub(crate) fn rewind_keeps_only_lines_before_the_mark() {
     assert_eq!(first.0, 0, "回档清空后行 id 从头计");
 }
 
+/// 目的：钉住连续删除回档时 line_reply / 工具行锚与 marks 一起回退（第二次删除到 0 不 panic）。
+#[test]
+pub(crate) fn repeated_delete_to_zero_keeps_derived_state_in_sync() {
+    let mut member = BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec!["{\"type\":\"say\",\"text\":\"答一\"}".to_string()],
+    );
+    let mut core = core_with(vec![module_of("a")], gw(member, vec!["[]".into()]));
+    let sid = core
+        .create_work(work("w", WorkMode::Single, &["a"]))
+        .unwrap()
+        .sid;
+    with_live(|l| core.single_say(&sid, "问一", l)).unwrap(); // 行 0 用户 / 1 AI
+
+    core.rewind(
+        &sid,
+        crate::capabilities::conductor::api::RewindTarget::Delete(0),
+    )
+    .unwrap();
+    assert!(core.single_history(&sid).unwrap().is_empty(), "对话清空");
+
+    // marks 已清空、line_reply 仍保留 2 项时，第二次删除到 0 会走 align_keep 的 MAX 分支；
+    // 这里钉住它不 panic。
+    let again = core
+        .rewind(
+            &sid,
+            crate::capabilities::conductor::api::RewindTarget::Delete(0),
+        )
+        .expect("重复删除到 0 不应 panic");
+    assert!(again.is_empty(), "清空后重复回档仍是空视图");
+    assert!(core.single_history(&sid).unwrap().is_empty(), "仍是空对话");
+
+    // 回档后还能继续；行号从 0 重新计，不会被陈旧的 line_reply 拖到越界。
+    let ev = with_live(|l| core.single_say(&sid, "再来", l)).unwrap();
+    let rows = transcript_rows(&ev);
+    assert_eq!(
+        rows.first().map(|r| r.0),
+        Some(0),
+        "回档清空后行 id 从 0 起：{:?}",
+        rows
+    );
+    assert_eq!(
+        core.single_history(&sid).unwrap().len(),
+        2,
+        "用户 + 答一（身份不占对话）"
+    );
+}
+
 #[test]
 pub(crate) fn rebuilt_context_keeps_tool_result() {
     // 同一份落盘历史 + 新的 Conductor 模拟「重启」：重建上下文时工具子轮不能丢。

@@ -147,8 +147,8 @@
   "src/capabilities/conductor/service/rewind.rs": {
     "头块：槽外有行或自造槽": 7,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 6,
-    "条目：首行不是目的": 3,
+    "条目：槽外有行或自造槽": 1,
+    "条目：首行不是目的": 1,
     "行内：连续超过 2 行": 1
   },
   "src/capabilities/conductor/service/turn.rs": {
@@ -386,8 +386,8 @@
   "src/capabilities/session/domain/session.rs": {
     "头块：槽外有行或自造槽": 4,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 84,
-    "条目：首行不是目的": 50
+    "条目：槽外有行或自造槽": 82,
+    "条目：首行不是目的": 49
   },
   "src/capabilities/session/domain/tools.rs": {
     "头块：槽外有行或自造槽": 4,

@@ -124,6 +124,30 @@ impl ConductorHandle {
         Arc::clone(&self.bus)
     }
 
+    /// 目的：回档并推重置快照（`SessionOps` 与动作表共用这一条收尾）。
+    /// 约束：回档会改写盘上转录，事件台必须同时收到 `rewound` 才能让刷新/多端重置；两个入口各写一份，迟早一处漏推。
+    pub(crate) fn rewind_with_reset(
+        &self,
+        sid: &str,
+        target: RewindTarget,
+    ) -> Result<RewindOutcome, String> {
+        let outcome = self.call({
+            let sid = sid.to_string();
+            move |core| core.rewind_outcome(&sid, target)
+        })?;
+        self.publish_rewound(sid, &outcome);
+        Ok(outcome)
+    }
+
+    /// 目的：把一次回档结果发布成事件台上的重置快照（受影响的每个会话各一条 `rewound`）。
+    /// 约束：主/子会话都要发——子会话也有自己的历史视图与刷新路径。
+    pub(crate) fn publish_rewound(&self, sid: &str, outcome: &RewindOutcome) {
+        for (child, events) in &outcome.children {
+            self.bus.push_rewound(child, events.clone());
+        }
+        self.bus.push_rewound(sid, outcome.main.clone());
+    }
+
     /// **级联停止**：把 root 及其整棵子树（按 `meta.parent`）里正在生成的会话都停下来。
     /// 返回实际停下的会话 id——不假装“停止了一个本来就没在跑的会话”。
     /// 代理核心的 `stop` 走这条：主会话停 = 所有相关工作一起停（用户看得见的那一下）。

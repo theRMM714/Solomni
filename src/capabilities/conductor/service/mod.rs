@@ -76,7 +76,10 @@ impl PersistPolicy {
         }
         !matches!(
             ev,
-            SessionEvent::Delta { .. } | SessionEvent::Working { .. } | SessionEvent::ToolCall(_)
+            SessionEvent::Delta { .. }
+                | SessionEvent::Working { .. }
+                | SessionEvent::ToolCall(_)
+                | SessionEvent::Rewound { .. }
         )
     }
 }

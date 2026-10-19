@@ -70,6 +70,10 @@ pub struct EventBus {
 struct BusInner {
     seq: u64,
     lines: Vec<EventLine>,
+    /// 每个会话最近一次回档的重置点（事件台序号）：该序号及之前的事实已被盘上转录取代，
+    /// 历史合流不得再把它当实时尾巴；客户端自己的 since 游标不受影响（它们仍需看到
+    /// 重置事件本身来清空视图，见 push_rewound）。
+    rewound: std::collections::BTreeMap<String, u64>,
 }
 
 impl EventBus {
@@ -79,9 +83,8 @@ impl EventBus {
         })
     }
 
-    /// 入箱一批事实，返回它的全局序号。核心内部调用；锁中毒不算致命（拿回内层继续）。
-    fn push(&self, sid: &str, events: &[SessionEvent]) -> u64 {
-        let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+    /// 入箱一批事实并裁剪，返回它的全局序号（调用方已持锁）。
+    fn append_locked(g: &mut BusInner, sid: &str, events: &[SessionEvent]) -> u64 {
         g.seq += 1;
         let seq = g.seq;
         g.lines.push(EventLine {
@@ -93,6 +96,22 @@ impl EventBus {
             let drop = g.lines.len() - BUS_KEEP;
             g.lines.drain(..drop);
         }
+        seq
+    }
+
+    /// 入箱一批事实，返回它的全局序号。核心内部调用；锁中毒不算致命（拿回内层继续）。
+    fn push(&self, sid: &str, events: &[SessionEvent]) -> u64 {
+        let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        Self::append_locked(&mut g, sid, events)
+    }
+
+    /// 目的：回档成功后入箱一条 `rewound`（携带活动视图），并把该会话的重置水印推进到它的序号。
+    /// 约束：盘上转录已经被回档改写，事件台本身不能回退；没有这条事实，刷新/多端无法知道旧事件已作废。
+    pub fn push_rewound(&self, sid: &str, events: Vec<serde_json::Value>) -> u64 {
+        let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let ev = SessionEvent::Rewound { events };
+        let seq = Self::append_locked(&mut g, sid, std::slice::from_ref(&ev));
+        g.rewound.insert(sid.to_string(), seq);
         seq
     }
 
@@ -124,6 +143,21 @@ impl EventBus {
         (lines, g.seq, oldest)
     }
 
+    /// 历史合流窗口：只取该会话**最近一次回档之后**的事件批 + 当前头部（同一把锁内）。
+    /// 回档水印之前的批次已被盘上转录取代，不能再拼回历史视图；客户端的长轮询仍用
+    /// `snapshot`（它需要看到重置事件本身来清空视图）。
+    fn snapshot_after_rewind(&self, sid: &str) -> (Vec<EventLine>, u64) {
+        let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let cut = g.rewound.get(sid).copied().unwrap_or(0);
+        let lines = g
+            .lines
+            .iter()
+            .filter(|l| l.sid == sid && l.seq > cut)
+            .cloned()
+            .collect();
+        (lines, g.seq)
+    }
+
     /// 盘上转录**之外**的实时尾巴 + 事件台当前头部：给「历史和实时一次给全」用（见呈现层的 history.open）。
     ///
     /// 只取「**转录在事件台里的最后一个位置之后**」的事实：转录是事件台的**前缀**，
@@ -143,7 +177,7 @@ impl EventBus {
                 *left.entry(k).or_insert(0) += 1;
             }
         }
-        let (lines, head, _oldest) = self.snapshot(Some(sid), 0);
+        let (lines, head) = self.snapshot_after_rewind(sid);
         let mut on_bus: Vec<serde_json::Value> = lines
             .into_iter()
             .flat_map(|l| l.events.into_iter().map(|e| e.to_json()))
@@ -205,6 +239,9 @@ pub trait SessionOps: Send + Sync {
     fn open_queue(&self, sid: &str) -> Result<Option<DecisionQueue>, String>;
     fn withdraw_agree(&self, sid: &str, agent: &str) -> Result<Advance, String>;
     /// 回档：返回重放后的完整事件流（已是线格式，供前端整体重建）。
+    /// 生产入口（动作表 / CLI）走 `ConductorHandle::rewind_with_reset`；这一格保留给
+    /// 契约测试与其它调用方，同时确保回档的同步收尾只有一条实现。
+    #[allow(dead_code)]
     fn rewind(&self, sid: &str, target: RewindTarget) -> Result<Vec<serde_json::Value>, String>;
     /// 压缩这个会话的上下文（AI 自己压；压不动如实说）。
     fn compact(&self, sid: &str) -> Result<Advance, String>;
@@ -439,6 +476,14 @@ pub enum Acted {
     Advanced(Advance),
     Replayed(Vec<serde_json::Value>),
     Done(serde_json::Value),
+}
+
+/// 目的：一次回档的完整结果——主会话活动视图 + 受影响的子会话活动视图。
+/// 约束：主视图回给调用方；每份视图同时作为一条 `rewound` 推上事件台，供刷新与多端重置。
+#[derive(Debug)]
+pub(crate) struct RewindOutcome {
+    pub main: Vec<serde_json::Value>,
+    pub children: Vec<(String, Vec<serde_json::Value>)>,
 }
 
 //

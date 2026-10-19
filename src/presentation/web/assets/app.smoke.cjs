@@ -270,6 +270,44 @@ setTimeout(async () => {
       toolReasoningRendered = r.reasoning === '过程说明' && r.show === true;
     } catch (e) { loadErrors.push("定稿思维链检查失败：" + e.message); }
   }
+  // **回档重置事件**：清空旧视图，按服务端给的活动视图整体重建（刷新/多端同一条路径）。
+  let rewoundApplies = false;
+  if (!loadErrors.length) {
+    try {
+      const r = vm.runInNewContext(
+        "(function () { const s = { sid: 'x', lines: [{ cls: 'user', who: '用户', text: '旧' }], live: [{ kind: 'msg' }]," +
+          "  fold: { k: true }, scroll: { k: 1 }, pending: { id: 'old' }, done: true, readonly: true };" +
+          "absorb(s, { type: 'rewound', events: [{ type: 'transcript', lines: [{ id: 0, kind: 'user', speaker: '用户', line: '新' }] }] });" +
+          "return { n: s.lines.length, text: (s.lines[0] || {}).text, live: s.live.length," +
+          "  fold: Object.keys(s.fold).length, scroll: Object.keys(s.scroll).length," +
+          "  pending: s.pending, done: s.done, readonly: s.readonly }; })()",
+        sandbox
+      );
+      rewoundApplies = r.n === 1 && r.text === '新' && r.live === 0
+        && r.fold === 0 && r.scroll === 0 && r.pending === null
+        && r.done === false && r.readonly === false;
+      if (!rewoundApplies) loadErrors.push("回档重置检查：" + JSON.stringify(r));
+    } catch (e) { loadErrors.push("回档重置检查失败：" + e.message); }
+  }
+  // **只读历史会话**：发送按钮禁用并显示只读；会话说明写明要先点「继续」。
+  let readonlyRule = false;
+  if (!loadErrors.length) {
+    try {
+      const r = vm.runInNewContext(
+        "(function () { const s = { sid: 'ro', can_update_task: false, running: false, running_known: true," +
+          "  sending: false, done: true, readonly: true, lines: [], live: [], fold: {}, scroll: {} };" +
+          "state.sessions.set('ro', s); state.activeSid = 'ro';" +
+          "syncSendButton(s); const b = document.querySelector('#btn-send');" +
+          "const note = sessionNote(s);" +
+          "return { disabled: b.disabled, text: b.textContent, title: b.title," +
+          "  note: note && note.textContent }; })()",
+        sandbox
+      );
+      readonlyRule = r.disabled === true && String(r.text).indexOf('只读') >= 0
+        && String(r.note).indexOf('只读') >= 0 && String(r.title).indexOf('继续') >= 0;
+      if (!readonlyRule) loadErrors.push("只读会话检查：" + JSON.stringify(r));
+    } catch (e) { loadErrors.push("只读会话检查失败：" + e.message); }
+  }
   // **一行的画法只有一处**：身份在上（每个 kind 都有）、思维链次之、正文按 kind。
   //  ① 只有思维链的行照画（身份 + 思维链），但不留空正文；②完全没内容的行不占位；③工具卡片带身份。
   let lineRule = false;
@@ -521,6 +559,7 @@ setTimeout(async () => {
   }
   const ok = alerts.length === 0 && loadErrors.length === 0 && rendered && tierWarned && identityKept
     && pollConn === "已连接" && pollApplied && hydratedHistory && liveReplaced && liveClearedOnIdle && toolReasoningRendered
+    && rewoundApplies && readonlyRule
     && taskButtonRule && decisionCardRule && onlyLastStreams && lineRule && runningRules && atMenuRefetches
     && wizardProxy && sessionNoteRule && historyRunTag
     && consoleErrors.length === 0;
@@ -528,6 +567,7 @@ setTimeout(async () => {
     console.log("alerts（原生弹窗被调用的次数，应为 0）:", JSON.stringify(alerts));
     console.log("notice 渲染:", rendered, "| 虚拟机档不可用提示:", tierWarned, "| 身份标题保留:", identityKept);
     console.log("轮询状态点:", JSON.stringify(pollConn), "| 事件已应用:", pollApplied, "| 盘上转录已补:", hydratedHistory, "| 流式被替换:", liveReplaced, "| 空闲清理:", liveClearedOnIdle, "| 思维链:", toolReasoningRendered);
+    console.log("回档重置:", rewoundApplies, "| 只读会话:", readonlyRule);
     console.log("运行态归一（事件为准 / 快照只对账）:", runningRules, "| @ 菜单每次重拉:", atMenuRefetches);
     console.log("向导代理形态:", wizardProxy, "| 会话级说明:", sessionNoteRule, "| 侧栏运行态:", historyRunTag);
     console.log("应用侧 console.error:", JSON.stringify(consoleErrors.slice(0, 3)));

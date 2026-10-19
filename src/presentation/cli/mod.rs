@@ -563,7 +563,8 @@ fn render(events: &[SessionEvent]) {
             // 短暂事件（流式增量 / 运行态 / 工具调用）：Web 前端用来做实时渲染，CLI 不逐条打。
             SessionEvent::Delta { .. }
             | SessionEvent::Working { .. }
-            | SessionEvent::ToolCall(_) => {}
+            | SessionEvent::ToolCall(_)
+            | SessionEvent::Rewound { .. } => {}
         }
     }
 }

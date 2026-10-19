@@ -2216,6 +2216,20 @@ async function loadPathRoots(sid) {
 
 function activeSession() { return state.sessions.get(state.activeSid); }
 
+/* 回档/重置：清空当前会话视图，并按服务端给的**活动视图**整体重建。
+ * 回档会改写盘上转录；事件台上的旧事实不随文件回退，所以服务端另推一条 `rewound`
+ * 快照。这里用同一段逻辑处理“动作回包”和“其它标签页收到的重置事件”。 */
+function applySnapshot(s, events) {
+  s.lines = [];
+  s.live = [];
+  s.fold = {};
+  s.scroll = {};
+  s.pending = null;
+  s.done = false;
+  s.readonly = false; // 回档后的会话是活动会话（历史回放被用户明确回档/继续）
+  for (const ev of (events || [])) absorb(s, ev);
+}
+
 /* ---------- 事件吸收：统一把 SessionEvent 变成行 ---------- */
 function absorb(s, ev) {
   switch (ev.type) {
@@ -2237,6 +2251,11 @@ function absorb(s, ev) {
         text: '[留档] 以下内容已折叠（保留在文件里，可恢复）',
         mark: ev.mark,
       });
+      break;
+    // 回档成功：服务端给的是**回档后的活动视图**；清空旧视图整体重建。
+    // 刷新/多端靠这条事件同步，而不是把回档前的旧事件当实时尾巴再拼一遍。
+    case 'rewound':
+      applySnapshot(s, ev.events || []);
       break;
     // 任务链的进展：节点开工/回报/验收/交付——主会话也要看得到，不必点进子会话。
     case 'node_started':
@@ -2443,6 +2462,10 @@ function syncSendButton(s) {
   const busy = isBusy(s);
   sendBtn.textContent = busy ? '停止' : '发送';
   sendBtn.className = busy ? 'btn btn-danger' : 'btn btn-primary';
+  // 历史回放是只读的：发送按钮禁用，并把原因写在 title 上（点「继续」后才解除）。
+  sendBtn.disabled = !!(s && s.readonly);
+  sendBtn.title = s && s.readonly ? '历史回放为只读：点「继续」后才能发送' : '';
+  if (s && s.readonly) sendBtn.textContent = '只读';
   const cont = $('#btn-continue');
   if (cont) cont.className = busy ? 'btn hidden' : 'btn';
   // 「改需求」是**用户的动作**（不是核心推的门）：没有"本次需求"就**根本不渲染**（不是灰着）；
@@ -2518,6 +2541,7 @@ function sessionNote(s) {
   }
   if (s.run === 'stopped') bits.push('这条会话已停止：不会再被派发或唤醒；点「继续」可以接着走。');
   if (s.run === 'closed') bits.push('这条会话已关闭：终态，不会再被派发或唤醒。');
+  if (s.readonly) bits.push('历史回放为只读：点「继续」后才能发送消息。');
   if (!bits.length) return null;
   const d = document.createElement('div');
   d.className = 'agent-note';
@@ -2894,7 +2918,9 @@ const ACT_IDS = { say: 'send_message', task: 'set_task' };
 function actionUrl(id) { return '/api/actions/' + id; }
 async function act(action, text) {
   const s = activeSession();
-  if (!s || isBusy(s) || s.readonly) return;
+  if (!s) return;
+  if (isBusy(s)) return;
+  if (s.readonly) { notice('历史回放为只读', '点「继续」后才能发送消息。', 'info'); return; }
   // 本地事实：我的命令在途（不是服务端运行态）——按钮立刻切「停止」，避免重复提交。
   s.sending = true;
   // 乐观回显：自己的发言立刻可见；服务端权威行到达时自动替换（见 absorb）。
@@ -2945,16 +2971,9 @@ function restoreMark(mark) {
 async function applyRewind(s, body) {
   try {
     const r = await api('POST', actionUrl('rewind'), Object.assign({ session_id: s.sid }, body));
-    s.lines = [];
-    s.live = [];
-    s.fold = {};   // 行整体重建，折叠状态一并重来（避免旧键被新行复用）
-    s.scroll = {};
-    s.pending = null;
-    s.done = false;
-    s.readonly = false; // 历史回放会话一旦回档即转为活动会话
     if (typeof r.head === 'number') s.floor = r.head;
-    for (const ev of (r.events || [])) absorb(s, ev);
-    for (const ev of (r.live || [])) absorb(s, ev);
+    // 行整体重建，折叠状态一并重来（避免旧键被新行复用）；与事件台上的 `rewound` 同一套逻辑。
+    applySnapshot(s, (r.events || []).concat(r.live || []));
     renderAll();
   } catch (err) { notice('操作失败', err.message, 'err'); }
 }
@@ -3214,7 +3233,8 @@ async function stopGeneration() {
 
 function onSend() {
   const s = activeSession();
-  if (!s || s.readonly) return;
+  if (!s) return;
+  if (s.readonly) { notice('历史回放为只读', '点「继续」后才能发送消息。', 'info'); return; }
   if (isBusy(s)) { stopGeneration(); return; } // 生成中：同一个键变成「停止」
   if (s.awaiting === 'task') { const v = takeInput(); if (v) act('task', v); return; }
   // 裁决门挂着时不从这里发：那是卡片上的选项（要补充的话写在卡片里的附言框）。

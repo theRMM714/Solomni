@@ -185,6 +185,107 @@ fn history_merge_is_the_transcript_plus_the_bus_tail_without_repeats() {
     }
 }
 
+/// 回档是事件台的一等事实：成功后推一条 `rewound`（活动视图），并推进该会话的重置水印；
+/// 之后 `history.open` 的 live 只能取水印之后的事件——被删/折叠的旧批次不许再回来。
+#[test]
+fn rewind_pushes_a_reset_fact_and_history_merge_ignores_superseded_batches() {
+    let handle = spawn(vec![module_of("a")], Vec::new());
+    let ops = Ops::from_handle(&handle);
+    let sid = ops
+        .sessions
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话")
+        .0
+        .sid;
+    ops.sessions
+        .say(&sid, "问一", Output::Final)
+        .expect("说一句");
+    ops.sessions
+        .say(&sid, "问二", Output::Final)
+        .expect("再说一句");
+
+    // ① 删除到第 0 行：盘上转录清空；事件台必须给一条 rewound（活动视图为空）。
+    let replayed = ops
+        .sessions
+        .rewind(
+            &sid,
+            crate::capabilities::conductor::api::RewindTarget::Delete(0),
+        )
+        .expect("回档到第 0 行");
+    assert!(replayed.is_empty(), "删除到 0 的活动视图应为空");
+
+    let (lines, _head, _oldest) = handle.events().snapshot(Some(&sid), 0);
+    let mut saw_reset = false;
+    for line in &lines {
+        for ev in &line.events {
+            if let SessionEvent::Rewound { events } = ev {
+                saw_reset = true;
+                assert!(events.is_empty(), "删除到 0 的重置快照应为空：{:?}", events);
+            }
+        }
+    }
+    assert!(saw_reset, "回档成功后必须推一条 rewound");
+
+    // ② 刷新/重新打开：盘上转录为空，事件台里的旧批次不能再被当成 live 拼回。
+    let (_meta, transcript) = ops.history.open(&sid).expect("读转录");
+    assert!(transcript.is_empty(), "删除到 0 后盘上转录应为空");
+    let (tail, head) = handle.events().tail_excluding(&sid, &transcript);
+    assert!(head > 0, "合流要给出头部序号");
+    assert!(
+        tail.iter()
+            .all(|v| v.get("type").and_then(|t| t.as_str()) != Some("transcript")),
+        "旧转录不许作为 live 回来：{:?}",
+        tail
+    );
+
+    // ③ 回档后还能继续；新事件按水印之后的窗口接上，旧内容仍不回来。
+    ops.sessions
+        .say(&sid, "新问", Output::Final)
+        .expect("回档后还能说");
+    let (_meta, transcript2) = ops.history.open(&sid).expect("读新转录");
+    let (tail2, _head2) = handle.events().tail_excluding(&sid, &transcript2);
+    let text = serde_json::to_string(&tail2).expect("序列化尾巴");
+    assert!(
+        !text.contains("问一") && !text.contains("问二"),
+        "回档前的旧内容不许从 live 回来：{}",
+        text
+    );
+
+    // ④ 留档同样不能被旧批次污染：折叠后的活动视图只有标记，没有正文行。
+    let sid2 = ops
+        .sessions
+        .create_work(single_work("w2", &["a"]))
+        .expect("建第二个会话")
+        .0
+        .sid;
+    ops.sessions
+        .say(&sid2, "留档问", Output::Final)
+        .expect("说一句");
+    let archived = ops
+        .sessions
+        .rewind(
+            &sid2,
+            crate::capabilities::conductor::api::RewindTarget::Archive(0),
+        )
+        .expect("留档");
+    assert!(
+        archived
+            .iter()
+            .any(|v| v.get("type").and_then(|t| t.as_str()) == Some("rewind")),
+        "留档活动视图应带标记：{:?}",
+        archived
+    );
+    let (_meta, transcript3) = ops.history.open(&sid2).expect("读留档转录");
+    let (tail3, _head3) = handle.events().tail_excluding(&sid2, &transcript3);
+    assert!(
+        tail3
+            .iter()
+            .all(|v| v.get("type").and_then(|t| t.as_str()) != Some("transcript")),
+        "留档后旧转录不许作为 live 回来：{:?}",
+        tail3
+    );
+}
+
 // ---------- 停止：生成期间也立刻生效（并发归核心） ----------
 
 #[test]
