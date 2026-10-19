@@ -1,7 +1,8 @@
-//! 共享区版本化工作区的**成员侧执行者**：把 `work_pull` / `work_commit` / `work_status` 三个调用
-//! 接到 `workspace` 能力面上（与代理工具同理：成员循环只认"谁认领这个名字"，核心自有工具不是特例）。
-//!
-//! 执行发生在会话工作线程上；版本库写入由 workspace 的 service 串行化（它持版本库端口）。
+//! 目的：共享区版本化工作区的**成员侧执行者**——把六个 work_* 调用接到 workspace 能力面上。
+//! 管：成员工具调用的参数解析、路径权限收口与回执转交。
+//! 不管：版本库写入、冲突与备份判定（在 workspace）；工具声明（`systools/tools.yaml`）。
+//! 联动：在会话工作线程上执行；成员循环只认"谁认领这个名字"；版本库写入由 workspace 的
+//!   service 串行化（它持版本库端口）。
 
 use super::now_ts;
 use crate::capabilities::conductor::domain::work as dw;
@@ -159,6 +160,14 @@ impl WorkHandler {
             Ok(p) => p,
             Err(e) => return outcome(false, e),
         };
+        let expect_head = match args.get("head") {
+            None | Some(serde_json::Value::Null) => None,
+            Some(serde_json::Value::Number(n)) => match n.as_u64() {
+                Some(id) => Some(id),
+                None => return outcome(false, "head 必须是非负整数（主副本提交 id）".to_string()),
+            },
+            Some(_) => return outcome(false, "head 必须是非负整数（主副本提交 id）".to_string()),
+        };
         let take = match dw::str_arg(args, "take").as_deref() {
             Some("upstream") => ResolveTake::Upstream,
             Some("local") => ResolveTake::Local,
@@ -178,9 +187,58 @@ impl WorkHandler {
         if let Err(e) = check_readable(&self.permissions, &paths) {
             return outcome(false, e);
         }
-        let req = ResolveRequest { paths, take };
+        let req = ResolveRequest {
+            paths,
+            take,
+            expect_head,
+        };
         match self.workspace.work_resolve(&self.work, &self.agent, &req) {
             Ok(r) => outcome(true, dw::render_resolve(&r)),
+            Err(e) => outcome(false, e),
+        }
+    }
+
+    fn lost(&self, args: &serde_json::Value) -> ToolOutcome {
+        let path = dw::str_arg(args, "path");
+        let restore = match args.get("restore") {
+            None | Some(serde_json::Value::Null) => false,
+            Some(serde_json::Value::Bool(b)) => *b,
+            Some(_) => return outcome(false, "restore 必须是布尔值".to_string()),
+        };
+        if restore {
+            let Some(path) = path else {
+                return outcome(false, "work_lost restore 要给出 path".to_string());
+            };
+            let Some(expect) = dw::str_arg(args, "expect_current") else {
+                return outcome(
+                    false,
+                    "恢复要带 expect_current（当前沙箱文件的 hash；文件不存在传空串）".to_string(),
+                );
+            };
+            if let Err(e) = check_readable(&self.permissions, std::slice::from_ref(&path)) {
+                return outcome(false, e);
+            }
+            return match self
+                .workspace
+                .work_restore_lost(&self.work, &self.agent, &path, &expect)
+            {
+                Ok(r) => outcome(true, dw::render_restore_lost(&r)),
+                Err(e) => outcome(false, e),
+            };
+        }
+        if let Some(p) = &path {
+            if let Err(e) = check_readable(&self.permissions, std::slice::from_ref(p)) {
+                return outcome(false, e);
+            }
+        }
+        match self
+            .workspace
+            .work_lost(&self.work, &self.agent, path.as_deref())
+        {
+            Ok(mut r) => {
+                r.entries.retain(|e| self.permissions.read_ok(&e.path));
+                outcome(true, dw::render_lost(&r))
+            }
             Err(e) => outcome(false, e),
         }
     }
@@ -206,6 +264,7 @@ impl ToolHandler for WorkHandler {
             dw::STATUS => self.status(&args),
             dw::VERSIONS => self.versions(&args),
             dw::RESOLVE => self.resolve(&args),
+            dw::LOST => self.lost(&args),
             other => outcome(false, format!("未知的工作区工具：{}", other)),
         }
     }

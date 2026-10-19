@@ -8,5 +8,5 @@ execute:
     {{tasks}}
 
     产物写进你自己的沙箱、再用 work_commit 提交回共享区——核心验收在共享区里看，没提交的产物它看不到。
-    文本、图片、视频与其它二进制都按字节处理（内容流式读写、不整份进上下文；单文件有上限）；提交冲突不会自动合并：文本可人工合并后用 take=local，图片 / 视频 / 二进制只能选边；先用 work_versions 看三方。
+    文本、图片、视频与其它二进制都按字节处理（内容流式读写、不整份进上下文；单文件有上限）；提交冲突不会自动合并：先用 work_status / work_versions 看三方（记下主副本提交 id）；文本可人工合并后用 work_resolve take=local head=<id>（预览截断先用 read 读全文），图片 / 视频 / 二进制只能选边；take=upstream 覆盖前会备份，被覆盖的本地版本可用 work_lost 找回。
     做完用 submit_report 工具回报：summary 做了什么 / changes 动了什么 / open 遗留问题。

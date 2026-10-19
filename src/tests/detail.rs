@@ -335,6 +335,76 @@ fn fs_work_store_streams_assets_and_rejects_oversize_or_mismatch() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// 目的：跨根复制保持流式与指纹校验；目标根可新建，失败不留临时文件，符号链接逃逸被拒。
+#[test]
+fn fs_work_store_copies_between_roots_with_hash_check() {
+    use crate::capabilities::workspace::api::content_hash;
+    use crate::capabilities::workspace::detail::fs_workstore::FsWorkStore;
+    use crate::capabilities::workspace::ports::WorkStore;
+
+    let root = scratch("fs-workstore-cross-copy");
+    let sandbox = root.join("a");
+    let lost = root.join(".work").join("lost").join("a");
+    std::fs::create_dir_all(&sandbox).expect("建沙箱");
+    let s = FsWorkStore::new();
+    let data = b"lost bytes".to_vec();
+    std::fs::write(sandbox.join("note.bin"), &data).expect("写本地版本");
+    let hash = content_hash(&data);
+
+    // 目标根不存在：复制要建出来。
+    let size = s
+        .copy_under_to_under(&sandbox, "note.bin", &lost, "note.bin", &hash)
+        .unwrap();
+    assert_eq!(size, data.len() as u64);
+    assert_eq!(std::fs::read(lost.join("note.bin")).unwrap(), data);
+
+    // 指纹不符：拒绝，目标不出现，临时文件清掉。
+    let bad = content_hash(b"different");
+    let err = s
+        .copy_under_to_under(&sandbox, "note.bin", &lost, "other.bin", &bad)
+        .unwrap_err();
+    assert!(err.contains("改动"), "{}", err);
+    assert!(!lost.join("other.bin").exists());
+    let leftovers: Vec<String> = std::fs::read_dir(&lost)
+        .unwrap()
+        .flatten()
+        .filter_map(|e| e.file_name().to_str().map(str::to_string))
+        .filter(|n| n.starts_with(".tmp-"))
+        .collect();
+    assert!(leftovers.is_empty(), "临时文件要清掉：{:?}", leftovers);
+
+    // 源缺失。
+    assert!(s
+        .copy_under_to_under(&sandbox, "nope", &lost, "x", &hash)
+        .is_err());
+
+    #[cfg(unix)]
+    {
+        let outside = root.join("outside");
+        std::fs::create_dir_all(&outside).expect("建根外目录");
+        std::fs::write(outside.join("pwn.bin"), b"x").expect("写根外文件");
+        std::os::unix::fs::symlink(&outside, sandbox.join("link")).expect("造链接");
+        assert!(
+            s.copy_under_to_under(
+                &sandbox,
+                "link/pwn.bin",
+                &lost,
+                "pwn.bin",
+                &content_hash(b"x")
+            )
+            .is_err(),
+            "源路径不能越过符号链接"
+        );
+        std::os::unix::fs::symlink(&outside, lost.join("out")).expect("造目标链接");
+        assert!(
+            s.copy_under_to_under(&sandbox, "note.bin", &lost, "out/pwn.bin", &hash)
+                .is_err(),
+            "目标路径不能越过符号链接"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 // ---------- FsSysIo ----------
 
 #[test]

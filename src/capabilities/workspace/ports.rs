@@ -74,6 +74,17 @@ pub trait WorkStore: Send + Sync {
         root: &Path,
         rel: &str,
     ) -> Result<(), String>;
+    /// 目的：把一个根下的文件流式复制到另一个根下的相对路径（备份 / 恢复用），并校验源指纹。
+    /// 约束：不设单文件上限；两端都拒绝符号链接逃逸；目标用同目录临时文件 + rename。
+    /// 返回：复制后的字节数；源内容与 expected_hash 不符 = Err（临时文件清理）。
+    fn copy_under_to_under(
+        &self,
+        from_root: &Path,
+        from_rel: &str,
+        to_root: &Path,
+        to_rel: &str,
+        expected_hash: &str,
+    ) -> Result<u64, String>;
     /// 当前 head 提交号；空仓库 = None。
     fn head(&self, store: &Path) -> Result<Option<u64>, String>;
     fn set_head(&self, store: &Path, id: u64) -> Result<(), String>;

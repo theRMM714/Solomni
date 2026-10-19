@@ -275,6 +275,8 @@ pub(crate) struct InMemoryWorkStore {
     next_ids: Mutex<BTreeMap<String, u64>>,
     fail: Option<String>,
     fail_times: Mutex<BTreeMap<String, usize>>,
+    /// 按方法 + 键子串注入失败（例如只让某一条路径的 copy 失败）。
+    fail_on: Mutex<BTreeMap<String, (String, usize)>>,
 }
 
 fn ws_key(root: &std::path::Path, rel: &str) -> String {
@@ -321,6 +323,14 @@ impl InMemoryWorkStore {
             .insert(method.to_string(), times);
     }
 
+    /// 目的：只在键包含 needle 的调用上注入失败（按次数递减）。
+    pub(crate) fn fail_on(&self, method: &str, needle: &str, times: usize) {
+        self.fail_on
+            .lock()
+            .expect("锁")
+            .insert(method.to_string(), (needle.to_string(), times));
+    }
+
     fn enter(&self, method: &str) -> Result<(), String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
@@ -330,6 +340,18 @@ impl InMemoryWorkStore {
             if *n > 0 {
                 *n -= 1;
                 return Err(format!("注入失败：{}", method));
+            }
+        }
+        Ok(())
+    }
+
+    /// 目的：按方法 + 键子串注入失败；不匹配的调用不受影响。
+    fn enter_key(&self, method: &str, key: &str) -> Result<(), String> {
+        let mut map = self.fail_on.lock().expect("锁");
+        if let Some((needle, left)) = map.get_mut(method) {
+            if *left > 0 && key.contains(needle.as_str()) {
+                *left -= 1;
+                return Err(format!("注入失败：{}（{}）", method, key));
             }
         }
         Ok(())
@@ -495,6 +517,10 @@ impl WorkStore for InMemoryWorkStore {
             return Err(m.clone());
         }
         self.enter("copy_object_to_under")?;
+        self.enter_key(
+            "copy_object_to_under",
+            &format!("{}|{}", root.to_string_lossy(), rel),
+        )?;
         let bytes = self
             .objects
             .lock()
@@ -507,6 +533,40 @@ impl WorkStore for InMemoryWorkStore {
             .expect("锁")
             .insert(ws_key(root, rel), bytes);
         Ok(())
+    }
+
+    fn copy_under_to_under(
+        &self,
+        from_root: &std::path::Path,
+        from_rel: &str,
+        to_root: &std::path::Path,
+        to_rel: &str,
+        expected_hash: &str,
+    ) -> Result<u64, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.enter("copy_under_to_under")?;
+        self.enter_key(
+            "copy_under_to_under",
+            &format!("{}|{}", from_root.to_string_lossy(), from_rel),
+        )?;
+        let bytes = self
+            .files
+            .lock()
+            .expect("锁")
+            .get(&ws_key(from_root, from_rel))
+            .cloned()
+            .ok_or_else(|| format!("源文件不存在：{}", from_rel))?;
+        let scanned = scan_bytes(&bytes, None);
+        if scanned.hash != expected_hash {
+            return Err(format!("源文件在复制过程中被改动，请重试：{}", from_rel));
+        }
+        self.files
+            .lock()
+            .expect("锁")
+            .insert(ws_key(to_root, to_rel), bytes);
+        Ok(scanned.size)
     }
 
     fn head(&self, store: &std::path::Path) -> Result<Option<u64>, String> {

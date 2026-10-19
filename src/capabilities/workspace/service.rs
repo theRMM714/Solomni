@@ -8,14 +8,16 @@
 
 use crate::capabilities::workspace::api::{
     media_hint, Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, FileVersion,
-    GcReport, PullReport, ResolveAction, ResolveEntry, ResolveReport, ResolveRequest, ResolveTake,
+    GcReport, LostEntry, LostReport, PullReport, ResolveAction, ResolveEntry, ResolveReport,
+    ResolveRequest, ResolveTake, ResolveWarning, ResolveWarningKind, RestoreLostReport,
     StatusEntry, StatusReport, VersionView, WorkFiles, WorkRoots, WorkUsage, Workspace,
     MAX_ASSET_BYTES, VERSION_TEXT_LIMIT,
 };
 use crate::capabilities::workspace::domain::hash::{content_hash, is_content_hash};
 use crate::capabilities::workspace::domain::workstore::{
-    clean_rel, expand_paths, plan_commit, pull_verdict, status_of, Commit, CommitAnchor, Conflict,
-    ConflictAt, Index, Pending, PendingIndex, PullVerdict, Tree,
+    clean_rel, expand_paths, local_take_verdict, lost_rel, needs_backup, plan_commit, pull_verdict,
+    status_of, Commit, CommitAnchor, Conflict, ConflictAt, Index, LocalTakeVerdict, Pending,
+    PendingIndex, PullVerdict, Tree,
 };
 use crate::capabilities::workspace::ports::{WorkStore, Workdirs};
 use std::collections::{BTreeMap, BTreeSet};
@@ -28,6 +30,8 @@ const MAX_STATUS_TREE: usize = 200;
 const RECENT_COMMITS: usize = 5;
 /// status 里列出的“沙箱未跟踪文件”上限（超出如实标注截断）。
 const MAX_LOCAL_ONLY: usize = 50;
+/// work_lost 一次最多列出的备份数（超出如实标注截断）。
+const MAX_LOST: usize = 50;
 
 /// 工作区能力：持四个端口，按用例答话。
 pub struct WorkspaceService {
@@ -331,6 +335,52 @@ fn render_oversize(items: &[(String, u64)], limit: u64) -> String {
     out
 }
 
+/// 目的：该 agent 的备份根 `<版本库>/lost/<agent>`。
+/// 约束：agent 必须是单个、干净的路径组件；不允许用它把备份根挪到别处。
+fn lost_root(store: &Path, agent: &str) -> Result<PathBuf, String> {
+    if agent.is_empty()
+        || agent == "."
+        || agent == ".."
+        || agent.contains('/')
+        || agent.contains('\\')
+    {
+        return Err(format!("agent 名不能用作备份目录：{}", agent));
+    }
+    Ok(store.join("lost").join(agent))
+}
+
+/// 目的：备份目录里的临时文件（复制中断留下的）不算一份备份。
+fn is_lost_temp(rel: &str) -> bool {
+    rel.split('/').any(|s| s.starts_with(".tmp-"))
+}
+
+/// 把 take=local 的拒绝清单渲染成模型侧回执：整次不做，逐条点名。
+fn render_resolve_denied(paths: &[String]) -> String {
+    let mut out = String::from(
+        "解决被拒：以下路径的本地内容与基线一致（你没有改过它），take=local 不会包含主副本的新改动：",
+    );
+    for path in paths.iter().take(50) {
+        out.push_str(&format!("\n- {}", path));
+    }
+    if paths.len() > 50 {
+        out.push_str(&format!("\n…（共 {} 条）", paths.len()));
+    }
+    out.push_str(
+        "\n先用 work_versions 看基线 / 主副本 / 沙箱三方：要接受主副本用 take=upstream；要保留本地，请先把主副本内容合进沙箱，再带 head=<主副本提交 id> 调 take=local。\n本次没有改动文件或基线。",
+    );
+    out
+}
+
+/// 一条待执行的 resolve 计划：先把三方看全、把要备份的备份完，再统一改文件/基线。
+struct ResolvePlan {
+    path: String,
+    head_hash: Option<String>,
+    base_hash: Option<String>,
+    local_hash: Option<String>,
+    /// 覆盖/删除前要写入的备份相对路径（版本库内）；不需要备份 = None。
+    backup: Option<String>,
+}
+
 impl Workspace for WorkspaceService {
     fn prepare(&self, session: &str, agents: &[String]) -> Result<(), String> {
         self.dirs.prepare(session, agents)
@@ -377,37 +427,72 @@ impl Workspace for WorkspaceService {
             missing,
             ..PullReport::default()
         };
+        let mut index_dirty = false;
         for rel in want {
-            let head_hash = tree.get(&rel).cloned().unwrap_or_default();
-            let local = self.store.scan_under(&sandbox, &rel, None)?;
-            let local_hash = local.as_ref().map(|v| v.hash.clone());
-            let base = index.get(&rel).map(String::as_str);
-            match pull_verdict(base, Some(&head_hash), local_hash.as_deref()) {
-                PullVerdict::Update => {
-                    self.store
-                        .copy_object_to_under(&store, &head_hash, &sandbox, &rel)?;
-                    index.insert(rel.clone(), head_hash);
-                    report.updated.push(rel);
+            // 逐条收敛：中途失败时，已成功的路径保留在 index 里并落盘，
+            // 避免“沙箱已是新版、基线还没推进”在下次上游提交后变成伪冲突。
+            let step = (|| -> Result<(), String> {
+                let head_hash = tree.get(&rel).cloned().unwrap_or_default();
+                let local = self.store.scan_under(&sandbox, &rel, None)?;
+                let local_hash = local.as_ref().map(|v| v.hash.clone());
+                let base = index.get(&rel).map(String::as_str);
+                match pull_verdict(base, Some(&head_hash), local_hash.as_deref()) {
+                    PullVerdict::Update => {
+                        self.store
+                            .copy_object_to_under(&store, &head_hash, &sandbox, &rel)?;
+                        index.insert(rel.clone(), head_hash);
+                        report.updated.push(rel.clone());
+                        index_dirty = true;
+                    }
+                    PullVerdict::AlreadySame => {
+                        index.insert(rel.clone(), head_hash);
+                        report.already.push(rel.clone());
+                        index_dirty = true;
+                    }
+                    PullVerdict::NoChange => report.no_change.push(rel.clone()),
+                    PullVerdict::Occupied => report.occupied.push(rel.clone()),
+                    PullVerdict::Conflict => {
+                        // pull 侧能落到 Conflict 的形态：本地删了/上游改了，或两边都改了。
+                        let kind = if local_hash.is_none() {
+                            Conflict::DeleteVsModify
+                        } else {
+                            Conflict::BothModified
+                        };
+                        report.conflicts.push(ConflictAt {
+                            path: rel.clone(),
+                            kind,
+                        });
+                    }
+                    PullVerdict::Missing => report.missing.push(rel.clone()),
                 }
-                PullVerdict::AlreadySame => {
-                    index.insert(rel.clone(), head_hash);
-                    report.already.push(rel);
+                Ok(())
+            })();
+            if let Err(e) = step {
+                let written = report.updated.len() + report.already.len();
+                let mut msg = format!(
+                    "拉取中断：已写入/登记 {} 个路径；失败于 {}：{}",
+                    written, rel, e
+                );
+                if index_dirty {
+                    match self.store.write_index(&store, agent, &index) {
+                        Ok(()) => msg.push_str("；已完成部分的基线已记录，重试同一路径即可"),
+                        Err(se) => msg.push_str(&format!(
+                            "；已完成部分的基线写入也失败：{}。重试 work_pull 会收敛",
+                            se
+                        )),
+                    }
+                } else {
+                    msg.push_str("；还没有写入任何文件，重试同一路径即可");
                 }
-                PullVerdict::NoChange => report.no_change.push(rel),
-                PullVerdict::Occupied => report.occupied.push(rel),
-                PullVerdict::Conflict => {
-                    // pull 侧能落到 Conflict 的形态：本地删了/上游改了，或两边都改了。
-                    let kind = if local_hash.is_none() {
-                        Conflict::DeleteVsModify
-                    } else {
-                        Conflict::BothModified
-                    };
-                    report.conflicts.push(ConflictAt { path: rel, kind });
-                }
-                PullVerdict::Missing => report.missing.push(rel),
+                return Err(msg);
             }
         }
-        self.store.write_index(&store, agent, &index)?;
+        if let Err(e) = self.store.write_index(&store, agent, &index) {
+            return Err(format!(
+                "拉取已写入沙箱，但基线写入失败：{}；重试 work_pull 会收敛（已是最新的文件只更新基线）",
+                e
+            ));
+        }
         Ok(report)
     }
 
@@ -681,7 +766,7 @@ impl Workspace for WorkspaceService {
         let (shared, store, sandbox) = self.agent_roots(work, agent)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;
-        let (_, tree) = self.head_tree(&store)?;
+        let (head_commit, tree) = self.head_tree(&store)?;
         let index: Index = self.store.read_index(&store, agent)?;
         let media_type = media_hint(&rel).map(|h| h.mime.to_string());
         let base = match index.get(&rel) {
@@ -698,6 +783,7 @@ impl Workspace for WorkspaceService {
         }
         Ok(VersionView {
             path: rel,
+            head_commit,
             media_type,
             base,
             head,
@@ -719,7 +805,7 @@ impl Workspace for WorkspaceService {
         let (shared, store, sandbox) = self.agent_roots(work, agent)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;
-        let (_, tree) = self.head_tree(&store)?;
+        let (head_id, tree) = self.head_tree(&store)?;
         let mut index: Index = self.store.read_index(&store, agent)?;
         let sandbox_files: BTreeSet<String> = self.store.list(&sandbox)?.into_iter().collect();
         let available: BTreeSet<String> = index
@@ -735,81 +821,276 @@ impl Workspace for WorkspaceService {
                 missing.join("、")
             ));
         }
-        let mut entries: Vec<ResolveEntry> = Vec::new();
-        let mut changed = false;
+        if matches!(req.take, ResolveTake::Local) {
+            if let Some(current) = head_id {
+                match req.expect_head {
+                    Some(expected) if expected == current => {}
+                    Some(expected) => {
+                        return Err(format!(
+                            "主副本已从提交 {} 变为 {}：你查看后主副本又前进了，不能把旧合并结果登记到新版本。先重新 work_versions 看三方、把新版合进沙箱，再带 head={} 调 work_resolve。",
+                            expected, current, current
+                        ))
+                    }
+                    None => {
+                        return Err(format!(
+                            "take=local 要带 head=<主副本提交 id>（先 work_status 或 work_versions 取，当前是 {}）；主副本在你查看之后可能已变化，resolve 不能替你猜。",
+                            current
+                        ))
+                    }
+                }
+            }
+        }
+        let mut plans: Vec<ResolvePlan> = Vec::new();
+        let mut denied: Vec<String> = Vec::new();
+        let mut warnings: Vec<ResolveWarning> = Vec::new();
         for rel in want {
             let head_hash = tree.get(&rel).cloned();
             let base_hash = index.get(&rel).cloned();
             let local = self.store.scan_under(&sandbox, &rel, None)?;
             let local_hash = local.as_ref().map(|v| v.hash.clone());
-            let action = match req.take {
-                ResolveTake::Upstream => match head_hash {
-                    Some(hash) => {
-                        let same = local_hash.as_deref() == Some(hash.as_str());
-                        if !same {
-                            self.store
-                                .copy_object_to_under(&store, &hash, &sandbox, &rel)?;
-                        }
-                        let base_changed = base_hash.as_deref() != Some(hash.as_str());
-                        if base_changed {
-                            index.insert(rel.clone(), hash);
-                            changed = true;
-                        }
-                        if !same {
-                            ResolveAction::WroteUpstream
-                        } else if base_changed {
-                            ResolveAction::Marked
-                        } else {
-                            ResolveAction::NoChange
-                        }
-                    }
-                    None => {
-                        let had_local = local_hash.is_some();
-                        if had_local {
-                            self.store.remove_under(&sandbox, &rel)?;
-                        }
-                        let had_base = index.remove(&rel).is_some();
-                        changed |= had_local || had_base;
-                        if had_local {
-                            ResolveAction::RemovedLocal
-                        } else if had_base {
-                            ResolveAction::Cleared
-                        } else {
-                            ResolveAction::NoChange
-                        }
-                    }
-                },
-                ResolveTake::Local => match head_hash {
-                    Some(hash) => {
-                        let base_changed = base_hash.as_deref() != Some(hash.as_str());
-                        if base_changed {
-                            index.insert(rel.clone(), hash);
-                            changed = true;
-                            ResolveAction::Marked
-                        } else {
-                            ResolveAction::NoChange
-                        }
-                    }
-                    None => {
-                        let had_base = index.remove(&rel).is_some();
-                        changed |= had_base;
-                        if had_base {
-                            ResolveAction::Cleared
-                        } else {
-                            ResolveAction::NoChange
-                        }
-                    }
-                },
+            let backup = if matches!(req.take, ResolveTake::Upstream)
+                && needs_backup(head_hash.as_deref(), local_hash.as_deref())
+            {
+                Some(lost_rel(agent, &rel)?)
+            } else {
+                None
             };
-            entries.push(ResolveEntry { path: rel, action });
+            if matches!(req.take, ResolveTake::Local) {
+                match local_take_verdict(
+                    base_hash.as_deref(),
+                    head_hash.as_deref(),
+                    local_hash.as_deref(),
+                ) {
+                    LocalTakeVerdict::DenyUnchanged => denied.push(rel.clone()),
+                    LocalTakeVerdict::WarnLocalMissing => warnings.push(ResolveWarning {
+                        path: rel.clone(),
+                        kind: ResolveWarningKind::LocalMissing,
+                    }),
+                    LocalTakeVerdict::WarnNoBase => warnings.push(ResolveWarning {
+                        path: rel.clone(),
+                        kind: ResolveWarningKind::NoBase,
+                    }),
+                    LocalTakeVerdict::Ok => {}
+                }
+            }
+            plans.push(ResolvePlan {
+                path: rel,
+                head_hash,
+                base_hash,
+                local_hash,
+                backup,
+            });
+        }
+        if !denied.is_empty() {
+            return Err(render_resolve_denied(&denied));
+        }
+        // 先把所有要覆盖/删除的本地版本备份完，再做任何改动；备份失败就整次拒绝。
+        let backup_root = lost_root(&store, agent)?;
+        for plan in &plans {
+            if plan.backup.is_some() {
+                let hash = plan
+                    .local_hash
+                    .as_deref()
+                    .ok_or_else(|| format!("内部错误：{} 需要备份但没有本地指纹", plan.path))?;
+                self.store.copy_under_to_under(
+                    &sandbox,
+                    &plan.path,
+                    &backup_root,
+                    &plan.path,
+                    hash,
+                )?;
+            }
+        }
+        let mut entries: Vec<ResolveEntry> = Vec::new();
+        let mut changed = false;
+        let mut done = 0usize;
+        let apply = (|| -> Result<(), (String, String)> {
+            for plan in plans {
+                let ResolvePlan {
+                    path: rel,
+                    head_hash,
+                    base_hash,
+                    local_hash,
+                    backup,
+                } = plan;
+                let action = match req.take {
+                    ResolveTake::Upstream => match head_hash.as_deref() {
+                        Some(hash) => {
+                            let same = local_hash.as_deref() == Some(hash);
+                            if !same {
+                                self.store
+                                    .copy_object_to_under(&store, hash, &sandbox, &rel)
+                                    .map_err(|e| (rel.clone(), e))?;
+                            }
+                            let base_changed = base_hash.as_deref() != Some(hash);
+                            if base_changed {
+                                index.insert(rel.clone(), hash.to_string());
+                                changed = true;
+                            }
+                            if !same {
+                                ResolveAction::WroteUpstream
+                            } else if base_changed {
+                                ResolveAction::Marked
+                            } else {
+                                ResolveAction::NoChange
+                            }
+                        }
+                        None => {
+                            let had_local = local_hash.is_some();
+                            if had_local {
+                                self.store
+                                    .remove_under(&sandbox, &rel)
+                                    .map_err(|e| (rel.clone(), e))?;
+                            }
+                            let had_base = index.remove(&rel).is_some();
+                            changed |= had_local || had_base;
+                            if had_local {
+                                ResolveAction::RemovedLocal
+                            } else if had_base {
+                                ResolveAction::Cleared
+                            } else {
+                                ResolveAction::NoChange
+                            }
+                        }
+                    },
+                    ResolveTake::Local => match head_hash.as_deref() {
+                        Some(hash) => {
+                            let base_changed = base_hash.as_deref() != Some(hash);
+                            if base_changed {
+                                index.insert(rel.clone(), hash.to_string());
+                                changed = true;
+                                ResolveAction::Marked
+                            } else {
+                                ResolveAction::NoChange
+                            }
+                        }
+                        None => {
+                            let had_base = index.remove(&rel).is_some();
+                            changed |= had_base;
+                            if had_base {
+                                ResolveAction::Cleared
+                            } else {
+                                ResolveAction::NoChange
+                            }
+                        }
+                    },
+                };
+                entries.push(ResolveEntry {
+                    path: rel,
+                    action,
+                    backup,
+                });
+                done += 1;
+            }
+            Ok(())
+        })();
+        if let Err((rel, e)) = apply {
+            return Err(format!(
+                "解决中断：已处理 {} 条；失败于 {}：{}；已覆盖的文件可用 work_pull 对齐，已备份的本地版本在版本库 lost/ 下（可用 work_lost 找回）。",
+                done, rel, e
+            ));
         }
         if changed {
-            self.store.write_index(&store, agent, &index)?;
+            if let Err(e) = self.store.write_index(&store, agent, &index) {
+                return Err(format!(
+                    "解决已完成，但基线写入失败：{}；重试 work_pull 或 work_resolve 会补上基线。",
+                    e
+                ));
+            }
         }
         Ok(ResolveReport {
             take: req.take,
+            head: head_id,
             entries,
             missing,
+            warnings,
+        })
+    }
+
+    fn work_lost(&self, work: &str, agent: &str, path: Option<&str>) -> Result<LostReport, String> {
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let (_shared, store, sandbox) = self.agent_roots(work, agent)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &_shared, &store)?;
+        let lost = lost_root(&store, agent)?;
+        let filter = match path {
+            Some(p) => Some(clean_rel(p)?),
+            None => None,
+        };
+        let mut rels = self.store.list(&lost)?;
+        rels.retain(|r| !is_lost_temp(r));
+        if let Some(f) = &filter {
+            rels.retain(|r| r == f || r.starts_with(&format!("{}/", f)));
+        }
+        let total = rels.len();
+        let truncated = total > MAX_LOST;
+        rels.truncate(MAX_LOST);
+        let mut entries = Vec::new();
+        for rel in rels {
+            let Some(v) = self.store.scan_under(&lost, &rel, None)? else {
+                continue;
+            };
+            let current = self.store.scan_under(&sandbox, &rel, None)?;
+            entries.push(LostEntry {
+                path: rel,
+                hash: v.hash,
+                size: v.size,
+                current_hash: current.map(|c| c.hash),
+            });
+        }
+        Ok(LostReport {
+            agent: agent.to_string(),
+            total,
+            entries,
+            truncated,
+        })
+    }
+
+    fn work_restore_lost(
+        &self,
+        work: &str,
+        agent: &str,
+        path: &str,
+        expect_current: &str,
+    ) -> Result<RestoreLostReport, String> {
+        let rel = clean_rel(path)?;
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let (_shared, store, sandbox) = self.agent_roots(work, agent)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &_shared, &store)?;
+        let lost = lost_root(&store, agent)?;
+        let backups = self.store.list(&lost)?;
+        if !backups.iter().any(|p| p == &rel) {
+            return Err(format!(
+                "没有这个被覆盖的本地版本：{}（先用 work_lost 看可恢复清单）",
+                rel
+            ));
+        }
+        let Some(backup) = self.store.scan_under(&lost, &rel, None)? else {
+            return Err(format!("备份文件不存在：{}", rel));
+        };
+        let current = self.store.scan_under(&sandbox, &rel, None)?;
+        let current_hash = current.as_ref().map(|v| v.hash.clone());
+        let matches = match current_hash.as_deref() {
+            None => expect_current.is_empty(),
+            Some(hash) => hash == expect_current,
+        };
+        if !matches {
+            return Err(format!(
+                "当前沙箱内容与 expect_current 不符：当前={}；先 work_lost 重新看当前 hash，确认后再恢复。",
+                current_hash.as_deref().unwrap_or("不存在")
+            ));
+        }
+        let size = self
+            .store
+            .copy_under_to_under(&lost, &rel, &sandbox, &rel, &backup.hash)?;
+        Ok(RestoreLostReport {
+            path: rel,
+            hash: backup.hash,
+            size,
+            previous: current_hash,
         })
     }
 

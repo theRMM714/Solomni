@@ -102,9 +102,6 @@
     "条目：首行不是目的": 42,
     "行内：注释串后面必须是代码（不能是空行）": 5
   },
-  "src/capabilities/conductor/domain/work.rs": {
-    "头块：槽外有行或自造槽": 1
-  },
   "src/capabilities/conductor/mod.rs": {
     "头块：槽外有行或自造槽": 12,
     "头块：缺文件头": 1
@@ -170,8 +167,6 @@
     "行内：注释串后面必须是代码（不能是空行）": 1
   },
   "src/capabilities/conductor/service/work_tools.rs": {
-    "头块：槽外有行或自造槽": 4,
-    "头块：缺文件头": 1,
     "条目：槽外有行或自造槽": 3,
     "条目：首行不是目的": 2
   },

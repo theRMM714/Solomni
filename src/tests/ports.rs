@@ -406,6 +406,23 @@ fn work_store_double_streams_assets_and_rejects_oversize_or_mismatch() {
         hash
     );
 
+    // 跨根复制（备份 / 恢复原语）：源指纹校验，目标根按传入路径隔离。
+    let lost = abs(&["w", ".work", "lost", "a"]);
+    assert_eq!(
+        s.copy_under_to_under(&root, "clip.bin", &lost, "clip.bin", &hash)
+            .unwrap(),
+        10_000
+    );
+    assert_eq!(
+        s.scan_under(&lost, "clip.bin", None).unwrap().unwrap().hash,
+        hash
+    );
+    let bad_cross = content_hash(b"different");
+    assert!(s
+        .copy_under_to_under(&root, "clip.bin", &lost, "x", &bad_cross)
+        .is_err());
+    assert!(s.scan_under(&lost, "x", None).unwrap().is_none());
+
     let bad = content_hash(b"different");
     let err = s
         .ingest_under(&store, &root, "clip.bin", &bad, 20_000)

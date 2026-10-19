@@ -350,6 +350,57 @@ impl WorkStore for FsWorkStore {
         result
     }
 
+    fn copy_under_to_under(
+        &self,
+        from_root: &Path,
+        from_rel: &str,
+        to_root: &Path,
+        to_rel: &str,
+        expected_hash: &str,
+    ) -> Result<u64, String> {
+        let source = safe_path(from_root, from_rel)?;
+        std::fs::create_dir_all(to_root)
+            .map_err(|e| format!("建目标根失败（{}）：{}", to_root.display(), e))?;
+        let target = safe_path(to_root, to_rel)?;
+        let dir = target
+            .parent()
+            .ok_or_else(|| format!("落点没有父目录：{}", target.display()))?;
+        std::fs::create_dir_all(dir).map_err(|e| format!("建目录失败：{}", e))?;
+        let tmp = temp_path(dir);
+        let result = (|| -> Result<u64, String> {
+            let mut src = File::open(&source)
+                .map_err(|e| format!("读取失败（{}）：{}", source.display(), e))?;
+            let mut out = File::create(&tmp)
+                .map_err(|e| format!("建临时文件失败（{}）：{}", tmp.display(), e))?;
+            let mut scanner = AssetScanner::new(None);
+            let mut buf = vec![0u8; ASSET_CHUNK_BYTES];
+            loop {
+                let n = src
+                    .read(&mut buf)
+                    .map_err(|e| format!("读取失败（{}）：{}", source.display(), e))?;
+                if n == 0 {
+                    break;
+                }
+                scanner.feed(&buf[..n]);
+                out.write_all(&buf[..n])
+                    .map_err(|e| format!("写临时文件失败（{}）：{}", tmp.display(), e))?;
+            }
+            let scanned = scanner.finish();
+            if scanned.hash != expected_hash {
+                return Err(format!("源文件在复制过程中被改动，请重试：{}", from_rel));
+            }
+            out.sync_all()
+                .map_err(|e| format!("刷临时文件失败（{}）：{}", tmp.display(), e))?;
+            drop(out);
+            rename_temp(&tmp, &target)?;
+            Ok(scanned.size)
+        })();
+        if result.is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+        result
+    }
+
     fn head(&self, store: &Path) -> Result<Option<u64>, String> {
         match std::fs::read_to_string(store.join("head")) {
             Ok(t) => t

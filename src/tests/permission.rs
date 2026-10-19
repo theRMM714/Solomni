@@ -365,6 +365,57 @@ fn work_status_filters_paths_outside_read_scope() {
     );
 }
 
+/// 目的：work_lost 的清单与恢复也按读作用域收口，不能拿备份绕过白名单。
+#[test]
+fn work_lost_is_scoped_by_read_permission() {
+    use crate::capabilities::conductor::service::work_tools::WorkHandler;
+    use crate::kernel::ports::{ToolCtx, ToolHandler};
+
+    let dirs = std::sync::Arc::new(InMemoryWorkspace::new());
+    let store = std::sync::Arc::new(InMemoryWorkStore::new());
+    let ws = test_workspace_store(dirs, store.clone());
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    let root = ws.roots("w", &[]).unwrap().store.join("lost").join("a");
+    store
+        .write_under(&root, "public/lost.txt", b"public-lost")
+        .unwrap();
+    store
+        .write_under(&root, "secret/lost.txt", b"secret-lost")
+        .unwrap();
+
+    let p = Permissions {
+        allow_read: paths(&["public"]),
+        ..Default::default()
+    };
+    let h = WorkHandler::new(ws, "w", "a", p);
+    let ctx = ToolCtx {
+        work: "w",
+        agent: "a",
+        line: 1,
+    };
+    let out = h.run(&ctx, "work_lost", "{}");
+    assert!(out.ok, "{}", out.output);
+    assert!(out.output.contains("public/lost.txt"), "{}", out.output);
+    assert!(!out.output.contains("secret/lost.txt"), "{}", out.output);
+
+    let denied = h.run(&ctx, "work_lost", r#"{"path":"secret/lost.txt"}"#);
+    assert!(
+        !denied.ok && denied.output.contains("读取被拒"),
+        "{}",
+        denied.output
+    );
+    let restore = h.run(
+        &ctx,
+        "work_lost",
+        r#"{"path":"secret/lost.txt","restore":true,"expect_current":""}"#,
+    );
+    assert!(
+        !restore.ok && restore.output.contains("读取被拒"),
+        "{}",
+        restore.output
+    );
+}
+
 /// 目的：work_versions / work_resolve 也按读作用域收口，不能拿它们绕过白名单。
 #[test]
 fn work_versions_and_resolve_are_scoped_by_read_permission() {

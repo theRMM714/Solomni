@@ -512,6 +512,20 @@ fn resolve_req(
     crate::capabilities::workspace::api::ResolveRequest {
         paths: paths.iter().map(|s| s.to_string()).collect(),
         take,
+        expect_head: None,
+    }
+}
+
+/// take=local 的请求要带当前主副本提交 id（并发窗口守卫）；测试统一从 work_head 取。
+fn resolve_local_req(
+    ws: &WorkFace,
+    work: &str,
+    paths: &[&str],
+) -> crate::capabilities::workspace::api::ResolveRequest {
+    crate::capabilities::workspace::api::ResolveRequest {
+        paths: paths.iter().map(|s| s.to_string()).collect(),
+        take: crate::capabilities::workspace::api::ResolveTake::Local,
+        expect_head: ws.work_head(work).unwrap(),
     }
 }
 
@@ -711,6 +725,43 @@ pub(crate) fn work_pull_never_clobbers_and_empty_commits_are_refused() {
     assert!(bad_pull.contains("路径"), "{}", bad_pull);
 }
 
+/// 目的：pull 中途失败保留已完成部分的基线；上游再动后重拉不产生伪冲突。
+#[test]
+pub(crate) fn work_pull_persists_partial_baseline_on_later_failure() {
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.work_commit_user("w", "a.txt", b"a1", 1, 0).unwrap();
+    ws.work_commit_user("w", "b.txt", b"b1", 2, 0).unwrap();
+    let sb = sandbox_of(&ws, "w", "a");
+    let both = ["a.txt".to_string(), "b.txt".to_string()];
+    ws.work_pull("w", "a", &both).unwrap();
+
+    ws.work_commit_user("w", "a.txt", b"a2", 3, 0).unwrap();
+    ws.work_commit_user("w", "b.txt", b"b2", 4, 0).unwrap();
+    store.fail_on("copy_object_to_under", "b.txt", 1);
+    let err = ws.work_pull("w", "a", &both).unwrap_err();
+    assert!(
+        err.contains("b.txt") && err.contains("已写入/登记 1 个"),
+        "{}",
+        err
+    );
+    assert_eq!(
+        store.read_under(&sb, "a.txt").unwrap().as_deref(),
+        Some(&b"a2"[..]),
+        "a.txt 已经写进沙箱，基线也必须已经推进"
+    );
+
+    ws.work_commit_user("w", "a.txt", b"a3", 5, 0).unwrap();
+    let rep = ws.work_pull("w", "a", &both).unwrap();
+    assert!(
+        rep.conflicts.is_empty(),
+        "部分基线没保留时这里会报伪冲突：{:?}",
+        rep.conflicts
+    );
+    assert!(rep.updated.contains(&"a.txt".to_string()));
+    assert!(rep.updated.contains(&"b.txt".to_string()));
+}
+
 /// work_status 把"本地有修改 / 上游有更新 / 冲突"分开说，而不是笼统一句。
 #[test]
 pub(crate) fn work_status_separates_local_and_upstream_changes() {
@@ -778,6 +829,11 @@ pub(crate) fn work_versions_reports_text_and_binary_without_guessing() {
 
     let note = ws.work_versions("w", "a", "note.md").unwrap();
     assert_eq!(note.media_type.as_deref(), Some("text/markdown"));
+    assert_eq!(
+        note.head_commit,
+        Some(2),
+        "work_versions 要给出 take=local 的 head"
+    );
     assert_eq!(note.head.unwrap().text.as_deref(), Some("v1"));
     assert!(ws.work_versions("w", "a", "nope.bin").is_err());
 }
@@ -889,7 +945,7 @@ pub(crate) fn work_asset_paths_do_not_use_whole_file_reads() {
 /// 目的：两边都改时，人工合并后用 take=local 推进基线，提交成功且主副本拿到合并结果。
 #[test]
 pub(crate) fn work_resolve_local_marks_merged_result_and_commit_succeeds() {
-    use crate::capabilities::workspace::api::{ResolveAction, ResolveTake};
+    use crate::capabilities::workspace::api::ResolveAction;
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string(), "b".to_string()])
         .unwrap();
@@ -907,7 +963,7 @@ pub(crate) fn work_resolve_local_marks_merged_result_and_commit_succeeds() {
         .is_err());
 
     let rep = ws
-        .work_resolve("w", "b", &resolve_req(&["note.md"], ResolveTake::Local))
+        .work_resolve("w", "b", &resolve_local_req(&ws, "w", &["note.md"]))
         .unwrap();
     assert_eq!(rep.entries[0].action, ResolveAction::Marked);
     let commit = ws
@@ -989,7 +1045,7 @@ pub(crate) fn work_resolve_handles_upstream_deletion_by_side() {
     assert!(store.read_under(&sb_a, "gone.txt").unwrap().is_none());
 
     let keep = ws
-        .work_resolve("w", "a", &resolve_req(&["keep.bin"], ResolveTake::Local))
+        .work_resolve("w", "a", &resolve_local_req(&ws, "w", &["keep.bin"]))
         .unwrap();
     assert_eq!(keep.entries[0].action, ResolveAction::Cleared);
     assert_eq!(
@@ -1018,7 +1074,7 @@ pub(crate) fn work_resolve_handles_upstream_deletion_by_side() {
 /// 目的：未拉取但沙箱有同名文件时状态直说，take=local 后可提交；未跟踪文件单列。
 #[test]
 pub(crate) fn work_status_exposes_both_present_and_local_only_then_resolve_clears_it() {
-    use crate::capabilities::workspace::api::{ResolveAction, ResolveTake};
+    use crate::capabilities::workspace::api::ResolveAction;
     use crate::capabilities::workspace::domain::workstore::StatusState;
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string()]).unwrap();
@@ -1041,7 +1097,7 @@ pub(crate) fn work_status_exposes_both_present_and_local_only_then_resolve_clear
     assert_eq!(only.entries[0].state, StatusState::LocalOnly);
 
     let rep = ws
-        .work_resolve("w", "a", &resolve_req(&["note.md"], ResolveTake::Local))
+        .work_resolve("w", "a", &resolve_local_req(&ws, "w", &["note.md"]))
         .unwrap();
     assert_eq!(rep.entries[0].action, ResolveAction::Marked);
     ws.work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "合并", 2))
@@ -1055,25 +1111,240 @@ pub(crate) fn work_status_exposes_both_present_and_local_only_then_resolve_clear
     );
 }
 
-/// 目的：空路径与三方都不存在的路径都被如实拒绝；部分存在时报告 missing。
+/// 目的：本地没改过时 take=local 必须拒绝；head token 过期也必须拒绝，且都不留改动。
 #[test]
-pub(crate) fn work_resolve_refuses_empty_and_reports_missing() {
-    use crate::capabilities::workspace::api::ResolveTake;
-    let (ws, _dirs, _store) = work_ws();
+pub(crate) fn work_resolve_local_rejects_unmerged_and_stale_head() {
+    use crate::capabilities::workspace::api::{ResolveAction, ResolveRequest, ResolveTake};
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string(), "b".to_string()])
+        .unwrap();
+    ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
+    let sb_a = sandbox_of(&ws, "w", "a");
+    let sb_b = sandbox_of(&ws, "w", "b");
+    ws.work_pull("w", "a", &["note.md".to_string()]).unwrap();
+    ws.work_pull("w", "b", &["note.md".to_string()]).unwrap();
+    store.write_under(&sb_a, "note.md", b"a-change").unwrap();
+    ws.work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "a", 2))
+        .unwrap();
+
+    // b 本地仍是 v1：take=local 只会用旧内容覆盖上游，整次拒绝。
+    let before = store.read_under(&sb_b, "note.md").unwrap();
+    let err = ws
+        .work_resolve("w", "b", &resolve_local_req(&ws, "w", &["note.md"]))
+        .unwrap_err();
+    assert!(err.contains("没有改过"), "{}", err);
+    assert_eq!(store.read_under(&sb_b, "note.md").unwrap(), before);
+    assert_eq!(ws.work_head("w").unwrap(), Some(2));
+
+    // 带过期 head 的 resolve 同样拒绝：不能把基于上一版的合并登记到新版。
+    let stale = ResolveRequest {
+        paths: vec!["note.md".to_string()],
+        take: ResolveTake::Local,
+        expect_head: Some(1),
+    };
+    let err = ws.work_resolve("w", "b", &stale).unwrap_err();
+    assert!(
+        err.contains("主副本已从提交") && err.contains("2"),
+        "{}",
+        err
+    );
+
+    // 真正合并后再 resolve：成功，并记录本次基于的 head。
+    store.write_under(&sb_b, "note.md", b"merged").unwrap();
+    let rep = ws
+        .work_resolve("w", "b", &resolve_local_req(&ws, "w", &["note.md"]))
+        .unwrap();
+    assert_eq!(rep.entries[0].action, ResolveAction::Marked);
+    assert_eq!(rep.head, Some(2));
+}
+
+/// 目的：take=local 在“本地缺失 / 没有基线”时给出显式警告，但仍按既有契约执行。
+#[test]
+pub(crate) fn work_resolve_local_warns_when_local_missing_or_no_base() {
+    use crate::capabilities::workspace::api::ResolveWarningKind;
+    let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
-    assert!(ws
-        .work_resolve("w", "a", &resolve_req(&[], ResolveTake::Local))
-        .is_err());
-    assert!(ws
-        .work_resolve("w", "a", &resolve_req(&["nope"], ResolveTake::Local))
-        .is_err());
+    ws.work_commit_user("w", "other.md", b"o1", 2, 0).unwrap();
+    let sb = sandbox_of(&ws, "w", "a");
+    store.write_under(&sb, "other.md", b"local").unwrap();
+
     let rep = ws
         .work_resolve(
             "w",
             "a",
-            &resolve_req(&["note.md", "nope"], ResolveTake::Local),
+            &resolve_local_req(&ws, "w", &["note.md", "other.md"]),
         )
+        .unwrap();
+    assert_eq!(rep.entries.len(), 2);
+    assert!(rep
+        .warnings
+        .iter()
+        .any(|w| w.path == "note.md" && w.kind == ResolveWarningKind::LocalMissing));
+    assert!(rep
+        .warnings
+        .iter()
+        .any(|w| w.path == "other.md" && w.kind == ResolveWarningKind::NoBase));
+}
+
+/// 目的：take=upstream 覆盖前把本地版本备份到 lost/；work_lost 能列出并按当前 hash 恢复。
+#[test]
+pub(crate) fn work_resolve_upstream_backs_up_and_work_lost_restores() {
+    use crate::capabilities::workspace::api::content_hash;
+    use crate::capabilities::workspace::api::{ResolveAction, ResolveTake};
+    use crate::capabilities::workspace::ports::WorkStore;
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string(), "b".to_string()])
+        .unwrap();
+    ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
+    let sb_a = sandbox_of(&ws, "w", "a");
+    let sb_b = sandbox_of(&ws, "w", "b");
+    ws.work_pull("w", "a", &["note.md".to_string()]).unwrap();
+    ws.work_pull("w", "b", &["note.md".to_string()]).unwrap();
+    store.write_under(&sb_a, "note.md", b"a-change").unwrap();
+    ws.work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "a", 2))
+        .unwrap();
+    store.write_under(&sb_b, "note.md", b"b-change").unwrap();
+
+    let rep = ws
+        .work_resolve("w", "b", &resolve_req(&["note.md"], ResolveTake::Upstream))
+        .unwrap();
+    assert_eq!(rep.entries[0].action, ResolveAction::WroteUpstream);
+    let backup = rep.entries[0].backup.as_deref().expect("要有备份路径");
+    assert_eq!(backup, "lost/b/note.md");
+    let backup_root = ws.roots("w", &[]).unwrap().store.join("lost").join("b");
+    assert_eq!(
+        store
+            .read_under(&backup_root, "note.md")
+            .unwrap()
+            .as_deref(),
+        Some(&b"b-change"[..])
+    );
+    assert_eq!(
+        store.read_under(&sb_b, "note.md").unwrap().as_deref(),
+        Some(&b"a-change"[..])
+    );
+
+    let lost = ws.work_lost("w", "b", None).unwrap();
+    assert_eq!((lost.total, lost.entries.len()), (1, 1));
+    let e = &lost.entries[0];
+    assert_eq!(e.path, "note.md");
+    assert_eq!(e.hash, content_hash(b"b-change"));
+    let a_hash = content_hash(b"a-change");
+    assert_eq!(e.current_hash.as_deref(), Some(a_hash.as_str()));
+
+    // expect_current 不匹配：拒绝，沙箱不动。
+    let err = ws
+        .work_restore_lost("w", "b", "note.md", "not-the-current-hash")
+        .unwrap_err();
+    assert!(err.contains("expect_current"), "{}", err);
+    assert_eq!(
+        store.read_under(&sb_b, "note.md").unwrap().as_deref(),
+        Some(&b"a-change"[..])
+    );
+
+    // 按当前 hash 恢复；备份仍保留。
+    let current = e.current_hash.clone().unwrap();
+    let restored = ws.work_restore_lost("w", "b", "note.md", &current).unwrap();
+    assert_eq!(restored.previous.as_deref(), Some(current.as_str()));
+    assert_eq!(
+        store.read_under(&sb_b, "note.md").unwrap().as_deref(),
+        Some(&b"b-change"[..])
+    );
+    assert_eq!(ws.work_lost("w", "b", None).unwrap().entries.len(), 1);
+
+    // 当前文件不存在时，expect_current 传空串。
+    store.remove_under(&sb_b, "note.md").unwrap();
+    let restored = ws.work_restore_lost("w", "b", "note.md", "").unwrap();
+    assert!(restored.previous.is_none());
+    assert_eq!(
+        store.read_under(&sb_b, "note.md").unwrap().as_deref(),
+        Some(&b"b-change"[..])
+    );
+}
+
+/// 目的：上游删除时 take=upstream 也要先备份本地版本，再删沙箱文件。
+#[test]
+pub(crate) fn work_resolve_upstream_backs_up_before_removing_local() {
+    use crate::capabilities::workspace::api::{ResolveAction, ResolveTake};
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string(), "b".to_string()])
+        .unwrap();
+    ws.work_commit_user("w", "gone.txt", b"v1", 1, 0).unwrap();
+    let sb_a = sandbox_of(&ws, "w", "a");
+    ws.work_pull("w", "a", &["gone.txt".to_string()]).unwrap();
+    ws.work_pull("w", "b", &["gone.txt".to_string()]).unwrap();
+    store.write_under(&sb_a, "gone.txt", b"local").unwrap();
+    ws.work_commit(
+        "w",
+        "b",
+        "w--b",
+        &commit_req(&[], &["gone.txt"], "上游删", 2),
+    )
+    .unwrap();
+
+    let rep = ws
+        .work_resolve("w", "a", &resolve_req(&["gone.txt"], ResolveTake::Upstream))
+        .unwrap();
+    assert_eq!(rep.entries[0].action, ResolveAction::RemovedLocal);
+    let backup = rep.entries[0].backup.as_deref().expect("删除前也要备份");
+    assert_eq!(backup, "lost/a/gone.txt");
+    let backup_root = ws.roots("w", &[]).unwrap().store.join("lost").join("a");
+    assert_eq!(
+        store
+            .read_under(&backup_root, "gone.txt")
+            .unwrap()
+            .as_deref(),
+        Some(&b"local"[..])
+    );
+    assert!(store.read_under(&sb_a, "gone.txt").unwrap().is_none());
+}
+
+/// 目的：备份失败时整次 resolve 中止，不覆盖本地、不动基线。
+#[test]
+pub(crate) fn work_resolve_aborts_when_backup_fails() {
+    use crate::capabilities::workspace::api::ResolveTake;
+    use crate::capabilities::workspace::domain::workstore::StatusState;
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string(), "b".to_string()])
+        .unwrap();
+    ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
+    let sb_a = sandbox_of(&ws, "w", "a");
+    let sb_b = sandbox_of(&ws, "w", "b");
+    ws.work_pull("w", "a", &["note.md".to_string()]).unwrap();
+    ws.work_pull("w", "b", &["note.md".to_string()]).unwrap();
+    store.write_under(&sb_a, "note.md", b"a-change").unwrap();
+    ws.work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "a", 2))
+        .unwrap();
+    store.write_under(&sb_b, "note.md", b"b-change").unwrap();
+
+    store.fail_times("copy_under_to_under", 1);
+    let err = ws
+        .work_resolve("w", "b", &resolve_req(&["note.md"], ResolveTake::Upstream))
+        .unwrap_err();
+    assert!(err.contains("copy_under_to_under"), "{}", err);
+    assert_eq!(
+        store.read_under(&sb_b, "note.md").unwrap().as_deref(),
+        Some(&b"b-change"[..])
+    );
+    let st = ws.work_status("w", "b", &[]).unwrap();
+    assert_eq!(st.entries[0].state, StatusState::Conflict);
+}
+
+/// 目的：空路径与三方都不存在的路径都被如实拒绝；部分存在时报告 missing。
+#[test]
+pub(crate) fn work_resolve_refuses_empty_and_reports_missing() {
+    let (ws, _dirs, _store) = work_ws();
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
+    assert!(ws
+        .work_resolve("w", "a", &resolve_local_req(&ws, "w", &[]))
+        .is_err());
+    assert!(ws
+        .work_resolve("w", "a", &resolve_local_req(&ws, "w", &["nope"]))
+        .is_err());
+    let rep = ws
+        .work_resolve("w", "a", &resolve_local_req(&ws, "w", &["note.md", "nope"]))
         .unwrap();
     assert_eq!(rep.entries.len(), 1);
     assert_eq!(rep.missing, vec!["nope"]);

@@ -360,6 +360,7 @@ tools:
       文本、图片、视频与其它二进制都按**字节**处理，不假定 UTF-8；内容按块流式写入，不整份进上下文。
       内置 write 只写文本；图片 / 视频 / 其它二进制由模块工具或用户投喂产出。
       本地已改、上游也改过的路径**不会被覆盖**，会如实报冲突——先用 work_versions 看三方，再用 work_resolve 选边。
+      中途失败会保留已完成部分的基线，错误里点名失败路径与已更新数量；重试同一路径会收敛。
     params:
       paths:
         type: array
@@ -404,8 +405,9 @@ tools:
     parallel: true                # 只读、无副作用：同一回复里的多个读取可以并发跑
     desc: |
       看一条路径的三方版本：基线（你上次拉取/提交的那一版）、主副本当前版、沙箱本地版。
-      给 hash、大小与按扩展名的媒体类型提示；文本给有上限的预览，图片 / 视频 / 其它二进制只给指纹、大小与类型，不冒充文本。
-      超过单文件上限的既有文件只给元数据，不预览；冲突或提交被拒时先用它看清三方，再决定 work_resolve 的取法。
+      给 hash、大小、主副本提交 id 与按扩展名的媒体类型提示；文本给有上限的预览，图片 / 视频 / 其它二进制只给指纹、大小与类型，不冒充文本。
+      超过单文件上限的既有文件只给元数据，不预览；**预览截断（truncated）或超限时不能据此合并**，要用 read 读沙箱与共享主副本同一路径的全文。
+      冲突或提交被拒时先用它看清三方，再决定 work_resolve 的取法。
     params:
       path:
         type: string
@@ -417,7 +419,10 @@ tools:
     callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: |
       解决基线冲突或在两个版本之间显式选边。take=upstream：用主副本覆盖沙箱（主副本已删则删本地）；
+      **覆盖/删除前会先把本地版本备份到版本库 lost/，回执给备份路径**；备份失败则整次拒绝。
       take=local：不动文件，只把基线推进到主副本（声明“我已把上游合进本地”）；主副本已删时清掉基线，让本地成为新增。
+      take=local 必须带 head（work_status / work_versions 返回的主副本提交 id）；主副本在你查看后又前进会拒绝。
+      本地与基线一致（没改过）时 take=local 会被拒绝，避免用旧内容静默覆盖上游；本地缺失或无基线会在回执里警告。
       文本可人工合并后用 take=local；图片 / 视频 / 其它二进制不能合并，只能选边；不做自动合并。调用前先用 work_versions 看三方。
     params:
       paths:
@@ -428,6 +433,28 @@ tools:
         type: string
         required: true
         desc: upstream（取主副本，放弃本地）或 local（保留本地，把基线推进到主副本）
+      head:
+        type: integer
+        min: 0
+        desc: take=local 必填：调用方看到的主副本提交 id（work_status / work_versions 返回）；与当前 head 不符会被拒绝
+  work_lost:
+    capability: none              # 列备份只读；restore 只写自己的沙箱，不碰共享主副本
+    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    desc: |
+      列出 / 恢复 work_resolve take=upstream 覆盖或删除前备份的**本地版本**（版本库 lost/ 下，按 agent 隔离）。
+      省略 path = 列出本 agent 的全部备份：路径、备份 hash/大小、当前沙箱 hash。
+      path + restore=true 时把该备份复制回沙箱同路径；必须带 expect_current（当前沙箱文件的 hash，文件不存在传空串），
+      不匹配就拒绝，避免覆盖你后来写的新内容。恢复不消费备份，可再次恢复；恢复后先 work_versions 看三方、合并再提交。
+    params:
+      path:
+        type: string
+        desc: 要查看 / 恢复的共享区相对路径；列表时省略 = 全部，给了 = 只看这一条或它下面的
+      restore:
+        type: boolean
+        desc: true = 把 path 的备份恢复回沙箱；缺省 false（只看）
+      expect_current:
+        type: string
+        desc: restore 必填：当前沙箱文件的 hash；文件不存在传空串（列表回执会给当前 hash）
 
   # —— 协作动词：讨论阶段的表态（声明式工具：声明在总表，由角色面按回合发放）——
   say:

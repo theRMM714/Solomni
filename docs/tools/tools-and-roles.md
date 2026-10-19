@@ -163,7 +163,7 @@ roles:
 - **会话权限叠加在落点之上**：
   - 共享区读写受该 agent 的白名单 / 黑名单约束（默认整棵放行；白名单一出现就取代默认，黑名单只做减法）。
   - `work_commit` 只接受白名单内的相对路径（越界**整条拒绝**）；`work_pull` 只拉白名单内的路径。
-  - `work_versions` / `work_resolve` 走读作用域（它们不写共享主副本，提交仍由 `work_commit` 收口）。
+  - `work_versions` / `work_resolve` / `work_lost` 走读作用域（它们不写共享主副本，提交仍由 `work_commit` 收口；`work_lost` 的 restore 只写自己的沙箱）。
   - 语义见 [docs/permission/README.md](../permission/README.md)。
 - **编码**：内置 `read` / `write` 读严格 UTF-8（非法字节按替换字符呈现并如实标注——**本程序不猜编码**），写一律 UTF-8；
   `work_pull` / `work_commit` / `work_versions` / `work_resolve` 按**字节**处理，图片、视频与其它二进制不走 UTF-8 假设。
@@ -196,8 +196,8 @@ prompts/
 | 角色 | 何时 | 工具面（`systools/roles.yaml`） |
 | --- | --- | --- |
 | `discussant` | 讨论阶段 | `say` `agree` `leave` `ask` `read` `list` `search` |
-| `executor` | 任务链节点（agent 子会话） | `read` `list` `write` `edit` `patch` `search` `work_pull` `work_commit` `work_status` `work_versions` `work_resolve` `submit_report` + 该 agent 的模块工具 |
-| `solo` | 用户建的单 agent 工作 | `read` `list` `write` `edit` `patch` `search` `work_pull` `work_commit` `work_status` `work_versions` `work_resolve` + 该 agent 的模块工具（**不发** `submit_report`） |
+| `executor` | 任务链节点（agent 子会话） | `read` `list` `write` `edit` `patch` `search` `work_pull` `work_commit` `work_status` `work_versions` `work_resolve` `work_lost` `submit_report` + 该 agent 的模块工具 |
+| `solo` | 用户建的单 agent 工作 | `read` `list` `write` `edit` `patch` `search` `work_pull` `work_commit` `work_status` `work_versions` `work_resolve` `work_lost` + 该 agent 的模块工具（**不发** `submit_report`） |
 | `planner` | 核心整理派发 | `read` `search` `plan` `slate` `verdict` |
 | `orchestrator` | 核心链中推进 | `read` `search` `node_verdict` `checklist` |
 | `core_proxy` | 核心代理（用户把决定权整块交给它，代用户决定） | `catalog_agents` `create_session` `send_session_message` `observe_session` `read_session_messages` `control_session` `read` `list` `search`（**不发**模块工具） |
@@ -228,8 +228,9 @@ prompts/
 **共享区是版本化工作区**：
 
 - 主副本 `work/` 对 agent 只读，agent 只写自己的沙箱（工作副本）。
-- `work_pull` / `work_commit` / `work_status` / `work_versions` / `work_resolve` 五个**核心自有工具**做同步、查看、三方比较与显式解决冲突。
-- 冲突按文件级三方比较判定，**整体拒绝并逐条点名**，不做自动合并；文本可人工合并后用 `take=local`，图片 / 视频 / 二进制只能显式选边（细则见 [workspace](../workspace/README.md) 与 [PRODUCT.md](../../PRODUCT.md)）。
+- `work_pull` / `work_commit` / `work_status` / `work_versions` / `work_resolve` / `work_lost` 六个**核心自有工具**做同步、查看、三方比较、显式解决冲突与备份恢复。
+- 冲突按文件级三方比较判定，**整体拒绝并逐条点名**，不做自动合并；文本可人工合并后用 `take=local`（带 `head`），图片 / 视频 / 二进制只能显式选边（细则见 [workspace](../workspace/README.md) 与 [PRODUCT.md](../../PRODUCT.md)）。
+- `take=local` 在本地与基线一致时拒绝、主副本提交变化时拒绝；`take=upstream` 覆盖/删除前备份到 `lost/`，`work_lost` 可按当前 hash 恢复。
 - 文本、图片、视频与其它二进制都按字节处理；`work_versions` 给 hash、大小与扩展名媒体类型提示，文本预览最多 16 KiB；单文件超过 64 MiB 时提交 / 上传明确拒绝。
 - 用户投喂是同一条提交路径里的**权威提交**（作者 = user）。
 

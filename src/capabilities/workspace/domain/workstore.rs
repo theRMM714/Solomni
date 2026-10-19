@@ -305,6 +305,8 @@ pub fn pull_verdict(base: Option<&str>, head: Option<&str>, local: Option<&str>)
 pub struct VersionView {
     /// 目的：共享区相对路径。
     pub path: String,
+    /// 目的：主副本当前提交 id（空共享区 = None）；take=local 时作为 head 传回。
+    pub head_commit: Option<u64>,
     /// 目的：按扩展名给出的媒体类型提示；未知 = None（内容以 hash / size 为准）。
     pub media_type: Option<String>,
     /// 目的：基线版本；没拉取过 = None。
@@ -365,6 +367,9 @@ pub struct ResolveEntry {
     pub path: String,
     /// 目的：实际发生的动作。
     pub action: ResolveAction,
+    /// 目的：take=upstream 覆盖/删除前写入的本地版本备份（相对版本库 `.work/` 的路径）；
+    ///   没有备份 = None。
+    pub backup: Option<String>,
 }
 
 /// 目的：work_resolve 的请求。
@@ -374,6 +379,40 @@ pub struct ResolveRequest {
     pub paths: Vec<String>,
     /// 目的：取主副本还是保留本地。
     pub take: ResolveTake,
+    /// 目的：take=local 时调用方看到的主副本提交 id；用来拒绝“查看后主副本又前进”。
+    /// 约束：take=local 且工作已有提交时必填；take=upstream 忽略。
+    pub expect_head: Option<u64>,
+}
+
+/// 目的：一条路径的风险提示：不阻止执行，但回执必须显式说清。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolveWarningKind {
+    /// 目的：主副本有这一版，但沙箱里没有文件；take=local 只推基线，不会写回文件。
+    LocalMissing,
+    /// 目的：没有基线（从未拉取过），take=local 会把主副本当前版当作已合并。
+    NoBase,
+}
+
+impl ResolveWarningKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ResolveWarningKind::LocalMissing => {
+                "本地没有这个文件；take=local 只推进基线，不会写入沙箱；要删除主副本这一版，提交时用 deletes 显式列出"
+            }
+            ResolveWarningKind::NoBase => {
+                "从未拉取过（没有基线）；take=local 会把主副本当前版当作已合并，提交会覆盖它"
+            }
+        }
+    }
+}
+
+/// 目的：一条路径的风险提示。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolveWarning {
+    /// 目的：共享区相对路径。
+    pub path: String,
+    /// 目的：提示类型。
+    pub kind: ResolveWarningKind,
 }
 
 /// 目的：work_resolve 的结果。
@@ -381,10 +420,103 @@ pub struct ResolveRequest {
 pub struct ResolveReport {
     /// 目的：本次使用的取法。
     pub take: ResolveTake,
+    /// 目的：本次读到的主副本提交 id（空共享区 = None）。
+    pub head: Option<u64>,
     /// 目的：逐条路径的解决结果。
     pub entries: Vec<ResolveEntry>,
     /// 目的：请求了、但基线 / 主副本 / 沙箱三方都没有的路径。
     pub missing: Vec<String>,
+    /// 目的：逐条路径的风险提示；不阻止执行，但回执必须列出。
+    pub warnings: Vec<ResolveWarning>,
+}
+
+/// 目的：take=local 的纯判定：拒绝“本地与基线一致、上游却已更新”的伪解决。
+/// 返回：DenyUnchanged = 本地没改过，take=local 只会用旧内容覆盖上游；
+///   Warn* = 可以继续，但回执要显式提示风险。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalTakeVerdict {
+    Ok,
+    WarnLocalMissing,
+    WarnNoBase,
+    DenyUnchanged,
+}
+
+/// 目的：按基线 / 主副本 / 沙箱三方给出 take=local 的判定。
+/// 约束：head=None（上游已删）不算覆盖上游，不拒绝也不提示。
+pub fn local_take_verdict(
+    base: Option<&str>,
+    head: Option<&str>,
+    local: Option<&str>,
+) -> LocalTakeVerdict {
+    let Some(head) = head else {
+        return LocalTakeVerdict::Ok;
+    };
+    match (base, local) {
+        (_, None) => LocalTakeVerdict::WarnLocalMissing,
+        (Some(b), Some(l)) if b != head && l == b => LocalTakeVerdict::DenyUnchanged,
+        (None, Some(l)) if l != head => LocalTakeVerdict::WarnNoBase,
+        _ => LocalTakeVerdict::Ok,
+    }
+}
+
+/// 目的：take=upstream 前是否需要备份本地文件。
+/// 返回：本地存在且与主副本当前版不同 = true（覆盖或删除都会丢内容）。
+pub fn needs_backup(head: Option<&str>, local: Option<&str>) -> bool {
+    local.is_some() && local != head
+}
+
+/// 目的：把一个 agent 的一条路径映射到版本库里的备份相对路径：`lost/<agent>/<rel>`。
+/// 约束：agent 必须能作为单个路径组件；rel 必须是干净的共享区相对路径。
+pub fn lost_rel(agent: &str, rel: &str) -> Result<String, String> {
+    let rel = clean_rel(rel)?;
+    if agent.is_empty()
+        || agent == "."
+        || agent == ".."
+        || agent.contains('/')
+        || agent.contains('\\')
+    {
+        return Err(format!("agent 名不能用作备份目录：{}", agent));
+    }
+    Ok(format!("lost/{}/{}", agent, rel))
+}
+
+/// 目的：一份被 work_resolve take=upstream 覆盖/删除的本地版本。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LostEntry {
+    /// 目的：共享区相对路径。
+    pub path: String,
+    /// 目的：备份内容的指纹。
+    pub hash: String,
+    /// 目的：备份内容的字节数。
+    pub size: u64,
+    /// 目的：当前沙箱同路径的内容指纹；不存在 = None（恢复时 expect_current 传空串）。
+    pub current_hash: Option<String>,
+}
+
+/// 目的：work_lost 的清单结果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LostReport {
+    /// 目的：这份清单属于哪个 agent（备份目录 `lost/<agent>/`）。
+    pub agent: String,
+    /// 目的：过滤后、截断前的总份数。
+    pub total: usize,
+    /// 目的：本次列出的份数（最多到上限）。
+    pub entries: Vec<LostEntry>,
+    /// 目的：是否因上限只列出了一部分。
+    pub truncated: bool,
+}
+
+/// 目的：work_restore_lost 的结果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RestoreLostReport {
+    /// 目的：恢复到的共享区相对路径。
+    pub path: String,
+    /// 目的：恢复的备份内容指纹。
+    pub hash: String,
+    /// 目的：恢复的备份内容字节数。
+    pub size: u64,
+    /// 目的：覆盖前沙箱同路径的指纹；之前不存在 = None。
+    pub previous: Option<String>,
 }
 
 /// 目的：一个 agent 的基线与 agent 名的配对，供待恢复事务写回。
@@ -803,5 +935,55 @@ mod tests {
             status_of(Some("h1"), None, Some("h2")),
             StatusState::Conflict
         );
+    }
+
+    #[test]
+    fn local_take_verdict_rejects_unmerged_and_warns_on_blind_states() {
+        use LocalTakeVerdict::*;
+        assert_eq!(
+            local_take_verdict(Some("h1"), Some("h2"), Some("h1")),
+            DenyUnchanged
+        );
+        assert_eq!(local_take_verdict(Some("h1"), Some("h2"), Some("h3")), Ok);
+        assert_eq!(
+            local_take_verdict(Some("h1"), Some("h1"), Some("h1")),
+            Ok,
+            "上游没动时 take=local 只是推进基线，不是覆盖"
+        );
+        assert_eq!(local_take_verdict(None, Some("h2"), None), WarnLocalMissing);
+        assert_eq!(
+            local_take_verdict(Some("h1"), Some("h2"), None),
+            WarnLocalMissing
+        );
+        assert_eq!(local_take_verdict(None, Some("h2"), Some("h1")), WarnNoBase);
+        assert_eq!(
+            local_take_verdict(None, Some("h2"), Some("h2")),
+            Ok,
+            "本地已经等于主副本时无需警告"
+        );
+        assert_eq!(
+            local_take_verdict(Some("h1"), None, Some("h1")),
+            Ok,
+            "上游已删时保留本地不是覆盖上游"
+        );
+    }
+
+    #[test]
+    fn backup_only_when_local_exists_and_differs_from_head() {
+        assert!(needs_backup(Some("h2"), Some("h1")));
+        assert!(needs_backup(None, Some("h1")));
+        assert!(!needs_backup(Some("h1"), Some("h1")));
+        assert!(!needs_backup(Some("h1"), None));
+        assert!(!needs_backup(None, None));
+    }
+
+    #[test]
+    fn lost_rel_is_one_clean_agent_component_plus_a_clean_rel() {
+        assert_eq!(lost_rel("a", "dir/x.md").unwrap(), "lost/a/dir/x.md");
+        assert!(lost_rel("", "x").is_err());
+        assert!(lost_rel("..", "x").is_err());
+        assert!(lost_rel("a/b", "x").is_err());
+        assert!(lost_rel("a\\b", "x").is_err());
+        assert!(lost_rel("a", "../x").is_err());
     }
 }

@@ -8,9 +8,10 @@ pub use crate::capabilities::workspace::domain::workspace::{
     safe_file_name, AreaUsage, Place, Sandbox, Sandboxes, WorkFiles, WorkRoots, WorkUsage,
 };
 pub use crate::capabilities::workspace::domain::workstore::{
-    Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, GcReport, PullReport,
-    ResolveAction, ResolveEntry, ResolveReport, ResolveRequest, ResolveTake, StatusEntry,
-    StatusReport, VersionView,
+    Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, GcReport, LostEntry,
+    LostReport, PullReport, ResolveAction, ResolveEntry, ResolveReport, ResolveRequest,
+    ResolveTake, ResolveWarning, ResolveWarningKind, RestoreLostReport, StatusEntry, StatusReport,
+    VersionView,
 };
 
 /// 工作区的**用例面**（`service.rs` 实现）：别的能力要工作区目录与版本化，走这里；
@@ -30,7 +31,7 @@ pub trait Workspace: Send + Sync {
     fn roots(&self, session: &str, agents: &[String]) -> Result<WorkRoots, String>;
 
     /// **拉取**：把主副本（head）的路径写进该 agent 的沙箱同相对路径，并更新它的拉取基线。
-    /// 本地已改且上游也改的路径**不覆盖**，只报冲突。
+    /// 本地已改且上游也改的路径**不覆盖**，只报冲突；中途失败时保留已完成部分的基线。
     fn work_pull(&self, work: &str, agent: &str, paths: &[String]) -> Result<PullReport, String>;
     /// **提交**：文件级三方比较（基线 / 沙箱 / head）。任一条冲突 → 整个提交拒绝、逐条点名。
     fn work_commit(
@@ -60,17 +61,29 @@ pub trait Workspace: Send + Sync {
         agent: &str,
         paths: &[String],
     ) -> Result<StatusReport, String>;
-    /// 目的：一条路径的三方版本（基线 / 主副本 / 沙箱内容或指纹）。
-    /// 约束：文本有上限预览；二进制只给指纹与大小。
+    /// 目的：一条路径的三方版本（基线 / 主副本 / 沙箱内容或指纹）+ 主副本提交 id。
+    /// 约束：文本有上限预览；二进制只给指纹与大小；truncated 时不能据此合并。
     fn work_versions(&self, work: &str, agent: &str, path: &str) -> Result<VersionView, String>;
     /// 目的：解决冲突——取主副本覆盖本地，或保留本地并把基线推进到主副本。
-    /// 约束：不做自动合并。
+    /// 约束：不做自动合并；take=local 要带 expect_head（主副本提交 id），且本地与基线一致时拒绝；
+    ///       take=upstream 覆盖/删除本地文件前先备份到版本库 lost/ 下。
     fn work_resolve(
         &self,
         work: &str,
         agent: &str,
         req: &ResolveRequest,
     ) -> Result<ResolveReport, String>;
+    /// 目的：列出该 agent 被 take=upstream 覆盖/删除的本地版本；path 省略 = 全部。
+    fn work_lost(&self, work: &str, agent: &str, path: Option<&str>) -> Result<LostReport, String>;
+    /// 目的：把一份备份复制回沙箱同路径，并校验 expect_current（文件不存在传空串）。
+    /// 约束：恢复不消费备份；不匹配就拒绝，避免覆盖后来写的新内容。
+    fn work_restore_lost(
+        &self,
+        work: &str,
+        agent: &str,
+        path: &str,
+        expect_current: &str,
+    ) -> Result<RestoreLostReport, String>;
     /// 把主副本物化回某个提交点（只改共享区，不动各会话）。
     /// **消费方是回档对齐与提交历史（缺口 `work.rewind-and-file-state`）**：机制先就位、进测试，
     /// 生产调用点随回档重做接入——二进制 crate 里暂时没有生产调用点的接口方法会被 dead_code 误报。
