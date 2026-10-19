@@ -21,7 +21,7 @@
 | `shared/texts.yaml` | `no_agents` / `no_model` / `no_module_dirs` / `no_module_tools` / `no_module_tool_params` | 空态说法 |
 | | `module_tool_params_header` | 模块工具参数段的小标题（模块在 `module.yaml` 里声明了 `params` 时出现） |
 | | `refs.foreign_sandbox` / `refs.collab_sandbox` | `@` 引用越权与协作场景的如实说明（定义在 `shared/texts.yaml`） |
-| | `tool_texts.*` | **运行时回执**：路径校验、参数不符（说事实 + 回发工具签名）、内置工具回执与行区间/截断/编码标注、edit 的找不到（含"只差空白"提示）与多处命中、patch 的解析失败与"第几块为什么、整体没写"、write 的"没读过/读后又被改/只读到一部分"三种拒绝、模块工具分派的三类失败、**信封不合法四类**与"已修复后执行"/"输出被长度截断"的如实标注、**围栏必要落点授不上的拒绝与"按裁决无围栏执行"的如实标注**、给模型看的清单骨架、追加在回复行末尾的 `（已停止）` / `（本段被输出长度截断）` |
+| | `tool_texts.*` | **运行时回执**：参数不符（说事实 + 回发工具签名）、内置工具回执与行区间/截断/编码标注、edit 的找不到（含"只差空白"提示）与多处命中、patch 的解析失败与"第几块为什么、整体没写"、write 的"没读过/读后又被改/只读到一部分"三种拒绝、模块工具分派的三类失败、**信封不合法四类**与"已修复后执行"/"输出被长度截断"的如实标注、**围栏必要落点授不上的拒绝与"按裁决无围栏执行"的如实标注**、给模型看的清单骨架、追加在回复行末尾的 `（已停止）` / `（本段被输出长度截断）`。**路径校验与权限拒绝已由 workspace 代码直接返回，不在册子。** |
 | `shared/agent.yaml` | `agent.system` | agent 职责提示词骨架（模块 `system` 合成 + 该会话**类型 × 角色**的机制说明 + 工作环境 + 调用约定；**工具清单不在这里**，随回合注入） |
 | `roles/discussant.yaml` | `discuss.opener` / `discuss.step` / `discuss.autonomy_note` | 讨论首轮、轮转、小组自裁说明 |
 | `roles/planner.yaml` | `synthesize.*` | 整理方案 |
@@ -45,8 +45,8 @@
   1. **按名字取一段**：`Prompt::text(Segment::…)`（原文）或 `Prompt::render(Segment::…, vars)`（渲染）；
      名字表是 `capabilities/prompt/domain/prompt.rs` 的 `Segment`——**加一段提示词 = 册子加键 + 这里加变体**
      （缺了编译不过）；
-  2. **拿走两块共享记录**：`Prompt::tools()`（`tool_texts`，~100 条模型侧文案）与 `Prompt::refs()`，
-     它们是 `Arc`：沙箱、工具环境、会话一律共享同一份，**不逐处深拷贝**；
+  2. **拿走两块共享记录**：`Prompt::tools()`（`tool_texts`，工具环境 / 回执文案）与 `Prompt::refs()`，
+     它们是 `Arc`：工具环境与会话共享同一份，**不逐处深拷贝**；路径/权限拒绝已由 workspace 代码直接返回，不经这里。
 - 渲染（`{{key}}` 替换、缺键 / 缺变量即报错）在 `capabilities/prompt/domain/prompt.rs`（纯逻辑，不读文件）；
 - **工具总表与角色表不在这份册子里**：`systools/tools.yaml`（工具是什么）与 `systools/roles.yaml`（身份有什么）
   由 `capabilities/tools/detail/yaml_systools.rs` 的 `YamlSystools` 装配成 `SystemTools`，**与册子分开注入**——

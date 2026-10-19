@@ -3,6 +3,7 @@
 //! 纯规则在 `domain/systool.rs`（参数校验、回执文案、观察账本、`ToolOutcome`）——本文件只调用它们；
 //! 因此这里引 `ports`（IO 机制），`domain/` 不引（见 ARCHITECTURE.md §九.3）。
 
+use crate::capabilities::prompt::api::ToolTexts;
 use crate::capabilities::tools::domain::systool::*;
 use crate::capabilities::tools::ports::SysIo;
 use crate::capabilities::workspace::api::{Place, Sandbox};
@@ -12,20 +13,20 @@ use std::path::{Path, PathBuf};
 /// 顺序：解析 JSON → 认工具 → 按声明校验参数 → 补缺省 → 寻址（内置工具一律需要一个 path）。
 pub fn execute(
     sb: &Sandbox,
+    texts: &ToolTexts,
     book: &crate::capabilities::tools::api::ToolBook,
     io: &dyn SysIo,
     obs: &mut Observations,
     name: &str,
     args_json: &str,
 ) -> ToolOutcome {
-    let texts = &sb.texts;
     // 自由格式工具：输入是一段原样文本（不是 JSON），也不吃参数校验——认工具后就交给它自己解释。
     if is_freeform(name) {
         if !book.contains_key(name) {
             return fail(texts.render(&texts.unknown_builtin, &[("name", name.to_string())]));
         }
         return match name {
-            PATCH => apply_patch(sb, io, obs, args_json),
+            PATCH => apply_patch(sb, texts, io, obs, args_json),
             other => fail(texts.render(&texts.unknown_builtin, &[("name", other.to_string())])),
         };
     }
@@ -77,22 +78,18 @@ pub fn execute(
         return fail(sb.read_refusal(&place, &path));
     }
     match name {
-        READ => read(sb, io, obs, &args, &spec, &path),
-        WRITE => write(sb, io, obs, &args, &spec, &path, &place),
-        EDIT => edit(sb, io, obs, &args, &spec, &path),
-        LIST => list(sb, io, &spec, &path),
-        SEARCH => search(sb, io, &args, &spec, &path),
-        other => fail(
-            sb.texts
-                .render(&sb.texts.unknown_builtin, &[("name", other.to_string())]),
-        ),
+        READ => read(texts, io, obs, &args, &spec, &path),
+        WRITE => write(texts, io, obs, &args, &spec, &path, &place),
+        EDIT => edit(texts, io, obs, &args, &spec, &path),
+        LIST => list(texts, io, &spec, &path),
+        SEARCH => search(texts, io, &args, &spec, &path),
+        other => fail(texts.render(&texts.unknown_builtin, &[("name", other.to_string())])),
     }
 }
 
 /// list：列目录（名字 / 是否目录 / 字节数，按名字排序）。
 /// 存在的理由：确认"资料齐不齐、脚本在不在、运行包装没装"必须能列目录——read 只读文件。
-fn list(sb: &Sandbox, io: &dyn SysIo, spec: &str, path: &Path) -> ToolOutcome {
-    let texts = &sb.texts;
+fn list(texts: &ToolTexts, io: &dyn SysIo, spec: &str, path: &Path) -> ToolOutcome {
     let entries = match io.list(path) {
         Ok(e) => e,
         Err(e) => return fail(e),
@@ -137,14 +134,13 @@ fn list(sb: &Sandbox, io: &dyn SysIo, spec: &str, path: &Path) -> ToolOutcome {
 
 /// read：按行区间返回，行号从 1 数起；回执末尾告诉模型接着用哪个 offset，并如实记账"读到的是不是全文"。
 fn read(
-    sb: &Sandbox,
+    texts: &ToolTexts,
     io: &dyn SysIo,
     obs: &mut Observations,
     args: &serde_json::Value,
     spec: &str,
     path: &Path,
 ) -> ToolOutcome {
-    let texts = &sb.texts;
     let got = match io.read(path) {
         Ok(g) => g,
         // 目录不是文件：如实引导到 list，而不是把 IO 错原样丢给模型。
@@ -254,7 +250,7 @@ fn read(
 /// write：整份写入（同名文件被整份覆盖）。
 /// 覆盖已存在的文件必须先有"完整读过、且读后没被改过"的证据——否则拒绝，并让模型改用 edit。
 fn write(
-    sb: &Sandbox,
+    texts: &ToolTexts,
     io: &dyn SysIo,
     obs: &mut Observations,
     args: &serde_json::Value,
@@ -262,7 +258,6 @@ fn write(
     path: &Path,
     place: &Place,
 ) -> ToolOutcome {
-    let texts = &sb.texts;
     let content = args
         .get("content")
         .and_then(|c| c.as_str())
@@ -306,14 +301,13 @@ fn write(
 /// edit：按字面替换一处（默认要求唯一命中）。证据是 old_string 本身——它就是要改的那段原文，不需要先读过。
 /// 被截断或含非法 UTF-8 的文件一律不改（改写会把没读到的部分或原始字节一起弄丢）。
 fn edit(
-    sb: &Sandbox,
+    texts: &ToolTexts,
     io: &dyn SysIo,
     obs: &mut Observations,
     args: &serde_json::Value,
     spec: &str,
     path: &Path,
 ) -> ToolOutcome {
-    let texts = &sb.texts;
     let old = args
         .get("old_string")
         .and_then(|v| v.as_str())
@@ -390,13 +384,12 @@ fn edit(
 
 /// search：逐行找关键词，返回带行号的命中行（命中总数与截断如实报）。
 fn search(
-    sb: &Sandbox,
+    texts: &ToolTexts,
     io: &dyn SysIo,
     args: &serde_json::Value,
     spec: &str,
     path: &Path,
 ) -> ToolOutcome {
-    let texts = &sb.texts;
     let keyword = args
         .get("keyword")
         .and_then(|k| k.as_str())
@@ -488,9 +481,14 @@ fn search(
 /// patch：把一段**自由格式**的补丁应用到一处或多处文件（信封之后原样跟补丁文本，不走 JSON）。
 /// 原子性：先解析 + 寻址 + 读入 + 在内存里算出全部新内容；任何一块不成立就**一个文件都不写**，
 /// 回执点名第几块、为什么。同一个文件被多块改到时，后一块看到前一块的结果。
-fn apply_patch(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, body: &str) -> ToolOutcome {
+fn apply_patch(
+    sb: &Sandbox,
+    texts: &ToolTexts,
+    io: &dyn SysIo,
+    obs: &mut Observations,
+    body: &str,
+) -> ToolOutcome {
     use crate::capabilities::tools::domain::patch::Block;
-    let texts = &sb.texts;
     let blocks = match crate::capabilities::tools::domain::patch::parse(body) {
         Ok(b) => b,
         Err(f) => return fail(patch_fault(texts, &f)),

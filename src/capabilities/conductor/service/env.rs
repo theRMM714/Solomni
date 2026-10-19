@@ -56,7 +56,6 @@ impl Conductor {
                 modules,
                 modules_with_userdata,
                 permissions: self.permissions_for(meta, &a.name),
-                texts: self.prompt.tools(),
                 path_codec: path_codec.clone(),
             });
         }
@@ -176,6 +175,7 @@ impl Conductor {
             tier,
             vm: Arc::clone(&self.vm),
             sandbox: sb.clone(),
+            tool_texts: self.prompt.tools(),
             builtin_tools: self.systools.book(),
 
             unavailable,

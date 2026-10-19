@@ -40,13 +40,14 @@ pub(crate) fn run_branch(
         // **按这一回合的工具面校验**：不在面里的调用一律如实拒绝（不静默执行、也不当表态）。
         (
             String::new(),
-            crate::capabilities::tools::api::refuse(&ctx.sandbox.texts, name),
+            crate::capabilities::tools::api::refuse(&ctx.tool_texts, name),
         )
     } else if crate::capabilities::tools::api::is_builtin(name) {
         (
             String::new(),
             ctx.tools.run_builtin(
                 &ctx.sandbox,
+                &ctx.tool_texts,
                 &ctx.builtin_tools,
                 &mut branch,
                 name,
@@ -224,7 +225,7 @@ pub(crate) fn run_batch(
                     label,
                     ToolOutcome {
                         ok: false,
-                        output: ctx.sandbox.texts.tool_denied_by_user.clone(),
+                        output: ctx.tool_texts.tool_denied_by_user.clone(),
                     },
                 )
             });
@@ -387,11 +388,11 @@ pub(crate) fn available_tools(ctx: &MemberTools) -> String {
         }
     }
     list.extend(crate::capabilities::tools::api::names());
-    list.join(&ctx.sandbox.texts.tool_list_separator)
+    list.join(&ctx.tool_texts.tool_list_separator)
 }
 
 pub(crate) fn deny(ctx: &MemberTools, why: String) -> ToolOutcome {
-    let texts = &ctx.sandbox.texts;
+    let texts = &ctx.tool_texts;
     ToolOutcome {
         ok: false,
         output: texts.render(
@@ -412,30 +413,27 @@ pub(crate) fn dispatch_external(
         Some(m) => m.to_string(),
         None if ctx.modules.len() == 1 => ctx.modules.keys().next().cloned().unwrap_or_default(),
         None => {
-            let why = ctx.sandbox.texts.render(
-                &ctx.sandbox.texts.no_module_field,
+            let why = ctx.tool_texts.render(
+                &ctx.tool_texts.no_module_field,
                 &[("tool", inv.name.clone())],
             );
             return (String::new(), deny(ctx, why));
         }
     };
     let Some(mt) = ctx.modules.get(&module) else {
-        let why = ctx.sandbox.texts.render(
-            &ctx.sandbox.texts.unknown_module,
+        let why = ctx.tool_texts.render(
+            &ctx.tool_texts.unknown_module,
             &[("module", module.clone())],
         );
         return (module.clone(), deny(ctx, why));
     };
     // 运行包未就绪（本档位下该模块的工具不执行）：如实报缺哪个能力，让模型换工具或告诉用户。
     if let Some(caps) = ctx.unavailable.get(&module) {
-        let why = ctx.sandbox.texts.render(
-            &ctx.sandbox.texts.module_unavailable,
+        let why = ctx.tool_texts.render(
+            &ctx.tool_texts.module_unavailable,
             &[
                 ("module", module.clone()),
-                (
-                    "capability",
-                    caps.join(&ctx.sandbox.texts.tool_list_separator),
-                ),
+                ("capability", caps.join(&ctx.tool_texts.tool_list_separator)),
             ],
         );
         return (module.clone(), deny(ctx, why));
@@ -445,10 +443,9 @@ pub(crate) fn dispatch_external(
         let args: serde_json::Value = match serde_json::from_str(&inv.args_json) {
             Ok(a) => a,
             Err(e) => {
-                let why = ctx.sandbox.texts.render(
-                    &ctx.sandbox.texts.bad_args_json,
-                    &[("error", e.to_string())],
-                );
+                let why = ctx
+                    .tool_texts
+                    .render(&ctx.tool_texts.bad_args_json, &[("error", e.to_string())]);
                 return (module.clone(), deny(ctx, why));
             }
         };
@@ -474,7 +471,7 @@ pub(crate) fn dispatch_external(
                     Ok(args) => {
                         if let Err(fault) = book.check(&args) {
                             let why = crate::capabilities::tools::api::arg_fault_text(
-                                &ctx.sandbox.texts,
+                                &ctx.tool_texts,
                                 &full,
                                 book,
                                 &fault,
@@ -483,10 +480,9 @@ pub(crate) fn dispatch_external(
                         }
                     }
                     Err(e) => {
-                        let why = ctx.sandbox.texts.render(
-                            &ctx.sandbox.texts.bad_args_json,
-                            &[("error", e.to_string())],
-                        );
+                        let why = ctx
+                            .tool_texts
+                            .render(&ctx.tool_texts.bad_args_json, &[("error", e.to_string())]);
                         return (module.clone(), deny(ctx, why));
                     }
                 }
@@ -524,8 +520,8 @@ pub(crate) fn dispatch_external(
             }
         }
         None => {
-            let why = ctx.sandbox.texts.render(
-                &ctx.sandbox.texts.module_lacks_tool,
+            let why = ctx.tool_texts.render(
+                &ctx.tool_texts.module_lacks_tool,
                 &[("module", module.clone()), ("tool", inv.name.clone())],
             );
             (module.clone(), deny(ctx, why))

@@ -85,6 +85,7 @@ impl CollabSession {
             tier: crate::kernel::api::Tier::Host,
             vm: Arc::clone(&self.vm),
             sandbox: sb.clone(),
+            tool_texts: self.prompts.tools(),
             builtin_tools: self.systools.book(),
             unavailable: std::collections::BTreeMap::new(),
             fence: crate::kernel::api::FenceSpec::from_sandbox(&sb, false),

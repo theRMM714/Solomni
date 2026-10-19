@@ -336,6 +336,7 @@ pub fn core_operation(
         for (call_id, name, args) in readonly {
             let out = ctx.tools.run_builtin(
                 &ctx.sandbox,
+                &ctx.tool_texts,
                 &ctx.builtin_tools,
                 &mut ctx.observations,
                 &name,
@@ -361,7 +362,7 @@ pub fn core_operation(
             views.push(view);
         }
         // 按通道形态把结果回灌（原生：一条助手消息带 tool_calls + 每条结果 role=tool）。
-        for m in reply_msgs(mode, &done.raw, &views, &ctx.sandbox.texts) {
+        for m in reply_msgs(mode, &done.raw, &views, &ctx.tool_texts) {
             msgs.push(m);
         }
     }

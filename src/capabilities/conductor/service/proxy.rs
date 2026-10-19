@@ -593,7 +593,6 @@ impl Conductor {
                 granularity: crate::capabilities::permission::api::Granularity::Full,
                 ..self.registry.app().permissions.clone()
             },
-            texts: self.prompt.tools(),
             // 代理发言席自己住在宿主上（文件工具也跑在宿主），不需要 guest 翻译。
             path_codec: None,
         };

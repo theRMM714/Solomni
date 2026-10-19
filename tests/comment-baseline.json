@@ -288,8 +288,8 @@
   "src/capabilities/prompt/domain/prompt.rs": {
     "头块：槽外有行或自造槽": 3,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 161,
-    "条目：首行不是目的": 145
+    "条目：槽外有行或自造槽": 148,
+    "条目：首行不是目的": 132
   },
   "src/capabilities/prompt/mod.rs": {
     "头块：槽外有行或自造槽": 4,
@@ -524,8 +524,8 @@
   "src/capabilities/workspace/domain/workspace.rs": {
     "头块：槽外有行或自造槽": 7,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 43,
-    "条目：首行不是目的": 36
+    "条目：槽外有行或自造槽": 41,
+    "条目：首行不是目的": 35
   },
   "src/capabilities/workspace/domain/workstore.rs": {
     "头块：槽外有行或自造槽": 10,

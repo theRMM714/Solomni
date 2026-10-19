@@ -227,40 +227,12 @@ pub struct CoreTexts {
     pub no_module_tool_params: String,
 }
 
-/// 工具与路径的模型侧文案：核心拼回执、失败说明与清单行时从这里取。
-/// 随沙箱/工具环境注入 conductor 的纯逻辑（与 RefsPrompts 同一套做法），本身不是状态。
+/// 工具环境与运行时回执的模型侧文案：核心拼回执、失败说明与清单行时从这里取。
+/// 随工具环境注入 conductor 的纯逻辑（与 RefsPrompts 同一套做法），本身不是状态。
 #[derive(Debug, Clone, Deserialize)]
 pub struct ToolTexts {
     /// 目的：路径写法的**唯一一处**说明（env_block 把它插进每个环境块；工具说明与模块声明不再各写一份）。
     pub path_rules: String,
-    // —— 路径校验（workspace::resolve）——
-    pub path_empty: String,
-    /// 变量：path
-    pub path_need_absolute: String,
-    /// 变量：path
-    pub path_empty_segment: String,
-    /// 变量：path
-    pub path_cur_dir: String,
-    /// 变量：path
-    pub path_parent_dir: String,
-    /// 变量：path
-    pub path_outside_roots: String,
-    /// 变量：why, roots
-    pub roots_wrapper: String,
-    /// 变量：root
-    pub roots_shared: String,
-    /// 变量：root
-    pub roots_private: String,
-    /// 变量：id, root
-    pub roots_module: String,
-    /// 共享主副本只读时，写类工具的如实拒绝（无变量）。
-    pub write_shared_read_only: String,
-    /// 会话权限：写被白/黑名单拒绝。变量：path, roots
-    pub write_scope_denied: String,
-    /// 会话权限：读被白/黑名单拒绝。变量：path, roots
-    pub read_scope_denied: String,
-    /// 会话权限：模块目录默认只读。变量：id
-    pub module_write_denied: String,
     /// 会话权限：工具级确认被用户拒绝（无变量）——工具没有执行。
     pub tool_denied_by_user: String,
     // —— 内置工具回执（systool）——

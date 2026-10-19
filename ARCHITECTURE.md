@@ -84,14 +84,14 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 
 ## 五、提示词册（prompts/）
 
-- **所有发给 LLM 的提示词一律写入 `prompts/`**，禁止硬编码进代码；改文案只改册子；占位符 `{{key}}`，渲染器在 `capabilities/prompt/domain/prompt.rs`。
+- **所有发给 LLM 的指令、身份、协议、环境提示词一律写入 `prompts/`**，禁止硬编码进代码；运行时回执不在此列（见下一条）。改文案只改册子；占位符 `{{key}}`，渲染器在 `capabilities/prompt/domain/prompt.rs`。
 - **缺文件 / 缺键 / 缺变量 = 报错暴露**，禁止静默兜底文案。**册子只由提示词能力持有一次**，以 `Arc` 共享。
 - **别的能力不点字段路径**：按名字取段（`Prompt::text` / `render` + `Segment`），或拿走两块共享记录（`tools()` / `refs()`）；
   "哪个回合发哪几段"的组装留在各业务（身份块归 `session`、工具说明归 `tools`、清单文本归 `registry` / `workspace`）。
 - 路径占位符（`{{work_root}}` 等）由协调业务在运行时替换成**真实根目录**后才交给 agent——仓库里永远不出现机器路径。
 - **不进册子的两类**：①行身份是结构化字段（`LineView` 的 `speaker` / `verb` / `kind`，认字段不认文案）；
   ②只给用户看的呈现层文案（各类 `Notice`、工具轨迹行的成败字样、面向界面 / CLI 的 `Err`）。
-  运行时回执进册子——它们会成为模型下一轮的输入。键清单见 [docs/prompt/prompts.md](docs/prompt/prompts.md)。
+  运行时回执**按产生它的模块归属**：路径/权限拒绝由 workspace 代码直接返回；工具回执、信封/围栏标注等仍由 `tool_texts` 提供。判断标准是"谁做决定谁拥有文案"，不是"进上下文就进册子"。键清单见 [docs/prompt/prompts.md](docs/prompt/prompts.md)。
 
 ## 六、状态与落盘契约
 

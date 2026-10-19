@@ -60,6 +60,9 @@ pub struct MemberTools {
     pub vm: Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync>,
     /// 本成员的沙箱：内置文件工具的寻址与越界依据（权限收口在 conductor）。
     pub sandbox: crate::capabilities::workspace::api::Sandbox,
+    /// 目的：工具说明块用的提示词册文本（当前只用到 `tools_this_turn` 这一段指令）。
+    /// 约束：运行时回执不从这里取；它们由各自产生它们的代码返回。
+    pub tool_texts: std::sync::Arc<crate::capabilities::prompt::api::ToolTexts>,
     /// 内置工具的参数契约（来自 `systools/tools.yaml` 的 tools）：说明与校验都按它来。
     /// 它属于**工具面**，不属于沙箱——沙箱只管路径。
     pub builtin_tools: crate::capabilities::tools::api::ToolBook,
@@ -129,8 +132,8 @@ impl MemberTools {
         if parts.is_empty() {
             return String::new();
         }
-        self.sandbox.texts.render(
-            &self.sandbox.texts.tools_this_turn,
+        self.tool_texts.render(
+            &self.tool_texts.tools_this_turn,
             &[("tools", parts.join("\n"))],
         )
     }

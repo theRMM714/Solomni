@@ -1053,6 +1053,7 @@ pub(crate) fn run_builtin(
     let mut obs = crate::capabilities::tools::api::Observations::default();
     crate::capabilities::tools::service::systool::execute(
         sb,
+        &test_prompts().tools(),
         &test_systools().tools,
         io,
         &mut obs,
@@ -1102,7 +1103,6 @@ pub(crate) fn test_sandbox(
         modules: map,
         modules_with_userdata: std::collections::BTreeSet::new(),
         permissions: Default::default(),
-        texts: test_prompts().tools(),
         path_codec: None,
     }
 }
@@ -2990,6 +2990,7 @@ pub(crate) fn member_with_service_tools(
         tier: crate::kernel::api::Tier::Host,
         vm: test_vm(Arc::new(InMemoryPackages::empty())),
         sandbox: sb.clone(),
+        tool_texts: test_prompts().tools(),
         builtin_tools: test_systools().tools,
         unavailable: BTreeMap::new(),
         fence: crate::kernel::api::FenceSpec::from_sandbox(&sb, false),

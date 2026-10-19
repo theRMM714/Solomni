@@ -1,13 +1,13 @@
 //! 工作区与沙箱的纯数据定义与寻址（机制在适配层）。
 //! 布局：session/<工作名>/work（用户投喂与成品，本工作共享）
 //!       session/<工作名>/<agent实例名>/（该 agent 的私有沙箱）。
-//! 寻址：给 AI 的只有**真实绝对路径**（根目录由适配层给出，经提示词册如实告知）。
+//! 寻址：给 AI 的只有**真实绝对路径**（根目录由适配层给出；拒绝时把允许的根列回去）。
 //! 核心把路径与三个根（共享区 / 私有沙箱 / 成员模块目录）比对来判定可达范围：
 //! 必须是**绝对路径**、组件里不含 . 与 ..、且落在某个允许的根之内；
 //! 越界、相对路径、空段一律拒绝，并把系统工具允许的根列回去（如实报错，不纠正）。
 
 use crate::capabilities::permission::api::Permissions;
-use crate::capabilities::prompt::api::{RefRoots, ToolTexts};
+use crate::capabilities::prompt::api::RefRoots;
 use crate::kernel::api::slash;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -64,9 +64,6 @@ pub struct Sandbox {
     /// 本席位的生效权限（读/提交白黑名单、模块写授权、决定粒度）：由 conductor 解析后注入。
     /// 私有沙箱不在它的管辖内（永远全权）；它只管共享工作区与模块目录。
     pub permissions: Permissions,
-    /// 模型侧文案（来自 prompts/）：**共享一份**（提示词能力给的 `Arc`），不是状态、也不深拷贝。
-    /// 路径拒绝文案由**本模块自己**渲染，所以这条是正常的业务间依赖（经 prompt 的能力面）。
-    pub texts: std::sync::Arc<ToolTexts>,
     /// 目的：这场会话的路径翻译器（虚拟机档 guest ↔ 宿主；本机档 None = 恒等）。
     /// 约束：只用来把模型给的写法译成宿主路径**再校验**；安全判断仍然只有 `resolve` 一处。
     pub path_codec: Option<std::sync::Arc<dyn crate::kernel::ports::PathCodec>>,
@@ -79,41 +76,31 @@ impl Sandbox {
         let spec = raw.trim();
         // 所有拒绝都附上"系统工具允许的根"，模型照着改。
         let deny = |why: String| {
-            self.texts.render(
-                &self.texts.roots_wrapper,
-                &[("why", why), ("roots", self.roots_listing())],
+            format!(
+                "{}。系统工具允许的根（模块工具不查这张表，由围栏 / guest 边界约束）：\n{}",
+                why,
+                self.roots_listing()
             )
         };
         if spec.is_empty() {
-            return Err(deny(self.texts.path_empty.clone()));
+            return Err(deny("路径不能为空".to_string()));
         }
         // 模型侧写法 → 宿主写法（虚拟机档 guest→宿主；本机档恒等）。翻译只影响寻址；安全判断仍在下面。
         let host: PathBuf = match self.path_codec.as_ref() {
             Some(codec) => match codec.to_host(spec) {
                 Some(p) => p,
                 // 认不出本环境的写法：按"不在允许根里"如实拒绝，并把允许的根列回去。
-                None => {
-                    return Err(deny(self.texts.render(
-                        &self.texts.path_outside_roots,
-                        &[("path", spec.to_string())],
-                    )))
-                }
+                None => return Err(deny(format!("路径越界：{}", spec))),
             },
             None => PathBuf::from(spec),
         };
         if !host.is_absolute() {
-            return Err(deny(self.texts.render(
-                &self.texts.path_need_absolute,
-                &[("path", spec.to_string())],
-            )));
+            return Err(deny(format!("需要绝对路径，收到：{}", spec)));
         }
         // 空段（连续分隔符）：components() 会吞掉，这里如实挡掉。
         let flat = host.to_string_lossy().replace('\\', "/");
         if flat.trim_start_matches('/').contains("//") {
-            return Err(deny(self.texts.render(
-                &self.texts.path_empty_segment,
-                &[("path", spec.to_string())],
-            )));
+            return Err(deny(format!("路径含空段（连续分隔符）：{}", spec)));
         }
         let p: &Path = &host;
         let mut norm = PathBuf::new();
@@ -121,18 +108,8 @@ impl Sandbox {
             match c {
                 Component::Prefix(_) | Component::RootDir => norm.push(c.as_os_str()),
                 Component::Normal(s) => norm.push(s),
-                Component::CurDir => {
-                    return Err(deny(
-                        self.texts
-                            .render(&self.texts.path_cur_dir, &[("path", spec.to_string())]),
-                    ))
-                }
-                Component::ParentDir => {
-                    return Err(deny(self.texts.render(
-                        &self.texts.path_parent_dir,
-                        &[("path", spec.to_string())],
-                    )))
-                }
+                Component::CurDir => return Err(deny(format!("路径不能含 . 段：{}", spec))),
+                Component::ParentDir => return Err(deny(format!("路径不能含 .. 段：{}", spec))),
             }
         }
         // 落在哪个根之内：取匹配到的最长根（最具体）。
@@ -147,10 +124,7 @@ impl Sandbox {
         }
         match best {
             Some((place, _)) => Ok((place, norm)),
-            None => Err(deny(self.texts.render(
-                &self.texts.path_outside_roots,
-                &[("path", spec.to_string())],
-            ))),
+            None => Err(deny(format!("路径越界：{}", spec))),
         }
     }
 
@@ -184,15 +158,17 @@ impl Sandbox {
                     self.shared_read_only()
                 } else {
                     let roots = self.permissions.write_roots_listing();
-                    self.texts.render(
-                        &self.texts.write_scope_denied,
-                        &[("path", self.rel_to(&self.shared, path)), ("roots", roots)],
+                    format!(
+                        "写权限受限：{} 不在允许提交的路径内（允许：{}）。",
+                        self.rel_to(&self.shared, path),
+                        roots
                     )
                 }
             }
-            Place::Module(id) => self
-                .texts
-                .render(&self.texts.module_write_denied, &[("id", id.clone())]),
+            Place::Module(id) => format!(
+                "模块 {} 的目录默认只读：改模块要先由用户在会话权限里授权（<module>/userdata/ 除外）。",
+                id
+            ),
             Place::Private => self.shared_read_only(),
         }
     }
@@ -205,9 +181,9 @@ impl Sandbox {
             Place::Private => self.rel_to(&self.private, path),
             Place::Module(_) => self.rel_to(&self.shared, path),
         };
-        self.texts.render(
-            &self.texts.read_scope_denied,
-            &[("path", rel), ("roots", roots)],
+        format!(
+            "读权限受限：{} 不在允许读取的路径内（允许：{}）。",
+            rel, roots
         )
     }
 
@@ -226,9 +202,12 @@ impl Sandbox {
             .unwrap_or_else(|_| slash(path))
     }
 
-    /// 写共享主副本被拒时的如实说明（文案在提示词册）。
+    /// 共享主副本只读的拒绝文案（运行时回执；归 workspace 所有，不进提示词册）。
+    const SHARED_READ_ONLY: &str = "共享区只读：改动请写进你自己的沙箱（工作副本），再用 work_commit 提交；文本、图片、视频与二进制都按字节处理（内容流式读写、不整份进上下文；单文件有上限）；冲突先用 work_status / work_versions 看三方（记下主副本提交 id），文本合并后用 work_resolve take=local head=<id>（预览截断先用 read 读全文） 选边，图片 / 视频 / 二进制只能选边；take=upstream 覆盖前会备份，被覆盖的本地版本可用 work_lost 找回。";
+
+    /// 写共享主副本被拒时的如实说明（运行时回执，由本模块拥有）。
     pub fn shared_read_only(&self) -> String {
-        self.texts.write_shared_read_only.clone()
+        Self::SHARED_READ_ONLY.to_string()
     }
 
     /// 允许的根：共享区、私有沙箱、每个成员模块目录（顺序稳定，便于取最长匹配）。
@@ -254,20 +233,14 @@ impl Sandbox {
     /// 系统工具允许的根清单（错误文案里列全，模型照着改）——按本环境的写法给。
     pub fn roots_listing(&self) -> String {
         let mut lines = vec![
-            self.texts.render(
-                &self.texts.roots_shared,
-                &[("root", self.in_view(&self.shared))],
+            format!(
+                "- 本次工作的共享区（主副本，只读）：{}",
+                self.in_view(&self.shared)
             ),
-            self.texts.render(
-                &self.texts.roots_private,
-                &[("root", self.in_view(&self.private))],
-            ),
+            format!("- 你私有的沙箱：{}", self.in_view(&self.private)),
         ];
         for (id, root) in &self.modules {
-            lines.push(self.texts.render(
-                &self.texts.roots_module,
-                &[("id", id.clone()), ("root", self.in_view(root))],
-            ));
+            lines.push(format!("- 模块 {} 的目录：{}", id, self.in_view(root)));
         }
         lines.join("\n")
     }

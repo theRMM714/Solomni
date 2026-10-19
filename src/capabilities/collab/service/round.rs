@@ -373,7 +373,7 @@ pub fn converse_with(
                     let done = run_batch(ctx, &plan, confirms.as_mut(), ask, sink);
                     // 先按原序把工具行建好（执行已经做完），再让**唯一那处**构造函数产出这一回复的消息：
                     // 实时与重建走同一个函数，"重建上下文与实时一致"因此是结构保证的。
-                    let texts = &ctx.sandbox.texts;
+                    let texts = &ctx.tool_texts;
                     let reply_text = reply.text.clone();
                     let views: Vec<ToolCallView> = calls
                         .iter()
@@ -429,7 +429,7 @@ pub fn converse_with(
                 // ② 没有原生调用却写了信封：**不执行**（两套形态互斥），但也不静默丢掉意图
                 {
                     if let Some(inv) = reply.tools.first().cloned() {
-                        let texts = &ctx.sandbox.texts;
+                        let texts = &ctx.tool_texts;
                         let view = ToolCallView {
                             speaker: speaker.to_string(),
                             module: inv.module.clone().unwrap_or_default(),
@@ -476,13 +476,13 @@ pub fn converse_with(
                 let ctx = tools.as_deref_mut().expect("上臂已判存在");
                 // 回执按判定出的类别给修法（未闭合 / 裸控制字符 / 语法错 / 字段不合法）。
                 let mut why = crate::capabilities::llm::api::malformed_report(
-                    &ctx.sandbox.texts,
+                    &ctx.tool_texts,
                     inv.malformed.as_ref().expect("上臂已判存在"),
                 );
                 // 供应商说是长度截断：那"写坏 JSON"就不是模型的错，改法也不同（分次写/拆小步骤）。
                 if truncated {
                     why.push('\n');
-                    why.push_str(&ctx.sandbox.texts.malformed_truncated);
+                    why.push_str(&ctx.tool_texts.malformed_truncated);
                 }
                 let view = ToolCallView {
                     speaker: speaker.to_string(),
@@ -496,7 +496,7 @@ pub fn converse_with(
                     reply: reply_id,
                 };
                 on_tool(&view);
-                let texts = &ctx.sandbox.texts;
+                let texts = &ctx.tool_texts;
                 let msgs_of = reply_msgs(mode, &raw, std::slice::from_ref(&view), texts);
                 for m in &msgs_of {
                     msgs.push(m.clone());
@@ -549,8 +549,8 @@ pub fn converse_with(
                             ok: outcome.ok,
                             output: format!(
                                 "{}\n{}",
-                                ctx.sandbox.texts.render(
-                                    &ctx.sandbox.texts.envelope_repaired,
+                                ctx.tool_texts.render(
+                                    &ctx.tool_texts.envelope_repaired,
                                     &[("what", what.to_string())]
                                 ),
                                 outcome.output
@@ -559,7 +559,7 @@ pub fn converse_with(
                         _ => outcome,
                     }
                 };
-                let texts = &ctx.sandbox.texts;
+                let texts = &ctx.tool_texts;
                 let views: Vec<ToolCallView> = plan
                     .iter()
                     .enumerate()
