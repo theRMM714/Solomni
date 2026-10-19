@@ -115,7 +115,6 @@ impl Conductor {
                 }
             }
             if !started.is_empty() {
-                let texts = self.prompt.tools();
                 let lines: Vec<String> = started
                     .iter()
                     .map(|(id, ops)| {
@@ -123,11 +122,8 @@ impl Conductor {
                             .iter()
                             .map(|o| o.tool.clone())
                             .collect::<Vec<_>>()
-                            .join(&texts.tool_list_separator);
-                        texts.render(
-                            &texts.module_tools_line,
-                            &[("id", id.clone()), ("tools", names)],
-                        )
+                            .join("、");
+                        format!("- {}：{}", id, names)
                     })
                     .collect();
                 notes.module_tools = format!("{}\n{}", notes.module_tools, lines.join("\n"));
@@ -144,14 +140,7 @@ impl Conductor {
                         if signature.is_empty() {
                             continue;
                         }
-                        param_lines.push(texts.render(
-                            &texts.module_tool_params_line,
-                            &[
-                                ("module", id.clone()),
-                                ("tool", op.tool.clone()),
-                                ("signature", signature),
-                            ],
-                        ));
+                        param_lines.push(format!("- {}.{}\n{}", id, op.tool, signature));
                     }
                 }
                 if !param_lines.is_empty() {
@@ -175,7 +164,10 @@ impl Conductor {
             tier,
             vm: Arc::clone(&self.vm),
             sandbox: sb.clone(),
-            tool_texts: self.prompt.tools(),
+            tools_this_turn: self
+                .prompt
+                .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
+                .to_string(),
             builtin_tools: self.systools.book(),
 
             unavailable,
@@ -331,8 +323,9 @@ impl Conductor {
             chat,
             note,
             Some(tools),
-            self.prompt.refs(),
-            self.prompt.tools(),
+            self.prompt
+                .text(crate::capabilities::prompt::api::Segment::CompactPrompt)
+                .to_string(),
         );
         // 自动压缩的预算按**这个 agent 的模型**窗口算（见 session-model.md 六）。
         s.set_compact_budget(self.compact_budget(a.model.as_deref()));

@@ -1,10 +1,10 @@
 //! 核心自带的内置工具：read / write / edit / search。
-//! 策略在 conductor（名字固定、放行、寻址、根内校验、参数校验、改动前的"读过"证据、回执文案）；机制在 SysIo 端口（适配层）。
+//! 策略在 conductor（名字固定、放行、寻址、根内校验、参数校验、改动前的"读过"证据）；回执文案在本文件与调用点；机制在 SysIo 端口（适配层）。
 //! **参数契约不在本文件里**：声明在 systools/tools.yaml 的 tools，本文件只按声明校验、取缺省值与拼回执。
 //! 存在的理由：读盘落盘不经过任何外部进程，编码问题不进本程序——模型自己看内容自己决定。
 //! 路径一律是真实绝对路径（根目录经提示词册如实告知）；模块声明的外部工具与内置工具用同一套路径。
 
-use crate::capabilities::prompt::api::{Prompt, Segment, ToolTexts};
+use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::tools::api::{ArgFault, ToolSchema};
 use crate::capabilities::workspace::api::Sandbox;
 use std::collections::BTreeMap;
@@ -111,9 +111,7 @@ pub fn tool_notes(
                 ("sandbox_root", crate::kernel::api::slash(&sb.private)),
             ],
         ),
-        module_tools: crate::capabilities::tools::domain::module_tools::module_tools(
-            prompt, modules,
-        ),
+        module_tools: crate::capabilities::tools::domain::module_tools::module_tools(modules),
         module_tool_params: crate::capabilities::tools::domain::module_tools::module_tool_params(
             prompt, modules,
         ),
@@ -249,7 +247,6 @@ pub(crate) fn near_match(hay: &str, old: &str) -> Option<(usize, String)> {
 
 /// 整份覆盖已存在文件的证据检查：本次会话里**完整读过**它、且读后没被改过（write 与 patch 的 Add 共用）。
 pub(crate) fn overwrite_check(
-    texts: &ToolTexts,
     obs: &Observations,
     spec: &str,
     path: &Path,
@@ -257,13 +254,19 @@ pub(crate) fn overwrite_check(
 ) -> Result<(), String> {
     match obs.known(path) {
         Some(seen) if seen == fnv1a(current) => Ok(()),
-        Some(_) => Err(texts.render(&texts.write_stale, &[("path", spec.to_string())])),
+        Some(_) => Err(format!(
+            "{} 在你读过之后又被改动过（内容与当时不同）：请重新 read 一遍再决定怎么写，不要凭记忆覆盖。",
+            spec
+        )),
         None => Err(match obs.partial_why(path) {
-            Some(w) => texts.render(
-                &texts.write_partial,
-                &[("path", spec.to_string()), ("why", w)],
+            Some(w) => format!(
+                "{} 你只读到一部分：{}。整份覆盖会丢掉没读到的内容，请改用 edit 改确定的片段。",
+                spec, w
             ),
-            None => texts.render(&texts.write_need_read, &[("path", spec.to_string())]),
+            None => format!(
+                "要整份覆盖已存在的文件 {}，必须在本次会话里先**完整读过**它（只读一段不算）。请先 read 全文，或改用 edit 只改那一处。",
+                spec
+            ),
         }),
     }
 }
@@ -278,118 +281,88 @@ pub(crate) fn align_eol(content: &str, current: &str) -> String {
 }
 
 /// 某一块不成立的回执（整体不写盘，所以措辞要直说这一点）。
-pub(crate) fn block_fault(texts: &ToolTexts, n: usize, why: String) -> String {
-    texts.render(
-        &texts.patch_block_fault,
-        &[("n", n.to_string()), ("why", why)],
-    )
+pub(crate) fn block_fault(n: usize, why: String) -> String {
+    format!("[patch] 第 {} 块不成立，**没有任何文件被写入**：{}", n, why)
 }
 
 /// patch 解析失败的回执（每一类都说清事实）。
-pub(crate) fn patch_fault(texts: &ToolTexts, f: &crate::capabilities::tools::api::Fault) -> String {
+pub(crate) fn patch_fault(f: &crate::capabilities::tools::api::Fault) -> String {
     use crate::capabilities::tools::api::Fault as F;
     match f {
-        F::NoBlocks => texts.patch_no_blocks.clone(),
-        F::UnknownMarker { line, text } => texts.render(
-            &texts.patch_unknown_marker,
-            &[("line", line.to_string()), ("text", text.clone())],
+        F::NoBlocks => {
+            "没认出任何补丁标记（要 *** Add File: 路径 或 *** Update File: 路径）".to_string()
+        }
+        F::UnknownMarker { line, text } => format!(
+            "第 {} 行看不懂的标记 *** {}（只认 Add File / Update File / SEARCH / REPLACE / End File）",
+            line, text
         ),
-        F::MissingPath { line, marker } => texts.render(
-            &texts.patch_missing_path,
-            &[("line", line.to_string()), ("marker", marker.clone())],
-        ),
-        F::EmptyAdd { line } => texts.render(&texts.patch_empty_add, &[("line", line.to_string())]),
+        F::MissingPath { line, marker } => {
+            format!("第 {} 行的 {} 后面没写路径", line, marker)
+        }
+        F::EmptyAdd { line } => format!("第 {} 行的 Add File 后面没有内容", line),
         F::EmptyUpdate { line } => {
-            texts.render(&texts.patch_empty_update, &[("line", line.to_string())])
+            format!("第 {} 行的 Update File 后面没有 SEARCH / REPLACE", line)
         }
-        F::EmptySearch { line } => {
-            texts.render(&texts.patch_empty_search, &[("line", line.to_string())])
-        }
-        F::MissingEnd { line } => {
-            texts.render(&texts.patch_missing_end, &[("line", line.to_string())])
-        }
-        F::SearchWithoutReplace { line } => texts.render(
-            &texts.patch_search_no_replace,
-            &[("line", line.to_string())],
+        F::EmptySearch { line } => format!(
+            "第 {} 行的 SEARCH 是空的（要在文件开头插入，就把开头那几行一起写进 SEARCH）",
+            line
         ),
-        F::ReplaceWithoutSearch { line } => texts.render(
-            &texts.patch_replace_no_search,
-            &[("line", line.to_string())],
+        F::MissingEnd { line } => format!(
+            "第 {} 行起的这一块没有 *** End File 收尾（它的后面可能还有别的话，核心不猜哪里是结尾）：请给每一块都补上 *** End File。",
+            line
         ),
+        F::SearchWithoutReplace { line } => {
+            format!("第 {} 行的 SEARCH 后面没有 REPLACE", line)
+        }
+        F::ReplaceWithoutSearch { line } => {
+            format!("第 {} 行的 REPLACE 前面没有 SEARCH", line)
+        }
     }
 }
 
 /// 一处改动失败的原因句（外面再套"第 N 块第 k 处"）。
-pub(crate) fn edit_fault_reason(
-    texts: &ToolTexts,
-    f: &crate::capabilities::tools::api::EditFault,
-) -> String {
+pub(crate) fn edit_fault_reason(f: &crate::capabilities::tools::api::EditFault) -> String {
     use crate::capabilities::tools::api::EditFault as E;
     match f {
         E::NotFound { total } => {
-            texts.render(&texts.patch_not_found, &[("total", total.to_string())])
+            format!("SEARCH 的原文按**整行**匹配找不到（该文件共 {} 行）", total)
         }
-        E::Multiple { lines } => texts.render(
-            &texts.patch_multiple,
-            &[
-                ("n", lines.len().to_string()),
-                (
-                    "lines",
-                    lines
-                        .iter()
-                        .map(|l| l.to_string())
-                        .collect::<Vec<_>>()
-                        .join("、"),
-                ),
-            ],
+        E::Multiple { lines } => format!(
+            "SEARCH 命中了 {} 处（第 {} 行）：把上下文补足，让它唯一",
+            lines.len(),
+            lines
+                .iter()
+                .map(|l| l.to_string())
+                .collect::<Vec<_>>()
+                .join("、")
         ),
-        E::NearMiss { line, actual } => texts.render(
-            &texts.patch_near,
-            &[("line", line.to_string()), ("actual", actual.clone())],
-        ),
+        E::NearMiss { line, actual } => {
+            format!("第 {} 行与它只差空白：{}", line, actual)
+        }
     }
 }
 
 /// 参数不符的回执：说清是哪一条不合（由声明判定），再把工具签名原样发回去。
-pub fn arg_fault_text(
-    texts: &ToolTexts,
-    name: &str,
-    schema: &ToolSchema,
-    fault: &ArgFault,
-) -> String {
+pub fn arg_fault_text(name: &str, schema: &ToolSchema, fault: &ArgFault) -> String {
     let why = match fault {
-        ArgFault::NotObject => texts.arg_not_object.clone(),
-        ArgFault::Missing(n) => texts.render(&texts.arg_missing, &[("name", n.clone())]),
-        ArgFault::WrongType { name, want } => texts.render(
-            &texts.arg_wrong_type,
-            &[("name", name.clone()), ("want", want.to_string())],
-        ),
-        ArgFault::Empty(n) => texts.render(&texts.arg_empty, &[("name", n.clone())]),
-        ArgFault::TooSmall { name, min } => texts.render(
-            &texts.arg_too_small,
-            &[("name", name.clone()), ("min", min.clone())],
-        ),
-        ArgFault::TooBig { name, max } => texts.render(
-            &texts.arg_too_big,
-            &[("name", name.clone()), ("max", max.clone())],
-        ),
-        ArgFault::Unknown(n) => texts.render(&texts.arg_unknown, &[("name", n.clone())]),
+        ArgFault::NotObject => "args 必须是一个参数对象".to_string(),
+        ArgFault::Missing(n) => format!("缺少必填参数 {}", n),
+        ArgFault::WrongType { name, want } => format!("参数 {} 需要 {}", name, want),
+        ArgFault::Empty(n) => format!("参数 {} 不能是空字符串", n),
+        ArgFault::TooSmall { name, min } => format!("参数 {} 不能小于 {}", name, min),
+        ArgFault::TooBig { name, max } => format!("参数 {} 不能大于 {}", name, max),
+        ArgFault::Unknown(n) => format!("没有参数 {}", n),
     };
-    texts.render(
-        &texts.arg_fault,
-        &[
-            ("why", why),
-            (
-                "signature",
-                format!("{}\n{}", name, schema.render_for_prompt()),
-            ),
-        ],
-    )
+    let signature = format!("{}\n{}", name, schema.render_for_prompt());
+    format!("{}。{}", why, signature)
 }
 
 /// 越权调用：这个席位没有这个工具（角色表决定工具面）——**如实拒绝**，不执行。
-pub fn refuse(texts: &ToolTexts, name: &str) -> ToolOutcome {
-    fail(texts.render(&texts.tool_not_allowed, &[("name", name.to_string())]))
+pub fn refuse(name: &str) -> ToolOutcome {
+    fail(format!(
+        "这个席位没有工具 {}：角色表没发给它（越权调用一律不执行）。",
+        name
+    ))
 }
 
 pub(crate) fn fail(msg: String) -> ToolOutcome {

@@ -77,7 +77,7 @@ fn maybe_compact(s: &mut AgentSession, identity: &str, sink: &mut dyn FnMut(Sess
         .as_ref()
         .and_then(|t| t.builtin_tools.get("compact"))
         .map(|s| s.decl("compact"));
-    let prompt = s.tool_texts.compact_prompt.clone();
+    let prompt = s.compact_prompt.clone();
     let up_to = s.next_line;
     match compact_turn(s, &prompt, decl.as_ref(), identity) {
         Ok(summary) => {
@@ -102,7 +102,7 @@ pub fn say(
 ) {
     // 到点先压一次：**同一个工作线程内**跑，不阻塞核心。
     maybe_compact(s, identity, sink);
-    let text = crate::capabilities::prompt::api::rewrite(text, Some(&s.id), &s.roots(), &s.refs);
+    let text = crate::capabilities::prompt::api::rewrite(text, Some(&s.id), &s.roots());
     s.dialogue.push(Msg::user(text.clone()));
     // 用户行不属于任何模型回复：给它**自己的行号**当回复号（与重建时的规则一致），
     // 否则它会继承上一轮的回复号，回档时与上一轮误并成一组。
@@ -212,7 +212,6 @@ fn run_rounds(
     sink: &mut dyn FnMut(SessionEvent),
 ) -> Vec<Round> {
     let label = s.id.clone();
-    let texts = s.tool_texts.clone();
     let stopped = live.cancelled();
     let next_line = std::cell::Cell::new(s.next_line);
     let per_round: std::cell::RefCell<Vec<Vec<LineView>>> = std::cell::RefCell::new(Vec::new());
@@ -222,7 +221,7 @@ fn run_rounds(
             *error.borrow_mut() = Some(err);
             return;
         }
-        let views = build_round_lines(&label, &texts, round, stopped, &next_line, spec.turn_id);
+        let views = build_round_lines(&label, round, stopped, &next_line, spec.turn_id);
         if !views.is_empty() {
             s(SessionEvent::Transcript(views.clone()));
         }

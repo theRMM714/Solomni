@@ -58,7 +58,6 @@ pub trait ToolExec: Send + Sync {
     fn run_builtin(
         &self,
         sb: &crate::capabilities::workspace::api::Sandbox,
-        texts: &crate::capabilities::prompt::api::ToolTexts,
         builtin_tools: &ToolBook,
         observations: &mut Observations,
         name: &str,

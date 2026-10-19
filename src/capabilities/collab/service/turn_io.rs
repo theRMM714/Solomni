@@ -85,7 +85,10 @@ impl CollabSession {
             tier: crate::kernel::api::Tier::Host,
             vm: Arc::clone(&self.vm),
             sandbox: sb.clone(),
-            tool_texts: self.prompts.tools(),
+            tools_this_turn: self
+                .prompts
+                .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
+                .to_string(),
             builtin_tools: self.systools.book(),
             unavailable: std::collections::BTreeMap::new(),
             fence: crate::kernel::api::FenceSpec::from_sandbox(&sb, false),
@@ -133,8 +136,7 @@ impl CollabSession {
     /// 约束：那一关已由队列出队——这里只管"他的话怎么进业务"，不碰队列。
     pub(crate) fn answer(&mut self, text: &str, sink: &mut dyn FnMut(SessionEvent)) {
         let roots = self.sandboxes.ref_roots();
-        let text =
-            crate::capabilities::prompt::api::rewrite(text, None, &roots, &self.prompts.refs());
+        let text = crate::capabilities::prompt::api::rewrite(text, None, &roots);
         if let Some(disc) = self.disc.as_mut() {
             disc.pending_user_answers.push(text);
         }
@@ -286,8 +288,7 @@ impl CollabSession {
             return;
         }
         let roots = self.sandboxes.ref_roots();
-        let text =
-            crate::capabilities::prompt::api::rewrite(text, None, &roots, &self.prompts.refs());
+        let text = crate::capabilities::prompt::api::rewrite(text, None, &roots);
         let line = self.view(LineView::user("", text));
         sink(SessionEvent::Transcript(vec![line]));
     }

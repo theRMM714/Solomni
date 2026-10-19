@@ -79,7 +79,9 @@ impl CollabSession {
 
     /// 注入到该成员会话里的提醒文案（核心在轮次边界注入；用户主动中止时不注入）。
     pub fn reminder_text(&self) -> String {
-        self.prompts.tools().discuss_reminder.clone()
+        self.prompts
+            .text(crate::capabilities::prompt::api::Segment::DiscussReminder)
+            .to_string()
     }
 }
 
@@ -551,8 +553,7 @@ impl CollabSession {
     pub fn set_task(&mut self, task: &str, sink: &mut dyn FnMut(SessionEvent)) {
         // 写法按本会话环境给（虚拟机档 = guest 写法，模块工具直接能用）：翻译器在沙箱清单里。
         let roots = self.sandboxes.ref_roots();
-        let task =
-            crate::capabilities::prompt::api::rewrite(task, None, &roots, &self.prompts.refs());
+        let task = crate::capabilities::prompt::api::rewrite(task, None, &roots);
         if task.trim().is_empty() {
             sink(SessionEvent::Notice("[取消] 需求为空".into()));
             sink(SessionEvent::Ended);

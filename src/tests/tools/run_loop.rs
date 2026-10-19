@@ -396,14 +396,7 @@ pub(crate) fn builtin_edit_replaces_the_requested_span_and_reports_what_it_did()
     );
     let edit = |obs: &mut crate::capabilities::tools::api::Observations, args: &str| {
         let full = format!("{{\"path\":\"{}\",{}}}", note, args);
-        exec.run_builtin(
-            &sb,
-            &test_prompts().tools(),
-            &test_systools().tools,
-            obs,
-            "edit",
-            &full,
-        )
+        exec.run_builtin(&sb, &test_systools().tools, obs, "edit", &full)
     };
     // 唯一命中：只改那一处，别处一字不动
     let ok = edit(
@@ -502,14 +495,7 @@ pub(crate) fn builtin_edit_refuses_files_it_cannot_see_whole() {
             Arc::clone(&io),
             Arc::new(NoFenceHost),
         );
-        let out = exec.run_builtin(
-            &sb,
-            &test_prompts().tools(),
-            &test_systools().tools,
-            &mut obs,
-            "edit",
-            &args,
-        );
+        let out = exec.run_builtin(&sb, &test_systools().tools, &mut obs, "edit", &args);
         assert!(!out.ok && out.output.contains(want), "{}", out.output);
         assert_eq!(
             io.get(&["demo", "work", "note.txt"]).as_deref(),
@@ -531,14 +517,7 @@ pub(crate) fn builtin_write_needs_a_complete_prior_read_of_an_existing_file() {
     );
     let run =
         |obs: &mut crate::capabilities::tools::api::Observations, tool: &str, args: String| {
-            exec.run_builtin(
-                &sb,
-                &test_prompts().tools(),
-                &test_systools().tools,
-                obs,
-                tool,
-                &args,
-            )
+            exec.run_builtin(&sb, &test_systools().tools, obs, tool, &args)
         };
     let mut obs = crate::capabilities::tools::api::Observations::default();
     // 新建文件：不需要"读过"什么

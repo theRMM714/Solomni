@@ -224,7 +224,6 @@ impl Discussion {
         sink: &mut dyn FnMut(SessionEvent),
     ) -> Result<MemberTurn, String> {
         let opts = self.opts();
-        let texts = self.prompts.tools();
         let speaker = self.members[i].id.clone();
         let turn = {
             let m = &mut self.members[i];
@@ -241,7 +240,6 @@ impl Discussion {
                 chat.as_mut(),
                 tools.as_mut(),
                 turn,
-                &texts,
                 sink,
             )?
         };
@@ -269,8 +267,6 @@ impl Discussion {
         chat: &mut dyn Chat,
         mut tools: Option<&mut MemberTools>,
         turn: Vec<Msg>,
-        // 模型侧运行时文案（行尾的"降级/截断"说明按它现渲染）。
-        texts: &crate::capabilities::prompt::api::ToolTexts,
         sink: &mut dyn FnMut(SessionEvent),
     ) -> Result<MemberTurn, String> {
         // 工具面**由角色表发放**（动词 + 只读核实工具）：表是唯一真相，代码里不另写一份名单。
@@ -299,9 +295,7 @@ impl Discussion {
             if round.tool.is_none() {
                 return;
             }
-            lines.extend(build_round_lines(
-                speaker, texts, round, false, &next_line, None,
-            ));
+            lines.extend(build_round_lines(speaker, round, false, &next_line, None));
         };
         // **逐片外送**：讨论席的发言也要能看到"正在生成"（信封不能当正文流上屏，见 crate::capabilities::session::api::stream_piece）。
         let mut acc = String::new();
@@ -687,21 +681,11 @@ impl Discussion {
         // 正文 = 发言本身（说话人与动词在字段里）；降级/截断的说明照样跟在正文后。
         let mut line = text;
         if degraded {
-            line.push_str(
-                &self
-                    .prompts
-                    .tools()
-                    .render(&self.prompts.tools().discuss_degraded, &[]),
-            );
+            line.push_str("　（信封缺失，按发言收录）");
         }
         // 被长度截断：如实写在行尾（与"降级"同一套做法）——模型与用户都看得到
         if truncated {
-            line.push_str(
-                &self
-                    .prompts
-                    .tools()
-                    .render(&self.prompts.tools().truncated_suffix, &[]),
-            );
+            line.push_str("（本段被输出长度截断）");
         }
         let mut v = LineView::speech(id, verb_tag(verb), line);
         v.degraded = degraded;

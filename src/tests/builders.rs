@@ -494,7 +494,9 @@ pub(crate) fn member_with_tools(
         tier: crate::kernel::api::Tier::Host,
         vm: test_vm(Arc::new(InMemoryPackages::empty())),
         sandbox: test_sandbox("m0", &[]),
-        tool_texts: test_prompts().tools(),
+        tools_this_turn: test_prompts()
+            .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
+            .to_string(),
         builtin_tools: test_systools().tools,
         unavailable: BTreeMap::new(),
         fence: crate::kernel::api::FenceSpec::from_sandbox(&test_sandbox("m0", &[]), false),
@@ -786,7 +788,9 @@ pub(crate) fn native_member(
         tier: crate::kernel::api::Tier::Host,
         vm: test_vm(Arc::new(InMemoryPackages::empty())),
         sandbox: sb.clone(),
-        tool_texts: test_prompts().tools(),
+        tools_this_turn: test_prompts()
+            .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
+            .to_string(),
         builtin_tools: test_systools().tools,
         unavailable: BTreeMap::new(),
         fence: crate::kernel::api::FenceSpec::from_sandbox(&sb, false),

@@ -268,7 +268,7 @@ pub(crate) fn native_mode_refuses_a_hand_written_envelope() {
     assert!(!trace[0].ok, "原生模式下信封不执行");
     assert_eq!(
         trace[0].output,
-        prompts.tools().native_no_envelope,
+        "这条通道用**原生工具调用**：正文里的 JSON 信封不会被当成调用执行。需要工具时请直接发起工具调用（一次可以发起多个）。",
         "要如实说清本通道用原生调用"
     );
     assert_eq!(io.get(&["demo", "work", "out.md"]), None, "绝不落盘");

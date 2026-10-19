@@ -7,10 +7,8 @@
 //!
 //! 持有者只有 `service.rs` 一处；组合根装一次，conductor 只持 `Box<dyn Prompt>`。
 
-pub use crate::capabilities::prompt::domain::prompt::{RefsPrompts, Segment, ToolTexts, Vars};
+pub use crate::capabilities::prompt::domain::prompt::{Segment, Vars};
 pub use crate::capabilities::prompt::domain::refs::{rewrite, RefRoots};
-
-use std::sync::Arc;
 
 /// 提示词册能力：按名字答"某一段是什么"，并共享两块大记录。
 pub trait Prompt: Send + Sync {
@@ -27,10 +25,4 @@ pub trait Prompt: Send + Sync {
     /// 按（**宿主平台**，**guest 的 os**）取工作环境块并渲染：虚拟机档传 guest，本机档传 None。
     /// 对应关系在 `prompts/shared/tools.yaml` 的 `envs`，这里只做匹配；变量与 `render` 同一套。
     fn env(&self, host: &str, guest: Option<&str>, vars: Vars) -> String;
-
-    /// 工具与路径的模型侧文案（~100 条模板）：**共享一份**——调用方拿 `Arc`，不深拷贝。
-    fn tools(&self) -> Arc<ToolTexts>;
-
-    /// `@` 引用的两句说明文案：共享一份。
-    fn refs(&self) -> Arc<RefsPrompts>;
 }

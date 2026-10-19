@@ -308,19 +308,11 @@ pub struct Roster {
 }
 
 /// 目的：模块公地清单（拟名单时给模型看）：id / 简述。
-pub fn listing(roster: &Roster, texts: &crate::capabilities::prompt::api::ToolTexts) -> String {
+pub fn listing(roster: &Roster) -> String {
     roster
         .modules
         .iter()
-        .map(|m| {
-            texts.render(
-                &texts.module_listing_line,
-                &[
-                    ("id", m.manifest.id.clone()),
-                    ("brief", m.manifest.brief.clone()),
-                ],
-            )
-        })
+        .map(|m| format!("- {}：{}", m.manifest.id, m.manifest.brief))
         .collect::<Vec<_>>()
         .join("\n")
 }

@@ -239,7 +239,6 @@ pub(crate) fn vm_tool_paths_follow_provisioned_packages_without_restart() {
 /// 行由**唯一那处**构造函数产出（单 agent 与讨论席共用），所以这里直接问它。
 #[test]
 pub(crate) fn tool_round_reasoning_lands_on_the_tool_line() {
-    let prompts = test_prompts();
     let tool = crate::capabilities::session::api::ToolCallView {
         speaker: "a".to_string(),
         module: String::new(),
@@ -268,12 +267,7 @@ pub(crate) fn tool_round_reasoning_lands_on_the_tool_line() {
     };
     let next = std::cell::Cell::new(0u64);
     let lines = crate::capabilities::collab::service::round::build_round_lines(
-        "a",
-        &prompts.tools(),
-        &round,
-        false,
-        &next,
-        None,
+        "a", &round, false, &next, None,
     );
     assert_eq!(lines.len(), 1, "工具轮没有正文时只出工具行：{lines:?}");
     assert_eq!(

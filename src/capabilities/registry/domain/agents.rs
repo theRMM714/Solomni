@@ -3,7 +3,6 @@
 //! 落盘在 .home/agents.yaml（与 providers/models/settings 同处用户私有区）。
 
 use crate::capabilities::modules::api::Roster;
-use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::registry::domain::providers::ModelEntry;
 use crate::capabilities::session::api::AgentMeta;
 use serde::{Deserialize, Serialize};
@@ -74,32 +73,29 @@ pub fn check_reserved(name: &str, reserved: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// 已存 agent 清单（拟名单时给模型看）：名字 / 模块 / 模型 / 说明；空登记处用册子里的说法。
-pub fn listing(prompt: &dyn Prompt, known: &Agents) -> String {
+/// 已存 agent 清单（拟名单时给模型看）：名字 / 模块 / 模型 / 说明；空登记处如实说明。
+pub fn listing(known: &Agents) -> String {
     if known.is_empty() {
-        return prompt.text(Segment::NoAgents).to_string();
+        return "（登记处还没有 agent；这次只能组装新的）".to_string();
     }
-    let texts = prompt.tools();
     known
         .iter()
         .map(|(name, a)| {
             let model = a
                 .model
                 .clone()
-                .unwrap_or_else(|| prompt.text(Segment::NoModel).to_string());
+                .unwrap_or_else(|| "（核心默认）".to_string());
             let note = if a.note.trim().is_empty() {
                 String::new()
             } else {
                 format!("；{}", a.note.trim())
             };
-            texts.render(
-                &texts.agent_listing_line,
-                &[
-                    ("name", name.clone()),
-                    ("modules", a.modules.join(" + ")),
-                    ("model", model),
-                    ("note", note),
-                ],
+            format!(
+                "- {}：模块 {}；模型 {}{}",
+                name,
+                a.modules.join(" + "),
+                model,
+                note
             )
         })
         .collect::<Vec<_>>()
@@ -107,10 +103,7 @@ pub fn listing(prompt: &dyn Prompt, known: &Agents) -> String {
 }
 
 /// 可用模型清单（拟名单时给模型看）：id / 名称 / api_model / 说明。
-pub fn model_listing(
-    models: &BTreeMap<String, ModelEntry>,
-    texts: &crate::capabilities::prompt::api::ToolTexts,
-) -> String {
+pub fn model_listing(models: &BTreeMap<String, ModelEntry>) -> String {
     models
         .iter()
         .map(|(id, m)| {
@@ -119,15 +112,7 @@ pub fn model_listing(
             } else {
                 format!("；{}", m.note)
             };
-            texts.render(
-                &texts.model_listing_line,
-                &[
-                    ("id", id.clone()),
-                    ("name", m.name.clone()),
-                    ("api_model", m.api_model.clone()),
-                    ("note", note),
-                ],
-            )
+            format!("- {}：{}（{}{}）", id, m.name, m.api_model, note)
         })
         .collect::<Vec<_>>()
         .join("\n")

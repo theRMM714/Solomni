@@ -25,7 +25,7 @@ pub struct ProcTools {
     /// 目的：「未授权」的提示只出一次，不刷屏。
     #[cfg(windows)]
     pub disclosed: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    /// 目的：工具回执里那些收尾标记的文案（由上层适配后经 kernel 端口注入：它们随 [工具结果] 进模型上下文）。
+    /// 目的：工具回执里那些收尾标记的文案（生产用本文件的 `CodeProcessTexts`；它们随 [工具结果] 进模型上下文）。
     ///   **共享一份**（调用方给出的 `Arc`）：这里不再各存一份深拷贝。
     pub texts: std::sync::Arc<dyn ProcessTexts>,
     /// 目的：单次工具执行的超时（到时连根杀掉整棵树，ok = false）。
@@ -34,8 +34,54 @@ pub struct ProcTools {
     pub max_output_chars: usize,
 }
 
+/// 目的：进程机制自己的收尾文案（不再经提示词册；它们随 [工具结果] 进模型上下文）。
+pub struct CodeProcessTexts;
+
+impl ProcessTexts for CodeProcessTexts {
+    fn stderr_header(&self) -> String {
+        "[stderr]".to_string()
+    }
+    fn timeout(&self) -> String {
+        "[超时] 工具进程与它拉起的整棵进程树已被终止".to_string()
+    }
+    fn fence_failed(&self) -> String {
+        "[围栏] 工具进程没有进入围栏：命令未执行（当前能力等级见启动报告）".to_string()
+    }
+    fn truncated(&self, chars: &str, limit: &str) -> String {
+        format!("[截断] 输出共 {} 字符，仅保留前 {}", chars, limit)
+    }
+    fn fence_blocked(&self, part: &str, path: &str, why: &str, fix: &str) -> String {
+        format!(
+            "[围栏] 这次调用**没有执行**：{}（{}）授不上——{}。怎么补：{}",
+            part, path, why, fix
+        )
+    }
+    fn denied_by_user(&self) -> String {
+        "用户没有放行这次工具调用：它**没有执行**。请换一种做法，或请用户调整会话权限（ask / full）。"
+            .to_string()
+    }
+    fn no_answerer_defaulted(&self, part: &str, path: &str, option: &str) -> String {
+        format!(
+            "[围栏] 这一问没人能答（没有可回答的前端）：{}（{}）授不上——按这一问声明的默认项「{}」收场。",
+            part, path, option
+        )
+    }
+    fn no_answerer_refused(&self, part: &str, path: &str) -> String {
+        format!(
+            "[围栏] 这一问没人能答（没有可回答的前端），也没有声明默认项：{}（{}）授不上——这次调用**没有执行**。",
+            part, path
+        )
+    }
+    fn fence_unfenced(&self, part: &str, path: &str, why: &str) -> String {
+        format!(
+            "[围栏] 这次调用按你的裁决**无围栏**执行（没有容器那层强制）：{}（{}）授不上——{}",
+            part, path, why
+        )
+    }
+}
+
 impl ProcTools {
-    /// 目的：组合根注入：当前可执行文件（守门进程就是它自己）、提示词册里的收尾标记、产品私有区与写权限开关。
+    /// 目的：组合根注入：当前可执行文件（守门进程就是它自己）、进程收尾文案、产品私有区与写权限开关。
     pub fn new(
         exe: PathBuf,
         texts: std::sync::Arc<dyn ProcessTexts>,
@@ -451,23 +497,13 @@ mod tests {
         std::env::remove_var("SOLOMNI_PROBE_SECRET");
     }
 
-    /// 回执里的标记文案必须来自提示词册（它们随 [工具结果] 进模型上下文，所以不能在代码里另写一份）。
+    /// 回执里的标记文案由进程机制自己的代码返回（它们随 [工具结果] 进模型上下文）。
     #[test]
-    fn receipt_markers_come_from_the_prompt_book() {
-        use crate::capabilities::prompt::api::Prompt;
-        use crate::capabilities::prompt::ports::PromptSource;
-        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let prompts = crate::capabilities::prompt::detail::yaml_prompts::YamlPrompts::new(
-            root.join("prompts"),
-        )
-        .load()
-        .expect("内置提示词册必须合法");
-        let texts = prompts.tools();
+    fn receipt_markers_are_code_owned() {
+        let texts = CodeProcessTexts;
         let tools = ProcTools::new(
             PathBuf::from("solomni"),
-            std::sync::Arc::new(crate::capabilities::tools::detail::PromptProcessTexts::new(
-                std::sync::Arc::clone(&texts),
-            )),
+            std::sync::Arc::new(CodeProcessTexts),
             PathBuf::from("target").join("test-scratch"),
             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         );
@@ -478,16 +514,12 @@ mod tests {
 
         let with_err = tools.assemble("正文".to_string(), "警告".to_string(), false, Some(0));
         assert!(
-            with_err.output.contains(&texts.tool_stderr_header) && with_err.output.contains("警告")
+            with_err.output.contains(&texts.stderr_header()) && with_err.output.contains("警告")
         );
 
         let timed = tools.assemble(String::new(), String::new(), true, None);
         assert!(!timed.ok);
-        assert!(
-            timed.output.contains(&texts.tool_timeout),
-            "{}",
-            timed.output
-        );
+        assert!(timed.output.contains(&texts.timeout()), "{}", timed.output);
 
         let fenced = tools.assemble(
             String::new(),
@@ -497,7 +529,7 @@ mod tests {
         );
         assert!(!fenced.ok);
         assert!(
-            fenced.output.contains(&texts.tool_fence_failed),
+            fenced.output.contains(&texts.fence_failed()),
             "{}",
             fenced.output
         );
@@ -513,11 +545,11 @@ mod tests {
 
     /// 未授权时段的放行规矩：**只有本机装不上能降级**。
     /// 自检已确认机制有效却仍装不上 = 我们写错了，那一路必须拒绝执行——
-    /// 按无围栏跑等于用户以为有围栏、实际什么都没有（回执文案取自提示词册）。
+    /// 按无围栏跑等于用户以为有围栏、实际什么都没有（回执文案由进程机制代码返回）。
     #[cfg(windows)]
     #[test]
     fn broken_mechanism_refuses_execution_instead_of_degrading() {
-        let texts = prompt_texts();
+        let texts = code_texts();
         let broken = refuse_when_broken(
             &*texts,
             confine::FenceVerdict::Broken("profile 写错".to_string()),
@@ -592,25 +624,15 @@ mod tests {
         }
     }
 
-    fn prompt_texts() -> std::sync::Arc<dyn crate::kernel::ports::ProcessTexts> {
-        use crate::capabilities::prompt::api::Prompt;
-        use crate::capabilities::prompt::ports::PromptSource;
-        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let prompts = crate::capabilities::prompt::detail::yaml_prompts::YamlPrompts::new(
-            root.join("prompts"),
-        )
-        .load()
-        .expect("内置提示词册必须合法");
-        std::sync::Arc::new(crate::capabilities::tools::detail::PromptProcessTexts::new(
-            prompts.tools(),
-        ))
+    fn code_texts() -> std::sync::Arc<dyn crate::kernel::ports::ProcessTexts> {
+        std::sync::Arc::new(CodeProcessTexts)
     }
 
     /// 造一个按「cwd = 隔离根」跑真工具的 runner（命令用裸文件名，避免命令行里出现引号）。
     fn real_runner(exe: PathBuf, home: &std::path::Path, timeout_secs: u64) -> ProcTools {
         let mut t = ProcTools::new(
             exe,
-            prompt_texts(),
+            code_texts(),
             home.to_path_buf(),
             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         );
@@ -858,7 +880,7 @@ mod tests {
     fn real_runner_with_write(exe: PathBuf, home: &std::path::Path) -> ProcTools {
         let mut t = ProcTools::new(
             exe,
-            prompt_texts(),
+            code_texts(),
             home.to_path_buf(),
             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
         );

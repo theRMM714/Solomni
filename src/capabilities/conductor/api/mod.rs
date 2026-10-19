@@ -282,7 +282,6 @@ pub struct ConductorHandle {
     log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
     /// 代理会话注入成员侧执行者要的两份装配材料（与核心共享同一份，不在桥这一侧重装）。
     book: crate::capabilities::tools::api::ToolBook,
-    texts: Arc<crate::capabilities::prompt::api::ToolTexts>,
     /// 工具执行面："人直接跑一个模块工具"（无会话）也走它，不另起一套执行机制。
     tools: Arc<dyn crate::capabilities::tools::api::ToolExec + Send + Sync>,
     /// 常驻服务面（与核心共享同一份）：ResidentOps 由它转发。

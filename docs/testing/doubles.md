@@ -131,7 +131,7 @@ Fixture 必须：
 | `Workdirs` | `InMemoryWorkspace` | 内存布局可观察 | `fail_with` | 不适用 | `FsWorkspace` | 已验收 |
 | `WorkStore` | `InMemoryWorkStore` | 内存文件 / 提交 / 基线可观察；资产路径的 `stat` / `scan` / `ingest` / `copy` 与跨根备份 `copy_under_to_under` 同契约 | `fail_with`、`fail_times`、`fail_on`（按方法 + 键子串，例如只让某条路径的 copy 失败；含整文件 `read_under` / `read_object`） | 不适用 | `FsWorkStore`（含符号链接逃逸拒绝、流式临时文件清理、超限 / 指纹不符拒绝、跨根复制建目标根） | 已验收；**持有者只有 `workspace::service.rs`**（R12） |
 | `PathCodec`（kernel 共享） | 不适用（用真实 `PathBridge`） | 不适用 | 不适用 | 不适用 | `PathBridge`（本机档恒等；虚拟机档两种路径方言互转） | 已验收（`src/tests/vm.rs`、`src/tests/prompt.rs`） |
-| `ProcessTexts`（kernel 共享） | 不适用（用真实 `PromptProcessTexts`） | 不适用 | 不适用 | 不适用 | `PromptProcessTexts`（文案由提示词册注入） | 已验收（进程机制用例直接注入真实实现） |
+| `ProcessTexts`（kernel 共享） | 不适用（用真实 `CodeProcessTexts`） | 不适用 | 不适用 | 不适用 | `kernel::detail::process::CodeProcessTexts`（文案由机制代码返回） | 已验收（进程机制用例直接注入真实实现） |
 | `ToolHandler`（kernel 共享） | 不适用（真实处理器直接测） | 不适用 | 不适用 | 不适用 | `WorkHandler` / `ProxyHandler` | 已验收（`src/tests/tools/`、`src/tests/conductor/proxy.rs`） |
 | `SysIo` | `InMemorySysIo`（含并发峰值与按文件延时） | 内存内容 + 同时在读的峰值 | `fail_with` | 不适用 | `FsSysIo`（含 lossy / cut） | 已验收；**持有者只有 `tools::service.rs`**（R12） |
 | `HistoryStore` | `InMemoryHistory` | 内存流水可观察 | `fail_with` | 不适用 | `FsHistory` | 已验收；**持有者只有 `session::service.rs`**（R12） |

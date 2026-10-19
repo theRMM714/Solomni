@@ -6,13 +6,13 @@
 
 ## 一、管什么 / 不管什么
 
-**管**：提示词册（`prompts/`）的内存形态与 `{{key}}` 渲染；`@` 引用改写成**本环境写法**的绝对路径；按名字取段；按（会话类型 × 角色）取机制说明，按（宿主 × guest）取环境块；两块共享记录（工具文本 / 引用）。
+**管**：提示词册（`prompts/`）的内存形态与 `{{key}}` 渲染；`@` 引用改写成**本环境写法**的绝对路径；按名字取段；按（会话类型 × 角色）取机制说明，按（宿主 × guest）取环境块。运行时回执不归本单元。
 
 **不管**：**不替业务拼「哪个回合发哪几段」**（组装留在各业务）；不落盘；界面通知文案不进册子。
 
 ## 二、入站契约与状态归属
 
-`api::Prompt`（`text` / `render` / `mechanism` / `env` + `tools()` / `refs()`）+ 词汇（`Segment` / `ToolTexts` / `RefsPrompts` / `RefRoots` / `rewrite` / `Vars`）。端口 `PromptSource` 由本单元的装载入口 `load()` 使用，组合根注入。
+`api::Prompt`（`text` / `render` / `mechanism` / `env`）+ 词汇（`Segment` / `RefRoots` / `rewrite` / `Vars`）。端口 `PromptSource` 由本单元的装载入口 `load()` 使用，组合根注入。
 
 `RefRoots` 带 `path_codec`（虚拟机档把宿主路径渲染成 guest 写法；本机档 None = 恒等）——调用方只给真实根，
 写法由本单元按会话环境渲染；纯逻辑（无 IO）。

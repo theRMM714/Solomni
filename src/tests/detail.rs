@@ -1068,7 +1068,7 @@ fn yaml_prompts_loads_the_shipped_book_and_reports_missing_or_broken_files() {
     let ok = YamlPrompts::new(real)
         .load()
         .expect("产品自带提示词册必须合法");
-    assert!(!ok.core.no_agents.is_empty());
+    assert!(!ok.core.path_rules.is_empty());
 
     // 目录不存在 = 装配错误（如实报，不静默造默认文案）。
     let missing = YamlPrompts::new(root.join("nope")).load().unwrap_err();

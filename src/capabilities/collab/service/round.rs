@@ -373,7 +373,6 @@ pub fn converse_with(
                     let done = run_batch(ctx, &plan, confirms.as_mut(), ask, sink);
                     // 先按原序把工具行建好（执行已经做完），再让**唯一那处**构造函数产出这一回复的消息：
                     // 实时与重建走同一个函数，"重建上下文与实时一致"因此是结构保证的。
-                    let texts = &ctx.tool_texts;
                     let reply_text = reply.text.clone();
                     let views: Vec<ToolCallView> = calls
                         .iter()
@@ -394,7 +393,7 @@ pub fn converse_with(
                             }
                         })
                         .collect();
-                    let msgs_of = reply_msgs(ctx.mode, &reply_text, &views, texts);
+                    let msgs_of = reply_msgs(ctx.mode, &reply_text, &views);
                     for m in &msgs_of {
                         msgs.push(m.clone());
                     }
@@ -429,21 +428,20 @@ pub fn converse_with(
                 // ② 没有原生调用却写了信封：**不执行**（两套形态互斥），但也不静默丢掉意图
                 {
                     if let Some(inv) = reply.tools.first().cloned() {
-                        let texts = &ctx.tool_texts;
                         let view = ToolCallView {
                             speaker: speaker.to_string(),
                             module: inv.module.clone().unwrap_or_default(),
                             name: inv.name.clone(),
                             ok: false,
                             args: inv.args_json.clone(),
-                            output: texts.native_no_envelope.clone(),
+                            output: "这条通道用**原生工具调用**：正文里的 JSON 信封不会被当成调用执行。需要工具时请直接发起工具调用（一次可以发起多个）。".to_string(),
                             raw: raw.clone(),
                             call_id: String::new(),
                             reply: reply_id,
                         };
                         on_tool(&view);
                         // 这条没有合法原生 id（模型是手写的信封）：走文本形状，不能发 role=tool。
-                        let msgs_of = reply_msgs(mode, &raw, std::slice::from_ref(&view), texts);
+                        let msgs_of = reply_msgs(mode, &raw, std::slice::from_ref(&view));
                         for m in &msgs_of {
                             msgs.push(m.clone());
                         }
@@ -473,16 +471,14 @@ pub fn converse_with(
             // 但记一条失败的工具行把"哪里不合法"回注给模型（下一轮自己改）。同样计入上限，不会死循环。
             _ if malformed.is_some() && tools.is_some() => {
                 let inv = reply.tools.first().cloned().expect("上臂已判非空");
-                let ctx = tools.as_deref_mut().expect("上臂已判存在");
                 // 回执按判定出的类别给修法（未闭合 / 裸控制字符 / 语法错 / 字段不合法）。
                 let mut why = crate::capabilities::llm::api::malformed_report(
-                    &ctx.tool_texts,
                     inv.malformed.as_ref().expect("上臂已判存在"),
                 );
                 // 供应商说是长度截断：那"写坏 JSON"就不是模型的错，改法也不同（分次写/拆小步骤）。
                 if truncated {
                     why.push('\n');
-                    why.push_str(&ctx.tool_texts.malformed_truncated);
+                    why.push_str("注意：这次输出是**被供应商按输出长度截断的**（finish_reason=length），不是你 JSON 写坏了——请把内容分次写，或把这一步拆小。");
                 }
                 let view = ToolCallView {
                     speaker: speaker.to_string(),
@@ -496,8 +492,7 @@ pub fn converse_with(
                     reply: reply_id,
                 };
                 on_tool(&view);
-                let texts = &ctx.tool_texts;
-                let msgs_of = reply_msgs(mode, &raw, std::slice::from_ref(&view), texts);
+                let msgs_of = reply_msgs(mode, &raw, std::slice::from_ref(&view));
                 for m in &msgs_of {
                     msgs.push(m.clone());
                 }
@@ -545,21 +540,19 @@ pub fn converse_with(
                 // 修过信封就如实标注在回执最前面（模型与用户都能看到核心没有瞎猜）
                 let annotate = |outcome: ToolOutcome| -> ToolOutcome {
                     match repaired.as_deref() {
-                        Some(what) if !what.is_empty() => ToolOutcome {
-                            ok: outcome.ok,
-                            output: format!(
-                                "{}\n{}",
-                                ctx.tool_texts.render(
-                                    &ctx.tool_texts.envelope_repaired,
-                                    &[("what", what.to_string())]
-                                ),
-                                outcome.output
-                            ),
-                        },
+                        Some(what) if !what.is_empty() => {
+                            let repaired = format!(
+                                "[信封修复] {}；核心按无歧义的写法修好后执行了本次调用（下次请直接输出合法信封）。",
+                                what
+                            );
+                            ToolOutcome {
+                                ok: outcome.ok,
+                                output: format!("{}\n{}", repaired, outcome.output),
+                            }
+                        }
                         _ => outcome,
                     }
                 };
-                let texts = &ctx.tool_texts;
                 let views: Vec<ToolCallView> = plan
                     .iter()
                     .enumerate()
@@ -579,7 +572,7 @@ pub fn converse_with(
                         }
                     })
                     .collect();
-                let msgs_of = reply_msgs(mode, &raw, &views, texts);
+                let msgs_of = reply_msgs(mode, &raw, &views);
                 for m in &msgs_of {
                     msgs.push(m.clone());
                 }
@@ -657,7 +650,6 @@ pub fn converse_with(
 /// **行格式只有这一处定义**：单 agent 与讨论席的行都从这里出（回档按同一口径解析回发言）。
 pub fn build_round_lines(
     id: &str,
-    texts: &crate::capabilities::prompt::api::ToolTexts,
     round: &Round,
     stopped: bool,
     next_line: &std::cell::Cell<u64>,
@@ -710,10 +702,10 @@ pub fn build_round_lines(
         // 正文 = 内容本身（说话人/动词在字段里）；被停/被截断的说明照样跟在正文后。
         let mut line = text.clone();
         if stopped {
-            line.push_str(&texts.stopped_suffix);
+            line.push_str("（已停止）");
         }
         if truncated {
-            line.push_str(&texts.truncated_suffix);
+            line.push_str("（本段被输出长度截断）");
         }
         out.push(make(line, verb, "msg", reasoning.take(), None));
     };

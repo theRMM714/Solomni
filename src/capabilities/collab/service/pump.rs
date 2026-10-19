@@ -514,7 +514,9 @@ impl CollabSession {
                 tier: self.spec.tier,
                 vm: Arc::clone(&self.vm),
                 sandbox,
-                tool_texts: prompts.tools(),
+                tools_this_turn: prompts
+                    .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
+                    .to_string(),
                 builtin_tools: self.systools.book(),
                 reply_seq: self.reply_seq,
                 line: Default::default(),

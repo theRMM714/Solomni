@@ -898,12 +898,8 @@ fn collect_sources(
 fn build_runner(
     root: &std::path::Path,
 ) -> Result<crate::kernel::detail::process::ProcTools, String> {
-    let source =
-        crate::capabilities::prompt::detail::yaml_prompts::YamlPrompts::new(root.join("prompts"));
-    let prompt = crate::capabilities::prompt::service::load(&source)?;
-    let texts: std::sync::Arc<dyn crate::kernel::ports::ProcessTexts> = std::sync::Arc::new(
-        crate::capabilities::tools::detail::PromptProcessTexts::new(prompt.tools()),
-    );
+    let texts: std::sync::Arc<dyn crate::kernel::ports::ProcessTexts> =
+        std::sync::Arc::new(crate::kernel::detail::process::CodeProcessTexts);
     Ok(crate::kernel::detail::process::ProcTools::new(
         std::env::current_exe().unwrap_or_default(),
         texts,

@@ -33,8 +33,8 @@ pub trait PathCodec: Send + Sync + std::fmt::Debug {
     fn to_view(&self, host: &Path) -> String;
 }
 
-/// 目的：外部进程回执里那些收尾标记的文案端口——进程机制不硬编码文案，由上层适配后注入。
-/// 约束：文案从哪来不由本端口决定（提示词册在 `capabilities/prompt`，由组合根适配后注入）；
+/// 目的：外部进程回执里那些收尾标记的文案端口——默认实现由进程机制自己提供（代码常量/函数）。
+/// 约束：保留窄端口供测试替身；生产实现 `CodeProcessTexts` 在 `kernel/detail/process.rs`；
 ///   围栏拒绝/放行那 5 个方法只在 Windows 的容器围栏那一路用（unix 无使用点，如实放行死代码）。
 #[allow(dead_code)]
 pub trait ProcessTexts: Send + Sync {

@@ -26,27 +26,24 @@ impl ToolDecl {
 }
 
 /// 目的：渲染模块工具的参数契约段（只列**声明了**参数的）。
-/// 参数：`prompt` 提供文案，`modules` 是这一席的模块清单。
+/// 参数：`prompt` 提供段标题与空态，`modules` 是这一席的模块清单。
 /// 返回：给模型看的参数段；一个都没声明时用册子里「没有」的说法。
 pub fn module_tool_params(prompt: &dyn Prompt, modules: &[Module]) -> String {
-    let texts = prompt.tools();
     let mut sections: Vec<String> = Vec::new();
     for m in modules {
         for (name, decl) in &m.manifest.tools {
             if let Some(schema) = decl.schema() {
-                sections.push(texts.render(
-                    &texts.module_tool_params_line,
-                    &[
-                        ("module", m.manifest.id.clone()),
-                        ("tool", name.clone()),
-                        ("signature", schema.render_for_prompt()),
-                    ],
+                sections.push(format!(
+                    "- {}.{}\n{}",
+                    m.manifest.id,
+                    name,
+                    schema.render_for_prompt()
                 ));
             }
         }
     }
     if sections.is_empty() {
-        return prompt.text(Segment::NoModuleToolParams).to_string();
+        return "（本 agent 的模块工具都没声明参数，args 由工具自己解释）".to_string();
     }
     format!(
         "{}\n{}",
@@ -56,10 +53,9 @@ pub fn module_tool_params(prompt: &dyn Prompt, modules: &[Module]) -> String {
 }
 
 /// 目的：渲染该 agent 的外部工具清单（**按模块分组，每行一个模块**）。
-/// 参数：`prompt` 提供文案，`modules` 是这一席的模块清单。
-/// 返回：模型据此在信封里写 module；都没有声明工具时用册子里的说法。
-pub fn module_tools(prompt: &dyn Prompt, modules: &[Module]) -> String {
-    let texts = prompt.tools();
+/// 参数：`modules` 是这一席的模块清单。
+/// 返回：模型据此在信封里写 module；都没有声明工具时如实说明。
+pub fn module_tools(modules: &[Module]) -> String {
     let lines: Vec<String> = modules
         .iter()
         .filter(|m| !m.manifest.tools.is_empty())
@@ -70,15 +66,12 @@ pub fn module_tools(prompt: &dyn Prompt, modules: &[Module]) -> String {
                 .keys()
                 .cloned()
                 .collect::<Vec<_>>()
-                .join(&texts.tool_list_separator);
-            texts.render(
-                &texts.module_tools_line,
-                &[("id", m.manifest.id.clone()), ("tools", names)],
-            )
+                .join("、");
+            format!("- {}：{}", m.manifest.id, names)
         })
         .collect();
     if lines.is_empty() {
-        prompt.text(Segment::NoModuleTools).to_string()
+        "（本 agent 的模块都未声明外部工具）".to_string()
     } else {
         lines.join("\n")
     }

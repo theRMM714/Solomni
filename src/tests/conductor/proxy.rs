@@ -7,7 +7,7 @@ use crate::capabilities::conductor::service::proxy::ProxyTools;
 
 fn rig() -> (Arc<FakeProxyHost>, ProxyTools) {
     let host = Arc::new(FakeProxyHost::new());
-    let tools = ProxyTools::new(host.clone(), test_systools().tools, test_prompts().tools());
+    let tools = ProxyTools::new(host.clone(), test_systools().tools);
     (host, tools)
 }
 
@@ -476,7 +476,7 @@ pub(crate) fn the_real_bridge_reads_catalog_and_session_messages() {
     }
 
     let bridge: Arc<dyn ProxyHost + Send + Sync> = Arc::new(ProxyBridge::new(handle.clone()));
-    let mut tools = ProxyTools::new(bridge, test_systools().tools, test_prompts().tools());
+    let mut tools = ProxyTools::new(bridge, test_systools().tools);
     let c = ctx(Some(full_grant()));
 
     // 清单：只回公开事实（模型视图里没有密钥字段）。
@@ -560,7 +560,7 @@ pub(crate) fn the_real_bridge_creates_a_child_work() {
     let parent_sid = parent.sid.clone();
 
     let bridge: Arc<dyn ProxyHost + Send + Sync> = Arc::new(ProxyBridge::new(handle.clone()));
-    let mut tools = ProxyTools::new(bridge, test_systools().tools, test_prompts().tools());
+    let mut tools = ProxyTools::new(bridge, test_systools().tools);
     let c = d::ProxyCall {
         grant: Some(full_grant()),
         parent: Some(parent_sid.clone()),
@@ -621,12 +621,7 @@ pub(crate) fn the_proxy_handler_owns_and_runs_proxy_tools() {
     };
     let (handle, _ops) = super::super::ops_with(vec![module], vec![]);
     let host: Arc<dyn ProxyHost + Send + Sync> = Arc::new(ProxyBridge::new(handle));
-    let handler = ProxyHandler::new(
-        host,
-        test_systools().tools,
-        test_prompts().tools(),
-        ctx(Some(full_grant())),
-    );
+    let handler = ProxyHandler::new(host, test_systools().tools, ctx(Some(full_grant())));
 
     assert!(handler.owns(d::CATALOG) && handler.owns(d::CREATE));
     assert!(!handler.owns("read"), "内置工具不归它");
@@ -931,7 +926,7 @@ pub(crate) fn the_real_bridge_creates_a_multi_agent_child_work() {
         .create_work(super::super::single_work("w-parent-multi", &["m1"]))
         .expect("建父工作");
     let bridge: Arc<dyn ProxyHost + Send + Sync> = Arc::new(ProxyBridge::new(handle.clone()));
-    let mut tools = ProxyTools::new(bridge, test_systools().tools, test_prompts().tools());
+    let mut tools = ProxyTools::new(bridge, test_systools().tools);
     let c = d::ProxyCall {
         grant: Some(full_grant()),
         parent: Some(parent.sid.clone()),

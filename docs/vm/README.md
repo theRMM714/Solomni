@@ -110,7 +110,7 @@
 - 就绪检测按**组合**逐项报"现状 + 怎么补"；"验过没有"是数据表（`VERIFIED_HOSTS`），不是平台 `cfg`。
 - **路径桥**（`domain/paths.rs`）：宿主路径 ↔ guest 路径只有一座桥。同方言时**恒等**（宿主路径原样在 guest 里成立）；跨方言时编进镜像根（宿主 `D:\a\b` → POSIX guest `/solomni-host/d/a/b`；POSIX 宿主 → Windows guest `C:\solomni-host\…`，非法字符转义）。
 - 挂载点与命令装配（`cwd` / 路径型 `env`）都走路径桥；**反向也走它**：系统工具跑在宿主侧，靠它把模型给的 guest 写法译回宿主路径（`PathCodec`，见 [docs/tools/tools-and-roles.md](../tools/tools-and-roles.md) 的「路径模型」）。
-- **工作环境提示词按环境分发**（`prompts/shared/tools.yaml` 的 `env_hosts` / `env_guests` / `envs`）：本机档按宿主平台给，虚拟机档按 guest 的 os 给——虚拟机档给出的路径就是 guest 内路径；**系统工具与模块工具同一套写法**（路径规矩只在提示词册的 `tool_texts.path_rules` 里说一次，核心在寻址前翻译）。
+- **工作环境提示词按环境分发**（`prompts/shared/tools.yaml` 的 `env_hosts` / `env_guests` / `envs`）：本机档按宿主平台给，虚拟机档按 guest 的 os 给——虚拟机档给出的路径就是 guest 内路径；**系统工具与模块工具同一套写法**（路径规矩只在提示词册的 `path_rules` 里说一次，核心在寻址前翻译）。
 - **虚拟根一格一个目录**（`.vm/guest/<名>/`）：名字由清单的 `guest:` 字段给，多条条目可共用一个根。
 - 目录里的 `guest.yaml` 声明画像（`id` / `arch` / `os` / `agent` / `clients` / `runtimes`）：用户自备镜像自己写；产品供的由 provision 落盘（`guest-rootfs` / `guest-disk` 写基础画像），`guest-runtime` 编排再写入**逐个自证过**的 `runtimes`（Windows 另把 `clients` 写成 cifs）。
 - `runtimes` 是 guest 里确实可用的运行能力，选型诊断据此不必再要 `runtimes/` 包；缺省按目录名与 Debian 默认（linux + QGA + 9p + virtiofs），不认识的值如实拒收。

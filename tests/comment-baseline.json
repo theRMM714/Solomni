@@ -134,8 +134,8 @@
   "src/capabilities/conductor/service/mod.rs": {
     "头块：槽外有行或自造槽": 3,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 48,
-    "条目：首行不是目的": 25
+    "条目：槽外有行或自造槽": 47,
+    "条目：首行不是目的": 24
   },
   "src/capabilities/conductor/service/proxy.rs": {
     "头块：槽外有行或自造槽": 4,
@@ -230,7 +230,7 @@
     "行内：连续超过 2 行": 1
   },
   "src/capabilities/llm/domain/malformed.rs": {
-    "头块：槽外有行或自造槽": 5,
+    "头块：槽外有行或自造槽": 4,
     "头块：缺文件头": 1,
     "条目：槽外有行或自造槽": 1,
     "条目：首行不是目的": 1
@@ -288,8 +288,8 @@
   "src/capabilities/prompt/domain/prompt.rs": {
     "头块：槽外有行或自造槽": 3,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 148,
-    "条目：首行不是目的": 132
+    "条目：槽外有行或自造槽": 51,
+    "条目：首行不是目的": 37
   },
   "src/capabilities/prompt/mod.rs": {
     "头块：槽外有行或自造槽": 4,
@@ -386,8 +386,8 @@
   "src/capabilities/session/domain/session.rs": {
     "头块：槽外有行或自造槽": 4,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 85,
-    "条目：首行不是目的": 51
+    "条目：槽外有行或自造槽": 84,
+    "条目：首行不是目的": 50
   },
   "src/capabilities/session/domain/tools.rs": {
     "头块：槽外有行或自造槽": 4,

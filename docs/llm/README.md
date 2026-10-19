@@ -21,7 +21,7 @@
 
 ## 四、改动本单元时必须同步
 
-- 请求体形状是**真实会话与探针共用的唯一定义**（`detail/http_chat.rs`）；改协议 → `src/tests/llm.rs`、`src/tests/detail.rs`、`src/tests/fakes.rs`；信封回执文案来自 `prompt` 的 `ToolTexts`。
+- 请求体形状是**真实会话与探针共用的唯一定义**（`detail/http_chat.rs`）；改协议 → `src/tests/llm.rs`、`src/tests/detail.rs`、`src/tests/fakes.rs`；信封不合法的修法由 `llm/domain/malformed.rs` 代码返回。
 
 ## 本目录
 

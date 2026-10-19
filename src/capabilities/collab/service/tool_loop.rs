@@ -38,16 +38,12 @@ pub(crate) fn run_branch(
     let mut branch = ctx.observations.clone();
     let (label, outcome) = if !face_has(ctx, module, name) {
         // **按这一回合的工具面校验**：不在面里的调用一律如实拒绝（不静默执行、也不当表态）。
-        (
-            String::new(),
-            crate::capabilities::tools::api::refuse(&ctx.tool_texts, name),
-        )
+        (String::new(), crate::capabilities::tools::api::refuse(name))
     } else if crate::capabilities::tools::api::is_builtin(name) {
         (
             String::new(),
             ctx.tools.run_builtin(
                 &ctx.sandbox,
-                &ctx.tool_texts,
                 &ctx.builtin_tools,
                 &mut branch,
                 name,
@@ -225,7 +221,7 @@ pub(crate) fn run_batch(
                     label,
                     ToolOutcome {
                         ok: false,
-                        output: ctx.tool_texts.tool_denied_by_user.clone(),
+                        output: "用户没有放行这次工具调用：它**没有执行**。请换一种做法，或请用户调整会话权限（ask / full）。".to_string(),
                     },
                 )
             });
@@ -388,17 +384,13 @@ pub(crate) fn available_tools(ctx: &MemberTools) -> String {
         }
     }
     list.extend(crate::capabilities::tools::api::names());
-    list.join(&ctx.tool_texts.tool_list_separator)
+    list.join("、")
 }
 
 pub(crate) fn deny(ctx: &MemberTools, why: String) -> ToolOutcome {
-    let texts = &ctx.tool_texts;
     ToolOutcome {
         ok: false,
-        output: texts.render(
-            &texts.available_wrapper,
-            &[("why", why), ("tools", available_tools(ctx))],
-        ),
+        output: format!("{}。可用：{}", why, available_tools(ctx)),
     }
 }
 
@@ -413,28 +405,23 @@ pub(crate) fn dispatch_external(
         Some(m) => m.to_string(),
         None if ctx.modules.len() == 1 => ctx.modules.keys().next().cloned().unwrap_or_default(),
         None => {
-            let why = ctx.tool_texts.render(
-                &ctx.tool_texts.no_module_field,
-                &[("tool", inv.name.clone())],
+            let why = format!(
+                "工具 {} 没有指明所属模块（本 agent 有多个模块，核心不替你猜），请在信封里写 module",
+                inv.name
             );
             return (String::new(), deny(ctx, why));
         }
     };
     let Some(mt) = ctx.modules.get(&module) else {
-        let why = ctx.tool_texts.render(
-            &ctx.tool_texts.unknown_module,
-            &[("module", module.clone())],
-        );
+        let why = format!("本 agent 没有模块 {}", module);
         return (module.clone(), deny(ctx, why));
     };
     // 运行包未就绪（本档位下该模块的工具不执行）：如实报缺哪个能力，让模型换工具或告诉用户。
     if let Some(caps) = ctx.unavailable.get(&module) {
-        let why = ctx.tool_texts.render(
-            &ctx.tool_texts.module_unavailable,
-            &[
-                ("module", module.clone()),
-                ("capability", caps.join(&ctx.tool_texts.tool_list_separator)),
-            ],
+        let why = format!(
+            "模块 {} 的运行包 {} 未装载，本会话不执行它的工具；请如实告知用户，并改用其它可用工具。",
+            module,
+            caps.join("、")
         );
         return (module.clone(), deny(ctx, why));
     }
@@ -443,9 +430,7 @@ pub(crate) fn dispatch_external(
         let args: serde_json::Value = match serde_json::from_str(&inv.args_json) {
             Ok(a) => a,
             Err(e) => {
-                let why = ctx
-                    .tool_texts
-                    .render(&ctx.tool_texts.bad_args_json, &[("error", e.to_string())]);
+                let why = format!("参数不是合法 JSON：{}", e);
                 return (module.clone(), deny(ctx, why));
             }
         };
@@ -471,18 +456,13 @@ pub(crate) fn dispatch_external(
                     Ok(args) => {
                         if let Err(fault) = book.check(&args) {
                             let why = crate::capabilities::tools::api::arg_fault_text(
-                                &ctx.tool_texts,
-                                &full,
-                                book,
-                                &fault,
+                                &full, book, &fault,
                             );
                             return (module.clone(), deny(ctx, why));
                         }
                     }
                     Err(e) => {
-                        let why = ctx
-                            .tool_texts
-                            .render(&ctx.tool_texts.bad_args_json, &[("error", e.to_string())]);
+                        let why = format!("参数不是合法 JSON：{}", e);
                         return (module.clone(), deny(ctx, why));
                     }
                 }
@@ -520,10 +500,7 @@ pub(crate) fn dispatch_external(
             }
         }
         None => {
-            let why = ctx.tool_texts.render(
-                &ctx.tool_texts.module_lacks_tool,
-                &[("module", module.clone()), ("tool", inv.name.clone())],
-            );
+            let why = format!("模块 {} 未声明工具 {}", module, inv.name);
             (module.clone(), deny(ctx, why))
         }
     }

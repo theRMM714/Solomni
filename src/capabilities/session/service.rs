@@ -119,7 +119,6 @@ pub fn reply_msgs(
     mode: crate::capabilities::llm::api::ToolMode,
     raw: &str,
     calls: &[crate::capabilities::session::api::ToolCallView],
-    texts: &crate::capabilities::prompt::api::ToolTexts,
 ) -> Vec<crate::capabilities::llm::api::Msg> {
     let protocol = mode == crate::capabilities::llm::api::ToolMode::Native
         && !calls.is_empty()
@@ -141,10 +140,7 @@ pub fn reply_msgs(
         out.push(crate::capabilities::llm::api::Msg::assistant(raw));
     }
     for c in calls {
-        let body = texts.render(
-            &texts.tool_result_wrapper,
-            &[("label", c.label()), ("output", c.output.clone())],
-        );
+        let body = format!("[工具结果] {}\n{}", c.label(), c.output);
         out.push(if protocol {
             crate::capabilities::llm::api::Msg::tool(&c.call_id, body)
         } else {
@@ -336,7 +332,6 @@ pub fn core_operation(
         for (call_id, name, args) in readonly {
             let out = ctx.tools.run_builtin(
                 &ctx.sandbox,
-                &ctx.tool_texts,
                 &ctx.builtin_tools,
                 &mut ctx.observations,
                 &name,
@@ -362,7 +357,7 @@ pub fn core_operation(
             views.push(view);
         }
         // 按通道形态把结果回灌（原生：一条助手消息带 tool_calls + 每条结果 role=tool）。
-        for m in reply_msgs(mode, &done.raw, &views, &ctx.tool_texts) {
+        for m in reply_msgs(mode, &done.raw, &views) {
             msgs.push(m);
         }
     }

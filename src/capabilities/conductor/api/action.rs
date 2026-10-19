@@ -353,7 +353,7 @@ impl ConductorHandle {
         if let Some(schema) = decl.schema() {
             if let Err(fault) = schema.check(&module_args) {
                 let full = format!("module.{}.{}", module.manifest.id, tool);
-                return Err(arg_fault_text(&self.texts, &full, &schema, &fault));
+                return Err(arg_fault_text(&full, &schema, &fault));
             }
         }
         let work = work.map(std::path::PathBuf::from);
@@ -768,7 +768,7 @@ impl ActionOps for ConductorHandle {
                 Some(schema) => {
                     let mut args = call.args;
                     if let Err(fault) = schema.check(&args) {
-                        Err(arg_fault_text(&self.texts, &id, schema, &fault))
+                        Err(arg_fault_text(&id, schema, &fault))
                     } else {
                         schema.apply_defaults(&mut args);
                         self.authorize_action(&id, &caller, schema)

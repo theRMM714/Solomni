@@ -94,26 +94,19 @@ pub(crate) fn prompt_render_keeps_single_braces() {
 #[test]
 pub(crate) fn refs_rewrite_covers_prefixes_speakers_and_punctuation() {
     use crate::capabilities::prompt::api::{rewrite, RefRoots};
-    // 文案来自提示词册：期望值也用册子渲染出来，代码里不复制那两句中文。
-    let t = test_prompts().refs();
+    // 文案由 refs 代码返回：期望值在测试里同样直接构造。
     let foreign = |path: &str, agent: &str| {
-        crate::capabilities::prompt::domain::prompt::render(
-            &t.foreign_sandbox,
-            &[("agent", agent.to_string()), ("path", path.to_string())],
+        format!(
+            "（无权读取：{} 在 agent「{}」的私有沙箱里，不是你自己的。可用的是上面列出的真实路径）",
+            path, agent
         )
-        .expect("册子变量齐全")
     };
     let collab = |path: &str, agent: &str| {
-        crate::capabilities::prompt::domain::prompt::render(
-            &t.collab_sandbox,
-            &[("path", path.to_string()), ("agent", agent.to_string())],
+        format!(
+            "（{} 只有 agent「{}」能读，其它 agent 无权；要共享请让用户把它放进本工作的共享区）",
+            path, agent
         )
-        .expect("册子变量齐全")
     };
-    assert!(
-        t.foreign_sandbox.contains("{{agent}}") && t.foreign_sandbox.contains("{{path}}"),
-        "无权文案要同时报出文件与 agent"
-    );
     // 真实根：共享区 + 本 agent（甲）的私有沙箱
     let roots = RefRoots {
         work: abs(&["w", "work"]),
@@ -127,83 +120,83 @@ pub(crate) fn refs_rewrite_covers_prefixes_speakers_and_punctuation() {
     };
     // @work：与 speaker 无关，一律给出共享区真实路径
     assert_eq!(
-        rewrite("@work:a.txt", Some("甲"), &roots, &t),
+        rewrite("@work:a.txt", Some("甲"), &roots),
         s(&["w", "work", "a.txt"])
     );
     assert_eq!(
-        rewrite("@work:sub/a.txt", None, &roots, &t),
+        rewrite("@work:sub/a.txt", None, &roots),
         s(&["w", "work", "sub", "a.txt"])
     );
     // @sandbox：命中自己的沙箱 → 私有沙箱真实路径
     assert_eq!(
-        rewrite("@sandbox:甲/note.txt", Some("甲"), &roots, &t),
+        rewrite("@sandbox:甲/note.txt", Some("甲"), &roots),
         s(&["w", "甲", "note.txt"])
     );
     // @sandbox：别人的沙箱 → 册子文案（带文件名与 agent 名，不泄漏真实路径）
     assert_eq!(
-        rewrite("@sandbox:乙/note", Some("甲"), &roots, &t),
+        rewrite("@sandbox:乙/note", Some("甲"), &roots),
         foreign("note", "乙")
     );
     // @sandbox：协作（没有"自己的沙箱"）→ 册子里的协作文案
     assert_eq!(
-        rewrite("@sandbox:乙/note", None, &collab_roots, &t),
+        rewrite("@sandbox:乙/note", None, &collab_roots),
         collab("note", "乙")
     );
     // 终止标点留在原文里（只替换前缀+路径），所以句中标点/收尾标点都原样保留
     assert_eq!(
-        rewrite("@work:a.txt，", Some("甲"), &roots, &t),
+        rewrite("@work:a.txt，", Some("甲"), &roots),
         format!("{}，", s(&["w", "work", "a.txt"]))
     );
     assert_eq!(
-        rewrite("看 @sandbox:甲/b.txt。", Some("甲"), &roots, &t),
+        rewrite("看 @sandbox:甲/b.txt。", Some("甲"), &roots),
         format!("看 {}。", s(&["w", "甲", "b.txt"]))
     );
     assert_eq!(
-        rewrite("@work:a.txt 请读它", Some("甲"), &roots, &t),
+        rewrite("@work:a.txt 请读它", Some("甲"), &roots),
         format!("{} 请读它", s(&["w", "work", "a.txt"]))
     );
     assert_eq!(
-        rewrite("@work:a.txt，请读它", Some("甲"), &roots, &t),
+        rewrite("@work:a.txt，请读它", Some("甲"), &roots),
         format!("{}，请读它", s(&["w", "work", "a.txt"]))
     );
     // 句点不是终止符：note.txt 是完整路径
     assert_eq!(
-        rewrite("@work:note.txt", Some("甲"), &roots, &t),
+        rewrite("@work:note.txt", Some("甲"), &roots),
         s(&["w", "work", "note.txt"])
     );
     assert_eq!(
-        rewrite("@sandbox:乙/note.txt", Some("甲"), &roots, &t),
+        rewrite("@sandbox:乙/note.txt", Some("甲"), &roots),
         foreign("note.txt", "乙"),
         "扩展名要算进路径，不能截成 note"
     );
     assert_eq!(
-        rewrite("@sandbox:乙/\"note.txt\"", Some("甲"), &roots, &t),
+        rewrite("@sandbox:乙/\"note.txt\"", Some("甲"), &roots),
         foreign("note.txt", "乙")
     );
     // 已知取舍：句尾英文句点算进路径（要精确表达就用引号形式）
     assert_eq!(
-        rewrite("@work:a.txt.", Some("甲"), &roots, &t),
+        rewrite("@work:a.txt.", Some("甲"), &roots),
         s(&["w", "work", "a.txt."])
     );
     assert_eq!(
-        rewrite("@work:\"a.txt.\"", Some("甲"), &roots, &t),
+        rewrite("@work:\"a.txt.\"", Some("甲"), &roots),
         s(&["w", "work", "a.txt."])
     );
     // 引号形式：空白与标点都算路径的一部分
     assert_eq!(
-        rewrite("@work:\"项目 说明.md\"", Some("甲"), &roots, &t),
+        rewrite("@work:\"项目 说明.md\"", Some("甲"), &roots),
         s(&["w", "work", "项目 说明.md"])
     );
     assert_eq!(
-        rewrite("@work:\"a,b(1).md\"", Some("甲"), &roots, &t),
+        rewrite("@work:\"a,b(1).md\"", Some("甲"), &roots),
         s(&["w", "work", "a,b(1).md"])
     );
     assert_eq!(
-        rewrite("@sandbox:甲/\"a b.md\"", Some("甲"), &roots, &t),
+        rewrite("@sandbox:甲/\"a b.md\"", Some("甲"), &roots),
         s(&["w", "甲", "a b.md"])
     );
     assert_eq!(
-        rewrite("@work:\"a b.md\" 看一下", Some("甲"), &roots, &t),
+        rewrite("@work:\"a b.md\" 看一下", Some("甲"), &roots),
         format!("{} 看一下", s(&["w", "work", "a b.md"]))
     );
     // agent 名也支持引号（名字含空白）：引号后必须紧跟 /
@@ -211,72 +204,68 @@ pub(crate) fn refs_rewrite_covers_prefixes_speakers_and_punctuation() {
         rewrite(
             "@sandbox:\"调研 助手\"/\"a b.md\"",
             Some("调研 助手"),
-            &roots,
-            &t
+            &roots
         ),
         s(&["w", "甲", "a b.md"])
     );
     assert_eq!(
-        rewrite("@sandbox:\"调研 助手\"/a", Some("甲"), &roots, &t),
+        rewrite("@sandbox:\"调研 助手\"/a", Some("甲"), &roots),
         foreign("a", "调研 助手")
     );
     // 根还没就绪（代拟确认前）：原样保留引用，不编路径
     assert_eq!(
-        rewrite("@work:a.txt", None, &RefRoots::default(), &t),
+        rewrite("@work:a.txt", None, &RefRoots::default()),
         "@work:a.txt"
     );
     // 不完整前缀 / 结构不满足 / 引号未闭合：原样输出（不猜）
-    assert_eq!(rewrite("@work:", Some("甲"), &roots, &t), "@work:");
-    assert_eq!(rewrite("@work: ", Some("甲"), &roots, &t), "@work: ");
+    assert_eq!(rewrite("@work:", Some("甲"), &roots), "@work:");
+    assert_eq!(rewrite("@work: ", Some("甲"), &roots), "@work: ");
     assert_eq!(
-        rewrite("@sandbox:甲", Some("甲"), &roots, &t),
+        rewrite("@sandbox:甲", Some("甲"), &roots),
         "@sandbox:甲",
         "缺相对路径"
     );
     assert_eq!(
-        rewrite("@sandbox:/a.txt", Some("甲"), &roots, &t),
+        rewrite("@sandbox:/a.txt", Some("甲"), &roots),
         "@sandbox:/a.txt",
         "缺 agent 名"
     );
     assert_eq!(
-        rewrite("@sandbox:甲/", Some("甲"), &roots, &t),
+        rewrite("@sandbox:甲/", Some("甲"), &roots),
         "@sandbox:甲/",
         "相对路径为空"
     );
     assert_eq!(
-        rewrite("@work:\"a b.md", Some("甲"), &roots, &t),
+        rewrite("@work:\"a b.md", Some("甲"), &roots),
         "@work:\"a b.md",
         "路径引号未闭合"
     );
     assert_eq!(
-        rewrite("@work:\"\"", Some("甲"), &roots, &t),
+        rewrite("@work:\"\"", Some("甲"), &roots),
         "@work:\"\"",
         "空引号路径"
     );
     assert_eq!(
-        rewrite("@sandbox:\"调研 助手/a.md", Some("甲"), &roots, &t),
+        rewrite("@sandbox:\"调研 助手/a.md", Some("甲"), &roots),
         "@sandbox:\"调研 助手/a.md",
         "agent 名引号未闭合"
     );
     assert_eq!(
-        rewrite("@sandbox:\"调研\"x/a.md", Some("甲"), &roots, &t),
+        rewrite("@sandbox:\"调研\"x/a.md", Some("甲"), &roots),
         "@sandbox:\"调研\"x/a.md",
         "agent 名引号后缺 /"
     );
     // 普通文本 / 误伤：不含两种前缀一律原样
-    assert_eq!(rewrite("", Some("甲"), &roots, &t), "");
-    assert_eq!(rewrite("没有引用", Some("甲"), &roots, &t), "没有引用");
+    assert_eq!(rewrite("", Some("甲"), &roots), "");
+    assert_eq!(rewrite("没有引用", Some("甲"), &roots), "没有引用");
     assert_eq!(
-        rewrite("email@xxx.com 是我的", Some("甲"), &roots, &t),
+        rewrite("email@xxx.com 是我的", Some("甲"), &roots),
         "email@xxx.com 是我的"
     );
-    assert_eq!(
-        rewrite("@workx:a.txt", Some("甲"), &roots, &t),
-        "@workx:a.txt"
-    );
+    assert_eq!(rewrite("@workx:a.txt", Some("甲"), &roots), "@workx:a.txt");
     // 一句里多个引用；引号形式与无引号旧形式并存
     assert_eq!(
-        rewrite("@work:a.txt 和 @sandbox:甲/b.txt", Some("甲"), &roots, &t),
+        rewrite("@work:a.txt 和 @sandbox:甲/b.txt", Some("甲"), &roots),
         format!(
             "{} 和 {}",
             s(&["w", "work", "a.txt"]),
@@ -284,7 +273,7 @@ pub(crate) fn refs_rewrite_covers_prefixes_speakers_and_punctuation() {
         )
     );
     assert_eq!(
-        rewrite("@work:a.txt 与 @work:\"a b.md\"", Some("甲"), &roots, &t),
+        rewrite("@work:a.txt 与 @work:\"a b.md\"", Some("甲"), &roots),
         format!(
             "{} 与 {}",
             s(&["w", "work", "a.txt"]),
@@ -303,12 +292,11 @@ pub(crate) fn ref_rewrite_uses_the_session_path_dialect() {
     use crate::capabilities::vm::domain::paths::PathDialect;
     use crate::capabilities::workspace::api::{Place, Sandboxes};
     use std::sync::Arc;
-    let t = test_prompts().refs();
     // 同方言（本机档）：桥是恒等，改写结果就是原有宿主写法，行为不变。
     let params =
         SessionParams::from_workspace("甲", &test_sandbox("甲", &["data"]), &[], "single", "solo");
     assert_eq!(
-        rewrite("@work:a.txt", Some("甲"), &params.ref_roots(), &t),
+        rewrite("@work:a.txt", Some("甲"), &params.ref_roots()),
         s(&["demo", "work", "a.txt"]),
         "本机档行为不变"
     );
@@ -329,7 +317,7 @@ pub(crate) fn ref_rewrite_uses_the_session_path_dialect() {
         },
     ));
     let roots = params.ref_roots();
-    let work = rewrite("@work:a.txt 看一下", Some("甲"), &roots, &t);
+    let work = rewrite("@work:a.txt 看一下", Some("甲"), &roots);
     assert_eq!(
         work,
         format!(
@@ -339,7 +327,7 @@ pub(crate) fn ref_rewrite_uses_the_session_path_dialect() {
         "虚拟机档的 @work 要是 guest 写法"
     );
     // 模型拿到 guest 写法再交给同一座桥寻址：译回宿主、落点仍是那个文件（越界与否的判据不变）。
-    let own = rewrite("@sandbox:甲/note.txt", Some("甲"), &roots, &t);
+    let own = rewrite("@sandbox:甲/note.txt", Some("甲"), &roots);
     assert_eq!(
         own,
         bridge
@@ -359,7 +347,7 @@ pub(crate) fn ref_rewrite_uses_the_session_path_dialect() {
         codec: sb.path_codec.clone(),
     };
     assert_eq!(
-        rewrite("@work:a.txt", None, &boxes.ref_roots(), &t),
+        rewrite("@work:a.txt", None, &boxes.ref_roots()),
         bridge.to_guest(&sb.shared.join("a.txt")).replace('\\', "/"),
         "协作的 @work 也要按会话环境给写法（名单还没定时 list 是空的）"
     );

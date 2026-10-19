@@ -26,16 +26,13 @@ pub fn propose(parties: &Parties<'_>, req: &mut Request<'_>) -> Result<Proposal,
             ("mode", mode_text),
             (
                 "agents",
-                crate::capabilities::registry::api::listing(parties.prompt, parties.agents),
+                crate::capabilities::registry::api::listing(parties.agents),
             ),
             (
                 "modules",
-                crate::capabilities::modules::api::listing(parties.roster, &parties.prompt.tools()),
+                crate::capabilities::modules::api::listing(parties.roster),
             ),
-            (
-                "models",
-                model_listing(parties.models, &parties.prompt.tools()),
-            ),
+            ("models", model_listing(parties.models)),
             ("task", req.task.to_string()),
         ],
     );

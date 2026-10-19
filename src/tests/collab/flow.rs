@@ -206,7 +206,6 @@ pub(crate) fn discussion_turn_streams_deltas_and_never_leaks_the_envelope() {
     };
     let mut events: Vec<crate::capabilities::session::api::SessionEvent> = Vec::new();
     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let prompts = test_prompts();
     let _ = crate::capabilities::collab::service::discussion::Discussion::turn_with(
         &*test_tools_svc(),
         "discussant",
@@ -218,7 +217,6 @@ pub(crate) fn discussion_turn_streams_deltas_and_never_leaks_the_envelope() {
         &mut chat,
         None,
         vec![crate::capabilities::llm::api::Msg::user("说说")],
-        &prompts.tools(),
         &mut |e| events.push(e),
     )
     .expect("跑一个回合");
@@ -381,7 +379,9 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         tier: crate::kernel::api::Tier::Host,
         vm: test_vm(Arc::new(InMemoryPackages::empty())),
         sandbox: sb.clone(),
-        tool_texts: test_prompts().tools(),
+        tools_this_turn: test_prompts()
+            .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
+            .to_string(),
         builtin_tools: test_systools().tools,
         unavailable: BTreeMap::new(),
         fence: crate::kernel::api::FenceSpec::from_sandbox(&sb, false),
@@ -477,7 +477,6 @@ pub(crate) fn executor_reports_through_a_tool_call() {
     let mut obs = crate::capabilities::tools::api::Observations::default();
     let out = crate::capabilities::tools::service::systool::execute(
         &sb,
-        &test_prompts().tools(),
         &test_systools().tools,
         &io,
         &mut obs,

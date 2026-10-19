@@ -1053,7 +1053,6 @@ pub(crate) fn run_builtin(
     let mut obs = crate::capabilities::tools::api::Observations::default();
     crate::capabilities::tools::service::systool::execute(
         sb,
-        &test_prompts().tools(),
         &test_systools().tools,
         io,
         &mut obs,
@@ -2990,7 +2989,9 @@ pub(crate) fn member_with_service_tools(
         tier: crate::kernel::api::Tier::Host,
         vm: test_vm(Arc::new(InMemoryPackages::empty())),
         sandbox: sb.clone(),
-        tool_texts: test_prompts().tools(),
+        tools_this_turn: test_prompts()
+            .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
+            .to_string(),
         builtin_tools: test_systools().tools,
         unavailable: BTreeMap::new(),
         fence: crate::kernel::api::FenceSpec::from_sandbox(&sb, false),
@@ -3006,11 +3007,9 @@ pub(crate) fn member_with_service_tools(
     }
 }
 
-/// 目的：给进程机制用的测试文案（提示词册适配器）。
+/// 目的：给进程机制用的测试文案（代码实现，与生产同一份）。
 pub(crate) fn test_process_texts() -> Arc<dyn crate::kernel::ports::ProcessTexts> {
-    Arc::new(crate::capabilities::tools::detail::PromptProcessTexts::new(
-        test_prompt().tools(),
-    ))
+    Arc::new(crate::kernel::detail::process::CodeProcessTexts)
 }
 
 // ---------- 常驻服务（MCP）的脚本化长驻会话替身 ----------

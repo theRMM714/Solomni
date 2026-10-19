@@ -241,24 +241,21 @@ pub fn env_block(
     let in_guest = |path: &std::path::Path| -> String {
         crate::kernel::api::slash(std::path::Path::new(&bridge.to_guest(path)))
     };
-    let texts = prompt.tools();
     let module_roots = if p.module_dirs.is_empty() {
-        prompt.text(Segment::NoModuleDirs).to_string()
+        "（你没有成员模块目录）".to_string()
     } else {
         p.module_dirs
             .iter()
-            .map(|(id, root)| {
-                texts.render(
-                    &texts.module_root_line,
-                    &[("id", id.clone()), ("root", in_guest(root))],
-                )
-            })
+            .map(|(id, root)| format!("- {}：{}", id, in_guest(root)))
             .collect::<Vec<_>>()
             .join("\n")
     };
     let sandbox_root = in_guest(&p.private);
     // 路径写法只有一处（册子里的 path_rules）：它自己也要用真实根渲染出例子，再插进环境块。
-    let path_rules = texts.render(&texts.path_rules, &[("sandbox_root", sandbox_root.clone())]);
+    let path_rules = prompt.render(
+        Segment::PathRules,
+        &[("sandbox_root", sandbox_root.clone())],
+    );
     // 工作环境按**环境**分发：本机档按宿主平台选；虚拟机档按 guest 的 os 选。
     prompt.env(
         std::env::consts::OS,
@@ -303,10 +300,8 @@ pub struct AgentSession {
     note: Option<String>,
     /// 工具环境：内置文件工具按该 agent 的沙箱放行 + 该 agent 模块声明的外部工具。
     pub(crate) tools: Option<MemberTools>,
-    /// @ 引用的说明文案（提示词册）；改写在入历史与转录之前做。**共享一份**（不再每会话深拷贝）。
-    pub(crate) refs: std::sync::Arc<crate::capabilities::prompt::api::RefsPrompts>,
-    /// 模型侧运行时文案（提示词册）；**共享一份**。
-    pub(crate) tool_texts: std::sync::Arc<crate::capabilities::prompt::api::ToolTexts>,
+    /// 压缩回合的指令（提示词段；构造时取自册子）。
+    pub(crate) compact_prompt: String,
     /// 下一条转录行的 id。
     pub(crate) next_line: u64,
     /// 每行 id 对应「该行完成时的历史长度」，回档按它截断历史。
@@ -357,8 +352,7 @@ impl AgentSession {
         chat: BoxedChat,
         note: Option<String>,
         tools: Option<MemberTools>,
-        refs: std::sync::Arc<crate::capabilities::prompt::api::RefsPrompts>,
-        tool_texts: std::sync::Arc<crate::capabilities::prompt::api::ToolTexts>,
+        compact_prompt: String,
     ) -> AgentSession {
         let mut s = AgentSession {
             cur_turn: 0,
@@ -370,8 +364,7 @@ impl AgentSession {
             chat,
             note,
             tools,
-            refs,
-            tool_texts,
+            compact_prompt,
             next_line: 0,
             marks: Vec::new(),
             line_reply: Vec::new(),
@@ -395,8 +388,7 @@ impl AgentSession {
         chat: BoxedChat,
         note: Option<String>,
         tools: Option<MemberTools>,
-        refs: std::sync::Arc<crate::capabilities::prompt::api::RefsPrompts>,
-        tool_texts: std::sync::Arc<crate::capabilities::prompt::api::ToolTexts>,
+        compact_prompt: String,
     ) -> AgentSession {
         let next = marks.len() as u64;
         let mut s = AgentSession {
@@ -410,8 +402,7 @@ impl AgentSession {
             chat,
             note,
             tools,
-            refs,
-            tool_texts,
+            compact_prompt,
             marks,
             line_reply,
             cur_reply: 0,

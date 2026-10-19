@@ -16,6 +16,5 @@
 | `src/capabilities/tools/domain/module_tools.rs` | 模块清单 → 工具面：把 `module.yaml` 声明的工具与参数契约转成工具能力认识的形态，并渲染模型侧参数段 |
 | `src/capabilities/tools/domain/roles.rs` | 角色表与工具总表的纯数据形态（`RoleDecl` / `SystemTools`）：按角色组装工具面、装配期自检与动作审计格式化 |
 | `src/capabilities/tools/domain/fence.rs` | 围栏描述符的派生策略（其余中立类型在 `kernel/domain/fence.rs`） |
-| `src/capabilities/tools/detail/prompt_process_texts.rs` | 提示词册 → kernel `ProcessTexts` 端口的适配器 |
 | `src/capabilities/tools/detail/sys_io.rs` | `SysIo` 端口的磁盘实现：纯 Rust 直接读写（严格 UTF-8、非法字节如实标注、写时建父目录） |
 | `src/capabilities/tools/detail/yaml_systools.rs` | `SystoolsSource` 的磁盘实现：读 `systools/tools.yaml`、`roles.yaml` 与 `names.yaml`（缺文件如实报装配错误） |

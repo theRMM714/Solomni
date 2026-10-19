@@ -5,7 +5,6 @@
 
 use crate::capabilities::conductor::domain::proxy as d;
 use crate::capabilities::conductor::ports::ProxyHost;
-use crate::capabilities::prompt::api::ToolTexts;
 use crate::capabilities::tools::api::{arg_fault_text, ToolBook, ToolOutcome};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -14,21 +13,15 @@ use std::sync::Arc;
 pub struct ProxyTools {
     host: Arc<dyn ProxyHost + Send + Sync>,
     book: ToolBook,
-    texts: Arc<ToolTexts>,
     /// 幂等账本：工具/request_id → 上一次的结果（重放直接回同一结果，不再动宿主）。
     done: BTreeMap<String, ToolOutcome>,
 }
 
 impl ProxyTools {
-    pub fn new(
-        host: Arc<dyn ProxyHost + Send + Sync>,
-        book: ToolBook,
-        texts: Arc<ToolTexts>,
-    ) -> ProxyTools {
+    pub fn new(host: Arc<dyn ProxyHost + Send + Sync>, book: ToolBook) -> ProxyTools {
         ProxyTools {
             host,
             book,
-            texts,
             done: BTreeMap::new(),
         }
     }
@@ -47,7 +40,7 @@ impl ProxyTools {
             Err(e) => return deny(format!("{} 的参数不是合法 JSON：{}", name, e)),
         };
         if let Err(fault) = schema.check(&value) {
-            return deny(arg_fault_text(&self.texts, name, schema, &fault));
+            return deny(arg_fault_text(name, schema, &fault));
         }
         let mut value = value;
         schema.apply_defaults(&mut value);
@@ -627,8 +620,9 @@ impl Conductor {
             chat,
             note,
             Some(tools),
-            self.prompt.refs(),
-            self.prompt.tools(),
+            self.prompt
+                .text(crate::capabilities::prompt::api::Segment::CompactPrompt)
+                .to_string(),
         );
         s.set_compact_budget(self.compact_budget(None));
         Ok(s)
@@ -774,11 +768,10 @@ impl ProxyHandler {
     pub fn new(
         host: Arc<dyn ProxyHost + Send + Sync>,
         book: ToolBook,
-        texts: Arc<ToolTexts>,
         ctx: d::ProxyCall,
     ) -> ProxyHandler {
         ProxyHandler {
-            tools: std::sync::Mutex::new(ProxyTools::new(host, book, texts)),
+            tools: std::sync::Mutex::new(ProxyTools::new(host, book)),
             ctx,
         }
     }

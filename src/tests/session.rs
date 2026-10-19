@@ -656,7 +656,6 @@ pub(crate) fn discussion_turn_carries_the_agent_sessions_own_history() {
         seen: Arc::clone(&seen),
     };
     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let prompts = test_prompts();
     let turn = crate::capabilities::collab::service::discussion::Discussion::turn_with(
         &*test_tools_svc(),
         "discussant",
@@ -668,7 +667,6 @@ pub(crate) fn discussion_turn_carries_the_agent_sessions_own_history() {
         &mut chat,
         None,
         vec![crate::capabilities::llm::api::Msg::user("讨论上下文")],
-        &prompts.tools(),
         &mut |_| {},
     )
     .expect("跑一个回合");

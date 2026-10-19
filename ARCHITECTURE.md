@@ -57,7 +57,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 | `ServiceAdapter` | 一个常驻服务的协议适配器：拉起、发现操作、调用、关闭（按行协议走 kernel 的 `SessionHost`） | `residents/detail::McpAdapter`（MCP stdio） |
 | `SecretStore` | 模块隐秘字段的落盘（`.home/secrets.yaml`；值不进提示词、转录与日志） | `secrets/detail::YamlSecrets` |
 | `FenceHost` | 围栏授权的释放（删除会话时请求一次撤销）；**kernel 共享机制端口** | `confine::FenceHostAdapter`（本平台无该机制时为空操作） |
-| `Log` / `HostProbe` / `PathCodec` / `ProcessTexts` | 运行日志（三级）/ 宿主能力探测（**只问事实**：路径存在性、PATH 上的可执行文件、本机虚拟化能力）/ 模型侧路径 ↔ 宿主路径的翻译 / 外部进程回执的收尾文案 | `FileLog` / `HostProbeAdapter` / `vm` 的路径桥 / `tools::PromptProcessTexts`（测试 `NoopLog` / `FixedProbe`） |
+| `Log` / `HostProbe` / `PathCodec` / `ProcessTexts` | 运行日志（三级）/ 宿主能力探测（**只问事实**：路径存在性、PATH 上的可执行文件、本机虚拟化能力）/ 模型侧路径 ↔ 宿主路径的翻译 / 外部进程回执的收尾文案 | `FileLog` / `HostProbeAdapter` / `vm` 的路径桥 / `kernel::detail::process::CodeProcessTexts`（测试 `NoopLog` / `FixedProbe`） |
 | `ToolHandler` | **一类工具的执行者**（按名字认领）：内置、模块与核心自有工具因此走**同一条派发路径** | 各能力注入（工具能力管内置与模块；conductor 注入代理工具那个） |
 | `AskUser` | **请用户裁决的提问端口**：需要用户裁决的机制（工具执行层、围栏）推一条问题并**阻塞**等一个选项 id——走会话的**统一裁决通道**（不是第二条） | 会话侧实现（conductor 的 `SessionAsk`：卡片进那一条队、`answer_card` 作答；构不出可用选项时停会话 + 落警告） |
 
@@ -86,12 +86,12 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 
 - **所有发给 LLM 的指令、身份、协议、环境提示词一律写入 `prompts/`**，禁止硬编码进代码；运行时回执不在此列（见下一条）。改文案只改册子；占位符 `{{key}}`，渲染器在 `capabilities/prompt/domain/prompt.rs`。
 - **缺文件 / 缺键 / 缺变量 = 报错暴露**，禁止静默兜底文案。**册子只由提示词能力持有一次**，以 `Arc` 共享。
-- **别的能力不点字段路径**：按名字取段（`Prompt::text` / `render` + `Segment`），或拿走两块共享记录（`tools()` / `refs()`）；
+- **别的能力不点字段路径**：按名字取段（`Prompt::text` / `render` + `Segment`）；
   "哪个回合发哪几段"的组装留在各业务（身份块归 `session`、工具说明归 `tools`、清单文本归 `registry` / `workspace`）。
 - 路径占位符（`{{work_root}}` 等）由协调业务在运行时替换成**真实根目录**后才交给 agent——仓库里永远不出现机器路径。
 - **不进册子的两类**：①行身份是结构化字段（`LineView` 的 `speaker` / `verb` / `kind`，认字段不认文案）；
   ②只给用户看的呈现层文案（各类 `Notice`、工具轨迹行的成败字样、面向界面 / CLI 的 `Err`）。
-  运行时回执**按产生它的模块归属**：路径/权限拒绝由 workspace 代码直接返回；工具回执、信封/围栏标注等仍由 `tool_texts` 提供。判断标准是"谁做决定谁拥有文案"，不是"进上下文就进册子"。键清单见 [docs/prompt/prompts.md](docs/prompt/prompts.md)。
+  运行时回执**按产生它的模块归属**：路径/权限拒绝由 workspace 代码直接返回；工具回执、信封/围栏标注、清单行等由产生它们的模块代码返回。判断标准是"谁做决定谁拥有文案"，不是"进上下文就进册子"。键清单见 [docs/prompt/prompts.md](docs/prompt/prompts.md)。
 
 ## 六、状态与落盘契约
 

@@ -21,7 +21,6 @@ impl ConductorHandle {
         let bus = EventBus::new();
         let (tx, rx) = mpsc::channel::<Job>();
         let book = core.systools_book();
-        let texts = core.prompt_texts();
         let tools = core.tools_handle();
         let residents = core.residents_handle();
         let secrets = core.secrets_handle();
@@ -33,7 +32,6 @@ impl ConductorHandle {
             bus,
             log: Arc::clone(&worker_log),
             book,
-            texts,
             tools,
             residents,
             secrets,
@@ -201,7 +199,6 @@ impl ConductorHandle {
         let handler = crate::capabilities::conductor::service::proxy::ProxyHandler::new(
             host,
             self.book.clone(),
-            std::sync::Arc::clone(&self.texts),
             dp::ProxyCall {
                 grant,
                 parent: Some(sid.to_string()),

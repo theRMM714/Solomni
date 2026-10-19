@@ -233,9 +233,8 @@ fn main() {
     // 启动报告算出的同一份围栏事实：Web 概览按它取「本机能力」与「本次实际」（下面那块必定赋值）。
     let fence_report;
     // 进程机制共用的文案（一次执行与长驻会话同一份）。
-    let process_texts: std::sync::Arc<dyn kernel::ports::ProcessTexts> = std::sync::Arc::new(
-        capabilities::tools::detail::PromptProcessTexts::new(prompt.tools()),
-    );
+    let process_texts: std::sync::Arc<dyn kernel::ports::ProcessTexts> =
+        std::sync::Arc::new(kernel::detail::process::CodeProcessTexts);
     // 工具执行：外层拉起的守门进程就是本程序自己（围栏在它里面装）。
     let tools = kernel::detail::process::ProcTools::new(
         std::env::current_exe().unwrap_or_default(),

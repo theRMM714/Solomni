@@ -6,7 +6,7 @@
 //!
 //! 加载机制在 `detail/yaml_prompts.rs`；本文件不碰文件系统。
 
-use crate::capabilities::prompt::api::{Prompt, RefsPrompts, Segment, ToolTexts, Vars};
+use crate::capabilities::prompt::api::{Prompt, Segment, Vars};
 use crate::capabilities::prompt::domain::prompt::{render, Prompts};
 use crate::capabilities::prompt::ports::PromptSource;
 use std::sync::Arc;
@@ -28,14 +28,6 @@ impl Prompt for Prompts {
     fn env(&self, host: &str, guest: Option<&str>, vars: Vars) -> String {
         render(&self.core.env_for(host, guest), vars)
             .expect("提示词渲染失败：变量缺失属于装配错误，须修复 prompts/ 或调用方")
-    }
-
-    fn tools(&self) -> Arc<ToolTexts> {
-        Arc::clone(&self.tools)
-    }
-
-    fn refs(&self) -> Arc<RefsPrompts> {
-        Arc::clone(&self.refs)
     }
 }
 

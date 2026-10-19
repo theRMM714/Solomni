@@ -377,15 +377,11 @@ pub(crate) fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix
         other => panic!("应判为语法错：{:?}", other),
     }
     // 四类各有各的修法（不是同一条笼统提示）
-    let texts = test_prompts().tools();
-    let control = crate::capabilities::llm::api::malformed_report(
-        &texts,
-        &Malformed::RawControl {
-            ch: '\n',
-            line: 3,
-            tail: None,
-        },
-    );
+    let control = crate::capabilities::llm::api::malformed_report(&Malformed::RawControl {
+        ch: '\n',
+        line: 3,
+        tail: None,
+    });
     assert!(
         control.contains("裸换行") && control.contains("第 3 行"),
         "{}",
@@ -396,32 +392,27 @@ pub(crate) fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix
         "要教模型把换行写成反斜杠 n：{}",
         control
     );
-    let shape = crate::capabilities::llm::api::malformed_report(
-        &texts,
-        &Malformed::Shape("missing field name".to_string()),
-    );
+    let shape = crate::capabilities::llm::api::malformed_report(&Malformed::Shape(
+        "missing field name".to_string(),
+    ));
     assert!(
         shape.contains("字段不合法") && shape.contains("missing field"),
         "{}",
         shape
     );
-    let tab = crate::capabilities::llm::api::malformed_report(
-        &texts,
-        &Malformed::RawControl {
-            ch: '\t',
-            line: 1,
-            tail: None,
-        },
-    );
+    let tab = crate::capabilities::llm::api::malformed_report(&Malformed::RawControl {
+        ch: '\t',
+        line: 1,
+        tail: None,
+    });
     // 只差收尾括号：要说清"还差 }"（而不是误导成"内容过长"）
-    let brace = crate::capabilities::llm::api::malformed_report(
-        &texts,
-        &Malformed::Unclosed(crate::capabilities::llm::api::Tail {
+    let brace = crate::capabilities::llm::api::malformed_report(&Malformed::Unclosed(
+        crate::capabilities::llm::api::Tail {
             missing: "}".to_string(),
             in_string: false,
             envelopes: 1,
-        }),
-    );
+        },
+    ));
     assert!(brace.contains("还差 }"), "{}", brace);
     assert!(
         !brace.contains("分次写入"),
@@ -429,23 +420,21 @@ pub(crate) fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix
         brace
     );
     // 断在字符串中间才是"内容没写完"，这时才谈分次写
-    let cut = crate::capabilities::llm::api::malformed_report(
-        &texts,
-        &Malformed::Unclosed(crate::capabilities::llm::api::Tail {
+    let cut = crate::capabilities::llm::api::malformed_report(&Malformed::Unclosed(
+        crate::capabilities::llm::api::Tail {
             missing: "}\"}".to_string(),
             in_string: true,
             envelopes: 1,
-        }),
-    );
+        },
+    ));
     // 一段回复里起了两段信封：要说清"只发一段"，而不是让它去补末尾括号（真实事故的形状）
-    let multi = crate::capabilities::llm::api::malformed_report(
-        &texts,
-        &Malformed::Unclosed(crate::capabilities::llm::api::Tail {
+    let multi = crate::capabilities::llm::api::malformed_report(&Malformed::Unclosed(
+        crate::capabilities::llm::api::Tail {
             missing: "}}".to_string(),
             in_string: false,
             envelopes: 2,
-        }),
-    );
+        },
+    ));
     assert!(
         multi.contains("2 段") && multi.contains("只发一段"),
         "{}",
@@ -462,12 +451,9 @@ pub(crate) fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix
         cut
     );
     assert!(tab.contains("制表符"), "{}", tab);
-    assert!(
-        texts.malformed_unclosed_brace != texts.malformed_unclosed_string
-            && texts.malformed_unclosed_string != texts.malformed_syntax
-            && texts.malformed_syntax != texts.malformed_shape,
-        "每一类的文案都要各说各的"
-    );
+    assert_ne!(control, shape, "每一类的文案都要各说各的");
+    assert_ne!(shape, brace, "每一类的文案都要各说各的");
+    assert_ne!(brace, cut, "每一类的文案都要各说各的");
 }
 
 #[test]

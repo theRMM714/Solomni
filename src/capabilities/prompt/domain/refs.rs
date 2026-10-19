@@ -3,10 +3,9 @@
 //!   写法是**会话所在环境**的（虚拟机档经路径翻译器给 guest 写法，模块工具在 guest 里直接能用；本机档恒等），
 //!   输出统一 / 分隔（JSON 里反斜杠是转义符）。
 //! 不管：越界与权限判定（在 workspace 的寻址）、提示词本体（同目录的 `prompt.rs`）、谁在什么时候调用。
-//! 联动：根与翻译器由会话侧给（`RefRoots`）；说明文案取自提示词册（`RefsPrompts`）；契约见
+//! 联动：根与翻译器由会话侧给（`RefRoots`）；说明文案归本模块代码所有；契约见
 //!   docs/tools/tools-and-roles.md 的「路径模型」。
 
-use crate::capabilities::prompt::domain::prompt::RefsPrompts;
 use crate::kernel::ports::PathCodec;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -23,8 +22,8 @@ pub struct RefRoots {
 /// 目的：把用户输入里的 @ 引用改写成真实路径。
 /// 参数：`speaker` = Some(agent 实例名)（单 agent 形态：它自己的沙箱可达）；None = 协作（多人共读同一段文字）。
 /// 约束：只认两种前缀，其余一律原样留在文本里（不猜）；路径范围带引号时取到下一个引号为止，
-///   否则到空白或终止标点为止，终止符**留在原文里不消费**；引用别人的私有沙箱时只给册子文案，不泄漏真实路径。
-pub fn rewrite(text: &str, speaker: Option<&str>, roots: &RefRoots, texts: &RefsPrompts) -> String {
+///   否则到空白或终止标点为止，终止符**留在原文里不消费**；引用别人的私有沙箱时只给代码里的说明，不泄漏真实路径。
+pub fn rewrite(text: &str, speaker: Option<&str>, roots: &RefRoots) -> String {
     if text.is_empty() || !text.contains('@') {
         return text.to_string();
     }
@@ -59,7 +58,7 @@ pub fn rewrite(text: &str, speaker: Option<&str>, roots: &RefRoots, texts: &Refs
                 let rendered = match own {
                     Some(full) => Some(full),
                     None if speaker == Some(agent) => None, // 根还没就绪：原样保留，不编路径
-                    None => Some(sandbox_note(agent, rel, speaker, texts)),
+                    None => Some(sandbox_note(agent, rel, speaker)),
                 };
                 if let Some(full) = rendered {
                     out.push_str(&full);
@@ -94,19 +93,20 @@ fn full_path(root: &Path, rel: &str, codec: Option<&dyn PathCodec>) -> Option<St
     Some(crate::kernel::api::slash(&view))
 }
 
-/// 引用别人（或协作）的沙箱：用册子文案如实说明谁能读，不给出真实路径。
-/// 单 agent 形态（speaker 是别人）用 foreign_sandbox；协作（speaker = None）用 collab_sandbox。
-fn sandbox_note(agent: &str, rel: &str, speaker: Option<&str>, texts: &RefsPrompts) -> String {
-    let template = if speaker.is_none() {
-        &texts.collab_sandbox
+/// 引用别人（或协作）的沙箱：如实说明谁能读，不给出真实路径。
+/// 单 agent 形态（speaker 是别人）说"无权读"；协作（speaker = None）说"只有那个 agent 能读"。
+fn sandbox_note(agent: &str, rel: &str, speaker: Option<&str>) -> String {
+    if speaker.is_none() {
+        format!(
+            "（{} 只有 agent「{}」能读，其它 agent 无权；要共享请让用户把它放进本工作的共享区）",
+            rel, agent
+        )
     } else {
-        &texts.foreign_sandbox
-    };
-    crate::capabilities::prompt::domain::prompt::render(
-        template,
-        &[("agent", agent.to_string()), ("path", rel.to_string())],
-    )
-    .expect("refs 文案变量由调用方保证（缺变量属于装配错误）")
+        format!(
+            "（无权读取：{} 在 agent「{}」的私有沙箱里，不是你自己的。可用的是上面列出的真实路径）",
+            rel, agent
+        )
+    }
 }
 
 /// 取一段引用路径：带引号（"…"）时取到下一个引号为止（引号本身不进结果）；

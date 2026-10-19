@@ -322,9 +322,7 @@ impl Conductor {
                 )
                 .with_guest(self.guest_os_of(&meta.exec));
                 let (chat, note) = self.llm.member_channel(channel.as_ref(), &a.name);
-                let texts = self.prompt.tools();
-                let (history, marks, line_reply, compacted_upto) =
-                    replay_dialogue(events, mode, &texts);
+                let (history, marks, line_reply, compacted_upto) = replay_dialogue(events, mode);
                 let unavailable = self.unavailable_modules(&meta.exec, &modules);
                 // 身份与角色**同一把尺子**（重建与实时不能各写一份，见 Conductor::role_of）：
                 // 协作派生的成员 / 节点 = executor（拿得到回报工具）；其余单 agent 工作 = solo。
@@ -351,17 +349,17 @@ impl Conductor {
                         chat,
                         note,
                         Some(tools),
-                        self.prompt.refs(),
-                        self.prompt.tools(),
+                        self.prompt
+                            .text(crate::capabilities::prompt::api::Segment::CompactPrompt)
+                            .to_string(),
                     ),
                 ))
             }
             // 代理会话：没有 agent（核心自己说话）；外壳由 build_proxy 装配，回放与单 agent 共用同一件。
             "proxy" => {
                 let mut s = self.build_proxy(meta)?;
-                let texts = self.prompt.tools();
                 let (history, marks, line_reply, compacted_upto) =
-                    replay_dialogue(events, s.tool_mode(), &texts);
+                    replay_dialogue(events, s.tool_mode());
                 s.dialogue = history;
                 s.marks = marks;
                 s.line_reply = line_reply;
@@ -384,7 +382,6 @@ impl Conductor {
 fn replay_dialogue(
     events: &[serde_json::Value],
     mode: crate::capabilities::llm::api::ToolMode,
-    texts: &crate::capabilities::prompt::api::ToolTexts,
 ) -> (
     Vec<crate::capabilities::llm::api::Msg>,
     Vec<usize>,
@@ -486,7 +483,7 @@ fn replay_dialogue(
                 .filter_map(|t| t.get("tool").cloned())
                 .filter_map(|t| serde_json::from_value(t).ok())
                 .collect();
-            for m in crate::capabilities::session::api::reply_msgs(mode, raw, &views, texts) {
+            for m in crate::capabilities::session::api::reply_msgs(mode, raw, &views) {
                 history.push(m);
             }
             for _ in 0..group.len() {

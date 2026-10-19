@@ -83,7 +83,6 @@ impl ToolExec for ToolsService {
     fn run_builtin(
         &self,
         sb: &crate::capabilities::workspace::api::Sandbox,
-        texts: &crate::capabilities::prompt::api::ToolTexts,
         builtin_tools: &ToolBook,
         observations: &mut Observations,
         name: &str,
@@ -91,7 +90,6 @@ impl ToolExec for ToolsService {
     ) -> ToolOutcome {
         crate::capabilities::tools::service::systool::execute(
             sb,
-            texts,
             builtin_tools,
             self.io.as_ref(),
             observations,

@@ -527,14 +527,14 @@ fn history_store_double_roundtrips_lists_deletes_and_propagates_failure() {
 #[test]
 fn prompt_source_double_loads_the_builtin_book_and_propagates_failure() {
     let p = TestPrompts::ok().load().expect("内置提示词册必须合法");
-    assert!(!p.core.no_agents.is_empty(), "册子里的话术不能是空的");
+    assert!(!p.core.chat_protocol.is_empty(), "册子里的段落不能是空的");
     assert_eq!(
         TestPrompts::ok()
             .load()
             .expect("重复加载稳定")
             .core
-            .no_agents,
-        p.core.no_agents
+            .chat_protocol,
+        p.core.chat_protocol
     );
     assert_eq!(
         TestPrompts::ok().fail_with("册子缺失").load().unwrap_err(),
