@@ -32,10 +32,13 @@
 
 ### 执行分派与就绪
 
-- 会话在 `tier == Vm` 时把模块命令交给 guest；建会话 / 启用历史会话时装配并拉起，改配时重建，删除会话时销毁。
-- **一个主会话树共用一台 guest**：guest 租约 = 顶层工作名，协作/节点子会话的工具租约都指向它；
+- 会话在 `tier == Vm` 时把模块命令交给 guest；建会话 / 启用历史会话时装配并拉起，删除会话时销毁。
+  **改配按装配输入变化重建**：模块集合 / 档位 / 虚拟根 / 网络 / 定版变了才重建；只改模型或权限不重建。
+- **一个主会话树共用一台 guest**：guest 租约 = 顶层工作名（proxy 树 = 代理根名），协作/节点/proxy 子工作的工具租约都指向它；
   主机围栏租约仍按子会话（`FenceSpec.lease` 与工具上下文里的 `guest_lease` 分开）。
-  proxy 子工作在动态加入主 guest 落地前**暂时各自一台**（缺口见 [tests/gaps.yaml](../../tests/gaps.yaml)）。
+- **环境属于主会话**：`tier / guest / net / pins` 由人建主会话时决定，子会话只读继承；核心代理的 `create_session` 不接受模型自选环境。
+- **guest 装配按整棵树聚合**：plan / 沙箱 / 包冲突 / 定版取作用域根与整棵子树的并集；新子会话的包已被运行 guest 装载就直接加入，
+  引入新包时要求树空闲后按新装配重建，不做运行包动态加载。
 - 就绪项 `guest` 按**已验平台数据表**（`VERIFIED_HOSTS` = linux / windows）放开，并带上本平台**已实现**的组合。
 - 已验组合：Linux QEMU/KVM + virtiofs（virtiofsd 不在场或**不能执行**时退 9p）；Windows QEMU/WHPX + SMB guestfwd（缺 smbd 时退 QGA 复制）。
 - macOS 未验，缺口见 [tests/macos/gaps.yaml](../../tests/macos/gaps.yaml)。
@@ -55,12 +58,16 @@
 
 ### 并发与进程归属
 
-- 每个主会话树一条 guest 租约（固定 `-m 2048 -smp 2`）；协作子会话共用，proxy 子工作临时各自一条。
+- 每个主会话树一条 guest 租约（固定 `-m 2048 -smp 2`）；协作子会话与 proxy 子工作都共用这一条。
 - 同时台上限是设置项 `max_guests`（默认 2，0 = 不限制），按主会话树计数，到上限如实拒绝；同一租约重启不占新名额（见 [REGISTRY_SPEC.md](../../REGISTRY_SPEC.md) 与 `domain/exec.rs` 的 `admit_guest`）。
 - 会话启动时用 qemu-img 在基础镜像上建一份**每租约可写层**（`.vm/overlays/<租约>.qcow2`），删会话即丢——多台并发**不同写一份基础镜像**；供给编排直写基础镜像（它要改的就是镜像本身，`GuestSpec.isolated = false`）。
   启用 = 按基础镜像重建 guest：guest 内未落到宿主挂载点（共享区 / 沙箱 / 模块目录）的改动不保留。
-- **共享 guest 的隔离缺口**：当前 guest 内没有 per-agent 围栏（host 围栏不进入 guest），
-  同一主工作内的 agent 在 guest 里互信；guest 内隔离与 proxy 动态加入主 guest 记在 [tests/gaps.yaml](../../tests/gaps.yaml)。
+- **guest 内 per-agent 围栏**：宿主把该 agent 的围栏翻成 guest 路径与允许集，经 guest 内 Linux helper（Landlock + no_new_privs）执行；
+  helper 缺失或装不上时 fail-closed，不回退到无围栏执行。只支持 Linux guest；Windows / macOS guest 未适配，按不支持处理。
+  本次隔离只覆盖文件系统可达范围；同 guest 内仍是同一 UID/root，进程信号、`/proc` 与 `system` 包的全局可见性不在承诺内。
+- **稳定挂载根**：共享 guest 只挂工作树与模块树两个根，新 agent 沙箱 / 新模块目录按状态出现；具体某个 agent 能看什么由当次围栏决定。
+- **运行包仍是启动期装配**：新子会话只加模块、不加新包时直接加入运行中的 guest；包集合变化按新 plan 重建共享 guest（要求树空闲）。
+  `system` 包仍按 guest 全局叠写，per-agent 只保证文件可达范围，不承诺系统包隔离。
 - 每个 QEMU 与共享进程起时记账（`.home/processes.json`，`kernel/detail/procs.rs`：用途 + 归属 + 标记），销毁时注销。
 - 共享守护进程（`virtiofsd` / SMB helper）由对应共享后端按租约起停：起时进同一份进程账并绑父死子亡，释放时清理（`virtiofsd` 按进程组）。
 - 父死子亡：核心被强杀也不留孤儿攥着镜像；三平台机制见 [docs/kernel/README.md](../kernel/README.md) 的「长驻子进程的账与回收」。

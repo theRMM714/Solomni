@@ -177,16 +177,6 @@ impl Conductor {
         )
     }
 
-    /// 目的：按一条会话的 meta 现算执行计划（启用/续跑与建会话同一把尺子）。
-    /// 约束：模块清单取这条 meta 的 agent 名单；虚拟机档按 guest 的 os 判入口与运行包。
-    pub(crate) fn plan_for_meta(
-        &self,
-        meta: &SessionMeta,
-    ) -> Result<crate::capabilities::vm::api::ExecPlan, String> {
-        let roster = self.scan();
-        self.plan_for_meta_with(meta, &roster)
-    }
-
     fn plan_for_meta_with(
         &self,
         meta: &SessionMeta,
@@ -341,14 +331,14 @@ impl Conductor {
                 ))
             }
         }
-        // 共享 guest 的子会话：模块 / 定版 / 网络都会改变主 guest 的装配，本次先不支持单独编辑（后续安排）。
-        if meta.parent.is_some() {
-            if let Ok(Some((lease, _))) = self.guest_scope(&meta) {
-                if lease != meta.name {
-                    return Err("子会话的配置随主会话（共享 guest）：暂不支持单独编辑".to_string());
-                }
-            }
-        }
+        // 共享 guest 的子会话也可以编辑：写回该 agent 的唯一配置，保存后重新加入同一台 guest。
+        // 旧 guest / 旧树的装配在下面与编辑后的树比对，只有装配真的变了才重建。
+        let owner = self.config_owner_of(&meta)?;
+        let old_scope = self.guest_scope(&meta)?;
+        let old_tree = match &old_scope {
+            Some((_, root)) => Some(self.tree_meta(root, None)?),
+            None => None,
+        };
         if session_started(&events) {
             let old: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
             let new: Vec<String> = edit.agents.iter().map(|a| a.name.clone()).collect();
@@ -416,6 +406,14 @@ impl Conductor {
         }
         if meta.mode == "single" && metas.len() != 1 {
             return Err("单 agent 形态只接受一个 agent（模块数不限）".to_string());
+        }
+        // 子会话的名单是主名单的一份视图：只能改这一席的模块 / 模型 / 权限，不能在子会话里增删或改名。
+        if owner.name != meta.name {
+            let old: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
+            let new: Vec<String> = metas.iter().map(|a| a.name.clone()).collect();
+            if old != new {
+                return Err("子会话不能改 agent 名单：要换人请改主会话或新建会话".to_string());
+            }
         }
         // 档位：与「开始」同一把尺子——虚拟机档的选型不成立（多版本未定版 / 定版不存在 / 路径冲突）如实拒绝。
         let tier = match edit.tier.as_str() {
@@ -486,7 +484,7 @@ impl Conductor {
                     && (target_os == std::env::consts::OS
                         || crate::capabilities::vm::api::runs_on_target(p, target_os))
             });
-        let plan = crate::capabilities::vm::api::plan(
+        crate::capabilities::vm::api::plan(
             &spec,
             &session_modules,
             &self.library_for(&spec),
@@ -494,23 +492,29 @@ impl Conductor {
             &missing,
         )
         .map_err(|diags| crate::capabilities::vm::api::diagnose_text_for(&diags, guest))?;
-        self.log.info(
-            "conductor::edit_session",
-            &format!(
-                "sid={}；{}",
-                sid,
-                crate::capabilities::vm::api::plan_summary(&plan)
-            ),
-        );
 
         let mut new_meta = meta.clone();
         new_meta.modules = metas.iter().flat_map(|a| a.modules.clone()).collect();
-        new_meta.agents = metas;
+        new_meta.agents = metas.clone();
         new_meta.exec = spec.clone();
-        // 子会话只能随主会话：主会话改档位/guest/pins/net 时同步整棵子树，并作废它们的内存对象。
-        let (old_children, new_children) = if meta.parent.is_none() {
-            let mut old_children = Vec::new();
-            let mut new_children = Vec::new();
+        // 同一 agent 全树只有一份配置：子会话编辑写回所属名单；主会话 / proxy 子工作编辑同步整棵子树。
+        let mut old_children = Vec::new();
+        let mut new_children = Vec::new();
+        if owner.name != meta.name {
+            let mut new_owner = owner.clone();
+            for a in &metas {
+                if let Some(slot) = new_owner.agents.iter_mut().find(|x| x.name == a.name) {
+                    *slot = a.clone();
+                }
+            }
+            new_owner.modules = new_owner
+                .agents
+                .iter()
+                .flat_map(|a| a.modules.clone())
+                .collect();
+            old_children.push(owner.clone());
+            new_children.push(new_owner);
+        } else {
             for child in self.subtree_of(sid) {
                 if child == sid {
                     continue;
@@ -518,26 +522,78 @@ impl Conductor {
                 let mut cm = self.history.meta(&child)?;
                 old_children.push(cm.clone());
                 cm.exec = spec.clone();
+                for ca in &mut cm.agents {
+                    if let Some(na) = new_meta.agents.iter().find(|a| a.name == ca.name) {
+                        *ca = na.clone();
+                    }
+                }
+                cm.modules = cm.agents.iter().flat_map(|a| a.modules.clone()).collect();
                 new_children.push(cm);
             }
-            (old_children, new_children)
-        } else {
-            (Vec::new(), Vec::new())
-        };
-        // 要等 guest 的那一段：旧的是虚拟机档就得停（改配一律重建）；新的是虚拟机档就得起。
+        }
+        // 模块归属是整棵树的规则（与档位无关）：先按编辑后的名单查一遍重复。
+        let (check_root, check_extra): (&SessionMeta, Vec<&SessionMeta>) =
+            if owner.name != meta.name {
+                (
+                    new_children.first().expect("子会话编辑要写回所属名单"),
+                    vec![&new_meta],
+                )
+            } else {
+                (&new_meta, new_children.iter().collect())
+            };
+        let check_tree = self.tree_meta_with(check_root, &check_extra)?;
+        if let Some((m, a, b)) = duplicate_tree_module(&check_tree) {
+            return Err(format!(
+                "模块 {} 同时属于 agent {} 与 {}：同一模块在一条会话树里只能属于一个 agent",
+                m, a, b
+            ));
+        }
         let was_vm = meta.exec.tier == crate::kernel::api::Tier::Vm;
         let is_vm = new_meta.exec.tier == crate::kernel::api::Tier::Vm;
-        let job = if is_vm {
-            let sandboxes = self.sandboxes(&new_meta, &roster)?;
+        // 共享 guest 的装配按整棵树算：把这次的新值覆盖到作用域根的子树上，再出计划与沙箱。
+        let (lease, tree, tree_plan) = if is_vm {
+            let (lease, scope_meta) = self
+                .guest_scope(&new_meta)?
+                .ok_or_else(|| "虚拟机档会话没有解析出 guest 作用域".to_string())?;
+            let mut extras: Vec<&SessionMeta> = vec![&new_meta];
+            extras.extend(new_children.iter());
+            let tree = self.tree_meta_with(&scope_meta, &extras)?;
+            let plan = self.plan_for_meta_with(&tree, &roster)?;
+            self.log.info(
+                "conductor::edit_session",
+                &format!(
+                    "sid={}；{}",
+                    sid,
+                    crate::capabilities::vm::api::plan_summary(&plan)
+                ),
+            );
+            (Some(lease), Some(tree), Some(plan))
+        } else {
+            (None, None, None)
+        };
+        // 只有组装输入变了才重建 guest：模块 / 环境变了要重建；只改模型 / 权限不重建。
+        let needs_guest = is_vm
+            && match (&old_tree, &tree) {
+                (Some(old), Some(tree)) => guest_assembly_changed(old, tree),
+                _ => true,
+            };
+        let job = if needs_guest {
+            let tree = tree.as_ref().expect("is_vm 已准备 tree");
+            let tree_plan = tree_plan.as_ref().expect("is_vm 已准备 plan");
+            let sandboxes = self.sandboxes(tree, &roster)?;
             Some(EditGuest::Boot(Box::new(self.guest_boot(
-                &new_meta,
-                &plan,
+                tree,
+                tree_plan,
                 &sandboxes,
                 was_vm,
-                &new_meta.name,
+                lease.as_deref().expect("is_vm 已准备 lease"),
             ))))
-        } else if was_vm {
-            Some(EditGuest::Stop(self.guest_stop(&meta.name)))
+        } else if was_vm && !is_vm {
+            let old_lease = old_scope
+                .as_ref()
+                .map(|(l, _)| l.clone())
+                .unwrap_or_else(|| meta.name.clone());
+            Some(EditGuest::Stop(self.guest_stop(&old_lease)))
         } else {
             None
         };
@@ -901,7 +957,12 @@ impl Conductor {
             if parent.is_some() {
                 return Err("子工作不能建成代理形态：代理不能往里套代理".to_string());
             }
-            let (sid, facts) = self.create_proxy_with_facts(&spec.name, now_ts(), spec.tier)?;
+            let (sid, facts) = self.create_proxy_with_facts(
+                &spec.name,
+                now_ts(),
+                spec.tier,
+                spec.guest.as_deref(),
+            )?;
             return Ok((
                 PreparedWork::Ready(WorkOpened {
                     sid,
@@ -1001,11 +1062,15 @@ impl Conductor {
             parent: parent.map(|s| s.to_string()),
             node: None,
             delegation: None,
-            // 档位来自**用户在创建向导里的选择**（默认 = 设置里的档位）；承载不了由下面如实拒绝。
-            exec: crate::kernel::api::ExecSpec {
-                tier: spec.tier,
-                guest: spec.guest.clone(),
-                ..crate::kernel::api::ExecSpec::default()
+            // 环境属于主会话：子会话整段沿用父会话（档位 / 虚拟根 / 网络 / 定版）；
+            // 顶层来自**用户在创建向导里的选择**（默认 = 设置里的档位）。承载不了由下面如实拒绝。
+            exec: match parent {
+                Some(p) => self.history.meta(p)?.exec,
+                None => crate::kernel::api::ExecSpec {
+                    tier: spec.tier,
+                    guest: spec.guest.clone(),
+                    ..crate::kernel::api::ExecSpec::default()
+                },
             },
             run: RunState::Active,
         };
@@ -1077,7 +1142,42 @@ impl Conductor {
         let boot = if meta.exec.tier == crate::kernel::api::Tier::Vm
             && !(meta.delegate && meta.agents.is_empty())
         {
-            Some(self.guest_boot(&meta, &plan, &sandboxes, false, &meta.name))
+            // 共享 guest：按整棵树装配（proxy 子工作都进代理根那一台），租约取作用域根。
+            let (lease, scope_meta) = self
+                .guest_scope(&meta)?
+                .ok_or_else(|| "虚拟机档会话没有解析出 guest 作用域".to_string())?;
+            let tree = self.tree_meta(&scope_meta, Some(&meta))?;
+            if let Some((m, a, b)) = duplicate_tree_module(&tree) {
+                return Err(format!(
+                    "模块 {} 同时属于 agent {} 与 {}：同一模块在一条会话树里只能属于一个 agent",
+                    m, a, b
+                ));
+            }
+            let tree_plan = self.plan_for_meta_with(&tree, &roster)?;
+            let tree_sandboxes = self.sandboxes(&tree, &roster)?;
+            // 运行包不做动态加载：新子会话的包已被这台 guest 装载就直接加入；
+            // 引入新包时要等树空闲后按聚合后的 meta 重建这台共享 guest。
+            let want: Vec<String> = tree_plan
+                .packages
+                .iter()
+                .map(|p| format!("{}@{}", p.id, p.version))
+                .collect();
+            let active = self.vm.guest_leases().iter().any(|l| l == &lease);
+            let have = self.vm.guest_packages(&lease);
+            let restart = needs_guest_packages_rebuild(active, &want, have.as_deref());
+            if restart {
+                let running = self
+                    .subtree_of(&scope_meta.name)
+                    .into_iter()
+                    .find(|s| self.running.contains(s));
+                if let Some(s) = running {
+                    return Err(format!(
+                        "子会话引入了这台 guest 还没装载的运行包：先停掉正在生成的 {}，再重建共享 guest",
+                        s
+                    ));
+                }
+            }
+            Some(self.guest_boot(&tree, &tree_plan, &tree_sandboxes, restart, &lease))
         } else {
             None
         };
@@ -1244,15 +1344,13 @@ impl Conductor {
             return Ok(None);
         }
         let roster = self.scan();
-        let plan = self.plan_for_meta(&scope_meta)?;
-        let sandboxes = self.sandboxes(&scope_meta, &roster)?;
-        Ok(Some(self.guest_boot(
-            &scope_meta,
-            &plan,
-            &sandboxes,
-            false,
-            &lease,
-        )))
+        // 共享 guest 的装配按整棵树算：proxy 根自己没有名单，子工作的 agent / 模块 / 包都要进来。
+        let tree = self.tree_meta(&scope_meta, None)?;
+        let plan = self.plan_for_meta_with(&tree, &roster)?;
+        let sandboxes = self.sandboxes(&tree, &roster)?;
+        Ok(Some(
+            self.guest_boot(&tree, &plan, &sandboxes, false, &lease),
+        ))
     }
 
     /// 目的：把"起 guest"这一段打包成交给调用方线程的活——核心只准备参数，不在这里拉起。
@@ -1356,4 +1454,53 @@ impl Conductor {
             usage,
         })
     }
+}
+
+/// 目的：新子会话要不要为运行包重建共享 guest——只有活 guest 且它缺其中某个包时才要。
+pub(crate) fn needs_guest_packages_rebuild(
+    active: bool,
+    want: &[String],
+    have: Option<&[String]>,
+) -> bool {
+    if !active {
+        return false;
+    }
+    match have {
+        Some(have) => want.iter().any(|p| !have.contains(p)),
+        None => !want.is_empty(),
+    }
+}
+
+/// 目的：一个模块在整棵树里只能属于一个 agent；返回（模块, 先出现的 agent, 后出现的 agent）。
+fn duplicate_tree_module(meta: &SessionMeta) -> Option<(String, String, String)> {
+    let mut seen: BTreeMap<String, String> = BTreeMap::new();
+    for a in &meta.agents {
+        for m in &a.modules {
+            if let Some(prev) = seen.insert(m.clone(), a.name.clone()) {
+                return Some((m.clone(), prev, a.name.clone()));
+            }
+        }
+    }
+    None
+}
+
+/// 目的：guest 装配只认"agent → 模块集合"与环境；模型 / 权限变化不该触发重建。
+fn agent_modules(meta: &SessionMeta) -> BTreeMap<String, Vec<String>> {
+    let mut out = BTreeMap::new();
+    for a in &meta.agents {
+        let mut modules = a.modules.clone();
+        modules.sort();
+        modules.dedup();
+        out.insert(a.name.clone(), modules);
+    }
+    out
+}
+
+/// 目的：这次改配要不要重建共享 guest——模块集合或 ExecSpec（档位 / 虚拟根 / 网络 / 定版）变了才要。
+fn guest_assembly_changed(old: &SessionMeta, new: &SessionMeta) -> bool {
+    old.exec.tier != new.exec.tier
+        || old.exec.guest != new.exec.guest
+        || old.exec.net != new.exec.net
+        || old.exec.pins != new.exec.pins
+        || agent_modules(old) != agent_modules(new)
 }

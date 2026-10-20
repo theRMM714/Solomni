@@ -1573,6 +1573,152 @@ pub(crate) fn child_sessions_share_the_main_guest_and_follow_its_tier() {
     assert_eq!(updated.exec.tier, Tier::Vm, "子会话档位跟主会话");
 }
 
+/// 目的：proxy 树里的子工作共用代理根那一台 guest，不再每个子工作各起一台。
+#[test]
+pub(crate) fn proxy_children_share_the_proxy_tree_guest() {
+    let hist = Arc::new(InMemoryHistory::new());
+    seed_session(&hist, "p", "proxy", Vec::new(), vm_spec());
+    let child = SessionMeta {
+        name: "p--a".to_string(),
+        mode: "single".to_string(),
+        delegate: false,
+        modules: vec!["a".to_string()],
+        task: None,
+        ts: 2,
+        agents: vec![agent_meta("a", &["a"], None)],
+        exec: vm_spec(),
+        parent: Some("p".to_string()),
+        node: None,
+        delegation: None,
+        run: RunState::Active,
+    };
+    hist.create(&child).expect("子工作落盘");
+    let core = core_with_pkgs(
+        vec![module_of("a")],
+        gw(BTreeMap::new(), Vec::new()),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::new(InMemorySysIo::new()),
+        Arc::new(InMemoryPackages::empty()),
+    );
+    let child_meta = hist.meta("p--a").expect("读子工作");
+    assert_eq!(
+        core.guest_lease_for(&child_meta).expect("取租约"),
+        "p",
+        "proxy 子工作要加入代理根那一台 guest"
+    );
+    assert_eq!(
+        core.guest_lease_for(&hist.meta("p").expect("代理根"))
+            .expect("代理根租约"),
+        "",
+        "代理根自己没有 guest；由子工作按同一租约拉起"
+    );
+}
+
+/// 目的：共享 guest 的子会话也能改配置；写回该 agent 的唯一名单，而不是留一份会漂的副本。
+#[test]
+pub(crate) fn child_edit_writes_back_to_the_agent_roster() {
+    let hist = Arc::new(InMemoryHistory::new());
+    seed_session(
+        &hist,
+        "w",
+        "collab",
+        vec![agent_meta("a", &["a"], None), agent_meta("b", &["b"], None)],
+        Default::default(),
+    );
+    let child = SessionMeta {
+        name: "w--a".to_string(),
+        mode: "single".to_string(),
+        delegate: false,
+        modules: vec!["a".to_string()],
+        task: None,
+        ts: 2,
+        agents: vec![agent_meta("a", &["a"], None)],
+        exec: Default::default(),
+        parent: Some("w".to_string()),
+        node: None,
+        delegation: None,
+        run: RunState::Active,
+    };
+    hist.create(&child).expect("子会话落盘");
+    let mut core = core_with_pkgs(
+        vec![module_of("a"), module_of("b"), module_of("c")],
+        gw(BTreeMap::new(), Vec::new()),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::new(InMemorySysIo::new()),
+        Arc::new(InMemoryPackages::empty()),
+    );
+    let (prepared, job) = core
+        .prepare_edit("w--a", edit_of(vec![("a", &["c"], "")]))
+        .expect("子会话可以改模块");
+    assert!(job.is_none(), "本机档不需要 guest");
+    assert_eq!(prepared.new_meta.agents[0].modules, vec!["c".to_string()]);
+    let owner = prepared
+        .new_children
+        .iter()
+        .find(|m| m.name == "w")
+        .expect("写回主会话的名单");
+    assert_eq!(
+        owner.agents[0].modules,
+        vec!["c".to_string()],
+        "同一 agent 只有一份配置"
+    );
+    core.commit_edit(prepared).expect("提交改配");
+    assert_eq!(
+        hist.meta("w").expect("主会话").agents[0].modules,
+        vec!["c".to_string()]
+    );
+    assert_eq!(
+        hist.meta("w--a").expect("子会话").agents[0].modules,
+        vec!["c".to_string()]
+    );
+}
+
+/// 目的：树里同一模块被分给两个 agent 时如实拒绝，不能等 guest 装配时才冲突。
+#[test]
+pub(crate) fn tree_wide_module_ownership_is_enforced_on_child_edit() {
+    let hist = Arc::new(InMemoryHistory::new());
+    seed_session(
+        &hist,
+        "w",
+        "collab",
+        vec![agent_meta("a", &["a"], None), agent_meta("b", &["b"], None)],
+        Default::default(),
+    );
+    let child = SessionMeta {
+        name: "w--a".to_string(),
+        mode: "single".to_string(),
+        delegate: false,
+        modules: vec!["a".to_string()],
+        task: None,
+        ts: 2,
+        agents: vec![agent_meta("a", &["a"], None)],
+        exec: Default::default(),
+        parent: Some("w".to_string()),
+        node: None,
+        delegation: None,
+        run: RunState::Active,
+    };
+    hist.create(&child).expect("子会话落盘");
+    let mut core = core_with_pkgs(
+        vec![module_of("a"), module_of("b")],
+        gw(BTreeMap::new(), Vec::new()),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::new(InMemorySysIo::new()),
+        Arc::new(InMemoryPackages::empty()),
+    );
+    let err = core
+        .prepare_edit("w--a", edit_of(vec![("a", &["b"], "")]))
+        .err()
+        .expect("模块已被另一个 agent 占用");
+    assert!(err.contains("同时属于"), "{}", err);
+}
+
 /// 目的：上下文「继续」只在后端判定有断点时出现——单 agent 末条是用户才有，末条是 AI 没有。
 #[test]
 pub(crate) fn continue_hint_is_derived_from_the_session_state() {

@@ -114,20 +114,22 @@ impl GuestBoot {
             .ok_or_else(|| "这条虚拟机档会话没有选定虚拟根".to_string())?;
         let dir = resolve_guest(&root, name)?;
         let image = classify_base(&dir, probe.as_ref())?;
-        let mut rw: Vec<PathBuf> = Vec::new();
-        let mut ro: Vec<PathBuf> = Vec::new();
-        let mut ro_tree: Vec<PathBuf> = Vec::new();
-        for sb in &sandboxes.list {
-            let f = FenceSpec::from_sandbox(sb, net).with_read_only(fence_read.clone());
-            rw.extend(f.rw);
-            ro.extend(f.ro);
-            ro_tree.extend(f.ro_tree);
+        // 共享 guest 只挂**稳定根**：工作树与模块根各一处，新子会话/新模块按状态出现；
+        // 具体某个 agent 能看什么由 guest 内 helper 按当次围栏限制，不靠宿主挂载点枚举。
+        let (mut rw, ro_tree) = stable_roots(&sandboxes);
+        // 建 guest 时树里可能还没有模块（proxy 的第一个子工作可以只用内建工具）：
+        // 模块根也按稳定根挂上，后面新子会话加模块时不用重建 guest。
+        let modules_root = root.join("modules");
+        if probe.is_dir(&modules_root) && !rw.contains(&modules_root) {
+            rw.push(modules_root);
+            rw.sort();
+            rw.dedup();
         }
         let fence = FenceSpec {
             agent: String::new(),
             lease: lease.clone(),
             rw,
-            ro: ro.clone(),
+            ro: fence_read.clone(),
             ro_tree,
             private: PathBuf::new(),
             cwd: PathBuf::new(),
@@ -149,6 +151,13 @@ impl GuestBoot {
             isolated: true,
         };
         vm.guest_start(&spec)?;
+        vm.guest_set_packages(
+            &lease,
+            plan.packages
+                .iter()
+                .map(|p| format!("{}@{}", p.id, p.version))
+                .collect(),
+        );
         // 已装载的 prefix 包：把 `<prefix>/bin/*` 软链进 guest 的 /usr/local/bin，
         // 这样"模块声明 runtimes: [X] + 裸名命令"在 guest 里真的能跑起来（失败如实记一条，不假装装上了）。
         for script in package_setup_scripts(&plan) {
@@ -170,6 +179,56 @@ impl GuestBoot {
         }
         Ok(())
     }
+}
+
+/// 目的：共享 guest 的稳定挂载根——工作树（含所有 agent 沙箱）与模块根（含 userdata）。
+/// 约束：这里只给"可见范围"，不表达某个 agent 的权限；per-agent 允许集由当次 GuestAccess 决定。
+pub(crate) fn stable_roots(sandboxes: &Sandboxes) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let mut rw: Vec<PathBuf> = Vec::new();
+    if let Some(work) = sandboxes.shared.parent() {
+        if !work.as_os_str().is_empty() {
+            rw.push(work.to_path_buf());
+        }
+    }
+    let mut module_roots: Vec<PathBuf> = sandboxes
+        .list
+        .iter()
+        .flat_map(|sb| sb.modules.values().cloned())
+        .collect();
+    module_roots.sort();
+    module_roots.dedup();
+    let roots = match common_ancestor(&module_roots) {
+        Some(root) => vec![root],
+        None => module_roots,
+    };
+    for root in roots {
+        if !rw.contains(&root) {
+            rw.push(root);
+        }
+    }
+    rw.sort();
+    rw.dedup();
+    // 模块根的读写位由 helper 按每个 agent 的 module_write / userdata 决定；
+    // 这里整棵挂可写，是为了让 userdata 真的能落回宿主。
+    (rw, Vec::new())
+}
+
+/// 目的：一组路径的最长公共祖先；不同盘符或公共部分只剩根时返回 None（退回逐项挂载）。
+fn common_ancestor(paths: &[PathBuf]) -> Option<PathBuf> {
+    let mut acc = paths.first()?.clone();
+    for p in &paths[1..] {
+        let mut next = PathBuf::new();
+        for (a, b) in acc.components().zip(p.components()) {
+            if a == b {
+                next.push(a.as_os_str());
+            } else {
+                break;
+            }
+        }
+        acc = next;
+    }
+    acc.parent()?;
+    Some(acc)
 }
 
 /// 目的：一次 guest 销毁（慢：先请 guest 断电并等它落盘，超时才杀）——同样在调用方线程上跑。

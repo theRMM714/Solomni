@@ -89,7 +89,7 @@ agent 实例名不得占用 `work` / `children`（名单在 `systools/names.yaml
 - **执行档位**（`exec` 段）：本机档（默认）= 脚本直接在宿主上跑；虚拟机档 = 一整套 guest。
   虚拟机档的选型、诊断、装配计划、逐项前置检测、guest 端口、QEMU 后端与**执行分派**都已就位
   （建会话 / 启用历史会话时按计划与沙箱装配挂载并拉起 guest，工具命令送进 guest，会话删除时销毁）；
-  **一个主会话树共用一台 guest**（子会话的工具租约指向顶层工作；proxy 子工作暂各自一台，缺口见 [tests/gaps.yaml](tests/gaps.yaml)）；
+  **一个主会话树共用一台 guest**（子会话与 proxy 子工作的工具租约都指向顶层工作；guest 内按 agent 用 Linux helper 做文件可达范围隔离；环境随主会话，AI 不能给子会话另选档位 / 虚拟根）；
   **按组合放开**：guest 做成五轴可扩展组合（宿主 × 引擎 × guest × 通道 × 共享），各平台默认吃当前最强组合并逐级回退；
   Linux（QEMU/KVM + virtiofs，缺 virtiofsd 时退 9p）与 Windows（QEMU/WHPX + SMB 实时共享，缺 smbd 时退 QGA 复制）已真机验收，macOS 的组合未验（未验组合禁用并逐项列出缺什么、每项怎么补）；
   未开放组合上已存在的会话不拦打开（列表标注"虚拟机档不可用"，本次按本机档执行）。

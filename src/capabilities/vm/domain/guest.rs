@@ -195,6 +195,45 @@ pub struct GuestSpec {
     pub isolated: bool,
 }
 
+/// 目的：一次 guest 执行要用的 per-agent 允许集（已是 guest 写法）。
+/// 约束：只由 host 侧从 FenceSpec 翻译而来；guest 内 helper 只认这份策略，失败一律 fail-closed。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuestAccess {
+    pub agent: String,
+    pub rw: Vec<String>,
+    pub ro: Vec<String>,
+    pub ro_tree: Vec<String>,
+    pub private: String,
+    pub cwd: String,
+    pub net: bool,
+}
+
+impl GuestAccess {
+    /// 目的：把某 agent 的围栏翻成 guest 路径。挂载表优先，跨方言才走镜像根。
+    pub fn from_fence(fence: &FenceSpec, os: GuestOs, mounts: &[GuestMount]) -> GuestAccess {
+        let map = |paths: &[PathBuf]| -> Vec<String> {
+            paths.iter().map(|p| to_guest_path(p, os, mounts)).collect()
+        };
+        GuestAccess {
+            agent: fence.agent.clone(),
+            rw: map(&fence.rw),
+            ro: map(&fence.ro),
+            ro_tree: map(&fence.ro_tree),
+            private: if fence.private.as_os_str().is_empty() {
+                String::new()
+            } else {
+                to_guest_path(&fence.private, os, mounts)
+            },
+            cwd: if fence.cwd.as_os_str().is_empty() {
+                String::new()
+            } else {
+                to_guest_path(&fence.cwd, os, mounts)
+            },
+            net: fence.net,
+        }
+    }
+}
+
 /// 目的：在 guest 里跑一次工具（命令 + 参数 + 环境 + 工作目录）。
 #[derive(Debug, Clone)]
 pub struct GuestRun {

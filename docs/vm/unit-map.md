@@ -14,6 +14,7 @@
 | `src/capabilities/vm/domain/paths.rs` | 宿主 ↔ guest 路径桥（恒等 / 镜像根，可逆；纯逻辑） |
 | `src/capabilities/vm/domain/packages.rs` | 运行包契约（package.yaml）校验、去重、系统路径冲突预检与来源目录（纯逻辑） |
 | `src/capabilities/vm/detail/fs_packages.rs` | `PackageSource` 的磁盘实现：扫描 runtimes/ |
+| `src/capabilities/vm/detail/guest_helper.rs` | Linux guest 内执行助手：脚本文本、装进 guest、按 host 翻好的允许集走 Landlock + no_new_privs；缺失/装不上 fail-closed |
 | `src/capabilities/vm/detail/qemu.rs` | `VmEngine` / `GuestChannel` 的 QEMU 实现：拉起 qemu-system-*、按需用 qemu-img 建每租约可写层，经 QGA 执行与销毁（含文件搬运） |
 | `src/capabilities/vm/detail/copy.rs` | `ShareBackend` 的 QGA 复制实现：建目录脚本与宿主侧 tar 打包/解包（按趟同步；实时共享是 `share_smb.rs` / `share_virtiofs.rs`） |
 | `src/capabilities/vm/detail/share_ninep.rs` | `ShareBackend` 的 9p 实现：-fsdev / -device 参数与 guest 端 mount 脚本 |

@@ -242,6 +242,8 @@ pub mod proxy;
 mod rewind;
 mod turn;
 mod work;
+#[cfg(test)]
+pub(crate) use work::needs_guest_packages_rebuild;
 pub(crate) mod work_tools;
 impl Conductor {
     /// 组合根专用：main 负责创建适配器并注入；conductor 不自建任何具体实现。

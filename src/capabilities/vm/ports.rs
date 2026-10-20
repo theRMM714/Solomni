@@ -3,7 +3,9 @@
 //! 不管：清单校验与冲突预检（domain/packages.rs）、镜像判定与挂载清单（domain/guest.rs）、引擎参数（detail/）。
 //! 联动：由 service.rs 持有（R12）；实现是 detail/fs_packages.rs、detail/qemu.rs 与 detail/share_*.rs。
 
-use crate::capabilities::vm::domain::guest::{GuestImage, GuestMount, GuestRun, GuestSpec};
+use crate::capabilities::vm::domain::guest::{
+    GuestAccess, GuestImage, GuestMount, GuestRun, GuestSpec,
+};
 use crate::capabilities::vm::domain::packages::Library;
 use crate::kernel::api::ToolOutcome;
 
@@ -98,6 +100,13 @@ pub trait GuestVm: Send {
 /// 目的：在 guest 里执行命令的通道（QGA / 自研 agent）。
 pub trait GuestChannel: Send {
     fn exec(&mut self, run: &GuestRun) -> ToolOutcome;
+    /// 目的：按 per-agent 允许集在 guest 里执行；通道不实现就 fail-closed（绝不静默按无围栏跑）。
+    fn exec_fenced(&mut self, _run: &GuestRun, _access: &GuestAccess) -> ToolOutcome {
+        ToolOutcome {
+            ok: false,
+            output: "这条 guest 命令通道没有实现 per-agent 围栏".to_string(),
+        }
+    }
     /// 目的：探一下 guest 里的命令通道是否已就绪（agent 已起）。默认：这条通道不知道，回 false。
     /// 约束：必须**有界**返回——不能在没有 agent 时干等（首启装 agent 期间要轮询它）。
     fn ping(&mut self) -> bool {

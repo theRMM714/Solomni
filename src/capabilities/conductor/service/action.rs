@@ -72,31 +72,32 @@ impl Conductor {
             Some(n) => self.unique_work_name(n, &derived),
             None => self.unique_work_name(&derived, "work"),
         };
-        // 档位：点名就用它；否则子会话沿用父会话，顶层用设置里的默认档。
-        let tier = match spec
-            .tier
-            .as_deref()
-            .map(str::trim)
-            .filter(|t| !t.is_empty())
-        {
-            Some(t) => Tier::parse(t)?,
-            None => match &parent {
-                Some(p) => self.history.meta(p)?.exec.tier,
+        // 环境属于主会话：有父就整段沿用父会话的 ExecSpec（档位 / 虚拟根 / 网络 / 定版），
+        // 不给子会话留任何单独覆盖的入口。顶层仍由人经呈现层给档位与虚拟根。
+        let parent_exec = match &parent {
+            Some(p) => Some(self.history.meta(p)?.exec),
+            None => None,
+        };
+        let tier = match &parent_exec {
+            Some(exec) => exec.tier,
+            None => match spec
+                .tier
+                .as_deref()
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+            {
+                Some(t) => Tier::parse(t)?,
                 None => self.registry.app_settings().tier,
             },
         };
-        // 虚拟根：点名就用它；否则子会话沿用父会话，顶层为空（建好后在会话配置里选）。
-        let vm_guest = match spec
-            .guest
-            .as_deref()
-            .map(str::trim)
-            .filter(|b| !b.is_empty())
-        {
-            Some(b) => Some(b.to_string()),
-            None => match &parent {
-                Some(p) => self.history.meta(p)?.exec.guest.clone(),
-                None => None,
-            },
+        let vm_guest = match &parent_exec {
+            Some(exec) => exec.guest.clone(),
+            None => spec
+                .guest
+                .as_deref()
+                .map(str::trim)
+                .filter(|b| !b.is_empty())
+                .map(|b| b.to_string()),
         };
         // 本次需求：协作必须有；单 agent 的"开头"由调用方在开工那一刻给（见 create_session_call）。
         let task = if mode == WorkMode::Collab {

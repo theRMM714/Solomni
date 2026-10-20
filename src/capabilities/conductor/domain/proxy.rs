@@ -413,12 +413,6 @@ pub struct CreateArgs {
     /// 目的：工作名（可省 = 由宿主派生）。
     #[serde(default)]
     pub name: Option<String>,
-    /// 目的：执行档位 host / vm（可省 = 由宿主按父会话或设置定）。
-    #[serde(default)]
-    pub tier: Option<String>,
-    /// 目的：虚拟机档的虚拟根名（可省 = 子会话沿用父会话，顶层为空、建好后在会话配置里选）。
-    #[serde(default)]
-    pub guest: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -497,16 +491,8 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
         .as_ref()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
-    let tier = args
-        .tier
-        .as_ref()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
-    let guest = args
-        .guest
-        .as_ref()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
+    // 环境参数只属于人经呈现层的主会话：核心代理建出的子会话整段继承父会话的环境，
+    // 这里不接受模型自选档位 / 虚拟根（父会话由机制填，子会话由 prepare_session 继承）。
     let agents = parse_agents(&args.agents)?;
     match mode {
         SessionMode::Single if agents.len() != 1 => {
@@ -589,8 +575,8 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
         task,
         request_id,
         name,
-        tier,
-        guest,
+        tier: None,
+        guest: None,
         parent: None,
     })
 }

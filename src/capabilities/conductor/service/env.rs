@@ -30,19 +30,12 @@ impl Conductor {
         } else {
             self.history.meta(&root)?
         };
-        // proxy：父会话没有 guest；它下面的**每个子工作**各自一台，子工作内部的子会话共用这一台。
+        // proxy：父会话没有 guest；整棵代理树的子工作共用顶层那一台（租约 = 代理根名）。
         if top.mode == "proxy" {
             if meta.parent.is_none() {
                 return Ok(None);
             }
-            let mut cur = meta.clone();
-            while let Some(p) = cur.parent.clone() {
-                if p == top.name {
-                    break;
-                }
-                cur = self.history.meta(&p)?;
-            }
-            return Ok(Some((cur.name.clone(), cur)));
+            return Ok(Some((top.name.clone(), top)));
         }
         // 单 agent / 协作：整棵树共用顶层工作那台 guest。
         Ok(Some((top.name.clone(), top)))
@@ -54,6 +47,65 @@ impl Conductor {
             .guest_scope(meta)?
             .map(|(lease, _)| lease)
             .unwrap_or_default())
+    }
+
+    /// 目的：一个 agent 的配置归属哪份名单：协作成员会话的名单在主会话，
+    ///   proxy 子工作（父是代理）或顶层会话自己就是名单所有者；嵌套协作继续向上找。
+    /// 约束：同一 agent 全树只有一份配置——子会话编辑写回这里，不留两份会漂的 meta。
+    pub(crate) fn config_owner_of(&self, meta: &SessionMeta) -> Result<SessionMeta, String> {
+        let mut owner = meta.clone();
+        while let Some(p) = owner.parent.clone() {
+            let pm = self.history.meta(&p)?;
+            if pm.mode == "collab" {
+                owner = pm;
+            } else {
+                break;
+            }
+        }
+        Ok(owner)
+    }
+
+    /// 目的：一台共享 guest 的**树级装配 meta**——把作用域根与其整棵子树的 agent 并成一份。
+    /// 约束：同一 agent 名只留一份（后代覆盖祖先，便于子会话编辑后按新值装配）；exec / 形态 / 工作名取作用域根。
+    ///   extra 用于"还没落盘"的待建子会话（建工作与改配的准备段要它）。
+    pub(crate) fn tree_meta(
+        &self,
+        root: &SessionMeta,
+        extra: Option<&SessionMeta>,
+    ) -> Result<SessionMeta, String> {
+        let extras: Vec<&SessionMeta> = extra.into_iter().collect();
+        self.tree_meta_with(root, &extras)
+    }
+
+    /// 目的：同上，但是可带多份尚未落盘的 meta（改配时主会话与子树的新值要一起参与装配）。
+    pub(crate) fn tree_meta_with(
+        &self,
+        root: &SessionMeta,
+        extra: &[&SessionMeta],
+    ) -> Result<SessionMeta, String> {
+        let mut agents: BTreeMap<String, crate::capabilities::session::api::AgentMeta> =
+            BTreeMap::new();
+        let mut push = |m: &SessionMeta| {
+            for a in &m.agents {
+                agents.insert(a.name.clone(), a.clone());
+            }
+        };
+        push(root);
+        for sid in self.subtree_of(&root.name) {
+            if sid == root.name {
+                continue;
+            }
+            if let Ok(m) = self.history.meta(&sid) {
+                push(&m);
+            }
+        }
+        for m in extra {
+            push(m);
+        }
+        let mut out = root.clone();
+        out.agents = agents.into_values().collect();
+        out.modules = out.agents.iter().flat_map(|a| a.modules.clone()).collect();
+        Ok(out)
     }
 
     /// 组装本次工作的沙箱清单：工作根来自 Workspace 端口，模块目录来自清单。

@@ -56,8 +56,8 @@ pub struct MemberTools {
     pub tools: Arc<dyn ToolExec + Send + Sync>,
     /// 目的：本会话的执行档位——工具执行者据此决定在本机跑还是送进 guest。
     pub tier: crate::kernel::api::Tier,
-    /// 目的：虚拟机档要用的 **guest 租约**（空 = 本机档 / 没有 guest）：共享 guest 时它是顶层工作名，
-    ///   proxy 子工作临时按自己的名字；主机围栏仍用 `fence.lease`（子会话名）。
+    /// 目的：虚拟机档要用的 **guest 租约**（空 = 本机档 / 没有 guest）：共享 guest 时它是作用域根工作名
+    ///   （proxy 树 = 代理根名）；主机围栏仍用 `fence.lease`（子会话名）。
     pub guest_lease: String,
     /// 目的：虚拟机档的 guest 用例面（**不持它的端口**，R12）：guest 执行走它。
     pub vm: Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync>,
@@ -115,7 +115,13 @@ impl MemberTools {
         let mut parts: Vec<String> = Vec::new();
         for id in ids {
             if let Some(schema) = self.builtin_tools.get(id) {
-                parts.push(format!("{}\n{}", id, schema.render_for_prompt()));
+                // 环境参数只属于人经呈现层：核心代理的 create_session 工具面不列 tier / guest。
+                let text = if self.role == "core_proxy" && id == "create_session" {
+                    schema.render_for_prompt_hiding(&["tier", "guest"])
+                } else {
+                    schema.render_for_prompt()
+                };
+                parts.push(format!("{}\n{}", id, text));
             }
         }
         // patch 是自由格式工具：它不在参数清单里，写法跟一段补丁正文（只有拿到它的席位才给）。

@@ -5,6 +5,7 @@
 
 pub mod copy;
 pub mod fs_packages;
+pub mod guest_helper;
 pub mod qemu;
 pub mod share_ninep;
 pub mod share_smb;

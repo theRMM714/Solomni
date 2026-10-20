@@ -4,7 +4,7 @@
 //! 联动：端口在 ports.rs；由组合根构造、service.rs 持有。
 
 use crate::capabilities::vm::domain::guest::{
-    GuestArch, GuestImage, GuestRun, GuestSpec, SeedDocs,
+    GuestAccess, GuestArch, GuestImage, GuestOs, GuestRun, GuestSpec, SeedDocs,
 };
 use crate::capabilities::vm::ports::{GuestChannel, GuestVm, SharePlan, VmEngine};
 use crate::kernel::api::ToolOutcome;
@@ -315,6 +315,13 @@ impl VmEngine for QemuEngine {
             if !out.ok {
                 handle.stop();
                 return Err(format!("把共享挂进 guest 失败：{}", out.output));
+            }
+        }
+        // 会话 guest 每次都是新的可写层：把 per-agent 围栏助手装进去；装不上这台 guest 就不能用。
+        if spec.isolated && spec.image.os == GuestOs::Linux {
+            if let Err(e) = super::guest_helper::install(&mut handle) {
+                handle.stop();
+                return Err(e);
             }
         }
         Ok(Box::new(handle))
@@ -643,13 +650,9 @@ impl QemuHandle {
     }
 }
 
-impl GuestChannel for QemuHandle {
-    /// 目的：QGA 就绪探测——同步握手能过一次就算通道已就绪（读超时保证有界）。
-    fn ping(&mut self) -> bool {
-        self.sync_or_heal().is_ok()
-    }
-
-    fn exec(&mut self, run: &GuestRun) -> ToolOutcome {
+impl QemuHandle {
+    /// 目的：一次 guest 执行；带 access 时经 guest 内助手按 per-agent 允许集执行，失败绝不回退到无围栏。
+    fn exec_run(&mut self, run: &GuestRun, access: Option<&GuestAccess>) -> ToolOutcome {
         if let Err(why) = self.sync_or_heal() {
             return fail(&why);
         }
@@ -658,21 +661,52 @@ impl GuestChannel for QemuHandle {
             .iter()
             .map(|(k, v)| serde_json::json!({"name":k,"value":v}))
             .collect();
-        let script = if run.cwd.is_empty() {
-            run.command.clone()
-        } else {
-            format!("cd {} && {}", run.cwd, run.command)
-        };
-        if let Err(why) = self.send(&serde_json::json!({
-            "execute":"guest-exec",
-            "arguments":{
-                "path":"/bin/sh",
-                "arg":["-c",script],
-                "input-data": b64(&run.args_json),
-                "capture-output":true,
-                "env":env,
+        let request = if let Some(access) = access {
+            let policy = serde_json::json!({
+                "script": run.command,
+                "cwd": run.cwd,
+                "rw": access.rw,
+                "ro": access.ro,
+                "ro_tree": access.ro_tree,
+                "private": access.private,
+                "net": access.net,
+            });
+            let n = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(1);
+            let path = format!("/tmp/solomni-fence-{}-{}.json", std::process::id(), n);
+            if let Err(why) = self.put_file(&path, policy.to_string().as_bytes()) {
+                return fail(&format!("把 per-agent 围栏写进 guest 失败：{}", why));
             }
-        })) {
+            serde_json::json!({
+                "execute":"guest-exec",
+                "arguments":{
+                    "path": super::guest_helper::HELPER_PATH,
+                    "arg":[path],
+                    "input-data": b64(&run.args_json),
+                    "capture-output":true,
+                    "env":env,
+                }
+            })
+        } else {
+            let script = if run.cwd.is_empty() {
+                run.command.clone()
+            } else {
+                format!("cd {} && {}", run.cwd, run.command)
+            };
+            serde_json::json!({
+                "execute":"guest-exec",
+                "arguments":{
+                    "path":"/bin/sh",
+                    "arg":["-c",script],
+                    "input-data": b64(&run.args_json),
+                    "capture-output":true,
+                    "env":env,
+                }
+            })
+        };
+        if let Err(why) = self.send(&request) {
             return fail(&why);
         }
         let pid = match self.recv() {
@@ -722,6 +756,21 @@ impl GuestChannel for QemuHandle {
             }
             std::thread::sleep(Duration::from_millis(20));
         }
+    }
+}
+
+impl GuestChannel for QemuHandle {
+    /// 目的：QGA 就绪探测——同步握手能过一次就算通道已就绪（读超时保证有界）。
+    fn ping(&mut self) -> bool {
+        self.sync_or_heal().is_ok()
+    }
+
+    fn exec(&mut self, run: &GuestRun) -> ToolOutcome {
+        self.exec_run(run, None)
+    }
+
+    fn exec_fenced(&mut self, run: &GuestRun, access: &GuestAccess) -> ToolOutcome {
+        self.exec_run(run, Some(access))
     }
 
     /// 目的：把字节分块写进 guest 文件（QGA guest-file-write，base64）。

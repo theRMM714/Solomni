@@ -1340,3 +1340,38 @@ pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
 }
+
+/// 目的：核心代理建子会话时不能自选环境：给了 tier / guest 也整段继承主会话。
+#[test]
+pub(crate) fn ai_created_child_inherits_the_proxy_environment() {
+    let (handle, ops) = super::super::ops_with(vec![module_of("m1")], vec![]);
+    let proxy = handle
+        .call(|core| core.create_proxy("p-env", 1))
+        .expect("建代理");
+    let child = handle
+        .call({
+            let proxy = proxy.clone();
+            move |core| {
+                let spec = d::NewSession {
+                    mode: d::SessionMode::Single,
+                    agents: vec![d::NewAgent {
+                        name: "a".to_string(),
+                        transient: true,
+                        modules: vec!["m1".to_string()],
+                        model: None,
+                    }],
+                    task: "做事".to_string(),
+                    request_id: "r-env".to_string(),
+                    name: None,
+                    tier: Some("vm".to_string()),
+                    guest: Some("nope".to_string()),
+                    parent: Some(proxy),
+                };
+                Ok(core.create_session(&spec)?.0.session)
+            }
+        })
+        .expect("建子会话");
+    let (meta, _) = ops.history.open(&child).expect("子会话落盘");
+    assert_eq!(meta.exec.tier, Tier::Host, "子会话环境随代理主会话");
+    assert_eq!(meta.exec.guest, None, "AI 不能给子会话选虚拟根");
+}

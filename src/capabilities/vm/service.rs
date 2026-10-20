@@ -18,6 +18,8 @@ struct Lease {
     share: Arc<dyn ShareBackend + Send + Sync>,
     guard: Box<dyn ShareGuard>,
     mounts: Vec<GuestMount>,
+    /// 启动时实际装载的运行包（id@version）：新子会话据此判断要不要重建。
+    packages: Vec<String>,
     /// 这份 guest 是什么 OS：命令路径按它译成 guest 拼法。
     os: GuestOs,
 }
@@ -56,6 +58,47 @@ impl VmService {
         want.iter()
             .filter_map(|id| self.shares.iter().find(|s| s.id() == *id).cloned())
             .collect()
+    }
+}
+
+impl VmService {
+    /// 目的：一次 guest 执行（可带 per-agent 围栏）——共享同步与命令通道在同一把租约锁下。
+    fn run_guest(
+        &self,
+        lease: &str,
+        run: &GuestRun,
+        fence: Option<&crate::kernel::api::FenceSpec>,
+    ) -> ToolOutcome {
+        let entry = match self.guests.lock() {
+            Ok(guests) => guests.get(lease).cloned(),
+            Err(_) => return fail("guest 表锁坏了"),
+        };
+        let Some(entry) = entry else {
+            return fail(&format!("这次会话没有活着的 guest（租约 {}）", lease));
+        };
+        // 全局表锁只用来取 entry；执行在该租约自己的锁下跑——跨租约因此真并行（同一租约仍串行）。
+        let mut held = entry.lock().unwrap_or_else(|e| e.into_inner());
+        let held = &mut *held;
+        let translated =
+            crate::capabilities::vm::domain::guest::translate_run(run, held.os, &held.mounts);
+        if let Err(why) = held.share.sync_in(held.vm.channel(), &held.mounts) {
+            return fail(&format!("共享同步（进去）失败：{}", why));
+        }
+        let out = match fence {
+            Some(fence) => {
+                let access = crate::capabilities::vm::domain::guest::GuestAccess::from_fence(
+                    fence,
+                    held.os,
+                    &held.mounts,
+                );
+                held.vm.channel().exec_fenced(&translated, &access)
+            }
+            None => held.vm.channel().exec(&translated),
+        };
+        if let Err(why) = held.share.sync_out(held.vm.channel(), &held.mounts) {
+            return fail(&format!("共享同步（回来）失败：{}", why));
+        }
+        out
     }
 }
 
@@ -104,6 +147,7 @@ impl Vm for VmService {
             share,
             guard,
             mounts: spec.mounts.clone(),
+            packages: Vec::new(),
             os: spec.image.os,
         }));
         let previous = self
@@ -119,26 +163,30 @@ impl Vm for VmService {
     }
 
     fn guest_run(&self, lease: &str, run: &GuestRun) -> ToolOutcome {
-        let entry = match self.guests.lock() {
-            Ok(guests) => guests.get(lease).cloned(),
-            Err(_) => return fail("guest 表锁坏了"),
+        self.run_guest(lease, run, None)
+    }
+
+    fn guest_run_fenced(
+        &self,
+        lease: &str,
+        run: &GuestRun,
+        fence: &crate::kernel::api::FenceSpec,
+    ) -> ToolOutcome {
+        self.run_guest(lease, run, Some(fence))
+    }
+
+    fn guest_packages(&self, lease: &str) -> Option<Vec<String>> {
+        let entry = self.guests.lock().ok()?.get(lease).cloned()?;
+        let held = entry.lock().unwrap_or_else(|e| e.into_inner());
+        Some(held.packages.clone())
+    }
+
+    fn guest_set_packages(&self, lease: &str, packages: Vec<String>) {
+        let Some(entry) = self.guests.lock().ok().and_then(|g| g.get(lease).cloned()) else {
+            return;
         };
-        let Some(entry) = entry else {
-            return fail(&format!("这次会话没有活着的 guest（租约 {}）", lease));
-        };
-        // 全局表锁只用来取 entry；执行在该租约自己的锁下跑——跨租约因此真并行（同一租约仍串行）。
         let mut held = entry.lock().unwrap_or_else(|e| e.into_inner());
-        let held = &mut *held;
-        let translated =
-            crate::capabilities::vm::domain::guest::translate_run(run, held.os, &held.mounts);
-        if let Err(why) = held.share.sync_in(held.vm.channel(), &held.mounts) {
-            return fail(&format!("共享同步（进去）失败：{}", why));
-        }
-        let out = held.vm.channel().exec(&translated);
-        if let Err(why) = held.share.sync_out(held.vm.channel(), &held.mounts) {
-            return fail(&format!("共享同步（回来）失败：{}", why));
-        }
-        out
+        held.packages = packages;
     }
 
     fn guest_wait_agent(&self, lease: &str, timeout: std::time::Duration) -> bool {

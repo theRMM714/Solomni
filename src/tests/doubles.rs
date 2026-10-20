@@ -2055,6 +2055,24 @@ impl crate::capabilities::vm::ports::GuestChannel for FakeChannel {
             output: "fake-guest".to_string(),
         }
     }
+
+    fn exec_fenced(
+        &mut self,
+        _run: &crate::capabilities::vm::domain::guest::GuestRun,
+        access: &crate::capabilities::vm::domain::guest::GuestAccess,
+    ) -> crate::kernel::api::ToolOutcome {
+        self.calls.lock().expect("锁").push(format!(
+            "fenced:{}:{}:{}:{}",
+            self.lease,
+            access.agent,
+            access.cwd,
+            access.rw.join(",")
+        ));
+        crate::kernel::api::ToolOutcome {
+            ok: true,
+            output: "fake-guest".to_string(),
+        }
+    }
 }
 
 impl crate::capabilities::vm::ports::GuestVm for FakeVm {
@@ -2076,6 +2094,8 @@ pub(crate) struct RecordingVm {
     pub runs: Mutex<Vec<String>>,
     /// 目的：已拉起的租约（`guest_leases` 的事实来源；`guest_start` 记、`guest_stop` 删）。
     pub leases: Mutex<Vec<String>>,
+    /// 目的：每个租约启动时装载的运行包（判定新子会话要不要重建）。
+    pub packages: Mutex<std::collections::BTreeMap<String, Vec<String>>>,
 }
 
 impl crate::capabilities::vm::api::Vm for RecordingVm {
@@ -2107,12 +2127,40 @@ impl crate::capabilities::vm::api::Vm for RecordingVm {
         }
     }
 
+    fn guest_run_fenced(
+        &self,
+        _lease: &str,
+        run: &crate::capabilities::vm::domain::guest::GuestRun,
+        _fence: &crate::kernel::api::FenceSpec,
+    ) -> crate::kernel::api::ToolOutcome {
+        self.runs
+            .lock()
+            .expect("锁")
+            .push(format!("fenced:{}", run.command));
+        crate::kernel::api::ToolOutcome {
+            ok: true,
+            output: "guest".to_string(),
+        }
+    }
+
+    fn guest_packages(&self, lease: &str) -> Option<Vec<String>> {
+        self.packages.lock().expect("锁").get(lease).cloned()
+    }
+
+    fn guest_set_packages(&self, lease: &str, packages: Vec<String>) {
+        self.packages
+            .lock()
+            .expect("锁")
+            .insert(lease.to_string(), packages);
+    }
+
     fn guest_wait_agent(&self, _lease: &str, _timeout: std::time::Duration) -> bool {
         true
     }
 
     fn guest_stop(&self, lease: &str) {
         self.leases.lock().expect("锁").retain(|l| l != lease);
+        self.packages.lock().expect("锁").remove(lease);
     }
 
     fn guest_leases(&self) -> Vec<String> {

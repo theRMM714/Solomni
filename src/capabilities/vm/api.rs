@@ -28,6 +28,17 @@ pub trait Vm: Send + Sync {
     fn guest_start(&self, spec: &GuestSpec) -> Result<(), String>;
     /// 在该租约的 guest 里跑一次工具（没有这个 guest = 如实失败）。
     fn guest_run(&self, lease: &str, run: &GuestRun) -> crate::kernel::api::ToolOutcome;
+    /// 目的：按某个 agent 的围栏在 guest 里跑一次工具；通道不支持围栏就如实失败。
+    fn guest_run_fenced(
+        &self,
+        lease: &str,
+        run: &GuestRun,
+        fence: &crate::kernel::api::FenceSpec,
+    ) -> crate::kernel::api::ToolOutcome;
+    /// 目的：这台 guest 启动时装载的运行包（id@version，排序去重）；没有活 guest = None。
+    fn guest_packages(&self, lease: &str) -> Option<Vec<String>>;
+    /// 目的：把本次启动实际装载的运行包记进租约（供"新子会话要不要重建"判断）。
+    fn guest_set_packages(&self, lease: &str, packages: Vec<String>);
     /// 目的：等 guest 的命令通道就绪（首启装 agent 期间轮询它）。
     /// 返回：到期限仍不通给 false；租约不在场也给 false。
     /// 约束：必须**有界**返回，不能在没有 agent 时干等。

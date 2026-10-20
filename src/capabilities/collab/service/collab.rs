@@ -151,7 +151,7 @@ pub struct CollabSession {
     /// 本会话的执行选型（档位 + 运行包定版）。
     pub(crate) spec: ExecSpec,
     /// 目的：这棵会话树的 **guest 租约**（空 = 本机档）：顶层协作会话用自己的名字，
-    ///   proxy 子工作临时用自己的名字；成员回合的工具环境按它送进 guest。
+    ///   proxy 子树用代理根名；成员回合的工具环境按它送进 guest。
     pub(crate) guest_lease: String,
     /// 本工作的沙箱清单（按 agent 实例名取）。
     pub(crate) sandboxes: Sandboxes,

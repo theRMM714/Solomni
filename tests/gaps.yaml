@@ -73,21 +73,3 @@
     未覆盖的生产路径逐条有补测或缺口结论。
   blocked_by: 缺少观察面（子进程插桩与合并尚未实现）
 
-- id: vm.shared-guest-isolation-and-dynamic-mounts
-  scope: global
-  level: T3
-  why: |
-    虚拟机档按"一个主会话树一台 guest"共享 guest。共享要求 guest 内按 agent 隔离，
-    并允许子会话的沙箱/模块/运行包加入同一台 guest。当前 host 围栏不进入 guest：
-    GuestRun 没有 agent 身份，QGA 以 guest 身份执行 /bin/sh，guest 内所有挂载对每个 agent 可见；
-    GuestSpec.mounts 在启动时固定，proxy 运行时创建的子工作沙箱与运行包无法加入已启动的主 guest
-    （当前临时给每个 proxy 子工作一台 guest）。
-  how: |
-    1) 把 FenceSpec 翻成 guest 路径与允许集，GuestRun 带 agent 身份；guest 内用 Landlock / mount namespace（Linux）
-       与 ACL / AppContainer（Windows）强制，helper 进镜像，失败 fail-closed；
-    2) 主 guest 采用稳定挂载根（或等价机制）让新子会话沙箱/模块按状态加入；proxy 不再需要独立 guest；
-    3) 真机/契约用例：agent A 在 guest 内读/写不到 B 的沙箱；proxy 子会话加入主 guest 后工具可用。
-  accept: |
-    guest 内 per-agent 隔离可验证；proxy 子会话按状态加入主 guest，模块工具可用；
-    无静默降级；文档承诺与实现一致。
-  blocked_by: 缺少实现

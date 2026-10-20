@@ -2216,6 +2216,10 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
     let share = crate::tests::scratch("vm-live-share");
     std::fs::create_dir_all(&share).expect("建共享目录");
     std::fs::write(share.join("marker.txt"), "SHARE_MARKER").expect("写标记");
+    std::fs::create_dir_all(share.join("a")).expect("建 A 沙箱");
+    std::fs::write(share.join("a").join("ok.txt"), "A_OK").expect("写 A 文件");
+    std::fs::create_dir_all(share.join("b")).expect("建 B 沙箱");
+    std::fs::write(share.join("b").join("secret.txt"), "B_SECRET").expect("写 B 文件");
     let guest_dir = "/solomni-vm-live-share";
     // 会话走**每租约可写层**（与产品同一条路）：基础镜像只读，可写层落在临时目录、随 guest 一起删。
     let overlay_dir = crate::tests::scratch("vm-live-overlays");
@@ -2296,6 +2300,39 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
         cwd: String::new(),
     };
     let out = guest.channel().exec(&run);
+    // per-agent 围栏：A 只拿到自己的沙箱，B 的沙箱必须被 guest 内 helper 拒绝。
+    let access = crate::capabilities::vm::domain::guest::GuestAccess {
+        agent: "a".to_string(),
+        rw: vec![format!("{guest_dir}/a")],
+        ro: Vec::new(),
+        ro_tree: Vec::new(),
+        private: format!("{guest_dir}/a"),
+        cwd: format!("{guest_dir}/a"),
+        net: false,
+    };
+    let fenced = guest.channel().exec_fenced(
+        &GuestRun {
+            command: format!(
+                "cat {guest_dir}/a/ok.txt; echo '---'; cat {guest_dir}/b/secret.txt",
+                guest_dir = guest_dir
+            ),
+            args_json: "{}".to_string(),
+            env: Vec::new(),
+            cwd: String::new(),
+        },
+        &access,
+    );
+    assert!(
+        !fenced.ok,
+        "读 B 的沙箱必须被拒绝（能看到就说明围栏没生效）：{}",
+        fenced.output
+    );
+    assert!(fenced.output.contains("A_OK"), "{}", fenced.output);
+    assert!(
+        fenced.output.contains("Permission denied") || fenced.output.contains("权限"),
+        "B 的沙箱要被 Landlock 拒绝：{}",
+        fenced.output
+    );
     if use_copy && out.ok {
         // 复制的语义：执行后整棵回拷，宿主才看得到 guest 的写。
         backend
@@ -2613,4 +2650,229 @@ pub(crate) fn path_bridge_round_trips_guest_and_host() {
             "宿主写法直通"
         );
     }
+}
+
+/// 目的：per-agent 允许集按挂载表翻成 guest 写法（跨方言也一样）。
+#[test]
+pub(crate) fn guest_access_translates_the_fence_into_guest_paths() {
+    use crate::capabilities::vm::domain::guest::{GuestAccess, GuestMount};
+    use crate::kernel::api::FenceSpec;
+    let mounts = vec![
+        GuestMount {
+            host: std::path::PathBuf::from("/work"),
+            guest: "/guest/work".to_string(),
+            read_only: false,
+        },
+        GuestMount {
+            host: std::path::PathBuf::from("/mods"),
+            guest: "/guest/mods".to_string(),
+            read_only: true,
+        },
+    ];
+    let fence = FenceSpec {
+        agent: "a".to_string(),
+        lease: "w--a".to_string(),
+        rw: vec![std::path::PathBuf::from("/work/a")],
+        ro: vec![std::path::PathBuf::from("/work/ro")],
+        ro_tree: vec![std::path::PathBuf::from("/mods/m1")],
+        private: std::path::PathBuf::from("/work/a"),
+        cwd: std::path::PathBuf::from("/mods/m1"),
+        net: false,
+    };
+    let access = GuestAccess::from_fence(
+        &fence,
+        crate::capabilities::vm::domain::guest::GuestOs::Linux,
+        &mounts,
+    );
+    assert_eq!(access.agent, "a");
+    assert_eq!(access.rw, vec!["/guest/work/a".to_string()]);
+    assert_eq!(access.ro, vec!["/guest/work/ro".to_string()]);
+    assert_eq!(access.ro_tree, vec!["/guest/mods/m1".to_string()]);
+    assert_eq!(access.cwd, "/guest/mods/m1");
+}
+
+/// 目的：guest 通道没有实现围栏时，必须 fail-closed，不能悄悄按无围栏执行。
+#[test]
+pub(crate) fn a_channel_without_fencing_refuses_fenced_runs() {
+    use crate::capabilities::vm::domain::guest::{GuestAccess, GuestRun};
+    use crate::capabilities::vm::ports::GuestChannel;
+    struct Bare;
+    impl GuestChannel for Bare {
+        fn exec(&mut self, _run: &GuestRun) -> crate::kernel::api::ToolOutcome {
+            crate::kernel::api::ToolOutcome {
+                ok: true,
+                output: "bare".to_string(),
+            }
+        }
+    }
+    let access = GuestAccess {
+        agent: "a".to_string(),
+        rw: Vec::new(),
+        ro: Vec::new(),
+        ro_tree: Vec::new(),
+        private: String::new(),
+        cwd: String::new(),
+        net: false,
+    };
+    let run = GuestRun {
+        command: "true".to_string(),
+        args_json: "{}".to_string(),
+        env: Vec::new(),
+        cwd: String::new(),
+    };
+    let out = Bare.exec_fenced(&run, &access);
+    assert!(!out.ok, "没实现围栏必须失败");
+    assert!(out.output.contains("围栏"), "{}", out.output);
+}
+
+/// 目的：助手脚本必须真的走 Landlock + no_new_privs，并把私有沙箱设成 HOME/TMP。
+#[test]
+pub(crate) fn guest_helper_is_a_fail_closed_landlock_launcher() {
+    let script = crate::capabilities::vm::detail::guest_helper::HELPER_SCRIPT;
+    assert!(script.contains("landlock_create_ruleset"), "{}", script);
+    assert!(script.contains("landlock_restrict_self"), "{}", script);
+    assert!(
+        script.contains("PR_SET_NO_NEW_PRIVS") || script.contains("prctl(38"),
+        "{}",
+        script
+    );
+    assert!(script.contains("TMPDIR"), "{}", script);
+    assert!(
+        crate::capabilities::vm::detail::guest_helper::HELPER_PATH.contains("solomni-guest-fence"),
+        "助手路径要稳定"
+    );
+}
+
+/// 目的：VmService 的围栏执行要把 agent 与 guest 路径交给通道，并记录启动时装载的运行包。
+#[test]
+pub(crate) fn vm_service_runs_fenced_and_records_packages() {
+    use crate::capabilities::vm::domain::guest::{GuestMount, GuestSpec};
+    use crate::capabilities::vm::service::VmService;
+    use crate::kernel::api::FenceSpec;
+    use std::sync::Arc;
+    let engine = Arc::new(crate::tests::doubles::FakeEngine::new());
+    let share = Arc::new(crate::tests::doubles::NamedShare::new("copy", true));
+    let svc = VmService::new(
+        Arc::new(InMemoryPackages::empty()),
+        engine.clone(),
+        vec![share],
+    );
+    let spec = GuestSpec {
+        lease: "w".to_string(),
+        image: GuestImage::linux(
+            "test",
+            std::path::PathBuf::from("/base/rootfs.ext4"),
+            None,
+            None,
+        ),
+        mounts: vec![GuestMount {
+            host: std::path::PathBuf::from("/work"),
+            guest: "/guest/work".to_string(),
+            read_only: false,
+        }],
+        net: false,
+        engine_path: None,
+        share_path: None,
+        shares: Vec::new(),
+        seed: None,
+        isolated: false,
+    };
+    svc.guest_start(&spec).expect("起替身 guest");
+    svc.guest_set_packages("w", vec!["python@3.12".to_string()]);
+    assert_eq!(
+        svc.guest_packages("w"),
+        Some(vec!["python@3.12".to_string()])
+    );
+    let fence = FenceSpec {
+        agent: "a".to_string(),
+        lease: "w--a".to_string(),
+        rw: vec![std::path::PathBuf::from("/work/a")],
+        ro: Vec::new(),
+        ro_tree: Vec::new(),
+        private: std::path::PathBuf::from("/work/a"),
+        cwd: std::path::PathBuf::from("/work/a"),
+        net: false,
+    };
+    let out = svc.guest_run_fenced(
+        "w",
+        &GuestRun {
+            command: "echo hi".to_string(),
+            args_json: "{}".to_string(),
+            env: Vec::new(),
+            cwd: "/work/a".to_string(),
+        },
+        &fence,
+    );
+    assert!(out.ok, "{}", out.output);
+    let calls = engine.calls.lock().expect("锁").clone();
+    assert!(
+        calls.iter().any(|c| c.contains("fenced:w:a:/guest/work/a")),
+        "围栏执行要带 agent 与 guest 路径：{:?}",
+        calls
+    );
+}
+
+/// 目的：共享 guest 只挂工作树与模块根两个稳定根，新 agent/模块按状态出现，而不是启动时逐项枚举。
+#[test]
+pub(crate) fn stable_roots_cover_the_work_tree_and_module_tree() {
+    use crate::capabilities::workspace::api::{Sandbox, Sandboxes};
+    use std::collections::BTreeMap;
+    let sb = |agent: &str, module: &str| Sandbox {
+        work_name: "w".to_string(),
+        session: "w".to_string(),
+        agent: agent.to_string(),
+        shared_writable: false,
+        shared: std::path::PathBuf::from("/session/w/work"),
+        private: std::path::PathBuf::from("/session/w").join(agent),
+        modules: BTreeMap::from([(
+            module.to_string(),
+            std::path::PathBuf::from("/modules").join(module),
+        )]),
+        modules_with_userdata: Default::default(),
+        permissions: Default::default(),
+        path_codec: None,
+    };
+    let sandboxes = Sandboxes {
+        shared: std::path::PathBuf::from("/session/w/work"),
+        list: vec![sb("a", "m1"), sb("b", "m2")],
+        codec: None,
+    };
+    let (rw, ro_tree) =
+        crate::capabilities::conductor::service::guest_job::stable_roots(&sandboxes);
+    assert!(
+        rw.contains(&std::path::PathBuf::from("/session/w")),
+        "工作树根要整棵挂：{:?}",
+        rw
+    );
+    assert!(
+        rw.contains(&std::path::PathBuf::from("/modules")),
+        "模块树根要整棵挂：{:?}",
+        rw
+    );
+    assert!(
+        !rw.iter().any(|p| p.ends_with("a") || p.ends_with("b")),
+        "不再逐 agent 枚举：{:?}",
+        rw
+    );
+    assert!(ro_tree.is_empty(), "模块 userdata 要可写，稳定根进 rw");
+}
+
+/// 目的：新子会话只在活 guest 缺包时才重建；包已覆盖就直接加入，不做运行包动态加载。
+#[test]
+pub(crate) fn package_rebuild_only_happens_when_the_running_guest_is_missing_one() {
+    use crate::capabilities::conductor::service::needs_guest_packages_rebuild;
+    let want = vec!["python@3.12".to_string()];
+    assert!(!needs_guest_packages_rebuild(false, &want, None));
+    assert!(!needs_guest_packages_rebuild(
+        true,
+        &want,
+        Some(&["python@3.12".to_string()])
+    ));
+    assert!(needs_guest_packages_rebuild(
+        true,
+        &want,
+        Some(&["node@22".to_string()])
+    ));
+    assert!(!needs_guest_packages_rebuild(true, &[], Some(&[])));
+    assert!(needs_guest_packages_rebuild(true, &want, None));
 }

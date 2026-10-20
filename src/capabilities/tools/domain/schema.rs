@@ -51,11 +51,19 @@ pub type ToolBook = BTreeMap<String, ToolSchema>;
 impl ToolSchema {
     /// 模型侧的参数说明：每个参数一行，带类型、必填/缺省与说明。
     pub fn render_for_prompt(&self) -> String {
+        self.render_for_prompt_hiding(&[])
+    }
+
+    /// 目的：按调用者裁剪版——hide 里的参数名不发给这一席（校验仍按完整声明走）。
+    pub fn render_for_prompt_hiding(&self, hide: &[&str]) -> String {
         let mut lines: Vec<String> = Vec::new();
         if !self.desc.trim().is_empty() {
             lines.push(self.desc.trim().to_string());
         }
         for (name, p) in self.params.iter().flatten() {
+            if hide.iter().any(|h| h == name) {
+                continue;
+            }
             let mut marks: Vec<String> = vec![p.ty.name().to_string()];
             if p.required {
                 marks.push("必填".to_string());
@@ -467,6 +475,10 @@ params:
         );
         assert_eq!(js["required"], serde_json::json!(["path"]));
         assert_eq!(js["additionalProperties"], serde_json::json!(false));
+
+        let hidden = s.render_for_prompt_hiding(&["path"]);
+        assert!(!hidden.contains("- path"), "裁掉的参数不发：{}", hidden);
+        assert!(hidden.contains("- offset"), "其余参数照发：{}", hidden);
     }
 
     #[test]

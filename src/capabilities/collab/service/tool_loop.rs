@@ -482,7 +482,7 @@ pub(crate) fn dispatch_external(
                 }
                 (
                     module,
-                    ctx.vm.guest_run(
+                    ctx.vm.guest_run_fenced(
                         &ctx.guest_lease,
                         &crate::capabilities::vm::api::GuestRun {
                             command: command.to_string(),
@@ -490,6 +490,7 @@ pub(crate) fn dispatch_external(
                             env: env.to_vec(),
                             cwd: mt.root.display().to_string(),
                         },
+                        &ctx.fence.at(&mt.root),
                     ),
                 )
             } else {

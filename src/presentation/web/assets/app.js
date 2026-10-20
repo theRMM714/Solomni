@@ -330,14 +330,13 @@ function renderHistory() {
     open.onclick = (e) => { e.stopPropagation(); openHistory(h.name); };
 
     const edit = btn('编辑', 'hbtn');
-    if (h.parent) {
-      edit.disabled = true;
-      edit.title = '子会话的配置随主会话（共享 guest 的编辑待后续安排）';
-    } else if (generating(h.name)) {
+    if (generating(h.name)) {
       edit.disabled = true;
       edit.title = '该会话正在生成中：先「停止」或等它结束，再改配置';
     } else {
-      edit.title = '打开配置面板（在进入会话视图之前改名单 / 模块 / 模型 / 档位）';
+      edit.title = h.parent
+        ? '打开配置面板：环境随主会话（档位 / 虚拟根不可改），模块 / 模型 / 权限可改'
+        : '打开配置面板（在进入会话视图之前改名单 / 模块 / 模型 / 档位）';
       edit.onclick = (e) => { e.stopPropagation(); openConfig(h.name); };
     }
     acts.appendChild(open); acts.appendChild(edit);

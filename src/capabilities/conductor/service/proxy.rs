@@ -507,7 +507,7 @@ impl Conductor {
     /// 测试便捷入口：只要引用（产品入口经 `create_work(WorkMode::Proxy)`）。
     #[cfg(test)]
     pub fn create_proxy(&mut self, name: &str, granted_at: i64) -> Result<String, String> {
-        self.create_proxy_with_facts(name, granted_at, crate::kernel::api::Tier::Host)
+        self.create_proxy_with_facts(name, granted_at, crate::kernel::api::Tier::Host, None)
             .map(|(sid, _)| sid)
     }
 
@@ -520,6 +520,7 @@ impl Conductor {
         name: &str,
         granted_at: i64,
         tier: crate::kernel::api::Tier,
+        guest: Option<&str>,
     ) -> Result<(String, Vec<SessionEvent>), String> {
         validate_work_name(name)?;
         if self.sessions.contains_key(name) || self.history.load(name).is_ok() {
@@ -527,6 +528,9 @@ impl Conductor {
         }
         let exec = ExecSpec {
             tier,
+            guest: guest
+                .map(|g| g.trim().to_string())
+                .filter(|g| !g.is_empty()),
             ..ExecSpec::default()
         };
         // 与其余形态同一把尺子：虚拟机档的承载不成立就不建（用户环境问题，不是选型问题）。

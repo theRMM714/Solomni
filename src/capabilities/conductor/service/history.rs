@@ -121,7 +121,7 @@ impl Conductor {
             }
         }
         // 虚拟机档的租约交给调用方销毁（guest 关机要等它落盘，别占核心线程）。
-        // 共享 guest：按工作根去重（协作子会话与父会话共用一台）；proxy 子工作各自一台。
+        // 共享 guest：按作用域租约去重（协作子会话 / proxy 子树共用一台）。
         let mut guest_leases: Vec<String> = Vec::new();
         for sid in &subtree {
             let Ok(meta) = self.history.meta(sid) else {
