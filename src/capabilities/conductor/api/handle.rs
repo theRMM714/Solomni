@@ -36,6 +36,7 @@ impl ConductorHandle {
             residents,
             secrets,
             modules,
+            booting: Arc::new(std::sync::Mutex::new(std::collections::BTreeSet::new())),
         };
         // 注意：工作线程**绝不能**捕获取手柄（那会持有一个 Sender，通道永不闭合、线程永不退出）。
         std::thread::Builder::new()
@@ -238,6 +239,74 @@ impl ConductorHandle {
         self.call(|_core| -> Result<(), String> { panic!("入站契约测试注入的 panic") })
     }
 
+    /// 目的：串行同一台 guest 的启动；离开作用域自动摘掉标记（即便启动失败/ panic）。
+    fn run_guest_boot(
+        &self,
+        boot: crate::capabilities::conductor::service::guest_job::GuestBoot,
+    ) -> Result<(), String> {
+        struct Slot<'a> {
+            set: &'a std::sync::Mutex<std::collections::BTreeSet<String>>,
+            lease: String,
+        }
+        impl Drop for Slot<'_> {
+            fn drop(&mut self) {
+                if let Ok(mut set) = self.set.lock() {
+                    set.remove(&self.lease);
+                }
+            }
+        }
+        let lease = boot.lease().to_string();
+        {
+            let mut set = self
+                .booting
+                .lock()
+                .map_err(|_| "guest 启动锁坏了".to_string())?;
+            if !set.insert(lease.clone()) {
+                return Err(format!("guest 正在启动（租约 {}）：稍后再试", lease));
+            }
+        }
+        let _slot = Slot {
+            set: &self.booting,
+            lease,
+        };
+        boot.run()
+    }
+
+    /// 目的：确保这条会话的 guest 已经起来（启用 / 发言 / 成员回合 / 节点共用的兜底）。
+    /// 约束：只准备与启动，不改会话运行态；已有活 guest 或本机档 = 什么都不做。
+    pub(crate) fn ensure_guest(&self, sid: &str) -> Result<(), String> {
+        let sid = sid.to_string();
+        let boot = self.call(move |core| core.prepare_guest_boot(&sid))?;
+        if let Some(boot) = boot {
+            self.run_guest_boot(boot)?;
+        }
+        Ok(())
+    }
+
+    /// 目的：启用一条历史会话（只恢复，不生成）：重建、确保 guest、解冻整棵子树。
+    pub(crate) fn activate_session(&self, sid: &str) -> Result<SessionView, String> {
+        let sid = sid.to_string();
+        let prepared = self.call(move |core| core.prepare_activation(&sid))?;
+        let prepared = match prepared {
+            crate::capabilities::conductor::service::PreparedActivation::Ready {
+                sid,
+                boot,
+                lease,
+            } => {
+                if let Some(boot) = boot {
+                    self.run_guest_boot(boot)?;
+                }
+                crate::capabilities::conductor::service::PreparedActivation::Ready {
+                    sid,
+                    boot: None,
+                    lease,
+                }
+            }
+            other => other,
+        };
+        self.call(move |core| core.commit_activation(prepared))
+    }
+
     /// 单 agent 生成：**核心队列只占两步短命令**（取出会话 / 交回会话），生成本身在工作线程上跑。
     /// 为什么必须这样：生成要跑几十秒到几分钟，它若占着唯一的命令队列，
     /// 读接口（历史列表 / 状态）与其它会话的命令全排在它后面——界面因此"假死"。
@@ -248,6 +317,8 @@ impl ConductorHandle {
         text: Option<String>,
         out: Output,
     ) -> Result<Advance, String> {
+        // 虚拟机档：生成前确保这棵树（或 proxy 子工作）的 guest 已经起来；本机档/已有活 guest = no-op。
+        self.ensure_guest(sid)?;
         // ① 短命令：检查 + 把会话取出来 + 定下本次调用参数（都在核心线程上，毫秒级）。
         let prepared = self.call({
             let sid = sid.to_string();
@@ -260,6 +331,7 @@ impl ConductorHandle {
     /// 一个节点的执行回合：**核心把任务提示词作为系统消息注入**（不是用户发言），再生成。
     /// 与 CLI 的 `Conductor::drive_node` 同一条语义——各前端只做各自的界面，管道只有这一条。
     pub(crate) fn node_generation(&self, child: &str, objective: &str) -> Result<Advance, String> {
+        self.ensure_guest(child)?;
         let prepared = self.call({
             let (child, objective) = (child.to_string(), objective.to_string());
             move |core| core.prepare_node(&child, &objective)
@@ -444,6 +516,7 @@ impl ConductorHandle {
                 Ok(())
             })?;
         }
+        self.ensure_guest(&child)?;
         let session = self.call({
             let name = child.clone();
             move |core| core.take_single(&name)
@@ -801,6 +874,8 @@ impl ConductorHandle {
     /// 成员回合由主线程取该 agent 的会话去跑（它才拿得到那些会话）。所以泵线程与主线程**握手**：
     /// 泵让出 → 发 AskReq → 主线程跑完回 MemberTurn → 泵继续。
     pub(crate) fn collab_generation(&self, sid: &str, work: CollabWork) -> Result<Advance, String> {
+        // 协作泵启动前确保这棵树的 guest 已起（代拟名单确认后第一次生成也走这里）。
+        self.ensure_guest(sid)?;
         let bus = Arc::clone(&self.bus);
         let jobs = Arc::clone(&self.jobs);
         // **先登记再取会话**：登记早于派发，所以「停止」从派发那一刻起就能生效。

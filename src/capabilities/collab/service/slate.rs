@@ -234,6 +234,7 @@ impl CollabSession {
         meta: &SessionMeta,
         events: &[serde_json::Value],
         sandboxes: Sandboxes,
+        guest_lease: String,
         // 本会话的裁决队（核心按会话 id 与转录里已发出的卡号给）：重建出来的整队进它。
         door: Arc<DecisionDoor>,
     ) -> Result<CollabSession, String> {
@@ -291,6 +292,7 @@ impl CollabSession {
             tools,
             log,
             spec: meta.exec.clone(),
+            guest_lease,
             sandboxes,
             done: st.ended,
             cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),

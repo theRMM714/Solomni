@@ -474,10 +474,16 @@ pub(crate) fn dispatch_external(
                 .unwrap_or(&[]);
             if ctx.tier == crate::kernel::api::Tier::Vm {
                 // 虚拟机档：命令送进这个会话的 guest（挂载与网络在起 guest 时已经定下）。
+                if ctx.guest_lease.is_empty() {
+                    return (
+                        module,
+                        deny(ctx, "这条虚拟机档会话没有 guest 租约".to_string()),
+                    );
+                }
                 (
                     module,
                     ctx.vm.guest_run(
-                        &ctx.fence.lease,
+                        &ctx.guest_lease,
                         &crate::capabilities::vm::api::GuestRun {
                             command: command.to_string(),
                             args_json: inv.args_json.clone(),

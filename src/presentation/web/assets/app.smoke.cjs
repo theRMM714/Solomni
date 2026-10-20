@@ -289,22 +289,24 @@ setTimeout(async () => {
       if (!rewoundApplies) loadErrors.push("回档重置检查：" + JSON.stringify(r));
     } catch (e) { loadErrors.push("回档重置检查失败：" + e.message); }
   }
-  // **只读历史会话**：发送按钮禁用并显示只读；会话说明写明要先点「继续」。
+  // **只读历史会话**：不渲染输入区，只留「启用会话」；会话说明写明要先启用。
   let readonlyRule = false;
   if (!loadErrors.length) {
     try {
       const r = vm.runInNewContext(
         "(function () { const s = { sid: 'ro', can_update_task: false, running: false, running_known: true," +
-          "  sending: false, done: true, readonly: true, lines: [], live: [], fold: {}, scroll: {} };" +
+          "  sending: false, activating: false, done: true, readonly: true, lines: [], live: [], fold: {}, scroll: {}," +
+          "  continue_action: null };" +
           "state.sessions.set('ro', s); state.activeSid = 'ro';" +
-          "syncSendButton(s); const b = document.querySelector('#btn-send');" +
+          "syncComposer(s); const bar = document.querySelector('#readonly-bar');" +
           "const note = sessionNote(s);" +
-          "return { disabled: b.disabled, text: b.textContent, title: b.title," +
+          "return { children: (bar.children || []).map((x) => String(x.textContent || ''))," +
           "  note: note && note.textContent }; })()",
         sandbox
       );
-      readonlyRule = r.disabled === true && String(r.text).indexOf('只读') >= 0
-        && String(r.note).indexOf('只读') >= 0 && String(r.title).indexOf('继续') >= 0;
+      const joined = (r.children || []).join('|');
+      readonlyRule = joined.indexOf('只读') >= 0 && joined.indexOf('启用会话') >= 0
+        && String(r.note).indexOf('只读') >= 0 && String(r.note).indexOf('启用会话') >= 0;
       if (!readonlyRule) loadErrors.push("只读会话检查：" + JSON.stringify(r));
     } catch (e) { loadErrors.push("只读会话检查失败：" + e.message); }
   }

@@ -154,6 +154,14 @@ body {
   padding: 12px 14px; font: inherit; line-height: 1.5;
 }
 .composer textarea:focus { outline: none; border-color: var(--accent); }
+/* 历史回放：只读视图不渲染输入区，只留一个启用动作。 */
+.readonly-bar {
+  flex: none; display: flex; align-items: center; gap: 12px; justify-content: center;
+  padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+  background: var(--bg2); border-top: 1px solid var(--line);
+}
+.readonly-bar .readonly-note { color: var(--fg-dim); font-size: 13px; }
+.readonly-bar .btn { flex: none; }
 .btn-add {
   flex: none; width: 46px; height: 46px; padding: 0;
   font-size: 20px; line-height: 1; color: var(--fg-dim);

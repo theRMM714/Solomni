@@ -34,6 +34,10 @@ impl SessionOps for ConductorHandle {
         self.single_generation(sid, Some(text.to_string()), out)
     }
 
+    fn activate(&self, sid: &str) -> Result<SessionView, String> {
+        self.activate_session(sid)
+    }
+
     fn continue_flow(&self, sid: &str, out: Output) -> Result<Advance, String> {
         // 「继续」= 「停止」的逆操作：先把整棵子树解冻，再按形态接着走。
         // 单 agent / 代理补一条「继续」用户行作为这一轮的起因；协作不需要用户发言，从断点推进。

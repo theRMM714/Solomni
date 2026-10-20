@@ -32,6 +32,9 @@ pub(crate) struct PreparedEdit {
     pub(crate) sid: String,
     pub(crate) old_meta: SessionMeta,
     pub(crate) new_meta: SessionMeta,
+    /// 目的：主会话改档位时要同步的子树（旧值用于撤围栏，新值用于落盘）。
+    pub(crate) old_children: Vec<SessionMeta>,
+    pub(crate) new_children: Vec<SessionMeta>,
 }
 impl Conductor {
     /// 运行能力报告：模块声明的能力、包库里的可用版本、缺失清单与虚拟机档诊断。
@@ -174,6 +177,52 @@ impl Conductor {
         )
     }
 
+    /// 目的：按一条会话的 meta 现算执行计划（启用/续跑与建会话同一把尺子）。
+    /// 约束：模块清单取这条 meta 的 agent 名单；虚拟机档按 guest 的 os 判入口与运行包。
+    pub(crate) fn plan_for_meta(
+        &self,
+        meta: &SessionMeta,
+    ) -> Result<crate::capabilities::vm::api::ExecPlan, String> {
+        let roster = self.scan();
+        self.plan_for_meta_with(meta, &roster)
+    }
+
+    fn plan_for_meta_with(
+        &self,
+        meta: &SessionMeta,
+        roster: &crate::capabilities::modules::api::Roster,
+    ) -> Result<crate::capabilities::vm::api::ExecPlan, String> {
+        let mut ids: Vec<&str> = meta
+            .agents
+            .iter()
+            .flat_map(|a| a.modules.iter().map(String::as_str))
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        let session_modules: Vec<Module> = roster
+            .modules
+            .iter()
+            .filter(|m| ids.iter().any(|id| *id == m.manifest.id))
+            .cloned()
+            .collect();
+        let guest = self.guest_os_of(&meta.exec).map(|g| g.as_str());
+        let target_os = guest.unwrap_or(std::env::consts::OS);
+        let missing: Vec<crate::capabilities::vm::api::MissingEntry> =
+            crate::capabilities::vm::api::missing_entries_for(&session_modules, target_os, &|p| {
+                self.probe.is_executable(p)
+                    && (target_os == std::env::consts::OS
+                        || crate::capabilities::vm::api::runs_on_target(p, target_os))
+            });
+        crate::capabilities::vm::api::plan(
+            &meta.exec,
+            &session_modules,
+            &self.library_for(&meta.exec),
+            &self.guest_runtimes_of(&meta.exec),
+            &missing,
+        )
+        .map_err(|diags| crate::capabilities::vm::api::diagnose_text_for(&diags, guest))
+    }
+
     /// 本档位下不能执行工具的模块（模块 id → 缺的能力名）：建会话与重建时收口给工具环境。
     pub(crate) fn unavailable_modules(
         &self,
@@ -238,6 +287,7 @@ impl Conductor {
                 })
                 .collect(),
             tier: tier.as_str().to_string(),
+            tier_locked: meta.parent.is_some(),
             guest: meta.exec.guest.clone(),
             guests: self.guest_bases()?,
             net: meta.exec.net,
@@ -273,8 +323,11 @@ impl Conductor {
         sid: &str,
         edit: SessionEdit,
     ) -> Result<(PreparedEdit, Option<EditGuest>), String> {
-        if self.running.contains(sid) {
-            return Err(Self::running_refusal(sid));
+        // 改配要重建整棵子树的档位/guest 关联：任一在跑都拒绝（先停再改）。
+        for s in self.subtree_of(sid) {
+            if self.running.contains(&s) {
+                return Err(Self::running_refusal(&s));
+            }
         }
         let (meta, events) = self.history_open(sid)?;
         match meta.mode.as_str() {
@@ -286,6 +339,14 @@ impl Conductor {
                     "未知会话形态：{}（只认 single / collab / proxy）",
                     other
                 ))
+            }
+        }
+        // 共享 guest 的子会话：模块 / 定版 / 网络都会改变主 guest 的装配，本次先不支持单独编辑（后续安排）。
+        if meta.parent.is_some() {
+            if let Ok(Some((lease, _))) = self.guest_scope(&meta) {
+                if lease != meta.name {
+                    return Err("子会话的配置随主会话（共享 guest）：暂不支持单独编辑".to_string());
+                }
             }
         }
         if session_started(&events) {
@@ -368,6 +429,12 @@ impl Conductor {
             pins: edit.pins.clone(),
             net: edit.net,
         };
+        // 子会话的档位只随主会话：这里只锁 tier / guest，模块与模型仍按各自规则（后续再收口）。
+        if meta.parent.is_some() && (spec.tier != meta.exec.tier || spec.guest != meta.exec.guest) {
+            return Err(
+                "子会话的档位随主会话：不能单独改 tier / guest（改主会话即可）".to_string(),
+            );
+        }
         // 承载校验：前置条件不具备时**不允许改入虚拟机档**（用户环境问题，不是选型问题）。
         // 界面上的"能不能选"由 SessionConfig 的 tier_ready 说同一件事，两处不会各说各话。
         // 已经在虚拟机档上的会话只校验**它自己那几项**（基础根等）：改模块、改模型、定版、开网络都不该被拦住——
@@ -439,15 +506,36 @@ impl Conductor {
         let mut new_meta = meta.clone();
         new_meta.modules = metas.iter().flat_map(|a| a.modules.clone()).collect();
         new_meta.agents = metas;
-        new_meta.exec = spec;
+        new_meta.exec = spec.clone();
+        // 子会话只能随主会话：主会话改档位/guest/pins/net 时同步整棵子树，并作废它们的内存对象。
+        let (old_children, new_children) = if meta.parent.is_none() {
+            let mut old_children = Vec::new();
+            let mut new_children = Vec::new();
+            for child in self.subtree_of(sid) {
+                if child == sid {
+                    continue;
+                }
+                let mut cm = self.history.meta(&child)?;
+                old_children.push(cm.clone());
+                cm.exec = spec.clone();
+                new_children.push(cm);
+            }
+            (old_children, new_children)
+        } else {
+            (Vec::new(), Vec::new())
+        };
         // 要等 guest 的那一段：旧的是虚拟机档就得停（改配一律重建）；新的是虚拟机档就得起。
         let was_vm = meta.exec.tier == crate::kernel::api::Tier::Vm;
         let is_vm = new_meta.exec.tier == crate::kernel::api::Tier::Vm;
         let job = if is_vm {
             let sandboxes = self.sandboxes(&new_meta, &roster)?;
-            Some(EditGuest::Boot(Box::new(
-                self.guest_boot(&new_meta, &plan, &sandboxes, was_vm),
-            )))
+            Some(EditGuest::Boot(Box::new(self.guest_boot(
+                &new_meta,
+                &plan,
+                &sandboxes,
+                was_vm,
+                &new_meta.name,
+            ))))
         } else if was_vm {
             Some(EditGuest::Stop(self.guest_stop(&meta.name)))
         } else {
@@ -458,6 +546,8 @@ impl Conductor {
                 sid: sid.to_string(),
                 old_meta: meta,
                 new_meta,
+                old_children,
+                new_children,
             },
             job,
         ))
@@ -469,13 +559,24 @@ impl Conductor {
             sid,
             old_meta,
             new_meta,
+            old_children,
+            new_children,
         } = prepared;
         self.history.save_meta(&new_meta)?;
+        for child in &new_children {
+            self.history.save_meta(child)?;
+        }
         // 权限或模块可能变了：撤掉按**旧配置**写下的围栏授权；下一次工具执行按新配置重授（即时生效）。
         self.release_session_fences(&old_meta);
+        for child in &old_children {
+            self.release_session_fences(child);
+        }
         self.record_config(&sid, &new_meta);
-        // 内存里那份是按旧配置装的：丢掉它，下一次访问按新配置从转录重建（转录即状态，不丢内容）。
+        // 内存里那份是按旧配置装的：丢掉主会话与整棵子树，下一次访问按新配置从转录重建。
         self.sessions.remove(&sid);
+        for child in &new_children {
+            self.sessions.remove(&child.name);
+        }
         Ok(())
     }
 
@@ -611,6 +712,50 @@ impl Conductor {
 
     // ---- 会话中心（前端只持 id） ----
 
+    /// 目的：上下文「继续」是否该出现——判据只在后端（前端不按末条/模式猜）。
+    /// 约束：正在跑、已关闭、代理、或没有真实断点时不出现；协作有挂起卡时由卡承担，不给继续。
+    fn continue_action(
+        &self,
+        sid: &str,
+        running: bool,
+        mode: &str,
+        run: &str,
+        has_pending: bool,
+    ) -> Option<ContinueView> {
+        if running || run == "closed" || mode == "proxy" {
+            return None;
+        }
+        match mode {
+            "single" => {
+                let user_last =
+                    matches!(self.sessions.get(sid), Some(Session::Single(s)) if s.last_is_user());
+                if user_last {
+                    Some(ContinueView {
+                        kind: "turn".to_string(),
+                        label: "继续上一轮".to_string(),
+                        reason: "上一轮还没有回答".to_string(),
+                    })
+                } else {
+                    None
+                }
+            }
+            "collab" if !has_pending => Some(ContinueView {
+                kind: "collab".to_string(),
+                label: "恢复协作".to_string(),
+                reason: "协作泵没有在跑".to_string(),
+            }),
+            _ => None,
+        }
+    }
+
+    /// 目的：一条会话的权威视图（启用回包 / 正在生成时附着用）：状态、运行态与上下文继续。
+    pub(crate) fn session_view(&self, sid: &str) -> Result<SessionView, String> {
+        self.session_views(&self.history_list())
+            .into_iter()
+            .find(|v| v.sid == sid)
+            .ok_or_else(|| format!("无此会话：{}", sid))
+    }
+
     /// 会话列表视图（进行中的工作）。形态取落盘 meta（单一真相，不在内存里留影子状态）。
     pub fn session_views(&self, history: &[HistoryView]) -> Vec<SessionView> {
         // 在表里的会话 + **正在生成的会话**（后者对象在工作线程上，但它确实存在、也确实在跑）。
@@ -665,8 +810,11 @@ impl Conductor {
                 // 待裁决：**判据只有队本身**（核心各关卡与工具级确认排在同一条队上）——
                 // 正在生成的会话（对象在工作线程手里）照样取得到；推的卡片事件与它是同一份。
                 let pending = self.desk.peek(&sid).and_then(|d| d.json());
+                let running = running_now.contains(&sid);
+                let continue_action =
+                    self.continue_action(&sid, running, &mode, &run, pending.is_some());
                 SessionView {
-                    running: running_now.contains(&sid),
+                    running,
                     sid,
                     mode,
                     done,
@@ -676,6 +824,7 @@ impl Conductor {
                     can_update_task,
                     run,
                     pending,
+                    continue_action,
                 }
             })
             .collect()
@@ -924,8 +1073,11 @@ impl Conductor {
         } else {
             None
         };
-        let boot = if meta.exec.tier == crate::kernel::api::Tier::Vm {
-            Some(self.guest_boot(&meta, &plan, &sandboxes, false))
+        // 代拟名单还没确认：沙箱/模块都不知道，先不起 guest；第一次真正生成前 ensure_guest 再起。
+        let boot = if meta.exec.tier == crate::kernel::api::Tier::Vm
+            && !(meta.delegate && meta.agents.is_empty())
+        {
+            Some(self.guest_boot(&meta, &plan, &sandboxes, false, &meta.name))
         } else {
             None
         };
@@ -1009,6 +1161,7 @@ impl Conductor {
                     meta.exec.net,
                     meta.exec.tier,
                     guest,
+                    self.guest_lease_for(&meta)?,
                 );
                 (Session::Single(s), opened)
             }
@@ -1026,6 +1179,7 @@ impl Conductor {
                     Arc::clone(&self.tools),
                     Arc::clone(&self.log),
                     meta.exec.clone(),
+                    self.guest_lease_for(&meta)?,
                     metas.clone(),
                     delegate,
                     sandboxes.clone(),
@@ -1069,6 +1223,38 @@ impl Conductor {
         super::guest_job::GuestStop::new(Arc::clone(&self.vm), vec![lease.to_string()])
     }
 
+    /// 目的：按一条会话的现状准备"确保 guest"那一段（启用、发言、成员回合共用）。
+    /// 返回：None = 本机档 / proxy 父会话 / 已有活 guest / 代拟名单还没确认；有 = 要在调用方线程跑。
+    pub(crate) fn prepare_guest_boot(
+        &self,
+        sid: &str,
+    ) -> Result<Option<super::guest_job::GuestBoot>, String> {
+        let meta = self.history.meta(sid)?;
+        if meta.run == RunState::Closed {
+            return Err(format!("会话 {} 已关闭：终态，不能再启用", sid));
+        }
+        let Some((lease, scope_meta)) = self.guest_scope(&meta)? else {
+            return Ok(None);
+        };
+        if self.vm.guest_leases().iter().any(|l| l == &lease) {
+            return Ok(None);
+        }
+        // 代拟名单还没确认：沙箱/模块都还不知道，等第一次真正生成前再起（见 guest_scope / spawn）。
+        if scope_meta.agents.is_empty() && scope_meta.delegate {
+            return Ok(None);
+        }
+        let roster = self.scan();
+        let plan = self.plan_for_meta(&scope_meta)?;
+        let sandboxes = self.sandboxes(&scope_meta, &roster)?;
+        Ok(Some(self.guest_boot(
+            &scope_meta,
+            &plan,
+            &sandboxes,
+            false,
+            &lease,
+        )))
+    }
+
     /// 目的：把"起 guest"这一段打包成交给调用方线程的活——核心只准备参数，不在这里拉起。
     fn guest_boot(
         &self,
@@ -1076,6 +1262,7 @@ impl Conductor {
         plan: &crate::capabilities::vm::api::ExecPlan,
         sandboxes: &crate::capabilities::workspace::api::Sandboxes,
         restart: bool,
+        lease: &str,
     ) -> GuestBoot {
         let share_tool = self.share_tool_path();
         GuestBoot::new(
@@ -1092,7 +1279,7 @@ impl Conductor {
                 share_tool.as_deref(),
                 self.probe.as_ref(),
             ),
-            meta.name.clone(),
+            lease.to_string(),
             meta.exec.net,
             plan.clone(),
             sandboxes.clone(),

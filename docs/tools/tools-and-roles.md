@@ -67,7 +67,7 @@ roles:
 
 - **agent 对系统的每个操作都要有对应工具 + 身份限制**：没有工具的操作 = 契约缺口（例如"要返工哪个节点"必须是 `checklist.items[].rework` 这类**字段**，不能塞进自由文本）。
 - **工具的"后果"写进声明**：会驱动核心动作的工具要写清"这个结论会让系统做什么"。
-  - `node_verdict` 的 `ok=false` = 该节点退回待办、点「继续」只重派它；
+  - `node_verdict` 的 `ok=false` = 该节点退回待办、点上下文「恢复协作」只重派它；
   - `checklist` 的 `fail` 必须填 `rework` = 要返工的节点 id；
   - `verdict.clear=true` 才照用户说的开工 / 放行。
 - 写了表里没有的 id 或漏填 = 这次判定用不了，核心**要求重填**。
@@ -216,6 +216,7 @@ prompts/
 | --- | --- |
 | 代理工具 | 当前：六个工具 + `core_proxy` 角色 + 队列桥宿主（真实会话）。委托是**全权**（`granularity=full`）；路径的白 / 黑名单与模块写授权在会话权限（[docs/permission/README.md](../permission/README.md)）；命中 `ask` 表的调用在执行前经统一裁决通道让用户选 `allow` / `deny` / `full`。孩子不把转录推给代理：门的通知、意外停止通知 + `read_session_messages` 主动倒查 |
 | 建会话 = 建 + 写开头 + 开工 | `create_session` 一份声明两处调用：**人经呈现层**给 `name` / `mode` / `agents`（可省 `tier`；虚拟机档时给 `guest`（虚拟根名））先建出会话，后续用 `send_message` 发言推进；**核心代理**给 `mode`（single / collab）+ `agents`（只写身份：`ref` 或 `name`+`modules`+`model`）+ `task`，**建好就开工**（single 以 task 为第一句，collab 以它当本次需求）。后续补充 / 返工 / 代答门仍走 `send_session_message`（**代答要显式给 `reply` = 那张卡上的选项 id**；给不出就不作代答，不替用户猜） |
+| 历史会话的启用 / 继续 | 只读历史只显示「启用会话」：`activate_session` 从盘上重建、确保 guest、解冻整棵子树，**不跑模型**。启用后 `SessionView.continue` 说有断点时才显示上下文动作（单 agent「继续上一轮」/ 协作「恢复协作」），走 `control_session` 的 `continue`；代理不显示。 |
 | 代理工具的生命周期 | `stop` = 把整棵子树落成 `stopped`（拦住派发与唤醒）再**级联中断**在跑的生成，会话上的停止按钮就是这一下；`continue` = 解冻并按形态唤醒接着走；`close` 是终态。停止 / 继续是一对逆操作，没有单独的暂停；都不改写历史 |
 | 代理模式下的子会话审查关卡 | 不问用户：作为**门**交给核心判断，核心用 `send_session_message(kind=user_reply, reply=<选项 id>)` 回答 |
 | 代理模式下子会话的转录 | **不转发给核心**：核心只拿门的通知与意外停止通知，正文经 `read_session_messages`（0 = 最新）主动倒查 |

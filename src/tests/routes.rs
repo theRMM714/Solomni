@@ -193,6 +193,22 @@ impl SessionOps for FakeOps {
         self.guard()?;
         Ok(Advance { head: 7 })
     }
+    fn activate(&self, _sid: &str) -> Result<SessionView, String> {
+        self.guard()?;
+        Ok(SessionView {
+            sid: "w1".to_string(),
+            mode: "single".to_string(),
+            done: false,
+            tier: "host".to_string(),
+            tier_ready: true,
+            tier_missing: Vec::new(),
+            running: false,
+            can_update_task: false,
+            run: "active".to_string(),
+            pending: None,
+            continue_action: None,
+        })
+    }
     fn continue_flow(&self, _sid: &str, _out: Output) -> Result<Advance, String> {
         self.guard()?;
         Ok(Advance { head: 8 })
@@ -258,6 +274,7 @@ impl SessionOps for FakeOps {
                 permissions: None,
             }],
             tier: "host".to_string(),
+            tier_locked: false,
             guest: None,
             guests: Vec::new(),
             net: false,
@@ -330,6 +347,7 @@ impl SessionOps for FakeOps {
                 can_update_task: h.mode == "collab",
                 run: h.run.as_str().to_string(),
                 pending: None,
+                continue_action: None,
             })
             .collect())
     }

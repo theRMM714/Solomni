@@ -56,6 +56,9 @@ pub struct MemberTools {
     pub tools: Arc<dyn ToolExec + Send + Sync>,
     /// 目的：本会话的执行档位——工具执行者据此决定在本机跑还是送进 guest。
     pub tier: crate::kernel::api::Tier,
+    /// 目的：虚拟机档要用的 **guest 租约**（空 = 本机档 / 没有 guest）：共享 guest 时它是顶层工作名，
+    ///   proxy 子工作临时按自己的名字；主机围栏仍用 `fence.lease`（子会话名）。
+    pub guest_lease: String,
     /// 目的：虚拟机档的 guest 用例面（**不持它的端口**，R12）：guest 执行走它。
     pub vm: Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync>,
     /// 本成员的沙箱：内置文件工具的寻址与越界依据（权限收口在 conductor）。

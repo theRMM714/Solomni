@@ -83,6 +83,7 @@ impl CollabSession {
             log: Arc::clone(&self.log),
             tools: Arc::clone(&self.tools),
             tier: crate::kernel::api::Tier::Host,
+            guest_lease: String::new(),
             vm: Arc::clone(&self.vm),
             sandbox: sb.clone(),
             tools_this_turn: self

@@ -3,7 +3,7 @@
 //! 装配（new 适配器）只发生在 main 组合根。前端只见 Conductor 门面、会话句柄与 SessionEvent 流。
 
 use crate::capabilities::conductor::api::{
-    AgentInstance, AgentSuggestion, ConfigAgent, FilesAgentRootView, FilesAgentView,
+    AgentInstance, AgentSuggestion, ConfigAgent, ContinueView, FilesAgentRootView, FilesAgentView,
     FilesRootsView, FilesView, RewindTarget, RuntimeReport, SessionConfig, SessionEdit,
     SessionView, TierChoices, WorkMode, WorkOpened, WorkSpec,
 };
@@ -171,6 +171,19 @@ pub(crate) enum Prepared {
     NotSingle,
 }
 
+/// 目的：一次"启用会话"的两段——核心只判断与准备（可选的一段 guest 启动），慢的那一段在调用方线程上跑。
+pub(crate) enum PreparedActivation {
+    /// 会话正在生成：附着即可，不重建、不重启 guest。
+    Running(SessionView),
+    /// 可以启用：可选 guest 启动；提交时重建会话并解冻整棵子树。
+    Ready {
+        sid: String,
+        boot: Option<crate::capabilities::conductor::service::guest_job::GuestBoot>,
+        /// 本次启动要占的租约（提交失败时据此收掉刚拉起的 guest）。
+        lease: Option<String>,
+    },
+}
+
 /// **应用服务**：持有注入的端口、能力面与会话中心；前端拿不到它（只拿 `conductor::api::Ops`）。
 /// 组合根在 `ConductorHandle::spawn` 里把它**移进核心自己的执行线程**——此后状态只被那一个线程碰，
 /// 所以这里不加任何锁（并发不变式见 ARCHITECTURE.md §一）。
@@ -223,7 +236,7 @@ mod action;
 pub(crate) mod ask_user;
 mod env;
 mod flow;
-mod guest_job;
+pub(crate) mod guest_job;
 mod history;
 pub mod proxy;
 mod rewind;

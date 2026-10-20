@@ -2987,6 +2987,7 @@ pub(crate) fn member_with_service_tools(
             Arc::new(NoFenceHost),
         ),
         tier: crate::kernel::api::Tier::Host,
+        guest_lease: String::new(),
         vm: test_vm(Arc::new(InMemoryPackages::empty())),
         sandbox: sb.clone(),
         tools_this_turn: test_prompts()

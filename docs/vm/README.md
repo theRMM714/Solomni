@@ -32,7 +32,10 @@
 
 ### 执行分派与就绪
 
-- 会话在 `tier == Vm` 时把模块命令交给 guest；建会话时装配并拉起，改配时重建，删除会话时销毁。
+- 会话在 `tier == Vm` 时把模块命令交给 guest；建会话 / 启用历史会话时装配并拉起，改配时重建，删除会话时销毁。
+- **一个主会话树共用一台 guest**：guest 租约 = 顶层工作名，协作/节点子会话的工具租约都指向它；
+  主机围栏租约仍按子会话（`FenceSpec.lease` 与工具上下文里的 `guest_lease` 分开）。
+  proxy 子工作在动态加入主 guest 落地前**暂时各自一台**（缺口见 [tests/gaps.yaml](../../tests/gaps.yaml)）。
 - 就绪项 `guest` 按**已验平台数据表**（`VERIFIED_HOSTS` = linux / windows）放开，并带上本平台**已实现**的组合。
 - 已验组合：Linux QEMU/KVM + virtiofs（virtiofsd 不在场或**不能执行**时退 9p）；Windows QEMU/WHPX + SMB guestfwd（缺 smbd 时退 QGA 复制）。
 - macOS 未验，缺口见 [tests/macos/gaps.yaml](../../tests/macos/gaps.yaml)。
@@ -52,9 +55,12 @@
 
 ### 并发与进程归属
 
-- 每条会话一条租约、一台 guest（固定 `-m 2048 -smp 2`）。
-- 同时台上限是设置项 `max_guests`（默认 2，0 = 不限制），到上限如实拒绝；同一租约重启不占新名额（见 [REGISTRY_SPEC.md](../../REGISTRY_SPEC.md) 与 `domain/exec.rs` 的 `admit_guest`）。
+- 每个主会话树一条 guest 租约（固定 `-m 2048 -smp 2`）；协作子会话共用，proxy 子工作临时各自一条。
+- 同时台上限是设置项 `max_guests`（默认 2，0 = 不限制），按主会话树计数，到上限如实拒绝；同一租约重启不占新名额（见 [REGISTRY_SPEC.md](../../REGISTRY_SPEC.md) 与 `domain/exec.rs` 的 `admit_guest`）。
 - 会话启动时用 qemu-img 在基础镜像上建一份**每租约可写层**（`.vm/overlays/<租约>.qcow2`），删会话即丢——多台并发**不同写一份基础镜像**；供给编排直写基础镜像（它要改的就是镜像本身，`GuestSpec.isolated = false`）。
+  启用 = 按基础镜像重建 guest：guest 内未落到宿主挂载点（共享区 / 沙箱 / 模块目录）的改动不保留。
+- **共享 guest 的隔离缺口**：当前 guest 内没有 per-agent 围栏（host 围栏不进入 guest），
+  同一主工作内的 agent 在 guest 里互信；guest 内隔离与 proxy 动态加入主 guest 记在 [tests/gaps.yaml](../../tests/gaps.yaml)。
 - 每个 QEMU 与共享进程起时记账（`.home/processes.json`，`kernel/detail/procs.rs`：用途 + 归属 + 标记），销毁时注销。
 - 共享守护进程（`virtiofsd` / SMB helper）由对应共享后端按租约起停：起时进同一份进程账并绑父死子亡，释放时清理（`virtiofsd` 按进程组）。
 - 父死子亡：核心被强杀也不留孤儿攥着镜像；三平台机制见 [docs/kernel/README.md](../kernel/README.md) 的「长驻子进程的账与回收」。

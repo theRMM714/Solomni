@@ -449,6 +449,58 @@ impl Conductor {
         Ok(())
     }
 
+    /// 目的：启用会话的第一段（核心，毫秒级）——closed 拒绝；正在生成则附着；
+    ///   否则准备可选的一段 guest 启动，等调用方线程跑完后提交。
+    pub(crate) fn prepare_activation(
+        &self,
+        sid: &str,
+    ) -> Result<super::PreparedActivation, String> {
+        let meta = self.history.meta(sid)?;
+        if meta.run == RunState::Closed {
+            return Err(format!("会话 {} 已关闭：终态，不能再启用", sid));
+        }
+        if self.running.contains(sid) {
+            return Ok(super::PreparedActivation::Running(self.session_view(sid)?));
+        }
+        let boot = self.prepare_guest_boot(sid)?;
+        let lease = boot.as_ref().map(|b| b.lease().to_string());
+        Ok(super::PreparedActivation::Ready {
+            sid: sid.to_string(),
+            boot,
+            lease,
+        })
+    }
+
+    /// 目的：启用会话的第二段（核心）——按落盘转录重建、解冻整棵子树，返回启用后的视图。
+    /// 约束：guest 已经由调用方线程启动；这里失败要收掉本次刚拉起的 guest，不留半成品。
+    pub(crate) fn commit_activation(
+        &mut self,
+        prepared: super::PreparedActivation,
+    ) -> Result<SessionView, String> {
+        match prepared {
+            super::PreparedActivation::Running(view) => Ok(view),
+            super::PreparedActivation::Ready { sid, boot, lease } => {
+                // guest 启动已在调用方线程完成；这里只把它的句柄丢掉。
+                drop(boot);
+                if let Err(e) = self.ensure_session(&sid) {
+                    if let Some(l) = &lease {
+                        if !self.running.contains(&sid) {
+                            self.vm.guest_stop(l);
+                        }
+                    }
+                    return Err(e);
+                }
+                if let Err(e) = self.resume_subtree(&sid) {
+                    if let Some(l) = &lease {
+                        self.vm.guest_stop(l);
+                    }
+                    return Err(e);
+                }
+                self.session_view(&sid)
+            }
+        }
+    }
+
     /// 继续：由用户点击授权。单 agent 会话需要轮到用户（末条是 AI 就只提醒、不发请求）；
     /// 协作不需要用户发言，继续 = 从断点推进流水线。
     /// **测试用同步入口**：生产路径的两条（单 agent / 协作）都在工作线程上跑（见 ConductorHandle）。

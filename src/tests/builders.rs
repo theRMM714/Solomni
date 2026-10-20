@@ -492,6 +492,7 @@ pub(crate) fn member_with_tools(
             Arc::new(NoFenceHost),
         ),
         tier: crate::kernel::api::Tier::Host,
+        guest_lease: String::new(),
         vm: test_vm(Arc::new(InMemoryPackages::empty())),
         sandbox: test_sandbox("m0", &[]),
         tools_this_turn: test_prompts()
@@ -786,6 +787,7 @@ pub(crate) fn native_member(
         log: Arc::new(crate::kernel::ports::NoopLog),
         tools: test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),
         tier: crate::kernel::api::Tier::Host,
+        guest_lease: String::new(),
         vm: test_vm(Arc::new(InMemoryPackages::empty())),
         sandbox: sb.clone(),
         tools_this_turn: test_prompts()

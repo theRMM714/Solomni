@@ -349,6 +349,16 @@ tools:
       request_id:
         type: string
         desc: 幂等标识（核心代理必填）：同一个 request_id 重放不会重复控制
+  activate_session:
+    capability: none              # 不碰文件：恢复会话与它的 guest
+    callers: [user]               # 人经呈现层：只读历史 → 启用会话
+    desc: 启用一条历史会话：从盘上重建、确保虚拟机 guest、解冻整棵子树；**不产生模型调用**（继续/恢复由 control_session 的 continue 单独触发）。
+    params:
+      session_id:
+        type: string
+        required: true
+        non_empty: true
+        desc: 要启用的会话 id
 
   # —— 共享区版本化工作区：agent 只写自己的沙箱，用 pull / commit / resolve 与主副本同步 ——
   work_pull:

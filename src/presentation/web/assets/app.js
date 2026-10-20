@@ -68,6 +68,9 @@ async function refreshState() {
       lines: [], live: [], pending: v.pending || null, sending: false,
       running: false, working: null, running_known: false,
       can_update_task: !!v.can_update_task,
+      continue_action: v.continue || null,
+      tier: v.tier, tier_ready: v.tier_ready, tier_missing: v.tier_missing || [],
+      activating: false,
       done: !!(h && h.done), awaiting: null, fold: {}, scroll: {},
       readonly: false, hydrated: false, buffer: [],
     };
@@ -83,6 +86,11 @@ async function refreshState() {
     cur.can_update_task = !!v.can_update_task;
     cur.run = v.run || 'active';
     cur.pending = v.pending || null;
+    // 上下文继续与档位提示都以后端视图为准；只读视图不显示继续（只有启用）。
+    if (!cur.readonly) cur.continue_action = v.continue || null;
+    cur.tier = v.tier;
+    cur.tier_ready = v.tier_ready;
+    cur.tier_missing = v.tier_missing || [];
     // 运行态**只对账、不覆盖**：这条会话已经有实时知识（事件就是真相）时，快照比它滞后——
     // 一次迟到的轮询不能把已经收尾的回合标回"在跑"。没有实时知识时按快照补齐，并清掉本地遗留
     // （快照说没跑就是没跑）；谁在跑未知时照旧显示"正在工作…"。
@@ -96,7 +104,7 @@ async function refreshState() {
   renderHistory();
   if (opened) renderTabs();
   const cur = activeSession();
-  if (cur) { syncTyping(cur); syncSendButton(cur); }
+  if (cur) { syncTyping(cur); syncSendButton(cur); syncComposer(cur); }
 }
 
 /// 思维链块：永远默认折叠，点击（原生 details）才展开。
@@ -318,11 +326,14 @@ function renderHistory() {
     const acts = document.createElement('div'); acts.className = 'history-acts';
 
     const open = btn('打开', 'hbtn');
-    open.title = '进入会话视图（转録 + 继续 / 停止）';
+    open.title = '进入会话视图（转録 + 启用 / 上下文继续 / 停止）';
     open.onclick = (e) => { e.stopPropagation(); openHistory(h.name); };
 
     const edit = btn('编辑', 'hbtn');
-    if (generating(h.name)) {
+    if (h.parent) {
+      edit.disabled = true;
+      edit.title = '子会话的配置随主会话（共享 guest 的编辑待后续安排）';
+    } else if (generating(h.name)) {
       edit.disabled = true;
       edit.title = '该会话正在生成中：先「停止」或等它结束，再改配置';
     } else {
@@ -446,6 +457,7 @@ async function openHistory(name) {
       sid: name, mode: (r.meta && r.meta.mode) || 'single', title: name,
       lines: [], live: [], pending: null, sending: false,
       running: false, working: null, running_known: false,
+      activating: false, continue_action: null,
       done: true, awaiting: null, readonly: true, fold: {}, scroll: {},
     };
     s.hydrated = true;
@@ -753,14 +765,21 @@ function buildConfigForm(sid, cfg, c, box) {
   // 虚拟机档的**承载**由后端判定（与「开始」/保存同一把尺子）：前置条件不具备时禁用，不让选。
   // 与「未接入」是两回事：guest 本体尚未接入这一点写在下面的提示里，两条都如实说。
   const vmOk = cfg.vm_available !== false;
+  const tierLocked = !!cfg.tier_locked;
   const hostR = cfgRadio('本机档 —— 脚本直接在宿主上跑：宿主自备解释器，不装载运行包；隔离就是宿主本身（快，但风险也在宿主上）。', draft.tier === 'host', 'cfg-tier');
   const vmR = cfgRadio('虚拟机档 —— 一整套 guest，脚本在 guest 里跑：按模块声明的运行能力装载运行包；隔离更强，代价是更重、依赖运行包。', draft.tier === 'vm', 'cfg-tier', !vmOk);
+  if (tierLocked) {
+    hostR.box.disabled = true;
+    vmR.box.disabled = true;
+    secT.appendChild(cfgHint('执行档位随主会话：子会话不能单独改档位与虚拟根。', 'warn'));
+  }
   // 虚拟机档选的是**虚拟根**（清单里的一个虚拟机），不是路径：本机有哪些由后端给。
   const pick = guestPicker(cfg.guests, draft.guest, (v) => { draft.guest = v; });
   const syncTier = () => {
     const vm = draft.tier === 'vm';
-    pick.wrap.className = vm ? 'wf-field' : 'wf-field hidden';
-    pick.hint.className = 'cfg-hint' + (vm ? '' : ' hidden');
+    const show = vm && !tierLocked;
+    pick.wrap.className = show ? 'wf-field' : 'wf-field hidden';
+    pick.hint.className = 'cfg-hint' + (show ? '' : ' hidden');
     pick.sync();
   };
   hostR.box.addEventListener('change', () => { if (hostR.box.checked) { draft.tier = 'host'; syncTier(); } });
@@ -2413,7 +2432,46 @@ function lineParts(l) {
 }
 
 /* ---------- 渲染 ---------- */
-function renderAll() { renderTabs(); renderStream(); renderGate(activeSession()); }
+function renderAll() { renderTabs(); renderStream(); renderGate(activeSession()); syncComposer(activeSession()); }
+
+/* 只读历史视图：不渲染输入区；只留「启用会话」。启用是后端动作，前端只渲染结果。 */
+function renderReadonly(s) {
+  const bar = $('#readonly-bar');
+  if (!bar) return;
+  bar.innerHTML = '';
+  if (!s || !s.readonly) { bar.classList.add('hidden'); return; }
+  bar.classList.remove('hidden');
+  const note = document.createElement('span');
+  note.className = 'readonly-note';
+  note.textContent = s.run === 'closed' ? '历史回放（只读）· 已关闭' : '历史回放（只读）：启用后才能发送消息';
+  bar.appendChild(note);
+  if (s.run === 'closed') return;
+  const b = document.createElement('button');
+  b.className = 'btn btn-primary';
+  b.textContent = s.activating ? '正在启用…' : '启用会话';
+  b.disabled = !!s.activating;
+  b.onclick = activateFlow;
+  bar.appendChild(b);
+}
+
+/* 输入区与上下文继续的显隐：只按后端给的视图（readonly / continue_action / running）渲染。 */
+function syncComposer(s) {
+  const composer = $('#composer');
+  if (composer) {
+    if (s && s.readonly) composer.classList.add('hidden');
+    else composer.classList.remove('hidden');
+  }
+  renderReadonly(s);
+  const cont = $('#btn-continue');
+  if (!cont) return;
+  const c = s && !s.readonly && !isBusy(s) ? s.continue_action : null;
+  if (c) cont.classList.remove('hidden');
+  else cont.classList.add('hidden');
+  if (c) {
+    cont.textContent = c.label || '继续';
+    cont.title = c.reason || '';
+  }
+}
 
 function renderTabs() {
   const tabs = $('#tabs');
@@ -2458,16 +2516,13 @@ function syncTyping(s) {
 function syncSendButton(s) {
   const sendBtn = $('#btn-send');
   if (!sendBtn) return;
-  // 忙碌时只留一个「停止」：用户一眼就知道这个会话在跑，而不是拿「继续/发送」去试探。
+  // 忙碌时只留一个「停止」：用户一眼就知道这个会话在跑，而不是拿「发送」去试探。
   const busy = isBusy(s);
   sendBtn.textContent = busy ? '停止' : '发送';
   sendBtn.className = busy ? 'btn btn-danger' : 'btn btn-primary';
-  // 历史回放是只读的：发送按钮禁用，并把原因写在 title 上（点「继续」后才解除）。
-  sendBtn.disabled = !!(s && s.readonly);
-  sendBtn.title = s && s.readonly ? '历史回放为只读：点「继续」后才能发送' : '';
-  if (s && s.readonly) sendBtn.textContent = '只读';
-  const cont = $('#btn-continue');
-  if (cont) cont.className = busy ? 'btn hidden' : 'btn';
+  // 只读视图整块隐藏输入区；这里只处理正常会话的发送/停止。
+  sendBtn.disabled = false;
+  sendBtn.title = '';
   // 「改需求」是**用户的动作**（不是核心推的门）：没有"本次需求"就**根本不渲染**（不是灰着）；
   // 会话正在工作时不可点。
   const up = $('#btn-update-task');
@@ -2539,9 +2594,9 @@ function sessionNote(s) {
     bits.push('代理模式：核心代你挑人、建子工作并回答它们的关卡——这就是全权；' +
       '按「停止」会让相关会话一起停下。');
   }
-  if (s.run === 'stopped') bits.push('这条会话已停止：不会再被派发或唤醒；点「继续」可以接着走。');
+  if (s.run === 'stopped') bits.push('这条会话已停止：不会再被派发或唤醒；启用后按会话状态继续。');
   if (s.run === 'closed') bits.push('这条会话已关闭：终态，不会再被派发或唤醒。');
-  if (s.readonly) bits.push('历史回放为只读：点「继续」后才能发送消息。');
+  if (s.readonly) bits.push('历史回放为只读：点「启用会话」后才能发送消息。');
   if (!bits.length) return null;
   const d = document.createElement('div');
   d.className = 'agent-note';
@@ -2920,7 +2975,7 @@ async function act(action, text) {
   const s = activeSession();
   if (!s) return;
   if (isBusy(s)) return;
-  if (s.readonly) { notice('历史回放为只读', '点「继续」后才能发送消息。', 'info'); return; }
+  if (s.readonly) { notice('历史回放为只读', '点「启用会话」后才能发送消息。', 'info'); return; }
   // 本地事实：我的命令在途（不是服务端运行态）——按钮立刻切「停止」，避免重复提交。
   s.sending = true;
   // 乐观回显：自己的发言立刻可见；服务端权威行到达时自动替换（见 absorb）。
@@ -2993,22 +3048,61 @@ function withdrawAgree(agent) {
   ]);
 }
 
-/* 继续：由用户点击授权核心往下走。单 agent 若末条是 AI，服务端只回提醒、不发请求。 */
-async function continueFlow() {
+/* 启用：由用户点击授权核心恢复一条历史会话。后端负责重建 / 共享 guest / 解冻整棵树；
+   前端只把返回的会话视图贴回本地并渲染。启用本身不跑模型。 */
+async function activateFlow() {
   const s = activeSession();
-  if (!s || isBusy(s)) return;
-  s.sending = true;
-  renderStream();
+  if (!s || !s.readonly || s.activating) return;
+  s.activating = true;
+  renderAll();
   try {
-    await api('POST', actionUrl('control_session'), { session_id: s.sid, action: 'continue' });
-    s.readonly = false; // 历史回放会话一旦继续即转为活动会话（跨重启续跑）
+    const r = await api('POST', actionUrl('activate_session'), { session_id: s.sid });
+    applyActivation(s, (r && r.session) || {});
+    s.readonly = false;
     renderAll();
+  } catch (err) {
+    notice('启用失败', err.message, 'err');
+  } finally {
+    s.activating = false;
+    renderAll();
+  }
+}
+
+function applyActivation(s, v) {
+  s.mode = v.mode || s.mode;
+  s.run = v.run || s.run || 'active';
+  s.running = !!v.running;
+  s.running_known = true;
+  s.done = !!v.done;
+  s.can_update_task = !!v.can_update_task;
+  s.pending = v.pending || null;
+  s.continue_action = v.continue || null;
+  s.tier = v.tier || s.tier;
+  s.tier_ready = v.tier_ready;
+  s.tier_missing = v.tier_missing || [];
+}
+
+/* 上下文「继续」：后端说确实有断点时才出现（单 agent 上一轮 / 协作泵）。
+   效果仍是 control_session 的 continue；没有通用按钮。 */
+async function continueContext() {
+  const s = activeSession();
+  if (!s || s.readonly || isBusy(s) || !s.continue_action) return;
+  const hint = s.continue_action;
+  s.sending = true;
+  s.continue_action = null; // 先收起；以事件与快照为准，失败时状态刷新会再给
+  renderAll();
+  try {
+    await api('POST', actionUrl('control_session'), {
+      session_id: s.sid,
+      action: 'continue',
+      reason: hint.reason || hint.label || '',
+    });
   } catch (err) {
     s.lines.push({ cls: 'bad', who: '错误', text: err.message });
     renderAll();
   } finally {
     s.sending = false;
-    needState = true; // 同上：运行态以事件为准，快照只对账
+    needState = true; // 运行态以事件为准，快照只对账
     renderAll();
   }
 }
@@ -3212,7 +3306,7 @@ async function atOnInput() {
 
 /* ---------- 发送 ---------- */
 $('#btn-send').onclick = onSend;
-$('#btn-continue').onclick = continueFlow;
+$('#btn-continue').onclick = continueContext;
 $('#btn-update-task').onclick = updateTaskFlow;
 $('#input').addEventListener('keydown', (e) => {
   if (atKey(e)) return; // 菜单打开时 ↑/↓/Enter/Esc 归菜单
@@ -3234,7 +3328,7 @@ async function stopGeneration() {
 function onSend() {
   const s = activeSession();
   if (!s) return;
-  if (s.readonly) { notice('历史回放为只读', '点「继续」后才能发送消息。', 'info'); return; }
+  if (s.readonly) { notice('历史回放为只读', '点「启用会话」后才能发送消息。', 'info'); return; }
   if (isBusy(s)) { stopGeneration(); return; } // 生成中：同一个键变成「停止」
   if (s.awaiting === 'task') { const v = takeInput(); if (v) act('task', v); return; }
   // 裁决门挂着时不从这里发：那是卡片上的选项（要补充的话写在卡片里的附言框）。

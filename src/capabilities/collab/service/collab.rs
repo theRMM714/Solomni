@@ -150,6 +150,9 @@ pub struct CollabSession {
     pub(crate) log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
     /// 本会话的执行选型（档位 + 运行包定版）。
     pub(crate) spec: ExecSpec,
+    /// 目的：这棵会话树的 **guest 租约**（空 = 本机档）：顶层协作会话用自己的名字，
+    ///   proxy 子工作临时用自己的名字；成员回合的工具环境按它送进 guest。
+    pub(crate) guest_lease: String,
     /// 本工作的沙箱清单（按 agent 实例名取）。
     pub(crate) sandboxes: Sandboxes,
     pub(crate) done: bool,
@@ -177,6 +180,7 @@ impl CollabSession {
         tools: Arc<dyn ToolExec + Send + Sync>,
         log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
         spec: ExecSpec,
+        guest_lease: String,
         roster: Vec<AgentMeta>,
         delegated: bool,
         sandboxes: Sandboxes,
@@ -214,6 +218,7 @@ impl CollabSession {
             tools,
             log,
             spec,
+            guest_lease,
             sandboxes,
             done: false,
             cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),

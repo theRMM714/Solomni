@@ -512,6 +512,7 @@ impl CollabSession {
                 log: Arc::clone(&self.log),
                 tools: Arc::clone(&self.tools),
                 tier: self.spec.tier,
+                guest_lease: self.guest_lease.clone(),
                 vm: Arc::clone(&self.vm),
                 sandbox,
                 tools_this_turn: prompts

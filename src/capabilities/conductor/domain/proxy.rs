@@ -257,7 +257,8 @@ pub fn relay_reply(
 /// 一次控制动作写进目标会话的**可回放记录**文案（机制写，前端照同一条显示）。
 /// 记的是"谁、为什么动了这条会话"——不静默改运行态。
 pub fn control_note(action: ControlAction, reason: &str) -> String {
-    format!("[代理] {} 这条会话：{}", action.as_str(), reason)
+    // 人经呈现层的控制与核心代理的控制都走这里：不冒充"代理"，只记一条控制事实。
+    format!("[控制] {} 这条会话：{}", action.as_str(), reason)
 }
 
 /// 一次转达写进目标会话的**来源记录**文案：说清接下来这条**不是用户原话**，

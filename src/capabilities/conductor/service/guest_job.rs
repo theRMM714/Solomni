@@ -74,6 +74,11 @@ impl GuestBoot {
         }
     }
 
+    /// 目的：这段启动要占的 guest 租约（调用方据此串行同一台 guest 的启动）。
+    pub(crate) fn lease(&self) -> &str {
+        &self.lease
+    }
+
     /// 目的：真正把 guest 拉起来（慢：QEMU 启动 + 等 QGA 就绪；改配时先停旧的）。
     /// 错误：准入到上限、虚拟根不可用、引擎起不来都如实返回；此时**没有任何状态被提交**。
     pub fn run(self) -> Result<(), String> {
@@ -95,6 +100,10 @@ impl GuestBoot {
         } = self;
         // 并发闸门：每台 guest 固定 -m 2048 -smp 2，按设置里的上限如实拒绝（同一租约重启不占新名额）。
         admit_guest(&vm.guest_leases(), &lease, max_guests)?;
+        // 另一个请求可能刚把它启动好：非重启语义下不再拉第二台（否则会把刚起来的替换掉）。
+        if !restart && vm.guest_leases().iter().any(|l| l == &lease) {
+            return Ok(());
+        }
         // 改配：先停掉这个租约的旧 guest（同一租约不并存两台）。
         if restart {
             vm.guest_stop(&lease);

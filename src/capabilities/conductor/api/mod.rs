@@ -220,6 +220,8 @@ pub trait SessionOps: Send + Sync {
     fn create_work(&self, spec: WorkSpec) -> Result<(WorkOpened, u64), String>;
     /// 单 agent 会话里说一句（生成可被 `stop` 中止）。
     fn say(&self, sid: &str, text: &str, out: Output) -> Result<Advance, String>;
+    /// 启用一条历史会话：从盘上重建、确保 guest、解冻整棵子树；**不产生模型调用**。
+    fn activate(&self, sid: &str) -> Result<SessionView, String>;
     /// 继续一次会话：被停止过就先解冻整棵子树再接着走；协作从断点推进，单 agent / 代理补一轮「继续」。
     fn continue_flow(&self, sid: &str, out: Output) -> Result<Advance, String>;
     /// 协作会话：写下本次需求（起点那一关）；其余推进一律走"回答一张卡"。
@@ -327,6 +329,8 @@ pub struct ConductorHandle {
     secrets: Arc<dyn crate::capabilities::secrets::api::SecretOps + Send + Sync>,
     /// 模块公地能力面（与核心共享同一份）：模块事实与启停写面由它转发。
     modules: Arc<dyn crate::capabilities::modules::api::Modules + Send + Sync>,
+    /// 正在启动的 guest 租约：同一台 guest 的并发启用/生成只能有一个在拉，别互相替换。
+    booting: Arc<std::sync::Mutex<std::collections::BTreeSet<String>>>,
 }
 
 /// 一次"要一个成员回合"的请求：泵在工作线程上让出，回头找主线程驱动（它才拿得到各 agent 的会话）。
@@ -625,6 +629,8 @@ pub struct SessionConfig {
     pub started: bool,
     pub agents: Vec<ConfigAgent>,
     pub tier: String,
+    /// 目的：档位是否随主会话（子会话为 true）：界面不渲染档位选择，后端拒绝子会话改档位。
+    pub tier_locked: bool,
     /// 目的：这条会话选的虚拟根名（本机档为空）。
     pub guest: Option<String>,
     /// 目的：本机有哪些虚拟根可选（含"装没装齐"）——界面据此渲染下拉，不自己编列表。
@@ -661,6 +667,17 @@ pub struct SessionEdit {
     pub net: bool,
 }
 
+/// 目的：上下文「继续」只在后端判断确实有断点时出现（单 agent 上一轮被打断 / 协作泵没走完）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ContinueView {
+    /// 目的：断点种类：`turn`（继续上一轮）/ `collab`（恢复协作）。
+    pub kind: String,
+    /// 目的：按钮文字（后端给，前端不按 kind 自己编）。
+    pub label: String,
+    /// 目的：为什么出现（按钮 title 与续跑记录用）。
+    pub reason: String,
+}
+
 /// 会话列表视图。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SessionView {
@@ -688,6 +705,9 @@ pub struct SessionView {
     /// 刷新页面时界面照样画得出那张卡；推的那条只是增量（队列里后面的几张在 waiting 里）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pending: Option<serde_json::Value>,
+    /// 目的：上下文「继续」按钮（None = 不显示）；前端只按它渲染，不自己判断末条/协作泵。
+    #[serde(rename = "continue", skip_serializing_if = "Option::is_none")]
+    pub continue_action: Option<ContinueView>,
 }
 
 /// 会话文件清单视图（前端 @ 菜单与「长路径缩写」用）：相对清单 + 真实根。

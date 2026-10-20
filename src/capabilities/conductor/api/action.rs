@@ -466,6 +466,13 @@ impl ConductorHandle {
                     )),
                 }
             }
+            "activate_session" => {
+                let view = SessionOps::activate(self, &s("session_id"))?;
+                Ok(Acted::Done(serde_json::json!({
+                    "ok": true,
+                    "session": view,
+                })))
+            }
             "control_session" => {
                 let action = d::ControlAction::parse(&s("action"))?;
                 let reason = s("reason");

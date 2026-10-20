@@ -121,7 +121,19 @@ impl Conductor {
             }
         }
         // 虚拟机档的租约交给调用方销毁（guest 关机要等它落盘，别占核心线程）。
-        let stop = super::guest_job::GuestStop::new(Arc::clone(&self.vm), subtree.clone());
+        // 共享 guest：按工作根去重（协作子会话与父会话共用一台）；proxy 子工作各自一台。
+        let mut guest_leases: Vec<String> = Vec::new();
+        for sid in &subtree {
+            let Ok(meta) = self.history.meta(sid) else {
+                continue;
+            };
+            if let Ok(Some((lease, _))) = self.guest_scope(&meta) {
+                if !guest_leases.iter().any(|l| l == &lease) {
+                    guest_leases.push(lease);
+                }
+            }
+        }
+        let stop = super::guest_job::GuestStop::new(Arc::clone(&self.vm), guest_leases);
         for sid in &subtree {
             self.sessions.remove(sid);
             // 会话没了，它的裁决队随会话一起消失（等待方与转录都不复存在）。

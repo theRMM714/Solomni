@@ -13,6 +13,49 @@ impl Conductor {
         self.registry.channel(model)
     }
 
+    /// 目的：这台会话的**共享 guest 作用域**——(guest 租约, 该租约对应的会话 meta)。
+    /// 约束：一个主会话树一台 guest；proxy 父会话没有 guest，它的每个子工作临时各占一台。
+    ///   host 档 / proxy 父会话 = None；其余 = (租约, 作用域根 meta)。
+    pub(crate) fn guest_scope(
+        &self,
+        meta: &SessionMeta,
+    ) -> Result<Option<(String, SessionMeta)>, String> {
+        if meta.exec.tier != crate::kernel::api::Tier::Vm {
+            return Ok(None);
+        }
+        // 顶层工作名：子会话沿 parent 走到顶（整棵树只有一个 work/）。
+        let root = self.work_root_of(meta)?;
+        let top = if root == meta.name {
+            meta.clone()
+        } else {
+            self.history.meta(&root)?
+        };
+        // proxy：父会话没有 guest；它下面的**每个子工作**各自一台，子工作内部的子会话共用这一台。
+        if top.mode == "proxy" {
+            if meta.parent.is_none() {
+                return Ok(None);
+            }
+            let mut cur = meta.clone();
+            while let Some(p) = cur.parent.clone() {
+                if p == top.name {
+                    break;
+                }
+                cur = self.history.meta(&p)?;
+            }
+            return Ok(Some((cur.name.clone(), cur)));
+        }
+        // 单 agent / 协作：整棵树共用顶层工作那台 guest。
+        Ok(Some((top.name.clone(), top)))
+    }
+
+    /// 目的：这台会话的工具执行要用的 guest 租约（空 = 本机档 / 没有 guest）。
+    pub(crate) fn guest_lease_for(&self, meta: &SessionMeta) -> Result<String, String> {
+        Ok(self
+            .guest_scope(meta)?
+            .map(|(lease, _)| lease)
+            .unwrap_or_default())
+    }
+
     /// 组装本次工作的沙箱清单：工作根来自 Workspace 端口，模块目录来自清单。
     /// 权限策略在此收口：模块目录只对其所属 agent 可达（同一模块不会同属两个 agent，创建时已校验）。
     /// 每个 agent 的沙箱按 meta.agents 建；共享区根任何时候都有（代拟还没名单时也有，@ 改写要用）。
@@ -97,6 +140,7 @@ impl Conductor {
         // 这一席的身份：用户建的单 agent 会话 = solo，协作子会话 = executor（见 systools/roles.yaml）。
         role: &str,
         tier: crate::kernel::api::Tier,
+        guest_lease: String,
     ) -> crate::capabilities::session::api::MemberTools {
         // 角色表发放的系统工具 id 清单（工具面的名字部分）；核心自有工具按它决定装不装。
         let allowed = self.role_tools(role);
@@ -162,6 +206,7 @@ impl Conductor {
             log: Arc::clone(&self.log),
             tools: Arc::clone(&self.tools),
             tier,
+            guest_lease,
             vm: Arc::clone(&self.vm),
             sandbox: sb.clone(),
             tools_this_turn: self
@@ -287,6 +332,7 @@ impl Conductor {
         net: bool,
         tier: crate::kernel::api::Tier,
         guest: Option<crate::capabilities::vm::api::GuestOs>,
+        guest_lease: String,
     ) -> (
         crate::capabilities::session::api::AgentSession,
         Vec<SessionEvent>,
@@ -316,7 +362,16 @@ impl Conductor {
         )
         .with_guest(guest);
         // 单 agent 工作：用户自己开的那场对话（不是任务链的节点）——身份是 solo。
-        let tools = self.tools_env(modules, sb, unavailable, net, mode, "solo", tier);
+        let tools = self.tools_env(
+            modules,
+            sb,
+            unavailable,
+            net,
+            mode,
+            "solo",
+            tier,
+            guest_lease,
+        );
         let mut s = crate::capabilities::session::api::AgentSession::new(
             &a.name,
             params,

@@ -613,6 +613,7 @@ impl Conductor {
             tool_mode,
             "core_proxy",
             crate::kernel::api::Tier::Host,
+            String::new(),
         );
         let mut s = AgentSession::new(
             d::SPEAKER,

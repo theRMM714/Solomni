@@ -322,6 +322,7 @@ impl Conductor {
                 meta,
                 events,
                 sandboxes,
+                self.guest_lease_for(meta)?,
                 // 重建出来的整队进**同一条队**（按转录里已发出的卡号续号，已答过的不重问）。
                 self.desk_of(&meta.name),
             )?)),
@@ -378,6 +379,7 @@ impl Conductor {
                     mode,
                     &role,
                     meta.exec.tier,
+                    self.guest_lease_for(meta)?,
                 );
                 // 回复 id 跨重启单调：从转录里的最大值续号，否则新回复会与旧回复并成一组。
                 tools.reply_seq = crate::capabilities::session::api::max_reply(events);
