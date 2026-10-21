@@ -119,7 +119,7 @@ impl ShareBackend for SmbShare {
 
     /// 约束：只有 QEMU 的 user 网卡有 guestfwd；guest 侧要声明装了 cifs-utils（clients.cifs）。
     fn supports(&self, engine: &str, guest: &GuestImage) -> bool {
-        engine == "qemu" && guest.clients.cifs
+        crate::capabilities::vm::domain::exec::share_carries("smb", engine, guest)
     }
 
     /// 目的：起 helper（匿名共享，每个挂载点一个共享名 s0/s1…），产出 guestfwd 隧道参数与 guest 端 cifs 挂载脚本。

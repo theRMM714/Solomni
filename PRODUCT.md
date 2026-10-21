@@ -90,8 +90,8 @@ agent 实例名不得占用 `work` / `children`（名单在 `systools/names.yaml
   虚拟机档的选型、诊断、装配计划、逐项前置检测、guest 端口、QEMU 后端与**执行分派**都已就位
   （建会话 / 启用历史会话时按计划与沙箱装配挂载并拉起 guest，工具命令送进 guest，会话删除时销毁）；
   **一个主会话树共用一台 guest**（子会话与 proxy 子工作的工具租约都指向顶层工作；guest 内按 agent 用 Linux helper 做文件可达范围隔离；环境随主会话，AI 不能给子会话另选档位 / 虚拟根）；
-  **按组合放开**：guest 做成五轴可扩展组合（宿主 × 引擎 × guest × 通道 × 共享），各平台默认吃当前最强组合并逐级回退；
-  Linux（QEMU/KVM + virtiofs，缺 virtiofsd 时退 9p）与 Windows（QEMU/WHPX + SMB 实时共享，缺 smbd 时退 QGA 复制）已真机验收，macOS 的组合未验（未验组合禁用并逐项列出缺什么、每项怎么补）；
+  **按组合放开**：guest 做成五轴可扩展组合（宿主 × 引擎 × guest × 通道 × 共享），各平台按用户共享链取第一个可用档；copy 不在用户链里（只作开发/应急）；
+  Linux（QEMU/KVM + virtiofs，缺 virtiofsd 时退 9p）与 Windows（QEMU/WHPX + SMB guestfwd）已真机验收；Windows 缺 smbd 时虚拟机档不可用（先补齐，不降级）；macOS 的组合未验（未验组合禁用并逐项列出缺什么、每项怎么补）；
   未开放组合上已存在的会话不拦打开（列表标注"虚拟机档不可用"，本次按本机档执行）。
   guest 默认 Debian stable（13 / trixie）；QEMU 等依赖**不预置、不分发**，由 provision 能力在 Linux / Windows 上按清单下载并解包进项目内（需用户同意），产品检测、指路并给出"怎么补"（入口 `--provision`，契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)）。
 - **运行能力**：模块用 `runtimes` 声明工具需要哪些运行包，包放在 `runtimes/`（放入即出现）；

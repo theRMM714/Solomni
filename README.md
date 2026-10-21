@@ -36,7 +36,7 @@ Solomni 是一个**跑在自己机器上的 agent 运行环境（AgentOS）**：
 - **会话与历史**：一个工作一个目录 `session/<工作名>/`；回档 / 留档 / 删除 / 恢复、转录回放、上下文压缩、共享区版本化（`work_pull` / `work_commit` / `work_versions` / `work_resolve`）。
 - **三重隔离**：内置工具越界拒绝 → 工具进程走守门进程（环境白名单 / 进程树 / 超时杀整棵树）→ 平台围栏（Windows AppContainer、Linux Landlock、macOS seatbelt）；装不上就如实报告能力等级。
 - **两档执行**：本机档（默认）与虚拟机档（模块工具在 guest 里跑）。虚拟机档按宿主 × 引擎 × guest × 通道 × 共享五轴可插；
-  Linux（QEMU/KVM + virtiofs，缺 virtiofsd 时退 9p）与 Windows（QEMU/WHPX + SMB 实时共享，缺 smbd 时退 QGA 复制）已真机验收，macOS 未验（`VERIFIED_HOSTS` 只放开 Linux / Windows；缺 QEMU 取包与 Apple vz 引擎，见 [tests/macos/gaps.yaml](tests/macos/gaps.yaml)）；
+  Linux（QEMU/KVM + virtiofs，缺 virtiofsd 时退 9p）与 Windows（QEMU/WHPX + SMB guestfwd）已真机验收；Windows 缺 smbd 时虚拟机档不可用（先补齐，不降级）；copy 只是开发/应急通道，不参与用户档。macOS 未验（`VERIFIED_HOSTS` 只放开 Linux / Windows；缺 QEMU 取包与 Apple vz 引擎，见 [tests/macos/gaps.yaml](tests/macos/gaps.yaml)）；
   虚拟机档在 Linux / Windows 上不可用时，网页与命令行都能按同一份清单补齐依赖（见下）。细节见 [docs/vm/README.md](docs/vm/README.md)，运行包契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)。
 - **登记处**：供应商 / 模型 / agent / 设置四份 YAML，全在 `.home/`，由界面管理；通道密钥只在本机登记处与核心的出站调用里（边界见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)）。
 - **两种交互面**：终端转录中心（默认）与本地网页（`-webUI`，只绑 `127.0.0.1`，默认 3081）。

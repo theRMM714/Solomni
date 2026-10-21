@@ -89,21 +89,22 @@ files:                      # 包内文件指纹：用于可复现与呈现
 
 虚拟机档的判据分两层：**机器能力**（虚拟机监视器 / guest 后端 / 引擎 / 共享档，`vm::vm_capability`）决定界面能不能**选**；
 **虚拟根是会话级**——创建（`create_session` 的 `guest`）或会话配置里从清单选一个（界面给下拉，不让人填路径），
-保存 /「开始」时与机器能力合并成严格判据（`vm::tier_readiness` / `tier_refusal`）。
+保存 /「开始」时与机器能力合并成严格判据（`vm::tier_readiness` / `tier_refusal`）；
+会话级还会检查所选 guest 的 `clients` 有没有本平台用户档能承载的，没有就在起 guest 前拒绝并指路 `guest.yaml`。
 
 当前状态：选型、诊断、装配计划、逐项前置检测、guest 生命周期与**执行分派**都已就位，并按**五轴组合**做成可插的形状——
 宿主 × `VmEngine`（当前 `QemuEngine`）× `GuestImage`（虚拟根里可放 `guest.yaml` 声明 id / arch / os / agent / clients / runtimes）×
-`GuestChannel`（当前 QGA）× `ShareBackend`（`VirtioFsShare` / `NinePShare` / `CopyShare` / `SmbShare`）。按平台的组合回退链是数据（`default_combos` / `choose_combo`），
+`GuestChannel`（当前 QGA）× `ShareBackend`（用户档 `VirtioFsShare` / `NinePShare` / `SmbShare`；`CopyShare` 仅开发/应急；`NoneShare` 仅供给编排）。按平台的用户组合链是数据（`default_combos` / `share_chain`），
 加速器按平台给（`accel=kvm:tcg` / `accel=whpx:tcg` / `accel=hvf:tcg`）。**root 只有磁盘镜像一种**，会话每次叠一份每租约可写层（镜像清单见下）。
 **建 / 改配 / 删除会话都分两段**：核心线程只做校验、占名与出计划，起停 guest 在调用方线程上跑，核心不陪着等 guest。
 宿主路径 ↔ guest 路径只有一座桥（`domain/paths.rs`：同方言恒等，跨方言编进镜像根，**正反两向**），**挂载点、命令 `cwd` / 路径型 `env`、
 工作环境提示词、系统工具的寻址四处共用它**；运行包按 guest 平台分包（`runtimes/<id>/<os>-<arch>/`）。整条业务住在独立能力 `vm`
-（入口见 [docs/vm/README.md](docs/vm/README.md)，逐文件职责见 [docs/vm/unit-map.md](docs/vm/unit-map.md)）；就绪项 `guest` 按**已验平台数据表**（`VERIFIED_HOSTS`）放开，并带上本平台**已实现**的组合。
+（入口见 [docs/vm/README.md](docs/vm/README.md)，逐文件职责见 [docs/vm/unit-map.md](docs/vm/unit-map.md)）；就绪项 `guest` 按**已验平台数据表**（`VERIFIED_HOSTS`）放开，并带上本平台**用户共享链**的组合。
 
 前置检测是**一份逐项清单**（机器能力 `vm::vm_requirements`，界面与 `--doctor` 照抄同一份）：
 
 - 检查项：虚拟机监视器、guest 本体、共享档、QEMU（引擎）；虚拟根（会话级）在保存 /「开始」时合并进来。
-- 每项给出"现状 + 怎么补"；共享档缺外部程序只作事实呈现、不拦档（Linux 缺 `virtiofsd` 退 9p，Windows 缺 `smbd` 退 QGA 复制）。
+- 每项给出"现状 + 怎么补"；共享档是**硬前置**：用户共享链为空则虚拟机档不可用。Linux 缺 `virtiofsd` 仍可用 9p；Windows 缺 `smbd` 直接拒绝（先补齐，copy 不兜底）。
 - 依赖（QEMU / `virtiofsd` / 镜像 / SMB helper）**不预置、不分发**（解归档的入口程序装完补可执行位——便携包里的 zip 常常不带 unix 权限位），
   由 provision 能力在 Linux / Windows 上按 `dependencies.yaml` + `links.yaml` 下载并解包进项目内 `.vm/`（需用户同意；入口 `solomni --provision --ensure --yes`；
   下载后按台账核对 sha256——自托管资产在清单条目里、链接类在 `links.yaml` 里成对，不 pin 的源如实不校验）。
@@ -122,7 +123,7 @@ files:                      # 包内文件指纹：用于可复现与呈现
 - 可选 `guest.yaml` 声明画像（id / arch / agent / os / clients / runtimes）：`runtimes` 是 guest 里确实可用的运行能力名，如 python / node，选型诊断据此不必再要 `runtimes/` 包；缺省按目录名与 Debian 默认（os 缺省 linux），不认识的值如实拒收。
 - 清单（`dependencies.yaml`）给每条 guest 条目一个 `guest:` 名，多条条目可以共同装一个虚拟根；界面读 provision 的虚拟根清单，不自己看盘。
 
-**已真机验收**：Linux（QEMU/KVM + virtiofs，缺 `virtiofsd` 时退 9p）与 Windows（QEMU/WHPX + SMB guestfwd 实时共享；缺 `smbd` 时退 QGA 复制）——引擎级探针（`vm_live_guest_runs_command_inside_guest`）+ 并发可写层探针（`vm_live_two_guests_share_one_base_without_writing_it`）
+**已真机验收**：Linux（QEMU/KVM + virtiofs，缺 `virtiofsd` 时退 9p）与 Windows（QEMU/WHPX + SMB guestfwd 实时共享；缺 `smbd` 时虚拟机档不可用）——引擎级探针（`vm_live_guest_runs_command_inside_guest`）+ 并发可写层探针（`vm_live_two_guests_share_one_base_without_writing_it`）
 与 e2e 的虚拟机档会话场景都过（虚拟根默认 `debian`，`SOLOMNI_VM_GUEST` 可换）；两端的 QEMU 与 guest 镜像由 provision 能力按清单装入，
 Windows 的首启 / 维护启动与 Linux 的 `guest-rootfs` 打包、维护启动见上；Linux 镜像是普通 ext4 磁盘根，由 `unshare -r` + `mke2fs -d` 打包（镜像里的属主才是 root），打包后按源镜像回填特权位与 uid/gid——rdump 与 mke2fs 都拿不到它们。整段编排在 Rust 侧。
 多台虚拟机档会话并发时各写自己的**每租约可写层**（不共写基础镜像），同时台上限 `max_guests`（见 [docs/vm/README.md](docs/vm/README.md) 的「并发」）。

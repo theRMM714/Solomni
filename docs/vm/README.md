@@ -22,12 +22,14 @@
 
 - 引擎：`QemuEngine`（唯一引擎）。
 - 命令通道：`QemuHandle`（QEMU + QGA）。chardev 就绪前连上的那条会被 QEMU RST，握手失败即重连再握手——通道被换掉不是故障。
-- 共享后端（默认在前）：
+- 共享后端（用户档，默认在前）：
   - `VirtioFsShare`：QEMU vhost-user-fs，Linux 默认档。
   - `NinePShare`：挂载式共享，Linux 回退档。
-  - `SmbShare`：用户态 SMB helper + guestfwd 隧道，Windows 默认档。
-  - `CopyShare`：QGA 复制，三平台兜底。
+  - `SmbShare`：用户态 SMB helper + guestfwd 隧道，Windows 默认档（硬前置）。
+  - `CopyShare`：QGA 复制，**仅开发/应急**（`SOLOMNI_VM_SHARE=copy`），不参与用户链。
+  - `NoneShare`：内部无共享档（无挂载、无同步），只给供给编排。
 - 平台组合是数据（`default_combos` / `share_chain`）：共享档在**起 guest 那一刻**按候选挑，不在装配期定。
+  空候选只从用户档里挑；copy 只有在显式候选（开发/应急开关）里才会被选。
 - 加速器按平台给：`accel=kvm:tcg` / `accel=whpx:tcg` / `accel=hvf:tcg`。共享要隧道时给 `restrict=on` 网卡。
 
 ### 执行分派与就绪
@@ -40,7 +42,7 @@
 - **guest 装配按整棵树聚合**：plan / 沙箱 / 包冲突 / 定版取作用域根与整棵子树的并集；新子会话的包已被运行 guest 装载就直接加入，
   引入新包时要求树空闲后按新装配重建，不做运行包动态加载。
 - 就绪项 `guest` 按**已验平台数据表**（`VERIFIED_HOSTS` = linux / windows）放开，并带上本平台**已实现**的组合。
-- 已验组合：Linux QEMU/KVM + virtiofs（virtiofsd 不在场或**不能执行**时退 9p）；Windows QEMU/WHPX + SMB guestfwd（缺 smbd 时退 QGA 复制）。
+- 已验组合：Linux QEMU/KVM + virtiofs（virtiofsd 不在场或**不能执行**时退 9p）；Windows QEMU/WHPX + SMB guestfwd（缺 smbd 时虚拟机档不可用，先补齐，不降级）。
 - macOS 未验，缺口见 [tests/macos/gaps.yaml](../../tests/macos/gaps.yaml)。
 
 ### 判据与预检
@@ -53,6 +55,7 @@
 **静态预检**在「开始」那一刻一次走完：
 
 - 机器能力 × 虚拟根（名字 → `.vm/guest/<名>`，`resolve_guest`）× guest 声明的运行能力（`guest.yaml` 的 `runtimes`）× 模块声明 × 包库。
+- 共享档按所选 guest 的 `clients` 再判：没有本平台用户档能承载的客户端就在起 guest 前拒绝，并指路 `guest.yaml`；copy 不参与这条判据（开发/应急开关除外）。
 - **模块工具的入口**：相对路径入口必须在场且能跑；两档都查——虚拟机档按 **guest 的 os** 解析名字，跨平台还看文件形式（宿主编出来的产物在 guest 里跑不了，一样算缺）。
 - 缺任何一项都**如实拒绝、先预检再启动**（不拉一台跑不了工具的 guest）：`plan` 对缺包同样返回拒绝，`diagnose_text` 给出「把包放进 `runtimes/`、或让镜像声明」的说法。
 
@@ -104,15 +107,17 @@
 | `VmEngine` | 探测可用性、拉 / 停 VM、加速器、磁盘、网卡 | `QemuEngine`（三平台） |
 | `GuestImage` | 镜像描述：id / arch / os / 磁盘镜像 / kernel / initrd / agent / 声明的共享客户端与运行能力 | 虚拟根 `debian`（默认，画像 id `debian-13-genericcloud-amd64`）、`windows`、用户自备 |
 | `GuestChannel` | 在 guest 里执行、文件读写、销毁 | `QemuHandle`（QEMU + QGA） |
-| `ShareBackend` | 宿主↔guest 共享，声明支持的引擎与 guest | `VirtioFsShare`（Linux 默认）、`NinePShare`（Linux 回退）、`SmbShare`（Windows 默认，guestfwd + 用户态 smbd helper）、`CopyShare`（三平台兜底） |
+| `ShareBackend` | 宿主↔guest 共享，声明支持的引擎与 guest | `VirtioFsShare`（Linux 默认）、`NinePShare`（Linux 回退）、`SmbShare`（Windows 默认，guestfwd + 用户态 smbd helper）、`CopyShare`（仅开发/应急）、`NoneShare`（内部无共享，供给编排） |
 
-各平台默认与回退（性能优先）：
+各平台用户共享链（性能优先）：
 
-| 宿主 | 引擎 | 共享 | 加速 | 回退链 |
+| 宿主 | 引擎 | 共享 | 加速 | 用户链 |
 | --- | --- | --- | --- | --- |
-| Linux | QEMU | virtiofs（**已验**，默认；缺 virtiofsd 时退 9p） | `accel=kvm:tcg` | virtiofs → 9p → copy |
-| macOS | QEMU（未验） | 9p | `accel=hvf:tcg` | 9p → copy |
-| Windows | QEMU | smb（**已验**，默认；缺 smbd 时退 copy） | `accel=whpx:tcg` | smb → copy |
+| Linux | QEMU | virtiofs（**已验**，默认；缺 virtiofsd 时退 9p） | `accel=kvm:tcg` | virtiofs → 9p |
+| macOS | QEMU（未验） | 9p | `accel=hvf:tcg` | 9p |
+| Windows | QEMU | smb（**已验**，硬前置） | `accel=whpx:tcg` | smb |
+
+copy 不在任何用户链里；只有进程级开发/应急开关（`SOLOMNI_VM_SHARE=copy`）会把它作为该进程 VM 会话的唯一候选，并在日志里警告性能不可用。自定义 guest 没有声明本平台可承载的客户端时，`tier_readiness` 在起 guest 前拒绝。
 
 - **root 只能是一份磁盘镜像**（qcow2 / raw ext4；`classify_base` 只认这个）：会话每次叠一份每租约可写层，谁也不写基础镜像；有内核就直启（`root=/dev/vda`），没有就靠镜像自带引导。需要共享时 guest 拿 `restrict=on` 的网卡（出站全断，`guestfwd` 内部隧道可用）。
 - **模块构建也能落 guest**（`solomni --build=<模块 id> --guest=<虚拟根>`）：模块目录以读写挂进 guest、构建期能力按 `needs` 装载，
@@ -130,7 +135,8 @@
 - 依赖（QEMU / `virtiofsd` / SMB helper / 镜像）**不预置、不分发**，由 `provision` 能力按清单下载并解包进项目内 `.vm/`（清单 `dependencies.yaml`、下载源 `links.yaml`，需用户同意）。
 - 补齐入口是**界面里的一个动作**：虚拟机档不可用时，配置面板与创建向导给出「补齐虚拟机依赖」（先看清单与体积、再确认下载、按进度长轮询）；CLI `solomni --provision --ensure --yes` 是没有界面时的等价路径。
 - 设置里没登记 `qemu_path` / `virtiofsd_path` / `smbd_path` 时，**判据每次取用时**自动采用项目内补齐的那个可执行文件（显式登记优先）——装完即生效，不必重启。
-- 共享后端也在此列：全部适配器在装配期持有，哪一档在起 guest 那一刻按 `share_chain` 的候选挑——装完 virtiofsd / smbd，**下一次启动就用上**。
+- 共享后端也在此列：用户档在装配期持有，哪一档在起 guest 那一刻按 `share_chain` 的候选挑——装完 virtiofsd / smbd，**下一次启动就用上**。
+- **开发/应急 copy**：进程启动时设 `SOLOMNI_VM_SHARE=copy`，该进程的 VM 会话强制走 copy（QGA 复制），日志打警告。它不在用户链、不进用户界面；只在开发/运维细则里出现。普通进程不装配它。
 
 ## 本目录
 

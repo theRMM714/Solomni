@@ -49,11 +49,17 @@ impl VmService {
         }
     }
 
-    /// 目的：这次启动的共享后端候选：GuestSpec.shares 有就按它（按 id 认），没有就按本 service 持有的顺序。
+    /// 目的：这次启动的共享后端候选：GuestSpec.shares 有就按它（按 id 认），没有就按本 service 持有的用户档。
     /// 约束：候选只收本 service 真持有的那些——传进来的 id 认不出就跳过（不 new 别人的适配器）。
+    /// 约束：空候选只返回**非 emergency** 档；copy 只有在 GuestSpec.shares 显式写出时才可能被选中。
     fn candidates(&self, want: &[&'static str]) -> Vec<Arc<dyn ShareBackend + Send + Sync>> {
         if want.is_empty() {
-            return self.shares.clone();
+            return self
+                .shares
+                .iter()
+                .filter(|s| !s.is_emergency())
+                .cloned()
+                .collect();
         }
         want.iter()
             .filter_map(|id| self.shares.iter().find(|s| s.id() == *id).cloned())

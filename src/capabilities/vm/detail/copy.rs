@@ -1,9 +1,9 @@
-//! 目的：ShareBackend 的 QGA 复制实现——宿主目录与 guest 之间按需打包/解包（三平台通用，不需要宿主侧文件服务）。
+//! 目的：ShareBackend 的 QGA 复制实现——**仅开发/应急**；宿主目录与 Linux guest 之间按趟打包/解包（不需要宿主侧文件服务）。
 //! 管：prepare 里的建目录脚本；sync_in / sync_out 的 tar 打包与经命令通道的文件搬运（每趟同步语义）。
 //! 不管：命令通道与 QGA 细节（detail/qemu.rs）、镜像判定与挂载清单（domain/guest.rs）。
-//! 联动：实现 ports::ShareBackend；由组合根构造、service.rs 持有；实时共享方案见 tests/gaps.yaml。
+//! 联动：实现 ports::ShareBackend；只有 `SOLOMNI_VM_SHARE=copy` 的进程会显式选它；不参与用户链。
 
-use crate::capabilities::vm::domain::guest::{GuestAgent, GuestImage, GuestMount, GuestRun};
+use crate::capabilities::vm::domain::guest::{GuestImage, GuestMount, GuestRun};
 use crate::capabilities::vm::ports::{
     GuestChannel, NoShareGuard, ShareBackend, ShareGuard, SharePlan,
 };
@@ -11,7 +11,7 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-/// 目的：QGA 复制共享后端——不依赖宿主侧文件服务，靠命令通道搬 tar。
+/// 目的：QGA 复制共享后端（开发/应急）——不依赖宿主侧文件服务，靠命令通道搬 tar。
 pub struct CopyShare;
 
 impl CopyShare {
@@ -26,9 +26,15 @@ impl ShareBackend for CopyShare {
         "copy"
     }
 
-    /// 约束：只有 QEMU/QGA 这条通道实现了 put_file / get_file，所以 guest 要声明 QGA agent。
+    /// 约束：copy 是开发/应急通道——空候选永不自动选中它，只有显式候选才允许。
+    fn is_emergency(&self) -> bool {
+        true
+    }
+
+    /// 约束：只有 QEMU/QGA 这条通道实现了 put_file / get_file，所以 guest 要声明 QGA agent；
+    ///   脚本是 POSIX，只对 Linux guest 成立。copy 只作开发/应急，不参与用户链。
     fn supports(&self, engine: &str, guest: &GuestImage) -> bool {
-        engine == "qemu" && matches!(guest.agent, GuestAgent::Qga)
+        crate::capabilities::vm::domain::exec::share_carries("copy", engine, guest)
     }
 
     fn prepare(

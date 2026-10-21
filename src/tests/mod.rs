@@ -43,15 +43,13 @@ pub(crate) fn test_guest(name: &str) -> String {
     std::fs::create_dir_all(&dir).expect("建虚拟根目录");
     std::fs::write(dir.join("rootfs.ext4"), b"img").expect("写占位磁盘镜像");
     std::fs::write(dir.join("vmlinuz"), b"stub").expect("写占位内核");
+    // 测试虚拟根声明三种客户端：Linux 用 9p/virtiofs，Windows 用 cifs——同一份夹具在三平台都能承载。
+    std::fs::write(
+        dir.join("guest.yaml"),
+        format!("id: {name}\nclients: [9p, virtiofs, cifs]\n"),
+    )
+    .expect("写 guest.yaml");
     name.to_string()
-}
-
-/// 目的：一个可用于虚拟机档的**基础根**——磁盘镜像 + vmlinuz（要过基础根布局判定）。
-pub(crate) fn base_dir(name: &str) -> std::path::PathBuf {
-    let dir = scratch(name);
-    std::fs::write(dir.join("rootfs.ext4"), b"img").expect("写磁盘镜像");
-    std::fs::write(dir.join("vmlinuz"), b"stub").expect("写内核");
-    dir
 }
 
 /// 目的：隔离落点 `target/test-scratch/contract/<name>`（target/ 不入库）。每次先清空再建。

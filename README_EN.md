@@ -41,7 +41,7 @@ Solomni is an **agent runtime environment (AgentOS) that runs on your own machin
 - **Three isolation layers**: path checks inside the built-in tools → every tool process runs behind the gate process (environment allowlist / process tree / timeout kills the whole tree)
   → platform fences (Windows AppContainer, Linux Landlock, macOS seatbelt); if a mechanism cannot be installed, the capability grade is reported honestly.
 - **Two execution tiers**: host tier (default) and vm tier (module tools run inside a guest). The vm tier is pluggable along host × engine × guest × channel × share;
-  Linux (QEMU/KVM + virtiofs, falling back to 9p when virtiofsd is absent) and Windows (QEMU/WHPX + SMB live share, falling back to QGA copy when smbd is absent) are verified on real machines;
+  Linux (QEMU/KVM + virtiofs, falling back to 9p when virtiofsd is absent) and Windows (QEMU/WHPX + SMB guestfwd) are verified on real machines; without smbd the Windows vm tier is unavailable (provision it; no copy fallback). copy is a development/emergency-only channel and never a user backend;
   macOS is unverified (`VERIFIED_HOSTS` only admits Linux / Windows; QEMU packaging and the Apple vz engine are missing — see [tests/macos/gaps.yaml](tests/macos/gaps.yaml)). When the vm tier is unavailable on Linux / Windows, the web UI and the CLI install the same manifest into the project's `.vm/`.
   Details in [docs/vm/README.md](docs/vm/README.md); runtime package contract in [RUNTIME_SPEC.md](RUNTIME_SPEC.md).
 - **Registry**: four YAML files for providers / models / agents / settings, all under `.home/`, managed from the UI; channel keys live only in the local registry and in the core's outbound calls

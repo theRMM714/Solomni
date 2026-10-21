@@ -135,13 +135,15 @@ pub(crate) fn package_conflicts_flag_overlapping_paths() {
 /// 约束：现在的判据是**逐项清单**：缺哪几项、每项怎么补，都要能读出来。
 #[test]
 pub(crate) fn vm_tier_readiness_gates_creation_and_editing() {
+    // 用测试探测：本机可起虚拟机、平台共享工具在场；不依赖 runner 有没有 /dev/kvm 或 smbd/virtiofsd。
+    let probe = crate::tests::doubles::vm_capable_host_probe();
     // 本机档：任何机器上都能承载（不装载运行包、不要 guest）。
     let host = exec::tier_readiness(
         &crate::tests::root_dir(),
         &ExecSpec::default(),
         None,
         None,
-        &crate::kernel::detail::HostProbeAdapter,
+        probe.as_ref(),
     );
     assert!(host.ready(), "本机档没有前置条件");
     assert!(host.requirements.is_empty(), "本机档不该有虚拟机前置清单");
@@ -150,7 +152,7 @@ pub(crate) fn vm_tier_readiness_gates_creation_and_editing() {
         &ExecSpec::default(),
         None,
         None,
-        &crate::kernel::detail::HostProbeAdapter
+        probe.as_ref()
     )
     .is_none());
 
@@ -165,7 +167,7 @@ pub(crate) fn vm_tier_readiness_gates_creation_and_editing() {
         &ghost,
         None,
         None,
-        &crate::kernel::detail::HostProbeAdapter,
+        probe.as_ref(),
     );
     assert!(!r.ready(), "前置不齐就不成立：{:?}", r);
     let guest_item = r
@@ -187,7 +189,7 @@ pub(crate) fn vm_tier_readiness_gates_creation_and_editing() {
                     && crate::capabilities::vm::domain::exec::share_available(
                         c.share,
                         None,
-                        &crate::kernel::detail::HostProbeAdapter,
+                        probe.as_ref(),
                     )
             })
             .expect("本平台要有可用的组合");
@@ -1380,12 +1382,36 @@ pub(crate) fn share_syncs_around_each_run_and_releases_on_stop() {
     assert!(ecalls.iter().any(|c| c == "stop:w"), "{:?}", ecalls);
 }
 
+/// 目的：内部 none 档只给供给编排：空计划、无引擎参数、无挂载脚本。
+#[test]
+pub(crate) fn none_share_plans_no_mounts_or_engine_args() {
+    use crate::capabilities::vm::detail::NoneShare;
+    use crate::capabilities::vm::ports::ShareBackend;
+    let share = NoneShare::new();
+    assert!(share.supports("qemu", &GuestImage::linux("t", "/d".into(), None, None)));
+    let (plan, _guard) = share.prepare("qemu", &[], None).expect("空计划");
+    assert_eq!(plan.kind, "none");
+    assert!(plan.engine_args.is_empty());
+    assert!(plan.guest_scripts.is_empty());
+    assert!(!plan.needs_net && !plan.needs_shared_mem);
+    let mounts = vec![crate::capabilities::vm::domain::guest::GuestMount {
+        host: std::path::PathBuf::from("/host/work"),
+        guest: "/work".to_string(),
+        read_only: false,
+    }];
+    assert!(
+        share.prepare("qemu", &mounts, None).is_err(),
+        "none 只给无挂载的供给编排"
+    );
+}
+
 /// 目的：复制后端不产生引擎参数，只在 guest 里建目录；宿主侧 tar 打包/解包真跑通。
 #[test]
 pub(crate) fn copy_share_plans_mkdirs_and_tar_round_trips_on_the_host() {
     use crate::capabilities::vm::detail::copy::{host_tar, host_untar, CopyShare};
     use crate::capabilities::vm::ports::ShareBackend;
     let share = CopyShare::new();
+    assert!(share.is_emergency(), "copy 是 emergency 档，空候选不自动选");
     let mounts = vec![GuestMount {
         host: std::path::PathBuf::from("/host/work"),
         guest: "/work".to_string(),
@@ -1728,7 +1754,9 @@ pub(crate) fn vm_capability_is_machine_only_while_session_readiness_needs_base()
         ..Default::default()
     };
     probe.files.push(qemu.clone());
-    probe.exes.push("virtiofsd".to_string());
+    probe
+        .exes
+        .push(if cfg!(windows) { "smbd" } else { "virtiofsd" }.to_string());
     let q = qemu.to_string_lossy().into_owned();
     let cap = vm_capability(&VmInputs {
         qemu: Some(q.as_str()),
@@ -1912,7 +1940,7 @@ sleep 300
 }
 
 /// 目的：共享档的"在场"判据与就绪说明同源——登记了 / PATH 里有 virtiofsd 才算 virtiofs 可用，否则如实退到 9p。
-/// 约束：共享档缺失**不参与承载判定**（有 9p 回退），只作事实呈现；否则会把性能档缺失误报成档位不可用。
+/// 约束：共享档是硬前置；Linux 缺 virtiofsd 仍算可用（9p），Windows 缺 smbd 则判否。copy 不进用户判据。
 #[test]
 pub(crate) fn share_availability_gates_the_effective_combo() {
     use crate::capabilities::vm::domain::exec::{share_available, share_tool_of};
@@ -1985,7 +2013,7 @@ pub(crate) fn share_availability_gates_the_effective_combo() {
             detail
         );
     }
-    // 就绪项：没有 virtiofsd 时 share 项仍 met（不拦档），但要说清回退与怎么补。
+    // 就绪项：共享档是硬前置。Linux 缺 virtiofsd 仍可用 9p；Windows 缺 smbd 直接判否。
     let spec = ExecSpec {
         tier: Tier::Vm,
         guest: None,
@@ -1997,19 +2025,25 @@ pub(crate) fn share_availability_gates_the_effective_combo() {
         .iter()
         .find(|x| x.id == "share")
         .expect("清单里要有共享档这一项");
-    assert!(share.met, "共享档缺失不该拦住虚拟机档（有回退档）");
     if cfg!(windows) {
-        // Windows 的已实现链是 smb → copy：缺 smbd 时退回 copy，说明里要同时给出 smb/smbd 与回退。
+        assert!(!share.met, "Windows 缺 smbd：共享档必须判否");
         assert!(
-            share.detail.contains("smb")
-                && share.detail.contains("smbd")
-                && share.detail.contains("copy"),
-            "要说清回退到 copy 与怎么补 smbd：{:?}",
+            share.detail.contains("smb") && share.detail.contains("smbd"),
+            "要说清缺 smbd：{:?}",
             share
         );
+        assert!(
+            !share.detail.contains("copy") && !share.how.contains("copy"),
+            "用户档文案不许再拿 copy 兜底：{:?}",
+            share
+        );
+        assert!(!share.how.is_empty(), "判否要给补齐办法：{:?}", share);
     } else {
-        // Linux：virtiofs 优先，缺 virtiofsd 时退回 9p；macOS：默认链是 vz/virtiofs（vz 未实现），
-        // 实际落到 qemu/9p——9p 不需要外部工具，没有「怎么补」可写。
+        assert!(
+            share.met,
+            "9p 不需要外部工具，Linux/macOS 仍可用：{:?}",
+            share
+        );
         assert!(share.detail.contains("9p"), "要说清落到 9p：{:?}", share);
         if cfg!(target_os = "linux") {
             assert!(
@@ -2084,7 +2118,7 @@ pub(crate) fn share_is_picked_per_guest_at_start() {
     );
 }
 
-/// 目的：按平台的组合回退链是数据；起 guest 的共享档候选只收"已实现 + 工具在场"的那些，顺序就是优先序。
+/// 目的：按平台的用户共享链是数据；起 guest 的候选只收"用户档 + 工具在场"的那些，顺序就是优先序。
 #[test]
 pub(crate) fn share_chain_follows_the_platform_and_skips_absent_tools() {
     use crate::capabilities::vm::domain::exec::{default_combos, share_chain};
@@ -2099,34 +2133,215 @@ pub(crate) fn share_chain_follows_the_platform_and_skips_absent_tools() {
     assert_eq!(ids("macos")[0], "vz/virtiofs");
     assert_eq!(ids("windows")[0], "qemu/smb");
 
-    // 空环境：要外部工具的档全不在候选里，不需要工具的 9p / copy 照旧可用（回退档永远兜得住）。
+    // 空环境：要外部工具的档不在候选里；9p 不需要外部工具，Windows 没有用户档。
     let bare = FixedProbe::default();
-    assert_eq!(share_chain("linux", None, &bare), vec!["9p", "copy"]);
-    assert_eq!(share_chain("windows", None, &bare), vec!["copy"]);
+    assert_eq!(share_chain("linux", None, &bare), vec!["9p"]);
+    assert_eq!(share_chain("windows", None, &bare), Vec::<&str>::new());
     assert_eq!(
         share_chain("macos", None, &bare),
-        vec!["9p", "copy"],
+        vec!["9p"],
         "vz 未实现：macOS 的候选从 qemu 那一档起"
     );
 
-    // 工具在场：性能更高的那一档排到前面（Linux 没 virtiofsd 就退 9p，Windows 没 smbd 就只有 copy）。
+    // 工具在场：性能更高的那一档排到前面（Linux 没 virtiofsd 就退 9p；Windows 只有 smb）。
     let mut with_tools = FixedProbe::default();
     with_tools.exes.push("virtiofsd".to_string());
     with_tools.exes.push("smbd".to_string());
     assert_eq!(
         share_chain("linux", None, &with_tools),
-        vec!["virtiofs", "9p", "copy"]
+        vec!["virtiofs", "9p"]
     );
-    assert_eq!(
-        share_chain("windows", None, &with_tools),
-        vec!["smb", "copy"]
-    );
+    assert_eq!(share_chain("windows", None, &with_tools), vec!["smb"]);
     // 登记了路径就以登记的为准（不是在 PATH 上碰运气）。
     assert_eq!(
         share_chain("linux", Some("no/such/virtiofsd"), &with_tools),
-        vec!["9p", "copy"],
+        vec!["9p"],
         "登记了一个不在场的路径：那一档不进候选"
     );
+    // copy 永远不会出现在用户链里；它只由进程级隐藏开关显式启用。
+    for host in ["linux", "windows", "macos", "unknown"] {
+        assert!(
+            !share_chain(host, None, &with_tools).contains(&"copy"),
+            "copy 不得进用户链：{host}"
+        );
+    }
+}
+
+/// 目的：测试 vm 面同时持有 9p 与 smb 替身——Linux/macOS 与 Windows 的真实候选都能落到已持有的档上。
+#[test]
+pub(crate) fn test_vm_holds_a_share_for_each_platform_chain() {
+    use crate::capabilities::vm::domain::guest::{GuestImage, GuestSpec};
+    let svc = crate::tests::doubles::test_vm(Arc::new(InMemoryPackages::empty()));
+    for share in ["9p", "smb"] {
+        let spec = GuestSpec {
+            lease: format!("w-{share}"),
+            image: GuestImage::linux(
+                "test",
+                std::path::PathBuf::from("/base/rootfs.ext4"),
+                None,
+                None,
+            ),
+            mounts: Vec::new(),
+            net: false,
+            engine_path: None,
+            share_path: None,
+            shares: vec![share],
+            seed: None,
+            isolated: false,
+        };
+        svc.guest_start(&spec)
+            .unwrap_or_else(|why| panic!("测试 vm 面要持有 {share} 替身：{why}"));
+    }
+}
+
+/// 目的：copy 的开关只认 `copy` 这个值；空/其它值都不算打开。
+#[test]
+pub(crate) fn copy_switch_only_opens_for_the_copy_value() {
+    use crate::capabilities::vm::domain::exec::copy_share_setting;
+    assert!(copy_share_setting(Some("copy")));
+    assert!(copy_share_setting(Some(" COPY ")));
+    assert!(!copy_share_setting(Some("1")));
+    assert!(!copy_share_setting(Some("")));
+    assert!(!copy_share_setting(None));
+}
+
+/// 目的：空候选永远不自动选 emergency；只有显式写出 copy 才允许。
+#[test]
+pub(crate) fn emergency_share_is_not_picked_without_an_explicit_candidate() {
+    use crate::capabilities::vm::domain::guest::{GuestImage, GuestSpec};
+    use crate::capabilities::vm::service::VmService;
+    use crate::tests::doubles::NamedShare;
+
+    let emergency = Arc::new(NamedShare::new("copy", true).emergency());
+    let user = Arc::new(NamedShare::new("9p", true));
+    let svc = VmService::new(
+        Arc::new(InMemoryPackages::empty()),
+        Arc::new(crate::tests::doubles::FakeEngine::new()),
+        vec![emergency.clone(), user.clone()],
+    );
+    let spec = |lease: &str, shares: Vec<&'static str>| GuestSpec {
+        lease: lease.to_string(),
+        image: GuestImage::linux(
+            "test",
+            std::path::PathBuf::from("/base/rootfs.ext4"),
+            None,
+            None,
+        ),
+        mounts: Vec::new(),
+        net: false,
+        engine_path: None,
+        share_path: None,
+        shares,
+        seed: None,
+        isolated: false,
+    };
+    svc.guest_start(&spec("w1", Vec::new()))
+        .expect("空候选应该只用用户档");
+    assert_eq!(user.calls(), vec!["prepare"]);
+    assert!(emergency.calls().is_empty(), "copy 不该被自动选中");
+    svc.guest_start(&spec("w2", vec!["copy"]))
+        .expect("显式候选要允许 emergency");
+    assert_eq!(emergency.calls(), vec!["prepare"]);
+}
+
+/// 目的：共享承载判据只认引擎 + guest 客户端；copy 只对 Linux guest 成立。
+#[test]
+pub(crate) fn share_carries_matches_engine_and_guest_clients() {
+    use crate::capabilities::vm::domain::exec::share_carries;
+    use crate::capabilities::vm::domain::guest::{GuestImage, GuestOs};
+    let image = GuestImage::linux(
+        "test",
+        std::path::PathBuf::from("/base/rootfs.ext4"),
+        None,
+        None,
+    );
+    assert!(share_carries("9p", "qemu", &image));
+    assert!(share_carries("virtiofs", "qemu", &image));
+    assert!(
+        !share_carries("smb", "qemu", &image),
+        "默认 Debian 没有 cifs"
+    );
+    assert!(
+        share_carries("copy", "qemu", &image),
+        "copy 只作应急，但 Linux guest 能落"
+    );
+    assert!(
+        !share_carries("virtiofs", "vz", &image),
+        "virtiofs 只落 QEMU"
+    );
+    assert!(!share_carries("copy", "vz", &image));
+
+    let mut win = image.clone();
+    win.os = GuestOs::Windows;
+    win.clients.nine_p = false;
+    win.clients.virtio_fs = false;
+    win.clients.cifs = true;
+    assert!(share_carries("smb", "qemu", &win));
+    assert!(!share_carries("9p", "qemu", &win));
+    assert!(
+        !share_carries("copy", "qemu", &win),
+        "copy 的脚本是 POSIX，不接 Windows guest"
+    );
+}
+
+/// 目的：自定义 guest 没声明任何可用客户端时，起 guest 前就拒绝，不等到挂载失败。
+#[test]
+pub(crate) fn a_guest_without_supported_clients_is_rejected_before_boot() {
+    use crate::capabilities::vm::api::tier_readiness;
+    use crate::kernel::api::{ExecSpec as VmSpec, Tier};
+    let root = crate::tests::scratch("vm-guest-share-readiness");
+    let probe = crate::kernel::detail::HostProbeAdapter;
+    let arch = if cfg!(target_arch = "aarch64") {
+        "arm64"
+    } else {
+        "amd64"
+    };
+    let write_guest = |name: &str, clients: &str| {
+        let dir = root.join(".vm").join("guest").join(name);
+        std::fs::create_dir_all(&dir).expect("建 guest 目录");
+        std::fs::write(dir.join("rootfs.ext4"), b"img").expect("写磁盘镜像");
+        std::fs::write(
+            dir.join("guest.yaml"),
+            format!(
+                "id: {name}\narch: {arch}\nos: linux\nagent: qga\nclients: [{clients}]\nruntimes: [python]\n"
+            ),
+        )
+        .expect("写 guest.yaml");
+    };
+    write_guest("good", "9p, virtiofs, cifs");
+    write_guest("bad", "");
+    // 给一个可执行的共享工具路径：Windows 按文件存在判，Unix 要执行位。
+    let tool = root.join("share-tool");
+    std::fs::write(&tool, b"stub").expect("写工具占位");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).expect("加执行位");
+    }
+    let tool = tool.to_string_lossy().into_owned();
+    let spec = |guest: &str| VmSpec {
+        tier: Tier::Vm,
+        guest: Some(guest.to_string()),
+        ..Default::default()
+    };
+    let find = |guest: &str| {
+        let readiness = tier_readiness(&root, &spec(guest), None, Some(tool.as_str()), &probe);
+        readiness
+            .requirements
+            .into_iter()
+            .find(|r| r.id == "share-guest")
+            .expect("要有 guest 级共享判据")
+    };
+    let good = find("good");
+    assert!(good.met, "声明了可用客户端的 guest 要能承载：{:?}", good);
+    let bad = find("bad");
+    assert!(!bad.met, "没声明客户端的 guest 必须拒绝：{:?}", bad);
+    assert!(
+        bad.detail.contains("未声明") && bad.how.contains("guest.yaml"),
+        "拒绝要说清缺什么、怎么补：{:?}",
+        bad
+    );
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 /// 目的：已验平台是数据表（不是平台 cfg）：Linux 已验，Windows / macOS 未验。
@@ -2138,7 +2353,7 @@ pub(crate) fn verified_platforms_are_a_data_table() {
     );
     assert!(
         crate::capabilities::vm::domain::exec::host_verified("windows"),
-        "Windows 已真机验收（QEMU/WHPX + QGA 复制；e2e 的 vm 场景通过）"
+        "Windows 已真机验收（QEMU/WHPX + SMB guestfwd；e2e 的 vm 场景通过）"
     );
     assert!(
         !crate::capabilities::vm::domain::exec::host_verified("macos"),
@@ -2245,22 +2460,25 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
         seed: None,
         isolated: true,
     };
-    // 共享后端按平台与在场情况选（与组合根同一份判据）：smb(Windows) > virtiofs > copy(QGA) > 9p。
+    // 共享后端按平台用户链选（与组合根同一份判据）：smb(Windows) > virtiofs > 9p。
+    // 没有可用的用户档就如实跳过探针——copy 是开发/应急通道，不在这里兜底。
     let nine = crate::capabilities::vm::detail::NinePShare::new();
-    let copy = crate::capabilities::vm::detail::CopyShare::new();
     let virtiofs = crate::capabilities::vm::detail::VirtioFsShare::new();
     let smb = crate::capabilities::vm::detail::SmbShare::new();
     let use_smb = std::env::consts::OS == "windows" && spec.image.clients.cifs && smbd.is_some();
     let use_virtiofs = !use_smb && virtiofsd.is_some() && spec.image.clients.virtio_fs;
-    let use_copy = !use_smb
-        && !use_virtiofs
-        && (std::env::consts::OS == "windows" || !spec.image.clients.nine_p);
+    let use_nine =
+        !use_smb && !use_virtiofs && std::env::consts::OS != "windows" && spec.image.clients.nine_p;
+    if !use_smb && !use_virtiofs && !use_nine {
+        eprintln!(
+            "[探针] 没有可用的用户共享档（Windows 需要 smbd；Linux/macOS 需要 9p 或 virtiofsd）：跳过真机验收"
+        );
+        return;
+    }
     let backend: &dyn crate::capabilities::vm::ports::ShareBackend = if use_smb {
         &smb
     } else if use_virtiofs {
         &virtiofs
-    } else if use_copy {
-        &copy
     } else {
         &nine
     };
@@ -2281,12 +2499,6 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
             "每租约可写层要建出来：{}",
             overlay.display()
         );
-    }
-    if use_copy {
-        // 复制后端没有"挂载"：进去之前先把宿主目录同步到 guest，marker 才在里面。
-        backend
-            .sync_in(guest.channel(), &spec.mounts)
-            .expect("同步宿主目录进去要成功");
     }
     let run = GuestRun {
         command: format!(
@@ -2333,23 +2545,15 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
         "B 的沙箱要被 Landlock 拒绝：{}",
         fenced.output
     );
-    if use_copy && out.ok {
-        // 复制的语义：执行后整棵回拷，宿主才看得到 guest 的写。
-        backend
-            .sync_out(guest.channel(), &spec.mounts)
-            .expect("回拷 guest 目录要成功");
-    }
-    if use_virtiofs || use_smb {
-        // 实时共享：**不等任何回拷**，宿主此刻就该看得到 guest 写的内容。
-        let written = std::fs::read_to_string(share.join("from-guest.txt")).unwrap_or_default();
-        assert!(
-            written.contains("VM_LIVE_OK"),
-            "{} 要实时可见：宿主读到 {:?}（guest 输出：{}）",
-            backend.id(),
-            written,
-            out.output
-        );
-    }
+    // 实时共享：挂载式后端**不等任何回拷**，宿主此刻就该看得到 guest 写的内容。
+    let written = std::fs::read_to_string(share.join("from-guest.txt")).unwrap_or_default();
+    assert!(
+        written.contains("VM_LIVE_OK"),
+        "{} 要实时可见：宿主读到 {:?}（guest 输出：{}）",
+        backend.id(),
+        written,
+        out.output
+    );
     guest.stop();
     // 同上：删租约要把那份可写层也删掉。
     {
@@ -2441,7 +2645,7 @@ pub(crate) fn vm_live_two_guests_share_one_base_without_writing_it() {
         .expect("读基础镜像 mtime");
     let overlay_dir = crate::tests::scratch("vm-live-overlays-two");
     let engine = crate::capabilities::vm::detail::QemuEngine::with_overlay_dir(overlay_dir.clone());
-    let backend = crate::capabilities::vm::detail::CopyShare::new();
+    let backend = crate::capabilities::vm::detail::NoneShare::new();
     let (plan, _guard) = backend
         .prepare("qemu", &[], None)
         .expect("共享计划要能派生");
@@ -2751,7 +2955,7 @@ pub(crate) fn vm_service_runs_fenced_and_records_packages() {
     use crate::kernel::api::FenceSpec;
     use std::sync::Arc;
     let engine = Arc::new(crate::tests::doubles::FakeEngine::new());
-    let share = Arc::new(crate::tests::doubles::NamedShare::new("copy", true));
+    let share = Arc::new(crate::tests::doubles::NamedShare::new("9p", true));
     let svc = VmService::new(
         Arc::new(InMemoryPackages::empty()),
         engine.clone(),

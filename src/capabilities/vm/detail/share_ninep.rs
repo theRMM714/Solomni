@@ -23,7 +23,7 @@ impl ShareBackend for NinePShare {
 
     /// 约束：只有 QEMU 有 virtfs；guest 侧还要声明了 9p2000.L 客户端（Linux 内核自带）。
     fn supports(&self, engine: &str, guest: &GuestImage) -> bool {
-        engine == "qemu" && guest.clients.nine_p
+        crate::capabilities::vm::domain::exec::share_carries("9p", engine, guest)
     }
 
     fn prepare(

@@ -94,31 +94,13 @@ pub(crate) fn sandboxes_lookup_is_by_agent() {
 #[test]
 pub(crate) fn vm_availability_is_machine_only_and_base_is_session_level() {
     use crate::capabilities::vm::domain::exec::host_verified;
-    use crate::tests::doubles::{core_with_gateway_probe, FixedProbe};
-    // 机器能力探测替身按声明回答；虚拟根由 test_guest 造在 .vm/guest/<名> 下。
-    let base = crate::tests::base_dir("vm-avail-base");
-    // 机器能力齐：有虚拟机监视器，PATH 里有 QEMU 与 virtiofsd（guest 项按已验平台数据表）。
-    let mut probe = FixedProbe {
-        hypervisor: true,
-        ..Default::default()
-    };
-    probe.exes.push("qemu-system-x86_64".to_string());
-    probe.exes.push("virtiofsd".to_string());
-    probe.dirs.push(base.clone());
-    probe.files.push(base.join("vmlinuz"));
-    // 就绪检测问的是"虚拟根在不在场"：替身按声明的根作答（子树算在场，文件按声明）。
-    let guest_dir = crate::tests::root_dir()
-        .join(".vm")
-        .join("guest")
-        .join("vm-avail");
-    probe.guests.push(guest_dir.clone());
-    // 虚拟根现在是"磁盘镜像 + 可选内核"：镜像必须在场（会话的可写层叠在它上面）。
-    probe.files.push(guest_dir.join("rootfs.ext4"));
-    probe.files.push(guest_dir.join("vmlinuz"));
+    use crate::tests::doubles::core_with_gateway_probe;
+    // 虚拟根由 test_guest 造在 .vm/guest/<名> 下，并声明三平台客户端；探测用真实路径 + 本机可起虚拟机。
+    crate::tests::test_guest("vm-avail");
     let mut core = core_with_gateway_probe(
         vec![module_of("a")],
         gw(BTreeMap::new(), Vec::new()),
-        Arc::new(probe),
+        crate::tests::doubles::vm_capable_host_probe(),
     );
     let choices = core.tier_choices();
     let expected = host_verified(std::env::consts::OS);
@@ -163,7 +145,12 @@ pub(crate) fn vm_availability_is_machine_only_and_base_is_session_level() {
     with_guest.guest = Some(guest.clone());
     core.create_work(with_guest)
         .expect("机器能力齐 + 虚拟根在场就该建得起来");
-    let _ = std::fs::remove_dir_all(&base);
+    let _ = std::fs::remove_dir_all(
+        crate::tests::root_dir()
+            .join(".vm")
+            .join("guest")
+            .join("vm-avail"),
+    );
 }
 
 /// 虚拟机档的承载校验：前置条件不具备时，**创建与编辑都如实拒绝**（用户环境问题，不是选型问题）。
@@ -195,7 +182,7 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
         test_prompt(),
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
-        Arc::new(crate::kernel::detail::HostProbeAdapter),
+        crate::tests::doubles::test_host_probe(),
         Arc::new(crate::capabilities::residents::api::NoResidents),
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     );
@@ -247,7 +234,7 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
         test_prompt(),
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
-        Arc::new(crate::kernel::detail::HostProbeAdapter),
+        crate::tests::doubles::test_host_probe(),
         Arc::new(crate::capabilities::residents::api::NoResidents),
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     );
@@ -375,7 +362,7 @@ pub(crate) fn module_without_runtime_is_denied_with_reason() {
         test_prompt(),
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
-        Arc::new(crate::kernel::detail::HostProbeAdapter),
+        crate::tests::doubles::test_host_probe(),
         Arc::new(crate::capabilities::residents::api::NoResidents),
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     );

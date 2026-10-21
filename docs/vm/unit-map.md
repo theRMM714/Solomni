@@ -16,7 +16,8 @@
 | `src/capabilities/vm/detail/fs_packages.rs` | `PackageSource` 的磁盘实现：扫描 runtimes/ |
 | `src/capabilities/vm/detail/guest_helper.rs` | Linux guest 内执行助手：脚本文本、装进 guest、按 host 翻好的允许集走 Landlock + no_new_privs；缺失/装不上 fail-closed |
 | `src/capabilities/vm/detail/qemu.rs` | `VmEngine` / `GuestChannel` 的 QEMU 实现：拉起 qemu-system-*、按需用 qemu-img 建每租约可写层，经 QGA 执行与销毁（含文件搬运） |
-| `src/capabilities/vm/detail/copy.rs` | `ShareBackend` 的 QGA 复制实现：建目录脚本与宿主侧 tar 打包/解包（按趟同步；实时共享是 `share_smb.rs` / `share_virtiofs.rs`） |
+| `src/capabilities/vm/detail/copy.rs` | `ShareBackend` 的 QGA 复制实现（仅开发/应急）：建目录脚本与宿主侧 tar 打包/解包（按趟同步；不参与用户链，实时共享是 `share_smb.rs` / `share_virtiofs.rs`） |
 | `src/capabilities/vm/detail/share_ninep.rs` | `ShareBackend` 的 9p 实现：-fsdev / -device 参数与 guest 端 mount 脚本 |
+| `src/capabilities/vm/detail/share_none.rs` | `ShareBackend` 的内部无共享实现：空计划、无同步，只给供给编排 |
 | `src/capabilities/vm/detail/share_virtiofs.rs` | `ShareBackend` 的 virtiofs 实现：起停 virtiofsd（vhost-user 守护进程，按进程组清理）、-chardev / vhost-user-fs-pci 参数与 guest 端 mount 脚本 |
 | `src/capabilities/vm/detail/share_smb.rs` | `ShareBackend` 的 SMB 实现：探测/起停用户态 smbd helper（匿名共享，凭据随租约回收）、guestfwd 隧道参数与 guest 端 mount -t cifs 脚本 |

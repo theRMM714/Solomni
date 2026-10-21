@@ -1363,6 +1363,17 @@ impl Conductor {
         lease: &str,
     ) -> GuestBoot {
         let share_tool = self.share_tool_path();
+        // 开发/应急开关打开时，本进程的 VM 会话强制走 copy（不追加成回退链）；
+        // 普通进程没有这个开关，share_chain 只给用户档。
+        let shares = if crate::capabilities::vm::api::copy_share_enabled() {
+            vec!["copy"]
+        } else {
+            crate::capabilities::vm::api::share_chain(
+                std::env::consts::OS,
+                share_tool.as_deref(),
+                self.probe.as_ref(),
+            )
+        };
         GuestBoot::new(
             Arc::clone(&self.vm),
             self.root.clone(),
@@ -1371,12 +1382,8 @@ impl Conductor {
             self.registry.app().max_guests,
             self.fence_read_roots(),
             self.qemu_path(),
-            share_tool.clone(),
-            crate::capabilities::vm::api::share_chain(
-                std::env::consts::OS,
-                share_tool.as_deref(),
-                self.probe.as_ref(),
-            ),
+            share_tool,
+            shares,
             lease.to_string(),
             meta.exec.net,
             plan.clone(),

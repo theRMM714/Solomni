@@ -33,7 +33,7 @@ fn conductor_rooted(
         test_prompt(),
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
-        Arc::new(crate::kernel::detail::HostProbeAdapter),
+        crate::tests::doubles::test_host_probe(),
         Arc::new(crate::capabilities::residents::api::NoResidents),
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     )
@@ -78,26 +78,11 @@ fn conductor_for_vm(
 /// 目的：探针按"机器能力齐 + 虚拟根在场"作答（虚拟根的真文件由 `test_guest` 造）。
 /// 约束：与它的两条用例同一道门——本平台 guest 后端尚未真机验收时没有调用方。
 #[cfg(not(target_os = "macos"))]
-fn vm_capable_probe(guest: &str) -> std::sync::Arc<crate::tests::doubles::FixedProbe> {
-    use crate::tests::doubles::FixedProbe;
-    let base = crate::tests::scratch("vm-core-free-base");
-    let guest_dir = crate::tests::root_dir()
-        .join(".vm")
-        .join("guest")
-        .join(guest);
-    let mut probe = FixedProbe {
-        hypervisor: true,
-        ..Default::default()
-    };
-    probe.exes.push("qemu-system-x86_64".to_string());
-    probe.exes.push("virtiofsd".to_string());
-    probe.dirs.push(base.clone());
-    probe.files.push(base.join("rootfs.ext4"));
-    probe.files.push(base.join("vmlinuz"));
-    probe.guests.push(guest_dir.clone());
-    probe.files.push(guest_dir.join("rootfs.ext4"));
-    probe.files.push(guest_dir.join("vmlinuz"));
-    Arc::new(probe)
+fn vm_capable_probe(
+    guest: &str,
+) -> std::sync::Arc<dyn crate::kernel::ports::HostProbe + Send + Sync> {
+    crate::tests::test_guest(guest);
+    crate::tests::doubles::vm_capable_host_probe()
 }
 
 /// 目的：创建虚拟机档会话时**核心线程不陪着等 guest**——起 guest（几十秒到几分钟）在调用方线程上跑。

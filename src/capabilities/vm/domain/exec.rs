@@ -4,6 +4,7 @@
 //! 联动：契约见 docs/vm/README.md 与 RUNTIME_SPEC.md；ExecSpec 是 kernel 的共享事实；被 conductor 与呈现层经 api.rs 消费。
 
 use crate::capabilities::modules::api::Module;
+use crate::capabilities::vm::domain::guest::{GuestAgent, GuestImage, GuestOs};
 use crate::capabilities::vm::domain::packages::{Library, PackageManifest, KIND_SYSTEM};
 use crate::kernel::api::{ExecSpec, Tier};
 use crate::kernel::ports::HostProbe;
@@ -295,7 +296,19 @@ pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
             id: "guest",
             met: guest_backend_verified(),
             detail: if guest_backend_verified() {
-                format!("guest 后端已就位，本平台默认组合 {} 已通过真机验收", combo)
+                if copy_share_enabled() {
+                    "guest 后端已就位，本平台已通过真机验收（当前共享档为开发/应急 copy）"
+                        .to_string()
+                } else if combo == "未定" {
+                    "guest 后端已就位，本平台已通过真机验收；用户共享档当前不可用".to_string()
+                } else {
+                    format!("guest 后端已就位，本平台默认组合 {} 已通过真机验收", combo)
+                }
+            } else if copy_share_enabled() {
+                "guest 后端已就位，但本平台尚未真机验收；当前共享档为开发/应急 copy（就绪项判否）"
+                    .to_string()
+            } else if combo == "未定" {
+                "guest 后端已就位，但本平台尚未真机验收（就绪项判否）".to_string()
             } else {
                 format!(
                     "guest 后端已就位，但本平台默认组合 {} 尚未真机验收（就绪项判否）",
@@ -304,6 +317,9 @@ pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
             },
             how: if guest_backend_verified() {
                 String::new()
+            } else if copy_share_enabled() || combo == "未定" {
+                "在该平台真机上跑通一次 vm 档工具后再放开（现状与验收见 tests/macos/gaps.yaml）"
+                    .to_string()
             } else {
                 format!(
                     "在该平台真机上跑通一次 vm 档工具（默认组合 {}）后再放开（现状与验收见 tests/macos/gaps.yaml）",
@@ -311,8 +327,8 @@ pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
                 )
             },
         },
-        // 共享档：只作事实呈现（**不参与 ready**）——缺 virtiofsd 时组合自动回退 9p，虚拟机档仍可用。
-        share_requirement(vm.share_tool, vm.probe, &combo),
+        // 共享档：**硬前置**——用户链为空就判否；copy 只在开发/应急开关下出现。
+        share_requirement(vm.share_tool, vm.probe),
         // QEMU：不预置、不分发（可由 setup 脚本装进项目内）。没登记就看 PATH——检测那件东西在不在。
         qemu_requirement(vm.qemu, vm.probe),
     ]
@@ -355,10 +371,6 @@ const LINUX_COMBOS: &[Combo] = &[
         engine: "qemu",
         share: "9p",
     },
-    Combo {
-        engine: "qemu",
-        share: "copy",
-    },
 ];
 const MACOS_COMBOS: &[Combo] = &[
     Combo {
@@ -369,25 +381,13 @@ const MACOS_COMBOS: &[Combo] = &[
         engine: "qemu",
         share: "9p",
     },
-    Combo {
-        engine: "qemu",
-        share: "copy",
-    },
 ];
-const WINDOWS_COMBOS: &[Combo] = &[
-    Combo {
-        engine: "qemu",
-        share: "smb",
-    },
-    Combo {
-        engine: "qemu",
-        share: "copy",
-    },
-];
-const FALLBACK_COMBOS: &[Combo] = &[Combo {
+const WINDOWS_COMBOS: &[Combo] = &[Combo {
     engine: "qemu",
-    share: "copy",
+    share: "smb",
 }];
+/// 未列出的平台没有已实现的用户共享档——虚拟机档如实不可用，不拿 emergency 档兜底。
+const FALLBACK_COMBOS: &[Combo] = &[];
 
 /// 目的：某个宿主平台上按"性能优先"排好的组合顺序（回退在后面）；未列出的平台用兜底表。
 pub fn default_combos(host: &str) -> &'static [Combo] {
@@ -413,8 +413,25 @@ fn guest_backend_verified() -> bool {
     host_verified(std::env::consts::OS)
 }
 
-/// 目的：已经实现的共享后端（组合选择与就绪说明**共用同一份**，避免"说要验 A、实际跑 B"）。
-pub const IMPLEMENTED_SHARES: &[&str] = &["9p", "copy", "virtiofs", "smb"];
+/// 目的：用户可选的共享后端（组合选择与就绪说明**共用同一份**，避免"说要验 A、实际跑 B"）。
+/// 约束：copy 不在此列——它是开发/应急通道，只有进程级隐藏开关开启时才参与选档。
+pub const USER_SHARES: &[&str] = &["9p", "virtiofs", "smb"];
+
+/// 目的：进程级开发/应急开关的环境变量；取值为 `copy`（不区分大小写）时才启用 copy。
+pub const COPY_SHARE_ENV: &str = "SOLOMNI_VM_SHARE";
+
+/// 目的：这个进程是否显式打开了 copy 应急通道。
+/// 约束：只在入口层读一次；普通用户进程不设置它，copy 因此不装配、不参与选档。
+pub fn copy_share_enabled() -> bool {
+    let raw = std::env::var(COPY_SHARE_ENV).ok();
+    copy_share_setting(raw.as_deref())
+}
+
+/// 目的：把环境变量的原始值翻成"开没开"（纯函数，测试不用改进程环境）。
+pub(crate) fn copy_share_setting(raw: Option<&str>) -> bool {
+    raw.map(|v| v.trim().eq_ignore_ascii_case("copy"))
+        .unwrap_or(false)
+}
 
 /// 目的：共享档 virtiofs 要用的外部守护进程名（探测 PATH 与设置登记都用它；只支持 Rust 版 CLI）。
 pub const VIRTIOFSD_BIN: &str = "virtiofsd";
@@ -431,21 +448,37 @@ pub fn share_tool_of(share: &str) -> Option<&'static str> {
     }
 }
 
+/// 目的：这个共享档能不能承载这台引擎上的这份 guest（纯事实）。
+/// 约束：适配器的 `supports` 与起 guest 前的就绪判据共用这一份，避免"说 A 跑 B"。
+pub fn share_carries(share: &str, engine: &str, guest: &GuestImage) -> bool {
+    match share {
+        "virtiofs" => engine == "qemu" && guest.clients.virtio_fs,
+        "9p" => engine == "qemu" && guest.clients.nine_p,
+        "smb" => engine == "qemu" && guest.clients.cifs,
+        // copy 是开发/应急通道：脚本是 POSIX（/bin/sh、/tmp、tar -C），只对 Linux guest 成立；
+        // 它不参与用户链，只有 SOLOMNI_VM_SHARE=copy 时才进候选。
+        "copy" => {
+            engine == "qemu" && matches!(guest.agent, GuestAgent::Qga) && guest.os == GuestOs::Linux
+        }
+        _ => false,
+    }
+}
+
 /// 目的：一个外部工具在不在场——登记路径优先（登记了就必须是那个文件），否则看 PATH。
 fn tool_available(name: &str, registered: Option<&str>, probe: &dyn HostProbe) -> bool {
     match registered.map(str::trim) {
         // 登记了就以登记的为准，而且得**能直接执行**——只在场（比如权限位丢了）不算可用，
-        // 否则组合会选它、到启动那一步才炸；这里如实判"不在场"，让回退链与就绪文案说真话。
+        // 否则组合会选它、到启动那一步才炸；这里如实判"不在场"，让就绪文案说真话。
         Some(p) if !p.is_empty() => probe.is_executable(Path::new(p)),
         _ => probe.has_exe(name),
     }
 }
 
-/// 目的：这次启动**可试**的共享后端 id，按本平台"性能优先"的已实现顺序；工具不在场的档不列。
+/// 目的：这次启动**可试**的用户共享后端 id，按本平台"性能优先"的顺序；工具不在场的档不列。
 /// 参数：host = 宿主平台（std::env::consts::OS 的取值）；share_tool = 本平台共享工具路径（None = 兜底 PATH）；probe = 宿主事实。
-/// 约束：只判"已实现 + 工具在场"（share_available）；落不落到这台引擎 / 这份 guest 上由共享后端自己判
-///   （ShareBackend::supports）——所以**选档发生在起 guest 那一刻**，不是装配期定一次。
-/// 约束：引擎恒按 qemu 筛（当前唯一已实现引擎）；返回空表 = 本平台这一份没有可试的共享档。
+/// 约束：只判"用户档 + 工具在场"（share_available）；copy 不在用户链里，由 `copy_share_enabled` 单独决定。
+/// 约束：落不落到这台引擎 / 这份 guest 上由 `share_carries` 判——选档发生在起 guest 那一刻，不是装配期定一次。
+/// 约束：引擎恒按 qemu 筛（当前唯一已实现引擎）；返回空表 = 本平台没有可试的用户共享档。
 pub fn share_chain(
     host: &str,
     share_tool: Option<&str>,
@@ -495,10 +528,10 @@ pub fn runs_on_target(path: &Path, target_os: &str) -> bool {
     }
 }
 
-/// 目的：某个共享档在不在场：先要是已实现的档，再要它要的外部工具在场（不需要工具的档恒在场）。
-/// 约束：组合选择（组合根）与就绪说明共用这一份，避免"说要验 A、实际跑 B"。
+/// 目的：某个用户共享档在不在场：先要是用户档，再要它要的外部工具在场（不需要工具的档恒在场）。
+/// 约束：组合选择（组合根）与就绪说明共用这一份，避免"说要验 A、实际跑 B"；copy 不在用户档里。
 pub fn share_available(share: &str, share_tool: Option<&str>, probe: &dyn HostProbe) -> bool {
-    if !IMPLEMENTED_SHARES.contains(&share) {
+    if !USER_SHARES.contains(&share) {
         return false;
     }
     match share_tool_of(share) {
@@ -507,59 +540,118 @@ pub fn share_available(share: &str, share_tool: Option<&str>, probe: &dyn HostPr
     }
 }
 
-/// 目的：本平台**实际会选**的已实现组合标签（"引擎/共享"）：引擎 qemu 在、共享档在场，按回退链取第一个。
+/// 目的：本平台用户链**实际会选**的组合标签（"引擎/共享"）；开发/应急开关打开时标出 copy。
 fn effective_combo_label(share_tool: Option<&str>, probe: &dyn HostProbe) -> String {
-    default_combos(std::env::consts::OS)
-        .iter()
-        .find(|c| c.engine == "qemu" && share_available(c.share, share_tool, probe))
-        .map(|c| format!("{}/{}", c.engine, c.share))
+    if copy_share_enabled() {
+        return "qemu/copy（应急）".to_string();
+    }
+    share_chain(std::env::consts::OS, share_tool, probe)
+        .first()
+        .map(|share| format!("qemu/{share}"))
         .unwrap_or_else(|| "未定".to_string())
 }
 
-/// 目的：共享档的现状——本平台实现链里性能最高的那一档在不在场、不在就回退到下一档。
-/// 约束：**恒 met、不参与承载判定**——缺 virtiofsd 时组合自动回退 9p，虚拟机档照样可用；
-///   所以"怎么补"写在 detail 里（met 恒真，how 按约定留空），不把性能档的缺失误报成档位不可用。
-fn share_requirement(
-    share_tool: Option<&str>,
-    probe: &dyn HostProbe,
-    effective_combo: &str,
-) -> VmRequirement {
-    let top = default_combos(std::env::consts::OS)
-        .iter()
-        .find(|c| c.engine == "qemu" && IMPLEMENTED_SHARES.contains(&c.share));
-    let detail = match top {
-        None => "本平台还没有已实现的共享档".to_string(),
-        Some(c) => match share_tool_of(c.share) {
-            None => format!("共享档 {}（不需要外部工具）", c.share),
-            Some(name) => {
-                if share_available(c.share, share_tool, probe) {
-                    format!("共享档 {} 可用（找到 {}）", c.share, name)
-                } else {
-                    match share_tool.map(str::trim) {
+/// 目的：共享档的现状——本平台用户链有没有能用的挂载式后端；没有就如实判否。
+/// 约束：这是**硬前置**，不再回退 copy；Linux 缺 virtiofsd 时 9p 仍算可用。
+///   "怎么补"写在 how 里；copy 只由开发/应急开关启用，并在 detail 里明确标出。
+fn share_requirement(share_tool: Option<&str>, probe: &dyn HostProbe) -> VmRequirement {
+    if copy_share_enabled() {
+        return VmRequirement {
+            id: "share",
+            met: true,
+            detail: format!(
+                "共享档 copy 已由开发/应急开关启用（{}={}）：性能不可用，不参与用户档",
+                COPY_SHARE_ENV, "copy"
+            ),
+            how: String::new(),
+        };
+    }
+    let chain = share_chain(std::env::consts::OS, share_tool, probe);
+    let top = top_user_combo();
+    if chain.is_empty() {
+        let (detail, how) = match top {
+            None => (
+                "本平台还没有已实现的用户共享档".to_string(),
+                "换本机档；虚拟机档需要挂载式共享（Linux 9p/virtiofs、Windows smb）".to_string(),
+            ),
+            Some(c) => {
+                let detail = match share_tool_of(c.share) {
+                    None => format!("共享档 {} 不可用：本平台用户链为空", c.share),
+                    Some(name) => match share_tool.map(str::trim) {
                         Some(p)
                             if !p.is_empty()
                                 && probe.is_file(Path::new(p))
                                 && !probe.is_executable(Path::new(p)) =>
                         {
                             format!(
-                                "共享档 {} 登记的那个不能执行（{}）：已按组合回退到 {}；给它执行位，或换成 PATH 上的 {} 即可启用",
-                                c.share, p, effective_combo, name
+                                "共享档 {} 登记的那个不能执行（{}）：虚拟机档不可用",
+                                c.share, p
                             )
                         }
                         _ => format!(
-                            "共享档 {} 不在场（没找到 {}）：已按组合回退到 {}；把 {} 放进 PATH，或在设置里登记它的完整路径即可启用",
-                            c.share, name, effective_combo, name
+                            "共享档 {} 不在场（没找到 {}）：虚拟机档不可用",
+                            c.share, name
                         ),
-                    }
-                }
+                    },
+                };
+                (detail, share_how(c.share))
             }
+        };
+        return VmRequirement {
+            id: "share",
+            met: false,
+            detail,
+            how,
+        };
+    }
+    let best = chain[0];
+    let detail = match top {
+        Some(c) if c.share == best => match share_tool_of(best) {
+            Some(name) => format!("共享档 {} 可用（找到 {}）", best, name),
+            None => format!("共享档 {}（不需要外部工具）", best),
         },
+        Some(c) => match share_tool_of(c.share) {
+            Some(name) => match share_tool.map(str::trim) {
+                Some(p)
+                    if !p.is_empty()
+                        && probe.is_file(Path::new(p))
+                        && !probe.is_executable(Path::new(p)) =>
+                {
+                    format!(
+                        "共享档 {} 登记的那个不能执行（{}）：使用 {}；给它执行位，或换成 PATH 上的 {} 即可启用",
+                        c.share, p, best, name
+                    )
+                }
+                _ => format!(
+                    "共享档 {} 不在场（没找到 {}）：使用 {}；把 {} 放进 PATH，或在设置里登记它的完整路径即可启用",
+                    c.share, name, best, name
+                ),
+            },
+            None => format!("共享档 {}（不需要外部工具）", best),
+        },
+        None => format!("共享档 {} 可用", best),
     };
     VmRequirement {
         id: "share",
         met: true,
         detail,
         how: String::new(),
+    }
+}
+
+/// 目的：本平台用户链里性能最高的那一档（copy 不在其中）。
+fn top_user_combo() -> Option<&'static Combo> {
+    default_combos(std::env::consts::OS)
+        .iter()
+        .find(|c| c.engine == "qemu" && USER_SHARES.contains(&c.share))
+}
+
+/// 目的：用户共享档缺失时怎么补（按平台给可操作的说法，不说"回退 copy"）。
+fn share_how(share: &str) -> String {
+    match share {
+        "smb" => "点「补齐虚拟机依赖」把 smbd 装进项目内（只写项目内，需用户同意），或自行安装 smbd 并放进 PATH / 在设置里登记完整路径；集成环境可用 solomni --provision --ensure --yes。".to_string(),
+        "virtiofs" => "点「补齐虚拟机依赖」把 virtiofsd 装进项目内（只写项目内，需用户同意），或自行安装 virtiofsd 并放进 PATH / 在设置里登记完整路径。Linux 没有 virtiofsd 时仍可用 9p；9p 也不可用才禁用 VM 档。".to_string(),
+        _ => "点「补齐虚拟机依赖」把所需的共享档装进项目内（只写项目内，需用户同意），或换本机档。".to_string(),
     }
 }
 
@@ -685,6 +777,69 @@ fn guest_requirement(root: &Path, guest: Option<&str>, probe: &dyn HostProbe) ->
     }
 }
 
+/// 目的：会话级共享判据——这份 guest 的客户端里，有没有本平台用户链能承载的一档。
+/// 返回 None = 虚拟根不在场/布局不可用（由 guest 项报错）；不重复报同一件事。
+fn guest_share_requirement(
+    root: &Path,
+    guest: Option<&str>,
+    share_tool: Option<&str>,
+    probe: &dyn HostProbe,
+) -> Option<VmRequirement> {
+    let name = guest.map(str::trim).filter(|g| !g.is_empty())?;
+    let dir = resolve_guest(root, name).ok()?;
+    if !probe.is_dir(&dir) {
+        return None;
+    }
+    let image = crate::capabilities::vm::domain::guest::classify_base(&dir, probe).ok()?;
+    let chain: Vec<&'static str> = if copy_share_enabled() {
+        vec!["copy"]
+    } else {
+        share_chain(std::env::consts::OS, share_tool, probe)
+    };
+    let usable: Vec<&'static str> = chain
+        .into_iter()
+        .filter(|share| share_carries(share, "qemu", &image))
+        .collect();
+    if usable.is_empty() {
+        let mut declared: Vec<&str> = Vec::new();
+        if image.clients.nine_p {
+            declared.push("9p");
+        }
+        if image.clients.virtio_fs {
+            declared.push("virtiofs");
+        }
+        if image.clients.cifs {
+            declared.push("cifs");
+        }
+        let declared = if declared.is_empty() {
+            "未声明任何共享客户端".to_string()
+        } else {
+            declared.join("、")
+        };
+        return Some(VmRequirement {
+            id: "share-guest",
+            met: false,
+            detail: format!(
+                "这份 guest 没有本平台用户共享档能承载的客户端（已声明：{}）；虚拟机档无法挂载工作区",
+                declared
+            ),
+            how: if copy_share_enabled() {
+                "开发/应急 copy 只支持 Linux guest；换 Linux 虚拟根，或关掉 SOLOMNI_VM_SHARE=copy 后用用户档。"
+                    .to_string()
+            } else {
+                "在 guest.yaml 的 clients 里声明 9p 或 virtiofs（Windows 宿主用 cifs），或换默认虚拟根。"
+                    .to_string()
+            },
+        });
+    }
+    Some(VmRequirement {
+        id: "share-guest",
+        met: true,
+        detail: format!("guest 可用共享档：{}", usable.join("、")),
+        how: String::new(),
+    })
+}
+
 /// 目的：机器能力的就绪视图（不含会话级虚拟根）：界面据此决定虚拟机档能不能**选**。
 pub fn vm_capability(vm: &VmInputs<'_>) -> TierReadiness {
     TierReadiness {
@@ -727,6 +882,10 @@ pub fn tier_readiness(
     });
     // 虚拟根是这条会话的选型，不是机器能力：保存 /「开始」时才要求它。
     requirements.push(guest_requirement(root, spec.guest.as_deref(), probe));
+    // 共享档也按这台 guest 再判一次：用户链里有档可用，不代表这份 guest 声明了对应客户端。
+    if let Some(share) = guest_share_requirement(root, spec.guest.as_deref(), share_tool, probe) {
+        requirements.push(share);
+    }
     TierReadiness { requirements }
 }
 

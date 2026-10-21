@@ -1711,6 +1711,50 @@ impl crate::kernel::ports::HostProbe for FixedProbe {
     }
 }
 
+/// 目的：测试用的宿主探测——真实事实 + 本平台共享工具视为在场。
+/// 约束：虚拟机档的就绪判据现在是硬前置；测试不该因为开发机没装 smbd/virtiofsd 而少验一条业务路径。
+pub(crate) struct TestHostProbe {
+    /// 目的：None = 用真实宿主事实；Some = 测试声明（VM 用例要 "本机能起虚拟机" 时不依赖 runner 有没有 /dev/kvm）。
+    hypervisor: Option<bool>,
+}
+
+impl crate::kernel::ports::HostProbe for TestHostProbe {
+    fn is_file(&self, path: &std::path::Path) -> bool {
+        crate::kernel::detail::HostProbeAdapter.is_file(path)
+    }
+    fn is_dir(&self, path: &std::path::Path) -> bool {
+        crate::kernel::detail::HostProbeAdapter.is_dir(path)
+    }
+    fn is_executable(&self, path: &std::path::Path) -> bool {
+        crate::kernel::detail::HostProbeAdapter.is_executable(path)
+    }
+    fn has_exe(&self, name: &str) -> bool {
+        matches!(name, "qemu-system-x86_64" | "smbd" | "virtiofsd")
+            || crate::kernel::detail::HostProbeAdapter.has_exe(name)
+    }
+    fn hypervisor_available(&self) -> bool {
+        self.hypervisor
+            .unwrap_or_else(|| crate::kernel::detail::HostProbeAdapter.hypervisor_available())
+    }
+    fn read_text(&self, path: &std::path::Path) -> Option<String> {
+        crate::kernel::detail::HostProbeAdapter.read_text(path)
+    }
+}
+
+/// 目的：给测试组合根用的宿主探测（共享工具恒在场）。
+pub(crate) fn test_host_probe() -> std::sync::Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>
+{
+    std::sync::Arc::new(TestHostProbe { hypervisor: None })
+}
+
+/// 目的：VM 用例的宿主探测——真实路径事实 + 共享工具在场 + 声明"本机能起虚拟机"（不依赖 runner 的 /dev/kvm）。
+pub(crate) fn vm_capable_host_probe(
+) -> std::sync::Arc<dyn crate::kernel::ports::HostProbe + Send + Sync> {
+    std::sync::Arc::new(TestHostProbe {
+        hypervisor: Some(true),
+    })
+}
+
 /// 日志能力替身：什么都不做（呈现层的埋点不参与任何判定）。
 pub(crate) struct NoopLogOps;
 impl crate::capabilities::conductor::api::LogOps for NoopLogOps {
@@ -1924,6 +1968,7 @@ impl crate::capabilities::vm::ports::ShareBackend for FakeShare {
 pub(crate) struct NamedShare {
     name: &'static str,
     ok: bool,
+    emergency: bool,
     pub(crate) calls: Arc<Mutex<Vec<String>>>,
 }
 
@@ -1933,8 +1978,15 @@ impl NamedShare {
         NamedShare {
             name,
             ok,
+            emergency: false,
             calls: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    /// 目的：把它标成 emergency 档（验空候选不自动选、显式候选才允许）。
+    pub(crate) fn emergency(mut self) -> NamedShare {
+        self.emergency = true;
+        self
     }
 
     /// 目的：它被调用过的动作（按发生顺序）。
@@ -1946,6 +1998,10 @@ impl NamedShare {
 impl crate::capabilities::vm::ports::ShareBackend for NamedShare {
     fn id(&self) -> &'static str {
         self.name
+    }
+
+    fn is_emergency(&self) -> bool {
+        self.emergency
     }
 
     fn supports(
@@ -2169,15 +2225,18 @@ impl crate::capabilities::vm::api::Vm for RecordingVm {
 }
 
 /// 目的：测试用的 **vm 能力面**——把运行包库来源与 guest 替身装进 `VmService`（与生产同一条路，R12）。
-/// 约束：共享档用一个恒可落、id 是 `copy` 的替身——`copy` 在每个平台的候选链里（不需要外部工具），
-///   所以 conductor 按真实链路给出的候选总能挑到它；要验"挑哪一档"的用例自己装配替身。
+/// 约束：共享档替身同时持 `9p` 与 `smb`（都是用户链里的挂载式档，不需要外部工具），
+///   Linux/macOS 的真实候选能挑到 9p，Windows 能挑到 smb；copy 是 emergency 档，空候选不会被自动选中。
 pub(crate) fn test_vm(
     packages: Arc<dyn PackageSource + Send + Sync>,
 ) -> Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync> {
     Arc::new(crate::capabilities::vm::service::VmService::new(
         packages,
         Arc::new(FakeEngine::new()),
-        vec![Arc::new(NamedShare::new("copy", true))],
+        vec![
+            Arc::new(NamedShare::new("9p", true)),
+            Arc::new(NamedShare::new("smb", true)),
+        ],
     ))
 }
 
@@ -2189,7 +2248,10 @@ pub(crate) fn test_vm_with_engine(
     Arc::new(crate::capabilities::vm::service::VmService::new(
         packages,
         Arc::new(engine),
-        vec![Arc::new(NamedShare::new("copy", true))],
+        vec![
+            Arc::new(NamedShare::new("9p", true)),
+            Arc::new(NamedShare::new("smb", true)),
+        ],
     ))
 }
 /// 目的：模块启停覆盖的内存存储（测试用；与 yaml 实现同一条端口）。
@@ -2284,7 +2346,7 @@ pub(crate) fn core_with_services(
         test_prompt(),
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
-        Arc::new(crate::kernel::detail::HostProbeAdapter),
+        test_host_probe(),
         residents,
         secrets,
     )
@@ -2323,7 +2385,7 @@ pub(crate) fn core_with_workspace(
         test_prompt(),
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
-        Arc::new(crate::kernel::detail::HostProbeAdapter),
+        test_host_probe(),
         Arc::new(crate::capabilities::residents::api::NoResidents),
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     )
@@ -2421,7 +2483,7 @@ pub(crate) fn core_with_pkgs(
         test_prompt(),
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
-        Arc::new(crate::kernel::detail::HostProbeAdapter),
+        test_host_probe(),
         Arc::new(crate::capabilities::residents::api::NoResidents),
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     )
@@ -2452,7 +2514,7 @@ pub(crate) fn core_with_settings(store: InMemorySettings) -> Conductor {
         test_prompt(),
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
-        Arc::new(crate::kernel::detail::HostProbeAdapter),
+        test_host_probe(),
         Arc::new(crate::capabilities::residents::api::NoResidents),
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     )
@@ -2490,7 +2552,7 @@ pub(crate) fn core_with_io_gateway(
         test_prompt(),
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
-        Arc::new(crate::kernel::detail::HostProbeAdapter),
+        test_host_probe(),
         Arc::new(crate::capabilities::residents::api::NoResidents),
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     )
@@ -2501,11 +2563,7 @@ pub(crate) fn core_with_gateway(
     modules: Vec<Module>,
     gateway: impl ChatGateway + Send + Sync + 'static,
 ) -> Conductor {
-    core_with_gateway_probe(
-        modules,
-        gateway,
-        Arc::new(crate::kernel::detail::HostProbeAdapter),
-    )
+    core_with_gateway_probe(modules, gateway, test_host_probe())
 }
 
 /// 目的：同 core_with_gateway，但注入指定的宿主探测（机器能力/依赖在场与否要可控的用例用它）。

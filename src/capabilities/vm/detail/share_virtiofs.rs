@@ -55,7 +55,7 @@ impl ShareBackend for VirtioFsShare {
 
     /// 约束：只有 QEMU 有 vhost-user-fs；guest 侧还要声明 virtiofs 客户端（Linux 内核 ≥5.4 自带）。
     fn supports(&self, engine: &str, guest: &GuestImage) -> bool {
-        engine == "qemu" && guest.clients.virtio_fs
+        crate::capabilities::vm::domain::exec::share_carries("virtiofs", engine, guest)
     }
 
     fn prepare(

@@ -53,6 +53,10 @@ impl ShareGuard for NoShareGuard {
 pub trait ShareBackend: Send + Sync {
     /// 目的：后端稳定短名（诊断与日志用）。
     fn id(&self) -> &'static str;
+    /// 目的：是不是开发/应急档——空候选不自动选它，只有 GuestSpec.shares 显式写出才允许。
+    fn is_emergency(&self) -> bool {
+        false
+    }
     /// 目的：本后端能不能把共享落到这台引擎 / 这份 guest 上（纯事实）。
     fn supports(&self, engine: &str, guest: &GuestImage) -> bool;
     /// 目的：装配共享——产出计划与（可能的）外部资源凭据。

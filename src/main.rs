@@ -283,8 +283,8 @@ fn main() {
             }
         };
 
-    // **虚拟机档能力**：运行包库来源、VM 引擎与共享后端这些出站端口只由它的 service 持有（R12）；
-    // 共享后端**全部**按平台回退链顺序装配进来：哪一档落得上在起 guest 那一刻选（见 GuestSpec.shares）。
+    // **虚拟机档能力**：运行包库来源、VM 引擎与共享后端这些出站端口只由它的 service 持有（R12）；用户共享后端按平台用户链装配，起 guest 时选。
+    // copy 不在用户链；只有进程级开发/应急开关才补进持有列表（仍要显式候选）。
     let order = capabilities::vm::domain::exec::default_combos(std::env::consts::OS);
     let mut shares: Vec<Arc<dyn capabilities::vm::ports::ShareBackend + Send + Sync>> = Vec::new();
     for combo in order.iter().filter(|c| c.engine == "qemu") {
@@ -298,12 +298,21 @@ fn main() {
                     .with_book(std::sync::Arc::clone(&book)),
             ),
             "9p" => Arc::new(capabilities::vm::detail::NinePShare::new()),
-            "copy" => Arc::new(capabilities::vm::detail::CopyShare::new()),
             _ => continue,
         };
         if !shares.iter().any(|s| s.id() == share.id()) {
             shares.push(share);
         }
+    }
+    if capabilities::vm::api::copy_share_enabled() {
+        shares.push(Arc::new(capabilities::vm::detail::CopyShare::new()));
+        let note = format!(
+            "{}={}：copy 共享仅用于开发/应急，性能不可用；本进程的 VM 会话会强制走它",
+            capabilities::vm::api::COPY_SHARE_ENV,
+            "copy"
+        );
+        log.warn("main::vm_share", &note);
+        eprintln!("[虚拟机] {}", note);
     }
     let vm: Arc<dyn capabilities::vm::api::Vm + Send + Sync> =
         Arc::new(capabilities::vm::service::VmService::new(

@@ -46,7 +46,7 @@ Fake 必须：
 | `src/tests/doubles.rs:NoFenceHost` | 围栏释放空操作 Stub | 已被核心测试使用 |
 | `src/tests/doubles.rs:RecordingFence` | 围栏释放记录型 Spy | 已钉住"删会话即请求撤销授权" |
 | `src/kernel/ports.rs:NoopLog` | 无声日志 Stub | 已存在；不用于验证日志内容 |
-| `src/tests/doubles.rs:FixedProbe` | 宿主探测 Fake（按声明回答路径 / 可执行文件 / 虚拟化） | 已用于 T2 契约用例；Core 级装配用真实 `HostProbeAdapter`（要 scratch 目录的真实存在性） |
+| `src/tests/doubles.rs:FixedProbe` / `TestHostProbe` | 宿主探测 Fake（按声明回答路径 / 可执行文件 / 虚拟化）；`TestHostProbe` 用真实路径事实，但把平台共享工具视为在场 | `FixedProbe` 用于 T2 契约用例；Core 级装配用 `TestHostProbe`（要 scratch 目录的真实存在性，又不让测试依赖机器是否装了 smbd/virtiofsd） |
 | `src/tests/doubles.rs:NoopLogOps` | 日志能力 Stub（入站能力面） | 已用于路由契约测试（呈现层不需要它做判定） |
 | `tests/cross-platform/e2e/mock.js` | 本地假供应商服务 | 已用于 T5；应覆盖协议错误、断开、延迟等场景 |
 
@@ -126,7 +126,7 @@ Fixture 必须：
 | `PackageSource` | `InMemoryPackages` | 不适用 | 不适用（错误进 `rejected`） | 不适用 | `FsPackages` | 已验收；**持有者只有 `vm::service.rs`**（R12） |
 | `VmEngine`（vm） | `FakeEngine`（返回的 `GuestVm` 替身是 `FakeVm`，通道是 `FakeChannel`） | `calls`（start / stop / run / fenced；`RecordingVm` 记 `guest_run` 与租约的包集合） | `boot_error` 注入启动失败、`boot_delay` 注入慢启动 | 不适用 | `QemuEngine`（真机验：`vm_live_guest_runs_command_inside_guest` 在 KVM / WHPX 下真起 guest、按平台同步或挂载额外共享、验宿主路径不可达；`vm_live_two_guests_share_one_base_without_writing_it` 同一基础镜像并发起两台、各写自己的可写层、验基础镜像 mtime 不变；e2e 的 vm 档会话场景（虚拟根默认 `debian`，`SOLOMNI_VM_GUEST` 可换）真跑模块工具并验删会话销毁 guest（Windows 的会话级验收已通过）；环境由 provision 能力（`--provision`）装入 `.vm/`，默认 `[探针]` 跳过） | 契约测试与执行分派已验收；真机探针与产品级会话验收都已跑通（Linux KVM / Windows WHPX） |
 | `GuestChannel`（vm） | `FakeChannel`（经 `FakeEngine`） | `calls`（run / fenced + agent / guest cwd / rw） | 不适用；**未实现 `exec_fenced` 的通道默认 fail-closed** | 不适用 | `QemuHandle`（QGA 通道，随 `QemuEngine.boot` 起；会话 guest 装 Linux helper，按 `GuestAccess` 走 Landlock） | 契约测试与 Linux 真机验收已通过 |
-| `ShareBackend`（vm） | `FakeShare`、`NamedShare`；资源句柄 `FakeGuard` / `FakeGuard2` | `calls`（prepare / sync_in / sync_out / release）、共享计划可观察（恒空） | 不适用 | 不适用 | `NinePShare` / `VirtioFsShare` / `CopyShare` / `SmbShare`（`src/tests/vm.rs` 钉住各自的引擎参数、netdev 选项与 guest 端命令；virtiofsd 与 smbd 的起停、超时与清理用假可执行文件验；真机验同 vm 探针）；`ShareGuard` 的真实实现是 `VirtioFsGuard` / `SmbGuard` / `NoShareGuard` | 契约测试已验收；Linux 真机（virtiofs）与 Windows 真机（SMB 实时共享 / 缺 smbd 退 QGA 复制）都已跑通 |
+| `ShareBackend`（vm） | `FakeShare`、`NamedShare`（可标 emergency）；资源句柄 `FakeGuard` / `FakeGuard2` | `calls`（prepare / sync_in / sync_out / release）、共享计划可观察（恒空） | 不适用 | 不适用 | 用户档 `NinePShare` / `VirtioFsShare` / `SmbShare`；`CopyShare`（仅开发/应急，空候选不自动选）；`NoneShare`（内部无共享，供给编排）。`src/tests/vm.rs` 钉住各自的引擎参数、netdev 选项与 guest 端命令；virtiofsd 与 smbd 的起停、超时与清理用假可执行文件验；真机验同 vm 探针；`ShareGuard` 的真实实现是 `VirtioFsGuard` / `SmbGuard` / `NoShareGuard` | 契约测试已验收；Linux 真机（virtiofs）与 Windows 真机（SMB 实时共享）都已跑通；copy 不作验收路径 |
 | `ProxyHost`（conductor） | `FakeProxyHost` | `calls`（catalog / create / send / observe / control / messages）、`created`、`relayed` | `fail_create` / `fail_send` / `fail_control` | 不适用 | `ProxyBridge`（把动作交给核心线程） | 已验收（`src/tests/conductor/proxy.rs`） |
 | `Workdirs` | `InMemoryWorkspace` | 内存布局可观察 | `fail_with` | 不适用 | `FsWorkspace` | 已验收 |
 | `WorkStore` | `InMemoryWorkStore` | 内存文件 / 提交 / 基线可观察；资产路径的 `stat` / `scan` / `ingest` / `copy` 与跨根备份 `copy_under_to_under` 同契约 | `fail_with`、`fail_times`、`fail_on`（按方法 + 键子串，例如只让某条路径的 copy 失败；含整文件 `read_under` / `read_object`） | 不适用 | `FsWorkStore`（含符号链接逃逸拒绝、流式临时文件清理、超限 / 指纹不符拒绝、跨根复制建目标根） | 已验收；**持有者只有 `workspace::service.rs`**（R12） |
@@ -145,7 +145,7 @@ Fixture 必须：
 | `SessionHost`（kernel 共享） | `ScriptedHost`（按脚本逐行应答；可演 `list_changed` 通知与 EOF）；返回的 `Session` 替身是 `ScriptedSession` | `sent`（发出的每一行与关闭） | 脚本用尽 = 如实报错 | EOF / 读错误 = `alive()` 转 false（崩溃检测） | `ProcessSessions`（返回 `FencedSession`；真实 MCP 服务端到端见 `src/tests/mcp.rs`，非 unix 或缺 python 时如实跳过） | 已验收 |
 | `SecretStore`（secrets） | `InMemorySecretStore` | `values`、写入次数 | 由替身注入失败 | 不适用 | `detail::YamlSecrets`（`.home/secrets.yaml`，unix 0600） | 契约测试已验收（`src/tests/secrets.rs`）；生产消费点已接入（CLI `secret`、常驻服务与一次性模块工具的 env 注入、常驻服务回执脱敏） |
 | `Log` | `NoopLog`（Stub）、`RecordingLog`（记录 `(级别, 位置, 文案)`，供"事实被记进日志"的断言） | `RecordingLog` 可查 | 不适用 | 不适用 | `FileLog`（三个级别都落盘） | 已验收 |
-| `HostProbe` | `FixedProbe`（只按声明回答） | 不适用 | 不适用 | 不适用 | `HostProbeAdapter`（真实路径事实；PATH 上不存在的名字如实说没有） | 已验收 |
+| `HostProbe` | `FixedProbe`（只按声明回答）、`TestHostProbe`（真实事实 + 平台共享工具视为在场） | 不适用 | 不适用 | 不适用 | `HostProbeAdapter`（真实路径事实；PATH 上不存在的名字如实说没有） | 已验收 |
 
 **持有者（R12）**：`ModuleSource` / `ModuleStateStore` 只由 `modules::service.rs` 持有（别的能力经 `modules::api::ModulesOps` 要清单与启停有效值）；`PackageSource` 只由 `vm::service.rs` 持有（别的能力经 `vm::api::Vm` 要运行包库）；`Workdirs` / `WorkStore` 只由 `workspace::service.rs` 持有（别的能力经 `workspace::api::Workspace` 要目录与版本库用例）。
 
