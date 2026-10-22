@@ -150,7 +150,7 @@ impl Conductor {
                 private,
                 modules,
                 modules_with_userdata,
-                permissions: self.permissions_for(meta, &a.name),
+                permissions: self.permissions_for(meta),
                 path_codec: path_codec.clone(),
             });
         }
@@ -161,19 +161,18 @@ impl Conductor {
         })
     }
 
-    /// 一个 agent 的**生效权限**：settings.yaml 的全局默认叠加该 agent 在会话 meta 里的覆盖。
-    /// 只替换显式给出的字段（空集合有确切语义 = 默认整棵工作区，所以覆盖用 Option 表达）。
+    /// 一条会话的**生效权限**：全局默认（含硬黑名单底线）叠加会话 meta 里的覆盖。
+    /// 只替换显式给出的字段（空集合有确切语义 = 默认整棵工作区，所以覆盖用 Option 表达）；`deny` 只增不减。
     pub(crate) fn permissions_for(
         &self,
         meta: &SessionMeta,
-        agent: &str,
     ) -> crate::capabilities::permission::api::Permissions {
-        let base = self.registry.app().permissions.clone();
-        meta.agents
-            .iter()
-            .find(|a| a.name == agent)
-            .map(|a| base.apply(&a.permissions))
-            .unwrap_or(base)
+        let app = self.registry.app();
+        let base = app
+            .sandbox
+            .defaults
+            .to_permissions(&app.sandbox.policy.deny);
+        base.apply(&meta.sandbox.permissions)
     }
 
     /// 工具环境：内置文件工具永远可用；外部工具按模块分组放行（模块 id → 目录 + 工具表）。
@@ -269,9 +268,9 @@ impl Conductor {
 
             unavailable,
             // 围栏：可达范围 + 断网 + 环境白名单的落点，全部由该 agent 的沙箱派生（机制在 adapters）；
-            // 只读根来自用户显式授权（`fence_read`），默认空。
+            // 只读根来自用户显式授权（`sandbox.policy.host_read_roots`），默认空。
             fence: crate::kernel::api::FenceSpec::from_sandbox(sb, net)
-                .with_read_only(self.fence_read_roots()),
+                .with_read_only(self.host_read_roots()),
             // 各模块隐私字段的注入项：装配期按模块解析一次，起工具进程时只走环境（解析失败 = 该模块没有可用值）。
             module_env: modules
                 .iter()

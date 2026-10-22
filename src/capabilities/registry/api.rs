@@ -13,7 +13,8 @@ pub use crate::capabilities::registry::domain::agents::{
     AgentView, Agents, RosterPick,
 };
 pub use crate::capabilities::registry::domain::providers::{
-    AppSettings, ModelEntry, ModelView, Provider, ProviderView, Settings,
+    AppSettings, ModelEntry, ModelView, Provider, ProviderView, SandboxEnforceLevel,
+    SandboxUnavailable, Settings,
 };
 
 use crate::capabilities::llm::api::{Channel, ProbeOutcome, ReplayReport, ToolMode};

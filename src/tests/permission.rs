@@ -16,6 +16,26 @@ fn paths(v: &[&str]) -> Vec<String> {
     v.iter().map(|s| s.to_string()).collect()
 }
 
+/// 全局黑名单是硬底线：会话只能追加，不能清空。
+#[test]
+fn global_deny_is_a_hard_floor_that_sessions_can_only_extend() {
+    let base = Permissions {
+        deny: paths(&["secret"]),
+        ..Permissions::default()
+    };
+    let cleared = base.apply(&PermissionsOverride {
+        deny: Some(Vec::new()),
+        ..Default::default()
+    });
+    assert!(!cleared.read_ok("secret/key.txt"), "会话清空 deny 不能生效");
+    let extended = base.apply(&PermissionsOverride {
+        deny: Some(paths(&["private"])),
+        ..Default::default()
+    });
+    assert!(!extended.read_ok("secret/key.txt"));
+    assert!(!extended.read_ok("private/x"));
+}
+
 /// 未配置 = 默认：整棵工作区可读、可提交；模块目录只读（无写授权）。
 #[test]
 fn defaults_allow_the_whole_workspace_and_keep_modules_read_only() {
@@ -879,16 +899,15 @@ fn tool_confirmation_rides_the_decision_channel() {
                         name: "a".to_string(),
                         modules: vec!["a".to_string()],
                         model: String::new(),
-                        permissions: Some(PermissionsOverride {
-                            granularity: Some(Granularity::Ask),
-                            ask: Some(paths(&["a.grep"])),
-                            ..Default::default()
-                        }),
                     }],
                     tier: "host".to_string(),
                     guest: None,
                     pins: BTreeMap::new(),
-                    net: false,
+                    permissions: Some(PermissionsOverride {
+                        granularity: Some(Granularity::Ask),
+                        ask: Some(paths(&["a.grep"])),
+                        ..Default::default()
+                    }),
                 },
             )
             .expect("把这一席的粒度设成 ask");

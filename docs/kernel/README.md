@@ -69,7 +69,7 @@
 
 **可选**（缺了命令照跑，只是可达范围小一点）：
 
-- 用户显式授权的只读根（`.home/settings.yaml` 的 `fence_read`）；
+- 用户显式授权的主机只读根（`.home/settings.yaml` 的 `sandbox.policy.host_read_roots`）；
 - 数据边界父目录的只读属性（容器里判「这个目录在不在」用它；缺了会让模块自己的「父目录不存在就先建」走偏，那是**命令自己的报错**，不是围栏失守）；
 - 不存在的落点（没有 `userdata/` 的模块、派生与执行之间的竞态）：跳过，不进结论。
 
@@ -82,7 +82,7 @@
   - 回执把"用户拒绝"与"没人答"分开写清楚。
 - **构不出可用选项**时**不发起裁决**（契约禁止置灰）：有可回答的前端就**停掉这个会话 + 落一条警告**，没有前端只如实拒绝这次调用；停过一次之后不再推卡。
 - **可选落点授不上只记事实**：留一条 stderr 脚印，不牵动这次执行。
-- **未授权档位不是这条路**（仅 Windows）：用户没开 `fence_write` 时外层根本不写权限项，容器围栏不装，按无围栏执行；启动报告的「本次实际」如实标出。Linux / macOS 没有外层授权这一步，围栏照常装。
+- **未授权档位不是这条路**（仅 Windows）：用户没开 `sandbox.policy.windows.write_acl` 时外层根本不写权限项，容器围栏不装；若策略要求强制则拒绝，否则按无围栏执行并在启动报告标出。Linux / macOS 没有外层授权这一步，围栏照常装。
 - **回执文案由进程机制自己的代码返回**：`kernel/detail/process.rs` 的 `CodeProcessTexts`（围栏拒绝/放行、超时、stderr、截断）；`ProcessTexts` 只是窄端口，生产实现与机制同文件。
 - **围栏里失败的统一说明**：工具在围栏里非零退出时，守门进程补一条**不分语言**的话（可达范围 + 范围外被围栏拒绝）；成功不打扰。
 
@@ -97,13 +97,13 @@
 一次工具执行（`ProcessRunner` 的实现 `ProcTools`）：
 
 - 外层用**当前程序自己**当守门进程：`--fence-run <FenceJob JSON> -- <命令>`。
-- `FenceJob` = `FenceSpec` + `prepared`（外层是否已写完本机授权）+ `home`（容器 profile 的台账落点）；三者扁平成一个 JSON 传给守门进程。
+- `FenceJob` = `FenceSpec` + `prepared`（外层是否已写完本机授权）+ `home`（容器 profile 的台账落点）+ `policy`（本进程的强制项与降级许可）；扁平成一个 JSON 传给守门进程。
 - 命令作为**一个 argv** 交给守门进程，外层不拼 shell；参数 JSON 经 stdin 送进工具进程，不进命令行。
 - 守门进程用系统 shell 执行模块作者写的命令行（`sh -c` / `cmd /C`）——命令行是模块声明的一部分。
 - 环境白名单：外层 `env_clear`，只注入 `fence_env`（PATH / PATHEXT / 系统根 / LANG / TZ 等，`HOME` 与 `TEMP` 指向该 agent 私有沙箱）与模块隐秘字段；其它环境与凭据不进工具进程。
 - 收尾：stdout / stderr 分别读；超时 30 秒（`ProcTools::timeout`）后连根杀树；输出上限 16000 字符。超时、截断、围栏失败的文案经 `ProcessTexts` 注入，机制不硬编码。
 - 围栏装不上（本机不支持 / 容器起不来）：`net=false` 时守门进程如实降级，按无围栏执行；`net=true` 时能力授不上则**拒绝执行**（不能把文件系统围栏一起丢掉）。能力等级已在启动报告里说明。
-- Windows 外层未授权（`fence_write=false`）：容器不装，按无围栏执行；`net` 不生效，启动报告的「本次实际」已标出。
+- Windows 外层未授权（`sandbox.policy.windows.write_acl=false`）：容器不装；策略要求强制时拒绝，否则按无围栏执行；全局网络开关不生效于容器，启动报告的「本次实际」已标出。
 - Windows 未授权时段先自检（`confine::verify`）：`EnvUnavailable` = 本机不支持，降级照跑；`Broken` = 自检说机制有效却装不上（我们写错了），**拒绝执行**，不按无围栏跑。
 - 固定退出码 `111`（`FENCE_FAILED`）只用于：`FenceJob` JSON 非法、守门进程里工具命令起不来、或工具被信号结束拿不到退出码。
 - 围栏生效且工具非零退出：守门进程往 stderr 补一条边界说明（可达范围 + 范围外被围栏拒绝）；成功不打扰。
@@ -117,9 +117,10 @@
 | Windows | AppContainer（外层 `prepare_fence` 把可达范围写进目录 ACL） | 按 `net`（真 = 授 `internetClient` 公网出站；假 = 不授） | 守门进程建容器 profile 并在容器内跑；作业对象管进程树与进程数上限 |
 | 其它 | 无（如实降级） | 无 | 只有超时与整棵树终止 |
 
-- **网络边界**：只放行出站（Windows `internetClient` / macOS `network-outbound`），不授 private network，也不做 loopback 豁免；Linux 本机档不围栏网络（`capability().net=false`），如实报告。Windows 未授权 `fence_write` 时容器不装，`net` 同样不生效（启动报告的「本次实际」会标出）。
+- **网络边界**：全局 `sandbox.policy.network` 是唯一开关；只放行出站（Windows `internetClient` / macOS `network-outbound`），不授 private network，也不做 loopback 豁免；Linux 本机档不围栏网络（`capability().net=false`），按 `on_unavailable` 拒绝或本进程降级。Windows 未授权 `windows.write_acl` 时容器不装，网络不生效（启动报告的「本次实际」会标出）。
 - 进程树：Unix 起进程时开独立进程组，超时 / 退出时对负 pid 发 `SIGKILL`；Windows 把工具进程放进守门进程的作业对象（`KILL_ON_JOB_CLOSE`），守门进程一死整棵树随之消亡。
-- **本机能力**与**本次实际**分开报（见 `src/main.rs` 的启动报告）：`fence_write` 只决定 Windows 是否写目录 ACL；Linux / macOS 的围栏在守门进程里自足。所以「本次实际」在 Linux / macOS 上等于本机能力；Windows 未授权时 fs/net 为假，进程树、资源上限与环境白名单照旧生效。
+- **本机能力**与**本次实际**分开报（见 `src/main.rs` 的启动报告）：`sandbox.policy.windows.write_acl` 只决定 Windows 是否写目录 ACL；Linux / macOS 的围栏在守门进程里自足。所以「本次实际」在 Linux / macOS 上等于本机能力；Windows 未授权时 fs/net 为假，进程树、资源上限与环境白名单照旧生效。
+- **进程级降级**：`FenceJob.policy` 携带 `require_fs` / `require_net` / `allow_degraded`；机制装不上时，`allow_degraded=false` 一律以 `FENCE_FAILED` 拒绝（所有平台一致），已同意降级才继续。降级只活在当前进程，不落盘。
 
 ## 七、长驻子进程的账与回收（`procs`）
 

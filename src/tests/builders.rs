@@ -815,7 +815,6 @@ pub(crate) fn vm_spec() -> ExecSpec {
         tier: Tier::Vm,
         guest: Some(crate::tests::test_guest("vm-spec")),
         pins: BTreeMap::new(),
-        net: false,
     }
 }
 
@@ -826,7 +825,6 @@ pub(crate) fn agent_meta(name: &str, modules: &[&str], model: Option<&str>) -> A
         transient: false,
         modules: modules.iter().map(|s| s.to_string()).collect(),
         model: model.map(|s| s.to_string()),
-        permissions: Default::default(),
     }
 }
 
@@ -847,6 +845,7 @@ pub(crate) fn seed_session(
         ts: 1,
         agents,
         exec,
+        sandbox: Default::default(),
         parent: None,
         node: None,
         delegation: None,
@@ -864,13 +863,12 @@ pub(crate) fn edit_of(agents: Vec<(&str, &[&str], &str)>) -> SessionEdit {
                 name: n.to_string(),
                 modules: ms.iter().map(|s| s.to_string()).collect(),
                 model: m.to_string(),
-                permissions: None,
             })
             .collect(),
         tier: "host".to_string(),
         guest: None,
         pins: BTreeMap::new(),
-        net: false,
+        permissions: None,
     }
 }
 

@@ -38,8 +38,85 @@ fn default_context_tokens() -> u64 {
     DEFAULT_CONTEXT_TOKENS
 }
 
+/// 目的：沙箱策略（全局硬约束，会话不可填）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct SandboxSettings {
+    #[serde(default)]
+    pub policy: SandboxPolicy,
+    #[serde(default)]
+    pub defaults: crate::capabilities::permission::api::PermissionDefaults,
+}
+
+/// 目的：全局沙箱硬约束。会话不能覆盖这里的任何字段。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct SandboxPolicy {
+    /// 目的：是否允许工具 / guest / 常驻服务 / 构建出站。`false` = 断网；是否强制由 `enforce.network` 决定。
+    #[serde(default)]
+    pub network: bool,
+    #[serde(default)]
+    pub enforce: SandboxEnforce,
+    /// 目的：机制不可用时的处置（`ask` 询问本进程降级；`refuse` 直接拒绝；没人答/没有前端 = 拒绝）。
+    #[serde(default)]
+    pub on_unavailable: SandboxUnavailable,
+    #[serde(default)]
+    pub windows: WindowsSandbox,
+    /// 目的：用户显式授权的主机绝对路径只读根（默认空）。
+    #[serde(default)]
+    pub host_read_roots: Vec<String>,
+    /// 目的：全局黑名单（工作区相对路径）——硬底线，会话只能追加、不能删除。
+    #[serde(default)]
+    pub deny: Vec<String>,
+}
+
+/// 目的：哪些围栏必须强制；`best_effort` 表示机制不可用时允许降级（但仍如实报告）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct SandboxEnforce {
+    #[serde(default)]
+    pub filesystem: SandboxEnforceLevel,
+    #[serde(default)]
+    pub network: SandboxEnforceLevel,
+    #[serde(default)]
+    pub process_tree: SandboxEnforceLevel,
+    #[serde(default)]
+    pub env_whitelist: SandboxEnforceLevel,
+}
+
+/// 目的：一条围栏特性的要求等级。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SandboxEnforceLevel {
+    /// 必须强制；不可用时按 `on_unavailable` 处置。
+    #[default]
+    Require,
+    /// 尽力而为；不可用时降级并如实报告。
+    BestEffort,
+}
+
+/// 目的：机制不可用时的处置。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SandboxUnavailable {
+    /// 询问用户是否本进程降级；没人答/没有前端 = 拒绝。
+    #[default]
+    Ask,
+    /// 直接拒绝。
+    Refuse,
+}
+
+/// 目的：Windows 容器围栏需要写本机目录 ACL 的授权。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct WindowsSandbox {
+    #[serde(default)]
+    pub write_acl: bool,
+}
+
 /// 基本设置（settings.yaml）：一般 agent 都有的开关。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AppSettings {
     /// 流式传输：向供应商请求逐片返回。
     #[serde(default = "default_true")]
@@ -50,14 +127,9 @@ pub struct AppSettings {
     /// 默认执行档位：新建会话未单独选定时用它（本机 = 在宿主上跑；虚拟机 = 整台 guest）。
     #[serde(default)]
     pub tier: crate::kernel::api::Tier,
-    /// 是否允许工具围栏在本机写权限（Windows 上要给会话/模块目录与解释器安装目录加目录 ACL）。
-    /// 默认否：没经过用户显式授权，本程序不动本机任何权限项。
+    /// 全局沙箱策略与会话默认权限。
     #[serde(default)]
-    pub fence_write: bool,
-    /// 用户显式授权的**只读根**（工具进程只读可达，不继承写）。默认空 = 一个都不放行。
-    /// 授权落在用户自己的目录上；本程序只加只读 ACE，不给写权限。
-    #[serde(default)]
-    pub fence_read: Vec<String>,
+    pub sandbox: SandboxSettings,
     /// 虚拟机档用的 QEMU 可执行文件路径（默认空 = 兜底看 PATH，或由 setup 脚本装进项目内）。
     /// 依赖不预置、不分发；setup 脚本按平台下载进项目内，产品检测与指路。
     #[serde(default)]
@@ -87,10 +159,6 @@ pub struct AppSettings {
     /// 到顶就放它过去：主会话如实记一行"未回应"，整轮继续（不阻塞）。
     #[serde(default = "default_discuss_remind_cap")]
     pub discuss_remind_cap: u32,
-    /// **会话权限的全局默认**（白/黑名单、模块写授权、决定粒度）：可被会话里逐 agent 的覆盖替换。
-    /// 语义见 capabilities/permission/domain/permission.rs：空白名单 = 整棵工作区，黑名单只做减法。
-    #[serde(default)]
-    pub permissions: crate::capabilities::permission::api::Permissions,
 }
 
 fn default_discuss_remind_cap() -> u32 {
@@ -120,8 +188,7 @@ impl Default for AppSettings {
             streaming: true,
             show_reasoning: true,
             tier: crate::kernel::api::Tier::Host,
-            fence_write: false,
-            fence_read: Vec::new(),
+            sandbox: SandboxSettings::default(),
             qemu_path: String::new(),
             virtiofsd_path: String::new(),
             smbd_path: String::new(),
@@ -129,9 +196,27 @@ impl Default for AppSettings {
             llm_timeout_secs: crate::kernel::api::DEFAULT_LLM_TIMEOUT_SECS,
             compact_at_percent: 70,
             discuss_remind_cap: 3,
-            permissions: Default::default(),
         }
     }
+}
+
+/// 目的：校验 settings.yaml 的沙箱段——路径、枚举与硬黑名单。
+pub fn validate_sandbox_settings(s: &SandboxSettings) -> Result<(), String> {
+    crate::capabilities::permission::api::validate_defaults(&s.defaults)?;
+    crate::capabilities::permission::api::validate(&s.defaults.to_permissions(&s.policy.deny))?;
+    for r in &s.policy.host_read_roots {
+        let raw = r.trim();
+        if raw.is_empty() {
+            return Err("sandbox.policy.host_read_roots 里的路径不能为空".to_string());
+        }
+        if !std::path::Path::new(raw).is_absolute() {
+            return Err(format!(
+                "sandbox.policy.host_read_roots 必须是绝对路径：{}",
+                raw
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// 登记处（providers.yaml + models.yaml + settings.yaml + agents.yaml 的内存合体）。

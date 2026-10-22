@@ -85,12 +85,14 @@ impl CollabSession {
     }
 }
 
-/// 用户显式授权的只读根（`settings.yaml` 的 `fence_read`）：空 = 一个都不放行。
-/// 与 `Conductor::fence_read_roots` 同义——两处都读同一份设置事实（协调业务与协作会话各有一份派生）。
+/// 用户显式授权的主机只读根（`settings.yaml` 的 `sandbox.policy.host_read_roots`）：空 = 一个都不放行。
+/// 与 `Conductor::host_read_roots` 同义——两处都读同一份设置事实（协调业务与协作会话各有一份派生）。
 pub(crate) fn read_only_roots(
     app: &crate::capabilities::registry::api::AppSettings,
 ) -> Vec<std::path::PathBuf> {
-    app.fence_read
+    app.sandbox
+        .policy
+        .host_read_roots
         .iter()
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())

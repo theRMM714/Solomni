@@ -90,7 +90,7 @@ impl SettingsStore for YamlSettingsStore {
         };
         let app = match std::fs::read_to_string(&self.settings_path) {
             Ok(t) => yaml_serde::from_str::<AppSettings>(&t)
-                .map_err(|e| format!("settings.yaml 非法：{}", e))?,
+                .map_err(|e| format!("settings.yaml 配置非法：{}", e))?,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => AppSettings::default(),
             Err(e) => return Err(e.to_string()),
         };

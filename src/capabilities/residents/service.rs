@@ -37,6 +37,8 @@ pub struct ResidentsService {
     /// 起过、但进程已经结束的服务（key = 模块/服务 → (如实原因, 会话租约)）：
     /// 崩溃检测的落点——如实标失败，不装作还在跑。
     failed: Mutex<BTreeMap<String, (String, String)>>,
+    /// 目的：全局网络开关（常驻服务与一次执行同一份口径）。
+    network: bool,
 }
 
 impl ResidentsService {
@@ -56,7 +58,14 @@ impl ResidentsService {
             secrets,
             running: Mutex::new(BTreeMap::new()),
             failed: Mutex::new(BTreeMap::new()),
+            network: false,
         }
+    }
+
+    /// 目的：组合根注入全局网络开关（默认 false；重启后按新设置重建）。
+    pub fn with_network(mut self, network: bool) -> ResidentsService {
+        self.network = network;
+        self
     }
 
     /// 目的：适配器名一览（未知适配器时如实列出可用项）。
@@ -148,6 +157,7 @@ impl ResidentOps for ResidentsService {
         let env = self.secrets.resolve(module)?;
         // 服务围栏：与"人直接跑模块工具"同一条口径（模块根递归只读 + userdata 可写），并挂上会话租约。
         let mut fence = crate::kernel::api::FenceSpec::standalone(&m.root, None, m.has_userdata);
+        fence.net = self.network;
         fence.lease = lease.to_string();
         fence.agent = format!("resident/{}/{}", module, name);
         let spec = LaunchSpec {

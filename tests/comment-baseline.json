@@ -85,8 +85,8 @@
   "src/capabilities/conductor/api/mod.rs": {
     "头块：槽外有行或自造槽": 12,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 104,
-    "条目：首行不是目的": 68,
+    "条目：槽外有行或自造槽": 102,
+    "条目：首行不是目的": 67,
     "行内：注释串后面必须是代码（不能是空行）": 5,
     "行内：连续超过 2 行": 1
   },
@@ -262,8 +262,8 @@
   "src/capabilities/permission/domain/permission.rs": {
     "头块：槽外有行或自造槽": 11,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 24,
-    "条目：首行不是目的": 21
+    "条目：槽外有行或自造槽": 18,
+    "条目：首行不是目的": 15
   },
   "src/capabilities/permission/mod.rs": {
     "头块：槽外有行或自造槽": 4,
@@ -331,8 +331,8 @@
   "src/capabilities/registry/domain/providers.rs": {
     "头块：槽外有行或自造槽": 4,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 38,
-    "条目：首行不是目的": 29
+    "条目：槽外有行或自造槽": 33,
+    "条目：首行不是目的": 27
   },
   "src/capabilities/registry/mod.rs": {
     "头块：槽外有行或自造槽": 4,
@@ -374,7 +374,7 @@
   "src/capabilities/session/domain/history.rs": {
     "头块：槽外有行或自造槽": 2,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 38,
+    "条目：槽外有行或自造槽": 37,
     "条目：首行不是目的": 24
   },
   "src/capabilities/session/domain/rewind.rs": {

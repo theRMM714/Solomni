@@ -357,11 +357,12 @@ impl ConductorHandle {
             }
         }
         let work = work.map(std::path::PathBuf::from);
-        let fence = crate::kernel::api::FenceSpec::standalone(
+        let mut fence = crate::kernel::api::FenceSpec::standalone(
             &module.root,
             work.as_deref(),
             module.has_userdata,
         );
+        fence.net = self.settings()?.sandbox.policy.network;
         let args_json = serde_json::to_string(&module_args).unwrap_or_else(|_| "{}".to_string());
         // 人直接跑模块工具：这一趟**没有可回答的前端**（没有会话、没有裁决队），所以不给提问端口——
         // 围栏的必要落点授不上时按 fail-closed 拒绝；隐私字段只经环境变量注入（值不进命令行）。
@@ -509,8 +510,13 @@ impl ConductorHandle {
                 .map(Acted::Replayed),
             "compact" => SessionOps::compact(self, &s("session_id")).map(Acted::Advanced),
             "edit_session" => {
-                let edit: SessionEdit = serde_json::from_value(args.clone())
-                    .map_err(|e| format!("编辑内容非法：{}", e))?;
+                // 动作信封的 session_id 不属于编辑体：先摘掉再按严格 DTO 反序列化。
+                let mut body = args.clone();
+                if let Some(obj) = body.as_object_mut() {
+                    obj.remove("session_id");
+                }
+                let edit: SessionEdit =
+                    serde_json::from_value(body).map_err(|e| format!("编辑内容非法：{}", e))?;
                 self.edit(&s("session_id"), edit)?;
                 Ok(Acted::Done(serde_json::json!({ "ok": true })))
             }
@@ -623,17 +629,28 @@ impl ConductorHandle {
                 Ok(Acted::Done(serde_json::json!({ "ok": ok })))
             }
             "set_settings" => {
+                let before = self.settings()?.sandbox;
                 self.apply_settings(args)?;
-                Ok(Acted::Done(serde_json::json!({ "ok": true })))
+                let after = self.settings()?.sandbox;
+                // 沙箱策略是进程级启动事实：变了就要求整体重启，避免旧 guest / 旧快照半生效。
+                Ok(Acted::Done(
+                    serde_json::json!({ "ok": true, "restart": before != after }),
+                ))
             }
             other => Err(format!("未知的登记处动作：{}", other)),
         }
     }
 
-    /// 目的：设置的部分更新——未提交的字段保留现值（执行档位 / 围栏写权限 / 会话权限默认值不在这一层暴露）。
+    /// 目的：设置的部分更新——未提交的字段保留现值；`sandbox` 整段替换（全局硬约束与会话默认值）。
+    /// 约束：沙箱段由登记处校验；本层不解释策略。
     fn apply_settings(&self, args: &serde_json::Value) -> Result<(), String> {
         let current = self.settings()?;
         let num = |k: &str| args.get(k).and_then(|v| v.as_u64());
+        let sandbox = match args.get("sandbox") {
+            Some(v) => serde_json::from_value(v.clone())
+                .map_err(|e| format!("settings.sandbox 配置非法：{}", e))?,
+            None => current.sandbox.clone(),
+        };
         let settings = AppSettings {
             streaming: args
                 .get("streaming")
@@ -644,9 +661,7 @@ impl ConductorHandle {
                 .and_then(|v| v.as_bool())
                 .unwrap_or(current.show_reasoning),
             tier: current.tier,
-            fence_write: current.fence_write,
-            fence_read: current.fence_read.clone(),
-            permissions: current.permissions.clone(),
+            sandbox,
             qemu_path: current.qemu_path.clone(),
             virtiofsd_path: current.virtiofsd_path.clone(),
             smbd_path: current.smbd_path.clone(),

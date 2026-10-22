@@ -167,6 +167,7 @@ fn meta(name: &str) -> SessionMeta {
         ts: 1,
         agents: Vec::new(),
         exec: crate::kernel::api::ExecSpec::default(),
+        sandbox: Default::default(),
         parent: None,
         node: None,
         delegation: None,
@@ -271,13 +272,13 @@ impl SessionOps for FakeOps {
                 name: "甲".to_string(),
                 modules: vec!["m".to_string()],
                 model: String::new(),
-                permissions: None,
             }],
             tier: "host".to_string(),
             tier_locked: false,
             guest: None,
             guests: Vec::new(),
             net: false,
+            permissions: Default::default(),
             pins: BTreeMap::new(),
             tier_ready: true,
             tier_missing: Vec::new(),
@@ -564,6 +565,8 @@ fn fence() -> FenceInfo {
         effective_net: true,
         write_allowed: true,
         read_only_roots: 0,
+        sandbox_missing: Vec::new(),
+        sandbox_degraded: false,
     }
 }
 

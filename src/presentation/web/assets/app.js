@@ -717,7 +717,7 @@ function buildConfigForm(sid, cfg, c, box) {
     tier: cfg.tier === 'vm' ? 'vm' : 'host',
     guest: cfg.guest || '',
     pins: {},
-    net: !!cfg.net,
+    permissions: cfg.permissions || { allow_read: [], allow_write: [], deny: [], module_write: [], granularity: 'ask', ask: [] },
   };
   const pins0 = cfg.pins || {};
   for (const k of Object.keys(pins0)) draft.pins[k] = pins0[k];
@@ -854,13 +854,33 @@ function buildConfigForm(sid, cfg, c, box) {
   }
   box.appendChild(secP);
 
-  // 网络
-  const secN = cfgDiv('cfg-sec');
-  secN.appendChild(cfgDiv('cfg-sec-title', '网络'));
-  const net = checkbox('放行出站网络（默认不放行。虚拟机档：guest 网卡；本机档：Windows / macOS 按此开关放行/断网，Linux 不隔离网络；只放行公网出站，不授局域网/回环；Windows 未授权本机写权限时容器不装，断网不生效）', draft.net);
-  net.box.addEventListener('change', () => { draft.net = net.box.checked; });
-  secN.appendChild(net.wrap);
-  box.appendChild(secN);
+  // 会话权限：路径范围 / 模块写 / 决定粒度（网络是全局开关，不在这里）
+  const secPerm = cfgDiv('cfg-sec');
+  secPerm.appendChild(cfgDiv('cfg-sec-title', '会话权限'));
+  secPerm.appendChild(cfgHint('网络由全局 sandbox.policy.network 控制；本会话不可单独改。'));
+  const perm = draft.permissions || {};
+  const lines = (v) => (Array.isArray(v) ? v.join('\n') : '');
+  const parseLines = (text) => String(text || '')
+    .split(/[\n,]/).map((s) => s.trim()).filter((s) => s.length > 0);
+  const makeList = (label, value, hint) => {
+    const t = areaInput('每行一条');
+    t.value = lines(value);
+    t.addEventListener('input', () => { if (hint) hint.textContent = ''; });
+    const f = field(label, t);
+    secPerm.appendChild(f);
+    return t;
+  };
+  const allowRead = makeList('读白名单（相对工作区根；空 = 整棵可读）', perm.allow_read);
+  const allowWrite = makeList('提交白名单（相对工作区根；空 = 整棵可提交）', perm.allow_write);
+  const deny = makeList('黑名单（读写都禁；全局黑名单是硬底线，这里只能追加）', perm.deny);
+  const moduleWrite = makeList('模块目录写授权（模块 id，每行一个；空 = 模块目录只读）', perm.module_write);
+  const askList = makeList('需要确认的工具名（granularity=ask 时生效；模块工具写 module.tool）', perm.ask);
+  const gran = selectInput([
+    { value: 'ask', label: 'ask：ask 表里的工具先问用户' },
+    { value: 'full', label: 'full：任何工具都不确认' },
+  ], perm.granularity || 'ask');
+  secPerm.appendChild(field('决定粒度', gran));
+  box.appendChild(secPerm);
 
   // 动作
   const acts = cfgDiv('cfg-actions');
@@ -878,7 +898,14 @@ function buildConfigForm(sid, cfg, c, box) {
       tier: draft.tier,
       guest: draft.tier === 'vm' ? (draft.guest || null) : null,
       pins: pins,
-      net: draft.net,
+      permissions: {
+        allow_read: parseLines(allowRead.value),
+        allow_write: parseLines(allowWrite.value),
+        deny: parseLines(deny.value),
+        module_write: parseLines(moduleWrite.value),
+        ask: parseLines(askList.value),
+        granularity: gran.value,
+      },
     };
     save.disabled = true;
     c.setMsg('保存中…');
@@ -1424,19 +1451,97 @@ function openSettingsModal() {
     const pct = numberInput('上下文用到百分之多少就压缩', state.settings.compact_at_percent, 0, 100);
     // 同时最多几台 guest（每台固定 -m 2048 -smp 2）：0 = 不限制；超了在起 guest 那一刻如实拒绝。
     const guests = numberInput('虚拟机档同时最多几台', state.settings.max_guests, 0, 64);
+    // 全局沙箱策略（硬约束）：保存后整体重启，避免旧 guest / 旧快照半生效。
+    const sb = state.settings.sandbox || {};
+    const sp = sb.policy || {};
+    const en = sp.enforce || {};
+    const sd = sb.defaults || {};
+    const lines = (v) => (Array.isArray(v) ? v.join('\n') : '');
+    const parseLines = (text) => String(text || '')
+      .split(/[\n,]/).map((s) => s.trim()).filter((s) => s.length > 0);
+    const area = (label, value, hint) => {
+      const t = areaInput('每行一条');
+      t.value = lines(value);
+      const f = field(label, t);
+      if (hint) f.appendChild(cfgHint(hint));
+      return { t, f };
+    };
+    const select = (label, opts, value) => field(label, selectInput(opts, value));
+    const network = checkbox('允许工具 / guest / 常驻服务 / 构建出站（全局）', !!sp.network);
+    const writeAcl = checkbox('允许 Windows 写本机目录 ACL（只影响 Windows 的容器围栏）', !!(sp.windows && sp.windows.write_acl));
+    const level = (v) => selectInput([
+      { value: 'require', label: 'require：必须强制，不可用时询问是否本进程降级' },
+      { value: 'best_effort', label: 'best_effort：尽力而为，不可用时降级并如实报告' },
+    ], v || 'require');
+    const enFs = level(en.filesystem);
+    const enNet = level(en.network);
+    const enTree = level(en.process_tree);
+    const enEnv = level(en.env_whitelist);
+    const onUnavailable = selectInput([
+      { value: 'ask', label: 'ask：启动时询问是否本进程降级（不落盘）' },
+      { value: 'refuse', label: 'refuse：直接拒绝' },
+    ], sp.on_unavailable || 'ask');
+    const hostRoots = area('主机只读根（绝对路径，每行一条）', sp.host_read_roots);
+    const hardDeny = area('全局黑名单（工作区相对路径，只增不减）', sp.deny);
+    const defRead = area('默认读白名单（会话可覆盖）', sd.allow_read);
+    const defWrite = area('默认提交白名单（会话可覆盖）', sd.allow_write);
+    const defModule = area('默认模块写授权（会话可覆盖）', sd.module_write);
+    const defAsk = area('默认 ask 表（会话可覆盖）', sd.ask);
+    const defGran = selectInput([
+      { value: 'ask', label: 'ask' },
+      { value: 'full', label: 'full' },
+    ], sd.granularity || 'ask');
+    c.body.appendChild(cfgHint('以下沙箱策略是全局硬约束：会话不能改；保存后自动整体重启。', 'warn'));
+    c.body.appendChild(network.wrap);
+    c.body.appendChild(field('文件系统围栏', enFs));
+    c.body.appendChild(field('网络围栏（仅在网络关闭时需要）', enNet));
+    c.body.appendChild(field('进程树围栏', enTree));
+    c.body.appendChild(field('环境白名单', enEnv));
+    c.body.appendChild(field('机制不可用时', onUnavailable));
+    c.body.appendChild(writeAcl.wrap);
+    c.body.appendChild(hostRoots.f);
+    c.body.appendChild(hardDeny.f);
+    c.body.appendChild(cfgHint('默认权限是会话可覆盖的起点；全局黑名单是硬底线，会话只能追加、不能清空。'));
+    c.body.appendChild(defRead.f);
+    c.body.appendChild(defWrite.f);
+    c.body.appendChild(defModule.f);
+    c.body.appendChild(field('默认决定粒度', defGran));
+    c.body.appendChild(defAsk.f);
     const save = btn('保存', 'btn btn-primary btn-block');
     save.onclick = async () => {
       try {
-        await api('POST', actionUrl('set_settings'), {
+        const saved = await api('POST', actionUrl('set_settings'), {
           streaming: stream.box.checked,
           show_reasoning: cot.box.checked,
           llm_timeout_secs: Number(to.input.value) || 300,
           discuss_remind_cap: Number(remind.input.value) || 0,
           compact_at_percent: Number(pct.input.value) || 0,
           max_guests: Number(guests.input.value) || 0,
+          sandbox: {
+            policy: {
+              network: network.box.checked,
+              enforce: {
+                filesystem: enFs.value,
+                network: enNet.value,
+                process_tree: enTree.value,
+                env_whitelist: enEnv.value,
+              },
+              on_unavailable: onUnavailable.value,
+              windows: { write_acl: writeAcl.box.checked },
+              host_read_roots: parseLines(hostRoots.t.value),
+              deny: parseLines(hardDeny.t.value),
+            },
+            defaults: {
+              allow_read: parseLines(defRead.t.value),
+              allow_write: parseLines(defWrite.t.value),
+              module_write: parseLines(defModule.t.value),
+              granularity: defGran.value,
+              ask: parseLines(defAsk.t.value),
+            },
+          },
         });
         await refreshState();
-        c.setMsg('已保存');
+        c.setMsg(saved && saved.restart ? '已保存：沙箱策略变更，正在重启…' : '已保存');
       } catch (e) { c.setMsg(e.message, true); }
     };
     c.body.appendChild(stream.wrap);

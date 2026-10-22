@@ -588,14 +588,14 @@ tools:
   edit_session:
     capability: none
     callers: [user]
-    desc: 配置：改每个 agent 的模块与模型、执行档位、定版与网络（会话开过后名单与形态冻结）。
+    desc: 配置：改每个 agent 的模块与模型、执行档位、定版与会话级权限（会话开过后名单与形态冻结）。
     params:
       session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
-      agents: { type: array, required: true, desc: 每个 agent 的配置数组（name / modules / model / permissions） }
+      agents: { type: array, required: true, desc: 每个 agent 的配置数组（name / modules / model） }
       tier: { type: string, required: true, non_empty: true, desc: 执行档位 host / vm }
       guest: { type: string, desc: 虚拟机档的虚拟根名（清单里的一个名字；可选） }
       pins: { type: object, desc: 能力定版表（可选） }
-      net: { type: boolean, desc: 是否放行出站网络 }
+      permissions: { type: object, desc: 会话级权限覆盖（allow_read / allow_write / deny / module_write / granularity / ask；网络是全局策略） }
   upload:
     capability: none
     callers: [user]
@@ -681,10 +681,11 @@ tools:
   set_settings:
     capability: none
     callers: [user]
-    desc: 改产品设置（部分更新：未提交的字段保留现值）。执行档位 / 围栏写权限 / 会话权限默认值不在这一层暴露。
+    desc: 改产品设置（部分更新：未提交的字段保留现值）。sandbox 是全局沙箱策略（整段替换），保存后整体重启。
     params:
       streaming: { type: boolean, desc: 流式传输 }
       show_reasoning: { type: boolean, desc: 思维链显示 }
       llm_timeout_secs: { type: integer, min: 1, desc: 单次模型调用的超时（秒） }
       compact_at_percent: { type: integer, min: 0, max: 100, desc: 上下文用到百分之多少就压缩 }
       discuss_remind_cap: { type: integer, min: 0, desc: 一轮内最多提醒几次 }
+      sandbox: { type: object, desc: 全局沙箱策略（整段替换；保存后整体重启） }

@@ -400,7 +400,7 @@ pub(crate) fn doctor_reports_the_recorded_processes() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// 目的：路径级围栏的「本次实际」按平台判据：只有 Windows 受 fence_write 授权影响。
+/// 目的：路径级围栏的「本次实际」按平台判据：只有 Windows 受 `sandbox.policy.windows.write_acl` 授权影响。
 ///   用合成能力值，不依赖本机机制；Windows 分支由 Windows CI 真跑。
 #[test]
 fn effective_path_fence_only_depends_on_authorization_on_windows() {
@@ -436,7 +436,11 @@ fn effective_path_fence_only_depends_on_authorization_on_windows() {
 #[test]
 fn startup_fence_report_and_doctor_share_the_same_capability() {
     let cap = crate::kernel::detail::confine::capability();
-    let report = crate::FenceReport::new(cap.clone(), false);
+    let report = crate::FenceReport::new(
+        cap.clone(),
+        false,
+        std::sync::Arc::new(crate::kernel::api::SandboxMode::permissive()),
+    );
     let root = crate::tests::scratch("fence-report");
     let doc = crate::diagnostics::doctor_json_with(&root, cap.clone());
     let fence = doc.get("fence").expect("--doctor 要报围栏事实");

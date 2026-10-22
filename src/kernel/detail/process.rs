@@ -32,6 +32,8 @@ pub struct ProcTools {
     pub timeout: Duration,
     /// 目的：回传给模型/轨迹的输出上限（字符数）。
     pub max_output_chars: usize,
+    /// 目的：全局沙箱要求与本进程是否已同意降级。
+    pub mode: std::sync::Arc<crate::kernel::api::SandboxMode>,
 }
 
 /// 目的：进程机制自己的收尾文案（不再经提示词册；它们随 [工具结果] 进模型上下文）。
@@ -102,7 +104,14 @@ impl ProcTools {
             texts,
             timeout: Duration::from_secs(30),
             max_output_chars: 16_000,
+            mode: std::sync::Arc::new(crate::kernel::api::SandboxMode::permissive()),
         }
+    }
+
+    /// 目的：组合根注入全局沙箱模式；缺省是“无要求”的测试替身。
+    pub fn with_mode(mut self, mode: std::sync::Arc<crate::kernel::api::SandboxMode>) -> ProcTools {
+        self.mode = mode;
+        self
     }
 }
 
@@ -118,7 +127,7 @@ impl ProcessRunner for ProcTools {
         ask: Option<&dyn crate::kernel::ports::AskUser>,
     ) -> ToolOutcome {
         // Windows：容器围栏要先把「可达范围」授权给容器 SID。
-        // **默认不写本机任何权限项**：只有用户显式授权（设置里的 fence_write，或环境变量 SOLOMNI_FENCE_WRITE=1）才做。
+        // **默认不写本机任何权限项**：只有用户显式授权（设置里的 sandbox.policy.windows.write_acl，或环境变量 SOLOMNI_FENCE_WRITE=1）才做。
         #[cfg(windows)]
         let (prepared, unfenced_note) = {
             use std::sync::atomic::Ordering;
@@ -141,7 +150,7 @@ impl ProcessRunner for ProcTools {
                 }
             } else if !self.disclosed.swap(true, Ordering::Relaxed) {
                 eprintln!(
-                    "[围栏] 容器围栏未启用（用户没授权在本机写权限）：外部工具按无围栏执行（能力等级见启动报告）。要启用：在设置里打开，或在 .home/settings.yaml 写 fence_write: true"
+                    "[围栏] 容器围栏未启用（用户没授权在本机写权限）：外部工具按无围栏执行（能力等级见启动报告）。要启用：在设置里打开，或在 .home/settings.yaml 写 sandbox.policy.windows.write_acl: true"
                 );
             }
             if !prepared && note.is_none() {
@@ -162,10 +171,25 @@ impl ProcessRunner for ProcTools {
         let home = Some(self.home.clone());
         #[cfg(not(windows))]
         let home: Option<std::path::PathBuf> = None;
+        // 全局沙箱要求：机制不可用且本进程未同意降级时，工具**不执行**。
+        // 用户已就“必要落点”选了本轮无围栏时，不再用进程级要求拦一次（那是更具体的裁决）。
+        if unfenced_note.is_none() {
+            if let Err(why) = self.mode.check(fence, prepared) {
+                return ToolOutcome {
+                    ok: false,
+                    output: why,
+                };
+            }
+        }
         let job = confine::FenceJob {
             spec: fence.clone(),
             prepared,
             home,
+            policy: crate::kernel::api::FenceRunPolicy {
+                require_fs: self.mode.requirements.filesystem,
+                require_net: self.mode.requirements.network,
+                allow_degraded: self.mode.degraded(),
+            },
         };
         let mut cmd = confine::launcher(&self.exe, &job, command);
         cmd.current_dir(&fence.cwd)
@@ -541,6 +565,47 @@ mod tests {
             "截断要如实报字符数：{}",
             &cut.output[cut.output.len() - 80..]
         );
+    }
+
+    /// 全局沙箱要求：机制不可用且未同意降级时拒绝；同意降级后放行；"允许联网"不需要网络围栏。
+    #[test]
+    fn sandbox_mode_refuses_missing_requirements_until_degraded() {
+        use crate::kernel::api::{SandboxMode, SandboxRequirements};
+        let spec = FenceSpec {
+            agent: "a".to_string(),
+            lease: String::new(),
+            rw: Vec::new(),
+            ro: Vec::new(),
+            ro_tree: Vec::new(),
+            private: PathBuf::new(),
+            cwd: PathBuf::new(),
+            net: false,
+        };
+        let mode = SandboxMode::new(
+            SandboxRequirements {
+                filesystem: true,
+                network: true,
+                process_tree: true,
+                env_whitelist: true,
+            },
+            false,
+            false,
+            false,
+            false,
+            true,
+        );
+        assert!(mode.check(&spec, false).is_err(), "缺机制时默认拒绝");
+        mode.set_degraded(true);
+        assert!(mode.check(&spec, false).is_ok(), "本进程同意降级后放行");
+        mode.set_degraded(false);
+        let allow_net = FenceSpec {
+            net: true,
+            ro: Vec::new(),
+            ..spec.clone()
+        };
+        // 文件系统仍然缺，所以还是拒绝；但“网络围栏”不应再单独要求。
+        let err = mode.check(&allow_net, false).unwrap_err();
+        assert!(!err.contains("网络围栏"), "{}", err);
     }
 
     /// 未授权时段的放行规矩：**只有本机装不上能降级**。

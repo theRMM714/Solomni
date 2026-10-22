@@ -552,6 +552,7 @@ impl Conductor {
             ts: now_ts(),
             agents: Vec::new(),
             exec,
+            sandbox: Default::default(),
             parent: None,
             node: None,
             delegation: Some(Delegation { granted_at }),
@@ -575,6 +576,11 @@ impl Conductor {
     /// 装配一个代理会话对象（创建与重建**共用同一处**，两处不各拼一遍）。
     pub(crate) fn build_proxy(&self, meta: &SessionMeta) -> Result<AgentSession, String> {
         let roots = self.workspace.roots(&meta.name, &[])?;
+        let app = self.registry.app();
+        let base = app
+            .sandbox
+            .defaults
+            .to_permissions(&app.sandbox.policy.deny);
         let sb = Sandbox {
             work_name: meta.name.clone(),
             session: meta.name.clone(),
@@ -588,7 +594,7 @@ impl Conductor {
             // 代理会话：用户选这一形态就是**不确认任何工具**（full）；路径权限沿用全局默认。
             permissions: crate::capabilities::permission::api::Permissions {
                 granularity: crate::capabilities::permission::api::Granularity::Full,
-                ..self.registry.app().permissions.clone()
+                ..base
             },
             // 代理发言席自己住在宿主上（文件工具也跑在宿主），不需要 guest 翻译。
             path_codec: None,

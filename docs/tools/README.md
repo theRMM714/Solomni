@@ -17,7 +17,7 @@
 **不管**：
 
 - 不放领域语义（角色是系统的身份，不是业务概念）；不选模型；不碰会话流水。
-- 不决定用户授权的只读根（`fence_read`）：由调用方（`conductor` / `collab`）叠加。
+- 不决定用户授权的主机只读根（`sandbox.policy.host_read_roots`）：由调用方（`conductor` / `collab`）叠加。
 
 ## 二、入站契约与状态归属
 

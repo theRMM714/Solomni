@@ -451,6 +451,8 @@ pub fn build_module(
         return 0;
     }
     // 跑构建：围栏由产品给（只写模块目录与状态目录；不写本机任何权限项）。
+    // 网络是全局开关，模块的 build.net 只是“这次构建需要网络”的声明；两者取交集。
+    let network = global_network_allowed(root) && decl.net;
     let state_dir = root.join(".vm").join("build-state");
     let home = state_dir.join(id).join("home");
     if let Err(e) = std::fs::create_dir_all(&home) {
@@ -465,12 +467,12 @@ pub fn build_module(
         ro_tree: Vec::new(),
         private: home,
         cwd: module.root.clone(),
-        net: decl.net,
+        net: network,
     };
     println!(
         "[构建] {}：在模块根跑声明的构建命令（出站网络：{}）",
         id,
-        if decl.net { "放行" } else { "不放行" }
+        if network { "放行" } else { "不放行" }
     );
     let out =
         crate::kernel::ports::ProcessRunner::run(runner, &fence, &decl.command, "{}", &[], None);
@@ -573,10 +575,11 @@ pub fn build_module_in_guest(root: &std::path::Path, id: &str, guest: &str) -> i
         return 0;
     }
     // 挂载：模块目录（读写，产物经它落回宿主）+ 已挑中的包（prefix 挂前缀、system 挂专用只读根）。
+    let network = global_network_allowed(root) && decl.net;
     let lease = format!("build-{}", id);
     let plan = crate::capabilities::vm::api::ExecPlan {
         tier: crate::kernel::api::Tier::Vm,
-        net: decl.net,
+        net: network,
         guest: Some(guest.to_string()),
         packages,
     };
@@ -588,14 +591,14 @@ pub fn build_module_in_guest(root: &std::path::Path, id: &str, guest: &str) -> i
         ro_tree: Vec::new(),
         private: std::path::PathBuf::new(),
         cwd: module.root.clone(),
-        net: decl.net,
+        net: network,
     };
     let mounts = crate::capabilities::vm::api::mounts_from(&plan, &fence, &image.bridge());
     let spec = crate::capabilities::vm::api::GuestSpec {
         lease: lease.clone(),
         image: image.clone(),
         mounts,
-        net: decl.net,
+        net: network,
         engine_path,
         share_path: share_tool.clone(),
         // 构建要求**挂载式**共享（产物要落回宿主那份）：这里只用用户链，copy 不在其中。
@@ -611,7 +614,7 @@ pub fn build_module_in_guest(root: &std::path::Path, id: &str, guest: &str) -> i
         "[构建] {}：在 guest「{}」里跑声明的构建命令（出站网络：{}）",
         id,
         guest,
-        if decl.net { "放行" } else { "不放行" }
+        if network { "放行" } else { "不放行" }
     );
     if let Err(e) = vm.guest_start(&spec) {
         eprintln!("[构建] 起 guest 失败：{}", e);
@@ -888,6 +891,17 @@ fn collect_sources(
         buf.push(0);
     }
     Ok(())
+}
+
+/// 目的：构建期的全局网络开关（与主程序同一份 settings.yaml；读不到/非法按拒绝）。
+fn global_network_allowed(root: &std::path::Path) -> bool {
+    std::fs::read_to_string(root.join(".home").join("settings.yaml"))
+        .ok()
+        .and_then(|t| {
+            yaml_serde::from_str::<crate::capabilities::registry::api::AppSettings>(&t).ok()
+        })
+        .map(|a| a.sandbox.policy.network)
+        .unwrap_or(false)
 }
 
 /// 目的：构建用的执行器——与外层工具执行同一套守门进程机制（围栏在它里面装）。

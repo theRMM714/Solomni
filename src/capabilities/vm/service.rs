@@ -92,11 +92,20 @@ impl VmService {
         }
         let out = match fence {
             Some(fence) => {
-                let access = crate::capabilities::vm::domain::guest::GuestAccess::from_fence(
+                let mut access = crate::capabilities::vm::domain::guest::GuestAccess::from_fence(
                     fence,
                     held.os,
                     &held.mounts,
                 );
+                // 只读挂载的包前缀（/opt/...）也要进 per-agent 允许集：命令经 /usr/local/bin
+                // 的软链调用包内解释器时，Landlock 检查的是目标路径。
+                for m in &held.mounts {
+                    if m.read_only && !m.guest.is_empty() {
+                        access.ro_tree.push(m.guest.clone());
+                    }
+                }
+                access.ro_tree.sort();
+                access.ro_tree.dedup();
                 held.vm.channel().exec_fenced(&translated, &access)
             }
             None => held.vm.channel().exec(&translated),

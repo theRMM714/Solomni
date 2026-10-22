@@ -27,6 +27,8 @@ pub struct ProcessSessions {
     /// 目的：「未授权」的提示只出一次，不刷屏。
     #[cfg(windows)]
     disclosed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// 目的：全局沙箱要求与本进程是否已同意降级。
+    mode: std::sync::Arc<crate::kernel::api::SandboxMode>,
 }
 
 impl ProcessSessions {
@@ -53,7 +55,14 @@ impl ProcessSessions {
             write_allowed,
             #[cfg(windows)]
             disclosed: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            mode: std::sync::Arc::new(crate::kernel::api::SandboxMode::permissive()),
         }
+    }
+
+    /// 目的：组合根注入全局沙箱模式；缺省是“无要求”的测试替身。
+    pub fn with_mode(mut self, mode: std::sync::Arc<crate::kernel::api::SandboxMode>) -> Self {
+        self.mode = mode;
+        self
     }
 }
 
@@ -162,7 +171,7 @@ impl SessionHost for ProcessSessions {
                 }
             } else if !self.disclosed.swap(true, Ordering::Relaxed) {
                 eprintln!(
-                    "[围栏] 容器围栏未启用（用户没授权在本机写权限）：常驻服务按无围栏执行（要启用：在设置里打开，或写 fence_write: true）"
+                    "[围栏] 容器围栏未启用（用户没授权在本机写权限）：常驻服务按无围栏执行（要启用：在设置里打开，或写 sandbox.policy.windows.write_acl: true）"
                 );
             }
             if !prepared {
@@ -177,10 +186,19 @@ impl SessionHost for ProcessSessions {
         };
         #[cfg(not(windows))]
         let (prepared, home): (bool, Option<PathBuf>) = (false, None);
+        // 全局沙箱要求：机制不可用且本进程未同意降级时，常驻服务不拉起。
+        self.mode
+            .check(&spec.fence, prepared)
+            .map_err(|why| format!("服务起不来（沙箱要求未满足）：{}", why))?;
         let job = crate::kernel::detail::confine::FenceJob {
             spec: spec.fence.clone(),
             prepared,
             home,
+            policy: crate::kernel::api::FenceRunPolicy {
+                require_fs: self.mode.requirements.filesystem,
+                require_net: self.mode.requirements.network,
+                allow_degraded: self.mode.degraded(),
+            },
         };
         let mut cmd = crate::kernel::detail::confine::launcher(&self.exe, &job, &spec.command);
         cmd.current_dir(&spec.fence.cwd)

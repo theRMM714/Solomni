@@ -487,6 +487,7 @@ pub(crate) fn exec_entry_missing_refuses_before_any_tier() {
         &Library::default(),
         &[],
         &missing,
+        false,
     )
     .unwrap_err();
     assert!(
@@ -495,7 +496,15 @@ pub(crate) fn exec_entry_missing_refuses_before_any_tier() {
         host
     );
     // 虚拟机档：入口判据排最前，缺包一并如实报（一次把话说全）。
-    let vm = exec::plan(&vm_spec(), &modules, &Library::default(), &[], &missing).unwrap_err();
+    let vm = exec::plan(
+        &vm_spec(),
+        &modules,
+        &Library::default(),
+        &[],
+        &missing,
+        false,
+    )
+    .unwrap_err();
     assert!(
         matches!(vm.first(), Some(Diagnosis::MissingEntry { .. })),
         "入口判据要排在最前：{:?}",
@@ -514,6 +523,7 @@ pub(crate) fn exec_entry_missing_refuses_before_any_tier() {
         &Library::default(),
         &[],
         &[],
+        false,
     )
     .expect("本机档照旧可成立");
 }
@@ -585,6 +595,7 @@ pub(crate) fn exec_host_tier_ignores_packages() {
         &Library::default(),
         &[],
         &[],
+        false,
     )
     .expect("本机档不装载运行包，不会因缺包失败");
     assert_eq!(plan.tier, Tier::Host);
@@ -622,7 +633,7 @@ pub(crate) fn exec_vm_tier_reports_missing_ambiguous_and_unavailable() {
         "本机档一律可用"
     );
     // 缺包 = **不创建**（不再降级）：没有工具用户完不成工作，与其拉一台跑不了工具的 guest，不如选型这步如实拒。
-    let refused = exec::plan(&spec, &modules, &empty, &[], &[]).unwrap_err();
+    let refused = exec::plan(&spec, &modules, &empty, &[], &[], false).unwrap_err();
     assert!(
         matches!(refused.as_slice(), [Diagnosis::Missing { .. }]),
         "{:?}",
@@ -638,7 +649,7 @@ pub(crate) fn exec_vm_tier_reports_missing_ambiguous_and_unavailable() {
     let guest = vec!["python".to_string()];
     assert!(exec::vm_diagnoses(&modules, &empty, &spec, &guest).is_empty());
     assert!(exec::unavailable(&spec, &modules, &empty, &guest).is_empty());
-    assert!(exec::plan(&spec, &modules, &empty, &guest, &[])
+    assert!(exec::plan(&spec, &modules, &empty, &guest, &[], false)
         .expect("guest 自带就不算缺")
         .packages
         .is_empty());
@@ -659,7 +670,7 @@ pub(crate) fn exec_vm_tier_reports_missing_ambiguous_and_unavailable() {
         .iter()
         .any(|d| matches!(d, Diagnosis::UnknownPin { .. })));
     // 多版本未定版 = 选型不成立：派生计划如实拒绝（这是用户要解决的选型问题，不是"缺包"）
-    let refused = exec::plan(&spec, &modules, &two, &[], &[]).unwrap_err();
+    let refused = exec::plan(&spec, &modules, &two, &[], &[], false).unwrap_err();
     assert!(
         exec::diagnose_text(&refused).contains("多个版本"),
         "{}",
@@ -672,7 +683,7 @@ pub(crate) fn exec_vm_tier_reports_missing_ambiguous_and_unavailable() {
     };
     assert!(exec::vm_diagnoses(&modules, &two, &ok, &[]).is_empty());
     assert_eq!(
-        exec::plan(&ok, &modules, &two, &[], &[])
+        exec::plan(&ok, &modules, &two, &[], &[], false)
             .unwrap()
             .packages
             .len(),
@@ -691,7 +702,7 @@ pub(crate) fn exec_vm_plan_pins_versions_and_orders_prefix_before_system() {
         Vec::new(),
     );
     let modules = vec![module_with_runtimes("a", &["python", "cc"])];
-    let plan = exec::plan(&vm_spec(), &modules, &lib, &[], &[]).expect("虚拟机档可成立");
+    let plan = exec::plan(&vm_spec(), &modules, &lib, &[], &[], false).expect("虚拟机档可成立");
     let ids: Vec<&str> = plan.packages.iter().map(|p| p.id.as_str()).collect();
     assert_eq!(
         ids,
@@ -2520,7 +2531,6 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
         ro_tree: Vec::new(),
         private: format!("{guest_dir}/a"),
         cwd: format!("{guest_dir}/a"),
-        net: false,
     };
     let fenced = guest.channel().exec_fenced(
         &GuestRun {
@@ -2916,7 +2926,6 @@ pub(crate) fn a_channel_without_fencing_refuses_fenced_runs() {
         ro_tree: Vec::new(),
         private: String::new(),
         cwd: String::new(),
-        net: false,
     };
     let run = GuestRun {
         command: "true".to_string(),
@@ -2941,6 +2950,31 @@ pub(crate) fn guest_helper_is_a_fail_closed_landlock_launcher() {
         script
     );
     assert!(script.contains("TMPDIR"), "{}", script);
+    assert!(
+        script.contains("env_names"),
+        "环境白名单要按模块隐秘字段名注入：{}",
+        script
+    );
+    assert!(
+        script.contains("subprocess.Popen") && script.contains("start_new_session"),
+        "要用独立进程组启动，才能杀整棵树：{}",
+        script
+    );
+    assert!(
+        script.contains("os.killpg") && script.contains("TIMEOUT_SECS"),
+        "超时要杀进程组：{}",
+        script
+    );
+    assert!(
+        script.contains("/etc/ld.so.cache") && !script.contains("for base in (\n        \"/usr\",\n        \"/bin\",\n        \"/sbin\",\n        \"/lib\",\n        \"/lib64\",\n        \"/etc\","),
+        "只读基线要与本机 Linux 对齐，不能整棵 /etc：{}",
+        script
+    );
+    assert_eq!(
+        crate::capabilities::vm::detail::guest_helper::HELPER_TIMEOUT_SECS,
+        30,
+        "guest 超时与本机守门进程同一口径"
+    );
     assert!(
         crate::capabilities::vm::detail::guest_helper::HELPER_PATH.contains("solomni-guest-fence"),
         "助手路径要稳定"

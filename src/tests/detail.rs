@@ -47,9 +47,9 @@ fn meta(name: &str) -> SessionMeta {
             transient: false,
             modules: vec!["a".to_string()],
             model: None,
-            permissions: Default::default(),
         }],
         exec: ExecSpec::default(),
+        sandbox: Default::default(),
         parent: None,
         node: None,
         delegation: None,
@@ -576,8 +576,19 @@ fn yaml_settings_store_defaults_saves_and_reports_malformed_files() {
     // 四份文件都不存在 = 空登记处 + 默认设置（不是错误）。
     let empty = store.load().expect("缺文件必须取默认，不报错");
     assert!(empty.providers.is_empty() && empty.models.is_empty() && empty.core.is_none());
-    assert!(empty.app.streaming && !empty.app.fence_write);
+    assert!(empty.app.streaming && !empty.app.sandbox.policy.windows.write_acl);
     assert!(empty.agents.is_empty());
+
+    // 旧字段/拼错键 = 配置非法（不做兼容、不静默忽略）。
+    std::fs::create_dir_all(&home).expect("建 .home");
+    std::fs::write(home.join("settings.yaml"), "fence_write: true\n").expect("造旧配置");
+    let err = store.load().unwrap_err();
+    assert!(
+        err.contains("settings.yaml 配置非法") && err.contains("unknown field"),
+        "{}",
+        err
+    );
+    std::fs::remove_file(home.join("settings.yaml")).expect("删旧配置");
 
     let mut want = Settings::default();
     want.providers.insert(

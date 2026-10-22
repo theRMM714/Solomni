@@ -8,6 +8,32 @@ use crate::kernel::api::Ask;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+/// 目的：守门进程执行时的全局沙箱要求——机制装不上时是降级还是拒绝。
+/// 约束：`allow_degraded` 只来自本进程的启动问答；不落盘。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FenceRunPolicy {
+    #[serde(default)]
+    pub require_fs: bool,
+    #[serde(default)]
+    pub require_net: bool,
+    #[serde(default = "default_allow_degraded")]
+    pub allow_degraded: bool,
+}
+
+fn default_allow_degraded() -> bool {
+    true
+}
+
+impl Default for FenceRunPolicy {
+    fn default() -> Self {
+        FenceRunPolicy {
+            require_fs: false,
+            require_net: false,
+            allow_degraded: true,
+        }
+    }
+}
+
 /// 目的：守门进程要执行的命令与其环境上下文。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FenceSpec {
@@ -33,8 +59,9 @@ pub struct FenceSpec {
     pub private: PathBuf,
     /// 目的：工具进程的工作目录（它所属模块的根目录）。
     pub cwd: PathBuf,
-    /// 目的：是否放行出站网络（默认否）。能强制的本机档：Windows 授 `internetClient`、macOS 放行
-    ///   `network-outbound`；Linux 本机档不围栏网络（`capability().net=false`）；虚拟机档由 QEMU 网卡决定。
+    /// 目的：这次执行是否放行出站网络（来自全局 `sandbox.policy.network`，不是会话字段）。
+    ///   能强制的本机档：Windows 授 `internetClient`、macOS 放行 `network-outbound`；Linux 本机档不围栏网络
+    ///   （`capability().net=false`，按 `on_unavailable` 拒绝或本进程降级）；虚拟机档由 QEMU 网卡决定。
     ///   只放行出站，不授 private network / loopback。
     pub net: bool,
 }
@@ -80,7 +107,7 @@ pub enum FencePart {
     Sandbox,
     /// 其余**数据边界**（共享区主副本、模块 `userdata/` 这类读写根）：这次执行要用到的根。
     DataBoundary,
-    /// 用户显式授权的只读根（`fence_read`）。
+    /// 用户显式授权的主机只读根（`sandbox.policy.host_read_roots`）。
     AuthorizedRead,
     /// 数据边界的父目录（只授读属性：容器里判"这个目录在不在"用它）。
     Parent,
@@ -184,6 +211,116 @@ pub const OPT_FENCE_ABORT: &str = "fence_abort";
 /// 返回：`None` = **构不出可用选项**（除"放弃"外没有一条真能执行的）：调用方**不发起裁决**，
 ///   改为停掉这个会话 + 落一条警告（契约禁止置灰）。
 // 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
+/// 目的：全局沙箱策略对机制的要求（与 `settings.yaml` 的 `sandbox.policy.enforce` 同义）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SandboxRequirements {
+    pub filesystem: bool,
+    pub network: bool,
+    pub process_tree: bool,
+    pub env_whitelist: bool,
+}
+
+/// 目的：本进程的沙箱模式——全局要求 + 本机能力 + 是否已同意本进程降级。
+/// 约束：降级只活在内存里，不落盘；重启后重新评估、重新询问。
+#[derive(Debug)]
+pub struct SandboxMode {
+    pub requirements: SandboxRequirements,
+    pub filesystem_ok: bool,
+    pub network_ok: bool,
+    pub tree_ok: bool,
+    pub env_ok: bool,
+    /// 目的：`on_unavailable=ask` 时为真；`refuse` 时为假（不允许通过问答降级）。
+    pub ask_allowed: bool,
+    degraded: std::sync::atomic::AtomicBool,
+}
+
+impl SandboxMode {
+    /// 目的：按全局要求与本机能力构造；初始未降级。
+    pub fn new(
+        requirements: SandboxRequirements,
+        filesystem_ok: bool,
+        network_ok: bool,
+        tree_ok: bool,
+        env_ok: bool,
+        ask_allowed: bool,
+    ) -> SandboxMode {
+        SandboxMode {
+            requirements,
+            filesystem_ok,
+            network_ok,
+            tree_ok,
+            env_ok,
+            ask_allowed,
+            degraded: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    /// 目的：测试替身/无策略场景——什么都不要求，机制视为可用。
+    pub fn permissive() -> SandboxMode {
+        SandboxMode::new(
+            SandboxRequirements::default(),
+            true,
+            true,
+            true,
+            true,
+            false,
+        )
+    }
+
+    pub fn degraded(&self) -> bool {
+        self.degraded.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn set_degraded(&self, value: bool) {
+        self.degraded
+            .store(value, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// 目的：启动期缺哪些必要机制（不看 `prepared`，那是执行期事实）。
+    pub fn missing(&self) -> Vec<&'static str> {
+        let mut out = Vec::new();
+        if self.requirements.filesystem && !self.filesystem_ok {
+            out.push("文件系统围栏");
+        }
+        if self.requirements.network && !self.network_ok {
+            out.push("网络围栏");
+        }
+        if self.requirements.process_tree && !self.tree_ok {
+            out.push("进程树围栏");
+        }
+        if self.requirements.env_whitelist && !self.env_ok {
+            out.push("环境白名单");
+        }
+        out
+    }
+
+    /// 目的：执行前检查——要求强制但机制（或 Windows 的本机授权）不可用时拒绝；已同意降级则放行。
+    /// 约束：`spec.net=true` 时不需要“网络围栏”来拦出站；只有要求断网时才检查。
+    pub fn check(&self, spec: &FenceSpec, prepared: bool) -> Result<(), String> {
+        let paths_effective = !cfg!(windows) || prepared;
+        let mut missing: Vec<&'static str> = Vec::new();
+        if self.requirements.filesystem && (!self.filesystem_ok || !paths_effective) {
+            missing.push("文件系统围栏");
+        }
+        if self.requirements.network && !spec.net && (!self.network_ok || !paths_effective) {
+            missing.push("网络围栏");
+        }
+        if self.requirements.process_tree && !self.tree_ok {
+            missing.push("进程树围栏");
+        }
+        if self.requirements.env_whitelist && !self.env_ok {
+            missing.push("环境白名单");
+        }
+        if missing.is_empty() || self.degraded() {
+            return Ok(());
+        }
+        Err(format!(
+            "沙箱要求{}，但本机机制不可用；按全局策略拒绝执行（启动时可选择本进程降级，重启后重新询问）",
+            missing.join("、")
+        ))
+    }
+}
+
 #[allow(dead_code)]
 pub fn fence_ask(block: &FenceBlocked, name: &str, unfenced_possible: bool) -> Option<Ask> {
     if !unfenced_possible {

@@ -238,10 +238,19 @@ pub fn run_fenced(
     _prepared: bool,
     _home: Option<&std::path::Path>,
     command: &str,
+    policy: &crate::kernel::api::FenceRunPolicy,
 ) -> i32 {
     let enforced = match install(spec, command) {
         Ok(()) => true,
         Err(e) => {
+            let required = policy.require_fs || (policy.require_net && !spec.net);
+            if required && !policy.allow_degraded {
+                eprintln!(
+                    "[围栏] 文件系统/网络围栏未生效（{}）：按全局策略拒绝执行",
+                    e
+                );
+                return FENCE_FAILED;
+            }
             // 如实降级：机制装不上就不装，但不假装装上了（启动时已报告能力等级）。
             eprintln!("[围栏] 文件系统围栏未生效（{}）：按如实降级继续执行", e);
             false
@@ -322,7 +331,7 @@ fn install_rules(spec: &FenceSpec, command: &str) -> Result<(), String> {
     if !spec.cwd.as_os_str().is_empty() {
         wanted.push((spec.cwd.clone(), RO_ALL));
     }
-    // 用户显式授权的只读根（`fence_read`）：只给只读位，一个写位都不给。
+    // 用户显式授权的主机只读根（`sandbox.policy.host_read_roots`）：只给只读位，一个写位都不给。
     for root in &spec.ro {
         if !root.as_os_str().is_empty() {
             wanted.push((root.clone(), RO_ALL));

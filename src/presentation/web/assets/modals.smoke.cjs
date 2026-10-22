@@ -76,7 +76,7 @@ const sandbox = {
           providers: [{ id: "p1", base_url: "http://x" }],
           models: [{ id: "m1", name: "M", api_model: "m", provider: "p1", note: "", tools: "native", context: 32000, is_core: true }],
           agents: [],
-          settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70, max_guests: 2 },
+          settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70, max_guests: 2, sandbox: { policy: { network: false, enforce: { filesystem: "require", network: "require", process_tree: "require", env_whitelist: "require" }, on_unavailable: "ask", windows: { write_acl: false }, host_read_roots: [], deny: [] }, defaults: { allow_read: [], allow_write: [], module_write: [], granularity: "ask", ask: [] } } },
           history: [],
         }),
       };
@@ -143,6 +143,11 @@ if (!loadErrors.length) {
     const body = roots.get("#modal-root").children[0].children[0].children[1];
     const save = walk(body, []).find((n) => n.tagName === "BUTTON" && n.textContent === "保存");
     return !!save && typeof save.onclick === "function";
+  });
+  check("沙箱策略段在设置弹层里", () => {
+    const body = roots.get("#modal-root").children[0].children[0].children[1];
+    const text = walk(body, []).map((n) => String(n.textContent || "")).join(" ");
+    return text.indexOf("全局硬约束") >= 0 && text.indexOf("网络围栏") >= 0;
   });
   // ③ 回合分隔行要可见：解析成系统分隔行，而不是 who=标签、text 为空的空行。
   check("回合分隔行解析成系统行", () => {

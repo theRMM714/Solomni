@@ -98,8 +98,25 @@ agents:
 streaming: true        # 流式传输：向供应商请求逐片返回（默认 true）
 show_reasoning: true   # 思维链显示（默认 true；界面上永远默认折叠、点击才展开）
 tier: host             # 默认执行档位：host（本机）| vm（虚拟机）（默认 host）
-fence_write: false     # 是否允许 Windows 容器围栏在本机写目录 ACL（默认 false：不动本机任何权限项；Linux / macOS 不需要）
-fence_read: []         # 用户显式授权的只读根（默认空：一个都不放行）
+sandbox:               # 全局沙箱策略：会话不可填；保存后整体重启
+  policy:
+    network: false     # 全局网络开关：会话 / 直接模块工具 / 常驻服务 / 构建共用
+    enforce:           # 哪些围栏必须强制（require）；best_effort 表示不可用时降级并如实报告
+      filesystem: require
+      network: require
+      process_tree: require
+      env_whitelist: require
+    on_unavailable: ask # ask = 启动时询问是否本进程降级（不落盘）；refuse = 直接拒绝
+    windows:
+      write_acl: false # 是否允许 Windows 容器围栏写本机目录 ACL
+    host_read_roots: [] # 用户显式授权的主机绝对路径只读根（默认空）
+    deny: []           # 全局黑名单（工作区相对路径）：硬底线，会话只能追加、不能删除
+  defaults:            # 会话权限的全局默认；会话 meta 可覆盖
+    allow_read: []     # 读白名单（相对工作区根；空 = 整棵工作区可读）
+    allow_write: []    # 提交白名单（相对工作区根；空 = 整棵工作区可提交）
+    module_write: []   # 模块目录写授权（模块 id；空 = 模块目录只读，userdata/ 恒可写）
+    granularity: ask   # 决定粒度：ask = ask 表里的工具要用户放行；full = 任何工具都不设确认
+    ask: []            # granularity=ask 时要用户放行的工具名（模块工具写 module.tool）
 qemu_path: ""          # 虚拟机档用的 QEMU 可执行文件路径（默认空 = 判据每次取用时采用项目内补齐的可运行包；否则兜底看 PATH。显式登记优先）
 virtiofsd_path: ""     # 虚拟机档共享后端要用的外部程序路径（如 virtiofsd；默认同 qemu_path：登记优先，否则用项目内补齐的那个）
 smbd_path: ""          # 虚拟机档 smb 共享档要用的外部 helper 路径（默认空 = 判据每次取用时采用项目内补齐的 helper；否则兜底看 PATH）
@@ -107,29 +124,29 @@ max_guests: 2          # 虚拟机档同时最多几台 guest（0 = 不限制；
 llm_timeout_secs: 300  # 单次模型调用的总预算（秒），全局通用（讨论/执行/验收/单 agent）
 compact_at_percent: 70 # 上下文用到模型窗口的百分之多少就自动压一次（0 = 关）
 discuss_remind_cap: 3  # 讨论里一轮内对同一个成员最多提醒几次（提醒 = "你还没用动词表态"）
-permissions:           # 【可选】会话权限的全局默认（可被会话 meta 里逐 agent 的覆盖替换）
-  allow_read: []       # 读白名单（相对工作区根；空 = 整棵工作区可读）
-  allow_write: []      # 提交白名单（相对工作区根；空 = 整棵工作区可提交）
-  deny: []             # 黑名单：读写都禁，只做减法（不让默认失效）
-  module_write: []     # 模块目录写授权（模块 id；空 = 模块目录只读，userdata/ 恒可写）
-  granularity: ask     # 决定粒度：ask = ask 表里的工具要用户放行；full = 任何工具都不设确认
-  ask: []              # granularity=ask 时要用户放行的工具名（模块工具写 module.tool）
 ```
 
-- 这些是**默认值**：会话可在 `meta.yaml` 的 `exec` 段单独选定档位与定版
-  （见 [ARCHITECTURE.md](ARCHITECTURE.md)「状态与落盘契约」与 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)）。
-- **模型调用次数没有上限**：工具循环跑到模型不再发起调用为止（执行席与讨论席一样），
-  用户随时可以点「停止」。`discuss_remind_cap` 只是**提醒次数**：提醒到顶就如实记一行"未回应"放过它，整轮继续。
-- `fence_write` 可被环境变量 `SOLOMNI_FENCE_WRITE=1/0` 临时覆盖（优先级高于设置，测试与 CI 用得到）；它只影响 Windows 的目录 ACL。
+- `sandbox.policy` 是**全局硬约束**：会话、子会话、agent 都不能覆盖；改它要保存后整体重启，
+  让所有 guest / 常驻服务 / 工具进程按新策略重建。旧字段 `fence_write` / `fence_read` / `permissions` 不再读取，
+  也不做兼容层；配置写错（拼错键、相对的主机只读根、非法路径）启动即报 `settings.yaml 配置非法`。
+- `sandbox.defaults` 是**会话权限的全局默认**；会话级覆盖写在 `meta.yaml` 的 `sandbox.permissions`
+  （见 [docs/session/session-model.md](docs/session/session-model.md)）。`sandbox.policy.deny` 是硬底线，
+  会话只能追加黑名单，不能清空。语义只有一份权威：[docs/permission/README.md](docs/permission/README.md)。
+- **网络是全局开关**（`sandbox.policy.network`）：会话工具、直接模块工具、常驻服务、模块构建共用；
+  不再有会话 `exec.net`。provisioning 首启与核心模型出站不受它影响。
+- `on_unavailable=ask` 时，启动预检发现 `require` 的机制不可用会询问是否**本进程降级**；
+  回答不落盘，重启再问；没人答 / 没有前端 / `refuse` = fail-closed。`SOLOMNI_SANDBOX_DEGRADED=1/0`
+  只供测试与 CI 在进程级注入（`1` 仅在 `ask` 下生效）。
+- `sandbox.policy.windows.write_acl` 可被环境变量 `SOLOMNI_FENCE_WRITE=1/0` 临时覆盖（优先级高于设置，测试与 CI 用得到）；
+  它只影响 Windows 的目录 ACL。
+- `sandbox.policy.host_read_roots` 是**用户显式授权的主机绝对路径只读根**（默认空）：工具进程对这些目录只读可达，
+  不继承写；授权落在用户自己的目录上。撤权与 `write_acl` 走同一份台账（`--fence-clean` 一并撤净；
+  启动期按归属对账回收陈旧授权，见 [ARCHITECTURE.md](ARCHITECTURE.md) 六）。
 - `llm_timeout_secs` 是**单次模型调用的总预算**，全局通用：连接之外，等响应头 / 读响应体 / 整体都用它。
   **为什么是一个预算**：非流式下供应商要等整段生成完才发响应头，单独设一个小的「头超时」会把几十秒的正常长回复误判成不通。
   预算用尽 = **中断**这一轮并如实告知（用户可以点「继续」重试），不是把会话作废。
-- `fence_read` 是**用户显式授权的只读根**（字符串数组，默认空 = 一个都不放行）：工具进程对这些目录**只读可达**，
-  不继承写。授权落在用户自己的目录上；本程序只加只读 ACE（Windows 上授给该 agent 自己的容器身份，不是共享组），
-  撤权与 `fence_write` 走同一份台账（`--fence-clean` 一并撤净；启动期按归属对账回收陈旧授权，见 [ARCHITECTURE.md](ARCHITECTURE.md) 六）。
-- `permissions` 是**会话权限的全局默认**，逐 agent 的覆盖写在会话的 `meta.yaml`（见
-  [docs/session/session-model.md](docs/session/session-model.md) 的「形态」）。语义只有一份权威：
-  [docs/permission/README.md](docs/permission/README.md)。未配置时 = 整棵工作区可读可提交、模块目录只读。
+- **模型调用次数没有上限**：工具循环跑到模型不再发起调用为止（执行席与讨论席一样），
+  用户随时可以点「停止」。`discuss_remind_cap` 只是**提醒次数**：提醒到顶就如实记一行"未回应"放过它，整轮继续。
 
 ## 六、名字与 id
 

@@ -28,7 +28,12 @@ pub fn run_fenced(
     _prepared: bool,
     _home: Option<&std::path::Path>,
     command: &str,
+    policy: &crate::kernel::api::FenceRunPolicy,
 ) -> i32 {
+    if (policy.require_fs || (policy.require_net && !spec.net)) && !policy.allow_degraded {
+        eprintln!("[围栏] 本平台没有接入文件系统/网络围栏：按全局策略拒绝执行");
+        return FENCE_FAILED;
+    }
     match shell_command(command).current_dir(&spec.cwd).status() {
         Ok(s) => {
             let code = s.code().unwrap_or(FENCE_FAILED);

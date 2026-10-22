@@ -310,8 +310,9 @@ async function lines(sid) {
   });
   assert(cAsk.status === 200, '建"工具确认"会话', cAsk.text.slice(0, 200));
   const edAsk = await act(nameAsk, 'edit_session', {
-    agents: [{ name: '确认兵', modules: ['research'], model: 'm1', permissions: { granularity: 'ask', ask: ['write'] } }],
-    tier: 'host', net: false,
+    agents: [{ name: '确认兵', modules: ['research'], model: 'm1' }],
+    permissions: { granularity: 'ask', ask: ['write'] },
+    tier: 'host',
   });
   assert(edAsk.status === 200, '把该 agent 的粒度设成 ask（ask 表 = write）', edAsk.text.slice(0, 240));
   const sandbox = path.join(dir(nameAsk), '确认兵');

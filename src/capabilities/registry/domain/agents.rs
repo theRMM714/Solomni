@@ -232,7 +232,6 @@ pub fn resolve_picks(
                 transient,
                 modules: local,
                 model,
-                permissions: Default::default(),
             },
             why,
         ));

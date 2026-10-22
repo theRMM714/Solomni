@@ -9,19 +9,20 @@
 **管**：决定粒度（`ask` / `full`）、工作区路径的读写白名单与黑名单、模块目录写授权；
 把**声明**解析成**生效态**，并提供唯一一处路径判定。
 
-**不管**：不认会话、不碰文件系统、不持端口、不持有状态——落盘的声明在登记处（`settings.yaml` 的全局默认）
-与会话 `meta.yaml`（逐 agent 覆盖），生效态每次现算。
+**不管**：不认会话、不碰文件系统、不持端口、不持有状态——落盘的声明在登记处（`settings.yaml` 的
+`sandbox.defaults` 与硬黑名单 `sandbox.policy.deny`）与会话 `meta.yaml`（会话级覆盖），生效态每次现算。
 
 ## 二、入站契约与状态归属
 
 `api`：`Permissions` / `PermissionsOverride` / `Granularity` 与 `validate` / `validate_override`。
-**状态不属于本能力**：全局默认归登记处，逐 agent 覆盖归会话 `meta`；本能力只有纯规则。
+**状态不属于本能力**：全局默认与硬黑名单归登记处，会话级覆盖归会话 `meta`；本能力只有纯规则。
 
 ## 三、语义（唯一一份）
 
 - 默认：整棵工作区**可读、可提交**；
 - **白名单一出现就取代默认**（配了 `allow_read` 就失去默认的整棵可读，配了 `allow_write` 就失去默认提交）；
 - **黑名单只做减法，不让默认失效**；两者重叠时**黑大于白**；
+- 全局 `sandbox.policy.deny` 是**硬底线**：会话只能追加黑名单，不能清空；
 - `.` 代表整棵工作区；匹配按**路径组件**做（`web` 不匹配 `website`）；
 - **模块目录默认只读**；`module_write` 命中该模块才整块可写；`<module>/userdata/` 恒可写；
 - `granularity`：`full` = 任何工具都不设确认；`ask` = `ask` 表里的工具调用**在执行前**先让用户回答。
@@ -55,12 +56,12 @@
 ## 四、依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：无（纯领域，不自持端口）；
-- 谁在用我：`registry`（全局默认）、`session`（逐 agent 覆盖）、`workspace`（落点判定）、`conductor`（解析与装配）；
+- 谁在用我：`registry`（全局默认与硬黑名单）、`session`（会话级覆盖）、`workspace`（落点判定）、`conductor`（解析与装配）；
   `tools` 不直接引用它，只消费派生后的生效态（`Sandbox.permissions`）。
 
 ## 五、改动本单元时必须同步
 
-- 改语义 → 本页 + [`REGISTRY_SPEC.md`](../../REGISTRY_SPEC.md)（settings/agents 字段）+ [docs/session/session-model.md](../session/session-model.md)（meta）；
+- 改语义 → 本页 + [`REGISTRY_SPEC.md`](../../REGISTRY_SPEC.md)（settings 的 `sandbox` 段）+ [docs/session/session-model.md](../session/session-model.md)（meta 的会话级 `sandbox`）；
 - 改落点判定 → [docs/tools/tools-and-roles.md](../tools/tools-and-roles.md) 的路径模型 + 平台围栏探针；
 - 改 `FenceSpec` 字段 → 三平台后端与跨平台字面量门禁。
 

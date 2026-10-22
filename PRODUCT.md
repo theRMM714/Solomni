@@ -99,19 +99,22 @@ agent 实例名不得占用 `work` / `children`（名单在 `systools/names.yaml
   虚拟机档在「开始」前**拒绝创建**（没有工具用户完不成工作）；两者都**不是**会话崩溃（契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md) §五）。
 - **三层隔离，各说各的实际强度**：
   ① 内置文件工具是**工具层**越界拒绝（路径校验）；
-  ② 模块工具进程统一从**守门进程**里跑（环境白名单、超时连根杀树、进程数上限）；
-  ③ 文件系统与网络围栏按平台接入（Linux Landlock、macOS seatbelt、Windows AppContainer）。
-  **启动时自检并如实报告能力等级**：装不上就说装不上；自检确认机制有效却仍装不上 = 程序自己写错了，那一路**拒绝执行**。
+  ② 模块工具进程从**守门进程**里跑（环境白名单、超时连根杀树、进程数上限）；guest 内由 Linux helper 对齐同一组策略
+     （只读基线、解释器目录、env 白名单、超时杀树、输出上限）；
+  ③ 文件系统围栏按平台接入（Linux Landlock、macOS seatbelt、Windows AppContainer）。
+  **全局沙箱策略是硬约束**（`sandbox.policy`）：默认 `require`，机制不可用时按 `on_unavailable` 询问是否**本进程降级**
+  （不落盘，重启再问）或直接拒绝；自检确认机制有效却仍装不上 = 程序自己写错了，那一路**拒绝执行**。
   **必要落点授不上不静默降级**：经统一裁决通道问一次（本轮无围栏跑一次 / 放弃这次调用）；拒绝、没人答或没有可回答的前端一律不执行；**可选落点**授不上只记事实。
   机制细节见 [ARCHITECTURE.md](ARCHITECTURE.md)，三平台真机探针见 [TESTING.md](TESTING.md)。
-- **出站网络**（`exec.net`，默认 false）：虚拟机档决定 guest 网卡；本机档 Windows 授 `internetClient`、
-  macOS 放行 `network-outbound`、Linux 不围栏网络（能力表如实报 `net=false`）。只放行出站，
-  不授 private network / loopback；Windows 未授权 `fence_write` 时容器不装，`net` 不生效。
+- **出站网络是全局开关**（`sandbox.policy.network`）：会话工具、直接模块工具、常驻服务、模块构建共用；
+  不再有会话 `exec.net`。虚拟机档决定 guest 网卡；本机档 Windows 授 `internetClient`、macOS 放行 `network-outbound`、
+  Linux 不围栏网络（能力表如实报 `net=false`，按 `on_unavailable` 拒绝或本进程降级）。只放行出站，
+  不授 private network / loopback；Windows 未授权 `windows.write_acl` 时容器不装，网络不生效。
 - **未授权不等于无围栏**：Windows 的容器围栏（路径级可达范围与断网）要授权才装得上；
   Linux / macOS 的围栏在守门进程里自足，不受授权影响。进程树与环境白名单两种时段都生效；
   启动报告把"本机能力"与"本次实际"分两行说清。
 - **围栏要用就征得同意**：Windows 的路径级围栏要写本机权限项，程序**默认不写**——只有显式授权
-  （`settings.yaml` 的 `fence_write: true` 或 `SOLOMNI_FENCE_WRITE=1`）才做；授权后每次写入逐条列出并记进台账。
+  （`settings.yaml` 的 `sandbox.policy.windows.write_acl: true` 或 `SOLOMNI_FENCE_WRITE=1`）才做；授权后每次写入逐条列出并记进台账。
   授权台账、启动对账与按条处置的语义见 [docs/kernel/README.md](docs/kernel/README.md)；分层边界见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 - 上传同名文件绝不静默覆盖（覆盖 / 改名 / 取消）。
 
@@ -215,7 +218,8 @@ $ start.bat                 # Windows（或 node start.js）；macOS/Linux 用 .
 - **历史侧栏**：每项三个动作——**打开**（转录 + 启用 / 上下文继续 / 停止）、**编辑**（配置视图）、**删除**（永久删除；
   工作区非空时先列出共享区与各 agent 沙箱的文件数与总字节，让你确认"连文件一起删"）。
   **子会话不渲染删除按钮**（它由核心管理，删主会话会一起删掉它）。
-- **配置视图**：改每个 agent 的模块与模型、执行档位、能力定版、网络开关；同一模块不得同属两个 agent；
+- **配置视图**：改每个 agent 的模块与模型、执行档位、能力定版、会话级权限（路径范围 / 模块写 / 决定粒度）；
+  网络是全局开关，不在会话里改；同一模块不得同属两个 agent；
   **会话一旦开过（流水里有内容），名单与形态就冻结**（要换人请新建）；生成中不许改。
   缺运行包、拒收的模块与包、虚拟机档的诊断都在这里如实列出，并给出依赖文件夹路径。每次提交追加一条**旁路配置记录**
   （只作呈现与审计，不进模型上下文）。

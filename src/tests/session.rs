@@ -1083,7 +1083,7 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
         !core.session_config(&sid).unwrap().started,
         "单 agent 会话在用户开口之前还没内容：名字仍改得动"
     );
-    // 改：模块 a → b，模型指定 m，档位换虚拟机档、放行网络。
+    // 改：模块 a → b，模型指定 m，档位换虚拟机档。网络是全局策略，不在会话里改。
     // 虚拟机档现在一律不可选（guest 本体尚未接入），所以**先把它做成已存在的虚拟机档会话**——
     // 已在 vm 档的会话只校验它自己那几项（基础根等），改模块/模型/网络照旧允许。
     hist.force_tier(&sid, Tier::Vm);
@@ -1095,19 +1095,23 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
                 name: "a".to_string(),
                 modules: vec!["b".to_string()],
                 model: "m".to_string(),
-                permissions: None,
             }],
             tier: "vm".to_string(),
             guest: Some(guest.clone()),
             pins: BTreeMap::new(),
-            net: true,
+            permissions: Some(crate::capabilities::permission::api::PermissionsOverride {
+                allow_write: Some(vec!["docs".to_string()]),
+                module_write: Some(vec!["b".to_string()]),
+                ..Default::default()
+            }),
         },
     )
     .unwrap();
     let cfg = core.session_config(&sid).unwrap();
     assert_eq!(cfg.agents[0].modules, vec!["b".to_string()]);
     assert_eq!(cfg.tier, "vm");
-    assert!(cfg.net, "网络开关随提交生效");
+    assert_eq!(cfg.permissions.allow_write, vec!["docs".to_string()]);
+    assert!(cfg.permissions.module_write_ok("b"));
     let (meta, events) = hist.load(&sid).unwrap();
     assert_eq!(
         meta.agents[0].modules,
@@ -1115,6 +1119,11 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
         "meta.yaml 是名单的唯一真相"
     );
     assert_eq!(meta.exec.tier, Tier::Vm);
+    assert_eq!(
+        meta.sandbox.permissions.allow_write,
+        Some(vec!["docs".to_string()]),
+        "会话级权限写回 meta"
+    );
     assert_eq!(
         meta.exec.guest.as_deref(),
         Some(guest.as_str()),
@@ -1333,8 +1342,8 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_reads_legacy_meta() {
             tier: Tier::Vm,
             guest: Some(crate::tests::test_guest("rt-guest")),
             pins: BTreeMap::from([("python".to_string(), "3.12.4".to_string())]),
-            net: false,
         },
+        sandbox: Default::default(),
         parent: None,
         node: None,
         delegation: None,
@@ -1348,7 +1357,6 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_reads_legacy_meta() {
         back.exec.pins.get("python").map(String::as_str),
         Some("3.12.4")
     );
-    assert!(!back.exec.net);
     assert_eq!(back.run, RunState::Active, "缺省运行态 = 正常运行");
     // 运行态是**持久事实**：停止 / 关闭写进 meta 后重启照样成立。
     let stopped = SessionMeta {
@@ -1364,7 +1372,6 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_reads_legacy_meta() {
             .expect("旧 meta.yaml 必须可读");
     assert_eq!(legacy.exec.tier, Tier::Host);
     assert!(legacy.exec.guest.is_none());
-    assert!(!legacy.exec.net);
     assert!(legacy.exec.pins.is_empty());
     assert_eq!(legacy.run, RunState::Active);
 }
@@ -1525,6 +1532,7 @@ pub(crate) fn child_sessions_share_the_main_guest_and_follow_its_tier() {
         ts: 2,
         agents: vec![agent_meta("a", &["a"], None)],
         exec: vm_spec(),
+        sandbox: Default::default(),
         parent: Some("w".to_string()),
         node: None,
         delegation: None,
@@ -1587,6 +1595,7 @@ pub(crate) fn proxy_children_share_the_proxy_tree_guest() {
         ts: 2,
         agents: vec![agent_meta("a", &["a"], None)],
         exec: vm_spec(),
+        sandbox: Default::default(),
         parent: Some("p".to_string()),
         node: None,
         delegation: None,
@@ -1636,6 +1645,7 @@ pub(crate) fn child_edit_writes_back_to_the_agent_roster() {
         ts: 2,
         agents: vec![agent_meta("a", &["a"], None)],
         exec: Default::default(),
+        sandbox: Default::default(),
         parent: Some("w".to_string()),
         node: None,
         delegation: None,
@@ -1697,6 +1707,7 @@ pub(crate) fn tree_wide_module_ownership_is_enforced_on_child_edit() {
         ts: 2,
         agents: vec![agent_meta("a", &["a"], None)],
         exec: Default::default(),
+        sandbox: Default::default(),
         parent: Some("w".to_string()),
         node: None,
         delegation: None,

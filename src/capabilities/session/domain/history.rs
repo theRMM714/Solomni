@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 /// 加上**此后会被机制改写的运行态**（`run`：暂停 / 关闭）。两者都是落盘事实，
 /// 是"这条会话是什么、还该不该被驱动"的唯一真相（不在内存里留影子状态）。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SessionMeta {
     pub name: String,
     /// 工作形态：`single` / `collab` / `proxy`（界面标签与 `rebuild_session` 的装配依据同源）。
@@ -27,6 +28,9 @@ pub struct SessionMeta {
     /// 执行档位与运行包选型（exec 段；缺字段的旧会话按默认 = 本机档读回）。
     #[serde(default)]
     pub exec: crate::kernel::api::ExecSpec,
+    /// 这条会话的权限覆盖（路径范围 / 模块写 / 决定粒度）。全局给默认值，这里只覆盖显式字段。
+    #[serde(default)]
+    pub sandbox: SessionSandbox,
     /// 谁编排的（子会话 = 父会话名；顶层会话为空）。
     /// 也是**落点判据**：子会话落在父会话目录的 `children/` 下（可再嵌套）。
     /// 整棵树不论嵌套多少层，**只有顶层一个 `work/`**——所有子会话共用它。
@@ -100,8 +104,17 @@ impl SessionMeta {
     }
 }
 
+/// 目的：会话级权限覆盖——权限跟会话走，不跟 agent 走。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionSandbox {
+    #[serde(default)]
+    pub permissions: crate::capabilities::permission::api::PermissionsOverride,
+}
+
 /// 会话里的一个 agent 实例记录。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AgentMeta {
     /// 实例名（重名时已加 -2/-3；也是其沙箱目录名）。
     pub name: String,
@@ -111,10 +124,6 @@ pub struct AgentMeta {
     pub modules: Vec<String>,
     #[serde(default)]
     pub model: Option<String>,
-    /// 该 agent 的**权限覆盖**（白/黑名单、模块写授权、决定粒度；只覆盖显式给出的字段）。
-    /// 缺省 = 继承 settings.yaml 的全局默认。见 docs/permission/README.md。
-    #[serde(default)]
-    pub permissions: crate::capabilities::permission::api::PermissionsOverride,
 }
 
 /// 历史列表条目。

@@ -19,6 +19,8 @@ const BIN = path.join(ROOT, "target", PROFILE, EXE);
 
 const log = (m) => console.log("[start] " + m);
 const die = (m) => { console.error("[start] " + m); process.exit(1); };
+// 与 src/presentation/web/mod.rs 的 RESTART_EXIT_CODE 同源：全局沙箱策略保存后整体重启。
+const RESTART_EXIT_CODE = 75;
 
 function binLocked(p) {
   // Windows 不允许打开正在运行的可执行文件写：这个探针判断是否还有另一个实例占着二进制。
@@ -53,7 +55,15 @@ function run(cargoEnv) {
     : "starting CLI (type webui at the prompt for the Web UI, or start with -webUI)");
   const r = spawnSync(argv[0], argv.slice(1), { cwd: ROOT, stdio: "inherit", env: cargoEnv });
   if (r.error) die("run failed: " + r.error.message);
-  process.exitCode = r.status || 0;
+  return r.status === null ? 1 : r.status;
+}
+
+function runLoop(cargoEnv) {
+  for (;;) {
+    const code = run(cargoEnv);
+    if (code !== RESTART_EXIT_CODE) return code;
+    log("sandbox policy changed - restarting");
+  }
 }
 
 (async () => {
@@ -73,7 +83,7 @@ function run(cargoEnv) {
   if (binLocked(BIN)) {
     log("binary is held by a running Solomni instance - cannot rebuild, starting it as-is.");
     log("close the other window/session to pick up source changes.");
-    run(cargoEnv);
+    process.exitCode = runLoop(cargoEnv);
     return;
   }
   log(fs.existsSync(BIN) ? "checking build..." : "binary not found, building (first run is slow)...");
@@ -83,5 +93,5 @@ function run(cargoEnv) {
 
   // 构建可能替换了锁探针刚检查过的文件；用之前再确认一次。
   if (!fs.existsSync(BIN)) die("build reported success but no binary at " + path.relative(ROOT, BIN));
-  run(cargoEnv);
+  process.exitCode = runLoop(cargoEnv);
 })();

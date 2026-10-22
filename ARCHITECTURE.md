@@ -114,14 +114,18 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 - **会话参数与对话分开**：身份、工作环境、调用约定是**参数**（`session::SessionParams`），每次调用现场渲染；对话里只有真正发生过的事。
   装配式与理由见 [docs/session/session-model.md](docs/session/session-model.md) 的「会话参数与对话分开」。
 - `meta.yaml` 的 `agents` 是名单的唯一真相（代拟路径在用户确认那一刻写回）；`exec` 段是执行选型的唯一真相
-  （档位 / 虚拟根名 / 定版 `pins` / 是否放行出站网络；缺段按默认读回）。执行计划本身**从不落盘**（含真实路径，只在运行时派生）。
+  （档位 / 虚拟根名 / 定版 `pins`；缺段按默认读回）；会话级权限覆盖在 `sandbox.permissions`。
+  执行计划本身**从不落盘**（含真实路径，只在运行时派生）；网络与围栏要求是全局策略，不在会话里。
 - 会话的旁路配置记录（`{"type":"config"}`）只在编辑提交时追加：供呈现与审计，**不进模型上下文**，回放与状态派生跳过它。
 - 出站模型调用的参数由核心决定、随端口传下去（`LlmOpts{stream, timeout_secs}`），取值来自**全局设置**；`Output` 只管回包形状。
   调用失败**不是**模型的回复：`Completion.error` 与正文分离，上层据此发 `Notice` 并**中断本轮**（不落转录行），会话保持可继续。
 - **围栏**（策略在 `capabilities/tools/domain/fence.rs`，机制在 `detail/confine/`）：
-  可达范围 = 自己的私有沙箱（永远全权）+ 自己的模块目录（**默认只读**；`module_write` 授权才整块可写，`<module>/userdata/` 恒可写）+ 用户显式授权的只读根（`.home/settings.yaml` 的 `fence_read`，默认空）；
+  可达范围 = 自己的私有沙箱（永远全权）+ 自己的模块目录（**默认只读**；`module_write` 授权才整块可写，`<module>/userdata/` 恒可写）+ 用户显式授权的主机只读根（`.home/settings.yaml` 的 `sandbox.policy.host_read_roots`，默认空）；
   共享主副本**只有在"这一席可写"时**才进 rw（核心会话），agent 会话默认只读——工具层与围栏层两处都挡住直接写。
-  **会话权限**（`capabilities/permission/`，纯领域）统一裁定：整棵工作区默认可读可提交，**白名单一出现就取代默认、黑名单只做减法**；
+  **全局沙箱策略**（`sandbox.policy`）是硬约束：网络开关、`require` 特性、不可用时的 `ask/refuse`、Windows 写 ACL 与硬黑名单；
+  会话不能覆盖。默认 `require`，机制不可用时询问是否**本进程降级**（不落盘，重启再问），拒绝 = fail-closed。
+  **会话权限**（`capabilities/permission/`，纯领域，**会话级**）统一裁定：整棵工作区默认可读可提交，**白名单一出现就取代默认、黑名单只做减法**；
+  全局 `sandbox.policy.deny` 只增不减，会话只能追加；
   内置读/写、`work_pull` / `work_commit`（提交白名单）、`work_versions` / `work_resolve`（读作用域）与围栏派生都读同一份生效态（`Sandbox.permissions` / `FenceSpec`）。
   **工具级确认**（`granularity: ask`）命中 `ask` 表就把这次调用**当一关进裁决队**并阻塞；回答 `allow` / `deny` / `full`
   （`full` 只对**本轮**生效，到 agent 停下输出为止，不落盘；停止把整队解成拒绝；没人答时按 `Ask.on_unanswered` 收场）。
@@ -130,7 +134,8 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
   台账每条授权 / profile 带**归属**（pid + 进程创建时刻 + **会话租约**），写事务用**进程内互斥 + 跨进程文件锁**串行。
   **启动期**（会话尚未开工）按归属**对账一次**：只回收归属明确已死的条目、无法判定的如实报告并跳过，失败保留供重试——不询问用户、不阻塞启动，也不做孤儿清扫（那留手动）；手动重试用 `--fence-reconcile`。
   `--fence-clean` 按台账**整体还原**根内路径、精确撤销根外条目，再扫掉台账外的孤儿授权（含任何显式包 SID ACE）与遗留 profile；按条处置是 `--fence-ledger` / `--fence-restore` / `--fence-revoke` / `--fence-profile-rm`。
-  机制验证分三态：`Enforced` / `EnvUnavailable`（本机不允许，如实降级照跑）/ `Broken`（我们写错了，未授权时段**拒绝执行**）。
+  机制验证分三态：`Enforced` / `EnvUnavailable`（本机不允许：`require` 且未同意降级时拒绝，否则如实降级）/ `Broken`（我们写错了，**拒绝执行**）；
+  `FenceJob.policy` 把 `require` / `allow_degraded` 交给守门进程，三平台同一把尺子。
   **必要落点授不上不许降级**（解释器目录 / 模块目录 / 工作目录 / 私有沙箱 / 其余数据边界 / 容器身份 / 台账）：
   经统一裁决通道问用户（`fence_unfenced_once` 本轮无围栏跑一次 / `fence_abort` 放弃这次调用）；
   拒绝、没人答、按停止（整队作废 = 拒绝）与**没有可回答的前端**一律不执行。**可选落点**（用户授权的只读根、父目录的只读属性、不存在的落点）授不上只记事实。

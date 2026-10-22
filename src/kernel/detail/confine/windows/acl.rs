@@ -489,7 +489,7 @@ pub(crate) fn grant_targets(spec: &FenceSpec) -> Vec<GrantTarget> {
             leaves.push(leaf(root, RIGHTS_RW, true, rw_part(spec, root)));
         }
     }
-    // 用户显式授权的只读根（`fence_read`）：只写只读 ACE，**授给该 agent 自己的容器 SID**；
+    // 用户显式授权的主机只读根（`sandbox.policy.host_read_roots`）：只写只读 ACE，**授给该 agent 自己的容器 SID**；
     // 不能授给共享组（那等于向任意容器程序开放用户数据）；不递归（用户可能授很大的目录）。
     for root in &spec.ro {
         if !root.as_os_str().is_empty() {

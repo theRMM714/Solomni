@@ -375,7 +375,7 @@ impl Conductor {
                     &modules,
                     &sb,
                     unavailable,
-                    meta.exec.net,
+                    self.network_allowed(),
                     mode,
                     &role,
                     meta.exec.tier,

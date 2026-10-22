@@ -42,6 +42,10 @@ impl RegistryService {
         log: Arc<dyn Log + Send + Sync>,
     ) -> Result<RegistryService, String> {
         let settings = store.load()?;
+        crate::capabilities::registry::domain::providers::validate_sandbox_settings(
+            &settings.app.sandbox,
+        )
+        .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
         Ok(RegistryService {
             settings,
             store,
@@ -299,8 +303,9 @@ impl Registry for RegistryService {
     }
 
     fn set_app_settings(&mut self, app: AppSettings) -> Result<(), String> {
-        // 不合法就如实拒绝，不把坏的权限（绝对路径 / ..）落进登记处。
-        crate::capabilities::permission::api::validate(&app.permissions)?;
+        // 不合法就如实拒绝，不把坏的策略（绝对路径 / .. / 未知字段）落进登记处。
+        crate::capabilities::registry::domain::providers::validate_sandbox_settings(&app.sandbox)
+            .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
         self.settings.app = app;
         self.save("registry::set_app_settings")
     }

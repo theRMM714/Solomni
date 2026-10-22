@@ -35,9 +35,11 @@ impl Tier {
     }
 }
 
-/// 目的：会话的执行选型——档位 + 虚拟根名 + 能力定版 + 是否放行出站网络（默认否）。
+/// 目的：会话的执行选型——档位 + 虚拟根名 + 能力定版。
 /// 约束：进 meta.yaml 的 exec 段（缺字段的旧会话按默认 = 本机档读回）；本机/虚拟机两侧与呈现层共享，按 R6 归 kernel。
+///   网络与围栏要求是**全局策略**，不在这里。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExecSpec {
     #[serde(default)]
     pub tier: Tier,
@@ -48,9 +50,6 @@ pub struct ExecSpec {
     /// 目的：能力名 → 精确版本（用户定版；多版本时不猜）。
     #[serde(default)]
     pub pins: BTreeMap<String, String>,
-    /// 目的：是否放行出站网络（默认否：guest 无网卡）。
-    #[serde(default)]
-    pub net: bool,
 }
 
 /// 目的：单次模型调用的默认总预算（秒）。

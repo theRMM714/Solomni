@@ -62,6 +62,7 @@ const CFG = {
   sid: "w", mode: "single", started: true,
   agents: [{ name: "调研员", modules: ["research"], model: "m1" }],
   tier: "vm", guest: "debian", net: true,
+  permissions: { allow_read: [], allow_write: ["docs"], deny: [], module_write: ["research"], granularity: "ask", ask: ["research.grep"] },
   guests: [
     { guest: "debian", label: "debian-13-genericcloud-amd64", os: "linux", arch: "amd64", ready: true, missing: [], install: ".vm/guest/debian", runtimes: ["python"] },
     { guest: "windows", label: "debian-13-genericcloud-amd64", os: "linux", arch: "amd64", ready: false, missing: ["vm.guest-runtime.windows"], install: ".vm/guest/windows" },
@@ -267,7 +268,7 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
     pinSelects[0] && pinSelects[0].children.map((o) => o.textContent).join("|"));
   check("config: 单版本能力不显示选择", !selects.some((s) => (s.children || []).some((o) => String(o.textContent) === "20.11.0")));
   check("config: 单版本已有定版如实说明", t.indexOf("包库里现在看不到这个能力") >= 0);
-  check("config: 网络开关", t.indexOf("放行出站网络") >= 0);
+  check("config: 会话权限段", t.indexOf("会话权限") >= 0 && t.indexOf("网络由全局") >= 0);
   check("config: 保存/取消按钮", !!findButton(modal, "保存") && !!findButton(modal, "取消"));
 
   /* ---- 保存失败：后端 error 原文 ---- */
@@ -280,13 +281,15 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
   check("config: 失败后保存按钮可再点", save.disabled === false);
   const editCall = calls.find((c) => /\/api\/actions\/edit_session$/.test(c.url));
   const sent = JSON.parse(editCall.body);
-  check("config: 提交体形状 {session_id,agents,tier,guest,pins,net}",
-    JSON.stringify(Object.keys(sent).sort()) === JSON.stringify(["agents", "guest", "net", "pins", "session_id", "tier"])
+  check("config: 提交体形状 {session_id,agents,tier,guest,pins,permissions}",
+    JSON.stringify(Object.keys(sent).sort()) === JSON.stringify(["agents", "guest", "permissions", "pins", "session_id", "tier"])
       && sent.session_id === "w", editCall.body);
-  check("config: 提交体内容（名单/模块/模型/档位/虚拟根/pins/网络）",
-    sent.tier === "vm" && sent.guest === "debian" && sent.net === true
+  check("config: 提交体内容（名单/模块/模型/档位/虚拟根/pins/会话权限）",
+    sent.tier === "vm" && sent.guest === "debian"
     && sent.agents[0].name === "调研员" && JSON.stringify(sent.agents[0].modules) === JSON.stringify(["research"])
-    && sent.agents[0].model === "m1" && JSON.stringify(sent.pins) === JSON.stringify({ python: "3.12", ruby: "3.2" }),
+    && sent.agents[0].model === "m1" && JSON.stringify(sent.pins) === JSON.stringify({ python: "3.12", ruby: "3.2" })
+    && JSON.stringify(sent.permissions.allow_write) === JSON.stringify(["docs"])
+    && JSON.stringify(sent.permissions.module_write) === JSON.stringify(["research"]),
     editCall.body);
 
   /* ---- 取消定版 = 空串不提交 ---- */

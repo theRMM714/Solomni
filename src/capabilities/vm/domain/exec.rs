@@ -933,6 +933,7 @@ pub fn plan(
     lib: &Library,
     guest_runtimes: &[String],
     missing: &[MissingEntry],
+    net: bool,
 ) -> Result<ExecPlan, Vec<Diagnosis>> {
     // 入口判据与档位无关：模块根下没有那个能直接跑的产物，两档都当场拒绝（一次把话说全）。
     let entries: Vec<Diagnosis> = missing
@@ -951,7 +952,7 @@ pub fn plan(
             }
             Ok(ExecPlan {
                 tier: Tier::Host,
-                net: spec.net,
+                net,
                 guest: None,
                 packages: Vec::new(),
             })
@@ -1005,7 +1006,7 @@ pub fn plan(
                 .collect();
             Ok(ExecPlan {
                 tier: Tier::Vm,
-                net: spec.net,
+                net,
                 guest: spec.guest.clone(),
                 packages,
             })

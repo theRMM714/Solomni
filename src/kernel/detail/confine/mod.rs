@@ -138,6 +138,8 @@ pub struct FenceJob {
     ///   守门进程是唯一真正建 profile 的地方，外层只知道"该建"、不知道"建成了"。
     ///   没有台账的调用方（探针）给 `None`：那类 profile 由 `--fence-clean` 的前缀清扫兜底。
     pub home: Option<PathBuf>,
+    /// 目的：全局沙箱要求与“本进程是否已同意降级”——机制装不上时据此拒绝或降级。
+    pub policy: crate::kernel::api::FenceRunPolicy,
 }
 
 impl FenceJob {
@@ -154,6 +156,10 @@ impl FenceJob {
             "home".to_string(),
             serde_json::to_value(&self.home).unwrap_or(serde_json::Value::Null),
         );
+        fields.insert(
+            "policy".to_string(),
+            serde_json::to_value(self.policy).unwrap_or(serde_json::Value::Null),
+        );
         serde_json::Value::Object(fields).to_string()
     }
 
@@ -167,12 +173,16 @@ impl FenceJob {
             /// 缺省 = 没有台账可落（探针、别的调用方）；这不是"忘记传"，所以允许缺省。
             #[serde(default)]
             home: Option<PathBuf>,
+            /// 缺省 = 旧探针/旧调用方：按“允许降级”处理（不改变既有降级路径的语义）。
+            #[serde(default)]
+            policy: crate::kernel::api::FenceRunPolicy,
         }
         serde_json::from_str::<Raw>(text)
             .map(|raw| FenceJob {
                 spec: raw.spec,
                 prepared: raw.prepared,
                 home: raw.home,
+                policy: raw.policy,
             })
             .map_err(|e| format!("围栏参数非法：{}", e))
     }
@@ -190,7 +200,13 @@ pub fn launcher(exe: &Path, job: &FenceJob, command: &str) -> Command {
 
 /// 目的：守门进程内：装围栏 → 跑命令 → 返回退出码。失败必须报错（stderr）并用 FENCE_FAILED 退出。
 pub fn run_fenced(job: &FenceJob, command: &str) -> i32 {
-    backend::run_fenced(&job.spec, job.prepared, job.home.as_deref(), command)
+    backend::run_fenced(
+        &job.spec,
+        job.prepared,
+        job.home.as_deref(),
+        command,
+        &job.policy,
+    )
 }
 
 /// 目的：围栏里工具失败时给回执的边界说明（可达范围 + 范围外被拒）；不需要说明时返回 None。
@@ -950,6 +966,7 @@ mod tests {
             spec,
             prepared: true,
             home: Some(PathBuf::from("home")),
+            policy: Default::default(),
         };
         let text = job.to_json();
         assert!(text.contains("\"prepared\":true"), "{}", text);
@@ -969,6 +986,7 @@ mod tests {
             spec: bare,
             prepared: false,
             home: None,
+            policy: Default::default(),
         };
         assert_eq!(
             FenceJob::from_json(&no_home.to_json()).expect("回读"),

@@ -669,7 +669,8 @@ impl QemuHandle {
                 "ro": access.ro,
                 "ro_tree": access.ro_tree,
                 "private": access.private,
-                "net": access.net,
+                // 只传隐秘字段的**名字**（值走 QGA env），不把值写进临时文件。
+                "env_names": run.env.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>(),
             });
             let n = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -720,7 +721,9 @@ impl QemuHandle {
             },
             Err(why) => return fail(&why),
         };
-        let deadline = Instant::now() + Duration::from_secs(600);
+        // helper 自己按 30 秒杀树；外层只留一段缓冲，超时仍返回失败。
+        let deadline =
+            Instant::now() + Duration::from_secs(super::guest_helper::HELPER_TIMEOUT_SECS + 30);
         loop {
             let v = match self.status_once(pid) {
                 Ok(v) => v,
@@ -748,7 +751,7 @@ impl QemuHandle {
                 );
                 return ToolOutcome {
                     ok: code == 0,
-                    output,
+                    output: cap_output(output),
                 };
             }
             if Instant::now() >= deadline {
@@ -868,6 +871,17 @@ impl Drop for QemuHandle {
     fn drop(&mut self) {
         self.shutdown_and_wait();
     }
+}
+
+/// 目的：guest 输出与本机守门进程同一份上限；截断时如实报原字符数。
+fn cap_output(text: String) -> String {
+    const MAX: usize = 16_000;
+    let count = text.chars().count();
+    if count <= MAX {
+        return text;
+    }
+    let head: String = text.chars().take(MAX).collect();
+    format!("{}\n[截断] 输出共 {} 字符，仅保留前 {}", head, count, MAX)
 }
 
 fn fail(why: &str) -> ToolOutcome {

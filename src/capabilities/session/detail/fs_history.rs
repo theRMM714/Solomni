@@ -83,7 +83,7 @@ impl FsHistory {
     fn read_meta(dir: &std::path::Path, name: &str) -> Result<SessionMeta, String> {
         let text = std::fs::read_to_string(dir.join("meta.yaml"))
             .map_err(|_| format!("无此会话：{}", name))?;
-        yaml_serde::from_str(&text).map_err(|e| format!("会话 meta.yaml 非法：{}", e))
+        yaml_serde::from_str(&text).map_err(|e| format!("会话数据非法：{}", e))
     }
 
     /// 读一个会话目录的列表视图（meta 缺失或非法 = None）。

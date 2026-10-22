@@ -296,19 +296,36 @@ pub fn verify(spec: &FenceSpec, _command: &str) -> FenceVerdict {
     }
 }
 
-pub fn run_fenced(spec: &FenceSpec, prepared: bool, home: Option<&Path>, command: &str) -> i32 {
+pub fn run_fenced(
+    spec: &FenceSpec,
+    prepared: bool,
+    home: Option<&Path>,
+    command: &str,
+    policy: &crate::kernel::api::FenceRunPolicy,
+) -> i32 {
     if let Err(e) = join_kill_on_close_job(MAX_PROCESSES) {
         eprintln!("[围栏] 进程树围栏安装失败：{}", e);
     }
+    let strict = (policy.require_fs || policy.require_net) && !policy.allow_degraded;
+    let refuse = |why: &str| -> i32 {
+        eprintln!("[围栏] {}；按全局策略拒绝执行", why);
+        FENCE_FAILED
+    };
     // 容器要先把读放行与落点做好（改本机目录 ACL）才可能真跑起来：外层没授权就直接按无围栏执行，
     // 不去试一个注定读不到模块目录与解释器的容器（那样只会把工具报成一堆"拒绝访问"）。
     if !prepared {
+        if strict {
+            return refuse("外层未授权本机写入，容器围栏不可用");
+        }
         eprintln!("[围栏] 外层未授权本机写入：容器围栏不可用，按如实降级继续执行");
         return run_unfenced(spec, command);
     }
     let name = container_name(spec);
     // 容器身份先立起来（profile 是容器能读到系统目录的前提）。
     if let Err(e) = ensure_profile(&name) {
+        if strict {
+            return refuse(&format!("{}{}）", ENV_BLOCKED_MARK, e));
+        }
         eprintln!("[围栏] {}{}）：按如实降级继续执行", ENV_BLOCKED_MARK, e);
         return run_unfenced(spec, command);
     }
@@ -319,6 +336,9 @@ pub fn run_fenced(spec: &FenceSpec, prepared: bool, home: Option<&Path>, command
     let sid = match container_sid(&name) {
         Ok(s) => s,
         Err(e) => {
+            if strict {
+                return refuse(&format!("容器围栏未生效（{}）", e));
+            }
             eprintln!("[围栏] 容器围栏未生效（{}）：按如实降级继续执行", e);
             return run_unfenced(spec, command);
         }
@@ -333,9 +353,9 @@ pub fn run_fenced(spec: &FenceSpec, prepared: bool, home: Option<&Path>, command
         Err(e) => {
             // 容器起不来要如实说清；net=true 时不能退回无围栏（那样会连文件系统围栏一起丢掉），直接拒绝。
             eprintln!("[围栏] 容器围栏未生效（{}）", e);
-            if spec.net {
+            if spec.net || strict {
                 eprintln!(
-                    "[围栏] 本次要求放行出站网络，但能力/容器授不上：拒绝执行（不按无围栏跑）"
+                    "[围栏] 本次要求放行出站网络或强制围栏，但能力/容器授不上：拒绝执行（不按无围栏跑）"
                 );
                 return FENCE_FAILED;
             }

@@ -27,7 +27,8 @@
 - **启动对账**在会话开工前跑两份：围栏授权台账（`confine::reconcile`）与长驻子进程账（`ProcessBook::reconcile`，`.home/processes.json`）。
   - 围栏台账只回收归属明确已死的授权。
   - 进程账清掉已不在的登记，并按**能证明的身份**收掉上次留下的孤儿：Unix 看命令行标记，Windows 看进程创建时间；认不出身份的只报不动手（不误杀别人的进程）。机制见 [kernel 的「长驻子进程的账与回收」](../kernel/README.md)。
-- **围栏写权限**：`SOLOMNI_FENCE_WRITE=1/0` 优先，否则读设置里的 `fence_write`；它只决定 Windows 是否写目录 ACL（Linux / macOS 的围栏在守门进程里自足）。启动报告把「本机能力」与「本次实际」分开打印：Unix 的「本次实际」等于本机能力；Windows 未授权时 fs/net 为假（容器围栏不装），进程树仍生效。
+- **围栏写权限**：`SOLOMNI_FENCE_WRITE=1/0` 优先，否则读设置里的 `sandbox.policy.windows.write_acl`；它只决定 Windows 是否写目录 ACL（Linux / macOS 的围栏在守门进程里自足）。启动报告把「本机能力」与「本次实际」分开打印：Unix 的「本次实际」等于本机能力；Windows 未授权时 fs/net 为假（容器围栏不装），进程树仍生效。
+- **全局沙箱策略**：`sandbox.policy` 是进程级启动事实；保存后整体重启。默认 `require`，机制不可用时按 `on_unavailable` 询问本进程降级（不落盘）或拒绝；`SOLOMNI_SANDBOX_DEGRADED=1/0` 只供测试/CI 注入。
 - **常驻服务**按有效启停拉起（`ResidentOps::start_enabled`，进程级租约，不属于任何会话）。
 - **核心**搬到自己的执行线程（`ConductorHandle::spawn`）；呈现层只拿 `Ops` 与入站能力面。
 - `--probe-tools` / `--probe-replay` 在核心装配后执行：前者把**确定**结论写回 `models.yaml`，后者只报事实、不改登记处。

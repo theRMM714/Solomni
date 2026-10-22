@@ -250,12 +250,11 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
                     name: "a".to_string(),
                     modules: vec!["a".to_string()],
                     model: String::new(),
-                    permissions: None,
                 }],
                 tier: "vm".to_string(),
                 guest: Some("definitely-not-a-real-guest".to_string()),
                 pins: BTreeMap::new(),
-                net: false,
+                permissions: None,
             },
         )
         .expect_err("虚拟根不在场就不许改入虚拟机档");

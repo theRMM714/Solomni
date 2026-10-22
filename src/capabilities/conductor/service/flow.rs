@@ -357,6 +357,7 @@ impl Conductor {
             ts: now_ts(),
             agents: vec![a.clone()],
             exec: pmeta.exec.clone(),
+            sandbox: pmeta.sandbox.clone(),
             parent: Some(parent.to_string()),
             node: None,
             delegation: None,

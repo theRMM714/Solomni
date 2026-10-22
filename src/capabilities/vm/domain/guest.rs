@@ -205,7 +205,6 @@ pub struct GuestAccess {
     pub ro_tree: Vec<String>,
     pub private: String,
     pub cwd: String,
-    pub net: bool,
 }
 
 impl GuestAccess {
@@ -229,7 +228,6 @@ impl GuestAccess {
             } else {
                 to_guest_path(&fence.cwd, os, mounts)
             },
-            net: fence.net,
         }
     }
 }

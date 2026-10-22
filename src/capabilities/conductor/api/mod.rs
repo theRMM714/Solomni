@@ -608,16 +608,13 @@ pub struct TierChoices {
 
 /// 配置界面里的一个 agent（名字冻结时仍要显示）。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConfigAgent {
     pub name: String,
     #[serde(default)]
     pub modules: Vec<String>,
     #[serde(default)]
     pub model: String,
-    /// 该 agent 的**权限覆盖**（白/黑名单、模块写授权、决定粒度）：只覆盖显式给出的字段。
-    /// `None` = 这次编辑没提供权限（**保留现值**）；`Some` = 替换。缺省=保留，避免界面上改模块把权限改没。
-    #[serde(default)]
-    pub permissions: Option<crate::capabilities::permission::api::PermissionsOverride>,
 }
 
 /// 会话配置视图（配置界面用）：身份与冻结标记 + 可改项 + 运行能力事实。
@@ -635,7 +632,10 @@ pub struct SessionConfig {
     pub guest: Option<String>,
     /// 目的：本机有哪些虚拟根可选（含"装没装齐"）——界面据此渲染下拉，不自己编列表。
     pub guests: Vec<crate::capabilities::provision::api::GuestBase>,
+    /// 目的：当前生效的网络开关（全局策略，只读展示）。
     pub net: bool,
+    /// 目的：当前生效的会话权限（全局默认 + 会话覆盖）。
+    pub permissions: crate::capabilities::permission::api::Permissions,
     pub pins: BTreeMap<String, String>,
     /// 本机能不能承载**当前档位**（虚拟机档的前置条件）：界面据此决定虚拟机档能不能选。
     pub tier_ready: bool,
@@ -656,6 +656,7 @@ pub struct SessionConfig {
 /// 编辑提交（配置界面用）：改模块、模型、档位、定版与网络。
 /// 名字与形态不在这里——会话一旦开过（流水有内容）它们就冻结了。
 #[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SessionEdit {
     pub agents: Vec<ConfigAgent>,
     pub tier: String,
@@ -663,8 +664,9 @@ pub struct SessionEdit {
     pub guest: Option<String>,
     #[serde(default)]
     pub pins: BTreeMap<String, String>,
+    /// 目的：会话级权限覆盖（路径范围 / 模块写 / 决定粒度）。`None` = 保留现值。
     #[serde(default)]
-    pub net: bool,
+    pub permissions: Option<crate::capabilities::permission::api::PermissionsOverride>,
 }
 
 /// 目的：上下文「继续」只在后端判断确实有断点时出现（单 agent 上一轮被打断 / 协作泵没走完）。

@@ -263,7 +263,12 @@ async function main() {
     stop(mock);
     return 1;
   }
-  const srv = spawn(BIN, ["-webUI", "--web-port", String(PORT_SRV), "--root", FIXTURE], { cwd: PRODUCT_ROOT, stdio: "inherit" });
+  // 安全模式下的 e2e：Linux 没有网络围栏，用进程级注入明确同意降级；不写任何设置。
+  const srv = spawn(BIN, ["-webUI", "--web-port", String(PORT_SRV), "--root", FIXTURE], {
+    cwd: PRODUCT_ROOT,
+    stdio: "inherit",
+    env: Object.assign({}, process.env, { SOLOMNI_SANDBOX_DEGRADED: "1" }),
+  });
   try {
     const ready = await waitReady("http://127.0.0.1:" + PORT_SRV + "/api/state", 60);
     if (!ready) {

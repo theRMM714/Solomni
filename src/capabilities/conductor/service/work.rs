@@ -209,6 +209,7 @@ impl Conductor {
             &self.library_for(&meta.exec),
             &self.guest_runtimes_of(&meta.exec),
             &missing,
+            self.network_allowed(),
         )
         .map_err(|diags| crate::capabilities::vm::api::diagnose_text_for(&diags, guest))
     }
@@ -272,15 +273,14 @@ impl Conductor {
                     name: a.name.clone(),
                     modules: a.modules.clone(),
                     model: a.model.clone().unwrap_or_default(),
-                    // 视图要把现值给出去；编辑回包缺了它 = 保留现值（见 SessionEdit 的字段说明）。
-                    permissions: Some(a.permissions.clone()),
                 })
                 .collect(),
             tier: tier.as_str().to_string(),
             tier_locked: meta.parent.is_some(),
             guest: meta.exec.guest.clone(),
             guests: self.guest_bases()?,
-            net: meta.exec.net,
+            net: self.network_allowed(),
+            permissions: self.permissions_for(&meta),
             pins: meta.exec.pins.clone(),
             runtime: self.runtime_report_for(&meta.exec),
             runtimes_dir: crate::kernel::api::slash(&self.vm.runtimes_dir()),
@@ -353,21 +353,12 @@ impl Conductor {
         let reserved = self.reserved_names();
         let mut seen: Vec<String> = Vec::new();
         let mut metas: Vec<AgentMeta> = Vec::new();
-        // 旧权限按名字留档：这次编辑没给某个 agent 的 permissions（None）= 保留它的现值。
-        let old_permissions: std::collections::BTreeMap<
-            String,
-            crate::capabilities::permission::api::PermissionsOverride,
-        > = meta
-            .agents
-            .iter()
-            .map(|x| (x.name.clone(), x.permissions.clone()))
-            .collect();
+        if let Some(p) = &edit.permissions {
+            crate::capabilities::permission::api::validate_override(p)?;
+        }
         for a in &edit.agents {
             crate::capabilities::registry::api::validate_name(&a.name)?;
             crate::capabilities::registry::api::check_reserved(&a.name, &reserved)?;
-            if let Some(p) = &a.permissions {
-                crate::capabilities::permission::api::validate_override(p)?;
-            }
             for id in &a.modules {
                 if !roster.modules.iter().any(|m| &m.manifest.id == id) {
                     return Err(format!("无此模块：{}", id));
@@ -395,10 +386,6 @@ impl Conductor {
                 } else {
                     Some(a.model.clone())
                 },
-                permissions: a
-                    .permissions
-                    .clone()
-                    .unwrap_or_else(|| old_permissions.get(&a.name).cloned().unwrap_or_default()),
             });
         }
         if metas.is_empty() {
@@ -425,7 +412,6 @@ impl Conductor {
             tier,
             guest: edit.guest.clone(),
             pins: edit.pins.clone(),
-            net: edit.net,
         };
         // 子会话的档位只随主会话：这里只锁 tier / guest，模块与模型仍按各自规则（后续再收口）。
         if meta.parent.is_some() && (spec.tier != meta.exec.tier || spec.guest != meta.exec.guest) {
@@ -490,6 +476,7 @@ impl Conductor {
             &self.library_for(&spec),
             &self.guest_runtimes_of(&spec),
             &missing,
+            self.network_allowed(),
         )
         .map_err(|diags| crate::capabilities::vm::api::diagnose_text_for(&diags, guest))?;
 
@@ -497,6 +484,9 @@ impl Conductor {
         new_meta.modules = metas.iter().flat_map(|a| a.modules.clone()).collect();
         new_meta.agents = metas.clone();
         new_meta.exec = spec.clone();
+        if let Some(p) = &edit.permissions {
+            new_meta.sandbox.permissions = p.clone();
+        }
         // 同一 agent 全树只有一份配置：子会话编辑写回所属名单；主会话 / proxy 子工作编辑同步整棵子树。
         let mut old_children = Vec::new();
         let mut new_children = Vec::new();
@@ -522,6 +512,7 @@ impl Conductor {
                 let mut cm = self.history.meta(&child)?;
                 old_children.push(cm.clone());
                 cm.exec = spec.clone();
+                cm.sandbox = new_meta.sandbox.clone();
                 for ca in &mut cm.agents {
                     if let Some(na) = new_meta.agents.iter().find(|a| a.name == ca.name) {
                         *ca = na.clone();
@@ -644,8 +635,9 @@ impl Conductor {
         match self.sandboxes(meta, &roster) {
             Ok(sandboxes) => {
                 for sb in &sandboxes.list {
-                    let spec = crate::kernel::api::FenceSpec::from_sandbox(sb, meta.exec.net)
-                        .with_read_only(self.fence_read_roots());
+                    let spec =
+                        crate::kernel::api::FenceSpec::from_sandbox(sb, self.network_allowed())
+                            .with_read_only(self.host_read_roots());
                     if let Err(e) = self.tools.release_fence(&spec) {
                         self.log.warn(
                             "conductor::release_session_fences",
@@ -669,7 +661,7 @@ impl Conductor {
             "mode": meta.mode,
             "tier": meta.exec.tier.as_str(),
             "guest": meta.exec.guest,
-            "net": meta.exec.net,
+            "net": self.network_allowed(),
             "pins": meta.exec.pins,
             "agents": meta.agents.iter().map(|a| serde_json::json!({
                 "name": a.name,
@@ -752,13 +744,20 @@ impl Conductor {
             .map(|d| self.root.join(&d.probe).to_string_lossy().into_owned())
     }
 
-    /// 用户显式授权的只读根（`settings.yaml` 的 `fence_read`）。
+    /// 目的：全局网络开关（工具 / guest / 常驻服务 / 构建都看它）。
+    pub(crate) fn network_allowed(&self) -> bool {
+        self.registry.app().sandbox.policy.network
+    }
+
+    /// 用户显式授权的主机只读根（`settings.yaml` 的 `sandbox.policy.host_read_roots`）。
     /// 策略层只带事实：哪些目录只读可达由用户定，只读位怎么落由适配层定。
     /// 空 = 一个都不放行（默认不动本机任何权限项）。
-    pub(crate) fn fence_read_roots(&self) -> Vec<std::path::PathBuf> {
+    pub(crate) fn host_read_roots(&self) -> Vec<std::path::PathBuf> {
         self.registry
             .app()
-            .fence_read
+            .sandbox
+            .policy
+            .host_read_roots
             .iter()
             .map(|s| s.trim())
             .filter(|s| !s.is_empty())
@@ -1040,7 +1039,6 @@ impl Conductor {
                 transient: a.transient,
                 modules: a.modules.clone(),
                 model: a.model.clone(),
-                permissions: Default::default(),
             });
         }
         // 模块扁平清单（展示用；顺序按 agent 名单展开）
@@ -1071,6 +1069,10 @@ impl Conductor {
                     guest: spec.guest.clone(),
                     ..crate::kernel::api::ExecSpec::default()
                 },
+            },
+            sandbox: match parent {
+                Some(p) => self.history.meta(p)?.sandbox,
+                None => Default::default(),
             },
             run: RunState::Active,
         };
@@ -1123,6 +1125,7 @@ impl Conductor {
             &self.library_for(&meta.exec),
             &self.guest_runtimes_of(&meta.exec),
             &missing,
+            self.network_allowed(),
         )
         .map_err(|diags| crate::capabilities::vm::api::diagnose_text_for(&diags, guest))?;
         self.log.info(
@@ -1258,7 +1261,7 @@ impl Conductor {
                     channel,
                     &sb,
                     unavailable,
-                    meta.exec.net,
+                    self.network_allowed(),
                     meta.exec.tier,
                     guest,
                     self.guest_lease_for(&meta)?,
@@ -1356,7 +1359,7 @@ impl Conductor {
     /// 目的：把"起 guest"这一段打包成交给调用方线程的活——核心只准备参数，不在这里拉起。
     fn guest_boot(
         &self,
-        meta: &SessionMeta,
+        _meta: &SessionMeta,
         plan: &crate::capabilities::vm::api::ExecPlan,
         sandboxes: &crate::capabilities::workspace::api::Sandboxes,
         restart: bool,
@@ -1380,12 +1383,12 @@ impl Conductor {
             Arc::clone(&self.probe),
             Arc::clone(&self.log),
             self.registry.app().max_guests,
-            self.fence_read_roots(),
+            self.host_read_roots(),
             self.qemu_path(),
             share_tool,
             shares,
             lease.to_string(),
-            meta.exec.net,
+            self.network_allowed(),
             plan.clone(),
             sandboxes.clone(),
             restart,
@@ -1503,11 +1506,11 @@ fn agent_modules(meta: &SessionMeta) -> BTreeMap<String, Vec<String>> {
     out
 }
 
-/// 目的：这次改配要不要重建共享 guest——模块集合或 ExecSpec（档位 / 虚拟根 / 网络 / 定版）变了才要。
+/// 目的：这次改配要不要重建共享 guest——模块集合或 ExecSpec（档位 / 虚拟根 / 定版）变了才要。
+/// 网络是全局策略；全局变更走整体重启，不在这里触发按会话重建。
 fn guest_assembly_changed(old: &SessionMeta, new: &SessionMeta) -> bool {
     old.exec.tier != new.exec.tier
         || old.exec.guest != new.exec.guest
-        || old.exec.net != new.exec.net
         || old.exec.pins != new.exec.pins
         || agent_modules(old) != agent_modules(new)
 }

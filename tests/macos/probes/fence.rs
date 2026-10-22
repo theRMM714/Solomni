@@ -206,7 +206,7 @@ fn env_unavailable_degrades_and_still_runs_the_command() {
         err
     );
 }
-/// 只读档（用户显式授权的 `fence_read`）：授权的根**读得到、写不进**，而读写根照旧写得进。
+/// 只读档（用户显式授权的 `sandbox.policy.host_read_roots`）：授权的根**读得到、写不进**，而读写根照旧写得进。
 /// 三件事分开断言，才能区分"只读位生效"与"整条围栏坏了"。
 #[test]
 fn read_only_roots_are_readable_but_not_writable() {

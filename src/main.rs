@@ -12,6 +12,8 @@ mod presentation;
 #[cfg(test)]
 mod tests;
 
+use capabilities::registry::api::Registry as _;
+use std::io::IsTerminal as _;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -211,6 +213,62 @@ fn main() {
         picked("vm.virtiofsd."),
         picked("vm.smbd."),
     );
+    // 全局沙箱模式：要求 vs 本机能力；机制不可用时默认询问是否本进程降级（不落盘）。
+    let sandbox_cfg = registry.app_settings().sandbox.clone();
+    let write_acl = sandbox_cfg.policy.windows.write_acl;
+    let paths_ok = !cfg!(windows) || write_acl;
+    let requirements = kernel::api::SandboxRequirements {
+        filesystem: sandbox_cfg.policy.enforce.filesystem
+            == capabilities::registry::api::SandboxEnforceLevel::Require,
+        network: sandbox_cfg.policy.enforce.network
+            == capabilities::registry::api::SandboxEnforceLevel::Require
+            && !sandbox_cfg.policy.network,
+        process_tree: sandbox_cfg.policy.enforce.process_tree
+            == capabilities::registry::api::SandboxEnforceLevel::Require,
+        env_whitelist: sandbox_cfg.policy.enforce.env_whitelist
+            == capabilities::registry::api::SandboxEnforceLevel::Require,
+    };
+    let sandbox_mode = Arc::new(kernel::api::SandboxMode::new(
+        requirements,
+        fence_cap.fs && paths_ok,
+        fence_cap.net && paths_ok,
+        fence_cap.tree,
+        true,
+        sandbox_cfg.policy.on_unavailable == capabilities::registry::api::SandboxUnavailable::Ask,
+    ));
+    // 测试/CI 的进程级注入（与 SOLOMNI_FENCE_WRITE 同一性质）：不写盘；'1' 降级、'0' 严格。
+    let forced = std::env::var("SOLOMNI_SANDBOX_DEGRADED").ok();
+    match forced.as_deref() {
+        Some("1") if sandbox_mode.ask_allowed => sandbox_mode.set_degraded(true),
+        Some("0") => sandbox_mode.set_degraded(false),
+        _ => {}
+    }
+    let missing = sandbox_mode.missing();
+    if !missing.is_empty() {
+        println!(
+            "[沙箱] 全局策略要求{}，但本机机制不可用",
+            missing.join("、")
+        );
+        if forced.is_none() && sandbox_mode.ask_allowed && std::io::stdin().is_terminal() {
+            use std::io::Write as _;
+            print!("[沙箱] 是否本次进程降级运行？（不落盘，重启后重新询问）[y/N] ");
+            let _ = std::io::stdout().flush();
+            let mut answer = String::new();
+            let _ = std::io::stdin().read_line(&mut answer);
+            let yes = matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes");
+            sandbox_mode.set_degraded(yes);
+        } else if let Some(value) = forced.as_deref() {
+            println!(
+                "[沙箱] 按 SOLOMNI_SANDBOX_DEGRADED={} 处理（本进程，不落盘）",
+                value
+            );
+        } else {
+            println!("[沙箱] 没有可回答的前端：按拒绝执行（fail-closed）");
+        }
+    }
+    if sandbox_mode.degraded() {
+        println!("[沙箱] 本进程已降级：缺失的强制项按如实降级执行；重启后重新评估");
+    }
     let prompt_source =
         capabilities::prompt::detail::yaml_prompts::YamlPrompts::new(root.join("prompts"));
     // **提示词册能力**：册子只在这里装载一次、也只被它持有；conductor 与工具执行
@@ -241,7 +299,8 @@ fn main() {
         std::sync::Arc::clone(&process_texts),
         home.clone(),
         std::sync::Arc::clone(&write_allowed),
-    );
+    )
+    .with_mode(std::sync::Arc::clone(&sandbox_mode));
     // 内置文件工具：纯 Rust 直接读写，不经过外部进程（编码问题不进本程序）。
     let io = capabilities::tools::detail::FsSysIo::default();
     // **工具能力**：两张表由加载器读进来，三个出站端口（外部执行 / 内置读写 / 围栏释放）
@@ -349,16 +408,19 @@ fn main() {
         };
 
     // **常驻服务能力**：真实协议适配器（MCP stdio 走守门进程的长驻会话）+ 模块能力面 + 隐秘字段面。
-    let residents: Arc<dyn capabilities::residents::api::ResidentOps + Send + Sync> =
-        Arc::new(capabilities::residents::service::ResidentsService::new(
+    let residents: Arc<dyn capabilities::residents::api::ResidentOps + Send + Sync> = Arc::new(
+        capabilities::residents::service::ResidentsService::new(
             vec![Arc::new(capabilities::residents::detail::McpAdapter::new(
-                Arc::new(kernel::detail::ProcessSessions::new(
-                    std::env::current_exe().unwrap_or_default(),
-                    std::sync::Arc::clone(&process_texts),
-                    home.clone(),
-                    std::sync::Arc::clone(&write_allowed),
-                    std::sync::Arc::clone(&book),
-                )),
+                Arc::new(
+                    kernel::detail::ProcessSessions::new(
+                        std::env::current_exe().unwrap_or_default(),
+                        std::sync::Arc::clone(&process_texts),
+                        home.clone(),
+                        std::sync::Arc::clone(&write_allowed),
+                        std::sync::Arc::clone(&book),
+                    )
+                    .with_mode(std::sync::Arc::clone(&sandbox_mode)),
+                ),
                 std::sync::Arc::clone(&log),
             ))
                 as Arc<
@@ -366,7 +428,9 @@ fn main() {
                 >],
             Arc::clone(&modules),
             Arc::clone(&secrets),
-        ));
+        )
+        .with_network(registry.app_settings().sandbox.policy.network),
+    );
 
     // 依赖补齐面先建出来：Conductor（选虚拟根要读清单）与呈现层（setup 路由）各持同一份。
     let provision: Arc<dyn capabilities::provision::api::Provision + Send + Sync> = Arc::new(
@@ -476,12 +540,20 @@ fn main() {
         let allow = match env_flag.as_deref() {
             Some("1") => true,
             Some("0") => false,
-            _ => conductor.registry().app_settings().fence_write,
+            _ => {
+                conductor
+                    .registry()
+                    .app_settings()
+                    .sandbox
+                    .policy
+                    .windows
+                    .write_acl
+            }
         };
         write_allowed.store(allow, std::sync::atomic::Ordering::Relaxed);
         // 能力与本次实际**分开报**：授权只影响 Windows 的目录 ACL；Linux / macOS 的围栏在守门进程里自足，
         // 未授权不等于无围栏。两行都用同一份 FenceReport，Web 概览也照它取。
-        let report = FenceReport::new(fence_cap, allow);
+        let report = FenceReport::new(fence_cap, allow, std::sync::Arc::clone(&sandbox_mode));
         let usable = |ok: bool| if ok { "可用" } else { "不可用" };
         println!(
             "[围栏] 本机能力：文件系统={} 断网={} 进程树={}（{}）",
@@ -490,7 +562,13 @@ fn main() {
             usable(report.cap.tree),
             report.cap.note
         );
-        let ro = conductor.registry().app_settings().fence_read.len();
+        let ro = conductor
+            .registry()
+            .app_settings()
+            .sandbox
+            .policy
+            .host_read_roots
+            .len();
         println!(
             "[围栏] 本次实际：文件系统={} 断网={} 进程树={}；容器授权={}；只读根={} 个（{}）",
             usable(report.fs),
@@ -500,6 +578,17 @@ fn main() {
             ro,
             fence_auth_note(report.write_allowed)
         );
+        if !report.sandbox_mode.missing().is_empty() {
+            println!(
+                "[沙箱] 强制项缺失：{}；本进程{}",
+                report.sandbox_mode.missing().join("、"),
+                if report.sandbox_mode.degraded() {
+                    "已按用户确认降级（不落盘，重启后重新询问）"
+                } else {
+                    "按拒绝执行（fail-closed）"
+                }
+            );
+        }
         fence_report = report;
     }
 
@@ -553,17 +642,23 @@ struct FenceReport {
     write_allowed: bool,
     fs: bool,
     net: bool,
+    sandbox_mode: std::sync::Arc<kernel::api::SandboxMode>,
 }
 
 impl FenceReport {
     /// 目的：按本机能力与本次授权算出同一份事实；启动报告与 Web 不再各编一套。
-    fn new(cap: kernel::detail::confine::Capability, write_allowed: bool) -> Self {
+    fn new(
+        cap: kernel::detail::confine::Capability,
+        write_allowed: bool,
+        sandbox_mode: std::sync::Arc<kernel::api::SandboxMode>,
+    ) -> Self {
         let (fs, net) = cap.effective_paths(write_allowed);
         Self {
             cap,
             write_allowed,
             fs,
             net,
+            sandbox_mode,
         }
     }
 }
@@ -592,13 +687,13 @@ fn fence_auth_note(write_allowed: bool) -> &'static str {
         if write_allowed {
             "容器围栏按本机能力装，写入的权限项逐条记台账"
         } else {
-            "不写本机任何权限项，容器围栏不装，只放行进程树、资源上限与环境白名单；要启用：设置里打开，或 .home/settings.yaml 写 fence_write: true"
+            "不写本机任何权限项，容器围栏不装，只放行进程树、资源上限与环境白名单；要启用：设置里打开，或 .home/settings.yaml 写 sandbox.policy.windows.write_acl: true"
         }
     }
     #[cfg(not(windows))]
     {
         let _ = write_allowed;
-        "fence_write 只影响 Windows 的目录 ACL；本平台围栏在守门进程里自足，与授权无关"
+        "sandbox.policy.windows.write_acl 只影响 Windows 的目录 ACL；本平台围栏在守门进程里自足，与授权无关"
     }
 }
 
@@ -615,8 +710,15 @@ fn serve_web(ops: capabilities::conductor::api::Ops, port: u16, report: &FenceRe
         read_only_roots: ops
             .registry
             .settings()
-            .map(|s| s.fence_read.len())
+            .map(|s| s.sandbox.policy.host_read_roots.len())
             .unwrap_or(0),
+        sandbox_missing: report
+            .sandbox_mode
+            .missing()
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect(),
+        sandbox_degraded: report.sandbox_mode.degraded(),
     };
     if let Err(e) = presentation::web::serve(ops, port, fence) {
         eprintln!("[Web 服务异常] {}", e);

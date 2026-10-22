@@ -111,10 +111,19 @@ pub fn run_fenced(
     _prepared: bool,
     _home: Option<&std::path::Path>,
     command: &str,
+    policy: &crate::kernel::api::FenceRunPolicy,
 ) -> i32 {
     let enforced = match install(spec, command) {
         Ok(()) => true,
         Err(e) => {
+            let required = policy.require_fs || (policy.require_net && !spec.net);
+            if required && !policy.allow_degraded {
+                eprintln!(
+                    "[围栏] 文件系统/网络围栏未生效（{}）：按全局策略拒绝执行",
+                    e
+                );
+                return FENCE_FAILED;
+            }
             eprintln!("[围栏] 文件系统围栏未生效（{}）：按如实降级继续执行", e);
             false
         }
@@ -229,7 +238,7 @@ fn profile_text(spec: &FenceSpec, command: &str) -> String {
     for dir in super::interpreter_dirs(command) {
         ro_paths.push(dir.to_string_lossy().replace('\\', "/"));
     }
-    // 用户显式授权的只读根（`fence_read`）：只放 `file-read*`，不碰 `file-write*`。
+    // 用户显式授权的主机只读根（`sandbox.policy.host_read_roots`）：只放 `file-read*`，不碰 `file-write*`。
     for root in &spec.ro {
         if !root.as_os_str().is_empty() {
             ro_paths.push(root.to_string_lossy().replace('\\', "/"));

@@ -38,9 +38,16 @@ pub struct FenceInfo {
     pub effective_net: bool,
     /// 用户有没有授权在本机写权限项（只影响 Windows 的容器围栏）。
     pub write_allowed: bool,
-    /// 用户显式授权的只读根个数（`settings.yaml` 的 `fence_read`）；0 = 一个都没授。
+    /// 用户显式授权的主机只读根个数（`settings.yaml` 的 `sandbox.policy.host_read_roots`）；0 = 一个都没授。
     pub read_only_roots: usize,
+    /// 目的：全局策略要求、但本机机制不可用的项（空 = 齐了）。
+    pub sandbox_missing: Vec<String>,
+    /// 目的：本进程是否已按用户确认降级（不落盘；重启后重新询问）。
+    pub sandbox_degraded: bool,
 }
+
+/// 目的：保存全局沙箱策略后要求启动器整体重启的退出码（start.js 认它）。
+pub const RESTART_EXIT_CODE: i32 = 75;
 
 /// 启动转录中心服务器：**可中断**——收到 Ctrl+C / SIGINT 就正常关闭回到 CLI（进程仍在）。
 /// 端口可指定，默认 3081，只绑本机回环。
@@ -359,7 +366,16 @@ pub(crate) fn route(
                 // 回档 / 改需求返回完整重放（前端整体重建）。
                 Ok(Acted::Replayed(events)) => ok_json(json!({ "events": events })),
                 // 其余给一份结构化结果（{ok:true} / {sid,agents} …）。
-                Ok(Acted::Done(v)) => ok_json(v),
+                Ok(Acted::Done(v)) => {
+                    // 全局沙箱策略变了：先把回包发出去，再整体重启（启动器按退出码拉起）。
+                    if v.get("restart").and_then(|b| b.as_bool()) == Some(true) {
+                        std::thread::spawn(|| {
+                            std::thread::sleep(std::time::Duration::from_millis(300));
+                            std::process::exit(RESTART_EXIT_CODE);
+                        });
+                    }
+                    ok_json(v)
+                }
                 Err(e) => {
                     log.error("web::action", &format!("动作 {} 失败：{}", id, e));
                     complaint(400, e)

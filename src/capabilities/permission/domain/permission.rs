@@ -26,23 +26,24 @@ pub enum Granularity {
 /// 一份权限声明（全局默认，或已被覆盖后的完整生效态）。
 /// 空的白名单 = 默认（整棵工作区）；空的 `deny` = 不禁止任何路径。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Permissions {
-    /// 读白名单（相对工作区根；空 = 整棵工作区可读）。
+    /// 目的：读白名单（相对工作区根；空 = 整棵工作区可读）。
     #[serde(default)]
     pub allow_read: Vec<String>,
-    /// 提交白名单（相对工作区根；空 = 整棵工作区可提交）。
+    /// 目的：提交白名单（相对工作区根；空 = 整棵工作区可提交）。
     #[serde(default)]
     pub allow_write: Vec<String>,
     /// 黑名单：读写都禁，只做减法（空 = 不禁止）。
     #[serde(default)]
     pub deny: Vec<String>,
-    /// 模块目录写授权（模块 id；空 = 模块目录只读，`userdata/` 恒可写）。
+    /// 目的：模块目录写授权（模块 id；空 = 模块目录只读，`userdata/` 恒可写）。
     #[serde(default)]
     pub module_write: Vec<String>,
-    /// 决定粒度。
+    /// 目的：决定粒度。
     #[serde(default)]
     pub granularity: Granularity,
-    /// 需要用户确认的工具名（`granularity=ask` 时生效；模块工具写 `module.tool`）。
+    /// 目的：需要用户确认的工具名（`granularity=ask` 时生效；模块工具写 `module.tool`）。
     #[serde(default)]
     pub ask: Vec<String>,
 }
@@ -60,9 +61,57 @@ impl Default for Permissions {
     }
 }
 
+/// 目的：全局默认权限（不含硬黑名单）。会话覆盖只替换显式字段；硬黑名单由 `SandboxPolicy.deny` 单独持有。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PermissionDefaults {
+    /// 目的：读白名单（相对工作区根；空 = 整棵工作区可读）。
+    #[serde(default)]
+    pub allow_read: Vec<String>,
+    /// 目的：提交白名单（相对工作区根；空 = 整棵工作区可提交）。
+    #[serde(default)]
+    pub allow_write: Vec<String>,
+    /// 目的：模块目录写授权（模块 id；空 = 模块目录只读，`userdata/` 恒可写）。
+    #[serde(default)]
+    pub module_write: Vec<String>,
+    /// 目的：决定粒度。
+    #[serde(default)]
+    pub granularity: Granularity,
+    /// 目的：需要用户确认的工具名（`granularity=ask` 时生效；模块工具写 `module.tool`）。
+    #[serde(default)]
+    pub ask: Vec<String>,
+}
+
+impl Default for PermissionDefaults {
+    fn default() -> Self {
+        PermissionDefaults {
+            allow_read: Vec::new(),
+            allow_write: Vec::new(),
+            module_write: Vec::new(),
+            granularity: Granularity::Ask,
+            ask: Vec::new(),
+        }
+    }
+}
+
+impl PermissionDefaults {
+    /// 目的：把全局默认与硬黑名单合成一份生效权限。
+    pub fn to_permissions(&self, hard_deny: &[String]) -> Permissions {
+        Permissions {
+            allow_read: self.allow_read.clone(),
+            allow_write: self.allow_write.clone(),
+            deny: hard_deny.to_vec(),
+            module_write: self.module_write.clone(),
+            granularity: self.granularity,
+            ask: self.ask.clone(),
+        }
+    }
+}
+
 /// 会话 / 逐 agent 的**覆盖**：只覆盖显式给出的字段（None = 继承上一层）。
 /// 为什么用 Option 而不是空集合：空白名单有确切语义（= 默认整棵），与"没给"必须分得开。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PermissionsOverride {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allow_read: Option<Vec<String>>,
@@ -79,7 +128,7 @@ pub struct PermissionsOverride {
 }
 
 impl Permissions {
-    /// 叠加一层覆盖：只替换它显式给出的字段。
+    /// 目的：叠加一层覆盖——只替换显式给出的字段；`deny` 是**追加**而非替换（全局黑名单是硬底线）。
     pub fn apply(&self, over: &PermissionsOverride) -> Permissions {
         let mut out = self.clone();
         if let Some(v) = &over.allow_read {
@@ -89,7 +138,12 @@ impl Permissions {
             out.allow_write = v.clone();
         }
         if let Some(v) = &over.deny {
-            out.deny = v.clone();
+            // 追加：会话只能加黑名单，不能把全局黑名单清空。
+            for entry in v {
+                if !out.deny.iter().any(|e| normalize(e) == normalize(entry)) {
+                    out.deny.push(entry.clone());
+                }
+            }
         }
         if let Some(v) = &over.module_write {
             out.module_write = v.clone();
@@ -221,6 +275,17 @@ pub fn validate_override(o: &PermissionsOverride) -> Result<(), String> {
             if t.trim().is_empty() {
                 return Err("ask 里的工具名不能为空".to_string());
             }
+        }
+    }
+    Ok(())
+}
+
+/// 目的：校验全局默认权限（不含硬黑名单）。
+pub fn validate_defaults(d: &PermissionDefaults) -> Result<(), String> {
+    validate(&d.to_permissions(&[]))?;
+    for t in &d.ask {
+        if t.trim().is_empty() {
+            return Err("ask 里的工具名不能为空".to_string());
         }
     }
     Ok(())

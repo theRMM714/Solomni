@@ -73,3 +73,22 @@
     未覆盖的生产路径逐条有补测或缺口结论。
   blocked_by: 缺少观察面（子进程插桩与合并尚未实现）
 
+- id: modules.multi-agent-ownership
+  scope: global
+  level: T3
+  why: |
+    当前硬约束“同一模块只能属于一个 agent”（work.rs 的 duplicate_tree_module 与 create/edit 校验、
+    proxy 的名单校验、网页提示）挡住了多个 agent 共用同一模块的合法场景。
+    权限收敛到会话级后，这个约束的主要剩余理由是模块目录 / userdata 的并发写与工具归属；
+    读共享本身没有歧义。
+  how: |
+    1) 去掉 create/edit/proxy 的重复校验与网页提示；meta.modules 去重，AgentMeta.modules 允许重叠。
+    2) 定多 owner 的写策略：模块目录默认只读；module_write 命中时按模块加写锁/租约，或只允许单 owner 写。
+    3) 校验 sandbox/guest 挂载、secrets、resident 服务、模块工具面在重叠时仍然只装配一份。
+    4) 补 T3/T4：两个 agent 同时调用同一模块的只读工具；写工具按策略串行或拒绝；UI 能保存重叠名单。
+  accept: |
+    同一模块可同时属于多个 agent；两边都能调用它的工具并看到同一目录；
+    写访问有确定策略且并发不损坏 userdata；meta 不出现重复模块；测试与 UI 一致。
+  blocked_by: |
+    未排期；需要先定模块目录 / userdata 的多 owner 写策略（本期不做）
+

@@ -1087,7 +1087,7 @@ fn editing_is_refused_while_a_session_is_generating() {
         tier: "host".to_string(),
         guest: None,
         pins: std::collections::BTreeMap::new(),
-        net: false,
+        permissions: None,
     };
     ops.sessions.edit(&sid, edit()).expect("没在生成时可以改");
 
