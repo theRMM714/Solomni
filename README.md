@@ -50,6 +50,8 @@ Solomni 是一个**跑在自己机器上的 agent 运行环境（AgentOS）**：
 
 ```bash
 node setup-runtime.js    # 准备运行环境：项目内 platform/<os>/ 与 .tools/；有可用 Rust 则只读借用
+node setup-toolchains.js # 可选：把 Python / Node / C-C++ 装进项目内 .tools/toolchains（下载前要 --yes）
+node setup-toolchains.js --check # 只读校验：缺什么列什么，缺则非零退出
 node start.js            # 任意平台；Windows 也可双击 start.bat，macOS / Linux 也可 ./start.sh
 node start.js -webUI     # 直接进本地网页（127.0.0.1:3081）
 node start.js --provision                # 可选：虚拟机档只读状态（JSON：QEMU / guest 镜像 / agent 与运行包）
@@ -58,6 +60,8 @@ node start.js --provision --ensure --yes # 可选（Linux / Windows）：把 QEM
 ```
 
 - 工具链与缓存收敛在**项目内**：检测到可用的 Rust 就**只读借用**，缓存与产物仍落 `platform/<os>/`；没有或有问题的才先征求同意装进项目内，不动系统；**无交互终端时不做安装**，打印手动步骤后退出。
+- 模块工具/构建的**基础工具链**（Python / Node / C-C++）装进 `.tools/toolchains/`，启动时前置 PATH；缺失时回退宿主并如实报告。C# 等未内置能力留给用户扩展（本机档的 `runtimes/` 扩展仍是缺口）。
+  C/C++ 在 Windows 用 MinGW-w64、Linux / macOS 用 Zig；macOS 链接原生框架仍需要系统的 Xcode Command Line Tools / SDK。
   借用系统工具链时不读系统 `~/.cargo/config.toml`（镜像 / 凭据），依赖会重新下到项目内——这是「不写项目外」的取舍；门禁还会快照项目外缓存根，写出去即失败。
 
 ### 开发环境

@@ -94,8 +94,9 @@ agent 实例名不得占用 `work` / `children`（名单在 `systools/names.yaml
   Linux（QEMU/KVM + virtiofs，缺 virtiofsd 时退 9p）与 Windows（QEMU/WHPX + SMB guestfwd）已真机验收；Windows 缺 smbd 时虚拟机档不可用（先补齐，不降级）；macOS 的组合未验（未验组合禁用并逐项列出缺什么、每项怎么补）；
   未开放组合上已存在的会话不拦打开（列表标注"虚拟机档不可用"，本次按本机档执行）。
   guest 默认 Debian stable（13 / trixie）；QEMU 等依赖**不预置、不分发**，由 provision 能力在 Linux / Windows 上按清单下载并解包进项目内（需用户同意），产品检测、指路并给出"怎么补"（入口 `--provision`，契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)）。
-- **运行能力**：模块用 `runtimes` 声明工具需要哪些运行包，包放在 `runtimes/`（放入即出现）；
-  能力由包库或 guest 画像（`guest.yaml` 的 `runtimes`）满足。缺包 = 本机档那次执行如实拒绝并说明缺什么，
+- **运行能力**：本机档优先使用项目内基础工具链（Python / Node / C-C++，装进 `.tools/toolchains`；缺失时回退宿主并在启动报告说明）；
+  模块用 `runtimes` 声明的额外运行包放在 `runtimes/`（放入即出现），仍只服务虚拟机档，能力由包库或 guest 画像
+  （`guest.yaml` 的 `runtimes`）满足。缺能力 = 本机档那次执行如实拒绝并说明缺什么，
   虚拟机档在「开始」前**拒绝创建**（没有工具用户完不成工作）；两者都**不是**会话崩溃（契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md) §五）。
 - **三层隔离，各说各的实际强度**：
   ① 内置文件工具是**工具层**越界拒绝（路径校验）；

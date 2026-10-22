@@ -463,7 +463,8 @@ pub fn build_module(
         agent: format!("build:{}", id),
         lease: String::new(),
         rw: vec![module.root.clone(), state_dir.join(id)],
-        ro: Vec::new(),
+        // 构建脚本可能调用项目内编译器（gcc/g++/zig），要放行它的安装根；否则 Landlock 会拒绝。
+        ro: crate::entry::toolchains::active_roots(root),
         ro_tree: Vec::new(),
         private: home,
         cwd: module.root.clone(),

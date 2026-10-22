@@ -289,15 +289,18 @@ pub(crate) fn runtime_report_is_tier_aware() {
     };
     let core = cores(
         Arc::new(InMemoryPackages::empty()),
-        vec![module_with_runtimes("a", &["python"])],
+        vec![module_with_runtimes("a", &["no-such-capability"])],
     );
     let host = core.runtime_report(Tier::Host);
     assert_eq!(host.tier, "host");
-    assert_eq!(host.declared.get("a"), Some(&vec!["python".to_string()]));
+    assert_eq!(
+        host.declared.get("a"),
+        Some(&vec!["no-such-capability".to_string()])
+    );
     assert_eq!(
         host.missing.get("a"),
-        Some(&vec!["python".to_string()]),
-        "档位无关的事实照实报"
+        Some(&vec!["no-such-capability".to_string()]),
+        "宿主确实没有这个能力时照实报"
     );
     assert!(host.available.is_empty());
     assert!(host.diagnoses.is_empty(), "本机档不做虚拟机档诊断");
@@ -313,6 +316,30 @@ pub(crate) fn runtime_report_is_tier_aware() {
     assert!(r.missing.is_empty(), "{:?}", r.missing);
     assert_eq!(r.available.get("python"), Some(&vec!["3.12.4".to_string()]));
     assert!(r.diagnoses.is_empty(), "{:?}", r.diagnoses);
+}
+
+#[test]
+pub(crate) fn host_runtime_report_uses_effective_path() {
+    let probe = Arc::new(FixedProbe {
+        exes: vec!["python".to_string()],
+        ..Default::default()
+    });
+    let core = core_with_pkgs_probe(
+        vec![module_with_runtimes("a", &["python"])],
+        gw(BTreeMap::new(), vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::new(InMemoryHistory::new()),
+        Arc::new(InMemorySysIo::new()),
+        Arc::new(InMemoryPackages::empty()),
+        probe,
+    );
+    let host = core.runtime_report(Tier::Host);
+    assert!(
+        host.missing.is_empty(),
+        "宿主 PATH 上有 python 就不算缺：{:?}",
+        host.missing
+    );
 }
 
 #[test]

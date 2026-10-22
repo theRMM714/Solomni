@@ -736,7 +736,7 @@ function structuralAudit() {
   // ④ 外部连接台账 ↔ 消费点：links.yaml 的键与代码里 link(...) 的引用一一对应。
   // 为什么机器查：台账多个没人用的键 = 死数据；少一个被引用的键 = 运行期才炸（env.js 是引导层，炸在这里没得救）。
   const linksFile = path.join(ROOT, "links.yaml");
-  const linkDomains = ["rustup", "winlibs", "release", "guest", "smbd"];
+  const linkDomains = ["rustup", "winlibs", "release", "guest", "smbd", "toolchain"];
   if (!fs.existsSync(linksFile)) {
     problems.push("缺外部连接台账：links.yaml");
   } else {
@@ -769,6 +769,7 @@ function structuralAudit() {
     // 消费点：环境层（rustup 安装）与依赖清单的 source（产品侧下载源都在 dependencies.yaml；
     // release:<资产> 走 release.base，不在这里当键）。
     scanLinkUses(path.join(ROOT, "env.js"));
+    scanLinkUses(path.join(ROOT, "toolchains.js"));
     const depsFile = path.join(ROOT, "dependencies.yaml");
     if (fs.existsSync(depsFile)) {
       for (const m of fs.readFileSync(depsFile, "utf8").matchAll(/^\s*source:\s*([A-Za-z0-9_.:-]+)\s*$/gm)) {

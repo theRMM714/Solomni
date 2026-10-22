@@ -11,6 +11,7 @@
 | --- | --- |
 | `src/entry/mod.rs` | 入口层共用机制的入口（当前只有产品根规范化） |
 | `src/entry/root.rs` | 产品根规范化：纯词法拼接与归一化，取不到当前目录才退回 canonicalize |
+| `src/entry/toolchains.rs` | 启动期基础工具链：读 `.tools/toolchains/active.json`，校验目标与相对路径，把项目 bin 前置到 PATH 并设置工具环境；缺失 / 损坏只报告 |
 | `src/main.rs` | 组合根 + argv 分发：隐藏模式 / 探针 → 装配各能力 → 启动对账与围栏报告（本机能力 / 本次实际）→ 交给 CLI 或 Web |
 | `src/diagnostics/mod.rs` | 机器可读探针：doctor / provision / https-check / unpack / print-routes / print-fence-env / fence-verify / build |
 | `src/guard/mod.rs` | 守门模式分发：围栏守门（--fence-run）、进程守门（--proc-watchdog）、围栏台账按条处置 |

@@ -36,9 +36,22 @@ pub(crate) struct PreparedEdit {
     pub(crate) old_children: Vec<SessionMeta>,
     pub(crate) new_children: Vec<SessionMeta>,
 }
+/// 目的：本机档的能力是否已由生效 PATH 满足（基础工具链或宿主）。
+/// 参数：cap 是模块 runtimes 里的能力名；常见能力映射到实际可执行名，未知能力按同名查。
+fn host_has_capability(probe: &dyn crate::kernel::ports::HostProbe, cap: &str) -> bool {
+    let names: &[&str] = match cap {
+        "python" => &["python", "python3"],
+        "node" => &["node"],
+        "cc" | "c-c++" => &["cc", "gcc", "g++", "clang", "clang++"],
+        "bash" => &["bash"],
+        _ => &[cap],
+    };
+    names.iter().any(|n| probe.has_exe(n))
+}
+
 impl Conductor {
     /// 运行能力报告：模块声明的能力、包库里的可用版本、缺失清单与虚拟机档诊断。
-    /// 「清单即事实」：每次调用重扫模块清单与包库；本机档不装载运行包，missing 只作事实呈现。
+    /// 「清单即事实」：每次调用重扫模块清单与包库；本机档不装载运行包，missing 只保留生效 PATH 上确实没有的能力。
     pub fn runtime_report(&self, tier: crate::kernel::api::Tier) -> RuntimeReport {
         self.runtime_report_for(&crate::kernel::api::ExecSpec {
             tier,
@@ -63,8 +76,13 @@ impl Conductor {
             for caps in missing.values_mut() {
                 caps.retain(|c| !guest_runtimes.iter().any(|g| g == c));
             }
-            missing.retain(|_, caps| !caps.is_empty());
+        } else {
+            // 本机档不装载运行包：能力由生效 PATH（项目内基础工具链在前、宿主在后）满足。
+            for caps in missing.values_mut() {
+                caps.retain(|c| !host_has_capability(self.probe.as_ref(), c));
+            }
         }
+        missing.retain(|_, caps| !caps.is_empty());
         let qemu = self.qemu_path();
         let share_tool = self.share_tool_path();
         let readiness = crate::capabilities::vm::api::tier_readiness(

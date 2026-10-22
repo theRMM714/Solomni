@@ -8,7 +8,7 @@
 
 **管**：
 
-- 入口层共用机制：产品根规范化（`src/entry/root.rs`）。
+- 入口层共用机制：产品根规范化（`src/entry/root.rs`）与启动期基础工具链 PATH（`src/entry/toolchains.rs`）。
 - 组合根（`src/main.rs`）：new 出各适配器、装配各能力、跑启动对账、把入站能力面交给 CLI 或 Web。
 - 机器可读探针与隐藏模式（`src/diagnostics/mod.rs`）。
 - 两个守门模式（`src/guard/mod.rs`）：围栏 `--fence-run`、长驻子进程 `--proc-watchdog`，以及围栏台账的按条处置。
@@ -22,6 +22,7 @@
 
 - 先处理**不需要装配核心**的模式：`--proc-watchdog`、`--fence-run`、`--https-check`、`--unpack`、`--print-fence-env`、`--fence-verify`、`--print-routes`。
 - 再解析产品根：`--root <路径>`，缺省 `.`；相对路径与当前目录做纯词法拼接，取不到当前目录才退回 `canonicalize`（Windows 上剥掉 `\\?\` 前缀）。
+- 根解析后立即应用**基础工具链**：读 `.tools/toolchains/active.json`，把项目内 `bin` 前置到 PATH；目标不符 / 路径不安全 / bin 不在场只报告，不阻断启动。之后 `--doctor`、`--build`、会话工具与常驻服务都看这份生效 PATH。
 - `--doctor`、`--provision`、`--build`、围栏台账系列（`--fence-reconcile` / `--fence-ledger` / `--fence-restore` / `--fence-revoke` / `--fence-profile-rm` / `--fence-clean`）只需要产品根，不装配核心。
 - 装配期失败一律打印 `[装配失败]` 并以 1 退出：登记处四份 yaml 读不了、提示词册缺文件 / 缺键、工具总表与角色表不自洽、模块清单装配失败、隐秘字段加载失败、核心执行线程起不来。日志文件起不来只降级到 stderr（进程继续）。
 - **启动对账**在会话开工前跑两份：围栏授权台账（`confine::reconcile`）与长驻子进程账（`ProcessBook::reconcile`，`.home/processes.json`）。

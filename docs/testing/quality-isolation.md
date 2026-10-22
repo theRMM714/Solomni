@@ -67,6 +67,7 @@
 | `dead_code` | `capabilities/session/domain/events.rs` 的 `enum SessionEvent` | 事件词汇里的字段**不全在生产路径被读**（例如 `DiscussionDone` 的 `round` / `over_cap` 供呈现层做裁决确认页）；词汇就是线格式，字段随契约保留，删掉会让呈现侧拿不到事实 |
 | `dead_code` | `capabilities/workspace/api.rs` 的 `Workspace::work_restore` | 共享区"指定提交点还原"的**机制入口**（由测试钉住）：生产回档走 `work_rewind_to` / `work_discard_after` / `work_restore_point` 按行锚算目标，`work_restore` 作为对照留在接口面 |
 | `too_many_arguments` | `capabilities/conductor/service/env.rs` 的 `tools_env` / `build_single` | 会话装配把"这一席的工具面 / 这一场单 agent 会话"一次说全（模块 / 沙箱 / 缺包 / 网络 / 形态 / 角色 / 档位）：它们本就串联透传，收口成参数对象只是把参数挪个地方 |
+| `too_many_arguments` | `tests/doubles.rs` 的 `core_with_pkgs_probe` | 测试装配要逐项控制端口（模块 / 通道 / 执行器 / 目录 / 历史 / IO / 包库 / 宿主探测）；收口成参数对象只会把同一批替身挪个位置，读起来更绕 |
 | `large_enum_variant` | `capabilities/conductor/service/mod.rs` 的 `enum Session` | 两变体大小差得远，但装箱只换来一次间接寻址，却把"会话本体可直接移动"这个形状改掉 |
 
 新增 allow 必须同时更新本表；理由说不清的就不该 allow。

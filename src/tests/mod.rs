@@ -27,6 +27,7 @@ mod secrets;
 mod session;
 mod slate;
 mod taskchain;
+mod toolchains;
 mod tools;
 mod vm;
 mod workspace;

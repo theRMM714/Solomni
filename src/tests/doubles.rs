@@ -2467,6 +2467,31 @@ pub(crate) fn core_with_pkgs(
     io: Arc<InMemorySysIo>,
     packages: Arc<InMemoryPackages>,
 ) -> Conductor {
+    core_with_pkgs_probe(
+        modules,
+        gateway,
+        runner,
+        catalog,
+        history,
+        io,
+        packages,
+        test_host_probe(),
+    )
+}
+
+/// 目的：指定全部端口 + 运行包库 + **宿主探测**的装配（断言本机档按生效 PATH 判运行能力）。
+/// 约束：参数与 core_with_pkgs 同形，只多一个 probe；测试装配需要逐项控制端口。
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn core_with_pkgs_probe(
+    modules: Vec<Module>,
+    gateway: ScriptGateway,
+    runner: Arc<impl ProcessRunner + 'static>,
+    catalog: Arc<FakeCatalog>,
+    history: Arc<InMemoryHistory>,
+    io: Arc<InMemorySysIo>,
+    packages: Arc<InMemoryPackages>,
+    probe: Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>,
+) -> Conductor {
     let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
         Arc::new(gateway);
     let llm = test_llm(Arc::clone(&gateway), catalog);
@@ -2483,7 +2508,7 @@ pub(crate) fn core_with_pkgs(
         test_prompt(),
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
-        test_host_probe(),
+        probe,
         Arc::new(crate::capabilities::residents::api::NoResidents),
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     )

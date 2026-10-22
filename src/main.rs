@@ -71,10 +71,35 @@ fn main() {
         .unwrap_or_else(|| PathBuf::from("."));
     // 产品根规范化成**干净的绝对路径**：提示词里给 AI 的、以及各适配器给出的根都是它。
     let (root, root_note) = entry::root::resolve_root(&raw_root);
+    let home = root.join(".home");
+    // 基础工具链：只写项目内 .tools；先应用 PATH，再跑诊断 / 构建 / 会话，模块工具与 build 因此都优先项目版本。
+    let toolchains = entry::toolchains::apply(&root);
+    // 这些是人读的启动事实；--doctor / --provision 的 stdout 是机器可读 JSON，所以走 stderr。
+    if toolchains.active.is_empty() {
+        eprintln!("[工具链] 未安装项目工具链，使用宿主 PATH（可运行 node setup-toolchains.js）");
+    } else {
+        eprintln!(
+            "[工具链] 项目内：{}",
+            toolchains
+                .active
+                .iter()
+                .map(|(id, version)| format!("{} {}", id, version))
+                .collect::<Vec<_>>()
+                .join("、")
+        );
+    }
+    if !toolchains.missing.is_empty() {
+        eprintln!(
+            "[工具链] 未安装：{}；这些命令回退宿主 PATH",
+            toolchains.missing.join("、")
+        );
+    }
+    for w in &toolchains.warnings {
+        eprintln!("[工具链] {}", w);
+    }
     if doctor {
         std::process::exit(diagnostics::doctor(&root));
     }
-    let home = root.join(".home");
     // 隐藏模式：依赖补齐的状态（机器可读，只报事实）——缺什么、装到哪、从哪来。
     if args.iter().any(|a| a == "--provision") {
         std::process::exit(diagnostics::provision(&root, &args));
@@ -115,6 +140,23 @@ fn main() {
     if let Some(note) = &root_note {
         eprintln!("[根目录] {}", note);
         log.warn("main::root", note);
+    }
+    if !toolchains.active.is_empty() {
+        log.info(
+            "main::toolchains",
+            &format!(
+                "项目内工具链：{}",
+                toolchains
+                    .active
+                    .iter()
+                    .map(|(id, version)| format!("{} {}", id, version))
+                    .collect::<Vec<_>>()
+                    .join("、")
+            ),
+        );
+    }
+    for w in &toolchains.warnings {
+        log.warn("main::toolchains", w);
     }
     // 启动对账（装配期，会话尚未开工）：按台账回收上一次运行被杀/崩溃留下的陈旧授权。
     // 只回收归属明确已死的条目；无法判定的报告后跳过；失败如实报、台账保留供重试（--fence-reconcile / --fence-clean）。

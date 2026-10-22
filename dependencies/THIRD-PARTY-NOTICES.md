@@ -51,6 +51,17 @@
 - **Source Code**: https://github.com/theRMM714/rust-smb-server-win
 - **Note**: 上游 [paltaio/rust-smb-server](https://github.com/paltaio/rust-smb-server)（MIT）+ 本仓补丁（Windows 定位 IO、`unlink` 目录识别、delete-on-close 错误传播）与 helper CLI，由该仓 CI 构建并发布资产；Solomni 只按 URL 下载，不携带其提交史。
 
+## 5. 基础工具链（按需下载，不随仓分发）
+
+以下组件由 `setup-toolchains.js` 在用户同意后从上游下载到项目内 `.tools/toolchains/`，本仓不携带二进制：
+
+- **Python**：python-build-standalone（CPython 3.14.9），PSF-2.0；来源 https://github.com/astral-sh/python-build-standalone 。
+- **Node.js**：Node 24.11.0，MIT；来源 https://nodejs.org/dist/ 。
+- **Zig**：0.15.2，MIT；来源 https://ziglang.org/download/ 。
+- **MinGW-w64（winlibs）**：GCC 16.2.0 / MinGW-w64 UCRT，GPL/LGPL（含 GCC Runtime Library Exception）；来源 https://github.com/brechtsanders/winlibs_mingw 。
+
+每个资产的 URL 与 sha256 成对登记在 `links.yaml`；升级时同 diff 更新。
+
 ---
 
 ## 附：GPL 源码获取说明
@@ -113,6 +124,18 @@ This file documents the third-party dependency bundles self-hosted and distribut
 - **License**: MIT (upstream rust-smb-server is MIT as well)
 - **Source Code**: https://github.com/theRMM714/rust-smb-server-win
 - **Note**: Upstream `paltaio/rust-smb-server` (MIT) plus this project's patches (Windows positional IO, directory-aware `unlink`, delete-on-close error propagation) and the helper CLI; the asset is built and published by that repository's CI, and Solomni only downloads it by URL.
+
+## 5. Base toolchains (downloaded on demand, not shipped)
+
+The following components are downloaded by `setup-toolchains.js` (with user consent) into the project's
+`.tools/toolchains/`; this repository does not carry their binaries:
+
+- **Python**: python-build-standalone (CPython 3.14.9), PSF-2.0; https://github.com/astral-sh/python-build-standalone .
+- **Node.js**: Node 24.11.0, MIT; https://nodejs.org/dist/ .
+- **Zig**: 0.15.2, MIT; https://ziglang.org/download/ .
+- **MinGW-w64 (winlibs)**: GCC 16.2.0 / MinGW-w64 UCRT, GPL/LGPL (with the GCC Runtime Library Exception); https://github.com/brechtsanders/winlibs_mingw .
+
+Each asset's URL and sha256 are paired in `links.yaml`; upgrades update both in the same diff.
 
 ---
 

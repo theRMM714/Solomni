@@ -59,6 +59,8 @@ the **runtime environment** (just running the product) and the **dev environment
 
 ```bash
 node setup-runtime.js    # prepare the runtime environment: platform/<os>/ and .tools/ inside the project; borrows a usable Rust read-only
+node setup-toolchains.js # optional: install Python / Node / C-C++ into the project's .tools/toolchains (--yes confirms the download)
+node setup-toolchains.js --check # read-only check: lists what is missing, exits non-zero if anything is
 node start.js            # any platform; on Windows also start.bat, on macOS / Linux also ./start.sh
 node start.js -webUI     # go straight to the local web UI (127.0.0.1:3081)
 node start.js --provision                # optional: read-only vm tier status (JSON: QEMU / guest image / agent and runtimes)
@@ -72,6 +74,11 @@ node start.js --provision --ensure --yes # optional (Linux / Windows): install Q
   steps, and exits. Borrowing means the system `~/.cargo/config.toml` (mirrors / credentials) is not read and
   deps are re-downloaded into the project — the price of "no writes outside"; the gate also snapshots
   out-of-project cache roots and fails if anything was written.
+- The **base toolchains** for module tools/builds (Python / Node / C-C++) live under `.tools/toolchains/` and are
+  prepended to PATH at startup; when missing, the product falls back to the host PATH and reports it. C# and other
+  non-base capabilities remain user extensions (the host-side `runtimes/` extension is still a gap).
+  C/C++ uses MinGW-w64 on Windows and Zig on Linux / macOS; linking native macOS frameworks still needs the
+  system Xcode Command Line Tools / SDK.
 
 ### Dev environment
 
