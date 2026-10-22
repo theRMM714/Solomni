@@ -4,11 +4,13 @@
 # 触发：**PR（目标 main，且已 Ready for review）与手动 workflow_dispatch**；push 不触发。
 # Draft PR 的 opened / synchronize 仍会创建 run，但所有 job 跳过（不耗 runner、不发布 ci-report）；
 # 标 Ready（ready_for_review）才跑验收，之后的推送也重跑。PR 验收 PR head 提交（SOURCE_SHA），
-# 报告的 sha 因此等于 PR 头；手动派发验收 github.sha。CI 的唯一价值是给出本机拿不到的结论（他平台编译、
-# 真机围栏、TLS 出站）。inputs.clean=true 跳过缓存，用于「干净机器」验收。契约见 docs/testing/execution-ci.md。
+# 报告的 sha 因此等于 PR 头；手动派发验收 github.sha。代码验收的 CI 价值是给出本机拿不到的结论（他平台编译、
+# 真机围栏、TLS 出站）；文档门禁在 CI 里跑是为了合并闸门，不是补平台结论。inputs.clean=true 跳过缓存，用于「干净机器」验收。契约见 docs/testing/execution-ci.md。
 #
-# 契约：每个平台**恰好两个 job**——quality（T0 + 单元 + 平台探针 + 前端冒烟）与 e2e（L4 端到端）；
-# 不得再拆。publish-report 下载两份报告、合并后发布 ci-report（成败都发）。
+# 契约：代码 PR 每个平台**恰好两个重 job**——quality（T0 + 单元 + 平台探针 + 前端冒烟）与 e2e（L4 端到端）；
+# 另加两条不分平台的快道：changes（判定 docs-only）与 docs（文档门禁）。docs-only 时六个重 job 跳过，
+# publish-report 不跑（它会重建 ci-report，冲掉三平台现场），改由 publish-doc-report 发布 ci-doc。
+# 不得再拆每平台的两个重 job；也不得用 workflow 级 paths-ignore（required check 会永远 pending）。
 name: 测试
 
 on:
@@ -25,22 +27,65 @@ on:
 
 # PR 触发时验收 PR head（不是 merge commit）；手动派发时就是 github.sha。报告与发布共用这一份；
 # checkout 用 base 仓的 refs/pull/<N>/head，指向同一个 head 提交。
+# docs-only 的判定由 changes job 做；不要改成 workflow 级 paths-ignore（required check 会 pending）。
 env:
   SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 permissions:
-  contents: read # 默认只读；仅 publish-report job 获得 ci-report 写权限。
+  contents: read # 默认只读；仅 publish-report / publish-doc-report 获得各自报告分支的写权限。
 
-# 同一 ref 同时只跑一次；不自动取消已开跑的那次（验收现场不能被中途掐掉，ci-report 不能被写坏）。
+# 同一 ref 同时只跑一次；不自动取消已开跑的那次（验收现场不能被中途掐掉，ci-report / ci-doc 不能被写坏）。
 concurrency:
   group: test-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  changes:
+    name: 变更分流
+    # Draft 不跑：Draft 的 opened / synchronize 会创建 run，这里跳过（不耗 runner）。
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # 与 quality / e2e 同一份 head；分类只看 PR 的提交差异。
+          ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/head', github.event.pull_request.number) || github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "lts/*"
+
+      # 分类器自带样例自测与 include_str! 文档消费自检：自测失败 = job 失败，下游按全量兜底。
+      # 从 base 取分类器副本再执行：PR 若改 tests/ci-changes.mjs 想把自己判成 docs-only，改的是 head 的脚本，
+      # 而这里跑的是 base 的脚本（它会把该文件判成代码）；base 还没有分类器时直接用全量。
+      - name: 判定是否只有叙述型文档变更
+        id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SOLOMNI_ROOT: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          if [ -n "${BASE_SHA}" ]; then
+            git fetch --no-tags --depth=1 origin "${BASE_SHA}" >/dev/null 2>&1 || true
+          fi
+          mkdir -p target
+          if [ -n "${BASE_SHA}" ] && git show "${BASE_SHA}:tests/ci-changes.mjs" > target/ci-changes-trusted.mjs 2>/dev/null; then
+            node target/ci-changes-trusted.mjs
+          else
+            echo "::warning title=变更分流::base 没有可信分类器，按全量 CI 处理"
+            echo "docs_only=false" >> "${GITHUB_OUTPUT}"
+          fi
+
   quality:
     name: 质量与单元（${{ matrix.os }}）
-    # Draft PR 不跑：Draft 的 opened / synchronize 会创建 run，但这里跳过（不耗 runner）。
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    needs: changes
+    # docs-only 时跳过（job 级 skipped 对 required check 计 Success）；分类失败/异常一律跑全量。
+    if: ${{ always() && !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (needs.changes.result != 'success' || needs.changes.outputs.docs_only != 'true') }}
     runs-on: ${{ matrix.os }}
     # 比 e2e 宽：要额外预编译装 cargo-audit / cargo-deny（供应链门禁，见 docs/testing/levels.md 的 T0）。
     timeout-minutes: 45
@@ -126,8 +171,9 @@ jobs:
 
   e2e:
     name: 端到端（${{ matrix.os }}）
-    # Draft PR 不跑（同 quality）：Ready 之后才产生验收结论。
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    needs: changes
+    # 同 quality：docs-only 跳过；分类失败/异常按全量兜底。
+    if: ${{ always() && !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (needs.changes.result != 'success' || needs.changes.outputs.docs_only != 'true') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
@@ -183,12 +229,42 @@ jobs:
             target/test-logs/
           if-no-files-found: ignore
 
+  docs:
+    name: 文档门禁
+    needs: changes
+    # 只有 docs-only 才跑；分类失败/异常时不跑，quality / e2e 已按全量兜底。
+    if: ${{ always() && !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && needs.changes.result == 'success' && needs.changes.outputs.docs_only == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/head', github.event.pull_request.number) || github.sha }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "lts/*"
+
+      # 只跑结构审查（含文档/真相源比对；纯文本不编译）；不借 Rust、不装供应链工具、不碰缓存。
+      - name: 文档门禁
+        run: node run-tests.js --docs
+
+      - name: 留产物（文档门禁报告；无论成败）
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: docs-report
+          path: target/test-report.json
+          if-no-files-found: ignore
+
   publish-report:
     name: 合并并发布 ci-report
-    needs: [quality, e2e]
+    needs: [changes, quality, e2e]
     # fork PR 的 token 只读，发布必然失败；测试照跑，只跳过发布。
-    # Draft 的 run 里两个依赖 job 都跳过：这里也跳过，免得发布出空报告。
-    if: ${{ always() && !cancelled() && (github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository)) }}
+    # Draft 的 run 里依赖 job 都跳过：这里也跳过，免得发布出空报告。
+    # docs-only 不发布 ci-report：它会重建分支，只有文档报告会把三平台现场冲掉；文档报告走 ci-doc。
+    # 分类失败时 quality/e2e 已按全量兜底，这里照常发布（docs_only 为空 != 'true'）。
+    if: ${{ always() && !cancelled() && (github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository)) && (needs.changes.result != 'success' || needs.changes.outputs.docs_only != 'true') }}
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -263,3 +339,59 @@ jobs:
             node tests/ci-merge.mjs
             RUNNER_OS="${runner_os}" node tests/ci-publish.mjs
           done
+
+  publish-doc-report:
+    name: 发布 ci-doc（文档门禁）
+    needs: [changes, docs]
+    # 文档-only 才发布；fork PR 的 token 只读，跳过发布。docs 失败也发布失败证据（成败都发）。
+    if: ${{ always() && !cancelled() && (github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository)) && needs.changes.result == 'success' && needs.changes.outputs.docs_only == 'true' }}
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: ci-doc-publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          fetch-depth: 0
+
+      # 报告没产出（docs job 更早失败）时不阻塞发布：ci-publish 会把"没有报告"记成失败证据。
+      - name: 下载文档门禁报告
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: docs-report
+          path: ci-artifacts/docs-report
+
+      - name: 先把 ci-doc 重建为空分支
+        env:
+          REPORT_BRANCH: ci-doc
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # 与 ci-report 同一套做法：artifacts 下载完才清理并强推；只留最近一次文档门禁现场。
+          git checkout --orphan ci-doc-clean
+          git rm -rf . >/dev/null 2>&1 || true
+          git commit --allow-empty -m "重建 ci-doc 报告树（run ${GITHUB_RUN_NUMBER}）"
+          git push origin "HEAD:refs/heads/${REPORT_BRANCH}" --force
+
+      - name: 恢复源码工作树
+        run: git checkout --detach "${SOURCE_SHA}"
+
+      - name: 发布文档门禁报告
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPORT_BRANCH: ci-doc
+          REPORT_OS: docs
+        run: |
+          set -euo pipefail
+          mkdir -p target/test-logs
+          if [ -d "ci-artifacts/docs-report" ]; then
+            cp -R "ci-artifacts/docs-report/." target/
+          fi
+          node tests/ci-publish.mjs
+

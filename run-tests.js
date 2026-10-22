@@ -43,6 +43,9 @@ const STEP_BUDGET_S = {
 };
 // 覆盖率发现模式（手动，不进默认门禁；判据与局限见 docs/testing/execution-ci.md 与 quality-isolation.md）。
 const COVERAGE = process.argv.includes("--coverage");
+// 文档门禁模式（CI 的 docs job 与纯文档任务用）：只跑 T0 结构审查（含文档/真相源比对与纯文本结构检查），
+// 不跑 cargo、单元、平台目标、前端冒烟与 L4；判据见 docs/testing/execution-ci.md。
+const DOCS = process.argv.includes("--docs");
 // 真机围栏测试（会改本机状态：建 AppContainer profile、写目录 ACL）默认不跑，必须显式开启。
 const FENCE_LIVE = process.argv.includes("--fence-live") || process.env.SOLOMNI_FENCE_LIVE === "1";
 // CI 把每个平台拆成两个 job（契约见 docs/testing/execution-ci.md）：质量 job 用 --skip-e2e 跳过 L4，
@@ -1128,10 +1131,74 @@ function runCoverage() {
   process.exit(r.code === 0 ? 0 : 1);
 }
 
+/**
+ * 文档门禁（--docs）：只跑 T0 结构审查（含文档与真相源比对；纯文本，不编译）。
+ * 复用 structuralAudit 这一处权威，不复制检查逻辑；全程只读，不碰 cargo、本机状态与项目外目录。
+ * 为什么独立：纯文档改动不需要三平台编译/单元/L4，但文档链接、路由表、unit-map、提示词键表等
+ * 仍必须被机器验证（判据见 docs/testing/execution-ci.md）。
+ */
+function runDocs() {
+  const steps = [];
+  announce("T0 文档门禁");
+  const audit = structuralAudit();
+  const ms = Date.now() - stepStart;
+  announceDone(audit.problems.length ? "失败" : "完成", audit.problems.length ? audit.problems.length + " 条问题" : audit.targets.length + " 个目标 / " + audit.testFiles + " 个测试文件");
+  steps.push({
+    step: "T0 文档门禁",
+    status: audit.problems.length ? "quality-fail" : "pass",
+    detail: audit.problems.join("；"),
+    ms,
+    slow: false,
+  });
+  const qualityFailed = steps.filter((s) => s.status === "quality-fail");
+  const report = {
+    mode: "docs",
+    platform: process.platform,
+    arch: process.arch,
+    osKey: OS_KEY,
+    profile: PROFILE,
+    fenceLive: false,
+    doctor: null,
+    steps,
+    envSkips: [],
+    quality: {
+      failed: qualityFailed.length,
+      steps: qualityFailed.map((s) => ({ step: s.step, detail: s.detail })),
+    },
+    globalGaps: [],
+    gaps: [],
+    timeouts: [],
+    failed: 0,
+  };
+  fs.mkdirSync(path.dirname(REPORT), { recursive: true });
+  fs.writeFileSync(REPORT, JSON.stringify(report, null, 2));
+
+  console.log("");
+  console.log("=== 测试汇总（文档门禁，报告见 target/test-report.json）===");
+  for (const s of steps) {
+    console.log("  " + s.status.padEnd(13) + " " + s.step.padEnd(24) + " " + (s.detail || "") + (s.ms ? "  [" + (s.ms / 1000).toFixed(1) + "s]" : ""));
+  }
+  if (qualityFailed.length) {
+    for (const s of qualityFailed) {
+      console.log("=== 质量详情：" + s.step + " ===");
+      console.log(s.detail || "");
+    }
+    console.log("TEST-REPORT-FAIL");
+    process.exit(1);
+  }
+  console.log("TEST-REPORT-OK");
+  console.log("[docs] 本次只跑文档门禁：代码门禁、三平台与 L4 未运行；文档-only 不发布 ci-report（报告写 ci-doc）。");
+}
+
 function main() {
   // 覆盖率发现模式：手动、不进门禁（判据与局限见 docs/testing/execution-ci.md）。
   if (COVERAGE) {
     runCoverage();
+    return;
+  }
+  // 文档门禁模式：纯文档改动的独立入口（不跑 cargo、单元、平台目标、前端冒烟与 L4）。
+  if (DOCS) {
+    runDocs();
     return;
   }
   // 项目外缓存快照与上次崩溃残留清理（清零前先记，跑完再对）。
@@ -1379,6 +1446,17 @@ function pushStep(obj) {
     raw: dl.code === 0 ? null : dl.out.slice(-600),
   });
 
+  // 变更分流自检：CI 的 changes job 用 base 副本决定是否跳过代码测试；分类器自身必须有样例与 include 消费自检。
+  announce("变更分流自检");
+  const cc = sh(process.execPath, [path.join("tests", "ci-changes.mjs"), "--self-test"]);
+  announceDone(cc.code === 0 ? "完成" : "失败", "");
+  pushStep({
+    step: "变更分流自检",
+    status: cc.code === 0 ? "pass" : "fail",
+    detail: cc.out.trim().split(/\r?\n/).slice(-1).join(""),
+    raw: cc.code === 0 ? null : cc.out.slice(-600),
+  });
+
   // 环境引导自检：env.js 的下载 / 续传 / 结构判定 / sha256 闸（真实子进程 + 本地应答源；仅 Windows 真跑，
   // 别的平台那条路不存在，如实记 [探针]）。判据见 docs/testing/execution-ci.md 的「环境引导自检」。
   announce("环境引导自检");
@@ -1438,6 +1516,7 @@ function pushStep(obj) {
   const envSkips = steps.filter((s) => s.status === "env-skip");
   const skips = steps.flatMap((s) => s.skips || []);
   const report = {
+    mode: "full",
     platform: process.platform,
     arch: process.arch,
     osKey: OS_KEY,

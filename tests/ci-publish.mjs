@@ -1,14 +1,17 @@
 // CI 每次结束时的自助发布（成败都发），两条通道都需要零人工介入：
 // ① GitHub Actions 注释：失败时逐条 ::error::（带断言原文与在场证据），通过时一条 ::notice:: 概览；
 //    匿名可读，不依赖任何额外权限。
-// ② Contents API 写进 ci-report 滚动分支：同一路径每次覆盖（只留最近一次），不需要 git/ssh/管道。
+// ② Contents API 写进滚动分支（默认 ci-report，文档门禁用 ci-doc）：同一路径每次覆盖（只留最近一次），不需要 git/ssh/管道。
 // 目的：现场（含"这次绿了"的 steps / envSkips / 围栏能力）要让"没有 GitHub 凭据的一方"（例如 AI 会话）能自己读到。
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const osName = (process.env.RUNNER_OS || "unknown").toLowerCase();
+// 报告键默认取 runner OS；文档门禁不是平台报告，由调用方用 REPORT_OS=docs 指定。
+const osName = (process.env.REPORT_OS || process.env.RUNNER_OS || "unknown").toLowerCase();
+// 发布目标分支：代码验收写 ci-report，文档门禁写 ci-doc（两者都由工作流在本次运行前重建）。
+const reportBranch = process.env.REPORT_BRANCH || "ci-report";
 const repo = process.env.GITHUB_REPOSITORY || "theRMM714/Solomni";
 const token = process.env.GITHUB_TOKEN || "";
 const runNumber = process.env.GITHUB_RUN_NUMBER || "0";
@@ -60,7 +63,7 @@ if (fs.existsSync(logDir)) {
 // 连报告都没有（更早的步骤就挂了，或没跑到）同样按失败处理。
 const qualityFailed = (report && report.quality && report.quality.failed) || 0;
 const failed = !report || (report.failed || 0) > 0 || qualityFailed > 0;
-let summary = "平台=" + osName + " 模式=" + (report && report.fenceLive ? "真机(--fence-live)" : "安全") + " 结果=" + (failed ? "失败" : "通过") + "\n";
+let summary = "平台=" + osName + " 模式=" + (report && report.mode === "docs" ? "文档门禁" : report && report.fenceLive ? "真机(--fence-live)" : "安全") + " 结果=" + (failed ? "失败" : "通过") + "\n";
 if (report) {
   for (const s of report.steps || []) {
     if (s.status !== "pass" && s.status !== "skip-platform") summary += "  " + s.status + "  " + s.step + "  " + (s.detail || "") + "\n";
@@ -78,11 +81,11 @@ if (failed) {
   console.log("::notice title=测试通过（" + osName + "）::" + esc(summary));
 }
 
-// —— ci-report 分支（Contents API：同一路径覆盖，只留最近一次）
+// —— 滚动分支（Contents API：同一路径覆盖，只留最近一次）
 const apiHeaders = { Authorization: "Bearer " + token, "User-Agent": "solomni-ci", Accept: "application/vnd.github+json" };
 const jsonHeaders = Object.assign({ "Content-Type": "application/json" }, apiHeaders);
 
-// 首次运行时 ci-report 还不存在：Contents API 的 PUT 要求目标分支已存在，
+// 首次运行时目标分支还不存在：Contents API 的 PUT 要求目标分支已存在，
 // 所以先按默认分支的 HEAD 建出这个滚动分支，否则第一条失败报告就永远发不出去。
 async function apiJson(url) {
   const r = await fetch(url, { headers: apiHeaders });
@@ -91,28 +94,28 @@ async function apiJson(url) {
 }
 
 async function ensureReportBranch() {
-  const refUrl = "https://api.github.com/repos/" + repo + "/git/ref/heads/ci-report";
+  const refUrl = "https://api.github.com/repos/" + repo + "/git/ref/heads/" + reportBranch;
   const ref = await fetch(refUrl, { headers: apiHeaders });
   if (ref.status === 200) return;
   // 404 才是"还没有这个分支"；其它状态（401/403）说明凭据或权限不对，如实报出来而不是继续往下撞。
-  if (ref.status !== 404) throw new Error("查 ci-report 分支 → HTTP " + ref.status + " " + (await ref.text()).slice(0, 160));
+  if (ref.status !== 404) throw new Error("查 " + reportBranch + " 分支 → HTTP " + ref.status + " " + (await ref.text()).slice(0, 160));
   const info = await apiJson("https://api.github.com/repos/" + repo);
   const baseRef = await apiJson("https://api.github.com/repos/" + repo + "/git/ref/heads/" + info.default_branch);
   const made = await fetch("https://api.github.com/repos/" + repo + "/git/refs", {
     method: "POST",
     headers: jsonHeaders,
-    body: JSON.stringify({ ref: "refs/heads/ci-report", sha: baseRef.object.sha }),
+    body: JSON.stringify({ ref: "refs/heads/" + reportBranch, sha: baseRef.object.sha }),
   });
   // 422 = 已被并发建好，当作成功。
-  if (!made.ok && made.status !== 422) throw new Error("建 ci-report 分支 → HTTP " + made.status + " " + (await made.text()).slice(0, 160));
+  if (!made.ok && made.status !== 422) throw new Error("建 " + reportBranch + " 分支 → HTTP " + made.status + " " + (await made.text()).slice(0, 160));
 }
 
 async function putFile(pathInRepo, text) {
   const url = "https://api.github.com/repos/" + repo + "/contents/" + pathInRepo;
   let shaExisting = null;
-  const g = await fetch(url + "?ref=ci-report", { headers: apiHeaders });
+  const g = await fetch(url + "?ref=" + reportBranch, { headers: apiHeaders });
   if (g.status === 200) shaExisting = (await g.json()).sha;
-  const body = { message: (failed ? "失败报告" : "通过报告") + " run " + runNumber + " (" + osName + ")", content: Buffer.from(text, "utf8").toString("base64"), branch: "ci-report" };
+  const body = { message: (failed ? "失败报告" : "通过报告") + " run " + runNumber + " (" + osName + ")", content: Buffer.from(text, "utf8").toString("base64"), branch: reportBranch };
   if (shaExisting) body.sha = shaExisting;
   const r = await fetch(url, { method: "PUT", headers: jsonHeaders, body: JSON.stringify(body) });
   if (!r.ok) throw new Error(pathInRepo + " → HTTP " + r.status + " " + (await r.text()).slice(0, 200));
@@ -124,7 +127,7 @@ if (token) {
     await putFile(
       "runs/" + osName + "/meta.json",
       JSON.stringify(
-        { run: runNumber, sha, os: osName, at: new Date().toISOString(), failed: failed, qualityFailed: qualityFailed },
+        { run: runNumber, sha, os: osName, mode: report ? report.mode || "full" : "none", at: new Date().toISOString(), failed: failed, qualityFailed: qualityFailed },
         null,
         2,
       ),
@@ -133,10 +136,10 @@ if (token) {
     if (fs.existsSync(logDir)) {
       for (const f of fs.readdirSync(logDir)) await putFile("runs/" + osName + "/logs/" + f, fs.readFileSync(path.join(logDir, f), "utf8"));
     }
-    console.log("[ci-publish] 已写入 ci-report 分支的 runs/" + osName + "/");
+    console.log("[ci-publish] 已写入 " + reportBranch + " 分支的 runs/" + osName + "/");
   } catch (e) {
-    console.log("::warning title=ci-report 分支未发布::" + esc(String(e.message || e).slice(0, 300)));
+    console.log("::warning title=" + reportBranch + " 分支未发布::" + esc(String(e.message || e).slice(0, 300)));
   }
 } else {
-  console.log("::warning title=没有 GITHUB_TOKEN::跳过 ci-report 分支发布");
+  console.log("::warning title=没有 GITHUB_TOKEN::跳过 " + reportBranch + " 分支发布");
 }

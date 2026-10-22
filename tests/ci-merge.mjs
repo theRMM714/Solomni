@@ -39,6 +39,7 @@ function main() {
   const failed = steps.filter((s) => s.status === "fail");
   const qualityFailed = steps.filter((s) => s.status === "quality-fail");
   const report = {
+    mode: "full",
     platform: base.platform,
     arch: base.arch,
     osKey: base.osKey,

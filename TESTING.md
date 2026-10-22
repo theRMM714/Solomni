@@ -30,13 +30,17 @@
 - `src/tests/` 的单元与契约测试：**与 `capabilities/` 同构的一个能力一个文件**，用例多的按域分成子模块；`doubles.rs` 放端口替身，`builders.rs` 放测试装配脚手架；
 - `tests/cross-platform/` 跨平台集成与端到端测试；
 - `tests/windows/`、`tests/linux/`、`tests/macos/` 平台探针（`tests/helpers/probe.rs` 提供共用探针设施）；
-- `tests/dev-loop.mjs` 开发回路自检（`dev.js` 的固定子命令表与拒绝出口）；`tests/env-bootstrap.mjs` 环境引导自检
+- `tests/dev-loop.mjs` 开发回路自检（`dev.js` 的固定子命令表与拒绝出口）；`tests/ci-changes.mjs` 变更分流自检
+  （分类样例、`include_str!/include_bytes!` 文档消费、取不到 diff 时落回全量）；`tests/env-bootstrap.mjs` 环境引导自检
   （`env.js` 的下载 / 续传 / 结构判定 / sha256 闸与显式接受开关，真实子进程 + 本地应答源；仅 Windows 真跑）；
   `src/presentation/web/assets/*.smoke.cjs` 前端冒烟测试；
 - `tests/gaps.yaml`（全局）与 `tests/<平台>/gaps.yaml`（平台）缺口账；
 - `tests/cross-platform/e2e/` 的 L4 覆盖 MCP 常驻服务调用与**父死子亡**：核心被强杀后，常驻服务进程跟着消失；macOS 的守门进程另有 `tests/macos/` 探针；
 - **谁做任务谁补测试**：做完就补上这次改动的用例并跑门禁，通过后同步文档（见 [AGENTS.md](AGENTS.md) 九）；
-- `node run-tests.js` 测试汇总入口（`node start.js -test` 是备好环境后的同一入口）；开发环境先跑 `node setup-dev.js`
+- `node run-tests.js` 测试汇总入口（`node start.js -test` 是备好环境后的同一入口）；纯叙述型文档改动用
+  `node run-tests.js --docs`（只跑结构审查，含文档与真相源比对；不跑 cargo / 单元 / 平台目标 / L4）；
+  `docs/presentation/contracts.md` 是机器契约文档（ROUTES 表由 Rust 测试消费），仍走全量。CI 的文档-only 分流见
+  [docs/testing/execution-ci.md](docs/testing/execution-ci.md)；开发环境先跑 `node setup-dev.js`
   （条目清单 [dev-tools.js](dev-tools.js)，`--check` 只读校验；运行环境另见 [setup-runtime.js](setup-runtime.js)）；
 - `src/capabilities/llm/detail/fake_chat.rs` 中的 `FakeChat` 与 `DemoGateway`；
 - `src/tests/doubles.rs` 与 `src/tests/builders.rs` 的端口替身与测试装配（支持失败注入，供 T2 复用）；
@@ -96,6 +100,7 @@
 - **缺口的唯一真相**是 `tests/gaps.yaml`（全局）与 `tests/<平台>/gaps.yaml`（平台）；门户与细则都不复述条目内容。
 - **成功标记**（`FRONTEND-SMOKE-OK` / `DEV-LOOP-OK` / `ENV-BOOTSTRAP-OK` / `E2E-OK` / `TEST-REPORT-OK` / `TEST-REPORT-FAIL` / `TEST-REPORT-ACCEPTED`）
   的固定含义见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md)。
+  `TEST-REPORT-OK` 在 `--docs` 模式下只代表文档门禁通过，不代表代码 / 三平台 / L4 已验收；文档-only 的 CI 只发布 `ci-doc`。
 - **质量失败不能被业务测试通过抵消**：两边的结论分别记，判据见 [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md)。
 - **需要 CI 的场景**（平台专属代码、真机围栏、HTTPS/TLS、其它平台的质量分区）本地跑不出结论，
  必须等 CI 并按 [docs/testing/execution-ci.md](docs/testing/execution-ci.md) 的读法核对 `sha`。
