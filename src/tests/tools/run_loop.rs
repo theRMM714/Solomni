@@ -302,25 +302,31 @@ pub(crate) fn builtin_file_tools_run_in_direct_session() {
     );
 }
 
-/// 模块目录**默认只读**：agent 不能改模块代码（内置 write 一律拒绝，不落盘）。
+/// 模块目录（含 `userdata/`）对 agent **永久只读**：内置 write 一律拒绝，不落盘。
 #[test]
-pub(crate) fn builtin_write_into_module_dir_is_denied_by_default() {
+pub(crate) fn builtin_write_into_module_dir_is_denied() {
     let io = InMemorySysIo::new();
     let sb = test_sandbox("a1", &["data"]);
-    let keep = s(&["mods", "data", "keep.txt"]);
-    let out = run_builtin(
-        &sb,
-        &io,
-        "write",
-        &format!("{{\"path\":\"{}\",\"content\":\"状态\"}}", keep),
-    );
-    assert!(!out.ok, "模块目录默认只读：{}", out.output);
-    assert!(
-        out.output.contains("模块 data"),
-        "拒绝理由要说清是模块目录：{}",
-        out.output
-    );
-    assert_eq!(io.get(&["mods", "data", "keep.txt"]), None, "不得落盘");
+    let cases: [&[&str]; 2] = [
+        &["mods", "data", "keep.txt"],
+        &["mods", "data", "userdata", "state.json"],
+    ];
+    for rel in cases {
+        let path = s(rel);
+        let out = run_builtin(
+            &sb,
+            &io,
+            "write",
+            &format!("{{\"path\":\"{}\",\"content\":\"状态\"}}", path),
+        );
+        assert!(!out.ok, "模块目录对 agent 只读：{}", out.output);
+        assert!(
+            out.output.contains("模块 data"),
+            "拒绝理由要说清是模块目录：{}",
+            out.output
+        );
+        assert_eq!(io.get(rel), None, "不得落盘");
+    }
     // 别人的模块（不在本席模块表里）：同样拒绝且不落盘。
     let other = s(&["mods", "other", "x.txt"]);
     let bad = run_builtin(
@@ -331,52 +337,6 @@ pub(crate) fn builtin_write_into_module_dir_is_denied_by_default() {
     );
     assert!(!bad.ok);
     assert_eq!(io.get(&["mods", "other", "x.txt"]), None);
-}
-
-/// 模块的 `userdata/` 例外恒可写：那是模块自己的跨任务状态区。
-#[test]
-pub(crate) fn builtin_write_into_module_userdata_is_allowed() {
-    let io = InMemorySysIo::new();
-    let sb = test_sandbox("a1", &["data"]);
-    let state = s(&["mods", "data", "userdata", "state.json"]);
-    let out = run_builtin(
-        &sb,
-        &io,
-        "write",
-        &format!("{{\"path\":\"{}\",\"content\":\"{{}}\"}}", state),
-    );
-    assert!(out.ok, "userdata 恒可写：{}", out.output);
-    assert_eq!(
-        io.get(&["mods", "data", "userdata", "state.json"])
-            .as_deref(),
-        Some("{}")
-    );
-}
-
-/// 显式授权（`module_write`）后，模块目录整块可写，并如实提示。
-#[test]
-pub(crate) fn builtin_write_into_authorized_module_is_allowed_with_notice() {
-    let io = InMemorySysIo::new();
-    let mut sb = test_sandbox("a1", &["data"]);
-    sb.permissions.module_write = vec!["data".to_string()];
-    let keep = s(&["mods", "data", "keep.txt"]);
-    let out = run_builtin(
-        &sb,
-        &io,
-        "write",
-        &format!("{{\"path\":\"{}\",\"content\":\"状态\"}}", keep),
-    );
-    assert!(out.ok, "{}", out.output);
-    assert_eq!(
-        io.get(&["mods", "data", "keep.txt"]).as_deref(),
-        Some("状态")
-    );
-    assert!(
-        out.output
-            .contains(crate::capabilities::tools::domain::systool::MODULE_WRITE_MARK),
-        "要有可供轨迹识别的标记：{}",
-        out.output
-    );
 }
 
 #[test]

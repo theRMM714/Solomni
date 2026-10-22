@@ -357,7 +357,7 @@ impl Conductor {
             self.workspace.prepare(sid, &names)?;
             let (mut meta, _) = self.history.load(sid)?;
             meta.agents = roster.clone();
-            meta.modules = roster.iter().flat_map(|a| a.modules.clone()).collect();
+            meta.modules = super::flat_modules(&roster);
             self.history.create(&meta)?;
             let module_roster = self.scan();
             let sandboxes = self.sandboxes(&meta, &module_roster)?;

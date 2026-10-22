@@ -39,6 +39,30 @@ pub enum Session {
     Collab(CollabSession),
 }
 
+/// 目的：模块列表保序去重（一个 agent 内重复只留一份；跨 agent 的重叠是合法的共用）。
+pub(crate) fn dedup_modules(list: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(list.len());
+    for m in list {
+        if !out.contains(m) {
+            out.push(m.clone());
+        }
+    }
+    out
+}
+
+/// 目的：整张名单的扁平模块清单（保序去重）：同一模块被多个 agent 共用时只出现一次。
+pub(crate) fn flat_modules(agents: &[AgentMeta]) -> Vec<String> {
+    let mut out = Vec::new();
+    for a in agents {
+        for m in &a.modules {
+            if !out.contains(m) {
+                out.push(m.clone());
+            }
+        }
+    }
+    out
+}
+
 /// 单模式的组合语义：多个 agent 的模块并成一个**临时组合**实例（去重、保序；模型取核心默认）。
 fn merge_into_one(picked: &[AgentInstance], name: &str) -> AgentInstance {
     let mut merged: Vec<String> = Vec::new();

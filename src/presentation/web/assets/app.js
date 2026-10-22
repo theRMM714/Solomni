@@ -717,7 +717,7 @@ function buildConfigForm(sid, cfg, c, box) {
     tier: cfg.tier === 'vm' ? 'vm' : 'host',
     guest: cfg.guest || '',
     pins: {},
-    permissions: cfg.permissions || { allow_read: [], allow_write: [], deny: [], module_write: [], granularity: 'ask', ask: [] },
+    permissions: cfg.permissions || { allow_read: [], allow_write: [], deny: [], granularity: 'ask', ask: [] },
   };
   const pins0 = cfg.pins || {};
   for (const k of Object.keys(pins0)) draft.pins[k] = pins0[k];
@@ -733,30 +733,12 @@ function buildConfigForm(sid, cfg, c, box) {
     : cfgHint('这轮会话还没有内容：agent 名单与形态都还改得动。'));
   box.appendChild(head);
 
-  // agent 名单：名字 / 模块 / 模型
-  const dupHints = [];
-  const syncDup = () => {
-    const owners = {};
-    for (const a of draft.agents) {
-      for (const id of a.modules) {
-        owners[id] = owners[id] || [];
-        owners[id].push(a.name.trim() || '（未命名）');
-      }
-    }
-    dupHints.forEach((h, i) => {
-      const mine = draft.agents[i].modules.filter((id) => owners[id].length > 1);
-      h.textContent = mine.length
-        ? '同一模块只能属于一个 agent：' + mine.join('、') + ' 同时出现在多个 agent 里，保存会被后端拒绝。'
-        : '';
-      h.className = 'cfg-hint' + (mine.length ? ' warn' : '');
-    });
-  };
+  // agent 名单：名字 / 模块 / 模型（同一模块可被多个 agent 共用）
   const secA = cfgDiv('cfg-sec');
   secA.appendChild(cfgDiv('cfg-sec-title', 'agent 名单（' + draft.agents.length + ' 个）'));
   if (!draft.agents.length) secA.appendChild(emptyHint('（这个会话没有 agent 记录）'));
-  draft.agents.forEach((a, i) => secA.appendChild(cfgAgentBlock(a, i, frozen, dupHints, syncDup)));
+  draft.agents.forEach((a, i) => secA.appendChild(cfgAgentBlock(a, i, frozen)));
   box.appendChild(secA);
-  syncDup();
 
   // 执行档位：本机 / 虚拟机（如实说明各自是什么）
   const secT = cfgDiv('cfg-sec');
@@ -873,7 +855,6 @@ function buildConfigForm(sid, cfg, c, box) {
   const allowRead = makeList('读白名单（相对工作区根；空 = 整棵可读）', perm.allow_read);
   const allowWrite = makeList('提交白名单（相对工作区根；空 = 整棵可提交）', perm.allow_write);
   const deny = makeList('黑名单（读写都禁；全局黑名单是硬底线，这里只能追加）', perm.deny);
-  const moduleWrite = makeList('模块目录写授权（模块 id，每行一个；空 = 模块目录只读）', perm.module_write);
   const askList = makeList('需要确认的工具名（granularity=ask 时生效；模块工具写 module.tool）', perm.ask);
   const gran = selectInput([
     { value: 'ask', label: 'ask：ask 表里的工具先问用户' },
@@ -902,7 +883,6 @@ function buildConfigForm(sid, cfg, c, box) {
         allow_read: parseLines(allowRead.value),
         allow_write: parseLines(allowWrite.value),
         deny: parseLines(deny.value),
-        module_write: parseLines(moduleWrite.value),
         ask: parseLines(askList.value),
         granularity: gran.value,
       },
@@ -924,7 +904,7 @@ function buildConfigForm(sid, cfg, c, box) {
 }
 
 /// 一个 agent 的编辑块：名字（冻结时只读）/ 模块多选（选项来自 /api/state 的 modules）/ 模型下拉。
-function cfgAgentBlock(a, idx, frozen, dupHints, syncDup) {
+function cfgAgentBlock(a, idx, frozen) {
   const row = cfgDiv('cfg-agent');
   row.appendChild(cfgDiv('cfg-agent-head', 'agent ' + (idx + 1) + '：' + (a.name || '（未命名）')));
 
@@ -944,18 +924,13 @@ function cfgAgentBlock(a, idx, frozen, dupHints, syncDup) {
     cb.addEventListener('change', () => {
       if (cb.checked) { if (a.modules.indexOf(m.id) < 0) a.modules.push(m.id); }
       else a.modules = a.modules.filter((x) => x !== m.id);
-      syncDup();
     });
     const id = document.createElement('span'); id.textContent = m.id;
     const brief = document.createElement('span'); brief.className = 'wf-brief'; brief.textContent = m.brief || '';
     lab.appendChild(cb); lab.appendChild(id); lab.appendChild(brief);
     mods.appendChild(lab);
   }
-  row.appendChild(field('模块（这个 agent 的能力；勾 1 个 = 直连式，勾多个 = 组合式）', mods));
-  const dup = cfgHint('');
-  dupHints.push(dup); // 与 draft.agents 同序：syncDup 按下标回写
-  row.appendChild(dup);
-
+  row.appendChild(field('模块（这个 agent 的能力；勾 1 个 = 直连式，勾多个 = 组合式；同一模块可被多个 agent 共用）', mods));
   const cur = a.model || '';
   const opts = [{ value: '', label: '（核心默认）' }]
     .concat(state.models.map((m) => ({ value: m.id, label: m.name + '（' + m.id + '）' })));
@@ -1485,7 +1460,6 @@ function openSettingsModal() {
     const hardDeny = area('全局黑名单（工作区相对路径，只增不减）', sp.deny);
     const defRead = area('默认读白名单（会话可覆盖）', sd.allow_read);
     const defWrite = area('默认提交白名单（会话可覆盖）', sd.allow_write);
-    const defModule = area('默认模块写授权（会话可覆盖）', sd.module_write);
     const defAsk = area('默认 ask 表（会话可覆盖）', sd.ask);
     const defGran = selectInput([
       { value: 'ask', label: 'ask' },
@@ -1504,7 +1478,6 @@ function openSettingsModal() {
     c.body.appendChild(cfgHint('默认权限是会话可覆盖的起点；全局黑名单是硬底线，会话只能追加、不能清空。'));
     c.body.appendChild(defRead.f);
     c.body.appendChild(defWrite.f);
-    c.body.appendChild(defModule.f);
     c.body.appendChild(field('默认决定粒度', defGran));
     c.body.appendChild(defAsk.f);
     const save = btn('保存', 'btn btn-primary btn-block');
@@ -1534,7 +1507,6 @@ function openSettingsModal() {
             defaults: {
               allow_read: parseLines(defRead.t.value),
               allow_write: parseLines(defWrite.t.value),
-              module_write: parseLines(defModule.t.value),
               granularity: defGran.value,
               ask: parseLines(defAsk.t.value),
             },

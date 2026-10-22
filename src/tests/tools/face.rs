@@ -436,6 +436,57 @@ pub(crate) fn module_tools_are_concurrent_only_when_declared() {
     );
 }
 
+/// 目的：同一模块被多个 agent 共用时的进程租约——未声明 parallel 的调用在模块内跨 agent 串行
+///    （保护模块自己的 userdata），声明了 parallel 的只读调用仍可并发。
+#[test]
+pub(crate) fn module_lease_serializes_exclusive_calls_but_allows_parallel_readers() {
+    use crate::kernel::api::FenceSpec;
+    fn exercise(runner: Arc<ParallelRunner>, parallel: bool) {
+        let svc = test_tools_svc_with(
+            Arc::clone(&runner) as Arc<dyn ProcessRunner>,
+            Arc::new(InMemorySysIo::new()),
+            Arc::new(NoFenceHost),
+        );
+        let fence = FenceSpec {
+            agent: "a".to_string(),
+            lease: "w".to_string(),
+            rw: Vec::new(),
+            ro: Vec::new(),
+            ro_tree: Vec::new(),
+            private: PathBuf::new(),
+            cwd: PathBuf::new(),
+            net: false,
+        };
+        let env: Vec<(String, String)> = Vec::new();
+        std::thread::scope(|s| {
+            for _ in 0..2 {
+                let svc = &svc;
+                let fence = &fence;
+                let env = &env;
+                s.spawn(move || {
+                    let _ =
+                        svc.run_module("m", fence, "python tools/x.py", "{}", env, parallel, None);
+                });
+            }
+        });
+    }
+    let runner = Arc::new(ParallelRunner::new(60));
+    exercise(Arc::clone(&runner), false);
+    assert_eq!(
+        runner.peak_concurrent(),
+        1,
+        "未声明 parallel 的同模块调用必须跨 agent 串行（峰值 {}）",
+        runner.peak_concurrent()
+    );
+    let runner = Arc::new(ParallelRunner::new(60));
+    exercise(Arc::clone(&runner), true);
+    assert!(
+        runner.peak_concurrent() >= 2,
+        "声明 parallel 的只读调用仍可并发（峰值 {}）",
+        runner.peak_concurrent()
+    );
+}
+
 #[test]
 pub(crate) fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
     use crate::capabilities::conductor::api::ProbeOutcome;

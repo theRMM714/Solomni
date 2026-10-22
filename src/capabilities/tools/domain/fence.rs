@@ -1,5 +1,5 @@
 //! 目的：从该 agent 的沙箱 / 无会话场景**派生**围栏描述符（策略在这里，机制与类型在 kernel）。
-//! 管：`FenceSpec::from_sandbox` / `FenceSpec::standalone`——把 `Sandbox`、模块写授权与 `userdata/` 事实变成 `FenceSpec`。
+//! 管：`FenceSpec::from_sandbox` / `FenceSpec::standalone`——把 `Sandbox` 与 `userdata/` 事实变成 `FenceSpec`。
 //! 不管：描述符自身的形状与平台机制（在 `kernel::domain::fence` 与 `kernel::detail::confine`）。
 //! 联动：经 `tools::api` 给协调业务与协作会话用；kernel 不反向依赖本模块。
 
@@ -9,7 +9,7 @@ use crate::capabilities::workspace::api::Sandbox;
 use std::path::{Path, PathBuf};
 
 impl FenceSpec {
-    /// 目的：从该 agent 的沙箱派生（模块目录按模块 id 升序，顺序稳定；同一模块不会同属两个 agent）。
+    /// 目的：从该 agent 的沙箱派生（模块目录按模块 id 升序，顺序稳定；同一模块可以被多个 agent 共用）。
     pub fn from_sandbox(sb: &Sandbox, net: bool) -> FenceSpec {
         // 共享主副本只有在**这一席可写**时才进 rw：agent 会话默认只读，
         // 于是模块外部工具进程也读不到 / 写不了未拉取进沙箱的主副本内容。
@@ -19,16 +19,12 @@ impl FenceSpec {
             rw.push(sb.shared.clone());
         }
         rw.push(sb.private.clone());
-        // 模块目录默认**只读**：只有 module_write 命中该模块才整块可写。
-        // <module>/userdata 派不派，看工作区扫描注入的事实（domain 不读盘）。
+        // 模块目录对 agent **永远只读**（含 userdata）：agent 只有模块的使用权。
+        // <module>/userdata 只给模块自己的进程写；派不派看工作区扫描注入的事实（domain 不读盘）。
         for (id, root) in &sb.modules {
-            if sb.permissions.module_write_ok(id) {
-                rw.push(root.clone());
-            } else {
-                ro_tree.push(root.clone());
-                if sb.modules_with_userdata.contains(id) {
-                    rw.push(root.join("userdata"));
-                }
+            ro_tree.push(root.clone());
+            if sb.modules_with_userdata.contains(id) {
+                rw.push(root.join("userdata"));
             }
         }
         rw.sort();
@@ -47,7 +43,8 @@ impl FenceSpec {
         }
     }
 
-    /// 目的：**无会话**（人直接跑一个模块工具）的围栏——模块目录递归只读 + 它自己的 `userdata/`（事实说有才）可写，外加用户指定的工作目录（缺省 = `userdata/`，没有则退回模块根）。
+    /// 目的：**无会话**（人直接跑一个模块工具 / 常驻服务）的围栏——模块目录递归只读 + 它自己的 `userdata/`（事实说有才）可写，外加用户指定的工作目录（缺省 = `userdata/`，没有则退回模块根）。
+    /// 约束：这是模块自身进程的口径；agent 会话的模块目录连 `userdata/` 也不可写（见 `from_sandbox`）。
     /// 参数：has_userdata 是工作区扫描给出的"该模块有没有 `userdata/`"事实（domain 不读盘）。
     /// 约束：与 agent 会话同一条围栏口径——不装机制时只留进程树与环境白名单，如实降级。
     pub fn standalone(

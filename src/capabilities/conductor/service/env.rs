@@ -104,12 +104,12 @@ impl Conductor {
         }
         let mut out = root.clone();
         out.agents = agents.into_values().collect();
-        out.modules = out.agents.iter().flat_map(|a| a.modules.clone()).collect();
+        out.modules = super::flat_modules(&out.agents);
         Ok(out)
     }
 
     /// 组装本次工作的沙箱清单：工作根来自 Workspace 端口，模块目录来自清单。
-    /// 权限策略在此收口：模块目录只对其所属 agent 可达（同一模块不会同属两个 agent，创建时已校验）。
+    /// 权限策略在此收口：模块目录只对使用它的 agent 可达；同一模块可被多个 agent 共用（各自独立沙箱与工具面）。
     /// 每个 agent 的沙箱按 meta.agents 建；共享区根任何时候都有（代拟还没名单时也有，@ 改写要用）。
     pub(crate) fn sandboxes(
         &self,

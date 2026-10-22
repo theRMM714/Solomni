@@ -29,9 +29,6 @@ pub const MAX_SEARCH_HITS: usize = 200;
 /// 单条命中行回传的字符上限（长行截断，避免一行吃掉整个上下文）。
 pub const MAX_SEARCH_LINE_CHARS: usize = 300;
 
-/// 写进模块目录的标记：回执里带上它，给模型看；工具轨迹据此给用户一句可见提示（同一常量，两处共用）。
-pub const MODULE_WRITE_MARK: &str = "[模块目录]";
-
 /// 执行席的**回报**工具：不碰文件，只把"做完了什么"承载成一次工具调用。
 /// 为什么是工具而不是正文 JSON：回报会驱动核心（判节点完成），属于核心操作（见 tools-and-roles.md）。
 pub const REPORT: &str = "submit_report";

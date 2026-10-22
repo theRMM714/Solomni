@@ -207,7 +207,7 @@ pub(crate) fn agent_crud_and_work_with_agents() {
     let o = core.create_work(dup).unwrap();
     assert_eq!(o.agents, vec!["a".to_string(), "a-2".to_string()]);
 
-    // 同一模块不得跨 agent 重复
+    // 同一模块可跨 agent 共用
     let cross = WorkSpec {
         name: "cross".to_string(),
         mode: WorkMode::Collab,
@@ -230,10 +230,10 @@ pub(crate) fn agent_crud_and_work_with_agents() {
         tier: crate::kernel::api::Tier::Host,
         guest: None,
     };
-    assert!(core
-        .create_work(cross)
-        .unwrap_err()
-        .contains("被多个 agent"));
+    let opened = core.create_work(cross).expect("同一模块可跨 agent 共用");
+    assert_eq!(opened.agents, vec!["x".to_string(), "y".to_string()]);
+    let (meta, _) = core.history_open("cross").expect("打开会话");
+    assert_eq!(meta.modules, vec!["a".to_string()], "meta.modules 去重");
 
     assert!(core.registry_mut().agent_remove("调研").unwrap());
     assert!(core.registry().agent_views().is_empty());

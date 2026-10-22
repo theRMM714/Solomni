@@ -244,7 +244,7 @@ fn profile_text(spec: &FenceSpec, command: &str) -> String {
             ro_paths.push(root.to_string_lossy().replace('\\', "/"));
         }
     }
-    // 只读子树（模块目录默认只读）：seatbelt 的 subpath 天然递归，与 ro 同走只读。
+    // 只读子树（模块目录对 agent 只读）：seatbelt 的 subpath 天然递归，与 ro 同走只读。
     for root in &spec.ro_tree {
         if !root.as_os_str().is_empty() {
             ro_paths.push(root.to_string_lossy().replace('\\', "/"));

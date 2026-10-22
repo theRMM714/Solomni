@@ -540,7 +540,7 @@ fn install_rules(spec: &FenceSpec, command: &str) -> Result<(), String> {
         wanted.push((root.clone(), allowed_rw));
     }
     // 工作目录（模块根）：工具进程要能在里面起（读 + 执行），但**不因此获得写**——
-    // 模块目录默认只读时，写权只能来自 rw（module_write 授权）。
+    // 模块目录对 agent 只读；写权只能来自 rw（私有沙箱与模块自己的 userdata）。
     if !spec.cwd.as_os_str().is_empty() {
         wanted.push((spec.cwd.clone(), RO_ALL));
     }
@@ -550,7 +550,7 @@ fn install_rules(spec: &FenceSpec, command: &str) -> Result<(), String> {
             wanted.push((root.clone(), RO_ALL));
         }
     }
-    // 只读子树（模块目录默认只读）：同为只读；与 ro 的分野只在 Windows 的递归位上。
+    // 只读子树（模块目录对 agent 只读）：同为只读；与 ro 的分野只在 Windows 的递归位上。
     for root in &spec.ro_tree {
         if !root.as_os_str().is_empty() {
             wanted.push((root.clone(), RO_ALL));

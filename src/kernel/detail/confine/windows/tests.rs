@@ -244,7 +244,7 @@ fn grant_targets_include_parents_with_stat_only() {
     }
 }
 
-/// 只读**子树**（模块目录默认只读）与工作目录：都给 `RIGHTS_RO` 递归，写权只能来自 `rw`。
+/// 只读**子树**（模块目录对 agent 只读）与工作目录：都给 `RIGHTS_RO` 递归，写权只能来自 `rw`。
 #[test]
 fn grant_targets_keep_module_read_only_and_cwd_read_only() {
     let base = std::env::temp_dir().join("solomni-grant-targets");
@@ -773,13 +773,13 @@ fn container_roundtrip_keeps_module_read_only_and_peer_unreachable() {
     assert_eq!(code, 0, "模块目录要读得到、userdata 要写得进：{}", read);
     assert!(read.contains("print(1)"), "模块脚本内容要读得到：{}", read);
 
-    // ② 模块目录默认只读：模块根里写不进新文件（写权只来自 rw）。
+    // ② 模块目录对 agent 只读：模块根里写不进新文件（写权只来自 rw）。
     let forbidden = module.join("should-not-exist.txt");
     let code =
         run_in_container(sid, &spec, "echo x > should-not-exist.txt").expect("容器进程应当能启动");
     assert!(
         !forbidden.exists() && code != 0,
-        "模块目录默认只读：模块根里不该写得进新文件（exit={}）：{:?}",
+        "模块目录对 agent 只读：模块根里不该写得进新文件（exit={}）：{:?}",
         code,
         std::fs::read_dir(&module).map(|d| d.flatten().map(|e| e.file_name()).collect::<Vec<_>>())
     );

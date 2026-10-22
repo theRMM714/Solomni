@@ -5,7 +5,7 @@
 
 use crate::capabilities::tools::domain::systool::*;
 use crate::capabilities::tools::ports::SysIo;
-use crate::capabilities::workspace::api::{Place, Sandbox};
+use crate::capabilities::workspace::api::Sandbox;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 /// 执行一次内置工具调用（args_json = 模型信封里的 args 对象）。
@@ -77,7 +77,7 @@ pub fn execute(
     }
     match name {
         READ => read(io, obs, &args, &spec, &path),
-        WRITE => write(io, obs, &args, &spec, &path, &place),
+        WRITE => write(io, obs, &args, &spec, &path),
         EDIT => edit(io, obs, &args, &spec, &path),
         LIST => list(io, &spec, &path),
         SEARCH => search(io, &args, &spec, &path),
@@ -228,7 +228,6 @@ fn write(
     args: &serde_json::Value,
     spec: &str,
     path: &Path,
-    place: &Place,
 ) -> ToolOutcome {
     let content = args
         .get("content")
@@ -247,21 +246,13 @@ fn write(
         return fail(e);
     }
     obs.note_written(path, fnv1a(content));
-    let mut out = format!(
-        "[write] 已写入 {}（{} 字符，UTF-8）",
-        spec,
-        content.chars().count()
-    );
-    // 写进模块目录属于「动了自己的能力」：放行，但如实提示（模型可见；工具轨迹据此也给用户一句）。
-    if let Place::Module(id) = place {
-        out.push_str(&format!(
-            "\n{} 这是模块 {} 的目录（你的能力，不是本工作私有区），改动会保留。",
-            MODULE_WRITE_MARK, id
-        ));
-    }
     ToolOutcome {
         ok: true,
-        output: out,
+        output: format!(
+            "[write] 已写入 {}（{} 字符，UTF-8）",
+            spec,
+            content.chars().count()
+        ),
     }
 }
 
@@ -433,7 +424,6 @@ fn apply_patch(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, body: &str)
     };
     // 首次出现的顺序 = 写盘顺序（同一路径只写一次）
     let mut order: Vec<PathBuf> = Vec::new();
-    let mut places: BTreeMap<PathBuf, Place> = BTreeMap::new();
     let mut pending: BTreeMap<PathBuf, String> = BTreeMap::new();
     let mut lines: Vec<String> = Vec::new();
     for (i, b) in blocks.iter().enumerate() {
@@ -514,7 +504,6 @@ fn apply_patch(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, body: &str)
                 }
             }
         }
-        places.entry(path.clone()).or_insert(place);
         if !order.contains(&path) {
             order.push(path.clone());
         }
@@ -531,23 +520,13 @@ fn apply_patch(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, body: &str)
         }
         obs.note_written(path, fnv1a(content));
     }
-    let mut out = format!(
-        "[patch] 已应用 {} 块改动，写了 {} 个文件：\n{}",
-        blocks.len(),
-        order.len(),
-        lines.join("\n")
-    );
-    // 写进模块目录属于「动了自己的能力」：放行，但如实提示（与 write 同一句）
-    for path in &order {
-        if let Some(Place::Module(id)) = places.get(path) {
-            out.push_str(&format!(
-                "\n{} 这是模块 {} 的目录（你的能力，不是本工作私有区），改动会保留。",
-                MODULE_WRITE_MARK, id
-            ));
-        }
-    }
     ToolOutcome {
         ok: true,
-        output: out,
+        output: format!(
+            "[patch] 已应用 {} 块改动，写了 {} 个文件：\n{}",
+            blocks.len(),
+            order.len(),
+            lines.join("\n")
+        ),
     }
 }

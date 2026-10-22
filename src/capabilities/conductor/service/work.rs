@@ -348,10 +348,9 @@ impl Conductor {
                 );
             }
         }
-        // 校验：模块与模型真实存在；同一模块不得同属两个 agent（沙箱与发言归属会歧义）。
+        // 校验：模块与模型真实存在；同一模块可以跨 agent 共用（各自独立沙箱与工具面）。
         let roster = self.scan();
         let reserved = self.reserved_names();
-        let mut seen: Vec<String> = Vec::new();
         let mut metas: Vec<AgentMeta> = Vec::new();
         if let Some(p) = &edit.permissions {
             crate::capabilities::permission::api::validate_override(p)?;
@@ -363,13 +362,6 @@ impl Conductor {
                 if !roster.modules.iter().any(|m| &m.manifest.id == id) {
                     return Err(format!("无此模块：{}", id));
                 }
-                if seen.iter().any(|x| x == id) {
-                    return Err(format!(
-                        "模块 {} 被多个 agent 同时使用；同一模块只能属于一个 agent",
-                        id
-                    ));
-                }
-                seen.push(id.clone());
             }
             if !a.model.is_empty() {
                 if !self.registry.has_model(&a.model) {
@@ -380,7 +372,7 @@ impl Conductor {
             metas.push(AgentMeta {
                 name: a.name.clone(),
                 transient: !self.registry.has_agent(&a.name),
-                modules: a.modules.clone(),
+                modules: dedup_modules(&a.modules),
                 model: if a.model.is_empty() {
                     None
                 } else {
@@ -454,10 +446,11 @@ impl Conductor {
         ) {
             return Err(why);
         }
+        let module_ids = flat_modules(&metas);
         let session_modules: Vec<Module> = roster
             .modules
             .iter()
-            .filter(|m| seen.iter().any(|id| id == &m.manifest.id))
+            .filter(|m| module_ids.iter().any(|id| id == &m.manifest.id))
             .cloned()
             .collect();
         // 入口按**目标环境**判：虚拟机档在 guest 里跑（guest 的 os），本机档在宿主；
@@ -481,7 +474,7 @@ impl Conductor {
         .map_err(|diags| crate::capabilities::vm::api::diagnose_text_for(&diags, guest))?;
 
         let mut new_meta = meta.clone();
-        new_meta.modules = metas.iter().flat_map(|a| a.modules.clone()).collect();
+        new_meta.modules = flat_modules(&metas);
         new_meta.agents = metas.clone();
         new_meta.exec = spec.clone();
         if let Some(p) = &edit.permissions {
@@ -497,11 +490,7 @@ impl Conductor {
                     *slot = a.clone();
                 }
             }
-            new_owner.modules = new_owner
-                .agents
-                .iter()
-                .flat_map(|a| a.modules.clone())
-                .collect();
+            new_owner.modules = flat_modules(&new_owner.agents);
             old_children.push(owner.clone());
             new_children.push(new_owner);
         } else {
@@ -518,26 +507,9 @@ impl Conductor {
                         *ca = na.clone();
                     }
                 }
-                cm.modules = cm.agents.iter().flat_map(|a| a.modules.clone()).collect();
+                cm.modules = flat_modules(&cm.agents);
                 new_children.push(cm);
             }
-        }
-        // 模块归属是整棵树的规则（与档位无关）：先按编辑后的名单查一遍重复。
-        let (check_root, check_extra): (&SessionMeta, Vec<&SessionMeta>) =
-            if owner.name != meta.name {
-                (
-                    new_children.first().expect("子会话编辑要写回所属名单"),
-                    vec![&new_meta],
-                )
-            } else {
-                (&new_meta, new_children.iter().collect())
-            };
-        let check_tree = self.tree_meta_with(check_root, &check_extra)?;
-        if let Some((m, a, b)) = duplicate_tree_module(&check_tree) {
-            return Err(format!(
-                "模块 {} 同时属于 agent {} 与 {}：同一模块在一条会话树里只能属于一个 agent",
-                m, a, b
-            ));
         }
         let was_vm = meta.exec.tier == crate::kernel::api::Tier::Vm;
         let is_vm = new_meta.exec.tier == crate::kernel::api::Tier::Vm;
@@ -983,8 +955,7 @@ impl Conductor {
         }
         let roster = self.scan();
         let reserved = self.reserved_names();
-        // 校验 agent：名字合法、模块与模型真实存在；同一模块不得同时属于两个 agent（沙箱会歧义）
-        let mut seen_modules: Vec<String> = Vec::new();
+        // 校验 agent：名字合法、模块与模型真实存在；模块可跨 agent 共用（各自独立沙箱与工具面）
         for a in &spec.agents {
             crate::capabilities::registry::api::validate_name(&a.name)?;
             crate::capabilities::registry::api::check_reserved(&a.name, &reserved)?;
@@ -992,13 +963,6 @@ impl Conductor {
                 if !roster.modules.iter().any(|m| &m.manifest.id == id) {
                     return Err(format!("无此模块：{}", id));
                 }
-                if seen_modules.iter().any(|x| x == id) {
-                    return Err(format!(
-                        "模块 {} 被多个 agent 同时使用；同一模块只能属于一个 agent",
-                        id
-                    ));
-                }
-                seen_modules.push(id.clone());
             }
             if let Some(mid) = &a.model {
                 if !self.registry.has_model(mid) {
@@ -1037,12 +1001,12 @@ impl Conductor {
             metas.push(AgentMeta {
                 name,
                 transient: a.transient,
-                modules: a.modules.clone(),
+                modules: dedup_modules(&a.modules),
                 model: a.model.clone(),
             });
         }
-        // 模块扁平清单（展示用；顺序按 agent 名单展开）
-        let module_ids: Vec<String> = metas.iter().flat_map(|m| m.modules.clone()).collect();
+        // 模块扁平清单（展示用；顺序按 agent 名单展开，同一模块被多个 agent 共用时只留一份）
+        let module_ids = flat_modules(&metas);
         // 代拟：给了 agent 就不再代拟（名单已经有了，不让核心盖掉用户的选择）。
         let delegate = spec.delegate && metas.is_empty();
 
@@ -1150,12 +1114,6 @@ impl Conductor {
                 .guest_scope(&meta)?
                 .ok_or_else(|| "虚拟机档会话没有解析出 guest 作用域".to_string())?;
             let tree = self.tree_meta(&scope_meta, Some(&meta))?;
-            if let Some((m, a, b)) = duplicate_tree_module(&tree) {
-                return Err(format!(
-                    "模块 {} 同时属于 agent {} 与 {}：同一模块在一条会话树里只能属于一个 agent",
-                    m, a, b
-                ));
-            }
             let tree_plan = self.plan_for_meta_with(&tree, &roster)?;
             let tree_sandboxes = self.sandboxes(&tree, &roster)?;
             // 运行包不做动态加载：新子会话的包已被这台 guest 装载就直接加入；
@@ -1479,19 +1437,6 @@ pub(crate) fn needs_guest_packages_rebuild(
         Some(have) => want.iter().any(|p| !have.contains(p)),
         None => !want.is_empty(),
     }
-}
-
-/// 目的：一个模块在整棵树里只能属于一个 agent；返回（模块, 先出现的 agent, 后出现的 agent）。
-fn duplicate_tree_module(meta: &SessionMeta) -> Option<(String, String, String)> {
-    let mut seen: BTreeMap<String, String> = BTreeMap::new();
-    for a in &meta.agents {
-        for m in &a.modules {
-            if let Some(prev) = seen.insert(m.clone(), a.name.clone()) {
-                return Some((m.clone(), prev, a.name.clone()));
-            }
-        }
-    }
-    None
 }
 
 /// 目的：guest 装配只认"agent → 模块集合"与环境；模型 / 权限变化不该触发重建。

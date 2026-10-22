@@ -76,7 +76,7 @@ const sandbox = {
           providers: [{ id: "p1", base_url: "http://x" }],
           models: [{ id: "m1", name: "M", api_model: "m", provider: "p1", note: "", tools: "native", context: 32000, is_core: true }],
           agents: [],
-          settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70, max_guests: 2, sandbox: { policy: { network: false, enforce: { filesystem: "require", network: "require", process_tree: "require", env_whitelist: "require" }, on_unavailable: "ask", windows: { write_acl: false }, host_read_roots: [], deny: [] }, defaults: { allow_read: [], allow_write: [], module_write: [], granularity: "ask", ask: [] } } },
+          settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70, max_guests: 2, sandbox: { policy: { network: false, enforce: { filesystem: "require", network: "require", process_tree: "require", env_whitelist: "require" }, on_unavailable: "ask", windows: { write_acl: false }, host_read_roots: [], deny: [] }, defaults: { allow_read: [], allow_write: [], granularity: "ask", ask: [] } } },
           history: [],
         }),
       };

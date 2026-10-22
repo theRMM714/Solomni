@@ -62,7 +62,7 @@ const CFG = {
   sid: "w", mode: "single", started: true,
   agents: [{ name: "调研员", modules: ["research"], model: "m1" }],
   tier: "vm", guest: "debian", net: true,
-  permissions: { allow_read: [], allow_write: ["docs"], deny: [], module_write: ["research"], granularity: "ask", ask: ["research.grep"] },
+  permissions: { allow_read: [], allow_write: ["docs"], deny: [], granularity: "ask", ask: ["research.grep"] },
   guests: [
     { guest: "debian", label: "debian-13-genericcloud-amd64", os: "linux", arch: "amd64", ready: true, missing: [], install: ".vm/guest/debian", runtimes: ["python"] },
     { guest: "windows", label: "debian-13-genericcloud-amd64", os: "linux", arch: "amd64", ready: false, missing: ["vm.guest-runtime.windows"], install: ".vm/guest/windows" },
@@ -289,7 +289,7 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
     && sent.agents[0].name === "调研员" && JSON.stringify(sent.agents[0].modules) === JSON.stringify(["research"])
     && sent.agents[0].model === "m1" && JSON.stringify(sent.pins) === JSON.stringify({ python: "3.12", ruby: "3.2" })
     && JSON.stringify(sent.permissions.allow_write) === JSON.stringify(["docs"])
-    && JSON.stringify(sent.permissions.module_write) === JSON.stringify(["research"]),
+    && !("module_write" in sent.permissions),
     editCall.body);
 
   /* ---- 取消定版 = 空串不提交 ---- */
@@ -322,7 +322,7 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
   const sent3 = JSON.parse(calls.filter((c) => /\/api\/actions\/edit_session$/.test(c.url)).pop().body);
   check("config: 本机档提交 tier=host 且 guest=null", sent3.tier === "host" && sent3.guest === null, JSON.stringify(sent3));
 
-  /* ---- 未开过的会话（started=false）：名字可改、无冻结、跨 agent 重复模块实时提示、保存成功 ---- */
+  /* ---- 未开过的会话（started=false）：名字可改、无冻结、跨 agent 共用模块可保存 ---- */
   openConfig("raw");
   await sleep(60);
   const m2 = reg.get("#modal-root");
@@ -345,9 +345,9 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
     t2.indexOf("虚拟机档前置（") >= 0 && t2.indexOf("guest 本体尚未接入") >= 0 &&
     t2.indexOf("怎么补：") >= 0 && t2.indexOf("自行安装 QEMU") >= 0 && t2.indexOf("没有选定虚拟根") >= 0);
   const dupHints = findByClass(m2, "cfg-hint").map((x) => x.textContent)
-    .filter((x) => String(x).indexOf("同一模块只能属于一个 agent") >= 0);
-  check("config(raw): 跨 agent 重复模块实时提示",
-    dupHints.length === 2 && dupHints.every((x) => x.indexOf("research") >= 0), JSON.stringify(dupHints));
+    .filter((x) => String(x).indexOf("同一模块") >= 0);
+  check("config(raw): 跨 agent 共用模块不再提示拒绝",
+    dupHints.length === 0, JSON.stringify(dupHints));
   findButton(m2, "保存").onclick();
   await sleep(80);
   const msg2 = findByClass(reg.get("#modal-root"), "modal-msg")[0];

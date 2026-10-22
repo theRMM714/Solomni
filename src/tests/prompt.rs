@@ -290,7 +290,8 @@ pub(crate) fn ref_rewrite_uses_the_session_path_dialect() {
     use crate::capabilities::session::api::SessionParams;
     use crate::capabilities::vm::api::PathBridge;
     use crate::capabilities::vm::domain::paths::PathDialect;
-    use crate::capabilities::workspace::api::{Place, Sandboxes};
+    use crate::capabilities::workspace::api::Sandboxes;
+    use crate::capabilities::workspace::domain::workspace::Place;
     use std::sync::Arc;
     // 同方言（本机档）：桥是恒等，改写结果就是原有宿主写法，行为不变。
     let params =

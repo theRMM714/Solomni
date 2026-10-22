@@ -6,7 +6,7 @@
 use crate::capabilities::permission::api::{
     validate, Granularity, Permissions, PermissionsOverride,
 };
-use crate::capabilities::workspace::api::Place;
+use crate::capabilities::workspace::domain::workspace::Place;
 use crate::tests::doubles::{
     abs, run_builtin, test_sandbox, test_workspace, test_workspace_store, InMemorySysIo,
     InMemoryWorkStore, InMemoryWorkspace,
@@ -36,13 +36,12 @@ fn global_deny_is_a_hard_floor_that_sessions_can_only_extend() {
     assert!(!extended.read_ok("private/x"));
 }
 
-/// 未配置 = 默认：整棵工作区可读、可提交；模块目录只读（无写授权）。
+/// 未配置 = 默认：整棵工作区可读、可提交。
 #[test]
-fn defaults_allow_the_whole_workspace_and_keep_modules_read_only() {
+fn defaults_allow_the_whole_workspace() {
     let p = Permissions::default();
     assert!(p.read_ok("a/b.txt"));
     assert!(p.write_ok("任何/路径"));
-    assert!(!p.module_write_ok("m"));
 }
 
 /// 白名单**取代**默认；黑名单**只做减法**；两者重叠时黑大于白。
@@ -142,18 +141,7 @@ fn entries_must_be_clean_relative_paths() {
     assert!(validate(&p).is_err());
 }
 
-/// 模块写授权按模块 id 判定。
-#[test]
-fn module_write_authorization_is_per_module() {
-    let p = Permissions {
-        module_write: paths(&["codegen"]),
-        ..Default::default()
-    };
-    assert!(p.module_write_ok("codegen"));
-    assert!(!p.module_write_ok("render"));
-}
-
-/// 落点规则：共享区读写受白黑名单；私有沙箱永远全权；模块目录默认只读、`userdata/` 例外。
+/// 落点规则：共享区读写受白黑名单；私有沙箱永远全权；模块目录（含 `userdata/`）对 agent 永久只读。
 #[test]
 fn sandbox_places_follow_the_permission_set() {
     let mut sb = test_sandbox("a1", &["data"]);
@@ -173,10 +161,10 @@ fn sandbox_places_follow_the_permission_set() {
     // 私有沙箱：不受白名单影响，永远全权。
     assert!(sb.can_read(&Place::Private, &private.join("src").join("x")));
     assert!(sb.can_write(&Place::Private, &private.join("src").join("x")));
-    // 模块目录：默认只读；userdata 例外。
+    // 模块目录：永久只读，userdata 也不例外（模块数据由模块自己的进程写）。
     let module_place = Place::Module("data".to_string());
     assert!(!sb.can_write(&module_place, &module.join("script.py")));
-    assert!(sb.can_write(&module_place, &module.join("userdata").join("state.json")));
+    assert!(!sb.can_write(&module_place, &module.join("userdata").join("state.json")));
 }
 
 /// 内置工具：读/写越出白名单都如实拒绝；私有沙箱照常。
@@ -228,7 +216,7 @@ fn builtin_tools_respect_the_scope() {
     );
 }
 
-/// 围栏派生：模块目录默认只读（进 ro_tree）；`userdata/` 的派发看**注入的事实**，domain 不读盘。
+/// 围栏派生：模块目录对 agent 只读（进 ro_tree）；`userdata/` 的派发看**注入的事实**，domain 不读盘。
 /// `standalone` 的缺省工作目录同样按这条事实回退。
 #[test]
 fn fence_spec_scopes_module_dirs_and_userdata() {
@@ -239,7 +227,7 @@ fn fence_spec_scopes_module_dirs_and_userdata() {
 
     // 事实：没有 userdata → 不进 rw，模块根仍进 ro_tree。
     let spec = FenceSpec::from_sandbox(&sb, false);
-    assert!(spec.ro_tree.contains(&module), "模块目录默认只读");
+    assert!(spec.ro_tree.contains(&module), "模块目录对 agent 只读");
     assert!(
         !spec.rw.contains(&module.join("userdata")),
         "事实说没有 userdata 就不派这条落点"
@@ -247,19 +235,15 @@ fn fence_spec_scopes_module_dirs_and_userdata() {
     assert!(!spec.rw.contains(&module), "未授权时整块模块目录不进 rw");
     assert_eq!(spec.private, sb.private, "HOME/TEMP 落在私有沙箱");
 
-    // 事实：有 userdata → 进 rw。
+    // 事实：有 userdata → 只把 userdata 放进 rw（模块自己的进程可写）。
     sb.modules_with_userdata.insert("data".to_string());
-    let spec = FenceSpec::from_sandbox(&sb, false);
+    let spec = FenceSpec::from_sandbox(&sb, true);
     assert!(
         spec.rw.contains(&module.join("userdata")),
-        "事实说有 userdata 就可写"
+        "事实说有 userdata 就派给模块进程"
     );
-
-    // 授权后：模块整块进 rw，不再进 ro_tree。
-    sb.permissions.module_write = vec!["data".to_string()];
-    let spec = FenceSpec::from_sandbox(&sb, true);
-    assert!(spec.rw.contains(&module));
-    assert!(!spec.ro_tree.contains(&module));
+    assert!(spec.ro_tree.contains(&module), "模块根对 agent 始终只读");
+    assert!(!spec.rw.contains(&module), "agent 不能整块写模块目录");
     assert!(spec.net, "net 随参数透传");
 }
 

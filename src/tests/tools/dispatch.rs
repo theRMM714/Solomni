@@ -31,7 +31,7 @@ pub(crate) fn same_named_tools_across_modules_are_no_longer_a_conflict() {
         core.create_work(one_agent).is_ok(),
         "同名工具同属一个 agent 也应能建"
     );
-    // 仍然保留的校验：同一模块不得同时属于两个 agent（沙箱与发言归属会歧义）。
+    // 同一模块可以同时属于两个 agent（共用；各自独立沙箱与工具面）。
     let cross = WorkSpec {
         name: "cross".to_string(),
         mode: WorkMode::Collab,
@@ -54,10 +54,19 @@ pub(crate) fn same_named_tools_across_modules_are_no_longer_a_conflict() {
         tier: crate::kernel::api::Tier::Host,
         guest: None,
     };
-    assert!(core
+    let opened = core
         .create_work(cross)
-        .unwrap_err()
-        .contains("被多个 agent"));
+        .expect("同一模块可被多个 agent 共用");
+    assert_eq!(opened.agents, vec!["甲".to_string(), "乙".to_string()]);
+    let (meta, _) = core.history_open("cross").expect("打开会话");
+    assert_eq!(meta.agents.len(), 2);
+    assert!(
+        meta.agents
+            .iter()
+            .all(|a| a.modules == vec!["a".to_string()]),
+        "两个 agent 都装同一个模块"
+    );
+    assert_eq!(meta.modules, vec!["a".to_string()], "meta.modules 去重");
 }
 
 /// 两个模块可以声明**同名**工具（信封里的 module 消歧）；每次调用跑在各自模块的目录里。

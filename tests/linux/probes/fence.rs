@@ -228,7 +228,7 @@ fn shared_area_is_outside_the_agent_fence() {
     );
 }
 
-/// **模块目录默认只读**（策略层把模块根放进 `ro_tree`、只把 `userdata/` 放进 `rw`）：
+/// **模块目录对 agent 只读**（策略层把模块根放进 `ro_tree`、只把 `userdata/` 放进 `rw`）：
 /// 模块代码写不进、目录读得到、`userdata/` 写得进。
 #[test]
 fn module_dir_is_read_only_but_userdata_is_writable() {
@@ -260,7 +260,7 @@ fn module_dir_is_read_only_but_userdata_is_writable() {
     }
     // 模块代码写不进。
     let (code, _out, werr) = run_launcher(&spec, &format!("echo x > {}", script.display()));
-    assert_ne!(code, Some(0), "模块目录默认只读：{}", werr);
+    assert_ne!(code, Some(0), "模块目录对 agent 只读：{}", werr);
     // 模块目录读得到（ro_tree 递归可读的对照）。
     let (rc, rout, rerr) = run_launcher(&spec, &format!("cat {}", script.display()));
     assert!(

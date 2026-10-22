@@ -154,7 +154,7 @@ roles:
 | --- | --- | --- |
 | `{{work_root}}` | 本次工作共享区 `session/<工作名>/work/` 的绝对路径（**主副本**） | 本工作内的 agent（**只读**：agent 会话里写它会被工具层拒绝，写入走 `work_commit`） |
 | `{{sandbox_root}}` | 该 agent 私有沙箱 `session/<工作名>/<agent实例名>/` 的绝对路径 | 只有它自己（**永远全权**） |
-| `{{module_roots}}` | 该 agent 各模块目录的绝对路径（一行一个） | 只有该模块所属的 agent（**默认只读**；`module_write` 授权才可写；`<module>/userdata/` 恒可写） |
+| `{{module_roots}}` | 该 agent 使用的模块目录的绝对路径（一行一个） | 只有使用该模块的 agent（**对 agent 永久只读，含 `userdata/`**：agent 只有使用权，模块数据由模块自己的进程维护） |
 
 - **越界即拒绝**：
   - 路径必须是列出的真实根**之下**的绝对路径。

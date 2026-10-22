@@ -496,7 +496,7 @@ pub(crate) fn grant_targets(spec: &FenceSpec) -> Vec<GrantTarget> {
             leaves.push(leaf(root, RIGHTS_RO, false, FencePart::AuthorizedRead));
         }
     }
-    // 只读**子树**（模块目录默认只读）：必须递归可读（工具脚本在目录里），所以 recursive + inherit。
+    // 只读**子树**（模块目录对 agent 只读）：必须递归可读（工具脚本在目录里），所以 recursive + inherit。
     for root in &spec.ro_tree {
         if !root.as_os_str().is_empty() {
             leaves.push(leaf(root, RIGHTS_RO, true, FencePart::Module));

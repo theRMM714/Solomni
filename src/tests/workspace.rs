@@ -5,7 +5,7 @@ use super::prelude::*;
 
 #[test]
 pub(crate) fn sandbox_resolve_accepts_only_absolute_paths_inside_roots() {
-    use crate::capabilities::workspace::api::Place;
+    use crate::capabilities::workspace::domain::workspace::Place;
     let sb = test_sandbox("a1", &["data"]);
     // 绝对且在根内 → 通过（返回归一化后的绝对路径）
     let (place, path) = sb
@@ -1665,7 +1665,7 @@ pub(crate) fn work_status_waits_for_the_per_work_gate() {
 pub(crate) fn sandbox_resolves_guest_written_paths() {
     use crate::capabilities::vm::api::PathBridge;
     use crate::capabilities::vm::domain::paths::PathDialect;
-    use crate::capabilities::workspace::api::Place;
+    use crate::capabilities::workspace::domain::workspace::Place;
     // 跨方言才有翻译（同方言时桥是恒等，走的是宿主写法那条路）。
     let guest = if cfg!(windows) {
         PathDialect::Posix

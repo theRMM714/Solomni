@@ -120,7 +120,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 - 出站模型调用的参数由核心决定、随端口传下去（`LlmOpts{stream, timeout_secs}`），取值来自**全局设置**；`Output` 只管回包形状。
   调用失败**不是**模型的回复：`Completion.error` 与正文分离，上层据此发 `Notice` 并**中断本轮**（不落转录行），会话保持可继续。
 - **围栏**（策略在 `capabilities/tools/domain/fence.rs`，机制在 `detail/confine/`）：
-  可达范围 = 自己的私有沙箱（永远全权）+ 自己的模块目录（**默认只读**；`module_write` 授权才整块可写，`<module>/userdata/` 恒可写）+ 用户显式授权的主机只读根（`.home/settings.yaml` 的 `sandbox.policy.host_read_roots`，默认空）；
+  可达范围 = 自己的私有沙箱（永远全权）+ 使用的模块目录（**对 agent 永久只读，含 `<module>/userdata/`**——agent 只有使用权，模块数据只由模块自己的工具 / 服务进程写）+ 用户显式授权的主机只读根（`.home/settings.yaml` 的 `sandbox.policy.host_read_roots`，默认空）；
   共享主副本**只有在"这一席可写"时**才进 rw（核心会话），agent 会话默认只读——工具层与围栏层两处都挡住直接写。
   **全局沙箱策略**（`sandbox.policy`）是硬约束：网络开关、`require` 特性、不可用时的 `ask/refuse`、Windows 写 ACL 与硬黑名单；
   会话不能覆盖。默认 `require`，机制不可用时询问是否**本进程降级**（不落盘，重启再问），拒绝 = fail-closed。

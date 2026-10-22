@@ -93,7 +93,7 @@ pub fn job_json_ro(rw: &[PathBuf], ro: &[PathBuf], cwd: &PathBuf, prepared: bool
     )
 }
 
-/// 带**只读子树**（`ro_tree`）的守门进程入参：模块目录默认只读时用它。
+/// 带**只读子树**（`ro_tree`）的守门进程入参：模块目录对 agent 只读时用它。
 /// `ro_tree` 是**递归只读**（与用户授权的 `ro` 分开：Windows 上前者递归、后者不递归）。
 pub fn job_json_tree(rw: &[PathBuf], ro_tree: &[PathBuf], cwd: &PathBuf, prepared: bool) -> String {
     let esc = |p: &PathBuf| p.to_string_lossy().replace('\\', "/");

@@ -1101,7 +1101,6 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
             pins: BTreeMap::new(),
             permissions: Some(crate::capabilities::permission::api::PermissionsOverride {
                 allow_write: Some(vec!["docs".to_string()]),
-                module_write: Some(vec!["b".to_string()]),
                 ..Default::default()
             }),
         },
@@ -1111,7 +1110,6 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
     assert_eq!(cfg.agents[0].modules, vec!["b".to_string()]);
     assert_eq!(cfg.tier, "vm");
     assert_eq!(cfg.permissions.allow_write, vec!["docs".to_string()]);
-    assert!(cfg.permissions.module_write_ok("b"));
     let (meta, events) = hist.load(&sid).unwrap();
     assert_eq!(
         meta.agents[0].modules,
@@ -1218,10 +1216,13 @@ pub(crate) fn edit_session_enforces_the_same_rules_as_creation() {
         .edit_session("w", edit_of(vec![("a", &["没有这个模块"], "")]))
         .unwrap_err();
     assert!(e.contains("无此模块"), "{}", e);
-    let e = core
-        .edit_session("c", edit_of(vec![("x", &["a"], ""), ("y", &["a"], "")]))
-        .unwrap_err();
-    assert!(e.contains("只能属于一个 agent"), "{}", e);
+    core.edit_session("c", edit_of(vec![("x", &["a"], ""), ("y", &["a"], "")]))
+        .expect("同一模块可被多个 agent 共用");
+    let shared = core.session_config("c").unwrap();
+    assert!(shared
+        .agents
+        .iter()
+        .all(|a| a.modules == vec!["a".to_string()]));
     let mut bad_tier = edit_of(vec![("x", &["a"], "")]);
     bad_tier.tier = "docker".to_string();
     assert!(core
@@ -1687,9 +1688,9 @@ pub(crate) fn child_edit_writes_back_to_the_agent_roster() {
     );
 }
 
-/// 目的：树里同一模块被分给两个 agent 时如实拒绝，不能等 guest 装配时才冲突。
+/// 目的：树里同一模块被分给两个 agent 时允许（共用），并把落盘名单去重。
 #[test]
-pub(crate) fn tree_wide_module_ownership_is_enforced_on_child_edit() {
+pub(crate) fn tree_wide_module_overlap_is_allowed_on_child_edit() {
     let hist = Arc::new(InMemoryHistory::new());
     seed_session(
         &hist,
@@ -1723,11 +1724,15 @@ pub(crate) fn tree_wide_module_ownership_is_enforced_on_child_edit() {
         Arc::new(InMemorySysIo::new()),
         Arc::new(InMemoryPackages::empty()),
     );
-    let err = core
+    let prepared = core
         .prepare_edit("w--a", edit_of(vec![("a", &["b"], "")]))
-        .err()
-        .expect("模块已被另一个 agent 占用");
-    assert!(err.contains("同时属于"), "{}", err);
+        .expect("同一模块可被多个 agent 共用");
+    assert_eq!(prepared.0.new_meta.modules, vec!["b".to_string()]);
+    assert_eq!(
+        prepared.0.new_children[0].modules,
+        vec!["b".to_string()],
+        "主会话的扁平清单去重（两个 agent 都用 b 时只留一份）"
+    );
 }
 
 /// 目的：上下文「继续」只在后端判定有断点时出现——单 agent 末条是用户才有，末条是 AI 没有。

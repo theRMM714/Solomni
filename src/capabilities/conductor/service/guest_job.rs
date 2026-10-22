@@ -208,7 +208,7 @@ pub(crate) fn stable_roots(sandboxes: &Sandboxes) -> (Vec<PathBuf>, Vec<PathBuf>
     }
     rw.sort();
     rw.dedup();
-    // 模块根的读写位由 helper 按每个 agent 的 module_write / userdata 决定；
+    // 模块根的读写位由 helper 按 agent 沙箱派生的围栏决定（模块目录只读、userdata 只给模块进程）；
     // 这里整棵挂可写，是为了让 userdata 真的能落回宿主。
     (rw, Vec::new())
 }

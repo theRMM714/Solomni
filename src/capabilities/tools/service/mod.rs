@@ -14,7 +14,8 @@ use crate::capabilities::tools::api::{
 use crate::capabilities::tools::domain::roles::SystemTools;
 use crate::capabilities::tools::ports::{SysIo, SystoolsSource};
 use crate::kernel::ports::{FenceHost, ProcessRunner};
-use std::sync::Arc;
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex, RwLock};
 
 /// 工具能力：持两张表与三个端口，按用例答话。
 pub struct ToolsService {
@@ -23,6 +24,8 @@ pub struct ToolsService {
     runner: Arc<dyn ProcessRunner>,
     io: Arc<dyn SysIo + Send + Sync>,
     fence: Arc<dyn FenceHost + Send + Sync>,
+    /// 目的：同一模块工具进程的读写租约（跨 agent）。`parallel` 工具共享读租约，其余取独占写租约。
+    module_leases: Mutex<BTreeMap<String, Arc<RwLock<()>>>>,
 }
 
 impl ToolsService {
@@ -38,7 +41,17 @@ impl ToolsService {
             runner,
             io,
             fence,
+            module_leases: Mutex::new(BTreeMap::new()),
         })
+    }
+
+    /// 目的：取（或建）某个模块的进程租约；租约只在同一模块内生效。
+    fn module_lease(&self, module: &str) -> Arc<RwLock<()>> {
+        let mut leases = self.module_leases.lock().unwrap_or_else(|e| e.into_inner());
+        leases
+            .entry(module.to_string())
+            .or_insert_with(|| Arc::new(RwLock::new(())))
+            .clone()
     }
 }
 
@@ -71,13 +84,22 @@ impl Tools for ToolsService {
 impl ToolExec for ToolsService {
     fn run_module(
         &self,
+        module: &str,
         fence: &crate::kernel::api::FenceSpec,
         command: &str,
         args_json: &str,
         env: &[(String, String)],
+        parallel: bool,
         ask: Option<&dyn crate::kernel::ports::AskUser>,
     ) -> ToolOutcome {
-        self.runner.run(fence, command, args_json, env, ask)
+        let lease = self.module_lease(module);
+        if parallel {
+            let _shared = lease.read().unwrap_or_else(|e| e.into_inner());
+            self.runner.run(fence, command, args_json, env, ask)
+        } else {
+            let _exclusive = lease.write().unwrap_or_else(|e| e.into_inner());
+            self.runner.run(fence, command, args_json, env, ask)
+        }
     }
 
     fn run_builtin(

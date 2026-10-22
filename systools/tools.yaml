@@ -234,7 +234,7 @@ tools:
           agent 数组（只写**身份**，不写任务）：复用登记处的 {"ref":"已存agent名"}，
           或临时组装 {"name":"新名字","modules":["模块id"],"model":"模型id"}——`modules` 可省略或为空：
           零模块 agent 只用内建文件工具（读写、搜索）。proxy 给空数组（或省略）；collab 省略 = 委托核心按 task 代拟名单。
-          **model 填 catalog_agents 回的 `id`（不是 `name`）**；同一模块不得出现在两个 agent 里。
+          **model 填 catalog_agents 回的 `id`（不是 `name`）**；同一模块可以出现在多个 agent 里（共用，各自独立调用）。
       task:
         type: string
         desc: |-
@@ -595,7 +595,7 @@ tools:
       tier: { type: string, required: true, non_empty: true, desc: 执行档位 host / vm }
       guest: { type: string, desc: 虚拟机档的虚拟根名（清单里的一个名字；可选） }
       pins: { type: object, desc: 能力定版表（可选） }
-      permissions: { type: object, desc: 会话级权限覆盖（allow_read / allow_write / deny / module_write / granularity / ask；网络是全局策略） }
+      permissions: { type: object, desc: 会话级权限覆盖（allow_read / allow_write / deny / granularity / ask；网络是全局策略） }
   upload:
     capability: none
     callers: [user]

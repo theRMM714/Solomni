@@ -221,10 +221,6 @@ pub(crate) fn create_session_validates_then_creates_once() {
             "无此模块",
         ),
         (
-            r#"{"mode":"collab","agents":[{"name":"x","modules":["m1"]},{"name":"y","modules":["m1"]}],"task":"做事","request_id":"b2"}"#,
-            "同一模块只能属于一个 agent",
-        ),
-        (
             r#"{"mode":"collab","agents":[{"name":"x","modules":["m1"]}],"task":"做事","request_id":"b3"}"#,
             "至少要两个 agent",
         ),
@@ -955,10 +951,20 @@ pub(crate) fn the_real_bridge_creates_a_multi_agent_child_work() {
         .expect("工作根");
     assert_eq!(root, parent.sid, "子工作与父会话共用同一个 work/");
     assert!(meta.task.is_some(), "协作必须有本次需求（会话级 opening）");
-    // 同一模块不得同时属于两个 agent（登记处事实核对在调用前完成，不留半成品）。
-    let dup = r#"{"mode":"collab","agents":[{"name":"c1","modules":["m1"]},{"name":"c2","modules":["m1"]}],"task":"做事","request_id":"m2"}"#;
-    let out = tools.call(&c, d::CREATE, dup);
-    assert!(!out.ok && out.output.contains("同一模块"), "{}", out.output);
+    // 同一模块可以同时属于两个 agent（共用；各自独立沙箱与工具面）。
+    let shared = r#"{"mode":"collab","agents":[{"name":"c1","modules":["m1"]},{"name":"c2","modules":["m1"]}],"task":"做事","request_id":"m2"}"#;
+    let out = tools.call(&c, d::CREATE, shared);
+    assert!(out.ok, "{}", out.output);
+    let v: serde_json::Value = serde_json::from_str(&out.output).expect("JSON");
+    let child = v["session"].as_str().expect("有会话引用").to_string();
+    let (meta, _) = ops.history.open(&child).expect("能打开子工作");
+    assert_eq!(meta.modules, vec!["m1".to_string()], "meta.modules 去重");
+    assert!(
+        meta.agents
+            .iter()
+            .all(|a| a.modules == vec!["m1".to_string()]),
+        "两个 agent 都装同一个模块"
+    );
 }
 
 /// 代理会话的身份是**角色提示词**（core_proxy）+ 环境 + 调用约定，不是普通 agent 身份；

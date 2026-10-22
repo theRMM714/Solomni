@@ -494,16 +494,16 @@ pub(crate) fn dispatch_external(
                     ),
                 )
             } else {
-                (
-                    module,
-                    ctx.tools.run_module(
-                        &ctx.fence.at(&mt.root),
-                        command,
-                        &inv.args_json,
-                        env,
-                        ask,
-                    ),
-                )
+                let outcome = ctx.tools.run_module(
+                    &module,
+                    &ctx.fence.at(&mt.root),
+                    command,
+                    &inv.args_json,
+                    env,
+                    mt.parallel.contains(&inv.name),
+                    ask,
+                );
+                (module, outcome)
             }
         }
         None => {

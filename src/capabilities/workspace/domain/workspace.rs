@@ -61,7 +61,7 @@ pub struct Sandbox {
     pub modules: BTreeMap<String, PathBuf>,
     /// 目的：有 <root>/userdata 目录的模块 id（工作区扫描读出的事实；围栏派生据此决定派不派这条）。
     pub modules_with_userdata: std::collections::BTreeSet<String>,
-    /// 本席位的生效权限（读/提交白黑名单、模块写授权、决定粒度）：由 conductor 解析后注入。
+    /// 本席位的生效权限（读/提交白黑名单、决定粒度）：由 conductor 解析后注入。
     /// 私有沙箱不在它的管辖内（永远全权）；它只管共享工作区与模块目录。
     pub permissions: Permissions,
     /// 目的：这场会话的路径翻译器（虚拟机档 guest ↔ 宿主；本机档 None = 恒等）。
@@ -129,7 +129,7 @@ impl Sandbox {
     }
 
     /// 该落点这一席能不能写：共享主副本只读时写类工具一律拒绝；私有沙箱永远全权；
-    /// 模块目录默认只读，只有 module_write 命中该模块（或落在 <module>/userdata/ 下）才可写。
+    /// 模块目录（含 `<module>/userdata/`）对 agent **永久只读**——agent 只有使用权，模块数据由模块自己的进程维护。
     pub fn can_write(&self, place: &Place, path: &Path) -> bool {
         match place {
             // 共享主副本：这一席可写**且**路径落在提交白名单内（黑名单已并入 write_ok）。
@@ -137,7 +137,7 @@ impl Sandbox {
                 self.shared_writable && self.permissions.write_ok(&self.rel_to(&self.shared, path))
             }
             Place::Private => true,
-            Place::Module(id) => self.permissions.module_write_ok(id) || self.is_userdata(id, path),
+            Place::Module(_) => false,
         }
     }
 
@@ -166,7 +166,7 @@ impl Sandbox {
                 }
             }
             Place::Module(id) => format!(
-                "模块 {} 的目录默认只读：改模块要先由用户在会话权限里授权（<module>/userdata/ 除外）。",
+                "模块 {} 的目录对 agent 只读（含 userdata/）：模块数据由模块自己的工具进程维护；请写进你自己的沙箱（工作副本）。",
                 id
             ),
             Place::Private => self.shared_read_only(),
@@ -185,14 +185,6 @@ impl Sandbox {
             "读权限受限：{} 不在允许读取的路径内（允许：{}）。",
             rel, roots
         )
-    }
-
-    /// <module>/userdata/：模块自己的跨任务状态区，恒可写（不被模块只读默认挡住）。
-    fn is_userdata(&self, id: &str, path: &Path) -> bool {
-        match self.modules.get(id) {
-            Some(root) => path.starts_with(root.join("userdata")),
-            None => false,
-        }
     }
 
     /// 一条绝对路径相对某个根的工作区相对形式（`/` 分隔），供权限条目比对。

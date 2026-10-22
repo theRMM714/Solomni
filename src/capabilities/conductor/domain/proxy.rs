@@ -503,10 +503,9 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
         }
         _ => {}
     }
-    let mut used: Vec<String> = Vec::new();
     let mut resolved: Vec<NewAgent> = Vec::new();
     for (i, a) in agents.into_iter().enumerate() {
-        let (name, modules, model, transient) = if a.reuse {
+        let (name, mut modules, model, transient) = if a.reuse {
             let fact = catalog
                 .agents
                 .iter()
@@ -553,19 +552,16 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
         };
         crate::capabilities::registry::api::validate_name(&name)
             .map_err(|e| format!("agents[{}] 的名字不合法：{}", i, e))?;
-        for id in &modules {
-            if used.iter().any(|u| u == id) {
-                return Err(format!(
-                    "模块 {} 被多个 agent 同时使用；同一模块只能属于一个 agent",
-                    id
-                ));
+        let mut unique: Vec<String> = Vec::new();
+        for id in modules.drain(..) {
+            if !unique.contains(&id) {
+                unique.push(id);
             }
-            used.push(id.clone());
         }
         resolved.push(NewAgent {
             name,
             transient,
-            modules,
+            modules: unique,
             model,
         });
     }
@@ -885,9 +881,12 @@ mod tests {
             "request_id": "r3"
         }))
         .unwrap();
-        assert!(resolve_new_session(&dup, &c)
-            .unwrap_err()
-            .contains("同一模块只能属于一个 agent"));
+        let shared = resolve_new_session(&dup, &c).expect("同一模块可被多个 agent 共用");
+        assert_eq!(shared.agents.len(), 2);
+        assert!(shared
+            .agents
+            .iter()
+            .all(|a| a.modules == vec!["m1".to_string()]));
 
         let one: CreateArgs = serde_json::from_value(serde_json::json!({
             "mode": "collab",

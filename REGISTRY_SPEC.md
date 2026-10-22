@@ -89,7 +89,7 @@ agents:
 ```
 
 - agent 只是「用户编排选择的存档」，不是能力注册表——能力仍在 `modules/` 公地（见 [PHILOSOPHY.md](PHILOSOPHY.md)）。
-- 同一个模块在一次工作里只能属于一个 agent；核心按名单去重并拒收非法条目。
+- 同一个模块可以在一次工作里被多个 agent 共用（各自独立沙箱与调用）；每个 agent 的模块列表按出现顺序去重，`meta.modules` 是去重后的扁平清单。
 - agent 名会成为会话内的沙箱目录名，校验比 id 严（见「六、名字与 id」）。
 
 ## 五、settings.yaml
@@ -114,7 +114,6 @@ sandbox:               # 全局沙箱策略：会话不可填；保存后整体�
   defaults:            # 会话权限的全局默认；会话 meta 可覆盖
     allow_read: []     # 读白名单（相对工作区根；空 = 整棵工作区可读）
     allow_write: []    # 提交白名单（相对工作区根；空 = 整棵工作区可提交）
-    module_write: []   # 模块目录写授权（模块 id；空 = 模块目录只读，userdata/ 恒可写）
     granularity: ask   # 决定粒度：ask = ask 表里的工具要用户放行；full = 任何工具都不设确认
     ask: []            # granularity=ask 时要用户放行的工具名（模块工具写 module.tool）
 qemu_path: ""          # 虚拟机档用的 QEMU 可执行文件路径（默认空 = 判据每次取用时采用项目内补齐的可运行包；否则兜底看 PATH。显式登记优先）

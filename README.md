@@ -102,7 +102,7 @@ tools:                       # 可选：模块工具表
 ```
 
 - 模块工具只有一条调用约定：**启动命令 + 参数 + stdin/stdout 回执**；长驻 MCP 服务写进 `services`。
-- 工具进程可达该 agent 的私有沙箱与它自己的模块目录；共享区主副本要先 `work_pull` / `work_commit`（冲突用 `work_versions` / `work_resolve`）。`userdata/` 恒可写，模块目录默认只读。
+- 工具进程可达该 agent 的私有沙箱与它使用的模块目录；共享区主副本要先 `work_pull` / `work_commit`（冲突用 `work_versions` / `work_resolve`）。模块目录（含 `userdata/`）对 agent 只读：agent 只有模块使用权，模块数据由模块自己的进程维护。
 - 能跑通就是合法模块；跑不通时核心如实报错，不猜、不兜底。
 
 ### 跑一遍演示

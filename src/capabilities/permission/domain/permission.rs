@@ -1,11 +1,11 @@
-//! 权限的**纯规则**：决定粒度 + 工作区路径的白名单 / 黑名单 + 模块写授权。
+//! 权限的**纯规则**：决定粒度 + 工作区路径的白名单 / 黑名单。
 //!
 //! 语义（用户口径，唯一一份）：
 //! - 默认：整棵工作区可读、可提交；
 //! - **白名单一出现就取代默认**（配了 allow_read 就失去默认的整棵可读，配了 allow_write 就失去默认提交）；
 //! - **黑名单只做减法，不让默认失效**；
 //! - 两者重叠时**黑大于白**；
-//! - 模块目录默认只读；`module_write` 命中该模块才整块可写（`<module>/userdata/` 恒可写，由执行点单独放行）。
+//! - 模块目录对 agent **永久只读**（含 `<module>/userdata/`）：agent 只有模块的使用权，模块数据由模块自己的进程维护。
 //!
 //! 归属：本文件只处理器**声明**→**生效态**的解析与判定，不认识会话、不碰文件系统。
 //! 白/黑是呈现层词汇；解析后下游只见 `read_ok` / `write_ok` 一个正向判定。
@@ -37,9 +37,6 @@ pub struct Permissions {
     /// 黑名单：读写都禁，只做减法（空 = 不禁止）。
     #[serde(default)]
     pub deny: Vec<String>,
-    /// 目的：模块目录写授权（模块 id；空 = 模块目录只读，`userdata/` 恒可写）。
-    #[serde(default)]
-    pub module_write: Vec<String>,
     /// 目的：决定粒度。
     #[serde(default)]
     pub granularity: Granularity,
@@ -54,7 +51,6 @@ impl Default for Permissions {
             allow_read: Vec::new(),
             allow_write: Vec::new(),
             deny: Vec::new(),
-            module_write: Vec::new(),
             granularity: Granularity::Ask,
             ask: Vec::new(),
         }
@@ -71,9 +67,6 @@ pub struct PermissionDefaults {
     /// 目的：提交白名单（相对工作区根；空 = 整棵工作区可提交）。
     #[serde(default)]
     pub allow_write: Vec<String>,
-    /// 目的：模块目录写授权（模块 id；空 = 模块目录只读，`userdata/` 恒可写）。
-    #[serde(default)]
-    pub module_write: Vec<String>,
     /// 目的：决定粒度。
     #[serde(default)]
     pub granularity: Granularity,
@@ -87,7 +80,6 @@ impl Default for PermissionDefaults {
         PermissionDefaults {
             allow_read: Vec::new(),
             allow_write: Vec::new(),
-            module_write: Vec::new(),
             granularity: Granularity::Ask,
             ask: Vec::new(),
         }
@@ -101,7 +93,6 @@ impl PermissionDefaults {
             allow_read: self.allow_read.clone(),
             allow_write: self.allow_write.clone(),
             deny: hard_deny.to_vec(),
-            module_write: self.module_write.clone(),
             granularity: self.granularity,
             ask: self.ask.clone(),
         }
@@ -119,8 +110,6 @@ pub struct PermissionsOverride {
     pub allow_write: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deny: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub module_write: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub granularity: Option<Granularity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -144,9 +133,6 @@ impl Permissions {
                     out.deny.push(entry.clone());
                 }
             }
-        }
-        if let Some(v) = &over.module_write {
-            out.module_write = v.clone();
         }
         if let Some(g) = over.granularity {
             out.granularity = g;
@@ -176,11 +162,6 @@ impl Permissions {
             return true;
         }
         hit(allow, rel)
-    }
-
-    /// 这个模块的目录能不能整块写（内置工具与围栏共用）。
-    pub fn module_write_ok(&self, module: &str) -> bool {
-        self.module_write.iter().any(|m| m.trim() == module)
     }
 
     /// 这个工具调用要不要用户确认（`full` 一律不确认；`ask` 表里命中才要）。
@@ -266,9 +247,6 @@ pub fn validate_override(o: &PermissionsOverride) -> Result<(), String> {
     if let Some(v) = &o.deny {
         probe.deny = v.clone();
     }
-    if let Some(v) = &o.module_write {
-        probe.module_write = v.clone();
-    }
     validate(&probe)?;
     if let Some(list) = &o.ask {
         for t in list {
@@ -291,7 +269,7 @@ pub fn validate_defaults(d: &PermissionDefaults) -> Result<(), String> {
     Ok(())
 }
 
-/// 校验整份声明：路径条目合法、模块 id 非空。
+/// 校验整份声明：路径条目合法。
 pub fn validate(p: &Permissions) -> Result<(), String> {
     for (label, list) in [
         ("allow_read", &p.allow_read),
@@ -300,15 +278,6 @@ pub fn validate(p: &Permissions) -> Result<(), String> {
     ] {
         for e in list.iter() {
             validate_entry(e).map_err(|why| format!("{}：{}", label, why))?;
-        }
-    }
-    for m in &p.module_write {
-        let id = m.trim();
-        if id.is_empty() {
-            return Err("module_write 里的模块 id 不能为空".to_string());
-        }
-        if id.contains('/') || id.contains('\\') || id == ".." {
-            return Err(format!("module_write 里的模块 id 不合法：{}", m));
         }
     }
     Ok(())

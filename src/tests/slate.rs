@@ -7,7 +7,7 @@ use super::prelude::*;
 
 #[test]
 pub(crate) fn suggest_models_recommends_agents() {
-    // 不存在的模块 / 不存在的模型 / 重复占用的模块一律拒收。
+    // 不存在的模块 / 不存在的模型一律拒收；同一模块可以被多个 agent 共用。
     let script = "{\"type\":\"tool\",\"name\":\"slate\",\"args\":{\"picks\":[{\"name\":\"甲\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"},{\"name\":\"乙\",\"modules\":[\"b\"],\"model\":\"m\",\"why\":\"补位\"},{\"name\":\"鬼\",\"modules\":[\"ghost\"],\"model\":\"m\",\"why\":\"模块不存在\"},{\"name\":\"丙\",\"modules\":[\"a\"],\"model\":\"nope\",\"why\":\"模型不存在\"},{\"name\":\"丁\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"重复占模块\"}]}}".to_string();
     let core = core_with(
         vec![module_of("a"), module_of("b")],
@@ -16,10 +16,12 @@ pub(crate) fn suggest_models_recommends_agents() {
     // 协作：两个独立 agent，各带自己的模块与模型。
     let (collab, rows) = core.suggest_models("做个东西", WorkMode::Collab).unwrap();
     assert!(!rows.is_empty(), "核心这一趟的行必须交出来（推给系统会话）");
-    assert_eq!(collab.len(), 2);
+    assert_eq!(collab.len(), 3, "共用同一模块的推荐项也要收下");
     assert_eq!(collab[0].name, "甲");
     assert_eq!(collab[0].modules, vec!["a".to_string()]);
     assert_eq!(collab[1].modules, vec!["b".to_string()]);
+    assert_eq!(collab[2].name, "丁");
+    assert_eq!(collab[2].modules, vec!["a".to_string()]);
     assert_eq!(collab[0].model, "m");
     assert_eq!(collab[0].why, "对口");
     // 单 agent：多条推荐 → 并成一个临时 agent（并过的不是任何单个已存 agent，故 reuse=false）。

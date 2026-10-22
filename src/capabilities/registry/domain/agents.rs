@@ -147,8 +147,8 @@ impl RosterPick {
     }
 }
 
-/// 把核心拟的名单落地成 agent 实例：逐条校验（存在性、模型真实、模块不重复），
-/// 非法条目整条拒收并给出原因（不静默改写）。复用项带进来的模块同样参与去重。
+/// 把核心拟的名单落地成 agent 实例：逐条校验（存在性、模型真实），
+/// 非法条目整条拒收并给出原因（不静默改写）。同一模块可以被多个 agent 共用，同一 agent 内重复只留一份。
 /// 返回（已接受的实例 + 理由, 拒收说明）。
 pub fn resolve_picks(
     picks: Vec<RosterPick>,
@@ -158,7 +158,6 @@ pub fn resolve_picks(
 ) -> (Vec<(AgentMeta, String)>, Vec<String>) {
     let mut out: Vec<(AgentMeta, String)> = Vec::new();
     let mut rejected: Vec<String> = Vec::new();
-    let mut used: Vec<String> = Vec::new();
     let mut names: Vec<String> = Vec::new();
     for p in picks {
         let why = p.why();
@@ -203,12 +202,9 @@ pub fn resolve_picks(
                 bad = true;
                 break;
             }
-            if used.iter().any(|u| u == id) || local.iter().any(|u| u == id) {
-                rejected.push(format!("模块 {} 在名单里出现了两次（{}）", id, label));
-                bad = true;
-                break;
+            if !local.contains(id) {
+                local.push(id.clone());
             }
-            local.push(id.clone());
         }
         if bad {
             continue;
@@ -225,7 +221,6 @@ pub fn resolve_picks(
         };
         let name = unique_instance_name(&name, &names);
         names.push(name.clone());
-        used.extend(local.iter().cloned());
         out.push((
             AgentMeta {
                 name,
