@@ -115,7 +115,7 @@ tools:                       # 可选：模块工具表
 前两个演示要三个模块在清单里、indexer 已构建、登记处有供应商与一个可用的模型（用 `SOLOMNI_DEMO_MODEL` 指定，或用核心默认）；
 **MCP 演示**要 `mcp-toolbox` 在清单里、登记处有供应商与可用模型（它自带 `services` 声明，不需要预先构建）；
 **代理演示**要登记处有供应商、模型与**核心默认模型**（挑人是核心的事，它可以临时组装零模块的 agent）。
-**虚拟机档演示**要 `harvest` 在清单里、登记处有可用模型，且选定的虚拟根在本机装齐、画像里声明有 python（`guest.yaml` 的 `runtimes`——Linux / Windows 都由 `solomni --provision --ensure --yes` 的运行期编排起一次 guest 自证后写入；缺包时核心会在创建那一刻拒绝）。
+**虚拟机档演示**要 `harvest` 在清单里、登记处有可用模型，且选定的虚拟根在本机装齐、画像里声明有 python / node / cc / gcc（`guest.yaml` 的 `runtimes`——Linux / Windows 都由 `solomni --provision --ensure --yes` 的运行期编排起一次 guest 自证后写入；缺包时核心会在创建那一刻拒绝）。
 **条件不齐就打印 `DEMO-SKIPPED` 与怎么补、以退出码 2 收场：不跑，也不用内置演示通道凑一遍。**
 
 ```bash

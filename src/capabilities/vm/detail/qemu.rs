@@ -15,6 +15,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+/// 目的：**无围栏** guest 命令（供给编排 / apt / 下载工具链）的外层等待预算。
+/// 约束：有围栏的命令仍按 guest helper 的 30 秒杀树；供给编排可能下载几百 MB，30 秒不够。
+const UNFENCED_GUEST_RUN_SECS: u64 = 1800;
+
 /// 目的：QEMU 的加速器有序表（按平台）：本平台的硬件加速排前，TCG 兜底；值是 -machine 的 accel=… 参数。
 /// 约束：QEMU 会把本平台不认识的加速器记为 invalid 并继续试下一项，所以同一份参数可跨平台复用。
 pub fn accelerators() -> &'static str {
@@ -721,9 +725,13 @@ impl QemuHandle {
             },
             Err(why) => return fail(&why),
         };
-        // helper 自己按 30 秒杀树；外层只留一段缓冲，超时仍返回失败。
-        let deadline =
-            Instant::now() + Duration::from_secs(super::guest_helper::HELPER_TIMEOUT_SECS + 30);
+        // 有围栏时 helper 自己按 30 秒杀树，外层只留一段缓冲；供给编排（无围栏）要等 apt / 下载完。
+        let budget = if access.is_some() {
+            super::guest_helper::HELPER_TIMEOUT_SECS + 30
+        } else {
+            UNFENCED_GUEST_RUN_SECS
+        };
+        let deadline = Instant::now() + Duration::from_secs(budget);
         loop {
             let v = match self.status_once(pid) {
                 Ok(v) => v,

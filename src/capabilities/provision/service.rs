@@ -100,7 +100,7 @@ struct GuestProfile {
     id: Option<String>,
     os: Option<String>,
     arch: Option<String>,
-    /// 目的：画像里声明的运行能力（内联列表 `runtimes: [python, node]`；缺画像 = 空）。
+    /// 目的：画像里声明的运行能力（内联列表 `runtimes: [python, node, cc, gcc]`；缺画像 = 空）。
     runtimes: Vec<String>,
 }
 
@@ -1164,9 +1164,9 @@ fn pack_guest_base(base: &Path, cache: &Path, on_line: &mut dyn FnMut(&str)) -> 
         fs::rename(&tmp, &link).map_err(|e| format!("放回 {name} 失败：{e}"))?;
     }
     let used = dir_bytes(base)?;
-    // 留足余量：guest 里 apt 要下索引（压缩的也有几十 MB）、解包运行包、写日志——1 GiB 的镜像在维护启动装
-    // node 时会真的空间不足（真机验收露的：Write error 28）。下限 1 GB、至少 768 MB 余量。
-    let slack = std::cmp::max(768 << 20, used / 2);
+    // 留足余量：guest 里 apt 要下索引（压缩的也有几十 MB）、装 C/C++（约 300 MB）、解 Node（约 200 MB）、写日志——
+    // 1.6 GiB 的旧镜像在维护启动装基础工具链时会真的空间不足（Write error 28）。下限 1 GB、至少 1.5 GB 余量。
+    let slack = std::cmp::max(1536 << 20, used / 2);
     let need = std::cmp::max(1u64 << 30, used + slack);
     let blocks = need.div_ceil(4096);
     let tmp_img = cache.join("pack.ext4");

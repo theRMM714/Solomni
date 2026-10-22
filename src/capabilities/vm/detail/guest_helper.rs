@@ -174,6 +174,9 @@ def main():
     # 环境白名单：不继承守护进程环境；只保留运行时需要的最小集合 + 该模块的隐秘字段名。
     keep = ("PATH", "LANG", "LC_ALL", "TZ", "PYTHONIOENCODING", "PYTHONUTF8")
     env = {k: os.environ[k] for k in keep if k in os.environ}
+    # QGA 不保证带 PATH（也可能给空串）；不给默认值，g++ 的 collect2 会找不到 ld。
+    if not env.get("PATH"):
+        env["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
     for k in policy.get("env_names", []):
         if k and k in os.environ:
             env[k] = os.environ[k]

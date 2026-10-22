@@ -114,10 +114,10 @@ files:                      # 包内文件指纹：用于可复现与呈现
   下载后按台账核对 sha256——自托管资产在清单条目里、链接类在 `links.yaml` 里成对，不 pin 的源如实不校验）。
 - 产品检测、指路并给出补齐入口；`qemu_path` / `virtiofsd_path` / `smbd_path` 可登记。
 - 虚拟根里**真有什么**由 `kind: guest-runtime` 的运行期编排（Rust 侧，不依赖仓库脚本）起一次 guest **逐个自证**后写进画像。
-- Windows：首启经 cloud-init 装 `qemu-guest-agent`；维护启动装 `python3` / `cifs-utils` 与 NodeSource 的 node。
-- Linux：`guest-rootfs` 把 agent 装进磁盘镜像（`.qga-ready` 标记让编排跳过首启）；维护启动装 `python3` 与 NodeSource 的 node；共享客户端保持镜像声明的 9p / virtiofs。
-- 两端都是普通 ext4 磁盘根，apt / NodeSource 走标准路径。
-- 两者都只把**自证过**的能力写进 `guest.yaml` 的 `runtimes`（例如 `[python, node]`）。
+- Windows：首启经 cloud-init 装 `qemu-guest-agent`；维护启动装 `python3` / `cifs-utils` / C-C++（`gcc` `g++` `make` `libc6-dev`），并从固定版本官方二进制装 Node。
+- Linux：`guest-rootfs` 把 agent 装进磁盘镜像（`.qga-ready` 标记让编排跳过首启）；维护启动装 `python3` 与 C-C++，并从固定版本官方二进制装 Node；共享客户端保持镜像声明的 9p / virtiofs。
+- 两端都是普通 ext4 磁盘根；C/C++ 走 Debian apt 标准路径，Node 走官方发行包的固定 URL + sha256。
+- 两者都只把**自证过**的能力写进 `guest.yaml` 的 `runtimes`（例如 `[python, node, cc, gcc]`；`gcc` 是 `build.needs` 用的可执行名）。
 - 全量补齐（`--ensure --yes`）时这一条起不了 guest（缺 KVM / WHPX 这类机器事实）只如实跳过并继续；显式点名（`--ensure=vm.guest-runtime.linux`）才硬失败。
 
 虚拟根 = 项目内 `.vm/guest/<名>` 的一格目录：

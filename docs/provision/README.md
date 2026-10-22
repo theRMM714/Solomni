@@ -55,8 +55,9 @@
 
 - Windows 虚拟根：首启经 cloud-init 种子装 `qemu-guest-agent`，落 `.qga-ready`。
 - Linux 虚拟根：agent 由 `guest-rootfs` 装进镜像，`.qga-ready` 让编排跳过首启；维护启动先按 QEMU 用户网络配网。
-- 维护启动两端同一条路：整份刷新 apt lists、装 python3 与 NodeSource 的 nodejs（Windows 另加 cifs-utils，客户端声明写成 cifs；Linux 保持镜像声明的 9p/virtiofs）。
-- 自证命令是 `python -V` 与 `node --version`：python 是必需基线，node 尽力装、通了才声明；通过后写 `.runtimes-ready`，失败不写（下次重试）。
+- 维护启动两端同一条路：整份刷新 apt lists、装 python3 与 C-C++（gcc / g++ / make / libc6-dev），并从固定版本官方二进制装 Node（Windows 另加 cifs-utils，客户端声明写成 cifs；Linux 保持镜像声明的 9p/virtiofs）。
+- 自证命令是 `python -V`、`node --version` 与一次最小 C++ 编译：三者都通了才声明；通过后写 `.runtimes-ready`，失败不写（下次重试）。
+- 当前基础镜像按 2.3 GB 构造（留 1.5 GB 余量）；不是这个基线的虚拟根**不在支持范围**，不自动修补——删除 `.vm/guest/<名>` 后重新 `--provision --ensure --yes`。
 - 全量补齐时这一条失败只如实跳过并继续；显式点名才硬失败——它依赖本机能起 guest。
 
 ### 缓存与完整性

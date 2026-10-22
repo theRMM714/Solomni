@@ -13,7 +13,7 @@
 
 产物落在 `build/`（Linux/macOS 是 `indexer`，Windows 是 `indexer.exe`），命令可重复执行、没改源就跳过（源指纹记在 `.vm/build-state/indexer.json`）。
 
-构建期能力是 `gcc`：本机档要求它在**宿主 PATH** 上（产品不预置工具链）；虚拟机档用 `--guest=<虚拟根>` 让产品在 guest 里编，`gcc` 由 guest 自带的运行能力或 `runtimes/` 包提供。
+构建期能力是 `gcc`：本机档优先用项目内基础工具链（Windows MinGW / Linux、macOS Zig），缺失时回退宿主 PATH；虚拟机档用 `--guest=<虚拟根>` 让产品在 guest 里编，`gcc` 由 guest 自带的运行能力或 `runtimes/` 包提供。
 
 ## 协议
 

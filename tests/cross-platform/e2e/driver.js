@@ -919,7 +919,7 @@ async function approvePlan(name) {
     assert(cv.status === 200, '建虚拟机档工作（先本机档）', cv.text.slice(0, 200));
     const ev = await act(nameVm, 'edit_session', {
       agents: [{ name: '探针兵', modules: ['toolbox'], model: 'm1' }],
-      tier: 'vm', guest: vmGuest, net: false,
+      tier: 'vm', guest: vmGuest,
     });
     assert(ev.status === 200, '改入虚拟机档（就绪检测放行）', ev.text.slice(0, 240));
     const saidVm = await act(nameVm, 'send_message', { text: '虚拟机档读一下' });
@@ -927,7 +927,7 @@ async function approvePlan(name) {
     const lv = await lines(nameVm);
     const tv = (lv.filter((x) => x.tool).pop() || {}).tool || {};
     assert(tv.module === 'toolbox' && tv.name === 'read_txt' && tv.ok === true, 'vm 档工具在 guest 里成功（落成 tool 行）', JSON.stringify(tv).slice(0, 300));
-    assert(String(tv.output || '').includes('Debian GNU/Linux'), '工具读到的是 guest 的 os-release（宿主不是 Debian）', String(tv.output).slice(0, 240));
+    assert(String(tv.output || '').includes('Debian GNU/Linux'), '工具读到的是 guest 的 os-release（不是宿主）', String(tv.output).slice(0, 240));
     // virtiofs 档：会话活着时守护进程要在跑（登记了 virtiofsd 才会选它，与组合根同一份判据）。
     if (process.env.SOLOMNI_VM_VIRTIOFSD) {
       const vfp = require('child_process').spawnSync('pgrep', ['-af', 'virtiofsd'], { encoding: 'utf8' });
