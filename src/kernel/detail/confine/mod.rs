@@ -211,14 +211,28 @@ pub fn run_fenced(job: &FenceJob, command: &str) -> i32 {
 
 /// 目的：围栏里工具失败时给回执的边界说明（可达范围 + 范围外被拒）；不需要说明时返回 None。
 /// 约束：只在围栏真强制生效且工具自己非零退出时给；不含任何语言知识，也不猜被拒的是哪条路径。
-fn fence_boundary_note(spec: &FenceSpec, enforced: bool, code: i32) -> Option<String> {
-    if !enforced || code == 0 {
+fn fence_boundary_note(
+    spec: &FenceSpec,
+    fs_enforced: bool,
+    net_enforced: bool,
+    code: i32,
+) -> Option<String> {
+    if !fs_enforced || code == 0 {
         return None;
     }
+    let net = if net_enforced {
+        if spec.net {
+            "开"
+        } else {
+            "关"
+        }
+    } else {
+        "未生效"
+    };
     Some(format!(
         "[围栏] 工具进程只可达 {}（网：{}）；范围外的访问被围栏拒绝。",
         reachable_roots(spec),
-        if spec.net { "开" } else { "关" }
+        net
     ))
 }
 
@@ -255,8 +269,8 @@ fn push_root(all: &mut Vec<String>, p: &Path) {
 }
 
 /// 目的：把边界说明打到 stderr（守门进程的 stderr 由外层拼进工具回执）。
-fn note_fence_boundary(spec: &FenceSpec, enforced: bool, code: i32) {
-    if let Some(line) = fence_boundary_note(spec, enforced, code) {
+fn note_fence_boundary(spec: &FenceSpec, fs_enforced: bool, net_enforced: bool, code: i32) {
+    if let Some(line) = fence_boundary_note(spec, fs_enforced, net_enforced, code) {
         eprintln!("{}", line);
     }
 }
@@ -1152,15 +1166,27 @@ mod tests {
             cwd: PathBuf::from("mods").join("m0"),
             net: false,
         };
-        assert!(fence_boundary_note(&spec, true, 0).is_none(), "成功不打扰");
         assert!(
-            fence_boundary_note(&spec, false, 1).is_none(),
+            fence_boundary_note(&spec, true, true, 0).is_none(),
+            "成功不打扰"
+        );
+        assert!(
+            fence_boundary_note(&spec, false, true, 1).is_none(),
             "没强制生效就不谈边界"
         );
-        let note = fence_boundary_note(&spec, true, 1).expect("围栏内失败要有边界说明");
+        let note = fence_boundary_note(&spec, true, true, 1).expect("围栏内失败要有边界说明");
         assert!(note.contains("范围外的访问被围栏拒绝"), "{}", note);
         assert!(note.contains("（网：关）"), "{}", note);
         assert!(note.contains("mods"), "要报出可达范围：{}", note);
+        // 网络没装上时不能说“关”：那会让用户以为断网生效了。
+        let degraded =
+            fence_boundary_note(&spec, true, false, 1).expect("文件系统围栏失败也要说明");
+        assert!(degraded.contains("（网：未生效）"), "{}", degraded);
+        // 放行网络的失败仍报“开”，不把允许说成阻断。
+        let mut allowed = spec;
+        allowed.net = true;
+        let note = fence_boundary_note(&allowed, true, true, 1).expect("失败说明");
+        assert!(note.contains("（网：开）"), "{}", note);
     }
 
     /// 可达范围摘要：重复的根只报一次；根多时折叠，失败说明不因根多而失控。

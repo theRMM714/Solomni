@@ -1,12 +1,21 @@
 //! Landlock 探针：真机验收本平台的文件系统围栏——允许的根里写得进，根之外读不到。
 //! 驱动方式与运行期完全一致：交给守门进程（本程序 --fence-run）去装围栏。
 
-use crate::probe::{job_json, job_json_tree, run_launcher, scratch};
+use crate::probe::{
+    bin, job_json, job_json_net, job_json_net_policy, job_json_tree, python_command, run_launcher,
+    run_launcher_env, scratch, FENCE_FAILED, SELFCHECK_FAIL_FLAG,
+};
 
 /// 与 src/kernel/detail/confine/linux.rs 的 RULES_REJECTED_MARK 一致（集成测试看不到 crate 内部）。
 /// 自检已确认本机 Landlock 有效，却仍装不上 = 我们的规则写错了；
 /// 那种情况**必须响亮失败**，否则「绿」等于围栏根本没验收。
 const RULES_REJECTED_MARK: &str = "landlock 规则被拒绝";
+
+/// 与 src/kernel/detail/confine/linux.rs 的 SECCOMP_REJECTED_MARK 一致：
+/// 自检已确认机制有效、却仍装不上 = 规则写错，必须响亮失败。
+const SECCOMP_REJECTED_MARK: &str = "seccomp 规则被拒绝";
+/// 与 linux.rs 的 NETWORK_NOT_ENFORCED 一致：机制不可用，工具按无网络围栏降级。
+const NETWORK_NOT_ENFORCED: &str = "网络围栏未生效";
 
 #[test]
 fn fence_denies_outside_paths_and_allows_the_given_roots() {
@@ -313,5 +322,201 @@ fn fence_allows_node_to_start_by_reading_the_openssl_config() {
         "node 脚本的 stdout 要透传：{} / {}",
         out,
         err
+    );
+}
+
+/// **网络开关**：net=false 拒绝出站（回环也拒绝）；net=true 放行。
+/// 用本机回环监听做确定性对照：先证明宿主连得上，再验围栏里两种模式的差异。
+#[test]
+fn network_follows_the_net_flag() {
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("占回环端口");
+    let port = listener.local_addr().expect("取回环端口").port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut buf = [0u8; 1024];
+            let _ = std::io::Read::read(&mut stream, &mut buf);
+            let _ = std::io::Write::write_all(
+                &mut stream,
+                b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok",
+            );
+        }
+    });
+    // 输出落到 rw 根里：Landlock 的只读基线不给 /dev/null 写权，写 /dev/null 会让 curl 以 23 失败。
+    let dir = scratch("fence-net");
+    let body = dir.join("body.txt");
+    let cmd = format!(
+        "curl -s -m 4 --noproxy '*' -o {} -w '%{{http_code}}' http://127.0.0.1:{}/",
+        body.display(),
+        port
+    );
+    let host = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(&cmd)
+        .output()
+        .expect("宿主跑一遍");
+    if String::from_utf8_lossy(&host.stdout).trim() != "200" {
+        eprintln!("[探针] 宿主回环监听没有应答，跳过网络开关断言");
+        return;
+    }
+    let closed = job_json_net(std::slice::from_ref(&dir), &dir, false, false);
+    let (code, out, err) = run_launcher(&closed, &cmd);
+    if err.contains(RULES_REJECTED_MARK) {
+        panic!(
+            "本机 Landlock 机制有效，但规则装不上（规则写错）：{}",
+            err.trim()
+        );
+    }
+    if err.contains(SECCOMP_REJECTED_MARK) {
+        panic!(
+            "本机 seccomp 机制有效，但网络规则装不上（规则写错）：{}",
+            err.trim()
+        );
+    }
+    if err.contains(NETWORK_NOT_ENFORCED) {
+        eprintln!(
+            "[探针] 本机 seccomp 网络围栏不可用（环境结论，如实跳过，不作为通过）：{}",
+            err.trim()
+        );
+        return;
+    }
+    assert_ne!(code, Some(0), "net=false 不该连得上回环：{} / {}", out, err);
+    assert_eq!(
+        out.trim(),
+        "000",
+        "net=false 不该连得上回环：stderr={}",
+        err
+    );
+
+    let open = job_json_net(std::slice::from_ref(&dir), &dir, false, true);
+    let (code, out, err) = run_launcher(&open, &cmd);
+    if err.contains(RULES_REJECTED_MARK) || err.contains(SECCOMP_REJECTED_MARK) {
+        panic!("围栏规则装不上（规则写错）：{}", err.trim());
+    }
+    assert_eq!(code, Some(0), "net=true 应放行回环出站：{} / {}", out, err);
+    assert_eq!(out.trim(), "200", "net=true 应放行回环出站：stderr={}", err);
+}
+
+/// **真正断网**：net=false 不只拦 TCP，也拦 UDP；本地 AF_UNIX 仍可用（不误伤本地 IPC）。
+/// 用 Python 一次跑完两个断言；本机没有 python 时如实跳过，不静默当作通过。
+#[test]
+fn network_deny_blocks_udp_but_keeps_unix_sockets() {
+    let script = r#"import socket
+try:
+    socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    print('UDP-OPEN')
+except OSError:
+    print('UDP-DENIED')
+try:
+    socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    print('UNIX-OK')
+except OSError:
+    print('UNIX-DENIED')
+"#;
+    let Some(cmd) = python_command(script) else {
+        eprintln!("[探针] 本机没有 python，跳过 UDP / AF_UNIX 断言");
+        return;
+    };
+    let dir = scratch("fence-net-udp");
+    let spec = job_json_net(std::slice::from_ref(&dir), &dir, false, false);
+    let (_, out, err) = run_launcher(&spec, &cmd);
+    if err.contains(RULES_REJECTED_MARK) || err.contains(SECCOMP_REJECTED_MARK) {
+        panic!("围栏规则装不上（规则写错）：{}", err.trim());
+    }
+    if err.contains(NETWORK_NOT_ENFORCED) {
+        eprintln!(
+            "[探针] 本机 seccomp 网络围栏不可用（环境结论，如实跳过，不作为通过）：{}",
+            err.trim()
+        );
+        return;
+    }
+    assert!(
+        out.contains("UDP-DENIED"),
+        "net=false 必须连 UDP socket 都建不出来：{} / {}",
+        out,
+        err
+    );
+    assert!(
+        out.contains("UNIX-OK"),
+        "AF_UNIX 是本地 IPC，不该被网络过滤器误伤：{} / {}",
+        out,
+        err
+    );
+    assert!(
+        !out.contains("UDP-OPEN") && !out.contains("UNIX-DENIED"),
+        "两类 socket 的结论必须与预期一致：{} / {}",
+        out,
+        err
+    );
+}
+
+/// **机制不可用时 fail-closed**：要求强制网络围栏、且未同意降级时，守门进程必须拒绝执行，
+/// 而不是按无网络围栏继续跑。用测试注入把自检确定性地压成“本机不允许”。
+#[test]
+fn network_deny_refuses_when_the_mechanism_is_unavailable() {
+    let dir = scratch("fence-net-unavailable");
+    let spec = job_json_net_policy(
+        std::slice::from_ref(&dir),
+        &dir,
+        false,
+        false,
+        false,
+        true,
+        false,
+    );
+    let (code, out, err) =
+        run_launcher_env(&spec, "echo should-not-run", &[(SELFCHECK_FAIL_FLAG, "1")]);
+    assert_eq!(
+        code,
+        Some(FENCE_FAILED),
+        "机制不可用且未同意降级时必须拒绝执行：{} / {}",
+        out,
+        err
+    );
+    assert!(
+        err.contains(NETWORK_NOT_ENFORCED),
+        "拒绝原因要带稳定标记：{}",
+        err
+    );
+    assert!(
+        err.contains("按全局策略拒绝执行"),
+        "拒绝原因要说清是全局策略：{}",
+        err
+    );
+    assert!(
+        !out.contains("should-not-run"),
+        "拒绝执行时命令不得跑起来：{} / {}",
+        out,
+        err
+    );
+}
+
+/// **能力上报**：机制真的可用时，--doctor 必须报 net=true；否则启动还会把网络围栏当缺失项，
+/// 用户仍会被询问降级或拒绝执行——探针通过也不代表收口完成。
+#[test]
+fn doctor_reports_network_fence_available() {
+    let root = scratch("fence-net-doctor");
+    let out = std::process::Command::new(bin())
+        .arg("--doctor")
+        .arg("--root")
+        .arg(&root)
+        .output()
+        .expect("跑 --doctor");
+    assert!(
+        out.status.success(),
+        "--doctor 要能跑完：{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let json: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("--doctor 的 stdout 是 JSON");
+    let net = json
+        .get("fence")
+        .and_then(|f| f.get("net"))
+        .and_then(|v| v.as_bool());
+    assert_eq!(
+        net,
+        Some(true),
+        "--doctor 要把 Linux 的网络围栏报成可用：{}",
+        String::from_utf8_lossy(&out.stdout)
     );
 }

@@ -107,9 +107,10 @@ agent 实例名不得占用 `work` / `children`（名单在 `systools/names.yaml
   **必要落点授不上不静默降级**：经统一裁决通道问一次（本轮无围栏跑一次 / 放弃这次调用）；拒绝、没人答或没有可回答的前端一律不执行；**可选落点**授不上只记事实。
   机制细节见 [ARCHITECTURE.md](ARCHITECTURE.md)，三平台真机探针见 [TESTING.md](TESTING.md)。
 - **出站网络是全局开关**（`sandbox.policy.network`）：会话工具、直接模块工具、常驻服务、模块构建共用；
-  不再有会话 `exec.net`。虚拟机档决定 guest 网卡；本机档 Windows 授 `internetClient`、macOS 放行 `network-outbound`、
-  Linux 不围栏网络（能力表如实报 `net=false`，按 `on_unavailable` 拒绝或本进程降级）。只放行出站，
-  不授 private network / loopback；Windows 未授权 `windows.write_acl` 时容器不装，网络不生效。
+  不再有会话 `exec.net`。虚拟机档决定 guest 网卡；本机档 Windows 授 `internetClient`（只公网出站，不授
+  private network / loopback）、macOS 放行 `network-outbound`、Linux 在 `network=false` 时由 seccomp 拒绝
+  非 AF_UNIX / AF_NETLINK socket（TCP/UDP/raw 与回环都出不去）。Linux 的 `network=true` 不装网络过滤器，
+  不限制入站/绑定（平台差异）。Windows 未授权 `windows.write_acl` 时容器不装，网络不生效。
 - **未授权不等于无围栏**：Windows 的容器围栏（路径级可达范围与断网）要授权才装得上；
   Linux / macOS 的围栏在守门进程里自足，不受授权影响。进程树与环境白名单两种时段都生效；
   启动报告把"本机能力"与"本次实际"分两行说清。

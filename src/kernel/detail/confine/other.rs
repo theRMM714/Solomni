@@ -38,7 +38,7 @@ pub fn run_fenced(
         Ok(s) => {
             let code = s.code().unwrap_or(FENCE_FAILED);
             // 本平台没有文件系统围栏可装：边界说明恒不触发，调用只为与三平台同一处收口。
-            super::note_fence_boundary(spec, false, code);
+            super::note_fence_boundary(spec, false, false, code);
             code
         }
         Err(e) => {

@@ -53,8 +53,8 @@ session/<工作名>/
   会话只能追加、不能清空。语义见 [docs/permission/README.md](../permission/README.md)。
 - **出站网络是全局开关**（`sandbox.policy.network`）：会话工具、直接模块工具、常驻服务、模块构建共用；
   不再有 `exec.net`。虚拟机档决定 guest 网卡；本机档 Windows 授 `internetClient`、macOS 放行 `network-outbound`、
-  Linux 不围栏网络（`capability().net=false`，按 `on_unavailable` 拒绝或本进程降级）。只放行出站，
-  不授 private network / loopback；Windows 未授权 `windows.write_acl` 时容器不装，网络不生效。
+  Linux `net=false` 用 seccomp 拒绝非本地 socket（`net=true` 不装网络过滤器，不限制入站/绑定）。
+  Windows 只放行公网出站，不授 private network / loopback；Windows 未授权 `windows.write_acl` 时容器不装，网络不生效。
 - 侧栏**可见**：agent 会话挂在主会话下（`meta.parent`），用户可进入查看与发言干预。
 - 侧栏顺序是**树序**，由核心给出（父会话紧跟它的子会话，深度优先、各自按时间倒序）：
   顺序与缩进是同一件事的两面，各排各的就会出现"子会话排在父会话上面"的错位。

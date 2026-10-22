@@ -347,7 +347,7 @@ pub fn run_fenced(
     free_sid(sid);
     match outcome {
         Ok(code) => {
-            super::note_fence_boundary(spec, true, code);
+            super::note_fence_boundary(spec, true, true, code);
             code
         }
         Err(e) => {

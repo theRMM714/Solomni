@@ -102,22 +102,26 @@
 - 守门进程用系统 shell 执行模块作者写的命令行（`sh -c` / `cmd /C`）——命令行是模块声明的一部分。
 - 环境白名单：外层 `env_clear`，只注入 `fence_env`（PATH / PATHEXT / 系统根 / LANG / TZ 等，`HOME` 与 `TEMP` 指向该 agent 私有沙箱）与模块隐秘字段；其它环境与凭据不进工具进程。
 - 收尾：stdout / stderr 分别读；超时 30 秒（`ProcTools::timeout`）后连根杀树；输出上限 16000 字符。超时、截断、围栏失败的文案经 `ProcessTexts` 注入，机制不硬编码。
-- 围栏装不上（本机不支持 / 容器起不来）：`net=false` 时守门进程如实降级，按无围栏执行；`net=true` 时能力授不上则**拒绝执行**（不能把文件系统围栏一起丢掉）。能力等级已在启动报告里说明。
+- 围栏装不上（本机不支持 / 容器起不来）：命中 `require_fs` / `require_net` 且未同意降级时，守门进程以 `FENCE_FAILED` **拒绝执行**；已同意降级才如实降级继续。Linux 的文件系统与网络两项**独立**判定，一项装不上不影响另一项。能力等级已在启动报告里说明。
 - Windows 外层未授权（`sandbox.policy.windows.write_acl=false`）：容器不装；策略要求强制时拒绝，否则按无围栏执行；全局网络开关不生效于容器，启动报告的「本次实际」已标出。
 - Windows 未授权时段先自检（`confine::verify`）：`EnvUnavailable` = 本机不支持，降级照跑；`Broken` = 自检说机制有效却装不上（我们写错了），**拒绝执行**，不按无围栏跑。
-- 固定退出码 `111`（`FENCE_FAILED`）只用于：`FenceJob` JSON 非法、守门进程里工具命令起不来、或工具被信号结束拿不到退出码。
-- 围栏生效且工具非零退出：守门进程往 stderr 补一条边界说明（可达范围 + 范围外被围栏拒绝）；成功不打扰。
+- 固定退出码 `111`（`FENCE_FAILED`）用于：`FenceJob` JSON 非法、守门进程里工具命令起不来、工具被信号结束拿不到退出码，或全局策略要求强制而机制装不上（拒绝执行）。
+- 围栏生效且工具非零退出：守门进程往 stderr 补一条边界说明（可达范围 + 实际网络状态：开 / 关 / 未生效 + 范围外被围栏拒绝）；成功不打扰。
 
 平台差异：
 
 | 平台 | 文件系统 | 出站网络 | 机制 |
 | --- | --- | --- | --- |
-| Linux | Landlock（内核不支持或规则被拒时如实降级） | 不围栏 | 守门进程内装 Landlock |
-| macOS | seatbelt（`sandbox_init` 是私有且已弃用的 ABI；失效时如实降级） | 按 `net`（真 = 放行 `network-outbound`；假 = 拒绝） | 守门进程内装 seatbelt；祖先元数据放行 `file-read-metadata` |
+| Linux | Landlock（内核不支持或规则被拒时如实降级） | 按 `net`（真 = 不装网络过滤器；假 = seccomp 拒绝非 AF_UNIX / AF_NETLINK socket，TCP/UDP/raw 与回环都出不去） | 守门进程内装 Landlock 与 seccomp |
+| macOS | seatbelt（`sandbox_init` 是私有且已弃用的 ABI；失效时如实降级） | 按 `net`（真 = 放行 `network-outbound`；假 = 拒绝 `network*`） | 守门进程内装 seatbelt；祖先元数据放行 `file-read-metadata` |
 | Windows | AppContainer（外层 `prepare_fence` 把可达范围写进目录 ACL） | 按 `net`（真 = 授 `internetClient` 公网出站；假 = 不授） | 守门进程建容器 profile 并在容器内跑；作业对象管进程树与进程数上限 |
 | 其它 | 无（如实降级） | 无 | 只有超时与整棵树终止 |
 
-- **网络边界**：全局 `sandbox.policy.network` 是唯一开关；只放行出站（Windows `internetClient` / macOS `network-outbound`），不授 private network，也不做 loopback 豁免；Linux 本机档不围栏网络（`capability().net=false`），按 `on_unavailable` 拒绝或本进程降级。Windows 未授权 `windows.write_acl` 时容器不装，网络不生效（启动报告的「本次实际」会标出）。
+- **网络边界**：全局 `sandbox.policy.network` 是唯一开关。平台落点：
+  Windows 授 `internetClient`（只放公网出站；不授 private network / loopback，也不做 loopback 豁免）；
+  macOS `net=true` 放行 `network-outbound`（入站与绑定仍由 `deny default` 拒绝，回环出站可用），`net=false` 拒绝 `network*`；
+  Linux `net=true` 不装网络过滤器（不限制入站/绑定，这是与 Windows / macOS 的平台差异），`net=false` 用 seccomp 拒绝非 AF_UNIX / AF_NETLINK socket。
+  Windows 未授权 `windows.write_acl` 时容器不装，网络不生效（启动报告的「本次实际」会标出）。
 - 进程树：Unix 起进程时开独立进程组，超时 / 退出时对负 pid 发 `SIGKILL`；Windows 把工具进程放进守门进程的作业对象（`KILL_ON_JOB_CLOSE`），守门进程一死整棵树随之消亡。
 - **本机能力**与**本次实际**分开报（见 `src/main.rs` 的启动报告）：`sandbox.policy.windows.write_acl` 只决定 Windows 是否写目录 ACL；Linux / macOS 的围栏在守门进程里自足。所以「本次实际」在 Linux / macOS 上等于本机能力；Windows 未授权时 fs/net 为假，进程树、资源上限与环境白名单照旧生效。
 - **进程级降级**：`FenceJob.policy` 携带 `require_fs` / `require_net` / `allow_degraded`；机制装不上时，`allow_degraded=false` 一律以 `FENCE_FAILED` 拒绝（所有平台一致），已同意降级才继续。降级只活在当前进程，不落盘。

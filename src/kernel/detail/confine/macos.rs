@@ -135,7 +135,7 @@ pub fn run_fenced(
     match cmd.status() {
         Ok(s) => match s.code() {
             Some(c) => {
-                super::note_fence_boundary(spec, enforced, c);
+                super::note_fence_boundary(spec, enforced, enforced, c);
                 c
             }
             None => {

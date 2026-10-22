@@ -49,6 +49,31 @@ pub fn job_json_net(rw: &[PathBuf], cwd: &PathBuf, prepared: bool, net: bool) ->
     )
 }
 
+/// 目的：带 `FenceRunPolicy` 的守门进程入参——验“要求强制但机制不可用”时的拒绝路径。
+/// 约束：缺省探针只测降级，主动要求 `allow_degraded=false` 才能钉住 fail-closed。
+pub fn job_json_net_policy(
+    rw: &[PathBuf],
+    cwd: &PathBuf,
+    prepared: bool,
+    net: bool,
+    require_fs: bool,
+    require_net: bool,
+    allow_degraded: bool,
+) -> String {
+    let esc = |p: &PathBuf| p.to_string_lossy().replace('\\', "/");
+    let roots: Vec<String> = rw.iter().map(|p| format!("\"{}\"", esc(p))).collect();
+    format!(
+        "{{\"agent\":\"probe\",\"rw\":[{}],\"ro\":[],\"cwd\":\"{}\",\"net\":{},\"prepared\":{},\"home\":null,\"policy\":{{\"require_fs\":{},\"require_net\":{},\"allow_degraded\":{}}}}}",
+        roots.join(","),
+        esc(cwd),
+        net,
+        prepared,
+        require_fs,
+        require_net,
+        allow_degraded
+    )
+}
+
 /// 带**只读根**的守门进程入参（只读档的探针用）：`ro` 与 `rw` 同层，`prepared` 说明外层有没有做完本机授权。
 /// 只读根的授权只在 Windows 上需要写 ACE；unix 的机制在守门进程内自足，所以 prepared 传什么都行。
 pub fn job_json_ro(rw: &[PathBuf], ro: &[PathBuf], cwd: &PathBuf, prepared: bool) -> String {

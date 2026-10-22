@@ -263,7 +263,7 @@ async function main() {
     stop(mock);
     return 1;
   }
-  // 安全模式下的 e2e：Linux 没有网络围栏，用进程级注入明确同意降级；不写任何设置。
+  // 安全模式下的 e2e：显式同意本进程降级（Windows 未授权写 ACL 等机制缺项）；不写任何设置。
   const srv = spawn(BIN, ["-webUI", "--web-port", String(PORT_SRV), "--root", FIXTURE], {
     cwd: PRODUCT_ROOT,
     stdio: "inherit",

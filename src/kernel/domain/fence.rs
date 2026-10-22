@@ -60,9 +60,9 @@ pub struct FenceSpec {
     /// 目的：工具进程的工作目录（它所属模块的根目录）。
     pub cwd: PathBuf,
     /// 目的：这次执行是否放行出站网络（来自全局 `sandbox.policy.network`，不是会话字段）。
-    ///   能强制的本机档：Windows 授 `internetClient`、macOS 放行 `network-outbound`；Linux 本机档不围栏网络
-    ///   （`capability().net=false`，按 `on_unavailable` 拒绝或本进程降级）；虚拟机档由 QEMU 网卡决定。
-    ///   只放行出站，不授 private network / loopback。
+    ///   平台落点：Windows 授 `internetClient`、macOS 放行 `network-outbound`、Linux `net=false` 用 seccomp
+    ///   拒绝非本地 socket（`net=true` 不装网络过滤器，不限制入站/绑定）；虚拟机档由 QEMU 网卡决定。
+    /// 约束：Windows 只放行公网出站，不授 private network / loopback；Linux 的平台差异见 docs/kernel/README.md。
     pub net: bool,
 }
 

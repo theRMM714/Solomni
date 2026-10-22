@@ -1,19 +1,3 @@
 # Linux 平台的缺口账（当前状态：条目存在 = 这条测试还没有；补上就删条目）。
 #
-# 除下面这条外，Linux 上的机制与整仓测试已由三平台 CI 的 ubuntu-latest 真跑通过
-# （Landlock 围栏的越界拒绝与允许根内写入、单元层、跨平台集成、端到端）。
-
-- id: fence.linux-net
-  scope: linux
-  level: T4
-  why: |
-    Linux 本机档没有网络围栏（capability.net=false）。全局网络开关成为硬策略后，
-    network=deny 在 Linux 上仍会出站；按 refuse 语义只能拒绝执行，不能真正断网。
-  how: |
-    1) 评估 Landlock ABI 4 的 network 规则（TCP connect/bind）或 netns/seccomp；
-    2) 机制不可用时按全局 on_unavailable=refuse 拒绝；
-    3) 补 tests/linux 探针：deny 时出站连接失败，allow 时可用。
-  accept: |
-    Linux 本机在 network=deny 时工具进程无法建立出站连接；
-    机制不可用时拒绝执行并给出稳定标记；探针真机通过。
-  blocked_by: 缺少实现（Linux 本机网络围栏机制未接）；下次完成
+# 当前为空。

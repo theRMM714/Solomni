@@ -76,8 +76,8 @@ files:                      # 包内文件指纹：用于可复现与呈现
   **运行包库（`runtimes/`）只服务虚拟机档**：本机档不看它，也不用它满足模块声明的 `runtimes`——本机档的能力就是宿主实际有什么。
 - **虚拟机档**：会话选定后，`vm` 能力做**选型诊断**并派生**装配计划**（装载顺序、虚拟根）。
   网络是**全局开关**（`sandbox.policy.network`），不是会话字段：虚拟机档决定 guest 网卡；本机档由平台围栏决定
-  （Windows `internetClient`、macOS `network-outbound`、Linux 不围栏，按 `on_unavailable` 拒绝或本进程降级）。
-  默认 false，只放行出站、不授 private network / loopback。
+  （Windows `internetClient`、macOS `network-outbound`、Linux `net=false` 用 seccomp 拒绝非本地 socket；
+  Linux `net=true` 不装网络过滤器，不限制入站/绑定）。默认 false；Windows 只放行公网出站，不授 private network / loopback。
   三类情况分开处理：
   - **装载**（只发生在虚拟机档）：**prefix** 包在起 guest 后把 `<prefix>/bin/*` 软链进 `/usr/local/bin`（裸名命令因此可用）；
     **system** 包按 `provides_paths` 把只读载荷**叠写**进系统路径（复制合并 + "已叠"标记，失败不落标记）。
