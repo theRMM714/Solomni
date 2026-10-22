@@ -72,7 +72,7 @@
 ## 七、Git 与 CI
 
 - `main` 是唯一长期分支，有保护：不直接提交、不 push；一切经任务分支 + PR，合并由用户 squash。
-- 任务分支从最新 `main` 切；默认 `development`，并行任务用 `task/<简述>`；合并后删除。
+- 任务分支从最新 `main` 切；分支名用 `task/<简述>`；合并后删除。
 - 提交前检查 `.gitignore`，用 `git status` 确认没有意外跟踪文件或无关修改；不覆盖、删除或提交用户已有且不属于本次范围的修改。
 - agent 不自行 Ready、不自行合并。
 - CI 触发、报告读取与判定见 `docs/testing/execution-ci.md`。
