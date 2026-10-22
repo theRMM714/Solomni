@@ -1,5 +1,5 @@
-// CI 发布入口的合并步骤（契约见 docs/testing/execution-ci.md）：每个平台由 quality 与 e2e 两个 job
-// 各交一份报告，这里并成该平台唯一的 target/test-report.json，再交给 tests/ci-publish.mjs 发布。
+// CI 发布入口的合并步骤（契约见 docs/testing/execution-ci.md）：每个平台合并 quality 与 e2e
+// 两份报告，这里并成该平台唯一的 target/test-report.json，再交给 tests/ci-publish.mjs 发布。
 // 任何一半缺报告都补一条 fail 步骤——"没跑到"不能读成"通过"。
 import fs from "node:fs";
 import path from "node:path";
@@ -24,7 +24,7 @@ function main() {
   const quality = read(REPORT);
   const e2e = read(E2E);
   if (!quality && !e2e) {
-    console.log("::warning title=没有可合并的报告::quality 与 e2e 两个 job 都没产出报告");
+    console.log("::warning title=没有可合并的报告::quality 与 e2e 两份报告都没产出");
     return;
   }
 

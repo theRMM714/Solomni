@@ -64,7 +64,7 @@
 2. 方案：目标、范围（明确不做）、验收、步骤、风险、文档、CI；跨单元契约先冻结；用户同意后开工。
 3. 开工：最新 `main` 切分支 → 空提交 → push → 立刻 Draft PR（正文=方案）；**没有 Draft PR 不写实现代码**。
 4. 实施：一个阶段一个提交；每次 push 更新 PR 的清单、阶段记录与测试证据；范围变化先改 PR 并重新确认。
-5. 收口：代码任务 `node run-tests.js` 全绿；纯叙述型文档任务 `node run-tests.js --docs` 全绿（只代表文档门禁，`docs/presentation/contracts.md` 仍走全量）；`git status` 干净；交用户确认；确认后销账、改最终 PR 正文；用户 Ready/合并。
+5. 收口：代码任务 `node run-tests.js` 全绿；纯叙述型文档任务 `node run-tests.js --docs` 全绿（只代表文档审查 + 结构审查，`docs/presentation/contracts.md` 仍走全量）；`git status` 干净；交用户确认；确认后销账、改最终 PR 正文；用户 Ready/合并。
 6. 本机回路：`node dev.js test|fmt|clippy`；门禁 `node run-tests.js`（纯文档用 `--docs`）；不直接调 `cargo`。
 
 开工命令、开工自检、阶段定义、PR 更新节奏与完整流程见 `docs/workflow/README.md`。

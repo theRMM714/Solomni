@@ -16,15 +16,18 @@ node dev.js fmt       # T0 格式（cargo fmt --all -- --check）
 node dev.js clippy    # T0 静态检查（cargo clippy --all-targets --all-features --keep-going -- -D warnings）
 ```
 
-纯**叙述型文档**改动用文档门禁模式（不跑 cargo、单元、平台目标与 L4，只读仓库并写本次报告）：
+纯**叙述型文档**改动用审查模式（不跑 cargo、单元、平台目标与 L4，只读仓库并写本次报告）：
 
 ```text
-node run-tests.js --docs
+node run-tests.js --docs             # 文档审查 + 结构审查（本地纯文档任务）
+node run-tests.js --audit=docs       # 只跑文档审查（CI docs job）
+node run-tests.js --audit=structure  # 只跑结构审查（CI structure job）
 ```
 
-它只跑 `structuralAudit()`（含文档与真相源比对：链接、门户路由表、unit-map、提示词键表、systools、links.yaml、注释契约；以及同属结构审查的纯文本检查，不编译），
-报告标 `mode: "docs"`；`docs/presentation/contracts.md` 是机器契约文档（ROUTES 表由 Rust 测试消费），**不算叙述型文档**，要跑全量。
-多个模式同时出现时 `--coverage` 优先于 `--docs`，`--docs` 优先于 `--skip-e2e`；纯文档任务不要为了凑流程跑全量。
+`--docs` 同时跑 `docsAudit()`（文档自身：门户存在 / 链接、根文档路由）与 `structureAudit()`（代码↔文档结构：unit-map、提示词键表、systools、links.yaml、注释契约、依赖方向、测试目标 / 孤儿 / `#[ignore]` 等；不编译），
+报告标 `mode: "docs"`。CI 把两者拆成独立的 `docs` / `structure` job，`--audit=docs|structure` 只跑其中一路（structure 报告 `mode: "structure"`）。
+`docs/presentation/contracts.md` 是机器契约文档（ROUTES 表由 Rust 测试消费），改它仍要走全量；同时它是文档，文档审查也会查它的链接。
+多个模式同时出现时 `--coverage` 优先于审查模式，`--docs` 优先于 `--audit`；`--skip-audit` 只作用于全量模式。纯文档任务不要为了凑流程跑全量。
 
 迭代到一定段落、要按门禁判一次时用完整入口的**质量 job 模式**（T0 全套 + L1 单元 + 四个平台目标 + 前端冒烟 + 开发回路自检 + 环境引导自检，只省 L4）：
 
@@ -47,7 +50,7 @@ node run-tests.js
 1. `cargo build`（并打印安全模式 / 真机围栏模式说明）；
 2. 运行 `solomni --doctor`，记录当前平台和围栏能力；
 3. `T0 编译（--all-targets）`（硬失败）；
-4. `T0 结构审查`（硬失败；逐项判定见 [levels.md](levels.md) 的 T0）；
+4. `T0 结构审查`（文档审查 + 结构审查；硬失败；逐项判定见 [levels.md](levels.md) 的 T0）；
 5. `T0 格式（fmt --check）`（硬失败）；
 6. `T0 静态检查（clippy）`（硬失败）；
 7. `T0 编译告警`（硬失败）；
@@ -58,13 +61,13 @@ node run-tests.js
 12. 逐个运行四个测试目标 `cross-platform` / `windows` / `linux` / `macos`（同样默认并行；非本平台且整目标为空的记 `skip-platform`）；
 13. 前端冒烟；
 14. 开发回路自检（`tests/dev-loop.mjs`：`dev.js` 的子命令表与"环境没就绪就如实拒绝"）；
-15. 变更分流自检（`tests/ci-changes.mjs --self-test`：分类样例、`include_str!/include_bytes!` 文档消费、失败兜底）；
+15. 变更分流自检（`tests/ci-changes.mjs --self-test`：`code_changed` / `docs_changed` 两个谓词、`include_str!/include_bytes!` 文档消费、失败兜底）；
 16. 环境引导自检（`tests/env-bootstrap.mjs`：`env.js` 的下载 / 续传 / 结构判定 / sha256 闸，见下文；仅 Windows 真跑，时限 5 分钟）；
 17. 存在编排器时运行 `L4 端到端`（编排器会**现场构建 indexer**：编译器版本进日志，构建失败即失败；`--skip-e2e` 时这一步整步不出现）；
 18. `T0 项目外写`（快照项目外缓存根，新增 / 变化即硬失败；顺带清理系统临时目录里上次崩溃残留的 `solomni-*`）；
 19. 写入 `target/test-report.json` 并打印 `TEST-REPORT-OK` 或 `TEST-REPORT-FAIL`；平台缺口账为空时再打印 `TEST-REPORT-ACCEPTED`。
 
-`--docs` 是**独立模式**：只跑上面的第 4 步（结构审查），报告 `mode: "docs"`，不打印 `TEST-REPORT-ACCEPTED`。
+`--docs` / `--audit=docs|structure` 是**独立模式**：只跑上面的第 4 步对应的审查（`--docs` 两者都跑），报告 `mode: "docs"` / `"structure"`，不打印 `TEST-REPORT-ACCEPTED`。
 
 每一步都有墙钟上限（默认 15 分钟；L4 20 分钟，环境引导自检 5 分钟）：超时即硬失败，证据记进报告的 `timeouts`，不会把本地入口或
 CI job 拖到外层超时。每步用时记在报告的 `ms`，超预算的标 `[slow]`（只报不拦）。
@@ -190,7 +193,7 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 只要不是 `0`，工作流变红并打印 `MUTATION-FOUND`（全捕获打印 `MUTATION-OK`）——**这是给人看的调查结果，
 不参与 `TEST-REPORT-ACCEPTED`，也不写 `ci-report`**。
 
-结果分两处，**各推各的**（`ci-report` / `ci-doc` 由 `test.yml` 独占，突变不碰它们）：
+结果分两处，**各推各的**（`ci-report` 由 `test.yml` 独占，突变不碰它）：
 
 - **`ci-mutation` 滚动分支**（小文本，可 `git show`，无凭据也能读）：
   `git fetch origin && git show origin/ci-mutation:capability-repair/missed.txt`；键是 `core` 或 `capability-<名字>`，
@@ -205,41 +208,55 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 
 跨平台验收工作流是 `.github/workflows/test.yml`，**两种触发：PR（目标 `main`，且已 Ready for review）与手动
 `workflow_dispatch`**；`push` 不触发。Draft PR 的 `opened` / `synchronize` 仍会创建 run，但所有 job 跳过
-（不耗 runner，也不发布 `ci-report` / `ci-doc`）；标 Ready（`ready_for_review`）才跑验收，之后的推送同样重跑。
+（不耗 runner，也不发布 `ci-report`）；标 Ready（`ready_for_review`）才跑验收，之后的推送同样重跑。
 PR 验收 PR head 提交（`SOURCE_SHA`），报告的 `sha` 因此等于 PR 头；手动派发验收 `github.sha`。
 矩阵 `windows-latest / ubuntu-latest / macos-latest`（`fail-fast: false`，一个平台失败不影响另外两个出结论）。
-来自 fork 的 PR 照跑测试，但不发布 `ci-report` / `ci-doc`（token 只读）。
+来自 fork 的 PR 照跑测试，但不发布 `ci-report`（token 只读）。
 
-**契约：代码 PR 每个平台恰好两个重 job**——`quality` 与 `e2e`；这是刻意的上限，**不得再拆**。
-在此之外有两条不分平台的快道，以及两个发布 job：
+平台相关的 job 是 `quality` 与 `e2e`；`changes` / `docs` / `structure` / `publish-report` 是平台无关的 job：
 
 | job | 跑什么 | 对应入口 |
 | --- | --- | --- |
-| `quality` | T0 质量门禁 + 供应链 + L1 单元 + 平台探针 + 前端冒烟 + 开发回路 / 变更分流 / 环境引导自检（**跳过 L4**） | `node run-tests.js --fence-live --skip-e2e` |
+| `quality` | 平台门禁 + 供应链 + L1 单元 + 平台探针 + 前端冒烟 + 开发回路 / 变更分流 / 环境引导自检（**跳过 L4 与结构审查**） | `node run-tests.js --fence-live --skip-e2e --skip-audit` |
 | `e2e` | L4 端到端（自己构建产品，与 `quality` 并行） | `node tests/ci-e2e.mjs`（CI 专用；本地整跑用 `node run-tests.js --fence-live`） |
-| `changes` | 判定本次 PR 是否只改叙述型文档；从 base 取分类器副本，自测 + `include_str!/include_bytes!` 文档消费自检 | `node tests/ci-changes.mjs`（副本） |
-| `docs` | 仅 docs-only：文档门禁（结构审查；文档与真相源比对 + 纯文本检查） | `node run-tests.js --docs` |
-| `publish-report` | 代码 PR：合并 quality / e2e 报告并发布 `ci-report` | `tests/ci-merge.mjs` + `tests/ci-publish.mjs` |
-| `publish-doc-report` | 文档 PR：把文档门禁报告发布到 `ci-doc` | `tests/ci-publish.mjs`（`REPORT_BRANCH=ci-doc`、`REPORT_OS=docs`） |
+| `changes` | 判定 `code_changed` / `docs_changed`；从 base 取分类器副本，自测 + `include_str!/include_bytes!` 文档消费自检 | `node tests/ci-changes.mjs`（副本） |
+| `docs` | 有文档变更：文档审查（门户 / 链接 / 根文档路由） | `node run-tests.js --audit=docs` |
+| `structure` | 始终跑：结构审查（代码↔文档结构；文档与真相源比对 + 纯文本检查） | `node run-tests.js --audit=structure` |
+| `publish-report` | 汇总三条 lane 的报告并发布 `ci-report` | `tests/ci-merge.mjs` + `tests/ci-publish.mjs` |
 
-**docs-only 的分流**：`changes` 先把 PR 文件分成两类。只有全部文件都是**叙述型文档**（`*.md`、`docs/**`、`LICENSE`）才
-`docs_only=true`；`docs/presentation/contracts.md` 例外——它的 ROUTES 表由 `src/tests/routes.rs` 的 `include_str!` 消费，
-归代码门禁。代码、混合、空 diff、分类器异常一律 `docs_only=false`，宁可全量不可漏测。
+**三路分流**：`changes` 输出两个谓词：
 
-docs-only 时 `quality` / `e2e` 用 **job 级 `if` 跳过**：GitHub 对 required check 的 `skipped` 计为 Success，PR 照常可合并。
+- `code_changed`：至少一个非叙述型文档路径（`docs/presentation/contracts.md` 也算代码——ROUTES 表由 `src/tests/routes.rs` 的 `include_str!` 消费）；
+- `docs_changed`：至少一个文档路径（`*.md`、`docs/**`、`LICENSE`；contracts.md 同时算文档，文档审查也查它的链接）。
+
+| PR | `docs` 文档审查 | `structure` 结构审查 | `quality` / `e2e` 三平台 |
+| --- | --- | --- | --- |
+| 纯文档 | 跑 | 跑 | 跳过 |
+| 纯代码 | 跳过 | 跑 | 跑 |
+| 混合 | 跑 | 跑 | 跑 |
+
+**结构审查始终跑**：代码变更会破坏代码↔文档结构（新增 `src/**/*.rs` 没进 unit-map），文档变更同样会
+（删 unit-map 一行、删提示词键表一个键、从 `SYSTOOL.md` 删表名）。所以它不是“纯文档检查”，而是两边都要对得上的门禁。
+它平台无关，只跑一次，不放进三平台的 `quality`。
+
+`quality` / `e2e` / `docs` 用 **job 级 `if` 跳过**：GitHub 对 required check 的 `skipped` 计为 Success，PR 照常可合并。
 **不要改成 workflow 级 `paths-ignore`**：workflow 不启动时 required context 根本不会上报，会永远停在 pending。
-`changes` 先跑分类器自测；全量入口的「变更分流自检」步骤也会跑同一个 `--self-test`。分类器**从 base 取副本**（`git show base:tests/ci-changes.mjs`）再执行——PR 改自己的分类脚本不能把自己判成 docs-only，base 还没有该文件时直接 `docs_only=false`。取不到 diff 或未知路径时同样落回全量。
+`changes` 先跑分类器自测；全量入口的「变更分流自检」步骤也会跑同一个 `--self-test`。分类器**从 base 取副本**（`git show base:tests/ci-changes.mjs`）再执行——PR 改自己的分类脚本不能把自己判成全文档；base 还没有该文件时两路都跑。取不到 diff、空 diff 或未知路径时同样落回全量。
+新分类器写 `code_changed` / `docs_changed`；旧版 base 只写 `docs_only` 时新字段缺失，下游条件按 `!= 'false'` 兜底为全量跑，不会出现启动期全跳过。
 
-`publish-report` 把两个 job 的产物（`test-report-<os>` 与 `e2e-report-<os>`）用 `tests/ci-merge.mjs` 合并成该平台
-唯一的 `test-report.json`，再交给 `tests/ci-publish.mjs` 发布。**任一半缺报告都补一条 `fail` 步骤**——"没跑到"不能读成"通过"。
-Draft 的 run 里依赖 job 都跳过，两个发布 job 也跳过：不拿空产物发报告。
+`publish-report` 把三条 lane 的产物（`structure-report`、`docs-report`、`test-report-<os>` 与 `e2e-report-<os>`）汇总：
+平台的 quality / e2e 两份先用 `tests/ci-merge.mjs` 合并成该平台唯一的 `test-report.json`，再由 `tests/ci-publish.mjs` 发布。
+**任一半缺报告都补一条 `fail` 步骤**——"没跑到"不能读成"通过"。
+Draft 的 run 里依赖 job 都跳过，发布也跳过：不拿空产物发报告。
 
-**docs-only 不发布 `ci-report`**：该分支每次运行都会被重建为空分支再写入，只有一份文档报告会把三平台现场冲掉。
-文档报告改发独立的 `ci-doc` 滚动分支（`runs/docs/`，同样每次重建、只留最近一次）。它由 `publish-doc-report` 发布，
-成败都发；docs job 更早失败、没有报告时也会写一条失败 meta。`ci-report` 保持"三平台代码验收现场"的语义，不被文档运行污染。
+**报告统一到 `ci-report`**：该分支每次运行都会被重建为空分支再写入，只留最近一次运行。目录按 lane 分键：
+`runs/structure/`、`runs/docs/`、`runs/<os>/`。没有 `ci-doc`；文档审查 / 结构审查与三平台共用同一个分支。
+纯代码 PR 没有 `runs/docs/`，纯文档 PR 没有平台目录；读的时候按存在的 key 比 `sha`。
 
-> **规则集**：`development` 当前 required 的是六个重 job；新增 `文档门禁` 后要把它加进 required contexts，
-> 否则 docs-only 时六个重 job 是 skipped（Success），文档门禁红了也照样能合并。本仓的规则集修改由用户在 GitHub 设置里执行。
+> **规则集**：`development` 当前 required 的是六个平台 job；另需把 `文档审查` 与 `结构审查` 加进 required contexts
+> （旧的 `文档门禁` 已不再存在）。`变更分流` 只是路由 job，**不要**设为 required——它卡住不应阻塞合并，
+> 真正的闸门是文档审查 / 结构审查 / 六个平台 job。纯文档 PR 的三平台是 skipped（Success），但结构审查与文档审查会跑；
+> 纯代码 PR 的文档审查是 skipped（Success），结构审查始终跑。本仓的规则集修改由用户在 GitHub 设置里执行。
 
 `workflow_dispatch` 的 `clean` 输入（`true`）跳过 `actions/cache` 按干净机器跑；PR 触发没有这个输入，缓存照用。缓存只覆盖**项目内**路径
 （`platform/ci/cargo`：借用 runner 自带 Rust 时的 `CARGO_HOME`，含 registry / git / 工具；以及 `target/debug`），
@@ -255,11 +272,11 @@ CI 借 runner 自带 Rust（`CARGO_HOME` / `SOLOMNI_CARGO_HOME` 指项目内）�
 | 平台专属代码（`kernel/detail/confine/` 各平台文件、`tests/<平台>/`） | 平台目标的 `main.rs` 首行是 `#![cfg(target_os = …)]`：非本平台的目标整目标为空，代码根本不编译 | 三平台各编译并各跑一次 |
 | 真机围栏（ACL / 容器 profile / Landlock / seatbelt） | 本地默认安全模式会跳过会改本机状态的探针 | 一次性 runner 上真跑，并验撤权与 profile 回收 |
 | HTTPS/TLS 出站链路 | 受限环境可能取不到系统 TLS 凭证（判据见 [levels.md](levels.md) 的 T4），本地只能 env-skip | 干净 runner 上真连公网端点 |
-| T0 九项（clippy 只编译当前平台的 `#[cfg]`；交叉类型检查在本机无目标或交叉 C 工具链时 env-skip；依赖图随平台变；供应链要联网装工具） | 本机只能代表本平台（判的是**平台差异**，不是「改了门禁就要派发」） | 三平台各跑同一套门禁：硬失败项零容忍，环境项记 `env-skip` |
+| T0 九项（clippy 只编译当前平台的 `#[cfg]`；交叉类型检查在本机无目标或交叉 C 工具链时 env-skip；依赖图随平台变；供应链要联网装工具） | 本机只能代表本平台（判的是**平台差异**，不是「改了门禁就要派发」） | 三平台各跑同一套平台相关门禁（结构审查由独立 `structure` job 跑一次）：硬失败项零容忍，环境项记 `env-skip` |
 | 三种语言的模块（python / node / C++）在真进程里跑 | 本机只代表本平台的解释器与编译器 | 三平台各跑一次真工具链路，indexer 现场编译 |
 | 发布前验收 | 本地通过 ≠ 三平台通过 | 三平台报告 + 三平台 `TEST-REPORT-ACCEPTED` |
 
-文档门禁本身是本地可复现的确定性检查；CI 里跑它是为了 required check 与合并闸门，不是补平台结论。
+文档审查与结构审查本身是本地可复现的确定性检查；CI 里跑它们是为了 required check 与合并闸门，不是补平台结论。
 
 **什么时候手动派发**：Draft 阶段不自动跑 CI，需要他平台结论时手动派发；PR 标 Ready 后自动跑，不必再派发。
 手动派发还用于「没有 PR 的分支」与「干净机器复验」。
@@ -267,7 +284,7 @@ CI 借 runner 自带 Rust（`CARGO_HOME` / `SOLOMNI_CARGO_HOME` 指项目内）�
 
 - **依赖** → Draft 期手动派发一次（或直接 Ready 让 PR 跑），并按下面的读法比对 `sha`；
 - **不依赖** → 本地入口就是验收结论；PR 标 Ready 时会照跑，但不把 CI 的 `env-skip` 当通过。
-- **纯叙述型文档** → 不依赖本机之外：本地 `node run-tests.js --docs` 通过即可；PR 标 Ready 时走 `changes` + `docs` 快道，不产生三平台验收。
+- **纯叙述型文档** → 不依赖本机之外：本地 `node run-tests.js --docs`（文档审查 + 结构审查）通过即可；PR 标 Ready 时走 `changes` + `docs` + `structure`，不产生三平台验收。
 - 用户明确要求派发时例外。
 
 **触发**：PR 标 Ready（或对 Ready 的 PR 推送）即自动跑；Draft 不跑。需要单独验证某个分支或干净机器时手动派发，
@@ -280,20 +297,23 @@ gh workflow run test.yml --ref <分支>
 按干净机器跑（跳过缓存）时加 `-f clean=true`。Ready 的 PR 不必另派发；触发后按下面的读法比对 `sha`。
 
 **报告怎么读（硬规矩）**：只用 `git` 或 git CLI 拉滚动分支，**禁止轮询网页**；时机无法确认时委托用户拉取（见 `AGENTS.md`）。
-代码验收读 `ci-report`，文档门禁读 `ci-doc`（**docs-only 不更新 `ci-report`**）：
+代码 / 文档 / 结构验收都读 `ci-report`（**没有 `ci-doc`**）：
 
 ```text
 git fetch origin
-# 代码 PR：三平台现场
+# 结构审查（始终有）
+git show origin/ci-report:runs/structure/meta.json
+git show origin/ci-report:runs/structure/test-report.json
+# 文档审查（有文档变更时才有）
+git show origin/ci-report:runs/docs/meta.json
+git show origin/ci-report:runs/docs/test-report.json
+# 三平台（有代码变更时才有）
 git show origin/ci-report:runs/windows/meta.json        # run / sha / mode / failed / qualityFailed
 git show origin/ci-report:runs/windows/test-report.json  # 与本地 target/test-report.json 同构
 git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原文
-# 文档 PR：文档门禁现场
-git show origin/ci-doc:runs/docs/meta.json               # run / sha / mode=docs / failed / qualityFailed
-git show origin/ci-doc:runs/docs/test-report.json
 ```
 
-`runs/<os>/` 的 `os` 取 `windows` / `linux` / `macos`；`ci-doc` 固定是 `docs`。判定顺序：
+`runs/<key>/` 的 key 取 `structure` / `docs` / `windows` / `linux` / `macos`；纯文档 PR 只有前两个，纯代码 PR 只有 `structure` + 三个平台。判定顺序：
 
 1. **先比 `sha`**：`meta.json` 的 `sha` 必须等于要验收的那个提交；不等 = 这次 CI 还没覆盖它，别拿旧结论当新证据。
 2. 再看 `failed` 与 `qualityFailed`（都为假才算通过）。
@@ -307,16 +327,15 @@ git show origin/ci-doc:runs/docs/test-report.json
 > （包 SID 在令牌的 `TokenAppContainerSid` 字段里，不在组列表里），按它判会把生效的容器记成降级。
 > 容器是否生效用**行为对照**（授权落点写得进、父目录按名可用、父目录内容不可见），见 [levels.md](levels.md) 的 T4。
 
-**等多久再拉（推荐节奏）**：触发之后（PR 标 Ready 或手动派发）**先等 5 分钟**再拉对应报告（代码验收 `ci-report`，文档-only `ci-doc`）；若 `meta.json` 的 `sha` 还对不上
-（这次 run 没结束），**每次再等 2 分钟**重拉一次，直到对应报告的 `sha` 都对得上（代码验收看三平台；docs-only 只看 `ci-doc` 的 `runs/docs/`），或确认 run 已失败/取消。
+**等多久再拉（推荐节奏）**：触发之后（PR 标 Ready 或手动派发）**先等 5 分钟**再拉 `ci-report`；若本次跑了的 lane 的 `meta.json` 的 `sha` 还对不上
+（这次 run 没结束），**每次再等 2 分钟**重拉一次，直到对应 key 的 `sha` 都对得上（纯文档看 `runs/structure` + `runs/docs`；有代码看 `runs/structure` + 三平台），或确认 run 已失败/取消。
 等的是 git 拉取，不是网页轮询——`AGENTS.md` 禁止查网页；时间上拿不准（比如 runner 排队很久）就委托用户拉取。
 
 **发布通道**（由 `tests/ci-publish.mjs` 在 CI 里自助发布，成败都发）：
 
 - Actions 注释：失败逐条 `::error::`（带断言原文），通过一条 `::notice::` 概览——匿名可读，不需要凭据；
-- `ci-report` 滚动分支（代码验收）：同一路径每次覆盖，**只留最近一次**（要历史看 Actions 产物 `test-report-<os>`）；
-- `ci-doc` 滚动分支（文档门禁）：同样每次重建、只留最近一次，报告在 `runs/docs/`；`ci-report` 不会被文档运行改写；
-- **代码 PR（Ready）与手动派发都发布** `ci-report`；docs-only 的 run 只发布 `ci-doc`（`push` 不触发；Draft 的 run 全部跳过，不发布）；PR 报告的 `sha` 是 PR head（fork PR 不发布，见上）；
+- `ci-report` 滚动分支（三路共用）：同一路径每次覆盖，**只留最近一次**；结构审查在 `runs/structure/`，文档审查在 `runs/docs/`，三平台在 `runs/<os>/`（要历史看 Actions 产物 `test-report-<os>`）；
+- **Ready 的 PR 与手动派发都发布** `ci-report`（`push` 不触发；Draft 的 run 全部跳过，不发布）；PR 报告的 `sha` 是 PR head（fork PR 不发布，见上）；
 - 报告发布失败（例如 token 权限不对）只是 `::warning::`，**不影响**测试本身的成败——所以"没读到报告"不等于"测试没过"。
 
 **本地与 CI 的关系**：本地入口是快速反馈；CI 在 Ready 的 PR 上自动跑（Draft 期按需手动派发），给出**跨平台与真机**的最终判据。
@@ -334,15 +353,15 @@ git show origin/ci-doc:runs/docs/test-report.json
 - `skip-platform`：当前平台不适用的空平台目标；
 - `gap`：入口没有找到应运行的部分。
 
-本地 `target/test-report.json` 的字段：`mode`（`full` / `docs`；`--docs` 的报告只有文档门禁步骤）、`platform` / `arch` / `osKey` / `profile` / `fenceLive` / `doctor`（本次运行的环境事实）、
+本地 `target/test-report.json` 的字段：`mode`（`full` / `docs` / `structure`；`--docs` 是文档审查 + 结构审查，`--audit=docs` / `--audit=structure` 只跑其中一路）、`platform` / `arch` / `osKey` / `profile` / `fenceLive` / `doctor`（本次运行的环境事实）、
 `steps`（逐步骤状态、用时 `ms` 与超预算标记 `slow`——"哪一步慢"要看它，不看感觉）、`envSkips`（探针级跳过）、
 `timeouts`（被墙钟超时终止的命令）、`quality`（`failed` / `steps`）、`gaps`（平台缺口账）、
 `globalGaps`（`tests/gaps.yaml` 的长期目标）、`failed`（状态为 `fail` 的步骤数；`quality-fail` 另由 `quality.failed` 计）。
-CI 合并后的报告由 `tests/ci-merge.mjs` 生成：`mode` 固定为 `full`，保留上述环境字段与 `steps` / `envSkips` / `quality` / `globalGaps` / `gaps` / `failed`，
+CI 合并后的平台报告由 `tests/ci-merge.mjs` 生成：`mode` 固定为 `full`，保留上述环境字段与 `steps` / `envSkips` / `quality` / `globalGaps` / `gaps` / `failed`，
 不保留 `timeouts` 与 `steps[].slow`。
-`mode: "docs"` 的报告不走 `ci-merge.mjs`（没有 e2e 半份），由 `tests/ci-publish.mjs` 直接发布到 `ci-doc`；
-它的 `gaps` / `globalGaps` 为空，`steps` 只有 `T0 文档门禁`，不代表平台缺口验收。
-`runs/<os>/meta.json` 也带 `mode`（`full` / `docs` / `none`），读报告时先比 `sha`，再认 `mode`。
+`mode: "docs"` / `mode: "structure"` 的报告不走 `ci-merge.mjs`（没有 e2e 半份），由 `tests/ci-publish.mjs` 直接发布到 `ci-report` 的 `runs/docs/` / `runs/structure/`；
+它们的 `gaps` / `globalGaps` 为空，`steps` 只有 `T0 文档审查` / `T0 结构审查`（本地 `--docs` 是 `T0 文档门禁`），不代表平台缺口验收。
+`runs/<key>/meta.json` 的 key 是 `structure` / `docs` / `windows` / `linux` / `macos`，也带 `mode`（`full` / `docs` / `structure` / `none`），读报告时先比 `sha`，再认 `mode`。
 报告没有 `test-fail` / `blocked` 这两个状态：失败只有 `fail`，缺口只有 `gap`。
 
 ## 二、成功标记
@@ -353,7 +372,7 @@ CI 合并后的报告由 `tests/ci-merge.mjs` 生成：`mode` 固定为 `full`�
 - `DEV-LOOP-OK`：开发回路自检完成（`dev.js` 的子命令表与拒绝出口）；
 - `ENV-BOOTSTRAP-OK`：环境引导自检完成（`env.js` 的下载 / 续传 / 结构判定 / sha256 闸；非 Windows 会先打一条 `[探针]`）；
 - `E2E-OK`：端到端场景完成；
-- `TEST-REPORT-OK`：当前入口的运行步骤没有失败；`--docs` 模式只代表**文档门禁**通过，不代表代码、三平台或 L4 已验收；
+- `TEST-REPORT-OK`：当前入口的运行步骤没有失败；`--docs` / `--audit` 模式只代表对应审查（文档审查 / 结构审查）通过，不代表代码、三平台或 L4 已验收；
 - `TEST-REPORT-FAIL`：当前入口有硬失败步骤**或** T0 任一项不过（同时以非零退出码暴露）；
 - `TEST-REPORT-ACCEPTED`：当前平台缺口账为空；
 - `MUTATION-OK` / `MUTATION-FOUND`：突变测试工作流全捕获 / 有未捕获或超时——**只用于调查，不参与验收**。

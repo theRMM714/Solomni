@@ -38,8 +38,8 @@
 - `tests/cross-platform/e2e/` 的 L4 覆盖 MCP 常驻服务调用与**父死子亡**：核心被强杀后，常驻服务进程跟着消失；macOS 的守门进程另有 `tests/macos/` 探针；
 - **谁做任务谁补测试**：做完就补上这次改动的用例并跑门禁，通过后同步文档（见 [AGENTS.md](AGENTS.md) 九）；
 - `node run-tests.js` 测试汇总入口（`node start.js -test` 是备好环境后的同一入口）；纯叙述型文档改动用
-  `node run-tests.js --docs`（只跑结构审查，含文档与真相源比对；不跑 cargo / 单元 / 平台目标 / L4）；
-  `docs/presentation/contracts.md` 是机器契约文档（ROUTES 表由 Rust 测试消费），仍走全量。CI 的文档-only 分流见
+  `node run-tests.js --docs`（文档审查 + 结构审查，含文档与真相源比对；不跑 cargo / 单元 / 平台目标 / L4；CI 用 `--audit=docs` / `--audit=structure` 拆成独立 job）；
+  `docs/presentation/contracts.md` 是机器契约文档（ROUTES 表由 Rust 测试消费），仍走全量。CI 的文档/结构分流见
   [docs/testing/execution-ci.md](docs/testing/execution-ci.md)；开发环境先跑 `node setup-dev.js`
   （条目清单 [dev-tools.js](dev-tools.js)，`--check` 只读校验；运行环境另见 [setup-runtime.js](setup-runtime.js)）；
 - `src/capabilities/llm/detail/fake_chat.rs` 中的 `FakeChat` 与 `DemoGateway`；
@@ -100,7 +100,7 @@
 - **缺口的唯一真相**是 `tests/gaps.yaml`（全局）与 `tests/<平台>/gaps.yaml`（平台）；门户与细则都不复述条目内容。
 - **成功标记**（`FRONTEND-SMOKE-OK` / `DEV-LOOP-OK` / `ENV-BOOTSTRAP-OK` / `E2E-OK` / `TEST-REPORT-OK` / `TEST-REPORT-FAIL` / `TEST-REPORT-ACCEPTED`）
   的固定含义见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md)。
-  `TEST-REPORT-OK` 在 `--docs` 模式下只代表文档门禁通过，不代表代码 / 三平台 / L4 已验收；文档-only 的 CI 只发布 `ci-doc`。
+  `TEST-REPORT-OK` 在 `--docs` / `--audit` 模式下只代表对应审查（文档审查 / 结构审查）通过，不代表代码 / 三平台 / L4 已验收；CI 报告统一写 `ci-report` 的 `runs/structure` / `runs/docs` / `runs/<os>`，不再有 `ci-doc`。
 - **质量失败不能被业务测试通过抵消**：两边的结论分别记，判据见 [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md)。
 - **需要 CI 的场景**（平台专属代码、真机围栏、HTTPS/TLS、其它平台的质量分区）本地跑不出结论，
  必须等 CI 并按 [docs/testing/execution-ci.md](docs/testing/execution-ci.md) 的读法核对 `sha`。

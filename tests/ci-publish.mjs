@@ -1,16 +1,16 @@
 // CI 每次结束时的自助发布（成败都发），两条通道都需要零人工介入：
 // ① GitHub Actions 注释：失败时逐条 ::error::（带断言原文与在场证据），通过时一条 ::notice:: 概览；
 //    匿名可读，不依赖任何额外权限。
-// ② Contents API 写进滚动分支（默认 ci-report，文档门禁用 ci-doc）：同一路径每次覆盖（只留最近一次），不需要 git/ssh/管道。
+// ② Contents API 写进滚动分支（统一 ci-report）：同一路径每次覆盖（只留最近一次），不需要 git/ssh/管道。
 // 目的：现场（含"这次绿了"的 steps / envSkips / 围栏能力）要让"没有 GitHub 凭据的一方"（例如 AI 会话）能自己读到。
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-// 报告键默认取 runner OS；文档门禁不是平台报告，由调用方用 REPORT_OS=docs 指定。
+// 报告键默认取 runner OS；文档审查 / 结构审查不是平台报告，由调用方用 REPORT_OS=docs|structure 指定。
 const osName = (process.env.REPORT_OS || process.env.RUNNER_OS || "unknown").toLowerCase();
-// 发布目标分支：代码验收写 ci-report，文档门禁写 ci-doc（两者都由工作流在本次运行前重建）。
+// 发布目标分支：统一 ci-report（由工作流在本次运行前重建），三路各写自己的 runs/<key>/。
 const reportBranch = process.env.REPORT_BRANCH || "ci-report";
 const repo = process.env.GITHUB_REPOSITORY || "theRMM714/Solomni";
 const token = process.env.GITHUB_TOKEN || "";
@@ -63,7 +63,14 @@ if (fs.existsSync(logDir)) {
 // 连报告都没有（更早的步骤就挂了，或没跑到）同样按失败处理。
 const qualityFailed = (report && report.quality && report.quality.failed) || 0;
 const failed = !report || (report.failed || 0) > 0 || qualityFailed > 0;
-let summary = "平台=" + osName + " 模式=" + (report && report.mode === "docs" ? "文档门禁" : report && report.fenceLive ? "真机(--fence-live)" : "安全") + " 结果=" + (failed ? "失败" : "通过") + "\n";
+const modeLabel = report && report.mode === "docs"
+  ? "文档审查"
+  : report && report.mode === "structure"
+    ? "结构审查"
+    : report && report.fenceLive
+      ? "真机(--fence-live)"
+      : "安全";
+let summary = "平台=" + osName + " 模式=" + modeLabel + " 结果=" + (failed ? "失败" : "通过") + "\n";
 if (report) {
   for (const s of report.steps || []) {
     if (s.status !== "pass" && s.status !== "skip-platform") summary += "  " + s.status + "  " + s.step + "  " + (s.detail || "") + "\n";

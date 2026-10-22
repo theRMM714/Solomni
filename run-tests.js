@@ -43,13 +43,23 @@ const STEP_BUDGET_S = {
 };
 // 覆盖率发现模式（手动，不进默认门禁；判据与局限见 docs/testing/execution-ci.md 与 quality-isolation.md）。
 const COVERAGE = process.argv.includes("--coverage");
-// 文档门禁模式（CI 的 docs job 与纯文档任务用）：只跑 T0 结构审查（含文档/真相源比对与纯文本结构检查），
-// 不跑 cargo、单元、平台目标、前端冒烟与 L4；判据见 docs/testing/execution-ci.md。
+// 审查模式：只跑纯文本审查，不跑 cargo、单元、平台目标、前端冒烟与 L4。
+// - --docs：文档审查 + 结构审查（本地纯文档任务用，等价于旧的整份结构审查）；
+// - --audit=docs / --audit=structure：只跑其中一路（CI 的 docs / structure job 用）；
+// 同时给 --docs 与 --audit 时 --docs（两路一起）优先。判据见 docs/testing/execution-ci.md。
 const DOCS = process.argv.includes("--docs");
+const AUDIT_ARG = process.argv.find((a) => a.startsWith("--audit="));
+const AUDIT_SCOPE = AUDIT_ARG ? AUDIT_ARG.slice("--audit=".length) : null;
+if (AUDIT_SCOPE !== null && AUDIT_SCOPE !== "docs" && AUDIT_SCOPE !== "structure") {
+  console.error("用法：--audit=docs|structure");
+  process.exit(2);
+}
+// CI 的 quality job 用：平台无关的结构审查已由独立 structure job 承担，报告里不再出现这一步。
+const SKIP_AUDIT = process.argv.includes("--skip-audit");
 // 真机围栏测试（会改本机状态：建 AppContainer profile、写目录 ACL）默认不跑，必须显式开启。
 const FENCE_LIVE = process.argv.includes("--fence-live") || process.env.SOLOMNI_FENCE_LIVE === "1";
-// CI 把每个平台拆成两个 job（契约见 docs/testing/execution-ci.md）：质量 job 用 --skip-e2e 跳过 L4，
-// L4 由独立的 e2e job（tests/ci-e2e.mjs）跑，发布时两份报告合并。本地直接跑不带这个开关。
+// CI 的 quality job 用 --skip-e2e 跳过 L4，L4 由独立的 e2e job（tests/ci-e2e.mjs）跑；
+// 发布时两份报告合并。本地直接跑不带这个开关。
 const SKIP_E2E = process.argv.includes("--skip-e2e");
 const REPORT = path.join(ROOT, "target", "test-report.json");
 // 缺口账：唯一真相是这些文件。平台账决定 TEST-REPORT-ACCEPTED；全局账是长期目标（每条都进报告）。
@@ -438,8 +448,8 @@ function toolAvailable(sub) {
   return sh("cargo", [sub, "--version"]).code === 0;
 }
 
-/** 结构审查（纯文件分析，不起进程）：目标登记、孤儿测试文件、缺口账格式。 */
-function structuralAudit() {
+/** 结构审查（纯文件分析，不起进程）：代码↔文档结构、目标登记、孤儿测试文件、缺口账、注释契约、依赖方向。 */
+function structureAudit() {
   const problems = [];
   const BT = String.fromCharCode(96);
   const toml = fs.readFileSync(path.join(ROOT, "Cargo.toml"), "utf8");
@@ -565,17 +575,6 @@ function structuralAudit() {
   }
   for (const b of ratchetSelfTest()) problems.push("棘轮自测失败：" + b);
   for (const b of commentLexerSelfTest()) problems.push("注释词法自测失败：" + b);
-  // 文档分层（AGENTS.md「文档分层与同步」）：门户引用 docs/ 下的细则，细则引用彼此——
-  // 两边都要真实存在。只查引用不查正文，避免把文档写法变成门禁。
-  // **相对解析**：链接按所在文件的目录解析（门户在根、细则在 docs/<领域>/），所以 docs/ 内部写错的同级引用也会被抓到。
-  const mdLinks = (text) => [...text.matchAll(/\]\(([^)#\s]+\.md)(?:#[^)]*)?\)/g)].map((m) => m[1]);
-  const checkDocLinks = (absFile, label) => {
-    const dir = path.dirname(absFile);
-    for (const ref of mdLinks(fs.readFileSync(absFile, "utf8"))) {
-      if (/^[a-z]+:/i.test(ref)) continue; // 外链不查
-      if (!fs.existsSync(path.resolve(dir, ref))) problems.push(label + " 引用的文档不存在：" + ref);
-    }
-  };
   // 结构审查：**跨平台字面量完整性**——平台专属代码本地不编译（unix 的 #[cfg] 在 Windows 上不存在，
   // 反之亦然），漏字段这类错只在别的平台炸。这里按文本检查：每个 FenceSpec 字面量都要写全字段
   // （`ro` 与 `rw` 同层），本地就能抓住 CI 才会暴露的那类问题。
@@ -655,24 +654,6 @@ function structuralAudit() {
     scanIgnore(d);
   }
 
-  const portalFiles = ["README.md", "README_EN.md", "AGENTS.md", "ARCHITECTURE.md", "PRODUCT.md", "MODULE_SPEC.md", "SYSTOOL.md", "RUNTIME_SPEC.md", "REGISTRY_SPEC.md", "TESTING.md"];
-  for (const p of portalFiles) {
-    const abs = path.join(ROOT, p);
-    if (!fs.existsSync(abs)) { problems.push("缺门户文档：" + p); continue; }
-    checkDocLinks(abs, p);
-  }
-  const docsDir = path.join(ROOT, "docs");
-  if (fs.existsSync(docsDir)) {
-    const walkDocs = (d) => {
-      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-        const p = path.join(d, e.name);
-        if (e.isDirectory()) { walkDocs(p); continue; }
-        if (!e.name.endsWith(".md")) continue;
-        checkDocLinks(p, rel(p));
-      }
-    };
-    walkDocs(docsDir);
-  }
 
 
   // ---------- 文档与配置的真相源比对 ----------
@@ -805,17 +786,6 @@ function structuralAudit() {
     });
   }
 
-  // ③ 根 *.md ↔ AGENTS.md 路由表：新增根文档必须同时进路由表。
-  // 白名单只有 AGENTS.md 自己（路由表不列它）；出现不进路由表的临时工作清单时，在这里加名字并写明理由。
-  const rootDocAllow = ["AGENTS.md"];
-  const agentsDoc = path.join(ROOT, "AGENTS.md");
-  if (fs.existsSync(agentsDoc)) {
-    const agentsText = fs.readFileSync(agentsDoc, "utf8");
-    for (const e of fs.readdirSync(ROOT)) {
-      if (!e.endsWith(".md") || rootDocAllow.includes(e)) continue;
-      if (!agentsText.includes("`" + e + "`")) problems.push("根文档 " + e + " 没进 AGENTS.md 的文档路由表");
-    }
-  }
 
   // ---------- 依赖方向门禁 ----------
   // 权威：AGENTS.md「核心约束」（按业务功能垂直切分、业务之间通过 API 契约协作）与
@@ -1060,6 +1030,64 @@ function structuralAudit() {
 }
 
 /**
+ * 文档审查（只查文档自身）：门户存在与链接、docs/ 下的 .md 链接、根 *.md ↔ AGENTS.md 路由表。
+ * 只被文档变更影响：纯代码 PR 不碰这些文件，可以跳过。判据见 docs/testing/execution-ci.md。
+ */
+function docsAudit() {
+  const problems = [];
+  const BT = String.fromCharCode(96);
+  const rel = (f) => path.relative(ROOT, f).replace(/\\/g, "/");
+  // 文档分层（AGENTS.md「文档分层与同步」）：门户引用 docs/ 下的细则，细则引用彼此——
+  // 两边都要真实存在。只查引用不查正文，避免把文档写法变成门禁。
+  // **相对解析**：链接按所在文件的目录解析（门户在根、细则在 docs/<领域>/），所以 docs/ 内部写错的同级引用也会被抓到。
+  const mdLinks = (text) => [...text.matchAll(/\]\(([^)#\s]+\.md)(?:#[^)]*)?\)/g)].map((m) => m[1]);
+  const checkDocLinks = (absFile, label) => {
+    const dir = path.dirname(absFile);
+    for (const ref of mdLinks(fs.readFileSync(absFile, "utf8"))) {
+      if (/^[a-z]+:/i.test(ref)) continue; // 外链不查
+      if (!fs.existsSync(path.resolve(dir, ref))) problems.push(label + " 引用的文档不存在：" + ref);
+    }
+  };
+  const portalFiles = ["README.md", "README_EN.md", "AGENTS.md", "ARCHITECTURE.md", "PRODUCT.md", "MODULE_SPEC.md", "SYSTOOL.md", "RUNTIME_SPEC.md", "REGISTRY_SPEC.md", "TESTING.md"];
+  for (const p of portalFiles) {
+    const abs = path.join(ROOT, p);
+    if (!fs.existsSync(abs)) { problems.push("缺门户文档：" + p); continue; }
+    checkDocLinks(abs, p);
+  }
+  const docsDir = path.join(ROOT, "docs");
+  if (fs.existsSync(docsDir)) {
+    const walkDocs = (d) => {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) { walkDocs(p); continue; }
+        if (!e.name.endsWith(".md")) continue;
+        checkDocLinks(p, rel(p));
+      }
+    };
+    walkDocs(docsDir);
+  }
+  // 根 *.md ↔ AGENTS.md 路由表：新增根文档必须同时进路由表。
+  // 白名单只有 AGENTS.md 自己（路由表不列它）；出现不进路由表的临时工作清单时，在这里加名字并写明理由。
+  const rootDocAllow = ["AGENTS.md"];
+  const agentsDoc = path.join(ROOT, "AGENTS.md");
+  if (fs.existsSync(agentsDoc)) {
+    const agentsText = fs.readFileSync(agentsDoc, "utf8");
+    for (const e of fs.readdirSync(ROOT)) {
+      if (!e.endsWith(".md") || rootDocAllow.includes(e)) continue;
+      if (!agentsText.includes(BT + e + BT)) problems.push("根文档 " + e + " 没进 AGENTS.md 的文档路由表");
+    }
+  }
+  return { problems };
+}
+
+/** 全量审查：文档审查 + 结构审查（本地 --docs 与全量入口的 T0 步骤用）。 */
+function auditAll() {
+  const d = docsAudit();
+  const s = structureAudit();
+  return { problems: [...d.problems, ...s.problems], targets: s.targets, testFiles: s.testFiles };
+}
+
+/**
  * 供应链门禁：已知 CVE（cargo audit）与许可证/禁用/来源策略（cargo deny，配置在 deny.toml）。
  * 工具缺失 = env-skip（离线开发机常见）；工具在但失败要分清"真的有问题"与"取不到数据"。
  */
@@ -1133,27 +1161,35 @@ function runCoverage() {
 }
 
 /**
- * 文档门禁（--docs）：只跑 T0 结构审查（含文档与真相源比对；纯文本，不编译）。
- * 复用 structuralAudit 这一处权威，不复制检查逻辑；全程只读，不碰 cargo、本机状态与项目外目录。
- * 为什么独立：纯文档改动不需要三平台编译/单元/L4，但文档链接、路由表、unit-map、提示词键表等
- * 仍必须被机器验证（判据见 docs/testing/execution-ci.md）。
+ * 审查模式（--docs / --audit=docs|structure）：只跑纯文本审查，不跑 cargo、单元、平台目标、前端冒烟与 L4。
+ * 复用 docsAudit / structureAudit 这一处权威，不复制检查逻辑；全程只读。
+ * - all：文档审查 + 结构审查（本地纯文档任务；等价于旧的整份结构审查）；
+ * - docs：只查文档自身（CI 的 docs job）；
+ * - structure：只查代码↔文档结构（CI 的 structure job）。
+ * 判据见 docs/testing/execution-ci.md。
  */
-function runDocs() {
+function runAudit(scope) {
+  const label = scope === "docs" ? "T0 文档审查" : scope === "structure" ? "T0 结构审查" : "T0 文档门禁";
   const steps = [];
-  announce("T0 文档门禁");
-  const audit = structuralAudit();
+  announce(label);
+  const audit = scope === "docs" ? docsAudit() : scope === "structure" ? structureAudit() : auditAll();
   const ms = Date.now() - stepStart;
-  announceDone(audit.problems.length ? "失败" : "完成", audit.problems.length ? audit.problems.length + " 条问题" : audit.targets.length + " 个目标 / " + audit.testFiles + " 个测试文件");
+  const detail = audit.problems.length
+    ? audit.problems.join("；")
+    : scope === "docs"
+      ? "文档检查通过"
+      : audit.targets.length + " 个目标 / " + audit.testFiles + " 个测试文件";
+  announceDone(audit.problems.length ? "失败" : "完成", audit.problems.length ? audit.problems.length + " 条问题" : detail);
   steps.push({
-    step: "T0 文档门禁",
+    step: label,
     status: audit.problems.length ? "quality-fail" : "pass",
-    detail: audit.problems.join("；"),
+    detail,
     ms,
     slow: false,
   });
   const qualityFailed = steps.filter((s) => s.status === "quality-fail");
   const report = {
-    mode: "docs",
+    mode: scope === "structure" ? "structure" : "docs",
     platform: process.platform,
     arch: process.arch,
     osKey: OS_KEY,
@@ -1174,8 +1210,9 @@ function runDocs() {
   fs.mkdirSync(path.dirname(REPORT), { recursive: true });
   fs.writeFileSync(REPORT, JSON.stringify(report, null, 2));
 
+  const what = scope === "docs" ? "文档审查" : scope === "structure" ? "结构审查" : "文档审查 + 结构审查";
   console.log("");
-  console.log("=== 测试汇总（文档门禁，报告见 target/test-report.json）===");
+  console.log("=== 测试汇总（" + what + "，报告见 target/test-report.json）===");
   for (const s of steps) {
     console.log("  " + s.status.padEnd(13) + " " + s.step.padEnd(24) + " " + (s.detail || "") + (s.ms ? "  [" + (s.ms / 1000).toFixed(1) + "s]" : ""));
   }
@@ -1188,7 +1225,7 @@ function runDocs() {
     process.exit(1);
   }
   console.log("TEST-REPORT-OK");
-  console.log("[docs] 本次只跑文档门禁：代码门禁、三平台与 L4 未运行；文档-only 不发布 ci-report（报告写 ci-doc）。");
+  console.log("[audit] 本次只跑" + what + "：代码门禁、三平台与 L4 未运行；CI 报告统一写 ci-report。");
 }
 
 function main() {
@@ -1197,9 +1234,13 @@ function main() {
     runCoverage();
     return;
   }
-  // 文档门禁模式：纯文档改动的独立入口（不跑 cargo、单元、平台目标、前端冒烟与 L4）。
+  // 审查模式：文档审查 / 结构审查 / 两者（不跑 cargo、单元、平台目标、前端冒烟与 L4）。
   if (DOCS) {
-    runDocs();
+    runAudit("all");
+    return;
+  }
+  if (AUDIT_SCOPE) {
+    runAudit(AUDIT_SCOPE);
     return;
   }
   // 项目外缓存快照与上次崩溃残留清理（清零前先记，跑完再对）。
@@ -1244,18 +1285,23 @@ function pushStep(obj) {
     raw: check.code === 0 ? null : check.out.slice(-800),
   });
 
-  announce("T0 结构审查");
-  const audit = structuralAudit();
-  announceDone(
-    audit.problems.length ? "失败" : "完成",
-    audit.problems.length ? audit.problems.length + " 条问题" : audit.targets.length + " 个目标 / " + audit.testFiles + " 个测试文件"
-  );
-  pushStep({
-    step: "T0 结构审查",
-    status: audit.problems.length ? "quality-fail" : "pass",
-    detail: audit.problems.join("；"),
-    raw: null,
-  });
+  if (!SKIP_AUDIT) {
+    announce("T0 结构审查");
+    const audit = auditAll();
+    announceDone(
+      audit.problems.length ? "失败" : "完成",
+      audit.problems.length ? audit.problems.length + " 条问题" : audit.targets.length + " 个目标 / " + audit.testFiles + " 个测试文件"
+    );
+    pushStep({
+      step: "T0 结构审查",
+      status: audit.problems.length ? "quality-fail" : "pass",
+      detail: audit.problems.join("；"),
+      raw: null,
+    });
+  } else {
+    // CI 的 quality job：平台无关的结构审查已由独立 structure job 承担，避免三平台各跑一次。
+    console.log("[T0] 已跳过结构审查（--skip-audit）：由 CI 的 structure job 承担");
+  }
 
   // ---- T0：四项零容忍硬失败（基线机制已删除，见 docs/testing/quality-isolation.md） ----
   announce("T0 格式（fmt --check）");

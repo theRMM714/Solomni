@@ -1,4 +1,4 @@
-// CI 的 e2e job 入口（契约见 docs/testing/execution-ci.md）：每个平台恰好两个 job，本脚本承担
+// CI 的 e2e job 入口（契约见 docs/testing/execution-ci.md）：本脚本承担
 // L4 端到端那一半。它构建产品、跑编排器，写一份 e2e-report.json 片段；发布 job 用
 // tests/ci-merge.mjs 把它并进该平台唯一的 test-report.json。判据与 run-tests.js 的 L4 步骤一致：
 // 退出码 0 且输出含 E2E-OK 才算通过。构建失败、报告缺失都算失败，不静默跳过。

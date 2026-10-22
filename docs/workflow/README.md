@@ -77,13 +77,13 @@
 5. 遇到阻塞或方案需要实质变化：先改 PR 正文或评论说明事实，再询问用户，不硬做。
 6. 原方案范围内暴露的实现错误可直接修复；证明原方案错误时，回到方案阶段重新确认。
 7. 范围外的问题记进 PR（或缺口账），不混进本次改动。
-8. 本机开发回路：改一层验一层用 `node dev.js test|fmt|clippy`（它用项目内工具链与缓存，见 [execution-ci.md](../testing/execution-ci.md) 的「本机开发回路」）；迭代时按门禁判一次用 `node run-tests.js --skip-e2e`，验收用 `node run-tests.js`；**纯叙述型文档**改动用 `node run-tests.js --docs`（只跑文档门禁，不跑代码 / 三平台 / L4；`docs/presentation/contracts.md` 除外，它走全量）。不要直接调 `cargo`：裸 shell 里 `CARGO_HOME` 会指到系统用户目录，缓存只读、编译起不来。
+8. 本机开发回路：改一层验一层用 `node dev.js test|fmt|clippy`（它用项目内工具链与缓存，见 [execution-ci.md](../testing/execution-ci.md) 的「本机开发回路」）；迭代时按门禁判一次用 `node run-tests.js --skip-e2e`，验收用 `node run-tests.js`；**纯叙述型文档**改动用 `node run-tests.js --docs`（文档审查 + 结构审查，不跑代码 / 三平台 / L4；`docs/presentation/contracts.md` 除外，它走全量）。不要直接调 `cargo`：裸 shell 里 `CARGO_HOME` 会指到系统用户目录，缓存只读、编译起不来。
 9. 测试与文档跟代码同一次提交：新行为有新用例，改了行为改对应用例；权威文档改成当前状态，不留「实施中」。
 10. 完成修改和适用测试后再提交；提交前检查 `.gitignore` 与 `git status`，不提交无关修改。
 
 ## 五、收口
 
-1. 按 `TESTING.md` 运行适用测试和质量检查：代码任务本地 `node run-tests.js` 全绿；纯叙述型文档任务用 `node run-tests.js --docs`，只代表文档门禁通过。失败则继续修复，不得把 `env-skip`、`gap` 或 `blocked` 写成通过。
+1. 按 `TESTING.md` 运行适用测试和质量检查：代码任务本地 `node run-tests.js` 全绿；纯叙述型文档任务用 `node run-tests.js --docs`，只代表文档审查 + 结构审查通过。失败则继续修复，不得把 `env-skip`、`gap` 或 `blocked` 写成通过。
 2. 差异自查：`git status` 干净、无无关改动、无机器路径与用户信息、PR 只含本任务。
 3. 交用户确认（闸门 2）。
 4. 用户确认后缺口销账：`tests/gaps.yaml` 删已补条目，并按规则同步门户与现状描述；检查权威文档，删掉过期、临时和矛盾的说法。
@@ -97,4 +97,4 @@
 
 - 硬规则见 `AGENTS.md` §七：`main` 保护、任务分支、用户 squash 合并、agent 不自行 Ready / 合并。
 - 需要他平台或真机结论时，用 `gh workflow run test.yml --ref <分支>` 手动派发；触发时机、报告读取与 `sha` 比对一律以 [execution-ci.md](../testing/execution-ci.md) 为准。
-- 纯文档 PR 在 Ready 后走 `changes` + `docs` 快道：六个平台重 job 跳过，不发布 `ci-report`，文档门禁报告发布到 `ci-doc`；不要把文档门禁的结果当成三平台验收。
+- 纯文档 PR 在 Ready 后走 `changes` + `docs` + `structure`：六个平台 job 跳过，报告写 `ci-report` 的 `runs/docs` / `runs/structure`；不要把文档审查或结构审查的结果当成三平台验收。

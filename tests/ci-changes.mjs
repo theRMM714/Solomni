@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 /**
- * CI 变更分流：判断一次 PR 是否只改了叙述型文档。
- * 判据：doc-only 的 PR 跳过三平台重 job，只跑文档门禁；机器契约文档仍走代码门禁
- * （被 include_str!/include_bytes! 消费的 docs/** 由自检强制归代码门禁）。
- * 失败兜底：取不到 diff、未知路径一律 docs_only=false（宁可全量，不可漏测）。
+ * CI 变更分流：把一次 PR 的改动分成两路。
+ * - code_changed：至少一个非叙述型文档路径 → 三平台（quality / e2e）+ 结构审查；
+ * - docs_changed：至少一个文档路径 → 文档审查 + 结构审查。
+ * 结构审查两路都要跑：代码变更会破坏代码↔文档一致性，文档变更同样会。
+ * 机器契约文档（docs/presentation/contracts.md）算代码：它的 ROUTES 表被 Rust 测试消费；
+ * 但它同时是文档，所以文档审查也跑（两个谓词不是互斥的）。
+ * 失败兜底：取不到 diff、未知路径、空 diff 一律两路都跑（宁可全量，不可漏测）。
  * 约束：只依赖 Node 内置模块——CI 会从 base 把它复制到 target/ 再执行，相对导入会失效。
  */
 import fs from "node:fs";
@@ -17,7 +20,7 @@ import { fileURLToPath } from "node:url";
 const ROOT = process.env.SOLOMNI_ROOT
   ? path.resolve(process.env.SOLOMNI_ROOT)
   : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-// 机器契约型文档：被代码/测试直接消费，改它们必须跑代码门禁（当前由 src/tests/routes.rs 的 include_str! 消费）。
+// 机器契约型文档：被代码/测试直接消费，改它们必须跑三平台（当前由 src/tests/routes.rs 的 include_str! 消费）。
 const CONTRACT_DOCS = new Set(["docs/presentation/contracts.md"]);
 const EXACT_DOCS = new Set(["LICENSE"]);
 
@@ -26,7 +29,7 @@ function normPath(file) {
   return String(file).replace(/\\/g, "/").replace(/^\.\//, "");
 }
 
-/** 是否是叙述型文档：.md、docs/**、LICENSE。机器契约文档显式排除。 */
+/** 叙述型文档：.md、docs/**、LICENSE。机器契约文档显式排除（它必须进代码门禁）。 */
 function isDocPath(file) {
   const p = normPath(file);
   if (CONTRACT_DOCS.has(p)) return false;
@@ -36,13 +39,27 @@ function isDocPath(file) {
   return false;
 }
 
+/** 文档审查的输入：文档文件本身（含机器契约文档——它也是文档，链接仍要查）。 */
+function isDocsReviewPath(file) {
+  const p = normPath(file);
+  if (EXACT_DOCS.has(p)) return true;
+  if (p.startsWith("docs/")) return true;
+  if (p.endsWith(".md")) return true;
+  return false;
+}
+
 /**
- * 纯判定：只有全部文件都是叙述型文档才算 docs-only。
- * 空 diff 不算 docs-only：没有可验收的变更，交回全量入口处理。
+ * 纯判定：
+ * - code：存在非叙述型文档路径（含 contracts.md）→ 三平台 + 结构审查；
+ * - docs：存在文档路径（含 contracts.md）→ 文档审查 + 结构审查。
+ * 空 diff 不在这里兜底（两个都 false），由 main 按全量处理。
  */
 export function classify(files) {
-  if (!files || !files.length) return false;
-  return files.every(isDocPath);
+  if (!files || !files.length) return { code: false, docs: false };
+  return {
+    code: files.some((f) => !isDocPath(f)),
+    docs: files.some(isDocsReviewPath),
+  };
 }
 
 /** 被 Rust 代码 include 的 docs/**：这些文档改了可能破坏编译或契约测试，必须走代码门禁。 */
@@ -70,35 +87,38 @@ function docsConsumedByCode() {
 
 function selfTest() {
   const cases = [
-    { files: ["README.md"], want: true },
-    { files: ["docs/a/b.md"], want: true },
-    { files: ["docs/img/x.png"], want: true },
-    { files: ["docs\\a.md"], want: true },
-    { files: ["LICENSE"], want: true },
-    { files: [".github/pull_request_template.md"], want: true },
-    { files: ["modules/x/README.md"], want: true },
-    { files: ["dependencies/THIRD-PARTY-NOTICES.md"], want: true },
-    { files: ["docs/presentation/contracts.md"], want: false },
-    { files: ["README.md", "src/main.rs"], want: false },
-    { files: ["README.md", "docs/presentation/contracts.md"], want: false },
-    { files: ["Cargo.toml"], want: false },
-    { files: ["Cargo.lock"], want: false },
-    { files: ["prompts/shared/texts.yaml"], want: false },
-    { files: ["systools/tools.yaml"], want: false },
-    { files: ["links.yaml"], want: false },
-    { files: ["dependencies.yaml"], want: false },
-    { files: ["tests/gaps.yaml"], want: false },
-    { files: [".github/workflows/test.yml"], want: false },
-    { files: ["demo/x.mjs"], want: false },
-    { files: [], want: false },
+    { files: ["README.md"], code: false, docs: true },
+    { files: ["docs/a/b.md"], code: false, docs: true },
+    { files: ["docs/img/x.png"], code: false, docs: true },
+    { files: ["docs\\a.md"], code: false, docs: true },
+    { files: ["LICENSE"], code: false, docs: true },
+    { files: [".github/pull_request_template.md"], code: false, docs: true },
+    { files: ["modules/x/README.md"], code: false, docs: true },
+    { files: ["dependencies/THIRD-PARTY-NOTICES.md"], code: false, docs: true },
+    // 机器契约文档：代码门禁与文档审查都要跑。
+    { files: ["docs/presentation/contracts.md"], code: true, docs: true },
+    { files: ["README.md", "src/main.rs"], code: true, docs: true },
+    { files: ["README.md", "docs/presentation/contracts.md"], code: true, docs: true },
+    { files: ["Cargo.toml"], code: true, docs: false },
+    { files: ["Cargo.lock"], code: true, docs: false },
+    { files: ["prompts/shared/texts.yaml"], code: true, docs: false },
+    { files: ["systools/tools.yaml"], code: true, docs: false },
+    { files: ["links.yaml"], code: true, docs: false },
+    { files: ["dependencies.yaml"], code: true, docs: false },
+    { files: ["tests/gaps.yaml"], code: true, docs: false },
+    { files: [".github/workflows/test.yml"], code: true, docs: false },
+    { files: ["demo/x.mjs"], code: true, docs: false },
+    { files: [], code: false, docs: false },
   ];
   for (const c of cases) {
-    assert.equal(classify(c.files), c.want, "分类样例不成立：" + JSON.stringify(c.files));
+    const got = classify(c.files);
+    assert.deepEqual(got, { code: c.code, docs: c.docs }, "分类样例不成立：" + JSON.stringify(c.files));
   }
   const consumed = docsConsumedByCode();
   assert.ok(consumed.includes("docs/presentation/contracts.md"), "自检应发现 routes.rs 消费的 docs/presentation/contracts.md");
   for (const p of consumed) {
-    assert.equal(classify([p]), false, "被代码 include 的文档必须走代码门禁：" + p);
+    assert.equal(classify([p]).code, true, "被代码 include 的文档必须走代码门禁：" + p);
+    assert.equal(classify([p]).docs, true, "被代码 include 的文档也在 docs/ 下，文档审查也要跑：" + p);
   }
   console.log("[变更分流] 自检通过：分类样例 " + cases.length + " 条，include 文档 " + consumed.length + " 个");
 }
@@ -125,16 +145,18 @@ function changedFiles(base, head) {
   return out.split("\0").filter(Boolean);
 }
 
-function writeOutputs(docsOnly) {
+function writeOutputs(codeChanged, docsChanged) {
   const out = process.env.GITHUB_OUTPUT;
-  if (out) fs.appendFileSync(out, "docs_only=" + (docsOnly ? "true" : "false") + "\n");
+  if (!out) return;
+  fs.appendFileSync(out, "code_changed=" + (codeChanged ? "true" : "false") + "\n");
+  fs.appendFileSync(out, "docs_changed=" + (docsChanged ? "true" : "false") + "\n");
 }
 
-function writeSummary(docsOnly, files) {
+function writeSummary(codeChanged, docsChanged, files) {
   const summary = process.env.GITHUB_STEP_SUMMARY;
   if (!summary) return;
   const shown = files.slice(0, 200);
-  const body = "### 变更分流\n\n- docs_only：" + docsOnly + "\n- 文件数：" + files.length + "\n\n"
+  const body = "### 变更分流\n\n- code_changed：" + codeChanged + "\n- docs_changed：" + docsChanged + "\n- 文件数：" + files.length + "\n\n"
     + (files.length ? "    " + shown.join("\n    ") + (files.length > shown.length ? "\n    …（其余省略）" : "") + "\n" : "（无文件变更）\n");
   fs.appendFileSync(summary, body);
 }
@@ -152,24 +174,32 @@ function main() {
   const base = (process.env.BASE_SHA || "").trim();
   const head = (process.env.HEAD_SHA || "").trim();
   let files = [];
-  let docsOnly = false;
+  // 兜底是全量：没有 base/head、空 diff、取不到 diff 都让两路都跑。
+  let codeChanged = true;
+  let docsChanged = true;
   if (base && head) {
     try {
       files = changedFiles(base, head);
-      docsOnly = classify(files);
+      const c = classify(files);
+      if (files.length) {
+        codeChanged = c.code;
+        docsChanged = c.docs;
+      } else {
+        console.log("::warning title=变更分流::空 diff，按全量 CI 处理");
+      }
     } catch (e) {
       console.log("::warning title=变更分流::取不到 PR diff，按全量 CI 处理：" + String((e && e.message) || e).slice(0, 300));
-      docsOnly = false;
     }
   } else {
     console.log("[变更分流] 没有 PR base/head（手动派发？），按全量 CI 处理");
   }
 
-  writeOutputs(docsOnly);
-  writeSummary(docsOnly, files);
-  console.log("[变更分流] 文件 " + files.length + " 个；docs_only=" + docsOnly);
-  if (!docsOnly) console.log("[变更分流] 走代码门禁（三平台 quality / e2e）");
-  else console.log("[变更分流] 走文档门禁（只跑 run-tests.js --docs）");
+  writeOutputs(codeChanged, docsChanged);
+  writeSummary(codeChanged, docsChanged, files);
+  console.log("[变更分流] 文件 " + files.length + " 个；code_changed=" + codeChanged + "；docs_changed=" + docsChanged);
+  if (codeChanged) console.log("[变更分流] 跑三平台（quality / e2e）+ 结构审查");
+  if (docsChanged) console.log("[变更分流] 跑文档审查 + 结构审查");
+  if (!codeChanged && !docsChanged) console.log("[变更分流] 无可用变更，按全量兜底");
 }
 
 const invoked = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
