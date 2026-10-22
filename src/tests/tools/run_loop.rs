@@ -16,7 +16,13 @@ pub(crate) fn module_tool_params_are_declared_in_the_manifest_and_enforced_by_co
     let system = crate::capabilities::session::domain::session::agent_system(
         &prompts,
         "m0",
-        &[(mod_m0.manifest.id.clone(), mod_m0.manifest.system.clone())],
+        &[
+            crate::capabilities::session::domain::session::ModulePrompt {
+                id: mod_m0.manifest.id.clone(),
+                brief: mod_m0.manifest.brief.clone(),
+                system: mod_m0.manifest.system.clone(),
+            },
+        ],
         "工具说明",
         crate::capabilities::llm::api::ToolMode::Envelope,
         "single",

@@ -3,7 +3,7 @@
 > 本文是**提示词册结构与键清单的唯一权威**：每份文件里有什么键、每个键干什么。
 > 规则（谁写、占位符、缺键报错、什么不进册子）见 [ARCHITECTURE.md](../../ARCHITECTURE.md) 的「五、提示词册」；
 > "哪个角色用哪份提示词、拿哪些工具"见 [tools-and-roles.md](../tools/tools-and-roles.md) 的「提示词按角色分配」；
-> 模块自己的职责提示词（`module.yaml` 的 `system`）见 [MODULE_SPEC.md](../../MODULE_SPEC.md)。
+> 模块自己的能力摘要（`brief`）与工具用法（`system`）见 [MODULE_SPEC.md](../../MODULE_SPEC.md)。
 
 册子按**共享 / 角色**两个目录切分；加载经 `PromptSource` 端口（`capabilities/prompt/ports.rs`，实现在 `capabilities/prompt/detail/yaml_prompts.rs`），
 `{{key}}` 渲染与"缺键即报错"在 `capabilities/prompt/domain/prompt.rs`（纯逻辑，不读文件）。
@@ -20,7 +20,7 @@
 | | `tool_calling_envelope` / `tool_calling_native` | 工具调用约定**两套，互斥**：一个通道只用一套，由通道形态决定注入哪套 |
 | `shared/texts.yaml` | `module_tool_params_header` | 模块工具参数段的小标题（模块在 `module.yaml` 里声明了 `params` 时出现） |
 | | `path_rules` / `tools_this_turn` / `compact_prompt` / `discuss_reminder` | **指令段**（进入模型上下文，但属于"模型被要求做什么"）：路径写法、本回合工具说明块标题、压缩回合指令、讨论轮次里"上一轮没表态"的提醒 |
-| `shared/agent.yaml` | `agent.system` | agent 职责提示词骨架（模块 `system` 合成 + 该会话**类型 × 角色**的机制说明 + 工作环境 + 调用约定；**工具清单不在这里**，随回合注入） |
+| `shared/agent.yaml` | `agent.system` | agent 身份骨架（模块 `brief` 能力行 + `system` 工具用法 + 该会话**类型 × 角色**的机制说明 + 工作环境 + 调用约定；**工具清单不在这里**，随回合注入） |
 | `roles/discussant.yaml` | `discuss.opener` / `discuss.step` / `discuss.autonomy_note` | 讨论首轮、轮转、小组自裁说明 |
 | `roles/planner.yaml` | `synthesize.*` | 整理方案 |
 | | `node_review.*` | 节点验收（产出"节点 id — 负责人"表与结论） |

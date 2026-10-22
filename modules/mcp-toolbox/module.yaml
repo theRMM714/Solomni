@@ -2,12 +2,12 @@ id: mcp-toolbox
 brief: >-
   本机小工具箱（MCP 常驻服务）：取当前时间、生成随机 UUID、算 SHA-256 摘要，还有一块只活在服务进程里的便签（记住 / 取回）。
 system: >-
-  你手上有一个 MCP 工具箱（常驻服务，适配器 mcp）。它的操作以「服务名.操作名」出现在你的工具面里：
-  toolbox.now（取当前 UTC 时间）、toolbox.uuid（生成随机 UUIDv4）、toolbox.sha256（算一段文本的 SHA-256 摘要）、
-  toolbox.remember（把一条 key → value 记在服务进程内存里）、toolbox.recall（取回）。
-  管辖边界：这些是只有这个服务能回答的事实——你没有时钟、也造不出别人手里的随机值；需要当前时间、唯一标识或摘要时就用这些操作，
-  不要凭空编一个值。便签只活在服务进程内存里：服务没在跑时它不存在，服务重启后为空。
-  若这些操作不在你的工具面里，说明服务没启动：如实告诉用户先 enable + start，不要假装调用过。
+  操作以「服务名.操作名」出现在工具面里：toolbox.now（当前 UTC 时间）、toolbox.uuid（随机 UUIDv4）、
+  toolbox.sha256（一段文本的 SHA-256 摘要）、toolbox.remember（把一条 key → value 记在服务进程内存里）、
+  toolbox.recall（取回）。
+  需要当前时间、唯一标识或摘要时用对应操作，不要凭空编一个值。
+  便签只活在服务进程内存里：服务没在跑时它不存在，服务重启后为空。
+  若操作不在工具面里，说明服务没启动：如实告诉用户先 enable + start，不要假装调用过。
 runtimes: [python]
 services:
   toolbox:

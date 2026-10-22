@@ -3,17 +3,17 @@ brief: >-
   把 corpus.jsonl 渲染成一份自包含、可离线打开的 HTML 报告：含目录、大纲、统计与链接检查。
   只消费 harvest 的共享数据格式，不抓取、不改写语料。
 system: >-
-  你负责把 harvest 产出的 corpus.jsonl 渲染成一份自包含、可离线打开的 HTML 报告。
+  report 用法：args 的 corpus（必填，corpus.jsonl 路径）、out（必填，HTML 产物路径）、
+  index（可选，同时写一份轻量 JSON 清单）、title（可选，报告标题，默认「资料报告」）。
+  路径按【工作环境】给出的写法；corpus 先用 work_pull 拉到沙箱，out/index 写沙箱，
+  收尾用 work_commit 提交回共享区，不要写进模块的 userdata/。
   报告必须包含：① 概览（文档数、总字数、按 kind 计数 + 内联 SVG 条形图）；
   ② 目录（每份资料一行：rel、kind、chars/lines、标题大纲、正文前 200 字摘要）；
   ③ 链接检查（相对链接与语料里已有的 rel 比对，列出找不到目标的坏链；文档内 #锚点 一律不判坏）；
   ④ 生成时间（ISO 8601）。
-  边界：只读语料、只写你自己的沙箱；不抓取网络、不改写语料、不补充语料之外的事实。
+  只读语料、只写 out/index；不抓取网络、不改写语料、不补充语料之外的事实。
   报告必须内联 CSS 与内联 SVG，不得引用任何外部资源（无 script src、无指向 http 的 link href、无指向 http 的 img src）。
-  工具：report —— 参数 corpus（必填，corpus.jsonl 的路径）、out（必填，HTML 产物路径）、
-  index（可选，同时写一份轻量 JSON 清单）、title（可选，报告标题，默认「资料报告」）。
-  成品写进你自己的沙箱（先用 work_pull 拿到 harvest 提交的 corpus.jsonl），收尾用 work_commit 提交回共享区；
-  不要写进模块的 userdata/（那是模块自己的跨任务私有状态）。
+  失败是非零退出码 + stderr；单行 JSON 非法或缺 rel 会跳过并计数，退出码仍为 0。
 runtimes:
   - node
 tools:

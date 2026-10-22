@@ -25,12 +25,13 @@ pub fn keep_whole_replies(line_reply: &[u64], keep: usize) -> usize {
 
 /// 目的：**身份块的系统提示**：把 `{{mechanism}}` / `{{env}}` / `{{tool_calling}}` 三件事按同一口径填进模板。
 ///   模块只是能力包（没有"发言"这回事）；发言席是 agent，所以这份 system 按 agent 成文。
+///   `brief` 是能力摘要，`system` 是工具用法；两者都来自模块声明。
 ///   env 由 tools 的 systool 按该 agent 的沙箱渲染后传入。
 ///   **工具清单不在这里**：本回合能用哪些工具随回合注入（见 collab 的 engine::tools_block）。
 pub fn agent_system(
     prompt: &dyn crate::capabilities::prompt::api::Prompt,
     agent: &str,
-    modules: &[(String, String)],
+    modules: &[ModulePrompt],
     env: &str,
     mode: crate::capabilities::llm::api::ToolMode,
     session_kind: &str,
@@ -71,7 +72,7 @@ fn render_system(
     prompt: &dyn crate::capabilities::prompt::api::Prompt,
     segment: crate::capabilities::prompt::api::Segment,
     agent: &str,
-    modules: &[(String, String)],
+    modules: &[ModulePrompt],
     env: &str,
     mode: crate::capabilities::llm::api::ToolMode,
     session_kind: &str,
@@ -80,7 +81,14 @@ fn render_system(
     use crate::capabilities::prompt::api::Segment;
     let parts = modules
         .iter()
-        .map(|(id, system)| format!("\n== {} ==\n{}", id, system.trim()))
+        .map(|m| {
+            let brief = m.brief.trim();
+            if brief.is_empty() {
+                format!("\n== {} ==\n{}", m.id, m.system.trim())
+            } else {
+                format!("\n== {} ==\n能力：{}\n{}", m.id, brief, m.system.trim())
+            }
+        })
         .collect::<Vec<_>>()
         .join("");
     // 机制说明**按（会话使用类型 × 角色）**从册子里取：对应关系是数据，这里只做匹配。
@@ -109,6 +117,18 @@ fn render_system(
     )
 }
 
+/// 目的：一个模块进身份块所需的文本：能力摘要 + 工具用法。
+/// 约束：`brief` 只写能做什么（一行），`system` 只写怎么用（参数 / 路径 / 输入输出 / 错误 / 前置条件）。
+#[derive(Debug, Clone)]
+pub struct ModulePrompt {
+    /// 目的：模块 id（身份块小节的标题）。
+    pub id: String,
+    /// 目的：能力摘要（身份块里的一行“能力：”）。
+    pub brief: String,
+    /// 目的：工具用法（参数 / 路径 / 输入输出 / 错误 / 前置条件）。
+    pub system: String,
+}
+
 /// 会话参数：拼请求要的**前提**（身份、环境）。**不是对话**——不占对话列表的位置，
 /// 每次模型调用由驱动现渲染（见 `identity`）。
 ///
@@ -127,8 +147,8 @@ pub struct SessionParams {
     pub private: std::path::PathBuf,
     /// 模块 id → 目录（环境块列出的模块目录）。
     pub module_dirs: std::collections::BTreeMap<String, std::path::PathBuf>,
-    /// 模块能力包：id + 模块 system（顺序即装配顺序）。
-    pub modules: Vec<(String, String)>,
+    /// 模块能力包：id + 能力摘要 + 工具用法（顺序即装配顺序）。
+    pub modules: Vec<ModulePrompt>,
     /// **角色提示词段**：`None` = 普通 agent（模块能力包 + `AgentSystem`）；
     /// `Some(seg)` = 不是 agent 的核心身份（代理这类），身份块渲染 `seg` 那一段角色提示词。
     /// 存段名而不是渲染好的文本：身份块**每回合现渲染**（册子一改，下一次调用就生效）。
@@ -160,7 +180,11 @@ impl SessionParams {
             module_dirs: sb.modules.clone(),
             modules: modules
                 .iter()
-                .map(|m| (m.manifest.id.clone(), m.manifest.system.clone()))
+                .map(|m| ModulePrompt {
+                    id: m.manifest.id.clone(),
+                    brief: m.manifest.brief.clone(),
+                    system: m.manifest.system.clone(),
+                })
                 .collect(),
             role_system: None,
             session_kind: session_kind.to_string(),

@@ -7,7 +7,7 @@ Solomni is an **agent runtime environment (AgentOS) that runs on your own machin
 
 ## Why you need it
 
-- **Plug a tool or workflow in through a contract.** A folder plus a `module.yaml` (responsibility prompt + tool declarations) is a module; its start command stays its own.
+- **Plug a tool or workflow in through a contract.** A folder plus a `module.yaml` (capability summary + tool usage + tool declarations) is a module; its start command stays its own.
   Adaptation stays on the module's side — no SDK, no restructuring of this repository. **Outside the contract the two sides depend on nothing from each other**:
   take the product away and the module still runs; take the module away and the product keeps running.
   People use it through the UI and agents through the contract, from one declaration (contract in [MODULE_SPEC.md](MODULE_SPEC.md)).
@@ -27,7 +27,7 @@ Solomni is an **agent runtime environment (AgentOS) that runs on your own machin
 | Thing | What it is |
 | --- | --- |
 | **Core** | The only program in the product (Rust). It provides the mechanisms: sessions and transcripts, task orchestration and acceptance, tool execution and fencing, the registry, rewind and compaction |
-| **Module** | A folder `modules/<id>/`: a `module.yaml` (responsibility prompt + tool declarations, optionally resident services and secret fields) plus the tools themselves — any language, anything that runs |
+| **Module** | A folder `modules/<id>/`: a `module.yaml` (capability summary + tool usage + tool declarations, optionally resident services and secret fields) plus the tools themselves — any language, anything that runs |
 | **Agent** | A name + the modules it holds + a model + its own sandbox. Whichever agent a module is loaded into, it speaks in that agent's name |
 | **Users** | People and agents. People use the interfaces (terminal / local web UI), agents use the module contract — the same modules, two doors |
 
@@ -117,7 +117,7 @@ both sides depend only on this contract (full fields and rules in [MODULE_SPEC.m
 ```yaml
 id: research                 # globally unique, = the folder name
 brief: Research and comparison.   # short capability note: what the core picks people from
-system: You take care of research...  # responsibility prompt: scope + how your tools are used
+system: scan usage: root and out are required...  # tool usage: params / paths / I/O / errors (capability goes in brief)
 tools:                       # optional: external tool table
   read_txt:
     command: python tools/read_txt.py   # working directory = the module root

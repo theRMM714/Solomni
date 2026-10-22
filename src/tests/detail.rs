@@ -717,7 +717,7 @@ fn fs_modules_accepts_valid_folders_and_rejects_each_illegal_form_with_a_reason(
         std::fs::create_dir_all(&d).expect("建模块目录");
         std::fs::write(d.join("module.yaml"), yaml).expect("写清单");
     };
-    put("good", "id: good\nbrief: 简介\nsystem: 你是 good\n");
+    put("good", "id: good\nbrief: 简介\nsystem: 用法：good\n");
     std::fs::create_dir_all(dir.join("nomanual")).expect("目录");
     std::fs::write(
         dir.join("nomanual").join("module.yaml"),

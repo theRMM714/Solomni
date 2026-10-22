@@ -1398,8 +1398,8 @@ pub(crate) fn module_of(id: &str) -> Module {
         manifest: ModuleManifest {
             build: None,
             id: id.to_string(),
-            brief: format!("{} 的简介", id),
-            system: format!("你负责{}", id),
+            brief: format!("{} 的能力", id),
+            system: format!("用法：{}", id),
             enabled: true,
             runtimes: Vec::new(),
             tools: BTreeMap::new(),

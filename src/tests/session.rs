@@ -748,9 +748,10 @@ pub(crate) fn core_direct_seeds_system_prompt() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    // 回归：单 agent 会话的身份块必须是职责提示词（由会话参数现渲染，不进对话列表）。
+    // 回归：单 agent 会话的身份块带能力摘要与工具用法（由会话参数现渲染，不进对话列表）。
     let identity = core.single_identity(&sid).expect("身份块");
-    assert!(identity.contains("你负责a"), "{}", identity);
+    assert!(identity.contains("能力：a 的能力"), "{}", identity);
+    assert!(identity.contains("用法：a"), "{}", identity);
     assert!(
         core.single_history(&sid).unwrap().is_empty(),
         "对话里只有真正发生过的事（此刻还没有）"
@@ -772,7 +773,7 @@ pub(crate) fn core_direct_seeds_system_prompt() {
 
 #[test]
 pub(crate) fn single_mode_accepts_multi_module_agent_and_converses() {
-    // 单 agent 形态允许 1 个 agent 带多个模块：能建、system 并入全部职责、说话人是 agent 名。
+    // 单 agent 形态允许 1 个 agent 带多个模块：能建、能力与用法并入全部模块、说话人是 agent 名。
     let mut member = BTreeMap::new();
     member.insert(
         "组合".to_string(),
@@ -795,8 +796,11 @@ pub(crate) fn single_mode_accepts_multi_module_agent_and_converses() {
     );
     let identity = core.single_identity(&sid).expect("身份块");
     assert!(
-        identity.contains("你负责a") && identity.contains("你负责b"),
-        "身份块必须并入全部模块职责：{}",
+        identity.contains("能力：a 的能力")
+            && identity.contains("能力：b 的能力")
+            && identity.contains("用法：a")
+            && identity.contains("用法：b"),
+        "身份块必须并入全部模块的能力与用法：{}",
         identity
     );
     let events = with_live(|l| core.single_say(&sid, "在吗", l)).unwrap();

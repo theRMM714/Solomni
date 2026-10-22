@@ -2,12 +2,13 @@ id: harvest
 brief: >-
   把工作共享区里的资料扫成一份可复用的语料清单：抽取正文、标题层级与链接，并统计字节、字符与行数。
 system: >-
-  你负责「把共享区的资料变成语料」：用 scan 把一个目录扫成 corpus.jsonl（每份资料一条记录：
-  相对路径、正文、标题层级、链接、字节/字符/行数）。共享区是只读主副本，你的工具进程读不到它：
-  要用的资料先用 work_pull 拉进你自己的沙箱，只对沙箱里的副本跑 scan，产物也写进沙箱，
-  收尾时用 work_commit 提交回共享区。不要写进模块的 userdata/（那是模块自己的跨任务私有状态）。
-  scan 的回执只有统计与产物路径——语料正文不会回显，别把资料内容抄进你的发言。
-  args 里的路径按【工作环境】给出的写法（与所有工具同一套）。
+  scan 用法：args 的 root（要扫描的目录）与 out（corpus.jsonl 输出路径）必填；
+  include 是可选扩展名白名单，缺省 md,txt,html,json（.markdown 归 md，.htm 归 html）。
+  路径按【工作环境】给出的写法；root 用 work_pull 拉到自己的沙箱副本，
+  out 写沙箱，收尾用 work_commit 提交回共享区；不要写进模块的 userdata/。
+  scan 递归扫 root，跳过隐藏目录、userdata/、超过 8 MB 或读不了的文件；
+  回执只给统计与产物路径，不回显正文。
+  失败是非零退出码 + stderr；没命中任何资料不是错误。
 runtimes: [python]
 tools:
   scan:

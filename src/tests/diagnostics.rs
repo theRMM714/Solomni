@@ -62,7 +62,7 @@ fn host_build_module(module: &std::path::Path) -> std::path::PathBuf {
     std::fs::create_dir_all(module.join("tools")).expect("建模块目录");
     std::fs::write(
         module.join("module.yaml"),
-        "id: hello\nbrief: 构建契约用例\nsystem: 你负责打招呼\nbuild:\n  command: tools/build\ntools:\n  hi:\n    command: build/hello\n",
+        "id: hello\nbrief: 构建契约用例\nsystem: 用法：打招呼\nbuild:\n  command: tools/build\ntools:\n  hi:\n    command: build/hello\n",
     )
     .expect("写模块清单");
     // 构建命令每跑一次就往 `build/runs.txt` 记一行：`build/` 不进源指纹，所以它是"命令真的又跑了一次"的
@@ -207,7 +207,7 @@ fn host_build_failure_is_honest_and_leaves_no_state() {
     std::fs::write(
         module.join("module.yaml"),
         format!(
-            "id: bad\nbrief: 构建失败用例\nsystem: 你负责失败\nbuild:\n  command: \"{}\"\ntools:\n  hi:\n    command: build/bad\n",
+            "id: bad\nbrief: 构建失败用例\nsystem: 用法：失败\nbuild:\n  command: \"{}\"\ntools:\n  hi:\n    command: build/bad\n",
             FAILING_BUILD
         ),
     )
@@ -236,7 +236,7 @@ fn host_build_failure_is_honest_and_leaves_no_state() {
     std::fs::create_dir_all(&needy).expect("建模块目录");
     std::fs::write(
         needy.join("module.yaml"),
-        "id: needy\nbrief: 构建期能力不在场\nsystem: 你负责构建\nbuild:\n  command: tools/build\n  needs: [no-such-tool-xyz]\ntools:\n  hi:\n    command: build/hello\n",
+        "id: needy\nbrief: 构建期能力不在场\nsystem: 用法：构建\nbuild:\n  command: tools/build\n  needs: [no-such-tool-xyz]\ntools:\n  hi:\n    command: build/hello\n",
     )
     .expect("写模块清单");
     assert_eq!(
@@ -249,7 +249,7 @@ fn host_build_failure_is_honest_and_leaves_no_state() {
     std::fs::create_dir_all(&plain).expect("建模块目录");
     std::fs::write(
         plain.join("module.yaml"),
-        "id: plain\nbrief: 没有构建段\nsystem: 你负责单干\ntools:\n  hi:\n    command: python tools/hi.py\n",
+        "id: plain\nbrief: 没有构建段\nsystem: 用法：单干\ntools:\n  hi:\n    command: python tools/hi.py\n",
     )
     .expect("写模块清单");
     assert_eq!(
@@ -329,7 +329,7 @@ fn guest_build_makes_the_entry_in_the_guest() {
     std::fs::create_dir_all(&module).expect("建模块目录");
     std::fs::write(
         module.join("module.yaml"),
-        "id: greet\nbrief: 虚拟机档构建用例\nsystem: 你负责打招呼\nbuild:\n  command: \"mkdir -p build && printf '#!/bin/sh\\necho GUEST-OK\\n' > build/hello && chmod +x build/hello\"\ntools:\n  hi:\n    command: build/hello\n",
+        "id: greet\nbrief: 虚拟机档构建用例\nsystem: 用法：打招呼\nbuild:\n  command: \"mkdir -p build && printf '#!/bin/sh\\necho GUEST-OK\\n' > build/hello && chmod +x build/hello\"\ntools:\n  hi:\n    command: build/hello\n",
     )
     .expect("写模块清单");
     // 同一个虚拟根不能被两台 guest 同时写：真机用例之间串行（见 doubles::live_guest_lock）。
