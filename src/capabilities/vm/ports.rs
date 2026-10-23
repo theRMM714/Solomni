@@ -1,22 +1,12 @@
 //! 目的：vm 能力的出站端口。
-//! 管：PackageSource（扫描 runtimes/ 包清单）、VmEngine / GuestVm / GuestChannel（起 / 跑 / 销毁 guest）与 ShareBackend（宿主↔guest 共享）。
-//! 不管：清单校验与冲突预检（domain/packages.rs）、镜像判定与挂载清单（domain/guest.rs）、引擎参数（detail/）。
-//! 联动：由 service.rs 持有（R12）；实现是 detail/fs_packages.rs、detail/qemu.rs 与 detail/share_*.rs。
+//! 管：VmEngine / GuestVm / GuestChannel（起 / 跑 / 销毁 guest）与 ShareBackend（宿主↔guest 共享）。
+//! 不管：运行包库与选包（packages）、镜像判定与挂载清单（domain/guest.rs）、引擎参数（detail/）。
+//! 联动：由 service.rs 持有（R12）；实现是 detail/qemu.rs 与 detail/share_*.rs。
 
 use crate::capabilities::vm::domain::guest::{
     GuestAccess, GuestImage, GuestMount, GuestRun, GuestSpec,
 };
-use crate::capabilities::vm::domain::packages::Library;
 use crate::kernel::api::ToolOutcome;
-
-/// 目的：运行包库来源端口——扫描依赖文件夹（runtimes/）里的包清单。
-/// 约束：「清单即事实」，每次调用重扫，放入即出现；清单校验、去重与冲突预检在本能力（packages::Library::build），
-///   目录遍历与 yaml 解析在适配层。只有 service.rs 持有它（R12）。
-pub trait PackageSource {
-    fn scan(&self) -> Library;
-    /// 包库所在目录（配置界面要把"把包放哪儿"如实告诉用户）。
-    fn dir(&self) -> std::path::PathBuf;
-}
 
 /// 目的：共享计划——把一次启动要挂的宿主目录翻成引擎参数与 guest 端挂载命令。
 /// 约束：与引擎解耦是"尽量"：engine_args 由后端按调用方给的引擎 id 生成（同一后端可服务多引擎）。

@@ -1,6 +1,7 @@
 # 运行包契约（RUNTIME_SPEC）
 
 > 本文只讲**运行包作者**要遵守的契约：一个包长什么样、怎么被声明、怎么被装配。
+> 契约与包库由 `packages` 能力拥有（见 [docs/packages/README.md](docs/packages/README.md)）；`vm` 只消费它给出的 `PackagePlan`。
 > 模块作者的契约见 [MODULE_SPEC.md](MODULE_SPEC.md)，分层与端口见 [ARCHITECTURE.md](ARCHITECTURE.md)，
 > 产品行为见 [PRODUCT.md](PRODUCT.md)，登记处字段见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)。
 

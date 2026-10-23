@@ -16,6 +16,7 @@ mod fence_reach;
 mod llm;
 mod mcp;
 mod modules;
+mod packages;
 mod permission;
 mod ports;
 mod prelude;

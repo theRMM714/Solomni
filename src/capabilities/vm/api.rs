@@ -1,30 +1,24 @@
 //! 目的：vm 能力的入站面——其它能力与呈现层只准用这里。
-//! 管：Vm 用例 trait（运行包库 / 包库目录 / guest 生命周期）与档位、计划、诊断、就绪检测的重导出。
-//! 不管：纯逻辑实现（domain/）与端口（ports.rs）。
+//! 管：Vm 用例 trait（guest 生命周期）与档位、计划、入口诊断、就绪检测的重导出。
+//! 不管：纯逻辑实现（domain/）与端口（ports.rs）；运行包契约与选包在 packages 能力。
 //! 联动：被 conductor / collab / cli 与入口层消费。
 
 pub use crate::capabilities::vm::domain::exec::resolve_guest;
 pub use crate::capabilities::vm::domain::exec::{
-    absent, admit_guest, capability_refusal, copy_share_enabled, declared, diagnose_text,
-    diagnose_text_for, guest_platform, missing_entries_for, plan, plan_summary, runs_on_target,
-    share_chain, tier_readiness, tier_refusal, unavailable, vm_capability, vm_diagnoses,
-    vm_requirements, Diagnosis, ExecPlan, MissingEntry, PlannedPackage, VmInputs, VmRequirement,
+    admit_guest, capability_refusal, copy_share_enabled, diagnose_text_for, guest_platform,
+    missing_entries_for, plan, plan_summary, runs_on_target, share_chain, tier_readiness,
+    tier_refusal, vm_capability, vm_requirements, ExecPlan, MissingEntry, VmInputs, VmRequirement,
     COPY_SHARE_ENV,
 };
 pub use crate::capabilities::vm::domain::guest::{
     classify_base, mounts_from, package_setup_scripts, GuestImage, GuestRun, GuestSpec, SeedDocs,
 };
 pub use crate::capabilities::vm::domain::guest::{GuestArch, GuestClients, GuestOs};
-pub use crate::capabilities::vm::domain::packages::{library_for_guest, Library};
 pub use crate::capabilities::vm::domain::paths::PathBridge;
 
-/// 目的：虚拟机档的**用例面**（`service.rs` 实现）——运行包库、包库目录与 guest 生命周期走这里。
-/// 约束：出站端口 `PackageSource` / `VmEngine` / `ShareBackend` 只由 `service.rs` 持有（R12）。
+/// 目的：虚拟机档的**用例面**（`service.rs` 实现）——guest 生命周期走这里。
+/// 约束：出站端口 `VmEngine` / `ShareBackend` 只由 `service.rs` 持有（R12）；运行包库在 packages 能力。
 pub trait Vm: Send + Sync {
-    /// 运行包库：可用的包清单（每次重扫）。
-    fn library(&self) -> Library;
-    /// 包库所在目录（界面上要如实告诉用户"把包放哪儿"）。
-    fn runtimes_dir(&self) -> std::path::PathBuf;
     /// 按规格拉起会话级 guest（同一租约重复拉起 = 先销毁旧的）。
     fn guest_start(&self, spec: &GuestSpec) -> Result<(), String>;
     /// 在该租约的 guest 里跑一次工具（没有这个 guest = 如实失败）。

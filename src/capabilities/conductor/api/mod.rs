@@ -566,7 +566,28 @@ pub struct AgentSuggestion {
     pub reuse: bool,
 }
 
-/// 运行能力报告（呈现与日志用）：声明了什么、包库里有什么、缺什么、虚拟机档的诊断。
+/// 目的：运行能力诊断的**组合**：包选择问题与模块入口问题各归其所有者，报告只做聚合。
+/// 约束：`untagged` 让前端拿到的 JSON 仍是扁平的 `{ "Missing": ... }` / `{ "MissingEntry": ... }`。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(untagged)]
+pub enum RuntimeDiagnosis {
+    Package(crate::capabilities::packages::api::Problem),
+}
+
+/// 目的：组合诊断的可读说法（CLI / 日志用）。
+pub fn diagnose_text(diags: &[RuntimeDiagnosis]) -> String {
+    diags
+        .iter()
+        .map(|d| match d {
+            RuntimeDiagnosis::Package(p) => {
+                crate::capabilities::packages::api::diagnose_text(std::slice::from_ref(p))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("；")
+}
+
+/// 运行能力报告（呈现与日志用）：声明了什么、包库里有什么、缺什么、档位诊断。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct RuntimeReport {
     pub tier: String,
@@ -574,10 +595,10 @@ pub struct RuntimeReport {
     pub declared: BTreeMap<String, Vec<String>>,
     /// 能力名 → 包库里的可用版本（升序）。
     pub available: BTreeMap<String, Vec<String>>,
-    /// 模块 id → 包库里没有的能力（档位无关的事实）。
+    /// 模块 id → 本档位下用不了的能力。
     pub missing: BTreeMap<String, Vec<String>>,
-    /// 虚拟机档下不能成立的诊断；本机档为空。
-    pub diagnoses: Vec<crate::capabilities::vm::api::Diagnosis>,
+    /// 本档位下不能成立的诊断（包选择 + 模块入口）；空 = 没有。
+    pub diagnoses: Vec<RuntimeDiagnosis>,
     /// 本机能不能承载**当前档位**（虚拟机档的前置条件；本机档恒为可）。
     /// 界面据此决定虚拟机档能不能选，并与「开始」/编辑的校验同源（`crate::capabilities::vm::api::tier_readiness`）。
     pub tier_ready: bool,

@@ -408,16 +408,23 @@ fn print_roster(ops: &Ops) {
         );
     }
     // 虚拟机档的诊断：缺包之外（多版本未定版 / 定版不存在 / 路径冲突）会挡住「开始」，在这里如实说明。
-    let hard: Vec<crate::capabilities::vm::api::Diagnosis> = report
+    let hard: Vec<crate::capabilities::conductor::api::RuntimeDiagnosis> = report
         .diagnoses
         .iter()
-        .filter(|d| !matches!(d, crate::capabilities::vm::api::Diagnosis::Missing { .. }))
+        .filter(|d| {
+            !matches!(
+                d,
+                crate::capabilities::conductor::api::RuntimeDiagnosis::Package(
+                    crate::capabilities::packages::api::Problem::Missing { .. }
+                )
+            )
+        })
         .cloned()
         .collect();
     if !hard.is_empty() {
         println!(
             "[档位诊断] {}（虚拟机档要先解决这些才能开始会话）",
-            crate::capabilities::vm::api::diagnose_text(&hard)
+            crate::capabilities::conductor::api::diagnose_text(&hard)
         );
     }
     for r in &report.rejected_packages {

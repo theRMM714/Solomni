@@ -1,31 +1,20 @@
 //! 目的：执行档位与执行计划的纯逻辑——档位诊断、计划派生、承载判定与就绪检测。
-//! 管：ExecSpec 的选型诊断（缺包 / 歧义 / 定版不存在 / 路径冲突）、ExecPlan 的装载顺序、本机能否承载虚拟机档。
-//! 不管：目录遍历与 guest 启动（在 detail/ 与 guest 后端）、会话档案（session）、实际的工具进程执行（tools）。
+//! 管：ExecSpec 的档位诊断、ExecPlan 的装载顺序、本机能否承载虚拟机档。
+//! 不管：包库与选包（packages）、目录遍历与 guest 启动（在 detail/ 与 guest 后端）、会话档案（session）、实际的工具进程执行（tools）。
 //! 联动：契约见 docs/vm/README.md 与 RUNTIME_SPEC.md；ExecSpec 是 kernel 的共享事实；被 conductor 与呈现层经 api.rs 消费。
 
 use crate::capabilities::modules::api::Module;
+use crate::capabilities::packages::api::PlannedPackage;
 use crate::capabilities::vm::domain::guest::{GuestAgent, GuestImage, GuestOs};
-use crate::capabilities::vm::domain::packages::{Library, PackageManifest, KIND_SYSTEM};
 use crate::kernel::api::{ExecSpec, Tier};
 use crate::kernel::ports::HostProbe;
 use serde::Serialize;
-use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-/// 目的：一条诊断：结构化事实（界面文案由呈现层渲染；模型侧文案在提示词册）。
+/// 目的：一条**模块入口**诊断：结构化事实（界面文案由呈现层渲染；模型侧文案在提示词册）。
+/// 约束：包选择问题归 `packages::api::Problem`，不混进这里。
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-pub enum Diagnosis {
-    /// 模块（含它的包的传递依赖）需要的能力，包库里没有任何包提供。
-    Missing { module: String, capability: String },
-    /// 同一能力有多个版本，需用户定版。
-    Ambiguous {
-        capability: String,
-        versions: Vec<String>,
-    },
-    /// exec 段定的版本在库里不存在。
-    UnknownPin { capability: String, version: String },
-    /// 两个包会写进同一处路径。
-    Conflict { path: String, a: String, b: String },
+pub enum EntryProblem {
     /// 模块工具的入口（模块内产物）不在场——命令是相对路径，模块根下却没有这个能直接跑的文件。
     MissingEntry {
         module: String,
@@ -79,19 +68,6 @@ pub fn missing_entries_for(
     out
 }
 
-/// 目的：计划里的一项：已定版的包。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PlannedPackage {
-    pub id: String,
-    pub version: String,
-    pub kind: String,
-    pub prefix: String,
-    /// 目的：包内容所在目录（清单扫描时记下）；装配阶段用它把包挂进 guest。
-    pub source_dir: std::path::PathBuf,
-    /// 目的：kind = system 时要叠写进 guest 的**相对系统路径**（prefix 包为空）。
-    pub provides_paths: Vec<String>,
-}
-
 /// 目的：执行计划：运行时派生，从不落盘（装配阶段按 (id, version) 去包里定位内容）。
 #[derive(Debug, Clone)]
 pub struct ExecPlan {
@@ -101,109 +77,6 @@ pub struct ExecPlan {
     pub guest: Option<String>,
     /// 目的：装载顺序：先独立前缀（互不干扰），后写进系统路径的包（叠层）。
     pub packages: Vec<PlannedPackage>,
-}
-
-/// 目的：模块声明的能力（模块 id → 能力名，升序；去重）。
-pub fn declared(modules: &[Module]) -> BTreeMap<String, Vec<String>> {
-    let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for m in modules {
-        if m.manifest.runtimes.is_empty() {
-            continue;
-        }
-        let mut caps = m.manifest.runtimes.clone();
-        caps.sort();
-        caps.dedup();
-        out.insert(m.manifest.id.clone(), caps);
-    }
-    out
-}
-
-/// 目的：哪些模块声明的能力包库里没有（模块 id → 缺失的能力名）——档位无关的事实。
-pub fn absent(modules: &[Module], lib: &Library) -> BTreeMap<String, Vec<String>> {
-    let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for m in modules {
-        let miss: Vec<String> = m
-            .manifest
-            .runtimes
-            .iter()
-            .filter(|c| lib.versions_of(c).is_empty())
-            .cloned()
-            .collect();
-        if !miss.is_empty() {
-            out.insert(m.manifest.id.clone(), miss);
-        }
-    }
-    out
-}
-
-/// 目的：虚拟机档的诊断（空 = 可以成立）：缺包 / 多版本歧义 / 定版不存在 / 系统路径冲突。
-/// 参数：guest_runtimes = guest 镜像**自带**的运行能力名——镜像里已经有的不必再放 `runtimes/` 包，不算缺。
-/// 约束：传递依赖也在这里走完：包 requires 的能力缺失时，归到触发出它的模块上。
-pub fn vm_diagnoses(
-    modules: &[Module],
-    lib: &Library,
-    spec: &ExecSpec,
-    guest_runtimes: &[String],
-) -> Vec<Diagnosis> {
-    let mut out: Vec<Diagnosis> = Vec::new();
-    let mut queue: Vec<(String, String)> = Vec::new();
-    for m in modules {
-        for c in &m.manifest.runtimes {
-            queue.push((c.clone(), m.manifest.id.clone()));
-        }
-    }
-    let mut seen: BTreeSet<(String, String)> = BTreeSet::new();
-    let mut chosen: BTreeMap<String, &PackageManifest> = BTreeMap::new();
-    while let Some((cap, module)) = queue.pop() {
-        if !seen.insert((cap.clone(), module.clone())) {
-            continue;
-        }
-        let versions = lib.versions_of(&cap);
-        if versions.is_empty() {
-            if guest_runtimes.iter().any(|g| g == &cap) {
-                // guest 镜像自带这个能力：不必再放 runtimes/ 包，也不算缺。
-                continue;
-            }
-            out.push(Diagnosis::Missing {
-                module,
-                capability: cap,
-            });
-            continue;
-        }
-        let picked: Option<&PackageManifest> = match spec.pins.get(&cap) {
-            Some(v) => match lib.pick(&cap, v) {
-                Some(p) => Some(p),
-                None => {
-                    out.push(Diagnosis::UnknownPin {
-                        capability: cap.clone(),
-                        version: v.clone(),
-                    });
-                    None
-                }
-            },
-            None if versions.len() == 1 => Some(versions[0]),
-            None => {
-                out.push(Diagnosis::Ambiguous {
-                    capability: cap.clone(),
-                    versions: versions.iter().map(|p| p.version.clone()).collect(),
-                });
-                None
-            }
-        };
-        if let Some(p) = picked {
-            for r in &p.requires {
-                queue.push((r.clone(), module.clone()));
-            }
-            chosen.insert(cap, p);
-        }
-    }
-    let refs: Vec<&PackageManifest> = chosen.values().copied().collect();
-    for (path, a, b) in crate::capabilities::vm::domain::packages::conflicts(&refs) {
-        out.push(Diagnosis::Conflict { path, a, b });
-    }
-    out.sort();
-    out.dedup();
-    out
 }
 
 /// 目的：执行档位的能力前置条件（本机档没有额外前置）。
@@ -923,175 +796,50 @@ pub fn admit_guest(running: &[String], lease: &str, max: u32) -> Result<(), Stri
     Ok(())
 }
 
-/// 目的：派生执行计划：本机档不装载运行包（宿主自备解释器）。
-/// 约束：虚拟机档**任何诊断都拒绝**——选型不成立（多版本未定版 / 定版不存在 / 系统路径冲突）与
-///   **缺包**都算：没有工具用户完不成工作，与其拉一台跑不了工具的 guest，不如在选型这步如实拒绝。
-/// 约束：guest 自带的运行能力（`guest_runtimes`）不算缺（镜像里已经有解释器）。
+/// 目的：派生执行计划：入口判据与档位无关；运行包由 packages 能力选好，这里只负责落进 ExecPlan。
+/// 约束：本机档不装载运行包（packages 为空）；虚拟机档的包选择与诊断在 `packages::api::plan_guest`。
 pub fn plan(
     spec: &ExecSpec,
-    modules: &[Module],
-    lib: &Library,
-    guest_runtimes: &[String],
+    packages: Vec<PlannedPackage>,
     missing: &[MissingEntry],
     net: bool,
-) -> Result<ExecPlan, Vec<Diagnosis>> {
+) -> Result<ExecPlan, Vec<EntryProblem>> {
     // 入口判据与档位无关：模块根下没有那个能直接跑的产物，两档都当场拒绝（一次把话说全）。
-    let entries: Vec<Diagnosis> = missing
+    let entries: Vec<EntryProblem> = missing
         .iter()
-        .map(|m| Diagnosis::MissingEntry {
+        .map(|m| EntryProblem::MissingEntry {
             module: m.module.clone(),
             tool: m.tool.clone(),
             command: m.command.clone(),
             buildable: m.buildable,
         })
         .collect();
+    if !entries.is_empty() {
+        return Err(entries);
+    }
     match spec.tier {
-        Tier::Host => {
-            if !entries.is_empty() {
-                return Err(entries);
-            }
-            Ok(ExecPlan {
-                tier: Tier::Host,
-                net,
-                guest: None,
-                packages: Vec::new(),
-            })
-        }
-        Tier::Vm => {
-            let mut diags = entries;
-            diags.extend(vm_diagnoses(modules, lib, spec, guest_runtimes));
-            if !diags.is_empty() {
-                return Err(diags);
-            }
-            let mut chosen: Vec<&PackageManifest> = Vec::new();
-            let mut seen: BTreeSet<String> = BTreeSet::new();
-            let mut queue: Vec<String> = modules
-                .iter()
-                .flat_map(|m| m.manifest.runtimes.clone())
-                .collect();
-            while let Some(cap) = queue.pop() {
-                if !seen.insert(cap.clone()) {
-                    continue;
-                }
-                let versions = lib.versions_of(&cap);
-                let picked = match spec.pins.get(&cap) {
-                    Some(v) => versions.iter().copied().find(|p| &p.version == v),
-                    None => versions.first().copied(),
-                };
-                if let Some(p) = picked {
-                    for r in &p.requires {
-                        queue.push(r.clone());
-                    }
-                    chosen.push(p);
-                }
-            }
-            // 装载顺序：先独立前缀，后写进系统路径的包；各自内部按 (id, version) 稳定。
-            chosen.sort_by(|a, b| {
-                (rank(&a.kind), a.id.as_str(), a.version.as_str()).cmp(&(
-                    rank(&b.kind),
-                    b.id.as_str(),
-                    b.version.as_str(),
-                ))
-            });
-            let packages = chosen
-                .iter()
-                .map(|p| PlannedPackage {
-                    id: p.id.clone(),
-                    version: p.version.clone(),
-                    kind: p.kind.clone(),
-                    prefix: p.prefix.clone(),
-                    source_dir: p.source_dir.clone(),
-                    provides_paths: p.provides_paths.clone(),
-                })
-                .collect();
-            Ok(ExecPlan {
-                tier: Tier::Vm,
-                net,
-                guest: spec.guest.clone(),
-                packages,
-            })
-        }
+        Tier::Host => Ok(ExecPlan {
+            tier: Tier::Host,
+            net,
+            guest: None,
+            packages: Vec::new(),
+        }),
+        Tier::Vm => Ok(ExecPlan {
+            tier: Tier::Vm,
+            net,
+            guest: spec.guest.clone(),
+            packages,
+        }),
     }
-}
-
-/// 目的：本档位下不能执行工具的模块（模块 id → 缺失的能力名）：本机档不装载运行包，一律可用（空表）。
-/// 约束：虚拟机档：缺包 / 装配不成立（歧义 / 定版不存在 / 冲突）时，凡声明了运行能力的模块都不能执行工具。
-/// 约束：guest 自带的运行能力不算缺（镜像里已经有解释器）——与 `plan` 同一把尺子。
-pub fn unavailable(
-    spec: &ExecSpec,
-    modules: &[Module],
-    lib: &Library,
-    guest_runtimes: &[String],
-) -> BTreeMap<String, Vec<String>> {
-    let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    if spec.tier != Tier::Vm {
-        return out;
-    }
-    let diags = vm_diagnoses(modules, lib, spec, guest_runtimes);
-    if diags.is_empty() {
-        return out;
-    }
-    let mut assembly_broken = false;
-    for d in &diags {
-        match d {
-            Diagnosis::Missing { module, capability } => {
-                out.entry(module.clone())
-                    .or_default()
-                    .push(capability.clone());
-            }
-            _ => assembly_broken = true,
-        }
-    }
-    if assembly_broken {
-        for m in modules {
-            if !m.manifest.runtimes.is_empty() {
-                let mut caps = m.manifest.runtimes.clone();
-                caps.sort();
-                caps.dedup();
-                out.insert(m.manifest.id.clone(), caps);
-            }
-        }
-    }
-    out
-}
-
-/// 目的：诊断的可读说法（面向界面/CLI 的 Err，与 conductor 其它 Err 同一做法）。
-pub fn diagnose_text(diags: &[Diagnosis]) -> String {
-    diagnose_text_for(diags, None)
 }
 
 /// 目的：同上，但"怎么补"按**目标环境**说：虚拟机档的入口要在那个虚拟根里编（宿主上编出来的产物在 guest 里跑不了）。
 /// 参数：guest = 这次会话的虚拟根名（None = 本机档，在宿主编）。
-pub fn diagnose_text_for(diags: &[Diagnosis], guest: Option<&str>) -> String {
+pub fn diagnose_text_for(diags: &[EntryProblem], guest: Option<&str>) -> String {
     let lines: Vec<String> = diags
         .iter()
         .map(|d| match d {
-            Diagnosis::Missing { module, capability } => {
-                format!(
-                    "模块 {} 需要运行包 {}：包库里没有、guest 镜像也没声明自带（把它放进依赖文件夹 runtimes/，或在 guest.yaml 的 runtimes 里声明）",
-                    module, capability
-                )
-            }
-            Diagnosis::Ambiguous {
-                capability,
-                versions,
-            } => {
-                format!(
-                    "运行包 {} 有多个版本，需用户定版：{}",
-                    capability,
-                    versions.join("、")
-                )
-            }
-            Diagnosis::UnknownPin {
-                capability,
-                version,
-            } => {
-                format!("运行包 {} 的定版 {} 不在包库里", capability, version)
-            }
-            Diagnosis::Conflict { path, a, b } => {
-                format!("运行包 {} 与 {} 都要写进 {}，装配会互相覆盖", a, b, path)
-            }
-            Diagnosis::MissingEntry {
+            EntryProblem::MissingEntry {
                 module,
                 tool,
                 command,
@@ -1134,12 +882,4 @@ pub fn plan_summary(plan: &ExecPlan) -> String {
         pkgs.join("、"),
         net
     )
-}
-
-fn rank(kind: &str) -> u8 {
-    if kind == KIND_SYSTEM {
-        1
-    } else {
-        0
-    }
 }

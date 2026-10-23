@@ -207,8 +207,12 @@ fn main() {
         root.join("modules"),
         capabilities::tools::api::names(),
     );
-    // 运行包库：依赖文件夹 runtimes/（一个包 = 一个文件夹 + package.yaml）。
-    let packages = capabilities::vm::detail::FsPackages::new(root.join("runtimes"));
+    // 运行包能力：依赖文件夹 runtimes/（一个包 = 一个文件夹 + package.yaml）。
+    let packages: Arc<dyn capabilities::packages::api::Packages + Send + Sync> = Arc::new(
+        capabilities::packages::service::PackagesService::new(Arc::new(
+            capabilities::packages::detail::FsPackages::new(root.join("runtimes")),
+        )),
+    );
     // 端点记忆：谁先通了就固定谁，后续会话不再反复探测候选。
     let memo = capabilities::llm::detail::endpoint::memo_new();
     // **llm 能力**：三个出站端口（通道工厂 / 模型目录 / 信封修复）只由它的 service 持有（R12）；
@@ -417,7 +421,6 @@ fn main() {
     }
     let vm: Arc<dyn capabilities::vm::api::Vm + Send + Sync> =
         Arc::new(capabilities::vm::service::VmService::new(
-            Arc::new(packages),
             Arc::new(
                 capabilities::vm::detail::QemuEngine::with_overlay_dir(
                     root.join(".vm").join("overlays"),
@@ -488,6 +491,7 @@ fn main() {
         )),
         workspace,
         Arc::clone(&vm),
+        Arc::clone(&packages),
         Arc::clone(&provision),
         Arc::clone(&modules),
         Arc::clone(&llm),

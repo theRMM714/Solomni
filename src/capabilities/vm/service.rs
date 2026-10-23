@@ -1,12 +1,12 @@
 //! 目的：vm 能力的用例与端口持有者。
-//! 管：持 PackageSource / VmEngine / ShareBackend（R12），按租约交出运行包库与 guest 生命周期
+//! 管：持 VmEngine / ShareBackend（R12），按租约管理 guest 生命周期
 //!   （guest 与共享凭据同生共死；每次执行前后走共享的同步钩子）。
-//! 不管：纯逻辑（domain/）；适配器（detail/）由组合根构造。
+//! 不管：纯逻辑（domain/）、运行包库与选包（packages）；适配器（detail/）由组合根构造。
 //! 联动：端口在 ports.rs；被 api::Vm 的调用方消费。
 
-use crate::capabilities::vm::api::{Library, Vm};
+use crate::capabilities::vm::api::Vm;
 use crate::capabilities::vm::domain::guest::{GuestMount, GuestOs, GuestRun, GuestSpec};
-use crate::capabilities::vm::ports::{GuestVm, PackageSource, ShareBackend, ShareGuard, VmEngine};
+use crate::capabilities::vm::ports::{GuestVm, ShareBackend, ShareGuard, VmEngine};
 use crate::kernel::api::ToolOutcome;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -24,9 +24,8 @@ struct Lease {
     os: GuestOs,
 }
 
-/// 目的：虚拟机档能力——持运行包库来源、VM 引擎与**已实现的全部共享后端**，按会话租约管理 guest。
+/// 目的：虚拟机档能力——持 VM 引擎与**已实现的全部共享后端**，按会话租约管理 guest。
 pub struct VmService {
-    packages: Arc<dyn PackageSource + Send + Sync>,
     engine: Arc<dyn VmEngine + Send + Sync>,
     /// 已实现的共享后端（按优先序持有）：起 guest 时按 GuestSpec.shares 挑第一个落得上的。
     shares: Vec<Arc<dyn ShareBackend + Send + Sync>>,
@@ -37,12 +36,10 @@ pub struct VmService {
 impl VmService {
     /// 目的：组合根专用——把已实现的共享后端都交进来（选哪一个不在这里定）。
     pub fn new(
-        packages: Arc<dyn PackageSource + Send + Sync>,
         engine: Arc<dyn VmEngine + Send + Sync>,
         shares: Vec<Arc<dyn ShareBackend + Send + Sync>>,
     ) -> VmService {
         VmService {
-            packages,
             engine,
             shares,
             guests: Mutex::new(BTreeMap::new()),
@@ -118,14 +115,6 @@ impl VmService {
 }
 
 impl Vm for VmService {
-    fn library(&self) -> Library {
-        self.packages.scan()
-    }
-
-    fn runtimes_dir(&self) -> std::path::PathBuf {
-        self.packages.dir()
-    }
-
     fn guest_start(&self, spec: &GuestSpec) -> Result<(), String> {
         if !self.engine.supports(&spec.image) {
             return Err(format!("引擎 {} 承载不了这份 guest 镜像", self.engine.id()));

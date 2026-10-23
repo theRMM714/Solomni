@@ -45,7 +45,7 @@ dependency-baseline.json # 依赖方向门禁的基线
 ```
 
 单元层与 `capabilities/` **同构**：T1 用例按业务分文件——`taskchain.rs` / `prompt.rs` / `registry.rs` /
-`llm.rs` / `workspace.rs` / `session.rs` / `slate.rs` / `modules.rs` / `vm.rs` / `permission.rs` /
+`llm.rs` / `workspace.rs` / `session.rs` / `slate.rs` / `modules.rs` / `packages.rs` / `vm.rs` / `permission.rs` /
 `residents.rs` / `secrets.rs`，加**协调业务**自己的 `conductor.rs` 与 `conductor/`（`ask_user` / `proxy`）；
 用例多的能力按域分目录（`tools/` 与 `collab/` 各五个子模块）；契约测试 `ports.rs` / `fakes.rs` / `detail.rs` /
 `mcp.rs` / `api.rs` / `cli.rs` / `routes.rs`；横向用例 `diagnostics.rs`（隐藏模式契约）/ `fence_reach.rs`（模块可达范围）；

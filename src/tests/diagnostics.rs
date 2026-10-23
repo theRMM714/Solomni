@@ -259,47 +259,6 @@ fn host_build_failure_is_honest_and_leaves_no_state() {
     );
 }
 
-#[test]
-pub(crate) fn build_packages_take_guest_or_library() {
-    use crate::capabilities::vm::api::Library;
-    use crate::tests::doubles::{pkg, pkg_yaml};
-    let lib = Library::build(
-        vec![
-            pkg_yaml(
-                "id: cc\nversion: 13.2.0\nkind: system\nprovides_paths: [usr/bin, usr/lib]\nrequires: [binutils]",
-            ),
-            pkg("binutils", "2.42"),
-            pkg("python", "3.12.4"),
-        ],
-        Vec::new(),
-    );
-    // guest 自带的跳过；库里有的一并带上传递 requires；都没有的如实报缺。
-    let (pkgs, missing) = crate::diagnostics::build_packages(
-        &["python".to_string(), "cc".to_string(), "rustc".to_string()],
-        &lib,
-        &["python".to_string()],
-    );
-    let ids: Vec<&str> = pkgs.iter().map(|p| p.id.as_str()).collect();
-    assert_eq!(ids.len(), 2, "cc 与它的传递依赖 binutils：{:?}", ids);
-    assert!(
-        ids.contains(&"cc") && ids.contains(&"binutils"),
-        "{:?}",
-        ids
-    );
-    assert!(
-        !ids.contains(&"python"),
-        "guest 自带的运行能力不装载包：{:?}",
-        ids
-    );
-    assert_eq!(missing, vec!["rustc".to_string()], "缺的能力要如实报");
-    let cc = pkgs.iter().find(|p| p.id == "cc").expect("有 cc");
-    assert_eq!(cc.kind, "system");
-    assert_eq!(
-        cc.provides_paths,
-        vec!["usr/bin".to_string(), "usr/lib".to_string()]
-    );
-}
-
 /// 目的：真机验收（默认跳过）：虚拟机档构建——在 guest 里编出产物，产物经挂载落回模块目录。
 #[cfg(unix)]
 #[test]

@@ -1,22 +1,22 @@
 # vm（虚拟机档）
 
-> 运行包库、执行档位与计划、就绪检测与诊断、guest 生命周期。
+> 执行档位与计划、就绪检测与诊断、guest 生命周期；运行包契约与选包见 [packages](../packages/README.md)。
 > 五轴组合（宿主 × 引擎 × guest × 通道 × 共享）可插：Linux 与 Windows 已真机验收，macOS 未验（见「五」与 `tests/macos/gaps.yaml`）。
 > 本目录是该单元的唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）→ 其它细则。
 > 分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九；契约见 [RUNTIME_SPEC.md](../../RUNTIME_SPEC.md)。
 
 ## 一、管什么 / 不管什么
 
-**管**：运行包库（`runtimes/`）与 `package.yaml` 契约；执行档位（本机 / 虚拟机）的选型诊断、执行计划派生、
+**管**：执行档位（本机 / 虚拟机）的选型诊断、执行计划派生（运行包由 `packages` 选好，本能力只消费 `PackagePlan`）、
 **就绪检测**（本机能不能承载虚拟机档；缺哪几项、每项怎么补），以及 **guest 生命周期**（按会话租约起 / 跑 / 销毁）。
 
-**不管**：会话与档案（`session`）、工作区与沙箱（`workspace`，本能力只收它给的中立路径）、模块清单（`modules`，只消费它声明的 `runtimes`）、实际执行工具（`tools`）。
+**不管**：运行包契约、包库与选包（`packages`）、会话与档案（`session`）、工作区与沙箱（`workspace`，本能力只收它给的中立路径）、模块清单（`modules`，只消费它声明的 `runtimes`）、实际执行工具（`tools`）。
 
 ## 二、入站契约与状态归属
 
-`api::Vm`（`library` / `runtimes_dir` / `guest_start` / `guest_run` / `guest_wait_agent` / `guest_stop` / `guest_leases`）
-+ 档位与计划的纯函数（`plan` / `tier_readiness` / `tier_refusal` / `vm_requirements` / `vm_capability` / `capability_refusal` / `vm_diagnoses` / …）。
-出站端口 `PackageSource` / `VmEngine` / `ShareBackend` **只由 `service.rs` 持有**（R12）；`GuestVm` / `GuestChannel` 由引擎在 boot 时交出。`ExecSpec` 是共享事实（在 `kernel`），本能力只读它。
+`api::Vm`（`guest_start` / `guest_run` / `guest_wait_agent` / `guest_stop` / `guest_leases`）
++ 档位与计划的纯函数（`plan` / `tier_readiness` / `tier_refusal` / `vm_requirements` / `vm_capability` / `capability_refusal` / …）。
+出站端口 `VmEngine` / `ShareBackend` **只由 `service.rs` 持有**（R12）；`GuestVm` / `GuestChannel` 由引擎在 boot 时交出。`ExecSpec` 是共享事实（在 `kernel`），本能力只读它；包库与选包在 `packages`。
 
 ### 适配器与组合
 
@@ -55,10 +55,10 @@
 
 **静态预检**在「开始」那一刻一次走完：
 
-- 机器能力 × 虚拟根（名字 → `.vm/guest/<名>`，`resolve_guest`）× guest 声明的运行能力（`guest.yaml` 的 `runtimes`）× 模块声明 × 包库。
+- 机器能力 × 虚拟根（名字 → `.vm/guest/<名>`，`resolve_guest`）× guest 声明的运行能力（`guest.yaml` 的 `runtimes`）× 模块声明 × `packages` 的选包计划。
 - 共享档按所选 guest 的 `clients` 再判：没有本平台用户档能承载的客户端就在起 guest 前拒绝，并指路 `guest.yaml`；copy 不参与这条判据（开发/应急开关除外）。
 - **模块工具的入口**：相对路径入口必须在场且能跑；两档都查——虚拟机档按 **guest 的 os** 解析名字，跨平台还看文件形式（宿主编出来的产物在 guest 里跑不了，一样算缺）。
-- 缺任何一项都**如实拒绝、先预检再启动**（不拉一台跑不了工具的 guest）：`plan` 对缺包同样返回拒绝，`diagnose_text` 给出「把包放进 `runtimes/`、或让镜像声明」的说法。
+- 缺任何一项都**如实拒绝、先预检再启动**（不拉一台跑不了工具的 guest）：`packages::plan_guest` 对缺包返回问题，`diagnose_text` 给出「把包放进 `runtimes/`、或让镜像声明」的说法；`vm::plan` 只把选好的包落进执行计划。
 
 ### 并发与进程归属
 
@@ -72,7 +72,7 @@
   同 guest 内仍是同一 UID/root，per-agent 进程信号、`/proc` 与 `system` 包的全局可见性不在承诺内。
   网络是 **VM 级全局开关**（不是 per-agent）：`GuestAccess` 不再携带 `net`；出站由 QEMU 网卡决定。
 - **稳定挂载根**：共享 guest 只挂工作树与模块树两个根，新 agent 沙箱 / 新模块目录按状态出现；具体某个 agent 能看什么由当次围栏决定。
-- **运行包仍是启动期装配**：新子会话只加模块、不加新包时直接加入运行中的 guest；包集合变化按新 plan 重建共享 guest（要求树空闲）。
+- **运行包集合仍是启动期装配**：新子会话只加模块、不加新包时直接加入运行中的 guest；包集合变化按新计划重建共享 guest（要求树空闲）。
   `system` 包仍按 guest 全局叠写，per-agent 只保证文件可达范围，不承诺系统包隔离。
 - 每个 QEMU 与共享进程起时记账（`.home/processes.json`，`kernel/detail/procs.rs`：用途 + 归属 + 标记），销毁时注销。
 - 共享守护进程（`virtiofsd` / SMB helper）由对应共享后端按租约起停：起时进同一份进程账并绑父死子亡，释放时清理（`virtiofsd` 按进程组）。
@@ -125,9 +125,9 @@ copy 不在任何用户链里；只有进程级开发/应急开关（`SOLOMNI_VM
 - **root 只能是一份磁盘镜像**（qcow2 / raw ext4；`classify_base` 只认这个）：会话每次叠一份每租约可写层，谁也不写基础镜像；有内核就直启（`root=/dev/vda`），没有就靠镜像自带引导。需要共享时 guest 拿 `restrict=on` 的网卡（出站全断，`guestfwd` 内部隧道可用）。
 - **模块构建也能落 guest**（`solomni --build=<模块 id> --guest=<虚拟根>`）：模块目录以读写挂进 guest、构建期能力按 `needs` 装载，
   在 guest 里用它的编译包编，产物经挂载直接落回宿主那份模块目录（宿主工具链不进这条链）。
-- **prefix 包**：`runtimes/` 里已装载的 `kind: prefix` 包只读挂在 `/<prefix>`；起 guest 后把它的 `<prefix>/bin/*` 软链进 `/usr/local/bin`，模块声明的裸名命令因此在 guest 里可用。
+- **prefix 包**：`packages` 选出的 `kind: prefix` 包只读挂在 `/<prefix>`；起 guest 后把它的 `<prefix>/bin/*` 软链进 `/usr/local/bin`，模块声明的裸名命令因此在 guest 里可用。
 - **system 包**：载荷按 `provides_paths` **叠写**进系统路径（复制合并 + "已叠"标记，不挂载覆盖）。
-- **包库只服务虚拟机档**：本机档不装载运行包，解释器由宿主自备。
+- **包库在 `packages` 单元**：契约、扫描与选包都在那里；`vm` 只消费 `PackagePlan` 做挂载/软链/叠写，不再持有 `PackageSource`。
 - 就绪检测按**组合**逐项报"现状 + 怎么补"；"验过没有"是数据表（`VERIFIED_HOSTS`），不是平台 `cfg`。
 - **路径桥**（`domain/paths.rs`）：宿主路径 ↔ guest 路径只有一座桥。同方言时**恒等**（宿主路径原样在 guest 里成立）；跨方言时编进镜像根（宿主 `D:\a\b` → POSIX guest `/solomni-host/d/a/b`；POSIX 宿主 → Windows guest `C:\solomni-host\…`，非法字符转义）。
 - 挂载点与命令装配（`cwd` / 路径型 `env`）都走路径桥；**反向也走它**：系统工具跑在宿主侧，靠它把模型给的 guest 写法译回宿主路径（`PathCodec`，见 [docs/tools/tools-and-roles.md](../tools/tools-and-roles.md) 的「路径模型」）。

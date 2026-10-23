@@ -378,7 +378,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         tools: test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),
         tier: crate::kernel::api::Tier::Host,
         guest_lease: String::new(),
-        vm: test_vm(Arc::new(InMemoryPackages::empty())),
+        vm: test_vm(),
         sandbox: sb.clone(),
         tools_this_turn: test_prompts()
             .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)

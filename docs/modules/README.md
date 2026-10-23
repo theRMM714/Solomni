@@ -8,7 +8,7 @@
 
 **管**：扫描 `modules/`、`module.yaml` 契约与校验、模块清单（`Roster`）、清单文本（`listing`）、模块与服务的启停状态（有效值 = 用户覆盖 ?? 作者默认）。
 
-**不管**：工具面与参数渲染（`tools` / `session` 消费模块声明）、常驻服务的运行态与生命周期（`residents`）、隐秘字段的**值**（`secrets`）、运行包库与执行计划（`vm`）、身份块渲染（`session`）、名单/登记/装配（`slate` / `registry` / `conductor`）。
+**不管**：工具面与参数渲染（`tools` / `session` 消费模块声明）、常驻服务的运行态与生命周期（`residents`）、隐秘字段的**值**（`secrets`）、运行包库与选包（`packages`）、执行计划（`vm`）、身份块渲染（`session`）、名单/登记/装配（`slate` / `registry` / `conductor`）。
 
 ## 二、入站契约与状态归属
 

@@ -1,5 +1,5 @@
-//! 目的：虚拟机档能力的用例测试——运行包库、执行档位与计划、就绪检测与诊断。
-//! 管：本能力的不变式（清单校验、计划顺序、承载判定、诊断说法）。
+//! 目的：虚拟机档能力的用例测试——执行档位与计划、就绪检测与诊断、guest 装配。
+//! 管：本能力的不变式（档位计划、入口判据、承载判定、挂载/叠写脚本）。
 //! 不管：工作区与沙箱（`src/tests/workspace.rs`）、conductor 的编排。
 //! 联动：契约见 docs/vm/README.md 与 RUNTIME_SPEC.md。
 use super::builders::*;
@@ -8,7 +8,7 @@ use crate::capabilities::vm::api::Vm;
 use crate::capabilities::vm::domain::guest::{
     classify_base, GuestImage, GuestMount, GuestRun, GuestSpec,
 };
-use crate::capabilities::vm::ports::{PackageSource, ShareBackend, VmEngine};
+use crate::capabilities::vm::ports::{ShareBackend, VmEngine};
 use crate::kernel::ports::HostProbe;
 
 /// 目的：虚拟根名 → 那一格目录的解析——名字是**一段**，路径与越界写法如实拒绝（不猜、不静默当路径）。
@@ -26,108 +26,6 @@ pub(crate) fn guest_names_resolve_to_one_slot_and_paths_are_refused() {
     assert!(
         resolve_guest(&root, "/abs/path").is_err(),
         "绝对路径不是虚拟根名"
-    );
-}
-
-#[test]
-pub(crate) fn package_manifest_check_rejects_illegal_forms() {
-    let check = crate::capabilities::vm::domain::packages::check_manifest;
-    assert!(
-        check(&pkg("python", "3.12.4")).is_ok(),
-        "prefix 类默认 kind"
-    );
-    assert!(
-        check(&pkg_yaml("id: Python\nversion: 1\nprefix: opt/p")).is_err(),
-        "id 只允许小写"
-    );
-    assert!(
-        check(&pkg_yaml("id: py\nversion: 1\nkind: magic\nprefix: opt/p")).is_err(),
-        "kind 只认 prefix / system"
-    );
-    assert!(
-        check(&pkg_yaml("id: py\nversion: 1")).is_err(),
-        "prefix 类必须给 prefix"
-    );
-    assert!(
-        check(&pkg_yaml("id: py\nversion: 1\nprefix: opt/../etc")).is_err(),
-        "前缀不能含 .."
-    );
-    assert!(
-        check(&pkg_yaml("id: py\nversion: 1\nprefix: opt\\\\rt")).is_err(),
-        "前缀用 / 书写形式"
-    );
-    assert!(
-        check(&pkg_yaml("id: cc\nversion: 1\nkind: system")).is_err(),
-        "system 类必须给 provides_paths"
-    );
-    assert!(check(&pkg_yaml(
-        "id: cc\nversion: 1\nkind: system\nprovides_paths: [usr/include]"
-    ))
-    .is_ok());
-    assert!(
-        check(&pkg_yaml("id: a\nversion: 1\nprefix: opt/a\nrequires: [a]")).is_err(),
-        "requires 不能依赖自己"
-    );
-}
-
-#[test]
-pub(crate) fn library_keeps_versions_and_rejects_duplicates() {
-    let lib = Library::build(
-        vec![
-            pkg("python", "3.12.4"),
-            pkg("python", "3.11.9"),
-            pkg("python", "3.12.4"),
-            pkg_yaml("id: bad\nversion: 1"),
-        ],
-        vec!["x：package.yaml 非法".to_string()],
-    );
-    let versions: Vec<&str> = lib
-        .versions_of("python")
-        .iter()
-        .map(|p| p.version.as_str())
-        .collect();
-    assert_eq!(
-        versions,
-        vec!["3.11.9", "3.12.4"],
-        "同 (id, version) 只收一份，版本升序"
-    );
-    assert!(
-        lib.rejected.iter().any(|r| r.contains("只收先出现的那份")),
-        "{:?}",
-        lib.rejected
-    );
-    assert!(
-        lib.rejected.iter().any(|r| r.contains("prefix")),
-        "非法清单要说明原因：{:?}",
-        lib.rejected
-    );
-    assert!(
-        lib.rejected.iter().any(|r| r.contains("package.yaml 非法")),
-        "适配层拒收原因也要留：{:?}",
-        lib.rejected
-    );
-    let caps = lib.capability_versions();
-    assert_eq!(caps.get("python").map(|v| v.len()), Some(2));
-}
-
-#[test]
-pub(crate) fn package_conflicts_flag_overlapping_paths() {
-    let lib = Library::build(
-        vec![
-            pkg_yaml("id: a\nversion: 1\nkind: system\nprovides_paths: [usr/lib]"),
-            pkg_yaml("id: b\nversion: 1\nkind: system\nprovides_paths: [usr/lib/x86_64]"),
-            pkg("node", "20.11.1"),
-        ],
-        Vec::new(),
-    );
-    let refs: Vec<&PackageManifest> = lib.packages.iter().collect();
-    let got = crate::capabilities::vm::domain::packages::conflicts(&refs);
-    assert_eq!(got.len(), 1, "只有那对写进同一处的包冲突：{:?}", got);
-    assert_eq!(got[0].0, "usr/lib");
-    assert!(
-        got[0].1.contains("a@1") && got[0].2.contains("b@1"),
-        "{:?}",
-        got
     );
 }
 
@@ -460,7 +358,7 @@ pub(crate) fn diagnose_text_points_a_guest_session_at_building_inside_the_guest(
         command: "build/indexer".to_string(),
         buildable: true,
     }];
-    let host = exec::diagnose_text(&diags);
+    let host = exec::diagnose_text_for(&diags, None);
     assert!(host.contains("--build=indexer"), "{}", host);
     assert!(!host.contains("--guest="), "本机档不该提虚拟根：{}", host);
     let guest = exec::diagnose_text_for(&diags, Some("windows"));
@@ -473,7 +371,6 @@ pub(crate) fn diagnose_text_points_a_guest_session_at_building_inside_the_guest(
 }
 #[test]
 pub(crate) fn exec_entry_missing_refuses_before_any_tier() {
-    let modules = vec![module_with_runtimes("a", &["python"])];
     let missing = vec![crate::capabilities::vm::api::MissingEntry {
         module: "a".to_string(),
         tool: "build".to_string(),
@@ -481,55 +378,32 @@ pub(crate) fn exec_entry_missing_refuses_before_any_tier() {
         buildable: true,
     }];
     // 本机档：入口判据是唯一要说的。
-    let host = exec::plan(
-        &ExecSpec::default(),
-        &modules,
-        &Library::default(),
-        &[],
-        &missing,
-        false,
-    )
-    .unwrap_err();
+    let host = exec::plan(&ExecSpec::default(), Vec::new(), &missing, false).unwrap_err();
     assert!(
         matches!(host.as_slice(), [Diagnosis::MissingEntry { .. }]),
         "{:?}",
         host
     );
-    // 虚拟机档：入口判据排最前，缺包一并如实报（一次把话说全）。
-    let vm = exec::plan(
-        &vm_spec(),
-        &modules,
-        &Library::default(),
-        &[],
-        &missing,
-        false,
-    )
-    .unwrap_err();
+    // 虚拟机档：入口判据同样先于别的判据。
+    let vm = exec::plan(&vm_spec(), Vec::new(), &missing, false).unwrap_err();
     assert!(
         matches!(vm.first(), Some(Diagnosis::MissingEntry { .. })),
         "入口判据要排在最前：{:?}",
         vm
     );
-    let said = exec::diagnose_text(&vm);
+    let said = exec::diagnose_text_for(&vm, None);
     assert!(
         said.contains("build/indexer") && said.contains("--build=a"),
         "模块声明了构建方法时，拒绝理由要指到 --build：{}",
         said
     );
     // 没有这份事实时照旧成立：入口判据不牵连别的东西。
-    exec::plan(
-        &ExecSpec::default(),
-        &modules,
-        &Library::default(),
-        &[],
-        &[],
-        false,
-    )
-    .expect("本机档照旧可成立");
+    exec::plan(&ExecSpec::default(), Vec::new(), &[], false).expect("本机档照旧可成立");
 }
 #[test]
 pub(crate) fn package_setup_scripts_apply_prefix_bins_and_system_payloads() {
-    use crate::capabilities::vm::domain::exec::{ExecPlan, PlannedPackage};
+    use crate::capabilities::packages::api::PlannedPackage;
+    use crate::capabilities::vm::domain::exec::ExecPlan;
     let pkg = |id: &str, kind: &str, prefix: &str, rels: &[&str]| PlannedPackage {
         id: id.to_string(),
         version: "1".to_string(),
@@ -588,16 +462,8 @@ pub(crate) fn package_setup_scripts_apply_prefix_bins_and_system_payloads() {
 }
 #[test]
 pub(crate) fn exec_host_tier_ignores_packages() {
-    let modules = vec![module_with_runtimes("a", &["python"])];
-    let plan = exec::plan(
-        &ExecSpec::default(),
-        &modules,
-        &Library::default(),
-        &[],
-        &[],
-        false,
-    )
-    .expect("本机档不装载运行包，不会因缺包失败");
+    let plan = exec::plan(&ExecSpec::default(), Vec::new(), &[], false)
+        .expect("本机档不装载运行包，不会因缺包失败");
     assert_eq!(plan.tier, Tier::Host);
     assert!(plan.packages.is_empty());
     assert!(plan.guest.is_none());
@@ -608,168 +474,6 @@ pub(crate) fn exec_host_tier_ignores_packages() {
         "{}",
         summary
     );
-}
-
-#[test]
-pub(crate) fn exec_vm_tier_reports_missing_ambiguous_and_unavailable() {
-    let modules = vec![module_with_runtimes("a", &["python"])];
-    let empty = Library::default();
-    let spec = vm_spec();
-    assert_eq!(
-        exec::vm_diagnoses(&modules, &empty, &spec, &[]),
-        vec![Diagnosis::Missing {
-            module: "a".to_string(),
-            capability: "python".to_string()
-        }]
-    );
-    let un = exec::unavailable(&spec, &modules, &empty, &[]);
-    assert_eq!(
-        un.get("a"),
-        Some(&vec!["python".to_string()]),
-        "虚拟机档缺包 = 该模块工具不可用"
-    );
-    assert!(
-        exec::unavailable(&ExecSpec::default(), &modules, &empty, &[]).is_empty(),
-        "本机档一律可用"
-    );
-    // 缺包 = **不创建**（不再降级）：没有工具用户完不成工作，与其拉一台跑不了工具的 guest，不如选型这步如实拒。
-    let refused = exec::plan(&spec, &modules, &empty, &[], &[], false).unwrap_err();
-    assert!(
-        matches!(refused.as_slice(), [Diagnosis::Missing { .. }]),
-        "{:?}",
-        refused
-    );
-    let said = exec::diagnose_text(&exec::vm_diagnoses(&modules, &empty, &spec, &[]));
-    assert!(
-        said.contains("runtimes/"),
-        "缺包的说法要告诉用户把包放哪：{}",
-        said
-    );
-    // guest 镜像自带的能力不算缺（镜像里已经有解释器）：诊断空、工具可用、计划成立。
-    let guest = vec!["python".to_string()];
-    assert!(exec::vm_diagnoses(&modules, &empty, &spec, &guest).is_empty());
-    assert!(exec::unavailable(&spec, &modules, &empty, &guest).is_empty());
-    assert!(exec::plan(&spec, &modules, &empty, &guest, &[], false)
-        .expect("guest 自带就不算缺")
-        .packages
-        .is_empty());
-    // 多版本且未定版 = 不替用户选
-    let two = Library::build(
-        vec![pkg("python", "3.12.4"), pkg("python", "3.11.9")],
-        Vec::new(),
-    );
-    assert!(exec::vm_diagnoses(&modules, &two, &spec, &[])
-        .iter()
-        .any(|d| matches!(d, Diagnosis::Ambiguous { .. })));
-    // 定版指定的版本不在库里 = 如实报
-    let bad = ExecSpec {
-        pins: BTreeMap::from([("python".to_string(), "9.9".to_string())]),
-        ..vm_spec()
-    };
-    assert!(exec::vm_diagnoses(&modules, &two, &bad, &[])
-        .iter()
-        .any(|d| matches!(d, Diagnosis::UnknownPin { .. })));
-    // 多版本未定版 = 选型不成立：派生计划如实拒绝（这是用户要解决的选型问题，不是"缺包"）
-    let refused = exec::plan(&spec, &modules, &two, &[], &[], false).unwrap_err();
-    assert!(
-        exec::diagnose_text(&refused).contains("多个版本"),
-        "{}",
-        exec::diagnose_text(&refused)
-    );
-    // 定版之后可以成立
-    let ok = ExecSpec {
-        pins: BTreeMap::from([("python".to_string(), "3.12.4".to_string())]),
-        ..vm_spec()
-    };
-    assert!(exec::vm_diagnoses(&modules, &two, &ok, &[]).is_empty());
-    assert_eq!(
-        exec::plan(&ok, &modules, &two, &[], &[], false)
-            .unwrap()
-            .packages
-            .len(),
-        1
-    );
-}
-
-#[test]
-pub(crate) fn exec_vm_plan_pins_versions_and_orders_prefix_before_system() {
-    let lib = Library::build(
-        vec![
-            pkg_yaml("id: cc\nversion: 13.2.0\nkind: system\nprovides_paths: [usr/bin, usr/include]\nrequires: [binutils]"),
-            pkg_yaml("id: binutils\nversion: 2.42\nprefix: opt/rt/binutils2.42"),
-            pkg("python", "3.12.4"),
-        ],
-        Vec::new(),
-    );
-    let modules = vec![module_with_runtimes("a", &["python", "cc"])];
-    let plan = exec::plan(&vm_spec(), &modules, &lib, &[], &[], false).expect("虚拟机档可成立");
-    let ids: Vec<&str> = plan.packages.iter().map(|p| p.id.as_str()).collect();
-    assert_eq!(
-        ids,
-        vec!["binutils", "python", "cc"],
-        "先独立前缀，后写进系统路径的包；包的 requires 走闭包"
-    );
-    assert_eq!(plan.packages[0].version, "2.42", "计划里是定版后的精确版本");
-    assert_eq!(
-        plan.packages[0].prefix, "opt/rt/binutils2.42",
-        "独立前缀随计划走（装配按它挂载）"
-    );
-    assert_eq!(plan.packages[2].kind, "system", "写进系统路径的包排在最后");
-    assert_eq!(plan.guest.as_deref(), Some("vm-spec"));
-    assert!(!plan.net, "默认不放行出站网络");
-}
-
-#[test]
-pub(crate) fn diagnose_text_spells_out_every_reason() {
-    let missing = exec::diagnose_text(&[Diagnosis::Missing {
-        module: "a".to_string(),
-        capability: "python".to_string(),
-    }]);
-    assert!(
-        missing.contains("模块 a") && missing.contains("python") && missing.contains("runtimes/"),
-        "{}",
-        missing
-    );
-    let ambiguous = exec::diagnose_text(&[Diagnosis::Ambiguous {
-        capability: "python".to_string(),
-        versions: vec!["3.11.9".to_string(), "3.12.4".to_string()],
-    }]);
-    assert!(
-        ambiguous.contains("多个版本") && ambiguous.contains("3.12.4"),
-        "{}",
-        ambiguous
-    );
-    let bad = exec::diagnose_text(&[Diagnosis::UnknownPin {
-        capability: "python".to_string(),
-        version: "9.9".to_string(),
-    }]);
-    assert!(bad.contains("定版 9.9"), "{}", bad);
-    let clash = exec::diagnose_text(&[Diagnosis::Conflict {
-        path: "usr/lib".to_string(),
-        a: "a@1".to_string(),
-        b: "b@1".to_string(),
-    }]);
-    assert!(
-        clash.contains("usr/lib") && clash.contains("a@1") && clash.contains("b@1"),
-        "{}",
-        clash
-    );
-}
-
-#[test]
-pub(crate) fn fs_packages_records_source_dir() {
-    let dir = crate::tests::scratch("vm-pkg-source");
-    let sub = dir.join("py");
-    std::fs::create_dir_all(&sub).expect("建包目录");
-    std::fs::write(
-        sub.join("package.yaml"),
-        "id: python\nversion: 3.12.4\nprefix: opt/rt/py\n",
-    )
-    .expect("写清单");
-    let lib = crate::capabilities::vm::detail::FsPackages::new(dir.clone()).scan();
-    assert_eq!(lib.packages.len(), 1, "一个包");
-    assert_eq!(lib.packages[0].source_dir, sub, "扫描要记下来源目录");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -800,86 +504,6 @@ pub(crate) fn guest_base_requires_a_disk_image() {
         "不在场要报出来"
     );
     let _ = std::fs::remove_dir_all(&dir);
-}
-/// 目的：运行包按 guest 平台分包——平台子目录名的认法、按 guest 筛库、平台名拼法。
-#[test]
-pub(crate) fn packages_split_by_guest_platform() {
-    use crate::capabilities::vm::domain::packages::{
-        is_platform_dir_name, library_for_guest, Library, PackageManifest,
-    };
-    assert!(is_platform_dir_name("linux-x86_64"));
-    assert!(is_platform_dir_name("windows-aarch64"));
-    assert!(!is_platform_dir_name("linux"), "要 os-arch 两段");
-    assert!(
-        !is_platform_dir_name("linux-riscv64"),
-        "不认的架构不算平台目录"
-    );
-    assert!(!is_platform_dir_name("bin"), "普通内容目录不算平台目录");
-
-    let mk = |id: &str, src: &str, dirs: Vec<(&str, &str)>| PackageManifest {
-        id: id.to_string(),
-        version: "1".to_string(),
-        kind: "prefix".to_string(),
-        prefix: format!("opt/rt/{}", id),
-        provides_paths: Vec::new(),
-        requires: Vec::new(),
-        license: Vec::new(),
-        note: String::new(),
-        files: Vec::new(),
-        source_dir: std::path::PathBuf::from(src),
-        platform_dirs: dirs
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), std::path::PathBuf::from(v)))
-            .collect(),
-    };
-    let lib = Library {
-        packages: vec![
-            mk(
-                "python",
-                "/rt/python",
-                vec![
-                    ("linux-x86_64", "/rt/python/linux-x86_64"),
-                    ("windows-x86_64", "/rt/python/windows-x86_64"),
-                ],
-            ),
-            mk("plain", "/rt/plain", Vec::new()),
-        ],
-        rejected: Vec::new(),
-    };
-    let g = library_for_guest(&lib, "linux-x86_64");
-    assert_eq!(
-        g.packages.len(),
-        2,
-        "匹配的与不分平台的都留：{:?}",
-        g.packages
-    );
-    assert_eq!(
-        g.packages
-            .iter()
-            .find(|p| p.id == "python")
-            .expect("python 在")
-            .source_dir,
-        std::path::PathBuf::from("/rt/python/linux-x86_64"),
-        "source_dir 指到匹配的平台子目录"
-    );
-    let w = library_for_guest(&lib, "windows-aarch64");
-    assert!(
-        w.packages.iter().all(|p| p.id != "python"),
-        "没有匹配分包 → 这个包在 guest 上不可用（诊断会如实报缺）"
-    );
-    assert!(
-        w.packages.iter().any(|p| p.id == "plain"),
-        "不分平台的包照旧"
-    );
-
-    assert_eq!(
-        crate::capabilities::vm::domain::exec::guest_platform(
-            crate::capabilities::vm::domain::guest::GuestOs::Linux,
-            crate::capabilities::vm::domain::guest::GuestArch::Arm64
-        ),
-        "linux-aarch64",
-        "平台名是 os-arch，架构用 x86_64 / aarch64"
-    );
 }
 
 /// 目的：命令装配按 guest 方言译路径——工作目录与本机路径型环境变量改成 guest 拼法，命令与非路径变量不动。
@@ -1042,7 +666,8 @@ pub(crate) fn fence_roots_follow_the_bridge() {
 
 #[test]
 pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
-    use crate::capabilities::vm::domain::exec::{ExecPlan, PlannedPackage};
+    use crate::capabilities::packages::api::PlannedPackage;
+    use crate::capabilities::vm::domain::exec::ExecPlan;
     use crate::capabilities::vm::domain::guest::mounts_from;
     let plan = ExecPlan {
         tier: Tier::Vm,
@@ -1352,11 +977,7 @@ pub(crate) fn disk_root_uses_a_virtio_disk_not_9p() {
 pub(crate) fn share_syncs_around_each_run_and_releases_on_stop() {
     let engine = Arc::new(crate::tests::doubles::FakeEngine::new());
     let share = Arc::new(crate::tests::doubles::FakeShare::new());
-    let vm = crate::capabilities::vm::service::VmService::new(
-        Arc::new(InMemoryPackages::empty()),
-        engine.clone(),
-        vec![share.clone()],
-    );
+    let vm = crate::capabilities::vm::service::VmService::new(engine.clone(), vec![share.clone()]);
     let spec = GuestSpec {
         lease: "w".to_string(),
         image: GuestImage::linux(
@@ -1519,7 +1140,6 @@ pub(crate) fn vm_service_refuses_unfit_engine_and_share_with_a_reason() {
     use crate::capabilities::vm::detail::{NinePShare, QemuEngine};
     use crate::capabilities::vm::domain::guest::GuestArch;
     let svc = crate::capabilities::vm::service::VmService::new(
-        Arc::new(InMemoryPackages::empty()),
         Arc::new(QemuEngine::new()),
         vec![Arc::new(NinePShare::new())],
     );
@@ -2074,7 +1694,6 @@ pub(crate) fn share_is_picked_per_guest_at_start() {
     let slow = Arc::new(NamedShare::new("slow", false));
     let fast = Arc::new(NamedShare::new("fast", true));
     let vm = crate::capabilities::vm::service::VmService::new(
-        Arc::new(InMemoryPackages::empty()),
         Arc::new(crate::tests::doubles::FakeEngine::new()),
         vec![slow.clone(), fast.clone()],
     );
@@ -2182,7 +1801,7 @@ pub(crate) fn share_chain_follows_the_platform_and_skips_absent_tools() {
 #[test]
 pub(crate) fn test_vm_holds_a_share_for_each_platform_chain() {
     use crate::capabilities::vm::domain::guest::{GuestImage, GuestSpec};
-    let svc = crate::tests::doubles::test_vm(Arc::new(InMemoryPackages::empty()));
+    let svc = crate::tests::doubles::test_vm();
     for share in ["9p", "smb"] {
         let spec = GuestSpec {
             lease: format!("w-{share}"),
@@ -2226,7 +1845,6 @@ pub(crate) fn emergency_share_is_not_picked_without_an_explicit_candidate() {
     let emergency = Arc::new(NamedShare::new("copy", true).emergency());
     let user = Arc::new(NamedShare::new("9p", true));
     let svc = VmService::new(
-        Arc::new(InMemoryPackages::empty()),
         Arc::new(crate::tests::doubles::FakeEngine::new()),
         vec![emergency.clone(), user.clone()],
     );
@@ -2376,7 +1994,6 @@ pub(crate) fn verified_platforms_are_a_data_table() {
 pub(crate) fn vm_service_holds_guests_by_lease() {
     let engine = Arc::new(crate::tests::doubles::FakeEngine::new());
     let vm = crate::capabilities::vm::service::VmService::new(
-        Arc::new(InMemoryPackages::empty()),
         engine.clone(),
         vec![Arc::new(crate::tests::doubles::FakeShare::new())],
     );
@@ -2783,7 +2400,6 @@ pub(crate) fn guests_on_different_leases_run_concurrently() {
         met: Arc::new(AtomicBool::new(false)),
     };
     let vm = crate::capabilities::vm::service::VmService::new(
-        Arc::new(InMemoryPackages::empty()),
         Arc::new(RvEngine(rv.clone())),
         vec![Arc::new(FakeShare::new())],
     );
@@ -2990,11 +2606,7 @@ pub(crate) fn vm_service_runs_fenced_and_records_packages() {
     use std::sync::Arc;
     let engine = Arc::new(crate::tests::doubles::FakeEngine::new());
     let share = Arc::new(crate::tests::doubles::NamedShare::new("9p", true));
-    let svc = VmService::new(
-        Arc::new(InMemoryPackages::empty()),
-        engine.clone(),
-        vec![share],
-    );
+    let svc = VmService::new(engine.clone(), vec![share]);
     let spec = GuestSpec {
         lease: "w".to_string(),
         image: GuestImage::linux(

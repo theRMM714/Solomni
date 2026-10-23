@@ -493,7 +493,7 @@ pub(crate) fn member_with_tools(
         ),
         tier: crate::kernel::api::Tier::Host,
         guest_lease: String::new(),
-        vm: test_vm(Arc::new(InMemoryPackages::empty())),
+        vm: test_vm(),
         sandbox: test_sandbox("m0", &[]),
         tools_this_turn: test_prompts()
             .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
@@ -788,7 +788,7 @@ pub(crate) fn native_member(
         tools: test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),
         tier: crate::kernel::api::Tier::Host,
         guest_lease: String::new(),
-        vm: test_vm(Arc::new(InMemoryPackages::empty())),
+        vm: test_vm(),
         sandbox: sb.clone(),
         tools_this_turn: test_prompts()
             .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
@@ -918,7 +918,8 @@ pub(crate) fn native_core(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history_of(history),
         test_workspace(Arc::new(InMemoryWorkspace::new())),
-        test_vm(Arc::new(InMemoryPackages::empty())),
+        test_vm(),
+        test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(vec![module_of("a")]))),
         llm,

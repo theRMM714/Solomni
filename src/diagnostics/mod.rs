@@ -171,9 +171,6 @@ fn provisioning_vm(
     root: &std::path::Path,
 ) -> std::sync::Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync> {
     std::sync::Arc::new(crate::capabilities::vm::service::VmService::new(
-        std::sync::Arc::new(crate::capabilities::vm::detail::FsPackages::new(
-            root.join("runtimes"),
-        )),
         std::sync::Arc::new(
             crate::capabilities::vm::detail::QemuEngine::new().with_book(
                 crate::kernel::detail::procs::ProcessBook::open(&root.join(".home")),
@@ -206,9 +203,6 @@ fn build_vm(
         ]
     };
     std::sync::Arc::new(crate::capabilities::vm::service::VmService::new(
-        std::sync::Arc::new(crate::capabilities::vm::detail::FsPackages::new(
-            root.join("runtimes"),
-        )),
         std::sync::Arc::new(
             crate::capabilities::vm::detail::QemuEngine::with_overlay_dir(
                 root.join(".vm").join("overlays"),
@@ -548,8 +542,15 @@ pub fn build_module_in_guest(root: &std::path::Path, id: &str, guest: &str) -> i
     };
     // 构建期能力：guest 自带，或包库（prefix / system 两种装配都已就位）。
     let vm = build_vm(root);
-    let lib = vm.library();
-    let (packages, missing) = build_packages(&decl.needs, &lib, &image.runtimes);
+    let packages_lib =
+        crate::capabilities::packages::service::PackagesService::new(std::sync::Arc::new(
+            crate::capabilities::packages::detail::FsPackages::new(root.join("runtimes")),
+        ));
+    let (packages, missing) = crate::capabilities::packages::api::build_packages(
+        &decl.needs,
+        &crate::capabilities::packages::api::Packages::library(&packages_lib),
+        &image.runtimes,
+    );
     if !missing.is_empty() {
         eprintln!(
             "[构建] guest「{}」里没有这些构建期能力，包库也没提供：{}（把编译包放进 runtimes/，或给虚拟根装一个）",
@@ -785,48 +786,6 @@ fn finish_build(
     0
 }
 
-/// 目的：虚拟机档构建期要装载的包——`needs` 里 guest 自带的跳过，其余按包库挑（连同传递 `requires`）。
-/// 参数：needs = 构建期能力名；lib = 运行包库；guest_runtimes = guest 画像自带的运行能力。
-/// 返回：（包计划，缺的能力名）。
-/// 约束：同一能力多版本时取包库的默认序（会话的定版不适用于一次性构建）；缺的能力如实交给调用方报错。
-pub fn build_packages(
-    needs: &[String],
-    lib: &crate::capabilities::vm::api::Library,
-    guest_runtimes: &[String],
-) -> (
-    Vec<crate::capabilities::vm::api::PlannedPackage>,
-    Vec<String>,
-) {
-    let mut out = Vec::new();
-    let mut missing = Vec::new();
-    let mut seen = std::collections::BTreeSet::new();
-    let mut queue: Vec<String> = needs.to_vec();
-    while let Some(cap) = queue.pop() {
-        if !seen.insert(cap.clone()) {
-            continue;
-        }
-        if guest_runtimes.iter().any(|g| g == &cap) {
-            continue;
-        }
-        let Some(p) = lib.versions_of(&cap).first().copied() else {
-            missing.push(cap);
-            continue;
-        };
-        for r in &p.requires {
-            queue.push(r.clone());
-        }
-        out.push(crate::capabilities::vm::api::PlannedPackage {
-            id: p.id.clone(),
-            version: p.version.clone(),
-            kind: p.kind.clone(),
-            prefix: p.prefix.clone(),
-            source_dir: p.source_dir.clone(),
-            provides_paths: p.provides_paths.clone(),
-        });
-    }
-    missing.sort();
-    (out, missing)
-}
 /// 目的：构建状态（`.vm/build-state/<模块>.json`）——指纹一致且入口在场就跳过重编。
 #[derive(serde::Serialize, serde::Deserialize)]
 struct BuildState {

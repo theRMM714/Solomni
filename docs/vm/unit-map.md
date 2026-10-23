@@ -6,14 +6,12 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/capabilities/vm/api.rs` | 入站面：`Vm` 用例 trait（运行包库 / 包库目录 / guest 生命周期）与档位、计划、诊断、就绪检测的重导出 |
-| `src/capabilities/vm/service.rs` | 用例与端口持有者：持 `PackageSource` / `VmEngine` / `ShareBackend`（R12），按租约管理 guest（每租约一把锁：跨租约并行、同一租约串行） |
-| `src/capabilities/vm/ports.rs` | 出站端口：`PackageSource`（扫描 runtimes/ 包清单）、`VmEngine` / `GuestVm` / `GuestChannel`（起 / 跑 / 销毁 guest）与 `ShareBackend` / `SharePlan`（宿主↔guest 共享） |
-| `src/capabilities/vm/domain/exec.rs` | 执行档位诊断、执行计划派生、承载判定、就绪检测与并发准入（纯逻辑） |
-| `src/capabilities/vm/domain/guest.rs` | guest 镜像判定（`GuestImage`）与挂载清单（纯逻辑） |
+| `src/capabilities/vm/api.rs` | 入站面：`Vm` 用例 trait（guest 生命周期）与档位、计划、入口诊断、就绪检测的重导出 |
+| `src/capabilities/vm/service.rs` | 用例与端口持有者：持 `VmEngine` / `ShareBackend`（R12），按租约管理 guest（每租约一把锁：跨租约并行、同一租约串行） |
+| `src/capabilities/vm/ports.rs` | 出站端口：`VmEngine` / `GuestVm` / `GuestChannel`（起 / 跑 / 销毁 guest）与 `ShareBackend` / `SharePlan`（宿主↔guest 共享） |
+| `src/capabilities/vm/domain/exec.rs` | 执行档位诊断、执行计划派生（消费 `PackagePlan`）、承载判定、就绪检测与并发准入（纯逻辑） |
+| `src/capabilities/vm/domain/guest.rs` | guest 镜像判定（`GuestImage`）、挂载清单、prefix 软链与 system 叠写脚本（纯逻辑） |
 | `src/capabilities/vm/domain/paths.rs` | 宿主 ↔ guest 路径桥（恒等 / 镜像根，可逆；纯逻辑） |
-| `src/capabilities/vm/domain/packages.rs` | 运行包契约（package.yaml）校验、去重、系统路径冲突预检与来源目录（纯逻辑） |
-| `src/capabilities/vm/detail/fs_packages.rs` | `PackageSource` 的磁盘实现：扫描 runtimes/ |
 | `src/capabilities/vm/detail/guest_helper.rs` | Linux guest 内执行助手：脚本文本、装进 guest、按 host 翻好的允许集走 Landlock + no_new_privs；缺失/装不上 fail-closed |
 | `src/capabilities/vm/detail/qemu.rs` | `VmEngine` / `GuestChannel` 的 QEMU 实现：拉起 qemu-system-*、按需用 qemu-img 建每租约可写层，经 QGA 执行与销毁（含文件搬运） |
 | `src/capabilities/vm/detail/copy.rs` | `ShareBackend` 的 QGA 复制实现（仅开发/应急）：建目录脚本与宿主侧 tar 打包/解包（按趟同步；不参与用户链，实时共享是 `share_smb.rs` / `share_virtiofs.rs`） |

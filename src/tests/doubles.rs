@@ -15,6 +15,8 @@ use crate::capabilities::llm::detail::fake_chat::FakeChat;
 use crate::capabilities::llm::ports::{ChatGateway, ModelCatalog};
 use crate::capabilities::modules::api::{Module, ModuleManifest};
 use crate::capabilities::modules::ports::ModuleSource;
+use crate::capabilities::packages::domain::manifest::{Library, PackageManifest};
+use crate::capabilities::packages::ports::PackageSource;
 use crate::capabilities::prompt::api::Prompt;
 use crate::capabilities::prompt::domain::prompt::Prompts;
 use crate::capabilities::prompt::ports::PromptSource;
@@ -25,8 +27,6 @@ use crate::capabilities::session::api::{HistoryView, SessionMeta};
 use crate::capabilities::session::ports::HistoryStore;
 use crate::capabilities::tools::ports::SystoolsSource;
 use crate::capabilities::tools::ports::{FileRead, SysIo};
-use crate::capabilities::vm::domain::packages::{Library, PackageManifest};
-use crate::capabilities::vm::ports::PackageSource;
 use crate::capabilities::workspace::domain::asset::{AssetScanner, FileVersion};
 use crate::capabilities::workspace::ports::{WorkStore, Workdirs};
 use crate::kernel::api::Tier;
@@ -2155,14 +2155,6 @@ pub(crate) struct RecordingVm {
 }
 
 impl crate::capabilities::vm::api::Vm for RecordingVm {
-    fn library(&self) -> Library {
-        Library::default()
-    }
-
-    fn runtimes_dir(&self) -> std::path::PathBuf {
-        abs(&["runtimes"])
-    }
-
     fn guest_start(
         &self,
         spec: &crate::capabilities::vm::domain::guest::GuestSpec,
@@ -2224,14 +2216,11 @@ impl crate::capabilities::vm::api::Vm for RecordingVm {
     }
 }
 
-/// 目的：测试用的 **vm 能力面**——把运行包库来源与 guest 替身装进 `VmService`（与生产同一条路，R12）。
+/// 目的：测试用的 **vm 能力面**——把 guest 替身装进 `VmService`（与生产同一条路，R12）。
 /// 约束：共享档替身同时持 `9p` 与 `smb`（都是用户链里的挂载式档，不需要外部工具），
 ///   Linux/macOS 的真实候选能挑到 9p，Windows 能挑到 smb；copy 是 emergency 档，空候选不会被自动选中。
-pub(crate) fn test_vm(
-    packages: Arc<dyn PackageSource + Send + Sync>,
-) -> Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync> {
+pub(crate) fn test_vm() -> Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync> {
     Arc::new(crate::capabilities::vm::service::VmService::new(
-        packages,
         Arc::new(FakeEngine::new()),
         vec![
             Arc::new(NamedShare::new("9p", true)),
@@ -2242,17 +2231,22 @@ pub(crate) fn test_vm(
 
 /// 目的：带可控"起 guest 耗时 / 失败"的 vm 能力面——验核心不被慢步骤占住、失败不留痕。
 pub(crate) fn test_vm_with_engine(
-    packages: Arc<dyn PackageSource + Send + Sync>,
     engine: FakeEngine,
 ) -> Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync> {
     Arc::new(crate::capabilities::vm::service::VmService::new(
-        packages,
         Arc::new(engine),
         vec![
             Arc::new(NamedShare::new("9p", true)),
             Arc::new(NamedShare::new("smb", true)),
         ],
     ))
+}
+
+/// 目的：测试用的 **packages 能力面**——把内存包库装进 `PackagesService`（与生产同一条路，R12）。
+pub(crate) fn test_packages(
+    packages: Arc<dyn PackageSource + Send + Sync>,
+) -> Arc<dyn crate::capabilities::packages::api::Packages + Send + Sync> {
+    Arc::new(crate::capabilities::packages::service::PackagesService::new(packages))
 }
 /// 目的：模块启停覆盖的内存存储（测试用；与 yaml 实现同一条端口）。
 #[derive(Default)]
@@ -2334,7 +2328,8 @@ pub(crate) fn core_with_services(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
         test_workspace(Arc::new(InMemoryWorkspace::new())),
-        test_vm(Arc::new(InMemoryPackages::empty())),
+        test_vm(),
+        test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
         llm,
@@ -2373,7 +2368,8 @@ pub(crate) fn core_with_workspace(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
         test_workspace(ws),
-        test_vm(Arc::new(InMemoryPackages::empty())),
+        test_vm(),
+        test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
         llm,
@@ -2500,7 +2496,8 @@ pub(crate) fn core_with_pkgs_probe(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history_of(history),
         test_workspace(Arc::new(InMemoryWorkspace::new())),
-        test_vm(packages),
+        test_vm(),
+        test_packages(packages),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
         llm,
@@ -2527,7 +2524,8 @@ pub(crate) fn core_with_settings(store: InMemorySettings) -> Conductor {
         registry_service(store, Arc::clone(&llm)),
         test_history(),
         test_workspace(Arc::new(InMemoryWorkspace::new())),
-        test_vm(Arc::new(InMemoryPackages::empty())),
+        test_vm(),
+        test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(Vec::new()))),
         llm,
@@ -2569,7 +2567,8 @@ pub(crate) fn core_with_io_gateway(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
         test_workspace(Arc::new(InMemoryWorkspace::new())),
-        test_vm(Arc::new(InMemoryPackages::empty())),
+        test_vm(),
+        test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
         llm,
@@ -2608,7 +2607,8 @@ pub(crate) fn core_with_gateway_probe(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
         test_workspace(Arc::new(InMemoryWorkspace::new())),
-        test_vm(Arc::new(InMemoryPackages::empty())),
+        test_vm(),
+        test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
         llm,
@@ -3119,7 +3119,7 @@ pub(crate) fn member_with_service_tools(
         ),
         tier: crate::kernel::api::Tier::Host,
         guest_lease: String::new(),
-        vm: test_vm(Arc::new(InMemoryPackages::empty())),
+        vm: test_vm(),
         sandbox: sb.clone(),
         tools_this_turn: test_prompts()
             .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)

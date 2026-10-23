@@ -123,7 +123,7 @@ Fixture 必须：
 | `ModelCatalog` | `FakeCatalog` | `seen` | `fail_with` | 不适用 | `HttpModelCatalog` | 已验收 |
 | `ModuleSource`（modules） | `VecSource`（经 `test_modules` 装进 `ModulesService`） | 不适用 | 不适用（错误进 `rejected`） | 不适用 | `detail::FsModules` | 已验收 |
 | `ModuleStateStore`（modules） | `InMemoryModuleState`（经 `test_modules_store`） | 覆盖落盘可观察 | 不适用 | 不适用 | `detail::YamlModuleState` | 已验收 |
-| `PackageSource` | `InMemoryPackages` | 不适用 | 不适用（错误进 `rejected`） | 不适用 | `FsPackages` | 已验收；**持有者只有 `vm::service.rs`**（R12） |
+| `PackageSource` | `InMemoryPackages` | 不适用 | 不适用（错误进 `rejected`） | 不适用 | `FsPackages` | 已验收；**持有者只有 `packages::service.rs`**（R12） |
 | `VmEngine`（vm） | `FakeEngine`（返回的 `GuestVm` 替身是 `FakeVm`，通道是 `FakeChannel`） | `calls`（start / stop / run / fenced；`RecordingVm` 记 `guest_run` 与租约的包集合） | `boot_error` 注入启动失败、`boot_delay` 注入慢启动 | 不适用 | `QemuEngine`（真机验：`vm_live_guest_runs_command_inside_guest` 在 KVM / WHPX 下真起 guest、按平台同步或挂载额外共享、验宿主路径不可达；`vm_live_two_guests_share_one_base_without_writing_it` 同一基础镜像并发起两台、各写自己的可写层、验基础镜像 mtime 不变；e2e 的 vm 档会话场景（虚拟根默认 `debian`，`SOLOMNI_VM_GUEST` 可换）真跑模块工具并验删会话销毁 guest（Windows 的会话级验收已通过）；环境由 provision 能力（`--provision`）装入 `.vm/`，默认 `[探针]` 跳过） | 契约测试与执行分派已验收；真机探针与产品级会话验收都已跑通（Linux KVM / Windows WHPX） |
 | `GuestChannel`（vm） | `FakeChannel`（经 `FakeEngine`） | `calls`（run / fenced + agent / guest cwd / rw） | 不适用；**未实现 `exec_fenced` 的通道默认 fail-closed** | 不适用 | `QemuHandle`（QGA 通道，随 `QemuEngine.boot` 起；会话 guest 装 Linux helper，按 `GuestAccess` 走 Landlock） | 契约测试与 Linux 真机验收已通过 |
 | `ShareBackend`（vm） | `FakeShare`、`NamedShare`（可标 emergency）；资源句柄 `FakeGuard` / `FakeGuard2` | `calls`（prepare / sync_in / sync_out / release）、共享计划可观察（恒空） | 不适用 | 不适用 | 用户档 `NinePShare` / `VirtioFsShare` / `SmbShare`；`CopyShare`（仅开发/应急，空候选不自动选）；`NoneShare`（内部无共享，供给编排）。`src/tests/vm.rs` 钉住各自的引擎参数、netdev 选项与 guest 端命令；virtiofsd 与 smbd 的起停、超时与清理用假可执行文件验；真机验同 vm 探针；`ShareGuard` 的真实实现是 `VirtioFsGuard` / `SmbGuard` / `NoShareGuard` | 契约测试已验收；Linux 真机（virtiofs）与 Windows 真机（SMB 实时共享）都已跑通；copy 不作验收路径 |
@@ -147,7 +147,7 @@ Fixture 必须：
 | `Log` | `NoopLog`（Stub）、`RecordingLog`（记录 `(级别, 位置, 文案)`，供"事实被记进日志"的断言） | `RecordingLog` 可查 | 不适用 | 不适用 | `FileLog`（三个级别都落盘） | 已验收 |
 | `HostProbe` | `FixedProbe`（只按声明回答）、`TestHostProbe`（真实事实 + 平台共享工具视为在场） | 不适用 | 不适用 | 不适用 | `HostProbeAdapter`（真实路径事实；PATH 上不存在的名字如实说没有） | 已验收 |
 
-**持有者（R12）**：`ModuleSource` / `ModuleStateStore` 只由 `modules::service.rs` 持有（别的能力经 `modules::api::ModulesOps` 要清单与启停有效值）；`PackageSource` 只由 `vm::service.rs` 持有（别的能力经 `vm::api::Vm` 要运行包库）；`Workdirs` / `WorkStore` 只由 `workspace::service.rs` 持有（别的能力经 `workspace::api::Workspace` 要目录与版本库用例）。
+**持有者（R12）**：`ModuleSource` / `ModuleStateStore` 只由 `modules::service.rs` 持有（别的能力经 `modules::api::ModulesOps` 要清单与启停有效值）；`PackageSource` 只由 `packages::service.rs` 持有（别的能力经 `packages::api::Packages` 要运行包库）；`Workdirs` / `WorkStore` 只由 `workspace::service.rs` 持有（别的能力经 `workspace::api::Workspace` 要目录与版本库用例）。
 
 `Log`、`PathCodec`、`ProcessTexts`、`ToolHandler`、`HostProbe`、`AskUser`、`ProcessRunner`、`SessionHost` / `Session` 与 `FenceHost` 是**不在某个能力 `ports.rs`** 的端口：它们在 `kernel/ports.rs`（机制型业务单元 `kernel`，无领域语义，R12 的例外）。
 见 [../kernel/unit-map.md](../kernel/unit-map.md)。

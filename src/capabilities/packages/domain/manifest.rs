@@ -1,7 +1,7 @@
 //! 目的：运行包契约（package.yaml）与包库事实——一个包 = 一个文件夹 + 一份清单。
 //! 管：清单校验、去重、系统路径冲突预检与按能力查版本（纯逻辑，可单测）。
 //! 不管：目录遍历与 yaml 解析（PackageSource 端口的适配层）、包内容怎么组织（只认清单事实）。
-//! 联动：契约见 docs/vm/README.md；被 domain/exec.rs 与本能力 service 消费。
+//! 联动：契约见 RUNTIME_SPEC.md；被 domain/plan.rs 与本能力 service 消费。
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

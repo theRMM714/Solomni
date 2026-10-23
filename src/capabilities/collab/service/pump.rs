@@ -438,7 +438,6 @@ impl CollabSession {
     pub(crate) fn assemble_members(&self) -> Result<(Vec<Member>, Vec<String>), String> {
         let prompts = self.prompts.clone();
         let roster = self.modules.roster();
-        let library = self.vm.library();
         let mut members = Vec::new();
         let mut notes = Vec::new();
         for a in &self.roster {
@@ -524,14 +523,9 @@ impl CollabSession {
                 builtin_tools: self.systools.book(),
                 reply_seq: self.reply_seq,
                 line: Default::default(),
-                // 本档位下不能执行工具的模块（缺运行包）：机制侧据此拒绝执行。guest 自带的运行能力由执行侧收口
-                // （conductor 的 unavailable_modules 有会话的 base 与 probe）；讨论席拿不到模块工具，这里按包库事实给即可。
-                unavailable: crate::capabilities::vm::api::unavailable(
-                    &self.spec,
-                    &modules,
-                    &library,
-                    &[],
-                ),
+                // 讨论席拿不到模块工具（with_modules = false），因此不需要包选择诊断；
+                // 执行席的缺包判据在 conductor（与成员循环同一把尺子）。
+                unavailable: std::collections::BTreeMap::new(),
                 fence,
                 // 讨论席不干活、拿不到模块工具，也就没有工具进程的注入项。
                 module_env: Default::default(),

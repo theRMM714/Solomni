@@ -8,6 +8,7 @@ use crate::capabilities::conductor::api::{
     SessionView, TierChoices, WorkMode, WorkOpened, WorkSpec,
 };
 use crate::capabilities::llm::api::Llm;
+use crate::capabilities::packages::api::Packages;
 use crate::capabilities::provision::api::Provision;
 use crate::capabilities::session::api::History;
 #[cfg(test)]
@@ -220,8 +221,10 @@ pub struct Conductor {
     history: Arc<dyn History + Send + Sync>,
     /// 工作区用例面（**不持它的端口**，R12）：工作区目录与版本化走它。
     workspace: Arc<dyn Workspace + Send + Sync>,
-    /// 虚拟机档用例面（**不持它的端口**，R12）：运行包库与档位就绪检测走它。
+    /// 虚拟机档用例面（**不持它的端口**，R12）：guest 生命周期与档位就绪检测走它。
     vm: Arc<dyn Vm + Send + Sync>,
+    /// 运行包能力（**不持它的端口**，R12）：包库、选型诊断与计划走它。
+    packages: Arc<dyn Packages + Send + Sync>,
     /// 依赖补齐面（**不持它的端口**，R12）：虚拟根清单与装没装齐从它读。
     provision: Arc<dyn Provision + Send + Sync>,
     /// 目的：模块能力（**不持它的端口**，R12）——模块清单事实的唯一上游。
@@ -280,6 +283,7 @@ impl Conductor {
         history: Arc<dyn History + Send + Sync>,
         workspace: Arc<dyn Workspace + Send + Sync>,
         vm: Arc<dyn Vm + Send + Sync>,
+        packages: Arc<dyn Packages + Send + Sync>,
         provision: Arc<dyn Provision + Send + Sync>,
         modules: Arc<dyn Modules + Send + Sync>,
         llm: Arc<dyn Llm + Send + Sync>,
@@ -297,6 +301,7 @@ impl Conductor {
             history,
             workspace,
             vm,
+            packages,
             provision,
             modules,
             llm,

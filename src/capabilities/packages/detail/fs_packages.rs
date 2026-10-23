@@ -1,10 +1,10 @@
 //! 目的：PackageSource 端口的磁盘实现——扫描 runtimes/ 下每个含 package.yaml 的文件夹。
 //! 管：目录遍历与 yaml 解析；清单即事实，放在依赖文件夹里即出现，移出即消失。
-//! 不管：清单校验、去重与冲突预检（在 domain/packages.rs）。
+//! 不管：清单校验、去重与冲突预检（在 domain/manifest.rs）。
 //! 联动：端口在 ports.rs；只由组合根构造。
 
-use crate::capabilities::vm::domain::packages::{Library, PackageManifest};
-use crate::capabilities::vm::ports::PackageSource;
+use crate::capabilities::packages::domain::manifest::{Library, PackageManifest};
+use crate::capabilities::packages::ports::PackageSource;
 use std::path::PathBuf;
 
 pub struct FsPackages {
@@ -58,7 +58,7 @@ impl PackageSource for FsPackages {
                                 continue;
                             }
                             let name = sub.file_name().to_string_lossy().to_string();
-                            if crate::capabilities::vm::domain::packages::is_platform_dir_name(
+                            if crate::capabilities::packages::domain::manifest::is_platform_dir_name(
                                 &name,
                             ) {
                                 m.platform_dirs.insert(name, sub_path);
