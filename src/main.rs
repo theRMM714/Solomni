@@ -474,7 +474,11 @@ fn main() {
             Arc::clone(&modules),
             Arc::clone(&secrets),
         )
-        .with_network(registry.app_settings().sandbox.policy.network),
+        .with_network(registry.app_settings().sandbox.policy.network)
+        .with_host_runtime(
+            Arc::clone(&packages),
+            Arc::new(kernel::detail::HostProbeAdapter),
+        ),
     );
 
     // 依赖补齐面先建出来：Conductor（选虚拟根要读清单）与呈现层（setup 路由）各持同一份。

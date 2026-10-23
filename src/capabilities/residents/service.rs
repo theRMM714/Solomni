@@ -5,6 +5,7 @@
 //! 联动：api 见 `api.rs`，端口见 `ports.rs`；由 `main.rs` 装配。
 
 use crate::capabilities::modules::api::{Module, Modules, Roster, ServiceDecl};
+use crate::capabilities::packages::api as pkgs;
 use crate::capabilities::residents::api::{
     Operation, Receipt, ResidentOps, ServiceState, ServiceView,
 };
@@ -39,6 +40,11 @@ pub struct ResidentsService {
     failed: Mutex<BTreeMap<String, (String, String)>>,
     /// 目的：全局网络开关（常驻服务与一次执行同一份口径）。
     network: bool,
+    /// 目的：本机档的运行包面（包库 + 宿主事实）；没有注入 = 不装载运行包。
+    host: Option<(
+        Arc<dyn pkgs::Packages + Send + Sync>,
+        Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>,
+    )>,
 }
 
 impl ResidentsService {
@@ -59,7 +65,18 @@ impl ResidentsService {
             running: Mutex::new(BTreeMap::new()),
             failed: Mutex::new(BTreeMap::new()),
             network: false,
+            host: None,
         }
+    }
+
+    /// 目的：组合根注入本机档运行包面（包库 + 宿主探测）；服务起进程时按宿主目标取 PATH/只读根。
+    pub fn with_host_runtime(
+        mut self,
+        packages: Arc<dyn pkgs::Packages + Send + Sync>,
+        probe: Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>,
+    ) -> ResidentsService {
+        self.host = Some((packages, probe));
+        self
     }
 
     /// 目的：组合根注入全局网络开关（默认 false；重启后按新设置重建）。
@@ -160,6 +177,33 @@ impl ResidentOps for ResidentsService {
         fence.net = self.network;
         fence.lease = lease.to_string();
         fence.agent = format!("resident/{}/{}", module, name);
+        // 本机档的运行包：与模块工具同一把尺子（HostProbe 提供事实，packages 给计划）。
+        let (path, roots) = if let Some((packages, probe)) = &self.host {
+            let current_path = std::env::var_os("PATH").unwrap_or_default();
+            let has_exe = |n: &str| probe.has_exe(n);
+            let bin_ok = |p: &std::path::Path| probe.is_dir(p);
+            let facts = pkgs::Facts {
+                has_exe: &has_exe,
+                bin_ok: &bin_ok,
+                current_path: &current_path,
+            };
+            let plan = pkgs::plan_host(
+                &crate::kernel::api::ExecSpec::default(),
+                std::slice::from_ref(m),
+                &packages.library(),
+                pkgs::PinPolicy::First,
+                &facts,
+            );
+            if !plan.problems.is_empty() {
+                return Err(pkgs::diagnose_text(&plan.problems));
+            }
+            (plan.path, plan.roots)
+        } else {
+            (None, Vec::new())
+        };
+        fence.ro_tree.extend(roots);
+        fence.ro_tree.sort();
+        fence.ro_tree.dedup();
         let spec = LaunchSpec {
             module: module.to_string(),
             name: name.to_string(),
@@ -167,6 +211,7 @@ impl ResidentOps for ResidentsService {
             cwd: m.root.clone(),
             options: decl.options.clone(),
             env,
+            path,
             fence,
         };
         let (instance, operations) = adapter.start(&spec)?;

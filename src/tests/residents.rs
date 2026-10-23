@@ -466,3 +466,35 @@ fn residents_call_requires_a_running_service() {
         .unwrap_err();
     assert!(err.contains("未启动"), "{}", err);
 }
+
+/// 目的：常驻服务也按宿主目标取运行包：PATH 与围栏只读根都来自 packages 计划。
+#[test]
+fn resident_service_gets_host_package_path_and_roots() {
+    use crate::tests::doubles::{test_packages, FixedProbe, InMemoryPackages};
+    let dir = crate::tests::scratch("resident-host-pkg");
+    let bin = dir.join("bin");
+    std::fs::create_dir_all(&bin).expect("建 bin");
+    let mut m = module_with_service("m1", "fake", true);
+    m.manifest.runtimes = vec!["pkgtool".to_string()];
+    let mut p = crate::tests::doubles::pkg("pkgtool", "1");
+    p.source_dir = dir.clone();
+    let packages = test_packages(Arc::new(InMemoryPackages::from(vec![p])));
+    let probe = Arc::new(FixedProbe {
+        dirs: vec![bin.clone()],
+        ..Default::default()
+    });
+    let fake = Arc::new(FakeServiceAdapter::new());
+    let service = ResidentsService::new(
+        vec![Arc::clone(&fake) as Arc<dyn ServiceAdapter + Send + Sync>],
+        test_modules(Arc::new(VecSource(vec![m]))),
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+    )
+    .with_host_runtime(packages, probe);
+    service.start("m1", "svc", "").expect("服务要起得来");
+    let paths = fake.paths();
+    let path = paths[0].as_ref().expect("常驻服务要拿到包 PATH");
+    let first = std::env::split_paths(path).next().expect("PATH 第一段");
+    assert_eq!(first, bin, "包 bin 前置到服务 PATH");
+    assert!(fake.roots()[0].contains(&dir), "包根要进围栏只读根");
+    let _ = std::fs::remove_dir_all(&dir);
+}

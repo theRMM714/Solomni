@@ -210,6 +210,9 @@ impl SessionHost for ProcessSessions {
         for (k, v) in crate::kernel::detail::confine::fence_env(&spec.fence, &spec.command) {
             cmd.env(k, v);
         }
+        if let Some(p) = &spec.path {
+            cmd.env("PATH", p);
+        }
         for (k, v) in &spec.env {
             cmd.env(k, v);
         }

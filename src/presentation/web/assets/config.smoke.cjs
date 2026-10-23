@@ -255,10 +255,10 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
   check("config: 依赖文件夹真实路径（照它去放包）", t.indexOf("/runtimes") >= 0);
   check("config: declared 呈现", t.indexOf("模块 research 需要：python") >= 0);
   check("config: missing 呈现 + 放进 runtimes_dir 后重新扫描",
-    t.indexOf("模块 research 缺：python") >= 0 && t.indexOf("把对应的运行包放进 /runtimes") >= 0 && t.indexOf("重新扫描") >= 0);
+    t.indexOf("模块 research 缺：python") >= 0 && t.indexOf("把适用于本档位的运行包放进 /runtimes") >= 0 && t.indexOf("重新扫描") >= 0);
   check("config: available 呈现", t.indexOf("· python：3.11、3.12") >= 0 && t.indexOf("· node：20.11.0") >= 0);
   check("config: 四类 diagnosis 都译成中文",
-    ["有多个版本", "在包库里没有", "不在包库里", "都要写进 opt/rt/bin"].every((k) => t.indexOf(k) >= 0), t);
+    ["有多个版本", "在本档位没有", "不在本档位可用的包里", "都要写进 opt/rt/bin"].every((k) => t.indexOf(k) >= 0), t);
   check("config: 模块/运行包拒收原因原文",
     t.indexOf("模块：broken-mod：缺 module.yaml") >= 0 && t.indexOf("运行包：runtimes/bad：manifest 非法") >= 0);
   const pinSelects = selects.filter((s) => (s.children || []).some((o) => ["3.11", "3.12"].indexOf(String(o.textContent)) >= 0));

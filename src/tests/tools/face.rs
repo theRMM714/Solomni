@@ -464,8 +464,16 @@ pub(crate) fn module_lease_serializes_exclusive_calls_but_allows_parallel_reader
                 let fence = &fence;
                 let env = &env;
                 s.spawn(move || {
-                    let _ =
-                        svc.run_module("m", fence, "python tools/x.py", "{}", env, parallel, None);
+                    let _ = svc.run_module(
+                        "m",
+                        fence,
+                        "python tools/x.py",
+                        "{}",
+                        env,
+                        None,
+                        parallel,
+                        None,
+                    );
                 });
             }
         });

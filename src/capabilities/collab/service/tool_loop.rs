@@ -500,6 +500,7 @@ pub(crate) fn dispatch_external(
                     command,
                     &inv.args_json,
                     env,
+                    ctx.runtime_path.as_deref(),
                     mt.parallel.contains(&inv.name),
                     ask,
                 );

@@ -818,7 +818,14 @@ async function approvePlan(name) {
   assert(q && /检索/.test(String(q.output || '')), 'query 有命中（不是空结果兜底）', String((q && q.output) || '').slice(0, 300));
 
   // 不经 AI 直接跑模块（模块的独立入口 = 它声明的 tools）：同一份动作目录，**不建会话**。
-  // 本机档不装载运行包（与成员循环同一把尺子）：声明了 runtimes 的模块照样直跑并落产物。
+  // 本机档按宿主目标装载运行包：pkgprobe 的 bin/ 进本次 PATH，直跑真的用上它。
+  const pkgDirect = await reg('module.pkgprobe.echo', {});
+  assert(pkgDirect.status === 200, '直跑本机运行包提供的工具（module.pkgprobe.echo）', pkgDirect.text.slice(0, 300));
+  assert(
+    pkgDirect.json && pkgDirect.json.ok === true && String(pkgDirect.json.output || '').includes('PKG-OK'),
+    '运行包 bin/ 真的进了本次 PATH',
+    JSON.stringify(pkgDirect.json).slice(0, 300),
+  );
   const directRoot = path.join(ROOT, 'session', 'e2e-direct-' + Date.now());
   const directIn = path.join(directRoot, 'in');
   fs.mkdirSync(directIn, { recursive: true });

@@ -260,7 +260,7 @@ impl ConductorHandle {
     }
 
     /// 目的：模块 id → 它在**当前设置档位**下缺的运行包能力（空表 = 都能跑）。
-    /// 约束：与成员循环读同一把尺子（`workspace::api::unavailable`，档位感知）——本机档不装载运行包，
+    /// 约束：与成员循环读同一把尺子（`packages::api::plan_host` 的 `unusable`，宿主目标）——本机档按宿主目标选包，
     ///   不因"没装包"拒绝本机解释器就能跑的工具；缺包 = 不执行，不静默降级。
     fn unavailable_modules(&self) -> BTreeMap<String, Vec<String>> {
         self.call(|core| Ok(core.unavailable_modules_now()))
@@ -336,10 +336,19 @@ impl ConductorHandle {
     ) -> Result<Acted, String> {
         self.authorize_module(caller)?;
         let (module, tool, decl) = self.module_action(id)?;
-        // 与成员循环同一把尺子：该能力不在包库里 = 该模块的工具不执行，并如实说明缺哪个能力。
-        if let Some(caps) = self.unavailable_modules().get(&module.manifest.id) {
+        // 直接动作跑在宿主：按宿主目标取包计划（没有会话定版，多版本取稳定序第一个）。
+        let module_for_plan = module.clone();
+        let host_plan = self.call(move |core| {
+            Ok(core.host_plan_for(
+                &crate::kernel::api::ExecSpec::default(),
+                std::slice::from_ref(&module_for_plan),
+                crate::capabilities::packages::api::PinPolicy::First,
+            ))
+        })?;
+        // 与成员循环同一把尺子：该能力在本机档不可用 = 该模块的工具不执行，并如实说明缺哪个能力。
+        if let Some(caps) = host_plan.unusable.get(&module.manifest.id) {
             return Err(format!(
-                "模块 {} 的运行包 {} 未装载，不能直接跑它的工具；把包放进依赖文件夹 runtimes/（契约见 RUNTIME_SPEC.md）",
+                "模块 {} 的运行能力 {} 在本机档不可用，不能直接跑它的工具；把适用于本机目标的包放进依赖文件夹 runtimes/（契约见 RUNTIME_SPEC.md）",
                 module.manifest.id,
                 caps.join("、")
             ));
@@ -363,6 +372,9 @@ impl ConductorHandle {
             module.has_userdata,
         );
         fence.net = self.settings()?.sandbox.policy.network;
+        fence.ro_tree.extend(host_plan.roots.iter().cloned());
+        fence.ro_tree.sort();
+        fence.ro_tree.dedup();
         let args_json = serde_json::to_string(&module_args).unwrap_or_else(|_| "{}".to_string());
         // 人直接跑模块工具：这一趟**没有可回答的前端**（没有会话、没有裁决队），所以不给提问端口——
         // 围栏的必要落点授不上时按 fail-closed 拒绝；隐私字段只经环境变量注入（值不进命令行）。
@@ -373,6 +385,7 @@ impl ConductorHandle {
             &decl.command,
             &args_json,
             &env,
+            host_plan.path.as_deref(),
             decl.parallel,
             None,
         );

@@ -6,13 +6,15 @@
 use super::builders::*;
 use super::prelude::*;
 use crate::capabilities::packages::api as pkgs;
-use crate::capabilities::packages::api::{Library, Problem};
+use crate::capabilities::packages::api::{Facts, Library, PinPolicy, Problem, Target};
 use crate::capabilities::packages::detail::FsPackages;
 use crate::capabilities::packages::domain::manifest::{
-    check_manifest, conflicts, is_platform_dir_name, PackageManifest,
+    check_manifest, conflicts, host_platform, is_platform_dir_name, PackageManifest,
 };
 use crate::capabilities::packages::ports::PackageSource;
 use std::collections::BTreeMap;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 
 #[test]
 pub(crate) fn package_manifest_check_rejects_illegal_forms() {
@@ -380,5 +382,204 @@ pub(crate) fn build_packages_take_guest_or_library() {
     assert_eq!(
         cc.provides_paths,
         vec!["usr/bin".to_string(), "usr/lib".to_string()]
+    );
+}
+
+/// 目的：按当前宿主目标造一个包清单（平台子目录可指定；source_dir 由调用方给）。
+fn manifest(
+    id: &str,
+    version: &str,
+    kind: &str,
+    prefix: &str,
+    source_dir: &Path,
+    dirs: &[(&str, &Path)],
+) -> PackageManifest {
+    PackageManifest {
+        id: id.to_string(),
+        version: version.to_string(),
+        kind: kind.to_string(),
+        prefix: prefix.to_string(),
+        provides_paths: if kind == "system" {
+            vec!["usr/lib".to_string()]
+        } else {
+            Vec::new()
+        },
+        requires: Vec::new(),
+        license: Vec::new(),
+        note: String::new(),
+        files: Vec::new(),
+        source_dir: source_dir.to_path_buf(),
+        platform_dirs: dirs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_path_buf()))
+            .collect(),
+    }
+}
+
+/// 目的：目标平台载荷：host-* 优先、guest-* 优先、无前缀通用回退；不留错的那份。
+#[test]
+pub(crate) fn target_selects_the_matching_payload() {
+    let Some(platform) = host_platform() else {
+        return;
+    };
+    let root = PathBuf::from("/packages/py");
+    let host_dir = root.join(format!("host-{}", platform));
+    let guest_dir = root.join(format!("guest-{}", platform));
+    let common = root.join(platform);
+    let p = manifest(
+        "py",
+        "1",
+        "prefix",
+        "opt/rt/py",
+        &root,
+        &[
+            (&format!("host-{}", platform), &host_dir),
+            (&format!("guest-{}", platform), &guest_dir),
+            (platform, &common),
+        ],
+    );
+    assert_eq!(
+        p.payload_for(&Target::host()).as_deref(),
+        Some(host_dir.as_path()),
+        "本机档优先 host-*"
+    );
+    assert_eq!(
+        p.payload_for(&Target::guest(platform)).as_deref(),
+        Some(guest_dir.as_path()),
+        "虚拟机档优先 guest-*"
+    );
+    let only_guest = manifest(
+        "py",
+        "1",
+        "prefix",
+        "opt/rt/py",
+        &root,
+        &[(&format!("guest-{}", platform), &guest_dir)],
+    );
+    assert!(only_guest.payload_for(&Target::host()).is_none());
+    let common_only = manifest("py", "1", "prefix", "opt/rt/py", &root, &[]);
+    assert_eq!(
+        common_only.payload_for(&Target::host()).as_deref(),
+        Some(root.as_path())
+    );
+}
+
+/// 目的：本机计划优先用运行包，包 bin/ 前置到 PATH、包根进只读根；host 缺少的可执行名回退宿主。
+#[test]
+pub(crate) fn host_plan_prefers_packages_and_falls_back_to_host_path() {
+    let dir = crate::tests::scratch("host-plan");
+    let bin = dir.join("bin");
+    std::fs::create_dir_all(&bin).expect("建 bin");
+    let p = manifest("tool", "1", "prefix", "opt/rt/tool", &dir, &[]);
+    let lib = Library::build(vec![p], Vec::new());
+    let modules = vec![module_with_runtimes("a", &["tool"])];
+    let spec = ExecSpec::default();
+    let has_any = |_: &str| true;
+    let bin_ok = |p: &Path| p == bin;
+    let current = OsStr::new("/host/bin");
+    let facts = Facts {
+        has_exe: &has_any,
+        bin_ok: &bin_ok,
+        current_path: current,
+    };
+    let plan = pkgs::plan_host(&spec, &modules, &lib, PinPolicy::Require, &facts);
+    assert!(plan.problems.is_empty(), "{:?}", plan.problems);
+    assert_eq!(
+        plan.providers.get("tool"),
+        Some(&pkgs::Provider::Package {
+            id: "tool".to_string(),
+            version: "1".to_string()
+        }),
+        "有包就用包（即使宿主 PATH 上也有）"
+    );
+    let path = plan.path.expect("有包就有 PATH");
+    let first = std::env::split_paths(&path).next().expect("第一段");
+    assert_eq!(first, bin, "包 bin/ 前置");
+    assert_eq!(plan.roots, vec![dir.clone()], "包根进只读根");
+
+    let empty = Library::default();
+    let plan = pkgs::plan_host(&spec, &modules, &empty, PinPolicy::Require, &facts);
+    assert!(plan.problems.is_empty(), "{:?}", plan.problems);
+    assert_eq!(plan.providers.get("tool"), Some(&pkgs::Provider::Host));
+    assert!(plan.path.is_none(), "宿主 PATH 已够用，不需要覆盖");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 目的：多版本在会话里必须定版；无会话面按稳定序取第一个。
+#[test]
+pub(crate) fn host_plan_requires_a_pin_for_multiple_versions() {
+    let p1 = manifest("tool", "1", "prefix", "opt/rt/tool1", Path::new("/p1"), &[]);
+    let p2 = manifest("tool", "2", "prefix", "opt/rt/tool2", Path::new("/p2"), &[]);
+    let lib = Library::build(vec![p1, p2], Vec::new());
+    let modules = vec![module_with_runtimes("a", &["tool"])];
+    let spec = ExecSpec::default();
+    let has = |_: &str| false;
+    let bin_ok = |_: &Path| true;
+    let facts = Facts {
+        has_exe: &has,
+        bin_ok: &bin_ok,
+        current_path: OsStr::new(""),
+    };
+    let plan = pkgs::plan_host(&spec, &modules, &lib, PinPolicy::Require, &facts);
+    assert!(
+        plan.problems
+            .iter()
+            .any(|p| matches!(p, Problem::Ambiguous { .. })),
+        "{:?}",
+        plan.problems
+    );
+    assert_eq!(plan.unusable.get("a"), Some(&vec!["tool".to_string()]));
+    let plan = pkgs::plan_host(&spec, &modules, &lib, PinPolicy::First, &facts);
+    assert!(plan.problems.is_empty(), "{:?}", plan.problems);
+    assert_eq!(plan.packages[0].version, "1", "无会话面取稳定序第一个");
+}
+
+/// 目的：system 类包不服务本机档；包没有可执行 bin 时不假装可用。
+#[test]
+pub(crate) fn host_plan_refuses_system_and_binless_packages() {
+    let system = manifest("cc", "13", "system", "", Path::new("/p/cc"), &[]);
+    let lib = Library::build(vec![system], Vec::new());
+    let modules = vec![module_with_runtimes("a", &["cc"])];
+    let spec = ExecSpec::default();
+    let has = |_: &str| false;
+    let bin_ok = |_: &Path| true;
+    let facts = Facts {
+        has_exe: &has,
+        bin_ok: &bin_ok,
+        current_path: OsStr::new(""),
+    };
+    let plan = pkgs::plan_host(&spec, &modules, &lib, PinPolicy::Require, &facts);
+    assert!(
+        plan.problems
+            .iter()
+            .any(|p| matches!(p, Problem::NotForTarget { .. })),
+        "{:?}",
+        plan.problems
+    );
+    assert_eq!(plan.unusable.get("a"), Some(&vec!["cc".to_string()]));
+
+    let no_bin = manifest(
+        "tool",
+        "1",
+        "prefix",
+        "opt/rt/tool",
+        Path::new("/p/tool"),
+        &[],
+    );
+    let lib = Library::build(vec![no_bin], Vec::new());
+    let tool_modules = vec![module_with_runtimes("a", &["tool"])];
+    let bin_ok = |_: &Path| false;
+    let facts = Facts {
+        has_exe: &has,
+        bin_ok: &bin_ok,
+        current_path: OsStr::new(""),
+    };
+    let plan = pkgs::plan_host(&spec, &tool_modules, &lib, PinPolicy::Require, &facts);
+    assert!(
+        plan.problems
+            .iter()
+            .any(|p| matches!(p, Problem::NoBin { .. })),
+        "{:?}",
+        plan.problems
     );
 }

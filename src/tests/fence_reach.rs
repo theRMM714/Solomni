@@ -63,7 +63,14 @@ fn fence_reach_for_external_harness() {
     let fence = FenceSpec::standalone(&module, None, false);
 
     // 1) 命令里按 PATH 名的程序（python）目录被放行：模块工具跑通一次完整往返。
-    let a = runner.run(&fence, &format!("{} tools/probe.py", py), "{}", &[], None);
+    let a = runner.run(
+        &fence,
+        &format!("{} tools/probe.py", py),
+        "{}",
+        &[],
+        None,
+        None,
+    );
     assert!(
         a.ok && a.output.contains("PROBE-OK"),
         "命令里按 PATH 名的程序应可达：{}",
@@ -71,7 +78,7 @@ fn fence_reach_for_external_harness() {
     );
 
     // 2) 绝对路径的程序不被自动放行：模块目录外的可执行文件跑不起来（如实失败，不静默）。
-    let b = runner.run(&fence, &outside_sh.to_string_lossy(), "{}", &[], None);
+    let b = runner.run(&fence, &outside_sh.to_string_lossy(), "{}", &[], None, None);
     assert!(
         !b.ok,
         "模块目录外的绝对路径程序不该可达（要放进模块目录，或用 PATH 名）：{}",
@@ -84,6 +91,7 @@ fn fence_reach_for_external_harness() {
         &format!("{} tools/read_outside.py", py),
         "{}",
         &[],
+        None,
         None,
     );
     assert!(

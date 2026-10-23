@@ -89,16 +89,17 @@ impl ToolExec for ToolsService {
         command: &str,
         args_json: &str,
         env: &[(String, String)],
+        path: Option<&std::ffi::OsStr>,
         parallel: bool,
         ask: Option<&dyn crate::kernel::ports::AskUser>,
     ) -> ToolOutcome {
         let lease = self.module_lease(module);
         if parallel {
             let _shared = lease.read().unwrap_or_else(|e| e.into_inner());
-            self.runner.run(fence, command, args_json, env, ask)
+            self.runner.run(fence, command, args_json, env, path, ask)
         } else {
             let _exclusive = lease.write().unwrap_or_else(|e| e.into_inner());
-            self.runner.run(fence, command, args_json, env, ask)
+            self.runner.run(fence, command, args_json, env, path, ask)
         }
     }
 

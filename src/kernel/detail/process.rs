@@ -124,6 +124,7 @@ impl ProcessRunner for ProcTools {
         command: &str,
         args_json: &str,
         env: &[(String, String)],
+        path: Option<&std::ffi::OsStr>,
         ask: Option<&dyn crate::kernel::ports::AskUser>,
     ) -> ToolOutcome {
         // Windows：容器围栏要先把「可达范围」授权给容器 SID。
@@ -200,6 +201,10 @@ impl ProcessRunner for ProcTools {
         cmd.env_clear();
         for (k, v) in confine::fence_env(fence, command) {
             cmd.env(k, v);
+        }
+        // 本机档运行包的生效 PATH：只覆盖这一趟，不改进程全局。
+        if let Some(p) = path {
+            cmd.env("PATH", p);
         }
         // 该模块隐私字段的注入项：只走环境，不进命令行（值也不进提示词 / 转录 / 日志）。
         for (k, v) in env {
@@ -744,6 +749,7 @@ mod tests {
             "{\"k\":\"v\"}",
             &[],
             None,
+            None,
         );
         assert!(out.ok, "工具应当成功：{}", out.output);
         assert!(
@@ -778,6 +784,7 @@ mod tests {
             &format!("{} echo_env.py", py),
             "{}",
             &[],
+            None,
             None,
         );
         std::env::remove_var("SOLOMNI_PROBE_ENV_LEAK");
@@ -823,6 +830,7 @@ mod tests {
             "{}",
             &[],
             None,
+            None,
         );
         assert!(out.ok, "node 工具应当成功：{}", out.output);
         for flag in ["--preserve-symlinks", "--preserve-symlinks-main"] {
@@ -844,6 +852,7 @@ mod tests {
                 &format!("{} echo_node_opts.py", py),
                 "{}",
                 &[],
+                None,
                 None,
             );
             assert!(out.ok, "python 工具应当成功：{}", out.output);
@@ -889,7 +898,7 @@ mod tests {
             std::fs::set_permissions(&script, perm).expect("加执行位");
         }
         let tools = real_runner(exe, &dir, 60);
-        let out = tools.run(&spec_for(&dir), command, "{}", &[], None);
+        let out = tools.run(&spec_for(&dir), command, "{}", &[], None, None);
         assert!(out.ok, "带正斜杠的相对程序名必须能跑起来：{}", out.output);
         assert!(
             out.output.contains("PROBE-OK"),
@@ -923,6 +932,7 @@ mod tests {
             &format!("{} sleep60.py", py),
             "{}",
             &[],
+            None,
             None,
         );
         assert!(!out.ok, "超时必须如实回执失败：{}", out.output);
@@ -1054,7 +1064,7 @@ mod tests {
         let tools = real_runner_with_write(exe, &home);
         // ① 用户选"本轮无围栏跑一次"：命令真跑，回执**如实标为无围栏**。
         let ask = RecordingAsk::new(Some(OPT_FENCE_UNFENCED));
-        let out = tools.run(&spec, &command, "{}", &[], Some(&ask));
+        let out = tools.run(&spec, &command, "{}", &[], None, Some(&ask));
         assert_eq!(
             ask.asked_ids(),
             vec![vec![
@@ -1085,7 +1095,7 @@ mod tests {
         );
         // ② 用户选"放弃这次调用"：不执行，回执写清哪一环、哪个目录、缺什么、怎么补。
         let ask = RecordingAsk::new(Some(OPT_FENCE_ABORT));
-        let out = tools.run(&spec, &command, "{}", &[], Some(&ask));
+        let out = tools.run(&spec, &command, "{}", &[], None, Some(&ask));
         assert!(!out.ok, "放弃 = 不执行");
         assert!(
             !out.output.contains("RAN"),
@@ -1101,7 +1111,7 @@ mod tests {
             );
         }
         // ③ 没有可回答的前端（纯终端 / e2e）：没有可点的选项 = 不执行（fail-closed）。
-        let out = tools.run(&spec, &command, "{}", &[], None);
+        let out = tools.run(&spec, &command, "{}", &[], None, None);
         assert!(!out.ok, "没有可回答的前端 = 不执行");
         assert!(
             !out.output.contains("RAN"),
@@ -1122,7 +1132,7 @@ mod tests {
     fn missing_launcher_binary_is_reported_honestly() {
         let dir = crate::tests::scratch("proc-tools-missing-exe");
         let tools = real_runner(PathBuf::from("definitely-not-here-solomni"), &dir, 5);
-        let out = tools.run(&spec_for(&dir), "echo hi", "{}", &[], None);
+        let out = tools.run(&spec_for(&dir), "echo hi", "{}", &[], None, None);
         assert!(!out.ok);
         assert!(out.output.contains("工具进程启动失败"), "{}", out.output);
         let _ = std::fs::remove_dir_all(&dir);

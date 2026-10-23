@@ -371,6 +371,15 @@ impl Conductor {
                 // 身份与角色**同一把尺子**（重建与实时不能各写一份，见 Conductor::role_of）：
                 // 协作派生的成员 / 节点 = executor（拿得到回报工具）；其余单 agent 工作 = solo。
                 let role = self.role_of(meta)?;
+                let host_plan = if meta.exec.tier == crate::kernel::api::Tier::Host {
+                    self.host_plan_for(
+                        &meta.exec,
+                        &modules,
+                        crate::capabilities::packages::api::PinPolicy::Require,
+                    )
+                } else {
+                    crate::capabilities::packages::api::PackagePlan::default()
+                };
                 let mut tools = self.tools_env(
                     &modules,
                     &sb,
@@ -380,6 +389,7 @@ impl Conductor {
                     &role,
                     meta.exec.tier,
                     self.guest_lease_for(meta)?,
+                    &host_plan,
                 );
                 // 回复 id 跨重启单调：从转录里的最大值续号，否则新回复会与旧回复并成一组。
                 tools.reply_seq = crate::capabilities::session::api::max_reply(events);

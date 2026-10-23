@@ -60,7 +60,7 @@ node start.js --provision --ensure --yes # 可选（Linux / Windows）：把 QEM
 ```
 
 - 工具链与缓存收敛在**项目内**：检测到可用的 Rust 就**只读借用**，缓存与产物仍落 `platform/<os>/`；没有或有问题的才先征求同意装进项目内，不动系统；**无交互终端时不做安装**，打印手动步骤后退出。
-- 模块工具/构建的**基础工具链**（Python / Node / C-C++）装进 `.tools/toolchains/`，启动时前置 PATH；缺失时回退宿主并如实报告。C# 等未内置能力留给用户扩展（本机档的 `runtimes/` 扩展仍是缺口）。
+- 模块工具/构建的**基础工具链**（Python / Node / C-C++）装进 `.tools/toolchains/`，启动时前置 PATH；缺失时回退宿主并如实报告。C# 等未内置能力可由用户把适用于本机目标的包放进 `runtimes/`（包 `bin/` 进本次执行的 PATH；缺包如实报告）。
   C/C++ 在 Windows 用 MinGW-w64、Linux / macOS 用 Zig；macOS 链接原生框架仍需要系统的 Xcode Command Line Tools / SDK。
   借用系统工具链时不读系统 `~/.cargo/config.toml`（镜像 / 凭据），依赖会重新下到项目内——这是「不写项目外」的取舍；门禁还会快照项目外缓存根，写出去即失败。
 

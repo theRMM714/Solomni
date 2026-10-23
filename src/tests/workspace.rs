@@ -305,7 +305,18 @@ pub(crate) fn runtime_report_is_tier_aware() {
         "宿主确实没有这个能力时照实报"
     );
     assert!(host.available.is_empty());
-    assert!(host.diagnoses.is_empty(), "本机档不做虚拟机档诊断");
+    assert!(
+        matches!(
+            host.diagnoses.as_slice(),
+            [
+                crate::capabilities::conductor::api::RuntimeDiagnosis::Package(
+                    crate::capabilities::packages::api::Problem::Missing { .. }
+                )
+            ]
+        ),
+        "本机档缺能力也要如实诊断：{:?}",
+        host.diagnoses
+    );
     assert_eq!(core.runtime_report(Tier::Vm).diagnoses.len(), 1);
     // 包库里有包 = 缺失消失、诊断清空
     let with_pkg = cores(

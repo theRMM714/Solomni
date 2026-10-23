@@ -47,6 +47,7 @@ impl ServiceAdapter for McpAdapter {
             fence: spec.fence.clone(),
             command: spec.command.clone(),
             env: spec.env.clone(),
+            path: spec.path.clone(),
         })?;
         let mut next_id = 1u64;
         // 握手期间先记下有没有 list_changed（真出现就在第一次调用前刷新一次）。

@@ -35,7 +35,7 @@ pub(crate) fn guest_names_resolve_to_one_slot_and_paths_are_refused() {
 pub(crate) fn vm_tier_readiness_gates_creation_and_editing() {
     // 用测试探测：本机可起虚拟机、平台共享工具在场；不依赖 runner 有没有 /dev/kvm 或 smbd/virtiofsd。
     let probe = crate::tests::doubles::vm_capable_host_probe();
-    // 本机档：任何机器上都能承载（不装载运行包、不要 guest）。
+    // 本机档：任何机器上都能承载（没有 guest 前置）。
     let host = exec::tier_readiness(
         &crate::tests::root_dir(),
         &ExecSpec::default(),
@@ -463,7 +463,7 @@ pub(crate) fn package_setup_scripts_apply_prefix_bins_and_system_payloads() {
 #[test]
 pub(crate) fn exec_host_tier_ignores_packages() {
     let plan = exec::plan(&ExecSpec::default(), Vec::new(), &[], false)
-        .expect("本机档不装载运行包，不会因缺包失败");
+        .expect("本机档的 ExecPlan 不装 guest 包，不会因缺包失败");
     assert_eq!(plan.tier, Tier::Host);
     assert!(plan.packages.is_empty());
     assert!(plan.guest.is_none());

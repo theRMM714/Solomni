@@ -256,6 +256,7 @@ impl ProcessRunner for SilentRunner {
         _command: &str,
         _args: &str,
         _env: &[(String, String)],
+        _path: Option<&std::ffi::OsStr>,
         _ask: Option<&dyn crate::kernel::ports::AskUser>,
     ) -> ToolOutcome {
         panic!("不应调用工具");
@@ -282,12 +283,14 @@ impl RecordingRunner {
 /// 目的：记下每次调用注入项的 runner（断言隐私字段只经环境变量进工具进程）。
 pub(crate) struct EnvRecordingRunner {
     pub(crate) envs: Mutex<Vec<Vec<(String, String)>>>,
+    pub(crate) paths: Mutex<Vec<Option<std::ffi::OsString>>>,
 }
 
 impl EnvRecordingRunner {
     pub(crate) fn new() -> EnvRecordingRunner {
         EnvRecordingRunner {
             envs: Mutex::new(Vec::new()),
+            paths: Mutex::new(Vec::new()),
         }
     }
 }
@@ -299,9 +302,14 @@ impl ProcessRunner for EnvRecordingRunner {
         _command: &str,
         args_json: &str,
         env: &[(String, String)],
+        path: Option<&std::ffi::OsStr>,
         _ask: Option<&dyn crate::kernel::ports::AskUser>,
     ) -> ToolOutcome {
         self.envs.lock().expect("锁").push(env.to_vec());
+        self.paths
+            .lock()
+            .expect("锁")
+            .push(path.map(|p| p.to_os_string()));
         ToolOutcome {
             ok: true,
             output: format!("跑完了 {}", args_json),
@@ -316,6 +324,7 @@ impl ProcessRunner for RecordingRunner {
         command: &str,
         args_json: &str,
         _env: &[(String, String)],
+        _path: Option<&std::ffi::OsStr>,
         _ask: Option<&dyn crate::kernel::ports::AskUser>,
     ) -> ToolOutcome {
         // 记下工具进程的工作目录（= 该模块的根）与命令、参数。
@@ -360,6 +369,7 @@ impl ProcessRunner for ParallelRunner {
         command: &str,
         args_json: &str,
         _env: &[(String, String)],
+        _path: Option<&std::ffi::OsStr>,
         _ask: Option<&dyn crate::kernel::ports::AskUser>,
     ) -> ToolOutcome {
         let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
@@ -401,6 +411,7 @@ impl ProcessRunner for AskingRunner {
         command: &str,
         args_json: &str,
         _env: &[(String, String)],
+        _path: Option<&std::ffi::OsStr>,
         ask: Option<&dyn crate::kernel::ports::AskUser>,
     ) -> ToolOutcome {
         let Some(ask) = ask else {
@@ -502,6 +513,7 @@ pub(crate) fn member_with_tools(
         unavailable: BTreeMap::new(),
         fence: crate::kernel::api::FenceSpec::from_sandbox(&test_sandbox("m0", &[]), false),
         module_env: Default::default(),
+        runtime_path: None,
         residents: Arc::new(crate::capabilities::residents::api::NoResidents),
         reply_seq: 0,
         line: Default::default(),
@@ -797,6 +809,7 @@ pub(crate) fn native_member(
         unavailable: BTreeMap::new(),
         fence: crate::kernel::api::FenceSpec::from_sandbox(&sb, false),
         module_env: Default::default(),
+        runtime_path: None,
         residents: Arc::new(crate::capabilities::residents::api::NoResidents),
         reply_seq: 0,
         line: Default::default(),

@@ -76,7 +76,8 @@ node start.js --provision --ensure --yes # optional (Linux / Windows): install Q
   out-of-project cache roots and fails if anything was written.
 - The **base toolchains** for module tools/builds (Python / Node / C-C++) live under `.tools/toolchains/` and are
   prepended to PATH at startup; when missing, the product falls back to the host PATH and reports it. C# and other
-  non-base capabilities remain user extensions (the host-side `runtimes/` extension is still a gap).
+  non-base capabilities can be added as host-targeted packages under `runtimes/` (their `bin/` joins that run's PATH;
+  missing packages are reported honestly).
   C/C++ uses MinGW-w64 on Windows and Zig on Linux / macOS; linking native macOS frameworks still needs the
   system Xcode Command Line Tools / SDK.
 

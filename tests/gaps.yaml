@@ -73,20 +73,3 @@
     未覆盖的生产路径逐条有补测或缺口结论。
   blocked_by: 缺少观察面（子进程插桩与合并尚未实现）
 
-- id: runtime.host-extension
-  scope: global
-  level: T3
-  why: |
-    本机档目前只使用宿主 PATH 与产品内置的基础工具链（Python / Node / C-C++）；`runtimes/` 包库仍只服务虚拟机档。
-    未内置的能力（例如 C#/.NET）在本机档没有"用户把包放进 runtimes/ 就能用"的路径，只能在宿主自行安装或改用虚拟机档。
-  how: |
-    1) 给 `package.yaml` 增加目标平台语义：包目录可按宿主 / guest 的 os-arch 分包，或显式声明它服务哪个执行档；
-    2) 本机档扫描 `runtimes/`，按当前宿主目标选包；`prefix` 的 bin 前置到生效 PATH，`system` 载荷不叠写系统路径
-       （本机档不能改系统；需要另行定义项目内叠层目录）；
-    3) 围栏放行项目内包目录；与基础工具链的优先级、定版与冲突规则写进 RUNTIME_SPEC；
-    4) 补本机档真进程用例、冲突 / 缺包 / 跨平台诊断，并同步模块作者文档。
-  accept: |
-    用户把本机目标包放进 `runtimes/` 后，本机档的模块工具与 `--build` 能使用它；缺包仍如实拒绝并说明缺什么；
-    虚拟机档的 `runtimes/` 行为不变；`node run-tests.js` 全绿。
-  blocked_by: 缺少实现（本机档不装载 runtimes/）
-

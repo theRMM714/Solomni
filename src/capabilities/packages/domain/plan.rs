@@ -5,11 +5,13 @@
 
 use crate::capabilities::modules::api::Module;
 use crate::capabilities::packages::domain::manifest::{
-    conflicts, Library, PackageManifest, KIND_SYSTEM,
+    conflicts, Library, PackageManifest, Target, KIND_SYSTEM,
 };
 use crate::kernel::api::ExecSpec;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::{OsStr, OsString};
+use std::path::{Path, PathBuf};
 
 /// 目的：一条**包选择**诊断：结构化事实（界面文案由呈现层渲染）。
 /// 约束：模块内产物不在场是另一类事实，归 `vm::api::EntryProblem`，不混进这里。
@@ -24,8 +26,23 @@ pub enum Problem {
     },
     /// exec 段定的版本在库里不存在。
     UnknownPin { capability: String, version: String },
-    /// 两个包会写进同一处路径。
+    /// 两个包会写进同一处路径（只发生在虚拟机档）。
     Conflict { path: String, a: String, b: String },
+    /// 包库里只有**别的目标**能用的包（system 类、只有 guest 载荷、平台不匹配等）。
+    NotForTarget {
+        module: String,
+        capability: String,
+        target: String,
+        packages: Vec<String>,
+    },
+    /// 选中的包没有可执行的 `bin/`（本机档无法把命令放进 PATH）。
+    NoBin {
+        module: String,
+        capability: String,
+        package: String,
+    },
+    /// PATH 合成失败（路径里有无法放进 PATH 的字符）。
+    Path { why: String },
 }
 
 /// 目的：计划里的一项：已定版的包。
@@ -50,6 +67,45 @@ pub struct PackagePlan {
     pub problems: Vec<Problem>,
     /// 目的：模块 id → 本档位下用不了的能力名（空 = 都能用）。
     pub unusable: BTreeMap<String, Vec<String>>,
+    /// 目的：本机档的生效 PATH（包 `bin/` 在前，当前 PATH 在后）；虚拟机档为空。
+    pub path: Option<OsString>,
+    /// 目的：本机档要放行给围栏的包内容根（只读）；虚拟机档为空。
+    pub roots: Vec<PathBuf>,
+    /// 目的：能力 → 实际提供者（包或宿主 PATH），供构建指纹与排障。
+    pub providers: BTreeMap<String, Provider>,
+}
+
+/// 目的：一个能力最终由谁提供。
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Provider {
+    Host,
+    Package { id: String, version: String },
+}
+
+/// 目的：多版本且没定版时的策略。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PinPolicy {
+    /// 会话：必须由用户定版，核心不替用户挑。
+    Require,
+    /// 一次性构建 / 直接动作 / 常驻服务：没有定版入口，按包库稳定序取第一个。
+    First,
+}
+
+/// 目的：一次选型要问宿主的事实（由调用方用 HostProbe / std::env 提供，domain 不读盘）。
+pub struct Facts<'a> {
+    /// 目的：宿主生效 PATH 上有没有这个可执行名（基础工具链或宿主自装）。
+    pub has_exe: &'a dyn Fn(&str) -> bool,
+    /// 目的：这个 `bin` 目录可用吗（本机档要求目录在场；虚拟机档不用）。
+    pub bin_ok: &'a dyn Fn(&Path) -> bool,
+    /// 目的：当前进程 PATH（合成生效 PATH 的尾部）。
+    pub current_path: &'a OsStr,
+}
+
+/// 目的：一条选型请求：谁（模块 / build）需要哪个能力。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Request {
+    pub module: String,
+    pub capability: String,
 }
 
 /// 目的：哪些模块声明的能力包库里没有（模块 id → 缺失的能力名）——档位无关的事实。
@@ -68,6 +124,226 @@ pub fn absent(modules: &[Module], lib: &Library) -> BTreeMap<String, Vec<String>
         }
     }
     out
+}
+
+/// 目的：从模块声明派生选型请求。
+pub fn requests_from(modules: &[Module]) -> Vec<Request> {
+    let mut out = Vec::new();
+    for m in modules {
+        for cap in &m.manifest.runtimes {
+            out.push(Request {
+                module: m.manifest.id.clone(),
+                capability: cap.clone(),
+            });
+        }
+    }
+    out
+}
+
+/// 目的：从一段能力名清单派生请求（构建期 `needs` 用；module 是给诊断看的归属名）。
+pub fn requests_for(caps: &[String], module: &str) -> Vec<Request> {
+    caps.iter()
+        .map(|cap| Request {
+            module: module.to_string(),
+            capability: cap.clone(),
+        })
+        .collect()
+}
+
+/// 目的：本机档的包计划：按宿主目标选 prefix、产出 PATH/只读根；包优先于基础工具链/宿主 PATH。
+pub fn plan_host(
+    spec: &ExecSpec,
+    modules: &[Module],
+    lib: &Library,
+    policy: PinPolicy,
+    facts: &Facts,
+) -> PackagePlan {
+    plan_host_requests(&requests_from(modules), &spec.pins, lib, policy, facts)
+}
+
+/// 目的：本机档的包计划（请求显式给；构建期 `needs` 用它）。
+pub fn plan_host_requests(
+    requests: &[Request],
+    pins: &BTreeMap<String, String>,
+    lib: &Library,
+    policy: PinPolicy,
+    facts: &Facts,
+) -> PackagePlan {
+    let target = Target::host();
+    let eligible = lib.for_target(&target);
+    let mut problems: Vec<Problem> = Vec::new();
+    let mut chosen: Vec<&PackageManifest> = Vec::new();
+    let mut providers: BTreeMap<String, Provider> = BTreeMap::new();
+    let mut seen: BTreeSet<(String, String)> = BTreeSet::new();
+    let mut queue: Vec<Request> = requests.to_vec();
+    while let Some(req) = queue.pop() {
+        if !seen.insert((req.capability.clone(), req.module.clone())) {
+            continue;
+        }
+        let cap = &req.capability;
+        let versions = eligible.versions_of(cap);
+        if versions.is_empty() {
+            if has_host_executable(facts.has_exe, cap) {
+                providers.insert(cap.clone(), Provider::Host);
+                continue;
+            }
+            let all: Vec<String> = lib
+                .versions_of(cap)
+                .iter()
+                .map(|p| format!("{}@{}", p.id, p.version))
+                .collect();
+            if all.is_empty() {
+                problems.push(Problem::Missing {
+                    module: req.module.clone(),
+                    capability: cap.clone(),
+                });
+            } else {
+                problems.push(Problem::NotForTarget {
+                    module: req.module.clone(),
+                    capability: cap.clone(),
+                    target: target.label(),
+                    packages: all,
+                });
+            }
+            continue;
+        }
+        let picked: Option<&PackageManifest> = match pins.get(cap) {
+            Some(v) => match eligible.pick(cap, v) {
+                Some(p) => Some(p),
+                None => {
+                    let all: Vec<String> = lib
+                        .versions_of(cap)
+                        .iter()
+                        .map(|p| format!("{}@{}", p.id, p.version))
+                        .collect();
+                    if all.iter().any(|p| p.ends_with(&format!("@{}", v))) {
+                        problems.push(Problem::NotForTarget {
+                            module: req.module.clone(),
+                            capability: cap.clone(),
+                            target: target.label(),
+                            packages: all,
+                        });
+                    } else {
+                        problems.push(Problem::UnknownPin {
+                            capability: cap.clone(),
+                            version: v.clone(),
+                        });
+                    }
+                    None
+                }
+            },
+            None if versions.len() == 1 => Some(versions[0]),
+            None if policy == PinPolicy::First => Some(versions[0]),
+            None => {
+                problems.push(Problem::Ambiguous {
+                    capability: cap.clone(),
+                    versions: versions.iter().map(|p| p.version.clone()).collect(),
+                });
+                None
+            }
+        };
+        let Some(p) = picked else { continue };
+        if !(facts.bin_ok)(&p.source_dir.join("bin")) {
+            problems.push(Problem::NoBin {
+                module: req.module.clone(),
+                capability: cap.clone(),
+                package: format!("{}@{}", p.id, p.version),
+            });
+            continue;
+        }
+        for r in &p.requires {
+            queue.push(Request {
+                module: req.module.clone(),
+                capability: r.clone(),
+            });
+        }
+        providers.insert(
+            cap.clone(),
+            Provider::Package {
+                id: p.id.clone(),
+                version: p.version.clone(),
+            },
+        );
+        chosen.push(p);
+    }
+
+    chosen.sort_by(|a, b| {
+        (a.id.as_str(), a.version.as_str()).cmp(&(b.id.as_str(), b.version.as_str()))
+    });
+    let packages: Vec<PlannedPackage> = chosen.iter().map(|p| planned(p)).collect();
+    let (path, roots) = host_env(&packages, facts, &mut problems);
+    problems.sort();
+    problems.dedup();
+    PackagePlan {
+        unusable: unusable_map(requests, &problems),
+        packages,
+        problems,
+        path,
+        roots,
+        providers,
+    }
+}
+
+/// 目的：本机档的生效 PATH 与只读根：选中包的 `bin/` 前置，包内容根放行。
+fn host_env(
+    packages: &[PlannedPackage],
+    facts: &Facts,
+    problems: &mut Vec<Problem>,
+) -> (Option<OsString>, Vec<PathBuf>) {
+    let mut bins: Vec<PathBuf> = Vec::new();
+    let mut roots: Vec<PathBuf> = Vec::new();
+    for p in packages {
+        let bin = p.source_dir.join("bin");
+        if (facts.bin_ok)(&bin) {
+            bins.push(bin);
+        }
+        roots.push(p.source_dir.clone());
+    }
+    roots.sort();
+    roots.dedup();
+    match compose_path(&bins, facts.current_path) {
+        Ok(path) => (path, roots),
+        Err(why) => {
+            problems.push(Problem::Path { why });
+            (None, roots)
+        }
+    }
+}
+
+/// 目的：把包的 `bin/` 前置到当前 PATH；不重复、顺序稳定。
+fn compose_path(bins: &[PathBuf], current: &OsStr) -> Result<Option<OsString>, String> {
+    if bins.is_empty() {
+        return Ok(None);
+    }
+    let mut seen: BTreeSet<OsString> = BTreeSet::new();
+    let mut parts: Vec<OsString> = Vec::new();
+    for b in bins {
+        let s = b.clone().into_os_string();
+        if seen.insert(s.clone()) {
+            parts.push(s);
+        }
+    }
+    for p in std::env::split_paths(current) {
+        let s = p.into_os_string();
+        if seen.insert(s.clone()) {
+            parts.push(s);
+        }
+    }
+    std::env::join_paths(parts)
+        .map(Some)
+        .map_err(|e| format!("PATH 合成失败：{}", e))
+}
+
+/// 目的：能力名 → 宿主上可能对应的可执行名；未知能力按同名查。
+pub fn has_host_executable(has: &dyn Fn(&str) -> bool, cap: &str) -> bool {
+    let names: &[&str] = match cap {
+        "python" => &["python", "python3"],
+        "node" => &["node"],
+        "cc" | "c-c++" => &["cc", "gcc", "g++", "clang", "clang++"],
+        "bash" => &["bash"],
+        _ => return has(cap),
+    };
+    names.iter().any(|n| has(n))
 }
 
 /// 目的：包选择诊断（空 = 可以成立）：缺包 / 多版本歧义 / 定版不存在 / 系统路径冲突。
@@ -149,12 +425,14 @@ pub fn plan_guest(
     guest_runtimes: &[String],
 ) -> PackagePlan {
     let problems = diagnoses(modules, lib, spec, guest_runtimes);
-    let unusable = unusable_map(modules, &problems);
+    let requests = requests_from(modules);
+    let unusable = unusable_map(&requests, &problems);
     if !problems.is_empty() {
         return PackagePlan {
             packages: Vec::new(),
             problems,
             unusable,
+            ..Default::default()
         };
     }
     let mut chosen: Vec<&PackageManifest> = Vec::new();
@@ -190,6 +468,7 @@ pub fn plan_guest(
         packages: chosen.iter().map(|p| planned(p)).collect(),
         problems,
         unusable,
+        ..Default::default()
     }
 }
 
@@ -239,7 +518,7 @@ fn planned(p: &PackageManifest) -> PlannedPackage {
 
 /// 目的：模块 id → 本档位下用不了的能力名：缺包只点名那个能力；装配不成立（歧义 / 定版 / 冲突）则
 /// 凡声明了运行能力的模块都不可用——与工具循环的"缺包 = 不执行"同一把尺子。
-fn unusable_map(modules: &[Module], problems: &[Problem]) -> BTreeMap<String, Vec<String>> {
+fn unusable_map(requests: &[Request], problems: &[Problem]) -> BTreeMap<String, Vec<String>> {
     let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
     if problems.is_empty() {
         return out;
@@ -256,14 +535,15 @@ fn unusable_map(modules: &[Module], problems: &[Problem]) -> BTreeMap<String, Ve
         }
     }
     if assembly_broken {
-        for m in modules {
-            if !m.manifest.runtimes.is_empty() {
-                let mut caps = m.manifest.runtimes.clone();
-                caps.sort();
-                caps.dedup();
-                out.insert(m.manifest.id.clone(), caps);
-            }
+        for req in requests {
+            out.entry(req.module.clone())
+                .or_default()
+                .push(req.capability.clone());
         }
+    }
+    for caps in out.values_mut() {
+        caps.sort();
+        caps.dedup();
     }
     out
 }
@@ -301,6 +581,31 @@ pub fn diagnose_text(diags: &[Problem]) -> String {
             Problem::Conflict { path, a, b } => {
                 format!("运行包 {} 与 {} 都要写进 {}，装配会互相覆盖", a, b, path)
             }
+            Problem::NotForTarget {
+                module,
+                capability,
+                target,
+                packages,
+            } => {
+                format!(
+                    "模块 {} 需要运行包 {}：包库里只有不服务 {} 的包（{}）",
+                    module,
+                    capability,
+                    target,
+                    packages.join("、")
+                )
+            }
+            Problem::NoBin {
+                module,
+                capability,
+                package,
+            } => {
+                format!(
+                    "模块 {} 的运行包 {}（{}）没有可执行的 bin/，本机档放不进 PATH",
+                    module, capability, package
+                )
+            }
+            Problem::Path { why } => format!("运行包 PATH 合成失败：{}", why),
         })
         .collect();
     lines.join("；")

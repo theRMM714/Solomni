@@ -37,19 +37,6 @@ pub(crate) struct PreparedEdit {
     pub(crate) old_children: Vec<SessionMeta>,
     pub(crate) new_children: Vec<SessionMeta>,
 }
-/// 目的：本机档的能力是否已由生效 PATH 满足（基础工具链或宿主）。
-/// 参数：cap 是模块 runtimes 里的能力名；常见能力映射到实际可执行名，未知能力按同名查。
-fn host_has_capability(probe: &dyn crate::kernel::ports::HostProbe, cap: &str) -> bool {
-    let names: &[&str] = match cap {
-        "python" => &["python", "python3"],
-        "node" => &["node"],
-        "cc" | "c-c++" => &["cc", "gcc", "g++", "clang", "clang++"],
-        "bash" => &["bash"],
-        _ => &[cap],
-    };
-    names.iter().any(|n| probe.has_exe(n))
-}
-
 /// 目的：模块声明的能力（模块 id → 能力名，升序；去重）——报告 metadata。
 fn declared(modules: &[Module]) -> BTreeMap<String, Vec<String>> {
     let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -67,7 +54,7 @@ fn declared(modules: &[Module]) -> BTreeMap<String, Vec<String>> {
 
 impl Conductor {
     /// 运行能力报告：模块声明的能力、包库里的可用版本、缺失清单与虚拟机档诊断。
-    /// 「清单即事实」：每次调用重扫模块清单与包库；本机档不装载运行包，missing 只保留生效 PATH 上确实没有的能力。
+    /// 「清单即事实」：每次调用重扫模块清单与包库；本机档按宿主目标选包，missing 只保留本档位确实用不了的能力。
     pub fn runtime_report(&self, tier: crate::kernel::api::Tier) -> RuntimeReport {
         self.runtime_report_for(&crate::kernel::api::ExecSpec {
             tier,
@@ -81,26 +68,28 @@ impl Conductor {
         let lib = self.packages.library();
         let guest_runtimes = self.guest_runtimes_of(spec);
         let vm = spec.tier == crate::kernel::api::Tier::Vm;
-        let diagnoses = if vm {
-            pkgs::diagnoses(&roster.modules, &lib, spec, &guest_runtimes)
+        let (diagnoses, mut missing, available) = if vm {
+            let diagnoses = pkgs::diagnoses(&roster.modules, &lib, spec, &guest_runtimes)
                 .into_iter()
                 .map(crate::capabilities::conductor::api::RuntimeDiagnosis::Package)
-                .collect()
-        } else {
-            Vec::new()
-        };
-        // 「缺什么」按**这份规格**算：guest 自带的运行能力不算缺（与 plan / unavailable 同一把尺子）。
-        let mut missing = pkgs::absent(&roster.modules, &lib);
-        if vm {
+                .collect();
+            // 「缺什么」按**这份规格**算：guest 自带的运行能力不算缺（与 plan / unavailable 同一把尺子）。
+            let mut missing = pkgs::absent(&roster.modules, &lib);
             for caps in missing.values_mut() {
                 caps.retain(|c| !guest_runtimes.iter().any(|g| g == c));
             }
+            (diagnoses, missing, lib.capability_versions())
         } else {
-            // 本机档不装载运行包：能力由生效 PATH（项目内基础工具链在前、宿主在后）满足。
-            for caps in missing.values_mut() {
-                caps.retain(|c| !host_has_capability(self.probe.as_ref(), c));
-            }
-        }
+            let plan = self.host_plan_for(spec, &roster.modules, pkgs::PinPolicy::Require);
+            let diagnoses = plan
+                .problems
+                .iter()
+                .cloned()
+                .map(crate::capabilities::conductor::api::RuntimeDiagnosis::Package)
+                .collect();
+            let available = lib.for_target(&pkgs::Target::host()).capability_versions();
+            (diagnoses, plan.unusable, available)
+        };
         missing.retain(|_, caps| !caps.is_empty());
         let qemu = self.qemu_path();
         let share_tool = self.share_tool_path();
@@ -114,7 +103,7 @@ impl Conductor {
         RuntimeReport {
             tier: spec.tier.as_str().to_string(),
             declared: declared(&roster.modules),
-            available: lib.capability_versions(),
+            available,
             missing,
             diagnoses,
             tier_ready: readiness.ready(),
@@ -208,6 +197,24 @@ impl Conductor {
         pkgs::library_for_guest(&self.packages.library(), &self.guest_platform_of(spec))
     }
 
+    /// 目的：本机档的包计划：按宿主目标选包、产出 PATH/只读根；会话用 Require，无会话面用 First。
+    pub(crate) fn host_plan_for(
+        &self,
+        spec: &crate::kernel::api::ExecSpec,
+        modules: &[Module],
+        policy: pkgs::PinPolicy,
+    ) -> pkgs::PackagePlan {
+        let current_path = std::env::var_os("PATH").unwrap_or_default();
+        let has_exe = |name: &str| self.probe.has_exe(name);
+        let bin_ok = |path: &std::path::Path| self.probe.is_dir(path);
+        let facts = pkgs::Facts {
+            has_exe: &has_exe,
+            bin_ok: &bin_ok,
+            current_path: &current_path,
+        };
+        pkgs::plan_host(spec, modules, &self.packages.library(), policy, &facts)
+    }
+
     /// 目的：按一份执行规格与模块清单派生计划：入口判据先于包选型（与旧 `plan` 的错误顺序一致）。
     fn plan_for_spec(
         &self,
@@ -283,28 +290,30 @@ impl Conductor {
         spec: &crate::kernel::api::ExecSpec,
         modules: &[Module],
     ) -> BTreeMap<String, Vec<String>> {
-        if spec.tier != crate::kernel::api::Tier::Vm {
-            return BTreeMap::new();
+        if spec.tier == crate::kernel::api::Tier::Vm {
+            pkgs::plan_guest(
+                spec,
+                modules,
+                &self.library_for(spec),
+                &self.guest_runtimes_of(spec),
+            )
+            .unusable
+        } else {
+            self.host_plan_for(spec, modules, pkgs::PinPolicy::Require)
+                .unusable
         }
-        pkgs::plan_guest(
-            spec,
-            modules,
-            &self.library_for(spec),
-            &self.guest_runtimes_of(spec),
-        )
-        .unusable
     }
 
-    /// 目的：**当前设置档位**下不能执行工具的模块（人直接跑与动作目录共用）：本机档不装载运行包，一律可用。
-    /// 约束：与成员循环同一把尺子（`packages::api::plan_guest` 的 `unusable`）——不用档位无关的 `absent`，
-    ///   否则本机档会因"没装运行包"误拒本机解释器就能跑的工具。
+    /// 目的：人直接跑模块工具（无会话）时不能执行工具的模块——它跑在宿主，按**宿主**目标判。
+    /// 约束：与成员循环同一把尺子（`packages::api::plan_host` 的 `unusable`）；没有定版入口，多版本取稳定序第一个。
     pub fn unavailable_modules_now(&self) -> BTreeMap<String, Vec<String>> {
-        let spec = crate::kernel::api::ExecSpec {
-            tier: self.registry.app().tier,
-            ..crate::kernel::api::ExecSpec::default()
-        };
         let roster = self.modules.roster();
-        self.unavailable_modules(&spec, &roster.modules)
+        self.host_plan_for(
+            &crate::kernel::api::ExecSpec::default(),
+            &roster.modules,
+            pkgs::PinPolicy::First,
+        )
+        .unusable
     }
 
     /// 配置视图：把「能改什么、现在是什么、缺什么」如实给出（每次读取都重扫模块清单与包库）。
@@ -1118,7 +1127,7 @@ impl Conductor {
         self.workspace.prepare(&root, &agent_names)?;
         let sandboxes = self.sandboxes(&meta, &roster)?;
         // 扫描事实如实埋点：本会话用到的模块里，哪些声明的运行包不在包库（缺包同样会在下面按计划拒绝，文件与 guest 声明都看）。
-        // 包库只服务虚拟机档：本机档不装载运行包，这条警告在那里没有意义（宿主自备解释器）。
+        // 虚拟机档缺包在「开始」前就拒绝；这里的警告只补一条扫描事实。本机档由宿主计划在工具执行时如实拒绝。
         let session_modules: Vec<Module> = roster
             .modules
             .iter()
@@ -1265,6 +1274,11 @@ impl Conductor {
                 let channel = self.channel_of(a.model.as_deref());
                 let unavailable = self.unavailable_modules(&meta.exec, &chosen);
                 let guest = self.guest_os_of(&meta.exec);
+                let host_plan = if meta.exec.tier == crate::kernel::api::Tier::Host {
+                    self.host_plan_for(&meta.exec, &chosen, pkgs::PinPolicy::Require)
+                } else {
+                    pkgs::PackagePlan::default()
+                };
                 let (s, opened) = self.build_single(
                     a,
                     &chosen,
@@ -1275,6 +1289,7 @@ impl Conductor {
                     meta.exec.tier,
                     guest,
                     self.guest_lease_for(&meta)?,
+                    &host_plan,
                 );
                 (Session::Single(s), opened)
             }

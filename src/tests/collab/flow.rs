@@ -387,6 +387,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         unavailable: BTreeMap::new(),
         fence: crate::kernel::api::FenceSpec::from_sandbox(&sb, false),
         module_env: Default::default(),
+        runtime_path: None,
         residents: Arc::new(crate::capabilities::residents::api::NoResidents),
         reply_seq: 0,
         line: Default::default(),

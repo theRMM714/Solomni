@@ -406,23 +406,49 @@ pub fn build_module(
         eprintln!("[构建] 模块「{}」没声明 build 段：在 module.yaml 里写 build.command（见 MODULE_SPEC 的「构建」）", id);
         return 2;
     };
+    use crate::capabilities::packages::api::Packages as _;
     use crate::kernel::ports::HostProbe;
     let probe = crate::kernel::detail::host_probe::HostProbeAdapter;
-    // 构建期能力：本机档就是宿主 PATH 上有没有那个工具（包库只服务虚拟机档）。
-    let missing: Vec<&str> = decl
-        .needs
-        .iter()
-        .filter(|c| !probe.has_exe(c))
-        .map(|c| c.as_str())
-        .collect();
-    if !missing.is_empty() {
+    // 构建期能力：运行包优先，基础工具链 / 宿主 PATH 回退；没有会话定版，多版本取稳定序第一个。
+    let packages_lib =
+        crate::capabilities::packages::service::PackagesService::new(std::sync::Arc::new(
+            crate::capabilities::packages::detail::FsPackages::new(root.join("runtimes")),
+        ));
+    let current_path = std::env::var_os("PATH").unwrap_or_default();
+    let has_exe = |name: &str| probe.has_exe(name);
+    let bin_ok = |path: &std::path::Path| probe.is_dir(path);
+    let facts = crate::capabilities::packages::api::Facts {
+        has_exe: &has_exe,
+        bin_ok: &bin_ok,
+        current_path: &current_path,
+    };
+    let requests =
+        crate::capabilities::packages::api::requests_for(&decl.needs, &format!("build:{}", id));
+    let plan = crate::capabilities::packages::api::plan_host_requests(
+        &requests,
+        &std::collections::BTreeMap::new(),
+        &packages_lib.library(),
+        crate::capabilities::packages::api::PinPolicy::First,
+        &facts,
+    );
+    if !plan.problems.is_empty() {
         eprintln!(
-            "[构建] 本机没有这些构建期工具：{}（装工具链、自己编好放进来，或让作者发产物）",
-            missing.join("、")
+            "[构建] 本机没有这些构建期能力：{}（装工具链、把适用于本机目标的包放进 runtimes/、自己编好放进来，或让作者发产物）",
+            crate::capabilities::packages::api::diagnose_text(&plan.problems)
         );
         return 1;
     }
-    let fingerprint = match source_fingerprint(&module.root, &decl) {
+    let providers: Vec<String> = plan
+        .providers
+        .iter()
+        .map(|(cap, p)| match p {
+            crate::capabilities::packages::api::Provider::Host => format!("{}=host", cap),
+            crate::capabilities::packages::api::Provider::Package { id, version } => {
+                format!("{}={}@{}", cap, id, version)
+            }
+        })
+        .collect();
+    let fingerprint = match source_fingerprint(&module.root, &decl, &providers) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("[构建] 算源指纹失败：{}", e);
@@ -459,7 +485,7 @@ pub fn build_module(
         rw: vec![module.root.clone(), state_dir.join(id)],
         // 构建脚本可能调用项目内编译器（gcc/g++/zig），要放行它的安装根；否则 Landlock 会拒绝。
         ro: crate::entry::toolchains::active_roots(root),
-        ro_tree: Vec::new(),
+        ro_tree: plan.roots.clone(),
         private: home,
         cwd: module.root.clone(),
         net: network,
@@ -469,8 +495,15 @@ pub fn build_module(
         id,
         if network { "放行" } else { "不放行" }
     );
-    let out =
-        crate::kernel::ports::ProcessRunner::run(runner, &fence, &decl.command, "{}", &[], None);
+    let out = crate::kernel::ports::ProcessRunner::run(
+        runner,
+        &fence,
+        &decl.command,
+        "{}",
+        &[],
+        plan.path.as_deref(),
+        None,
+    );
     print!("{}", out.output);
     if !out.ok {
         eprintln!("[构建] {} 的构建命令失败（不落状态，下次重试）", id);
@@ -546,20 +579,26 @@ pub fn build_module_in_guest(root: &std::path::Path, id: &str, guest: &str) -> i
         crate::capabilities::packages::service::PackagesService::new(std::sync::Arc::new(
             crate::capabilities::packages::detail::FsPackages::new(root.join("runtimes")),
         ));
-    let (packages, missing) = crate::capabilities::packages::api::build_packages(
-        &decl.needs,
+    let platform = crate::capabilities::vm::api::guest_platform(image.os, image.arch);
+    let eligible = crate::capabilities::packages::api::Library::for_target(
         &crate::capabilities::packages::api::Packages::library(&packages_lib),
-        &image.runtimes,
+        &crate::capabilities::packages::api::Target::guest(&platform),
     );
+    let (packages, missing) =
+        crate::capabilities::packages::api::build_packages(&decl.needs, &eligible, &image.runtimes);
     if !missing.is_empty() {
         eprintln!(
-            "[构建] guest「{}」里没有这些构建期能力，包库也没提供：{}（把编译包放进 runtimes/，或给虚拟根装一个）",
+            "[构建] guest「{}」里没有这些构建期能力，包库也没提供：{}（把适用于该 guest 目标的包放进 runtimes/，或给虚拟根装一个）",
             guest,
             missing.join("、")
         );
         return 1;
     }
-    let fingerprint = match source_fingerprint(&module.root, &decl) {
+    let providers: Vec<String> = packages
+        .iter()
+        .map(|p| format!("{}@{}", p.id, p.version))
+        .collect();
+    let fingerprint = match source_fingerprint(&module.root, &decl, &providers) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("[构建] 算源指纹失败：{}", e);
@@ -805,11 +844,14 @@ fn read_build_state(path: &std::path::Path) -> Option<BuildState> {
 fn source_fingerprint(
     module_root: &std::path::Path,
     decl: &crate::capabilities::modules::api::BuildDecl,
+    providers: &[String],
 ) -> Result<String, String> {
     let mut buf: Vec<u8> = Vec::new();
     buf.extend_from_slice(decl.command.as_bytes());
     buf.push(0);
     buf.extend_from_slice(decl.needs.join(",").as_bytes());
+    buf.push(0);
+    buf.extend_from_slice(providers.join(",").as_bytes());
     buf.push(0);
     buf.push(if decl.net { b'1' } else { b'0' });
     buf.push(0);

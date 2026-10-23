@@ -20,6 +20,7 @@ fn launch() -> LaunchSpec {
         cwd: std::path::PathBuf::from("."),
         options: Default::default(),
         env: vec![("TOKEN".to_string(), "s3cr3t".to_string())],
+        path: None,
         fence: FenceSpec::standalone(std::path::Path::new("."), None, false),
     }
 }

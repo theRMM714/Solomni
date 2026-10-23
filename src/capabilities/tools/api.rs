@@ -44,6 +44,7 @@ pub trait Tools: Send + Sync {
 pub trait ToolExec: Send + Sync {
     /// 执行一次**外部工具**（模块声明的那种）：围栏安装、守门进程、超时杀树、截断都在端口后面。
     /// 参数：`module` = 所属模块 id（按它取进程租约）；`env` = 该模块隐私字段的注入项（只经环境变量进进程，不进命令行）；
+    ///   `path` = 本机档运行包的生效 PATH（`None` = 用围栏白名单里的 PATH）；
     ///   `parallel` = 该工具是否声明只读可并发（true 取共享租约，false 取独占租约）；
     ///   `ask` = 这一趟的**提问端口**（围栏的必要落点授不上时经它问用户）；`None` = 没有可回答的前端。
     /// 约束：同一模块的独占调用跨 agent 串行；不同模块与内置工具不受影响。
@@ -55,6 +56,7 @@ pub trait ToolExec: Send + Sync {
         command: &str,
         args_json: &str,
         env: &[(String, String)],
+        path: Option<&std::ffi::OsStr>,
         parallel: bool,
         ask: Option<&dyn crate::kernel::ports::AskUser>,
     ) -> ToolOutcome;

@@ -1275,7 +1275,7 @@ fn registry_actions_are_user_only_and_go_through_the_dispatcher() {
         .any(|a| a.id.starts_with("upsert_") || a.id == "set_settings"));
 }
 
-/// 运行能力判定是**档位感知**的：本机档不装载运行包（一律可用，直跑真的执行）；
+/// 运行能力判定是**档位感知**的：本机档按宿主目标选包 / PATH（直跑真的执行）；
 /// 「缺包 = 不执行」是**虚拟机档**的判定，域层另有 `exec_vm_tier_reports_missing_ambiguous_and_unavailable`。
 /// 回归点：直跑曾用档位无关的 `absent`，在本机档因"没装包"误拒本机解释器就能跑的工具。
 #[test]
@@ -1301,7 +1301,7 @@ fn module_action_on_host_tier_runs_even_without_runtime_packages() {
         .expect("模块工具进目录");
     assert!(
         e.available,
-        "本机档不装载运行包：声明了 runtimes 也该可用（reason={}）",
+        "本机档按宿主 PATH / 运行包满足能力（reason={}）",
         e.reason
     );
 
@@ -1356,4 +1356,54 @@ fn action_table_rejects_unknown_id_value_and_caller() {
         ))
         .unwrap_err();
     assert!(err.contains("不接受这个调用者"), "{}", err);
+}
+
+/// 目的：本机会话用运行包时，工具进程拿到的 PATH 是**包的 bin 前置**（只覆盖这一趟）。
+#[test]
+fn host_session_uses_package_bin_path() {
+    use std::sync::Arc;
+    let dir = crate::tests::scratch("host-session-pkg");
+    let bin = dir.join("bin");
+    std::fs::create_dir_all(&bin).expect("建 bin");
+    let mut p = crate::tests::doubles::pkg("pkgtool", "1");
+    p.source_dir = dir.clone();
+    let packages = Arc::new(crate::tests::doubles::InMemoryPackages::from(vec![p]));
+    let probe = Arc::new(crate::tests::doubles::FixedProbe {
+        dirs: vec![bin.clone()],
+        ..Default::default()
+    });
+    let mut m = module_with_runtimes("a", &["pkgtool"]);
+    m.manifest.tools.insert("run".to_string(), decl("pkgtool"));
+    let mut member = std::collections::BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![
+            "{\"type\":\"tool\",\"name\":\"run\",\"args\":{}}".into(),
+            "{\"type\":\"say\",\"text\":\"done\"}".into(),
+        ],
+    );
+    let runner = Arc::new(super::builders::EnvRecordingRunner::new());
+    let mut core = crate::tests::doubles::core_with_pkgs_probe(
+        vec![m],
+        crate::tests::doubles::gw(member, vec!["[]".into()]),
+        Arc::clone(&runner),
+        Arc::new(crate::tests::doubles::FakeCatalog::new(vec![
+            "m".to_string()
+        ])),
+        Arc::new(crate::tests::doubles::InMemoryHistory::new()),
+        Arc::new(crate::tests::doubles::InMemorySysIo::new()),
+        packages,
+        probe,
+    );
+    let sid = core
+        .create_work(crate::tests::doubles::work("w", WorkMode::Single, &["a"]))
+        .unwrap()
+        .sid;
+    crate::tests::doubles::with_live(|l| core.single_say(&sid, "干活", l)).unwrap();
+    let paths = runner.paths.lock().expect("锁");
+    assert_eq!(paths.len(), 1, "工具真的跑了一次");
+    let path = paths[0].as_ref().expect("本机档要注入包 PATH");
+    let first = std::env::split_paths(path).next().expect("PATH 第一段");
+    assert_eq!(first, bin, "包的 bin 前置到这一趟 PATH");
+    let _ = std::fs::remove_dir_all(&dir);
 }

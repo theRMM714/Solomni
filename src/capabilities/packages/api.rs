@@ -4,11 +4,11 @@
 //! 联动：被 vm / conductor / diagnostics / residents 消费；契约见 RUNTIME_SPEC.md。
 
 pub use crate::capabilities::packages::domain::manifest::{
-    library_for_guest, Library, KIND_SYSTEM,
+    library_for_guest, Library, Target, KIND_SYSTEM,
 };
 pub use crate::capabilities::packages::domain::plan::{
-    absent, build_packages, diagnose_text, diagnoses, plan_guest, PackagePlan, PlannedPackage,
-    Problem,
+    absent, build_packages, diagnose_text, diagnoses, plan_guest, plan_host, plan_host_requests,
+    requests_for, Facts, PackagePlan, PinPolicy, PlannedPackage, Problem, Provider,
 };
 
 /// 目的：运行包库的用例面（service.rs 实现）——包库快照与依赖文件夹路径走这里。

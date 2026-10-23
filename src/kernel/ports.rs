@@ -133,7 +133,8 @@ pub trait HostProbe: Send + Sync {
 
 /// 目的：一次外部进程执行端口——机制（围栏安装、进程拉起、stdin 送参、超时杀树、截断）在适配层。
 /// 参数：`fence` = 这次执行的可达范围与网络；`command` = 模块声明的启动命令；`args_json` = 经 stdin 送进去的参数；
-///   `env` = 该模块隐私字段的注入项（只经环境变量进进程，**不进命令行**）；`ask` = 这一趟的提问端口
+///   `env` = 该模块隐私字段的注入项（只经环境变量进进程，**不进命令行**）；
+///   `path` = 这一趟的运行包 PATH（本机档；`None` = 用围栏白名单里的 PATH）；`ask` = 这一趟的提问端口
 ///   （围栏必要落点授不上时经它问用户；`None` = 没有可回答的前端）。
 /// 返回：一次执行的事实回执；成功与否看退出码，细节由适配层如实拼装。
 /// 约束：策略（哪个模块能调哪个工具、命令行映射、可达哪些根）由调用方派生后传入；本端口只做机制。
@@ -144,6 +145,7 @@ pub trait ProcessRunner: Send + Sync {
         command: &str,
         args_json: &str,
         env: &[(String, String)],
+        path: Option<&std::ffi::OsStr>,
         ask: Option<&dyn AskUser>,
     ) -> ToolOutcome;
 }
@@ -154,6 +156,8 @@ pub struct SessionSpec {
     pub fence: FenceSpec,
     pub command: String,
     pub env: Vec<(String, String)>,
+    /// 目的：这一趟运行包的 PATH（本机档；`None` = 用围栏白名单里的 PATH）。
+    pub path: Option<std::ffi::OsString>,
 }
 
 /// 目的：一个已拉起的**长驻**进程会话——按行收发与关闭（MCP / ACP 这类按行的协议用它）。

@@ -6,6 +6,7 @@
 //! 方法取 pub(crate)（或 pub）供兄弟族与 conductor/api.rs 调用。
 
 use super::*;
+use crate::capabilities::packages::api as pkgs;
 
 impl Conductor {
     /// 核心按用户选择解析模型通道；缺省用核心默认；都缺 = None（网关回落演示并告知）。
@@ -192,6 +193,7 @@ impl Conductor {
         role: &str,
         tier: crate::kernel::api::Tier,
         guest_lease: String,
+        host_plan: &pkgs::PackagePlan,
     ) -> crate::capabilities::session::api::MemberTools {
         // 角色表发放的系统工具 id 清单（工具面的名字部分）；核心自有工具按它决定装不装。
         let allowed = self.role_tools(role);
@@ -268,9 +270,15 @@ impl Conductor {
 
             unavailable,
             // 围栏：可达范围 + 断网 + 环境白名单的落点，全部由该 agent 的沙箱派生（机制在 adapters）；
-            // 只读根来自用户显式授权（`sandbox.policy.host_read_roots`），默认空。
-            fence: crate::kernel::api::FenceSpec::from_sandbox(sb, net)
-                .with_read_only(self.host_read_roots()),
+            // 只读根来自用户显式授权（`sandbox.policy.host_read_roots`）与本机运行包的包根。
+            fence: {
+                let mut fence = crate::kernel::api::FenceSpec::from_sandbox(sb, net)
+                    .with_read_only(self.host_read_roots());
+                fence.ro_tree.extend(host_plan.roots.iter().cloned());
+                fence.ro_tree.sort();
+                fence.ro_tree.dedup();
+                fence
+            },
             // 各模块隐私字段的注入项：装配期按模块解析一次，起工具进程时只走环境（解析失败 = 该模块没有可用值）。
             module_env: modules
                 .iter()
@@ -281,6 +289,7 @@ impl Conductor {
                     )
                 })
                 .collect(),
+            runtime_path: host_plan.path.clone(),
             // 从零开始；按落盘转录重建时由调用方按转录里的最大值续号（见 rebuild_session）。
             reply_seq: 0,
             line: Default::default(),
@@ -384,6 +393,7 @@ impl Conductor {
         tier: crate::kernel::api::Tier,
         guest: Option<crate::capabilities::vm::api::GuestOs>,
         guest_lease: String,
+        host_plan: &pkgs::PackagePlan,
     ) -> (
         crate::capabilities::session::api::AgentSession,
         Vec<SessionEvent>,
@@ -422,6 +432,7 @@ impl Conductor {
             "solo",
             tier,
             guest_lease,
+            host_plan,
         );
         let mut s = crate::capabilities::session::api::AgentSession::new(
             &a.name,

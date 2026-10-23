@@ -51,33 +51,155 @@ pub struct PackageManifest {
     pub platform_dirs: BTreeMap<String, std::path::PathBuf>,
 }
 
-/// 目的：平台子目录名的写法（os-arch）——认了才能当"分平台包"用；不认的子目录当普通内容。
-pub fn is_platform_dir_name(name: &str) -> bool {
-    let Some((os, arch)) = name.split_once('-') else {
-        return false;
-    };
-    matches!(os, "linux" | "macos" | "windows") && matches!(arch, "x86_64" | "aarch64")
+/// 目的：这次装配的**目标**——目标由发起方给，不由包自己声明。
+/// 约束：Host = 本机档（只收 `prefix`）；Guest = 虚拟机档（`prefix` 与 `system` 都可以）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Target {
+    /// 目的：本机档目标（平台 = 宿主 os-arch）。
+    Host { platform: String },
+    /// 目的：虚拟机档目标（平台 = 那个虚拟根的 os-arch）。
+    Guest { platform: String },
 }
 
-/// 目的：按 guest 平台筛一遍包库——有平台分包的只留与 guest 匹配的那份（source_dir 指过去）；有分包但没有匹配那份的包从库里去掉，于是"缺能力"由诊断如实报出（不挂错的那份）。
-pub fn library_for_guest(lib: &Library, platform: &str) -> Library {
-    let mut packages = Vec::new();
-    for p in &lib.packages {
-        if p.platform_dirs.is_empty() {
-            packages.push(p.clone());
-            continue;
+impl Target {
+    /// 目的：宿主目标（平台取当前宿主；认不出平台时只可能是"无平台子目录"的通用包）。
+    pub fn host() -> Target {
+        Target::Host {
+            platform: host_platform().unwrap_or_default().to_string(),
         }
-        let Some(dir) = p.platform_dirs.get(platform) else {
-            continue;
+    }
+
+    /// 目的：guest 目标（平台用 pkg 目标的 os-arch 写法，例如 linux-x86_64）。
+    pub fn guest(platform: &str) -> Target {
+        Target::Guest {
+            platform: platform.to_string(),
+        }
+    }
+
+    /// 目的：目标的平台名（os-arch；可能为空 = 平台未知）。
+    pub fn platform(&self) -> &str {
+        match self {
+            Target::Host { platform } | Target::Guest { platform } => platform,
+        }
+    }
+
+    /// 目的：是不是本机档目标。
+    pub fn is_host(&self) -> bool {
+        matches!(self, Target::Host { .. })
+    }
+
+    /// 目的：人读的目标（诊断与日志用）。
+    pub fn label(&self) -> String {
+        match self {
+            Target::Host { platform } => format!("本机（{}）", platform_or_unknown(platform)),
+            Target::Guest { platform } => format!("guest（{}）", platform_or_unknown(platform)),
+        }
+    }
+}
+
+fn platform_or_unknown(platform: &str) -> &str {
+    if platform.is_empty() {
+        "平台未知"
+    } else {
+        platform
+    }
+}
+
+/// 目的：当前宿主的目标名（与平台子目录同一套 os-arch 写法）；认不出给 None。
+pub fn host_platform() -> Option<&'static str> {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => Some("linux-x86_64"),
+        ("linux", "aarch64") => Some("linux-aarch64"),
+        ("windows", "x86_64") => Some("windows-x86_64"),
+        ("windows", "aarch64") => Some("windows-aarch64"),
+        ("macos", "x86_64") => Some("macos-x86_64"),
+        ("macos", "aarch64") => Some("macos-aarch64"),
+        _ => None,
+    }
+}
+
+/// 目的：认出的平台子目录：`tier` = None 表示两档通用，Some 表示只服务那一档。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlatformDir<'a> {
+    /// 目的：None = 两档通用；Some = 只服务那一档。
+    pub tier: Option<crate::kernel::api::Tier>,
+    /// 目的：平台名（os-arch）。
+    pub platform: &'a str,
+}
+
+/// 目的：平台子目录名的写法：`<os>-<arch>`（两档通用）、`host-<os>-<arch>`、`guest-<os>-<arch>`。
+/// 约束：不认的子目录当普通内容，不是平台目录。
+pub fn platform_dir(name: &str) -> Option<PlatformDir<'_>> {
+    let (tier, rest) = if let Some(rest) = name.strip_prefix("host-") {
+        (Some(crate::kernel::api::Tier::Host), rest)
+    } else if let Some(rest) = name.strip_prefix("guest-") {
+        (Some(crate::kernel::api::Tier::Vm), rest)
+    } else {
+        (None, name)
+    };
+    let (os, arch) = rest.split_once('-')?;
+    if !matches!(os, "linux" | "macos" | "windows") || !matches!(arch, "x86_64" | "aarch64") {
+        return None;
+    }
+    Some(PlatformDir {
+        tier,
+        platform: rest,
+    })
+}
+
+/// 目的：这个子目录名是不是平台目录（两档通用或带 host/guest 前缀）。
+pub fn is_platform_dir_name(name: &str) -> bool {
+    platform_dir(name).is_some()
+}
+
+impl PackageManifest {
+    /// 目的：这个包在目标下用哪份载荷：带目标的平台目录优先，其次两档通用的 `<os>-<arch>`；
+    /// 约束：无平台子目录 = 整包通用；没有匹配载荷 = 该包在该目标不可用（不挂错的那份）。
+    pub fn payload_for(&self, target: &Target) -> Option<std::path::PathBuf> {
+        if self.platform_dirs.is_empty() {
+            return Some(self.source_dir.clone());
+        }
+        let platform = target.platform();
+        if platform.is_empty() {
+            return None;
+        }
+        let key = match target {
+            Target::Host { .. } => format!("host-{}", platform),
+            Target::Guest { .. } => format!("guest-{}", platform),
         };
-        let mut q = p.clone();
-        q.source_dir = dir.clone();
-        packages.push(q);
+        self.platform_dirs
+            .get(&key)
+            .or_else(|| self.platform_dirs.get(platform))
+            .cloned()
     }
-    Library {
-        packages,
-        rejected: lib.rejected.clone(),
+}
+
+impl Library {
+    /// 目的：按目标筛一遍包库：只留该目标可用的包，并把 `source_dir` 指到选中的载荷。
+    /// 约束：本机档只收 `prefix`（`system` 要写系统路径，本机不叠写）；虚拟机档两种都收。
+    pub fn for_target(&self, target: &Target) -> Library {
+        let mut packages = Vec::new();
+        for p in &self.packages {
+            if target.is_host() && p.kind != KIND_PREFIX {
+                continue;
+            }
+            let Some(payload) = p.payload_for(target) else {
+                continue;
+            };
+            let mut q = p.clone();
+            q.source_dir = payload;
+            packages.push(q);
+        }
+        Library {
+            packages,
+            rejected: self.rejected.clone(),
+        }
     }
+}
+
+/// 目的：按 guest 平台筛库（包装 `for_target`，给只需要 guest 的调用方）。
+pub fn library_for_guest(lib: &Library, platform: &str) -> Library {
+    lib.for_target(&Target::guest(platform))
 }
 
 /// 目的：一个文件的声明指纹。

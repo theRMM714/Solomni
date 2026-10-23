@@ -797,7 +797,7 @@ pub fn admit_guest(running: &[String], lease: &str, max: u32) -> Result<(), Stri
 }
 
 /// 目的：派生执行计划：入口判据与档位无关；运行包由 packages 能力选好，这里只负责落进 ExecPlan。
-/// 约束：本机档不装载运行包（packages 为空）；虚拟机档的包选择与诊断在 `packages::api::plan_guest`。
+/// 约束：本机档的 `packages` 为空（运行包由 packages 注入本次 PATH，不进 guest 装配）；虚拟机档的包选择与诊断在 `packages::api::plan_guest`。
 pub fn plan(
     spec: &ExecSpec,
     packages: Vec<PlannedPackage>,

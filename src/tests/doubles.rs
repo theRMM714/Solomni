@@ -1359,6 +1359,10 @@ impl InMemoryPackages {
     pub(crate) fn with(yamls: &[&str]) -> InMemoryPackages {
         InMemoryPackages(yamls.iter().map(|y| pkg_yaml(y)).collect())
     }
+    /// 目的：直接给清单（需要设置 source_dir 等扫描事实时用）。
+    pub(crate) fn from(manifests: Vec<PackageManifest>) -> InMemoryPackages {
+        InMemoryPackages(manifests)
+    }
 }
 
 impl PackageSource for InMemoryPackages {
@@ -2868,6 +2872,8 @@ impl ProxyHost for FakeProxyHost {
 pub(crate) struct FakeServiceAdapter {
     pub calls: Arc<Mutex<Vec<String>>>,
     envs: Mutex<Vec<(String, String)>>,
+    paths: Mutex<Vec<Option<std::ffi::OsString>>>,
+    roots: Mutex<Vec<Vec<std::path::PathBuf>>>,
 }
 
 impl FakeServiceAdapter {
@@ -2875,11 +2881,20 @@ impl FakeServiceAdapter {
         FakeServiceAdapter {
             calls: Arc::new(Mutex::new(Vec::new())),
             envs: Mutex::new(Vec::new()),
+            paths: Mutex::new(Vec::new()),
+            roots: Mutex::new(Vec::new()),
         }
     }
     /// 目的：start 时收到的注入项（断言 secrets 注入用）。
     pub(crate) fn envs(&self) -> Vec<(String, String)> {
         self.envs.lock().expect("锁").clone()
+    }
+    /// 目的：start 时收到的运行包 PATH 与围栏只读根。
+    pub(crate) fn paths(&self) -> Vec<Option<std::ffi::OsString>> {
+        self.paths.lock().expect("锁").clone()
+    }
+    pub(crate) fn roots(&self) -> Vec<Vec<std::path::PathBuf>> {
+        self.roots.lock().expect("锁").clone()
     }
 }
 
@@ -2922,6 +2937,11 @@ impl crate::capabilities::residents::ports::ServiceAdapter for FakeServiceAdapte
             .expect("锁")
             .push(format!("start:{}", spec.name));
         self.envs.lock().expect("锁").extend(spec.env.clone());
+        self.paths.lock().expect("锁").push(spec.path.clone());
+        self.roots
+            .lock()
+            .expect("锁")
+            .push(spec.fence.ro_tree.clone());
         Ok((
             Box::new(FakeServiceInstance {
                 calls: Arc::clone(&self.calls),
@@ -3128,6 +3148,7 @@ pub(crate) fn member_with_service_tools(
         unavailable: BTreeMap::new(),
         fence: crate::kernel::api::FenceSpec::from_sandbox(&sb, false),
         module_env: Default::default(),
+        runtime_path: None,
         reply_seq: 0,
         line: Default::default(),
         allowed: crate::capabilities::tools::api::names(),

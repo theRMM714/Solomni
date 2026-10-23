@@ -668,19 +668,34 @@ function diagnosisText(d) {
   if (!d || typeof d !== 'object') return String(d);
   if (d.Missing) {
     return '模块 ' + d.Missing.module + ' 需要的运行能力 ' + d.Missing.capability +
-      ' 在包库里没有：把它放进依赖文件夹后点「重新扫描」。';
+      ' 在本档位没有：把它放进依赖文件夹后点「重新扫描」，或确认基础工具链 / 宿主 PATH。';
   }
   if (d.Ambiguous) {
     return '运行能力 ' + d.Ambiguous.capability + ' 有多个版本（' + (d.Ambiguous.versions || []).join('、') +
-      '）：在下面「定版」里选一个版本，虚拟机档才装得起来。';
+      '）：在下面「定版」里选一个版本，工具才跑得起来。';
   }
   if (d.UnknownPin) {
     return '运行能力 ' + d.UnknownPin.capability + ' 定的版本 ' + d.UnknownPin.version +
-      ' 不在包库里：改一个版本，或把该版本的运行包放进依赖文件夹后点「重新扫描」。';
+      ' 不在本档位可用的包里：改一个版本，或把该版本的运行包放进依赖文件夹后点「重新扫描」。';
   }
   if (d.Conflict) {
     return '运行包 ' + d.Conflict.a + ' 与 ' + d.Conflict.b + ' 都要写进 ' + d.Conflict.path +
       '：装配会互相覆盖，换版本或去掉其中一个。';
+  }
+  if (d.NotForTarget) {
+    return '模块 ' + d.NotForTarget.module + ' 需要的运行能力 ' + d.NotForTarget.capability +
+      ' 在本档位用不了：包库里只有 ' + (d.NotForTarget.packages || []).join('、') +
+      '（目标：' + d.NotForTarget.target + '）。换一个包，或改用虚拟机档。';
+  }
+  if (d.NoBin) {
+    return '运行包 ' + d.NoBin.package + ' 没有可执行的 bin/：本机档放不进 PATH。检查包内容或换一个包。';
+  }
+  if (d.Path) {
+    return '运行包 PATH 合成失败：' + d.Path.why;
+  }
+  if (d.MissingEntry) {
+    return '模块 ' + d.MissingEntry.module + ' 的工具 ' + d.MissingEntry.tool +
+      ' 入口不在场：' + d.MissingEntry.command + '。先按模块 README 或 --build 编一次。';
   }
   return JSON.stringify(d);
 }
@@ -727,7 +742,7 @@ function buildConfigForm(sid, cfg, c, box) {
   // 与「未接入」是两回事：guest 本体尚未接入这一点写在下面的提示里，两条都如实说。
   const vmOk = cfg.vm_available !== false;
   const tierLocked = !!cfg.tier_locked;
-  const hostR = cfgRadio('本机档 —— 脚本直接在宿主上跑：宿主自备解释器，不装载运行包；隔离就是宿主本身（快，但风险也在宿主上）。', draft.tier === 'host', 'cfg-tier');
+  const hostR = cfgRadio('本机档 —— 脚本直接在宿主上跑：按宿主目标装载 runtimes/ 的包，基础工具链 / 宿主 PATH 回退；隔离就是宿主本身（快，但风险也在宿主上）。', draft.tier === 'host', 'cfg-tier');
   const vmR = cfgRadio('虚拟机档 —— 一整套 guest，脚本在 guest 里跑：按模块声明的运行能力装载运行包；隔离更强，代价是更重、依赖运行包。', draft.tier === 'vm', 'cfg-tier', !vmOk);
   if (tierLocked) {
     hostR.box.disabled = true;
@@ -935,7 +950,7 @@ function cfgRuntimeBlock(rt, dir, savedTier, rescan) {
   sec.appendChild(cfgDiv('cfg-line', '依赖文件夹（运行包放这里）：'));
   sec.appendChild(cfgDiv('cfg-dir', dir || '（后端没有给出依赖文件夹路径）'));
   sec.appendChild(cfgHint(savedTier === 'host'
-    ? '已保存的是本机档：脚本用宿主自己的解释器，不装载运行包。下面这些是如实呈现的事实，缺包不会拦会话。'
+    ? '已保存的是本机档：运行包按宿主目标装载，包 bin/ 进本次执行的 PATH；缺包或缺本机载荷 = 该模块的工具不执行（会话照样进行，如实说明缺什么）。'
     : '已保存的是虚拟机档：按模块声明的运行能力装载运行包；缺包 = 该模块的工具不执行（会话照样进行，如实说明缺什么）。'));
 
   const declared = rt.declared || {};
@@ -946,12 +961,12 @@ function cfgRuntimeBlock(rt, dir, savedTier, rescan) {
 
   const missing = rt.missing || {};
   const mIds = Object.keys(missing);
-  sec.appendChild(cfgDiv('cfg-sub', '缺口（包库里没有的能力）'));
+  sec.appendChild(cfgDiv('cfg-sub', '缺口（本档位用不了的能力）'));
   if (!mIds.length) {
     sec.appendChild(cfgDiv('cfg-line cfg-ok', '没有缺口：模块声明的运行能力在依赖文件夹里都能找到。'));
   } else {
     for (const id of mIds) sec.appendChild(cfgDiv('cfg-line cfg-bad', '· 模块 ' + id + ' 缺：' + (missing[id] || []).join('、')));
-    sec.appendChild(cfgHint('把对应的运行包放进 ' + (dir || '依赖文件夹 runtimes/') + '，再点上面的「重新扫描」（放入即出现，不用重启）。', 'warn'));
+    sec.appendChild(cfgHint('把适用于本档位的运行包放进 ' + (dir || '依赖文件夹 runtimes/') + '，再点上面的「重新扫描」（放入即出现；活动会话重新启用后生效）。', 'warn'));
   }
 
   const avail = rt.available || {};
@@ -962,7 +977,7 @@ function cfgRuntimeBlock(rt, dir, savedTier, rescan) {
 
   const diags = rt.diagnoses || [];
   if (diags.length) {
-    sec.appendChild(cfgDiv('cfg-sub', '虚拟机档诊断（选型不成立的原因）'));
+    sec.appendChild(cfgDiv('cfg-sub', '运行能力诊断（选型不成立的原因）'));
     for (const d of diags) sec.appendChild(cfgDiv('cfg-line cfg-bad', '· ' + diagnosisText(d)));
   }
 
