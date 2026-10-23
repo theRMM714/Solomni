@@ -219,6 +219,28 @@ pub fn validate_sandbox_settings(s: &SandboxSettings) -> Result<(), String> {
     Ok(())
 }
 
+/// 目的：Windows 上 `require` 文件系统/网络围栏与“不授权写 ACL”互斥——这组配置永远满足不了。
+/// 约束：只在 Windows 上判定；Linux / macOS 的围栏在守门进程里自足，`write_acl` 不参与。
+pub fn validate_sandbox_authorization(p: &SandboxPolicy) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let fs_required = p.enforce.filesystem == SandboxEnforceLevel::Require;
+        let net_required = p.enforce.network == SandboxEnforceLevel::Require && !p.network;
+        if (fs_required || net_required) && !p.windows.write_acl {
+            return Err(
+                "Windows 上 require 文件系统/网络围栏时必须同时授权 sandbox.policy.windows.write_acl，\
+                 或把对应的 enforce 降为 best_effort"
+                    .to_string(),
+            );
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = p;
+    }
+    Ok(())
+}
+
 /// 登记处（providers.yaml + models.yaml + settings.yaml + agents.yaml 的内存合体）。
 #[derive(Debug, Default, Clone)]
 pub struct Settings {

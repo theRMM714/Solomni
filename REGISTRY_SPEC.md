@@ -108,7 +108,7 @@ sandbox:               # 全局沙箱策略：会话不可填；保存后整体�
       env_whitelist: require
     on_unavailable: ask # ask = 启动门询问是否本进程降级（不落盘）；refuse = 直接拒绝
     windows:
-      write_acl: false # 是否允许 Windows 容器围栏写本机目录 ACL（首次启动会引导授权）
+      write_acl: false # 是否允许 Windows 容器围栏写本机目录 ACL（首次启动会引导；Windows 上 require 时必须为 true）
     host_read_roots: [] # 用户显式授权的主机绝对路径只读根（默认空）
     deny: []           # 全局黑名单（工作区相对路径）：硬底线，会话只能追加、不能删除
   defaults:            # 会话权限的全局默认；会话 meta 可覆盖
@@ -139,6 +139,9 @@ discuss_remind_cap: 3  # 讨论里一轮内对同一个成员最多提醒几次�
   又不会让首次启动停在“不可用”状态。
 - **重设**只修能修的那一项：Windows 未授权 → 写 `write_acl: true`；本机能力缺失 → 明确询问是否把
   `enforce` 四项降为 `best_effort`（持久接受无强制），默认否。
+- **Windows 配置一致性**：`require` 文件系统/网络围栏 + `windows.write_acl: false` 是**非法组合**——
+  保存时直接拒绝；已存在的 `settings.yaml` 加载时报 `settings.yaml 配置非法`。首启没有文件不拦（交给引导）。
+  要无围栏请把对应 `enforce` 降为 `best_effort`。
 - `on_unavailable=ask` 时，启动门发现 `require` 的机制不可用会询问是否**本进程降级**；
   回答不落盘，重启再问；没人答 / 没有前端 / `refuse` = fail-closed。`SOLOMNI_SANDBOX_DEGRADED=1/0`
   只供测试与 CI 在进程级注入（`1` 仅在 `ask` 下生效）。

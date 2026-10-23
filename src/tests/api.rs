@@ -841,6 +841,8 @@ fn auto_compaction_kicks_in_when_the_history_exceeds_the_budget() {
     // 阈值调到 1%：预算 = 32000 × 1% × 4 ≈ 1280 字符，上面那条长回复会超。
     let mut st = ops.registry.settings().expect("读设置");
     st.compact_at_percent = 1;
+    // Windows 上 require + write_acl=false 是非法组合；这条只验压缩阈值，先给授权。
+    st.sandbox.policy.windows.write_acl = true;
     ops.registry.set_settings(st).expect("写设置");
     let sid = ops
         .sessions

@@ -16,7 +16,10 @@ const consoleErrors = [];
 const filesBySid = new Map();
 // /api/state 的桩：**在跑的会话由后端会话表给**（前端不再从事件流里造会话）。
 // smoke-w 一开始就在跑：启动时的状态刷新据此建标签页并补盘上转录，随后轮询把实时行接上。
-const stateStub = { sessions: [{ sid: "smoke-w", running: true }] };
+const stateStub = {
+  sessions: [{ sid: "smoke-w", running: true }],
+  fence: { effective_fs: true, effective_net: true, sandbox_missing: [], sandbox_degraded: false },
+};
 function el(tag) {
   const node = {
     tag: tag || "",
@@ -64,6 +67,7 @@ const sandbox = {
           modules: [{ id: "research", brief: "调研", runtimes: ["python", "ruby"] }],
           providers: [], rejected: ["broken-mod"], agents: [], history: [],
           settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70 },
+          fence: stateStub.fence,
           sessions: stateStub.sessions,
         }),
       };
@@ -559,11 +563,46 @@ setTimeout(async () => {
       if (!historyRunTag) loadErrors.push("侧栏运行态检查：" + j);
     } catch (e) { loadErrors.push("侧栏运行态检查失败：" + e.message); }
   }
+  // 围栏横幅：正常 / best_effort 隐藏；降级 / 要求未满足显示（并区分文案）。
+  let fenceBanner = false;
+  if (!loadErrors.length) {
+    try {
+      const r = vm.runInNewContext(
+        "(function () {" +
+          " const box = document.querySelector('#fence-banner');" +
+          " const text = document.querySelector('#fence-text');" +
+          " state.fence = { effective_fs: false, effective_net: false, sandbox_missing: [], sandbox_degraded: true };" +
+          " renderFenceBanner();" +
+          " const degraded = { cls: box.className, text: text.textContent };" +
+          " state.fence = { effective_fs: false, effective_net: false, sandbox_missing: ['文件系统围栏'], sandbox_degraded: false };" +
+          " renderFenceBanner();" +
+          " const missing = { cls: box.className, text: text.textContent };" +
+          " state.fence = { effective_fs: false, effective_net: false, sandbox_missing: [], sandbox_degraded: false };" +
+          " renderFenceBanner();" +
+          " const bestEffort = { cls: box.className, text: text.textContent };" +
+          " state.fence = { effective_fs: true, effective_net: true, sandbox_missing: [], sandbox_degraded: false };" +
+          " renderFenceBanner();" +
+          " const normal = { cls: box.className, text: text.textContent };" +
+          " return { degraded: degraded, missing: missing, bestEffort: bestEffort, normal: normal }; })()",
+        sandbox
+      );
+      fenceBanner =
+        r.degraded.cls.indexOf("hidden") < 0 &&
+        r.degraded.text.indexOf("降级") >= 0 &&
+        r.missing.cls.indexOf("hidden") < 0 &&
+        r.missing.text.indexOf("未满足") >= 0 &&
+        r.bestEffort.cls.indexOf("hidden") >= 0 &&
+        r.normal.cls.indexOf("hidden") >= 0;
+      if (!fenceBanner) loadErrors.push("围栏横幅检查：" + JSON.stringify(r));
+    } catch (e) {
+      loadErrors.push("围栏横幅检查失败：" + e.message);
+    }
+  }
   const ok = alerts.length === 0 && loadErrors.length === 0 && rendered && tierWarned && identityKept
     && pollConn === "已连接" && pollApplied && hydratedHistory && liveReplaced && liveClearedOnIdle && toolReasoningRendered
     && rewoundApplies && readonlyRule
     && taskButtonRule && decisionCardRule && onlyLastStreams && lineRule && runningRules && atMenuRefetches
-    && wizardProxy && sessionNoteRule && historyRunTag
+    && wizardProxy && sessionNoteRule && historyRunTag && fenceBanner
     && consoleErrors.length === 0;
   if (!ok) {
     console.log("alerts（原生弹窗被调用的次数，应为 0）:", JSON.stringify(alerts));
@@ -571,7 +610,7 @@ setTimeout(async () => {
     console.log("轮询状态点:", JSON.stringify(pollConn), "| 事件已应用:", pollApplied, "| 盘上转录已补:", hydratedHistory, "| 流式被替换:", liveReplaced, "| 空闲清理:", liveClearedOnIdle, "| 思维链:", toolReasoningRendered);
     console.log("回档重置:", rewoundApplies, "| 只读会话:", readonlyRule);
     console.log("运行态归一（事件为准 / 快照只对账）:", runningRules, "| @ 菜单每次重拉:", atMenuRefetches);
-    console.log("向导代理形态:", wizardProxy, "| 会话级说明:", sessionNoteRule, "| 侧栏运行态:", historyRunTag);
+    console.log("向导代理形态:", wizardProxy, "| 会话级说明:", sessionNoteRule, "| 侧栏运行态:", historyRunTag, "| 围栏横幅:", fenceBanner);
     console.log("应用侧 console.error:", JSON.stringify(consoleErrors.slice(0, 3)));
     console.log("loadErrors:", JSON.stringify(loadErrors));
   }

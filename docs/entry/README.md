@@ -36,6 +36,8 @@
   不会起 CLI 或 Web。`-webUI` 不是绕过，门通过后才会 `serve_web`。
 - **首次启动**（没有 `.home/settings.yaml`）：Windows 上先问一次是否授权写 ACL；选是写盘并以退出码 75 整体重启，
   选否不写盘、进入启动门。重设只修能修的那一项：未授权写授权；本机能力缺失则明确问是否把 `enforce` 降为 `best_effort`。
+- **配置一致性**：Windows 上 `require` 文件系统/网络围栏 + `write_acl: false` 保存时拒绝、已存在的
+  `settings.yaml` 加载时报 `配置非法`；首启没有文件不拦（交给引导）。
 - **全局沙箱策略**：`sandbox.policy` 是进程级启动事实；保存后整体重启。默认 `require`，机制不可用时启动门按
   `on_unavailable` 询问本进程降级（不落盘）、重设或退出；`SOLOMNI_SANDBOX_DEGRADED=1/0` 只供测试/CI 注入。
 - **常驻服务**按有效启停拉起（`ResidentOps::start_enabled`，进程级租约，不属于任何会话）。

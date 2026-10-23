@@ -14,6 +14,7 @@ const state = {
   modules: [], providers: [], models: [], core: null, rejected: [], agents: [],
   history: [],           // 会话历史（名字/mode/时间）
   settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70 }, // 基本设置
+  fence: null,           // /api/state 的围栏事实：只有降级 / 要求未满足时进横幅
   sessions: new Map(),   // sid -> { sid, mode, title, lines, pending, sending, running, working, done, awaiting, readonly }
   activeSid: null,
   settingsOpen: false,
@@ -100,6 +101,8 @@ async function refreshState() {
     }
   }
   state.settings = s.settings || { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70 };
+  state.fence = s.fence || null;
+  renderFenceBanner();
   renderSidebar();
   renderHistory();
   if (opened) renderTabs();
@@ -990,6 +993,29 @@ function cfgRuntimeBlock(rt, dir, savedTier, rescan) {
   return sec;
 }
 
+/// 围栏横幅：只报“本进程降级”或“启动要求未满足”；用户主动选的 best_effort 不在这里打扰。
+function renderFenceBanner() {
+  const box = $('#fence-banner');
+  const text = $('#fence-text');
+  if (!box || !text) return;
+  const f = state.fence || {};
+  const missing = Array.isArray(f.sandbox_missing) ? f.sandbox_missing : [];
+  const degraded = !!f.sandbox_degraded;
+  if (!degraded && !missing.length) {
+    box.className = 'fence-banner hidden';
+    text.textContent = '';
+    return;
+  }
+  box.className = degraded ? 'fence-banner' : 'fence-banner fence-err';
+  if (degraded) {
+    text.textContent = '本进程已降级：强制围栏未全部生效'
+      + (missing.length ? '（' + missing.join('、') + '）' : '')
+      + '；重启后重新评估。';
+  } else {
+    text.textContent = '启动要求未满足：' + missing.join('、') + '；模块工具会被拒绝执行。';
+  }
+}
+
 /* 侧栏：只保留「被拒收模块」的如实提示（模块清单在「新建工作」向导里用）。 */
 function renderSidebar() {
   const rejected = $('#rejected');
@@ -1468,6 +1494,7 @@ function openSettingsModal() {
     c.body.appendChild(field('环境白名单', enEnv));
     c.body.appendChild(field('机制不可用时', onUnavailable));
     c.body.appendChild(writeAcl.wrap);
+    c.body.appendChild(cfgHint('Windows 上 require 文件系统/网络围栏必须先勾选「允许 Windows 写本机目录 ACL」；否则保存会被拒绝。要无围栏请把对应 enforce 降为 best_effort。', 'warn'));
     c.body.appendChild(hostRoots.f);
     c.body.appendChild(hardDeny.f);
     c.body.appendChild(cfgHint('默认权限是会话可覆盖的起点；全局黑名单是硬底线，会话只能追加、不能清空。'));
@@ -3654,6 +3681,7 @@ $('#btn-providers').onclick = openProvidersModal;
 $('#btn-models').onclick = openModelsModal;
 $('#btn-core').onclick = openCoreModal;
 $('#btn-settings').onclick = openSettingsModal;
+$('#fence-settings').onclick = openSettingsModal;
 $('#btn-agents').onclick = openAgentsModal;
 $('#btn-modules').onclick = openModulesPanel;
 $('#btn-upload').onclick = pickUploadFile;

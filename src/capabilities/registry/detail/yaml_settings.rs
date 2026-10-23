@@ -89,8 +89,16 @@ impl SettingsStore for YamlSettingsStore {
             Err(e) => return Err(e.to_string()),
         };
         let app = match std::fs::read_to_string(&self.settings_path) {
-            Ok(t) => yaml_serde::from_str::<AppSettings>(&t)
-                .map_err(|e| format!("settings.yaml 配置非法：{}", e))?,
+            Ok(t) => {
+                let app = yaml_serde::from_str::<AppSettings>(&t)
+                    .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
+                // 首启没有文件时上面的 NotFound 分支不拦（交给引导决定）；已存在的文件必须自洽。
+                crate::capabilities::registry::domain::providers::validate_sandbox_authorization(
+                    &app.sandbox.policy,
+                )
+                .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
+                app
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => AppSettings::default(),
             Err(e) => return Err(e.to_string()),
         };

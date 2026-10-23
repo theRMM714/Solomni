@@ -611,6 +611,8 @@ fn yaml_settings_store_defaults_saves_and_reports_malformed_files() {
     );
     want.core = Some("m".to_string());
     want.app.streaming = false;
+    // Windows 上 require + write_acl=false 是非法组合；这条只验落盘/读回，先给授权。
+    want.app.sandbox.policy.windows.write_acl = true;
     want.agents.insert(
         "甲".to_string(),
         crate::capabilities::registry::domain::agents::Agent {

@@ -4,7 +4,10 @@
 //! 联动：启动报告与 `src/main.rs` 的 `FenceReport`；语义见 `docs/kernel/README.md`。
 
 use super::prelude::*;
-use crate::capabilities::registry::api::SandboxEnforceLevel::BestEffort;
+use crate::capabilities::registry::api::AppSettings;
+use crate::capabilities::registry::api::SandboxEnforceLevel::{BestEffort, Require};
+use crate::capabilities::registry::detail::yaml_settings::YamlSettingsStore;
+use crate::capabilities::registry::ports::SettingsStore;
 use crate::kernel::api::SandboxRequirements;
 use crate::kernel::detail::confine::Capability;
 use crate::{GateOutcome, MissingCause, MissingPart};
@@ -358,4 +361,122 @@ fn gate_forced_strict_exits_without_prompting() {
         matches!(out, GateOutcome::Exit(1)),
         "测试/CI 注入严格模式时不能偷偷启动"
     );
+}
+
+#[test]
+fn require_without_write_acl_is_rejected_on_windows() {
+    let mut app = AppSettings::default();
+    app.sandbox.policy.enforce.filesystem = Require;
+    app.sandbox.policy.enforce.network = Require;
+    app.sandbox.policy.windows.write_acl = false;
+    #[cfg(windows)]
+    assert!(
+        crate::capabilities::registry::domain::providers::validate_sandbox_authorization(
+            &app.sandbox.policy
+        )
+        .is_err(),
+        "Windows 上 require + 不授权写 ACL 是不可能满足的配置"
+    );
+    #[cfg(not(windows))]
+    assert!(
+        crate::capabilities::registry::domain::providers::validate_sandbox_authorization(
+            &app.sandbox.policy
+        )
+        .is_ok(),
+        "Unix 的围栏自足，write_acl 不参与"
+    );
+
+    // best_effort + 不授权：合法（用户显式选择无围栏）。
+    app.sandbox.policy.enforce.filesystem = BestEffort;
+    app.sandbox.policy.enforce.network = BestEffort;
+    assert!(
+        crate::capabilities::registry::domain::providers::validate_sandbox_authorization(
+            &app.sandbox.policy
+        )
+        .is_ok()
+    );
+    // require + 授权：合法。
+    app.sandbox.policy.enforce.filesystem = Require;
+    app.sandbox.policy.windows.write_acl = true;
+    assert!(
+        crate::capabilities::registry::domain::providers::validate_sandbox_authorization(
+            &app.sandbox.policy
+        )
+        .is_ok()
+    );
+    // 全局网络开关打开后，网络围栏不再 require。
+    app.sandbox.policy.enforce.filesystem = BestEffort;
+    app.sandbox.policy.enforce.network = Require;
+    app.sandbox.policy.network = true;
+    app.sandbox.policy.windows.write_acl = false;
+    assert!(
+        crate::capabilities::registry::domain::providers::validate_sandbox_authorization(
+            &app.sandbox.policy
+        )
+        .is_ok()
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn set_app_settings_rejects_require_without_write_acl() {
+    let mut core = core();
+    let mut app = core.registry().app_settings();
+    app.sandbox.policy.enforce.filesystem = Require;
+    app.sandbox.policy.enforce.network = Require;
+    app.sandbox.policy.windows.write_acl = false;
+    let err = core.registry_mut().set_app_settings(app).unwrap_err();
+    assert!(err.contains("write_acl"), "{err}");
+}
+
+#[test]
+fn set_app_settings_accepts_best_effort_without_write_acl() {
+    let mut core = core();
+    let mut app = core.registry().app_settings();
+    app.sandbox.policy.enforce.filesystem = BestEffort;
+    app.sandbox.policy.enforce.network = BestEffort;
+    app.sandbox.policy.windows.write_acl = false;
+    core.registry_mut()
+        .set_app_settings(app)
+        .expect("best_effort + 不授权是合法组合");
+}
+
+#[test]
+fn existing_settings_file_must_be_self_consistent() {
+    let dir = crate::tests::scratch("settings-authorization");
+    let store = YamlSettingsStore::new(
+        dir.join("providers.yaml"),
+        dir.join("models.yaml"),
+        dir.join("settings.yaml"),
+        dir.join("agents.yaml"),
+    );
+    std::fs::write(
+        dir.join("settings.yaml"),
+        "sandbox:\n  policy:\n    enforce:\n      filesystem: require\n      network: require\n    windows:\n      write_acl: false\n",
+    )
+    .expect("写 settings.yaml");
+    let loaded = store.load();
+    #[cfg(windows)]
+    {
+        let err = loaded.expect_err("Windows 上应拒绝矛盾配置");
+        assert!(err.contains("settings.yaml 配置非法"), "{err}");
+        assert!(err.contains("write_acl"), "{err}");
+    }
+    #[cfg(not(windows))]
+    assert!(loaded.is_ok(), "Unix 上 write_acl 不参与");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn missing_settings_file_still_loads_defaults_for_first_run() {
+    let dir = crate::tests::scratch("settings-first-run");
+    let store = YamlSettingsStore::new(
+        dir.join("providers.yaml"),
+        dir.join("models.yaml"),
+        dir.join("settings.yaml"),
+        dir.join("agents.yaml"),
+    );
+    let loaded = store.load().expect("首启没有 settings.yaml 不能拒绝");
+    assert!(!loaded.app.sandbox.policy.windows.write_acl);
+    let _ = std::fs::remove_dir_all(&dir);
 }

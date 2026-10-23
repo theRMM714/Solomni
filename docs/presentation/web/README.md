@@ -10,6 +10,11 @@
 另外管**依赖补齐的界面入口**：虚拟机档不可用时，配置面板与创建向导给出「补齐虚拟机依赖」（看清单与体积 → 确认 → 按 `seq` 长轮询进度 → 如实说清生效范围）；
 要装哪些条目由后端 `/api/setup/status` 的 `pending` 决定，界面不自己挑。
 基本设置弹层还列**现在在跑什么**（`GET /api/processes`：产品起的 QEMU / 共享进程 / 常驻服务守门进程与它们的归属；`alive=false` 如实标成「已退出，等对账清」，`orphanRisk` 标出父死子亡没挂上、核心被强杀会留下的那条）。
+**围栏横幅**：`/api/state` 的 `fence` 给 `effective_fs/net`、`write_allowed`、`sandbox_missing`、`sandbox_degraded`；
+前端只在 `sandbox_degraded` 或 `sandbox_missing` 非空时显示（降级黄色 / 要求未满足红色），正常与用户主动选的
+`best_effort` 不显示。保存策略后整体重启并重算，横幅随新状态显示或消失；无 TTY 且要求未满足时启动门退出，
+恢复走控制台或 `SOLOMNI_FENCE_WRITE=1`。红色「要求未满足」是 **bug 指示器**：保存/加载会拒绝
+`require + write_acl=false`，正常运行的 Web 不会有这一态。
 
 **不管**：不做业务判断、不持状态、不落盘；**永不接触端口对象，也拿不到 `Core` 本身**。
 

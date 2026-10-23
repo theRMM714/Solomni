@@ -16,6 +16,12 @@
     <div id="conn-state" class="conn-state" title="服务器连接状态"><span class="dot dot-ok"></span><span id="conn-text">已连接</span></div>
   </header>
 
+  <!-- 围栏横幅：只有“本进程降级”或“启动要求未满足”时显示；正常 / best_effort 不打扰。 -->
+  <div id="fence-banner" class="fence-banner hidden" role="status" aria-live="polite">
+    <span id="fence-text" class="fence-text"></span>
+    <button id="fence-settings" class="btn fence-btn" type="button">去设置</button>
+  </div>
+
   <div class="layout">
     <!-- 侧栏：新建工作 + 会话历史 + 设置二级菜单 -->
     <aside id="sidebar" class="sidebar">

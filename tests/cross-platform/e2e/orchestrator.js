@@ -225,17 +225,17 @@ async function main() {
     fs.symlinkSync(path.join(PRODUCT_ROOT, ".vm"), vmLink, "dir");
     console.log("[e2e] 夹具 .vm → 仓库 .vm（真机跑用）");
   }
+  // 夹具的 settings.yaml 要**自洽**：Windows 上 require 文件系统/网络围栏必须授权写 ACL。
+  // 驱动后面只改 streaming 这类字段，部分更新会保留这份沙箱，所以它必须是合法组合。
+  const settingsLines = ["sandbox:", "  policy:", "    windows:", "      write_acl: true"];
   // QEMU 路径由环境变量给（机器相关，不写进仓库），起服务前落进 settings.yaml。
   const vmQemu = process.env.SOLOMNI_VM_QEMU || "";
   const vmVirtiofsd = process.env.SOLOMNI_VM_VIRTIOFSD || "";
-  if (vmQemu || vmVirtiofsd) {
-    const lines = [];
-    if (vmQemu) lines.push("qemu_path: " + JSON.stringify(vmQemu));
-    if (vmVirtiofsd) lines.push("virtiofsd_path: " + JSON.stringify(vmVirtiofsd));
-    fs.writeFileSync(path.join(home, "settings.yaml"), lines.join("\n") + "\n");
-    if (vmQemu) console.log("[e2e] 已登记 qemu_path：" + vmQemu);
-    if (vmVirtiofsd) console.log("[e2e] 已登记 virtiofsd_path：" + vmVirtiofsd);
-  }
+  if (vmQemu) settingsLines.push("qemu_path: " + JSON.stringify(vmQemu));
+  if (vmVirtiofsd) settingsLines.push("virtiofsd_path: " + JSON.stringify(vmVirtiofsd));
+  fs.writeFileSync(path.join(home, "settings.yaml"), settingsLines.join("\n") + "\n");
+  if (vmQemu) console.log("[e2e] 已登记 qemu_path：" + vmQemu);
+  if (vmVirtiofsd) console.log("[e2e] 已登记 virtiofsd_path：" + vmVirtiofsd);
   fs.rmSync(path.join(FIXTURE, "modules", "toolbox", "userdata"), { recursive: true, force: true });
 
   // 三个真模块（python / node / C++）按需复制进夹具：**每次跑都从仓库源码重新复制**，
