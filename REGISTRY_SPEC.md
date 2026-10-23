@@ -106,9 +106,9 @@ sandbox:               # 全局沙箱策略：会话不可填；保存后整体�
       network: require
       process_tree: require
       env_whitelist: require
-    on_unavailable: ask # ask = 启动时询问是否本进程降级（不落盘）；refuse = 直接拒绝
+    on_unavailable: ask # ask = 启动门询问是否本进程降级（不落盘）；refuse = 直接拒绝
     windows:
-      write_acl: false # 是否允许 Windows 容器围栏写本机目录 ACL
+      write_acl: false # 是否允许 Windows 容器围栏写本机目录 ACL（首次启动会引导授权）
     host_read_roots: [] # 用户显式授权的主机绝对路径只读根（默认空）
     deny: []           # 全局黑名单（工作区相对路径）：硬底线，会话只能追加、不能删除
   defaults:            # 会话权限的全局默认；会话 meta 可覆盖
@@ -132,11 +132,19 @@ discuss_remind_cap: 3  # 讨论里一轮内对同一个成员最多提醒几次�
   会话只能追加黑名单，不能清空。语义只有一份权威：[docs/permission/README.md](docs/permission/README.md)。
 - **网络是全局开关**（`sandbox.policy.network`）：会话工具、直接模块工具、常驻服务、模块构建共用；
   provisioning 首启与核心模型出站不受它影响。
-- `on_unavailable=ask` 时，启动预检发现 `require` 的机制不可用会询问是否**本进程降级**；
+- **启动门**：默认 CLI 与 `-webUI` 都先过环境检查；`sandbox.policy` 的要求没满足时，只能
+  **本次无围栏（不落盘）/ 重新设置 / 退出**，不会起 CLI 或 Web。没有可回答的前端、或 `refuse` 且不重设 = 退出。
+- **首次启动**（`.home/settings.yaml` 不存在）在 Windows 上先问一次是否授权 `windows.write_acl`：
+  选是就写盘并以退出码 75 整体重启；选否不写任何设置，直接进入启动门。这样默认不写本机权限项，
+  又不会让首次启动停在“不可用”状态。
+- **重设**只修能修的那一项：Windows 未授权 → 写 `write_acl: true`；本机能力缺失 → 明确询问是否把
+  `enforce` 四项降为 `best_effort`（持久接受无强制），默认否。
+- `on_unavailable=ask` 时，启动门发现 `require` 的机制不可用会询问是否**本进程降级**；
   回答不落盘，重启再问；没人答 / 没有前端 / `refuse` = fail-closed。`SOLOMNI_SANDBOX_DEGRADED=1/0`
   只供测试与 CI 在进程级注入（`1` 仅在 `ask` 下生效）。
-- `sandbox.policy.windows.write_acl` 可被环境变量 `SOLOMNI_FENCE_WRITE=1/0` 临时覆盖（优先级高于设置，测试与 CI 用得到）；
-  它只影响 Windows 的目录 ACL。
+- `sandbox.policy.windows.write_acl` 可被环境变量 `SOLOMNI_FENCE_WRITE=1/0` 临时覆盖（优先级高于设置，
+  预检、启动报告与工具进程用同一个值；测试与 CI 用得到）；它只影响 Windows 的目录 ACL。
+  环境变量生效时不再做首次授权引导，重设也不会写无效的设置，而是提示改环境变量。
 - `sandbox.policy.host_read_roots` 是**用户显式授权的主机绝对路径只读根**（默认空）：工具进程对这些目录只读可达，
   不继承写；授权落在用户自己的目录上。撤权与 `write_acl` 走同一份台账（`--fence-clean` 一并撤净；
   启动期按归属对账回收陈旧授权，见 [ARCHITECTURE.md](ARCHITECTURE.md) 六）。

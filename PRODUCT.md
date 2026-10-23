@@ -104,8 +104,9 @@ agent 实例名不得占用 `work` / `children`（名单在 `systools/names.yaml
   ② 模块工具进程从**守门进程**里跑（环境白名单、超时连根杀树、进程数上限）；guest 内由 Linux helper 对齐同一组策略
      （只读基线、解释器目录、env 白名单、超时杀树、输出上限）；
   ③ 文件系统围栏按平台接入（Linux Landlock、macOS seatbelt、Windows AppContainer）。
-  **全局沙箱策略是硬约束**（`sandbox.policy`）：默认 `require`，机制不可用时按 `on_unavailable` 询问是否**本进程降级**
-  （不落盘，重启再问）或直接拒绝；自检确认机制有效却仍装不上 = 程序自己写错了，那一路**拒绝执行**。
+  **全局沙箱策略是硬约束**（`sandbox.policy`）：默认 `require`，机制不可用时启动门按 `on_unavailable` 询问是否**本进程降级**
+  （不落盘，重启再问）、重设或退出；自检确认机制有效却仍装不上 = 程序自己写错了，那一路**拒绝执行**。
+  **门不过就不起前端**：默认 CLI 与 `-webUI` 都先过环境检查；没有可回答的前端时直接退出，不会“先开 Web 再说”。
   **必要落点授不上不静默降级**：经统一裁决通道问一次（本轮无围栏跑一次 / 放弃这次调用）；拒绝、没人答或没有可回答的前端一律不执行；**可选落点**授不上只记事实。
   机制细节见 [ARCHITECTURE.md](ARCHITECTURE.md)，三平台真机探针见 [TESTING.md](TESTING.md)。
 - **出站网络是全局开关**（`sandbox.policy.network`）：会话工具、直接模块工具、常驻服务、模块构建共用；
@@ -119,6 +120,9 @@ agent 实例名不得占用 `work` / `children`（名单在 `systools/names.yaml
 - **围栏要用就征得同意**：Windows 的路径级围栏要写本机权限项，程序**默认不写**——只有显式授权
   （`settings.yaml` 的 `sandbox.policy.windows.write_acl: true` 或 `SOLOMNI_FENCE_WRITE=1`）才做；授权后每次写入逐条列出并记进台账。
   授权台账、启动对账与按条处置的语义见 [docs/kernel/README.md](docs/kernel/README.md)；分层边界见 [ARCHITECTURE.md](ARCHITECTURE.md)。
+- **首次启动先问一次**：没有 `.home/settings.yaml` 时，Windows 上先问是否授权写 ACL；选是就写盘并整体重启，
+  选否不写任何设置，直接进入启动门（本次无围栏 / 重设 / 退出）。本机能力缺失与“未授权”分开报；
+  重设只修能修的那一项：未授权写授权，能力缺失则明确询问是否把强制等级降为 `best_effort`。
 - 上传同名文件绝不静默覆盖（覆盖 / 改名 / 取消）。
 
 ## 运行流程

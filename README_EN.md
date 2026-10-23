@@ -68,6 +68,9 @@ node start.js --provision --ensure --yes # optional (Linux / Windows): install Q
 # the web UI can do the same on Linux / Windows from the dialog shown when the vm tier is unavailable (no CLI needed)
 ```
 
+- **First start**: without `.home/settings.yaml`, Windows first asks whether to authorize the container fence
+  (directory ACLs); choosing no writes nothing and enters the startup gate (unfenced this run / reconfigure / exit).
+  `-webUI` does not bypass that gate.
 - Toolchain and caches stay **inside the project**: a usable Rust is **borrowed read-only** (caches and artifacts
   still land under `platform/<os>/`); only when none is usable does it ask for consent and install into the
   project, never touching the system; with **no interactive terminal** it skips the install, prints the manual

@@ -59,6 +59,9 @@ node start.js --provision --ensure --yes # 可选（Linux / Windows）：把 QEM
 # 网页里也能直接补（Linux / Windows）：虚拟机档不可用时，配置面板 / 创建向导给的「补齐虚拟机依赖」就是这条（不必开终端）
 ```
 
+- **首次启动**：没有 `.home/settings.yaml` 时，Windows 会先问一次是否授权容器围栏（写目录 ACL）；
+  选是就写盘并整体重启；选否不写设置、进入启动门（本次无围栏 / 重设 / 退出）。`-webUI` 也要先过这关，
+  不会“带参数就直接开网页”。
 - 工具链与缓存收敛在**项目内**：检测到可用的 Rust 就**只读借用**，缓存与产物仍落 `platform/<os>/`；没有或有问题的才先征求同意装进项目内，不动系统；**无交互终端时不做安装**，打印手动步骤后退出。
 - 模块工具/构建的**基础工具链**（Python / Node / C-C++）装进 `.tools/toolchains/`，启动时前置 PATH；缺失时回退宿主并如实报告。C# 等未内置能力可由用户把适用于本机目标的包放进 `runtimes/`（包 `bin/` 进本次执行的 PATH；缺包如实报告）。
   C/C++ 在 Windows 用 MinGW-w64、Linux / macOS 用 Zig；macOS 链接原生框架仍需要系统的 Xcode Command Line Tools / SDK。

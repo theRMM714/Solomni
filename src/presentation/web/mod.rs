@@ -40,7 +40,7 @@ pub struct FenceInfo {
     pub write_allowed: bool,
     /// 用户显式授权的主机只读根个数（`settings.yaml` 的 `sandbox.policy.host_read_roots`）；0 = 一个都没授。
     pub read_only_roots: usize,
-    /// 目的：全局策略要求、但本机机制不可用的项（空 = 齐了）。
+    /// 目的：全局策略要求、但本次实际未满足的项（空 = 齐了；未授权与能力缺失都在这里）。
     pub sandbox_missing: Vec<String>,
     /// 目的：本进程是否已按用户确认降级（不落盘；重启后重新询问）。
     pub sandbox_degraded: bool,

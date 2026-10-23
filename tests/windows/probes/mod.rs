@@ -2,6 +2,7 @@
 
 mod container;
 mod ledger;
+mod startup;
 
 #[path = "../../helpers/https_probe.rs"]
 mod https;
