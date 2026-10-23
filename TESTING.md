@@ -64,7 +64,7 @@
   范围 `tests/mutation-scope.json`）：只有 `core`（小而精）与 `capability`（单能力抽查）两个范围，刻意不做 `all`；
   结果只作调查，**不参与 `TEST-REPORT-ACCEPTED`**，发它自己独占的 `ci-mutation` 滚动分支（各推各的，不碰 `ci-report`），
   完整现场走 Actions 产物。
-- 门禁之外另有一个**仓库卫生审查**脚本 `run-hygiene.js`（注释契约存量棘轮 + 内容卫生；报告只报不拦、收紧只能往下，也不进 `TEST-REPORT-*`）：
+- 门禁之外另有一个**仓库卫生审查**脚本 `run-hygiene.js`（注释契约存量棘轮 + 内容卫生 + 语义卫生；报告只报不拦、收紧只能往下，也不进 `TEST-REPORT-*`）：
   判据与用法见 [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md) 的「门禁之外」。
 
 **缺口账在哪**：全局 `tests/gaps.yaml`，平台 `tests/<平台>/gaps.yaml`，跨平台 `tests/cross-platform/gaps.yaml`。
@@ -100,7 +100,7 @@
 - **缺口的唯一真相**是 `tests/gaps.yaml`（全局）与 `tests/<平台>/gaps.yaml`（平台）；门户与细则都不复述条目内容。
 - **成功标记**（`FRONTEND-SMOKE-OK` / `DEV-LOOP-OK` / `ENV-BOOTSTRAP-OK` / `E2E-OK` / `TEST-REPORT-OK` / `TEST-REPORT-FAIL` / `TEST-REPORT-ACCEPTED`）
   的固定含义见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md)。
-  `TEST-REPORT-OK` 在 `--docs` / `--audit` 模式下只代表对应审查（文档审查 / 结构审查）通过，不代表代码 / 三平台 / L4 已验收；CI 报告统一写 `ci-report` 的 `runs/structure` / `runs/docs` / `runs/<os>`，不再有 `ci-doc`。
+  `TEST-REPORT-OK` 在 `--docs` / `--audit` 模式下只代表对应审查（文档审查 / 结构审查）通过，不代表代码 / 三平台 / L4 已验收；CI 报告统一写 `ci-report` 的 `runs/structure` / `runs/docs` / `runs/<os>`。
 - **质量失败不能被业务测试通过抵消**：两边的结论分别记，判据见 [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md)。
 - **需要 CI 的场景**（平台专属代码、真机围栏、HTTPS/TLS、其它平台的质量分区）本地跑不出结论，
  必须等 CI 并按 [docs/testing/execution-ci.md](docs/testing/execution-ci.md) 的读法核对 `sha`。

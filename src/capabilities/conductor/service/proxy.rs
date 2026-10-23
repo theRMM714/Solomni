@@ -26,7 +26,7 @@ impl ProxyTools {
         }
     }
 
-    /// 执行一次代理工具调用：name 必须是五个代理工具之一；args_json 是模型给的参数。
+    /// 执行一次代理工具调用：name 必须是六个代理工具之一；args_json 是模型给的参数。
     /// 参数先按总表声明校验（形状只有一份真相），再做语义校验、授权与宿主调用。
     pub fn call(&mut self, ctx: &d::ProxyCall, name: &str, args_json: &str) -> ToolOutcome {
         if !d::is_proxy_tool(name) {

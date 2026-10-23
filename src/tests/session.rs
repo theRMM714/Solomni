@@ -1334,7 +1334,7 @@ pub(crate) fn deleting_a_session_asks_the_fence_to_release_its_grants() {
 }
 
 #[test]
-pub(crate) fn session_meta_exec_section_roundtrips_and_reads_legacy_meta() {
+pub(crate) fn session_meta_exec_section_roundtrips_and_defaults_to_host() {
     let meta = SessionMeta {
         name: "w".to_string(),
         mode: "single".to_string(),
@@ -1371,14 +1371,14 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_reads_legacy_meta() {
     let back: SessionMeta =
         yaml_serde::from_str(&yaml_serde::to_string(&stopped).expect("序列化")).expect("反序列化");
     assert_eq!(back.run, RunState::Stopped);
-    // 缺 exec 段的旧会话照旧可读（默认 = 本机档、不联网、不定版、正常运行）。
-    let legacy: SessionMeta =
-        yaml_serde::from_str("name: old\nmode: single\nmodules: [a]\nts: 1\n")
-            .expect("旧 meta.yaml 必须可读");
-    assert_eq!(legacy.exec.tier, Tier::Host);
-    assert!(legacy.exec.guest.is_none());
-    assert!(legacy.exec.pins.is_empty());
-    assert_eq!(legacy.run, RunState::Active);
+    // 缺 exec 段按当前默认读回：本机档、无虚拟根、无定版、正常运行。
+    let defaulted: SessionMeta =
+        yaml_serde::from_str("name: w\nmode: single\nmodules: [a]\nts: 1\n")
+            .expect("缺 exec 段的 meta 必须可读");
+    assert_eq!(defaulted.exec.tier, Tier::Host);
+    assert!(defaulted.exec.guest.is_none());
+    assert!(defaulted.exec.pins.is_empty());
+    assert_eq!(defaulted.run, RunState::Active);
 }
 
 /// 回档**按回复原子**：截在一次回复中间时整条回复一起丢，绝不留下"孤儿工具结果"。

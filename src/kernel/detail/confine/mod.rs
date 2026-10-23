@@ -276,7 +276,7 @@ fn note_fence_boundary(spec: &FenceSpec, fs_enforced: bool, net_enforced: bool, 
 }
 
 /// 目的：扫掉本程序建过的整族容器 profile：台账只记"我们知道写过什么"，而 profile 可能来自没有台账的路径
-///   （探针、夹具的台账被删、旧版本）。名字前缀是本程序独有的，所以按它扫。返回扫掉的个数。
+///   （探针、夹具的台账被删、进程被杀）。名字前缀是本程序独有的，所以按它扫。返回扫掉的个数。
 pub fn sweep_profiles() -> Result<usize, String> {
     #[cfg(windows)]
     {
@@ -380,7 +380,7 @@ pub struct Owner {
     /// 目的：进程创建时刻（Windows FILETIME，自 1601 起的 100ns；0 = 读不到，按"无法判定"处理）。
     #[serde(default)]
     pub start: u64,
-    /// 目的：会话租约（会话 id；空 = 无会话/旧格式）。同一进程里同名 agent 的多个会话靠它区分。
+    /// 目的：会话租约（会话 id；空 = 无会话，例如探针或未绑定租约的授权）。同一进程里同名 agent 的多个会话靠它区分。
     #[serde(default)]
     pub lease: String,
 }

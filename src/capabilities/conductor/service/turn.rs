@@ -212,7 +212,7 @@ impl Conductor {
     }
 
     /// 测试用同步入口：与工作线程那条路**同一段语义**（准备 → 生成 → 交回落盘）。
-    /// 生产路径不再走它——那里的生成在工作线程上（见 `ConductorHandle::single_generation`）。
+    /// 生产路径的生成在工作线程上（见 `ConductorHandle::single_generation`）。
     #[cfg(test)]
     pub fn single_say(
         &mut self,

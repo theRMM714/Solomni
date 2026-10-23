@@ -452,7 +452,7 @@ async function installWinlibs() {
       url = fs.readFileSync(marker, "utf8").trim();
       log("resuming from the same source: " + url);
     } else {
-      // 上游资产名带版本：台账里钉死一个 release 的完整 URL，不再走 GitHub API（也就没有限流）。
+      // 上游资产名带版本：台账里钉死一个 release 的完整 URL（不查 GitHub API，也就没有限流）。
       const upstream = link("winlibs.upstream.asset");
       const candidates = [upstream].concat(mirrorVariants(upstream));
       const extraMirror = (process.env.SOLOMNI_GH_MIRROR || "").replace(/\/+$/, "");

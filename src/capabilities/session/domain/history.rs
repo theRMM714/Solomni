@@ -25,7 +25,7 @@ pub struct SessionMeta {
     /// 本次工作参与的 agent 实例（模型随 agent 记；名单的唯一真相）。
     #[serde(default)]
     pub agents: Vec<AgentMeta>,
-    /// 执行档位与运行包选型（exec 段；缺字段的旧会话按默认 = 本机档读回）。
+    /// 执行档位与运行包选型（exec 段；缺字段按默认 = 本机档读回）。
     #[serde(default)]
     pub exec: crate::kernel::api::ExecSpec,
     /// 这条会话的权限覆盖（路径范围 / 模块写 / 决定粒度）。全局给默认值，这里只覆盖显式字段。
@@ -133,7 +133,7 @@ pub struct HistoryView {
     pub mode: String,
     pub ts: i64,
     pub done: bool,
-    /// 这条会话记的执行档位与选型（meta.yaml 的 exec 段；缺字段的旧会话按默认 = 本机档读回）。
+    /// 这条会话记的执行档位与选型（meta.yaml 的 exec 段；缺字段按默认 = 本机档读回）。
     /// 列表视图据此提示"环境已变"——**不拦打开**，记录是用户的。
     #[serde(default)]
     pub exec: crate::kernel::api::ExecSpec,

@@ -186,26 +186,6 @@ function toolDetail(label, text, sess, key, literal) {
   return d;
 }
 
-/// 兜底卡片：正文看起来是工具信封（旧会话里核心曾把它当发言落盘）→ 按工具卡片渲染。
-/// 键用 L<行id>:raw，与真实工具调用的 T<序号>:… 分开，不串味。
-function rawToolCard(text, sess, key, speaker) {
-  const body = String(text || '');
-  const mod = (body.match(/"module"\s*:\s*"([^"]*)"/) || [])[1] || '';
-  const name = (body.match(/"name"\s*:\s*"([^"]*)"/) || [])[1] || '工具信封';
-  const el = document.createElement('div');
-  el.className = 'line tool-card bad';
-  el.title = speaker ? speaker + ' 的工具信封（不完整）' : '工具信封（不完整）';
-  const head = document.createElement('div'); head.className = 'tool-head';
-  const nm = document.createElement('span'); nm.className = 'tool-name';
-  nm.textContent = (mod ? mod + '.' : '') + name;
-  const mark = document.createElement('span'); mark.className = 'tool-mark'; mark.textContent = '✗';
-  const note = document.createElement('span'); note.className = 'tool-note'; note.textContent = '信封不完整';
-  head.appendChild(nm); head.appendChild(mark); head.appendChild(note);
-  el.appendChild(head);
-  el.appendChild(toolDetail('原文', body, sess, key + ':raw', true));
-  return el;
-}
-
 /// 工具调用卡片：头部只写「模块.工具名」+ 成败；参数与结果折叠在里面（折叠状态走 fold store）。
 /// 流式 tool_call 与权威 transcript 的 tool 行共用这一个渲染函数，也共用同一个折叠键。
 function toolCard(t, sess, key, who) {
@@ -590,7 +570,7 @@ function openSetupModal(onDone) {
       if (job.running) { watch(st); return; }
       const pending = Array.isArray(st.pending) ? st.pending : null;
       if (!pending) {
-        box.appendChild(cfgHint('这个进程没有给出要补哪些条目（可能是旧版本）：重启应用后再试。', 'err'));
+        box.appendChild(cfgHint('这个进程没有给出要补哪些条目（界面与核心版本不一致）：重启应用后再试。', 'err'));
         const close = btn('关闭', 'btn btn-block'); close.onclick = finish;
         box.appendChild(close);
         return;
@@ -2337,7 +2317,7 @@ function absorb(s, ev) {
         text: '[压缩] 此前内容已压成摘要（不再发给模型，仍可查看）：\n' + ev.summary,
       });
       break;
-    // 留档回档：折叠分界。内容保留在文件里，可恢复；旧格式删除标记不进界面。
+    // 留档回档：折叠分界。内容保留在文件里，可恢复。
     case 'rewind':
       if (ev.mode !== 'archive') break;
       s.lines.push({
@@ -2461,17 +2441,6 @@ function absorbEvents(s, events) {
 }
 
 /* [id:tag] text → 行对象（呈现即上下文：原样收录，标签做样式） */
-/* 正文看着就是"工具信封"（开头即 {"type":"tool"…）→ 兜底按工具卡片渲染。
- * 只在**开头**判定（允许前导空白），避免误伤正文中段引用 JSON 的情况。 */
-function looksLikeToolEnvelope(text) {
-  return /^\s*\{\s*"type"\s*:\s*"tool"/.test(String(text == null ? '' : text));
-}
-
-/* 以工具信封开头的文本行 → 卡片行对象（键用 L<行id>:raw，与真实工具调用的 T<序号> 分开）。 */
-function envelopeLine(text, speaker) {
-  return { cls: 'line', who: '', text: text, speaker: speaker || '', rawTool: true };
-}
-
 /// 一行 → 渲染对象：**全读结构化字段**（种类 / 说话人 / 动词 / 正文），不从正文里抠标签。
 /// 服务端在落行时就把身份写进字段（见 core/events.rs 的 LineView）——
 /// 这里只做"种类 → 样式"的映射：系统行、用户行、轮次分隔行、模型发言、工具卡片。
@@ -2495,8 +2464,6 @@ function lineParts(l) {
   // 模型发言：动词决定样式；"降级"是结构化信号（不在正文里找说明文案）。
   const cls = verb === 'agree' ? 'ok' : verb === 'leave' ? 'sys' : verb === 'ask' ? 'plan' : 'line';
   const deg = l.degraded === true;
-  // 自由发言（say）的正文若整段就是工具信封，按卡片渲染，而不是当消息
-  if (cls === 'line' && looksLikeToolEnvelope(text)) return [envelopeLine(text, speaker)];
   return [{
     cls: deg ? 'sys' : cls,
     who: speaker + (verb ? ' · ' + verb : '') + (deg ? ' · 信封缺失' : ''),
@@ -2685,15 +2652,13 @@ function renderDone(s) {
   doneBox.innerHTML = '';
   const note = sessionNote(s);
   if (note) doneBox.appendChild(note);
-  // tool 行的稳定序号：在 s.lines 里按出现顺序数（兜底的信封行不算，它用 L<行id>:raw）。
+  // tool 行的稳定序号：在 s.lines 里按出现顺序数。
   let toolSeq = 0;
   for (const l of s.lines) {
-    // 工具行（含"正文就是工具信封"的兜底行）：渲染成卡片，而不是当消息发出来。
-    if (l.tool || l.rawTool) {
-      const b = l.tool
-        ? lineBlock({ cls: 'tool', tool: l.tool, who: (l.tool && l.tool.speaker) || l.speaker, reasoning: l.reasoning }, s, 'T' + toolSeq, false)
-        : { node: rawToolCard(l.text, s, 'L' + l.id, l.speaker) };
-      if (l.tool) toolSeq += 1;
+    // 工具行：渲染成卡片，而不是当消息发出来。
+    if (l.tool) {
+      const b = lineBlock({ cls: 'tool', tool: l.tool, who: (l.tool && l.tool.speaker) || l.speaker, reasoning: l.reasoning }, s, 'T' + toolSeq, false);
+      toolSeq += 1;
       if (typeof l.id === 'number') b.node.appendChild(rewindButton(l.id));
       doneBox.appendChild(b.node);
       continue;
@@ -3469,9 +3434,6 @@ async function pollLoop() {
         needState = false;
         lastStateAt = Date.now();
         // refreshState 自己会把侧栏与历史重画；agent 登记弹窗里的列表归那个弹窗自己管。
-        // refreshState 自己会把侧栏与历史重画；agent 登记弹窗里的列表归那个弹窗自己管。
-        // 曾经这里调了弹窗内部的 `renderList`——那个名字在顶层作用域根本不存在，
-        // 于是每次刷新都抛一次 ReferenceError，被轮询的 catch 当成"断线"，状态点一直红着。
         await refreshState();
       }
       // 纯流式增量：只 append 新节点（折叠、<pre> 滚动、外层滚动都不被打断）。

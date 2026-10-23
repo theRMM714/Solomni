@@ -100,9 +100,12 @@
 存量存在时（还有未收紧的旧违规）它只报，不拦：
 
 ```text
-node run-hygiene.js            # 报现状：注释契约存量（按规则汇总）+ 与快照的差 + 内容卫生
+node run-hygiene.js            # 报现状：注释契约存量 + 与快照的差 + 内容卫生 + 语义卫生摘要
+node run-hygiene.js --semantic # 展开语义卫生的全部可疑项（高置信 + 需判断）
+node run-hygiene.js --semantic-only # 只跑语义卫生
 node run-hygiene.js --tighten  # 按现状下调 tests/comment-baseline.json（唯一会写文件的入口；出现新增就拒绝）
-node run-hygiene.js --strict   # 有发现即非零退出（给想拿它当自查的人）
+node run-hygiene.js --strict   # 契约 / 内容有发现即非零退出（语义项默认不算）
+node run-hygiene.js --strict-semantic # 高置信语义项有发现即非零（可选自查）
 ```
 
 - **格式存量**（注释契约，见 `ARCHITECTURE.md` 的「注释契约」）：判定与比对只有一处（在这个脚本里）；
@@ -110,8 +113,12 @@ node run-hygiene.js --strict   # 有发现即非零退出（给想拿它当自�
   收紧是显式动作且只能往下（有新增就拒绝写盘），不让门禁偷偷改数，也不让「先违规再收紧」洗成存量。
 - **内容卫生**（只报）：悬挂的缺口 id（已删 id 从 git 历史取）、docs 与根文档里指向不存在的 `src/**.rs`、引用的根文档不存在；
   取不到 git 历史时如实写「没跑」，不当作通过。
-- `run-hygiene.js` **本身不进 T0、不进 `TEST-REPORT-*`**：混进门禁只有两种结局——门禁天天红，或者开始放行，两种都不诚实。
-  门禁只复用它的注释契约判定做棘轮（结构审查里的一条），见 [levels.md](levels.md) 的 T0。
+- **语义卫生**（只报）：按 `git ls-files` 扫受控文本文件——Markdown 正文（跳过代码围栏）与 Rust / JS / YAML / TOML / shell / 批处理注释里的历史或待办措辞。
+  强词（`曾经` / `旧实现` / `旧格式` / `旧会话` 等）默认展开，弱词（`改成` / `以前` / `不再有` 等）默认只给数量与样例；`--semantic` 展开全部。<!-- hygiene-ignore -->
+  它**不建基线、不进 T0、不影响 `--strict`**；确认是当前语义的行加 `hygiene-ignore` 显式跳过。`--strict-semantic` 只对强词生效，给想拿它当自查的人。
+  词表与 `ARCHITECTURE.md` §十.3 的 `//` 契约词表分开：后者是门禁棘轮，前者是全仓报告。
+- **语义卫生的仓库内容不进 T0、不进 `TEST-REPORT-*`**：混进门禁只有两种结局——门禁天天红，或者开始放行，两种都不诚实。
+  门禁只复用它的注释契约判定做棘轮（结构审查里的一条），并跑它的词法 / 语义扫描自测（测工具，不测仓库内容），见 [levels.md](levels.md) 的 T0。
 
 ## 产物落点（临时诊断与运行日志）
 

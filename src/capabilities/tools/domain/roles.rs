@@ -1,8 +1,8 @@
 //! 角色（身份）：**场景绑定的身份**，带提示词与系统工具面。
 //!
-//! 两个真相源各一张表（见 docs/tools/tools-and-roles.md）：
+//! 两张授权表 + 一张布局表（见 docs/tools/tools-and-roles.md 与 SYSTOOL.md）：
 //! - `systools/tools.yaml`：工具**是什么**（说明、参数契约、能否并发、能力）；
-//! - `systools/roles.yaml`：这个**身份有什么**（引用的系统工具 id + 提示词）。
+//! - `systools/roles.yaml`：这个**身份有什么**（引用的系统工具 id + 提示词）；`names.yaml` 是布局的第三份（agent 实例名不得占用），不是角色授权。
 //!
 //! 代码里**不得**出现"哪个角色能调哪个工具"的判断：只有两个动作——按角色组装工具面、按表校验调用。
 

@@ -28,7 +28,7 @@ Solomni is an **agent runtime environment (AgentOS) that runs on your own machin
 | --- | --- |
 | **Core** | The only program in the product (Rust). It provides the mechanisms: sessions and transcripts, task orchestration and acceptance, tool execution and fencing, the registry, rewind and compaction |
 | **Module** | A folder `modules/<id>/`: a `module.yaml` (capability summary + tool usage + tool declarations, optionally resident services and secret fields) plus the tools themselves — any language, anything that runs |
-| **Agent** | A name + the modules it holds + a model + its own sandbox. Whichever agent a module is loaded into, it speaks in that agent's name |
+| **Agent** | A name + the modules it holds (possibly none: only built-in file tools) + a model + its own sandbox. Whichever agent a module is loaded into, it speaks in that agent's name |
 | **Users** | People and agents. People use the interfaces (terminal / local web UI), agents use the module contract — the same modules, two doors |
 
 ## What works today
@@ -37,7 +37,7 @@ Solomni is an **agent runtime environment (AgentOS) that runs on your own machin
 - **Modules are drop-in**: a folder with a valid `module.yaml` under `modules/` appears; remove it and it is gone — no registration, no build, no restart
   (contract in [MODULE_SPEC.md](MODULE_SPEC.md)).
 - **Sessions and history**: one directory per piece of work (`session/<name>/`); rewind / archive / delete / restore, transcript replay, context compaction,
-  versioned shared area (`work_pull` / `work_commit` / `work_versions` / `work_resolve`).
+  versioned shared area (`work_pull` / `work_commit` / `work_status` / `work_versions` / `work_resolve` / `work_lost`).
 - **Three isolation layers**: path checks inside the built-in tools → every tool process runs behind the gate process (environment allowlist / process tree / timeout kills the whole tree)
   → platform fences (Windows AppContainer, Linux Landlock, macOS seatbelt); if a mechanism cannot be installed, the capability grade is reported honestly.
 - **Two execution tiers**: host tier (default) and vm tier (module tools run inside a guest). The vm tier is pluggable along host × engine × guest × channel × share;
@@ -109,7 +109,7 @@ node dev.js test|fmt|clippy   # one-layer dev commands; do not call cargo direct
   and environment variables, not the ledger.
 - **You can run it without a provider**: it walks the flow with the built-in fake model and says so plainly.
 - Common flags: `--root <dir>` (product root), `--web-port <port>`, `--release`.
-- Commands at the prompt: `single [agent…]` / `collab [agent…|?]` / `proxy` (hand the whole decision to the core) / `module [module-id.tool [json]]` (run a module tool directly, without an agent) / `resident list|start|stop|enable|disable|call` (resident services) / `secret` (secret fields) / `webui`.
+- Commands at the prompt: the menu printed at startup is the full list (`print_menu` in `src/presentation/cli/mod.rs`); the rewind command is `rewind`, while providers / models / the core default model are `provider` / `model` / `core`.
 
 ### Add a provider and a model
 

@@ -10,7 +10,7 @@ pub use crate::capabilities::tools::domain::systool::{
     ToolNotes, ToolOutcome, PATCH, REPORT,
 };
 
-/// 工具总表与角色表的**能力面**：别的能力只问"这一席能用哪些工具"，**看不见两张表的字段**。
+/// 工具总表、角色表与名字表的**能力面**：别的能力只问"这一席能用哪些工具"，**看不见三张表的字段**。
 ///
 /// 表本体（`SystemTools`）是纯数据、没有端口；组合根装载一次，`conductor` 只持 `Arc<dyn Tools>`
 /// 并与协作会话共享（见 `service.rs`）。

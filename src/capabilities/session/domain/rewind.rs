@@ -64,19 +64,16 @@ pub struct RewindMark {
 }
 
 impl RewindMark {
-    /// 从一条流水事件解析；不是回档记录 = None。
-    /// 旧格式（只有 keep、没有 mode/from）按删除读：before = from = keep。
+    /// 从一条流水事件解析；不是当前格式的回档记录 = None。
+    /// 当前格式只有留档标记：`before`（保留 id < before）与 `mode: archive`。
     pub fn from_value(ev: &serde_json::Value) -> Option<RewindMark> {
         if ev.get("type").and_then(|t| t.as_str()) != Some("rewind") {
             return None;
         }
-        let before = ev
-            .get("before")
-            .and_then(|v| v.as_u64())
-            .or_else(|| ev.get("keep").and_then(|v| v.as_u64()))?;
+        let before = ev.get("before").and_then(|v| v.as_u64())?;
         let mode = match ev.get("mode").and_then(|m| m.as_str()) {
             Some("archive") => RewindMode::Archive,
-            _ => RewindMode::Delete,
+            _ => return None,
         };
         Some(RewindMark {
             mark: ev.get("mark").and_then(|v| v.as_u64()).unwrap_or(0),
@@ -103,7 +100,6 @@ pub fn folded(marks: &[RewindMark], id: u64) -> bool {
 
 /// 应用回档标记后的**活动视图**：
 /// - 留档折叠的行不进内容（模型与界面都看不到；文件里仍在，恢复后回来）；
-/// - 旧格式的删除标记按位置截断它后面的内容；
 /// - 回档标记本身作为结构化事件保留（呈现层据此画留档分界），模型侧会忽略它。
 pub fn truncate_events(events: &[serde_json::Value]) -> Vec<serde_json::Value> {
     let marks = rewind_marks(events);
@@ -128,15 +124,7 @@ pub fn truncate_events(events: &[serde_json::Value]) -> Vec<serde_json::Value> {
                     content.push(e2);
                 }
             }
-            Some("rewind") => {
-                // 旧格式（删除）标记：按位置截断它后面的内容（新格式删除会重写文件，不留标记）。
-                if let Some(m) = RewindMark::from_value(ev) {
-                    if m.mode == RewindMode::Delete {
-                        content = cut_before_line(&content, m.before);
-                    }
-                }
-                content.push(ev.clone());
-            }
+            Some("rewind") => content.push(ev.clone()),
             _ => content.push(ev.clone()),
         }
     }
@@ -308,18 +296,5 @@ mod tests {
         assert_eq!(next_line_id(&events), 6, "新行从最大 id + 1 续号");
         assert!(folded(&rewind_marks(&events), 3));
         assert!(!folded(&rewind_marks(&events), 4));
-    }
-
-    #[test]
-    fn old_keep_marker_is_read_as_delete_and_cuts_positionally() {
-        let events = vec![
-            json!({"type":"transcript","lines":[{"id":0},{"id":1},{"id":2}]}),
-            json!({"type":"rewind","keep":1}),
-        ];
-        assert_eq!(ids(&events), vec![0], "旧 keep 标记按位置截断它之前的内容");
-        let m = &rewind_marks(&events)[0];
-        assert_eq!(m.mode, RewindMode::Delete);
-        assert_eq!(m.before, 1);
-        assert_eq!(m.from, 1);
     }
 }

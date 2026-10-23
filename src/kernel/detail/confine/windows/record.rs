@@ -325,7 +325,7 @@ pub(crate) fn record_profile(home: &Path, name: &str) {
 }
 
 /// 本程序建过的容器 profile 名（Windows 把包目录名转小写，按前缀不区分大小写筛）。
-/// profile 可能来自没有台账的路径（探针、夹具的台账被删、旧版本），所以按名字前缀扫。
+/// profile 可能来自没有台账的路径（探针、夹具的台账被删、进程被杀），所以按名字前缀扫。
 fn our_profile_names() -> Result<Vec<String>, String> {
     let root = match std::env::var_os("LOCALAPPDATA") {
         Some(v) => PathBuf::from(v).join("Packages"),
@@ -373,7 +373,7 @@ pub(crate) fn delete_profile(name: &str) -> bool {
 }
 
 /// 目的：孤儿授权清扫——在产品根内找台账之外、我们写过的显式 ACE 并连树撤掉。
-/// 约束：台账是精确回收的依据，但账会断（夹具/临时 home 被删、进程被杀、旧版本没记账），
+/// 约束：台账是精确回收的依据，但账会断（夹具/临时 home 被删、进程被杀、写入后没来得及记账），
 ///   断了账不代表没有残留。反向兜底两条：本程序建过的容器 profile 名派生 SID；以及任何显式、
 ///   非继承、SID 形如 S-1-15-2-* 的允许 ACE（排除 ALL APPLICATION PACKAGES 与 ALL RESTRICTED
 ///   两个基线）——profile 已删或从没建过的残留也能回收。自产品根向下在**最上层**命中处连树撤掉

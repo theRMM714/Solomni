@@ -413,7 +413,7 @@ pub(crate) fn rewinding_the_main_session_truncates_agent_sessions_by_turn() {
 #[test]
 pub(crate) fn repeated_malformed_envelopes_each_get_a_failed_row() {
     // 非法信封**没有次数上限**了：每个都各记一条失败行回注给模型，直到它不再发信封（或用户停）。
-    const N: usize = 12; // 远大于任何合理上限：证明"超过旧上限照跑"
+    const N: usize = 12; // 远大于任何合理上限：证明没有次数上限
     let broken = broken_tool(&s(&["w", "work", "README.md"]));
     let mut script: Vec<String> = (0..N).map(|_| broken.clone()).collect();
     script.push("到此为止。".to_string());
@@ -429,7 +429,7 @@ pub(crate) fn repeated_malformed_envelopes_each_get_a_failed_row() {
     assert_eq!(
         rows.iter().filter(|r| r.2).count(),
         N,
-        "每次非法信封各记一条（N 超过旧上限）+ 末行正文：{:?}",
+        "每次非法信封各记一条 + 末行正文：{:?}",
         rows
     );
     assert!(
@@ -605,7 +605,7 @@ pub(crate) fn prose_then_tool_envelope_keeps_prose_line_and_rebuilds_identically
 
 #[test]
 pub(crate) fn tool_envelope_after_prose_runs_and_json_never_shows() {
-    // 正文之后跟信封：**照常执行**（不再有强制收尾），显示文本取信封之外的正文，JSON 绝不进转录。
+    // 正文之后跟信封：**照常执行**（没有强制收尾），显示文本取信封之外的正文，JSON 绝不进转录。
     let runner = Arc::new(RecordingRunner {
         calls: Mutex::new(Vec::new()),
         out: "ok".into(),

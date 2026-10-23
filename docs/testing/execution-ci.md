@@ -242,7 +242,7 @@ PR 验收 PR head 提交（`SOURCE_SHA`），报告的 `sha` 因此等于 PR 头
 `quality` / `e2e` / `docs` 用 **job 级 `if` 跳过**：GitHub 对 required check 的 `skipped` 计为 Success，PR 照常可合并。
 **不要改成 workflow 级 `paths-ignore`**：workflow 不启动时 required context 根本不会上报，会永远停在 pending。
 `changes` 先跑分类器自测；全量入口的「变更分流自检」步骤也会跑同一个 `--self-test`。分类器**从 base 取副本**（`git show base:tests/ci-changes.mjs`）再执行——PR 改自己的分类脚本不能把自己判成全文档；base 还没有该文件时两路都跑。取不到 diff、空 diff 或未知路径时同样落回全量。
-新分类器写 `code_changed` / `docs_changed`；旧版 base 只写 `docs_only` 时新字段缺失，下游条件按 `!= 'false'` 兜底为全量跑，不会出现启动期全跳过。
+新分类器写 `code_changed` / `docs_changed`；分类字段缺失（例如 base 的分类器还没有该键）时，下游条件按 `!= 'false'` 兜底为全量跑，不会出现启动期全跳过。
 
 `publish-report` 把三条 lane 的产物（`structure-report`、`docs-report`、`test-report-<os>` 与 `e2e-report-<os>`）汇总：
 平台的 quality / e2e 两份先用 `tests/ci-merge.mjs` 合并成该平台唯一的 `test-report.json`，再由 `tests/ci-publish.mjs` 发布。
@@ -250,11 +250,11 @@ PR 验收 PR head 提交（`SOURCE_SHA`），报告的 `sha` 因此等于 PR 头
 Draft 的 run 里依赖 job 都跳过，发布也跳过：不拿空产物发报告。
 
 **报告统一到 `ci-report`**：该分支每次运行都会被重建为空分支再写入，只留最近一次运行。目录按 lane 分键：
-`runs/structure/`、`runs/docs/`、`runs/<os>/`。没有 `ci-doc`；文档审查 / 结构审查与三平台共用同一个分支。
+`runs/structure/`、`runs/docs/`、`runs/<os>/`。文档审查 / 结构审查与三平台共用同一个分支。
 纯代码 PR 没有 `runs/docs/`，纯文档 PR 没有平台目录；读的时候按存在的 key 比 `sha`。
 
-> **规则集**：`development` 当前 required 的是六个平台 job；另需把 `文档审查` 与 `结构审查` 加进 required contexts
-> （旧的 `文档门禁` 已不再存在）。`变更分流` 只是路由 job，**不要**设为 required——它卡住不应阻塞合并，
+> **规则集**：`development` 当前 required 的是六个平台 job；另需把 `文档审查` 与 `结构审查` 加进 required contexts。
+> `变更分流` 只是路由 job，**不要**设为 required——它卡住不应阻塞合并，
 > 真正的闸门是文档审查 / 结构审查 / 六个平台 job。纯文档 PR 的三平台是 skipped（Success），但结构审查与文档审查会跑；
 > 纯代码 PR 的文档审查是 skipped（Success），结构审查始终跑。本仓的规则集修改由用户在 GitHub 设置里执行。
 
@@ -297,7 +297,7 @@ gh workflow run test.yml --ref <分支>
 按干净机器跑（跳过缓存）时加 `-f clean=true`。Ready 的 PR 不必另派发；触发后按下面的读法比对 `sha`。
 
 **报告怎么读（硬规矩）**：只用 `git` 或 git CLI 拉滚动分支，**禁止轮询网页**；时机无法确认时委托用户拉取（见 `AGENTS.md`）。
-代码 / 文档 / 结构验收都读 `ci-report`（**没有 `ci-doc`**）：
+代码 / 文档 / 结构验收都读 `ci-report`：
 
 ```text
 git fetch origin

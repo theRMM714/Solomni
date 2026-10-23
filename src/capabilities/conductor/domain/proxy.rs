@@ -977,7 +977,7 @@ mod tests {
         assert!(authorize(&scoped, CREATE, Some("gpt"), Some("s1")).is_ok());
     }
 
-    /// 转达不再要求"来源引用"：只按 kind 记一条"由核心代理转达"的记录。
+    /// 转达只按 kind 记一条"由核心代理转达"的记录。
     #[test]
     fn relay_only_needs_targets_and_a_kind() {
         let call = ProxyCall {

@@ -62,7 +62,7 @@ pub struct Commit {
     pub message: String,
     pub changes: Vec<Change>,
     pub tree: Tree,
-    /// 转录行锚（旧记录没有 = None，按"总在回档点之前"保守处理）。
+    /// 转录行锚（没有锚 = None，按"总在回档点之前"保守处理）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anchor: Option<CommitAnchor>,
 }

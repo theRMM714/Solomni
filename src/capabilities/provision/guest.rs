@@ -16,7 +16,7 @@ const USER_DATA: &str = "#cloud-config\nruncmd:\n  - >-\n    dpkg -s qemu-guest-
 /// 目的：首启 cloud-init 的 meta-data（固定 instance-id，避免每次启动重跑）。
 const META_DATA: &str = "instance-id: solomni-provision\nlocal-hostname: solomni-guest\n";
 
-/// 目的：guest 的 Node 用固定版本官方二进制（不再走 NodeSource / apt）。
+/// 目的：guest 的 Node 用固定版本官方二进制安装。
 /// 约束：版本 / URL / sha256 的唯一真相在 links.yaml；升级时同 diff 改那两行与这里的版本常量。
 const NODE_TOP: &str = "node-v24.11.0-linux-x64";
 const NODE_ROOT: &str = "/opt/solomni/toolchains/node/24.11.0";

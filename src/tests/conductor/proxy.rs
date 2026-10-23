@@ -95,7 +95,7 @@ pub(crate) fn the_six_tools_are_declared_and_granted_to_core_proxy() {
     }
 }
 
-/// 没有授权就什么都不做：五个工具全部如实拒绝，且**根本没碰宿主**。
+/// 没有授权就什么都不做：六个工具全部如实拒绝，且**根本没碰宿主**。
 #[test]
 pub(crate) fn without_a_grant_nothing_reaches_the_host() {
     let (host, mut tools) = rig();
@@ -307,7 +307,7 @@ pub(crate) fn send_marks_source_and_reports_partial_success() {
     assert_eq!(again, out, "重放回同一结果（含部分失败）");
     assert_eq!(host.calls().len(), calls, "重放不再动宿主");
 
-    // 代答不再要求"来源引用"：只按 kind 记一条来源记录。
+    // 代答只按 kind 记一条来源记录。
     let out = tools.call(
         &c,
         d::SEND,

@@ -323,7 +323,7 @@ fn main() {
         }
     };
     // 工具总表与角色表必须自洽（悬空引用 / 缺能力都是装配错误）：装配期就挡下，不拖到运行期。
-    // 两张表归**工具能力**（加载器在它自己的 detail 里；装载后由它的 service 持有）。
+    // 三张表归**工具能力**（加载器在它自己的 detail 里；装载后由它的 service 持有）。
     let systools_source =
         capabilities::tools::detail::yaml_systools::YamlSystools::new(root.join("systools"));
 
@@ -345,7 +345,7 @@ fn main() {
     .with_mode(std::sync::Arc::clone(&sandbox_mode));
     // 内置文件工具：纯 Rust 直接读写，不经过外部进程（编码问题不进本程序）。
     let io = capabilities::tools::detail::FsSysIo::default();
-    // **工具能力**：两张表由加载器读进来，三个出站端口（外部执行 / 内置读写 / 围栏释放）
+    // **工具能力**：三张表由加载器读进来，三个出站端口（外部执行 / 内置读写 / 围栏释放）
     // 只由它的 service 持有（R12）。装配期就挡下"悬空引用 / 缺能力"。
     let tools_svc = match capabilities::tools::service::ToolsService::new(
         &systools_source,

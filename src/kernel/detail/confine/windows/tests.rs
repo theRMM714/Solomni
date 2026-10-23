@@ -1555,7 +1555,7 @@ fn reconcile_skips_entries_without_ownership() {
         net: false,
     };
     expect_granted(&prepare_fence(&spec, "cmd", &home), "授权应当成功");
-    // 清空全部归属（模拟旧格式/归属读不出来）：对账必须报告并跳过，不许回收。
+    // 清空全部归属（模拟归属读不出来 / 台账丢失）：对账必须报告并跳过，不许回收。
     {
         let mut rec = load_record(&home);
         for g in rec.grants.iter_mut() {

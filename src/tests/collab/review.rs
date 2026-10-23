@@ -87,18 +87,18 @@ pub(crate) fn review_parse_failure_is_conservative_fail() {
 
 #[test]
 pub(crate) fn mode_vocabulary_is_single_or_collab_only() {
-    // web 与 conductor 的形态词汇只有 single / collab；旧的 direct / compose 一概不认（GREEN FIELD，无兼容）。
+    // web 与 conductor 的形态词汇只有 single / collab / proxy；其它一律不认。
     use crate::presentation::web::parse_mode;
     assert!(matches!(parse_mode("single"), Ok(WorkMode::Single)));
     assert!(matches!(parse_mode("collab"), Ok(WorkMode::Collab)));
     // 第三人形态：代理（没有名单，选它就是授予全权）。
     assert!(matches!(parse_mode("proxy"), Ok(WorkMode::Proxy)));
     assert!(parse_mode("nope").is_err());
-    for bad in ["direct", "compose", "omni", ""] {
+    for bad in ["bogus", "omni", ""] {
         let e = parse_mode(bad).unwrap_err();
         assert!(e.contains("未知模式"), "web 必须 400 并说明：{}", e);
     }
-    // 落盘 meta 里的旧形态不做兼容：重建会话时明确报错（不静默当单 agent）。
+    // 落盘 meta 里出现未知形态：重建会话时明确报错（不静默当单 agent）。
     let hist = Arc::new(InMemoryHistory::new());
     let mut core = core_with_all(
         vec![module_of("a")],
@@ -109,8 +109,8 @@ pub(crate) fn mode_vocabulary_is_single_or_collab_only() {
         Arc::new(InMemorySysIo::new()),
     );
     hist.create(&SessionMeta {
-        name: "旧会话".to_string(),
-        mode: "direct".to_string(),
+        name: "未知形态".to_string(),
+        mode: "unknown_mode".to_string(),
         delegate: false,
         modules: vec!["a".to_string()],
         task: None,
@@ -132,7 +132,7 @@ pub(crate) fn mode_vocabulary_is_single_or_collab_only() {
     // 内存里没有这个会话 → 走 rebuild_session，对未知形态如实报错。
     let err = core
         .rewind(
-            "旧会话",
+            "未知形态",
             crate::capabilities::conductor::api::RewindTarget::Delete(0),
         )
         .unwrap_err();

@@ -9,7 +9,7 @@
 
 **管**：
 
-- 系统工具总表与角色表（`systools/`），以及「按角色发放工具面 / 按表校验调用」的唯一判据。
+- 系统工具总表、角色表与名字表（`systools/` 三份），以及「按角色发放工具面 / 按表校验调用」的唯一判据。
 - 内置文件工具（read / list / write / edit / patch / search）的执行编排与纯规则、工具参数契约、补丁通道。
 - 模块工具进程的执行编排；拉起与围栏机制是 kernel 共享的 `ProcessRunner` / `confine`。
 - 围栏可达范围的派生（`domain/fence.rs` 的 `from_sandbox` / `standalone`）。

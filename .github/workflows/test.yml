@@ -10,7 +10,7 @@
 # job 结构：平台相关的是 quality（平台门禁 + 单元 + 探针 + 前端冒烟）与 e2e（L4 端到端）；
 # 平台无关的是 changes（分流）、docs（文档审查）、structure（结构审查）与 publish-report（汇总发布）。
 # 有代码变更 → quality / e2e；有文档变更 → docs；structure 始终跑（代码或文档变更都可能破坏代码↔文档结构）。
-# 报告统一到 ci-report：runs/structure、runs/docs、runs/<os>；不再有 ci-doc。
+# 报告统一到 ci-report：runs/structure、runs/docs、runs/<os>。
 # changes 只是路由，不要设为 required（卡住不应阻塞合并）；也不要用 workflow 级 paths-ignore（required check 会永远 pending）。
 name: 测试
 
@@ -64,7 +64,7 @@ jobs:
       # 分类器自带样例自测与 include_str! 文档消费自检：自测失败 = job 失败，下游按全量兜底。
       # 从 base 取分类器副本再执行：PR 若改 tests/ci-changes.mjs 想把自己判成全文档，改的是 head 的脚本，
       # 而这里跑的是 base 的脚本（它会把该文件判成代码）；base 还没有分类器时直接用全量。
-      # 旧版 base 只写 docs_only：新字段缺失，下游条件按「!= false」兜底为全量跑。
+      # 分类字段缺失（例如 base 的分类器还没有该键）时，下游条件按「!= false」兜底为全量跑。
       - name: 判定代码 / 文档变更
         id: classify
         env:

@@ -87,7 +87,7 @@ pub(crate) fn face_has(ctx: &MemberTools, module: Option<&str>, name: &str) -> b
 }
 
 /// 这一回合有没有哪个执行者认领这个名字（核心自有工具）。
-/// 认领了就按**工具面**放行，不再走模块派发——判据因此只剩“面里有没有它”。
+/// 认领了就按**工具面**放行——判据只剩“面里有没有它”。
 fn handler_for<'a>(
     ctx: &'a MemberTools,
     name: &str,

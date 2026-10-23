@@ -182,7 +182,7 @@ setTimeout(async () => {
   }
   // 每条消息都要显示身份（说话人 · 动词）：正文**追加**，不许把身份标题一起抹掉。
   // 真实 DOM 里 el.innerHTML = … 会清空子节点——桩 DOM 默认是一根普通属性，测不出这个错，
-  // 所以这里用**会清空 children 的**严格元素来验（agree 这类非 line 类的消息曾经因此丢了说话人）。
+  // 所以这里用**会清空 children 的**严格元素来验（agree 这类非 line 类的消息不能丢说话人）。
   let identityKept = false;
   if (!loadErrors.length) {
     try {

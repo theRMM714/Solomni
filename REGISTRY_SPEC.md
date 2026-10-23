@@ -126,13 +126,12 @@ discuss_remind_cap: 3  # 讨论里一轮内对同一个成员最多提醒几次�
 ```
 
 - `sandbox.policy` 是**全局硬约束**：会话、子会话、agent 都不能覆盖；改它要保存后整体重启，
-  让所有 guest / 常驻服务 / 工具进程按新策略重建。旧字段 `fence_write` / `fence_read` / `permissions` 不再读取，
-  也不做兼容层；配置写错（拼错键、相对的主机只读根、非法路径）启动即报 `settings.yaml 配置非法`。
+  让所有 guest / 常驻服务 / 工具进程按新策略重建。配置写错（拼错键、未知键、相对的主机只读根、非法路径）启动即报 `settings.yaml 配置非法`。
 - `sandbox.defaults` 是**会话权限的全局默认**；会话级覆盖写在 `meta.yaml` 的 `sandbox.permissions`
   （见 [docs/session/session-model.md](docs/session/session-model.md)）。`sandbox.policy.deny` 是硬底线，
   会话只能追加黑名单，不能清空。语义只有一份权威：[docs/permission/README.md](docs/permission/README.md)。
 - **网络是全局开关**（`sandbox.policy.network`）：会话工具、直接模块工具、常驻服务、模块构建共用；
-  不再有会话 `exec.net`。provisioning 首启与核心模型出站不受它影响。
+  provisioning 首启与核心模型出站不受它影响。
 - `on_unavailable=ask` 时，启动预检发现 `require` 的机制不可用会询问是否**本进程降级**；
   回答不落盘，重启再问；没人答 / 没有前端 / `refuse` = fail-closed。`SOLOMNI_SANDBOX_DEGRADED=1/0`
   只供测试与 CI 在进程级注入（`1` 仅在 `ask` 下生效）。

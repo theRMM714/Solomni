@@ -318,7 +318,7 @@ impl Conductor {
     pub fn edit_session(&mut self, sid: &str, edit: SessionEdit) -> Result<(), String> {
         let (prepared, job) = self.prepare_edit(sid, edit)?;
         if let Some(job) = job {
-            // 失败什么都不改：meta 还没落盘，旧会话原样还在。
+            // 失败什么都不改：meta 还没落盘，现有会话原样还在。
             job.run()?;
         }
         self.commit_edit(prepared)

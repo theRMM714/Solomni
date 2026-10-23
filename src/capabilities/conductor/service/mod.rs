@@ -240,7 +240,7 @@ pub struct Conductor {
     /// 提示词册能力：**册子本体在它里面**（只有一处），conductor 只按名字取段。
     /// 用 `Arc`：协作会话要与核心**共享**这一份（逐处克隆整本册子是白费）。
     prompt: Arc<dyn Prompt>,
-    /// 工具总表与角色表的能力面（`systools/` 两张表）：**表本体在工具能力里**，与册子互不依赖。
+    /// 工具总表与角色表的能力面（授权两张表；名字表由组合根另取）：**表本体在工具能力里**，与册子互不依赖。
     systools: Arc<dyn Tools>,
     sessions: HashMap<SessionId, Session>,
     /// **裁决队**（按会话 id 取）：核心各关卡与工具级确认共用同一条队（见 docs/session/session-model.md）。

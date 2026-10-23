@@ -579,16 +579,16 @@ fn yaml_settings_store_defaults_saves_and_reports_malformed_files() {
     assert!(empty.app.streaming && !empty.app.sandbox.policy.windows.write_acl);
     assert!(empty.agents.is_empty());
 
-    // 旧字段/拼错键 = 配置非法（不做兼容、不静默忽略）。
+    // 未知字段 / 拼错键 = 配置非法（拒绝，不读取、不静默忽略）。
     std::fs::create_dir_all(&home).expect("建 .home");
-    std::fs::write(home.join("settings.yaml"), "fence_write: true\n").expect("造旧配置");
+    std::fs::write(home.join("settings.yaml"), "fence_write: true\n").expect("造非法配置");
     let err = store.load().unwrap_err();
     assert!(
         err.contains("settings.yaml 配置非法") && err.contains("unknown field"),
         "{}",
         err
     );
-    std::fs::remove_file(home.join("settings.yaml")).expect("删旧配置");
+    std::fs::remove_file(home.join("settings.yaml")).expect("删非法配置");
 
     let mut want = Settings::default();
     want.providers.insert(
@@ -902,7 +902,7 @@ fn role_face_comes_from_the_role_table() {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let st = YamlSystools::new(root.join("systools"))
         .load()
-        .expect("读两张表");
+        .expect("读三张表");
     let ids = |role: &str| -> Vec<String> {
         st.tool_face(role)
             .expect("角色表里的角色")

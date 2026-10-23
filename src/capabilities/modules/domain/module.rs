@@ -180,7 +180,7 @@ pub fn check_tools(m: &ModuleManifest, reserved: &[String]) -> Result<(), String
     for (name, decl) in &m.tools {
         if reserved.iter().any(|r| r == name) {
             return Err(format!(
-                "tools 里的 {} 是核心内置工具名（保留名），模块不得占用",
+                "tools 里的 {} 是内置工具名（保留名），模块不得占用",
                 name
             ));
         }

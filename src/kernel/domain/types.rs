@@ -36,7 +36,7 @@ impl Tier {
 }
 
 /// 目的：会话的执行选型——档位 + 虚拟根名 + 能力定版。
-/// 约束：进 meta.yaml 的 exec 段（缺字段的旧会话按默认 = 本机档读回）；本机/虚拟机两侧与呈现层共享，按 R6 归 kernel。
+/// 约束：进 meta.yaml 的 exec 段（缺字段按默认 = 本机档读回）；本机/虚拟机两侧与呈现层共享，按 R6 归 kernel。
 ///   网络与围栏要求是**全局策略**，不在这里。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

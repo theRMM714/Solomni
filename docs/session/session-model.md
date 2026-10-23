@@ -52,7 +52,7 @@ session/<工作名>/
   只覆盖显式给出的字段，缺省继承 `settings.yaml` 的 `sandbox.defaults`；`sandbox.policy.deny` 是硬底线，
   会话只能追加、不能清空。语义见 [docs/permission/README.md](../permission/README.md)。
 - **出站网络是全局开关**（`sandbox.policy.network`）：会话工具、直接模块工具、常驻服务、模块构建共用；
-  不再有 `exec.net`。虚拟机档决定 guest 网卡；本机档 Windows 授 `internetClient`、macOS 放行 `network-outbound`、
+  虚拟机档决定 guest 网卡；本机档 Windows 授 `internetClient`、macOS 放行 `network-outbound`、
   Linux `net=false` 用 seccomp 拒绝非本地 socket（`net=true` 不装网络过滤器，不限制入站/绑定）。
   Windows 只放行公网出站，不授 private network / loopback；Windows 未授权 `windows.write_acl` 时容器不装，网络不生效。
 - 侧栏**可见**：agent 会话挂在主会话下（`meta.parent`），用户可进入查看与发言干预。

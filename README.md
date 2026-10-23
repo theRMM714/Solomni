@@ -33,7 +33,7 @@ Solomni 是一个**跑在自己机器上的 agent 运行环境（AgentOS）**：
 
 - **三种形态**：单 agent / 小组协作 / 代理（决定权整块交给核心）。形态、流程与用户旅程见 [PRODUCT.md](PRODUCT.md)。
 - **模块即插即用**：`modules/` 里放一个带合法 `module.yaml` 的文件夹就出现，移走就消失——不注册、不编译、不重启（契约见 [MODULE_SPEC.md](MODULE_SPEC.md)）。
-- **会话与历史**：一个工作一个目录 `session/<工作名>/`；回档 / 留档 / 删除 / 恢复、转录回放、上下文压缩、共享区版本化（`work_pull` / `work_commit` / `work_versions` / `work_resolve`）。
+- **会话与历史**：一个工作一个目录 `session/<工作名>/`；回档 / 留档 / 删除 / 恢复、转录回放、上下文压缩、共享区版本化（`work_pull` / `work_commit` / `work_status` / `work_versions` / `work_resolve` / `work_lost`）。
 - **三重隔离**：内置工具越界拒绝 → 工具进程走守门进程（环境白名单 / 进程树 / 超时杀整棵树）→ 平台围栏（Windows AppContainer、Linux Landlock、macOS seatbelt）；装不上就如实报告能力等级。
 - **两档执行**：本机档（默认）与虚拟机档（模块工具在 guest 里跑）。虚拟机档按宿主 × 引擎 × guest × 通道 × 共享五轴可插；
   Linux（QEMU/KVM + virtiofs，缺 virtiofsd 时退 9p）与 Windows（QEMU/WHPX + SMB guestfwd）已真机验收；Windows 缺 smbd 时虚拟机档不可用（先补齐，不降级）；copy 只是开发/应急通道，不参与用户档。macOS 未验（`VERIFIED_HOSTS` 只放开 Linux / Windows；缺 QEMU 取包与 Apple vz 引擎，见 [tests/macos/gaps.yaml](tests/macos/gaps.yaml)）；
@@ -86,7 +86,7 @@ node dev.js test|fmt|clippy   # 本机开发回路：改一层验一层；不要
   用户覆盖走 `.home/settings.yaml` 与环境变量，不改仓库里的台账。
 - **没有配供应商也能跑**：用内置假模型把流程演示一遍，并如实告知。
 - 常用参数：`--root <目录>`（换产品根）、`--web-port <端口>`、`--release`。
-- 终端提示符下的命令：`single [agent名…]` / `collab [agent名…|?]` / `proxy（决定权整块交给核心）` / `module [模块id.工具名 [json]]（不经 agent 直接调模块工具）` / `resident list|start|stop|enable|disable|call`（常驻服务） / `secret`（隐秘字段） / `webui`。
+- 终端提示符下的命令：启动时打印的菜单就是全量清单（`src/presentation/cli/mod.rs` 的 `print_menu`）；回档走 `rewind`，供应商 / 模型 / 核心默认模型分别走 `provider` / `model` / `core`。
 
 ### 配供应商与模型
 

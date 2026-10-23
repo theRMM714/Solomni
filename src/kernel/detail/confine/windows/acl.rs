@@ -860,7 +860,7 @@ mod tests {
         vec![1, 2, 0, 0, 0, 0, 0, 5]
     }
 
-    /// 标准允许 / 拒绝 ACE：SID 紧跟在掩码之后（偏移 8）——原来的硬编码在这一类上是对的。
+    /// 标准允许 / 拒绝 ACE：SID 紧跟在掩码之后（偏移 8）。
     #[test]
     fn standard_ace_puts_the_sid_right_after_the_mask() {
         for ace_type in [ACCESS_ALLOWED_ACE_TYPE, ACCESS_DENIED_ACE_TYPE] {

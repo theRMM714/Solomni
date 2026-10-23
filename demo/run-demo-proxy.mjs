@@ -272,7 +272,7 @@ async function main() {
   ok(names.every((n) => FACE.includes(n)), "只用它自己的工具面（模块工具一个也没发）", names.join("、"));
   ok(names.includes("catalog_agents"), "先核实清单再决定（catalog_agents）");
   ok(names.includes("create_session"), "自己建出子工作（create_session）");
-  // 建会话自带开头（opening）就开工——"转达"不再是开工的必经一步（后续补充 / 返工 / 代答门才用它）。
+  // 建会话自带开头（opening）就开工；"转达"只用于后续补充 / 返工 / 代答门。
 
   const st = await state();
   const kids = descendants(st, sid);

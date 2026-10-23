@@ -13,7 +13,7 @@
 | **名字表** | 工作区布局**固定占用的目录名**（agent 实例名不得占用） | `systools/names.yaml` |
 | **规划清单** | 已确认但尚未实施的系统工具与验收条件，**不限角色**（非当前工具表、非测试缺口账） | [systool_gaps.yaml](systool_gaps.yaml) |
 
-工具与角色的名单在代码里没有第二份：角色引用了表里不存在的 id = **结构审查硬失败**（不靠人看）。
+工具与角色的名单在代码里没有第二份：角色引用了表里不存在的 id = **装配期 `SystemTools::problems()` 硬失败**（`src/tests/detail.rs` 锁死，不靠人看）。
 
 ## 二、读哪一份
 
@@ -33,7 +33,7 @@
 - 改角色 → `systools/roles.yaml` + `prompts/roles/<角色>`（提示词与工具面同处声明，分开必然漂）；
 - 加 / 改保留目录名 → `systools/names.yaml` + 落盘布局文档（[docs/session/session-model.md](docs/session/session-model.md)）；
 - 改路径模型 / 围栏口径 → [docs/tools/tools-and-roles.md](docs/tools/tools-and-roles.md) 与 [ARCHITECTURE.md](ARCHITECTURE.md)；
-- 悬空引用由 `node run-tests.js` 的结构审查挡下。
+- 悬空引用由装配期 `SystemTools::problems()` 挡下（`src/tests/detail.rs` 锁死）。
 
 ## 四、联动
 

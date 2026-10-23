@@ -1,11 +1,11 @@
-//! 目的：工具能力的出站端口——文件读写与两张表的加载（机制在适配层）。
+//! 目的：工具能力的出站端口——文件读写与三张表的加载（机制在适配层）。
 //! 管：`SystoolsSource` / `SysIo` 与它们的数据形态（`FileRead` / `DirEntry`）。
 //! 不管：外部进程执行与围栏授权释放——那是 kernel 共享的 `ProcessRunner` / `FenceHost`。
 //! 联动：由 `service/mod.rs` 持有（R12）；kernel 端口见 `src/kernel/ports.rs`。
 
 use crate::capabilities::tools::domain::roles::SystemTools;
 
-/// 目的：工具总表与角色表的加载端口：读 `systools/tools.yaml` + `systools/roles.yaml`（机制在适配层）。
+/// 目的：工具总表、角色表与名字表的加载端口：读 `systools/tools.yaml` + `systools/roles.yaml` + `systools/names.yaml`（机制在适配层）。
 pub trait SystoolsSource {
     fn load(&self) -> Result<SystemTools, String>;
 }

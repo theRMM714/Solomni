@@ -44,7 +44,7 @@ const STEP_BUDGET_S = {
 // 覆盖率发现模式（手动，不进默认门禁；判据与局限见 docs/testing/execution-ci.md 与 quality-isolation.md）。
 const COVERAGE = process.argv.includes("--coverage");
 // 审查模式：只跑纯文本审查，不跑 cargo、单元、平台目标、前端冒烟与 L4。
-// - --docs：文档审查 + 结构审查（本地纯文档任务用，等价于旧的整份结构审查）；
+// - --docs：文档审查 + 结构审查（本地纯文档任务用）；
 // - --audit=docs / --audit=structure：只跑其中一路（CI 的 docs / structure job 用）；
 // 同时给 --docs 与 --audit 时 --docs（两路一起）优先。判据见 docs/testing/execution-ci.md。
 const DOCS = process.argv.includes("--docs");
@@ -561,7 +561,7 @@ function structureAudit() {
   // 注释契约（ARCHITECTURE.md 十）：判定与棘轮比对只有一处——run-hygiene.js 的 scanCommentContract
   // 与 compareContract。棘轮**只减不增**：新文件零容忍（快照里没有 = 从 0 起算），老文件同类变多也是新增；
   // 变少 = 应销账，同样硬失败（收紧只能往下，见 --tighten）。
-  const { scanCommentContract, compareContract, ratchetSelfTest, commentLexerSelfTest } = require("./run-hygiene.js");
+  const { scanCommentContract, compareContract, ratchetSelfTest, commentLexerSelfTest, semanticSelfTest } = require("./run-hygiene.js");
   const COMMENT_BASELINE = path.join(ROOT, "tests", "comment-baseline.json");
   const contractNow = scanCommentContract().byFileRule;
   if (!fs.existsSync(COMMENT_BASELINE)) {
@@ -575,6 +575,7 @@ function structureAudit() {
   }
   for (const b of ratchetSelfTest()) problems.push("棘轮自测失败：" + b);
   for (const b of commentLexerSelfTest()) problems.push("注释词法自测失败：" + b);
+  for (const b of semanticSelfTest()) problems.push("语义卫生自测失败：" + b);
   // 结构审查：**跨平台字面量完整性**——平台专属代码本地不编译（unix 的 #[cfg] 在 Windows 上不存在，
   // 反之亦然），漏字段这类错只在别的平台炸。这里按文本检查：每个 FenceSpec 字面量都要写全字段
   // （`ro` 与 `rw` 同层），本地就能抓住 CI 才会暴露的那类问题。
@@ -657,7 +658,7 @@ function structureAudit() {
 
 
   // ---------- 文档与配置的真相源比对 ----------
-  // 为什么机器查：这些"某份文档列出另一处的清单"的段落，人一定会忘记同步（本轮手改过三次）。
+  // 为什么机器查：这些"某份文档列出另一处的清单"的段落，人一定会忘记同步。
   // 三处比对：① 提示词键表 ↔ prompts/**；② systools/** ↔ 文档是否提到；③ 根 *.md ↔ AGENTS.md 路由表。
 
   // ① 提示词键表 ↔ 册子：docs/prompt/prompts.md 的「结构与键」是"每份文件里有什么键"的唯一权威。
@@ -793,7 +794,7 @@ function structureAudit() {
   // 三条规则：① 业务/机制层不得反向依赖 adapters / presentation；
   //          ② presentation 只经入站能力面（core::api）驱动，不碰端口与内部模块；
   //          ③ 业务层内部不得成环（按强连通分量判定）。
-  // 迁移期允许的现状违规进 tests/dependency-baseline.json；**条目一旦不再成立必须删除**（过期即失败）——
+  // 依赖方向的现状违规进 tests/dependency-baseline.json；**条目一旦不再成立必须删除**（过期即失败）——
   // 这是"每拆一个分区就销一次账"的机器判据，不靠人看。
   const depBaselineFile = path.join(ROOT, "tests", "dependency-baseline.json");
   let depBaseline = null;
@@ -871,7 +872,7 @@ function structureAudit() {
     const reverse = new Set();
     const presentation = new Set();
     const apiOnly = new Set();
-    // 批次 20a 新增：给别能力的类型写 impl、domain 里引端口。
+    // 给别能力的类型写 impl、domain 里引端口。
     const foreignImpl = new Set();
     const domainPorts = new Set();
     const apiPorts = new Set();
@@ -904,18 +905,18 @@ function structureAudit() {
         if (layer === "presentation" && !presOk && targetLayer !== "presentation") {
           presentation.add(f + " -> " + t);
         }
-        // 业务之间**只经对方的 `api`** 交流（R1，批次 20a 收紧）：`::ports` 是"对方与它自己 detail 之间的事"（R12），
+        // 业务之间**只经对方的 `api`** 交流（R1）：`::ports` 是"对方与它自己 detail 之间的事"（R12），
         // 跨能力引用一律不许；`::domain` / `::detail` 同样是实现。能力内部的互相引用不算"业务之间"。
         if (layer === "capabilities" && targetLayer === "capabilities") {
           const selfCap = f.split("/")[2];
           const otherCap = t.split("::")[2];
           if (otherCap && otherCap !== selfCap && !t.endsWith("::api")) apiOnly.add(f + " -> " + t);
         }
-        // `domain/` 是**纯逻辑**（批次 20a）：不得引用任何**能力端口**（自己的也不行，引了就不是纯的了）。
+        // `domain/` 是**纯逻辑**：不得引用任何**能力端口**（自己的也不行，引了就不是纯的了）。
         // kernel 的机制端口（`Log` / `HostProbe`）是全项目共享的机制接口（R12 例外），不在此列。
         if (f.includes("/domain/") && t.startsWith("crate::capabilities::") && t.endsWith("::ports"))
           domainPorts.add(f + " -> " + t);
-        // **端口只由定义它的能力持有**（R12，批次 20a）：任何非入口层引用别的能力的 `ports` 都是违规——
+        // **端口只由定义它的能力持有**（R12）：任何非入口层引用别的能力的 `ports` 都是违规——
         // 协调业务 `conductor` 也算，它不该拿着别人的端口替别人做 IO。
         if (
           layer !== "entry" &&
@@ -925,7 +926,7 @@ function structureAudit() {
         ) {
           apiOnly.add(f + " -> " + t);
         }
-        // `api.rs` 是**入站用例面**：不得把**能力端口**再导出去（批次 20b 清掉 llm 那处）。
+        // `api.rs` 是**入站用例面**：不得把**能力端口**再导出去。
         // kernel 的机制端口（`Log` / `HostProbe`）是全项目共享的机制接口（R12 例外），不在此列。
         if (f.endsWith("/api.rs") && t.startsWith("crate::capabilities::") && t.endsWith("::ports"))
           apiPorts.add(f + " -> " + t);
@@ -1006,11 +1007,11 @@ function structureAudit() {
         }
       }
     };
-    compare("reverse", [...reverse].sort(), depBaseline.reverse || [], "业务层不得反向依赖旧巨石 core / adapters / presentation");
+    compare("reverse", [...reverse].sort(), depBaseline.reverse || [], "业务层不得反向依赖呈现层或入口层");
     compare("presentation", [...presentation].sort(), depBaseline.presentation || [], "presentation 只能经各能力的 ::api 驱动");
-    compare("apiOnly", [...apiOnly].sort(), depBaseline.apiOnly || [], "业务之间只能经对方的 ::api（R1，批次 20a 起不再允许 ::ports）；::domain / ::detail 是实现，跨能力一律不许碰");
+    compare("apiOnly", [...apiOnly].sort(), depBaseline.apiOnly || [], "业务之间只能经对方的 ::api（R1）；::domain / ::detail 是实现，跨能力一律不许碰");
     compare("foreignImpl", [...foreignImpl].sort(), depBaseline.foreignImpl || [], "不得给别的能力的类型写 impl（R1：另一种互相引入）");
-    compare("domainPorts", [...domainPorts].sort(), depBaseline.domainPorts || [], "domain 是纯逻辑（批次 20a）：不得引用任何 ports");
+    compare("domainPorts", [...domainPorts].sort(), depBaseline.domainPorts || [], "domain 是纯逻辑：不得引用任何 ports");
     compare("apiPorts", [...apiPorts].sort(), depBaseline.apiPorts || [], "api 是入站用例面：不得把本能力的 ports 再导出去（R12）");
     compare("channelCross", [...channelCross].sort(), depBaseline.channelCross || [], "呈现层的两个渠道（cli / web）互不依赖：不得引用对方");
 
@@ -1163,7 +1164,7 @@ function runCoverage() {
 /**
  * 审查模式（--docs / --audit=docs|structure）：只跑纯文本审查，不跑 cargo、单元、平台目标、前端冒烟与 L4。
  * 复用 docsAudit / structureAudit 这一处权威，不复制检查逻辑；全程只读。
- * - all：文档审查 + 结构审查（本地纯文档任务；等价于旧的整份结构审查）；
+ * - all：文档审查 + 结构审查（本地纯文档任务）；
  * - docs：只查文档自身（CI 的 docs job）；
  * - structure：只查代码↔文档结构（CI 的 structure job）。
  * 判据见 docs/testing/execution-ci.md。

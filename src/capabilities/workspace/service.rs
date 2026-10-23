@@ -1199,7 +1199,7 @@ impl Workspace for WorkspaceService {
                 continue;
             };
             let within = match &c.anchor {
-                // 旧记录没有锚：保守地算它在回档点之前（不让老数据把共享区清空）。
+                // 没有锚：保守地算它在回档点之前（不让无锚提交把共享区清空）。
                 None => true,
                 Some(a) => keep_by_agent
                     .get(&a.agent)

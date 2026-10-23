@@ -28,5 +28,5 @@
 | `src/capabilities/conductor/domain/action.rs` | 动作回包的纯逻辑：探测结论 → 响应 JSON |
 | `src/capabilities/conductor/domain/proxy.rs` | 核心代理工具的纯逻辑：入参解析、授权校验、载荷规整与回执拼装 |
 | `src/capabilities/conductor/service/proxy.rs` | 代理工具执行面与队列桥 `ProxyBridge`（把动作交给核心线程） |
-| `src/capabilities/conductor/service/work_tools.rs` | 共享区五个核心自有工具（`work_pull` / `work_commit` / `work_status` / `work_versions` / `work_resolve`）的成员侧执行者 |
-| `src/capabilities/conductor/domain/work.rs` | 五个核心自有工具的纯逻辑：工具名、入参解析、回执拼装与三方版本 / 解决结果渲染 |
+| `src/capabilities/conductor/service/work_tools.rs` | 共享区六个核心自有工具（`work_pull` / `work_commit` / `work_status` / `work_versions` / `work_resolve` / `work_lost`）的成员侧执行者 |
+| `src/capabilities/conductor/domain/work.rs` | 六个核心自有工具的纯逻辑：工具名、入参解析、回执拼装与三方版本 / 解决结果渲染 |

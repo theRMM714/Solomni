@@ -193,7 +193,7 @@ fn report(done: Result<String, String>) -> i32 {
     }
 }
 
-/// （台账可能不存在：探针、夹具的台账被删、旧版本建的）——隐藏模式，用户经文档知道它。
+/// （台账可能不存在：探针、夹具的台账被删、进程被杀）——隐藏模式，用户经文档知道它。
 pub fn fence_clean(root: &std::path::Path) -> i32 {
     let home = root.join(".home");
     let mut lines: Vec<String> = Vec::new();

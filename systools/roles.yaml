@@ -4,7 +4,7 @@
 # module_tools（默认否）= 这个身份**能不能用它自己模块的工具**：讨论席发不到（它不干活），执行席发。
 # 不做角色继承：重复列几个 id 没有代价，继承会引入隐式耦合。
 #
-# 引用的 id 必须在 systools/tools.yaml 里存在——悬空引用会被测试门禁挡下（不靠人看）。
+# 引用的 id 必须在 systools/tools.yaml 里存在——悬空引用由装配期 SystemTools::problems() 挡下（src/tests/detail.rs 锁死）。
 
 roles:
   # 讨论阶段：发言 + 表态，外加文件域（讨论可以读资料）。

@@ -250,7 +250,7 @@ async function main() {
   }
 
   // 假供应商端口按当前进程号取：本机可能残留上一次跑掉的进程占着固定端口，
-  // 那样新进程起不来（EADDRINUSE），而驱动仍会打到旧的那个——症状是断言莫名其妙地按旧逻辑走。
+  // 那样新进程起不来（EADDRINUSE），而驱动仍会打到旧的那个——症状是断言莫名其妙地按陈旧状态走。
   const mockPort = 8397 + (process.pid % 200);
   const mock = spawn(process.execPath, [path.join(HERE, "mock.js")], {
     cwd: HERE,

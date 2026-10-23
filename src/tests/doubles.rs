@@ -1648,7 +1648,7 @@ pub(crate) fn test_history_of(
     ))
 }
 
-/// 测试用的 **tools 能力**：两张表 + 三个替身端口（与生产同一条路，R12）。
+/// 测试用的 **tools 能力**：三张表 + 三个替身端口（与生产同一条路，R12）。
 /// 两个面都从这里出：`Arc<dyn Tools>`（表）与 `Arc<dyn ToolExec>`（执行）。
 pub(crate) fn test_tools_svc() -> Arc<crate::capabilities::tools::service::ToolsService> {
     test_tools_svc_with(

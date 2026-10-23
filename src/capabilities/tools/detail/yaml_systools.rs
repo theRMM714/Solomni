@@ -1,4 +1,4 @@
-//! 系统工具与角色的装配输入：`systools/tools.yaml`（工具是什么）+ `systools/roles.yaml`（身份有什么）。
+//! 系统工具、角色与布局保留名的装配输入：`systools/tools.yaml`（工具是什么）+ `systools/roles.yaml`（身份有什么）+ `systools/names.yaml`（布局保留名）。
 //! **它属于工具能力**（工具总表与角色表是工具侧的事实，不是提示词）：
 //! 放在提示词能力里会让 `prompt → tools` 成环（见 ARCHITECTURE.md §一）。
 //! 缺目录/缺文件 = 装配错误（如实报错，不静默造默认）。
@@ -38,7 +38,7 @@ impl YamlSystools {
 }
 
 impl SystoolsSource for YamlSystools {
-    /// 系统工具与角色：读 `tools.yaml`（工具是什么）与 `roles.yaml`（身份有什么）。
+    /// 系统工具、角色与保留名：读 `tools.yaml`（工具是什么）、`roles.yaml`（身份有什么）与 `names.yaml`（布局保留名）。
     fn load(&self) -> Result<SystemTools, String> {
         let path = self.dir.join("tools.yaml");
         let text = std::fs::read_to_string(&path)

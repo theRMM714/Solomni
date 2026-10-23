@@ -558,7 +558,7 @@ pub(crate) fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
     );
 }
 /// 共享区版本化的六个工具：executor / solo 发到，讨论席与核心角色不发；
-/// 声明在工具总表里（角色表的悬空引用由结构审查兜底）。
+/// 声明在工具总表里（角色表的悬空引用由装配期 `SystemTools::problems()` 与 `src/tests/detail.rs` 锁死）。
 #[test]
 pub(crate) fn work_versioning_tools_are_granted_to_the_working_roles_only() {
     use crate::capabilities::tools::api::Tools;

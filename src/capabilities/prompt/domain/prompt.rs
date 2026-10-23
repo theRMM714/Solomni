@@ -279,7 +279,7 @@ pub struct EnvBlock {
 pub struct Mechanism {
     /// 会话使用类型（必须在 `session_kinds` 里）。
     pub session: String,
-    /// 适用角色（必须在角色表里存在——悬空引用由测试门禁挡下）。
+    /// 适用角色（必须在角色表里存在——悬空引用由装配期 `SystemTools::problems()` 挡下）。
     pub roles: Vec<String>,
     pub text: String,
 }

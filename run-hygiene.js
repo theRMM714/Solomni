@@ -1,15 +1,19 @@
 #!/usr/bin/env node
 /**
  * 仓库卫生审查——**不是门禁**：门禁（node run-tests.js 的 T0 结构审查）回答"这次改动有没有把代码弄坏"，
- * 卫生回答"仓库里还欠多少、挂在谁身上"。存量在迁移期必然存在，所以它只报，不拦；唯一会写文件的入口是 --tighten。
+ * 卫生回答"仓库里还欠多少、挂在谁身上"。存量是历史累积，必然存在，所以它只报，不拦；唯一会写文件的入口是 --tighten。
  *
- * 两类：
+ * 三类：
  * - 格式存量（注释契约，ARCHITECTURE.md 十）：按 文件 × 规则 **计数**，与 tests/comment-baseline.json 比。
  *   棘轮只减不增：新文件零容忍（快照里没有 = 从 0 起算），老文件同类变多也算新增；变少要求销账。
  *   --tighten 只许往下收束：出现新增就拒绝写盘（收紧后连同改动一起提交）。
  * - 内容卫生（只报）：悬挂的缺口 id（已删 id 从 git 历史取）、文档里指向不存在的 src 路径、引用的根文档不存在。
+ * - 语义卫生（只报）：全仓 Markdown 正文与源码 / 配置 / 脚本注释里的历史或待办措辞；不建基线、不进 T0，
+ *   只把可疑行列出来让人判断。`hygiene-ignore` 可显式跳过确认过的行。
  *
- * 用法：node run-hygiene.js [--by-file] [--dir <模式>]… [--tighten] [--strict]   出口码：默认 0；--strict 有发现即 1。
+ * 用法：node run-hygiene.js [--by-file] [--dir <模式>]… [--tighten] [--strict]
+ *                      [--semantic] [--semantic-only] [--strict-semantic]
+ *   出口码：默认 0；--strict 有契约 / 内容发现即 1；--strict-semantic 有**高置信**语义发现即 1。
  */
 "use strict";
 const fs = require("fs");
@@ -21,8 +25,14 @@ const BASELINE = path.join(ROOT, "tests", "comment-baseline.json");
 const HEADER_SLOTS = ["目的", "管", "不管", "联动"];
 const ITEM_SLOTS = ["目的", "参数", "返回", "错误", "约束"];
 /* 词表只收**叙事性**词（讲来历、显式待办）。领域词不进：`临时 agent`、`后续片段`、`本地遗留`、
- * `暂未暴露` 都是描述当前状态的说法，收进来只会制造误报（迁移时实测过）。 */
+ * `暂未暴露` 都是描述当前状态的说法，收进来只会制造误报。 */
 const COMMENT_FORBIDDEN = ["曾经", "原来", "旧版", "旧实现", "改成", "先是", "后来", "以前", "与旧逻辑", "TODO", "FIXME", "待补"];
+/* 语义卫生（只报）的词表：**与上面的门禁词表分开**。上面的词表只作用于 Rust `//` 行内注释，
+ * 改动它会动 tests/comment-baseline.json；这里扩的是全仓报告，不建基线、不进 T0。
+ * 强词 = 大概率是旧实现 / 旧格式叙述；弱词 = 也可能描述当前操作或当前效果，必须人看。hygiene-ignore */
+const STRONG_WORDS = ["曾经", "旧版", "旧实现", "旧格式", "旧会话", "旧字段", "旧形态", "旧上限", "旧输出", "旧名字", "旧记录", "旧逻辑", "迁移期", "承接原", "已不再"];
+const WEAK_WORDS = ["旧资产", "原来", "改成", "先是", "后来", "以前", "不再有", "TODO", "FIXME", "待补"];
+const SEMANTIC_EXTS = new Set(["md", "rs", "js", "mjs", "cjs", "yaml", "yml", "toml", "sh", "py", "bat", "cmd", "cpp", "css", "html"]);
 const LEDGERS = ["tests/gaps.yaml", "tests/cross-platform/gaps.yaml", "tests/windows/gaps.yaml", "tests/linux/gaps.yaml", "tests/macos/gaps.yaml"];
 
 const RULES = {
@@ -57,15 +67,29 @@ function scanRustLines(text) {
   const lines = text.split(/\r?\n/);
   const blockAt = [];
   const isComment = new Array(lines.length).fill(false);
+  const comments = [];
+  const blockTexts = [];
   let mode = "code";
   let hashes = 0;
+  let blockStart = 0;
+  let blockBuf = "";
   for (let n = 0; n < lines.length; n++) {
     const s = lines[n];
     if (mode === "code" && /^\s*\/\//.test(s)) isComment[n] = true;
     let i = 0;
     while (i < s.length) {
       if (mode === "block") {
-        if (s.startsWith("*/", i)) { mode = "code"; i += 2; } else i++;
+        const close = s.indexOf("*/", i);
+        if (close >= 0) {
+          blockBuf += s.slice(i, close);
+          blockTexts.push({ line: blockStart, text: blockBuf });
+          mode = "code";
+          i = close + 2;
+          blockBuf = "";
+        } else {
+          blockBuf += s.slice(i) + "\n";
+          i = s.length;
+        }
         continue;
       }
       if (mode === "str" || mode === "char") {
@@ -80,8 +104,18 @@ function scanRustLines(text) {
         i++;
         continue;
       }
-      if (s.startsWith("//", i)) break;
-      if (s.startsWith("/*", i)) { blockAt.push(n + 1); mode = "block"; i += 2; continue; }
+      if (s.startsWith("//", i)) {
+        comments.push({ line: n + 1, text: s.slice(i) });
+        break;
+      }
+      if (s.startsWith("/*", i)) {
+        blockAt.push(n + 1);
+        blockStart = n + 1;
+        blockBuf = "";
+        mode = "block";
+        i += 2;
+        continue;
+      }
       if (s[i] === '"') { mode = "str"; i++; continue; }
       if (s[i] === "r") {
         let j = i + 1;
@@ -101,7 +135,8 @@ function scanRustLines(text) {
       i++;
     }
   }
-  return { blockAt: blockAt, isComment: isComment };
+  if (mode === "block") blockTexts.push({ line: blockStart, text: blockBuf });
+  return { blockAt: blockAt, isComment: isComment, comments: comments, blockTexts: blockTexts };
 }
 
 function scanCommentContract() {
@@ -174,6 +209,257 @@ function scanCommentContract() {
     if (run) closeRun(false);
   }
   return { findings: findings, byFileRule: toByFileRule(findings) };
+}
+
+/** 文件扩展名（小写，不含点）；没有扩展名 = 空串。 */
+function extOf(file) {
+  const m = String(file).match(/\.([A-Za-z0-9]+)$/);
+  return m ? m[1].toLowerCase() : "";
+}
+
+/** 语义卫生的取文本规则：Markdown 取正文（跳围栏），源码 / 配置 / 脚本取注释。
+ *  返回 [{line, text}]；line 从 1 起。 */
+function semanticTexts(text, ext) {
+  const lines = String(text).split(/\r?\n/);
+  if (ext === "md") {
+    const out = [];
+    let fence = false;
+    lines.forEach((line, n) => {
+      const t = line.trim();
+      if (/^(```|~~~)/.test(t)) { fence = !fence; return; }
+      if (!fence) out.push({ line: n + 1, text: line });
+    });
+    return out;
+  }
+  if (ext === "rs") {
+    const lex = scanRustLines(text);
+    return lex.comments.concat(lex.blockTexts).sort((a, b) => a.line - b.line);
+  }
+  if (["js", "mjs", "cjs", "cpp", "css"].includes(ext)) return jsCommentTexts(text);
+  if (["yaml", "yml", "toml", "sh", "py"].includes(ext)) {
+    const out = [];
+    lines.forEach((line, n) => {
+      const t = line.trim();
+      if (t.startsWith("#")) out.push({ line: n + 1, text: t });
+    });
+    return out;
+  }
+  if (["bat", "cmd"].includes(ext)) {
+    const out = [];
+    lines.forEach((line, n) => {
+      const t = line.trim();
+      if (/^(rem\b|::)/i.test(t)) out.push({ line: n + 1, text: t });
+    });
+    return out;
+  }
+  if (ext === "html") {
+    const out = [];
+    let inComment = false;
+    lines.forEach((line, n) => {
+      const t = line.trim();
+      if (t.includes("<!--")) inComment = true;
+      if (inComment) out.push({ line: n + 1, text: line });
+      if (t.includes("-->")) inComment = false;
+    });
+    return out;
+  }
+  return [];
+}
+
+/** JS / TS / C++ / CSS 的注释文本：字符串（含模板串）里的 // 不算注释；块注释跨行累积。 */
+function jsCommentTexts(text) {
+  const lines = String(text).split(/\r?\n/);
+  const out = [];
+  let mode = "code";
+  let quote = "";
+  let blockLine = 0;
+  let blockBuf = "";
+  for (let n = 0; n < lines.length; n++) {
+    const s = lines[n];
+    let i = 0;
+    while (i < s.length) {
+      if (mode === "block") {
+        const close = s.indexOf("*/", i);
+        if (close >= 0) {
+          blockBuf += s.slice(i, close);
+          out.push({ line: blockLine, text: blockBuf });
+          mode = "code";
+          i = close + 2;
+          blockBuf = "";
+        } else {
+          blockBuf += s.slice(i) + "\n";
+          i = s.length;
+        }
+        continue;
+      }
+      if (mode === "str") {
+        if (s[i] === "\\") { i += 2; continue; }
+        if (s[i] === quote) { mode = "code"; i++; continue; }
+        i++;
+        continue;
+      }
+      if (s.startsWith("//", i)) { out.push({ line: n + 1, text: s.slice(i) }); break; }
+      if (s.startsWith("/*", i)) { blockLine = n + 1; blockBuf = ""; mode = "block"; i += 2; continue; }
+      if (s[i] === '"' || s[i] === "'" || s[i] === "`") { quote = s[i]; mode = "str"; i++; continue; }
+      i++;
+    }
+  }
+  if (mode === "block") out.push({ line: blockLine, text: blockBuf });
+  return out;
+}
+
+/** 一行文本里的语义词：强词 / 弱词 / 批次 20x。返回 null = 没有可疑词。 */
+function semanticLineHits(text) {
+  const flat = String(text).replace(/\s+/g, " ");
+  const strong = STRONG_WORDS.filter((w) => flat.includes(w));
+  const batches = flat.match(/批次\s*20[ab]/g) || [];
+  const weak = WEAK_WORDS.filter((w) => flat.includes(w));
+  const words = [...new Set([...strong, ...batches, ...weak])];
+  if (!words.length) return null;
+  return { level: strong.length || batches.length ? "strong" : "weak", words: words };
+}
+
+/** 一段文本的语义发现：同一行多个词合成一条；hygiene-ignore 的整行 / 整块跳过。 */
+function semanticHits(text, ext) {
+  const byLine = new Map();
+  let ignored = 0;
+  for (const item of semanticTexts(text, ext)) {
+    if (item.text.includes("hygiene-ignore")) { ignored++; continue; }
+    const hit = semanticLineHits(item.text);
+    if (!hit) continue;
+    const prev = byLine.get(item.line);
+    if (prev) {
+      prev.words = [...new Set([...prev.words, ...hit.words])];
+      if (hit.level === "strong") prev.level = "strong";
+      prev.text += " " + item.text;
+    } else {
+      byLine.set(item.line, {
+        line: item.line,
+        level: hit.level,
+        words: hit.words,
+        text: String(item.text).replace(/\s+/g, " ").trim(),
+      });
+    }
+  }
+  return { findings: [...byLine.values()].sort((a, b) => a.line - b.line), ignored: ignored };
+}
+
+const SEMANTIC_SKIP_DIRS = new Set(["target", ".git", "node_modules", "platform", ".tools", ".home", "session", "work", "dist", "userdata"]);
+
+/** 受控文件清单；取不到 git 时返回 null（调用方降级到目录遍历）。 */
+function trackedTextFiles() {
+  try {
+    return git(["ls-files"]).split(/\r?\n/).filter((f) => f && SEMANTIC_EXTS.has(extOf(f)));
+  } catch (e) {
+    return null;
+  }
+}
+
+/** git 不可用时的降级：从仓库根遍历文本文件，跳过产物、用户数据与依赖目录。 */
+function fallbackTextFiles() {
+  const out = [];
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (!SEMANTIC_SKIP_DIRS.has(e.name)) walk(p);
+        continue;
+      }
+      if (SEMANTIC_EXTS.has(extOf(e.name))) out.push(path.relative(ROOT, p).replace(/\\/g, "/"));
+    }
+  };
+  walk(ROOT);
+  return out;
+}
+
+/** 语义卫生（只报）：全仓 Markdown 正文 + 源码 / 配置 / 脚本注释里的历史或待办措辞。
+ *  不建基线、不进 T0；hygiene-ignore 是显式的「已确认」出口。 */
+function semanticFindings() {
+  let files = trackedTextFiles();
+  let degraded = null;
+  if (files === null) {
+    files = fallbackTextFiles();
+    degraded = "取不到 git 文件清单，只扫源码树（target / .git / 用户数据已跳过）";
+  }
+  const findings = [];
+  let ignored = 0;
+  let unreadable = 0;
+  for (const rel of files) {
+    let text;
+    try {
+      text = fs.readFileSync(path.join(ROOT, rel), "utf8");
+    } catch (e) {
+      unreadable++;
+      continue;
+    }
+    const res = semanticHits(text, extOf(rel));
+    ignored += res.ignored;
+    for (const f of res.findings) findings.push({ file: rel, ...f });
+  }
+  findings.sort((a, b) => {
+    if (a.level !== b.level) return a.level === "strong" ? -1 : 1;
+    if (a.file !== b.file) return a.file < b.file ? -1 : 1;
+    return a.line - b.line;
+  });
+  return { findings: findings, ignored: ignored, unreadable: unreadable, degraded: degraded };
+}
+
+/** 语义卫生的可执行自测（纯文本，不读盘）：围栏 / 字符串 / 注释 / 抑制 / 去重 / 分级。 */
+function semanticSelfTest() {
+  const bad = [];
+  const eq = (name, got, want) => {
+    if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(name + "：期望 " + JSON.stringify(want) + "，实际 " + JSON.stringify(got));
+  };
+  const hits = (text, ext) => semanticHits(text, ext).findings;
+  eq("MD 代码围栏跳过", hits("```\n曾经\n```\n", "md").length, 0);
+  eq("MD 正文命中", hits("正文曾经", "md")[0] && hits("正文曾经", "md")[0].words, ["曾经"]);
+  eq("Rust /// 命中", hits("/// 曾经\n", "rs")[0] && hits("/// 曾经\n", "rs")[0].words, ["曾经"]);
+  eq("Rust 字符串不命中", hits('let s = "曾经";', "rs").length, 0);
+  eq("Rust 行内命中", hits("let s = 1; // 旧实现", "rs")[0] && hits("let s = 1; // 旧实现", "rs")[0].words, ["旧实现"]);
+  eq("Rust 块注释命中", hits("/* 旧版 */", "rs")[0] && hits("/* 旧版 */", "rs")[0].words, ["旧版"]);
+  eq("JS 字符串不命中", hits('const u = "http://x/曾经";', "js").length, 0);
+  eq("JS 行注释命中", hits("// 旧格式\n", "js")[0] && hits("// 旧格式\n", "js")[0].words, ["旧格式"]);
+  eq("YAML 值不命中", hits("desc: 曾经\n", "yaml").length, 0);
+  eq("YAML 注释命中", hits("# 旧版\n", "yaml")[0] && hits("# 旧版\n", "yaml")[0].words, ["旧版"]);
+  eq("hygiene-ignore 跳过", hits("曾经 hygiene-ignore", "md").length, 0);
+  eq("同行去重", hits("曾经 旧版", "md").length, 1);
+  eq("弱词分级", hits("改成", "md")[0] && hits("改成", "md")[0].level, "weak");
+  eq("批次 20a 识别", hits("批次 20a", "md")[0] && hits("批次 20a", "md")[0].words, ["批次 20a"]);
+  return bad;
+}
+
+/** 语义小节的文本行；findings 已按 --dir 过滤。 */
+function semanticReportLines(sem, findings, all) {
+  const out = [];
+  const strong = findings.filter((f) => f.level === "strong");
+  const weak = findings.filter((f) => f.level === "weak");
+  out.push("== 语义卫生（只报，不进 T0、不进棘轮） ==");
+  if (sem.degraded) out.push("  [降级] " + sem.degraded);
+  const extra = [];
+  if (sem.ignored) extra.push("已按 hygiene-ignore 跳过 " + sem.ignored + " 行");
+  if (sem.unreadable) extra.push(sem.unreadable + " 个文件读不了");
+  out.push("  高置信 " + strong.length + " 处 / 需判断 " + weak.length + " 处" + (extra.length ? "；" + extra.join("；") : ""));
+  if (!findings.length) {
+    out.push("  没有发现");
+    return out;
+  }
+  const wordCount = (arr) => {
+    const m = new Map();
+    for (const f of arr) for (const w of f.words) m.set(w, (m.get(w) || 0) + 1);
+    return [...m.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).map(([w, n]) => w + " " + n).join(" | ");
+  };
+  if (strong.length) out.push("  高置信词：" + wordCount(strong));
+  if (weak.length) out.push("  需判断词：" + wordCount(weak));
+  out.push("");
+  const emit = (arr, cap, label) => {
+    for (const f of arr.slice(0, cap)) out.push("  " + f.file + ":" + f.line + "  [" + f.words.join("、") + "]  " + f.text);
+    if (arr.length > cap) out.push("  …（" + label + "其余 " + (arr.length - cap) + " 处，--semantic 展开）");
+  };
+  emit(strong, all ? strong.length : 30, "高置信");
+  if (weak.length) emit(weak, all ? weak.length : 5, "需判断");
+  out.push("");
+  out.push("  提示：这些是「可疑」不是「违规」；确认是当前语义的行加 hygiene-ignore，其余按当前状态改写。");
+  return out;
 }
 
 function toByFileRule(findings) {
@@ -382,6 +668,9 @@ function main() {
   const dirs = [];
   for (let i = 0; i < argv.length; i++) if (argv[i] === "--dir" && argv[i + 1]) dirs.push(argv[i + 1]);
   const byFileView = argv.includes("--by-file");
+  const semanticAll = argv.includes("--semantic");
+  const semanticOnly = argv.includes("--semantic-only");
+  const strictSemantic = argv.includes("--strict-semantic");
   const scan = scanCommentContract();
   const inDirs = dirMatcher(dirs);
   const findings = scan.findings.filter((f) => inDirs(f.file));
@@ -416,6 +705,13 @@ function main() {
       + findings.length + " 处。" + (baselineAll ? "（收紧前 " + Object.keys(baselineAll).length + " 个文件）" : ""));
     console.log(lines.join("\n"));
     return 0;
+  }
+
+  if (semanticOnly) {
+    const sem = semanticFindings();
+    const semFiltered = sem.findings.filter((f) => inDirs(f.file));
+    console.log(semanticReportLines(sem, semFiltered, true).join("\n"));
+    return strictSemantic && semFiltered.some((f) => f.level === "strong") ? 1 : 0;
   }
 
   const byRule = new Map();
@@ -459,10 +755,16 @@ function main() {
   if (!content.length) lines.push("  没有发现");
   for (const c of content) lines.push("  [" + c.kind + "] " + c.text);
 
+  const sem = semanticFindings();
+  const semFiltered = sem.findings.filter((f) => inDirs(f.file));
+  lines.push("");
+  lines.push(...semanticReportLines(sem, semFiltered, semanticAll));
+
   console.log(lines.join("\n"));
+  if (strictSemantic && semFiltered.some((f) => f.level === "strong")) return 1;
   if (argv.includes("--strict") && (findings.length || content.length)) return 1;
   return 0;
 }
 
 if (require.main === module) process.exit(main());
-module.exports = { scanCommentContract, compareContract, ratchetSelfTest, commentLexerSelfTest, deletedGapIds, contentFindings, RULES, LEDGERS };
+module.exports = { scanCommentContract, compareContract, ratchetSelfTest, commentLexerSelfTest, semanticSelfTest, semanticFindings, semanticHits, deletedGapIds, contentFindings, RULES, LEDGERS };
