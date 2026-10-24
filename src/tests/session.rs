@@ -1776,7 +1776,7 @@ pub(crate) fn continue_hint_is_derived_from_the_session_state() {
 }
 
 /// 目的：内容类系统提示（notice）占一行、自己成一条回复，但**不进模型上下文**。
-/// 判据：同一段转录加一条 notice，重建出的对话条数与角色序列与不加时完全一致。
+/// 约束：同一段转录加一条 notice，重建出的对话条数与角色序列与不加时完全一致。
 #[test]
 pub(crate) fn notice_lines_stay_out_of_the_model_dialogue() {
     use crate::capabilities::conductor::service::replay_dialogue;

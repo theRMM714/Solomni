@@ -750,19 +750,19 @@ impl ConductorHandle {
         self.bus.push(sid, &events);
     }
 
-    /// 机制往一个会话记一条**可回放通知**：落盘（它进历史重放）+ 推它的事件台（在场的前端立刻看到）。
-    /// 代理转达的来源记录与控制记录走这条——两条都要"既留得下、也看得见"。
+    /// 机制往一个会话记一条**内容类提示**：能行化就行化（有 id、可回档），否则退回瞬时提示；
+    /// 落盘（它进历史重放）+ 推它的事件台（在场的前端立刻看到）——代理转达与控制记录走这条。
     pub(crate) fn record_notice(&self, sid: &str, ev: SessionEvent) {
+        let SessionEvent::Notice(text) = ev else {
+            return;
+        };
         let target = sid.to_string();
-        let mut batch = vec![ev.clone()];
-        let ok = self
-            .call(move |core| {
-                core.record_events(&target, &mut batch);
-                Ok(())
-            })
-            .is_ok();
-        if ok {
-            self.bus.push(sid, std::slice::from_ref(&ev));
+        if let Ok(events) = self.call(move |core| {
+            let mut events = core.notice_row(&target, &text);
+            core.record_events(&target, &mut events);
+            Ok(events)
+        }) {
+            self.bus.push(sid, &events);
         }
     }
 

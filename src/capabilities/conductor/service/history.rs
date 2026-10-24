@@ -302,6 +302,19 @@ impl Conductor {
         }
     }
 
+    /// 目的：把一条内容类系统提示记成**转录行**（有 id、可回档/折叠）；返回要外送的事件。
+    /// 约束：只在会话对象在核心表里时分配行 id；生成中的会话被取走、没有计数器可分配，
+    ///   这时如实退回瞬时提示（界面照样看得见，只是不可回档）。
+    pub(crate) fn notice_row(&mut self, sid: &str, text: &str) -> Vec<SessionEvent> {
+        let mut out = Vec::new();
+        match self.sessions.get_mut(sid) {
+            Some(Session::Single(s)) => out.extend(s.note_notice(text)),
+            Some(Session::Collab(c)) => c.notice(text, &mut |e| out.push(e)),
+            None => out.push(SessionEvent::Notice(text.to_string())),
+        }
+        out
+    }
+
     /// 增量落盘手柄：交给工作线程，按"一次模型调用"的粒度落盘（见 `Persister`）。
     pub(crate) fn persister(&self, sid: &str) -> Persister {
         Persister {

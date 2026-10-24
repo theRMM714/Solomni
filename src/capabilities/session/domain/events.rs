@@ -330,8 +330,8 @@ impl LineView {
         }
     }
 
-    /// **内容类系统提示**：转录里是一等行（有 id、可回档/折叠、能删除），**不进模型上下文**。
-    /// 与 `system` 的区别：`system` 是模型上下文里的系统消息；`notice` 只给人看。
+    /// 目的：构造一条**内容类系统提示**行（转录一等行，**不进模型上下文**）。
+    /// 约束：与 `system` 的区别——`system` 是上下文里的系统消息；`notice` 只给人看。
     pub fn notice(line: String) -> LineView {
         LineView {
             kind: "notice".to_string(),

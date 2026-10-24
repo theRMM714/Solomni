@@ -121,7 +121,7 @@ impl Conductor {
                     } else {
                         crate::capabilities::session::api::interrupted_note(&err)
                     };
-                    out.push(SessionEvent::Notice(note));
+                    out.extend(self.notice_row(sid, &note));
                     break;
                 }
             };
@@ -167,8 +167,9 @@ impl Conductor {
             // 安全网：提醒/重问必须有终点（计数有上限，这里再兜一层，防实现走偏时空转）。
             guard += 1;
             if guard > 500 {
-                out.push(SessionEvent::Notice(
-                    "[警告] 讨论推进次数异常（已到安全上限），已停下等用户处理".to_string(),
+                out.extend(self.notice_row(
+                    sid,
+                    "[警告] 讨论推进次数异常（已到安全上限），已停下等用户处理",
                 ));
                 break;
             }
@@ -318,10 +319,8 @@ impl Conductor {
                     });
                     todo.push((node, child, objective));
                 }
-                Err(e) => out.push(SessionEvent::Notice(format!(
-                    "[错误] 节点 {} 派发失败：{}",
-                    node, e
-                ))),
+                Err(e) => out
+                    .extend(self.notice_row(sid, &format!("[错误] 节点 {} 派发失败：{}", node, e))),
             }
         }
         (out, todo)

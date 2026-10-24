@@ -559,13 +559,12 @@ impl Conductor {
             run: RunState::Active,
         };
         self.workspace.prepare(name, &[])?;
-        let session = self.build_proxy(&meta)?;
+        let mut session = self.build_proxy(&meta)?;
         let mut events = session.open();
         // 授予事实既是 meta 的 `delegation`（可重建），也留一条**可回放记录**：
         // 打开这条会话的人应当看得见"决定权是整块交出去的"，而不是只能去读 meta。
-        events.push(SessionEvent::Notice(
-            "[授予] 用户选定了代理形态——决定权整块交给核心（全权）。".to_string(),
-        ));
+        events
+            .extend(session.note_notice("[授予] 用户选定了代理形态——决定权整块交给核心（全权）。"));
         self.history.create(&meta)?;
         self.sessions
             .insert(name.to_string(), Session::Single(session));

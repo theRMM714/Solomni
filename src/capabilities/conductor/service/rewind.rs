@@ -432,8 +432,8 @@ impl Conductor {
         }
     }
 }
-/// 把转录事件还原成（对话, 每行历史长度, 每行回复号, 压缩点）——单 agent 与代理会话**共用同一件**。
-/// 两处不各拼一遍：重建必须与实时逐条一致（见 `reply_msgs` 与 session-model.md）。
+/// 目的：把转录事件还原成（对话, 每行历史长度, 每行回复号, 压缩点）——单 agent 与代理会话共用同一件。
+/// 约束：重建必须与实时逐条一致（见 `reply_msgs` 与 session-model.md）。
 pub(crate) fn replay_dialogue(
     events: &[serde_json::Value],
     mode: crate::capabilities::llm::api::ToolMode,
