@@ -434,7 +434,7 @@ impl Conductor {
 }
 /// 把转录事件还原成（对话, 每行历史长度, 每行回复号, 压缩点）——单 agent 与代理会话**共用同一件**。
 /// 两处不各拼一遍：重建必须与实时逐条一致（见 `reply_msgs` 与 session-model.md）。
-fn replay_dialogue(
+pub(crate) fn replay_dialogue(
     events: &[serde_json::Value],
     mode: crate::capabilities::llm::api::ToolMode,
 ) -> (
@@ -493,9 +493,14 @@ fn replay_dialogue(
         let line = l.get("line").and_then(|x| x.as_str()).unwrap_or("");
         // **读结构化字段**（种类 / 系统标记 / 正文），不从正文里抠 [标签]。
         let kind = l.get("kind").and_then(|x| x.as_str()).unwrap_or("");
+        // **内容类系统提示**只给人看：不进对话，但仍占一行（marks / line_reply 与转录行一一对应）。
+        if kind == "notice" {
+            line_reply.push(l.get("id").and_then(|x| x.as_u64()).unwrap_or(0));
+            marks.push(history.len());
+            i += 1;
         // 系统注入的行按它该有的角色还原：提醒/边界是 system，
         // **派发行**（`task`）是 user——否则重建出来的请求又变成一条 user 都没有，供应商照样拒收。
-        if kind == "system" || l.get("system").and_then(|x| x.as_bool()).unwrap_or(false) {
+        } else if kind == "system" || l.get("system").and_then(|x| x.as_bool()).unwrap_or(false) {
             let is_task = l.get("task").and_then(|x| x.as_bool()).unwrap_or(false);
             history.push(if is_task {
                 Msg::user(line.to_string())

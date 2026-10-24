@@ -330,6 +330,16 @@ impl LineView {
         }
     }
 
+    /// **内容类系统提示**：转录里是一等行（有 id、可回档/折叠、能删除），**不进模型上下文**。
+    /// 与 `system` 的区别：`system` 是模型上下文里的系统消息；`notice` 只给人看。
+    pub fn notice(line: String) -> LineView {
+        LineView {
+            kind: "notice".to_string(),
+            line,
+            ..Default::default()
+        }
+    }
+
     /// **讨论的轮次分隔行**：正文 = 轮次号（结构化，不再从"轮次 2"里抠数字）。
     pub fn round(n: usize) -> LineView {
         LineView {

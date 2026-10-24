@@ -267,6 +267,8 @@ pub(crate) mod guest_job;
 mod history;
 pub mod proxy;
 mod rewind;
+#[cfg(test)]
+pub(crate) use rewind::replay_dialogue;
 mod turn;
 mod work;
 #[cfg(test)]

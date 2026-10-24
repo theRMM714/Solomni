@@ -550,6 +550,13 @@ impl CollabSession {
         v
     }
 
+    /// 目的：记一条**内容类系统提示**——转录里是一等行（有 id、可回档/折叠、能删除），**不进模型上下文**。
+    /// 约束：自己成一条回复（reply = 自己的 id），回档到它按回复原子截断。
+    pub(crate) fn notice(&mut self, text: &str, sink: &mut dyn FnMut(SessionEvent)) {
+        let line = self.view(LineView::notice(text.to_string()));
+        sink(SessionEvent::Transcript(vec![line]));
+    }
+
     /// 名单里的 agent 名（顺序即名单）。
     pub(crate) fn names(&self) -> Vec<String> {
         self.roster.iter().map(|a| a.name.clone()).collect()
@@ -562,7 +569,7 @@ impl CollabSession {
         let roots = self.sandboxes.ref_roots();
         let task = crate::capabilities::prompt::api::rewrite(task, None, &roots);
         if task.trim().is_empty() {
-            sink(SessionEvent::Notice("[取消] 需求为空".into()));
+            self.notice("[取消] 需求为空", sink);
             sink(SessionEvent::Ended);
             self.done = true;
             return;
