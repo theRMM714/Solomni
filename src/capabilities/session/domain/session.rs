@@ -466,7 +466,6 @@ impl AgentSession {
 
     /// 目的：注入一条**内容类系统提示**——转录里是一等行（有 id、可回档/折叠、能删除），**不进模型上下文**。
     /// 约束：自己成一条回复（reply = 自己的 id），回档到它按回复原子截断。
-    #[allow(dead_code)] // B3 的转换点：单 agent / 代理的内容提示改走它（本阶段先立模型）。
     pub fn note_notice(&mut self, text: &str) -> Vec<SessionEvent> {
         let v = self.notice_line(text);
         vec![SessionEvent::Transcript(vec![v])]
