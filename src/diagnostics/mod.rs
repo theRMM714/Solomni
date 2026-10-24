@@ -165,23 +165,6 @@ pub(crate) fn doctor_json_with(
     doc
 }
 
-/// 目的：给 `--provision` 的补齐作业装配 vm 能力面（guest-runtime 的运行期编排要起 guest）。
-/// 约束：只用于补齐——共享档用内部 `none`（无挂载、无同步），引擎路径由编排条目自己给。
-fn provisioning_vm(
-    root: &std::path::Path,
-) -> std::sync::Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync> {
-    std::sync::Arc::new(crate::capabilities::vm::service::VmService::new(
-        std::sync::Arc::new(
-            crate::capabilities::vm::detail::QemuEngine::new().with_book(
-                crate::kernel::detail::procs::ProcessBook::open(&root.join(".home")),
-            ),
-        ),
-        vec![std::sync::Arc::new(
-            crate::capabilities::vm::detail::NoneShare::new(),
-        )],
-    ))
-}
-
 /// 目的：虚拟机档构建用的 vm 能力面：**只持挂载式**共享档（virtiofs / 9p / smb）。
 /// 参数：root = 产品根。
 /// 约束：模块目录是读写挂进去的，产物才能落回宿主那份——构建只持挂载式用户档；
@@ -231,8 +214,13 @@ pub fn provision(root: &std::path::Path, args: &[String]) -> i32 {
             );
             return 2;
         }
-        let p =
-            crate::capabilities::provision::ProvisionService::with_vm(root, provisioning_vm(root));
+        // 与网页补齐同一条装配：只持内部 `none`，不拿会话 vm 顶替。
+        let p = crate::capabilities::provision::ProvisionService::with_vm(
+            root,
+            crate::provision_vm(crate::kernel::detail::procs::ProcessBook::open(
+                &root.join(".home"),
+            )),
+        );
         return match p.ensure(&ids, &mut |line| eprintln!("[依赖补齐] {}", line)) {
             Ok(()) => 0,
             Err(e) => {

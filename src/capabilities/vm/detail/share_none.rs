@@ -1,7 +1,7 @@
 //! 目的：ShareBackend 的内部 `none` 实现——供给编排只经 QGA 在 guest 里装东西，不需要挂载或同步。
 //! 管：给引擎一个空共享计划；不建挂载点、不搬文件。
 //! 不管：命令通道与 QGA 细节（detail/qemu.rs）、用户共享（share_9p / virtiofs / smb）。
-//! 联动：实现 ports::ShareBackend；由 `--provision` 的组合根构造并显式指定，不参与用户选档。
+//! 联动：实现 ports::ShareBackend；由组合根的**补齐面**（网页补齐 / `--provision`）构造并显式指定，不参与用户选档。
 
 use crate::capabilities::vm::domain::guest::{GuestImage, GuestMount};
 use crate::capabilities::vm::ports::{NoShareGuard, ShareBackend, ShareGuard, SharePlan};
