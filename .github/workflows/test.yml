@@ -8,9 +8,11 @@
 # 真机围栏、TLS 出站）；文档/结构审查在 CI 里跑是为了合并闸门，不是补平台结论。inputs.clean=true 跳过缓存，用于「干净机器」验收。契约见 docs/testing/execution-ci.md。
 #
 # job 结构：平台相关的是 quality（平台门禁 + 单元 + 探针 + 前端冒烟）与 e2e（L4 端到端）；
-# 平台无关的是 changes（分流）、docs（文档审查）、structure（结构审查）与 publish-report（汇总发布）。
+# 平台无关的是 changes（分流）、docs（文档审查）、structure（结构审查）、gate（验收闸门）与 publish-report（汇总发布）。
 # 有代码变更 → quality / e2e；有文档变更 → docs；structure 始终跑（代码或文档变更都可能破坏代码↔文档结构）。
-# 报告统一到 ci-report：runs/structure、runs/docs、runs/<os>。
+# gate 汇总四个 job 的结果，是规则集里唯一代表代码/文档验收的必填检查：quality / e2e 是矩阵 job，被 job 级 if 跳过时
+# 矩阵不展开，只报一条名字带字面量 ${{ matrix.os }} 的 skipped，永远对不上按平台名配置的 required context。
+# 报告统一到 ci-report：runs/structure、runs/docs、runs/<os>；gate 只做闸门，不产报告。
 # changes 只是路由，不要设为 required（卡住不应阻塞合并）；也不要用 workflow 级 paths-ignore（required check 会永远 pending）。
 name: 测试
 
@@ -292,6 +294,48 @@ jobs:
             target/e2e-report.json
             target/test-logs/
           if-no-files-found: ignore
+
+  gate:
+    name: 验收闸门
+    # 规则集里代表「代码/文档验收可合并」的必填检查：质量与单元 / 端到端是矩阵 job，被 job 级 if 跳过时矩阵不展开，
+    # 只报一条名字带字面量 ${{ matrix.os }} 的 skipped，按平台名配置的 required context 永远不会上报。
+    # 这里用固定名字汇总：跳过是否合法按变更分类判，不按「有没有跑」猜。
+    # always()：依赖失败或被跳过也要给出结论；取消的 job 结果不是 success，同样判失败，不让 skipped 冒充通过。
+    needs: [changes, docs, structure, quality, e2e]
+    if: ${{ always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 按变更类型核对四个 job
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          CODE_CHANGED: ${{ needs.changes.outputs.code_changed }}
+          DOCS_CHANGED: ${{ needs.changes.outputs.docs_changed }}
+          DOCS: ${{ needs.docs.result }}
+          STRUCTURE: ${{ needs.structure.result }}
+          QUALITY: ${{ needs.quality.result }}
+          E2E: ${{ needs.e2e.result }}
+        run: |
+          set -euo pipefail
+          failed=0
+          # 只有「本次变更本来就不跑这个 lane」才允许 skipped；其余 skipped（取消、异常）都算失败。
+          require() {
+            echo "- $1：$2（允许跳过：$3）" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$2" = "success" ]; then return 0; fi
+            if [ "$2" = "skipped" ] && [ "$3" = "yes" ]; then return 0; fi
+            echo "::error::$1 未通过：result=$2"
+            failed=1
+          }
+          # 分类字段缺失 / 取不到 diff 时按「有变更」处理，与 job 级兜底一致；changes 自身只是路由，不设闸。
+          if [ "${CHANGES}" != "success" ]; then echo "::warning title=验收闸门::变更分流未成功，按全量兜底核对"; fi
+          if [ "${DOCS_CHANGED}" = "false" ]; then allow_docs=yes; else allow_docs=no; fi
+          if [ "${CODE_CHANGED}" = "false" ]; then allow_code=yes; else allow_code=no; fi
+          require "文档审查" "${DOCS}" "${allow_docs}"
+          require "结构审查" "${STRUCTURE}" no
+          require "质量与单元" "${QUALITY}" "${allow_code}"
+          require "端到端" "${E2E}" "${allow_code}"
+          if [ "${failed}" -ne 0 ]; then exit 1; fi
+          echo "GATE-OK"
 
   publish-report:
     name: 汇总并发布 ci-report

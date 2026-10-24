@@ -46,8 +46,8 @@
    git fetch origin main
    git switch -c <分支> origin/main
    ```
-   默认 `development`，并行任务用 `task/<简述>`；`main` 有分支保护，不直接提交、不 push。
-2. 空提交占位（合并用 squash，不会进主线）：
+   分支名用 `task/<简述>`；`main` 有分支保护，不直接提交、不 push。
+2. 空提交占位：
    ```sh
    git commit --allow-empty -m "chore: 开工 <任务>"
    git push -u origin <分支>
@@ -88,13 +88,13 @@
 3. 交用户确认（闸门 2）。
 4. 用户确认后缺口销账：`tests/gaps.yaml` 删已补条目，并按规则同步门户与现状描述；检查权威文档，删掉过期、临时和矛盾的说法。
 5. 把 PR 正文改成最终状态：做了什么 / 未做 / 风险，并写明验收证据（命令、成功标记、CI 的 `sha`）。
-6. 用户确认后，Ready 与合并由用户执行；agent 不自行 Ready、不自行合并。合并方式 squash，PR 标题即主线提交信息，必须能独立说明改了什么；合并后删任务分支。
+6. 用户确认后，Ready 与合并由用户执行；agent 不自行 Ready、不自行合并。PR 标题即主线提交信息，必须能独立说明本次任务主题；合并后删任务分支。
 
 ## 六、例外
 - 咨询 / 审查：只出结论，不建分支。
 
 ## 七、Git 与 CI
 
-- 硬规则见 `AGENTS.md` §七：`main` 保护、任务分支、用户 squash 合并、agent 不自行 Ready / 合并。
+- 硬规则见 `AGENTS.md` §七：`main` 保护、任务分支、agent 不自行 Ready / 合并。
 - 需要他平台或真机结论时，用 `gh workflow run test.yml --ref <分支>` 手动派发；触发时机、报告读取与 `sha` 比对一律以 [execution-ci.md](../testing/execution-ci.md) 为准。
-- 纯文档 PR 在 Ready 后走 `changes` + `docs` + `structure`：六个平台 job 跳过，报告写 `ci-report` 的 `runs/docs` / `runs/structure`；不要把文档审查或结构审查的结果当成三平台验收。
+- 纯文档 PR 在 Ready 后走 `changes` + `docs` + `structure` + `验收闸门`：平台 job 跳过（矩阵 job 跳过时不会展开，规则集不按平台名要求它们，见 [execution-ci.md](../testing/execution-ci.md) 的 CI 一节），报告写 `ci-report` 的 `runs/docs` / `runs/structure`；不要把文档审查或结构审查的结果当成三平台验收。

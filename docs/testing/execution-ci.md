@@ -213,7 +213,7 @@ PR 验收 PR head 提交（`SOURCE_SHA`），报告的 `sha` 因此等于 PR 头
 矩阵 `windows-latest / ubuntu-latest / macos-latest`（`fail-fast: false`，一个平台失败不影响另外两个出结论）。
 来自 fork 的 PR 照跑测试，但不发布 `ci-report`（token 只读）。
 
-平台相关的 job 是 `quality` 与 `e2e`；`changes` / `docs` / `structure` / `publish-report` 是平台无关的 job：
+平台相关的 job 是 `quality` 与 `e2e`；`changes` / `docs` / `structure` / `gate` / `publish-report` 是平台无关的 job：
 
 | job | 跑什么 | 对应入口 |
 | --- | --- | --- |
@@ -222,6 +222,7 @@ PR 验收 PR head 提交（`SOURCE_SHA`），报告的 `sha` 因此等于 PR 头
 | `changes` | 判定 `code_changed` / `docs_changed`；从 base 取分类器副本，自测 + `include_str!/include_bytes!` 文档消费自检 | `node tests/ci-changes.mjs`（副本） |
 | `docs` | 有文档变更：文档审查（门户 / 链接 / 根文档路由） | `node run-tests.js --audit=docs` |
 | `structure` | 始终跑：结构审查（代码↔文档结构；文档与真相源比对 + 纯文本检查） | `node run-tests.js --audit=structure` |
+| `gate` | 汇总四个 job 的结果，规则集里唯一代表代码/文档验收的必填检查；不产报告 | 内联脚本读 `needs.*.result` |
 | `publish-report` | 汇总三条 lane 的报告并发布 `ci-report` | `tests/ci-merge.mjs` + `tests/ci-publish.mjs` |
 
 **三路分流**：`changes` 输出两个谓词：
@@ -229,18 +230,29 @@ PR 验收 PR head 提交（`SOURCE_SHA`），报告的 `sha` 因此等于 PR 头
 - `code_changed`：至少一个非叙述型文档路径（`docs/presentation/contracts.md` 也算代码——ROUTES 表由 `src/tests/routes.rs` 的 `include_str!` 消费）；
 - `docs_changed`：至少一个文档路径（`*.md`、`docs/**`、`LICENSE`；contracts.md 同时算文档，文档审查也查它的链接）。
 
-| PR | `docs` 文档审查 | `structure` 结构审查 | `quality` / `e2e` 三平台 |
-| --- | --- | --- | --- |
-| 纯文档 | 跑 | 跑 | 跳过 |
-| 纯代码 | 跳过 | 跑 | 跑 |
-| 混合 | 跑 | 跑 | 跑 |
+| PR | `docs` 文档审查 | `structure` 结构审查 | `quality` / `e2e` 三平台 | `gate` |
+| --- | --- | --- | --- | --- |
+| 纯文档 | 跑 | 跑 | 跳过（闸门判为合法） | 跑 |
+| 纯代码 | 跳过（闸门判为合法） | 跑 | 跑 | 跑 |
+| 混合 | 跑 | 跑 | 跑 | 跑 |
 
 **结构审查始终跑**：代码变更会破坏代码↔文档结构（新增 `src/**/*.rs` 没进 unit-map），文档变更同样会
 （删 unit-map 一行、删提示词键表一个键、从 `SYSTOOL.md` 删表名）。所以它不是“纯文档检查”，而是两边都要对得上的门禁。
 它平台无关，只跑一次，不放进三平台的 `quality`。
 
-`quality` / `e2e` / `docs` 用 **job 级 `if` 跳过**：GitHub 对 required check 的 `skipped` 计为 Success，PR 照常可合并。
+`quality` / `e2e` / `docs` 用 **job 级 `if` 跳过**，被跳过的 required check 计为 Success——但这条只对**非矩阵 job** 成立。
+`docs` 名字固定，跳过就上报一条同名的 skipped；`quality` / `e2e` 是矩阵 job，而 `jobs.<job_id>.if` 在**矩阵展开之前**求值
+（[GitHub 文档](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idif)），
+被跳过时不会展开成 `（windows-latest）` 等名字，只报一条名字带字面量 `${{ matrix.os }}` 的 skipped。按平台名配置的
+required context 因此永远停在 pending——纯文档 PR 会卡在「检查全绿/跳过，但不能合并」。所以平台 job 不进规则集，
+改由固定名字的 `gate` 汇总。
 **不要改成 workflow 级 `paths-ignore`**：workflow 不启动时 required context 根本不会上报，会永远停在 pending。
+
+`gate`（检查名 `验收闸门`）在非 Draft 的 run 里始终运行，只读四个 job 的 `needs.*.result`，按 `changes` 的分类结果判「跳过是否合法」：
+`code_changed=false` 时 `quality` / `e2e` 可以 skipped，`docs_changed=false` 时 `docs` 可以 skipped，`structure` 必须 success；
+其余任何 skipped / failure / cancelled 都判失败。`changes` 自身不参与判定（它只是路由；失败时下游已按全量兜底），
+所以分类器故障不会单独阻塞合并，但真跑挂了的 job 一定会被闸门拦下。`gate` 不写 `ci-report`，结论只在 PR 检查项里。
+
 `changes` 先跑分类器自测；全量入口的「变更分流自检」步骤也会跑同一个 `--self-test`。分类器**从 base 取副本**（`git show base:tests/ci-changes.mjs`）再执行——PR 改自己的分类脚本不能把自己判成全文档；base 还没有该文件时两路都跑。取不到 diff、空 diff 或未知路径时同样落回全量。
 新分类器写 `code_changed` / `docs_changed`；分类字段缺失（例如 base 的分类器还没有该键）时，下游条件按 `!= 'false'` 兜底为全量跑，不会出现启动期全跳过。
 
@@ -251,12 +263,12 @@ Draft 的 run 里依赖 job 都跳过，发布也跳过：不拿空产物发报�
 
 **报告统一到 `ci-report`**：该分支每次运行都会被重建为空分支再写入，只留最近一次运行。目录按 lane 分键：
 `runs/structure/`、`runs/docs/`、`runs/<os>/`。文档审查 / 结构审查与三平台共用同一个分支。
-纯代码 PR 没有 `runs/docs/`，纯文档 PR 没有平台目录；读的时候按存在的 key 比 `sha`。
+纯代码 PR 没有 `runs/docs/`，纯文档 PR 没有平台目录；读的时候按存在的 key 比 `sha`。`gate` 不写报告，别在 `ci-report` 里找它。
 
-> **规则集**：`development` 当前 required 的是六个平台 job；另需把 `文档审查` 与 `结构审查` 加进 required contexts。
-> `变更分流` 只是路由 job，**不要**设为 required——它卡住不应阻塞合并，
-> 真正的闸门是文档审查 / 结构审查 / 六个平台 job。纯文档 PR 的三平台是 skipped（Success），但结构审查与文档审查会跑；
-> 纯代码 PR 的文档审查是 skipped（Success），结构审查始终跑。本仓的规则集修改由用户在 GitHub 设置里执行。
+> **规则集**：`main` 的必填检查是 `文档审查`、`结构审查`、`验收闸门`。
+> **不要**把六个平台 job 或 `变更分流` 设为 required：平台 job 是矩阵 job，纯文档 PR 跳过时不会产出 `（windows-latest）` 这类名字（永远 pending）；
+> `变更分流` 只是路由 job，卡住不应阻塞合并。纯文档 PR 的平台 job 是 skipped，由 `验收闸门` 判为合法；
+> 纯代码 PR 的文档审查是 skipped，闸门同样只核对实际跑了的 job。本仓的规则集修改由用户在 GitHub 设置里执行。
 
 `workflow_dispatch` 的 `clean` 输入（`true`）跳过 `actions/cache` 按干净机器跑；PR 触发没有这个输入，缓存照用。缓存只覆盖**项目内**路径
 （`platform/ci/cargo`：借用 runner 自带 Rust 时的 `CARGO_HOME`，含 registry / git / 工具；以及 `target/debug`），
@@ -284,7 +296,7 @@ CI 借 runner 自带 Rust（`CARGO_HOME` / `SOLOMNI_CARGO_HOME` 指项目内）�
 
 - **依赖** → Draft 期手动派发一次（或直接 Ready 让 PR 跑），并按下面的读法比对 `sha`；
 - **不依赖** → 本地入口就是验收结论；PR 标 Ready 时会照跑，但不把 CI 的 `env-skip` 当通过。
-- **纯叙述型文档** → 不依赖本机之外：本地 `node run-tests.js --docs`（文档审查 + 结构审查）通过即可；PR 标 Ready 时走 `changes` + `docs` + `structure`，不产生三平台验收。
+- **纯叙述型文档** → 不依赖本机之外：本地 `node run-tests.js --docs`（文档审查 + 结构审查）通过即可；PR 标 Ready 时走 `changes` + `docs` + `structure` + `gate`，不产生三平台验收。
 - 用户明确要求派发时例外。
 
 **触发**：PR 标 Ready（或对 Ready 的 PR 推送）即自动跑；Draft 不跑。需要单独验证某个分支或干净机器时手动派发，
