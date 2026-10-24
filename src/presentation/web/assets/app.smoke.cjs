@@ -369,6 +369,45 @@ setTimeout(async () => {
       if (!noticeRow) loadErrors.push('notice 行检查：' + JSON.stringify(r));
     } catch (e) { loadErrors.push('notice 行检查失败：' + e.message); }
   }
+  // **弹层只在遮罩上按下并松开才关**：拖选跨出面板不关，点外面才关。
+  let modalDismiss = false;
+  if (!loadErrors.length) {
+    try {
+      const r = vm.runInNewContext(
+        "(function () {" +
+          " const root = document.querySelector('#modal-root');" +
+          " root.children.length = 0; root.className = 'modal-root';" +
+          " openModal('关闭判据', function () {});" +
+          " const overlay = root.children[0];" +
+          " const panel = overlay.children[0];" +
+          " const down = (overlay._h.pointerdown || [])[0];" +
+          " const click = (overlay._h.click || [])[0];" +
+          " if (!down || !click) return { bound: false };" +
+          " down({ target: panel }); click({ target: overlay });" +
+          " const kept = root.className.indexOf('open') >= 0;" +
+          " down({ target: overlay }); click({ target: overlay });" +
+          " const closed = root.className.indexOf('open') < 0;" +
+          " return { bound: true, kept: kept, closed: closed };" +
+          "})()",
+        sandbox
+      );
+      modalDismiss = r.bound && r.kept && r.closed;
+      if (!modalDismiss) loadErrors.push('弹层关闭判据：' + JSON.stringify(r));
+    } catch (e) { loadErrors.push('弹层关闭判据失败：' + e.message); }
+  }
+  // **回档是图标按钮**：有 aria-label / 有 SVG，且沿用 line-act 的 hover 显隐。
+  let rewindIcon = false;
+  if (!loadErrors.length) {
+    try {
+      const r = vm.runInNewContext(
+        "(function () { const b = rewindButton(4); return { cls: b.className, label: b.attrs && b.attrs['aria-label'], svg: b.children[0] && b.children[0].innerHTML }; })()",
+        sandbox
+      );
+      rewindIcon = String(r.cls).indexOf('icon-btn') >= 0 && String(r.cls).indexOf('line-act') >= 0
+        && r.label === '回档到此处' && String(r.svg).indexOf('<svg') === 0;
+      if (!rewindIcon) loadErrors.push('回档图标检查：' + JSON.stringify(r));
+    } catch (e) { loadErrors.push('回档图标检查失败：' + e.message); }
+  }
   // **改需求按钮**：没有能力位就根本不渲染（不是灰着）；会话工作时不可点。
   let taskButtonRule = false;
   if (!loadErrors.length) {
@@ -628,14 +667,14 @@ setTimeout(async () => {
   const ok = alerts.length === 0 && loadErrors.length === 0 && rendered && tierWarned && identityKept
     && pollConn === "已连接" && pollApplied && hydratedHistory && liveReplaced && liveClearedOnIdle && toolReasoningRendered
     && rewoundApplies && readonlyRule
-    && taskButtonRule && decisionCardRule && onlyLastStreams && lineRule && noticeRow && runningRules && atMenuRefetches
+    && taskButtonRule && decisionCardRule && onlyLastStreams && lineRule && noticeRow && modalDismiss && rewindIcon && runningRules && atMenuRefetches
     && wizardProxy && sessionNoteRule && historyRunTag && fenceBanner
     && consoleErrors.length === 0;
   if (!ok) {
     console.log("alerts（原生弹窗被调用的次数，应为 0）:", JSON.stringify(alerts));
     console.log("notice 渲染:", rendered, "| 虚拟机档不可用提示:", tierWarned, "| 身份标题保留:", identityKept);
     console.log("轮询状态点:", JSON.stringify(pollConn), "| 事件已应用:", pollApplied, "| 盘上转录已补:", hydratedHistory, "| 流式被替换:", liveReplaced, "| 空闲清理:", liveClearedOnIdle, "| 思维链:", toolReasoningRendered);
-    console.log("回档重置:", rewoundApplies, "| 只读会话:", readonlyRule, "| notice 行:", noticeRow);
+    console.log("回档重置:", rewoundApplies, "| 只读会话:", readonlyRule, "| notice 行:", noticeRow, "| 弹层判据:", modalDismiss, "| 回档图标:", rewindIcon);
     console.log("运行态归一（事件为准 / 快照只对账）:", runningRules, "| @ 菜单每次重拉:", atMenuRefetches);
     console.log("向导代理形态:", wizardProxy, "| 会话级说明:", sessionNoteRule, "| 侧栏运行态:", historyRunTag, "| 围栏横幅:", fenceBanner);
     console.log("应用侧 console.error:", JSON.stringify(consoleErrors.slice(0, 3)));

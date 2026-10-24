@@ -346,18 +346,17 @@ body {
 .history-kids { display: flex; flex-direction: column; gap: 4px; margin-left: 14px; padding-left: 6px; border-left: 1px solid var(--color-border); }
 /* 会话历史下方的一句话说明（与侧栏其它说明同款小字） */
 .panel-note { font-size: 11px; color: var(--color-text-dim); margin-top: 6px; }
+/* 行内动作：图标按钮（回档 / 恢复 / 撤回），hover 或键盘聚焦时浮现。 */
 .line-act {
-  margin-left: 8px; padding: 0 6px; font-size: 11px; line-height: 18px;
-  background: none; border: 1px solid var(--color-border); border-radius: 4px;
-  color: var(--color-text-dim); cursor: pointer; opacity: 0; transition: opacity var(--dur-fast) var(--ease-out);
+  margin-left: 6px; width: 24px; height: 24px; vertical-align: middle;
+  opacity: 0; transition: opacity var(--dur-fast) var(--ease-out);
 }
-.line:hover .line-act { opacity: 1; }
-.line-act:hover { border-color: var(--color-err); color: var(--color-err); }
-/* 删除：暗红主题，常态就可见（不再靠 hover 才浮现），一眼能认出来 */
-.line-act.danger {
-  opacity: 1; color: var(--color-danger-text); border-color: var(--color-danger-strong); background: var(--color-danger-weak);
+.line:hover .line-act, .line-act:focus-visible { opacity: 1; }
+.line-act:hover { color: var(--color-text); border-color: var(--color-border-strong); }
+/* 触屏没有 hover：动作常显，否则等于没有入口。 */
+@media (hover: none) {
+  .line-act { opacity: 1; }
 }
-.line-act.danger:hover { color: var(--color-text-inverse); background: var(--color-danger-strong); border-color: var(--color-danger-line); }
 /* ---- @ 引用菜单：输入区上方，只列已存在的文件 ---- */
 .at-menu {
   width: 100%; max-width: 760px; margin: 0 auto 8px;

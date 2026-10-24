@@ -546,6 +546,7 @@ async function deleteHistory(name) {
     }
     await refreshState();
     renderAll();
+    ui.toast('ok', '已删除会话：' + name);
   } catch (err) { notice('操作失败', err.message, 'err'); }
 }
 
@@ -1249,15 +1250,18 @@ function notice(title, text, kind) {
   const body = document.createElement("div"); body.className = "notice-text"; body.textContent = text || "";
   const row = document.createElement("div"); row.className = "notice-actions";
   const ok = btn("知道了", "btn btn-primary");
-  const close = () => { root.innerHTML = ""; root.className = "notice-root"; document.removeEventListener("keydown", onKey); };
-  const onKey = (e) => { if (e.key === "Escape") close(); };
+  let unbind = null;
+  const close = () => {
+    if (unbind) { unbind(); unbind = null; }
+    root.innerHTML = "";
+    root.className = "notice-root";
+  };
   ok.onclick = close;
   row.appendChild(ok);
   panel.appendChild(head); panel.appendChild(body); panel.appendChild(row);
   overlay.appendChild(panel);
-  overlay.onclick = (e) => { if (e.target === overlay) close(); };
-  document.addEventListener("keydown", onKey);
   root.appendChild(overlay);
+  unbind = ui.bindDismiss(overlay, panel, close);
   return close;
 }
 
@@ -1272,28 +1276,34 @@ function confirmBox(title, text, confirmLabel) {
     const head = document.createElement("div"); head.className = "notice-title"; head.textContent = title || "";
     const body = document.createElement("div"); body.className = "notice-text"; body.textContent = text || "";
     const row = document.createElement("div"); row.className = "notice-actions";
-    const done = (v) => { root.innerHTML = ""; root.className = "notice-root"; document.removeEventListener("keydown", onKey); resolve(v); };
-    const onKey = (e) => { if (e.key === "Escape") done(false); };
+    let unbind = null;
+    const done = (v) => {
+      if (unbind) { unbind(); unbind = null; }
+      root.innerHTML = "";
+      root.className = "notice-root";
+      resolve(v);
+    };
     const no = btn("取消", "btn"); no.onclick = () => done(false);
     const yes = btn(confirmLabel || "确认", "btn btn-primary"); yes.onclick = () => done(true);
     row.appendChild(no); row.appendChild(yes);
     panel.appendChild(head); panel.appendChild(body); panel.appendChild(row);
     overlay.appendChild(panel);
-    overlay.onclick = (e) => { if (e.target === overlay) done(false); };
-    document.addEventListener("keydown", onKey);
     root.appendChild(overlay);
+    unbind = ui.bindDismiss(overlay, panel, () => done(false));
   });
 }
 
 /* ---------- 主区弹层（清空一律 innerHTML=''） ---------- */
+let modalUnbind = null;
 function closeModal() {
+  if (modalUnbind) { modalUnbind(); modalUnbind = null; }
   const root = $('#modal-root');
   root.innerHTML = '';
   root.className = 'modal-root';
 }
 function openModal(title, build, wide) {
+  closeModal();
   const root = $('#modal-root');
-  root.innerHTML = '';
   root.className = 'modal-root open';
   const overlay = document.createElement('div'); overlay.className = 'modal-overlay';
   const panel = document.createElement('div'); panel.className = 'modal-panel' + (wide ? ' wide' : '');
@@ -1306,8 +1316,8 @@ function openModal(title, build, wide) {
   const msg = document.createElement('div'); msg.className = 'modal-msg';
   panel.appendChild(head); panel.appendChild(body); panel.appendChild(msg);
   overlay.appendChild(panel);
-  overlay.onclick = (e) => { if (e.target === overlay) closeModal(); };
   root.appendChild(overlay);
+  modalUnbind = ui.bindDismiss(overlay, panel, closeModal);
   const ctx = {
     body,
     setMsg: (t, isErr) => { msg.textContent = t || ''; msg.className = isErr ? 'modal-msg err' : 'modal-msg'; },
@@ -1698,6 +1708,7 @@ async function saveSettings(c, f, saveBtn) {
     const saved = await api('POST', actionUrl('set_settings'), collectSettings(f));
     await refreshState();
     c.setMsg(saved && saved.restart ? '已保存：沙箱策略变更，正在重启…' : '已保存');
+    ui.toast(saved && saved.restart ? 'warn' : 'ok', saved && saved.restart ? '已保存，正在重启…' : '设置已保存');
   } catch (e) {
     c.setMsg(e.message, true);
   } finally {
@@ -1937,7 +1948,7 @@ uploadPicker.addEventListener('change', () => {
         conflictUpload(s.sid, f.name, b64);
       } else {
         filesCache.delete(s.sid); // 文件清单变了，@ 菜单下次重拉
-        notice('已上传', '已上传到本次工作的 work/：' + f.name);
+        ui.toast('ok', '已上传到 work/：' + f.name);
       }
     } catch (err) {
       notice('操作失败', err.message, 'err');
@@ -1966,7 +1977,7 @@ async function sendUpload(sid, name, b64, overwrite) {
       return;
     }
     filesCache.delete(sid); // 文件清单变了，@ 菜单下次重拉
-    notice('已上传', '已上传：' + name);
+    ui.toast('ok', '已上传：' + name);
   } catch (e) { notice('操作失败', e.message, 'err'); }
 }
 
@@ -1990,7 +2001,7 @@ function renameUpload(sid, name, b64, alt) {
         const r = await api('POST', actionUrl('upload'), { session_id: sid, name: v, data_base64: b64 });
         if (r.uploaded === false) { c.setMsg('还是同名，请换一个名字', true); return; }
         filesCache.delete(sid); // 文件清单变了，@ 菜单下次重拉
-        closeModal(); notice('已上传', '已上传：' + v);
+        closeModal(); ui.toast('ok', '已上传：' + v);
       } catch (e) {
         c.setMsg(e.message, true);
       }
@@ -2864,12 +2875,16 @@ function syncSendButton(s) {
 /// 只有本来就在底部才自动跟随；用户往上滚时保持原位置（流式刷新不抢滚动条）。
 function nearBottom(box) { return box.scrollHeight - box.scrollTop - box.clientHeight < 80; }
 
-/// 回档按钮：回到这一行（留档或删除，点开后再选）。
+/// 回档按钮：回到这一行（留档或删除，点开后再选）。图标 + 原生 title（长说明不会被滚动裁掉）。
 function rewindButton(id) {
-  const b = document.createElement('button');
-  b.className = 'line-act'; b.textContent = '回档到此处';
+  const b = ui.iconButton({
+    icon: 'undo',
+    label: '回档到此处',
+    tip: '',
+    cls: 'line-act',
+    onClick: () => rewindTo(id),
+  });
   b.title = '回到这一行：留档（可恢复）或删除（不可恢复）';
-  b.onclick = () => rewindTo(id);
   return b;
 }
 
@@ -2958,17 +2973,26 @@ function renderDone(s) {
     if (typeof l.id === 'number') el.appendChild(rewindButton(l.id));
     // 留档分界上的「恢复」：删掉该标记及其后的内容（含留档期间的新工作）。
     if (typeof l.mark === 'number') {
-      const rb = document.createElement('button');
-      rb.className = 'line-act'; rb.textContent = '恢复';
+      const rb = ui.iconButton({
+        icon: 'undo',
+        label: '恢复留档',
+        tip: '',
+        cls: 'line-act',
+        onClick: () => restoreMark(l.mark),
+      });
       rb.title = '恢复到这次留档之前（标记及其后的内容会被删除）';
-      rb.onclick = () => restoreMark(l.mark);
       el.appendChild(rb);
     }
     // 撤回该同意：转录追加一条撤回行，继续时按剩余转录重新判定。
     if (l.verb === 'agree' && l.speaker) {
-      const w = document.createElement('button');
-      w.className = 'line-act'; w.textContent = '撤回同意'; w.title = '让该 agent 本轮不再算同意';
-      w.onclick = () => withdrawAgree(l.speaker);
+      const w = ui.iconButton({
+        icon: 'close',
+        label: '撤回同意',
+        tip: '',
+        cls: 'line-act',
+        onClick: () => withdrawAgree(l.speaker),
+      });
+      w.title = '让该 agent 本轮不再算同意';
       el.appendChild(w);
     }
     doneBox.appendChild(el);
@@ -3119,11 +3143,12 @@ function renderGate(s) {
   // **卡片照画**：工具级确认发生在生成中（生成正停下来等这一答），核心关卡的卡也一样——
   // 前端只认后端给的四格（信封 / 消息 / 选项），不按 kind 猜按钮、也不在忙时把它藏起来。
   if (!p) return;
-  gate.appendChild(renderCard(p));
+  gate.appendChild(renderCard(p, s));
 }
 
 /// 裁决卡：信封 / 消息（标题 / 正文 / 详情）/ 选项——四格都由后端给，前端照画（**扁平**，见契约）。
-function renderCard(p) {
+function renderCard(p, s) {
+  const busy = !!(s && s.sending);
   const msg = p.message || {};
   const el = document.createElement('div');
   el.className = 'gate-card';
@@ -3160,6 +3185,7 @@ function renderCard(p) {
   const inp = document.createElement('input');
   inp.className = 'decision-input';
   inp.placeholder = '附言（可空；要你回话 / 先说一句的那一关必填）…';
+  inp.disabled = busy;
   el.appendChild(inp);
   const bs = document.createElement('div');
   bs.className = 'btns';
@@ -3167,6 +3193,7 @@ function renderCard(p) {
     const bt = document.createElement('button');
     bt.className = 'btn btn-primary';
     bt.textContent = o.label;
+    bt.disabled = busy;
     bt.onclick = () => answerCard(p.id, o.id, inp.value.trim());
     bs.appendChild(bt);
   }
@@ -3218,6 +3245,7 @@ async function updateTask(text) {
     s.lines = []; s.pending = null; s.readonly = false; s.done = false;
     for (const ev of (r.events || [])) absorb(s, ev);
     renderAll();
+    ui.toast('ok', '已改需求');
   } catch (err) { notice('操作失败', err.message, 'err'); }
 }
 
@@ -3356,6 +3384,7 @@ async function applyRewind(s, body) {
     // 行整体重建，折叠状态一并重来（避免旧键被新行复用）；与事件台上的 `rewound` 同一套逻辑。
     applySnapshot(s, (r.events || []).concat(r.live || []));
     renderAll();
+    ui.toast('ok', '已回档');
   } catch (err) { notice('操作失败', err.message, 'err'); }
 }
 
@@ -3368,6 +3397,7 @@ function withdrawAgree(agent) {
       try {
         await api('POST', actionUrl('withdraw'), { session_id: s.sid, agent });
         renderAll();
+        ui.toast('ok', '已撤回「' + agent + '」的同意');
       } catch (err) { notice('操作失败', err.message, 'err'); }
     }],
     ['取消', 'btn btn-ghost', () => {}],
@@ -3386,6 +3416,7 @@ async function activateFlow() {
     applyActivation(s, (r && r.session) || {});
     s.readonly = false;
     renderAll();
+    ui.toast('ok', '会话已启用');
   } catch (err) {
     notice('启用失败', err.message, 'err');
   } finally {
@@ -3648,7 +3679,10 @@ async function stopGeneration() {
   if (!s || !isBusy(s)) return;
   try {
     await api('POST', actionUrl('control_session'), { session_id: s.sid, action: 'stop' });
-  } catch (e) { /* 停止失败不吵用户；按钮仍是停止，可再点一次 */ }
+    ui.toast('ok', '已请求停止');
+  } catch (e) {
+    ui.toast('err', '停止失败：' + e.message);
+  }
 }
 
 function onSend() {

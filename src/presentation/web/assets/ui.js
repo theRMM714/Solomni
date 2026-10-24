@@ -121,7 +121,12 @@
     if (root) root.appendChild(m);
     openMenu = m;
     const onDown = (e) => { if (e.target !== m && !m.contains?.(e.target)) closeMenu(); };
-    const onKey = (e) => { if (e.key === 'Escape') closeMenu(); };
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        if (e.stopPropagation) e.stopPropagation();
+        closeMenu();
+      }
+    };
     if (doc.addEventListener) {
       doc.addEventListener('pointerdown', onDown, true);
       doc.addEventListener('keydown', onKey, true);
@@ -157,17 +162,31 @@
     return !!overlay && downTarget === overlay && clickTarget === overlay;
   }
 
+  /* 弹层栈：Esc 只关最上面那层（notice 盖在 modal 上时不会一起关）。 */
+  const layers = [];
   function bindDismiss(overlay, panel, close) {
     let down = null;
-    overlay.addEventListener('pointerdown', (e) => { down = e.target; });
-    overlay.addEventListener('click', (e) => {
+    const onDown = (e) => { down = e.target; };
+    const onClick = (e) => {
       if (dismisses(overlay, down, e.target)) close();
       down = null;
-    });
-    if (doc.addEventListener) {
-      doc.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
-    }
-    return close;
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape' && layers[layers.length - 1] === overlay) close();
+    };
+    overlay.addEventListener('pointerdown', onDown);
+    overlay.addEventListener('click', onClick);
+    if (doc.addEventListener) doc.addEventListener('keydown', onKey);
+    layers.push(overlay);
+    return () => {
+      const i = layers.lastIndexOf(overlay);
+      if (i >= 0) layers.splice(i, 1);
+      if (overlay.removeEventListener) {
+        overlay.removeEventListener('pointerdown', onDown);
+        overlay.removeEventListener('click', onClick);
+      }
+      if (doc.removeEventListener) doc.removeEventListener('keydown', onKey);
+    };
   }
 
   global.ui = {
