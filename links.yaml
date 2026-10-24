@@ -56,4 +56,4 @@ release.base: https://github.com/theRMM714/Solomni/releases/download/dependencie
 # Windows 的 SMB 共享 helper：独立 fork 仓自己发 Release 资产（源码 + 预编译 smbd.exe）。
 smbd.windows: https://github.com/theRMM714/rust-smb-server-win/releases/download/v0.0.1/smbd-windows-x86_64.exe
 # 来源：该 release 的 `smbd-windows-x86_64.exe` 资产 digest（GitHub API）。
-smbd.windows.sha256: 0ce4f31a8621817212e9706ec9f8651fd40f02535d07660eec2855187c73b90f
+smbd.windows.sha256: 79b86c2aecb638e05bd8bf1d8f71d107f47e45dec97e7886f4c3ff62dabd381b
