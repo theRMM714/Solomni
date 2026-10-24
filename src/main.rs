@@ -17,6 +17,27 @@ use std::io::{BufRead, IsTerminal, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// 目的：补齐面专用的 vm 能力面：只持内部 `none` 共享档（运行期编排只经 QGA，不挂载、不建可写层）。
+/// 约束：与会话 vm 分开装配——`none` 不进用户候选链，避免 `clients` 为空的 guest 被静默当成无共享。
+/// 约束：网页补齐与 `--provision` 都经这里，两处不各装一份。
+pub(crate) fn provision_vm(
+    book: Arc<kernel::detail::procs::ProcessBook>,
+) -> Arc<dyn capabilities::vm::api::Vm + Send + Sync> {
+    provision_vm_with(Arc::new(
+        capabilities::vm::detail::QemuEngine::new().with_book(book),
+    ))
+}
+
+/// 目的：同上，但允许注入引擎替身（回归测试用）；生产入口只用 `provision_vm`。
+pub(crate) fn provision_vm_with(
+    engine: Arc<dyn capabilities::vm::ports::VmEngine + Send + Sync>,
+) -> Arc<dyn capabilities::vm::api::Vm + Send + Sync> {
+    Arc::new(capabilities::vm::service::VmService::new(
+        engine,
+        vec![Arc::new(capabilities::vm::detail::NoneShare::new())],
+    ))
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     // 长驻子进程守门模式（内部协议，用户不用）：macOS 没有 PR_SET_PDEATHSIG，由本程序自己盯核心，
@@ -528,8 +549,9 @@ fn main() {
     );
 
     // 依赖补齐面先建出来：Conductor（选虚拟根要读清单）与呈现层（setup 路由）各持同一份。
+    // vm 用**补齐面专用**的那份：运行期编排显式点名内部 none，不能拿会话 vm 顶替（那边只有用户档）。
     let provision: Arc<dyn capabilities::provision::api::Provision + Send + Sync> = Arc::new(
-        capabilities::provision::ProvisionService::with_vm(&root, Arc::clone(&vm)),
+        capabilities::provision::ProvisionService::with_vm(&root, provision_vm(Arc::clone(&book))),
     );
     // 启动时要按有效启停拉起常驻服务：留一份手柄（进程级租约，不属于任何会话）。
     let residents_boot = Arc::clone(&residents);

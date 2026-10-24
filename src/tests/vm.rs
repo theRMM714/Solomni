@@ -1037,6 +1037,52 @@ pub(crate) fn none_share_plans_no_mounts_or_engine_args() {
     );
 }
 
+/// 目的：补齐面专用 vm 必须自带内部 `none` 档——运行期编排显式点名它，漏装就会在起 guest 前被判「没有候选」。
+/// 约束：替身引擎的 id 伪装成 qemu（`NoneShare` 只承载 qemu），只验候选装配，不启真 VM。
+#[test]
+pub(crate) fn provision_vm_holds_internal_none_share() {
+    use crate::tests::doubles::FakeEngine;
+
+    struct QemuDouble(FakeEngine);
+    impl VmEngine for QemuDouble {
+        fn id(&self) -> &'static str {
+            "qemu"
+        }
+        fn supports(&self, guest: &GuestImage) -> bool {
+            self.0.supports(guest)
+        }
+        fn boot(
+            &self,
+            spec: &GuestSpec,
+            share: &crate::capabilities::vm::ports::SharePlan,
+        ) -> Result<Box<dyn crate::capabilities::vm::ports::GuestVm>, String> {
+            self.0.boot(spec, share)
+        }
+    }
+
+    let vm = crate::provision_vm_with(Arc::new(QemuDouble(FakeEngine::new())));
+    let lease = "provision-test";
+    let spec = GuestSpec {
+        lease: lease.to_string(),
+        image: GuestImage::linux(
+            "test",
+            std::path::PathBuf::from("/base/rootfs.qcow2"),
+            None,
+            None,
+        ),
+        mounts: Vec::new(),
+        net: true,
+        engine_path: None,
+        share_path: None,
+        shares: vec!["none"],
+        seed: None,
+        isolated: false,
+    };
+    vm.guest_start(&spec)
+        .expect("补齐面要能用内部 none 档起 guest");
+    vm.guest_stop(lease);
+}
+
 /// 目的：复制后端不产生引擎参数，只在 guest 里建目录；宿主侧 tar 打包/解包真跑通。
 #[test]
 pub(crate) fn copy_share_plans_mkdirs_and_tar_round_trips_on_the_host() {
