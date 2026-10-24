@@ -1,0 +1,118 @@
+/* Solomni 风格令牌：颜色、间距、圆角、字号、动效、层级与尺寸的唯一来源。
+ * 约束：本文件只定义变量（:root / 媒体查询），不出现任何组件选择器；
+ *   页面与组件只准引用 var(--…)，不许写字面量颜色或时长（tokens.smoke.cjs 守着这条）。
+ * 联动：/ui.css 是组件层，/style.css 是页面组装层；三者加载顺序 tokens → ui → style。 */
+:root {
+  /* ---- 色板（底层；语义层只引用这里） ---- */
+  --c-neutral-900: #0d0f13;
+  --c-neutral-800: #16181d;
+  --c-neutral-700: #1d2026;
+  --c-neutral-600: #242830;
+  --c-neutral-500: #2f3542;
+  --c-neutral-400: #3b4250;
+  --c-neutral-300: #8a919e;
+  --c-neutral-200: #b8bfca;
+  --c-neutral-100: #d8dce3;
+  --c-neutral-50: #f2f4f8;
+  --c-blue-500: #4a80bd;
+  --c-blue-600: #3c6da6;
+  --c-green-500: #57c785;
+  --c-amber-500: #e0b354;
+  --c-amber-700: #8a6d1f;
+  --c-red-500: #e06c75;
+  --c-red-700: #8c2f37;
+  --c-red-800: #7a2b31;
+  --c-red-200: #ffb3ba;
+
+  /* ---- 语义：背景 / 表面 / 描边 ---- */
+  --color-bg: var(--c-neutral-800);
+  --color-surface: var(--c-neutral-700);
+  --color-surface-2: var(--c-neutral-600);
+  --color-surface-3: var(--c-neutral-500);
+  --color-border: var(--c-neutral-500);
+  --color-border-strong: var(--c-neutral-400);
+  --color-overlay: rgba(10, 12, 16, .6);
+  --color-mask: rgba(0, 0, 0, .45);
+
+  /* ---- 语义：文字 / 强调 / 状态 ---- */
+  --color-text: var(--c-neutral-100);
+  --color-text-dim: var(--c-neutral-300);
+  --color-text-inverse: #ffffff;
+  --color-text-inverse-dim: rgba(255, 255, 255, .75);
+  --color-inverse-weak: rgba(255, 255, 255, .15);
+  --color-user-bubble: #355d85;
+  --color-user-border: #355d85;
+  --color-accent: var(--c-blue-500);
+  --color-accent-strong: var(--c-blue-600);
+  --color-accent-contrast: #ffffff;
+  --color-focus: var(--c-blue-500);
+  --color-ok: var(--c-green-500);
+  --color-warn: var(--c-amber-500);
+  --color-err: var(--c-red-500);
+  --color-warn-weak: rgba(224, 179, 84, .12);
+  --color-warn-line: rgba(224, 179, 84, .45);
+  --color-err-weak: rgba(224, 108, 117, .12);
+  --color-err-line: rgba(224, 108, 117, .45);
+  --color-danger-weak: rgba(224, 108, 117, .12);
+  --color-danger-strong: var(--c-red-700);
+  --color-danger-line: #b0454e;
+  --color-danger-text: var(--c-red-200);
+
+  /* ---- 间距（4 基数） ---- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+
+  /* ---- 圆角 ---- */
+  --r-1: 6px;
+  --r-2: 10px;
+  --r-3: 14px;
+  --r-pill: 999px;
+
+  /* ---- 字号 / 行高 ---- */
+  --fs-xs: 11px;
+  --fs-s: 12px;
+  --fs-m: 13px;
+  --fs-base: 15px;
+  --fs-l: 17px;
+  --lh-tight: 1.35;
+  --lh-base: 1.6;
+
+  /* ---- 动效 ---- */
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 260ms;
+  --dur-blink: 1s;
+  --dur-spin: .7s;
+  --ease-out: cubic-bezier(.2, .7, .2, 1);
+  --ease-in-out: cubic-bezier(.4, 0, .2, 1);
+
+  /* ---- 阴影 / 层级 / 尺寸 ---- */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, .3);
+  --shadow-2: 0 16px 40px rgba(0, 0, 0, .5);
+  --shadow-side: 4px 0 20px rgba(0, 0, 0, .4);
+  --z-sticky: 10;
+  --z-drawer: 20;
+  --z-sidebar: 30;
+  --z-modal: 40;
+  --z-toast: 50;
+  --z-notice: 60;
+  --w-sidebar: 280px;
+  --w-rail: 64px;
+  --h-topbar: 48px;
+  --w-read: 760px;
+}
+
+/* 系统要求减少动效：所有过渡与动画自动归零（令牌是唯一开关）。 */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-base: 0ms;
+    --dur-slow: 0ms;
+    --dur-blink: 0ms;
+    --dur-spin: 0ms;
+  }
+}

@@ -286,6 +286,21 @@ pub(crate) fn route(
             static_head("application/javascript"),
             include_str!("assets/md.js").to_string(),
         ),
+        "tokens" => (
+            200,
+            static_head("text/css"),
+            include_str!("assets/tokens.css").to_string(),
+        ),
+        "ui_css" => (
+            200,
+            static_head("text/css"),
+            include_str!("assets/ui.css").to_string(),
+        ),
+        "ui_js" => (
+            200,
+            static_head("application/javascript"),
+            include_str!("assets/ui.js").to_string(),
+        ),
 
         "events" => {
             // 长轮询：?sid= 会话，&since= 客户端已见序号。最多等 20s；有新事件立即回。

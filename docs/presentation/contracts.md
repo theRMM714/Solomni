@@ -91,7 +91,7 @@
 
 下面这张表由契约测试与 `ROUTES` 机器比对——对不上就是测试失败，不是靠人记得改文档：
 
-静态资源（`/`、`style.css`、`app.js`、`md.js`）一律 `Cache-Control: no-store`：改了前端**刷新即生效**，
+静态资源（`/`、`style.css`、`app.js`、`md.js`、`tokens.css`、`ui.css`、`ui.js`）一律 `Cache-Control: no-store`：改了前端**刷新即生效**，
 不需要硬刷新（`src/presentation/web/mod.rs` 的 `static_head`）。
 
 <!-- ROUTES:BEGIN -->
@@ -101,6 +101,9 @@
 | GET | `/style.css` | 静态资源 | — | `style.css` | 200 |
 | GET | `/app.js` | 静态资源 | — | `app.js` | 200 |
 | GET | `/md.js` | 静态资源 | — | `md.js` | 200 |
+| GET | `/tokens.css` | 静态资源 | — | `tokens.css` | 200 |
+| GET | `/ui.css` | 静态资源 | — | `ui.css` | 200 |
+| GET | `/ui.js` | 静态资源 | — | `ui.js` | 200 |
 | GET | `/api/events` | 事件台（`EventBus`） | 查询 `sid` / `since` | `{lines:[{seq,sid,events}],head,oldest}` | 200 |
 | GET | `/api/state` | `ModulesOps::roster / module_enabled / service_enabled` + `SessionOps::session_views` + `RegistryOps` + `HistoryOps::list` | — | `{modules,services,rejected,fence,providers,models,core,agents,settings,sessions,history}`（`modules[].runtimes` 是模块声明的运行能力，创建向导据此预判虚拟根够不够；`modules[].enabled` 与 `modules[].services[].enabled` 是**有效启停**；`services` 是常驻服务的**运行态** `{module,name,adapter,state,reason,operations}`；`sessions[].pending` 是**当前那张裁决卡**的快照，与推的 `decision_card` 同一份） | 200, 400 |
 | GET | `/api/actions` | `ActionOps::catalog` | 查询 `sid` | `{actions:[{id,desc,params,available,reason}]}` | 200, 400 |
