@@ -155,6 +155,10 @@ body {
 .turn-toggle { width: 24px; height: 24px; margin-left: auto; flex: none; }
 .turn-toggle .ui-icon { transform: rotate(90deg); transition: transform var(--dur-fast) var(--ease-out); }
 .turn.collapsed .turn-toggle .ui-icon { transform: none; }
+.turn.empty { display: none; }
+.turn.streaming .turn-text::after {
+  content: "▍"; margin-left: 2px; animation: blink var(--dur-blink) infinite;
+}
 .turn-body { margin-top: 6px; }
 .turn-body.hidden { display: none; }
 .turn-text .md { white-space: normal; }

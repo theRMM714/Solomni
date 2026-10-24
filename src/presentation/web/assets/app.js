@@ -2979,6 +2979,7 @@ function renderTabs() {
       el.type = 'button';
       el.className = 'tab' + (name === state.activeSid ? ' active' : '') + (opened ? '' : ' ghost');
       el.title = name;
+      el.setAttribute('aria-selected', name === state.activeSid ? 'true' : 'false');
       el.dataset.badge = tabPendingDeep(name) && name !== state.activeSid ? '1' : '0';
       const label = document.createElement('span');
       label.textContent = tabLabel(name);
@@ -3367,89 +3368,112 @@ function renderDone(s, full) {
 /// **一个块最多一个思维链折叠 + 一段正文**（与定稿后的行同形）：模型会把"思维链/正文"交替吐出来，
 /// 若按到达片段各建节点，流式期间就会冒出两个「思维链」、正文被切成好几段。
 /// 流式 tool 块的键 = 已有权威 tool 行数 + 它在 live 里的 tool 块序号 → 与定稿后的权威行同键。
+function liveTurnNode(owner) {
+  const el = document.createElement('article');
+  el.className = 'turn live';
+  const head = document.createElement('div');
+  head.className = 'turn-head';
+  const who = document.createElement('span');
+  who.className = 'turn-who';
+  who.textContent = (owner && owner.speaker) || (owner && owner.tool && owner.tool.speaker) || '';
+  head.appendChild(who);
+  el.appendChild(head);
+  const body = document.createElement('div');
+  body.className = 'turn-body';
+  el.appendChild(body);
+  return { node: el, body, cot: null, textWrap: null, text: null, textValue: '', tools: null, toolList: null };
+}
+
+function updateLiveGroup(g, gi, s, showCot, streaming) {
+  const ui = g.ui;
+  const segs = (g.msg && g.msg.segments) || [];
+  let cot = '';
+  let txt = '';
+  for (const seg of segs) {
+    const t = String(seg.text == null ? '' : seg.text);
+    if (!t) continue;
+    if (seg.kind === 'reasoning') cot += t;
+    else txt += t;
+  }
+  if (showCot && cot) {
+    if (!ui.cot) {
+      const node = reasoningBlock(cot, s, 'V' + gi);
+      if (ui.textWrap) ui.body.insertBefore(node, ui.textWrap);
+      else ui.body.appendChild(node);
+      ui.cot = { node, text: cot };
+    } else if (ui.cot.text !== cot) {
+      const body = ui.cot.node.children && ui.cot.node.children[1];
+      if (body) body.textContent = cot;
+      ui.cot.text = cot;
+    }
+  }
+  if (txt) {
+    if (!ui.textWrap) {
+      ui.textWrap = document.createElement('div');
+      ui.textWrap.className = 'turn-text';
+      ui.body.appendChild(ui.textWrap);
+      ui.text = mdNode(txt);
+      ui.textWrap.appendChild(ui.text);
+      ui.textValue = txt;
+    } else if (ui.textValue !== txt) {
+      if (typeof markdownToHtml === 'function') ui.text.innerHTML = shortPath(markdownToHtml(txt));
+      else ui.text.textContent = txt;
+      ui.textValue = txt;
+    }
+  }
+  if (g.tools.length) {
+    if (!ui.tools) {
+      ui.tools = document.createElement('details');
+      ui.tools.className = 'fold turn-tools';
+      const sum = document.createElement('summary');
+      ui.tools.appendChild(sum);
+      ui.toolList = document.createElement('div');
+      ui.toolList.className = 'tool-list';
+      ui.tools.appendChild(ui.toolList);
+      ui.body.appendChild(ui.tools);
+    }
+    const failed = g.tools.filter((tb) => tb.tool && !tb.tool.ok).length;
+    ui.tools.children[0].textContent = '工具调用 · ' + g.tools.length + (failed ? '（' + failed + ' 失败）' : '');
+    for (const tb of g.tools) {
+      if (tb._node) continue;
+      tb._node = toolCard(tb.tool, s, 'LT' + gi + '-' + g.tools.indexOf(tb), '');
+      ui.toolList.appendChild(tb._node);
+    }
+  }
+  const visible = (showCot && !!cot) || !!txt || g.tools.length > 0;
+  ui.node.className = 'turn live' + (visible ? '' : ' empty') + (streaming && visible ? ' streaming' : '');
+}
+
+/// 流式块按“一次回复”分组：消息 + 随后的工具调用合成同一个临时轮，定稿后形状不变。
 function renderLive(s, full) {
   if (!liveBox) { renderStream(true); return; }
   const live = s.live || [];
-  if (full) { for (const b of live) { b._node = null; b._cot = null; b._txt = null; } }
-  const toolLines = s.lines.filter((l) => l.tool).length;
-  let liveTool = 0;
-  for (let bi = 0; bi < live.length; bi++) {
-    const blk = live[bi];
-    if (blk.kind === 'tool') {
-      if (!blk._node) {
-        // 实时工具块与定稿工具行**同一处建块**（身份也随之带上）：这里从前直接调 toolCard，卡片没有身份。
-        blk._node = lineBlock({ cls: 'tool', tool: blk.tool, who: (blk.tool && blk.tool.speaker) || blk.speaker }, s, 'T' + (toolLines + liveTool), true).node;
-        liveBox.appendChild(blk._node);
-      }
-      liveTool += 1;
-      continue;
-    }
-    const segs = blk.segments || [];
-    if (!blk._node) {
-      // 实时块同样经 lineBlock：身份先立，思维链/正文随后往这一块里追加（见下面的增量更新）。
-      blk._node = lineBlock({ cls: 'line', who: blk.speaker, text: '', reasoning: null }, s, 'V' + bi, true).node;
-      blk._cot = null;
-      blk._txt = null;
-      liveBox.appendChild(blk._node);
-    }
-    // 先把这一轮的所有片段按 kind 归并（顺序无关紧要：思维链永远在正文之上，与定稿行一致）
-    let cot = '';
-    let txt = '';
-    for (const seg of segs) {
-      const t = String(seg.text == null ? '' : seg.text);
-      if (!t) continue;
-      if (seg.kind === 'reasoning') cot += t;
-      else txt += t;
-    }
-    const showCot = !!state.settings.show_reasoning;
-    if (showCot && cot) {
-      if (!blk._cot) {
-        const node = reasoningBlock(cot, s, 'V' + bi);
-        // 正文节点若先到，思维链要插到它前面（永远"先想后说"）
-        if (blk._txt && blk._txt.node && typeof blk._node.insertBefore === 'function') {
-          blk._node.insertBefore(node, blk._txt.node);
-        } else {
-          blk._node.appendChild(node);
-        }
-        blk._cot = { node: node, text: cot };
-      } else if (blk._cot.text !== cot) {
-        if (blk._cot.node && blk._cot.node.children && blk._cot.node.children[1]) {
-          blk._cot.node.children[1].textContent = cot;
-        }
-        blk._cot.text = cot;
-      }
-    }
-    if (txt) {
-      if (!blk._txt) {
-        const node = mdNode(txt);
-        blk._node.appendChild(node);
-        blk._txt = { node: node, text: txt };
-      } else if (blk._txt.text !== txt) {
-        // 只更新内容，节点不动 → 折叠与滚动都不受打扰
-        if (typeof markdownToHtml === 'function') blk._txt.node.innerHTML = shortPath(markdownToHtml(txt));
-        else blk._txt.node.textContent = txt;
-        blk._txt.text = txt;
-      }
-    }
-    // 这一轮没有**可见**内容（例如只发了一封信封、正文不外泄）→ 整块隐藏：
-    // 别留一张只有说话人名字的空卡片（工具轮尤其明显）。节点位置不变，所以内容后到时会出现在正确位置。
-    const visible = (showCot && !!cot) || !!txt;
-    if (visible) blk._node.classList.remove('empty');
-    else blk._node.classList.add('empty');
+  if (full) {
+    liveBox.innerHTML = '';
+    for (const b of live) { b._node = null; b._ui = null; }
   }
-  // **只有正在传的那一块**是"流式观感"：一轮开始（新块）之后，前一块就已经讲完了
-  // （后面跟着它那一轮的工具卡），不该再挂着光标——块的正文要等整个回合定稿才被权威行替换，
-  // 期间前几块挂着光标，看起来就是"已经落盘的东西还在流"（真机反馈）。
+  const groups = [];
+  for (const b of live) {
+    if (b.kind === 'msg') groups.push({ msg: b, tools: [] });
+    else if (b.kind === 'tool') {
+      if (!groups.length) groups.push({ msg: null, tools: [] });
+      groups[groups.length - 1].tools.push(b);
+    }
+  }
+  const showCot = !!state.settings.show_reasoning;
   let lastMsg = -1;
-  for (let bi = 0; bi < live.length; bi++) if (live[bi].kind === 'msg') lastMsg = bi;
-  for (let bi = 0; bi < live.length; bi++) {
-    const b = live[bi];
-    if (b.kind !== 'msg' || !b._node || !b._node.className) continue;
-    // 保留 empty 类（它由上面按"有没有可见内容"加/去）：整块重写 className 会把它抹掉，
-    // 空块就再也藏不住了。流式光标只挂在**正在传的那一块**上。
-    const blank = String(b._node.className).indexOf('empty') >= 0;
-    b._node.className = 'line line' + (blank ? ' empty' : '') + (bi === lastMsg ? ' streaming' : '');
-  }
+  groups.forEach((g, gi) => { if (g.msg) lastMsg = gi; });
+  groups.forEach((g, gi) => {
+    const owner = g.msg || g.tools[0];
+    if (!owner) return;
+    if (!owner._ui) {
+      owner._ui = liveTurnNode(owner);
+      liveBox.appendChild(owner._ui.node);
+    }
+    g.ui = owner._ui;
+    if (g.msg) g.msg._node = owner._ui.node;
+    updateLiveGroup(g, gi, s, showCot, gi === lastMsg);
+  });
   flushScroll(s);
 }
 
