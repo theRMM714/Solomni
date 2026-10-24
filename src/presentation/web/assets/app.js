@@ -288,8 +288,8 @@ function checkbox(labelText, checked) {
 }
 
 /* ---------- 会话历史：树 + 铅笔菜单 ----------
- * 根会话可展开子会话；活跃路径自动展开。点条目本身不进入会话（避免误开）——
- * 进入 / 改配置 / 删除一律走行尾铅笔的浮层菜单。子会话不单独删（删父会话会一起删）。 */
+ * 根会话可展开子会话；活跃路径自动展开。点条目直接打开会话；改配置 / 删除走行尾铅笔的浮层菜单。
+ * 子会话不单独删（删父会话会一起删）。 */
 function historyByParent() {
   const by = new Map();
   for (const h of (state.history || [])) {
@@ -354,6 +354,8 @@ function renderHistory() {
     for (const h of (by.get(parent) || [])) {
       const row = document.createElement('div');
       row.className = 'history-item';
+      row.title = '点击打开会话';
+      row.onclick = () => openHistory(h.name);
       const kids = by.get(h.name) || [];
       const open = state.treeOpen.has(h.name);
       if (kids.length) {

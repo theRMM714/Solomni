@@ -404,10 +404,10 @@ body {
 .history-list:empty::before { content: "（还没有历史会话）"; color: var(--color-text-dim); font-size: 12px; }
 /* 条目本身不是入口（点了不进会话）：进入走「打开」按钮，改动走「编辑」按钮。 */
 .history-item {
-  display: flex; align-items: center; gap: 6px; cursor: default;
+  display: flex; align-items: center; gap: 6px; cursor: pointer;
   background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 6px; padding: 5px 8px;
 }
-.history-item:hover { border-color: var(--color-border); }
+.history-item:hover { border-color: var(--color-accent); }
 /* 会话树：根行可展开，子行缩进挂在父行下（见 app.js 的 renderHistory）。 */
 .history-toggle {
   flex: none; width: 18px; height: 18px; padding: 0;

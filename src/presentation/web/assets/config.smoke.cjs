@@ -217,7 +217,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const list = reg.get("#history-list");
   const items = findByClass(list, "history-item");
   check("history: 两项都渲染", items.length === 2, "items=" + items.length);
-  check("history: 条目本身没有 onclick（点条目不进会话）", items.every((it) => !it.onclick));
+  check("history: 条目本身可点击打开", items.every((it) => typeof it.onclick === "function"));
   const pencils = findByClass(list, "hpen");
   check("history: 每行一个铅笔", pencils.length === items.length, "pencils=" + pencils.length);
   const menuOf = (pencil) => {
@@ -454,17 +454,12 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
   let openErrored = null;
   try {
     const firstItem = findByClass(reg.get("#history-list"), "history-item")[0];
-    const pencil = findByClass(firstItem, "hpen")[0];
-    pencil.onclick({ stopPropagation() {} });
-    const root = reg.get("#menu-root");
-    const menu = root.children[root.children.length - 1];
-    const openItem = walk(menu, []).find((x) => x.tag === "button" && allText(x).trim() === "打开");
-    openItem.onclick();
+    firstItem.onclick();
     await sleep(80);
   } catch (e) { openErrored = e && e.message; }
   check("open: 点「打开」进入会话视图不报错", !openErrored, String(openErrored));
   check("open: 会话被激活、按历史只读回放", state.activeSid === "w" && !!state.sessions.get("w"), "activeSid=" + state.activeSid);
-  check("open: 条目本身仍不是入口", typeof findByClass(reg.get("#history-list"), "history-item")[0].onclick !== "function");
+  check("open: 条目本身仍是入口", typeof findByClass(reg.get("#history-list"), "history-item")[0].onclick === "function");
 
   finish();
 })().catch((e) => { loadErrors.push("harness error: " + ((e && e.stack) || e)); finish(); });
