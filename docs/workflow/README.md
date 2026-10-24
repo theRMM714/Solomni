@@ -97,4 +97,4 @@
 
 - 硬规则见 `AGENTS.md` §七：`main` 保护、任务分支、agent 不自行 Ready / 合并。
 - 需要他平台或真机结论时，用 `gh workflow run test.yml --ref <分支>` 手动派发；触发时机、报告读取与 `sha` 比对一律以 [execution-ci.md](../testing/execution-ci.md) 为准。
-- 纯文档 PR 在 Ready 后走 `changes` + `docs` + `structure`：六个平台 job 跳过，报告写 `ci-report` 的 `runs/docs` / `runs/structure`；不要把文档审查或结构审查的结果当成三平台验收。
+- 纯文档 PR 在 Ready 后走 `changes` + `docs` + `structure` + `验收闸门`：平台 job 跳过（矩阵 job 跳过时不会展开，规则集不按平台名要求它们，见 [execution-ci.md](../testing/execution-ci.md) 的 CI 一节），报告写 `ci-report` 的 `runs/docs` / `runs/structure`；不要把文档审查或结构审查的结果当成三平台验收。
