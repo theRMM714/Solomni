@@ -161,6 +161,9 @@ sandbox.globalThis = sandbox;
 try {
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "md.js"), "utf8"), sandbox, { filename: "md.js" });
 } catch (e) { loadErrors.push("md load error: " + e.message); }
+try {
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, "ui.js"), "utf8"), sandbox, { filename: "ui.js" });
+} catch (e) { loadErrors.push("ui load error: " + e.message); }
 const appPath = path.join(__dirname, "app.js");
 try {
   vm.runInNewContext(fs.readFileSync(appPath, "utf8"), sandbox, { filename: "app.js" });

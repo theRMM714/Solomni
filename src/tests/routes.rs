@@ -923,6 +923,9 @@ fn success_shapes_are_pinned_per_route() {
         ("GET", "/style.css", "", 200, "--"),
         ("GET", "/app.js", "", 200, "/api/"),
         ("GET", "/md.js", "", 200, "function esc"),
+        ("GET", "/tokens.css", "", 200, "--color-bg"),
+        ("GET", "/ui.css", "", 200, ".btn"),
+        ("GET", "/ui.js", "", 200, "global.ui"),
         ("GET", "/api/events?sid=&since=0", "", 200, "\"head\""),
         ("GET", "/api/state", "", 200, "\"modules\""),
         (
