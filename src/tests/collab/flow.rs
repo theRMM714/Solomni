@@ -106,12 +106,7 @@ pub(crate) fn core_collab_slate_rejects_invalid_picks() {
         .unwrap()
         .facts;
     for want in ["ghost 不存在", "幽灵 不在登记处", "nope 不存在"] {
-        assert!(
-            ev.iter()
-                .any(|e| matches!(e, SessionEvent::Notice(n) if n.contains(want))),
-            "应如实拒收：{}",
-            want
-        );
+        assert!(shown_contains(&ev, want), "应如实拒收：{}", want);
     }
     assert!(ev.iter().any(|e| matches!(e, SessionEvent::Transcript(l) if l.iter().any(|x| x.line.contains("乙〈a〉→ m")))));
 }

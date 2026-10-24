@@ -74,7 +74,11 @@ pub(crate) fn collab_rewind_rebuilds_from_transcript_and_resume_waits_at_gate() 
     );
     // 继续：未开始不由继续代劳，只提醒
     let ev = with_live(|l| core.continue_flow(&sid, l)).unwrap();
-    assert!(matches!(&ev[0], SessionEvent::Notice(n) if n.contains("裁决门")));
+    assert!(
+        shown_contains(&ev, "裁决门"),
+        "继续要如实提醒在裁决门等：{:?}",
+        shown_texts(&ev)
+    );
 }
 
 #[test]
@@ -89,7 +93,8 @@ pub(crate) fn collab_update_task_rewinds_and_latest_wins() {
         replay_lines(&replayed),
         vec![
             "[用户:需求] 旧需求".to_string(),
-            "[用户:需求] 新需求".to_string()
+            "[用户:需求] 新需求".to_string(),
+            "[建组] a".to_string()
         ]
     );
     // 派生以最后一条需求为准

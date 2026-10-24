@@ -61,15 +61,13 @@ impl CollabSession {
                         } else {
                             crate::capabilities::session::api::interrupted_note(&err)
                         };
-                        sink(SessionEvent::Notice(note));
+                        self.notice(&note, sink);
                         return;
                     }
                     TurnOut::Stopped => {
                         // 用户点了「停止」：被中断的那条发言没有吸收（半截 say/agree 会把状态算歪），
                         // 讨论保持可继续——点「继续」从断点接着推进。
-                        sink(SessionEvent::Notice(
-                            crate::capabilities::session::api::stopped_note(),
-                        ));
+                        self.notice(&crate::capabilities::session::api::stopped_note(), sink);
                         return;
                     }
                     TurnOut::AskUser { member, question } => {
@@ -80,9 +78,7 @@ impl CollabSession {
                         let round = self.disc.as_ref().expect("disc 存在").round;
                         let over_cap = round > MAX_ROUNDS;
                         if over_cap {
-                            sink(SessionEvent::Notice(
-                                "[上限] 讨论轮次超限，交用户裁决。".into(),
-                            ));
+                            self.notice("[上限] 讨论轮次超限，交用户裁决。", sink);
                         }
                         sink(SessionEvent::DiscussionDone { round, over_cap });
                         break;
@@ -118,10 +114,13 @@ impl CollabSession {
                         .collect();
                     let problems = chain.problems(&roster);
                     if !problems.is_empty() {
-                        sink(SessionEvent::Notice(format!(
-                            "[错误] 核心给出的任务链不自洽：{}。点「继续」会重新整理。",
-                            problems.join("；")
-                        )));
+                        self.notice(
+                            &format!(
+                                "[错误] 核心给出的任务链不自洽：{}。点「继续」会重新整理。",
+                                problems.join("；")
+                            ),
+                            sink,
+                        );
                         return;
                     }
                     // **按阶段定名**：阶段由依赖图派生，节点 id 由核心给（n{阶段}-{序号}），
@@ -139,7 +138,7 @@ impl CollabSession {
                     } else {
                         crate::capabilities::session::api::interrupted_note(&err)
                     };
-                    sink(SessionEvent::Notice(note));
+                    self.notice(&note, sink);
                     return;
                 }
             }
@@ -247,9 +246,10 @@ impl CollabSession {
                 let (verdicts, advice) = match made {
                     Ok(v) => v,
                     Err(err) => {
-                        sink(SessionEvent::Notice(
-                            crate::capabilities::session::api::interrupted_note(&err),
-                        ));
+                        self.notice(
+                            &crate::capabilities::session::api::interrupted_note(&err),
+                            sink,
+                        );
                         return;
                     }
                 };
@@ -273,15 +273,16 @@ impl CollabSession {
                 if !missing.is_empty() {
                     what.push(format!("没给结论的节点：{}", missing.join("、")));
                 }
-                sink(SessionEvent::Notice(format!(
-                    "[阶段 {} 验收] 这次判定用不了（{}），已要求核心重填；要停就点「停止」。",
-                    stage,
-                    what.join("；")
-                )));
+                self.notice(
+                    &format!(
+                        "[阶段 {} 验收] 这次判定用不了（{}），已要求核心重填；要停就点「停止」。",
+                        stage,
+                        what.join("；")
+                    ),
+                    sink,
+                );
                 if self.cancelled() {
-                    sink(SessionEvent::Notice(
-                        crate::capabilities::session::api::stopped_note(),
-                    ));
+                    self.notice(&crate::capabilities::session::api::stopped_note(), sink);
                     return;
                 }
                 retry = Some(format!(
@@ -311,24 +312,25 @@ impl CollabSession {
                         continue;
                     }
                     let why = note.trim();
-                    sink(SessionEvent::Notice(if why.is_empty() {
+                    let note = if why.is_empty() {
                         format!("[返工] {}：没过（等用户点「继续」后只重派它）", node)
                     } else {
                         format!("[返工] {}：{}", node, why)
-                    }));
+                    };
+                    self.notice(&note, sink);
                 }
-                sink(SessionEvent::Notice(format!(
-                    "[阶段 {} 验收] 没通过：{}。点「继续」后**只重派这些**（下一阶段先不开工）。",
-                    stage,
-                    bad.join("、")
-                )));
+                self.notice(
+                    &format!(
+                        "[阶段 {} 验收] 没通过：{}。点「继续」后**只重派这些**（下一阶段先不开工）。",
+                        stage,
+                        bad.join("、")
+                    ),
+                    sink,
+                );
                 self.ask_user(Pending::NodeBlocked { nodes: bad }, sink);
                 return;
             }
-            sink(SessionEvent::Notice(format!(
-                "[阶段 {} 通过] 下一阶段开工。",
-                stage
-            )));
+            self.notice(&format!("[阶段 {} 通过] 下一阶段开工。", stage), sink);
         }
         // 总验收：核心 AI 按**各节点的产出**核对（复用执行阶段的验收机制）→ 交付。
         let llm = self.llm_opts();
@@ -377,22 +379,24 @@ impl CollabSession {
                 sink,
             );
             sink(crate::capabilities::session::api::idle());
-            if let Some(note) = self.exec_note(&exec) {
-                sink(SessionEvent::Notice(note));
+            let failed = self.exec_note(&exec);
+            if let Some(note) = failed {
+                self.notice(&note, sink);
                 return;
             }
             let problems = exec.rework_problems(&known);
             if problems.is_empty() {
                 break;
             }
-            sink(SessionEvent::Notice(format!(
-                "[总验收] 这次判定用不了（{}），已要求核心重填；要停就点「停止」。",
-                problems.join("；")
-            )));
+            self.notice(
+                &format!(
+                    "[总验收] 这次判定用不了（{}），已要求核心重填；要停就点「停止」。",
+                    problems.join("；")
+                ),
+                sink,
+            );
             if self.cancelled() {
-                sink(SessionEvent::Notice(
-                    crate::capabilities::session::api::stopped_note(),
-                ));
+                self.notice(&crate::capabilities::session::api::stopped_note(), sink);
                 return;
             }
             retry = Some(format!(
@@ -412,16 +416,20 @@ impl CollabSession {
                 }
                 let node = it.rework.as_deref().unwrap_or("");
                 let why = it.reason.as_deref().unwrap_or("").trim();
-                sink(SessionEvent::Notice(if why.is_empty() {
+                let note = if why.is_empty() {
                     format!("[返工] {}：没过（等用户点「继续」后只重派它）", node)
                 } else {
                     format!("[返工] {}：{}", node, why)
-                }));
+                };
+                self.notice(&note, sink);
             }
-            sink(SessionEvent::Notice(format!(
-                "[总验收] 没通过：{}。点「继续」后**只重派这些**（不交付）。",
-                bad.join("、")
-            )));
+            self.notice(
+                &format!(
+                    "[总验收] 没通过：{}。点「继续」后**只重派这些**（不交付）。",
+                    bad.join("、")
+                ),
+                sink,
+            );
             self.ask_user(Pending::NodeBlocked { nodes: bad }, sink);
             return;
         }

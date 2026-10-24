@@ -1,6 +1,7 @@
 //! 入站契约（`conductor::api`）的契约测试：命令/事件模型、能力分面、停止语义、panic 隔离。
 //! 这一层不碰 HTTP；HTTP 侧（路由目录与逐路由契约）另见本目录的 routes。
 
+use super::builders::shown_contains;
 use super::doubles::{collab_work, decl, module_of, module_with_runtimes};
 use super::{gated_ops, ops_with, single_work, slow_ops};
 use crate::capabilities::conductor::api::{
@@ -492,10 +493,7 @@ fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
     // 否则打开那个标签页，光标一直挂着、按钮一直停在「停止」。
     // 替身让第一个成员（a）正常说完、第二个（b）卡住被停——收尾要看**被停的那个**。
     let child = format!("{}--b", sid);
-    let stopped_line = |evs: &[SessionEvent]| {
-        evs.iter()
-            .any(|e| matches!(e, SessionEvent::Notice(n) if n.contains("[停止]")))
-    };
+    let stopped_line = |evs: &[SessionEvent]| shown_contains(evs, "[停止]");
     let bus_of = |sid: &str| -> Vec<SessionEvent> {
         let (batches, _head, _oldest) = handle.events().snapshot(Some(sid), 0);
         batches
@@ -525,9 +523,7 @@ fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
         on_child.iter().map(|e| e.to_json()).collect::<Vec<_>>()
     );
     assert!(
-        on_child
-            .iter()
-            .any(|e| matches!(e, SessionEvent::Notice(n) if n.contains("[停止]"))),
+        shown_contains(&on_child, "[停止]"),
         "子会话要如实收到「已停止」：{:?}",
         on_child.iter().map(|e| e.to_json()).collect::<Vec<_>>()
     );

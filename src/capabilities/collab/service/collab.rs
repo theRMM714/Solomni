@@ -580,10 +580,8 @@ impl CollabSession {
         if self.delegated {
             self.draft_slate(sink);
         } else {
-            sink(SessionEvent::Notice(format!(
-                "[建组] {}",
-                self.names().join(" + ")
-            )));
+            let names = self.names().join(" + ");
+            self.notice(&format!("[建组] {}", names), sink);
             self.ask_user(Pending::ConfirmBegin, sink);
         }
     }

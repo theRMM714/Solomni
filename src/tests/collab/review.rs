@@ -322,15 +322,9 @@ pub(crate) fn stage_review_refills_until_the_ids_are_valid() {
     answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
     let evs = answer_card(&mut core, &sid, OPT_PLAN_SAY, "同意开工").unwrap();
     assert!(
-        evs.iter()
-            .any(|e| matches!(e, SessionEvent::Notice(n) if n.contains("重填"))),
+        shown_contains(&evs, "重填"),
         "id 不在表里该要求核心重填：{:?}",
-        evs.iter()
-            .filter_map(|e| match e {
-                SessionEvent::Notice(n) => Some(n.clone()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
+        shown_texts(&evs)
     );
     assert!(
         evs.iter()
@@ -392,21 +386,15 @@ pub(crate) fn total_review_rework_names_the_nodes_and_only_they_are_redispatched
         "没过就不交付"
     );
     assert!(
-        first
-            .iter()
-            .any(|e| matches!(e, SessionEvent::Notice(n) if n.contains("只重派这些"))),
+        shown_contains(&first, "只重派这些"),
         "如实说明只重派指名的那些"
     );
     // 用户看到的顺序：**完成**先报（节点提交那一刻），再是**返工提示**、最后那三句汇总。
     let done_at = first
         .iter()
         .position(|e| matches!(e, SessionEvent::Report { id, .. } if id == "n1-1"));
-    let rework_at = first.iter().position(
-        |e| matches!(e, SessionEvent::Notice(n) if n.contains("[返工]") && n.contains("n1-1")),
-    );
-    let tail_at = first
-        .iter()
-        .position(|e| matches!(e, SessionEvent::Notice(n) if n.contains("只重派这些")));
+    let rework_at = shown_at(&first, "[返工] n1-1");
+    let tail_at = shown_at(&first, "只重派这些");
     assert!(
         done_at.is_some() && rework_at.is_some(),
         "要有「节点完成」与「返工提示」：{:?}",

@@ -3,7 +3,7 @@
 //! 不管：工具级确认（那一张卡本片仍走它自己的路）；真实 Web 渲染由 L4 端到端覆盖。
 //! 联动：契约见 docs/session/session-model.md 的「请用户裁决：一条通道，消息 + 选项」。
 
-use super::super::builders::answer_card;
+use super::super::builders::{answer_card, shown_contains, shown_texts};
 use super::super::ops_with;
 use super::super::prelude::*;
 
@@ -232,13 +232,13 @@ pub(crate) fn cards_and_answers_survive_a_rebuild() {
         .unwrap()
         .sid;
     let first = core.open_queue(&sid).unwrap().expect("挂着一张卡").card;
-    // 回档到需求行之后：会话按**转录**重建（重启同一条路）。
-    core.rewind(
-        &sid,
-        crate::capabilities::conductor::api::RewindTarget::Delete(1),
-    )
-    .unwrap();
-    let rebuilt = core.open_queue(&sid).unwrap().expect("重建后卡还在").card;
+    // 重启 / 回档走同一条重建路：按**转录**重建，卡与选项都要回来（卡号稳定）。
+    let (meta, events) = core.history_open("w").unwrap();
+    let rebuilt_session = core.rebuild_session(&meta, &events).expect("按转录重建");
+    let crate::capabilities::conductor::service::Session::Collab(c) = rebuilt_session else {
+        panic!("重建出来的还该是协作会话");
+    };
+    let rebuilt = c.door.queue().expect("重建后卡还在").card;
     assert_eq!(rebuilt.id, first.id, "卡号跨重建稳定");
     let ids = option_ids(&rebuilt);
     let was = option_ids(&first);
@@ -352,10 +352,9 @@ pub(crate) fn the_say_option_lets_the_core_judge_the_users_words() {
         ev
     );
     assert!(
-        ev.iter()
-            .any(|e| matches!(e, SessionEvent::Notice(n) if n.contains("照你说的开工"))),
+        shown_contains(&ev, "照你说的开工"),
         "明确才开工：{:?}",
-        ev
+        shown_texts(&ev)
     );
 }
 
