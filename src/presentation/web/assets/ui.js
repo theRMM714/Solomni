@@ -18,6 +18,10 @@
     alert: '<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/>',
     folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
+    cpu: '<rect x="7" y="7" width="10" height="10" rx="2"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/>',
+    shield: '<path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6Z"/>',
+    users: '<circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M16 5a3 3 0 0 1 0 6"/><path d="M18 20a6 6 0 0 0-3-5"/>',
+    box: '<path d="m12 3 8 4v10l-8 4-8-4V7Z"/><path d="m4 7 8 4 8-4M12 11v10"/>',
     panel: '<path d="M3 5h18v14H3z"/><path d="M9 5v14"/>',
     more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
     dot: '<circle cx="12" cy="12" r="4"/>',
@@ -51,7 +55,8 @@
       attr(b, 'aria-label', label);
       b.title = label;
     }
-    b.dataset.tip = o.tip || label;
+    const tip = o.tip === undefined ? label : o.tip;
+    if (tip) b.dataset.tip = tip;
     b.appendChild(icon(o.icon));
     if (typeof o.onClick === 'function') b.onclick = o.onClick;
     if (o.disabled) b.disabled = true;
@@ -80,6 +85,7 @@
     if (!openMenu) return;
     const m = openMenu;
     openMenu = null;
+    if (m._cleanup) m._cleanup();
     if (m.parentNode && m.parentNode.removeChild) m.parentNode.removeChild(m);
     else if (m.remove) m.remove();
   }
@@ -95,8 +101,11 @@
       attr(b, 'role', 'menuitem');
       if (it.icon) b.appendChild(icon(it.icon));
       b.appendChild(el('span', '', it.label || ''));
-      if (it.disabled) b.disabled = true;
-      if (typeof it.onClick === 'function') {
+      if (it.disabled) {
+        b.disabled = true;
+        if (it.reason) b.title = it.reason;
+      }
+      if (typeof it.onClick === 'function' && !it.disabled) {
         b.onclick = () => { closeMenu(); it.onClick(); };
       }
       m.appendChild(b);
@@ -117,14 +126,12 @@
       doc.addEventListener('pointerdown', onDown, true);
       doc.addEventListener('keydown', onKey, true);
     }
-    const close = () => {
+    m._cleanup = () => {
       if (doc.removeEventListener) {
         doc.removeEventListener('pointerdown', onDown, true);
         doc.removeEventListener('keydown', onKey, true);
       }
-      closeMenu();
     };
-    m._close = close;
     return m;
   }
 

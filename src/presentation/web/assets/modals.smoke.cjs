@@ -18,6 +18,7 @@ function el(tag) {
     children: [],
     classList: { add() {}, remove() {}, contains: () => false },
     addEventListener() {},
+    setAttribute() {},
     querySelector: () => el(),
     appendChild(c) {
       // 真实 DOM 会抛：appendChild 只接受节点。桩必须一样严，否则误用照不出来。
@@ -93,6 +94,7 @@ function load(file) {
   } catch (e) { loadErrors.push(file + " 载入失败：" + e.message); }
 }
 load("md.js");
+load("ui.js");
 load("app.js");
 
 // 递归收集树里的节点（判"表单真的建出来了"）。
@@ -102,6 +104,14 @@ function walk(node, out) {
   return out;
 }
 const inputsIn = (node) => walk(node, []).filter((n) => n.tagName === "INPUT");
+const hubBody = () => walk(roots.get("#modal-root"), []).find((n) => String(n.className) === "settings-hub");
+const openPage = (id) => {
+  const hub = hubBody();
+  const nav = walk(hub, []).find((n) => String(n.className) === "settings-nav");
+  const btn = walk(nav, []).find((n) => n.tagName === "BUTTON" && n.dataset && n.dataset.id === id);
+  if (btn) btn.onclick();
+  return walk(hub, []).find((n) => String(n.className).indexOf("settings-page") === 0 && n.dataset && n.dataset.id === id);
+};
 
 const results = [];
 function check(name, fn) {
@@ -121,32 +131,34 @@ if (!loadErrors.length) {
     const nums = inputsIn(body).filter((i) => i.type === "number");
     return nums.length >= 1;
   });
-  // ② 基本设置弹窗：超时 / 提醒次数 / 压缩阈值三项都在（都是数字输入）。
-  //（调用次数上限已撤掉：模型调用没有次数上限，只有提醒次数。）
-  check("基本设置弹窗含超时、提醒、压缩与同时上台数", () => {
+  // ② 设置中心：分页后生成页只有三项数字（超时 / 提醒 / 压缩），同时上台数在资源页。
+  check("设置中心：生成页含超时、提醒、压缩", () => {
     vm.runInNewContext("openSettingsModal()", sandbox);
-    const body = roots.get("#modal-root").children[0].children[0].children[1];
-    const nums = inputsIn(body).filter((i) => i.type === "number");
-    // 四项数字输入：超时 / 提醒次数 / 压缩阈值 / 虚拟机档同时最多几台。
-    return nums.length >= 4;
+    const page = openPage("generate");
+    const nums = inputsIn(page).filter((i) => i.type === "number");
+    return nums.length >= 3;
   });
-  // ⑥ 同时上台数要随保存一起提交（后端 set_settings 收这个字段，界面漏了就等于改不了）。
-  // ⑦ "现在在跑什么"区块要在（内容异步填；这里只钉区块与初始提示，渲染路径见 app.js 的 api 调用）。
-  check("设置弹层有长驻进程区块", () => {
-    const body = roots.get("#modal-root").children[0].children[0].children[1];
-    const nodes = walk(body, []);
+  // ⑥ 同时上台数要随保存一起提交（后端 set_settings 收这个字段）；"现在在跑什么"同页。
+  check("设置中心：资源页含同时上台数与进程区块", () => {
+    vm.runInNewContext("openSettingsModal()", sandbox);
+    const page = openPage("resources");
+    const nums = inputsIn(page).filter((i) => i.type === "number");
+    const nodes = walk(page, []);
     const title = nodes.find((n) => n.className === "wf-label" && n.textContent === "现在在跑什么");
     const log = nodes.find((n) => n.className === "cfg-log");
-    return !!title && !!log;
+    return nums.length >= 1 && !!title && !!log;
   });
-  check("同时上台数随保存提交", () => {
-    const body = roots.get("#modal-root").children[0].children[0].children[1];
-    const save = walk(body, []).find((n) => n.tagName === "BUTTON" && n.textContent === "保存");
+  check("设置中心：底栏保存接线", () => {
+    vm.runInNewContext("openSettingsModal()", sandbox);
+    openPage("generate");
+    const hub = hubBody();
+    const save = walk(hub, []).find((n) => n.tagName === "BUTTON" && n.textContent === "保存");
     return !!save && typeof save.onclick === "function";
   });
-  check("沙箱策略段在设置弹层里", () => {
-    const body = roots.get("#modal-root").children[0].children[0].children[1];
-    const text = walk(body, []).map((n) => String(n.textContent || "")).join(" ");
+  check("设置中心：沙箱页含硬约束与网络围栏", () => {
+    vm.runInNewContext("openSettingsModal()", sandbox);
+    const page = openPage("sandbox");
+    const text = walk(page, []).map((n) => String(n.textContent || "")).join(" ");
     return text.indexOf("全局硬约束") >= 0 && text.indexOf("网络围栏") >= 0;
   });
   // ③ 回合分隔行要可见：解析成系统分隔行，而不是 who=标签、text 为空的空行。

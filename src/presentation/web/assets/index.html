@@ -12,9 +12,9 @@
 </head>
 <body>
 <div id="app">
-  <!-- 顶栏：品牌 + 状态 + 侧栏开关（移动端） -->
+  <!-- 顶栏：品牌 + 状态 + 侧栏开关（桌面收起 / 移动端抽屉） -->
   <header class="topbar">
-    <button id="btn-drawer" class="icon-btn only-mobile" aria-label="打开侧栏">☰</button>
+    <button id="btn-drawer" class="icon-btn" aria-label="收起或展开侧栏">☰</button>
     <div class="brand">Solomni <span class="brand-sub">转录中心</span></div>
     <div id="conn-state" class="conn-state" title="服务器连接状态"><span class="dot dot-ok"></span><span id="conn-text">已连接</span></div>
   </header>
@@ -26,29 +26,24 @@
   </div>
 
   <div class="layout">
-    <!-- 侧栏：新建工作 + 会话历史 + 设置二级菜单 -->
+    <!-- 侧栏：新建 + 会话树 + 底部设置；收起时只留图标栏 -->
     <aside id="sidebar" class="sidebar">
-      <section class="panel">
-        <button id="btn-new-work" class="btn btn-primary btn-block">+ 新建工作</button>
-      </section>
-      <div id="rejected" class="rejected"></div>
-      <section class="panel">
-        <h2>会话历史</h2>
-        <div id="history-list" class="history-list"></div>
-        <p class="panel-note">「打开」进入会话；「编辑」先看配置。点条目本身不进会话。</p>
-      </section>
-      <section class="panel">
-        <button id="settings-head" class="submenu-head">设置 <span class="caret">▾</span></button>
-        <div id="settings-body" class="submenu-body">
-          <button id="btn-providers" class="submenu-item">供应商登记</button>
-          <button id="btn-models" class="submenu-item">模型登记</button>
-          <button id="btn-core" class="submenu-item">核心 AI 默认模型</button>
-          <button id="btn-settings" class="submenu-item">基本设置</button>
-          <button id="btn-agents" class="submenu-item">agent 管理</button>
-          <button id="btn-modules" class="submenu-item">模块与服务</button>
-        </div>
-      </section>
-      <p class="sidebar-note">密钥只进登记处，任何界面不显示、不转发。</p>
+      <div class="sidebar-main">
+        <section class="panel">
+          <button id="btn-new-work" class="btn btn-primary btn-block">+ 新建工作</button>
+        </section>
+        <div id="rejected" class="rejected"></div>
+        <section class="panel">
+          <h2>会话历史</h2>
+          <div id="history-list" class="history-list"></div>
+          <p class="panel-note">铅笔菜单：打开 / 编辑 / 删除；点条目本身不进会话。</p>
+        </section>
+        <p class="sidebar-note">密钥只进登记处，任何界面不显示、不转发。</p>
+      </div>
+      <div class="sidebar-foot">
+        <button id="btn-settings" class="sidebar-action" type="button" title="设置"></button>
+      </div>
+      <div id="sidebar-rail" class="sidebar-rail"></div>
     </aside>
     <div id="drawer-mask" class="drawer-mask"></div>
 

@@ -28,8 +28,12 @@ function el(tag) {
     classList: { add() {}, remove() {} },
     // 事件处理器**记下来**（不丢）：冒烟要能像用户那样触发它（如向导里切档位、勾模块）。
     addEventListener(t, f) { (node._h[t] = node._h[t] || []).push(f); },
+    setAttribute(k, v) { (node.attrs = node.attrs || {})[k] = String(v); },
     querySelector: () => el(),
-    appendChild(c) { node.children.push(c); },
+    appendChild(c) { node.children.push(c); if (c) c.parentNode = node; },
+    removeChild(c) { const i = node.children.indexOf(c); if (i >= 0) node.children.splice(i, 1); if (c) c.parentNode = null; return c; },
+    contains(n) { return node.children.indexOf(n) >= 0; },
+    getBoundingClientRect() { return { left: 0, top: 0, right: 0, bottom: 0 }; },
     onclick: null,
   };
   return node;
@@ -573,8 +577,10 @@ setTimeout(async () => {
           "   { name: 'p', mode: 'proxy', ts: 1, done: false, run: 'stopped', tier: 'host', parent: null }," +
           "   { name: 'c', mode: 'single', ts: 2, done: false, run: 'closed', tier: 'host', parent: 'p' }," +
           "   { name: 'a', mode: 'single', ts: 3, done: false, run: 'active', tier: 'host', parent: null }];" +
-          " const box = document.querySelector('#history-list'); box.children.length = 0; renderHistory();" +
-          " const tags = box.children.map(function (el) {" +
+          " const box = document.querySelector('#history-list'); box.children.length = 0;" +
+          " state.treeOpen.add('p'); renderHistory();" +
+          " const all = []; (function walk(n) { for (const c of (n.children || [])) { all.push(c); walk(c); } })(box);" +
+          " const tags = all.map(function (el) {" +
           "   return (el.children || []).map(function (x) { return String(x.textContent); }).join('|'); });" +
           " return { tags: tags }; })()",
         sandbox

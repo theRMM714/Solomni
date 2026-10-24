@@ -17,7 +17,9 @@ const state = {
   fence: null,           // /api/state 的围栏事实：只有降级 / 要求未满足时进横幅
   sessions: new Map(),   // sid -> { sid, mode, title, lines, pending, sending, running, working, done, awaiting, readonly }
   activeSid: null,
-  settingsOpen: false,
+  treeOpen: new Set(),   // 会话树展开的父会话（纯 UI 状态，不落盘）
+  autoOpenedFor: null,   // 上次自动展开过的活跃会话：只在切换时展开祖先，不抢用户手的折叠
+  rail: false,           // 侧栏是否收起为图标栏（偏好记 localStorage）
 };
 
 /* ---------- API ---------- */
@@ -283,57 +285,112 @@ function checkbox(labelText, checked) {
   return { wrap, box };
 }
 
-/* ---------- 会话历史：只读回放；每项只有「打开」「编辑」两个动作 + 删除 ----------
- * 点条目本身不进入会话（避免误开）：进入一律走「打开」按钮。
- * 正在生成中的会话只禁用「编辑」（理由写在按钮 title 上）：后端也会再拦一次，这里只是先挡住。 */
+/* ---------- 会话历史：树 + 铅笔菜单 ----------
+ * 根会话可展开子会话；活跃路径自动展开。点条目本身不进入会话（避免误开）——
+ * 进入 / 改配置 / 删除一律走行尾铅笔的浮层菜单。子会话不单独删（删父会话会一起删）。 */
+function historyByParent() {
+  const by = new Map();
+  for (const h of (state.history || [])) {
+    const p = h.parent || '';
+    if (!by.has(p)) by.set(p, []);
+    by.get(p).push(h);
+  }
+  return by;
+}
+
+/// 当前会话的祖先链（自己 → 父 → …）：树据此自动展开，用户不用找。
+function activePath() {
+  const out = [];
+  const seen = new Set();
+  let cur = state.activeSid;
+  while (cur && !seen.has(cur)) {
+    seen.add(cur);
+    out.push(cur);
+    const h = (state.history || []).find((x) => x.name === cur);
+    cur = h && h.parent ? h.parent : null;
+  }
+  return out;
+}
+
+/// 行尾铅笔菜单：打开 / 编辑配置 / 删除（子会话多一项「打开父会话」，不给删除）。
+function historyMenu(h) {
+  const busy = generating(h.name);
+  const items = [
+    { label: '打开', icon: 'folder', onClick: () => openHistory(h.name) },
+    {
+      label: '编辑配置',
+      icon: 'pencil',
+      disabled: busy,
+      reason: busy ? '该会话正在生成中：先「停止」或等它结束，再改配置' : '',
+      onClick: () => openConfig(h.name),
+    },
+  ];
+  if (h.parent) items.splice(1, 0, { label: '打开父会话', icon: 'chevron', onClick: () => openHistory(h.parent) });
+  if (!h.parent) {
+    items.push({ sep: true });
+    items.push({ label: '删除', icon: 'close', danger: true, onClick: () => deleteHistory(h.name) });
+  }
+  return items;
+}
+
 function renderHistory() {
   const box = $('#history-list');
   if (!box) return;
   box.innerHTML = '';
   const items = state.history || [];
   if (!items.length) { box.textContent = '（还没有历史会话）'; return; }
-  for (const h of items) {
-    const el = document.createElement('div');
-    // 子会话（parent 指向另一个会话）在侧栏里**缩进**挂在父会话下。
-    el.className = 'history-item' + (h.parent ? ' history-child' : '');
-    const name = document.createElement('span'); name.className = 'hname';
-    name.textContent = (h.parent ? '└ ' : '') + h.name;
-    const mode = document.createElement('span'); mode.className = 'hmode';
-    // 运行态是**持久事实**（停止 / 关闭），与"这一刻在不在跑"分开：侧栏据此标出来。
-    const stateTag = h.run === 'stopped' ? '·已停止'
-      : h.run === 'closed' ? '·已关闭'
-        : (h.done ? '' : '·进行中 ');
-    mode.textContent =
-      stateTag + h.mode +
-      (h.tier === 'vm' && h.tier_ready === false ? '·虚拟机档不可用' : '');
-    const acts = document.createElement('div'); acts.className = 'history-acts';
-
-    const open = btn('打开', 'hbtn');
-    open.title = '进入会话视图（转録 + 启用 / 上下文继续 / 停止）';
-    open.onclick = (e) => { e.stopPropagation(); openHistory(h.name); };
-
-    const edit = btn('编辑', 'hbtn');
-    if (generating(h.name)) {
-      edit.disabled = true;
-      edit.title = '该会话正在生成中：先「停止」或等它结束，再改配置';
-    } else {
-      edit.title = h.parent
-        ? '打开配置面板：环境随主会话（档位 / 虚拟根不可改），模块 / 模型 / 权限可改'
-        : '打开配置面板（在进入会话视图之前改名单 / 模块 / 模型 / 档位）';
-      edit.onclick = (e) => { e.stopPropagation(); openConfig(h.name); };
+  // 活跃路径的祖先自动展开一次（切换会话时）；用户手动折叠后不再被抢回去。
+  if (state.autoOpenedFor !== state.activeSid) {
+    state.autoOpenedFor = state.activeSid;
+    for (const n of activePath()) {
+      const h = items.find((x) => x.name === n);
+      if (h && h.parent) state.treeOpen.add(h.parent);
     }
-    acts.appendChild(open); acts.appendChild(edit);
-
-    el.appendChild(name); el.appendChild(mode); el.appendChild(acts);
-    // 子会话由核心按节点派生，不单独删（删父会话会一起删掉它）：**不渲染**删除按钮。
-    if (!h.parent) {
-      const del = btn('✕', 'hdel');
-      del.title = '删除该会话（连同它的子会话与工作区文件一起删除）';
-      del.onclick = (e) => { e.stopPropagation(); deleteHistory(h.name); };
-      el.appendChild(del);
-    }
-    box.appendChild(el);
   }
+  const by = historyByParent();
+  const branch = (parent, into) => {
+    for (const h of (by.get(parent) || [])) {
+      const row = document.createElement('div');
+      row.className = 'history-item';
+      const kids = by.get(h.name) || [];
+      const open = state.treeOpen.has(h.name);
+      if (kids.length) {
+        const t = document.createElement('button');
+        t.type = 'button';
+        t.className = 'history-toggle' + (open ? ' open' : '');
+        t.title = open ? '收起子会话' : '展开子会话';
+        t.setAttribute('aria-label', t.title);
+        t.appendChild(ui.icon('chevron'));
+        t.onclick = (e) => {
+          e.stopPropagation();
+          if (open) state.treeOpen.delete(h.name); else state.treeOpen.add(h.name);
+          renderHistory();
+        };
+        row.appendChild(t);
+      } else {
+        const sp = document.createElement('span'); sp.className = 'history-toggle'; row.appendChild(sp);
+      }
+      const name = document.createElement('span');
+      name.className = 'hname'; name.textContent = h.name; name.title = h.name;
+      const mode = document.createElement('span'); mode.className = 'hmode';
+      // 运行态是**持久事实**（停止 / 关闭），与"这一刻在不在跑"分开：侧栏据此标出来。
+      const stateTag = h.run === 'stopped' ? '·已停止'
+        : h.run === 'closed' ? '·已关闭'
+          : (h.done ? '' : '·进行中 ');
+      mode.textContent = stateTag + h.mode +
+        (h.tier === 'vm' && h.tier_ready === false ? '·虚拟机档不可用' : '');
+      const pencil = ui.iconButton({ icon: 'pencil', label: '会话操作', tip: '', cls: 'hpen' });
+      pencil.onclick = (e) => { e.stopPropagation(); ui.menu(pencil, historyMenu(h)); };
+      row.appendChild(name); row.appendChild(mode); row.appendChild(pencil);
+      into.appendChild(row);
+      if (kids.length && open) {
+        const wrap = document.createElement('div'); wrap.className = 'history-kids';
+        branch(h.name, wrap);
+        into.appendChild(wrap);
+      }
+    }
+  };
+  branch('', box);
 }
 
 /// 快照（/api/state）说这条会话、或它的任一子会话在跑吗。
@@ -1022,10 +1079,66 @@ function renderSidebar() {
   if (rejected) rejected.textContent = (state.rejected || []).join('\n');
 }
 
-function toggleSettings() {
-  state.settingsOpen = !state.settingsOpen;
-  $('#settings-head').className = 'submenu-head' + (state.settingsOpen ? ' open' : '');
-  $('#settings-body').className = 'submenu-body' + (state.settingsOpen ? ' open' : '');
+/* ---------- 侧栏：桌面收起为图标栏，移动端是抽屉 ---------- */
+const RAIL_KEY = 'solomni.ui.sidebar';
+function isNarrow() {
+  try { return typeof matchMedia === 'function' && matchMedia('(max-width: 899px)').matches; }
+  catch (e) { return false; }
+}
+function readRail() {
+  try { return localStorage.getItem(RAIL_KEY) === 'rail'; } catch (e) { return false; }
+}
+function saveRail() {
+  try { localStorage.setItem(RAIL_KEY, state.rail ? 'rail' : 'wide'); } catch (e) { /* 存不了就只留内存态 */ }
+}
+function applyRail(railed) {
+  state.rail = !!railed;
+  const sb = $('#sidebar');
+  if (sb) sb.className = 'sidebar' + (state.rail && !isNarrow() ? ' rail' : '');
+}
+function openDrawer() {
+  const sb = $('#sidebar'); if (sb) sb.classList.add('open');
+  const mask = $('#drawer-mask'); if (mask) mask.classList.add('show');
+}
+function closeDrawer() {
+  const sb = $('#sidebar'); if (sb) sb.classList.remove('open');
+  const mask = $('#drawer-mask'); if (mask) mask.classList.remove('show');
+}
+function toggleSidebar() {
+  if (isNarrow()) { openDrawer(); return; }
+  applyRail(!state.rail);
+  saveRail();
+}
+
+/// 侧栏的图标与底部设置按钮：HTML 只留骨架，图标从 ui.js 来（不再写字符画）。
+function setupSidebar() {
+  if (typeof ui === 'undefined') return;
+  const foot = $('#btn-settings');
+  if (foot && !(foot.children || []).length) {
+    foot.appendChild(ui.icon('gear'));
+    const label = document.createElement('span');
+    label.className = 'sidebar-action-label';
+    label.textContent = '设置';
+    foot.appendChild(label);
+  }
+  const rail = $('#sidebar-rail');
+  if (rail && !(rail.children || []).length) {
+    const expand = () => { applyRail(false); saveRail(); };
+    rail.appendChild(ui.iconButton({ icon: 'plus', label: '新建工作', tip: '新建工作', onClick: openWizard }));
+    rail.appendChild(ui.iconButton({ icon: 'clock', label: '会话历史', tip: '会话历史', onClick: expand }));
+    rail.appendChild(ui.iconButton({ icon: 'gear', label: '设置', tip: '设置', onClick: () => openSettingsHub('generate') }));
+    rail.appendChild(ui.iconButton({ icon: 'chevron', label: '展开侧栏', tip: '展开侧栏', onClick: expand }));
+  }
+  const drawer = $('#btn-drawer');
+  if (drawer) {
+    drawer.innerHTML = '';
+    drawer.appendChild(ui.icon('panel'));
+    drawer.onclick = toggleSidebar;
+  }
+  applyRail(readRail());
+  if (typeof window !== 'undefined' && window.addEventListener) {
+    window.addEventListener('resize', () => applyRail(state.rail));
+  }
 }
 
 /* ---------- 通用小构件（只用冒烟桩支持的 API） ---------- */
@@ -1205,8 +1318,7 @@ function openModal(title, build, wide) {
 }
 
 /* ---------- 设置①：供应商登记（录入 / 修改 / 删除） ---------- */
-function openProvidersModal() {
-  openModal('供应商登记', (c) => {
+function providersPage(c) {
     const listWrap = document.createElement('div'); listWrap.className = 'reg-list';
     const idIn = textInput('id');
     const urlIn = textInput('base_url');
@@ -1261,12 +1373,14 @@ function openProvidersModal() {
     form.appendChild(field('api_key', keyIn));
     form.appendChild(save);
     c.body.appendChild(form);
-  });
+}
+
+function openProvidersModal() {
+  openModal('供应商登记', providersPage);
 }
 
 /* ---------- 设置②：模型登记（录入 / 修改 / 删除 + 供应商模型发现） ---------- */
-function openModelsModal() {
-  openModal('模型登记', (c) => {
+function modelsPage(c) {
     const listWrap = document.createElement('div'); listWrap.className = 'reg-list';
     const discWrap = document.createElement('div'); discWrap.className = 'reg-list';
     const idIn = textInput('id');
@@ -1409,12 +1523,14 @@ function openModelsModal() {
     const discTitle = document.createElement('div'); discTitle.className = 'wf-label'; discTitle.textContent = '从供应商获取模型（点选填入 api_model）';
     c.body.appendChild(discTitle);
     c.body.appendChild(discWrap);
-  });
+}
+
+function openModelsModal() {
+  openModal('模型登记', modelsPage);
 }
 
 /* ---------- 设置③：核心 AI 默认模型 ---------- */
-function openCoreModal() {
-  openModal('核心 AI 默认模型', (c) => {
+function coreModelBlock(c) {
     const opts = state.models.map((m) => ({ value: m.id, label: m.name + '（' + m.id + '）' }));
     const sel = selectInput(opts, state.core);
     const save = btn('保存', 'btn btn-primary btn-block');
@@ -1430,143 +1546,266 @@ function openCoreModal() {
     if (!opts.length) c.body.appendChild(emptyHint('（未登记模型，先到「模型登记」添加）'));
     c.body.appendChild(field('核心 AI 使用的模型', sel));
     c.body.appendChild(save);
-  });
+}
+
+function openCoreModal() {
+  openModal('核心 AI 默认模型', coreModelBlock);
 }
 
 /* ---------- 设置④：基本设置 ---------- */
+/// 设置 1–4 页共用的控件：一次建全，切页只切显示——保存是全量写，不能因为没建过某页丢改动。
+function settingsForm() {
+  const stream = checkbox('流式传输（供应商逐片返回，边收边显示）', state.settings.streaming);
+  const cot = checkbox('思维链显示（每条回答下的思维链，永远默认折叠、点击展开）', state.settings.show_reasoning);
+  const to = numberInput('单次模型调用的超时（秒）', state.settings.llm_timeout_secs, 10, 3600);
+  const remind = numberInput('一轮内最多提醒几次', state.settings.discuss_remind_cap, 0, 20);
+  const pct = numberInput('上下文用到百分之多少就压缩', state.settings.compact_at_percent, 0, 100);
+  const guests = numberInput('虚拟机档同时最多几台', state.settings.max_guests, 0, 64);
+  const sb = state.settings.sandbox || {};
+  const sp = sb.policy || {};
+  const en = sp.enforce || {};
+  const sd = sb.defaults || {};
+  const lines = (v) => (Array.isArray(v) ? v.join('\n') : '');
+  const area = (label, value) => {
+    const t = areaInput('每行一条');
+    t.value = lines(value);
+    return { t, f: field(label, t) };
+  };
+  const network = checkbox('允许工具 / guest / 常驻服务 / 构建出站（全局）', !!sp.network);
+  const writeAcl = checkbox('允许 Windows 写本机目录 ACL（只影响 Windows 的容器围栏）', !!(sp.windows && sp.windows.write_acl));
+  const level = (v) => selectInput([
+    { value: 'require', label: 'require：必须强制，不可用时询问是否本进程降级' },
+    { value: 'best_effort', label: 'best_effort：尽力而为，不可用时降级并如实报告' },
+  ], v || 'require');
+  const enFs = level(en.filesystem);
+  const enNet = level(en.network);
+  const enTree = level(en.process_tree);
+  const enEnv = level(en.env_whitelist);
+  const onUnavailable = selectInput([
+    { value: 'ask', label: 'ask：启动时询问是否本进程降级（不落盘）' },
+    { value: 'refuse', label: 'refuse：直接拒绝' },
+  ], sp.on_unavailable || 'ask');
+  const hostRoots = area('主机只读根（绝对路径，每行一条）', sp.host_read_roots);
+  const hardDeny = area('全局黑名单（工作区相对路径，只增不减）', sp.deny);
+  const defRead = area('默认读白名单（会话可覆盖）', sd.allow_read);
+  const defWrite = area('默认提交白名单（会话可覆盖）', sd.allow_write);
+  const defAsk = area('默认 ask 表（会话可覆盖）', sd.ask);
+  const defGran = selectInput([
+    { value: 'ask', label: 'ask' },
+    { value: 'full', label: 'full' },
+  ], sd.granularity || 'ask');
+  return { stream, cot, to, remind, pct, guests, network, writeAcl, enFs, enNet, enTree, enEnv, onUnavailable, hostRoots, hardDeny, defRead, defWrite, defAsk, defGran };
+}
+
+/// 1 页：生成与上下文。
+function buildGeneratePage(c, f) {
+  c.body.appendChild(f.stream.wrap);
+  c.body.appendChild(f.cot.wrap);
+  c.body.appendChild(f.to.wrap);
+  c.body.appendChild(cfgHint('超时是全局的：讨论、执行、验收与单 agent 共用这一份预算。用尽时会中断本轮并提示，点「继续」可重试（会话不会作废）。'));
+  c.body.appendChild(f.remind.wrap);
+  c.body.appendChild(cfgHint('调用次数没有上限：模型继续核实就继续跑，直到它给出表态（你可以随时点「停止」）。'));
+  c.body.appendChild(cfgHint('一轮内提醒到顶就记一行「未回应」放过它，整轮继续（不阻塞）。'));
+  c.body.appendChild(f.pct.wrap);
+  c.body.appendChild(cfgHint('压缩由 AI 自己做：到点自动压一次；也可以随时手动 /compact。填 0 = 不自动压。'));
+}
+
+/// 2 页：沙箱围栏（全局硬约束）。
+function buildSandboxPage(c, f) {
+  c.body.appendChild(cfgHint('以下沙箱策略是全局硬约束：会话不能改；保存后自动整体重启。', 'warn'));
+  c.body.appendChild(f.network.wrap);
+  c.body.appendChild(field('文件系统围栏', f.enFs));
+  c.body.appendChild(field('网络围栏（仅在网络关闭时需要）', f.enNet));
+  c.body.appendChild(field('进程树围栏', f.enTree));
+  c.body.appendChild(field('环境白名单', f.enEnv));
+  c.body.appendChild(field('机制不可用时', f.onUnavailable));
+  c.body.appendChild(f.writeAcl.wrap);
+  c.body.appendChild(cfgHint('Windows 上 require 文件系统/网络围栏必须先勾选「允许 Windows 写本机目录 ACL」；否则保存会被拒绝。要无围栏请把对应 enforce 降为 best_effort。', 'warn'));
+}
+
+/// 3 页：权限默认值。
+function buildPermissionsPage(c, f) {
+  c.body.appendChild(f.hostRoots.f);
+  c.body.appendChild(f.hardDeny.f);
+  c.body.appendChild(cfgHint('默认权限是会话可覆盖的起点；全局黑名单是硬底线，会话只能追加、不能清空。'));
+  c.body.appendChild(f.defRead.f);
+  c.body.appendChild(f.defWrite.f);
+  c.body.appendChild(field('默认决定粒度', f.defGran));
+  c.body.appendChild(f.defAsk.f);
+}
+
+/// 4 页：资源与进程。
+function buildResourcesPage(c, f) {
+  c.body.appendChild(f.guests.wrap);
+  c.body.appendChild(cfgHint('每台虚拟机固定 2 GB 内存 / 2 核：到上限时新建会如实拒绝，不会悄悄抢资源。填 0 = 不限制。'));
+  const title = document.createElement('div');
+  title.className = 'wf-label';
+  title.textContent = '现在在跑什么';
+  const box = document.createElement('div');
+  box.className = 'cfg-log';
+  box.textContent = '读取中…';
+  c.body.appendChild(title);
+  c.body.appendChild(box);
+  api('GET', '/api/processes').then((r) => {
+    const list = (r && r.procs) || [];
+    box.textContent = list.length ? list.map((p) =>
+      (p.alive ? '在跑' : '已退出（等对账清）') + ' · ' + p.purpose + ' · ' + p.owner + ' · pid ' + p.pid +
+      (p.orphanRisk ? ' · 父死子亡未挂上（核心被强杀会留下）：' + (p.guardNote || '') : '')
+    ).join('\n') : '没有产品起的长驻进程。';
+  }).catch((e) => { box.textContent = '读不到：' + e.message; });
+}
+
+function parseSettingLines(text) {
+  return String(text || '').split(/[\n,]/).map((s) => s.trim()).filter((s) => s.length > 0);
+}
+
+/// 1–4 页共用一份提交体（set_settings 是全量写）。
+function collectSettings(f) {
+  return {
+    streaming: f.stream.box.checked,
+    show_reasoning: f.cot.box.checked,
+    llm_timeout_secs: Number(f.to.input.value) || 300,
+    discuss_remind_cap: Number(f.remind.input.value) || 0,
+    compact_at_percent: Number(f.pct.input.value) || 0,
+    max_guests: Number(f.guests.input.value) || 0,
+    sandbox: {
+      policy: {
+        network: f.network.box.checked,
+        enforce: {
+          filesystem: f.enFs.value,
+          network: f.enNet.value,
+          process_tree: f.enTree.value,
+          env_whitelist: f.enEnv.value,
+        },
+        on_unavailable: f.onUnavailable.value,
+        windows: { write_acl: f.writeAcl.box.checked },
+        host_read_roots: parseSettingLines(f.hostRoots.t.value),
+        deny: parseSettingLines(f.hardDeny.t.value),
+      },
+      defaults: {
+        allow_read: parseSettingLines(f.defRead.t.value),
+        allow_write: parseSettingLines(f.defWrite.t.value),
+        granularity: f.defGran.value,
+        ask: parseSettingLines(f.defAsk.t.value),
+      },
+    },
+  };
+}
+
+async function saveSettings(c, f, saveBtn) {
+  const reset = busyButton(saveBtn, '保存中…');
+  try {
+    const saved = await api('POST', actionUrl('set_settings'), collectSettings(f));
+    await refreshState();
+    c.setMsg(saved && saved.restart ? '已保存：沙箱策略变更，正在重启…' : '已保存');
+  } catch (e) {
+    c.setMsg(e.message, true);
+  } finally {
+    reset();
+  }
+}
+
 function openSettingsModal() {
-  openModal('基本设置', (c) => {
-    const stream = checkbox('流式传输（供应商逐片返回，边收边显示）', state.settings.streaming);
-    const cot = checkbox('思维链显示（每条回答下的思维链，永远默认折叠、点击展开）', state.settings.show_reasoning);
-    // 单次模型调用的总预算（全局：讨论 / 执行 / 验收 / 单 agent 共用）。
-    const to = numberInput('单次模型调用的超时（秒）', state.settings.llm_timeout_secs, 10, 3600);
-    // 讨论阶段的提醒次数（用户可调）：一轮内对同一个成员最多提醒几次。
-    // **调用次数没有上限**：模型继续核实就继续跑，直到它给出表态（或用户点停止）。
-    const remind = numberInput('一轮内最多提醒几次', state.settings.discuss_remind_cap, 0, 20);
-    // 上下文用到多少就该压（占模型窗口的百分比）。
-    const pct = numberInput('上下文用到百分之多少就压缩', state.settings.compact_at_percent, 0, 100);
-    // 同时最多几台 guest（每台固定 -m 2048 -smp 2）：0 = 不限制；超了在起 guest 那一刻如实拒绝。
-    const guests = numberInput('虚拟机档同时最多几台', state.settings.max_guests, 0, 64);
-    // 全局沙箱策略（硬约束）：保存后整体重启，避免旧 guest / 旧快照半生效。
-    const sb = state.settings.sandbox || {};
-    const sp = sb.policy || {};
-    const en = sp.enforce || {};
-    const sd = sb.defaults || {};
-    const lines = (v) => (Array.isArray(v) ? v.join('\n') : '');
-    const parseLines = (text) => String(text || '')
-      .split(/[\n,]/).map((s) => s.trim()).filter((s) => s.length > 0);
-    const area = (label, value, hint) => {
-      const t = areaInput('每行一条');
-      t.value = lines(value);
-      const f = field(label, t);
-      if (hint) f.appendChild(cfgHint(hint));
-      return { t, f };
+  openSettingsHub('generate');
+}
+
+/* ---------- 设置中心：左侧分页、右侧单页、底栏统一保存 ----------
+ * 1–4 页共享同一份 AppSettings（set_settings 是全量写）：控件一次建全，切页只切显示。
+ * 5–8 页是即时的登记 / 启停操作，不显示保存栏。 */
+const SETTINGS_PAGES = [
+  { id: 'generate', group: '设置', label: '生成与上下文', icon: 'cpu' },
+  { id: 'sandbox', group: '设置', label: '沙箱围栏', icon: 'shield' },
+  { id: 'permissions', group: '设置', label: '权限默认值', icon: 'gear' },
+  { id: 'resources', group: '设置', label: '资源与进程', icon: 'dot' },
+  { id: 'providers', group: '登记', label: '供应商', icon: 'box' },
+  { id: 'models', group: '登记', label: '模型与核心默认', icon: 'dot' },
+  { id: 'agents', group: '登记', label: 'agent 管理', icon: 'users' },
+  { id: 'modules', group: '登记', label: '模块与服务', icon: 'folder' },
+];
+
+function openSettingsHub(page) {
+  openModal('设置', (c) => {
+    const hub = document.createElement('div');
+    hub.className = 'settings-hub';
+    const nav = document.createElement('nav');
+    nav.className = 'settings-nav';
+    nav.setAttribute('aria-label', '设置分页');
+    const panes = document.createElement('div');
+    panes.className = 'settings-panes';
+    const foot = document.createElement('div');
+    foot.className = 'settings-foot';
+    const form = settingsForm();
+    const save = btn('保存', 'btn btn-primary');
+    save.onclick = () => saveSettings(c, form, save);
+    const hint = document.createElement('span');
+    hint.className = 'settings-foot-hint';
+    hint.textContent = '这四页共用同一份保存（全量写入）';
+    foot.appendChild(save);
+    foot.appendChild(hint);
+    hub.appendChild(nav);
+    hub.appendChild(panes);
+    hub.appendChild(foot);
+
+    const built = new Map();
+    const ctxOf = (pane) => ({ body: pane, setMsg: c.setMsg });
+    const builders = {
+      generate: (pane, ctx) => buildGeneratePage(ctx, form),
+      sandbox: (pane, ctx) => buildSandboxPage(ctx, form),
+      permissions: (pane, ctx) => buildPermissionsPage(ctx, form),
+      resources: (pane, ctx) => buildResourcesPage(ctx, form),
+      providers: (pane, ctx) => providersPage(ctx),
+      models: (pane, ctx) => { modelsPage(ctx); coreModelBlock(ctx); },
+      agents: (pane, ctx) => agentsPage(ctx),
+      modules: (pane, ctx) => modulesPage(ctx),
     };
-    const select = (label, opts, value) => field(label, selectInput(opts, value));
-    const network = checkbox('允许工具 / guest / 常驻服务 / 构建出站（全局）', !!sp.network);
-    const writeAcl = checkbox('允许 Windows 写本机目录 ACL（只影响 Windows 的容器围栏）', !!(sp.windows && sp.windows.write_acl));
-    const level = (v) => selectInput([
-      { value: 'require', label: 'require：必须强制，不可用时询问是否本进程降级' },
-      { value: 'best_effort', label: 'best_effort：尽力而为，不可用时降级并如实报告' },
-    ], v || 'require');
-    const enFs = level(en.filesystem);
-    const enNet = level(en.network);
-    const enTree = level(en.process_tree);
-    const enEnv = level(en.env_whitelist);
-    const onUnavailable = selectInput([
-      { value: 'ask', label: 'ask：启动时询问是否本进程降级（不落盘）' },
-      { value: 'refuse', label: 'refuse：直接拒绝' },
-    ], sp.on_unavailable || 'ask');
-    const hostRoots = area('主机只读根（绝对路径，每行一条）', sp.host_read_roots);
-    const hardDeny = area('全局黑名单（工作区相对路径，只增不减）', sp.deny);
-    const defRead = area('默认读白名单（会话可覆盖）', sd.allow_read);
-    const defWrite = area('默认提交白名单（会话可覆盖）', sd.allow_write);
-    const defAsk = area('默认 ask 表（会话可覆盖）', sd.ask);
-    const defGran = selectInput([
-      { value: 'ask', label: 'ask' },
-      { value: 'full', label: 'full' },
-    ], sd.granularity || 'ask');
-    c.body.appendChild(cfgHint('以下沙箱策略是全局硬约束：会话不能改；保存后自动整体重启。', 'warn'));
-    c.body.appendChild(network.wrap);
-    c.body.appendChild(field('文件系统围栏', enFs));
-    c.body.appendChild(field('网络围栏（仅在网络关闭时需要）', enNet));
-    c.body.appendChild(field('进程树围栏', enTree));
-    c.body.appendChild(field('环境白名单', enEnv));
-    c.body.appendChild(field('机制不可用时', onUnavailable));
-    c.body.appendChild(writeAcl.wrap);
-    c.body.appendChild(cfgHint('Windows 上 require 文件系统/网络围栏必须先勾选「允许 Windows 写本机目录 ACL」；否则保存会被拒绝。要无围栏请把对应 enforce 降为 best_effort。', 'warn'));
-    c.body.appendChild(hostRoots.f);
-    c.body.appendChild(hardDeny.f);
-    c.body.appendChild(cfgHint('默认权限是会话可覆盖的起点；全局黑名单是硬底线，会话只能追加、不能清空。'));
-    c.body.appendChild(defRead.f);
-    c.body.appendChild(defWrite.f);
-    c.body.appendChild(field('默认决定粒度', defGran));
-    c.body.appendChild(defAsk.f);
-    const save = btn('保存', 'btn btn-primary btn-block');
-    save.onclick = async () => {
-      try {
-        const saved = await api('POST', actionUrl('set_settings'), {
-          streaming: stream.box.checked,
-          show_reasoning: cot.box.checked,
-          llm_timeout_secs: Number(to.input.value) || 300,
-          discuss_remind_cap: Number(remind.input.value) || 0,
-          compact_at_percent: Number(pct.input.value) || 0,
-          max_guests: Number(guests.input.value) || 0,
-          sandbox: {
-            policy: {
-              network: network.box.checked,
-              enforce: {
-                filesystem: enFs.value,
-                network: enNet.value,
-                process_tree: enTree.value,
-                env_whitelist: enEnv.value,
-              },
-              on_unavailable: onUnavailable.value,
-              windows: { write_acl: writeAcl.box.checked },
-              host_read_roots: parseLines(hostRoots.t.value),
-              deny: parseLines(hardDeny.t.value),
-            },
-            defaults: {
-              allow_read: parseLines(defRead.t.value),
-              allow_write: parseLines(defWrite.t.value),
-              granularity: defGran.value,
-              ask: parseLines(defAsk.t.value),
-            },
-          },
-        });
-        await refreshState();
-        c.setMsg(saved && saved.restart ? '已保存：沙箱策略变更，正在重启…' : '已保存');
-      } catch (e) { c.setMsg(e.message, true); }
-    };
-    c.body.appendChild(stream.wrap);
-    c.body.appendChild(cot.wrap);
-    c.body.appendChild(to.wrap);
-    c.body.appendChild(cfgHint('超时是全局的：讨论、执行、验收与单 agent 共用这一份预算。用尽时会中断本轮并提示，点「继续」可重试（会话不会作废）。'));
-    c.body.appendChild(remind.wrap);
-    c.body.appendChild(cfgHint('调用次数没有上限：模型继续核实就继续跑，直到它给出表态（你可以随时点「停止」）。'));
-    c.body.appendChild(cfgHint('一轮内提醒到顶就记一行「未回应」放过它，整轮继续（不阻塞）。'));
-    c.body.appendChild(pct.wrap);
-    c.body.appendChild(cfgHint('压缩由 AI 自己做：到点自动压一次；也可以随时手动 /compact。填 0 = 不自动压。'));
-    c.body.appendChild(guests.wrap);
-    c.body.appendChild(cfgHint('每台虚拟机固定 2 GB 内存 / 2 核：到上限时新建会如实拒绝，不会悄悄抢资源。填 0 = 不限制。'));
-    // 现在在跑什么（只读）：产品亲手起的长驻子进程 + 归属；死条目如实标出来（等启动对账清）。
-    const procsTitle = document.createElement('div');
-    procsTitle.className = 'wf-label';
-    procsTitle.textContent = '现在在跑什么';
-    const procsBox = document.createElement('div');
-    procsBox.className = 'cfg-log';
-    procsBox.textContent = '读取中…';
-    c.body.appendChild(procsTitle);
-    c.body.appendChild(procsBox);
-    api('GET', '/api/processes').then((r) => {
-      const list = (r && r.procs) || [];
-      procsBox.textContent = list.length ? list.map((p) =>
-        (p.alive ? '在跑' : '已退出（等对账清）') + ' · ' + p.purpose + ' · ' + p.owner + ' · pid ' + p.pid +
-        (p.orphanRisk ? ' · 父死子亡未挂上（核心被强杀会留下）：' + (p.guardNote || '') : '')
-      ).join('\n') : '没有产品起的长驻进程。';
-    }).catch((e) => { procsBox.textContent = '读不到：' + e.message; });
-    c.body.appendChild(save);
-  });
+    const settingsIds = new Set(['generate', 'sandbox', 'permissions', 'resources']);
+
+    let group = '';
+    for (const p of SETTINGS_PAGES) {
+      if (p.group !== group) {
+        group = p.group;
+        const g = document.createElement('div');
+        g.className = 'settings-nav-group';
+        g.textContent = group;
+        nav.appendChild(g);
+      }
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'settings-nav-item';
+      b.dataset.id = p.id;
+      b.appendChild(ui.icon(p.icon));
+      const label = document.createElement('span');
+      label.textContent = p.label;
+      b.appendChild(label);
+      b.onclick = () => show(p.id);
+      nav.appendChild(b);
+    }
+
+    function show(id) {
+      if (!builders[id]) id = 'generate';
+      for (const b of nav.children) {
+        if (!b.dataset || !b.dataset.id) continue;
+        b.className = 'settings-nav-item' + (b.dataset.id === id ? ' active' : '');
+      }
+      let pane = built.get(id);
+      if (!pane) {
+        pane = document.createElement('section');
+        pane.className = 'settings-page';
+        pane.dataset.id = id;
+        panes.appendChild(pane);
+        builders[id](pane, ctxOf(pane));
+        built.set(id, pane);
+      }
+      for (const ch of panes.children) {
+        ch.className = 'settings-page' + (ch.dataset.id === id ? '' : ' hidden');
+      }
+      foot.className = settingsIds.has(id) ? 'settings-foot' : 'settings-foot hidden';
+      c.setMsg('');
+    }
+
+    c.body.appendChild(hub);
+    show(page || 'generate');
+  }, true);
 }
 
 /* ---------- 通用：多选一弹层（顶替原生 confirm 的三选） ---------- */
@@ -1585,8 +1824,7 @@ function choiceModal(title, question, actions) {
 }
 
 /* ---------- 设置⑤：agent 管理（列表 / 新建 / 编辑 / 删除） ---------- */
-function openAgentsModal() {
-  openModal('agent 管理', (c) => {
+function agentsPage(c) {
     const listWrap = document.createElement('div'); listWrap.className = 'reg-list';
     const modWrap = document.createElement('div'); modWrap.className = 'wf-mods';
     const nameIn = textInput('agent 名字（会当沙箱目录名，非空、无非法字符、不能重名）');
@@ -1676,7 +1914,10 @@ function openAgentsModal() {
     form.appendChild(field('说明', noteIn));
     form.appendChild(save); form.appendChild(cancelEdit);
     c.body.appendChild(form);
-  }, true);
+}
+
+function openAgentsModal() {
+  openModal('agent 管理', agentsPage, true);
 }
 
 /* ---------- 上传文件到本次工作的 work/ ---------- */
@@ -3510,11 +3751,10 @@ function eventError(err) {
 /* 事实只有两份：模块清单 + 服务运行态（/api/state）与动作目录（/api/actions）——不在这里另写一份。
    只列 modules/ 下的模块；每个模块下面挂它的服务（带开关）与功能（每个功能一个「使用」子卡片）。
    系统工具各回各的入口，不倒进这一块（模块的全局开关 set_module_enabled 挂在模块头上）。 */
-async function openModulesPanel() {
-  const ctx = openModal('模块与服务', () => {}, true);
+function modulesPage(c) {
   const load = async () => {
-    ctx.body.innerHTML = '';
-    ctx.setMsg('加载中…');
+    c.body.innerHTML = '';
+    c.setMsg('加载中…');
     let mods = [];
     let services = [];
     let actions = [];
@@ -3526,13 +3766,17 @@ async function openModulesPanel() {
       // 隐秘字段的设置面另有入口：值不在这一块面板里回显。
       actions = (ac.actions || []).filter((a) => a.id !== 'set_secret' && a.id !== 'clear_secret');
     } catch (e) {
-      ctx.setMsg('加载失败：' + e.message, true);
+      c.setMsg('加载失败：' + e.message, true);
       return;
     }
-    ctx.setMsg('');
-    renderModulesPanel(ctx, mods, services, actions, load);
+    c.setMsg('');
+    renderModulesPanel(c, mods, services, actions, load);
   };
-  await load();
+  load();
+}
+
+function openModulesPanel() {
+  openModal('模块与服务', modulesPage, true);
 }
 
 /** 纯渲染（数据注入）：模块 → 服务（开关 + 运行态）→ 功能（「使用」按钮）。 */
@@ -3672,21 +3916,13 @@ function actionRunner(action) {
   return box;
 }
 
-/* ---------- 抽屉（移动端） ---------- */
-$('#btn-drawer').onclick = () => { $('#sidebar').classList.add('open'); $('#drawer-mask').classList.add('show'); };
-$('#drawer-mask').onclick = () => { $('#sidebar').classList.remove('open'); $('#drawer-mask').classList.remove('show'); };
-
-/* ---------- 顶层接线 ---------- */
+/* ---------- 抽屉遮罩 / 顶层接线 ---------- */
+$('#drawer-mask').onclick = closeDrawer;
 $('#btn-new-work').onclick = openWizard;
-$('#settings-head').onclick = toggleSettings;
-$('#btn-providers').onclick = openProvidersModal;
-$('#btn-models').onclick = openModelsModal;
-$('#btn-core').onclick = openCoreModal;
-$('#btn-settings').onclick = openSettingsModal;
-$('#fence-settings').onclick = openSettingsModal;
-$('#btn-agents').onclick = openAgentsModal;
-$('#btn-modules').onclick = openModulesPanel;
+$('#btn-settings').onclick = () => openSettingsHub('generate');
+$('#fence-settings').onclick = () => openSettingsHub('sandbox');
 $('#btn-upload').onclick = pickUploadFile;
+setupSidebar();
 
 /* ---------- 启动 ---------- */
 refreshState()
