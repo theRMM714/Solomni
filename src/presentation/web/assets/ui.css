@@ -3,6 +3,20 @@
  * 联动：页面布局在 /style.css；组件工厂在 /ui.js。 */
 .hidden { display: none !important; }
 
+/* ---- 统一滚动条：跟随主题，不露出系统白条 ---- */
+* { scrollbar-width: thin; scrollbar-color: var(--color-surface-3) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--color-surface-3); border-radius: var(--r-pill);
+  border: 2px solid transparent; background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--color-border-strong); background-clip: padding-box; }
+*::-webkit-scrollbar-corner { background: transparent; }
+
+/* 原生勾选/单选跟随主题的强调色 */
+input[type="checkbox"], input[type="radio"] { accent-color: var(--color-accent); }
+
 /* ---- 焦点可见：键盘走查时的统一反馈 ---- */
 :where(button, a, input, select, textarea, summary):focus-visible {
   outline: 2px solid var(--color-focus);

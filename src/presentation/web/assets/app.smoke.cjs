@@ -348,14 +348,16 @@ setTimeout(async () => {
           " const head = (first.children || []).filter(function (c) { return clsOf(c)[0] === 'turn-head'; })[0];" +
           " const body = (first.children || []).filter(function (c) { return clsOf(c)[0] === 'turn-body'; })[0] || { children: [] };" +
           " const bodyCls = (body.children || []).map(function (c) { return clsOf(c)[0]; });" +
+          " const cotNode = (body.children || []).filter(function (c) { return clsOf(c)[0] === 'cot'; })[0];" +
           " const userRows = all.filter(function (n) { return clsOf(n).indexOf('user') >= 0; });" +
           " return { turns: turns.length, head: !!head," +
-          "   cot: bodyCls.indexOf('cot') >= 0, text: bodyCls.indexOf('turn-text') >= 0," +
+          "   cot: bodyCls.indexOf('cot') >= 0, cotClosed: !!cotNode && cotNode.open === false," +
+          "   text: bodyCls.indexOf('turn-text') >= 0," +
           "   tools: bodyCls.indexOf('fold') >= 0, user: userRows.length };" +
           "})()",
         sandbox
       );
-      lineRule = r.turns === 1 && r.head && r.cot && r.text && r.tools && r.user === 1;
+      lineRule = r.turns === 1 && r.head && r.cot && r.cotClosed && r.text && r.tools && r.user === 1;
       if (!lineRule) loadErrors.push('行画法检查：' + JSON.stringify(r));
     } catch (e) { loadErrors.push('行画法检查失败：' + e.message); }
   }

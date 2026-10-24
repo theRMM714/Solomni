@@ -1394,6 +1394,7 @@ function openProvidersModal() {
 
 /* ---------- 设置②：模型登记（录入 / 修改 / 删除 + 供应商模型发现） ---------- */
 function modelsPage(c) {
+  const changed = () => { if (typeof c.afterChange === 'function') c.afterChange(); };
     const listWrap = document.createElement('div'); listWrap.className = 'reg-list';
     const discWrap = document.createElement('div'); discWrap.className = 'reg-list';
     const idIn = textInput('id');
@@ -1434,7 +1435,7 @@ function modelsPage(c) {
         del.onclick = async () => {
           try {
             await api('POST', actionUrl('remove_model'), { id: m.id });
-            await refreshState(); rebuild();
+            await refreshState(); rebuild(); changed();
             c.setMsg('已删除 ' + m.id);
           } catch (e) { c.setMsg(e.message, true); }
         };
@@ -1448,7 +1449,7 @@ function modelsPage(c) {
             const what = r.outcome === 'supported' ? '支持原生工具调用'
               : r.outcome === 'unsupported' ? '**不支持**原生工具调用（供应商拒了带 tools 的请求）'
               : '无法判定（供应商接受了 tools，但这次没有发起调用）';
-            await refreshState(); rebuild();
+            await refreshState(); rebuild(); changed();
             c.setMsg(what + '｜' + (r.detail || '') + '｜登记处现在是「' +
               (r.mode === 'native' ? '原生' : '手写信封') + '」，下一次生成起生效');
           } catch (e) { c.setMsg(e.message, true); }
@@ -1515,7 +1516,7 @@ function modelsPage(c) {
       }
       try {
         await api('POST', actionUrl('upsert_model'), body);
-        await refreshState(); rebuild();
+        await refreshState(); rebuild(); changed();
         c.setMsg('已保存：' + body.id);
       } catch (e) { c.setMsg(e.message, true); }
     };
@@ -1754,11 +1755,14 @@ function openSettingsHub(page) {
     const hint = document.createElement('span');
     hint.className = 'settings-foot-hint';
     hint.textContent = '这四页共用同一份保存（全量写入）';
-    foot.appendChild(save);
     foot.appendChild(hint);
+    foot.appendChild(save);
+    const main = document.createElement('div');
+    main.className = 'settings-main';
+    main.appendChild(panes);
+    main.appendChild(foot);
     hub.appendChild(nav);
-    hub.appendChild(panes);
-    hub.appendChild(foot);
+    hub.appendChild(main);
 
     const built = new Map();
     const ctxOf = (pane) => ({ body: pane, setMsg: c.setMsg });
@@ -1768,7 +1772,17 @@ function openSettingsHub(page) {
       permissions: (pane, ctx) => buildPermissionsPage(ctx, form),
       resources: (pane, ctx) => buildResourcesPage(ctx, form),
       providers: (pane, ctx) => providersPage(ctx),
-      models: (pane, ctx) => { modelsPage(ctx); coreModelBlock(ctx); },
+      models: (pane, ctx) => {
+        // 核心默认可选项必须在登记/删除模型后立即刷新（否则要整页刷新才看得到新模型）。
+        const core = document.createElement('div');
+        core.className = 'settings-core';
+        pane.appendChild(core);
+        const coreCtx = { body: core, setMsg: ctx.setMsg };
+        const refreshCore = () => { core.innerHTML = ''; coreModelBlock(coreCtx); };
+        refreshCore();
+        ctx.afterChange = refreshCore;
+        modelsPage(ctx);
+      },
       agents: (pane, ctx) => agentsPage(ctx),
       modules: (pane, ctx) => modulesPage(ctx),
     };
@@ -2683,21 +2697,15 @@ function absorb(s, ev) {
         for (const p of parts) { p.id = l.id; if (l.reasoning) p.reasoning = l.reasoning; }
         s.lines.push(...parts);
       }
-      // 流式期间展开的思维链：定稿后键从 V{bi} 迁到 R{reply}:cot，用户的展开不会被收回。
-      if (s.live && s.live.length) {
-        const bi = s.live.length - 1;
-        if (foldOpen(s, 'V' + bi)) {
-          const reply = (ev.lines || []).map((l) => l.reply).find((r) => r) || 0;
-          if (reply) { s.fold = s.fold || {}; s.fold['R' + reply + ':cot'] = true; }
-        }
-      }
       s.live = []; // 权威行整体替换掉流式块
       break;
     case 'delta': {
       // 流式块列表（短暂，不落盘）：一次发言可能有**多轮模型调用**（工具循环），
       // 所以按到达顺序排块——kind='start' 表示又一轮开始：封存上一块并推入新块，绝不丢弃。
       if (ev.kind === 'start' || !s.live.length || s.live[s.live.length - 1].kind !== 'msg') {
-        s.live.push({ kind: 'msg', speaker: ev.speaker || '', segments: [] });
+        // 每个流式轮一个**唯一键**：V{序号} 若按数组下标复用，上一轮展开的思维链会污染下一轮。
+        s.liveSeq = (s.liveSeq || 0) + 1;
+        s.live.push({ kind: 'msg', speaker: ev.speaker || '', segments: [], key: 'V' + s.liveSeq });
       }
       if (ev.kind === 'start') return true;
       const segs = s.live[s.live.length - 1].segments;
@@ -3397,7 +3405,7 @@ function updateLiveGroup(g, gi, s, showCot, streaming) {
   }
   if (showCot && cot) {
     if (!ui.cot) {
-      const node = reasoningBlock(cot, s, 'V' + gi);
+      const node = reasoningBlock(cot, s, (g.msg && g.msg.key) || ('V' + gi));
       if (ui.textWrap) ui.body.insertBefore(node, ui.textWrap);
       else ui.body.appendChild(node);
       ui.cot = { node, text: cot };

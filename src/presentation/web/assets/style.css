@@ -133,7 +133,7 @@ body {
 .stream-done, .stream-live { display: contents; }
 .line { max-width: 82%; padding: 8px 12px; border-radius: var(--r-2); background: var(--color-surface-2); border: 1px solid var(--color-border); white-space: pre-wrap; word-break: break-word; }
 .line.sys { align-self: center; max-width: 95%; background: transparent; border: 1px dashed var(--color-border); color: var(--color-text-dim); font-size: 13px; }
-.line.user { align-self: flex-end; background: var(--color-accent); border-color: var(--color-accent); color: var(--color-text-inverse); }
+.line.user { align-self: flex-end; background: var(--color-user-bubble); border-color: var(--color-user-border); color: var(--color-text-inverse); }
 .line .who { font-size: 11px; color: var(--color-text-dim); margin-bottom: 2px; display: block; }
 .line.user .who { color: var(--color-text-inverse-dim); }
 /* ---- 一轮气泡：身份 / 思维链 / 正文 / 工具组 ---- */
@@ -353,11 +353,16 @@ body {
 }
 .settings-nav-item:hover { color: var(--color-text); background: var(--color-surface-2); }
 .settings-nav-item.active { color: var(--color-text); background: var(--color-surface-2); border-color: var(--color-border); }
-.settings-panes { min-width: 0; }
+.settings-main { display: flex; flex-direction: column; min-width: 0; min-height: 420px; }
+.settings-panes { flex: 1; min-width: 0; }
 .settings-page { display: flex; flex-direction: column; gap: 12px; }
-.settings-foot { display: flex; align-items: center; gap: 12px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--color-border); }
-.settings-foot.hidden { display: none; }
-.settings-foot-hint { font-size: 12px; color: var(--color-text-dim); }
+.settings-core { padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid var(--color-border); }
+.settings-foot {
+  display: flex; align-items: center; justify-content: flex-end; gap: 12px;
+  margin-top: auto; padding-top: 12px; border-top: 1px solid var(--color-border);
+}
+.settings-foot .btn { flex: none; white-space: nowrap; }
+.settings-foot-hint { flex: 1; text-align: right; font-size: 12px; color: var(--color-text-dim); }
 @media (max-width: 700px) {
   .settings-hub { grid-template-columns: 1fr; }
   .settings-nav { flex-direction: row; flex-wrap: wrap; }
@@ -424,6 +429,8 @@ body {
 }
 .line:hover .line-act, .turn:hover .line-act, .line-act:focus-visible { opacity: 1; }
 .line-act:hover { color: var(--color-text); border-color: var(--color-border-strong); }
+.line.user .line-act { color: var(--color-text-inverse-dim); border-color: transparent; }
+.line.user .line-act:hover { color: var(--color-text-inverse); background: var(--color-inverse-weak); }
 /* 触屏没有 hover：动作常显，否则等于没有入口。 */
 @media (hover: none) {
   .line-act { opacity: 1; }
