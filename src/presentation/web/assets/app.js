@@ -2593,6 +2593,7 @@ function applySnapshot(s, events) {
   s.live = [];
   s.fold = {};
   s.scroll = {};
+  s.forceFull = true;
   s.pending = null;
   s.done = false;
   s.readonly = false; // 回档后的会话是活动会话（历史回放被用户明确回档/继续）
@@ -2643,12 +2644,22 @@ function absorb(s, ev) {
     case 'transcript':
       // 服务端权威转录：每行带会话内稳定 id（回档按 id 定位）。
       // 权威行到达：撤掉乐观回显与流式块，改用服务端的行；带 tool 的行渲染成工具卡片。
+      const hadPending = s.lines.some((x) => x.pending);
       s.lines = s.lines.filter((x) => !x.pending);
+      if (hadPending) s.forceFull = true; // 乐观回显被权威行替换：整帧重建，别留下没有 id 的旧节点
       for (const l of ev.lines) {
         // 身份与样式**全读结构化字段**（种类 / 说话人 / 动词），不再从正文里抠标签（见 lineParts）。
         const parts = lineParts(l);
         for (const p of parts) { p.id = l.id; if (l.reasoning) p.reasoning = l.reasoning; }
         s.lines.push(...parts);
+      }
+      // 流式期间展开的思维链：定稿后键从 V{bi} 迁到 R{reply}:cot，用户的展开不会被收回。
+      if (s.live && s.live.length) {
+        const bi = s.live.length - 1;
+        if (foldOpen(s, 'V' + bi)) {
+          const reply = (ev.lines || []).map((l) => l.reply).find((r) => r) || 0;
+          if (reply) { s.fold = s.fold || {}; s.fold['R' + reply + ':cot'] = true; }
+        }
       }
       s.live = []; // 权威行整体替换掉流式块
       break;
@@ -2747,7 +2758,15 @@ function lineParts(l) {
   // 工具行：按调用视图渲染成卡片（说话人取自视图）。
   if (l.tool || kind === 'tool') {
     // 工具行同样要有身份（卡片左上角标出是谁在调工具）——身份是这一行的，不是正文的附属。
-    return [{ cls: 'tool', tool: l.tool || null, reasoning: reasoning, who: (l.tool && l.tool.speaker) || speaker, text: '', speaker: (l.tool && l.tool.speaker) || speaker }];
+    return [{
+      cls: 'tool',
+      tool: l.tool || null,
+      reasoning: reasoning,
+      who: (l.tool && l.tool.speaker) || speaker,
+      text: '',
+      speaker: (l.tool && l.tool.speaker) || speaker,
+      reply: l.reply || (l.tool && l.tool.reply) || 0,
+    }];
   }
   // 内容类系统提示：转录里的一等行（有 id，可回档/折叠），界面仍按系统行画。
   if (kind === 'notice') return [{ cls: 'sys notice', who: speaker, text: text }];
@@ -2767,6 +2786,7 @@ function lineParts(l) {
     speaker: speaker,
     verb: verb,
     degraded: deg,
+    reply: l.reply || 0,
   }];
 }
 
@@ -2947,55 +2967,190 @@ function sessionNote(s) {
   return d;
 }
 
-function renderDone(s) {
+/* ---------- 定稿渲染：按 reply 归成「一轮」，只追加新行 ----------
+ * 一轮 = 首次模型回复的 id；同 reply 的正文 / 思维链 / 工具行合成一个气泡。
+ * 增量：只处理 s.lines 里还没渲染过的尾部；同一 reply 的后续行只重建这一轮（折叠状态按 key 恢复）。
+ * 整帧重建只发生在：切会话、重置/回档、思维链开关、会话说明变化、渲染计数倒退。 */
+let doneState = { owner: null, count: 0, show: null, note: '', last: null };
+
+function turnWorthy(p) {
+  return (p.cls === 'line' || p.cls === 'ok' || p.cls === 'tool') && typeof p.id === 'number';
+}
+
+function turnKey(group) {
+  return group.reply ? 'R' + group.reply : 'K' + group.id;
+}
+
+function turnText(parts) {
+  return parts
+    .filter((p) => p.cls !== 'tool')
+    .map((p) => String(p.text == null ? '' : p.text))
+    .filter((t) => t.trim())
+    .join('\n\n');
+}
+
+function turnReasoning(parts) {
+  return parts
+    .filter((p) => p.cls !== 'tool')
+    .map((p) => p.reasoning)
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+/// 一轮气泡：身份 / 思维链 / 正文 / 工具组；思维链与工具组各自折叠，整轮可折叠。
+function buildTurn(group, s) {
+  const parts = group.parts;
+  const tools = parts.filter((p) => p.cls === 'tool');
+  const msgs = parts.filter((p) => p.cls !== 'tool');
+  const head = msgs[0] || parts[0];
+  const text = turnText(parts);
+  const reasoning = turnReasoning(parts);
+  if (!reasoning && !text.trim() && !tools.length) return null;
+  const key = turnKey(group);
+  const el = document.createElement('article');
+  el.className = 'turn' + (head.cls === 'ok' ? ' ok' : '');
+  el.dataset.reply = String(group.reply || '');
+
+  const headEl = document.createElement('div');
+  headEl.className = 'turn-head';
+  const who = document.createElement('span');
+  who.className = 'turn-who';
+  who.textContent = head.who || head.speaker || '';
+  headEl.appendChild(who);
+  if (tools.length) {
+    const failed = tools.filter((p) => p.tool && !p.tool.ok).length;
+    const cnt = document.createElement('span');
+    cnt.className = 'turn-count';
+    cnt.textContent = '工具 ' + tools.length + (failed ? ' · ' + failed + ' 失败' : '');
+    headEl.appendChild(cnt);
+  }
+  const preview = document.createElement('span');
+  preview.className = 'turn-preview';
+  preview.textContent = text.replace(/\s+/g, ' ').slice(0, 64);
+  headEl.appendChild(preview);
+  const toggle = ui.iconButton({ icon: 'chevron', label: '折叠这一轮', tip: '', cls: 'turn-toggle' });
+  headEl.appendChild(toggle);
+  el.appendChild(headEl);
+
+  const body = document.createElement('div');
+  body.className = 'turn-body';
+  if (reasoning && state.settings.show_reasoning) {
+    body.appendChild(reasoningBlock(reasoning, s, key + ':cot'));
+  }
+  if (text.trim()) {
+    const t = document.createElement('div');
+    t.className = 'turn-text';
+    appendBody(t, head.cls, text);
+    body.appendChild(t);
+  }
+  if (tools.length) {
+    const groupEl = document.createElement('details');
+    groupEl.className = 'fold turn-tools';
+    foldBind(s, key + ':tools', groupEl);
+    const failed = tools.filter((p) => p.tool && !p.tool.ok).length;
+    const sum = document.createElement('summary');
+    sum.textContent = '工具调用 · ' + tools.length + (failed ? '（' + failed + ' 失败）' : '');
+    groupEl.appendChild(sum);
+    const list = document.createElement('div');
+    list.className = 'tool-list';
+    for (const p of tools) list.appendChild(toolCard(p.tool, s, 'T' + p.id, ''));
+    groupEl.appendChild(list);
+    body.appendChild(groupEl);
+  }
+  el.appendChild(body);
+
+  const foot = document.createElement('div');
+  foot.className = 'turn-foot';
+  if (typeof parts[0].id === 'number') {
+    const rb = rewindButton(parts[0].id);
+    rb.title = '回档到这一轮之前：留档（可恢复）或删除（不可恢复）';
+    foot.appendChild(rb);
+  }
+  if (head.verb === 'agree' && head.speaker) {
+    const w = ui.iconButton({ icon: 'close', label: '撤回同意', tip: '', cls: 'line-act' });
+    w.title = '让该 agent 本轮不再算同意';
+    w.onclick = () => withdrawAgree(head.speaker);
+    foot.appendChild(w);
+  }
+  if (foot.children.length) el.appendChild(foot);
+
+  const openKey = key + ':turn';
+  const closed = !!(s.fold && s.fold[openKey] === false);
+  if (closed) {
+    body.classList.add('hidden');
+    el.classList.add('collapsed');
+  }
+  toggle.setAttribute('aria-expanded', String(!closed));
+  toggle.onclick = () => {
+    const closeNow = !body.classList.contains('hidden');
+    body.classList[closeNow ? 'add' : 'remove']('hidden');
+    el.classList[closeNow ? 'add' : 'remove']('collapsed');
+    s.fold = s.fold || {};
+    s.fold[openKey] = !closeNow;
+    toggle.setAttribute('aria-expanded', String(!closeNow));
+  };
+  return { node: el, reply: group.reply, parts, key };
+}
+
+function appendFinalRow(l, s) {
+  const bodyless = !String(l.text == null ? '' : l.text).trim();
+  if (bodyless && !l.reasoning) return;
+  const built = lineBlock(l, s, 'L' + l.id, false);
+  if (typeof l.id === 'number') built.node.appendChild(rewindButton(l.id));
+  if (typeof l.mark === 'number') {
+    const rb = ui.iconButton({ icon: 'undo', label: '恢复留档', tip: '', cls: 'line-act' });
+    rb.title = '恢复到这次留档之前（标记及其后的内容会被删除）';
+    rb.onclick = () => restoreMark(l.mark);
+    built.node.appendChild(rb);
+  }
+  doneBox.appendChild(built.node);
+}
+
+function appendFinalLine(l, s) {
+  if (!turnWorthy(l)) {
+    doneState.last = null;
+    appendFinalRow(l, s);
+    return;
+  }
+  const reply = l.reply || 0;
+  const last = doneState.last;
+  if (last && reply && last.reply === reply) {
+    // 同一次回复的后续行（典型是工具行）：只重建这一轮，节点替换，折叠状态按 key 恢复。
+    const parts = last.parts.concat([l]);
+    const fresh = buildTurn({ kind: 'turn', reply, parts, id: parts[0].id }, s);
+    if (!fresh) return;
+    if (last.node.parentNode && last.node.parentNode.replaceChild) {
+      last.node.parentNode.replaceChild(fresh.node, last.node);
+    } else {
+      doneBox.removeChild(last.node);
+      doneBox.appendChild(fresh.node);
+    }
+    doneState.last = fresh;
+    return;
+  }
+  const turn = buildTurn({ kind: 'turn', reply, parts: [l], id: l.id }, s);
+  if (!turn) return;
+  doneBox.appendChild(turn.node);
+  doneState.last = turn;
+}
+
+function renderDone(s, full) {
   if (!doneBox) return;
-  doneBox.innerHTML = '';
   const note = sessionNote(s);
-  if (note) doneBox.appendChild(note);
-  // tool 行的稳定序号：在 s.lines 里按出现顺序数。
-  let toolSeq = 0;
-  for (const l of s.lines) {
-    // 工具行：渲染成卡片，而不是当消息发出来。
-    if (l.tool) {
-      const b = lineBlock({ cls: 'tool', tool: l.tool, who: (l.tool && l.tool.speaker) || l.speaker, reasoning: l.reasoning }, s, 'T' + toolSeq, false);
-      toolSeq += 1;
-      if (typeof l.id === 'number') b.node.appendChild(rewindButton(l.id));
-      doneBox.appendChild(b.node);
-      continue;
-    }
-    // **空正文行不画空盒子**：一轮只有思维链、没有正文也没有工具调用时，落下来的行正文就是空的；
-    // 照常画说话人 + 空正文出来，就是一个空的"谁在说"框（真机上看到的空块）。这种行只画思维链。
-    const bodyless = !String(l.text == null ? '' : l.text).trim();
-    if (bodyless && !l.reasoning) continue;
-    // 建块只有一处（lineBlock）：身份 → 思维链 → 正文；定稿行与实时块同一套画法。
-    const el = lineBlock(l, s, 'L' + l.id, false).node;
-    // 回档：到这一行为止（服务端按行 id 重建，前端整体替换）。
-    if (typeof l.id === 'number') el.appendChild(rewindButton(l.id));
-    // 留档分界上的「恢复」：删掉该标记及其后的内容（含留档期间的新工作）。
-    if (typeof l.mark === 'number') {
-      const rb = ui.iconButton({
-        icon: 'undo',
-        label: '恢复留档',
-        tip: '',
-        cls: 'line-act',
-        onClick: () => restoreMark(l.mark),
-      });
-      rb.title = '恢复到这次留档之前（标记及其后的内容会被删除）';
-      el.appendChild(rb);
-    }
-    // 撤回该同意：转录追加一条撤回行，继续时按剩余转录重新判定。
-    if (l.verb === 'agree' && l.speaker) {
-      const w = ui.iconButton({
-        icon: 'close',
-        label: '撤回同意',
-        tip: '',
-        cls: 'line-act',
-        onClick: () => withdrawAgree(l.speaker),
-      });
-      w.title = '让该 agent 本轮不再算同意';
-      el.appendChild(w);
-    }
-    doneBox.appendChild(el);
+  const noteText = note ? note.textContent : '';
+  const show = !!state.settings.show_reasoning;
+  const bad = full || !!s.forceFull || doneState.owner !== s.sid || doneState.count > s.lines.length
+    || doneState.show !== show || doneState.note !== noteText;
+  if (bad) {
+    s.forceFull = false;
+    doneBox.innerHTML = '';
+    doneState = { owner: s.sid, count: 0, show, note: noteText, last: null };
+    if (note) doneBox.appendChild(note);
+    for (const l of s.lines) appendFinalLine(l, s);
+    doneState.count = s.lines.length;
+  } else if (doneState.count < s.lines.length) {
+    for (const l of s.lines.slice(doneState.count)) appendFinalLine(l, s);
+    doneState.count = s.lines.length;
   }
   flushScroll(s);
 }
@@ -3095,22 +3250,50 @@ function renderStream(force) {
   const box = $('#stream');
   const prevTop = box.scrollTop;
   const stick = force === true || nearBottom(box);
-  // 容器随之重建，避免旧节点被当成"已经渲染过"
-  doneBox = null; liveBox = null; typingNode = null; domOwner = null;
-  box.innerHTML = '';
   const s = activeSession();
   if (!s) {
+    doneBox = null; liveBox = null; typingNode = null; domOwner = null;
+    doneState = { owner: null, count: 0, show: null, note: '', last: null };
     box.innerHTML = '<div class="empty"><div class="logo">☉</div>' +
       '<div class="tip">点左上角「+ 新建工作」开始：单 agent（直连式 / 组合式）· 协作</div>' +
       '<div class="hint">PC：双栏布局　移动端：左上角 ☰ 打开侧栏</div></div>';
     return;
   }
-  buildStreamBoxes(s.sid);
-  renderDone(s);
-  renderLive(s, true);
+  const full = force === true || domOwner !== s.sid || !doneBox || !liveBox;
+  if (full) {
+    // 切会话 / 重置 / 开关变化：容器与全部行重建（折叠与 <pre> 滚动由 store 恢复）。
+    doneBox = null; liveBox = null; typingNode = null; domOwner = null;
+    box.innerHTML = '';
+    buildStreamBoxes(s.sid);
+    doneState.owner = null;
+    renderDone(s, true);
+    renderLive(s, true);
+  } else {
+    // 追加路径：只处理新到的定稿行；流式块只在"这一轮已经收尾"时撤下。
+    renderDone(s, false);
+    if (!s.live || !s.live.length) {
+      if (liveBox) liveBox.innerHTML = '';
+      for (const b of (s.live || [])) { b._node = null; b._cot = null; b._txt = null; }
+    } else {
+      renderLive(s, false);
+    }
+  }
   syncTyping(s);
   box.scrollTop = stick ? box.scrollHeight : prevTop;
   syncSendButton(s);
+}
+
+/* 流式增量按帧合并：一帧最多一次 DOM 写，高频分片不会把主线程塞满。 */
+let liveTickScheduled = false;
+function scheduleLiveTick() {
+  if (liveTickScheduled) return;
+  liveTickScheduled = true;
+  const run = () => {
+    liveTickScheduled = false;
+    renderLiveTick(activeSession());
+  };
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+  else setTimeout(run, 0);
 }
 
 /// 流式增量帧：只 append 新的流式节点，绝不重建已有节点。
@@ -3215,6 +3398,7 @@ async function answerCard(card, option, note) {
     renderAll();
   } catch (err) {
     s.lines = s.lines.filter((x) => !x.pending);
+    s.forceFull = true;
     s.lines.push({ cls: 'bad', who: '错误', text: err.message });
     renderAll();
   } finally {
@@ -3243,6 +3427,7 @@ async function updateTask(text) {
   try {
     const r = await api('POST', actionUrl('update_task'), { session_id: s.sid, text });
     s.lines = []; s.pending = null; s.readonly = false; s.done = false;
+    s.forceFull = true;
     for (const ev of (r.events || [])) absorb(s, ev);
     renderAll();
     ui.toast('ok', '已改需求');
@@ -3344,6 +3529,7 @@ async function act(action, text) {
     renderAll();
   } catch (err) {
     s.lines = s.lines.filter((x) => !x.pending);
+    s.forceFull = true;
     s.lines.push({ cls: 'bad', who: '错误', text: err.message });
     renderAll();
   } finally {
@@ -3757,7 +3943,7 @@ async function pollLoop() {
       }
       // 纯流式增量：只 append 新节点（折叠、<pre> 滚动、外层滚动都不被打断）。
       if (mode === 'full') renderAll();
-      else if (mode === 'live') renderLiveTick(activeSession());
+      else if (mode === 'live') scheduleLiveTick();
       // 有会话动作在等回包时，让动作回包自己刷新 pending；轮询只补漏。
     } catch (err) {
       eventError(err);

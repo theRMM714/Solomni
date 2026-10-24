@@ -23,7 +23,7 @@ const stateStub = {
 function el(tag) {
   const node = {
     tag: tag || "",
-    textContent: "", innerHTML: "", value: "", className: "", dataset: {},
+    textContent: "", value: "", className: "", dataset: {},
     children: [], _h: {},
     classList: { add() {}, remove() {} },
     // 事件处理器**记下来**（不丢）：冒烟要能像用户那样触发它（如向导里切档位、勾模块）。
@@ -36,6 +36,12 @@ function el(tag) {
     getBoundingClientRect() { return { left: 0, top: 0, right: 0, bottom: 0 }; },
     onclick: null,
   };
+  // 真实 DOM：innerHTML = '' 会清空子节点。桩不模拟这一条，整帧重建就会留着旧节点。
+  let html = "";
+  Object.defineProperty(node, "innerHTML", {
+    get: () => html,
+    set: (v) => { html = v; if (v === "") node.children = []; },
+  });
   return node;
 }
 // notice/confirmBox 要能跑起来：桩一个最小 DOM（含 #notice-root）。
@@ -329,27 +335,79 @@ setTimeout(async () => {
       const r = vm.runInNewContext(
         "(function () {" +
           " const s = { sid: 'bl', lines: [" +
-          "   { id: 9, cls: 'line', who: '资料手', text: '', reasoning: '只有思维链' }," +
-          "   { id: 10, cls: 'line', who: '资料手', text: '', reasoning: null }," +
-          "   { id: 11, cls: 'tool', who: '检索手', text: '', tool: { speaker: '检索手', name: 'read', ok: true, args: '{}', output: 'ok' } }" +
+          "   { id: 9, reply: 9, cls: 'line', who: '资料手 · say', speaker: '资料手', verb: 'say', text: '正文', reasoning: '思维链' }," +
+          "   { id: 10, reply: 9, cls: 'tool', who: '资料手', text: '', tool: { speaker: '资料手', name: 'read', ok: true, args: '{}', output: 'ok' } }," +
+          "   { id: 11, reply: 11, cls: 'user', who: '用户', text: '问一句' }" +
           " ], live: [], fold: {}, scroll: {} };" +
           " state.sessions.set('bl', s); state.activeSid = 'bl';" +
           " const box = document.querySelector('#stream'); box.children.length = 0; renderStream(true);" +
           " const all = []; (function walk(n) { for (const c of (n.children || [])) { all.push(c); walk(c); } })(box);" +
-          " const cls = function (n) { return (n.children || []).map(function (c) { return String(c.className); }); };" +
-          " const has = function (n, s) { return cls(n).some(function (c) { return c.indexOf(s) >= 0; }); };" +
-          " const cotLines = all.filter(function (n) { return has(n, 'who') && has(n, 'cot'); });" +
-          " const withBody = cotLines.filter(function (n) { return cls(n).some(function (c) { return c.indexOf('md') === 0; }); });" +
-          " const toolWho = all.filter(function (n) { return String(n.className).indexOf('tool-card') >= 0 && has(n, 'who'); });" +
-          " const emptyBoxes = all.filter(function (n) { return String(n.className).indexOf('line') === 0 && (n.children || []).length === 0; });" +
-          " return { cot: cotLines.length, body: withBody.length, toolWho: toolWho.length, empty: emptyBoxes.length };" +
+          " const clsOf = function (n) { return String(n.className).split(' '); };" +
+          " const turns = all.filter(function (n) { return clsOf(n)[0] === 'turn'; });" +
+          " const first = turns[0] || { children: [] };" +
+          " const head = (first.children || []).filter(function (c) { return clsOf(c)[0] === 'turn-head'; })[0];" +
+          " const body = (first.children || []).filter(function (c) { return clsOf(c)[0] === 'turn-body'; })[0] || { children: [] };" +
+          " const bodyCls = (body.children || []).map(function (c) { return clsOf(c)[0]; });" +
+          " const userRows = all.filter(function (n) { return clsOf(n).indexOf('user') >= 0; });" +
+          " return { turns: turns.length, head: !!head," +
+          "   cot: bodyCls.indexOf('cot') >= 0, text: bodyCls.indexOf('turn-text') >= 0," +
+          "   tools: bodyCls.indexOf('fold') >= 0, user: userRows.length };" +
           "})()",
         sandbox
       );
-      // 空块由 `.line.empty { display: none }` 兜住（CSS 在冒烟里没有样式表可比），这里只管行本身的画法。
-      lineRule = r.cot >= 1 && r.body === 0 && r.toolWho >= 1;
+      lineRule = r.turns === 1 && r.head && r.cot && r.text && r.tools && r.user === 1;
       if (!lineRule) loadErrors.push('行画法检查：' + JSON.stringify(r));
     } catch (e) { loadErrors.push('行画法检查失败：' + e.message); }
+  }
+  // **定稿只追加**：新增行不重建已渲染的轮；同一 reply 的后续行只重建最后那一轮。
+  let incrementalAppend = false;
+  if (!loadErrors.length) {
+    try {
+      const r = vm.runInNewContext(
+        "(function () {" +
+          " const s = { sid: 'inc', lines: [], live: [], fold: {}, scroll: {} };" +
+          " state.sessions.set('inc', s); state.activeSid = 'inc';" +
+          " const box = document.querySelector('#stream'); box.children.length = 0;" +
+          " absorb(s, { type: 'transcript', lines: [{ id: 1, reply: 1, kind: 'msg', speaker: '甲', verb: 'say', line: '第一句' }] });" +
+          " renderStream(true);" +
+          " const done = box.children[0];" +
+          " const first = done.children[0];" +
+          " absorb(s, { type: 'transcript', lines: [{ id: 2, reply: 2, kind: 'msg', speaker: '甲', verb: 'say', line: '第二句' }] });" +
+          " renderStream();" +
+          " const kept = done.children[0] === first && done.children.length === 2;" +
+          " absorb(s, { type: 'transcript', lines: [{ id: 3, reply: 3, kind: 'msg', speaker: '甲', verb: 'say', line: '第三句' }] });" +
+          " renderStream();" +
+          " return { kept: kept, count: done.children.length };" +
+          "})()",
+        sandbox
+      );
+      incrementalAppend = r.kept && r.count === 3;
+      if (!incrementalAppend) loadErrors.push('增量渲染检查：' + JSON.stringify(r));
+    } catch (e) { loadErrors.push('增量渲染检查失败：' + e.message); }
+  }
+  // **乐观回显被权威行替换**：待定行没有 id，替换时必须整帧重建，不能留下旧节点。
+  let pendingReplaced = false;
+  if (!loadErrors.length) {
+    try {
+      const r = vm.runInNewContext(
+        "(function () {" +
+          " const s = { sid: 'pend', lines: [], live: [], fold: {}, scroll: {} };" +
+          " state.sessions.set('pend', s); state.activeSid = 'pend';" +
+          " const box = document.querySelector('#stream'); box.children.length = 0;" +
+          " s.lines.push({ cls: 'user', who: '用户', text: '乐观', pending: true });" +
+          " renderStream(true);" +
+          " absorb(s, { type: 'transcript', lines: [{ id: 1, reply: 1, kind: 'user', speaker: '用户', line: '乐观' }] });" +
+          " renderStream();" +
+          " const done = box.children[0];" +
+          " const row = done.children[0] || { children: [] };" +
+          " const hasAct = (row.children || []).some(function (c) { return String(c.className).indexOf('line-act') >= 0; });" +
+          " return { rows: done.children.length, act: hasAct };" +
+          "})()",
+        sandbox
+      );
+      pendingReplaced = r.rows === 1 && r.act;
+      if (!pendingReplaced) loadErrors.push('乐观回显替换检查：' + JSON.stringify(r));
+    } catch (e) { loadErrors.push('乐观回显替换检查失败：' + e.message); }
   }
   // **内容类系统提示是一等行**：kind=notice 的转录行有 id（回档靠它），界面按系统行画。
   let noticeRow = false;
@@ -667,14 +725,14 @@ setTimeout(async () => {
   const ok = alerts.length === 0 && loadErrors.length === 0 && rendered && tierWarned && identityKept
     && pollConn === "已连接" && pollApplied && hydratedHistory && liveReplaced && liveClearedOnIdle && toolReasoningRendered
     && rewoundApplies && readonlyRule
-    && taskButtonRule && decisionCardRule && onlyLastStreams && lineRule && noticeRow && modalDismiss && rewindIcon && runningRules && atMenuRefetches
+    && taskButtonRule && decisionCardRule && onlyLastStreams && lineRule && incrementalAppend && pendingReplaced && noticeRow && modalDismiss && rewindIcon && runningRules && atMenuRefetches
     && wizardProxy && sessionNoteRule && historyRunTag && fenceBanner
     && consoleErrors.length === 0;
   if (!ok) {
     console.log("alerts（原生弹窗被调用的次数，应为 0）:", JSON.stringify(alerts));
     console.log("notice 渲染:", rendered, "| 虚拟机档不可用提示:", tierWarned, "| 身份标题保留:", identityKept);
     console.log("轮询状态点:", JSON.stringify(pollConn), "| 事件已应用:", pollApplied, "| 盘上转录已补:", hydratedHistory, "| 流式被替换:", liveReplaced, "| 空闲清理:", liveClearedOnIdle, "| 思维链:", toolReasoningRendered);
-    console.log("回档重置:", rewoundApplies, "| 只读会话:", readonlyRule, "| notice 行:", noticeRow, "| 弹层判据:", modalDismiss, "| 回档图标:", rewindIcon);
+    console.log("回档重置:", rewoundApplies, "| 只读会话:", readonlyRule, "| notice 行:", noticeRow, "| 弹层判据:", modalDismiss, "| 回档图标:", rewindIcon, "| 增量追加:", incrementalAppend, "| 乐观替换:", pendingReplaced);
     console.log("运行态归一（事件为准 / 快照只对账）:", runningRules, "| @ 菜单每次重拉:", atMenuRefetches);
     console.log("向导代理形态:", wizardProxy, "| 会话级说明:", sessionNoteRule, "| 侧栏运行态:", historyRunTag, "| 围栏横幅:", fenceBanner);
     console.log("应用侧 console.error:", JSON.stringify(consoleErrors.slice(0, 3)));

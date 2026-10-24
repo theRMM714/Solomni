@@ -127,6 +127,37 @@ body {
 .line.user { align-self: flex-end; background: var(--color-accent); border-color: var(--color-accent); color: var(--color-text-inverse); }
 .line .who { font-size: 11px; color: var(--color-text-dim); margin-bottom: 2px; display: block; }
 .line.user .who { color: var(--color-text-inverse-dim); }
+/* ---- 一轮气泡：身份 / 思维链 / 正文 / 工具组 ---- */
+.turn {
+  max-width: 82%; align-self: flex-start; white-space: normal;
+  background: var(--color-surface-2); border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-border); border-radius: var(--r-2);
+  padding: 8px 12px;
+}
+.turn.ok { border-left-color: var(--color-ok); }
+.turn-head { display: flex; align-items: center; gap: 8px; }
+.turn-who { font-size: 11px; color: var(--color-text-dim); white-space: nowrap; }
+.turn-count { font-size: 11px; color: var(--color-text-dim); white-space: nowrap; }
+.turn-preview {
+  display: none; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-size: 12px; color: var(--color-text-dim);
+}
+.turn.collapsed .turn-preview { display: block; }
+.turn-toggle { width: 24px; height: 24px; margin-left: auto; flex: none; }
+.turn-toggle .ui-icon { transform: rotate(90deg); transition: transform var(--dur-fast) var(--ease-out); }
+.turn.collapsed .turn-toggle .ui-icon { transform: none; }
+.turn-body { margin-top: 6px; }
+.turn-body.hidden { display: none; }
+.turn-text .md { white-space: normal; }
+.turn-tools { margin-top: 6px; }
+.turn .tool-card { max-width: none; margin-top: 6px; }
+.turn .tool-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.turn-foot {
+  display: flex; align-items: center; gap: 2px; margin-top: 2px;
+  opacity: 0; transition: opacity var(--dur-fast) var(--ease-out);
+}
+.turn:hover .turn-foot, .turn-foot:focus-within { opacity: 1; }
+@media (hover: none) { .turn-foot { opacity: 1; } }
 .line.plan { border-left: 3px solid var(--color-accent); }
 .line.review .rv-item { font-size: 13px; }
 .rv-pass { color: var(--color-ok); }
@@ -206,7 +237,7 @@ body {
     background: var(--color-mask);
   }
   .drawer-mask.show { display: block; }
-  .line { max-width: 92%; }
+  .line, .turn { max-width: 92%; }
   /* 移动端：输入区铺满，输入框更高更好点 */
   .composer-inner { max-width: none; }
   .composer textarea { min-height: 58px; max-height: 180px; }
@@ -351,7 +382,7 @@ body {
   margin-left: 6px; width: 24px; height: 24px; vertical-align: middle;
   opacity: 0; transition: opacity var(--dur-fast) var(--ease-out);
 }
-.line:hover .line-act, .line-act:focus-visible { opacity: 1; }
+.line:hover .line-act, .turn:hover .line-act, .line-act:focus-visible { opacity: 1; }
 .line-act:hover { color: var(--color-text); border-color: var(--color-border-strong); }
 /* 触屏没有 hover：动作常显，否则等于没有入口。 */
 @media (hover: none) {
