@@ -192,18 +192,21 @@ if (!loadErrors.length) {
     return got.applied === 2 && got.lines.length === 2 &&
       got.lines[0].indexOf("第一") >= 0 && got.lines[1].indexOf("第二") >= 0;
   });
-  // ⑥ 节点回报要显示成一行"完成"（此前只有"开工"，用户看不到节点交回来了）。
-  check("节点回报显示成完成行", () => {
+  // ⑥ 节点回报要与"开工"配成同一张完成卡（不再是一条系统文本行）。
+  check("节点回报配成完成卡", () => {
     const snippet = [
       "(() => {",
       '  state.sessions.set("s2", { sid: "s2", lines: [], live: [], pending: null, sending: false, done: false, fold: {}, scroll: {} });',
-      '  absorb(state.sessions.get("s2"), { type: "report", id: "n1", rework: 0, text: "语料抽好了\\n第二行不该显示" });',
-      '  return state.sessions.get("s2").lines.map((l) => l.text);',
+      '  absorb(state.sessions.get("s2"), { type: "node_started", node: "n1", sid: "w--a", assignee: "甲" });',
+      '  absorb(state.sessions.get("s2"), { type: "report", id: "n1", rework: 2, text: "语料抽好了\\n第二行也留着" });',
+      '  const l = state.sessions.get("s2").lines[0] || {};',
+      '  return { n: state.sessions.get("s2").lines.length, cls: l.cls, state: l.state, id: l.node && l.node.id, sid: l.node && l.node.sid, rework: l.rework, report: l.report };',
       "})()",
     ].join("\n");
     const got = vm.runInNewContext(snippet, sandbox);
-    return got.length === 1 && got[0].indexOf("[节点] 完成：n1") === 0 &&
-      got[0].indexOf("语料抽好了") > 0 && got[0].indexOf("第二行") < 0;
+    return got.n === 1 && got.cls === "node" && got.state === "done" &&
+      got.id === "n1" && got.sid === "w--a" && got.rework === 2 &&
+      String(got.report).indexOf("语料抽好了") === 0;
   });
   // ⑦ 模块与服务面板：只列模块；服务带开关与运行态；功能给「使用」，参数在子卡片里。
   check("模块与服务面板只列模块、功能走「使用」子卡片", () => {

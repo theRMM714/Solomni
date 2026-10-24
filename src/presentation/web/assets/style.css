@@ -99,11 +99,20 @@ body {
 .provider-form input:focus { outline: none; border-color: var(--color-accent); }
 .sidebar-note { font-size: 11px; color: var(--color-text-dim); }
 
-/* ---- 会话标签 ---- */
+/* ---- 会话标签：主 → 子 → 子子，按活跃路径逐层展开 ---- */
 .tabs {
-  flex: none; display: flex; gap: 6px; padding: 8px 12px 0;
-  overflow-x: auto; background: var(--color-surface);
+  flex: none; display: flex; flex-direction: column; gap: 4px;
+  padding: 8px 12px 6px; background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
 }
+.tab-row { display: flex; gap: 6px; overflow-x: auto; }
+.tab-row.sub { padding-left: 12px; margin-left: 8px; border-left: 1px solid var(--color-border); }
+.tab-row.sub .tab {
+  padding: 3px 10px; font-size: 12px; border-radius: var(--r-1);
+  border-bottom: 1px solid var(--color-border);
+}
+.tab.ghost { opacity: .55; border-style: dashed; }
+.tab-dot { width: 6px; height: 6px; }
 .tab {
   display: flex; align-items: center; gap: 6px;
   padding: 6px 12px; border-radius: 8px 8px 0 0;
@@ -152,6 +161,33 @@ body {
 .turn-tools { margin-top: 6px; }
 .turn .tool-card { max-width: none; margin-top: 6px; }
 .turn .tool-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+
+/* ---- 节点卡：执行进度（状态 / 执行人 / 返工 / 回报 / 进入子会话） ---- */
+.node-card {
+  max-width: 82%; align-self: flex-start; display: flex; flex-direction: column; gap: 4px;
+  background: var(--color-surface-2); border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-accent); border-radius: var(--r-2); padding: 8px 12px;
+}
+.node-card.done { border-left-color: var(--color-ok); }
+.node-head { display: flex; align-items: center; gap: 8px; }
+.node-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-accent); flex: none; }
+.node-card.done .node-dot { background: var(--color-ok); }
+.node-title { font-weight: 600; font-size: 13px; }
+.node-badge { font-size: 11px; color: var(--color-text-dim); }
+.node-open {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; font-size: 11px; background: none; border: 1px solid var(--color-border);
+  border-radius: var(--r-1); color: var(--color-text-dim); cursor: pointer;
+}
+.node-open:hover { color: var(--color-accent); border-color: var(--color-accent); }
+.node-sub { font-size: 12px; color: var(--color-text-dim); }
+.node-preview { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node-report { margin-top: 2px; }
+.node-report-text {
+  margin: 4px 0 0; padding: 6px 8px; max-height: 200px; overflow: auto;
+  background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--r-1);
+  font-size: 12px; white-space: pre-wrap; word-break: break-word;
+}
 .turn-foot {
   display: flex; align-items: center; gap: 2px; margin-top: 2px;
   opacity: 0; transition: opacity var(--dur-fast) var(--ease-out);
@@ -237,7 +273,7 @@ body {
     background: var(--color-mask);
   }
   .drawer-mask.show { display: block; }
-  .line, .turn { max-width: 92%; }
+  .line, .turn, .node-card { max-width: 92%; }
   /* 移动端：输入区铺满，输入框更高更好点 */
   .composer-inner { max-width: none; }
   .composer textarea { min-height: 58px; max-height: 180px; }

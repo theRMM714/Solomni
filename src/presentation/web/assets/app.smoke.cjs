@@ -722,11 +722,60 @@ setTimeout(async () => {
       loadErrors.push("围栏横幅检查失败：" + e.message);
     }
   }
+  // **节点卡**：开工/回报配成一张卡，带状态、执行人与进入子会话。
+  let nodeCard = false;
+  if (!loadErrors.length) {
+    try {
+      const r = vm.runInNewContext(
+        "(function () {" +
+          " const s = { sid: 'nd', lines: [], live: [], fold: {}, scroll: {} };" +
+          " state.sessions.set('nd', s); state.activeSid = 'nd';" +
+          " absorb(s, { type: 'node_started', node: 'n1', sid: 'nd--a', assignee: '甲' });" +
+          " absorb(s, { type: 'report', id: 'n1', rework: 0, text: '做完了' });" +
+          " const box = document.querySelector('#stream'); box.children.length = 0; renderStream(true);" +
+          " const all = []; (function walk(n) { for (const c of (n.children || [])) { all.push(c); walk(c); } })(box);" +
+          " const cards = all.filter(function (n) { return String(n.className).split(' ')[0] === 'node-card'; });" +
+          " const card = cards[0] || { children: [] };" +
+          " const open = (card.children || []).some(function (c) {" +
+          "   return String(c.className) === 'node-head' && (c.children || []).some(function (x) { return String(x.className) === 'node-open'; }); });" +
+          " return { cards: cards.length, open: open };" +
+          "})()",
+        sandbox
+      );
+      nodeCard = r.cards === 1 && r.open;
+      if (!nodeCard) loadErrors.push('节点卡检查：' + JSON.stringify(r));
+    } catch (e) { loadErrors.push('节点卡检查失败：' + e.message); }
+  }
+  // **标签梯级**：根 / 子 / 子子三行，按活跃路径展开。
+  let tabLadder = false;
+  if (!loadErrors.length) {
+    try {
+      const r = vm.runInNewContext(
+        "(function () {" +
+          " state.history = [" +
+          "  { name: 'r', parent: null, mode: 'collab', run: 'active' }," +
+          "  { name: 'r--a', parent: 'r', mode: 'single', run: 'active' }," +
+          "  { name: 'r--a--n', parent: 'r--a', mode: 'single', run: 'active' }];" +
+          " state.sessions.clear(); state.nodeBySid.clear();" +
+          " state.sessions.set('r', { sid: 'r', title: 'r', parent: null, lines: [], live: [], fold: {}, scroll: {} });" +
+          " state.sessions.set('r--a', { sid: 'r--a', title: 'r--a', parent: 'r', lines: [], live: [], fold: {}, scroll: {} });" +
+          " state.sessions.set('r--a--n', { sid: 'r--a--n', title: 'r--a--n', parent: 'r--a', lines: [], live: [], fold: {}, scroll: {} });" +
+          " state.activeSid = 'r--a--n'; renderTabs();" +
+          " const rows = document.querySelector('#tabs').children;" +
+          " const labels = []; for (const row of rows) for (const tab of row.children) labels.push(String(tab.children[0].textContent));" +
+          " return { rows: rows.length, labels: labels };" +
+          "})()",
+        sandbox
+      );
+      tabLadder = r.rows === 3 && JSON.stringify(r.labels) === JSON.stringify(['r', 'a', 'n']);
+      if (!tabLadder) loadErrors.push('标签梯级检查：' + JSON.stringify(r));
+    } catch (e) { loadErrors.push('标签梯级检查失败：' + e.message); }
+  }
   const ok = alerts.length === 0 && loadErrors.length === 0 && rendered && tierWarned && identityKept
     && pollConn === "已连接" && pollApplied && hydratedHistory && liveReplaced && liveClearedOnIdle && toolReasoningRendered
     && rewoundApplies && readonlyRule
     && taskButtonRule && decisionCardRule && onlyLastStreams && lineRule && incrementalAppend && pendingReplaced && noticeRow && modalDismiss && rewindIcon && runningRules && atMenuRefetches
-    && wizardProxy && sessionNoteRule && historyRunTag && fenceBanner
+    && wizardProxy && sessionNoteRule && historyRunTag && fenceBanner && nodeCard && tabLadder
     && consoleErrors.length === 0;
   if (!ok) {
     console.log("alerts（原生弹窗被调用的次数，应为 0）:", JSON.stringify(alerts));
@@ -734,7 +783,7 @@ setTimeout(async () => {
     console.log("轮询状态点:", JSON.stringify(pollConn), "| 事件已应用:", pollApplied, "| 盘上转录已补:", hydratedHistory, "| 流式被替换:", liveReplaced, "| 空闲清理:", liveClearedOnIdle, "| 思维链:", toolReasoningRendered);
     console.log("回档重置:", rewoundApplies, "| 只读会话:", readonlyRule, "| notice 行:", noticeRow, "| 弹层判据:", modalDismiss, "| 回档图标:", rewindIcon, "| 增量追加:", incrementalAppend, "| 乐观替换:", pendingReplaced);
     console.log("运行态归一（事件为准 / 快照只对账）:", runningRules, "| @ 菜单每次重拉:", atMenuRefetches);
-    console.log("向导代理形态:", wizardProxy, "| 会话级说明:", sessionNoteRule, "| 侧栏运行态:", historyRunTag, "| 围栏横幅:", fenceBanner);
+    console.log("向导代理形态:", wizardProxy, "| 会话级说明:", sessionNoteRule, "| 侧栏运行态:", historyRunTag, "| 围栏横幅:", fenceBanner, "| 节点卡:", nodeCard, "| 标签梯级:", tabLadder);
     console.log("应用侧 console.error:", JSON.stringify(consoleErrors.slice(0, 3)));
     console.log("loadErrors:", JSON.stringify(loadErrors));
   }

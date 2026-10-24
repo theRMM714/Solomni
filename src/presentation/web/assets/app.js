@@ -20,6 +20,7 @@ const state = {
   treeOpen: new Set(),   // 会话树展开的父会话（纯 UI 状态，不落盘）
   autoOpenedFor: null,   // 上次自动展开过的活跃会话：只在切换时展开祖先，不抢用户手的折叠
   rail: false,           // 侧栏是否收起为图标栏（偏好记 localStorage）
+  nodeBySid: new Map(),  // 子会话 sid -> {node, assignee}：节点卡与标签共用同一份标题
 };
 
 /* ---------- API ---------- */
@@ -68,6 +69,7 @@ async function refreshState() {
     const h = (state.history || []).find((x) => x.name === v.sid);
     const s = {
       sid: v.sid, mode: v.mode || 'single', title: (h && h.name) || v.sid, run: v.run || 'active',
+      parent: (h && h.parent) || null,
       lines: [], live: [], pending: v.pending || null, sending: false,
       running: false, working: null, running_known: false,
       can_update_task: !!v.can_update_task,
@@ -494,6 +496,7 @@ async function openHistory(name) {
     const r = await api('GET', '/api/history/' + encodeURIComponent(name));
     const s = {
       sid: name, mode: (r.meta && r.meta.mode) || 'single', title: name,
+      parent: (r.meta && r.meta.parent) || null,
       lines: [], live: [], pending: null, sending: false,
       running: false, working: null, running_known: false,
       activating: false, continue_action: null,
@@ -2629,18 +2632,45 @@ function absorb(s, ev) {
       break;
     // 任务链的进展：节点开工/回报/验收/交付——主会话也要看得到，不必点进子会话。
     case 'node_started':
-      s.lines.push({ cls: 'sys system', who: '', text: '[节点] 开工：' + (ev.assignee || '') + ' · ' + (ev.node || '') });
-      break;
-    // 节点回报 = **它把活交回来了**：主会话记一行"完成"（摘要取首行，正文在子会话里看）。
-    // 失败的节点由核心的验收结论另行如实说明（这里只显示"交回"这个事实，不替验收下判）。
-    case 'report':
+      // 节点是执行进度，不是转录内容：独立的卡片（有状态 / 执行人 / 进入子会话），不复用系统消息。
+      if (ev.sid) state.nodeBySid.set(ev.sid, { node: ev.node || '', assignee: ev.assignee || '' });
       s.lines.push({
-        cls: 'sys system',
+        cls: 'node',
+        node: { id: ev.node || '', sid: ev.sid || '', assignee: ev.assignee || '' },
+        state: 'started',
+        report: '',
+        rework: 0,
         who: '',
-        text: '[节点] 完成：' + (ev.id || '') + (ev.rework ? '（第 ' + ev.rework + ' 轮返工）' : '')
-          + (ev.text ? ' —— ' + String(ev.text).split('\n')[0].slice(0, 80) : ''),
+        text: '',
       });
       break;
+    // 节点回报 = **它把活交回来了**：找到同一节点的卡标完成，不另起一行。
+    // 失败的节点由核心的验收结论另行如实说明（这里只显示"交回"这个事实，不替验收下判）。
+    case 'report': {
+      const id = ev.id || '';
+      let hit = null;
+      for (let i = s.lines.length - 1; i >= 0; i -= 1) {
+        const l = s.lines[i];
+        if (l.cls === 'node' && l.node && l.node.id === id) { hit = l; break; }
+      }
+      if (hit) {
+        hit.state = 'done';
+        hit.report = ev.text || '';
+        hit.rework = ev.rework || 0;
+      } else {
+        s.lines.push({
+          cls: 'node',
+          node: { id, sid: '', assignee: '' },
+          state: 'done',
+          report: ev.text || '',
+          rework: ev.rework || 0,
+          who: '',
+          text: '',
+        });
+      }
+      s.forceFull = true; // 卡在原位更新：报告不频繁，整帧重建比维护节点映射更稳
+      break;
+    }
     case 'transcript':
       // 服务端权威转录：每行带会话内稳定 id（回档按 id 定位）。
       // 权威行到达：撤掉乐观回显与流式块，改用服务端的行；带 tool 的行渲染成工具卡片。
@@ -2832,25 +2862,143 @@ function syncComposer(s) {
   }
 }
 
+/* ---------- 会话标签：主 → 子 → 子子，按活跃路径逐层展开 ----------
+ * 第 1 行是根（工作）；第 N 行是上一行活跃会话的孩子。只显示活跃路径上的层。
+ * 孩子来源 = history（含没打开过的，弱化显示）+ 已打开的视图；点弱化的才去加载。 */
+function sessionParent(name) {
+  const s = state.sessions.get(name);
+  if (s && s.parent) return s.parent;
+  const h = (state.history || []).find((x) => x.name === name);
+  return (h && h.parent) || null;
+}
+
+function knownChildren(parent) {
+  const names = [];
+  const seen = new Set();
+  for (const h of (state.history || [])) {
+    if ((h.parent || null) === parent && !seen.has(h.name)) { seen.add(h.name); names.push(h.name); }
+  }
+  for (const s of state.sessions.values()) {
+    const p = s.parent || sessionParent(s.sid);
+    if ((p || null) === parent && !seen.has(s.sid)) { seen.add(s.sid); names.push(s.sid); }
+  }
+  return names;
+}
+
+function tabLabel(sid) {
+  const meta = state.nodeBySid.get(sid);
+  if (meta && meta.node) return meta.node + (meta.assignee ? ' · ' + meta.assignee : '');
+  const parent = sessionParent(sid);
+  if (parent && sid.indexOf(parent + '--') === 0) return sid.slice(parent.length + 2);
+  const s = state.sessions.get(sid);
+  return (s && s.title) || sid;
+}
+
+function tabBusy(sid) {
+  const s = state.sessions.get(sid);
+  if (s && s.running_known) return !!s.running;
+  return snapshotRunning(sid);
+}
+
+function tabPending(sid) {
+  const s = state.sessions.get(sid);
+  if (s && s.pending) return true;
+  const v = state.views && state.views.get(sid);
+  return !!(v && v.pending);
+}
+
+/// 裁决角标向上聚合：子会话在等用户，父标签也亮一个小点。
+function tabPendingDeep(sid, seen) {
+  const mark = seen || new Set();
+  if (mark.has(sid)) return false;
+  mark.add(sid);
+  if (tabPending(sid)) return true;
+  return knownChildren(sid).some((k) => tabPendingDeep(k, mark));
+}
+
+/// 关闭一个标签视图：连同它的后代视图一起关（只关视图，不删会话数据）。
+function closeView(sid) {
+  const doomed = new Set([sid]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const s of [...state.sessions.values()]) {
+      const p = s.parent || sessionParent(s.sid);
+      if (p && doomed.has(p) && !doomed.has(s.sid)) { doomed.add(s.sid); grew = true; }
+    }
+  }
+  for (const n of doomed) state.sessions.delete(n);
+  if (doomed.has(state.activeSid)) {
+    let cur = sessionParent(sid);
+    while (cur && !state.sessions.has(cur)) cur = sessionParent(cur);
+    state.activeSid = cur || (state.sessions.keys().next().done ? null : state.sessions.keys().next().value);
+  }
+  ui.toast('ok', '已关闭标签（会话仍在）');
+  renderAll();
+}
+
+/// 打开一条会话并补齐它的祖先视图：标签梯级才有"主 → 子 → 子子"的路径可站。
+async function openPath(sid) {
+  if (!sid) return;
+  const chain = [];
+  const seen = new Set();
+  let cur = sid;
+  while (cur && !seen.has(cur)) {
+    seen.add(cur);
+    chain.unshift(cur);
+    cur = sessionParent(cur);
+  }
+  for (const name of chain) {
+    if (!state.sessions.has(name)) await openHistory(name);
+  }
+  if (state.sessions.has(sid)) setActive(sid);
+}
+
 function renderTabs() {
   const tabs = $('#tabs');
+  if (!tabs) return;
   tabs.innerHTML = '';
-  for (const s of state.sessions.values()) {
-    const el = document.createElement('button');
-    el.className = 'tab' + (s.sid === state.activeSid ? ' active' : '');
-    el.dataset.badge = s.pending && s.sid !== state.activeSid ? '1' : '0';
-    el.innerHTML = '<span></span><span class="close">✕</span>';
-    el.querySelector('span').textContent = s.title;
-    el.onclick = () => setActive(s.sid);
-    el.querySelector('.close').onclick = (e) => {
-      e.stopPropagation();
-      state.sessions.delete(s.sid);
-      if (state.activeSid === s.sid) {
-        state.activeSid = state.sessions.keys().next().done ? null : state.sessions.keys().next().value;
+  const path = activePath().reverse(); // 根 → … → 活跃
+  const roots = [...state.sessions.values()]
+    .filter((s) => !(s.parent || sessionParent(s.sid)))
+    .map((s) => s.sid);
+  const rootNames = roots.length ? roots : (path[0] ? [path[0]] : []);
+  const rows = [];
+  if (rootNames.length) rows.push({ active: path[0] || null, names: rootNames, depth: 0 });
+  for (let i = 0; i < path.length; i += 1) {
+    const kids = knownChildren(path[i]);
+    if (!kids.length) break;
+    rows.push({ active: path[i + 1] || null, names: kids, depth: i + 1 });
+  }
+  for (const row of rows) {
+    const rowEl = document.createElement('div');
+    rowEl.className = 'tab-row' + (row.depth ? ' sub' : ' root');
+    for (const name of row.names) {
+      const opened = state.sessions.has(name);
+      const el = document.createElement('button');
+      el.type = 'button';
+      el.className = 'tab' + (name === state.activeSid ? ' active' : '') + (opened ? '' : ' ghost');
+      el.title = name;
+      el.dataset.badge = tabPendingDeep(name) && name !== state.activeSid ? '1' : '0';
+      const label = document.createElement('span');
+      label.textContent = tabLabel(name);
+      el.appendChild(label);
+      if (tabBusy(name)) {
+        const dot = document.createElement('span');
+        dot.className = 'dot dot-ok tab-dot';
+        el.appendChild(dot);
       }
-      renderAll();
-    };
-    tabs.appendChild(el);
+      if (opened) {
+        const close = document.createElement('span');
+        close.className = 'close';
+        close.textContent = '✕';
+        close.onclick = (e) => { e.stopPropagation(); closeView(name); };
+        el.appendChild(close);
+      }
+      el.onclick = () => { if (state.sessions.has(name)) setActive(name); else openPath(name); };
+      rowEl.appendChild(el);
+    }
+    tabs.appendChild(rowEl);
   }
 }
 
@@ -3092,7 +3240,67 @@ function buildTurn(group, s) {
   return { node: el, reply: group.reply, parts, key };
 }
 
+/// 节点卡：执行进度，不是转录内容。状态 / 执行人 / 返工轮次 / 回报 / 进入子会话。
+function nodeCard(l, s) {
+  const n = l.node || {};
+  const el = document.createElement('article');
+  el.className = 'node-card ' + (l.state === 'done' ? 'done' : 'started');
+  const head = document.createElement('div');
+  head.className = 'node-head';
+  const dot = document.createElement('span');
+  dot.className = 'node-dot';
+  head.appendChild(dot);
+  const title = document.createElement('span');
+  title.className = 'node-title';
+  title.textContent = '节点 · ' + (n.id || '（未命名）');
+  head.appendChild(title);
+  const badge = document.createElement('span');
+  badge.className = 'node-badge';
+  badge.textContent = l.state === 'done'
+    ? '完成' + (l.rework ? ' · 第 ' + l.rework + ' 轮返工' : '')
+    : '进行中';
+  head.appendChild(badge);
+  if (n.sid) {
+    const go = document.createElement('button');
+    go.type = 'button';
+    go.className = 'node-open';
+    go.title = '进入这个节点的子会话';
+    go.appendChild(ui.icon('folder'));
+    const label = document.createElement('span');
+    label.textContent = '子会话';
+    go.appendChild(label);
+    go.onclick = () => openPath(n.sid);
+    head.appendChild(go);
+  }
+  el.appendChild(head);
+  if (n.assignee) {
+    const sub = document.createElement('div');
+    sub.className = 'node-sub';
+    sub.textContent = '执行：' + n.assignee;
+    el.appendChild(sub);
+  }
+  if (l.report) {
+    const prev = document.createElement('div');
+    prev.className = 'node-preview';
+    prev.textContent = String(l.report).split('\n')[0].slice(0, 96);
+    el.appendChild(prev);
+    const d = document.createElement('details');
+    d.className = 'fold node-report';
+    foldBind(s, 'N' + (n.id || ''), d);
+    const sum = document.createElement('summary');
+    sum.textContent = '回报全文';
+    d.appendChild(sum);
+    const pre = document.createElement('pre');
+    pre.className = 'node-report-text';
+    pre.textContent = l.report;
+    d.appendChild(pre);
+    el.appendChild(d);
+  }
+  return el;
+}
+
 function appendFinalRow(l, s) {
+  if (l.cls === 'node') { doneBox.appendChild(nodeCard(l, s)); return; }
   const bodyless = !String(l.text == null ? '' : l.text).trim();
   if (bodyless && !l.reasoning) return;
   const built = lineBlock(l, s, 'L' + l.id, false);
