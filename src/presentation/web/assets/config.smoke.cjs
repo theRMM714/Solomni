@@ -21,7 +21,10 @@ class N {
     this.dataset = {}; this._h = {}; this.value = ""; this.checked = false; this._html = "";
     this.style = {};
   }
-  appendChild(c) { this.children.push(c); return c; }
+  appendChild(c) { if (c) c.parentNode = this; this.children.push(c); return c; }
+  removeChild(c) { const i = this.children.indexOf(c); if (i >= 0) this.children.splice(i, 1); if (c) c.parentNode = null; return c; }
+  contains(n) { return this.children.indexOf(n) >= 0; }
+  getBoundingClientRect() { return { left: 0, top: 0, right: 0, bottom: 0 }; }
   addEventListener(t, f) { (this._h[t] = this._h[t] || []).push(f); }
   querySelector() { return new N("div"); }
   querySelectorAll() { return []; }
@@ -189,6 +192,9 @@ try {
   vm.runInContext(fs.readFileSync(path.join(__dirname, "md.js"), "utf8"), ctx, { filename: "md.js" });
 } catch (e) { loadErrors.push("md load error: " + e.message); }
 try {
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "ui.js"), "utf8"), ctx, { filename: "ui.js" });
+} catch (e) { loadErrors.push("ui load error: " + e.message); }
+try {
   vm.runInContext(fs.readFileSync(path.join(__dirname, "app.js"), "utf8"), ctx, { filename: "app.js" });
 } catch (e) { loadErrors.push("load error: " + e.message); }
 let state = null, renderHistory = null, openConfig = null, closeModalIfAny = null;
@@ -207,23 +213,34 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   state.sessions.set("busy-one", { sid: "busy-one", sending: false, running: true, running_known: true, mode: "collab" }); // 本标签页收到了它的运行态事件
   renderHistory();
 
-  /* ---- 会话列表：三个按钮 + 点条目不进会话 + 生成中禁用「编辑」 ---- */
+  /* ---- 会话列表：铅笔菜单 + 点条目不进会话 + 生成中禁用「编辑配置」 ---- */
   const list = reg.get("#history-list");
   const items = findByClass(list, "history-item");
   check("history: 两项都渲染", items.length === 2, "items=" + items.length);
   check("history: 条目本身没有 onclick（点条目不进会话）", items.every((it) => !it.onclick));
-  const opened = findButton(items[0], "打开");
-  const edited = findButton(items[0], "编辑");
-  check("history: 打开/编辑按钮存在", !!opened && !!edited);
-  check("history: 删除按钮仍在", !!findButton(items[0], "✕"));
-  check("history: 打开按钮接线到 openHistory", typeof opened.onclick === "function");
-  check("history: 非生成中会话的编辑按钮可用", edited.disabled !== true && typeof edited.onclick === "function");
-  check("history: 删除按钮接线", typeof findButton(items[0], "✕").onclick === "function");
+  const pencils = findByClass(list, "hpen");
+  check("history: 每行一个铅笔", pencils.length === items.length, "pencils=" + pencils.length);
+  const menuOf = (pencil) => {
+    pencil.onclick({ stopPropagation() {} });
+    const root = reg.get("#menu-root");
+    return root.children[root.children.length - 1];
+  };
+  const m0 = menuOf(pencils[0]);
+  const labels0 = walk(m0, []).filter((x) => x.tag === "button").map((x) => allText(x).trim());
+  check("history: 菜单有打开/编辑/删除",
+    labels0.indexOf("打开") >= 0 && labels0.indexOf("编辑配置") >= 0 && labels0.indexOf("删除") >= 0,
+    labels0.join("|"));
+  const openBtn = walk(m0, []).find((x) => x.tag === "button" && allText(x).trim() === "打开");
+  const editBtn = walk(m0, []).find((x) => x.tag === "button" && allText(x).trim() === "编辑配置");
+  check("history: 打开接线到 openHistory", openBtn && typeof openBtn.onclick === "function");
+  check("history: 非生成中会话的编辑可用", editBtn && editBtn.disabled !== true && typeof editBtn.onclick === "function");
   const busyItem = items.find((it) => allText(it).indexOf("busy-one") >= 0);
-  const busyEdit = findButton(busyItem, "编辑");
-  check("history: 生成中会话的编辑按钮被禁用", busyEdit.disabled === true, "disabled=" + busyEdit.disabled);
-  check("history: 生成中的禁用理由写在 title 上", String(busyEdit.title).indexOf("正在生成中") >= 0, busyEdit.title);
-  check("history: 生成中会话的编辑按钮没有接线", typeof busyEdit.onclick !== "function");
+  const busyPencil = findByClass(busyItem, "hpen")[0];
+  const mb = menuOf(busyPencil);
+  const busyEdit = walk(mb, []).find((x) => x.tag === "button" && allText(x).trim() === "编辑配置");
+  check("history: 生成中会话的编辑被禁用", busyEdit && busyEdit.disabled === true, "disabled=" + (busyEdit && busyEdit.disabled));
+  check("history: 生成中的禁用理由写在 title 上", busyEdit && String(busyEdit.title).indexOf("正在生成中") >= 0, busyEdit && busyEdit.title);
+  check("history: 生成中会话的编辑没有接线", busyEdit && typeof busyEdit.onclick !== "function");
   check("history: 状态文案保留（·进行中）", allText(items[0]).indexOf("·进行中") < 0 && allText(busyItem).indexOf("·进行中") >= 0);
 
   /* ---- 配置面板（started=true、虚拟机档）：冻结、模块、模型、档位、运行能力、定版、网络 ---- */
@@ -436,7 +453,13 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
   closeModalIfAny();
   let openErrored = null;
   try {
-    findButton(findByClass(reg.get("#history-list"), "history-item")[0], "打开").onclick({ stopPropagation() {} });
+    const firstItem = findByClass(reg.get("#history-list"), "history-item")[0];
+    const pencil = findByClass(firstItem, "hpen")[0];
+    pencil.onclick({ stopPropagation() {} });
+    const root = reg.get("#menu-root");
+    const menu = root.children[root.children.length - 1];
+    const openItem = walk(menu, []).find((x) => x.tag === "button" && allText(x).trim() === "打开");
+    openItem.onclick();
     await sleep(80);
   } catch (e) { openErrored = e && e.message; }
   check("open: 点「打开」进入会话视图不报错", !openErrored, String(openErrored));

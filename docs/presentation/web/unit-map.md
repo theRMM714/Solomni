@@ -8,4 +8,4 @@
 | --- | --- |
 | `src/presentation/web/mod.rs` | 本地 HTTP 服务（tiny_http，只绑 `127.0.0.1`）与长轮询；按 `ROUTES` 匹配与分发 |
 | `src/presentation/web/routes.rs` | HTTP 路由目录 `ROUTES` 与匹配器：路由的唯一定义，`--print-routes` 输出它的 JSON |
-| `src/presentation/web/assets/` | 浏览器端资源（`index.html` / `app.js` / `md.js` / `style.css`）与冒烟脚本（`*.smoke.cjs`） |
+| `src/presentation/web/assets/` | 浏览器端资源（`index.html` / `tokens.css` / `ui.css` / `ui.js` / `style.css` / `app.js` / `md.js`）与冒烟脚本（`*.smoke.cjs`） |
