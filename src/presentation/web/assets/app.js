@@ -2497,6 +2497,8 @@ function lineParts(l) {
     // 工具行同样要有身份（卡片左上角标出是谁在调工具）——身份是这一行的，不是正文的附属。
     return [{ cls: 'tool', tool: l.tool || null, reasoning: reasoning, who: (l.tool && l.tool.speaker) || speaker, text: '', speaker: (l.tool && l.tool.speaker) || speaker }];
   }
+  // 内容类系统提示：转录里的一等行（有 id，可回档/折叠），界面仍按系统行画。
+  if (kind === 'notice') return [{ cls: 'sys notice', who: speaker, text: text }];
   // 系统行：系统注入的提醒/边界（没有说话人），或核心自己的行（代拟…）。
   if (kind === 'system' || l.system) return [{ cls: 'sys system', who: speaker, text: text }];
   // 讨论的轮次分隔行：标签是"轮次 + 号"（号在正文里，结构化）。

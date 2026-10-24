@@ -84,10 +84,12 @@ fn maybe_compact(s: &mut AgentSession, identity: &str, sink: &mut dyn FnMut(Sess
             s.compact(up_to, &summary);
             sink(SessionEvent::Compacted { up_to, summary });
         }
-        Err(err) => sink(SessionEvent::Notice(format!(
-            "[警告] 自动压缩没成功：{}（继续用完整上下文）",
-            err
-        ))),
+        Err(err) => {
+            let note = format!("[警告] 自动压缩没成功：{}（继续用完整上下文）", err);
+            for ev in s.note_notice(&note) {
+                sink(ev);
+            }
+        }
     }
 }
 
@@ -270,14 +272,15 @@ fn run_rounds(
         }
     }
     if let Some(err) = error.borrow().as_ref() {
-        sink(SessionEvent::Notice(
-            crate::capabilities::session::api::interrupted_note(err),
-        ));
+        for ev in s.note_notice(&crate::capabilities::session::api::interrupted_note(err)) {
+            sink(ev);
+        }
     }
     if stopped {
-        sink(SessionEvent::Notice(
-            "[已停止] 生成已按你的要求中止（保留已产出的部分）".to_string(),
-        ));
+        for ev in s.note_notice("[已停止] 生成已按你的要求中止（保留已产出的部分）")
+        {
+            sink(ev);
+        }
     }
     rounds
 }

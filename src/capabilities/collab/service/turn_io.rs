@@ -239,10 +239,7 @@ impl CollabSession {
         match judged {
             Ok((true, why)) => {
                 if !why.trim().is_empty() {
-                    sink(SessionEvent::Notice(format!(
-                        "[裁决] 照你说的开工：{}",
-                        why
-                    )));
+                    self.notice(&format!("[裁决] 照你说的开工：{}", why), sink);
                 }
                 match p {
                     Pending::PlanReview => {
@@ -262,23 +259,25 @@ impl CollabSession {
             }
             // 不明确 = **不动**：不自动往下推，这一关续一张新卡接着等他补一句。
             Ok((false, why)) => {
-                sink(SessionEvent::Notice(if why.trim().is_empty() {
+                let note = if why.trim().is_empty() {
                     "[裁决] 我还没听出明确的意思，先不动；请再说一句（要做 / 不要做 / 照哪个走）。"
                         .to_string()
                 } else {
                     format!("[裁决] 先不动——{}；请再说一句。", why)
-                }));
+                };
+                self.notice(&note, sink);
                 self.gate_advice = advice.to_string();
                 self.ask_user(p.clone(), sink);
                 false
             }
             Err(err) => {
-                sink(SessionEvent::Notice(
-                    crate::capabilities::session::api::interrupted_note(&format!(
+                self.notice(
+                    &crate::capabilities::session::api::interrupted_note(&format!(
                         "判定你的意思时没能问模型（{}）；为稳妥先不动，请再说一句。",
                         err
                     )),
-                ));
+                    sink,
+                );
                 self.gate_advice = advice.to_string();
                 self.ask_user(p.clone(), sink);
                 false

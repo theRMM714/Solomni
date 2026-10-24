@@ -464,6 +464,34 @@ impl AgentSession {
         vec![SessionEvent::Transcript(vec![v])]
     }
 
+    /// 目的：注入一条**内容类系统提示**——转录里是一等行（有 id、可回档/折叠、能删除），**不进模型上下文**。
+    /// 约束：自己成一条回复（reply = 自己的 id），回档到它按回复原子截断。
+    pub fn note_notice(&mut self, text: &str) -> Vec<SessionEvent> {
+        let v = self.notice_line(text);
+        vec![SessionEvent::Transcript(vec![v])]
+    }
+
+    /// 目的：分配一条 notice 行（id / marks / line_reply 与普通行同一套账），不碰对话。
+    fn notice_line(&mut self, text: &str) -> LineView {
+        let id = self.next_line;
+        let v = LineView {
+            id,
+            reply: id,
+            line: text.to_string(),
+            kind: "notice".to_string(),
+            turn: self.cur_turn,
+            ..Default::default()
+        };
+        self.next_line += 1;
+        if let Some(t) = self.tools.as_ref() {
+            t.line
+                .store(self.next_line, std::sync::atomic::Ordering::Relaxed);
+        }
+        self.line_reply.push(id);
+        self.marks.push(self.dialogue.len());
+        v
+    }
+
     /// 注入一条**派发任务**（核心给这个 agent 派的活，见 session-model.md 四之二）。
     /// 界面：**系统行**——说话人是核心，不冒充用户；上下文：**user 角色**——派活是一次"回合"，
     /// 会话协议要求请求里至少有一条 user 消息（全是 system 的请求会被供应商整条拒收）。

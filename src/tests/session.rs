@@ -1774,3 +1774,45 @@ pub(crate) fn continue_hint_is_derived_from_the_session_state() {
     assert_eq!(hint.kind, "turn");
     assert!(hint.label.contains("继续"));
 }
+
+/// 目的：内容类系统提示（notice）占一行、自己成一条回复，但**不进模型上下文**。
+/// 约束：同一段转录加一条 notice，重建出的对话条数与角色序列与不加时完全一致。
+#[test]
+pub(crate) fn notice_lines_stay_out_of_the_model_dialogue() {
+    use crate::capabilities::conductor::service::replay_dialogue;
+    use crate::capabilities::llm::api::ToolMode;
+    let events = |with_notice: bool| {
+        let mut lines =
+            vec![serde_json::json!({"id": 0, "kind": "user", "speaker": "用户", "line": "问一"})];
+        if with_notice {
+            lines.push(serde_json::json!({
+                "id": 1,
+                "kind": "notice",
+                "reply": 1,
+                "line": "[建组] a",
+            }));
+        }
+        let reply = if with_notice { 2 } else { 1 };
+        lines.push(serde_json::json!({
+            "id": reply,
+            "kind": "msg",
+            "speaker": "a",
+            "verb": "say",
+            "line": "答一",
+            "reply": reply,
+        }));
+        vec![serde_json::json!({"type": "transcript", "lines": lines})]
+    };
+    let (plain, plain_marks, plain_reply, _) = replay_dialogue(&events(false), ToolMode::Envelope);
+    let (shown, marks, line_reply, _) = replay_dialogue(&events(true), ToolMode::Envelope);
+    assert_eq!(shown.len(), plain.len(), "提示不进对话");
+    assert_eq!(
+        shown.iter().map(|m| m.role.as_str()).collect::<Vec<_>>(),
+        plain.iter().map(|m| m.role.as_str()).collect::<Vec<_>>(),
+        "对话的角色序列不变"
+    );
+    assert_eq!(marks.len(), 3, "三条行各占一份 marks");
+    assert_eq!(line_reply, vec![0, 1, 2], "提示行自己成一条回复");
+    assert_eq!(plain_marks.len(), 2);
+    assert_eq!(plain_reply, vec![0, 1]);
+}

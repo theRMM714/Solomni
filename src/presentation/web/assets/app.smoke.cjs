@@ -344,6 +344,24 @@ setTimeout(async () => {
       if (!lineRule) loadErrors.push('行画法检查：' + JSON.stringify(r));
     } catch (e) { loadErrors.push('行画法检查失败：' + e.message); }
   }
+  // **内容类系统提示是一等行**：kind=notice 的转录行有 id（回档靠它），界面按系统行画。
+  let noticeRow = false;
+  if (!loadErrors.length) {
+    try {
+      const r = vm.runInNewContext(
+        "(function () {" +
+          " const s = { sid: 'nt', lines: [], live: [], fold: {}, scroll: {} };" +
+          " absorb(s, { type: 'transcript', lines: [{ id: 7, reply: 7, kind: 'notice', line: '[建组] a' }] });" +
+          " const l = s.lines[0] || {};" +
+          " return { id: l.id, cls: l.cls, text: l.text, n: s.lines.length };" +
+          "})()",
+        sandbox
+      );
+      noticeRow = r.n === 1 && r.id === 7 && String(r.cls).indexOf('sys') >= 0
+        && String(r.cls).indexOf('notice') >= 0 && r.text === '[建组] a';
+      if (!noticeRow) loadErrors.push('notice 行检查：' + JSON.stringify(r));
+    } catch (e) { loadErrors.push('notice 行检查失败：' + e.message); }
+  }
   // **改需求按钮**：没有能力位就根本不渲染（不是灰着）；会话工作时不可点。
   let taskButtonRule = false;
   if (!loadErrors.length) {
@@ -601,14 +619,14 @@ setTimeout(async () => {
   const ok = alerts.length === 0 && loadErrors.length === 0 && rendered && tierWarned && identityKept
     && pollConn === "已连接" && pollApplied && hydratedHistory && liveReplaced && liveClearedOnIdle && toolReasoningRendered
     && rewoundApplies && readonlyRule
-    && taskButtonRule && decisionCardRule && onlyLastStreams && lineRule && runningRules && atMenuRefetches
+    && taskButtonRule && decisionCardRule && onlyLastStreams && lineRule && noticeRow && runningRules && atMenuRefetches
     && wizardProxy && sessionNoteRule && historyRunTag && fenceBanner
     && consoleErrors.length === 0;
   if (!ok) {
     console.log("alerts（原生弹窗被调用的次数，应为 0）:", JSON.stringify(alerts));
     console.log("notice 渲染:", rendered, "| 虚拟机档不可用提示:", tierWarned, "| 身份标题保留:", identityKept);
     console.log("轮询状态点:", JSON.stringify(pollConn), "| 事件已应用:", pollApplied, "| 盘上转录已补:", hydratedHistory, "| 流式被替换:", liveReplaced, "| 空闲清理:", liveClearedOnIdle, "| 思维链:", toolReasoningRendered);
-    console.log("回档重置:", rewoundApplies, "| 只读会话:", readonlyRule);
+    console.log("回档重置:", rewoundApplies, "| 只读会话:", readonlyRule, "| notice 行:", noticeRow);
     console.log("运行态归一（事件为准 / 快照只对账）:", runningRules, "| @ 菜单每次重拉:", atMenuRefetches);
     console.log("向导代理形态:", wizardProxy, "| 会话级说明:", sessionNoteRule, "| 侧栏运行态:", historyRunTag, "| 围栏横幅:", fenceBanner);
     console.log("应用侧 console.error:", JSON.stringify(consoleErrors.slice(0, 3)));

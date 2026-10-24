@@ -43,19 +43,20 @@ impl CollabSession {
         // 核心这一次调用结束了：交回"谁在干活"——下一棒（泵的下一步 / 等用户）会再推。
         sink(crate::capabilities::session::api::idle());
         let Ok(proposal) = proposal else {
-            sink(SessionEvent::Notice(
-                "[错误] 代拟失败（模型无响应格式）。请直接点名 agent。".into(),
-            ));
+            self.notice(
+                "[错误] 代拟失败（模型无响应格式）。请直接点名 agent。",
+                sink,
+            );
             sink(SessionEvent::Ended);
             self.done = true;
             return;
         };
         // 拒收项如实告知（合法性由拟名单业务判，这里只转述）。
         for r in proposal.rejected {
-            sink(SessionEvent::Notice(format!("[代拟] {}，拒收", r)));
+            self.notice(&format!("[代拟] {}，拒收", r), sink);
         }
         if proposal.picks.is_empty() {
-            sink(SessionEvent::Notice("[错误] 代拟名单无可用 agent".into()));
+            self.notice("[错误] 代拟名单无可用 agent", sink);
             sink(SessionEvent::Ended);
             self.done = true;
             return;
@@ -82,7 +83,7 @@ impl CollabSession {
         ));
         sink(SessionEvent::Transcript(vec![line]));
         if !ok {
-            sink(SessionEvent::Notice("[取消] 已按用户意愿取消".into()));
+            self.notice("[取消] 已按用户意愿取消", sink);
             sink(SessionEvent::Ended);
             self.done = true;
             return;
@@ -90,17 +91,16 @@ impl CollabSession {
         if self.slate_picks.is_empty() {
             // 名单只活在内存里（落档发生在确认之后）；重启后回来会空手。
             // 与其拿着空名单开工，不如如实告知并重新拟一份（名单本来就是要用户过目的提案）。
-            sink(SessionEvent::Notice(
-                "[提示] 上次拟的名单未落档（重启会丢），重新拟一份，请再确认。".into(),
-            ));
+            self.notice(
+                "[提示] 上次拟的名单未落档（重启会丢），重新拟一份，请再确认。",
+                sink,
+            );
             self.draft_slate(sink);
             return;
         }
         self.roster = self.slate_picks.clone();
-        sink(SessionEvent::Notice(format!(
-            "[建组] {}",
-            self.names().join(" + ")
-        )));
+        let names = self.names().join(" + ");
+        self.notice(&format!("[建组] {}", names), sink);
         self.ask_user(Pending::ConfirmBegin, sink);
     }
 
@@ -119,17 +119,18 @@ impl CollabSession {
         let (members, notes) = match self.assemble_members() {
             Ok(x) => x,
             Err(e) => {
-                sink(SessionEvent::Notice(format!("[装配失败] {}", e)));
+                self.notice(&format!("[装配失败] {}", e), sink);
                 return;
             }
         };
         for n in notes {
-            sink(SessionEvent::Notice(n));
+            self.notice(&n, sink);
         }
         if self.core_is_demo {
-            sink(SessionEvent::Notice(
-                "[提示] 核心未配置供应商：整理/验收使用内置假模型（演示）".into(),
-            ));
+            self.notice(
+                "[提示] 核心未配置供应商：整理/验收使用内置假模型（演示）",
+                sink,
+            );
         }
         // 讨论也走**全局设置**（流式 + 预算），与单 agent 共用同一份。
         let llm = crate::capabilities::llm::api::LlmOpts {
@@ -198,9 +199,7 @@ impl CollabSession {
             self.ask_user(Pending::ConfirmSlate, sink);
             return;
         }
-        sink(SessionEvent::Notice(
-            "[提示] 等待你在裁决门确认名单 / 开始讨论。".into(),
-        ));
+        self.notice("[提示] 等待你在裁决门确认名单 / 开始讨论。", sink);
     }
 
     /// 撤回某 agent 的同意：转录追加一条撤回行（用户可见、也进上下文），并就地复位本轮表态。
