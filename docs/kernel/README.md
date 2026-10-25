@@ -47,8 +47,10 @@
 - 改**归属字段**（含会话租约 `Sandbox.session` → `FenceSpec.lease` → `Owner.lease`）或启动对账时，`record.rs` 的 `current_owner` / `owners_state` / `reconcile` / `release_fence` / `clean` 与入口 `--fence-reconcile` 要一起改；启动对账的接线在 `src/main.rs`。
 - ACE 的读法只有一处：`acl.rs` 的 `ace_parts` 按 ACE 头算 SID 偏移（标准 ACE 与回调 ACE 从第 8 字节起，对象 ACE 再加 Flags(4) 与在场的 GUID）。改覆盖的 ACE 类型或身份形状时，写后核对、诊断转储与 `windows/tests.rs` 的对象 ACE 往返探针要一起看。
 - 容器里**列目录**的判据：同一个授权叶子上，cmd 的 `dir` 与 PowerShell 的 `Get-ChildItem` 会被拒；cmd 的 `for` 枚举与 python 的 `os.listdir` / `os.scandir` 正常。所以"列自己的产物"用 `for` 枚举钉住（`container_roundtrip_sees_leaf_but_not_parent_content` 的第四步），`dir` 不是可依赖的列举手段。
+- **解释器按真身授权**：命令名经目录重解析点（符号链接 / 联接）进来时，Windows 只授**真身**的安装根——链接对象自身的 DACL 不参与跟随（真机：链接没有 AAPP 也能跑 exe）；文件本身是链接、父目录是实目录时两边都留。预检与执行共用 `interpreter_roots_for_exe`。
+- **预检即终局**：解释器根先过 `interpreter_dir_usable`（已有 AAPP 只读、属主、或 `AccessCheck` 判出 `WRITE_DAC`）；不可用就直接记成必要落点缺失，**不尝试写**。
 - 命令里的解释器有**基线**：`node <文件>` 的命令由围栏注入 `NODE_OPTIONS=--preserve-symlinks --preserve-symlinks-main`——node 的 `fs.realpathSync` 会 lstat 卷根与祖先前缀，而这两类落点按设计不在可达范围；少了它，进程在脚本执行前就 EPERM 死。只在 Windows 注入（Landlock 不管读属性、seatbelt 已给祖先放行 `file-read-metadata`）；判据与 `interpreter_dirs` 共用同一份 PATH 解析（`command_programs_in`）。
-- **真机测试（`--fence-live`）**：`unwritable_interpreter_dir_never_silently_runs_unfenced`（`ProcTools` 的用例）断言三条：选「跑一次」才跑且回执如实标为无围栏；选「放弃」不执行；没有可回答的前端也不执行。
+- **真机测试（`--fence-live`）**：`unwritable_interpreter_dir_never_silently_runs_unfenced`（`ProcTools` 的用例）断言三条：选「跑一次」才跑且回执如实标为无围栏；选「放弃」不执行；没有可回答的前端也不执行。宿主解释器的真身可授权时如实 env-skip（构造不出"授不上"这一态）；"写失败不报回滚、不撤预存 ACE"的契约由注入用例 `failed_write_keeps_preexisting_ace_and_never_says_rollback` 覆盖。
 - 改 `procs` 的登记字段或回收判据时，本页的「长驻子进程的账与回收」、`src/main.rs` 的启动对账、`--doctor` 的 `processes` 字段与 `GET /api/processes` 的响应要一起看。
 
 ## 五、围栏落点：必要与可选
@@ -75,6 +77,7 @@
 
 **行为**（`prepare_fence` → `FencePrep` → `ProcTools`）：
 
+- **预检失败不写**：解释器根不可授权时 `prepare_fence` 直接给出必要落点缺失，不产生"写一半/回滚"的状态；回执只写真身路径。
 - **必要落点授不上：不许降级**。经统一裁决通道（见 [session-model.md](../session/session-model.md) 的「请用户裁决」）推一条消息：哪一环、哪个目录、缺什么前提、怎么补。
   - 两条选项：`fence_unfenced_once`（本轮无围栏跑一次——回执与 stderr 都**如实标为无围栏**）/ `fence_abort`（放弃这次调用）。
   - 这一问声明 "没人答就当我选了放弃"（`on_unanswered` = `fence_abort`）。

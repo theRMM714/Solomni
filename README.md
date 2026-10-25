@@ -64,7 +64,7 @@ node start.js --provision --ensure --yes # 可选（Linux / Windows）：把 QEM
   不会“带参数就直接开网页”。基础工具链缺失时，`start.js` 还会在首次启动问一次是否装进项目内；
   之后每次启动只报告缺失与补全命令，不再追问。
 - 工具链与缓存收敛在**项目内**：检测到可用的 Rust 就**只读借用**，缓存与产物仍落 `platform/<os>/`；没有或有问题的才先征求同意装进项目内，不动系统；**无交互终端时不做安装**，打印手动步骤后退出。
-- 模块工具/构建的**基础工具链**（Python / Node / C-C++）是运行前提，装进 `.tools/toolchains/`，启动时前置 PATH。`setup-runtime.js` 默认安装；`start.js` 首启询问、之后每次启动报告项目内 / 宿主回退 / 缺失。宿主回退只在 Windows 围栏能授权时可用（已有足够权限项，或目录属主是当前用户）；否则如实报原因并要求先装项目内。C# 等额外能力可由用户把适用于本机目标的包放进 `runtimes/`（包 `bin/` 进本次执行的 PATH；缺包如实报告）。
+- 模块工具/构建的**基础工具链**（Python / Node / C-C++）是运行前提，装进 `.tools/toolchains/`，启动时前置 PATH。`setup-runtime.js` 默认安装；`start.js` 首启询问、之后每次启动报告项目内 / 宿主回退 / 缺失。宿主回退只在 Windows 围栏能授权时可用（按**真身安装根**判：已有足够权限项、目录属主是当前用户、或当前用户对该目录有 WRITE_DAC；命令名经链接进来时链接本身不授）；否则如实报原因并要求先装项目内。C# 等额外能力可由用户把适用于本机目标的包放进 `runtimes/`（包 `bin/` 进本次执行的 PATH；缺包如实报告）。
   C/C++ 在 Windows 用 MinGW-w64、Linux / macOS 用 Zig；macOS 链接原生框架仍需要系统的 Xcode Command Line Tools / SDK。
   借用系统工具链时不读系统 `~/.cargo/config.toml`（镜像 / 凭据），依赖会重新下到项目内——这是「不写项目外」的取舍；门禁还会快照项目外缓存根，写出去即失败。
 
