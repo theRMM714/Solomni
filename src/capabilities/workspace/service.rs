@@ -16,8 +16,8 @@ use crate::capabilities::workspace::api::{
 use crate::capabilities::workspace::domain::hash::{content_hash, is_content_hash};
 use crate::capabilities::workspace::domain::workstore::{
     clean_rel, expand_paths, local_take_verdict, lost_rel, needs_backup, plan_commit, pull_verdict,
-    status_of, Commit, CommitAnchor, Conflict, ConflictAt, Index, LocalTakeVerdict, Pending,
-    PendingIndex, PullVerdict, Tree,
+    status_of, validate_paths, Commit, CommitAnchor, Conflict, ConflictAt, Index, LocalTakeVerdict,
+    Pending, PendingIndex, PullVerdict, Tree, Unchanged,
 };
 use crate::capabilities::workspace::ports::{WorkStore, Workdirs};
 use std::collections::{BTreeMap, BTreeSet};
@@ -321,6 +321,34 @@ fn render_conflicts(conflicts: &[ConflictAt]) -> String {
     out
 }
 
+/// 空提交的原因渲染成模型侧回执：逐条说清是“一致”“上游已更新”还是“上游已删除”，
+/// 并给下一步（不再笼统说“与主副本一致”）。
+fn render_unchanged(items: &[(String, Unchanged)]) -> String {
+    let mut out = String::from("没有可提交的改动：");
+    for (path, why) in items.iter().take(50) {
+        out.push_str(&format!("\n- {}：{}", path, why.as_str()));
+    }
+    if items.len() > 50 {
+        out.push_str(&format!("\n…（共 {} 条）", items.len()));
+    }
+    if items
+        .iter()
+        .any(|(_, why)| matches!(why, Unchanged::UpstreamDeleted))
+    {
+        out.push_str(
+            "\n上游已删除的路径：要保留本地内容为新增，先 work_resolve take=local（带当前 head），再 work_commit；要放弃，用 take=upstream。",
+        );
+    }
+    if items
+        .iter()
+        .any(|(_, why)| matches!(why, Unchanged::UpstreamMoved))
+    {
+        out.push_str("\n上游已更新的路径：先 work_pull 把新版拉进沙箱，再提交。");
+    }
+    out.push_str("\n先用 work_status / work_versions 看逐条状态，再决定下一步。");
+    out
+}
+
 /// 把超限清单渲染成模型侧回执（点名路径、大小与上限，并给替代路径）。
 fn render_oversize(items: &[(String, u64)], limit: u64) -> String {
     let mut out = format!(
@@ -410,6 +438,7 @@ impl Workspace for WorkspaceService {
         if paths.is_empty() {
             return Err("work_pull 要给出要拉取的路径（文件或文件夹）".to_string());
         }
+        validate_paths(paths)?;
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
         let (shared, store, sandbox) = self.agent_roots(work, agent)?;
@@ -507,6 +536,7 @@ impl Workspace for WorkspaceService {
         if msg.is_empty() {
             return Err("提交说明不能为空".to_string());
         }
+        validate_paths(&req.paths)?;
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
         let (shared, store, sandbox) = self.agent_roots(work, agent)?;
@@ -553,13 +583,14 @@ impl Workspace for WorkspaceService {
         if locals.is_empty() {
             return Err("没有可提交的改动：paths 与 deletes 都是空的".to_string());
         }
-        let changes = match plan_commit(&index, &tree, &locals) {
-            Ok(c) => c,
+        let plan = match plan_commit(&index, &tree, &locals) {
+            Ok(p) => p,
             Err(conflicts) => return Err(render_conflicts(&conflicts)),
         };
-        if changes.is_empty() {
-            return Err("没有可提交的改动：这些路径与主副本一致".to_string());
+        if plan.changes.is_empty() {
+            return Err(render_unchanged(&plan.unchanged));
         }
+        let changes = plan.changes;
         // 先落对象，再写事务日志；主副本与元数据由事务统一应用/恢复。
         let id = self.reserve_id(&store)?;
         let mut new_tree = tree.clone();
@@ -688,6 +719,9 @@ impl Workspace for WorkspaceService {
         agent: &str,
         paths: &[String],
     ) -> Result<StatusReport, String> {
+        if !paths.is_empty() {
+            validate_paths(paths)?;
+        }
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
         let (shared, store, sandbox) = self.agent_roots(work, agent)?;
@@ -706,11 +740,10 @@ impl Workspace for WorkspaceService {
         let all: BTreeSet<String> = index.keys().chain(tree.keys()).cloned().collect();
         // 显式给路径时，把沙箱里未跟踪的文件也算进候选（能如实报“本地新增”）。
         let available: BTreeSet<String> = all.iter().chain(sandbox_files.iter()).cloned().collect();
-        let want: Vec<String> = if paths.is_empty() {
-            all.iter().cloned().collect()
+        let (want, missing): (Vec<String>, Vec<String>) = if paths.is_empty() {
+            (all.iter().cloned().collect(), Vec::new())
         } else {
-            let (got, _) = expand_paths(paths, &available);
-            got
+            expand_paths(paths, &available)
         };
         let mut entries: Vec<StatusEntry> = Vec::new();
         for rel in want {
@@ -753,6 +786,7 @@ impl Workspace for WorkspaceService {
             tree: all_tree,
             tree_truncated: truncated,
             entries,
+            missing,
             local_only,
             local_only_truncated,
             recent,
@@ -800,6 +834,7 @@ impl Workspace for WorkspaceService {
         if req.paths.is_empty() {
             return Err("work_resolve 要给出要解决的路径（文件或文件夹）".to_string());
         }
+        validate_paths(&req.paths)?;
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
         let (shared, store, sandbox) = self.agent_roots(work, agent)?;
