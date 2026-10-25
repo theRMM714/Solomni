@@ -1127,6 +1127,56 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// 目的：必要落点授不上时的三段裁决（问 / 跑 / 拒）不依赖宿主解释器的形态——
+    ///   用一个非解释器的必要落点把契约钉住；解释器那一环的"按真身授权"另有单测。
+    #[cfg(windows)]
+    #[test]
+    fn a_blocked_non_interpreter_root_still_asks_and_fails_closed() {
+        use crate::kernel::domain::fence::{
+            FenceBlocked, FencePart, OPT_FENCE_ABORT, OPT_FENCE_UNFENCED,
+        };
+        let dir = crate::tests::scratch("proc-tools-fence-ask");
+        std::fs::create_dir_all(&dir).expect("建目录");
+        let tools = ProcTools::new(
+            PathBuf::from("not-used"),
+            code_texts(),
+            dir.clone(),
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        );
+        let spec = spec_for(&dir);
+        let blocked = FenceBlocked {
+            part: FencePart::Module,
+            path: dir.clone(),
+            why: "写 DACL 失败（错误码 5）".to_string(),
+        };
+        // ① 选「无围栏跑一次」：问到了两个选项，按它办。
+        let ask = RecordingAsk::new(Some(OPT_FENCE_UNFENCED));
+        match tools.fence_blocked(Some(&ask), &spec, &blocked) {
+            FenceGo::Unfenced { note } => assert!(note.contains("无围栏"), "{}", note),
+            FenceGo::Refused(_) => panic!("选了无围栏跑一次却被拒"),
+        }
+        assert_eq!(
+            ask.asked_ids(),
+            vec![vec![
+                OPT_FENCE_UNFENCED.to_string(),
+                OPT_FENCE_ABORT.to_string()
+            ]],
+            "必要落点授不上要问用户（选项 id 是契约）"
+        );
+        // ② 选「放弃」：不执行。
+        let ask = RecordingAsk::new(Some(OPT_FENCE_ABORT));
+        match tools.fence_blocked(Some(&ask), &spec, &blocked) {
+            FenceGo::Refused(_) => {}
+            FenceGo::Unfenced { .. } => panic!("放弃之后绝不许跑"),
+        }
+        // ③ 没有可回答的前端：fail-closed。
+        match tools.fence_blocked(None, &spec, &blocked) {
+            FenceGo::Refused(_) => {}
+            FenceGo::Unfenced { .. } => panic!("没人答绝不许跑"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// 守门进程起不来：如实回执「启动失败」，不 panic、不假装跑过。
     #[test]
     fn missing_launcher_binary_is_reported_honestly() {

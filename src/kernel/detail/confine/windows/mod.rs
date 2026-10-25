@@ -31,6 +31,8 @@ pub(crate) const FILE_ALL_ACCESS: u32 = 0x001F_01FF;
 pub(crate) const FILE_DELETE_CHILD: u32 = 0x0000_0040;
 pub(crate) const DELETE: u32 = 0x0001_0000;
 pub(crate) const WRITE_DAC: u32 = 0x0004_0000;
+/// 目的：读安全描述符的权限位（AccessCheck 判写 DACL 时一起要）。
+pub(crate) const READ_CONTROL: u32 = 0x0002_0000;
 /// 目的：通用位：ACL 里存的可能是它们，也可能是内核展开后的具体位，比较覆盖关系时两者等价。
 pub(crate) const GENERIC_READ: u32 = 0x8000_0000;
 pub(crate) const GENERIC_WRITE: u32 = 0x4000_0000;
@@ -157,12 +159,17 @@ pub(crate) fn interpreter_dir_usable(dir: &Path) -> Result<(), String> {
         return Ok(());
     }
     match owner_is_current_user(dir) {
+        Ok(true) => return Ok(()),
+        Ok(false) => {}
+        Err(e) => return Err(format!("读取目录属主失败：{}", e)),
+    }
+    match can_write_dacl(dir) {
         Ok(true) => Ok(()),
         Ok(false) => Err(
-            "目录属主不是当前用户；写 DACL 需要管理员，或预先把该目录授给「所有应用程序包」"
+            "目录属主不是当前用户，当前用户也没有写 DACL 的权限；写 DACL 需要管理员，或预先把该目录授给「所有应用程序包」"
                 .to_string(),
         ),
-        Err(e) => Err(format!("读取目录属主失败：{}", e)),
+        Err(e) => Err(format!("判定写 DACL 权限失败：{}", e)),
     }
 }
 
@@ -216,6 +223,12 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
         // 基线的 ACE 可能**早已存在**（系统目录上常有全应用包的允许项）：那不是我们写的，记进台账会让收尾
         // 去撤系统目录（拒绝访问）。已存在就跳过，不记归属、也不改 DACL。
         if has_ace_for(base, &dir, RIGHTS_RO) {
+            continue;
+        }
+        // 预检即终局：这一条授权写不进去时，连尝试都不做——不产生"写一半/回滚"的状态。
+        if let Err(why) = interpreter_dir_usable(&dir) {
+            eprintln!("[围栏] 解释器目录不可授权（{}）：{}", dir.display(), why);
+            prep.fail(FencePart::Interpreter, dir, why);
             continue;
         }
         let target = GrantTarget {

@@ -298,10 +298,18 @@ pub(crate) fn base_facts(root: &Path) -> BaseFacts {
             let Some(exe) = crate::kernel::detail::host_probe::find_exe(name) else {
                 continue;
             };
-            let dir = crate::kernel::detail::confine::interpreter_install_root(&exe);
-            let (fenced, why) = match crate::kernel::detail::confine::interpreter_dir_usable(&dir) {
-                Ok(()) => (true, String::new()),
-                Err(e) => (false, e),
+            let roots = crate::kernel::detail::confine::interpreter_roots_for_exe(&exe);
+            let (fenced, why) = if roots.is_empty() {
+                (false, "解释器安装目录不在场".to_string())
+            } else {
+                match roots.iter().find_map(|dir| {
+                    crate::kernel::detail::confine::interpreter_dir_usable(dir)
+                        .err()
+                        .map(|e| format!("{}（{}）", e, dir.display()))
+                }) {
+                    Some(e) => (false, e),
+                    None => (true, String::new()),
+                }
             };
             fallback.insert(
                 id.to_string(),

@@ -672,17 +672,50 @@ fn interpreter_dirs_in(
 ) -> Vec<std::path::PathBuf> {
     let mut dirs: Vec<std::path::PathBuf> = Vec::new();
     for hit in command_programs_in(command, path_var, pathext) {
-        // 解释器常见布局：<root>/bin/xxx（官方安装与虚拟环境）或 <root>/xxx。
-        if let Some(parent) = hit.parent() {
-            dirs.push(install_dir(parent));
+        dirs.extend(interpreter_roots_for_exe(&hit));
+    }
+    dirs.sort();
+    dirs.dedup();
+    dirs
+}
+
+/// 目的：解释器程序 → 要授权的安装根（Windows 按真身；Unix 链接与真身都留）。
+/// 约束：父目录是重解析点时，**链接对象自身的 DACL 不参与跟随**（真机：链接没有 AAPP 也能跑 exe），
+///   只授真身；文件本身是链接、父目录是实目录时两边都留（运行期兄弟文件可能在链接旁）。
+///   真身取不到又确实是重解析点：退回链接父目录，让授权按真实失败如实报，而不是静默不给。
+pub(crate) fn interpreter_roots_for_exe(exe: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+    let parent = exe.parent();
+    let real = std::fs::canonicalize(exe)
+        .ok()
+        .map(|p| strip_verbatim_prefix(&p));
+    #[cfg(windows)]
+    {
+        if !parent.map(is_reparse_point).unwrap_or(false) {
+            if let Some(p) = parent {
+                dirs.push(install_dir(p));
+            }
         }
-        // 符号链接要把**真身**的安装目录也放行：macOS 上 python3 常常是链接，动态库在真身旁边——
-        // 只放行链接所在目录会让加载器取不到库（进程直接 SIGABRT）。
-        if let Ok(real) = std::fs::canonicalize(&hit) {
-            let real = strip_verbatim_prefix(&real);
-            if real != hit {
-                if let Some(parent) = real.parent() {
-                    dirs.push(install_dir(parent));
+        if let Some(real) = real.as_deref() {
+            if let Some(p) = real.parent() {
+                dirs.push(install_dir(p));
+            }
+        }
+        if dirs.is_empty() {
+            if let Some(p) = parent {
+                dirs.push(install_dir(p));
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        if let Some(p) = parent {
+            dirs.push(install_dir(p));
+        }
+        if let Some(real) = real.as_deref() {
+            if real != exe {
+                if let Some(p) = real.parent() {
+                    dirs.push(install_dir(p));
                 }
             }
         }
@@ -692,11 +725,14 @@ fn interpreter_dirs_in(
     dirs.into_iter().filter(|d| d.is_dir()).collect()
 }
 
-/// 目的：解释器可执行文件 → 它的安装根（与围栏授权同一个口径）。
-pub(crate) fn interpreter_install_root(exe: &std::path::Path) -> std::path::PathBuf {
-    exe.parent()
-        .map(install_dir)
-        .unwrap_or_else(|| exe.to_path_buf())
+/// 目的：路径本身是不是重解析点（符号链接 / 联接）。
+#[cfg(windows)]
+fn is_reparse_point(path: &std::path::Path) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+    std::fs::symlink_metadata(path)
+        .map(|m| m.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
+        .unwrap_or(false)
 }
 
 /// 目的：这个解释器安装目录在**平台围栏**下能不能放行（只读探测，不写权限项）。
@@ -1222,6 +1258,64 @@ mod tests {
                 .all(|d| !d.ends_with("nope")),
             "数据/缺失路径不该被当成解释器"
         );
+    }
+
+    /// 目的：命令经目录重解析点（符号链接 / 联接）进来时，Windows 只授**真身**安装根；
+    ///   链接对象自身的 DACL 不参与跟随（真机：链接没有 AAPP 也能跑 exe）。
+    #[cfg(windows)]
+    #[test]
+    fn interpreter_roots_skip_a_reparse_point_parent_and_use_the_real_root() {
+        let root = crate::tests::scratch("interpreter-reparse");
+        let real = root.join("real");
+        let link = root.join("nodejs");
+        std::fs::create_dir_all(&real).expect("建真身目录");
+        std::fs::write(real.join("node.exe"), b"stub").expect("放假 node");
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(&real)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if !made {
+            eprintln!("[探针] 本机建不出目录联接（env-skip）：跳过重解析点授权口径");
+            let _ = std::fs::remove_dir_all(&root);
+            return;
+        }
+        assert_eq!(
+            interpreter_roots_for_exe(&link.join("node.exe")),
+            vec![real.clone()],
+            "只授真身安装根，不授链接父目录"
+        );
+        let _ = std::fs::remove_dir(&link);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 目的：只有 exe 本身是链接、父目录是实目录时，两边都留（运行期兄弟文件可能在链接旁）。
+    #[cfg(windows)]
+    #[test]
+    fn interpreter_roots_keep_both_sides_for_a_file_symlink() {
+        use std::os::windows::fs::symlink_file;
+        let root = crate::tests::scratch("interpreter-file-link");
+        let real = root.join("real");
+        let tools = root.join("tools");
+        std::fs::create_dir_all(&real).expect("建真身目录");
+        std::fs::create_dir_all(&tools).expect("建工具目录");
+        std::fs::write(real.join("node.exe"), b"stub").expect("放假 node");
+        let made = symlink_file(real.join("node.exe"), tools.join("node.exe")).is_ok();
+        if !made {
+            eprintln!("[探针] 本机建不出文件符号链接（env-skip）：跳过文件链接的安装根口径");
+            let _ = std::fs::remove_dir_all(&root);
+            return;
+        }
+        let roots = interpreter_roots_for_exe(&tools.join("node.exe"));
+        assert!(
+            roots.contains(&tools),
+            "链接父目录要留（运行期兄弟文件）：{:?}",
+            roots
+        );
+        assert!(roots.contains(&real), "真身安装根也要留：{:?}", roots);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// 解释器基线：`node <文件>` 的命令要带上"跳过 realpath"的两个开关；别的解释器、命令里的数据文件路径都不带。
