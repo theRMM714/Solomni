@@ -7,19 +7,23 @@ use crate::kernel::api::FenceSpec;
 use std::ffi::c_void;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use windows_sys::Win32::Foundation::{CloseHandle, LocalFree};
+use windows_sys::Win32::Foundation::{CloseHandle, LocalFree, HANDLE};
 use windows_sys::Win32::Security::Authorization::{
     ConvertStringSidToSidW, GetNamedSecurityInfoW, SetEntriesInAclW, SetNamedSecurityInfoW,
     EXPLICIT_ACCESS_W, GRANT_ACCESS, OBJECTS_AND_SID, REVOKE_ACCESS, TRUSTEE_IS_OBJECTS_AND_SID,
     TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
 };
 use windows_sys::Win32::Security::{
-    GetAce, GetAclInformation, GetSecurityDescriptorLength, GetTokenInformation, SetFileSecurityW,
-    TokenUser, ACE_INHERITED_OBJECT_TYPE_PRESENT, ACE_OBJECT_TYPE_PRESENT, ACL,
-    ACL_SIZE_INFORMATION, CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION, OBJECT_INHERIT_ACE,
-    OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SID, TOKEN_QUERY, TOKEN_USER,
+    AccessCheck, GetAce, GetAclInformation, GetSecurityDescriptorLength, GetTokenInformation,
+    ImpersonateSelf, RevertToSelf, SecurityImpersonation, SetFileSecurityW, TokenUser,
+    ACE_INHERITED_OBJECT_TYPE_PRESENT, ACE_OBJECT_TYPE_PRESENT, ACL, ACL_SIZE_INFORMATION,
+    CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION, GENERIC_MAPPING, GROUP_SECURITY_INFORMATION,
+    OBJECT_INHERIT_ACE, OWNER_SECURITY_INFORMATION, PRIVILEGE_SET, PSECURITY_DESCRIPTOR, PSID, SID,
+    TOKEN_QUERY, TOKEN_USER,
 };
-use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+use windows_sys::Win32::System::Threading::{
+    GetCurrentProcess, GetCurrentThread, OpenProcessToken, OpenThreadToken,
+};
 
 /// 文件对象（SetNamedSecurityInfoW / GetNamedSecurityInfoW 的对象类型）。
 use super::*;
@@ -44,6 +48,13 @@ const GUID_LEN: usize = 16;
 pub(crate) const INHERIT_ONLY_ACE: u8 = 0x08;
 /// 目的：ACE 标志位「由父目录继承而来」——用来区分显式写下的 ACE 与继承来的。
 pub(crate) const INHERITED_ACE: u8 = 0x10;
+
+// 测试注入：强制 grant_verified 在写之前失败，覆盖“写都没成功”的失败路径。
+// 约束：线程局部，避免与并行跑的真机探针互相踩。
+#[cfg(test)]
+thread_local! {
+    pub(crate) static FORCE_GRANT_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
 
 /// 目的：一条 ACE 解析出来的关键字段——**SID 偏移随 ACE 类型变**，所以它必须算出来，不能到处硬写 8。
 /// 约束：纯数据（GUID 已转文本），不持有 IO 资源，可脱机单测。
@@ -680,9 +691,32 @@ pub(crate) fn grant_verified(
     recursive: bool,
     inherit: bool,
 ) -> Result<(), String> {
+    #[cfg(test)]
+    if FORCE_GRANT_FAILURE.with(|f| f.get()) {
+        return Err("测试注入：写 DACL 失败（没有写入）".to_string());
+    }
+    let before_sd = sd_bytes(path).map_err(|e| format!("读取写入前安全描述符失败：{}", e))?;
     let before = acl_scan(path).map_err(|e| format!("读取写入前 DACL 失败：{}", e))?;
-    grant_one(sid, path, rights, recursive, inherit)?;
-    let after = acl_scan(path).map_err(|e| format!("写后读回 DACL 失败：{}", e))?;
+    // 写失败时先比一次：真没变就什么都不做；变了（递归写可能已落了一部分）就还原。
+    if let Err(e) = grant_one(sid, path, rights, recursive, inherit) {
+        let changed = sd_bytes(path).map(|now| now != before_sd).unwrap_or(true);
+        return Err(if changed {
+            restore_after_failed_write(path, &before_sd, e, recursive)
+        } else {
+            e
+        });
+    }
+    let after = match acl_scan(path) {
+        Ok(after) => after,
+        Err(e) => {
+            return Err(restore_after_failed_write(
+                path,
+                &before_sd,
+                format!("写后读回 DACL 失败：{}", e),
+                recursive,
+            ))
+        }
+    };
     let lost = lost_entries(&permission_entries(&before), &permission_entries(&after));
     if !lost.is_empty() {
         // 认不出的 ACE 进不了比对：有就说清，别让"缺 N 项"看起来像全部账目。
@@ -691,20 +725,50 @@ pub(crate) fn grant_verified(
         } else {
             String::new()
         };
-        return Err(format!(
-            "写后核对发现原有权限项丢失（{}，缺 {} 项{}）",
-            path.display(),
-            lost.len(),
-            unparsed
+        return Err(restore_after_failed_write(
+            path,
+            &before_sd,
+            format!(
+                "写后核对发现原有权限项丢失（{}，缺 {} 项{}）",
+                path.display(),
+                lost.len(),
+                unparsed
+            ),
+            recursive,
         ));
     }
     if !has_ace_for(sid, path, rights) {
-        return Err(format!(
-            "写后校验失败（{}）：给定权限的 ACE 未生效，本机环境不允许",
-            path.display()
+        return Err(restore_after_failed_write(
+            path,
+            &before_sd,
+            format!(
+                "写后校验失败（{}）：给定权限的 ACE 未生效，本机环境不允许",
+                path.display()
+            ),
+            recursive,
         ));
     }
     Ok(())
+}
+
+/// 目的：写后核对失败时把对象还原到写入前；还原失败如实说明并把台账留给收尾。
+fn restore_after_failed_write(
+    path: &Path,
+    before_sd: &[u8],
+    primary: String,
+    recursive: bool,
+) -> String {
+    match restore_sd(path, before_sd) {
+        Ok(()) if recursive => format!(
+            "{}（根对象已还原；递归子项若有残留，台账保留，可用 --fence-clean 收尾）",
+            primary
+        ),
+        Ok(()) => format!("{}（已还原到写入前的 DACL）", primary),
+        Err(e) => format!(
+            "{}；还原失败：{}（台账保留，可用 --fence-clean 收尾）",
+            primary, e
+        ),
+    }
 }
 
 /// 目的：读出一个对象的 DACL 安全描述符（self-relative 字节），供收尾整体还原。
@@ -811,6 +875,113 @@ pub(crate) fn owner_is_current_user(path: &Path) -> Result<bool, String> {
         LocalFree(sd as _);
     }
     Ok(is_sid_text(&owner_text) && owner_text == me)
+}
+
+/// 目的：当前进程能不能写这个对象的 DACL（READ_CONTROL | WRITE_DAC）——预检与真实授权同一把尺子。
+/// 约束：AccessCheck 要模拟令牌（进程令牌会错误 1309）；SD 必须带 owner/group/DACL（只给 DACL 会错误 1338）。
+pub(crate) fn can_write_dacl(path: &Path) -> Result<bool, String> {
+    let _imp = Impersonation::begin()?;
+    let mut token: HANDLE = std::ptr::null_mut();
+    if unsafe { OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, 0, &mut token) } == 0 {
+        return Err(format!(
+            "打开线程令牌失败：{}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    let _token = CloseOnDrop(token);
+    let mut owner: PSID = std::ptr::null_mut();
+    let mut group: PSID = std::ptr::null_mut();
+    let mut dacl: *mut ACL = std::ptr::null_mut();
+    let mut sd: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
+    let w = wide(path);
+    let rc = unsafe {
+        GetNamedSecurityInfoW(
+            w.as_ptr(),
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+            &mut owner,
+            &mut group,
+            &mut dacl,
+            std::ptr::null_mut(),
+            &mut sd,
+        )
+    };
+    if rc != 0 {
+        return Err(format!(
+            "读安全描述符失败（{}）：错误码 {}",
+            path.display(),
+            rc
+        ));
+    }
+    let _sd = LocalFreeOnDrop(sd);
+    let mapping = GENERIC_MAPPING {
+        GenericRead: FILE_GENERIC_READ,
+        GenericWrite: FILE_GENERIC_WRITE,
+        GenericExecute: FILE_GENERIC_EXECUTE,
+        GenericAll: FILE_ALL_ACCESS,
+    };
+    let mut privileges = vec![0u8; 1024];
+    let mut len = privileges.len() as u32;
+    let mut granted: u32 = 0;
+    let mut status: i32 = 0;
+    let ok = unsafe {
+        AccessCheck(
+            sd,
+            token,
+            READ_CONTROL | WRITE_DAC,
+            &mapping,
+            privileges.as_mut_ptr() as *mut PRIVILEGE_SET,
+            &mut len,
+            &mut granted,
+            &mut status,
+        )
+    };
+    if ok == 0 {
+        return Err(format!(
+            "AccessCheck 失败：{}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(status != 0 && granted & (READ_CONTROL | WRITE_DAC) == (READ_CONTROL | WRITE_DAC))
+}
+
+/// 目的：模拟当前用户拿线程令牌，离开作用域时一定还原（失败路径也不把线程留在模拟态）。
+struct Impersonation;
+
+impl Impersonation {
+    fn begin() -> Result<Impersonation, String> {
+        if unsafe { ImpersonateSelf(SecurityImpersonation) } == 0 {
+            return Err(format!(
+                "模拟当前用户失败：{}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        Ok(Impersonation)
+    }
+}
+
+impl Drop for Impersonation {
+    fn drop(&mut self) {
+        unsafe { RevertToSelf() };
+    }
+}
+
+/// 目的：句柄离开作用域即关闭。
+struct CloseOnDrop(HANDLE);
+
+impl Drop for CloseOnDrop {
+    fn drop(&mut self) {
+        unsafe { CloseHandle(self.0) };
+    }
+}
+
+/// 目的：安全描述符离开作用域即释放。
+struct LocalFreeOnDrop(PSECURITY_DESCRIPTOR);
+
+impl Drop for LocalFreeOnDrop {
+    fn drop(&mut self) {
+        unsafe { LocalFree(self.0 as _) };
+    }
 }
 
 /// 目的：当前进程令牌里的用户 SID。

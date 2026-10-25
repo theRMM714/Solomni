@@ -1898,3 +1898,73 @@ fn release_fence_only_removes_the_calling_sessions_claim() {
     let _ = clean(&home);
     discard(&base);
 }
+
+/// 目的：预检的“能不能写 DACL”用 AccessCheck 判，不只认属主（nvm 真身属主是 Administrators，
+///   当前用户却有 WRITE_DAC）。
+#[test]
+fn can_write_dacl_accepts_a_directory_we_own() {
+    let dir = crate::tests::scratch("can-write-dacl");
+    std::fs::create_dir_all(&dir).expect("建目录");
+    assert!(
+        can_write_dacl(&dir).expect("AccessCheck 应当能跑"),
+        "自己拥有的目录应当可写 DACL"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 目的：写都没成功时不许报“回滚失败”，也不许动预存的 ACE（真机上它就是链接上那条 SYNCHRONIZE）。
+#[test]
+fn failed_write_keeps_preexisting_ace_and_never_says_rollback() {
+    let base = crate::tests::scratch("grant-failure-rollback");
+    let dir = base.join("mod");
+    let home = base.join(".home");
+    std::fs::create_dir_all(&dir).expect("建目录");
+    std::fs::create_dir_all(&home).expect("建台账目录");
+    let sid = baseline_sid().expect("基线 SID");
+    // 预存一条**不够用**的 ACE（真机上就是链接上那条只有 SYNCHRONIZE 的项）。
+    const SYNCHRONIZE: u32 = 0x0010_0000;
+    grant_one(sid, &dir, SYNCHRONIZE, false, false).expect("预存 ACE");
+    assert!(!has_ace_for(sid, &dir, RIGHTS_RO), "前置：预存 ACE 不够用");
+    assert!(has_any_ace_for(sid, &dir), "前置：预存 ACE 在场");
+    let before = acl_scan(&dir).expect("读 ACL").entries.len();
+    FORCE_GRANT_FAILURE.with(|f| f.set(true));
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            FORCE_GRANT_FAILURE.with(|f| f.set(false));
+        }
+    }
+    let _reset = Reset;
+    let mut rec = GrantRecord::default();
+    let target = GrantTarget {
+        path: dir.clone(),
+        rights: RIGHTS_RO,
+        recursive: false,
+        inherit: false,
+        part: FencePart::Interpreter,
+    };
+    let err = grant_one_journaled(
+        &home,
+        &mut rec,
+        sid,
+        &sid_to_string(sid),
+        &target,
+        &base,
+        current_owner(),
+    )
+    .expect_err("注入的写失败要如实返回");
+    assert!(
+        !err.contains("回滚失败"),
+        "写都没成功不许报回滚失败：{}",
+        err
+    );
+    assert!(has_any_ace_for(sid, &dir), "预存 ACE 必须还在");
+    assert_eq!(
+        acl_scan(&dir).expect("读 ACL").entries.len(),
+        before,
+        "失败路径不许改 DACL"
+    );
+    revoke_one(sid, &dir, false).expect("清掉预存 ACE");
+    free_sid(sid);
+    let _ = std::fs::remove_dir_all(&base);
+}

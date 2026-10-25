@@ -109,8 +109,10 @@ node run-tests.js --fence-live
 **本地门禁的前提：仓库根没有被 Windows 写沙箱打上 Low 完整性标签。**
 DSH 的 Windows 写沙箱后端（`@deepseek-ai/dsh-sandbox-windows-acl`）在授写权时给授权根设置
 `SYSTEM_MANDATORY_LABEL_ACE`（Low、no-write-up、`(OI)(CI)` 可继承）。标签按**映像文件**生效：
-Windows 的进程完整性 = min(令牌, 映像)，所以仓库根里的 `cargo` / `rustc` / 链接器 / 测试二进制 / `solomni.exe`
-全以 Low 运行；它不随会话结束自动撤销，回收要 `SeRelabelPrivilege`。
+Windows 的进程完整性 = min(令牌, 映像)。但标签只对**继承到它的对象**生效：根目录打标后新建的子项才继承，
+已存在的子目录（例如 `target/`）可能没有标签，里面的测试二进制仍以 Medium 运行——所以"仓库根里的
+cargo / rustc / 链接器 / 测试二进制 / solomni.exe 全以 Low 运行"并不总成立。判据要按**具体路径**查，
+不要只看根。它不随会话结束自动撤销，回收要 `SeRelabelPrivilege`。
 
 带标签时以下失败都是**假失败**，不是产品缺陷：
 
@@ -121,8 +123,9 @@ Windows 的进程完整性 = min(令牌, 映像)，所以仓库根里的 `cargo`
 - 拉子进程 / 抓管道受会话沙箱限制（Node 管道 stdio 被 EPERM、`status` 为 null）：把 stdout 重定向到文件再读
   （`stdio: ["ignore", fd, "ignore"]`），不要用管道。这一条与 Low 标签是两件事。
 
-**判据（唯一）**：`icacls "<仓库根>" | findstr Mandatory` 打出 `Mandatory Label\Low Mandatory Level`（子项显示 `(I)` 继承）。
-不要只看 `whoami /groups`：shell 可能显示 Medium，决定进程完整性的是映像文件上的标签。
+**判据（唯一）**：对**根和实际要跑的可执行文件**分别跑 `icacls <路径> | findstr Mandatory`；任一处打出
+`Mandatory Label\Low Mandatory Level` 就按下面处置。不要只看 `whoami /groups`：shell 可能显示 Medium，
+决定进程完整性的是映像文件上的标签。
 
 **处置，按优先级：**
 

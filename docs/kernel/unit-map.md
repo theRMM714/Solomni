@@ -29,7 +29,7 @@
 | `src/kernel/detail/confine/other.rs` | 其他平台后端：如实降级——只保证超时与整棵进程树终止，绝不作有文件系统围栏的假装 |
 | `src/kernel/detail/confine/windows/` | Windows 围栏后端目录：入口与策略派发在 `mod.rs`，DACL 授权在 `acl.rs`、授权台账与撤权在 `record.rs`、容器身份与作业对象在 `container.rs`、真机探针在 `tests.rs` |
 | `src/kernel/detail/confine/windows/mod.rs` | Windows 围栏后端入口：按 agent 派生 AppContainer SID、逐条授权可达范围，再用 `STARTUPINFOEX` 在容器与作业对象里起工具（`net` 决定是否授 internetClient） |
-| `src/kernel/detail/confine/windows/acl.rs` | Windows 安全描述符操作：逐路径改 DACL（授予 / 撤销）、解析 ACE 与 SID、展开泛型掩码 |
+| `src/kernel/detail/confine/windows/acl.rs` | Windows 安全描述符操作：逐路径改 DACL（授予 / 撤销）、解析 ACE 与 SID、展开泛型掩码、`AccessCheck` 判写 DACL 权限 |
 | `src/kernel/detail/confine/windows/record.rs` | 围栏授权台账与撤销：快照、根外授权摘要与容器 profile 的落盘、精确撤销、孤儿清扫与按条处置 |
 | `src/kernel/detail/confine/windows/container.rs` | Windows 容器围栏的启动面：AppContainer 档案与 SID、`net` 对应的 internetClient 能力、UTF-16 转换、system shell 与 kill-on-close 作业对象 |
 | `src/kernel/detail/confine/windows/tests.rs` | Windows 围栏的真机探针：AppContainer 授权、容器往返、ACL 台账与撤权（需改本机权限项的用例，`--fence-live` 才跑） |

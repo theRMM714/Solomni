@@ -661,14 +661,8 @@ pub(crate) fn grant_one_journaled(
     match grant_verified(sid, path, rights, recursive, inherit) {
         Ok(()) => Ok(true),
         Err(e) => {
-            // 只有**真写进去**才谈回滚：写都没成功时再报一条"回滚失败"，会把"这次没动过权限项"说反。
-            let rollback = if has_any_ace_for(sid, path) {
-                revoke_one(sid, path, recursive)
-                    .map_err(|x| format!("撤销已写入的 ACE 失败：{}", x))
-            } else {
-                Ok(())
-            };
-            // 撤掉本次**确实新增过**的归属；条目空掉后，没有授权引用的快照也一并销掉。
+            // 写失败 = 这一个字节都没改：grant_verified 只在**写成功**后负责还原。
+            // 这里不再按“有没有该 SID 的 ACE”去撤销——预存的部分 ACE 会被误当成自己写的。
             let mut journal: Option<String> = None;
             if owner_added {
                 if let Err(x) = journal_release_grant(home, rec, sid_text, path, owner) {
@@ -681,18 +675,14 @@ pub(crate) fn grant_one_journaled(
                     journal = Some(format!("台账更新失败：{}", x));
                 }
             }
-            Err(combine(e, rollback.err(), journal))
+            Err(combine(e, journal))
         }
     }
 }
 
 /// 目的：把主错误与回滚、台账更新两条次生错误拼成一条如实的失败原因。
-fn combine(primary: String, rollback: Option<String>, journal: Option<String>) -> String {
+fn combine(primary: String, journal: Option<String>) -> String {
     let mut out = primary;
-    if let Some(r) = rollback {
-        out.push_str("；回滚失败：");
-        out.push_str(&r);
-    }
     if let Some(j) = journal {
         out.push_str("；台账更新失败：");
         out.push_str(&j);
