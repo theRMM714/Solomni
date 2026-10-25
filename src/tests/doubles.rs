@@ -1006,6 +1006,47 @@ impl SysIo for InMemorySysIo {
         }
     }
 
+    fn is_dir(&self, path: &std::path::Path) -> Result<bool, String> {
+        let key = path.to_string_lossy().into_owned();
+        let prefix = format!(
+            "{}{}",
+            key.trim_end_matches(['/', '\\']),
+            std::path::MAIN_SEPARATOR
+        );
+        let files = self.files.lock().expect("锁");
+        if files.contains_key(&key) {
+            return Ok(false);
+        }
+        if files.keys().any(|k| k.starts_with(&prefix)) {
+            return Ok(true);
+        }
+        Err(format!("看 {} 失败：不存在", path.display()))
+    }
+
+    fn delete(&self, path: &std::path::Path, recursive: bool) -> Result<(), String> {
+        let key = path.to_string_lossy().into_owned();
+        let prefix = format!(
+            "{}{}",
+            key.trim_end_matches(['/', '\\']),
+            std::path::MAIN_SEPARATOR
+        );
+        let mut files = self.files.lock().expect("锁");
+        if files.remove(&key).is_some() {
+            return Ok(());
+        }
+        if !files.keys().any(|k| k.starts_with(&prefix)) {
+            return Err(format!("删除 {} 失败：不存在", path.display()));
+        }
+        if !recursive {
+            return Err(format!(
+                "{} 是目录；要整棵删除，加 recursive=true",
+                path.display()
+            ));
+        }
+        files.retain(|k, _| !k.starts_with(&prefix));
+        Ok(())
+    }
+
     fn write(&self, path: &std::path::Path, content: &str) -> Result<(), String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());

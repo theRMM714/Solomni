@@ -63,7 +63,7 @@
 子会话落在它的 `children/` 下（可再嵌套）——完整布局与命名规则见 [docs/session/session-model.md](docs/session/session-model.md)。
 agent 实例名不得占用 `work` / `children`（名单在 `systools/names.yaml`）。
 
-- **文件读写用内置工具**（`read` / `list` / `write` / `edit` / `patch` / `search`；`patch` 用自由格式补丁，大段内容不必塞进 JSON）：
+- **文件读写用内置工具**（`read` / `list` / `write` / `edit` / `patch` / `delete` / `search`；`patch` 用自由格式补丁，大段内容不必塞进 JSON；`delete` 默认只删沙箱里的文件）：
   核心把占位符替换成**本环境写法的根**（本机档 = 宿主路径，虚拟机档 = guest 路径）；越出这些根（相对路径、`..`）一律拒绝，
   虚拟机档下的 guest 写法在寻址前译回宿主路径再校验。
 - **一 agent 一格目录**：读不到别人的私有区、也写不进去；产物有归属，返工找得到人。模块目录不被任何 agent 拥有：agent 只有使用权，agent 的文件工具对模块目录（含 `userdata/`）只读，模块数据由模块自己的工具 / 服务进程维护。

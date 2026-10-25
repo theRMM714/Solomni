@@ -63,7 +63,22 @@ tools:
   patch:
     capability: fs-write        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
     callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
-    desc: 用一段**自由格式**的补丁文本改文件（信封之后原样跟补丁；大段内容不要塞进 JSON）。语法见 patch_guide。
+    desc: 用一段**自由格式**的补丁文本改文件（信封之后原样跟补丁；大段内容不要塞进 JSON）。语法见 patch_guide；删除文件用 delete，不要写 *** Delete File。
+  delete:
+    capability: fs-write        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
+    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    desc: |
+      删除**你自己沙箱里**的文件；默认只删文件，目录必须显式 recursive=true。
+      共享区不在这里删（用 work_commit 的 deletes）；模块目录（含 userdata）由模块自己的工具 / 服务进程维护。
+      不跟随符号链接 / junction：删除链接只删链接本身。
+    params:
+      paths:
+        type: array
+        required: true
+        desc: 要删除的路径数组（本环境的绝对路径；每一项都必须在你的沙箱里）
+      recursive:
+        type: boolean
+        desc: true = 路径是目录时连内容一起删；省略 = 只删文件，遇到目录会拒绝
   list:
     capability: fs-read        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
     callers: [user, discussant, executor, solo, core_proxy]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致

@@ -5,7 +5,7 @@ pub use crate::capabilities::workspace::domain::asset::{
 };
 pub use crate::capabilities::workspace::domain::hash::content_hash;
 pub use crate::capabilities::workspace::domain::workspace::{
-    safe_file_name, AreaUsage, Sandbox, Sandboxes, WorkFiles, WorkRoots, WorkUsage,
+    safe_file_name, AreaUsage, Place, Sandbox, Sandboxes, WorkFiles, WorkRoots, WorkUsage,
 };
 pub use crate::capabilities::workspace::domain::workstore::{
     Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, GcReport, LostEntry,

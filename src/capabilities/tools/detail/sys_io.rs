@@ -6,6 +6,33 @@ use crate::capabilities::tools::ports::{DirEntry, FileRead, SysIo};
 use std::io::Read;
 use std::path::Path;
 
+/// 删除链接本身：Windows 的目录链接 / junction 可能只认 `remove_dir`，先试 `remove_file` 再退。
+fn remove_link(path: &Path) -> Result<(), String> {
+    std::fs::remove_file(path)
+        .or_else(|_| std::fs::remove_dir(path))
+        .map_err(|e| format!("删除链接 {} 失败：{}", path.display(), e))
+}
+
+/// 递归删除目录：逐项看 `symlink_metadata`，链接只删链接本身，绝不顺着链接进目标。
+fn remove_tree(dir: &Path) -> Result<(), String> {
+    let entries =
+        std::fs::read_dir(dir).map_err(|e| format!("列目录 {} 失败：{}", dir.display(), e))?;
+    for ent in entries {
+        let ent = ent.map_err(|e| format!("读目录项失败：{}", e))?;
+        let p = ent.path();
+        let meta = std::fs::symlink_metadata(&p)
+            .map_err(|e| format!("看 {} 失败：{}", p.display(), e))?;
+        if meta.file_type().is_symlink() {
+            remove_link(&p)?;
+        } else if meta.is_dir() {
+            remove_tree(&p)?;
+        } else {
+            std::fs::remove_file(&p).map_err(|e| format!("删除 {} 失败：{}", p.display(), e))?;
+        }
+    }
+    std::fs::remove_dir(dir).map_err(|e| format!("删除目录 {} 失败：{}", dir.display(), e))
+}
+
 /// 真实落点是否仍在 `root` 内：目标存在就 `canonicalize`；目标不存在就退到最近的已存在祖先；
 /// 叶子是悬空符号链接时直接拒绝（`canonicalize` 会失败，不能靠“看父目录”绕过）。
 fn real_within(root: &Path, path: &Path) -> Result<(), String> {
@@ -105,6 +132,30 @@ impl SysIo for FsSysIo {
 
     fn within(&self, root: &Path, path: &Path) -> Result<(), String> {
         real_within(root, path)
+    }
+
+    fn is_dir(&self, path: &Path) -> Result<bool, String> {
+        let meta = std::fs::symlink_metadata(path)
+            .map_err(|e| format!("看 {} 失败：{}", path.display(), e))?;
+        Ok(meta.file_type().is_dir())
+    }
+
+    fn delete(&self, path: &Path, recursive: bool) -> Result<(), String> {
+        let meta = std::fs::symlink_metadata(path)
+            .map_err(|e| format!("看 {} 失败：{}", path.display(), e))?;
+        if meta.file_type().is_symlink() {
+            return remove_link(path);
+        }
+        if meta.is_dir() {
+            if !recursive {
+                return Err(format!(
+                    "{} 是目录；要整棵删除，加 recursive=true",
+                    path.display()
+                ));
+            }
+            return remove_tree(path);
+        }
+        std::fs::remove_file(path).map_err(|e| format!("删除 {} 失败：{}", path.display(), e))
     }
 
     fn list(&self, path: &Path) -> Result<Vec<DirEntry>, String> {

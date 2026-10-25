@@ -17,6 +17,7 @@ pub const READ: &str = "read";
 pub const WRITE: &str = "write";
 pub const EDIT: &str = "edit";
 pub const PATCH: &str = "patch";
+pub const DELETE: &str = "delete";
 pub const LIST: &str = "list";
 pub const SEARCH: &str = "search";
 
@@ -40,6 +41,7 @@ pub fn is_builtin(name: &str) -> bool {
         || name == WRITE
         || name == EDIT
         || name == PATCH
+        || name == DELETE
         || name == LIST
         || name == SEARCH
         || name == REPORT
@@ -52,6 +54,7 @@ pub fn names() -> Vec<String> {
         WRITE.to_string(),
         EDIT.to_string(),
         PATCH.to_string(),
+        DELETE.to_string(),
         LIST.to_string(),
         SEARCH.to_string(),
         REPORT.to_string(),

@@ -198,8 +198,8 @@ prompts/
 | 角色 | 何时 | 工具面（`systools/roles.yaml`） |
 | --- | --- | --- |
 | `discussant` | 讨论阶段 | `say` `agree` `leave` `ask` `read` `list` `search` |
-| `executor` | 任务链节点（agent 子会话） | `read` `list` `write` `edit` `patch` `search` `work_pull` `work_commit` `work_status` `work_versions` `work_resolve` `work_lost` `submit_report` + 该 agent 的模块工具 |
-| `solo` | 用户建的单 agent 工作 | `read` `list` `write` `edit` `patch` `search` `work_pull` `work_commit` `work_status` `work_versions` `work_resolve` `work_lost` + 该 agent 的模块工具（**不发** `submit_report`） |
+| `executor` | 任务链节点（agent 子会话） | `read` `list` `write` `edit` `patch` `delete` `search` `work_pull` `work_commit` `work_status` `work_versions` `work_resolve` `work_lost` `submit_report` + 该 agent 的模块工具 |
+| `solo` | 用户建的单 agent 工作 | `read` `list` `write` `edit` `patch` `delete` `search` `work_pull` `work_commit` `work_status` `work_versions` `work_resolve` `work_lost` + 该 agent 的模块工具（**不发** `submit_report`） |
 | `planner` | 核心整理派发 | `read` `search` `plan` `slate` `verdict` |
 | `orchestrator` | 核心链中推进 | `read` `search` `node_verdict` `checklist` |
 | `core_proxy` | 核心代理（用户把决定权整块交给它，代用户决定） | `catalog_agents` `create_session` `send_session_message` `observe_session` `read_session_messages` `control_session` `read` `list` `search`（**不发**模块工具） |

@@ -105,13 +105,14 @@ patch_guide: |-
   - *** 是保留前缀：内容里若必须出现以 *** 开头的行，请改写它（否则会被当成标记）。
   - 新建文件用 *** Add File:；改已有文件用 *** Update File:（整份覆盖已存在的文件仍要求"先完整读过"）。
   - 内容**照你写的原样落盘**：想让文件末尾多一个空行，就在 *** End File 之前留一个空行（核心不替你加）。
+  - **删除文件用 `delete` 工具**（默认只删文件；删目录加 `recursive=true`）；patch 不认 `*** Delete File`。
 
 # —— 内置工具的参数契约：模型侧的参数说明与调用校验都由这一份声明驱动（改参数只改这里）——
 tool_calling_envelope: |-
   工具调用约定：需要用工具时，只输出一个 JSON 信封（不要包裹其它文字）：
   {"type":"tool","module":"模块id","name":"工具名","args":{...参数对象...}}
   外部工具要带上它所属的模块 id（见上面清单每行开头）；核心自己实现的系统工具
-  （read / write / edit / patch / list / search / work_pull / work_commit / work_status / work_versions / work_resolve / work_lost 等）不用写 module。
+  （read / write / edit / patch / delete / list / search / work_pull / work_commit / work_status / work_versions / work_resolve / work_lost 等）不用写 module。
   要一次发**多个**调用（互不依赖的那些），就把它们写进同一个信封的 calls 数组——核心按工具声明的并发性一起跑，
   结果按你写的顺序发回：
   {"type":"tool","calls":[{"name":"read","args":{...参数对象...}},{"module":"模块id","name":"工具名","args":{...参数对象...}}]}
