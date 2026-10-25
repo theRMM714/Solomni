@@ -2370,7 +2370,12 @@ pub(crate) fn test_vm_with_engine(
 pub(crate) fn test_packages(
     packages: Arc<dyn PackageSource + Send + Sync>,
 ) -> Arc<dyn crate::capabilities::packages::api::Packages + Send + Sync> {
-    Arc::new(crate::capabilities::packages::service::PackagesService::new(packages))
+    Arc::new(
+        crate::capabilities::packages::service::PackagesService::with_base(
+            packages,
+            crate::capabilities::packages::api::BaseFacts::default(),
+        ),
+    )
 }
 
 /// 目的：测试用的 packages 能力面，带"宿主回退可用"的事实（由测试 probe 声明它有什么）。
@@ -2464,6 +2469,7 @@ pub(crate) fn core_with_services(
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
+        Arc::new(crate::capabilities::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(
             runner,
@@ -2504,6 +2510,7 @@ pub(crate) fn core_with_workspace(
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
+        Arc::new(crate::capabilities::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),
@@ -2532,6 +2539,42 @@ pub(crate) fn core_with_io(
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
         Arc::new(InMemoryHistory::new()),
         io,
+    )
+}
+
+/// 目的：注入**构建面**的装配——创建会话前补编的用例要断言"编完才建 / 编不成不建"。
+/// 参数：`modules` = 清单事实；`builds` = 构建能力面（用例给真实现或替身）。
+pub(crate) fn core_with_builds(
+    modules: Vec<Module>,
+    builds: Arc<dyn crate::capabilities::builds::api::Builds + Send + Sync>,
+) -> Conductor {
+    let gateway: Arc<dyn ChatGateway + Send + Sync> = Arc::new(gw(BTreeMap::new(), Vec::new()));
+    let llm = test_llm(
+        Arc::clone(&gateway),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+    );
+    Conductor::new(
+        crate::tests::root_dir(),
+        registry_service(InMemorySettings::new(), Arc::clone(&llm)),
+        test_history(),
+        test_workspace(Arc::new(InMemoryWorkspace::new())),
+        test_vm(),
+        test_packages(Arc::new(InMemoryPackages::empty())),
+        test_provision(),
+        test_modules(Arc::new(VecSource(modules))),
+        builds,
+        llm,
+        test_tools_svc_with(
+            Arc::new(SilentRunner),
+            Arc::new(InMemorySysIo::new()),
+            Arc::new(NoFenceHost),
+        ),
+        test_prompt(),
+        test_tools_svc(),
+        Arc::new(crate::kernel::ports::NoopLog),
+        test_host_probe(),
+        Arc::new(crate::capabilities::residents::api::NoResidents),
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
     )
 }
 
@@ -2652,6 +2695,7 @@ pub(crate) fn core_with_pkgs_probe(
         test_packages_with_base(packages, base),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
+        Arc::new(crate::capabilities::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(runner, io, Arc::new(NoFenceHost)),
         test_prompt(),
@@ -2680,6 +2724,7 @@ pub(crate) fn core_with_settings(store: InMemorySettings) -> Conductor {
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(Vec::new()))),
+        Arc::new(crate::capabilities::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),
@@ -2723,6 +2768,7 @@ pub(crate) fn core_with_io_gateway(
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
+        Arc::new(crate::capabilities::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),
         test_prompt(),
@@ -2763,6 +2809,7 @@ pub(crate) fn core_with_gateway_probe(
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
+        Arc::new(crate::capabilities::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),

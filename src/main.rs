@@ -541,6 +541,25 @@ fn main() {
     let provision: Arc<dyn capabilities::provision::api::Provision + Send + Sync> = Arc::new(
         capabilities::provision::ProvisionService::with_vm(&root, provision_vm(Arc::clone(&book))),
     );
+    // **构建能力**：创建会话前补编模块产物（本机档宿主、虚拟机档 guest）；执行器与 `--build` 同一条路——
+    // **不申请容器身份**（构建是系统动作）：AppContainer 的临时目录写不了文件；可达范围仍由围栏规格给出。
+    let build_runner = kernel::detail::process::ProcTools::new(
+        std::env::current_exe().unwrap_or_default(),
+        std::sync::Arc::clone(&process_texts),
+        home.clone(),
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    );
+    let builds: Arc<dyn capabilities::builds::api::Builds + Send + Sync> =
+        Arc::new(capabilities::builds::service::BuildsService::new(
+            root.clone(),
+            Arc::clone(&packages),
+            Arc::clone(&vm),
+            Arc::clone(&provision),
+            Arc::new(build_runner),
+            Arc::new(kernel::detail::HostProbeAdapter),
+            std::sync::Arc::clone(&log),
+            entry::toolchains::active_roots(&root),
+        ));
     // 启动时要按有效启停拉起常驻服务：留一份手柄（进程级租约，不属于任何会话）。
     let residents_boot = Arc::clone(&residents);
     let mut conductor = capabilities::conductor::service::Conductor::new(
@@ -554,6 +573,7 @@ fn main() {
         Arc::clone(&packages),
         Arc::clone(&provision),
         Arc::clone(&modules),
+        Arc::clone(&builds),
         Arc::clone(&llm),
         toolexec,
         prompt,

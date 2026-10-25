@@ -116,7 +116,7 @@ tools:                       # 可选：模块工具表
 ### 跑一遍演示
 
 演示是**真机测试**：走真实模型，会真的投喂资料、调工具、核产物。所以脚本开工前先核对条件——
-前两个演示要三个模块在清单里、indexer 已构建、登记处有供应商与一个可用的模型（用 `SOLOMNI_DEMO_MODEL` 指定，或用核心默认）；
+前两个演示要三个模块在清单里、登记处有供应商与一个可用的模型（用 `SOLOMNI_DEMO_MODEL` 指定，或用核心默认）；indexer 的产物在创建会话前自动补编（也可先手动 `solomni --build=indexer`）；
 **MCP 演示**要 `mcp-toolbox` 在清单里、登记处有供应商与可用模型（它自带 `services` 声明，不需要预先构建）；
 **代理演示**要登记处有供应商、模型与**核心默认模型**（挑人是核心的事，它可以临时组装零模块的 agent）。
 **虚拟机档演示**要 `harvest` 在清单里、登记处有可用模型，且选定的虚拟根在本机装齐、画像里声明有 python / node / cc / gcc（`guest.yaml` 的 `runtimes`——Linux / Windows 都由 `solomni --provision --ensure --yes` 的运行期编排起一次 guest 自证后写入；缺包时核心会在创建那一刻拒绝）。
@@ -131,7 +131,7 @@ node demo/run-demo-proxy.mjs   # 代理：只跟核心说话，它自己挑人�
 node demo/run-demo-vm.mjs      # 虚拟机档：单 agent 在 guest 里跑 harvest，产物经实时共享直接落宿主
 ```
 
-C++ 模块要先编译一次（产物不入库），命令与理由见 [modules/indexer/README.md](modules/indexer/README.md)——前置检查会替你确认这一步。
+C++ 模块的产物不入库：创建会话前会按 `module.yaml` 的 `build:` 段在目标环境自动补编一次（失败则创建被拒，理由见 [modules/indexer/README.md](modules/indexer/README.md)）；也可以手动 `solomni --build=indexer`。
 
 ## 还没接入
 

@@ -123,7 +123,7 @@
 copy 不在任何用户链里；只有进程级开发/应急开关（`SOLOMNI_VM_SHARE=copy`）会把它作为该进程 VM 会话的唯一候选，并在日志里警告性能不可用。自定义 guest 没有声明本平台可承载的客户端时，`tier_readiness` 在起 guest 前拒绝。
 
 - **root 只能是一份磁盘镜像**（qcow2 / raw ext4；`classify_base` 只认这个）：会话每次叠一份每租约可写层，谁也不写基础镜像；有内核就直启（`root=/dev/vda`），没有就靠镜像自带引导。需要共享时 guest 拿 `restrict=on` 的网卡（出站全断，`guestfwd` 内部隧道可用）。
-- **模块构建也能落 guest**（`solomni --build=<模块 id> --guest=<虚拟根>`）：模块目录以读写挂进 guest、构建期能力按 `needs` 装载，
+- **模块构建也能落 guest**（创建会话前自动补编；手动入口是 `solomni --build=<模块 id> --guest=<虚拟根>`，见 [builds](../builds/README.md)）：模块目录以读写挂进 guest、构建期能力按 `needs` 装载，
   在 guest 里用它的编译包编，产物经挂载直接落回宿主那份模块目录（宿主工具链不进这条链）。
 - **prefix 包**：`packages` 选出的 `kind: prefix` 包只读挂在 `/<prefix>`；起 guest 后把它的 `<prefix>/bin/*` 软链进 `/usr/local/bin`，模块声明的裸名命令因此在 guest 里可用。
 - **system 包**：载荷按 `provides_paths` **叠写**进系统路径（复制合并 + "已叠"标记，不挂载覆盖）。

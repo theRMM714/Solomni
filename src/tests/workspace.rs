@@ -174,6 +174,7 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(vec![module_of("a")]))),
+        Arc::new(crate::capabilities::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),
@@ -227,6 +228,7 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(vec![module_of("a")]))),
+        Arc::new(crate::capabilities::builds::api::NoBuilds),
         llm2,
         test_tools_svc_with(
             Arc::new(SilentRunner),
@@ -393,6 +395,7 @@ pub(crate) fn module_without_runtime_is_denied_with_reason() {
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(vec![mod_a]))),
+        Arc::new(crate::capabilities::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(
             Arc::clone(&runner) as Arc<dyn ProcessRunner>,

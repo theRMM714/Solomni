@@ -2490,8 +2490,8 @@ async function openWizard(draft) {
       const release = busyButton(createBtn, '正在创建…');
       cancelBtn.disabled = true;
       c.setMsg(w.tier === 'vm'
-        ? '正在创建：虚拟机档要先起一台 guest（首次可能要几十秒到几分钟），起来之后才开工…'
-        : '正在创建…');
+        ? '正在创建：虚拟机档要先起一台 guest（首次可能要几十秒到几分钟）；缺编译产物时还会先在 guest 里编一次…'
+        : '正在创建：缺编译产物时先补编一次，编完就开工…');
       try {
         await startSession(body);
         closeModal();

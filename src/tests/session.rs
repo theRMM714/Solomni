@@ -1313,6 +1313,7 @@ pub(crate) fn deleting_a_session_asks_the_fence_to_release_its_grants() {
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(vec![module_of("a")]))),
+        Arc::new(crate::capabilities::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),

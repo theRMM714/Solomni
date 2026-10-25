@@ -75,6 +75,21 @@ impl ConductorHandle {
         caller: &Caller,
         spec: &d::NewSession,
     ) -> Result<d::Created, String> {
+        // 先补编：名单里声明了 `build:` 的模块若在目标环境还没有入口，就在这一段（调用方线程）编好——
+        // 核心线程不陪着等编译器；编不成如实拒绝，不进入准备段（什么都不留下）。
+        let (tier, guest) = self.call({
+            let spec = spec.clone();
+            move |core| core.resolve_env(&spec)
+        })?;
+        let mut ids: Vec<String> = Vec::new();
+        for a in &spec.agents {
+            for m in &a.modules {
+                if !ids.contains(m) {
+                    ids.push(m.clone());
+                }
+            }
+        }
+        self.ensure_built(&ids, tier, guest.as_deref())?;
         // **两段**：核心只做校验 / 占名 / 出计划（毫秒级）；起 guest 要等几十秒到几分钟，
         // 在这一段（调用方线程）上跑——核心线程因此不被占住，别的请求照常响应。
         let (prepared, boot) = self.call({

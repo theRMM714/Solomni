@@ -14,14 +14,7 @@ pub struct PackagesService {
 }
 
 impl PackagesService {
-    pub fn new(source: Arc<dyn PackageSource + Send + Sync>) -> PackagesService {
-        PackagesService {
-            source,
-            base: BaseFacts::default(),
-        }
-    }
-
-    /// 目的：带上组合根算好的基础 profile / 宿主回退事实；测试替身继续用 `new` 的空事实。
+    /// 目的：带上组合根算好的基础 profile / 宿主回退事实；测试替身传 `BaseFacts::default()`。
     pub fn with_base(
         source: Arc<dyn PackageSource + Send + Sync>,
         base: BaseFacts,

@@ -171,7 +171,7 @@ pub(crate) fn doctor_json_with(
 /// 参数：root = 产品根。
 /// 约束：模块目录是读写挂进去的，产物才能落回宿主那份——构建只持挂载式用户档；
 ///   `copy` 是开发/应急通道，不装配；`none` 只给供给编排。
-fn build_vm(
+pub(crate) fn build_vm(
     root: &std::path::Path,
 ) -> std::sync::Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync> {
     let shares: Vec<
@@ -350,11 +350,12 @@ pub fn print_routes() {
     println!("{}", crate::presentation::web::routes::catalog_json());
 }
 
-/// 目的：隐藏模式——**构建一个模块声明的产物**（系统动作：在**目标环境**里跑 `module.yaml` 的 `build.command`）。
+/// 目的：隐藏模式——**构建一个模块声明的产物**（系统动作：在目标环境里跑 `module.yaml` 的 `build.command`）。
 /// 参数：root = 产品根；args = 原始参数；i = `--build` 的位置（`--build=<模块 id>`；可选 `--guest=<虚拟根>`）。
-/// 约束：只写项目内；本机档用**产品自己写的**受限围栏跑，虚拟机档在 guest 里跑（工具链是 guest 的编译包）——
-///   两者都**不进 agent 的工具围栏**；模块契约与状态落点见 MODULE_SPEC 的「构建」与 `.vm/build-state/<模块>.json`。
+/// 返回：退出码（0 成功；1 构建失败或环境不齐；2 用法错、没有该模块、或模块没有 `build` 段）。
+/// 约束：用例在 `builds` 能力（本机档用产品围栏、虚拟机档在 guest 里编）；这里只解析参数、装配能力面与打印回执。
 pub fn build(root: &std::path::Path, args: &[String], i: usize) -> i32 {
+    use crate::capabilities::builds::api::Target;
     let id = match args[i].strip_prefix("--build=") {
         Some(v) if !v.is_empty() => v.to_string(),
         _ => args.get(i + 1).cloned().unwrap_or_default(),
@@ -363,346 +364,93 @@ pub fn build(root: &std::path::Path, args: &[String], i: usize) -> i32 {
         eprintln!("用法：solomni --build=<模块 id> [--guest=<虚拟根>]");
         return 2;
     }
-    if let Some(guest) = args.iter().find_map(|a| a.strip_prefix("--guest=")) {
-        if guest.trim().is_empty() {
+    let guest = args.iter().find_map(|a| a.strip_prefix("--guest="));
+    if let Some(g) = guest {
+        if g.trim().is_empty() {
             eprintln!("[构建] --guest 要给虚拟根名（`.vm/guest/<名>`）");
             return 2;
         }
-        return build_module_in_guest(root, &id, guest.trim());
     }
-    let runner = match build_runner(root) {
-        Ok(r) => r,
+    let Some(module) = module_by_id(root, &id) else {
+        eprintln!("[构建] 没有模块「{}」（清单被拒收的话见 --doctor）", id);
+        return 2;
+    };
+    let Some(decl) = module.manifest.build.clone() else {
+        eprintln!(
+            "[构建] 模块「{}」没声明 build 段：在 module.yaml 里写 build.command（见 MODULE_SPEC 的「构建」）",
+            id
+        );
+        return 2;
+    };
+    let target = match guest {
+        Some(g) => Target::Guest(g.trim().to_string()),
+        None => Target::Host,
+    };
+    let builds = match build_service(root) {
+        Ok(b) => b,
         Err(e) => {
-            eprintln!("[构建] 执行器起不来：{}", e);
+            eprintln!("[构建] {}", e);
             return 1;
         }
     };
-    build_module(root, &id, &runner)
+    let net = global_network_allowed(root) && decl.net;
+    let at = match &target {
+        Target::Host => "在模块根".to_string(),
+        Target::Guest(g) => format!("在 guest「{}」里", g),
+    };
+    println!(
+        "[构建] {}：{}跑声明的构建命令（出站网络：{}）",
+        id,
+        at,
+        if net { "放行" } else { "不放行" }
+    );
+    match crate::capabilities::builds::api::Builds::build(&builds, &module, &target, net) {
+        Ok(b) if b.skipped => {
+            println!("[构建] {} 在目标 {} 上已是最新，跳过", id, b.target);
+            0
+        }
+        Ok(b) => {
+            print!("{}", b.output);
+            println!("[构建] {} 构建完成（目标 {}）", id, b.target);
+            0
+        }
+        Err(e) => {
+            eprintln!("[构建] {}", e);
+            1
+        }
+    }
 }
 
-/// 目的：构建一个模块（**本机档**：在宿主上编，产物给宿主用）——CLI 与用例共用。
-/// 参数：root = 产品根；id = 模块 id；runner = 执行器（生产是守门进程，用例可注入替身）——
-///   构建命令经它跑在**产品给的**围栏里（只写模块目录与状态目录、按声明的 net）。
-pub fn build_module(
+/// 目的：命令行构建用的能力面——包库、虚拟机、补齐、执行器与基础工具链安装根按产品根现场装配。
+/// 参数：root = 产品根。
+/// 返回：可调用的构建能力面。
+/// 错误：执行器起不来。
+fn build_service(
     root: &std::path::Path,
-    id: &str,
-    runner: &dyn crate::kernel::ports::ProcessRunner,
-) -> i32 {
-    let Some(module) = module_by_id(root, id) else {
-        eprintln!("[构建] 没有模块「{}」（清单被拒收的话见 --doctor）", id);
-        return 2;
-    };
-    let Some(decl) = module.manifest.build.clone() else {
-        eprintln!("[构建] 模块「{}」没声明 build 段：在 module.yaml 里写 build.command（见 MODULE_SPEC 的「构建」）", id);
-        return 2;
-    };
-    use crate::capabilities::packages::api::Packages as _;
-    use crate::kernel::ports::HostProbe;
-    let probe = crate::kernel::detail::host_probe::HostProbeAdapter;
-    // 构建期能力：运行包优先，基础工具链 / 宿主 PATH 回退；没有会话定版，多版本取稳定序第一个。
-    let base = crate::entry::toolchains::base_facts(root);
-    let packages_lib = crate::capabilities::packages::service::PackagesService::with_base(
-        std::sync::Arc::new(crate::capabilities::packages::detail::FsPackages::new(
-            root.join("runtimes"),
-        )),
-        base.clone(),
-    );
-    let current_path = std::env::var_os("PATH").unwrap_or_default();
-    let has_exe = |name: &str| probe.has_exe(name);
-    let bin_ok = |path: &std::path::Path| probe.is_dir(path);
-    let facts = crate::capabilities::packages::api::Facts {
-        has_exe: &has_exe,
-        bin_ok: &bin_ok,
-        current_path: &current_path,
-        base: &base.active,
-        host_fallback: &base.fallback,
-    };
-    let requests =
-        crate::capabilities::packages::api::requests_for(&decl.needs, &format!("build:{}", id));
-    let plan = crate::capabilities::packages::api::plan_host_requests(
-        &requests,
-        &std::collections::BTreeMap::new(),
-        &packages_lib.library(),
-        crate::capabilities::packages::api::PinPolicy::First,
-        &facts,
-    );
-    if !plan.problems.is_empty() {
-        eprintln!(
-            "[构建] 本机没有这些构建期能力：{}（装工具链、把适用于本机目标的包放进 runtimes/、自己编好放进来，或让作者发产物）",
-            crate::capabilities::packages::api::diagnose_text(&plan.problems)
-        );
-        return 1;
-    }
-    let providers: Vec<String> = plan
-        .providers
-        .iter()
-        .map(|(cap, p)| match p {
-            crate::capabilities::packages::api::Provider::Base { id, version } => {
-                format!("{}={}@{}", cap, id, version)
-            }
-            crate::capabilities::packages::api::Provider::Host => format!("{}=host", cap),
-            crate::capabilities::packages::api::Provider::Package { id, version } => {
-                format!("{}={}@{}", cap, id, version)
-            }
-        })
-        .collect();
-    let fingerprint = match source_fingerprint(&module.root, &decl, &providers) {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("[构建] 算源指纹失败：{}", e);
-            return 1;
-        }
-    };
-    let state_path = build_state_path(root, id);
-    if build_is_fresh(
-        &state_path,
-        "host",
-        std::env::consts::OS,
-        &fingerprint,
-        &module,
-    ) {
-        println!(
-            "[构建] {} 已是最新，跳过（状态 {}）",
-            id,
-            state_path.display()
-        );
-        return 0;
-    }
-    // 跑构建：围栏由产品给（只写模块目录与状态目录；不写本机任何权限项）。
-    // 网络是全局开关，模块的 build.net 只是“这次构建需要网络”的声明；两者取交集。
-    let network = global_network_allowed(root) && decl.net;
-    let state_dir = root.join(".vm").join("build-state");
-    let home = state_dir.join(id).join("home");
-    if let Err(e) = std::fs::create_dir_all(&home) {
-        eprintln!("[构建] 建状态目录失败：{}", e);
-        return 1;
-    }
-    let fence = crate::kernel::api::FenceSpec {
-        agent: format!("build:{}", id),
-        lease: String::new(),
-        rw: vec![module.root.clone(), state_dir.join(id)],
-        // 构建脚本可能调用项目内编译器（gcc/g++/zig），要放行它的安装根；否则 Landlock 会拒绝。
-        ro: crate::entry::toolchains::active_roots(root),
-        ro_tree: plan.roots.clone(),
-        private: home,
-        cwd: module.root.clone(),
-        net: network,
-    };
-    println!(
-        "[构建] {}：在模块根跑声明的构建命令（出站网络：{}）",
-        id,
-        if network { "放行" } else { "不放行" }
-    );
-    let out = crate::kernel::ports::ProcessRunner::run(
-        runner,
-        &fence,
-        &decl.command,
-        "{}",
-        &[],
-        plan.path.as_deref(),
-        None,
-    );
-    print!("{}", out.output);
-    if !out.ok {
-        eprintln!("[构建] {} 的构建命令失败（不落状态，下次重试）", id);
-        return 1;
-    }
-    finish_build(
-        root,
-        id,
-        "host",
-        std::env::consts::OS,
-        &fingerprint,
-        &module,
-        &state_path,
-    )
-}
-
-/// 目的：构建一个模块的**虚拟机档**产物——在 guest 里用它的编译包编，产物经挂载落回模块目录。
-/// 参数：root = 产品根；id = 模块 id；guest = 虚拟根名（`.vm/guest/<名>`）。
-/// 约束：guest 用完即销毁（会话级可写层）；模块目录以读写挂进去（产物落在宿主那份里）；
-///   `needs` 由 guest 自带或包库满足（prefix 的 bin 进 PATH、system 的载荷叠写进系统路径）。
-pub fn build_module_in_guest(root: &std::path::Path, id: &str, guest: &str) -> i32 {
-    let Some(module) = module_by_id(root, id) else {
-        eprintln!("[构建] 没有模块「{}」（清单被拒收的话见 --doctor）", id);
-        return 2;
-    };
-    let Some(decl) = module.manifest.build.clone() else {
-        eprintln!("[构建] 模块「{}」没声明 build 段：在 module.yaml 里写 build.command（见 MODULE_SPEC 的「构建」）", id);
-        return 2;
-    };
-    use crate::kernel::ports::HostProbe;
-    let probe = crate::kernel::detail::host_probe::HostProbeAdapter;
-    // 目标环境：虚拟根必须可用（名字 → 一格目录；布局不对如实拒绝）。
-    let dir = match crate::capabilities::vm::api::resolve_guest(root, guest) {
-        Ok(d) if probe.is_dir(&d) => d,
-        _ => {
-            eprintln!(
-                "[构建] 本机没有虚拟根「{}」：先 solomni --provision --ensure --yes（或换一个 --guest）",
-                guest
-            );
-            return 2;
-        }
-    };
-    let image = match crate::capabilities::vm::api::classify_base(&dir, &probe) {
-        Ok(i) => i,
-        Err(why) => {
-            eprintln!("[构建] 虚拟根「{}」不可用（{}）", guest, why);
-            return 1;
-        }
-    };
-    // 引擎与共享工具从**补齐台账**取（与 provision 同源；缺 QEMU 就如实拒绝）。
-    let deps = crate::capabilities::provision::api::Provision::status(
-        &crate::capabilities::provision::ProvisionService::new(root),
-    )
-    .unwrap_or_default();
-    let pick = |prefix: &str| {
-        deps.iter()
-            .find(|d| d.present && d.id.starts_with(prefix))
-            .map(|d| d.probe.clone())
-    };
-    let engine_path = pick("vm.qemu.");
-    if engine_path.is_none() {
-        eprintln!("[构建] 没有可用的 QEMU：先 solomni --provision --ensure --yes");
-        return 1;
-    }
-    let share_tool = if std::env::consts::OS == "windows" {
-        pick("vm.smbd.")
-    } else {
-        pick("vm.virtiofsd.")
-    };
-    // 构建期能力：guest 自带，或包库（prefix / system 两种装配都已就位）。
-    let vm = build_vm(root);
-    let packages_lib =
-        crate::capabilities::packages::service::PackagesService::new(std::sync::Arc::new(
-            crate::capabilities::packages::detail::FsPackages::new(root.join("runtimes")),
-        ));
-    let platform = crate::capabilities::vm::api::guest_platform(image.os, image.arch);
-    let eligible = crate::capabilities::packages::api::Library::for_target(
-        &crate::capabilities::packages::api::Packages::library(&packages_lib),
-        &crate::capabilities::packages::api::Target::guest(&platform),
-    );
-    let (packages, missing) =
-        crate::capabilities::packages::api::build_packages(&decl.needs, &eligible, &image.runtimes);
-    if !missing.is_empty() {
-        eprintln!(
-            "[构建] guest「{}」里没有这些构建期能力，包库也没提供：{}（把适用于该 guest 目标的包放进 runtimes/，或给虚拟根装一个）",
-            guest,
-            missing.join("、")
-        );
-        return 1;
-    }
-    let providers: Vec<String> = packages
-        .iter()
-        .map(|p| format!("{}@{}", p.id, p.version))
-        .collect();
-    let fingerprint = match source_fingerprint(&module.root, &decl, &providers) {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("[构建] 算源指纹失败：{}", e);
-            return 1;
-        }
-    };
-    let state_path = build_state_path(root, id);
-    if build_is_fresh(&state_path, guest, image.os.as_str(), &fingerprint, &module) {
-        println!(
-            "[构建] {} 在「{}」上已是最新，跳过（状态 {}）",
-            id,
-            guest,
-            state_path.display()
-        );
-        return 0;
-    }
-    // 挂载：模块目录（读写，产物经它落回宿主）+ 已挑中的包（prefix 挂前缀、system 挂专用只读根）。
-    let network = global_network_allowed(root) && decl.net;
-    let lease = format!("build-{}", id);
-    let plan = crate::capabilities::vm::api::ExecPlan {
-        tier: crate::kernel::api::Tier::Vm,
-        net: network,
-        guest: Some(guest.to_string()),
-        packages,
-    };
-    let fence = crate::kernel::api::FenceSpec {
-        agent: format!("build:{}", id),
-        lease: lease.clone(),
-        rw: vec![module.root.clone()],
-        ro: Vec::new(),
-        ro_tree: Vec::new(),
-        private: std::path::PathBuf::new(),
-        cwd: module.root.clone(),
-        net: network,
-    };
-    let mounts = crate::capabilities::vm::api::mounts_from(&plan, &fence, &image.bridge());
-    let spec = crate::capabilities::vm::api::GuestSpec {
-        lease: lease.clone(),
-        image: image.clone(),
-        mounts,
-        net: network,
-        engine_path,
-        share_path: share_tool.clone(),
-        // 构建要求**挂载式**共享（产物要落回宿主那份）：这里只用用户链，copy 不在其中。
-        shares: crate::capabilities::vm::api::share_chain(
-            std::env::consts::OS,
-            share_tool.as_deref(),
-            &crate::kernel::detail::host_probe::HostProbeAdapter,
+) -> Result<crate::capabilities::builds::service::BuildsService, String> {
+    use std::sync::Arc;
+    let packages: Arc<dyn crate::capabilities::packages::api::Packages + Send + Sync> = Arc::new(
+        crate::capabilities::packages::service::PackagesService::with_base(
+            Arc::new(crate::capabilities::packages::detail::FsPackages::new(
+                root.join("runtimes"),
+            )),
+            crate::entry::toolchains::base_facts(root),
         ),
-        seed: None,
-        isolated: true,
-    };
-    println!(
-        "[构建] {}：在 guest「{}」里跑声明的构建命令（出站网络：{}）",
-        id,
-        guest,
-        if network { "放行" } else { "不放行" }
     );
-    if let Err(e) = vm.guest_start(&spec) {
-        eprintln!("[构建] 起 guest 失败：{}", e);
-        return 1;
-    }
-    if !vm.guest_wait_agent(&lease, std::time::Duration::from_secs(15 * 60)) {
-        vm.guest_stop(&lease);
-        eprintln!("[构建] 等 guest 的 qemu-guest-agent 超时");
-        return 1;
-    }
-    // 先把编译包接进 guest（prefix 的 bin 进 PATH、system 的载荷叠写进系统路径），再跑构建。
-    for script in crate::capabilities::vm::api::package_setup_scripts(&plan) {
-        let _ = vm.guest_run(
-            &lease,
-            &crate::capabilities::vm::api::GuestRun {
-                command: script,
-                args_json: "{}".to_string(),
-                env: Vec::new(),
-                cwd: String::new(),
-            },
-        );
-    }
-    let out = vm.guest_run(
-        &lease,
-        &crate::capabilities::vm::api::GuestRun {
-            command: decl.command.clone(),
-            args_json: "{}".to_string(),
-            env: Vec::new(),
-            cwd: module.root.display().to_string(),
-        },
-    );
-    vm.guest_stop(&lease);
-    print!("{}", out.output);
-    if !out.ok {
-        eprintln!(
-            "[构建] {} 在 guest「{}」里的构建命令失败（不落状态，下次重试）",
-            id, guest
-        );
-        return 1;
-    }
-    finish_build(
-        root,
-        id,
-        guest,
-        image.os.as_str(),
-        &fingerprint,
-        &module,
-        &state_path,
-    )
+    let provision: Arc<dyn crate::capabilities::provision::api::Provision + Send + Sync> =
+        Arc::new(crate::capabilities::provision::ProvisionService::new(root));
+    let runner: Arc<dyn crate::kernel::ports::ProcessRunner + Send + Sync> =
+        Arc::new(build_runner(root)?);
+    Ok(crate::capabilities::builds::service::BuildsService::new(
+        root.to_path_buf(),
+        packages,
+        build_vm(root),
+        provision,
+        runner,
+        Arc::new(crate::kernel::detail::host_probe::HostProbeAdapter),
+        Arc::new(crate::kernel::ports::NoopLog),
+        crate::entry::toolchains::active_roots(root),
+    ))
 }
 
 /// 目的：按模块 id 扫出模块（扫盘；清单被拒收的在这里就是"找不到"，细节看 `--doctor`）。
@@ -719,178 +467,6 @@ fn module_by_id(
     .modules
     .into_iter()
     .find(|m| m.manifest.id == id)
-}
-
-/// 目的：构建状态的落点（`.vm/build-state/<模块>.json`）——本机档与各虚拟根**共用一份**，靠 `target` 区分。
-fn build_state_path(root: &std::path::Path, id: &str) -> std::path::PathBuf {
-    root.join(".vm")
-        .join("build-state")
-        .join(format!("{}.json", id))
-}
-
-/// 目的：缓存命中吗——目标与源指纹都得一致，且入口都在场（否则等于没编）。
-fn build_is_fresh(
-    state_path: &std::path::Path,
-    target: &str,
-    target_os: &str,
-    fingerprint: &str,
-    module: &crate::capabilities::modules::api::Module,
-) -> bool {
-    let Some(prev) = read_build_state(state_path) else {
-        return false;
-    };
-    prev.target == target
-        && prev.fingerprint == fingerprint
-        && entries_left(module, target_os).is_empty()
-}
-
-/// 目的：入口复验（构建完必须真在、真能跑）；返回还缺哪些入口。
-/// 参数：target_os = 这次构建的**目标平台**（宿主构建 = 宿主；在虚拟根里构建 = 那个 guest 的 os）——
-///   与建会话时的入口判据同一把尺子，否则"宿主编的产物"会被当成"guest 里能跑"。
-fn entries_left(
-    module: &crate::capabilities::modules::api::Module,
-    target_os: &str,
-) -> Vec<crate::capabilities::vm::api::MissingEntry> {
-    use crate::kernel::ports::HostProbe;
-    let probe = crate::kernel::detail::host_probe::HostProbeAdapter;
-    crate::capabilities::vm::api::missing_entries_for(
-        std::slice::from_ref(module),
-        target_os,
-        &|p| {
-            probe.is_executable(p)
-                && (target_os == std::env::consts::OS
-                    || crate::capabilities::vm::api::runs_on_target(p, target_os))
-        },
-    )
-}
-
-/// 目的：构建的收尾——复验入口、落状态、如实报成败（本机档与虚拟机档共用）。
-fn finish_build(
-    _root: &std::path::Path,
-    id: &str,
-    target: &str,
-    target_os: &str,
-    fingerprint: &str,
-    module: &crate::capabilities::modules::api::Module,
-    state_path: &std::path::Path,
-) -> i32 {
-    let left = entries_left(module, target_os);
-    if !left.is_empty() {
-        eprintln!(
-            "[构建] 命令跑通了，但入口仍不在场：{}——检查 build.command 把产物写到哪了",
-            left.iter()
-                .map(|e| format!("{}（工具 {}）", e.command, e.tool))
-                .collect::<Vec<_>>()
-                .join("、")
-        );
-        return 1;
-    }
-    let state = BuildState {
-        module: id.to_string(),
-        target: target.to_string(),
-        fingerprint: fingerprint.to_string(),
-    };
-    let text = match serde_json::to_string_pretty(&state) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("[构建] 状态序列化失败：{}", e);
-            return 1;
-        }
-    };
-    if let Some(dir) = state_path.parent() {
-        if let Err(e) = std::fs::create_dir_all(dir) {
-            eprintln!("[构建] 建状态目录失败（{}）：{}", dir.display(), e);
-            return 1;
-        }
-    }
-    if let Err(e) = std::fs::write(
-        state_path,
-        format!(
-            "{}
-",
-            text
-        ),
-    ) {
-        eprintln!("[构建] 写状态失败（{}）：{}", state_path.display(), e);
-        return 1;
-    }
-    println!(
-        "[构建] {} 构建完成（目标 {}；状态 {}）",
-        id,
-        target,
-        state_path.display()
-    );
-    0
-}
-
-/// 目的：构建状态（`.vm/build-state/<模块>.json`）——指纹一致且入口在场就跳过重编。
-#[derive(serde::Serialize, serde::Deserialize)]
-struct BuildState {
-    module: String,
-    target: String,
-    fingerprint: String,
-}
-
-/// 目的：读构建状态；读不到（首次）或格式不认识都给 None（那就重编）。
-fn read_build_state(path: &std::path::Path) -> Option<BuildState> {
-    let text = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str(&text).ok()
-}
-
-/// 目的：模块的**源指纹**（构建命令 + 能力 + 网络 + 全部源文件的相对路径与内容）——变了才重编。
-/// 约束：跳过 `build/`（产物本身）与 `userdata/`（跨任务私有状态，不是源）。
-fn source_fingerprint(
-    module_root: &std::path::Path,
-    decl: &crate::capabilities::modules::api::BuildDecl,
-    providers: &[String],
-) -> Result<String, String> {
-    let mut buf: Vec<u8> = Vec::new();
-    buf.extend_from_slice(decl.command.as_bytes());
-    buf.push(0);
-    buf.extend_from_slice(decl.needs.join(",").as_bytes());
-    buf.push(0);
-    buf.extend_from_slice(providers.join(",").as_bytes());
-    buf.push(0);
-    buf.push(if decl.net { b'1' } else { b'0' });
-    buf.push(0);
-    collect_sources(module_root, module_root, &mut buf)?;
-    Ok(crate::capabilities::workspace::api::content_hash(&buf))
-}
-
-/// 目的：把模块根下的源文件按相对路径 + 内容收进指纹缓冲；`build/` 与 `userdata/` 跳过。
-fn collect_sources(
-    root: &std::path::Path,
-    dir: &std::path::Path,
-    buf: &mut Vec<u8>,
-) -> Result<(), String> {
-    let mut entries: Vec<std::path::PathBuf> = std::fs::read_dir(dir)
-        .map_err(|e| format!("读 {} 失败：{}", dir.display(), e))?
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .collect();
-    entries.sort();
-    for path in entries {
-        let rel = path
-            .strip_prefix(root)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .into_owned();
-        let top = rel.split(['/', '\\']).next().unwrap_or("");
-        if top == "build" || top == "userdata" {
-            continue;
-        }
-        if path.is_dir() {
-            collect_sources(root, &path, buf)?;
-            continue;
-        }
-        buf.extend_from_slice(rel.as_bytes());
-        buf.push(0);
-        buf.extend_from_slice(
-            &std::fs::read(&path).map_err(|e| format!("读 {} 失败：{}", path.display(), e))?,
-        );
-        buf.push(0);
-    }
-    Ok(())
 }
 
 /// 目的：构建期的全局网络开关（与主程序同一份 settings.yaml；读不到/非法按拒绝）。
