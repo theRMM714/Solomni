@@ -392,10 +392,11 @@ pub(crate) fn patch_guide_examples_follow_the_session_path_dialect() {
     use crate::capabilities::vm::domain::paths::PathDialect;
 
     let mut sb = test_sandbox("甲", &[]);
+    let host_root = crate::kernel::api::slash(&sb.private);
+    let host_example = format!("*** Update File: {}/note.txt", host_root);
     let host = crate::capabilities::tools::api::tool_notes(&test_prompts(), &sb, &[]);
     assert!(
-        host.patch_guide
-            .contains(&crate::kernel::api::slash(&sb.private)),
+        host.patch_guide.contains(&host_example),
         "本机档的示例用宿主写法：{}",
         host.patch_guide
     );
@@ -410,16 +411,18 @@ pub(crate) fn patch_guide_examples_follow_the_session_path_dialect() {
     let notes = crate::capabilities::tools::api::tool_notes(&test_prompts(), &sb, &[]);
     let guest_root = bridge.to_guest(&sb.private).replace('\\', "/");
     assert!(
-        notes.patch_guide.contains(&guest_root),
+        notes
+            .patch_guide
+            .contains(&format!("*** Update File: {}/note.txt", guest_root)),
         "guest 档的示例要用 guest 写法（{}）：{}",
         guest_root,
         notes.patch_guide
     );
+    // 只比对整行示例：guest 路径本身可能包含宿主路径片段（POSIX 宿主的 /solomni-host/home/...），
+    // 不能用 contains(宿主根) 判定“没出现宿主写法”。
     assert!(
-        !notes
-            .patch_guide
-            .contains(&crate::kernel::api::slash(&sb.private)),
-        "guest 档不能再出现宿主写法：{}",
+        !notes.patch_guide.contains(&host_example),
+        "guest 档不能再出现宿主写法的示例：{}",
         notes.patch_guide
     );
 }
