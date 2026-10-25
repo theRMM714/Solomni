@@ -25,10 +25,12 @@ services:
 | `now` | — | `{"iso","epoch_ms"}` 当前 UTC 时间 |
 | `uuid` | — | `{"uuid"}` 随机 UUIDv4 |
 | `sha256` | `{"text"}` | `{"sha256","bytes"}` 十六进制摘要 |
-| `remember` | `{"key","value"}` | `{"ok","key","count"}`；value 只存服务进程内存 |
+| `remember` | `{"key","value"}` | `{"ok","key","count"}`；value 只存服务进程内存（最多 256 条，超出按写入先后淘汰最旧的） |
 | `recall` | `{"key"}` | `{"key","found","value"}` |
 
 服务**只用标准库**、不联网、不写盘；便签状态只活在服务进程里，重启即清空。
+
+协议是按行的 JSON-RPC：一次只收一个 JSON 对象；批量数组会回 `-32600` 并说明不支持，不静默丢弃。
 
 ## 启用与启动
 

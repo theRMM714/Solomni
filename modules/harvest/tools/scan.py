@@ -15,10 +15,17 @@ from html.parser import HTMLParser
 MAX_BYTES = 8 * 1024 * 1024
 # 扩展名 → kind。
 KINDS = {".md": "md", ".markdown": "md", ".txt": "txt", ".html": "html", ".htm": "html", ".json": "json"}
-DEFAULT_INCLUDE = "md,txt,html,json"
+DEFAULT_INCLUDE = "md,markdown,htm,txt,html,json"
 
 MD_HEADING = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
-MD_LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)")
+# 链接地址两种写法：尖括号包裹（可含空格）或普通地址（允许一层平衡括号，如 Foo_(bar).md）；
+# 地址后可跟 "标题" / '标题' / (标题)，只取地址。
+MD_LINK = re.compile(
+    r"\[[^\]]*\]\(\s*(?:<([^<>\n]+)>|((?:[^()\s]|\([^()\s]*\))+))"
+    r"(?:\s+(?:\"[^\"]*\"|'[^']*'|\([^()]*\)))?\s*\)"
+)
+# 与 render 同一口径：不是锚点、不是 //、不带 URI scheme 的才是相对引用。
+SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*:")
 
 
 class Extractor(HTMLParser):
@@ -75,7 +82,11 @@ def extract_markdown(raw):
         m = MD_HEADING.match(line)
         if m:
             headings.append(m.group(2))
-    links = [m.group(1) for m in MD_LINK.finditer(raw)]
+    links = []
+    for m in MD_LINK.finditer(raw):
+        target = (m.group(1) or m.group(2) or "").strip()
+        if target:
+            links.append(target)
     return raw, headings, links
 
 
@@ -115,17 +126,28 @@ def main():
 
     records = []
     skipped_big = 0
-    skipped_kind = 0
+    skipped_include = 0
+    skipped_ext = 0
+    skipped_link = 0
     unreadable = 0
     for base, dirs, files in os.walk(root):
-        # 隐藏目录与 userdata/ 不进语料（后者是模块自己的跨任务私有状态）。
+        # 隐藏目录与 userdata/ 不进语料（后者是模块自己的跨任务私有状态）；
+        # 排序让同一份输入的产出顺序稳定（提交到共享区不产生噪声 diff）。
         dirs[:] = [d for d in dirs if not d.startswith(".") and d != "userdata"]
+        dirs.sort()
         for name in sorted(files):
             ext = os.path.splitext(name)[1].lower()
-            if ext not in want or ext not in KINDS:
-                skipped_kind += 1
+            if ext not in KINDS:
+                skipped_ext += 1
+                continue
+            if ext not in want:
+                skipped_include += 1
                 continue
             abs_path = os.path.join(base, name)
+            # 不跟随文件符号链接：语料只描述 root 里真实存在的文件。
+            if os.path.islink(abs_path):
+                skipped_link += 1
+                continue
             try:
                 size = os.path.getsize(abs_path)
             except OSError:
@@ -155,14 +177,18 @@ def main():
     total_lines = 0
     rel_links = 0
     ext_links = 0
+    anchor_links = 0
     for r in records:
         by_kind[r["kind"]] = by_kind.get(r["kind"], 0) + 1
         total_chars += r["chars"]
         total_lines += r["lines"]
         for link in r["links"]:
-            if link.startswith(("http://", "https://", "//", "mailto:")):
+            value = link.strip()
+            if value.startswith("#"):
+                anchor_links += 1
+            elif value.startswith("//") or SCHEME.match(value):
                 ext_links += 1
-            else:
+            elif value:
                 rel_links += 1
 
     print("语料清单：%s" % out)
@@ -171,11 +197,14 @@ def main():
     top = sorted(records, key=lambda r: r["chars"], reverse=True)[:3]
     if top:
         print("最大的几份：" + "  ".join("%s(%d)" % (r["rel"], r["chars"]) for r in top))
-    print("链接 %d 条（相对 %d / 外链 %d）" % (rel_links + ext_links, rel_links, ext_links))
-    if skipped_big or unreadable or skipped_kind:
+    print(
+        "链接 %d 条（相对 %d / 外链 %d / 锚点 %d）"
+        % (rel_links + ext_links + anchor_links, rel_links, ext_links, anchor_links)
+    )
+    if skipped_big or unreadable or skipped_ext or skipped_include or skipped_link:
         print(
-            "略过：超大 %d / 读不了 %d / 扩展名不在白名单 %d"
-            % (skipped_big, unreadable, skipped_kind)
+            "略过：超大 %d / 读不了 %d / 扩展名不支持 %d / 不在白名单 %d / 符号链接 %d"
+            % (skipped_big, unreadable, skipped_ext, skipped_include, skipped_link)
         )
 
 

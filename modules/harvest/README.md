@@ -8,11 +8,11 @@
 ## 工具
 
     harvest.scan    command: python tools/scan.py
-    stdin: {"root":"<要扫的目录>","out":"<corpus.jsonl 路径>","include":"md,txt,html,json"}
+    stdin: {"root":"<要扫的目录>","out":"<corpus.jsonl 路径>","include":"md,markdown,htm,txt,html,json"}
 
-- `root` / `out` 必填；`include` 是扩展名白名单，缺省 `md,txt,html,json`（`.markdown` 归 md，`.htm` 归 html）。
-- 递归扫 `root`，**跳过**隐藏目录（`.` 开头）与 `userdata/`（模块自己的跨任务私有区）。
-- 单份超过 8 MB、读不了、或不在白名单里的文件一律跳过，跳过的数量在 stdout 末尾如实报出，不静默丢。
+- `root` / `out` 必填；`include` 是扩展名白名单，缺省 `md,markdown,htm,txt,html,json`（`.markdown` 归 md，`.htm` 归 html）。
+- 递归扫 `root`，**跳过**隐藏目录（`.` 开头）与 `userdata/`（模块自己的跨任务私有区）；目录按名字排序遍历，同一份输入的产出顺序稳定。
+- 单份超过 8 MB、读不了、扩展名不支持、不在白名单、或是符号链接的文件都跳过；跳过的数量按类别在 stdout 末尾如实报出，不静默丢。
 - 失败走 stderr + 非零退出码（缺参数、`root` 不是目录、`out` 写不了）；没命中任何资料不是错误，如实报 0 份。
 - stdout 只给产物路径 + 几行统计（模型看这个，不回显整份语料）。
 
@@ -29,5 +29,5 @@
 | `chars` | 抽出的正文码点数 |
 | `lines` | 正文行数 |
 | `headings` | 标题列表：markdown 取 `#`..`######` 的文字，HTML 取 `h1`..`h3`，其余为空 |
-| `links` | 链接列表：markdown 取 `[文字](地址)` 的地址，HTML 取 `href`，其余为空 |
+| `links` | 链接列表：markdown 取 `[文字](地址)` 的地址（地址可写 `<...>`，可带 `"标题"`，允许一层平衡括号如 `Foo_(bar).md`），HTML 取 `href`，其余为空 |
 | `text` | 抽出的纯文本正文（HTML 去掉 `script`/`style`） |

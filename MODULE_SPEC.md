@@ -48,7 +48,7 @@ enabled: true           # 【可选】缺省 true：模块的作者默认启用�
 brief: >-               # 能力简述（两三句）：给核心选人看，给菜单上的用户看
   调研、对比与选型。只说明能干什么，不列具体能力。
 system: >-              # 工具用法：参数 / 路径 / 输入输出 / 错误 / 前置条件（能力写在 brief）
-  scan 用法：root 与 out 必填；include 是可选扩展名白名单，缺省 md,txt,html,json。
+  scan 用法：root 与 out 必填；include 是可选扩展名白名单，缺省 md,markdown,htm,txt,html,json。
 runtimes:               # 【可选】运行能力：工具需要哪些运行包（只写能力名，版本由用户定）
   - python
 tools:                  # 【可选】模块工具表：工具名 → 声明

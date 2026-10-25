@@ -29,7 +29,7 @@ tools:
   write:
     capability: fs-write        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
     callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
-    desc: 整份写入文本文件（UTF-8）：文件不存在则新建；已存在则整份覆盖，但**要求你在本次会话里先完整读过它**（只改一处请用 edit）。
+    desc: 整份写入文本文件（UTF-8）：文件不存在则新建；已存在则整份覆盖，但**要求你在本次会话里先完整读过它、或在本次会话里写过它**（核心刚写过的内容它知道，不必再读一遍；只改一处请用 edit）。
     params:
       path:
         type: string
