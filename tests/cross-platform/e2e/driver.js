@@ -361,7 +361,11 @@ async function lines(sid) {
   assert(fs.existsSync(fFull1) && fs.existsSync(fFull2), '答 full → 本轮两个调用都执行', fFull1 + ' / ' + fFull2);
   // [待确认] 是**系统行（notice）**，不是转录行：从落盘流水按事件类型数。
   const hAsk = await api('GET', '/api/history/' + encodeURIComponent(nameAsk));
-  const askedTimes = ((hAsk.json && hAsk.json.events) || []).filter((e) => e.type === 'notice' && String(e.text || '').includes('[待确认]')).length;
+  // [待确认] 是瞬时 Notice（不落盘）；历史接口的 live 尾巴仍带着它，和盘上事件一起数。
+  const askedTimes = [
+    ...((hAsk.json && hAsk.json.events) || []),
+    ...((hAsk.json && hAsk.json.live) || []),
+  ].filter((e) => e.type === 'notice' && String(e.text || '').includes('[待确认]')).length;
   assert(askedTimes === 3, '全程只停三次（full 那轮只停一次；若变成 4 = full 没生效）', 'asked=' + askedTimes);
 
   // 非法工具信封：必须记成一条失败的工具行，且 JSON 绝不上屏（真实 bug 的回归）
