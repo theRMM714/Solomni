@@ -90,17 +90,18 @@ impl Default for LlmOpts {
     }
 }
 
-/// 一次补全的请求选项：策略在 conductor（要不要流式、要不要声明工具、给多少预算），机制在适配器。
-/// Copy：讨论回合的工具循环每轮都要一份（只换 tools 槽位，其余照旧）。
-#[derive(Clone, Copy)]
+/// 目的：一次补全的请求选项——策略在 conductor，机制在适配器。
+/// 约束：每轮克隆一份；只换 tools / cancel 槽位，其余照旧。
+#[derive(Clone)]
 pub struct CompleteOpts<'a> {
     pub stream: bool,
     /// 要声明的工具；None = 本次不声明（手写信封模式，或本轮不需要工具）。
     pub tools: Option<&'a [ToolDecl]>,
-    /// 本次调用的**总预算**（秒）：连接之外，等响应头、读响应体与整体都用它。
-    /// 为什么是一个预算而不是拆几个：**非流式**下供应商要等整段生成完才发响应头，
-    /// 单独设一个小的"头超时"会把长回复误判成不通。
+    /// 目的：等待首个响应 / 首个数据块的预算（秒）；不是整次流的总时长。
+    /// 约束：非流式调用把它当整次调用的上限（那时没有中间的"已收到"可重置）。
     pub timeout_secs: u64,
+    /// 目的：用户「停止」的取消位；适配器等待数据块时轮询它，置位即关闭请求。
+    pub cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl<'a> CompleteOpts<'a> {
@@ -110,12 +111,22 @@ impl<'a> CompleteOpts<'a> {
             stream,
             tools: None,
             timeout_secs: DEFAULT_LLM_TIMEOUT_SECS,
+            cancel: None,
         }
     }
 
     /// 带上本次预算（核心按设置给；设置是全局的，见 `AppSettings::llm_timeout_secs`）。
     pub fn with_timeout(mut self, secs: u64) -> CompleteOpts<'a> {
         self.timeout_secs = secs;
+        self
+    }
+
+    /// 目的：接上这次生成的取消位；停止时适配器能立刻关闭在途请求。
+    pub fn with_cancel(
+        mut self,
+        cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> CompleteOpts<'a> {
+        self.cancel = Some(cancel);
         self
     }
 }
@@ -213,6 +224,9 @@ pub struct Completion {
     /// 而核心正是按转录派生"下一步该谁说话"——错误文本一旦混进去，状态就歪了。
     /// 有它，上层才能如实告知用户并**中断**这一轮（而不是假装模型说了这句话）。
     pub error: Option<String>,
+    /// 目的：用户按了「停止」——取消关闭了在途请求，不是模型回复、也不是失败。
+    /// 约束：上层据此收尾并写 `[停止]`；任何已流到一半的工具调用都不得执行。
+    pub cancelled: bool,
 }
 
 impl Completion {
@@ -224,6 +238,7 @@ impl Completion {
             finish: String::new(),
             calls: Vec::new(),
             error: None,
+            cancelled: false,
         }
     }
 
@@ -235,6 +250,25 @@ impl Completion {
             finish: String::new(),
             calls: Vec::new(),
             error: Some(reason.into()),
+            cancelled: false,
+        }
+    }
+
+    /// 目的：用户「停止」——请求已被取消关闭；已产出的部分原样带回。
+    /// 约束：上层不得据此执行工具。
+    pub fn cancelled(
+        raw: String,
+        reasoning: String,
+        finish: String,
+        calls: Vec<ToolCall>,
+    ) -> Completion {
+        Completion {
+            raw,
+            reasoning,
+            finish,
+            calls,
+            error: None,
+            cancelled: true,
         }
     }
 

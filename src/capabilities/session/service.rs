@@ -180,6 +180,9 @@ pub fn core_operation(
         systools.tool_face(role).unwrap_or_default();
     let face_ids: Vec<String> = face_rows.iter().map(|(id, _)| id.to_string()).collect();
     let mut opts = opts;
+    if let Some(c) = cancel {
+        opts.cancel = Some(std::sync::Arc::clone(c));
+    }
     let decls: Vec<crate::capabilities::llm::api::ToolDecl> =
         if mode == crate::capabilities::llm::api::ToolMode::Native {
             face_rows.iter().map(|(id, s)| s.decl(id)).collect()
@@ -227,8 +230,12 @@ pub fn core_operation(
                     None => true,
                 }
             };
-            chat.complete(&msgs, opts, &mut on)
+            chat.complete(&msgs, opts.clone(), &mut on)
         };
+        // 停止优先：已取消的调用不得再解析载荷、执行核实工具或进入下一轮。
+        if done.cancelled || cancel.is_some_and(|c| c.load(std::sync::atomic::Ordering::Relaxed)) {
+            return Err("已停止".to_string());
+        }
         if let Some(err) = done.error {
             return Err(err);
         }

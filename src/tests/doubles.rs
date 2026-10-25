@@ -1646,6 +1646,7 @@ impl Chat for NativeCallChat {
                 args_json: self.args_json.clone(),
             }],
             error: None,
+            cancelled: false,
         }
     }
 }

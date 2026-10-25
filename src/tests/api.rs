@@ -325,6 +325,31 @@ fn stop_takes_effect_while_generation_is_still_running() {
     );
     assert!(!ops.sessions.is_running(&sid), "收尾后不再标记在跑");
     assert!(ticks.load(Ordering::Relaxed) > 0, "通道确实被调用过");
+    // 停止要留下可回档的内容行；原始瞬时 Notice 不得落盘（否则刷新后不可删）。
+    let (_meta, events) = ops.history.open(&sid).expect("读停止后的转录");
+    assert!(
+        !events
+            .iter()
+            .any(|e| e.get("type").and_then(|t| t.as_str()) == Some("notice")),
+        "原始 Notice 不落盘：{:?}",
+        events
+    );
+    let stopped_line = events
+        .iter()
+        .filter(|e| e.get("type").and_then(|t| t.as_str()) == Some("transcript"))
+        .filter_map(|e| e.get("lines").and_then(|l| l.as_array()))
+        .flatten()
+        .any(|l| {
+            l.get("kind").and_then(|k| k.as_str()) == Some("notice")
+                && l.get("line")
+                    .and_then(|s| s.as_str())
+                    .is_some_and(|s| s.contains("[停止]"))
+        });
+    assert!(
+        stopped_line,
+        "停止要写一条可回档的 [停止] 内容行：{:?}",
+        events
+    );
     assert!(
         ops.sessions.stop("没这个会话").is_empty(),
         "停一个没在跑的会话 = 空"

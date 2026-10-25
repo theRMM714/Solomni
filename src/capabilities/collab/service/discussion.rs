@@ -333,6 +333,7 @@ impl Discussion {
             dialogue.to_vec(),
             llm,
             speaker,
+            std::sync::Arc::clone(cancel),
             &mut on_chunk,
             &mut on_tool,
             &mut on_round,

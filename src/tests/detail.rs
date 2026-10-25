@@ -30,6 +30,7 @@ use crate::capabilities::workspace::ports::Workdirs;
 use crate::kernel::api::ExecSpec;
 use crate::kernel::detail::file_log::FileLog;
 use crate::kernel::ports::{Log, NoopLog};
+use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -1291,6 +1292,89 @@ impl Drop for Mock {
     }
 }
 
+/// 按时间片吐 SSE 的本机假供应商：先写响应头，再按步骤写 chunk，用于验首块/空闲超时与取消。
+struct StreamMock {
+    base: String,
+    stop: Arc<AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl StreamMock {
+    fn start(steps: Vec<(Duration, Vec<u8>)>) -> StreamMock {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("起本机流式假供应商");
+        listener.set_nonblocking(true).expect("非阻塞 accept");
+        let addr = listener.local_addr().expect("TCP 地址");
+        let base = format!("http://127.0.0.1:{}", addr.port());
+        let stop = Arc::new(AtomicBool::new(false));
+        let st = Arc::clone(&stop);
+        let handle = std::thread::spawn(move || {
+            while !st.load(Ordering::Relaxed) {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(x) => x,
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(10));
+                        continue;
+                    }
+                    Err(_) => break,
+                };
+                // 请求头读一次就够：后续 body 不参与假供应商的判断。
+                let mut buf = [0u8; 8192];
+                let _ = stream.read(&mut buf);
+                // 先发响应头：客户端的 send() 立刻返回；首块预算从这里开始算。
+                if stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n",
+                    )
+                    .is_err()
+                {
+                    break;
+                }
+                let _ = stream.flush();
+                let mut broken = false;
+                for (delay, bytes) in steps.iter() {
+                    std::thread::sleep(*delay);
+                    let head = format!("{:X}\r\n", bytes.len());
+                    if stream.write_all(head.as_bytes()).is_err()
+                        || stream.write_all(bytes).is_err()
+                        || stream.write_all(b"\r\n").is_err()
+                    {
+                        broken = true;
+                        break;
+                    }
+                    let _ = stream.flush();
+                }
+                if !broken {
+                    let _ = stream.write_all(b"0\r\n\r\n");
+                    let _ = stream.flush();
+                }
+            }
+        });
+        StreamMock {
+            base,
+            stop,
+            handle: Some(handle),
+        }
+    }
+
+    /// 以 /v1 结尾：候选只有一条，超时用例不会被端点回落放大成两倍等待。
+    fn channel_v1(&self, key: &str) -> Channel {
+        Channel {
+            base_url: format!("{}/v1", self.base),
+            api_key: key.to_string(),
+            model: "m".to_string(),
+        }
+    }
+}
+
+impl Drop for StreamMock {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(h) = self.handle.take() {
+            let _ = h.join();
+        }
+    }
+}
+
 fn completion_body(content: &str) -> String {
     serde_json::json!({"choices": [{"message": {"content": content}}]}).to_string()
 }
@@ -1383,6 +1467,99 @@ fn http_chat_streams_chunks_and_stops_when_the_caller_aborts() {
     assert_eq!(out2, "你", "中止后返回已产出的正文，且不重开候选");
     assert_eq!(seen2.len(), 2, "中止后不再回调：{:?}", seen2);
     assert_eq!(mock2.requests().len(), 1, "中止不得把流重新拉起来");
+}
+
+#[test]
+fn http_stream_idle_keepalives_do_not_trip_a_total_timeout() {
+    // 总时长 1.5s > timeout_secs=1，但每 300ms 都有字节（含 SSE keepalive）：
+    // 正常流式不因总时长中断，只有真正空闲才中断。
+    let steps = vec![
+        (Duration::from_millis(300), b": ping\n\n".to_vec()),
+        (Duration::from_millis(300), b": ping\n\n".to_vec()),
+        (Duration::from_millis(300), sse_delta("你").into_bytes()),
+        (Duration::from_millis(300), sse_delta("好").into_bytes()),
+        (Duration::from_millis(300), b"data: [DONE]\n\n".to_vec()),
+    ];
+    let mock = StreamMock::start(steps);
+    let (mut chat, _) = gateway().member_channel(Some(&mock.channel_v1("k")), "a");
+    let out = chat.complete(
+        &[Msg::user("慢慢说")],
+        CompleteOpts::plain(true).with_timeout(1),
+        &mut |_| true,
+    );
+    assert_eq!(out.error, None, "正常流式不该超时：{:?}", out.error);
+    assert_eq!(out.raw, "你好");
+}
+
+#[test]
+fn http_stream_reports_idle_timeout_only_after_the_stream_goes_quiet() {
+    let steps = vec![
+        (Duration::from_millis(100), sse_delta("你").into_bytes()),
+        (Duration::from_millis(2000), b"data: [DONE]\n\n".to_vec()),
+    ];
+    let mock = StreamMock::start(steps);
+    let (mut chat, _) = gateway().member_channel(Some(&mock.channel_v1("k")), "a");
+    let out = chat.complete(
+        &[Msg::user("停一下")],
+        CompleteOpts::plain(true).with_timeout(1),
+        &mut |_| true,
+    );
+    let err = out.error.unwrap_or_default();
+    assert!(err.contains("流空闲超时"), "空闲超时要如实报：{}", err);
+}
+
+#[test]
+fn http_stream_times_out_waiting_for_the_first_data_block() {
+    let steps = vec![(Duration::from_millis(1500), sse_delta("迟到").into_bytes())];
+    let mock = StreamMock::start(steps);
+    let (mut chat, _) = gateway().member_channel(Some(&mock.channel_v1("k")), "a");
+    let out = chat.complete(
+        &[Msg::user("在吗")],
+        CompleteOpts::plain(true).with_timeout(1),
+        &mut |_| true,
+    );
+    let err = out.error.unwrap_or_default();
+    assert!(
+        err.contains("等待首个数据块超时"),
+        "首块超时要如实报：{}",
+        err
+    );
+}
+
+#[test]
+fn http_stream_stop_cancels_without_waiting_for_the_next_chunk() {
+    let mut steps = Vec::new();
+    for _ in 0..20 {
+        steps.push((Duration::from_millis(200), b": ping\n\n".to_vec()));
+    }
+    steps.push((
+        Duration::from_millis(200),
+        sse_delta("不应到达").into_bytes(),
+    ));
+    let mock = StreamMock::start(steps);
+    let (chat, _) = gateway().member_channel(Some(&mock.channel_v1("k")), "a");
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel_for_call = Arc::clone(&cancel);
+    let worker = std::thread::spawn(move || {
+        let mut chat = chat;
+        chat.complete(
+            &[Msg::user("想很久")],
+            CompleteOpts::plain(true)
+                .with_timeout(30)
+                .with_cancel(cancel_for_call),
+            &mut |_| true,
+        )
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    cancel.store(true, Ordering::Relaxed);
+    let started = std::time::Instant::now();
+    let out = worker.join().expect("生成线程");
+    assert!(out.cancelled, "取消要显式标记：{:?}", out.error);
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "停止不能等下一个 chunk（{:?}）",
+        started.elapsed()
+    );
 }
 
 #[test]

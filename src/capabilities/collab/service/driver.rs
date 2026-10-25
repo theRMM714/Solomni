@@ -214,7 +214,8 @@ fn run_rounds(
     sink: &mut dyn FnMut(SessionEvent),
 ) -> Vec<Round> {
     let label = s.id.clone();
-    let stopped = live.cancelled();
+    // 取消位在整段回合里只读地观察：每一轮构造行/收尾时都重新读，不能用开始时的快照。
+    let cancel = std::sync::Arc::clone(&live.cancel);
     let next_line = std::cell::Cell::new(s.next_line);
     let per_round: std::cell::RefCell<Vec<Vec<LineView>>> = std::cell::RefCell::new(Vec::new());
     let error: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
@@ -223,7 +224,13 @@ fn run_rounds(
             *error.borrow_mut() = Some(err);
             return;
         }
-        let views = build_round_lines(&label, round, stopped, &next_line, spec.turn_id);
+        let views = build_round_lines(
+            &label,
+            round,
+            cancel.load(std::sync::atomic::Ordering::Relaxed),
+            &next_line,
+            spec.turn_id,
+        );
         if !views.is_empty() {
             s(SessionEvent::Transcript(views.clone()));
         }
@@ -271,14 +278,14 @@ fn run_rounds(
             }
         }
     }
-    if let Some(err) = error.borrow().as_ref() {
-        for ev in s.note_notice(&crate::capabilities::session::api::interrupted_note(err)) {
+    // 停止优先于同一次调用的错误：用户按了停止就是「我停的」，不再报成故障。
+    let stopped = cancel.load(std::sync::atomic::Ordering::Relaxed);
+    if stopped {
+        for ev in s.note_notice(&crate::capabilities::session::api::stopped_note()) {
             sink(ev);
         }
-    }
-    if stopped {
-        for ev in s.note_notice("[已停止] 生成已按你的要求中止（保留已产出的部分）")
-        {
+    } else if let Some(err) = error.borrow().as_ref() {
+        for ev in s.note_notice(&crate::capabilities::session::api::interrupted_note(err)) {
             sink(ev);
         }
     }
@@ -381,6 +388,7 @@ fn run(
             dialogue.clone(),
             llm,
             &label,
+            std::sync::Arc::clone(&cancel),
             &mut |chunk| {
                 let mut kind = "text";
                 let mut piece = String::new();

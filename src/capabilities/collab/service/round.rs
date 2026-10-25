@@ -119,6 +119,21 @@ impl Round {
     }
 }
 
+/// 用户已停止：**不执行**，但每个调用仍留一条失败行，说明为什么没有执行。
+fn refused_batch(plan: &[(Option<String>, String, String)]) -> Vec<(String, ToolOutcome)> {
+    plan.iter()
+        .map(|(module, _, _)| {
+            (
+                module.clone().unwrap_or_default(),
+                ToolOutcome {
+                    ok: false,
+                    output: "用户已停止：这一轮的工具调用**没有执行**。".to_string(),
+                },
+            )
+        })
+        .collect()
+}
+
 /// stream/on 透传给通道（呈现层在 on 里外送 Delta）；on 返回 false = 用户要求中止。
 /// on_tool 在每个工具跑完后立刻回调（工具行与文本行因此天然有序）。
 /// 终止保证：超限后告知一次并强制收尾；其后再来 tool 信封按原文作答，不再执行。
@@ -132,6 +147,7 @@ pub fn converse_with(
     dialogue: Vec<Msg>,
     llm: crate::capabilities::llm::api::LlmOpts,
     speaker: &str,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     on: &mut dyn FnMut(Chunk) -> bool,
     on_tool: &mut dyn FnMut(&ToolCallView),
     on_round: &mut RoundSink<'_>,
@@ -227,13 +243,22 @@ pub fn converse_with(
                     Some(&decls.list)
                 },
                 timeout_secs: llm.timeout_secs,
-            };
+                cancel: None,
+            }
+            .with_cancel(std::sync::Arc::clone(&cancel));
             chat.complete(&msgs, opts, &mut sink)
         };
+        // 用户「停止」：请求已被取消关闭。停止优先于同一次调用的错误；
+        // 后面的工具分支只记录"未执行"的失败行，绝不真的执行已流到一半的 tool_call。
+        let user_stopped = done.cancelled || cancel.load(std::sync::atomic::Ordering::Relaxed);
+        if user_stopped {
+            // 这一轮只记录"未执行"的失败行；循环顶部据此退出，不再发起下一次调用。
+            aborted = true;
+        }
         // 调用失败（超时 / 网络）：**不是模型的回复**——这一轮不解析信封、不执行工具、不落转录，
         // 只把原因带回，让上层如实告知用户并中断本轮（用户可以点「继续」重试）。
         // 为什么必须短路：错误文本若被当成发言吸收，核心按转录派生的"下一步该谁说话"就歪了。
-        if let Some(err) = done.error.clone() {
+        if let Some(err) = done.error.clone().filter(|_| !user_stopped) {
             push_round!(Round {
                 reply: reply_id,
                 text: String::new(),
@@ -423,7 +448,11 @@ pub fn converse_with(
                     // 调度：**连续**声明可并发的调用合成一批并发跑，其余各自独占（写入类因此是批次之间的屏障）。
                     // 结果按原始下标返回，随后一律按原序回填——并发只影响执行，不影响上下文里的顺序。
                     note_unauthorized(ctx, &plan, sink);
-                    let done = run_batch(ctx, &plan, confirms.as_mut(), ask, sink);
+                    let done = if user_stopped {
+                        refused_batch(&plan)
+                    } else {
+                        run_batch(ctx, &plan, confirms.as_mut(), ask, sink)
+                    };
                     // 先按原序把工具行建好（执行已经做完），再让**唯一那处**构造函数产出这一回复的消息：
                     // 实时与重建走同一个函数，"重建上下文与实时一致"因此是结构保证的。
                     let reply_text = reply.text.clone();
@@ -589,7 +618,11 @@ pub fn converse_with(
                     .collect();
                 // 内置工具（read/write/edit/search）优先且不属于任何模块；外部工具按模块定 cwd。
                 note_unauthorized(ctx, &plan, sink);
-                let done = run_batch(ctx, &plan, confirms.as_mut(), ask, sink);
+                let done = if user_stopped {
+                    refused_batch(&plan)
+                } else {
+                    run_batch(ctx, &plan, confirms.as_mut(), ask, sink)
+                };
                 // 修过信封就如实标注在回执最前面（模型与用户都能看到核心没有瞎猜）
                 let annotate = |outcome: ToolOutcome| -> ToolOutcome {
                     match repaired.as_deref() {
