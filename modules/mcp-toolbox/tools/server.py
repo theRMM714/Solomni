@@ -10,7 +10,8 @@ import uuid as uuid_mod
 
 PROTOCOL_VERSION = "2024-11-05"
 
-# 便签：只活在本进程内存里（常驻服务重启即清空）。
+# 便签：只活在本进程内存里（常驻服务重启即清空）；最多记 MAX_NOTES 条，超出按写入先后淘汰最旧的。
+MAX_NOTES = 256
 NOTES = {}
 
 # 按行协议统一 UTF-8：核心起进程时会带 PYTHONIOENCODING，这里兜住手工直跑的场合。
@@ -75,7 +76,11 @@ def op_sha256(args):
 
 def op_remember(args):
     key = arg(args, "key")
-    NOTES[key] = arg(args, "value", required=False)
+    value = arg(args, "value", required=False)
+    NOTES[key] = value
+    # 先写先出：长驻进程的内存有上界，不靠调用方自觉。
+    while len(NOTES) > MAX_NOTES:
+        NOTES.pop(next(iter(NOTES)))
     return as_text({"ok": True, "key": key, "count": len(NOTES)})
 
 
@@ -140,7 +145,11 @@ def handle(msg):
         args = params.get("arguments")
         if not isinstance(args, dict):
             args = {}
-        reply(mid, tool_call(params.get("name") or "", args))
+        name = params.get("name")
+        if not isinstance(name, str) or name == "":
+            reply(mid, tool_error("缺少操作名"))
+            return
+        reply(mid, tool_call(name, args))
     elif mid is not None:
         fail(mid, -32601, "没有这个方法：" + str(method))
 
@@ -158,6 +167,13 @@ def main():
             continue
         if isinstance(msg, dict):
             handle(msg)
+        else:
+            # 批量（JSON 数组）这条适配器不用：如实拒绝，不静默丢。
+            send({
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {"code": -32600, "message": "不支持批量请求（一次只发一个 JSON 对象）"},
+            })
 
 
 if __name__ == "__main__":

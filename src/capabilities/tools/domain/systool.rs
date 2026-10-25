@@ -103,12 +103,20 @@ pub fn tool_notes(
     sb: &Sandbox,
     modules: &[crate::capabilities::modules::api::Module],
 ) -> ToolNotes {
+    // 示例路径必须与【工作环境】同一种写法：虚拟机档给 guest 写法，宿主盘符在 guest 里不存在。
+    // 翻译器与 env_block 同源（沙箱的 path_codec）——两份提示词各用一套路径会把模型带偏。
+    let view = |path: &std::path::Path| -> String {
+        match sb.path_codec.as_ref() {
+            Some(codec) => crate::kernel::api::slash(std::path::Path::new(&codec.to_view(path))),
+            None => crate::kernel::api::slash(path),
+        }
+    };
     ToolNotes {
         patch_guide: prompt.render(
             Segment::PatchGuide,
             &[
-                ("work_root", crate::kernel::api::slash(&sb.shared)),
-                ("sandbox_root", crate::kernel::api::slash(&sb.private)),
+                ("work_root", view(&sb.shared)),
+                ("sandbox_root", view(&sb.private)),
             ],
         ),
         module_tools: crate::capabilities::tools::domain::module_tools::module_tools(modules),

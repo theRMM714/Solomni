@@ -41,6 +41,22 @@ function esc(value) {
     .replace(/'/g, '&#39;');
 }
 
+/* 先写同目录临时文件再改名：中途失败不会留下半截产物（覆盖同名文件时也是一次替换）。 */
+function writeAtomic(file, text) {
+  const temp = file + '.tmp-' + process.pid;
+  try {
+    fs.writeFileSync(temp, text, 'utf8');
+    fs.renameSync(temp, file);
+  } catch (err) {
+    try {
+      fs.unlinkSync(temp);
+    } catch (cleanupErr) {
+      /* 临时文件没建起来或已改名：没什么可清的 */
+    }
+    throw err;
+  }
+}
+
 function readStdin() {
   return new Promise(function (resolve, reject) {
     const chunks = [];
@@ -192,6 +208,12 @@ function checkLinks(docs, relSet) {
   const broken = [];
   const seen = new Set();
   let checked = 0;
+  // 大小写不同的真实路径：链接按原样在共享区里确实找不到，但指出"语料里是 X"能少一次瞎猜。
+  const folded = new Map();
+  relSet.forEach(function (rel) {
+    const key = rel.toLowerCase();
+    if (!folded.has(key)) folded.set(key, rel);
+  });
   docs.forEach(function (doc) {
     doc.links.forEach(function (link) {
       if (!isRelativeLink(link)) return;
@@ -203,7 +225,15 @@ function checkLinks(docs, relSet) {
       const key = normalizeRel(doc.rel) + ' -> ' + link;
       if (seen.has(key)) return;
       seen.add(key);
-      broken.push({ from: doc.rel, link: link, candidates: candidates });
+      let hint = '';
+      for (const candidate of candidates) {
+        const actual = folded.get(candidate.toLowerCase());
+        if (actual) {
+          hint = '语料里是 ' + actual + '，只有大小写不同';
+          break;
+        }
+      }
+      broken.push({ from: doc.rel, link: link, candidates: candidates, hint: hint });
     });
   });
   return { checked: checked, broken: broken };
@@ -374,7 +404,7 @@ function buildHtml(model) {
     parts.push('<thead><tr><th>来源文档</th><th>链接</th><th>解析目标</th><th>说明</th></tr></thead>');
     parts.push('<tbody>');
     model.linkCheck.broken.forEach(function (item) {
-      parts.push('<tr><td><code>' + esc(item.from) + '</code></td><td><code>' + esc(item.link) + '</code></td><td><code>' + esc(item.candidates.join(' | ')) + '</code></td><td>在语料里找不到目标</td></tr>');
+      parts.push('<tr><td><code>' + esc(item.from) + '</code></td><td><code>' + esc(item.link) + '</code></td><td><code>' + esc(item.candidates.join(' | ')) + '</code></td><td>' + (item.hint ? esc(item.hint) : '在语料里找不到目标') + '</td></tr>');
     });
     parts.push('</tbody>');
     parts.push('</table>');
@@ -430,7 +460,7 @@ async function main() {
   });
 
   try {
-    fs.writeFileSync(outPath, html, 'utf8');
+    writeAtomic(outPath, html);
   } catch (err) {
     fail('无法写入 HTML 产物 ' + outPath + '：' + (err && err.message ? err.message : String(err)));
   }
@@ -441,10 +471,10 @@ async function main() {
       return { rel: doc.rel, kind: doc.kind, chars: doc.chars, headings: doc.headings };
     });
     try {
-      fs.writeFileSync(indexPath, JSON.stringify(list, null, 2) + '\n', 'utf8');
+      writeAtomic(indexPath, JSON.stringify(list, null, 2) + '\n');
       indexWritten = path.resolve(indexPath);
     } catch (err) {
-      fail('无法写入索引产物 ' + indexPath + '：' + (err && err.message ? err.message : String(err)));
+      fail('HTML 已写入 ' + path.resolve(outPath) + '，但索引写不进 ' + indexPath + '：' + (err && err.message ? err.message : String(err)));
     }
   }
 
@@ -457,7 +487,7 @@ async function main() {
   lines.push('跳过了 ' + result.malformed.length + ' 行（JSON 非法或缺少 rel）');
   lines.push('相对链接: ' + linkCheck.checked + ' 条；坏链: ' + linkCheck.broken.length + ' 条');
   linkCheck.broken.slice(0, BROKEN_PREVIEW).forEach(function (item) {
-    lines.push('  - ' + item.from + ' -> ' + item.link);
+    lines.push('  - ' + item.from + ' -> ' + item.link + (item.hint ? '（' + item.hint + '）' : ''));
   });
   if (linkCheck.broken.length > BROKEN_PREVIEW) {
     lines.push('  …还有 ' + (linkCheck.broken.length - BROKEN_PREVIEW) + ' 条坏链，详见报告链接检查段');
