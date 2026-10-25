@@ -223,18 +223,8 @@ pub(crate) fn run_in_container(sid: PSID, spec: &FenceSpec, command: &str) -> Re
     // 环境块显式给（见 fence_env）：子进程拿到的就是白名单本身，不靠"守门进程恰好继承了什么"。
     let env = super::super::fence_env(spec, command);
     // 程序名改写成相对 cwd 的路径：AppContainer 里绝对路径的程序会被拒（真机：同一文件用绝对路径报
-    // Access denied，用 `..\` 相对路径正常）；解析规则用容器里生效的那份 PATH / PATHEXT。
-    let path_var = env
-        .iter()
-        .find(|(k, _)| k == "PATH")
-        .map(|(_, v)| v.clone())
-        .unwrap_or_default();
-    let pathext = env
-        .iter()
-        .find(|(k, _)| k == "PATHEXT")
-        .map(|(_, v)| v.to_string_lossy().into_owned());
-    let command =
-        &super::super::container_program_command(command, &spec.cwd, &path_var, pathext.as_deref());
+    // Access denied，用 `..\` 相对路径正常）。裸名不碰——交给 cmd 按容器里的 PATH 解析。
+    let command = &super::super::container_program_command(command, &spec.cwd);
     let mut block: Vec<u16> = Vec::new();
     for (k, v) in env {
         block.extend(k.encode_wide());
