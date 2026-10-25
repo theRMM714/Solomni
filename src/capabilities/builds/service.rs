@@ -124,7 +124,7 @@ impl BuildsService {
         let left = self.entries_left(module, target_os);
         if !left.is_empty() {
             return Err(format!(
-                "命令跑通了，但入口仍不在场：{}——检查 build.command 把产物写到哪了{}",
+                "构建命令报了成功，但入口仍不在场：{}——脚本可能吞掉了失败（Windows 的 `if errorlevel` 对崩溃码不成立，用 `|| exit /b 1`），或产物写错了地方；检查 build.command{}",
                 left.iter()
                     .map(|e| format!("{}（工具 {}）", e.command, e.tool))
                     .collect::<Vec<_>>()

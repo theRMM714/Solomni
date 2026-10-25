@@ -146,6 +146,8 @@ tools:
   产品在**目标环境**里跑 `command`（本机档在宿主；虚拟机档用 `--guest=<虚拟根>` 在 **guest 里用它的编译包**编），
   围栏由产品给（只写模块目录与状态目录、按 `net` 声明）；**工具链不进 agent 的工具围栏**。
   本机档构建围栏额外**只读**放行项目内基础工具链的安装根（编译器要读自己的 libexec / 动态库），仍然不能写它。
+  构建是**系统动作、不申请容器身份**（与 `--build` 同一条执行路）：可达范围由围栏规格给出，不走 agent 的容器。
+  **成败以产物为准**：命令退出码只当快速失败信号；零退出但入口不在场同样算失败（脚本可能吞掉了失败，见「跨平台」）。
   `net` 的平台落点：虚拟机档决定 guest 网卡；本机档 Windows 授 `internetClient`、macOS 放行
   `network-outbound`、Linux `net=false` 用 seccomp 拒绝非本地 socket（`net=true` 不装网络过滤器，不限制入站/绑定）。
   默认 false；Windows 只放行公网出站，不授 private network / loopback。
@@ -160,6 +162,8 @@ tools:
 - **跨平台**：构建命令写成**模块内的脚本**——unix 放 `tools/build`（要执行位），Windows 放 `tools/build.cmd`；两个文件并排，
   各自的壳自己找得到（Windows 的 cmd 按 PATHEXT，与 `npm` 的 shim 同一条规矩）。
   **`.cmd` 只写 ASCII**：cmd 按控制台代码页解释批处理字节，非 ASCII 的 `rem` 注释会把**下一行整行吞掉**，构建直接失败；`chcp 65001` 在管道 stdio 下也救不了。
+  **失败判定用 `||`，不要用 `if errorlevel`**：`g++ … || exit /b 1`。`if errorlevel 1` 的语义是「errorlevel ≥ 1」，
+  编译器崩溃时退出码是负数（如 `0xC0000409`），判断为假、脚本以 0 退出，产品只能靠入口复验发现——归因会变得含糊。
   说明文字写进模块 README，`--build` 与门禁都按这条判（`run-tests.js` 的结构审查扫 `.cmd`/`.bat` 的非 ASCII 与 BOM）。
   **产品负责安装基础工具链**（Python / Node / C-C++，运行前提，装进项目内 `.tools/toolchains`；
   `setup-runtime.js` 默认安装，`start.js` 首启询问、之后每次启动报告）；额外工具链不由产品预置：
