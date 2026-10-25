@@ -337,9 +337,8 @@ pub fn converse_with(
                 return rounds;
             }
         }
-        // ── 信封通道：供应商偶尔把调用放进原生槽位 ──
-        // 两套形态互斥，**不能在这里执行**；但也绝不静默丢：落一条失败工具行 + warn，
-        // 让模型把同样的调用改写成信封重发（否则用户只看到正文停在冒号，没有任何错误行）。
+        // ── 信封通道：供应商偶尔把调用放进原生槽位：两套形态互斥，不能执行，但也绝不静默丢——
+        // 落一条失败工具行 + warn，让模型改写信封重发（否则正文停在冒号，没有任何错误行）。
         if mode == crate::capabilities::llm::api::ToolMode::Envelope
             && !calls.is_empty()
             && reply.tools.is_empty()

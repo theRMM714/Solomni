@@ -146,8 +146,8 @@ pub fn clean_rel(raw: &str) -> Result<String, String> {
     Ok(parts.join("/"))
 }
 
-/// 校验一组共享区相对路径：所有 `work_*` 的 `paths` 入口都先过这里。
-/// 非法路径整条拒绝，不再降级成 `missing`（否则“路径写错”会被误报成“上游没有”）。
+/// 目的：校验一组共享区相对路径：所有 `work_*` 的 `paths` 入口都先过这里。
+///   非法路径整条拒绝，不再降级成 `missing`（否则“路径写错”会被误报成“上游没有”）。
 pub fn validate_paths(paths: &[String]) -> Result<(), String> {
     for raw in paths {
         clean_rel(raw)?;
@@ -192,7 +192,7 @@ pub fn expand_paths(paths: &[String], available: &BTreeSet<String>) -> (Vec<Stri
     (out.into_iter().collect(), missing)
 }
 
-/// 一条路径没有可提交改动的原因（`work_commit` 的空提交回执按它给下一步）。
+/// 目的：一条路径没有可提交改动的原因（`work_commit` 的空提交回执按它给下一步）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Unchanged {
     /// 本地与基线一致（上游也还是基线那一版）。
@@ -219,7 +219,7 @@ impl Unchanged {
     }
 }
 
-/// 提交计划：要写的变化 + 没有改动的原因（两者合起来覆盖 `locals` 里的全部路径）。
+/// 目的：提交计划：要写的变化 + 没有改动的原因（两者合起来覆盖 `locals` 里的全部路径）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitPlan {
     pub changes: Vec<Change>,

@@ -835,7 +835,7 @@ pub(crate) fn work_delete_is_explicit_in_the_commit_request() {
 }
 
 /// 目的：work_* 的 paths 入口把“写错”和“上游没有”分开报；空提交说清真实原因；
-/// 沙箱里删掉已拉取的文件时状态是“本地已删除”，不是“本地有修改”。
+///   沙箱里删掉已拉取的文件时状态是“本地已删除”，不是“本地有修改”。
 #[test]
 pub(crate) fn work_paths_and_empty_commit_report_the_real_reason() {
     use crate::capabilities::workspace::domain::workstore::StatusState;
@@ -861,9 +861,7 @@ pub(crate) fn work_paths_and_empty_commit_report_the_real_reason() {
     assert!(bad.contains("不能包含 . 或 .."), "{}", bad);
 
     // 合法但不存在：work_status 如实回报 missing，不静默丢。
-    let st = ws
-        .work_status("w", "a", &["nope.txt".to_string()])
-        .unwrap();
+    let st = ws.work_status("w", "a", &["nope.txt".to_string()]).unwrap();
     assert_eq!(st.missing, vec!["nope.txt"]);
 
     // 上游删除、本地未改：空提交说“上游已删除”，不再说“与主副本一致”。

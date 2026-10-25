@@ -407,7 +407,6 @@ fn fs_work_store_copies_between_roots_with_hash_check() {
 
 // ---------- FsSysIo ----------
 
-
 /// 目的：词法上在根内的路径，真实落点可能是符号链接 / junction 指的根外——必须拒绝。
 #[test]
 fn fs_sys_io_rejects_symlink_or_junction_escape() {

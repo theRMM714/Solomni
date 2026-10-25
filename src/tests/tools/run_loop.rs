@@ -308,9 +308,8 @@ pub(crate) fn builtin_file_tools_run_in_direct_session() {
     );
 }
 
-
 /// 目的：信封通道里供应商返回原生 tool_calls 时**不执行**，但要落一条失败工具行 + 日志，
-/// 不能静默丢成“正文停在冒号”（真实会话里用户看到的就是这个）。
+///   不能静默丢成“正文停在冒号”（真实会话里用户看到的就是这个）。
 #[test]
 pub(crate) fn envelope_mode_native_calls_become_a_failed_tool_line() {
     let io = Arc::new(InMemorySysIo::new());
@@ -329,10 +328,9 @@ pub(crate) fn envelope_mode_native_calls_become_a_failed_tool_line() {
     let views: Vec<_> = events
         .iter()
         .flat_map(|e| match e {
-            SessionEvent::Transcript(ls) => ls
-                .iter()
-                .filter_map(|l| l.tool.clone())
-                .collect::<Vec<_>>(),
+            SessionEvent::Transcript(ls) => {
+                ls.iter().filter_map(|l| l.tool.clone()).collect::<Vec<_>>()
+            }
             _ => Vec::new(),
         })
         .collect();

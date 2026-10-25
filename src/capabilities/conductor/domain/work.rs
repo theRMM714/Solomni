@@ -112,8 +112,13 @@ pub fn render_commit(r: &CommitReport) -> String {
         out.push_str(&format!("\n修改：{}", paths(&mods)));
     }
     if !dels.is_empty() {
-        out.push_str(&format!("\n删除（只删共享区；沙箱副本未动）：{}", paths(&dels)));
-        out.push_str("\n沙箱里的同名文件如果还在，用 delete 工具清理；工作副本的删除不会自动跟着提交。");
+        out.push_str(&format!(
+            "\n删除（只删共享区；沙箱副本未动）：{}",
+            paths(&dels)
+        ));
+        out.push_str(
+            "\n沙箱里的同名文件如果还在，用 delete 工具清理；工作副本的删除不会自动跟着提交。",
+        );
     }
     out
 }

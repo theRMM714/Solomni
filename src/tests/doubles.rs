@@ -994,11 +994,7 @@ impl SysIo for InMemorySysIo {
         Ok(out)
     }
 
-    fn within(
-        &self,
-        root: &std::path::Path,
-        path: &std::path::Path,
-    ) -> Result<(), String> {
+    fn within(&self, root: &std::path::Path, path: &std::path::Path) -> Result<(), String> {
         if path.starts_with(root) {
             Ok(())
         } else {
@@ -1619,9 +1615,8 @@ impl Chat for SharedScript {
     }
 }
 
-
 /// 目的：模拟“信封通道里供应商返回了原生 tool_calls”——第一次给调用，第二次给普通正文，
-/// 避免测试落进“每轮都返回同一个调用”的死循环。
+///   避免测试落进“每轮都返回同一个调用”的死循环。
 pub(crate) struct NativeCallChat {
     pub name: String,
     pub args_json: String,

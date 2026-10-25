@@ -20,8 +20,8 @@ fn remove_tree(dir: &Path) -> Result<(), String> {
     for ent in entries {
         let ent = ent.map_err(|e| format!("读目录项失败：{}", e))?;
         let p = ent.path();
-        let meta = std::fs::symlink_metadata(&p)
-            .map_err(|e| format!("看 {} 失败：{}", p.display(), e))?;
+        let meta =
+            std::fs::symlink_metadata(&p).map_err(|e| format!("看 {} 失败：{}", p.display(), e))?;
         if meta.file_type().is_symlink() {
             remove_link(&p)?;
         } else if meta.is_dir() {

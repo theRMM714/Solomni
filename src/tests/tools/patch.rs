@@ -324,7 +324,6 @@ pub(crate) fn builtin_read_range_numbers_lines_and_points_at_the_next_offset() {
     );
 }
 
-
 /// 目的：delete 默认只删文件；目录必须 recursive；共享区与模块目录整体拒绝；路径先校验再动盘。
 #[test]
 pub(crate) fn builtin_delete_only_sandbox_files_and_honours_recursive() {
@@ -380,8 +379,7 @@ pub(crate) fn builtin_delete_only_sandbox_files_and_honours_recursive() {
         &sb2,
         &io,
         "delete",
-        &serde_json::json!({ "paths": [abs(&["mods", "data", "userdata", "x.txt"])] })
-            .to_string(),
+        &serde_json::json!({ "paths": [abs(&["mods", "data", "userdata", "x.txt"])] }).to_string(),
     );
     assert!(!out.ok);
     assert!(out.output.contains("模块"), "{}", out.output);
