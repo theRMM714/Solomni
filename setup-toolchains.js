@@ -71,12 +71,12 @@ async function ensureVerified(url, sha256) {
   log("下载 " + url);
   const r = spawnSync(curlExe(), ["--fail", "--location", "--retry", "2", "--output", part, url], { stdio: "inherit" });
   if (r.error || r.status !== 0) {
-    die("下载失败：" + url + (r.error ? "（" + r.error.message + "）" : ""));
+    throw new Error("下载失败：" + url + (r.error ? "（" + r.error.message + "）" : ""));
   }
   const got = await hashFile(part);
   if (got.toLowerCase() !== sha256.toLowerCase()) {
     fs.rmSync(part, { force: true });
-    die("sha256 不符：" + name + "\n  台账 " + sha256 + "\n  实际 " + got);
+    throw new Error("sha256 不符：" + name + "\n  台账 " + sha256 + "\n  实际 " + got);
   }
   fs.renameSync(part, dest);
   return dest;
@@ -94,7 +94,7 @@ function extract(archive, dest) {
     );
     if (ps.status === 0) return;
   }
-  die("解包失败：" + archive + "（需要可用的 tar；Windows 会再试 Expand-Archive）");
+  throw new Error("解包失败：" + archive + "（需要可用的 tar；Windows 会再试 Expand-Archive）");
 }
 
 function existingBins(dir, candidates) {
@@ -116,7 +116,7 @@ function findZig(root) {
 
 function writeZigWrappers(installDir) {
   const zig = findZig(installDir);
-  if (!zig) die("Zig 包里找不到 zig 可执行文件：" + installDir);
+  if (!zig) throw new Error("Zig 包里找不到 zig 可执行文件：" + installDir);
   const bin = path.join(installDir, "bin");
   fs.mkdirSync(bin, { recursive: true });
   const relZig = path.relative(bin, zig).split(path.sep).join("/");
@@ -141,7 +141,7 @@ function rel(p) {
 
 async function installOne(id, target) {
   const spec = TC.TOOLS[id] && TC.TOOLS[id].targets[target];
-  if (!spec) die("工具 " + id + " 没有目标 " + target + " 的条目");
+  if (!spec) throw new Error("工具 " + id + " 没有目标 " + target + " 的条目");
   // Windows 的 C/C++ 复用 env.js 已经装好的 winlibs，避免同机两份 MinGW。
   if (id === "cc" && target === "windows-x86_64") {
     const ready = path.join(TOOLS, "mingw64", "bin", "g++.exe");
@@ -166,7 +166,7 @@ async function installOne(id, target) {
     found = writeZigWrappers(dir);
   } else {
     found = existingBins(dir, spec.bins);
-    if (!found.length) die("解包后找不到 bin 目录：" + dir + "（期望 " + spec.bins.join(" / ") + "）");
+    if (!found.length) throw new Error("解包后找不到 bin 目录：" + dir + "（期望 " + spec.bins.join(" / ") + "）");
   }
   return { id, version: TC.versionOf(id, target), bin: found.map((b) => rel(path.join(dir, b))), env: {} };
 }
@@ -188,29 +188,44 @@ function writeActive(target, requested, tools) {
   fs.renameSync(tmp, ACTIVE);
 }
 
-function check(target, requested) {
+/** 目的：只读校验 profile 状态；不打印、不退出，供 CLI 与启动器共用。 */
+function profileState(target, requested) {
   const active = readActive();
-  if (!active) die("未安装：缺少 " + rel(ACTIVE) + "。运行 node setup-toolchains.js --yes");
-  if (active.error) die("active.json 非法：" + active.error);
-  if (active.target !== target) die("active.json 的目标是 " + active.target + "，当前是 " + target);
+  if (!active) {
+    return { ok: false, reason: "missing", active: null, target, installed: [], missing: requested.slice() };
+  }
+  if (active.error) {
+    return { ok: false, reason: "invalid", why: active.error, active: null, target, installed: [], missing: requested.slice() };
+  }
+  if (active.target !== target) {
+    return {
+      ok: false,
+      reason: "target",
+      why: "active.json 的目标是 " + active.target + "，当前是 " + target,
+      active,
+      target,
+      installed: [],
+      missing: requested.slice(),
+    };
+  }
   const installed = new Map((active.tools || []).map((t) => [t.id, t]));
-  let missing = 0;
+  const okTools = [];
+  const missing = [];
   for (const id of requested) {
     const t = installed.get(id);
     if (!t) {
-      bad("缺 " + id + "（active.json 未登记）");
-      missing++;
+      missing.push(id);
       continue;
     }
-    const ok = (t.bin || []).every((b) => fs.existsSync(path.join(ROOT, b)));
+    const bins = t.bin || [];
+    const ok = bins.length > 0 && bins.every((b) => fs.existsSync(path.join(ROOT, b)));
     if (!ok) {
-      bad("缺 " + id + " 的 bin 目录：" + (t.bin || []).join(" / "));
-      missing++;
+      missing.push(id);
       continue;
     }
-    log(id + " " + t.version + " → " + t.bin.join(" / "));
+    okTools.push({ id, version: t.version || "", bin: bins });
   }
-  if (missing) process.exit(1);
+  return { ok: missing.length === 0, reason: missing.length ? "missing" : "", active, target, installed: okTools, missing };
 }
 
 async function ask(q) {
@@ -218,6 +233,61 @@ async function ask(q) {
   const answer = await new Promise((resolve) => rl.question(q, resolve));
   rl.close();
   return answer;
+}
+
+/**
+ * 目的：确保 base profile 已安装；CLI、setup-runtime、start.js 共用这一份。
+ * 参数：yes = 不问直接装；target = 目标；only = 只装其中几个（缺省整个 profile）。
+ * 返回：profileState 的结果 + { installedNow, failed }；不退出进程。
+ */
+async function ensureProfile({ yes = false, target, only } = {}) {
+  const t = target || TC.hostTarget();
+  if (!t || !TC.TARGETS[t]) {
+    throw new Error("不支持的目标平台：" + (t || process.platform + "/" + process.arch));
+  }
+  const requested = only && only.length ? only.slice() : TC.PROFILE.slice();
+  for (const id of requested) {
+    if (!TC.TOOLS[id]) throw new Error("未知工具：" + id + "（可用：" + Object.keys(TC.TOOLS).join(" / ") + "）");
+  }
+  const before = profileState(t, requested);
+  if (before.ok) return { ...before, installedNow: false, failed: [] };
+  if (!yes) {
+    if (!process.stdin.isTTY) return { ...before, ok: false, reason: "no-tty", installedNow: false, failed: [] };
+    const a = await ask("把 " + requested.join(" / ") + " 装进项目内 .tools/toolchains？不写系统 [y/N] ");
+    if (a.trim().toLowerCase() !== "y") {
+      return { ...before, ok: false, reason: "declined", installedNow: false, failed: [] };
+    }
+  }
+  const done = [];
+  const failed = [];
+  for (const id of requested) {
+    try {
+      done.push(await installOne(id, t));
+    } catch (e) {
+      const why = e && e.message ? e.message : String(e);
+      failed.push({ id, why });
+      bad(id + " 安装失败：" + why);
+    }
+  }
+  if (done.length) {
+    const active = readActive();
+    const usable = active && !active.error && active.target === t ? active : null;
+    const existing = usable ? usable.tools || [] : [];
+    const byId = new Map(existing.map((x) => [x.id, x]));
+    for (const d of done) byId.set(d.id, d);
+    const profile = Array.from(new Set([...(usable ? usable.profile || [] : []), ...TC.PROFILE, ...requested]));
+    writeActive(t, profile, Array.from(byId.values()));
+    log("active.json 已写：" + rel(ACTIVE));
+    for (const d of done) log("  " + d.id + " " + d.version + " → " + d.bin.join(" / "));
+  }
+  const after = profileState(t, requested);
+  return {
+    ...after,
+    ok: after.ok && failed.length === 0,
+    reason: after.ok && failed.length === 0 ? "" : failed.length ? "failed" : after.reason,
+    installedNow: true,
+    failed,
+  };
 }
 
 async function main() {
@@ -232,9 +302,16 @@ async function main() {
   const onlyArg = argv.find((a) => a.startsWith("--only="));
   const requested = onlyArg ? onlyArg.slice("--only=".length).split(",").map((s) => s.trim()).filter(Boolean) : TC.PROFILE.slice();
   for (const id of requested) if (!TC.TOOLS[id]) die("未知工具：" + id + "（可用：" + Object.keys(TC.TOOLS).join(" / ") + "）");
-  const checkOnly = argv.includes("--check");
-  if (checkOnly) {
-    check(target, requested);
+  if (argv.includes("--check")) {
+    const st = profileState(target, requested);
+    if (st.why) bad(st.why);
+    if (!st.active) {
+      bad("未安装：缺少 " + rel(ACTIVE) + "。运行 node setup-toolchains.js --yes");
+    } else if (!st.ok) {
+      for (const id of st.missing) bad("缺 " + id + (st.active ? "（active.json 未登记或缺 bin）" : ""));
+    }
+    if (!st.ok) process.exit(1);
+    for (const t of st.installed) log(t.id + " " + t.version + " → " + t.bin.join(" / "));
     return;
   }
   const yes = argv.includes("--yes");
@@ -243,26 +320,14 @@ async function main() {
     console.log(usage());
     die("无交互终端：不擅自下载。确认后重跑并加 --yes。");
   }
-  if (!yes) {
-    const a = await ask("把 " + requested.join(" / ") + " 装进项目内 .tools/toolchains？不写系统 [y/N] ");
-    if (a.trim().toLowerCase() !== "y") die("已取消");
+  const st = await ensureProfile({ yes, target, only: requested });
+  if (!st.ok) {
+    if (st.reason === "declined") die("已取消");
+    bad("基础工具链未就绪：" + (st.missing.join("、") || st.reason));
+    process.exit(1);
   }
-  const done = [];
-  let failed = 0;
-  for (const id of requested) {
-    try {
-      done.push(await installOne(id, target));
-    } catch (e) {
-      failed++;
-      bad(id + " 安装失败：" + (e && e.message ? e.message : e));
-    }
-  }
-  if (done.length) {
-    writeActive(target, requested, done);
-    log("active.json 已写：" + rel(ACTIVE));
-    for (const t of done) log("  " + t.id + " " + t.version + " → " + t.bin.join(" / "));
-  }
-  if (failed) process.exit(1);
 }
 
-main().catch((e) => die(e && e.stack ? e.stack : String(e)));
+if (require.main === module) main().catch((e) => die(e && e.stack ? e.stack : String(e)));
+
+module.exports = { ensureProfile, profileState };
