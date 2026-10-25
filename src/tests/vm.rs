@@ -2522,8 +2522,8 @@ pub(crate) fn path_bridge_round_trips_guest_and_host() {
         );
         assert_eq!(
             guest_to_host(b, r"D:\a\b"),
-            Some(host.to_path_buf()),
-            "宿主写法直通"
+            None,
+            "虚拟机档只认 guest 写法，宿主路径不再直通"
         );
     }
 }

@@ -108,21 +108,17 @@ fn windows_mirror(host: &Path) -> String {
     out
 }
 
-/// 目的：guest 路径 → 宿主路径——`to_guest` 的逆；认不出（不在镜像根里、也不是宿主绝对路径）给 None。
+/// 目的：guest 路径 → 宿主路径——`to_guest` 的逆；认不出（不在镜像根里）给 None。
 /// 约束：只做编码逆变换与写法识别，不做安全判断（是否落在允许根内由寻址层判）。
+///   **虚拟机档只认 guest 写法**；宿主绝对路径在这里不成立（本机档是恒等，不走这里）。
 pub fn guest_to_host(bridge: PathBridge, guest: &str) -> Option<PathBuf> {
     if bridge.identity {
         return Some(PathBuf::from(guest));
     }
-    let mirrored = match bridge.guest {
+    match bridge.guest {
         PathDialect::Posix => posix_unmirror(guest),
         PathDialect::Windows => windows_unmirror(guest),
-    };
-    // 宿主写法直通：系统工具在宿主侧跑，宿主绝对路径本来就成立（提示词教的是 guest 写法，但两种都认）。
-    mirrored.or_else(|| {
-        let p = PathBuf::from(guest);
-        p.is_absolute().then_some(p)
-    })
+    }
 }
 
 /// 目的：POSIX guest 的镜像路径解回 Windows 宿主路径（`/solomni-host/d/a/b` → `D:\a\b`）。

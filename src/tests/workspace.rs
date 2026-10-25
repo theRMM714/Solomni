@@ -1774,10 +1774,10 @@ pub(crate) fn sandbox_resolves_guest_written_paths() {
     let (place, path) = sb.resolve(&guest_note).expect("guest 写法该认");
     assert_eq!(place, Place::Private);
     assert_eq!(path, sb.private.join("note.txt"));
-    // 宿主写法直通（系统工具跑在宿主侧，本来就成立）。
+    // 虚拟机档只认 guest 写法：宿主写法要明确拒绝，并说清是写法不对。
     let host_note = sb.private.join("host.txt").to_string_lossy().into_owned();
-    let (place, _) = sb.resolve(&host_note).expect("宿主写法也认");
-    assert_eq!(place, Place::Private);
+    let why = sb.resolve(&host_note).expect_err("宿主写法不再直通");
+    assert!(why.contains("不是本环境的写法"), "{}", why);
     // 镜像根下、但不在任何允许根里的路径：翻译得出来也要被根校验拒。
     let outside = bridge.to_guest(&abs(&["elsewhere", "x.txt"]));
     let why = sb.resolve(&outside).expect_err("越界要拒");

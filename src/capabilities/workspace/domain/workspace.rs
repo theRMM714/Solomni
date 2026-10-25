@@ -89,8 +89,13 @@ impl Sandbox {
         let host: PathBuf = match self.path_codec.as_ref() {
             Some(codec) => match codec.to_host(spec) {
                 Some(p) => p,
-                // 认不出本环境的写法：按"不在允许根里"如实拒绝，并把允许的根列回去。
-                None => return Err(deny(format!("路径越界：{}", spec))),
+                // 认不出本环境的写法：说清是写法不对，而不是“越界”；允许的根照旧列回去。
+                None => {
+                    return Err(deny(format!(
+                        "路径不是本环境的写法（虚拟机档用 guest 内路径，宿主路径在这里不存在）：{}",
+                        spec
+                    )))
+                }
             },
             None => PathBuf::from(spec),
         };
