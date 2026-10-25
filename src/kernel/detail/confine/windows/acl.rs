@@ -697,8 +697,15 @@ pub(crate) fn grant_verified(
     }
     let before_sd = sd_bytes(path).map_err(|e| format!("读取写入前安全描述符失败：{}", e))?;
     let before = acl_scan(path).map_err(|e| format!("读取写入前 DACL 失败：{}", e))?;
-    // grant_one 返回 Err = 一个字节都没写：没有东西可还原，也不许报“回滚”。
-    grant_one(sid, path, rights, recursive, inherit)?;
+    // 写失败时先比一次：真没变就什么都不做；变了（递归写可能已落了一部分）就还原。
+    if let Err(e) = grant_one(sid, path, rights, recursive, inherit) {
+        let changed = sd_bytes(path).map(|now| now != before_sd).unwrap_or(true);
+        return Err(if changed {
+            restore_after_failed_write(path, &before_sd, e, recursive)
+        } else {
+            e
+        });
+    }
     let after = match acl_scan(path) {
         Ok(after) => after,
         Err(e) => {
@@ -706,6 +713,7 @@ pub(crate) fn grant_verified(
                 path,
                 &before_sd,
                 format!("写后读回 DACL 失败：{}", e),
+                recursive,
             ))
         }
     };
@@ -726,6 +734,7 @@ pub(crate) fn grant_verified(
                 lost.len(),
                 unparsed
             ),
+            recursive,
         ));
     }
     if !has_ace_for(sid, path, rights) {
@@ -736,14 +745,24 @@ pub(crate) fn grant_verified(
                 "写后校验失败（{}）：给定权限的 ACE 未生效，本机环境不允许",
                 path.display()
             ),
+            recursive,
         ));
     }
     Ok(())
 }
 
 /// 目的：写后核对失败时把对象还原到写入前；还原失败如实说明并把台账留给收尾。
-fn restore_after_failed_write(path: &Path, before_sd: &[u8], primary: String) -> String {
+fn restore_after_failed_write(
+    path: &Path,
+    before_sd: &[u8],
+    primary: String,
+    recursive: bool,
+) -> String {
     match restore_sd(path, before_sd) {
+        Ok(()) if recursive => format!(
+            "{}（根对象已还原；递归子项若有残留，台账保留，可用 --fence-clean 收尾）",
+            primary
+        ),
         Ok(()) => format!("{}（已还原到写入前的 DACL）", primary),
         Err(e) => format!(
             "{}；还原失败：{}（台账保留，可用 --fence-clean 收尾）",
