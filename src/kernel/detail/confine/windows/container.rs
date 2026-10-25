@@ -46,6 +46,25 @@ pub(crate) fn container_name(spec: &FenceSpec) -> String {
     format!("{}{:016x}", PROFILE_PREFIX, h)
 }
 
+/// 目的：容器进程的**系统临时目录**（`GetTempPath2` 在 AppContainer 里返回的落点）。
+/// 参数：`spec` = 这次执行的围栏规格。
+/// 返回：`<私有沙箱>/Packages/<容器名>/AC/Temp`；私有沙箱为空（连 cwd 也没有）时 `None`——没有落点，不猜。
+/// 约束：`prepare_fence` 在授权前把它建出来。`GetTempPath2` **不读 TMP/TEMP**：容器里缺了它，
+///   编译器这类程序连临时文件都写不了（真机：g++ 直接 abort）。
+pub(crate) fn container_temp_dir(spec: &FenceSpec) -> Option<PathBuf> {
+    let private = spec.private_or_cwd();
+    if private.as_os_str().is_empty() {
+        return None;
+    }
+    Some(
+        private
+            .join("Packages")
+            .join(container_name(spec))
+            .join("AC")
+            .join("Temp"),
+    )
+}
+
 /// 目的：名字是不是本程序建过的容器 profile（Windows 把包目录名转成小写，所以按不区分大小写比）。
 pub(crate) fn is_our_profile(name: &str) -> bool {
     name.get(..PROFILE_PREFIX.len())
@@ -202,8 +221,12 @@ pub(crate) fn internet_client_sid(enabled: bool) -> Result<Option<Vec<u8>>, Stri
 /// 目的：把工具进程放进容器里跑：按 `net` 授/不授 `internetClient`，stdio 用外层给的那三个句柄；环境用运行期白名单显式给出。
 pub(crate) fn run_in_container(sid: PSID, spec: &FenceSpec, command: &str) -> Result<i32, String> {
     // 环境块显式给（见 fence_env）：子进程拿到的就是白名单本身，不靠"守门进程恰好继承了什么"。
+    let env = super::super::fence_env(spec, command);
+    // 程序名改写成相对 cwd 的路径：AppContainer 里绝对路径的程序会被拒（真机：同一文件用绝对路径报
+    // Access denied，用 `..\` 相对路径正常）。裸名不碰——交给 cmd 按容器里的 PATH 解析。
+    let command = &super::super::container_program_command(command, &spec.cwd);
     let mut block: Vec<u16> = Vec::new();
-    for (k, v) in super::super::fence_env(spec, command) {
+    for (k, v) in env {
         block.extend(k.encode_wide());
         block.push(u16::from(b'='));
         block.extend(v.encode_wide());
