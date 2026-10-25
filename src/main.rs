@@ -659,6 +659,8 @@ fn main() {
     let mut ops = capabilities::conductor::api::Ops::from_handle(&handle);
     // 依赖补齐面：组合根注入（能力面默认未接入，这里换成真实现）。
     ops.provision = Arc::clone(&provision);
+    // 基础工具链事实：Web 端横幅与 CLI 启动报告读同一份。
+    ops.toolchains = entry::toolchains::json(&base);
 
     // 启动拉起：把所有**已启用**的常驻服务拉起来（进程级租约，不属于任何会话）。
     for line in residents_boot.start_enabled() {

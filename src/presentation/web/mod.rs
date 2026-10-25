@@ -619,6 +619,8 @@ fn state_json(ops: &Ops, fence: &FenceInfo) -> Result<serde_json::Value, String>
         "rejected": roster.rejected,
         // 本机工具围栏的实际能力（如实显示，不假装）：哪些维度真的被强制了。
         "fence": fence,
+        // 基础工具链的启动事实：项目内 / 宿主回退 / 缺失；Web 横幅与 CLI 启动报告同一份。
+        "toolchains": ops.toolchains,
         "providers": ops.registry.providers()?,
         "models": ops.registry.models()?,
         "core": ops.registry.core_model()?,

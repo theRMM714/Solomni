@@ -376,6 +376,8 @@ pub struct Ops {
     pub secrets: Arc<dyn crate::capabilities::secrets::api::SecretOps + Send + Sync>,
     /// 目的：依赖补齐的统一面（组合根注入；默认未接入，如实失败不假装可用）。
     pub provision: Arc<dyn crate::capabilities::provision::api::Provision + Send + Sync>,
+    /// 目的：基础工具链的启动事实（组合根注入；测试替身为 null）。
+    pub toolchains: serde_json::Value,
 }
 
 impl Ops {
@@ -393,6 +395,7 @@ impl Ops {
             residents: Arc::clone(&h.residents),
             secrets: Arc::clone(&h.secrets),
             provision: Arc::new(crate::capabilities::provision::api::NoProvision),
+            toolchains: serde_json::Value::Null,
         }
     }
 }

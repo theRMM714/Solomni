@@ -155,18 +155,7 @@ pub(crate) fn doctor_json_with(
             "node": crate::kernel::detail::host_probe::find_exe("node").map(|p| p.to_string_lossy().into_owned()),
             "curl": crate::kernel::detail::host_probe::find_exe("curl").map(|p| p.to_string_lossy().into_owned()),
         },
-        "toolchains": {
-            "profile": crate::entry::toolchains::PROFILE,
-            "active": base.active.iter().map(|(id, version)| serde_json::json!({
-                "id": id,
-                "version": version,
-            })).collect::<Vec<_>>(),
-            "fallback": base.fallback.iter().map(|(id, f)| (id.clone(), serde_json::json!({
-                "path": f.path.to_string_lossy(),
-                "fenced": f.fenced,
-                "why": f.why,
-            }))).collect::<std::collections::BTreeMap<_, _>>(),
-        },
+        "toolchains": crate::entry::toolchains::json(&base),
         "processes": procs,
         "vm_tier": {
             "available": vm.iter().all(|r| r.met),

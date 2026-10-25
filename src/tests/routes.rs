@@ -121,6 +121,7 @@ fn fake_ops(fail: Option<&str>) -> Ops {
         residents: Arc::new(crate::capabilities::residents::api::NoResidents),
         secrets: Arc::new(crate::capabilities::secrets::api::NoSecrets),
         provision: Arc::new(FakeProvision::new(fail)),
+        toolchains: serde_json::Value::Null,
     }
 }
 

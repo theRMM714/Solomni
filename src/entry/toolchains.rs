@@ -358,3 +358,27 @@ pub(crate) fn report_lines(base: &BaseFacts) -> Vec<String> {
     }
     lines
 }
+
+/// 目的：基础工具链的机器可读快照（--doctor、/api/state 与 Web 横幅共用同一份）。
+pub(crate) fn json(base: &BaseFacts) -> serde_json::Value {
+    let installed: BTreeSet<&str> = base.active.iter().map(|(id, _)| id.as_str()).collect();
+    let missing: Vec<&str> = PROFILE
+        .iter()
+        .copied()
+        .filter(|id| !installed.contains(id))
+        .collect();
+    serde_json::json!({
+        "profile": PROFILE,
+        "active": base.active.iter().map(|(id, version)| serde_json::json!({
+            "id": id,
+            "version": version,
+        })).collect::<Vec<_>>(),
+        "missing": missing,
+        "fallback": base.fallback.iter().map(|(id, f)| (id.clone(), serde_json::json!({
+            "path": f.path.to_string_lossy(),
+            "fenced": f.fenced,
+            "why": f.why,
+        }))).collect::<BTreeMap<_, _>>(),
+        "lines": report_lines(base),
+    })
+}
