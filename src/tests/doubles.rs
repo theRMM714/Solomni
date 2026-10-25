@@ -1619,6 +1619,77 @@ impl Chat for SharedScript {
     }
 }
 
+
+/// 目的：模拟“信封通道里供应商返回了原生 tool_calls”——第一次给调用，第二次给普通正文，
+/// 避免测试落进“每轮都返回同一个调用”的死循环。
+pub(crate) struct NativeCallChat {
+    pub name: String,
+    pub args_json: String,
+    pub raw: String,
+    pub finish: String,
+    sent: bool,
+}
+
+impl Chat for NativeCallChat {
+    fn complete(
+        &mut self,
+        _messages: &[Msg],
+        _opts: CompleteOpts<'_>,
+        _on: &mut dyn FnMut(Chunk) -> bool,
+    ) -> Completion {
+        if self.sent {
+            return Completion::text("我改用信封重发。");
+        }
+        self.sent = true;
+        Completion {
+            raw: self.raw.clone(),
+            reasoning: String::new(),
+            finish: self.finish.clone(),
+            calls: vec![crate::capabilities::llm::api::ToolCall {
+                id: "call-native-1".to_string(),
+                name: self.name.clone(),
+                args_json: self.args_json.clone(),
+            }],
+            error: None,
+        }
+    }
+}
+
+/// 目的：给成员通道发 NativeCallChat 的网关；核心通道不用。
+pub(crate) struct NativeCallGateway {
+    pub name: String,
+    pub args_json: String,
+    pub raw: String,
+}
+
+impl ChatGateway for NativeCallGateway {
+    fn member_channel(
+        &self,
+        _channel: Option<&Channel>,
+        _module_id: &str,
+    ) -> (BoxedChat, Option<String>) {
+        (
+            Box::new(NativeCallChat {
+                name: self.name.clone(),
+                args_json: self.args_json.clone(),
+                raw: self.raw.clone(),
+                finish: "tool_calls".to_string(),
+                sent: false,
+            }),
+            None,
+        )
+    }
+    fn core_channel(&self, _channel: Option<&Channel>) -> (BoxedChat, bool) {
+        (Box::new(FakeChat::new(vec!["[]".to_string()])), false)
+    }
+    fn probe_tools(
+        &self,
+        _channel: &Channel,
+    ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
+        Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
+    }
+}
+
 /// 脚本网关：按 agent 实例名回放各自脚本；核心通道走共享队列。
 pub(crate) struct ScriptGateway {
     member: BTreeMap<String, Vec<String>>,

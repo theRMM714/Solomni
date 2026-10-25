@@ -308,6 +308,55 @@ pub(crate) fn builtin_file_tools_run_in_direct_session() {
     );
 }
 
+
+/// 目的：信封通道里供应商返回原生 tool_calls 时**不执行**，但要落一条失败工具行 + 日志，
+/// 不能静默丢成“正文停在冒号”（真实会话里用户看到的就是这个）。
+#[test]
+pub(crate) fn envelope_mode_native_calls_become_a_failed_tool_line() {
+    let io = Arc::new(InMemorySysIo::new());
+    let note = s(&["w", "a", "note.txt"]);
+    let gateway = NativeCallGateway {
+        name: "read".to_string(),
+        args_json: serde_json::json!({ "path": note }).to_string(),
+        raw: "先确认一下：".to_string(),
+    };
+    let mut core = core_with_io_gateway(vec![module_of("a")], gateway, Arc::clone(&io));
+    let sid = core
+        .create_work(work("w", WorkMode::Single, &["a"]))
+        .unwrap()
+        .sid;
+    let events = with_live(|l| core.single_say(&sid, "继续", l)).unwrap();
+    let views: Vec<_> = events
+        .iter()
+        .flat_map(|e| match e {
+            SessionEvent::Transcript(ls) => ls
+                .iter()
+                .filter_map(|l| l.tool.clone())
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        })
+        .collect();
+    assert_eq!(views.len(), 1, "{:?}", views);
+    assert_eq!(views[0].name, "read");
+    assert!(!views[0].ok, "通道错位不能算成功");
+    assert!(
+        views[0].output.contains("原生工具调用"),
+        "必须把通道错位说清楚：{}",
+        views[0].output
+    );
+    assert!(
+        !views[0].output.contains("你好"),
+        "没有执行就不该有读取结果：{}",
+        views[0].output
+    );
+    let h = core.single_history(&sid).unwrap();
+    assert!(
+        h.iter()
+            .any(|m| m.role == "user" && m.content.contains("原生工具调用")),
+        "失败工具行也要回注上下文，模型才知道换信封重发"
+    );
+}
+
 /// 模块目录（含 `userdata/`）对 agent **永久只读**：内置 write 一律拒绝，不落盘。
 #[test]
 pub(crate) fn builtin_write_into_module_dir_is_denied() {
