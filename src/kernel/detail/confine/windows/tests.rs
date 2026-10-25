@@ -956,6 +956,92 @@ fn container_runs_a_node_module_tool_with_realpath_skipped() {
     discard(&base);
 }
 
+/// 【真机】容器里**绝对路径**的程序也要能跑：执行前把程序名改写成相对 cwd 的路径。
+///   现象：同一文件用 `D:\…\x.exe` 报 Access denied，用 `..\x.exe` 正常（相对路径走 cwd 的目录句柄，
+///   不遍历卷根；非系统盘的卷根 DACL 要管理员才写得动）。容器执行因此在 `run_in_container` 里做这次改写。
+/// 会创建 AppContainer profile 与写目录 ACL，只在 --fence-live（SOLOMNI_FENCE_LIVE=1）下跑。
+#[test]
+fn container_runs_a_program_given_by_absolute_path() {
+    if std::env::var("SOLOMNI_FENCE_LIVE")
+        .map(|v| v != "1")
+        .unwrap_or(true)
+    {
+        eprintln!(
+            "[探针] 未开启真机围栏测试：container_runs_a_program_given_by_absolute_path 会创建 AppContainer profile（改本机状态），已跳过；要真跑加 --fence-live"
+        );
+        return;
+    }
+    if !capability().fs {
+        eprintln!(
+            "[探针] 本机不允许改目录 ACL（{}）：绝对路径执行探针跳过（不静默当作通过）",
+            capability().note
+        );
+        return;
+    }
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let base = repo.join("target").join("probe-exec");
+    let c_leaf = base.join("c-leaf");
+    let d_leaf = base.join("d-leaf");
+    std::fs::create_dir_all(&c_leaf).expect("建 cwd 夹具");
+    std::fs::create_dir_all(&d_leaf).expect("建相邻夹具");
+    let cmd_exe = PathBuf::from(std::env::var("SystemRoot").unwrap_or_default())
+        .join("System32")
+        .join("cmd.exe");
+    std::fs::copy(&cmd_exe, c_leaf.join("cmd2.exe")).expect("拷到 cwd");
+    std::fs::copy(&cmd_exe, d_leaf.join("cmd2.exe")).expect("拷到相邻目录");
+    let spec = FenceSpec {
+        agent: "probe-exec".to_string(),
+        lease: String::new(),
+        rw: vec![c_leaf.clone(), d_leaf.clone()],
+        ro: Vec::new(),
+        ro_tree: Vec::new(),
+        private: c_leaf.clone(),
+        cwd: c_leaf.clone(),
+        net: false,
+    };
+    let container = container_name(&spec);
+    if let Err(e) = ensure_profile(&container) {
+        if e.contains(PROFILE_ENV_BLOCKED_MARK) {
+            eprintln!(
+                "[探针] 本环境不允许建 AppContainer profile（环境结论，如实跳过）：{}",
+                e
+            );
+            discard(&base);
+            return;
+        }
+        panic!("建容器 profile：{}", e);
+    }
+    let home = base.join("ledger");
+    expect_granted(&prepare_fence(&spec, "cmd", &home), "授权应当成功");
+    let sid = container_sid(&container).expect("派生 SID");
+    // 相对名（基线对照）与绝对路径（相邻目录，必须被改写成相对路径才跑得起来）。
+    let rel = run_in_container(sid, &spec, "cmd2.exe /c echo REL > rel.txt").expect("起容器");
+    let abs = run_in_container(
+        sid,
+        &spec,
+        &format!(
+            "\"{}\" /c echo ABS > abs.txt",
+            d_leaf.join("cmd2.exe").display()
+        ),
+    )
+    .expect("起容器");
+    assert!(
+        rel == 0 && c_leaf.join("rel.txt").is_file(),
+        "相对名要能跑（exit={}）",
+        rel
+    );
+    assert!(
+        abs == 0 && c_leaf.join("abs.txt").is_file(),
+        "绝对路径要能跑（执行前应改写成相对 cwd 的路径；exit={}）",
+        abs
+    );
+    free_sid(sid);
+    release_fence(&spec, &home).expect("撤权应当成功");
+    clean(&home).expect("台账回收应当成功");
+    assert!(delete_profile(&container), "探针的容器 profile 应当删得掉");
+    discard(&base);
+}
+
 /// 目的：容器临时目录按 AppContainer 的 `GetTempPath2` 布局给——`<私有沙箱>/Packages/<容器名>/AC/Temp`。
 /// 约束：私有沙箱为空时退回工作目录；两者都空就没有落点（返回 `None`，不猜）。
 #[test]
@@ -1019,7 +1105,10 @@ fn container_has_a_writable_temp_dir_for_compilers() {
         eprintln!("[探针] 本机没有项目内 MinGW：容器临时目录探针跳过（不静默当作通过）");
         return;
     }
-    let base = std::env::temp_dir().join(format!("solomni-temp-probe-{}", std::process::id()));
+    // 夹具放在仓库卷上（与项目内编译器同卷）：跨卷时程序名无法相对化，而这条用例要验的是"编译器能跑"。
+    let base = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target")
+        .join(format!("temp-probe-{}", std::process::id()));
     let sandbox = base.join("sandbox");
     let leaf = base.join("leaf");
     std::fs::create_dir_all(&sandbox).expect("建私有沙箱");
@@ -1083,8 +1172,8 @@ fn container_has_a_writable_temp_dir_for_compilers() {
         "容器里的 TEMP 应当就是 prepare 建的落点"
     );
 
-    // ② 编译器能用它（附加验证）：g++ 的临时文件走 GetTempPath2，目录不可写会直接 abort。
-    //    某些环境里容器不能执行该盘上的程序（例如项目在非系统盘）——那种是环境结论，如实打印并跳过这一步。
+    // ② 编译器能用它：g++ 的临时文件走 GetTempPath2，目录不可写会直接 abort。
+    //    程序名是绝对路径——容器执行前会改写成相对 cwd（见 container_runs_a_program_given_by_absolute_path）。
     let log = leaf.join("gpp.log");
     let code = run_in_container(
         sid,
@@ -1097,22 +1186,13 @@ fn container_has_a_writable_temp_dir_for_compilers() {
     )
     .expect("容器进程应当能启动");
     let said = std::fs::read_to_string(&log).unwrap_or_default();
-    if code != 0 {
-        // 某些环境里容器不能执行该盘上的程序（例如项目在非系统盘、卷根没给「所有应用程序包」的穿过权）：
-        // 那是环境结论，如实打印；临时目录这个契约本身已由 ① 验过，这里不把它当成本用例的失败。
-        eprintln!(
-            "[探针] 容器里跑不了这个编译器（{}，exit={}，输出 {:?}）：g++ 验证跳过（临时目录本身已验过）",
-            gpp.display(),
-            code,
-            said.trim()
-        );
-    } else {
-        assert!(
-            leaf.join("out.o").is_file(),
-            "g++ 报了成功就必须有产物（临时目录 {}）",
-            temp.display()
-        );
-    }
+    assert!(
+        code == 0 && leaf.join("out.o").is_file(),
+        "容器里的 g++ 要能编译（exit={}，输出 {:?}，临时目录 {}）",
+        code,
+        said.trim(),
+        temp.display()
+    );
 
     free_sid(sid);
     release_fence(&spec, &home).expect("撤权应当成功");

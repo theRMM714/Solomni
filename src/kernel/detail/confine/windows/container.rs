@@ -221,8 +221,22 @@ pub(crate) fn internet_client_sid(enabled: bool) -> Result<Option<Vec<u8>>, Stri
 /// 目的：把工具进程放进容器里跑：按 `net` 授/不授 `internetClient`，stdio 用外层给的那三个句柄；环境用运行期白名单显式给出。
 pub(crate) fn run_in_container(sid: PSID, spec: &FenceSpec, command: &str) -> Result<i32, String> {
     // 环境块显式给（见 fence_env）：子进程拿到的就是白名单本身，不靠"守门进程恰好继承了什么"。
+    let env = super::super::fence_env(spec, command);
+    // 程序名改写成相对 cwd 的路径：AppContainer 里绝对路径的程序会被拒（真机：同一文件用绝对路径报
+    // Access denied，用 `..\` 相对路径正常）；解析规则用容器里生效的那份 PATH / PATHEXT。
+    let path_var = env
+        .iter()
+        .find(|(k, _)| k == "PATH")
+        .map(|(_, v)| v.clone())
+        .unwrap_or_default();
+    let pathext = env
+        .iter()
+        .find(|(k, _)| k == "PATHEXT")
+        .map(|(_, v)| v.to_string_lossy().into_owned());
+    let command =
+        &super::super::container_program_command(command, &spec.cwd, &path_var, pathext.as_deref());
     let mut block: Vec<u16> = Vec::new();
-    for (k, v) in super::super::fence_env(spec, command) {
+    for (k, v) in env {
         block.extend(k.encode_wide());
         block.push(u16::from(b'='));
         block.extend(v.encode_wide());

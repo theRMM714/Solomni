@@ -800,6 +800,118 @@ fn is_executable(_path: &std::path::Path) -> bool {
     true
 }
 
+/// 目的：把命令的**程序名**改写成相对 cwd 的路径——AppContainer 里绝对路径的程序会被拒（真机：同一文件
+///   `D:\…\tool.exe` 报 Access denied，`..\tool.exe` 正常；相对路径基于 cwd 的目录句柄解析，不遍历卷根）。
+/// 参数：`command` = 模块声明的启动命令；`cwd` = 工具进程的工作目录；`path_var` / `pathext` = 容器里生效的解析规则。
+/// 返回：改写后的命令；程序名解析不出、跨卷、或算不出相对路径时**原样返回**（行为不变）。
+/// 约束：只改**首 token**（与 `windows_program_separators` 同一口径），参数里的路径不动。
+#[cfg(windows)]
+pub(crate) fn container_program_command(
+    command: &str,
+    cwd: &Path,
+    path_var: &std::ffi::OsStr,
+    pathext: Option<&str>,
+) -> String {
+    let (head, rest) = split_program(command);
+    let bare = head.trim_matches('"');
+    if bare.is_empty() {
+        return command.to_string();
+    }
+    let abs = if Path::new(bare).is_absolute() {
+        PathBuf::from(bare)
+    } else if bare.contains(['\\', '/']) {
+        cwd.join(bare)
+    } else {
+        match resolve_program(bare, path_var, pathext) {
+            Some(p) => p,
+            None => return command.to_string(),
+        }
+    };
+    let Some(rel) = relative_to(cwd, &abs) else {
+        return command.to_string();
+    };
+    let text = rel.to_string_lossy().into_owned();
+    let quoted = if text.contains(' ') {
+        format!("\"{}\"", text)
+    } else {
+        text
+    };
+    format!("{}{}", quoted, rest)
+}
+
+/// 目的：命令拆成（程序名, 余下原文）；引号包住的程序名整段算一个 token。
+#[cfg(windows)]
+fn split_program(command: &str) -> (&str, &str) {
+    let end = match command.strip_prefix('"') {
+        Some(rest) => rest.find('"').map(|i| i + 2).unwrap_or(command.len()),
+        None => command.find(char::is_whitespace).unwrap_or(command.len()),
+    };
+    (&command[..end], &command[end..])
+}
+
+/// 目的：按 PATH 解析一个裸名（与 `command_programs_in` 同一套规则：条目可带引号、PATHEXT 可缺）。
+/// 返回：第一个能直接跑的命中；解析不出给 `None`（不猜）。
+#[cfg(windows)]
+fn resolve_program(
+    name: &str,
+    path_var: &std::ffi::OsStr,
+    pathext: Option<&str>,
+) -> Option<PathBuf> {
+    let exts = exec_extensions(pathext);
+    for entry in std::env::split_paths(path_var) {
+        let text = entry.to_string_lossy();
+        let unquoted = text.trim_matches('"');
+        let dir = if unquoted.len() == text.len() {
+            entry
+        } else {
+            PathBuf::from(unquoted.to_string())
+        };
+        let mut tries: Vec<PathBuf> = vec![dir.join(name)];
+        for e in &exts {
+            tries.push(dir.join(format!("{}{}", name, e)));
+        }
+        if let Some(hit) = tries.into_iter().find(|p| p.is_file() && is_executable(p)) {
+            return Some(hit);
+        }
+    }
+    None
+}
+
+/// 目的：从 `base` 到 `target` 的相对路径；不同卷或算不出给 `None`。
+#[cfg(windows)]
+fn relative_to(base: &Path, target: &Path) -> Option<PathBuf> {
+    use std::path::Component;
+    let b: Vec<Component> = base.components().collect();
+    let t: Vec<Component> = target.components().collect();
+    if b.is_empty() || t.is_empty() {
+        return None;
+    }
+    let same = |x: &Component, y: &Component| {
+        x.as_os_str()
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&y.as_os_str().to_string_lossy())
+    };
+    if !same(&b[0], &t[0]) {
+        return None;
+    }
+    let mut i = 0;
+    while i < b.len() && i < t.len() && same(&b[i], &t[i]) {
+        i += 1;
+    }
+    let mut out = PathBuf::new();
+    for _ in i..b.len() {
+        out.push("..");
+    }
+    for c in &t[i..] {
+        out.push(c.as_os_str());
+    }
+    if out.as_os_str().is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
 /// 目的：交给 cmd 解释前，把**程序名**里的正斜杠换成反斜杠。
 ///   cmd 只把程序名里的 `\` 当路径分隔符：`build/indexer build` 会被它读成「命令 build + 开关 /indexer」，
 ///   报 `'build' is not recognized`。程序名之后的参数原样保留（`node tools/report.js` 这类命令靠参数里的正斜杠）。
@@ -982,6 +1094,67 @@ mod tests {
         );
         assert_eq!(windows_program_separators("\"a/b\" rest"), "\"a\\b\" rest");
         assert_eq!(windows_program_separators("plain"), "plain");
+    }
+
+    /// 容器执行前把程序名改写成相对 cwd：AppContainer 里绝对路径的程序会被拒（真机：同一文件
+    /// `D:\…\x.exe` 报 Access denied、`..\x.exe` 正常）。解析不出 / 跨卷 / 本来就是相对路径时原样返回。
+    #[cfg(windows)]
+    #[test]
+    fn container_program_command_rewrites_only_a_resolvable_program_path() {
+        let sep = std::path::MAIN_SEPARATOR;
+        let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let cwd = repo.join("target").join("prog-cwd");
+        let prog = repo.join("target").join("prog-bin").join("x.exe");
+        // 同卷绝对路径 → 相对 cwd。
+        assert_eq!(
+            container_program_command(
+                &format!("{} run", prog.display()),
+                &cwd,
+                std::ffi::OsStr::new(""),
+                None
+            ),
+            format!("..{sep}prog-bin{sep}x.exe run")
+        );
+        // 裸名按 PATH 解析后相对化（容器里的解析规则就是这份 PATH / PATHEXT）。
+        let dir = crate::tests::scratch("prog-command");
+        let bin = dir.join("bin");
+        std::fs::create_dir_all(&bin).expect("建 bin");
+        std::fs::write(bin.join("tool.cmd"), "@echo off\n").expect("写工具");
+        let module = dir.join("module");
+        std::fs::create_dir_all(&module).expect("建模块");
+        assert_eq!(
+            container_program_command("tool hi", &module, bin.as_os_str(), Some(".CMD")),
+            format!("..{sep}bin{sep}tool.cmd hi")
+        );
+        // 相对路径 → 只把分隔符归一（与 windows_program_separators 同一结果）。
+        assert_eq!(
+            container_program_command(
+                "build/indexer build",
+                &module,
+                std::ffi::OsStr::new(""),
+                None
+            ),
+            "build\\indexer build"
+        );
+        // 解析不出 → 原样。
+        assert_eq!(
+            container_program_command("no-such-tool hi", &module, std::ffi::OsStr::new(""), None),
+            "no-such-tool hi"
+        );
+        // 跨卷 → 原样（系统临时目录与仓库常不在同一个卷）。
+        let temp = std::env::temp_dir();
+        let different_volume = temp.components().next() != repo.components().next();
+        if different_volume {
+            let cmd = format!(
+                "\"{}\" /c echo",
+                repo.join("target").join("x.exe").display()
+            );
+            assert_eq!(
+                container_program_command(&cmd, &temp, std::ffi::OsStr::new(""), None),
+                cmd
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// 守门进程的入参是**扁平** JSON：FenceSpec 的字段同层再加一个 prepared；
