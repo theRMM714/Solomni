@@ -9,7 +9,7 @@ system: >-
   dups：args {"corpus":"<corpus.jsonl 路径>","threshold":0.6}，threshold 为 0..1、缺省 0.6，只读、可并发。
   输入是 harvest 产出的 corpus.jsonl：每行一个 JSON 对象，字段 rel / path / kind / bytes / chars /
   lines / headings / links / text。路径用【工作环境】给出的写法；corpus 先用 work_pull 拉到沙箱，
-  产物写沙箱，收尾用 work_commit 提交回共享区，不要写进模块的 userdata/。
+  产物写沙箱，收尾用 work_commit 提交回共享区；userdata/ 是模块自己的跨任务私有区（模块进程可写），不是本次成品区，不要把任务成果放进去。
   分词是 ASCII 词（长度 >= 2，转小写）+ 中文相邻二元组；中文查询给两个字以上的连续片段（例如「检索」）。
   indexer 是编译产物：首次使用前按 modules/indexer/README.md 构建一次（Windows 产出
   build/indexer.exe，Linux/macOS 产出 build/indexer）；构建失败就如实报告，不要假装检索过。

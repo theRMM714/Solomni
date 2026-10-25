@@ -6,7 +6,7 @@ system: >-
   report 用法：args 的 corpus（必填，corpus.jsonl 路径）、out（必填，HTML 产物路径）、
   index（可选，同时写一份轻量 JSON 清单）、title（可选，报告标题，默认「资料报告」）。
   路径按【工作环境】给出的写法；corpus 先用 work_pull 拉到沙箱，out/index 写沙箱，
-  收尾用 work_commit 提交回共享区，不要写进模块的 userdata/。
+  收尾用 work_commit 提交回共享区；userdata/ 是模块自己的跨任务私有区（模块进程可写），不是本次成品区，不要把任务成果放进去。
   报告必须包含：① 概览（文档数、总字数、按 kind 计数 + 内联 SVG 条形图）；
   ② 目录（每份资料一行：rel、kind、chars/lines、标题大纲、正文前 200 字摘要）；
   ③ 链接检查（相对链接与语料里已有的 rel 比对，列出找不到目标的坏链；文档内 #锚点 一律不判坏）；
