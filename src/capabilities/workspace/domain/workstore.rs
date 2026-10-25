@@ -146,6 +146,15 @@ pub fn clean_rel(raw: &str) -> Result<String, String> {
     Ok(parts.join("/"))
 }
 
+/// 目的：校验一组共享区相对路径：所有 `work_*` 的 `paths` 入口都先过这里。
+///   非法路径整条拒绝，不再降级成 `missing`（否则“路径写错”会被误报成“上游没有”）。
+pub fn validate_paths(paths: &[String]) -> Result<(), String> {
+    for raw in paths {
+        clean_rel(raw)?;
+    }
+    Ok(())
+}
+
 /// 把一条已校验的相对路径拼到一个根下（一律用路径组件，禁止把分隔符写进字符串再拼）。
 pub fn join_rel(root: &Path, rel: &str) -> Result<PathBuf, String> {
     let clean = clean_rel(rel)?;
@@ -183,14 +192,49 @@ pub fn expand_paths(paths: &[String], available: &BTreeSet<String>) -> (Vec<Stri
     (out.into_iter().collect(), missing)
 }
 
+/// 目的：一条路径没有可提交改动的原因（`work_commit` 的空提交回执按它给下一步）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unchanged {
+    /// 本地与基线一致（上游也还是基线那一版）。
+    SameAsBase,
+    /// 本地已经与主副本一致。
+    SameAsHead,
+    /// 本地未改，但上游已前进：先拉取再提交。
+    UpstreamMoved,
+    /// 上游已删除，本地还留着基线那一版。
+    UpstreamDeleted,
+    /// 显式删除的路径，上游已经删了。
+    AlreadyDeleted,
+}
+
+impl Unchanged {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Unchanged::SameAsBase => "本地与基线一致",
+            Unchanged::SameAsHead => "已与主副本一致",
+            Unchanged::UpstreamMoved => "本地未改，上游已更新",
+            Unchanged::UpstreamDeleted => "上游已删除，本地未改",
+            Unchanged::AlreadyDeleted => "上游已删除，无需再删",
+        }
+    }
+}
+
+/// 目的：提交计划：要写的变化 + 没有改动的原因（两者合起来覆盖 `locals` 里的全部路径）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitPlan {
+    pub changes: Vec<Change>,
+    pub unchanged: Vec<(String, Unchanged)>,
+}
+
 /// 文件级三方比较（提交侧）：`locals` = 路径 → 要写的**内容指纹**（`None` = 显式删除）。
-/// Ok(改动清单) 为空 = 没有可提交的改动；Err = 冲突清单（**整个提交都拒绝**）。
+/// Ok(changes) 为空 = 没有可提交的改动，`unchanged` 逐条给出原因；Err = 冲突清单（**整个提交都拒绝**）。
 pub fn plan_commit(
     index: &Index,
     tree: &Tree,
     locals: &BTreeMap<String, Option<String>>,
-) -> Result<Vec<Change>, Vec<ConflictAt>> {
+) -> Result<CommitPlan, Vec<ConflictAt>> {
     let mut changes: Vec<Change> = Vec::new();
+    let mut unchanged: Vec<(String, Unchanged)> = Vec::new();
     let mut conflicts: Vec<(String, Conflict)> = Vec::new();
     for (path, local) in locals {
         let base = index.get(path).map(String::as_str);
@@ -200,7 +244,7 @@ pub fn plan_commit(
                 // 显式删除：必须有基线，且上游没在拉取之后动过。
                 match (base, head) {
                     (None, _) => conflicts.push((path.clone(), Conflict::DeleteWithoutBase)),
-                    (Some(_), None) => {}
+                    (Some(_), None) => unchanged.push((path.clone(), Unchanged::AlreadyDeleted)),
                     (Some(b), Some(h)) if b == h => changes.push(Change {
                         path: path.clone(),
                         kind: ChangeKind::Delete,
@@ -219,23 +263,27 @@ pub fn plan_commit(
                     }),
                     (None, Some(h)) => {
                         if local_hash == h {
-                            // 与主副本一致：无需提交
+                            unchanged.push((path.clone(), Unchanged::SameAsHead));
                         } else {
                             conflicts.push((path.clone(), Conflict::BothAdded));
                         }
                     }
                     (Some(b), None) => {
                         if local_hash == b {
-                            // 本地没改，上游已删：无需提交
+                            unchanged.push((path.clone(), Unchanged::UpstreamDeleted));
                         } else {
                             conflicts.push((path.clone(), Conflict::ModifyVsDelete));
                         }
                     }
                     (Some(b), Some(h)) => {
                         if local_hash == b {
-                            // 本地没改
+                            if b == h {
+                                unchanged.push((path.clone(), Unchanged::SameAsBase));
+                            } else {
+                                unchanged.push((path.clone(), Unchanged::UpstreamMoved));
+                            }
                         } else if local_hash == h {
-                            // 已经和主副本一致
+                            unchanged.push((path.clone(), Unchanged::SameAsHead));
                         } else if b == h {
                             changes.push(Change {
                                 path: path.clone(),
@@ -251,7 +299,7 @@ pub fn plan_commit(
         }
     }
     if conflicts.is_empty() {
-        Ok(changes)
+        Ok(CommitPlan { changes, unchanged })
     } else {
         Err(conflicts
             .into_iter()
@@ -621,6 +669,8 @@ pub enum StatusState {
     LocalOnly,
     /// 拉过之后本地改了。
     LocalModified,
+    /// 拉过、上游没动，但沙箱里的文件被删了（提交删除要显式放进 deletes）。
+    LocalDeleted,
     /// 拉过之后上游又动了。
     UpstreamMoved,
     /// 目的：上游删了，本地没有改过（本地可能还留着旧副本）。
@@ -637,6 +687,7 @@ impl StatusState {
             StatusState::Clean => "一致",
             StatusState::LocalOnly => "本地新增（未跟踪）",
             StatusState::LocalModified => "本地有修改",
+            StatusState::LocalDeleted => "本地已删除",
             StatusState::UpstreamMoved => "上游有更新",
             StatusState::UpstreamDeleted => "上游已删除",
             StatusState::Conflict => "冲突",
@@ -666,7 +717,7 @@ pub fn status_of(base: Option<&str>, head: Option<&str>, local: Option<&str>) ->
         (Some(b), Some(h)) => match local {
             None => {
                 if b == h {
-                    StatusState::LocalModified
+                    StatusState::LocalDeleted
                 } else {
                     StatusState::Conflict
                 }
@@ -741,6 +792,8 @@ pub struct StatusReport {
     pub tree: Vec<String>,
     pub tree_truncated: bool,
     pub entries: Vec<StatusEntry>,
+    /// 目的：显式给了 paths 但基线、主副本与沙箱里都没有的路径。
+    pub missing: Vec<String>,
     /// 目的：沙箱里有、基线与主副本都没有的路径（下一次提交会成为新增；有上限）。
     pub local_only: Vec<String>,
     /// 目的：`local_only` 是否被截断（如实标注，不假装列全）。
@@ -796,28 +849,32 @@ mod tests {
     #[test]
     fn commit_rules_cover_add_modify_delete_and_noop() {
         // 主副本有 f1（h1），本地改成 h2 → modify。
-        let changes = plan_commit(
+        let plan = plan_commit(
             &index(&[("f1", "h1")]),
             &tree(&[("f1", "h1")]),
             &locals(&[("f1", Some("h2"))]),
         )
         .unwrap();
         assert_eq!(
-            changes,
+            plan.changes,
             vec![Change {
                 path: "f1".into(),
                 kind: ChangeKind::Modify,
                 hash: "h2".to_string()
             }]
         );
-        // 本地没改 → 没得提交。
-        let changes = plan_commit(
+        // 本地没改、上游已更新 → 没得提交，原因说“上游已更新”。
+        let plan = plan_commit(
             &index(&[("f1", "h2")]),
             &tree(&[("f1", "h1")]),
             &locals(&[("f1", Some("h2"))]),
         )
         .unwrap();
-        assert!(changes.is_empty());
+        assert!(plan.changes.is_empty());
+        assert_eq!(
+            plan.unchanged,
+            vec![("f1".to_string(), Unchanged::UpstreamMoved)]
+        );
         // 基线 h1、上游 h2、本地 h3：两边都改了 → 冲突。
         let err = plan_commit(
             &index(&[("f1", "h1")]),
@@ -833,19 +890,43 @@ mod tests {
             }]
         );
         // 显式删除：基线 == 上游 → delete；上游动过 → 冲突。
-        let changes = plan_commit(
+        let plan = plan_commit(
             &index(&[("f1", "h1")]),
             &tree(&[("f1", "h1")]),
             &locals(&[("f1", None)]),
         )
         .unwrap();
-        assert_eq!(changes[0].kind, ChangeKind::Delete);
+        assert_eq!(plan.changes[0].kind, ChangeKind::Delete);
         assert!(plan_commit(
             &index(&[("f1", "h1")]),
             &tree(&[("f1", "h9")]),
             &locals(&[("f1", None)])
         )
         .is_err());
+        // 上游已删除、本地未改 → 没得提交，原因说“上游已删除”。
+        let plan = plan_commit(
+            &index(&[("f1", "h1")]),
+            &tree(&[]),
+            &locals(&[("f1", Some("h1"))]),
+        )
+        .unwrap();
+        assert!(plan.changes.is_empty());
+        assert_eq!(
+            plan.unchanged,
+            vec![("f1".to_string(), Unchanged::UpstreamDeleted)]
+        );
+        // 上游已删除、显式删除也已经是删除状态 → 无需再删。
+        let plan = plan_commit(
+            &index(&[("f1", "h1")]),
+            &tree(&[]),
+            &locals(&[("f1", None)]),
+        )
+        .unwrap();
+        assert!(plan.changes.is_empty());
+        assert_eq!(
+            plan.unchanged,
+            vec![("f1".to_string(), Unchanged::AlreadyDeleted)]
+        );
         // 没拉取过就删 → 冲突（不是静默删）。
         assert_eq!(
             plan_commit(
@@ -909,6 +990,14 @@ mod tests {
         assert_eq!(
             status_of(Some("h1"), Some("h1"), Some("h2")),
             StatusState::LocalModified
+        );
+        assert_eq!(
+            status_of(Some("h1"), Some("h1"), None),
+            StatusState::LocalDeleted
+        );
+        assert_eq!(
+            status_of(Some("h1"), Some("h2"), None),
+            StatusState::Conflict
         );
         assert_eq!(
             status_of(Some("h1"), Some("h2"), Some("h1")),

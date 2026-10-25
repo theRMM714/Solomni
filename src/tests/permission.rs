@@ -141,7 +141,7 @@ fn entries_must_be_clean_relative_paths() {
     assert!(validate(&p).is_err());
 }
 
-/// 落点规则：共享区读写受白黑名单；私有沙箱永远全权；模块目录（含 `userdata/`）对 agent 永久只读。
+/// 落点规则：共享区读写受白黑名单；私有沙箱永远全权；模块目录（含 `userdata/`）对 agent 的内置文件工具永久只读。
 #[test]
 fn sandbox_places_follow_the_permission_set() {
     let mut sb = test_sandbox("a1", &["data"]);
@@ -161,7 +161,7 @@ fn sandbox_places_follow_the_permission_set() {
     // 私有沙箱：不受白名单影响，永远全权。
     assert!(sb.can_read(&Place::Private, &private.join("src").join("x")));
     assert!(sb.can_write(&Place::Private, &private.join("src").join("x")));
-    // 模块目录：永久只读，userdata 也不例外（模块数据由模块自己的进程写）。
+    // 模块目录：内置文件工具永久只读，userdata 也不例外（模块数据由模块自己的工具 / 服务进程写）。
     let module_place = Place::Module("data".to_string());
     assert!(!sb.can_write(&module_place, &module.join("script.py")));
     assert!(!sb.can_write(&module_place, &module.join("userdata").join("state.json")));

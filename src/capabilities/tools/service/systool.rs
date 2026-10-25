@@ -1,12 +1,12 @@
-//! 内置工具的**执行编排**：驱动 `SysIo` 读写盘上的文件（read / write / edit / patch / list / search）。
+//! 内置工具的**执行编排**：驱动 `SysIo` 读写盘上的文件（read / write / edit / patch / delete / list / search）。
 //!
 //! 纯规则在 `domain/systool.rs`（参数校验、回执文案、观察账本、`ToolOutcome`）——本文件只调用它们；
 //! 因此这里引 `ports`（IO 机制），`domain/` 不引（见 ARCHITECTURE.md §九.3）。
 
 use crate::capabilities::tools::domain::systool::*;
 use crate::capabilities::tools::ports::SysIo;
-use crate::capabilities::workspace::api::Sandbox;
-use std::collections::BTreeMap;
+use crate::capabilities::workspace::api::{Place, Sandbox};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 /// 执行一次内置工具调用（args_json = 模型信封里的 args 对象）。
 /// 顺序：解析 JSON → 认工具 → 按声明校验参数 → 补缺省 → 寻址（内置工具一律需要一个 path）。
@@ -57,6 +57,9 @@ pub fn execute(
             output: out,
         };
     }
+    if name == DELETE {
+        return delete(sb, io, &args);
+    }
     let spec = match args.get("path").and_then(|p| p.as_str()) {
         Some(p) => p.to_string(),
         // 声明里每个内置工具都声明了必填 path，走到这里说明声明与实现不一致。
@@ -74,6 +77,13 @@ pub fn execute(
         }
     } else if matches!(name, READ | LIST | SEARCH) && !sb.can_read(&place, &path) {
         return fail(sb.read_refusal(&place, &path));
+    }
+    // 词法上在根内不等于真实落点在根内：符号链接 / junction 指向根外时一律拒绝。
+    let Some(root) = sb.root_of(&place) else {
+        return fail(format!("找不到落点对应的根：{}", spec));
+    };
+    if let Err(e) = io.within(root, &path) {
+        return fail(e);
     }
     match name {
         READ => read(io, obs, &args, &spec, &path),
@@ -112,6 +122,97 @@ fn list(io: &dyn SysIo, spec: &str, path: &Path) -> ToolOutcome {
     ToolOutcome {
         ok: true,
         output: format!("{}\n{}", header, rows),
+    }
+}
+
+/// delete：只删**该 agent 自己的沙箱**。默认只删文件；目录必须显式 recursive=true。
+/// 共享区走 work_commit 的 deletes，模块目录（含 userdata）由模块自己的工具维护。
+/// 删除链接只删链接本身，绝不顺着链接去删目标。
+fn delete(sb: &Sandbox, io: &dyn SysIo, args: &serde_json::Value) -> ToolOutcome {
+    let Some(raw_paths) = args.get("paths").and_then(|v| v.as_array()) else {
+        return fail("缺少必填参数 paths（要删除的路径数组）".to_string());
+    };
+    if raw_paths.is_empty() {
+        return fail("paths 不能为空".to_string());
+    }
+    let recursive = args
+        .get("recursive")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    struct Plan {
+        spec: String,
+        path: PathBuf,
+        is_dir: bool,
+    }
+    let mut plans: Vec<Plan> = Vec::new();
+    let mut seen: BTreeSet<PathBuf> = BTreeSet::new();
+    // 先全部校验、一个都不删：目录没 recursive、越权、路径不存在都在动盘前整体拒绝。
+    for raw in raw_paths {
+        let Some(spec) = raw.as_str() else {
+            return fail("paths 里每一项都必须是路径字符串".to_string());
+        };
+        let (place, path) = match sb.resolve(spec) {
+            Ok(x) => x,
+            Err(e) => return fail(e),
+        };
+        if !matches!(&place, Place::Private) {
+            let why = match &place {
+                Place::Shared => "共享区不在这里删：用 work_commit 的 deletes 显式列出",
+                Place::Module(_) => {
+                    "模块目录（含 userdata）由模块自己的工具 / 服务进程维护；delete 只删你自己的沙箱"
+                }
+                Place::Private => unreachable!(),
+            };
+            return fail(format!("delete 拒绝 {}：{}", spec, why));
+        }
+        if !seen.insert(path.clone()) {
+            continue;
+        }
+        let Some(root) = sb.root_of(&place) else {
+            return fail(format!("找不到落点对应的根：{}", spec));
+        };
+        if let Err(e) = io.within_parent(root, &path) {
+            return fail(e);
+        }
+        let is_dir = match io.is_dir(&path) {
+            Ok(v) => v,
+            Err(e) => return fail(e),
+        };
+        if is_dir && !recursive {
+            return fail(format!("{} 是目录；要整棵删除，加 recursive=true", spec));
+        }
+        plans.push(Plan {
+            spec: spec.to_string(),
+            path,
+            is_dir,
+        });
+    }
+    // 先删更深的路径：paths 里同时给了父目录和子路径时，顺序不影响结果。
+    plans.sort_by(|a, b| {
+        b.path
+            .components()
+            .count()
+            .cmp(&a.path.components().count())
+    });
+    let mut out = String::from("已删除：");
+    for p in plans {
+        match io.delete(&p.path, recursive) {
+            Ok(()) => out.push_str(&format!(
+                "\n- {}（{}）",
+                p.spec,
+                if p.is_dir { "目录" } else { "文件/链接" }
+            )),
+            Err(e) => {
+                return fail(format!(
+                    "删除中断：{} 失败：{}；它前面的已删，后面的未动",
+                    p.spec, e
+                ))
+            }
+        }
+    }
+    ToolOutcome {
+        ok: true,
+        output: out,
     }
 }
 
@@ -435,6 +536,12 @@ fn apply_patch(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, body: &str)
         };
         if !sb.can_write(&place, &path) {
             return fail(block_fault(n, sb.write_refusal(&place, &path)));
+        }
+        let Some(root) = sb.root_of(&place) else {
+            return fail(block_fault(n, format!("找不到落点对应的根：{}", spec)));
+        };
+        if let Err(e) = io.within(root, &path) {
+            return fail(block_fault(n, e));
         }
         // 同一个文件被前面的块改过：以后面算出来的内容为准（不能回到盘上的旧内容）
         let source: Option<(String, bool, bool)> = match pending.get(&path) {

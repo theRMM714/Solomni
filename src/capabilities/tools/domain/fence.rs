@@ -19,8 +19,8 @@ impl FenceSpec {
             rw.push(sb.shared.clone());
         }
         rw.push(sb.private.clone());
-        // 模块目录对 agent **永远只读**（含 userdata）：agent 只有模块的使用权。
-        // <module>/userdata 只给模块自己的进程写；派不派看工作区扫描注入的事实（domain 不读盘）。
+        // 模块目录对 agent 的**内置文件工具**永远只读（含 userdata）：agent 只有模块的使用权。
+        // <module>/userdata 只给模块自己的工具 / 服务进程写；派不派看工作区扫描注入的事实（domain 不读盘）。
         for (id, root) in &sb.modules {
             ro_tree.push(root.clone());
             if sb.modules_with_userdata.contains(id) {
@@ -44,7 +44,8 @@ impl FenceSpec {
     }
 
     /// 目的：**无会话**（人直接跑一个模块工具 / 常驻服务）的围栏——模块目录递归只读 + 它自己的 `userdata/`（事实说有才）可写，外加用户指定的工作目录（缺省 = `userdata/`，没有则退回模块根）。
-    /// 约束：这是模块自身进程的口径；agent 会话的模块目录连 `userdata/` 也不可写（见 `from_sandbox`）。
+    /// 约束：这是模块自身进程的口径；agent 的**内置文件工具**对模块目录（含 `userdata/`）只读，
+    ///   由 `Sandbox::can_write` 判；模块工具进程的 `from_sandbox` 会把 `userdata/` 放进 rw。
     /// 参数：has_userdata 是工作区扫描给出的"该模块有没有 `userdata/`"事实（domain 不读盘）。
     /// 约束：与 agent 会话同一条围栏口径——不装机制时只留进程树与环境白名单，如实降级。
     pub fn standalone(

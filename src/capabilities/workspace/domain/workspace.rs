@@ -89,8 +89,13 @@ impl Sandbox {
         let host: PathBuf = match self.path_codec.as_ref() {
             Some(codec) => match codec.to_host(spec) {
                 Some(p) => p,
-                // 认不出本环境的写法：按"不在允许根里"如实拒绝，并把允许的根列回去。
-                None => return Err(deny(format!("路径越界：{}", spec))),
+                // 认不出本环境的写法：说清是写法不对，而不是“越界”；允许的根照旧列回去。
+                None => {
+                    return Err(deny(format!(
+                        "路径不是本环境的写法（虚拟机档用 guest 内路径，宿主路径在这里不存在）：{}",
+                        spec
+                    )))
+                }
             },
             None => PathBuf::from(spec),
         };
@@ -128,8 +133,17 @@ impl Sandbox {
         }
     }
 
-    /// 该落点这一席能不能写：共享主副本只读时写类工具一律拒绝；私有沙箱永远全权；
-    /// 模块目录（含 `<module>/userdata/`）对 agent **永久只读**——agent 只有使用权，模块数据由模块自己的进程维护。
+    /// 目的：该落点对应的宿主根（真实路径校验用；`Place::Module` 取模块根）。
+    pub fn root_of(&self, place: &Place) -> Option<&Path> {
+        match place {
+            Place::Shared => Some(self.shared.as_path()),
+            Place::Private => Some(self.private.as_path()),
+            Place::Module(id) => self.modules.get(id).map(|p| p.as_path()),
+        }
+    }
+
+    /// 该落点这一席能不能写：共享主副本只读时写类工具一律拒绝；私有沙箱永远全权；模块目录（含 `<module>/userdata/`）对 **agent 的内置文件工具** 永久只读——
+    /// 模块数据由模块自己的工具 / 服务进程维护（模块工具进程的围栏见 `FenceSpec::from_sandbox`）。
     pub fn can_write(&self, place: &Place, path: &Path) -> bool {
         match place {
             // 共享主副本：这一席可写**且**路径落在提交白名单内（黑名单已并入 write_ok）。
@@ -166,7 +180,7 @@ impl Sandbox {
                 }
             }
             Place::Module(id) => format!(
-                "模块 {} 的目录对 agent 只读（含 userdata/）：模块数据由模块自己的工具进程维护；请写进你自己的沙箱（工作副本）。",
+                "模块 {} 的目录对 agent 的内置文件工具只读（含 userdata/）：模块数据由模块自己的工具 / 服务进程维护；请写进你自己的沙箱（工作副本）。",
                 id
             ),
             Place::Private => self.shared_read_only(),

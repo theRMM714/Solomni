@@ -18,7 +18,7 @@ envs:
       **共享区是版本化工作区，你不能直接写它**：要用的内容先 work_pull 拉进沙箱（同一相对路径，文件或文件夹；
       文本、图片、视频与其它二进制都按字节处理，内容流式读写、不整份进上下文；单文件有上限，超限会明确拒绝），在沙箱里改完再用 work_commit 提交回共享区；提交做三方比较，冲突会如实报出、不会覆盖别人。
       冲突不自动合并：先用 work_status / work_versions 看三方（记下主副本提交 id）；文本可人工合并后用 work_resolve take=local head=<id>（预览截断先用 read 读全文），图片 / 视频 / 其它二进制只能选边（take=upstream 取主副本、会先备份本地；take=local 保留本地）。被覆盖的本地版本可用 work_lost 找回。
-      用 work_status 看共享区当前提交、你的逐条状态与沙箱里未跟踪的文件。模块目录（含 userdata/）对你只读；userdata/ 是模块自己的跨任务私有状态（缓存/记忆/配置），由模块进程维护，不是本次工作的成品区，不要把任务成果往里写。
+      用 work_status 看共享区当前提交、你的逐条状态与沙箱里未跟踪的文件。**你的文件工具**对模块目录（含 userdata/）只读；userdata/ 是模块自己的跨任务私有状态（缓存/记忆/配置），由模块工具 / 服务进程维护，不是本次工作的成品区，不要把任务成果往里写。
       当前工作：{{work_name}}；agent 名：{{agent}}
   - host: windows
     text: |-
@@ -30,7 +30,7 @@ envs:
       **共享区是版本化工作区，你不能直接写它**：要用的内容先 work_pull 拉进沙箱（同一相对路径，文件或文件夹；
       文本、图片、视频与其它二进制都按字节处理，内容流式读写、不整份进上下文；单文件有上限，超限会明确拒绝），在沙箱里改完再用 work_commit 提交回共享区；提交做三方比较，冲突会如实报出、不会覆盖别人。
       冲突不自动合并：先用 work_status / work_versions 看三方（记下主副本提交 id）；文本可人工合并后用 work_resolve take=local head=<id>（预览截断先用 read 读全文），图片 / 视频 / 其它二进制只能选边（take=upstream 取主副本、会先备份本地；take=local 保留本地）。被覆盖的本地版本可用 work_lost 找回。
-      用 work_status 看共享区当前提交、你的逐条状态与沙箱里未跟踪的文件。模块目录（含 userdata/）对你只读；userdata/ 是模块自己的跨任务私有状态（缓存/记忆/配置），由模块进程维护，不是本次工作的成品区，不要把任务成果往里写。
+      用 work_status 看共享区当前提交、你的逐条状态与沙箱里未跟踪的文件。**你的文件工具**对模块目录（含 userdata/）只读；userdata/ 是模块自己的跨任务私有状态（缓存/记忆/配置），由模块工具 / 服务进程维护，不是本次工作的成品区，不要把任务成果往里写。
       当前工作：{{work_name}}；agent 名：{{agent}}
   - host: macos
     text: |-
@@ -42,7 +42,7 @@ envs:
       **共享区是版本化工作区，你不能直接写它**：要用的内容先 work_pull 拉进沙箱（同一相对路径，文件或文件夹；
       文本、图片、视频与其它二进制都按字节处理，内容流式读写、不整份进上下文；单文件有上限，超限会明确拒绝），在沙箱里改完再用 work_commit 提交回共享区；提交做三方比较，冲突会如实报出、不会覆盖别人。
       冲突不自动合并：先用 work_status / work_versions 看三方（记下主副本提交 id）；文本可人工合并后用 work_resolve take=local head=<id>（预览截断先用 read 读全文），图片 / 视频 / 其它二进制只能选边（take=upstream 取主副本、会先备份本地；take=local 保留本地）。被覆盖的本地版本可用 work_lost 找回。
-      用 work_status 看共享区当前提交、你的逐条状态与沙箱里未跟踪的文件。模块目录（含 userdata/）对你只读；userdata/ 是模块自己的跨任务私有状态（缓存/记忆/配置），由模块进程维护，不是本次工作的成品区，不要把任务成果往里写。
+      用 work_status 看共享区当前提交、你的逐条状态与沙箱里未跟踪的文件。**你的文件工具**对模块目录（含 userdata/）只读；userdata/ 是模块自己的跨任务私有状态（缓存/记忆/配置），由模块工具 / 服务进程维护，不是本次工作的成品区，不要把任务成果往里写。
       当前工作：{{work_name}}；agent 名：{{agent}}
   - guest: linux
     text: |-
@@ -56,7 +56,7 @@ envs:
       **共享区是版本化工作区，你不能直接写它**：要用的内容先 work_pull 拉进沙箱（同一相对路径，文件或文件夹；
       文本、图片、视频与其它二进制都按字节处理，内容流式读写、不整份进上下文；单文件有上限，超限会明确拒绝），在沙箱里改完再用 work_commit 提交回共享区；提交做三方比较，冲突会如实报出、不会覆盖别人。
       冲突不自动合并：先用 work_status / work_versions 看三方（记下主副本提交 id）；文本可人工合并后用 work_resolve take=local head=<id>（预览截断先用 read 读全文），图片 / 视频 / 其它二进制只能选边（take=upstream 取主副本、会先备份本地；take=local 保留本地）。被覆盖的本地版本可用 work_lost 找回。
-      用 work_status 看共享区当前提交、你的逐条状态与沙箱里未跟踪的文件。模块目录（含 userdata/）对你只读；userdata/ 是模块自己的跨任务私有状态（缓存/记忆/配置），由模块进程维护，不是本次工作的成品区，不要把任务成果往里写。
+      用 work_status 看共享区当前提交、你的逐条状态与沙箱里未跟踪的文件。**你的文件工具**对模块目录（含 userdata/）只读；userdata/ 是模块自己的跨任务私有状态（缓存/记忆/配置），由模块工具 / 服务进程维护，不是本次工作的成品区，不要把任务成果往里写。
       当前工作：{{work_name}}；agent 名：{{agent}}
   - guest: macos
     text: |-
@@ -69,7 +69,7 @@ envs:
       {{path_rules}}
       **共享区是版本化工作区，你不能直接写它**：要用的内容先 work_pull 拉进沙箱（同一相对路径，文件或文件夹；
       文本、图片、视频与其它二进制都按字节处理，内容流式读写、不整份进上下文；单文件有上限，超限会明确拒绝），改完再用 work_commit 提交回共享区；冲突不自动合并：先用 work_status / work_versions 看三方（记下主副本提交 id）；文本可人工合并后用 work_resolve take=local head=<id>（预览截断先用 read 读全文），图片 / 视频 / 其它二进制只能选边（take=upstream 取主副本、会先备份本地；take=local 保留本地）；被覆盖的本地版本可用 work_lost 找回。
-      用 work_status 看共享区当前提交、你的逐条状态与沙箱里未跟踪的文件。模块目录（含 userdata/）对你只读；userdata/ 是模块自己的跨任务私有状态，由模块进程维护，不要把任务成果往里写。
+      用 work_status 看共享区当前提交、你的逐条状态与沙箱里未跟踪的文件。**你的文件工具**对模块目录（含 userdata/）只读；userdata/ 是模块自己的跨任务私有状态，由模块工具 / 服务进程维护，不要把任务成果往里写。
       当前工作：{{work_name}}；agent 名：{{agent}}
   - guest: windows
     text: |-
@@ -82,7 +82,7 @@ envs:
       {{path_rules}}
       **共享区是版本化工作区，你不能直接写它**：要用的内容先 work_pull 拉进沙箱（同一相对路径，文件或文件夹；
       文本、图片、视频与其它二进制都按字节处理，内容流式读写、不整份进上下文；单文件有上限，超限会明确拒绝），改完再用 work_commit 提交回共享区；冲突不自动合并：先用 work_status / work_versions 看三方（记下主副本提交 id）；文本可人工合并后用 work_resolve take=local head=<id>（预览截断先用 read 读全文），图片 / 视频 / 其它二进制只能选边（take=upstream 取主副本、会先备份本地；take=local 保留本地）；被覆盖的本地版本可用 work_lost 找回。
-      用 work_status 看共享区当前提交、你的逐条状态与沙箱里未跟踪的文件。模块目录（含 userdata/）对你只读；userdata/ 是模块自己的跨任务私有状态，由模块进程维护，不要把任务成果往里写。
+      用 work_status 看共享区当前提交、你的逐条状态与沙箱里未跟踪的文件。**你的文件工具**对模块目录（含 userdata/）只读；userdata/ 是模块自己的跨任务私有状态，由模块工具 / 服务进程维护，不要把任务成果往里写。
       当前工作：{{work_name}}；agent 名：{{agent}}
 
 # —— patch 通道的写法：让"改文件"不必把大段文本塞进 JSON（换行/引号/CJK 都不用转义）——
@@ -105,13 +105,14 @@ patch_guide: |-
   - *** 是保留前缀：内容里若必须出现以 *** 开头的行，请改写它（否则会被当成标记）。
   - 新建文件用 *** Add File:；改已有文件用 *** Update File:（整份覆盖已存在的文件仍要求"先完整读过"）。
   - 内容**照你写的原样落盘**：想让文件末尾多一个空行，就在 *** End File 之前留一个空行（核心不替你加）。
+  - **删除文件用 `delete` 工具**（默认只删文件；删目录加 `recursive=true`）；patch 不认 `*** Delete File`。
 
 # —— 内置工具的参数契约：模型侧的参数说明与调用校验都由这一份声明驱动（改参数只改这里）——
 tool_calling_envelope: |-
   工具调用约定：需要用工具时，只输出一个 JSON 信封（不要包裹其它文字）：
   {"type":"tool","module":"模块id","name":"工具名","args":{...参数对象...}}
   外部工具要带上它所属的模块 id（见上面清单每行开头）；核心自己实现的系统工具
-  （read / write / edit / patch / list / search / work_pull / work_commit / work_status / work_versions / work_resolve / work_lost 等）不用写 module。
+  （read / write / edit / patch / delete / list / search / work_pull / work_commit / work_status / work_versions / work_resolve / work_lost 等）不用写 module。
   要一次发**多个**调用（互不依赖的那些），就把它们写进同一个信封的 calls 数组——核心按工具声明的并发性一起跑，
   结果按你写的顺序发回：
   {"type":"tool","calls":[{"name":"read","args":{...参数对象...}},{"module":"模块id","name":"工具名","args":{...参数对象...}}]}

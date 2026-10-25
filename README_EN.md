@@ -139,7 +139,7 @@ tools:                       # optional: external tool table
 ```
 
 - External tools have one calling convention: **start command + arguments + a stdin/stdout receipt**; a long-running MCP service goes under `services`.
-- A tool process can reach that agent's private sandbox and the module directories it uses; the shared main copy needs `work_pull` / `work_commit` (conflicts: `work_versions` / `work_resolve`). Module directories (including `userdata/`) are read-only to agents: agents have use rights only, and module data is maintained by the module's own processes.
+- A tool process can reach that agent's private sandbox and the module directories it uses; the shared main copy needs `work_pull` / `work_commit` (conflicts: `work_versions` / `work_resolve`). Module directories (including `userdata/`) are read-only to the agent's file tools: agents have use rights only, and module data is maintained by the module's own tools and services.
 - If it runs, it is a valid module; if it does not, the core reports the reason plainly — no guessing, no fallback.
 
 ### Run the demo

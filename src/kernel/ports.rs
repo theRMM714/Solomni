@@ -24,8 +24,8 @@ use std::path::{Path, PathBuf};
 
 /// 目的：模型侧路径 ↔ 宿主路径的翻译（虚拟机档 guest ↔ 宿主；本机档恒等）。
 /// 约束：**只翻译，不做安全判断**——翻译结果仍要过允许根校验（`workspace::Sandbox::resolve`）。
-/// 约束：认不出本环境写法的路径回 None（调用方按"不在允许根里"如实拒绝）；也允许宿主写法直通
-///   （系统工具跑在宿主侧，宿主绝对路径本来就成立）。
+/// 约束：认不出本环境写法的路径回 None（调用方按"不是本环境的写法"如实拒绝）；
+///   虚拟机档只认 guest 写法，宿主绝对路径不再直通。
 pub trait PathCodec: Send + Sync + std::fmt::Debug {
     /// 模型给的路径 → 宿主路径；认不出回 None。
     fn to_host(&self, raw: &str) -> Option<PathBuf>;

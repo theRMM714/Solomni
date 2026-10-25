@@ -833,6 +833,57 @@ pub(crate) fn work_delete_is_explicit_in_the_commit_request() {
     let st = ws.work_status("w", "a", &[]).unwrap();
     assert!(!st.tree.contains(&"note.md".to_string()));
 }
+
+/// 目的：work_* 的 paths 入口把“写错”和“上游没有”分开报；空提交说清真实原因；
+///   沙箱里删掉已拉取的文件时状态是“本地已删除”，不是“本地有修改”。
+#[test]
+pub(crate) fn work_paths_and_empty_commit_report_the_real_reason() {
+    use crate::capabilities::workspace::domain::workstore::StatusState;
+    use crate::capabilities::workspace::ports::WorkStore;
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string(), "b".to_string()])
+        .unwrap();
+    ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
+    ws.work_pull("w", "a", &["note.md".to_string()]).unwrap();
+
+    // 非法路径整条拒绝，不再降级成“主副本没有”。
+    let bad = ws
+        .work_pull("w", "a", &["../x.txt".to_string()])
+        .unwrap_err();
+    assert!(bad.contains("不能包含 . 或 .."), "{}", bad);
+    let bad = ws
+        .work_commit("w", "a", "w--a", &commit_req(&["../x.txt"], &[], "x", 2))
+        .unwrap_err();
+    assert!(bad.contains("不能包含 . 或 .."), "{}", bad);
+    let bad = ws
+        .work_status("w", "a", &["../x.txt".to_string()])
+        .unwrap_err();
+    assert!(bad.contains("不能包含 . 或 .."), "{}", bad);
+
+    // 合法但不存在：work_status 如实回报 missing，不静默丢。
+    let st = ws.work_status("w", "a", &["nope.txt".to_string()]).unwrap();
+    assert_eq!(st.missing, vec!["nope.txt"]);
+
+    // 上游删除、本地未改：空提交说“上游已删除”，不再说“与主副本一致”。
+    ws.work_pull("w", "b", &["note.md".to_string()]).unwrap();
+    ws.work_commit("w", "b", "w--b", &commit_req(&[], &["note.md"], "删", 2))
+        .unwrap();
+    let empty = ws
+        .work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "重加", 3))
+        .unwrap_err();
+    assert!(empty.contains("上游已删除"), "{}", empty);
+    assert!(!empty.contains("与主副本一致"), "{}", empty);
+
+    // 本地删除（上游没动）→ 本地已删除。
+    ws.prepare("w2", &["a".to_string()]).unwrap();
+    ws.work_commit_user("w2", "note.md", b"v1", 1, 0).unwrap();
+    ws.work_pull("w2", "a", &["note.md".to_string()]).unwrap();
+    let sb = sandbox_of(&ws, "w2", "a");
+    store.remove_under(&sb, "note.md").unwrap();
+    let st = ws.work_status("w2", "a", &[]).unwrap();
+    assert_eq!(st.entries[0].state, StatusState::LocalDeleted);
+}
+
 /// 目的：work_versions 给文本预览、二进制只给指纹与大小；不把二进制冒充文本。
 #[test]
 pub(crate) fn work_versions_reports_text_and_binary_without_guessing() {
@@ -1721,10 +1772,10 @@ pub(crate) fn sandbox_resolves_guest_written_paths() {
     let (place, path) = sb.resolve(&guest_note).expect("guest 写法该认");
     assert_eq!(place, Place::Private);
     assert_eq!(path, sb.private.join("note.txt"));
-    // 宿主写法直通（系统工具跑在宿主侧，本来就成立）。
+    // 虚拟机档只认 guest 写法：宿主写法要明确拒绝，并说清是写法不对。
     let host_note = sb.private.join("host.txt").to_string_lossy().into_owned();
-    let (place, _) = sb.resolve(&host_note).expect("宿主写法也认");
-    assert_eq!(place, Place::Private);
+    let why = sb.resolve(&host_note).expect_err("宿主写法不再直通");
+    assert!(why.contains("不是本环境的写法"), "{}", why);
     // 镜像根下、但不在任何允许根里的路径：翻译得出来也要被根校验拒。
     let outside = bridge.to_guest(&abs(&["elsewhere", "x.txt"]));
     let why = sb.resolve(&outside).expect_err("越界要拒");

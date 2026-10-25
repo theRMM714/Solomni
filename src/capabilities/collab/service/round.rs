@@ -337,6 +337,59 @@ pub fn converse_with(
                 return rounds;
             }
         }
+        // ── 信封通道：供应商偶尔把调用放进原生槽位：两套形态互斥，不能执行，但也绝不静默丢——
+        // 落一条失败工具行 + warn，让模型改写信封重发（否则正文停在冒号，没有任何错误行）。
+        if mode == crate::capabilities::llm::api::ToolMode::Envelope
+            && !calls.is_empty()
+            && reply.tools.is_empty()
+        {
+            if let Some(ctx) = tools.as_deref_mut() {
+                let c = &calls[0];
+                ctx.log.warn(
+                    "engine::converse",
+                    &format!(
+                        "信封通道收到原生 tool_calls（{} 个，finish_reason={}）：不执行，落失败工具行",
+                        calls.len(),
+                        finish
+                    ),
+                );
+                let view = ToolCallView {
+                    speaker: speaker.to_string(),
+                    module: String::new(),
+                    name: c.name.clone(),
+                    ok: false,
+                    args: c.args_json.clone(),
+                    output: format!(
+                        "这一回合走**信封通道**，但供应商返回了原生工具调用（name={}，finish_reason={}）；核心没有执行。请把同样的调用写成信封重发：{{\"type\":\"tool\",\"name\":\"...\",\"args\":{{...}}}}。",
+                        c.name, finish
+                    ),
+                    raw: raw.clone(),
+                    call_id: String::new(),
+                    reply: reply_id,
+                };
+                let msgs_of = reply_msgs(mode, &raw, std::slice::from_ref(&view));
+                for m in &msgs_of {
+                    msgs.push(m.clone());
+                }
+                on_tool(&view);
+                push_round!(Round {
+                    reply: reply_id,
+                    text: reply.text.clone(),
+                    reasoning: std::mem::take(&mut reasoning),
+                    text_msgs: vec![msgs_of[0].clone()],
+                    tool: Some(ToolRun {
+                        view,
+                        msgs: vec![msgs_of[1].clone()],
+                    }),
+                    finish,
+                    error: None,
+                    verb: None,
+                    degraded: false,
+                });
+                return rounds;
+            }
+        }
+
         // ── 原生通道：工具调用来自供应商的结构化槽位（不解析信封）──
         if mode == crate::capabilities::llm::api::ToolMode::Native {
             if let Some(ctx) = tools.as_deref_mut() {

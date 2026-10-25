@@ -324,6 +324,67 @@ pub(crate) fn builtin_read_range_numbers_lines_and_points_at_the_next_offset() {
     );
 }
 
+/// 目的：delete 默认只删文件；目录必须 recursive；共享区与模块目录整体拒绝；路径先校验再动盘。
+#[test]
+pub(crate) fn builtin_delete_only_sandbox_files_and_honours_recursive() {
+    let io = InMemorySysIo::new();
+    let sb = test_sandbox("a1", &[]);
+    io.seed(&["demo", "a1", "probe.txt"], "探针");
+    let probe = abs(&["demo", "a1", "probe.txt"]);
+    let out = run_builtin(
+        &sb,
+        &io,
+        "delete",
+        &serde_json::json!({ "paths": [probe] }).to_string(),
+    );
+    assert!(out.ok, "{}", out.output);
+    assert_eq!(io.get(&["demo", "a1", "probe.txt"]), None);
+
+    // 目录：默认拒绝，且一个都不删；recursive=true 才整棵删。
+    io.seed(&["demo", "a1", "dir", "a.txt"], "a");
+    let dir = abs(&["demo", "a1", "dir"]);
+    let out = run_builtin(
+        &sb,
+        &io,
+        "delete",
+        &serde_json::json!({ "paths": [dir] }).to_string(),
+    );
+    assert!(!out.ok, "目录默认必须拒绝：{}", out.output);
+    assert!(out.output.contains("recursive=true"), "{}", out.output);
+    assert!(io.get(&["demo", "a1", "dir", "a.txt"]).is_some());
+    let out = run_builtin(
+        &sb,
+        &io,
+        "delete",
+        &serde_json::json!({ "paths": [abs(&["demo", "a1", "dir"])], "recursive": true })
+            .to_string(),
+    );
+    assert!(out.ok, "{}", out.output);
+    assert_eq!(io.get(&["demo", "a1", "dir", "a.txt"]), None);
+
+    // 共享区不在 delete 的授权面；模块目录（含 userdata）也不在。
+    io.seed(&["demo", "work", "shared.txt"], "x");
+    let out = run_builtin(
+        &sb,
+        &io,
+        "delete",
+        &serde_json::json!({ "paths": [abs(&["demo", "work", "shared.txt"])] }).to_string(),
+    );
+    assert!(!out.ok);
+    assert!(out.output.contains("work_commit"), "{}", out.output);
+    assert!(io.get(&["demo", "work", "shared.txt"]).is_some());
+
+    let sb2 = test_sandbox("a1", &["data"]);
+    let out = run_builtin(
+        &sb2,
+        &io,
+        "delete",
+        &serde_json::json!({ "paths": [abs(&["mods", "data", "userdata", "x.txt"])] }).to_string(),
+    );
+    assert!(!out.ok);
+    assert!(out.output.contains("模块"), "{}", out.output);
+}
+
 #[test]
 pub(crate) fn builtin_arg_mistakes_are_named_and_the_signature_comes_back() {
     let io = InMemorySysIo::new();
@@ -434,11 +495,14 @@ pub(crate) fn builtin_tool_book_is_the_one_source_of_names_and_paths() {
             );
             continue;
         }
-        let path = schema.params.as_ref().and_then(|p| p.get("path"));
+        // delete 是多路径工具（paths 数组），其余内置文件工具都是单 path。
+        let key = if name == "delete" { "paths" } else { "path" };
+        let path = schema.params.as_ref().and_then(|p| p.get(key));
         assert!(
             path.map(|p| p.required).unwrap_or(false),
-            "{} 必须声明必填 path",
-            name
+            "{} 必须声明必填 {}",
+            name,
+            key
         );
     }
     // 工作环境块：**只有路径与规矩，没有工具清单**（总表只留在核心手里当判据）。

@@ -146,7 +146,7 @@ roles:
 仓库永不出现机器路径；系统工具与模块工具**用同一套路径语言**（布局见 [session-model.md](../session/session-model.md) 一）：
 
 - **一种写法，一处说明**：
-  - 模型对本环境用绝对路径：本机档是宿主路径，虚拟机档是 guest 内路径（路径桥渲染）。
+  - 模型对本环境用绝对路径：本机档是宿主路径，虚拟机档是 guest 内路径（路径桥渲染）；**虚拟机档不认宿主写法**，写了按“不是本环境的写法”拒绝。
   - 用户 `@` 引用改写出来的也是这同一种写法（见下「用户也能引用」）。
   - 规矩只在提示词册的 `path_rules` 里说一次（见 [prompts.md](../prompt/prompts.md)）。
   - 虚拟机档的 guest 写法由核心在**寻址前**译回宿主路径（`kernel::ports::PathCodec`），再过下面的允许根校验。
@@ -156,7 +156,7 @@ roles:
 | --- | --- | --- |
 | `{{work_root}}` | 本次工作共享区 `session/<工作名>/work/` 的绝对路径（**主副本**） | 本工作内的 agent（**只读**：agent 会话里写它会被工具层拒绝，写入走 `work_commit`） |
 | `{{sandbox_root}}` | 该 agent 私有沙箱 `session/<工作名>/<agent实例名>/` 的绝对路径 | 只有它自己（**永远全权**） |
-| `{{module_roots}}` | 该 agent 使用的模块目录的绝对路径（一行一个） | 只有使用该模块的 agent（**对 agent 永久只读，含 `userdata/`**：agent 只有使用权，模块数据由模块自己的进程维护） |
+| `{{module_roots}}` | 该 agent 使用的模块目录的绝对路径（一行一个） | 只有使用该模块的 agent（**对 agent 的内置文件工具永久只读，含 `userdata/`**：agent 只有使用权；模块工具 / 服务进程可写自己的 `userdata/`） |
 
 - **越界即拒绝**：
   - 路径必须是列出的真实根**之下**的绝对路径。
@@ -198,8 +198,8 @@ prompts/
 | 角色 | 何时 | 工具面（`systools/roles.yaml`） |
 | --- | --- | --- |
 | `discussant` | 讨论阶段 | `say` `agree` `leave` `ask` `read` `list` `search` |
-| `executor` | 任务链节点（agent 子会话） | `read` `list` `write` `edit` `patch` `search` `work_pull` `work_commit` `work_status` `work_versions` `work_resolve` `work_lost` `submit_report` + 该 agent 的模块工具 |
-| `solo` | 用户建的单 agent 工作 | `read` `list` `write` `edit` `patch` `search` `work_pull` `work_commit` `work_status` `work_versions` `work_resolve` `work_lost` + 该 agent 的模块工具（**不发** `submit_report`） |
+| `executor` | 任务链节点（agent 子会话） | `read` `list` `write` `edit` `patch` `delete` `search` `work_pull` `work_commit` `work_status` `work_versions` `work_resolve` `work_lost` `submit_report` + 该 agent 的模块工具 |
+| `solo` | 用户建的单 agent 工作 | `read` `list` `write` `edit` `patch` `delete` `search` `work_pull` `work_commit` `work_status` `work_versions` `work_resolve` `work_lost` + 该 agent 的模块工具（**不发** `submit_report`） |
 | `planner` | 核心整理派发 | `read` `search` `plan` `slate` `verdict` |
 | `orchestrator` | 核心链中推进 | `read` `search` `node_verdict` `checklist` |
 | `core_proxy` | 核心代理（用户把决定权整块交给它，代用户决定） | `catalog_agents` `create_session` `send_session_message` `observe_session` `read_session_messages` `control_session` `read` `list` `search`（**不发**模块工具） |

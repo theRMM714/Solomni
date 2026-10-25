@@ -35,4 +35,19 @@ pub trait SysIo: Send + Sync {
     fn write(&self, path: &std::path::Path, content: &str) -> Result<(), String>;
     /// 列一个目录（按名字排序）。路径不是目录时如实报错——调用方据此把 read 的失败引导到 list。
     fn list(&self, path: &std::path::Path) -> Result<Vec<DirEntry>, String>;
+    /// 校验 `path` 的真实落点仍在 `root` 之内：词法上的根内路径可能是符号链接 / junction，
+    /// 真实目标在根外时一律拒绝。`root` 是 `Sandbox::root_of(place)` 给出的宿主根。
+    fn within(&self, root: &std::path::Path, path: &std::path::Path) -> Result<(), String>;
+    /// 校验 `path` 的**父目录**真实落点在 `root` 内：删除链接本身是允许的，
+    /// 但不能因为链接指向根外就顺着它去删目标。默认实现用 `within(root, parent)`。
+    fn within_parent(&self, root: &std::path::Path, path: &std::path::Path) -> Result<(), String> {
+        let parent = path
+            .parent()
+            .ok_or_else(|| format!("路径没有父目录：{}", path.display()))?;
+        self.within(root, parent)
+    }
+    /// 这个路径是不是目录（符号链接一律按非目录处理：删除时只删链接本身）。
+    fn is_dir(&self, path: &std::path::Path) -> Result<bool, String>;
+    /// 删除一个文件 / 链接；`recursive=true` 时删除整棵目录（不跟随其内部的链接）。
+    fn delete(&self, path: &std::path::Path, recursive: bool) -> Result<(), String>;
 }
