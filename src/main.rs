@@ -541,14 +541,15 @@ fn main() {
     let provision: Arc<dyn capabilities::provision::api::Provision + Send + Sync> = Arc::new(
         capabilities::provision::ProvisionService::with_vm(&root, provision_vm(Arc::clone(&book))),
     );
-    // **构建能力**：创建会话前补编模块产物（本机档在宿主、虚拟机档在 guest）；执行器与外层工具同一套守门进程机制。
+    // **构建能力**：创建会话前补编模块产物（本机档在宿主、虚拟机档在 guest）。
+    // 执行器与 `--build` 同一条路：**不申请容器身份**（构建是系统动作，不是 agent 工具）——
+    // 否则编译器在 AppContainer 的临时目录里写不了文件；可达范围仍由围栏规格给出（模块目录 + 状态目录）。
     let build_runner = kernel::detail::process::ProcTools::new(
         std::env::current_exe().unwrap_or_default(),
         std::sync::Arc::clone(&process_texts),
         home.clone(),
-        std::sync::Arc::clone(&write_allowed),
-    )
-    .with_mode(std::sync::Arc::clone(&sandbox_mode));
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    );
     let builds: Arc<dyn capabilities::builds::api::Builds + Send + Sync> =
         Arc::new(capabilities::builds::service::BuildsService::new(
             root.clone(),

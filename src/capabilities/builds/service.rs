@@ -119,15 +119,17 @@ impl BuildsService {
         target_os: &str,
         fingerprint: &str,
         state_path: &Path,
+        output: &str,
     ) -> Result<(), String> {
         let left = self.entries_left(module, target_os);
         if !left.is_empty() {
             return Err(format!(
-                "命令跑通了，但入口仍不在场：{}——检查 build.command 把产物写到哪了",
+                "命令跑通了，但入口仍不在场：{}——检查 build.command 把产物写到哪了{}",
                 left.iter()
                     .map(|e| format!("{}（工具 {}）", e.command, e.tool))
                     .collect::<Vec<_>>()
-                    .join("、")
+                    .join("、"),
+                tail(output)
             ));
         }
         fp::write_state(
@@ -227,7 +229,14 @@ impl BuildsService {
         if !out.ok {
             return Err(format!("构建命令失败（目标 host）{}", tail(&out.output)));
         }
-        self.finish(module, "host", target_os, &fingerprint, &state_path)?;
+        self.finish(
+            module,
+            "host",
+            target_os,
+            &fingerprint,
+            &state_path,
+            &out.output,
+        )?;
         Ok(Built {
             module: module.manifest.id.clone(),
             target: "host".to_string(),
@@ -368,7 +377,14 @@ impl BuildsService {
                 tail(&out.output)
             ));
         }
-        self.finish(module, guest, target_os, &fingerprint, &state_path)?;
+        self.finish(
+            module,
+            guest,
+            target_os,
+            &fingerprint,
+            &state_path,
+            &out.output,
+        )?;
         Ok(Built {
             module: module.manifest.id.clone(),
             target: guest.to_string(),
