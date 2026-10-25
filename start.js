@@ -8,7 +8,10 @@
 const { spawnSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const readline = require("readline");
 const env = require("./env.js");
+const TOOLCHAINS = require("./toolchains.js");
+const TC = require("./setup-toolchains.js");
 
 const ROOT = __dirname;
 const IS_WIN = process.platform === "win32";
@@ -19,6 +22,11 @@ const BIN = path.join(ROOT, "target", PROFILE, EXE);
 
 const log = (m) => console.log("[start] " + m);
 const die = (m) => { console.error("[start] " + m); process.exit(1); };
+
+function ask(q) {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => rl.question(q, (a) => { rl.close(); resolve(a); }));
+}
 // 与 src/presentation/web/mod.rs 的 RESTART_EXIT_CODE 同源：全局沙箱策略保存后整体重启。
 const RESTART_EXIT_CODE = 75;
 
@@ -48,7 +56,7 @@ function runTests(cargoEnv) {
 }
 
 function run(cargoEnv) {
-  const pass = process.argv.slice(2).filter((a) => a !== "--release");
+  const pass = process.argv.slice(2).filter((a) => a !== "--release" && a !== "--yes");
   const argv = [BIN, "."].concat(pass);
   log(process.argv.includes("-webUI")
     ? "starting Web UI (default 127.0.0.1:3081, open http://127.0.0.1:3081)"
@@ -68,6 +76,35 @@ function runLoop(cargoEnv) {
 
 (async () => {
   const ready = await env.ensure();
+  // 基础工具链是运行前提：首启问一次，之后只由核心每次启动报告缺失；--yes 可补装。
+  const target = TOOLCHAINS.hostTarget();
+  const before = target ? TC.profileState(target, TOOLCHAINS.PROFILE) : { ok: true };
+  if (target && !before.ok) {
+    const marker = path.join(ROOT, ".tools", "toolchains", ".install-asked");
+    const asked = fs.existsSync(marker);
+    const force = process.argv.includes("--yes");
+    if (force || (!asked && process.stdin.isTTY)) {
+      try {
+        fs.mkdirSync(path.dirname(marker), { recursive: true });
+        if (!asked) fs.writeFileSync(marker, new Date().toISOString() + "\n");
+      } catch (e) {
+        log("无法写首次询问标记：" + (e && e.message ? e.message : e));
+      }
+      try {
+        let install = force;
+        if (!force) {
+          const a = await ask("首次启动：把 Python / Node / C-C++ 装进项目内 .tools/toolchains？[y/N] ");
+          install = a.trim().toLowerCase() === "y";
+        }
+        if (install) {
+          const st = await TC.ensureProfile({ yes: true, target });
+          if (!st.ok) log("基础工具链未装好：" + (st.missing.join("、") || st.reason) + "（可运行 node setup-runtime.js --yes）");
+        }
+      } catch (e) {
+        log("基础工具链安装失败：" + (e && e.message ? e.message : e));
+      }
+    }
+  }
   log("platform " + process.platform + " " + process.arch);
   const cargo = ready.cargo;
   const cargoEnv = ready.env;

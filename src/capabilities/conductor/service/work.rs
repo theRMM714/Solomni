@@ -207,10 +207,13 @@ impl Conductor {
         let current_path = std::env::var_os("PATH").unwrap_or_default();
         let has_exe = |name: &str| self.probe.has_exe(name);
         let bin_ok = |path: &std::path::Path| self.probe.is_dir(path);
+        let base = self.packages.base();
         let facts = pkgs::Facts {
             has_exe: &has_exe,
             bin_ok: &bin_ok,
             current_path: &current_path,
+            base: &base.active,
+            host_fallback: &base.fallback,
         };
         pkgs::plan_host(spec, modules, &self.packages.library(), policy, &facts)
     }
@@ -221,7 +224,7 @@ impl Conductor {
         spec: &crate::kernel::api::ExecSpec,
         modules: &[Module],
         missing: &[crate::capabilities::vm::api::MissingEntry],
-        guest: Option<&str>,
+        guest_root: Option<&str>,
     ) -> Result<crate::capabilities::vm::api::ExecPlan, String> {
         // 一次把话说全：入口判据在前，包选型问题在后（与旧的单一计划函数同一顺序）。
         let entry_diags =
@@ -242,7 +245,7 @@ impl Conductor {
         if !entry_diags.is_empty() {
             parts.push(crate::capabilities::vm::api::diagnose_text_for(
                 &entry_diags,
-                guest,
+                guest_root,
             ));
         }
         if !package_plan.problems.is_empty() {
@@ -252,7 +255,7 @@ impl Conductor {
             return Err(parts.join("；"));
         }
         crate::capabilities::vm::api::plan(spec, package_plan.packages, &[], self.network_allowed())
-            .map_err(|diags| crate::capabilities::vm::api::diagnose_text_for(&diags, guest))
+            .map_err(|diags| crate::capabilities::vm::api::diagnose_text_for(&diags, guest_root))
     }
 
     fn plan_for_meta_with(
@@ -281,7 +284,12 @@ impl Conductor {
                     && (target_os == std::env::consts::OS
                         || crate::capabilities::vm::api::runs_on_target(p, target_os))
             });
-        self.plan_for_spec(&meta.exec, &session_modules, &missing, guest)
+        self.plan_for_spec(
+            &meta.exec,
+            &session_modules,
+            &missing,
+            meta.exec.guest.as_deref(),
+        )
     }
 
     /// 本档位下不能执行工具的模块（模块 id → 缺的能力名）：建会话与重建时收口给工具环境。
@@ -542,7 +550,7 @@ impl Conductor {
                     && (target_os == std::env::consts::OS
                         || crate::capabilities::vm::api::runs_on_target(p, target_os))
             });
-        self.plan_for_spec(&spec, &session_modules, &missing, guest)?;
+        self.plan_for_spec(&spec, &session_modules, &missing, spec.guest.as_deref())?;
 
         let mut new_meta = meta.clone();
         new_meta.modules = flat_modules(&metas);
@@ -1135,7 +1143,15 @@ impl Conductor {
             .cloned()
             .collect();
         if meta.exec.tier == crate::kernel::api::Tier::Vm {
+            let guest_runtimes = self.guest_runtimes_of(&meta.exec);
             for (id, caps) in pkgs::absent(&session_modules, &self.packages.library()) {
+                let caps: Vec<String> = caps
+                    .into_iter()
+                    .filter(|c| !guest_runtimes.iter().any(|g| g == c))
+                    .collect();
+                if caps.is_empty() {
+                    continue;
+                }
                 self.log.warn(
                     "conductor::create_work",
                     &format!("模块 {} 声明的运行包不在包库：{}", id, caps.join("、")),
@@ -1152,7 +1168,12 @@ impl Conductor {
                     && (target_os == std::env::consts::OS
                         || crate::capabilities::vm::api::runs_on_target(p, target_os))
             });
-        let plan = self.plan_for_spec(&meta.exec, &session_modules, &missing, guest)?;
+        let plan = self.plan_for_spec(
+            &meta.exec,
+            &session_modules,
+            &missing,
+            meta.exec.guest.as_deref(),
+        )?;
         self.log.info(
             "conductor::create_work",
             &crate::capabilities::vm::api::plan_summary(&plan),

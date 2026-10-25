@@ -12,6 +12,7 @@ const fs = require("fs");
 const path = require("path");
 const env = require("./env.js");
 const DEV = require("./dev-tools.js");
+const TC = require("./setup-toolchains.js");
 
 const ROOT = __dirname;
 const CHECK = process.argv.includes("--check");
@@ -68,6 +69,10 @@ function probeRunnable(name, e) {
   if (!ready) die("项目内工具链不可用（platform/<os>/）：先 node setup-dev.js --yes");
   const e = ready.env;
   log("项目内工具链：" + ready.cargo);
+  // 开发与门禁同样需要基础 profile：python / node / cc 是运行前提。
+  const tc = await TC.ensureProfile({ yes: YES });
+  if (!tc.ok) die("基础工具链未就绪：" + (tc.missing.join("、") || tc.reason) + "（补全：node setup-toolchains.js --yes）");
+  log("基础工具链：" + tc.installed.map((t) => t.id + " " + t.version).join("、"));
 
   const comps = installedComponents(e);
   const targets = installedTargets(e);

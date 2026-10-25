@@ -15,6 +15,7 @@ const state = {
   history: [],           // 会话历史（名字/mode/时间）
   settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70 }, // 基本设置
   fence: null,           // /api/state 的围栏事实：只有降级 / 要求未满足时进横幅
+  toolchains: null,      // /api/state 的基础工具链事实：项目内 / 宿主回退 / 缺失
   sessions: new Map(),   // sid -> { sid, mode, title, lines, pending, sending, running, working, done, awaiting, readonly }
   activeSid: null,
   treeOpen: new Set(),   // 会话树展开的父会话（纯 UI 状态，不落盘）
@@ -106,7 +107,9 @@ async function refreshState() {
   }
   state.settings = s.settings || { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70 };
   state.fence = s.fence || null;
+  state.toolchains = s.toolchains || null;
   renderFenceBanner();
+  renderToolchainBanner();
   renderSidebar();
   renderHistory();
   if (opened) renderTabs();
@@ -1077,6 +1080,28 @@ function renderFenceBanner() {
   } else {
     text.textContent = '启动要求未满足：' + missing.join('、') + '；模块工具会被拒绝执行。';
   }
+}
+
+/// 基础工具链横幅：项目内缺失时列出缺失能力、宿主回退是否可授权、补全命令。
+function renderToolchainBanner() {
+  const box = $('#toolchain-banner');
+  const text = $('#toolchain-text');
+  if (!box || !text) return;
+  const t = state.toolchains || {};
+  const missing = Array.isArray(t.missing) ? t.missing : [];
+  if (!missing.length) {
+    box.className = 'fence-banner hidden';
+    text.textContent = '';
+    return;
+  }
+  const fallback = t.fallback || {};
+  const bad = missing.filter((id) => fallback[id] && fallback[id].fenced === false);
+  const absent = missing.filter((id) => !fallback[id]);
+  let msg = '基础工具链未安装：' + missing.join('、') + '。补全：node setup-runtime.js --yes';
+  if (bad.length) msg += ' 宿主回退在围栏下不可授权（' + bad.join('、') + '）；工具调用会问是否本次无围栏跑。';
+  if (absent.length) msg += ' 宿主 PATH 也没有：' + absent.join('、') + '。';
+  text.textContent = msg;
+  box.className = 'fence-banner';
 }
 
 /* 侧栏：只保留「被拒收模块」的如实提示（模块清单在「新建工作」向导里用）。 */

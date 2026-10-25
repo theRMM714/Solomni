@@ -3,9 +3,13 @@
 //! 不管：下载 / 解包 / 版本选择（setup-toolchains.js）；guest 内工具链（后续阶段）；模块工具协议与围栏。
 //! 联动：由 main 在根解析后调用；环境随后由 fence_env / interpreter_dirs / HostProbe 共用。
 
+use crate::capabilities::packages::api::{BaseFacts, HostFallback};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{OsStr, OsString};
 use std::path::{Component, Path, PathBuf};
+
+/// 目的：基础 profile 的工具 id（唯一真相是 toolchains.js 的 PROFILE；这里用用例钉住一致）。
+pub(crate) const PROFILE: [&str; 3] = ["python", "node", "cc"];
 
 /// 目的：当前宿主的目标名（与 setup-toolchains.js 的 TARGETS 同一套写法）。
 pub(crate) fn target() -> Option<&'static str> {
@@ -43,8 +47,6 @@ struct ActiveTool {
 pub(crate) struct Applied {
     /// 目的：已生效的项目工具：(id, 版本)。
     pub active: Vec<(String, String)>,
-    /// 目的：profile 里声明了但没装上的工具（这些命令回退宿主 PATH）。
-    pub missing: Vec<String>,
     /// 目的：路径 / 解析问题（如实报告，不阻断启动）。
     pub warnings: Vec<String>,
 }
@@ -58,7 +60,8 @@ pub(crate) struct Composed {
     pub env: Vec<(String, String)>,
     /// 目的：实际生效的项目工具：(id, 版本)。
     pub active: Vec<(String, String)>,
-    /// 目的：profile 里声明了但没装上的工具。
+    /// 目的：profile 里声明了但没装上的工具（启动报告从 base_facts 派生；这里留给用例断言）。
+    #[cfg_attr(not(test), allow(dead_code))]
     pub missing: Vec<String>,
     /// 目的：路径 / 解析问题（如实报告）。
     pub warnings: Vec<String>,
@@ -233,7 +236,6 @@ pub(crate) fn apply(root: &Path) -> Applied {
             }
             Applied {
                 active: c.active,
-                missing: c.missing,
                 warnings: c.warnings,
             }
         }
@@ -242,4 +244,141 @@ pub(crate) fn apply(root: &Path) -> Applied {
             ..Default::default()
         },
     }
+}
+
+/// 目的：项目内基础 profile 已装上的工具（id, version）——只认当前目标、相对路径与真实存在的 bin。
+pub(crate) fn active_tools(root: &Path) -> Vec<(String, String)> {
+    let Some(target) = target() else {
+        return Vec::new();
+    };
+    let file = root.join(".tools").join("toolchains").join("active.json");
+    let Ok(raw) = std::fs::read_to_string(&file) else {
+        return Vec::new();
+    };
+    let Ok(active) = serde_json::from_str::<ActiveFile>(&raw) else {
+        return Vec::new();
+    };
+    if active.target != target {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for tool in active.tools {
+        let ok = tool
+            .bin
+            .iter()
+            .any(|b| safe_rel(b).map(|p| root.join(p).is_dir()).unwrap_or(false));
+        if ok {
+            out.push((tool.id, tool.version));
+        }
+    }
+    out
+}
+
+/// 目的：能力名 → 宿主上可能的可执行名（与 toolchains.js 的 profile 一一对应）。
+fn host_names(id: &str) -> &'static [&'static str] {
+    match id {
+        "python" => &["python", "python3"],
+        "node" => &["node"],
+        "cc" => &["gcc", "g++", "cc", "clang", "clang++"],
+        _ => &[],
+    }
+}
+
+/// 目的：基础 profile 的事实：项目内装了什么 + 缺的那几个在宿主上的回退与围栏可用性。
+/// 约束：只读；不写任何权限项。围栏可用性由平台探针回答（Windows 看已有 ACE / 目录属主）。
+pub(crate) fn base_facts(root: &Path) -> BaseFacts {
+    let active = active_tools(root);
+    let installed: BTreeSet<&str> = active.iter().map(|(id, _)| id.as_str()).collect();
+    let mut fallback = BTreeMap::new();
+    for id in PROFILE {
+        if installed.contains(id) {
+            continue;
+        }
+        for name in host_names(id) {
+            let Some(exe) = crate::kernel::detail::host_probe::find_exe(name) else {
+                continue;
+            };
+            let dir = crate::kernel::detail::confine::interpreter_install_root(&exe);
+            let (fenced, why) = match crate::kernel::detail::confine::interpreter_dir_usable(&dir) {
+                Ok(()) => (true, String::new()),
+                Err(e) => (false, e),
+            };
+            fallback.insert(
+                id.to_string(),
+                HostFallback {
+                    path: exe,
+                    fenced,
+                    why,
+                },
+            );
+            break;
+        }
+    }
+    BaseFacts { active, fallback }
+}
+
+/// 目的：每次启动都要打印的基础工具链报告：项目内 / 缺失 / 宿主回退是否可用。
+pub(crate) fn report_lines(base: &BaseFacts) -> Vec<String> {
+    let installed: BTreeSet<&str> = base.active.iter().map(|(id, _)| id.as_str()).collect();
+    let mut lines = Vec::new();
+    if !base.active.is_empty() {
+        let list: Vec<String> = base
+            .active
+            .iter()
+            .map(|(id, version)| format!("{} {}", id, version))
+            .collect();
+        lines.push(format!("项目内：{}", list.join("、")));
+    }
+    let missing: Vec<&str> = PROFILE
+        .iter()
+        .copied()
+        .filter(|id| !installed.contains(id))
+        .collect();
+    if !missing.is_empty() {
+        lines.push(format!(
+            "项目内未安装：{}；补全：node setup-runtime.js --yes",
+            missing.join("、")
+        ));
+        for id in missing {
+            match base.fallback.get(id) {
+                Some(f) if f.fenced => lines.push(format!(
+                    "宿主回退 {} → {}（围栏可用）",
+                    id,
+                    f.path.display()
+                )),
+                Some(f) => lines.push(format!(
+                    "宿主回退 {} → {}（围栏不可授权：{}；工具调用会问是否本次无围栏跑）",
+                    id,
+                    f.path.display(),
+                    f.why
+                )),
+                None => lines.push(format!("宿主回退 {}：宿主 PATH 也没有", id)),
+            }
+        }
+    }
+    lines
+}
+
+/// 目的：基础工具链的机器可读快照（--doctor、/api/state 与 Web 横幅共用同一份）。
+pub(crate) fn json(base: &BaseFacts) -> serde_json::Value {
+    let installed: BTreeSet<&str> = base.active.iter().map(|(id, _)| id.as_str()).collect();
+    let missing: Vec<&str> = PROFILE
+        .iter()
+        .copied()
+        .filter(|id| !installed.contains(id))
+        .collect();
+    serde_json::json!({
+        "profile": PROFILE,
+        "active": base.active.iter().map(|(id, version)| serde_json::json!({
+            "id": id,
+            "version": version,
+        })).collect::<Vec<_>>(),
+        "missing": missing,
+        "fallback": base.fallback.iter().map(|(id, f)| (id.clone(), serde_json::json!({
+            "path": f.path.to_string_lossy(),
+            "fenced": f.fenced,
+            "why": f.why,
+        }))).collect::<BTreeMap<_, _>>(),
+        "lines": report_lines(base),
+    })
 }

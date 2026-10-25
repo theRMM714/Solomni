@@ -692,6 +692,28 @@ fn interpreter_dirs_in(
     dirs.into_iter().filter(|d| d.is_dir()).collect()
 }
 
+/// 目的：解释器可执行文件 → 它的安装根（与围栏授权同一个口径）。
+pub(crate) fn interpreter_install_root(exe: &std::path::Path) -> std::path::PathBuf {
+    exe.parent()
+        .map(install_dir)
+        .unwrap_or_else(|| exe.to_path_buf())
+}
+
+/// 目的：这个解释器安装目录在**平台围栏**下能不能放行（只读探测，不写权限项）。
+///   Windows：已有足够的 ALL APPLICATION PACKAGES ACE，或目录属主是当前用户（能写 DACL）；
+///   其它平台：围栏只读放行，目录存在即可。
+pub(crate) fn interpreter_dir_usable(dir: &std::path::Path) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        windows::interpreter_dir_usable(dir)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = dir;
+        Ok(())
+    }
+}
+
 /// 程序所在目录 → 该程序的「安装目录」：<root>/bin|Scripts 这种布局上溯一层（标准库与动态库在 <root> 里），其余就是所在目录。
 fn install_dir(bin: &std::path::Path) -> std::path::PathBuf {
     let leaf = bin

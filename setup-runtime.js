@@ -7,6 +7,7 @@
  */
 "use strict";
 const env = require("./env.js");
+const TC = require("./setup-toolchains.js");
 
 (async () => {
   const yes = process.argv.includes("--yes");
@@ -16,4 +17,13 @@ const env = require("./env.js");
   if (ready.source !== "project") {
     console.log("[setup-runtime] 说明：当前借用系统工具链（只读）；开发环境请用 node setup-dev.js 装项目内工具链。");
   }
+  // 基础工具链是运行前提：本机档的 python / node / cc 默认装进项目内，不写系统。
+  const st = await TC.ensureProfile({ yes });
+  if (!st.ok) {
+    console.error("[setup-runtime] 基础工具链未就绪：" + (st.missing.join("、") || st.reason));
+    console.error("[setup-runtime] 补全：node setup-toolchains.js --yes");
+    process.exitCode = 1;
+    return;
+  }
+  console.log("[setup-runtime] 基础工具链：" + st.installed.map((t) => t.id + " " + t.version).join("、"));
 })();

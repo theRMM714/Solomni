@@ -25,6 +25,11 @@
     <button id="fence-settings" class="btn fence-btn" type="button">去设置</button>
   </div>
 
+  <!-- 基础工具链横幅：只在项目内 profile 缺失时显示；宿主回退与补全命令如实给出。 -->
+  <div id="toolchain-banner" class="fence-banner hidden" role="status" aria-live="polite">
+    <span id="toolchain-text" class="fence-text"></span>
+  </div>
+
   <div class="layout">
     <!-- 侧栏：新建 + 会话树 + 底部设置；收起时只留图标栏 -->
     <aside id="sidebar" class="sidebar">

@@ -264,10 +264,16 @@ async function main() {
     return 1;
   }
   // 安全模式下的 e2e：显式同意本进程降级（Windows 未授权写 ACL 等机制缺项）；不写任何设置。
+  // 同时把围栏写入关掉：安全模式本来就不写本机权限项，宿主解释器因此按"无围栏"跑；
+  // 真机围栏验收（--fence-live）才保留写入，并要求项目内工具链。
+  const fenceWrite = process.env.SOLOMNI_FENCE_LIVE === "1" ? "1" : "0";
   const srv = spawn(BIN, ["-webUI", "--web-port", String(PORT_SRV), "--root", FIXTURE], {
     cwd: PRODUCT_ROOT,
     stdio: "inherit",
-    env: Object.assign({}, process.env, { SOLOMNI_SANDBOX_DEGRADED: "1" }),
+    env: Object.assign({}, process.env, {
+      SOLOMNI_SANDBOX_DEGRADED: "1",
+      SOLOMNI_FENCE_WRITE: fenceWrite,
+    }),
   });
   try {
     const ready = await waitReady("http://127.0.0.1:" + PORT_SRV + "/api/state", 60);
