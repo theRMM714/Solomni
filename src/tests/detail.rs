@@ -407,6 +407,64 @@ fn fs_work_store_copies_between_roots_with_hash_check() {
 
 // ---------- FsSysIo ----------
 
+
+/// 目的：词法上在根内的路径，真实落点可能是符号链接 / junction 指的根外——必须拒绝。
+#[test]
+fn fs_sys_io_rejects_symlink_or_junction_escape() {
+    let base = scratch("fs-sysio-link");
+    let root = base.join("root");
+    let outside = base.join("outside");
+    std::fs::create_dir_all(&root).expect("建根");
+    std::fs::create_dir_all(&outside).expect("建外部");
+    std::fs::write(outside.join("secret.txt"), "SECRET").expect("造外部文件");
+
+    if !make_dir_link(&outside, &root.join("out")) {
+        return; // 平台不允许造链接：跳过（Windows 的 junction 探针在真机上另验）
+    }
+    let io = FsSysIo::default();
+    assert!(
+        io.within(&root, &root.join("out").join("secret.txt"))
+            .is_err(),
+        "junction 指向根外必须拒绝"
+    );
+    assert!(
+        io.within(&root, &root.join("ok.txt")).is_ok(),
+        "不存在的普通文件按最近的已存在祖先判，仍在根内"
+    );
+    if make_file_link(&outside.join("missing.txt"), &root.join("dangling")) {
+        assert!(
+            io.within(&root, &root.join("dangling")).is_err(),
+            "悬空符号链接不能被“看父目录”绕过"
+        );
+    }
+}
+
+#[cfg(unix)]
+fn make_dir_link(target: &std::path::Path, link: &std::path::Path) -> bool {
+    std::os::unix::fs::symlink(target, link).is_ok()
+}
+
+#[cfg(windows)]
+fn make_dir_link(target: &std::path::Path, link: &std::path::Path) -> bool {
+    std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(link)
+        .arg(target)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+#[cfg(unix)]
+fn make_file_link(target: &std::path::Path, link: &std::path::Path) -> bool {
+    std::os::unix::fs::symlink(target, link).is_ok()
+}
+
+#[cfg(windows)]
+fn make_file_link(target: &std::path::Path, link: &std::path::Path) -> bool {
+    std::os::windows::fs::symlink_file(target, link).is_ok()
+}
+
 #[test]
 fn fs_sys_io_reads_utf8_flags_lossy_and_truncation_and_creates_parents() {
     let root = scratch("fs-sysio");

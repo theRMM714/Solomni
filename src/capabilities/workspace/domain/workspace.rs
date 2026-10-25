@@ -128,6 +128,15 @@ impl Sandbox {
         }
     }
 
+    /// 该落点对应的宿主根（真实路径校验用；`Place::Module` 取模块根）。
+    pub fn root_of(&self, place: &Place) -> Option<&Path> {
+        match place {
+            Place::Shared => Some(self.shared.as_path()),
+            Place::Private => Some(self.private.as_path()),
+            Place::Module(id) => self.modules.get(id).map(|p| p.as_path()),
+        }
+    }
+
     /// 该落点这一席能不能写：共享主副本只读时写类工具一律拒绝；私有沙箱永远全权；
     /// 模块目录（含 `<module>/userdata/`）对 **agent 的内置文件工具** 永久只读——
     /// 模块数据由模块自己的工具 / 服务进程维护（模块工具进程的围栏见 `FenceSpec::from_sandbox`）。

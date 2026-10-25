@@ -75,6 +75,13 @@ pub fn execute(
     } else if matches!(name, READ | LIST | SEARCH) && !sb.can_read(&place, &path) {
         return fail(sb.read_refusal(&place, &path));
     }
+    // 词法上在根内不等于真实落点在根内：符号链接 / junction 指向根外时一律拒绝。
+    let Some(root) = sb.root_of(&place) else {
+        return fail(format!("找不到落点对应的根：{}", spec));
+    };
+    if let Err(e) = io.within(root, &path) {
+        return fail(e);
+    }
     match name {
         READ => read(io, obs, &args, &spec, &path),
         WRITE => write(io, obs, &args, &spec, &path),
@@ -435,6 +442,12 @@ fn apply_patch(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, body: &str)
         };
         if !sb.can_write(&place, &path) {
             return fail(block_fault(n, sb.write_refusal(&place, &path)));
+        }
+        let Some(root) = sb.root_of(&place) else {
+            return fail(block_fault(n, format!("找不到落点对应的根：{}", spec)));
+        };
+        if let Err(e) = io.within(root, &path) {
+            return fail(block_fault(n, e));
         }
         // 同一个文件被前面的块改过：以后面算出来的内容为准（不能回到盘上的旧内容）
         let source: Option<(String, bool, bool)> = match pending.get(&path) {

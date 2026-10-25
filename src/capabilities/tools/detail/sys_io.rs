@@ -6,6 +6,48 @@ use crate::capabilities::tools::ports::{DirEntry, FileRead, SysIo};
 use std::io::Read;
 use std::path::Path;
 
+/// 真实落点是否仍在 `root` 内：目标存在就 `canonicalize`；目标不存在就退到最近的已存在祖先；
+/// 叶子是悬空符号链接时直接拒绝（`canonicalize` 会失败，不能靠“看父目录”绕过）。
+fn real_within(root: &Path, path: &Path) -> Result<(), String> {
+    let root_real = root
+        .canonicalize()
+        .map_err(|e| format!("根目录不可达：{}（{}）", root.display(), e))?;
+    let contained = |real: &Path| {
+        if real.starts_with(&root_real) {
+            Ok(())
+        } else {
+            Err(format!(
+                "路径越过允许的根（符号链接 / junction 指向根外）：{}",
+                path.display()
+            ))
+        }
+    };
+    if let Ok(real) = path.canonicalize() {
+        return contained(&real);
+    }
+    if std::fs::symlink_metadata(path)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err(format!(
+            "路径越过允许的根（符号链接 / junction 指向根外或悬空）：{}",
+            path.display()
+        ));
+    }
+    let mut probe = path;
+    loop {
+        match probe.parent() {
+            Some(parent) if parent != probe => {
+                probe = parent;
+                if let Ok(real) = probe.canonicalize() {
+                    return contained(&real);
+                }
+            }
+            _ => return Err(format!("路径不可达：{}", path.display())),
+        }
+    }
+}
+
 pub struct FsSysIo {
     /// 单次读取的字节上限（超出只读开头部分，如实标注）。
     pub max_read_bytes: usize,
@@ -59,6 +101,10 @@ impl SysIo for FsSysIo {
             std::fs::create_dir_all(dir).map_err(|e| format!("建目录失败：{}", e))?;
         }
         std::fs::write(path, content.as_bytes()).map_err(|e| format!("写入失败：{}", e))
+    }
+
+    fn within(&self, root: &Path, path: &Path) -> Result<(), String> {
+        real_within(root, path)
     }
 
     fn list(&self, path: &Path) -> Result<Vec<DirEntry>, String> {

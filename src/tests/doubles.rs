@@ -994,6 +994,18 @@ impl SysIo for InMemorySysIo {
         Ok(out)
     }
 
+    fn within(
+        &self,
+        root: &std::path::Path,
+        path: &std::path::Path,
+    ) -> Result<(), String> {
+        if path.starts_with(root) {
+            Ok(())
+        } else {
+            Err(format!("路径越过允许的根：{}", path.display()))
+        }
+    }
+
     fn write(&self, path: &std::path::Path, content: &str) -> Result<(), String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
