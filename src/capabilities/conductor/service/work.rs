@@ -207,10 +207,13 @@ impl Conductor {
         let current_path = std::env::var_os("PATH").unwrap_or_default();
         let has_exe = |name: &str| self.probe.has_exe(name);
         let bin_ok = |path: &std::path::Path| self.probe.is_dir(path);
+        let base = self.packages.base();
         let facts = pkgs::Facts {
             has_exe: &has_exe,
             bin_ok: &bin_ok,
             current_path: &current_path,
+            base: &base.active,
+            host_fallback: &base.fallback,
         };
         pkgs::plan_host(spec, modules, &self.packages.library(), policy, &facts)
     }
@@ -1135,7 +1138,15 @@ impl Conductor {
             .cloned()
             .collect();
         if meta.exec.tier == crate::kernel::api::Tier::Vm {
+            let guest_runtimes = self.guest_runtimes_of(&meta.exec);
             for (id, caps) in pkgs::absent(&session_modules, &self.packages.library()) {
+                let caps: Vec<String> = caps
+                    .into_iter()
+                    .filter(|c| !guest_runtimes.iter().any(|g| g == c))
+                    .collect();
+                if caps.is_empty() {
+                    continue;
+                }
                 self.log.warn(
                     "conductor::create_work",
                     &format!("模块 {} 声明的运行包不在包库：{}", id, caps.join("、")),

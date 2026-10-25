@@ -8,7 +8,8 @@ pub use crate::capabilities::packages::domain::manifest::{
 };
 pub use crate::capabilities::packages::domain::plan::{
     absent, build_packages, diagnose_text, diagnoses, plan_guest, plan_host, plan_host_requests,
-    requests_for, Facts, PackagePlan, PinPolicy, PlannedPackage, Problem, Provider,
+    requests_for, BaseFacts, Facts, HostFallback, PackagePlan, PinPolicy, PlannedPackage, Problem,
+    Provider,
 };
 
 /// 目的：运行包库的用例面（service.rs 实现）——包库快照与依赖文件夹路径走这里。
@@ -18,4 +19,8 @@ pub trait Packages: Send + Sync {
     fn library(&self) -> Library;
     /// 包库所在目录（界面上要如实告诉用户"把包放哪儿"）。
     fn runtimes_dir(&self) -> std::path::PathBuf;
+    /// 项目内基础 profile 与宿主回退事实（组合根算好；测试替身缺省为空）。
+    fn base(&self) -> BaseFacts {
+        BaseFacts::default()
+    }
 }

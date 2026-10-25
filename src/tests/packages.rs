@@ -17,6 +17,112 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 #[test]
+pub(crate) fn base_capabilities_prefer_project_then_usable_host_fallback() {
+    let modules = vec![module_with_runtimes("a", &["python", "gcc"])];
+    let has = |_: &str| false;
+    let bin_ok = |_: &Path| true;
+    let current = OsStr::new("");
+    let base = vec![("python".to_string(), "3.14.9".to_string())];
+    let mut fallback = BTreeMap::new();
+    fallback.insert(
+        "cc".to_string(),
+        pkgs::HostFallback {
+            path: PathBuf::from("C:/host/gcc.exe"),
+            fenced: true,
+            why: String::new(),
+        },
+    );
+    let facts = Facts {
+        has_exe: &has,
+        bin_ok: &bin_ok,
+        current_path: current,
+        base: &base,
+        host_fallback: &fallback,
+    };
+    let plan = pkgs::plan_host(
+        &ExecSpec::default(),
+        &modules,
+        &Library::default(),
+        PinPolicy::Require,
+        &facts,
+    );
+    assert!(plan.problems.is_empty(), "{:?}", plan.problems);
+    assert_eq!(
+        plan.providers.get("python"),
+        Some(&pkgs::Provider::Base {
+            id: "python".to_string(),
+            version: "3.14.9".to_string(),
+        })
+    );
+    assert_eq!(plan.providers.get("gcc"), Some(&pkgs::Provider::Host));
+}
+
+#[test]
+pub(crate) fn base_capability_uses_host_fallback_even_when_fence_cannot_grant() {
+    let modules = vec![module_with_runtimes("a", &["python"])];
+    let has = |_: &str| false;
+    let bin_ok = |_: &Path| true;
+    let current = OsStr::new("");
+    let base: Vec<(String, String)> = Vec::new();
+    let mut fallback = BTreeMap::new();
+    fallback.insert(
+        "python".to_string(),
+        pkgs::HostFallback {
+            path: PathBuf::from("C:/host/python.exe"),
+            fenced: false,
+            why: "目录属主不是当前用户".to_string(),
+        },
+    );
+    let facts = Facts {
+        has_exe: &has,
+        bin_ok: &bin_ok,
+        current_path: current,
+        base: &base,
+        host_fallback: &fallback,
+    };
+    let plan = pkgs::plan_host(
+        &ExecSpec::default(),
+        &modules,
+        &Library::default(),
+        PinPolicy::Require,
+        &facts,
+    );
+    assert!(plan.problems.is_empty(), "{:?}", plan.problems);
+    assert_eq!(plan.providers.get("python"), Some(&pkgs::Provider::Host));
+    assert!(
+        plan.unusable.is_empty(),
+        "回退存在但围栏授不了权时仍可执行（工具层会问是否本次无围栏跑）：{:?}",
+        plan.unusable
+    );
+
+    let empty = BTreeMap::new();
+    let facts = Facts {
+        has_exe: &has,
+        bin_ok: &bin_ok,
+        current_path: current,
+        base: &base,
+        host_fallback: &empty,
+    };
+    let plan = pkgs::plan_host(
+        &ExecSpec::default(),
+        &modules,
+        &Library::default(),
+        PinPolicy::Require,
+        &facts,
+    );
+    assert!(
+        matches!(
+            plan.problems.as_slice(),
+            [Problem::MissingBase { capability, .. }] if capability == "python"
+        ),
+        "{:?}",
+        plan.problems
+    );
+    let text = pkgs::diagnose_text(&plan.problems);
+    assert!(text.contains("node setup-runtime.js --yes"), "{}", text);
+}
+
+#[test]
 pub(crate) fn package_manifest_check_rejects_illegal_forms() {
     assert!(
         check_manifest(&pkg("python", "3.12.4")).is_ok(),
@@ -477,10 +583,14 @@ pub(crate) fn host_plan_prefers_packages_and_falls_back_to_host_path() {
     let has_any = |_: &str| true;
     let bin_ok = |p: &Path| p == bin;
     let current = OsStr::new("/host/bin");
+    let base: Vec<(String, String)> = Vec::new();
+    let fallback = std::collections::BTreeMap::new();
     let facts = Facts {
         has_exe: &has_any,
         bin_ok: &bin_ok,
         current_path: current,
+        base: &base,
+        host_fallback: &fallback,
     };
     let plan = pkgs::plan_host(&spec, &modules, &lib, PinPolicy::Require, &facts);
     assert!(plan.problems.is_empty(), "{:?}", plan.problems);
@@ -515,10 +625,14 @@ pub(crate) fn host_plan_requires_a_pin_for_multiple_versions() {
     let spec = ExecSpec::default();
     let has = |_: &str| false;
     let bin_ok = |_: &Path| true;
+    let base: Vec<(String, String)> = Vec::new();
+    let fallback = std::collections::BTreeMap::new();
     let facts = Facts {
         has_exe: &has,
         bin_ok: &bin_ok,
         current_path: OsStr::new(""),
+        base: &base,
+        host_fallback: &fallback,
     };
     let plan = pkgs::plan_host(&spec, &modules, &lib, PinPolicy::Require, &facts);
     assert!(
@@ -543,10 +657,14 @@ pub(crate) fn host_plan_refuses_system_and_binless_packages() {
     let spec = ExecSpec::default();
     let has = |_: &str| false;
     let bin_ok = |_: &Path| true;
+    let base: Vec<(String, String)> = Vec::new();
+    let fallback = std::collections::BTreeMap::new();
     let facts = Facts {
         has_exe: &has,
         bin_ok: &bin_ok,
         current_path: OsStr::new(""),
+        base: &base,
+        host_fallback: &fallback,
     };
     let plan = pkgs::plan_host(&spec, &modules, &lib, PinPolicy::Require, &facts);
     assert!(
@@ -569,10 +687,14 @@ pub(crate) fn host_plan_refuses_system_and_binless_packages() {
     let lib = Library::build(vec![no_bin], Vec::new());
     let tool_modules = vec![module_with_runtimes("a", &["tool"])];
     let bin_ok = |_: &Path| false;
+    let base: Vec<(String, String)> = Vec::new();
+    let fallback = std::collections::BTreeMap::new();
     let facts = Facts {
         has_exe: &has,
         bin_ok: &bin_ok,
         current_path: OsStr::new(""),
+        base: &base,
+        host_fallback: &fallback,
     };
     let plan = pkgs::plan_host(&spec, &tool_modules, &lib, PinPolicy::Require, &facts);
     assert!(

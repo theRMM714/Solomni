@@ -96,24 +96,10 @@ fn main() {
     // 基础工具链：只写项目内 .tools；先应用 PATH，再跑诊断 / 构建 / 会话，模块工具与 build 因此都优先项目版本。
     let toolchains = entry::toolchains::apply(&root);
     // 这些是人读的启动事实；--doctor / --provision 的 stdout 是机器可读 JSON，所以走 stderr。
-    if toolchains.active.is_empty() {
-        eprintln!("[工具链] 未安装项目工具链，使用宿主 PATH（可运行 node setup-toolchains.js）");
-    } else {
-        eprintln!(
-            "[工具链] 项目内：{}",
-            toolchains
-                .active
-                .iter()
-                .map(|(id, version)| format!("{} {}", id, version))
-                .collect::<Vec<_>>()
-                .join("、")
-        );
-    }
-    if !toolchains.missing.is_empty() {
-        eprintln!(
-            "[工具链] 未安装：{}；这些命令回退宿主 PATH",
-            toolchains.missing.join("、")
-        );
+    // 基础 profile 缺失时**每次启动**都报：项目内 / 宿主回退 / 宿主也没有，并给补全命令。
+    let base = entry::toolchains::base_facts(&root);
+    for line in entry::toolchains::report_lines(&base) {
+        eprintln!("[工具链] {}", line);
     }
     for w in &toolchains.warnings {
         eprintln!("[工具链] {}", w);
@@ -229,11 +215,13 @@ fn main() {
         capabilities::tools::api::names(),
     );
     // 运行包能力：依赖文件夹 runtimes/（一个包 = 一个文件夹 + package.yaml）。
-    let packages: Arc<dyn capabilities::packages::api::Packages + Send + Sync> = Arc::new(
-        capabilities::packages::service::PackagesService::new(Arc::new(
-            capabilities::packages::detail::FsPackages::new(root.join("runtimes")),
-        )),
-    );
+    let packages: Arc<dyn capabilities::packages::api::Packages + Send + Sync> =
+        Arc::new(capabilities::packages::service::PackagesService::with_base(
+            Arc::new(capabilities::packages::detail::FsPackages::new(
+                root.join("runtimes"),
+            )),
+            base.clone(),
+        ));
     // 端点记忆：谁先通了就固定谁，后续会话不再反复探测候选。
     let memo = capabilities::llm::detail::endpoint::memo_new();
     // **llm 能力**：三个出站端口（通道工厂 / 模型目录 / 信封修复）只由它的 service 持有（R12）；

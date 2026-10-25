@@ -145,6 +145,7 @@ pub(crate) fn doctor_json_with(
             })
         })
         .collect();
+    let base = crate::entry::toolchains::base_facts(root);
     let doc = serde_json::json!({
         "platform": std::env::consts::OS,
         "arch": std::env::consts::ARCH,
@@ -153,6 +154,18 @@ pub(crate) fn doctor_json_with(
             "python": crate::kernel::detail::host_probe::find_exe("python").map(|p| p.to_string_lossy().into_owned()),
             "node": crate::kernel::detail::host_probe::find_exe("node").map(|p| p.to_string_lossy().into_owned()),
             "curl": crate::kernel::detail::host_probe::find_exe("curl").map(|p| p.to_string_lossy().into_owned()),
+        },
+        "toolchains": {
+            "profile": crate::entry::toolchains::PROFILE,
+            "active": base.active.iter().map(|(id, version)| serde_json::json!({
+                "id": id,
+                "version": version,
+            })).collect::<Vec<_>>(),
+            "fallback": base.fallback.iter().map(|(id, f)| (id.clone(), serde_json::json!({
+                "path": f.path.to_string_lossy(),
+                "fenced": f.fenced,
+                "why": f.why,
+            }))).collect::<std::collections::BTreeMap<_, _>>(),
         },
         "processes": procs,
         "vm_tier": {
@@ -398,10 +411,13 @@ pub fn build_module(
     use crate::kernel::ports::HostProbe;
     let probe = crate::kernel::detail::host_probe::HostProbeAdapter;
     // 构建期能力：运行包优先，基础工具链 / 宿主 PATH 回退；没有会话定版，多版本取稳定序第一个。
-    let packages_lib =
-        crate::capabilities::packages::service::PackagesService::new(std::sync::Arc::new(
-            crate::capabilities::packages::detail::FsPackages::new(root.join("runtimes")),
-        ));
+    let base = crate::entry::toolchains::base_facts(root);
+    let packages_lib = crate::capabilities::packages::service::PackagesService::with_base(
+        std::sync::Arc::new(crate::capabilities::packages::detail::FsPackages::new(
+            root.join("runtimes"),
+        )),
+        base.clone(),
+    );
     let current_path = std::env::var_os("PATH").unwrap_or_default();
     let has_exe = |name: &str| probe.has_exe(name);
     let bin_ok = |path: &std::path::Path| probe.is_dir(path);
@@ -409,6 +425,8 @@ pub fn build_module(
         has_exe: &has_exe,
         bin_ok: &bin_ok,
         current_path: &current_path,
+        base: &base.active,
+        host_fallback: &base.fallback,
     };
     let requests =
         crate::capabilities::packages::api::requests_for(&decl.needs, &format!("build:{}", id));
@@ -430,6 +448,9 @@ pub fn build_module(
         .providers
         .iter()
         .map(|(cap, p)| match p {
+            crate::capabilities::packages::api::Provider::Base { id, version } => {
+                format!("{}={}@{}", cap, id, version)
+            }
             crate::capabilities::packages::api::Provider::Host => format!("{}=host", cap),
             crate::capabilities::packages::api::Provider::Package { id, version } => {
                 format!("{}={}@{}", cap, id, version)

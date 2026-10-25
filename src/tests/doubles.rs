@@ -2252,6 +2252,14 @@ pub(crate) fn test_packages(
 ) -> Arc<dyn crate::capabilities::packages::api::Packages + Send + Sync> {
     Arc::new(crate::capabilities::packages::service::PackagesService::new(packages))
 }
+
+/// 目的：测试用的 packages 能力面，带"宿主回退可用"的事实（由测试 probe 声明它有什么）。
+pub(crate) fn test_packages_with_base(
+    packages: Arc<dyn PackageSource + Send + Sync>,
+    base: crate::capabilities::packages::api::BaseFacts,
+) -> Arc<dyn crate::capabilities::packages::api::Packages + Send + Sync> {
+    Arc::new(crate::capabilities::packages::service::PackagesService::with_base(packages, base))
+}
 /// 目的：模块启停覆盖的内存存储（测试用；与 yaml 实现同一条端口）。
 #[derive(Default)]
 pub(crate) struct InMemoryModuleState {
@@ -2495,13 +2503,33 @@ pub(crate) fn core_with_pkgs_probe(
     let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
         Arc::new(gateway);
     let llm = test_llm(Arc::clone(&gateway), catalog);
+    // 测试里的宿主回退：probe 说有的基础能力就当作"围栏可用"，与生产里组合根给的事实同形。
+    let mut base = crate::capabilities::packages::api::BaseFacts::default();
+    for id in ["python", "node", "cc"] {
+        let names: &[&str] = match id {
+            "python" => &["python", "python3"],
+            "node" => &["node"],
+            "cc" => &["cc", "gcc", "g++", "clang", "clang++"],
+            _ => &[],
+        };
+        if names.iter().any(|n| probe.has_exe(n)) {
+            base.fallback.insert(
+                id.to_string(),
+                crate::capabilities::packages::api::HostFallback {
+                    path: std::path::PathBuf::from(id),
+                    fenced: true,
+                    why: String::new(),
+                },
+            );
+        }
+    }
     Conductor::new(
         crate::tests::root_dir(),
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history_of(history),
         test_workspace(Arc::new(InMemoryWorkspace::new())),
         test_vm(),
-        test_packages(packages),
+        test_packages_with_base(packages, base),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
         llm,

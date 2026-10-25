@@ -182,10 +182,13 @@ impl ResidentOps for ResidentsService {
             let current_path = std::env::var_os("PATH").unwrap_or_default();
             let has_exe = |n: &str| probe.has_exe(n);
             let bin_ok = |p: &std::path::Path| probe.is_dir(p);
+            let base = packages.base();
             let facts = pkgs::Facts {
                 has_exe: &has_exe,
                 bin_ok: &bin_ok,
                 current_path: &current_path,
+                base: &base.active,
+                host_fallback: &base.fallback,
             };
             let plan = pkgs::plan_host(
                 &crate::kernel::api::ExecSpec::default(),

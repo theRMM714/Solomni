@@ -7,18 +7,19 @@ use crate::kernel::api::FenceSpec;
 use std::ffi::c_void;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use windows_sys::Win32::Foundation::LocalFree;
+use windows_sys::Win32::Foundation::{CloseHandle, LocalFree};
 use windows_sys::Win32::Security::Authorization::{
     ConvertStringSidToSidW, GetNamedSecurityInfoW, SetEntriesInAclW, SetNamedSecurityInfoW,
     EXPLICIT_ACCESS_W, GRANT_ACCESS, OBJECTS_AND_SID, REVOKE_ACCESS, TRUSTEE_IS_OBJECTS_AND_SID,
     TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
 };
 use windows_sys::Win32::Security::{
-    GetAce, GetAclInformation, GetSecurityDescriptorLength, SetFileSecurityW,
-    ACE_INHERITED_OBJECT_TYPE_PRESENT, ACE_OBJECT_TYPE_PRESENT, ACL, ACL_SIZE_INFORMATION,
-    CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION, OBJECT_INHERIT_ACE, PSECURITY_DESCRIPTOR,
-    PSID, SID,
+    GetAce, GetAclInformation, GetSecurityDescriptorLength, GetTokenInformation, SetFileSecurityW,
+    TokenUser, ACE_INHERITED_OBJECT_TYPE_PRESENT, ACE_OBJECT_TYPE_PRESENT, ACL,
+    ACL_SIZE_INFORMATION, CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION, OBJECT_INHERIT_ACE,
+    OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SID, TOKEN_QUERY, TOKEN_USER,
 };
+use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 /// 文件对象（SetNamedSecurityInfoW / GetNamedSecurityInfoW 的对象类型）。
 use super::*;
@@ -779,6 +780,68 @@ pub(crate) fn orphan_package_aces(path: &Path) -> Result<Vec<String>, String> {
 /// 目的：这段文本是不是一个真的 SID——转换失败时 sid_to_string 会给占位文本，它不能当判等依据。
 fn is_sid_text(text: &str) -> bool {
     text.starts_with("S-1-")
+}
+
+/// 目的：目录属主是不是当前用户（能写 DACL 的充分条件；不判显式 WRITE_DAC ACE）。
+pub(crate) fn owner_is_current_user(path: &Path) -> Result<bool, String> {
+    let me = current_user_sid()?;
+    if !is_sid_text(&me) {
+        return Ok(false);
+    }
+    let w = wide(path);
+    let mut owner: PSID = std::ptr::null_mut();
+    let mut sd: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
+    let rc = unsafe {
+        GetNamedSecurityInfoW(
+            w.as_ptr(),
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION,
+            &mut owner,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut sd,
+        )
+    };
+    if rc != 0 {
+        return Err(format!("错误码 {}", rc));
+    }
+    let owner_text = sid_to_string(owner);
+    unsafe {
+        LocalFree(sd as _);
+    }
+    Ok(is_sid_text(&owner_text) && owner_text == me)
+}
+
+/// 目的：当前进程令牌里的用户 SID。
+fn current_user_sid() -> Result<String, String> {
+    use windows_sys::Win32::Foundation::HANDLE;
+    let mut token: HANDLE = std::ptr::null_mut();
+    let opened = unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) };
+    if opened == 0 {
+        return Err("打开进程令牌失败".to_string());
+    }
+    let mut len = 0u32;
+    unsafe {
+        GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut len);
+    }
+    if len == 0 {
+        unsafe {
+            CloseHandle(token);
+        }
+        return Err("读取令牌用户失败".to_string());
+    }
+    let mut buf = vec![0u8; len as usize];
+    let read =
+        unsafe { GetTokenInformation(token, TokenUser, buf.as_mut_ptr() as *mut _, len, &mut len) };
+    unsafe {
+        CloseHandle(token);
+    }
+    if read == 0 {
+        return Err("读取令牌用户失败".to_string());
+    }
+    let user = unsafe { &*(buf.as_ptr() as *const TOKEN_USER) };
+    Ok(sid_to_string(user.User.Sid))
 }
 
 /// 目的：该对象上有没有给这个 SID 的**任何**允许 ACE（不看权限位）。

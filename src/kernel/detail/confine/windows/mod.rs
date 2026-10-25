@@ -143,6 +143,29 @@ fn missing(path: &Path) -> bool {
     )
 }
 
+/// 目的：解释器安装目录在 Windows 容器围栏下能不能放行。
+///   已有足够的 ALL APPLICATION PACKAGES ACE 就不用写；否则只有属主是当前用户（能写 DACL）才算可用。
+/// 约束：只读探测；真正的递归授权仍由 prepare_fence 做，失败信息以那里为准。
+pub(crate) fn interpreter_dir_usable(dir: &Path) -> Result<(), String> {
+    if !dir.is_dir() {
+        return Err(format!("目录不在场（{}）", dir.display()));
+    }
+    let base = baseline_sid().map_err(|e| format!("派生共享包 SID 失败：{}", e))?;
+    let has = has_ace_for(base, dir, RIGHTS_RO);
+    free_sid(base);
+    if has {
+        return Ok(());
+    }
+    match owner_is_current_user(dir) {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(
+            "目录属主不是当前用户；写 DACL 需要管理员，或预先把该目录授给「所有应用程序包」"
+                .to_string(),
+        ),
+        Err(e) => Err(format!("读取目录属主失败：{}", e)),
+    }
+}
+
 /// 目的：把围栏要用的授权一次性做好（按 (SID, 路径, 权限) 去重，不重复改 ACL），并如实分出
 ///   **必要**落点（授不上就要问用户或拒绝）与**可选**落点（只记事实）。
 /// 约束：每条授权先落台账再动 ACL，写后核对；失败就回滚并如实记进结论（不静默降级）。

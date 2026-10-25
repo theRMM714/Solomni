@@ -3,7 +3,8 @@
 //! 不管：安装器（setup-toolchains.js）、真实进程围栏与 guest 工具链。
 //! 联动：被测实现见 src/entry/toolchains.rs；启动期调用见 src/main.rs。
 
-use crate::entry::toolchains::{active_roots, compose, target};
+use crate::capabilities::packages::api::{BaseFacts, HostFallback};
+use crate::entry::toolchains::{active_roots, compose, report_lines, target, PROFILE};
 
 type ToolSpec<'a> = (&'a str, &'a str, &'a [&'a str], &'a [(&'a str, &'a str)]);
 
@@ -37,6 +38,62 @@ fn active(target: &str, profile: &[&str], tools: &[ToolSpec<'_>]) -> String {
         "{{\"target\":\"{}\",\"profile\":[{}],\"tools\":[{}]}}",
         target, profile, tools
     )
+}
+
+#[test]
+pub(crate) fn profile_matches_toolchains_js() {
+    let js = include_str!("../../toolchains.js");
+    let line = js
+        .lines()
+        .find(|l| l.contains("const PROFILE"))
+        .expect("toolchains.js 里应有 PROFILE");
+    for id in PROFILE {
+        assert!(
+            line.contains(&format!("\"{}\"", id)),
+            "toolchains.js 的 PROFILE 少 {}：{}",
+            id,
+            line
+        );
+    }
+}
+
+#[test]
+pub(crate) fn report_lines_name_project_missing_host_fallback_and_gap() {
+    let mut fallback = std::collections::BTreeMap::new();
+    fallback.insert(
+        "python".to_string(),
+        HostFallback {
+            path: std::path::PathBuf::from("C:/host/python.exe"),
+            fenced: true,
+            why: String::new(),
+        },
+    );
+    fallback.insert(
+        "node".to_string(),
+        HostFallback {
+            path: std::path::PathBuf::from("C:/host/node.exe"),
+            fenced: false,
+            why: "目录属主不是当前用户".to_string(),
+        },
+    );
+    let base = BaseFacts {
+        active: Vec::new(),
+        fallback,
+    };
+    let text = report_lines(&base).join("\n");
+    assert!(text.contains("项目内未安装：python、node、cc"), "{}", text);
+    assert!(
+        text.contains("宿主回退 python") && text.contains("围栏可用"),
+        "{}",
+        text
+    );
+    assert!(
+        text.contains("宿主回退 node") && text.contains("围栏不可授权"),
+        "{}",
+        text
+    );
+    assert!(text.contains("宿主回退 cc：宿主 PATH 也没有"), "{}", text);
+    assert!(text.contains("node setup-runtime.js --yes"), "{}", text);
 }
 
 #[test]

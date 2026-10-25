@@ -19,6 +19,8 @@ use std::path::{Path, PathBuf};
 pub enum Problem {
     /// 模块（含它的包的传递依赖）需要的能力，包库里没有任何包提供。
     Missing { module: String, capability: String },
+    /// 模块需要的是基础能力，但项目内基础 profile 没装，宿主也没有回退。
+    MissingBase { module: String, capability: String },
     /// 同一能力有多个版本，需用户定版。
     Ambiguous {
         capability: String,
@@ -78,8 +80,44 @@ pub struct PackagePlan {
 /// 目的：一个能力最终由谁提供。
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Provider {
+    /// 项目内基础 profile（python / node / cc）。
+    Base {
+        id: String,
+        version: String,
+    },
+    /// 宿主 PATH（额外能力的回退；基础能力只有在围栏可授权时才走这里）。
     Host,
-    Package { id: String, version: String },
+    Package {
+        id: String,
+        version: String,
+    },
+}
+
+/// 目的：宿主回退的一个解释器：路径 + 平台围栏能不能放行。
+/// 约束：fenced=false 不等于不可执行——工具调用仍可经统一裁决通道选择"本次无围栏跑"；
+///   启动报告必须把这一条如实说清（服务没有可回答前端时 fail-closed）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostFallback {
+    pub path: std::path::PathBuf,
+    pub fenced: bool,
+    pub why: String,
+}
+
+/// 目的：项目内基础 profile 的事实（组合根从 active.json / HostProbe / 围栏探针算好）。
+#[derive(Debug, Clone, Default)]
+pub struct BaseFacts {
+    pub active: Vec<(String, String)>,
+    pub fallback: std::collections::BTreeMap<String, HostFallback>,
+}
+
+/// 目的：能力名 → 基础 profile 的工具 id；不是基础能力就返回 None。
+pub fn base_id_for(cap: &str) -> Option<&'static str> {
+    match cap {
+        "python" | "python3" => Some("python"),
+        "node" => Some("node"),
+        "cc" | "gcc" | "g++" | "c++" | "clang" | "clang++" => Some("cc"),
+        _ => None,
+    }
 }
 
 /// 目的：多版本且没定版时的策略。
@@ -99,6 +137,10 @@ pub struct Facts<'a> {
     pub bin_ok: &'a dyn Fn(&Path) -> bool,
     /// 目的：当前进程 PATH（合成生效 PATH 的尾部）。
     pub current_path: &'a OsStr,
+    /// 目的：项目内基础 profile 已装上的工具（id, version）。
+    pub base: &'a [(String, String)],
+    /// 目的：基础能力的宿主回退事实（工具 id → 解释器路径 + 围栏可用性）。
+    pub host_fallback: &'a BTreeMap<String, HostFallback>,
 }
 
 /// 目的：一条选型请求：谁（模块 / build）需要哪个能力。
@@ -183,6 +225,34 @@ pub fn plan_host_requests(
         let cap = &req.capability;
         let versions = eligible.versions_of(cap);
         if versions.is_empty() {
+            // 基础能力：项目内 profile 优先，其次宿主回退（只有围栏能授权才算可用）。
+            // 额外能力：仍按包库 → 宿主 PATH 回退。
+            if lib.versions_of(cap).is_empty() {
+                if let Some(id) = base_id_for(cap) {
+                    if let Some((_, version)) = facts.base.iter().find(|(i, _)| i == id) {
+                        providers.insert(
+                            cap.clone(),
+                            Provider::Base {
+                                id: id.to_string(),
+                                version: version.clone(),
+                            },
+                        );
+                        continue;
+                    }
+                    match facts.host_fallback.get(id) {
+                        Some(_) => {
+                            providers.insert(cap.clone(), Provider::Host);
+                        }
+                        None => {
+                            problems.push(Problem::MissingBase {
+                                module: req.module.clone(),
+                                capability: cap.clone(),
+                            });
+                        }
+                    }
+                    continue;
+                }
+            }
             if has_host_executable(facts.has_exe, cap) {
                 providers.insert(cap.clone(), Provider::Host);
                 continue;
@@ -526,7 +596,8 @@ fn unusable_map(requests: &[Request], problems: &[Problem]) -> BTreeMap<String, 
     let mut assembly_broken = false;
     for d in problems {
         match d {
-            Problem::Missing { module, capability } => {
+            Problem::Missing { module, capability }
+            | Problem::MissingBase { module, capability } => {
                 out.entry(module.clone())
                     .or_default()
                     .push(capability.clone());
@@ -559,6 +630,15 @@ pub fn diagnose_text(diags: &[Problem]) -> String {
             } => {
                 format!(
                     "模块 {} 需要运行包 {}：包库里没有、guest 镜像也没声明自带（把它放进依赖文件夹 runtimes/，或在 guest.yaml 的 runtimes 里声明）",
+                    module, capability
+                )
+            }
+            Problem::MissingBase {
+                module,
+                capability,
+            } => {
+                format!(
+                    "模块 {} 的基础运行能力 {} 未安装：先运行 node setup-runtime.js --yes 把项目内基础工具链装好",
                     module, capability
                 )
             }
