@@ -55,7 +55,7 @@
 | `--provision --ensure[=id,…] --yes` | 下载并安装（只写项目内） | 0 成功 / 1 失败 / 2 没给 `--yes` |
 | `--https-check <url>` | 用产品自己的出站链路打一次最小 HTTPS 请求 | `ok` / `no-net` / `env-tls` / `tls-fail\|fail`；0，缺 URL 2 |
 | `--unpack <archive> <dest>` | 解归档：tar / tar.gz / tgz / tar.zst / tzst / tar.xz / txz / zip | 0 / 1 失败 / 2 用法错 |
-| `--build=<模块 id> [--guest=<虚拟根>]` | 在目标环境跑 `module.yaml` 的 `build.command`：本机档用产品围栏，虚拟机档在 guest 里 | 0 / 1 失败 / 2 用法错、没有该模块或没有 `build` 声明 |
+| `--build=<模块 id> [--guest=<虚拟根>]` | 在目标环境跑 `module.yaml` 的 `build.command`：本机档用产品围栏，虚拟机档在 guest 里；**创建会话前也会按需自动补编**（见 [docs/builds](../builds/README.md)），这条是手动入口 | 0 / 1 失败 / 2 用法错、没有该模块或没有 `build` 声明 |
 | `--probe-tools <模型 id>` | 实测一条通道是否支持原生工具调用，把**确定**结论写回 `models.yaml` | 三态文本；0 / 1 失败 / 2 用法错 |
 | `--probe-replay <模型 id>` | 只报回放形状的事实，不改登记处 | 逐形状文本；0 / 1 失败 / 2 用法错 |
 | `--print-routes` | HTTP 路由目录的唯一定义（见 [contracts.md](../presentation/contracts.md)） | JSON；0 |

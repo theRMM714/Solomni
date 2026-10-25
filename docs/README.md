@@ -16,6 +16,7 @@
 | `registry`（登记处） | [README.md](registry/README.md) | [unit-map.md](registry/unit-map.md) |
 | `modules`（模块公地） | [README.md](modules/README.md) | [unit-map.md](modules/unit-map.md) |
 | `packages`（运行包） | [README.md](packages/README.md) | [unit-map.md](packages/unit-map.md) |
+| `builds`（模块构建） | [README.md](builds/README.md) | [unit-map.md](builds/unit-map.md) |
 | `vm`（虚拟机档） | [README.md](vm/README.md) | [unit-map.md](vm/unit-map.md) |
 | `workspace`（工作区） | [README.md](workspace/README.md) | [unit-map.md](workspace/unit-map.md) |
 | `provision`（依赖补齐） | [README.md](provision/README.md) | [unit-map.md](provision/unit-map.md) |

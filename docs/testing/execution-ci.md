@@ -143,7 +143,7 @@ Windows 的进程完整性 = min(令牌, 映像)，所以仓库根里的 `cargo`
 虚拟机档真机用例默认跳过，设 `SOLOMNI_VM_LIVE=1` 才真跑（按需再给 `SOLOMNI_VM_QEMU` / `SOLOMNI_VM_GUEST`，虚拟根默认 `debian`）：
 
 - `src/tests/vm.rs`：guest 起停、并发可写层；
-- `src/tests/diagnostics.rs`：guest 内构建；
+- `src/tests/builds.rs`：本机构建、缓存、失败与创建前补编（guest 内构建在 `SOLOMNI_VM_LIVE=1` 时真跑）；
 - `src/capabilities/provision/guest.rs`：Linux 运行期编排；
 - `src/capabilities/provision/service.rs`：guest-rootfs 属性真机用例（`guest_rootfs_pipeline_keeps_source_attrs_on_the_real_image`，用 `.vm/cache/rootfs.ext4`）；
 - `tests/cross-platform/e2e/`：vm 会话场景。

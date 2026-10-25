@@ -8,6 +8,7 @@
 //! `conductor`（协调业务）与其它能力**平级**：它持会话在世表、命令队列与运行态，
 //! 只经各能力的 `api` 编排，别人不反向调它。
 
+pub mod builds;
 pub mod collab;
 pub mod conductor;
 pub mod llm;

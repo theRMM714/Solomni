@@ -10,7 +10,7 @@
 选型诊断（缺包 / 多版本 / 定版 / 冲突 / 目标不匹配 / 无 bin）；`PackagePlan` 的装载顺序、本机 PATH 与只读根；按模块汇总的不可用能力。
 
 **不管**：guest 生命周期、挂载/软链/system 叠写（`vm` 消费 `PackagePlan` 后自己做）；实际工具进程（`tools`）；
-会话装配与工具面（`conductor`）；构建编排（`diagnostics`）。
+会话装配与工具面（`conductor`）；构建编排与补编（`builds`）。
 
 ## 二、边界
 
@@ -24,5 +24,5 @@
 
 - `conductor`：本机档工具面（包 `bin/` 前置 PATH、包根只读放行）、运行能力报告、缺包判据与定版。
 - `vm`：按 guest 平台筛库、取 `PackagePlan`，把 prefix 挂到 `/<prefix>`、system 载荷叠写进系统路径。
-- `diagnostics`：本机 / guest 构建期 `needs` 的包计划。
+- `builds`：本机 / guest 构建期 `needs` 的包计划（创建会话前补编与 `--build` 共用）。
 - `residents`：常驻服务起进程前的本机包 PATH 与只读根。

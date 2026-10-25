@@ -28,6 +28,43 @@ impl Conductor {
         self.commit_session(prepared)
     }
 
+    /// 目的：规整一次建会话的**目标环境**（档位 / 虚拟根）：有父沿用父会话的执行段，顶层取载荷或设置默认。
+    /// 参数：`spec` = 规整后的载荷。
+    /// 返回：(档位, 虚拟根名)。
+    /// 错误：档位名不合法。
+    /// 约束：与准备段同一份判据（准备段也调它）——创建前的补编因此按同一个目标环境编。
+    pub(crate) fn resolve_env(
+        &self,
+        spec: &d::NewSession,
+    ) -> Result<(Tier, Option<String>), String> {
+        let parent_exec = match &spec.parent {
+            Some(p) => Some(self.history.meta(p)?.exec),
+            None => None,
+        };
+        let tier = match &parent_exec {
+            Some(exec) => exec.tier,
+            None => match spec
+                .tier
+                .as_deref()
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+            {
+                Some(t) => Tier::parse(t)?,
+                None => self.registry.app_settings().tier,
+            },
+        };
+        let guest = match &parent_exec {
+            Some(exec) => exec.guest.clone(),
+            None => spec
+                .guest
+                .as_deref()
+                .map(str::trim)
+                .filter(|b| !b.is_empty())
+                .map(|b| b.to_string()),
+        };
+        Ok((tier, guest))
+    }
+
     /// 目的：建会话的第一段（核心，毫秒级）——规整载荷、占名、备好工作区与计划。
     /// 返回：准备结果 + 可选的那段"要等 guest"的活（虚拟机档才有）。
     pub(crate) fn prepare_session(
@@ -74,31 +111,7 @@ impl Conductor {
         };
         // 环境属于主会话：有父就整段沿用父会话的 ExecSpec（档位 / 虚拟根 / 网络 / 定版），
         // 不给子会话留任何单独覆盖的入口。顶层仍由人经呈现层给档位与虚拟根。
-        let parent_exec = match &parent {
-            Some(p) => Some(self.history.meta(p)?.exec),
-            None => None,
-        };
-        let tier = match &parent_exec {
-            Some(exec) => exec.tier,
-            None => match spec
-                .tier
-                .as_deref()
-                .map(str::trim)
-                .filter(|t| !t.is_empty())
-            {
-                Some(t) => Tier::parse(t)?,
-                None => self.registry.app_settings().tier,
-            },
-        };
-        let vm_guest = match &parent_exec {
-            Some(exec) => exec.guest.clone(),
-            None => spec
-                .guest
-                .as_deref()
-                .map(str::trim)
-                .filter(|b| !b.is_empty())
-                .map(|b| b.to_string()),
-        };
+        let (tier, vm_guest) = self.resolve_env(spec)?;
         // 本次需求：协作必须有；单 agent 的"开头"由调用方在开工那一刻给（见 create_session_call）。
         let task = if mode == WorkMode::Collab {
             let t = spec.task.trim();

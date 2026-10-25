@@ -967,6 +967,7 @@ pub(crate) fn native_core(
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(vec![module_of("a")]))),
+        Arc::new(crate::capabilities::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),
         test_prompt(),

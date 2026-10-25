@@ -5,6 +5,7 @@
 
 mod api;
 mod builders;
+mod builds;
 mod cli;
 mod collab;
 mod conductor;

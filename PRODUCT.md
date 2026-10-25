@@ -140,7 +140,7 @@ $ start.bat                 # Windows（或 node start.js）；macOS/Linux 用 .
 [发现] harvest · indexer · mcp-toolbox · render   <- 扫描 modules/，只报事实
 （菜单：编排入口 + 模块清单，brief 在此给用户看）
 ```
-启动层序负责工具链与构建（见 [README.md](README.md)）；核心启动后立即扫描 `modules/`。
+启动层序负责工具链与核心二进制的构建（见 [README.md](README.md)）；模块产物的构建在创建会话前按需补编（见 [docs/builds/README.md](docs/builds/README.md)）；核心启动后立即扫描 `modules/`。
 
 ### 协作（`collab`）：一次完整流程（六步）
 

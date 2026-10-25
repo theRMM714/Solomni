@@ -25,6 +25,7 @@ fn conductor_rooted(
         test_packages(Arc::new(InMemoryPackages::empty())),
         provision,
         test_modules(Arc::new(VecSource(vec![module_of("a")]))),
+        Arc::new(crate::capabilities::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),
@@ -62,6 +63,7 @@ fn conductor_for_vm(
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
+        Arc::new(crate::capabilities::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),

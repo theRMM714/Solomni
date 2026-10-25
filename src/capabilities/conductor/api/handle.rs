@@ -25,6 +25,7 @@ impl ConductorHandle {
         let residents = core.residents_handle();
         let secrets = core.secrets_handle();
         let modules = core.modules_handle();
+        let builds = core.builds_handle();
         let handle = ConductorHandle {
             tx,
             jobs,
@@ -36,6 +37,7 @@ impl ConductorHandle {
             residents,
             secrets,
             modules,
+            builds,
             booting: Arc::new(std::sync::Mutex::new(std::collections::BTreeSet::new())),
         };
         // 注意：工作线程**绝不能**捕获取手柄（那会持有一个 Sender，通道永不闭合、线程永不退出）。
@@ -73,6 +75,49 @@ impl ConductorHandle {
             .map_err(|_| "核心已停止：无法发送命令".to_string())?;
         rx.recv()
             .map_err(|_| "核心无回应：命令执行中发生 panic，或核心线程已停止".to_string())?
+    }
+
+    /// 目的：创建会话前的补编——本次名单里的模块若在目标环境没有入口、且声明了 `build:`，先在这里编好。
+    /// 参数：`ids` = 本次会话的模块 id（已去重保序）；`tier` / `guest` = 目标环境。
+    /// 错误：构建失败或环境不齐时如实拒绝（错误里带目标与构建输出）。
+    /// 约束：跑在**调用方线程**（不占核心队列），核心线程不陪着等编译器；入口已在场的模块不碰。
+    pub(crate) fn ensure_built(
+        &self,
+        ids: &[String],
+        tier: crate::kernel::api::Tier,
+        guest: Option<&str>,
+    ) -> Result<(), String> {
+        use crate::capabilities::builds::api::Target;
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let target = match tier {
+            crate::kernel::api::Tier::Host => Target::Host,
+            crate::kernel::api::Tier::Vm => match guest.map(str::trim).filter(|g| !g.is_empty()) {
+                Some(g) => Target::Guest(g.to_string()),
+                // 虚拟根没给：准备段会如实拒绝（这里不猜默认值）。
+                None => return Ok(()),
+            },
+        };
+        let roster = self.modules.roster();
+        let net = self.call(|core| Ok(core.network_allowed()))?;
+        for id in ids {
+            let Some(module) = roster.modules.iter().find(|m| &m.manifest.id == id) else {
+                // 没有这个模块：准备段会如实拒绝，这里不重复判。
+                continue;
+            };
+            let built = self
+                .builds
+                .ensure(module, &target, net)
+                .map_err(|e| format!("模块 {} 构建失败（目标 {}）：{}", id, target.label(), e))?;
+            if !built.skipped {
+                self.log.info(
+                    "conductor::create_session",
+                    &format!("已补编模块 {}（目标 {}）", id, built.target),
+                );
+            }
+        }
+        Ok(())
     }
 
     /// 接上工具级确认：有交互前端（Web）在服务时才调，纯终端不调（生成线程不能空等一个没人回答的问题）。

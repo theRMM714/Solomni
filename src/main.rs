@@ -541,6 +541,25 @@ fn main() {
     let provision: Arc<dyn capabilities::provision::api::Provision + Send + Sync> = Arc::new(
         capabilities::provision::ProvisionService::with_vm(&root, provision_vm(Arc::clone(&book))),
     );
+    // **构建能力**：创建会话前补编模块产物（本机档在宿主、虚拟机档在 guest）；执行器与外层工具同一套守门进程机制。
+    let build_runner = kernel::detail::process::ProcTools::new(
+        std::env::current_exe().unwrap_or_default(),
+        std::sync::Arc::clone(&process_texts),
+        home.clone(),
+        std::sync::Arc::clone(&write_allowed),
+    )
+    .with_mode(std::sync::Arc::clone(&sandbox_mode));
+    let builds: Arc<dyn capabilities::builds::api::Builds + Send + Sync> =
+        Arc::new(capabilities::builds::service::BuildsService::new(
+            root.clone(),
+            Arc::clone(&packages),
+            Arc::clone(&vm),
+            Arc::clone(&provision),
+            Arc::new(build_runner),
+            Arc::new(kernel::detail::HostProbeAdapter),
+            std::sync::Arc::clone(&log),
+            entry::toolchains::active_roots(&root),
+        ));
     // 启动时要按有效启停拉起常驻服务：留一份手柄（进程级租约，不属于任何会话）。
     let residents_boot = Arc::clone(&residents);
     let mut conductor = capabilities::conductor::service::Conductor::new(
@@ -554,6 +573,7 @@ fn main() {
         Arc::clone(&packages),
         Arc::clone(&provision),
         Arc::clone(&modules),
+        Arc::clone(&builds),
         Arc::clone(&llm),
         toolexec,
         prompt,

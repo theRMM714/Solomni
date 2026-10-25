@@ -2,6 +2,7 @@
 //! 分层纪律：本文件不出现文件读、ureq、stdin/stdout——机制全在各能力的 `detail` 与 `kernel/detail`，
 //! 装配（new 适配器）只发生在 main 组合根。前端只见 Conductor 门面、会话句柄与 SessionEvent 流。
 
+use crate::capabilities::builds::api::Builds;
 use crate::capabilities::conductor::api::{
     AgentInstance, AgentSuggestion, ConfigAgent, ContinueView, FilesAgentRootView, FilesAgentView,
     FilesRootsView, FilesView, RewindTarget, RuntimeReport, SessionConfig, SessionEdit,
@@ -232,6 +233,8 @@ pub struct Conductor {
     provision: Arc<dyn Provision + Send + Sync>,
     /// 目的：模块能力（**不持它的端口**，R12）——模块清单事实的唯一上游。
     modules: Arc<dyn Modules + Send + Sync>,
+    /// 目的：构建能力面（**不持它的端口**，R12）——创建会话前补编声明了 `build:` 的模块。
+    builds: Arc<dyn Builds + Send + Sync>,
     /// llm 用例面：按解析出来的通道造收发句柄 + 信封的无歧义修复（通道的**解析**在登记处能力）。
     llm: Arc<dyn Llm + Send + Sync>,
     /// 工具执行面（**不持它的端口**，R12）：跑外部/内置工具、释放围栏授权都走它。
@@ -291,6 +294,7 @@ impl Conductor {
         packages: Arc<dyn Packages + Send + Sync>,
         provision: Arc<dyn Provision + Send + Sync>,
         modules: Arc<dyn Modules + Send + Sync>,
+        builds: Arc<dyn Builds + Send + Sync>,
         llm: Arc<dyn Llm + Send + Sync>,
         tools: Arc<dyn ToolExec + Send + Sync>,
         prompt: Arc<dyn Prompt>,
@@ -309,6 +313,7 @@ impl Conductor {
             packages,
             provision,
             modules,
+            builds,
             llm,
             tools,
             log,
@@ -345,6 +350,11 @@ impl Conductor {
     /// 目的：模块能力面（手柄与核心共享同一份；启停写面经它）。
     pub(crate) fn modules_handle(&self) -> Arc<dyn Modules + Send + Sync> {
         Arc::clone(&self.modules)
+    }
+
+    /// 目的：构建能力面（手柄与核心共享同一份；创建会话前在调用方线程补编，核心线程不陪着等编译）。
+    pub(crate) fn builds_handle(&self) -> Arc<dyn Builds + Send + Sync> {
+        Arc::clone(&self.builds)
     }
 
     /// 目的：常驻服务面（手柄与核心共享同一份；动作与会话回收经它）。

@@ -14,6 +14,18 @@ use std::sync::Arc;
 impl SessionOps for ConductorHandle {
     fn create_work(&self, spec: WorkSpec) -> Result<(WorkOpened, u64), String> {
         let bus = Arc::clone(&self.bus);
+        // 先补编：名单里声明了 `build:` 的模块若在目标环境还没有入口，就在这一段（调用方线程）编好。
+        {
+            let mut ids: Vec<String> = Vec::new();
+            for a in &spec.agents {
+                for m in &a.modules {
+                    if !ids.contains(m) {
+                        ids.push(m.clone());
+                    }
+                }
+            }
+            self.ensure_built(&ids, spec.tier, spec.guest.as_deref())?;
+        }
         // 两段：核心准备（毫秒级）→ 起 guest（这一段）→ 提交。核心线程不陪着等 QEMU。
         let (prepared, boot) = self.call(move |core| core.prepare_work(spec, None))?;
         if let Some(boot) = boot {
