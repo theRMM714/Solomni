@@ -659,6 +659,49 @@ pub(crate) fn an_aborted_generation_never_executes_a_repairable_envelope() {
 }
 
 #[test]
+pub(crate) fn a_cancelled_generation_never_executes_a_valid_tool_envelope() {
+    // 与上一条互补：信封本身**合法**，只是用户在生成途中按了停止。工具仍不得执行。
+    let note = s(&["w", "a", "note.txt"]);
+    let raw = format!(
+        "{{\"type\":\"tool\",\"name\":\"write\",\"args\":{{\"path\":\"{}\",\"content\":\"正文\"}}}}",
+        note
+    );
+    let io = Arc::new(InMemorySysIo::new());
+    let mut core =
+        core_with_io_gateway(vec![module_of("a")], AbortGateway { raw }, Arc::clone(&io));
+    let sid = core
+        .create_work(work("w", WorkMode::Single, &["a"]))
+        .unwrap()
+        .sid;
+    let events = {
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let mut noop = |_e: crate::capabilities::session::api::SessionEvent| {};
+        let mut live = crate::capabilities::session::api::Live {
+            llm: Default::default(),
+            cancel,
+            emit: &mut noop,
+            decisions: None,
+            ask: None,
+        };
+        core.single_say(&sid, "写", &mut live).unwrap()
+    };
+    assert_eq!(
+        io.get(&["w", "a", "note.txt"]),
+        None,
+        "取消后合法信封也绝不落盘"
+    );
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            crate::capabilities::session::api::SessionEvent::Transcript(lines)
+                if lines.iter().any(|l| l.kind == "notice" && l.line.contains("[停止]"))
+        )),
+        "取消要留下可回档的 [停止] 行：{:?}",
+        events
+    );
+}
+
+#[test]
 pub(crate) fn a_truncated_output_is_reported_as_truncation_not_as_a_bad_envelope() {
     // 供应商说 finish_reason=length：回执要指出"是被按长度截断"，而不是让模型去查括号；
     // 真实会话里正是分辨不出这两者，模型照着"内容过长"的假设白跑了两轮。

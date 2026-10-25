@@ -133,6 +133,7 @@ pub(crate) fn run_execution(
         let mut views = Vec::new();
         let mut noop = |_c: crate::capabilities::llm::api::Chunk| true;
         let mut sink = |_e: crate::capabilities::session::api::SessionEvent| {};
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let rounds = crate::capabilities::collab::service::round::converse_with(
             m.chat.as_mut().expect("测试通道").as_mut(),
             m.tools.as_mut(),
@@ -140,6 +141,7 @@ pub(crate) fn run_execution(
             vec![crate::capabilities::llm::api::Msg::user(user)],
             Default::default(),
             &id,
+            cancel,
             &mut noop,
             &mut |v: &crate::capabilities::session::api::ToolCallView| views.push(v.clone()),
             &mut |_r: &crate::capabilities::collab::service::round::Round,
@@ -577,6 +579,7 @@ impl Chat for ReasoningChat {
             finish: "stop".to_string(),
             calls: Vec::new(),
             error: None,
+            cancelled: false,
         }
     }
 }
@@ -627,6 +630,7 @@ impl Chat for TruncChat {
             finish: "length".to_string(),
             calls: Vec::new(),
             error: None,
+            cancelled: false,
         }
     }
 }
@@ -780,6 +784,7 @@ impl Chat for NativeChat {
                 finish: "tool_calls".to_string(),
                 calls,
                 error: None,
+                cancelled: false,
             },
             NativeStep::Text(t) => Completion::text(t),
         }

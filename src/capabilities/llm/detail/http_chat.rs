@@ -1,14 +1,13 @@
-//! 真实通道：OpenAI 兼容 /chat/completions（ureq）。
+//! 真实通道：OpenAI 兼容 /chat/completions（可取消的 reqwest 流；见 http_stream）。
 //! 网关只做机制：给啥通道（供应商 + 模型）建啥会话；channel = None 时回落演示并如实告知。
 //! 端点补全/回落规则见 endpoint 模块：无版本段先直连，404/405 再试 /v1。
 //! 密钥只在出站调用里使用，永不落提示词/转录/日志；错误信息经脱敏（红线）。
 
 use super::endpoint::{chat_candidates, memo_get, memo_set, resolve_candidates, Attempt, Memo};
 use super::fake_chat::DemoGateway;
-use super::http_agent::{finish_request, redact};
 use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{
-    BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg, ProbeOutcome, ToolCall, ToolDecl,
+    BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg, ProbeOutcome, ToolDecl,
 };
 use crate::capabilities::llm::ports::ChatGateway;
 
@@ -68,6 +67,47 @@ fn request_body(
     body
 }
 
+/// 工具声明 → OpenAI 兼容的 function 形状（唯一一处映射，探测与正式请求共用）。
+fn decl_json(t: &ToolDecl) -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": t.name,
+            "description": t.description,
+            "parameters": t.parameters,
+        },
+    })
+}
+
+/// 目的：一条最小请求——单条用户消息 + 可选工具声明（探测用；正式对话走 complete）。
+pub(crate) fn attempt_with_tools(
+    url: &str,
+    key: &str,
+    model: &str,
+    user: &str,
+    tools: Option<&[ToolDecl]>,
+) -> Attempt<Completion> {
+    let mut body = serde_json::json!({
+        "model": model,
+        "stream": false,
+        "messages": [{ "role": "user", "content": user }],
+    });
+    if let Some(tools) = tools {
+        if !tools.is_empty() {
+            body["tools"] = serde_json::Value::Array(tools.iter().map(decl_json).collect());
+            body["tool_choice"] = serde_json::json!("auto");
+        }
+    }
+    // 探针是一次性诊断，用默认预算（它不参与真实会话的设置）。
+    attempt_with_cancel(
+        url,
+        key,
+        &body.to_string(),
+        crate::kernel::api::DEFAULT_LLM_TIMEOUT_SECS,
+        None,
+    )
+}
+
 /// 发一段**合成好的 messages**（探针专用）：回放形状探测要发的不是普通消息，
 /// 而是含 tool_calls 与 role=tool 的历史。端点候选、脱敏与重试规则与真实请求完全一致。
 pub(crate) fn attempt_raw(
@@ -79,11 +119,12 @@ pub(crate) fn attempt_raw(
 ) -> Attempt<Completion> {
     let body = request_body(model, false, messages, tools).to_string();
     // 探针是一次性诊断，用默认预算（它不参与真实会话的设置）。
-    attempt(
+    attempt_with_cancel(
         url,
         key,
         &body,
         crate::kernel::api::DEFAULT_LLM_TIMEOUT_SECS,
+        None,
     )
 }
 
@@ -128,11 +169,22 @@ impl Chat for HttpChat {
             None => chat_candidates(&self.channel.base_url),
         };
         let key = self.channel.api_key.clone();
-        let timeout_secs = opts.timeout_secs;
         let outcome = if stream {
+            let rt = match super::http_stream::runtime() {
+                Ok(rt) => rt,
+                Err(e) => return Completion::failure(e),
+            };
             resolve_candidates(
                 &candidates,
-                |url| stream_once(url, &key, &body, timeout_secs, on),
+                |url| {
+                    rt.block_on(super::http_stream::stream_once(
+                        url,
+                        &key,
+                        &body,
+                        opts.clone(),
+                        on,
+                    ))
+                },
                 |url, err, next| {
                     self.log.warn(
                         "http_chat::stream",
@@ -141,9 +193,10 @@ impl Chat for HttpChat {
                 },
             )
         } else {
+            let cancel = opts.cancel.clone();
             resolve_candidates(
                 &candidates,
-                |url| attempt(url, &key, &body, timeout_secs),
+                |url| attempt_with_cancel(url, &key, &body, opts.timeout_secs, cancel.as_deref()),
                 |url, err, next| {
                     self.log.warn(
                         "http_chat::complete",
@@ -153,11 +206,15 @@ impl Chat for HttpChat {
             )
         };
         match outcome {
-            Ok((url, text)) => {
+            Ok((url, done)) => {
+                // 用户停止：不把取消当成"成功命中端点"，也不写端点记忆。
+                if done.cancelled {
+                    return done;
+                }
                 // 通了就定死：进程内共享，后续会话直接用它，不再探测候选。
                 memo_set(&self.memo, &self.memo_key, &url);
                 self.resolved = Some(url);
-                text
+                done
             }
             Err(e) => {
                 self.log.error(
@@ -171,322 +228,25 @@ impl Chat for HttpChat {
     }
 }
 
-/// 一次流式 POST：读 SSE，逐片回调正文与思维链；返回完整正文。
-/// 已经吐出过内容后不再换候选（避免重复输出）。
-/// 兼容两类供应商：发「增量」的、以及发「累积快照」的（此处统一归一成增量）。
-/// 中止与容积双保险：on 返回 false、或正文/思维链超过上限，立即停止读取。
-fn stream_once(
+/// 非流式调用：没有中间分片可重置，整次调用共用 `timeout_secs`。
+/// 探针用 None；真实会话把停止位传进来，停止时请求同样立刻关闭。
+fn attempt_with_cancel(
     url: &str,
     key: &str,
     body: &str,
     timeout_secs: u64,
-    on: &mut dyn FnMut(Chunk) -> bool,
+    cancel: Option<&std::sync::atomic::AtomicBool>,
 ) -> Attempt<Completion> {
-    use std::io::BufRead;
-    let agent = super::http_agent::agent_for_llm(timeout_secs);
-    let resp = match finish_request(
-        agent
-            .post(url)
-            .header("Authorization", &format!("Bearer {}", key))
-            .header("Content-Type", "application/json")
-            .send(body),
-        key,
-    ) {
-        Ok(r) => r,
-        Err((msg, true)) => return Attempt::Retry(msg),
-        Err((msg, false)) => return Attempt::Fatal(msg),
-    };
-    const MAX_STREAM_CHARS: usize = 200_000;
-    // 新一轮开始：让调用方清空本轮流式占位（工具多轮各成一段）
-    if !on(Chunk::Start) {
-        return Attempt::Ok(Completion::text(""));
+    match super::http_stream::runtime() {
+        Ok(rt) => rt.block_on(super::http_stream::attempt_async(
+            url,
+            key,
+            body,
+            timeout_secs,
+            cancel,
+        )),
+        Err(e) => Attempt::Fatal(e),
     }
-    let mut content = String::new();
-    let mut reasoning_acc = String::new();
-    // 供应商的结束原因（通常只在最后一个分片里给）：如实带回，核心据此分辨"写完停"还是"被截断"
-    let mut finish = String::new();
-    // 原生工具调用：按 index 分片来（id/name 一般在第一片，arguments 逐片拼接）——最常见的坑就在这里
-    let mut calls: Vec<ToolCall> = Vec::new();
-    let mut got_any = false;
-    let mut cancelled = false;
-    for line in std::io::BufReader::new(resp.into_body().into_reader()).lines() {
-        let line = match line {
-            Ok(l) => l,
-            Err(e) => {
-                let msg = redact(format!("读取流失败：{}", e), key);
-                return if got_any {
-                    Attempt::Fatal(msg)
-                } else {
-                    Attempt::Retry(msg)
-                };
-            }
-        };
-        let Some(data) = line.strip_prefix("data:") else {
-            continue;
-        };
-        let data = data.trim();
-        if data == "[DONE]" {
-            break;
-        }
-        if data.is_empty() {
-            continue;
-        }
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(data) else {
-            continue;
-        };
-        let Some(choice) = v.get("choices").and_then(|c| c.get(0)) else {
-            continue;
-        };
-        if let Some(f) = choice.get("finish_reason").and_then(|f| f.as_str()) {
-            if !f.is_empty() {
-                finish = f.to_string();
-            }
-        }
-        let Some(delta) = choice.get("delta") else {
-            continue;
-        };
-        // 原生工具调用的分片：按 index 归位，name/id 出现即记，arguments 追加
-        if let Some(arr) = delta.get("tool_calls").and_then(|t| t.as_array()) {
-            // **工具调用也算"有内容"**：只有工具调用、没有正文的流是**正常回执**（模型决定调工具），
-            // 不能当成"流式响应没有正文内容"——那会把整段工具调用丢掉。
-            if !arr.is_empty() {
-                got_any = true;
-            }
-            for item in arr {
-                let idx = item
-                    .get("index")
-                    .and_then(|i| i.as_u64())
-                    .unwrap_or(calls.len() as u64) as usize;
-                while calls.len() <= idx {
-                    calls.push(ToolCall {
-                        id: String::new(),
-                        name: String::new(),
-                        args_json: String::new(),
-                    });
-                }
-                let slot = &mut calls[idx];
-                if let Some(id) = item.get("id").and_then(|i| i.as_str()) {
-                    if !id.is_empty() {
-                        slot.id = id.to_string();
-                    }
-                }
-                if let Some(f) = item.get("function") {
-                    if let Some(n) = f.get("name").and_then(|n| n.as_str()) {
-                        if !n.is_empty() {
-                            slot.name = n.to_string();
-                        }
-                    }
-                    if let Some(a) = f.get("arguments").and_then(|a| a.as_str()) {
-                        slot.args_json.push_str(a);
-                    }
-                }
-            }
-        }
-        // 正文：累积快照 → 只取新增部分；正常增量 → 原样
-        if let Some(t) = delta.get("content").and_then(|c| c.as_str()) {
-            if !t.is_empty() {
-                got_any = true;
-                // 只有「比已积累的更长且以它为前缀」才算累积快照；等长/重复的按普通增量追加，
-                // 保证每个分片都会回调 on（否则中止检查会被跳过，流会卡死）。
-                let piece = if t.len() > content.len() && t.starts_with(content.as_str()) {
-                    t[content.len()..].to_string()
-                } else {
-                    t.to_string()
-                };
-                content = if piece.is_empty() {
-                    content
-                } else {
-                    format!("{}{}", content, piece)
-                };
-                if !piece.is_empty() && !on(Chunk::Text(piece)) {
-                    cancelled = true;
-                    break;
-                }
-            }
-        }
-        // 思维链：同样归一化
-        let reasoning = delta
-            .get("reasoning_content")
-            .and_then(|c| c.as_str())
-            .or_else(|| delta.get("reasoning").and_then(|c| c.as_str()));
-        if let Some(r) = reasoning {
-            if !r.is_empty() {
-                got_any = true;
-                let piece =
-                    if r.len() > reasoning_acc.len() && r.starts_with(reasoning_acc.as_str()) {
-                        r[reasoning_acc.len()..].to_string()
-                    } else {
-                        r.to_string()
-                    };
-                reasoning_acc = if piece.is_empty() {
-                    reasoning_acc
-                } else {
-                    format!("{}{}", reasoning_acc, piece)
-                };
-                if !piece.is_empty() && !on(Chunk::Reasoning(piece)) {
-                    cancelled = true;
-                    break;
-                }
-            }
-        }
-        // 容积上限：防供应商跑飞把内存与界面拖死
-        if content.len() + reasoning_acc.len() > MAX_STREAM_CHARS {
-            break;
-        }
-    }
-    // 用户主动中止：原样收尾，绝不换候选重开（否则「停止」会把流重新拉起来）
-    if cancelled {
-        return Attempt::Ok(Completion {
-            raw: content,
-            reasoning: reasoning_acc,
-            finish,
-            calls,
-            error: None,
-        });
-    }
-    // 纯工具调用轮的正文是空的：这不算"没内容"，不能因此换候选重试。
-    if content.is_empty() && reasoning_acc.is_empty() && calls.is_empty() {
-        return Attempt::Retry("流式响应没有正文内容".to_string());
-    }
-    Attempt::Ok(Completion {
-        raw: content,
-        reasoning: reasoning_acc,
-        finish,
-        calls,
-        error: None,
-    })
-}
-
-/// 工具声明 → OpenAI 兼容的 function 形状（唯一一处映射，探测与正式请求共用）。
-fn decl_json(t: &ToolDecl) -> serde_json::Value {
-    serde_json::json!({
-        "type": "function",
-        "function": {
-            "name": t.name,
-            "description": t.description,
-            "parameters": t.parameters,
-        },
-    })
-}
-
-/// 一条最小请求：单条用户消息 + 可选工具声明（探测用它；正式对话走 complete）。
-/// 复用同一套端点解析、脱敏与响应解析，不另写一份。
-pub(crate) fn attempt_with_tools(
-    url: &str,
-    key: &str,
-    model: &str,
-    user: &str,
-    tools: Option<&[ToolDecl]>,
-) -> Attempt<Completion> {
-    let mut body = serde_json::json!({
-        "model": model,
-        "stream": false,
-        "messages": [{ "role": "user", "content": user }],
-    });
-    if let Some(tools) = tools {
-        if !tools.is_empty() {
-            body["tools"] = serde_json::Value::Array(tools.iter().map(decl_json).collect());
-            body["tool_choice"] = serde_json::json!("auto");
-        }
-    }
-    // 探针是一次性诊断，用默认预算（它不参与真实会话的设置）。
-    attempt(
-        url,
-        key,
-        &body.to_string(),
-        crate::kernel::api::DEFAULT_LLM_TIMEOUT_SECS,
-    )
-}
-
-/// 单次 POST：请求与解析都在此；失败按「可换候选 / 立即报」归类。
-fn attempt(url: &str, key: &str, body: &str, timeout_secs: u64) -> Attempt<Completion> {
-    let agent = super::http_agent::agent_for_llm(timeout_secs);
-    // 红线：ureq 部分错误会回显请求头，密钥在 finish_request/redact 里统一脱敏后才出适配层。
-    let resp = match finish_request(
-        agent
-            .post(url)
-            .header("Authorization", &format!("Bearer {}", key))
-            .header("Content-Type", "application/json")
-            .send(body),
-        key,
-    ) {
-        Ok(r) => r,
-        Err((msg, true)) => return Attempt::Retry(msg),
-        Err((msg, false)) => return Attempt::Fatal(msg),
-    };
-    let mut got = resp.into_body();
-    let text = match got.read_to_string() {
-        Ok(t) => t,
-        Err(e) => return Attempt::Retry(redact(e.to_string(), key)),
-    };
-    match parse_content(&text) {
-        Ok(c) => Attempt::Ok(c),
-        // 2xx 但不是补全形状（SPA 回落的 HTML 首页等）：这里不是该 API，换下一个候选。
-        Err(e) => Attempt::Retry(e),
-    }
-}
-
-/// 解析补全响应：取 choices[0].message.content、finish_reason 与原生 tool_calls（后两者可能没有）。
-fn parse_content(text: &str) -> Result<Completion, String> {
-    let v: serde_json::Value =
-        serde_json::from_str(text).map_err(|e| format!("响应不是 JSON：{}", e))?;
-    let choice = v.get("choices").and_then(|c| c.get(0));
-    // 有些供应商在纯工具调用时 content 是 null（不是缺字段）：按空串处理，不算错。
-    let raw = choice
-        .and_then(|c| c.get("message"))
-        .and_then(|m| m.get("content"))
-        .and_then(|c| c.as_str())
-        .unwrap_or_default()
-        .to_string();
-    let reasoning = choice
-        .and_then(|c| c.get("message"))
-        .and_then(|m| m.get("reasoning_content").or_else(|| m.get("reasoning")))
-        .and_then(|r| r.as_str())
-        .unwrap_or_default()
-        .to_string();
-    let finish = choice
-        .and_then(|c| c.get("finish_reason"))
-        .and_then(|f| f.as_str())
-        .unwrap_or_default()
-        .to_string();
-    let calls = choice
-        .and_then(|c| c.get("message"))
-        .and_then(|m| m.get("tool_calls"))
-        .and_then(|t| t.as_array())
-        .map(|arr| arr.iter().filter_map(native_call).collect::<Vec<_>>())
-        .unwrap_or_default();
-    if raw.is_empty() && reasoning.is_empty() && calls.is_empty() {
-        return Err("响应缺少 choices[0].message.content（也没有 tool_calls）".to_string());
-    }
-    Ok(Completion {
-        raw,
-        reasoning,
-        finish,
-        calls,
-        error: None,
-    })
-}
-
-/// 从一段 OpenAI 形状的 tool_calls 元素里取（id, name, arguments）。
-/// arguments 是**一段 JSON 文本**（供应商原样给），能不能解析留给上层如实报。
-fn native_call(v: &serde_json::Value) -> Option<ToolCall> {
-    let f = v.get("function")?;
-    let name = f.get("name").and_then(|n| n.as_str())?.to_string();
-    let id = v
-        .get("id")
-        .and_then(|i| i.as_str())
-        .unwrap_or_default()
-        .to_string();
-    let args_json = f
-        .get("arguments")
-        .and_then(|a| a.as_str())
-        .unwrap_or("{}")
-        .to_string();
-    Some(ToolCall {
-        id,
-        name,
-        args_json,
-    })
 }
 
 fn real_or_demo(

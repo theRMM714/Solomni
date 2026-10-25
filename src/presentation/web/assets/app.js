@@ -1598,7 +1598,7 @@ function openCoreModal() {
 function settingsForm() {
   const stream = checkbox('流式传输（供应商逐片返回，边收边显示）', state.settings.streaming);
   const cot = checkbox('思维链显示（每条回答下的思维链，永远默认折叠、点击展开）', state.settings.show_reasoning);
-  const to = numberInput('单次模型调用的超时（秒）', state.settings.llm_timeout_secs, 10, 3600);
+  const to = numberInput('等待首个响应的超时（秒）', state.settings.llm_timeout_secs, 10, 3600);
   const remind = numberInput('一轮内最多提醒几次', state.settings.discuss_remind_cap, 0, 20);
   const pct = numberInput('上下文用到百分之多少就压缩', state.settings.compact_at_percent, 0, 100);
   const guests = numberInput('虚拟机档同时最多几台', state.settings.max_guests, 0, 64);
@@ -1643,7 +1643,7 @@ function buildGeneratePage(c, f) {
   c.body.appendChild(f.stream.wrap);
   c.body.appendChild(f.cot.wrap);
   c.body.appendChild(f.to.wrap);
-  c.body.appendChild(cfgHint('超时是全局的：讨论、执行、验收与单 agent 共用这一份预算。用尽时会中断本轮并提示，点「继续」可重试（会话不会作废）。'));
+  c.body.appendChild(cfgHint('这是“等第一个响应/第一个数据块”的预算，不是整次流的总时长：正常流式只要还在出数据就不会超时；流开始后 120 秒没有新数据才判定断流。用尽时会中断本轮并提示，点「继续」可重试（会话不会作废）。'));
   c.body.appendChild(f.remind.wrap);
   c.body.appendChild(cfgHint('调用次数没有上限：模型继续核实就继续跑，直到它给出表态（你可以随时点「停止」）。'));
   c.body.appendChild(cfgHint('一轮内提醒到顶就记一行「未回应」放过它，整轮继续（不阻塞）。'));

@@ -2,30 +2,9 @@
 //! ureq 3 默认把 4xx/5xx 变成**不带响应体**的 Error；这里关掉（http_status_as_error(false)），
 //! 由 finish_request 统一判状态——这样错误文案里才留得住供应商自己的原话。
 
-use std::time::Duration;
-
 /// 构建带连接/总超时的代理；TLS 后端按平台显式装配（实现在 kernel/outbound）。
 pub fn agent(connect_secs: u64, total_secs: u64) -> ureq::Agent {
     crate::kernel::detail::outbound::agent(connect_secs, total_secs)
-}
-
-/// 一次模型调用的出站代理：连接 10 秒；**等响应头 / 读响应体 / 整体预算**都用同一个预算。
-/// 为什么三项共用一个预算：**非流式**下供应商要等整段生成完才发响应头，
-/// 把"等响应头"单独设小会把几十秒的正常长回复误判成不通。
-pub fn agent_for_llm(timeout_secs: u64) -> ureq::Agent {
-    let budget = Some(Duration::from_secs(timeout_secs.max(1)));
-    let builder = ureq::Agent::config_builder()
-        .timeout_connect(Some(Duration::from_secs(10)))
-        .timeout_recv_response(budget)
-        .timeout_recv_body(budget)
-        .timeout_global(budget)
-        .http_status_as_error(false);
-    let builder = if let Some(tls) = crate::kernel::detail::outbound::tls_config() {
-        builder.tls_config(tls)
-    } else {
-        builder
-    };
-    builder.build().into()
 }
 
 /// 这条构建实际用的 TLS 后端（编译期事实）：探针与自检据此如实报出来，不靠人猜。

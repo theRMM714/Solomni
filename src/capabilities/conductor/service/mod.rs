@@ -105,6 +105,9 @@ impl PersistPolicy {
                 | SessionEvent::Working { .. }
                 | SessionEvent::ToolCall(_)
                 | SessionEvent::Rewound { .. }
+                // 原始 Notice 是**瞬时提示**（没有行 id，无法回档）：只推给在场的前端，
+                // 不落盘。真正可回放的内容提示是 Transcript 里的 `LineView kind=notice`。
+                | SessionEvent::Notice(_)
         )
     }
 }

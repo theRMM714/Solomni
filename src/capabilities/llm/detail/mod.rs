@@ -5,6 +5,7 @@ pub mod fake_chat;
 pub mod http_agent;
 pub mod http_chat;
 pub mod http_probe;
+pub(crate) mod http_stream;
 pub mod model_catalog;
 pub mod repair;
 

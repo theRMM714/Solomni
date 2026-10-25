@@ -22,6 +22,7 @@
 ## 四、改动本单元时必须同步
 
 - 请求体形状是**真实会话与探针共用的唯一定义**（`detail/http_chat.rs`）；改协议 → `src/tests/llm.rs`、`src/tests/detail.rs`、`src/tests/fakes.rs`；信封不合法的修法由 `llm/domain/malformed.rs` 代码返回。
+- 流式读、停止与分层超时在 `detail/http_stream.rs`；改这里要同步 `src/tests/detail.rs` 的静默 / keepalive / 取消用例，以及 `docs/session/session-model.md` 的停止与超时语义。
 
 ## 本目录
 

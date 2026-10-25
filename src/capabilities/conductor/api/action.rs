@@ -126,6 +126,12 @@ impl ConductorHandle {
         } else {
             reason
         };
+        let note = d::control_note(action, why);
+        // 「继续」在真正跑模型之前先把动作记下来：否则整轮生成结束前转录里没有任何痕迹，
+        // 用户看到的只是"点了一下、什么都没发生"。停止/关闭仍按实际操作结果记。
+        if action == d::ControlAction::Continue {
+            self.record_notice(sid, SessionEvent::Notice(note.clone()));
+        }
         let state = match action {
             d::ControlAction::Stop => {
                 // 走会话能力的停止：冻结整棵子树 + 级联中断在跑的生成（回执给实际停下的会话数）。
@@ -166,7 +172,9 @@ impl ConductorHandle {
                 st.state
             }
         };
-        self.record_notice(sid, SessionEvent::Notice(d::control_note(action, why)));
+        if action != d::ControlAction::Continue {
+            self.record_notice(sid, SessionEvent::Notice(note));
+        }
         Ok(state)
     }
 
