@@ -95,7 +95,7 @@ agent 实例名不得占用 `work` / `children`（名单在 `systools/names.yaml
   未开放组合上已存在的会话不拦打开（列表标注"虚拟机档不可用"，本次按本机档执行）。
   guest 默认 Debian stable（13 / trixie）；QEMU 等依赖**不预置、不分发**，由 provision 能力在 Linux / Windows 上按清单下载并解包进项目内（需用户同意），产品检测、指路并给出"怎么补"（入口 `--provision`，契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)）。
 - **运行能力**：模块用 `runtimes` 声明需要的能力。本机档按**宿主目标**装载 `runtimes/` 里的 `prefix` 包（包 `bin/` 前置到本次执行的 PATH），
-  基础工具链（Python / Node / C-C++，装进 `.tools/toolchains`）与宿主 PATH 是回退；`system` 类包只服务虚拟机档。
+  基础工具链（Python / Node / C-C++，装进 `.tools/toolchains`）是运行前提，宿主 PATH 是回退（Windows 上还要围栏能授权）；`system` 类包只服务虚拟机档。
   虚拟机档按 guest 平台装载包，能力也可由 guest 画像（`guest.yaml` 的 `runtimes`）满足。
   缺能力 = 本机档那次执行如实拒绝并说明缺什么，虚拟机档在「开始」前**拒绝创建**（没有工具用户完不成工作）；
   两者都**不是**会话崩溃（契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md) §五）。

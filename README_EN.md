@@ -59,7 +59,7 @@ the **runtime environment** (just running the product) and the **dev environment
 
 ```bash
 node setup-runtime.js    # prepare the runtime environment: platform/<os>/ and .tools/ inside the project; borrows a usable Rust read-only
-node setup-toolchains.js # optional: install Python / Node / C-C++ into the project's .tools/toolchains (--yes confirms the download)
+node setup-toolchains.js # base toolchain only (setup-runtime installs it by default; --yes confirms the download)
 node setup-toolchains.js --check # read-only check: lists what is missing, exits non-zero if anything is
 node start.js            # any platform; on Windows also start.bat, on macOS / Linux also ./start.sh
 node start.js -webUI     # go straight to the local web UI (127.0.0.1:3081)
@@ -70,17 +70,21 @@ node start.js --provision --ensure --yes # optional (Linux / Windows): install Q
 
 - **First start**: without `.home/settings.yaml`, Windows first asks whether to authorize the container fence
   (directory ACLs); choosing no writes nothing and enters the startup gate (unfenced this run / reconfigure / exit).
-  `-webUI` does not bypass that gate.
+  `-webUI` does not bypass that gate. When the base toolchain is missing, `start.js` also asks once whether to
+  install it into the project; later starts only report the missing pieces and the install command.
 - Toolchain and caches stay **inside the project**: a usable Rust is **borrowed read-only** (caches and artifacts
   still land under `platform/<os>/`); only when none is usable does it ask for consent and install into the
   project, never touching the system; with **no interactive terminal** it skips the install, prints the manual
   steps, and exits. Borrowing means the system `~/.cargo/config.toml` (mirrors / credentials) is not read and
   deps are re-downloaded into the project — the price of "no writes outside"; the gate also snapshots
   out-of-project cache roots and fails if anything was written.
-- The **base toolchains** for module tools/builds (Python / Node / C-C++) live under `.tools/toolchains/` and are
-  prepended to PATH at startup; when missing, the product falls back to the host PATH and reports it. C# and other
-  non-base capabilities can be added as host-targeted packages under `runtimes/` (their `bin/` joins that run's PATH;
-  missing packages are reported honestly).
+- The **base toolchains** for module tools/builds (Python / Node / C-C++) are a runtime prerequisite: they live
+  under `.tools/toolchains/` and are prepended to PATH at startup. `setup-runtime.js` installs them by default;
+  `start.js` asks once on first start and reports project / host fallback / missing on every start afterwards. The
+  host fallback is only usable when the Windows fence can grant it (an adequate existing entry, or the directory is
+  owned by the current user); otherwise the reason is reported and the project-local install is required. C# and
+  other non-base capabilities can be added as host-targeted packages under `runtimes/` (their `bin/` joins that
+  run's PATH; missing packages are reported honestly).
   C/C++ uses MinGW-w64 on Windows and Zig on Linux / macOS; linking native macOS frameworks still needs the
   system Xcode Command Line Tools / SDK.
 

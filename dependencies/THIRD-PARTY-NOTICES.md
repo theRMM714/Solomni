@@ -51,9 +51,9 @@
 - **Source Code**: https://github.com/theRMM714/rust-smb-server-win
 - **Note**: 上游 [paltaio/rust-smb-server](https://github.com/paltaio/rust-smb-server)（MIT）+ 本仓补丁（Windows 定位 IO、`unlink` 目录识别、delete-on-close 错误传播）与 helper CLI，由该仓 CI 构建并发布资产；Solomni 只按 URL 下载，不携带其提交史。
 
-## 5. 基础工具链（按需下载，不随仓分发）
+## 5. 基础工具链（运行前提，首次安装；不随仓分发）
 
-以下组件由 `setup-toolchains.js` 在用户同意后从上游下载到项目内 `.tools/toolchains/`，本仓不携带二进制：
+以下组件由 `setup-runtime.js` 默认、`setup-toolchains.js` 按需在用户同意后从上游下载到项目内 `.tools/toolchains/`；本仓不携带二进制：
 
 - **Python**：python-build-standalone（CPython 3.14.9），PSF-2.0；来源 https://github.com/astral-sh/python-build-standalone 。
 - **Node.js**：Node 24.11.0，MIT；来源 https://nodejs.org/dist/ 。
@@ -125,10 +125,10 @@ This file documents the third-party dependency bundles self-hosted and distribut
 - **Source Code**: https://github.com/theRMM714/rust-smb-server-win
 - **Note**: Upstream `paltaio/rust-smb-server` (MIT) plus this project's patches (Windows positional IO, directory-aware `unlink`, delete-on-close error propagation) and the helper CLI; the asset is built and published by that repository's CI, and Solomni only downloads it by URL.
 
-## 5. Base toolchains (downloaded on demand, not shipped)
+## 5. Base toolchains (runtime prerequisite, first install; not shipped)
 
-The following components are downloaded by `setup-toolchains.js` (with user consent) into the project's
-`.tools/toolchains/`; this repository does not carry their binaries:
+The following components are installed by `setup-runtime.js` by default (or `setup-toolchains.js` on demand) with
+user consent into the project's `.tools/toolchains/`; this repository does not carry their binaries:
 
 - **Python**: python-build-standalone (CPython 3.14.9), PSF-2.0; https://github.com/astral-sh/python-build-standalone .
 - **Node.js**: Node 24.11.0, MIT; https://nodejs.org/dist/ .
