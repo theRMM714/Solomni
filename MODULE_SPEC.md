@@ -147,6 +147,8 @@ tools:
   围栏由产品给（只写模块目录与状态目录、按 `net` 声明）；**工具链不进 agent 的工具围栏**。
   本机档构建围栏额外**只读**放行项目内基础工具链的安装根（编译器要读自己的 libexec / 动态库），仍然不能写它。
   构建是**系统动作、不申请容器身份**（与 `--build` 同一条执行路）：可达范围由围栏规格给出，不走 agent 的容器。
+  容器里的工具临时区由围栏准备（`<私有沙箱>/Packages/<容器名>/AC/Temp`，见 [docs/kernel](docs/kernel/README.md)），
+  编译器因此能在容器里落临时文件；构建本身仍走非容器路径。
   **成败以产物为准**：命令退出码只当快速失败信号；零退出但入口不在场同样算失败（脚本可能吞掉了失败，见「跨平台」）。
   `net` 的平台落点：虚拟机档决定 guest 网卡；本机档 Windows 授 `internetClient`、macOS 放行
   `network-outbound`、Linux `net=false` 用 seccomp 拒绝非本地 socket（`net=true` 不装网络过滤器，不限制入站/绑定）。

@@ -257,6 +257,17 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
         }
     };
     let sid_text = sid_to_string(sid);
+    // 容器临时目录：AppContainer 的 GetTempPath2 指到 %LOCALAPPDATA%\Packages\<容器名>\AC\Temp（不读 TMP/TEMP），
+    // 不建它编译器连临时文件都写不了；先建后授权——它在 rw 之下，下面的递归 ACE 会覆盖到它，不必单列授权。
+    if let Some(temp) = container_temp_dir(spec) {
+        if let Err(e) = std::fs::create_dir_all(&temp) {
+            eprintln!(
+                "[围栏] 容器临时目录建不出来（{}）：{}（这次执行里用临时文件的命令会自己报错）",
+                temp.display(),
+                e
+            );
+        }
+    }
     let todo = grant_targets(spec);
     for target in todo {
         let (path, rights) = (&target.path, target.rights);
