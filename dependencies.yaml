@@ -9,6 +9,7 @@
 #   source   下载源：links.yaml 的键，或 release:<资产名>（= links.yaml 的 release.base + 资产名，项目自托管便携包）
 #   kind     安装方式：archive（默认，解归档）/ appimage / file（单文件直下）/ guest-disk（单文件 + 画像）/ guest-rootfs（多步构造）/ guest-runtime（起 guest 自证运行能力）
 #   guest    虚拟机档的**虚拟根名**（只有 guest 类条目有；`install` 指它那一格目录，一个虚拟根可以由多条条目共同装）
+#   family   【可选】Linux 虚拟根的发行版族（只有 guest-rootfs 有；构造配方按它取，当前只有 debian）
 #   strip    解包时剥掉归档里的前 N 段目录（缺省 0）
 #   size_mb  大致体积（提示与带宽预估）
 #   sha256   【可选】归档 / 单文件的 sha256（64 位十六进制）。**校验值与它守护的那条连接写在同一条**：
@@ -57,6 +58,7 @@ deps:
     arch: x86_64
     kind: guest-rootfs
     guest: debian
+    family: debian
     install: .vm/guest/debian
     probe: .vm/guest/debian/rootfs.ext4
     source: guest.debian.image

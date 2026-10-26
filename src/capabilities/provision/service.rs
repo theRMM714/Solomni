@@ -42,6 +42,9 @@ pub struct Dep {
     /// 目的：归属的虚拟根名（只有 guest 类条目有）；一个虚拟根可以由多条条目共同装。
     #[serde(default)]
     pub guest: Option<String>,
+    /// 目的：Linux 虚拟根构造用的发行版族（只有 guest-rootfs 有）；没有声明 = 没有构造配方。
+    #[serde(default)]
+    pub family: Option<String>,
     /// 目的：解包时剥掉归档里的前 N 段目录（便携包常带一层包装目录）；缺省 0。
     #[serde(default)]
     pub strip: usize,
@@ -933,83 +936,178 @@ fn sanitize_guest_base(base: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// 目的：一个 Linux 虚拟根发行版族的构造配方——initrd 的差异只在这里，执行器（unshare + chroot + 固定 PATH）共用。
+/// 约束：内核 / QGA / 系统清理 / 运行期编排仍按 Debian 写死；第二族落地时按同一份清单字段扩展。
+#[derive(Debug)]
+struct GuestFamily {
+    /// 目的：initrd 配置（虚拟根内相对路径）。
+    initrd_conf: &'static str,
+    /// 目的：把模块清单写成该族配置文件的全文。
+    initrd_conf_text: fn(&[String]) -> String,
+    /// 目的：在 chroot 里跑的构建脚本（已含固定 PATH）。
+    initrd_script: fn(&str) -> String,
+    /// 目的：initrd 产物（虚拟根内相对路径）。
+    initrd_artifact: fn(&str) -> String,
+}
+
+/// 目的：initrd 要补的模块——9p 回退档要它们；模块名各族一致，只有写法由配方给。
+const INITRD_MODULES: &[&str] = &[
+    "9p",
+    "9pnet",
+    "9pnet_virtio",
+    "virtio",
+    "virtio_pci",
+    "virtio_ring",
+];
+
+/// 目的：按清单的 family 取构造配方；当前只有 Debian。
+fn guest_family(name: &str) -> Option<&'static GuestFamily> {
+    match name {
+        "debian" => Some(&DEBIAN),
+        _ => None,
+    }
+}
+
+/// 目的：这条 guest-rootfs 用哪份配方——缺声明与不认识都如实拒绝，并指出预构造镜像的出路。
+fn family_of(dep: &Dep) -> Result<&'static GuestFamily, String> {
+    match dep.family.as_deref() {
+        Some(name) => guest_family(name).ok_or_else(|| {
+            format!(
+                "{}：没有发行版族 {} 的构造配方（当前只有 debian）；可用预构造镜像 + guest.yaml",
+                dep.id, name
+            )
+        }),
+        None => Err(format!(
+            "{}：清单缺 family（这条 guest-rootfs 用哪份构造配方）；可用预构造镜像 + guest.yaml",
+            dep.id
+        )),
+    }
+}
+
+/// 目的：Debian / Ubuntu 的 initrd 配方（initramfs-tools）——一行一个模块。
+static DEBIAN: GuestFamily = GuestFamily {
+    initrd_conf: "etc/initramfs-tools/modules",
+    initrd_conf_text: initramfs_tools_conf,
+    initrd_script: initramfs_tools_script,
+    initrd_artifact: initramfs_tools_artifact,
+};
+
+/// 目的：initramfs-tools 的模块文件全文。
+fn initramfs_tools_conf(modules: &[String]) -> String {
+    let mut text = modules.join("\n");
+    text.push('\n');
+    text
+}
+
+/// 目的：initramfs-tools 的构建脚本——先固定 guest PATH，宿主 PATH 缺 /usr/sbin 也能找到 depmod / mkinitramfs。
+fn initramfs_tools_script(abi: &str) -> String {
+    format!(
+        "#!/bin/bash\nset -e\nexport PATH=/usr/sbin:/usr/bin:/sbin:/bin\ndepmod {0}\nmkinitramfs -o /boot/initrd.img-{0} {0}\n",
+        abi
+    )
+}
+
+/// 目的：initramfs-tools 的产物（虚拟根内相对路径）。
+fn initramfs_tools_artifact(abi: &str) -> String {
+    format!("boot/initrd.img-{}", abi)
+}
+
+/// 目的：把已有的 initrd 模块清单与要补的模块合并——去空行、保留原顺序、不重复。
+fn merge_initrd_modules(existing: &str, wanted: &[&str]) -> Vec<String> {
+    let mut lines: Vec<String> = existing
+        .lines()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect();
+    for m in wanted {
+        if !lines.iter().any(|l| l == m) {
+            lines.push((*m).to_string());
+        }
+    }
+    lines
+}
+
+/// 目的：拼出 initrd 构建失败的事实——退出码 + 输出尾部；不替内核能力下结论。
+fn initrd_failure(code: Option<i32>, stderr: &[u8], stdout: &[u8]) -> String {
+    let tail = output_tail(stderr, stdout);
+    let status = match code {
+        Some(code) => format!("退出码 {}", code),
+        None => "被信号终止".to_string(),
+    };
+    if tail.is_empty() {
+        format!("生成 initrd 失败（{}，无输出）", status)
+    } else {
+        format!("生成 initrd 失败（{}）：{}", status, tail)
+    }
+}
+
+/// 目的：取子进程输出的尾部（stderr 在前、stdout 在后，最多 8 行，每行最多 300 字）。
+fn output_tail(stderr: &[u8], stdout: &[u8]) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    for bytes in [stderr, stdout] {
+        for line in String::from_utf8_lossy(bytes).lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            lines.push(line.chars().take(300).collect());
+        }
+    }
+    let start = lines.len().saturating_sub(8);
+    lines[start..].join("\n")
+}
+
 /// 目的：在 guest 里生成带 9p 模块的 initrd（chroot 走非特权用户命名空间，不需要 root）。
+/// 参数：family = 这条虚拟根的发行版族配方（配置路径 / 模块写法 / 构建脚本 / 产物）。
+/// 约束：脚本在 chroot 里固定 PATH；失败带退出码与输出尾部，不把非零退出归因到命名空间。
 fn ensure_guest_initrd(
     base: &Path,
     abi: &str,
+    family: &GuestFamily,
     on_line: &mut dyn FnMut(&str),
 ) -> Result<(), String> {
-    let conf = base.join("etc").join("initramfs-tools").join("modules");
+    let conf = base.join(family.initrd_conf);
     fs::create_dir_all(conf.parent().expect("有父目录")).map_err(|e| e.to_string())?;
-    let mut lines: Vec<String> = fs::read_to_string(&conf)
-        .unwrap_or_default()
-        .lines()
-        .map(|s| s.to_string())
-        .filter(|s| !s.trim().is_empty())
-        .collect();
-    for m in [
-        "9p",
-        "9pnet",
-        "9pnet_virtio",
-        "virtio",
-        "virtio_pci",
-        "virtio_ring",
-    ] {
-        if !lines.iter().any(|l| l == m) {
-            lines.push(m.to_string());
-        }
-    }
-    fs::write(
-        &conf,
-        format!(
-            "{}
-",
-            lines.join(
-                "
-"
-            )
-        ),
-    )
-    .map_err(|e| format!("写 {} 失败：{}", conf.display(), e))?;
+    let modules = merge_initrd_modules(
+        &fs::read_to_string(&conf).unwrap_or_default(),
+        INITRD_MODULES,
+    );
+    fs::write(&conf, (family.initrd_conf_text)(&modules))
+        .map_err(|e| format!("写 {} 失败：{}", conf.display(), e))?;
     let script = base.join("tmp").join("solomni-initrd.sh");
     fs::create_dir_all(script.parent().expect("有父目录")).map_err(|e| e.to_string())?;
-    fs::write(
-        &script,
-        format!(
-            "#!/bin/bash
-set -e
-depmod {0}
-mkinitramfs -o /boot/initrd.img-{0} {0}
-",
-            abi
-        ),
-    )
-    .map_err(|e| format!("写 initrd 脚本失败：{}", e))?;
+    fs::write(&script, (family.initrd_script)(abi))
+        .map_err(|e| format!("写 initrd 脚本失败：{}", e))?;
     on_line("在 chroot（用户命名空间，无需 root）里生成带 9p 的 initrd");
+    // /proc 绑定失败不致命（Debian 的 mkinitramfs 不需要它），但要如实留一行，不静默吞掉。
     let inner = format!(
-        "mount --bind /proc {0} 2>/dev/null || true; chroot {1} /bin/bash /tmp/solomni-initrd.sh",
-        base.join("proc").display(),
-        base.display()
+        "if mount --bind /proc {proc} 2>/dev/null; then :; else echo 'solomni: /proc 绑定失败（继续）' >&2; fi; chroot {root} /bin/bash /tmp/solomni-initrd.sh",
+        proc = base.join("proc").display(),
+        root = base.display()
     );
-    let st = std::process::Command::new("unshare")
+    let out = std::process::Command::new("unshare")
         .args(["-r", "-m", "sh", "-c", &inner])
-        .status()
-        .map_err(|e| {
-            format!(
-                "跑不了 unshare（需要 util-linux 且内核允许非特权用户命名空间）：{}",
-                e
-            )
-        })?;
+        .output()
+        .map_err(|e| format!("起不了 unshare（需要 util-linux）：{}", e))?;
     let _ = fs::remove_file(&script);
-    if !st.success() {
-        return Err("生成 initrd 失败（需要内核允许非特权用户命名空间）".to_string());
+    if !out.status.success() {
+        return Err(initrd_failure(out.status.code(), &out.stderr, &out.stdout));
     }
-    if !base
-        .join("boot")
-        .join(format!("initrd.img-{}", abi))
-        .is_file()
+    // 成功时把 chroot 的告警带出来（限 5 行，别刷屏）：/proc 绑定失败这类事实不能只在日志里。
+    for line in String::from_utf8_lossy(&out.stderr)
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .take(5)
     {
-        return Err("initrd 没生成出来".to_string());
+        on_line(&format!("initrd：{}", line.trim()));
+    }
+    let artifact = base.join((family.initrd_artifact)(abi));
+    if !artifact.is_file() {
+        return Err(format!(
+            "initrd 没生成出来：{}（chroot 脚本退出 0，但没有产物）",
+            artifact.display()
+        ));
     }
     Ok(())
 }
@@ -1045,6 +1143,7 @@ fn install_guest_rootfs(
     agent: &ureq::Agent,
     on_line: &mut dyn FnMut(&str),
 ) -> Result<(), String> {
+    let family = family_of(dep)?;
     let base = under(root, &dep.install);
     let cache = root.join(".vm").join("cache");
     fs::create_dir_all(&base).map_err(|e| format!("建 {} 失败：{}", base.display(), e))?;
@@ -1104,7 +1203,7 @@ fn install_guest_rootfs(
     let abi = ensure_guest_kernel(&cache, &base, agent, on_line)?;
     ensure_guest_qga(&cache, &base, agent, on_line)?;
     sanitize_guest_base(&base)?;
-    ensure_guest_initrd(&base, &abi, on_line)?;
+    ensure_guest_initrd(&base, &abi, family, on_line)?;
     link_guest_kernel(&base, &abi)?;
     #[cfg(unix)]
     {
@@ -1517,6 +1616,7 @@ mod tests {
             source: "smbd.windows".to_string(),
             kind: "file".to_string(),
             guest: None,
+            family: None,
             strip: 0,
             size_mb: 1,
             sha256: String::new(),
@@ -1549,6 +1649,92 @@ mod tests {
             got,
             "linux-image-6.12.111+deb13-amd64-unsigned_6.12.111-1_amd64.deb"
         );
+    }
+
+    /// 目的：Debian 配方带齐 initrd 的配置 / 脚本 / 产物；脚本先固定 guest PATH，
+    ///   宿主 PATH 缺 /usr/sbin 时也能找到 depmod / mkinitramfs。
+    #[test]
+    fn debian_family_carries_the_initrd_recipe() {
+        let family = guest_family("debian").expect("debian 要有配方");
+        assert_eq!(family.initrd_conf, "etc/initramfs-tools/modules");
+        let conf = (family.initrd_conf_text)(&["9p".to_string(), "virtio".to_string()]);
+        assert_eq!(conf, "9p\nvirtio\n");
+        let script = (family.initrd_script)("6.12.0");
+        assert!(
+            script.contains("export PATH=/usr/sbin:/usr/bin:/sbin:/bin"),
+            "{script}"
+        );
+        assert!(script.contains("depmod 6.12.0"), "{script}");
+        assert!(
+            script.contains("mkinitramfs -o /boot/initrd.img-6.12.0 6.12.0"),
+            "{script}"
+        );
+        assert_eq!((family.initrd_artifact)("6.12.0"), "boot/initrd.img-6.12.0");
+    }
+
+    /// 目的：模块清单按原顺序合并、去空行、不重复；已有的条目不被改写。
+    #[test]
+    fn initrd_modules_are_merged_without_duplicates() {
+        let got = merge_initrd_modules(" foo \n\n9p\n", &["9p", "virtio"]);
+        assert_eq!(got, vec!["foo", "9p", "virtio"]);
+    }
+
+    /// 目的：清单没声明或声明了不认识的族都要如实拒绝，并指出预构造镜像的出路；不猜、不回落 Debian。
+    #[test]
+    fn unknown_family_is_refused_with_a_prebuilt_image_way_out() {
+        let mut dep = Dep {
+            id: "vm.guest.linux".to_string(),
+            os: "linux".to_string(),
+            arch: "x86_64".to_string(),
+            install: ".vm/guest/debian".to_string(),
+            probe: ".vm/guest/debian/rootfs.ext4".to_string(),
+            source: "guest.debian.image".to_string(),
+            kind: "guest-rootfs".to_string(),
+            guest: Some("debian".to_string()),
+            family: Some("alpine".to_string()),
+            strip: 0,
+            size_mb: 0,
+            sha256: String::new(),
+            note: String::new(),
+        };
+        let err = family_of(&dep).expect_err("没有 alpine 配方要拒绝");
+        assert!(err.contains("alpine"), "{}", err);
+        assert!(err.contains("预构造镜像"), "{}", err);
+        dep.family = None;
+        let err = family_of(&dep).expect_err("缺 family 也要拒绝");
+        assert!(err.contains("family"), "{}", err);
+        assert!(err.contains("预构造镜像"), "{}", err);
+    }
+
+    /// 目的：失败信息带退出码与子进程输出尾部，不改写成因；没有输出时也如实说清。
+    #[test]
+    fn initrd_failure_reports_the_real_output() {
+        let err = initrd_failure(
+            Some(127),
+            b"/bin/bash: line 3: depmod: command not found\n",
+            b"",
+        );
+        assert!(err.contains("退出码 127"), "{}", err);
+        assert!(err.contains("depmod: command not found"), "{}", err);
+        assert!(
+            !err.contains("命名空间"),
+            "不许把 PATH 问题推给内核：{}",
+            err
+        );
+        let quiet = initrd_failure(None, b"", b"");
+        assert!(quiet.contains("被信号终止"), "{}", quiet);
+        assert!(quiet.contains("无输出"), "{}", quiet);
+    }
+
+    /// 目的：清单里的 Debian 虚拟根必须写明 family——构造配方只按显式声明取，不靠 id 或目录名猜。
+    #[test]
+    fn manifest_declares_the_debian_family() {
+        let all = deps().expect("清单可解析");
+        let dep = all
+            .iter()
+            .find(|d| d.id == "vm.guest.linux")
+            .expect("有 Linux 虚拟根条目");
+        assert_eq!(dep.family.as_deref(), Some("debian"));
     }
 
     /// 目的：单文件安装按 probe 的文件名落进安装目录。
@@ -1687,6 +1873,7 @@ mod tests {
             install: ".vm/tool".to_string(),
             probe: ".vm/tool/tool".to_string(),
             guest: None,
+            family: None,
             source: "release:t.tar".to_string(),
             strip: 0,
             size_mb: 1,
@@ -1732,6 +1919,7 @@ mod tests {
             install: ".vm/guest/debian".to_string(),
             probe: ".vm/guest/debian/rootfs.qcow2".to_string(),
             guest: Some("debian".to_string()),
+            family: None,
             source: "release:a.bin".to_string(),
             strip: 0,
             size_mb: 0,
@@ -1777,6 +1965,7 @@ mod tests {
             install: ".vm/guest/debian".to_string(),
             probe: ".vm/guest/debian/rootfs.qcow2".to_string(),
             guest: Some("debian".to_string()),
+            family: None,
             source: "release:d.qcow2".to_string(),
             strip: 0,
             size_mb: 0,
@@ -1882,6 +2071,7 @@ mod tests {
             install: ".vm/guest/debian".to_string(),
             probe: probe.to_string(),
             guest: Some(guest.to_string()),
+            family: None,
             source: "release:a".to_string(),
             strip: 0,
             size_mb: 0,
@@ -1930,6 +2120,7 @@ mod tests {
             install: install.to_string(),
             probe: probe.to_string(),
             guest: Some("debian".to_string()),
+            family: None,
             source: source.to_string(),
             strip: 0,
             size_mb: 0,
@@ -2040,6 +2231,7 @@ mod tests {
             install: ".vm/x".to_string(),
             probe: ".vm/x/f.txt".to_string(),
             guest: None,
+            family: None,
             source: "release:a.tar".to_string(),
             strip: 0,
             size_mb: 0,
