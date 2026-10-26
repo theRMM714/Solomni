@@ -93,7 +93,7 @@ pub fn is_freeform(name: &str) -> bool {
 pub struct ToolNotes {
     pub patch_guide: String,
     pub module_tools: String,
-    /// 模块工具与**已就绪服务操作的参数合并成一段**：标题只出现一次（服务行由装配方传入）。
+    /// 目的：模块工具与**已就绪服务操作的参数合并成一段**；标题只出现一次（服务行由装配方传入）。
     pub module_tool_params: String,
 }
 
