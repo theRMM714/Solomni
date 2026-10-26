@@ -77,11 +77,25 @@ impl QemuEngine {
 /// 目的：guest 内存大小（MiB）——`-m` 与共享内存后端（vhost-user 要）必须同一尺寸，所以只写一处。
 pub const GUEST_MEM_MB: u32 = 2048;
 
+/// 目的：给 QEMU 的磁盘格式——`.qcow2` 是每租约可写层，其余布局按 raw。
+/// 约束：必须显式传 `format=`：raw 被自动探测时 QEMU 会限制 block 0 的写，并每次打警告。
+fn disk_format(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("qcow2") => "qcow2",
+        _ => "raw",
+    }
+}
+
 /// 目的：除共享之外的一次启动参数（不含可执行文件本身）——机器、加速器、内存、内核、串口、QGA 通道与首启种子。
 /// 参数：channel_opts 是 QGA chardev 的补充选项；share_needs_net = 共享后端要不要 guest 有（受限）网卡；
 ///   share_needs_mem = 共享后端要不要 guest RAM 是**可共享内存**（vhost-user 设备，如 virtiofs）；
 ///   seed_url = 首启 cloud-init 的 NoCloud net 种子根 URL（None = 不投种子）。
-/// 约束：根永远是磁盘镜像（`-drive file=…,if=virtio`；会话的那一份是每租约可写层），有内核就 `root=/dev/vda` 直启。
+/// 约束：根永远是磁盘镜像（`-drive file=…,if=virtio,format=…`；会话的那一份是每租约可写层），有内核就 `root=/dev/vda` 直启。
 pub fn engine_args(
     spec: &GuestSpec,
     channel_opts: &str,
@@ -132,7 +146,11 @@ pub fn engine_args(
     }
     // 根永远是磁盘镜像（会话的那一份是每租约可写层）。
     a.push("-drive".to_string());
-    a.push(format!("file={},if=virtio", spec.image.disk.display()));
+    a.push(format!(
+        "file={},if=virtio,format={}",
+        spec.image.disk.display(),
+        disk_format(&spec.image.disk)
+    ));
     // 有内核就直启、由命令行给根设备；没有内核靠镜像自带引导（固件）。
     if spec.image.kernel.is_some() {
         a.push("-append".to_string());
