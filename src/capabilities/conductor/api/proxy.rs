@@ -196,6 +196,36 @@ impl SessionOps for ConductorHandle {
         self.call(move |core| core.files_view(&sid))
     }
 
+    fn work_log(
+        &self,
+        sid: &str,
+        limit: usize,
+        before: Option<u64>,
+    ) -> Result<crate::capabilities::workspace::api::WorkLog, String> {
+        let sid = sid.to_string();
+        self.call(move |core| core.work_log(&sid, limit, before))
+    }
+
+    fn work_commit_view(
+        &self,
+        sid: &str,
+        commit: u64,
+    ) -> Result<crate::capabilities::workspace::api::CommitDetail, String> {
+        let sid = sid.to_string();
+        self.call(move |core| core.work_commit_view(&sid, commit))
+    }
+
+    fn work_commit_file(
+        &self,
+        sid: &str,
+        commit: u64,
+        path: &str,
+    ) -> Result<crate::capabilities::workspace::api::CommitFileView, String> {
+        let sid = sid.to_string();
+        let path = path.to_string();
+        self.call(move |core| core.work_commit_file(&sid, commit, &path))
+    }
+
     fn exists(&self, sid: &str) -> Result<bool, String> {
         let sid = sid.to_string();
         self.call(move |core| Ok(core.session_exists(&sid)))

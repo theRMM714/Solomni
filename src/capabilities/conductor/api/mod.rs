@@ -254,6 +254,26 @@ pub trait SessionOps: Send + Sync {
     /// 投喂文件进本次工作的 work/；返回 false = 同名已存在（由用户决定覆盖或改名）。
     fn upload(&self, sid: &str, name: &str, bytes: &[u8], overwrite: bool) -> Result<bool, String>;
     fn files(&self, sid: &str) -> Result<FilesView, String>;
+    /// 目的：提交历史（只读）：当前 head + 分页提交；`before` = 只取 id 更小的提交。
+    fn work_log(
+        &self,
+        sid: &str,
+        limit: usize,
+        before: Option<u64>,
+    ) -> Result<crate::capabilities::workspace::api::WorkLog, String>;
+    /// 目的：一条提交的详情（只读）。
+    fn work_commit_view(
+        &self,
+        sid: &str,
+        commit: u64,
+    ) -> Result<crate::capabilities::workspace::api::CommitDetail, String>;
+    /// 目的：一条提交里某个文件的内容预览（只读；路径必须在这条提交的树里）。
+    fn work_commit_file(
+        &self,
+        sid: &str,
+        commit: u64,
+        path: &str,
+    ) -> Result<crate::capabilities::workspace::api::CommitFileView, String>;
     // 入站契约是**发布给前端的接口面**：二进制 crate 里暂时没有调用点的接口方法会被 dead_code 误报
     // （见 docs/testing/quality-isolation.md 的 allow 清单）。
     #[allow(dead_code)]
@@ -736,6 +756,10 @@ pub struct SessionView {
     /// 目的：上下文「继续」按钮（None = 不显示）；前端只按它渲染，不自己判断末条/协作泵。
     #[serde(rename = "continue", skip_serializing_if = "Option::is_none")]
     pub continue_action: Option<ContinueView>,
+    /// 目的：最近一次模型调用的上下文用量（只对 `Session::Single` 有：single / proxy / agent 子会话）。
+    /// 约束：协作主会话没有一条持续发给模型的对话，因此没有这个字段。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<crate::capabilities::session::api::ContextUsage>,
 }
 
 /// 会话文件清单视图（前端 @ 菜单与「长路径缩写」用）：相对清单 + 真实根。

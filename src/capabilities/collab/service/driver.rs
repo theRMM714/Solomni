@@ -62,14 +62,24 @@ pub fn compact_turn(
     Ok(summary)
 }
 
-/// 到点自动压一次：估算历史字符数（≈ tokens × 4），超预算就跑一个压缩回合。
+/// 到点自动压一次：有供应商 usage 用精确 token；拿不到才按字符估算（≈ tokens × 4）。
 /// 压不动就**如实通知并继续用完整上下文**（不静默降级、不假装压过）。
 fn maybe_compact(s: &mut AgentSession, identity: &str, sink: &mut dyn FnMut(SessionEvent)) {
-    if s.compact_at == 0 {
+    if s.compact_percent == 0 {
         return;
     }
-    let chars: usize = s.dialogue.iter().map(|m| m.content.chars().count()).sum();
-    if chars <= s.compact_at {
+    let exceeded = match s.context_usage() {
+        // 供应商报过 usage：用它和窗口比，别让字符估算与状态栏的百分比各说各话。
+        Some(u) if u.window > 0 => u.total_tokens * 100 >= u.window * s.compact_percent as u64,
+        // 没报过：退回字符预算。
+        _ => {
+            if s.compact_at == 0 {
+                return;
+            }
+            s.dialogue_chars() > s.compact_at
+        }
+    };
+    if !exceeded {
         return;
     }
     let decl = s
@@ -82,6 +92,10 @@ fn maybe_compact(s: &mut AgentSession, identity: &str, sink: &mut dyn FnMut(Sess
     match compact_turn(s, &prompt, decl.as_ref(), identity) {
         Ok(summary) => {
             s.compact(up_to, &summary);
+            // 压完发送视图变小了：留一份估算用量，别让下一轮继续拿旧的大数字反复触发。
+            let usage = s.estimate_usage();
+            s.set_last_usage(Some(usage));
+            sink(SessionEvent::Usage { usage, line: up_to });
             sink(SessionEvent::Compacted { up_to, summary });
         }
         Err(err) => {
@@ -217,6 +231,8 @@ fn run_rounds(
     // 取消位在整段回合里只读地观察：每一轮构造行/收尾时都重新读，不能用开始时的快照。
     let cancel = std::sync::Arc::clone(&live.cancel);
     let next_line = std::cell::Cell::new(s.next_line);
+    // 这次问询第一行会落在哪个 id：usage 事件跟着它，回档到它之前时用量一起失效。
+    let usage_line = next_line.get();
     let per_round: std::cell::RefCell<Vec<Vec<LineView>>> = std::cell::RefCell::new(Vec::new());
     let error: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
     let mut on_round = |round: &Round, s: &mut dyn FnMut(SessionEvent)| {
@@ -277,6 +293,22 @@ fn run_rounds(
                 }
             }
         }
+    }
+    // 至少有一次成功调用：更新用量（供应商精确 / 字符估算），状态栏据此刷新。
+    // 全失败时不更新——别把上一次/上一次成功的数字冒充成这一次的。
+    if rounds.iter().any(|r| r.error.is_none()) {
+        let usage = s
+            .chat
+            .last_usage()
+            .map(|t| {
+                crate::capabilities::session::api::ContextUsage::from_tokens(t, s.context_window)
+            })
+            .unwrap_or_else(|| s.estimate_usage());
+        s.set_last_usage(Some(usage));
+        sink(SessionEvent::Usage {
+            usage,
+            line: usage_line,
+        });
     }
     // 停止优先于同一次调用的错误：用户按了停止就是「我停的」，不再报成故障。
     let stopped = cancel.load(std::sync::atomic::Ordering::Relaxed);

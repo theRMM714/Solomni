@@ -148,6 +148,66 @@ select.field-input { cursor: pointer; }
 .notice-text { padding: var(--sp-2) var(--sp-4) var(--sp-1); overflow-y: auto; color: var(--color-text-dim); white-space: pre-wrap; }
 .notice-actions { display: flex; gap: var(--sp-2); justify-content: flex-end; padding: var(--sp-3) var(--sp-4) var(--sp-4); }
 
+/* ---- 状态 chip + 锚定小卡片（会话状态栏） ---- */
+.status-chip {
+  display: inline-flex; align-items: center; gap: var(--sp-1);
+  padding: 3px 9px; background: transparent; border: 1px solid transparent;
+  border-radius: var(--r-pill); color: var(--color-text-dim);
+  font: inherit; font-size: var(--fs-s); cursor: pointer; white-space: nowrap;
+  transition: color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+.status-chip:hover,
+.status-chip[aria-expanded="true"] {
+  color: var(--color-text); background: var(--color-surface-2); border-color: var(--color-border);
+}
+.status-chip .ui-icon { width: 14px; height: 14px; flex: none; }
+.status-chip-text { font-variant-numeric: tabular-nums; }
+.status-chip-hint { color: var(--color-text-dim); font-size: var(--fs-xs); opacity: .8; }
+.status-chip.warn { color: var(--color-warn); }
+.status-chip.danger { color: var(--color-err); }
+.popover {
+  position: fixed; z-index: var(--z-notice);
+  width: min(420px, calc(100vw - 24px)); max-height: 70vh; overflow-y: auto;
+  background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: var(--r-2); box-shadow: var(--shadow-2);
+  padding: var(--sp-3); animation: panel-in var(--dur-fast) var(--ease-out);
+}
+.popover-head { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.popover-title { flex: 1; font-weight: 600; font-size: var(--fs-m); }
+.popover-close {
+  width: 26px; height: 26px; padding: 0; border: none; background: none;
+  color: var(--color-text-dim); cursor: pointer; border-radius: var(--r-1);
+}
+.popover-close:hover { color: var(--color-err); background: var(--color-surface-2); }
+.popover-row {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: var(--sp-3); padding: 2px 0; font-size: var(--fs-s);
+}
+.popover-row .k { color: var(--color-text-dim); }
+.popover-row .v { text-align: right; font-variant-numeric: tabular-nums; word-break: break-word; }
+.popover-note { margin-top: var(--sp-2); font-size: var(--fs-s); color: var(--color-text-dim); line-height: var(--lh-base); }
+.popover-foot { display: flex; gap: var(--sp-2); justify-content: flex-end; margin-top: var(--sp-3); flex-wrap: wrap; }
+.ctx-bar {
+  position: relative; height: 6px; margin: var(--sp-2) 0 var(--sp-1);
+  background: var(--color-surface-2); border-radius: var(--r-pill); overflow: hidden;
+}
+.ctx-fill { height: 100%; width: 0; background: var(--color-accent); transition: width var(--dur-base) var(--ease-out); }
+.ctx-fill.warn { background: var(--color-warn); }
+.ctx-fill.danger { background: var(--color-err); }
+.ctx-mark {
+  position: absolute; top: 0; bottom: 0; width: 1px;
+  background: var(--color-text-dim); opacity: .65;
+}
+.badge-soft {
+  display: inline-block; padding: 1px 6px; border-radius: var(--r-pill);
+  background: var(--color-surface-2); border: 1px solid var(--color-border);
+  color: var(--color-text-dim); font-size: var(--fs-xs);
+}
+.badge-soft.ok { color: var(--color-ok); border-color: var(--color-ok); }
+.badge-soft.warn { color: var(--color-warn); border-color: var(--color-warn-line); }
+
 /* ---- 浮层菜单（铅笔 / 更多） ---- */
 .menu {
   position: fixed; z-index: var(--z-notice); min-width: 168px;
@@ -218,6 +278,15 @@ select.field-input { cursor: pointer; }
   border-radius: var(--r-pill); padding: 2px 10px; font-size: var(--fs-s); cursor: pointer;
 }
 .chip:hover { border-color: var(--color-accent); color: var(--color-accent); }
+
+/* 移动端：状态小卡片贴底（状态栏本身在底部，避免顶出屏幕） */
+@media (max-width: 899px) {
+  .popover {
+    left: 8px !important; right: 8px; top: auto !important;
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    width: auto; max-height: 70vh;
+  }
+}
 
 @keyframes overlay-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes panel-in { from { opacity: 0; transform: translateY(4px) scale(.99); } to { opacity: 1; transform: none; } }

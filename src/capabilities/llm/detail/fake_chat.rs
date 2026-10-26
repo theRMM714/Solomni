@@ -3,13 +3,17 @@
 //! 它同时是"对话通道"（`api::Chat`）与"通道工厂"（`ports::ChatGateway`）的实现，不做装配决策。
 
 use crate::capabilities::llm::api::Channel;
-use crate::capabilities::llm::api::{BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg};
+use crate::capabilities::llm::api::{
+    BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg, TokenUsage,
+};
 use crate::capabilities::llm::ports::ChatGateway;
 
 /// 脚本假模型：按调用次序回放脚本（最后一个条目重复兜底）；记录调用供测试断言。
 pub struct FakeChat {
     script: Vec<String>,
     pub calls: Vec<Vec<Msg>>,
+    /// 脚本替身要验“精确用量”时注入；None = 这条通道拿不到 usage。
+    usage: Option<TokenUsage>,
 }
 
 impl FakeChat {
@@ -17,7 +21,20 @@ impl FakeChat {
         FakeChat {
             script,
             calls: Vec::new(),
+            usage: None,
         }
+    }
+
+    /// 目的：让脚本替身每次调用都报同一份 usage（T1/T2 验状态栏与压缩阈值用）。
+    pub fn with_usage(mut self, usage: TokenUsage) -> FakeChat {
+        self.usage = Some(usage);
+        self
+    }
+
+    fn done(&self, text: String) -> Completion {
+        let mut done = Completion::text(text);
+        done.usage = self.usage;
+        done
     }
 
     fn next(&mut self) -> String {
@@ -43,15 +60,19 @@ impl Chat for FakeChat {
         let stream = opts.stream;
         let text = self.next();
         if !stream {
-            return Completion::text(text);
+            return self.done(text);
         }
         if !on(Chunk::Start) {
-            return Completion::text("");
+            return self.done(String::new());
         }
         if !text.is_empty() {
             let _ = on(Chunk::Text(text.clone()));
         }
-        Completion::text(text)
+        self.done(text)
+    }
+
+    fn last_usage(&self) -> Option<TokenUsage> {
+        self.usage
     }
 }
 

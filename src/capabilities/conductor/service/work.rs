@@ -926,6 +926,11 @@ impl Conductor {
                 let running = running_now.contains(&sid);
                 let continue_action =
                     self.continue_action(&sid, running, &mode, &run, pending.is_some());
+                // 只有持续对话的会话才有单一上下文；协作主会话由核心按次组上下文，不伪造数字。
+                let context = match self.sessions.get(&sid) {
+                    Some(Session::Single(s)) => s.context_usage(),
+                    _ => None,
+                };
                 SessionView {
                     running,
                     sid,
@@ -938,6 +943,7 @@ impl Conductor {
                     run,
                     pending,
                     continue_action,
+                    context,
                 }
             })
             .collect()
@@ -1550,6 +1556,76 @@ impl Conductor {
             },
             usage,
         })
+    }
+
+    /// 目的：提交历史（只读）：工作根从会话的 meta 上溯；列表与当前 head 一起给。
+    pub fn work_log(
+        &self,
+        sid: &str,
+        limit: usize,
+        before: Option<u64>,
+    ) -> Result<crate::capabilities::workspace::api::WorkLog, String> {
+        let work = self.work_root(sid)?;
+        self.workspace.work_log(&work, limit, before)
+    }
+
+    /// 目的：一条提交的详情（只读）。
+    pub fn work_commit_view(
+        &self,
+        sid: &str,
+        commit: u64,
+    ) -> Result<crate::capabilities::workspace::api::CommitDetail, String> {
+        let work = self.work_root(sid)?;
+        self.workspace.work_commit_view(&work, commit)
+    }
+
+    /// 目的：一条提交里某个文件的内容预览（只读）。
+    pub fn work_commit_file(
+        &self,
+        sid: &str,
+        commit: u64,
+        path: &str,
+    ) -> Result<crate::capabilities::workspace::api::CommitFileView, String> {
+        let work = self.work_root(sid)?;
+        self.workspace.work_commit_file(&work, commit, path)
+    }
+
+    /// 目的：用户把共享区回滚到某个提交点（非破坏性）：只改共享区与 head，目标之后的提交仍保留。
+    /// 约束：**同一工作子树里任一生成中会话都拒绝**；expect_head 与当前 head 不符也拒绝。
+    /// 返回：回滚后的 head + 要外送的 notice 事件（已落盘）。
+    pub(crate) fn restore_work_commit(
+        &mut self,
+        sid: &str,
+        commit: u64,
+        expect_head: u64,
+    ) -> Result<(Option<u64>, Vec<SessionEvent>), String> {
+        let work = self.work_root(sid)?;
+        let tree = self.subtree_of(&work);
+        if let Some(running) = self.running.iter().find(|s| tree.iter().any(|x| x == *s)) {
+            return Err(Self::running_refusal(running));
+        }
+        let current = self.workspace.work_head(&work)?.unwrap_or(0);
+        if current != expect_head {
+            return Err(format!(
+                "共享区已经变化：你看到的是 head #{}，现在是 #{}；先刷新提交历史再回滚",
+                expect_head, current
+            ));
+        }
+        let target = self.workspace.work_commit_view(&work, commit)?;
+        self.workspace.work_restore(&work, commit)?;
+        let after = self.workspace.work_head(&work)?;
+        let before = if current == 0 {
+            "空共享区".to_string()
+        } else {
+            format!("提交 #{}", current)
+        };
+        let text = format!(
+            "[工作区回滚] 共享区已从{}回滚到提交 #{}（{}：{}）。目标之后的提交仍保留在历史里，可再次回滚；各 agent 沙箱未改动，后续拉取可能遇到冲突。",
+            before, commit, target.author, target.message
+        );
+        let mut events = self.notice_row(sid, &text);
+        self.record_events(sid, &mut events);
+        Ok((after, events))
     }
 }
 

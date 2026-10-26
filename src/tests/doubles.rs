@@ -1614,6 +1614,8 @@ pub(crate) fn scripted(s: Vec<String>) -> BoxedChat {
 /// 共享脚本队列（Mutex 版：需跨线程 Send+Sync）。
 pub(crate) struct SharedScript {
     pub(crate) q: Arc<Mutex<Vec<String>>>,
+    /// 目的：需要验“精确上下文用量”时注入；None = 这条通道拿不到 usage。
+    pub(crate) usage: Option<crate::capabilities::llm::api::TokenUsage>,
 }
 
 impl Chat for SharedScript {
@@ -1629,7 +1631,13 @@ impl Chat for SharedScript {
         } else {
             q.first().cloned().unwrap_or_default()
         };
-        Completion::text(text)
+        let mut done = Completion::text(text);
+        done.usage = self.usage;
+        done
+    }
+
+    fn last_usage(&self) -> Option<crate::capabilities::llm::api::TokenUsage> {
+        self.usage
     }
 }
 
@@ -1665,6 +1673,7 @@ impl Chat for NativeCallChat {
             }],
             error: None,
             cancelled: false,
+            usage: None,
         }
     }
 }
@@ -1701,13 +1710,25 @@ impl ChatGateway for NativeCallGateway {
 pub(crate) struct ScriptGateway {
     member: BTreeMap<String, Vec<String>>,
     core: Arc<Mutex<Vec<String>>>,
+    /// 需要验“精确上下文用量”时注入；None = 这条通道拿不到 usage。
+    usage: Option<crate::capabilities::llm::api::TokenUsage>,
 }
 impl ScriptGateway {
     pub(crate) fn new(member: BTreeMap<String, Vec<String>>, core: Vec<String>) -> ScriptGateway {
         ScriptGateway {
             member,
             core: Arc::new(Mutex::new(core)),
+            usage: None,
         }
+    }
+
+    /// 目的：让这个脚本网关的每次调用都报同一份 usage（验状态栏 / 压缩阈值用）。
+    pub(crate) fn with_usage(
+        mut self,
+        usage: crate::capabilities::llm::api::TokenUsage,
+    ) -> ScriptGateway {
+        self.usage = Some(usage);
+        self
     }
 }
 
@@ -1723,11 +1744,15 @@ impl ChatGateway for ScriptGateway {
             self.member.get(id).cloned().unwrap_or_else(|| {
                 vec!["{\"type\":\"say\",\"text\":\"（演示）收到。\"}".to_string()]
             });
-        scripted(script)
+        match self.usage {
+            Some(u) => Box::new(FakeChat::new(script).with_usage(u)),
+            None => scripted(script),
+        }
     }
     fn core_channel(&self, _c: &Channel) -> BoxedChat {
         Box::new(SharedScript {
             q: Arc::clone(&self.core),
+            usage: self.usage,
         })
     }
 }
@@ -2760,6 +2785,7 @@ pub(crate) fn gw(member: BTreeMap<String, Vec<String>>, core: Vec<String>) -> Sc
     ScriptGateway {
         member,
         core: Arc::new(Mutex::new(core)),
+        usage: None,
     }
 }
 

@@ -112,6 +112,21 @@ check("危险项带 danger", String(m.children[2].className).indexOf("danger") >
 m.children[0].onclick();
 check("菜单项接线并收起", opened === 1 && menuRoot.children.length === 0);
 
+const chip = ui.statusChip({ icon: "chart", text: "18,432 tok · 14.4%", label: "上下文用量", cls: "warn", onClick: () => { opened += 1; } });
+check("状态 chip 是 button", chip.tagName === "BUTTON");
+check("状态 chip 类名", chip.className.indexOf("status-chip") === 0, chip.className);
+check("状态 chip 带图标与文字", (chip.children[0] || {}).className === "ui-icon" && String((chip.children[1] || {}).textContent).indexOf("18,432") === 0);
+chip.onclick();
+check("状态 chip 接线", opened === 2, String(opened));
+
+const floating = el("div");
+const pop = ui.popover(anchor, floating, { label: "上下文用量" });
+check("小卡片挂到 #menu-root", menuRoot.children.length === 1 && pop.node.parentNode === menuRoot);
+check("小卡片 role=dialog", pop.node.attrs.role === "dialog");
+check("锚点 aria-expanded", anchor.attrs["aria-expanded"] === "true");
+pop.close();
+check("关闭后移除小卡片", menuRoot.children.length === 0 && anchor.attrs["aria-expanded"] === "false");
+
 if (failures.length) {
   console.log(failures.join("\n"));
   console.log("UI-SMOKE-FAIL（" + failures.length + " 条）");

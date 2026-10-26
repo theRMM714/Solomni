@@ -5,7 +5,7 @@
 
 use super::endpoint::{retryable_status, Attempt};
 use super::http_agent::redact;
-use crate::capabilities::llm::api::{Chunk, CompleteOpts, Completion, ToolCall};
+use crate::capabilities::llm::api::{Chunk, CompleteOpts, Completion, TokenUsage, ToolCall};
 use futures_util::StreamExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -201,6 +201,7 @@ pub(crate) async fn stream_once(
         calls: state.calls,
         error: None,
         cancelled: false,
+        usage: state.usage,
     })
 }
 
@@ -216,17 +217,21 @@ struct StreamState {
     reasoning: String,
     finish: String,
     calls: Vec<ToolCall>,
+    usage: Option<TokenUsage>,
     got_any: bool,
 }
 
 impl StreamState {
     fn cancelled(self) -> Attempt<Completion> {
-        Attempt::Ok(Completion::cancelled(
-            self.content,
-            self.reasoning,
-            self.finish,
-            self.calls,
-        ))
+        Attempt::Ok(Completion {
+            raw: self.content,
+            reasoning: self.reasoning,
+            finish: self.finish,
+            calls: self.calls,
+            error: None,
+            cancelled: true,
+            usage: self.usage,
+        })
     }
 }
 
@@ -260,6 +265,10 @@ fn feed(
         let Ok(v) = serde_json::from_str::<serde_json::Value>(data) else {
             continue;
         };
+        // 供应商可以在最后一块只发 usage（没有 choices）；先收用量，再处理正文。
+        if let Some(usage) = usage_of(&v) {
+            state.usage = Some(usage);
+        }
         let Some(choice) = v.get("choices").and_then(|c| c.get(0)) else {
             continue;
         };
@@ -436,6 +445,21 @@ async fn read_text(
     }
 }
 
+/// 从响应/流数据块里取 usage（OpenAI 形状；容忍只给 input/output 的别名）。
+/// 全零 / 没有 usage = None：不把"供应商没报"伪装成精确的 0。
+fn usage_of(v: &serde_json::Value) -> Option<TokenUsage> {
+    let u = v.get("usage")?;
+    let n = |keys: &[&str]| keys.iter().find_map(|k| u.get(*k).and_then(|x| x.as_u64()));
+    let prompt = n(&["prompt_tokens", "input_tokens"]).unwrap_or(0);
+    let completion = n(&["completion_tokens", "output_tokens"]).unwrap_or(0);
+    let total = n(&["total_tokens"])
+        .or_else(|| (prompt > 0 || completion > 0).then_some(prompt + completion));
+    if prompt == 0 && completion == 0 && total.unwrap_or(0) == 0 {
+        return None;
+    }
+    Some(TokenUsage::new(prompt, completion, total))
+}
+
 /// 解析补全响应：取 choices[0].message.content、finish_reason 与原生 tool_calls（后两者可能没有）。
 fn parse_content(text: &str) -> Result<Completion, String> {
     let v: serde_json::Value =
@@ -475,6 +499,7 @@ fn parse_content(text: &str) -> Result<Completion, String> {
         calls,
         error: None,
         cancelled: false,
+        usage: usage_of(&v),
     })
 }
 

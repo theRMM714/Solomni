@@ -621,6 +621,14 @@ tools:
       name: { type: string, required: true, non_empty: true, desc: 落进共享区的文件名 }
       data_base64: { type: string, required: true, desc: 文件内容的 base64 }
       overwrite: { type: boolean, desc: 同名时是否覆盖（缺省 false） }
+  restore_work_commit:
+    capability: none
+    callers: [user]
+    desc: 把共享区回滚到某个提交点（非破坏性：目标之后的提交仍保留，可再次回滚）；只改共享区与 head，不动各 agent 沙箱。同一工作子树里有会话在生成时拒绝。
+    params:
+      session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
+      commit: { type: integer, required: true, min: 1, desc: 要回滚到的提交号 }
+      expect_head: { type: integer, required: true, min: 0, desc: 你看到提交历史时的 head 提交号；空共享区传 0（与当前不符会被拒绝） }
 
   # —— 登记处动作：产品级资源（供应商 / 密钥 / 模型 / agent / 设置）——
   # callers **只给 user**：这些是产品级资源，默认不开放给任何角色（密钥与全局配置只由人操作）。

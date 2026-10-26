@@ -40,6 +40,8 @@ pub fn run(ops: Ops, web_default_port: u16) -> CliExit {
             "core" => core_flow(&ops, &arg),
             // 回档：留档（标记+折叠，可恢复）/ 删除（真的截掉）/ 恢复（删掉该标记及其后）。
             "rewind" => rewind_cmd(&ops, &arg),
+            // 共享区提交历史：看 head / 列提交 / 看详情 / 非破坏性回滚。
+            "work" => work_cmd(&ops, &arg),
             // 常驻服务：列清单 / 启停开关 / 调用操作（都走统一动作面）。
             "resident" => resident_cmd(&ops, &arg),
             // 隐秘字段：列声明（置值随设置面接入）。
@@ -293,6 +295,155 @@ fn act_and_print(ops: &Ops, call: ActionCall) {
     }
 }
 
+/// 共享区提交历史：`work <会话> [log [条数] | show <提交号> | restore <提交号> [--yes]]`。
+/// 回滚是非破坏性的：目标之后的提交仍保留，可再次回滚；只改共享区主副本，不动 agent 沙箱。
+fn work_cmd(ops: &Ops, arg: &str) {
+    let parts: Vec<&str> = arg.split_whitespace().collect();
+    let Some(sid) = parts.first().copied() else {
+        println!("[用法] work <会话> [log [条数] | show <提交号> | restore <提交号> [--yes]]");
+        return;
+    };
+    let verb = parts
+        .get(1)
+        .map(|s| s.to_ascii_lowercase())
+        .unwrap_or_else(|| "log".to_string());
+    if verb == "log" {
+        let limit = parts
+            .get(2)
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(20);
+        let log = match ops.sessions.work_log(sid, limit, None) {
+            Ok(l) => l,
+            Err(e) => {
+                println!("[错误] {}", e);
+                return;
+            }
+        };
+        match &log.head {
+            Some(h) => println!(
+                "共享区 head #{}（{}，{}）· {} 个提交",
+                h.id,
+                h.author,
+                time_label(h.time),
+                log.total
+            ),
+            None => println!("共享区还没有提交"),
+        }
+        for c in &log.commits {
+            println!(
+                "  {} #{:<4} {:<10} {:<10} {} 处改动  {}",
+                if c.on_head { "*" } else { " " },
+                c.id,
+                c.author,
+                time_label(c.time),
+                c.changes,
+                first_line(&c.message)
+            );
+        }
+        if log.truncated {
+            println!("  （还有更早的提交：work {} log <更多条数>）", sid);
+        }
+        return;
+    }
+    let id = match parts.get(2).and_then(|s| s.parse::<u64>().ok()) {
+        Some(n) => n,
+        None => {
+            println!("[用法] work <会话> show|restore <提交号>");
+            return;
+        }
+    };
+    match verb.as_str() {
+        "show" => match ops.sessions.work_commit_view(sid, id) {
+            Ok(c) => {
+                println!(
+                    "提交 #{}（{}，{}）：{}",
+                    c.id,
+                    c.author,
+                    time_label(c.time),
+                    c.message
+                );
+                for ch in &c.changes {
+                    println!(
+                        "  {:<7} {:<10} {}",
+                        match ch.kind {
+                            crate::capabilities::workspace::api::ChangeKind::Add => "新增",
+                            crate::capabilities::workspace::api::ChangeKind::Modify => "修改",
+                            crate::capabilities::workspace::api::ChangeKind::Delete => "删除",
+                        },
+                        ch.size,
+                        ch.path
+                    );
+                }
+                if c.changes_truncated {
+                    println!("  （改动太多，列表已截断）");
+                }
+            }
+            Err(e) => println!("[错误] {}", e),
+        },
+        "restore" => {
+            let log = match ops.sessions.work_log(sid, 1, None) {
+                Ok(l) => l,
+                Err(e) => {
+                    println!("[错误] {}", e);
+                    return;
+                }
+            };
+            let head = log.head.as_ref().map(|h| h.id).unwrap_or(0);
+            let target = match ops.sessions.work_commit_view(sid, id) {
+                Ok(c) => c,
+                Err(e) => {
+                    println!("[错误] {}", e);
+                    return;
+                }
+            };
+            println!(
+                "把共享区从 head #{} 回滚到提交 #{}（{}）。目标之后的提交仍保留，可再次回滚；各 agent 沙箱未改动。",
+                head, target.id, first_line(&target.message)
+            );
+            let yes = parts.iter().any(|p| p.eq_ignore_ascii_case("--yes"))
+                || prompt("确认回滚？输入 yes：") == "yes";
+            if !yes {
+                println!("[取消] 没有回滚");
+                return;
+            }
+            match ops.actions.act(ActionCall {
+                id: "restore_work_commit".to_string(),
+                args: serde_json::json!({
+                    "session_id": sid,
+                    "commit": id,
+                    "expect_head": head,
+                }),
+                caller: Caller::User,
+                out: Output::Final,
+            }) {
+                Ok(Acted::Done(v)) => {
+                    let now = v.get("head").and_then(|h| h.as_u64()).unwrap_or(0);
+                    println!("[回滚] 共享区现在 head #{}", now);
+                }
+                Ok(_) => println!("[回滚] 完成"),
+                Err(e) => println!("[错误] {}", e),
+            }
+        }
+        other => println!("[用法] work <会话> log|show|restore（不认 {}）", other),
+    }
+}
+
+/// 提交时间的人读标签：最近用相对时间，较老直接给时间戳（终端不引第三方日期库）。
+fn time_label(ts: i64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let diff = now.saturating_sub(ts);
+    match diff {
+        d if d < 60 => "刚刚".to_string(),
+        d if d < 3600 => format!("{} 分钟前", d / 60),
+        d if d < 86_400 => format!("{} 小时前", d / 3600),
+        d if d < 30 * 86_400 => format!("{} 天前", d / 86_400),
+        _ => format!("{}", ts),
+    }
+}
+
 fn rewind_cmd(ops: &Ops, arg: &str) {
     let parts: Vec<&str> = arg.split_whitespace().collect();
     let usage = "[用法] rewind <会话> archive|delete <行id>  或  rewind <会话> restore <标记id>";
@@ -452,7 +603,7 @@ fn print_menu(ops: &Ops) {
             model_label(a.model.as_deref())
         );
     }
-    println!("命令：single [agent名…] | collab [agent名…|?] | proxy（决定权整块交给核心） | module [模块id.工具名 [json]]（不经 AI 直接用模块工具） | provider list|add|rm|discover | model list|add|rm | core <模型id> | rewind <会话> archive|delete <行id> | rewind <会话> restore <标记id> | resident list|start|stop|enable|disable|call <模块id> <服务名> [操作名] [json] | secret | rescan | webui | exit");
+    println!("命令：single [agent名…] | collab [agent名…|?] | proxy（决定权整块交给核心） | module [模块id.工具名 [json]]（不经 AI 直接用模块工具） | provider list|add|rm|discover | model list|add|rm | core <模型id> | rewind <会话> archive|delete <行id> | rewind <会话> restore <标记id> | work <会话> log|show|restore <提交号> | resident list|start|stop|enable|disable|call <模块id> <服务名> [操作名] [json] | secret | rescan | webui | exit");
 }
 
 /// 模型标签（CLI 展示文案；核心默认是登记处的概念，不是提示词）。
@@ -572,6 +723,8 @@ fn render(events: &[SessionEvent]) {
             | SessionEvent::Working { .. }
             | SessionEvent::ToolCall(_)
             | SessionEvent::Rewound { .. } => {}
+            // 上下文用量是状态栏事实：Web 有状态栏，终端不逐次打。
+            SessionEvent::Usage { .. } => {}
         }
     }
 }

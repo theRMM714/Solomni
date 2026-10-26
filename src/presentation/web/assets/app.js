@@ -119,6 +119,8 @@ async function refreshState() {
       tier: v.tier, tier_ready: v.tier_ready, tier_missing: v.tier_missing || [],
       activating: false,
       done: !!(h && h.done), awaiting: null, fold: {}, scroll: {},
+      context: v.context || null,
+      work: null, workAt: 0, workDirty: false, workError: '',
       readonly: false, hydrated: false, buffer: [],
     };
     state.sessions.set(v.sid, s);
@@ -138,6 +140,8 @@ async function refreshState() {
     cur.tier = v.tier;
     cur.tier_ready = v.tier_ready;
     cur.tier_missing = v.tier_missing || [];
+    // 上下文用量以快照兜底；实时 usage 事件到达后以事件为准（同一份事实，事件更新）。
+    if (v.context !== undefined) cur.context = v.context || null;
     // 运行态**只对账、不覆盖**：这条会话已经有实时知识（事件就是真相）时，快照比它滞后——
     // 一次迟到的轮询不能把已经收尾的回合标回"在跑"。没有实时知识时按快照补齐，并清掉本地遗留
     // （快照说没跑就是没跑）；谁在跑未知时照旧显示"正在工作…"。
@@ -159,7 +163,11 @@ async function refreshState() {
   renderHistory();
   if (opened) renderTabs();
   const cur = activeSession();
-  if (cur) { syncTyping(cur); syncSendButton(cur); syncComposer(cur); }
+  if (cur) {
+    syncTyping(cur); syncSendButton(cur); syncComposer(cur);
+    // 提交信息不塞进每 3 秒的 /api/state：按需、低频刷新（后台 agent 提交也能跟上）。
+    if (!cur.workAt || Date.now() - cur.workAt > 15000) loadWork(cur.sid);
+  }
   if (registryChanged) notifyRegistryChange();
 }
 
@@ -551,6 +559,7 @@ async function openHistory(name) {
       lines: [], live: [], pending: null, sending: false,
       running: false, working: null, running_known: false,
       activating: false, continue_action: null,
+      context: null, work: null, workAt: 0, workDirty: false, workError: '',
       done: true, awaiting: null, readonly: true, fold: {}, scroll: {},
     };
     s.hydrated = true;
@@ -2143,6 +2152,7 @@ async function sendUpload(sid, name, b64, overwrite) {
       return;
     }
     filesCache.delete(sid); // 文件清单变了，@ 菜单下次重拉
+    loadWork(sid, true); // 上传 = 一次提交，状态栏的 head 要跟着变
     ui.toast('ok', '已上传：' + name);
   } catch (e) { notice('操作失败', e.message, 'err'); }
 }
@@ -2167,6 +2177,7 @@ function renameUpload(sid, name, b64, alt) {
         const r = await api('POST', actionUrl('upload'), { session_id: sid, name: v, data_base64: b64 });
         if (r.uploaded === false) { c.setMsg('还是同名，请换一个名字', true); return; }
         filesCache.delete(sid); // 文件清单变了，@ 菜单下次重拉
+        loadWork(sid, true);
         closeModal(); ui.toast('ok', '已上传：' + v);
       } catch (e) {
         c.setMsg(e.message, true);
@@ -2737,6 +2748,7 @@ async function startSession(body) {
     sid, mode: body.mode, title: body.name || sid, run: 'active',
     lines: [], live: [], pending: null, sending: false,
     running: false, working: null, running_known: false,
+    context: null, work: null, workAt: 0, workDirty: false, workError: '',
     done: false, awaiting: null, fold: {}, scroll: {},
   };
   // 开场事实由 /api/sessions 那一刻就推给事件台了（回包只给头部序号），所以这里**合流**一次：
@@ -2761,6 +2773,7 @@ function setActive(sid) {
   if (cached) shortPathRoots = buildRootList(cached.roots);
   renderTabs(); renderStream(true); renderGate(state.sessions.get(sid));
   const s = state.sessions.get(sid);
+  if (s) { syncComposer(s); loadWork(sid); }
   if (!s || !s.readonly) $('#input').focus();
   if (!cached) loadPathRoots(sid); // 没缓存就去拉一次（失败静默），拿到后补一次重渲染
 }
@@ -2794,6 +2807,8 @@ function applySnapshot(s, events) {
   s.forceFull = true;
   s.pending = null;
   s.done = false;
+  s.context = null; // 回档后的用量由快照里的 usage 事件重建；没有就显示"还没有调用"
+  s.workDirty = true; // 回档可能也物化了共享区：状态栏重新拉一次提交
   s.readonly = false; // 回档后的会话是活动会话（历史回放被用户明确回档/继续）
   for (const ev of (events || [])) absorb(s, ev);
 }
@@ -2810,6 +2825,16 @@ function absorb(s, ev) {
         text: '[压缩] 此前内容已压成摘要（不再发给模型，仍可查看）：\n' + ev.summary,
       });
       break;
+    // 上下文用量：不是转录行、不进模型上下文；只更新状态栏（持久事件，刷新后仍在）。
+    case 'usage':
+      s.context = {
+        prompt_tokens: ev.prompt_tokens || 0,
+        completion_tokens: ev.completion_tokens || 0,
+        total_tokens: ev.total_tokens || 0,
+        window: ev.window || 0,
+        exact: ev.exact === true,
+      };
+      return true;
     // 留档回档：折叠分界。内容保留在文件里，可恢复。
     case 'rewind':
       if (ev.mode !== 'archive') break;
@@ -2911,6 +2936,8 @@ function absorb(s, ev) {
     case 'tool_call':
       // 工具调用发生在轮与轮之间：按到达顺序插进流式块里（module 为空 = 内置 read/write）。
       s.live.push({ kind: 'tool', tool: ev });
+      // agent 提交会改共享区 head：让状态栏 / 提交弹窗下次刷新时跟上。
+      if (ev.name === 'work_commit') s.workDirty = true;
       return true; // 同上：卡片节点只 append，绝不重建
     case 'discussion_done':
       if (ev.over_cap) s.lines.push({ cls: 'sys', who: '', text: '讨论超轮次上限，进入裁决。' });
@@ -3010,7 +3037,11 @@ function lineParts(l) {
 }
 
 /* ---------- 渲染 ---------- */
-function renderAll() { renderTabs(); renderStream(); renderGate(activeSession()); syncComposer(activeSession()); }
+function renderAll() {
+  const s = activeSession();
+  renderTabs(); renderStream(); renderGate(s); syncComposer(s);
+  if (s && s.workDirty) { s.workDirty = false; loadWork(s.sid, true); }
+}
 
 /* 只读历史视图：不渲染输入区；只留「启用会话」。启用是后端动作，前端只渲染结果。 */
 function renderReadonly(s) {
@@ -3040,6 +3071,7 @@ function syncComposer(s) {
     else composer.classList.remove('hidden');
   }
   renderReadonly(s);
+  syncStatusbar(s);
   const cont = $('#btn-continue');
   if (!cont) return;
   const c = s && !s.readonly && !isBusy(s) ? s.continue_action : null;
@@ -3048,6 +3080,444 @@ function syncComposer(s) {
   if (c) {
     cont.textContent = c.label || '继续';
     cont.title = c.reason || '';
+  }
+}
+
+/* ---------- 会话状态栏：上下文用量 + 共享区提交 ----------
+ * 数据源：/api/state 的 SessionView.context（精确/估算）、持久 usage 事件、/api/sessions/{sid}/work。
+ * 约束：这里只做呈现与只读拉取；回滚走统一动作分发（动作 id restore_work_commit）。 */
+function fmtInt(n) {
+  const v = Number(n || 0);
+  return Number.isFinite(v) ? v.toLocaleString('zh-CN') : '0';
+}
+function ctxPercent(ctx) {
+  if (!ctx || !ctx.window) return null;
+  return (Number(ctx.total_tokens || 0) / Number(ctx.window)) * 100;
+}
+function ctxChipClass(percent) {
+  const at = Number((state.settings && state.settings.compact_at_percent) || 0);
+  if (percent == null) return '';
+  if (percent >= 90) return 'danger';
+  if (at > 0 && percent >= at) return 'warn';
+  return '';
+}
+function timeAgo(ts) {
+  const t = Number(ts || 0);
+  if (!t) return '';
+  const diff = Math.max(0, Math.floor(Date.now() / 1000) - t);
+  if (diff < 60) return '刚刚';
+  if (diff < 3600) return Math.floor(diff / 60) + ' 分钟前';
+  if (diff < 86400) return Math.floor(diff / 3600) + ' 小时前';
+  if (diff < 30 * 86400) return Math.floor(diff / 86400) + ' 天前';
+  return fmtDateTime(t);
+}
+function fmtDateTime(ts) {
+  const t = Number(ts || 0);
+  if (!t) return '—';
+  try {
+    return new Date(t * 1000).toLocaleString('zh-CN', { hour12: false });
+  } catch (e) { return String(t); }
+}
+function statusPrintOf(s) {
+  const c = s && s.context;
+  const w = s && s.work;
+  return JSON.stringify([
+    s && s.sid, c && c.prompt_tokens, c && c.completion_tokens, c && c.total_tokens,
+    c && c.window, c && c.exact, w && w.head && w.head.id, w && w.total, w && w.error,
+    s && s.workError, s && s.workAt ? 1 : 0,
+    (state.settings && state.settings.compact_at_percent) || 0,
+  ]);
+}
+
+function syncStatusbar(s) {
+  const box = $('#session-status');
+  if (!box) return;
+  if (!s || state.activeSid !== s.sid) {
+    box.classList.add('hidden');
+    box.innerHTML = '';
+    return;
+  }
+  const print = statusPrintOf(s);
+  if (s.statusPrint === print) {
+    box.classList.remove('hidden');
+    return;
+  }
+  s.statusPrint = print;
+  box.innerHTML = '';
+  box.classList.remove('hidden');
+  const inner = document.createElement('div');
+  inner.className = 'session-status-inner';
+
+  // 协作主会话没有一条持续发给模型的对话：不显示上下文 chip（不伪造数字）。
+  if (s.mode !== 'collab') {
+    const c = s.context;
+    const pct = ctxPercent(c);
+    const label = c
+      ? (c.exact ? '' : '≈') + fmtInt(c.total_tokens) + ' tok · ' + (pct == null ? '—' : pct.toFixed(1) + '%')
+      : '上下文 —';
+    const tip = c
+      ? '上下文：' + (c.exact ? '供应商 usage（精确）' : '按字符估算') +
+        '；' + fmtInt(c.total_tokens) + ' / ' + fmtInt(c.window) + ' tokens'
+      : '已经有模型调用后显示上下文用量';
+    const chip = ui.statusChip({
+      icon: 'chart',
+      text: label,
+      label: '上下文用量',
+      title: tip,
+      cls: ctxChipClass(pct),
+      onClick: () => openContextCard(s, chip),
+    });
+    inner.appendChild(chip);
+  }
+
+  // 共享区提交：head + 相对时间；点击看详情 / 全部提交。
+  const work = s.work;
+  const head = work && work.head;
+  let workLabel = 'work …';
+  if (s.workError) workLabel = 'work 不可用';
+  else if (work) workLabel = head ? '#' + head.id + ' work · ' + timeAgo(head.time) : 'work 空';
+  const workChip = ui.statusChip({
+    icon: 'git',
+    text: workLabel,
+    label: '共享区提交',
+    title: head ? ('#' + head.id + ' ' + head.author + '：' + head.message) : '共享区提交历史',
+    cls: s.workError ? 'warn' : '',
+    onClick: () => openWorkCard(s, workChip),
+  });
+  inner.appendChild(workChip);
+  box.appendChild(inner);
+}
+
+async function loadWork(sid, force) {
+  const s = state.sessions.get(sid);
+  if (!s) return;
+  if (s.workLoading) return;
+  if (!force && s.workAt && Date.now() - s.workAt < 10000) return;
+  s.workLoading = true;
+  s.workDirty = false;
+  try {
+    const r = await api('GET', '/api/sessions/' + encodeURIComponent(sid) + '/work?limit=20');
+    if (state.sessions.get(sid) !== s) return;
+    s.work = r;
+    s.workError = '';
+  } catch (e) {
+    if (state.sessions.get(sid) !== s) return;
+    s.workError = e.message;
+  } finally {
+    s.workLoading = false;
+    s.workAt = Date.now();
+    if (state.activeSid === sid) syncStatusbar(s);
+  }
+}
+
+function popoverBox(title, close) {
+  const box = document.createElement('div');
+  const head = document.createElement('div');
+  head.className = 'popover-head';
+  const h = document.createElement('div');
+  h.className = 'popover-title';
+  h.textContent = title || '';
+  const x = document.createElement('button');
+  x.type = 'button';
+  x.className = 'popover-close';
+  x.setAttribute('aria-label', '关闭');
+  x.textContent = '✕';
+  x.onclick = close || (() => ui.closePopover());
+  head.appendChild(h); head.appendChild(x);
+  box.appendChild(head);
+  return box;
+}
+function popoverRow(k, v) {
+  const row = document.createElement('div');
+  row.className = 'popover-row';
+  const a = document.createElement('span'); a.className = 'k'; a.textContent = k;
+  const b = document.createElement('span'); b.className = 'v'; b.textContent = v;
+  row.appendChild(a); row.appendChild(b);
+  return row;
+}
+function popoverNote(text, cls) {
+  const n = document.createElement('div');
+  n.className = 'popover-note' + (cls ? ' ' + cls : '');
+  n.textContent = text;
+  return n;
+}
+
+function openContextCard(s, anchor) {
+  const box = popoverBox('上下文用量');
+  const c = s.context;
+  if (!c) {
+    box.appendChild(popoverNote('还没有模型调用。下一次调用后这里会显示精确用量；拿不到供应商 usage 时按字符估算并标注。'));
+    ui.popover(anchor, box, { label: '上下文用量' });
+    return;
+  }
+  const pct = ctxPercent(c);
+  const at = Number((state.settings && state.settings.compact_at_percent) || 0);
+  if (pct != null) {
+    const bar = document.createElement('div');
+    bar.className = 'ctx-bar';
+    const fill = document.createElement('div');
+    fill.className = 'ctx-fill' + (pct >= 90 ? ' danger' : (at > 0 && pct >= at ? ' warn' : ''));
+    fill.style.width = Math.max(0, Math.min(100, pct)) + '%';
+    bar.appendChild(fill);
+    if (at > 0 && at <= 100) {
+      const mark = document.createElement('span');
+      mark.className = 'ctx-mark';
+      mark.style.left = at + '%';
+      mark.title = '自动压缩阈值 ' + at + '%';
+      bar.appendChild(mark);
+    }
+    box.appendChild(bar);
+  }
+  box.appendChild(popoverRow('已用', fmtInt(c.total_tokens) + ' tokens'));
+  box.appendChild(popoverRow('窗口', fmtInt(c.window) + ' tokens'));
+  box.appendChild(popoverRow('占用', pct == null ? '—' : pct.toFixed(1) + '%'));
+  box.appendChild(popoverRow('上次输入 / 输出', fmtInt(c.prompt_tokens) + ' / ' + fmtInt(c.completion_tokens)));
+  box.appendChild(popoverRow('自动压缩', at > 0 ? at + '%' : '已关闭'));
+  const badge = document.createElement('span');
+  badge.className = 'badge-soft ' + (c.exact ? 'ok' : 'warn');
+  badge.textContent = c.exact ? '供应商 usage（精确）' : '按字符估算';
+  box.appendChild(badge);
+  box.appendChild(popoverNote(c.exact
+    ? '数字来自供应商返回的 usage；工具结果回灌的瞬间可能略小于下一请求。'
+    : '供应商没回 usage：按对话字符 ÷ 4 估算，只作参考。'));
+  ui.popover(anchor, box, { label: '上下文用量' });
+}
+
+function openWorkCard(s, anchor) {
+  const box = popoverBox('共享区');
+  if (s.workError) {
+    box.appendChild(popoverNote('提交信息读取失败：' + s.workError));
+  } else if (!s.work) {
+    box.appendChild(popoverNote('正在读取提交历史…'));
+    if (!s.workLoading) {
+      loadWork(s.sid, true).then(() => {
+        if (state.activeSid === s.sid && !s.work) return;
+        if (state.activeSid === s.sid) { ui.closePopover(); openWorkCard(s, anchor); }
+      });
+    }
+  } else if (!s.work.head) {
+    box.appendChild(popoverNote('还没有提交。agent 的 work_commit 或你的上传会出现在这里。'));
+  } else {
+    const h = s.work.head;
+    box.appendChild(popoverRow('当前 head', '#' + h.id));
+    box.appendChild(popoverRow('作者 / 时间', h.author + ' · ' + timeAgo(h.time)));
+    const msg = document.createElement('div');
+    msg.className = 'commit-msg';
+    msg.textContent = h.message;
+    box.appendChild(msg);
+    const rows = (s.work.commits || []).slice(0, 5);
+    if (rows.length) {
+      const list = document.createElement('div');
+      list.className = 'work-history-list';
+      list.style.maxHeight = '180px';
+      for (const c of rows) {
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'work-row' + (c.on_head ? ' current' : '');
+        const rh = document.createElement('div'); rh.className = 'work-row-head';
+        const id = document.createElement('span'); id.className = 'work-id'; id.textContent = '#' + c.id;
+        const meta = document.createElement('span'); meta.className = 'work-meta';
+        meta.textContent = (c.on_head ? '当前线 · ' : '已离开当前线 · ') + c.author + ' · ' + timeAgo(c.time);
+        rh.appendChild(id); rh.appendChild(meta);
+        const m = document.createElement('div'); m.className = 'work-msg'; m.textContent = c.message;
+        row.appendChild(rh); row.appendChild(m);
+        row.onclick = () => { ui.closePopover(); openWorkHistory(s, c.id); };
+        list.appendChild(row);
+      }
+      box.appendChild(list);
+    }
+  }
+  const foot = document.createElement('div');
+  foot.className = 'popover-foot';
+  const all = btn('全部提交', 'btn btn-ghost');
+  all.onclick = () => { ui.closePopover(); openWorkHistory(s); };
+  foot.appendChild(all);
+  box.appendChild(foot);
+  ui.popover(anchor, box, { label: '共享区提交' });
+}
+
+function openWorkHistory(s, selected) {
+  loadWork(s.sid, true);
+  openModal('提交历史 · ' + s.sid, (c) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'work-history';
+    const list = document.createElement('div');
+    list.className = 'work-history-list';
+    const detail = document.createElement('div');
+    detail.className = 'work-detail';
+    wrap.appendChild(list); wrap.appendChild(detail);
+    c.body.appendChild(wrap);
+    c.setMsg('回滚是非破坏性的：目标之后的提交仍保留，可再次回滚；只改共享区，不动各 agent 沙箱。');
+    let page = null;
+    let selectedId = selected || null;
+    let loading = false;
+
+    const paintDetail = async (id) => {
+      if (!id) {
+        detail.innerHTML = '<div class="work-empty">选一条提交看详情。</div>';
+        return;
+      }
+      detail.innerHTML = '<div class="work-empty">读取中…</div>';
+      let d;
+      try {
+        d = await api('GET', '/api/sessions/' + encodeURIComponent(s.sid) + '/work/' + encodeURIComponent(id));
+      } catch (e) {
+        detail.innerHTML = '';
+        detail.appendChild(popoverNote('读取失败：' + e.message, 'err'));
+        return;
+      }
+      detail.innerHTML = '';
+      const head = document.createElement('div');
+      head.className = 'work-detail-head';
+      const title = document.createElement('div');
+      title.className = 'work-detail-title';
+      title.textContent = '#' + d.id + (d.parent ? ' ← #' + d.parent : '');
+      const badge = document.createElement('span');
+      badge.className = 'badge-soft' + (s.work && s.work.head && s.work.head.id === d.id ? ' ok' : '');
+      badge.textContent = s.work && s.work.head && s.work.head.id === d.id ? '当前 head' : '历史提交';
+      head.appendChild(title); head.appendChild(badge);
+      detail.appendChild(head);
+      detail.appendChild(popoverRow('作者 / 时间', d.author + ' · ' + fmtDateTime(d.time)));
+      const msg = document.createElement('div');
+      msg.className = 'commit-msg';
+      msg.textContent = d.message;
+      detail.appendChild(msg);
+      const chHead = document.createElement('div');
+      chHead.className = 'work-meta';
+      chHead.textContent = '改动 ' + d.changes.length + ' 处' + (d.changes_truncated ? '（已截断）' : '');
+      detail.appendChild(chHead);
+      const changes = document.createElement('div');
+      changes.className = 'change-list';
+      for (const ch of d.changes) {
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'change-row';
+        const kind = document.createElement('span');
+        kind.className = 'change-kind ' + ch.kind;
+        kind.textContent = ch.kind === 'add' ? '新增' : ch.kind === 'modify' ? '修改' : '删除';
+        const path = document.createElement('span');
+        path.className = 'change-path';
+        path.textContent = ch.path;
+        const size = document.createElement('span');
+        size.className = 'change-size';
+        size.textContent = ch.size + ' B';
+        row.appendChild(kind); row.appendChild(path); row.appendChild(size);
+        if (ch.kind !== 'delete') {
+          row.title = '预览该提交里的这个文件';
+          row.onclick = () => previewCommitFile(detail, s, d.id, ch.path);
+        } else {
+          row.disabled = true;
+          row.title = '该提交删除了这个文件';
+        }
+        changes.appendChild(row);
+      }
+      detail.appendChild(changes);
+      const foot = document.createElement('div');
+      foot.className = 'popover-foot';
+      const restore = btn('回滚到此处', 'btn btn-primary');
+      const blocked = s.readonly ? '历史回放只读：先启用会话' : (isBusy(s) ? '会话正在生成：先停止再回滚' : '');
+      if (blocked) { restore.disabled = true; restore.title = blocked; }
+      restore.onclick = () => restoreCommit(c, s, d);
+      foot.appendChild(restore);
+      detail.appendChild(foot);
+    };
+
+    const paintList = (append) => {
+      if (!page) return;
+      if (!append) list.innerHTML = '';
+      for (const cm of page.commits) {
+        if (list.querySelector('[data-commit="' + cm.id + '"]')) continue;
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.dataset.commit = String(cm.id);
+        row.className = 'work-row' + (cm.on_head ? ' current' : '');
+        const rh = document.createElement('div'); rh.className = 'work-row-head';
+        const id = document.createElement('span'); id.className = 'work-id'; id.textContent = '#' + cm.id;
+        const meta = document.createElement('span'); meta.className = 'work-meta';
+        meta.textContent = (cm.on_head ? '当前线 · ' : '已离开 · ') + cm.author + ' · ' + timeAgo(cm.time) + ' · ' + cm.changes + ' 处';
+        rh.appendChild(id); rh.appendChild(meta);
+        const m = document.createElement('div'); m.className = 'work-msg'; m.textContent = cm.message;
+        row.appendChild(rh); row.appendChild(m);
+        row.onclick = () => { selectedId = cm.id; paintDetail(cm.id); };
+        list.appendChild(row);
+      }
+    };
+    const loadPage = async (before) => {
+      if (loading) return;
+      loading = true;
+      try {
+        const q = '/api/sessions/' + encodeURIComponent(s.sid) + '/work?limit=50' + (before ? '&before=' + before : '');
+        const r = await api('GET', q);
+        page = r;
+        s.work = r;
+        s.workAt = Date.now();
+        syncStatusbar(s);
+        paintList(!!before);
+        if (r.truncated) {
+          const old = list.querySelector('.work-more');
+          if (old) old.remove();
+          const more = btn('加载更早', 'btn btn-ghost work-more');
+          more.onclick = () => loadPage(page.commits[page.commits.length - 1].id);
+          list.appendChild(more);
+        }
+        if (!selectedId) selectedId = r.head ? r.head.id : (r.commits[0] && r.commits[0].id);
+        paintDetail(selectedId);
+      } catch (e) {
+        c.setMsg('读取提交历史失败：' + e.message, true);
+      } finally {
+        loading = false;
+      }
+    };
+    loadPage(null);
+  }, true);
+}
+
+async function previewCommitFile(holder, s, commit, path) {
+  const old = holder.querySelector('.file-preview');
+  if (old) old.remove();
+  const box = document.createElement('div');
+  box.className = 'file-preview';
+  box.appendChild(popoverNote('读取 ' + path + ' …'));
+  holder.appendChild(box);
+  try {
+    const r = await api('GET', '/api/sessions/' + encodeURIComponent(s.sid) + '/work/' +
+      encodeURIComponent(commit) + '?path=' + encodeURIComponent(path));
+    box.innerHTML = '';
+    box.appendChild(popoverRow('文件', r.path));
+    box.appendChild(popoverRow('大小 / 类型', r.size + ' B · ' + (r.media_type || '未知')));
+    if (r.too_large) box.appendChild(popoverNote('超过共享区单文件上限：只给元信息，不预览。'));
+    else if (r.text == null) box.appendChild(popoverNote('二进制 / 非 UTF-8：只给元信息。'));
+    else {
+      const pre = document.createElement('pre');
+      pre.textContent = r.text + (r.truncated ? '\n…（预览已截断，共 ' + r.size + ' B）' : '');
+      box.appendChild(pre);
+    }
+  } catch (e) {
+    box.innerHTML = '';
+    box.appendChild(popoverNote('读取失败：' + e.message, 'err'));
+  }
+}
+
+async function restoreCommit(modal, s, d) {
+  if (s.readonly) { notice('历史回放只读', '先启用会话，再回滚共享区。', 'info'); return; }
+  if (isBusy(s)) { notice('会话正在生成', '先停止再回滚，避免与正在提交的 agent 交错。', 'info'); return; }
+  let head = s.work && s.work.head ? s.work.head.id : 0;
+  const text = '共享区将从 head #' + head + ' 回滚到提交 #' + d.id + '（' + d.author + '：' + d.message + '）。\n\n' +
+    '这是非破坏性回滚：目标之后的提交仍保留在历史里，可再次回滚；只改共享区主副本，不动各 agent 沙箱，后续拉取可能遇到冲突。';
+  if (!(await confirmBox('回滚共享区', text, '回滚'))) return;
+  try {
+    await api('POST', actionUrl('restore_work_commit'), {
+      session_id: s.sid, commit: d.id, expect_head: head,
+    });
+    s.workAt = 0; s.workDirty = false;
+    await loadWork(s.sid, true);
+    ui.toast('ok', '已回滚到提交 #' + d.id);
+    if (modal && modal.close) modal.close();
+  } catch (e) {
+    if (modal && modal.setMsg) modal.setMsg('回滚失败：' + e.message, true);
+    else notice('回滚失败', e.message, 'err');
+    s.workAt = 0;
+    loadWork(s.sid, true);
   }
 }
 
@@ -3728,6 +4198,8 @@ function renderLiveTick(s) {
   syncTyping(s);
   box.scrollTop = stick ? box.scrollHeight : prevTop;
   syncSendButton(s);
+  syncStatusbar(s);
+  if (s.workDirty) { s.workDirty = false; loadWork(s.sid, true); }
 }
 
 /* 裁决门：**按后端给的消息与选项渲染**（前端不认识业务含义，也不按 kind 猜按钮）。
@@ -3990,6 +4462,7 @@ async function applyRewind(s, body) {
     if (typeof r.head === 'number') s.floor = r.head;
     // 行整体重建，折叠状态一并重来（避免旧键被新行复用）；与事件台上的 `rewound` 同一套逻辑。
     applySnapshot(s, (r.events || []).concat(r.live || []));
+    s.workDirty = true;
     renderAll();
     ui.toast('ok', '已回档');
   } catch (err) { notice('操作失败', err.message, 'err'); }

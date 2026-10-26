@@ -1464,6 +1464,82 @@ fn http_chat_streams_chunks_and_stops_when_the_caller_aborts() {
     assert_eq!(mock2.requests().len(), 1, "中止不得把流重新拉起来");
 }
 
+/// usage 是两个方向的真实协议事实：非流式在响应体，流式在最后一个只有 usage 的分片。
+#[test]
+fn http_chat_reads_usage_from_stream_and_non_stream() {
+    let non_stream = serde_json::json!({
+        "choices": [{"message": {"content": "答"}}],
+        "usage": {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120}
+    })
+    .to_string();
+    let mock = Mock::start(vec![(200, "application/json", non_stream)]);
+    let mut chat = gateway().member_channel(&mock.channel("k"), "a");
+    let done = chat.complete(&[Msg::user("问")], CompleteOpts::plain(false), &mut |_| {
+        true
+    });
+    assert_eq!(done.raw, "答");
+    let usage = done.usage.expect("非流式 usage");
+    assert_eq!(
+        (
+            usage.prompt_tokens,
+            usage.completion_tokens,
+            usage.total_tokens
+        ),
+        (100, 20, 120)
+    );
+    assert_eq!(chat.last_usage().expect("通道记住 usage").total_tokens, 120);
+
+    // 流式：正文分片之后，供应商发一个 choices 为空、只带 usage 的分片。
+    let sse = format!(
+        "{}{}data: {}\n\ndata: [DONE]\n\n",
+        sse_delta("你"),
+        sse_delta("好"),
+        serde_json::json!({"choices": [], "usage": {"prompt_tokens": 200, "completion_tokens": 30, "total_tokens": 230}})
+    );
+    let mock2 = Mock::start(vec![(200, "text/event-stream", sse)]);
+    let mut chat2 = gateway().member_channel(&mock2.channel("k"), "a");
+    let mut pieces = Vec::new();
+    let done2 = chat2.complete(&[Msg::user("问")], CompleteOpts::plain(true), &mut |c| {
+        if let Chunk::Text(t) = c {
+            pieces.push(t);
+        }
+        true
+    });
+    assert_eq!(done2.raw, "你好");
+    assert_eq!(pieces, vec!["你".to_string(), "好".to_string()]);
+    let usage2 = done2.usage.expect("流式 usage");
+    assert_eq!(usage2.total_tokens, 230);
+    assert_eq!(
+        chat2
+            .last_usage()
+            .expect("通道记住流式 usage")
+            .prompt_tokens,
+        200
+    );
+}
+
+/// 供应商不接受 stream_options：去掉参数重试一次（不再重复正文），拿不到 usage 就由会话估算。
+#[test]
+fn http_chat_retries_without_stream_options_when_provider_rejects_it() {
+    let reject =
+        serde_json::json!({"error": {"message": "unknown field: stream_options"}}).to_string();
+    let body = format!("{}data: [DONE]\n\n", sse_delta("好"));
+    let mock = Mock::start(vec![
+        (400, "application/json", reject),
+        (200, "text/event-stream", body),
+    ]);
+    let mut chat = gateway().member_channel(&mock.channel("k"), "a");
+    let done = chat.complete(&[Msg::user("问")], CompleteOpts::plain(true), &mut |_| {
+        true
+    });
+    assert_eq!(done.raw, "好", "回退后正常收正文");
+    assert!(done.usage.is_none(), "回退后的响应没 usage，不能伪造精确");
+    let bodies = mock.bodies();
+    assert_eq!(bodies.len(), 2, "400 之后只重试一次：{:?}", bodies);
+    assert!(bodies[0].contains("stream_options"), "{}", bodies[0]);
+    assert!(!bodies[1].contains("stream_options"), "{}", bodies[1]);
+}
+
 #[test]
 fn http_stream_idle_keepalives_do_not_trip_a_total_timeout() {
     // 总时长 1.5s > timeout_secs=1，但每 300ms 都有字节（含 SSE keepalive）：

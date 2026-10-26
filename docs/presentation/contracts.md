@@ -105,11 +105,13 @@
 | GET | `/ui.css` | 静态资源 | — | `ui.css` | 200 |
 | GET | `/ui.js` | 静态资源 | — | `ui.js` | 200 |
 | GET | `/api/events` | 事件台（`EventBus`） | 查询 `sid` / `since` | `{lines:[{seq,sid,events}],head,oldest}` | 200 |
-| GET | `/api/state` | `ModulesOps::roster / module_enabled / service_enabled` + `SessionOps::session_views` + `RegistryOps` + `HistoryOps::list` | — | `{modules,services,rejected,fence,providers,models,core,agents,settings,sessions,history}`（`modules[].runtimes` 是模块声明的运行能力，创建向导据此预判虚拟根够不够；`modules[].enabled` 与 `modules[].services[].enabled` 是**有效启停**；`services` 是常驻服务的**运行态** `{module,name,adapter,state,reason,operations}`；`sessions[].pending` 是**当前那张裁决卡**的快照，与推的 `decision_card` 同一份） | 200, 400 |
+| GET | `/api/state` | `ModulesOps::roster / module_enabled / service_enabled` + `SessionOps::session_views` + `RegistryOps` + `HistoryOps::list` | — | `{modules,services,rejected,fence,providers,models,core,agents,settings,sessions,history}`（`modules[].runtimes` 是模块声明的运行能力，创建向导据此预判虚拟根够不够；`modules[].enabled` 与 `modules[].services[].enabled` 是**有效启停**；`services` 是常驻服务的**运行态** `{module,name,adapter,state,reason,operations}`；`sessions[].pending` 是**当前那张裁决卡**的快照，与推的 `decision_card` 同一份；`sessions[].context` 是最近一次模型调用的上下文用量，只对 `Session::Single`（single / proxy / agent 子会话）存在） | 200, 400 |
 | GET | `/api/actions` | `ActionOps::catalog` | 查询 `sid` | `{actions:[{id,desc,params,available,reason}]}` | 200, 400 |
 | POST | `/api/actions/{id}` | `ActionOps::act` | `{…按动作声明}` | `{head}` / `{events}`（重放快照） / `{ok,…}` | 200, 400 |
 | GET | `/api/sessions/{sid}/config` | `SessionOps::config` | — | `{config}` | 200, 400 |
 | GET | `/api/sessions/{sid}/files` | `SessionOps::files` | — | `{work,agents,roots,usage}` | 200, 404 |
+| GET | `/api/sessions/{sid}/work` | `SessionOps::work_log` | 查询 `limit` / `before` | `{head,commits:[{id,parent,author,session,time,message,changes,on_head}],total,truncated}` | 200, 404 |
+| GET | `/api/sessions/{sid}/work/{commit}` | `SessionOps::work_commit_view / work_commit_file` | 查询 `path`（可选） | `{id,parent,author,session,time,message,changes,changes_truncated}` / `{path,hash,size,media_type,text,truncated,too_large}` | 200, 404 |
 | GET | `/api/settings` | `RegistryOps::settings` | — | `{settings}` | 200, 400 |
 | GET | `/api/history` | `HistoryOps::list` | — | `{sessions}` | 200, 400 |
 | GET | `/api/history/{name}` | `HistoryOps::open` | — | `{meta,events,live,head}` | 200, 404 |

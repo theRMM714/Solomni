@@ -124,11 +124,48 @@ pub fn truncate_events(events: &[serde_json::Value]) -> Vec<serde_json::Value> {
                     content.push(e2);
                 }
             }
+            // 用量事件也跟着它那次调用的首行走：行被折叠了，这条用量就不再代表当前发送视图。
+            Some("usage") => {
+                let line = ev.get("line").and_then(|i| i.as_u64()).unwrap_or(0);
+                if !folded(&marks, line) {
+                    content.push(ev.clone());
+                }
+            }
             Some("rewind") => content.push(ev.clone()),
             _ => content.push(ev.clone()),
         }
     }
     content
+}
+
+/// 目的：活动视图里最后一次模型调用报的上下文用量（没有 = None）。
+/// 约束：折叠区间里的用量不算；回档到它之前时状态栏因此不会继续显示旧数字。
+pub fn last_usage(
+    events: &[serde_json::Value],
+) -> Option<crate::capabilities::session::api::ContextUsage> {
+    let marks = rewind_marks(events);
+    events.iter().rev().find_map(|ev| {
+        if ev.get("type").and_then(|t| t.as_str()) != Some("usage") {
+            return None;
+        }
+        let line = ev.get("line").and_then(|i| i.as_u64()).unwrap_or(0);
+        if folded(&marks, line) {
+            return None;
+        }
+        Some(crate::capabilities::session::api::ContextUsage {
+            prompt_tokens: ev
+                .get("prompt_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
+            completion_tokens: ev
+                .get("completion_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
+            total_tokens: ev.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+            window: ev.get("window").and_then(|v| v.as_u64()).unwrap_or(0),
+            exact: ev.get("exact").and_then(|v| v.as_bool()).unwrap_or(false),
+        })
+    })
 }
 
 /// 流水里用过的**最大行 id + 1**：新行从这里续号，绝不复用被折叠行的 id。
@@ -173,6 +210,12 @@ pub fn cut_before_line(events: &[serde_json::Value], keep: u64) -> Vec<serde_jso
                 if done {
                     return out;
                 }
+            }
+        } else if ev.get("type").and_then(|t| t.as_str()) == Some("usage") {
+            // 用量属于它那次调用的首行；保留点之前的才留下。
+            let line = ev.get("line").and_then(|i| i.as_u64()).unwrap_or(0);
+            if line < keep {
+                out.push(ev.clone());
             }
         } else {
             out.push(ev.clone());

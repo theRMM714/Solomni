@@ -22,19 +22,6 @@
     `node run-tests.js` 全绿。
   blocked_by: 缺少实现
 
-- id: work.commit-history-ui
-  scope: global
-  level: T5
-  why: |
-    共享区的提交记录与"任一提交点可还原"的机制已就位（`work_status` 能看到最近提交），但用户没有入口
-    去浏览提交历史或把共享区回滚到某个提交点——只能在会话里由 agent 看到状态。
-  how: |
-    1) CLI / Web 各加一个入口：列出某工作的提交（id / 作者 / 时间 / message / 改动清单）；
-    2) 选中一个提交点给出"回滚共享区到此处"的动作（调 `Workspace::work_restore`，走现有入站契约）；
-    3) 回滚要留可回放的记录，并与回档标记模型对齐（提交锚见 docs/session/session-model.md 的五）。
-  accept: 用户能在界面上看到提交历史，并把共享区回滚到任一提交点；回滚后新开的 agent 拉取到的是那一点的内容。
-  blocked_by: 缺少实现（呈现面未接入）
-
 - id: work.large-asset-transfer
   scope: global
   level: T3

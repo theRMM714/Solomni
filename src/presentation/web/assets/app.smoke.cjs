@@ -779,19 +779,50 @@ setTimeout(async () => {
       if (!tabLadder) loadErrors.push('标签梯级检查：' + JSON.stringify(r));
     } catch (e) { loadErrors.push('标签梯级检查失败：' + e.message); }
   }
+  // **状态栏**：single / proxy 有上下文 chip，协作主会话没有；提交 chip 都在。
+  let statusBarRules = false;
+  if (!loadErrors.length) {
+    try {
+      const r = vm.runInNewContext(
+        "(function () {" +
+          " const box = document.querySelector('#session-status');" +
+          " function allText(n) { let t = String(n.textContent || ''); for (const c of (n.children || [])) t += ' ' + allText(c); return t; }" +
+          " function chips() { const out = []; (function walk(n) { for (const c of (n.children || [])) { if (String(c.className).split(' ')[0] === 'status-chip') out.push(allText(c)); walk(c); } })(box); return out; }" +
+          " function run(sid, mode, ctx, head) {" +
+          "   state.sessions.clear(); state.activeSid = sid;" +
+          "   const s = { sid: sid, mode: mode, lines: [], live: [], fold: {}, scroll: {}, context: ctx," +
+          "     work: { head: head, commits: head ? [head] : [], total: head ? 1 : 0, truncated: false }," +
+          "     workAt: 1, workDirty: false, workError: '', running: false, sending: false, readonly: false };" +
+          "   state.sessions.set(sid, s); box.children = []; s.statusPrint = ''; syncStatusbar(s); return chips(); }" +
+          " const head = { id: 7, author: 'user', time: 1, message: '初始', changes: 1 };" +
+          " const ctx = { prompt_tokens: 17000, completion_tokens: 1432, total_tokens: 18432, window: 128000, exact: true };" +
+          " const single = run('s1', 'single', ctx, head);" +
+          " const proxy = run('s2', 'proxy', { prompt_tokens: 900, completion_tokens: 100, total_tokens: 1000, window: 10000, exact: true }, null);" +
+          " const collab = run('s3', 'collab', ctx, head);" +
+          " return { single: single, proxy: proxy, collab: collab };" +
+          "})()",
+        sandbox
+      );
+      const singleOk = r.single.length === 2 && /18,432/.test(r.single[0]) && /14\.4%/.test(r.single[0]) && /#7/.test(r.single[1]);
+      const proxyOk = r.proxy.length === 2 && /1,000/.test(r.proxy[0]) && /10\.0%/.test(r.proxy[0]);
+      const collabOk = r.collab.length === 1 && /#7/.test(r.collab[0]);
+      statusBarRules = singleOk && proxyOk && collabOk;
+      if (!statusBarRules) loadErrors.push("状态栏检查：" + JSON.stringify(r));
+    } catch (e) { loadErrors.push("状态栏检查失败：" + e.message); }
+  }
   const ok = alerts.length === 0 && loadErrors.length === 0 && rendered && tierWarned && identityKept
     && pollConn === "已连接" && pollApplied && hydratedHistory && liveReplaced && liveClearedOnIdle && toolReasoningRendered
     && rewoundApplies && readonlyRule
     && taskButtonRule && decisionCardRule && onlyLastStreams && lineRule && incrementalAppend && pendingReplaced && noticeRow && modalDismiss && rewindIcon && runningRules && atMenuRefetches
     && wizardProxy && wizardBlocked && sessionNoteRule && historyRunTag && fenceBanner && nodeCard && tabLadder
-    && consoleErrors.length === 0;
+    && statusBarRules && consoleErrors.length === 0;
   if (!ok) {
     console.log("alerts（原生弹窗被调用的次数，应为 0）:", JSON.stringify(alerts));
     console.log("notice 渲染:", rendered, "| 虚拟机档不可用提示:", tierWarned, "| 身份标题保留:", identityKept);
     console.log("轮询状态点:", JSON.stringify(pollConn), "| 事件已应用:", pollApplied, "| 盘上转录已补:", hydratedHistory, "| 流式被替换:", liveReplaced, "| 空闲清理:", liveClearedOnIdle, "| 思维链:", toolReasoningRendered);
     console.log("回档重置:", rewoundApplies, "| 只读会话:", readonlyRule, "| notice 行:", noticeRow, "| 弹层判据:", modalDismiss, "| 回档图标:", rewindIcon, "| 增量追加:", incrementalAppend, "| 乐观替换:", pendingReplaced);
     console.log("运行态归一（事件为准 / 快照只对账）:", runningRules, "| @ 菜单每次重拉:", atMenuRefetches);
-    console.log("向导代理形态:", wizardProxy, "| 会话级说明:", sessionNoteRule, "| 侧栏运行态:", historyRunTag, "| 围栏横幅:", fenceBanner, "| 节点卡:", nodeCard, "| 标签梯级:", tabLadder);
+    console.log("向导代理形态:", wizardProxy, "| 会话级说明:", sessionNoteRule, "| 侧栏运行态:", historyRunTag, "| 围栏横幅:", fenceBanner, "| 节点卡:", nodeCard, "| 标签梯级:", tabLadder, "| 状态栏:", statusBarRules);
     console.log("应用侧 console.error:", JSON.stringify(consoleErrors.slice(0, 3)));
     console.log("loadErrors:", JSON.stringify(loadErrors));
   }

@@ -336,9 +336,17 @@ pub struct AgentSession {
     pub(crate) cur_reply: u64,
     /// 正在落行的**回合 id**（讨论的回合标记用它；单 agent 回合为 0）。
     cur_turn: u64,
-    /// 自动压缩的**字符预算**（≈ 模型窗口 × 设置百分比 × 4）；0 = 关。
-    /// 到点就在这一轮开始前先压一次（见 docs/session/session-model.md 六）。
+    /// 目的：自动压缩的**字符预算**（≈ 模型窗口 × 设置百分比 × 4）；0 = 关。
+    /// 约束：拿不到供应商 usage 时用它兜底（见 docs/session/session-model.md 六）。
     pub(crate) compact_at: usize,
+    /// 目的：自动压缩的 token 阈值（= 窗口 × 百分比）；0 = 关。有精确 usage 时优先读它。
+    pub(crate) compact_tokens: u64,
+    /// 目的：压缩百分比（0 = 关；状态栏小卡片要显示它）。
+    pub(crate) compact_percent: u8,
+    /// 目的：本会话当前模型的上下文窗口（状态栏百分比的分母）。
+    pub(crate) context_window: u64,
+    /// 目的：最近一次模型调用的用量；None = 还没调用过。
+    pub(crate) last_usage: Option<crate::capabilities::session::api::ContextUsage>,
     /// 压缩点（转录行 id）：0 = 没压过。此前的内容已被摘要取代，对话里补不回来。
     pub(crate) compacted_upto: u64,
 }
@@ -379,6 +387,10 @@ impl AgentSession {
         let mut s = AgentSession {
             cur_turn: 0,
             compact_at: 0,
+            compact_tokens: 0,
+            compact_percent: 0,
+            context_window: 0,
+            last_usage: None,
             compacted_upto: 0,
             id: id.to_string(),
             params,
@@ -414,6 +426,10 @@ impl AgentSession {
         let mut s = AgentSession {
             cur_turn: 0,
             compact_at: 0,
+            compact_tokens: 0,
+            compact_percent: 0,
+            context_window: 0,
+            last_usage: None,
             compacted_upto,
             id: id.to_string(),
             next_line: next,
@@ -491,9 +507,51 @@ impl AgentSession {
         vec![SessionEvent::Transcript(vec![LineView { task: true, ..v }])]
     }
 
-    /// 设自动压缩的字符预算（装配时按模型窗口 × 设置百分比算出来；0 = 关）。
-    pub fn set_compact_budget(&mut self, chars: usize) {
-        self.compact_at = chars;
+    /// 目的：设本会话的上下文预算：窗口、压缩阈值百分比（0 = 关）与字符兜底一起算好。
+    /// 约束：装配、重建、改模型都走这一处；last_usage 已有时把窗口换成当前模型的窗口。
+    pub fn set_context_budget(&mut self, window: u64, percent: u8) {
+        self.context_window = window;
+        self.compact_percent = percent;
+        let pct = percent as u64;
+        self.compact_tokens = window * pct / 100;
+        self.compact_at = (self.compact_tokens * 4) as usize;
+        if let Some(u) = self.last_usage.as_mut() {
+            u.window = window;
+        }
+    }
+
+    /// 目的：最近一次调用的用量（状态栏与压缩判定读它）。
+    pub fn context_usage(&self) -> Option<crate::capabilities::session::api::ContextUsage> {
+        self.last_usage
+    }
+
+    /// 目的：写入最近一次调用的用量；窗口以当前模型为准（模型改过也显示同一个窗口）。
+    pub fn set_last_usage(
+        &mut self,
+        mut usage: Option<crate::capabilities::session::api::ContextUsage>,
+    ) {
+        if let Some(u) = usage.as_mut() {
+            if self.context_window > 0 {
+                u.window = self.context_window;
+            }
+        }
+        self.last_usage = usage;
+    }
+
+    /// 目的：发送视图的字符数（拿不到供应商 usage 时的压缩兜底）。
+    pub fn dialogue_chars(&self) -> usize {
+        self.dialogue
+            .iter()
+            .map(|m| m.content.chars().count())
+            .sum()
+    }
+
+    /// 目的：按当前发送视图估一份上下文用量（没有供应商 usage 时用；界面会标"估算"）。
+    pub fn estimate_usage(&self) -> crate::capabilities::session::api::ContextUsage {
+        crate::capabilities::session::api::ContextUsage::estimated(
+            self.dialogue_chars(),
+            self.context_window,
+        )
     }
 
     /// 当前下一条转录行的 id（压缩点用它：把此前的行全部移出发送视图）。

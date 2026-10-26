@@ -110,6 +110,8 @@ impl Conductor {
                 let active = if precise {
                     if let Some(Session::Single(s)) = self.sessions.get_mut(sid) {
                         s.apply_rewind(before);
+                        // 截掉的尾部里的 usage 事件也随 kept 过滤；状态栏不能继续显示旧数字。
+                        s.set_last_usage(crate::capabilities::session::api::last_usage(&kept));
                     }
                     crate::capabilities::session::api::truncate_events(&kept)
                 } else {
@@ -392,21 +394,24 @@ impl Conductor {
                 );
                 // 回复 id 跨重启单调：从转录里的最大值续号，否则新回复会与旧回复并成一组。
                 tools.reply_seq = crate::capabilities::session::api::max_reply(events);
-                Ok(Session::Single(
-                    crate::capabilities::session::api::AgentSession::restore(
-                        &a.name,
-                        params,
-                        history,
-                        marks,
-                        line_reply,
-                        compacted_upto,
-                        chat,
-                        Some(tools),
-                        self.prompt
-                            .text(crate::capabilities::prompt::api::Segment::CompactPrompt)
-                            .to_string(),
-                    ),
-                ))
+                let mut s = crate::capabilities::session::api::AgentSession::restore(
+                    &a.name,
+                    params,
+                    history,
+                    marks,
+                    line_reply,
+                    compacted_upto,
+                    chat,
+                    Some(tools),
+                    self.prompt
+                        .text(crate::capabilities::prompt::api::Segment::CompactPrompt)
+                        .to_string(),
+                );
+                // 重建也要恢复上下文预算与最近一次用量：否则重启后自动压缩与状态栏都失忆。
+                let (window, percent) = self.context_budget(a.model.as_deref());
+                s.set_context_budget(window, percent);
+                s.set_last_usage(crate::capabilities::session::api::last_usage(events));
+                Ok(Session::Single(s))
             }
             // 代理会话：没有 agent（核心自己说话）；外壳由 build_proxy 装配，回放与单 agent 共用同一件。
             "proxy" => {
@@ -421,6 +426,7 @@ impl Conductor {
                 if let Some(t) = s.tools.as_mut() {
                     t.reply_seq = crate::capabilities::session::api::max_reply(events);
                 }
+                s.set_last_usage(crate::capabilities::session::api::last_usage(events));
                 Ok(Session::Single(s))
             }
             other => Err(format!(
