@@ -1199,7 +1199,7 @@ pub(crate) fn test_notes(
     sb: &crate::capabilities::workspace::api::Sandbox,
     modules: &[crate::capabilities::modules::api::Module],
 ) -> crate::capabilities::tools::api::ToolNotes {
-    crate::capabilities::tools::api::tool_notes(&test_prompts(), sb, modules)
+    crate::capabilities::tools::api::tool_notes(&test_prompts(), sb, modules, &[])
 }
 
 /// 内存会话历史：供测试断言落盘与回放。

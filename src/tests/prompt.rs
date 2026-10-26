@@ -394,7 +394,7 @@ pub(crate) fn patch_guide_examples_follow_the_session_path_dialect() {
     let mut sb = test_sandbox("甲", &[]);
     let host_root = crate::kernel::api::slash(&sb.private);
     let host_example = format!("*** Update File: {}/note.txt", host_root);
-    let host = crate::capabilities::tools::api::tool_notes(&test_prompts(), &sb, &[]);
+    let host = crate::capabilities::tools::api::tool_notes(&test_prompts(), &sb, &[], &[]);
     assert!(
         host.patch_guide.contains(&host_example),
         "本机档的示例用宿主写法：{}",
@@ -408,7 +408,7 @@ pub(crate) fn patch_guide_examples_follow_the_session_path_dialect() {
     };
     let bridge = PathBridge::new(std::env::consts::OS, guest);
     sb.path_codec = Some(Arc::new(bridge));
-    let notes = crate::capabilities::tools::api::tool_notes(&test_prompts(), &sb, &[]);
+    let notes = crate::capabilities::tools::api::tool_notes(&test_prompts(), &sb, &[], &[]);
     let guest_root = bridge.to_guest(&sb.private).replace('\\', "/");
     assert!(
         notes

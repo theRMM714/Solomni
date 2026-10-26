@@ -25,10 +25,15 @@ impl ToolDecl {
     }
 }
 
-/// 目的：渲染模块工具的参数契约段（只列**声明了**参数的）。
-/// 参数：`prompt` 提供段标题与空态，`modules` 是这一席的模块清单。
-/// 返回：给模型看的参数段；一个都没声明时用册子里「没有」的说法。
-pub fn module_tool_params(prompt: &dyn Prompt, modules: &[Module]) -> String {
+/// 目的：渲染参数契约段（模块工具 + 已就绪服务操作合并成**一段**，标题只出现一次）。
+/// 参数：`prompt` 提供段标题与空态，`modules` 是这一席的模块清单，
+///   `extra_sections` 是装配方按**已就绪服务操作**渲染好的行（不带标题；由本函数并进同一段）。
+/// 返回：给模型看的参数段；两组都没声明参数时用册子里「没有」的说法。
+pub fn module_tool_params(
+    prompt: &dyn Prompt,
+    modules: &[Module],
+    extra_sections: &[String],
+) -> String {
     let mut sections: Vec<String> = Vec::new();
     for m in modules {
         for (name, decl) in &m.manifest.tools {
@@ -42,6 +47,7 @@ pub fn module_tool_params(prompt: &dyn Prompt, modules: &[Module]) -> String {
             }
         }
     }
+    sections.extend(extra_sections.iter().cloned());
     if sections.is_empty() {
         return "（本 agent 的模块工具都没声明参数，args 由工具自己解释）".to_string();
     }

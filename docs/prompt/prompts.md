@@ -18,7 +18,7 @@
 | `shared/tools.yaml` | `env_hosts` / `env_guests` / `envs[].host\|guest\|text` | **工作环境按环境分发**：本机档按宿主平台（`env_hosts`：linux / windows / macos），虚拟机档按 guest 的 os（`env_guests`）；每条只写 host 或 guest 之一，装载时校验全表覆盖（不静默漏发一份环境）。文本变量：work_name / agent / work_root / sandbox_root / module_roots / path_rules——虚拟机档给的是 **guest 内路径**；路径规矩只有一处（`texts.yaml` 的 `path_rules`，`env_block` 用它渲染后插进每个环境块） |
 | | `patch_guide` | 自由格式补丁的写法（每块以 `*** End File` 收尾、SEARCH 要整行一致、一次可多块、整体原子） |
 | | `tool_calling_envelope` / `tool_calling_native` | 工具调用约定**两套，互斥**：一个通道只用一套，由通道形态决定注入哪套 |
-| `shared/texts.yaml` | `module_tool_params_header` | 模块工具参数段的小标题（模块在 `module.yaml` 里声明了 `params` 时出现） |
+| `shared/texts.yaml` | `module_tool_params_header` | 模块工具参数段的小标题（静态模块工具或已就绪服务操作声明了 `params` 时出现；两类参数合并成一段，标题只出现一次） |
 | | `path_rules` / `tools_this_turn` / `compact_prompt` / `discuss_reminder` | **指令段**（进入模型上下文，但属于"模型被要求做什么"）：路径写法、本回合工具说明块标题、压缩回合指令、讨论轮次里"上一轮没表态"的提醒 |
 | `shared/agent.yaml` | `agent.system` | agent 身份骨架（模块 `brief` 能力行 + `system` 工具用法 + 该会话**类型 × 角色**的机制说明 + 工作环境 + 调用约定；**工具清单不在这里**，随回合注入） |
 | `roles/discussant.yaml` | `discuss.opener` / `discuss.step` / `discuss.autonomy_note` | 讨论首轮、轮转、小组自裁说明 |
