@@ -19,10 +19,16 @@ fn unclosed_report(tail: &Tail) -> String {
         "工具信封**断在字符串中间**：内容没写完，补引号会让核心拿到半截内容，所以核心不猜、也没有执行工具。请重新输出完整信封；内容太长就分次写入。".to_string()
     } else {
         format!(
-            "工具信封没写完：**还差 {}**（字符串里的内容已经闭合，只是信封没收尾；补上就完整了）。完整格式：{{\"type\":\"tool\",\"name\":\"工具名\",\"args\":{{...}}}}。",
-            tail.missing
+            "工具信封没写完：**还差 {}**（字符串里的内容已经闭合，只是信封没收尾；补上就完整了）。信封格式：{}。",
+            tail.missing,
+            envelope_forms()
         )
     }
+}
+
+/// 两种工具信封形态的示范（单数 / calls 数组）：所有纠错文案共用，避免只示范一种。
+fn envelope_forms() -> &'static str {
+    r#"单数形态 {"type":"tool","name":"工具名","args":{...}}；一次要发多个调用就用 calls 数组形态 {"type":"tool","calls":[{"name":"工具名1","args":{...}},{"name":"工具名2","args":{...}}]}（两种形态不能混用）"#
 }
 
 /// 附带说明：信封还差什么（与其它类别叠加时用）。
@@ -64,8 +70,9 @@ pub fn malformed_report(kind: &Malformed) -> String {
             why
         ),
         Malformed::Shape(why) => format!(
-            "工具信封是合法 JSON，但字段不合法：{}。核心没有执行任何工具。信封格式：{{\"type\":\"tool\",\"name\":\"工具名\",\"args\":{{...参数对象...}}}}；一次要发多个就改用 {{\"type\":\"tool\",\"calls\":[{{...}}, {{...}}]}}（两种形态不能混用）。",
-            why
+            "工具信封是合法 JSON，但字段不合法：{}。核心没有执行任何工具。信封格式：{}。",
+            why,
+            envelope_forms()
         ),
     }
 }

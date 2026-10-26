@@ -400,6 +400,11 @@ pub(crate) fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix
         "{}",
         shape
     );
+    assert!(
+        shape.contains("calls"),
+        "字段不合法也要示范 calls 数组形态：{}",
+        shape
+    );
     let tab = crate::capabilities::llm::api::malformed_report(&Malformed::RawControl {
         ch: '\t',
         line: 1,
@@ -414,6 +419,11 @@ pub(crate) fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix
         },
     ));
     assert!(brace.contains("还差 }"), "{}", brace);
+    assert!(
+        brace.contains("单数形态") && brace.contains("calls"),
+        "未闭合也要示范单数与 calls 两种形态：{}",
+        brace
+    );
     assert!(
         !brace.contains("分次写入"),
         "内容写完就别引导它去分次写：{}",
