@@ -14,6 +14,11 @@
 
 `api::Llm`（造通道 / 探测 / 发现 / 修信封）+ 对外协议类型（`Chat` 的调用方是别的能力，所以契约在 `api`）。出站端口 `ChatGateway` / `ModelCatalog` / `EnvelopeRepair` **只由 `service.rs` 持有**（R12），**不进 `api`**。
 
+**token 用量是通道事实**：`Completion.usage` 带供应商回的 prompt / completion / total（拿不到 = None），
+`Chat::last_usage()` 让调用方在一次工具循环结束后读最近一次用量。流式请求带
+`stream_options: {include_usage: true}`；供应商 400/422 明确拒绝该参数时，`HttpChat` 去掉参数**只重试一次**
+（此时还没收到内容，不会重复正文），用量退回"拿不到"。非流式直接读响应体 `usage`。
+
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`kernel`、`prompt`
@@ -22,6 +27,7 @@
 ## 四、改动本单元时必须同步
 
 - 请求体形状是**真实会话与探针共用的唯一定义**（`detail/http_chat.rs`）；改协议 → `src/tests/llm.rs`、`src/tests/detail.rs`、`src/tests/fakes.rs`；信封不合法的修法由 `llm/domain/malformed.rs` 代码返回。
+  流式请求体的 `stream_options.include_usage` 属于这条协议形状；供应商拒收时的回退在 `HttpChat::complete`，由 `src/tests/detail.rs` 钉住"只重试一次、第二次不含该参数"。
 - 流式读、停止与分层超时在 `detail/http_stream.rs`；改这里要同步 `src/tests/detail.rs` 的静默 / keepalive / 取消用例，以及 `docs/session/session-model.md` 的停止与超时语义。
 
 ## 本目录

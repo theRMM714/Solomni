@@ -110,6 +110,9 @@ roles:
 - **登记处动作只给 user**：供应商 / 密钥 / 模型 / agent / 设置的写面（`upsert_provider` / `remove_provider` / `discover_models` / `upsert_model` / `remove_model` /
   `set_core_model` / `probe_model_tools` / `probe_replay_shape` / `upsert_agent` / `remove_agent` / `set_settings`）的 `callers` 只有 `user`——
   产品级资源默认不开放给任何角色；`api_key` 只进登记处，不进动作目录、不进审计。读（`GET /api/settings`、`/api/state`）仍是独立读接口。
+- **工作区回滚动作也只给 user**：`restore_work_commit`（`session_id` / `commit` / `expect_head`）——非破坏性物化共享区，
+  目标之后的提交仍保留；同一工作子树里有会话在生成时拒绝；成功后由核心落一条可回放的 `notice` 行。
+  提交历史 / 详情 / 文件预览是**只读视图**（`SessionOps::work_log` / `work_commit_view` / `work_commit_file`），不进动作表。
 - **常驻服务的生命周期动作也只给 user**：`control_resident`（`start` / `stop` / `enable` / `disable`，参数 `module` / `name` / `action` / `lease`）——
   agent 用已启动的实例，不负责拉起；服务清单是独立只读视图（`ResidentOps::services`，CLI `resident`）。会话删除时按租约回收该会话拉起的实例。
 - **已启动常驻服务的操作也走模块动作**：id = `module.<模块id>.<服务名>.<操作名>`（静态模块工具优先，其次常驻服务操作）。
@@ -224,6 +227,7 @@ prompts/
 | 代理模式下子会话的转录 | **不转发给核心**：核心只拿门的通知与意外停止通知，正文经 `read_session_messages`（0 = 最新）主动倒查 |
 | 改任务目标 | 等于**改任务提示词**；改完**不作废**，让它跑完再由核心验收；链有问题则与用户在**主会话**讨论改链 |
 | 回档 | **整棵子树按同一回合 id 同步收窗**；留档折叠（可再恢复），删除 / 恢复真的截断（见 [session-model.md](../session/session-model.md) 的五） |
+| 共享区提交历史 / 回滚 | 只读视图 + user-only 动作 `restore_work_commit`：非破坏性、`expect_head` 防陈旧、运行中拒绝；目标之后的提交仍在历史里（细则见 [workspace](../workspace/README.md)） |
 | 系统工具调用 | 与模块工具同路径：工具行 + `[工具结果]`，可审计、可回放 |
 
 ## 九、当前状态
@@ -236,11 +240,13 @@ prompts/
 - `take=local` 在本地与基线一致时拒绝、主副本提交变化时拒绝；`take=upstream` 覆盖/删除前备份到 `lost/`，`work_lost` 可按当前 hash 恢复。
 - 文本、图片、视频与其它二进制都按字节处理；`work_versions` 给 hash、大小与扩展名媒体类型提示，文本预览最多 16 KiB；单文件超过 64 MiB 时提交 / 上传明确拒绝。
 - 用户投喂是同一条提交路径里的**权威提交**（作者 = user）。
+- 用户可在 Web 会话状态栏或 CLI `work` 命令看提交历史、提交详情与文本预览，并把共享区非破坏性回滚到任一提交点；
+  agent 侧仍只拿 `work_*` 工具，不给回滚入口。
 
 - 工具面**按回合按身份注入**（总表不进提示词）；越权调用如实拒绝并落工具行；悬空引用由装配期 `problems()` 挡下。
 - 核心操作与执行席回报都从**工具参数**取载荷。
 - 代理会话复用**通用成员循环**（没有「代理专用」分支）；工具动作经队列桥回核心线程执行。
-- 呈现面：Web 建工作向导含代理形态；CLI 有 `resident` / `secret` 入口。链的流程见 [task-chain.md](../collab/task-chain.md)。
+- 呈现面：Web 建工作向导含代理形态，会话状态栏显示上下文用量与共享区提交；CLI 有 `resident` / `secret` / `work` 入口。链的流程见 [task-chain.md](../collab/task-chain.md)。
 
 ## 十、联动
 

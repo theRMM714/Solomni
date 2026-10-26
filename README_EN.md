@@ -37,7 +37,7 @@ Solomni is an **agent runtime environment (AgentOS) that runs on your own machin
 - **Modules are drop-in**: a folder with a valid `module.yaml` under `modules/` appears; remove it and it is gone — no registration, no build, no restart
   (contract in [MODULE_SPEC.md](MODULE_SPEC.md)).
 - **Sessions and history**: one directory per piece of work (`session/<name>/`); rewind / archive / delete / restore, transcript replay, context compaction,
-  versioned shared area (`work_pull` / `work_commit` / `work_status` / `work_versions` / `work_resolve` / `work_lost`).
+  versioned shared area (`work_pull` / `work_commit` / `work_status` / `work_versions` / `work_resolve` / `work_lost`), plus a user-facing commit history with non-destructive rollback.
 - **Three isolation layers**: path checks inside the built-in tools → every tool process runs behind the gate process (environment allowlist / process tree / timeout kills the whole tree)
   → platform fences (Windows AppContainer, Linux Landlock, macOS seatbelt); if a mechanism cannot be installed, the capability grade is reported honestly.
 - **Two execution tiers**: host tier (default) and vm tier (module tools run inside a guest). The vm tier is pluggable along host × engine × guest × channel × share;
@@ -46,7 +46,7 @@ Solomni is an **agent runtime environment (AgentOS) that runs on your own machin
   Details in [docs/vm/README.md](docs/vm/README.md); runtime package contract in [RUNTIME_SPEC.md](RUNTIME_SPEC.md).
 - **Registry**: four YAML files for providers / models / agents / settings, all under `.home/`, managed from the UI; channel keys live only in the local registry and in the core's outbound calls
   (boundaries in [REGISTRY_SPEC.md](REGISTRY_SPEC.md)).
-- **Two interfaces**: the terminal transcript center (default) and the local web UI (`-webUI`, binds `127.0.0.1` only, port 3081 by default).
+- **Two interfaces**: the terminal transcript center (default) and the local web UI (`-webUI`, binds `127.0.0.1` only, port 3081 by default). The web session page has a status bar for context usage and shared-area commits.
 - **One decision channel**: core gates, tool-level confirmation and questions raised by the tool layer use the same card (message + options); it blocks, the option id is the contract,
   and cards and answers are persisted with the session. Behaviour in [PRODUCT.md](PRODUCT.md) and [docs/session/session-model.md](docs/session/session-model.md).
 
