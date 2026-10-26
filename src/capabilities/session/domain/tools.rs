@@ -136,15 +136,25 @@ impl MemberTools {
         if with_modules {
             parts.push(self.notes.module_tools.clone());
             parts.push(self.notes.module_tool_params.clone());
-            if !self.notes.service_params.is_empty() {
-                parts.push(self.notes.service_params.clone());
-            }
         }
         if parts.is_empty() {
             return String::new();
         }
         self.tools_this_turn.replace("{{tools}}", &parts.join("\n"))
     }
+}
+
+/// 目的：已就绪服务**只保留这个 agent 工具面里的模块**——服务清单是全局的，
+///   未分配给它的模块服务不该出现在提示词里（写了也调不动，只会把模型带偏）。
+pub fn service_ops_for_modules(
+    started: BTreeMap<String, Vec<ServiceOp>>,
+    modules: &[crate::capabilities::modules::api::Module],
+) -> BTreeMap<String, Vec<ServiceOp>> {
+    let allowed: BTreeSet<&str> = modules.iter().map(|m| m.manifest.id.as_str()).collect();
+    started
+        .into_iter()
+        .filter(|(id, _)| allowed.contains(id.as_str()))
+        .collect()
 }
 
 /// 放行表：模块 id → 该模块的（目录, 工具表）。

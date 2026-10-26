@@ -501,7 +501,7 @@ impl CollabSession {
             .with_read_only(read_only_roots(&self.settings.app));
             // 工具说明块的素材（patch 语法 / 模块工具 / 模块参数）：装配期按这个 agent 的沙箱与模块算一次。
             let tool_notes =
-                crate::capabilities::tools::api::tool_notes(&*prompts, &sandbox, &modules);
+                crate::capabilities::tools::api::tool_notes(&*prompts, &sandbox, &modules, &[]);
             member.tools = Some(MemberTools {
                 mode,
                 role: "discussant".to_string(),

@@ -18,4 +18,4 @@
 | `src/capabilities/llm/detail/model_catalog.rs` | `ModelCatalog` 的适配器：OpenAI 兼容 `GET {base_url}/models`，按候选补全与回落，错误先脱敏 |
 | `src/capabilities/llm/detail/fake_chat.rs` | 测试专用通道：脚本假模型（无网络、无密钥），兼作 `Chat` 与 `ChatGateway`，只给单元测试与测试替身回放 |
 | `src/capabilities/llm/domain/envelope.rs` | 发言信封的解析（纯逻辑）：认出最外层结构（发言 / 表态 / 工具调用），并给出不合法信封的判定类别与收尾状态 |
-| `src/capabilities/llm/domain/malformed.rs` | 不合法信封的回执装配：按判定类别从提示词册选模板并拼装修法（模板在 `prompt`，这里只做选择与拼装） |
+| `src/capabilities/llm/domain/malformed.rs` | 不合法信封的回执装配：按判定类别给出对应修法；单数形态与 `calls` 数组形态都示范（文案归本模块，不经提示词册） |

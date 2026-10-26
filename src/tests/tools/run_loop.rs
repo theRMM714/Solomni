@@ -615,3 +615,81 @@ pub(crate) fn builtin_write_needs_a_complete_prior_read_of_an_existing_file() {
         "拒不覆盖"
     );
 }
+
+#[test]
+pub(crate) fn module_and_service_params_share_one_header() {
+    let mut m = module_of("m0");
+    m.manifest.tools.insert(
+        "grep".to_string(),
+        decl_with(
+            "python tools/grep.py",
+            "keyword: {type: string, required: true}\n",
+        ),
+    );
+    let service_sections = vec!["- m0.svc.echo\nx（integer，必填）".to_string()];
+    let notes = crate::capabilities::tools::api::tool_notes(
+        &test_prompts(),
+        &test_sandbox("m0", &["m0"]),
+        std::slice::from_ref(&m),
+        &service_sections,
+    );
+    let block = &notes.module_tool_params;
+    assert_eq!(
+        block.matches("【模块工具参数】").count(),
+        1,
+        "静态模块参数与服务参数只能共用一个标题：{}",
+        block
+    );
+    assert!(block.contains("m0.grep"), "{}", block);
+    assert!(block.contains("m0.svc.echo"), "{}", block);
+    assert!(
+        !block.contains("都没声明参数"),
+        "有参数时不能出现空态文案：{}",
+        block
+    );
+
+    // 只有服务参数时同样只出现一个标题，也不能退回"没声明参数"的空态。
+    let only_service = crate::capabilities::tools::api::tool_notes(
+        &test_prompts(),
+        &test_sandbox("m0", &["m0"]),
+        &[],
+        &service_sections,
+    );
+    assert_eq!(
+        only_service
+            .module_tool_params
+            .matches("【模块工具参数】")
+            .count(),
+        1,
+        "{}",
+        only_service.module_tool_params
+    );
+    assert!(
+        !only_service.module_tool_params.contains("都没声明参数"),
+        "{}",
+        only_service.module_tool_params
+    );
+}
+
+#[test]
+pub(crate) fn service_ops_are_scoped_to_the_agent_module_face() {
+    use crate::capabilities::session::api::{service_ops_for_modules, ServiceOp};
+    let op = |tool: &str| ServiceOp {
+        tool: tool.to_string(),
+        service: "svc".to_string(),
+        op: tool.to_string(),
+        description: String::new(),
+        parameters: None,
+    };
+    let started = BTreeMap::from([
+        ("m0".to_string(), vec![op("svc.echo")]),
+        ("other".to_string(), vec![op("svc.echo")]),
+    ]);
+    let filtered = service_ops_for_modules(started, &[module_of("m0")]);
+    assert_eq!(
+        filtered.keys().cloned().collect::<Vec<_>>(),
+        vec!["m0".to_string()],
+        "未分配模块的服务不能进提示词"
+    );
+    assert_eq!(filtered["m0"].len(), 1);
+}

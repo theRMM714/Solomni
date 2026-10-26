@@ -314,6 +314,20 @@ if (!loadErrors.length) {
     `, sandbox);
     return got.research && got.service && got.use && got.noRunInList && got.noSysTools && got.lonely && got.subRun;
   });
+  // ⑧ 核心默认块：设置模型页顶部有下拉与保存，容器须给二者留间距（保存按钮紧贴下拉的回归）。
+  check("核心默认块：下拉与保存按钮在设置模型页且有间距", () => {
+    seedRegistry();
+    vm.runInNewContext("openSettingsModal()", sandbox);
+    const page = openPage("models");
+    const core = walk(page, []).find((n) => String(n.className) === "settings-core");
+    const save = core && walk(core, []).find((n) => n.tagName === "BUTTON" && n.textContent === "保存");
+    const label = core && walk(core, []).find((n) => n.className === "wf-label" && n.textContent === "核心 AI 使用的模型");
+    const css = fs.readFileSync(path.join(__dirname, "style.css"), "utf8");
+    const rule = (css.match(/\.settings-core\s*\{[^}]*\}/) || [""])[0];
+    const spaced = /display:\s*flex/.test(rule) && /flex-direction:\s*column/.test(rule) &&
+      /gap:\s*(12px|var\(--sp-3\))/.test(rule);
+    return !!(core && save && label && spaced);
+  });
 }
 
 const failed = results.filter((r) => !r[1]);

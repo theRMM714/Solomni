@@ -196,55 +196,52 @@ impl Conductor {
         // 工具面：静态模块工具 + **已就绪**常驻服务的操作（操作是服务跑起来才发现的，按模块现填）。
         let with_modules = self.systools.allows_module_tools(role);
         let mut table = crate::capabilities::session::api::tool_table(modules);
-        let mut notes = crate::capabilities::tools::api::tool_notes(&*self.prompt, sb, modules);
-        if with_modules {
-            let started = self.started_service_ops();
-            for (id, ops) in &started {
-                if let Some(mt) = table.get_mut(id) {
-                    for op in ops {
-                        mt.services.insert(op.tool.clone(), op.clone());
-                    }
+        // 服务清单是全局的：只把**这个 agent 工具面里**的模块服务写进提示词。
+        let started = if with_modules {
+            crate::capabilities::session::api::service_ops_for_modules(
+                self.started_service_ops(),
+                modules,
+            )
+        } else {
+            BTreeMap::new()
+        };
+        let mut module_tool_lines: Vec<String> = Vec::new();
+        // 这些操作**自带参数契约**（服务给的 JSON Schema 原样）：信封通道也要把参数说清，
+        // 否则模型只知道名字、只能瞎试参数（真实模型上真发生过）。
+        let mut service_param_lines: Vec<String> = Vec::new();
+        for (id, ops) in &started {
+            if let Some(mt) = table.get_mut(id) {
+                for op in ops {
+                    mt.services.insert(op.tool.clone(), op.clone());
                 }
             }
-            if !started.is_empty() {
-                let lines: Vec<String> = started
-                    .iter()
-                    .map(|(id, ops)| {
-                        let names = ops
-                            .iter()
-                            .map(|o| o.tool.clone())
-                            .collect::<Vec<_>>()
-                            .join("、");
-                        format!("- {}：{}", id, names)
-                    })
-                    .collect();
-                notes.module_tools = format!("{}\n{}", notes.module_tools, lines.join("\n"));
-                // 这些操作**自带参数契约**（服务给的 JSON Schema 原样）：信封通道也要把参数说清，
-                // 否则模型只知道名字、只能瞎试参数（真实模型上真发生过）。
-                let mut param_lines: Vec<String> = Vec::new();
-                for (id, ops) in &started {
-                    for op in ops {
-                        let Some(schema) = &op.parameters else {
-                            continue;
-                        };
-                        let signature =
-                            crate::capabilities::tools::api::json_schema_lines(schema).join("\n");
-                        if signature.is_empty() {
-                            continue;
-                        }
-                        param_lines.push(format!("- {}.{}\n{}", id, op.tool, signature));
-                    }
+            let names = ops
+                .iter()
+                .map(|o| o.tool.clone())
+                .collect::<Vec<_>>()
+                .join("、");
+            module_tool_lines.push(format!("- {}：{}", id, names));
+            for op in ops {
+                let Some(schema) = &op.parameters else {
+                    continue;
+                };
+                let signature =
+                    crate::capabilities::tools::api::json_schema_lines(schema).join("\n");
+                if signature.is_empty() {
+                    continue;
                 }
-                if !param_lines.is_empty() {
-                    notes.service_params = format!(
-                        "{}\n{}",
-                        self.prompt.text(
-                            crate::capabilities::prompt::api::Segment::ModuleToolParamsHeader
-                        ),
-                        param_lines.join("\n")
-                    );
-                }
+                service_param_lines.push(format!("- {}.{}\n{}", id, op.tool, signature));
             }
+        }
+        let mut notes = crate::capabilities::tools::api::tool_notes(
+            &*self.prompt,
+            sb,
+            modules,
+            &service_param_lines,
+        );
+        if !module_tool_lines.is_empty() {
+            notes.module_tools =
+                format!("{}\n{}", notes.module_tools, module_tool_lines.join("\n"));
         }
         crate::capabilities::session::api::MemberTools {
             mode,
