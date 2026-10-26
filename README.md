@@ -56,7 +56,7 @@ node start.js            # 任意平台；Windows 也可双击 start.bat，macOS
 node start.js -webUI     # 直接进本地网页（127.0.0.1:3081）
 node start.js --provision                # 可选：虚拟机档只读状态（JSON：QEMU / guest 镜像 / agent 与运行包）
 node start.js --provision --ensure --yes # 可选（Linux / Windows）：把 QEMU 与 Debian guest 装进项目内 .vm/（下载前要 --yes）
-# 网页里也能直接补（Linux / Windows）：虚拟机档不可用时，配置面板 / 创建向导给的「补齐虚拟机依赖」就是这条（不必开终端）
+# 网页里也能直接补（Linux / Windows）：虚拟机档不可用、或选中的虚拟根未装齐时，配置面板 / 创建向导给的「补齐虚拟机依赖」就是这条（不必开终端）
 ```
 
 - **首次启动**：没有 `.home/settings.yaml` 时，Windows 会先问一次是否授权容器围栏（写目录 ACL）；
