@@ -607,6 +607,7 @@ setTimeout(async () => {
   // **向导的第三人形态**：形态选择里必须真有「代理」，且它的说明说清了"没有名单 + 全权 + 停止即全停"。
   let wizardProxy = false;
   let wizardGuest = false;
+  let wizardBlocked = false;
   if (!loadErrors.length) {
     try {
       await vm.runInNewContext("openWizard()", sandbox);
@@ -618,6 +619,11 @@ setTimeout(async () => {
         .find((n) => (n.children || []).some((o) => o.value === "proxy"));
       wizardProxy = !!sel && texts.indexOf("代理（把决定权整块交给核心）") >= 0;
       if (!wizardProxy) loadErrors.push("向导代理形态检查：没有找到 proxy 选项");
+      // 没有登记任何模型：创建按钮必须禁用，并说清先去登记（后端也会拒绝）。
+      const createBtn = all.find((n) => (n.tag === "button" || n.tagName === "BUTTON") && n.textContent === "创建并开始");
+      wizardBlocked = !!createBtn && createBtn.disabled === true &&
+        texts.indexOf("未登记任何模型") >= 0;
+      if (!wizardBlocked) loadErrors.push("向导无模型检查：创建按钮没有禁用或缺少提示");
       // 虚拟机档那一步：选的是**虚拟机**（虚拟根），并且按所选模块预判"可能要缺什么"。
       const radios = all.filter((n) => n.type === "radio" && n.name === "wf-tier");
       const vmRadio = radios[1];
@@ -777,7 +783,7 @@ setTimeout(async () => {
     && pollConn === "已连接" && pollApplied && hydratedHistory && liveReplaced && liveClearedOnIdle && toolReasoningRendered
     && rewoundApplies && readonlyRule
     && taskButtonRule && decisionCardRule && onlyLastStreams && lineRule && incrementalAppend && pendingReplaced && noticeRow && modalDismiss && rewindIcon && runningRules && atMenuRefetches
-    && wizardProxy && sessionNoteRule && historyRunTag && fenceBanner && nodeCard && tabLadder
+    && wizardProxy && wizardBlocked && sessionNoteRule && historyRunTag && fenceBanner && nodeCard && tabLadder
     && consoleErrors.length === 0;
   if (!ok) {
     console.log("alerts（原生弹窗被调用的次数，应为 0）:", JSON.stringify(alerts));
