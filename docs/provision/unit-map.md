@@ -10,5 +10,5 @@
 | --- | --- |
 | `src/capabilities/provision/mod.rs` | 能力入口：模块与公开面（`ProvisionService`） |
 | `src/capabilities/provision/api.rs` | 入站契约：`Provision` trait + `DepStatus` / `JobState` DTO + `NoProvision` |
-| `src/capabilities/provision/service.rs` | 实现：清单 / 台账解析、本机状态、下载缓存与 sha256 闸、各 `kind` 的安装（含 `guest-rootfs` 的 ext4 构造与属性回填）、作业与取消；`run` 持有可选的 vm 能力面 |
+| `src/capabilities/provision/service.rs` | 实现：清单 / 台账解析、本机状态、下载缓存与 sha256 闸、各 `kind` 的安装（含 `guest-rootfs` 的 ext4 构造与属性回填；initrd 按清单 `family` 取配方）、作业与取消；`run` 持有可选的 vm 能力面 |
 | `src/capabilities/provision/guest.rs` | 虚拟根的运行期编排（`guest-runtime`）：Windows 走 cloud-init 种子首启装 agent、Linux 跳过首启；维护启动经 QGA 装 python3、C-C++ 与固定版本 Node，逐个自证后落 `.qga-ready` / `.runtimes-ready` 并改写 `guest.yaml` 的 `clients` / `runtimes` |

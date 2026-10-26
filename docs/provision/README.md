@@ -25,12 +25,14 @@
 | `appimage` | 自带 `--appimage-extract`，不依赖 FUSE；保持包内原布局（applet 按 `argv[0]` 找 `../shared/bin/<名>`）。 |
 | `file` | 单文件直下，按 `probe` 的文件名落盘。 |
 | `guest-disk` | 单文件（Debian cloud qcow2）+ `guest.yaml` 基础画像；镜像已在场时**不覆盖**（运行期状态在里面）。 |
-| `guest-rootfs` | Linux 虚拟根多步构造，见下。 |
+| `guest-rootfs` | Debian 虚拟根多步构造，见下；构造配方按清单 `family` 取。 |
 | `guest-runtime` | 虚拟根的运行期编排，见下。 |
 
 解归档的入口程序（清单 `probe` 指到的那个）装完会补**可执行位**：zip 不一定带 unix 权限位，解出来会是不能跑的 0644（例如 `virtiofsd` 的便携包）。
 
-### guest-rootfs：Linux 虚拟根的多步构造
+### guest-rootfs：Debian 虚拟根的多步构造
+
+一条 `guest-rootfs` 的构造配方由清单的 `family` 显式指定；当前只有 `debian`（Debian 13 cloud 镜像），配方只描述 initrd 这一步（配置路径 / 模块写法 / 构建命令 / 产物）。内核 / agent / 系统清理 / 运行期编排仍是 Debian 专用。别的发行版可以走预构造镜像 + `guest.yaml`（不经过这条构造链）；要由产品构造时再补同形状的配方，不运行时嗅探、不回落 Debian，没声明或不认识的 `family` 如实拒绝。
 
 一条 `guest-rootfs` 条目按顺序做这些事，只写项目内：
 
@@ -39,7 +41,7 @@
 3. `debugfs rdump` 把 rootfs 解成目录树。**此时先读出一份"打包会丢"的属性清单**（特权位 setuid / setgid / sticky、非 root 属主与属组）——随后要装内核与 agent，目录树不再与源镜像一一对应。
 4. 装通用内核。cloud 镜像自带内核的 `CONFIG_NET_9P` 没编（`# CONFIG_NET_9P is not set`），共享回退档 9p 就用不了；所以只在"已装 ABI 真带 `9pnet_virtio` 模块"时沿用，否则装与 rootfs 同 Debian 大版本的**普通**通用内核（排除 `-rt-` / `-cloud-`）。
 5. 装 `qemu-guest-agent`。
-6. 清掉 cloud 镜像留下的 `fstab` 与 remount 单元（root 由内核命令行给出），用第 4 步选定的 ABI 生成 initrd（带 9p 模块），并把 `vmlinuz` / `initrd.img` 两个稳定软链换指。
+6. 清掉 cloud 镜像留下的 `fstab` 与 remount 单元（root 由内核命令行给出），按配方的配置路径与写法补 9p / virtio 模块，在 chroot 里生成 initrd（执行器固定 guest PATH，失败带退出码与输出尾部），并把 `vmlinuz` / `initrd.img` 两个稳定软链换指。
 7. 写基础 `guest.yaml` 画像。
 8. `unshare -r` + `mke2fs -d` 把目录树打包成 `rootfs.ext4` 磁盘镜像（4 KiB 块）；镜像里的属主才是 root。
 9. 在镜像上**回填第 3 步读出的属性**并核对：rdump / mke2fs 拿不到特权位与 uid/gid。

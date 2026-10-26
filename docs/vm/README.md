@@ -84,7 +84,7 @@
 
 依赖由 `provision` 能力按清单（`dependencies.yaml` + `links.yaml`，需用户同意、只写项目内）装进 `.vm/`：
 
-- Linux：QEMU（pkgforge Anylinux AppImage）、virtiofsd 与默认虚拟根 `debian`（cloud 镜像 rootfs → `rootfs.ext4` 磁盘镜像 + 通用内核 + initrd + qemu-guest-agent，装进 `.vm/guest/debian/`；会话的可写层叠在镜像上）。
+- Linux：QEMU（pkgforge Anylinux AppImage）、virtiofsd 与默认虚拟根 `debian`（cloud 镜像 rootfs → `rootfs.ext4` 磁盘镜像 + 通用内核 + initrd + qemu-guest-agent，装进 `.vm/guest/debian/`；会话的可写层叠在镜像上）；构造配方按清单 `family: debian` 取，当前只有 Debian 一份。
 - Windows：官方源码在 MSYS2（mingw-w64）下自建的 QEMU 11.1.1 便携包（`--enable-slirp`，固件按真实文件打包）、Debian cloud qcow2（虚拟根 `windows`，装进 `.vm/guest/windows/`）与 `guest.yaml`。
 - 虚拟根的真实运行能力由 `guest-runtime` 编排自证后写进 `guest.yaml` 的 `runtimes`：Windows 走 cloud-init 首启 + 维护启动装包；Linux 的 agent 由 `guest-rootfs` 装进镜像，维护启动装 python3、C-C++ 与固定版本 Node。构造细节见 [docs/provision/README.md](../provision/README.md)。
 - macOS 保持检测 + 指路（缺口见 `tests/macos/gaps.yaml`）。
@@ -103,7 +103,7 @@
 
 ## 五、多平台组合
 
-宿主 / 引擎 / guest / 通道 / 共享**五轴都可插**——"统一 Debian guest"只是**默认实例**，不是硬约束。
+宿主 / 引擎 / guest / 通道 / 共享**五轴都可插**——"统一 Debian guest"只是**默认实例**，不是硬约束；产品侧构造链当前只有 Debian 配方，其它 Linux 发行版可用预构造镜像 + `guest.yaml`。
 
 | 端口 / 数据 | 职责 | 适配器（默认在前） |
 | --- | --- | --- |
