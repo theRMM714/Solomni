@@ -750,6 +750,33 @@ pub(crate) fn work_rewind_to_materializes_by_line_anchor_and_discards_later_comm
     assert_eq!(ws.work_head("w").unwrap(), None);
 }
 
+/// 目的：用户回滚共享区后，新开的 agent 拉取到的是目标提交点的内容。
+#[test]
+pub(crate) fn work_restore_is_visible_to_a_new_agent_on_pull() {
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string(), "b".to_string()])
+        .unwrap();
+    let id1 = ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
+    let id2 = ws.work_commit_user("w", "note.md", b"v2", 2, 0).unwrap();
+    assert_ne!(id1, id2);
+
+    // 回滚到 v1；b 从没拉取过，之后首次拉取必须看到 v1。
+    ws.work_restore("w", id1).unwrap();
+    let pulled = ws
+        .work_pull("w", "b", &["note.md".to_string()])
+        .expect("新 agent 首次拉取");
+    assert_eq!(
+        pulled.updated,
+        vec!["note.md"],
+        "回滚后的 head 内容写进新沙箱"
+    );
+    let sb = sandbox_of(&ws, "w", "b");
+    assert_eq!(
+        store.read_under(&sb, "note.md").unwrap().as_deref(),
+        Some(&b"v1"[..])
+    );
+}
+
 /// 目的：回滚离开过的提交不在当前 head 祖先链上：转录回档只沿当前线选点，不能把旧分支选回来。
 #[test]
 pub(crate) fn work_rewind_to_ignores_commits_off_the_current_head() {
