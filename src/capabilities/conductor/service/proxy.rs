@@ -5,6 +5,7 @@
 
 use crate::capabilities::conductor::domain::proxy as d;
 use crate::capabilities::conductor::ports::ProxyHost;
+use crate::capabilities::llm::api::Channel;
 use crate::capabilities::tools::api::{arg_fault_text, ToolBook, ToolOutcome};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -543,6 +544,8 @@ impl Conductor {
         ) {
             return Err(why);
         }
+        // 先解析核心通道：没有模型就不建（工作区都还没有，失败什么都不留）。
+        let channel = self.registry.core_channel()?;
         let meta = SessionMeta {
             name: name.to_string(),
             mode: "proxy".to_string(),
@@ -559,8 +562,8 @@ impl Conductor {
             run: RunState::Active,
         };
         self.workspace.prepare(name, &[])?;
-        let mut session = self.build_proxy(&meta)?;
-        let mut events = session.open();
+        let mut session = self.build_proxy_with(&meta, &channel)?;
+        let mut events = Vec::new();
         // 授予事实既是 meta 的 `delegation`（可重建），也留一条**可回放记录**：
         // 打开这条会话的人应当看得见"决定权是整块交出去的"，而不是只能去读 meta。
         events
@@ -574,6 +577,15 @@ impl Conductor {
 
     /// 装配一个代理会话对象（创建与重建**共用同一处**，两处不各拼一遍）。
     pub(crate) fn build_proxy(&self, meta: &SessionMeta) -> Result<AgentSession, String> {
+        let channel = self.registry.core_channel()?;
+        self.build_proxy_with(meta, &channel)
+    }
+
+    fn build_proxy_with(
+        &self,
+        meta: &SessionMeta,
+        channel: &Channel,
+    ) -> Result<AgentSession, String> {
         let roots = self.workspace.roots(&meta.name, &[])?;
         let app = self.registry.app();
         let base = app
@@ -598,18 +610,8 @@ impl Conductor {
             // 代理发言席自己住在宿主上（文件工具也跑在宿主），不需要 guest 翻译。
             path_codec: None,
         };
-        let channel = self.registry.core_channel();
-        let tool_mode = if channel.is_some() {
-            self.registry.tool_mode(None)
-        } else {
-            crate::capabilities::llm::api::ToolMode::Envelope
-        };
-        let (chat, demo) = self.llm.core_channel(channel.as_ref());
-        let note = if demo {
-            Some("（无可用模型：本次走演示通道，不会原生调用工具）".to_string())
-        } else {
-            None
-        };
+        let tool_mode = self.registry.tool_mode(None);
+        let chat = self.llm.core_channel(channel);
         // 身份是**角色提示词**（core_proxy），不是某个 agent 的模块能力包：
         // 机制 / 环境 / 调用约定仍与 agent 身份同一份口径（见 workspace 的 render_system）。
         let mut params = SessionParams::from_workspace(d::SPEAKER, &sb, &[], "proxy", "core_proxy");
@@ -629,7 +631,6 @@ impl Conductor {
             d::SPEAKER,
             params,
             chat,
-            note,
             Some(tools),
             self.prompt
                 .text(crate::capabilities::prompt::api::Segment::CompactPrompt)

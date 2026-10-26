@@ -433,7 +433,7 @@ session/<工作名>/
 
 ### 设置
 
-- `models.yaml`：每个模型声明 `context`（窗口大小，缺省保守 32k）；用户可覆盖；
+- `models.yaml`：每个模型可声明 `context`（窗口大小）；填 0 / 留空 = 用户不填，自动压缩按 128K 兜底；
 - `settings.yaml`：`compact_at_percent`（默认 70）。
 
 ### 压不动就如实说

@@ -32,15 +32,11 @@ impl LlmService {
 }
 
 impl Llm for LlmService {
-    fn member_channel(
-        &self,
-        channel: Option<&Channel>,
-        module_id: &str,
-    ) -> (BoxedChat, Option<String>) {
+    fn member_channel(&self, channel: &Channel, module_id: &str) -> BoxedChat {
         self.gateway.member_channel(channel, module_id)
     }
 
-    fn core_channel(&self, channel: Option<&Channel>) -> (BoxedChat, bool) {
+    fn core_channel(&self, channel: &Channel) -> BoxedChat {
         self.gateway.core_channel(channel)
     }
 

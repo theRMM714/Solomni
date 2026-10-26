@@ -349,13 +349,12 @@ impl Conductor {
                 let sb = sandboxes.for_agent(&a.name).cloned().ok_or_else(|| {
                     format!("会话 {} 缺少 agent {} 的沙箱信息", meta.name, a.name)
                 })?;
-                let channel = self.registry.channel(a.model.as_deref());
+                let channel = self
+                    .registry
+                    .channel(a.model.as_deref())
+                    .map_err(|e| format!("agent {} 没有可用模型通道：{}", a.name, e))?;
                 // 重建时同样按登记处派生形态：系统提示与实际协议必须一致（回放才与实时一致）
-                let mode = if channel.is_some() {
-                    self.registry.tool_mode(a.model.as_deref())
-                } else {
-                    crate::capabilities::llm::api::ToolMode::Envelope
-                };
+                let mode = self.registry.tool_mode(a.model.as_deref());
                 // **会话参数**：与建立时同一个口径（身份块每回合现渲染，不进消息列表）。
                 let params = crate::capabilities::session::api::SessionParams::from_workspace(
                     &a.name,
@@ -365,7 +364,7 @@ impl Conductor {
                     &self.role_of(meta)?,
                 )
                 .with_guest(self.guest_os_of(&meta.exec));
-                let (chat, note) = self.llm.member_channel(channel.as_ref(), &a.name);
+                let chat = self.llm.member_channel(&channel, &a.name);
                 let (history, marks, line_reply, compacted_upto) = replay_dialogue(events, mode);
                 let unavailable = self.unavailable_modules(&meta.exec, &modules);
                 // 身份与角色**同一把尺子**（重建与实时不能各写一份，见 Conductor::role_of）：
@@ -402,7 +401,6 @@ impl Conductor {
                         line_reply,
                         compacted_upto,
                         chat,
-                        note,
                         Some(tools),
                         self.prompt
                             .text(crate::capabilities::prompt::api::Segment::CompactPrompt)

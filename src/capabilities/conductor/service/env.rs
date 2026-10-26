@@ -9,11 +9,6 @@ use super::*;
 use crate::capabilities::packages::api as pkgs;
 
 impl Conductor {
-    /// 核心按用户选择解析模型通道；缺省用核心默认；都缺 = None（网关回落演示并告知）。
-    pub(crate) fn channel_of(&self, model: Option<&str>) -> Option<Channel> {
-        self.registry.channel(model)
-    }
-
     /// 目的：这台会话的**共享 guest 作用域**——(guest 租约, 该租约对应的会话 meta)。
     /// 约束：一个主会话树一台 guest；proxy 父会话没有 guest，它的每个子工作临时各占一台。
     ///   host 档 / proxy 父会话 = None；其余 = (租约, 作用域根 meta)。
@@ -386,7 +381,7 @@ impl Conductor {
         &self,
         a: &AgentMeta,
         modules: &[Module],
-        channel: Option<Channel>,
+        channel: Channel,
         sb: &crate::capabilities::workspace::api::Sandbox,
         unavailable: BTreeMap<String, Vec<String>>,
         net: bool,
@@ -398,23 +393,16 @@ impl Conductor {
         crate::capabilities::session::api::AgentSession,
         Vec<SessionEvent>,
     ) {
-        let (chat, note) = self.llm.member_channel(channel.as_ref(), &a.name);
-        // 形态按登记处解析；没有真实通道（演示回落）只能是手写信封——演示通道不会原生调用。
-        let mode = if channel.is_some() {
-            self.registry.tool_mode(a.model.as_deref())
-        } else {
-            crate::capabilities::llm::api::ToolMode::Envelope
-        };
+        let chat = self.llm.member_channel(&channel, &a.name);
+        // 形态按登记处解析；通道已在前置判据里解析成功，这里不再有"没有通道"的分支。
+        let mode = self.registry.tool_mode(a.model.as_deref());
         self.log.info(
             "conductor::build_single",
             &format!(
                 "单 agent 工作：agent {}，模块 {}，模型 {}",
                 a.name,
                 a.modules.join("+"),
-                channel
-                    .as_ref()
-                    .map(|c| c.model.as_str())
-                    .unwrap_or("无（演示）")
+                channel.model
             ),
         );
         // **会话参数**：身份块每回合由它现渲染（不存进消息列表）。
@@ -438,7 +426,6 @@ impl Conductor {
             &a.name,
             params,
             chat,
-            note,
             Some(tools),
             self.prompt
                 .text(crate::capabilities::prompt::api::Segment::CompactPrompt)
@@ -446,7 +433,6 @@ impl Conductor {
         );
         // 自动压缩的预算按**这个 agent 的模型**窗口算（见 session-model.md 六）。
         s.set_compact_budget(self.compact_budget(a.model.as_deref()));
-        let opened = s.open();
-        (s, opened)
+        (s, Vec::new())
     }
 }

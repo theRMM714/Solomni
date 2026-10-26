@@ -759,3 +759,62 @@ pub(crate) fn native_multi_call_rebuilds_identically_to_live() {
         "一次回复只推一条助手消息"
     );
 }
+
+/// 目的：一个模型都没登记时**不能建会话**——不能再用内置假模型把流程跑起来。
+#[test]
+fn creating_a_session_without_any_model_is_refused_and_leaves_no_history() {
+    let mut core = core_with_settings(InMemorySettings::without_models());
+    let err = core
+        .create_work(work("no-model", WorkMode::Single, &[]))
+        .expect_err("没有模型必须拒绝");
+    assert!(err.contains("还没有任何模型"), "{}", err);
+    assert!(core.history_list().is_empty(), "失败不应留下会话记录");
+}
+
+/// 目的：模型在册但核心默认没设时，没显式模型的 agent 不能建会话；错误要指名缺什么。
+#[test]
+fn creating_a_session_without_core_default_is_refused() {
+    let mut core =
+        core_with_settings_modules(InMemorySettings::without_core(), vec![module_of("a")]);
+    let err = core
+        .create_work(work("no-core", WorkMode::Single, &["a"]))
+        .expect_err("没有核心默认必须拒绝");
+    assert!(err.contains("agent a 没有可用模型通道"), "{}", err);
+    assert!(err.contains("核心 AI 未设定默认模型"), "{}", err);
+    assert!(core.history_list().is_empty(), "失败不应留下会话记录");
+}
+
+/// 目的：代理会话跑在核心默认上；没设默认就不建。
+#[test]
+fn creating_a_proxy_without_core_default_is_refused() {
+    let mut core = core_with_settings(InMemorySettings::without_core());
+    let spec = WorkSpec {
+        name: "no-core-proxy".to_string(),
+        mode: WorkMode::Proxy,
+        agents: Vec::new(),
+        task: None,
+        delegate: false,
+        tier: Tier::Host,
+        guest: None,
+    };
+    let err = core
+        .create_work(spec)
+        .expect_err("代理没有核心默认必须拒绝");
+    assert!(err.contains("代理会话没有可用模型通道"), "{}", err);
+    assert!(core.history_list().is_empty(), "失败不应留下会话记录");
+}
+
+/// 目的：协作的成员即使都显式指定了模型，核心自己还要通道（编排 / 整理 / 验收）。
+#[test]
+fn creating_a_collab_without_core_default_is_refused_even_with_explicit_models() {
+    let mut core =
+        core_with_settings_modules(InMemorySettings::without_core(), vec![module_of("a")]);
+    let mut spec = work("no-core-collab", WorkMode::Collab, &["a"]);
+    spec.task = Some("做个东西".to_string());
+    spec.agents[0].model = Some("m".to_string());
+    let err = core
+        .create_work(spec)
+        .expect_err("协作没有核心默认必须拒绝");
+    assert!(err.contains("核心没有可用模型通道"), "{}", err);
+    assert!(core.history_list().is_empty(), "失败不应留下会话记录");
+}

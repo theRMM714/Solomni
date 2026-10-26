@@ -24,6 +24,47 @@ const state = {
   nodeBySid: new Map(),  // 子会话 sid -> {node, assignee}：节点卡与标签共用同一份标题
 };
 
+/* ---------- 登记处状态同步（供应商 / 模型 / agent / 核心默认） ----------
+ * 页面只建一次并缓存；登记处一变，所有已打开的分页都要跟着变，不能等用户刷新整页。
+ * 约定：订阅者只同步**列表与下拉选项**，绝不重建表单主体——3 秒轮询也会走到这里，
+ * 重建输入框会把用户正在填的 id / 密钥 / note 冲掉。 */
+const registryListeners = new Set();
+let registryPrint = "";
+function registryFingerprint() {
+  return JSON.stringify([state.providers, state.models, state.agents, state.core]);
+}
+function onRegistryChange(fn) {
+  registryListeners.add(fn);
+  return () => registryListeners.delete(fn);
+}
+function notifyRegistryChange() {
+  for (const fn of Array.from(registryListeners)) {
+    try { fn(); } catch (e) { console.error("登记处视图刷新失败：", e); }
+  }
+}
+/** 下拉选项原地换新：保留当前选中；值已不在选项里时退回第一个（或空串）。 */
+function syncSelect(sel, options, current) {
+  const want = current === undefined || current === null ? sel.value : current;
+  sel.innerHTML = "";
+  for (const o of options) {
+    const op = document.createElement("option");
+    op.value = o.value; op.textContent = o.label;
+    sel.appendChild(op);
+  }
+  const has = options.some((o) => o.value === want);
+  sel.value = has ? want : (options.length ? options[0].value : "");
+  return sel.value;
+}
+/** 模型下拉的选项：needEmpty = 带「（核心默认）」空项（会话配置用）。 */
+function modelOptions(current, needEmpty) {
+  const opts = (needEmpty ? [{ value: "", label: "（核心默认）" }] : [])
+    .concat(state.models.map((m) => ({ value: m.id, label: m.name + "（" + m.id + "）" })));
+  if (current && !state.models.some((m) => m.id === current)) {
+    opts.push({ value: current, label: current + "（登记处已无此模型）" });
+  }
+  return opts;
+}
+
 /* ---------- API ---------- */
 async function api(method, url, body) {
   const res = await fetch(url, {
@@ -108,6 +149,10 @@ async function refreshState() {
   state.settings = s.settings || { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70 };
   state.fence = s.fence || null;
   state.toolchains = s.toolchains || null;
+  // 登记处真变了才通知：轮询每 3 秒都会进来，每次重画会让用户填到一半的表单被冲掉。
+  const nextRegistryPrint = registryFingerprint();
+  const registryChanged = nextRegistryPrint !== registryPrint;
+  registryPrint = nextRegistryPrint;
   renderFenceBanner();
   renderToolchainBanner();
   renderSidebar();
@@ -115,6 +160,7 @@ async function refreshState() {
   if (opened) renderTabs();
   const cur = activeSession();
   if (cur) { syncTyping(cur); syncSendButton(cur); syncComposer(cur); }
+  if (registryChanged) notifyRegistryChange();
 }
 
 /// 思维链块：永远默认折叠，点击（原生 details）才展开。
@@ -588,11 +634,14 @@ function openConfig(sid) {
   openModal('配置：' + sid, (c) => {
     const box = document.createElement('div'); box.className = 'cfg';
     c.body.appendChild(box);
-    loadConfig(sid, c, box);
+    // 登记处变了只同步模型下拉；重读配置会换掉 DOM，所以这里只订阅一次，由 syncModels 指向最新一份。
+    let syncModels = () => {};
+    c.onRegistryChange(() => syncModels());
+    loadConfig(sid, c, box, (fn) => { syncModels = fn; });
   }, true);
 }
 
-async function loadConfig(sid, c, box) {
+async function loadConfig(sid, c, box, setSync) {
   box.innerHTML = '';
   box.appendChild(emptyHint('正在读取配置…'));
   let cfg = null;
@@ -606,7 +655,7 @@ async function loadConfig(sid, c, box) {
   }
   box.innerHTML = '';
   if (!cfg) { box.appendChild(cfgHint('后端没有返回 config', 'err')); return; }
-  buildConfigForm(sid, cfg, c, box);
+  buildConfigForm(sid, cfg, c, box, setSync);
 }
 
 /* ---------- 依赖补齐：把"缺什么"变成"点一下装上" ----------
@@ -779,8 +828,11 @@ function diagnosisText(d) {
   return JSON.stringify(d);
 }
 
-function buildConfigForm(sid, cfg, c, box) {
+function buildConfigForm(sid, cfg, c, box, setSync) {
   const frozen = !!cfg.started;
+  // 模型下拉的同步器：openConfig 的登记处订阅只调最新这一份。
+  const modelSyncs = [];
+  if (setSync) setSync(() => { for (const fn of modelSyncs) fn(); });
   const rt = cfg.runtime || {};
   const dir = cfg.runtimes_dir || '';
   // 表单草稿：保存从这里读；「重新扫描」整块重建，未保存的改动随之丢弃。
@@ -811,7 +863,7 @@ function buildConfigForm(sid, cfg, c, box) {
   const secA = cfgDiv('cfg-sec');
   secA.appendChild(cfgDiv('cfg-sec-title', 'agent 名单（' + draft.agents.length + ' 个）'));
   if (!draft.agents.length) secA.appendChild(emptyHint('（这个会话没有 agent 记录）'));
-  draft.agents.forEach((a, i) => secA.appendChild(cfgAgentBlock(a, i, frozen)));
+  draft.agents.forEach((a, i) => secA.appendChild(cfgAgentBlock(a, i, frozen, modelSyncs)));
   box.appendChild(secA);
 
   // 执行档位：本机 / 虚拟机（如实说明各自是什么）
@@ -881,7 +933,7 @@ function buildConfigForm(sid, cfg, c, box) {
   // 运行能力：declared / missing / available / diagnoses / rejected / rejected_packages
   box.appendChild(cfgRuntimeBlock(rt, dir, draft.tier, () => {
     c.setMsg('正在重新扫描模块清单与依赖文件夹…');
-    loadConfig(sid, c, box);
+    loadConfig(sid, c, box, setSync);
   }));
 
   // 定版：只对「有多个可用版本」的能力给选择
@@ -975,7 +1027,7 @@ function buildConfigForm(sid, cfg, c, box) {
       await api('POST', actionUrl('edit_session'), Object.assign({ session_id: sid }, body));
       await refreshState();
       c.setMsg('已保存：下一次发言按新配置生效');
-      loadConfig(sid, c, box); // 重读一遍：把落盘后的样子如实显示出来
+      loadConfig(sid, c, box, setSync); // 重读一遍：把落盘后的样子如实显示出来
     } catch (e) {
       save.disabled = false;
       c.setMsg('保存失败：' + e.message, true); // 后端 error 原文，不吞
@@ -986,7 +1038,7 @@ function buildConfigForm(sid, cfg, c, box) {
 }
 
 /// 一个 agent 的编辑块：名字（冻结时只读）/ 模块多选（选项来自 /api/state 的 modules）/ 模型下拉。
-function cfgAgentBlock(a, idx, frozen) {
+function cfgAgentBlock(a, idx, frozen, modelSyncs) {
   const row = cfgDiv('cfg-agent');
   row.appendChild(cfgDiv('cfg-agent-head', 'agent ' + (idx + 1) + '：' + (a.name || '（未命名）')));
 
@@ -1014,11 +1066,10 @@ function cfgAgentBlock(a, idx, frozen) {
   }
   row.appendChild(field('模块（这个 agent 的能力；勾 1 个 = 直连式，勾多个 = 组合式；同一模块可被多个 agent 共用）', mods));
   const cur = a.model || '';
-  const opts = [{ value: '', label: '（核心默认）' }]
-    .concat(state.models.map((m) => ({ value: m.id, label: m.name + '（' + m.id + '）' })));
-  if (cur && !state.models.some((m) => m.id === cur)) opts.push({ value: cur, label: cur + '（登记处已无此模型）' });
-  const sel = selectInput(opts, cur);
+  const sel = selectInput(modelOptions(cur, true), cur);
   sel.addEventListener('change', () => { a.model = sel.value; });
+  // 登记处变了就换选项，保留这一席当前选择（值没了就如实显示"登记处已无此模型"）。
+  if (modelSyncs) modelSyncs.push(() => syncSelect(sel, modelOptions(a.model || '', true), a.model || ''));
   row.appendChild(field('模型（留空 = 用核心默认）', sel));
   return row;
 }
@@ -1343,7 +1394,12 @@ function confirmBox(title, text, confirmLabel) {
 
 /* ---------- 主区弹层（清空一律 innerHTML=''） ---------- */
 let modalUnbind = null;
+// 弹窗自己的登记处订阅：关窗就退订，免得页面没了还在重绘。
+let modalDisposers = [];
 function closeModal() {
+  for (const off of modalDisposers.splice(0)) {
+    try { off(); } catch (e) { console.warn("退订失败：", e); }
+  }
   if (modalUnbind) { modalUnbind(); modalUnbind = null; }
   const root = $('#modal-root');
   root.innerHTML = '';
@@ -1351,6 +1407,7 @@ function closeModal() {
 }
 function openModal(title, build, wide) {
   closeModal();
+  modalDisposers = [];
   const root = $('#modal-root');
   root.className = 'modal-root open';
   const overlay = document.createElement('div'); overlay.className = 'modal-overlay';
@@ -1370,6 +1427,18 @@ function openModal(title, build, wide) {
     body,
     setMsg: (t, isErr) => { msg.textContent = t || ''; msg.className = isErr ? 'modal-msg err' : 'modal-msg'; },
     close: closeModal,
+    // 订阅登记处变化；弹窗关闭时统一退订。
+    onRegistryChange: (fn) => {
+      const off = onRegistryChange(fn);
+      modalDisposers.push(off);
+      return off;
+    },
+    // 登记处写操作只有这一条：动作 → 重拉状态（指纹变了会通知所有已打开的分页）。
+    mutate: async (action, body) => {
+      const out = await api('POST', actionUrl(action), body);
+      await refreshState();
+      return out;
+    },
   };
   build(ctx);
   return ctx;
@@ -1401,8 +1470,8 @@ function providersPage(c) {
         const del = btn('删除', 'link-btn danger');
         del.onclick = async () => {
           try {
-            await api('POST', actionUrl('remove_provider'), { id: p.id });
-            await refreshState(); rebuild();
+            await c.mutate('remove_provider', { id: p.id });
+            rebuild();
             c.setMsg('已删除 ' + p.id);
           } catch (e) { c.setMsg(e.message, true); }
         };
@@ -1416,13 +1485,15 @@ function providersPage(c) {
       const id = idIn.value.trim(), url = urlIn.value.trim(), key = keyIn.value;
       if (!id || !url || !key) { c.setMsg('id / base_url / api_key 均不能为空', true); return; }
       try {
-        await api('POST', actionUrl('upsert_provider'), { id, base_url: url, api_key: key });
+        await c.mutate('upsert_provider', { id, base_url: url, api_key: key });
         keyIn.value = '';
-        await refreshState(); rebuild();
+        rebuild();
         c.setMsg('已保存：' + id);
       } catch (e) { c.setMsg(e.message, true); }
     };
 
+    // 供应商变了：模型页的供应商下拉 / 发现区靠这条通知同步（它们可能已经建好并缓存）。
+    c.onRegistryChange(rebuild);
     rebuild();
     c.body.appendChild(listWrap);
     const form = document.createElement('div'); form.className = 'form-col';
@@ -1438,18 +1509,27 @@ function openProvidersModal() {
 }
 
 /* ---------- 设置②：模型登记（录入 / 修改 / 删除 + 供应商模型发现） ---------- */
-function modelsPage(c) {
-  const changed = () => { if (typeof c.afterChange === 'function') c.afterChange(); };
+function modelsPage(c, coreBody) {
     const listWrap = document.createElement('div'); listWrap.className = 'reg-list';
     const discWrap = document.createElement('div'); discWrap.className = 'reg-list';
+    const coreWrap = coreBody || document.createElement('div');
     const idIn = textInput('id');
     const nameIn = textInput('展示名');
     const apiIn = textInput('api_model（真正发给供应商的串）');
     const providerSel = selectInput(state.providers.map((p) => ({ value: p.id, label: p.id })), null);
     const noteIn = textInput('note（能力说明）');
-    // 上下文窗口：自动压缩按它 × 设置里的百分比触发；填 0/留空 = 保留现值（新建缺省 32k）。
-    const ctxIn = numberInput('上下文窗口（tokens）', 0, 0, 2000000);
+    // 上下文窗口：0 / 留空 = 用户不填；自动压缩按 128K 兜底（见后端 DEFAULT_CONTEXT_TOKENS）。
+    const ctxIn = numberInput('上下文窗口（tokens，0 或留空 = 不填；自动压缩按 128K 兜底）', 0, 0, 2000000);
     const save = btn('登记 / 更新', 'btn btn-primary btn-block');
+
+    function syncProviderSelect() {
+      syncSelect(providerSel, state.providers.map((p) => ({ value: p.id, label: p.id })), providerSel.value);
+    }
+
+    function refreshCore() {
+      coreWrap.innerHTML = '';
+      coreModelBlock({ body: coreWrap, setMsg: c.setMsg, mutate: c.mutate }, false);
+    }
 
     function rebuild() {
       listWrap.innerHTML = '';
@@ -1465,10 +1545,21 @@ function modelsPage(c) {
         const sub = document.createElement('div'); sub.className = 'reg-sub';
         sub.textContent = m.name + ' · ' + m.api_model + ' · 供应商 ' + m.provider +
           ' · 工具调用 ' + (m.tools === 'native' ? '原生' : '手写信封') +
-          ' · 窗口 ' + (m.context || 0) + ' tokens';
+          ' · 窗口 ' + (m.context ? m.context + ' tokens' : '未填（压缩按 128K 兜底）');
         const note = document.createElement('div'); note.className = 'reg-note'; note.textContent = m.note || '';
         main.appendChild(id); main.appendChild(sub); main.appendChild(note);
         const acts = document.createElement('div'); acts.className = 'reg-acts';
+        if (!m.is_core) {
+          // 登记完就有这条：不必再去上面的核心默认块里找同一个模型。
+          const setCore = btn('设为核心', 'link-btn');
+          setCore.onclick = async () => {
+            try {
+              await c.mutate('set_core_model', { id: m.id });
+              c.setMsg('核心 AI 默认模型：' + m.id);
+            } catch (e) { c.setMsg(e.message, true); }
+          };
+          acts.appendChild(setCore);
+        }
         const edit = btn('编辑', 'link-btn');
         edit.onclick = () => {
           idIn.value = m.id; nameIn.value = m.name; apiIn.value = m.api_model;
@@ -1479,8 +1570,7 @@ function modelsPage(c) {
         const del = btn('删除', 'link-btn danger');
         del.onclick = async () => {
           try {
-            await api('POST', actionUrl('remove_model'), { id: m.id });
-            await refreshState(); rebuild(); changed();
+            await c.mutate('remove_model', { id: m.id });
             c.setMsg('已删除 ' + m.id);
           } catch (e) { c.setMsg(e.message, true); }
         };
@@ -1490,11 +1580,10 @@ function modelsPage(c) {
           probe.disabled = true;
           c.setMsg('正在实测 ' + m.id + ' 的工具调用支持（要发两条最小请求）…');
           try {
-            const r = await api('POST', actionUrl('probe_model_tools'), { id: m.id });
+            const r = await c.mutate('probe_model_tools', { id: m.id });
             const what = r.outcome === 'supported' ? '支持原生工具调用'
               : r.outcome === 'unsupported' ? '**不支持**原生工具调用（供应商拒了带 tools 的请求）'
               : '无法判定（供应商接受了 tools，但这次没有发起调用）';
-            await refreshState(); rebuild(); changed();
             c.setMsg(what + '｜' + (r.detail || '') + '｜登记处现在是「' +
               (r.mode === 'native' ? '原生' : '手写信封') + '」，下一次生成起生效');
           } catch (e) { c.setMsg(e.message, true); }
@@ -1560,13 +1649,21 @@ function modelsPage(c) {
         c.setMsg('id / 名字 / api_model / 供应商 均不能为空', true); return;
       }
       try {
-        await api('POST', actionUrl('upsert_model'), body);
-        await refreshState(); rebuild(); changed();
-        c.setMsg('已保存：' + body.id);
+        await c.mutate('upsert_model', body);
+        c.setMsg('已保存：' + body.id +
+          (state.core ? '' : '（还没有核心默认模型：点这一行的「设为核心」即可）'));
       } catch (e) { c.setMsg(e.message, true); }
     };
 
-    rebuild(); rebuildDiscover();
+    // 登记处任何变化都只同步列表 / 下拉 / 核心块，不重建表单（轮询也会走到这里）。
+    c.onRegistryChange(() => {
+      rebuild();
+      rebuildDiscover();
+      syncProviderSelect();
+      refreshCore();
+    });
+    rebuild(); rebuildDiscover(); syncProviderSelect(); refreshCore();
+    if (!coreBody) c.body.appendChild(coreWrap);
     c.body.appendChild(listWrap);
     const form = document.createElement('div'); form.className = 'form-col';
     form.appendChild(field('id', idIn));
@@ -1589,20 +1686,20 @@ function openModelsModal() {
 }
 
 /* ---------- 设置③：核心 AI 默认模型 ---------- */
-function coreModelBlock(c) {
-    const opts = state.models.map((m) => ({ value: m.id, label: m.name + '（' + m.id + '）' }));
-    const sel = selectInput(opts, state.core);
+function coreModelBlock(c, subscribe) {
+    const sel = selectInput(modelOptions(state.core), state.core);
     const save = btn('保存', 'btn btn-primary btn-block');
+    const sync = () => syncSelect(sel, modelOptions(state.core), state.core || sel.value);
+    if (subscribe !== false && typeof c.onRegistryChange === 'function') c.onRegistryChange(sync);
     save.onclick = async () => {
       const id = sel.value;
       if (!id) { c.setMsg('请先登记模型', true); return; }
       try {
-        await api('POST', actionUrl('set_core_model'), { id });
-        await refreshState();
+        await c.mutate('set_core_model', { id });
         c.setMsg('核心 AI 默认模型：' + id);
       } catch (e) { c.setMsg(e.message, true); }
     };
-    if (!opts.length) c.body.appendChild(emptyHint('（未登记模型，先到「模型登记」添加）'));
+    if (!state.models.length) c.body.appendChild(emptyHint('（未登记模型，先到「模型登记」添加）'));
     c.body.appendChild(field('核心 AI 使用的模型', sel));
     c.body.appendChild(save);
 }
@@ -1810,7 +1907,13 @@ function openSettingsHub(page) {
     hub.appendChild(main);
 
     const built = new Map();
-    const ctxOf = (pane) => ({ body: pane, setMsg: c.setMsg });
+    // 分页也拿得到弹窗级的登记处订阅与写动作入口（否则分页刷新只能各写一套）。
+    const ctxOf = (pane) => ({
+      body: pane,
+      setMsg: c.setMsg,
+      onRegistryChange: c.onRegistryChange,
+      mutate: c.mutate,
+    });
     const builders = {
       generate: (pane, ctx) => buildGeneratePage(ctx, form),
       sandbox: (pane, ctx) => buildSandboxPage(ctx, form),
@@ -1818,15 +1921,11 @@ function openSettingsHub(page) {
       resources: (pane, ctx) => buildResourcesPage(ctx, form),
       providers: (pane, ctx) => providersPage(ctx),
       models: (pane, ctx) => {
-        // 核心默认可选项必须在登记/删除模型后立即刷新（否则要整页刷新才看得到新模型）。
+        // 核心默认块放在模型页顶部：登记 / 删除 / 设核心后由 modelsPage 自己的订阅统一刷新。
         const core = document.createElement('div');
         core.className = 'settings-core';
         pane.appendChild(core);
-        const coreCtx = { body: core, setMsg: ctx.setMsg };
-        const refreshCore = () => { core.innerHTML = ''; coreModelBlock(coreCtx); };
-        refreshCore();
-        ctx.afterChange = refreshCore;
-        modelsPage(ctx);
+        modelsPage(ctx, core);
       },
       agents: (pane, ctx) => agentsPage(ctx),
       modules: (pane, ctx) => modulesPage(ctx),
@@ -1901,7 +2000,7 @@ function agentsPage(c) {
     const listWrap = document.createElement('div'); listWrap.className = 'reg-list';
     const modWrap = document.createElement('div'); modWrap.className = 'wf-mods';
     const nameIn = textInput('agent 名字（会当沙箱目录名，非空、无非法字符、不能重名）');
-    const modelSel = selectInput(state.models.map((m) => ({ value: m.id, label: m.name + '（' + m.id + '）' })), state.core);
+    const modelSel = selectInput(modelOptions(state.core, true), state.core || '');
     const noteIn = textInput('说明（这个 agent 干什么）');
     const save = btn('保存 agent', 'btn btn-primary btn-block');
     const cancelEdit = btn('取消编辑', 'btn btn-block hidden');
@@ -1922,9 +2021,13 @@ function agentsPage(c) {
         modWrap.appendChild(lab);
       }
     }
+    function syncModelSelect() {
+      syncSelect(modelSel, modelOptions(state.core, true), modelSel.value || state.core || '');
+    }
     function resetForm() {
       editing = null; nameIn.value = ''; noteIn.value = '';
       for (const k in picked) delete picked[k];
+      syncModelSelect();
       cancelEdit.className = 'btn btn-block hidden';
       renderMods();
     }
@@ -1952,8 +2055,7 @@ function agentsPage(c) {
         const del = btn('删除', 'link-btn danger');
         del.onclick = async () => {
           try {
-            await api('POST', actionUrl('remove_agent'), { name: a.name });
-            await refreshState(); renderList();
+            await c.mutate('remove_agent', { name: a.name });
             if (editing === a.name) resetForm();
             c.setMsg('已删除 ' + a.name);
           } catch (e) { c.setMsg(e.message, true); }
@@ -1970,20 +2072,22 @@ function agentsPage(c) {
       if (!name) { c.setMsg('agent 名字不能为空', true); return; }
       try {
         if (editing && editing !== name) {
-          await api('POST', actionUrl('remove_agent'), { name: editing });
+          await c.mutate('remove_agent', { name: editing });
         }
-        await api('POST', actionUrl('upsert_agent'), { name, modules, model: modelSel.value || undefined, note: noteIn.value.trim() });
-        await refreshState(); renderList(); resetForm();
+        await c.mutate('upsert_agent', { name, modules, model: modelSel.value || undefined, note: noteIn.value.trim() });
+        resetForm();
         c.setMsg('已保存 agent：' + name);
       } catch (e) { c.setMsg(e.message, true); }
     };
 
-    renderList(); renderMods();
+    // 模型登记变了：下拉与列表跟着变，正在编辑的名字 / 说明 / 勾选不动。
+    c.onRegistryChange(() => { syncModelSelect(); renderList(); });
+    renderList(); renderMods(); syncModelSelect();
     c.body.appendChild(listWrap);
     const form = document.createElement('div'); form.className = 'form-col';
     form.appendChild(field('名字', nameIn));
     form.appendChild(field('模块（这个 agent 的能力）', modWrap));
-    if (state.models.length) form.appendChild(field('默认模型', modelSel));
+    form.appendChild(field('默认模型（空 = 用核心默认）', modelSel));
     form.appendChild(field('说明', noteIn));
     form.appendChild(save); form.appendChild(cancelEdit);
     c.body.appendChild(form);
@@ -2190,6 +2294,21 @@ async function openWizard(draft) {
     const recBtn = btn('让核心推荐', 'btn btn-block');
     const createBtn = btn('创建并开始', 'btn btn-primary btn-block');
     const cancelBtn = btn('取消', 'btn btn-block');
+    // 没有可用模型就**不允许创建**：后端也会拒绝，这里先把原因说在前面。
+    function createBlocked() {
+      if (!state.models.length) {
+        return '未登记任何模型，不能创建会话：先到「设置 → 模型与核心默认」登记供应商与模型';
+      }
+      if (w.mode === 'proxy' && !state.core) {
+        return '代理会话必须设定核心默认模型：先到「设置 → 模型与核心默认」选定';
+      }
+      return '';
+    }
+    function syncCreateButton() {
+      const why = createBlocked();
+      createBtn.disabled = !!why;
+      createBtn.title = why;
+    }
     cancelBtn.onclick = closeModal;
 
     const modelOptions = () => state.models.map((m) => ({ value: m.id, label: m.name + '（' + m.id + '）' }));
@@ -2417,13 +2536,16 @@ async function openWizard(draft) {
       modelWrap.innerHTML = '';
       if (w.mode === 'proxy') {
         modelWrap.appendChild(emptyHint('（代理会话走核心默认通道：模型按登记处的核心默认）'));
+        if (!state.core) {
+          modelWrap.appendChild(cfgHint('（核心默认模型未设定：代理会话不能创建；先到「设置 → 模型与核心默认」选定）', 'warn'));
+        }
         return;
       }
       const opts = modelOptions();
       if (w.mode === 'single') {
+        if (!opts.length) { modelWrap.appendChild(cfgHint('（未登记任何模型：不能创建会话。先到「设置 → 模型与核心默认」登记。）', 'warn')); return; }
         const who = w.agentPick ? w.agentPick.name : ((w.agentName || '').trim() || pickedModules()[0] || '');
         if (!who) { modelWrap.appendChild(emptyHint('先复用 agent 或勾选模块，再指定模型')); return; }
-        if (!opts.length) { modelWrap.appendChild(emptyHint('（未登记模型，将用核心默认）')); return; }
         const row = document.createElement('div'); row.className = 'wf-model-row';
         const lab = document.createElement('span'); lab.className = 'wf-model-id'; lab.textContent = who;
         const cur = w.model || state.core || opts[0].value;
@@ -2435,7 +2557,7 @@ async function openWizard(draft) {
         return;
       }
       if (!w.agents.length) { modelWrap.appendChild(emptyHint('先加入 agent，再指定模型')); return; }
-      if (!opts.length) { modelWrap.appendChild(emptyHint('（未登记模型，将用核心默认）')); return; }
+      if (!opts.length) { modelWrap.appendChild(cfgHint('（未登记任何模型：不能创建会话。先到「设置 → 模型与核心默认」登记。）', 'warn')); return; }
       for (const a of w.agents) {
         const row = document.createElement('div'); row.className = 'wf-model-row';
         const lab = document.createElement('span'); lab.className = 'wf-model-id'; lab.textContent = a.name;
@@ -2449,7 +2571,7 @@ async function openWizard(draft) {
       }
     }
 
-    function renderAll() { renderParts(); renderModels(); renderEditor(); syncGuestGap(); }
+    function renderAll() { renderParts(); renderModels(); renderEditor(); syncGuestGap(); syncCreateButton(); }
 
     modeSel.addEventListener('change', () => {
       w.mode = modeSel.value;
@@ -2526,6 +2648,8 @@ async function openWizard(draft) {
     }
 
     createBtn.onclick = async () => {
+      const blocked = createBlocked();
+      if (blocked) { c.setMsg(blocked, true); return; }
       const name = nameIn.value.trim();
       if (!name) { c.setMsg('工作名称必填', true); return; }
       const task = taskIn.value.trim();
@@ -2599,7 +2723,9 @@ async function openWizard(draft) {
     c.body.appendChild(createBtn);
     c.body.appendChild(cancelBtn);
 
-    renderParts(); renderModels(); syncWizardTier();
+    renderParts(); renderModels(); syncWizardTier(); syncCreateButton();
+    // 别的标签页 / 设置在轮询后改了登记处：只换模型下拉与创建按钮，不重建名字 / 需求输入框。
+    c.onRegistryChange(() => { renderModels(); syncCreateButton(); });
   }, true);
 }
 

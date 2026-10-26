@@ -112,6 +112,17 @@ const openPage = (id) => {
   if (btn) btn.onclick();
   return walk(hub, []).find((n) => String(n.className).indexOf("settings-page") === 0 && n.dataset && n.dataset.id === id);
 };
+const optionValues = (page) => walk(page, []).filter((n) => n.tagName === "OPTION").map((n) => n.value);
+// 每个同步用例从同一份登记处起步（前一个用例可能改过全局 state）。
+function seedRegistry() {
+  vm.runInNewContext(`
+    state.providers = [{ id: "p1", base_url: "http://x" }];
+    state.models = [{ id: "m1", name: "M", api_model: "m", provider: "p1", note: "", tools: "native", context: 0, is_core: true }];
+    state.core = "m1";
+    state.agents = [];
+    notifyRegistryChange();
+  `, sandbox);
+}
 
 const results = [];
 function check(name, fn) {
@@ -160,6 +171,68 @@ if (!loadErrors.length) {
     const page = openPage("sandbox");
     const text = walk(page, []).map((n) => String(n.textContent || "")).join(" ");
     return text.indexOf("全局硬约束") >= 0 && text.indexOf("网络围栏") >= 0;
+  });
+  // 登记处同步：页面已建好并缓存后，新登记的东西必须立刻出现在它的列表 / 下拉里。
+  check("模型页先建好，登记供应商后下拉与发现区即时更新", () => {
+    seedRegistry();
+    vm.runInNewContext("openSettingsModal()", sandbox);
+    const page = openPage("models");
+    vm.runInNewContext(
+      'state.providers = state.providers.concat([{ id: "p2", base_url: "http://y" }]); notifyRegistryChange();',
+      sandbox
+    );
+    const text = walk(page, []).map((n) => String(n.textContent || "")).join(" ");
+    return optionValues(page).indexOf("p2") >= 0 && text.indexOf("p2") >= 0;
+  });
+  check("模型页先建好，登记模型后列表与核心下拉即时更新", () => {
+    seedRegistry();
+    vm.runInNewContext("openSettingsModal()", sandbox);
+    const page = openPage("models");
+    vm.runInNewContext(
+      'state.models = state.models.concat([{ id: "m2", name: "M2", api_model: "m2", provider: "p1", note: "", tools: "envelope", context: 0, is_core: false }]); notifyRegistryChange();',
+      sandbox
+    );
+    const text = walk(page, []).map((n) => String(n.textContent || "")).join(" ");
+    return optionValues(page).indexOf("m2") >= 0 && text.indexOf("M2") >= 0;
+  });
+  check("设为核心后模型行的「核心」徽标即时移动", () => {
+    seedRegistry();
+    vm.runInNewContext("openSettingsModal()", sandbox);
+    const page = openPage("models");
+    vm.runInNewContext(
+      'state.models = state.models.concat([{ id: "m2", name: "M2", api_model: "m2", provider: "p1", note: "", tools: "envelope", context: 0, is_core: false }]); state.core = "m2"; state.models = state.models.map((m) => ({ ...m, is_core: m.id === "m2" })); notifyRegistryChange();',
+      sandbox
+    );
+    const idNode = walk(page, []).find((n) => n.className === "reg-id" && String(n.textContent) === "m2");
+    return !!idNode && (idNode.children || []).some((c) => c.className === "reg-core");
+  });
+  check("登记处同步不重建表单（正在填的输入不丢）", () => {
+    seedRegistry();
+    vm.runInNewContext("openSettingsModal()", sandbox);
+    const page = openPage("models");
+    const idInput = walk(page, []).find((n) => n.tagName === "INPUT" && n.placeholder === "id");
+    idInput.value = "正在填的 id";
+    vm.runInNewContext(
+      'state.providers = state.providers.concat([{ id: "p3", base_url: "http://z" }]); notifyRegistryChange();',
+      sandbox
+    );
+    return idInput.value === "正在填的 id";
+  });
+  check("agent 页先建好，登记模型后默认模型下拉即时更新", () => {
+    seedRegistry();
+    vm.runInNewContext("openSettingsModal()", sandbox);
+    const page = openPage("agents");
+    vm.runInNewContext(
+      'state.models = state.models.concat([{ id: "m3", name: "M3", api_model: "m3", provider: "p1", note: "", tools: "envelope", context: 0, is_core: false }]); notifyRegistryChange();',
+      sandbox
+    );
+    return optionValues(page).indexOf("m3") >= 0;
+  });
+  check("模型表单说明 0 = 不填且自动压缩按 128K 兜底", () => {
+    vm.runInNewContext("openModelsModal()", sandbox);
+    const body = roots.get("#modal-root").children[0].children[0].children[1];
+    const text = walk(body, []).map((n) => String(n.textContent || "")).join(" ");
+    return text.indexOf("0 或留空 = 不填") >= 0 && text.indexOf("128K") >= 0;
   });
   // ③ 回合分隔行要可见：解析成系统分隔行，而不是 who=标签、text 为空的空行。
   check("回合分隔行解析成系统行", () => {

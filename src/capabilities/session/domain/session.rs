@@ -321,7 +321,6 @@ pub struct AgentSession {
     /// 身份与环境不在这里——它们由 params 现渲染（见 docs/tools/tools-and-roles.md 二）。
     pub(crate) dialogue: Vec<Msg>,
     pub(crate) chat: BoxedChat,
-    note: Option<String>,
     /// 工具环境：内置文件工具按该 agent 的沙箱放行 + 该 agent 模块声明的外部工具。
     pub(crate) tools: Option<MemberTools>,
     /// 压缩回合的指令（提示词段；构造时取自册子）。
@@ -374,7 +373,6 @@ impl AgentSession {
         id: &str,
         params: SessionParams,
         chat: BoxedChat,
-        note: Option<String>,
         tools: Option<MemberTools>,
         compact_prompt: String,
     ) -> AgentSession {
@@ -386,7 +384,6 @@ impl AgentSession {
             params,
             dialogue: Vec::new(),
             chat,
-            note,
             tools,
             compact_prompt,
             next_line: 0,
@@ -410,7 +407,6 @@ impl AgentSession {
         line_reply: Vec<u64>,
         compacted_upto: u64,
         chat: BoxedChat,
-        note: Option<String>,
         tools: Option<MemberTools>,
         compact_prompt: String,
     ) -> AgentSession {
@@ -424,7 +420,6 @@ impl AgentSession {
             params,
             dialogue,
             chat,
-            note,
             tools,
             compact_prompt,
             marks,
@@ -445,14 +440,6 @@ impl AgentSession {
         if let Some(t) = self.tools.as_mut() {
             t.mode = mode;
         }
-    }
-
-    /// 开场事件（通道回落告知）。
-    pub fn open(&self) -> Vec<SessionEvent> {
-        self.note
-            .clone()
-            .map(|n| vec![SessionEvent::Notice(n)])
-            .unwrap_or_default()
     }
 
     /// 注入一条**系统消息**（提醒/边界这类"不是用户说的、也不是模型说的"内容）：

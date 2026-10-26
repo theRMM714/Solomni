@@ -41,7 +41,7 @@ pub trait RegistryOps: Send + Sync {
         api_model: &str,
         provider: &str,
         note: &str,
-        // 上下文窗口（tokens）；0 = 保留现值（新建缺省 32k）。
+        // 上下文窗口（tokens）；0 = 用户不填（自动压缩按 128K 兜底）。
         context: u64,
     ) -> Result<(), String>;
     fn remove_model(&self, id: &str) -> Result<bool, String>;
@@ -98,10 +98,10 @@ pub trait Registry: Send + Sync {
 
     /// 模型 id → 成品通道；模型或供应商缺失 = 报错（不猜测回退）。
     fn resolve(&self, model: &str) -> Result<Channel, String>;
-    /// 核心 AI 默认通道；未设定或解析失败 = None（调用方回落演示并如实告知）。
-    fn core_channel(&self) -> Option<Channel>;
-    /// 本次调用要用的通道：给了模型用它，否则用核心默认；两者都缺 = None。
-    fn channel(&self, model: Option<&str>) -> Option<Channel>;
+    /// 核心 AI 默认通道；未设定或解析失败 = 如实报错（不回落、不猜）。
+    fn core_channel(&self) -> Result<Channel, String>;
+    /// 本次调用要用的通道：给了模型用它，否则用核心默认；失败带具体原因。
+    fn channel(&self, model: Option<&str>) -> Result<Channel, String>;
     /// 这个模型登记在册吗。
     fn has_model(&self, id: &str) -> bool;
     /// 登记处里一个模型都没有吗（推荐与代拟的前置判据）。
@@ -120,7 +120,7 @@ pub trait Registry: Send + Sync {
     fn provider_upsert(&mut self, id: &str, base_url: &str, api_key: &str) -> Result<(), String>;
     /// 删除供应商；仍被模型引用时拒绝（不静默级联删除）。
     fn provider_remove(&mut self, id: &str) -> Result<bool, String>;
-    /// 新建/更新模型。`context` 为 0 = 保留现值（新建缺省 32k）；工具形态保留原值。
+    /// 新建/更新模型。`context` 为 0 = 用户不填（自动压缩按 128K 兜底）；工具形态保留原值。
     fn model_upsert(
         &mut self,
         id: &str,

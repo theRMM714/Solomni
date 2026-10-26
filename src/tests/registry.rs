@@ -81,9 +81,9 @@ pub(crate) fn provider_lifecycle_and_key_never_leaks_to_view() {
     assert!(core.registry_mut().provider_remove("p1").unwrap());
 }
 
-/// 模型的上下文窗口：给了就改；表单没带（0）时**保留现值**——编辑别的字段不该顺手重置它。
+/// 模型的上下文窗口：给了就按它存；0 = 用户不填（原样存 0），自动压缩按 128K 兜底。
 #[test]
-pub(crate) fn model_context_is_kept_when_the_form_omits_it() {
+pub(crate) fn model_context_zero_means_not_filled_and_falls_back_to_128k() {
     let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]));
     core.registry_mut()
         .provider_upsert("p1", "http://x", "k")
@@ -100,11 +100,17 @@ pub(crate) fn model_context_is_kept_when_the_form_omits_it() {
             .unwrap_or(0)
     };
     assert_eq!(stored(&core), 64_000, "给了窗口就按它存");
-    // 再存一次（比如只改说明），不带窗口 → 保留 64000，而不是被重置成缺省。
+    assert_eq!(core.registry().context_of(Some("m")), 64_000);
+    // 再存一次带 0：0 是"用户不填"，原样存 0；自动压缩用 128K 兜底。
     core.registry_mut()
         .model_upsert("m", "M2", "api-m", "p1", "改了说明", 0)
         .unwrap();
-    assert_eq!(stored(&core), 64_000, "表单没带窗口时保留现值");
+    assert_eq!(stored(&core), 0, "0 = 不填，原样保存");
+    assert_eq!(
+        core.registry().context_of(Some("m")),
+        crate::capabilities::registry::domain::providers::DEFAULT_CONTEXT_TOKENS,
+        "自动压缩的兜底阈值是 128K"
+    );
 }
 
 #[test]

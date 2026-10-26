@@ -115,7 +115,7 @@ node dev.js test|fmt|clippy   # one-layer dev commands; do not call cargo direct
   repository follows. **A download's checksum lives next to the link it guards** in the same ledger (`<link-key>.sha256`);
   self-hosted release assets carry theirs in the `dependencies.yaml` entry. User overrides go through `.home/settings.yaml`
   and environment variables, not the ledger.
-- **You can run it without a provider**: it walks the flow with the built-in fake model and says so plainly.
+- **No usable model means no session**: register a provider and a model and set the core default first; a missing channel is refused with a precise reason, never replaced by a fake model.
 - Common flags: `--root <dir>` (product root), `--web-port <port>`, `--release`.
 - Commands at the prompt: the menu printed at startup is the full list (`print_menu` in `src/presentation/cli/mod.rs`); the rewind command is `rewind`, while providers / models / the core default model are `provider` / `model` / `core`.
 

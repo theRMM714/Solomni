@@ -102,6 +102,24 @@ impl InMemorySettings {
         }
         s
     }
+
+    /// 目的：一个模型都没登记（建会话必须被拒）。
+    pub(crate) fn without_models() -> InMemorySettings {
+        let s = InMemorySettings::new();
+        {
+            let mut g = s.s.lock().expect("锁");
+            g.models.clear();
+            g.core = None;
+        }
+        s
+    }
+
+    /// 目的：模型在册但核心默认没设（无显式模型的 agent / 代理 / 协作必须被拒）。
+    pub(crate) fn without_core() -> InMemorySettings {
+        let s = InMemorySettings::new();
+        s.s.lock().expect("锁").core = None;
+        s
+    }
 }
 
 impl SettingsStore for InMemorySettings {
@@ -1659,24 +1677,17 @@ pub(crate) struct NativeCallGateway {
 }
 
 impl ChatGateway for NativeCallGateway {
-    fn member_channel(
-        &self,
-        _channel: Option<&Channel>,
-        _module_id: &str,
-    ) -> (BoxedChat, Option<String>) {
-        (
-            Box::new(NativeCallChat {
-                name: self.name.clone(),
-                args_json: self.args_json.clone(),
-                raw: self.raw.clone(),
-                finish: "tool_calls".to_string(),
-                sent: false,
-            }),
-            None,
-        )
+    fn member_channel(&self, _channel: &Channel, _module_id: &str) -> BoxedChat {
+        Box::new(NativeCallChat {
+            name: self.name.clone(),
+            args_json: self.args_json.clone(),
+            raw: self.raw.clone(),
+            finish: "tool_calls".to_string(),
+            sent: false,
+        })
     }
-    fn core_channel(&self, _channel: Option<&Channel>) -> (BoxedChat, bool) {
-        (Box::new(FakeChat::new(vec!["[]".to_string()])), false)
+    fn core_channel(&self, _channel: &Channel) -> BoxedChat {
+        Box::new(FakeChat::new(vec!["[]".to_string()]))
     }
     fn probe_tools(
         &self,
@@ -1707,20 +1718,17 @@ impl ChatGateway for ScriptGateway {
     ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
         Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
     }
-    fn member_channel(&self, _c: Option<&Channel>, id: &str) -> (BoxedChat, Option<String>) {
+    fn member_channel(&self, _c: &Channel, id: &str) -> BoxedChat {
         let script =
             self.member.get(id).cloned().unwrap_or_else(|| {
                 vec!["{\"type\":\"say\",\"text\":\"（演示）收到。\"}".to_string()]
             });
-        (scripted(script), None)
+        scripted(script)
     }
-    fn core_channel(&self, _c: Option<&Channel>) -> (BoxedChat, bool) {
-        (
-            Box::new(SharedScript {
-                q: Arc::clone(&self.core),
-            }),
-            false,
-        )
+    fn core_channel(&self, _c: &Channel) -> BoxedChat {
+        Box::new(SharedScript {
+            q: Arc::clone(&self.core),
+        })
     }
 }
 
@@ -2709,6 +2717,14 @@ pub(crate) fn core_with_pkgs_probe(
 
 /// 用**指定登记处**装配（断言"全局设置是流式的上限、预算全局通用"这类判据）。
 pub(crate) fn core_with_settings(store: InMemorySettings) -> Conductor {
+    core_with_settings_modules(store, Vec::new())
+}
+
+/// 目的：同上设置装配，但指定模块清单（建带模块的会话时用）。
+pub(crate) fn core_with_settings_modules(
+    store: InMemorySettings,
+    modules: Vec<Module>,
+) -> Conductor {
     let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
         Arc::new(gw(BTreeMap::new(), Vec::new()));
     let llm = test_llm(
@@ -2723,7 +2739,7 @@ pub(crate) fn core_with_settings(store: InMemorySettings) -> Conductor {
         test_vm(),
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
-        test_modules(Arc::new(VecSource(Vec::new()))),
+        test_modules(Arc::new(VecSource(modules))),
         Arc::new(crate::capabilities::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(

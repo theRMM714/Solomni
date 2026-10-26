@@ -105,7 +105,7 @@ pub struct CompleteOpts<'a> {
 }
 
 impl<'a> CompleteOpts<'a> {
-    /// 本次不声明工具（手写信封模式；测试替身与演示通道也用它）。
+    /// 本次不声明工具（手写信封模式；测试替身也用它）。
     pub fn plain(stream: bool) -> CompleteOpts<'a> {
         CompleteOpts {
             stream,
@@ -230,7 +230,8 @@ pub struct Completion {
 }
 
 impl Completion {
-    /// 没有结束原因、没有原生调用的通道（演示通道、测试替身）：只有正文。
+    /// 没有结束原因、没有原生调用的通道（测试替身）：只有正文。
+    #[cfg(test)]
     pub fn text(raw: impl Into<String>) -> Completion {
         Completion {
             raw: raw.into(),
@@ -305,15 +306,11 @@ pub struct RepairOutcome {
 /// 本能力对外的**用例面**（`service.rs` 实现）：别的能力要通道、要探测、要发现时走这里，
 /// **不持本能力的出站端口**（R12）。
 pub trait Llm: Send + Sync {
-    /// 造一条成员通道句柄（`module_id` 用于演示降级时的名号）；附带是否演示回落（如实告知）。
-    fn member_channel(
-        &self,
-        channel: Option<&Channel>,
-        module_id: &str,
-    ) -> (BoxedChat, Option<String>);
+    /// 按已解析的通道造一条成员会话句柄（`module_id` 只用于日志名号）。
+    fn member_channel(&self, channel: &Channel, module_id: &str) -> BoxedChat;
 
-    /// 造核心自身通道（整理 / 验收 / 代拟 / 推荐）；bool = 是否演示通道。
-    fn core_channel(&self, channel: Option<&Channel>) -> (BoxedChat, bool);
+    /// 按已解析的通道造核心自身通道（整理 / 验收 / 代拟 / 推荐）。
+    fn core_channel(&self, channel: &Channel) -> BoxedChat;
 
     /// 实测这条通道支不支持原生工具调用（发两条最小请求对比）。
     fn probe_tools(&self, channel: &Channel) -> Result<ProbeOutcome, String>;

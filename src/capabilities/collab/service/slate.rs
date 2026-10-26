@@ -116,22 +116,13 @@ impl CollabSession {
         ));
         sink(SessionEvent::Transcript(vec![line]));
         let prompts = self.prompts.clone();
-        let (members, notes) = match self.assemble_members() {
+        let members = match self.assemble_members() {
             Ok(x) => x,
             Err(e) => {
                 self.notice(&format!("[装配失败] {}", e), sink);
                 return;
             }
         };
-        for n in notes {
-            self.notice(&n, sink);
-        }
-        if self.core_is_demo {
-            self.notice(
-                "[提示] 核心未配置供应商：整理/验收使用内置假模型（演示）",
-                sink,
-            );
-        }
         // 讨论也走**全局设置**（流式 + 预算），与单 agent 共用同一份。
         let llm = crate::capabilities::llm::api::LlmOpts {
             stream: self.settings.app.streaming,
@@ -254,8 +245,8 @@ impl CollabSession {
             }
         }
         let total = all_lines.len() as u64;
-        let core_channel = settings.core_channel();
-        let (core_chat, core_is_demo) = llm.core_channel(core_channel.as_ref());
+        let core_channel = settings.core_channel()?;
+        let core_chat = llm.core_channel(&core_channel);
         // 形态要在 settings 被移进结构体之前算出来。
         let core_mode = settings.tool_mode_for(None);
         let mut s = CollabSession {
@@ -282,7 +273,6 @@ impl CollabSession {
             next_line: total,
             reply_seq: crate::capabilities::session::api::max_reply(events),
             core_chat,
-            core_is_demo,
             core_mode,
             prompts: prompts.clone(),
             systools: systools.clone(),
@@ -307,7 +297,7 @@ impl CollabSession {
                 .map(|i| i + 1)
                 .unwrap_or(all_lines.len());
             let disc_lines = all_lines[start..].to_vec();
-            let (members, _) = s.assemble_members()?;
+            let members = s.assemble_members()?;
             let llm = s.llm_opts();
             // 恢复时与实时同一句：只有机制与约定，工具面随回合注入（见 tools_block）。
             let protocol = format!(

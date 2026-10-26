@@ -13,19 +13,26 @@ use crate::capabilities::packages::api as pkgs;
 pub(crate) enum PreparedWork {
     /// 已经建完（代理形态：没有 guest 可等）。
     Ready(WorkOpened),
-    /// 待提交：核心已占名并备好工作区与计划，慢的那一段由调用方跑。
-    Pending {
-        meta: Box<SessionMeta>,
-        mode: WorkMode,
-        metas: Vec<AgentMeta>,
-        task: Option<String>,
-        delegate: bool,
-        name: String,
-        agent_names: Vec<String>,
-        sandboxes: crate::capabilities::workspace::api::Sandboxes,
-        /// 失败时要撤掉的工作区空目录（只对顶层会话给：子会话与父共用目录）。
-        discard: Option<(String, Vec<String>)>,
-    },
+    /// 目的：待提交——核心已占名并备好工作区与计划，慢的那一段由调用方跑；装箱避免枚举被最大变体撑大。
+    Pending(Box<PendingWork>),
+}
+
+/// 目的：一次创建的"待提交"准备结果。
+pub(crate) struct PendingWork {
+    meta: Box<SessionMeta>,
+    mode: WorkMode,
+    metas: Vec<AgentMeta>,
+    task: Option<String>,
+    delegate: bool,
+    name: String,
+    agent_names: Vec<String>,
+    sandboxes: crate::capabilities::workspace::api::Sandboxes,
+    /// 每个 agent 已解析好的通道（提交段直接装配，不再可能因"没模型"失败）。
+    channels: BTreeMap<String, Channel>,
+    /// 协作会话核心自己的通道（协作必须有；单 agent 未用核心默认时为空）。
+    core_channel: Option<Channel>,
+    /// 失败时要撤掉的工作区空目录（只对顶层会话给：子会话与父共用目录）。
+    discard: Option<(String, Vec<String>)>,
 }
 
 /// 目的：一次改配的准备结果——旧 meta（撤围栏用）与新的（落盘用）。
@@ -981,9 +988,37 @@ impl Conductor {
         self.commit_work(prepared)
     }
 
+    /// 目的：把名单里每个 agent 的通道解析成**确定值**（核心默认或显式模型），失败带具体原因。
+    /// 约束：建工作/起 guest 之前调用——没有可用模型就不该留下任何会话或工作区；
+    ///   协作还要求核心自己的通道（编排 / 整理 / 验收都走它）。
+    fn resolve_channels(
+        &self,
+        metas: &[AgentMeta],
+        mode: WorkMode,
+    ) -> Result<(BTreeMap<String, Channel>, Option<Channel>), String> {
+        let mut channels = BTreeMap::new();
+        for a in metas {
+            let c = self
+                .registry
+                .channel(a.model.as_deref())
+                .map_err(|e| format!("agent {} 没有可用模型通道：{}", a.name, e))?;
+            channels.insert(a.name.clone(), c);
+        }
+        let core = if mode == WorkMode::Collab {
+            Some(
+                self.registry
+                    .core_channel()
+                    .map_err(|e| format!("核心没有可用模型通道：{}", e))?,
+            )
+        } else {
+            None
+        };
+        Ok((channels, core))
+    }
+
     /// 目的：创建的第一段（核心，毫秒级）——校验 / 占名 / 建工作区 / 出计划；要起 guest 时把那一段交出去。
     /// 返回：准备结果 + 可选的那段"要等 guest"的活（虚拟机档才有）。
-    /// 错误：形态、名字、档位、名单、选型不成立时如实拒绝，什么都不留下。
+    /// 错误：形态、名字、档位、名单、模型通道或选型不成立时如实拒绝，什么都不留下。
     pub(crate) fn prepare_work(
         &mut self,
         spec: WorkSpec,
@@ -1007,6 +1042,10 @@ impl Conductor {
             if parent.is_some() {
                 return Err("子工作不能建成代理形态：代理不能往里套代理".to_string());
             }
+            // 代理会话跑在核心默认模型上：没有它就不建（工作区都还没有，失败什么都不留）。
+            self.registry
+                .core_channel()
+                .map_err(|e| format!("代理会话没有可用模型通道：{}", e))?;
             let (sid, facts) = self.create_proxy_with_facts(
                 &spec.name,
                 now_ts(),
@@ -1084,6 +1123,9 @@ impl Conductor {
                 model: a.model.clone(),
             });
         }
+        // **模型通道前置判据**：合并后的名单里每个 agent 都要有确定通道；协作还要求核心通道。
+        // 放在建工作区 / 起 guest 之前——失败就不留下任何半成品。
+        let (channels, core_channel) = self.resolve_channels(&metas, spec.mode)?;
         // 模块扁平清单（展示用；顺序按 agent 名单展开，同一模块被多个 agent 共用时只留一份）
         let module_ids = flat_modules(&metas);
         // 代拟：给了 agent 就不再代拟（名单已经有了，不让核心盖掉用户的选择）。
@@ -1225,7 +1267,7 @@ impl Conductor {
             None
         };
         Ok((
-            PreparedWork::Pending {
+            PreparedWork::Pending(Box::new(PendingWork {
                 meta: Box::new(meta),
                 mode: spec.mode,
                 metas,
@@ -1234,8 +1276,10 @@ impl Conductor {
                 name,
                 agent_names,
                 sandboxes,
+                channels,
+                core_channel,
                 discard,
-            },
+            })),
             boot,
         ))
     }
@@ -1243,32 +1287,24 @@ impl Conductor {
     /// 目的：创建的第二段（核心，毫秒级）——装配会话对象、落盘身份、开场事实。
     /// 约束：guest 已经起好了（或本机档不需要）；落盘失败要撤掉占名与刚建的空工作区目录。
     pub(crate) fn commit_work(&mut self, prepared: PreparedWork) -> Result<WorkOpened, String> {
-        let (meta, mode, metas, task, delegate, name, agent_names, sandboxes, discard) =
-            match prepared {
-                // 代理形态在准备段里就建完了：这里原样交回。
-                PreparedWork::Ready(opened) => return Ok(opened),
-                PreparedWork::Pending {
-                    meta,
-                    mode,
-                    metas,
-                    task,
-                    delegate,
-                    name,
-                    agent_names,
-                    sandboxes,
-                    discard,
-                } => (
-                    *meta,
-                    mode,
-                    metas,
-                    task,
-                    delegate,
-                    name,
-                    agent_names,
-                    sandboxes,
-                    discard,
-                ),
-            };
+        let pending = match prepared {
+            // 代理形态在准备段里就建完了：这里原样交回。
+            PreparedWork::Ready(opened) => return Ok(opened),
+            PreparedWork::Pending(p) => p,
+        };
+        let PendingWork {
+            meta,
+            mode,
+            metas,
+            task,
+            delegate,
+            name,
+            agent_names,
+            sandboxes,
+            mut channels,
+            core_channel,
+            discard,
+        } = *pending;
         let roster = self.scan();
 
         let (session, mut events) = match mode {
@@ -1292,7 +1328,9 @@ impl Conductor {
                             .cloned()
                     })
                     .collect();
-                let channel = self.channel_of(a.model.as_deref());
+                let channel = channels
+                    .remove(&a.name)
+                    .ok_or_else(|| format!("缺少 agent {} 的模型通道", a.name))?;
                 let unavailable = self.unavailable_modules(&meta.exec, &chosen);
                 let guest = self.guest_os_of(&meta.exec);
                 let host_plan = if meta.exec.tier == crate::kernel::api::Tier::Host {
@@ -1318,11 +1356,14 @@ impl Conductor {
                 let task = task.as_deref().unwrap_or("").trim().to_string();
                 // 裁决队按会话 id 取：核心各关卡与这一席的工具级确认共用同一条队。
                 let door = self.desk_of(&name);
+                let core_channel =
+                    core_channel.ok_or_else(|| "协作会话缺少核心模型通道".to_string())?;
                 let mut cs = CollabSession::start(
                     Arc::clone(&self.llm),
                     Arc::clone(&self.vm),
                     Arc::clone(&self.modules),
                     self.registry.snapshot(),
+                    core_channel,
                     Arc::clone(&self.prompt),
                     Arc::clone(&self.systools),
                     Arc::clone(&self.tools),
@@ -1359,9 +1400,9 @@ impl Conductor {
 
     /// 目的：创建失败（guest 起不来 / 落盘失败）时撤销准备段占下的东西：名字占位 + 这次建出来的空工作区目录。
     pub(crate) fn abort_work(&mut self, prepared: PreparedWork) {
-        if let PreparedWork::Pending { name, discard, .. } = prepared {
-            self.starting.remove(&name);
-            if let Some((session, agents)) = discard {
+        if let PreparedWork::Pending(p) = prepared {
+            self.starting.remove(&p.name);
+            if let Some((session, agents)) = p.discard {
                 let _ = self.workspace.discard(&session, &agents);
             }
         }

@@ -1,5 +1,5 @@
-//! 演示/测试通道：脚本假模型（无网络、无密钥）。
-//! 双用途：核心回落演示（无可用模型通道时，如实告知）+ 单元测试脚本回放。
+//! 测试专用通道：脚本假模型（无网络、无密钥）。
+//! 只给单元测试与测试替身用；生产组合根不装配它，也不存在"无模型回落演示"。
 //! 它同时是"对话通道"（`api::Chat`）与"通道工厂"（`ports::ChatGateway`）的实现，不做装配决策。
 
 use crate::capabilities::llm::api::Channel;
@@ -55,36 +55,26 @@ impl Chat for FakeChat {
     }
 }
 
-/// 演示网关：一律发演示通道（无可用模型回落 / 测试装配两用）。
+/// 测试网关：忽略传入的通道，一律发脚本假模型（只用于测试装配）。
 pub struct DemoGateway;
 
 impl ChatGateway for DemoGateway {
-    /// 演示通道没有真实供应商可测：如实说"测不了"，不假装测过。
+    /// 脚本替身没有真实供应商可测：如实说"测不了"，不假装测过。
     fn probe_tools(
         &self,
         _channel: &Channel,
     ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
-        Err("演示通道没有真实供应商，测不了工具调用支持".to_string())
+        Err("测试通道没有真实供应商，测不了工具调用支持".to_string())
     }
 
-    fn member_channel(
-        &self,
-        _channel: Option<&Channel>,
-        module_id: &str,
-    ) -> (BoxedChat, Option<String>) {
-        (
-            Box::new(FakeChat::new(vec![format!(
-                "{{\"type\":\"say\",\"text\":\"（演示）{} 收到。\"}}",
-                module_id
-            )])),
-            Some(format!(
-                "[{}] 未配置模型通道，使用内置假模型演示",
-                module_id
-            )),
-        )
+    fn member_channel(&self, _channel: &Channel, module_id: &str) -> BoxedChat {
+        Box::new(FakeChat::new(vec![format!(
+            "{{\"type\":\"say\",\"text\":\"（演示）{} 收到。\"}}",
+            module_id
+        )]))
     }
 
-    fn core_channel(&self, _channel: Option<&Channel>) -> (BoxedChat, bool) {
+    fn core_channel(&self, _channel: &Channel) -> BoxedChat {
         // 核心操作走**工具调用**（见 docs/tools/tools-and-roles.md）：演示通道没有原生能力，
         // 所以发手写信封——它是这条通道唯一能用的形态。载荷形状与真实通道完全一致。
         let env = |tool: &str, args: &str| {
@@ -93,19 +83,16 @@ impl ChatGateway for DemoGateway {
                 tool, args
             )
         };
-        (
-            Box::new(FakeChat::new(vec![
-                "{\"type\":\"say\",\"text\":\"（演示）核心通道。\"}".to_string(),
-                env(
-                    "checklist",
-                    "{\"items\":[{\"item\":\"演示项\",\"status\":\"pass\",\"evidence\":\"演示\"}]}",
-                ),
-                env(
-                    "plan",
-                    "{\"plan\":\"（演示）方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}",
-                ),
-            ])),
-            true,
-        )
+        Box::new(FakeChat::new(vec![
+            "{\"type\":\"say\",\"text\":\"（演示）核心通道。\"}".to_string(),
+            env(
+                "checklist",
+                "{\"items\":[{\"item\":\"演示项\",\"status\":\"pass\",\"evidence\":\"演示\"}]}",
+            ),
+            env(
+                "plan",
+                "{\"plan\":\"（演示）方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}",
+            ),
+        ]))
     }
 }

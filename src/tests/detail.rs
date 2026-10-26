@@ -1406,12 +1406,7 @@ fn http_gateway_talks_to_a_real_endpoint_on_loopback() {
         "application/json",
         completion_body("来自本机假供应商"),
     )]);
-    let (mut chat, notice) = gateway().member_channel(Some(&mock.channel("k")), "a");
-    assert!(
-        notice.is_none(),
-        "有通道时不得回落演示，也不得编造回落通知：{:?}",
-        notice
-    );
+    let mut chat = gateway().member_channel(&mock.channel("k"), "a");
     let out = chat
         .complete(
             &[Msg::user("你好")],
@@ -1429,7 +1424,7 @@ fn http_gateway_talks_to_a_real_endpoint_on_loopback() {
 fn http_chat_streams_chunks_and_stops_when_the_caller_aborts() {
     let body = format!("{}{}data: [DONE]\n\n", sse_delta("你"), sse_delta("好"));
     let mock = Mock::start(vec![(200, "text/event-stream", body)]);
-    let (mut chat, _) = gateway().member_channel(Some(&mock.channel("k")), "a");
+    let mut chat = gateway().member_channel(&mock.channel("k"), "a");
     let mut seen: Vec<String> = Vec::new();
     let out = chat
         .complete(
@@ -1455,7 +1450,7 @@ fn http_chat_streams_chunks_and_stops_when_the_caller_aborts() {
     // 中止：Start 放行、第一片 Text 后要求停止 → 立即停下并保留已产出的正文。
     let body2 = format!("{}{}data: [DONE]\n\n", sse_delta("你"), sse_delta("好"));
     let mock2 = Mock::start(vec![(200, "text/event-stream", body2)]);
-    let (mut chat2, _) = gateway().member_channel(Some(&mock2.channel("k")), "a");
+    let mut chat2 = gateway().member_channel(&mock2.channel("k"), "a");
     let mut seen2: Vec<String> = Vec::new();
     let out2 = chat2
         .complete(&[Msg::user("停")], CompleteOpts::plain(true), &mut |c| {
@@ -1481,7 +1476,7 @@ fn http_stream_idle_keepalives_do_not_trip_a_total_timeout() {
         (Duration::from_millis(300), b"data: [DONE]\n\n".to_vec()),
     ];
     let mock = StreamMock::start(steps);
-    let (mut chat, _) = gateway().member_channel(Some(&mock.channel_v1("k")), "a");
+    let mut chat = gateway().member_channel(&mock.channel_v1("k"), "a");
     let out = chat.complete(
         &[Msg::user("慢慢说")],
         CompleteOpts::plain(true).with_timeout(1),
@@ -1498,7 +1493,7 @@ fn http_stream_reports_idle_timeout_only_after_the_stream_goes_quiet() {
         (Duration::from_millis(2000), b"data: [DONE]\n\n".to_vec()),
     ];
     let mock = StreamMock::start(steps);
-    let (mut chat, _) = gateway().member_channel(Some(&mock.channel_v1("k")), "a");
+    let mut chat = gateway().member_channel(&mock.channel_v1("k"), "a");
     let out = chat.complete(
         &[Msg::user("停一下")],
         CompleteOpts::plain(true).with_timeout(1),
@@ -1512,7 +1507,7 @@ fn http_stream_reports_idle_timeout_only_after_the_stream_goes_quiet() {
 fn http_stream_times_out_waiting_for_the_first_data_block() {
     let steps = vec![(Duration::from_millis(1500), sse_delta("迟到").into_bytes())];
     let mock = StreamMock::start(steps);
-    let (mut chat, _) = gateway().member_channel(Some(&mock.channel_v1("k")), "a");
+    let mut chat = gateway().member_channel(&mock.channel_v1("k"), "a");
     let out = chat.complete(
         &[Msg::user("在吗")],
         CompleteOpts::plain(true).with_timeout(1),
@@ -1537,7 +1532,7 @@ fn http_stream_stop_cancels_without_waiting_for_the_next_chunk() {
         sse_delta("不应到达").into_bytes(),
     ));
     let mock = StreamMock::start(steps);
-    let (chat, _) = gateway().member_channel(Some(&mock.channel_v1("k")), "a");
+    let chat = gateway().member_channel(&mock.channel_v1("k"), "a");
     let cancel = Arc::new(AtomicBool::new(false));
     let cancel_for_call = Arc::clone(&cancel);
     let worker = std::thread::spawn(move || {
@@ -1570,7 +1565,7 @@ fn finish_reason_is_carried_back_from_both_paths() {
     })
     .to_string();
     let mock = Mock::start(vec![(200, "application/json", body)]);
-    let (mut chat, _) = gateway().member_channel(Some(&mock.channel("k")), "a");
+    let mut chat = gateway().member_channel(&mock.channel("k"), "a");
     let out = chat.complete(&[Msg::user("hi")], CompleteOpts::plain(false), &mut |_| {
         true
     });
@@ -1586,7 +1581,7 @@ fn finish_reason_is_carried_back_from_both_paths() {
         sse_finish("length")
     );
     let mock2 = Mock::start(vec![(200, "text/event-stream", sse)]);
-    let (mut chat2, _) = gateway().member_channel(Some(&mock2.channel("k")), "a");
+    let mut chat2 = gateway().member_channel(&mock2.channel("k"), "a");
     let out2 = chat2.complete(&[Msg::user("hi")], CompleteOpts::plain(true), &mut |_| true);
     assert_eq!(out2.raw, "半句", "已产出的正文照常返回");
     assert_eq!(out2.finish, "length");
@@ -1637,7 +1632,7 @@ fn http_chat_reads_non_stream_reasoning() {
     })
     .to_string();
     let mock = Mock::start(vec![(200, "application/json", body)]);
-    let (mut chat, _) = gateway().member_channel(Some(&mock.channel("k")), "a");
+    let mut chat = gateway().member_channel(&mock.channel("k"), "a");
     let out = chat.complete(&[Msg::user("hi")], CompleteOpts::plain(false), &mut |_| {
         true
     });
@@ -1652,7 +1647,7 @@ fn http_chat_reads_native_tool_calls() {
         "application/json",
         tool_call_body("read", "{\"path\":\"/x\"}"),
     )]);
-    let (mut chat, _) = gateway().member_channel(Some(&mock.channel("k")), "a");
+    let mut chat = gateway().member_channel(&mock.channel("k"), "a");
     let out = chat.complete(
         &[Msg::user("读一下")],
         CompleteOpts::plain(false),
@@ -1681,7 +1676,7 @@ fn http_chat_assembles_streaming_tool_calls_by_index() {
         "",
     );
     let mock = Mock::start(vec![(200, "text/event-stream", sse)]);
-    let (mut chat, _) = gateway().member_channel(Some(&mock.channel("k")), "a");
+    let mut chat = gateway().member_channel(&mock.channel("k"), "a");
     let out = chat.complete(
         &[Msg::user("两件事")],
         CompleteOpts::plain(true),
@@ -1713,7 +1708,7 @@ fn http_chat_assembles_streaming_tool_calls_by_index() {
 #[test]
 fn native_history_goes_out_in_protocol_shape() {
     let mock = Mock::start(vec![(200, "application/json", completion_body("ok"))]);
-    let (mut chat, _) = gateway().member_channel(Some(&mock.channel("k")), "a");
+    let mut chat = gateway().member_channel(&mock.channel("k"), "a");
     let history = [
         Msg::user("读一下"),
         Msg::assistant_calls(
@@ -1913,7 +1908,7 @@ fn http_errors_come_back_honestly_and_never_carry_the_api_key() {
         (401, "application/json", body),
         (401, "application/json", "{}".to_string()),
     ]);
-    let (mut chat, _) = gateway().member_channel(Some(&mock.channel(secret)), "a");
+    let mut chat = gateway().member_channel(&mock.channel(secret), "a");
     let done = chat.complete(&[Msg::user("hi")], CompleteOpts::plain(false), &mut |_| {
         true
     });
@@ -1927,20 +1922,6 @@ fn http_errors_come_back_honestly_and_never_carry_the_api_key() {
         "要留下可定位的事实：{}",
         err
     );
-}
-
-#[test]
-fn http_gateway_falls_back_to_demo_only_when_there_is_no_channel() {
-    let (mut chat, notice) = gateway().member_channel(None, "reviewer");
-    assert!(notice.is_some(), "没有通道时必须如实告知回落：{:?}", notice);
-    let out = chat
-        .complete(&[Msg::user("hi")], CompleteOpts::plain(false), &mut |_| {
-            true
-        })
-        .raw;
-    assert!(out.contains("（演示）"), "{}", out);
-    let (_, core_demo) = gateway().core_channel(None);
-    assert!(core_demo, "核心通道同样如实标记");
 }
 
 #[test]
