@@ -9,7 +9,7 @@ use super::doubles::{
     InMemorySysIo, InMemoryWorkStore, InMemoryWorkspace, NoFenceHost, RecordingFence,
     ScriptGateway, SharedScript, TestPrompts, VecSource,
 };
-use crate::capabilities::llm::api::{Chat, CompleteOpts, Msg};
+use crate::capabilities::llm::api::{Channel, Chat, CompleteOpts, Msg};
 use crate::capabilities::llm::ports::{ChatGateway, ModelCatalog};
 use crate::capabilities::modules::ports::ModuleSource;
 use crate::capabilities::packages::ports::PackageSource;
@@ -121,14 +121,18 @@ fn chat_gateway_double_scripts_member_and_core_channels_separately() {
         vec!["{\"type\":\"say\",\"text\":\"甲\"}".to_string()],
     );
     let gw = ScriptGateway::new(member, vec!["[]".to_string()]);
-    let (mut c, notice) = gw.member_channel(None, "a");
-    assert!(notice.is_none(), "脚本替身不做回落，就不该编造通知");
+    let channel = Channel {
+        base_url: "http://test".to_string(),
+        api_key: "k".to_string(),
+        model: "m".to_string(),
+    };
+    let mut c = gw.member_channel(&channel, "a");
     assert!(c
         .complete(&[], CompleteOpts::plain(false), &mut |_| true)
         .raw
         .contains("甲"));
-    // 未登记的 agent：回落一条演示发言（不是 panic，也不是空串）。
-    let (mut c2, _) = gw.member_channel(None, "没登记");
+    // 未登记的 agent：脚本替身给一条兜底脚本（不是 panic，也不是空串）。
+    let mut c2 = gw.member_channel(&channel, "没登记");
     assert!(
         !c2.complete(&[], CompleteOpts::plain(false), &mut |_| true)
             .raw
@@ -136,8 +140,7 @@ fn chat_gateway_double_scripts_member_and_core_channels_separately() {
         "未登记也要能应答"
     );
     // 核心通道与成员通道是两条独立队列，互不污染。
-    let (mut core, demo) = gw.core_channel(None);
-    assert!(!demo, "脚本替身不是演示通道");
+    let mut core = gw.core_channel(&channel);
     assert_eq!(
         core.complete(&[], CompleteOpts::plain(false), &mut |_| true)
             .raw,

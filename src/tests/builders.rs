@@ -594,16 +594,12 @@ impl ChatGateway for ReasoningGateway {
         Err("测试替身没有真实供应商，测不了工具调用支持".to_string())
     }
 
-    fn member_channel(
-        &self,
-        _channel: Option<&Channel>,
-        _module_id: &str,
-    ) -> (BoxedChat, Option<String>) {
-        (Box::new(ReasoningChat), None)
+    fn member_channel(&self, _channel: &Channel, _module_id: &str) -> BoxedChat {
+        Box::new(ReasoningChat)
     }
 
-    fn core_channel(&self, _channel: Option<&Channel>) -> (BoxedChat, bool) {
-        (Box::new(ReasoningChat), false)
+    fn core_channel(&self, _channel: &Channel) -> BoxedChat {
+        Box::new(ReasoningChat)
     }
 }
 
@@ -647,21 +643,15 @@ impl ChatGateway for TruncGateway {
     ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
         Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
     }
-    fn member_channel(&self, _c: Option<&Channel>, _id: &str) -> (BoxedChat, Option<String>) {
-        (
-            Box::new(TruncChat {
-                script: self.script.clone(),
-            }),
-            None,
-        )
+    fn member_channel(&self, _c: &Channel, _id: &str) -> BoxedChat {
+        Box::new(TruncChat {
+            script: self.script.clone(),
+        })
     }
-    fn core_channel(&self, _c: Option<&Channel>) -> (BoxedChat, bool) {
-        (
-            Box::new(TruncChat {
-                script: self.script.clone(),
-            }),
-            false,
-        )
+    fn core_channel(&self, _c: &Channel) -> BoxedChat {
+        Box::new(TruncChat {
+            script: self.script.clone(),
+        })
     }
 }
 
@@ -697,21 +687,15 @@ impl ChatGateway for AbortGateway {
     ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
         Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
     }
-    fn member_channel(&self, _c: Option<&Channel>, _id: &str) -> (BoxedChat, Option<String>) {
-        (
-            Box::new(AbortChat {
-                raw: self.raw.clone(),
-            }),
-            None,
-        )
+    fn member_channel(&self, _c: &Channel, _id: &str) -> BoxedChat {
+        Box::new(AbortChat {
+            raw: self.raw.clone(),
+        })
     }
-    fn core_channel(&self, _c: Option<&Channel>) -> (BoxedChat, bool) {
-        (
-            Box::new(AbortChat {
-                raw: self.raw.clone(),
-            }),
-            false,
-        )
+    fn core_channel(&self, _c: &Channel) -> BoxedChat {
+        Box::new(AbortChat {
+            raw: self.raw.clone(),
+        })
     }
 }
 
@@ -727,14 +711,11 @@ impl ChatGateway for ProbeGateway {
     ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
         Ok(self.outcome.lock().expect("锁").clone())
     }
-    fn member_channel(&self, _c: Option<&Channel>, _id: &str) -> (BoxedChat, Option<String>) {
-        (
-            scripted(vec!["{\"type\":\"say\",\"text\":\"收到\"}".to_string()]),
-            None,
-        )
+    fn member_channel(&self, _c: &Channel, _id: &str) -> BoxedChat {
+        scripted(vec!["{\"type\":\"say\",\"text\":\"收到\"}".to_string()])
     }
-    fn core_channel(&self, _c: Option<&Channel>) -> (BoxedChat, bool) {
-        (scripted(vec!["[]".to_string()]), true)
+    fn core_channel(&self, _c: &Channel) -> BoxedChat {
+        scripted(vec!["[]".to_string()])
     }
 }
 
@@ -931,19 +912,16 @@ impl ChatGateway for NativeGateway {
             detail: "替身".to_string(),
         })
     }
-    fn member_channel(&self, _c: Option<&Channel>, _id: &str) -> (BoxedChat, Option<String>) {
+    fn member_channel(&self, _c: &Channel, _id: &str) -> BoxedChat {
         let steps = self.scripts.lock().expect("锁").pop().unwrap_or_default();
-        (
-            Box::new(NativeChat {
-                steps,
-                declared: Arc::new(Mutex::new(Vec::new())),
-                seen: Arc::new(Mutex::new(Vec::new())),
-            }),
-            None,
-        )
+        Box::new(NativeChat {
+            steps,
+            declared: Arc::new(Mutex::new(Vec::new())),
+            seen: Arc::new(Mutex::new(Vec::new())),
+        })
     }
-    fn core_channel(&self, _c: Option<&Channel>) -> (BoxedChat, bool) {
-        (Box::new(FakeChat::new(vec!["[]".to_string()])), false)
+    fn core_channel(&self, _c: &Channel) -> BoxedChat {
+        Box::new(FakeChat::new(vec!["[]".to_string()]))
     }
 }
 

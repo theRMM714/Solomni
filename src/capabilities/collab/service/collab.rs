@@ -9,7 +9,7 @@
 use super::pump::*;
 use crate::capabilities::collab::service::discussion::Discussion;
 use crate::capabilities::collab::service::synthesis::Execution;
-use crate::capabilities::llm::api::{Chat, Llm, Msg};
+use crate::capabilities::llm::api::{Channel, Chat, Llm, Msg};
 use crate::capabilities::modules::api::Modules;
 use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::registry::api::Settings;
@@ -133,7 +133,6 @@ pub struct CollabSession {
     /// 回复 id 计数器（转录行按它分组；按落盘重建时从转录里的最大值续号）。
     pub(crate) reply_seq: u64,
     pub(crate) core_chat: crate::capabilities::llm::api::BoxedChat,
-    pub(crate) core_is_demo: bool,
     /// 核心通道的工具调用形态（原生才声明工具；信封通道看提示词里的说明）。
     pub(crate) core_mode: crate::capabilities::llm::api::ToolMode,
     /// 提示词册能力面：**不是册子本体**（持有者只有提示词能力一处），这里只按名字取段。
@@ -177,6 +176,7 @@ impl CollabSession {
         vm: Arc<dyn Vm + Send + Sync>,
         modules: Arc<dyn Modules + Send + Sync>,
         settings: Settings,
+        core_channel: Channel,
         prompts: Arc<dyn Prompt>,
         systools: Arc<dyn crate::capabilities::tools::api::Tools>,
         tools: Arc<dyn ToolExec + Send + Sync>,
@@ -189,8 +189,7 @@ impl CollabSession {
         // 本会话的裁决队（核心按会话 id 给；与工具级确认共用同一条）。
         door: Arc<DecisionDoor>,
     ) -> Result<CollabSession, String> {
-        let core_channel = settings.core_channel();
-        let (core_chat, core_is_demo) = llm.core_channel(core_channel.as_ref());
+        let core_chat = llm.core_channel(&core_channel);
         let core_mode = settings.tool_mode_for(None);
         Ok(CollabSession {
             core_mode,
@@ -211,7 +210,6 @@ impl CollabSession {
             next_line: 0,
             reply_seq: 0,
             core_chat,
-            core_is_demo,
             prompts,
             systools,
             llm,

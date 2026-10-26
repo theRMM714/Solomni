@@ -222,22 +222,19 @@ impl crate::capabilities::llm::ports::ChatGateway for RecordingGateway {
     }
     fn member_channel(
         &self,
-        c: Option<&crate::capabilities::llm::api::Channel>,
+        c: &crate::capabilities::llm::api::Channel,
         id: &str,
-    ) -> (crate::capabilities::llm::api::BoxedChat, Option<String>) {
-        let (chat, note) = self.inner.member_channel(c, id);
-        (
-            Box::new(RecordingChat {
-                inner: chat,
-                seen: std::sync::Arc::clone(&self.seen),
-            }),
-            note,
-        )
+    ) -> crate::capabilities::llm::api::BoxedChat {
+        let chat = self.inner.member_channel(c, id);
+        Box::new(RecordingChat {
+            inner: chat,
+            seen: std::sync::Arc::clone(&self.seen),
+        })
     }
     fn core_channel(
         &self,
-        c: Option<&crate::capabilities::llm::api::Channel>,
-    ) -> (crate::capabilities::llm::api::BoxedChat, bool) {
+        c: &crate::capabilities::llm::api::Channel,
+    ) -> crate::capabilities::llm::api::BoxedChat {
         self.inner.core_channel(c)
     }
 }
@@ -251,28 +248,22 @@ impl crate::capabilities::llm::ports::ChatGateway for GatedGateway {
     }
     fn member_channel(
         &self,
-        _c: Option<&crate::capabilities::llm::api::Channel>,
+        _c: &crate::capabilities::llm::api::Channel,
         _id: &str,
-    ) -> (crate::capabilities::llm::api::BoxedChat, Option<String>) {
-        (
-            Box::new(GatedChat {
-                started: std::sync::Arc::clone(&self.started),
-                release: std::sync::Arc::clone(&self.release),
-            }),
-            None,
-        )
+    ) -> crate::capabilities::llm::api::BoxedChat {
+        Box::new(GatedChat {
+            started: std::sync::Arc::clone(&self.started),
+            release: std::sync::Arc::clone(&self.release),
+        })
     }
     fn core_channel(
         &self,
-        _c: Option<&crate::capabilities::llm::api::Channel>,
-    ) -> (crate::capabilities::llm::api::BoxedChat, bool) {
-        (
-            Box::new(GatedChat {
-                started: std::sync::Arc::clone(&self.started),
-                release: std::sync::Arc::clone(&self.release),
-            }),
-            false,
-        )
+        _c: &crate::capabilities::llm::api::Channel,
+    ) -> crate::capabilities::llm::api::BoxedChat {
+        Box::new(GatedChat {
+            started: std::sync::Arc::clone(&self.started),
+            release: std::sync::Arc::clone(&self.release),
+        })
     }
 }
 
@@ -313,26 +304,20 @@ impl crate::capabilities::llm::ports::ChatGateway for SlowGateway {
     }
     fn member_channel(
         &self,
-        _c: Option<&crate::capabilities::llm::api::Channel>,
+        _c: &crate::capabilities::llm::api::Channel,
         _id: &str,
-    ) -> (crate::capabilities::llm::api::BoxedChat, Option<String>) {
-        (
-            Box::new(SlowChat {
-                ticks: std::sync::Arc::clone(&self.ticks),
-            }),
-            None,
-        )
+    ) -> crate::capabilities::llm::api::BoxedChat {
+        Box::new(SlowChat {
+            ticks: std::sync::Arc::clone(&self.ticks),
+        })
     }
     fn core_channel(
         &self,
-        _c: Option<&crate::capabilities::llm::api::Channel>,
-    ) -> (crate::capabilities::llm::api::BoxedChat, bool) {
-        (
-            Box::new(SlowChat {
-                ticks: std::sync::Arc::clone(&self.ticks),
-            }),
-            false,
-        )
+        _c: &crate::capabilities::llm::api::Channel,
+    ) -> crate::capabilities::llm::api::BoxedChat {
+        Box::new(SlowChat {
+            ticks: std::sync::Arc::clone(&self.ticks),
+        })
     }
 }
 

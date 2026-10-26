@@ -1,5 +1,5 @@
 //! FakeChat / DemoGateway 的独立契约测试（docs/testing/doubles.md 的 Chat 与 ChatGateway 行）。
-//! 两者既是 T1 的脚本替身，也是产品在「没有可用模型通道」时的演示回落，所以两条路都要钉住。
+//! 两者都是**测试专用**替身：生产不装配，也不存在"没有模型就回落演示"这条路。
 
 use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{parse, Verb};
@@ -124,41 +124,34 @@ fn fake_chat_abort_at_text_keeps_the_produced_text() {
     assert_eq!(seen.len(), 2);
 }
 
-// ---------- DemoGateway：两类通道 / 回落通知 / 无网络无密钥 ----------
+// ---------- DemoGateway：测试专用 / 两类通道 / 不需要真实供应商 ----------
 
 #[test]
-fn demo_gateway_member_channel_discloses_the_fallback_and_names_the_module() {
-    let (mut chat, notice) = DemoGateway.member_channel(None, "reviewer");
-    let notice = notice.expect("回落必须如实告知，不得静默");
-    assert!(
-        notice.contains("reviewer"),
-        "通知要指明是哪个模块回落了：{}",
-        notice
-    );
+fn demo_gateway_member_channel_names_the_module_and_replies() {
+    let mut chat = DemoGateway.member_channel(&unreachable_channel(), "reviewer");
     let (out, _) = call(chat.as_mut(), false);
     let reply = parse(&out);
     assert!(
         matches!(reply.verb, Verb::Say),
-        "演示成员通道回一条发言：{}",
+        "测试成员通道回一条发言：{}",
         out
     );
     assert!(reply.text.contains("reviewer"), "{}", out);
 }
 
 #[test]
-fn demo_gateway_core_channel_is_marked_demo_and_replies() {
-    let (mut chat, demo) = DemoGateway.core_channel(None);
-    assert!(demo, "核心通道回落时必须标记成演示通道（供上层如实告知）");
+fn demo_gateway_core_channel_replies_with_a_checklist_tool_call() {
+    let mut chat = DemoGateway.core_channel(&unreachable_channel());
     let (first, _) = call(chat.as_mut(), false);
     assert!(matches!(parse(&first).verb, Verb::Say), "{}", first);
-    // 核心操作走**工具调用**：演示通道发手写信封，清单在 checklist 的参数里。
+    // 核心操作走**工具调用**：测试通道发手写信封，清单在 checklist 的参数里。
     let (second, _) = call(chat.as_mut(), false);
     let r = parse(&second);
     let tool = r
         .tools
         .iter()
         .find(|t| t.name == "checklist")
-        .unwrap_or_else(|| panic!("演示验收清单必须走 checklist 工具调用：{}", second));
+        .unwrap_or_else(|| panic!("验收清单必须走 checklist 工具调用：{}", second));
     let payload: serde_json::Value =
         serde_json::from_str(&tool.args_json).expect("参数必须是合法 JSON");
     assert!(
@@ -174,17 +167,17 @@ fn demo_gateway_core_channel_is_marked_demo_and_replies() {
 
 #[test]
 fn demo_gateway_scripts_are_valid_envelopes() {
-    let (mut member, _) = DemoGateway.member_channel(None, "a");
+    let mut member = DemoGateway.member_channel(&unreachable_channel(), "a");
     let (out, _) = call(member.as_mut(), false);
     assert!(
         !parse(&out).degraded,
-        "演示脚本必须是干净信封（模型下一轮会照抄格式）：{}",
+        "测试脚本必须是干净信封（模型下一轮会照抄格式）：{}",
         out
     );
-    let (mut core_chat, _) = DemoGateway.core_channel(None);
+    let mut core_chat = DemoGateway.core_channel(&unreachable_channel());
     let (say, _) = call(core_chat.as_mut(), false);
     assert!(!parse(&say).degraded, "{}", say);
-    // 核心操作走工具调用：演示通道发的是**手写信封**，载荷与真实通道同形。
+    // 核心操作走工具调用：测试通道发的是**手写信封**，载荷与真实通道同形。
     let (list, _) = call(core_chat.as_mut(), false);
     let r = parse(&list);
     assert!(
@@ -196,17 +189,20 @@ fn demo_gateway_scripts_are_valid_envelopes() {
 
 #[test]
 fn demo_gateway_needs_no_provider_and_does_not_dial_out() {
-    // 有通道（不可路由）与无通道两条路都必须立刻给出演示答复：出现演示文案即证明没走网络。
-    let (mut with_bogus, notice) = DemoGateway.member_channel(Some(&unreachable_channel()), "m");
-    assert!(notice.is_some(), "演示网关一律如实告知");
+    // 通道不可路由也立刻给答复：出现演示文案即证明它根本没碰网络。
+    let mut with_bogus = DemoGateway.member_channel(&unreachable_channel(), "m");
     let (out, _) = call(with_bogus.as_mut(), false);
     assert!(
         out.contains("（演示）"),
-        "没配置通道时也要给出演示答复：{}",
+        "测试通道不依赖任何供应商：{}",
         out
     );
-
-    let (mut without, _) = DemoGateway.member_channel(None, "m");
+    let other = Channel {
+        base_url: "http://198.51.100.7:9".to_string(),
+        api_key: "另一把".to_string(),
+        model: "另一条".to_string(),
+    };
+    let mut without = DemoGateway.member_channel(&other, "m");
     let (out2, _) = call(without.as_mut(), false);
-    assert_eq!(out, out2, "演示答复不随通道变化（说明它根本没用到通道）");
+    assert_eq!(out, out2, "测试答复不随通道变化（说明它根本没用到通道）");
 }

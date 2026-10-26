@@ -9,7 +9,7 @@ use crate::capabilities::modules::api::Roster;
 use crate::capabilities::registry::api::{AgentView, ModelView, ProviderView, Registry};
 use crate::capabilities::registry::domain::agents;
 use crate::capabilities::registry::domain::providers::{
-    AppSettings, ModelEntry, Provider, Settings, DEFAULT_CONTEXT_TOKENS,
+    AppSettings, ModelEntry, Provider, Settings,
 };
 use crate::capabilities::registry::ports::SettingsStore;
 use crate::kernel::ports::Log;
@@ -114,15 +114,12 @@ impl Registry for RegistryService {
         self.settings.resolve(model)
     }
 
-    fn core_channel(&self) -> Option<Channel> {
+    fn core_channel(&self) -> Result<Channel, String> {
         self.settings.core_channel()
     }
 
-    fn channel(&self, model: Option<&str>) -> Option<Channel> {
-        match model {
-            Some(id) => self.settings.resolve(id).ok(),
-            None => self.settings.core_channel(),
-        }
+    fn channel(&self, model: Option<&str>) -> Result<Channel, String> {
+        self.settings.effective_channel(model)
     }
 
     fn has_model(&self, id: &str) -> bool {
@@ -142,11 +139,7 @@ impl Registry for RegistryService {
     }
 
     fn context_of(&self, model: Option<&str>) -> u64 {
-        model
-            .map(|s| s.to_string())
-            .or_else(|| self.settings.core.clone())
-            .and_then(|id| self.settings.models.get(&id).map(|m| m.context))
-            .unwrap_or(DEFAULT_CONTEXT_TOKENS)
+        self.settings.context_of(model)
     }
 
     fn snapshot(&self) -> Settings {
@@ -217,14 +210,13 @@ impl Registry for RegistryService {
         }
         // 工具调用形态：编辑时**保留原值**（登记表单暂不带这个字段，不能因为没带就重置成缺省），
         // 新建缺省 envelope（任何供应商都能用的手写信封）。
-        let (tools, old_ctx) = self
+        let tools = self
             .settings
             .models
             .get(id)
-            .map(|m| (m.tools, m.context))
+            .map(|m| m.tools)
             .unwrap_or_default();
-        // 上下文窗口：表单没带（0）就保留现值（新建缺省 32k）——编辑别的字段不该顺手重置它。
-        let context = if context == 0 { old_ctx } else { context };
+        // 上下文窗口：0 = 用户不填（自动压缩按 DEFAULT_CONTEXT_TOKENS 兜底），原样保存。
         self.settings.models.insert(
             id.to_string(),
             ModelEntry {

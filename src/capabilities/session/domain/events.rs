@@ -83,7 +83,7 @@ pub struct DecisionAnswer {
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub enum SessionEvent {
-    /// 状态提示（通道回落、建组、返工、上限等）。
+    /// 状态提示（建组、返工、上限等）。
     Notice(String),
     /// 转录新增行（带会话内稳定 id，回档按它定位）。
     Transcript(Vec<LineView>),

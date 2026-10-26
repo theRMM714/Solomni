@@ -18,12 +18,9 @@ impl Conductor {
         if !self.registry.any_models() {
             return Err("登记处还没有任何模型，请先到「模型登记」添加".to_string());
         }
-        let channel = self.registry.core_channel().ok_or_else(|| {
-            "核心未设定默认模型（或它引用的供应商不存在），请先到「核心 AI 默认模型」设定"
-                .to_string()
-        })?;
+        let channel = self.registry.core_channel()?;
         let roster = self.scan();
-        let (mut chat, _) = self.llm.core_channel(Some(&channel));
+        let mut chat = self.llm.core_channel(&channel);
         // 登记处事实：**自持一份快照**（拟名单只读；一次用户动作、代价可忽略，
         // 与协作会话自持一份同义——写面是 `Box<dyn Registry>`，不可能共享出去）。
         let facts = self.registry.snapshot();
@@ -102,12 +99,11 @@ impl Conductor {
             }
             _ => return Ok(None),
         };
-        let channel = self.registry.channel(a.model.as_deref());
-        let want = if channel.is_some() {
-            self.registry.tool_mode(a.model.as_deref())
-        } else {
-            crate::capabilities::llm::api::ToolMode::Envelope
-        };
+        // 形态从登记处派生；通道没了就是前置条件失败，不悄悄退回手写信封。
+        self.registry
+            .channel(a.model.as_deref())
+            .map_err(|e| format!("agent {} 没有可用模型通道：{}", a.name, e))?;
+        let want = self.registry.tool_mode(a.model.as_deref());
         let cur = match self.sessions.get(sid) {
             Some(Session::Single(s)) => s.tool_mode(),
             // 还没装进内存的会话：交给 ensure_session 按当前形态建，这里不动

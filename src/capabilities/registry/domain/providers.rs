@@ -31,8 +31,9 @@ pub struct ModelEntry {
     pub context: u64,
 }
 
-/// 保守的上下文窗口缺省值（模型没声明、或登记处里查不到时用）。
-pub const DEFAULT_CONTEXT_TOKENS: u64 = 32_000;
+/// 上下文窗口的兜底值（模型没声明、或用户登记 0「不填」时，自动压缩按它算）。
+/// 取 128K：宁可早压，也别等供应商直接撑爆上下文。
+pub const DEFAULT_CONTEXT_TOKENS: u64 = 128_000;
 
 fn default_context_tokens() -> u64 {
     DEFAULT_CONTEXT_TOKENS
@@ -283,9 +284,38 @@ impl Settings {
             .unwrap_or_default()
     }
 
-    /// 核心 AI 默认通道；未设定或解析失败 = None（调用方回落演示并如实告知）。
-    pub fn core_channel(&self) -> Option<Channel> {
-        self.core.as_deref().and_then(|id| self.resolve(id).ok())
+    /// 目的：核心 AI 默认通道；未设定或解析失败 = 如实报错（不回落、不猜）。
+    pub fn core_channel(&self) -> Result<Channel, String> {
+        match self.core.as_deref() {
+            Some(id) => self
+                .resolve(id)
+                .map_err(|e| format!("核心默认模型 {} 无法解析：{}", id, e)),
+            None if self.models.is_empty() => {
+                Err("登记处还没有任何模型：请先登记供应商与模型".to_string())
+            }
+            None => Err(format!(
+                "核心 AI 未设定默认模型（已登记 {} 个模型）：请到「模型与核心默认」设定",
+                self.models.len()
+            )),
+        }
+    }
+
+    /// 目的：本次调用要用的通道；给了模型就用它，否则用核心默认，失败带具体原因。
+    pub fn effective_channel(&self, model: Option<&str>) -> Result<Channel, String> {
+        match model {
+            Some(id) => self.resolve(id),
+            None => self.core_channel(),
+        }
+    }
+
+    /// 目的：该模型（缺省用核心默认）的上下文窗口；登记为 0 = 用户不填，按兜底值算。
+    pub fn context_of(&self, model: Option<&str>) -> u64 {
+        model
+            .map(|s| s.to_string())
+            .or_else(|| self.core.clone())
+            .and_then(|id| self.models.get(&id).map(|m| m.context))
+            .filter(|c| *c > 0)
+            .unwrap_or(DEFAULT_CONTEXT_TOKENS)
     }
 
     /// 供应商展示视图（永不携带密钥）。

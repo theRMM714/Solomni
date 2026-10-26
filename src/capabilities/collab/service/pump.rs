@@ -441,13 +441,12 @@ impl CollabSession {
         self.done = true;
     }
 
-    /// 从在组名单装配成员通道（带回落告知；策略在 conductor：该 agent 的模型 > 核心默认）。
+    /// 从在组名单装配成员（策略在 conductor：该 agent 的模型 > 核心默认；缺了就如实报错）。
     /// 一个 agent = 一个成员：system 由它全部模块合成，工具 = 各模块外部工具的并集。
-    pub(crate) fn assemble_members(&self) -> Result<(Vec<Member>, Vec<String>), String> {
+    pub(crate) fn assemble_members(&self) -> Result<Vec<Member>, String> {
         let prompts = self.prompts.clone();
         let roster = self.modules.roster();
         let mut members = Vec::new();
-        let mut notes = Vec::new();
         for a in &self.roster {
             // 该 agent 的模块：清单即事实，缺了就如实报错（不静默跳过）。
             let modules: Vec<Module> = a
@@ -474,25 +473,16 @@ impl CollabSession {
                     missing.join("、")
                 ));
             }
-            let channel = a
-                .model
-                .as_deref()
-                .and_then(|id| self.settings.resolve(id).ok())
-                .or_else(|| self.settings.core_channel());
-            // 通道本身不再由成员持有（回合跑在各自的 agent 会话里）；这里只取它的如实告知。
-            let (_chat, note) = self.llm.member_channel(channel.as_ref(), &a.name);
-            if let Some(n) = note {
-                notes.push(n);
-            }
+            // 通道本身不再由成员持有（回合跑在各自的 agent 会话里）；这里只确认它存在。
+            // **不吞解析错误**：模型/供应商配坏了要如实报，不能伪装成"没配置"再回落。
+            self.settings
+                .effective_channel(a.model.as_deref())
+                .map_err(|e| format!("agent {} 没有可用模型通道：{}", a.name, e))?;
             let sandbox = self.sandboxes.for_agent(&a.name).cloned().ok_or_else(|| {
                 format!("agent {} 没有被分配沙箱（工作区未记录该 agent）", a.name)
             })?;
             // 形态按该 agent 的模型（或核心默认）解析：身份块里的调用约定与实际协议必须一致
-            let mode = if channel.is_some() {
-                self.settings.tool_mode_for(a.model.as_deref())
-            } else {
-                crate::capabilities::llm::api::ToolMode::Envelope
-            };
+            let mode = self.settings.tool_mode_for(a.model.as_deref());
             // **会话参数**：身份块每回合由它现渲染，不存进任何人的消息列表。
             let params = crate::capabilities::session::api::SessionParams::from_workspace(
                 &a.name,
@@ -552,7 +542,7 @@ impl CollabSession {
             });
             members.push(member);
         }
-        Ok((members, notes))
+        Ok(members)
     }
 }
 

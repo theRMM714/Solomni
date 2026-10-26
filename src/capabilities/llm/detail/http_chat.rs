@@ -1,10 +1,9 @@
 //! 真实通道：OpenAI 兼容 /chat/completions（可取消的 reqwest 流；见 http_stream）。
-//! 网关只做机制：给啥通道（供应商 + 模型）建啥会话；channel = None 时回落演示并如实告知。
-//! 端点补全/回落规则见 endpoint 模块：无版本段先直连，404/405 再试 /v1。
+//! 网关只做机制：给啥通道（供应商 + 模型）建啥会话；没有通道是调用方的前置条件失败，
+//! 这里**不回落假模型**。端点补全/回落规则见 endpoint 模块：无版本段先直连，404/405 再试 /v1。
 //! 密钥只在出站调用里使用，永不落提示词/转录/日志；错误信息经脱敏（红线）。
 
 use super::endpoint::{chat_candidates, memo_get, memo_set, resolve_candidates, Attempt, Memo};
-use super::fake_chat::DemoGateway;
 use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{
     BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg, ProbeOutcome, ToolDecl,
@@ -249,28 +248,7 @@ fn attempt_with_cancel(
     }
 }
 
-fn real_or_demo(
-    channel: Option<&Channel>,
-    log: &std::sync::Arc<dyn crate::kernel::ports::Log + Send + Sync>,
-    memo: &Memo,
-) -> (BoxedChat, bool) {
-    match channel {
-        Some(c) => (
-            Box::new(HttpChat::new(
-                c.clone(),
-                std::sync::Arc::clone(log),
-                std::sync::Arc::clone(memo),
-            )),
-            false,
-        ),
-        None => {
-            let (chat, demo) = DemoGateway.core_channel(None);
-            (chat, demo)
-        }
-    }
-}
-
-/// 真实网关：机制only。回落演示是如实告知的兜底，不是选择策略。
+/// 真实网关：机制 only。通道由调用方解析后传入；这里不制造任何假模型。
 pub struct HttpGateway {
     log: std::sync::Arc<dyn crate::kernel::ports::Log + Send + Sync>,
     memo: Memo,
@@ -299,49 +277,33 @@ impl ChatGateway for HttpGateway {
         crate::capabilities::llm::detail::http_probe::probe(channel, &self.log)
     }
 
-    fn member_channel(
-        &self,
-        channel: Option<&Channel>,
-        module_id: &str,
-    ) -> (BoxedChat, Option<String>) {
-        match channel {
-            Some(c) => {
-                self.log.info(
-                    "gateway::member_channel",
-                    &format!(
-                        "模块 {} → 供应商 {}（模型 {}）",
-                        module_id, c.base_url, c.model
-                    ),
-                );
-                (
-                    Box::new(HttpChat::new(
-                        c.clone(),
-                        std::sync::Arc::clone(&self.log),
-                        std::sync::Arc::clone(&self.memo),
-                    )),
-                    None,
-                )
-            }
-            // 回落告知（含模块 id）复用演示网关的话术。
-            None => {
-                self.log.warn(
-                    "gateway::member_channel",
-                    &format!("模块 {} 无可用模型通道，回落演示通道", module_id),
-                );
-                DemoGateway.member_channel(None, module_id)
-            }
-        }
+    fn member_channel(&self, channel: &Channel, module_id: &str) -> BoxedChat {
+        self.log.info(
+            "gateway::member_channel",
+            &format!(
+                "模块 {} → 供应商 {}（模型 {}）",
+                module_id, channel.base_url, channel.model
+            ),
+        );
+        Box::new(HttpChat::new(
+            channel.clone(),
+            std::sync::Arc::clone(&self.log),
+            std::sync::Arc::clone(&self.memo),
+        ))
     }
 
-    fn core_channel(&self, channel: Option<&Channel>) -> (BoxedChat, bool) {
-        let (chat, demo) = real_or_demo(channel, &self.log, &self.memo);
-        if demo {
-            self.log
-                .warn("gateway::core_channel", "核心通道未配置模型，使用演示通道");
-        } else {
-            self.log
-                .info("gateway::core_channel", "核心通道建立（真实供应商）");
-        }
-        (chat, demo)
+    fn core_channel(&self, channel: &Channel) -> BoxedChat {
+        self.log.info(
+            "gateway::core_channel",
+            &format!(
+                "核心通道建立：{}（模型 {}）",
+                channel.base_url, channel.model
+            ),
+        );
+        Box::new(HttpChat::new(
+            channel.clone(),
+            std::sync::Arc::clone(&self.log),
+            std::sync::Arc::clone(&self.memo),
+        ))
     }
 }

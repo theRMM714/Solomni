@@ -29,13 +29,13 @@ Fake 必须：
 | 实现 | 当前角色 | 当前状态 |
 | --- | --- | --- |
 | `src/capabilities/llm/detail/fake_chat.rs:FakeChat` | 脚本模型，同时记录 `calls`，兼具 Fake + Spy | 契约已就位（成功 / 空 / 流式 / 中止 / 记录） |
-| `src/capabilities/llm/detail/fake_chat.rs:DemoGateway` | 演示/回落网关 | 契约已就位（两类通道 / 回落告知 / 无网络、不需要隐秘字段） |
+| `src/capabilities/llm/detail/fake_chat.rs:DemoGateway` | 测试专用网关 | 契约已就位（两类通道 / 无网络、不需要隐秘字段；生产不装配） |
 | `src/tests/doubles.rs:InMemorySettings`、`InMemoryHistory`、`InMemoryWorkspace`、`InMemorySysIo`、`InMemoryWorkStore`、`InMemoryModuleState` | 内存 Fake | 已被核心测试装配使用；端口矩阵已登记（见 §三，已验收） |
 | `src/tests/doubles.rs:InMemoryPackages` | 包库 Fake | 已被核心测试使用；端口矩阵已登记（见 §三，已验收） |
 | `src/tests/doubles.rs:FakeEngine`、`FakeShare`、`RecordingVm` | VM 引擎 Fake（记录 start / run / stop）、共享后端 Fake（空共享计划）、vm 用例面替身（记录 guest_run） | 已被 vm 契约测试使用；端口矩阵已登记（见 §三） |
 | `src/tests/doubles.rs:FakeCatalog` | 模型目录 Fake + 调用记录（`seen`） | 已被核心测试使用；端口矩阵已登记（见 §三，已验收） |
 | `src/tests/doubles.rs:VecSource` | 模块清单 Fake | 已被核心测试使用；端口矩阵已登记（见 §三，已验收） |
-| `src/tests/doubles.rs:ScriptGateway`、`SharedScript` | 脚本网关 Fake | 已被核心测试使用；端口矩阵已登记（失败注入：无通道回落如实告知） |
+| `src/tests/doubles.rs:ScriptGateway`、`SharedScript` | 脚本网关 Fake | 已被核心测试使用；端口矩阵已登记（失败注入：未登记成员的兜底脚本） |
 | `src/tests/doubles.rs:TestPrompts` | 提示词册 Fake（返回内存册子） | 已被核心测试使用；端口矩阵已登记（见 §三，已验收） |
 | `src/tests/doubles.rs:FakeProxyHost` | 代理工具宿主 Fake + Spy（记录 catalog / 建会话 / 转达 / 控制 / 消息倒查） | 已用于 `src/tests/conductor/proxy.rs`；端口矩阵已登记（见 §三，已验收） |
 | `src/tests/doubles.rs:NamedShare`、`FakeGuard`、`FakeGuard2` | 共享后端 Fake（带名字与 `supports` 开关）+ 共享资源句柄 Spy（记录 release） | 已用于 vm 契约用例；端口矩阵已登记（见 §三，已验收） |
@@ -96,8 +96,7 @@ Fixture 必须：
 
 - member channel 能被创建并完成调用；
 - core channel 能被创建并完成调用；
-- 回落通知存在且指向正确模块；
-- 演示形态不发网络请求、不需要隐秘字段；
+- 测试形态不发网络请求、不需要隐秘字段；
 - core 与 member 的脚本语义不会相互污染。
 
 ### 本地假供应商
@@ -118,7 +117,7 @@ Fixture 必须：
 | 端口 | 当前替身 | 交互记录 | 失败注入 | 取消/超时 | 真实适配器 | 当前状态 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `Chat` | `FakeChat`、`SharedScript`、`TruncChat`、`AbortChat` | `FakeChat.calls` | 脚本回放非法信封 | `on` 返回 false 中止（FakeChat / HttpChat） | `HttpChat`：结束原因（非流式 `stop` / 流式 `length`）、原生 `tool_calls`（非流式 + 流式按 index 拼分片）都在环回假供应商上验 | 已验收 |
-| `ChatGateway` | `ScriptGateway`、`DemoGateway`、`ProbeGateway` | 通道脚本可观察 | 无通道回落（如实告知） | 不适用 | `HttpGateway`：探测的三种结论（支持 / 明确不支持 / 无法判定）与"通道本身不通"都在环回假供应商上验；结论写回登记处只写确凿的；回放形状探测逐项验"收了没有 / 真的读懂没有"（替身没真实供应商时默认如实说测不了） | 已验收 |
+| `ChatGateway` | `ScriptGateway`、`DemoGateway`、`ProbeGateway` | 通道脚本可观察 | 不适用（通道由调用方解析后传入，缺失在能力前置判据里拒绝） | 不适用 | `HttpGateway`：探测的三种结论（支持 / 明确不支持 / 无法判定）与"通道本身不通"都在环回假供应商上验；结论写回登记处只写确凿的；回放形状探测逐项验"收了没有 / 真的读懂没有"（替身没真实供应商时默认如实说测不了） | 已验收 |
 | `SettingsStore` | `InMemorySettings` | 内存状态可观察 | `fail_with` | 不适用 | `YamlSettingsStore` | 已验收 |
 | `ModelCatalog` | `FakeCatalog` | `seen` | `fail_with` | 不适用 | `HttpModelCatalog` | 已验收 |
 | `ModuleSource`（modules） | `VecSource`（经 `test_modules` 装进 `ModulesService`） | 不适用 | 不适用（错误进 `rejected`） | 不适用 | `detail::FsModules` | 已验收 |
