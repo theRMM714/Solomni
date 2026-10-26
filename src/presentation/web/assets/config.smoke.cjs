@@ -109,6 +109,7 @@ const calls = [];
 let setupPolls = 0;
 let setupStarted = false;
 let tiersVmAvailable = false; // 先在"虚拟机档不可用"的一侧验补齐入口，再切到可用侧验创建忙碌态
+let tiersGuestReady = true; // 机器前置齐时，虚拟根是否装齐是另一条事实（决定虚拟根下方的补齐入口）
 const jsonRes = (v, ok, status) => ({ ok: ok !== false, status: status || 200, json: async () => v });
 const sandbox = {
   document,
@@ -164,8 +165,8 @@ const sandbox = {
         vm_unavailable_reason: tiersVmAvailable ? "" : "虚拟机档现在不可用（没有找到 qemu-system-x86_64（按PATH找过））",
         vm_requirements: tiersVmAvailable ? [] : RAW.vm_requirements,
         guests: tiersVmAvailable
-          ? [{ guest: "windows", label: "debian-13", os: "linux", arch: "amd64", ready: true,
-              missing: [], install: ".vm/guest/windows", runtimes: ["python"] }]
+          ? [{ guest: "windows", label: "debian-13", os: "linux", arch: "amd64", ready: tiersGuestReady,
+              missing: tiersGuestReady ? [] : ["vm.guest-runtime.linux"], install: ".vm/guest/windows", runtimes: ["python"] }]
           : [],
         available: {},
       } });
@@ -416,6 +417,46 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
     'clickErrored=' + String(clickErrored) + ' text=' + wizText.slice(0, 200));
   closeModalIfAny();
 
+  /* ---- 机器前置齐、虚拟根未装齐：向导也要给出补齐动作，创建前直接拦住 ---- */
+  closeModalIfAny();
+  setupStarted = false; setupPolls = 0;
+  tiersVmAvailable = true; tiersGuestReady = false;
+  let guestErrored = null;
+  try { await vm.runInContext('openWizard()', ctx); await sleep(80); } catch (e) { guestErrored = e && e.message; }
+  const wizGuestRoot = reg.get('#modal-root');
+  check('wizard: 虚拟根未装齐时可打开向导', !guestErrored, String(guestErrored));
+  const wizGuestRadios = walk(wizGuestRoot, []).filter((n) => n.type === 'radio' && n.name === 'wf-tier');
+  wizGuestRadios[1].checked = true;
+  (wizGuestRadios[1]._h.change || []).forEach((f) => f());
+  const wizGuestSetup = findButton(wizGuestRoot, '补齐虚拟机依赖…');
+  check('wizard: 虚拟根未装齐时给出补齐按钮', !!wizGuestSetup && typeof wizGuestSetup.onclick === 'function');
+  // 填个名字、勾个模块，点创建：未装齐应当在本地被拦住，不发 create_session。
+  const guestNameInp = walk(wizGuestRoot, []).find((n) => n.tag === 'input' && String(n.placeholder).indexOf('工作名称') >= 0);
+  guestNameInp.value = 'guest-not-ready';
+  const guestModLab = walk(wizGuestRoot, []).find((n) => n.tag === 'label'
+    && (n.children || []).some((c) => String(c.textContent || '') === 'research'));
+  const guestModCb = guestModLab && (guestModLab.children || []).find((n) => n.type === 'checkbox');
+  guestModCb.checked = true; (guestModCb._h.change || []).forEach((f) => f());
+  const createsBefore = calls.filter((c) => /\/api\/actions\/create_session$/.test(c.url)).length;
+  findButton(wizGuestRoot, '创建并开始').onclick();
+  await sleep(30);
+  check('wizard: 未装齐时创建被本地拦住（不发请求）',
+    calls.filter((c) => /\/api\/actions\/create_session$/.test(c.url)).length === createsBefore);
+  const guestBlockMsg = findByClass(reg.get('#modal-root'), 'modal-msg')[0];
+  check('wizard: 拦住时说明缺哪几条',
+    !!guestBlockMsg && String(guestBlockMsg.textContent).indexOf('还没装齐') >= 0
+    && String(guestBlockMsg.textContent).indexOf('vm.guest-runtime.linux') >= 0,
+    guestBlockMsg && guestBlockMsg.textContent);
+  let guestClickErrored = null;
+  try { wizGuestSetup.onclick(); await sleep(120); } catch (e) { guestClickErrored = e && e.message; }
+  const guestSetupText = allText(reg.get('#modal-root'));
+  check('wizard: 点虚拟根旁的补齐真的打开补齐弹层',
+    !guestClickErrored && guestSetupText.indexOf('vm.virtiofsd.windows') >= 0 && guestSetupText.indexOf('只写项目内') >= 0,
+    'clickErrored=' + String(guestClickErrored) + ' text=' + guestSetupText.slice(0, 200));
+  closeModalIfAny();
+  tiersGuestReady = true;
+
+
   /* ---- 创建时的忙碌态：虚拟机档要在这一步起 guest（要等），按钮必须转圈并说清在等什么 ---- */
   closeModalIfAny();
   tiersVmAvailable = true; // 这一段要验虚拟机档的创建（它才要等 guest 起来）
@@ -460,6 +501,25 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
   check("open: 点「打开」进入会话视图不报错", !openErrored, String(openErrored));
   check("open: 会话被激活、按历史只读回放", state.activeSid === "w" && !!state.sessions.get("w"), "activeSid=" + state.activeSid);
   check("open: 条目本身仍是入口", typeof findByClass(reg.get("#history-list"), "history-item")[0].onclick === "function");
+
+
+  /* ---- 机器前置齐、虚拟根未装齐：配置面板也要给出补齐动作 ---- */
+  closeModalIfAny();
+  openConfig("w");
+  await sleep(80);
+  const cfgUnreadyRoot = reg.get("#modal-root");
+  const cfgGuestSel = walk(guestField(cfgUnreadyRoot), []).find((n) => n.tag === "select");
+  check("config: 未装齐用例能拿到虚拟根选择器", !!cfgGuestSel);
+  cfgGuestSel.value = "windows";
+  (cfgGuestSel._h.change || []).forEach((f) => f());
+  const cfgGuestSetup = findButton(cfgUnreadyRoot, "补齐虚拟机依赖…");
+  check("config: 虚拟根未装齐时给出补齐按钮",
+    !!cfgGuestSetup && typeof cfgGuestSetup.onclick === "function");
+  cfgGuestSetup.onclick();
+  await sleep(120);
+  check("config: 点虚拟根旁的补齐打开同一个弹层",
+    allText(reg.get("#modal-root")).indexOf("vm.virtiofsd.windows") >= 0);
+  closeModalIfAny();
 
   finish();
 })().catch((e) => { loadErrors.push("harness error: " + ((e && e.stack) || e)); finish(); });

@@ -136,7 +136,7 @@ copy 不在任何用户链里；只有进程级开发/应急开关（`SOLOMNI_VM
 - 目录里的 `guest.yaml` 声明画像（`id` / `arch` / `os` / `agent` / `clients` / `runtimes`）：用户自备镜像自己写；产品供的由 provision 落盘（`guest-rootfs` / `guest-disk` 写基础画像），`guest-runtime` 编排再写入**逐个自证过**的 `runtimes`（Windows 另把 `clients` 写成 cifs）。
 - `runtimes` 是 guest 里确实可用的运行能力，选型诊断据此不必再要 `runtimes/` 包；缺省按目录名与 Debian 默认（linux + QGA + 9p + virtiofs），不认识的值如实拒收。
 - 依赖（QEMU / `virtiofsd` / SMB helper / 镜像）**不预置、不分发**，由 `provision` 能力按清单下载并解包进项目内 `.vm/`（清单 `dependencies.yaml`、下载源 `links.yaml`，需用户同意）。
-- 补齐入口是**界面里的一个动作**：虚拟机档不可用时，配置面板与创建向导给出「补齐虚拟机依赖」（先看清单与体积、再确认下载、按进度长轮询）；CLI `solomni --provision --ensure --yes` 是没有界面时的等价路径。
+- 补齐入口是**界面里的一个动作**：虚拟机档不可用、或选中的虚拟根未装齐时，配置面板与创建向导给出「补齐虚拟机依赖」（先看清单与体积、再确认下载、按进度长轮询）；CLI `solomni --provision --ensure --yes` 是没有界面时的等价路径。
 - 设置里没登记 `qemu_path` / `virtiofsd_path` / `smbd_path` 时，**判据每次取用时**自动采用项目内补齐的那个可执行文件（显式登记优先）——装完即生效，不必重启。
 - 共享后端也在此列：用户档在装配期持有，哪一档在起 guest 那一刻按 `share_chain` 的候选挑——装完 virtiofsd / smbd，**下一次启动就用上**。
 - **开发/应急 copy**：进程启动时设 `SOLOMNI_VM_SHARE=copy`，该进程的 VM 会话强制走 copy（QGA 复制），日志打警告。它不在用户链、不进用户界面；只在开发/运维细则里出现。普通进程不装配它。

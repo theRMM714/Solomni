@@ -613,6 +613,16 @@ async function loadConfig(sid, c, box) {
  * 判据全在后端：`/api/setup/status` 的 `pending` 决定装什么（界面不自己挑条目——挑错了会把已装的重下一遍）。
  * 这里只做两步确认（先看清单、再下载）与进度；装完即生效，不需要重启。
  * 进度必须**看得见**：作业一起就进进度视图（当前步骤 + 滚动日志 + 取消）；关掉窗再打开也接着显示正在跑的那一次。 */
+function setupAction(before, onDone) {
+  const b = btn('补齐虚拟机依赖…', 'btn btn-block');
+  b.onclick = () => {
+    try {
+      if (before) before();
+      openSetupModal(onDone);
+    } catch (e) { notice('打开补齐弹层失败', e.message, 'err'); }
+  };
+  return b;
+}
 function openSetupModal(onDone) {
   openModal('补齐虚拟机依赖', (c) => {
     const box = document.createElement('div'); box.className = 'cfg';
@@ -819,13 +829,26 @@ function buildConfigForm(sid, cfg, c, box) {
     secT.appendChild(cfgHint('执行档位随主会话：子会话不能单独改档位与虚拟根。', 'warn'));
   }
   // 虚拟机档选的是**虚拟根**（清单里的一个虚拟机），不是路径：本机有哪些由后端给。
-  const pick = guestPicker(cfg.guests, draft.guest, (v) => { draft.guest = v; });
+  let guestInfo = (cfg.guests || []).find((g) => g.guest === draft.guest) || null;
+  let syncGuestSetup = () => {};
+  const pick = guestPicker(cfg.guests, draft.guest, (v, g) => {
+    draft.guest = v; guestInfo = g; syncGuestSetup();
+  });
+  // 机器前置齐、但选中的虚拟根没装齐时，这里给同一个补齐动作（与上面的机器前置入口不重复）。
+  const guestSetup = setupAction(null, () => openConfig(sid));
+  guestSetup.classList.add('hidden');
+  syncGuestSetup = () => {
+    const show = vmOk && draft.tier === 'vm' && (!guestInfo || !guestInfo.ready);
+    if (show) guestSetup.classList.remove('hidden');
+    else guestSetup.classList.add('hidden');
+  };
   const syncTier = () => {
     const vm = draft.tier === 'vm';
     const show = vm && !tierLocked;
     pick.wrap.className = show ? 'wf-field' : 'wf-field hidden';
     pick.hint.className = 'cfg-hint' + (show ? '' : ' hidden');
     pick.sync();
+    syncGuestSetup();
   };
   hostR.box.addEventListener('change', () => { if (hostR.box.checked) { draft.tier = 'host'; syncTier(); } });
   vmR.box.addEventListener('change', () => { if (vmR.box.checked) { draft.tier = 'vm'; syncTier(); } });
@@ -849,14 +872,9 @@ function buildConfigForm(sid, cfg, c, box) {
     // 缺什么已经列出来了，这里给**一个动作**（不是一句命令行）。
     // 装完重开配置面板：补齐弹层会把 #modal-root 顶掉，旧面板的 DOM 已经不在了——
     // 与其往脱离文档的节点上重绘，不如按新状态整份重读（未保存的改动会丢，和「重新扫描」同一个代价）。
-    const setupBtn = btn('补齐虚拟机依赖…', 'btn btn-block');
-    setupBtn.onclick = () => {
-      try { openSetupModal(() => openConfig(sid)); }
-      catch (e) { notice('打开补齐弹层失败', e.message, 'err'); }
-    };
-    secT.appendChild(setupBtn);
+    secT.appendChild(setupAction(null, () => openConfig(sid)));
   }
-  secT.appendChild(pick.wrap); secT.appendChild(pick.hint);
+  secT.appendChild(pick.wrap); secT.appendChild(pick.hint); secT.appendChild(guestSetup);
   box.appendChild(secT);
   syncTier();
 
@@ -2090,21 +2108,24 @@ async function openWizard(draft) {
       (lines.length ? '\n' + lines.join('\n') : ''),
       'err'
     ));
-    const setupBtn = btn('补齐虚拟机依赖…', 'btn btn-block');
     // 装完把向导按草稿重开：判据是后端按新状态算的，界面不自己改结论。
     // 先把用户填的名称与需求抄进草稿（它们只在弹层里读得到），否则重开会把它们清掉。
-    setupBtn.onclick = () => {
-      // 兜住同步异常：按钮点了**必须**有反应——静默什么都不发生是最难查的失败。
-      try {
-        snapshotDraft();
-        openSetupModal(() => openWizard(w));
-      } catch (e) { notice('打开补齐弹层失败', e.message, 'err'); }
-    };
-    tierField.appendChild(setupBtn);
+    tierField.appendChild(setupAction(snapshotDraft, () => openWizard(w)));
   }
 
   // 虚拟机档在**创建时**就要选一个虚拟根（会话级选择；机器能力已在上面判过）。
-  const pick = guestPicker(tiers && tiers.guests, w.guest, (v, g) => { w.guest = v; w.guestInfo = g; });
+  let syncGuestSetup = () => {};
+  const pick = guestPicker(tiers && tiers.guests, w.guest, (v, g) => {
+    w.guest = v; w.guestInfo = g; syncGuestSetup();
+  });
+  // 机器前置齐、但选中的虚拟根没装齐时，虚拟根选择器下面给同一个补齐动作（与机器前置入口不重复）。
+  const guestSetup = setupAction(snapshotDraft, () => openWizard(w));
+  guestSetup.classList.add('hidden');
+  syncGuestSetup = () => {
+    const show = vmOk && w.tier === 'vm' && (!w.guestInfo || !w.guestInfo.ready);
+    if (show) guestSetup.classList.remove('hidden');
+    else guestSetup.classList.add('hidden');
+  };
   // 预判：这个虚拟根（+ 包库）满足不了本次点到的哪些模块——**只是提示**，判据仍以创建时的后端校验为准。
   const gapHint = cfgHint('');
   function syncGuestGap() {
@@ -2134,6 +2155,7 @@ async function openWizard(draft) {
     pick.hint.className = 'wf-hint' + (w.tier === 'vm' ? '' : ' hidden');
     gapHint.className = 'wf-hint' + (w.tier === 'vm' ? '' : ' hidden');
     pick.sync();
+    syncGuestSetup();
     syncGuestGap();
   }
   openModal('新建工作', (c) => {
@@ -2512,6 +2534,11 @@ async function openWizard(draft) {
         c.setMsg('虚拟机档要先选一个虚拟机（虚拟根）：点上面的「补齐虚拟机依赖」装上，或换一个已装好的。', true);
         return;
       }
+      if (w.tier === 'vm' && w.guestInfo && !w.guestInfo.ready) {
+        const miss = (w.guestInfo.missing || []).join('、');
+        c.setMsg('这个虚拟根还没装齐' + (miss ? '（缺 ' + miss + '）' : '') + '：先点「补齐虚拟机依赖…」装上再用。', true);
+        return;
+      }
       let agents;
       if (w.mode === 'proxy') {
         // 代理：没有名单、没有需求——选这个形态就是**授予全权**（后端建 mode=proxy 的会话）。
@@ -2563,6 +2590,7 @@ async function openWizard(draft) {
     c.body.appendChild(tierField);
     c.body.appendChild(pick.wrap);
     c.body.appendChild(pick.hint);
+    c.body.appendChild(guestSetup);
     c.body.appendChild(gapHint);
     c.body.appendChild(partWrap);
     c.body.appendChild(modelWrap);
