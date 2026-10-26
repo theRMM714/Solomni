@@ -24,6 +24,9 @@ http.createServer((req, res) => {
     return;
   }
   let body = '';
+  // 请求体按 UTF-8 **流式解码**：直接对每个 Buffer 分片做 toString 会把跨分片的多字节字符劈成 U+FFFD
+  // （真工具链的 `[工具结果]` 前缀因此偶发损坏，夹具按结果条数推进会走错步）。
+  req.setEncoding('utf8');
   req.on('data', (d) => (body += d));
   req.on('end', () => {
     let j = null;
