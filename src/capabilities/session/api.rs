@@ -5,17 +5,17 @@ pub use crate::capabilities::session::domain::decisions::{
 };
 pub use crate::capabilities::session::domain::events::{
     idle, interrupted_note, last_compaction, qualify, stopped_note, working, CheckView,
-    DecisionCard, DecisionOption, DecisionQueue, DecisionWaiter, LineView, Live, Pending,
-    SessionEvent, ToolCallView, OPT_ASK_REPLY, OPT_BEGIN, OPT_BEGIN_ALLOW, OPT_NODE_REWORK,
-    OPT_NODE_SAY, OPT_PLAN_SAY, OPT_PLAN_START, OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM,
-    OPT_TOOL_ALLOW, OPT_TOOL_DENY, OPT_TOOL_FULL,
+    ContextUsage, DecisionCard, DecisionOption, DecisionQueue, DecisionWaiter, LineView, Live,
+    Pending, SessionEvent, ToolCallView, OPT_ASK_REPLY, OPT_BEGIN, OPT_BEGIN_ALLOW,
+    OPT_NODE_REWORK, OPT_NODE_SAY, OPT_PLAN_SAY, OPT_PLAN_START, OPT_SLATE_CANCEL,
+    OPT_SLATE_CONFIRM, OPT_TOOL_ALLOW, OPT_TOOL_DENY, OPT_TOOL_FULL,
 };
 pub use crate::capabilities::session::domain::history::{
     AgentMeta, Delegation, HistoryView, RunState, SessionMeta,
 };
 pub use crate::capabilities::session::domain::rewind::{
-    align_keep, cut_before_line, find_line_id, last_line_within, max_reply, next_line_id,
-    rewind_marks, truncate_events, turn_of_line, RewindMark, RewindMode,
+    align_keep, cut_before_line, find_line_id, last_line_within, last_usage, max_reply,
+    next_line_id, rewind_marks, truncate_events, turn_of_line, RewindMark, RewindMode,
 };
 pub use crate::capabilities::session::domain::session::{
     keep_whole_replies, stream_piece, summary_message, unique_work_name, AgentSession,

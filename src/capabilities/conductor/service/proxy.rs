@@ -636,7 +636,8 @@ impl Conductor {
                 .text(crate::capabilities::prompt::api::Segment::CompactPrompt)
                 .to_string(),
         );
-        s.set_compact_budget(self.compact_budget(None));
+        let (window, percent) = self.context_budget(None);
+        s.set_context_budget(window, percent);
         Ok(s)
     }
 }

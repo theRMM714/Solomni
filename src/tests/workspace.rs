@@ -630,6 +630,81 @@ pub(crate) fn work_commit_reports_conflicts_and_restore_returns_a_commit_point()
     );
 }
 
+/// 目的：提交历史与提交详情：列表按新→旧、on_head 标当前线；详情给改动大小；文件预览文本/二进制分开。
+/// 约束：非破坏性回滚后旧提交仍在列表里（on_head=false），从旧点继续提交会形成新分支。
+#[test]
+pub(crate) fn work_log_and_commit_preview_keep_off_line_commits_visible() {
+    let (ws, _dirs, _store) = work_ws();
+    ws.prepare("w", &[]).unwrap();
+    let id1 = ws.work_commit_user("w", "a.txt", b"one", 10, 0).unwrap();
+    let id2 = ws
+        .work_commit_user("w", "b.bin", &[0, 1, 2], 11, 0)
+        .unwrap();
+
+    let log = ws.work_log("w", 10, None).unwrap();
+    assert_eq!(log.head.as_ref().map(|h| h.id), Some(id2));
+    assert_eq!(
+        log.commits.iter().map(|c| c.id).collect::<Vec<_>>(),
+        vec![id2, id1]
+    );
+    assert!(
+        log.commits.iter().all(|c| c.on_head),
+        "两个提交都在当前线上"
+    );
+    assert_eq!(log.total, 2);
+    assert!(!log.truncated);
+
+    let d = ws.work_commit_view("w", id1).unwrap();
+    assert_eq!(d.changes.len(), 1);
+    assert_eq!(d.changes[0].path, "a.txt");
+    assert_eq!(d.changes[0].size, 3);
+    assert_eq!(d.changes[0].media_type.as_deref(), Some("text/plain"));
+    let f = ws.work_commit_file("w", id1, "a.txt").unwrap();
+    assert_eq!(f.text.as_deref(), Some("one"));
+    assert!(!f.truncated && !f.too_large);
+    let b = ws.work_commit_file("w", id2, "b.bin").unwrap();
+    assert_eq!(b.text, None, "含 NUL 的二进制不给文本预览");
+    assert_eq!(b.size, 3);
+    assert!(
+        ws.work_commit_file("w", id1, "nope.txt").is_err(),
+        "路径必须真在这条提交的树里"
+    );
+
+    // 非破坏性回滚：head 回到 id1，id2 仍在历史里，但标成"已离开当前线"。
+    ws.work_restore("w", id1).unwrap();
+    let back = ws.work_log("w", 10, None).unwrap();
+    assert_eq!(back.head.as_ref().map(|h| h.id), Some(id1));
+    assert_eq!(
+        back.commits
+            .iter()
+            .map(|c| (c.id, c.on_head))
+            .collect::<Vec<_>>(),
+        vec![(id2, false), (id1, true)]
+    );
+
+    // 从旧点继续提交：新提交的 parent = id1，旧 id2 仍保留（可再次回滚）。
+    let id3 = ws.work_commit_user("w", "a.txt", b"three", 12, 0).unwrap();
+    let branched = ws.work_log("w", 10, None).unwrap();
+    assert_eq!(branched.head.as_ref().map(|h| h.id), Some(id3));
+    assert_eq!(
+        branched
+            .commits
+            .iter()
+            .map(|c| (c.id, c.on_head))
+            .collect::<Vec<_>>(),
+        vec![(id3, true), (id2, false), (id1, true)]
+    );
+    assert_eq!(branched.commits[0].parent, Some(id1));
+
+    // before 分页：只取 id 更小的提交。
+    let page = ws.work_log("w", 1, Some(id3)).unwrap();
+    assert_eq!(
+        page.commits.iter().map(|c| c.id).collect::<Vec<_>>(),
+        vec![id2]
+    );
+    assert!(page.truncated, "后面还有 id1");
+}
+
 /// 按行锚精确物化共享区：agent 第 1 行提交 v1、第 3 行提交 v3；
 /// 回档到第 1 行 → 共享区回到 v1；再丢弃非祖先提交 → 第 3 行的提交记录真的没了。
 #[test]
@@ -673,6 +748,53 @@ pub(crate) fn work_rewind_to_materializes_by_line_anchor_and_discards_later_comm
     ws.work_restore_point("w", None).unwrap();
     assert!(store.read_under(&shared, "note.md").unwrap().is_none());
     assert_eq!(ws.work_head("w").unwrap(), None);
+}
+
+/// 目的：回滚离开过的提交不在当前 head 祖先链上：转录回档只沿当前线选点，不能把旧分支选回来。
+#[test]
+pub(crate) fn work_rewind_to_ignores_commits_off_the_current_head() {
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    let sb = sandbox_of(&ws, "w", "a");
+    let shared = shared_of(&ws, "w");
+
+    store.write_under(&sb, "a.txt", b"one").unwrap();
+    let mut r1 = commit_req(&["a.txt"], &[], "一", 1);
+    r1.line = 1;
+    let id1 = ws.work_commit("w", "a", "w--a", &r1).unwrap().id;
+
+    store.write_under(&sb, "a.txt", b"two").unwrap();
+    let mut r2 = commit_req(&["a.txt"], &[], "二", 2);
+    r2.line = 3;
+    let id2 = ws.work_commit("w", "a", "w--a", &r2).unwrap().id;
+
+    // 回到 id1，再从当前线继续提交（先拉齐沙箱，否则会被三方比较判冲突）。
+    ws.work_restore("w", id1).unwrap();
+    ws.work_pull("w", "a", &["a.txt".to_string()]).unwrap();
+    store.write_under(&sb, "a.txt", b"three").unwrap();
+    let mut r3 = commit_req(&["a.txt"], &[], "三", 3);
+    r3.line = 5;
+    let id3 = ws.work_commit("w", "a", "w--a", &r3).unwrap().id;
+
+    // 保留行 4：id2 的锚 3 会通过，但它已离开当前线；当前线上 id1(1) 通过、id3(5) 不过。
+    let mut keep = std::collections::BTreeMap::new();
+    keep.insert("a".to_string(), 4u64);
+    assert_eq!(ws.work_head("w").unwrap(), Some(id3));
+    assert_eq!(ws.work_rewind_to("w", &keep).unwrap(), Some(id1));
+    assert_eq!(
+        store.read_under(&shared, "a.txt").unwrap().as_deref(),
+        Some(&b"one"[..])
+    );
+    assert_eq!(ws.work_head("w").unwrap(), Some(id1));
+    // id2 / id3 仍是历史（非破坏性）；这里只是不再被选为当前点。
+    let log = ws.work_log("w", 10, None).unwrap();
+    assert_eq!(
+        log.commits
+            .iter()
+            .map(|c| (c.id, c.on_head))
+            .collect::<Vec<_>>(),
+        vec![(id3, false), (id2, false), (id1, true)]
+    );
 }
 
 /// 用户投喂 = 权威提交；agent 拉取后按基线提交，新路径是新增。

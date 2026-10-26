@@ -349,16 +349,14 @@ impl Conductor {
         self.registry.app().discuss_remind_cap
     }
 
-    /// 自动压缩的**字符预算** = 该模型的上下文窗口 × 设置百分比 × 4（≈ 字符/token 的粗估）。
-    /// 百分比为 0 = 关。见 docs/session/session-model.md 六。
-    pub(crate) fn compact_budget(&self, model: Option<&str>) -> usize {
-        let pct = self.registry.app().compact_at_percent as u64;
-        if pct == 0 {
-            return 0;
-        }
-        // 窗口按模型现算（缺省用核心默认；查不到就是保守缺省）——这是登记处的事实，不在这里另存一份。
-        let ctx = self.registry.context_of(model);
-        (ctx * pct / 100 * 4) as usize
+    /// 目的：本会话的上下文预算：窗口按模型现算（缺省用核心默认），百分比来自全局设置。
+    /// 约束：0% = 关自动压缩。见 docs/session/session-model.md 六。
+    pub(crate) fn context_budget(&self, model: Option<&str>) -> (u64, u8) {
+        // 窗口是登记处的事实，不在这里另存一份。
+        (
+            self.registry.context_of(model),
+            self.registry.app().compact_at_percent,
+        )
     }
 
     /// 角色表发放的系统工具 id 清单（工具面的名字部分）。
@@ -429,7 +427,8 @@ impl Conductor {
                 .to_string(),
         );
         // 自动压缩的预算按**这个 agent 的模型**窗口算（见 session-model.md 六）。
-        s.set_compact_budget(self.compact_budget(a.model.as_deref()));
+        let (window, percent) = self.context_budget(a.model.as_deref());
+        s.set_context_budget(window, percent);
         (s, Vec::new())
     }
 }

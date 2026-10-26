@@ -717,6 +717,9 @@ impl ConductorHandle {
                 );
                 if let Ok(summary) = &made {
                     s.compact(up_to, summary);
+                    // 压完发送视图变小了：留一份估算用量，避免状态栏还挂着压缩前的大数字。
+                    let usage = s.estimate_usage();
+                    s.set_last_usage(Some(usage));
                 }
                 (s, made)
             })
@@ -753,17 +756,20 @@ impl ConductorHandle {
                 return Ok(Advance { head });
             }
         };
-        let ev = SessionEvent::Compacted { up_to, summary };
+        let mut events = vec![SessionEvent::Compacted { up_to, summary }];
+        if let Some(usage) = s.context_usage() {
+            events.push(SessionEvent::Usage { usage, line: up_to });
+        }
         self.call({
             let sid = sid.to_string();
-            let ev = ev.clone();
+            let events = events.clone();
             move |core| {
                 core.put_single(&sid, s);
-                core.persister(&sid).persist(std::slice::from_ref(&ev));
+                core.persister(&sid).persist(&events);
                 Ok(())
             }
         })?;
-        let head = bus.push(sid, std::slice::from_ref(&ev));
+        let head = bus.push(sid, &events);
         Ok(Advance { head })
     }
 

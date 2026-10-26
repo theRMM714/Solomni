@@ -7,11 +7,11 @@
 //! pull / commit 的三方比较与 resolve 的选边规则在 `domain::workstore`（纯逻辑），落盘在 `WorkStore` 端口后面。
 
 use crate::capabilities::workspace::api::{
-    media_hint, Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, FileVersion,
-    GcReport, LostEntry, LostReport, PullReport, ResolveAction, ResolveEntry, ResolveReport,
-    ResolveRequest, ResolveTake, ResolveWarning, ResolveWarningKind, RestoreLostReport,
-    StatusEntry, StatusReport, VersionView, WorkFiles, WorkRoots, WorkUsage, Workspace,
-    MAX_ASSET_BYTES, VERSION_TEXT_LIMIT,
+    media_hint, Change, ChangeKind, ChangeView, CommitDetail, CommitFileView, CommitReport,
+    CommitRequest, CommitSummary, FileVersion, GcReport, LostEntry, LostReport, PullReport,
+    ResolveAction, ResolveEntry, ResolveReport, ResolveRequest, ResolveTake, ResolveWarning,
+    ResolveWarningKind, RestoreLostReport, StatusEntry, StatusReport, VersionView, WorkFiles,
+    WorkLog, WorkLogEntry, WorkRoots, WorkUsage, Workspace, MAX_ASSET_BYTES, VERSION_TEXT_LIMIT,
 };
 use crate::capabilities::workspace::domain::hash::{content_hash, is_content_hash};
 use crate::capabilities::workspace::domain::workstore::{
@@ -32,6 +32,10 @@ const RECENT_COMMITS: usize = 5;
 const MAX_LOCAL_ONLY: usize = 50;
 /// work_lost 一次最多列出的备份数（超出如实标注截断）。
 const MAX_LOST: usize = 50;
+/// 提交历史一页的上限（界面分页；不让一次读把整段历史塞进内存）。
+const MAX_LOG_LIMIT: usize = 200;
+/// 一条提交详情里最多列出的改动条数（超出如实标注截断）。
+const MAX_COMMIT_CHANGES: usize = 500;
 
 /// 工作区能力：持四个端口，按用例答话。
 pub struct WorkspaceService {
@@ -257,6 +261,23 @@ impl WorkspaceService {
             .read_commit(store, id)?
             .ok_or_else(|| format!("head 指向不存在的提交 {}", id))?;
         Ok((Some(id), commit.tree))
+    }
+
+    /// 当前 head 的祖先链（含 head）。用户回滚离开过的提交仍留在库里，但不在这一条线上。
+    fn head_ancestors(
+        &self,
+        store: &std::path::Path,
+        head: Option<u64>,
+    ) -> Result<BTreeSet<u64>, String> {
+        let mut set = BTreeSet::new();
+        let mut cur = head;
+        while let Some(id) = cur {
+            if !set.insert(id) {
+                break;
+            }
+            cur = self.store.read_commit(store, id)?.and_then(|c| c.parent);
+        }
+        Ok(set)
     }
 
     /// 目的：把一条对象的版本视图收成 `FileVersion`；已知媒体类型或超限时不读内容。
@@ -772,11 +793,16 @@ impl Workspace for WorkspaceService {
         let mut all_tree: Vec<String> = tree.keys().cloned().collect();
         let truncated = all_tree.len() > MAX_STATUS_TREE;
         all_tree.truncate(MAX_STATUS_TREE);
-        // 最近提交（新→旧）。
+        // 最近提交（新→旧，只沿当前 head 的祖先链：已回滚离开的提交不算"最近"）。
+        let ancestors = self.head_ancestors(&store, head_id)?;
         let mut ids = self.store.list_commits(&store)?;
         ids.reverse();
         let mut recent = Vec::new();
-        for id in ids.into_iter().take(RECENT_COMMITS) {
+        for id in ids
+            .into_iter()
+            .filter(|id| ancestors.contains(id))
+            .take(RECENT_COMMITS)
+        {
             if let Some(c) = self.store.read_commit(&store, id)? {
                 recent.push(CommitSummary::from(&c));
             }
@@ -790,6 +816,140 @@ impl Workspace for WorkspaceService {
             local_only,
             local_only_truncated,
             recent,
+        })
+    }
+
+    fn work_log(&self, work: &str, limit: usize, before: Option<u64>) -> Result<WorkLog, String> {
+        let limit = limit.clamp(1, MAX_LOG_LIMIT);
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let (shared, store) = self.work_roots(work)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)?;
+        let head_id = self.store.head(&store)?;
+        let head = match head_id {
+            Some(id) => Some(CommitSummary::from(
+                &self
+                    .store
+                    .read_commit(&store, id)?
+                    .ok_or_else(|| format!("head 指向不存在的提交 {}", id))?,
+            )),
+            None => None,
+        };
+        let on_head = self.head_ancestors(&store, head_id)?;
+        let all = self.store.list_commits(&store)?;
+        let total = all.len();
+        let mut commits: Vec<WorkLogEntry> = Vec::new();
+        let mut truncated = false;
+        for id in all.into_iter().rev() {
+            if before.is_some_and(|b| id >= b) {
+                continue;
+            }
+            if commits.len() >= limit {
+                truncated = true;
+                break;
+            }
+            let Some(c) = self.store.read_commit(&store, id)? else {
+                continue;
+            };
+            commits.push(WorkLogEntry {
+                id: c.id,
+                parent: c.parent,
+                author: c.author,
+                session: c.session,
+                time: c.time,
+                message: c.message,
+                changes: c.changes.len(),
+                on_head: on_head.contains(&id),
+            });
+        }
+        Ok(WorkLog {
+            head,
+            commits,
+            total,
+            truncated,
+        })
+    }
+
+    fn work_commit_view(&self, work: &str, commit: u64) -> Result<CommitDetail, String> {
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let (shared, store) = self.work_roots(work)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)?;
+        let c = self
+            .store
+            .read_commit(&store, commit)?
+            .ok_or_else(|| format!("没有提交点 {}", commit))?;
+        let mut changes = Vec::new();
+        let mut changes_truncated = false;
+        for ch in &c.changes {
+            if changes.len() >= MAX_COMMIT_CHANGES {
+                changes_truncated = true;
+                break;
+            }
+            let size = match ch.kind {
+                ChangeKind::Delete => 0,
+                ChangeKind::Add | ChangeKind::Modify => self.store.stat_object(&store, &ch.hash)?,
+            };
+            changes.push(ChangeView {
+                path: ch.path.clone(),
+                kind: ch.kind,
+                hash: ch.hash.clone(),
+                size,
+                media_type: media_hint(&ch.path).map(|h| h.mime.to_string()),
+            });
+        }
+        Ok(CommitDetail {
+            id: c.id,
+            parent: c.parent,
+            author: c.author,
+            session: c.session,
+            time: c.time,
+            message: c.message,
+            changes,
+            changes_truncated,
+        })
+    }
+
+    fn work_commit_file(
+        &self,
+        work: &str,
+        commit: u64,
+        path: &str,
+    ) -> Result<CommitFileView, String> {
+        let rel = clean_rel(path)?;
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let (shared, store) = self.work_roots(work)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)?;
+        let c = self
+            .store
+            .read_commit(&store, commit)?
+            .ok_or_else(|| format!("没有提交点 {}", commit))?;
+        let hash = c
+            .tree
+            .get(&rel)
+            .ok_or_else(|| format!("提交 {} 里没有路径：{}", commit, rel))?;
+        let binary = media_hint(&rel).map(|h| h.binary).unwrap_or(false);
+        let scanned = self.store.scan_object(
+            &store,
+            hash,
+            if binary {
+                None
+            } else {
+                Some(VERSION_TEXT_LIMIT)
+            },
+        )?;
+        Ok(CommitFileView {
+            path: rel.clone(),
+            hash: hash.clone(),
+            size: scanned.size,
+            media_type: media_hint(&rel).map(|h| h.mime.to_string()),
+            text: scanned.text,
+            truncated: scanned.truncated,
+            too_large: scanned.size > self.max_asset_bytes,
         })
     }
 
@@ -1227,9 +1387,16 @@ impl Workspace for WorkspaceService {
         let (shared, store) = self.work_roots(work)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;
+        // 只沿**当前 head 的祖先链**选点：用户回滚离开过的提交仍在库里，但不在当前线上，
+        // 不能被后续转录回档误选回来。
+        let head = self.store.head(&store)?;
+        let ancestors = self.head_ancestors(&store, head)?;
         // 提交按 id 升序：取"各会话都还没越过自己保留行"的最后一个提交点。
         let mut target = None;
         for id in self.store.list_commits(&store)? {
+            if !ancestors.contains(&id) {
+                continue;
+            }
             let Some(c) = self.store.read_commit(&store, id)? else {
                 continue;
             };

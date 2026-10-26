@@ -410,6 +410,53 @@ pub(crate) fn route(
             ),
             Err(e) => complaint(404, e),
         },
+        // 提交历史（只读）：limit / before 都是可选；不把整段历史塞进 /api/state。
+        "session.work" => {
+            let q = url.split('?').nth(1).unwrap_or("");
+            let mut limit = 50usize;
+            let mut before = None;
+            for pair in q.split('&') {
+                let mut kv = pair.splitn(2, '=');
+                match (kv.next(), kv.next()) {
+                    (Some("limit"), Some(v)) => {
+                        limit = v.parse::<usize>().unwrap_or(50).clamp(1, 200)
+                    }
+                    (Some("before"), Some(v)) => {
+                        before = v.parse::<u64>().ok();
+                    }
+                    _ => {}
+                }
+            }
+            match ops.sessions.work_log(&sid, limit, before) {
+                Ok(v) => ok_json(json!(v)),
+                Err(e) => complaint(404, e),
+            }
+        }
+        // 提交详情；带 path = 该提交里这个文件的内容预览。
+        "session.work.commit" => {
+            let commit = match m.param("commit").parse::<u64>() {
+                Ok(n) => n,
+                Err(_) => return complaint(400, "提交号必须是整数"),
+            };
+            let path = url
+                .split('?')
+                .nth(1)
+                .unwrap_or("")
+                .split('&')
+                .find_map(|kv| kv.strip_prefix("path="))
+                .map(routes::url_decode)
+                .filter(|p| !p.is_empty());
+            match path {
+                Some(path) => match ops.sessions.work_commit_file(&sid, commit, &path) {
+                    Ok(v) => ok_json(json!(v)),
+                    Err(e) => complaint(404, e),
+                },
+                None => match ops.sessions.work_commit_view(&sid, commit) {
+                    Ok(v) => ok_json(json!(v)),
+                    Err(e) => complaint(404, e),
+                },
+            }
+        }
 
         // ---- 基本设置 ----
         "settings.get" => match ops.registry.settings() {

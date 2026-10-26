@@ -79,6 +79,7 @@ fn meta(name: &str) -> SessionMeta {
 fn chat_double_shared_script_replays_in_order_and_is_explicitly_non_streaming() {
     let mut c = SharedScript {
         q: Arc::new(Mutex::new(vec!["一".to_string(), "二".to_string()])),
+        usage: None,
     };
     let mut chunks = 0;
     assert_eq!(
@@ -103,6 +104,7 @@ fn chat_double_shared_script_replays_in_order_and_is_explicitly_non_streaming() 
     );
     let mut empty = SharedScript {
         q: Arc::new(Mutex::new(Vec::new())),
+        usage: None,
     };
     assert_eq!(
         empty

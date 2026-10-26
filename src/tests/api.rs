@@ -903,6 +903,212 @@ fn auto_compaction_kicks_in_when_the_history_exceeds_the_budget() {
         "被总结掉的内容该移出发送视图（不是只加摘要）：{last:?}"
     );
 }
+/// 供应商 usage：会话视图给出精确数字，落盘 usage 事件，刷新/重建仍能读回来。
+#[test]
+fn provider_usage_is_exposed_in_session_view_and_persisted() {
+    use crate::capabilities::llm::api::TokenUsage;
+    let mut member = std::collections::BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec!["{\"type\":\"say\",\"text\":\"完成\"}".to_string()],
+    );
+    let gateway = super::doubles::ScriptGateway::new(member, vec![]).with_usage(TokenUsage::new(
+        900,
+        120,
+        Some(1020),
+    ));
+    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+        super::doubles::core_with_gateway(vec![module_of("a")], gateway),
+    )
+    .expect("起核心线程");
+    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let sid = ops
+        .sessions
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话")
+        .0
+        .sid;
+    ops.sessions
+        .say(
+            &sid,
+            "做一下",
+            crate::capabilities::conductor::api::Output::Final,
+        )
+        .expect("一轮");
+
+    let views = ops
+        .sessions
+        .session_views(&ops.history.list().expect("列表"))
+        .expect("视图");
+    let view = views.iter().find(|v| v.sid == sid).expect("会话在视图里");
+    let ctx = view.context.expect("单 agent 会话有上下文用量");
+    assert_eq!(ctx.total_tokens, 1020);
+    assert_eq!(ctx.prompt_tokens, 900);
+    assert!(ctx.exact, "供应商回的 usage 要标成精确");
+    assert!(ctx.window > 0, "窗口来自登记处（缺省 128K）");
+
+    // 落盘：刷新/重建读的是同一条 usage 事件，不靠内存里那份。
+    let (_, events) = ops.history.open(&sid).expect("读流水");
+    assert!(
+        events.iter().any(|e| {
+            e.get("type").and_then(|t| t.as_str()) == Some("usage")
+                && e.get("total_tokens").and_then(|n| n.as_u64()) == Some(1020)
+        }),
+        "流水里要有 usage 事件"
+    );
+    let last = crate::capabilities::session::api::last_usage(&events).expect("读回用量");
+    assert_eq!(last.total_tokens, 1020);
+}
+
+/// 工作区回滚动作：非破坏性、expect_head 防陈旧、成功后落可回放的 notice 行。
+#[test]
+fn restore_work_commit_is_non_destructive_and_records_a_notice() {
+    let handle = spawn(vec![module_of("a")], Vec::new());
+    let ops = Ops::from_handle(&handle);
+    let sid = ops
+        .sessions
+        .create_work(single_work("w-restore", &["a"]))
+        .expect("建会话")
+        .0
+        .sid;
+    assert!(ops
+        .sessions
+        .upload(&sid, "a.txt", b"one", false)
+        .expect("投喂一"));
+    assert!(ops
+        .sessions
+        .upload(&sid, "a.txt", b"two", true)
+        .expect("投喂二"));
+    let log = ops.sessions.work_log(&sid, 10, None).expect("提交历史");
+    let head = log.head.as_ref().expect("有 head").id;
+    let older = log
+        .commits
+        .iter()
+        .map(|c| c.id)
+        .find(|id| *id != head)
+        .expect("有更早的提交");
+
+    // 陈旧 expect_head：拒绝并说清当前 head。
+    let err = ops
+        .actions
+        .act(ActionCall {
+            id: "restore_work_commit".to_string(),
+            args: serde_json::json!({ "session_id": sid, "commit": older, "expect_head": 0 }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .unwrap_err();
+    assert!(err.contains("已经变化"), "{}", err);
+
+    // 正确 expect_head：回滚，目标之后的提交仍保留。
+    let done = ops
+        .actions
+        .act(ActionCall {
+            id: "restore_work_commit".to_string(),
+            args: serde_json::json!({ "session_id": sid, "commit": older, "expect_head": head }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .expect("回滚");
+    assert!(matches!(done, Acted::Done(_)), "回滚是同步完成动作");
+    let back = ops.sessions.work_log(&sid, 10, None).expect("回滚后的历史");
+    assert_eq!(back.head.as_ref().map(|h| h.id), Some(older));
+    assert_eq!(
+        back.commits.iter().map(|c| c.id).collect::<Vec<_>>(),
+        vec![head, older],
+        "非破坏性：目标之后的提交仍在"
+    );
+    assert_eq!(
+        back.commits.iter().map(|c| c.on_head).collect::<Vec<_>>(),
+        vec![false, true],
+        "旧 head 标成已离开当前线"
+    );
+
+    // 落一条 notice 行（有 id、可回放），内容点名 from/to 与"仍保留"。
+    let (_, events) = ops.history.open(&sid).expect("读流水");
+    let notice = events
+        .iter()
+        .filter(|e| e.get("type").and_then(|t| t.as_str()) == Some("transcript"))
+        .filter_map(|e| e.get("lines").and_then(|l| l.as_array()))
+        .flatten()
+        .find(|l| {
+            l.get("kind").and_then(|k| k.as_str()) == Some("notice")
+                && l.get("line")
+                    .and_then(|s| s.as_str())
+                    .is_some_and(|s| s.contains("工作区回滚"))
+        })
+        .expect("回滚要留可回放的 notice 行");
+    let text = notice.get("line").and_then(|s| s.as_str()).unwrap_or("");
+    assert!(text.contains(&format!("提交 #{}", older)), "{}", text);
+    assert!(text.contains("仍保留"), "{}", text);
+}
+
+/// 自动压缩优先看供应商 usage：对话很短但 token 已过阈值时也要压。
+#[test]
+fn auto_compaction_uses_provider_usage_when_it_is_available() {
+    use crate::capabilities::llm::api::TokenUsage;
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut member = std::collections::BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![
+            "先做".to_string(),
+            "{\"type\":\"tool\",\"name\":\"compact\",\"args\":{\"summary\":\"用量摘要\"}}"
+                .to_string(),
+            "继续".to_string(),
+        ],
+    );
+    let gateway = super::RecordingGateway {
+        inner: super::doubles::ScriptGateway::new(member, vec![]).with_usage(TokenUsage::new(
+            18_000,
+            2_000,
+            Some(20_000),
+        )),
+        seen: Arc::clone(&seen),
+    };
+    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+        super::doubles::core_with_gateway(vec![module_of("a")], gateway),
+    )
+    .expect("起核心线程");
+    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let mut st = ops.registry.settings().expect("读设置");
+    st.compact_at_percent = 10; // 128K × 10% = 12.8K < 20K
+    st.sandbox.policy.windows.write_acl = true;
+    ops.registry.set_settings(st).expect("写设置");
+    let sid = ops
+        .sessions
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话")
+        .0
+        .sid;
+    ops.sessions
+        .say(
+            &sid,
+            "第一句",
+            crate::capabilities::conductor::api::Output::Final,
+        )
+        .expect("第一轮");
+    ops.sessions
+        .say(
+            &sid,
+            "第二句",
+            crate::capabilities::conductor::api::Output::Final,
+        )
+        .expect("第二轮该先压一次");
+
+    let all = seen.lock().expect("锁").clone();
+    assert!(
+        all.iter()
+            .any(|msgs| msgs.iter().any(|c| c.contains("用量摘要"))),
+        "精确 usage 超阈值时该自动压：{all:?}"
+    );
+    let last = all.last().expect("至少问过一次").clone();
+    assert!(
+        last.iter().any(|c| c.contains("用量摘要")),
+        "压缩后的发送视图该带摘要：{last:?}"
+    );
+}
+
 /// 压缩能扛住重启：按落盘转录重建时，发送视图仍是「一份摘要 + 之后的行」。
 /// 回档跨越压缩点（`Conductor::rewind` 命中分流）→ 回到压缩前。
 #[test]

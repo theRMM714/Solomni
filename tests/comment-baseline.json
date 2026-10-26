@@ -115,8 +115,8 @@
   "src/capabilities/conductor/service/env.rs": {
     "头块：槽外有行或自造槽": 6,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 10,
-    "条目：首行不是目的": 5
+    "条目：槽外有行或自造槽": 8,
+    "条目：首行不是目的": 4
   },
   "src/capabilities/conductor/service/flow.rs": {
     "头块：槽外有行或自造槽": 6,
@@ -386,8 +386,8 @@
   "src/capabilities/session/domain/session.rs": {
     "头块：槽外有行或自造槽": 4,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 81,
-    "条目：首行不是目的": 48
+    "条目：槽外有行或自造槽": 78,
+    "条目：首行不是目的": 46
   },
   "src/capabilities/session/domain/tools.rs": {
     "头块：槽外有行或自造槽": 4,

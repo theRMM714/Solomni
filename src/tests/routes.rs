@@ -209,6 +209,7 @@ impl SessionOps for FakeOps {
             run: "active".to_string(),
             pending: None,
             continue_action: None,
+            context: None,
         })
     }
     fn continue_flow(&self, _sid: &str, _out: Output) -> Result<Advance, String> {
@@ -318,6 +319,76 @@ impl SessionOps for FakeOps {
             usage: Default::default(),
         })
     }
+    fn work_log(
+        &self,
+        _sid: &str,
+        _limit: usize,
+        _before: Option<u64>,
+    ) -> Result<crate::capabilities::workspace::api::WorkLog, String> {
+        self.guard()?;
+        use crate::capabilities::workspace::api::{CommitSummary, WorkLog, WorkLogEntry};
+        Ok(WorkLog {
+            head: Some(CommitSummary {
+                id: 1,
+                author: "user".to_string(),
+                time: 1,
+                message: "初始".to_string(),
+            }),
+            commits: vec![WorkLogEntry {
+                id: 1,
+                parent: None,
+                author: "user".to_string(),
+                session: String::new(),
+                time: 1,
+                message: "初始".to_string(),
+                changes: 1,
+                on_head: true,
+            }],
+            total: 1,
+            truncated: false,
+        })
+    }
+    fn work_commit_view(
+        &self,
+        _sid: &str,
+        _commit: u64,
+    ) -> Result<crate::capabilities::workspace::api::CommitDetail, String> {
+        self.guard()?;
+        use crate::capabilities::workspace::api::{ChangeKind, ChangeView, CommitDetail};
+        Ok(CommitDetail {
+            id: 1,
+            parent: None,
+            author: "user".to_string(),
+            session: String::new(),
+            time: 1,
+            message: "初始".to_string(),
+            changes: vec![ChangeView {
+                path: "a.txt".to_string(),
+                kind: ChangeKind::Add,
+                hash: "h".to_string(),
+                size: 2,
+                media_type: Some("text/plain".to_string()),
+            }],
+            changes_truncated: false,
+        })
+    }
+    fn work_commit_file(
+        &self,
+        _sid: &str,
+        _commit: u64,
+        path: &str,
+    ) -> Result<crate::capabilities::workspace::api::CommitFileView, String> {
+        self.guard()?;
+        Ok(crate::capabilities::workspace::api::CommitFileView {
+            path: path.to_string(),
+            hash: "h".to_string(),
+            size: 2,
+            media_type: Some("text/plain".to_string()),
+            text: Some("hi".to_string()),
+            truncated: false,
+            too_large: false,
+        })
+    }
     fn unique_work_name(&self, _base: &str, fallback: &str) -> Result<String, String> {
         Ok(fallback.to_string())
     }
@@ -350,6 +421,7 @@ impl SessionOps for FakeOps {
                 run: h.run.as_str().to_string(),
                 pending: None,
                 continue_action: None,
+                context: None,
             })
             .collect())
     }
@@ -584,6 +656,7 @@ fn sample_param(_route_id: &str, name: &str) -> &'static str {
         "sid" => "w1",
         "name" => "a1",
         "id" => "create_session",
+        "commit" => "1",
         _ => "x",
     }
 }
@@ -981,6 +1054,15 @@ fn success_shapes_are_pinned_per_route() {
         ("GET", "/api/actions?sid=w1", "", 200, "\"actions\""),
         ("GET", "/api/sessions/w1/config", "", 200, "\"config\""),
         ("GET", "/api/sessions/w1/files", "", 200, "\"roots\""),
+        ("GET", "/api/sessions/w1/work", "", 200, "\"commits\""),
+        ("GET", "/api/sessions/w1/work/1", "", 200, "\"changes\""),
+        (
+            "GET",
+            "/api/sessions/w1/work/1?path=a.txt",
+            "",
+            200,
+            "\"text\"",
+        ),
         // 登记处动作现在都走 /api/actions/{id}（上面已有成功用例盯着这条路由的形态）。
         ("GET", "/api/settings", "", 200, "\"settings\""),
         ("GET", "/api/tiers", "", 200, "\"tiers\""),

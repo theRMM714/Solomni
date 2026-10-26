@@ -6,7 +6,7 @@
 use super::endpoint::{chat_candidates, memo_get, memo_set, resolve_candidates, Attempt, Memo};
 use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{
-    BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg, ProbeOutcome, ToolDecl,
+    BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg, ProbeOutcome, TokenUsage, ToolDecl,
 };
 use crate::capabilities::llm::ports::ChatGateway;
 
@@ -20,6 +20,8 @@ pub struct HttpChat {
     /// 进程内共享的端点记忆：一旦通了就固定，后续会话不再探测。
     memo: Memo,
     memo_key: String,
+    /// 最近一次调用供应商报的 usage（拿不到 = None）；会话状态栏与压缩判定读它。
+    last_usage: Option<TokenUsage>,
 }
 
 /// 一条消息 → wire 形态。**协议字段按需出现**：手写信封通道的消息没有调用，
@@ -55,6 +57,10 @@ fn request_body(
     tools: Option<&[ToolDecl]>,
 ) -> serde_json::Value {
     let mut body = serde_json::json!({ "model": model, "stream": stream, "messages": messages });
+    // 流式请求也要 usage（状态栏与自动压缩要有精确数字）；不支持的供应商由 complete 回退掉。
+    if stream {
+        body["stream_options"] = serde_json::json!({ "include_usage": true });
+    }
     // 原生工具调用：把工具声明带给供应商（"参数走结构化槽位"的全部秘密就在这一段）。
     // 不声明 tools = 手写信封模式：模型照旧在正文里写信封，核心自己解析。
     if let Some(tools) = tools {
@@ -143,43 +149,33 @@ impl HttpChat {
             resolved,
             memo,
             memo_key,
+            last_usage: None,
         }
     }
 }
 
-impl Chat for HttpChat {
-    fn complete(
-        &mut self,
-        messages: &[Msg],
-        opts: CompleteOpts<'_>,
+impl HttpChat {
+    /// 一次出站交换：端点候选、重试归类、日志都在这里；请求体由调用方给（便于兼容回退换一份）。
+    fn exchange(
+        &self,
+        body: &str,
+        opts: &CompleteOpts<'_>,
         on: &mut dyn FnMut(Chunk) -> bool,
-    ) -> Completion {
-        let stream = opts.stream;
-        let wire: Vec<serde_json::Value> = messages.iter().map(msg_json).collect();
-        let body = request_body(
-            &self.channel.model,
-            stream,
-            serde_json::Value::Array(wire),
-            opts.tools,
-        )
-        .to_string();
+    ) -> Result<(String, Completion), String> {
         let candidates: Vec<String> = match &self.resolved {
             Some(url) => vec![url.clone()],
             None => chat_candidates(&self.channel.base_url),
         };
         let key = self.channel.api_key.clone();
-        let outcome = if stream {
-            let rt = match super::http_stream::runtime() {
-                Ok(rt) => rt,
-                Err(e) => return Completion::failure(e),
-            };
+        if opts.stream {
+            let rt = super::http_stream::runtime()?;
             resolve_candidates(
                 &candidates,
                 |url| {
                     rt.block_on(super::http_stream::stream_once(
                         url,
                         &key,
-                        &body,
+                        body,
                         opts.clone(),
                         on,
                     ))
@@ -195,7 +191,7 @@ impl Chat for HttpChat {
             let cancel = opts.cancel.clone();
             resolve_candidates(
                 &candidates,
-                |url| attempt_with_cancel(url, &key, &body, opts.timeout_secs, cancel.as_deref()),
+                |url| attempt_with_cancel(url, &key, body, opts.timeout_secs, cancel.as_deref()),
                 |url, err, next| {
                     self.log.warn(
                         "http_chat::complete",
@@ -203,7 +199,53 @@ impl Chat for HttpChat {
                     );
                 },
             )
-        };
+        }
+    }
+}
+
+/// 供应商把流式 usage 参数当未知字段拒掉了吗？只在 400/422 且点名字段时回退一次。
+fn stream_options_rejected(err: &str) -> bool {
+    let e = err.to_ascii_lowercase();
+    let rejected_status = e.contains("供应商返回 400") || e.contains("供应商返回 422");
+    rejected_status
+        && ["stream_options", "include_usage", "stream options"]
+            .iter()
+            .any(|needle| e.contains(needle))
+}
+
+impl Chat for HttpChat {
+    fn complete(
+        &mut self,
+        messages: &[Msg],
+        opts: CompleteOpts<'_>,
+        on: &mut dyn FnMut(Chunk) -> bool,
+    ) -> Completion {
+        let wire: Vec<serde_json::Value> = messages.iter().map(msg_json).collect();
+        let body_value = request_body(
+            &self.channel.model,
+            opts.stream,
+            serde_json::Value::Array(wire),
+            opts.tools,
+        );
+        let body = body_value.to_string();
+        let mut outcome = self.exchange(&body, &opts, on);
+        // 兼容回退：只在首个 400/422 且错误点名字段时去掉 stream_options 重试一次。
+        // 这时还没收到任何数据块（stream_once 在非 2xx 时不回调 on），不会重复正文。
+        if opts.stream {
+            if let Err(e) = &outcome {
+                if stream_options_rejected(e) {
+                    self.log.warn(
+                        "http_chat::stream",
+                        "供应商不接受 stream_options，去掉该参数重试；本次用量将按字符估算",
+                    );
+                    let mut retry = body_value.clone();
+                    if let Some(obj) = retry.as_object_mut() {
+                        obj.remove("stream_options");
+                    }
+                    outcome = self.exchange(&retry.to_string(), &opts, on);
+                }
+            }
+        }
         match outcome {
             Ok((url, done)) => {
                 // 用户停止：不把取消当成"成功命中端点"，也不写端点记忆。
@@ -213,6 +255,7 @@ impl Chat for HttpChat {
                 // 通了就定死：进程内共享，后续会话直接用它，不再探测候选。
                 memo_set(&self.memo, &self.memo_key, &url);
                 self.resolved = Some(url);
+                self.last_usage = done.usage;
                 done
             }
             Err(e) => {
@@ -224,6 +267,10 @@ impl Chat for HttpChat {
                 Completion::failure(format!("模型调用失败：{}", e))
             }
         }
+    }
+
+    fn last_usage(&self) -> Option<TokenUsage> {
+        self.last_usage
     }
 }
 

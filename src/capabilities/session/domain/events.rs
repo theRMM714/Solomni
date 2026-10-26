@@ -64,6 +64,47 @@ pub struct DecisionQueue {
     pub waiting: Vec<DecisionWaiter>,
 }
 
+/// 目的：一条会话最近一次模型调用的上下文用量（状态栏与压缩判定读它）。
+/// 约束：**不是**转录行、不进模型上下文；它只回答"上一次请求用了多少 token"。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ContextUsage {
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    pub total_tokens: u64,
+    /// 目的：这次调用时该模型的上下文窗口（缺省模型 = 128K 兜底，由 conductor 给）。
+    pub window: u64,
+    /// 目的：true = 供应商回的 usage；false = 按对话字符估算（界面必须标注）。
+    pub exact: bool,
+}
+
+impl ContextUsage {
+    /// 目的：供应商 usage → 带窗口的上下文用量。
+    pub fn from_tokens(
+        tokens: crate::capabilities::llm::api::TokenUsage,
+        window: u64,
+    ) -> ContextUsage {
+        ContextUsage {
+            prompt_tokens: tokens.prompt_tokens,
+            completion_tokens: tokens.completion_tokens,
+            total_tokens: tokens.total_tokens,
+            window,
+            exact: true,
+        }
+    }
+
+    /// 目的：拿不到供应商 usage 时的保守估算（≈ 字符 / 4）；界面据此标"估算"。
+    pub fn estimated(chars: usize, window: u64) -> ContextUsage {
+        let tokens = (chars / 4).max(if chars > 0 { 1 } else { 0 }) as u64;
+        ContextUsage {
+            prompt_tokens: tokens,
+            completion_tokens: 0,
+            total_tokens: tokens,
+            window,
+            exact: false,
+        }
+    }
+}
+
 /// 目的：一次回答的记录——谁答的、选了哪个 id、附言。落盘后重启仍能重建"答过什么"。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DecisionAnswer {
@@ -153,6 +194,9 @@ pub enum SessionEvent {
     /// 前端只能靠"有增量"去猜运行态，猜不到就不切按钮、也没有占位动画（用户完全不知道在干什么）。
     /// `agent = None` = 空闲（这一回合结束了）。
     Working { agent: Option<String> },
+    /// **上下文用量**（落盘，但不是转录行、不进模型上下文）：最近一次模型调用的输入/输出 token。
+    /// `line` 是这次调用产出第一行的行号；回档折叠到它之前时这条用量随之失效。
+    Usage { usage: ContextUsage, line: u64 },
 }
 
 /// 调用失败时的用户可见说明：**如实说原因**，并说清会话没被作废（可以点「继续」重试）。
@@ -457,6 +501,15 @@ impl SessionEvent {
             SessionEvent::Working { agent } => {
                 serde_json::json!({ "type": "working", "agent": agent })
             }
+            SessionEvent::Usage { usage, line } => serde_json::json!({
+                "type": "usage",
+                "prompt_tokens": usage.prompt_tokens,
+                "completion_tokens": usage.completion_tokens,
+                "total_tokens": usage.total_tokens,
+                "window": usage.window,
+                "exact": usage.exact,
+                "line": line,
+            }),
             SessionEvent::DecisionCard {
                 card,
                 gate,

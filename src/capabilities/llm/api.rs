@@ -151,6 +151,12 @@ pub trait Chat {
         opts: CompleteOpts<'_>,
         on: &mut dyn FnMut(Chunk) -> bool,
     ) -> Completion;
+
+    /// 目的：最近一次调用供应商报的 usage（拿不到 = None）：会话据此更新状态栏与压缩判定。
+    /// 约束：默认 None——只有真正认识供应商响应的通道实现它；脚本替身按需覆盖。
+    fn last_usage(&self) -> Option<TokenUsage> {
+        None
+    }
 }
 
 /// 拥有所有权的会话通道（装箱；会话可跨线程移动，Web 泵线程所需）。
@@ -205,6 +211,30 @@ impl Msg {
     }
 }
 
+/// 目的：一次调用的 token 用量（供应商回的 usage；拿不到 = None）。
+/// 约束：这是**事实**而不是估算；状态栏与自动压缩优先读它，缺了才按字符估。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct TokenUsage {
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    pub total_tokens: u64,
+}
+
+impl TokenUsage {
+    /// 目的：把供应商可能只给 prompt/completion 的 usage 归一成一份；total 缺失时按两者之和补齐。
+    pub fn new(
+        prompt_tokens: u64,
+        completion_tokens: u64,
+        total_tokens: Option<u64>,
+    ) -> TokenUsage {
+        TokenUsage {
+            prompt_tokens,
+            completion_tokens,
+            total_tokens: total_tokens.unwrap_or(prompt_tokens + completion_tokens),
+        }
+    }
+}
+
 /// 一次补全的结果：正文 + 供应商给的**结束原因**（原样带回，不翻译）。
 /// 为什么必须有它：只有把"模型写完自己停了"与"被输出长度截断"分开，核心才能给对修法。
 /// 真实会话里模型手写了一个 3KB 的工具信封、尾巴少一个括号，我们看不出是被截断还是它自己写漏，
@@ -227,6 +257,8 @@ pub struct Completion {
     /// 目的：用户按了「停止」——取消关闭了在途请求，不是模型回复、也不是失败。
     /// 约束：上层据此收尾并写 `[停止]`；任何已流到一半的工具调用都不得执行。
     pub cancelled: bool,
+    /// 目的：供应商这次调用报的 token 用量（拿不到 = None）：状态栏与自动压缩优先读它。
+    pub usage: Option<TokenUsage>,
 }
 
 impl Completion {
@@ -240,6 +272,7 @@ impl Completion {
             calls: Vec::new(),
             error: None,
             cancelled: false,
+            usage: None,
         }
     }
 
@@ -252,6 +285,7 @@ impl Completion {
             calls: Vec::new(),
             error: Some(reason.into()),
             cancelled: false,
+            usage: None,
         }
     }
 
@@ -270,6 +304,7 @@ impl Completion {
             calls,
             error: None,
             cancelled: true,
+            usage: None,
         }
     }
 

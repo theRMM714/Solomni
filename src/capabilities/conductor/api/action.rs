@@ -581,6 +581,28 @@ impl ConductorHandle {
                     serde_json::json!({ "ok": true, "uploaded": uploaded }),
                 ))
             }
+            // 工作区回滚：只给 user；非破坏性，expect_head 防"看完详情后别人又提交了"。
+            "restore_work_commit" => {
+                let sid = s("session_id");
+                let commit = args
+                    .get("commit")
+                    .and_then(|v| v.as_u64())
+                    .ok_or_else(|| "restore_work_commit 需要 commit（提交号）".to_string())?;
+                let expect_head = args
+                    .get("expect_head")
+                    .and_then(|v| v.as_u64())
+                    .ok_or_else(|| {
+                        "restore_work_commit 需要 expect_head（看到详情时的 head；空共享区传 0）"
+                            .to_string()
+                    })?;
+                let target = sid.clone();
+                let (after, events) =
+                    self.call(move |core| core.restore_work_commit(&target, commit, expect_head))?;
+                self.bus.push(&sid, &events);
+                Ok(Acted::Done(
+                    serde_json::json!({ "ok": true, "head": after }),
+                ))
+            }
             // 隐秘字段：值只进去、永不回显；不放模块工具面（agent 不需要写值）。
             "set_secret" => {
                 self.secrets.set(&s("module"), &s("name"), &s("value"))?;

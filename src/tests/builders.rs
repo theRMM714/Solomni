@@ -580,6 +580,7 @@ impl Chat for ReasoningChat {
             calls: Vec::new(),
             error: None,
             cancelled: false,
+            usage: None,
         }
     }
 }
@@ -627,6 +628,7 @@ impl Chat for TruncChat {
             calls: Vec::new(),
             error: None,
             cancelled: false,
+            usage: None,
         }
     }
 }
@@ -766,6 +768,7 @@ impl Chat for NativeChat {
                 calls,
                 error: None,
                 cancelled: false,
+                usage: None,
             },
             NativeStep::Text(t) => Completion::text(t),
         }

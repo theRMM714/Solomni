@@ -1121,6 +1121,52 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
     }
 }
 
+/// 目的：代理会话是 `Session::Single`，有一条持续对话，所以也要显示上下文用量（窗口取核心默认模型）。
+#[test]
+pub(crate) fn proxy_session_exposes_context_usage() {
+    use crate::capabilities::llm::api::TokenUsage;
+    let gateway = ScriptGateway::new(
+        BTreeMap::new(),
+        vec!["{\"type\":\"say\",\"text\":\"代理在\"}".to_string()],
+    )
+    .with_usage(TokenUsage::new(700, 50, Some(750)));
+    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(core_with_gateway(
+        vec![],
+        gateway,
+    ))
+    .expect("起核心线程");
+    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let spec = crate::capabilities::conductor::api::WorkSpec {
+        name: "w-proxy-ctx".to_string(),
+        mode: WorkMode::Proxy,
+        agents: Vec::new(),
+        task: None,
+        delegate: false,
+        tier: Tier::Host,
+        guest: None,
+    };
+    let sid = ops.sessions.create_work(spec).expect("建代理会话").0.sid;
+    ops.sessions
+        .say(
+            &sid,
+            "开始",
+            crate::capabilities::conductor::api::Output::Final,
+        )
+        .expect("代理一轮");
+    let views = ops
+        .sessions
+        .session_views(&ops.history.list().expect("列表"))
+        .expect("视图");
+    let view = views
+        .iter()
+        .find(|v| v.sid == sid)
+        .expect("代理会话在视图里");
+    let ctx = view.context.expect("代理会话也要有上下文用量");
+    assert_eq!(ctx.total_tokens, 750);
+    assert!(ctx.exact);
+    assert!(ctx.window > 0, "窗口取核心默认模型");
+}
+
 /// 观察的增量信号：`since` 给上次的游标就回「新增几条」；回执本身仍是幂等快照。
 #[test]
 pub(crate) fn observe_reports_new_messages_since_the_last_cursor() {

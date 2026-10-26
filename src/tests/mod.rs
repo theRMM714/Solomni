@@ -205,6 +205,10 @@ impl crate::capabilities::llm::api::Chat for RecordingChat {
             .push(m.iter().map(|x| x.content.clone()).collect());
         self.inner.complete(m, o, on)
     }
+
+    fn last_usage(&self) -> Option<crate::capabilities::llm::api::TokenUsage> {
+        self.inner.last_usage()
+    }
 }
 
 /// 包一层记录器：把每个成员通道收到的消息记下来（判"发送视图"用）。
