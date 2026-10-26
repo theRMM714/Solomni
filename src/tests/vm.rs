@@ -744,7 +744,8 @@ pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
         "没有网卡就没有 netdev"
     );
     assert!(
-        args.iter().any(|a| a == "file=/base/rootfs.ext4,if=virtio"),
+        args.iter()
+            .any(|a| a == "file=/base/rootfs.ext4,if=virtio,format=raw"),
         "根是磁盘镜像（virtio 磁盘）：{:?}",
         args
     );
@@ -928,7 +929,8 @@ pub(crate) fn disk_root_without_kernel_boots_via_firmware() {
         args
     );
     assert!(
-        args.iter().any(|a| a == "file=/img/root.qcow2,if=virtio"),
+        args.iter()
+            .any(|a| a == "file=/img/root.qcow2,if=virtio,format=qcow2"),
         "磁盘根照给：{:?}",
         args
     );
@@ -956,7 +958,8 @@ pub(crate) fn disk_root_uses_a_virtio_disk_not_9p() {
     };
     let args = engine_args(&spec, "opts", false, false, None, &[]);
     assert!(
-        args.iter().any(|a| a == "file=/img/root.qcow2,if=virtio"),
+        args.iter()
+            .any(|a| a == "file=/img/root.qcow2,if=virtio,format=qcow2"),
         "根要接成 virtio 磁盘：{:?}",
         args
     );
@@ -1173,7 +1176,7 @@ pub(crate) fn disk_image_base_is_classified_as_a_disk_root() {
     );
     assert!(
         args.iter()
-            .any(|a| a.starts_with("file=") && a.ends_with(",if=virtio")),
+            .any(|a| a.starts_with("file=") && a.ends_with(",if=virtio,format=raw")),
         "根要接成 virtio 磁盘：{:?}",
         args
     );

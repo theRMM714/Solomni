@@ -251,22 +251,37 @@ pub(super) fn install_guest_runtime(
         let py_probe =
             "mkdir -p /usr/local/bin; command -v python >/dev/null 2>&1 || ln -sf /usr/bin/python3 /usr/local/bin/python; python -V >/dev/null 2>&1";
         let mut python_ok = vm.guest_run(&lease, &sh(py_probe)).ok;
-        // C/C++ 用 Debian 原生 GCC / G++；Node 从官方二进制装。先刷新 apt 索引再装，去掉 deb-src。
-        let apt_cmd = format!(
+        // 索引与安装分两步：各给一条进度行——一步跑几分钟时界面不会停在同一条上。
+        on_line("刷新 apt 索引…");
+        let index_cmd = format!(
             "{net}{apt} sed -i 's/^Types: deb deb-src/Types: deb/' /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
              rm -rf /var/lib/apt/lists /var/cache/apt/archives; mkdir -p /var/lib/apt/lists; \
-             DEBIAN_FRONTEND=noninteractive apt-get update -o Acquire::Languages=none || true; \
-             DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends {req} curl ca-certificates; \
-             apt-get clean; rm -rf /var/cache/apt/archives/*; sync",
+             DEBIAN_FRONTEND=noninteractive apt-get update -o Acquire::Languages=none || true",
             apt = APT_COMPRESSED,
-            net = net,
+            net = net
+        );
+        let index_out = vm.guest_run(&lease, &sh(&index_cmd));
+        on_line(&format!(
+            "安装基础工具链（apt {}）…",
+            required_pkgs(is_windows)
+        ));
+        // C/C++ 用 Debian 原生 GCC / G++；Node 从官方二进制装。
+        let install_cmd = format!(
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends {req} curl ca-certificates; \
+             apt-get clean; rm -rf /var/cache/apt/archives/*; sync",
             req = required_pkgs(is_windows)
         );
-        let apt_out = vm.guest_run(&lease, &sh(&apt_cmd));
+        let install_out = vm.guest_run(&lease, &sh(&install_cmd));
+        // 失败回执同时带索引与安装两段；判据仍是安装命令（索引段沿用本地缓存也算成功）。
+        let apt_out = crate::kernel::api::ToolOutcome {
+            ok: install_out.ok,
+            output: format!("{}\n{}", index_out.output, install_out.output),
+        };
         if !python_ok {
             python_ok = apt_out.ok && vm.guest_run(&lease, &sh(py_probe)).ok;
         }
         // Node：固定版本官方二进制，校验 sha256 后解到 /opt/solomni/toolchains；失败就如实失败（不静默降级）。
+        on_line("安装 Node（固定版本官方二进制）…");
         let node_script = node_install_script()?;
         let node_run = if apt_out.ok {
             vm.guest_run(&lease, &sh(&node_script))
@@ -276,6 +291,7 @@ pub(super) fn install_guest_runtime(
                 output: apt_out.output.clone(),
             }
         };
+        on_line("自证 python / node / C-C++…");
         let node_ok = node_run.ok
             && vm
                 .guest_run(&lease, &sh("node --version >/dev/null 2>&1"))
@@ -502,8 +518,35 @@ mod tests {
             ".vm/guest/debian",
             ".vm/guest/debian/.runtimes-ready",
         );
-        install_guest_runtime(&root, &d, Some(&vm), true, &mut |_| {}).expect("编排");
+        let mut lines: Vec<String> = Vec::new();
+        install_guest_runtime(&root, &d, Some(&vm), true, &mut |l| {
+            lines.push(l.to_string())
+        })
+        .expect("编排");
         let runs = vm.runs.lock().expect("锁").clone();
+        for want in [
+            "刷新 apt 索引",
+            "安装基础工具链",
+            "安装 Node",
+            "自证 python / node / C-C++",
+        ] {
+            assert!(
+                lines.iter().any(|l| l.contains(want)),
+                "进度行缺「{}」：{:?}",
+                want,
+                lines
+            );
+        }
+        assert!(
+            runs.iter().filter(|c| c.contains("apt-get update")).count() == 1
+                && runs
+                    .iter()
+                    .filter(|c| c.contains("apt-get install"))
+                    .count()
+                    == 1,
+            "索引与安装要分两条命令：{:?}",
+            runs
+        );
         assert!(
             runs.iter()
                 .any(|c| c.contains("systemd-networkd") && c.contains("10.0.2.15")),
