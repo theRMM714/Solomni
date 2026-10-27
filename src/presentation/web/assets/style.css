@@ -657,7 +657,7 @@ body {
   font-size: 11px; color: var(--color-text-dim);
 }
 .mod-tile.is-added .mod-tile-mark {
-  border-color: var(--color-accent); background: var(--color-accent); color: var(--color-bg);
+  border-color: var(--color-accent); background: var(--color-accent); color: var(--color-accent-contrast);
 }
 .mod-tile-brief {
   font-size: 12px; color: var(--color-text-dim);
