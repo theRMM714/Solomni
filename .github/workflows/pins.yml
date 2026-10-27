@@ -1,0 +1,30 @@
+# 依赖校验值检查：只读比对当前 pin 与上游，不写文件、不开 PR。
+# 触发：手动与每周一；不随 PR 跑（PR 的结构审查只做离线格式与配对检查）。
+# 判据见 docs/testing/execution-ci.md 的「依赖哈希检查」。
+name: 依赖校验值检查
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: pins check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "lts/*"
+
+      # GITHUB_TOKEN 只用于 GitHub API 的限流额度；check 不写任何文件。
+      - name: 校验当前 pin 与上游
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node pins.js check

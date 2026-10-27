@@ -6,15 +6,16 @@
 #   arch     x86_64 / aarch64 / any
 #   install  装到产品根下的哪个目录（相对路径，用 / 分段）
 #   probe    判"在不在场"的那个路径（相对产品根；文件或目录存在即在位）
-#   source   下载源：links.yaml 的键，或 release:<资产名>（= links.yaml 的 release.base + 资产名，项目自托管便携包）
+#   source   下载源：links.yaml 的键，或 release:<release-tag>/<资产名>（= links.yaml 的 release.base + tag + 资产名，项目自托管便携包）
 #   kind     安装方式：archive（默认，解归档）/ appimage / file（单文件直下）/ guest-disk（单文件 + 画像）/ guest-rootfs（多步构造）/ guest-runtime（起 guest 自证运行能力）
 #   guest    虚拟机档的**虚拟根名**（只有 guest 类条目有；`install` 指它那一格目录，一个虚拟根可以由多条条目共同装）
 #   family   【可选】Linux 虚拟根的发行版族（只有 guest-rootfs 有；构造配方按它取，当前只有 debian）
 #   strip    解包时剥掉归档里的前 N 段目录（缺省 0）
 #   size_mb  大致体积（提示与带宽预估）
 #   sha256   【可选】归档 / 单文件的 sha256（64 位十六进制）。**校验值与它守护的那条连接写在同一条**：
-#            自托管 release 资产（source: release:<资产名>）写在本条目；source 是 links.yaml 的键的，
+#            自托管 release 资产（source: release:<tag>/<资产名>）写在本条目；source 是 links.yaml 的键的，
 #            写在 links.yaml 的 `<键>.sha256`。来源写进该条目的 note 或 links.yaml 的注释。
+#            自托管条目的值由 `node pins.js update` 从该 release 的 SHA256SUMS（缺失时 GitHub API digest）生成。
 #            不写 = 没有校验（`latest` 这种会随上游滚动的源只能这样）：靠解包 / 解析成功判，不假装验过。
 #   note     一句话
 #
@@ -27,7 +28,7 @@ deps:
     kind: appimage
     install: .vm/qemu
     probe: .vm/qemu/bin/qemu-system-x86_64
-    source: release:QEMU-11.1.1-4-anylinux-x86_64.AppImage
+    source: release:deps-qemu-11.1.1-4/QEMU-11.1.1-4-anylinux-x86_64.AppImage
     size_mb: 165
     sha256: 61ab65257c2db116aa28489c725379ab147a3bd399535c823a10d485ebd70fbd
     note: Linux 虚拟机档的 QEMU（pkgforge Anylinux AppImage，自带 sharun 兼容层；`--appimage-extract` 解包后约 1.7 GB，含全部 guest 目标）
@@ -36,7 +37,7 @@ deps:
     arch: x86_64
     install: .vm/virtiofsd
     probe: .vm/virtiofsd/virtiofsd
-    source: release:virtiofsd-4bfa7125.zip
+    source: release:deps-virtiofsd-1.14.0/virtiofsd-4bfa7125.zip
     strip: 3
     size_mb: 3
     sha256: 32cec50a9500dc2303307eb4cd9ab5a1c5d24a3b9cab9c84d1e8f82c9d0499f5
@@ -46,7 +47,7 @@ deps:
     arch: x86_64
     install: .vm/qemu
     probe: .vm/qemu/bin/qemu-system-x86_64.exe
-    source: release:qemu-windows-x86_64-11.1.1.tar.zst
+    source: release:deps-qemu-11.1.1-4/qemu-windows-x86_64-11.1.1.tar.zst
     strip: 1
     size_mb: 32
     sha256: e96ffa12bdea2feddd7091b4196f61c2ecd549f3db79fd9b792867c7c68e152c
@@ -103,4 +104,4 @@ deps:
     probe: .vm/smbd/smbd.exe
     source: smbd.windows
     size_mb: 1
-    note: 宿主侧用户态 SMB 共享服务（独立 fork 仓的预编译 helper；Windows 没有 9p / virtiofs，SMB 经 guestfwd 做实时共享）。Windows 用户档的**硬前置**：缺它虚拟机档不可用，先补齐，不降级；校验值在 links.yaml 的 `smbd.windows.sha256`（该 release 的资产 digest）
+    note: 宿主侧用户态 SMB 共享服务（独立 fork 仓 rust-smb-server 的 smbd-v* release；Windows 没有 9p / virtiofs，SMB 经 guestfwd 做实时共享）。Windows 用户档的**硬前置**：缺它虚拟机档不可用，先补齐，不降级；校验值在 links.yaml 的 `smbd.windows.sha256`（该 release 的 `.sha256` 资产，由 pins.js 刷新）

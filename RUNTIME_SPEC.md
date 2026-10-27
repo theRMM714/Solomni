@@ -122,7 +122,7 @@ files:                      # 包内文件指纹：用于可复现与呈现
 - 每项给出"现状 + 怎么补"；共享档是**硬前置**：用户共享链为空则虚拟机档不可用。Linux 缺 `virtiofsd` 仍可用 9p；Windows 缺 `smbd` 直接拒绝（先补齐，copy 不兜底）。
 - 依赖（QEMU / `virtiofsd` / 镜像 / SMB helper）**不预置、不分发**（解归档的入口程序装完补可执行位——便携包里的 zip 常常不带 unix 权限位），
   由 provision 能力在 Linux / Windows 上按 `dependencies.yaml` + `links.yaml` 下载并解包进项目内 `.vm/`（需用户同意；入口 `solomni --provision --ensure --yes`；
-  下载后按台账核对 sha256——自托管资产在清单条目里、链接类在 `links.yaml` 里成对，不 pin 的源如实不校验）。
+  下载后按台账核对 sha256——自托管资产在清单条目里（`release:<tag>/<资产>` + `sha256:`）、链接类在 `links.yaml` 里成对，不 pin 的源如实不校验）。
 - 产品检测、指路并给出补齐入口；`qemu_path` / `virtiofsd_path` / `smbd_path` 可登记。
 - 虚拟根里**真有什么**由 `kind: guest-runtime` 的运行期编排（Rust 侧，不依赖仓库脚本）起一次 guest **逐个自证**后写进画像。
 - Windows：首启经 cloud-init 装 `qemu-guest-agent`；维护启动装 `python3` / `cifs-utils` / C-C++（`gcc` `g++` `make` `libc6-dev`），并从固定版本官方二进制装 Node。

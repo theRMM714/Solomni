@@ -111,10 +111,12 @@ node dev.js test|fmt|clippy   # one-layer dev commands; do not call cargo direct
   a portable MinGW (`dlltool.exe`, needed by `windows-sys` raw-dylib) into the project's `.tools/`; a machine with a full
   binutils can point `SOLOMNI_MINGW_BIN=<bin dir>` at it instead of downloading ~260 MB.
 - **Outbound-link ledger**: `links.yaml` is the single authority for external URLs the project uses and that may
-  change (currently: toolchain bootstrap sources, the pinned winlibs upstream asset, the self-hosted dependencies release prefix, guest image sources, and the SMB helper asset); edit it once and the whole
+  change (currently: toolchain bootstrap sources, the pinned winlibs upstream asset, the download root for versioned self-hosted dependency releases, guest image sources, and the SMB helper asset); edit it once and the whole
   repository follows. **A download's checksum lives next to the link it guards** in the same ledger (`<link-key>.sha256`);
-  self-hosted release assets carry theirs in the `dependencies.yaml` entry. User overrides go through `.home/settings.yaml`
-  and environment variables, not the ledger.
+  self-hosted release assets carry theirs in the `dependencies.yaml` entry. Checksums are generated from upstream sources by
+  `node pins.js update` (never copied by hand); `node pins.js check` verifies them read-only and the weekly `pins-check`
+  CI job reports drift without writing files or opening PRs. User overrides go through `.home/settings.yaml` and environment
+  variables, not the ledger.
 - **No usable model means no session**: register a provider and a model and set the core default first; a missing channel is refused with a precise reason, never replaced by a fake model.
 - Common flags: `--root <dir>` (product root), `--web-port <port>`, `--release`.
 - Commands at the prompt: the menu printed at startup is the full list (`print_menu` in `src/presentation/cli/mod.rs`); the rewind command is `rewind`, while providers / models / the core default model are `provider` / `model` / `core`.
