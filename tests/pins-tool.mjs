@@ -44,6 +44,16 @@ assert.equal(pins.findZigShasum({ "0.15.2": { "x86_64-linux": { tarball: "u" } }
 // ④ GitHub release 坐标与自托管 source：旧 base=.../dependencies/ 与新 base=.../download/ 都要认。
 const gh = pins.githubRelease("https://github.com/o/r/releases/download/t/a.bin");
 assert.deepEqual(gh, { owner: "o", repo: "r", tag: "t", asset: "a.bin" });
+assert.deepEqual(
+  pins.githubRelease("https://github.com/o/r/releases/download/virtiofsd/1.14.0/a.bin"),
+  { owner: "o", repo: "r", tag: "virtiofsd/1.14.0", asset: "a.bin" },
+  "带 / 的 tag 要从右切资产名",
+);
+assert.deepEqual(
+  pins.githubRelease("https://github.com/o/r/releases/download/virtiofsd%2F1.14.0/a.bin"),
+  { owner: "o", repo: "r", tag: "virtiofsd/1.14.0", asset: "a.bin" },
+  "编码过的 tag 也要还原",
+);
 assert.equal(pins.githubRelease("https://example.com/a.bin"), null);
 let rt = pins.releaseTarget("https://github.com/o/r/releases/download/dependencies/", "release:a.bin");
 assert.equal(rt.tag, "dependencies");
@@ -52,6 +62,10 @@ assert.equal(rt.url, "https://github.com/o/r/releases/download/dependencies/a.bi
 rt = pins.releaseTarget("https://github.com/o/r/releases/download/", "release:deps-qemu-11.1.1-4/a.bin");
 assert.equal(rt.tag, "deps-qemu-11.1.1-4");
 assert.equal(rt.asset, "a.bin");
+rt = pins.releaseTarget("https://github.com/o/r/releases/download/", "release:virtiofsd/1.14.0/a.bin");
+assert.equal(rt.tag, "virtiofsd/1.14.0");
+assert.equal(rt.asset, "a.bin");
+assert.equal(rt.url, "https://github.com/o/r/releases/download/virtiofsd/1.14.0/a.bin");
 
 // ⑤ 链接键 → 校验源：Node 用 SHASUMS256.txt，Zig 用 index.json，Python 用 release digest。
 let t = pins.linkTarget("toolchain.node.24.11.0.linux-x86_64", "https://nodejs.org/dist/v24.11.0/node-v24.11.0-linux-x64.tar.xz");

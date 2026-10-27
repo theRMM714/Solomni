@@ -2045,8 +2045,8 @@ mod tests {
         let all = links().expect("台账可解析");
         let base = all.get("release.base").expect("台账有 release.base");
         assert_eq!(
-            source_url("release:deps-qemu-11.1.1-4/a.bin", &all).expect("要拼得出 URL"),
-            format!("{}/deps-qemu-11.1.1-4/a.bin", base.trim_end_matches('/')),
+            source_url("release:virtiofsd/1.14.0/a.bin", &all).expect("要拼得出 URL"),
+            format!("{}/virtiofsd/1.14.0/a.bin", base.trim_end_matches('/')),
             "tag 要原样保留在 URL 里"
         );
     }

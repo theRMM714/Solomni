@@ -28,7 +28,7 @@ deps:
     kind: appimage
     install: .vm/qemu
     probe: .vm/qemu/bin/qemu-system-x86_64
-    source: release:deps-qemu-11.1.1-4/QEMU-11.1.1-4-anylinux-x86_64.AppImage
+    source: release:qemu/11.1.1-4/QEMU-11.1.1-4-anylinux-x86_64.AppImage
     size_mb: 165
     sha256: 61ab65257c2db116aa28489c725379ab147a3bd399535c823a10d485ebd70fbd
     note: Linux 虚拟机档的 QEMU（pkgforge Anylinux AppImage，自带 sharun 兼容层；`--appimage-extract` 解包后约 1.7 GB，含全部 guest 目标）
@@ -37,7 +37,7 @@ deps:
     arch: x86_64
     install: .vm/virtiofsd
     probe: .vm/virtiofsd/virtiofsd
-    source: release:deps-virtiofsd-1.14.0/virtiofsd-4bfa7125.zip
+    source: release:virtiofsd/1.14.0/virtiofsd-4bfa7125.zip
     strip: 3
     size_mb: 3
     sha256: 32cec50a9500dc2303307eb4cd9ab5a1c5d24a3b9cab9c84d1e8f82c9d0499f5
@@ -47,7 +47,7 @@ deps:
     arch: x86_64
     install: .vm/qemu
     probe: .vm/qemu/bin/qemu-system-x86_64.exe
-    source: release:deps-qemu-11.1.1-4/qemu-windows-x86_64-11.1.1.tar.zst
+    source: release:qemu/11.1.1-4/qemu-windows-x86_64-11.1.1.tar.zst
     strip: 1
     size_mb: 32
     sha256: e96ffa12bdea2feddd7091b4196f61c2ecd549f3db79fd9b792867c7c68e152c
