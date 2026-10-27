@@ -1525,6 +1525,10 @@ function openAgentEditor(opts) {
     save.onclick = async () => {
       const name = draft.name.trim();
       if (!name) { c.setMsg('agent 名字不能为空', true); return; }
+      if (state.agents.some((x) => x.name === name && x.name !== editing)) {
+        c.setMsg('已有同名 agent：' + name + '（换一个名字，或先删除旧的）', true);
+        return;
+      }
       try {
         if (editing && editing !== name) {
           const ok = await confirmBox('agent 改名', '改名 = 先删旧「' + editing + '」再建新「' + name + '」。继续？', '继续');
@@ -1575,6 +1579,10 @@ function openTempAgentSheet(opts) {
         const name = draft.name.trim();
         if (!name) { c.setMsg('agent 名字不能为空', true); return; }
         try {
+          if (state.agents.some((x) => x.name === name)) {
+            const ok = await confirmBox('同名 agent', '登记处已有「' + name + '」，保存会更新它。继续？', '更新');
+            if (!ok) return;
+          }
           await c.mutate('upsert_agent', {
             name,
             modules: draft.modules.slice(),
@@ -2673,6 +2681,10 @@ async function openWizard(draft) {
       if (!name) { c.setMsg('agent 名字不能为空', true); return; }
       return (async () => {
         try {
+          if (state.agents.some((x) => x.name === name)) {
+            const ok = await confirmBox('同名 agent', '登记处已有「' + name + '」，保存会更新它。继续？', '更新');
+            if (!ok) return;
+          }
           await c.mutate('upsert_agent', {
             name,
             modules: a.modules.slice(),
