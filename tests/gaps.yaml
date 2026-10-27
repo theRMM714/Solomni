@@ -76,6 +76,8 @@
     于是子会话可以出现与父 / 根不一致的权限，且可能更宽。代理自己的 runtime Sandbox 还在
     proxy.rs 里硬编码了 granularity=Full（不落 meta）：代理子会话继承的是用户档位，不是这个 full。
     这些都是“子会话不得超过父会话”必须一起收口的问题。
+    正确口径不是“根一份”，而是“**根 ceiling + 子会话只收窄**”：多 agent 各写共享区一个文件夹
+    是合法需求；错的是“子会话可以比根更宽”和“父编辑覆盖子收窄”。
     shell 要安全，必须先把这套权限模型升级；这也是后续所有执行类工具的共同前提。
   how: |
     1) 权限拆成 reach × decision：
@@ -108,18 +110,34 @@
     6) 角色面不做 all：需要哪些角色就在角色表里显式列全；core_proxy 现在没有真实私有沙箱
        （private 指向 shared、shared_writable=true），要给它执行能力，先设计 proxy 私有沙箱与取产物路径；
        discussant 有私有沙箱但没有 work_pull，shell 只能跑自包含命令，要验证共享文件先补 work_pull。
-    7) 权限档位只在**根会话**存一份；子会话按根解析（或只在创建时复制且禁止子会话自行修改）。
-       代理的 full 改为显式档位（创建时由 user 选择并落盘），不再由 proxy.rs 硬编码；
-       协作多 agent 共享同一会话档位（权限跟会话走，不跟 agent 走），需要 per-agent 权限时另立设计。
-       子会话 edit 权限要么拒绝，要么写回根并确认；不能让子会话与根出现不同档位。
-       档位切换是根级动作，原子传播到整棵子树；有会话在生成时排队到下一次或拒绝，正在执行的调用不追溯。
+    7) 权限采用“**根 ceiling + 子会话只收窄**”：
+       - 根会话持有上限：四档 profile、reach 集合、decision、共享区路径范围
+         （allow_read / allow_write / deny）；
+       - 每个子会话可以有一层**收窄覆盖**（路径范围、reach、decision 只能更窄 / 更严）；
+         effective = 根 ceiling ∩ 子覆盖；子会话永远不能比根更宽；
+       - 典型用法：根“工作区内修改”、allow_write 为空（整棵工作区），
+         子 A 覆盖 allow_write=["src/foo"]、子 B 覆盖 ["src/bar"]，work_commit 各拒对方的路径；
+       - 子覆盖的“空集合”必须表示“不收窄”或“显式无权限”，不能沿用根的空集合 = 整棵工作区；
+         None（不覆盖）与 Some(empty)（显式无权限）要分开，否则子会话会把父级收窄撤销；
+       - 父级编辑只更新 ceiling，再与子覆盖求交，**不能覆盖掉子会话的收窄**；
+         如果父级收窄到与子覆盖无交集，子会话按 no access 处理并如实提示；
+       - 子会话 edit 只允许“收窄”；要放宽必须改根 ceiling。当前 edit_session 子会话路径
+         只写子会话 sandbox、不回写 owner，且不校验是否收窄；这条要改成“只允许收窄 + 求交”。
+    8) 代理的档位要**显式、落盘、可显示**：
+       - 建代理时由 user 选四档之一（或专门的“代理”预设），写进 meta；
+       - proxy.rs 不再硬编码 granularity=Full；代理会话状态栏 / 配置页显示它实际用的档位；
+       - 代理子工作继承根 ceiling；子工作可再收窄；代理自己的私有沙箱在给 shell 前必须先做，
+         现在 private=shared、shared_writable=true 不能直接跑 shell。
+    9) 档位切换是根级动作，原子传播到整棵子树；有会话在生成时排队到下一次或拒绝，正在执行的调用不追溯。
        审计要记录档位变化（当前 record_config 不含 permissions，要补）。
-    8) 同步 settings/meta schema、Web 设置、edit_session、permission API、文档与测试；
-       旧字段替换而非叠加；档位切换、子会话继承与 fail-closed 都要有可判定的用例。
+    10) 同步 settings/meta schema、Web 设置、edit_session、permission API、文档与测试；
+        旧字段替换而非叠加；档位切换、子会话继承与 fail-closed 都要有可判定的用例。
   accept: |
     逐工具能表达 reach × decision；四档可切换，且最高档按 reach 命名；
-    权限只在根会话存一份，子会话不能出现比根更宽的档位；代理档位显式落盘，不再硬编码 full；
-    多 agent 协作共享根档位；切换原子传播到整棵子树；
+    权限采用“根 ceiling + 子会话只收窄”：子会话不能比根更宽，可表达“每个 agent 只能改共享区某个文件夹”；
+    父级编辑与子收窄求交，不覆盖子收窄；子覆盖空集合的语义明确；
+    代理档位显式落盘、状态栏可见，不再硬编码 full；代理子工作继承根 ceiling；
+    多 agent 协作共享根 ceiling，各自可再收窄；切换原子传播到整棵子树；
     没有可回答前端时 ask 一律拒绝；正在执行的调用不因切换被追溯改写；
     shell 的 sandbox scope 在“工作区内修改”及以上可自动执行且只可达私有沙箱；
     external scope 在“外部可达（逐次确认）”下每命令 ask，在“全可达（自动放行）”下不问；
