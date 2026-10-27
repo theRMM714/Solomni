@@ -65,11 +65,19 @@
 ### 缓存与完整性
 
 - 缓存目录 `.vm/cache`。缓存里那份（复用的、刚下好的）进解包前按台账核对 sha256：
-  - 自托管 release 资产读清单条目（`sha256:`）；
+  - 自托管 release 资产读清单条目（`source: release:<tag>/<资产>` 与 `sha256:`）；
   - 链接类源读 `links.yaml` 的 `<键>.sha256`（pin 与它守护的 URL 在同一份台账里）；
   - 校验值由 `node pins.js update` 从上游校验源生成，`node pins.js check` 只读比对；不手抄。
   - 不 pin 的源如实不校验，靠解包 / 解析成功判。
 - 不符时**不删缓存**：报出台账值、实际值与来源——删了会在 pin 过期时变成每次重下的死循环。
+
+### 自托管依赖的 Release 版本
+
+- 按依赖族发版：QEMU 用 `deps-qemu-<版本>`，virtiofsd 用 `deps-virtiofsd-<版本>`；不走一个包住所有依赖的 `deps` 大包。
+- 清单写 `source: release:<tag>/<资产>`；`links.yaml` 的 `release.base` 只是下载根，不带具体版本。
+- 每个 release 带 `SHA256SUMS`；QEMU 的 release 同时带 GPL 对应源码与打包源码，virtiofsd 的 release 带许可证副本。
+- 旧 release 在仍被 Solomni 版本引用时**不删、不覆盖**；升级时新增 tag，旧 tag 保留。
+- 哈希仍由 `node pins.js update` 生成；`pins.js check` 只读比对当前 pin，不判断是否有新版本。
 
 ### 补齐后的生效方式
 
@@ -93,7 +101,7 @@
 ## 四、改动本单元时必须同步
 
 - 改清单字段或新增依赖 → `dependencies.yaml` 与 `dependencies/THIRD-PARTY-NOTICES.md`（自托管包的许可证与对应源码）；需要新下载源时改 `links.yaml`。
-  **自托管 release 资产要连 `sha256:` 一起登记**（值由 `node pins.js update` 从该 release 的 `SHA256SUMS` 或 GitHub API digest 生成）；链接类源的校验值写进 `links.yaml` 的 `<键>.sha256`。
+  **自托管 release 资产按依赖族发版**（`source: release:<tag>/<资产>`），连 `sha256:` 一起登记（值由 `node pins.js update` 从该 release 的 `SHA256SUMS` 或 GitHub API digest 生成）；链接类源的校验值写进 `links.yaml` 的 `<键>.sha256`。
   升级资产时 URL 与校验值必须同一个 diff 改掉；哈希不手抄，跑 `node pins.js update` 后用 `node pins.js check` 复核。
 - 改入站契约或路由 → `docs/presentation/contracts.md` 的 ROUTES 表与 `src/tests/routes.rs`（契约测试机器比对）。
 - 改下载 / 解包机制 → kernel 的 `outbound` / `unpack` 单元地图。

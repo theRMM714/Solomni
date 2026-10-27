@@ -111,7 +111,7 @@ node dev.js test|fmt|clippy   # one-layer dev commands; do not call cargo direct
   a portable MinGW (`dlltool.exe`, needed by `windows-sys` raw-dylib) into the project's `.tools/`; a machine with a full
   binutils can point `SOLOMNI_MINGW_BIN=<bin dir>` at it instead of downloading ~260 MB.
 - **Outbound-link ledger**: `links.yaml` is the single authority for external URLs the project uses and that may
-  change (currently: toolchain bootstrap sources, the pinned winlibs upstream asset, the self-hosted dependencies release prefix, guest image sources, and the SMB helper asset); edit it once and the whole
+  change (currently: toolchain bootstrap sources, the pinned winlibs upstream asset, the download root for versioned self-hosted dependency releases, guest image sources, and the SMB helper asset); edit it once and the whole
   repository follows. **A download's checksum lives next to the link it guards** in the same ledger (`<link-key>.sha256`);
   self-hosted release assets carry theirs in the `dependencies.yaml` entry. Checksums are generated from upstream sources by
   `node pins.js update` (never copied by hand); `node pins.js check` verifies them read-only and the weekly `pins-check`

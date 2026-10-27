@@ -3,7 +3,7 @@
  * 目的：维护 links.yaml 与 dependencies.yaml 里的校验值，把"手抄哈希"变成"按上游校验源生成"。
  * 管：update（刷新现有 pin）、check（只读比对）、bump（smbd 的 URL + 哈希一起换）。
  * 不管：下载依赖、安装依赖、产品运行期校验（那些在 provision / env.js / setup-toolchains.js）。
- * 联动：links.yaml、dependencies.yaml、.github/workflows/pins-check.yml；规则见 docs/provision/README.md。
+ * 联动：links.yaml、dependencies.yaml、.github/workflows/pins.yml；规则见 docs/provision/README.md。
  */
 "use strict";
 const fs = require("fs");
@@ -146,20 +146,35 @@ function replaceTrailingValue(line, value) {
   return m[1] + value + m[2];
 }
 
-async function fetchText(url, optional) {
+function requestHeaders(url) {
   const headers = { "User-Agent": USER_AGENT };
   if (url.startsWith("https://api.github.com/")) {
     headers.Accept = "application/vnd.github+json";
     if (process.env.GITHUB_TOKEN) headers.Authorization = "Bearer " + process.env.GITHUB_TOKEN;
   }
+  return headers;
+}
+
+async function fetchText(url, optional) {
   const res = await fetch(url, {
-    headers,
+    headers: requestHeaders(url),
     redirect: "follow",
     signal: AbortSignal.timeout(30000),
   });
   if (optional && res.status === 404) return null;
   if (!res.ok) throw new Error(url + " 返回 HTTP " + res.status);
   return await res.text();
+}
+
+/** 目的：确认 release 资产真的在（SHA256SUMS 可能先于资产上传）。 */
+async function headOk(url) {
+  const res = await fetch(url, {
+    method: "HEAD",
+    headers: requestHeaders(url),
+    redirect: "follow",
+    signal: AbortSignal.timeout(30000),
+  });
+  if (!res.ok) throw new Error(url + " 资产不存在（HTTP " + res.status + "）");
 }
 
 const releaseCache = new Map();
@@ -270,8 +285,12 @@ async function resolveTarget(t) {
       return hash;
     }
     case "github":
-    case "release":
       return await releaseDigest(t.owner, t.repo, t.tag, t.asset);
+    case "release": {
+      const hash = await releaseDigest(t.owner, t.repo, t.tag, t.asset);
+      if (t.url) await headOk(t.url);
+      return hash;
+    }
     default:
       throw new Error("未知的校验源类型：" + t.kind);
   }

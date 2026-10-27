@@ -8,7 +8,7 @@
 #   校验值由 `node pins.js update` 按上游校验源生成，不手抄；`node pins.js check` 只读比对。
 #   升级资产时 URL 与校验值必须在同一个 diff 里改掉——分居两处就会腐烂：曾把 URL 升到新版本、
 #   忘了改代码里那个常量，于是每次下载都判"不符 → 删文件 → 重跑"，把人挡在门外。
-#   自托管 release 资产不在这里 pin：那条连接的身份在 `dependencies.yaml` 的条目里（`sha256:` 字段）。
+#   自托管 release 资产不在这里 pin：那条连接的身份在 `dependencies.yaml` 的条目里（`source: release:<tag>/<资产>` + `sha256:`）。
 # - 不是每条都要 pin：源本身是 `latest`（会随上游滚动）的，pin 上去必然腐烂，就不写校验值，
 #   改由"下载成功 + 解包/解析成功"判。
 # - 只收"项目自用、可能变"的指路 / 下载源；用户自己配的（providers、qemu_path、guest_image）
@@ -53,7 +53,8 @@ guest.debian.image: https://cdimage.debian.org/cdimage/cloud/trixie/latest/debia
 guest.debian.qcow2: https://cdimage.debian.org/cdimage/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2
 guest.debian.pool: https://deb.debian.org/debian/pool/main/q/qemu/
 guest.debian.linux: https://deb.debian.org/debian/pool/main/l/linux/
-release.base: https://github.com/theRMM714/Solomni/releases/download/dependencies/
+# 自托管依赖的下载根；具体版本在 dependencies.yaml 的 `release:<tag>/<资产>`，按依赖族各自发 release。
+release.base: https://github.com/theRMM714/Solomni/releases/download/
 # Windows 的 SMB 共享 helper：独立 fork 仓自己发 Release 资产（源码 + 预编译 smbd.exe）。
 smbd.windows: https://github.com/theRMM714/rust-smb-server/releases/download/smbd-v0.1.0/smbd-windows-x86_64.exe
 # 来源：该 release 的 `smbd-windows-x86_64.exe.sha256`（CI 生成；缺失时回退 GitHub API 的资产 digest）。

@@ -749,12 +749,12 @@ function structureAudit() {
       for (const m of fs.readFileSync(abs, "utf8").matchAll(/\blink\("([A-Za-z0-9_.-]+)"\)/g)) used.add(m[1]);
     };
     // 消费点：环境层（rustup 安装）与依赖清单的 source（产品侧下载源都在 dependencies.yaml；
-    // release:<资产> 走 release.base，不在这里当键）。
+    // release:<tag>/<资产> 走 release.base，不在这里当键）。
     scanLinkUses(path.join(ROOT, "env.js"));
     scanLinkUses(path.join(ROOT, "toolchains.js"));
     const depsFile = path.join(ROOT, "dependencies.yaml");
     if (fs.existsSync(depsFile)) {
-      for (const m of fs.readFileSync(depsFile, "utf8").matchAll(/^\s*source:\s*([A-Za-z0-9_.:-]+)\s*$/gm)) {
+      for (const m of fs.readFileSync(depsFile, "utf8").matchAll(/^\s*source:\s*([A-Za-z0-9_.:/-]+)\s*$/gm)) {
         if (!m[1].includes(":")) used.add(m[1]);
       }
     }
