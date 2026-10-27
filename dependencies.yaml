@@ -103,4 +103,4 @@ deps:
     probe: .vm/smbd/smbd.exe
     source: smbd.windows
     size_mb: 1
-    note: 宿主侧用户态 SMB 共享服务（独立 fork 仓的预编译 helper；Windows 没有 9p / virtiofs，SMB 经 guestfwd 做实时共享）。Windows 用户档的**硬前置**：缺它虚拟机档不可用，先补齐，不降级；校验值在 links.yaml 的 `smbd.windows.sha256`（该 release 的资产 digest）
+    note: 宿主侧用户态 SMB 共享服务（独立 fork 仓 rust-smb-server 的 smbd-v* release；Windows 没有 9p / virtiofs，SMB 经 guestfwd 做实时共享）。Windows 用户档的**硬前置**：缺它虚拟机档不可用，先补齐，不降级；校验值在 links.yaml 的 `smbd.windows.sha256`（该 release 的 `.sha256` 资产，由 pins.js 刷新）

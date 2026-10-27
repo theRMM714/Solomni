@@ -67,6 +67,7 @@
 - 缓存目录 `.vm/cache`。缓存里那份（复用的、刚下好的）进解包前按台账核对 sha256：
   - 自托管 release 资产读清单条目（`sha256:`）；
   - 链接类源读 `links.yaml` 的 `<键>.sha256`（pin 与它守护的 URL 在同一份台账里）；
+  - 校验值由 `node pins.js update` 从上游校验源生成，`node pins.js check` 只读比对；不手抄。
   - 不 pin 的源如实不校验，靠解包 / 解析成功判。
 - 不符时**不删缓存**：报出台账值、实际值与来源——删了会在 pin 过期时变成每次重下的死循环。
 
@@ -92,8 +93,8 @@
 ## 四、改动本单元时必须同步
 
 - 改清单字段或新增依赖 → `dependencies.yaml` 与 `dependencies/THIRD-PARTY-NOTICES.md`（自托管包的许可证与对应源码）；需要新下载源时改 `links.yaml`。
-  **自托管 release 资产要连 `sha256:` 一起登记**（值取该 release 资产的 digest，来源写进 `note`）；链接类源的校验值写进 `links.yaml` 的 `<键>.sha256`。
-  升级资产时 URL 与校验值必须同一个 diff 改掉。
+  **自托管 release 资产要连 `sha256:` 一起登记**（值由 `node pins.js update` 从该 release 的 `SHA256SUMS` 或 GitHub API digest 生成）；链接类源的校验值写进 `links.yaml` 的 `<键>.sha256`。
+  升级资产时 URL 与校验值必须同一个 diff 改掉；哈希不手抄，跑 `node pins.js update` 后用 `node pins.js check` 复核。
 - 改入站契约或路由 → `docs/presentation/contracts.md` 的 ROUTES 表与 `src/tests/routes.rs`（契约测试机器比对）。
 - 改下载 / 解包机制 → kernel 的 `outbound` / `unpack` 单元地图。
 - 改 guest 运行期编排 → [docs/vm/README.md](../vm/README.md) 与 vm 的 `GuestSpec.seed` / `guest_wait_agent` 契约。

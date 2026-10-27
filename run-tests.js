@@ -1494,6 +1494,17 @@ function pushStep(obj) {
     raw: dl.code === 0 ? null : dl.out.slice(-600),
   });
 
+  // 依赖哈希工具自检：pins.js 的解析 / 来源推导 / 原地重写；只读、不碰网络。
+  announce("依赖哈希工具自检");
+  const pt = sh(process.execPath, [path.join("tests", "pins-tool.mjs")]);
+  announceDone(pt.code === 0 ? "完成" : "失败", "");
+  pushStep({
+    step: "依赖哈希工具自检",
+    status: pt.code === 0 && pt.out.includes("PINS-TOOL-OK") ? "pass" : "fail",
+    detail: pt.out.trim().split(/\r?\n/).slice(-1).join(""),
+    raw: pt.code === 0 ? null : pt.out.slice(-600),
+  });
+
   // 变更分流自检：CI 的 changes job 用 base 副本决定是否跳过代码测试；分类器自身必须有样例与 include 消费自检。
   announce("变更分流自检");
   const cc = sh(process.execPath, [path.join("tests", "ci-changes.mjs"), "--self-test"]);

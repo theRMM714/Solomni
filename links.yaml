@@ -5,6 +5,7 @@
 # - 值必须是 https://；域限于 rustup / winlibs / release / guest / smbd / toolchain（加域要同时改 tests 里的白名单）。
 # - **校验值（sha256）与它守护的那条链接成对**：键 = 链接键 + `.sha256`，值是 64 位十六进制；
 #   来源（上游同 release 的 `<资产>.sha256`，或 GitHub API 的资产 digest 字段）写在本行上面的注释里。
+#   校验值由 `node pins.js update` 按上游校验源生成，不手抄；`node pins.js check` 只读比对。
 #   升级资产时 URL 与校验值必须在同一个 diff 里改掉——分居两处就会腐烂：曾把 URL 升到新版本、
 #   忘了改代码里那个常量，于是每次下载都判"不符 → 删文件 → 重跑"，把人挡在门外。
 #   自托管 release 资产不在这里 pin：那条连接的身份在 `dependencies.yaml` 的条目里（`sha256:` 字段）。
@@ -54,6 +55,6 @@ guest.debian.pool: https://deb.debian.org/debian/pool/main/q/qemu/
 guest.debian.linux: https://deb.debian.org/debian/pool/main/l/linux/
 release.base: https://github.com/theRMM714/Solomni/releases/download/dependencies/
 # Windows 的 SMB 共享 helper：独立 fork 仓自己发 Release 资产（源码 + 预编译 smbd.exe）。
-smbd.windows: https://github.com/theRMM714/rust-smb-server-win/releases/download/v0.0.1/smbd-windows-x86_64.exe
-# 来源：该 release 的 `smbd-windows-x86_64.exe` 资产 digest（GitHub API）。
-smbd.windows.sha256: 79b86c2aecb638e05bd8bf1d8f71d107f47e45dec97e7886f4c3ff62dabd381b
+smbd.windows: https://github.com/theRMM714/rust-smb-server/releases/download/smbd-v0.1.0/smbd-windows-x86_64.exe
+# 来源：该 release 的 `smbd-windows-x86_64.exe.sha256`（CI 生成；缺失时回退 GitHub API 的资产 digest）。
+smbd.windows.sha256: 154aa1e7b8ca15feaa32baf878aee3499963bfcfb2d9009215e4035a56206249
