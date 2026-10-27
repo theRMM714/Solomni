@@ -322,12 +322,14 @@ impl RegistryOps for ConductorHandle {
         modules: &[String],
         model: &str,
         note: &str,
+        chara: &str,
     ) -> Result<(), String> {
-        let (name, modules, model, note) = (
+        let (name, modules, model, note, chara) = (
             name.to_string(),
             modules.to_vec(),
             model.to_string(),
             note.to_string(),
+            chara.to_string(),
         );
         // 模块存在性按**清单**校验：清单归 workspace，登记处只认事实，所以清单由这里取一份给它。
         // 目录保留名（systools/names.yaml）也在这里收口：登记处不认识工作区布局，名单由 conductor 注入。
@@ -336,7 +338,7 @@ impl RegistryOps for ConductorHandle {
             let reserved = core.reserved_names();
             crate::capabilities::registry::api::check_reserved(&name, &reserved)?;
             core.registry_mut()
-                .agent_upsert(&name, &modules, &model, &note, &roster)
+                .agent_upsert(&name, &modules, &model, &note, &chara, &roster)
         })
     }
     fn remove_agent(&self, name: &str) -> Result<bool, String> {

@@ -26,7 +26,7 @@ fn module_action_id_accepts_both_forms() {
 fn cli_session_creation_goes_through_the_action_table() {
     let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
     ops.registry
-        .upsert_agent("甲", &["a".to_string()], "", "")
+        .upsert_agent("甲", &["a".to_string()], "", "", "")
         .expect("建 agent");
     let picked = cli::pick_agents(&ops, &["甲".to_string()]).expect("点名");
     let sid = cli::create_session_action(&ops, "cli-1", "single", &picked, None, Tier::Host)
@@ -57,7 +57,7 @@ fn pick_agents_guides_on_empty_registry_and_names_the_unknown() {
     );
 
     ops.registry
-        .upsert_agent("甲", &["a".to_string()], "", "")
+        .upsert_agent("甲", &["a".to_string()], "", "", "")
         .expect("建 agent");
     let picked = cli::pick_agents(&ops, &["甲".to_string()]).expect("点名成功");
     assert_eq!(picked.len(), 1);

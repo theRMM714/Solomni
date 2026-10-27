@@ -28,9 +28,11 @@ pub fn keep_whole_replies(line_reply: &[u64], keep: usize) -> usize {
 ///   `brief` 是能力摘要，`system` 是工具用法；两者都来自模块声明。
 ///   env 由 tools 的 systool 按该 agent 的沙箱渲染后传入。
 ///   **工具清单不在这里**：本回合能用哪些工具随回合注入（见 collab 的 engine::tools_block）。
+#[allow(clippy::too_many_arguments)]
 pub fn agent_system(
     prompt: &dyn crate::capabilities::prompt::api::Prompt,
     agent: &str,
+    chara: &str,
     modules: &[ModulePrompt],
     env: &str,
     mode: crate::capabilities::llm::api::ToolMode,
@@ -41,6 +43,7 @@ pub fn agent_system(
         prompt,
         crate::capabilities::prompt::api::Segment::AgentSystem,
         agent,
+        chara,
         modules,
         env,
         mode,
@@ -62,7 +65,17 @@ pub fn role_system(
     session_kind: &str,
     role: &str,
 ) -> String {
-    render_system(prompt, segment, agent, &[], env, mode, session_kind, role)
+    render_system(
+        prompt,
+        segment,
+        agent,
+        "",
+        &[],
+        env,
+        mode,
+        session_kind,
+        role,
+    )
 }
 
 /// 两处身份（agent / 角色）**共用这一份装配**：模板不同，变量与取值口径完全相同——
@@ -72,6 +85,7 @@ fn render_system(
     prompt: &dyn crate::capabilities::prompt::api::Prompt,
     segment: crate::capabilities::prompt::api::Segment,
     agent: &str,
+    chara: &str,
     modules: &[ModulePrompt],
     env: &str,
     mode: crate::capabilities::llm::api::ToolMode,
@@ -94,10 +108,17 @@ fn render_system(
     // 机制说明**按（会话使用类型 × 角色）**从册子里取：对应关系是数据，这里只做匹配。
     //（AI 不知道机制就只会写散文。）
     let mechanism = prompt.mechanism(session_kind, role);
+    // 人设块是**独立指令段**：空人设不产生空标题；模板文案在册子里，不在代码里。
+    let chara_block = if chara.trim().is_empty() {
+        String::new()
+    } else {
+        prompt.render(Segment::AgentChara, &[("chara", chara.trim().to_string())])
+    };
     prompt.render(
         segment,
         &[
             ("agent", agent.to_string()),
+            ("chara_block", chara_block),
             ("modules", parts),
             ("mechanism", mechanism),
             ("env", env.to_string()),
@@ -147,6 +168,8 @@ pub struct SessionParams {
     pub private: std::path::PathBuf,
     /// 模块 id → 目录（环境块列出的模块目录）。
     pub module_dirs: std::collections::BTreeMap<String, std::path::PathBuf>,
+    /// 目的：人设 / 身份（建会话时快照；空 = 不产生人设块）。
+    pub chara: String,
     /// 模块能力包：id + 能力摘要 + 工具用法（顺序即装配顺序）。
     pub modules: Vec<ModulePrompt>,
     /// **角色提示词段**：`None` = 普通 agent（模块能力包 + `AgentSystem`）；
@@ -178,6 +201,7 @@ impl SessionParams {
             shared: sb.shared.clone(),
             private: sb.private.clone(),
             module_dirs: sb.modules.clone(),
+            chara: String::new(),
             modules: modules
                 .iter()
                 .map(|m| ModulePrompt {
@@ -191,6 +215,12 @@ impl SessionParams {
             role: role.to_string(),
             guest: None,
         }
+    }
+
+    /// 目的：接上这个 agent 的人设（建会话时从快照带入；空 = 不产生人设块）。
+    pub fn with_chara(mut self, chara: String) -> SessionParams {
+        self.chara = chara;
+        self
     }
 
     /// 目的：把"这场会话跑在哪种 guest 里"接上（本机档传 None）——工作环境块与路径拼法按它选。
@@ -238,6 +268,7 @@ impl SessionParams {
             None => agent_system(
                 prompt,
                 &self.agent,
+                &self.chara,
                 &self.modules,
                 &env,
                 mode,

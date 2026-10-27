@@ -75,6 +75,7 @@ impl Conductor {
                     .unwrap_or_default(),
                 modules: p.agent.modules,
                 why: p.why,
+                chara: p.agent.chara,
             })
             .collect();
         if out.is_empty() {

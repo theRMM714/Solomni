@@ -490,7 +490,8 @@ impl CollabSession {
                 &modules,
                 "collab",
                 "discussant",
-            );
+            )
+            .with_chara(a.chara.clone());
             let mut member = Member::plain(&a.name, params, mode);
             // 围栏：可达范围 + 断网，由该 agent 的沙箱与全局网络策略派生（机制在 adapters）；
             // 只读根来自用户显式授权（`host_read_roots`），默认空。

@@ -104,6 +104,7 @@ pub(crate) fn single_work(
             transient: true,
             modules: modules.iter().map(|s| s.to_string()).collect(),
             model: None,
+            chara: String::new(),
         }],
         task: None,
         delegate: false,

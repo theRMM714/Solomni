@@ -404,6 +404,7 @@ impl Conductor {
         let params = crate::capabilities::session::api::SessionParams::from_workspace(
             &a.name, sb, modules, "single", "solo",
         )
+        .with_chara(a.chara.clone())
         .with_guest(guest);
         // 单 agent 工作：用户自己开的那场对话（不是任务链的节点）——身份是 solo。
         let tools = self.tools_env(

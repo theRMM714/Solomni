@@ -539,6 +539,8 @@ pub struct AgentInstance {
     pub modules: Vec<String>,
     /// 该 agent 的模型（模型 id）；None = 核心默认。
     pub model: Option<String>,
+    /// 目的：人设 / 身份（空 = 不产生人设块）。
+    pub chara: String,
 }
 
 impl AgentInstance {
@@ -549,6 +551,7 @@ impl AgentInstance {
             transient: false,
             modules: v.modules.clone(),
             model: v.model.clone(),
+            chara: v.chara.clone(),
         }
     }
 }
@@ -589,6 +592,8 @@ pub struct AgentSuggestion {
     pub model: String,
     pub why: String,
     pub reuse: bool,
+    /// 目的：人设 / 身份（复用项取登记处自己的；组装项取核心建议）。
+    pub chara: String,
 }
 
 /// 目的：运行能力诊断的**组合**：包选择问题与模块入口问题各归其所有者，报告只做聚合。
@@ -661,6 +666,9 @@ pub struct ConfigAgent {
     pub modules: Vec<String>,
     #[serde(default)]
     pub model: String,
+    /// 目的：人设 / 身份（会话快照；配置界面允许临时改）。
+    #[serde(default)]
+    pub chara: String,
 }
 
 /// 会话配置视图（配置界面用）：身份与冻结标记 + 可改项 + 运行能力事实。

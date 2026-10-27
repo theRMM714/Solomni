@@ -283,6 +283,7 @@ pub struct AgentFact {
     pub modules: Vec<String>,
     pub model: Option<String>,
     pub note: String,
+    pub chara: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -380,6 +381,8 @@ pub struct NewAgent {
     pub transient: bool,
     pub modules: Vec<String>,
     pub model: Option<String>,
+    /// 目的：人设 / 身份（复用项取登记处自己的；临时项取声明里的）。
+    pub chara: String,
 }
 
 /// 一条要转达的消息（元信息 + 正文）：正文由工具层从参数取，宿主据此真正投递。
@@ -460,6 +463,7 @@ struct ParsedAgent {
     reuse: bool,
     modules: Vec<String>,
     model: Option<String>,
+    chara: String,
 }
 
 // ---------- 语义校验 ----------
@@ -505,7 +509,7 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
     }
     let mut resolved: Vec<NewAgent> = Vec::new();
     for (i, a) in agents.into_iter().enumerate() {
-        let (name, mut modules, model, transient) = if a.reuse {
+        let (name, mut modules, model, chara, transient) = if a.reuse {
             let fact = catalog
                 .agents
                 .iter()
@@ -515,6 +519,7 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
                 fact.name.clone(),
                 fact.modules.clone(),
                 fact.model.clone(),
+                fact.chara.clone(),
                 false,
             )
         } else {
@@ -548,7 +553,13 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
                     ));
                 }
             }
-            (a.name.clone(), a.modules.clone(), a.model.clone(), true)
+            (
+                a.name.clone(),
+                a.modules.clone(),
+                a.model.clone(),
+                a.chara.clone(),
+                true,
+            )
         };
         crate::capabilities::registry::api::validate_name(&name)
             .map_err(|e| format!("agents[{}] 的名字不合法：{}", i, e))?;
@@ -563,6 +574,7 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
             transient,
             modules: unique,
             model,
+            chara,
         });
     }
     Ok(NewSession {
@@ -712,6 +724,7 @@ fn parse_agents(items: &[serde_json::Value]) -> Result<Vec<ParsedAgent>, String>
                 reuse: true,
                 modules: Vec::new(),
                 model: None,
+                chara: String::new(),
             });
         } else {
             let name = match obj.get("name").and_then(|v| v.as_str()) {
@@ -741,12 +754,19 @@ fn parse_agents(items: &[serde_json::Value]) -> Result<Vec<ParsedAgent>, String>
                 .and_then(|v| v.as_str())
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty());
-            reject_extra(obj, &["name", "modules", "model"], i)?;
+            let chara = obj
+                .get("chara")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            reject_extra(obj, &["name", "modules", "model", "chara"], i)?;
             out.push(ParsedAgent {
                 name,
                 reuse: false,
                 modules,
                 model,
+                chara,
             });
         }
     }
@@ -777,6 +797,7 @@ mod tests {
                 modules: vec!["m1".to_string()],
                 model: Some("gpt".to_string()),
                 note: String::new(),
+                chara: "已存人设".to_string(),
             }],
             modules: vec![
                 ModuleFact {
@@ -813,6 +834,18 @@ mod tests {
         assert_eq!(spec.agents[0].modules, vec!["m1".to_string()]);
         assert!(spec.agents[0].transient);
         assert_eq!(spec.task, "做事");
+        assert_eq!(spec.agents[0].chara, "", "没写人设 = 空");
+
+        // 临时项可以带人设；这是核心代理建子会话时唯一能传人设的地方。
+        let with_chara: CreateArgs = serde_json::from_value(serde_json::json!({
+            "mode": "single",
+            "agents": [{"name": "带人设", "modules": ["m1"], "chara": " 严谨的整理者 "}],
+            "task": "做事",
+            "request_id": "r0c"
+        }))
+        .unwrap();
+        let spec = resolve_new_session(&with_chara, &c).expect("临时项人设合法");
+        assert_eq!(spec.agents[0].chara, "严谨的整理者", "人设去首尾空白");
 
         // modules 可以省略：零模块 agent 只用内建文件工具。
         let no_modules: CreateArgs = serde_json::from_value(serde_json::json!({
@@ -910,6 +943,7 @@ mod tests {
         let spec = resolve_new_session(&reuse, &c).expect("复用项");
         assert!(!spec.agents[0].transient);
         assert_eq!(spec.agents[0].model.as_deref(), Some("gpt"));
+        assert_eq!(spec.agents[0].chara, "已存人设", "复用项的人设取登记处事实");
 
         let missing: CreateArgs = serde_json::from_value(serde_json::json!({
             "mode": "single",
@@ -1018,6 +1052,7 @@ mod tests {
         let all = render_catalog(CatalogScope::All, &c).unwrap();
         assert!(all.contains("modules"));
         assert!(all.contains("models"));
+        assert!(all.contains("已存人设"), "清单要带 agent 人设：{}", all);
     }
 
     /// 转达要代答**只认选项 id**：属于那张卡才认，其余一律如实拒绝——不给任何"从一句话猜选项"的规则

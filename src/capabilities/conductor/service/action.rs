@@ -88,6 +88,7 @@ impl Conductor {
                 transient: a.transient,
                 modules: a.modules.clone(),
                 model: a.model.clone(),
+                chara: a.chara.clone(),
             })
             .collect();
         // 名字：点名就用它（撞名加尾号），否则派生（子会话按父 + agent 名，顶层按 agent 名）。

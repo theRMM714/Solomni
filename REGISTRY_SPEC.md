@@ -85,10 +85,14 @@ agents:
   <agent 名>:
     modules: [research, reviewer]   # 成员模块（可以为空：零模块 agent 只用内置文件工具）
     model: <模型 id>                # 默认模型（可选；缺省 = 用核心默认）
-    note: ""                        # 一句话说明（可选）
+    note: ""                        # 一句话说明（给人看；可选）
+    chara: |-                       # 人设 / 身份（给模型看；可选、可多行）
+      严谨的资料整理者：先核实，再下结论。
 ```
 
 - agent 只是「用户编排选择的存档」，不是能力注册表——能力仍在 `modules/` 公地（见 [PHILOSOPHY.md](PHILOSOPHY.md)）。
+- `note` 与 `chara` 是两件事：前者给人看（列表 / 推荐理由），后者进这个 agent 的身份提示词；`chara` 为空时不产生人设块。
+- 建会话时把 agent 的组合（名字 / 模块 / 模型 / 人设）取一份 **copy** 落进 `meta.yaml` 的 `agents`；之后改登记处不影响已开会话，会话配置里改的也只是这份 copy。
 - 同一个模块可以在一次工作里被多个 agent 共用（各自独立沙箱与调用）；每个 agent 的模块列表按出现顺序去重，`meta.modules` 是去重后的扁平清单。
 - agent 名会成为会话内的沙箱目录名，校验比 id 严（见「六、名字与 id」）。
 

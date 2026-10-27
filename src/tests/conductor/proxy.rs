@@ -722,6 +722,7 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
                     transient: true,
                     modules: vec!["m1".to_string()],
                     model: None,
+                    chara: String::new(),
                 }],
                 task: "做事".to_string(),
                 request_id: "r1".to_string(),
@@ -1091,6 +1092,7 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
         transient: true,
         modules: vec!["m1".to_string()],
         model: None,
+        chara: String::new(),
     }];
     assert!(ops
         .sessions
@@ -1268,12 +1270,14 @@ pub(crate) fn the_proxy_created_child_publishes_its_opening_facts() {
                 transient: true,
                 modules: vec!["m1".to_string()],
                 model: None,
+                chara: String::new(),
             },
             d::NewAgent {
                 name: "c2".to_string(),
                 transient: true,
                 modules: vec!["m2".to_string()],
                 model: None,
+                chara: String::new(),
             },
         ],
         task: "一起做".to_string(),
@@ -1411,6 +1415,7 @@ pub(crate) fn ai_created_child_inherits_the_proxy_environment() {
                         transient: true,
                         modules: vec!["m1".to_string()],
                         model: None,
+                        chara: String::new(),
                     }],
                     task: "做事".to_string(),
                     request_id: "r-env".to_string(),

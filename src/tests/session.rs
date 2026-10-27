@@ -78,6 +78,58 @@ pub(crate) fn agent_system_carries_the_real_roots() {
     );
 }
 
+/// 目的：人设是身份块里的**独立段**——有就出现，没有就不留空标题。
+/// 约束：人设从登记处视图快照进会话，和模块 / 模型同一份 copy 语义。
+#[test]
+pub(crate) fn agent_chara_enters_identity_only_when_set() {
+    let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]));
+    agent_upsert_chara(
+        &mut core,
+        "审稿人",
+        &["a"],
+        "",
+        "",
+        "严谨的审稿人：先质疑，再给方案。",
+    )
+    .unwrap();
+    let view = core
+        .registry()
+        .pick_agents(&["审稿人".to_string()])
+        .unwrap()
+        .into_iter()
+        .next()
+        .expect("登记处视图");
+    let sid = core
+        .create_work(WorkSpec {
+            name: "chara-w".to_string(),
+            mode: WorkMode::Single,
+            agents: vec![AgentInstance::from_view(&view)],
+            task: None,
+            delegate: false,
+            tier: Tier::Host,
+            guest: None,
+        })
+        .unwrap()
+        .sid;
+    let system = core.single_identity(&sid).expect("身份块");
+    assert!(
+        system.contains("== 人设与身份 ==") && system.contains("严谨的审稿人：先质疑，再给方案。"),
+        "登记处人设要进身份块：{}",
+        system
+    );
+    // 空人设：模板里的 chara_block 是空串，不留下空标题。
+    let empty = core
+        .create_work(work("chara-empty", WorkMode::Single, &["a"]))
+        .unwrap()
+        .sid;
+    let system2 = core.single_identity(&empty).expect("身份块");
+    assert!(
+        !system2.contains("== 人设与身份 =="),
+        "空人设不该留下空标题：{}",
+        system2
+    );
+}
+
 #[test]
 pub(crate) fn create_work_persists_and_history_replays() {
     let hist = Arc::new(InMemoryHistory::new());
@@ -633,12 +685,14 @@ pub(crate) fn create_work_validates_user_choices() {
                 transient: true,
                 modules: vec!["a".to_string()],
                 model: None,
+                chara: String::new(),
             },
             AgentInstance {
                 name: "乙".to_string(),
                 transient: true,
                 modules: vec!["b".to_string()],
                 model: None,
+                chara: String::new(),
             },
         ],
         task: None,
@@ -1099,6 +1153,7 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
                 name: "a".to_string(),
                 modules: vec!["b".to_string()],
                 model: "m".to_string(),
+                chara: String::new(),
             }],
             tier: "vm".to_string(),
             guest: Some(guest.clone()),

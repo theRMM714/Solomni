@@ -1511,6 +1511,7 @@ pub(crate) fn agents_of(modules: &[&str]) -> Vec<AgentInstance> {
             transient: true,
             modules: vec![m.to_string()],
             model: None,
+            chara: String::new(),
         })
         .collect()
 }
@@ -1532,6 +1533,7 @@ pub(crate) fn work(name: &str, mode: WorkMode, modules: &[&str]) -> WorkSpec {
             transient: true,
             modules: modules.iter().map(|s| s.to_string()).collect(),
             model: None,
+            chara: String::new(),
         }]
     };
     WorkSpec {
@@ -2473,10 +2475,22 @@ pub(crate) fn agent_upsert(
     model: &str,
     note: &str,
 ) -> Result<(), String> {
+    agent_upsert_chara(core, name, modules, model, note, "")
+}
+
+/// 目的：登记一个带人设的 agent（测试装配用）。
+pub(crate) fn agent_upsert_chara(
+    core: &mut Conductor,
+    name: &str,
+    modules: &[&str],
+    model: &str,
+    note: &str,
+    chara: &str,
+) -> Result<(), String> {
     let roster = core.scan();
     let modules: Vec<String> = modules.iter().map(|m| m.to_string()).collect();
     core.registry_mut()
-        .agent_upsert(name, &modules, model, note, &roster)
+        .agent_upsert(name, &modules, model, note, chara, &roster)
 }
 
 /// 目的：注入指定常驻服务面与隐秘字段面的装配（动作面、会话回收、env 注入的端到端断言用）。
@@ -2906,6 +2920,7 @@ impl FakeProxyHost {
                 modules: vec!["m1".to_string()],
                 model: Some("gpt".to_string()),
                 note: "已存".to_string(),
+                chara: "人设".to_string(),
             }],
             modules: vec![
                 dproxy::ModuleFact {

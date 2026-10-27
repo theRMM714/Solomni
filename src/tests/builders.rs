@@ -854,6 +854,7 @@ pub(crate) fn agent_meta(name: &str, modules: &[&str], model: Option<&str>) -> A
         transient: false,
         modules: modules.iter().map(|s| s.to_string()).collect(),
         model: model.map(|s| s.to_string()),
+        chara: String::new(),
     }
 }
 
@@ -892,6 +893,7 @@ pub(crate) fn edit_of(agents: Vec<(&str, &[&str], &str)>) -> SessionEdit {
                 name: n.to_string(),
                 modules: ms.iter().map(|s| s.to_string()).collect(),
                 model: m.to_string(),
+                chara: String::new(),
             })
             .collect(),
         tier: "host".to_string(),

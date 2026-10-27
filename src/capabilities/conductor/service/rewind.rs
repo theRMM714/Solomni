@@ -365,6 +365,7 @@ impl Conductor {
                     &self.session_kind_of(meta)?,
                     &self.role_of(meta)?,
                 )
+                .with_chara(a.chara.clone())
                 .with_guest(self.guest_os_of(&meta.exec));
                 let chat = self.llm.member_channel(&channel, &a.name);
                 let (history, marks, line_reply, compacted_upto) = replay_dialogue(events, mode);

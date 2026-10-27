@@ -260,6 +260,7 @@ impl Registry for RegistryService {
         module_ids: &[String],
         model: &str,
         note: &str,
+        chara: &str,
         roster: &Roster,
     ) -> Result<(), String> {
         agents::validate_name(name)?;
@@ -281,6 +282,7 @@ impl Registry for RegistryService {
                     Some(model.to_string())
                 },
                 note: note.to_string(),
+                chara: chara.trim().to_string(),
             },
         );
         self.save("registry::agent_upsert")

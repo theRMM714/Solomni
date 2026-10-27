@@ -16,6 +16,7 @@ pub(crate) fn module_tool_params_are_declared_in_the_manifest_and_enforced_by_co
     let system = crate::capabilities::session::domain::session::agent_system(
         &prompts,
         "m0",
+        "",
         &[
             crate::capabilities::session::domain::session::ModulePrompt {
                 id: mod_m0.manifest.id.clone(),
