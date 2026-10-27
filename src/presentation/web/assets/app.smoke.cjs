@@ -632,15 +632,37 @@ setTimeout(async () => {
       } else {
         vmRadio.checked = true;
         (vmRadio._h.change || []).forEach((f) => f());
-        // 桩 DOM 的 textContent 不聚合子节点：按"label 里有个内容是 research 的 span"找。
-        const lab = all.find((n) => n.tag === "label"
-          && (n.children || []).some((c) => String(c.textContent || "") === "research"));
-        const mcb = lab && (lab.children || []).find((n) => n.type === "checkbox");
-        if (!mcb) {
-          loadErrors.push("向导虚拟根检查：没有找到模块勾选框");
+        // 新的模块选择在 agent 弹层里：+ 新建临时 agent → + 添加模块 → 勾选 → 确定 → 加入本次。
+        const find = (pred) => {
+          const out = [];
+          (function walk(n) { for (const c of (n.children || [])) { out.push(c); walk(c); } })(root);
+          return out.find(pred);
+        };
+        const isBtn = (n) => n.tag === "button" || n.tagName === "BUTTON";
+        const addAgent = find((n) => isBtn(n) && n.textContent === "+ 新建临时 agent");
+        if (!addAgent) {
+          loadErrors.push("向导虚拟根检查：没有找到「+ 新建临时 agent」");
         } else {
-          mcb.checked = true;
-          (mcb._h.change || []).forEach((f) => f());
+          addAgent.onclick();
+          const addMod = find((n) => isBtn(n) && n.textContent === "+ 添加模块");
+          if (!addMod) {
+            loadErrors.push("向导虚拟根检查：没有找到「+ 添加模块」");
+          } else {
+            addMod.onclick();
+            const mcb = find((n) => n.type === "checkbox");
+            if (!mcb) {
+              loadErrors.push("向导虚拟根检查：模块选择器里没有勾选框");
+            } else {
+              mcb.checked = true;
+              (mcb._h.change || []).forEach((f) => f());
+              const ok = find((n) => isBtn(n) && n.textContent === "确定");
+              if (!ok) loadErrors.push("向导虚拟根检查：模块选择器没有「确定」");
+              else ok.onclick();
+              const join = find((n) => isBtn(n) && n.textContent === "加入本次（临时）");
+              if (!join) loadErrors.push("向导虚拟根检查：agent 弹层没有「加入本次（临时）」");
+              else join.onclick();
+            }
+          }
           const all2 = [];
           (function walk(n) { for (const c of (n.children || [])) { all2.push(c); walk(c); } })(root);
           const t2 = all2.map((n) => String(n.textContent || "")).join("|");
@@ -648,7 +670,7 @@ setTimeout(async () => {
             && t2.indexOf("已装齐") >= 0
             && t2.indexOf("自带运行能力：python") >= 0
             && t2.indexOf("这个虚拟机可能要缺：research 需要 ruby") >= 0;
-          if (!wizardGuest) loadErrors.push("向导虚拟根检查：" + t2.slice(0, 600));
+          if (!wizardGuest) loadErrors.push("向导虚拟根检查：" + t2.slice(0, 900));
         }
       }
     } catch (e) { loadErrors.push("向导代理形态检查失败：" + e.message); }

@@ -25,7 +25,14 @@ function el(tag) {
       if (!c || typeof c.appendChild !== "function") {
         throw new Error("appendChild 收到非节点（真实 DOM 会抛）：" + JSON.stringify(c === null ? null : Object.keys(c)));
       }
+      c.parentNode = node;
       node.children.push(c);
+      return c;
+    },
+    removeChild(c) {
+      const i = node.children.indexOf(c);
+      if (i >= 0) node.children.splice(i, 1);
+      if (c) c.parentNode = null;
       return c;
     },
     onclick: null,
@@ -218,15 +225,18 @@ if (!loadErrors.length) {
     );
     return idInput.value === "正在填的 id";
   });
-  check("agent 页先建好，登记模型后默认模型下拉即时更新", () => {
+  check("agent 页新建弹层：登记模型后默认模型下拉即时更新", () => {
     seedRegistry();
     vm.runInNewContext("openSettingsModal()", sandbox);
     const page = openPage("agents");
+    const add = walk(page, []).find((n) => n.tagName === "BUTTON" && n.textContent === "+ 新建 agent");
+    if (!add) return false;
+    add.onclick();
     vm.runInNewContext(
       'state.models = state.models.concat([{ id: "m3", name: "M3", api_model: "m3", provider: "p1", note: "", tools: "envelope", context: 0, is_core: false }]); notifyRegistryChange();',
       sandbox
     );
-    return optionValues(page).indexOf("m3") >= 0;
+    return optionValues(roots.get("#modal-root")).indexOf("m3") >= 0;
   });
   check("模型表单说明 0 = 不填且自动压缩按 128K 兜底", () => {
     vm.runInNewContext("openModelsModal()", sandbox);
@@ -327,6 +337,65 @@ if (!loadErrors.length) {
     const spaced = /display:\s*flex/.test(rule) && /flex-direction:\s*column/.test(rule) &&
       /gap:\s*(12px|var\(--sp-3\))/.test(rule);
     return !!(core && save && label && spaced);
+  });
+  // 弹层栈：关上层保留下层；关全部才清空（向导里开 agent / 模块选择器不丢状态的基础）。
+  check("弹层叠层：关上层保留下层，关全部才清空", () => {
+    const got = vm.runInNewContext(`
+      (() => {
+        closeModal();
+        const root = document.querySelector('#modal-root');
+        openModal('下层', (c) => { c.body.appendChild(ui.el('div', 'lower', 'LOWER')); });
+        const top = openModalLayer('上层', (c) => { c.body.appendChild(ui.el('div', 'upper', 'UPPER')); });
+        const walk = (n, out) => { out.push(n); for (const c of (n.children || [])) walk(c, out); return out; };
+        const lowerBefore = walk(root, []).some((n) => n.className === 'lower');
+        const upperBefore = walk(root, []).some((n) => n.className === 'upper');
+        top.close();
+        const lowerAfter = walk(root, []).some((n) => n.className === 'lower');
+        const upperAfter = walk(root, []).some((n) => n.className === 'upper');
+        closeModal();
+        const cleared = root.children.length === 0;
+        return { lowerBefore, upperBefore, lowerAfter, upperAfter, cleared };
+      })()
+    `, sandbox);
+    return got.lowerBefore && got.upperBefore && got.lowerAfter && !got.upperAfter && got.cleared;
+  });
+  // 模块搜索只认名字（id）与简介（brief），不串 runtimes 等字段。
+  check("模块搜索只匹配名字与简介", () => {
+    const got = vm.runInNewContext(`
+      (() => {
+        state.modules = [
+          { id: 'research', brief: '调研', runtimes: ['python'] },
+          { id: 'db', brief: '数据库', runtimes: ['ruby'] }
+        ];
+        return {
+          byId: moduleMatches(state.modules[0], 'res'),
+          byBrief: moduleMatches(state.modules[1], '数据'),
+          notRuntime: moduleMatches(state.modules[0], 'python'),
+          multi: moduleMatches(state.modules[0], 'res 调研'),
+          blank: moduleMatches(state.modules[0], '')
+        };
+      })()
+    `, sandbox);
+    return got.byId && got.byBrief && !got.notRuntime && got.multi && got.blank;
+  });
+  // 临时 agent 弹层必须有：人设输入、模块加号、加入按钮。
+  check("新建临时 agent 弹层含人设 / 模块加号", () => {
+    const got = vm.runInNewContext(`
+      (() => {
+        closeModal();
+        openTempAgentSheet({ onAdd: () => {} });
+        const root = document.querySelector('#modal-root');
+        const walk = (n, out) => { out.push(n); for (const c of (n.children || [])) walk(c, out); return out; };
+        const nodes = walk(root, []);
+        return {
+          add: nodes.some((n) => n.tagName === 'BUTTON' && n.textContent === '加入本次（临时）'),
+          modAdd: nodes.some((n) => n.tagName === 'BUTTON' && n.textContent === '+ 添加模块'),
+          chara: nodes.some((n) => n.tagName === 'TEXTAREA' && String(n.placeholder).indexOf('人设') >= 0)
+        };
+      })()
+    `, sandbox);
+    vm.runInNewContext("closeModal()", sandbox);
+    return got.add && got.modAdd && got.chara;
   });
 }
 
