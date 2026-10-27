@@ -70,6 +70,12 @@
     模块 userdata 写、共享区只读、私有沙箱全权这些差异都硬编码在派生里。
     结果：执行类工具（尤其 shell）无法表达“默认只在自己的私有沙箱里跑、越过沙箱才问人”；
     卡片 full 同时表示“会话不确认”和“本轮不再问”，语义重载；ask 在没有可回答前端时直接放行（fail-open）。
+    当前继承事实也不是“根一份”：协作成员与代理子会话在创建时复制父会话的 sandbox 权限
+    （spawn_agent_session 与 prepare_work 都复制 pmeta.sandbox），父编辑会向子树传播；
+    但子会话直接 edit 时只把 agents / modules 写回 owner，sandbox.permissions 不写回，
+    于是子会话可以出现与父 / 根不一致的权限，且可能更宽。代理自己的 runtime Sandbox 还在
+    proxy.rs 里硬编码了 granularity=Full（不落 meta）：代理子会话继承的是用户档位，不是这个 full。
+    这些都是“子会话不得超过父会话”必须一起收口的问题。
     shell 要安全，必须先把这套权限模型升级；这也是后续所有执行类工具的共同前提。
   how: |
     1) 权限拆成 reach × decision：
@@ -102,10 +108,18 @@
     6) 角色面不做 all：需要哪些角色就在角色表里显式列全；core_proxy 现在没有真实私有沙箱
        （private 指向 shared、shared_writable=true），要给它执行能力，先设计 proxy 私有沙箱与取产物路径；
        discussant 有私有沙箱但没有 work_pull，shell 只能跑自包含命令，要验证共享文件先补 work_pull。
-    7) 同步 settings/meta schema、Web 设置、edit_session、permission API、文档与测试；
+    7) 权限档位只在**根会话**存一份；子会话按根解析（或只在创建时复制且禁止子会话自行修改）。
+       代理的 full 改为显式档位（创建时由 user 选择并落盘），不再由 proxy.rs 硬编码；
+       协作多 agent 共享同一会话档位（权限跟会话走，不跟 agent 走），需要 per-agent 权限时另立设计。
+       子会话 edit 权限要么拒绝，要么写回根并确认；不能让子会话与根出现不同档位。
+       档位切换是根级动作，原子传播到整棵子树；有会话在生成时排队到下一次或拒绝，正在执行的调用不追溯。
+       审计要记录档位变化（当前 record_config 不含 permissions，要补）。
+    8) 同步 settings/meta schema、Web 设置、edit_session、permission API、文档与测试；
        旧字段替换而非叠加；档位切换、子会话继承与 fail-closed 都要有可判定的用例。
   accept: |
     逐工具能表达 reach × decision；四档可切换，且最高档按 reach 命名；
+    权限只在根会话存一份，子会话不能出现比根更宽的档位；代理档位显式落盘，不再硬编码 full；
+    多 agent 协作共享根档位；切换原子传播到整棵子树；
     没有可回答前端时 ask 一律拒绝；正在执行的调用不因切换被追溯改写；
     shell 的 sandbox scope 在“工作区内修改”及以上可自动执行且只可达私有沙箱；
     external scope 在“外部可达（逐次确认）”下每命令 ask，在“全可达（自动放行）”下不问；
