@@ -65,7 +65,8 @@ function basenameOfUrl(url) {
 
 /** 目的：从 GitHub release 资产 URL 拆出 owner / repo / tag / 资产名。 */
 function githubRelease(url) {
-  const m = url.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/releases\/download\/([^/]+)\/(.+)$/);
+  // tag 可以带 /（如 virtiofsd/1.14.0）；资产名不能带 /，所以从右切最后一段。
+  const m = url.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/releases\/download\/(.+)\/([^/]+)$/);
   if (!m) return null;
   return {
     owner: m[1],

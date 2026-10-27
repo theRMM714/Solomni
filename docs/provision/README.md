@@ -73,7 +73,7 @@
 
 ### 自托管依赖的 Release 版本
 
-- 按依赖族发版：QEMU 用 `deps-qemu-<版本>`，virtiofsd 用 `deps-virtiofsd-<版本>`；不走一个包住所有依赖的 `deps` 大包。
+- 按依赖族发版：QEMU 用 `qemu/<版本>`，virtiofsd 用 `virtiofsd/<版本>`；不走一个包住所有依赖的 `deps` 大包。
 - 清单写 `source: release:<tag>/<资产>`；`links.yaml` 的 `release.base` 只是下载根，不带具体版本。
 - 每个 release 带 `SHA256SUMS`；QEMU 的 release 同时带 GPL 对应源码与打包源码，virtiofsd 的 release 带许可证副本。
 - 旧 release 在仍被 Solomni 版本引用时**不删、不覆盖**；升级时新增 tag，旧 tag 保留。
