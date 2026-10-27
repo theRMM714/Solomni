@@ -65,10 +65,11 @@ function addTempAgentWithModule(root) {
   const addMod = find((n) => n.tag === "button" && n.textContent === "+ 添加模块");
   if (!addMod) return "没有「+ 添加模块」";
   addMod.onclick();
-  const cb = find((n) => n.type === "checkbox");
-  if (!cb) return "模块选择器里没有勾选框";
-  cb.checked = true;
-  (cb._h.change || []).forEach((f) => f());
+  const idNode = find((n) => String(n.className) === "mod-tile-id" && String(n.textContent) === "research");
+  let tile = idNode;
+  while (tile && String(tile.className).split(" ").indexOf("mod-tile") < 0) tile = tile.parentNode;
+  if (!tile) return "模块选择器里没有 research 卡片";
+  tile.onclick();
   const ok = find((n) => n.tag === "button" && n.textContent === "确定");
   if (!ok) return "模块选择器没有「确定」";
   ok.onclick();

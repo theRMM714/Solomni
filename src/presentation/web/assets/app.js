@@ -1401,49 +1401,73 @@ function moduleChips(opts) {
   render();
   return { node: box, render };
 }
-/** 模块选择弹层：搜索 → 勾选 → 确定。确定时才把整份选择交回去。 */
+/** 模块选择弹层：上方「已加入」始终可见且不参与搜索；下方「可选」可搜索；点卡片切换。 */
 function openModulePicker(opts) {
   const o = opts || {};
   const picked = new Set(o.selected || []);
   openModalLayer(o.title || '添加模块', (c) => {
-    const search = textInput('搜索模块（只匹配名字与简介）');
-    const list = document.createElement('div'); list.className = 'mod-pick-list';
-    const count = document.createElement('div'); count.className = 'mod-pick-count';
+    const search = textInput('关键字（只匹配名字与简介）');
+    const addedTitle = document.createElement('div'); addedTitle.className = 'mod-pick-title';
+    const availTitle = document.createElement('div'); availTitle.className = 'mod-pick-title';
+    const addedList = document.createElement('div'); addedList.className = 'mod-grid';
+    const availList = document.createElement('div'); availList.className = 'mod-grid';
     function ordered() {
       const out = state.modules.map((m) => m.id).filter((id) => picked.has(id));
       for (const id of picked) if (out.indexOf(id) < 0) out.push(id);
       return out;
     }
-    function updateCount() { count.textContent = '已选 ' + picked.size + ' 个'; }
+    function moduleOf(id) {
+      return state.modules.find((m) => m.id === id) || { id, brief: '（已不在清单）', missing: true };
+    }
+    function tile(m, isAdded) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'mod-tile' + (isAdded ? ' is-added' : '') + (m.missing ? ' is-orphan' : '');
+      b.setAttribute('aria-pressed', isAdded ? 'true' : 'false');
+      b.title = (isAdded ? '点击移除：' : '点击加入：') + m.id + (m.brief ? '——' + m.brief : '');
+      const head = document.createElement('span'); head.className = 'mod-tile-head';
+      const id = document.createElement('span'); id.className = 'mod-tile-id'; id.textContent = m.id;
+      const mark = document.createElement('span'); mark.className = 'mod-tile-mark';
+      mark.textContent = isAdded ? '✓' : '+';
+      head.appendChild(id); head.appendChild(mark);
+      const brief = document.createElement('span'); brief.className = 'mod-tile-brief'; brief.textContent = m.brief || '';
+      b.appendChild(head); b.appendChild(brief);
+      b.onclick = () => {
+        if (isAdded) picked.delete(m.id); else picked.add(m.id);
+        render();
+      };
+      return b;
+    }
     function render() {
-      list.innerHTML = '';
-      const shown = state.modules.filter((m) => moduleMatches(m, search.value));
-      // 已选但已从清单消失：补一行，避免“看得见却选不掉”。
-      for (const id of picked) {
-        if (!state.modules.some((m) => m.id === id)) {
-          shown.push({ id, brief: '（已不在清单）', missing: true });
-        }
+      const chosen = ordered();
+      const chosenSet = new Set(chosen);
+      addedTitle.textContent = '已加入（' + chosen.length + '）';
+      addedList.innerHTML = '';
+      if (!chosen.length) addedList.appendChild(emptyHint('（还没有加入模块）'));
+      else for (const id of chosen) addedList.appendChild(tile(moduleOf(id), true));
+
+      const shown = state.modules.filter((m) => !chosenSet.has(m.id) && moduleMatches(m, search.value));
+      availTitle.textContent = '可选（' + shown.length + '）';
+      availList.innerHTML = '';
+      if (!shown.length) {
+        const q = String(search.value || '').trim();
+        availList.appendChild(emptyHint(!state.modules.length
+          ? '（modules/ 下没有模块）'
+          : (!q && chosenSet.size >= state.modules.length
+            ? '（模块都已加入）'
+            : '（没有匹配的可选模块）')));
+      } else {
+        for (const m of shown) availList.appendChild(tile(m, false));
       }
-      if (!shown.length) list.appendChild(emptyHint('（没有匹配的模块）'));
-      for (const m of shown) {
-        const row = document.createElement('label');
-        row.className = 'mod-pick-row' + (m.missing ? ' is-orphan' : '');
-        const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = picked.has(m.id);
-        cb.addEventListener('change', () => {
-          if (cb.checked) picked.add(m.id); else picked.delete(m.id);
-          updateCount();
-        });
-        const name = document.createElement('span'); name.className = 'mod-pick-id'; name.textContent = m.id;
-        const brief = document.createElement('span'); brief.className = 'mod-pick-brief'; brief.textContent = m.brief || '';
-        row.appendChild(cb); row.appendChild(name); row.appendChild(brief);
-        list.appendChild(row);
-      }
-      updateCount();
     }
     search.addEventListener('input', render);
-    c.body.appendChild(field('搜索', search));
-    c.body.appendChild(list);
-    c.body.appendChild(count);
+    const addedSec = document.createElement('div'); addedSec.className = 'mod-pick-section';
+    addedSec.appendChild(addedTitle); addedSec.appendChild(addedList);
+    const availSec = document.createElement('div'); availSec.className = 'mod-pick-section';
+    availSec.appendChild(availTitle); availSec.appendChild(availList);
+    c.body.appendChild(addedSec);
+    c.body.appendChild(field('搜索可选模块', search));
+    c.body.appendChild(availSec);
     const actions = document.createElement('div'); actions.className = 'wf-inline';
     const cancel = btn('取消', 'btn'); cancel.onclick = c.close;
     const ok = btn('确定', 'btn btn-primary');
@@ -1452,7 +1476,7 @@ function openModulePicker(opts) {
     c.body.appendChild(actions);
     render();
     if (typeof search.focus === 'function') search.focus();
-  });
+  }, true);
 }
 
 /* ---------- agent 编辑：设置页 / 向导临时 agent 共用 ---------- */

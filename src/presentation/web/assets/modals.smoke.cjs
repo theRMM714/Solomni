@@ -15,9 +15,9 @@ function el(tag) {
     tagName: (tag || "div").toUpperCase(),
     textContent: "", value: "", className: "", dataset: {}, style: {},
     type: "", checked: false, disabled: false, title: "", placeholder: "",
-    children: [],
+    children: [], _h: {},
     classList: { add() {}, remove() {}, contains: () => false },
-    addEventListener() {},
+    addEventListener(t, f) { (node._h[t] = node._h[t] || []).push(f); },
     setAttribute() {},
     querySelector: () => el(),
     appendChild(c) {
@@ -377,6 +377,50 @@ if (!loadErrors.length) {
       })()
     `, sandbox);
     return got.byId && got.byBrief && !got.notRuntime && got.multi && got.blank;
+  });
+  // 模块选择器：已加入置顶、不参与搜索；可选列表排除已加入；点卡片可来回切换。
+  check("模块选择器：已加入置顶且可选列表排除已加入", () => {
+    const got = vm.runInNewContext(`
+      (() => {
+        state.modules = [
+          { id: 'research', brief: '调研' },
+          { id: 'db', brief: '数据库' }
+        ];
+        closeModal();
+        openModulePicker({ selected: ['research'], onDone: () => {} });
+        const root = document.querySelector('#modal-root');
+        const walk = (n, out) => { out.push(n); for (const c of (n.children || [])) walk(c, out); return out; };
+        const tileOf = (id) => {
+          const idNode = walk(root, []).find((n) => String(n.className) === 'mod-tile-id' && String(n.textContent) === id);
+          let t = idNode;
+          while (t && String(t.className).split(' ').indexOf('mod-tile') < 0) t = t.parentNode;
+          return t;
+        };
+        const isAdded = (t) => !!t && String(t.className).split(' ').indexOf('is-added') >= 0;
+        const before = {
+          added: isAdded(tileOf('research')),
+          availableHasDb: !!tileOf('db'),
+          availableHasResearch: !isAdded(tileOf('research')) && !!tileOf('research')
+        };
+        const search = walk(root, []).find((n) => n.tagName === 'INPUT');
+        search.value = 'research';
+        (search._h.input || []).forEach((f) => f());
+        const afterSearch = {
+          addedStill: isAdded(tileOf('research')),
+          dbHidden: !tileOf('db')
+        };
+        tileOf('research').onclick();
+        const afterRemove = {
+          addedGone: !isAdded(tileOf('research')),
+          backToAvailable: !!tileOf('research') && !isAdded(tileOf('research'))
+        };
+        closeModal();
+        return { before, afterSearch, afterRemove };
+      })()
+    `, sandbox);
+    return got.before.added && got.before.availableHasDb && !got.before.availableHasResearch
+      && got.afterSearch.addedStill && got.afterSearch.dbHidden
+      && got.afterRemove.addedGone && got.afterRemove.backToAvailable;
   });
   // 临时 agent 弹层必须有：人设输入、模块加号、加入按钮。
   check("新建临时 agent 弹层含人设 / 模块加号", () => {

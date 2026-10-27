@@ -649,12 +649,13 @@ setTimeout(async () => {
             loadErrors.push("向导虚拟根检查：没有找到「+ 添加模块」");
           } else {
             addMod.onclick();
-            const mcb = find((n) => n.type === "checkbox");
-            if (!mcb) {
-              loadErrors.push("向导虚拟根检查：模块选择器里没有勾选框");
+            const idNode = find((n) => String(n.className) === "mod-tile-id" && String(n.textContent) === "research");
+            let tile = idNode;
+            while (tile && String(tile.className).split(" ").indexOf("mod-tile") < 0) tile = tile.parentNode;
+            if (!tile) {
+              loadErrors.push("向导虚拟根检查：模块选择器里没有 research 卡片");
             } else {
-              mcb.checked = true;
-              (mcb._h.change || []).forEach((f) => f());
+              tile.onclick();
               const ok = find((n) => isBtn(n) && n.textContent === "确定");
               if (!ok) loadErrors.push("向导虚拟根检查：模块选择器没有「确定」");
               else ok.onclick();
