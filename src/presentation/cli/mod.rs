@@ -1010,6 +1010,7 @@ pub(crate) fn create_session_action(
                 "transient": a.transient,
                 "modules": a.modules,
                 "model": a.model,
+                "chara": a.chara,
             })
         })
         .collect();

@@ -23,7 +23,7 @@
 
 ```text
 session/<工作名>/
- meta.yaml          # 身份与选型：形态、agent 名单、模块与模型、需求、会话权限覆盖（sandbox）、执行档位（exec 段）
+ meta.yaml          # 身份与选型：形态、agent 名单（名字 / 人设 / 模块 / 模型）、需求、会话权限覆盖（sandbox）、执行档位（exec 段）
  transcript.jsonl   # 事件流水（留档只追加 rewind；删除 / 恢复整体重写）
  work/              # 本次工作的共享区**主副本**：用户投喂与成品（整棵树只有顶层这一个，agent 只读）
  .work/             # 共享区版本库：内容寻址对象、提交记录、各 agent 的拉取基线、待恢复事务、提交号计数器、跨进程锁（保留名）

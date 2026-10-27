@@ -66,6 +66,7 @@ pub(crate) fn flat_modules(agents: &[AgentMeta]) -> Vec<String> {
 }
 
 /// 单模式的组合语义：多个 agent 的模块并成一个**临时组合**实例（去重、保序；模型取核心默认）。
+/// 人设取空：多份人设无法诚实合并，由用户在会话配置里补。
 fn merge_into_one(picked: &[AgentInstance], name: &str) -> AgentInstance {
     let mut merged: Vec<String> = Vec::new();
     for a in picked {
@@ -80,6 +81,7 @@ fn merge_into_one(picked: &[AgentInstance], name: &str) -> AgentInstance {
         transient: true,
         modules: merged,
         model: None,
+        chara: String::new(),
     }
 }
 

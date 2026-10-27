@@ -48,6 +48,7 @@ fn meta(name: &str) -> SessionMeta {
             transient: false,
             modules: vec!["a".to_string()],
             model: None,
+            chara: String::new(),
         }],
         exec: ExecSpec::default(),
         sandbox: Default::default(),
@@ -677,6 +678,7 @@ fn yaml_settings_store_defaults_saves_and_reports_malformed_files() {
             modules: vec!["a".to_string()],
             model: None,
             note: "n".to_string(),
+            chara: "人设".to_string(),
         },
     );
     store.save(&want).expect("保存成功");
@@ -692,6 +694,10 @@ fn yaml_settings_store_defaults_saves_and_reports_malformed_files() {
     );
     assert_eq!(got.core.as_deref(), Some("m"));
     assert!(!got.app.streaming && got.agents.contains_key("甲"));
+    assert_eq!(
+        got.agents["甲"].chara, "人设",
+        "人设随 agents.yaml 落盘/读回"
+    );
 
     // unix：密钥文件 0600。
     #[cfg(unix)]

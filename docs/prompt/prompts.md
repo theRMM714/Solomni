@@ -20,7 +20,7 @@
 | | `tool_calling_envelope` / `tool_calling_native` | 工具调用约定**两套，互斥**：一个通道只用一套，由通道形态决定注入哪套 |
 | `shared/texts.yaml` | `module_tool_params_header` | 模块工具参数段的小标题（静态模块工具或已就绪服务操作声明了 `params` 时出现；两类参数合并成一段，标题只出现一次） |
 | | `path_rules` / `tools_this_turn` / `compact_prompt` / `discuss_reminder` | **指令段**（进入模型上下文，但属于"模型被要求做什么"）：路径写法、本回合工具说明块标题、压缩回合指令、讨论轮次里"上一轮没表态"的提醒 |
-| `shared/agent.yaml` | `agent.system` | agent 身份骨架（模块 `brief` 能力行 + `system` 工具用法 + 该会话**类型 × 角色**的机制说明 + 工作环境 + 调用约定；**工具清单不在这里**，随回合注入） |
+| `shared/agent.yaml` | `agent.system` / `agent.chara` | agent 身份骨架（人设块 + 模块 `brief` 能力行 + `system` 工具用法 + 该会话**类型 × 角色**的机制说明 + 工作环境 + 调用约定；**工具清单不在这里**，随回合注入）。`system` 的变量：agent / chara_block / modules / mechanism / env / tool_calling；`chara` 是独立人设段（变量 chara，空人设不插入空标题） |
 | `roles/discussant.yaml` | `discuss.opener` / `discuss.step` / `discuss.autonomy_note` | 讨论首轮、轮转、小组自裁说明 |
 | `roles/planner.yaml` | `synthesize.*` | 整理方案 |
 | | `node_review.*` | 节点验收（产出"节点 id — 负责人"表与结论） |

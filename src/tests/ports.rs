@@ -61,6 +61,7 @@ fn meta(name: &str) -> SessionMeta {
             transient: false,
             modules: vec!["a".to_string()],
             model: None,
+            chara: String::new(),
         }],
         exec: ExecSpec::default(),
         sandbox: Default::default(),

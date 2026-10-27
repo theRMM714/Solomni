@@ -46,6 +46,7 @@ fn merged(picks: Vec<Pick>) -> Pick {
             transient: true,
             modules,
             model,
+            chara: String::new(),
         },
         why: why.join("；"),
     }

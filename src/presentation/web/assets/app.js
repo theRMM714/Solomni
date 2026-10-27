@@ -847,7 +847,7 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
   // 表单草稿：保存从这里读；「重新扫描」整块重建，未保存的改动随之丢弃。
   const draft = {
     agents: (cfg.agents || []).map((a) => ({
-      name: a.name || '', modules: (a.modules || []).slice(), model: a.model || '',
+      name: a.name || '', modules: (a.modules || []).slice(), model: a.model || '', chara: a.chara || '',
     })),
     tier: cfg.tier === 'vm' ? 'vm' : 'host',
     guest: cfg.guest || '',
@@ -1018,7 +1018,7 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
       if (v) pins[cap] = v;
     }
     const body = {
-      agents: draft.agents.map((a) => ({ name: a.name.trim(), modules: a.modules.slice(), model: a.model || '' })),
+      agents: draft.agents.map((a) => ({ name: a.name.trim(), modules: a.modules.slice(), model: a.model || '', chara: a.chara || '' })),
       tier: draft.tier,
       guest: draft.tier === 'vm' ? (draft.guest || null) : null,
       pins: pins,
@@ -1046,7 +1046,7 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
   box.appendChild(acts);
 }
 
-/// 一个 agent 的编辑块：名字（冻结时只读）/ 模块多选（选项来自 /api/state 的 modules）/ 模型下拉。
+/// 一个 agent 的编辑块：名字（冻结时只读）/ 模块 chips（选项来自 /api/state 的 modules）/ 人设 / 模型下拉。
 function cfgAgentBlock(a, idx, frozen, modelSyncs) {
   const row = cfgDiv('cfg-agent');
   row.appendChild(cfgDiv('cfg-agent-head', 'agent ' + (idx + 1) + '：' + (a.name || '（未命名）')));
@@ -1058,22 +1058,15 @@ function cfgAgentBlock(a, idx, frozen, modelSyncs) {
   row.appendChild(field(frozen ? '名字（只读）' : '名字', nameIn));
   if (frozen) row.appendChild(cfgHint('会话已经开过：名单与形态冻结 —— 名字改不了（要换人请新建会话）；模块与模型仍可改。', 'warn'));
 
-  const mods = cfgDiv('wf-mods');
-  if (!state.modules.length) mods.appendChild(emptyHint('（modules/ 下没有模块）'));
-  for (const m of state.modules) {
-    const lab = document.createElement('label'); lab.className = 'wf-check';
-    const cb = document.createElement('input'); cb.type = 'checkbox';
-    cb.checked = a.modules.indexOf(m.id) >= 0;
-    cb.addEventListener('change', () => {
-      if (cb.checked) { if (a.modules.indexOf(m.id) < 0) a.modules.push(m.id); }
-      else a.modules = a.modules.filter((x) => x !== m.id);
-    });
-    const id = document.createElement('span'); id.textContent = m.id;
-    const brief = document.createElement('span'); brief.className = 'wf-brief'; brief.textContent = m.brief || '';
-    lab.appendChild(cb); lab.appendChild(id); lab.appendChild(brief);
-    mods.appendChild(lab);
-  }
-  row.appendChild(field('模块（这个 agent 的能力；勾 1 个 = 直连式，勾多个 = 组合式；同一模块可被多个 agent 共用）', mods));
+  const chips = moduleChips({
+    selected: () => a.modules,
+    onChange: (ids) => { a.modules = ids; },
+  });
+  row.appendChild(field('模块（这个 agent 的能力；同一模块可被多个 agent 共用）', chips.node));
+  const charaIn = areaInput('人设 / 身份（只影响这个会话里的这份 copy，不写回登记处）');
+  charaIn.value = a.chara || '';
+  charaIn.addEventListener('input', () => { a.chara = charaIn.value; });
+  row.appendChild(field('人设 / 身份', charaIn));
   const cur = a.model || '';
   const sel = selectInput(modelOptions(cur, true), cur);
   sel.addEventListener('change', () => { a.model = sel.value; });
@@ -1342,6 +1335,396 @@ function emptyHint(text) {
   return e;
 }
 
+/* ---------- 模块选择：已选 chips + 可搜索弹层 ---------- */
+/** 一行预览：把多行压成一行，过长截断（卡片 / 清单用，不冒充全文）。 */
+function oneLine(text, max) {
+  const s = String(text == null ? '' : text).replace(/\s+/g, ' ').trim();
+  const n = max || 80;
+  return s.length > n ? s.slice(0, n) + '…' : s;
+}
+function moduleById(id) {
+  return state.modules.find((m) => m.id === id);
+}
+/** 只匹配模块名字（id）与简介（brief）；runtimes / services / system 等字段刻意不查。 */
+function moduleMatches(m, q) {
+  const terms = String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return true;
+  const id = String(m.id || '').toLowerCase();
+  const brief = String(m.brief || '').toLowerCase();
+  return terms.every((t) => id.indexOf(t) >= 0 || brief.indexOf(t) >= 0);
+}
+/** 已选模块的 chips；返回 { node, render }。disabled = 只读（登记处 agent 的模块由登记处决定）。 */
+function moduleChips(opts) {
+  const o = opts || {};
+  const box = document.createElement('div');
+  box.className = 'mod-chips' + (o.disabled ? ' readonly' : '');
+  function current() { return (o.selected ? o.selected() : []).slice(); }
+  function commit(ids) {
+    if (o.onChange) o.onChange(ids.slice());
+    render();
+  }
+  function render() {
+    box.innerHTML = '';
+    const ids = current();
+    if (!ids.length) {
+      const empty = document.createElement('span');
+      empty.className = 'mod-chips-empty';
+      empty.textContent = o.emptyText || '（还没有模块：零模块 agent 只用内置文件工具）';
+      box.appendChild(empty);
+    }
+    for (const id of ids) {
+      const m = moduleById(id);
+      const chip = document.createElement('span');
+      chip.className = 'mod-chip' + (m ? '' : ' is-orphan');
+      const label = document.createElement('span');
+      label.className = 'mod-chip-label';
+      label.textContent = id + (m ? '' : '（已不在清单）');
+      if (m && m.brief) chip.title = m.brief;
+      chip.appendChild(label);
+      if (!o.disabled) {
+        const x = document.createElement('button');
+        x.type = 'button'; x.className = 'mod-chip-x'; x.textContent = '×';
+        x.title = '移除 ' + id;
+        x.onclick = () => commit(ids.filter((xid) => xid !== id));
+        chip.appendChild(x);
+      }
+      box.appendChild(chip);
+    }
+    if (!o.disabled) {
+      const add = document.createElement('button');
+      add.type = 'button'; add.className = 'mod-add';
+      add.textContent = '+ 添加模块';
+      add.onclick = () => openModulePicker({ selected: ids, title: '添加模块', onDone: commit });
+      box.appendChild(add);
+    }
+  }
+  render();
+  return { node: box, render };
+}
+/** 模块选择弹层：上方「已加入」始终可见且不参与搜索；下方「可选」可搜索；点卡片切换。 */
+function openModulePicker(opts) {
+  const o = opts || {};
+  const picked = new Set(o.selected || []);
+  openModalLayer(o.title || '添加模块', (c) => {
+    const search = textInput('关键字（只匹配名字与简介）');
+    const addedTitle = document.createElement('div'); addedTitle.className = 'mod-pick-title';
+    const availTitle = document.createElement('div'); availTitle.className = 'mod-pick-title';
+    const addedList = document.createElement('div'); addedList.className = 'mod-grid';
+    const availList = document.createElement('div'); availList.className = 'mod-grid';
+    function ordered() {
+      const out = state.modules.map((m) => m.id).filter((id) => picked.has(id));
+      for (const id of picked) if (out.indexOf(id) < 0) out.push(id);
+      return out;
+    }
+    function moduleOf(id) {
+      return state.modules.find((m) => m.id === id) || { id, brief: '（已不在清单）', missing: true };
+    }
+    function tile(m, isAdded) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'mod-tile' + (isAdded ? ' is-added' : '') + (m.missing ? ' is-orphan' : '');
+      b.setAttribute('aria-pressed', isAdded ? 'true' : 'false');
+      b.title = (isAdded ? '点击移除：' : '点击加入：') + m.id + (m.brief ? '——' + m.brief : '');
+      const head = document.createElement('span'); head.className = 'mod-tile-head';
+      const id = document.createElement('span'); id.className = 'mod-tile-id'; id.textContent = m.id;
+      const mark = document.createElement('span'); mark.className = 'mod-tile-mark';
+      mark.textContent = isAdded ? '✓' : '+';
+      head.appendChild(id); head.appendChild(mark);
+      const brief = document.createElement('span'); brief.className = 'mod-tile-brief'; brief.textContent = m.brief || '';
+      b.appendChild(head); b.appendChild(brief);
+      b.onclick = () => {
+        if (isAdded) picked.delete(m.id); else picked.add(m.id);
+        render();
+      };
+      return b;
+    }
+    function render() {
+      const chosen = ordered();
+      const chosenSet = new Set(chosen);
+      addedTitle.textContent = '已加入（' + chosen.length + '）';
+      addedList.innerHTML = '';
+      if (!chosen.length) addedList.appendChild(emptyHint('（还没有加入模块）'));
+      else for (const id of chosen) addedList.appendChild(tile(moduleOf(id), true));
+
+      const shown = state.modules.filter((m) => !chosenSet.has(m.id) && moduleMatches(m, search.value));
+      availTitle.textContent = '可选（' + shown.length + '）';
+      availList.innerHTML = '';
+      if (!shown.length) {
+        const q = String(search.value || '').trim();
+        availList.appendChild(emptyHint(!state.modules.length
+          ? '（modules/ 下没有模块）'
+          : (!q && chosenSet.size >= state.modules.length
+            ? '（模块都已加入）'
+            : '（没有匹配的可选模块）')));
+      } else {
+        for (const m of shown) availList.appendChild(tile(m, false));
+      }
+    }
+    search.addEventListener('input', render);
+    const addedSec = document.createElement('div'); addedSec.className = 'mod-pick-section';
+    addedSec.appendChild(addedTitle); addedSec.appendChild(addedList);
+    const availSec = document.createElement('div'); availSec.className = 'mod-pick-section';
+    availSec.appendChild(availTitle); availSec.appendChild(availList);
+    c.body.appendChild(addedSec);
+    c.body.appendChild(field('搜索可选模块', search));
+    c.body.appendChild(availSec);
+    const actions = document.createElement('div'); actions.className = 'wf-inline';
+    const cancel = btn('取消', 'btn'); cancel.onclick = c.close;
+    const ok = btn('确定', 'btn btn-primary');
+    ok.onclick = () => { const ids = ordered(); c.close(); if (o.onDone) o.onDone(ids); };
+    actions.appendChild(cancel); actions.appendChild(ok);
+    c.body.appendChild(actions);
+    render();
+    if (typeof search.focus === 'function') search.focus();
+  }, true);
+}
+
+/* ---------- agent 编辑：设置页 / 向导临时 agent 共用 ---------- */
+function cloneAgent(a) {
+  const x = a || {};
+  return {
+    name: x.name || '',
+    modules: (x.modules || []).slice(),
+    model: x.model || '',
+    chara: x.chara || '',
+    note: x.note || '',
+    transient: !!x.transient,
+    why: x.why || null,
+    reuse: !!x.reuse,
+  };
+}
+/** 人设 / 说明的一行预览（卡片与选择器用）。 */
+function agentPreview(a) {
+  if (a && String(a.chara || '').trim()) return '人设：' + oneLine(a.chara, 96);
+  if (a && String(a.note || '').trim()) return '说明：' + oneLine(a.note, 96);
+  return '';
+}
+/** agent 表单：名字 / 人设 / 模块 chips / 模型 / 说明。锁定项用于“登记处 agent 只改本会话模型”。 */
+function agentForm(opts) {
+  const o = opts || {};
+  const draft = o.draft;
+  const box = document.createElement('div'); box.className = 'form-col';
+  let nameTouched = !!(draft.name || '').trim();
+  const nameIn = textInput('agent 名字（会当沙箱目录名）');
+  nameIn.value = draft.name || '';
+  nameIn.disabled = !!o.lockedName;
+  nameIn.addEventListener('input', () => { nameTouched = true; draft.name = nameIn.value; });
+  const charaIn = areaInput('人设 / 身份（给模型看：角色、语气、职责边界；别写本次任务）');
+  charaIn.value = draft.chara || '';
+  charaIn.disabled = !!o.lockedChara;
+  charaIn.addEventListener('input', () => { draft.chara = charaIn.value; });
+  const chips = moduleChips({
+    selected: () => draft.modules,
+    disabled: !!o.lockedModules,
+    onChange: (ids) => {
+      draft.modules = ids;
+      if (!o.lockedName && !nameTouched && !String(draft.name || '').trim() && ids.length) {
+        draft.name = ids[0];
+        nameIn.value = ids[0];
+      }
+    },
+  });
+  const modelSel = selectInput(modelOptions(draft.model || '', true), draft.model || '');
+  modelSel.addEventListener('change', () => { draft.model = modelSel.value; });
+  const noteIn = textInput('说明（给人看的一句话，可选）');
+  noteIn.value = draft.note || '';
+  noteIn.addEventListener('input', () => { draft.note = noteIn.value; });
+  const syncModels = () => syncSelect(modelSel, modelOptions(draft.model || '', true), draft.model || '');
+  box.appendChild(field(o.lockedName ? '名字（只读）' : '名字', nameIn));
+  box.appendChild(field('人设 / 身份', charaIn));
+  box.appendChild(field('模块（能力）', chips.node));
+  box.appendChild(field('默认模型（空 = 核心默认）', modelSel));
+  box.appendChild(field('说明', noteIn));
+  return { node: box, draft, syncModels, nameIn, charaIn, chipNode: chips.node };
+}
+/** 设置页的 agent 新建 / 编辑（写登记处）。 */
+function openAgentEditor(opts) {
+  const o = opts || {};
+  const editing = o.agent ? o.agent.name : null;
+  const draft = cloneAgent(o.agent);
+  openModalLayer(editing ? '编辑 agent' : '新建 agent', (c) => {
+    const form = agentForm({ draft });
+    c.body.appendChild(form.node);
+    const save = btn('保存 agent', 'btn btn-primary btn-block');
+    save.onclick = async () => {
+      const name = draft.name.trim();
+      if (!name) { c.setMsg('agent 名字不能为空', true); return; }
+      if (state.agents.some((x) => x.name === name && x.name !== editing)) {
+        c.setMsg('已有同名 agent：' + name + '（换一个名字，或先删除旧的）', true);
+        return;
+      }
+      try {
+        if (editing && editing !== name) {
+          const ok = await confirmBox('agent 改名', '改名 = 先删旧「' + editing + '」再建新「' + name + '」。继续？', '继续');
+          if (!ok) return;
+          await c.mutate('remove_agent', { name: editing });
+        }
+        await c.mutate('upsert_agent', {
+          name,
+          modules: draft.modules.slice(),
+          model: draft.model || undefined,
+          note: draft.note.trim(),
+          chara: draft.chara.trim(),
+        });
+        if (o.onSaved) o.onSaved(name);
+        c.close();
+      } catch (e) { c.setMsg(e.message, true); }
+    };
+    const cancel = btn('取消', 'btn btn-block'); cancel.onclick = c.close;
+    c.body.appendChild(save); c.body.appendChild(cancel);
+    c.onRegistryChange(form.syncModels);
+  }, true);
+}
+/** 向导里的临时 agent 新建 / 编辑（不写登记处；可顺手保存为 agent）。 */
+function openTempAgentSheet(opts) {
+  const o = opts || {};
+  const editing = !!o.agent;
+  const draft = cloneAgent(o.agent);
+  if (!editing) draft.transient = true;
+  const title = o.title || (editing ? '编辑临时 agent' : '新建临时 agent');
+  openModalLayer(title, (c) => {
+    const form = agentForm({
+      draft,
+      lockedName: !!o.lockedName,
+      lockedModules: !!o.lockedModules,
+      lockedChara: !!o.lockedChara,
+    });
+    c.body.appendChild(form.node);
+    const add = btn(editing ? '保存' : '加入本次（临时）', 'btn btn-primary btn-block');
+    add.onclick = () => {
+      if (!draft.name.trim()) { c.setMsg('agent 名字不能为空', true); return; }
+      if (o.onAdd) o.onAdd(cloneAgent(draft));
+      c.close();
+    };
+    c.body.appendChild(add);
+    if (o.allowSaveAsAgent !== false) {
+      const keep = btn('保存为 agent 并加入', 'btn btn-block');
+      keep.onclick = async () => {
+        const name = draft.name.trim();
+        if (!name) { c.setMsg('agent 名字不能为空', true); return; }
+        try {
+          if (state.agents.some((x) => x.name === name)) {
+            const ok = await confirmBox('同名 agent', '登记处已有「' + name + '」，保存会更新它。继续？', '更新');
+            if (!ok) return;
+          }
+          await c.mutate('upsert_agent', {
+            name,
+            modules: draft.modules.slice(),
+            model: draft.model || undefined,
+            note: draft.note.trim(),
+            chara: draft.chara.trim(),
+          });
+          if (o.onSaveAsAgent) {
+            const saved = cloneAgent(draft);
+            saved.transient = false;
+            saved.reuse = true;
+            o.onSaveAsAgent(saved);
+          }
+          c.close();
+        } catch (e) { c.setMsg(e.message, true); }
+      };
+      c.body.appendChild(keep);
+    }
+    const cancel = btn('取消', 'btn btn-block'); cancel.onclick = c.close;
+    c.body.appendChild(cancel);
+    c.onRegistryChange(form.syncModels);
+  }, true);
+}
+/** 从登记处挑一个 agent（协作加入 / 单 agent 选择）。 */
+function openRegistryAgentPicker(opts) {
+  const o = opts || {};
+  const taken = o.taken || [];
+  openModalLayer(o.title || (o.single ? '选择 agent' : '从登记处加入'), (c) => {
+    const search = textInput('搜索 agent（名字 / 说明 / 人设）');
+    const list = document.createElement('div'); list.className = 'reg-list';
+    function matches(a, q) {
+      const terms = String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
+      if (!terms.length) return true;
+      const hay = [a.name, a.note, a.chara].map((x) => String(x || '').toLowerCase()).join(' ');
+      return terms.every((t) => hay.indexOf(t) >= 0);
+    }
+    function render() {
+      list.innerHTML = '';
+      const shown = state.agents.filter((a) => matches(a, search.value));
+      if (!shown.length) { list.appendChild(emptyHint('（没有匹配的登记处 agent）')); return; }
+      for (const a of shown) {
+        const row = document.createElement('div'); row.className = 'reg-item';
+        const main = document.createElement('div'); main.className = 'reg-main';
+        const nm = document.createElement('div'); nm.className = 'reg-id';
+        nm.textContent = a.name + (taken.indexOf(a.name) >= 0 ? '（已在本次名单）' : '');
+        const sub = document.createElement('div'); sub.className = 'reg-sub';
+        sub.textContent = (a.modules || []).join(' + ') + ' · 模型 ' + (a.model || '（核心默认）');
+        const line = document.createElement('div'); line.className = 'reg-note';
+        line.textContent = agentPreview(a);
+        main.appendChild(nm); main.appendChild(sub); if (line.textContent) main.appendChild(line);
+        const acts = document.createElement('div'); acts.className = 'reg-acts';
+        const pick = btn(o.single ? '选择' : '加入', 'btn');
+        pick.disabled = taken.indexOf(a.name) >= 0;
+        pick.onclick = () => {
+          if (pick.disabled) return;
+          if (o.onPick) o.onPick(cloneAgent({
+            name: a.name,
+            modules: (a.modules || []).slice(),
+            model: a.model || '',
+            chara: a.chara || '',
+            note: a.note || '',
+            transient: false,
+            reuse: true,
+          }));
+          c.close();
+        };
+        acts.appendChild(pick);
+        row.appendChild(main); row.appendChild(acts);
+        list.appendChild(row);
+      }
+    }
+    search.addEventListener('input', render);
+    c.body.appendChild(field('搜索', search));
+    c.body.appendChild(list);
+    const cancel = btn('关闭', 'btn btn-block'); cancel.onclick = c.close;
+    c.body.appendChild(cancel);
+    render();
+  }, true);
+}
+/** 向导 / 设置列表里的一个 agent 卡片。 */
+function agentCard(a, handlers) {
+  const h = handlers || {};
+  const row = document.createElement('div'); row.className = 'agent-item';
+  const main = document.createElement('div'); main.className = 'reg-main';
+  const head = document.createElement('div'); head.className = 'agent-card-head';
+  const nm = document.createElement('div'); nm.className = 'agent-name'; nm.textContent = a.name;
+  head.appendChild(nm);
+  const badge = document.createElement('span');
+  badge.className = 'agent-badge' + (a.transient ? ' is-transient' : '');
+  badge.textContent = a.transient ? '临时' : '登记处';
+  head.appendChild(badge);
+  main.appendChild(head);
+  const preview = agentPreview(a);
+  if (preview) { const p = document.createElement('div'); p.className = 'agent-preview'; p.textContent = preview; main.appendChild(p); }
+  const mods = document.createElement('div'); mods.className = 'agent-mods';
+  mods.textContent = (a.modules && a.modules.length ? a.modules.join(' + ') : '（无模块）') + ' · 模型 ' + (a.model || '（核心默认）');
+  main.appendChild(mods);
+  if (a.why) { const why = document.createElement('div'); why.className = 'wf-why'; why.textContent = a.why; main.appendChild(why); }
+  const acts = document.createElement('div'); acts.className = 'wf-inline';
+  if (a.transient && h.onSave) {
+    const keep = btn('存为 agent', 'link-btn');
+    keep.onclick = () => h.onSave(a);
+    acts.appendChild(keep);
+  }
+  if (h.onEdit) {
+    const edit = btn('编辑', 'link-btn');
+    edit.onclick = () => h.onEdit(a);
+    acts.appendChild(edit);
+  }
+  if (h.onRemove) {
+    const del = btn('移除', 'link-btn danger');
+    del.onclick = () => h.onRemove(a);
+    acts.appendChild(del);
+  }
+  row.appendChild(main); row.appendChild(acts);
+  return row;
+}
+
 
 /* ---------- 屏幕居中的提示弹窗（自研，顶替原生 alert/confirm） ----------
  * 为什么自己做：原生弹窗样式不可控、会阻塞主线程、在受限环境（内嵌浏览器 / 移动端 webview）里表现不一。
@@ -1401,22 +1784,45 @@ function confirmBox(title, text, confirmLabel) {
   });
 }
 
-/* ---------- 主区弹层（清空一律 innerHTML=''） ---------- */
-let modalUnbind = null;
-// 弹窗自己的登记处订阅：关窗就退订，免得页面没了还在重绘。
-let modalDisposers = [];
-function closeModal() {
-  for (const off of modalDisposers.splice(0)) {
-    try { off(); } catch (e) { console.warn("退订失败：", e); }
-  }
-  if (modalUnbind) { modalUnbind(); modalUnbind = null; }
-  const root = $('#modal-root');
-  root.innerHTML = '';
-  root.className = 'modal-root';
+/* ---------- 主区弹层：可叠层（向导 → agent → 模块选择器） ----------
+ * openModal 保持原语义：关掉所有层再开一层（现有调用点不需要改）。
+ * openModalLayer 叠一层：Esc / 点遮罩 / ctx.close 只关最上面这一层，下层状态还在。
+ */
+let modalLayers = [];
+function detachNode(n) {
+  if (!n) return;
+  if (n.parentNode && n.parentNode.removeChild) n.parentNode.removeChild(n);
+  else if (typeof n.remove === 'function') n.remove();
 }
-function openModal(title, build, wide) {
-  closeModal();
-  modalDisposers = [];
+/** 关掉这一层及其上面的所有层；closeModal 就是从最底层开始关。 */
+function closeModalLayer(layer) {
+  const at = modalLayers.indexOf(layer);
+  if (at < 0) return;
+  while (modalLayers.length > at) {
+    const top = modalLayers.pop();
+    if (top.unbind) top.unbind();
+    for (const off of top.disposers.splice(0)) {
+      try { off(); } catch (e) { console.warn("退订失败：", e); }
+    }
+    detachNode(top.overlay);
+  }
+  const root = $('#modal-root');
+  if (!modalLayers.length) {
+    root.innerHTML = '';
+    root.className = 'modal-root';
+  }
+}
+/** 关掉所有弹层（原有 closeModal 的语义）。 */
+function closeModal() {
+  if (!modalLayers.length) {
+    const root = $('#modal-root');
+    if (root) { root.innerHTML = ''; root.className = 'modal-root'; }
+    return;
+  }
+  closeModalLayer(modalLayers[0]);
+}
+/** 叠一层（没有下层时就是普通弹层）。返回的 ctx.close 只关自己这一层。 */
+function openModalLayer(title, build, wide) {
   const root = $('#modal-root');
   root.className = 'modal-root open';
   const overlay = document.createElement('div'); overlay.className = 'modal-overlay';
@@ -1424,22 +1830,25 @@ function openModal(title, build, wide) {
   const head = document.createElement('div'); head.className = 'modal-head';
   const h = document.createElement('div'); h.className = 'modal-title'; h.textContent = title;
   const close = btn('✕', 'modal-close');
-  close.onclick = closeModal;
+  const layer = { overlay, disposers: [], unbind: null };
+  const closeThis = () => closeModalLayer(layer);
+  close.onclick = closeThis;
   head.appendChild(h); head.appendChild(close);
   const body = document.createElement('div'); body.className = 'modal-body';
   const msg = document.createElement('div'); msg.className = 'modal-msg';
   panel.appendChild(head); panel.appendChild(body); panel.appendChild(msg);
   overlay.appendChild(panel);
   root.appendChild(overlay);
-  modalUnbind = ui.bindDismiss(overlay, panel, closeModal);
+  layer.unbind = ui.bindDismiss(overlay, panel, closeThis);
+  modalLayers.push(layer);
   const ctx = {
     body,
     setMsg: (t, isErr) => { msg.textContent = t || ''; msg.className = isErr ? 'modal-msg err' : 'modal-msg'; },
-    close: closeModal,
-    // 订阅登记处变化；弹窗关闭时统一退订。
+    close: closeThis,
+    // 订阅登记处变化；关层时统一退订。
     onRegistryChange: (fn) => {
       const off = onRegistryChange(fn);
-      modalDisposers.push(off);
+      layer.disposers.push(off);
       return off;
     },
     // 登记处写操作只有这一条：动作 → 重拉状态（指纹变了会通知所有已打开的分页）。
@@ -1451,6 +1860,11 @@ function openModal(title, build, wide) {
   };
   build(ctx);
   return ctx;
+}
+/** 开一层新的主弹层（保留原有替换语义）。 */
+function openModal(title, build, wide) {
+  closeModal();
+  return openModalLayer(title, build, wide);
 }
 
 /* ---------- 设置①：供应商登记（录入 / 修改 / 删除） ---------- */
@@ -1991,13 +2405,14 @@ function openSettingsHub(page) {
 
 /* ---------- 通用：多选一弹层（顶替原生 confirm 的三选） ---------- */
 function choiceModal(title, question, actions) {
-  openModal(title, (c) => {
+  // 叠在现有弹层之上：从向导里弹出来时，选完能回到向导（不丢已填内容）。
+  openModalLayer(title, (c) => {
     const q = document.createElement('div'); q.className = 'wf-label'; q.textContent = question;
     c.body.appendChild(q);
     const row = document.createElement('div'); row.className = 'wf-inline';
     for (const a of actions) {
       const b = btn(a[0], a[1] || 'btn');
-      b.onclick = () => { closeModal(); a[2](); };
+      b.onclick = () => { c.close(); a[2](); };
       row.appendChild(b);
     }
     c.body.appendChild(row);
@@ -2007,99 +2422,32 @@ function choiceModal(title, question, actions) {
 /* ---------- 设置⑤：agent 管理（列表 / 新建 / 编辑 / 删除） ---------- */
 function agentsPage(c) {
     const listWrap = document.createElement('div'); listWrap.className = 'reg-list';
-    const modWrap = document.createElement('div'); modWrap.className = 'wf-mods';
-    const nameIn = textInput('agent 名字（会当沙箱目录名，非空、无非法字符、不能重名）');
-    const modelSel = selectInput(modelOptions(state.core, true), state.core || '');
-    const noteIn = textInput('说明（这个 agent 干什么）');
-    const save = btn('保存 agent', 'btn btn-primary btn-block');
-    const cancelEdit = btn('取消编辑', 'btn btn-block hidden');
-    let editing = null;   // 正在编辑的原始名字
-    const picked = {};    // module id -> true
-
-    function pickedIds() { return state.modules.map((m) => m.id).filter((id) => picked[id]); }
-    function renderMods() {
-      modWrap.innerHTML = '';
-      if (!state.modules.length) { modWrap.appendChild(emptyHint('（modules/ 下没有模块）')); return; }
-      for (const m of state.modules) {
-        const lab = document.createElement('label'); lab.className = 'wf-check';
-        const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!picked[m.id];
-        cb.addEventListener('change', () => { picked[m.id] = cb.checked; });
-        const id = document.createElement('span'); id.textContent = m.id;
-        const brief = document.createElement('span'); brief.className = 'wf-brief'; brief.textContent = m.brief;
-        lab.appendChild(cb); lab.appendChild(id); lab.appendChild(brief);
-        modWrap.appendChild(lab);
-      }
-    }
-    function syncModelSelect() {
-      syncSelect(modelSel, modelOptions(state.core, true), modelSel.value || state.core || '');
-    }
-    function resetForm() {
-      editing = null; nameIn.value = ''; noteIn.value = '';
-      for (const k in picked) delete picked[k];
-      syncModelSelect();
-      cancelEdit.className = 'btn btn-block hidden';
-      renderMods();
-    }
+    const toolbar = document.createElement('div'); toolbar.className = 'wf-inline';
+    const add = btn('+ 新建 agent', 'btn btn-primary');
+    add.onclick = () => openAgentEditor({ onSaved: (name) => c.setMsg('已保存 agent：' + name) });
+    toolbar.appendChild(add);
     function renderList() {
       listWrap.innerHTML = '';
-      if (!state.agents.length) { listWrap.appendChild(emptyHint('（还没有 agent）')); return; }
+      if (!state.agents.length) { listWrap.appendChild(emptyHint('（还没有 agent：点「+ 新建 agent」）')); return; }
       for (const a of state.agents) {
-        const row = document.createElement('div'); row.className = 'reg-item';
-        const main = document.createElement('div'); main.className = 'reg-main';
-        const nm = document.createElement('div'); nm.className = 'reg-id'; nm.textContent = a.name;
-        const sub = document.createElement('div'); sub.className = 'reg-sub';
-        sub.textContent = a.modules.join(' + ') + ' · 模型 ' + (a.model || '（核心默认）');
-        const note = document.createElement('div'); note.className = 'reg-note'; note.textContent = a.note || '';
-        main.appendChild(nm); main.appendChild(sub); main.appendChild(note);
-        const acts = document.createElement('div'); acts.className = 'reg-acts';
-        const edit = btn('编辑', 'link-btn');
-        edit.onclick = () => {
-          editing = a.name; nameIn.value = a.name; noteIn.value = a.note || '';
-          if (a.model) modelSel.value = a.model;
-          for (const k in picked) delete picked[k];
-          for (const id of a.modules) picked[id] = true;
-          cancelEdit.className = 'btn btn-block';
-          renderMods(); c.setMsg('编辑 ' + a.name + '（改名 = 先删旧再建新）');
-        };
-        const del = btn('删除', 'link-btn danger');
-        del.onclick = async () => {
-          try {
-            await c.mutate('remove_agent', { name: a.name });
-            if (editing === a.name) resetForm();
-            c.setMsg('已删除 ' + a.name);
-          } catch (e) { c.setMsg(e.message, true); }
-        };
-        acts.appendChild(edit); acts.appendChild(del);
-        row.appendChild(main); row.appendChild(acts);
-        listWrap.appendChild(row);
+        listWrap.appendChild(agentCard(a, {
+          onEdit: () => openAgentEditor({
+            agent: a,
+            onSaved: (name) => c.setMsg('已保存 agent：' + name),
+          }),
+          onRemove: async () => {
+            try {
+              await c.mutate('remove_agent', { name: a.name });
+              c.setMsg('已删除 ' + a.name);
+            } catch (e) { c.setMsg(e.message, true); }
+          },
+        }));
       }
     }
-    cancelEdit.onclick = () => { resetForm(); c.setMsg(''); };
-    save.onclick = async () => {
-      const name = nameIn.value.trim();
-      const modules = pickedIds();
-      if (!name) { c.setMsg('agent 名字不能为空', true); return; }
-      try {
-        if (editing && editing !== name) {
-          await c.mutate('remove_agent', { name: editing });
-        }
-        await c.mutate('upsert_agent', { name, modules, model: modelSel.value || undefined, note: noteIn.value.trim() });
-        resetForm();
-        c.setMsg('已保存 agent：' + name);
-      } catch (e) { c.setMsg(e.message, true); }
-    };
-
-    // 模型登记变了：下拉与列表跟着变，正在编辑的名字 / 说明 / 勾选不动。
-    c.onRegistryChange(() => { syncModelSelect(); renderList(); });
-    renderList(); renderMods(); syncModelSelect();
+    c.onRegistryChange(renderList);
+    renderList();
+    c.body.appendChild(toolbar);
     c.body.appendChild(listWrap);
-    const form = document.createElement('div'); form.className = 'form-col';
-    form.appendChild(field('名字', nameIn));
-    form.appendChild(field('模块（这个 agent 的能力）', modWrap));
-    form.appendChild(field('默认模型（空 = 用核心默认）', modelSel));
-    form.appendChild(field('说明', noteIn));
-    form.appendChild(save); form.appendChild(cancelEdit);
-    c.body.appendChild(form);
 }
 
 function openAgentsModal() {
@@ -2192,13 +2540,11 @@ async function openWizard(draft) {
   // draft = 上一次没提交的草稿：补齐依赖后要把向导按原样重开，别把用户已经填的东西丢掉。
   // onclick 直接挂本函数时第一个参数是事件对象，所以按**标记**认草稿，不按真值认。
   const resumed = !!(draft && draft.__wizardDraft);
-  // single 形态：w.modules = 勾选的模块；w.agentPick = 复用的登记处 agent
-  // （null = 用勾选的模块组临时 agent，名字见 w.agentName）。
+  // 两种形态共用一份 agent 卡片列表：single 恰好 0/1 个；collab 可多个。
   const w = resumed ? draft : {
-    mode: 'single', modules: [], agentPick: null, agentName: '', agents: [], task: '',
-    tier: 'host', guest: '', __wizardDraft: true,
+    mode: 'single', agents: [], task: '', tier: 'host', guest: '', __wizardDraft: true,
   };
-  const ed = { open: false, name: '', modules: [], model: null, note: '' };
+  if (!Array.isArray(w.agents)) w.agents = [];
   // 名称与需求是**弹层里**输入框的现值（在本作用域之外）：由弹层装好后把取值钩子挂上来。
   let snapshotDraft = () => {};
   // 档位选择：默认档与虚拟机档可用性由后端给（GET /api/tiers，与「开始」的校验同源）。
@@ -2250,10 +2596,7 @@ async function openWizard(draft) {
     const covered = {};
     (g.runtimes || []).forEach((c) => { covered[c] = true; });
     Object.keys((tiers && tiers.available) || {}).forEach((c) => { covered[c] = true; });
-    const ids = w.mode === 'collab'
-      ? w.agents.reduce((acc, a) => acc.concat(a.modules || []), [])
-      : (w.agentPick ? (w.agentPick.modules || []).slice()
-        : state.modules.map((m) => m.id).filter((id) => w.modules.indexOf(id) >= 0));
+    const ids = w.agents.reduce((acc, a) => acc.concat(a.modules || []), []);
     const lack = [];
     for (const id of ids) {
       const m = state.modules.find((x) => x.id === id);
@@ -2295,7 +2638,6 @@ async function openWizard(draft) {
     }
     const partWrap = document.createElement('div'); partWrap.className = 'wf-field';
     const modelWrap = document.createElement('div'); modelWrap.className = 'wf-models';
-    const editorWrap = document.createElement('div'); editorWrap.className = 'wf-field hidden';
     const taskIn = areaInput('本次需求（协作必填；也可写上，核心据此推荐）');
     if (w.task) taskIn.value = w.task;   // 草稿重开：同上
     // 上面那个「补齐虚拟机依赖」按钮在本作用域之外：把抄草稿的钩子交给它，点击时才读现值。
@@ -2310,8 +2652,15 @@ async function openWizard(draft) {
       if (!state.models.length) {
         return '未登记任何模型，不能创建会话：先到「设置 → 模型与核心默认」登记供应商与模型';
       }
-      if (w.mode === 'proxy' && !state.core) {
-        return '代理会话必须设定核心默认模型：先到「设置 → 模型与核心默认」选定';
+      if (w.mode === 'proxy') {
+        return state.core ? '' : '代理会话必须设定核心默认模型：先到「设置 → 模型与核心默认」选定';
+      }
+      if (!w.agents.length) {
+        return w.mode === 'single' ? '单 agent：先选或新建一个 agent' : '协作：先加入至少 1 个 agent';
+      }
+      const noModel = w.agents.find((a) => !a.model);
+      if (noModel && !state.core) {
+        return 'agent「' + noModel.name + '」没有默认模型，且核心默认未设定：给它指定一个模型，或先选定核心默认';
       }
       return '';
     }
@@ -2322,203 +2671,97 @@ async function openWizard(draft) {
     }
     cancelBtn.onclick = closeModal;
 
-    const modelOptions = () => state.models.map((m) => ({ value: m.id, label: m.name + '（' + m.id + '）' }));
-
-    // 勾选的模块（按清单顺序输出，下发稳定）。
-    function pickedModules() {
-      return state.modules.map((m) => m.id).filter((id) => w.modules.indexOf(id) >= 0);
-    }
-
-    // 复用候选 = 登记处全部 agent；额外把"核心推荐复用"的那条摆进来（否则选中项在列表里看不见）。
-    function agentCandidates() {
-      const list = state.agents.slice();
-      if (w.agentPick && !list.some((a) => a.name === w.agentPick.name)) {
-        list.push({ name: w.agentPick.name, modules: w.agentPick.modules.slice(), model: w.agentPick.model, note: '' });
-      }
-      return list;
-    }
-
-    // 选中/取消选中登记处 agent：模块由它决定（有几个勾几个），模型预填它的默认值（仍可改，只对本工作生效）。
-    function pickAgent(name) {
-      if (!name) { w.agentPick = null; renderAll(); return; }
-      const a = agentCandidates().find((x) => x.name === name);
-      if (!a) { w.agentPick = null; renderAll(); return; }
-      w.agentPick = { name: a.name, modules: (a.modules || []).slice(), model: a.model || null };
-      w.modules = w.agentPick.modules.slice();
-      w.model = w.agentPick.model || state.core || w.model;
-      renderAll();
-    }
-
-    function singlePick() {
-      const box = document.createElement('div'); box.className = 'form-col';
-      const opts = [{ value: '', label: '（不选，用下面勾选的模块组一个临时 agent）' }].concat(
-        agentCandidates().map((a) => ({
-          value: a.name,
-          label: a.name + ' · ' + (a.modules || []).join('+') + ' · ' + (a.model || '核心默认'),
-        })));
-      const sel = selectInput(opts, w.agentPick ? w.agentPick.name : '');
-      sel.addEventListener('change', () => pickAgent(sel.value));
-      box.appendChild(field('agent（复用登记处已有的 agent）', sel));
-      if (w.agentPick) {
-        const hint = document.createElement('div'); hint.className = 'wf-hint';
-        hint.textContent = '已由 agent「' + w.agentPick.name + '」决定模块与默认模型；' +
-          '模型改动只对本工作生效，不写回登记处。';
-        box.appendChild(hint);
-      } else {
-        const nm = textInput('agent 名字（默认取勾选的第一个模块）');
-        nm.value = w.agentName || pickedModules()[0] || '';
-        nm.addEventListener('input', () => { w.agentName = nm.value; });
-        box.appendChild(field('本次 agent 的名字', nm));
-      }
-      const lab = document.createElement('div'); lab.className = 'wf-label';
-      lab.textContent = w.agentPick
-        ? '模块（已由 agent 决定，共 ' + w.agentPick.modules.length + ' 个）'
-        : '模块（勾 1 个 = 直连式，勾多个 = 组合式）';
-      box.appendChild(lab);
-      box.appendChild(singleModules());
-      return box;
-    }
-
-    function singleModules() {
-      const box = document.createElement('div'); box.className = 'wf-mods';
-      if (!state.modules.length) { box.appendChild(emptyHint('（modules/ 下没有模块）')); return box; }
-      for (const m of state.modules) {
-        const lab = document.createElement('label'); lab.className = 'wf-check' + (w.agentPick ? ' disabled' : '');
-        const cb = document.createElement('input'); cb.type = 'checkbox';
-        cb.checked = w.modules.indexOf(m.id) >= 0;
-        if (w.agentPick) cb.disabled = true;
-        cb.addEventListener('change', () => {
-          if (w.agentPick) return;
-          if (cb.checked) { if (w.modules.indexOf(m.id) < 0) w.modules.push(m.id); }
-          else w.modules = w.modules.filter((x) => x !== m.id);
-          renderAll();
-        });
-        const id = document.createElement('span'); id.textContent = m.id;
-        const brief = document.createElement('span'); brief.className = 'wf-brief'; brief.textContent = m.brief;
-        lab.appendChild(cb); lab.appendChild(id); lab.appendChild(brief);
-        box.appendChild(lab);
-      }
-      return box;
-    }
-
-    // 协作：agent 实例列表（名字可就地改，同名会让后端加尾号）
-    function agentRows() {
-      const list = document.createElement('div'); list.className = 'agent-list';
-      if (!w.agents.length) { list.appendChild(emptyHint('（还没加入 agent）')); return list; }
-      w.agents.forEach((a, i) => {
-        const row = document.createElement('div'); row.className = 'agent-item';
-        const main = document.createElement('div'); main.className = 'reg-main';
-        const nm = document.createElement('input'); nm.className = 'field-input agent-name';
-        nm.value = a.name; nm.autocomplete = 'off'; nm.placeholder = 'agent 名字';
-        nm.addEventListener('input', () => { a.name = nm.value; });
-        const sub = document.createElement('div'); sub.className = 'reg-sub';
-        // 登记处里的 agent 与临时 agent 如实分开：临时的那条可以就地存下来。
-        const badge = document.createElement('span');
-        badge.className = 'agent-badge' + (a.transient ? ' is-transient' : '');
-        badge.textContent = a.transient ? '临时（可保存为 agent）' : '已在登记处';
-        const mods = document.createElement('span'); mods.className = 'agent-mods'; mods.textContent = a.modules.join(' + ');
-        sub.appendChild(badge); sub.appendChild(mods);
-        main.appendChild(nm); main.appendChild(sub);
-        const acts = document.createElement('div'); acts.className = 'wf-inline';
-        if (a.transient) {
-          const keep = btn('存为 agent', 'link-btn');
-          keep.onclick = async () => {
-            if (!a.name.trim()) { c.setMsg('agent 名字不能为空', true); return; }
-            try {
-              await api('POST', actionUrl('upsert_agent'), { name: a.name.trim(), modules: a.modules.slice(), model: a.model || undefined, note: '' });
-              await refreshState();
-              a.transient = false; a.reuse = true;
-              renderAll(); c.setMsg('已保存 agent：' + a.name.trim());
-            } catch (e) { c.setMsg(e.message, true); }
-          };
-          acts.appendChild(keep);
-        }
-        const del = btn('移除', 'link-btn danger');
-        del.onclick = () => { w.agents.splice(i, 1); renderAll(); };
-        acts.appendChild(del);
-        row.appendChild(main); row.appendChild(acts);
-        list.appendChild(row);
-      });
-      return list;
-    }
-
-    // 内联新建 agent（不弹二级窗，避免丢掉向导状态）
-    function renderEditor() {
-      editorWrap.className = ed.open ? 'wf-field' : 'wf-field hidden';
-      editorWrap.innerHTML = '';
-      if (!ed.open) return;
-      const nm = textInput('新 agent 名字'); nm.value = ed.name;
-      nm.addEventListener('input', () => { ed.name = nm.value; });
-      const mods = document.createElement('div'); mods.className = 'wf-mods';
-      for (const m of state.modules) {
-        const lab = document.createElement('label'); lab.className = 'wf-check';
-        const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = ed.modules.indexOf(m.id) >= 0;
-        cb.addEventListener('change', () => {
-          if (cb.checked) { if (ed.modules.indexOf(m.id) < 0) ed.modules.push(m.id); }
-          else ed.modules = ed.modules.filter((x) => x !== m.id);
-        });
-        const id = document.createElement('span'); id.textContent = m.id;
-        const brief = document.createElement('span'); brief.className = 'wf-brief'; brief.textContent = m.brief;
-        lab.appendChild(cb); lab.appendChild(id); lab.appendChild(brief);
-        mods.appendChild(lab);
-      }
-      const mopts = modelOptions();
-      const msel = selectInput(mopts, ed.model || state.core);
-      if (mopts.length) ed.model = msel.value;
-      msel.addEventListener('change', () => { ed.model = msel.value; });
-      const note = textInput('说明（可选）'); note.value = ed.note;
-      note.addEventListener('input', () => { ed.note = note.value; });
-      const addT = btn('加入本次（临时）', 'btn');
-      addT.onclick = () => {
-        if (!ed.name.trim()) { c.setMsg('agent 名字不能为空', true); return; }
-        w.agents.push({ name: ed.name.trim(), transient: true, modules: ed.modules.slice(), model: ed.model, why: null });
-        ed.open = false; renderAll(); c.setMsg('已加入临时 agent：' + ed.name.trim());
-      };
-      const addS = btn('保存为 agent 并加入', 'btn btn-primary');
-      addS.onclick = async () => {
-        if (!ed.name.trim()) { c.setMsg('agent 名字不能为空', true); return; }
-        try {
-          await api('POST', actionUrl('upsert_agent'), { name: ed.name.trim(), modules: ed.modules.slice(), model: ed.model || undefined, note: ed.note.trim() });
-          await refreshState();
-          w.agents.push({ name: ed.name.trim(), transient: false, modules: ed.modules.slice(), model: ed.model, why: null });
-          ed.open = false; renderAll(); c.setMsg('已保存并加入 agent：' + ed.name.trim());
-        } catch (e) { c.setMsg(e.message, true); }
-      };
-      const cancelEd = btn('取消', 'btn btn-ghost');
-      cancelEd.onclick = () => { ed.open = false; renderAll(); };
-      editorWrap.appendChild(field('名字', nm));
-      editorWrap.appendChild(field('模块（能力）', mods));
-      if (mopts.length) editorWrap.appendChild(field('默认模型', msel));
-      editorWrap.appendChild(field('说明', note));
+    // 向导里的 agent 卡片：新建临时 / 从登记处加入；编辑已加入的卡片。
+    function agentActions(single, hasAgent) {
       const row = document.createElement('div'); row.className = 'wf-inline';
-      row.appendChild(addT); row.appendChild(addS); row.appendChild(cancelEd);
-      editorWrap.appendChild(row);
+      const temp = btn(hasAgent ? '+ 更换为临时 agent' : '+ 新建临时 agent', 'btn');
+      temp.onclick = () => {
+        openTempAgentSheet({
+          onAdd: (a) => { if (single) w.agents = [a]; else w.agents.push(a); renderAll(); },
+          onSaveAsAgent: (a) => { if (single) w.agents = [a]; else w.agents.push(a); renderAll(); },
+        });
+      };
+      const reg = btn(hasAgent ? '从登记处更换' : '从登记处加入', 'btn');
+      reg.onclick = () => {
+        openRegistryAgentPicker({
+          single,
+          taken: single ? [] : w.agents.map((a) => a.name),
+          onPick: (a) => { if (single) w.agents = [a]; else w.agents.push(a); renderAll(); },
+        });
+      };
+      row.appendChild(temp); row.appendChild(reg);
+      if (!state.agents.length) {
+        const hint = document.createElement('div'); hint.className = 'wf-hint';
+        hint.textContent = '（登记处还没有 agent：可以直接新建临时 agent）';
+        row.appendChild(hint);
+      }
+      return row;
     }
 
-    function agentPicker() {
+    function saveCard(i) {
+      const a = w.agents[i];
+      if (!a || !a.transient) return;
+      const name = a.name.trim();
+      if (!name) { c.setMsg('agent 名字不能为空', true); return; }
+      return (async () => {
+        try {
+          if (state.agents.some((x) => x.name === name)) {
+            const ok = await confirmBox('同名 agent', '登记处已有「' + name + '」，保存会更新它。继续？', '更新');
+            if (!ok) return;
+          }
+          await c.mutate('upsert_agent', {
+            name,
+            modules: a.modules.slice(),
+            model: a.model || undefined,
+            note: (a.note || '').trim(),
+            chara: (a.chara || '').trim(),
+          });
+          a.name = name; a.transient = false; a.reuse = true;
+          renderAll(); c.setMsg('已保存 agent：' + name);
+        } catch (e) { c.setMsg(e.message, true); }
+      })();
+    }
+
+    function cardHandlers(i) {
+      return {
+        onEdit: (a) => {
+          if (a.transient) {
+            openTempAgentSheet({
+              agent: a,
+              title: '编辑临时 agent',
+              onAdd: (next) => { w.agents[i] = next; renderAll(); },
+              onSaveAsAgent: (next) => { w.agents[i] = next; renderAll(); },
+            });
+          } else {
+            // 登记处 agent 的本次 copy：名字与模块由登记处决定，人设 / 模型可就本工作调整。
+            openTempAgentSheet({
+              agent: a,
+              title: '编辑本次 agent（不改登记处）',
+              lockedName: true,
+              lockedModules: true,
+              allowSaveAsAgent: false,
+              onAdd: (next) => { w.agents[i] = next; renderAll(); },
+            });
+          }
+        },
+        onSave: () => saveCard(i),
+        onRemove: () => { w.agents.splice(i, 1); renderAll(); },
+      };
+    }
+
+    function agentSection() {
       const box = document.createElement('div'); box.className = 'form-col';
-      box.appendChild(agentRows());
-      const addRow = document.createElement('div'); addRow.className = 'wf-inline';
-      const opts = state.agents.map((a) => ({ value: a.name, label: a.name + '（' + a.modules.join('+') + '）' }));
-      const sel = selectInput(opts, null);
-      const add = btn('加入', 'btn');
-      add.onclick = () => {
-        const a = state.agents.find((x) => x.name === sel.value);
-        if (!a) { c.setMsg('请选择已登记的 agent，或点下面「新建 agent」', true); return; }
-        if (w.agents.some((x) => x.name === a.name)) { c.setMsg('该 agent 已经在本次工作里了', true); return; }
-        w.agents.push({ name: a.name, transient: false, modules: a.modules.slice(), model: a.model || state.core, why: null });
-        renderAll();
-      };
-      if (opts.length) { addRow.appendChild(sel); addRow.appendChild(add); }
-      else addRow.appendChild(emptyHint('（还没有 agent，先去「设置 → agent 管理」新建）'));
-      box.appendChild(addRow);
-      const newBtn = btn('+ 新建 agent', 'btn btn-block');
-      newBtn.onclick = () => {
-        ed.open = true; ed.name = ''; ed.modules = []; ed.model = state.core; ed.note = '';
-        renderAll();
-      };
-      box.appendChild(newBtn);
-      box.appendChild(editorWrap);
+      if (w.mode === 'single') {
+        if (w.agents.length) box.appendChild(agentCard(w.agents[0], cardHandlers(0)));
+        else box.appendChild(emptyHint('（还没有选 agent：新建临时 agent，或从登记处加入）'));
+        box.appendChild(agentActions(true, w.agents.length > 0));
+        return box;
+      }
+      const list = document.createElement('div'); list.className = 'agent-list';
+      if (!w.agents.length) list.appendChild(emptyHint('（还没加入 agent）'));
+      w.agents.forEach((a, i) => list.appendChild(agentCard(a, cardHandlers(i))));
+      box.appendChild(list);
+      box.appendChild(agentActions(false, false));
       return box;
     }
 
@@ -2537,10 +2780,11 @@ async function openWizard(draft) {
         return;
       }
       const lab = document.createElement('div'); lab.className = 'wf-label';
-      lab.textContent = w.mode === 'single' ? '单 agent：复用已有 agent，或勾选它的模块'
-        : 'agent（协作：可多个，各自独立沙箱）';
+      lab.textContent = w.mode === 'single'
+        ? 'agent（单 agent：恰好 1 个；模块数不限）'
+        : 'agent 名单（协作：可多个，各自独立沙箱）';
       partWrap.appendChild(lab);
-      partWrap.appendChild(w.mode === 'single' ? singlePick() : agentPicker());
+      partWrap.appendChild(agentSection());
     }
 
     function renderModels() {
@@ -2552,41 +2796,21 @@ async function openWizard(draft) {
         }
         return;
       }
-      const opts = modelOptions();
-      if (w.mode === 'single') {
-        if (!opts.length) { modelWrap.appendChild(cfgHint('（未登记任何模型：不能创建会话。先到「设置 → 模型与核心默认」登记。）', 'warn')); return; }
-        const who = w.agentPick ? w.agentPick.name : ((w.agentName || '').trim() || pickedModules()[0] || '');
-        if (!who) { modelWrap.appendChild(emptyHint('先复用 agent 或勾选模块，再指定模型')); return; }
-        const row = document.createElement('div'); row.className = 'wf-model-row';
-        const lab = document.createElement('span'); lab.className = 'wf-model-id'; lab.textContent = who;
-        const cur = w.model || state.core || opts[0].value;
-        w.model = cur;
-        const sel = selectInput(opts, cur);
-        sel.addEventListener('change', () => { w.model = sel.value; });
-        row.appendChild(lab); row.appendChild(sel);
-        modelWrap.appendChild(row);
+      if (!state.models.length) {
+        modelWrap.appendChild(cfgHint('（未登记任何模型：不能创建会话。先到「设置 → 模型与核心默认」登记。）', 'warn'));
         return;
       }
-      if (!w.agents.length) { modelWrap.appendChild(emptyHint('先加入 agent，再指定模型')); return; }
-      if (!opts.length) { modelWrap.appendChild(cfgHint('（未登记任何模型：不能创建会话。先到「设置 → 模型与核心默认」登记。）', 'warn')); return; }
-      for (const a of w.agents) {
-        const row = document.createElement('div'); row.className = 'wf-model-row';
-        const lab = document.createElement('span'); lab.className = 'wf-model-id'; lab.textContent = a.name;
-        const cur = a.model || state.core || opts[0].value;
-        a.model = cur;
-        const sel = selectInput(opts, cur);
-        sel.addEventListener('change', () => { a.model = sel.value; });
-        row.appendChild(lab); row.appendChild(sel);
-        if (a.why) { const why = document.createElement('div'); why.className = 'wf-why'; why.textContent = a.why; row.appendChild(why); }
-        modelWrap.appendChild(row);
+      if (!state.core && w.agents.some((a) => !a.model)) {
+        modelWrap.appendChild(cfgHint('（核心默认未设定：没指定模型的 agent 不能创建；在卡片里给它选一个模型，或先选定核心默认）', 'warn'));
       }
     }
 
-    function renderAll() { renderParts(); renderModels(); renderEditor(); syncGuestGap(); syncCreateButton(); }
+    function renderAll() { renderParts(); renderModels(); syncGuestGap(); syncCreateButton(); }
 
     modeSel.addEventListener('change', () => {
       w.mode = modeSel.value;
-      ed.open = false;
+      // 从协作切回单 agent：只保留第一张卡片（不静默替换成别的人）。
+      if (w.mode === 'single' && w.agents.length > 1) w.agents = [w.agents[0]];
       renderAll();
     });
 
@@ -2596,46 +2820,28 @@ async function openWizard(draft) {
       if (!task) { c.setMsg('先写下本次需求，核心才能据此推荐', true); return; }
       c.setMsg('核心根据需求推荐中…');
       try {
-        // 核心返回 agent 草案：{ name, modules, model, why, reuse }。
-        // reuse=true → 这条就是登记处里已有的 agent（transient:false，行上标「已在登记处」）；
-        // reuse=false → 核心帮忙组装的临时 agent（transient:true，行上标「临时（可保存为 agent）」）。
         const r = await api('POST', '/api/suggest-models', { task, mode: w.mode });
-        const rec = (r.agents || []).filter((a) => (a.modules || []).length);
+        const rec = (r.agents || []).filter((a) => a && (a.name || (a.modules || []).length));
         if (!rec.length) { c.setMsg('核心未给出可用建议', true); return; }
-        const asItem = (a) => ({
-          name: a.name || a.modules[0],
-          transient: a.reuse !== true,
-          reuse: a.reuse === true,
-          modules: a.modules.slice(),
-          model: a.model,
-          why: a.why || null,
-        });
-        let note = '核心已给出建议（见下方，agent 名字与模型都可改）';
-        if (w.mode === 'single') {
-          const top = rec[0];
-          const mods = (top.modules || []).slice();
-          if (top.reuse === true) {
-            // 复用登记处已有的 agent：不论几个模块，完整按它的 modules 勾好（不截断）。
-            const who = top.name || mods[0];
-            const reg = state.agents.find((x) => x.name === who);
-            const regMods = reg && reg.modules.length ? reg.modules.slice() : mods;
-            w.agentPick = { name: who, modules: regMods, model: top.model || (reg && reg.model) || null };
-            w.modules = regMods.slice();
-            w.model = w.agentPick.model || state.core || w.model;
-            note = '核心建议复用已有 agent「' + who + '」（' + regMods.length + ' 个模块）；' +
-              '模型只对本工作生效，不写回登记处';
-          } else {
-            w.agentPick = null;
-            w.modules = mods.slice();
-            w.agentName = top.name || mods[0];
-            if (top.model) w.model = top.model;
-            note = '核心建议按临时 agent「' + w.agentName + '」组队（' + mods.length + ' 个模块）';
-          }
-        } else {
-          w.agents = rec.map(asItem);
-        }
+        const asItem = (a) => {
+          const reg = a.reuse === true ? state.agents.find((x) => x.name === a.name) : null;
+          return {
+            name: a.name || (a.modules && a.modules[0]) || 'agent',
+            transient: a.reuse !== true,
+            reuse: a.reuse === true,
+            modules: ((reg && reg.modules) ? reg.modules : (a.modules || [])).slice(),
+            model: a.model || (reg && reg.model) || '',
+            chara: a.reuse === true && reg ? (reg.chara || a.chara || '') : (a.chara || ''),
+            note: reg ? (reg.note || '') : '',
+            why: a.why || null,
+          };
+        };
+        const items = rec.map(asItem);
+        w.agents = w.mode === 'single' ? [items[0]] : items;
         renderAll();
-        c.setMsg(note);
+        c.setMsg(w.mode === 'single'
+          ? '核心建议 agent「' + items[0].name + '」（见下方卡片；名字、人设、模块、模型都可改）'
+          : '核心已给出建议（见下方卡片；每条都可改）');
       } catch (e) { c.setMsg(e.message, true); }
     };
 
@@ -2681,27 +2887,28 @@ async function openWizard(draft) {
         return;
       }
       if (w.mode === 'single') {
-        if (w.agentPick) {
-          const mods = (w.agentPick.modules || []).slice();
-          agents = [{
-            name: w.agentPick.name, transient: false, modules: mods,
-            model: w.model || w.agentPick.model || state.core,
-          }];
-        } else {
-          const mods = pickedModules();
-          const nm = (w.agentName || '').trim();
-          if (!nm && !mods.length) {
-            c.setMsg('单 agent：填一个 agent 名字，或至少勾选 1 个模块', true); return;
-          }
-          agents = [{
-            name: nm || mods[0], transient: true, modules: mods,
-            model: w.model || state.core,
-          }];
-        }
+        if (!w.agents.length) { c.setMsg('单 agent：先选或新建一个 agent', true); return; }
+        const a = w.agents[0];
+        const mods = (a.modules || []).slice();
+        const nm = (a.name || '').trim() || mods[0] || '';
+        if (!nm) { c.setMsg('单 agent：给这个 agent 一个名字（或至少 1 个模块）', true); return; }
+        agents = [{
+          name: nm,
+          transient: !!a.transient,
+          modules: mods,
+          model: a.model || undefined,
+          chara: (a.chara || '').trim(),
+        }];
       } else {
         if (!w.agents.length) { c.setMsg('请先加入至少 1 个 agent', true); return; }
         if (!task) { c.setMsg('协作模式必须填写本次需求', true); return; }
-        agents = w.agents.map((a) => ({ name: a.name.trim(), transient: !!a.transient, modules: a.modules.slice(), model: a.model }));
+        agents = w.agents.map((a) => ({
+          name: a.name.trim(),
+          transient: !!a.transient,
+          modules: a.modules.slice(),
+          model: a.model || undefined,
+          chara: (a.chara || '').trim(),
+        }));
         if (agents.some((a) => !a.name)) { c.setMsg('agent 名字不能为空', true); return; }
       }
       const names = agents.map((a) => a.name);
@@ -2735,7 +2942,7 @@ async function openWizard(draft) {
     c.body.appendChild(cancelBtn);
 
     renderParts(); renderModels(); syncWizardTier(); syncCreateButton();
-    // 别的标签页 / 设置在轮询后改了登记处：只换模型下拉与创建按钮，不重建名字 / 需求输入框。
+    // 别的标签页 / 设置在轮询后改了登记处：只换模型提示与创建按钮，不重建名字 / 需求输入框。
     c.onRegistryChange(() => { renderModels(); syncCreateButton(); });
   }, true);
 }
@@ -4965,7 +5172,7 @@ function useRow(action) {
 
 /** 子卡片：一个功能的参数与运行（回执打在卡片里）。 */
 function openUseCard(action) {
-  const ctx = openModal(action.id, () => {});
+  const ctx = openModalLayer(action.id, () => {});
   if (action.desc) ctx.setMsg(action.desc);
   ctx.body.appendChild(actionRunner(action));
 }

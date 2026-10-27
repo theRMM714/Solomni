@@ -883,6 +883,7 @@ fn tool_confirmation_rides_the_decision_channel() {
                         name: "a".to_string(),
                         modules: vec!["a".to_string()],
                         model: String::new(),
+                        chara: String::new(),
                     }],
                     tier: "host".to_string(),
                     guest: None,

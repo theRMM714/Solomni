@@ -124,6 +124,9 @@ pub struct AgentMeta {
     pub modules: Vec<String>,
     #[serde(default)]
     pub model: Option<String>,
+    /// 目的：人设 / 身份（建会话时从登记处或临时声明里快照；之后与会话一起走）。
+    #[serde(default)]
+    pub chara: String,
 }
 
 /// 历史列表条目。

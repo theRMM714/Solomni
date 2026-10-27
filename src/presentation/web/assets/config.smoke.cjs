@@ -51,6 +51,33 @@ function walk(n, out) { out.push(n); for (const c of n.children) walk(c, out); r
 function allText(n) { return walk(n, []).map((x) => (x.textContent == null ? "" : String(x.textContent))).join("\n"); }
 function findByClass(n, cls) { return walk(n, []).filter((x) => String(x.className).split(" ").indexOf(cls) >= 0); }
 function findButton(n, label) { return walk(n, []).find((x) => x.tag === "button" && x.textContent === label); }
+/** 向导里新建一个带指定模块（默认第一个）的临时 agent：+ 新建 → + 添加模块 → 勾选 → 确定 → 加入。 */
+function addTempAgentWithModule(root) {
+  const find = (pred) => walk(root, []).find(pred);
+  const addAgent = find((n) => n.tag === "button" && n.textContent === "+ 新建临时 agent");
+  if (!addAgent) return "没有「+ 新建临时 agent」";
+  addAgent.onclick();
+  const chara = find((n) => n.tag === "textarea" && String(n.placeholder).indexOf("人设") >= 0);
+  if (chara) {
+    chara.value = "测试人设";
+    (chara._h.input || []).forEach((f) => f());
+  }
+  const addMod = find((n) => n.tag === "button" && n.textContent === "+ 添加模块");
+  if (!addMod) return "没有「+ 添加模块」";
+  addMod.onclick();
+  const idNode = find((n) => String(n.className) === "mod-tile-id" && String(n.textContent) === "research");
+  let tile = idNode;
+  while (tile && String(tile.className).split(" ").indexOf("mod-tile") < 0) tile = tile.parentNode;
+  if (!tile) return "模块选择器里没有 research 卡片";
+  tile.onclick();
+  const ok = find((n) => n.tag === "button" && n.textContent === "确定");
+  if (!ok) return "模块选择器没有「确定」";
+  ok.onclick();
+  const join = find((n) => n.tag === "button" && n.textContent === "加入本次（临时）");
+  if (!join) return "agent 弹层没有「加入本次（临时）」";
+  join.onclick();
+  return "";
+}
 function guestField(n) {
   return walk(n, []).find((x) => String(x.className).indexOf("wf-field") === 0
     && (x.children || []).some((c) => String(c.textContent).indexOf("虚拟机（虚拟根）") >= 0));
@@ -63,7 +90,7 @@ function check(name, cond, extra) {
 /* 路径用中性书写形式（斜杠 + 无盘符），只验呈现，不代表任何机器路径。 */
 const CFG = {
   sid: "w", mode: "single", started: true,
-  agents: [{ name: "调研员", modules: ["research"], model: "m1" }],
+  agents: [{ name: "调研员", modules: ["research"], model: "m1", chara: "会话快照人设" }],
   tier: "vm", guest: "debian", net: true,
   permissions: { allow_read: [], allow_write: ["docs"], deny: [], granularity: "ask", ask: ["research.grep"] },
   guests: [
@@ -290,6 +317,11 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
   check("config: 保存/取消按钮", !!findButton(modal, "保存") && !!findButton(modal, "取消"));
 
   /* ---- 保存失败：后端 error 原文 ---- */
+  const charaIn = walk(modal, []).find((n) => n.tag === "textarea" && String(n.placeholder).indexOf("人设") >= 0);
+  if (charaIn) {
+    charaIn.value = "临时改的人设";
+    (charaIn._h.input || []).forEach((f) => f());
+  }
   const save = findButton(modal, "保存");
   save.onclick();
   await sleep(60);
@@ -305,7 +337,8 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
   check("config: 提交体内容（名单/模块/模型/档位/虚拟根/pins/会话权限）",
     sent.tier === "vm" && sent.guest === "debian"
     && sent.agents[0].name === "调研员" && JSON.stringify(sent.agents[0].modules) === JSON.stringify(["research"])
-    && sent.agents[0].model === "m1" && JSON.stringify(sent.pins) === JSON.stringify({ python: "3.12", ruby: "3.2" })
+    && sent.agents[0].model === "m1" && sent.agents[0].chara === "临时改的人设"
+    && JSON.stringify(sent.pins) === JSON.stringify({ python: "3.12", ruby: "3.2" })
     && JSON.stringify(sent.permissions.allow_write) === JSON.stringify(["docs"])
     && !("module_write" in sent.permissions),
     editCall.body);
@@ -430,13 +463,11 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
   (wizGuestRadios[1]._h.change || []).forEach((f) => f());
   const wizGuestSetup = findButton(wizGuestRoot, '补齐虚拟机依赖…');
   check('wizard: 虚拟根未装齐时给出补齐按钮', !!wizGuestSetup && typeof wizGuestSetup.onclick === 'function');
-  // 填个名字、勾个模块，点创建：未装齐应当在本地被拦住，不发 create_session。
+  // 填个名字、在 agent 弹层里选个模块，点创建：未装齐应当在本地被拦住，不发 create_session。
   const guestNameInp = walk(wizGuestRoot, []).find((n) => n.tag === 'input' && String(n.placeholder).indexOf('工作名称') >= 0);
   guestNameInp.value = 'guest-not-ready';
-  const guestModLab = walk(wizGuestRoot, []).find((n) => n.tag === 'label'
-    && (n.children || []).some((c) => String(c.textContent || '') === 'research'));
-  const guestModCb = guestModLab && (guestModLab.children || []).find((n) => n.type === 'checkbox');
-  guestModCb.checked = true; (guestModCb._h.change || []).forEach((f) => f());
+  const addErr = addTempAgentWithModule(wizGuestRoot);
+  check('wizard: 能通过加号新建临时 agent 并选模块', !addErr, addErr);
   const createsBefore = calls.filter((c) => /\/api\/actions\/create_session$/.test(c.url)).length;
   findButton(wizGuestRoot, '创建并开始').onclick();
   await sleep(30);
@@ -469,11 +500,8 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
   wizVm.checked = true; (wizVm._h.change || []).forEach((f) => f());
   const nameInp = walk(wizRoot, []).find((n) => n.tag === 'input' && String(n.placeholder).indexOf('工作名称') >= 0);
   nameInp.value = 'busy-check';
-  const modLab = walk(wizRoot, []).find((n) => n.tag === 'label'
-    && (n.children || []).some((c) => String(c.textContent || '') === 'research'));
-  const modCb = modLab && (modLab.children || []).find((n) => n.type === 'checkbox');
-  check('busy: 向导里能勾到模块', !!modCb);
-  modCb.checked = true; (modCb._h.change || []).forEach((f) => f());
+  const busyAddErr = addTempAgentWithModule(wizRoot);
+  check('busy: 向导里能用加号新建临时 agent', !busyAddErr, busyAddErr);
   const createBtn = findButton(wizRoot, '创建并开始');
   check('busy: 创建按钮在场', !!createBtn);
   const pending = createBtn.onclick();
@@ -488,6 +516,12 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
     && String(busyMsg.textContent).indexOf('guest') >= 0, busyMsg && busyMsg.textContent);
   await pending;
   await sleep(120);
+  const createCall = calls.filter((c) => /create_session$/.test(c.url)).pop();
+  let sentCreate = {};
+  try { sentCreate = JSON.parse(createCall.body); } catch (e) { sentCreate = {}; }
+  check('busy: 建会话体带 agent 人设',
+    sentCreate.agents && sentCreate.agents[0] && sentCreate.agents[0].chara === '测试人设',
+    createCall && createCall.body);
   check('busy: 建完之后进入会话、弹层关掉', state.activeSid === 'new-1', 'activeSid=' + state.activeSid);
 
   /* ---- 「打开」接线：点了真的进入会话视图 ---- */

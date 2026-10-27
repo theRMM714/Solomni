@@ -331,6 +331,7 @@ impl Conductor {
                     modules: v.modules,
                     model: v.model,
                     note: v.note,
+                    chara: v.chara,
                 })
                 .collect()
         } else {

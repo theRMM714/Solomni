@@ -182,9 +182,22 @@ pub(crate) fn agent_crud_and_work_with_agents() {
     assert!(agent_upsert(&mut core, "x", &["a"], "nope", "")
         .unwrap_err()
         .contains("无此模型"));
-    agent_upsert(&mut core, "调研", &["a", "b"], "m", "说明").unwrap();
+    agent_upsert_chara(
+        &mut core,
+        "调研",
+        &["a", "b"],
+        "m",
+        "说明",
+        "  严谨的资料整理者  ",
+    )
+    .unwrap();
     assert_eq!(core.registry().agent_views().len(), 1);
     assert_eq!(core.registry().agent_views()[0].modules.len(), 2);
+    assert_eq!(
+        core.registry().agent_views()[0].chara,
+        "严谨的资料整理者",
+        "人设随登记处保存，首尾空白去掉"
+    );
 
     // 组合：一个 agent（多模块合并）
     let spec = WorkSpec {
@@ -195,6 +208,7 @@ pub(crate) fn agent_crud_and_work_with_agents() {
             transient: false,
             modules: vec!["a".to_string(), "b".to_string()],
             model: Some("m".to_string()),
+            chara: "严谨的资料整理者".to_string(),
         }],
         task: None,
         delegate: false,
@@ -206,6 +220,10 @@ pub(crate) fn agent_crud_and_work_with_agents() {
     let meta = core.history_open("w").unwrap().0;
     assert_eq!(meta.agents.len(), 1);
     assert_eq!(meta.agents[0].name, "调研");
+    assert_eq!(
+        meta.agents[0].chara, "严谨的资料整理者",
+        "建会话时人设进会话快照"
+    );
 
     // 协作：多 agent；同工作内重名自动加尾号
     let mut dup = collab_work("c", &["a", "b"], false, "需求");
@@ -223,12 +241,14 @@ pub(crate) fn agent_crud_and_work_with_agents() {
                 transient: true,
                 modules: vec!["a".to_string()],
                 model: None,
+                chara: String::new(),
             },
             AgentInstance {
                 name: "y".to_string(),
                 transient: true,
                 modules: vec!["a".to_string()],
                 model: None,
+                chara: String::new(),
             },
         ],
         task: Some("需求".to_string()),

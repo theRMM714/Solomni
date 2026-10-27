@@ -274,6 +274,7 @@ impl SessionOps for FakeOps {
                 name: "甲".to_string(),
                 modules: vec!["m".to_string()],
                 model: String::new(),
+                chara: String::new(),
             }],
             tier: "host".to_string(),
             tier_locked: false,
@@ -437,6 +438,7 @@ impl RegistryOps for FakeOps {
                 modules: vec!["m".to_string()],
                 model: None,
                 note: String::new(),
+                chara: String::new(),
             })
             .collect())
     }
@@ -498,6 +500,7 @@ impl RegistryOps for FakeOps {
             modules: vec!["m".to_string()],
             model: None,
             note: String::new(),
+            chara: String::new(),
         }])
     }
     fn upsert_agent(
@@ -506,6 +509,7 @@ impl RegistryOps for FakeOps {
         _modules: &[String],
         _model: &str,
         _note: &str,
+        _chara: &str,
     ) -> Result<(), String> {
         self.guard()
     }
@@ -622,6 +626,7 @@ impl ConductorOps for FakeOps {
             model: "m1".to_string(),
             why: "因为".to_string(),
             reuse: false,
+            chara: String::new(),
         }])
     }
 }

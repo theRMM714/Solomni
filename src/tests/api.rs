@@ -5,7 +5,8 @@ use super::builders::shown_contains;
 use super::doubles::{collab_work, decl, module_of, module_with_runtimes};
 use super::{gated_ops, ops_with, single_work, slow_ops};
 use crate::capabilities::conductor::api::{
-    Acted, ActionCall, AgentInstance, Caller, SessionEdit, SessionEvent, WorkMode, WorkSpec,
+    Acted, ActionCall, AgentInstance, Caller, ConfigAgent, SessionEdit, SessionEvent, WorkMode,
+    WorkSpec,
 };
 use crate::capabilities::conductor::api::{ConductorHandle, Ops, Output};
 use crate::capabilities::modules::api::Module;
@@ -1208,7 +1209,7 @@ fn compaction_survives_a_restart_and_rewinds_back_through_the_point() {
 fn pick_agents_names_the_unknown_and_lists_the_rest() {
     let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
     ops.registry
-        .upsert_agent("甲", &["a".to_string()], "", "")
+        .upsert_agent("甲", &["a".to_string()], "", "", "")
         .expect("建 agent");
     let picked = ops.registry.pick_agents(&["甲".to_string()]).expect("点名");
     assert_eq!(picked.len(), 1);
@@ -1260,10 +1261,10 @@ fn unique_work_name_falls_back_and_appends_a_suffix() {
 fn single_mode_merges_multiple_agents_into_one_transient() {
     let (_h, ops) = ops_with(vec![module_of("a"), module_of("b")], Vec::new());
     ops.registry
-        .upsert_agent("甲", &["a".to_string(), "b".to_string()], "", "")
+        .upsert_agent("甲", &["a".to_string(), "b".to_string()], "", "", "")
         .expect("建 agent");
     ops.registry
-        .upsert_agent("乙", &["b".to_string()], "", "")
+        .upsert_agent("乙", &["b".to_string()], "", "", "")
         .expect("建 agent");
     let picked: Vec<AgentInstance> = ops
         .registry
@@ -1473,13 +1474,18 @@ fn registry_actions_are_user_only_and_go_through_the_dispatcher() {
     ops.actions
         .act(ActionCall {
             id: "upsert_agent".to_string(),
-            args: serde_json::json!({ "name": "甲", "modules": ["a"] }),
+            args: serde_json::json!({ "name": "甲", "modules": ["a"], "chara": "登记处人设" }),
             caller: Caller::User,
             out: Output::Final,
         })
         .expect("登记 agent");
     let agents = ops.registry.agents().expect("读 agent");
     assert!(agents.iter().any(|a| a.name == "甲"), "{:?}", agents);
+    assert_eq!(
+        agents.iter().find(|a| a.name == "甲").unwrap().chara,
+        "登记处人设",
+        "动作面把 chara 交给登记处"
+    );
 
     // 角色不能调登记处动作：供应商 / 密钥类是产品级资源，默认只给人。
     let role = Caller::Role {
@@ -1502,6 +1508,57 @@ fn registry_actions_are_user_only_and_go_through_the_dispatcher() {
     assert!(!cat
         .iter()
         .any(|a| a.id.starts_with("upsert_") || a.id == "set_settings"));
+}
+
+/// 建会话动作与改配置都带着人设走：人设是会话快照，不是登记处联动。
+#[test]
+fn create_session_and_config_carry_chara_as_a_snapshot() {
+    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
+    let done = ops
+        .actions
+        .act(ActionCall {
+            id: "create_session".to_string(),
+            args: serde_json::json!({
+                "name": "w-chara",
+                "mode": "single",
+                "agents": [{
+                    "name": "甲",
+                    "transient": true,
+                    "modules": ["a"],
+                    "chara": "建会话时写的人设"
+                }],
+                "tier": "host"
+            }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .expect("建会话");
+    let Acted::Done(v) = done else {
+        panic!("建会话应同步完成");
+    };
+    let sid = v["sid"].as_str().expect("sid").to_string();
+    let (meta, _) = ops.history.open(&sid).expect("读 meta");
+    assert_eq!(meta.agents[0].chara, "建会话时写的人设");
+    // 会话配置里的人设是 copy：允许临时改，写回同一份快照。
+    ops.sessions
+        .edit(
+            &sid,
+            SessionEdit {
+                agents: vec![ConfigAgent {
+                    name: "甲".to_string(),
+                    modules: vec!["a".to_string()],
+                    model: String::new(),
+                    chara: "会话里临时改的人设".to_string(),
+                }],
+                tier: "host".to_string(),
+                guest: None,
+                pins: std::collections::BTreeMap::new(),
+                permissions: None,
+            },
+        )
+        .expect("改配置");
+    let (meta, _) = ops.history.open(&sid).expect("读回 meta");
+    assert_eq!(meta.agents[0].chara, "会话里临时改的人设");
 }
 
 /// 运行能力判定是**档位感知**的：本机档按宿主目标选包 / PATH（直跑真的执行）；

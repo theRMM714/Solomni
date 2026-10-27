@@ -55,6 +55,7 @@ pub trait RegistryOps: Send + Sync {
         modules: &[String],
         model: &str,
         note: &str,
+        chara: &str,
     ) -> Result<(), String>;
     fn remove_agent(&self, name: &str) -> Result<bool, String>;
     fn settings(&self) -> Result<AppSettings, String>;
@@ -141,6 +142,7 @@ pub trait Registry: Send + Sync {
         modules: &[String],
         model: &str,
         note: &str,
+        chara: &str,
         roster: &Roster,
     ) -> Result<(), String>;
     /// 删除 agent。

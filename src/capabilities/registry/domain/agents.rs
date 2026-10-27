@@ -19,6 +19,9 @@ pub struct Agent {
     /// 一句话说明（给用户看）。
     #[serde(default)]
     pub note: String,
+    /// 目的：人设 / 身份（给模型看）：进入这个 agent 的身份提示词；可选、可多行。
+    #[serde(default)]
+    pub chara: String,
 }
 
 /// agent 登记处（agents.yaml 的内存形态）。
@@ -31,6 +34,7 @@ pub struct AgentView {
     pub modules: Vec<String>,
     pub model: Option<String>,
     pub note: String,
+    pub chara: String,
 }
 
 /// agent 名即将成为（session 内）目录名：非空、不含路径分隔符与 Windows 非法字符、不是保留名。
@@ -73,7 +77,22 @@ pub fn check_reserved(name: &str, reserved: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// 已存 agent 清单（拟名单时给模型看）：名字 / 模块 / 模型 / 说明；空登记处如实说明。
+/// 人设的一行预览（拟名单时给模型看）：取第一段非空文字并压成一行，过长截断。
+/// 为什么截断：清单是给核心挑人用的，不是全文朗读；完整人设在 catalog_agents 与会话快照里。
+fn chara_preview(chara: &str) -> String {
+    let line = chara
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("");
+    let mut out: String = line.chars().take(80).collect();
+    if line.chars().count() > 80 {
+        out.push('…');
+    }
+    out
+}
+
+/// 已存 agent 清单（拟名单时给模型看）：名字 / 模块 / 模型 / 人设 / 说明；空登记处如实说明。
 pub fn listing(known: &Agents) -> String {
     if known.is_empty() {
         return "（登记处还没有 agent；这次只能组装新的）".to_string();
@@ -90,11 +109,18 @@ pub fn listing(known: &Agents) -> String {
             } else {
                 format!("；{}", a.note.trim())
             };
+            let chara = chara_preview(&a.chara);
+            let chara = if chara.is_empty() {
+                String::new()
+            } else {
+                format!("；人设：{}", chara)
+            };
             format!(
-                "- {}：模块 {}；模型 {}{}",
+                "- {}：模块 {}；模型 {}{}{}",
                 name,
                 a.modules.join(" + "),
                 model,
+                chara,
                 note
             )
         })
@@ -135,6 +161,8 @@ pub enum RosterPick {
         modules: Vec<String>,
         model: String,
         #[serde(default)]
+        chara: String,
+        #[serde(default)]
         why: String,
     },
 }
@@ -162,12 +190,13 @@ pub fn resolve_picks(
     for p in picks {
         let why = p.why();
         // 复用项以登记处为准（模块与模型都取它自己的，核心不代拟模型）。
-        let (base, modules, model, transient) = match p {
+        let (base, modules, model, chara, transient) = match p {
             RosterPick::Reuse { agent, .. } => match known.get(agent.trim()) {
                 Some(a) => (
                     agent.trim().to_string(),
                     a.modules.clone(),
                     a.model.clone(),
+                    a.chara.clone(),
                     false,
                 ),
                 None => {
@@ -179,6 +208,7 @@ pub fn resolve_picks(
                 name,
                 modules,
                 model,
+                chara,
                 ..
             } => {
                 let label = if name.trim().is_empty() {
@@ -190,7 +220,7 @@ pub fn resolve_picks(
                     rejected.push(format!("{} 指定的模型 {} 不存在", label, model));
                     continue;
                 }
-                (label, modules, Some(model), true)
+                (label, modules, Some(model), chara.trim().to_string(), true)
             }
         };
         let label = base.clone();
@@ -227,6 +257,7 @@ pub fn resolve_picks(
                 transient,
                 modules: local,
                 model,
+                chara,
             },
             why,
         ));
@@ -257,6 +288,7 @@ pub fn views(agents: &Agents) -> Vec<AgentView> {
             modules: a.modules.clone(),
             model: a.model.clone(),
             note: a.note.clone(),
+            chara: a.chara.clone(),
         })
         .collect()
 }

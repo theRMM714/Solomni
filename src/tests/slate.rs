@@ -8,7 +8,7 @@ use super::prelude::*;
 #[test]
 pub(crate) fn suggest_models_recommends_agents() {
     // 不存在的模块 / 不存在的模型一律拒收；同一模块可以被多个 agent 共用。
-    let script = "{\"type\":\"tool\",\"name\":\"slate\",\"args\":{\"picks\":[{\"name\":\"甲\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"},{\"name\":\"乙\",\"modules\":[\"b\"],\"model\":\"m\",\"why\":\"补位\"},{\"name\":\"鬼\",\"modules\":[\"ghost\"],\"model\":\"m\",\"why\":\"模块不存在\"},{\"name\":\"丙\",\"modules\":[\"a\"],\"model\":\"nope\",\"why\":\"模型不存在\"},{\"name\":\"丁\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"重复占模块\"}]}}".to_string();
+    let script = "{\"type\":\"tool\",\"name\":\"slate\",\"args\":{\"picks\":[{\"name\":\"甲\",\"modules\":[\"a\"],\"model\":\"m\",\"chara\":\"严谨的资料整理者\",\"why\":\"对口\"},{\"name\":\"乙\",\"modules\":[\"b\"],\"model\":\"m\",\"why\":\"补位\"},{\"name\":\"鬼\",\"modules\":[\"ghost\"],\"model\":\"m\",\"why\":\"模块不存在\"},{\"name\":\"丙\",\"modules\":[\"a\"],\"model\":\"nope\",\"why\":\"模型不存在\"},{\"name\":\"丁\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"重复占模块\"}]}}".to_string();
     let core = core_with(
         vec![module_of("a"), module_of("b")],
         gw(BTreeMap::new(), vec![script.clone()]),
@@ -24,6 +24,10 @@ pub(crate) fn suggest_models_recommends_agents() {
     assert_eq!(collab[2].modules, vec!["a".to_string()]);
     assert_eq!(collab[0].model, "m");
     assert_eq!(collab[0].why, "对口");
+    assert_eq!(
+        collab[0].chara, "严谨的资料整理者",
+        "组装项的人设随建议交回"
+    );
     // 单 agent：多条推荐 → 并成一个临时 agent（并过的不是任何单个已存 agent，故 reuse=false）。
     let (merged, _rows) = core.suggest_models("做个东西", WorkMode::Single).unwrap();
     assert_eq!(merged.len(), 1);
@@ -57,11 +61,12 @@ pub(crate) fn suggest_models_single_mode_keeps_lone_pick_as_is() {
             ],
         ),
     );
-    agent_upsert(&mut reuse, "调研", &["a"], "m", "").unwrap();
+    agent_upsert_chara(&mut reuse, "调研", &["a"], "m", "", "登记处的人设").unwrap();
     let (got, _rows) = reuse.suggest_models("做个东西", WorkMode::Single).unwrap();
     assert_eq!(got.len(), 1);
     assert!(got[0].reuse, "一条复用项必须保留 reuse");
     assert_eq!(got[0].model, "m");
+    assert_eq!(got[0].chara, "登记处的人设", "复用项的人设取登记处自己的");
 }
 
 #[test]

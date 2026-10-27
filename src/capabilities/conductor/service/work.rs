@@ -367,6 +367,7 @@ impl Conductor {
                     name: a.name.clone(),
                     modules: a.modules.clone(),
                     model: a.model.clone().unwrap_or_default(),
+                    chara: a.chara.clone(),
                 })
                 .collect(),
             tier: tier.as_str().to_string(),
@@ -472,6 +473,7 @@ impl Conductor {
                 } else {
                     Some(a.model.clone())
                 },
+                chara: a.chara.trim().to_string(),
             });
         }
         if metas.is_empty() {
@@ -1127,6 +1129,7 @@ impl Conductor {
                 transient: a.transient,
                 modules: dedup_modules(&a.modules),
                 model: a.model.clone(),
+                chara: a.chara.trim().to_string(),
             });
         }
         // **模型通道前置判据**：合并后的名单里每个 agent 都要有确定通道；协作还要求核心通道。

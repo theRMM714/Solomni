@@ -215,6 +215,7 @@ impl ConductorHandle {
                         transient: false,
                         modules: v.modules,
                         model: v.model,
+                        chara: v.chara,
                     });
                     continue;
                 }
@@ -245,11 +246,18 @@ impl ConductorHandle {
                     .get("transient")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(true);
+                let chara = obj
+                    .get("chara")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
                 agents.push(d::NewAgent {
                     name,
                     transient,
                     modules,
                     model,
+                    chara,
                 });
             }
         }
@@ -685,7 +693,7 @@ impl ConductorHandle {
                             .collect()
                     })
                     .unwrap_or_default();
-                self.upsert_agent(&s("name"), &modules, &s("model"), &s("note"))?;
+                self.upsert_agent(&s("name"), &modules, &s("model"), &s("note"), &s("chara"))?;
                 Ok(Acted::Done(serde_json::json!({ "ok": true })))
             }
             "remove_agent" => {

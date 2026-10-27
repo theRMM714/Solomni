@@ -75,6 +75,8 @@ pub enum Segment {
     /// 核心代理（core_proxy）的身份提示词：在用户授予的任务级授权范围内代用户决定与转达。
     ProxySystem,
     AgentSystem,
+    /// 目的：agent 的人设块（只有登记了人设时才渲染；空人设不产生空标题）。
+    AgentChara,
     ToolCallingEnvelope,
     ToolCallingNative,
     PatchGuide,
@@ -286,8 +288,10 @@ pub struct Mechanism {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AgentPrompts {
-    /// system 变量：agent, modules, mechanism, env, tool_calling
+    /// system 变量：agent, chara_block, modules, mechanism, env, tool_calling
     pub system: String,
+    /// 目的：人设块模板；变量 chara（只有人设非空时才渲染并插入 system 的 chara_block）。
+    pub chara: String,
 }
 
 impl CoreTexts {
@@ -337,6 +341,7 @@ impl CoreTexts {
             Segment::VerdictUser => &self.verdict.user,
             Segment::ProxySystem => &self.proxy.system,
             Segment::AgentSystem => &self.agent.system,
+            Segment::AgentChara => &self.agent.chara,
             Segment::ToolCallingEnvelope => &self.tool_calling_envelope,
             Segment::ToolCallingNative => &self.tool_calling_native,
             Segment::PatchGuide => &self.patch_guide,

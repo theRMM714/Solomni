@@ -120,6 +120,7 @@ pub(crate) fn mode_vocabulary_is_single_or_collab_only() {
             transient: true,
             modules: vec!["a".to_string()],
             model: None,
+            chara: String::new(),
         }],
         exec: ExecSpec::default(),
         sandbox: Default::default(),

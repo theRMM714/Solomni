@@ -523,6 +523,7 @@ pub(crate) fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
                 transient: true,
                 modules: vec!["a".to_string()],
                 model: Some("m".to_string()),
+                chara: String::new(),
             }],
             task: None,
             delegate: false,
