@@ -60,3 +60,74 @@
     未覆盖的生产路径逐条有补测或缺口结论。
   blocked_by: 缺少观察面（子进程插桩与合并尚未实现）
 
+- id: permission.reach-and-decision
+  scope: global
+  level: T3
+  why: |
+    当前权限只有会话级 granularity（ask/full）+ ask 工具名单：逐工具只能决定“要不要问”，
+    不能决定“能到哪”。路径白名单/黑名单只作用于共享区；网络、主机只读根是全局开关；
+    工具声明的 capability 只是标签，不参与授权。围栏由 FenceSpec::from_sandbox 一刀切，
+    模块 userdata 写、共享区只读、私有沙箱全权这些差异都硬编码在派生里。
+    结果：执行类工具（尤其 shell）无法表达“默认只在自己的私有沙箱里跑、越过沙箱才问人”；
+    卡片 full 同时表示“会话不确认”和“本轮不再问”，语义重载；ask 在没有可回答前端时直接放行（fail-open）。
+    shell 要安全，必须先把这套权限模型升级；这也是后续所有执行类工具的共同前提。
+  how: |
+    1) 权限拆成 reach × decision：
+       reach = private / shared-read / shared-write / module-read / module-write / host-read / network / secrets；
+       decision = allow / ask / deny。
+       工具声明最大 reach 与默认 decision；会话在最大 reach 内覆盖；全局 sandbox.policy 是硬上限。
+       工具声明的最大 reach 是第二道闸：shell 不声明 shared-write / module-write，
+       所以即使档位“全可达”，shell 也写不进共享区与模块 userdata。
+    2) 用户可切换的会话权限档位（名称暂定；最高档按 reach 命名，不叫“完全权限”）：
+       - 仅可查看：reach = private + shared-read + module-read；读类 allow、写类 deny；shell 关闭；
+       - 工作区内修改：reach = private + shared-read + shared-write（仅 work_commit）+ module-read；
+         decision = allow；shell 只允许 sandbox scope；
+       - 外部可达（逐次确认）：上一档 + host-read + network；
+         sandbox scope 的 decision = allow，external scope 的 decision = ask；
+       - 全可达（自动放行）：上一档的全部 reach；decision = allow。
+         它与上一档的 reach 相同，差别只在 decision；它表示“reach 有多宽就授予多宽”，
+         不表示“绕过围栏 / 全局策略”，也不扩大 shell 的工具最大 reach。
+       档位只由 user 经呈现层切换；agent、子会话、core_proxy 不能自我提权；
+       子会话不得超过父会话的档位上限。
+       切换在**下一次权限判定**生效；已经在执行的调用不追溯，UI 要如实说明。
+    3) 每次执行类调用可请求 scope（shell 为 sandbox / external）：
+       effective_reach = 档位授予的 reach ∩ 工具声明的最大 reach ∩ 请求的 scope；
+       requested ⊄ granted = 拒绝（不是问）；requested ⊆ sandbox-only = allow；
+       超出 sandbox 时按有效 decision 处理：allow 直接跑、ask 问、deny 拒绝。
+       scope 是模型请求，不是用户每次选；用户选的是档位，ask 卡只展示这一次的 scope 与命令。
+    4) 围栏由 effective_reach 派生（rw / ro / ro_tree / net / env），替代 FenceSpec::from_sandbox 的单一路径；
+       模块 userdata 写、shell 私有沙箱、主机只读根、网络都成为 reach 的派生结果。
+    5) 卡片上的 full 改名为 allow_turn：只表示“本轮不再问”，不改 reach；
+       没有可回答前端时 ask 一律 deny；档位与会话的 decision=allow 不改变围栏，只改变 decision。
+    6) 角色面不做 all：需要哪些角色就在角色表里显式列全；core_proxy 现在没有真实私有沙箱
+       （private 指向 shared、shared_writable=true），要给它执行能力，先设计 proxy 私有沙箱与取产物路径；
+       discussant 有私有沙箱但没有 work_pull，shell 只能跑自包含命令，要验证共享文件先补 work_pull。
+    7) 同步 settings/meta schema、Web 设置、edit_session、permission API、文档与测试；
+       旧字段替换而非叠加；档位切换、子会话继承与 fail-closed 都要有可判定的用例。
+  accept: |
+    逐工具能表达 reach × decision；四档可切换，且最高档按 reach 命名；
+    没有可回答前端时 ask 一律拒绝；正在执行的调用不因切换被追溯改写；
+    shell 的 sandbox scope 在“工作区内修改”及以上可自动执行且只可达私有沙箱；
+    external scope 在“外部可达（逐次确认）”下每命令 ask，在“全可达（自动放行）”下不问；
+    “全可达”仍受全局 network / host_read_roots / deny / 围栏强制等级上限，且 shell 不能写共享区/模块 userdata；
+    档位切换、子会话继承、围栏降级、没有前端、工具最大 reach 这几条都有 T1/T2/T3/T5 用例；
+    node run-tests.js 全绿。
+  blocked_by: |
+    缺少实现；reach 集合、四档命名、settings/meta schema 与迁移顺序需在实施时冻结。
+
+- id: vm.windows-macos-guest
+  scope: global
+  level: T4
+  why: |
+    当前 fenced guest 执行只承诺 Linux guest 的 /bin/sh；Windows guest 与 macOS guest 的
+    guest 内工具 / shell、围栏、agent 通道本期都不开发。macOS 已有 fence.guest-tier-not-wired
+    等平台缺口；Windows 没有对应能力。
+  how: |
+    本期不做；文档与产品状态如实写“不可用”，不把 Windows/macOS guest 当成已支持。
+    将来做需要：Windows guest 镜像与 guest 内 agent / 围栏 / PowerShell 通道；macOS 按现有平台缺口补。
+  accept: |
+    文档、启动报告与界面都如实说 Windows/macOS guest 本期不可用；任何代码路径不声称支持；
+    对应的平台缺口保留。将来补齐时另立验收。
+  blocked_by: |
+    本期不做（用户决定）；macOS 另有平台机制缺口，Windows guest 需要完整的新机制。
+
