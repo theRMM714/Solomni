@@ -1317,6 +1317,11 @@ impl StreamMock {
                     }
                     Err(_) => break,
                 };
+                // macOS / BSD 的 accept 会让连接继承 listener 的 O_NONBLOCK（Linux 不继承）：
+                // 不恢复阻塞，write_all 可能返回 WouldBlock，连接就会在 chunked 终止块之前被关掉。
+                stream
+                    .set_nonblocking(false)
+                    .expect("accepted stream 必须按阻塞读写");
                 // 请求头读一次就够：后续 body 不参与假供应商的判断。
                 let mut buf = [0u8; 8192];
                 let _ = stream.read(&mut buf);
