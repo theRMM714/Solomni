@@ -749,12 +749,12 @@ function structureAudit() {
       for (const m of fs.readFileSync(abs, "utf8").matchAll(/\blink\("([A-Za-z0-9_.-]+)"\)/g)) used.add(m[1]);
     };
     // 消费点：环境层（rustup 安装）与依赖清单的 source（产品侧下载源都在 dependencies.yaml；
-    // release:<tag>/<资产> 走 release.base，不在这里当键）。
+    // release:<资产> 走 release.base，不在这里当键）。
     scanLinkUses(path.join(ROOT, "env.js"));
     scanLinkUses(path.join(ROOT, "toolchains.js"));
     const depsFile = path.join(ROOT, "dependencies.yaml");
     if (fs.existsSync(depsFile)) {
-      for (const m of fs.readFileSync(depsFile, "utf8").matchAll(/^\s*source:\s*([A-Za-z0-9_.:/-]+)\s*$/gm)) {
+      for (const m of fs.readFileSync(depsFile, "utf8").matchAll(/^\s*source:\s*([A-Za-z0-9_.:-]+)\s*$/gm)) {
         if (!m[1].includes(":")) used.add(m[1]);
       }
     }
@@ -1492,17 +1492,6 @@ function pushStep(obj) {
     status: dl.code === 0 && dl.out.includes("DEV-LOOP-OK") ? "pass" : "fail",
     detail: dl.out.trim().split(/\r?\n/).slice(-1).join(""),
     raw: dl.code === 0 ? null : dl.out.slice(-600),
-  });
-
-  // 依赖哈希工具自检：pins.js 的解析 / 来源推导 / 原地重写；只读、不碰网络。
-  announce("依赖哈希工具自检");
-  const pt = sh(process.execPath, [path.join("tests", "pins-tool.mjs")]);
-  announceDone(pt.code === 0 ? "完成" : "失败", "");
-  pushStep({
-    step: "依赖哈希工具自检",
-    status: pt.code === 0 && pt.out.includes("PINS-TOOL-OK") ? "pass" : "fail",
-    detail: pt.out.trim().split(/\r?\n/).slice(-1).join(""),
-    raw: pt.code === 0 ? null : pt.out.slice(-600),
   });
 
   // 变更分流自检：CI 的 changes job 用 base 副本决定是否跳过代码测试；分类器自身必须有样例与 include 消费自检。

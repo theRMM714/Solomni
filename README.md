@@ -85,9 +85,8 @@ node dev.js test|fmt|clippy   # 本机开发回路：改一层验一层；不要
   `setup-runtime.js` / `setup-dev.js` 只编排；`node setup-runtime.js` 与 `node env.js setup` 等价。
   Windows 首次运行会征得同意后把可携 MinGW（`dlltool.exe`，`windows-sys` 的 raw-dylib 需要）装进项目内 `.tools/`；
   已有完整 binutils 的机器用 `SOLOMNI_MINGW_BIN=<bin 目录>` 指过去即可，不必再下 260 MB。
-- **外部连接台账**：`links.yaml` 是项目自用、可能变的外部 URL 的唯一真相（当前：工具链引导源、winlibs 上游发布包的钉死 URL、自托管依赖的 Release 下载根、guest 镜像源与 SMB helper 资产）；
+- **外部连接台账**：`links.yaml` 是项目自用、可能变的外部 URL 的唯一真相（当前：工具链引导源、winlibs 上游发布包的钉死 URL、自托管依赖 Release 前缀、guest 镜像源与 SMB helper 资产）；
   改一处全仓生效。**下载源的校验值与那条链接成对**写在同一份台账里（`<链接键>.sha256`），自托管 release 资产的校验值写在 `dependencies.yaml` 的条目里。
-  校验值由 `node pins.js update` 按上游校验源生成（不手抄）；`node pins.js check` 只读比对，CI 的 `pins-check` 每周检查一次，不写文件、不开 PR。
   用户覆盖走 `.home/settings.yaml` 与环境变量，不改仓库里的台账。
 - **没有可用模型就不建会话**：先登记供应商与模型并设定核心默认；缺了如实拒绝并指明缺什么，不回落假模型。
 - 常用参数：`--root <目录>`（换产品根）、`--web-port <端口>`、`--release`。

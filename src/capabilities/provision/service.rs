@@ -71,7 +71,7 @@ pub fn links() -> Result<BTreeMap<String, String>, String> {
     yaml_serde::from_str(LINKS_YAML).map_err(|e| format!("links.yaml 非法：{}", e))
 }
 
-/// 目的：把 source 解析成可下载的 URL——`release:<tag>/<资产名>` 走自托管包，其余按 links.yaml 的键。
+/// 目的：把 source 解析成可下载的 URL——`release:<资产名>` 走自托管包，其余按 links.yaml 的键。
 pub fn source_url(source: &str, links: &BTreeMap<String, String>) -> Result<String, String> {
     if let Some(asset) = source.strip_prefix("release:") {
         let base = link("release.base").ok_or_else(|| "links.yaml 缺 release.base".to_string())?;
@@ -2036,18 +2036,6 @@ mod tests {
         assert_eq!(
             v.strip, 3,
             "zip 里 target/<三斜杠>/release/<bin> 四段，剥 3 段"
-        );
-    }
-
-    /// 目的：自托管 release 源带版本 tag——`release:<tag>/<资产>` 拼成可下载 URL。
-    #[test]
-    fn release_source_carries_the_release_tag() {
-        let all = links().expect("台账可解析");
-        let base = all.get("release.base").expect("台账有 release.base");
-        assert_eq!(
-            source_url("release:deps-qemu-11.1.1-4/a.bin", &all).expect("要拼得出 URL"),
-            format!("{}/deps-qemu-11.1.1-4/a.bin", base.trim_end_matches('/')),
-            "tag 要原样保留在 URL 里"
         );
     }
 

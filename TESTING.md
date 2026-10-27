@@ -30,8 +30,7 @@
 - `src/tests/` 的单元与契约测试：**与 `capabilities/` 同构的一个能力一个文件**，用例多的按域分成子模块；`doubles.rs` 放端口替身，`builders.rs` 放测试装配脚手架；
 - `tests/cross-platform/` 跨平台集成与端到端测试；
 - `tests/windows/`、`tests/linux/`、`tests/macos/` 平台探针（`tests/helpers/probe.rs` 提供共用探针设施）；
-- `tests/dev-loop.mjs` 开发回路自检（`dev.js` 的固定子命令表与拒绝出口）；`tests/pins-tool.mjs` 依赖哈希工具自检
-  （`pins.js` 的台账解析 / 来源推导 / 原地重写，只读、不碰网络）；`tests/ci-changes.mjs` 变更分流自检
+- `tests/dev-loop.mjs` 开发回路自检（`dev.js` 的固定子命令表与拒绝出口）；`tests/ci-changes.mjs` 变更分流自检
   （分类样例、`include_str!/include_bytes!` 文档消费、取不到 diff 时落回全量）；`tests/env-bootstrap.mjs` 环境引导自检
   （`env.js` 的下载 / 续传 / 结构判定 / sha256 闸与显式接受开关，真实子进程 + 本地应答源；仅 Windows 真跑）；
   `src/presentation/web/assets/*.smoke.cjs` 前端冒烟测试；

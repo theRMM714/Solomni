@@ -61,12 +61,11 @@ node run-tests.js
 12. 逐个运行四个测试目标 `cross-platform` / `windows` / `linux` / `macos`（同样默认并行；非本平台且整目标为空的记 `skip-platform`）；
 13. 前端冒烟；
 14. 开发回路自检（`tests/dev-loop.mjs`：`dev.js` 的子命令表与"环境没就绪就如实拒绝"）；
-15. 依赖哈希工具自检（`tests/pins-tool.mjs`：`pins.js` 的台账解析 / 来源推导 / 原地重写；不碰网络）；
-16. 变更分流自检（`tests/ci-changes.mjs --self-test`：`code_changed` / `docs_changed` 两个谓词、`include_str!/include_bytes!` 文档消费、失败兜底）；
-17. 环境引导自检（`tests/env-bootstrap.mjs`：`env.js` 的下载 / 续传 / 结构判定 / sha256 闸，见下文；仅 Windows 真跑，时限 5 分钟）；
-18. 存在编排器时运行 `L4 端到端`（编排器会**现场构建 indexer**：编译器版本进日志，构建失败即失败；`--skip-e2e` 时这一步整步不出现）；
-19. `T0 项目外写`（快照项目外缓存根，新增 / 变化即硬失败；顺带清理系统临时目录里上次崩溃残留的 `solomni-*`）；
-20. 写入 `target/test-report.json` 并打印 `TEST-REPORT-OK` 或 `TEST-REPORT-FAIL`；平台缺口账为空时再打印 `TEST-REPORT-ACCEPTED`。
+15. 变更分流自检（`tests/ci-changes.mjs --self-test`：`code_changed` / `docs_changed` 两个谓词、`include_str!/include_bytes!` 文档消费、失败兜底）；
+16. 环境引导自检（`tests/env-bootstrap.mjs`：`env.js` 的下载 / 续传 / 结构判定 / sha256 闸，见下文；仅 Windows 真跑，时限 5 分钟）；
+17. 存在编排器时运行 `L4 端到端`（编排器会**现场构建 indexer**：编译器版本进日志，构建失败即失败；`--skip-e2e` 时这一步整步不出现）；
+18. `T0 项目外写`（快照项目外缓存根，新增 / 变化即硬失败；顺带清理系统临时目录里上次崩溃残留的 `solomni-*`）；
+19. 写入 `target/test-report.json` 并打印 `TEST-REPORT-OK` 或 `TEST-REPORT-FAIL`；平台缺口账为空时再打印 `TEST-REPORT-ACCEPTED`。
 
 `--docs` / `--audit=docs|structure` 是**独立模式**：只跑上面的第 4 步对应的审查（`--docs` 两者都跑），报告 `mode: "docs"` / `"structure"`，不打印 `TEST-REPORT-ACCEPTED`。
 
@@ -97,14 +96,6 @@ T0 与业务测试在同一次运行里出结果，但结论分开记：质量�
 | 源不认 Range / 传到一半断开 | 退出 1、明说下载没完成、分片与来源标记都留着 |
 
 非 Windows 上那条路（`dlltool`）不存在：先打一条 `[探针]` 再照常打印 `ENV-BOOTSTRAP-OK`——env-skip，不算通过。
-
-### 依赖哈希检查（`pins.js`）
-
-`pins.js` 是维护工具，不在产品运行期用：`update` 按上游校验源刷新 `links.yaml` / `dependencies.yaml` 的哈希，`check` 只读比对，`bump smbd <tag>` 把 smbd 的 URL 与哈希一起换。
-
-- 普通 PR 的 `structure` 只做**离线**检查：键配对、64 位十六进制、无死数据；不联网。
-- `pins-check` workflow 只在手动与每周一跑 `node pins.js check`，只读、不写文件、不开 PR；失败只说明当前 pin 与上游不一致（或上游取不到）。
-- 它不判断“有没有新版本”：当前 pin 的 URL 仍自洽时 check 会通过；新版本靠发布通知 / 人工 `bump`。
 
 ### 真机入口（本地）
 
