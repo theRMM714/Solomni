@@ -255,9 +255,8 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
             }
         }
     }
-    // **祖先链不用授穿过**：容器令牌自带 SeChangeNotifyPrivilege，按名走到被放行的根不需要 FILE_TRAVERSE。
-    // 给祖先授穿过要改写 C:\、C:\Users 这种巨型目录的 DACL（Windows 顺整棵树重算继承，真机实测 ~90 s/条）。
-    // shell 例外：PowerShell 起动时要逐级读 cwd 的属性；只对 shell 的祖先补 RIGHTS_STAT（不递归、不继承、不读内容），见 grant_targets。
+    // **祖先链不用授穿过**：容器令牌自带 SeChangeNotifyPrivilege；给祖先授穿过要改写巨型目录 DACL（真机 ~90 s/条）。
+    // shell 例外：PowerShell 起动要逐级读 cwd 属性，只给 shell 的祖先补 RIGHTS_STAT（不递归/继承/读内容），见 grant_targets。
     free_sid(base);
 
     // 数据边界（会话目录、模块目录）→ 授给该 agent 自己的容器 SID（互相看不见）；
