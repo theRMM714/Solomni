@@ -271,7 +271,7 @@ http.createServer((req, res) => {
         const win = sys.includes('Windows 宿主');
         const ok = win
           ? "$dir = (Get-Location).Path; Write-Output ('PWD=' + $dir); [System.IO.File]::WriteAllText((Join-Path $dir 'shell-ok.txt'), 'SHELL-OK-中文'); Write-Output 'SHELL-OK-中文'"
-          : "printf 'SHELL-OK-中文\\n' > shell-ok.txt; printf 'SHELL-OK-中文\\n'";
+          : "printf 'PWD=%s\\n' \"$PWD\"; printf 'SHELL-OK-中文\\n' > shell-ok.txt; printf 'SHELL-OK-中文\\n'";
         content = JSON.stringify({
           type: 'tool',
           calls: [
