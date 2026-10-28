@@ -566,6 +566,7 @@ async function openHistory(name) {
       running: false, working: null, running_known: false,
       activating: false, continue_action: null,
       context: null, work: null, workAt: 0, workDirty: false, workError: '',
+      permission_profile: '', permission_label: '', permission_narrowed: false, permission_parent: null,
       done: true, awaiting: null, readonly: true, fold: {}, scroll: {},
     };
     s.hydrated = true;
@@ -4897,6 +4898,11 @@ function applyActivation(s, v) {
   s.tier = v.tier || s.tier;
   s.tier_ready = v.tier_ready;
   s.tier_missing = v.tier_missing || [];
+  // 启用返回的 SessionView 已经带生效权限：和会话状态一起贴回，别等下一次 /api/state 轮询。
+  s.permission_profile = v.permission_profile || s.permission_profile;
+  s.permission_label = v.permission_label || s.permission_label;
+  s.permission_narrowed = !!v.permission_narrowed;
+  s.permission_parent = v.permission_parent || null;
 }
 
 /* 上下文「继续」：后端说确实有断点时才出现（单 agent 上一轮 / 协作泵）。
