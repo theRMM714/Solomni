@@ -525,8 +525,14 @@ pub(crate) fn grant_targets(spec: &FenceSpec) -> Vec<GrantTarget> {
     // FILE_READ_ATTRIBUTES；其它工具只给直接父目录，不扩大面。
     let deep = !spec.private.as_os_str().is_empty() && spec.cwd == spec.private;
     for one in &leaves {
+        // 只有 shell 的 cwd/private 这个叶子需要祖先属性；运行包根等只给直接父目录。
+        let deep_leaf = deep && (one.path == spec.cwd || one.path == spec.private);
         let mut parent = one.path.parent();
         while let Some(p) = parent {
+            // 盘根不写：ACL 写盘根会触发整盘继承重算（真机很慢），而盘根的读属性默认已对容器可用。
+            if deep_leaf && p.parent().is_none() {
+                break;
+            }
             if !p.as_os_str().is_empty() {
                 todo.push(GrantTarget {
                     path: p.to_path_buf(),
@@ -536,7 +542,7 @@ pub(crate) fn grant_targets(spec: &FenceSpec) -> Vec<GrantTarget> {
                     part: FencePart::Parent,
                 });
             }
-            if !deep {
+            if !deep_leaf {
                 break;
             }
             parent = p.parent();

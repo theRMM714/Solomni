@@ -244,7 +244,6 @@ fn grant_targets_include_parents_with_stat_only() {
     }
 }
 
-
 /// 目的：shell 的 cwd = private 时，PowerShell 逐级解析 cwd 所需的祖先也要有只读属性（仅 STAT、不递归）。
 #[test]
 fn shell_cwd_gets_every_ancestor_stat_only() {
@@ -266,7 +265,7 @@ fn shell_cwd_gets_every_ancestor_stat_only() {
     let targets = grant_targets(&spec);
     let find = |p: &std::path::Path| targets.iter().find(|t| t.path == p).cloned();
     for anc in private.ancestors().skip(1) {
-        if anc.as_os_str().is_empty() {
+        if anc.as_os_str().is_empty() || anc.parent().is_none() {
             continue;
         }
         let got = find(anc).unwrap_or_else(|| panic!("祖先要在落点清单里：{}", anc.display()));
