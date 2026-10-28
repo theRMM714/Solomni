@@ -2303,6 +2303,14 @@ impl crate::capabilities::vm::ports::GuestVm for FakeVm {
 #[derive(Default)]
 pub(crate) struct RecordingVm {
     pub runs: Mutex<Vec<String>>,
+    /// 目的：fenced 执行的（脚本、超时、输出截断方式）；shell 契约断言用。
+    pub fenced_runs: Mutex<
+        Vec<(
+            String,
+            u64,
+            crate::capabilities::vm::domain::guest::OutputLimit,
+        )>,
+    >,
     /// 目的：已拉起的租约（`guest_leases` 的事实来源；`guest_start` 记、`guest_stop` 删）。
     pub leases: Mutex<Vec<String>>,
     /// 目的：每个租约启动时装载的运行包（判定新子会话要不要重建）。
@@ -2340,6 +2348,11 @@ impl crate::capabilities::vm::api::Vm for RecordingVm {
             .lock()
             .expect("锁")
             .push(format!("fenced:{}", run.command));
+        self.fenced_runs.lock().expect("锁").push((
+            run.command.clone(),
+            run.timeout_secs,
+            run.output_limit,
+        ));
         crate::kernel::api::ToolOutcome {
             ok: true,
             output: "guest".to_string(),
@@ -3397,6 +3410,7 @@ pub(crate) fn member_with_service_tools(
         fence: crate::kernel::api::FenceSpec::for_session(&sb, &[], false),
         module_env: Default::default(),
         runtime_path: None,
+        runtime_roots: Vec::new(),
         reply_seq: 0,
         line: Default::default(),
         allowed: crate::capabilities::tools::api::names(),

@@ -536,6 +536,8 @@ pub(crate) fn translate_run_maps_paths_to_the_guest_dialect() {
             ("LANG".to_string(), "C.UTF-8".to_string()),
         ],
         cwd: format!("{}/mod", work),
+        timeout_secs: 30,
+        output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
     };
     let out = translate_run(&run, GuestOs::Linux, &mounts);
     assert_eq!(
@@ -564,6 +566,8 @@ pub(crate) fn translate_run_maps_paths_to_the_guest_dialect() {
             args_json: "{}".to_string(),
             env: Vec::new(),
             cwd: format!("{}-outside", work),
+            timeout_secs: 30,
+            output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
         },
         GuestOs::Linux,
         &mounts,
@@ -1003,6 +1007,8 @@ pub(crate) fn share_syncs_around_each_run_and_releases_on_stop() {
         args_json: "{}".to_string(),
         env: Vec::new(),
         cwd: String::new(),
+        timeout_secs: 30,
+        output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
     };
     assert!(vm.guest_run("w", &run).ok, "执行要成功");
     vm.guest_stop("w");
@@ -1787,6 +1793,8 @@ pub(crate) fn share_is_picked_per_guest_at_start() {
         args_json: "{}".to_string(),
         env: Vec::new(),
         cwd: String::new(),
+        timeout_secs: 30,
+        output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
     };
     assert!(vm.guest_run("w1", &run).ok, "执行要成功");
     assert_eq!(fast.calls(), vec!["prepare", "sync_in", "sync_out"]);
@@ -2068,6 +2076,8 @@ pub(crate) fn vm_service_holds_guests_by_lease() {
         args_json: "{}".to_string(),
         env: Vec::new(),
         cwd: String::new(),
+        timeout_secs: 30,
+        output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
     };
     assert!(vm.guest_run("w", &run).ok, "有租约就能跑");
     assert!(!vm.guest_run("nope", &run).ok, "没这个租约要如实失败");
@@ -2187,6 +2197,8 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
         args_json: "{}".to_string(),
         env: Vec::new(),
         cwd: String::new(),
+            timeout_secs: 30,
+            output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
     };
     let out = guest.channel().exec(&run);
     // per-agent 围栏：A 只拿到自己的沙箱，B 的沙箱必须被 guest 内 helper 拒绝。
@@ -2208,6 +2220,8 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
             args_json: "{}".to_string(),
             env: Vec::new(),
             cwd: String::new(),
+            timeout_secs: 30,
+            output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
         },
         &access,
     );
@@ -2353,6 +2367,8 @@ pub(crate) fn vm_live_two_guests_share_one_base_without_writing_it() {
         args_json: "{}".to_string(),
         env: Vec::new(),
         cwd: String::new(),
+        timeout_secs: 30,
+        output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
     };
     let out_a = a.channel().exec(&run("TWO_A"));
     let out_b = b.channel().exec(&run("TWO_B"));
@@ -2473,6 +2489,8 @@ pub(crate) fn guests_on_different_leases_run_concurrently() {
         args_json: "{}".to_string(),
         env: Vec::new(),
         cwd: String::new(),
+        timeout_secs: 30,
+        output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
     };
     std::thread::scope(|s| {
         for lease in ["lease-a", "lease-b"] {
@@ -2599,6 +2617,8 @@ pub(crate) fn a_channel_without_fencing_refuses_fenced_runs() {
         args_json: "{}".to_string(),
         env: Vec::new(),
         cwd: String::new(),
+        timeout_secs: 30,
+        output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
     };
     let out = Bare.exec_fenced(&run, &access);
     assert!(!out.ok, "没实现围栏必须失败");
@@ -2628,8 +2648,10 @@ pub(crate) fn guest_helper_is_a_fail_closed_landlock_launcher() {
         script
     );
     assert!(
-        script.contains("os.killpg") && script.contains("TIMEOUT_SECS"),
-        "超时要杀进程组：{}",
+        script.contains("os.killpg")
+            && script.contains("timeout_secs")
+            && script.contains("policy.get(\"timeout_secs\""),
+        "超时要按本次 timeout_secs 杀进程组：{}",
         script
     );
     assert!(
@@ -2701,6 +2723,8 @@ pub(crate) fn vm_service_runs_fenced_and_records_packages() {
             args_json: "{}".to_string(),
             env: Vec::new(),
             cwd: "/work/a".to_string(),
+            timeout_secs: 30,
+            output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
         },
         &fence,
     );

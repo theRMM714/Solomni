@@ -248,6 +248,9 @@ pub struct Conductor {
     residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
     /// 隐秘字段的统一管理面：工具 / 服务起进程时按它解析注入项并脱敏。
     secrets: Arc<dyn crate::capabilities::secrets::api::SecretOps + Send + Sync>,
+    /// 项目内基础工具链的只读安装根（python / node / cc）：shell 的 sandbox 与 external 都放行它们。
+    /// 来源是组合根读到的 active.json；不按 agent 的模块重复注入。
+    base_roots: Vec<std::path::PathBuf>,
     /// 提示词册能力：**册子本体在它里面**（只有一处），conductor 只按名字取段。
     /// 用 `Arc`：协作会话要与核心**共享**这一份（逐处克隆整本册子是白费）。
     prompt: Arc<dyn Prompt>,
@@ -322,6 +325,7 @@ impl Conductor {
             probe,
             residents,
             secrets,
+            base_roots: Vec::new(),
             prompt,
             systools,
             sessions: HashMap::new(),
@@ -329,6 +333,12 @@ impl Conductor {
             running: std::collections::BTreeSet::new(),
             starting: std::collections::BTreeSet::new(),
         }
+    }
+
+    /// 目的：注入项目内基础工具链的只读安装根；组合根读到 active.json 后调用。
+    pub fn with_base_roots(mut self, roots: Vec<std::path::PathBuf>) -> Conductor {
+        self.base_roots = roots;
+        self
     }
 
     /// 目的：本机可选的虚拟根清单（会话配置与创建向导用）。

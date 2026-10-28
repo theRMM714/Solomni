@@ -113,6 +113,7 @@ impl CollabSession {
             // 核心核实用的是只读内置工具，没有模块工具进程，也就没有注入项。
             module_env: Default::default(),
             runtime_path: None,
+            runtime_roots: Vec::new(),
             residents: Arc::new(crate::capabilities::residents::api::NoResidents),
             reply_seq: 0,
             line: Default::default(),

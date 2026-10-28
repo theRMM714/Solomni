@@ -103,6 +103,17 @@ impl ToolExec for ToolsService {
         }
     }
 
+    fn run_shell(&self, run: &crate::kernel::ports::ShellRun<'_>) -> ToolOutcome {
+        let outcome = self.runner.run_shell(run);
+        // 按次临时 profile（Windows sandbox shell）：跑完立刻撤 ACE 并删 profile；失败只如实打印，不掩盖回执。
+        if run.ephemeral {
+            if let Err(e) = self.fence.release_shell(run.fence) {
+                eprintln!("[围栏] shell 收尾撤权未完成：{}", e);
+            }
+        }
+        outcome
+    }
+
     fn run_builtin(
         &self,
         sb: &crate::capabilities::workspace::api::Sandbox,

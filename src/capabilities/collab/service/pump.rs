@@ -552,6 +552,7 @@ impl CollabSession {
                 // 讨论席不干活、拿不到模块工具，也就没有工具进程的注入项。
                 module_env: Default::default(),
                 runtime_path: None,
+                runtime_roots: Vec::new(),
                 residents: Arc::new(crate::capabilities::residents::api::NoResidents),
                 // 讨论席的系统工具面由角色表发放，再按权限档位过滤。
                 allowed,

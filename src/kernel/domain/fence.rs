@@ -8,6 +8,9 @@ use crate::kernel::api::Ask;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+/// 目的：围栏边界说明的稳定标记（shell 回执据此判断“这次失败是不是被围栏拒绝”）。
+pub const FENCE_BOUNDARY_MARK: &str = "范围外的访问被围栏拒绝";
+
 /// 目的：守门进程执行时的全局沙箱要求——机制装不上时是降级还是拒绝。
 /// 约束：`allow_degraded` 只来自本进程的启动问答；不落盘。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

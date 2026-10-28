@@ -4,7 +4,7 @@
 //! 联动：端口在 ports.rs；由组合根构造、service.rs 持有。
 
 use crate::capabilities::vm::domain::guest::{
-    GuestAccess, GuestArch, GuestImage, GuestOs, GuestRun, GuestSpec, SeedDocs,
+    GuestAccess, GuestArch, GuestImage, GuestOs, GuestRun, GuestSpec, OutputLimit, SeedDocs,
 };
 use crate::capabilities::vm::ports::{GuestChannel, GuestVm, SharePlan, VmEngine};
 use crate::kernel::api::ToolOutcome;
@@ -333,6 +333,8 @@ impl VmEngine for QemuEngine {
                 args_json: "{}".to_string(),
                 env: Vec::new(),
                 cwd: String::new(),
+                timeout_secs: 30,
+                output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
             });
             if !out.ok {
                 handle.stop();
@@ -692,6 +694,8 @@ impl QemuHandle {
                 "ro_tree": access.ro_tree,
                 "private": access.private,
                 "net": access.net,
+                // 本次执行的超时秒数：guest helper 到点杀整棵进程树。
+                "timeout_secs": run.timeout_secs,
                 // 只传隐秘字段的**名字**（值走 QGA env），不把值写进临时文件。
                 "env_names": run.env.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>(),
             });
@@ -744,9 +748,9 @@ impl QemuHandle {
             },
             Err(why) => return fail(&why),
         };
-        // 有围栏时 helper 自己按 30 秒杀树，外层只留一段缓冲；供给编排（无围栏）要等 apt / 下载完。
+        // 有围栏时 helper 自己按本次 timeout_secs 杀树，外层只留一段缓冲；供给编排（无围栏）要等 apt / 下载完。
         let budget = if access.is_some() {
-            super::guest_helper::HELPER_TIMEOUT_SECS + 30
+            run.timeout_secs + 30
         } else {
             UNFENCED_GUEST_RUN_SECS
         };
@@ -778,7 +782,7 @@ impl QemuHandle {
                 );
                 return ToolOutcome {
                     ok: code == 0,
-                    output: cap_output(output),
+                    output: cap_output(output, run.output_limit),
                 };
             }
             if Instant::now() >= deadline {
@@ -901,14 +905,28 @@ impl Drop for QemuHandle {
 }
 
 /// 目的：guest 输出与本机守门进程同一份上限；截断时如实报原字符数。
-fn cap_output(text: String) -> String {
+fn cap_output(text: String, limit: OutputLimit) -> String {
     const MAX: usize = 16_000;
     let count = text.chars().count();
     if count <= MAX {
         return text;
     }
-    let head: String = text.chars().take(MAX).collect();
-    format!("{}\n[截断] 输出共 {} 字符，仅保留前 {}", head, count, MAX)
+    match limit {
+        OutputLimit::Head => {
+            let head: String = text.chars().take(MAX).collect();
+            format!("{}\n[截断] 输出共 {} 字符，仅保留前 {}", head, count, MAX)
+        }
+        OutputLimit::HeadAndTail => {
+            let head_n = MAX / 4;
+            let tail_n = MAX - head_n;
+            let head: String = text.chars().take(head_n).collect();
+            let tail: String = text.chars().skip(count - tail_n).collect();
+            format!(
+                "{}\n[截断] 输出共 {} 字符；保留开头 {} 与结尾 {} 字符\n{}",
+                head, count, head_n, tail_n, tail
+            )
+        }
+    }
 }
 
 fn fail(why: &str) -> ToolOutcome {

@@ -235,13 +235,26 @@ impl GuestAccess {
     }
 }
 
-/// 目的：在 guest 里跑一次工具（命令 + 参数 + 环境 + 工作目录）。
+/// 目的：guest 执行输出的截断方式：工具回执只留开头；shell 回执保留开头与结尾（退出码在尾部）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputLimit {
+    /// 目的：只留开头（模块工具沿用）。
+    Head,
+    /// 目的：保留开头 1/4 与结尾 3/4（shell）。
+    HeadAndTail,
+}
+
+/// 目的：在 guest 里跑一次工具（命令 + 参数 + 环境 + 工作目录 + 按次超时与输出截断）。
 #[derive(Debug, Clone)]
 pub struct GuestRun {
     pub command: String,
     pub args_json: String,
     pub env: Vec<(String, String)>,
     pub cwd: String,
+    /// 目的：fenced 执行的超时秒数（helper 到点杀整棵进程树）；unfenced 供给编排忽略它。
+    pub timeout_secs: u64,
+    /// 目的：输出超限时的截断方式。
+    pub output_limit: OutputLimit,
 }
 
 /// 目的：把一次 guest 运行的路径译成 guest 拼法——只译**工作目录**与**本机路径型环境变量**（同方言原样）。
@@ -270,6 +283,8 @@ pub fn translate_run(run: &GuestRun, os: GuestOs, mounts: &[GuestMount]) -> Gues
         } else {
             to_guest_path(Path::new(&run.cwd), os, mounts)
         },
+        timeout_secs: run.timeout_secs,
+        output_limit: run.output_limit,
     }
 }
 

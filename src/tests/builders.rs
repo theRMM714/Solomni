@@ -290,6 +290,10 @@ impl ProcessRunner for SilentRunner {
     ) -> ToolOutcome {
         panic!("不应调用工具");
     }
+
+    fn run_shell(&self, _run: &crate::kernel::ports::ShellRun<'_>) -> ToolOutcome {
+        panic!("不应调用 shell");
+    }
 }
 
 /// 记录型 runner：记录 (root, command, args)，回放固定输出。
@@ -344,6 +348,17 @@ impl ProcessRunner for EnvRecordingRunner {
             output: format!("跑完了 {}", args_json),
         }
     }
+
+    fn run_shell(&self, run: &crate::kernel::ports::ShellRun<'_>) -> ToolOutcome {
+        self.paths
+            .lock()
+            .expect("锁")
+            .push(run.path.map(|p| p.to_os_string()));
+        ToolOutcome {
+            ok: true,
+            output: format!("shell {}", run.script),
+        }
+    }
 }
 
 impl ProcessRunner for RecordingRunner {
@@ -362,6 +377,88 @@ impl ProcessRunner for RecordingRunner {
             command.to_string(),
             args_json.to_string(),
         ));
+        ToolOutcome {
+            ok: self.ok,
+            output: self.out.clone(),
+        }
+    }
+
+    fn run_shell(&self, run: &crate::kernel::ports::ShellRun<'_>) -> ToolOutcome {
+        // shell 也记进同一份 calls：cwd / "shell" / 脚本；超时与围栏看专门的 ShellRunner。
+        self.calls.lock().expect("锁").push((
+            run.fence.cwd.clone(),
+            "shell".to_string(),
+            run.script.to_string(),
+        ));
+        ToolOutcome {
+            ok: self.ok,
+            output: self.out.clone(),
+        }
+    }
+}
+
+/// 目的：一次 shell 调用的事实记录（脚本、围栏、超时、取消旗、是否按次临时 profile、PATH）。
+pub(crate) struct ShellRecord {
+    /// 目的：这次调用的围栏。
+    pub(crate) fence: crate::kernel::api::FenceSpec,
+    /// 目的：脚本原文。
+    pub(crate) script: String,
+    /// 目的：按次超时。
+    pub(crate) timeout: std::time::Duration,
+    /// 目的：调用时取消旗是否已置位。
+    pub(crate) cancel_set: bool,
+    /// 目的：是否按次临时容器 profile。
+    pub(crate) ephemeral: bool,
+    /// 目的：这一趟的 PATH。
+    pub(crate) path: Option<std::ffi::OsString>,
+}
+
+/// 目的：记录型 shell runner——每次 `run_shell` 记下完整事实，按脚本回放固定输出。
+pub(crate) struct ShellRunner {
+    /// 目的：调用记录。
+    pub(crate) calls: Mutex<Vec<ShellRecord>>,
+    /// 目的：回放输出。
+    pub(crate) out: String,
+    /// 目的：回放成败。
+    pub(crate) ok: bool,
+}
+
+impl ShellRunner {
+    /// 目的：按给定输出与成败造一个 shell 替身。
+    pub(crate) fn new(out: &str, ok: bool) -> ShellRunner {
+        ShellRunner {
+            calls: Mutex::new(Vec::new()),
+            out: out.to_string(),
+            ok,
+        }
+    }
+}
+
+impl ProcessRunner for ShellRunner {
+    fn run(
+        &self,
+        _fence: &crate::kernel::api::FenceSpec,
+        _command: &str,
+        _args: &str,
+        _env: &[(String, String)],
+        _path: Option<&std::ffi::OsStr>,
+        _ask: Option<&dyn crate::kernel::ports::AskUser>,
+    ) -> ToolOutcome {
+        panic!("这个替身只该跑 shell");
+    }
+
+    fn run_shell(&self, run: &crate::kernel::ports::ShellRun<'_>) -> ToolOutcome {
+        self.calls.lock().expect("锁").push(ShellRecord {
+            fence: run.fence.clone(),
+            script: run.script.to_string(),
+            timeout: run.timeout,
+            cancel_set: run
+                .cancel
+                .map(|c| c.load(std::sync::atomic::Ordering::Relaxed))
+                .unwrap_or(false),
+            ephemeral: run.ephemeral,
+            path: run.path.map(|p| p.to_os_string()),
+        });
         ToolOutcome {
             ok: self.ok,
             output: self.out.clone(),
@@ -410,6 +507,13 @@ impl ProcessRunner for ParallelRunner {
         ToolOutcome {
             ok: true,
             output: format!("{} 跑完了 {}", command, args_json),
+        }
+    }
+
+    fn run_shell(&self, run: &crate::kernel::ports::ShellRun<'_>) -> ToolOutcome {
+        ToolOutcome {
+            ok: true,
+            output: format!("shell 跑完了 {}", run.script),
         }
     }
 }
@@ -488,6 +592,13 @@ impl ProcessRunner for AskingRunner {
             output: "按你的裁决无围栏跑了一次".to_string(),
         }
     }
+
+    fn run_shell(&self, _run: &crate::kernel::ports::ShellRun<'_>) -> ToolOutcome {
+        ToolOutcome {
+            ok: true,
+            output: "shell 按你的裁决跑了一次".to_string(),
+        }
+    }
 }
 
 pub(crate) const TOOL_CALL: &str =
@@ -543,6 +654,7 @@ pub(crate) fn member_with_tools(
         fence: crate::kernel::api::FenceSpec::for_session(&test_sandbox("m0", &[]), &[], false),
         module_env: Default::default(),
         runtime_path: None,
+        runtime_roots: Vec::new(),
         residents: Arc::new(crate::capabilities::residents::api::NoResidents),
         reply_seq: 0,
         line: Default::default(),
@@ -826,6 +938,7 @@ pub(crate) fn native_member(
         fence: crate::kernel::api::FenceSpec::for_session(&sb, &[], false),
         module_env: Default::default(),
         runtime_path: None,
+        runtime_roots: Vec::new(),
         residents: Arc::new(crate::capabilities::residents::api::NoResidents),
         reply_seq: 0,
         line: Default::default(),

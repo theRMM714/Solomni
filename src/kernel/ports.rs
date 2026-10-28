@@ -21,6 +21,8 @@ impl Log for NoopLog {
 use crate::kernel::domain::fence::FenceSpec;
 use crate::kernel::domain::types::{Ask, AskOutcome, ToolOutcome};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
+use std::time::Duration;
 
 /// 目的：模型侧路径 ↔ 宿主路径的翻译（虚拟机档 guest ↔ 宿主；本机档恒等）。
 /// 约束：**只翻译，不做安全判断**——翻译结果仍要过允许根校验（`workspace::Sandbox::resolve`）。
@@ -56,6 +58,14 @@ pub trait ProcessTexts: Send + Sync {
     fn no_answerer_refused(&self, part: &str, path: &str) -> String;
     /// 无围栏跑一次时的如实标注（part / path / why）。
     fn fence_unfenced(&self, part: &str, path: &str, why: &str) -> String;
+    /// 目的：shell 输出 head+tail 截断的尾部说明（chars = 原字符数，head / tail = 各留多少）。
+    fn truncated_middle(&self, chars: &str, head: &str, tail: &str) -> String;
+    /// 目的：shell 的退出码回执（None = 被信号结束，拿不到退出码）。
+    fn shell_exit(&self, code: Option<i32>) -> String;
+    /// 目的：shell 到点被杀的说明（secs = 本次上限）。
+    fn shell_timeout(&self, secs: u64) -> String;
+    /// 目的：shell 被用户停止的说明（host 取消旗）。
+    fn shell_cancelled(&self) -> String;
 }
 
 /// 目的：**提问端口**——需要用户裁决的机制（围栏、工具执行层，今后任何 yes/no）经它推一条问题，
@@ -131,6 +141,25 @@ pub trait HostProbe: Send + Sync {
     }
 }
 
+/// 目的：一次一次性 shell 执行的输入——脚本、按次超时、取消与提问端口。
+/// 约束：脚本是**本环境 shell 语法**；命令的 stdin 不提供交互，脚本本身经 stdin（Unix）或临时文件（Windows）送达。
+pub struct ShellRun<'a> {
+    /// 目的：这次执行的可达范围与网络。
+    pub fence: &'a FenceSpec,
+    /// 目的：要执行的命令原文（本环境 shell 语法）。
+    pub script: &'a str,
+    /// 目的：本次超时；到点连根杀整棵树。
+    pub timeout: Duration,
+    /// 目的：host 取消旗；到点杀整棵树，guest 立即取消不在本端口内。
+    pub cancel: Option<&'a AtomicBool>,
+    /// 目的：这一趟运行包的生效 PATH（本机档；None = 用围栏白名单里的 PATH）。
+    pub path: Option<&'a std::ffi::OsStr>,
+    /// 目的：这一趟的提问端口（围栏必要落点授不上时经它问用户；None = 没有可回答的前端）。
+    pub ask: Option<&'a dyn AskUser>,
+    /// 目的：这次调用用的是**按次临时容器 profile**（Windows sandbox）：跑完要撤 ACE 并删 profile。
+    pub ephemeral: bool,
+}
+
 /// 目的：一次外部进程执行端口——机制（围栏安装、进程拉起、stdin 送参、超时杀树、截断）在适配层。
 /// 参数：`fence` = 这次执行的可达范围与网络；`command` = 模块声明的启动命令；`args_json` = 经 stdin 送进去的参数；
 ///   `env` = 该模块隐私字段的注入项（只经环境变量进进程，**不进命令行**）；
@@ -148,6 +177,10 @@ pub trait ProcessRunner: Send + Sync {
         path: Option<&std::ffi::OsStr>,
         ask: Option<&dyn AskUser>,
     ) -> ToolOutcome;
+
+    /// 目的：跑一次一次性 shell——平台 shell、按次超时、取消与 head+tail 截断都在适配层。
+    /// 约束：围栏必须真强制（机制装不上就拒绝）；命令的 stdin 不提供交互。
+    fn run_shell(&self, run: &ShellRun<'_>) -> ToolOutcome;
 }
 
 /// 目的：一个**长驻**外部进程会话的规格（起常驻服务用）：围栏 + 命令 + 注入项。
@@ -186,4 +219,10 @@ pub trait SessionHost: Send + Sync {
 /// 约束：调用方只提出请求，不碰任何 ACL；本平台没有该机制时实现为空操作。
 pub trait FenceHost: Send + Sync {
     fn release(&self, spec: &FenceSpec) -> Result<(), String>;
+
+    /// 目的：撤销一次**临时容器 profile**（Windows sandbox shell）的授权并删 profile。
+    /// 约束：默认空操作（其它平台没有按次 profile）；调用方只提出请求，不碰 ACL。
+    fn release_shell(&self, _spec: &FenceSpec) -> Result<(), String> {
+        Ok(())
+    }
 }

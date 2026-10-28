@@ -549,6 +549,8 @@ fn main() {
         home.clone(),
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     );
+    // 项目内基础工具链的只读安装根：构建与 shell 共用同一份（不按 agent 重复注入）。
+    let base_roots = entry::toolchains::active_roots(&root);
     let builds: Arc<dyn capabilities::builds::api::Builds + Send + Sync> =
         Arc::new(capabilities::builds::service::BuildsService::new(
             root.clone(),
@@ -558,7 +560,7 @@ fn main() {
             Arc::new(build_runner),
             Arc::new(kernel::detail::HostProbeAdapter),
             std::sync::Arc::clone(&log),
-            entry::toolchains::active_roots(&root),
+            base_roots.clone(),
         ));
     // 启动时要按有效启停拉起常驻服务：留一份手柄（进程级租约，不属于任何会话）。
     let residents_boot = Arc::clone(&residents);
@@ -582,7 +584,8 @@ fn main() {
         Arc::new(kernel::detail::HostProbeAdapter),
         residents,
         secrets,
-    );
+    )
+    .with_base_roots(base_roots);
 
     // 隐藏模式：实测一条通道支不支持原生工具调用，并把确定结论写回 models.yaml（要真实网络）。
     if let Some(i) = args.iter().position(|a| a == "--probe-tools") {

@@ -451,7 +451,7 @@ pub fn converse_with(
                     let done = if user_stopped {
                         refused_batch(&plan)
                     } else {
-                        run_batch(ctx, &plan, confirms.as_mut(), ask, sink)
+                        run_batch(ctx, &plan, confirms.as_mut(), ask, cancel.as_ref(), sink)
                     };
                     // 先按原序把工具行建好（执行已经做完），再让**唯一那处**构造函数产出这一回复的消息：
                     // 实时与重建走同一个函数，"重建上下文与实时一致"因此是结构保证的。
@@ -621,7 +621,7 @@ pub fn converse_with(
                 let done = if user_stopped {
                     refused_batch(&plan)
                 } else {
-                    run_batch(ctx, &plan, confirms.as_mut(), ask, sink)
+                    run_batch(ctx, &plan, confirms.as_mut(), ask, cancel.as_ref(), sink)
                 };
                 // 修过信封就如实标注在回执最前面（模型与用户都能看到核心没有瞎猜）
                 let annotate = |outcome: ToolOutcome| -> ToolOutcome {

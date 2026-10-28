@@ -77,6 +77,9 @@ pub struct MemberTools {
     pub module_env: std::collections::BTreeMap<String, Vec<(String, String)>>,
     /// 目的：本机档运行包的生效 PATH（由 packages 计划给出；虚拟机档 / 没有包 = None）。
     pub runtime_path: Option<std::ffi::OsString>,
+    /// 目的：shell 的只读工具链根：项目内基础 profile + 该 agent 模块的运行包根。
+    /// 约束：只进 shell 的 per-call 围栏；模块工具的放行仍走它自己的命令解释器基线。
+    pub runtime_roots: Vec<PathBuf>,
     /// **回复 id 计数器**：一次模型回复一个号，跨重启单调（重建时按转录里的最大值续号）。
     /// 转录行靠它分组（哪几行属于同一次回复），会话靠它按回复原子回档。
     pub reply_seq: u64,

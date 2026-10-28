@@ -87,6 +87,31 @@ impl crate::kernel::ports::FenceHost for FenceHostAdapter {
     fn release(&self, spec: &FenceSpec) -> Result<(), String> {
         release_fence(spec, &self.home)
     }
+
+    /// 目的：撤掉一次 shell 调用的围栏授权；Windows 上再删掉它的按次临时容器 profile。
+    fn release_shell(&self, spec: &FenceSpec) -> Result<(), String> {
+        #[cfg(windows)]
+        {
+            let mut errors: Vec<String> = Vec::new();
+            if let Err(e) = release_fence(spec, &self.home) {
+                errors.push(e);
+            }
+            let name = windows::container_name(spec);
+            if let Err(e) = windows::remove_profile_one(&self.home, &name) {
+                errors.push(e);
+            }
+            return if errors.is_empty() {
+                Ok(())
+            } else {
+                Err(errors.join("；"))
+            };
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (spec, &self.home);
+            Ok(())
+        }
+    }
 }
 
 /// 目的：本机能强制的围栏等级（如实上报给用户与日志）。
@@ -230,9 +255,10 @@ fn fence_boundary_note(
         "未生效"
     };
     Some(format!(
-        "[围栏] 工具进程只可达 {}（网：{}）；范围外的访问被围栏拒绝。",
+        "[围栏] 工具进程只可达 {}（网：{}）；{}。",
         reachable_roots(spec),
-        net
+        net,
+        crate::kernel::domain::fence::FENCE_BOUNDARY_MARK
     ))
 }
 
@@ -768,10 +794,10 @@ fn install_dir(bin: &std::path::Path) -> std::path::PathBuf {
     bin.to_path_buf()
 }
 
-/// node 的「跳过 realpath」开关：主模块看 `-main`，依赖与 ESM 看另一个——**两个都要**
-/// （单开任何一个，另一半照样 realpath，真机实测如此）。
+/// 目的：node 的「跳过 realpath」开关——主模块看 `-main`，依赖与 ESM 看另一个（两个都要）。
+/// 约束：单开任何一个，另一半照样 realpath（真机实测如此）。
 #[cfg(windows)]
-const NODE_REALPATH_FLAGS: &str = "--preserve-symlinks --preserve-symlinks-main";
+pub(crate) const NODE_REALPATH_FLAGS: &str = "--preserve-symlinks --preserve-symlinks-main";
 
 /// 目的：命令用 node 时要补的环境（`NODE_OPTIONS` 跳过 realpath）；不是 node 就是 `None`。
 /// 约束：Windows 的容器围栏才需要它——`fs.realpathSync` 先 lstat 盘卷根、再逐级 lstat 祖先前缀，

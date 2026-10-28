@@ -4,7 +4,7 @@
 //! 联动：消费方是核心（`src/capabilities/conductor/api/`）与各能力；端口见 `src/kernel/ports.rs`。
 
 pub use crate::kernel::domain::fence::{
-    FenceRunPolicy, FenceSpec, SandboxMode, SandboxRequirements,
+    FenceRunPolicy, FenceSpec, SandboxMode, SandboxRequirements, FENCE_BOUNDARY_MARK,
 };
 pub use crate::kernel::domain::jobs::JobRegistry;
 pub use crate::kernel::domain::path::slash;

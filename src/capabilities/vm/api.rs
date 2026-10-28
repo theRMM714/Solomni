@@ -11,7 +11,8 @@ pub use crate::capabilities::vm::domain::exec::{
     COPY_SHARE_ENV,
 };
 pub use crate::capabilities::vm::domain::guest::{
-    classify_base, mounts_from, package_setup_scripts, GuestImage, GuestRun, GuestSpec, SeedDocs,
+    classify_base, mounts_from, package_setup_scripts, GuestImage, GuestRun, GuestSpec,
+    OutputLimit, SeedDocs,
 };
 pub use crate::capabilities::vm::domain::guest::{GuestArch, GuestClients, GuestOs};
 pub use crate::capabilities::vm::domain::paths::PathBridge;

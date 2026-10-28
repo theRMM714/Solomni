@@ -20,6 +20,8 @@ pub const PATCH: &str = "patch";
 pub const DELETE: &str = "delete";
 pub const LIST: &str = "list";
 pub const SEARCH: &str = "search";
+/// 目的：执行类系统工具——一次性 shell（机制在 kernel 的 ProcessRunner / guest，不在 SysIo）。
+pub const SHELL: &str = "shell";
 
 /// 单次读取回传的字符上限（超出如实截断，并在回执里给出接着读的 offset）。
 pub const MAX_READ_CHARS: usize = 60_000;
@@ -47,7 +49,12 @@ pub fn is_builtin(name: &str) -> bool {
         || name == REPORT
 }
 
-/// 内置工具名清单（拼错误提示用）。
+/// 目的：这个系统工具名是不是执行类（shell）——不是 SysIo 内置文件工具，但同样按系统工具面发放与校验。
+pub fn is_exec(name: &str) -> bool {
+    name == SHELL
+}
+
+/// 目的：系统工具保留名清单（拼错误提示、模块工具不得占用）。
 pub fn names() -> Vec<String> {
     vec![
         READ.to_string(),
@@ -58,6 +65,7 @@ pub fn names() -> Vec<String> {
         LIST.to_string(),
         SEARCH.to_string(),
         REPORT.to_string(),
+        SHELL.to_string(),
     ]
 }
 

@@ -9,7 +9,8 @@ use crate::capabilities::vm::ports::GuestChannel;
 /// 目的：guest 内助手路径（会话可写层里，随每台 guest 一起重建）。
 pub const HELPER_PATH: &str = "/usr/local/sbin/solomni-guest-fence";
 
-/// 目的：助手超时（与本机守门进程的 30 秒同一口径；到点杀整棵进程树）。
+/// 目的：助手缺省超时（与本机守门进程的 30 秒同一口径）；每次执行的 timeout_secs 由策略给，缺省用它。
+#[allow(dead_code)]
 pub const HELPER_TIMEOUT_SECS: u64 = 30;
 
 /// 目的：助手脚本正文。guest 只需 python3（虚拟根基线已自证）；缺 python3 时执行必然失败，不降级。
@@ -29,7 +30,6 @@ SYS_ADD = 445
 SYS_RESTRICT = 446
 RULE_PATH_BENEATH = 1
 CLONE_NEWNET = 0x40000000
-TIMEOUT_SECS = 30
 
 
 def die(msg):
@@ -109,6 +109,13 @@ def main():
         os.unlink(path)
     except OSError:
         pass
+    # 本机把本次 timeout_secs 写进策略；缺省 / 非法值退回 30 秒（helper 始终有界）。
+    try:
+        timeout_secs = int(policy.get("timeout_secs", 30))
+    except (TypeError, ValueError):
+        timeout_secs = 30
+    if timeout_secs < 1:
+        timeout_secs = 1
 
     global libc
     libc = ctypes.CDLL(None, use_errno=True)
@@ -204,7 +211,7 @@ def main():
     except OSError as e:
         die("spawn(/bin/sh): " + str(e))
     try:
-        code = child.wait(timeout=TIMEOUT_SECS)
+        code = child.wait(timeout=timeout_secs)
     except subprocess.TimeoutExpired:
         try:
             os.killpg(child.pid, signal.SIGKILL)
@@ -231,6 +238,8 @@ pub fn install(channel: &mut dyn GuestChannel) -> Result<(), String> {
         args_json: "{}".to_string(),
         env: Vec::new(),
         cwd: String::new(),
+        timeout_secs: 30,
+        output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
     });
     if !mk.ok {
         return Err(format!("建 guest 助手目录失败：{}", mk.output));
@@ -241,6 +250,8 @@ pub fn install(channel: &mut dyn GuestChannel) -> Result<(), String> {
         args_json: "{}".to_string(),
         env: Vec::new(),
         cwd: String::new(),
+        timeout_secs: 30,
+        output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
     });
     if !chmod.ok {
         return Err(format!("给 guest 助手加执行位失败：{}", chmod.output));

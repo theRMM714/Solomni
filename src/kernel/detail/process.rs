@@ -34,6 +34,9 @@ pub struct ProcTools {
     pub max_output_chars: usize,
     /// 目的：全局沙箱要求与本进程是否已同意降级。
     pub mode: std::sync::Arc<crate::kernel::api::SandboxMode>,
+    /// 目的：强制使用的 PowerShell 程序（pwsh / powershell）；None = 自动检测。Windows 专用。
+    #[cfg(windows)]
+    pub shell_ps: Option<&'static str>,
 }
 
 /// 目的：进程机制自己的收尾文案（不再经提示词册；它们随 [工具结果] 进模型上下文）。
@@ -80,6 +83,27 @@ impl ProcessTexts for CodeProcessTexts {
             part, path, why
         )
     }
+    fn truncated_middle(&self, chars: &str, head: &str, tail: &str) -> String {
+        format!(
+            "[截断] 输出共 {} 字符；保留开头 {} 与结尾 {} 字符",
+            chars, head, tail
+        )
+    }
+    fn shell_exit(&self, code: Option<i32>) -> String {
+        match code {
+            Some(c) => format!("[shell] 退出码 {}", c),
+            None => "[shell] 退出码未知（被信号结束）".to_string(),
+        }
+    }
+    fn shell_timeout(&self, secs: u64) -> String {
+        format!(
+            "[shell] 超时（{} 秒）：工具进程与它拉起的整棵进程树已被终止",
+            secs
+        )
+    }
+    fn shell_cancelled(&self) -> String {
+        "[shell] 用户停止：工具进程与它拉起的整棵进程树已被终止".to_string()
+    }
 }
 
 impl ProcTools {
@@ -105,12 +129,21 @@ impl ProcTools {
             timeout: Duration::from_secs(30),
             max_output_chars: 16_000,
             mode: std::sync::Arc::new(crate::kernel::api::SandboxMode::permissive()),
+            #[cfg(windows)]
+            shell_ps: None,
         }
     }
 
     /// 目的：组合根注入全局沙箱模式；缺省是“无要求”的测试替身。
     pub fn with_mode(mut self, mode: std::sync::Arc<crate::kernel::api::SandboxMode>) -> ProcTools {
         self.mode = mode;
+        self
+    }
+
+    /// 目的：强制 shell 用哪个 PowerShell（诊断 / Windows 真机验 5.1 回退）；None = 自动。
+    #[cfg(windows)]
+    pub fn with_powershell(mut self, program: Option<&'static str>) -> ProcTools {
+        self.shell_ps = program;
         self
     }
 }
@@ -127,6 +160,50 @@ impl ProcessRunner for ProcTools {
         path: Option<&std::ffi::OsStr>,
         ask: Option<&dyn crate::kernel::ports::AskUser>,
     ) -> ToolOutcome {
+        self.run_inner(
+            fence,
+            command,
+            args_json,
+            env,
+            path,
+            ask,
+            RunPlan {
+                timeout: self.timeout,
+                strict: false,
+                shell: false,
+                cancel: None,
+            },
+        )
+    }
+
+    fn run_shell(&self, run: &crate::kernel::ports::ShellRun<'_>) -> ToolOutcome {
+        self.run_shell_impl(run)
+    }
+}
+
+/// 目的：一次进程执行的机制选项——模块工具用默认超时与降级策略；shell 用按次超时、严格围栏与取消。
+struct RunPlan<'a> {
+    timeout: Duration,
+    strict: bool,
+    shell: bool,
+    cancel: Option<&'a std::sync::atomic::AtomicBool>,
+}
+
+impl ProcTools {
+    /// 目的：一次进程执行的公共体（准备围栏、拉起守门进程、送 stdin、等待/取消/超时、拼回执）。
+    /// 参数：`plan` 区分模块工具与 shell；strict = 围栏必须真强制，shell 不降级、不问无围栏。
+    #[allow(clippy::too_many_arguments)]
+    #[cfg_attr(not(windows), allow(unused_variables))]
+    fn run_inner(
+        &self,
+        fence: &FenceSpec,
+        command: &str,
+        stdin_payload: &str,
+        env: &[(String, String)],
+        path: Option<&std::ffi::OsStr>,
+        ask: Option<&dyn crate::kernel::ports::AskUser>,
+        plan: RunPlan<'_>,
+    ) -> ToolOutcome {
         // Windows：容器围栏要先把「可达范围」授权给容器 SID。
         // **默认不写本机任何权限项**：只有用户显式授权（设置里的 sandbox.policy.windows.write_acl，或环境变量 SOLOMNI_FENCE_WRITE=1）才做。
         #[cfg(windows)]
@@ -140,10 +217,13 @@ impl ProcessRunner for ProcTools {
                 for n in &prep.notes {
                     eprintln!("[围栏] {}（可选落点，本次照常执行）", n);
                 }
-                // 必要落点授不上：**不许降级**——问用户（没有可回答的前端就按 fail-closed 拒绝）。
+                // 必要落点授不上：shell 严格模式直接拒绝；模块工具按既有裁决问用户。
                 if prep.ok() {
                     prepared = true;
                 } else if let Some(blocked) = &prep.blocked {
+                    if plan.strict {
+                        return self.fence_refusal_strict(blocked);
+                    }
                     match self.fence_blocked(ask, fence, blocked) {
                         FenceGo::Unfenced { note: n } => note = Some(n),
                         FenceGo::Refused(outcome) => return outcome,
@@ -173,8 +253,8 @@ impl ProcessRunner for ProcTools {
         #[cfg(not(windows))]
         let home: Option<std::path::PathBuf> = None;
         // 全局沙箱要求：机制不可用且本进程未同意降级时，工具**不执行**。
-        // 用户已就“必要落点”选了本轮无围栏时，不再用进程级要求拦一次（那是更具体的裁决）。
-        if unfenced_note.is_none() {
+        // shell 严格模式不看本进程降级：它的围栏要求恒为真，由守门进程按 FENCE_FAILED 拒绝。
+        if !plan.strict && unfenced_note.is_none() {
             if let Err(why) = self.mode.check(fence, prepared) {
                 return ToolOutcome {
                     ok: false,
@@ -182,15 +262,24 @@ impl ProcessRunner for ProcTools {
                 };
             }
         }
+        let policy = if plan.strict {
+            crate::kernel::api::FenceRunPolicy {
+                require_fs: true,
+                require_net: true,
+                allow_degraded: false,
+            }
+        } else {
+            crate::kernel::api::FenceRunPolicy {
+                require_fs: self.mode.requirements.filesystem,
+                require_net: self.mode.requirements.network,
+                allow_degraded: self.mode.degraded(),
+            }
+        };
         let job = confine::FenceJob {
             spec: fence.clone(),
             prepared,
             home,
-            policy: crate::kernel::api::FenceRunPolicy {
-                require_fs: self.mode.requirements.filesystem,
-                require_net: self.mode.requirements.network,
-                allow_degraded: self.mode.degraded(),
-            },
+            policy,
         };
         let mut cmd = confine::launcher(&self.exe, &job, command);
         cmd.current_dir(&fence.cwd)
@@ -227,7 +316,7 @@ impl ProcessRunner for ProcTools {
         };
         // stdin 独立线程送参：参数再大也不与 stdout 读取互锁。
         let mut stdin = child.stdin.take().expect("stdin 已声明管道");
-        let payload = format!("{}\n", args_json);
+        let payload = format!("{}\n", stdin_payload);
         let writer = thread::spawn(move || {
             use std::io::Write;
             let _ = stdin.write_all(payload.as_bytes());
@@ -238,10 +327,18 @@ impl ProcessRunner for ProcTools {
         let out_reader = thread::spawn(move || read_to_string(&mut stdout_pipe));
         let err_reader = thread::spawn(move || read_to_string(&mut stderr_pipe));
 
-        // 轮询等待至截止；到时连根杀掉整棵树（管道随之关闭，读线程自然结束）。
-        let deadline = Instant::now() + self.timeout;
+        // 轮询等待至截止；取消旗先看（停止要立刻生效），到点再杀整棵树。
+        let deadline = Instant::now() + plan.timeout;
         let mut timed_out = false;
+        let mut cancelled = false;
         loop {
+            if let Some(flag) = plan.cancel {
+                if flag.load(std::sync::atomic::Ordering::Relaxed) {
+                    cancelled = true;
+                    kill_tree(&mut child);
+                    break;
+                }
+            }
             match child.try_wait() {
                 Ok(Some(_)) => break,
                 Ok(None) => {
@@ -259,13 +356,202 @@ impl ProcessRunner for ProcTools {
         let out = out_reader.join().unwrap_or_default();
         let err = err_reader.join().unwrap_or_default();
         let code = child.try_wait().ok().flatten().and_then(|s| s.code());
-        let mut outcome = self.assemble(out, err, timed_out, code);
+        let mut outcome = if plan.shell {
+            self.assemble_shell(out, err, timed_out, cancelled, code, plan.timeout)
+        } else {
+            self.assemble(out, err, timed_out, code)
+        };
         // 用户裁决"本轮无围栏跑一次"：这次执行在回执里**如实标为无围栏**（模型与用户都看得到）。
         if let Some(note) = unfenced_note {
             outcome.output.push('\n');
             outcome.output.push_str(&note);
         }
         outcome
+    }
+
+    /// 目的：本机 shell 的启动方式：Windows 用 PowerShell（-File 临时脚本），其它平台用 sh（脚本走 stdin）。
+    /// 约束：脚本是数据，不拼进命令行；Windows 的临时脚本落在 shell 的 cwd（私有沙箱）里，跑完删掉。
+    #[cfg(not(windows))]
+    fn run_shell_impl(&self, run: &crate::kernel::ports::ShellRun<'_>) -> ToolOutcome {
+        // 外层守门进程本身就是 sh -c：这里再起一个 sh 读 stdin，脚本不会与命令的 stdin 抢同一条流。
+        let command = "sh -c \"$(cat)\"";
+        self.run_inner(
+            run.fence,
+            command,
+            run.script,
+            &[],
+            run.path,
+            run.ask,
+            RunPlan {
+                timeout: run.timeout,
+                strict: true,
+                shell: true,
+                cancel: run.cancel,
+            },
+        )
+    }
+
+    #[cfg(windows)]
+    fn run_shell_impl(&self, run: &crate::kernel::ports::ShellRun<'_>) -> ToolOutcome {
+        let (name, file) = match self.shell_script_file(run) {
+            Ok(v) => v,
+            Err(e) => {
+                return ToolOutcome {
+                    ok: false,
+                    output: e,
+                }
+            }
+        };
+        let command = format!(
+            "{} -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {}",
+            self.powershell_program(),
+            name
+        );
+        // shell 的脚本不在命令行里，解释器基线看不到 node：Windows 容器里 node 需要跳过 realpath。
+        let env = vec![(
+            "NODE_OPTIONS".to_string(),
+            confine::NODE_REALPATH_FLAGS.to_string(),
+        )];
+        let out = self.run_inner(
+            run.fence,
+            &command,
+            "",
+            &env,
+            run.path,
+            run.ask,
+            RunPlan {
+                timeout: run.timeout,
+                strict: true,
+                shell: true,
+                cancel: run.cancel,
+            },
+        );
+        let _ = std::fs::remove_file(&file);
+        out
+    }
+
+    /// 目的：把 shell 输出按 head+tail 截断（开头 1/4、结尾 3/4），截断标记在中间。
+    fn truncate_middle(&self, s: &str) -> String {
+        let count = s.chars().count();
+        if count <= self.max_output_chars {
+            return s.to_string();
+        }
+        let head_n = self.max_output_chars / 4;
+        let tail_n = self.max_output_chars - head_n;
+        let head: String = s.chars().take(head_n).collect();
+        let tail: String = s.chars().skip(count - tail_n).collect();
+        format!(
+            "{}\n{}\n{}",
+            head,
+            self.texts.truncated_middle(
+                &count.to_string(),
+                &head_n.to_string(),
+                &tail_n.to_string()
+            ),
+            tail
+        )
+    }
+
+    /// 目的：拼 shell 回执：head+tail 截断 + 退出码 / 超时 / 用户停止 / 围栏失败。
+    fn assemble_shell(
+        &self,
+        out: String,
+        err: String,
+        timed_out: bool,
+        cancelled: bool,
+        code: Option<i32>,
+        timeout: Duration,
+    ) -> ToolOutcome {
+        let mut body = out;
+        if !err.is_empty() {
+            if !body.is_empty() {
+                body.push('\n');
+            }
+            body.push_str(&self.texts.stderr_header());
+            body.push('\n');
+            body.push_str(&err);
+        }
+        let mut output = self.truncate_middle(&body);
+        output.push('\n');
+        if cancelled {
+            output.push_str(&self.texts.shell_cancelled());
+        } else if timed_out {
+            output.push_str(&self.texts.shell_timeout(timeout.as_secs()));
+        } else {
+            output.push_str(&self.texts.shell_exit(code));
+        }
+        if code == Some(confine::FENCE_FAILED) {
+            output.push('\n');
+            output.push_str(&self.texts.fence_failed());
+        }
+        ToolOutcome {
+            ok: !timed_out && !cancelled && code == Some(0),
+            output,
+        }
+    }
+}
+
+#[cfg(windows)]
+const PS_PRELUDE: &str = "try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }\n$OutputEncoding = [System.Text.Encoding]::UTF8\n";
+#[cfg(windows)]
+const PS_TAIL: &str = "\nif ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE }\n";
+
+#[cfg(windows)]
+impl ProcTools {
+    /// 目的：这次 shell 用哪个 PowerShell：显式覆盖优先，否则 pwsh 7 优先、powershell 5.1 回退。
+    fn powershell_program(&self) -> &'static str {
+        if let Some(program) = self.shell_ps {
+            return program;
+        }
+        if crate::kernel::detail::host_probe::find_exe("pwsh").is_some() {
+            "pwsh"
+        } else {
+            "powershell"
+        }
+    }
+}
+
+#[cfg(windows)]
+impl ProcTools {
+    /// 目的：把 shell 脚本写进 cwd 下的临时 .ps1（UTF-8 BOM + 输出编码前导 + 退出码尾巴）；返回相对名与全路径。
+    /// 约束：create_new 防跟随同名符号链接；名字由本进程生成，不含模型内容。
+    fn shell_script_file(
+        &self,
+        run: &crate::kernel::ports::ShellRun<'_>,
+    ) -> Result<(String, PathBuf), String> {
+        let dir = if !run.fence.cwd.as_os_str().is_empty() {
+            run.fence.cwd.clone()
+        } else {
+            run.fence.private.clone()
+        };
+        if dir.as_os_str().is_empty() {
+            return Err("shell 没有可写的私有沙箱（cwd 为空）".to_string());
+        }
+        let pid = std::process::id();
+        for n in 0..100u32 {
+            let name = format!(".solomni-shell-{}-{}.ps1", pid, n);
+            let path = dir.join(&name);
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+            {
+                Ok(mut f) => {
+                    use std::io::Write;
+                    let body = format!("{}{}\n{}", PS_PRELUDE, run.script, PS_TAIL);
+                    let mut bytes = vec![0xEF, 0xBB, 0xBF];
+                    bytes.extend_from_slice(body.as_bytes());
+                    if let Err(e) = f.write_all(&bytes) {
+                        let _ = std::fs::remove_file(&path);
+                        return Err(format!("写 shell 临时脚本失败：{}", e));
+                    }
+                    return Ok((name, path));
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(format!("建 shell 临时脚本失败：{}", e)),
+            }
+        }
+        Err("建 shell 临时脚本失败：名字用完了".to_string())
     }
 }
 
@@ -346,6 +632,21 @@ impl ProcTools {
             output.push('\n');
             output.push_str(&line);
         }
+        ToolOutcome { ok: false, output }
+    }
+
+    /// 目的：shell 严格模式下必要落点授不上：不发起裁决、不提供"无围栏跑一次"，直接失败。
+    fn fence_refusal_strict(
+        &self,
+        blocked: &crate::kernel::domain::fence::FenceBlocked,
+    ) -> ToolOutcome {
+        let path = where_text(blocked);
+        let part = blocked.part.label().to_string();
+        let mut output = self
+            .texts
+            .fence_blocked(&part, &path, &blocked.why, blocked.part.fix());
+        output.push('\n');
+        output.push_str("严格模式：shell 要求围栏真强制，这次调用没有执行。");
         ToolOutcome { ok: false, output }
     }
 
@@ -1175,6 +1476,224 @@ mod tests {
             FenceGo::Unfenced { .. } => panic!("没人答绝不许跑"),
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ---------- 一次性 shell（T3 真实进程） ----------
+    #[cfg(unix)]
+    fn shell_fence_ready() -> bool {
+        let c = confine::capability();
+        c.fs && c.net
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn real_shell_reports_chinese_and_exit_code() {
+        let Some(exe) = built_exe() else {
+            eprintln!("[探针] 未找到已构建的产品可执行文件，跳过 shell 契约");
+            return;
+        };
+        if !shell_fence_ready() {
+            eprintln!("[探针] 本机围栏不可用（环境结论），跳过 shell 契约");
+            return;
+        }
+        let dir = crate::tests::scratch("proc-shell-basic");
+        let tools = real_runner(exe, &dir, 30);
+        let out = tools.run_shell(&crate::kernel::ports::ShellRun {
+            fence: &spec_for(&dir),
+            script: "printf '中文\\n'; exit 3",
+            timeout: Duration::from_secs(10),
+            cancel: None,
+            path: None,
+            ask: None,
+            ephemeral: false,
+        });
+        assert!(!out.ok, "退出码 3 应如实失败：{}", out.output);
+        assert!(out.output.contains("中文"), "{}", out.output);
+        assert!(
+            out.output.contains("[shell] 退出码 3"),
+            "回执要带退出码：{}",
+            out.output
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn real_shell_keeps_head_and_tail_when_output_is_long() {
+        let Some(exe) = built_exe() else {
+            eprintln!("[探针] 未找到已构建的产品可执行文件，跳过 shell 截断契约");
+            return;
+        };
+        if !shell_fence_ready() {
+            eprintln!("[探针] 本机围栏不可用（环境结论），跳过 shell 截断契约");
+            return;
+        }
+        let dir = crate::tests::scratch("proc-shell-truncate");
+        let tools = real_runner(exe, &dir, 30);
+        let out = tools.run_shell(&crate::kernel::ports::ShellRun {
+            fence: &spec_for(&dir),
+            script: "i=0; while [ $i -lt 20000 ]; do printf a; i=$((i+1)); done; printf TAIL",
+            timeout: Duration::from_secs(10),
+            cancel: None,
+            path: None,
+            ask: None,
+            ephemeral: false,
+        });
+        assert!(out.ok, "{}", out.output);
+        assert!(out.output.contains("TAIL"), "结尾要保留：{}", out.output);
+        assert!(
+            out.output.contains("开头") && out.output.contains("结尾"),
+            "截断标记要如实说清：{}",
+            out.output
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn real_shell_timeout_and_cancel_kill_the_tree() {
+        let Some(exe) = built_exe() else {
+            eprintln!("[探针] 未找到已构建的产品可执行文件，跳过 shell 超时契约");
+            return;
+        };
+        if !shell_fence_ready() {
+            eprintln!("[探针] 本机围栏不可用（环境结论），跳过 shell 超时契约");
+            return;
+        }
+        let dir = crate::tests::scratch("proc-shell-stop");
+        let tools = real_runner(exe, &dir, 30);
+        let spec = spec_for(&dir);
+        let started = Instant::now();
+        let out = tools.run_shell(&crate::kernel::ports::ShellRun {
+            fence: &spec,
+            script: "sleep 5",
+            timeout: Duration::from_secs(1),
+            cancel: None,
+            path: None,
+            ask: None,
+            ephemeral: false,
+        });
+        assert!(!out.ok, "{}", out.output);
+        assert!(out.output.contains("超时"), "{}", out.output);
+        assert!(
+            started.elapsed() < Duration::from_secs(4),
+            "超时后不得继续等"
+        );
+
+        let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let set = std::sync::Arc::clone(&flag);
+        let spec2 = spec.clone();
+        let started = Instant::now();
+        let h = std::thread::spawn(move || {
+            tools.run_shell(&crate::kernel::ports::ShellRun {
+                fence: &spec2,
+                script: "sleep 5",
+                timeout: Duration::from_secs(30),
+                cancel: Some(&set),
+                path: None,
+                ask: None,
+                ephemeral: false,
+            })
+        });
+        std::thread::sleep(Duration::from_millis(300));
+        flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        let out = h.join().expect("shell 线程");
+        assert!(!out.ok, "{}", out.output);
+        assert!(out.output.contains("用户停止"), "{}", out.output);
+        assert!(started.elapsed() < Duration::from_secs(5), "停止要立刻收树");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn real_shell_fence_denies_outside_paths_and_marks_the_boundary() {
+        let Some(exe) = built_exe() else {
+            eprintln!("[探针] 未找到已构建的产品可执行文件，跳过 shell 围栏契约");
+            return;
+        };
+        if !shell_fence_ready() {
+            eprintln!("[探针] 本机围栏不可用（环境结论），跳过 shell 围栏契约");
+            return;
+        }
+        let inside = crate::tests::scratch("proc-shell-inside");
+        let outside = crate::tests::scratch("proc-shell-outside");
+        let secret = outside.join("secret.txt");
+        std::fs::write(&secret, "SHELL-SECRET").expect("写 secret");
+        let mut spec = spec_for(&inside);
+        spec.private = inside.clone();
+        let tools = real_runner(exe, &inside, 30);
+        let out = tools.run_shell(&crate::kernel::ports::ShellRun {
+            fence: &spec,
+            script: &format!("cat {}", secret.display()),
+            timeout: Duration::from_secs(10),
+            cancel: None,
+            path: None,
+            ask: None,
+            ephemeral: false,
+        });
+        assert!(!out.ok, "{}", out.output);
+        assert!(!out.output.contains("SHELL-SECRET"), "{}", out.output);
+        assert!(
+            out.output.contains(crate::kernel::api::FENCE_BOUNDARY_MARK),
+            "{}",
+            out.output
+        );
+        let _ = std::fs::remove_dir_all(&inside);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn real_shell_uses_powershell_utf8_exit_code_and_cleans_its_script() {
+        if !fence_live() {
+            eprintln!("[探针] 未开启真机围栏测试（会写本机 ACL）：跳过 Windows shell 契约");
+            return;
+        }
+        let Some(exe) = built_exe() else {
+            eprintln!("[探针] 未找到已构建的产品可执行文件，跳过 Windows shell 契约");
+            return;
+        };
+        for program in ["pwsh", "powershell"] {
+            if crate::kernel::detail::host_probe::find_exe(program).is_none() {
+                eprintln!("[探针] 本机没有 {}：跳过它的 PowerShell 契约", program);
+                continue;
+            }
+            let dir = crate::tests::scratch(&format!("proc-shell-{}", program));
+            let home = dir.join(".home");
+            let tools = real_runner_with_write(exe.clone(), &home).with_powershell(Some(program));
+            let mut spec = spec_for(&dir);
+            spec.private = dir.clone();
+            let out = tools.run_shell(&crate::kernel::ports::ShellRun {
+                fence: &spec,
+                script: "Write-Output '中文'; exit 3",
+                timeout: Duration::from_secs(30),
+                cancel: None,
+                path: None,
+                ask: None,
+                ephemeral: false,
+            });
+            assert!(!out.ok, "{}（{}）", out.output, program);
+            assert!(out.output.contains("中文"), "{}（{}）", out.output, program);
+            assert!(
+                out.output.contains("[shell] 退出码 3"),
+                "{}（{}）",
+                out.output,
+                program
+            );
+            let leftovers = std::fs::read_dir(&dir)
+                .expect("读 shell 目录")
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    e.file_name()
+                        .to_string_lossy()
+                        .starts_with(".solomni-shell-")
+                })
+                .count();
+            assert_eq!(leftovers, 0, "临时 .ps1 要清掉");
+            let _ = confine::release_fence(&spec, &home);
+            confine::clean(&home).ok();
+            let _ = std::fs::remove_dir_all(&dir);
+        }
     }
 
     /// 守门进程起不来：如实回执「启动失败」，不 panic、不假装跑过。
