@@ -361,6 +361,31 @@ setTimeout(async () => {
       if (!lineRule) loadErrors.push('行画法检查：' + JSON.stringify(r));
     } catch (e) { loadErrors.push('行画法检查失败：' + e.message); }
   }
+  // **tool-only 回复**：思维链挂在第一条 tool 行上；没有正文也要把思维链渲染出来。
+  let toolOnlyReasoning = false;
+  if (!loadErrors.length) {
+    try {
+      const r = vm.runInNewContext(
+        "(function () {" +
+          " const s = { sid: 'tl', lines: [" +
+          "   { id: 1, reply: 1, cls: 'tool', who: '资料手', text: '', reasoning: '工具前的想法'," +
+          "     tool: { speaker: '资料手', name: 'read', ok: true, args: '{}', output: 'ok' } }" +
+          " ], live: [], fold: {}, scroll: {} };" +
+          " state.sessions.set('tl', s); state.activeSid = 'tl';" +
+          " const box = document.querySelector('#stream'); box.children.length = 0; renderStream(true);" +
+          " const all = []; (function walk(n) { for (const c of (n.children || [])) { all.push(c); walk(c); } })(box);" +
+          " const clsOf = function (n) { return String(n.className).split(' '); };" +
+          " const turn = all.filter(function (n) { return clsOf(n)[0] === 'turn'; })[0] || { children: [] };" +
+          " const body = (turn.children || []).filter(function (c) { return clsOf(c)[0] === 'turn-body'; })[0] || { children: [] };" +
+          " const cot = (body.children || []).filter(function (c) { return clsOf(c)[0] === 'cot'; })[0] || { children: [] };" +
+          " const text = (cot.children || []).map(function (c) { return String(c.textContent || ''); }).join('|');" +
+          " return { cot: String(cot.className).split(' ')[0] === 'cot', text: text, tools: (body.children || []).some(function (c) { return clsOf(c)[0] === 'fold'; }) }; })()",
+        sandbox
+      );
+      toolOnlyReasoning = r.cot && r.tools && String(r.text).indexOf('工具前的想法') >= 0;
+      if (!toolOnlyReasoning) loadErrors.push('tool-only 思维链检查：' + JSON.stringify(r));
+    } catch (e) { loadErrors.push('tool-only 思维链检查失败：' + e.message); }
+  }
   // **定稿只追加**：新增行不重建已渲染的轮；同一 reply 的后续行只重建最后那一轮。
   let incrementalAppend = false;
   if (!loadErrors.length) {
@@ -836,14 +861,14 @@ setTimeout(async () => {
   const ok = alerts.length === 0 && loadErrors.length === 0 && rendered && tierWarned && identityKept
     && pollConn === "已连接" && pollApplied && hydratedHistory && liveReplaced && liveClearedOnIdle && toolReasoningRendered
     && rewoundApplies && readonlyRule
-    && taskButtonRule && decisionCardRule && onlyLastStreams && lineRule && incrementalAppend && pendingReplaced && noticeRow && modalDismiss && rewindIcon && runningRules && atMenuRefetches
+    && taskButtonRule && decisionCardRule && onlyLastStreams && lineRule && toolOnlyReasoning && incrementalAppend && pendingReplaced && noticeRow && modalDismiss && rewindIcon && runningRules && atMenuRefetches
     && wizardProxy && wizardBlocked && sessionNoteRule && historyRunTag && fenceBanner && nodeCard && tabLadder
     && statusBarRules && consoleErrors.length === 0;
   if (!ok) {
     console.log("alerts（原生弹窗被调用的次数，应为 0）:", JSON.stringify(alerts));
     console.log("notice 渲染:", rendered, "| 虚拟机档不可用提示:", tierWarned, "| 身份标题保留:", identityKept);
     console.log("轮询状态点:", JSON.stringify(pollConn), "| 事件已应用:", pollApplied, "| 盘上转录已补:", hydratedHistory, "| 流式被替换:", liveReplaced, "| 空闲清理:", liveClearedOnIdle, "| 思维链:", toolReasoningRendered);
-    console.log("回档重置:", rewoundApplies, "| 只读会话:", readonlyRule, "| notice 行:", noticeRow, "| 弹层判据:", modalDismiss, "| 回档图标:", rewindIcon, "| 增量追加:", incrementalAppend, "| 乐观替换:", pendingReplaced);
+    console.log("回档重置:", rewoundApplies, "| 只读会话:", readonlyRule, "| notice 行:", noticeRow, "| 弹层判据:", modalDismiss, "| 回档图标:", rewindIcon, "| tool-only 思维链:", toolOnlyReasoning, "| 增量追加:", incrementalAppend, "| 乐观替换:", pendingReplaced);
     console.log("运行态归一（事件为准 / 快照只对账）:", runningRules, "| @ 菜单每次重拉:", atMenuRefetches);
     console.log("向导代理形态:", wizardProxy, "| 会话级说明:", sessionNoteRule, "| 侧栏运行态:", historyRunTag, "| 围栏横幅:", fenceBanner, "| 节点卡:", nodeCard, "| 标签梯级:", tabLadder, "| 状态栏:", statusBarRules);
     console.log("应用侧 console.error:", JSON.stringify(consoleErrors.slice(0, 3)));

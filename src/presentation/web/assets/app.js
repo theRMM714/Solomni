@@ -4179,11 +4179,16 @@ function turnText(parts) {
 }
 
 function turnReasoning(parts) {
-  return parts
-    .filter((p) => p.cls !== 'tool')
-    .map((p) => p.reasoning)
-    .filter(Boolean)
-    .join('\n\n');
+  // reasoning 可能挂在第一条 tool 行上（模型只发工具调用、没有正文）；不能按 cls 过滤掉。
+  const seen = new Set();
+  const out = [];
+  for (const p of parts) {
+    const r = p.reasoning;
+    if (!r || seen.has(r)) continue;
+    seen.add(r);
+    out.push(r);
+  }
+  return out.join('\n\n');
 }
 
 /// 一轮气泡：身份 / 思维链 / 正文 / 工具组；思维链与工具组各自折叠，整轮可折叠。

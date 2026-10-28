@@ -331,6 +331,13 @@ impl ConductorHandle {
     /// 目的：启用一条历史会话（只恢复，不生成）：重建、确保 guest、解冻整棵子树。
     pub(crate) fn activate_session(&self, sid: &str) -> Result<SessionView, String> {
         let sid = sid.to_string();
+        // 启用历史会话也要先确保目标环境的模块产物：老会话可能是在宿主上建的，
+        // 切到/重开 VM 档时不能把宿主 native 产物直接带进 guest。
+        let (ids, tier, guest) = self.call({
+            let sid = sid.clone();
+            move |core| core.activation_build_request(&sid)
+        })?;
+        self.ensure_built(&ids, tier, guest.as_deref())?;
         let prepared = self.call(move |core| core.prepare_activation(&sid))?;
         let prepared = match prepared {
             crate::capabilities::conductor::service::PreparedActivation::Ready {
