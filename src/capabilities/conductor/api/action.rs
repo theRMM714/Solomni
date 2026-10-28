@@ -564,6 +564,13 @@ impl ConductorHandle {
                 .update_task(&s("session_id"), &s("text"))
                 .map(Acted::Replayed),
             "compact" => SessionOps::compact(self, &s("session_id")).map(Acted::Advanced),
+            "set_permission_profile" => {
+                let sid = s("session_id");
+                let profile =
+                    crate::capabilities::permission::api::ProfileId::parse(&s("profile"))?;
+                self.call(move |core| core.set_permission_profile(&sid, profile))?;
+                Ok(Acted::Done(serde_json::json!({ "ok": true })))
+            }
             "edit_session" => {
                 // 动作信封的 session_id 不属于编辑体：先摘掉再按严格 DTO 反序列化。
                 let mut body = args.clone();

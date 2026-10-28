@@ -1694,3 +1694,39 @@ fn host_session_uses_package_bin_path() {
     assert_eq!(first, bin, "包的 bin 前置到这一趟 PATH");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// 目的：状态栏快速切档走独立动作——只改 profile，不需要 edit_session 的名单载荷。
+#[test]
+fn set_permission_profile_action_switches_the_session_profile() {
+    use crate::capabilities::permission::api::ProfileId;
+    let handle = spawn(vec![module_of("a")], Vec::new());
+    let ops = Ops::from_handle(&handle);
+    let (opened, _) = ops
+        .sessions
+        .create_work(single_work("w-profile", &["a"]))
+        .expect("建会话");
+    let sid = opened.sid;
+    ops.actions
+        .act(ActionCall {
+            id: "set_permission_profile".to_string(),
+            args: serde_json::json!({ "session_id": sid, "profile": "view" }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .expect("快速切档");
+    assert_eq!(
+        ops.sessions.config(&sid).unwrap().permission.profile,
+        ProfileId::View
+    );
+    assert!(
+        ops.actions
+            .act(ActionCall {
+                id: "set_permission_profile".to_string(),
+                args: serde_json::json!({ "session_id": sid, "profile": "nope" }),
+                caller: Caller::User,
+                out: Output::Final,
+            })
+            .is_err(),
+        "未知档位如实拒绝"
+    );
+}

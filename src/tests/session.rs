@@ -2004,3 +2004,39 @@ pub(crate) fn creation_writes_the_chosen_profile_into_the_root_ceiling() {
         ProfileId::View
     );
 }
+
+/// 目的：快速切档是根级动作——更新根 ceiling，子会话只能再收窄。
+#[test]
+pub(crate) fn quick_profile_switch_updates_root_and_children_cannot_widen() {
+    use crate::capabilities::permission::api::ProfileId;
+    let hist = Arc::new(InMemoryHistory::new());
+    let mut core = core_with_all(
+        vec![module_of("a")],
+        gw(BTreeMap::new(), vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::new(InMemorySysIo::new()),
+    );
+    let parent = core
+        .create_work(collab_work("p", &["a"], false, "需求"))
+        .unwrap()
+        .sid;
+    let child = core.spawn_agent_session(&parent, "a").unwrap();
+    core.set_permission_profile(&parent, ProfileId::View)
+        .expect("根快速切档");
+    let (pm, _) = core.history_open(&parent).unwrap();
+    assert_eq!(
+        pm.sandbox.ceiling.as_ref().and_then(|l| l.profile),
+        Some(ProfileId::View)
+    );
+    assert_eq!(
+        core.session_config(&child).unwrap().permission.profile,
+        ProfileId::View,
+        "子会话继承新的根 ceiling"
+    );
+    let err = core
+        .set_permission_profile(&child, ProfileId::AllReach)
+        .unwrap_err();
+    assert!(err.contains("更宽"), "{}", err);
+}

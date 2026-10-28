@@ -732,6 +732,60 @@ impl Conductor {
         ))
     }
 
+    /// 目的：用户快速切档——只改 profile（重置 reach / decisions / 逐工具决定），保留共享区范围与黑名单。
+    /// 约束：根级动作；整棵 work tree 有会话在生成时拒绝；切换在下一次权限判定生效。
+    pub(crate) fn set_permission_profile(
+        &mut self,
+        sid: &str,
+        profile: crate::capabilities::permission::api::ProfileId,
+    ) -> Result<(), String> {
+        let (meta, _) = self.history_open(sid)?;
+        let guard = self.work_root(sid).unwrap_or_else(|_| sid.to_string());
+        for s in self.subtree_of(&guard) {
+            if self.running.contains(&s) {
+                return Err(Self::running_refusal(&s));
+            }
+        }
+        let mut layer = if meta.parent.is_none() {
+            meta.sandbox.ceiling.clone()
+        } else {
+            meta.sandbox.narrowing.clone()
+        }
+        .unwrap_or_default();
+        layer.profile = Some(profile);
+        layer.reach = None;
+        layer.decisions = None;
+        layer.tools.clear();
+        if meta.parent.is_none() {
+            self.permissions_for(&meta)?.apply_root(&layer)?;
+        } else {
+            let parent = self
+                .history
+                .meta(meta.parent.as_deref().unwrap_or_default())?;
+            self.permissions_for(&parent)?.apply_narrowing(&layer)?;
+        }
+        let mut new_meta = meta.clone();
+        if meta.parent.is_none() {
+            new_meta.sandbox.ceiling = Some(layer);
+            new_meta.sandbox.narrowing = None;
+        } else {
+            new_meta.sandbox.narrowing = Some(layer);
+            new_meta.sandbox.ceiling = None;
+        }
+        let changed = self.subtree_of(sid);
+        for s in &changed {
+            if let Ok(m) = self.history.meta(s) {
+                self.release_session_fences(&m);
+            }
+        }
+        self.history.save_meta(&new_meta)?;
+        self.record_config(sid, &new_meta);
+        for s in changed {
+            self.sessions.remove(&s);
+        }
+        Ok(())
+    }
+
     /// 目的：改配的第二段（核心）——写回 meta、撤旧围栏授权、记旁路配置、丢掉内存会话。
     pub(crate) fn commit_edit(&mut self, prepared: PreparedEdit) -> Result<(), String> {
         let PreparedEdit {

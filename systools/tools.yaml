@@ -617,6 +617,13 @@ tools:
     params:
       session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
       text: { type: string, required: true, desc: 新的需求 }
+  set_permission_profile:
+    capability: none              # 只改档位，不碰名单 / 环境
+    callers: [user]
+    desc: 快速切换会话权限档位（view / workspace / external / all_reach）；子会话只能收窄，整棵 work tree 生成中拒绝。
+    params:
+      session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
+      profile: { type: string, required: true, non_empty: true, desc: view / workspace / external / all_reach }
   edit_session:
     capability: none
     callers: [user]

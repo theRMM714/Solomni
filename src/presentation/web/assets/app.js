@@ -3476,33 +3476,20 @@ function openPermissionMenu(chip, s) {
       onClick: () => { if (id !== current) switchPermission(s.sid, id); },
     };
   });
-  items.push({ sep: true });
-  items.push({ icon: 'gear', label: '更多权限设置…', onClick: () => openConfig(s.sid) });
+  if (s.mode !== 'proxy') {
+    items.push({ sep: true });
+    items.push({ icon: 'gear', label: '更多权限设置…', onClick: () => openConfig(s.sid) });
+  }
   ui.menu(chip, items);
 }
 
-/* 快速切档只改 profile，共享区范围 / 逐工具决定保持现值；要改这些走“更多权限设置”。 */
+/* 快速切档只改 profile（并回到该档的 reach / decision 默认）；共享区范围保留，要改这些走“更多权限设置”。 */
 async function switchPermission(sid, profile) {
   const s = state.sessions.get(sid);
   if (!s) return;
   if (s.running) { ui.toast('warn', '会话正在生成：先停止再切换权限'); return; }
   try {
-    const r = await api('GET', '/api/sessions/' + encodeURIComponent(sid) + '/config');
-    const cfg = r.config;
-    if (!cfg) throw new Error('读不到这个会话的配置');
-    const body = {
-      agents: (cfg.agents || []).map((a) => ({
-        name: a.name,
-        modules: (a.modules || []).slice(),
-        model: a.model || '',
-        chara: a.chara || '',
-      })),
-      tier: cfg.tier || 'host',
-      guest: cfg.tier === 'vm' ? (cfg.guest || null) : null,
-      pins: cfg.pins || {},
-      permission: { profile },
-    };
-    await api('POST', actionUrl('edit_session'), Object.assign({ session_id: sid }, body));
+    await api('POST', actionUrl('set_permission_profile'), { session_id: sid, profile });
     await refreshState();
     ui.toast('ok', '权限档位：' + (PERMISSION_LABELS[profile] || profile));
   } catch (e) {

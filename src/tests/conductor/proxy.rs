@@ -1483,3 +1483,26 @@ pub(crate) fn proxy_profile_is_explicit_and_uses_a_real_private_sandbox() {
         _ => panic!("代理会话该重建为单会话形态"),
     }
 }
+
+/// 目的：代理也能从状态栏快速切档；不经过 edit_session（代理没有名单）。
+#[test]
+pub(crate) fn proxy_profile_can_be_quick_switched() {
+    use crate::capabilities::permission::api::ProfileId;
+    let (handle, ops) = super::super::ops_with(vec![], vec!["好"]);
+    let sid = handle
+        .call(|core| core.create_proxy("w-switch", 1))
+        .expect("建代理");
+    let target = sid.clone();
+    handle
+        .call(move |core| core.set_permission_profile(&target, ProfileId::View))
+        .expect("代理快速切档");
+    let (meta, _) = ops.history.open(&sid).expect("落盘");
+    assert_eq!(
+        meta.sandbox.ceiling.as_ref().and_then(|l| l.profile),
+        Some(ProfileId::View)
+    );
+    assert_eq!(
+        ops.sessions.config(&sid).unwrap().permission.profile,
+        ProfileId::View
+    );
+}
