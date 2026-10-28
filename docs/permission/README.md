@@ -26,7 +26,7 @@
 
 - read：read / list / search / work_pull / work_status / work_versions；
 - write：write / edit / patch / delete / work_commit / work_resolve / work_lost 的恢复；
-- exec：模块工具 / 未来的 shell；
+- exec：模块工具 / shell；
 - none：不碰文件、不需要权限闸门的动作。
 
 **Decision（怎么处置）**
@@ -57,7 +57,7 @@ secret 不是 reach：模块只声明自己有哪些隐秘字段，值只由系�
 
 1. granted = 会话 reach ∩ 工具最大 reach；
 2. 工具声明 scope 时：
-   requested = sandbox（只有 private）或 external（shared-read + module-read + host-read + network）；
+   requested = sandbox（只有 private）或 external（private + shared-read + module-read + host-read + network）；
    若 requested 不是 granted 的子集 → 拒绝（不是问）；
    granted = granted ∩ requested；
 3. decision = 会话逐工具覆盖 → profile 的 effect/scope 决定（四档都显式给出；工具声明里的默认只作缺省说明，不压过用户选的 profile）；
@@ -66,9 +66,16 @@ secret 不是 reach：模块只声明自己有哪些隐秘字段，值只由系�
 
 卡片上的 allow_turn 只表示「本轮剩余 ask 都不再问」；它不改 reach、不改 profile、不落盘。后续调用如果 reach 不够，仍然拒绝。
 
+**shell 的 scope** 是本次调用的 reach 请求，不是第二个权限档：
+
+- sandbox（缺省）：只 private + 基础 / 项目工具链只读；net=false；workspace 及以上 allow，view 不发放；不碰共享 / 模块 / 主机只读根。
+- external：在 sandbox 之上加 shared-read / module-read / host-read / network；external 档 ask、all_reach 档 allow；共享区 / 模块目录仍只读，module-write 不声明，模块 secrets 不注入。
+- sandbox 与 external 都要求围栏真强制（`allow_degraded=false`），装不上就拒绝；命令被围栏拒绝时回执提示 external，**不自动升级**。
+- Windows 上 shell 的 sandbox 与 external 都用**按次临时容器 profile**（W1），调用结束撤 ACE 并删 profile；这是让按次收窄在 Windows 上真实成立的机制。
+
 ## 五、围栏派生
 
-FenceSpec::for_call 按本次 granted 派生：private 进 rw；module-write 只把该模块的 userdata 放进 rw；shared-read / module-read 进 ro_tree；host-read 进 ro；network 与全局开关求交。shared-write 永不进 rw。
+FenceSpec::for_call 按本次 granted 派生：private 进 rw；module-write 只把该模块的 userdata 放进 rw；shared-read / module-read 进 ro_tree；host-read 进 ro；network 与全局开关求交。shared-write 永不进 rw。shell 的 per-call 围栏另加项目内**基础工具链根**（只读）；模块工具的放行仍走它自己的命令解释器基线。
 
 FenceSpec::for_session 用会话 profile 的 reach 并集，用于撤销 Windows ACL 等持久授权与生命周期；它不用于单次执行。
 
@@ -83,6 +90,7 @@ VM guest 的 per-call 断网由 guest helper 按策略里的 net 做 unshare(CLO
 - 共享区范围用三态：all / none / 路径数组。字段 None = 不覆盖，Some(none) = 显式无权限，两者必须分开；
 - 父级编辑只更新 ceiling，再与子 narrowing 求交，不覆盖子收窄；父级收窄到无交集时子会话无权限，并如实提示；
 - 档位切换是根级动作：整棵 work tree 有会话在生成时拒绝（先停再切）；切换在下一次权限判定生效，已经在执行的调用不追溯。
+- Windows 的 ACL 是持久的：模块工具每次调用带**唯一租约**，跑完按该租约撤自己那份 ACE（并发调用各持 owner，互不撤权）；shell 另走按次临时 profile。档位收窄后不会再读到上一次调用留下的外部根。
 
 ## 七、工具级确认的引擎路径
 

@@ -1385,12 +1385,15 @@ impl crate::kernel::ports::FenceHost for NoFenceHost {
 /// 记录型围栏端口：断言「删除会话时真的请求了撤销」。
 pub(crate) struct RecordingFence {
     pub(crate) released: Mutex<Vec<String>>,
+    /// 目的：每次撤销请求携带的租约（按次调用的唯一性断言用）。
+    pub(crate) leases: Mutex<Vec<String>>,
     fail: Option<String>,
 }
 impl RecordingFence {
     pub(crate) fn new() -> RecordingFence {
         RecordingFence {
             released: Mutex::new(Vec::new()),
+            leases: Mutex::new(Vec::new()),
             fail: None,
         }
     }
@@ -1406,6 +1409,7 @@ impl crate::kernel::ports::FenceHost for RecordingFence {
             return Err(m.clone());
         }
         self.released.lock().expect("锁").push(spec.agent.clone());
+        self.leases.lock().expect("锁").push(spec.lease.clone());
         Ok(())
     }
 }
@@ -2303,6 +2307,14 @@ impl crate::capabilities::vm::ports::GuestVm for FakeVm {
 #[derive(Default)]
 pub(crate) struct RecordingVm {
     pub runs: Mutex<Vec<String>>,
+    /// 目的：fenced 执行的（脚本、超时、输出截断方式）；shell 契约断言用。
+    pub fenced_runs: Mutex<
+        Vec<(
+            String,
+            u64,
+            crate::capabilities::vm::domain::guest::OutputLimit,
+        )>,
+    >,
     /// 目的：已拉起的租约（`guest_leases` 的事实来源；`guest_start` 记、`guest_stop` 删）。
     pub leases: Mutex<Vec<String>>,
     /// 目的：每个租约启动时装载的运行包（判定新子会话要不要重建）。
@@ -2340,6 +2352,11 @@ impl crate::capabilities::vm::api::Vm for RecordingVm {
             .lock()
             .expect("锁")
             .push(format!("fenced:{}", run.command));
+        self.fenced_runs.lock().expect("锁").push((
+            run.command.clone(),
+            run.timeout_secs,
+            run.output_limit,
+        ));
         crate::kernel::api::ToolOutcome {
             ok: true,
             output: "guest".to_string(),
@@ -3397,6 +3414,8 @@ pub(crate) fn member_with_service_tools(
         fence: crate::kernel::api::FenceSpec::for_session(&sb, &[], false),
         module_env: Default::default(),
         runtime_path: None,
+        runtime_roots: Vec::new(),
+        shell_live: None,
         reply_seq: 0,
         line: Default::default(),
         allowed: crate::capabilities::tools::api::names(),

@@ -48,6 +48,8 @@ fn sh(command: &str) -> GuestRun {
         args_json: "{}".to_string(),
         env: Vec::new(),
         cwd: String::new(),
+        timeout_secs: 30,
+        output_limit: crate::capabilities::vm::api::OutputLimit::Head,
     }
 }
 

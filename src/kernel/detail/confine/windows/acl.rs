@@ -519,19 +519,31 @@ pub(crate) fn grant_targets(spec: &FenceSpec) -> Vec<GrantTarget> {
     if !spec.cwd.as_os_str().is_empty() {
         leaves.push(leaf(&spec.cwd, RIGHTS_RO, true, FencePart::Cwd));
     }
-    // 父目录：只读属性、不递归、**不继承**；同一个父目录被多个叶子共用时靠调用方的去重表收口。
-    // 不继承是为了把残留面收敛到父目录本身：带 (OI)(CI) 的 ACE 会传播，一旦撤权断链就污染整棵子树。
+    // 父目录：只读属性、不递归、**不继承**（带 (OI)(CI) 的 ACE 会传播，撤权断链就污染整棵子树）；
+    // shell 的 cwd = private 时 PowerShell 起动要逐级解析 cwd，补祖先的 FILE_READ_ATTRIBUTES，其它工具只给直接父目录。
+    let deep = !spec.private.as_os_str().is_empty() && spec.cwd == spec.private;
     for one in &leaves {
-        if let Some(parent) = one.path.parent() {
-            if !parent.as_os_str().is_empty() {
+        // 只有 shell 的 cwd/private 这个叶子需要祖先属性；运行包根等只给直接父目录。
+        let deep_leaf = deep && (one.path == spec.cwd || one.path == spec.private);
+        let mut parent = one.path.parent();
+        while let Some(p) = parent {
+            // 盘根不写：ACL 写盘根会触发整盘继承重算（真机很慢），而盘根的读属性默认已对容器可用。
+            if deep_leaf && p.parent().is_none() {
+                break;
+            }
+            if !p.as_os_str().is_empty() {
                 todo.push(GrantTarget {
-                    path: parent.to_path_buf(),
+                    path: p.to_path_buf(),
                     rights: RIGHTS_STAT,
                     recursive: false,
                     inherit: false,
                     part: FencePart::Parent,
                 });
             }
+            if !deep_leaf {
+                break;
+            }
+            parent = p.parent();
         }
     }
     todo.extend(leaves);

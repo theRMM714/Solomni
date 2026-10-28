@@ -122,6 +122,7 @@ async function refreshState() {
       activating: false,
       done: !!(h && h.done), awaiting: null, fold: {}, scroll: {},
       context: v.context || null,
+      shell: v.shell || null,
       work: null, workAt: 0, workDirty: false, workError: '',
       readonly: false, hydrated: false, buffer: [],
     };
@@ -148,6 +149,7 @@ async function refreshState() {
     cur.permission_parent = v.permission_parent || null;
     // 上下文用量以快照兜底；实时 usage 事件到达后以事件为准（同一份事实，事件更新）。
     if (v.context !== undefined) cur.context = v.context || null;
+    if (v.shell !== undefined) cur.shell = v.shell || null;
     // 运行态**只对账、不覆盖**：这条会话已经有实时知识（事件就是真相）时，快照比它滞后——
     // 一次迟到的轮询不能把已经收尾的回合标回"在跑"。没有实时知识时按快照补齐，并清掉本地遗留
     // （快照说没跑就是没跑）；谁在跑未知时照旧显示"正在工作…"。
@@ -565,7 +567,7 @@ async function openHistory(name) {
       lines: [], live: [], pending: null, sending: false,
       running: false, working: null, running_known: false,
       activating: false, continue_action: null,
-      context: null, work: null, workAt: 0, workDirty: false, workError: '',
+      context: null, shell: null, work: null, workAt: 0, workDirty: false, workError: '',
       permission_profile: '', permission_label: '', permission_narrowed: false, permission_parent: null,
       done: true, awaiting: null, readonly: true, fold: {}, scroll: {},
     };
@@ -3067,7 +3069,7 @@ async function startSession(body) {
     sid, mode: body.mode, title: body.name || sid, run: 'active',
     lines: [], live: [], pending: null, sending: false,
     running: false, working: null, running_known: false,
-    context: null, work: null, workAt: 0, workDirty: false, workError: '',
+    context: null, shell: null, work: null, workAt: 0, workDirty: false, workError: '',
     done: false, awaiting: null, fold: {}, scroll: {},
   };
   // 开场事实由 /api/sessions 那一刻就推给事件台了（回包只给头部序号），所以这里**合流**一次：
@@ -3420,6 +3422,13 @@ function ctxChipClass(percent) {
   if (at > 0 && percent >= at) return 'warn';
   return '';
 }
+function fmtDuration(sec) {
+  const s = Math.max(0, Math.floor(Number(sec) || 0));
+  if (s < 60) return s + ' 秒';
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return m + ' 分' + (r ? r + ' 秒' : '');
+}
 function timeAgo(ts) {
   const t = Number(ts || 0);
   if (!t) return '';
@@ -3447,6 +3456,11 @@ function statusPrintOf(s) {
     (state.settings && state.settings.compact_at_percent) || 0,
     s && s.permission_profile, s && s.permission_label, s && s.permission_narrowed ? 1 : 0,
     s && s.permission_parent,
+    s && s.shell ? [
+      s.shell.command, s.shell.scope, s.shell.started_at, s.shell.finished_at,
+      s.shell.ok, s.shell.exit_code, (s.shell.output || '').length,
+      s.shell.finished_at ? 0 : Math.floor(Date.now() / 1000),
+    ] : 0,
   ]);
 }
 
@@ -3527,6 +3541,28 @@ function syncStatusbar(s) {
     });
     permChip.onclick = () => openPermissionMenu(permChip, s);
     inner.appendChild(permChip);
+  }
+
+
+  // shell：运行中 / 最近一次的结果；点开看命令、scope、cwd、退出码与回执预览。
+  if (s.shell) {
+    const sh = s.shell;
+    const running = !sh.finished_at;
+    const end = sh.finished_at || Math.floor(Date.now() / 1000);
+    const dur = fmtDuration(end - sh.started_at);
+    let text;
+    if (running) text = 'shell 运行中 · ' + dur;
+    else if (sh.exit_code == null) text = 'shell ' + (sh.ok ? '完成' : '中止') + ' · ' + dur;
+    else text = 'shell 退出码 ' + sh.exit_code + ' · ' + dur;
+    const shellChip = ui.statusChip({
+      icon: 'terminal',
+      text,
+      label: 'shell',
+      title: (running ? '正在执行：' : '最近一次：') + sh.command,
+      cls: running ? 'warn' : (sh.ok ? '' : 'danger'),
+    });
+    shellChip.onclick = () => openShellCard(s, shellChip);
+    inner.appendChild(shellChip);
   }
 
   // 协作主会话没有一条持续发给模型的对话：不显示上下文 chip（不伪造数字）。
@@ -3621,6 +3657,38 @@ function popoverNote(text, cls) {
   n.className = 'popover-note' + (cls ? ' ' + cls : '');
   n.textContent = text;
   return n;
+}
+
+
+function openShellCard(s, anchor) {
+  const box = popoverBox('shell');
+  const sh = s.shell;
+  if (!sh) {
+    box.appendChild(popoverNote('这条会话还没有执行过 shell。'));
+    ui.popover(anchor, box, { label: 'shell' });
+    return;
+  }
+  const running = !sh.finished_at;
+  const end = sh.finished_at || Math.floor(Date.now() / 1000);
+  const cmd = document.createElement('pre');
+  cmd.className = 'tool-pre';
+  cmd.textContent = sh.command;
+  box.appendChild(cmd);
+  box.appendChild(popoverRow('scope', sh.scope === 'external'
+    ? 'external（共享区 / 模块目录 / 主机只读根 / 网络）'
+    : 'sandbox（只碰私有沙箱）'));
+  box.appendChild(popoverRow('cwd', sh.cwd || '—'));
+  box.appendChild(popoverRow('状态', running ? '运行中…' : (sh.ok ? '成功' : '失败')));
+  box.appendChild(popoverRow('退出码', sh.exit_code == null ? '—' : String(sh.exit_code)));
+  box.appendChild(popoverRow('耗时', fmtDuration(end - sh.started_at)));
+  if (sh.output) {
+    const out = document.createElement('pre');
+    out.className = 'tool-pre';
+    out.textContent = sh.output;
+    box.appendChild(out);
+  }
+  box.appendChild(popoverNote('完整回执在转录的 shell 工具行；这里只保留最近一次。'));
+  ui.popover(anchor, box, { label: 'shell' });
 }
 
 function openContextCard(s, anchor) {

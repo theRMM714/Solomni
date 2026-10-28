@@ -498,6 +498,10 @@ fn call_grant_checks_scope_and_reach() {
     let granted = all
         .grant(&shell_max, Some(&CallScope::External.reach()))
         .expect("all_reach 可请求 external");
+    assert!(
+        granted.contains(Reach::Private),
+        "external 是“在沙箱之外加”，私有沙箱仍保留"
+    );
     assert!(granted.contains(Reach::HostRead));
     assert!(granted.contains(Reach::Network));
     assert!(!granted.contains(Reach::SharedWrite));

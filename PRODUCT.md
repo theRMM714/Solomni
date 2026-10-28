@@ -51,7 +51,7 @@
 **只有 agent 发言。** 模块是能力摘要、工具用法与工具的载体，agent 是发言人：模块被装进哪个 agent，就以那个 agent 的名义说话
 （转录里的说话人、沙箱目录名、同意 / 撤回 / 回报的归属都是 agent 实例名；没有「模块发言」这回事）。
 
-- 一个 agent = 名字 + 它具备的模块（可以为空：只用内置文件工具）+ 模型 + 人设（可选）+ 自己的沙箱；单 agent = 恰 1 个 agent（0 到多个模块合成一个 agent），协作 = N 个 agent。
+- 一个 agent = 名字 + 它具备的模块（可以为空：只用内置文件工具与 shell）+ 模型 + 人设（可选）+ 自己的沙箱；单 agent = 恰 1 个 agent（0 到多个模块合成一个 agent），协作 = N 个 agent。
 - agent 存在 `.home/agents.yaml`，在设置里管理；建工作时可**临时用**（transient，不写登记处），也可顺手存成常驻。
 - 建会话时把 agent 的组合（名字 / 模块 / 模型 / 人设）取一份 **copy** 落进会话；之后改登记处不影响已开会话，会话配置里改的也只是这份 copy。
 - `note` 是给人看的一句话说明；`chara` 是给模型看的人设 / 身份，进这个 agent 的身份提示词（空 = 不产生人设块）。
@@ -65,6 +65,8 @@
 子会话落在它的 `children/` 下（可再嵌套）——完整布局与命名规则见 [docs/session/session-model.md](docs/session/session-model.md)。
 agent 实例名不得占用 `work` / `children`（名单在 `systools/names.yaml`）。
 
+- **构建 / 测试 / 跑脚本用 shell**（执行类系统工具）：cwd 固定私有沙箱，默认 `scope=sandbox` 只碰私有沙箱 + 只读基础 / 项目工具链；
+  要读共享区 / 模块目录 / 主机只读根或联网用 `scope=external`，按会话档位 ask / allow；共享区永远只读，模块 userdata 不可写，不注入模块 secrets。
 - **文件读写用内置工具**（`read` / `list` / `write` / `edit` / `patch` / `delete` / `search`；`patch` 用自由格式补丁，大段内容不必塞进 JSON；`delete` 默认只删沙箱里的文件）：
   核心把占位符替换成**本环境写法的根**（本机档 = 宿主路径，虚拟机档 = guest 路径）；越出这些根（相对路径、`..`）一律拒绝，
   虚拟机档下的 guest 写法在寻址前译回宿主路径再校验。
@@ -97,14 +99,14 @@ agent 实例名不得占用 `work` / `children`（名单在 `systools/names.yaml
   未开放组合上已存在的会话不拦打开（列表标注"虚拟机档不可用"，本次按本机档执行）。
   guest 默认 Debian stable（13 / trixie）；QEMU 等依赖**不预置、不分发**，由 provision 能力在 Linux / Windows 上按清单下载并解包进项目内（需用户同意），产品检测、指路并给出"怎么补"（入口 `--provision`，契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)）。
 - **运行能力**：模块用 `runtimes` 声明需要的能力。本机档按**宿主目标**装载 `runtimes/` 里的 `prefix` 包（包 `bin/` 前置到本次执行的 PATH），
-  基础工具链（Python / Node / C-C++，装进 `.tools/toolchains`）是运行前提，宿主 PATH 是回退（Windows 上还要围栏能授权）；`system` 类包只服务虚拟机档。
+  基础工具链（Python / Node / C-C++，装进 `.tools/toolchains`）是运行前提，启动时拼进产品 PATH，shell 的只读根也对它们放行；模块 `runtimes/` 包按该 agent 的模块进本次 PATH / 只读根；宿主 PATH 是回退（Windows 上还要围栏能授权）；`system` 类包只服务虚拟机档。
   虚拟机档按 guest 平台装载包，能力也可由 guest 画像（`guest.yaml` 的 `runtimes`）满足。
   缺能力 = 本机档那次执行如实拒绝并说明缺什么，虚拟机档在「开始」前**拒绝创建**（没有工具用户完不成工作）；
   两者都**不是**会话崩溃（契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md) §五）。
 - **三层隔离，各说各的实际强度**：
-  ① 内置文件工具是**工具层**越界拒绝（路径校验）；
-  ② 模块工具进程从**守门进程**里跑（环境白名单、超时连根杀树、进程数上限）；guest 内由 Linux helper 对齐同一组策略
-     （只读基线、解释器目录、env 白名单、超时杀树、输出上限）；
+  ① 内置文件工具是**工具层**越界拒绝（路径校验）；shell 没有 path 参数，它的边界是**围栏**（sandbox / external），不是路径表；
+  ② 模块工具与 shell 进程从**守门进程**里跑（环境白名单、超时连根杀树、进程数上限）；guest 内由 Linux helper 对齐同一组策略
+     （只读基线、解释器目录、env 白名单、按次 `timeout_secs` 杀树、head/head+tail 输出）；Windows 的 sandbox / external shell 用按次临时容器 profile；
   ③ 文件系统围栏按平台接入（Linux Landlock、macOS seatbelt、Windows AppContainer）。
   **全局沙箱策略是硬约束**（`sandbox.policy`）：默认 `require`，机制不可用时启动门按 `on_unavailable` 询问是否**本进程降级**
   （不落盘，重启再问）、重设或退出；自检确认机制有效却仍装不上 = 程序自己写错了，那一路**拒绝执行**。
@@ -174,7 +176,7 @@ $ start.bat                 # Windows（或 node start.js）；macOS/Linux 用 .
 > single harvest             # 直接用登记处的 agent（模块数不限）
 > single harvest notes       # 把点名 agent 的模块并成一个临时 agent
 > single                     # 登记处全部 agent 的模块并成一个（全选）
-（上下文 = 该 agent 的能力摘要与工具用法 + 用户消息，直接开工；内置文件工具随时可用，它声明的模块工具也可用）
+（上下文 = 该 agent 的能力摘要与工具用法 + 用户消息，直接开工；内置文件工具与 shell 随时可用，它声明的模块工具也可用）
 ```
 工具的身份是 (模块, 工具名)：不同模块可以声明同名工具，调用时在信封的 `module` 字段里指明，各归各模块。
 
@@ -187,7 +189,7 @@ $ start.bat                 # Windows（或 node start.js）；macOS/Linux 用 .
 ```
 选这个形态就是**授予决定权**；代理的权限档位由用户建会话时显式选择并落盘（默认预选「全可达（自动放行）」，不再硬编码），配置页与状态栏都显示它实际用的档。想接管就按「停止」：它按编排归属把相关会话一起停下，按「继续」再解冻接着走。
 代理会话自己的档位也是它建出的子工作的根 ceiling；子工作继承它、并可再收窄。**权限管理**的完整语义见 [docs/permission/README.md](docs/permission/README.md)：四档 profile、共享区三态、逐工具决定，以及工具卡上的 `allow` / `deny` / `allow_turn`。
-`allow_turn` 只对**本轮**生效（到 agent 停下输出为止，不改落盘设置）。代理有真实私有沙箱 `.proxy`；给代理执行能力（shell）仍待后续任务。
+`allow_turn` 只对**本轮**生效（到 agent 停下输出为止，不改落盘设置）。代理有真实私有沙箱 `.proxy` 与 `shell`：shell 只做验收性核对（跑测试 / 看产物），不替执行席产出；共享区只读，仍没有 `work_pull` / `work_commit` / 模块工具；`net` 跟随全局 `sandbox.policy.network`。
 
 ### 退出
 

@@ -238,6 +238,40 @@ async function lines(sid) {
   const l1r = await lines(name1);
   assert(l1r.length === 0, '删除第一行后转录清空', JSON.stringify(l1r).slice(0, 160));
 
+  // 零模块 agent 的 shell：sandbox 只碰私有沙箱；成功与退出码两条都落成 tool 行
+  const nameShell = 'e2e-shell-' + Date.now();
+  const cShell = await api('POST', '/api/actions/create_session', {
+    name: nameShell, mode: 'single',
+    agents: [{ name: '执行手', transient: true, modules: [], model: 'm1' }],
+  });
+  assert(cShell.status === 200, '建零模块单 agent 工作（shell）', cShell.text.slice(0, 200));
+  const sShell = await act(nameShell, 'send_message', { text: '跑 shell' });
+  assert(sShell.status === 200, '零模块 agent 跑 shell', sShell.text.slice(0, 200));
+  const lShell = await lines(nameShell);
+  const shells = lShell.map((x) => x.tool).filter((t) => t && t.name === 'shell');
+  assert(shells.length === 2, '一次回复的两条 shell 调用都落成 tool 行', JSON.stringify(shells).slice(0, 300));
+  assert(
+    shells[0] && shells[0].ok === true && String(shells[0].output).includes('SHELL-OK-中文'),
+    'sandbox shell 成功且中文原样回执',
+    JSON.stringify(shells[0] || {}).slice(0, 300)
+  );
+  assert(
+    shells[1] && shells[1].ok === false && String(shells[1].output).includes('退出码 7'),
+    '非零退出如实回执退出码',
+    JSON.stringify(shells[1] || {}).slice(0, 300)
+  );
+  assert(
+    String((shells[0] || {}).output || '').includes('PWD='),
+    'shell 回执要能看见它落脚的 cwd',
+    JSON.stringify(shells[0] || {}).slice(0, 800)
+  );
+  const shellFile = path.join(dir(nameShell), '执行手', 'shell-ok.txt');
+  assert(
+    fs.existsSync(shellFile) && fs.readFileSync(shellFile, 'utf8').includes('SHELL-OK-中文'),
+    'shell cwd 是私有沙箱且真的写进去了',
+    shellFile + ' / ' + JSON.stringify(shells[0] || {}).slice(0, 1200)
+  );
+
   // 单 agent 带 2 个模块，且外部工具属于「第二个」模块：必须在它自己模块的目录里跑
   fs.mkdirSync(path.join(ROOT, 'modules', 'toolbox', 'userdata'), { recursive: true });
   fs.writeFileSync(path.join(ROOT, 'modules', 'toolbox', 'userdata', 'e2e.txt'), '第一行内容\n第二行内容\n');
@@ -941,6 +975,23 @@ async function approvePlan(name) {
     const tv = (lv.filter((x) => x.tool).pop() || {}).tool || {};
     assert(tv.module === 'toolbox' && tv.name === 'read_txt' && tv.ok === true, 'vm 档工具在 guest 里成功（落成 tool 行）', JSON.stringify(tv).slice(0, 300));
     assert(String(tv.output || '').includes('Debian GNU/Linux'), '工具读到的是 guest 的 os-release（不是宿主）', String(tv.output).slice(0, 240));
+
+    const saidVmShell = await act(nameVm, 'send_message', { text: '虚拟机档 shell' });
+    assert(saidVmShell.status === 200, '虚拟机档 shell 发言', saidVmShell.text.slice(0, 200));
+    const lvs = await lines(nameVm);
+    const shellVm = (lvs.filter((x) => x.tool).pop() || {}).tool || {};
+    assert(
+      shellVm.name === 'shell' && shellVm.ok === true && String(shellVm.output).includes('VM-SHELL-OK'),
+      'vm 档 shell 在 guest 里成功',
+      JSON.stringify(shellVm).slice(0, 300)
+    );
+    const vmShellFile = path.join(dir(nameVm), '探针兵', 'shell-guest.txt');
+    assert(
+      fs.existsSync(vmShellFile) && fs.readFileSync(vmShellFile, 'utf8').includes('VM-SHELL-OK'),
+      'guest shell 的 cwd 是私有沙箱且写出来了',
+      vmShellFile
+    );
+
     // virtiofs 档：会话活着时守护进程要在跑（登记了 virtiofsd 才会选它，与组合根同一份判据）。
     if (process.env.SOLOMNI_VM_VIRTIOFSD) {
       const vfp = require('child_process').spawnSync('pgrep', ['-af', 'virtiofsd'], { encoding: 'utf8' });

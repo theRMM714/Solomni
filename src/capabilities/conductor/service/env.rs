@@ -330,6 +330,19 @@ impl Conductor {
                 })
                 .collect(),
             runtime_path: host_plan.path.clone(),
+            shell_live: Some(self.shell_slot(&sb.session)),
+            runtime_roots: {
+                // 基础工具链根只在宿主档放行：VM 的工具链由 guest 的只读挂载提供，宿主路径在 guest 里不存在。
+                let mut roots = if tier == crate::kernel::api::Tier::Host {
+                    self.base_roots.clone()
+                } else {
+                    Vec::new()
+                };
+                roots.extend(host_plan.roots.iter().cloned());
+                roots.sort();
+                roots.dedup();
+                roots
+            },
             // 从零开始；按落盘转录重建时由调用方按转录里的最大值续号（见 rebuild_session）。
             reply_seq: 0,
             line: Default::default(),

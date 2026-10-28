@@ -11,7 +11,7 @@
 | --- | --- |
 | `src/kernel/mod.rs` | 机制型业务的入口与公开面：`api` / `ports` / `domain` / `detail` 四个子模块的形状声明 |
 | `src/kernel/api.rs` | 机制型业务的对外面：共享事实（`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask` / 默认预算）与纯机制（`slash` 的对外写法、生成中作业的取消表 `JobRegistry`）的重导出 |
-| `src/kernel/ports.rs` | 全项目共享的机制端口：`Log` / `PathCodec` / `ProcessTexts` / `AskUser` / `ToolHandler` / `HostProbe` / `ProcessRunner` / `SessionHost` / `FenceHost` 的 trait 定义与它们的纯数据形态 |
+| `src/kernel/ports.rs` | 全项目共享的机制端口：`Log` / `PathCodec` / `ProcessTexts` / `AskUser` / `ToolHandler` / `HostProbe` / `ProcessRunner` / `SessionHost` / `FenceHost` 的 trait 定义与它们的纯数据形态（含 `ShellRun` 与 shell 收尾文案） |
 | `src/kernel/domain/types.rs` | 跨业务共享的事实类型（纯数据）：`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask` / `AskOutcome` 与默认预算、能力名文法 |
 | `src/kernel/domain/fence.rs` | 围栏描述符（`FenceSpec`）与落点判据（`FencePart`/`FenceBlocked`/`fence_ask`）：纯数据 |
 | `src/kernel/domain/path.rs` | 路径的对外书写形式：把路径统一写成 `/` 分隔的字符串（给提示词、回执与 JSON 用；纯逻辑） |
@@ -20,7 +20,7 @@
 | `src/kernel/detail/host_probe.rs` | `HostProbe` 端口的机制实现：查环境变量与 `PATH` 里的可执行文件、路径存在性，并按平台判定虚拟机能力 |
 | `src/kernel/detail/outbound.rs` | 出站 HTTPS 的共享机制：唯一一处 TLS 后端装配与通用 ureq 代理 |
 | `src/kernel/detail/unpack.rs` | 归档解包机制：tar / tar.gz / tar.zst / tar.xz / zip 解到目录，支持 strip 与宽容链接，并还原归档里的权限位（可执行位） |
-| `src/kernel/detail/process.rs` | 外部进程执行机制（守门进程、stdin 送参、隐秘字段 env 注入、超时杀树、截断），实现 `ProcessRunner` |
+| `src/kernel/detail/process.rs` | 外部进程执行机制（守门进程、stdin 送参、隐秘字段 env 注入、超时/取消杀树、head/head+tail 截断、一次性 shell 的平台投递与按次 profile 收尾），实现 `ProcessRunner` |
 | `src/kernel/detail/procs.rs` | 长驻子进程的账（`.home/processes.json`）与回收：父死子亡的接线（`attach`：Linux 内核信号 / macOS 守门进程 / Windows 作业对象）、身份（Unix 命令行标记 / Windows 创建时间）、存活探测、终止、启动对账；登记虚拟机档的 QEMU、共享 helper 与常驻服务守门进程 |
 | `src/kernel/detail/session.rs` | 长驻外部进程机制（守门进程长跑、按行收发、关闭杀树、父死子亡、进程账登记与注销、Windows 容器预授权），实现 `SessionHost`；常驻服务的守门进程经它拉起 |
 | `src/kernel/detail/confine/mod.rs` | 围栏机制入口：本机能力与本次实际（`effective_paths`）的判据；策略由调用方传入，实现 `FenceHost` 释放 |

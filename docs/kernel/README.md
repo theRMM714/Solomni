@@ -103,16 +103,17 @@
 
 - 外层用**当前程序自己**当守门进程：`--fence-run <FenceJob JSON> -- <命令>`。
 - `FenceJob` = `FenceSpec` + `prepared`（外层是否已写完本机授权）+ `home`（容器 profile 的台账落点）+ `policy`（本进程的强制项与降级许可）；扁平成一个 JSON 传给守门进程。
-- 命令作为**一个 argv** 交给守门进程，外层不拼 shell；参数 JSON 经 stdin 送进工具进程，不进命令行。
-- 守门进程用系统 shell 执行模块作者写的命令行（`sh -c` / `cmd /C`）——命令行是模块声明的一部分。
+- 命令作为**一个 argv** 交给守门进程，外层不拼 shell；模块工具的参数 JSON 经 stdin 送进工具进程，不进命令行；shell 的脚本自身经 stdin（Unix）或临时 `.ps1`（Windows）送达。
+- 守门进程用系统 shell 执行模块作者写的命令行（`sh -c` / `cmd /C`）——命令行是模块声明的一部分。shell 的启动命令由机制生成：Unix `sh -c "$(cat)"`；Windows PowerShell（pwsh 7 优先、5.1 回退，`-File` 临时 .ps1）。
 - **容器里的程序名先相对化**（仅 Windows）：AppContainer 下**绝对路径**的程序会被拒（真机：同一文件用
   `D:\…\x.exe` 报 Access denied，用 `..\x.exe` 正常——相对路径走 cwd 的目录句柄，不遍历卷根；非系统盘的卷根
   DACL 要管理员才写得动）。执行前把首 token 的程序名解析成绝对路径、再改写成相对 cwd 的路径（同卷才改；
   裸名按容器里生效的 PATH / PATHEXT 解析；跨卷或解析不出则原样）。参数里的路径不动。
 - 环境白名单：外层 `env_clear`，只注入 `fence_env`（PATH / PATHEXT / 系统根 / LANG / TZ 等，`HOME` 与 `TEMP` 指向该 agent 私有沙箱）与模块隐秘字段；其它环境与凭据不进工具进程。
 - **围栏由本次权限 reach 派生**（策略在 `capabilities/tools/domain/fence.rs`）：`FenceSpec::for_call` 只把 granted 的 private / shared-read / module-read / module-write / host-read / network 放进 rw / ro_tree / ro / net；shared-write 永不进 rw，module-write 只给指定模块自己的 userdata。`for_session` 是撤销授权用的并集。
-- **VM guest 的 per-call 断网**：guest helper 读策略里的 `net`，false 时在子进程前 `unshare(CLONE_NEWNET)`；失败以 111 fail-closed，不静默降级。
-- 收尾：stdout / stderr 分别读；超时 30 秒（`ProcTools::timeout`）后连根杀树；输出上限 16000 字符。超时、截断、围栏失败的文案经 `ProcessTexts` 注入，机制不硬编码。
+- **shell 的一次执行**：`run_shell` 走同一个守门进程；`timeout_secs` 是本次的（不沿用模块工具的 30 秒），到点或取消旗置位都杀整棵树；输出 head+tail（4k 开头 + 12k 结尾）；sandbox / external 都 `require_fs + require_net + allow_degraded=false`，装不上拒绝；Windows 的 sandbox / external 用按次临时容器 profile（结束撤 ACE + 删 profile）；shell 的只读根另加基础工具链与 agent 运行包根。
+- **VM guest 的 per-call 断网**：guest helper 读策略里的 `net`，false 时在子进程前 `unshare(CLONE_NEWNET)`；失败以 111 fail-closed，不静默降级。helper 同时读 `timeout_secs` 并按它杀树；guest 输出按 `GuestRun.output_limit` 只留开头或开头+结尾。
+- 收尾：stdout / stderr 分别读；模块工具超时 30 秒（`ProcTools::timeout`），shell 用本次 `timeout_secs`；到时连根杀树；输出上限 16000 字符（模块只留开头，shell 开头+结尾）。超时、截断、围栏失败的文案经 `ProcessTexts` 注入，机制不硬编码。
 - 围栏装不上（本机不支持 / 容器起不来）：命中 `require_fs` / `require_net` 且未同意降级时，守门进程以 `FENCE_FAILED` **拒绝执行**；已同意降级才如实降级继续。Linux 的文件系统与网络两项**独立**判定，一项装不上不影响另一项。能力等级已在启动报告里说明。
 - Windows 外层未授权（`sandbox.policy.windows.write_acl=false`）：容器不装；启动门要求强制时只能本次降级 / 重设 / 退出，否则按无围栏执行；全局网络开关不生效于容器，启动报告的「本次实际」已标出。
 - Windows 未授权时段先自检（`confine::verify`）：`EnvUnavailable` = 本机不支持，降级照跑；`Broken` = 自检说机制有效却装不上（我们写错了），**拒绝执行**，不按无围栏跑。

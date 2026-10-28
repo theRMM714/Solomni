@@ -481,10 +481,12 @@ pub(crate) fn builtin_tool_book_is_the_one_source_of_names_and_paths() {
             .unwrap_or_else(|| panic!("动词 {} 该在总表里", verb));
         assert_eq!(schema.capability, "none", "{} 不碰文件系统", verb);
     }
-    // 内置工具一律按真实绝对路径寻址：JSON 工具必须声明必填 path；自由格式工具（patch）不吃参数校验。
+    // 内置文件工具一律按真实绝对路径寻址：JSON 工具必须声明必填 path；自由格式工具（patch）不吃参数校验。
     for (name, schema) in book {
-        // 只查文件域工具（按真实绝对路径寻址）：协作动词不碰文件系统，不吃这条。
-        if schema.capability == "none" {
+        // 只查文件域工具：协作动词不碰文件，执行类系统工具（shell）不吃 path。
+        if schema.capability == "none"
+            || schema.effect() == crate::capabilities::permission::api::Effect::Exec
+        {
             continue;
         }
         if crate::capabilities::tools::api::is_freeform(name) {

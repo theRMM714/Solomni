@@ -76,3 +76,41 @@
   blocked_by: |
     本期不做（用户决定）；macOS 另有平台机制缺口，Windows guest 需要完整的新机制。
 
+- id: permission.windows-concurrent-call-overlap
+  scope: global
+  level: T3
+  why: |
+    Windows 的容器 ACL 按 agent 容器 SID 生效。按次 lease + 跑完撤 ACE 已解决**串行**切换的残留
+    （每次调用只撤自己的 owner），shell 的 sandbox / external 还走按次临时 profile；但**同一 agent
+    的并发模块工具调用**仍共享同一个容器 SID/profile。两个不同 scope 的调用重叠时，窄调用在另一调用
+    还活着的那段时间里仍可能看到对方临时加的根。这是 per-call ACL 与 per-agent profile 的边界，不是
+    shell 的 sandbox 问题（shell 有独立 profile）。
+  how: |
+    两个方向：
+    1) 模块工具也按次临时容器 profile（独立 SID）；代价是每次调用建/删 profile，并发多时成本高；
+    2) 保持 agent profile，但按调用把 ACL 收窄到「本调用可见的并集」——需要跨调用引用计数/门控，
+       并明确重叠窗口的语义；不能只靠 lease 撤权（撤的是自己的 owner，不阻止对方活着时的授权）。
+    先定并发语义（允许重叠可见 vs 严格隔离），再按端口矩阵补 Windows 真机并发用例。
+  accept: |
+    同一 agent 的两个不同 scope 调用重叠时，窄调用读不到另一调用的额外根；并发撤销互不影响；
+    调用结束/崩溃回收不留孤儿 ACL；其它平台行为不变；node run-tests.js 全绿。
+  blocked_by: 缺少模块工具的按次容器 profile 或跨调用 ACL 隔离（当前只在调用结束时按 lease 撤自己的 ACE）
+
+- id: vm.guest-run-cancel-live
+  scope: global
+  level: T3
+  why: |
+    guest 取消机制已实现（Vm/GuestChannel 可取消、QGA SIGTERM、helper killpg、VM live 用例断言），
+    但本机与当前 CI 没有 QEMU / guest 真机环境，未开 SOLOMNI_VM_LIVE；真实 QGA 往返、helper 信号处理、
+    进程树清理与 15 秒上限只在代码/契约层验证，尚未有一份真机通过证据。
+  how: |
+    在 Linux 宿主安装/指向 QEMU 与 guest 虚拟根，设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU、可选
+    SOLOMNI_VM_GUEST，跑 vm_live_guest_runs_command_inside_guest（其中已含 sleep 30 + 取消断言）；
+    记录取消耗时、helper stderr、孤儿进程检查与 timeout 仍生效。
+  accept: |
+    真机上 guest 内 sleep 30 在 host 停止后 15 秒内被杀；回执含「用户停止」；timeout 30 仍照常收口；
+    没有残留 guest 进程；三平台（当前 Linux guest）契约一致；node run-tests.js 全绿。
+  blocked_by: 本机/CI 无 QEMU 与 guest 真机（未开 SOLOMNI_VM_LIVE）；不是缺实现
+
+
+

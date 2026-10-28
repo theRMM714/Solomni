@@ -71,6 +71,7 @@ impl VmService {
         lease: &str,
         run: &GuestRun,
         fence: Option<&crate::kernel::api::FenceSpec>,
+        cancel: Option<&std::sync::atomic::AtomicBool>,
     ) -> ToolOutcome {
         let entry = match self.guests.lock() {
             Ok(guests) => guests.get(lease).cloned(),
@@ -103,7 +104,9 @@ impl VmService {
                 }
                 access.ro_tree.sort();
                 access.ro_tree.dedup();
-                held.vm.channel().exec_fenced(&translated, &access)
+                held.vm
+                    .channel()
+                    .exec_fenced_cancellable(&translated, &access, cancel)
             }
             None => held.vm.channel().exec(&translated),
         };
@@ -167,7 +170,7 @@ impl Vm for VmService {
     }
 
     fn guest_run(&self, lease: &str, run: &GuestRun) -> ToolOutcome {
-        self.run_guest(lease, run, None)
+        self.run_guest(lease, run, None, None)
     }
 
     fn guest_run_fenced(
@@ -176,7 +179,17 @@ impl Vm for VmService {
         run: &GuestRun,
         fence: &crate::kernel::api::FenceSpec,
     ) -> ToolOutcome {
-        self.run_guest(lease, run, Some(fence))
+        self.run_guest(lease, run, Some(fence), None)
+    }
+
+    fn guest_run_fenced_cancellable(
+        &self,
+        lease: &str,
+        run: &GuestRun,
+        fence: &crate::kernel::api::FenceSpec,
+        cancel: Option<&std::sync::atomic::AtomicBool>,
+    ) -> ToolOutcome {
+        self.run_guest(lease, run, Some(fence), cancel)
     }
 
     fn guest_packages(&self, lease: &str) -> Option<Vec<String>> {

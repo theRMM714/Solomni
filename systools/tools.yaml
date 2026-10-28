@@ -108,6 +108,40 @@ tools:
         type: boolean
         desc: 是否忽略大小写；省略即区分大小写
 
+  # —— 执行类系统工具：一次性 shell ——
+  shell:
+    capability: exec
+    effect: exec
+    reach: [private, shared-read, module-read, host-read, network]
+    decision: ask              # 默认说明；四档 profile 的 exec_sandbox / exec_external 决定实际处置
+    scope: true                # 接受模型给的 per-call scope：sandbox / external；省略 = sandbox
+    callers: [executor, solo, core_proxy]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    desc: |
+      在本环境跑一条一次性命令（构建 / 测试 / 跑脚本）：cwd 固定是你的私有沙箱，无交互 stdin / TTY；
+      输出超限保留开头与结尾，回执带退出码；返回值非 0 就是这条命令失败。
+      scope=sandbox（默认）：只能读写你的私有沙箱，另可只读系统与项目内基础工具链（python / node / cc 等）；
+      不碰共享区 / 模块目录 / 主机只读根，不联网。工作区内修改及以上档位直接执行；仅可查看档不发放。
+      scope=external：额外可读共享区主副本、模块目录与你被授权的主机只读根，并按全局开关联网；
+      共享区 / 模块目录仍只读，模块 userdata 不可写。外部可达档每次调用先问你，全可达档直接执行；
+      要访问沙箱外但档位不够时会被拒绝，需要用户先把会话档位调到外部可达或更高。
+      命令超过 8000 字符时先把脚本用 write 写进沙箱再执行；timeout_secs 到点连根杀整棵进程树。
+    params:
+      command:
+        type: string
+        required: true
+        non_empty: true
+        desc: 要执行的命令（本环境 shell 语法：Windows 是 PowerShell，Linux / macOS 是 sh；一条命令，不交互）
+      scope:
+        type: string
+        default: sandbox
+        desc: sandbox（只碰私有沙箱，默认）或 external（额外读共享区 / 模块目录 / 主机只读根 / 联网）
+      timeout_secs:
+        type: integer
+        min: 1
+        max: 600
+        default: 120
+        desc: 本次执行的超时秒数；到点连根杀整棵进程树
+
   # —— 工具调用约定：两套**互斥**（一个通道只用一套，不能同时教，否则模型在正文里讲解参数会被当成调用）——
 
   # —— 核心操作：核心 AI 的产出（驱动核心走下一步）必须走工具调用，不在正文里手写 JSON ——

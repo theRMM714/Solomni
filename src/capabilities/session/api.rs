@@ -22,7 +22,7 @@ pub use crate::capabilities::session::domain::session::{
     SessionParams, TurnRun,
 };
 pub use crate::capabilities::session::domain::tools::{
-    service_ops_for_modules, tool_table, MemberTools, ServiceOp,
+    service_ops_for_modules, tool_table, MemberTools, ServiceOp, ShellLive, ShellSlot,
 };
 
 // 核心操作回路 + 原生回灌消息：`service.rs` 实现（它驱动 IO，不是纯派生）。

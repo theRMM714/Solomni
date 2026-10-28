@@ -1091,6 +1091,7 @@ impl Conductor {
                         }
                         Err(_) => (String::new(), String::new(), false, None),
                     };
+                let shell = self.shell_view(&sid);
                 SessionView {
                     running,
                     sid,
@@ -1108,6 +1109,7 @@ impl Conductor {
                     pending,
                     continue_action,
                     context,
+                    shell,
                 }
             })
             .collect()

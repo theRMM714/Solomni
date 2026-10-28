@@ -1,13 +1,17 @@
 //! 入站能力面：**其它能力与呈现层只准用这里**（不许碰 `domain` / `ports`）。
 
+pub use crate::capabilities::tools::domain::fence::call_lease;
 pub use crate::capabilities::tools::domain::patch::{EditFault, Fault};
 pub use crate::capabilities::tools::domain::roles::{action_audit, RoleTable, SystemTools};
 pub use crate::capabilities::tools::domain::schema::{
     json_schema_lines, ArgFault, ToolBook, ToolSchema,
 };
+pub use crate::capabilities::tools::domain::shell::{
+    ephemeral_names, exit_code, guest_script, parse as parse_shell, with_scope_hint,
+};
 pub use crate::capabilities::tools::domain::systool::{
-    arg_fault_text, is_builtin, is_freeform, names, patch_decl, refuse, tool_notes, Observations,
-    ToolNotes, ToolOutcome, PATCH, REPORT,
+    arg_fault_text, is_builtin, is_exec, is_freeform, names, patch_decl, refuse, tool_notes,
+    Observations, ToolNotes, ToolOutcome, PATCH, REPORT,
 };
 
 /// 工具总表、角色表与名字表的**能力面**：别的能力只问"这一席能用哪些工具"，**看不见三张表的字段**。
@@ -60,6 +64,10 @@ pub trait ToolExec: Send + Sync {
         parallel: bool,
         ask: Option<&dyn crate::kernel::ports::AskUser>,
     ) -> ToolOutcome;
+
+    /// 执行一次**一次性 shell**：平台 shell、按次超时、取消与 head+tail 截断都在 kernel 的 `ProcessRunner` 后面；
+    /// 跑完（若这次用的是按次临时 profile）由本能力释放围栏授权。
+    fn run_shell(&self, run: &crate::kernel::ports::ShellRun<'_>) -> ToolOutcome;
 
     /// 执行一次**内置工具**：放行、寻址、参数校验在本能力的 domain，机制在 `SysIo` 后面。
     fn run_builtin(

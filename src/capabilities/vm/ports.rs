@@ -101,6 +101,16 @@ pub trait GuestChannel: Send {
             output: "这条 guest 命令通道没有实现 per-agent 围栏".to_string(),
         }
     }
+
+    /// 目的：同 `exec_fenced`，但带上 host 取消旗；通道不实现就退回普通围栏执行。
+    fn exec_fenced_cancellable(
+        &mut self,
+        run: &GuestRun,
+        access: &GuestAccess,
+        _cancel: Option<&std::sync::atomic::AtomicBool>,
+    ) -> ToolOutcome {
+        self.exec_fenced(run, access)
+    }
     /// 目的：探一下 guest 里的命令通道是否已就绪（agent 已起）。默认：这条通道不知道，回 false。
     /// 约束：必须**有界**返回——不能在没有 agent 时干等（首启装 agent 期间要轮询它）。
     fn ping(&mut self) -> bool {

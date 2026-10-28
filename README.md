@@ -26,7 +26,7 @@ Solomni 是一个**跑在自己机器上的 agent 运行环境（AgentOS）**：
 | --- | --- |
 | **核心** | 产品里唯一的程序（Rust）。提供机制：会话与转录、任务编排与验收、工具执行与围栏、登记处、回档与压缩 |
 | **模块** | 一个文件夹 `modules/<id>/`：一份 `module.yaml`（能力摘要 + 工具用法 + 工具声明，可声明常驻服务与隐秘字段）+ 工具本体。任何语言、任何能跑起来的东西 |
-| **agent** | 名字 + 它具备的模块（可以为空：只用内置文件工具）+ 模型 + 自己的沙箱。模块被装进哪个 agent，就以那个 agent 的名义说话 |
+| **agent** | 名字 + 它具备的模块（可以为空：只用内置文件工具与 shell）+ 模型 + 自己的沙箱。模块被装进哪个 agent，就以那个 agent 的名义说话 |
 | **使用者** | 人与 agent。人走界面（终端 / 本机网页），agent 走模块契约——同一批模块，两个门 |
 
 ## 当前能力
@@ -34,7 +34,7 @@ Solomni 是一个**跑在自己机器上的 agent 运行环境（AgentOS）**：
 - **三种形态**：单 agent / 小组协作 / 代理（决定权整块交给核心）。形态、流程与用户旅程见 [PRODUCT.md](PRODUCT.md)。
 - **模块即插即用**：`modules/` 里放一个带合法 `module.yaml` 的文件夹就出现，移走就消失——不注册、不编译、不重启（契约见 [MODULE_SPEC.md](MODULE_SPEC.md)）。
 - **会话与历史**：一个工作一个目录 `session/<工作名>/`；回档 / 留档 / 删除 / 恢复、转录回放、上下文压缩、共享区版本化（`work_pull` / `work_commit` / `work_status` / `work_versions` / `work_resolve` / `work_lost`），以及用户侧的提交历史 / 非破坏性回滚。
-- **三重隔离**：内置工具越界拒绝 → 工具进程走守门进程（环境白名单 / 进程树 / 超时杀整棵树）→ 平台围栏（Windows AppContainer、Linux Landlock、macOS seatbelt）；装不上就如实报告能力等级。
+- **三重隔离**：内置文件工具越界拒绝（shell 的边界是围栏）→ 工具进程 / shell 走守门进程（环境白名单 / 进程树 / 超时或取消杀整棵树）→ 平台围栏（Windows AppContainer、Linux Landlock、macOS seatbelt）；装不上就如实报告能力等级。
 - **两档执行**：本机档（默认）与虚拟机档（模块工具在 guest 里跑）。虚拟机档按宿主 × 引擎 × guest × 通道 × 共享五轴可插；
   Linux（QEMU/KVM + virtiofs，缺 virtiofsd 时退 9p）与 Windows（QEMU/WHPX + SMB guestfwd）已真机验收；Windows 缺 smbd 时虚拟机档不可用（先补齐，不降级）；copy 只是开发/应急通道，不参与用户档。macOS 未验（`VERIFIED_HOSTS` 只放开 Linux / Windows；缺 QEMU 取包与 Apple vz 引擎，见 [tests/macos/gaps.yaml](tests/macos/gaps.yaml)）；
   虚拟机档在 Linux / Windows 上不可用时，网页与命令行都能按同一份清单补齐依赖（见下）。细节见 [docs/vm/README.md](docs/vm/README.md)，运行包契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)。
@@ -112,6 +112,7 @@ tools:                       # 可选：模块工具表
 
 - 模块工具只有一条调用约定：**启动命令 + 参数 + stdin/stdout 回执**；长驻 MCP 服务写进 `services`。
 - 工具进程可达该 agent 的私有沙箱与它使用的模块目录；共享区主副本要先 `work_pull` / `work_commit`（冲突用 `work_versions` / `work_resolve`）。模块目录（含 `userdata/`）对 agent 的文件工具只读：agent 只有模块使用权，模块数据由模块自己的工具 / 服务进程维护。
+- `shell` 默认 `scope=sandbox`：只碰私有沙箱 + 只读基础 / 项目工具链；要读共享区 / 模块目录 / 主机只读根或联网用 `scope=external`，按会话档位 ask / allow。共享区永远只读，模块 userdata 不可写，不注入模块 secrets。
 - 能跑通就是合法模块；跑不通时核心如实报错，不猜、不兜底。
 
 ### 跑一遍演示

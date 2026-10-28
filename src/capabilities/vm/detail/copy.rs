@@ -71,6 +71,8 @@ impl ShareBackend for CopyShare {
                 args_json: "{}".to_string(),
                 env: Vec::new(),
                 cwd: String::new(),
+                timeout_secs: 30,
+                output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
             });
             if !out.ok {
                 return Err(format!("把 {} 解进 guest 失败：{}", m.guest, out.output));
@@ -94,6 +96,8 @@ impl ShareBackend for CopyShare {
                 args_json: "{}".to_string(),
                 env: Vec::new(),
                 cwd: String::new(),
+                timeout_secs: 30,
+                output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
             });
             if !out.ok {
                 return Err(format!("打包 guest 的 {} 失败：{}", m.guest, out.output));
@@ -105,6 +109,8 @@ impl ShareBackend for CopyShare {
                 args_json: "{}".to_string(),
                 env: Vec::new(),
                 cwd: String::new(),
+                timeout_secs: 30,
+                output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
             });
         }
         Ok(())

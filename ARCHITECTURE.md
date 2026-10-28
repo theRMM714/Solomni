@@ -52,11 +52,11 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 | `PromptSource` | 提示词册加载（`prompts/`） | `YamlPrompts` |
 | `SystoolsSource` | 工具总表、角色表与保留名表的加载（`systools/`） | `YamlSystools` |
 | `ProxyHost` | 核心代理工具的外部动作（清单 / 建会话 / 转达 / 观察 / 消息倒查 / 生命周期） | `ProxyBridge`（队列桥；测试 `FakeProxyHost`） |
-| `ProcessRunner` | 外部进程执行（围栏安装、拉起、stdin 送参、超时杀树、截断）；**kernel 共享机制端口** | `ProcTools`（守门进程 = 本程序的 `--fence-run` 模式） |
+| `ProcessRunner` | 外部进程执行（围栏安装、拉起、stdin 送参、超时/取消杀树、head/head+tail 截断、一次性 shell）；**kernel 共享机制端口** | `ProcTools`（守门进程 = 本程序的 `--fence-run` 模式） |
 | `EnvelopeRepair` | 手写信封不合法时的**无歧义**补救（改了字段含义就是错；拿不准就不修） | `UnambiguousRepair` |
 | `ServiceAdapter` | 一个常驻服务的协议适配器：拉起、发现操作、调用、关闭（按行协议走 kernel 的 `SessionHost`） | `residents/detail::McpAdapter`（MCP stdio） |
 | `SecretStore` | 模块隐秘字段的落盘（`.home/secrets.yaml`；值不进提示词、转录与日志） | `secrets/detail::YamlSecrets` |
-| `FenceHost` | 围栏授权的释放（删除会话时请求一次撤销）；**kernel 共享机制端口** | `confine::FenceHostAdapter`（本平台无该机制时为空操作） |
+| `FenceHost` | 围栏授权的释放（删除会话时请求一次撤销；shell 的按次临时 profile 另走 `release_shell`）；**kernel 共享机制端口** | `confine::FenceHostAdapter`（本平台无该机制时为空操作） |
 | `Log` / `HostProbe` / `PathCodec` / `ProcessTexts` | 运行日志（三级）/ 宿主能力探测（**只问事实**：路径存在性、PATH 上的可执行文件、本机虚拟化能力）/ 模型侧路径 ↔ 宿主路径的翻译 / 外部进程回执的收尾文案 | `FileLog` / `HostProbeAdapter` / `vm` 的路径桥 / `kernel::detail::process::CodeProcessTexts`（测试 `NoopLog` / `FixedProbe`） |
 | `ToolHandler` | **一类工具的执行者**（按名字认领）：内置、模块与核心自有工具因此走**同一条派发路径** | 各能力注入（工具能力管内置与模块；conductor 注入代理工具那个） |
 | `AskUser` | **请用户裁决的提问端口**：需要用户裁决的机制（工具执行层、围栏）推一条问题并**阻塞**等一个选项 id——走会话的**统一裁决通道**（不是第二条） | 会话侧实现（conductor 的 `SessionAsk`：卡片进那一条队、`answer_card` 作答；构不出可用选项时停会话 + 落警告） |
@@ -128,8 +128,9 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
   工具级确认命中 ask 时进统一裁决队；回答 allow / deny / allow_turn；没有可回答前端一律拒绝。
   模块目录对 agent 的内置文件工具永久只读（含 userdata）；模块 userdata 只由模块工具 / 服务进程写。
   VM guest 的 per-call 断网由 guest helper 的 unshare(CLONE_NEWNET) 落实；失败 fail-closed。
+  **shell 的 scope 是单次 reach 请求**：sandbox 只 private + 基础 / 项目工具链只读（net=false）；external 加 shared-read / module-read / host-read / network；两者都要求围栏真强制，装不上拒绝。shell 的只读根另加 `runtime_roots`（基础工具链 + 本 agent 运行包）。
   工具进程走**守门进程**（本程序 `--fence-run`），环境不继承父进程（**密钥与凭据不进工具进程**），`HOME` / `TEMP` 等落进该 agent 的沙箱。
-  **一个 agent 一个容器 profile**，守门进程是唯一建它的地方并记进 `.home/fence-grants.json` 台账；每次写 ACL **先把记录落盘**（根内路径存原始安全描述符、根外只存 ACE 摘要），写后核对 ACE 与原有权限项、失败回滚并如实报错；
+  **模块工具一个 agent 一个容器 profile**，但每次调用带唯一租约，跑完按它撤自己那份 ACE；shell 的 sandbox / external 用**按次临时 profile**（W1，结束撤 ACE 并删 profile），所以按次收窄在 Windows 上真实成立。守门进程是唯一建 profile 的地方并记进 `.home/fence-grants.json` 台账；每次写 ACL **先把记录落盘**（根内路径存原始安全描述符、根外只存 ACE 摘要），写后核对 ACE 与原有权限项、失败回滚并如实报错；
   台账每条授权 / profile 带**归属**（pid + 进程创建时刻 + **会话租约**），写事务用**进程内互斥 + 跨进程文件锁**串行。
   **启动期**（会话尚未开工）按归属**对账一次**：只回收归属明确已死的条目、无法判定的如实报告并跳过，失败保留供重试——不询问用户、不阻塞启动，也不做孤儿清扫（那留手动）；手动重试用 `--fence-reconcile`。
   `--fence-clean` 按台账**整体还原**根内路径、精确撤销根外条目，再扫掉台账外的孤儿授权（含任何显式包 SID ACE）与遗留 profile；按条处置是 `--fence-ledger` / `--fence-restore` / `--fence-revoke` / `--fence-profile-rm`。
@@ -160,7 +161,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 - 路径一律用 `PathBuf` / `Path` 组件拼接：**禁止把 `/` 或 `\` 写进字符串再拼**。
 - **对外**（提示词、工具参数、回执、API）一律用 `/` 书写形式（Windows 反斜杠在 JSON 字符串里是非法转义）；由 `kernel::path::slash` 统一给出。
 - 编码：读严格 UTF-8、非法字节如实标注（**不猜编码**）；写一律 UTF-8；为工具子进程强制 UTF-8 环境。
-- 不假设平台：不写死盘符、不假设 shell（工具命令由模块作者声明）。
+- 不假设平台：不写死盘符；模块工具的命令由模块作者声明，系统 `shell` 按平台选 sh / PowerShell。
 - 围栏按平台给不同机制（`detail/confine/` 一个平台一个文件）；某平台没有接入的部分**就是没有**——文档与界面照实说。
 
 ## 九、业务边界与硬要求

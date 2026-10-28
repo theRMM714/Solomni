@@ -213,6 +213,29 @@ http.createServer((req, res) => {
       } else {
         content = '子工作已经开工，我盯着它。';
       }
+    } else if (sawToolResult && allUser.includes('跑 shell')) {
+      // shell 的第二轮：两次调用都拿到结果后收尾（第一条成功、第二条非零退出）。
+      content = JSON.stringify({ type: 'say', text: 'shell 跑完了' });
+    } else if (sawToolResult && user.includes('虚拟机档 shell')) {
+      // VM 档第二次发言：先跑一条 guest shell，拿到结果后收尾。
+      let boundary = -1;
+      for (let i = 0; i < msgs.length; i++) if (msgs[i].role === 'user') boundary = i;
+      const ran = msgs.slice(boundary + 1).filter((m) => m.role === 'tool').length;
+      if (ran === 0) {
+        calls = [{
+          id: 'call_vm_shell',
+          type: 'function',
+          function: {
+            name: 'shell',
+            arguments: JSON.stringify({
+              command: "printf 'VM-SHELL-OK\\n' > shell-guest.txt; printf 'VM-SHELL-OK\\n'",
+              timeout_secs: 30,
+            }),
+          },
+        }];
+      } else {
+        content = JSON.stringify({ type: 'say', text: 'guest shell 跑完了' });
+      }
     } else if (sawToolResult && allUser.includes('绝对路径读一下')) {
       // pull 完的第二轮：外部工具读**沙箱里**的那一份（共享区对工具进程不可达）。
       // 按工具结果条数收尾，别拿"成功输出里有没有内容"当判据——失败时会无限重发同一个调用。
@@ -243,7 +266,20 @@ http.createServer((req, res) => {
       else if (ran === 1) content = w('ask-full-2.txt');
       else content = done;
     } else if (sys.includes('【工作环境】') && !sawToolResult) {
-      if (/read_txt/.test(sys)) {
+      if (user.includes('跑 shell')) {
+        // 零模块 agent 的 shell：一条成功（写私有沙箱 + 中文），一条非零退出；平台语法分开。
+        const win = sys.includes('Windows 宿主');
+        const ok = win
+          ? "$dir = (Get-Location).Path; Write-Output ('PWD=' + $dir); [System.IO.File]::WriteAllText((Join-Path $dir 'shell-ok.txt'), 'SHELL-OK-中文'); Write-Output 'SHELL-OK-中文'"
+          : "printf 'PWD=%s\\n' \"$PWD\"; printf 'SHELL-OK-中文\\n' > shell-ok.txt; printf 'SHELL-OK-中文\\n'";
+        content = JSON.stringify({
+          type: 'tool',
+          calls: [
+            { name: 'shell', args: { command: ok, timeout_secs: 30 } },
+            { name: 'shell', args: { command: 'exit 7', timeout_secs: 30 } },
+          ],
+        });
+      } else if (/read_txt/.test(sys)) {
         // 该 agent 的某个模块声明了外部工具（夹具 toolbox）：用**相对路径**调用，专门验证 cwd = 它自己的模块目录。
         const env = { type: 'tool', module: 'toolbox', name: 'read_txt', args: { path: 'userdata/e2e.txt' } };
         if (user.includes('不要写模块')) {
