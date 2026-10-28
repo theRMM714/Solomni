@@ -244,6 +244,38 @@ fn grant_targets_include_parents_with_stat_only() {
     }
 }
 
+
+/// 目的：shell 的 cwd = private 时，PowerShell 逐级解析 cwd 所需的祖先也要有只读属性（仅 STAT、不递归）。
+#[test]
+fn shell_cwd_gets_every_ancestor_stat_only() {
+    let private = std::env::temp_dir()
+        .join("solomni-grant-targets")
+        .join("a")
+        .join("b")
+        .join("work");
+    let spec = FenceSpec {
+        agent: "probe".to_string(),
+        lease: String::new(),
+        private: private.clone(),
+        ro_tree: Vec::new(),
+        rw: vec![private.clone()],
+        ro: Vec::new(),
+        cwd: private.clone(),
+        net: false,
+    };
+    let targets = grant_targets(&spec);
+    let find = |p: &std::path::Path| targets.iter().find(|t| t.path == p).cloned();
+    for anc in private.ancestors().skip(1) {
+        if anc.as_os_str().is_empty() {
+            continue;
+        }
+        let got = find(anc).unwrap_or_else(|| panic!("祖先要在落点清单里：{}", anc.display()));
+        assert_eq!(got.rights, RIGHTS_STAT, "祖先只授读属性：{}", anc.display());
+        assert!(!got.recursive && !got.inherit, "祖先不递归、不继承");
+        assert_eq!(got.part, FencePart::Parent);
+    }
+}
+
 /// 只读**子树**（模块目录对 agent 只读）与工作目录：都给 `RIGHTS_RO` 递归，写权只能来自 `rw`。
 #[test]
 fn grant_targets_keep_module_read_only_and_cwd_read_only() {
