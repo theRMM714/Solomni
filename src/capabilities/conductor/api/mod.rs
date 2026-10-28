@@ -804,6 +804,8 @@ pub struct SessionView {
     pub permission_label: String,
     /// 目的：这条会话是不是带收窄层（子会话）。
     pub permission_narrowed: bool,
+    /// 目的：子会话的父档位（根为空）；权限快速切换据此禁用更高档。
+    pub permission_parent: Option<String>,
     /// 目的：**这条会话此刻在跑吗**（生成中）：界面据此把「发送/继续」换成「停止」并显示占位动画。
     /// 它是**对账副本**：运行态的唯一真相是推的 `SessionEvent::Working`（短暂、不落盘）；
     /// 这份快照供界面在"本页对这条会话还没有实时知识"时对齐——刚刷新页面、事件台裁掉一段后

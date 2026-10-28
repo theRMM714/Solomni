@@ -118,7 +118,7 @@ async function refreshState() {
       continue_action: v.continue || null,
       tier: v.tier, tier_ready: v.tier_ready, tier_missing: v.tier_missing || [],
       permission_profile: v.permission_profile || '', permission_label: v.permission_label || '',
-      permission_narrowed: !!v.permission_narrowed,
+      permission_narrowed: !!v.permission_narrowed, permission_parent: v.permission_parent || null,
       activating: false,
       done: !!(h && h.done), awaiting: null, fold: {}, scroll: {},
       context: v.context || null,
@@ -145,6 +145,7 @@ async function refreshState() {
     cur.permission_profile = v.permission_profile || cur.permission_profile;
     cur.permission_label = v.permission_label || cur.permission_label;
     cur.permission_narrowed = !!v.permission_narrowed;
+    cur.permission_parent = v.permission_parent || null;
     // 上下文用量以快照兜底；实时 usage 事件到达后以事件为准（同一份事实，事件更新）。
     if (v.context !== undefined) cur.context = v.context || null;
     // 运行态**只对账、不覆盖**：这条会话已经有实时知识（事件就是真相）时，快照比它滞后——
@@ -3444,7 +3445,69 @@ function statusPrintOf(s) {
     s && s.workError, s && s.workAt ? 1 : 0,
     (state.settings && state.settings.compact_at_percent) || 0,
     s && s.permission_profile, s && s.permission_label, s && s.permission_narrowed ? 1 : 0,
+    s && s.permission_parent,
   ]);
+}
+
+const PERMISSION_ORDER = ['view', 'workspace', 'external', 'all_reach'];
+const PERMISSION_LABELS = {
+  view: '仅可查看',
+  workspace: '工作区内修改',
+  external: '外部可达（逐次确认）',
+  all_reach: '全可达（自动放行）',
+};
+
+/* 权限档位小卡片：只列四档 + 一个“更多设置”。子会话禁用比父档更宽的选项；
+ * 生成中禁用全部（后端也会拒绝，这里先给出原因，免得白点一下）。 */
+function openPermissionMenu(chip, s) {
+  const current = s.permission_profile || 'workspace';
+  const parent = s.permission_parent || null;
+  const parentIdx = parent ? PERMISSION_ORDER.indexOf(parent) : PERMISSION_ORDER.length - 1;
+  const items = PERMISSION_ORDER.map((id, i) => {
+    const disabled = s.running || (!!parent && i > parentIdx);
+    const reason = s.running
+      ? '会话正在生成：先停止再切换权限'
+      : (!!parent && i > parentIdx ? '子会话只能收窄：要放宽请改主会话' : '');
+    return {
+      icon: id === current ? 'check' : (id === 'all_reach' ? 'alert' : 'shield'),
+      label: PERMISSION_LABELS[id] + (id === current ? '（当前）' : ''),
+      disabled,
+      reason,
+      onClick: () => { if (id !== current) switchPermission(s.sid, id); },
+    };
+  });
+  items.push({ sep: true });
+  items.push({ icon: 'gear', label: '更多权限设置…', onClick: () => openConfig(s.sid) });
+  ui.menu(chip, items);
+}
+
+/* 快速切档只改 profile，共享区范围 / 逐工具决定保持现值；要改这些走“更多权限设置”。 */
+async function switchPermission(sid, profile) {
+  const s = state.sessions.get(sid);
+  if (!s) return;
+  if (s.running) { ui.toast('warn', '会话正在生成：先停止再切换权限'); return; }
+  try {
+    const r = await api('GET', '/api/sessions/' + encodeURIComponent(sid) + '/config');
+    const cfg = r.config;
+    if (!cfg) throw new Error('读不到这个会话的配置');
+    const body = {
+      agents: (cfg.agents || []).map((a) => ({
+        name: a.name,
+        modules: (a.modules || []).slice(),
+        model: a.model || '',
+        chara: a.chara || '',
+      })),
+      tier: cfg.tier || 'host',
+      guest: cfg.tier === 'vm' ? (cfg.guest || null) : null,
+      pins: cfg.pins || {},
+      permission: { profile },
+    };
+    await api('POST', actionUrl('edit_session'), Object.assign({ session_id: sid }, body));
+    await refreshState();
+    ui.toast('ok', '权限档位：' + (PERMISSION_LABELS[profile] || profile));
+  } catch (e) {
+    ui.toast('err', e.message || String(e));
+  }
 }
 
 function syncStatusbar(s) {
@@ -3468,12 +3531,14 @@ function syncStatusbar(s) {
 
   // 权限档位：proxy 与子会话都必须看得见它实际用的档。
   if (s.permission_label) {
-    inner.appendChild(ui.statusChip({
+    const permChip = ui.statusChip({
+      icon: 'shield',
       text: s.permission_label + (s.permission_narrowed ? '（收窄）' : ''),
       label: '权限档位',
-      title: '当前权限档位：' + s.permission_label + '（点开配置可切换；子会话只能收窄）',
-      onClick: () => openConfig(s.sid),
-    }));
+      title: '当前权限档位：' + s.permission_label + '（点开可切换；子会话只能收窄）',
+    });
+    permChip.onclick = () => openPermissionMenu(permChip, s);
+    inner.appendChild(permChip);
   }
 
   // 协作主会话没有一条持续发给模型的对话：不显示上下文 chip（不伪造数字）。

@@ -1015,17 +1015,27 @@ impl Conductor {
                     Some(Session::Single(s)) => s.context_usage(),
                     _ => None,
                 };
-                let (permission_profile, permission_label, permission_narrowed) =
+                let (permission_profile, permission_label, permission_narrowed, permission_parent) =
                     match self.history.meta(&sid) {
-                        Ok(m) => match self.permissions_for(&m) {
-                            Ok(p) => (
-                                p.profile.as_str().to_string(),
-                                p.profile.label().to_string(),
-                                m.parent.is_some() && m.sandbox.narrowing.is_some(),
-                            ),
-                            Err(_) => (String::new(), "权限不可用".to_string(), false),
-                        },
-                        Err(_) => (String::new(), String::new(), false),
+                        Ok(m) => {
+                            let parent = m.parent.as_ref().and_then(|p| {
+                                self.history.meta(p).ok().and_then(|pm| {
+                                    self.permissions_for(&pm)
+                                        .ok()
+                                        .map(|ep| ep.profile.as_str().to_string())
+                                })
+                            });
+                            match self.permissions_for(&m) {
+                                Ok(p) => (
+                                    p.profile.as_str().to_string(),
+                                    p.profile.label().to_string(),
+                                    m.parent.is_some() && m.sandbox.narrowing.is_some(),
+                                    parent,
+                                ),
+                                Err(_) => (String::new(), "权限不可用".to_string(), false, None),
+                            }
+                        }
+                        Err(_) => (String::new(), String::new(), false, None),
                     };
                 SessionView {
                     running,
@@ -1038,6 +1048,7 @@ impl Conductor {
                     permission_profile,
                     permission_label,
                     permission_narrowed,
+                    permission_parent,
                     can_update_task,
                     run,
                     pending,
