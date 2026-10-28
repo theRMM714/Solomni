@@ -492,7 +492,7 @@ impl ProcTools {
 }
 
 #[cfg(windows)]
-const PS_PRELUDE: &str = "try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }\n$OutputEncoding = [System.Text.Encoding]::UTF8\n";
+const PS_PRELUDE: &str = "try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }\n$OutputEncoding = [System.Text.Encoding]::UTF8\nSet-Location -LiteralPath $PSScriptRoot -ErrorAction Stop\n";
 #[cfg(windows)]
 const PS_TAIL: &str = "\nif ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE }\n";
 
