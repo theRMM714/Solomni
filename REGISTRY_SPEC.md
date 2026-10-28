@@ -116,10 +116,12 @@ sandbox:               # 全局沙箱策略：会话不可填；保存后整体�
     host_read_roots: [] # 用户显式授权的主机绝对路径只读根（默认空）
     deny: []           # 全局黑名单（工作区相对路径）：硬底线，会话只能追加、不能删除
   defaults:            # 会话权限的全局默认；会话 meta 可覆盖
-    allow_read: []     # 读白名单（相对工作区根；空 = 整棵工作区可读）
-    allow_write: []    # 提交白名单（相对工作区根；空 = 整棵工作区可提交）
-    granularity: ask   # 决定粒度：ask = ask 表里的工具要用户放行；full = 任何工具都不设确认
-    ask: []            # granularity=ask 时要用户放行的工具名（模块工具写 module.tool）
+    profile: workspace # 默认档位：view / workspace / external / all_reach
+    shared:            # 共享区范围三态：all / none / 路径数组
+      read: all
+      write: all
+      deny: []         # 默认追加黑名单；全局 policy.deny 仍是硬底线
+    tools: {}          # 逐工具决定：工具名 -> allow / ask / deny
 qemu_path: ""          # 虚拟机档用的 QEMU 可执行文件路径（默认空 = 判据每次取用时采用项目内补齐的可运行包；否则兜底看 PATH。显式登记优先）
 virtiofsd_path: ""     # 虚拟机档共享后端要用的外部程序路径（如 virtiofsd；默认同 qemu_path：登记优先，否则用项目内补齐的那个）
 smbd_path: ""          # 虚拟机档 smb 共享档要用的外部 helper 路径（默认空 = 判据每次取用时采用项目内补齐的 helper；否则兜底看 PATH）
@@ -131,9 +133,10 @@ discuss_remind_cap: 3  # 讨论里一轮内对同一个成员最多提醒几次�
 
 - `sandbox.policy` 是**全局硬约束**：会话、子会话、agent 都不能覆盖；改它要保存后整体重启，
   让所有 guest / 常驻服务 / 工具进程按新策略重建。配置写错（拼错键、未知键、相对的主机只读根、非法路径）启动即报 `settings.yaml 配置非法`。
-- `sandbox.defaults` 是**会话权限的全局默认**；会话级覆盖写在 `meta.yaml` 的 `sandbox.permissions`
-  （见 [docs/session/session-model.md](docs/session/session-model.md)）。`sandbox.policy.deny` 是硬底线，
-  会话只能追加黑名单，不能清空。语义只有一份权威：[docs/permission/README.md](docs/permission/README.md)。
+- sandbox.defaults 是会话权限的全局默认；会话级权限层写在 meta.yaml 的 sandbox.ceiling / sandbox.narrowing
+  （见 docs/session/session-model.md）。sandbox.policy.deny 是硬底线，会话只能追加黑名单，不能清空；
+  profile 与工具声明只决定「能到哪、要不要问」，不能突破 policy 的 network / host_read_roots / deny / 强制等级上限。
+  语义只有一份权威：docs/permission/README.md。
 - **网络是全局开关**（`sandbox.policy.network`）：会话工具、直接模块工具、常驻服务、模块构建共用；
   provisioning 首启与核心模型出站不受它影响。
 - **启动门**：默认 CLI 与 `-webUI` 都先过环境检查；`sandbox.policy` 的要求没满足时，只能

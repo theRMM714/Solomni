@@ -106,6 +106,7 @@ pub(crate) fn agent_chara_enters_identity_only_when_set() {
             agents: vec![AgentInstance::from_view(&view)],
             task: None,
             delegate: false,
+            permission: None,
             tier: Tier::Host,
             guest: None,
         })
@@ -172,7 +173,7 @@ pub(crate) fn create_work_persists_and_history_replays() {
         .is_ok());
 }
 
-/// 删父带子：整个子树一起消失；子会话不允许单独删（它由核心按节点派生）。
+/// 目的：删父带子：整个子树一起消失；子会话不允许单独删（它由核心按节点派生）。
 #[test]
 pub(crate) fn history_delete_cascades_to_children_and_refuses_child_delete() {
     let hist = Arc::new(InMemoryHistory::new());
@@ -199,7 +200,7 @@ pub(crate) fn history_delete_cascades_to_children_and_refuses_child_delete() {
     assert!(hist.load(&child).is_err(), "子会话随父一起消失");
 }
 
-/// 工作根沿父链走到顶：代理 → 多 agent 子会话 → 它的节点子会话，第三层也锚在**顶层**那一个 work/ 上。
+/// 目的：工作根沿父链走到顶：代理 → 多 agent 子会话 → 它的节点子会话，第三层也锚在**顶层**那一个 work/ 上。
 #[test]
 pub(crate) fn work_root_walks_to_the_top_across_nested_sub_sessions() {
     let hist = Arc::new(InMemoryHistory::new());
@@ -222,7 +223,7 @@ pub(crate) fn work_root_walks_to_the_top_across_nested_sub_sessions() {
     assert_eq!(core.work_root(&low).unwrap(), top, "第三层也锚在顶");
 }
 
-/// 身份块里的机制说明按（**会话使用类型** × **角色**）取：对得上的拿，对不上的不拿。
+/// 目的：身份块里的机制说明按（**会话使用类型** × **角色**）取：对得上的拿，对不上的不拿。
 #[test]
 pub(crate) fn identity_takes_the_mechanism_of_its_session_and_role() {
     let prompt = test_prompts();
@@ -255,7 +256,7 @@ pub(crate) fn identity_takes_the_mechanism_of_its_session_and_role() {
     );
 }
 
-/// 子树里任一节点在生成中就**整体拒绝**：不能删到一半留下半个状态。
+/// 目的：子树里任一节点在生成中就**整体拒绝**：不能删到一半留下半个状态。
 #[test]
 pub(crate) fn history_delete_refuses_when_any_node_in_the_subtree_is_running() {
     let hist = Arc::new(InMemoryHistory::new());
@@ -282,7 +283,7 @@ pub(crate) fn history_delete_refuses_when_any_node_in_the_subtree_is_running() {
     );
 }
 
-/// 创建工作的档位来自用户选择；承载不了的虚拟机档如实拒绝（与「开始」的校验同源）。
+/// 目的：创建工作的档位来自用户选择；承载不了的虚拟机档如实拒绝（与「开始」的校验同源）。
 #[test]
 pub(crate) fn create_work_uses_chosen_tier_and_rejects_unavailable_vm() {
     let hist = Arc::new(InMemoryHistory::new());
@@ -370,7 +371,7 @@ pub(crate) fn direct_rewind_drops_tail_then_continue_allows_user_turn() {
     );
 }
 
-/// 留档：只标记并折叠尾部，文件字节一个不少，新行从最大 id 续号；恢复把标记及其后真的删掉。
+/// 目的：留档：只标记并折叠尾部，文件字节一个不少，新行从最大 id 续号；恢复把标记及其后真的删掉。
 #[test]
 pub(crate) fn archive_folds_the_tail_and_restore_brings_it_back() {
     use crate::capabilities::conductor::api::RewindTarget;
@@ -444,7 +445,7 @@ pub(crate) fn archive_folds_the_tail_and_restore_brings_it_back() {
     );
 }
 
-/// 删除：真的把标记点之后的字节从文件里删掉（不是只截视图）。
+/// 目的：删除：真的把标记点之后的字节从文件里删掉（不是只截视图）。
 #[test]
 pub(crate) fn delete_rewrites_the_file_for_real() {
     use crate::capabilities::conductor::api::RewindTarget;
@@ -697,6 +698,7 @@ pub(crate) fn create_work_validates_user_choices() {
         ],
         task: None,
         delegate: false,
+        permission: None,
         tier: crate::kernel::api::Tier::Host,
         guest: None,
     };
@@ -736,7 +738,7 @@ pub(crate) fn create_work_validates_user_choices() {
         .contains("不能包含"));
 }
 
-/// 设置是流式的**上限**：设置关掉时，调用方要流式也拿不到（全局通用）。
+/// 目的：设置是流式的**上限**：设置关掉时，调用方要流式也拿不到（全局通用）。
 #[test]
 pub(crate) fn streaming_setting_is_the_ceiling_for_every_call() {
     let core = crate::tests::doubles::core_with_settings(InMemorySettings::with_llm(false, 77));
@@ -748,7 +750,7 @@ pub(crate) fn streaming_setting_is_the_ceiling_for_every_call() {
     assert_eq!(core2.llm_opts(false).timeout_secs, 88, "预算与流式开关无关");
 }
 
-/// 用户进 agent 会话说的话，**下一回合它带着**——"讨论与执行不分家"的核心承诺。
+/// 目的：用户进 agent 会话说的话，**下一回合它带着**——"讨论与执行不分家"的核心承诺。
 /// 判据在"回合收到的消息"上：主会话内容靠**注入**（讨论上下文）给各 agent，
 /// 而用户在某个 agent 会话说的话进**它自己的历史**，下一回合一起带上。
 #[test]
@@ -867,7 +869,7 @@ pub(crate) fn single_mode_accepts_multi_module_agent_and_converses() {
     );
 }
 
-/// **落盘策略由会话种类定、判定只有一处**：短暂事件任何会话都不留；系统会话（`#` 开头）一条都不留。
+/// 目的：**落盘策略由会话种类定、判定只有一处**：短暂事件任何会话都不留；系统会话（`#` 开头）一条都不留。
 #[test]
 pub(crate) fn persist_policy_is_decided_by_the_session_kind() {
     use crate::capabilities::conductor::service::{is_system_session, PersistPolicy};
@@ -1033,7 +1035,7 @@ pub(crate) fn core_direct_tool_flow_injects_result_into_history() {
 
 // ---------- 内置文件工具：沙箱寻址与越界 ----------
 
-/// **派发行：界面是系统行，上下文是 user 角色**——Web 与 CLI 走同一条语义。
+/// 目的：**派发行：界面是系统行，上下文是 user 角色**——Web 与 CLI 走同一条语义。
 /// 界面上它是核心说的话（不得显示成"用户"），但请求里必须有一条 user 消息：
 /// 一条 user 都没有的请求会被供应商**整条拒收**（真机 400）。
 /// 这条同时守住"重建 = 实时"：重启后从落盘转录重建，派发行还得是 user，否则请求又坏掉。
@@ -1158,8 +1160,13 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
             tier: "vm".to_string(),
             guest: Some(guest.clone()),
             pins: BTreeMap::new(),
-            permissions: Some(crate::capabilities::permission::api::PermissionsOverride {
-                allow_write: Some(vec!["docs".to_string()]),
+            permission: Some(crate::capabilities::permission::api::PermissionLayer {
+                shared: Some(crate::capabilities::permission::api::SharedEdit {
+                    write: Some(crate::capabilities::permission::api::ScopeMode::Paths(
+                        vec!["docs".to_string()],
+                    )),
+                    ..Default::default()
+                }),
                 ..Default::default()
             }),
         },
@@ -1168,7 +1175,10 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
     let cfg = core.session_config(&sid).unwrap();
     assert_eq!(cfg.agents[0].modules, vec!["b".to_string()]);
     assert_eq!(cfg.tier, "vm");
-    assert_eq!(cfg.permissions.allow_write, vec!["docs".to_string()]);
+    assert_eq!(
+        cfg.permission.shared.write,
+        crate::capabilities::permission::api::ScopeMode::Paths(vec!["docs".to_string()])
+    );
     let (meta, events) = hist.load(&sid).unwrap();
     assert_eq!(
         meta.agents[0].modules,
@@ -1177,8 +1187,14 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
     );
     assert_eq!(meta.exec.tier, Tier::Vm);
     assert_eq!(
-        meta.sandbox.permissions.allow_write,
-        Some(vec!["docs".to_string()]),
+        meta.sandbox
+            .ceiling
+            .as_ref()
+            .and_then(|l| l.shared.as_ref())
+            .and_then(|s| s.write.clone()),
+        Some(crate::capabilities::permission::api::ScopeMode::Paths(
+            vec!["docs".to_string()]
+        )),
         "会话级权限写回 meta"
     );
     assert_eq!(
@@ -1186,12 +1202,22 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
         Some(guest.as_str()),
         "虚拟根随提交写回"
     );
+    let config = events
+        .iter()
+        .find(|e| e.get("type").and_then(|t| t.as_str()) == Some("config"))
+        .unwrap_or_else(|| panic!("每次提交编辑追加一条旁路配置记录：{:?}", events));
     assert!(
-        events
-            .iter()
-            .any(|e| e.get("type").and_then(|t| t.as_str()) == Some("config")),
-        "每次提交编辑追加一条旁路配置记录：{:?}",
-        events
+        config.get("permission").is_some(),
+        "配置记录要带权限层：{}",
+        config
+    );
+    assert!(
+        config
+            .get("permission_effective")
+            .and_then(|p| p.get("profile"))
+            .is_some(),
+        "配置记录要带生效档位：{}",
+        config
     );
     // 内存里的会话按旧配置装过：丢掉后下次访问按新配置从转录重建（内容不丢）。
     assert!(!core.session_exists(&sid));
@@ -1438,7 +1464,7 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_defaults_to_host() {
     assert_eq!(defaulted.run, RunState::Active);
 }
 
-/// 回档**按回复原子**：截在一次回复中间时整条回复一起丢，绝不留下"孤儿工具结果"。
+/// 目的：回档**按回复原子**：截在一次回复中间时整条回复一起丢，绝不留下"孤儿工具结果"。
 #[test]
 pub(crate) fn rewind_never_splits_a_reply() {
     use crate::capabilities::llm::api::ToolCall;
@@ -1504,7 +1530,7 @@ pub(crate) fn rewind_never_splits_a_reply() {
     );
 }
 
-/// 侧栏顺序 = **树序**：父会话紧跟它的子会话（顺序与缩进同源，不会再错位）。
+/// 目的：侧栏顺序 = **树序**：父会话紧跟它的子会话（顺序与缩进同源，不会再错位）。
 #[test]
 pub(crate) fn history_list_is_ordered_as_a_tree() {
     let hv = |name: &str, parent: Option<&str>, ts: i64| {
@@ -1871,4 +1897,110 @@ pub(crate) fn notice_lines_stay_out_of_the_model_dialogue() {
     assert_eq!(line_reply, vec![0, 1, 2], "提示行自己成一条回复");
     assert_eq!(plain_marks.len(), 2);
     assert_eq!(plain_reply, vec![0, 1]);
+}
+
+/// 目的：根编辑不覆盖子收窄；子只能再收窄，不能换更高档。
+#[test]
+pub(crate) fn root_edit_keeps_child_narrowing_and_child_cannot_widen() {
+    use crate::capabilities::permission::api::{
+        Decision, PermissionLayer, ProfileId, ScopeMode, SharedEdit,
+    };
+    let hist = Arc::new(InMemoryHistory::new());
+    let mut core = core_with_all(
+        vec![module_of("a")],
+        gw(BTreeMap::new(), vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::new(InMemorySysIo::new()),
+    );
+    let parent = core
+        .create_work(collab_work("p", &["a"], false, "需求"))
+        .unwrap()
+        .sid;
+    let child = core.spawn_agent_session(&parent, "a").unwrap();
+    let with = |mut e: SessionEdit, p: PermissionLayer| {
+        e.permission = Some(p);
+        e
+    };
+    core.edit_session(
+        &child,
+        with(
+            edit_of(vec![("a", &["a"], "")]),
+            PermissionLayer {
+                profile: Some(ProfileId::View),
+                shared: Some(SharedEdit {
+                    read: Some(ScopeMode::Paths(vec!["src".to_string()])),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        ),
+    )
+    .expect("子收窄");
+    core.edit_session(
+        &parent,
+        with(
+            edit_of(vec![("a", &["a"], "")]),
+            PermissionLayer {
+                shared: Some(SharedEdit {
+                    write: Some(ScopeMode::Paths(vec!["docs".to_string()])),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        ),
+    )
+    .expect("根编辑");
+    let (cm, _) = core.history_open(&child).unwrap();
+    assert!(cm.sandbox.narrowing.is_some(), "根编辑不能清掉子收窄");
+    let (pm, _) = core.history_open(&parent).unwrap();
+    assert!(pm.sandbox.ceiling.is_some(), "根 ceiling 落盘");
+    let cfg = core.session_config(&child).unwrap();
+    assert_eq!(
+        cfg.permission.profile,
+        ProfileId::View,
+        "子档位仍是收窄后的 view"
+    );
+    assert_eq!(
+        cfg.permission.decisions.write,
+        Decision::Deny,
+        "view 的写决定生效"
+    );
+    let widen = with(
+        edit_of(vec![("a", &["a"], "")]),
+        PermissionLayer {
+            profile: Some(ProfileId::AllReach),
+            ..Default::default()
+        },
+    );
+    let err = core.edit_session(&child, widen).unwrap_err();
+    assert!(err.contains("更宽"), "{}", err);
+}
+
+/// 目的：创建时选的档位直接落进根 ceiling；旧 meta 不兼容是预期。
+#[test]
+pub(crate) fn creation_writes_the_chosen_profile_into_the_root_ceiling() {
+    use crate::capabilities::permission::api::ProfileId;
+    let hist = Arc::new(InMemoryHistory::new());
+    let mut core = core_with_all(
+        vec![module_of("a")],
+        gw(BTreeMap::new(), vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::new(InMemorySysIo::new()),
+    );
+    let mut spec = work("wv", WorkMode::Single, &["a"]);
+    spec.permission = Some(ProfileId::View);
+    let sid = core.create_work(spec).unwrap().sid;
+    let (meta, _) = core.history_open(&sid).unwrap();
+    assert_eq!(
+        meta.sandbox.ceiling.as_ref().and_then(|l| l.profile),
+        Some(ProfileId::View)
+    );
+    assert_eq!(
+        core.session_config(&sid).unwrap().permission.profile,
+        ProfileId::View
+    );
 }

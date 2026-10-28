@@ -6,7 +6,7 @@
 //! 必须是**绝对路径**、组件里不含 . 与 ..、且落在某个允许的根之内；
 //! 越界、相对路径、空段一律拒绝，并把系统工具允许的根列回去（如实报错，不纠正）。
 
-use crate::capabilities::permission::api::Permissions;
+use crate::capabilities::permission::api::{Decision, PermissionSet, Reach};
 use crate::capabilities::prompt::api::RefRoots;
 use crate::kernel::api::slash;
 use serde::Serialize;
@@ -52,18 +52,15 @@ pub struct Sandbox {
     pub agent: String,
     /// 本工作共享区（session/<工作名>/work）——**主副本**，agent 会话默认只读。
     pub shared: PathBuf,
-    /// 共享主副本这一席能不能写：agent 会话 false（写入走 work_commit），核心会话 true。
-    /// 它只影响**写**；读仍然可按 `resolve` 落到 Shared。
-    pub shared_writable: bool,
     /// 本 agent 私有沙箱（session/<工作名>/<agent>）——也是它的工作副本。
     pub private: PathBuf,
     /// 成员模块：模块 id → 模块目录。
     pub modules: BTreeMap<String, PathBuf>,
     /// 目的：有 <root>/userdata 目录的模块 id（工作区扫描读出的事实；围栏派生据此决定派不派这条）。
     pub modules_with_userdata: std::collections::BTreeSet<String>,
-    /// 本席位的生效权限（读/提交白黑名单、决定粒度）：由 conductor 解析后注入。
-    /// 私有沙箱不在它的管辖内（永远全权）；它只管共享工作区与模块目录。
-    pub permissions: Permissions,
+    /// 本席位的生效权限（reach / decision / 共享区范围）：由 conductor 解析后注入。
+    /// 私有沙箱不受共享区路径范围约束，但仍受 profile 的写决定约束。
+    pub permissions: PermissionSet,
     /// 目的：这场会话的路径翻译器（虚拟机档 guest ↔ 宿主；本机档 None = 恒等）。
     /// 约束：只用来把模型给的写法译成宿主路径**再校验**；安全判断仍然只有 `resolve` 一处。
     pub path_codec: Option<std::sync::Arc<dyn crate::kernel::ports::PathCodec>>,
@@ -142,38 +139,53 @@ impl Sandbox {
         }
     }
 
-    /// 该落点这一席能不能写：共享主副本只读时写类工具一律拒绝；私有沙箱永远全权；模块目录（含 `<module>/userdata/`）对 **agent 的内置文件工具** 永久只读——
-    /// 模块数据由模块自己的工具 / 服务进程维护（模块工具进程的围栏见 `FenceSpec::from_sandbox`）。
-    pub fn can_write(&self, place: &Place, path: &Path) -> bool {
+    /// 该落点这一席能不能写：内置文件工具永远不直接写共享主副本（写入走 work_commit）；
+    /// 私有沙箱不受路径范围约束，但仍要 profile 的写决定允许；模块目录对内置文件工具永久只读。
+    pub fn can_write(&self, place: &Place, _path: &Path) -> bool {
+        if self.permissions.decisions.write != Decision::Allow {
+            return false;
+        }
         match place {
-            // 共享主副本：这一席可写**且**路径落在提交白名单内（黑名单已并入 write_ok）。
-            Place::Shared => {
-                self.shared_writable && self.permissions.write_ok(&self.rel_to(&self.shared, path))
-            }
-            Place::Private => true,
+            Place::Shared => false,
+            Place::Private => self.permissions.reach.contains(Reach::Private),
             Place::Module(_) => false,
         }
     }
 
-    /// 该落点这一席能不能读：共享主副本按读白名单/黑名单；私有沙箱与模块目录照旧可读。
+    /// 该落点这一席能不能读：共享区按 reach 与路径范围；私有沙箱与模块目录只看 reach 与读决定。
     pub fn can_read(&self, place: &Place, path: &Path) -> bool {
+        if self.permissions.decisions.read != Decision::Allow {
+            return false;
+        }
         match place {
-            Place::Shared => self.permissions.read_ok(&self.rel_to(&self.shared, path)),
-            _ => true,
+            Place::Shared => {
+                self.permissions.reach.contains(Reach::SharedRead)
+                    && self.permissions.read_ok(&self.rel_to(&self.shared, path))
+            }
+            Place::Private => self.permissions.reach.contains(Reach::Private),
+            Place::Module(_) => self.permissions.reach.contains(Reach::ModuleRead),
         }
     }
 
     /// 写被拒时的如实说明（按落点给不同原因）。
     pub fn write_refusal(&self, place: &Place, path: &Path) -> String {
+        if self.permissions.decisions.write != Decision::Allow {
+            return format!(
+                "当前档位「{}」不允许写入；要写入请把会话档位切到「工作区内修改」或更高。",
+                self.permissions.profile.label()
+            );
+        }
         match place {
-            // 主副本本身只读，还是路径越出提交白名单——两种原因说清楚，模型才知道怎么改。
             Place::Shared => {
-                if !self.shared_writable {
-                    self.shared_read_only()
+                if !self.permissions.reach.contains(Reach::SharedWrite) {
+                    format!(
+                        "当前档位「{}」没有共享区提交权限；要提交请把会话档位切到「工作区内修改」或更高。",
+                        self.permissions.profile.label()
+                    )
                 } else {
                     let roots = self.permissions.write_roots_listing();
                     format!(
-                        "写权限受限：{} 不在允许提交的路径内（允许：{}）。",
+                        "共享区只读：{} 不在允许提交的路径内（允许：{}）。主副本不直接写，请用 work_commit 提交。",
                         self.rel_to(&self.shared, path),
                         roots
                     )
@@ -183,7 +195,10 @@ impl Sandbox {
                 "模块 {} 的目录对 agent 的内置文件工具只读（含 userdata/）：模块数据由模块自己的工具 / 服务进程维护；请写进你自己的沙箱（工作副本）。",
                 id
             ),
-            Place::Private => self.shared_read_only(),
+            Place::Private => format!(
+                "当前档位「{}」不允许写入私有沙箱。",
+                self.permissions.profile.label()
+            ),
         }
     }
 
@@ -206,14 +221,6 @@ impl Sandbox {
         path.strip_prefix(root)
             .map(slash)
             .unwrap_or_else(|_| slash(path))
-    }
-
-    /// 共享主副本只读的拒绝文案（运行时回执；归 workspace 所有，不进提示词册）。
-    const SHARED_READ_ONLY: &str = "共享区只读：改动请写进你自己的沙箱（工作副本），再用 work_commit 提交；文本、图片、视频与二进制都按字节处理（内容流式读写、不整份进上下文；单文件有上限）；冲突先用 work_status / work_versions 看三方（记下主副本提交 id），文本合并后用 work_resolve take=local head=<id>（预览截断先用 read 读全文） 选边，图片 / 视频 / 二进制只能选边；take=upstream 覆盖前会备份，被覆盖的本地版本可用 work_lost 找回。";
-
-    /// 写共享主副本被拒时的如实说明（运行时回执，由本模块拥有）。
-    pub fn shared_read_only(&self) -> String {
-        Self::SHARED_READ_ONLY.to_string()
     }
 
     /// 允许的根：共享区、私有沙箱、每个成员模块目录（顺序稳定，便于取最长匹配）。

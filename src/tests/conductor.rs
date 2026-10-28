@@ -794,6 +794,7 @@ fn creating_a_proxy_without_core_default_is_refused() {
         agents: Vec::new(),
         task: None,
         delegate: false,
+        permission: None,
         tier: Tier::Host,
         guest: None,
     };

@@ -1281,6 +1281,7 @@ fn single_mode_merges_multiple_agents_into_one_transient() {
             agents: picked,
             task: None,
             delegate: false,
+            permission: None,
             tier: crate::kernel::api::Tier::Host,
             guest: None,
         })
@@ -1317,7 +1318,7 @@ fn editing_is_refused_while_a_session_is_generating() {
         tier: "host".to_string(),
         guest: None,
         pins: std::collections::BTreeMap::new(),
-        permissions: None,
+        permission: None,
     };
     ops.sessions.edit(&sid, edit()).expect("没在生成时可以改");
 
@@ -1553,7 +1554,7 @@ fn create_session_and_config_carry_chara_as_a_snapshot() {
                 tier: "host".to_string(),
                 guest: None,
                 pins: std::collections::BTreeMap::new(),
-                permissions: None,
+                permission: None,
             },
         )
         .expect("改配置");

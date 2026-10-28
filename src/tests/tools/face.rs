@@ -280,11 +280,11 @@ pub(crate) fn native_mode_refuses_a_hand_written_envelope() {
 pub(crate) fn declared_parallel_reads_overlap_and_results_keep_the_call_order() {
     use crate::capabilities::llm::api::ToolCall;
     let io = Arc::new(InMemorySysIo::new().slow(40));
-    io.seed(&["demo", "work", "a.txt"], "A1\nA2\n");
+    io.seed(&["demo", "a", "a.txt"], "A1\nA2\n");
     io.seed(&["demo", "work", "b.txt"], "B1\nB2\n");
     // 先发的读 a.txt 慢 120ms（后完成），后发的读 b.txt 快——顺序只能靠"按原始下标回填"保住。
-    io.slow_file(&["demo", "work", "a.txt"], 120);
-    let a = s(&["demo", "work", "a.txt"]);
+    io.slow_file(&["demo", "a", "a.txt"], 120);
+    let a = s(&["demo", "a", "a.txt"]);
     let b = s(&["demo", "work", "b.txt"]);
     let call = |id: &str, path: &str| ToolCall {
         id: id.to_string(),
@@ -326,8 +326,8 @@ pub(crate) fn declared_parallel_reads_overlap_and_results_keep_the_call_order() 
 pub(crate) fn a_writing_call_is_a_barrier_and_sees_the_merged_ledger() {
     use crate::capabilities::llm::api::ToolCall;
     let io = Arc::new(InMemorySysIo::new().slow(30));
-    io.seed(&["demo", "work", "a.txt"], "原文\n");
-    let a = s(&["demo", "work", "a.txt"]);
+    io.seed(&["demo", "a", "a.txt"], "原文\n");
+    let a = s(&["demo", "a", "a.txt"]);
     let mut m = native_member(
         "a",
         Arc::clone(&io),
@@ -359,10 +359,7 @@ pub(crate) fn a_writing_call_is_a_barrier_and_sees_the_merged_ledger() {
         "写入类排在并发批次之后，且能看到合并后的账本：{}",
         trace[1].output
     );
-    assert_eq!(
-        io.get(&["demo", "work", "a.txt"]).as_deref(),
-        Some("新内容\n")
-    );
+    assert_eq!(io.get(&["demo", "a", "a.txt"]).as_deref(), Some("新内容\n"));
     assert_eq!(
         io.peak_concurrent_reads(),
         1,
@@ -527,6 +524,7 @@ pub(crate) fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
             }],
             task: None,
             delegate: false,
+            permission: None,
             tier: crate::kernel::api::Tier::Host,
             guest: None,
         })

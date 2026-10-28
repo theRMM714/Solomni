@@ -287,6 +287,11 @@ impl ConductorHandle {
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string()),
             parent: None,
+            permission: args
+                .get("permission")
+                .and_then(|v| v.as_str())
+                .map(crate::capabilities::permission::api::ProfileId::parse)
+                .transpose()?,
         })
     }
 

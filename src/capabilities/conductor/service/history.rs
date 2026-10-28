@@ -95,9 +95,11 @@ impl Conductor {
                 Ok(sandboxes) => {
                     for sb in &sandboxes.list {
                         // 撤销要覆盖同一次授权写下的全部条目：读写根 + 用户授权的只读根。
-                        let spec =
-                            crate::kernel::api::FenceSpec::from_sandbox(sb, self.network_allowed())
-                                .with_read_only(self.host_read_roots());
+                        let spec = crate::kernel::api::FenceSpec::for_session(
+                            sb,
+                            &self.host_read_roots(),
+                            self.network_allowed(),
+                        );
                         if let Err(e) = self.tools.release_fence(&spec) {
                             self.log.warn(
                                 "conductor::history_delete",

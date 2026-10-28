@@ -2197,6 +2197,7 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
         ro_tree: Vec::new(),
         private: format!("{guest_dir}/a"),
         cwd: format!("{guest_dir}/a"),
+        net: true,
     };
     let fenced = guest.channel().exec_fenced(
         &GuestRun {
@@ -2591,6 +2592,7 @@ pub(crate) fn a_channel_without_fencing_refuses_fenced_runs() {
         ro_tree: Vec::new(),
         private: String::new(),
         cwd: String::new(),
+        net: true,
     };
     let run = GuestRun {
         command: "true".to_string(),
@@ -2720,7 +2722,6 @@ pub(crate) fn stable_roots_cover_the_work_tree_and_module_tree() {
         work_name: "w".to_string(),
         session: "w".to_string(),
         agent: agent.to_string(),
-        shared_writable: false,
         shared: std::path::PathBuf::from("/session/w/work"),
         private: std::path::PathBuf::from("/session/w").join(agent),
         modules: BTreeMap::from([(
@@ -2774,4 +2775,28 @@ pub(crate) fn package_rebuild_only_happens_when_the_running_guest_is_missing_one
     ));
     assert!(!needs_guest_packages_rebuild(true, &[], Some(&[])));
     assert!(needs_guest_packages_rebuild(true, &want, None));
+}
+
+/// 目的：per-call 断网事实从 FenceSpec 进 GuestAccess（helper 再据此 unshare 网络命名空间）。
+#[test]
+pub(crate) fn guest_access_carries_the_per_call_net_flag() {
+    use crate::capabilities::vm::api::GuestOs;
+    use crate::capabilities::vm::domain::guest::GuestAccess;
+    use crate::kernel::api::FenceSpec;
+    use std::path::PathBuf;
+
+    let base = FenceSpec {
+        agent: "a".to_string(),
+        lease: "w".to_string(),
+        rw: Vec::new(),
+        ro: Vec::new(),
+        ro_tree: Vec::new(),
+        private: PathBuf::new(),
+        cwd: PathBuf::new(),
+        net: false,
+    };
+    assert!(!GuestAccess::from_fence(&base, GuestOs::Linux, &[]).net);
+    let mut open = base.clone();
+    open.net = true;
+    assert!(GuestAccess::from_fence(&open, GuestOs::Linux, &[]).net);
 }

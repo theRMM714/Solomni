@@ -356,7 +356,8 @@ impl Conductor {
             ts: now_ts(),
             agents: vec![a.clone()],
             exec: pmeta.exec.clone(),
-            sandbox: pmeta.sandbox.clone(),
+            // 子会话只带自己的 narrowing；父的 ceiling 在判定时沿链求交，不复制。
+            sandbox: Default::default(),
             parent: Some(parent.to_string()),
             node: None,
             delegation: None,

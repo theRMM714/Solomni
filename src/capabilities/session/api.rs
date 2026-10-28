@@ -8,7 +8,7 @@ pub use crate::capabilities::session::domain::events::{
     ContextUsage, DecisionCard, DecisionOption, DecisionQueue, DecisionWaiter, LineView, Live,
     Pending, SessionEvent, ToolCallView, OPT_ASK_REPLY, OPT_BEGIN, OPT_BEGIN_ALLOW,
     OPT_NODE_REWORK, OPT_NODE_SAY, OPT_PLAN_SAY, OPT_PLAN_START, OPT_SLATE_CANCEL,
-    OPT_SLATE_CONFIRM, OPT_TOOL_ALLOW, OPT_TOOL_DENY, OPT_TOOL_FULL,
+    OPT_SLATE_CONFIRM, OPT_TOOL_ALLOW, OPT_TOOL_ALLOW_TURN, OPT_TOOL_DENY,
 };
 pub use crate::capabilities::session::domain::history::{
     AgentMeta, Delegation, HistoryView, RunState, SessionMeta,

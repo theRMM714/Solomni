@@ -605,8 +605,8 @@ pub const OPT_NODE_SAY: &str = "node_say";
 pub const OPT_TOOL_ALLOW: &str = "allow";
 /// 目的：工具级确认的选项 id——拒绝（工具不执行，回一条"用户拒绝"的结果给模型）。
 pub const OPT_TOOL_DENY: &str = "deny";
-/// 目的：工具级确认的选项 id——放行这一次，且**本轮（这次生成）剩余调用都不再问**（不落盘成策略）。
-pub const OPT_TOOL_FULL: &str = "full";
+/// 目的：工具级确认的选项 id——放行这一次，且**本轮（这次生成）剩余 ask 都不再问**（不落盘成策略）。
+pub const OPT_TOOL_ALLOW_TURN: &str = "allow_turn";
 
 /// 目的：工具的全名（内置 / 核心自有 = 工具名；模块工具 = 模块.工具）：卡片与记录都用这一种写法。
 pub fn qualify(module: Option<&str>, tool: &str) -> String {
@@ -720,7 +720,7 @@ impl Pending {
             Pending::ToolApproval { .. } => vec![
                 o(OPT_TOOL_ALLOW, "放行这一次"),
                 o(OPT_TOOL_DENY, "拒绝（不执行）"),
-                o(OPT_TOOL_FULL, "放行，且本轮都不再问"),
+                o(OPT_TOOL_ALLOW_TURN, "放行，且本轮都不再问"),
             ],
             // 工具层那一类：选项集**由发起方给**（它才知道每条选项真能不能执行），通道原样渲染。
             Pending::ToolAsk(ask) => ask.options.iter().map(|(id, label)| o(id, label)).collect(),

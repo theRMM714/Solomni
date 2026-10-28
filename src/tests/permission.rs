@@ -1,304 +1,184 @@
-//! 权限能力（permission）的用例：白/黑名单语义、覆盖解析、路径匹配、落点与提交/拉取作用域。
+//! 权限能力（permission）的用例：四档、reach 求交、共享区三态、落点与提交/拉取作用域。
 //!
 //! 归属：这些用例钉的是**权限规则本身**（T1），以及内置工具/工作区提交两个执行点对它的消费（T1/T2）。
 //! 平台围栏的真机验收在 tests/<平台>/（T4）。
 
 use crate::capabilities::permission::api::{
-    validate, Granularity, Permissions, PermissionsOverride,
+    validate_defaults, validate_entry, CallScope, Decision, DecisionEdit, Effect,
+    PermissionDefaults, PermissionLayer, PermissionSet, ProfileId, Reach, ReachSet, ScopeMode,
+    SharedEdit,
 };
 use crate::capabilities::workspace::domain::workspace::Place;
 use crate::tests::doubles::{
-    abs, run_builtin, test_sandbox, test_workspace, test_workspace_store, InMemorySysIo,
-    InMemoryWorkStore, InMemoryWorkspace,
+    abs, test_sandbox, test_workspace, test_workspace_store, InMemoryWorkStore, InMemoryWorkspace,
 };
-
 fn paths(v: &[&str]) -> Vec<String> {
     v.iter().map(|s| s.to_string()).collect()
 }
 
-/// 全局黑名单是硬底线：会话只能追加，不能清空。
-#[test]
-fn global_deny_is_a_hard_floor_that_sessions_can_only_extend() {
-    let base = Permissions {
-        deny: paths(&["secret"]),
-        ..Permissions::default()
-    };
-    let cleared = base.apply(&PermissionsOverride {
-        deny: Some(Vec::new()),
+fn pset(profile: ProfileId) -> PermissionSet {
+    PermissionDefaults {
+        profile,
         ..Default::default()
-    });
-    assert!(!cleared.read_ok("secret/key.txt"), "会话清空 deny 不能生效");
-    let extended = base.apply(&PermissionsOverride {
-        deny: Some(paths(&["private"])),
-        ..Default::default()
-    });
-    assert!(!extended.read_ok("secret/key.txt"));
-    assert!(!extended.read_ok("private/x"));
-}
-
-/// 未配置 = 默认：整棵工作区可读、可提交。
-#[test]
-fn defaults_allow_the_whole_workspace() {
-    let p = Permissions::default();
-    assert!(p.read_ok("a/b.txt"));
-    assert!(p.write_ok("任何/路径"));
-}
-
-/// 白名单**取代**默认；黑名单**只做减法**；两者重叠时黑大于白。
-#[test]
-fn whitelist_replaces_default_while_blacklist_only_subtracts() {
-    // 只有黑名单：默认仍在，减去被禁的那块。
-    let deny_only = Permissions {
-        deny: paths(&["secret"]),
-        ..Default::default()
-    };
-    assert!(deny_only.read_ok("docs/a"));
-    assert!(!deny_only.read_ok("secret/a"));
-    assert!(deny_only.write_ok("docs/a"));
-    assert!(!deny_only.write_ok("secret/a"));
-
-    // 只有读白名单：读的默认失效，写的默认仍在（读写各自独立）。
-    let allow_read = Permissions {
-        allow_read: paths(&["docs"]),
-        ..Default::default()
-    };
-    assert!(allow_read.read_ok("docs/a"));
-    assert!(!allow_read.read_ok("src/a"));
-    assert!(allow_read.write_ok("src/a"));
-
-    // 白 + 黑重叠：黑赢。
-    let both = Permissions {
-        allow_write: paths(&["web"]),
-        deny: paths(&["web/secrets"]),
-        ..Default::default()
-    };
-    assert!(both.write_ok("web/ok.txt"));
-    assert!(!both.write_ok("web/secrets/key"));
-    assert!(!both.write_ok("api/x"));
-}
-
-/// 匹配按**路径组件**做：`web` 不匹配 `website`；`.` 代表整棵。
-#[test]
-fn matching_is_component_aware() {
-    let p = Permissions {
-        allow_write: paths(&["web"]),
-        ..Default::default()
-    };
-    assert!(p.write_ok("web"));
-    assert!(p.write_ok("web/a/b"));
-    assert!(!p.write_ok("website/a"));
-    assert!(!p.write_ok("web-other"));
-    let all = Permissions {
-        allow_read: paths(&["."]),
-        ..Default::default()
-    };
-    assert!(all.read_ok("any/where"));
-}
-
-/// 覆盖只替换**显式给出**的字段；显式空集合 = 明确的"没有白名单"（回到默认），与"没给"分得开。
-#[test]
-fn override_replaces_only_the_fields_it_gives() {
-    let base = Permissions {
-        allow_read: paths(&["docs"]),
-        deny: paths(&["docs/secret"]),
-        ..Default::default()
-    };
-    let over = PermissionsOverride {
-        allow_write: Some(paths(&["web"])),
-        ..Default::default()
-    };
-    let out = base.apply(&over);
-    assert_eq!(out.allow_read, paths(&["docs"]));
-    assert_eq!(out.deny, paths(&["docs/secret"]));
-    assert_eq!(out.allow_write, paths(&["web"]));
-
-    let reset = PermissionsOverride {
-        allow_read: Some(Vec::new()),
-        ..Default::default()
-    };
-    assert!(base.apply(&reset).read_ok("anything"));
-}
-
-/// 条目必须是干净的**相对**路径：绝对路径、`..`、空段、盘符一律拒收。
-#[test]
-fn entries_must_be_clean_relative_paths() {
-    let ok = |e: &str| {
-        validate(&Permissions {
-            allow_read: paths(&[e]),
-            ..Default::default()
-        })
-        .is_ok()
-    };
-    assert!(ok("docs/a"));
-    assert!(ok("."));
-    for bad in ["/abs/x", "..", "a/../b", "a//b", r"C:\win", ""] {
-        assert!(!ok(bad), "应当拒绝：{:?}", bad);
     }
-    let p = Permissions {
-        allow_write: paths(&["../escape"]),
-        ..Default::default()
-    };
-    assert!(validate(&p).is_err());
+    .to_permission_set()
 }
 
-/// 落点规则：共享区读写受白黑名单；私有沙箱永远全权；模块目录（含 `userdata/`）对 agent 的内置文件工具永久只读。
+/// 四档的 reach 与 decision 必须和产品口径一致。
+#[test]
+fn profiles_carry_the_expected_reach_and_decisions() {
+    let view = ProfileId::View.spec();
+    assert!(view.reach.contains(Reach::Private));
+    assert!(view.reach.contains(Reach::SharedRead));
+    assert!(view.reach.contains(Reach::ModuleRead));
+    assert!(!view.reach.contains(Reach::SharedWrite));
+    assert_eq!(view.decisions.write, Decision::Deny);
+    assert_eq!(view.decisions.exec_sandbox, Decision::Deny);
+
+    let workspace = ProfileId::Workspace.spec();
+    assert!(workspace.reach.contains(Reach::SharedWrite));
+    assert!(workspace.reach.contains(Reach::ModuleWrite));
+    assert!(!workspace.reach.contains(Reach::HostRead));
+    assert!(!workspace.reach.contains(Reach::Network));
+    assert_eq!(workspace.decisions.exec_sandbox, Decision::Allow);
+    assert_eq!(workspace.decisions.exec_external, Decision::Deny);
+
+    let external = ProfileId::External.spec();
+    assert!(external.reach.contains(Reach::HostRead));
+    assert!(external.reach.contains(Reach::Network));
+    assert_eq!(external.decisions.exec_external, Decision::Ask);
+
+    let all = ProfileId::AllReach.spec();
+    assert_eq!(all.reach, external.reach);
+    assert_eq!(all.decisions.exec_external, Decision::Allow);
+}
+
+/// reach 的求交与子集是收窄判定的基础。
+#[test]
+fn reach_intersection_and_subset_are_component_safe() {
+    let a = ReachSet::from([Reach::Private, Reach::SharedRead, Reach::Network]);
+    let b = ReachSet::from([Reach::Private, Reach::SharedRead]);
+    assert_eq!(a.intersection(&b), b);
+    assert!(b.is_subset(&a));
+    assert!(!a.is_subset(&b));
+    assert!(ReachSet::empty().is_subset(&a));
+}
+
+/// 共享区范围三态：all / none / paths；空数组不再兼作整棵。
+#[test]
+fn shared_scope_is_explicitly_tristate() {
+    let all = ScopeMode::All;
+    let none = ScopeMode::None;
+    let src = ScopeMode::Paths(paths(&["src"]));
+    assert!(all.allows("任何/路径"));
+    assert!(!none.allows("src/a"));
+    assert!(src.allows("src/a"));
+    assert!(!src.allows("website/a"));
+    assert_eq!(all.intersect(&src), src);
+    assert_eq!(none.intersect(&src), ScopeMode::None);
+    assert_eq!(
+        src.intersect(&ScopeMode::Paths(paths(&["src/foo"]))),
+        ScopeMode::Paths(paths(&["src/foo"]))
+    );
+    assert_eq!(
+        src.intersect(&ScopeMode::Paths(paths(&["docs"]))),
+        ScopeMode::None
+    );
+    assert!(ScopeMode::Paths(paths(&["src/foo"])).is_subset_of(&src));
+    assert!(!src.is_subset_of(&ScopeMode::Paths(paths(&["src/foo"]))));
+    assert!(none.is_subset_of(&src));
+    assert!(!all.is_subset_of(&src));
+}
+
+/// 落点规则：共享区受 reach 与路径范围；私有沙箱不受路径范围，但受 profile 写决定；模块目录只读。
 #[test]
 fn sandbox_places_follow_the_permission_set() {
     let mut sb = test_sandbox("a1", &["data"]);
     let shared = sb.shared.clone();
     let private = sb.private.clone();
     let module = sb.modules.get("data").expect("模块目录").clone();
-    sb.permissions = Permissions {
-        allow_read: paths(&["docs"]),
-        allow_write: paths(&["docs"]),
-        ..Default::default()
-    };
-    // 共享区：白名单外读写都拒；白名单内放行。
+    sb.permissions = pset(ProfileId::Workspace);
+    assert!(sb.can_read(&Place::Shared, &shared.join("docs").join("x")));
+    assert!(!sb.can_write(&Place::Shared, &shared.join("docs").join("x")));
+    assert!(sb.can_read(&Place::Private, &private.join("x")));
+    assert!(sb.can_write(&Place::Private, &private.join("x")));
+    assert!(sb.can_read(
+        &Place::Module("data".to_string()),
+        &module.join("script.py")
+    ));
+    assert!(!sb.can_write(
+        &Place::Module("data".to_string()),
+        &module.join("userdata").join("state.json")
+    ));
+
+    // 共享区路径范围：白名单外读写都拒。
+    sb.permissions.shared_read = ScopeMode::Paths(paths(&["docs"]));
     assert!(!sb.can_read(&Place::Shared, &shared.join("src").join("x")));
     assert!(sb.can_read(&Place::Shared, &shared.join("docs").join("x")));
-    assert!(!sb.can_write(&Place::Shared, &shared.join("src").join("x")));
-    assert!(sb.can_write(&Place::Shared, &shared.join("docs").join("x")));
-    // 私有沙箱：不受白名单影响，永远全权。
-    assert!(sb.can_read(&Place::Private, &private.join("src").join("x")));
-    assert!(sb.can_write(&Place::Private, &private.join("src").join("x")));
-    // 模块目录：内置文件工具永久只读，userdata 也不例外（模块数据由模块自己的工具 / 服务进程写）。
-    let module_place = Place::Module("data".to_string());
-    assert!(!sb.can_write(&module_place, &module.join("script.py")));
-    assert!(!sb.can_write(&module_place, &module.join("userdata").join("state.json")));
+
+    // 仅可查看：私有沙箱可读不可写。
+    sb.permissions = pset(ProfileId::View);
+    assert!(sb.can_read(&Place::Private, &private.join("x")));
+    assert!(!sb.can_write(&Place::Private, &private.join("x")));
 }
 
-/// 内置工具：读/写越出白名单都如实拒绝；私有沙箱照常。
-#[test]
-fn builtin_tools_respect_the_scope() {
-    let io = InMemorySysIo::new();
-    let mut sb = test_sandbox("a1", &[]);
-    sb.permissions.allow_write = paths(&["docs"]);
-    sb.permissions.allow_read = paths(&["docs"]);
-
-    let out_of_scope = abs(&["demo", "work", "src", "x.txt"]);
-    let bad = run_builtin(
-        &sb,
-        &io,
-        "write",
-        &serde_json::json!({"path": out_of_scope.to_string_lossy(), "content": "x"}).to_string(),
-    );
-    assert!(!bad.ok, "写白名单外必须拒绝：{}", bad.output);
-
-    let in_scope = abs(&["demo", "work", "docs", "x.txt"]);
-    let ok = run_builtin(
-        &sb,
-        &io,
-        "write",
-        &serde_json::json!({"path": in_scope.to_string_lossy(), "content": "x"}).to_string(),
-    );
-    assert!(ok.ok, "写白名单内必须放行：{}", ok.output);
-
-    let denied = run_builtin(
-        &sb,
-        &io,
-        "read",
-        &serde_json::json!({"path": abs(&["demo", "work", "src", "y.txt"]).to_string_lossy()})
-            .to_string(),
-    );
-    assert!(!denied.ok, "读白名单外必须拒绝：{}", denied.output);
-
-    let private_ok = run_builtin(
-        &sb,
-        &io,
-        "write",
-        &serde_json::json!({"path": abs(&["demo", "a1", "scratch.txt"]).to_string_lossy(), "content": "x"})
-            .to_string(),
-    );
-    assert!(
-        private_ok.ok,
-        "私有沙箱不受白名单约束：{}",
-        private_ok.output
-    );
-}
-
-/// 围栏派生：模块目录对 agent 只读（进 ro_tree）；`userdata/` 的派发看**注入的事实**，domain 不读盘。
-/// `standalone` 的缺省工作目录同样按这条事实回退。
+/// 围栏派生：共享区永远不进 rw；私有沙箱进 rw；模块目录只读、userdata 只给模块写 reach。
 #[test]
 fn fence_spec_scopes_module_dirs_and_userdata() {
     use crate::kernel::api::FenceSpec;
     let mut sb = test_sandbox("a1", &[]);
     let module = abs(&["mods", "data"]);
     sb.modules.insert("data".to_string(), module.clone());
-
-    // 事实：没有 userdata → 不进 rw，模块根仍进 ro_tree。
-    let spec = FenceSpec::from_sandbox(&sb, false);
-    assert!(spec.ro_tree.contains(&module), "模块目录对 agent 只读");
-    assert!(
-        !spec.rw.contains(&module.join("userdata")),
-        "事实说没有 userdata 就不派这条落点"
-    );
-    assert!(!spec.rw.contains(&module), "未授权时整块模块目录不进 rw");
-    assert_eq!(spec.private, sb.private, "HOME/TEMP 落在私有沙箱");
-
-    // 事实：有 userdata → 只把 userdata 放进 rw（模块自己的进程可写）。
     sb.modules_with_userdata.insert("data".to_string());
-    let spec = FenceSpec::from_sandbox(&sb, true);
+    sb.permissions = pset(ProfileId::Workspace);
+
+    let session = FenceSpec::for_session(&sb, &[], false);
+    assert!(session.ro_tree.contains(&module), "模块目录对 agent 只读");
     assert!(
-        spec.rw.contains(&module.join("userdata")),
-        "事实说有 userdata 就派给模块进程"
+        session.rw.contains(&module.join("userdata")),
+        "模块工具可写自己的 userdata"
     );
-    assert!(spec.ro_tree.contains(&module), "模块根对 agent 始终只读");
-    assert!(!spec.rw.contains(&module), "agent 不能整块写模块目录");
-    assert!(spec.net, "net 随参数透传");
-}
+    assert!(!session.rw.contains(&module), "agent 不能整块写模块目录");
+    assert!(!session.rw.contains(&sb.shared), "共享区永不被直接写");
+    assert!(session.rw.contains(&sb.private), "私有沙箱可写");
+    assert_eq!(session.private, sb.private, "HOME/TEMP 落在私有沙箱");
 
-/// `standalone` 的缺省工作目录按**注入的事实**回退：没有 userdata 时退回模块根，不派不存在的落点。
-#[test]
-fn standalone_falls_back_when_userdata_is_absent() {
-    use crate::kernel::api::FenceSpec;
-    let module = abs(&["mods", "m0"]);
+    // 一次调用：只有声明 module-write 才给 userdata；只有 shared-read 才给共享区只读。
+    let write = ReachSet::from([Reach::Private, Reach::ModuleWrite]);
+    let call = FenceSpec::for_call(&sb, &write, Some("data"), &session);
+    assert!(call.rw.contains(&module.join("userdata")));
+    assert!(!call.ro_tree.contains(&sb.shared));
+    let no_write = ReachSet::from([Reach::Private, Reach::ModuleRead]);
+    let call = FenceSpec::for_call(&sb, &no_write, Some("data"), &session);
+    assert!(!call.rw.contains(&module.join("userdata")));
+    assert!(call.ro_tree.contains(&module));
 
-    let spec = FenceSpec::standalone(&module, None, false);
-    assert!(
-        !spec.rw.contains(&module.join("userdata")),
-        "事实说没有就不派"
-    );
-    assert_eq!(
-        spec.private_or_cwd(),
-        module,
-        "没有 userdata 时工作目录退回模块根"
-    );
-    assert_eq!(spec.cwd, module, "cwd 仍是模块根");
-
-    let spec = FenceSpec::standalone(&module, None, true);
-    assert!(spec.rw.contains(&module.join("userdata")), "事实说有就派");
-    assert_eq!(
-        spec.private,
-        module.join("userdata"),
-        "缺省工作目录 = userdata"
-    );
-
-    // 显式 work_root：事实说有 userdata 时补进 rw，说没有时不补。
-    let work = abs(&["mods", "work"]);
-    let with = FenceSpec::standalone(&module, Some(&work), true);
-    assert!(with.rw.contains(&work) && with.rw.contains(&module.join("userdata")));
-    let without = FenceSpec::standalone(&module, Some(&work), false);
-    assert!(without.rw.contains(&work) && !without.rw.contains(&module.join("userdata")));
+    let read = ReachSet::from([Reach::Private, Reach::SharedRead]);
+    let call = FenceSpec::for_call(&sb, &read, None, &session);
+    assert!(call.ro_tree.contains(&sb.shared));
+    assert!(!call.net, "workspace 没有 network reach");
 }
 
 /// 提交与拉取的作用域判定（工作区工具消费的那一份纯函数）：越界整条拒绝，不带半次提交。
 #[test]
 fn work_commit_and_pull_are_scoped() {
     use crate::capabilities::conductor::service::work_tools::{check_readable, check_writable};
-    let p = Permissions {
-        allow_read: paths(&["docs"]),
-        allow_write: paths(&["docs"]),
-        deny: paths(&["docs/secret"]),
-        ..Default::default()
-    };
+    let mut p = pset(ProfileId::Workspace);
+    p.shared_read = ScopeMode::Paths(paths(&["docs"]));
+    p.shared_write = ScopeMode::Paths(paths(&["docs"]));
+    p.deny = paths(&["docs/secret"]);
     assert!(check_readable(&p, &paths(&["docs/a"])).is_ok());
     assert!(check_readable(&p, &paths(&["src/a"])).is_err());
     assert!(check_writable(&p, &paths(&["docs/a"]), &[]).is_ok());
     assert!(check_writable(&p, &paths(&["docs/secret/key"]), &[]).is_err());
-    // 删除也在作用域之内（不能靠 deletes 绕过白名单）。
     assert!(check_writable(&p, &[], &paths(&["src/a"])).is_err());
-    // 任一条越界 → 整次拒绝。
     assert!(check_writable(&p, &paths(&["docs/a", "src/b"]), &[]).is_err());
+
+    let view = pset(ProfileId::View);
+    assert!(
+        check_writable(&view, &paths(&["docs/a"]), &[]).is_err(),
+        "仅可查看没有提交权限"
+    );
 }
 
 /// 目的：work_status 的路径清单按读作用域过滤，显式越界路径直接拒绝。
@@ -345,10 +225,8 @@ fn work_status_filters_paths_outside_read_scope() {
         .unwrap();
     store.write_under(&sb_a, "extra-secret.txt", b"x").unwrap();
 
-    let p = Permissions {
-        allow_read: paths(&["public.txt"]),
-        ..Default::default()
-    };
+    let mut p = pset(ProfileId::Workspace);
+    p.shared_read = ScopeMode::Paths(paths(&["public.txt"]));
     let h = WorkHandler::new(ws, "w", "a", p);
     let ctx = ToolCtx {
         work: "w",
@@ -387,10 +265,8 @@ fn work_lost_is_scoped_by_read_permission() {
         .write_under(&root, "secret/lost.txt", b"secret-lost")
         .unwrap();
 
-    let p = Permissions {
-        allow_read: paths(&["public"]),
-        ..Default::default()
-    };
+    let mut p = pset(ProfileId::Workspace);
+    p.shared_read = ScopeMode::Paths(paths(&["public"]));
     let h = WorkHandler::new(ws, "w", "a", p);
     let ctx = ToolCtx {
         work: "w",
@@ -426,10 +302,8 @@ fn work_versions_and_resolve_are_scoped_by_read_permission() {
     use crate::capabilities::conductor::service::work_tools::WorkHandler;
     use crate::kernel::ports::{ToolCtx, ToolHandler};
     let ws = test_workspace(std::sync::Arc::new(InMemoryWorkspace::new()));
-    let p = Permissions {
-        allow_read: paths(&["docs"]),
-        ..Default::default()
-    };
+    let mut p = pset(ProfileId::Workspace);
+    p.shared_read = ScopeMode::Paths(paths(&["docs"]));
     let h = WorkHandler::new(ws, "w", "a", p);
     let ctx = ToolCtx {
         work: "w",
@@ -445,7 +319,6 @@ fn work_versions_and_resolve_are_scoped_by_read_permission() {
     );
     assert!(!r.ok && r.output.contains("读取被拒"), "{}", r.output);
 
-    // 参数错误在权限检查之前收口：未知 take 与缺 path 都不执行。
     let bad_take = h.run(
         &ctx,
         "work_resolve",
@@ -456,109 +329,179 @@ fn work_versions_and_resolve_are_scoped_by_read_permission() {
     assert!(!no_path.ok && no_path.output.contains("path"));
 }
 
-/// `full` 不确认任何工具；`ask` 只确认表里命中的（空表 = 不确认）。
+/// 根 ceiling + 子 narrowing：子只能收窄；空集合是显式无权限。
 #[test]
-fn ask_list_only_applies_under_ask_granularity() {
-    let full = Permissions {
-        granularity: Granularity::Full,
-        ask: paths(&["write"]),
-        ..Default::default()
-    };
-    assert!(!full.should_ask("write"), "full 一律不确认");
+fn root_ceiling_and_child_narrowing_intersect() {
+    let base = pset(ProfileId::Workspace);
+    let root = base
+        .apply_root(&PermissionLayer {
+            shared: Some(SharedEdit {
+                read: Some(ScopeMode::All),
+                write: Some(ScopeMode::Paths(paths(&["src"]))),
+                deny: Vec::new(),
+            }),
+            ..Default::default()
+        })
+        .expect("根 ceiling");
+    let child = root
+        .apply_narrowing(&PermissionLayer {
+            profile: Some(ProfileId::View),
+            shared: Some(SharedEdit {
+                read: Some(ScopeMode::Paths(paths(&["src/foo"]))),
+                write: Some(ScopeMode::None),
+                deny: Vec::new(),
+            }),
+            ..Default::default()
+        })
+        .expect("子 narrowing");
+    assert_eq!(child.profile, ProfileId::View);
+    assert!(child.read_ok("src/foo/a"));
+    assert!(!child.read_ok("src/bar/a"));
+    assert!(!child.write_ok("src/foo/a"));
+    assert_eq!(child.decisions.write, Decision::Deny);
 
-    let ask = Permissions {
-        granularity: Granularity::Ask,
-        ask: paths(&["write", "m.t"]),
-        ..Default::default()
-    };
-    assert!(ask.should_ask("write"));
-    assert!(ask.should_ask("m.t"));
-    assert!(!ask.should_ask("read"));
+    // 子不能换更高档，也不能把写范围放宽。
+    assert!(root
+        .apply_narrowing(&PermissionLayer {
+            profile: Some(ProfileId::AllReach),
+            ..Default::default()
+        })
+        .is_err());
+    assert!(root
+        .apply_narrowing(&PermissionLayer {
+            shared: Some(SharedEdit {
+                write: Some(ScopeMode::Paths(paths(&["other"]))),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .is_err());
 
-    assert!(
-        !Permissions::default().should_ask("write"),
-        "空 ask 表不确认"
+    // 显式无权限与“不覆盖”必须分开。
+    let no_read = root
+        .apply_narrowing(&PermissionLayer {
+            shared: Some(SharedEdit {
+                read: Some(ScopeMode::None),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .expect("显式无读");
+    assert!(!no_read.read_ok("src/a"));
+    assert_eq!(no_read.shared_read, ScopeMode::None);
+
+    // 根与子无交集：求交结果就是显式无权限。
+    assert_eq!(
+        ScopeMode::Paths(paths(&["src"])).intersect(&ScopeMode::Paths(paths(&["docs"]))),
+        ScopeMode::None
     );
 }
 
-/// 工具级确认：`ask` 命中时先问用户——拒绝不执行、放行才跑、`full` 本轮不再问。
+/// 决定覆盖：子只能更严，根可以显式设置。
 #[test]
-fn ask_tools_are_confirmed_before_execution() {
-    use crate::capabilities::collab::service::tool_loop::{run_batch, ConfirmGate, ToolConfirm};
-    use crate::capabilities::session::api::{
-        SessionEvent, OPT_TOOL_ALLOW, OPT_TOOL_DENY, OPT_TOOL_FULL,
-    };
-    use crate::tests::builders::{member_with_tools, RecordingRunner};
-    use std::sync::Arc;
-
-    let runner = Arc::new(RecordingRunner::new("工具输出", true));
-    let mut m = member_with_tools("a1", vec![], Arc::clone(&runner));
-    let mut tools = m.tools.take().expect("成员工具环境");
-    tools.sandbox.permissions = Permissions {
-        granularity: Granularity::Ask,
-        ask: paths(&["m0.grep"]),
-        ..Default::default()
-    };
-    let plan = vec![(Some("m0".to_string()), "grep".to_string(), "{}".to_string())];
-    let mut sink = |_e: SessionEvent| {};
-
-    // ① 拒绝：问过用户、工具没执行、回一条"用户拒绝"。
-    let mut asked = Vec::new();
-    let mut deny = |req: &ToolConfirm, _sink: &mut dyn FnMut(SessionEvent)| -> String {
-        asked.push(req.tool.clone());
-        OPT_TOOL_DENY.to_string()
-    };
-    let mut gate = ConfirmGate {
-        full: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        confirm: &mut deny,
-    };
-    let done = run_batch(&mut tools, &plan, Some(&mut gate), None, &mut sink);
-    assert_eq!(asked, vec!["grep".to_string()], "ask 命中要问用户");
-    assert!(!done[0].1.ok);
+fn decisions_can_only_tighten_for_children() {
+    let base = pset(ProfileId::Workspace);
+    let root = base
+        .apply_root(&PermissionLayer {
+            decisions: Some(DecisionEdit {
+                write: Some(Decision::Ask),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .expect("根决定");
+    assert_eq!(root.decisions.write, Decision::Ask);
     assert!(
-        done[0].1.output.contains("没有放行"),
-        "拒绝理由要如实：{}",
-        done[0].1.output
+        root.apply_narrowing(&PermissionLayer {
+            decisions: Some(DecisionEdit {
+                write: Some(Decision::Allow),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .is_err(),
+        "子不能放宽"
     );
-    assert!(
-        runner.calls.lock().expect("锁").is_empty(),
-        "拒绝后不得启动工具进程"
-    );
+    let child = root
+        .apply_narrowing(&PermissionLayer {
+            decisions: Some(DecisionEdit {
+                write: Some(Decision::Deny),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .expect("子收紧");
+    assert_eq!(child.decisions.write, Decision::Deny);
+}
 
-    // ② 放行：工具真的执行了一次。
-    let mut allow = |_req: &ToolConfirm, _sink: &mut dyn FnMut(SessionEvent)| -> String {
-        OPT_TOOL_ALLOW.to_string()
+/// 条目必须是干净的相对路径：绝对路径、上级段、空段、盘符一律拒收。
+#[test]
+fn entries_must_be_clean_relative_paths() {
+    let ok = |e: &str| {
+        validate_defaults(&PermissionDefaults {
+            shared: crate::capabilities::permission::api::SharedScope {
+                read: ScopeMode::Paths(paths(&[e])),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .is_ok()
     };
-    let mut gate = ConfirmGate {
-        full: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        confirm: &mut allow,
-    };
-    let done = run_batch(&mut tools, &plan, Some(&mut gate), None, &mut sink);
-    assert!(done[0].1.ok, "{}", done[0].1.output);
+    assert!(ok("docs/a"));
+    assert!(ok("."));
+    for bad in ["/abs/x", "..", "a/../b", "a//b", r"C:\win", ""] {
+        assert!(!ok(bad), "应当拒绝：{:?}", bad);
+    }
+    assert!(validate_entry("../escape").is_err());
+}
+
+/// 工具声明的默认 decision 不压过 profile：shell 默认 ask，但工作区内修改的 sandbox scope 仍是 allow。
+#[test]
+fn profile_decision_overrides_tool_default() {
+    let p = pset(ProfileId::Workspace);
     assert_eq!(
-        runner.calls.lock().expect("锁").len(),
-        1,
-        "放行后要执行一次"
+        p.decision_for("shell", Effect::Exec, CallScope::Sandbox, Decision::Ask),
+        Decision::Allow
     );
+    let all = pset(ProfileId::AllReach);
+    assert_eq!(
+        all.decision_for("shell", Effect::Exec, CallScope::External, Decision::Ask),
+        Decision::Allow
+    );
+    let external = pset(ProfileId::External);
+    assert_eq!(
+        external.decision_for("shell", Effect::Exec, CallScope::External, Decision::Allow),
+        Decision::Ask
+    );
+}
 
-    // ③ full：第一次答"本轮不再问"，后面两次调用直接放行、不再问。
-    let mut asked_times = 0usize;
-    let mut full_answer = |_req: &ToolConfirm, _sink: &mut dyn FnMut(SessionEvent)| -> String {
-        asked_times += 1;
-        OPT_TOOL_FULL.to_string()
-    };
-    let mut gate = ConfirmGate {
-        full: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        confirm: &mut full_answer,
-    };
-    let three = vec![
-        (Some("m0".to_string()), "grep".to_string(), "{}".to_string()),
-        (Some("m0".to_string()), "grep".to_string(), "{}".to_string()),
-        (Some("m0".to_string()), "grep".to_string(), "{}".to_string()),
-    ];
-    let done = run_batch(&mut tools, &three, Some(&mut gate), None, &mut sink);
-    assert!(done.iter().all(|(_, o)| o.ok), "full 之后都要执行");
-    assert_eq!(asked_times, 1, "full 之后本轮不再问");
+/// 调用闸门：reach 不够 / scope 越界拒绝；allow_turn 只抑制 ask，不改 reach。
+#[test]
+fn call_grant_checks_scope_and_reach() {
+    let p = pset(ProfileId::Workspace);
+    let shell_max = ReachSet::from([
+        Reach::Private,
+        Reach::SharedRead,
+        Reach::ModuleRead,
+        Reach::HostRead,
+        Reach::Network,
+    ]);
+    let sandbox = CallScope::Sandbox.reach();
+    let granted = p.grant(&shell_max, Some(&sandbox)).expect("sandbox 合法");
+    assert_eq!(granted, ReachSet::from([Reach::Private]));
+    assert!(
+        p.grant(&shell_max, Some(&CallScope::External.reach()))
+            .is_err(),
+        "workspace 不能请求 external"
+    );
+    let all = pset(ProfileId::AllReach);
+    let granted = all
+        .grant(&shell_max, Some(&CallScope::External.reach()))
+        .expect("all_reach 可请求 external");
+    assert!(granted.contains(Reach::HostRead));
+    assert!(granted.contains(Reach::Network));
+    assert!(!granted.contains(Reach::SharedWrite));
+    assert!(!granted.contains(Reach::ModuleWrite));
 }
 
 /// 工具层提问端口**并入裁决通道**（端到端一条）：发起方（工具执行层）自己推问题 + 选项集 →
@@ -827,7 +770,7 @@ fn decision_door_queues_only_the_head_and_voids_waiters() {
 fn tool_confirmation_rides_the_decision_channel() {
     use crate::capabilities::conductor::api::{ConductorHandle, Ops, Output};
     use crate::capabilities::session::api::{
-        SessionEvent, OPT_TOOL_ALLOW, OPT_TOOL_DENY, OPT_TOOL_FULL,
+        SessionEvent, OPT_TOOL_ALLOW, OPT_TOOL_ALLOW_TURN, OPT_TOOL_DENY,
     };
     use crate::tests::builders::{tool_line_texts, RecordingRunner};
     use crate::tests::doubles::{abs, core_with_runner, decl, gw, module_of};
@@ -888,9 +831,8 @@ fn tool_confirmation_rides_the_decision_channel() {
                     tier: "host".to_string(),
                     guest: None,
                     pins: BTreeMap::new(),
-                    permissions: Some(PermissionsOverride {
-                        granularity: Some(Granularity::Ask),
-                        ask: Some(paths(&["a.grep"])),
+                    permission: Some(PermissionLayer {
+                        tools: BTreeMap::from([("a.grep".to_string(), Decision::Ask)]),
                         ..Default::default()
                     }),
                 },
@@ -914,7 +856,7 @@ fn tool_confirmation_rides_the_decision_channel() {
                             vec![
                                 OPT_TOOL_ALLOW.to_string(),
                                 OPT_TOOL_DENY.to_string(),
-                                OPT_TOOL_FULL.to_string()
+                                OPT_TOOL_ALLOW_TURN.to_string()
                             ],
                             "工具卡的选项 id 是契约：allow / deny / full"
                         );
@@ -991,7 +933,7 @@ fn tool_confirmation_rides_the_decision_channel() {
     );
 
     // ③ 本轮不再问：一次回复里两次调用，答 full → 只问一次、两次都执行（且**不落盘**成策略）。
-    let (_ev, lines, outs, cards, ran) = ask_case(OPT_TOOL_FULL, 2);
+    let (_ev, lines, outs, cards, ran) = ask_case(OPT_TOOL_ALLOW_TURN, 2);
     assert_eq!(cards, 1, "full 之后本轮不再问：{:?}", lines);
     assert_eq!(ran, 2, "两次调用都要执行：{:?}", lines);
     assert!(outs.iter().all(|o| o == "ok"), "{:?}", outs);

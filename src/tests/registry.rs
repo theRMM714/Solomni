@@ -212,6 +212,7 @@ pub(crate) fn agent_crud_and_work_with_agents() {
         }],
         task: None,
         delegate: false,
+        permission: None,
         tier: crate::kernel::api::Tier::Host,
         guest: None,
     };
@@ -253,6 +254,7 @@ pub(crate) fn agent_crud_and_work_with_agents() {
         ],
         task: Some("需求".to_string()),
         delegate: false,
+        permission: None,
         tier: crate::kernel::api::Tier::Host,
         guest: None,
     };

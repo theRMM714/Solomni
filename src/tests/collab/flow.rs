@@ -380,7 +380,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
             .to_string(),
         builtin_tools: test_systools().tools,
         unavailable: BTreeMap::new(),
-        fence: crate::kernel::api::FenceSpec::from_sandbox(&sb, false),
+        fence: crate::kernel::api::FenceSpec::for_session(&sb, &[], false),
         module_env: Default::default(),
         runtime_path: None,
         residents: Arc::new(crate::capabilities::residents::api::NoResidents),

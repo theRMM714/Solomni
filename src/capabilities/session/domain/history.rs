@@ -28,9 +28,9 @@ pub struct SessionMeta {
     /// 执行档位与运行包选型（exec 段；缺字段按默认 = 本机档读回）。
     #[serde(default)]
     pub exec: crate::kernel::api::ExecSpec,
-    /// 这条会话的权限覆盖（路径范围 / 模块写 / 决定粒度）。全局给默认值，这里只覆盖显式字段。
+    /// 这条会话的权限层：根是 ceiling，子是 narrowing。全局给默认值，这里只覆盖显式字段。
     #[serde(default)]
-    pub sandbox: SessionSandbox,
+    pub sandbox: crate::capabilities::permission::api::SessionSandbox,
     /// 谁编排的（子会话 = 父会话名；顶层会话为空）。
     /// 也是**落点判据**：子会话落在父会话目录的 `children/` 下（可再嵌套）。
     /// 整棵树不论嵌套多少层，**只有顶层一个 `work/`**——所有子会话共用它。
@@ -102,14 +102,6 @@ impl SessionMeta {
             )),
         }
     }
-}
-
-/// 目的：会话级权限覆盖——权限跟会话走，不跟 agent 走。
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SessionSandbox {
-    #[serde(default)]
-    pub permissions: crate::capabilities::permission::api::PermissionsOverride,
 }
 
 /// 会话里的一个 agent 实例记录。

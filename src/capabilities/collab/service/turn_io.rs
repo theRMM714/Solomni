@@ -69,10 +69,23 @@ impl CollabSession {
         sb.private = sb.shared.clone();
         sb.modules.clear();
         sb.modules_with_userdata.clear();
+        let book = self.systools.book();
         let allowed: Vec<String> = self
             .systools
             .tool_face(role)
-            .map(|f| f.into_iter().map(|(id, _)| id.to_string()).collect())
+            .map(|f| {
+                f.into_iter()
+                    .map(|(id, _)| id.to_string())
+                    .filter(|id| {
+                        book.get(id)
+                            .map(|s| {
+                                sb.permissions
+                                    .offers(id, s.effect(), &s.max_reach(), s.scope)
+                            })
+                            .unwrap_or(true)
+                    })
+                    .collect()
+            })
             .unwrap_or_default();
         Some(crate::capabilities::session::api::MemberTools {
             mode: self.core_mode,
@@ -92,8 +105,9 @@ impl CollabSession {
                 .to_string(),
             builtin_tools: self.systools.book(),
             unavailable: std::collections::BTreeMap::new(),
-            fence: crate::kernel::api::FenceSpec::from_sandbox(
+            fence: crate::kernel::api::FenceSpec::for_session(
                 &sb,
+                &[],
                 self.settings.app.sandbox.policy.network,
             ),
             // 核心核实用的是只读内置工具，没有模块工具进程，也就没有注入项。

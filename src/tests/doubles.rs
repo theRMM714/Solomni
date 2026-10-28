@@ -1161,9 +1161,6 @@ pub(crate) fn test_sandbox(
         work_name: "demo".to_string(),
         session: "demo".to_string(),
         agent: agent.to_string(),
-        // 测试助手默认**可写共享区**：内置文件工具的既有用例直接写 work/ 复核行为；
-        // 生产里 agent 会话是只读（env.rs 设 false），只读语义由 test_sandbox_readonly 单独钉。
-        shared_writable: true,
         shared: abs(&["demo", "work"]),
         private: abs(&["demo", agent]),
         modules: map,
@@ -1178,9 +1175,7 @@ pub(crate) fn test_sandbox_readonly(
     agent: &str,
     modules: &[&str],
 ) -> crate::capabilities::workspace::api::Sandbox {
-    let mut sb = test_sandbox(agent, modules);
-    sb.shared_writable = false;
-    sb
+    test_sandbox(agent, modules)
 }
 
 /// 测试用会话参数：agent 名 + 该 agent 的沙箱（无模块）。身份块由它现渲染。
@@ -1542,6 +1537,7 @@ pub(crate) fn work(name: &str, mode: WorkMode, modules: &[&str]) -> WorkSpec {
         agents,
         task: None,
         delegate: false,
+        permission: None,
         tier: crate::kernel::api::Tier::Host,
         guest: None,
     }
@@ -3398,7 +3394,7 @@ pub(crate) fn member_with_service_tools(
             .to_string(),
         builtin_tools: test_systools().tools,
         unavailable: BTreeMap::new(),
-        fence: crate::kernel::api::FenceSpec::from_sandbox(&sb, false),
+        fence: crate::kernel::api::FenceSpec::for_session(&sb, &[], false),
         module_env: Default::default(),
         runtime_path: None,
         reply_seq: 0,

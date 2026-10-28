@@ -68,12 +68,6 @@ pub struct FenceSpec {
 }
 
 impl FenceSpec {
-    /// 目的：挂上用户显式授权的只读根（策略层只带事实；只读位怎么落由适配层定）。
-    pub fn with_read_only(mut self, ro: Vec<PathBuf>) -> FenceSpec {
-        self.ro = ro;
-        self
-    }
-
     /// 目的：把这个围栏的工作目录设成某个模块的根（该模块的工具就在这里跑）。
     pub fn at(&self, module_root: &Path) -> FenceSpec {
         let mut out = self.clone();

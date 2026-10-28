@@ -207,10 +207,10 @@ pub(crate) fn builtin_search_reports_line_numbers_and_respects_case() {
     let io = InMemorySysIo::new();
     let sb = test_sandbox("a1", &[]);
     io.seed(
-        &["demo", "work", "note.txt"],
+        &["demo", "a1", "note.txt"],
         "第一行 Alpha\n第二行 beta\nalpha 小写\n",
     );
-    let path = s(&["demo", "work", "note.txt"]);
+    let path = s(&["demo", "a1", "note.txt"]);
     // 默认区分大小写
     let out = run_builtin(
         &sb,
@@ -397,11 +397,8 @@ pub(crate) fn builtin_write_into_module_dir_is_denied() {
 pub(crate) fn builtin_edit_replaces_the_requested_span_and_reports_what_it_did() {
     let io = Arc::new(InMemorySysIo::new());
     let sb = test_sandbox("a1", &[]);
-    let note = s(&["demo", "work", "note.txt"]);
-    io.seed(
-        &["demo", "work", "note.txt"],
-        "第一段\n要改的句子\n第三段\n",
-    );
+    let note = s(&["demo", "a1", "note.txt"]);
+    io.seed(&["demo", "a1", "note.txt"], "第一段\n要改的句子\n第三段\n");
     let mut obs = crate::capabilities::tools::api::Observations::default();
     let exec = test_tools_svc_with(
         Arc::new(SilentRunner),
@@ -419,7 +416,7 @@ pub(crate) fn builtin_edit_replaces_the_requested_span_and_reports_what_it_did()
     );
     assert!(ok.ok, "{}", ok.output);
     assert_eq!(
-        io.get(&["demo", "work", "note.txt"]).as_deref(),
+        io.get(&["demo", "a1", "note.txt"]).as_deref(),
         Some("第一段\n改好了\n第三段\n")
     );
     assert!(ok.output.contains("替换 1 处"), "{}", ok.output);
@@ -449,7 +446,7 @@ pub(crate) fn builtin_edit_replaces_the_requested_span_and_reports_what_it_did()
         miss.output
     );
     // 多处命中：列出位置，且绝不写盘
-    io.seed(&["demo", "work", "note.txt"], "dup\ndup\n");
+    io.seed(&["demo", "a1", "note.txt"], "dup\ndup\n");
     let multi = edit(&mut obs, "\"old_string\":\"dup\",\"new_string\":\"x\"");
     assert!(
         !multi.ok && multi.output.contains("命中 2 处") && multi.output.contains("第 1、2 行"),
@@ -457,7 +454,7 @@ pub(crate) fn builtin_edit_replaces_the_requested_span_and_reports_what_it_did()
         multi.output
     );
     assert_eq!(
-        io.get(&["demo", "work", "note.txt"]).as_deref(),
+        io.get(&["demo", "a1", "note.txt"]).as_deref(),
         Some("dup\ndup\n"),
         "拒收时绝不写盘"
     );
@@ -468,7 +465,7 @@ pub(crate) fn builtin_edit_replaces_the_requested_span_and_reports_what_it_did()
     );
     assert!(all.ok && all.output.contains("替换 2 处"), "{}", all.output);
     assert_eq!(
-        io.get(&["demo", "work", "note.txt"]).as_deref(),
+        io.get(&["demo", "a1", "note.txt"]).as_deref(),
         Some("x\nx\n")
     );
     // new_string 空串 = 把这一段删掉
@@ -477,16 +474,13 @@ pub(crate) fn builtin_edit_replaces_the_requested_span_and_reports_what_it_did()
         "\"old_string\":\"x\",\"new_string\":\"\",\"replace_all\":true",
     );
     assert!(del.ok, "{}", del.output);
-    assert_eq!(
-        io.get(&["demo", "work", "note.txt"]).as_deref(),
-        Some("\n\n")
-    );
+    assert_eq!(io.get(&["demo", "a1", "note.txt"]).as_deref(), Some("\n\n"));
 }
 
 #[test]
 pub(crate) fn builtin_edit_refuses_files_it_cannot_see_whole() {
     // 只看到开头 / 看到的是替换字符：改写会把没读到的内容或原始字节一起弄丢 → 一律不写盘。
-    let note = s(&["demo", "work", "note.txt"]);
+    let note = s(&["demo", "a1", "note.txt"]);
     let args = format!(
         "{{\"path\":\"{}\",\"old_string\":\"a\",\"new_string\":\"b\"}}",
         note
@@ -502,7 +496,7 @@ pub(crate) fn builtin_edit_refuses_files_it_cannot_see_whole() {
             "非法 UTF-8",
         ),
     ] {
-        io.seed(&["demo", "work", "note.txt"], "abc");
+        io.seed(&["demo", "a1", "note.txt"], "abc");
         let mut obs = crate::capabilities::tools::api::Observations::default();
         let exec = test_tools_svc_with(
             Arc::new(SilentRunner),
@@ -512,7 +506,7 @@ pub(crate) fn builtin_edit_refuses_files_it_cannot_see_whole() {
         let out = exec.run_builtin(&sb, &test_systools().tools, &mut obs, "edit", &args);
         assert!(!out.ok && out.output.contains(want), "{}", out.output);
         assert_eq!(
-            io.get(&["demo", "work", "note.txt"]).as_deref(),
+            io.get(&["demo", "a1", "note.txt"]).as_deref(),
             Some("abc"),
             "拒绝时不写盘"
         );
@@ -523,7 +517,7 @@ pub(crate) fn builtin_edit_refuses_files_it_cannot_see_whole() {
 pub(crate) fn builtin_write_needs_a_complete_prior_read_of_an_existing_file() {
     let io = Arc::new(InMemorySysIo::new());
     let sb = test_sandbox("a1", &[]);
-    let note = s(&["demo", "work", "note.txt"]);
+    let note = s(&["demo", "a1", "note.txt"]);
     let exec = test_tools_svc_with(
         Arc::new(SilentRunner),
         Arc::clone(&io),
@@ -579,7 +573,7 @@ pub(crate) fn builtin_write_needs_a_complete_prior_read_of_an_existing_file() {
         refused.output
     );
     assert_eq!(
-        io.get(&["demo", "work", "note.txt"]).as_deref(),
+        io.get(&["demo", "a1", "note.txt"]).as_deref(),
         Some("第二版\n还有一行"),
         "拒收时绝不写盘"
     );
@@ -599,7 +593,7 @@ pub(crate) fn builtin_write_needs_a_complete_prior_read_of_an_existing_file() {
     // 读过之后文件被别人改过：指纹不符 → 拒绝凭记忆覆盖
     let mut obs3 = crate::capabilities::tools::api::Observations::default();
     run(&mut obs3, "read", format!("{{\"path\":\"{}\"}}", note));
-    io.seed(&["demo", "work", "note.txt"], "别人改过的内容");
+    io.seed(&["demo", "a1", "note.txt"], "别人改过的内容");
     let stale = run(
         &mut obs3,
         "write",
@@ -611,7 +605,7 @@ pub(crate) fn builtin_write_needs_a_complete_prior_read_of_an_existing_file() {
         stale.output
     );
     assert_eq!(
-        io.get(&["demo", "work", "note.txt"]).as_deref(),
+        io.get(&["demo", "a1", "note.txt"]).as_deref(),
         Some("别人改过的内容"),
         "拒不覆盖"
     );

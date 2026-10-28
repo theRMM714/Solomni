@@ -81,7 +81,7 @@ impl GuestOs {
 /// 目的：guest 镜像里装的命令通道 agent（命令通道按它选实现）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GuestAgent {
-    /// QEMU guest agent（QGA），走 virtio-serial。
+    /// 目的：QEMU guest agent（QGA），走 virtio-serial。
     Qga,
 }
 
@@ -205,6 +205,8 @@ pub struct GuestAccess {
     pub ro_tree: Vec<String>,
     pub private: String,
     pub cwd: String,
+    /// 目的：本次执行要不要保留出站网络；false = guest helper 里 unshare 一个空网络命名空间。
+    pub net: bool,
 }
 
 impl GuestAccess {
@@ -228,6 +230,7 @@ impl GuestAccess {
             } else {
                 to_guest_path(&fence.cwd, os, mounts)
             },
+            net: fence.net,
         }
     }
 }

@@ -1,60 +1,115 @@
-//! 目的：从该 agent 的沙箱 / 无会话场景**派生**围栏描述符（策略在这里，机制与类型在 kernel）。
-//! 管：`FenceSpec::from_sandbox` / `FenceSpec::standalone`——把 `Sandbox` 与 `userdata/` 事实变成 `FenceSpec`。
-//! 不管：描述符自身的形状与平台机制（在 `kernel::domain::fence` 与 `kernel::detail::confine`）。
-//! 联动：经 `tools::api` 给协调业务与协作会话用；kernel 不反向依赖本模块。
+//! 目的：从权限 reach 派生围栏描述符（策略在这里，机制与类型在 kernel）。
+//! 管：FenceSpec::for_call / for_session / standalone——把生效 reach 与模块事实变成可达范围。
+//! 不管：描述符自身的形状与平台机制（在 kernel::domain::fence 与 kernel::detail::confine）。
+//! 联动：经 tools::api 给成员循环与协调业务用；kernel 不反向依赖本模块。
 
-use crate::kernel::api::FenceSpec;
-
+use crate::capabilities::permission::api::{Reach, ReachSet};
 use crate::capabilities::workspace::api::Sandbox;
+use crate::kernel::api::FenceSpec;
 use std::path::{Path, PathBuf};
 
 impl FenceSpec {
-    /// 目的：从该 agent 的沙箱派生（模块目录按模块 id 升序，顺序稳定；同一模块可以被多个 agent 共用）。
-    pub fn from_sandbox(sb: &Sandbox, net: bool) -> FenceSpec {
-        // 共享主副本只有在**这一席可写**时才进 rw：agent 会话默认只读，
-        // 于是模块外部工具进程也读不到 / 写不了未拉取进沙箱的主副本内容。
-        let mut rw = Vec::new();
-        let mut ro_tree = Vec::new();
-        if sb.shared_writable {
-            rw.push(sb.shared.clone());
+    /// 目的：为**一次调用**派生围栏；base 是同一会话的 for_session 结果（提供主机只读根与全局断网事实）。
+    /// 约束：shared-write 永不进 rw；module-write 只给指定模块自己的 userdata；网络再与全局上限求交。
+    pub fn for_call(
+        sb: &Sandbox,
+        reach: &ReachSet,
+        module: Option<&str>,
+        base: &FenceSpec,
+    ) -> FenceSpec {
+        let mut rw: Vec<PathBuf> = Vec::new();
+        let mut ro_tree: Vec<PathBuf> = Vec::new();
+        let mut ro: Vec<PathBuf> = Vec::new();
+        if reach.contains(Reach::Private) {
+            rw.push(sb.private.clone());
         }
-        rw.push(sb.private.clone());
-        // 模块目录对 agent 的**内置文件工具**永远只读（含 userdata）：agent 只有模块的使用权。
-        // <module>/userdata 只给模块自己的工具 / 服务进程写；派不派看工作区扫描注入的事实（domain 不读盘）。
-        for (id, root) in &sb.modules {
-            ro_tree.push(root.clone());
-            if sb.modules_with_userdata.contains(id) {
-                rw.push(root.join("userdata"));
+        if reach.contains(Reach::ModuleWrite) {
+            if let Some(id) = module {
+                if sb.modules_with_userdata.contains(id) {
+                    if let Some(root) = sb.modules.get(id) {
+                        rw.push(root.join("userdata"));
+                    }
+                }
             }
+        }
+        if reach.contains(Reach::SharedRead) {
+            ro_tree.push(sb.shared.clone());
+        }
+        if reach.contains(Reach::ModuleRead) {
+            ro_tree.extend(sb.modules.values().cloned());
+        }
+        if reach.contains(Reach::HostRead) {
+            ro.extend(base.ro.iter().cloned());
         }
         rw.sort();
         rw.dedup();
+        ro.sort();
+        ro.dedup();
         ro_tree.sort();
         ro_tree.dedup();
         FenceSpec {
             agent: sb.agent.clone(),
             lease: sb.session.clone(),
             rw,
-            ro: Vec::new(),
+            ro: { ro },
             ro_tree,
             private: sb.private.clone(),
             cwd: PathBuf::new(),
-            net,
+            net: reach.contains(Reach::Network) && base.net,
         }
     }
 
-    /// 目的：**无会话**（人直接跑一个模块工具 / 常驻服务）的围栏——模块目录递归只读 + 它自己的 `userdata/`（事实说有才）可写，外加用户指定的工作目录（缺省 = `userdata/`，没有则退回模块根）。
-    /// 约束：这是模块自身进程的口径；agent 的**内置文件工具**对模块目录（含 `userdata/`）只读，
-    ///   由 `Sandbox::can_write` 判；模块工具进程的 `from_sandbox` 会把 `userdata/` 放进 rw。
-    /// 参数：has_userdata 是工作区扫描给出的"该模块有没有 `userdata/`"事实（domain 不读盘）。
-    /// 约束：与 agent 会话同一条围栏口径——不装机制时只留进程树与环境白名单，如实降级。
+    /// 目的：为一个会话派生**并集围栏**——覆盖它可能签发过的全部 reach，用于撤销持久授权与生命周期。
+    pub fn for_session(sb: &Sandbox, host_roots: &[PathBuf], global_net: bool) -> FenceSpec {
+        let reach = &sb.permissions.reach;
+        let mut rw: Vec<PathBuf> = Vec::new();
+        let mut ro_tree: Vec<PathBuf> = Vec::new();
+        let mut ro: Vec<PathBuf> = Vec::new();
+        if reach.contains(Reach::Private) {
+            rw.push(sb.private.clone());
+        }
+        if reach.contains(Reach::ModuleWrite) {
+            for id in &sb.modules_with_userdata {
+                if let Some(root) = sb.modules.get(id) {
+                    rw.push(root.join("userdata"));
+                }
+            }
+        }
+        if reach.contains(Reach::SharedRead) {
+            ro_tree.push(sb.shared.clone());
+        }
+        if reach.contains(Reach::ModuleRead) {
+            ro_tree.extend(sb.modules.values().cloned());
+        }
+        if reach.contains(Reach::HostRead) {
+            ro.extend(host_roots.iter().cloned());
+        }
+        rw.sort();
+        rw.dedup();
+        ro.sort();
+        ro.dedup();
+        ro_tree.sort();
+        ro_tree.dedup();
+        FenceSpec {
+            agent: sb.agent.clone(),
+            lease: sb.session.clone(),
+            rw,
+            ro: { ro },
+            ro_tree,
+            private: sb.private.clone(),
+            cwd: PathBuf::new(),
+            net: global_net && reach.contains(Reach::Network),
+        }
+    }
+
+    /// 目的：**无会话**（人直接跑一个模块工具 / 常驻服务）的围栏——模块目录递归只读 + 它自己的 userdata 可写。
+    /// 约束：这是模块自身进程的口径；agent 的内置文件工具对模块目录（含 userdata）只读。
     pub fn standalone(
         module_root: &Path,
         work_root: Option<&Path>,
         has_userdata: bool,
     ) -> FenceSpec {
         let userdata = module_root.join("userdata");
-        // 缺省工作目录 = 模块的 userdata（事实说有才用）；否则退回 cwd（模块根），不派不存在的落点。
         let private = match work_root {
             Some(p) => p.to_path_buf(),
             None if has_userdata => userdata.clone(),
@@ -71,7 +126,6 @@ impl FenceSpec {
         rw.dedup();
         FenceSpec {
             agent: "user".to_string(),
-            // 无会话（人直接跑模块工具）：没有会话租约可挂。
             lease: String::new(),
             rw,
             ro: Vec::new(),

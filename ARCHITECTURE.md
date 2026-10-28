@@ -114,21 +114,20 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 - **会话参数与对话分开**：身份、工作环境、调用约定是**参数**（`session::SessionParams`），每次调用现场渲染；对话里只有真正发生过的事。
   装配式与理由见 [docs/session/session-model.md](docs/session/session-model.md) 的「会话参数与对话分开」。
 - `meta.yaml` 的 `agents` 是名单的唯一真相（代拟路径在用户确认那一刻写回）；`exec` 段是执行选型的唯一真相
-  （档位 / 虚拟根名 / 定版 `pins`；缺段按默认读回）；会话级权限覆盖在 `sandbox.permissions`。
+  （档位 / 虚拟根名 / 定版 `pins`；缺段按默认读回）；会话级权限层在 `sandbox.ceiling`（根）/ `sandbox.narrowing`（子）。
   执行计划本身**从不落盘**（含真实路径，只在运行时派生）；网络与围栏要求是全局策略，不在会话里。
 - 会话的旁路配置记录（`{"type":"config"}`）只在编辑提交时追加：供呈现与审计，**不进模型上下文**，回放与状态派生跳过它。
 - 出站模型调用的参数由核心决定、随端口传下去（`LlmOpts{stream, timeout_secs}`），取值来自**全局设置**；`Output` 只管回包形状。
   调用失败**不是**模型的回复：`Completion.error` 与正文分离，上层据此发 `Notice` 并**中断本轮**（不落转录行），会话保持可继续。
-- **围栏**（策略在 `capabilities/tools/domain/fence.rs`，机制在 `detail/confine/`）：
-  可达范围 = 自己的私有沙箱（永远全权）+ 使用的模块目录（**模块源码对 agent 的内置文件工具永久只读，含 `<module>/userdata/`**——agent 只有使用权；`<module>/userdata/` 只由该模块自己的工具 / 服务进程写）+ 用户显式授权的主机只读根（`.home/settings.yaml` 的 `sandbox.policy.host_read_roots`，默认空）；
-  共享主副本**只有在"这一席可写"时**才进 rw（核心会话），agent 会话默认只读——工具层与围栏层两处都挡住直接写。
-  **全局沙箱策略**（`sandbox.policy`）是硬约束：网络开关、`require` 特性、不可用时的 `ask/refuse`、Windows 写 ACL 与硬黑名单；
-  会话不能覆盖。默认 `require`，机制不可用时询问是否**本进程降级**（不落盘，重启再问），拒绝 = fail-closed。
-  **会话权限**（`capabilities/permission/`，纯领域，**会话级**）统一裁定：整棵工作区默认可读可提交，**白名单一出现就取代默认、黑名单只做减法**；
-  全局 `sandbox.policy.deny` 只增不减，会话只能追加；
-  内置读/写、`work_pull` / `work_commit`（提交白名单）、`work_versions` / `work_resolve`（读作用域）与围栏派生都读同一份生效态（`Sandbox.permissions` / `FenceSpec`）。
-  **工具级确认**（`granularity: ask`）命中 `ask` 表就把这次调用**当一关进裁决队**并阻塞；回答 `allow` / `deny` / `full`
-  （`full` 只对**本轮**生效，到 agent 停下输出为止，不落盘；停止把整队解成拒绝；没人答时按 `Ask.on_unanswered` 收场）。
+- **权限与围栏**（策略在 capabilities/tools/domain/fence.rs，机制在 detail/confine/）：
+  权限拆成 **reach × effect × decision**：reach = private / shared-read / shared-write / module-read / module-write / host-read / network；
+  decision = allow / ask / deny。四档 profile：仅可查看 / 工作区内修改 / 外部可达（逐次确认）/ 全可达（自动放行）；默认工作区内修改。
+  单次调用 granted = 会话 reach ∩ 工具最大 reach；执行类再按 sandbox / external scope 求交；requested 越界 = 拒绝。
+  围栏由 granted 派生：shared-write 永不进 rw；module-write 只给模块工具写自己的 userdata；host-read / network 受全局上限。
+  根会话 ceiling + 子会话逐层 narrowing：子只能收窄，父编辑不覆盖子收窄；路径范围只作用于共享区，私有沙箱不受路径范围限制（但受 profile 写决定约束）。
+  工具级确认命中 ask 时进统一裁决队；回答 allow / deny / allow_turn；没有可回答前端一律拒绝。
+  模块目录对 agent 的内置文件工具永久只读（含 userdata）；模块 userdata 只由模块工具 / 服务进程写。
+  VM guest 的 per-call 断网由 guest helper 的 unshare(CLONE_NEWNET) 落实；失败 fail-closed。
   工具进程走**守门进程**（本程序 `--fence-run`），环境不继承父进程（**密钥与凭据不进工具进程**），`HOME` / `TEMP` 等落进该 agent 的沙箱。
   **一个 agent 一个容器 profile**，守门进程是唯一建它的地方并记进 `.home/fence-grants.json` 台账；每次写 ACL **先把记录落盘**（根内路径存原始安全描述符、根外只存 ACE 摘要），写后核对 ACE 与原有权限项、失败回滚并如实报错；
   台账每条授权 / profile 带**归属**（pid + 进程创建时刻 + **会话租约**），写事务用**进程内互斥 + 跨进程文件锁**串行。

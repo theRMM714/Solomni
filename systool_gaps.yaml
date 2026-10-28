@@ -77,5 +77,5 @@
     Windows PowerShell 7/5.1 真机跑通，中文与退出码正确；Linux/macOS sh 与 VM Linux guest 跑通；
     host 停止杀掉整棵树；既有模块工具/内置工具行为不变；node run-tests.js 全绿。
   blocked_by: |
-    依赖 permission.reach-and-decision 与档位切换落地；Windows/macOS guest shell 暂不开发；
+    shell 本身未实现；它依赖的权限模型与档位切换已落地；Windows/macOS guest shell 暂不开发；
     guest 立即取消未实现。

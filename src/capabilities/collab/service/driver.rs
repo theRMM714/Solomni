@@ -352,10 +352,11 @@ fn run(
                        sink: &mut dyn FnMut(SessionEvent)|
      -> String {
         use crate::capabilities::session::api::{
-            qualify, AnswerSlot, Pending, SlotWake, OPT_TOOL_ALLOW, OPT_TOOL_DENY, OPT_TOOL_FULL,
+            qualify, AnswerSlot, Pending, SlotWake, OPT_TOOL_ALLOW, OPT_TOOL_ALLOW_TURN,
+            OPT_TOOL_DENY,
         };
         let Some(door) = decisions.as_ref() else {
-            return OPT_TOOL_ALLOW.to_string();
+            return OPT_TOOL_DENY.to_string();
         };
         let name = qualify(req.module.as_deref(), &req.tool);
         // 待确认落一条系统行（可回放），再进队并推卡片——**先登记再推**：
@@ -389,7 +390,7 @@ fn run(
             name,
             match answer.as_str() {
                 OPT_TOOL_ALLOW => "用户放行",
-                OPT_TOOL_FULL => "用户放行，本轮不再询问",
+                OPT_TOOL_ALLOW_TURN => "用户放行，本轮不再询问",
                 _ => "用户拒绝（或生成已停止）",
             }
         )));
@@ -399,7 +400,7 @@ fn run(
     let mut confirms =
         decisions.as_ref().map(
             |_| crate::capabilities::collab::service::tool_loop::ConfirmGate {
-                full: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                allow_turn: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 confirm: &mut confirm,
             },
         );

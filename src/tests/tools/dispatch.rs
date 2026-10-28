@@ -25,6 +25,7 @@ pub(crate) fn same_named_tools_across_modules_are_no_longer_a_conflict() {
         }],
         task: None,
         delegate: false,
+        permission: None,
         tier: crate::kernel::api::Tier::Host,
         guest: None,
     };
@@ -54,6 +55,7 @@ pub(crate) fn same_named_tools_across_modules_are_no_longer_a_conflict() {
         ],
         task: Some("需求".to_string()),
         delegate: false,
+        permission: None,
         tier: crate::kernel::api::Tier::Host,
         guest: None,
     };

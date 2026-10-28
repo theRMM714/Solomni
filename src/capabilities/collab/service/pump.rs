@@ -493,16 +493,39 @@ impl CollabSession {
             )
             .with_chara(a.chara.clone());
             let mut member = Member::plain(&a.name, params, mode);
-            // 围栏：可达范围 + 断网，由该 agent 的沙箱与全局网络策略派生（机制在 adapters）；
-            // 只读根来自用户显式授权（`host_read_roots`），默认空。
-            let fence = crate::kernel::api::FenceSpec::from_sandbox(
+            // 围栏：可达范围 + 断网，由该 agent 的生效权限与全局上限派生（机制在 adapters）；
+            // 只读根来自用户显式授权（host_read_roots），默认空。
+            let fence = crate::kernel::api::FenceSpec::for_session(
                 &sandbox,
+                &read_only_roots(&self.settings.app),
                 self.settings.app.sandbox.policy.network,
-            )
-            .with_read_only(read_only_roots(&self.settings.app));
+            );
             // 工具说明块的素材（patch 语法 / 模块工具 / 模块参数）：装配期按这个 agent 的沙箱与模块算一次。
             let tool_notes =
                 crate::capabilities::tools::api::tool_notes(&*prompts, &sandbox, &modules, &[]);
+            let allowed: Vec<String> = {
+                let book = self.systools.book();
+                self.systools
+                    .tool_face("discussant")
+                    .map(|f| {
+                        f.into_iter()
+                            .map(|(id, _)| id.to_string())
+                            .filter(|id| {
+                                book.get(id)
+                                    .map(|s| {
+                                        sandbox.permissions.offers(
+                                            id,
+                                            s.effect(),
+                                            &s.max_reach(),
+                                            s.scope,
+                                        )
+                                    })
+                                    .unwrap_or(true)
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
             member.tools = Some(MemberTools {
                 mode,
                 role: "discussant".to_string(),
@@ -530,12 +553,8 @@ impl CollabSession {
                 module_env: Default::default(),
                 runtime_path: None,
                 residents: Arc::new(crate::capabilities::residents::api::NoResidents),
-                // 讨论席的系统工具面**由角色表发放**（越权校验的唯一判据）。
-                allowed: self
-                    .systools
-                    .tool_face("discussant")
-                    .map(|f| f.into_iter().map(|(id, _)| id.to_string()).collect())
-                    .unwrap_or_default(),
+                // 讨论席的系统工具面由角色表发放，再按权限档位过滤。
+                allowed,
                 // 讨论席不干活：拿不到自己模块的工具（角色表的 module_tools）。
                 with_modules: self.systools.allows_module_tools("discussant"),
                 notes: tool_notes,

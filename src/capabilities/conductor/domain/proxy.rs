@@ -372,6 +372,8 @@ pub struct NewSession {
     pub guest: Option<String>,
     /// 父会话：由**机制**从调用上下文填，不从模型参数取（模型不能自选父）。
     pub parent: Option<String>,
+    /// 目的：创建时的权限档位；None = 用设置默认（子会话忽略并继承父 ceiling）。
+    pub permission: Option<crate::capabilities::permission::api::ProfileId>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -416,6 +418,9 @@ pub struct CreateArgs {
     /// 目的：工作名（可省 = 由宿主派生）。
     #[serde(default)]
     pub name: Option<String>,
+    /// 目的：创建时的权限档位（只对人经呈现层有效；代理建子会话时忽略并继承父 ceiling）。
+    #[serde(default)]
+    pub permission: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -577,6 +582,11 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
             chara,
         });
     }
+    let permission = args
+        .permission
+        .as_deref()
+        .map(crate::capabilities::permission::api::ProfileId::parse)
+        .transpose()?;
     Ok(NewSession {
         mode,
         agents: resolved,
@@ -586,6 +596,7 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
         tier: None,
         guest: None,
         parent: None,
+        permission,
     })
 }
 
