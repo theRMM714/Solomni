@@ -92,7 +92,20 @@ const CFG = {
   sid: "w", mode: "single", started: true,
   agents: [{ name: "调研员", modules: ["research"], model: "m1", chara: "会话快照人设" }],
   tier: "vm", guest: "debian", net: true,
-  permissions: { allow_read: [], allow_write: ["docs"], deny: [], granularity: "ask", ask: ["research.grep"] },
+  permission: {
+    profile: "workspace", label: "工作区内修改", summary: "",
+    reach: ["private", "shared-read", "shared-write", "module-read", "module-write"],
+    decisions: { read: "allow", write: "allow", exec_sandbox: "allow", exec_external: "deny" },
+    shared: { read: "all", write: ["docs"], deny: [] },
+    tools: { "research.grep": "ask" },
+    narrowed: false, parent_profile: null, warning: "",
+    profiles: [
+      { id: "view", label: "仅可查看", summary: "", reach: [], decisions: { read: "allow", write: "deny", exec_sandbox: "deny", exec_external: "deny" } },
+      { id: "workspace", label: "工作区内修改", summary: "", reach: [], decisions: { read: "allow", write: "allow", exec_sandbox: "allow", exec_external: "deny" } },
+      { id: "external", label: "外部可达（逐次确认）", summary: "", reach: [], decisions: { read: "allow", write: "allow", exec_sandbox: "allow", exec_external: "ask" } },
+      { id: "all_reach", label: "全可达（自动放行）", summary: "", reach: [], decisions: { read: "allow", write: "allow", exec_sandbox: "allow", exec_external: "allow" } },
+    ],
+  },
   guests: [
     { guest: "debian", label: "debian-13-genericcloud-amd64", os: "linux", arch: "amd64", ready: true, missing: [], install: ".vm/guest/debian", runtimes: ["python"] },
     { guest: "windows", label: "debian-13-genericcloud-amd64", os: "linux", arch: "amd64", ready: false, missing: ["vm.guest-runtime.windows"], install: ".vm/guest/windows" },
@@ -120,6 +133,7 @@ const RAW = { // 还没开过的协作会话：名字可改、本机档
   sid: "raw", mode: "collab", started: false,
   agents: [{ name: "x", modules: ["research"], model: "" }, { name: "y", modules: ["research"], model: "m2" }],
   tier: "host", guest: null, guests: [], net: false, pins: {},
+  permission: { profile: "workspace", label: "工作区内修改", summary: "", reach: [], decisions: { read: "allow", write: "allow", exec_sandbox: "allow", exec_external: "deny" }, shared: { read: "all", write: "all", deny: [] }, tools: {}, narrowed: false, parent_profile: null, warning: "", profiles: [] },
   // 这台机器**不具备**虚拟机档的前置条件：界面必须禁用虚拟机档并给出后端原话（本机档不受影响）。
   vm_available: false, vm_unavailable_reason: "虚拟机档现在不可用（guest 本体尚未接入）",
   vm_requirements: [
@@ -331,16 +345,16 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
   check("config: 失败后保存按钮可再点", save.disabled === false);
   const editCall = calls.find((c) => /\/api\/actions\/edit_session$/.test(c.url));
   const sent = JSON.parse(editCall.body);
-  check("config: 提交体形状 {session_id,agents,tier,guest,pins,permissions}",
-    JSON.stringify(Object.keys(sent).sort()) === JSON.stringify(["agents", "guest", "permissions", "pins", "session_id", "tier"])
+  check("config: 提交体形状 {session_id,agents,tier,guest,pins,permission}",
+    JSON.stringify(Object.keys(sent).sort()) === JSON.stringify(["agents", "guest", "permission", "pins", "session_id", "tier"])
       && sent.session_id === "w", editCall.body);
   check("config: 提交体内容（名单/模块/模型/档位/虚拟根/pins/会话权限）",
     sent.tier === "vm" && sent.guest === "debian"
     && sent.agents[0].name === "调研员" && JSON.stringify(sent.agents[0].modules) === JSON.stringify(["research"])
     && sent.agents[0].model === "m1" && sent.agents[0].chara === "临时改的人设"
     && JSON.stringify(sent.pins) === JSON.stringify({ python: "3.12", ruby: "3.2" })
-    && JSON.stringify(sent.permissions.allow_write) === JSON.stringify(["docs"])
-    && !("module_write" in sent.permissions),
+    && JSON.stringify(sent.permission.shared.write) === JSON.stringify(["docs"])
+    && sent.permission.profile === "workspace",
     editCall.body);
 
   /* ---- 取消定版 = 空串不提交 ---- */

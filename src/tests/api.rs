@@ -1281,6 +1281,7 @@ fn single_mode_merges_multiple_agents_into_one_transient() {
             agents: picked,
             task: None,
             delegate: false,
+            permission: None,
             tier: crate::kernel::api::Tier::Host,
             guest: None,
         })
@@ -1317,7 +1318,7 @@ fn editing_is_refused_while_a_session_is_generating() {
         tier: "host".to_string(),
         guest: None,
         pins: std::collections::BTreeMap::new(),
-        permissions: None,
+        permission: None,
     };
     ops.sessions.edit(&sid, edit()).expect("没在生成时可以改");
 
@@ -1553,7 +1554,7 @@ fn create_session_and_config_carry_chara_as_a_snapshot() {
                 tier: "host".to_string(),
                 guest: None,
                 pins: std::collections::BTreeMap::new(),
-                permissions: None,
+                permission: None,
             },
         )
         .expect("改配置");
@@ -1692,4 +1693,40 @@ fn host_session_uses_package_bin_path() {
     let first = std::env::split_paths(path).next().expect("PATH 第一段");
     assert_eq!(first, bin, "包的 bin 前置到这一趟 PATH");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 目的：状态栏快速切档走独立动作——只改 profile，不需要 edit_session 的名单载荷。
+#[test]
+fn set_permission_profile_action_switches_the_session_profile() {
+    use crate::capabilities::permission::api::ProfileId;
+    let handle = spawn(vec![module_of("a")], Vec::new());
+    let ops = Ops::from_handle(&handle);
+    let (opened, _) = ops
+        .sessions
+        .create_work(single_work("w-profile", &["a"]))
+        .expect("建会话");
+    let sid = opened.sid;
+    ops.actions
+        .act(ActionCall {
+            id: "set_permission_profile".to_string(),
+            args: serde_json::json!({ "session_id": sid, "profile": "view" }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .expect("快速切档");
+    assert_eq!(
+        ops.sessions.config(&sid).unwrap().permission.profile,
+        ProfileId::View
+    );
+    assert!(
+        ops.actions
+            .act(ActionCall {
+                id: "set_permission_profile".to_string(),
+                args: serde_json::json!({ "session_id": sid, "profile": "nope" }),
+                caller: Caller::User,
+                out: Output::Final,
+            })
+            .is_err(),
+        "未知档位如实拒绝"
+    );
 }

@@ -2,7 +2,7 @@
 // 覆盖：agent 登记处 → 推荐复用 → 单 agent（1 个 agent 带多模块）+ 内置 write 落私沙箱
 //       → 协作（非代拟）跑完交付 → 代拟（复用+组装）确认后名单写回 meta 并建出沙箱
 //       → 外部工具 cwd / 绝对路径 / 自由格式补丁 / 正文+信封 / 原生多调用（协议形状由假供应商核对）
-//       → 工具级确认（与本通道同形）：生成中停下等 allow / deny / full；快照带那张卡（刷新能重建）；full 本轮不再问
+//       → 工具级确认（与本通道同形）：生成中停下等 allow / deny / allow_turn；快照带那张卡（刷新能重建）；full 本轮不再问
 //       → MCP 常驻服务：模块声明的服务操作进工具面，经真进程调用，回执与本地计算的摘要对账。
 //       → 通用资产：PNG / MP4 上传 → work_pull → work_versions 媒体类型 / 指纹 / 大小，二进制产物走 work_commit。
 //       → 父死子亡：核心被强杀后，常驻服务的进程跟着消失（最后一步，核心一死就没有后续场景了）。
@@ -302,7 +302,7 @@ async function lines(sid) {
   const usl = ls.filter((x) => x.speaker === '用户').pop() || {};
   assert(new RegExp('项目 说明\\.md').test(String(usl.line)) && !/@work:/.test(String(usl.line)), '引号内的空格路径被完整改写（真实路径）', String(usl.line).slice(0, 240));
 
-  // 工具级确认（granularity=ask）：真生成 → 真停下 → 真回答；yes / no / full 三态都走一遍。
+  // 工具级确认（逐工具 ask）：真生成 → 真停下 → 真回答；allow / deny / allow_turn 三态都走一遍。
   const nameAsk = 'e2e-ask-' + Date.now();
   const cAsk = await api('POST', '/api/actions/create_session', {
     name: nameAsk, mode: 'single',
@@ -311,10 +311,10 @@ async function lines(sid) {
   assert(cAsk.status === 200, '建"工具确认"会话', cAsk.text.slice(0, 200));
   const edAsk = await act(nameAsk, 'edit_session', {
     agents: [{ name: '确认兵', modules: ['research'], model: 'm1' }],
-    permissions: { granularity: 'ask', ask: ['write'] },
+    permission: { tools: { write: 'ask' } },
     tier: 'host',
   });
-  assert(edAsk.status === 200, '把该 agent 的粒度设成 ask（ask 表 = write）', edAsk.text.slice(0, 240));
+  assert(edAsk.status === 200, '把 write 的逐工具决定设成 ask', edAsk.text.slice(0, 240));
   const sandbox = path.join(dir(nameAsk), '确认兵');
   const fDeny = path.join(sandbox, 'ask-deny.txt');
   const fAllow = path.join(sandbox, 'ask-allow.txt');
@@ -328,7 +328,7 @@ async function lines(sid) {
   const pDeny = sayAsk('工具确认：拒绝');
   const pendDeny = await waitPending(nameAsk, 'tool_approval', 20000);
   assert(pendDeny && (pendDeny.payload || {}).tool === 'write', '等待中的确认出现在 /api/state 快照里（刷新也能重建卡片）', JSON.stringify(pendDeny || {}).slice(0, 200));
-  assert((pendDeny.options || []).map((o) => o.id).join() === 'allow,deny,full', '工具卡的选项 id 是 allow / deny / full', JSON.stringify((pendDeny || {}).options));
+  assert((pendDeny.options || []).map((o) => o.id).join() === 'allow,deny,allow_turn', '工具卡的选项 id 是 allow / deny / allow_turn', JSON.stringify((pendDeny || {}).options));
   assert((await answerAsk(pendDeny, 'deny')).status === 200, '答 deny（拒绝）');
   await settle(pDeny, 30000, '拒绝场景');
   assert(!fs.existsSync(fDeny), '拒绝 → 工具没执行（文件不存在）', fDeny);
@@ -341,12 +341,12 @@ async function lines(sid) {
   await settle(pAllow, 30000, '放行场景');
   assert(fs.existsSync(fAllow), '放行 → 工具执行（文件存在）', fAllow);
 
-  // ③ 本轮不再问：一次回复给两个 write，第一个答 full → 第二个不再问、两个都执行。
+  // ③ 本轮不再问：一次回复给两个 write，第一个答 allow_turn → 第二个不再问、两个都执行。
   const pFull = sayAsk('工具确认：两个，本轮不再问');
   const pendFull = await waitPending(nameAsk, 'tool_approval', 20000);
-  assert(pendFull, 'full 场景的第一批确认出现');
-  await answerAsk(pendFull, 'full');
-  // 若 full 没生效会出现第二个确认——自动答掉以免挂住整个驱动，并把"多问了一次"记为失败。
+  assert(pendFull, 'allow_turn 场景的第一批确认出现');
+  await answerAsk(pendFull, 'allow_turn');
+  // 若 allow_turn 没生效会出现第二个确认——自动答掉以免挂住整个驱动，并把"多问了一次"记为失败。
   let second = null;
   for (let i = 0; i < 200; i++) {
     const s = await stateOk();
@@ -356,9 +356,9 @@ async function lines(sid) {
     await new Promise((r) => setTimeout(r, 100));
   }
   if (second) await answerAsk(second, 'allow');
-  await settle(pFull, 30000, 'full 场景');
-  assert(!second, '答 full 后本轮不再弹第二次确认', JSON.stringify(second || {}).slice(0, 160));
-  assert(fs.existsSync(fFull1) && fs.existsSync(fFull2), '答 full → 本轮两个调用都执行', fFull1 + ' / ' + fFull2);
+  await settle(pFull, 30000, 'allow_turn 场景');
+  assert(!second, '答 allow_turn 后本轮不再弹第二次确认', JSON.stringify(second || {}).slice(0, 160));
+  assert(fs.existsSync(fFull1) && fs.existsSync(fFull2), '答 allow_turn → 本轮两个调用都执行', fFull1 + ' / ' + fFull2);
   // [待确认] 是瞬时 Notice（不落盘），但事件台仍保留它；按 sid 从事件台数。
   // 不能从历史取：历史只给「最后一条转录之后」的尾巴，早于转录的瞬时事件会被跳过。
   const evAsk = await api(
@@ -368,7 +368,7 @@ async function lines(sid) {
   const askedTimes = ((evAsk.json && evAsk.json.lines) || [])
     .flatMap((l) => l.events || [])
     .filter((e) => e.type === 'notice' && String(e.text || '').includes('[待确认]')).length;
-  assert(askedTimes === 3, '全程只停三次（full 那轮只停一次；若变成 4 = full 没生效）', 'asked=' + askedTimes);
+  assert(askedTimes === 3, '全程只停三次（allow_turn 那轮只停一次；若变成 4 = allow_turn 没生效）', 'asked=' + askedTimes);
 
   // 非法工具信封：必须记成一条失败的工具行，且 JSON 绝不上屏（真实 bug 的回归）
   const name1f = 'e2e-badenv-' + Date.now();

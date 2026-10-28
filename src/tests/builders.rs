@@ -540,7 +540,7 @@ pub(crate) fn member_with_tools(
             .to_string(),
         builtin_tools: test_systools().tools,
         unavailable: BTreeMap::new(),
-        fence: crate::kernel::api::FenceSpec::from_sandbox(&test_sandbox("m0", &[]), false),
+        fence: crate::kernel::api::FenceSpec::for_session(&test_sandbox("m0", &[]), &[], false),
         module_env: Default::default(),
         runtime_path: None,
         residents: Arc::new(crate::capabilities::residents::api::NoResidents),
@@ -823,7 +823,7 @@ pub(crate) fn native_member(
             .to_string(),
         builtin_tools: test_systools().tools,
         unavailable: BTreeMap::new(),
-        fence: crate::kernel::api::FenceSpec::from_sandbox(&sb, false),
+        fence: crate::kernel::api::FenceSpec::for_session(&sb, &[], false),
         module_env: Default::default(),
         runtime_path: None,
         residents: Arc::new(crate::capabilities::residents::api::NoResidents),
@@ -899,7 +899,7 @@ pub(crate) fn edit_of(agents: Vec<(&str, &[&str], &str)>) -> SessionEdit {
         tier: "host".to_string(),
         guest: None,
         pins: BTreeMap::new(),
-        permissions: None,
+        permission: None,
     }
 }
 

@@ -4,5 +4,7 @@
 reserved:
   - work
   - children
+  # 代理会话自己的私有沙箱（真实私沙，不与共享区混用）：agent 实例名不得占用。
+  - .proxy
   # 共享区版本库（提交记录、内容寻址对象与各 agent 的拉取基线）：agent 实例名不得占用。
   - .work

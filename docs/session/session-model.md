@@ -43,13 +43,13 @@ session/<工作名>/
 - **环境属于顶层工作**：`exec`（档位 / 虚拟根 / 定版）由人建主会话时决定，整棵子树只读继承；
   核心代理建子会话时不能自选环境。**同一 agent 全树只有一份名单**：子会话编辑模块 / 模型时写回这份名单，
   guest 装配按整棵树重新聚合；只改模型 / 权限不重建 guest，改模块 / 环境才重建。
-  会话权限是**会话级**的：子会话继承主会话的 `sandbox`，编辑只改自己那一份，不写回他人。
+  会话权限是**根 ceiling + 子会话逐层 narrowing**：根写 sandbox.ceiling，子写 sandbox.narrowing；子只能换更低档、只能收窄，父编辑只改 ceiling 并与子 narrowing 求交，不覆盖子收窄。
 - **共享区是版本化工作区**：主副本 `work/` 与版本库 `.work/` 都锚在顶层工作上；agent 只写自己的沙箱，
   `work_pull` / `work_commit` 与主副本同步（文件级三方比较），`work_versions` 看三方，`work_resolve` 显式选边，`work_status` 看状态。
   文本、图片、视频与其它二进制都按字节处理（内容流式读写、不整份进上下文；单文件有上限）；
   `work_versions` 给 hash、大小与扩展名媒体类型提示；文本可人工合并后用 `take=local`，图片 / 视频 / 二进制只能选边，不做自动合并。
-- **会话级权限覆盖**写在 `meta.yaml` 的 `sandbox.permissions`（读/提交白名单、追加黑名单、模块写授权、决定粒度）：
-  只覆盖显式给出的字段，缺省继承 `settings.yaml` 的 `sandbox.defaults`；`sandbox.policy.deny` 是硬底线，
+- **会话权限层**写在 meta.yaml 的 sandbox.ceiling（根）与 sandbox.narrowing（子）：
+  四档 profile + 共享区三态 + 逐工具决定；缺省继承 settings.yaml 的 sandbox.defaults；sandbox.policy.deny 是硬底线，
   会话只能追加、不能清空。语义见 [docs/permission/README.md](../permission/README.md)。
 - **出站网络是全局开关**（`sandbox.policy.network`）：会话工具、直接模块工具、常驻服务、模块构建共用；
   虚拟机档决定 guest 网卡；本机档 Windows 授 `internetClient`、macOS 放行 `network-outbound`、
@@ -260,7 +260,7 @@ session/<工作名>/
 | 开始讨论 | `begin` / `begin_allow` |
 | 方案待审 | `plan_start` / `plan_say`（先说一句，由核心判定明确性） |
 | 节点没过 | `node_rework` / `node_say`（同上） |
-| 工具级确认（`ask` 粒度） | `allow` / `deny` / `full`（`full` = 本轮剩余调用不再问，不落盘） |
+| 工具级确认（逐工具 decision=ask） | `allow` / `deny` / `allow_turn`（`allow_turn` = 本轮剩余 ask 不再问，不落盘、不改 reach） |
 | 工具层提问（围栏这一环装不上，`gate = tool_ask`） | `fence_unfenced_once` / `fence_abort`（见 [docs/kernel/README.md](../kernel/README.md) 的「围栏落点：必要与可选」） |
 - **没人答时的收场**：由**发起方**在自己那张卡上声明一个**选项 id**（`Ask.on_unanswered`）——通道不解释它的
   含义，只在"没人答"时按它收场，并如实标为"不是用户答的"；不声明就按 fail-closed（这一趟不执行）。
@@ -276,7 +276,7 @@ session/<工作名>/
 - **请教**：用户的话进**主会话转录**（所有成员下一回合都看得到），不单独转给发问的成员；
 - **方案待审 / 节点没过**：由**核心判定意图是否明确**——明确才开工 / 放行，模糊就不开
   （他的话进主会话当反馈，关卡继续等着，核心不自动往下推）；
-- **工具级确认**：`allow` / `deny` / `full`（后者 = 本轮剩余调用不再问，不落盘）；
+- **工具级确认**：`allow` / `deny` / `allow_turn`（后者 = 本轮剩余 ask 不再问，不落盘、不改 reach）；
 - **围栏这类底层**：按选项做它自己的事（例如"本轮无围栏跑一次"）。
 - **改需求不是裁决**：它是会话级动作（会话视图的能力位 `can_update_task`），用户自己点；
   没有"本次需求"的会话**根本不渲染**这个按钮，会话工作中不可点。

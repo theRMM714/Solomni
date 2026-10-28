@@ -117,6 +117,8 @@ async function refreshState() {
       can_update_task: !!v.can_update_task,
       continue_action: v.continue || null,
       tier: v.tier, tier_ready: v.tier_ready, tier_missing: v.tier_missing || [],
+      permission_profile: v.permission_profile || '', permission_label: v.permission_label || '',
+      permission_narrowed: !!v.permission_narrowed, permission_parent: v.permission_parent || null,
       activating: false,
       done: !!(h && h.done), awaiting: null, fold: {}, scroll: {},
       context: v.context || null,
@@ -140,6 +142,10 @@ async function refreshState() {
     cur.tier = v.tier;
     cur.tier_ready = v.tier_ready;
     cur.tier_missing = v.tier_missing || [];
+    cur.permission_profile = v.permission_profile || cur.permission_profile;
+    cur.permission_label = v.permission_label || cur.permission_label;
+    cur.permission_narrowed = !!v.permission_narrowed;
+    cur.permission_parent = v.permission_parent || null;
     // 上下文用量以快照兜底；实时 usage 事件到达后以事件为准（同一份事实，事件更新）。
     if (v.context !== undefined) cur.context = v.context || null;
     // 运行态**只对账、不覆盖**：这条会话已经有实时知识（事件就是真相）时，快照比它滞后——
@@ -560,6 +566,7 @@ async function openHistory(name) {
       running: false, working: null, running_known: false,
       activating: false, continue_action: null,
       context: null, work: null, workAt: 0, workDirty: false, workError: '',
+      permission_profile: '', permission_label: '', permission_narrowed: false, permission_parent: null,
       done: true, awaiting: null, readonly: true, fold: {}, scroll: {},
     };
     s.hydrated = true;
@@ -852,7 +859,7 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
     tier: cfg.tier === 'vm' ? 'vm' : 'host',
     guest: cfg.guest || '',
     pins: {},
-    permissions: cfg.permissions || { allow_read: [], allow_write: [], deny: [], granularity: 'ask', ask: [] },
+    permission: cfg.permission || { profile: 'workspace', shared: { read: 'all', write: 'all', deny: [] }, tools: {} },
   };
   const pins0 = cfg.pins || {};
   for (const k of Object.keys(pins0)) draft.pins[k] = pins0[k];
@@ -979,31 +986,78 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
   }
   box.appendChild(secP);
 
-  // 会话权限：路径范围 / 模块写 / 决定粒度（网络是全局开关，不在这里）
+  // 会话权限：四档 + 共享区三态 + 逐工具决定（网络是全局开关，不在这里）
   const secPerm = cfgDiv('cfg-sec');
   secPerm.appendChild(cfgDiv('cfg-sec-title', '会话权限'));
-  secPerm.appendChild(cfgHint('网络由全局 sandbox.policy.network 控制；本会话不可单独改。'));
-  const perm = draft.permissions || {};
-  const lines = (v) => (Array.isArray(v) ? v.join('\n') : '');
+  secPerm.appendChild(cfgHint('网络由全局 sandbox.policy.network 控制；本会话不可单独改。子会话只能换更低档、只能收窄。'));
+  const perm = draft.permission || {};
   const parseLines = (text) => String(text || '')
     .split(/[\n,]/).map((s) => s.trim()).filter((s) => s.length > 0);
+  const profiles = (cfg.permission && cfg.permission.profiles) || [
+    { id: 'view', label: '仅可查看', summary: '' },
+    { id: 'workspace', label: '工作区内修改', summary: '' },
+    { id: 'external', label: '外部可达（逐次确认）', summary: '' },
+    { id: 'all_reach', label: '全可达（自动放行）', summary: '' },
+  ];
+  const curProfile = perm.profile || 'workspace';
+  const parentProfile = (cfg.permission && cfg.permission.parent_profile) || null;
+  const parentIndex = parentProfile ? profiles.findIndex((p) => p.id === parentProfile) : profiles.length - 1;
+  const prof = selectInput(profiles.map((p) => ({ value: p.id, label: p.label })), curProfile);
+  Array.from(prof.children || []).forEach((o, i) => {
+    if (parentProfile && i > parentIndex) o.disabled = true;
+  });
+  secPerm.appendChild(field('权限档位', prof));
+  const profHint = cfgHint('');
+  secPerm.appendChild(profHint);
+  const syncProf = () => {
+    const p = profiles.find((x) => x.id === prof.value);
+    profHint.textContent = p ? p.summary : '';
+  };
+  prof.addEventListener('change', syncProf);
+  syncProf();
   const makeList = (label, value, hint) => {
     const t = areaInput('每行一条');
-    t.value = lines(value);
+    t.value = Array.isArray(value) ? value.join('\n') : '';
     t.addEventListener('input', () => { if (hint) hint.textContent = ''; });
-    const f = field(label, t);
-    secPerm.appendChild(f);
+    secPerm.appendChild(field(label, t));
     return t;
   };
-  const allowRead = makeList('读白名单（相对工作区根；空 = 整棵可读）', perm.allow_read);
-  const allowWrite = makeList('提交白名单（相对工作区根；空 = 整棵可提交）', perm.allow_write);
-  const deny = makeList('黑名单（读写都禁；全局黑名单是硬底线，这里只能追加）', perm.deny);
-  const askList = makeList('需要确认的工具名（granularity=ask 时生效；模块工具写 module.tool）', perm.ask);
-  const gran = selectInput([
-    { value: 'ask', label: 'ask：ask 表里的工具先问用户' },
-    { value: 'full', label: 'full：任何工具都不确认' },
-  ], perm.granularity || 'ask');
-  secPerm.appendChild(field('决定粒度', gran));
+  const scopeEditor = (label, value) => {
+    const mode = Array.isArray(value) ? 'paths' : (value === 'none' ? 'none' : 'all');
+    const sel = selectInput([
+      { value: 'all', label: '整棵共享区' },
+      { value: 'none', label: '无权限' },
+      { value: 'paths', label: '指定路径' },
+    ], mode);
+    const area = areaInput('每行一条（相对共享区根）');
+    area.value = Array.isArray(value) ? value.join('\n') : '';
+    const wrap = cfgDiv('cfg-sec');
+    wrap.appendChild(field(label, sel));
+    const areaField = field(label + '：路径', area);
+    wrap.appendChild(areaField);
+    const sync = () => { areaField.style.display = sel.value === 'paths' ? '' : 'none'; };
+    sel.addEventListener('change', sync);
+    sync();
+    secPerm.appendChild(wrap);
+    return () => (sel.value === 'all' ? 'all' : sel.value === 'none' ? 'none' : parseLines(area.value));
+  };
+  const getRead = scopeEditor('共享区读范围', (perm.shared && perm.shared.read) || 'all');
+  const getWrite = scopeEditor('共享区写范围', (perm.shared && perm.shared.write) || 'all');
+  const deny = makeList('追加黑名单（读写都禁；全局黑名单是硬底线，这里只能追加）', (perm.shared && perm.shared.deny) || []);
+  const toolsArea = areaInput('每行一条：工具名=allow/ask/deny');
+  toolsArea.value = Object.entries(perm.tools || {}).map(([k, v]) => k + '=' + v).join('\n');
+  secPerm.appendChild(field('逐工具决定（可选；子会话不能改）', toolsArea));
+  const parseTools = () => {
+    const out = {};
+    for (const line of parseLines(toolsArea.value)) {
+      const i = line.indexOf('=');
+      if (i < 0) continue;
+      const k = line.slice(0, i).trim();
+      const v = line.slice(i + 1).trim();
+      if (k && ['allow', 'ask', 'deny'].includes(v)) out[k] = v;
+    }
+    return out;
+  };
   box.appendChild(secPerm);
 
   // 动作
@@ -1022,12 +1076,14 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
       tier: draft.tier,
       guest: draft.tier === 'vm' ? (draft.guest || null) : null,
       pins: pins,
-      permissions: {
-        allow_read: parseLines(allowRead.value),
-        allow_write: parseLines(allowWrite.value),
-        deny: parseLines(deny.value),
-        ask: parseLines(askList.value),
-        granularity: gran.value,
+      permission: {
+        profile: prof.value,
+        shared: {
+          read: getRead(),
+          write: getWrite(),
+          deny: parseLines(deny.value),
+        },
+        tools: (cfg.permission && cfg.permission.narrowed) ? {} : parseTools(),
       },
     };
     save.disabled = true;
@@ -2166,14 +2222,40 @@ function settingsForm() {
   ], sp.on_unavailable || 'ask');
   const hostRoots = area('主机只读根（绝对路径，每行一条）', sp.host_read_roots);
   const hardDeny = area('全局黑名单（工作区相对路径，只增不减）', sp.deny);
-  const defRead = area('默认读白名单（会话可覆盖）', sd.allow_read);
-  const defWrite = area('默认提交白名单（会话可覆盖）', sd.allow_write);
-  const defAsk = area('默认 ask 表（会话可覆盖）', sd.ask);
-  const defGran = selectInput([
-    { value: 'ask', label: 'ask' },
-    { value: 'full', label: 'full' },
-  ], sd.granularity || 'ask');
-  return { stream, cot, to, remind, pct, guests, network, writeAcl, enFs, enNet, enTree, enEnv, onUnavailable, hostRoots, hardDeny, defRead, defWrite, defAsk, defGran };
+  const defProfile = selectInput([
+    { value: 'view', label: '仅可查看' },
+    { value: 'workspace', label: '工作区内修改（默认）' },
+    { value: 'external', label: '外部可达（逐次确认）' },
+    { value: 'all_reach', label: '全可达（自动放行）' },
+  ], sd.profile || 'workspace');
+  const scopeArea = (label, value) => {
+    const mode = Array.isArray(value) ? 'paths' : (value === 'none' ? 'none' : 'all');
+    const sel = selectInput([
+      { value: 'all', label: '整棵共享区' },
+      { value: 'none', label: '无权限' },
+      { value: 'paths', label: '指定路径' },
+    ], mode);
+    const t = areaInput('每行一条（相对共享区根）');
+    t.value = Array.isArray(value) ? value.join('\n') : '';
+    const wrap = document.createElement('div'); wrap.className = 'wf-field';
+    wrap.appendChild(field(label + '方式', sel));
+    const pathField = field(label + '路径', t);
+    wrap.appendChild(pathField);
+    const sync = () => { pathField.style.display = sel.value === 'paths' ? '' : 'none'; };
+    sel.addEventListener('change', sync);
+    sync();
+    return {
+      wrap,
+      get: () => (sel.value === 'all' ? 'all' : sel.value === 'none' ? 'none' : parseSettingLines(t.value)),
+    };
+  };
+  const defSharedRead = scopeArea('默认共享区读范围', (sd.shared && sd.shared.read) || 'all');
+  const defSharedWrite = scopeArea('默认共享区写范围', (sd.shared && sd.shared.write) || 'all');
+  const defTools = area(
+    '默认逐工具决定（每行一条：工具名=allow/ask/deny）',
+    Object.entries(sd.tools || {}).map(([k, v]) => k + '=' + v),
+  );
+  return { stream, cot, to, remind, pct, guests, network, writeAcl, enFs, enNet, enTree, enEnv, onUnavailable, hostRoots, hardDeny, defProfile, defSharedRead, defSharedWrite, defTools };
 }
 
 /// 1 页：生成与上下文。
@@ -2206,11 +2288,11 @@ function buildSandboxPage(c, f) {
 function buildPermissionsPage(c, f) {
   c.body.appendChild(f.hostRoots.f);
   c.body.appendChild(f.hardDeny.f);
-  c.body.appendChild(cfgHint('默认权限是会话可覆盖的起点；全局黑名单是硬底线，会话只能追加、不能清空。'));
-  c.body.appendChild(f.defRead.f);
-  c.body.appendChild(f.defWrite.f);
-  c.body.appendChild(field('默认决定粒度', f.defGran));
-  c.body.appendChild(f.defAsk.f);
+  c.body.appendChild(cfgHint('默认权限是新建会话的起点；全局黑名单是硬底线，会话只能追加、不能清空。'));
+  c.body.appendChild(field('默认权限档位', f.defProfile));
+  c.body.appendChild(f.defSharedRead.wrap);
+  c.body.appendChild(f.defSharedWrite.wrap);
+  c.body.appendChild(f.defTools.f);
 }
 
 /// 4 页：资源与进程。
@@ -2262,10 +2344,23 @@ function collectSettings(f) {
         deny: parseSettingLines(f.hardDeny.t.value),
       },
       defaults: {
-        allow_read: parseSettingLines(f.defRead.t.value),
-        allow_write: parseSettingLines(f.defWrite.t.value),
-        granularity: f.defGran.value,
-        ask: parseSettingLines(f.defAsk.t.value),
+        profile: f.defProfile.value,
+        shared: {
+          read: f.defSharedRead.get(),
+          write: f.defSharedWrite.get(),
+          deny: [],
+        },
+        tools: (() => {
+          const out = {};
+          for (const line of parseSettingLines(f.defTools.t.value)) {
+            const i = line.indexOf('=');
+            if (i < 0) continue;
+            const k = line.slice(0, i).trim();
+            const v = line.slice(i + 1).trim();
+            if (k && ['allow', 'ask', 'deny'].includes(v)) out[k] = v;
+          }
+          return out;
+        })(),
       },
     },
   };
@@ -2542,7 +2637,7 @@ async function openWizard(draft) {
   const resumed = !!(draft && draft.__wizardDraft);
   // 两种形态共用一份 agent 卡片列表：single 恰好 0/1 个；collab 可多个。
   const w = resumed ? draft : {
-    mode: 'single', agents: [], task: '', tier: 'host', guest: '', __wizardDraft: true,
+    mode: 'single', agents: [], task: '', tier: 'host', guest: '', permission: 'workspace', __wizardDraft: true,
   };
   if (!Array.isArray(w.agents)) w.agents = [];
   // 名称与需求是**弹层里**输入框的现值（在本作用域之外）：由弹层装好后把取值钩子挂上来。
@@ -2560,6 +2655,17 @@ async function openWizard(draft) {
   hostR.box.addEventListener('change', () => { if (hostR.box.checked) { w.tier = 'host'; syncWizardTier(); } });
   vmR.box.addEventListener('change', () => { if (vmR.box.checked) { w.tier = 'vm'; syncWizardTier(); } });
   tierField.appendChild(tierLabel); tierField.appendChild(hostR.wrap); tierField.appendChild(vmR.wrap);
+  const profileField = document.createElement('div'); profileField.className = 'wf-field';
+  const profileLabel = document.createElement('div'); profileLabel.className = 'wf-label'; profileLabel.textContent = '权限档位';
+  const profileSel = selectInput([
+    { value: 'view', label: '仅可查看' },
+    { value: 'workspace', label: '工作区内修改（默认）' },
+    { value: 'external', label: '外部可达（逐次确认）' },
+    { value: 'all_reach', label: '全可达（自动放行）' },
+  ], w.permission || 'workspace');
+  profileSel.addEventListener('change', () => { w.permission = profileSel.value; });
+  profileField.appendChild(profileLabel); profileField.appendChild(profileSel);
+  profileField.appendChild(cfgHint('档位只决定能到哪、要不要问；创建后仍可在会话配置里收窄。代理形态默认全可达。'));
   if (!vmOk) {
     const reqs = (tiers && tiers.vm_requirements) || [];
     // 只列**现状**：怎么补这件事由下面的按钮承担（把指引和动作分成两件事，用户不会只看到话看不到路）。
@@ -2809,6 +2915,11 @@ async function openWizard(draft) {
 
     modeSel.addEventListener('change', () => {
       w.mode = modeSel.value;
+      // 代理形态默认显式选全可达（用户仍可在下拉里改；不再由后端硬编码）。
+      if (w.mode === 'proxy') {
+        w.permission = 'all_reach';
+        profileSel.value = 'all_reach';
+      }
       // 从协作切回单 agent：只保留第一张卡片（不静默替换成别的人）。
       if (w.mode === 'single' && w.agents.length > 1) w.agents = [w.agents[0]];
       renderAll();
@@ -2882,8 +2993,8 @@ async function openWizard(draft) {
       }
       let agents;
       if (w.mode === 'proxy') {
-        // 代理：没有名单、没有需求——选这个形态就是**授予全权**（后端建 mode=proxy 的会话）。
-        await submit({ name, mode: 'proxy', agents: [], tier: w.tier, guest: w.tier === 'vm' ? vmGuest : null });
+        // 代理：没有名单、没有需求——选这个形态就是授予全权（档位由上面的选择显式落盘）。
+        await submit({ name, mode: 'proxy', agents: [], tier: w.tier, guest: w.tier === 'vm' ? vmGuest : null, permission: w.permission || 'all_reach' });
         return;
       }
       if (w.mode === 'single') {
@@ -2913,7 +3024,7 @@ async function openWizard(draft) {
       }
       const names = agents.map((a) => a.name);
       const dup = names.filter((n, i) => names.indexOf(n) !== i)[0];
-      const body = { name, mode: w.mode, agents, tier: w.tier };
+      const body = { name, mode: w.mode, agents, tier: w.tier, permission: w.permission || 'workspace' };
       if (w.tier === 'vm') body.guest = vmGuest;
       if (task) body.task = task;
       if (dup) {
@@ -2930,6 +3041,7 @@ async function openWizard(draft) {
     c.body.appendChild(field('形态', modeSel));
     c.body.appendChild(modeHint);
     c.body.appendChild(tierField);
+    c.body.appendChild(profileField);
     c.body.appendChild(pick.wrap);
     c.body.appendChild(pick.hint);
     c.body.appendChild(guestSetup);
@@ -3333,7 +3445,57 @@ function statusPrintOf(s) {
     c && c.window, c && c.exact, w && w.head && w.head.id, w && w.total, w && w.error,
     s && s.workError, s && s.workAt ? 1 : 0,
     (state.settings && state.settings.compact_at_percent) || 0,
+    s && s.permission_profile, s && s.permission_label, s && s.permission_narrowed ? 1 : 0,
+    s && s.permission_parent,
   ]);
+}
+
+const PERMISSION_ORDER = ['view', 'workspace', 'external', 'all_reach'];
+const PERMISSION_LABELS = {
+  view: '仅可查看',
+  workspace: '工作区内修改',
+  external: '外部可达（逐次确认）',
+  all_reach: '全可达（自动放行）',
+};
+
+/* 权限档位小卡片：只列四档 + 一个“更多设置”。子会话禁用比父档更宽的选项；
+ * 生成中禁用全部（后端也会拒绝，这里先给出原因，免得白点一下）。 */
+function openPermissionMenu(chip, s) {
+  const current = s.permission_profile || 'workspace';
+  const parent = s.permission_parent || null;
+  const parentIdx = parent ? PERMISSION_ORDER.indexOf(parent) : PERMISSION_ORDER.length - 1;
+  const items = PERMISSION_ORDER.map((id, i) => {
+    const disabled = s.running || (!!parent && i > parentIdx);
+    const reason = s.running
+      ? '会话正在生成：先停止再切换权限'
+      : (!!parent && i > parentIdx ? '子会话只能收窄：要放宽请改主会话' : '');
+    return {
+      icon: id === current ? 'check' : (id === 'all_reach' ? 'alert' : 'shield'),
+      label: PERMISSION_LABELS[id] + (id === current ? '（当前）' : ''),
+      disabled,
+      reason,
+      onClick: () => { if (id !== current) switchPermission(s.sid, id); },
+    };
+  });
+  if (s.mode !== 'proxy') {
+    items.push({ sep: true });
+    items.push({ icon: 'gear', label: '更多权限设置…', onClick: () => openConfig(s.sid) });
+  }
+  ui.menu(chip, items);
+}
+
+/* 快速切档只改 profile（并回到该档的 reach / decision 默认）；共享区范围保留，要改这些走“更多权限设置”。 */
+async function switchPermission(sid, profile) {
+  const s = state.sessions.get(sid);
+  if (!s) return;
+  if (s.running) { ui.toast('warn', '会话正在生成：先停止再切换权限'); return; }
+  try {
+    await api('POST', actionUrl('set_permission_profile'), { session_id: sid, profile });
+    await refreshState();
+    ui.toast('ok', '权限档位：' + (PERMISSION_LABELS[profile] || profile));
+  } catch (e) {
+    ui.toast('err', e.message || String(e));
+  }
 }
 
 function syncStatusbar(s) {
@@ -3354,6 +3516,18 @@ function syncStatusbar(s) {
   box.classList.remove('hidden');
   const inner = document.createElement('div');
   inner.className = 'session-status-inner';
+
+  // 权限档位：proxy 与子会话都必须看得见它实际用的档。
+  if (s.permission_label) {
+    const permChip = ui.statusChip({
+      icon: 'shield',
+      text: s.permission_label + (s.permission_narrowed ? '（收窄）' : ''),
+      label: '权限档位',
+      title: '当前权限档位：' + s.permission_label + '（点开可切换；子会话只能收窄）',
+    });
+    permChip.onclick = () => openPermissionMenu(permChip, s);
+    inner.appendChild(permChip);
+  }
 
   // 协作主会话没有一条持续发给模型的对话：不显示上下文 chip（不伪造数字）。
   if (s.mode !== 'collab') {
@@ -4724,6 +4898,11 @@ function applyActivation(s, v) {
   s.tier = v.tier || s.tier;
   s.tier_ready = v.tier_ready;
   s.tier_missing = v.tier_missing || [];
+  // 启用返回的 SessionView 已经带生效权限：和会话状态一起贴回，别等下一次 /api/state 轮询。
+  s.permission_profile = v.permission_profile || s.permission_profile;
+  s.permission_label = v.permission_label || s.permission_label;
+  s.permission_narrowed = !!v.permission_narrowed;
+  s.permission_parent = v.permission_parent || null;
 }
 
 /* 上下文「继续」：后端说确实有断点时才出现（单 agent 上一轮 / 协作泵）。

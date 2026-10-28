@@ -33,7 +33,7 @@ fn ctx(grant: Option<d::Grant>) -> d::ProxyCall {
     }
 }
 
-/// 六个工具必须真的在总表里、且只发给 core_proxy（越权防线出自身份）。
+/// 目的：六个工具必须真的在总表里、且只发给 core_proxy（越权防线出自身份）。
 #[test]
 pub(crate) fn the_six_tools_are_declared_and_granted_to_core_proxy() {
     let st = test_systools();
@@ -95,7 +95,7 @@ pub(crate) fn the_six_tools_are_declared_and_granted_to_core_proxy() {
     }
 }
 
-/// 没有授权就什么都不做：六个工具全部如实拒绝，且**根本没碰宿主**。
+/// 目的：没有授权就什么都不做：六个工具全部如实拒绝，且**根本没碰宿主**。
 #[test]
 pub(crate) fn without_a_grant_nothing_reaches_the_host() {
     let (host, mut tools) = rig();
@@ -133,7 +133,7 @@ pub(crate) fn without_a_grant_nothing_reaches_the_host() {
     );
 }
 
-/// 授权边界：工具、有效期、模型与会话四道都算数。
+/// 目的：授权边界：工具、有效期、模型与会话四道都算数。
 #[test]
 pub(crate) fn grant_scope_expiry_and_bounds_are_enforced() {
     let (host, mut tools) = rig();
@@ -196,7 +196,7 @@ pub(crate) fn grant_scope_expiry_and_bounds_are_enforced() {
     );
 }
 
-/// create_session：先与登记处事实核对，再建立；失败不留半成品，重放不重复创建。
+/// 目的：create_session：先与登记处事实核对，再建立；失败不留半成品，重放不重复创建。
 #[test]
 pub(crate) fn create_session_validates_then_creates_once() {
     let (host, mut tools) = rig();
@@ -275,7 +275,7 @@ pub(crate) fn create_session_validates_then_creates_once() {
     assert_eq!(host.created().len(), 2);
 }
 
-/// send_session_message：来源如实标记、多目标部分成功、代答必须带独立引用。
+/// 目的：send_session_message：来源如实标记、多目标部分成功、代答必须带独立引用。
 #[test]
 pub(crate) fn send_marks_source_and_reports_partial_success() {
     let (host, mut tools) = rig();
@@ -319,7 +319,7 @@ pub(crate) fn send_marks_source_and_reports_partial_success() {
     assert_eq!(last.text, "好");
 }
 
-/// observe_session：只读、不回消息正文、不推进；非法 view 不碰宿主。
+/// 目的：observe_session：只读、不回消息正文、不推进；非法 view 不碰宿主。
 #[test]
 pub(crate) fn observe_reports_no_message_bodies() {
     let (host, mut tools) = rig();
@@ -344,7 +344,7 @@ pub(crate) fn observe_reports_no_message_bodies() {
     assert_eq!(host.calls().len(), calls, "非法 view 不得碰宿主");
 }
 
-/// read_session_messages：0 = 最新一条，按新→旧，可继续往更早翻。
+/// 目的：read_session_messages：0 = 最新一条，按新→旧，可继续往更早翻。
 #[test]
 pub(crate) fn read_session_messages_pages_newest_first() {
     let (host, mut tools) = rig();
@@ -370,7 +370,7 @@ pub(crate) fn read_session_messages_pages_newest_first() {
     assert!(w["next"].is_null(), "到底了不该有 next：{}", second.output);
 }
 
-/// control_session：回执是实际状态、重放幂等、宿主拒绝照实回报。
+/// 目的：control_session：回执是实际状态、重放幂等、宿主拒绝照实回报。
 #[test]
 pub(crate) fn control_is_idempotent_and_reports_the_actual_state() {
     let (host, mut tools) = rig();
@@ -409,7 +409,7 @@ pub(crate) fn control_is_idempotent_and_reports_the_actual_state() {
     assert!(!bad.ok && bad.output.contains("action"), "{}", bad.output);
 }
 
-/// 声明层先挡形状（没写的键、类型不对），语义层再挡取值；都不是代理工具的直接拒绝。
+/// 目的：声明层先挡形状（没写的键、类型不对），语义层再挡取值；都不是代理工具的直接拒绝。
 #[test]
 pub(crate) fn declaration_shape_is_enforced_before_semantics() {
     let (host, mut tools) = rig();
@@ -430,7 +430,7 @@ pub(crate) fn declaration_shape_is_enforced_before_semantics() {
         host.calls()
     );
 }
-/// 真实宿主（队列桥）：catalog 读登记处、observe 不回正文、messages 倒查到真实转录；
+/// 目的：真实宿主（队列桥）：catalog 读登记处、observe 不回正文、messages 倒查到真实转录；
 /// 目标不存在 / 未实现的一律如实报错，不假装成功。
 #[test]
 pub(crate) fn the_real_bridge_reads_catalog_and_session_messages() {
@@ -526,7 +526,7 @@ pub(crate) fn the_real_bridge_reads_catalog_and_session_messages() {
     );
     assert!(out.ok && out.output.contains("stopped:0"), "{}", out.output);
 }
-/// 真实宿主：建**子工作**——编排归属是父会话，落点在 `<父>/children/` 下，共用同一个 work/。
+/// 目的：真实宿主：建**子工作**——编排归属是父会话，落点在 `<父>/children/` 下，共用同一个 work/。
 #[test]
 pub(crate) fn the_real_bridge_creates_a_child_work() {
     use crate::capabilities::conductor::ports::ProxyHost;
@@ -592,7 +592,7 @@ pub(crate) fn the_real_bridge_creates_a_child_work() {
     let out = tools.call(&c, d::SEND, &args);
     assert!(out.ok, "{}", out.output);
 }
-/// 代理工具的执行者：按名字认领，执行经队列桥回核心线程——代理会话因此是普通成员会话。
+/// 目的：代理工具的执行者：按名字认领，执行经队列桥回核心线程——代理会话因此是普通成员会话。
 #[test]
 pub(crate) fn the_proxy_handler_owns_and_runs_proxy_tools() {
     use crate::capabilities::conductor::ports::ProxyHost;
@@ -635,7 +635,7 @@ pub(crate) fn the_proxy_handler_owns_and_runs_proxy_tools() {
     assert!(out.ok, "{}", out.output);
     assert!(out.output.contains("agents"), "{}", out.output);
 }
-/// 代理会话跑一轮真实生成：模型请求 `catalog_agents` → 经 handler / 队列桥在核心线程执行 →
+/// 目的：代理会话跑一轮真实生成：模型请求 `catalog_agents` → 经 handler / 队列桥在核心线程执行 →
 /// 工具行落进它自己的转录。这条钉住“代理会话就是普通成员会话 + 派发去特例”的整条链。
 #[test]
 pub(crate) fn the_proxy_session_runs_a_turn_through_the_generic_loop() {
@@ -665,7 +665,7 @@ pub(crate) fn the_proxy_session_runs_a_turn_through_the_generic_loop() {
         text
     );
 }
-/// 代理会话能从落盘重建：`rebuild_session` 走 `mode="proxy"` 那一支，装回 core_proxy 面。
+/// 目的：代理会话能从落盘重建：`rebuild_session` 走 `mode="proxy"` 那一支，装回 core_proxy 面。
 #[test]
 pub(crate) fn the_proxy_session_rebuilds_from_disk() {
     let (handle, ops) = super::super::ops_with(vec![], vec!["好"]);
@@ -690,7 +690,7 @@ pub(crate) fn the_proxy_session_rebuilds_from_disk() {
         _ => panic!("代理会话该重建为单会话形态"),
     }
 }
-/// 子会话停下 → 通知代理（只写一条通知行，**不转发子会话转录**）。
+/// 目的：子会话停下 → 通知代理（只写一条通知行，**不转发子会话转录**）。
 #[test]
 pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript() {
     use crate::capabilities::modules::api::ModuleManifest;
@@ -730,6 +730,7 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
                 tier: None,
                 guest: None,
                 parent: Some("w-notify".to_string()),
+                permission: None,
             };
             Ok(core.create_session(&spec)?.0.session)
         })
@@ -747,7 +748,7 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
     assert!(!text.contains("做事"), "不得把子会话的转录灌进来：{}", text);
 }
 
-/// 运行态是**落盘事实**：停止后派发与唤醒一律被拒，关闭是终态，继续解冻后放行。
+/// 目的：运行态是**落盘事实**：停止后派发与唤醒一律被拒，关闭是终态，继续解冻后放行。
 #[test]
 pub(crate) fn run_state_gates_dispatch_and_survives_stop_close() {
     use crate::capabilities::conductor::ports::ProxyHost;
@@ -850,7 +851,7 @@ pub(crate) fn run_state_gates_dispatch_and_survives_stop_close() {
     );
 }
 
-/// 转达的来源进目标会话的可回放记录：核心生成的内容不冒充用户原文。
+/// 目的：转达的来源进目标会话的可回放记录：核心生成的内容不冒充用户原文。
 #[test]
 pub(crate) fn relay_records_its_source_on_the_target() {
     use crate::capabilities::conductor::ports::ProxyHost;
@@ -895,7 +896,7 @@ pub(crate) fn relay_records_its_source_on_the_target() {
     );
 }
 
-/// 真实宿主：mode=multi 建的是**协作子工作**（复用既有协作与节点会话机制，不另起一套）。
+/// 目的：真实宿主：mode=multi 建的是**协作子工作**（复用既有协作与节点会话机制，不另起一套）。
 #[test]
 pub(crate) fn the_real_bridge_creates_a_multi_agent_child_work() {
     use crate::capabilities::conductor::ports::ProxyHost;
@@ -968,7 +969,7 @@ pub(crate) fn the_real_bridge_creates_a_multi_agent_child_work() {
     );
 }
 
-/// 代理会话的身份是**角色提示词**（core_proxy）+ 环境 + 调用约定，不是普通 agent 身份；
+/// 目的：代理会话的身份是**角色提示词**（core_proxy）+ 环境 + 调用约定，不是普通 agent 身份；
 /// 反过来，普通 agent 会话也不会沾上代理角色的话。
 #[test]
 pub(crate) fn the_proxy_identity_is_the_role_prompt() {
@@ -1041,7 +1042,7 @@ pub(crate) fn the_proxy_identity_is_the_role_prompt() {
     assert!(!plain.contains("派完活就让出回合"), "{}", plain);
 }
 
-/// 用户入口的第三人形态：`create_work(WorkMode::Proxy)` 建出**代理会话**——
+/// 目的：用户入口的第三人形态：`create_work(WorkMode::Proxy)` 建出**代理会话**——
 /// 没有名单、带全权委托、运行态正常；名单 / 需求与形态不符时整条拒绝、不留半成品。
 #[test]
 pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
@@ -1052,6 +1053,7 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
         agents: Vec::new(),
         task: None,
         delegate: false,
+        permission: None,
         tier: Tier::Host,
         guest: None,
     };
@@ -1144,6 +1146,7 @@ pub(crate) fn proxy_session_exposes_context_usage() {
         agents: Vec::new(),
         task: None,
         delegate: false,
+        permission: None,
         tier: Tier::Host,
         guest: None,
     };
@@ -1169,7 +1172,7 @@ pub(crate) fn proxy_session_exposes_context_usage() {
     assert!(ctx.window > 0, "窗口取核心默认模型");
 }
 
-/// 观察的增量信号：`since` 给上次的游标就回「新增几条」；回执本身仍是幂等快照。
+/// 目的：观察的增量信号：`since` 给上次的游标就回「新增几条」；回执本身仍是幂等快照。
 #[test]
 pub(crate) fn observe_reports_new_messages_since_the_last_cursor() {
     use crate::capabilities::conductor::ports::ProxyHost;
@@ -1235,7 +1238,7 @@ pub(crate) fn observe_reports_new_messages_since_the_last_cursor() {
     assert_eq!(third.new_messages, second.new_messages);
 }
 
-/// 代理建子工作：开场事实**当场**进它的事件台（在场的前端不用等刷新）。
+/// 目的：代理建子工作：开场事实**当场**进它的事件台（在场的前端不用等刷新）。
 #[test]
 pub(crate) fn the_proxy_created_child_publishes_its_opening_facts() {
     use crate::capabilities::conductor::ports::ProxyHost;
@@ -1286,6 +1289,7 @@ pub(crate) fn the_proxy_created_child_publishes_its_opening_facts() {
         tier: None,
         guest: None,
         parent: Some(proxy),
+        permission: None,
     };
     let created = bridge.create_session(&spec).expect("建协作子工作");
     // 开场事实与"这句是核心代理转达的"来源记录都应当**已经在事件台上**，而不是只在盘上
@@ -1348,6 +1352,7 @@ pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
             agents: Vec::new(),
             task: Some("做事".to_string()),
             delegate: true,
+            permission: None,
             tier: Tier::Host,
             guest: None,
         })
@@ -1423,6 +1428,7 @@ pub(crate) fn ai_created_child_inherits_the_proxy_environment() {
                     tier: Some("vm".to_string()),
                     guest: Some("nope".to_string()),
                     parent: Some(proxy),
+                    permission: None,
                 };
                 Ok(core.create_session(&spec)?.0.session)
             }
@@ -1431,4 +1437,72 @@ pub(crate) fn ai_created_child_inherits_the_proxy_environment() {
     let (meta, _) = ops.history.open(&child).expect("子会话落盘");
     assert_eq!(meta.exec.tier, Tier::Host, "子会话环境随代理主会话");
     assert_eq!(meta.exec.guest, None, "AI 不能给子会话选虚拟根");
+}
+
+/// 目的：代理档位显式落盘、配置可见；私有沙箱是真实目录，不再 private=shared。
+#[test]
+pub(crate) fn proxy_profile_is_explicit_and_uses_a_real_private_sandbox() {
+    use crate::capabilities::conductor::service::Session;
+    use crate::capabilities::permission::api::ProfileId;
+    let (handle, ops) = super::super::ops_with(vec![], vec!["好"]);
+    let sid = handle
+        .call(|core| {
+            core.create_proxy_with_facts(
+                "w-prof",
+                1,
+                crate::kernel::api::Tier::Host,
+                None,
+                ProfileId::View,
+            )
+            .map(|(sid, _)| sid)
+        })
+        .expect("建代理会话");
+    let (meta, events) = ops.history.open(&sid).expect("落盘");
+    assert_eq!(
+        meta.sandbox.ceiling.as_ref().and_then(|l| l.profile),
+        Some(ProfileId::View),
+        "代理档位要显式落盘"
+    );
+    assert!(meta.sandbox.narrowing.is_none());
+    let cfg = ops.sessions.config(&sid).expect("配置视图");
+    assert_eq!(cfg.permission.profile, ProfileId::View);
+    assert_eq!(cfg.permission.label, "仅可查看");
+    let session = handle
+        .call(move |core| core.rebuild_session(&meta, &events))
+        .expect("重建");
+    match session {
+        Session::Single(s) => {
+            let sb = &s.tools.as_ref().expect("工具环境").sandbox;
+            assert_ne!(sb.private, sb.shared, "代理必须有真实私有沙箱");
+            assert!(
+                sb.private.ends_with(".proxy"),
+                "私有沙箱目录是保留名 .proxy：{}",
+                sb.private.display()
+            );
+        }
+        _ => panic!("代理会话该重建为单会话形态"),
+    }
+}
+
+/// 目的：代理也能从状态栏快速切档；不经过 edit_session（代理没有名单）。
+#[test]
+pub(crate) fn proxy_profile_can_be_quick_switched() {
+    use crate::capabilities::permission::api::ProfileId;
+    let (handle, ops) = super::super::ops_with(vec![], vec!["好"]);
+    let sid = handle
+        .call(|core| core.create_proxy("w-switch", 1))
+        .expect("建代理");
+    let target = sid.clone();
+    handle
+        .call(move |core| core.set_permission_profile(&target, ProfileId::View))
+        .expect("代理快速切档");
+    let (meta, _) = ops.history.open(&sid).expect("落盘");
+    assert_eq!(
+        meta.sandbox.ceiling.as_ref().and_then(|l| l.profile),
+        Some(ProfileId::View)
+    );
+    assert_eq!(
+        ops.sessions.config(&sid).unwrap().permission.profile,
+        ProfileId::View
+    );
 }

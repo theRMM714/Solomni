@@ -691,6 +691,7 @@ impl QemuHandle {
                 "ro": access.ro,
                 "ro_tree": access.ro_tree,
                 "private": access.private,
+                "net": access.net,
                 // 只传隐秘字段的**名字**（值走 QGA env），不把值写进临时文件。
                 "env_names": run.env.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>(),
             });

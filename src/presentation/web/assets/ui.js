@@ -115,13 +115,19 @@
     }
     const r = anchor && typeof anchor.getBoundingClientRect === 'function'
       ? anchor.getBoundingClientRect()
-      : { left: 0, bottom: 0 };
-    if (m.style) {
-      m.style.left = Math.round(r.left) + 'px';
-      m.style.top = Math.round(r.bottom + 4) + 'px';
-    }
+      : { left: 0, top: 0, bottom: 0 };
     const root = doc.querySelector('#menu-root') || doc.body;
     if (root) root.appendChild(m);
+    // 菜单优先贴锚点下方；下方放不下就翻到上方。状态栏靠近视口底部，不翻会直接被裁掉。
+    const box = typeof m.getBoundingClientRect === 'function' ? m.getBoundingClientRect() : null;
+    const vh = global.innerHeight || 600;
+    const mh = (box && box.height) || Math.min(320, 44 * (items || []).length);
+    let top = r.bottom + 4;
+    if (top + mh > vh - 8) top = Math.max(8, r.top - mh - 4);
+    if (m.style) {
+      m.style.left = Math.round(r.left) + 'px';
+      m.style.top = Math.round(top) + 'px';
+    }
     openMenu = m;
     const onDown = (e) => { if (e.target !== m && !m.contains?.(e.target)) closeMenu(); };
     const onKey = (e) => {

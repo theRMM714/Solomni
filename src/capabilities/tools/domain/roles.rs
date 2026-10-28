@@ -103,7 +103,16 @@ impl SystemTools {
         let mut out = Vec::new();
         for (id, schema) in &self.tools {
             if schema.capability.trim().is_empty() {
-                out.push(format!("工具 {} 没声明 capability（权限收口依据）", id));
+                out.push(format!("工具 {} 没声明 capability（权限标签）", id));
+            }
+            if schema.scope && schema.effect() != crate::capabilities::permission::api::Effect::Exec
+            {
+                out.push(format!("工具 {} 声明了 scope，但 effect 不是 exec", id));
+            }
+            if schema.effect() != crate::capabilities::permission::api::Effect::None
+                && schema.max_reach().is_empty()
+            {
+                out.push(format!("工具 {} 需要权限，但最大 reach 为空", id));
             }
             if schema.callers.is_empty() {
                 out.push(format!("动作 {} 没声明 callers（谁能调它）", id));

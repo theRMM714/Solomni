@@ -66,7 +66,7 @@
   "src/capabilities/collab/service/tool_loop.rs": {
     "头块：槽外有行或自造槽": 3,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 27,
+    "条目：槽外有行或自造槽": 25,
     "条目：首行不是目的": 12
   },
   "src/capabilities/collab/service/turn_io.rs": {
@@ -85,8 +85,7 @@
   "src/capabilities/conductor/api/mod.rs": {
     "头块：槽外有行或自造槽": 12,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 102,
-    "条目：首行不是目的": 67,
+    "条目：槽外有行或自造槽": 35,
     "行内：注释串后面必须是代码（不能是空行）": 5,
     "行内：连续超过 2 行": 1
   },
@@ -115,8 +114,8 @@
   "src/capabilities/conductor/service/env.rs": {
     "头块：槽外有行或自造槽": 6,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 8,
-    "条目：首行不是目的": 4
+    "条目：槽外有行或自造槽": 6,
+    "条目：首行不是目的": 3
   },
   "src/capabilities/conductor/service/flow.rs": {
     "头块：槽外有行或自造槽": 6,
@@ -254,16 +253,6 @@
   "src/capabilities/mod.rs": {
     "头块：槽外有行或自造槽": 9,
     "头块：缺文件头": 1
-  },
-  "src/capabilities/permission/api.rs": {
-    "头块：槽外有行或自造槽": 1,
-    "头块：缺文件头": 1
-  },
-  "src/capabilities/permission/domain/permission.rs": {
-    "头块：槽外有行或自造槽": 11,
-    "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 17,
-    "条目：首行不是目的": 14
   },
   "src/capabilities/permission/mod.rs": {
     "头块：槽外有行或自造槽": 4,
@@ -478,7 +467,7 @@
   "src/capabilities/tools/domain/schema.rs": {
     "头块：槽外有行或自造槽": 9,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 18,
+    "条目：槽外有行或自造槽": 17,
     "条目：首行不是目的": 12
   },
   "src/capabilities/tools/domain/systool.rs": {
@@ -524,8 +513,8 @@
   "src/capabilities/workspace/domain/workspace.rs": {
     "头块：槽外有行或自造槽": 7,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 41,
-    "条目：首行不是目的": 35
+    "条目：槽外有行或自造槽": 38,
+    "条目：首行不是目的": 33
   },
   "src/capabilities/workspace/domain/workstore.rs": {
     "头块：槽外有行或自造槽": 10,
@@ -649,8 +638,7 @@
   "src/tests/conductor/proxy.rs": {
     "头块：槽外有行或自造槽": 2,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 26,
-    "条目：首行不是目的": 22
+    "条目：槽外有行或自造槽": 4
   },
   "src/tests/detail.rs": {
     "头块：槽外有行或自造槽": 3,
@@ -717,8 +705,7 @@
   "src/tests/session.rs": {
     "头块：槽外有行或自造槽": 2,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 18,
-    "条目：首行不是目的": 13,
+    "条目：槽外有行或自造槽": 5,
     "行内：注释串后面必须是代码（不能是空行）": 1,
     "行内：连续超过 2 行": 1
   },

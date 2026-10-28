@@ -6,7 +6,7 @@
 
 use super::now_ts;
 use crate::capabilities::conductor::domain::work as dw;
-use crate::capabilities::permission::api::Permissions;
+use crate::capabilities::permission::api::{Decision, PermissionSet, Reach};
 use crate::capabilities::workspace::api::{CommitRequest, ResolveRequest, ResolveTake, Workspace};
 use crate::kernel::api::ToolOutcome;
 use crate::kernel::ports::ToolHandler;
@@ -18,13 +18,19 @@ pub struct WorkHandler {
     work: String,
     /// 这一席的 agent 实例名（拉取基线按它记）。
     agent: String,
-    /// 这一席的生效权限：**提交与拉取的作用域**在这里收口（白名单/黑名单只认一个正向判定）。
-    permissions: Permissions,
+    /// 这一席的生效权限：提交与拉取的 reach 与共享区范围在这里收口。
+    permissions: PermissionSet,
 }
 
 /// 逐条路径过读权限：拉不进来的东西，读了也没有，所以在这里就拒绝（不作为提交/冲突问题）。
 /// 纯判定（输入只有生效权限与路径），便于 T1 直接钉规则。
-pub(crate) fn check_readable(permissions: &Permissions, paths: &[String]) -> Result<(), String> {
+pub(crate) fn check_readable(permissions: &PermissionSet, paths: &[String]) -> Result<(), String> {
+    if !permissions.reach.contains(Reach::SharedRead) {
+        return Err(format!(
+            "读取被拒：当前档位「{}」没有共享区读取权限",
+            permissions.profile.label()
+        ));
+    }
     for p in paths {
         if !permissions.read_ok(p) {
             return Err(format!(
@@ -39,10 +45,16 @@ pub(crate) fn check_readable(permissions: &Permissions, paths: &[String]) -> Res
 
 /// 逐条路径过写权限：任一条越界 → 整次提交拒绝（与冲突拒绝同一风格，不静默放过）。
 pub(crate) fn check_writable(
-    permissions: &Permissions,
+    permissions: &PermissionSet,
     paths: &[String],
     deletes: &[String],
 ) -> Result<(), String> {
+    if !permissions.reach.contains(Reach::SharedWrite) {
+        return Err(format!(
+            "提交被拒：当前档位「{}」没有共享区提交权限",
+            permissions.profile.label()
+        ));
+    }
     for p in paths.iter().chain(deletes.iter()) {
         if !permissions.write_ok(p) {
             return Err(format!(
@@ -60,7 +72,7 @@ impl WorkHandler {
         workspace: Arc<dyn Workspace + Send + Sync>,
         work: &str,
         agent: &str,
-        permissions: Permissions,
+        permissions: PermissionSet,
     ) -> WorkHandler {
         WorkHandler {
             workspace,
@@ -217,6 +229,17 @@ impl WorkHandler {
             };
             if let Err(e) = check_readable(&self.permissions, std::slice::from_ref(&path)) {
                 return outcome(false, e);
+            }
+            if self.permissions.decisions.write != Decision::Allow
+                || !self.permissions.reach.contains(Reach::Private)
+            {
+                return outcome(
+                    false,
+                    format!(
+                        "恢复被拒：当前档位「{}」不允许写入私有沙箱",
+                        self.permissions.profile.label()
+                    ),
+                );
             }
             return match self
                 .workspace

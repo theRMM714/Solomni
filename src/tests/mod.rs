@@ -108,6 +108,7 @@ pub(crate) fn single_work(
         }],
         task: None,
         delegate: false,
+        permission: None,
         tier: crate::kernel::api::Tier::Host,
         guest: None,
     }

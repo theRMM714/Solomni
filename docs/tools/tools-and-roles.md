@@ -13,7 +13,10 @@
 ```yaml
 tools:
   read:
-    capability: fs-read   # 能力：决定收口（沙箱 / 围栏）
+    capability: fs-read   # 标签：说明与“核心先核实”筛选用；真正授权看 effect / reach
+    effect: read          # read / write / exec / none
+    reach: [private, shared-read, module-read]   # 工具最大 reach；可省略，按 effect 给默认
+    decision: allow       # 默认处置；profile 的 effect/scope 决定可覆盖
     callers: [user, discussant, executor, solo, core_proxy, planner, orchestrator]   # 谁能调它：user（经呈现层）/ 角色 id
     desc: 读取文本文件（UTF-8）。
     parallel: true        # 同一回复里的多个调用能否真的并发跑
@@ -24,8 +27,10 @@ tools:
         desc: 要读取的路径（用【工作环境】的写法）
 ```
 
-- **`capability` 决定收口，不按"系统 / 模块"一刀切**：`read` / `list` / `search` / `write` / `edit` / `patch` 虽都是系统工具，
-  但碰文件系统，**照样受沙箱与围栏约束**；`say` / `agree` 这类不碰文件。
+- **`effect` / `reach` 决定收口，不按“系统 / 模块”一刀切**：`read` / `list` / `search` / `write` / `edit` / `patch` 虽都是系统工具，
+  但碰文件系统，照样受权限档位与围栏约束；`say` / `agree` 这类 effect=none，不碰文件。
+- **`scope`**：执行类工具可声明 per-call scope（sandbox / external）；当前只有未来的 shell 声明它。
+- **工具卡**：`decision=ask` 时进统一裁决队；选项 id 是 `allow` / `deny` / `allow_turn`。`allow_turn` 只对本轮后续 ask 生效，不改 reach、不落盘。
 - **`callers` 是授权判据**：`user` = 人经呈现层调用，其余是角色 id。它与角色表的（这个身份有什么）是**同一关系的两面**，
   由 `SystemTools::problems` 双向锁死——任何一边漏写 / 多写都是装配错误。
 - **列目录是"核实"的前提**：`read` 只读文件、`search` 要关键词，**没有 `list` 就确认不了"资料齐不齐"**；`read` 遇到目录会如实引导到 `list`。
@@ -45,10 +50,10 @@ roles:
 ## 二、可用工具面（运行时合成）
 
 ```text
-本会话可用工具 = 系统工具表 ∩ 该角色表 + 该成员所属模块的工具
+本会话可用工具 = 系统工具表 ∩ 该角色表 ∩ 当前权限档位 + 该成员所属模块的工具（同样过权限档位）
 ```
 
-越权防线分两段，缺一不可：系统工具查**角色表**；模块工具查**该成员有没有这个模块**（module 消歧）。
+越权防线分两段：**角色表**决定这个身份有哪些工具，**权限档位**决定其中哪些还能用（deny 的工具不发放，ask 的照常发放）；模块工具查**该成员有没有这个模块**（module 消歧）。两段缺一不可。
 
 **注入口径（唯一）**：**总表不进提示词**。每回合由核心查"这一回合的身份能用的工具"，
 把那一份的说明与参数作为一条系统消息随回合注入；原生通道同时用它做工具声明槽。
@@ -166,8 +171,9 @@ roles:
   - 相对路径、`..` 跳出、不在任何根之内：一律拒绝，并把允许的根列回去（如实报错，不纠正）。
   - **这张表只管系统工具**：模块工具的入参不查它；可达范围由围栏（本机档）/ guest 边界（虚拟机档）约束。
 - **会话权限叠加在落点之上**：
-  - 共享区读写受**该会话**的白名单 / 黑名单约束（默认整棵放行；白名单一出现就取代默认，黑名单只做减法；全局黑名单是硬底线）。
-  - `work_commit` 只接受白名单内的相对路径（越界**整条拒绝**）；`work_pull` 只拉白名单内的路径。
+  - 共享区读写受**该会话**的权限档位与共享区范围约束（范围三态 all / none / 路径数组；黑名单只做减法；全局黑名单是硬底线）。
+  - `work_commit` 只接受允许范围内的相对路径（越界**整条拒绝**）；`work_pull` 只拉允许范围内的路径。
+  - 私有沙箱不受共享区路径范围限制；模块目录对内置文件工具永久只读。
   - `work_versions` / `work_resolve` / `work_lost` 走读作用域（它们不写共享主副本，提交仍由 `work_commit` 收口；`work_lost` 的 restore 只写自己的沙箱）。
   - 语义见 [docs/permission/README.md](../permission/README.md)。
 - **编码**：内置 `read` / `write` 读严格 UTF-8（非法字节按替换字符呈现并如实标注——**本程序不猜编码**），写一律 UTF-8；
@@ -219,7 +225,7 @@ prompts/
 
 | 场景 | 约定 |
 | --- | --- |
-| 代理工具 | 当前：六个工具 + `core_proxy` 角色 + 队列桥宿主（真实会话）。委托是**全权**（`granularity=full`）；路径的白 / 黑名单与模块写授权在会话权限（[docs/permission/README.md](../permission/README.md)）；命中 `ask` 表的调用在执行前经统一裁决通道让用户选 `allow` / `deny` / `full`。孩子不把转录推给代理：门的通知、意外停止通知 + `read_session_messages` 主动倒查 |
+| 代理工具 | 当前：六个工具 + `core_proxy` 角色 + 队列桥宿主（真实会话）。代理档位由用户建会话时显式选择并落盘（预设全可达，不再硬编码 full），代理有真实私有沙箱 `.proxy`；权限语义见 [docs/permission/README.md](../permission/README.md)。命中 ask 的调用经统一裁决通道让用户选 `allow` / `deny` / `allow_turn`；没有可回答前端一律拒绝。孩子不把转录推给代理：门的通知、意外停止通知 + `read_session_messages` 主动倒查 |
 | 建会话 = 建 + 写开头 + 开工 | `create_session` 一份声明两处调用：**人经呈现层**给 `name` / `mode` / `agents`（可省 `tier`；虚拟机档时给 `guest`（虚拟根名））先建出会话，后续用 `send_message` 发言推进；**核心代理**给 `mode`（single / collab）+ `agents`（只写身份：`ref` 或 `name`+`modules`+`model`+`chara`；`chara` 可选，复用项取登记处自己的）+ `task`，**建好就开工**（single 以 task 为第一句，collab 以它当本次需求）。后续补充 / 返工 / 代答门仍走 `send_session_message`（**代答要显式给 `reply` = 那张卡上的选项 id**；给不出就不作代答，不替用户猜） |
 | 历史会话的启用 / 继续 | 只读历史只显示「启用会话」：`activate_session` 从盘上重建、确保 guest、解冻整棵子树，**不跑模型**。启用后 `SessionView.continue` 说有断点时才显示上下文动作（单 agent「继续上一轮」/ 协作「恢复协作」），走 `control_session` 的 `continue`；代理不显示。 |
 | 代理工具的生命周期 | `stop` = 把整棵子树落成 `stopped`（拦住派发与唤醒）再**级联中断**在跑的生成，会话上的停止按钮就是这一下；`continue` = 解冻并按形态唤醒接着走；`close` 是终态。停止 / 继续是一对逆操作，没有单独的暂停；都不改写历史 |

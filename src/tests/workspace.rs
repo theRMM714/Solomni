@@ -259,7 +259,7 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
                 tier: "vm".to_string(),
                 guest: Some("definitely-not-a-real-guest".to_string()),
                 pins: BTreeMap::new(),
-                permissions: None,
+                permission: None,
             },
         )
         .expect_err("虚拟根不在场就不许改入虚拟机档");
@@ -1823,15 +1823,15 @@ pub(crate) fn read_only_shared_refuses_builtin_writes_and_leaves_the_fence() {
     );
     assert!(ok.ok, "{}", ok.output);
 
-    // 围栏：只读时主副本不进 rw；可写沙箱时进 rw（核心 / 权限放开那一路）。
-    let spec = FenceSpec::from_sandbox(&sb, false);
+    // 围栏：主副本永远不进 rw（写共享只能走 work_commit）；私有沙箱进 rw。
+    let spec = FenceSpec::for_session(&sb, &[], false);
     assert!(!spec.rw.contains(&sb.shared), "主副本不该进 rw");
     assert!(spec.rw.contains(&sb.private));
     // 会话租约从沙箱带出：同名 agent 的多个并发会话靠它区分围栏归属。
     assert_eq!(spec.lease, sb.session, "围栏租约 = 沙箱的会话 id");
     let writable = test_sandbox("a", &[]);
-    let spec2 = FenceSpec::from_sandbox(&writable, false);
-    assert!(spec2.rw.contains(&writable.shared));
+    let spec2 = FenceSpec::for_session(&writable, &[], false);
+    assert!(!spec2.rw.contains(&writable.shared), "共享写不直接进 rw");
 }
 
 /// env.rs 装出来的 **agent 会话沙箱**默认就是只读共享区（生产接线，不是测试助手自己设的）。
@@ -1848,9 +1848,11 @@ pub(crate) fn agent_sandboxes_from_a_work_are_read_only_for_the_shared_area() {
     let roster = core.scan();
     let sandboxes = core.sandboxes(&meta, &roster).unwrap();
     let sb = sandboxes.list.first().expect("至少一个 agent 沙箱");
-    assert!(!sb.shared_writable, "生产里 agent 沙箱默认只读共享区");
     let (place, path) = sb.resolve(&p(&["w", "work", "x.txt"])).unwrap();
-    assert!(!sb.can_write(&place, &path));
+    assert!(
+        !sb.can_write(&place, &path),
+        "生产里 agent 沙箱不能直接写共享区"
+    );
 }
 
 /// 目的：版本库写闸按**工作**分：不同工作互不阻塞，同一个工作严格串行。

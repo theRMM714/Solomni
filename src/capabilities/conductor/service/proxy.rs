@@ -10,6 +10,9 @@ use crate::capabilities::tools::api::{arg_fault_text, ToolBook, ToolOutcome};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+/// 目的：代理会话自己的私有沙箱目录名（与 work/、children/ 同级，写进保留名表）。
+pub(crate) const PROXY_PRIVATE_DIR: &str = ".proxy";
+
 /// 代理工具的执行器：持有宿主端口、工具声明书、回执文案与幂等账本。
 pub struct ProxyTools {
     host: Arc<dyn ProxyHost + Send + Sync>,
@@ -509,8 +512,14 @@ impl Conductor {
     /// 测试便捷入口：只要引用（产品入口经 `create_work(WorkMode::Proxy)`）。
     #[cfg(test)]
     pub fn create_proxy(&mut self, name: &str, granted_at: i64) -> Result<String, String> {
-        self.create_proxy_with_facts(name, granted_at, crate::kernel::api::Tier::Host, None)
-            .map(|(sid, _)| sid)
+        self.create_proxy_with_facts(
+            name,
+            granted_at,
+            crate::kernel::api::Tier::Host,
+            None,
+            crate::capabilities::permission::api::ProfileId::AllReach,
+        )
+        .map(|(sid, _)| sid)
     }
 
     /// 建代理会话的真身：返回（会话引用, **开场事实**）——事实交给 api 层发布到事件台
@@ -523,6 +532,7 @@ impl Conductor {
         granted_at: i64,
         tier: crate::kernel::api::Tier,
         guest: Option<&str>,
+        profile: crate::capabilities::permission::api::ProfileId,
     ) -> Result<(String, Vec<SessionEvent>), String> {
         validate_work_name(name)?;
         if self.sessions.contains_key(name) || self.history.load(name).is_ok() {
@@ -556,13 +566,20 @@ impl Conductor {
             ts: now_ts(),
             agents: Vec::new(),
             exec,
-            sandbox: Default::default(),
+            sandbox: crate::capabilities::permission::api::SessionSandbox {
+                ceiling: Some(crate::capabilities::permission::api::PermissionLayer {
+                    profile: Some(profile),
+                    ..Default::default()
+                }),
+                narrowing: None,
+            },
             parent: None,
             node: None,
             delegation: Some(Delegation { granted_at }),
             run: RunState::Active,
         };
-        self.workspace.prepare(name, &[])?;
+        self.workspace
+            .prepare(name, &[PROXY_PRIVATE_DIR.to_string()])?;
         let mut session = self.build_proxy_with(&meta, &channel)?;
         let mut events = Vec::new();
         // 授予事实既是 meta 的 `delegation`（可重建），也留一条**可回放记录**：
@@ -587,27 +604,25 @@ impl Conductor {
         meta: &SessionMeta,
         channel: &Channel,
     ) -> Result<AgentSession, String> {
-        let roots = self.workspace.roots(&meta.name, &[])?;
-        let app = self.registry.app();
-        let base = app
-            .sandbox
-            .defaults
-            .to_permissions(&app.sandbox.policy.deny);
+        self.workspace
+            .prepare(&meta.name, &[PROXY_PRIVATE_DIR.to_string()])?;
+        let roots = self
+            .workspace
+            .roots(&meta.name, &[PROXY_PRIVATE_DIR.to_string()])?;
+        let private = roots
+            .agents
+            .get(PROXY_PRIVATE_DIR)
+            .cloned()
+            .ok_or_else(|| "代理会话没有私有沙箱路径".to_string())?;
         let sb = Sandbox {
             work_name: meta.name.clone(),
             session: meta.name.clone(),
             agent: d::SPEAKER.to_string(),
-            // 核心自己不出现在工具进程里；这里保持可写只是维持既有寻址，写类工具不在它的角色面上。
-            shared_writable: true,
             shared: roots.shared.clone(),
-            private: roots.shared.clone(),
+            private,
             modules: BTreeMap::new(),
             modules_with_userdata: std::collections::BTreeSet::new(),
-            // 代理会话：用户选这一形态就是**不确认任何工具**（full）；路径权限沿用全局默认。
-            permissions: crate::capabilities::permission::api::Permissions {
-                granularity: crate::capabilities::permission::api::Granularity::Full,
-                ..base
-            },
+            permissions: self.permissions_for(meta)?,
             // 代理发言席自己住在宿主上（文件工具也跑在宿主），不需要 guest 翻译。
             path_codec: None,
         };

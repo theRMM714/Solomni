@@ -204,7 +204,10 @@ impl Default for AppSettings {
 /// 目的：校验 settings.yaml 的沙箱段——路径、枚举与硬黑名单。
 pub fn validate_sandbox_settings(s: &SandboxSettings) -> Result<(), String> {
     crate::capabilities::permission::api::validate_defaults(&s.defaults)?;
-    crate::capabilities::permission::api::validate(&s.defaults.to_permissions(&s.policy.deny))?;
+    for e in &s.policy.deny {
+        crate::capabilities::permission::api::validate_entry(e)
+            .map_err(|why| format!("sandbox.policy.deny：{}", why))?;
+    }
     for r in &s.policy.host_read_roots {
         let raw = r.trim();
         if raw.is_empty() {

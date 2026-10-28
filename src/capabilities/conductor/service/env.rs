@@ -140,13 +140,11 @@ impl Conductor {
                 work_name: work.clone(),
                 session: meta.name.clone(),
                 agent: a.name.clone(),
-                // 共享主副本对 agent **只读**：写入走 work_commit（见 PRODUCT.md 的版本化工作区）。
-                shared_writable: false,
                 shared: roots.shared.clone(),
                 private,
                 modules,
                 modules_with_userdata,
-                permissions: self.permissions_for(meta),
+                permissions: self.permission_for_agent(meta, &a.name)?,
                 path_codec: path_codec.clone(),
             });
         }
@@ -157,18 +155,54 @@ impl Conductor {
         })
     }
 
-    /// 一条会话的**生效权限**：全局默认（含硬黑名单底线）叠加会话 meta 里的覆盖。
-    /// 只替换显式给出的字段（空集合有确切语义 = 默认整棵工作区，所以覆盖用 Option 表达）；`deny` 只增不减。
+    /// 目的：一条会话的权限链——根在前，自己最后（沿 parent 走到顶）。
+    fn permission_chain(&self, meta: &SessionMeta) -> Result<Vec<SessionMeta>, String> {
+        let mut chain = vec![meta.clone()];
+        let mut cur = meta.clone();
+        while let Some(parent) = cur.parent.clone() {
+            let pm = self.history.meta(&parent)?;
+            chain.push(pm.clone());
+            cur = pm;
+        }
+        chain.reverse();
+        Ok(chain)
+    }
+
+    /// 目的：一条会话的**生效权限**：全局默认 → 根 ceiling → 每层 narrowing → 全局硬黑名单。
     pub(crate) fn permissions_for(
         &self,
         meta: &SessionMeta,
-    ) -> crate::capabilities::permission::api::Permissions {
-        let app = self.registry.app();
-        let base = app
-            .sandbox
-            .defaults
-            .to_permissions(&app.sandbox.policy.deny);
-        base.apply(&meta.sandbox.permissions)
+    ) -> Result<crate::capabilities::permission::api::PermissionSet, String> {
+        let chain = self.permission_chain(meta)?;
+        let root = chain.first().ok_or_else(|| "会话权限链为空".to_string())?;
+        let mut out = self.registry.app().sandbox.defaults.to_permission_set();
+        if let Some(layer) = root.sandbox.root_layer()? {
+            out = out.apply_root(layer)?;
+        }
+        for child in chain.iter().skip(1) {
+            if let Some(layer) = child.sandbox.child_layer()? {
+                out = out.apply_narrowing(layer)?;
+            }
+        }
+        Ok(out.with_hard_deny(&self.registry.app().sandbox.policy.deny))
+    }
+
+    /// 目的：某个 agent 的生效权限：协作主会话里的发言席优先取它自己的子会话 narrowing。
+    fn permission_for_agent(
+        &self,
+        meta: &SessionMeta,
+        agent: &str,
+    ) -> Result<crate::capabilities::permission::api::PermissionSet, String> {
+        if meta.agents.len() == 1 && meta.agents[0].name == agent {
+            return self.permissions_for(meta);
+        }
+        let child_name = format!("{}--{}", meta.name, agent);
+        if let Ok(child) = self.history.meta(&child_name) {
+            if child.parent.as_deref() == Some(meta.name.as_str()) {
+                return self.permissions_for(&child);
+            }
+        }
+        self.permissions_for(meta)
     }
 
     /// 工具环境：内置文件工具永远可用；外部工具按模块分组放行（模块 id → 目录 + 工具表）。
@@ -190,11 +224,25 @@ impl Conductor {
         guest_lease: String,
         host_plan: &pkgs::PackagePlan,
     ) -> crate::capabilities::session::api::MemberTools {
-        // 角色表发放的系统工具 id 清单（工具面的名字部分）；核心自有工具按它决定装不装。
-        let allowed = self.role_tools(role);
+        // 角色表发放的系统工具 id 清单（工具面的名字部分），再按权限档位过滤：
+        // deny 的工具不发放（不是发放后再拒），ask 的照常发放。
+        let book = self.systools.book();
+        let allowed: Vec<String> = self
+            .role_tools(role)
+            .into_iter()
+            .filter(|id| {
+                book.get(id)
+                    .map(|s| {
+                        sb.permissions
+                            .offers(id, s.effect(), &s.max_reach(), s.scope)
+                    })
+                    .unwrap_or(true)
+            })
+            .collect();
         let handlers = self.work_handlers(sb, &allowed);
         // 工具面：静态模块工具 + **已就绪**常驻服务的操作（操作是服务跑起来才发现的，按模块现填）。
-        let with_modules = self.systools.allows_module_tools(role);
+        let with_modules = self.systools.allows_module_tools(role)
+            && !sb.permissions.decisions.exec_sandbox.is_deny();
         let mut table = crate::capabilities::session::api::tool_table(modules);
         // 服务清单是全局的：只把**这个 agent 工具面里**的模块服务写进提示词。
         let started = if with_modules {
@@ -236,7 +284,7 @@ impl Conductor {
         let mut notes = crate::capabilities::tools::api::tool_notes(
             &*self.prompt,
             sb,
-            modules,
+            if with_modules { modules } else { &[] },
             &service_param_lines,
         );
         if !module_tool_lines.is_empty() {
@@ -264,8 +312,8 @@ impl Conductor {
             // 围栏：可达范围 + 断网 + 环境白名单的落点，全部由该 agent 的沙箱派生（机制在 adapters）；
             // 只读根来自用户显式授权（`sandbox.policy.host_read_roots`）与本机运行包的包根。
             fence: {
-                let mut fence = crate::kernel::api::FenceSpec::from_sandbox(sb, net)
-                    .with_read_only(self.host_read_roots());
+                let mut fence =
+                    crate::kernel::api::FenceSpec::for_session(sb, &self.host_read_roots(), net);
                 fence.ro_tree.extend(host_plan.roots.iter().cloned());
                 fence.ro_tree.sort();
                 fence.ro_tree.dedup();

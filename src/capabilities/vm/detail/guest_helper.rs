@@ -28,6 +28,7 @@ SYS_CREATE = 444
 SYS_ADD = 445
 SYS_RESTRICT = 446
 RULE_PATH_BENEATH = 1
+CLONE_NEWNET = 0x40000000
 TIMEOUT_SECS = 30
 
 
@@ -186,6 +187,12 @@ def main():
         env["TMPDIR"] = home
         env["TMP"] = home
         env["TEMP"] = home
+
+    # 本次调用没有网络 reach：给子进程一个空网络命名空间。失败必须 fail-closed，
+    # 不能把"应该断网"悄悄降级成"照常联网"。
+    if not policy.get("net", True):
+        if libc.unshare(CLONE_NEWNET) != 0:
+            die("unshare(CLONE_NEWNET): " + os.strerror(ctypes.get_errno()))
 
     try:
         child = subprocess.Popen(

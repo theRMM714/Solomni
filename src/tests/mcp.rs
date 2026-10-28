@@ -3,6 +3,8 @@
 //! 不管：进程与围栏机制（在 kernel 的 SessionHost 实现里）；真实服务的端到端另有用例。
 //! 联动：适配器见 src/capabilities/residents/detail/mcp.rs；替身见 src/tests/doubles.rs。
 
+use crate::capabilities::collab::service::tool_loop::CallGrant;
+use crate::capabilities::permission::api::{Decision, Reach, ReachSet};
 use crate::capabilities::residents::detail::McpAdapter;
 use crate::capabilities::residents::ports::{LaunchSpec, ServiceAdapter};
 use crate::kernel::api::FenceSpec;
@@ -227,7 +229,11 @@ fn model_tool_face_exposes_started_service_ops() {
         body: String::new(),
         lead: String::new(),
     };
-    let (module, outcome) = dispatch_external(&ctx, &inv, None);
+    let grant = CallGrant {
+        reach: ReachSet::from([Reach::Private, Reach::ModuleRead, Reach::ModuleWrite]),
+        decision: Decision::Allow,
+    };
+    let (module, outcome) = dispatch_external(&ctx, &inv, None, &grant);
     assert_eq!(module, "m0");
     assert!(
         outcome.ok && outcome.output.contains("echo"),

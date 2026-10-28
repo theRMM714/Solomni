@@ -331,6 +331,48 @@ impl Conductor {
         .unusable
     }
 
+    /// 目的：把一条会话的生效权限变成配置视图（含四档可选值与收窄提示）。
+    fn permission_view(
+        &self,
+        meta: &SessionMeta,
+    ) -> Result<crate::capabilities::conductor::api::PermissionView, String> {
+        let effective = self.permissions_for(meta)?;
+        let parent_profile = match &meta.parent {
+            Some(parent) => Some(self.permissions_for(&self.history.meta(parent)?)?.profile),
+            None => None,
+        };
+        let warning = if effective.is_no_access() {
+            "当前根档位与本次收窄没有交集：这个会话目前没有可用权限。".to_string()
+        } else {
+            String::new()
+        };
+        Ok(crate::capabilities::conductor::api::PermissionView {
+            profile: effective.profile,
+            label: effective.profile.label().to_string(),
+            summary: effective.profile.summary().to_string(),
+            reach: effective.reach.to_vec(),
+            decisions: crate::capabilities::conductor::api::PermissionDecisionsView {
+                read: effective.decisions.read,
+                write: effective.decisions.write,
+                exec_sandbox: effective.decisions.exec_sandbox,
+                exec_external: effective.decisions.exec_external,
+            },
+            shared: crate::capabilities::conductor::api::PermissionSharedView {
+                read: effective.shared_read.clone(),
+                write: effective.shared_write.clone(),
+                deny: effective.deny.clone(),
+            },
+            tools: effective.tools.clone(),
+            narrowed: meta.parent.is_some() && meta.sandbox.narrowing.is_some(),
+            parent_profile,
+            warning,
+            profiles: crate::capabilities::permission::api::ProfileId::all()
+                .into_iter()
+                .map(|p| p.spec())
+                .collect(),
+        })
+    }
+
     /// 配置视图：把「能改什么、现在是什么、缺什么」如实给出（每次读取都重扫模块清单与包库）。
     pub fn session_config(&self, sid: &str) -> Result<SessionConfig, String> {
         let (meta, events) = self.history_open(sid)?;
@@ -375,7 +417,7 @@ impl Conductor {
             guest: meta.exec.guest.clone(),
             guests: self.guest_bases()?,
             net: self.network_allowed(),
-            permissions: self.permissions_for(&meta),
+            permission: self.permission_view(&meta)?,
             pins: meta.exec.pins.clone(),
             runtime: self.runtime_report_for(&meta.exec),
             runtimes_dir: crate::kernel::api::slash(&self.packages.runtimes_dir()),
@@ -409,7 +451,13 @@ impl Conductor {
         edit: SessionEdit,
     ) -> Result<(PreparedEdit, Option<EditGuest>), String> {
         // 改配要重建整棵子树的档位/guest 关联：任一在跑都拒绝（先停再改）。
-        for s in self.subtree_of(sid) {
+        // 权限是根级动作：切档要求整棵 work tree 空闲，避免子会话用旧快照继续跑。
+        let guard = if edit.permission.is_some() {
+            self.work_root(sid).unwrap_or_else(|_| sid.to_string())
+        } else {
+            sid.to_string()
+        };
+        for s in self.subtree_of(&guard) {
             if self.running.contains(&s) {
                 return Err(Self::running_refusal(&s));
             }
@@ -447,8 +495,8 @@ impl Conductor {
         let roster = self.scan();
         let reserved = self.reserved_names();
         let mut metas: Vec<AgentMeta> = Vec::new();
-        if let Some(p) = &edit.permissions {
-            crate::capabilities::permission::api::validate_override(p)?;
+        if let Some(p) = &edit.permission {
+            crate::capabilities::permission::api::validate_layer(p)?;
         }
         for a in &edit.agents {
             crate::capabilities::registry::api::validate_name(&a.name)?;
@@ -565,12 +613,37 @@ impl Conductor {
         new_meta.modules = flat_modules(&metas);
         new_meta.agents = metas.clone();
         new_meta.exec = spec.clone();
-        if let Some(p) = &edit.permissions {
-            new_meta.sandbox.permissions = p.clone();
+        if let Some(p) = &edit.permission {
+            if meta.parent.is_none() {
+                // 根：只更新 ceiling；子会话的 narrowing 原样保留，出计划/装配时再求交。
+                self.permissions_for(&meta)?.apply_root(p)?;
+                new_meta.sandbox.ceiling = Some(p.clone());
+                new_meta.sandbox.narrowing = None;
+            } else {
+                // 子：只能收窄；父的生效权限是校验基线。
+                let parent = self
+                    .history
+                    .meta(meta.parent.as_deref().unwrap_or_default())?;
+                self.permissions_for(&parent)?.apply_narrowing(p)?;
+                new_meta.sandbox.narrowing = Some(p.clone());
+                new_meta.sandbox.ceiling = None;
+            }
         }
         // 同一 agent 全树只有一份配置：子会话编辑写回所属名单；主会话 / proxy 子工作编辑同步整棵子树。
-        let mut old_children = Vec::new();
-        let mut new_children = Vec::new();
+        let mut old_children: Vec<SessionMeta> = Vec::new();
+        let mut new_children: Vec<SessionMeta> = Vec::new();
+        // 子会话改权限时，它自己的后代有效权限也跟着变：旧围栏一并撤销（它们不重写 meta）。
+        if owner.name != meta.name && edit.permission.is_some() {
+            for child in self.subtree_of(sid) {
+                if child == sid {
+                    continue;
+                }
+                let cm = self.history.meta(&child)?;
+                if !old_children.iter().any(|x| x.name == cm.name) {
+                    old_children.push(cm);
+                }
+            }
+        }
         if owner.name != meta.name {
             let mut new_owner = owner.clone();
             for a in &metas {
@@ -589,7 +662,6 @@ impl Conductor {
                 let mut cm = self.history.meta(&child)?;
                 old_children.push(cm.clone());
                 cm.exec = spec.clone();
-                cm.sandbox = new_meta.sandbox.clone();
                 for ca in &mut cm.agents {
                     if let Some(na) = new_meta.agents.iter().find(|a| a.name == ca.name) {
                         *ca = na.clone();
@@ -660,6 +732,60 @@ impl Conductor {
         ))
     }
 
+    /// 目的：用户快速切档——只改 profile（重置 reach / decisions / 逐工具决定），保留共享区范围与黑名单。
+    /// 约束：根级动作；整棵 work tree 有会话在生成时拒绝；切换在下一次权限判定生效。
+    pub(crate) fn set_permission_profile(
+        &mut self,
+        sid: &str,
+        profile: crate::capabilities::permission::api::ProfileId,
+    ) -> Result<(), String> {
+        let (meta, _) = self.history_open(sid)?;
+        let guard = self.work_root(sid).unwrap_or_else(|_| sid.to_string());
+        for s in self.subtree_of(&guard) {
+            if self.running.contains(&s) {
+                return Err(Self::running_refusal(&s));
+            }
+        }
+        let mut layer = if meta.parent.is_none() {
+            meta.sandbox.ceiling.clone()
+        } else {
+            meta.sandbox.narrowing.clone()
+        }
+        .unwrap_or_default();
+        layer.profile = Some(profile);
+        layer.reach = None;
+        layer.decisions = None;
+        layer.tools.clear();
+        if meta.parent.is_none() {
+            self.permissions_for(&meta)?.apply_root(&layer)?;
+        } else {
+            let parent = self
+                .history
+                .meta(meta.parent.as_deref().unwrap_or_default())?;
+            self.permissions_for(&parent)?.apply_narrowing(&layer)?;
+        }
+        let mut new_meta = meta.clone();
+        if meta.parent.is_none() {
+            new_meta.sandbox.ceiling = Some(layer);
+            new_meta.sandbox.narrowing = None;
+        } else {
+            new_meta.sandbox.narrowing = Some(layer);
+            new_meta.sandbox.ceiling = None;
+        }
+        let changed = self.subtree_of(sid);
+        for s in &changed {
+            if let Ok(m) = self.history.meta(s) {
+                self.release_session_fences(&m);
+            }
+        }
+        self.history.save_meta(&new_meta)?;
+        self.record_config(sid, &new_meta);
+        for s in changed {
+            self.sessions.remove(&s);
+        }
+        Ok(())
+    }
+
     /// 目的：改配的第二段（核心）——写回 meta、撤旧围栏授权、记旁路配置、丢掉内存会话。
     pub(crate) fn commit_edit(&mut self, prepared: PreparedEdit) -> Result<(), String> {
         let PreparedEdit {
@@ -695,9 +821,11 @@ impl Conductor {
         match self.sandboxes(meta, &roster) {
             Ok(sandboxes) => {
                 for sb in &sandboxes.list {
-                    let spec =
-                        crate::kernel::api::FenceSpec::from_sandbox(sb, self.network_allowed())
-                            .with_read_only(self.host_read_roots());
+                    let spec = crate::kernel::api::FenceSpec::for_session(
+                        sb,
+                        &self.host_read_roots(),
+                        self.network_allowed(),
+                    );
                     if let Err(e) = self.tools.release_fence(&spec) {
                         self.log.warn(
                             "conductor::release_session_fences",
@@ -723,6 +851,14 @@ impl Conductor {
             "guest": meta.exec.guest,
             "net": self.network_allowed(),
             "pins": meta.exec.pins,
+            "permission": serde_json::to_value(&meta.sandbox).unwrap_or(serde_json::Value::Null),
+            "permission_effective": self.permissions_for(meta).ok().map(|p| serde_json::json!({
+                "profile": p.profile,
+                "reach": p.reach,
+                "decisions": p.decisions,
+                "shared": { "read": p.shared_read, "write": p.shared_write, "deny": p.deny },
+                "tools": p.tools,
+            })),
             "agents": meta.agents.iter().map(|a| serde_json::json!({
                 "name": a.name,
                 "modules": a.modules,
@@ -933,6 +1069,28 @@ impl Conductor {
                     Some(Session::Single(s)) => s.context_usage(),
                     _ => None,
                 };
+                let (permission_profile, permission_label, permission_narrowed, permission_parent) =
+                    match self.history.meta(&sid) {
+                        Ok(m) => {
+                            let parent = m.parent.as_ref().and_then(|p| {
+                                self.history.meta(p).ok().and_then(|pm| {
+                                    self.permissions_for(&pm)
+                                        .ok()
+                                        .map(|ep| ep.profile.as_str().to_string())
+                                })
+                            });
+                            match self.permissions_for(&m) {
+                                Ok(p) => (
+                                    p.profile.as_str().to_string(),
+                                    p.profile.label().to_string(),
+                                    m.parent.is_some() && m.sandbox.narrowing.is_some(),
+                                    parent,
+                                ),
+                                Err(_) => (String::new(), "权限不可用".to_string(), false, None),
+                            }
+                        }
+                        Err(_) => (String::new(), String::new(), false, None),
+                    };
                 SessionView {
                     running,
                     sid,
@@ -941,6 +1099,10 @@ impl Conductor {
                     tier: exec.tier.as_str().to_string(),
                     tier_ready: readiness.ready(),
                     tier_missing: readiness.missing().iter().map(|s| s.to_string()).collect(),
+                    permission_profile,
+                    permission_label,
+                    permission_narrowed,
+                    permission_parent,
                     can_update_task,
                     run,
                     pending,
@@ -1059,6 +1221,8 @@ impl Conductor {
                 now_ts(),
                 spec.tier,
                 spec.guest.as_deref(),
+                spec.permission
+                    .unwrap_or(crate::capabilities::permission::api::ProfileId::AllReach),
             )?;
             return Ok((
                 PreparedWork::Ready(WorkOpened {
@@ -1165,8 +1329,17 @@ impl Conductor {
                 },
             },
             sandbox: match parent {
-                Some(p) => self.history.meta(p)?.sandbox,
-                None => Default::default(),
+                // 子会话只带自己的 narrowing；根 ceiling 沿祖先链现算，不再复制父权限。
+                Some(_) => Default::default(),
+                None => crate::capabilities::permission::api::SessionSandbox {
+                    ceiling: spec.permission.map(|profile| {
+                        crate::capabilities::permission::api::PermissionLayer {
+                            profile: Some(profile),
+                            ..Default::default()
+                        }
+                    }),
+                    narrowing: None,
+                },
             },
             run: RunState::Active,
         };
