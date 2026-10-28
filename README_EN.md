@@ -28,7 +28,7 @@ Solomni is an **agent runtime environment (AgentOS) that runs on your own machin
 | --- | --- |
 | **Core** | The only program in the product (Rust). It provides the mechanisms: sessions and transcripts, task orchestration and acceptance, tool execution and fencing, the registry, rewind and compaction |
 | **Module** | A folder `modules/<id>/`: a `module.yaml` (capability summary + tool usage + tool declarations, optionally resident services and secret fields) plus the tools themselves — any language, anything that runs |
-| **Agent** | A name + the modules it holds (possibly none: only built-in file tools) + a model + its own sandbox. Whichever agent a module is loaded into, it speaks in that agent's name |
+| **Agent** | A name + the modules it holds (possibly none: only built-in file tools and shell) + a model + its own sandbox. Whichever agent a module is loaded into, it speaks in that agent's name |
 | **Users** | People and agents. People use the interfaces (terminal / local web UI), agents use the module contract — the same modules, two doors |
 
 ## What works today
@@ -38,7 +38,8 @@ Solomni is an **agent runtime environment (AgentOS) that runs on your own machin
   (contract in [MODULE_SPEC.md](MODULE_SPEC.md)).
 - **Sessions and history**: one directory per piece of work (`session/<name>/`); rewind / archive / delete / restore, transcript replay, context compaction,
   versioned shared area (`work_pull` / `work_commit` / `work_status` / `work_versions` / `work_resolve` / `work_lost`), plus a user-facing commit history with non-destructive rollback.
-- **Three isolation layers**: path checks inside the built-in tools → every tool process runs behind the gate process (environment allowlist / process tree / timeout kills the whole tree)
+- **Shell**: a one-shot `shell` for build / test / scripts (executor, solo and the core proxy for verification). Default `scope=sandbox` touches only the private sandbox plus read-only base / project toolchains; `scope=external` also reads the shared area, module dirs and authorized host roots and may use the network, with the session profile deciding ask / allow. The shared area stays read-only and module secrets are never injected.
+- **Three isolation layers**: path checks inside the built-in file tools (shell's boundary is the fence) → every tool process and shell runs behind the gate process (environment allowlist / process tree / timeout or cancel kills the whole tree)
   → platform fences (Windows AppContainer, Linux Landlock, macOS seatbelt); if a mechanism cannot be installed, the capability grade is reported honestly.
 - **Two execution tiers**: host tier (default) and vm tier (module tools run inside a guest). The vm tier is pluggable along host × engine × guest × channel × share;
   Linux (QEMU/KVM + virtiofs, falling back to 9p when virtiofsd is absent) and Windows (QEMU/WHPX + SMB guestfwd) are verified on real machines; without smbd the Windows vm tier is unavailable (provision it; no copy fallback). copy is a development/emergency-only channel and never a user backend;

@@ -76,3 +76,36 @@
   blocked_by: |
     本期不做（用户决定）；macOS 另有平台机制缺口，Windows guest 需要完整的新机制。
 
+- id: vm.guest-run-cancel
+  scope: global
+  level: T3
+  why: |
+    guest 里的工具 / shell 只有超时收口：`timeout_secs` 到点由 helper 杀整棵进程树；
+    用户在生成中点停止不会立即取消 guest 内正在跑的命令，只会等到 timeout。
+    host 侧的取消旗已经杀树；这条只针对 guest。
+  how: |
+    helper 协议加取消通道（QGA 写取消标记或另开控制通道），exec 侧轮询并 killpg；
+    或让 guest 命令落在独立 cgroup 里，核心 stop 时按租约杀。不能只靠缩短 timeout。
+  accept: |
+    guest 内正在跑的命令在 stop 后立即被终止（有可观察的时间上限）；timeout 仍照常收口；
+    helper 失败 fail-closed；三平台 guest（当前只 Linux）契约一致；node run-tests.js 全绿。
+  blocked_by: 缺少 guest 内取消通道（helper 一次执行、没有取消消息；本期只到 timeout）
+
+- id: permission.windows-per-call-narrowing
+  scope: global
+  level: T3
+  why: |
+    Windows 的容器 ACL 是持久的：`prepare_fence` 只加 ACE，`release_fence` 只在会话生命周期撤。
+    于是模块工具的按次围栏在会话内是**并集**：同一个 agent 先跑过 external 或模块工具，之后档位收窄到
+    workspace，旧的 shared / module / host ACE 仍留在会话 profile 上。shell 的 sandbox 已用按次临时
+    profile（W1）绕开这条，但模块工具没有。
+  how: |
+    二选一：给所有按次执行用独立容器 profile（或独立 SID），或让每次调用带自己的 lease 并在调用后
+    撤该次 ACE（grant 台账已支持多 owner）。后者的成本是每次调用写/撤目录 ACL，需要真机测模块目录规模。
+  accept: |
+    Windows 上 profile 从 external 收窄到 workspace 后，模块工具 / shell 都读不到外部根；
+    并发调用互不撤权；会话删除与崩溃回收不留孤儿 ACL；其它平台行为不变；node run-tests.js 全绿。
+  blocked_by: 缺少模块工具的按次容器 profile / 按次撤 ACE 机制（shell 的 W1 只覆盖 shell）
+
+
+

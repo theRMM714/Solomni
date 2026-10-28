@@ -29,7 +29,7 @@ tools:
 
 - **`effect` / `reach` 决定收口，不按“系统 / 模块”一刀切**：`read` / `list` / `search` / `write` / `edit` / `patch` 虽都是系统工具，
   但碰文件系统，照样受权限档位与围栏约束；`say` / `agree` 这类 effect=none，不碰文件。
-- **`scope`**：执行类工具可声明 per-call scope（sandbox / external）；当前只有未来的 shell 声明它。
+- **`scope`**：执行类工具可声明 per-call scope（sandbox / external）；当前只有 shell 声明它。
 - **工具卡**：`decision=ask` 时进统一裁决队；选项 id 是 `allow` / `deny` / `allow_turn`。`allow_turn` 只对本轮后续 ask 生效，不改 reach、不落盘。
 - **`callers` 是授权判据**：`user` = 人经呈现层调用，其余是角色 id。它与角色表的（这个身份有什么）是**同一关系的两面**，
   由 `SystemTools::problems` 双向锁死——任何一边漏写 / 多写都是装配错误。
@@ -134,6 +134,19 @@ roles:
   只是各自进自己的账本：呈现层进运行日志，模型侧进**转录工具行**（可回放）。**缺运行包 = 不执行**：两条路径读同一把尺子（`runtime_report.missing`），
   目录里如实标不可用，不静默降级。
 
+## 三之三、执行类系统工具：shell
+
+`systools/tools.yaml` 的 `shell` 是唯一声明 per-call `scope` 的系统工具；它不新建执行机制：host 走 kernel 的 `ProcessRunner`，VM 走 guest helper。
+
+- 参数：`command`（必填）、`scope`（sandbox / external，缺省 sandbox）、`timeout_secs`（缺省 120，最大 600）。cwd 固定私有沙箱；无交互 stdin / TTY；输出 16k（4k 开头 + 12k 结尾）；命令上限 8000 字符；回执带退出码。
+- **scope 是本次调用的 reach 请求，profile 才是用户上限**：sandbox 只给 private + 基础 / 项目工具链只读（net=false）；external 在 sandbox 上再加 shared-read / module-read / host-read / network。requested 不是 granted 子集 = 拒绝，不弹卡。
+- profile：view 不发放；workspace sandbox allow、external deny；external sandbox allow、external ask；all_reach sandbox / external allow。sandbox 与 external 都要求围栏真强制（`allow_degraded=false`），装不上拒绝。
+- 围栏：shell 的 `for_call` 另加 `runtime_roots`（项目内基础工具链 + 本 agent 模块运行包根）；模块工具行为不变。Windows 上 sandbox 用按次临时容器 profile（W1），结束撤 ACE 并删 profile。
+- 平台：Linux / macOS 用 sh；Windows 用 PowerShell（pwsh 7 优先、5.1 回退；`-File` 临时 .ps1，UTF-8 BOM）；VM Linux guest 用 /bin/sh，helper 按 `timeout_secs` 杀树；guest 立即取消本期不做。
+- 角色：executor / solo / core_proxy。代理的 shell 只做验收性核对，不替执行席产出；共享区只读，仍没有 work_pull / work_commit / 模块工具。
+- 路径：shell 不接受模型给的 path 参数，**不适用** §五 的路径寻址表；边界是围栏。共享区内容先 work_pull 进沙箱；external 只额外读主副本，不写。
+- 隐私：shell 不注入模块 secrets，不声明 module-write；模块 userdata 不可写。
+
 ## 四、核心操作必须走工具调用
 
 **规则**：任何**会驱动核心**的产出都必须是一次**工具调用**——建任务链、节点验收、总验收、代拟 / 推荐名单、执行席回报。
@@ -207,11 +220,11 @@ prompts/
 | 角色 | 何时 | 工具面（`systools/roles.yaml`） |
 | --- | --- | --- |
 | `discussant` | 讨论阶段 | `say` `agree` `leave` `ask` `read` `list` `search` |
-| `executor` | 任务链节点（agent 子会话） | `read` `list` `write` `edit` `patch` `delete` `search` `work_pull` `work_commit` `work_status` `work_versions` `work_resolve` `work_lost` `submit_report` + 该 agent 的模块工具 |
-| `solo` | 用户建的单 agent 工作 | `read` `list` `write` `edit` `patch` `delete` `search` `work_pull` `work_commit` `work_status` `work_versions` `work_resolve` `work_lost` + 该 agent 的模块工具（**不发** `submit_report`） |
+| `executor` | 任务链节点（agent 子会话） | `read` `list` `write` `edit` `patch` `delete` `search` `shell` `work_pull` `work_commit` `work_status` `work_versions` `work_resolve` `work_lost` `submit_report` + 该 agent 的模块工具 |
+| `solo` | 用户建的单 agent 工作 | `read` `list` `write` `edit` `patch` `delete` `search` `shell` `work_pull` `work_commit` `work_status` `work_versions` `work_resolve` `work_lost` + 该 agent 的模块工具（**不发** `submit_report`） |
 | `planner` | 核心整理派发 | `read` `search` `plan` `slate` `verdict` |
 | `orchestrator` | 核心链中推进 | `read` `search` `node_verdict` `checklist` |
-| `core_proxy` | 核心代理（用户把决定权整块交给它，代用户决定） | `catalog_agents` `create_session` `send_session_message` `observe_session` `read_session_messages` `control_session` `read` `list` `search`（**不发**模块工具） |
+| `core_proxy` | 核心代理（用户把决定权整块交给它，代用户决定） | `catalog_agents` `create_session` `send_session_message` `observe_session` `read_session_messages` `control_session` `read` `list` `search` `shell`（**不发**模块工具） |
 
 **验收不是独立角色**：它是 `orchestrator` 的一个工具 / 一步（"根据验收情况推进任务"本就是同一个循环）。
 
@@ -225,7 +238,7 @@ prompts/
 
 | 场景 | 约定 |
 | --- | --- |
-| 代理工具 | 当前：六个工具 + `core_proxy` 角色 + 队列桥宿主（真实会话）。代理档位由用户建会话时显式选择并落盘（预设全可达，不再硬编码 full），代理有真实私有沙箱 `.proxy`；权限语义见 [docs/permission/README.md](../permission/README.md)。命中 ask 的调用经统一裁决通道让用户选 `allow` / `deny` / `allow_turn`；没有可回答前端一律拒绝。孩子不把转录推给代理：门的通知、意外停止通知 + `read_session_messages` 主动倒查 |
+| 代理工具 | 当前：六个工具 + `shell` + `core_proxy` 角色 + 队列桥宿主（真实会话）。代理档位由用户建会话时显式选择并落盘（预设全可达，不再硬编码 full），代理有真实私有沙箱 `.proxy`；权限语义见 [docs/permission/README.md](../permission/README.md)。代理的 `shell` 只做验收性核对（跑测试 / 看产物），不替执行席产出；共享区只读，仍没有 `work_pull` / `work_commit` / 模块工具；`net` 跟随全局 `sandbox.policy.network`。命中 ask 的调用经统一裁决通道让用户选 `allow` / `deny` / `allow_turn`；没有可回答前端一律拒绝。孩子不把转录推给代理：门的通知、意外停止通知 + `read_session_messages` 主动倒查 |
 | 建会话 = 建 + 写开头 + 开工 | `create_session` 一份声明两处调用：**人经呈现层**给 `name` / `mode` / `agents`（可省 `tier`；虚拟机档时给 `guest`（虚拟根名））先建出会话，后续用 `send_message` 发言推进；**核心代理**给 `mode`（single / collab）+ `agents`（只写身份：`ref` 或 `name`+`modules`+`model`+`chara`；`chara` 可选，复用项取登记处自己的）+ `task`，**建好就开工**（single 以 task 为第一句，collab 以它当本次需求）。后续补充 / 返工 / 代答门仍走 `send_session_message`（**代答要显式给 `reply` = 那张卡上的选项 id**；给不出就不作代答，不替用户猜） |
 | 历史会话的启用 / 继续 | 只读历史只显示「启用会话」：`activate_session` 从盘上重建、确保 guest、解冻整棵子树，**不跑模型**。启用后 `SessionView.continue` 说有断点时才显示上下文动作（单 agent「继续上一轮」/ 协作「恢复协作」），走 `control_session` 的 `continue`；代理不显示。 |
 | 代理工具的生命周期 | `stop` = 把整棵子树落成 `stopped`（拦住派发与唤醒）再**级联中断**在跑的生成，会话上的停止按钮就是这一下；`continue` = 解冻并按形态唤醒接着走；`close` 是终态。停止 / 继续是一对逆操作，没有单独的暂停；都不改写历史 |
@@ -249,6 +262,7 @@ prompts/
 - 用户可在 Web 会话状态栏或 CLI `work` 命令看提交历史、提交详情与文本预览，并把共享区非破坏性回滚到任一提交点；
   agent 侧仍只拿 `work_*` 工具，不给回滚入口。
 
+- 执行类系统工具 `shell` 对 executor / solo / core_proxy 发放：sandbox 只碰私有沙箱 + 基础 / 项目工具链只读；external 按档位 ask / allow；Windows sandbox 用按次临时 profile。
 - 工具面**按回合按身份注入**（总表不进提示词）；越权调用如实拒绝并落工具行；悬空引用由装配期 `problems()` 挡下。
 - 核心操作与执行席回报都从**工具参数**取载荷。
 - 代理会话复用**通用成员循环**（没有「代理专用」分支）；工具动作经队列桥回核心线程执行。

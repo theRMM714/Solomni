@@ -11,8 +11,9 @@
 
 - 系统工具总表、角色表与名字表（`systools/` 三份），以及「按角色发放工具面 / 按表校验调用」的唯一判据。
 - 内置文件工具（read / list / write / edit / patch / delete / search）的执行编排与纯规则、工具参数契约、补丁通道。
+- 执行类系统工具 `shell` 的参数 / scope 规则与派发；host 的拉起与围栏机制是 kernel 共享的 `ProcessRunner` / `confine`，VM 走 guest。
 - 模块工具进程的执行编排；拉起与围栏机制是 kernel 共享的 `ProcessRunner` / `confine`。
-- 围栏可达范围的派生（`domain/fence.rs` 的 `from_sandbox` / `standalone`）。
+- 围栏可达范围的派生（`domain/fence.rs` 的 `for_call` / `for_session` / `standalone`）。
 
 **不管**：
 
@@ -24,6 +25,8 @@
 `api::Tools`（按角色发放工具面 / 总表 / 自检）+ `api::ToolExec`（跑模块工具与系统工具、释放围栏）。出站端口 `SysIo` 与 kernel 共享的 `ProcessRunner` / `FenceHost` 由 `service/mod.rs` 持有（R12）；`SystoolsSource` 只在装配时读一次，不持有。
 
 模块工具的一次执行经 `--fence-run` 守门进程完成（命令与参数分开、环境白名单、超时杀树），协议在 [kernel 的「工具进程与守门协议」](../kernel/README.md)。
+
+`shell` 是执行类系统工具：host 走同一个 `ProcessRunner`（Unix `sh`、Windows PowerShell），VM 走 guest helper；sandbox / external 由 `scope` 请求、profile 封顶。Windows 的 sandbox shell 用按次临时容器 profile（W1）把 ACL 收窄做实；细节见 [tools-and-roles.md](tools-and-roles.md) 的「执行类系统工具：shell」。
 
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 

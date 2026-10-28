@@ -40,42 +40,4 @@
     有意推迟（不是缺条件）：先把「让出回合 + 停下叫醒」的机制提示词做对，
     再评估定时器还需要不需要——机制提示词不做，定时器只会变成轮询的新马甲。
 
-- id: systool.shell
-  scope: global
-  level: T5
-  why: |
-    执行席现在只能用内置文件工具和模块工具；零模块 agent 无法构建 / 测试 / 跑脚本，
-    模块作者也要为每个构建命令写一个工具。需要一个通用 shell，但必须复用现有
-    ProcessRunner / 围栏 / guest，不新建第二套执行机制；且默认只能碰私有沙箱，
-    越过沙箱必须走 ask / allow_turn。
-  how: |
-    1) systools/tools.yaml 加 shell：一次性命令；参数 command、scope（sandbox / external，默认 sandbox）、
-       timeout_secs；cwd 固定私有沙箱；无 stdin / TTY；head + tail 截断；退出码回执。
-    2) 不做 shell 专属权限模式：shell 读会话四档（仅可查看 / 工作区内修改 / 外部可达（逐次确认）/
-       全可达（自动放行））授予的 reach；scope 是模型对每次调用的请求，不是用户每次选。
-       档位是上限；requested ⊄ granted 直接拒绝；effective = granted ∩ 工具最大 reach ∩ requested。
-    3) sandbox scope：reach = private + 系统 / 工具链只读；不碰共享 / 模块 / 主机 / 网络；
-       在“工作区内修改”及以上自动执行，不问；在“仅可查看”档 shell 关闭。
-       external scope：加 shared-read / module-read / host-read / network；在“外部可达（逐次确认）”下 ask，
-       在“全可达（自动放行）”下不问；共享区永远只读，模块 userdata 不可写，不注入模块 secrets。
-    4) sandbox scope 要求围栏真强制（allow_degraded=false），装不上就拒绝；rw 只含 private；net 强制 false。
-       模型选错 scope 时，sandbox 请求被围栏拒绝，回执提示“需要 external 请重试（会先问）”；不自动升级。
-    5) Windows 用 PowerShell：pwsh 7 优先、powershell 5.1 回退；
-       -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass；命令走 stdin（-Command -）或 -EncodedCommand；
-       输出 UTF-8；模块工具仍 cmd /C 不动。
-    6) Linux / macOS 用 sh；VM Linux guest 用 /bin/sh，guest helper 支持 timeout_secs；
-       guest 内立即取消本期不做，停止只到 timeout。Windows / macOS guest 本期不做，见 vm.windows-macos-guest。
-    7) 角色：v1 显式 executor / solo；discussant 需先补 work_pull；core_proxy 需先有 proxy 私有沙箱。
-       不做 all；需要全部角色就手动列全。
-    8) 取消：host 取消旗杀整棵树；输出超限 head + tail；命令长度上限建议 8000 字符，
-       更长命令让模型先 write 成沙箱脚本再执行。
-  accept: |
-    “仅可查看”档 shell 关闭；“工作区内修改”档 sandbox scope 只写私有沙箱、读不到共享/模块/主机只读根、
-    网络不通、不弹确认；围栏降级时拒绝；
-    “外部可达（逐次确认）”档 external scope 每命令 ask，sandbox scope 不问；
-    “全可达（自动放行）”档 external scope 不问，但仍受全局 network / host_read_roots 上限，共享区仍只读；
-    Windows PowerShell 7/5.1 真机跑通，中文与退出码正确；Linux/macOS sh 与 VM Linux guest 跑通；
-    host 停止杀掉整棵树；既有模块工具/内置工具行为不变；node run-tests.js 全绿。
-  blocked_by: |
-    shell 本身未实现；它依赖的权限模型与档位切换已落地；Windows/macOS guest shell 暂不开发；
-    guest 立即取消未实现。
+
