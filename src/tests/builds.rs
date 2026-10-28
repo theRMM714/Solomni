@@ -504,3 +504,62 @@ fn ensure_rebuilds_when_the_target_changed() {
     assert!(prebuilt.skipped, "没有构建状态时按自带产物跳过");
     assert_eq!(build_runs(&module_dir), 2, "跳过时构建命令不再跑");
 }
+
+/// 目的：启用历史会话也要确保目标产物（老会话可能带着宿主产物）。
+#[test]
+fn activating_a_session_ensures_the_target_build() {
+    use crate::capabilities::builds::api::{Builds, Built};
+    use crate::capabilities::conductor::api::{ConductorHandle, SessionOps, WorkMode};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    struct CountingBuilds {
+        calls: Arc<AtomicUsize>,
+    }
+    impl Builds for CountingBuilds {
+        fn ensure(&self, module: &Module, target: &Target, _net: bool) -> Result<Built, String> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(Built {
+                module: module.manifest.id.clone(),
+                target: target.label(),
+                skipped: true,
+                output: String::new(),
+            })
+        }
+        fn build(&self, _module: &Module, _target: &Target, _net: bool) -> Result<Built, String> {
+            Err("启用用例不走 build".to_string())
+        }
+    }
+
+    let root = crate::tests::scratch("activate-build");
+    let module_dir = root.join("modules").join("hello");
+    let artifact = host_build_module(&module_dir);
+    std::fs::create_dir_all(artifact.parent().expect("build 目录")).expect("建 build");
+    std::fs::write(&artifact, "#!/bin/sh\necho HELLO-OK\n").expect("写自带产物");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perm = std::fs::metadata(&artifact).expect("读权限").permissions();
+        perm.set_mode(0o755);
+        std::fs::set_permissions(&artifact, perm).expect("加执行位");
+    }
+    let calls = Arc::new(AtomicUsize::new(0));
+    let builds = Arc::new(CountingBuilds {
+        calls: Arc::clone(&calls),
+    });
+    let handle = ConductorHandle::spawn(crate::tests::doubles::core_with_builds(
+        scanned_modules(&root),
+        builds,
+    ))
+    .expect("起核心");
+    let (opened, _) = handle
+        .create_work(crate::tests::doubles::work(
+            "w",
+            WorkMode::Single,
+            &["hello"],
+        ))
+        .expect("建会话");
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "建会话先确保一次");
+    handle.activate(&opened.sid).expect("启用会话");
+    assert_eq!(calls.load(Ordering::SeqCst), 2, "启用历史会话也要确保一次");
+}

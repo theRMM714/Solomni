@@ -446,6 +446,19 @@ impl Conductor {
         Ok(())
     }
 
+    /// 目的：启用前补编所需的目标与模块清单（只读事实；构建在调用方线程上跑）。
+    pub(crate) fn activation_build_request(
+        &self,
+        sid: &str,
+    ) -> Result<(Vec<String>, crate::kernel::api::Tier, Option<String>), String> {
+        let meta = self.history.meta(sid)?;
+        Ok((
+            meta.modules.clone(),
+            meta.exec.tier,
+            meta.exec.guest.clone(),
+        ))
+    }
+
     /// 目的：启用会话的第一段（核心，毫秒级）——closed 拒绝；正在生成则附着；
     ///   否则准备可选的一段 guest 启动，等调用方线程跑完后提交。
     pub(crate) fn prepare_activation(
