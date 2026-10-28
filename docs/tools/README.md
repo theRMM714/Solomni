@@ -26,7 +26,7 @@
 
 模块工具的一次执行经 `--fence-run` 守门进程完成（命令与参数分开、环境白名单、超时杀树），协议在 [kernel 的「工具进程与守门协议」](../kernel/README.md)。
 
-`shell` 是执行类系统工具：host 走同一个 `ProcessRunner`（Unix `sh`、Windows PowerShell），VM 走 guest helper；sandbox / external 由 `scope` 请求、profile 封顶。Windows 的 sandbox shell 用按次临时容器 profile（W1）把 ACL 收窄做实；细节见 [tools-and-roles.md](tools-and-roles.md) 的「执行类系统工具：shell」。
+`shell` 是执行类系统工具：host 走同一个 `ProcessRunner`（Unix `sh`、Windows PowerShell），VM 走 guest helper；sandbox / external 由 `scope` 请求、profile 封顶。Windows 的 sandbox / external shell 用按次临时容器 profile（W1）把 ACL 收窄做实；细节见 [tools-and-roles.md](tools-and-roles.md) 的「执行类系统工具：shell」。
 
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 

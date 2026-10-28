@@ -71,7 +71,7 @@
   本次隔离覆盖文件系统可达范围，并对齐本机 Linux 的只读基线、解释器目录、`cwd`、env 白名单、按 `GuestRun.timeout_secs` 超时杀整棵进程树与输出截断；
   同 guest 内仍是同一 UID/root，per-agent 进程信号、`/proc` 与 `system` 包的全局可见性不在承诺内。
   网络按 **per-call `GuestAccess.net`**：false 时 helper 在子进程前 `unshare(CLONE_NEWNET)`，失败 fail-closed；QEMU 网卡仍受 VM 级全局开关。
-  用户在生成中按停止只会等 `timeout_secs`：guest 内的立即取消尚未实现，见 `tests/gaps.yaml` 的 `vm.guest-run-cancel`。
+  用户在生成中按停止：host 置取消旗后经 QGA 给 guest helper 发 SIGTERM，helper 杀掉子进程组并退出；`timeout_secs` 仍照常收口。
 - **稳定挂载根**：共享 guest 只挂工作树与模块树两个根，新 agent 沙箱 / 新模块目录按状态出现；具体某个 agent 能看什么由当次围栏决定。
 - **运行包集合仍是启动期装配**：新子会话只加模块、不加新包时直接加入运行中的 guest；包集合变化按新计划重建共享 guest（要求树空闲）。
   `system` 包仍按 guest 全局叠写，per-agent 只保证文件可达范围，不承诺系统包隔离。

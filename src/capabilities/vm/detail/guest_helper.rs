@@ -30,6 +30,18 @@ SYS_ADD = 445
 SYS_RESTRICT = 446
 RULE_PATH_BENEATH = 1
 CLONE_NEWNET = 0x40000000
+CHILD = None
+
+
+def on_term(signum, frame):
+    child = CHILD
+    if child is not None:
+        try:
+            os.killpg(child.pid, signal.SIGKILL)
+        except OSError:
+            pass
+    sys.stderr.write("solomni-guest-fence: 用户停止，已终止整棵进程树\n")
+    sys.exit(143)
 
 
 def die(msg):
@@ -100,6 +112,7 @@ def interpreter_dirs(script):
 
 
 def main():
+    global CHILD
     if len(sys.argv) != 2:
         die("usage: policy.json")
     path = sys.argv[1]
@@ -116,6 +129,8 @@ def main():
         timeout_secs = 30
     if timeout_secs < 1:
         timeout_secs = 1
+    # host 取消：QGA 发 SIGTERM 给 helper，handler 杀掉子进程组再退出。
+    signal.signal(signal.SIGTERM, on_term)
 
     global libc
     libc = ctypes.CDLL(None, use_errno=True)
@@ -210,6 +225,7 @@ def main():
         )
     except OSError as e:
         die("spawn(/bin/sh): " + str(e))
+    CHILD = child
     try:
         code = child.wait(timeout=timeout_secs)
     except subprocess.TimeoutExpired:

@@ -114,6 +114,7 @@ impl CollabSession {
             module_env: Default::default(),
             runtime_path: None,
             runtime_roots: Vec::new(),
+            shell_live: None,
             residents: Arc::new(crate::capabilities::residents::api::NoResidents),
             reply_seq: 0,
             line: Default::default(),

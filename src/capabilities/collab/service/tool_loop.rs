@@ -581,20 +581,32 @@ fn run_shell(
     fence.ro_tree.extend(ctx.runtime_roots.iter().cloned());
     fence.ro_tree.sort();
     fence.ro_tree.dedup();
-    // sandbox 走按次临时 profile（Windows 上真正收窄）；external 用会话 profile。
-    let ephemeral = call.scope == CallScope::Sandbox;
-    if ephemeral {
-        let (agent, lease) = api::ephemeral_names(&ctx.sandbox.agent, &ctx.sandbox.session);
-        fence.agent = agent;
-        fence.lease = lease;
+    // sandbox 与 external 都走按次临时 profile：Windows 上这次调用加的 ACE 跑完就撤，
+    // 不把更宽的根留给同一 agent 的下一次调用（scope 只决定本次 reach，不是 profile 的生命周期）。
+    let ephemeral = true;
+    let (agent, lease) = api::ephemeral_names(&ctx.sandbox.agent, &ctx.sandbox.session);
+    fence.agent = agent;
+    fence.lease = lease;
+    if ctx.tier == crate::kernel::api::Tier::Vm && ctx.guest_lease.is_empty() {
+        return ToolOutcome {
+            ok: false,
+            output: "这条虚拟机档会话没有 guest 租约，shell 没有执行。".to_string(),
+        };
+    }
+    let slot = ctx.shell_live.clone();
+    if let Some(slot) = &slot {
+        let scope = match call.scope {
+            CallScope::Sandbox => "sandbox",
+            CallScope::External => "external",
+            CallScope::None => "",
+        };
+        slot.start(
+            &call.script,
+            scope,
+            &ctx.sandbox.private.display().to_string(),
+        );
     }
     let outcome = if ctx.tier == crate::kernel::api::Tier::Vm {
-        if ctx.guest_lease.is_empty() {
-            return ToolOutcome {
-                ok: false,
-                output: "这条虚拟机档会话没有 guest 租约，shell 没有执行。".to_string(),
-            };
-        }
         let run = crate::capabilities::vm::api::GuestRun {
             command: api::guest_script(&call.script),
             args_json: String::new(),
@@ -603,7 +615,8 @@ fn run_shell(
             timeout_secs: call.timeout.as_secs(),
             output_limit: crate::capabilities::vm::api::OutputLimit::HeadAndTail,
         };
-        ctx.vm.guest_run_fenced(&ctx.guest_lease, &run, &fence)
+        ctx.vm
+            .guest_run_fenced_cancellable(&ctx.guest_lease, &run, &fence, Some(cancel))
     } else {
         let run = crate::kernel::ports::ShellRun {
             fence: &fence,
@@ -622,7 +635,11 @@ fn run_shell(
         CallScope::External,
         Decision::Allow,
     );
-    api::with_scope_hint(outcome, call.scope, external)
+    let outcome = api::with_scope_hint(outcome, call.scope, external);
+    if let Some(slot) = &slot {
+        slot.finish(outcome.ok, api::exit_code(&outcome.output), &outcome.output);
+    }
+    outcome
 }
 
 /// 外部工具派发：先定模块（信封里的 module；省略时只有唯一模块才兜底），再查该模块的工具表。
@@ -705,14 +722,16 @@ pub(crate) fn dispatch_external(
                 .map(|v| v.as_slice())
                 .unwrap_or(&[]);
             // 每次调用按生效 reach 派生围栏：sh 与模块工具同一把尺子，不再用会话并集围栏执行。
-            let fence = crate::kernel::api::FenceSpec::for_call(
+            // 租约按**调用**唯一：Windows 上这次调用加的 ACE 跑完就撤，不把更宽的根留给同一 agent 的下一次调用。
+            let mut fence = crate::kernel::api::FenceSpec::for_call(
                 &ctx.sandbox,
                 &grant.reach,
                 Some(&module),
                 &ctx.fence,
             )
             .at(&mt.root);
-            if ctx.tier == crate::kernel::api::Tier::Vm {
+            fence.lease = crate::capabilities::tools::api::call_lease(&ctx.sandbox.session);
+            let outcome = if ctx.tier == crate::kernel::api::Tier::Vm {
                 // 虚拟机档：命令送进这个会话的 guest；per-call 断网由 guest helper 落实。
                 if ctx.guest_lease.is_empty() {
                     return (
@@ -720,23 +739,20 @@ pub(crate) fn dispatch_external(
                         deny(ctx, "这条虚拟机档会话没有 guest 租约".to_string()),
                     );
                 }
-                (
-                    module,
-                    ctx.vm.guest_run_fenced(
-                        &ctx.guest_lease,
-                        &crate::capabilities::vm::api::GuestRun {
-                            command: command.to_string(),
-                            args_json: inv.args_json.clone(),
-                            env: env.to_vec(),
-                            cwd: mt.root.display().to_string(),
-                            timeout_secs: 30,
-                            output_limit: crate::capabilities::vm::api::OutputLimit::Head,
-                        },
-                        &fence,
-                    ),
+                ctx.vm.guest_run_fenced(
+                    &ctx.guest_lease,
+                    &crate::capabilities::vm::api::GuestRun {
+                        command: command.to_string(),
+                        args_json: inv.args_json.clone(),
+                        env: env.to_vec(),
+                        cwd: mt.root.display().to_string(),
+                        timeout_secs: 30,
+                        output_limit: crate::capabilities::vm::api::OutputLimit::Head,
+                    },
+                    &fence,
                 )
             } else {
-                let outcome = ctx.tools.run_module(
+                ctx.tools.run_module(
                     &module,
                     &fence,
                     command,
@@ -745,9 +761,14 @@ pub(crate) fn dispatch_external(
                     ctx.runtime_path.as_deref(),
                     mt.parallel.contains(&inv.name),
                     ask,
-                );
-                (module, outcome)
+                )
+            };
+            // 按次撤 ACE：每次调用自己的租约只撤自己那份；并发调用各持 owner，互不撤权。
+            if let Err(e) = ctx.tools.release_fence(&fence) {
+                ctx.log
+                    .info("tools", &format!("模块工具调用围栏撤权未完成：{}", e));
             }
+            (module, outcome)
         }
         None => {
             let why = format!("模块 {} 未声明工具 {}", module, inv.name);

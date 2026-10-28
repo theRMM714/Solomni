@@ -87,6 +87,15 @@ pub fn with_scope_hint(outcome: ToolOutcome, scope: CallScope, external: Decisio
     ToolOutcome { ok: false, output }
 }
 
+/// 目的：从 shell 回执里取退出码（host 与 guest 的统一标记）；超时 / 停止 / 拿不到时为 None。
+pub fn exit_code(output: &str) -> Option<i32> {
+    output.lines().rev().find_map(|l| {
+        l.trim()
+            .strip_prefix("[shell] 退出码 ")
+            .and_then(|s| s.trim().parse().ok())
+    })
+}
+
 /// 目的：sandbox shell 的按次临时容器 profile 名与租约名（Windows W1 用；其它平台只是日志标识）。
 /// 约束：同一进程内单调递增 + pid，避免并发调用撞名；agent / lease 都带同一个后缀。
 pub fn ephemeral_names(agent: &str, session: &str) -> (String, String) {

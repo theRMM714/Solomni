@@ -8,6 +8,72 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// 目的：shell 最近一次运行的状态（前端状态栏卡片用）：命令、scope、起止、退出码与回执预览。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct ShellLive {
+    /// 目的：命令原文。
+    pub command: String,
+    /// 目的：本次 scope（sandbox / external）。
+    pub scope: String,
+    /// 目的：cwd（私有沙箱）。
+    pub cwd: String,
+    /// 目的：开始时间（Unix 秒）。
+    pub started_at: u64,
+    /// 目的：结束时间；None = 仍在跑。
+    pub finished_at: Option<u64>,
+    /// 目的：退出码（超时 / 停止 / 拿不到时为 None）。
+    pub exit_code: Option<i32>,
+    /// 目的：成败；None = 仍在跑。
+    pub ok: Option<bool>,
+    /// 目的：回执预览（最多 4000 字符；完整回执在转录的 shell 工具行）。
+    pub output: String,
+}
+
+/// 目的：一个会话的 shell 实时状态槽——工具循环写、状态栏快照读。
+#[derive(Debug, Default)]
+pub struct ShellSlot(std::sync::Mutex<Option<ShellLive>>);
+
+impl ShellSlot {
+    /// 目的：开始一次 shell：覆盖上一次的状态，等到 finish 才写结束时间 / 退出码。
+    pub fn start(&self, command: &str, scope: &str, cwd: &str) {
+        let mut g = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        *g = Some(ShellLive {
+            command: command.to_string(),
+            scope: scope.to_string(),
+            cwd: cwd.to_string(),
+            started_at: now_secs(),
+            finished_at: None,
+            exit_code: None,
+            ok: None,
+            output: String::new(),
+        });
+    }
+
+    /// 目的：收尾一次 shell：写结束时间、成败、退出码与回执预览（超过 4000 字符截断）。
+    pub fn finish(&self, ok: bool, exit_code: Option<i32>, output: &str) {
+        let mut g = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(s) = g.as_mut() else {
+            return;
+        };
+        s.finished_at = Some(now_secs());
+        s.ok = Some(ok);
+        s.exit_code = exit_code;
+        s.output = output.chars().take(4000).collect();
+    }
+
+    /// 目的：读一份快照；没有运行过 shell 就是 None。
+    pub fn get(&self) -> Option<ShellLive> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 /// 一个模块的外部工具环境：模块目录（外部工具进程的 cwd）+ 它声明的工具表 + 已启动常驻服务的操作。
 /// cwd 必须落在声明它的模块里（命令形如 python tools/x.py，是相对模块根写的）。
 #[derive(Debug, Clone)]
@@ -80,6 +146,8 @@ pub struct MemberTools {
     /// 目的：shell 的只读工具链根：项目内基础 profile + 该 agent 模块的运行包根。
     /// 约束：只进 shell 的 per-call 围栏；模块工具的放行仍走它自己的命令解释器基线。
     pub runtime_roots: Vec<PathBuf>,
+    /// 目的：这个会话最近一次 shell 的实时状态（状态栏卡片）；没有 shell 的席位为 None。
+    pub shell_live: Option<Arc<ShellSlot>>,
     /// **回复 id 计数器**：一次模型回复一个号，跨重启单调（重建时按转录里的最大值续号）。
     /// 转录行靠它分组（哪几行属于同一次回复），会话靠它按回复原子回档。
     pub reply_seq: u64,

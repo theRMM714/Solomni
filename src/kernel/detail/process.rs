@@ -140,8 +140,8 @@ impl ProcTools {
         self
     }
 
-    /// 目的：强制 shell 用哪个 PowerShell（诊断 / Windows 真机验 5.1 回退）；None = 自动。
-    #[cfg(windows)]
+    /// 目的：强制 shell 用哪个 PowerShell（Windows 真机验 5.1 回退）；None = 自动。
+    #[cfg(all(windows, test))]
     pub fn with_powershell(mut self, program: Option<&'static str>) -> ProcTools {
         self.shell_ps = program;
         self
@@ -1694,6 +1694,56 @@ mod tests {
             confine::clean(&home).ok();
             let _ = std::fs::remove_dir_all(&dir);
         }
+    }
+
+    /// 目的：Windows 真机上相对路径必须落在私有沙箱 cwd（shell 的 cwd 契约）。
+    #[cfg(windows)]
+    #[test]
+    fn real_windows_shell_writes_relative_files_in_its_private_cwd() {
+        if !fence_live() {
+            eprintln!("[探针] 未开启真机围栏测试（会写本机 ACL）：跳过 Windows shell cwd 契约");
+            return;
+        }
+        let Some(exe) = built_exe() else {
+            eprintln!("[探针] 未找到已构建的产品可执行文件，跳过 Windows shell cwd 契约");
+            return;
+        };
+        let dir = crate::tests::scratch("proc-shell-cwd");
+        let home = dir.join(".home");
+        let tools = real_runner_with_write(exe, &home);
+        let mut spec = spec_for(&dir);
+        spec.private = dir.clone();
+        let out = tools.run_shell(&crate::kernel::ports::ShellRun {
+            fence: &spec,
+            script: "Set-Content -Path shell-ok.txt -Value 'CWD-OK' -Encoding utf8; Write-Output (Get-Location)",
+            timeout: Duration::from_secs(30),
+            cancel: None,
+            path: None,
+            ask: None,
+            ephemeral: false,
+        });
+        let file = dir.join("shell-ok.txt");
+        assert!(
+            file.is_file(),
+            "shell 的相对路径要落在私有沙箱：{}\n{}",
+            file.display(),
+            out.output
+        );
+        assert!(
+            std::fs::read_to_string(&file)
+                .unwrap_or_default()
+                .contains("CWD-OK"),
+            "文件内容要写进去"
+        );
+        assert!(
+            out.output.contains(&dir.display().to_string()),
+            "Get-Location 要是私有沙箱：{}\n{}",
+            dir.display(),
+            out.output
+        );
+        let _ = confine::release_fence(&spec, &home);
+        confine::clean(&home).ok();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// 守门进程起不来：如实回执「启动失败」，不 panic、不假装跑过。

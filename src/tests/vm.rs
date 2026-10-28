@@ -2236,6 +2236,40 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
         "B 的沙箱要被 Landlock 拒绝：{}",
         fenced.output
     );
+
+    // 取消：sleep 30 起跑后由 host 置位取消旗，helper 收 SIGTERM 杀子进程组，不能等满 timeout。
+    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flipper = std::sync::Arc::clone(&cancel);
+    let thread = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        flipper.store(true, std::sync::atomic::Ordering::Relaxed);
+    });
+    let started = std::time::Instant::now();
+    let cancelled = guest.channel().exec_fenced_cancellable(
+        &GuestRun {
+            command: "sleep 30; echo SHOULD_NOT_FINISH".to_string(),
+            args_json: "{}".to_string(),
+            env: Vec::new(),
+            cwd: String::new(),
+            timeout_secs: 30,
+            output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
+        },
+        &access,
+        Some(&cancel),
+    );
+    let _ = thread.join();
+    assert!(!cancelled.ok, "取消后命令不能报成功：{}", cancelled.output);
+    assert!(
+        cancelled.output.contains("用户停止"),
+        "回执要说明用户停止：{}",
+        cancelled.output
+    );
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(15),
+        "取消要及时，不能等满 30 秒：{:?}",
+        started.elapsed()
+    );
+
     // 实时共享：挂载式后端**不等任何回拷**，宿主此刻就该看得到 guest 写的内容。
     let written = std::fs::read_to_string(share.join("from-guest.txt")).unwrap_or_default();
     assert!(
@@ -2652,6 +2686,14 @@ pub(crate) fn guest_helper_is_a_fail_closed_landlock_launcher() {
             && script.contains("timeout_secs")
             && script.contains("policy.get(\"timeout_secs\""),
         "超时要按本次 timeout_secs 杀进程组：{}",
+        script
+    );
+    assert!(
+        script.contains("signal.SIGTERM")
+            && script.contains("on_term")
+            && script.contains("CHILD")
+            && script.contains("os.killpg"),
+        "host 取消要经 SIGTERM 杀掉子进程组：{}",
         script
     );
     assert!(

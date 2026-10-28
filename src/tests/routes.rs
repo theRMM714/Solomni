@@ -214,6 +214,7 @@ impl SessionOps for FakeOps {
             pending: None,
             continue_action: None,
             context: None,
+            shell: None,
         })
     }
     fn continue_flow(&self, _sid: &str, _out: Output) -> Result<Advance, String> {
@@ -455,6 +456,7 @@ impl SessionOps for FakeOps {
                 pending: None,
                 continue_action: None,
                 context: None,
+                shell: None,
             })
             .collect())
     }

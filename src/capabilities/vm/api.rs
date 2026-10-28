@@ -31,6 +31,16 @@ pub trait Vm: Send + Sync {
         run: &GuestRun,
         fence: &crate::kernel::api::FenceSpec,
     ) -> crate::kernel::api::ToolOutcome;
+    /// 目的：在 guest 里跑一次可取消的围栏执行；默认退回 `guest_run_fenced`（测试 / 其它引擎）。
+    fn guest_run_fenced_cancellable(
+        &self,
+        lease: &str,
+        run: &GuestRun,
+        fence: &crate::kernel::api::FenceSpec,
+        _cancel: Option<&std::sync::atomic::AtomicBool>,
+    ) -> crate::kernel::api::ToolOutcome {
+        self.guest_run_fenced(lease, run, fence)
+    }
     /// 目的：这台 guest 启动时装载的运行包（id@version，排序去重）；没有活 guest = None。
     fn guest_packages(&self, lease: &str) -> Option<Vec<String>>;
     /// 目的：把本次启动实际装载的运行包记进租约（供"新子会话要不要重建"判断）。

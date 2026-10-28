@@ -836,9 +836,9 @@ setTimeout(async () => {
           " const box = document.querySelector('#session-status');" +
           " function allText(n) { let t = String(n.textContent || ''); for (const c of (n.children || [])) t += ' ' + allText(c); return t; }" +
           " function chips() { const out = []; (function walk(n) { for (const c of (n.children || [])) { if (String(c.className).split(' ')[0] === 'status-chip') out.push(allText(c)); walk(c); } })(box); return out; }" +
-          " function run(sid, mode, ctx, head) {" +
+          " function run(sid, mode, ctx, head, shell) {" +
           "   state.sessions.clear(); state.activeSid = sid;" +
-          "   const s = { sid: sid, mode: mode, lines: [], live: [], fold: {}, scroll: {}, context: ctx," +
+          "   const s = { sid: sid, mode: mode, lines: [], live: [], fold: {}, scroll: {}, context: ctx, shell: shell || null," +
           "     work: { head: head, commits: head ? [head] : [], total: head ? 1 : 0, truncated: false }," +
           "     workAt: 1, workDirty: false, workError: '', running: false, sending: false, readonly: false };" +
           "   state.sessions.set(sid, s); box.children = []; s.statusPrint = ''; syncStatusbar(s); return chips(); }" +
@@ -847,14 +847,17 @@ setTimeout(async () => {
           " const single = run('s1', 'single', ctx, head);" +
           " const proxy = run('s2', 'proxy', { prompt_tokens: 900, completion_tokens: 100, total_tokens: 1000, window: 10000, exact: true }, null);" +
           " const collab = run('s3', 'collab', ctx, head);" +
-          " return { single: single, proxy: proxy, collab: collab };" +
+          " const shellLive = { command: 'echo hi', scope: 'sandbox', cwd: '/x', started_at: Math.floor(Date.now()/1000) - 12, finished_at: Math.floor(Date.now()/1000), exit_code: 0, ok: true, output: 'hi' };" +
+          " const withShell = run('s4', 'single', ctx, head, shellLive);" +
+          " return { single: single, proxy: proxy, collab: collab, withShell: withShell };" +
           "})()",
         sandbox
       );
       const singleOk = r.single.length === 2 && /18,432/.test(r.single[0]) && /14\.4%/.test(r.single[0]) && /#7/.test(r.single[1]);
       const proxyOk = r.proxy.length === 2 && /1,000/.test(r.proxy[0]) && /10\.0%/.test(r.proxy[0]);
       const collabOk = r.collab.length === 1 && /#7/.test(r.collab[0]);
-      statusBarRules = singleOk && proxyOk && collabOk;
+      const shellOk = r.withShell.length === 3 && r.withShell.some((t) => /shell 退出码 0/.test(t));
+      statusBarRules = singleOk && proxyOk && collabOk && shellOk;
       if (!statusBarRules) loadErrors.push("状态栏检查：" + JSON.stringify(r));
     } catch (e) { loadErrors.push("状态栏检查失败：" + e.message); }
   }

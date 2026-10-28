@@ -130,7 +130,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
   VM guest 的 per-call 断网由 guest helper 的 unshare(CLONE_NEWNET) 落实；失败 fail-closed。
   **shell 的 scope 是单次 reach 请求**：sandbox 只 private + 基础 / 项目工具链只读（net=false）；external 加 shared-read / module-read / host-read / network；两者都要求围栏真强制，装不上拒绝。shell 的只读根另加 `runtime_roots`（基础工具链 + 本 agent 运行包）。
   工具进程走**守门进程**（本程序 `--fence-run`），环境不继承父进程（**密钥与凭据不进工具进程**），`HOME` / `TEMP` 等落进该 agent 的沙箱。
-  **模块工具一个 agent 一个容器 profile**；shell 的 sandbox 用**按次临时 profile**（W1，结束撤 ACE 并删 profile），所以它的按次收窄在 Windows 上真实成立。守门进程是唯一建 profile 的地方并记进 `.home/fence-grants.json` 台账；每次写 ACL **先把记录落盘**（根内路径存原始安全描述符、根外只存 ACE 摘要），写后核对 ACE 与原有权限项、失败回滚并如实报错；
+  **模块工具一个 agent 一个容器 profile**，但每次调用带唯一租约，跑完按它撤自己那份 ACE；shell 的 sandbox / external 用**按次临时 profile**（W1，结束撤 ACE 并删 profile），所以按次收窄在 Windows 上真实成立。守门进程是唯一建 profile 的地方并记进 `.home/fence-grants.json` 台账；每次写 ACL **先把记录落盘**（根内路径存原始安全描述符、根外只存 ACE 摘要），写后核对 ACE 与原有权限项、失败回滚并如实报错；
   台账每条授权 / profile 带**归属**（pid + 进程创建时刻 + **会话租约**），写事务用**进程内互斥 + 跨进程文件锁**串行。
   **启动期**（会话尚未开工）按归属**对账一次**：只回收归属明确已死的条目、无法判定的如实报告并跳过，失败保留供重试——不询问用户、不阻塞启动，也不做孤儿清扫（那留手动）；手动重试用 `--fence-reconcile`。
   `--fence-clean` 按台账**整体还原**根内路径、精确撤销根外条目，再扫掉台账外的孤儿授权（含任何显式包 SID ACE）与遗留 profile；按条处置是 `--fence-ledger` / `--fence-restore` / `--fence-revoke` / `--fence-profile-rm`。

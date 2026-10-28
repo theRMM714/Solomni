@@ -260,11 +260,16 @@ async function lines(sid) {
     '非零退出如实回执退出码',
     JSON.stringify(shells[1] || {}).slice(0, 300)
   );
+  assert(
+    String((shells[0] || {}).output || '').includes('PWD='),
+    'shell 回执要能看见它落脚的 cwd',
+    JSON.stringify(shells[0] || {}).slice(0, 800)
+  );
   const shellFile = path.join(dir(nameShell), '执行手', 'shell-ok.txt');
   assert(
     fs.existsSync(shellFile) && fs.readFileSync(shellFile, 'utf8').includes('SHELL-OK-中文'),
     'shell cwd 是私有沙箱且真的写进去了',
-    shellFile
+    shellFile + ' / ' + JSON.stringify(shells[0] || {}).slice(0, 1200)
   );
 
   // 单 agent 带 2 个模块，且外部工具属于「第二个」模块：必须在它自己模块的目录里跑

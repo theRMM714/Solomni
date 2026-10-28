@@ -270,7 +270,7 @@ http.createServer((req, res) => {
         // 零模块 agent 的 shell：一条成功（写私有沙箱 + 中文），一条非零退出；平台语法分开。
         const win = sys.includes('Windows 宿主');
         const ok = win
-          ? "Set-Content -Path shell-ok.txt -Value 'SHELL-OK-中文' -Encoding utf8; Write-Output 'SHELL-OK-中文'"
+          ? "$dir = (Get-Location).Path; Write-Output ('PWD=' + $dir); [System.IO.File]::WriteAllText((Join-Path $dir 'shell-ok.txt'), 'SHELL-OK-中文'); Write-Output 'SHELL-OK-中文'"
           : "printf 'SHELL-OK-中文\\n' > shell-ok.txt; printf 'SHELL-OK-中文\\n'";
         content = JSON.stringify({
           type: 'tool',

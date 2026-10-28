@@ -106,7 +106,7 @@ agent 实例名不得占用 `work` / `children`（名单在 `systools/names.yaml
 - **三层隔离，各说各的实际强度**：
   ① 内置文件工具是**工具层**越界拒绝（路径校验）；shell 没有 path 参数，它的边界是**围栏**（sandbox / external），不是路径表；
   ② 模块工具与 shell 进程从**守门进程**里跑（环境白名单、超时连根杀树、进程数上限）；guest 内由 Linux helper 对齐同一组策略
-     （只读基线、解释器目录、env 白名单、按次 `timeout_secs` 杀树、head/head+tail 输出）；Windows 的 sandbox shell 用按次临时容器 profile；
+     （只读基线、解释器目录、env 白名单、按次 `timeout_secs` 杀树、head/head+tail 输出）；Windows 的 sandbox / external shell 用按次临时容器 profile；
   ③ 文件系统围栏按平台接入（Linux Landlock、macOS seatbelt、Windows AppContainer）。
   **全局沙箱策略是硬约束**（`sandbox.policy`）：默认 `require`，机制不可用时启动门按 `on_unavailable` 询问是否**本进程降级**
   （不落盘，重启再问）、重设或退出；自检确认机制有效却仍装不上 = 程序自己写错了，那一路**拒绝执行**。

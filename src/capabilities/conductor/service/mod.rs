@@ -251,6 +251,10 @@ pub struct Conductor {
     /// 项目内基础工具链的只读安装根（python / node / cc）：shell 的 sandbox 与 external 都放行它们。
     /// 来源是组合根读到的 active.json；不按 agent 的模块重复注入。
     base_roots: Vec<std::path::PathBuf>,
+    /// 目的：会话 → shell 实时状态槽（状态栏卡片用）；工具循环写、SessionView 读。
+    shell_slots: std::sync::Mutex<
+        std::collections::BTreeMap<String, Arc<crate::capabilities::session::api::ShellSlot>>,
+    >,
     /// 提示词册能力：**册子本体在它里面**（只有一处），conductor 只按名字取段。
     /// 用 `Arc`：协作会话要与核心**共享**这一份（逐处克隆整本册子是白费）。
     prompt: Arc<dyn Prompt>,
@@ -326,6 +330,7 @@ impl Conductor {
             residents,
             secrets,
             base_roots: Vec::new(),
+            shell_slots: std::sync::Mutex::new(std::collections::BTreeMap::new()),
             prompt,
             systools,
             sessions: HashMap::new(),
@@ -339,6 +344,31 @@ impl Conductor {
     pub fn with_base_roots(mut self, roots: Vec<std::path::PathBuf>) -> Conductor {
         self.base_roots = roots;
         self
+    }
+
+    /// 目的：取（必要时创建）一个会话的 shell 实时状态槽；成员工具面与状态栏共用同一份。
+    pub(crate) fn shell_slot(
+        &self,
+        sid: &str,
+    ) -> Arc<crate::capabilities::session::api::ShellSlot> {
+        let mut map = self.shell_slots.lock().unwrap_or_else(|e| e.into_inner());
+        Arc::clone(
+            map.entry(sid.to_string()).or_insert_with(|| {
+                Arc::new(crate::capabilities::session::api::ShellSlot::default())
+            }),
+        )
+    }
+
+    /// 目的：读会话最近一次 shell 的快照；没有运行过就是 None（状态栏据此决定要不要出 chip）。
+    pub(crate) fn shell_view(
+        &self,
+        sid: &str,
+    ) -> Option<crate::capabilities::session::api::ShellLive> {
+        self.shell_slots
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(sid)
+            .and_then(|s| s.get())
     }
 
     /// 目的：本机可选的虚拟根清单（会话配置与创建向导用）。

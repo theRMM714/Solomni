@@ -1,12 +1,13 @@
 //! 入站能力面：**其它能力与呈现层只准用这里**（不许碰 `domain` / `ports`）。
 
+pub use crate::capabilities::tools::domain::fence::call_lease;
 pub use crate::capabilities::tools::domain::patch::{EditFault, Fault};
 pub use crate::capabilities::tools::domain::roles::{action_audit, RoleTable, SystemTools};
 pub use crate::capabilities::tools::domain::schema::{
     json_schema_lines, ArgFault, ToolBook, ToolSchema,
 };
 pub use crate::capabilities::tools::domain::shell::{
-    ephemeral_names, guest_script, parse as parse_shell, with_scope_hint,
+    ephemeral_names, exit_code, guest_script, parse as parse_shell, with_scope_hint,
 };
 pub use crate::capabilities::tools::domain::systool::{
     arg_fault_text, is_builtin, is_exec, is_freeform, names, patch_decl, refuse, tool_notes,

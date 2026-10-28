@@ -676,7 +676,12 @@ impl QemuHandle {
 
 impl QemuHandle {
     /// 目的：一次 guest 执行；带 access 时经 guest 内助手按 per-agent 允许集执行，失败绝不回退到无围栏。
-    fn exec_run(&mut self, run: &GuestRun, access: Option<&GuestAccess>) -> ToolOutcome {
+    fn exec_run(
+        &mut self,
+        run: &GuestRun,
+        access: Option<&GuestAccess>,
+        cancel: Option<&std::sync::atomic::AtomicBool>,
+    ) -> ToolOutcome {
         if let Err(why) = self.sync_or_heal() {
             return fail(&why);
         }
@@ -755,7 +760,29 @@ impl QemuHandle {
             UNFENCED_GUEST_RUN_SECS
         };
         let deadline = Instant::now() + Duration::from_secs(budget);
+        let mut cancel_sent = false;
         loop {
+            if !cancel_sent {
+                if let Some(flag) = cancel {
+                    if flag.load(std::sync::atomic::Ordering::Relaxed) {
+                        cancel_sent = true;
+                        // 先给 guest helper 发 SIGTERM：它的事件循环会杀掉子进程组再退出。
+                        let kill = format!("kill -TERM {}", pid);
+                        let _ = self.exec_run(
+                            &GuestRun {
+                                command: kill,
+                                args_json: "{}".to_string(),
+                                env: Vec::new(),
+                                cwd: String::new(),
+                                timeout_secs: 5,
+                                output_limit: OutputLimit::Head,
+                            },
+                            None,
+                            None,
+                        );
+                    }
+                }
+            }
             let v = match self.status_once(pid) {
                 Ok(v) => v,
                 Err(why) => return fail(&why),
@@ -775,11 +802,14 @@ impl QemuHandle {
                     .and_then(|d| d.as_str())
                     .map(unb64)
                     .unwrap_or_default();
-                let output = format!(
+                let mut output = format!(
                     "{}{}",
                     String::from_utf8_lossy(&out),
                     String::from_utf8_lossy(&err)
                 );
+                if cancel_sent {
+                    output.push_str("\n[shell] 用户停止：工具进程与它拉起的整棵进程树已被终止");
+                }
                 return ToolOutcome {
                     ok: code == 0,
                     output: cap_output(output, run.output_limit),
@@ -800,11 +830,20 @@ impl GuestChannel for QemuHandle {
     }
 
     fn exec(&mut self, run: &GuestRun) -> ToolOutcome {
-        self.exec_run(run, None)
+        self.exec_run(run, None, None)
     }
 
     fn exec_fenced(&mut self, run: &GuestRun, access: &GuestAccess) -> ToolOutcome {
-        self.exec_run(run, Some(access))
+        self.exec_run(run, Some(access), None)
+    }
+
+    fn exec_fenced_cancellable(
+        &mut self,
+        run: &GuestRun,
+        access: &GuestAccess,
+        cancel: Option<&std::sync::atomic::AtomicBool>,
+    ) -> ToolOutcome {
+        self.exec_run(run, Some(access), cancel)
     }
 
     /// 目的：把字节分块写进 guest 文件（QGA guest-file-write，base64）。

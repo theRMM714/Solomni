@@ -828,6 +828,9 @@ pub struct SessionView {
     /// 约束：协作主会话没有一条持续发给模型的对话，因此没有这个字段。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<crate::capabilities::session::api::ContextUsage>,
+    /// 目的：最近一次 shell 的运行状态（状态栏卡片）；没跑过 shell 就没有这个字段。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shell: Option<crate::capabilities::session::api::ShellLive>,
 }
 
 /// 目的：会话文件清单视图（前端 @ 菜单与「长路径缩写」用）：相对清单 + 真实根。

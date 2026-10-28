@@ -100,11 +100,11 @@ impl crate::kernel::ports::FenceHost for FenceHostAdapter {
             if let Err(e) = windows::remove_profile_one(&self.home, &name) {
                 errors.push(e);
             }
-            return if errors.is_empty() {
+            if errors.is_empty() {
                 Ok(())
             } else {
                 Err(errors.join("；"))
-            };
+            }
         }
         #[cfg(not(windows))]
         {

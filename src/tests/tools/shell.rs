@@ -35,6 +35,8 @@ pub(crate) fn sandbox_shell_only_gets_the_private_sandbox_and_runtime_roots() {
     let runner = Arc::new(ShellRunner::new("ok", true));
     let mut mt = member(Arc::clone(&runner));
     mt.runtime_roots = vec![abs(&["tc"])];
+    let slot = Arc::new(crate::capabilities::session::api::ShellSlot::default());
+    mt.shell_live = Some(Arc::clone(&slot));
     let cancel = AtomicBool::new(false);
     let mut sink = |_: SessionEvent| {};
     let done = run_batch(
@@ -65,6 +67,12 @@ pub(crate) fn sandbox_shell_only_gets_the_private_sandbox_and_runtime_roots() {
     assert!(!one.fence.net, "sandbox 不联网");
     assert!(!one.cancel_set);
     assert!(one.path.is_none(), "零模块 agent 没有运行包 PATH");
+    let live = slot.get().expect("状态栏快照");
+    assert_eq!(live.command, "echo hi");
+    assert_eq!(live.scope, "sandbox");
+    assert!(live.finished_at.is_some(), "跑完要写结束时间");
+    assert_eq!(live.ok, Some(true));
+    assert!(live.output.contains("ok"), "回执预览要进快照");
 }
 
 /// 目的：workspace 档拒绝 external 且不弹卡、不落进程。
@@ -128,7 +136,14 @@ pub(crate) fn external_profile_asks_and_all_reach_does_not() {
     let calls = runner.calls.lock().expect("锁");
     assert_eq!(calls.len(), 1);
     let one = &calls[0];
-    assert!(!one.ephemeral, "external 用会话 profile");
+    assert!(
+        one.ephemeral,
+        "external 也走按次 profile：不把更宽的根留到下一次调用"
+    );
+    assert!(
+        one.fence.agent.contains("#shell-"),
+        "按次 profile 名要带独有后缀"
+    );
     assert!(
         one.fence.ro_tree.contains(&mt.sandbox.shared),
         "共享区只读可达"
@@ -152,6 +167,45 @@ pub(crate) fn external_profile_asks_and_all_reach_does_not() {
     );
     assert!(done2[0].1.ok, "{}", done2[0].1.output);
     assert_eq!(runner2.calls.lock().expect("锁").len(), 1);
+}
+
+/// 目的：模块工具每次调用都带唯一租约，并在跑完后按该租约撤销（Windows 上不把更宽的根留给下一次）。
+#[test]
+pub(crate) fn module_tool_call_releases_its_own_lease() {
+    let runner = Arc::new(RecordingRunner::new("ok", true));
+    let fence = Arc::new(crate::tests::doubles::RecordingFence::new());
+    let mut m = member_with_tools("m0", Vec::new(), Arc::clone(&runner));
+    let mut mt = m.tools.take().expect("工具环境");
+    let runner_dyn: Arc<dyn crate::kernel::ports::ProcessRunner> = runner.clone();
+    let fence_dyn: Arc<dyn crate::kernel::ports::FenceHost + Send + Sync> = fence.clone();
+    mt.tools = crate::tests::doubles::test_tools_svc_with(
+        runner_dyn,
+        Arc::new(crate::tests::doubles::InMemorySysIo::new()),
+        fence_dyn,
+    );
+    let cancel = AtomicBool::new(false);
+    let plan = |_: &str| vec![(Some("m0".to_string()), "grep".to_string(), "{}".to_string())];
+    let mut sink = |_: SessionEvent| {};
+    let done = run_batch(&mut mt, &plan("a"), None, None, &cancel, &mut sink);
+    assert!(done[0].1.ok, "{}", done[0].1.output);
+    let first = fence
+        .leases
+        .lock()
+        .expect("锁")
+        .first()
+        .cloned()
+        .expect("这次调用要请求撤权");
+    assert!(first.contains("#call-"), "租约要按调用唯一（实际 {first}）");
+    assert_eq!(
+        fence.released.lock().expect("锁").as_slice(),
+        ["m0"],
+        "撤销的是这个 agent 的容器 SID"
+    );
+    let done2 = run_batch(&mut mt, &plan("b"), None, None, &cancel, &mut sink);
+    assert!(done2[0].1.ok, "{}", done2[0].1.output);
+    let leases = fence.leases.lock().expect("锁");
+    assert_eq!(leases.len(), 2);
+    assert_ne!(leases[0], leases[1], "两次调用不能共用一个租约");
 }
 
 /// 目的：view 档不发放 shell、workspace 及以上发放。

@@ -1385,12 +1385,15 @@ impl crate::kernel::ports::FenceHost for NoFenceHost {
 /// 记录型围栏端口：断言「删除会话时真的请求了撤销」。
 pub(crate) struct RecordingFence {
     pub(crate) released: Mutex<Vec<String>>,
+    /// 目的：每次撤销请求携带的租约（按次调用的唯一性断言用）。
+    pub(crate) leases: Mutex<Vec<String>>,
     fail: Option<String>,
 }
 impl RecordingFence {
     pub(crate) fn new() -> RecordingFence {
         RecordingFence {
             released: Mutex::new(Vec::new()),
+            leases: Mutex::new(Vec::new()),
             fail: None,
         }
     }
@@ -1406,6 +1409,7 @@ impl crate::kernel::ports::FenceHost for RecordingFence {
             return Err(m.clone());
         }
         self.released.lock().expect("锁").push(spec.agent.clone());
+        self.leases.lock().expect("锁").push(spec.lease.clone());
         Ok(())
     }
 }
@@ -3411,6 +3415,7 @@ pub(crate) fn member_with_service_tools(
         module_env: Default::default(),
         runtime_path: None,
         runtime_roots: Vec::new(),
+        shell_live: None,
         reply_seq: 0,
         line: Default::default(),
         allowed: crate::capabilities::tools::api::names(),
