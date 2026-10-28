@@ -451,3 +451,56 @@ fn creating_a_session_reports_the_build_failure_and_creates_nothing() {
         "构建失败不落状态（下次创建还会重试）"
     );
 }
+
+/// 目的：入口在场但构建状态属于别的目标时，ensure 必须按当前目标重编。
+#[test]
+fn ensure_rebuilds_when_the_target_changed() {
+    use crate::kernel::detail::process::ProcTools;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
+
+    let Some(exe) = crate::tests::doubles::built_exe() else {
+        eprintln!("[探针] 未找到已构建的可执行文件，跳过目标变化用例");
+        return;
+    };
+    let root = crate::tests::scratch("ensure-target");
+    let module_dir = root.join("modules").join("hello");
+    let artifact = host_build_module(&module_dir);
+    let runner = ProcTools::new(
+        exe,
+        crate::tests::doubles::test_process_texts(),
+        root.join("home"),
+        Arc::new(AtomicBool::new(false)),
+    );
+    let builds = builds_service(&root, runner);
+    let module = module_of(&root, "hello");
+    builds
+        .build(&module, &Target::Host, false)
+        .expect("先编出宿主产物");
+    assert_eq!(build_runs(&module_dir), 1, "起点只编过一次");
+    // 把状态伪造成别的目标：入口仍在，但这份入口不是当前目标的产物。
+    std::fs::write(
+        root.join(".vm").join("build-state").join("hello.json"),
+        r#"{"module":"hello","target":"debian","fingerprint":"stale"}"#,
+    )
+    .expect("写旧目标状态");
+    let again = builds
+        .ensure(&module, &Target::Host, false)
+        .expect("目标变化后重编");
+    assert!(!again.skipped, "目标不匹配不能算缓存命中");
+    assert_eq!(build_runs(&module_dir), 2, "构建命令要真重跑一次");
+    assert!(artifact.is_file(), "产物仍在：{}", artifact.display());
+    let state: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(root.join(".vm").join("build-state").join("hello.json"))
+            .expect("读新状态"),
+    )
+    .expect("状态是 JSON");
+    assert_eq!(state["target"], "host", "状态要回到当前目标");
+    // 随仓自带产物没有 build-state：不能因为缺状态就反复重编。
+    std::fs::remove_file(root.join(".vm").join("build-state").join("hello.json")).expect("删状态");
+    let prebuilt = builds
+        .ensure(&module, &Target::Host, false)
+        .expect("自带产物可跳过");
+    assert!(prebuilt.skipped, "没有构建状态时按自带产物跳过");
+    assert_eq!(build_runs(&module_dir), 2, "跳过时构建命令不再跑");
+}

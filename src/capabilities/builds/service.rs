@@ -397,16 +397,17 @@ impl BuildsService {
 impl Builds for BuildsService {
     fn ensure(&self, module: &Module, target: &Target, net: bool) -> Result<Built, String> {
         let target_os = self.target_os(target)?;
-        if self.entries_left(module, &target_os).is_empty() {
-            return Ok(Built {
-                module: module.manifest.id.clone(),
-                target: target.label(),
-                skipped: true,
-                output: String::new(),
-            });
-        }
+        let left = self.entries_left(module, &target_os);
         let Some(decl) = module.manifest.build.clone() else {
-            let left = self.entries_left(module, &target_os);
+            // 没有 build 段：入口在目标环境是否可用只能看入口本身。
+            if left.is_empty() {
+                return Ok(Built {
+                    module: module.manifest.id.clone(),
+                    target: target.label(),
+                    skipped: true,
+                    output: String::new(),
+                });
+            }
             return Err(format!(
                 "模块 {} 的工具 {} 入口不在场：{}（模块没声明 build 段：要自带产物，或按模块 README 自己编一次）",
                 module.manifest.id,
@@ -414,6 +415,30 @@ impl Builds for BuildsService {
                 left.first().map(|e| e.command.as_str()).unwrap_or("")
             ));
         };
+        // 有 build 段：入口存在不等于**这个目标**的产物。只有构建状态明确属于当前目标才跳过；
+        // 状态是别的目标（宿主产物进 guest）就交给 run 重编。状态缺失视为随仓自带产物，仍跳过。
+        if left.is_empty() {
+            let state_path = fp::state_path(&self.root, &module.manifest.id);
+            match fp::read_state(&state_path) {
+                Some(prev) if prev.target == target.label() => {
+                    return Ok(Built {
+                        module: module.manifest.id.clone(),
+                        target: target.label(),
+                        skipped: true,
+                        output: String::new(),
+                    });
+                }
+                Some(_) => return self.run(module, &decl, target, &target_os, net),
+                None => {
+                    return Ok(Built {
+                        module: module.manifest.id.clone(),
+                        target: target.label(),
+                        skipped: true,
+                        output: String::new(),
+                    });
+                }
+            }
+        }
         self.run(module, &decl, target, &target_os, net)
     }
 
