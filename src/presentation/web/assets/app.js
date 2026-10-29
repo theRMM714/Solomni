@@ -1071,26 +1071,29 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
   // 思考强度：工作根一个档（子会话共享）；改了就生效，与状态栏 chip 走同一个动作。
   const secThink = cfgDiv('cfg-sec');
   secThink.appendChild(cfgDiv('cfg-sec-title', '思考强度（工作根共享）'));
-  const think = cfg.thinking || { level: null, label: '随模型默认', options: [], note: '' };
-  const thinkOpts = [{ value: '', label: '随模型默认' }].concat((think.options || []).map((o) => ({
-    value: o.id,
-    label: o.label + (o.enabled ? '' : '（不可用：' + (o.reason || '未登记') + '）'),
-  })));
-  const thinkSel = selectInput(thinkOpts, think.level || '');
-  Array.from(thinkSel.children || []).forEach((o, i) => {
-    if (i > 0 && think.options && think.options[i - 1] && !think.options[i - 1].enabled) o.disabled = true;
-  });
+  const think = cfg.thinking || { level: null, default_level: null, label: '未设置', options: [], note: '' };
+  const thinkOpts = (think.options || []).map((o) => ({ value: o.id, label: o.label }));
+  const current = think.level || think.default_level || '';
+  // 只有没有统一默认档时，才需要「跟随默认」这一项；有具体默认档时它本身就是一项。
+  if (!think.default_level) thinkOpts.unshift({ value: '', label: '（跟随默认）' });
+  const known = (think.options || []).some((o) => o.id === current);
+  if (current && !known) {
+    thinkOpts.unshift({ value: current, label: (think.label || current) + '（当前档不可用）' });
+  }
+  const thinkSel = selectInput(thinkOpts, current);
+  if (current && !known && thinkSel.children[0]) thinkSel.children[0].disabled = true;
   thinkSel.onchange = async () => {
-    const level = thinkSel.value;
+    const picked = thinkSel.value;
+    const level = picked === think.default_level ? '' : picked;
     try {
       await api('POST', actionUrl('set_thinking'), { session_id: sid, level });
       await refreshState();
-      c.setMsg(level ? '思考强度：' + thinkingLabel(level) : '思考强度：随模型默认');
+      c.setMsg(level ? '思考强度：' + thinkingLabel(level) : '思考强度：跟随模型默认');
       loadConfig(sid, c, box, setSync);
     } catch (e) { c.setMsg(e.message, true); }
   };
   secThink.appendChild(field('思考强度', thinkSel));
-  secThink.appendChild(cfgHint(think.note || '只作用于对话生成；核心内部编排保持供应商默认。模型没登记该档时后端会拒绝并在菜单里写明原因。'));
+  secThink.appendChild(cfgHint(think.note || '只作用于对话生成；核心内部编排保持供应商默认。只列这组模型都登记了的档；选中共同默认档 = 跟随模型默认。'));
   box.appendChild(secThink);
 
   // 动作
@@ -3790,7 +3793,7 @@ function statusPrintOf(s) {
     (state.settings && state.settings.compact_at_percent) || 0,
     s && s.permission_profile, s && s.permission_label, s && s.permission_narrowed ? 1 : 0,
     s && s.permission_parent,
-    s && s.thinking ? [s.thinking.level, s.thinking.label, (s.thinking.options || []).length] : 0,
+    s && s.thinking ? [s.thinking.level, s.thinking.default_level, s.thinking.label, (s.thinking.options || []).length] : 0,
     s && s.shell ? [
       s.shell.command, s.shell.scope, s.shell.started_at, s.shell.finished_at,
       s.shell.ok, s.shell.exit_code, (s.shell.output || '').length,
@@ -3850,23 +3853,32 @@ function openPermissionMenu(chip, s) {
   ui.menu(chip, items);
 }
 
-/* 思考强度小卡片：工作根一个档；只列后端说可用的档，不可用的带原因（不静默降级）。 */
+/* 思考强度小卡片：工作根一个档；只列后端给的已映射档，没选过档时直接勾共同默认档。 */
 function openThinkingMenu(chip, s) {
-  const th = s.thinking || { level: null, label: '随模型默认', options: [], note: '' };
-  const items = [{
-    icon: !th.level ? 'check' : 'dot',
-    label: '随模型默认' + (!th.level ? '（当前）' : ''),
-    disabled: !!s.running,
-    reason: s.running ? '会话正在生成：先停止再切换思考强度' : '',
-    onClick: () => { if (th.level) switchThinking(s.sid, ''); },
-  }];
-  for (const o of (th.options || [])) {
+  const th = s.thinking || { level: null, default_level: null, label: '未设置', options: [], note: '' };
+  const current = th.level || th.default_level || '';
+  const items = [];
+  // 没有统一默认档时（各模型默认不同 / 都没设默认），保留一个跟随默认的状态项。
+  if (!th.default_level) {
     items.push({
-      icon: th.level === o.id ? 'check' : 'dot',
-      label: o.label + (th.level === o.id ? '（当前）' : ''),
-      disabled: !!s.running || !o.enabled,
-      reason: s.running ? '会话正在生成：先停止再切换思考强度' : (o.reason || ''),
-      onClick: () => { if (th.level !== o.id) switchThinking(s.sid, o.id); },
+      icon: !th.level ? 'check' : 'dot',
+      label: '跟随默认' + (!th.level ? '（当前）' : ''),
+      disabled: !!s.running,
+      reason: s.running ? '会话正在生成：先停止再切换思考强度' : '',
+      onClick: () => { if (th.level) switchThinking(s.sid, ''); },
+    });
+  }
+  for (const o of (th.options || [])) {
+    const isCurrent = current === o.id;
+    items.push({
+      icon: isCurrent ? 'check' : 'dot',
+      label: o.label + (isCurrent ? '（当前）' : ''),
+      disabled: !!s.running,
+      reason: s.running ? '会话正在生成：先停止再切换思考强度' : '',
+      onClick: () => {
+        if (isCurrent) return;
+        switchThinking(s.sid, o.id === th.default_level ? '' : o.id);
+      },
     });
   }
   ui.menu(chip, items);
@@ -3880,7 +3892,7 @@ async function switchThinking(sid, level) {
   try {
     await api('POST', actionUrl('set_thinking'), { session_id: sid, level });
     await refreshState();
-    ui.toast('ok', '思考强度：' + (level ? thinkingLabel(level) : '随模型默认'));
+    ui.toast('ok', '思考强度：' + (level ? thinkingLabel(level) : '跟随模型默认'));
   } catch (e) {
     ui.toast('err', e.message || String(e));
   }
@@ -3931,14 +3943,14 @@ function syncStatusbar(s) {
     inner.appendChild(permChip);
   }
 
-  // 思考强度：工作根一个档；不可用的档在菜单里禁用并写原因。
+  // 思考强度：工作根一个档；只列这组模型都登记了的档。
   if (s.thinking) {
     const th = s.thinking;
     const thChip = ui.statusChip({
       icon: 'cpu',
-      text: '思考 ' + (th.label || '随模型默认'),
+      text: '思考 ' + (th.label || '未设置'),
       label: '思考强度',
-      title: (th.note ? th.note : '当前思考强度：' + (th.label || '随模型默认') + '（点开可切换；子会话与工作根共享）'),
+      title: (th.note ? th.note : '当前思考强度：' + (th.label || '未设置') + '（点开可切换；子会话与工作根共享）'),
       cls: th.note ? 'warn' : '',
     });
     thChip.onclick = () => openThinkingMenu(thChip, s);

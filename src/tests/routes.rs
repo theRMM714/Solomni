@@ -209,7 +209,8 @@ impl SessionOps for FakeOps {
             permission_label: "工作区内修改".to_string(),
             thinking: crate::capabilities::conductor::api::ThinkingView {
                 level: None,
-                label: "随模型默认".to_string(),
+                default_level: None,
+                label: "未设置".to_string(),
                 options: Vec::new(),
                 note: String::new(),
             },
@@ -295,7 +296,8 @@ impl SessionOps for FakeOps {
             net: false,
             thinking: crate::capabilities::conductor::api::ThinkingView {
                 level: None,
-                label: "随模型默认".to_string(),
+                default_level: None,
+                label: "未设置".to_string(),
                 options: Vec::new(),
                 note: String::new(),
             },
@@ -463,7 +465,8 @@ impl SessionOps for FakeOps {
                 permission_label: "工作区内修改".to_string(),
                 thinking: crate::capabilities::conductor::api::ThinkingView {
                     level: None,
-                    label: "随模型默认".to_string(),
+                    default_level: None,
+                    label: "未设置".to_string(),
                     options: Vec::new(),
                     note: String::new(),
                 },

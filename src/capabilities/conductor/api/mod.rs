@@ -837,30 +837,28 @@ pub struct SessionView {
     pub shell: Option<crate::capabilities::session::api::ShellLive>,
 }
 
-/// 目的：思考强度视图：当前选择 + 可选档 + 不可用原因（状态栏与配置页共用一份事实）。
+/// 目的：思考强度视图：当前选择 + 共同默认档 + 可选档（状态栏与配置页共用一份事实）。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ThinkingView {
-    /// 目的：当前选择（None = 随模型默认）。
+    /// 目的：会话自己的选择（None = 没选过，跟随模型默认）。
     pub level: Option<String>,
-    /// 目的：给人看的当前档（"随模型默认" / 档位标签）。
+    /// 目的：这组模型共同的默认档（None = 没有统一默认：各模型各自默认或都不指定）。
+    pub default_level: Option<String>,
+    /// 目的：给人看的当前档（会话选择，否则共同默认；没有可显示的档时是「各模型默认 / 未设置」）。
     pub label: String,
-    /// 目的：可选档（按全局目录顺序；不可用的带原因）。
+    /// 目的：可选档（只列这组模型都登记了的档；按全局目录顺序）。
     pub options: Vec<ThinkingOptionView>,
     /// 目的：现在这组模型/目录有什么要注意的（空 = 正常）。
     pub note: String,
 }
 
-/// 目的：一个可选思考档：可用性只由"这组模型都登记了它"决定。
+/// 目的：一个可选思考档：只列这组模型都登记了的档。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ThinkingOptionView {
     /// 目的：档位 id。
     pub id: String,
     /// 目的：给人看的档位名。
     pub label: String,
-    /// 目的：这组模型是否都登记了这一档。
-    pub enabled: bool,
-    /// 目的：不可用时的原因（可用为空）。
-    pub reason: String,
 }
 
 /// 目的：会话文件清单视图（前端 @ 菜单与「长路径缩写」用）：相对清单 + 真实根。

@@ -739,7 +739,7 @@ tools:
     desc: 切换这条工作（会话级）的思考强度；写在工作根会话的 meta 上，子会话共享。只作用于对话生成（单 agent / 代理 / 协作成员回合），核心内部编排保持供应商默认。模型没登记该档时拒绝并列出模型。
     params:
       session_id: { type: string, required: true, non_empty: true, desc: 会话 id（子会话也可以，作用在工作根上） }
-      level: { type: string, desc: 思考档位 id；空串 = 随模型默认 }
+      level: { type: string, desc: 思考档位 id；空串 = 跟随模型默认（不指定） }
   probe_model_tools:
     capability: none
     callers: [user]

@@ -1781,19 +1781,19 @@ fn set_thinking_action_switches_the_work_level_and_rejects_unmapped_levels() {
     let cfg = ops.sessions.config(&sid).expect("读配置");
     assert_eq!(cfg.thinking.level.as_deref(), Some("high"));
     assert!(
-        cfg.thinking
-            .options
-            .iter()
-            .any(|o| o.id == "high" && o.enabled),
-        "已登记的档要标成可用"
+        cfg.thinking.options.iter().any(|o| o.id == "high"),
+        "已登记的档要列出来"
     );
     assert!(
-        cfg.thinking
-            .options
-            .iter()
-            .any(|o| o.id == "max" && !o.enabled),
-        "没登记的档要标成不可用并给出原因"
+        !cfg.thinking.options.iter().any(|o| o.id == "max"),
+        "没登记的档不列出来"
     );
+    assert_eq!(
+        cfg.thinking.default_level.as_deref(),
+        None,
+        "没有统一默认档"
+    );
+    assert_eq!(cfg.thinking.label, "高", "有会话选择时显示选择");
     // 没登记的档：拒绝并列出缺映射的模型（不静默降级）
     let err = ops
         .actions
@@ -1814,9 +1814,51 @@ fn set_thinking_action_switches_the_work_level_and_rejects_unmapped_levels() {
             out: Output::Final,
         })
         .unwrap();
+    let after = ops.sessions.config(&sid).unwrap();
+    assert_eq!(after.thinking.level.as_deref(), None, "空串回到跟随默认");
     assert_eq!(
-        ops.sessions.config(&sid).unwrap().thinking.level.as_deref(),
+        after.thinking.default_level.as_deref(),
         None,
-        "空串回到随模型默认"
+        "模型没有默认档"
+    );
+    assert_eq!(after.thinking.label, "未设置", "没有选择也没有默认");
+}
+
+/// 目的：没选过档时视图直接给出这组模型的共同默认；可选档只列已映射的档。
+#[test]
+fn thinking_view_uses_the_common_default_and_hides_unmapped_levels() {
+    use crate::capabilities::registry::api::ThinkingSpec;
+    use std::collections::BTreeMap;
+    let handle = spawn(vec![module_of("a")], Vec::new());
+    let ops = Ops::from_handle(&handle);
+    ops.registry
+        .upsert_model(crate::capabilities::registry::api::ModelDraft {
+            thinking: ThinkingSpec {
+                default: Some("high".to_string()),
+                levels: BTreeMap::from([
+                    ("low".to_string(), serde_json::json!("low")),
+                    ("high".to_string(), serde_json::json!("high")),
+                ]),
+            },
+            ..model_draft("m", "M", "m", "p", "", 32_000)
+        })
+        .unwrap();
+    let (opened, _) = ops
+        .sessions
+        .create_work(single_work("w-default", &["a"]))
+        .expect("建会话");
+    let cfg = ops.sessions.config(&opened.sid).expect("读配置");
+    assert_eq!(cfg.thinking.level, None, "没选过档");
+    assert_eq!(
+        cfg.thinking.default_level.as_deref(),
+        Some("high"),
+        "这组模型共同的默认档"
+    );
+    assert_eq!(cfg.thinking.label, "高", "默认档直接作为当前档显示");
+    let ids: Vec<&str> = cfg.thinking.options.iter().map(|o| o.id.as_str()).collect();
+    assert_eq!(ids, ["low", "high"], "只列已映射的档（按目录顺序）");
+    assert!(
+        !cfg.thinking.options.iter().any(|o| o.id == "max"),
+        "没映射的档不列出来"
     );
 }

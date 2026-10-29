@@ -850,7 +850,7 @@ setTimeout(async () => {
           " const collab = run('s3', 'collab', ctx, head);" +
           " const shellLive = { command: 'echo hi', scope: 'sandbox', cwd: '/x', started_at: Math.floor(Date.now()/1000) - 12, finished_at: Math.floor(Date.now()/1000), exit_code: 0, ok: true, output: 'hi' };" +
           " const withShell = run('s4', 'single', ctx, head, shellLive);" +
-          " const th = { level: 'high', label: '高', options: [{ id: 'high', label: '高', enabled: true, reason: '' }], note: '' };" +
+          " const th = { level: null, default_level: 'high', label: '高', options: [{ id: 'high', label: '高' }], note: '' };" +
           " const withThinking = run('s5', 'single', ctx, head, null, th);" +
           " return { single: single, proxy: proxy, collab: collab, withShell: withShell, withThinking: withThinking };" +
           "})()",
@@ -865,12 +865,56 @@ setTimeout(async () => {
       if (!statusBarRules) loadErrors.push("状态栏检查：" + JSON.stringify(r));
     } catch (e) { loadErrors.push("状态栏检查失败：" + e.message); }
   }
+  // **思考菜单**：有共同默认档时直接勾默认档、不出现「随模型默认」；没有统一默认时才出现「跟随默认」。
+  let thinkingMenuRules = false;
+  if (!loadErrors.length) {
+    try {
+      const r = vm.runInNewContext(`
+        (function () {
+          const chip = document.createElement('button');
+          const root = document.querySelector('#menu-root');
+          const mine = (th) => {
+            root.children.length = 0;
+            openThinkingMenu(chip, { sid: 's', running: false, thinking: th });
+            return root.children[root.children.length - 1];
+          };
+          const labels = (m) => {
+            const out = [];
+            for (const b of (m.children || [])) {
+              let t = '';
+              (function w(n) { t += String(n.textContent || ''); for (const c of (n.children || [])) w(c); })(b);
+              out.push(t);
+            }
+            return out;
+          };
+          const a = mine({
+            level: null, default_level: 'high', label: '高',
+            options: [{ id: 'low', label: '低' }, { id: 'high', label: '高' }], note: '',
+          });
+          const b = mine({
+            level: null, default_level: null, label: '未设置',
+            options: [{ id: 'high', label: '高' }], note: '',
+          });
+          return { a: labels(a), b: labels(b) };
+        })()
+      `, sandbox);
+      const hasDefaultOk = r.a.length === 2 &&
+        r.a.some((t) => t.indexOf('高（当前）') >= 0) &&
+        r.a.some((t) => t.indexOf('低') >= 0) &&
+        !r.a.some((t) => t.indexOf('跟随默认') >= 0 || t.indexOf('随模型默认') >= 0);
+      const noDefaultOk = r.b.length === 2 &&
+        r.b.some((t) => t.indexOf('跟随默认（当前）') >= 0) &&
+        r.b.some((t) => t.indexOf('高') >= 0);
+      thinkingMenuRules = hasDefaultOk && noDefaultOk;
+      if (!thinkingMenuRules) loadErrors.push("思考菜单检查：" + JSON.stringify(r));
+    } catch (e) { loadErrors.push("思考菜单检查失败：" + e.message); }
+  }
   const ok = alerts.length === 0 && loadErrors.length === 0 && rendered && tierWarned && identityKept
     && pollConn === "已连接" && pollApplied && hydratedHistory && liveReplaced && liveClearedOnIdle && toolReasoningRendered
     && rewoundApplies && readonlyRule
     && taskButtonRule && decisionCardRule && onlyLastStreams && lineRule && toolOnlyReasoning && incrementalAppend && pendingReplaced && noticeRow && modalDismiss && rewindIcon && runningRules && atMenuRefetches
     && wizardProxy && wizardBlocked && sessionNoteRule && historyRunTag && fenceBanner && nodeCard && tabLadder
-    && statusBarRules && consoleErrors.length === 0;
+    && statusBarRules && thinkingMenuRules && consoleErrors.length === 0;
   if (!ok) {
     console.log("alerts（原生弹窗被调用的次数，应为 0）:", JSON.stringify(alerts));
     console.log("notice 渲染:", rendered, "| 虚拟机档不可用提示:", tierWarned, "| 身份标题保留:", identityKept);

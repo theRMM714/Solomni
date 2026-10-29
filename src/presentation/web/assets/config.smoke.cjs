@@ -111,6 +111,7 @@ const CFG = {
     { guest: "windows", label: "debian-13-genericcloud-amd64", os: "linux", arch: "amd64", ready: false, missing: ["vm.guest-runtime.windows"], install: ".vm/guest/windows" },
   ],
   pins: { python: "3.12", ruby: "3.2" },
+  thinking: { level: null, default_level: "high", label: "高", options: [{ id: "high", label: "高" }], note: "" },
   vm_available: true, vm_unavailable_reason: "", vm_requirements: [],
   tier_ready: true, tier_missing: [],
   runtime: {
@@ -328,9 +329,10 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
   check("config: 单版本能力不显示选择", !selects.some((s) => (s.children || []).some((o) => String(o.textContent) === "20.11.0")));
   check("config: 单版本已有定版如实说明", t.indexOf("包库里现在看不到这个能力") >= 0);
   check("config: 会话权限段", t.indexOf("会话权限") >= 0 && t.indexOf("网络由全局") >= 0);
-  const thinkSel = selects.find((s) => (s.children || []).some((o) => String(o.textContent).indexOf("随模型默认") >= 0));
+  const thinkSel = selects.find((s) => (s.children || []).some((o) => String(o.textContent) === "高"));
   check("config: 思考强度选择器（工作根共享）",
-    t.indexOf("思考强度（工作根共享）") >= 0 && !!thinkSel);
+    t.indexOf("思考强度（工作根共享）") >= 0 && !!thinkSel && thinkSel.value === "high" &&
+    thinkSel.children.map((o) => o.textContent).join("|") === "高");
   check("config: 保存/取消按钮", !!findButton(modal, "保存") && !!findButton(modal, "取消"));
 
   /* ---- 保存失败：后端 error 原文 ---- */

@@ -956,8 +956,8 @@ impl Conductor {
         out
     }
 
-    /// 目的：一条工作的思考强度视图：当前档 + 全局目录里每一档在这组模型上的可用性。
-    /// 约束：可用 = 所有相关模型都登记了该档；不可用时把缺映射的模型列出来（不猜、不静默降级）。
+    /// 目的：一条工作的思考强度视图：当前选择 + 这组模型共同的默认档 + 只列已映射的档。
+    /// 约束：可选 = 所有相关模型都登记了该档；没有统一默认时由前端保留一个「跟随默认」状态项。
     pub(crate) fn thinking_view_for_root(&self, root: &str) -> ThinkingView {
         let level = self
             .history
@@ -966,35 +966,47 @@ impl Conductor {
             .and_then(|m| m.thinking.clone());
         let catalog = &self.registry.app().thinking.levels;
         let models = self.thinking_models_in_tree(root);
+        let views = self.registry.model_views();
+        let defaults: Vec<Option<String>> = models
+            .iter()
+            .map(|m| {
+                views
+                    .iter()
+                    .find(|v| v.id.as_str() == m.as_str())
+                    .and_then(|v| v.thinking.default.clone())
+            })
+            .collect();
+        // 共同默认：所有模型都设了同一个默认档才成立；否则没有可替用户选中的单一档。
+        let default_level = defaults.first().cloned().flatten().filter(|first| {
+            defaults
+                .iter()
+                .all(|d| d.as_deref() == Some(first.as_str()))
+        });
         let mut options = Vec::new();
-        for l in catalog {
-            let missing: Vec<String> = models
-                .iter()
-                .filter(|m| !self.registry.thinking_supports(Some(m), &l.id))
-                .cloned()
-                .collect();
-            let enabled = !models.is_empty() && missing.is_empty();
-            let reason = if models.is_empty() {
-                "登记处没有可用模型".to_string()
-            } else if !missing.is_empty() {
-                format!("这些模型没有登记：{}", missing.join("、"))
-            } else {
-                String::new()
-            };
-            options.push(ThinkingOptionView {
-                id: l.id.clone(),
-                label: l.display().to_string(),
-                enabled,
-                reason,
-            });
+        if !models.is_empty() {
+            for l in catalog {
+                if models
+                    .iter()
+                    .all(|m| self.registry.thinking_supports(Some(m), &l.id))
+                {
+                    options.push(ThinkingOptionView {
+                        id: l.id.clone(),
+                        label: l.display().to_string(),
+                    });
+                }
+            }
         }
-        let label = match &level {
-            Some(l) => catalog
+        let display = |id: &str| {
+            catalog
                 .iter()
-                .find(|x| &x.id == l)
+                .find(|x| x.id == id)
                 .map(|x| x.display().to_string())
-                .unwrap_or_else(|| l.clone()),
-            None => "随模型默认".to_string(),
+                .unwrap_or_else(|| id.to_string())
+        };
+        let label = match level.as_deref().or(default_level.as_deref()) {
+            Some(l) => display(l),
+            None if defaults.iter().any(|d| d.is_some()) => "各模型默认".to_string(),
+            None => "未设置".to_string(),
         };
         let current_ok = match &level {
             Some(l) => models
@@ -1006,11 +1018,17 @@ impl Conductor {
             "登记处还没有可用模型：先登记供应商与模型".to_string()
         } else if !current_ok {
             "当前档位有模型没登记：下一次生成会如实报错；改模型登记或在状态栏换一档".to_string()
+        } else if options.is_empty() {
+            "这组模型没有共同登记的思考档：先到「模型登记」补映射".to_string()
+        } else if level.is_none() && default_level.is_none() && defaults.iter().any(|d| d.is_some())
+        {
+            "各模型的默认思考档不同：切换后整棵工作树共用一个档".to_string()
         } else {
             String::new()
         };
         ThinkingView {
             level,
+            default_level,
             label,
             options,
             note,
@@ -1278,7 +1296,8 @@ impl Conductor {
                         .clone(),
                     Err(_) => ThinkingView {
                         level: None,
-                        label: "随模型默认".to_string(),
+                        default_level: None,
+                        label: "未设置".to_string(),
                         options: Vec::new(),
                         note: String::new(),
                     },
