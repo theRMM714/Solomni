@@ -2100,6 +2100,7 @@ function thinkingTagsEditor(levels) {
     input.value = '';
     showError('');
     render();
+    if (typeof input.focus === 'function') input.focus();
   }
   add.onclick = addLevel;
   input.addEventListener('keydown', (e) => {
