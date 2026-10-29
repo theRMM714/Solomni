@@ -2653,7 +2653,7 @@ function parseSettingLines(text) {
   return String(text || '').split(/[\n,]/).map((s) => s.trim()).filter((s) => s.length > 0);
 }
 
-/// 1–4 页共用一份提交体（set_settings 是全量写）。
+/// 1–4 页共用一份提交体（set_settings 是部分更新，未提交字段保留现值）。
 function collectSettings(f) {
   return {
     streaming: f.stream.box.checked,
@@ -2721,7 +2721,7 @@ function openSettingsModal() {
 }
 
 /* ---------- 设置中心：左侧分页、右侧单页、底栏统一保存 ----------
- * 1–4 页共享同一份 AppSettings（set_settings 是全量写）：控件一次建全，切页只切显示。
+ * 1–4 页共享同一份 AppSettings（set_settings 是部分更新，未提交字段保留现值）：控件一次建全，切页只切显示。
  * 5–8 页是即时的登记 / 启停操作，不显示保存栏。 */
 const SETTINGS_PAGES = [
   { id: 'generate', group: '设置', label: '生成与上下文', icon: 'cpu' },
