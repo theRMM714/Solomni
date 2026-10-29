@@ -13,8 +13,8 @@ pub use crate::capabilities::registry::domain::agents::{
     AgentView, Agents, RosterPick,
 };
 pub use crate::capabilities::registry::domain::providers::{
-    AppSettings, ModelEntry, ModelView, Provider, ProviderView, SandboxEnforceLevel,
-    SandboxUnavailable, Settings,
+    AppSettings, ModelDraft, ModelEntry, ModelView, Provider, ProviderView, SandboxEnforceLevel,
+    SandboxUnavailable, Settings, ThinkingSpec,
 };
 
 use crate::capabilities::llm::api::{Channel, ProbeOutcome, ReplayReport, ToolMode};
@@ -34,16 +34,7 @@ pub trait RegistryOps: Send + Sync {
     fn remove_provider(&self, id: &str) -> Result<bool, String>;
     fn models(&self) -> Result<Vec<ModelView>, String>;
     fn core_model(&self) -> Result<Option<String>, String>;
-    fn upsert_model(
-        &self,
-        id: &str,
-        name: &str,
-        api_model: &str,
-        provider: &str,
-        note: &str,
-        // 上下文窗口（tokens）；0 = 用户不填（自动压缩按 128K 兜底）。
-        context: u64,
-    ) -> Result<(), String>;
+    fn upsert_model(&self, draft: ModelDraft) -> Result<(), String>;
     fn remove_model(&self, id: &str) -> Result<bool, String>;
     fn set_core_model(&self, id: &str) -> Result<bool, String>;
     fn agents(&self) -> Result<Vec<AgentView>, String>;
@@ -113,6 +104,14 @@ pub trait Registry: Send + Sync {
     fn tool_mode(&self, model: Option<&str>) -> ToolMode;
     /// 该模型（缺省用核心默认）的上下文窗口（tokens）；未登记 = 保守缺省。
     fn context_of(&self, model: Option<&str>) -> u64;
+    /// 该模型（缺省用核心默认）在给定会话档位下要并入请求体的片段；None = 不发。
+    fn thinking_fragment(
+        &self,
+        model: Option<&str>,
+        level: Option<&str>,
+    ) -> Result<Option<serde_json::Value>, String>;
+    /// 该模型（缺省用核心默认）是否登记了这一档（会话切换前的可用性判据）。
+    fn thinking_supports(&self, model: Option<&str>, level: &str) -> bool;
     /// 登记处**快照**：协作会话自持一份（与今日 `settings.clone()` 同义，语义不变）。
     fn snapshot(&self) -> Settings;
     // ---- 写：只有这里改登记处，改完就落盘 ----
@@ -121,16 +120,8 @@ pub trait Registry: Send + Sync {
     fn provider_upsert(&mut self, id: &str, base_url: &str, api_key: &str) -> Result<(), String>;
     /// 删除供应商；仍被模型引用时拒绝（不静默级联删除）。
     fn provider_remove(&mut self, id: &str) -> Result<bool, String>;
-    /// 新建/更新模型。`context` 为 0 = 用户不填（自动压缩按 128K 兜底）；工具形态保留原值。
-    fn model_upsert(
-        &mut self,
-        id: &str,
-        name: &str,
-        api_model: &str,
-        provider: &str,
-        note: &str,
-        context: u64,
-    ) -> Result<(), String>;
+    /// 新建/更新模型。`draft.context` 为 0 = 用户不填（自动压缩按 128K 兜底）；工具形态保留原值。
+    fn model_upsert(&mut self, draft: ModelDraft) -> Result<(), String>;
     /// 删除模型；是核心默认模型时拒绝（先改默认再删）。
     fn model_remove(&mut self, id: &str) -> Result<bool, String>;
     /// 设定核心默认模型；模型不存在 = false（不改动）。

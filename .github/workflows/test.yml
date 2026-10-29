@@ -293,6 +293,7 @@ jobs:
           path: |
             target/e2e-report.json
             target/test-logs/
+            tests/cross-platform/e2e/root/logs/
           if-no-files-found: ignore
 
   gate:

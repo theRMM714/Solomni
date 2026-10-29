@@ -281,24 +281,9 @@ impl RegistryOps for ConductorHandle {
     }
     fn upsert_model(
         &self,
-        id: &str,
-        name: &str,
-        api_model: &str,
-        provider: &str,
-        note: &str,
-        context: u64,
+        draft: crate::capabilities::registry::api::ModelDraft,
     ) -> Result<(), String> {
-        let (id, name, api_model, provider, note) = (
-            id.to_string(),
-            name.to_string(),
-            api_model.to_string(),
-            provider.to_string(),
-            note.to_string(),
-        );
-        self.call(move |core| {
-            core.registry_mut()
-                .model_upsert(&id, &name, &api_model, &provider, &note, context)
-        })
+        self.call(move |core| core.registry_mut().model_upsert(draft))
     }
     fn remove_model(&self, id: &str) -> Result<bool, String> {
         let id = id.to_string();

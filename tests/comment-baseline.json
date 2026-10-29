@@ -320,8 +320,8 @@
   "src/capabilities/registry/domain/providers.rs": {
     "头块：槽外有行或自造槽": 4,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 33,
-    "条目：首行不是目的": 26
+    "条目：槽外有行或自造槽": 32,
+    "条目：首行不是目的": 25
   },
   "src/capabilities/registry/mod.rs": {
     "头块：槽外有行或自造槽": 4,

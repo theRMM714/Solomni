@@ -55,6 +55,7 @@ fn meta(name: &str) -> SessionMeta {
         parent: None,
         node: None,
         delegation: None,
+        thinking: None,
         run: crate::capabilities::session::api::RunState::Active,
     }
 }
@@ -666,6 +667,7 @@ fn yaml_settings_store_defaults_saves_and_reports_malformed_files() {
             note: String::new(),
             tools: crate::capabilities::llm::api::ToolMode::Envelope,
             context: 32_000,
+            thinking: Default::default(),
         },
     );
     want.core = Some("m".to_string());
@@ -2088,4 +2090,53 @@ fn outbound_error_classification_keeps_environment_and_our_bug_apart() {
     assert!(!lacks_system_credentials("certificate verify failed"));
     assert!(!lacks_system_credentials("hostname mismatch"));
     assert!(!lacks_system_credentials(""), "空原文不能算环境结论");
+}
+
+/// 目的：思考片段在**唯一的请求体构造处**合并：字符串/对象都进 wire，空对象不产生字段；
+/// 保留键即使绕过登记处校验也挡在运行时之外。
+#[test]
+fn http_chat_merges_the_thinking_fragment_into_the_request_body() {
+    // 对象片段（GLM 的关闭写法）
+    let mock = Mock::start(vec![(200, "application/json", completion_body("好"))]);
+    let mut chat = gateway().member_channel(&mock.channel("k"), "a");
+    let thinking = Arc::new(serde_json::json!({ "thinking": { "type": "disabled" } }));
+    let out = chat.complete(
+        &[Msg::user("hi")],
+        CompleteOpts::plain(false).with_thinking(Some(thinking)),
+        &mut |_| true,
+    );
+    assert!(out.error.is_none());
+    let body = &mock.bodies()[0];
+    assert!(
+        body.contains("\"thinking\":{\"type\":\"disabled\"}"),
+        "对象片段要原样合并：{}",
+        body
+    );
+    assert!(
+        body.contains("\"model\":\"m\""),
+        "模型字段仍由通道决定：{}",
+        body
+    );
+
+    // 保留键：运行时不得被片段覆盖
+    let mock2 = Mock::start(vec![(200, "application/json", completion_body("好"))]);
+    let mut chat2 = gateway().member_channel(&mock2.channel("k"), "a");
+    let hijack = Arc::new(serde_json::json!({ "model": "hijack", "reasoning_effort": "high" }));
+    let _ = chat2.complete(
+        &[Msg::user("hi")],
+        CompleteOpts::plain(false).with_thinking(Some(hijack)),
+        &mut |_| true,
+    );
+    let body2 = &mock2.bodies()[0];
+    assert!(
+        body2.contains("\"model\":\"m\""),
+        "model 不得被片段覆盖：{}",
+        body2
+    );
+    assert!(
+        !body2.contains("hijack"),
+        "保留键的值不得进请求体：{}",
+        body2
+    );
+    assert!(body2.contains("\"reasoning_effort\":\"high\""));
 }

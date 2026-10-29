@@ -281,6 +281,7 @@ impl Discussion {
         let llm = crate::capabilities::llm::api::LlmOpts {
             stream: opts.stream,
             timeout_secs: opts.timeout_secs,
+            thinking: opts.thinking.clone(),
         };
         let mut lines: Vec<LineView> = Vec::new();
         let next_line = std::cell::Cell::new(0u64);

@@ -571,6 +571,12 @@ impl ConductorHandle {
                 self.call(move |core| core.set_permission_profile(&sid, profile))?;
                 Ok(Acted::Done(serde_json::json!({ "ok": true })))
             }
+            "set_thinking" => {
+                let sid = s("session_id");
+                let level = s("level");
+                self.call(move |core| core.set_thinking(&sid, &level))?;
+                Ok(Acted::Done(serde_json::json!({ "ok": true })))
+            }
             "edit_session" => {
                 // 动作信封的 session_id 不属于编辑体：先摘掉再按严格 DTO 反序列化。
                 let mut body = args.clone();
@@ -667,14 +673,29 @@ impl ConductorHandle {
             }
             "upsert_model" => {
                 let context = args.get("context").and_then(|v| v.as_u64()).unwrap_or(0);
-                self.upsert_model(
-                    &s("id"),
-                    &s("name"),
-                    &s("api_model"),
-                    &s("provider"),
-                    &s("note"),
+                // 思考强度：省略 = 保留原值（与 tools 同一条规则）；给了就整段替换。
+                let thinking = match args.get("thinking") {
+                    Some(v) => serde_json::from_value(v.clone())
+                        .map_err(|e| format!("思考强度非法：{}", e))?,
+                    None => RegistryOps::models(self)?
+                        .into_iter()
+                        .find(|m| m.id == s("id"))
+                        .map(|m| crate::capabilities::registry::api::ThinkingSpec {
+                            default: m.thinking.default,
+                            levels: m.thinking.levels,
+                        })
+                        .unwrap_or_default(),
+                };
+                let draft = crate::capabilities::registry::api::ModelDraft {
+                    id: s("id"),
+                    name: s("name"),
+                    api_model: s("api_model"),
+                    provider: s("provider"),
+                    note: s("note"),
                     context,
-                )?;
+                    thinking,
+                };
+                self.upsert_model(draft)?;
                 Ok(Acted::Done(serde_json::json!({ "ok": true })))
             }
             "remove_model" => {
@@ -735,6 +756,11 @@ impl ConductorHandle {
                 .map_err(|e| format!("settings.sandbox 配置非法：{}", e))?,
             None => current.sandbox.clone(),
         };
+        let thinking = match args.get("thinking") {
+            Some(v) => serde_json::from_value(v.clone())
+                .map_err(|e| format!("settings.thinking 配置非法：{}", e))?,
+            None => current.thinking.clone(),
+        };
         let settings = AppSettings {
             streaming: args
                 .get("streaming")
@@ -744,6 +770,7 @@ impl ConductorHandle {
                 .get("show_reasoning")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(current.show_reasoning),
+            thinking,
             tier: current.tier,
             sandbox,
             qemu_path: current.qemu_path.clone(),

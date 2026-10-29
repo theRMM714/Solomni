@@ -836,9 +836,10 @@ setTimeout(async () => {
           " const box = document.querySelector('#session-status');" +
           " function allText(n) { let t = String(n.textContent || ''); for (const c of (n.children || [])) t += ' ' + allText(c); return t; }" +
           " function chips() { const out = []; (function walk(n) { for (const c of (n.children || [])) { if (String(c.className).split(' ')[0] === 'status-chip') out.push(allText(c)); walk(c); } })(box); return out; }" +
-          " function run(sid, mode, ctx, head, shell) {" +
+          " function run(sid, mode, ctx, head, shell, thinking) {" +
           "   state.sessions.clear(); state.activeSid = sid;" +
           "   const s = { sid: sid, mode: mode, lines: [], live: [], fold: {}, scroll: {}, context: ctx, shell: shell || null," +
+          "     thinking: thinking || null," +
           "     work: { head: head, commits: head ? [head] : [], total: head ? 1 : 0, truncated: false }," +
           "     workAt: 1, workDirty: false, workError: '', running: false, sending: false, readonly: false };" +
           "   state.sessions.set(sid, s); box.children = []; s.statusPrint = ''; syncStatusbar(s); return chips(); }" +
@@ -849,7 +850,9 @@ setTimeout(async () => {
           " const collab = run('s3', 'collab', ctx, head);" +
           " const shellLive = { command: 'echo hi', scope: 'sandbox', cwd: '/x', started_at: Math.floor(Date.now()/1000) - 12, finished_at: Math.floor(Date.now()/1000), exit_code: 0, ok: true, output: 'hi' };" +
           " const withShell = run('s4', 'single', ctx, head, shellLive);" +
-          " return { single: single, proxy: proxy, collab: collab, withShell: withShell };" +
+          " const th = { level: null, default_level: 'high', label: 'high', options: [{ id: 'high', label: 'high' }], note: '' };" +
+          " const withThinking = run('s5', 'single', ctx, head, null, th);" +
+          " return { single: single, proxy: proxy, collab: collab, withShell: withShell, withThinking: withThinking };" +
           "})()",
         sandbox
       );
@@ -857,16 +860,61 @@ setTimeout(async () => {
       const proxyOk = r.proxy.length === 2 && /1,000/.test(r.proxy[0]) && /10\.0%/.test(r.proxy[0]);
       const collabOk = r.collab.length === 1 && /#7/.test(r.collab[0]);
       const shellOk = r.withShell.length === 3 && r.withShell.some((t) => /shell 退出码 0/.test(t));
-      statusBarRules = singleOk && proxyOk && collabOk && shellOk;
+      const thinkingOk = r.withThinking.length === 3 && r.withThinking.some((t) => /思考 high/.test(t));
+      statusBarRules = singleOk && proxyOk && collabOk && shellOk && thinkingOk;
       if (!statusBarRules) loadErrors.push("状态栏检查：" + JSON.stringify(r));
     } catch (e) { loadErrors.push("状态栏检查失败：" + e.message); }
+  }
+  // **思考菜单**：有共同默认档时直接勾默认档、不出现「随模型默认」；没有统一默认时才出现「跟随默认」。
+  let thinkingMenuRules = false;
+  if (!loadErrors.length) {
+    try {
+      const r = vm.runInNewContext(`
+        (function () {
+          const chip = document.createElement('button');
+          const root = document.querySelector('#menu-root');
+          const mine = (th) => {
+            root.children.length = 0;
+            openThinkingMenu(chip, { sid: 's', running: false, thinking: th });
+            return root.children[root.children.length - 1];
+          };
+          const labels = (m) => {
+            const out = [];
+            for (const b of (m.children || [])) {
+              let t = '';
+              (function w(n) { t += String(n.textContent || ''); for (const c of (n.children || [])) w(c); })(b);
+              out.push(t);
+            }
+            return out;
+          };
+          const a = mine({
+            level: null, default_level: 'high', label: 'high',
+            options: [{ id: 'low', label: 'low' }, { id: 'high', label: 'high' }], note: '',
+          });
+          const b = mine({
+            level: null, default_level: null, label: '未设置',
+            options: [{ id: 'high', label: 'high' }], note: '',
+          });
+          return { a: labels(a), b: labels(b) };
+        })()
+      `, sandbox);
+      const hasDefaultOk = r.a.length === 2 &&
+        r.a.some((t) => t.indexOf('high（当前）') >= 0) &&
+        r.a.some((t) => t.indexOf('low') >= 0) &&
+        !r.a.some((t) => t.indexOf('跟随默认') >= 0 || t.indexOf('随模型默认') >= 0);
+      const noDefaultOk = r.b.length === 2 &&
+        r.b.some((t) => t.indexOf('跟随默认（当前）') >= 0) &&
+        r.b.some((t) => t.indexOf('high') >= 0);
+      thinkingMenuRules = hasDefaultOk && noDefaultOk;
+      if (!thinkingMenuRules) loadErrors.push("思考菜单检查：" + JSON.stringify(r));
+    } catch (e) { loadErrors.push("思考菜单检查失败：" + e.message); }
   }
   const ok = alerts.length === 0 && loadErrors.length === 0 && rendered && tierWarned && identityKept
     && pollConn === "已连接" && pollApplied && hydratedHistory && liveReplaced && liveClearedOnIdle && toolReasoningRendered
     && rewoundApplies && readonlyRule
     && taskButtonRule && decisionCardRule && onlyLastStreams && lineRule && toolOnlyReasoning && incrementalAppend && pendingReplaced && noticeRow && modalDismiss && rewindIcon && runningRules && atMenuRefetches
     && wizardProxy && wizardBlocked && sessionNoteRule && historyRunTag && fenceBanner && nodeCard && tabLadder
-    && statusBarRules && consoleErrors.length === 0;
+    && statusBarRules && thinkingMenuRules && consoleErrors.length === 0;
   if (!ok) {
     console.log("alerts（原生弹窗被调用的次数，应为 0）:", JSON.stringify(alerts));
     console.log("notice 渲染:", rendered, "| 虚拟机档不可用提示:", tierWarned, "| 身份标题保留:", identityKept);

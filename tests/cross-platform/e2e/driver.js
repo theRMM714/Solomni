@@ -36,18 +36,43 @@ async function stateOk() {
  *  否则生成卡在"等用户答卡"上、驱动卡在动作上，双方互等。CI 上这类卡不出现，泵只是空转。
  *  用 `unref` 让定时器不吊住进程。 */
 function startCardPump() {
-  const t = setInterval(() => { stateOk().catch(() => {}); }, 300);
+  let pumping = false;
+  const t = setInterval(() => {
+    // 慢机上上一次还没回来就不再叠请求：否则一条卡死的连接会叠出成百上千个 fetch。
+    if (pumping) return;
+    pumping = true;
+    stateOk().catch(() => {}).finally(() => { pumping = false; });
+  }, 300);
   if (t.unref) t.unref();
   return t;
 }
 startCardPump();
 
 async function api(method, p, body) {
-  const r = await fetch(BASE + p, {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  // 请求本身必须有上限：卡在一条永不回来的 HTTP 上会让驱动不退出、整个 job 被 30 分钟超时掐掉。
+  // 生成类动作可能合法地跑很久，给 120s；普通状态 / 历史读取远小于它。
+  const go = () => {
+    const signal = typeof AbortSignal !== 'undefined' && AbortSignal.timeout
+      ? AbortSignal.timeout(120000)
+      : undefined;
+    return fetch(BASE + p, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal,
+    });
+  };
+  let r;
+  try {
+    r = await go();
+  } catch (e) {
+    // 只对 GET 做一次短重试：Windows 上偶发的连接重置不应让整条驱动挂掉；
+    // 生成类 POST 重试可能重复副作用，不做。
+    if (method !== 'GET') throw e;
+    console.log('    [重试] GET ' + p + ' 失败一次：' + e.message);
+    await new Promise((res) => setTimeout(res, 200));
+    r = await go();
+  }
   const text = await r.text();
   let json = null;
   try { json = JSON.parse(text); } catch {}
@@ -151,7 +176,7 @@ async function answer(sid, option, note) {
   assert(!!card, '有待答的裁决卡：' + sid, JSON.stringify(card));
   if (!card) return { status: 0, text: 'no card' };
   const r = await act(sid, 'answer_card', { card: card.id, option: option, note: note || '' });
-  assert(await settleSegment(sid, 60000), '回答之后这一段要收尾：' + sid);
+  assert(await settleSegment(sid, 90000), '回答之后这一段要收尾：' + sid);
   return r;
 }
 
@@ -1039,5 +1064,14 @@ async function approvePlan(name) {
     }
   }
   console.log((failed ? 'E2E-FAILED failed=' + failed : 'E2E-DONE exitCode=0'));
+  // 强制退出：fetch / 定时器 / 假供应商的 keep-alive 都可能把事件循环吊住；
+  // 异常路径若不退出，编排器会一直等 driver，job 只能等 30 分钟超时。
   process.exitCode = failed ? 1 : 0;
-})().catch((e) => { console.log('FAIL 驱动异常 :: ' + e.message); process.exitCode = 1; });
+  setTimeout(() => process.exit(failed ? 1 : 0), 250);
+})().catch((e) => {
+  console.log('FAIL 驱动异常 :: ' + e.message);
+  if (e && e.cause) console.log('FAIL 驱动异常 cause :: ' + (e.cause.message || e.cause));
+  if (e && e.stack) console.log(e.stack);
+  process.exitCode = 1;
+  setTimeout(() => process.exit(1), 250);
+});

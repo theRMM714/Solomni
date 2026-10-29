@@ -22,6 +22,7 @@ pub(crate) fn settings_resolves_model_to_channel() {
             note: String::new(),
             tools: crate::capabilities::llm::api::ToolMode::Native,
             context: 32_000,
+            thinking: Default::default(),
         },
     );
     s.core = Some("m".into());
@@ -41,6 +42,7 @@ pub(crate) fn settings_resolves_model_to_channel() {
             note: String::new(),
             tools: Default::default(),
             context: 32_000,
+            thinking: Default::default(),
         },
     );
     assert!(s.resolve("d").is_ok(), "缺省形态的模型照样能解析出通道");
@@ -70,7 +72,7 @@ pub(crate) fn provider_lifecycle_and_key_never_leaks_to_view() {
     }
     // 仍被模型引用时拒绝删除供应商（不静默级联）
     core.registry_mut()
-        .model_upsert("m1", "M", "api-m", "p1", "快", 0)
+        .model_upsert(model_draft("m1", "M", "api-m", "p1", "快", 0))
         .unwrap();
     assert!(core
         .registry_mut()
@@ -89,7 +91,7 @@ pub(crate) fn model_context_zero_means_not_filled_and_falls_back_to_128k() {
         .provider_upsert("p1", "http://x", "k")
         .unwrap();
     core.registry_mut()
-        .model_upsert("m", "M", "api-m", "p1", "", 64_000)
+        .model_upsert(model_draft("m", "M", "api-m", "p1", "", 64_000))
         .unwrap();
     let stored = |c: &crate::capabilities::conductor::service::Conductor| {
         c.registry()
@@ -103,7 +105,7 @@ pub(crate) fn model_context_zero_means_not_filled_and_falls_back_to_128k() {
     assert_eq!(core.registry().context_of(Some("m")), 64_000);
     // 再存一次带 0：0 是"用户不填"，原样存 0；自动压缩用 128K 兜底。
     core.registry_mut()
-        .model_upsert("m", "M2", "api-m", "p1", "改了说明", 0)
+        .model_upsert(model_draft("m", "M2", "api-m", "p1", "改了说明", 0))
         .unwrap();
     assert_eq!(stored(&core), 0, "0 = 不填，原样保存");
     assert_eq!(
@@ -138,7 +140,7 @@ pub(crate) fn model_guards_core_default_and_discovery_uses_stored_provider() {
     // 引用了不存在的供应商 → 拒绝登记
     assert!(core
         .registry_mut()
-        .model_upsert("bad", "B", "b", "ghost", "", 0)
+        .model_upsert(model_draft("bad", "B", "b", "ghost", "", 0))
         .unwrap_err()
         .contains("无此供应商"));
     // 核心默认模型不可删；换默认后旧的可删
@@ -148,7 +150,7 @@ pub(crate) fn model_guards_core_default_and_discovery_uses_stored_provider() {
         .unwrap_err()
         .contains("核心默认模型"));
     core.registry_mut()
-        .model_upsert("m2", "M2", "api-m2", "p2", "", 0)
+        .model_upsert(model_draft("m2", "M2", "api-m2", "p2", "", 0))
         .unwrap();
     assert!(core.registry_mut().core_set_model("m2").unwrap());
     assert!(core.registry_mut().model_remove("m").unwrap());
@@ -393,7 +395,7 @@ pub(crate) fn a_probe_writes_back_only_conclusive_results() {
             .provider_upsert("p", "http://x", "k")
             .expect("登记供应商");
         core.registry_mut()
-            .model_upsert("m", "M", "api-m", "p", "", 0)
+            .model_upsert(model_draft("m", "M", "api-m", "p", "", 0))
             .expect("登记模型");
         core
     };
@@ -462,4 +464,171 @@ pub(crate) fn reserved_directory_names_are_rejected_case_insensitively() {
         "Windows 文件系统不区分大小写"
     );
     assert!(crate::capabilities::registry::api::check_reserved("甲", &reserved).is_ok());
+}
+
+/// 目的：默认目录就是四档；映射的字符串是 reasoning_effort 简写，对象原样合并，空对象 = 不发。
+#[test]
+pub(crate) fn thinking_defaults_and_map_shapes_are_resolved() {
+    use crate::capabilities::registry::domain::providers::{ThinkingCatalog, ThinkingSpec};
+    let mut s = Settings::default();
+    assert_eq!(
+        s.app
+            .thinking
+            .levels
+            .iter()
+            .map(|l| l.id.as_str())
+            .collect::<Vec<_>>(),
+        ["off", "low", "high", "max"],
+        "默认四档"
+    );
+    let levels = BTreeMap::from([
+        (
+            "off".to_string(),
+            serde_json::json!({ "thinking": { "type": "disabled" } }),
+        ),
+        ("low".to_string(), serde_json::json!("low")),
+        ("high".to_string(), serde_json::json!("high")),
+        ("mo".to_string(), serde_json::json!({})),
+    ]);
+    s.models.insert(
+        "m".to_string(),
+        ModelEntry {
+            name: "M".to_string(),
+            api_model: "m".to_string(),
+            provider: "p".to_string(),
+            note: String::new(),
+            tools: Default::default(),
+            context: 32_000,
+            thinking: ThinkingSpec {
+                default: Some("low".to_string()),
+                levels,
+            },
+        },
+    );
+    s.core = Some("m".to_string());
+    assert_eq!(
+        s.thinking_fragment(None, None).unwrap(),
+        Some(serde_json::json!({ "reasoning_effort": "low" })),
+        "未指定会话档时用模型默认档"
+    );
+    assert_eq!(
+        s.thinking_fragment(Some("m"), Some("off")).unwrap(),
+        Some(serde_json::json!({ "thinking": { "type": "disabled" } })),
+        "对象原样合并"
+    );
+    assert_eq!(
+        s.thinking_fragment(Some("m"), Some("mo")).unwrap(),
+        None,
+        "空对象 = 不发字段"
+    );
+    let err = s.thinking_fragment(Some("m"), Some("max")).unwrap_err();
+    assert!(err.contains("未登记思考档位 max"), "缺档要如实报：{}", err);
+    assert!(s.thinking_supports(Some("m"), "high"));
+    assert!(!s.thinking_supports(Some("m"), "max"));
+    assert_eq!(
+        crate::capabilities::registry::domain::providers::validate_thinking_catalog(
+            &ThinkingCatalog::default()
+        ),
+        Ok(())
+    );
+}
+
+/// 目的：目录标签不限制字符集（中文 / 空格 / 标点都行），但仍拒空、首尾空白、控制字符与重复。
+#[test]
+pub(crate) fn thinking_catalog_accepts_arbitrary_tags() {
+    use crate::capabilities::registry::domain::providers::{
+        validate_thinking_catalog, ThinkingCatalog, ThinkingLevel,
+    };
+    let tag = |s: &str| ThinkingLevel { id: s.to_string() };
+    let ok = ThinkingCatalog {
+        levels: vec![
+            tag("low"),
+            tag("高"),
+            tag("极高 档"),
+            tag("xhigh!"),
+            tag("🔥"),
+        ],
+    };
+    assert_eq!(validate_thinking_catalog(&ok), Ok(()));
+    let bad = |levels: Vec<ThinkingLevel>| {
+        validate_thinking_catalog(&ThinkingCatalog { levels }).unwrap_err()
+    };
+    assert!(bad(vec![tag("")]).contains("不能为空"));
+    assert!(bad(vec![tag(" low")]).contains("首尾不能有空白"));
+    assert!(bad(vec![tag("lo\tw")]).contains("控制字符"));
+    assert!(bad(vec![tag("low"), tag("low")]).contains("重复"));
+}
+
+/// 目的：目录项只认标签 id；设置文件里多余的 label 字段在读入时忽略。
+#[test]
+pub(crate) fn thinking_catalog_reads_tag_entries_and_ignores_extra_fields() {
+    use crate::capabilities::registry::domain::providers::ThinkingCatalog;
+    let cat: ThinkingCatalog =
+        yaml_serde::from_str("levels:\n- id: low\n  label: 低\n- id: 高\n").unwrap();
+    assert_eq!(
+        cat.levels.iter().map(|l| l.id.as_str()).collect::<Vec<_>>(),
+        ["low", "高"]
+    );
+}
+
+/// 目的：登记时就拒掉目录外的档、悬空的默认档与被保留键的片段；删掉仍被模型使用的等级也要拒绝。
+#[test]
+pub(crate) fn thinking_registration_rejects_unknown_levels_defaults_and_reserved_keys() {
+    use crate::capabilities::registry::api::ThinkingSpec;
+    let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]));
+    core.registry_mut()
+        .provider_upsert("p1", "http://x", "k")
+        .unwrap();
+    let bad_level = ThinkingSpec {
+        default: None,
+        levels: BTreeMap::from([("ultra".to_string(), serde_json::json!("ultra"))]),
+    };
+    let err = core
+        .registry_mut()
+        .model_upsert(ModelDraft {
+            thinking: bad_level,
+            ..model_draft("m", "M", "m", "p1", "", 0)
+        })
+        .unwrap_err();
+    assert!(err.contains("不在全局目录里"), "目录外的档要拒：{}", err);
+    let bad_default = ThinkingSpec {
+        default: Some("max".to_string()),
+        levels: BTreeMap::from([("low".to_string(), serde_json::json!("low"))]),
+    };
+    let err = core
+        .registry_mut()
+        .model_upsert(ModelDraft {
+            thinking: bad_default,
+            ..model_draft("m", "M", "m", "p1", "", 0)
+        })
+        .unwrap_err();
+    assert!(err.contains("默认档位"), "默认档必须被支持：{}", err);
+    let bad_key = ThinkingSpec {
+        default: None,
+        levels: BTreeMap::from([("high".to_string(), serde_json::json!({ "messages": [] }))]),
+    };
+    let err = core
+        .registry_mut()
+        .model_upsert(ModelDraft {
+            thinking: bad_key,
+            ..model_draft("m", "M", "m", "p1", "", 0)
+        })
+        .unwrap_err();
+    assert!(err.contains("不能覆盖请求协议字段"), "保留键要拒：{}", err);
+    // 登记一个只用 high 的模型，然后把全局目录里的 high 删掉 = 拒绝并点名模型。
+    core.registry_mut()
+        .model_upsert(ModelDraft {
+            thinking: ThinkingSpec {
+                default: None,
+                levels: BTreeMap::from([("high".to_string(), serde_json::json!("high"))]),
+            },
+            ..model_draft("m", "M", "m", "p1", "", 0)
+        })
+        .unwrap();
+    let mut app = core.registry().app_settings();
+    app.thinking.levels.retain(|l| l.id != "high");
+    // Windows 上 require 围栏必须授权写 ACL；这条只验思考目录的引用检查。
+    app.sandbox.policy.windows.write_acl = true;
+    let err = core.registry_mut().set_app_settings(app).unwrap_err();
+    assert!(err.contains("仍被模型 m 使用"), "删档要拒：{}", err);
 }

@@ -137,7 +137,6 @@ impl Conductor {
         text: Option<&str>,
         want_stream: bool,
     ) -> Result<Prepared, String> {
-        let llm = self.llm_opts(want_stream);
         // 还没装进内存的会话先从落盘重建（"继续"可能先于"打开"到达；真没这个会话仍然报无此会话）。
         self.ensure_session(sid)?;
         if matches!(self.sessions.get(sid), Some(Session::Collab(_))) {
@@ -155,12 +154,15 @@ impl Conductor {
                 return Ok(Prepared::Immediate(prefix));
             }
         }
+        // 思考强度按**工作根**解析（子会话共享）；模型没登记该档会在这里如实报错。
+        let llm = self.llm_opts_for(sid, want_stream)?;
         // 身份块**现渲染**（形态刚在上一步对齐过，所以这里读到的就是本回合的形态）。
         let identity = match self.sessions.get(sid) {
             Some(Session::Single(s)) => s.params().identity(&*self.prompt, s.tool_mode()),
             _ => return Ok(Prepared::NotSingle),
         };
-        let session = self.take_single(sid)?;
+        let mut session = self.take_single(sid)?;
+        session.set_thinking(llm.thinking.clone());
         let persister = self.persister(sid);
         Ok(Prepared::Run {
             session: Box::new(session),
@@ -181,17 +183,18 @@ impl Conductor {
         child: &str,
         objective: &str,
     ) -> Result<Prepared, String> {
-        // 节点的生成跟随设置里的流式开关。
-        let llm = self.llm_opts(true);
         self.ensure_session(child)?;
         if matches!(self.sessions.get(child), Some(Session::Collab(_))) {
             return Ok(Prepared::NotSingle);
         }
+        // 节点的生成跟随设置里的流式开关；思考强度按工作根解析（子会话共享）。
+        let llm = self.llm_opts_for(child, true)?;
         let mut prefix: Vec<SessionEvent> = Vec::new();
         if let Some(n) = self.refresh_tool_mode(child)? {
             prefix.push(SessionEvent::Notice(n));
         }
         let mut session = self.take_single(child)?;
+        session.set_thinking(llm.thinking.clone());
         // 核心注入：派发行（界面系统行、上下文 user 角色），这里只记录、不跑模型——
         // 生成交给工作线程（与 CLI 的 `drive_node` 同一段语义，见 session-model.md 四之二）。
         prefix.extend(session.note_task(objective));
@@ -470,15 +473,19 @@ impl Conductor {
             return Err(format!("会话 {} 已关闭：终态，不能再启用", sid));
         }
         if self.running.contains(sid) {
-            return Ok(super::PreparedActivation::Running(self.session_view(sid)?));
+            return Ok(super::PreparedActivation::Running(Box::new(
+                self.session_view(sid)?,
+            )));
         }
         let boot = self.prepare_guest_boot(sid)?;
         let lease = boot.as_ref().map(|b| b.lease().to_string());
-        Ok(super::PreparedActivation::Ready {
-            sid: sid.to_string(),
-            boot,
-            lease,
-        })
+        Ok(super::PreparedActivation::Ready(Box::new(
+            super::ReadyActivation {
+                sid: sid.to_string(),
+                boot,
+                lease,
+            },
+        )))
     }
 
     /// 目的：启用会话的第二段（核心）——按落盘转录重建、解冻整棵子树，返回启用后的视图。
@@ -488,8 +495,9 @@ impl Conductor {
         prepared: super::PreparedActivation,
     ) -> Result<SessionView, String> {
         match prepared {
-            super::PreparedActivation::Running(view) => Ok(view),
-            super::PreparedActivation::Ready { sid, boot, lease } => {
+            super::PreparedActivation::Running(view) => Ok(*view),
+            super::PreparedActivation::Ready(ready) => {
+                let super::ReadyActivation { sid, boot, lease } = *ready;
                 // guest 启动已在调用方线程完成；这里只把它的句柄丢掉。
                 drop(boot);
                 if let Err(e) = self.ensure_session(&sid) {

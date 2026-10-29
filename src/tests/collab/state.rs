@@ -148,6 +148,7 @@ pub(crate) fn discussion_calls_carry_the_global_streaming_and_budget() {
     let llm = crate::capabilities::llm::api::LlmOpts {
         stream: true,
         timeout_secs: 123,
+        thinking: None,
     };
     let (mut d, seen) = opts_discussion(vec![None, None, None], llm);
     assert!(

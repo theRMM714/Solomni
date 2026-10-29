@@ -373,7 +373,7 @@ impl CollabSession {
                 retry.as_deref(),
                 &*prompts,
                 &*self.systools,
-                llm,
+                llm.clone(),
                 self.core_mode,
                 verify.as_mut(),
                 sink,

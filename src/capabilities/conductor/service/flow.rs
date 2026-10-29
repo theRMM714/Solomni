@@ -85,6 +85,9 @@ impl Conductor {
             // ③ 跑这一回合：**与单 agent 同一条轮循环**（身份块 + 本回合工具面 + 对话 + 本回合提示 + 表态）。
             // 工具面由角色表发放（讨论席 = 动词 + 只读核实）；产出逐轮落进**它自己的会话**。
             let mut s = self.take_single(&child)?;
+            // 思考强度是**工作根**的会话级事实：成员回合也按它解析（成员模型各自映射）。
+            let thinking = self.thinking_fragment_for(&child)?;
+            s.set_thinking(thinking.clone());
             let round = match self.sessions.get(sid) {
                 Some(Session::Collab(c)) => c.round(),
                 _ => 0,
@@ -96,6 +99,7 @@ impl Conductor {
                     llm: crate::capabilities::llm::api::LlmOpts {
                         stream: opts.stream,
                         timeout_secs: opts.timeout_secs,
+                        thinking,
                     },
                     cancel: std::sync::Arc::clone(&cancel),
                     emit: &mut |e: SessionEvent| notes.borrow_mut().push(e),
@@ -361,6 +365,7 @@ impl Conductor {
             parent: Some(parent.to_string()),
             node: None,
             delegation: None,
+            thinking: None,
             run: RunState::Active,
         };
         // 沙箱锚在**顶层工作**上：该 agent 的目录在共享区那一层已经建好。

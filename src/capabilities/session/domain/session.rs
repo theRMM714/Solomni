@@ -380,6 +380,9 @@ pub struct AgentSession {
     pub(crate) last_usage: Option<crate::capabilities::session::api::ContextUsage>,
     /// 压缩点（转录行 id）：0 = 没压过。此前的内容已被摘要取代，对话里补不回来。
     pub(crate) compacted_upto: u64,
+    /// 目的：本会话解析好的思考参数片段（登记处按"这个 agent 的模型 + 工作根的档位"给）。
+    /// 约束：只影响**出站请求**；会话重建时由生成前的准备段重新解析，不落盘。
+    thinking: Option<std::sync::Arc<serde_json::Value>>,
 }
 
 /// 摘要消息（发送视图里是 **user 角色**）：`compact` 与重建共用一份口径，实时与回放才逐条相同。
@@ -423,6 +426,7 @@ impl AgentSession {
             context_window: 0,
             last_usage: None,
             compacted_upto: 0,
+            thinking: None,
             id: id.to_string(),
             params,
             dialogue: Vec::new(),
@@ -462,6 +466,7 @@ impl AgentSession {
             context_window: 0,
             last_usage: None,
             compacted_upto,
+            thinking: None,
             id: id.to_string(),
             next_line: next,
             params,
@@ -487,6 +492,17 @@ impl AgentSession {
         if let Some(t) = self.tools.as_mut() {
             t.mode = mode;
         }
+    }
+
+    /// 目的：写入本会话的思考参数片段（生成前的准备段按当前登记处解析）；None = 不发。
+    /// 约束：只改这一格，不重建会话——压缩回合与下一轮对话都用最新的值。
+    pub fn set_thinking(&mut self, thinking: Option<std::sync::Arc<serde_json::Value>>) {
+        self.thinking = thinking;
+    }
+
+    /// 目的：本会话当前的思考参数片段（压缩等会话内部调用读它）。
+    pub fn thinking(&self) -> Option<std::sync::Arc<serde_json::Value>> {
+        self.thinking.clone()
     }
 
     /// 注入一条**系统消息**（提醒/边界这类"不是用户说的、也不是模型说的"内容）：

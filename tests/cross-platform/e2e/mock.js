@@ -99,8 +99,9 @@ http.createServer((req, res) => {
         // 甲在第一轮 step 退场；此后它不该再被询问（再被问到 = leave 不可逆被破坏）。
         content = isJia && stepNo <= 1 ? JSON.stringify({ type: 'leave', text: '我撤了' }) : agree();
       } else if (user.includes('提问')) {
-        // 甲在第一步请教用户；回答之后（stepNo >= 2）不再问，让流程能收尾。
-        content = isJia && stepNo <= 1 ? JSON.stringify({ type: 'ask', text: '用哪个方案？' }) : say('等你定');
+        // 甲在第一步请教用户；回答之后（stepNo >= 2）直接同意，让这一段收敛。
+        // 不写"等你定"：用户已经答了，继续不收敛会把这一段拖到轮次上限。
+        content = isJia && stepNo <= 1 ? JSON.stringify({ type: 'ask', text: '用哪个方案？' }) : agree();
       } else if (user.includes('不收敛')) {
         // 首轮：甲说、乙同意 → 有人同意但没全票，不该收敛；次轮甲也同意才收敛。
         content = isJia ? (stepNo <= 1 ? say('我还有意见') : agree()) : agree();

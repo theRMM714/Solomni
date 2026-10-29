@@ -19,7 +19,7 @@ pub use crate::capabilities::prompt::api::{Prompt, Segment};
 
 pub use crate::capabilities::prompt::domain::prompt::render;
 
-pub use crate::capabilities::registry::api::{ModelEntry, Provider, Settings};
+pub use crate::capabilities::registry::api::{ModelDraft, ModelEntry, Provider, Settings};
 
 pub use crate::capabilities::session::api::Live;
 

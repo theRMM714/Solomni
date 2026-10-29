@@ -576,6 +576,7 @@ impl Conductor {
             parent: None,
             node: None,
             delegation: Some(Delegation { granted_at }),
+            thinking: None,
             run: RunState::Active,
         };
         self.workspace

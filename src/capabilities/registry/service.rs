@@ -9,7 +9,7 @@ use crate::capabilities::modules::api::Roster;
 use crate::capabilities::registry::api::{AgentView, ModelView, ProviderView, Registry};
 use crate::capabilities::registry::domain::agents;
 use crate::capabilities::registry::domain::providers::{
-    AppSettings, ModelEntry, Provider, Settings,
+    self, AppSettings, ModelDraft, ModelEntry, Provider, Settings,
 };
 use crate::capabilities::registry::ports::SettingsStore;
 use crate::kernel::ports::Log;
@@ -46,6 +46,8 @@ impl RegistryService {
             &settings.app.sandbox,
         )
         .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
+        providers::validate_thinking(&settings.models, &settings.app.thinking)
+            .map_err(|e| format!("登记处配置非法：{}", e))?;
         Ok(RegistryService {
             settings,
             store,
@@ -142,6 +144,18 @@ impl Registry for RegistryService {
         self.settings.context_of(model)
     }
 
+    fn thinking_fragment(
+        &self,
+        model: Option<&str>,
+        level: Option<&str>,
+    ) -> Result<Option<serde_json::Value>, String> {
+        self.settings.thinking_fragment(model, level)
+    }
+
+    fn thinking_supports(&self, model: Option<&str>, level: &str) -> bool {
+        self.settings.thinking_supports(model, level)
+    }
+
     fn snapshot(&self) -> Settings {
         self.settings.clone()
     }
@@ -193,19 +207,20 @@ impl Registry for RegistryService {
         Ok(removed)
     }
 
-    fn model_upsert(
-        &mut self,
-        id: &str,
-        name: &str,
-        api_model: &str,
-        provider: &str,
-        note: &str,
-        context: u64,
-    ) -> Result<(), String> {
+    fn model_upsert(&mut self, draft: ModelDraft) -> Result<(), String> {
+        let ModelDraft {
+            id,
+            name,
+            api_model,
+            provider,
+            note,
+            context,
+            thinking,
+        } = draft;
         if id.is_empty() || name.is_empty() || api_model.is_empty() || provider.is_empty() {
             return Err("id / name / api_model / provider 均不能为空".to_string());
         }
-        if !self.settings.providers.contains_key(provider) {
+        if !self.settings.providers.contains_key(&provider) {
             return Err(format!("无此供应商：{}", provider));
         }
         // 工具调用形态：编辑时**保留原值**（登记表单暂不带这个字段，不能因为没带就重置成缺省），
@@ -213,19 +228,23 @@ impl Registry for RegistryService {
         let tools = self
             .settings
             .models
-            .get(id)
+            .get(&id)
             .map(|m| m.tools)
             .unwrap_or_default();
+        // 思考强度：档位必须在全局目录里、默认档必须被支持、片段不得覆盖协议字段。
+        providers::validate_thinking_spec(&thinking, &self.settings.app.thinking)
+            .map_err(|e| format!("模型 {} 的思考强度非法：{}", id, e))?;
         // 上下文窗口：0 = 用户不填（自动压缩按 DEFAULT_CONTEXT_TOKENS 兜底），原样保存。
         self.settings.models.insert(
-            id.to_string(),
+            id,
             ModelEntry {
-                name: name.to_string(),
-                api_model: api_model.to_string(),
-                provider: provider.to_string(),
-                note: note.to_string(),
+                name,
+                api_model,
+                provider,
+                note,
                 tools,
                 context,
+                thinking,
             },
         );
         self.save("registry::model_upsert")
@@ -304,6 +323,24 @@ impl Registry for RegistryService {
             &app.sandbox.policy,
         )
         .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
+        // 思考目录：新目录必须自洽，且不能删掉仍被模型引用的档位（否则旧映射悬空）。
+        providers::validate_thinking_catalog(&app.thinking)
+            .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
+        for (mid, m) in &self.settings.models {
+            for level in m.thinking.levels.keys() {
+                if !app.thinking.levels.iter().any(|l| &l.id == level) {
+                    return Err(format!(
+                        "思考档位 {} 仍被模型 {} 使用：先改模型登记再删它",
+                        level, mid
+                    ));
+                }
+            }
+            if let Some(d) = &m.thinking.default {
+                if !app.thinking.levels.iter().any(|l| &l.id == d) {
+                    return Err(format!("模型 {} 的默认思考档位 {} 不在新目录里", mid, d));
+                }
+            }
+        }
         self.settings.app = app;
         self.save("registry::set_app_settings")
     }

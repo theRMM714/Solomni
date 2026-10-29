@@ -127,6 +127,7 @@ impl CollabSession {
         let llm = crate::capabilities::llm::api::LlmOpts {
             stream: self.settings.app.streaming,
             timeout_secs: self.settings.app.llm_timeout_secs,
+            thinking: None,
         };
         // 讨论席的"协议"= **机制说明 + 讨论约定**：只说约定不说机制，AI 就不知道自己在什么流程里、
         // 该干什么。

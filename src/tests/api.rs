@@ -2,7 +2,7 @@
 //! 这一层不碰 HTTP；HTTP 侧（路由目录与逐路由契约）另见本目录的 routes。
 
 use super::builders::shown_contains;
-use super::doubles::{collab_work, decl, module_of, module_with_runtimes};
+use super::doubles::{collab_work, decl, model_draft, module_of, module_with_runtimes};
 use super::{gated_ops, ops_with, single_work, slow_ops};
 use crate::capabilities::conductor::api::{
     Acted, ActionCall, AgentInstance, Caller, ConfigAgent, SessionEdit, SessionEvent, WorkMode,
@@ -1511,6 +1511,27 @@ fn registry_actions_are_user_only_and_go_through_the_dispatcher() {
         .any(|a| a.id.starts_with("upsert_") || a.id == "set_settings"));
 }
 
+/// set_settings 是部分更新；前端会提交 max_guests，动作参数表必须收它（缺了会让任何设置保存都失败）。
+#[test]
+fn set_settings_action_accepts_max_guests() {
+    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
+    // Windows 上 require 围栏必须授权写 ACL，否则设置本身不合法；这条只验动作参数。
+    let mut st = ops.registry.settings().expect("读设置");
+    st.sandbox.policy.windows.write_acl = true;
+    ops.registry
+        .set_settings(st)
+        .expect("准备 Windows 合法的沙箱策略");
+    ops.actions
+        .act(ActionCall {
+            id: "set_settings".to_string(),
+            args: serde_json::json!({ "max_guests": 5 }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .expect("set_settings 应接受 max_guests");
+    assert_eq!(ops.registry.settings().expect("读设置").max_guests, 5);
+}
+
 /// 建会话动作与改配置都带着人设走：人设是会话快照，不是登记处联动。
 #[test]
 fn create_session_and_config_carry_chara_as_a_snapshot() {
@@ -1728,5 +1749,122 @@ fn set_permission_profile_action_switches_the_session_profile() {
             })
             .is_err(),
         "未知档位如实拒绝"
+    );
+}
+
+/// 目的：思考强度是**工作根**的会话级事实：状态栏切档走独立动作；模型没登记该档时拒绝并列出原因。
+#[test]
+fn set_thinking_action_switches_the_work_level_and_rejects_unmapped_levels() {
+    use crate::capabilities::registry::api::ThinkingSpec;
+    use std::collections::BTreeMap;
+    let handle = spawn(vec![module_of("a")], Vec::new());
+    let ops = Ops::from_handle(&handle);
+    ops.registry
+        .upsert_model(crate::capabilities::registry::api::ModelDraft {
+            thinking: ThinkingSpec {
+                default: None,
+                levels: BTreeMap::from([
+                    ("low".to_string(), serde_json::json!("low")),
+                    ("high".to_string(), serde_json::json!("high")),
+                ]),
+            },
+            ..model_draft("m", "M", "m", "p", "", 32_000)
+        })
+        .unwrap();
+    let (opened, _) = ops
+        .sessions
+        .create_work(single_work("w-thinking", &["a"]))
+        .expect("建会话");
+    let sid = opened.sid;
+    ops.actions
+        .act(ActionCall {
+            id: "set_thinking".to_string(),
+            args: serde_json::json!({ "session_id": sid, "level": "high" }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .expect("切思考档");
+    let cfg = ops.sessions.config(&sid).expect("读配置");
+    assert_eq!(cfg.thinking.level.as_deref(), Some("high"));
+    assert!(
+        cfg.thinking.options.iter().any(|o| o.id == "high"),
+        "已登记的档要列出来"
+    );
+    assert!(
+        !cfg.thinking.options.iter().any(|o| o.id == "max"),
+        "没登记的档不列出来"
+    );
+    assert_eq!(
+        cfg.thinking.default_level.as_deref(),
+        None,
+        "没有统一默认档"
+    );
+    assert_eq!(cfg.thinking.label, "high", "有会话选择时显示标签");
+    // 没登记的档：拒绝并列出缺映射的模型（不静默降级）
+    let err = ops
+        .actions
+        .act(ActionCall {
+            id: "set_thinking".to_string(),
+            args: serde_json::json!({ "session_id": sid, "level": "max" }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .unwrap_err();
+    assert!(err.contains("模型 m") || err.contains("m"), "{}", err);
+    // 空串 = 随模型默认
+    ops.actions
+        .act(ActionCall {
+            id: "set_thinking".to_string(),
+            args: serde_json::json!({ "session_id": sid, "level": "" }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .unwrap();
+    let after = ops.sessions.config(&sid).unwrap();
+    assert_eq!(after.thinking.level.as_deref(), None, "空串回到跟随默认");
+    assert_eq!(
+        after.thinking.default_level.as_deref(),
+        None,
+        "模型没有默认档"
+    );
+    assert_eq!(after.thinking.label, "未设置", "没有选择也没有默认");
+}
+
+/// 目的：没选过档时视图直接给出这组模型的共同默认；可选档只列已映射的档。
+#[test]
+fn thinking_view_uses_the_common_default_and_hides_unmapped_levels() {
+    use crate::capabilities::registry::api::ThinkingSpec;
+    use std::collections::BTreeMap;
+    let handle = spawn(vec![module_of("a")], Vec::new());
+    let ops = Ops::from_handle(&handle);
+    ops.registry
+        .upsert_model(crate::capabilities::registry::api::ModelDraft {
+            thinking: ThinkingSpec {
+                default: Some("high".to_string()),
+                levels: BTreeMap::from([
+                    ("low".to_string(), serde_json::json!("low")),
+                    ("high".to_string(), serde_json::json!("high")),
+                ]),
+            },
+            ..model_draft("m", "M", "m", "p", "", 32_000)
+        })
+        .unwrap();
+    let (opened, _) = ops
+        .sessions
+        .create_work(single_work("w-default", &["a"]))
+        .expect("建会话");
+    let cfg = ops.sessions.config(&opened.sid).expect("读配置");
+    assert_eq!(cfg.thinking.level, None, "没选过档");
+    assert_eq!(
+        cfg.thinking.default_level.as_deref(),
+        Some("high"),
+        "这组模型共同的默认档"
+    );
+    assert_eq!(cfg.thinking.label, "high", "默认档直接作为当前标签显示");
+    let ids: Vec<&str> = cfg.thinking.options.iter().map(|o| o.id.as_str()).collect();
+    assert_eq!(ids, ["low", "high"], "只列已映射的档（按目录顺序）");
+    assert!(
+        !cfg.thinking.options.iter().any(|o| o.id == "max"),
+        "没映射的档不列出来"
     );
 }

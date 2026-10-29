@@ -31,6 +31,10 @@ pub struct SessionMeta {
     /// 这条会话的权限层：根是 ceiling，子是 narrowing。全局给默认值，这里只覆盖显式字段。
     #[serde(default)]
     pub sandbox: crate::capabilities::permission::api::SessionSandbox,
+    /// 目的：思考强度（会话级，只记在**工作根**上；子会话沿 parent 链共享同一个值）。
+    /// 约束：None = 随模型默认；各模型是否支持由登记处的 thinking 映射决定（不支持的档拒绝切换）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<String>,
     /// 谁编排的（子会话 = 父会话名；顶层会话为空）。
     /// 也是**落点判据**：子会话落在父会话目录的 `children/` 下（可再嵌套）。
     /// 整棵树不论嵌套多少层，**只有顶层一个 `work/`**——所有子会话共用它。
