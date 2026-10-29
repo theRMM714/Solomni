@@ -1515,6 +1515,12 @@ fn registry_actions_are_user_only_and_go_through_the_dispatcher() {
 #[test]
 fn set_settings_action_accepts_max_guests() {
     let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
+    // Windows 上 require 围栏必须授权写 ACL，否则设置本身不合法；这条只验动作参数。
+    let mut st = ops.registry.settings().expect("读设置");
+    st.sandbox.policy.windows.write_acl = true;
+    ops.registry
+        .set_settings(st)
+        .expect("准备 Windows 合法的沙箱策略");
     ops.actions
         .act(ActionCall {
             id: "set_settings".to_string(),

@@ -627,6 +627,8 @@ pub(crate) fn thinking_registration_rejects_unknown_levels_defaults_and_reserved
         .unwrap();
     let mut app = core.registry().app_settings();
     app.thinking.levels.retain(|l| l.id != "high");
+    // Windows 上 require 围栏必须授权写 ACL；这条只验思考目录的引用检查。
+    app.sandbox.policy.windows.write_acl = true;
     let err = core.registry_mut().set_app_settings(app).unwrap_err();
     assert!(err.contains("仍被模型 m 使用"), "删档要拒：{}", err);
 }
