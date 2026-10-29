@@ -24,14 +24,17 @@ const state = {
   nodeBySid: new Map(),  // 子会话 sid -> {node, assignee}：节点卡与标签共用同一份标题
 };
 
-/* ---------- 登记处状态同步（供应商 / 模型 / agent / 核心默认） ----------
+/* ---------- 登记处状态同步（供应商 / 模型 / agent / 核心默认 / 思考等级） ----------
  * 页面只建一次并缓存；登记处一变，所有已打开的分页都要跟着变，不能等用户刷新整页。
  * 约定：订阅者只同步**列表与下拉选项**，绝不重建表单主体——3 秒轮询也会走到这里，
  * 重建输入框会把用户正在填的 id / 密钥 / note 冲掉。 */
 const registryListeners = new Set();
 let registryPrint = "";
 function registryFingerprint() {
-  return JSON.stringify([state.providers, state.models, state.agents, state.core]);
+  return JSON.stringify([
+    state.providers, state.models, state.agents, state.core,
+    state.settings && state.settings.thinking,
+  ]);
 }
 function onRegistryChange(fn) {
   registryListeners.add(fn);
@@ -2017,6 +2020,284 @@ function openProvidersModal() {
   openModal('供应商登记', providersPage);
 }
 
+/* ---------- 思考等级标签 / 模型档位映射 ---------- */
+/// 档位的展示名：有独立显示名时带上 id，否则直接用 id（避免 "off（off）"）。
+function thinkingLevelLabel(l) {
+  const id = String((l && l.id) || '');
+  const label = String((l && l.label) || '').trim();
+  return label && label !== id ? label + '（' + id + '）' : id;
+}
+
+/** 思考等级标签编辑器：标签就是档位 id，顺序即界面顺序。
+ *  约束：非空、不重复、只用字母 / 数字 / _ / -（与后端校验一致）；已有显示名原样保留。 */
+function thinkingTagsEditor(levels) {
+  const node = document.createElement('div');
+  node.className = 'tag-editor';
+  const chips = document.createElement('div');
+  chips.className = 'mod-chips';
+  const addRow = document.createElement('div');
+  addRow.className = 'wf-inline';
+  const input = textInput('新档位（如 xhigh）');
+  input.className = 'field-input tag-input';
+  const add = btn('添加档位', 'mod-add');
+  const hint = cfgHint('标签就是档位 id；模型登记按它映射。只能用字母 / 数字 / _ / -。');
+  const err = cfgHint('', 'err');
+  addRow.appendChild(input); addRow.appendChild(add);
+  node.appendChild(chips); node.appendChild(addRow); node.appendChild(hint); node.appendChild(err);
+
+  const ids = [];
+  const labels = new Map();
+  for (const l of levels || []) {
+    const id = String((l && l.id) || '').trim();
+    if (!id || ids.indexOf(id) >= 0) continue;
+    ids.push(id);
+    const label = String((l && l.label) || '').trim();
+    labels.set(id, label === id ? '' : label);
+  }
+
+  function showError(text) { err.textContent = text || ''; }
+  function render() {
+    chips.innerHTML = '';
+    if (!ids.length) {
+      const empty = document.createElement('span');
+      empty.className = 'mod-chips-empty';
+      empty.textContent = '（还没有档位：至少加一个）';
+      chips.appendChild(empty);
+      return;
+    }
+    for (const id of ids) {
+      const chip = document.createElement('span');
+      chip.className = 'mod-chip';
+      const label = document.createElement('span');
+      label.className = 'mod-chip-label';
+      label.textContent = id;
+      const name = labels.get(id) || '';
+      chip.title = name ? '显示名：' + name : id;
+      const x = btn('×', 'mod-chip-x');
+      x.title = '移除 ' + id;
+      x.onclick = () => {
+        const i = ids.indexOf(id);
+        if (i >= 0) ids.splice(i, 1);
+        showError('');
+        render();
+      };
+      chip.appendChild(label); chip.appendChild(x);
+      chips.appendChild(chip);
+    }
+  }
+  function addLevel() {
+    const raw = String(input.value || '').trim();
+    if (!raw) { showError('思考档位不能为空'); return; }
+    if (ids.indexOf(raw) >= 0) { showError('思考档位已存在：' + raw); return; }
+    if (!/^[A-Za-z0-9_-]+$/.test(raw)) {
+      showError('思考档位只能用字母 / 数字 / _ / -（例如 xhigh）');
+      return;
+    }
+    ids.push(raw);
+    if (!labels.has(raw)) labels.set(raw, '');
+    input.value = '';
+    showError('');
+    render();
+  }
+  add.onclick = addLevel;
+  input.addEventListener('keydown', (e) => {
+    if (e && e.key === 'Enter') addLevel();
+  });
+  function validate() {
+    if (!ids.length) {
+      showError('思考等级至少要有一个档位');
+      return '思考等级至少要有一个档位';
+    }
+    for (const id of ids) {
+      if (!/^[A-Za-z0-9_-]+$/.test(id)) {
+        const msg = '思考档位只能用字母 / 数字 / _ / -（例如 xhigh）：' + id;
+        showError(msg);
+        return msg;
+      }
+    }
+    showError('');
+    return '';
+  }
+  function list() {
+    return ids.map((id) => ({ id, label: labels.get(id) || '' }));
+  }
+  render();
+  return { node, list, validate };
+}
+
+/** 模型思考映射：一行 = 左选档位、右填请求体片段；已映射的档位在其它行不可再选。
+ *  约束：每行值非空；{...} 必须是 JSON 对象；默认档只能从已映射的档里选（后端同一条）。 */
+function thinkingMapEditor() {
+  const mapping = document.createElement('div');
+  mapping.className = 'think-editor';
+  const rowsBox = document.createElement('div');
+  rowsBox.className = 'think-rows';
+  const empty = cfgHint('（还没有映射：这个模型不发思考参数）');
+  const addRow = document.createElement('div');
+  addRow.className = 'wf-inline';
+  const add = btn('+ 添加映射', 'mod-add');
+  addRow.appendChild(add);
+  const hint = cfgHint('字符串 = {"reasoning_effort": 值} 简写；{...} = 原样合并进请求体（保留键会被拒）。每行的值都不能为空。');
+  const defSel = selectInput([{ value: '', label: '（不指定：随供应商默认）' }], '');
+  const defaultField = field('思考默认档（只能选已映射的档）', defSel);
+  const defHint = cfgHint('不指定 = 随供应商默认；会话没选档时用它。');
+  mapping.appendChild(rowsBox);
+  mapping.appendChild(empty);
+  mapping.appendChild(addRow);
+  mapping.appendChild(hint);
+
+  const rows = [];
+  const catalog = () => thinkingLevels();
+  function findLevel(id) {
+    return catalog().find((l) => l.id === id) || null;
+  }
+  function optionFor(id) {
+    const l = findLevel(id);
+    return { value: id, label: l ? thinkingLevelLabel(l) : id + '（已不在目录）' };
+  }
+  function usedByOthers(row) {
+    const used = new Set();
+    for (const r of rows) if (r !== row && r.level) used.add(r.level);
+    return used;
+  }
+  function optionsFor(row) {
+    const used = usedByOthers(row);
+    const opts = [];
+    if (!row.level) opts.push({ value: '', label: '（选择档位）' });
+    for (const l of catalog()) {
+      if (used.has(l.id) && l.id !== row.level) continue;
+      if (!opts.some((o) => o.value === l.id)) opts.push({ value: l.id, label: thinkingLevelLabel(l) });
+    }
+    if (row.level && !findLevel(row.level) && !opts.some((o) => o.value === row.level)) {
+      opts.push({ value: row.level, label: row.level + '（已不在目录）' });
+    }
+    if (!opts.length) opts.push({ value: '', label: '（没有可用档位）' });
+    return opts;
+  }
+  function createRow(level, value) {
+    const row = { level: level || '', value: value || '', sel: null, input: null, node: null };
+    const node = document.createElement('div');
+    node.className = 'think-row';
+    const sel = selectInput([], row.level);
+    const eq = document.createElement('span');
+    eq.className = 'think-eq';
+    eq.textContent = '=';
+    const input = textInput('参数（如 high 或 {"thinking":{"type":"disabled"}}）');
+    input.className = 'field-input think-value';
+    input.value = row.value;
+    input.addEventListener('input', () => { row.value = input.value; });
+    const del = btn('×', 'link-btn danger');
+    del.title = '移除这一行';
+    del.onclick = () => removeRow(row);
+    sel.onchange = () => { row.level = sel.value; syncAll(); };
+    node.appendChild(sel); node.appendChild(eq); node.appendChild(input); node.appendChild(del);
+    row.node = node; row.sel = sel; row.input = input;
+    rowsBox.appendChild(node);
+    rows.push(row);
+    return row;
+  }
+  function removeRow(row) {
+    const i = rows.indexOf(row);
+    if (i >= 0) rows.splice(i, 1);
+    if (row.node && row.node.parentNode) row.node.parentNode.removeChild(row.node);
+    syncAll();
+  }
+  function syncRow(row) {
+    const v = syncSelect(row.sel, optionsFor(row), row.level);
+    if (v !== row.level) row.level = v;
+  }
+  function defaultOptions() {
+    const opts = [{ value: '', label: '（不指定：随供应商默认）' }];
+    for (const row of rows) {
+      if (!row.level || opts.some((o) => o.value === row.level)) continue;
+      opts.push(optionFor(row.level));
+    }
+    return opts;
+  }
+  function syncDefault(want) {
+    return syncSelect(defSel, defaultOptions(), want === undefined ? defSel.value : want);
+  }
+  function syncRows() {
+    for (const row of rows) syncRow(row);
+    empty.style.display = rows.length ? 'none' : '';
+    const cat = catalog();
+    const unused = cat.filter((l) => !rows.some((r) => r.level === l.id));
+    if (!cat.length) {
+      add.disabled = true;
+      add.textContent = '+ 添加映射';
+      add.title = '先在设置页添加思考等级';
+    } else if (!unused.length) {
+      add.disabled = true;
+      add.textContent = '（档位都已映射）';
+      add.title = '所有思考等级都已映射';
+    } else {
+      add.disabled = false;
+      add.textContent = '+ 添加映射';
+      add.title = '再添加一行映射';
+    }
+  }
+  function syncAll() {
+    syncRows();
+    syncDefault(defSel.value);
+  }
+  function addMapping() {
+    const used = new Set(rows.map((r) => r.level).filter(Boolean));
+    const next = catalog().find((l) => !used.has(l.id));
+    if (!next) return;
+    createRow(next.id, '');
+    syncAll();
+  }
+  add.onclick = addMapping;
+
+  function setSpec(spec) {
+    rowsBox.innerHTML = '';
+    rows.length = 0;
+    defSel.value = '';
+    const map = (spec && spec.levels) || {};
+    const ids = catalog().map((l) => l.id);
+    const known = ids.filter((id) => Object.prototype.hasOwnProperty.call(map, id));
+    const unknown = Object.keys(map).filter((id) => ids.indexOf(id) < 0).sort();
+    for (const id of known.concat(unknown)) {
+      const raw = map[id];
+      createRow(id, typeof raw === 'string' ? raw : JSON.stringify(raw));
+    }
+    syncRows();
+    syncDefault((spec && spec.default) || '');
+  }
+  function refresh() { syncAll(); }
+  function read() {
+    const levels = {};
+    const seen = new Set();
+    for (const row of rows) {
+      const level = String(row.level || '').trim();
+      const raw = String(row.value || '').trim();
+      if (!level) return { error: '有一行还没选思考档位' };
+      if (seen.has(level)) return { error: '思考档位 ' + level + ' 重复' };
+      seen.add(level);
+      if (!raw) return { error: '思考档位 ' + level + ' 的映射不能为空' };
+      if (raw.charAt(0) === '{') {
+        try {
+          const obj = JSON.parse(raw);
+          if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+            return { error: '思考档位 ' + level + ' 的映射必须是 JSON 对象' };
+          }
+          levels[level] = obj;
+        } catch (e) {
+          return { error: '思考档位 ' + level + ' 的 JSON 不合法：' + e.message };
+        }
+      } else {
+        levels[level] = raw;
+      }
+    }
+    const want = String(defSel.value || '').trim();
+    if (want && !seen.has(want)) return { error: '思考默认档 ' + want + ' 没有映射' };
+    return { spec: { default: want || null, levels } };
+  }
+
+  setSpec({ default: null, levels: {} });
+  return { mapping, defaultField, defaultHint: defHint, setSpec, refresh, read };
+}
+
 /* ---------- 设置②：模型登记（录入 / 修改 / 删除 + 供应商模型发现） ---------- */
 function modelsPage(c, coreBody) {
     const listWrap = document.createElement('div'); listWrap.className = 'reg-list';
@@ -2029,19 +2310,8 @@ function modelsPage(c, coreBody) {
     const noteIn = textInput('note（能力说明）');
     // 上下文窗口：0 / 留空 = 用户不填；自动压缩按 128K 兜底（见后端 DEFAULT_CONTEXT_TOKENS）。
     const ctxIn = numberInput('上下文窗口（tokens，0 或留空 = 不填；自动压缩按 128K 兜底）', 0, 0, 2000000);
-    // 思考强度：默认档 + 档位映射（字符串 = reasoning_effort 简写；对象 = 原样合并）。
-    const thinkDefOptions = () => [{ value: '', label: '（不指定：随供应商默认）' }]
-      .concat(thinkingLevels().map((l) => ({ value: l.id, label: (l.label || l.id) + '（' + l.id + '）' })));
-    const thinkDef = selectInput(thinkDefOptions(), '');
-    const thinkMap = areaInput('每行一条：档位=映射值（字符串 = reasoning_effort 简写；{...} = JSON 对象；不写 = 该模型不支持）');
-    const thinkPre1 = btn('按 reasoning_effort 预设填入', 'link-btn');
-    const thinkPre2 = btn('按 thinking + reasoning_effort 预设填入', 'link-btn');
-    const thinkClear = btn('清空', 'link-btn');
-    thinkPre1.onclick = () => { thinkMap.value = 'off=none\nlow=low\nhigh=high\nmax=max'; };
-    thinkPre2.onclick = () => {
-      thinkMap.value = 'off={"thinking":{"type":"disabled"}}\nlow={"reasoning_effort":"low"}\nhigh={"reasoning_effort":"high"}\nmax={"reasoning_effort":"max"}';
-    };
-    thinkClear.onclick = () => { thinkMap.value = ''; thinkDef.value = ''; };
+    // 思考强度：一行 = 左选档位、右填映射值；默认档只能从已映射的档里选。
+    const thinkEditor = thinkingMapEditor();
     const save = btn('登记 / 更新', 'btn btn-primary btn-block');
 
     function syncProviderSelect() {
@@ -2092,10 +2362,7 @@ function modelsPage(c, coreBody) {
           idIn.value = m.id; nameIn.value = m.name; apiIn.value = m.api_model;
           providerSel.value = m.provider; noteIn.value = m.note || '';
           ctxIn.input.value = m.context || 0;
-          thinkDef.value = (m.thinking && m.thinking.default) || '';
-          const tmap = (m.thinking && m.thinking.levels) || {};
-          thinkMap.value = Object.keys(tmap).map((k) =>
-            k + '=' + (typeof tmap[k] === 'string' ? tmap[k] : JSON.stringify(tmap[k]))).join('\n');
+          thinkEditor.setSpec(m.thinking || { default: null, levels: {} });
           c.setMsg('编辑 ' + m.id);
         };
         const del = btn('删除', 'link-btn danger');
@@ -2171,25 +2438,13 @@ function modelsPage(c, coreBody) {
     }
 
     save.onclick = async () => {
-      const levels = {};
-      for (const line of String(thinkMap.value || '').split('\n').map((s) => s.trim()).filter((s) => s.length > 0)) {
-        const i = line.indexOf('=');
-        if (i < 0) { c.setMsg('思考映射每行要写成 档位=映射值', true); return; }
-        const k = line.slice(0, i).trim();
-        const raw = line.slice(i + 1).trim();
-        if (!k || !raw) continue;
-        if (raw.startsWith('{')) {
-          try { levels[k] = JSON.parse(raw); }
-          catch (e) { c.setMsg('思考映射 ' + k + ' 的 JSON 不合法：' + e.message, true); return; }
-        } else {
-          levels[k] = raw;
-        }
-      }
+      const think = thinkEditor.read();
+      if (think.error) { c.setMsg(think.error, true); return; }
       const body = {
         id: idIn.value.trim(), name: nameIn.value.trim(), api_model: apiIn.value.trim(),
         provider: providerSel.value, note: noteIn.value.trim(),
         context: Number(ctxIn.input.value) || 0,
-        thinking: { default: thinkDef.value || null, levels: levels },
+        thinking: think.spec,
       };
       if (!body.id || !body.name || !body.api_model || !body.provider) {
         c.setMsg('id / 名字 / api_model / 供应商 均不能为空', true); return;
@@ -2207,6 +2462,7 @@ function modelsPage(c, coreBody) {
       rebuildDiscover();
       syncProviderSelect();
       refreshCore();
+      thinkEditor.refresh();
     });
     rebuild(); rebuildDiscover(); syncProviderSelect(); refreshCore();
     if (!coreBody) c.body.appendChild(coreWrap);
@@ -2220,12 +2476,9 @@ function modelsPage(c, coreBody) {
     // numberInput 返回 { input, wrap }，而 wrap **已经带标签**——直接把 wrap 挂上去
     //（传对象给 field 会让 appendChild 抛异常，整个表单就建不起来）。
     form.appendChild(ctxIn.wrap);
-    form.appendChild(field('思考默认档', thinkDef));
-    form.appendChild(field('思考档位映射（可选）', thinkMap));
-    const thinkRow = document.createElement('div'); thinkRow.className = 'cfg-actions';
-    thinkRow.appendChild(thinkPre1); thinkRow.appendChild(thinkPre2); thinkRow.appendChild(thinkClear);
-    form.appendChild(thinkRow);
-    form.appendChild(cfgHint('字符串 = {"reasoning_effort": 值} 简写；{...} = 原样合并进请求体（保留键会被拒）；映射为空 = 这个模型不发思考参数。档位 id 必须先在设置页的「思考等级」里存在。'));
+    form.appendChild(field('思考档位映射（可选）', thinkEditor.mapping));
+    form.appendChild(thinkEditor.defaultField);
+    form.appendChild(thinkEditor.defaultHint);
     form.appendChild(save);
     c.body.appendChild(form);
     const discTitle = document.createElement('div'); discTitle.className = 'wf-label'; discTitle.textContent = '从供应商获取模型（点选填入 api_model）';
@@ -2279,11 +2532,8 @@ function settingsForm() {
     t.value = lines(value);
     return { t, f: field(label, t) };
   };
-  // 思考等级目录：id=显示名；顺序即界面顺序。模型登记只能引用这里的档位。
-  const thinkLevels = area(
-    '思考等级（每行一条：id=显示名；顺序即界面顺序）',
-    thinkingLevels().map((l) => l.id + '=' + (l.label || '')),
-  );
+  // 思考等级目录：标签即档位 id，顺序即界面顺序。模型登记只能引用这里的档位。
+  const thinkLevels = thinkingTagsEditor(thinkingLevels());
   const network = checkbox('允许工具 / guest / 常驻服务 / 构建出站（全局）', !!sp.network);
   const writeAcl = checkbox('允许 Windows 写本机目录 ACL（只影响 Windows 的容器围栏）', !!(sp.windows && sp.windows.write_acl));
   const level = (v) => selectInput([
@@ -2340,8 +2590,8 @@ function settingsForm() {
 function buildGeneratePage(c, f) {
   c.body.appendChild(f.stream.wrap);
   c.body.appendChild(f.cot.wrap);
-  c.body.appendChild(f.thinkLevels.f);
-  c.body.appendChild(cfgHint('默认 off / low / high / max；可追加自定义档（如 xhigh）。模型登记里为每个模型写"档位 → 映射值"；会话状态栏切档时只列这组模型都登记了的档。'));
+  c.body.appendChild(field('思考等级', f.thinkLevels.node));
+  c.body.appendChild(cfgHint('默认 off / low / high / max；可追加自定义档（如 xhigh）。标签就是档位 id，模型登记按它写"档位 → 映射值"；会话状态栏切档时只列这组模型都登记了的档。'));
   c.body.appendChild(f.to.wrap);
   c.body.appendChild(cfgHint('这是“等第一个响应/第一个数据块”的预算，不是整次流的总时长：正常流式只要还在出数据就不会超时；流开始后 120 秒没有新数据才判定断流。用尽时会中断本轮并提示，点「继续」可重试（会话不会作废）。'));
   c.body.appendChild(f.remind.wrap);
@@ -2405,16 +2655,7 @@ function collectSettings(f) {
   return {
     streaming: f.stream.box.checked,
     show_reasoning: f.cot.box.checked,
-    thinking: (() => {
-      const levels = [];
-      for (const line of String(f.thinkLevels.t.value || '').split('\n').map((s) => s.trim()).filter((s) => s.length > 0)) {
-        const i = line.indexOf('=');
-        const id = (i < 0 ? line : line.slice(0, i)).trim();
-        const label = i < 0 ? '' : line.slice(i + 1).trim();
-        if (id) levels.push({ id, label });
-      }
-      return { levels };
-    })(),
+    thinking: { levels: f.thinkLevels.list() },
     llm_timeout_secs: Number(f.to.input.value) || 300,
     discuss_remind_cap: Number(f.remind.input.value) || 0,
     compact_at_percent: Number(f.pct.input.value) || 0,
@@ -2457,6 +2698,8 @@ function collectSettings(f) {
 }
 
 async function saveSettings(c, f, saveBtn) {
+  const bad = f.thinkLevels.validate();
+  if (bad) { c.setMsg(bad, true); return; }
   const reset = busyButton(saveBtn, '保存中…');
   try {
     const saved = await api('POST', actionUrl('set_settings'), collectSettings(f));

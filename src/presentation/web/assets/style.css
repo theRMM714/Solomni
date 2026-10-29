@@ -626,6 +626,19 @@ body {
   border-radius: 999px; padding: 3px 10px; font: inherit; font-size: 12px; cursor: pointer;
 }
 .mod-add:hover { border-color: var(--color-accent); }
+.mod-add:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ---- 思考等级标签 + 模型档位映射行 ---- */
+.tag-editor { display: flex; flex-direction: column; gap: 6px; }
+.tag-editor .wf-inline { align-items: center; }
+.tag-editor .tag-input { flex: 1 1 200px; min-width: 120px; }
+.tag-editor .mod-add { padding: 8px 12px; }
+.think-rows { display: flex; flex-direction: column; gap: 6px; }
+.think-row { display: flex; align-items: center; gap: 8px; }
+.think-row select { flex: 0 1 190px; min-width: 130px; }
+.think-eq { flex: none; color: var(--color-text-dim); }
+.think-row input.field-input { flex: 1 1 220px; min-width: 120px; }
+.think-row .link-btn { flex: none; font-size: 15px; line-height: 1; }
 .mod-pick-section { display: flex; flex-direction: column; gap: 6px; }
 .mod-pick-title { font-size: 12px; color: var(--color-text-dim); letter-spacing: .5px; }
 .mod-grid {

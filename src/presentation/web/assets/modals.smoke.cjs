@@ -149,7 +149,74 @@ if (!loadErrors.length) {
     const nums = inputsIn(body).filter((i) => i.type === "number");
     const text = walk(body, []).map((n) => String(n.textContent || "")).join(" ");
     return nums.length >= 1 && text.indexOf("思考默认档") >= 0 &&
-      text.indexOf("思考档位映射") >= 0 && text.indexOf("按 reasoning_effort 预设填入") >= 0;
+      text.indexOf("思考档位映射") >= 0 && text.indexOf("+ 添加映射") >= 0;
+  });
+  // ①之二 思考映射：逐行配对；已映射档位在其它行不可再选；默认档只列已映射的档。
+  check("模型页：思考映射行去重、可增删、默认档只列已映射", () => {
+    seedRegistry();
+    vm.runInNewContext("openSettingsModal()", sandbox);
+    const page = openPage("models");
+    const find = (pred) => walk(page, []).find(pred);
+    const add = find((n) => n.tagName === "BUTTON" && n.textContent === "+ 添加映射");
+    if (!add) return false;
+    add.onclick();
+    let rows = walk(page, []).filter((n) => String(n.className) === "think-row");
+    if (rows.length !== 1) return false;
+    let sels = rows.map((r) => walk(r, []).find((n) => n.tagName === "SELECT"));
+    const values = (s) => (s.children || []).map((o) => o.value);
+    if (values(sels[0]).filter(Boolean).length !== 4) return false;
+    add.onclick();
+    rows = walk(page, []).filter((n) => String(n.className) === "think-row");
+    if (rows.length !== 2) return false;
+    sels = rows.map((r) => walk(r, []).find((n) => n.tagName === "SELECT"));
+    if (values(sels[1]).indexOf("off") >= 0) return false;
+    if (values(sels[0]).indexOf("off") < 0) return false;
+    const defSel = find((n) => n.tagName === "SELECT" && (n.children || []).some((o) => String(o.textContent).indexOf("随供应商默认") >= 0));
+    if (!defSel || values(defSel).indexOf("off") < 0) return false;
+    if (values(defSel).indexOf("high") >= 0) return false;
+    const del = rows[0].children.find((c) => c.tagName === "BUTTON" && c.textContent === "×");
+    if (!del) return false;
+    del.onclick();
+    rows = walk(page, []).filter((n) => String(n.className) === "think-row");
+    return rows.length === 1 && values(rows[0].children.find((c) => c.tagName === "SELECT")).indexOf("off") >= 0;
+  });
+  // ①之三 编辑已有模型：映射值按字符串 / JSON 原样回填，默认档回到它自己。
+  check("模型页：编辑回填思考映射与默认档", () => {
+    vm.runInNewContext(`
+      state.providers = [{ id: "p1", base_url: "http://x" }];
+      state.models = [{ id: "m1", name: "M", api_model: "m", provider: "p1", note: "", tools: "native", context: 0, is_core: true, thinking: { default: "high", levels: { off: { thinking: { type: "disabled" } }, high: "high" } } }];
+      state.core = "m1"; state.agents = []; notifyRegistryChange();
+    `, sandbox);
+    vm.runInNewContext("openSettingsModal()", sandbox);
+    const page = openPage("models");
+    const row = walk(page, []).find((n) => String(n.className) === "reg-item");
+    const edit = row && walk(row, []).find((n) => n.tagName === "BUTTON" && n.textContent === "编辑");
+    if (!edit) return false;
+    edit.onclick();
+    const rows = walk(page, []).filter((n) => String(n.className) === "think-row");
+    if (rows.length !== 2) return false;
+    const inputValues = rows.map((r) => String(walk(r, []).find((n) => n.tagName === "INPUT").value));
+    const defSel = walk(page, []).find((n) => n.tagName === "SELECT" && (n.children || []).some((o) => String(o.textContent).indexOf("随供应商默认") >= 0));
+    return inputValues.indexOf('{"thinking":{"type":"disabled"}}') >= 0 &&
+      inputValues.indexOf("high") >= 0 && !!defSel && defSel.value === "high";
+  });
+  // ①之四 映射值为空：保存前就拒绝，不把空串发给后端。
+  check("模型页：思考映射空值拒绝保存", () => {
+    seedRegistry();
+    vm.runInNewContext("openSettingsModal()", sandbox);
+    const page = openPage("models");
+    const row = walk(page, []).find((n) => String(n.className) === "reg-item");
+    const edit = row && walk(row, []).find((n) => n.tagName === "BUTTON" && n.textContent === "编辑");
+    if (!edit) return false;
+    edit.onclick();
+    const add = walk(page, []).find((n) => n.tagName === "BUTTON" && n.textContent === "+ 添加映射");
+    if (!add) return false;
+    add.onclick();
+    const save = walk(page, []).find((n) => n.tagName === "BUTTON" && n.textContent === "登记 / 更新");
+    if (!save) return false;
+    save.onclick();
+    const msg = walk(roots.get("#modal-root"), []).find((n) => String(n.className).indexOf("modal-msg") === 0);
+    return !!msg && String(msg.textContent).indexOf("不能为空") >= 0;
   });
   // ② 设置中心：分页后生成页只有三项数字（超时 / 提醒 / 压缩），同时上台数在资源页。
   check("设置中心：生成页含超时、提醒、压缩", () => {
@@ -158,14 +225,69 @@ if (!loadErrors.length) {
     const nums = inputsIn(page).filter((i) => i.type === "number");
     return nums.length >= 3;
   });
-  // ②之二 思考等级目录在生成页：默认四档可编辑（后端 settings.thinking 是权威）。
-  check("设置中心：生成页含思考等级目录", () => {
+  // ②之二 思考等级目录在生成页：默认四档是标签（后端 settings.thinking 是权威）。
+  check("设置中心：生成页含思考等级标签", () => {
     vm.runInNewContext("openSettingsModal()", sandbox);
     const page = openPage("generate");
     const nodes = walk(page, []);
     const text = nodes.map((n) => String(n.textContent || "")).join(" ");
-    const ta = nodes.find((n) => n.tagName === "TEXTAREA" && /off=/.test(n.value || ""));
-    return text.indexOf("思考等级") >= 0 && !!ta && /low=/.test(ta.value);
+    const labels = nodes.filter((n) => String(n.className) === "mod-chip-label").map((n) => String(n.textContent));
+    const input = nodes.find((n) => n.tagName === "INPUT" && String(n.placeholder).indexOf("新档位") >= 0);
+    const add = nodes.find((n) => n.tagName === "BUTTON" && n.textContent === "添加档位");
+    return text.indexOf("思考等级") >= 0 && ["off", "low", "high", "max"].every((id) => labels.indexOf(id) >= 0) && !!input && !!add;
+  });
+  // ②之三 标签录入：空值 / 重复当场拒绝，新档位可加可删。
+  check("设置中心：思考等级标签可加、拒重复与空值、可删", () => {
+    vm.runInNewContext("openSettingsModal()", sandbox);
+    const page = openPage("generate");
+    const find = (pred) => walk(page, []).find(pred);
+    const input = find((n) => n.tagName === "INPUT" && String(n.placeholder).indexOf("新档位") >= 0);
+    const add = find((n) => n.tagName === "BUTTON" && n.textContent === "添加档位");
+    if (!input || !add) return false;
+    const labels = () => walk(page, []).filter((n) => String(n.className) === "mod-chip-label").map((n) => String(n.textContent));
+    input.value = "  "; add.onclick();
+    if (labels().length !== 4) return false;
+    const err = walk(page, []).find((n) => String(n.className).indexOf("cfg-hint") === 0 && String(n.textContent).indexOf("不能为空") >= 0);
+    if (!err) return false;
+    input.value = "off"; add.onclick();
+    if (labels().filter((x) => x === "off").length !== 1) return false;
+    input.value = "xhigh"; add.onclick();
+    if (labels().filter((x) => x === "xhigh").length !== 1) return false;
+    const chip = walk(page, []).find((n) => String(n.className) === "mod-chip" && (n.children || []).some((c) => String(c.textContent) === "xhigh"));
+    const x = chip && chip.children.find((c) => String(c.className).indexOf("mod-chip-x") === 0);
+    if (!x) return false;
+    x.onclick();
+    return labels().filter((x) => x === "xhigh").length === 0;
+  });
+  // ②之四 保存时把标签按 {id,label} 提交（已有显示名保留，新标签用 id）。
+  check("设置中心：保存提交思考标签", () => {
+    const original = sandbox.fetch;
+    let captured = null;
+    sandbox.fetch = async (url, opts) => {
+      if (String(url).indexOf("/api/actions/set_settings") >= 0) {
+        captured = JSON.parse(opts.body);
+        return { ok: true, json: async () => ({}) };
+      }
+      return original(url, opts);
+    };
+    try {
+      vm.runInNewContext("openSettingsModal()", sandbox);
+      const page = openPage("generate");
+      const find = (pred) => walk(page, []).find(pred);
+      const input = find((n) => n.tagName === "INPUT" && String(n.placeholder).indexOf("新档位") >= 0);
+      const add = find((n) => n.tagName === "BUTTON" && n.textContent === "添加档位");
+      const save = walk(hubBody(), []).find((n) => n.tagName === "BUTTON" && n.textContent === "保存");
+      if (!input || !add || !save) return false;
+      input.value = "xhigh"; add.onclick();
+      save.onclick();
+      if (!captured) return false;
+      const levels = (captured.thinking && captured.thinking.levels) || [];
+      const ids = levels.map((l) => l.id);
+      const off = levels.find((l) => l.id === "off");
+      return ids.indexOf("xhigh") >= 0 && !!off && off.label === "关闭";
+    } finally {
+      sandbox.fetch = original;
+    }
   });
   // ⑥ 同时上台数要随保存一起提交（后端 set_settings 收这个字段）；"现在在跑什么"同页。
   check("设置中心：资源页含同时上台数与进程区块", () => {
