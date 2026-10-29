@@ -991,20 +991,13 @@ impl Conductor {
                 {
                     options.push(ThinkingOptionView {
                         id: l.id.clone(),
-                        label: l.display().to_string(),
+                        label: l.id.clone(),
                     });
                 }
             }
         }
-        let display = |id: &str| {
-            catalog
-                .iter()
-                .find(|x| x.id == id)
-                .map(|x| x.display().to_string())
-                .unwrap_or_else(|| id.to_string())
-        };
         let label = match level.as_deref().or(default_level.as_deref()) {
-            Some(l) => display(l),
+            Some(l) => l.to_string(),
             None if defaults.iter().any(|d| d.is_some()) => "各模型默认".to_string(),
             None => "未设置".to_string(),
         };

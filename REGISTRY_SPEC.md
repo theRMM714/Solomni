@@ -113,12 +113,12 @@ agents:
 ```yaml
 streaming: true        # 流式传输：向供应商请求逐片返回（默认 true）
 show_reasoning: true   # 思维链显示（默认 true；界面上永远默认折叠、点击才展开）
-thinking:              # 思考强度目录（全局）：顺序即界面顺序；模型映射只能引用这里的档位
+thinking:              # 思考强度目录（全局）：标签顺序即界面顺序；模型映射只能引用这里的标签
   levels:
-    - { id: off,  label: 关闭 }
-    - { id: low,  label: 低 }
-    - { id: high, label: 高 }
-    - { id: max,  label: 最高 }
+    - { id: off }      # 标签就是界面显示文字，也是模型映射 / 会话选择的键
+    - { id: low }
+    - { id: high }
+    - { id: max }
 tier: host             # 默认执行档位：host（本机）| vm（虚拟机）（默认 host）
 sandbox:               # 全局沙箱策略：会话不可填；保存后整体重启
   policy:
@@ -149,7 +149,8 @@ compact_at_percent: 70 # 上下文用到模型窗口的百分之多少就自动�
 discuss_remind_cap: 3  # 讨论里一轮内对同一个成员最多提醒几次（提醒 = "你还没用动词表态"）
 ```
 
-- `thinking.levels` 是**全局思考等级目录**：默认四档，用户可追加（例如 `xhigh`）；id 只能用字母 / 数字 / `_` / `-`，重复或空值拒绝。
+- `thinking.levels` 是**全局思考等级标签目录**：默认四档，用户可追加任意标签（例如 `xhigh`、`高`、`极高 档`）；
+  标签可以任意字符，但不能为空、不能有首尾空白或控制字符，不能重复。
   删掉仍被模型 `thinking.levels` 引用的档位 = 拒绝并列出模型；模型默认档不在新目录里 = 同样拒绝。
   会话里切档是**会话级事实**（写在 `session/<工作>/meta.yaml` 的 `thinking`，工作根持有、子会话共享）；
   状态栏与配置页只列这组模型都登记了的档，没选过档时直接显示共同默认档，

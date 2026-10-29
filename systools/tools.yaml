@@ -775,7 +775,7 @@ tools:
     params:
       streaming: { type: boolean, desc: 流式传输 }
       show_reasoning: { type: boolean, desc: 思维链显示 }
-      thinking: { type: object, desc: "思考等级目录（整段替换）：levels 数组，每项 { id, label }；默认 off/low/high/max" }
+      thinking: { type: object, desc: "思考等级目录（整段替换）：levels 数组，每项 { id }（标签，任意字符；默认 off/low/high/max）" }
       llm_timeout_secs: { type: integer, min: 1, desc: 单次模型调用的超时（秒） }
       compact_at_percent: { type: integer, min: 0, max: 100, desc: 上下文用到百分之多少就压缩 }
       discuss_remind_cap: { type: integer, min: 0, desc: 一轮内最多提醒几次 }

@@ -253,13 +253,15 @@ if (!loadErrors.length) {
     if (labels().filter((x) => x === "off").length !== 1) return false;
     input.value = "xhigh"; add.onclick();
     if (labels().filter((x) => x === "xhigh").length !== 1) return false;
+    input.value = "高"; add.onclick();
+    if (labels().filter((x) => x === "高").length !== 1) return false;
     const chip = walk(page, []).find((n) => String(n.className) === "mod-chip" && (n.children || []).some((c) => String(c.textContent) === "xhigh"));
     const x = chip && chip.children.find((c) => String(c.className).indexOf("mod-chip-x") === 0);
     if (!x) return false;
     x.onclick();
     return labels().filter((x) => x === "xhigh").length === 0;
   });
-  // ②之四 保存时把标签按 {id,label} 提交（已有显示名保留，新标签用 id）。
+  // ②之四 保存时只提交标签 id（不再带显示名）。
   check("设置中心：保存提交思考标签", () => {
     const original = sandbox.fetch;
     let captured = null;
@@ -284,7 +286,7 @@ if (!loadErrors.length) {
       const levels = (captured.thinking && captured.thinking.levels) || [];
       const ids = levels.map((l) => l.id);
       const off = levels.find((l) => l.id === "off");
-      return ids.indexOf("xhigh") >= 0 && !!off && off.label === "关闭";
+      return ids.indexOf("xhigh") >= 0 && !!off && !("label" in off);
     } finally {
       sandbox.fetch = original;
     }

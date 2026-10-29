@@ -850,7 +850,7 @@ setTimeout(async () => {
           " const collab = run('s3', 'collab', ctx, head);" +
           " const shellLive = { command: 'echo hi', scope: 'sandbox', cwd: '/x', started_at: Math.floor(Date.now()/1000) - 12, finished_at: Math.floor(Date.now()/1000), exit_code: 0, ok: true, output: 'hi' };" +
           " const withShell = run('s4', 'single', ctx, head, shellLive);" +
-          " const th = { level: null, default_level: 'high', label: '高', options: [{ id: 'high', label: '高' }], note: '' };" +
+          " const th = { level: null, default_level: 'high', label: 'high', options: [{ id: 'high', label: 'high' }], note: '' };" +
           " const withThinking = run('s5', 'single', ctx, head, null, th);" +
           " return { single: single, proxy: proxy, collab: collab, withShell: withShell, withThinking: withThinking };" +
           "})()",
@@ -860,7 +860,7 @@ setTimeout(async () => {
       const proxyOk = r.proxy.length === 2 && /1,000/.test(r.proxy[0]) && /10\.0%/.test(r.proxy[0]);
       const collabOk = r.collab.length === 1 && /#7/.test(r.collab[0]);
       const shellOk = r.withShell.length === 3 && r.withShell.some((t) => /shell 退出码 0/.test(t));
-      const thinkingOk = r.withThinking.length === 3 && r.withThinking.some((t) => /思考 高/.test(t));
+      const thinkingOk = r.withThinking.length === 3 && r.withThinking.some((t) => /思考 high/.test(t));
       statusBarRules = singleOk && proxyOk && collabOk && shellOk && thinkingOk;
       if (!statusBarRules) loadErrors.push("状态栏检查：" + JSON.stringify(r));
     } catch (e) { loadErrors.push("状态栏检查失败：" + e.message); }
@@ -888,23 +888,23 @@ setTimeout(async () => {
             return out;
           };
           const a = mine({
-            level: null, default_level: 'high', label: '高',
-            options: [{ id: 'low', label: '低' }, { id: 'high', label: '高' }], note: '',
+            level: null, default_level: 'high', label: 'high',
+            options: [{ id: 'low', label: 'low' }, { id: 'high', label: 'high' }], note: '',
           });
           const b = mine({
             level: null, default_level: null, label: '未设置',
-            options: [{ id: 'high', label: '高' }], note: '',
+            options: [{ id: 'high', label: 'high' }], note: '',
           });
           return { a: labels(a), b: labels(b) };
         })()
       `, sandbox);
       const hasDefaultOk = r.a.length === 2 &&
-        r.a.some((t) => t.indexOf('高（当前）') >= 0) &&
-        r.a.some((t) => t.indexOf('低') >= 0) &&
+        r.a.some((t) => t.indexOf('high（当前）') >= 0) &&
+        r.a.some((t) => t.indexOf('low') >= 0) &&
         !r.a.some((t) => t.indexOf('跟随默认') >= 0 || t.indexOf('随模型默认') >= 0);
       const noDefaultOk = r.b.length === 2 &&
         r.b.some((t) => t.indexOf('跟随默认（当前）') >= 0) &&
-        r.b.some((t) => t.indexOf('高') >= 0);
+        r.b.some((t) => t.indexOf('high') >= 0);
       thinkingMenuRules = hasDefaultOk && noDefaultOk;
       if (!thinkingMenuRules) loadErrors.push("思考菜单检查：" + JSON.stringify(r));
     } catch (e) { loadErrors.push("思考菜单检查失败：" + e.message); }

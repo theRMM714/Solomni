@@ -533,6 +533,32 @@ pub(crate) fn thinking_defaults_and_map_shapes_are_resolved() {
     );
 }
 
+/// 目的：目录标签不限制字符集（中文 / 空格 / 标点都行），但仍拒空、首尾空白、控制字符与重复。
+#[test]
+pub(crate) fn thinking_catalog_accepts_arbitrary_tags() {
+    use crate::capabilities::registry::domain::providers::{
+        validate_thinking_catalog, ThinkingCatalog, ThinkingLevel,
+    };
+    let tag = |s: &str| ThinkingLevel { id: s.to_string() };
+    let ok = ThinkingCatalog {
+        levels: vec![
+            tag("low"),
+            tag("高"),
+            tag("极高 档"),
+            tag("xhigh!"),
+            tag("🔥"),
+        ],
+    };
+    assert_eq!(validate_thinking_catalog(&ok), Ok(()));
+    let bad = |levels: Vec<ThinkingLevel>| {
+        validate_thinking_catalog(&ThinkingCatalog { levels }).unwrap_err()
+    };
+    assert!(bad(vec![tag("")]).contains("不能为空"));
+    assert!(bad(vec![tag(" low")]).contains("首尾不能有空白"));
+    assert!(bad(vec![tag("lo\tw")]).contains("控制字符"));
+    assert!(bad(vec![tag("low"), tag("low")]).contains("重复"));
+}
+
 /// 目的：登记时就拒掉目录外的档、悬空的默认档与被保留键的片段；删掉仍被模型使用的等级也要拒绝。
 #[test]
 pub(crate) fn thinking_registration_rejects_unknown_levels_defaults_and_reserved_keys() {

@@ -2024,15 +2024,8 @@ function openProvidersModal() {
 }
 
 /* ---------- 思考等级标签 / 模型档位映射 ---------- */
-/// 档位的展示名：有独立显示名时带上 id，否则直接用 id（避免 "off（off）"）。
-function thinkingLevelLabel(l) {
-  const id = String((l && l.id) || '');
-  const label = String((l && l.label) || '').trim();
-  return label && label !== id ? label + '（' + id + '）' : id;
-}
-
-/** 思考等级标签编辑器：标签就是档位 id，顺序即界面顺序。
- *  约束：非空、不重复、只用字母 / 数字 / _ / -（与后端校验一致）；已有显示名原样保留。 */
+/** 思考等级标签编辑器：标签就是档位，顺序即界面顺序，界面显示与模型映射都用这一串。
+ *  约束：非空、不重复、无首尾空白、无控制字符（与后端校验一致）；不限制字符集。 */
 function thinkingTagsEditor(levels) {
   const node = document.createElement('div');
   node.className = 'tag-editor';
@@ -2040,22 +2033,20 @@ function thinkingTagsEditor(levels) {
   chips.className = 'mod-chips';
   const addRow = document.createElement('div');
   addRow.className = 'wf-inline';
-  const input = textInput('新档位（如 xhigh）');
+  const input = textInput('新档位（如 high、高、xhigh）');
   input.className = 'field-input tag-input';
   const add = btn('+ 添加档位', 'mod-add');
-  const hint = cfgHint('标签就是档位 id；模型登记按它映射。只能用字母 / 数字 / _ / -。');
+  const hint = cfgHint('标签就是档位；模型登记按它映射。可以任意写（如 high、高、xhigh），不能为空或重复。');
   const err = cfgHint('', 'err');
+  const control = /[\u0000-\u001f\u007f-\u009f]/;
   addRow.appendChild(input); addRow.appendChild(add);
   node.appendChild(chips); node.appendChild(hint); node.appendChild(err);
 
   const ids = [];
-  const labels = new Map();
   for (const l of levels || []) {
     const id = String((l && l.id) || '').trim();
     if (!id || ids.indexOf(id) >= 0) continue;
     ids.push(id);
-    const label = String((l && l.label) || '').trim();
-    labels.set(id, label === id ? '' : label);
   }
 
   function showError(text) { err.textContent = text || ''; }
@@ -2075,8 +2066,7 @@ function thinkingTagsEditor(levels) {
       const label = document.createElement('span');
       label.className = 'mod-chip-label';
       label.textContent = id;
-      const name = labels.get(id) || '';
-      chip.title = name ? '显示名：' + name : id;
+      chip.title = id;
       const x = btn('×', 'mod-chip-x');
       x.title = '移除 ' + id;
       x.onclick = () => {
@@ -2094,12 +2084,8 @@ function thinkingTagsEditor(levels) {
     const raw = String(input.value || '').trim();
     if (!raw) { showError('思考档位不能为空'); return; }
     if (ids.indexOf(raw) >= 0) { showError('思考档位已存在：' + raw); return; }
-    if (!/^[A-Za-z0-9_-]+$/.test(raw)) {
-      showError('思考档位只能用字母 / 数字 / _ / -（例如 xhigh）');
-      return;
-    }
+    if (control.test(raw)) { showError('思考档位不能包含控制字符'); return; }
     ids.push(raw);
-    if (!labels.has(raw)) labels.set(raw, '');
     input.value = '';
     showError('');
     render();
@@ -2115,8 +2101,8 @@ function thinkingTagsEditor(levels) {
       return '思考等级至少要有一个档位';
     }
     for (const id of ids) {
-      if (!/^[A-Za-z0-9_-]+$/.test(id)) {
-        const msg = '思考档位只能用字母 / 数字 / _ / -（例如 xhigh）：' + id;
+      if (control.test(id)) {
+        const msg = '思考档位不能包含控制字符：' + id;
         showError(msg);
         return msg;
       }
@@ -2125,7 +2111,7 @@ function thinkingTagsEditor(levels) {
     return '';
   }
   function list() {
-    return ids.map((id) => ({ id, label: labels.get(id) || '' }));
+    return ids.map((id) => ({ id }));
   }
   render();
   return { node, list, validate };
@@ -2159,7 +2145,7 @@ function thinkingMapEditor() {
   }
   function optionFor(id) {
     const l = findLevel(id);
-    return { value: id, label: l ? thinkingLevelLabel(l) : id + '（已不在目录）' };
+    return { value: id, label: l ? id : id + '（已不在目录）' };
   }
   function usedByOthers(row) {
     const used = new Set();
@@ -2172,7 +2158,7 @@ function thinkingMapEditor() {
     if (!row.level) opts.push({ value: '', label: '（选择档位）' });
     for (const l of catalog()) {
       if (used.has(l.id) && l.id !== row.level) continue;
-      if (!opts.some((o) => o.value === l.id)) opts.push({ value: l.id, label: thinkingLevelLabel(l) });
+      if (!opts.some((o) => o.value === l.id)) opts.push({ value: l.id, label: l.id });
     }
     if (row.level && !findLevel(row.level) && !opts.some((o) => o.value === row.level)) {
       opts.push({ value: row.level, label: row.level + '（已不在目录）' });
@@ -2538,7 +2524,7 @@ function settingsForm() {
     t.value = lines(value);
     return { t, f: field(label, t) };
   };
-  // 思考等级目录：标签即档位 id，顺序即界面顺序。模型登记只能引用这里的档位。
+  // 思考等级目录：标签即档位，顺序即界面顺序。模型登记只能引用这里的标签。
   const thinkLevels = thinkingTagsEditor(thinkingLevels());
   const network = checkbox('允许工具 / guest / 常驻服务 / 构建出站（全局）', !!sp.network);
   const writeAcl = checkbox('允许 Windows 写本机目录 ACL（只影响 Windows 的容器围栏）', !!(sp.windows && sp.windows.write_acl));
@@ -2597,7 +2583,7 @@ function buildGeneratePage(c, f) {
   c.body.appendChild(f.stream.wrap);
   c.body.appendChild(f.cot.wrap);
   c.body.appendChild(field('思考等级', f.thinkLevels.node));
-  c.body.appendChild(cfgHint('默认 off / low / high / max；可追加自定义档（如 xhigh）。标签就是档位 id，模型登记按它写"档位 → 映射值"；会话状态栏切档时只列这组模型都登记了的档。'));
+  c.body.appendChild(cfgHint('默认 off / low / high / max；可追加任意标签（如 xhigh、高）。标签就是档位，模型登记按它写"标签 → 映射值"；会话状态栏切档时只列这组模型都登记了的标签。'));
   c.body.appendChild(f.to.wrap);
   c.body.appendChild(cfgHint('这是“等第一个响应/第一个数据块”的预算，不是整次流的总时长：正常流式只要还在出数据就不会超时；流开始后 120 秒没有新数据才判定断流。用尽时会中断本轮并提示，点「继续」可重试（会话不会作废）。'));
   c.body.appendChild(f.remind.wrap);
@@ -3802,12 +3788,12 @@ function statusPrintOf(s) {
   ]);
 }
 
-/* 思考强度的兜底目录：后端 /api/state 的 settings.thinking 是权威；旧桩或加载失败时仍能画出四档。 */
+/* 思考强度的兜底目录：后端 /api/state 的 settings.thinking 是权威；桩或加载失败时仍能画出四档。 */
 const DEFAULT_THINKING_LEVELS = [
-  { id: 'off', label: '关闭' },
-  { id: 'low', label: '低' },
-  { id: 'high', label: '高' },
-  { id: 'max', label: '最高' },
+  { id: 'off' },
+  { id: 'low' },
+  { id: 'high' },
+  { id: 'max' },
 ];
 function thinkingLevels() {
   const t = state.settings && state.settings.thinking;
@@ -3815,8 +3801,7 @@ function thinkingLevels() {
   return levels.length ? levels : DEFAULT_THINKING_LEVELS;
 }
 function thinkingLabel(id) {
-  const hit = thinkingLevels().find((l) => l.id === id);
-  return hit ? (hit.label || hit.id) : (id || '');
+  return String(id || '');
 }
 
 const PERMISSION_ORDER = ['view', 'workspace', 'external', 'all_reach'];

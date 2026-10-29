@@ -43,26 +43,12 @@ fn default_context_tokens() -> u64 {
     DEFAULT_CONTEXT_TOKENS
 }
 
-/// 目的：一档思考强度（全局目录里的一项）：`id` 是模型映射与会话选择的键，`label` 只给人看。
+/// 目的：一档思考强度（全局目录里的一项）：`id` 是标签，也是模型映射与会话选择的键。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ThinkingLevel {
-    /// 目的：档位 id（模型映射与会话选择的键）。
+    /// 目的：档位标签（界面显示、模型映射与会话选择都用这一串）。
     pub id: String,
-    /// 目的：给人看的显示名（空 = 用 id）。
-    #[serde(default)]
-    pub label: String,
-}
-
-impl ThinkingLevel {
-    /// 目的：给人看的名字；没填显示名就用 id。
-    pub fn display(&self) -> &str {
-        if self.label.trim().is_empty() {
-            &self.id
-        } else {
-            &self.label
-        }
-    }
 }
 
 /// 目的：思考强度目录（settings.yaml 的 `thinking` 段）：顺序就是界面顺序。
@@ -80,19 +66,15 @@ pub fn default_thinking_levels() -> Vec<ThinkingLevel> {
     vec![
         ThinkingLevel {
             id: "off".to_string(),
-            label: "关闭".to_string(),
         },
         ThinkingLevel {
             id: "low".to_string(),
-            label: "低".to_string(),
         },
         ThinkingLevel {
             id: "high".to_string(),
-            label: "高".to_string(),
         },
         ThinkingLevel {
             id: "max".to_string(),
-            label: "最高".to_string(),
         },
     ]
 }
@@ -149,7 +131,7 @@ pub struct ModelDraft {
     pub thinking: ThinkingSpec,
 }
 
-/// 目的：校验目录——id 非空、唯一、可安全用作 YAML 键与映射键；显示名可空。
+/// 目的：校验目录——标签非空、唯一、无首尾空白、无控制字符；顺序即界面顺序。
 pub fn validate_thinking_catalog(c: &ThinkingCatalog) -> Result<(), String> {
     if c.levels.is_empty() {
         return Err("thinking.levels 不能为空".to_string());
@@ -158,22 +140,16 @@ pub fn validate_thinking_catalog(c: &ThinkingCatalog) -> Result<(), String> {
     for l in &c.levels {
         let id = l.id.trim();
         if id.is_empty() {
-            return Err("thinking.levels 里的 id 不能为空".to_string());
+            return Err("thinking.levels 里的标签不能为空".to_string());
         }
         if id != l.id {
-            return Err(format!("thinking.levels 的 id 首尾不能有空白：{:?}", l.id));
+            return Err(format!("thinking.levels 的标签首尾不能有空白：{:?}", l.id));
         }
-        if !id
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
-        {
-            return Err(format!(
-                "thinking.levels 的 id 只能用字母 / 数字 / _ / -：{}",
-                id
-            ));
+        if id.chars().any(char::is_control) {
+            return Err(format!("thinking.levels 的标签不能包含控制字符：{:?}", id));
         }
         if !seen.insert(id.to_string()) {
-            return Err(format!("thinking.levels 的 id 重复：{}", id));
+            return Err(format!("thinking.levels 的标签重复：{}", id));
         }
     }
     Ok(())

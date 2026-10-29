@@ -1793,7 +1793,7 @@ fn set_thinking_action_switches_the_work_level_and_rejects_unmapped_levels() {
         None,
         "没有统一默认档"
     );
-    assert_eq!(cfg.thinking.label, "高", "有会话选择时显示选择");
+    assert_eq!(cfg.thinking.label, "high", "有会话选择时显示标签");
     // 没登记的档：拒绝并列出缺映射的模型（不静默降级）
     let err = ops
         .actions
@@ -1854,7 +1854,7 @@ fn thinking_view_uses_the_common_default_and_hides_unmapped_levels() {
         Some("high"),
         "这组模型共同的默认档"
     );
-    assert_eq!(cfg.thinking.label, "高", "默认档直接作为当前档显示");
+    assert_eq!(cfg.thinking.label, "high", "默认档直接作为当前标签显示");
     let ids: Vec<&str> = cfg.thinking.options.iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, ["low", "high"], "只列已映射的档（按目录顺序）");
     assert!(
