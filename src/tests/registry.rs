@@ -559,6 +559,18 @@ pub(crate) fn thinking_catalog_accepts_arbitrary_tags() {
     assert!(bad(vec![tag("low"), tag("low")]).contains("重复"));
 }
 
+/// 目的：目录项只认标签 id；设置文件里多余的 label 字段在读入时忽略。
+#[test]
+pub(crate) fn thinking_catalog_reads_tag_entries_and_ignores_extra_fields() {
+    use crate::capabilities::registry::domain::providers::ThinkingCatalog;
+    let cat: ThinkingCatalog =
+        yaml_serde::from_str("levels:\n- id: low\n  label: 低\n- id: 高\n").unwrap();
+    assert_eq!(
+        cat.levels.iter().map(|l| l.id.as_str()).collect::<Vec<_>>(),
+        ["low", "高"]
+    );
+}
+
 /// 目的：登记时就拒掉目录外的档、悬空的默认档与被保留键的片段；删掉仍被模型使用的等级也要拒绝。
 #[test]
 pub(crate) fn thinking_registration_rejects_unknown_levels_defaults_and_reserved_keys() {

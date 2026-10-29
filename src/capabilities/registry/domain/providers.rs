@@ -45,7 +45,6 @@ fn default_context_tokens() -> u64 {
 
 /// 目的：一档思考强度（全局目录里的一项）：`id` 是标签，也是模型映射与会话选择的键。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ThinkingLevel {
     /// 目的：档位标签（界面显示、模型映射与会话选择都用这一串）。
     pub id: String,
