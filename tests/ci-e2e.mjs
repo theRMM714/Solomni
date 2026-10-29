@@ -20,11 +20,11 @@ fs.mkdirSync(LOG_DIR, { recursive: true });
 // 不带就等于把真机 e2e 悄悄降成安全模式（那正是 CI 要给出的结论）。本地请用 node run-tests.js --fence-live。
 const ENV = Object.assign({}, process.env, { SOLOMNI_FENCE_LIVE: "1", SOLOMNI_FENCE_WRITE: "1" });
 
-function run(cmd, args, logName) {
+function run(cmd, args, logName, timeoutMs) {
   const logFile = path.join(LOG_DIR, logName);
   const fd = fs.openSync(logFile, "w");
   process.stdout.write("    实时日志：" + path.relative(ROOT, logFile) + "\n");
-  const r = spawnSync(cmd, args, { cwd: ROOT, env: ENV, stdio: ["ignore", fd, fd] });
+  const r = spawnSync(cmd, args, { cwd: ROOT, env: ENV, stdio: ["ignore", fd, fd], timeout: timeoutMs || 0 });
   fs.closeSync(fd);
   return { code: r.error ? -1 : r.status, out: fs.readFileSync(logFile, "utf8"), error: r.error ? String(r.error.message) : null };
 }
@@ -40,7 +40,8 @@ function main() {
   const envSkips = [];
 
   const buildStart = Date.now();
-  const build = run("cargo", ["build", "--color", "never"], "e2e-cargo-build.log");
+  // 两道硬上限：构建和编排都不能无限挂；到点由本脚本写 fail 报告并让 artifact 有机会上传。
+  const build = run("cargo", ["build", "--color", "never"], "e2e-cargo-build.log", 4 * 60 * 1000);
   const buildMs = Date.now() - buildStart;
   envSkips.push(...probes(build.out));
   if (build.code !== 0) {
@@ -59,11 +60,14 @@ function main() {
       detail = "cross-platform.e2e.not-in-runner（编排尚未迁入）";
     } else {
       const start = Date.now();
-      const r = run(process.execPath, [orchestrator], "e2e-orchestrator.log");
+      const r = run(process.execPath, [orchestrator], "e2e-orchestrator.log", 25 * 60 * 1000);
       ms = Date.now() - start;
       envSkips.push(...probes(r.out));
       status = r.code === 0 && r.out.includes("E2E-OK") ? "pass" : "fail";
-      detail = r.out.trim().split(/\r?\n/).slice(-2).join(" / ");
+      // 报告里先放具体的 FAIL 行，再放最后两行（通常是 E2E-FAILED / 围栏回收）；
+      // 否则汇总里只剩"failed=1"，看报告的人还得去翻整份日志。
+      const failLine = r.out.split(/\r?\n/).find((l) => l.startsWith("FAIL "));
+      detail = (failLine ? failLine + " / " : "") + r.out.trim().split(/\r?\n/).slice(-2).join(" / ");
       if (status === "fail") raw = r.out.slice(-800);
     }
   }

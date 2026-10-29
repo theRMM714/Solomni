@@ -37,11 +37,11 @@ function dropFixtureVm() {
 function interpreter() {
   const { spawnSync } = require("child_process");
   for (const name of ["python", "python3"]) {
-    const r = spawnSync(name, ["-c", "print(1)"], { stdio: "ignore" });
+    const r = spawnSync(name, ["-c", "print(1)"], { stdio: "ignore", timeout: 5000 });
     if (!r.error && r.status === 0) {
       // 围栏是按「解释器所在目录」放行的，所以这里如实报出：用哪个名字、真身在哪、安装根在哪。
       // 失败时（例如动态库取不到导致 SIGABRT）这行就是定位依据。
-      const which = spawnSync(process.platform === "win32" ? "where" : "which", [name], { encoding: "utf8" });
+      const which = spawnSync(process.platform === "win32" ? "where" : "which", [name], { encoding: "utf8", timeout: 5000 });
       const real = (which.stdout || "").trim().split("\n")[0] || "(取不到路径)";
       console.log("[e2e] 夹具解释器：" + name + " → " + real);
       return name;
@@ -165,9 +165,14 @@ function buildIndexer() {
   // 不是编译器的问题），而编译器版本本来就该进日志：直接让它打进同一个流，两件事一起解决。
   for (const cxx of candidates) {
     console.log("[e2e] 试编译器：" + cxx);
-    const version = spawnSync(cxx, ["--version"], { stdio: "inherit" });
-    if (version.error || version.status !== 0) continue;
-    const r = spawnSync(cxx, flags.concat([src, "-o", out]), { stdio: "inherit" });
+    const version = spawnSync(cxx, ["--version"], { stdio: "inherit", timeout: 30000 });
+    if (version.error) {
+      console.log("[e2e] 试编译器失败：" + cxx + "（" + version.error.message + "）");
+      continue;
+    }
+    if (version.status !== 0) continue;
+    const r = spawnSync(cxx, flags.concat([src, "-o", out]), { stdio: "inherit", timeout: 120000 });
+    if (r.error) console.log("[e2e] 编译器超时 / 起不来：" + cxx + "（" + r.error.message + "）");
     if (r.status === 0) {
       console.log("[e2e] indexer 就绪：" + path.relative(FIXTURE, out) + "（" + fs.statSync(out).size + " 字节）");
       return true;
@@ -291,7 +296,18 @@ async function main() {
         E2E_SRV_PID: String(srv.pid),
       }),
     });
-    const code = await new Promise((resolve) => driver.on("exit", (c) => resolve(c === null ? 1 : c)));
+    // 驱动自身也有请求上限，但这里再加一道硬闸：driver 不退出时不能把整个 job 拖到 30 分钟超时。
+    const code = await new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        console.log("[e2e] 驱动超过 24 分钟没有退出：强制结束");
+        stop(driver);
+        resolve(1);
+      }, 24 * 60 * 1000);
+      driver.on("exit", (c) => {
+        clearTimeout(timer);
+        resolve(c === null ? 1 : c);
+      });
+    });
     if (code !== 0) {
       console.log("E2E-FAILED（驱动退出码 " + code + "）");
       return code;
@@ -311,6 +327,7 @@ async function main() {
     const cleaned = require("child_process").spawnSync(BIN, ["--fence-clean", "--root", FIXTURE], {
       cwd: PRODUCT_ROOT,
       encoding: "utf8",
+      timeout: 120000,
     });
     const say = ((cleaned.stdout || "") + (cleaned.stderr || "")).trim().replace(/\r?\n/g, " | ");
     console.log("[e2e] 围栏回收（退出码 " + cleaned.status + "）：" + say);
