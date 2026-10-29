@@ -142,8 +142,6 @@ impl Conductor {
         if matches!(self.sessions.get(sid), Some(Session::Collab(_))) {
             return Ok(Prepared::NotSingle);
         }
-        // 思考强度按**工作根**解析（子会话共享）；模型没登记该档会在这里如实报错。
-        let llm = self.llm_opts_for(sid, want_stream)?;
         let mut prefix: Vec<SessionEvent> = Vec::new();
         if let Some(n) = self.refresh_tool_mode(sid)? {
             prefix.push(SessionEvent::Notice(n));
@@ -156,6 +154,8 @@ impl Conductor {
                 return Ok(Prepared::Immediate(prefix));
             }
         }
+        // 思考强度按**工作根**解析（子会话共享）；模型没登记该档会在这里如实报错。
+        let llm = self.llm_opts_for(sid, want_stream)?;
         // 身份块**现渲染**（形态刚在上一步对齐过，所以这里读到的就是本回合的形态）。
         let identity = match self.sessions.get(sid) {
             Some(Session::Single(s)) => s.params().identity(&*self.prompt, s.tool_mode()),
