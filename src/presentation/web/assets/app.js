@@ -2039,11 +2039,11 @@ function thinkingTagsEditor(levels) {
   addRow.className = 'wf-inline';
   const input = textInput('新档位（如 xhigh）');
   input.className = 'field-input tag-input';
-  const add = btn('添加档位', 'mod-add');
+  const add = btn('+ 添加档位', 'mod-add');
   const hint = cfgHint('标签就是档位 id；模型登记按它映射。只能用字母 / 数字 / _ / -。');
   const err = cfgHint('', 'err');
   addRow.appendChild(input); addRow.appendChild(add);
-  node.appendChild(chips); node.appendChild(addRow); node.appendChild(hint); node.appendChild(err);
+  node.appendChild(chips); node.appendChild(hint); node.appendChild(err);
 
   const ids = [];
   const labels = new Map();
@@ -2063,6 +2063,7 @@ function thinkingTagsEditor(levels) {
       empty.className = 'mod-chips-empty';
       empty.textContent = '（还没有档位：至少加一个）';
       chips.appendChild(empty);
+      chips.appendChild(addRow);
       return;
     }
     for (const id of ids) {
@@ -2084,6 +2085,7 @@ function thinkingTagsEditor(levels) {
       chip.appendChild(label); chip.appendChild(x);
       chips.appendChild(chip);
     }
+    chips.appendChild(addRow);
   }
   function addLevel() {
     const raw = String(input.value || '').trim();

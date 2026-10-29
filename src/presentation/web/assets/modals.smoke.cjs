@@ -233,7 +233,7 @@ if (!loadErrors.length) {
     const text = nodes.map((n) => String(n.textContent || "")).join(" ");
     const labels = nodes.filter((n) => String(n.className) === "mod-chip-label").map((n) => String(n.textContent));
     const input = nodes.find((n) => n.tagName === "INPUT" && String(n.placeholder).indexOf("新档位") >= 0);
-    const add = nodes.find((n) => n.tagName === "BUTTON" && n.textContent === "添加档位");
+    const add = nodes.find((n) => n.tagName === "BUTTON" && n.textContent === "+ 添加档位");
     return text.indexOf("思考等级") >= 0 && ["off", "low", "high", "max"].every((id) => labels.indexOf(id) >= 0) && !!input && !!add;
   });
   // ②之三 标签录入：空值 / 重复当场拒绝，新档位可加可删。
@@ -242,7 +242,7 @@ if (!loadErrors.length) {
     const page = openPage("generate");
     const find = (pred) => walk(page, []).find(pred);
     const input = find((n) => n.tagName === "INPUT" && String(n.placeholder).indexOf("新档位") >= 0);
-    const add = find((n) => n.tagName === "BUTTON" && n.textContent === "添加档位");
+    const add = find((n) => n.tagName === "BUTTON" && n.textContent === "+ 添加档位");
     if (!input || !add) return false;
     const labels = () => walk(page, []).filter((n) => String(n.className) === "mod-chip-label").map((n) => String(n.textContent));
     input.value = "  "; add.onclick();
@@ -275,7 +275,7 @@ if (!loadErrors.length) {
       const page = openPage("generate");
       const find = (pred) => walk(page, []).find(pred);
       const input = find((n) => n.tagName === "INPUT" && String(n.placeholder).indexOf("新档位") >= 0);
-      const add = find((n) => n.tagName === "BUTTON" && n.textContent === "添加档位");
+      const add = find((n) => n.tagName === "BUTTON" && n.textContent === "+ 添加档位");
       const save = walk(hubBody(), []).find((n) => n.tagName === "BUTTON" && n.textContent === "保存");
       if (!input || !add || !save) return false;
       input.value = "xhigh"; add.onclick();

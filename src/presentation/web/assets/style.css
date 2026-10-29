@@ -630,7 +630,7 @@ body {
 
 /* ---- 思考等级标签 + 模型档位映射行 ---- */
 .tag-editor { display: flex; flex-direction: column; gap: 6px; }
-.tag-editor .wf-inline { align-items: center; }
+.tag-editor .wf-inline { flex: 1 1 220px; min-width: 180px; align-items: center; }
 .tag-editor .tag-input { flex: 1 1 200px; min-width: 120px; }
 .tag-editor .mod-add { padding: 8px 12px; }
 .think-rows { display: flex; flex-direction: column; gap: 6px; }
