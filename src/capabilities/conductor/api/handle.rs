@@ -340,19 +340,19 @@ impl ConductorHandle {
         self.ensure_built(&ids, tier, guest.as_deref())?;
         let prepared = self.call(move |core| core.prepare_activation(&sid))?;
         let prepared = match prepared {
-            crate::capabilities::conductor::service::PreparedActivation::Ready {
-                sid,
-                boot,
-                lease,
-            } => {
+            crate::capabilities::conductor::service::PreparedActivation::Ready(ready) => {
+                let crate::capabilities::conductor::service::ReadyActivation { sid, boot, lease } =
+                    *ready;
                 if let Some(boot) = boot {
                     self.run_guest_boot(boot)?;
                 }
-                crate::capabilities::conductor::service::PreparedActivation::Ready {
-                    sid,
-                    boot: None,
-                    lease,
-                }
+                crate::capabilities::conductor::service::PreparedActivation::Ready(Box::new(
+                    crate::capabilities::conductor::service::ReadyActivation {
+                        sid,
+                        boot: None,
+                        lease,
+                    },
+                ))
             }
             other => other,
         };
@@ -573,10 +573,16 @@ impl ConductorHandle {
             let name = child.clone();
             move |core| core.take_single(&name)
         })?;
+        // 思考强度是**工作根**的会话级事实：成员回合也按它解析（成员模型各自映射）。
+        let thinking = self.call({
+            let name = child.clone();
+            move |core| core.thinking_fragment_for(&name)
+        })?;
         // 这一回合的调用参数（流式 + 预算）：与单 agent 共用同一份全局设置。
         let llm = crate::capabilities::llm::api::LlmOpts {
             stream: req.opts.stream,
             timeout_secs: req.opts.timeout_secs,
+            thinking: thinking.clone(),
         };
         let cancel = std::sync::Arc::clone(&req.cancel);
         let systools = req.systools.clone();
@@ -602,6 +608,7 @@ impl ConductorHandle {
             .name("solomni-member".to_string())
             .spawn(move || {
                 let mut s = session;
+                s.set_thinking(thinking);
                 // **短暂事件**（流式增量）：按子会话的 sid 外送——打开它的会话就能看到它逐字在说。
                 let mut emit = {
                     let bus = Arc::clone(&bus);

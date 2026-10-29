@@ -127,6 +127,7 @@ pub(crate) fn mode_vocabulary_is_single_or_collab_only() {
         parent: None,
         node: None,
         delegation: None,
+        thinking: None,
         run: RunState::Active,
     })
     .unwrap();

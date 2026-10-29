@@ -71,14 +71,27 @@ pub struct ToolDecl {
     pub parameters: serde_json::Value,
 }
 
+/// 目的：思考片段不得覆盖的请求协议字段（登记处与适配器都在合并前挡一次）。
+pub const REQUEST_RESERVED_KEYS: [&str; 6] = [
+    "model",
+    "messages",
+    "stream",
+    "stream_options",
+    "tools",
+    "tool_choice",
+];
+
 /// 一次模型调用的通道参数：**策略在 conductor 定**（都来自全局设置），机制在适配器。
 /// 一个值一路传下去，而不是把 stream / 预算分别塞进各个函数的参数表——两处各传一份迟早会漏。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LlmOpts {
     /// 要不要流式（全局设置 `streaming`）：讨论、执行、验收、单 agent 全用它。
     pub stream: bool,
     /// 单次调用总预算（全局设置 `llm_timeout_secs`）。
     pub timeout_secs: u64,
+    /// 目的：本轮请求要并入的思考参数片段（None = 不发）；由登记处按"模型 + 会话档位"解析。
+    /// 约束：片段不得覆盖协议字段（见 REQUEST_RESERVED_KEYS）。
+    pub thinking: Option<std::sync::Arc<serde_json::Value>>,
 }
 
 impl Default for LlmOpts {
@@ -86,6 +99,7 @@ impl Default for LlmOpts {
         LlmOpts {
             stream: false,
             timeout_secs: DEFAULT_LLM_TIMEOUT_SECS,
+            thinking: None,
         }
     }
 }
@@ -102,6 +116,8 @@ pub struct CompleteOpts<'a> {
     pub timeout_secs: u64,
     /// 目的：用户「停止」的取消位；适配器等待数据块时轮询它，置位即关闭请求。
     pub cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// 目的：本轮要合并进请求体的思考参数片段（None = 不发）。
+    pub thinking: Option<std::sync::Arc<serde_json::Value>>,
 }
 
 impl<'a> CompleteOpts<'a> {
@@ -112,7 +128,17 @@ impl<'a> CompleteOpts<'a> {
             tools: None,
             timeout_secs: DEFAULT_LLM_TIMEOUT_SECS,
             cancel: None,
+            thinking: None,
         }
+    }
+
+    /// 目的：接上本轮解析好的思考参数片段（登记处给；适配器只负责合并）。
+    pub fn with_thinking(
+        mut self,
+        thinking: Option<std::sync::Arc<serde_json::Value>>,
+    ) -> CompleteOpts<'a> {
+        self.thinking = thinking;
+        self
     }
 
     /// 带上本次预算（核心按设置给；设置是全局的，见 `AppSettings::llm_timeout_secs`）。

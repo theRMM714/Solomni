@@ -509,7 +509,7 @@ pub(crate) fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
         .provider_upsert("p", "http://x", "k")
         .expect("登记供应商");
     core.registry_mut()
-        .model_upsert("m", "M", "api-m", "p", "", 0)
+        .model_upsert(model_draft("m", "M", "api-m", "p", "", 0))
         .expect("登记模型");
     let sid = core
         .create_work(WorkSpec {

@@ -9,6 +9,6 @@
 | `src/capabilities/registry/api.rs` | 入站能力面：登记处 DTO 的重导出、`Registry` 能力面与呈现层的队列面 `RegistryOps`（内部线程 + 命令队列） |
 | `src/capabilities/registry/service.rs` | 登记处的状态与用例：持四份 yaml 的内存形态（`Settings`），改完即经 `SettingsStore` 落盘 |
 | `src/capabilities/registry/ports.rs` | 出站端口：四份 yaml 的持久化 `SettingsStore`（load / save） |
-| `src/capabilities/registry/domain/providers.rs` | 供应商与模型的内存形态与通道解析：`Provider`（端点 + 密钥）、`ModelEntry`（模型串 / 上下文 / 工具形态）与 `Settings` / `AppSettings`；`settings.yaml` 的全局 `SandboxSettings`（硬约束 + 会话默认权限）也在这一份 |
+| `src/capabilities/registry/domain/providers.rs` | 供应商与模型的内存形态与通道解析：`Provider`（端点 + 密钥）、`ModelEntry`（模型串 / 上下文 / 工具形态 / 思考强度映射）与 `Settings` / `AppSettings`；`settings.yaml` 的全局 `SandboxSettings`（硬约束 + 会话默认权限）与 `ThinkingCatalog`（思考等级目录）也在这一份 |
 | `src/capabilities/registry/domain/agents.rs` | agent 登记处的内存形态与纯逻辑：具名 agent（模块 + 模型 + 说明 + 人设）的校验、唯一实例名、名单渲染与挑选 |
 | `src/capabilities/registry/detail/yaml_settings.rs` | `SettingsStore` 的磁盘实现：providers / models / settings / agents 四份 yaml 的读写（密钥只落 `providers.yaml`，unix 下 0600） |

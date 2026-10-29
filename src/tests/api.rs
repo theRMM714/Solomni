@@ -2,7 +2,7 @@
 //! 这一层不碰 HTTP；HTTP 侧（路由目录与逐路由契约）另见本目录的 routes。
 
 use super::builders::shown_contains;
-use super::doubles::{collab_work, decl, module_of, module_with_runtimes};
+use super::doubles::{collab_work, decl, model_draft, module_of, module_with_runtimes};
 use super::{gated_ops, ops_with, single_work, slow_ops};
 use crate::capabilities::conductor::api::{
     Acted, ActionCall, AgentInstance, Caller, ConfigAgent, SessionEdit, SessionEvent, WorkMode,
@@ -1728,5 +1728,80 @@ fn set_permission_profile_action_switches_the_session_profile() {
             })
             .is_err(),
         "未知档位如实拒绝"
+    );
+}
+
+/// 目的：思考强度是**工作根**的会话级事实：状态栏切档走独立动作；模型没登记该档时拒绝并列出原因。
+#[test]
+fn set_thinking_action_switches_the_work_level_and_rejects_unmapped_levels() {
+    use crate::capabilities::registry::api::ThinkingSpec;
+    use std::collections::BTreeMap;
+    let handle = spawn(vec![module_of("a")], Vec::new());
+    let ops = Ops::from_handle(&handle);
+    ops.registry
+        .upsert_model(crate::capabilities::registry::api::ModelDraft {
+            thinking: ThinkingSpec {
+                default: None,
+                levels: BTreeMap::from([
+                    ("low".to_string(), serde_json::json!("low")),
+                    ("high".to_string(), serde_json::json!("high")),
+                ]),
+            },
+            ..model_draft("m", "M", "m", "p", "", 32_000)
+        })
+        .unwrap();
+    let (opened, _) = ops
+        .sessions
+        .create_work(single_work("w-thinking", &["a"]))
+        .expect("建会话");
+    let sid = opened.sid;
+    ops.actions
+        .act(ActionCall {
+            id: "set_thinking".to_string(),
+            args: serde_json::json!({ "session_id": sid, "level": "high" }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .expect("切思考档");
+    let cfg = ops.sessions.config(&sid).expect("读配置");
+    assert_eq!(cfg.thinking.level.as_deref(), Some("high"));
+    assert!(
+        cfg.thinking
+            .options
+            .iter()
+            .any(|o| o.id == "high" && o.enabled),
+        "已登记的档要标成可用"
+    );
+    assert!(
+        cfg.thinking
+            .options
+            .iter()
+            .any(|o| o.id == "max" && !o.enabled),
+        "没登记的档要标成不可用并给出原因"
+    );
+    // 没登记的档：拒绝并列出缺映射的模型（不静默降级）
+    let err = ops
+        .actions
+        .act(ActionCall {
+            id: "set_thinking".to_string(),
+            args: serde_json::json!({ "session_id": sid, "level": "max" }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .unwrap_err();
+    assert!(err.contains("模型 m") || err.contains("m"), "{}", err);
+    // 空串 = 随模型默认
+    ops.actions
+        .act(ActionCall {
+            id: "set_thinking".to_string(),
+            args: serde_json::json!({ "session_id": sid, "level": "" }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .unwrap();
+    assert_eq!(
+        ops.sessions.config(&sid).unwrap().thinking.level.as_deref(),
+        None,
+        "空串回到随模型默认"
     );
 }

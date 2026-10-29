@@ -244,6 +244,7 @@ pub fn converse_with(
                 },
                 timeout_secs: llm.timeout_secs,
                 cancel: None,
+                thinking: llm.thinking.clone(),
             }
             .with_cancel(std::sync::Arc::clone(&cancel));
             chat.complete(&msgs, opts, &mut sink)

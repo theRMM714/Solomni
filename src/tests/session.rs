@@ -1435,6 +1435,7 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_defaults_to_host() {
         parent: None,
         node: None,
         delegation: None,
+        thinking: None,
         run: RunState::Active,
     };
     let text = yaml_serde::to_string(&meta).expect("序列化");
@@ -1448,6 +1449,7 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_defaults_to_host() {
     assert_eq!(back.run, RunState::Active, "缺省运行态 = 正常运行");
     // 运行态是**持久事实**：停止 / 关闭写进 meta 后重启照样成立。
     let stopped = SessionMeta {
+        thinking: None,
         run: RunState::Stopped,
         ..meta.clone()
     };
@@ -1562,7 +1564,7 @@ pub(crate) fn history_list_is_ordered_as_a_tree() {
 /// 目的：核心重启后启用一条 VM 历史会话——必须真的准备并拉起共享 guest，且不跑模型。
 #[test]
 pub(crate) fn activating_a_vm_history_session_boots_the_shared_guest() {
-    use crate::capabilities::conductor::service::PreparedActivation;
+    use crate::capabilities::conductor::service::{PreparedActivation, ReadyActivation};
     let hist = Arc::new(InMemoryHistory::new());
     seed_session(
         &hist,
@@ -1582,18 +1584,21 @@ pub(crate) fn activating_a_vm_history_session_boots_the_shared_guest() {
     );
     let prepared = core.prepare_activation("w").expect("准备启用");
     let (sid, boot, lease) = match prepared {
-        PreparedActivation::Ready { sid, boot, lease } => (sid, boot, lease),
+        PreparedActivation::Ready(ready) => {
+            let ReadyActivation { sid, boot, lease } = *ready;
+            (sid, boot, lease)
+        }
         PreparedActivation::Running(_) => panic!("历史会话不该被当成正在生成"),
     };
     assert_eq!(lease.as_deref(), Some("w"), "共享 guest 租约 = 顶层工作名");
     let boot = boot.expect("VM 历史会话要准备 guest 启动");
     boot.run().expect("guest 起来");
     let view = core
-        .commit_activation(PreparedActivation::Ready {
+        .commit_activation(PreparedActivation::Ready(Box::new(ReadyActivation {
             sid,
             boot: None,
             lease,
-        })
+        })))
         .expect("提交启用");
     assert!(core.session_exists("w"), "启用后会话要进核心表");
     assert_eq!(view.sid, "w");
@@ -1624,6 +1629,7 @@ pub(crate) fn child_sessions_share_the_main_guest_and_follow_its_tier() {
         parent: Some("w".to_string()),
         node: None,
         delegation: None,
+        thinking: None,
         run: RunState::Active,
     };
     hist.create(&child).expect("子会话落盘");
@@ -1687,6 +1693,7 @@ pub(crate) fn proxy_children_share_the_proxy_tree_guest() {
         parent: Some("p".to_string()),
         node: None,
         delegation: None,
+        thinking: None,
         run: RunState::Active,
     };
     hist.create(&child).expect("子工作落盘");
@@ -1737,6 +1744,7 @@ pub(crate) fn child_edit_writes_back_to_the_agent_roster() {
         parent: Some("w".to_string()),
         node: None,
         delegation: None,
+        thinking: None,
         run: RunState::Active,
     };
     hist.create(&child).expect("子会话落盘");
@@ -1799,6 +1807,7 @@ pub(crate) fn tree_wide_module_overlap_is_allowed_on_child_edit() {
         parent: Some("w".to_string()),
         node: None,
         delegation: None,
+        thinking: None,
         run: RunState::Active,
     };
     hist.create(&child).expect("子会话落盘");

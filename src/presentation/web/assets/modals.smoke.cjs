@@ -147,7 +147,9 @@ if (!loadErrors.length) {
     vm.runInNewContext("openModelsModal()", sandbox);
     const body = roots.get("#modal-root").children[0].children[0].children[1];
     const nums = inputsIn(body).filter((i) => i.type === "number");
-    return nums.length >= 1;
+    const text = walk(body, []).map((n) => String(n.textContent || "")).join(" ");
+    return nums.length >= 1 && text.indexOf("思考默认档") >= 0 &&
+      text.indexOf("思考档位映射") >= 0 && text.indexOf("按 reasoning_effort 预设填入") >= 0;
   });
   // ② 设置中心：分页后生成页只有三项数字（超时 / 提醒 / 压缩），同时上台数在资源页。
   check("设置中心：生成页含超时、提醒、压缩", () => {
@@ -155,6 +157,15 @@ if (!loadErrors.length) {
     const page = openPage("generate");
     const nums = inputsIn(page).filter((i) => i.type === "number");
     return nums.length >= 3;
+  });
+  // ②之二 思考等级目录在生成页：默认四档可编辑（后端 settings.thinking 是权威）。
+  check("设置中心：生成页含思考等级目录", () => {
+    vm.runInNewContext("openSettingsModal()", sandbox);
+    const page = openPage("generate");
+    const nodes = walk(page, []);
+    const text = nodes.map((n) => String(n.textContent || "")).join(" ");
+    const ta = nodes.find((n) => n.tagName === "TEXTAREA" && /off=/.test(n.value || ""));
+    return text.indexOf("思考等级") >= 0 && !!ta && /low=/.test(ta.value);
   });
   // ⑥ 同时上台数要随保存一起提交（后端 set_settings 收这个字段）；"现在在跑什么"同页。
   check("设置中心：资源页含同时上台数与进程区块", () => {

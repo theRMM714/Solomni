@@ -55,6 +55,7 @@ fn request_body(
     stream: bool,
     messages: serde_json::Value,
     tools: Option<&[ToolDecl]>,
+    thinking: Option<&serde_json::Value>,
 ) -> serde_json::Value {
     let mut body = serde_json::json!({ "model": model, "stream": stream, "messages": messages });
     // 流式请求也要 usage（状态栏与自动压缩要有精确数字）；不支持的供应商由 complete 回退掉。
@@ -67,6 +68,15 @@ fn request_body(
         if !tools.is_empty() {
             body["tools"] = serde_json::Value::Array(tools.iter().map(decl_json).collect());
             body["tool_choice"] = serde_json::json!("auto");
+        }
+    }
+    // 思考强度：登记处解析好的片段按模型映射原样合并；保留键在登记处已经拒收，这里再挡一次
+    //（覆盖 model / messages / stream / tools 会直接把这次请求弄坏）。
+    if let Some(extra) = thinking.and_then(|v| v.as_object()) {
+        for (k, v) in extra {
+            if !crate::capabilities::llm::api::REQUEST_RESERVED_KEYS.contains(&k.as_str()) {
+                body[k] = v.clone();
+            }
         }
     }
     body
@@ -122,7 +132,7 @@ pub(crate) fn attempt_raw(
     messages: serde_json::Value,
     tools: Option<&[ToolDecl]>,
 ) -> Attempt<Completion> {
-    let body = request_body(model, false, messages, tools).to_string();
+    let body = request_body(model, false, messages, tools, None).to_string();
     // 探针是一次性诊断，用默认预算（它不参与真实会话的设置）。
     attempt_with_cancel(
         url,
@@ -226,6 +236,7 @@ impl Chat for HttpChat {
             opts.stream,
             serde_json::Value::Array(wire),
             opts.tools,
+            opts.thinking.as_deref(),
         );
         let body = body_value.to_string();
         let mut outcome = self.exchange(&body, &opts, on);

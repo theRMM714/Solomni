@@ -26,7 +26,8 @@ pub fn compact_turn(
         &s.dialogue,
         &[Msg::user(prompt.to_string())],
     );
-    let mut opts = crate::capabilities::llm::api::CompleteOpts::plain(false);
+    let mut opts =
+        crate::capabilities::llm::api::CompleteOpts::plain(false).with_thinking(s.thinking());
     if let Some(d) = decl {
         opts.tools = Some(std::slice::from_ref(d));
     }
@@ -334,7 +335,7 @@ fn run(
     sink: &mut dyn FnMut(SessionEvent),
 ) -> Vec<Round> {
     let label = s.id.clone();
-    let llm = live.llm;
+    let llm = live.llm.clone();
     let cancel = std::sync::Arc::clone(&live.cancel);
     // 本回合的工具面（角色表发放）：**按回合换**——同一个会话会用两种身份干活（说话 / 干活）。
     // 装进这一回合的环境（声明与执行都读它），跑完还原。

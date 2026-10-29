@@ -742,6 +742,8 @@ pub struct SessionConfig {
     pub net: bool,
     /// 目的：当前生效的会话权限（档位 / reach / decision / 共享区范围）。
     pub permission: PermissionView,
+    /// 目的：思考强度（工作根会话级）：当前档 + 可选档与不可用原因。
+    pub thinking: ThinkingView,
     pub pins: BTreeMap<String, String>,
     /// 目的：本机能不能承载**当前档位**（虚拟机档的前置条件）：界面据此决定虚拟机档能不能选。
     pub tier_ready: bool,
@@ -802,6 +804,8 @@ pub struct SessionView {
     pub permission_profile: String,
     /// 目的：生效权限档位标签。
     pub permission_label: String,
+    /// 目的：思考强度（工作根会话级）：状态栏 chip 的文字与菜单都用它。
+    pub thinking: ThinkingView,
     /// 目的：这条会话是不是带收窄层（子会话）。
     pub permission_narrowed: bool,
     /// 目的：子会话的父档位（根为空）；权限快速切换据此禁用更高档。
@@ -831,6 +835,32 @@ pub struct SessionView {
     /// 目的：最近一次 shell 的运行状态（状态栏卡片）；没跑过 shell 就没有这个字段。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shell: Option<crate::capabilities::session::api::ShellLive>,
+}
+
+/// 目的：思考强度视图：当前选择 + 可选档 + 不可用原因（状态栏与配置页共用一份事实）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ThinkingView {
+    /// 目的：当前选择（None = 随模型默认）。
+    pub level: Option<String>,
+    /// 目的：给人看的当前档（"随模型默认" / 档位标签）。
+    pub label: String,
+    /// 目的：可选档（按全局目录顺序；不可用的带原因）。
+    pub options: Vec<ThinkingOptionView>,
+    /// 目的：现在这组模型/目录有什么要注意的（空 = 正常）。
+    pub note: String,
+}
+
+/// 目的：一个可选思考档：可用性只由"这组模型都登记了它"决定。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ThinkingOptionView {
+    /// 目的：档位 id。
+    pub id: String,
+    /// 目的：给人看的档位名。
+    pub label: String,
+    /// 目的：这组模型是否都登记了这一档。
+    pub enabled: bool,
+    /// 目的：不可用时的原因（可用为空）。
+    pub reason: String,
 }
 
 /// 目的：会话文件清单视图（前端 @ 菜单与「长路径缩写」用）：相对清单 + 真实根。

@@ -6,7 +6,7 @@ use crate::capabilities::builds::api::Builds;
 use crate::capabilities::conductor::api::{
     AgentInstance, AgentSuggestion, ConfigAgent, ContinueView, FilesAgentRootView, FilesAgentView,
     FilesRootsView, FilesView, RewindTarget, RuntimeReport, SessionConfig, SessionEdit,
-    SessionView, TierChoices, WorkMode, WorkOpened, WorkSpec,
+    SessionView, ThinkingOptionView, ThinkingView, TierChoices, WorkMode, WorkOpened, WorkSpec,
 };
 use crate::capabilities::llm::api::Llm;
 use crate::capabilities::packages::api::Packages;
@@ -203,16 +203,22 @@ pub(crate) enum Prepared {
 }
 
 /// 目的：一次"启用会话"的两段——核心只判断与准备（可选的一段 guest 启动），慢的那一段在调用方线程上跑。
+/// 约束：两个变体都装箱——SessionView / GuestBoot 都比指针大得多，装箱让两个分支体量一致。
 pub(crate) enum PreparedActivation {
     /// 会话正在生成：附着即可，不重建、不重启 guest。
-    Running(SessionView),
+    Running(Box<SessionView>),
     /// 可以启用：可选 guest 启动；提交时重建会话并解冻整棵子树。
-    Ready {
-        sid: String,
-        boot: Option<crate::capabilities::conductor::service::guest_job::GuestBoot>,
-        /// 本次启动要占的租约（提交失败时据此收掉刚拉起的 guest）。
-        lease: Option<String>,
-    },
+    Ready(Box<ReadyActivation>),
+}
+
+/// 目的：可启用会话的准备结果（装箱后仍要能逐个取字段）。
+pub(crate) struct ReadyActivation {
+    /// 目的：要启用的会话 id。
+    pub(crate) sid: String,
+    /// 目的：这一趟要跑的 guest 启动（没有 = 本机档）。
+    pub(crate) boot: Option<crate::capabilities::conductor::service::guest_job::GuestBoot>,
+    /// 目的：本次启动要占的租约（提交失败时据此收掉刚拉起的 guest）。
+    pub(crate) lease: Option<String>,
 }
 
 /// **应用服务**：持有注入的端口、能力面与会话中心；前端拿不到它（只拿 `conductor::api::Ops`）。

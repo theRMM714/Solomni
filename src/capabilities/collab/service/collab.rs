@@ -39,6 +39,8 @@ impl CollabSession {
         crate::capabilities::llm::api::LlmOpts {
             stream: self.settings.app.streaming,
             timeout_secs: self.settings.app.llm_timeout_secs,
+            // 核心内部编排不跟会话思考档（只作用于对话生成，见 set_thinking 的说明）。
+            thinking: None,
         }
     }
 }

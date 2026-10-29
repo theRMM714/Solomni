@@ -50,6 +50,13 @@ models:
     provider: <供应商 id>        # 必填，必须已存在
     note: ""                    # 能力说明（可选）
     tools: envelope             # 工具调用形态（可选；缺省 envelope）。只认这两个值，别的一律拒收
+    thinking:                   # 思考强度（可选；缺省 = 这个模型不发思考参数）
+      default: low              # 默认档（可选；必须是 levels 里的一个）
+      levels:                   # 档位 → 请求体片段；键必须在 settings.yaml 的 thinking.levels 里
+        off:  { thinking: { type: disabled } }   # 对象 = 原样合并进请求体
+        low:  low                                # 字符串 = {"reasoning_effort": 值} 简写
+        high: high
+        max:  max
 core: <模型 id>                 # 核心默认模型（可选）
 ```
 
@@ -74,6 +81,11 @@ core: <模型 id>                 # 核心默认模型（可选）
   **两种形态互斥**：一个通道走 native 就只认原生调用，正文里的信封不会被当工具执行
   （否则模型在正文里讲解参数就会被误当成调用），但会如实记一条失败的工具行。
   声明 native 而通道实际不支持时**如实报错**，不静默降级成信封（那会让模型在不知道信封格式的情况下空转）。
+- `thinking` 是**出站请求的思考强度映射**：
+  - 字符串值 = `{"reasoning_effort": 值}` 简写；对象值 = 原样合并；**空对象 = 这一档不发任何字段**；
+  - 片段不得覆盖协议字段（`model` / `messages` / `stream` / `stream_options` / `tools` / `tool_choice`），保存时拒收；
+  - 解析优先级：**会话选的档 > 模型 `default`**；两者都没有 = 不发。会话档在模型里没登记 = 下一次生成如实报错（不静默降级）；
+  - 默认四档 `off / low / high / max` 只是目录缺省；每家供应商的取值不同（DeepSeek 用 `reasoning_effort: none` 关，GLM 用 `thinking.type=disabled`），所以映射放在模型上而不是代码里。
 - 删除模型时若它是核心默认模型 = 拒绝（先改默认再删）。
 - `core` 未设定或解析失败 = 建会话 / 核心操作如实拒绝并指明缺什么（不回落假模型）。
 - 「模型 → 供应商」的绑定只对本产品可见；会话只记模型 id 引用。
@@ -101,6 +113,12 @@ agents:
 ```yaml
 streaming: true        # 流式传输：向供应商请求逐片返回（默认 true）
 show_reasoning: true   # 思维链显示（默认 true；界面上永远默认折叠、点击才展开）
+thinking:              # 思考强度目录（全局）：顺序即界面顺序；模型映射只能引用这里的档位
+  levels:
+    - { id: off,  label: 关闭 }
+    - { id: low,  label: 低 }
+    - { id: high, label: 高 }
+    - { id: max,  label: 最高 }
 tier: host             # 默认执行档位：host（本机）| vm（虚拟机）（默认 host）
 sandbox:               # 全局沙箱策略：会话不可填；保存后整体重启
   policy:
@@ -131,6 +149,10 @@ compact_at_percent: 70 # 上下文用到模型窗口的百分之多少就自动�
 discuss_remind_cap: 3  # 讨论里一轮内对同一个成员最多提醒几次（提醒 = "你还没用动词表态"）
 ```
 
+- `thinking.levels` 是**全局思考等级目录**：默认四档，用户可追加（例如 `xhigh`）；id 只能用字母 / 数字 / `_` / `-`，重复或空值拒绝。
+  删掉仍被模型 `thinking.levels` 引用的档位 = 拒绝并列出模型；模型默认档不在新目录里 = 同样拒绝。
+  会话里切档是**会话级事实**（写在 `session/<工作>/meta.yaml` 的 `thinking`，工作根持有、子会话共享），
+  见 [docs/session/session-model.md](docs/session/session-model.md)。
 - `sandbox.policy` 是**全局硬约束**：会话、子会话、agent 都不能覆盖；改它要保存后整体重启，
   让所有 guest / 常驻服务 / 工具进程按新策略重建。配置写错（拼错键、未知键、相对的主机只读根、非法路径）启动即报 `settings.yaml 配置非法`。
 - sandbox.defaults 是会话权限的全局默认；会话级权限层写在 meta.yaml 的 sandbox.ceiling / sandbox.narrowing

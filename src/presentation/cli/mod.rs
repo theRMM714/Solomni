@@ -1303,7 +1303,16 @@ fn model_flow(ops: &Ops, arg: &str) {
                 return;
             }
             let note = w.get(4).copied().unwrap_or("");
-            match ops.registry.upsert_model(w[0], w[1], w[2], w[3], note, 0) {
+            let draft = crate::capabilities::registry::api::ModelDraft {
+                id: w[0].to_string(),
+                name: w[1].to_string(),
+                api_model: w[2].to_string(),
+                provider: w[3].to_string(),
+                note: note.to_string(),
+                context: 0,
+                thinking: Default::default(),
+            };
+            match ops.registry.upsert_model(draft) {
                 Ok(()) => println!("[登记] 模型 {}", w[0]),
                 Err(e) => println!("[错误] {}", e),
             }

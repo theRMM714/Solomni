@@ -720,6 +720,7 @@ tools:
       provider: { type: string, required: true, non_empty: true, desc: 所属供应商 id }
       note: { type: string, desc: 能力说明（给人看） }
       context: { type: integer, min: 0, desc: 上下文窗口（token，估算用）；省略 = 0（未知） }
+      thinking: { type: object, desc: "思考强度：default = 档位 id 或空；levels = 档位 id → 字符串（reasoning_effort 简写）或 JSON 对象；省略 = 保留原值；levels 为空 = 该模型不发思考参数" }
   remove_model:
     capability: none
     callers: [user]
@@ -732,6 +733,13 @@ tools:
     desc: 把某个模型设为核心默认（未指定模型的 agent 回落它）。
     params:
       id: { type: string, required: true, non_empty: true, desc: 模型 id }
+  set_thinking:
+    capability: none
+    callers: [user]
+    desc: 切换这条工作（会话级）的思考强度；写在工作根会话的 meta 上，子会话共享。只作用于对话生成（单 agent / 代理 / 协作成员回合），核心内部编排保持供应商默认。模型没登记该档时拒绝并列出模型。
+    params:
+      session_id: { type: string, required: true, non_empty: true, desc: 会话 id（子会话也可以，作用在工作根上） }
+      level: { type: string, desc: 思考档位 id；空串 = 随模型默认 }
   probe_model_tools:
     capability: none
     callers: [user]
@@ -767,6 +775,7 @@ tools:
     params:
       streaming: { type: boolean, desc: 流式传输 }
       show_reasoning: { type: boolean, desc: 思维链显示 }
+      thinking: { type: object, desc: "思考等级目录（整段替换）：levels 数组，每项 { id, label }；默认 off/low/high/max" }
       llm_timeout_secs: { type: integer, min: 1, desc: 单次模型调用的超时（秒） }
       compact_at_percent: { type: integer, min: 0, max: 100, desc: 上下文用到百分之多少就压缩 }
       discuss_remind_cap: { type: integer, min: 0, desc: 一轮内最多提醒几次 }

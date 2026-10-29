@@ -172,6 +172,7 @@ fn meta(name: &str) -> SessionMeta {
         parent: None,
         node: None,
         delegation: None,
+        thinking: None,
         run: crate::capabilities::session::api::RunState::Active,
     }
 }
@@ -206,6 +207,12 @@ impl SessionOps for FakeOps {
             tier_missing: Vec::new(),
             permission_profile: "workspace".to_string(),
             permission_label: "工作区内修改".to_string(),
+            thinking: crate::capabilities::conductor::api::ThinkingView {
+                level: None,
+                label: "随模型默认".to_string(),
+                options: Vec::new(),
+                note: String::new(),
+            },
             permission_narrowed: false,
             permission_parent: None,
             running: false,
@@ -286,6 +293,12 @@ impl SessionOps for FakeOps {
             guest: None,
             guests: Vec::new(),
             net: false,
+            thinking: crate::capabilities::conductor::api::ThinkingView {
+                level: None,
+                label: "随模型默认".to_string(),
+                options: Vec::new(),
+                note: String::new(),
+            },
             permission: crate::capabilities::conductor::api::PermissionView {
                 profile: crate::capabilities::permission::api::ProfileId::Workspace,
                 label: "工作区内修改".to_string(),
@@ -448,6 +461,12 @@ impl SessionOps for FakeOps {
                 tier_missing: Vec::new(),
                 permission_profile: "workspace".to_string(),
                 permission_label: "工作区内修改".to_string(),
+                thinking: crate::capabilities::conductor::api::ThinkingView {
+                    level: None,
+                    label: "随模型默认".to_string(),
+                    options: Vec::new(),
+                    note: String::new(),
+                },
                 permission_narrowed: false,
                 permission_parent: None,
                 running: false,
@@ -501,6 +520,10 @@ impl RegistryOps for FakeOps {
             note: String::new(),
             tools: crate::capabilities::llm::api::ToolMode::Envelope,
             context: 32_000,
+            thinking: crate::capabilities::registry::domain::providers::ModelThinkingView {
+                default: None,
+                levels: Default::default(),
+            },
             is_core: true,
         }])
     }
@@ -510,12 +533,7 @@ impl RegistryOps for FakeOps {
     }
     fn upsert_model(
         &self,
-        _id: &str,
-        _name: &str,
-        _api_model: &str,
-        _provider: &str,
-        _note: &str,
-        _context: u64,
+        _draft: crate::capabilities::registry::api::ModelDraft,
     ) -> Result<(), String> {
         self.guard()
     }

@@ -64,6 +64,7 @@ impl InMemorySettings {
                 note: String::new(),
                 tools: crate::capabilities::llm::api::ToolMode::Envelope,
                 context: 32_000,
+                thinking: Default::default(),
             },
         );
         s.core = Some("m".to_string());
@@ -3481,5 +3482,25 @@ impl crate::kernel::ports::SessionHost for ScriptedHost {
             sent: Arc::clone(&self.sent),
             replies: Mutex::new(replies),
         }))
+    }
+}
+
+/// 目的：测试里登记模型的最小字段（思考强度默认空；要测思考的用例再改字段）。
+pub(crate) fn model_draft(
+    id: &str,
+    name: &str,
+    api_model: &str,
+    provider: &str,
+    note: &str,
+    context: u64,
+) -> crate::capabilities::registry::api::ModelDraft {
+    crate::capabilities::registry::api::ModelDraft {
+        id: id.to_string(),
+        name: name.to_string(),
+        api_model: api_model.to_string(),
+        provider: provider.to_string(),
+        note: note.to_string(),
+        context,
+        thinking: Default::default(),
     }
 }
