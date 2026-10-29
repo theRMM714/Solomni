@@ -677,9 +677,9 @@ impl ConductorHandle {
                 let thinking = match args.get("thinking") {
                     Some(v) => serde_json::from_value(v.clone())
                         .map_err(|e| format!("思考强度非法：{}", e))?,
-                    None => RegistryOps::models(self)
-                        .ok()
-                        .and_then(|ms| ms.into_iter().find(|m| m.id == s("id")))
+                    None => RegistryOps::models(self)?
+                        .into_iter()
+                        .find(|m| m.id == s("id"))
                         .map(|m| crate::capabilities::registry::api::ThinkingSpec {
                             default: m.thinking.default,
                             levels: m.thinking.levels,
