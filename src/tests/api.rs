@@ -1511,6 +1511,21 @@ fn registry_actions_are_user_only_and_go_through_the_dispatcher() {
         .any(|a| a.id.starts_with("upsert_") || a.id == "set_settings"));
 }
 
+/// set_settings 是部分更新；前端会提交 max_guests，动作参数表必须收它（缺了会让任何设置保存都失败）。
+#[test]
+fn set_settings_action_accepts_max_guests() {
+    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
+    ops.actions
+        .act(ActionCall {
+            id: "set_settings".to_string(),
+            args: serde_json::json!({ "max_guests": 5 }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .expect("set_settings 应接受 max_guests");
+    assert_eq!(ops.registry.settings().expect("读设置").max_guests, 5);
+}
+
 /// 建会话动作与改配置都带着人设走：人设是会话快照，不是登记处联动。
 #[test]
 fn create_session_and_config_carry_chara_as_a_snapshot() {

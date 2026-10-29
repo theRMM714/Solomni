@@ -779,4 +779,5 @@ tools:
       llm_timeout_secs: { type: integer, min: 1, desc: 单次模型调用的超时（秒） }
       compact_at_percent: { type: integer, min: 0, max: 100, desc: 上下文用到百分之多少就压缩 }
       discuss_remind_cap: { type: integer, min: 0, desc: 一轮内最多提醒几次 }
+      max_guests: { type: integer, min: 0, desc: 虚拟机档同时最多几台 guest（0 = 不限制） }
       sandbox: { type: object, desc: 全局沙箱策略（整段替换；保存后整体重启） }
