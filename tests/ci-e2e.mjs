@@ -67,7 +67,9 @@ function main() {
       // 报告里先放具体的 FAIL 行，再放最后两行（通常是 E2E-FAILED / 围栏回收）；
       // 否则汇总里只剩"failed=1"，看报告的人还得去翻整份日志。
       const failLine = r.out.split(/\r?\n/).find((l) => l.startsWith("FAIL "));
-      detail = (failLine ? failLine + " / " : "") + r.out.trim().split(/\r?\n/).slice(-2).join(" / ");
+      detail = (r.error ? "超时/起不来：" + r.error + " / " : "") +
+        (failLine ? failLine + " / " : "") +
+        r.out.trim().split(/\r?\n/).slice(-2).join(" / ");
       if (status === "fail") raw = r.out.slice(-800);
     }
   }
