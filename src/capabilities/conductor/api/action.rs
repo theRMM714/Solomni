@@ -408,7 +408,7 @@ impl ConductorHandle {
             module.has_userdata,
         );
         fence.net = self.settings()?.sandbox.policy.network;
-        // 独立调用也是"一次调用"：给唯一 lease，Windows 上才有独立的容器身份（否则并发的人直接调用共用一个 profile）。
+        // 独立调用没有会话：给唯一 lease，跑完按它收尾（Windows 上才有独立的容器身份）。
         fence.lease = crate::kernel::api::call_lease(&fence.agent);
         fence.ro_tree.extend(host_plan.roots.iter().cloned());
         fence.ro_tree.sort();

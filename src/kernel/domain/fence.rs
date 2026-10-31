@@ -7,7 +7,7 @@
 use crate::kernel::api::Ask;
 use serde::{Deserialize, Serialize};
 
-/// 目的：给一次调用生成唯一的围栏租约（Windows 上按次容器身份与 ACL 归属都靠它区分）。
+/// 目的：给**一次性调用**（构建 / 独立模块工具）生成唯一围栏租约；会话内的调用直接用会话 id 当租约。
 /// 约束：同一进程内单调递增 + pid；会话名只作可读前缀，不参与唯一性。
 pub fn call_lease(session: &str) -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
