@@ -63,8 +63,7 @@ fn smb_plan(mounts: &[GuestMount], port: u16) -> SharePlan {
     for (i, m) in mounts.iter().enumerate() {
         let ro = if m.read_only { ",ro" } else { "" };
         // 有界重试：SMB 握手在慢启动 / 嵌套虚拟化下会瞬时报 "server abruptly closed"；一次就判整台起不来
-        // 会把瞬时失败放大成"虚拟机档不可用"。三次都失败必须**非零退出**——不能让循环末尾的子命令
-        // 把失败吞成成功。
+        // 会把瞬时失败放大成"虚拟机档不可用"。三次都失败必须**非零退出**（循环末尾的子命令不许吞掉失败）。
         guest_scripts.push(format!(
             "mkdir -p '{g}' && n=0 && ok=0 && while [ $n -lt 3 ]; do n=$((n+1)); if mount -t cifs //{ip}/s{i} '{g}' -o port={p},guest,soft,nounix,noserverino,uid=0,gid=0,file_mode=0666,dir_mode=0777{ro}; then ok=1; break; fi; sleep 2; done; if [ $ok -ne 1 ]; then printf '共享 %s 挂载失败（已尝试 %s 次）' '{g}' $n; exit 1; fi",
             g = m.guest,
