@@ -1,0 +1,288 @@
+warning[duplicate]: found 2 duplicate entries for crate 'getrandom'
+   ┌─ D:\a\Solomni\Solomni/Cargo.lock:41:1
+   │  
+41 │ ╭ getrandom 0.2.17 registry+https://github.com/rust-lang/crates.io-index
+42 │ │ getrandom 0.4.3 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰─────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ getrandom v0.2.17
+     └── ring v0.17.14
+         ├── rustls v0.23.46
+         │   ├── hyper-rustls v0.27.10
+         │   │   └── reqwest v0.13.5
+         │   │       └── solomni v0.1.0
+         │   ├── reqwest v0.13.5 (*)
+         │   ├── rustls-platform-verifier v0.7.1
+         │   │   ├── reqwest v0.13.5 (*)
+         │   │   └── solomni v0.1.0 (*)
+         │   ├── solomni v0.1.0 (*)
+         │   ├── tokio-rustls v0.26.6
+         │   │   ├── hyper-rustls v0.27.10 (*)
+         │   │   └── reqwest v0.13.5 (*)
+         │   └── ureq v3.4.2
+         │       └── solomni v0.1.0 (*)
+         └── rustls-webpki v0.103.16
+             ├── rustls v0.23.46 (*)
+             └── rustls-platform-verifier v0.7.1 (*)
+   ├ getrandom v0.4.3
+     └── tempfile v3.27.0
+         └── native-tls v0.2.18
+             ├── hyper-tls v0.6.0
+             │   └── reqwest v0.13.5
+             │       └── solomni v0.1.0
+             ├── reqwest v0.13.5 (*)
+             ├── tokio-native-tls v0.3.1
+             │   ├── hyper-tls v0.6.0 (*)
+             │   └── reqwest v0.13.5 (*)
+             └── ureq v3.4.2
+                 └── solomni v0.1.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'syn'
+    ┌─ D:\a\Solomni\Solomni/Cargo.lock:126:1
+    │  
+126 │ ╭ syn 2.0.119 registry+https://github.com/rust-lang/crates.io-index
+127 │ │ syn 3.0.6 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰───────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ syn v2.0.119
+      ├── jni-macros v0.22.4
+      │   └── jni v0.22.4
+      │       └── rustls-platform-verifier v0.7.1
+      │           ├── reqwest v0.13.5
+      │           │   └── solomni v0.1.0
+      │           └── solomni v0.1.0 (*)
+      ├── jni-sys-macros v0.4.1
+      │   └── jni-sys v0.4.1
+      │       └── jni v0.22.4 (*)
+      └── openssl-macros v0.1.1
+          └── openssl v0.10.81
+              └── native-tls v0.2.18
+                  ├── hyper-tls v0.6.0
+                  │   └── reqwest v0.13.5 (*)
+                  ├── reqwest v0.13.5 (*)
+                  ├── tokio-native-tls v0.3.1
+                  │   ├── hyper-tls v0.6.0 (*)
+                  │   └── reqwest v0.13.5 (*)
+                  └── ureq v3.4.2
+                      └── solomni v0.1.0 (*)
+    ├ syn v3.0.6
+      ├── displaydoc v0.2.7
+      │   ├── icu_collections v2.4.0
+      │   │   ├── icu_normalizer v2.4.0
+      │   │   │   └── idna_adapter v1.2.2
+      │   │   │       └── idna v1.1.0
+      │   │   │           └── url v2.5.8
+      │   │   │               ├── reqwest v0.13.5
+      │   │   │               │   └── solomni v0.1.0
+      │   │   │               └── tower-http v0.6.11
+      │   │   │                   └── reqwest v0.13.5 (*)
+      │   │   └── icu_properties v2.4.0
+      │   │       └── idna_adapter v1.2.2 (*)
+      │   ├── icu_locale_core v2.4.0
+      │   │   ├── icu_properties v2.4.0 (*)
+      │   │   └── icu_provider v2.4.0
+      │   │       ├── icu_normalizer v2.4.0 (*)
+      │   │       └── icu_properties v2.4.0 (*)
+      │   ├── icu_properties v2.4.0 (*)
+      │   ├── icu_provider v2.4.0 (*)
+      │   ├── tinystr v0.8.5
+      │   │   └── icu_locale_core v2.4.0 (*)
+      │   └── zerotrie v0.2.5
+      │       ├── icu_properties v2.4.0 (*)
+      │       └── icu_provider v2.4.0 (*)
+      ├── futures-macro v0.3.34
+      │   └── futures-util v0.3.34
+      │       ├── hyper-util v0.1.21
+      │       │   ├── hyper-rustls v0.27.10
+      │       │   │   └── reqwest v0.13.5 (*)
+      │       │   ├── hyper-tls v0.6.0
+      │       │   │   └── reqwest v0.13.5 (*)
+      │       │   └── reqwest v0.13.5 (*)
+      │       ├── js-sys v0.3.106
+      │       │   ├── reqwest v0.13.5 (*)
+      │       │   ├── wasm-bindgen-futures v0.4.79
+      │       │   │   ├── reqwest v0.13.5 (*)
+      │       │   │   └── wasm-streams v0.5.0
+      │       │   │       └── reqwest v0.13.5 (*)
+      │       │   ├── wasm-streams v0.5.0 (*)
+      │       │   └── web-sys v0.3.106
+      │       │       ├── reqwest v0.13.5 (*)
+      │       │       └── wasm-streams v0.5.0 (*)
+      │       ├── reqwest v0.13.5 (*)
+      │       ├── solomni v0.1.0 (*)
+      │       ├── tower v0.5.3
+      │       │   ├── reqwest v0.13.5 (*)
+      │       │   └── tower-http v0.6.11 (*)
+      │       ├── tower-http v0.6.11 (*)
+      │       └── wasm-streams v0.5.0 (*)
+      ├── serde_derive v1.0.229
+      │   └── serde v1.0.229
+      │       ├── solomni v0.1.0 (*)
+      │       └── yaml_serde v0.10.7
+      │           └── solomni v0.1.0 (*)
+      ├── synstructure v0.14.0
+      │   ├── yoke-derive v0.8.4
+      │   │   └── yoke v0.8.4
+      │   │       ├── icu_collections v2.4.0 (*)
+      │   │       ├── icu_provider v2.4.0 (*)
+      │   │       ├── zerotrie v0.2.5 (*)
+      │   │       └── zerovec v0.11.9
+      │   │           ├── icu_collections v2.4.0 (*)
+      │   │           ├── icu_locale_core v2.4.0 (*)
+      │   │           ├── icu_normalizer v2.4.0 (*)
+      │   │           ├── icu_properties v2.4.0 (*)
+      │   │           ├── icu_provider v2.4.0 (*)
+      │   │           ├── potential_utf v0.1.6
+      │   │           │   └── icu_collections v2.4.0 (*)
+      │   │           └── tinystr v0.8.5 (*)
+      │   └── zerofrom-derive v0.1.8
+      │       └── zerofrom v0.1.8
+      │           ├── icu_collections v2.4.0 (*)
+      │           ├── icu_provider v2.4.0 (*)
+      │           ├── yoke v0.8.4 (*)
+      │           ├── zerotrie v0.2.5 (*)
+      │           └── zerovec v0.11.9 (*)
+      ├── thiserror-impl v2.0.21
+      │   └── thiserror v2.0.21
+      │       └── jni v0.22.4
+      │           └── rustls-platform-verifier v0.7.1
+      │               ├── reqwest v0.13.5 (*)
+      │               └── solomni v0.1.0 (*)
+      ├── tokio-macros v2.7.2
+      │   └── tokio v1.54.1
+      │       ├── async-compression v0.4.51
+      │       │   └── tower-http v0.6.11 (*)
+      │       ├── hyper v1.12.0
+      │       │   ├── hyper-rustls v0.27.10 (*)
+      │       │   ├── hyper-tls v0.6.0 (*)
+      │       │   ├── hyper-util v0.1.21 (*)
+      │       │   └── reqwest v0.13.5 (*)
+      │       ├── hyper-rustls v0.27.10 (*)
+      │       ├── hyper-tls v0.6.0 (*)
+      │       ├── hyper-util v0.1.21 (*)
+      │       ├── reqwest v0.13.5 (*)
+      │       ├── solomni v0.1.0 (*)
+      │       ├── tokio-native-tls v0.3.1
+      │       │   ├── hyper-tls v0.6.0 (*)
+      │       │   └── reqwest v0.13.5 (*)
+      │       ├── tokio-rustls v0.26.6
+      │       │   ├── hyper-rustls v0.27.10 (*)
+      │       │   └── reqwest v0.13.5 (*)
+      │       ├── tokio-util v0.7.20
+      │       │   ├── reqwest v0.13.5 (*)
+      │       │   └── tower-http v0.6.11 (*)
+      │       ├── tower v0.5.3 (*)
+      │       ├── tower-http v0.6.11 (*)
+      │       └── wasm-bindgen-futures v0.4.79 (*)
+      ├── wasm-bindgen-macro-support v0.2.129
+      │   └── wasm-bindgen-macro v0.2.129
+      │       └── wasm-bindgen v0.2.129
+      │           ├── js-sys v0.3.106 (*)
+      │           ├── reqwest v0.13.5 (*)
+      │           ├── wasm-bindgen-futures v0.4.79 (*)
+      │           ├── wasm-streams v0.5.0 (*)
+      │           └── web-sys v0.3.106 (*)
+      ├── yoke-derive v0.8.4 (*)
+      ├── zerofrom-derive v0.1.8 (*)
+      └── zerovec-derive v0.11.7
+          └── zerovec v0.11.9 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'windows-sys'
+    ┌─ D:\a\Solomni\Solomni/Cargo.lock:172:1
+    │  
+172 │ ╭ windows-sys 0.52.0 registry+https://github.com/rust-lang/crates.io-index
+173 │ │ windows-sys 0.61.2 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰────────────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ windows-sys v0.52.0
+      └── ring v0.17.14
+          ├── rustls v0.23.46
+          │   ├── hyper-rustls v0.27.10
+          │   │   └── reqwest v0.13.5
+          │   │       └── solomni v0.1.0
+          │   ├── reqwest v0.13.5 (*)
+          │   ├── rustls-platform-verifier v0.7.1
+          │   │   ├── reqwest v0.13.5 (*)
+          │   │   └── solomni v0.1.0 (*)
+          │   ├── solomni v0.1.0 (*)
+          │   ├── tokio-rustls v0.26.6
+          │   │   ├── hyper-rustls v0.27.10 (*)
+          │   │   └── reqwest v0.13.5 (*)
+          │   └── ureq v3.4.2
+          │       └── solomni v0.1.0 (*)
+          └── rustls-webpki v0.103.16
+              ├── rustls v0.23.46 (*)
+              └── rustls-platform-verifier v0.7.1 (*)
+    ├ windows-sys v0.61.2
+      ├── errno v0.3.14
+      │   └── rustix v1.1.5
+      │       ├── tempfile v3.27.0
+      │       │   └── native-tls v0.2.18
+      │       │       ├── hyper-tls v0.6.0
+      │       │       │   └── reqwest v0.13.5
+      │       │       │       └── solomni v0.1.0
+      │       │       ├── reqwest v0.13.5 (*)
+      │       │       ├── tokio-native-tls v0.3.1
+      │       │       │   ├── hyper-tls v0.6.0 (*)
+      │       │       │   └── reqwest v0.13.5 (*)
+      │       │       └── ureq v3.4.2
+      │       │           └── solomni v0.1.0 (*)
+      │       └── xattr v1.6.1
+      │           └── tar v0.4.46
+      │               └── solomni v0.1.0 (*)
+      ├── mio v1.2.4
+      │   └── tokio v1.54.1
+      │       ├── async-compression v0.4.51
+      │       │   └── tower-http v0.6.11
+      │       │       └── reqwest v0.13.5 (*)
+      │       ├── hyper v1.12.0
+      │       │   ├── hyper-rustls v0.27.10
+      │       │   │   └── reqwest v0.13.5 (*)
+      │       │   ├── hyper-tls v0.6.0 (*)
+      │       │   ├── hyper-util v0.1.21
+      │       │   │   ├── hyper-rustls v0.27.10 (*)
+      │       │   │   ├── hyper-tls v0.6.0 (*)
+      │       │   │   └── reqwest v0.13.5 (*)
+      │       │   └── reqwest v0.13.5 (*)
+      │       ├── hyper-rustls v0.27.10 (*)
+      │       ├── hyper-tls v0.6.0 (*)
+      │       ├── hyper-util v0.1.21 (*)
+      │       ├── reqwest v0.13.5 (*)
+      │       ├── solomni v0.1.0 (*)
+      │       ├── tokio-native-tls v0.3.1 (*)
+      │       ├── tokio-rustls v0.26.6
+      │       │   ├── hyper-rustls v0.27.10 (*)
+      │       │   └── reqwest v0.13.5 (*)
+      │       ├── tokio-util v0.7.20
+      │       │   ├── reqwest v0.13.5 (*)
+      │       │   └── tower-http v0.6.11 (*)
+      │       ├── tower v0.5.3
+      │       │   ├── reqwest v0.13.5 (*)
+      │       │   └── tower-http v0.6.11 (*)
+      │       ├── tower-http v0.6.11 (*)
+      │       └── wasm-bindgen-futures v0.4.79
+      │           ├── reqwest v0.13.5 (*)
+      │           └── wasm-streams v0.5.0
+      │               └── reqwest v0.13.5 (*)
+      ├── rustix v1.1.5 (*)
+      ├── rustls-platform-verifier v0.7.1
+      │   ├── reqwest v0.13.5 (*)
+      │   └── solomni v0.1.0 (*)
+      ├── schannel v0.1.29
+      │   ├── native-tls v0.2.18 (*)
+      │   └── rustls-native-certs v0.8.5
+      │       └── rustls-platform-verifier v0.7.1 (*)
+      ├── socket2 v0.6.5
+      │   ├── hyper-util v0.1.21 (*)
+      │   └── tokio v1.54.1 (*)
+      ├── solomni v0.1.0 (*)
+      ├── tempfile v3.27.0 (*)
+      ├── tokio v1.54.1 (*)
+      └── winapi-util v0.1.11
+          ├── same-file v1.0.6
+          │   └── walkdir v2.5.0
+          │       └── (build) jni v0.22.4
+          │           └── rustls-platform-verifier v0.7.1 (*)
+          └── walkdir v2.5.0 (*)
+
+advisories ok, bans ok, licenses ok, sources ok
