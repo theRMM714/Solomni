@@ -1378,12 +1378,12 @@ impl ModuleSource for VecSource {
 /// 无声围栏端口：测试里不碰任何 ACL（真实实现在 src/kernel/detail/confine）。
 pub(crate) struct NoFenceHost;
 impl crate::kernel::ports::FenceHost for NoFenceHost {
-    fn release(&self, _spec: &crate::kernel::api::FenceSpec) -> Result<(), String> {
+    fn release_call(&self, _spec: &crate::kernel::api::FenceSpec) -> Result<(), String> {
         Ok(())
     }
 }
 
-/// 记录型围栏端口：断言「删除会话时真的请求了撤销」。
+/// 记录型围栏端口：断言「每次调用结束真的请求了按次收尾」。
 pub(crate) struct RecordingFence {
     pub(crate) released: Mutex<Vec<String>>,
     /// 目的：每次撤销请求携带的租约（按次调用的唯一性断言用）。
@@ -1405,7 +1405,7 @@ impl RecordingFence {
     }
 }
 impl crate::kernel::ports::FenceHost for RecordingFence {
-    fn release(&self, spec: &crate::kernel::api::FenceSpec) -> Result<(), String> {
+    fn release_call(&self, spec: &crate::kernel::api::FenceSpec) -> Result<(), String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }

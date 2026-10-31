@@ -79,42 +79,8 @@ impl Conductor {
                 return Err(Self::running_refusal(sid));
             }
         }
-        // 撤围栏授权：子会话与父会话共用工作区，按工作根去重，避免对同一套根重复撤销。
-        let roster = self.modules.roster();
-        let mut released: Vec<String> = Vec::new();
-        for sid in &subtree {
-            let Ok((m, _)) = self.history.load(sid) else {
-                continue;
-            };
-            let work = self.work_root(sid).unwrap_or_else(|_| m.name.clone());
-            if released.iter().any(|w| w == &work) {
-                continue;
-            }
-            released.push(work);
-            match self.sandboxes(&m, &roster) {
-                Ok(sandboxes) => {
-                    for sb in &sandboxes.list {
-                        // 撤销要覆盖同一次授权写下的全部条目：读写根 + 用户授权的只读根。
-                        let spec = crate::kernel::api::FenceSpec::for_session(
-                            sb,
-                            &self.host_read_roots(),
-                            self.network_allowed(),
-                        );
-                        if let Err(e) = self.tools.release_fence(&spec) {
-                            self.log.warn(
-                                "conductor::history_delete",
-                                &format!("撤销围栏授权未完成：{}", e),
-                            );
-                        }
-                    }
-                }
-                Err(e) => self.log.warn(
-                    "conductor::history_delete",
-                    &format!("取沙箱失败，未撤销授权：{}", e),
-                ),
-            }
-        }
-        // 常驻服务的会话租约随会话消失一起回收（与围栏释放同一时机）。
+        // 围栏授权是按次写的（调用结束即撤）：会话删除只回收常驻服务租约与 guest，不再按会话并集撤权。
+        // 常驻服务的会话租约随会话消失一起回收。
         for sid in &subtree {
             if let Err(e) = self.residents.reap(sid) {
                 self.log.warn(

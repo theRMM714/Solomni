@@ -730,7 +730,7 @@ pub(crate) fn dispatch_external(
                 &ctx.fence,
             )
             .at(&mt.root);
-            fence.lease = crate::capabilities::tools::api::call_lease(&ctx.sandbox.session);
+            fence.lease = crate::kernel::api::call_lease(&ctx.sandbox.session);
             let outcome = if ctx.tier == crate::kernel::api::Tier::Vm {
                 // 虚拟机档：命令送进这个会话的 guest；per-call 断网由 guest helper 落实。
                 if ctx.guest_lease.is_empty() {
@@ -763,8 +763,8 @@ pub(crate) fn dispatch_external(
                     ask,
                 )
             };
-            // 按次撤 ACE：每次调用自己的租约只撤自己那份；并发调用各持 owner，互不撤权。
-            if let Err(e) = ctx.tools.release_fence(&fence) {
+            // 按次收尾：撤自己那份 ACE、删自己的 profile 与临时目录；并发调用各持独立身份，互不影响。
+            if let Err(e) = ctx.tools.release_call(&fence) {
                 ctx.log
                     .info("tools", &format!("模块工具调用围栏撤权未完成：{}", e));
             }

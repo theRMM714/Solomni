@@ -8,14 +8,6 @@ use crate::capabilities::workspace::api::Sandbox;
 use crate::kernel::api::FenceSpec;
 use std::path::{Path, PathBuf};
 
-/// 目的：给一次工具调用生成唯一的 ACL 归属租约（Windows 上调用结束只撤这一次的 ACE，不累积到会话）。
-pub fn call_lease(session: &str) -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    format!("{}#call-{}-{}", session, std::process::id(), n)
-}
-
 impl FenceSpec {
     /// 目的：为**一次调用**派生围栏；base 是同一会话的 for_session 结果（提供主机只读根与全局断网事实）。
     /// 约束：shared-write 永不进 rw；module-write 只给指定模块自己的 userdata；网络再与全局上限求交。

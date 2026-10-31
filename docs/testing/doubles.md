@@ -44,7 +44,7 @@ Fake 必须：
 | `src/tests/builders.rs:NativeGateway`、`NativeChat` | 原生通道替身：按脚本发结构化调用，并记录每次请求的声明与消息 | 已钉住协议形状与"实时/重建逐条一致" |
 | `src/tests/builders.rs:SilentRunner` | 守护 Stub：任何调用即 panic | 用于"不该用工具"的路径 |
 | `src/tests/doubles.rs:NoFenceHost` | 围栏释放空操作 Stub | 已被核心测试使用 |
-| `src/tests/doubles.rs:RecordingFence` | 围栏释放记录型 Spy | 已钉住"删会话即请求撤销授权" |
+| `src/tests/doubles.rs:RecordingFence` | 围栏释放记录型 Spy | 已钉住"每次调用结束请求按次收尾" |
 | `src/kernel/ports.rs:NoopLog` | 无声日志 Stub | 已存在；不用于验证日志内容 |
 | `src/tests/doubles.rs:FixedProbe` / `TestHostProbe` | 宿主探测 Fake（按声明回答路径 / 可执行文件 / 虚拟化）；`TestHostProbe` 用真实路径事实，但把平台共享工具视为在场 | `FixedProbe` 用于 T2 契约用例；Core 级装配用 `TestHostProbe`（要 scratch 目录的真实存在性，又不让测试依赖机器是否装了 smbd/virtiofsd） |
 | `src/tests/doubles.rs:NoopLogOps` | 日志能力 Stub（入站能力面） | 已用于路由契约测试（呈现层不需要它做判定） |
@@ -136,10 +136,10 @@ Fixture 必须：
 | `HistoryStore` | `InMemoryHistory` | 内存流水可观察 | `fail_with` | 不适用 | `FsHistory` | 已验收；**持有者只有 `session::service.rs`**（R12） |
 | `PromptSource` | `TestPrompts` | 不适用 | `fail_with` | 不适用 | `YamlPrompts` | 已验收 |
 | `SystoolsSource` | 不适用（**直接用真实加载器**：读的就是仓库自己的三份 yaml（工具 / 角色 / 名字表），确定性足够） | 不适用 | 缺文件 / 缺键由真实加载器如实报错（`src/tests/detail.rs`） | 不适用 | `YamlSystools` | 已验收 |
-| `ProcessRunner`（kernel 共享） | `RecordingRunner`、`SilentRunner`、`ParallelRunner`、`AskingRunner`（跑之前先经提问端口问一次）、`EnvRecordingRunner`（记每次调用的注入项）、`ShellRunner`（记 `run_shell` 的脚本 / 围栏 / 超时 / 取消 / 按次 profile / PATH） | `calls`（cwd / 命令 / 参数）、并发峰值、`envs`（注入项）、`ShellRunner.calls`；`AskingRunner` 另记"问过几次、真跑了几次" | `ok = false` 回执 | 真进程超时 / 取消杀树、head+tail 截断、按次临时 profile（`ProcTools`）；隐秘字段只经环境变量注入 | `ProcTools` | 已验收 |
+| `ProcessRunner`（kernel 共享） | `RecordingRunner`、`SilentRunner`、`ParallelRunner`、`AskingRunner`（跑之前先经提问端口问一次）、`EnvRecordingRunner`（记每次调用的注入项）、`ShellRunner`（记 `run_shell` 的脚本 / 围栏 / 超时 / 取消 / 按次 profile / PATH） | `calls`（cwd / 命令 / 参数）、并发峰值、`envs`（注入项）、`ShellRunner.calls`；`AskingRunner` 另记"问过几次、真跑了几次" | `ok = false` 回执 | 真进程超时 / 取消杀树、head+tail 截断；按次 profile 的撤权/删除在 `FenceHostAdapter`；隐秘字段只经环境变量注入 | `ProcTools` | 已验收 |
 | `AskUser` | `RecordingAsk`（按脚本作答，记下每次问到的选项 id）、`AskingRunner` 内部的同形替身 | 问到的选项 id / 是否停过会话 | 不适用（作答脚本给 `None` = 拒绝 / 没人答） | 阻塞等回答（不设超时；整队作废解开） | 会话侧实现 `conductor::service::SessionAsk`（卡片进那一条队、`answer_card` 作答；空选项集停会话 + 落警告） | 已验收（`src/tests/conductor/ask_user.rs`、`src/tests/permission.rs` 的端到端一条） |
 | `EnvelopeRepair` | `NoRepair` | 不适用 | 不适用（修复器遇不确定一律不修） | 不适用 | `UnambiguousRepair`（转义裸控制字符 + 补上缺的收尾括号；断在字符串中间、起了两段信封一律不修） | 已验收 |
-| `FenceHost`（kernel 共享） | `RecordingFence`、`NoFenceHost` | `released` / `release_shell`（默认空操作） | `fail_with` | 不适用 | `confine::FenceHostAdapter`（真机撤权在 `tests/windows/`；Windows 的 `release_shell` 撤 ACE 并删按次 profile） | 已验收 |
+| `FenceHost`（kernel 共享） | `RecordingFence`、`NoFenceHost` | `released` / `leases` / `release_call`（默认空操作） | `fail_with` | 不适用 | `confine::FenceHostAdapter`（真机撤权在 `tests/windows/`；Windows 的 `release_call` 撤 ACE、删按次 profile 与按次临时目录） | 已验收 |
 | `ServiceAdapter`（residents） | `FakeServiceAdapter`、`DyingServiceAdapter`（一启动就"死"：调用恒失败且 `is_alive=false`，崩溃检测用）；返回的 `ServiceInstance` 替身是 `FakeServiceInstance` / `DyingServiceInstance` | `calls`（start / call / stop） | 由替身注入启动失败 | 不适用 | `detail::McpAdapter`（MCP stdio；真实服务端到端见 `src/tests/mcp.rs`）；ACP 未接入 | 已验收（`src/tests/residents.rs`、`src/tests/mcp.rs`） |
 | `SessionHost`（kernel 共享） | `ScriptedHost`（按脚本逐行应答；可演 `list_changed` 通知与 EOF）；返回的 `Session` 替身是 `ScriptedSession` | `sent`（发出的每一行与关闭） | 脚本用尽 = 如实报错 | EOF / 读错误 = `alive()` 转 false（崩溃检测） | `ProcessSessions`（返回 `FencedSession`；真实 MCP 服务端到端见 `src/tests/mcp.rs`，非 unix 或缺 python 时如实跳过） | 已验收 |
 | `SecretStore`（secrets） | `InMemorySecretStore` | `values`、写入次数 | 由替身注入失败 | 不适用 | `detail::YamlSecrets`（`.home/secrets.yaml`，unix 0600） | 契约测试已验收（`src/tests/secrets.rs`）；生产消费点已接入（CLI `secret`、常驻服务与一次性模块工具的 env 注入、常驻服务回执脱敏） |

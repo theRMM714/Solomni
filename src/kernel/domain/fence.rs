@@ -1,4 +1,4 @@
-//! 目的：一次外部进程执行的**围栏描述符**（纯数据）与平台无关的落点判据。
+//! 目的：一次外部进程执行的**围栏描述符**（纯数据）、按次租约与平台无关的落点判据。
 //! 管：`FenceSpec`（可达范围 / 网络 / 租约）、`FencePart` / `FenceBlocked` / `fence_ask`（必要落点授不上时的裁决材料）。
 //! 不管：从 `Sandbox` / 模块权限**派生**围栏（那是上层策略，见 `capabilities/tools/domain/fence.rs`）；
 //!   平台机制（Landlock / seatbelt / AppContainer）在 `detail/confine`。
@@ -6,6 +6,15 @@
 
 use crate::kernel::api::Ask;
 use serde::{Deserialize, Serialize};
+
+/// 目的：给一次调用生成唯一的围栏租约（Windows 上按次容器身份与 ACL 归属都靠它区分）。
+/// 约束：同一进程内单调递增 + pid；会话名只作可读前缀，不参与唯一性。
+pub fn call_lease(session: &str) -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    format!("{}#call-{}-{}", session, std::process::id(), n)
+}
 use std::path::{Path, PathBuf};
 
 /// 目的：围栏边界说明的稳定标记（shell 回执据此判断“这次失败是不是被围栏拒绝”）。

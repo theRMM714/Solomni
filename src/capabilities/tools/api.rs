@@ -1,6 +1,5 @@
 //! 入站能力面：**其它能力与呈现层只准用这里**（不许碰 `domain` / `ports`）。
 
-pub use crate::capabilities::tools::domain::fence::call_lease;
 pub use crate::capabilities::tools::domain::patch::{EditFault, Fault};
 pub use crate::capabilities::tools::domain::roles::{action_audit, RoleTable, SystemTools};
 pub use crate::capabilities::tools::domain::schema::{
@@ -79,6 +78,6 @@ pub trait ToolExec: Send + Sync {
         args_json: &str,
     ) -> ToolOutcome;
 
-    /// 会话删除时请求一次：把该会话各 agent 的围栏授权撤掉（调用方只提出请求，不碰任何 ACL）。
-    fn release_fence(&self, spec: &crate::kernel::api::FenceSpec) -> Result<(), String>;
+    /// 一次调用的收尾：撤它自己的 ACE、删按次容器 profile 与临时目录（调用方只提出请求，不碰任何 ACL）。
+    fn release_call(&self, spec: &crate::kernel::api::FenceSpec) -> Result<(), String>;
 }

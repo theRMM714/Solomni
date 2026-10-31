@@ -71,7 +71,7 @@ secret 不是 reach：模块只声明自己有哪些隐秘字段，值只由系�
 - sandbox（缺省）：只 private + 基础 / 项目工具链只读；net=false；workspace 及以上 allow，view 不发放；不碰共享 / 模块 / 主机只读根。
 - external：在 sandbox 之上加 shared-read / module-read / host-read / network；external 档 ask、all_reach 档 allow；共享区 / 模块目录仍只读，module-write 不声明，模块 secrets 不注入。
 - sandbox 与 external 都要求围栏真强制（`allow_degraded=false`），装不上就拒绝；命令被围栏拒绝时回执提示 external，**不自动升级**。
-- Windows 上 shell 的 sandbox 与 external 都用**按次临时容器 profile**（W1），调用结束撤 ACE 并删 profile；这是让按次收窄在 Windows 上真实成立的机制。
+- Windows 上**每次宿主工具调用**（shell 的 sandbox / external、模块工具、独立调用、构建）都用**按次容器 profile**（W1）：身份按 `agent + lease` 派生，调用结束撤 ACE、删 profile、删按次临时目录；这是让按次收窄在 Windows 上真实成立的机制。
 
 ## 五、围栏派生
 
@@ -90,7 +90,7 @@ VM guest 的 per-call 断网由 guest helper 按策略里的 net 做 unshare(CLO
 - 共享区范围用三态：all / none / 路径数组。字段 None = 不覆盖，Some(none) = 显式无权限，两者必须分开；
 - 父级编辑只更新 ceiling，再与子 narrowing 求交，不覆盖子收窄；父级收窄到无交集时子会话无权限，并如实提示；
 - 档位切换是根级动作：整棵 work tree 有会话在生成时拒绝（先停再切）；切换在下一次权限判定生效，已经在执行的调用不追溯。
-- Windows 的 ACL 是持久的：模块工具每次调用带**唯一租约**，跑完按该租约撤自己那份 ACE（并发调用各持 owner，互不撤权）；shell 另走按次临时 profile。档位收窄后不会再读到上一次调用留下的外部根。
+- Windows 的 ACL 是持久的：每次调用带**唯一租约**，容器身份按 `agent + lease` 派生，跑完撤自己的 ACE、删自己的 profile 与临时目录；并发调用各有独立身份，互不影响。档位收窄后不会再读到别的调用留下的外部根（这正是并发重叠场景的判据）。
 
 ## 七、工具级确认的引擎路径
 

@@ -343,8 +343,8 @@ fn our_profile_names() -> Result<Vec<String>, String> {
         .collect())
 }
 
-/// 这个具名 profile 还在不在（列清单时如实报“挂着的还在不在”）。
-fn profile_exists(name: &str) -> bool {
+/// 目的：这个具名 profile 还在不在（列清单时如实报"挂着的还在不在"）。
+pub(crate) fn profile_exists(name: &str) -> bool {
     our_profile_names()
         .map(|names| names.iter().any(|n| n.eq_ignore_ascii_case(name)))
         .unwrap_or(false)
@@ -1159,7 +1159,8 @@ fn prune_backups(dir: &Path, keep: usize) {
 
 /// 目的：启动期对账——按台账回收"归属明确已死"的陈旧授权；无法判定的报告后跳过。
 /// 约束：不问用户；只回收归属明确已死的条目（活着的不动）；失败保留台账供下次重试。
-///   **不做**孤儿清扫（sweep_orphan_aces / sweep_profiles）——那两条无归属，会误伤在跑实例，只归手动 --fence-clean。
+///   **不做**孤儿清扫（sweep_orphan_aces / sweep_profiles）——那两条无归属，会误伤在跑实例，只归手动 --fence-clean；
+///   但会**报告**台账之外的按次 profile（按次调用后数量随调用增长），处置入口仍是手动。
 pub fn reconcile(home: &Path) -> super::super::ReconcileReport {
     let mut rep = super::super::ReconcileReport::default();
     let _lock = match lock_ledger(home) {
@@ -1170,6 +1171,21 @@ pub fn reconcile(home: &Path) -> super::super::ReconcileReport {
         }
     };
     let mut rec = load_record(home);
+    // 台账外的本程序 profile：只列出来（没有归属证明，自动删会误伤在跑实例）。
+    match our_profile_names() {
+        Ok(names) => {
+            let known: Vec<String> = rec
+                .profiles
+                .iter()
+                .map(|p| p.name.to_ascii_lowercase())
+                .collect();
+            rep.orphan_profiles = names
+                .into_iter()
+                .filter(|n| !known.contains(&n.to_ascii_lowercase()))
+                .collect();
+        }
+        Err(e) => rep.errors.push(format!("列举容器 profile 失败：{}", e)),
+    }
     if rec.is_empty() {
         rep.note = "没有台账：本程序没在本机写过权限项".to_string();
         return rep;

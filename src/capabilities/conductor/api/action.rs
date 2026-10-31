@@ -408,6 +408,8 @@ impl ConductorHandle {
             module.has_userdata,
         );
         fence.net = self.settings()?.sandbox.policy.network;
+        // 独立调用也是"一次调用"：给唯一 lease，Windows 上才有独立的容器身份（否则并发的人直接调用共用一个 profile）。
+        fence.lease = crate::kernel::api::call_lease(&fence.agent);
         fence.ro_tree.extend(host_plan.roots.iter().cloned());
         fence.ro_tree.sort();
         fence.ro_tree.dedup();
@@ -425,6 +427,13 @@ impl ConductorHandle {
             decl.parallel,
             None,
         );
+        // 按次收尾：撤 ACE、删按次 profile 与临时目录；失败如实记录（残留由 reconcile 按死归属回收）。
+        if let Err(e) = self.tools.release_call(&fence) {
+            self.log.info(
+                "conductor::module_tool",
+                &format!("围栏按次收尾未完成：{}", e),
+            );
+        }
         Ok(Acted::Done(
             serde_json::json!({ "ok": outcome.ok, "output": outcome.output }),
         ))
