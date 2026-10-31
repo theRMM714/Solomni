@@ -1,0 +1,52 @@
+[1/6] app.smoke.cjs
+FRONTEND-INIT-OK
+  → 通过
+[2/6] config.smoke.cjs
+事件流连接失败： Error: poll-not-stubbed
+    at fetch (/Users/runner/work/Solomni/Solomni/src/presentation/web/assets/config.smoke.cjs:178:57)
+    at pollLoop (app.js:5650:23)
+config.smoke: 88/88 断言通过
+CONFIG-SMOKE-OK
+  → 通过
+[3/6] md.smoke.cjs
+MD-OK
+  → 通过
+[4/6] modals.smoke.cjs
+PASS 模型登记弹窗建得起来且含窗口输入
+PASS 模型页：思考映射行去重、可增删、默认档只列已映射
+PASS 模型页：编辑回填思考映射与默认档
+PASS 模型页：思考映射空值拒绝保存
+PASS 设置中心：生成页含超时、提醒、压缩
+PASS 设置中心：生成页含思考等级标签
+PASS 设置中心：思考等级标签可加、拒重复与空值、可删
+PASS 设置中心：保存提交思考标签
+PASS 设置中心：资源页含同时上台数与进程区块
+PASS 设置中心：底栏保存接线
+PASS 设置中心：沙箱页含硬约束与网络围栏
+PASS 模型页先建好，登记供应商后下拉与发现区即时更新
+PASS 模型页先建好，登记模型后列表与核心下拉即时更新
+PASS 设为核心后模型行的「核心」徽标即时移动
+PASS 登记处同步不重建表单（正在填的输入不丢）
+PASS agent 页新建弹层：登记模型后默认模型下拉即时更新
+PASS 模型表单说明 0 = 不填且自动压缩按 128K 兜底
+PASS 回合分隔行解析成系统行
+PASS 轮次分隔行解析成系统行
+PASS 批次按 seq 应用，游标只前进
+PASS 节点回报配成完成卡
+PASS 模块与服务面板只列模块、功能走「使用」子卡片
+PASS 核心默认块：下拉与保存按钮在设置模型页且有间距
+PASS 弹层叠层：关上层保留下层，关全部才清空
+PASS 模块搜索只匹配名字与简介
+PASS 模块选择器：已加入置顶且可选列表排除已加入
+PASS 新建临时 agent 弹层含人设 / 模块加号
+FRONTEND-MODALS-OK
+  → 通过
+[5/6] tokens.smoke.cjs
+令牌检查：86 个令牌，ui.css / style.css 无字面量颜色与时长
+TOKENS-SMOKE-OK
+  → 通过
+[6/6] ui.smoke.cjs
+UI-SMOKE-OK
+  → 通过
+前端冒烟：6 个全部通过（app.smoke.cjs、config.smoke.cjs、md.smoke.cjs、modals.smoke.cjs、tokens.smoke.cjs、ui.smoke.cjs）
+FRONTEND-SMOKE-OK
