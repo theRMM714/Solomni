@@ -1,0 +1,27 @@
+{
+  "mode": "structure",
+  "platform": "linux",
+  "arch": "x64",
+  "osKey": "linux",
+  "profile": "debug",
+  "fenceLive": false,
+  "doctor": null,
+  "steps": [
+    {
+      "step": "T0 结构审查",
+      "status": "pass",
+      "detail": "4 个目标 / 18 个测试文件",
+      "ms": 240,
+      "slow": false
+    }
+  ],
+  "envSkips": [],
+  "quality": {
+    "failed": 0,
+    "steps": []
+  },
+  "globalGaps": [],
+  "gaps": [],
+  "timeouts": [],
+  "failed": 0
+}
