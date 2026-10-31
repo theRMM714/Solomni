@@ -1,0 +1,2 @@
+[探针] env.js 的 MinGW 引导只在 Windows 上存在：本平台跳过环境引导自检
+ENV-BOOTSTRAP-OK
