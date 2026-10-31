@@ -255,12 +255,8 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
             }
         }
     }
-    // **祖先链不用授穿过**：容器令牌自带 SeChangeNotifyPrivilege；给祖先授穿过要改写巨型目录 DACL（真机 ~90 s/条）。
-    // shell 例外：PowerShell 起动要逐级读 cwd 属性，只给 shell 的祖先补 RIGHTS_STAT（不递归/继承/读内容），见 grant_targets。
-    // base 在数据边界循环里还要用（工具链/运行包授给它），循环后再释放。
-
-    // 数据边界（会话目录、模块目录）→ 授给该 agent 自己的容器 SID（互相看不见）；
-    // 落点清单由 grant_targets 统一给出（叶子 + 父目录的只读属性），prepare 与 release 共用同一份。
+    // **祖先链不用授穿过**：令牌自带 SeChangeNotifyPrivilege；给祖先授穿过要改写巨型目录 DACL（真机 ~90 s/条），
+    // shell 例外只补 RIGHTS_STAT（见 grant_targets）；base 在下面的数据边界循环里还要用，循环后再释放。
     let sid = match container_sid(&container) {
         Ok(sid) => sid,
         Err(e) => {
