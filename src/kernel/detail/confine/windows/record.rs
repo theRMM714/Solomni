@@ -44,9 +44,18 @@ pub(crate) struct GrantEntry {
     pub(crate) rights: u32,
     #[serde(default)]
     pub(crate) at: u64,
+    /// 目的：当次授权是否递归（撤权要按它来：父目录的只读属性只授了根，撤权**不能**整树扫）。
+    /// 约束：缺省 true——旧条目没记这一位，按"递归"撤更彻底（宁可多撤自己的 ACE，也不留残留）。
+    #[serde(default = "recursive_by_default")]
+    pub(crate) recursive: bool,
     /// 目的：还需要这条授权的进程（空 = 缺归属，按"无法判定"处理，不主动回收）。
     #[serde(default)]
     pub(crate) owners: Vec<Owner>,
+}
+
+/// 目的：旧台账条目没记 "recursive" 时的缺省（按递归撤，宁可多扫也不留残留）。
+fn recursive_by_default() -> bool {
+    true
 }
 
 /// 目的：台账里一个我们建过的容器 profile（名字 + 记录时刻 + 归属集合）。
@@ -275,9 +284,9 @@ pub(crate) fn owners_state(owners: &[Owner]) -> OwnersState {
 }
 
 /// 目的：按 SID 字符串撤一条 ACE（先转 PSID，用完即释放）。
-fn revoke_one_text(sid_text: &str, path: &Path) -> Result<(), String> {
+fn revoke_one_text(sid_text: &str, path: &Path, recursive: bool) -> Result<(), String> {
     let sid = sid_from_string(sid_text)?;
-    let r = revoke_one(sid, path, true);
+    let r = revoke_one(sid, path, recursive);
     free_sid(sid);
     r
 }
@@ -532,6 +541,7 @@ pub(crate) fn journal_claim_grant(
     sid: &str,
     path: &Path,
     rights: u32,
+    recursive: bool,
     owner: Owner,
 ) -> Result<(bool, bool), String> {
     let key = path.to_string_lossy().into_owned();
@@ -561,6 +571,7 @@ pub(crate) fn journal_claim_grant(
         path: key.clone(),
         rights,
         at: now_secs(),
+        recursive,
         owners: vec![owner],
     });
     if let Err(e) = save_record(home, rec) {
@@ -653,7 +664,8 @@ pub(crate) fn grant_one_journaled(
     } else {
         false
     };
-    let (_, owner_added) = journal_claim_grant(home, rec, sid_text, path, rights, owner.clone())?;
+    let (_, owner_added) =
+        journal_claim_grant(home, rec, sid_text, path, rights, recursive, owner.clone())?;
     // ACE 已够用：归属已经补记（同名 agent 的另一个会话靠它保住这条授权），不重复改 DACL。
     if has_ace_for(sid, path, rights) {
         return Ok(false);
@@ -828,14 +840,14 @@ pub fn release_fence(spec: &FenceSpec, home: &Path) -> Result<(), String> {
     let mut errors: Vec<String> = Vec::new();
     for key in &keys {
         // 先把本次归属从这条授权里撤掉；还有别的归属（活的、或判不了的）就留着给它用。
-        let empty = match rec
+        let (empty, recursive) = match rec
             .grants
             .iter_mut()
             .find(|g| g.sid == sid_text && g.path == *key)
         {
             Some(g) => {
                 g.owners.retain(|o| *o != owner);
-                g.owners.is_empty()
+                (g.owners.is_empty(), g.recursive)
             }
             None => continue,
         };
@@ -873,7 +885,7 @@ pub fn release_fence(spec: &FenceSpec, home: &Path) -> Result<(), String> {
             }
         }
         // 根外（或同路径还有别的 SID）：只精确撤自己这条 ACE。
-        match revoke_one_text(&sid_text, &path) {
+        match revoke_one_text(&sid_text, &path, recursive) {
             Ok(()) => {
                 rec.grants
                     .retain(|g| !(g.sid == sid_text && g.path == *key));
@@ -1258,7 +1270,7 @@ pub fn reconcile(home: &Path) -> super::super::ReconcileReport {
         if has_snap && !kept_here {
             continue; // 交给下面快照整体还原
         }
-        match revoke_one_text(&g.sid, &path) {
+        match revoke_one_text(&g.sid, &path, g.recursive) {
             Ok(()) => rep.reclaimed_grants += 1,
             Err(e) => errors.push(e),
         }
