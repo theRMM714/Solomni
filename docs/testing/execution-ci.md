@@ -273,6 +273,8 @@ required context 因此永远停在 pending——纯文档 PR 会卡在「检查
 `publish-report` 把三条 lane 的产物（`structure-report`、`docs-report`、`test-report-<os>` 与 `e2e-report-<os>`）汇总：
 平台的 quality / e2e 两份先用 `tests/ci-merge.mjs` 合并成该平台唯一的 `test-report.json`，再由 `tests/ci-publish.mjs` 发布。
 **任一半缺报告都补一条 `fail` 步骤**——"没跑到"不能读成"通过"。
+两份产物的上传根必须都是 `target/`（发布端把它们 `cp` 进 `target/` 再找 `target/e2e-report.json`）；e2e 的夹具日志先收进 `target/e2e-logs/` 再上传，
+否则上传根会被抬到仓库根，报告落成 `target/target/e2e-report.json` 而被判成"没产出"。发布步骤为此留了一条布局检查：落到嵌套路径就让发布红，不静默丢 L4。
 Draft 的 run 里依赖 job 都跳过，发布也跳过：不拿空产物发报告。
 
 **报告统一到 `ci-report`**：该分支每次运行都会被重建为空分支再写入，只留最近一次运行。目录按 lane 分键：

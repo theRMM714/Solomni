@@ -285,6 +285,15 @@ jobs:
       - name: 跑 L4 端到端
         run: node tests/ci-e2e.mjs
 
+      # 上传根必须与 quality 一致（都是 target/）：发布端把产物 cp 进 target/ 再找 target/e2e-report.json；
+      # 若把夹具日志（tests/...）也放进同一个产物，上传根会被抬到仓库根，报告就变成 target/target/e2e-report.json。
+      - name: 汇总 e2e 夹具日志（上传根统一为 target/）
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p target/e2e-logs
+          if [ -d tests/cross-platform/e2e/root/logs ]; then cp -R tests/cross-platform/e2e/root/logs/. target/e2e-logs/; fi
+
       - name: 留产物（e2e 报告与日志；无论成败）
         if: always()
         uses: actions/upload-artifact@v7
@@ -293,7 +302,7 @@ jobs:
           path: |
             target/e2e-report.json
             target/test-logs/
-            tests/cross-platform/e2e/root/logs/
+            target/e2e-logs/
           if-no-files-found: ignore
 
   gate:
@@ -455,6 +464,11 @@ jobs:
             fi
             if [ -d "ci-artifacts/e2e-report-${platform}" ]; then
               cp -R "ci-artifacts/e2e-report-${platform}/." target/
+            fi
+            # 上传根错了会落成 target/target/…：宁可让发布红，也别静默丢 L4（这一条曾经吞过整条 e2e）。
+            if [ -f "target/target/e2e-report.json" ]; then
+              echo "e2e 产物布局不对：报告落在 target/target/ 下（检查 e2e job 的上传根）" >&2
+              exit 1
             fi
 
             case "${platform}" in
