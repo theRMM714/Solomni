@@ -91,6 +91,7 @@
 - 虚拟根的真实运行能力由 `guest-runtime` 编排自证后写进 `guest.yaml` 的 `runtimes`：Windows 走 cloud-init 首启 + 维护启动装包；Linux 的 agent 由 `guest-rootfs` 装进镜像，维护启动装 python3、C-C++ 与固定版本 Node。构造细节见 [docs/provision/README.md](../provision/README.md)。
 - macOS 保持检测 + 指路（缺口见 `tests/macos/gaps.yaml`）。
 - 真机探针的门槛：`SOLOMNI_VM_LIVE=1` + `SOLOMNI_VM_QEMU` / `SOLOMNI_VM_VIRTIOFSD` / `SOLOMNI_VM_SMBD` 指向 `.vm/`；虚拟根默认 `debian`，可用 `SOLOMNI_VM_GUEST` 换；默认 `[探针]` 跳过。
+- 取消与超时的真机证据走**不依赖共享后端**的 `vm_live_cancel_kills_the_guest_process_tree`（`NoneShare` + guest 内 `/tmp` 围栏）：取消要 15 秒内返回、回执含「用户停止」、guest 内无残留 `sleep`；`timeout_secs` 到点回执含 helper 的「工具进程超时」。取消路径上 helper 自己的 stderr 可能被 QGA 丢掉（实测时有时无），所以判决以**无孤儿 + 快速返回**为准；超时路径的 helper stderr 稳定可见，直接断言。
 
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 

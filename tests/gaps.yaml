@@ -96,21 +96,26 @@
     调用结束/崩溃回收不留孤儿 ACL；其它平台行为不变；node run-tests.js 全绿。
   blocked_by: 缺少模块工具的按次容器 profile 或跨调用 ACL 隔离（当前只在调用结束时按 lease 撤自己的 ACE）
 
-- id: vm.guest-run-cancel-live
+- id: vm.windows-smb-mount-unreliable
   scope: global
-  level: T3
+  level: T4
   why: |
-    guest 取消机制已实现（Vm/GuestChannel 可取消、QGA SIGTERM、helper killpg、VM live 用例断言），
-    但本机与当前 CI 没有 QEMU / guest 真机环境，未开 SOLOMNI_VM_LIVE；真实 QGA 往返、helper 信号处理、
-    进程树清理与 15 秒上限只在代码/契约层验证，尚未有一份真机通过证据。
+    Windows 宿主只有 SMB（smbd helper + QEMU guestfwd）一条用户共享链。共享挂载阶段会被对端关闭
+    （guest 侧 mount 报 `Server abruptly closed the connection` / `Host is down`），此时 smbd 进程仍在监听、
+    guest 到 10.0.2.100:445 的 TCP 也连得上。失败时 `vm_live_guest_runs_command_inside_guest` 起不了 guest，
+    以共享为前提的真机验收都拿不到证据（本机嵌套虚拟化的 Windows 宿主上间歇通过、随后连续失败，
+    3 次重试与 `vers=3.0` 都不改结果）。
   how: |
-    在 Linux 宿主安装/指向 QEMU 与 guest 虚拟根，设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU、可选
-    SOLOMNI_VM_GUEST，跑 vm_live_guest_runs_command_inside_guest（其中已含 sleep 30 + 取消断言）；
-    记录取消耗时、helper stderr、孤儿进程检查与 timeout 仍生效。
+    1) 取现场：smbd 的 stdout/stderr 已带 `[虚拟机] smbd：` 前缀转出，确认 helper 在连接哪一步关闭；
+       同时记录 guest 侧 cifs 的 `dmesg` 与 QEMU guestfwd 的状态；
+    2) 缩小变量：换一台非嵌套 / 资源充足的 Windows 宿主跑同一条用例；稳定通过就按宿主条件记录，不算产品缺陷；
+    3) 若正常宿主也复现：核对 smbd 版本与 SMB 方言（3.1.1 的 preauth / signing）、QEMU 版本与 guestfwd 的
+       多连接支持；必要时固定 `vers` 或调整 helper 的会话超时；
+    4) 真机验收：`vm_live_guest_runs_command_inside_guest` 在同一宿主连跑 N 次通过（含共享实时写回断言）。
   accept: |
-    真机上 guest 内 sleep 30 在 host 停止后 15 秒内被杀；回执含「用户停止」；timeout 30 仍照常收口；
-    没有残留 guest 进程；三平台（当前 Linux guest）契约一致；node run-tests.js 全绿。
-  blocked_by: 本机/CI 无 QEMU 与 guest 真机（未开 SOLOMNI_VM_LIVE）；不是缺实现
+    在目标宿主上连续多次起 guest 并在 guest 内挂上 cifs 共享（读得到宿主标记、写得到宿主可见的文件）；
+    不再出现 `Server abruptly closed` / `Host is down`；node run-tests.js 全绿。
+  blocked_by: 缺少可复现的宿主或 smbd/QEMU 关闭原因（嵌套虚拟化宿主上间歇失败，尚未定位）
 
 
 
