@@ -614,17 +614,11 @@ pub fn remove_profile_one(home: &std::path::Path, name: &str) -> Result<String, 
     }
 }
 
-/// 目的：撤销一次会话的围栏授权（会话删除时由核心经 FenceHost 端口请求；其它平台是空操作）。
+/// 目的：撤销一次调用的围栏授权（Windows 的按次释放用；其它平台没有持久授权这一步）。
+/// 约束：只在 Windows 编译——非 Windows 没有任何调用方，留着就是死代码。
+#[cfg(windows)]
 pub fn release_fence(spec: &FenceSpec, home: &std::path::Path) -> Result<(), String> {
-    #[cfg(windows)]
-    {
-        windows::release_fence(spec, home)
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = (spec, home);
-        Ok(())
-    }
+    windows::release_fence(spec, home)
 }
 
 /// 目的：命令里可能出现的外部程序：按 PATH 解析出真实路径（解析不出的跳过，不猜）。
