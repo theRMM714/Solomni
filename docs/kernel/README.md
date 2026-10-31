@@ -85,6 +85,7 @@
   - 回执把"用户拒绝"与"没人答"分开写清楚。
 - **构不出可用选项**时**不发起裁决**（契约禁止置灰）：有可回答的前端就**停掉这个会话 + 落一条警告**，没有前端只如实拒绝这次调用；停过一次之后不再推卡。
 - **可选落点授不上只记事实**：留一条 stderr 脚印，不牵动这次执行。
+- **三类根（仅 Windows）**：① **可信执行基座**——产品内工具链（`.tools/`）与运行包（`runtimes/<包>`）是只读二进制、不携带任何 scope 信息，一次性授给 `ALL APPLICATION PACKAGES`（与系统解释器目录同路），**不进按 reach 的容器身份**；② **受保护数据/代码**——私有沙箱、共享区、模块目录、模块 `userdata/`、用户授权只读根，按 reach 授给容器 SID；③ 系统基线（`C:\Windows` 等）。把工具链放进 reach 会让同一份 16k 文件按每个 scope 组合各授一次（本机实测 56s/次），属于类别错误。
 - **容器临时目录先建**（仅 Windows）：`prepare_fence` 在授权前建好 `<私有沙箱>/Packages/<容器名>/AC/Temp`——AppContainer 的 `GetTempPath2` **不读 TMP/TEMP**，编译器这类程序缺了它直接 abort（`Cannot create temporary file`）；目录在 `rw` 之下，递归 ACE 覆盖它，不单列一条授权。`private` 为空时跳过并记一条事实。
 - **未授权档位不是这条路**（仅 Windows）：用户没开 `sandbox.policy.windows.write_acl` 时外层根本不写权限项，容器围栏不装；若策略要求强制则拒绝，否则按无围栏执行并在启动报告标出。Linux / macOS 没有外层授权这一步，围栏照常装。
 - **启动门（组合根）**：默认 CLI 与 `-webUI` 都先判 `require` vs 本次实际，并把「未授权」与「本机能力缺失」分开报；未满足时只能本次降级 / 重设 / 退出。没有可回答的前端、或 `on_unavailable=refuse` 且不重设 = 退出，不会启动前端。首次启动（没有 `.home/settings.yaml`）在 Windows 先问一次是否授权写 ACL；选否不写盘、进入启动门。`require` + `write_acl=false` 的矛盾配置在加载 / 保存时即拒绝，不会进入门。

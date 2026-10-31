@@ -72,6 +72,7 @@ secret 不是 reach：模块只声明自己有哪些隐秘字段，值只由系�
 - external：在 sandbox 之上加 shared-read / module-read / host-read / network；external 档 ask、all_reach 档 allow；共享区 / 模块目录仍只读，module-write 不声明，模块 secrets 不注入。
 - sandbox 与 external 都要求围栏真强制（`allow_degraded=false`），装不上就拒绝；命令被围栏拒绝时回执提示 external，**不自动升级**。
 - Windows 上**每次宿主工具调用**（shell 的 sandbox / external、模块工具、独立调用、构建）都用**按次容器 profile**（W1）：身份按 `agent + lease` 派生，调用结束撤 ACE、删 profile、删按次临时目录；这是让按次收窄在 Windows 上真实成立的机制。
+- **工具链与运行包不是 reach**：`.tools/` 与 `runtimes/<包>` 是可信执行基座（只读、无秘密、本来就要执行），一次性授给 `ALL APPLICATION PACKAGES`，不参与按 reach 的容器身份与按次授权；共享区 / 模块目录 / 用户只读根才按 reach 收窄。
 
 ## 五、围栏派生
 

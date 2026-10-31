@@ -550,6 +550,13 @@ pub(crate) fn grant_targets(spec: &FenceSpec) -> Vec<GrantTarget> {
     todo
 }
 
+/// 目的：路径是不是**可信执行基座**（产品内工具链 / 运行包）：只读二进制，不携带任何 scope 信息，
+///   授给 baseline 一次即可，不参与按 reach 的容器身份与授权。
+pub(crate) fn is_trusted_base(path: &Path, product_root: &Path) -> bool {
+    let under = |base: &Path| path == base || path.starts_with(base);
+    under(&product_root.join(".tools")) || under(&product_root.join("runtimes"))
+}
+
 /// 目的：只读运行基线的授权对象：ALL APPLICATION PACKAGES（S-1-15-2-1）。
 ///   我们的容器令牌本来就带这个组，所以「解释器与系统只读区」这类基线只授一次、与 agent 身份无关；
 ///   每 agent 一个的容器 SID 只用来圈**数据边界**（会话目录、模块目录）。
