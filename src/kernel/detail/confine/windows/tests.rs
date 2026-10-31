@@ -1810,6 +1810,54 @@ fn reconcile_reclaims_dead_owners_and_keeps_live_ones() {
     discard(&base);
 }
 
+/// 【启动对账】台账外的按次 profile：只报告，不自动删（没有归属证明，删了会误伤在跑实例）。
+#[test]
+fn reconcile_reports_ledger_less_profiles_without_deleting_them() {
+    if std::env::var("SOLOMNI_FENCE_LIVE")
+        .map(|v| v != "1")
+        .unwrap_or(true)
+    {
+        eprintln!(
+            "[探针] 未开启真机围栏测试：reconcile_reports_ledger_less_profiles_without_deleting_them 会创建 AppContainer profile（改本机状态），已跳过；要真跑加 --fence-live"
+        );
+        return;
+    }
+    let base =
+        std::env::temp_dir().join(format!("solomni-reconcile-orphan-{}", std::process::id()));
+    let home = base.join(".home");
+    std::fs::create_dir_all(&home).expect("建台账目录");
+    let spec = FenceSpec {
+        agent: "probe-reconcile-orphan".to_string(),
+        lease: "call-orphan".to_string(),
+        private: PathBuf::new(),
+        ro_tree: Vec::new(),
+        rw: Vec::new(),
+        cwd: PathBuf::new(),
+        ro: Vec::new(),
+        net: false,
+    };
+    let name = container_name(&spec);
+    // 只建 profile、不记台账（模拟台账被删 / 非台账路径留下的残留）。
+    assert!(ensure_profile(&name).is_ok(), "建探针 profile");
+    let rep = reconcile(&home);
+    assert!(
+        rep.orphan_profiles
+            .iter()
+            .any(|n| n.eq_ignore_ascii_case(&name)),
+        "台账外的 profile 要列进报告：{:?}",
+        rep.orphan_profiles
+    );
+    assert!(
+        rep.summary().contains("台账外还有"),
+        "摘要要说明现象与处置入口：{}",
+        rep.summary()
+    );
+    assert!(profile_exists(&name), "只报告，不自动删");
+    // 收尾：探针自己删，不留痕。
+    assert!(delete_profile(&name), "探针 profile 应当删得掉");
+    discard(&base);
+}
+
 /// 【启动对账】缺归属/判不了的条目：如实报告并跳过，一条都不回收。
 #[test]
 fn reconcile_skips_entries_without_ownership() {
