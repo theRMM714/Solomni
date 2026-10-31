@@ -1,0 +1,27 @@
+{
+  "mode": "docs",
+  "platform": "linux",
+  "arch": "x64",
+  "osKey": "linux",
+  "profile": "debug",
+  "fenceLive": false,
+  "doctor": null,
+  "steps": [
+    {
+      "step": "T0 文档审查",
+      "status": "pass",
+      "detail": "文档检查通过",
+      "ms": 13,
+      "slow": false
+    }
+  ],
+  "envSkips": [],
+  "quality": {
+    "failed": 0,
+    "steps": []
+  },
+  "globalGaps": [],
+  "gaps": [],
+  "timeouts": [],
+  "failed": 0
+}
