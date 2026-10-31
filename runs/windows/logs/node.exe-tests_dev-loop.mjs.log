@@ -1,0 +1,9 @@
+用法：node dev.js <子命令>
+
+子命令：
+  test    L1 单元（--bin solomni）
+  fmt     T0 格式（cargo fmt --check）
+  clippy  T0 静态检查（cargo clippy -D warnings）
+
+要跑完整门禁与全量测试：node run-tests.js（迭代时加 --skip-e2e，见 docs/testing/execution-ci.md）。
+DEV-LOOP-OK
