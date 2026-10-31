@@ -1,0 +1,164 @@
+{
+  "mode": "full",
+  "platform": "linux",
+  "arch": "x64",
+  "osKey": "linux",
+  "profile": "debug",
+  "fenceLive": true,
+  "doctor": {
+    "error": "[工具链] 项目内未安装：python、node、cc；补全：node setup-runtime.js --yes\n[工具链] 宿主回退 python → /usr/bin/python（围栏可用）\n[工具链] 宿主回退 node → /opt/hostedtoolcache/node/24.22.1/x64/bin/node（围栏可用）\n[工具链] 宿主回退 cc → /usr/bin/gcc（围栏可用）\n{\"arch\":\"x86_64\",\"externals\":{\"curl\":\"/usr/bin/curl\",\"node\":\"/opt/hostedtoolcache/node/24.22.1/x64/bin/node\",\"python\":\"/usr/bin/python\"},\"fence\":{\"fs\":true,\"net\":true,\"note\":\"Linux：Landlock（ABI"
+  },
+  "steps": [
+    {
+      "step": "CI 前置：供应链工具安装",
+      "status": "pass",
+      "detail": "在 run-tests 之前完成（CI 墙钟）",
+      "ms": 895
+    },
+    {
+      "step": "cargo build",
+      "status": "pass",
+      "detail": "",
+      "ms": 17985
+    },
+    {
+      "step": "T0 编译（--all-targets）",
+      "status": "pass",
+      "detail": "",
+      "ms": 19544
+    },
+    {
+      "step": "T0 格式（fmt --check）",
+      "status": "pass",
+      "detail": "",
+      "ms": 1353
+    },
+    {
+      "step": "T0 静态检查（clippy）",
+      "status": "pass",
+      "detail": "",
+      "ms": 10446
+    },
+    {
+      "step": "T0 编译告警",
+      "status": "pass",
+      "detail": "",
+      "ms": 0
+    },
+    {
+      "step": "T0 交叉类型检查",
+      "status": "skip-platform",
+      "detail": "CI：三平台矩阵各自原生 cargo check --all-targets 已覆盖本平台；交叉检查是开发机补齐它平台的手段，这里不跑",
+      "ms": 0
+    },
+    {
+      "step": "T0 依赖重复（cargo tree）",
+      "status": "pass",
+      "detail": "",
+      "ms": 164
+    },
+    {
+      "step": "T0 供应链（audit/deny）",
+      "status": "pass",
+      "detail": "通过：audit、deny",
+      "ms": 2414
+    },
+    {
+      "step": "L1 单元（--bin solomni）",
+      "status": "pass",
+      "detail": "719 passed / 0 failed",
+      "ms": 40683
+    },
+    {
+      "step": "目标 cross-platform",
+      "status": "pass",
+      "detail": "5 passed / 0 failed",
+      "ms": 8900
+    },
+    {
+      "step": "目标 windows",
+      "status": "skip-platform",
+      "detail": "0 passed / 0 failed（本平台不适用）",
+      "ms": 184
+    },
+    {
+      "step": "目标 linux",
+      "status": "pass",
+      "detail": "12 passed / 0 failed",
+      "ms": 571
+    },
+    {
+      "step": "目标 macos",
+      "status": "skip-platform",
+      "detail": "0 passed / 0 failed（本平台不适用）",
+      "ms": 184
+    },
+    {
+      "step": "前端冒烟",
+      "status": "pass",
+      "detail": "前端冒烟：6 个全部通过（app.smoke.cjs、config.smoke.cjs、md.smoke.cjs、modals.smoke.cjs、tokens.smoke.cjs、ui.smoke.cjs） / FRONTEND-SMOKE-OK",
+      "ms": 2439
+    },
+    {
+      "step": "开发回路自检",
+      "status": "pass",
+      "detail": "DEV-LOOP-OK",
+      "ms": 86
+    },
+    {
+      "step": "依赖哈希工具自检",
+      "status": "pass",
+      "detail": "PINS-TOOL-OK",
+      "ms": 77
+    },
+    {
+      "step": "变更分流自检",
+      "status": "pass",
+      "detail": "[变更分流] 自检通过：分类样例 21 条，include 文档 1 个",
+      "ms": 67
+    },
+    {
+      "step": "环境引导自检",
+      "status": "env-skip",
+      "detail": "[探针] env.js 的 MinGW 引导只在 Windows 上存在：本平台跳过环境引导自检",
+      "ms": 256
+    },
+    {
+      "step": "T0 项目外写",
+      "status": "pass",
+      "detail": "",
+      "ms": 0
+    },
+    {
+      "step": "L4 端到端",
+      "status": "pass",
+      "detail": "E2E-OK / [e2e] 围栏回收（退出码 0）：[围栏] 清理完成：本平台的围栏不留权限项，无需清理 | [围栏] 清理完成：扫掉 0 个本程序建过的容器 profile | [工具链] 项目内未安装：python、node、cc；补全：node setup-runtime.js --yes | [工具链] 宿主回退 python → /usr/bin/python（围栏可用） | [工具链] 宿主回退 node → /opt/hostedtoolcache/node/24.22.1/x64/bin/node（围栏可用） | [工具链] 宿主回退 cc → /usr/bin/gcc（围栏可用）（构建 17.9s）",
+      "ms": 145773
+    }
+  ],
+  "envSkips": [
+    "[探针] 未开启 Linux 运行期编排的真机验收：设 SOLOMNI_VM_LIVE=1（仅 Linux 宿主）后重跑",
+    "[探针] 没有可用的 unshare -r / mke2fs / debugfs（要 e2fsprogs 与非特权用户命名空间）：跳过",
+    "[探针] 没有可用的 unshare -r / mke2fs / debugfs（要 e2fsprogs 与非特权用户命名空间）：跳过",
+    "[探针] 没有可用的 unshare -r / mke2fs（要 e2fsprogs 与非特权用户命名空间）：跳过",
+    "[探针] 未开启虚拟机档构建的真机验收：设 SOLOMNI_VM_LIVE=1 后重跑",
+    "[探针] 未开启取消的真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑（虚拟根默认 debian，可用 SOLOMNI_VM_GUEST 换）",
+    "[探针] 未开启虚拟机档真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑（虚拟根默认 debian，可用 SOLOMNI_VM_GUEST 换）",
+    "[探针] 未开启并发可写层的真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑",
+    "[探针] env.js 的 MinGW 引导只在 Windows 上存在：本平台跳过环境引导自检",
+    "[探针] 未开启虚拟机档会话验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑（虚拟根默认 debian）"
+  ],
+  "quality": {
+    "failed": 0,
+    "steps": []
+  },
+  "globalGaps": [
+    "module.acp-adapter",
+    "work.large-asset-transfer",
+    "testing.coverage-child-and-platform",
+    "vm.windows-macos-guest",
+    "vm.windows-smb-mount-unreliable"
+  ],
+  "gaps": [],
+  "failed": 0
+}
