@@ -152,10 +152,17 @@ pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
         VmRequirement {
             id: "hypervisor",
             met: hyper,
+            // 这一项是虚拟机档**唯一**的硬件前提：只用硬件加速，没有就不成立（不退回软件模拟）。
             detail: if hyper {
-                format!("本机虚拟机监视器可用（{}）", hypervisor_kind())
+                format!(
+                    "本机虚拟机监视器可用（{}）；虚拟机档只走硬件加速，不退回软件模拟",
+                    hypervisor_kind()
+                )
             } else {
-                hypervisor_hint().to_string()
+                format!(
+                    "{}；虚拟机档只走硬件加速，不退回软件模拟",
+                    hypervisor_hint()
+                )
             },
             how: if hyper {
                 String::new()

@@ -30,7 +30,8 @@
   - `NoneShare`：内部无共享档（无挂载、无同步），只给供给编排。
 - 平台组合是数据（`default_combos` / `share_chain`）：共享档在**起 guest 那一刻**按候选挑，不在装配期定。
   空候选只从用户档里挑；copy 只有在显式候选（开发/应急开关）里才会被选。
-- 加速器按平台给：`accel=kvm:tcg` / `accel=whpx:tcg` / `accel=hvf:tcg`。共享要隧道时给 `restrict=on` 网卡。
+- 加速器只用硬件加速：`accel=kvm` / `accel=whpx` / `accel=hvf`；**不退回软件模拟（TCG）**——软件模拟慢到没有可用性（同一台 guest 慢 2–5 倍，共享挂载会在慢启动里间歇失败），没有硬件加速时虚拟机档就绪项判否、启动如实拒绝。共享要隧道时给 `restrict=on` 网卡。
+- 共享挂载（Windows 的 SMB/cifs）有界重试 3 次；仍失败才判这次起 guest 失败，并在回执里给出尝试次数与最后一次 mount 报错。smbd 自己的输出带 `[虚拟机] smbd：` 前缀转出来，不和 guest 侧现场混在一起。
 
 ### 执行分派与就绪
 
@@ -117,9 +118,9 @@
 
 | 宿主 | 引擎 | 共享 | 加速 | 用户链 |
 | --- | --- | --- | --- | --- |
-| Linux | QEMU | virtiofs（**已验**，默认；缺 virtiofsd 时退 9p） | `accel=kvm:tcg` | virtiofs → 9p |
-| macOS | QEMU（未验） | 9p | `accel=hvf:tcg` | 9p |
-| Windows | QEMU | smb（**已验**，硬前置） | `accel=whpx:tcg` | smb |
+| Linux | QEMU | virtiofs（**已验**，默认；缺 virtiofsd 时退 9p） | `accel=kvm` | virtiofs → 9p |
+| macOS | QEMU（未验） | 9p | `accel=hvf` | 9p |
+| Windows | QEMU | smb（**已验**，硬前置） | `accel=whpx` | smb |
 
 copy 不在任何用户链里；只有进程级开发/应急开关（`SOLOMNI_VM_SHARE=copy`）会把它作为该进程 VM 会话的唯一候选，并在日志里警告性能不可用。自定义 guest 没有声明本平台可承载的客户端时，`tier_readiness` 在起 guest 前拒绝。
 

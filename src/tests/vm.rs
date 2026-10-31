@@ -764,8 +764,11 @@ pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
         .map(|i| args[i + 1].as_str());
     assert_eq!(
         accel,
-        Some(crate::capabilities::vm::detail::qemu::accelerators()),
-        "加速器按平台给（本平台硬件加速优先，TCG 兜底）"
+        Some(
+            crate::capabilities::vm::detail::qemu::accelerators()
+                .expect("本平台有硬件加速（虚拟机档只用硬件加速）")
+        ),
+        "加速器按平台给（只用硬件加速，不退回软件模拟）"
     );
     let serial = args
         .iter()
@@ -827,15 +830,23 @@ pub(crate) fn accelerators_and_nic_follow_the_platform_and_share_need() {
         isolated: false,
     };
     let expected = if cfg!(windows) {
-        "accel=whpx:tcg"
+        "accel=whpx"
     } else if cfg!(target_os = "macos") {
-        "accel=hvf:tcg"
+        "accel=hvf"
     } else if cfg!(target_os = "linux") {
-        "accel=kvm:tcg"
+        "accel=kvm"
     } else {
-        "accel=tcg"
+        panic!("本平台没有接入虚拟机档：accelerators() 应当是 None");
     };
-    assert_eq!(accelerators(), expected, "加速器表按平台给");
+    assert_eq!(
+        accelerators(),
+        Some(expected),
+        "加速器表按平台给：只有硬件加速"
+    );
+    assert!(
+        !accelerators().unwrap_or_default().contains("tcg"),
+        "不退回软件模拟：加速器参数里永远不出现 tcg"
+    );
 
     let plain = engine_args(&spec(false), "opts", false, false, None, &[]);
     assert!(

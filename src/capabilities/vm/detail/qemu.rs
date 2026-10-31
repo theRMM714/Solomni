@@ -19,17 +19,18 @@ use std::time::{Duration, Instant};
 /// 约束：有围栏的命令仍按 guest helper 的 30 秒杀树；供给编排可能下载几百 MB，30 秒不够。
 const UNFENCED_GUEST_RUN_SECS: u64 = 1800;
 
-/// 目的：QEMU 的加速器有序表（按平台）：本平台的硬件加速排前，TCG 兜底；值是 -machine 的 accel=… 参数。
-/// 约束：QEMU 会把本平台不认识的加速器记为 invalid 并继续试下一项，所以同一份参数可跨平台复用。
-pub fn accelerators() -> &'static str {
+/// 目的：本平台的硬件加速参数（-machine 的 accel=…）；None = 这个平台没有可用的硬件加速，虚拟机档不可用。
+/// 约束：**只用硬件加速，不退回软件模拟（TCG）**：软件模拟慢到没有可用性（实测同一台 guest 慢 2–5 倍，
+///   共享挂载在慢启动里间歇失败），静默回退会把"这台机器没有加速"伪装成"虚拟机档时好时坏"。
+pub fn accelerators() -> Option<&'static str> {
     if cfg!(windows) {
-        "accel=whpx:tcg"
+        Some("accel=whpx")
     } else if cfg!(target_os = "macos") {
-        "accel=hvf:tcg"
+        Some("accel=hvf")
     } else if cfg!(target_os = "linux") {
-        "accel=kvm:tcg"
+        Some("accel=kvm")
     } else {
-        "accel=tcg"
+        None
     }
 }
 
@@ -105,6 +106,9 @@ pub fn engine_args(
     net_options: &[String],
 ) -> Vec<String> {
     let mut a: Vec<String> = Vec::new();
+    // 没有硬件加速的平台不会走到启动（boot 先拒绝）；这里给一个 QEMU 不认识的加速器，
+    // 万一被绕过也在启动时立刻报错，绝不悄悄退回 TCG。
+    let accel = accelerators().unwrap_or("accel=none");
     a.push("-m".to_string());
     a.push(GUEST_MEM_MB.to_string());
     // vhost-user 设备（virtiofs）要求 guest RAM 是可共享内存：给一个同尺寸的 memfd 后端，挂到唯一 numa 节点。
@@ -121,7 +125,7 @@ pub fn engine_args(
         "-smp",
         "2",
         "-machine",
-        accelerators(),
+        accel,
         "-display",
         "none",
         "-no-reboot",
@@ -201,6 +205,13 @@ impl VmEngine for QemuEngine {
     }
 
     fn boot(&self, spec: &GuestSpec, share: &SharePlan) -> Result<Box<dyn GuestVm>, String> {
+        // 只用硬件加速：没有就如实拒绝（不回退软件模拟，TCG 的启动与共享都慢到没有可用性）。
+        let Some(accel) = accelerators() else {
+            return Err(
+                "本平台没有可用的硬件加速：虚拟机档只走硬件加速（KVM / WHPX / HVF），不退回软件模拟"
+                    .to_string(),
+            );
+        };
         let listener =
             TcpListener::bind("127.0.0.1:0").map_err(|e| format!("占不到 QGA 端口：{}", e))?;
         let port = listener.local_addr().map_err(|e| e.to_string())?.port();
@@ -265,7 +276,7 @@ impl VmEngine for QemuEngine {
             .stderr(Stdio::inherit());
         // 父死子亡（Unix）与独立进程组：核心被强杀时不许 QEMU 继续攥着镜像。
         procs::guard(&mut cmd);
-        let child = procs::spawn(cmd).map_err(|e| format!("起不了 QEMU（{}）：{}", exe, e))?;
+        let mut child = procs::spawn(cmd).map_err(|e| format!("起不了 QEMU（{}）：{}", exe, e))?;
         // 作业对象（Windows）/ 守门进程（macOS）：核心一死，它跟着死；挂不上只如实少一层兜底，不阻断启动。
         let launched = procs::attach(&child, "guest");
         let pid = child.id();
@@ -281,20 +292,28 @@ impl VmEngine for QemuEngine {
             });
         }
         drop(listener);
-        let stream = match connect_within(port, Duration::from_secs(30)) {
+        let stream = match connect_within(port, Duration::from_secs(30), Some(&mut child)) {
             Ok(s) => s,
             Err(e) => {
                 // 连不上就把刚拉起的 QEMU 与刚建的可写层都收掉，别留孤儿。
                 if let Some(book) = &self.book {
                     book.forget(pid);
                 }
-                let mut c = child;
-                let _ = c.kill();
-                let _ = c.wait();
+                let _ = child.kill();
+                let _ = child.wait();
                 if let Some(path) = &overlay {
                     let _ = std::fs::remove_file(path);
                 }
-                return Err(e);
+                // QEMU 一到就被加速器判死：错误里给出去处，避免用户以为是共享或镜像的问题。
+                let hint = if e.contains("已退出") {
+                    format!(
+                        "；本档只用硬件加速（{}），加速器不可用时不退回软件模拟",
+                        accel
+                    )
+                } else {
+                    String::new()
+                };
+                return Err(format!("{}{}", e, hint));
             }
         };
         // 读超时：agent 还没起时不能让 read_line 干等——首启轮询与运行期失败都要有界。
@@ -440,12 +459,23 @@ fn create_overlay(engine_exe: &str, base: &Path, overlay: &Path) -> Result<(), S
     Ok(())
 }
 
-fn connect_within(port: u16, budget: Duration) -> Result<TcpStream, String> {
+/// 目的：在预算内等 QGA 通道；同时盯着 QEMU 进程——它提前退出（例如加速器不可用）就立刻报出来，
+///   不把"加速器起不来"拖成 30 秒的"等通道超时"。
+fn connect_within(
+    port: u16,
+    budget: Duration,
+    mut child: Option<&mut Child>,
+) -> Result<TcpStream, String> {
     let deadline = Instant::now() + budget;
     loop {
         match TcpStream::connect(("127.0.0.1", port)) {
             Ok(s) => return Ok(s),
             Err(e) => {
+                if let Some(proc) = child.as_deref_mut() {
+                    if let Ok(Some(status)) = proc.try_wait() {
+                        return Err(format!("QEMU 进程已退出（{}）：{}", status, e));
+                    }
+                }
                 if Instant::now() >= deadline {
                     return Err(format!("等 QGA 通道超时（端口 {}）：{}", port, e));
                 }
@@ -574,7 +604,7 @@ impl QemuHandle {
     /// 目的：通道断了就照同一个端口重连一次，并把读超时照原样装回去。
     /// 约束：QEMU 的 chardev 还没就绪时连上的那条会被它 RST——"连上"不等于"通"，断了就重连。
     fn reconnect(&mut self) -> Result<(), String> {
-        let stream = connect_within(self.port, Duration::from_secs(5))?;
+        let stream = connect_within(self.port, Duration::from_secs(5), self.child.as_mut())?;
         stream
             .set_read_timeout(Some(Duration::from_secs(10)))
             .map_err(|e| format!("给 QGA 通道设读超时失败：{}", e))?;
