@@ -80,6 +80,8 @@ T0 与业务测试在同一次运行里出结果，但结论分开记：质量�
 > L4 端到端在 `tests/cross-platform/e2e/root/` 下**现场生成**夹具：`orchestrator.js` 把产品根的
 > `prompts/`、`systools/` 与三个真模块（`harvest` / `render` / `indexer`）拷进去再启动产品。那是**运行时副本、不是文档面**——
 > 不要手改、不要当文档审计；要改就改产品根的那一份，副本每次重跑都会覆盖。
+> 仓库有项目内工具链（`.tools/toolchains/active.json`）时，编排器把 `.tools/` 链进夹具根：产品按**产品根**找工具链，
+> 夹具根没有就会回落宿主 PATH；宿主解释器装在用户目录（scoop / nvm）时容器围栏里跑不到。没有项目内工具链（如 CI 未装置备）则保持宿主回退。
 
 ### 环境引导自检（`tests/env-bootstrap.mjs`）
 

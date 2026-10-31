@@ -33,6 +33,41 @@ function dropFixtureVm() {
   fs.rmSync(p, { recursive: true, force: true });
 }
 
+/** 夹具根的 .tools：产品按**产品根**找项目内工具链（`.tools/toolchains/active.json`），
+ * 夹具根没有它就会回落宿主 PATH——宿主解释器常装在用户目录（scoop / nvm），容器围栏里跑不到。
+ * 仓库里有项目内工具链就链过去；没有（例如 CI 没装置备）就保持宿主回退，如实说。 */
+function linkFixtureToolchains() {
+  const from = path.join(PRODUCT_ROOT, ".tools");
+  const to = path.join(FIXTURE, ".tools");
+  const active = path.join(from, "toolchains", "active.json");
+  if (!fs.existsSync(active)) {
+    console.log("[e2e] 仓库没有项目内工具链（.tools/toolchains/active.json）：按宿主 PATH 跑");
+    return;
+  }
+  let st = null;
+  try {
+    st = fs.lstatSync(to);
+  } catch {}
+  if (st) {
+    if (st.isSymbolicLink()) {
+      console.log("[e2e] 夹具 .tools 已链接：跑项目内工具链");
+      return;
+    }
+    // 不是链接（用户自备的一份 / 手工拷贝）：如实说，不删别人的东西。
+    console.log("[e2e] 夹具根的 .tools 不是链接，按它自己那份跑");
+    return;
+  }
+  try {
+    // junction 不需要管理员/开发者模式（目录符号链接需要）；Windows 上 junction 目标必须是绝对路径。
+    fs.symlinkSync(from, to, process.platform === "win32" ? "junction" : "dir");
+    console.log("[e2e] 夹具 .tools → 仓库 .tools（项目内工具链）");
+  } catch (e) {
+    // 链不上就**失败**，不静默回落：回落会让围栏里的解释器跑不到，最后只剩一堆难懂的失败。
+    console.error("[e2e] 夹具 .tools 链接失败：" + e.message);
+    throw e;
+  }
+}
+
 /** 本机可用的解释器名（探不到也照写，让工具失败时如实报错，而不是静默跳过）。 */
 function interpreter() {
   const { spawnSync } = require("child_process");
@@ -211,6 +246,8 @@ async function main() {
     recursive: true,
     force: true,
   });
+  // 夹具根也要看得到**项目内工具链**：否则产品按宿主 PATH 找解释器，围栏里跑不到（宿主装在用户目录时）。
+  linkFixtureToolchains();
   // 工具命令行按平台生成：Linux / macOS 上解释器通常叫 python3，Windows 上叫 python（写死一个必然在另一个平台挂）。
   const py = interpreter();
   writeToolbox(py);
