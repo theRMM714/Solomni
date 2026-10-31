@@ -587,16 +587,16 @@ fn silent_runner_double_fails_loudly_on_any_call() {
 fn fence_host_doubles_release_record_and_propagate_failure() {
     let s = spec();
     NoFenceHost
-        .release(&s)
+        .release_call(&s)
         .expect("本平台没有该机制时，空操作实现必须成功");
     let rec = RecordingFence::new();
-    rec.release(&s).expect("记录型实现成功");
-    rec.release(&s).expect("重复撤销不报错（幂等）");
+    rec.release_call(&s).expect("记录型实现成功");
+    rec.release_call(&s).expect("重复撤销不报错（幂等）");
     assert_eq!(rec.released.lock().expect("锁").as_slice(), ["a", "a"]);
 
     let bad = RecordingFence::new().fail_with("撤权失败");
     assert_eq!(
-        bad.release(&s).unwrap_err(),
+        bad.release_call(&s).unwrap_err(),
         "撤权失败",
         "撤权失败不得被当成已撤销"
     );

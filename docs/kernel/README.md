@@ -85,6 +85,7 @@
   - 回执把"用户拒绝"与"没人答"分开写清楚。
 - **构不出可用选项**时**不发起裁决**（契约禁止置灰）：有可回答的前端就**停掉这个会话 + 落一条警告**，没有前端只如实拒绝这次调用；停过一次之后不再推卡。
 - **可选落点授不上只记事实**：留一条 stderr 脚印，不牵动这次执行。
+- **三类根（仅 Windows）**：① **可信执行基座**——产品内工具链（`.tools/`）与运行包（`runtimes/<包>`）是只读二进制、不携带任何 scope 信息，一次性授给 `ALL APPLICATION PACKAGES`（与系统解释器目录同路），**不进按 reach 的容器身份**；② **受保护数据/代码**——私有沙箱、共享区、模块目录、模块 `userdata/`、用户授权只读根，按 reach 授给容器 SID；③ 系统基线（`C:\Windows` 等）。把工具链放进 reach 会让同一份 16k 文件按每个 scope 组合各授一次（本机实测 56s/次），属于类别错误。
 - **容器临时目录先建**（仅 Windows）：`prepare_fence` 在授权前建好 `<私有沙箱>/Packages/<容器名>/AC/Temp`——AppContainer 的 `GetTempPath2` **不读 TMP/TEMP**，编译器这类程序缺了它直接 abort（`Cannot create temporary file`）；目录在 `rw` 之下，递归 ACE 覆盖它，不单列一条授权。`private` 为空时跳过并记一条事实。
 - **未授权档位不是这条路**（仅 Windows）：用户没开 `sandbox.policy.windows.write_acl` 时外层根本不写权限项，容器围栏不装；若策略要求强制则拒绝，否则按无围栏执行并在启动报告标出。Linux / macOS 没有外层授权这一步，围栏照常装。
 - **启动门（组合根）**：默认 CLI 与 `-webUI` 都先判 `require` vs 本次实际，并把「未授权」与「本机能力缺失」分开报；未满足时只能本次降级 / 重设 / 退出。没有可回答的前端、或 `on_unavailable=refuse` 且不重设 = 退出，不会启动前端。首次启动（没有 `.home/settings.yaml`）在 Windows 先问一次是否授权写 ACL；选否不写盘、进入启动门。`require` + `write_acl=false` 的矛盾配置在加载 / 保存时即拒绝，不会进入门。
@@ -93,9 +94,9 @@
 
 **平台**：只有 Windows 有「外层授权写 ACL」这一步；Linux 的 Landlock 与 macOS 的 seatbelt 在守门进程里自足，那里没有 `prepare_fence`（不是存在但空转）。三个平台各自的强制项与降级条件见下「工具进程与守门协议」。
 
-**启动对账只回收归属明确已死的条目**：`reconcile` 走台账、**不调用** `sweep_orphan_aces` / `sweep_profiles`（那两条无归属、会误伤在跑实例）；孤儿清扫只在用户手动的 `--fence-clean`。
+**启动对账只回收归属明确已死的条目**：`reconcile` 走台账、**不调用** `sweep_orphan_aces` / `sweep_profiles`（那两条无归属、会误伤在跑实例）；孤儿清扫只在用户手动的 `--fence-clean`。台账之外的本程序 profile 会以"只报告、不自动删"列出来（没有归属证明，删了会误伤在跑实例），处置入口同样是 `--fence-clean`。
 
-**释放按会话租约**：`release_fence` 只撤"当前进程 + 当前会话"的那一份归属；同名 agent 的另一个并发会话仍持归属时，ACE 与快照都留着。解释器基线与容器 profile 不属于任何会话（进程级归属），不受单会话释放影响。
+**身份按 reach、生命周期按会话**：Windows 的容器身份 = `会话租约 + agent + 受保护根集合（reach 指纹，不含工具链、不含 net）`——同一会话里不同 scope 的调用根集合不同 → 不同 SID（窄调用看不到宽调用的根），同一 reach 的后续调用复用 SID 与 ACL。授权由会话持有：调用结束**不**释放，会话改配 / 删除时由 `release_by_lease` 按会话租约撤 ACE、删 profile；崩溃残留由 `reconcile` 按死归属回收。一次性调用（构建 / 独立模块工具）没有会话，各自唯一租约，跑完走 `release_call`（含 `private/Packages/<名字>` 临时目录）。
 
 ## 六、工具进程与守门协议
 
@@ -110,8 +111,8 @@
   DACL 要管理员才写得动）。执行前把首 token 的程序名解析成绝对路径、再改写成相对 cwd 的路径（同卷才改；
   裸名按容器里生效的 PATH / PATHEXT 解析；跨卷或解析不出则原样）。参数里的路径不动。
 - 环境白名单：外层 `env_clear`，只注入 `fence_env`（PATH / PATHEXT / 系统根 / LANG / TZ 等，`HOME` 与 `TEMP` 指向该 agent 私有沙箱）与模块隐秘字段；其它环境与凭据不进工具进程。
-- **围栏由本次权限 reach 派生**（策略在 `capabilities/tools/domain/fence.rs`）：`FenceSpec::for_call` 只把 granted 的 private / shared-read / module-read / module-write / host-read / network 放进 rw / ro_tree / ro / net；shared-write 永不进 rw，module-write 只给指定模块自己的 userdata。`for_session` 是撤销授权用的并集。
-- **shell 的一次执行**：`run_shell` 走同一个守门进程；`timeout_secs` 是本次的（不沿用模块工具的 30 秒），到点或取消旗置位都杀整棵树；输出 head+tail（4k 开头 + 12k 结尾）；sandbox / external 都 `require_fs + require_net + allow_degraded=false`，装不上拒绝；Windows 的 sandbox / external 用按次临时容器 profile（结束撤 ACE + 删 profile）；shell 的只读根另加基础工具链与 agent 运行包根。
+- **围栏由本次权限 reach 派生**（策略在 `capabilities/tools/domain/fence.rs`）：`FenceSpec::for_call` 只把 granted 的 private / shared-read / module-read / module-write / host-read / network 放进 rw / ro_tree / ro / net；shared-write 永不进 rw，module-write 只给指定模块自己的 userdata。`for_session` 只作为**会话 base**（提供主机只读根与全局断网事实）再派生按次围栏，不用于撤权。
+- **shell 的一次执行**：`run_shell` 走同一个守门进程；`timeout_secs` 是本次的（不沿用模块工具的 30 秒），到点或取消旗置位都杀整棵树；输出 head+tail（4k 开头 + 12k 结尾）；sandbox / external 都 `require_fs + require_net + allow_degraded=false`，装不上拒绝；Windows 的容器身份按 `会话 + agent + 受保护根集合` 派生（同一 reach 的调用复用 SID 与 ACL；不同 scope 根集合不同 → 不同 SID），授权按会话持有、会话改配/删除时回收；工具链与运行包是基础工具链基线，不参与按 reach 授权。
 - **VM guest 的 per-call 断网**：guest helper 读策略里的 `net`，false 时在子进程前 `unshare(CLONE_NEWNET)`；失败以 111 fail-closed，不静默降级。helper 同时读 `timeout_secs` 并按它杀树；guest 输出按 `GuestRun.output_limit` 只留开头或开头+结尾。
 - 收尾：stdout / stderr 分别读；模块工具超时 30 秒（`ProcTools::timeout`），shell 用本次 `timeout_secs`；到时连根杀树；输出上限 16000 字符（模块只留开头，shell 开头+结尾）。超时、截断、围栏失败的文案经 `ProcessTexts` 注入，机制不硬编码。
 - 围栏装不上（本机不支持 / 容器起不来）：命中 `require_fs` / `require_net` 且未同意降级时，守门进程以 `FENCE_FAILED` **拒绝执行**；已同意降级才如实降级继续。Linux 的文件系统与网络两项**独立**判定，一项装不上不影响另一项。能力等级已在启动报告里说明。

@@ -53,7 +53,11 @@ pub(crate) fn sandbox_shell_only_gets_the_private_sandbox_and_runtime_roots() {
     let one = &calls[0];
     assert_eq!(one.script, "echo hi");
     assert_eq!(one.timeout, Duration::from_secs(5));
-    assert!(one.ephemeral, "sandbox 走按次临时 profile");
+    assert_eq!(
+        (one.fence.agent.as_str(), one.fence.lease.as_str()),
+        (mt.sandbox.agent.as_str(), mt.sandbox.session.as_str()),
+        "容器身份 = 会话 + agent + 可达集合（不再按次重派）"
+    );
     assert_eq!(one.fence.cwd, mt.sandbox.private, "cwd 固定私有沙箱");
     assert_eq!(one.fence.rw, vec![mt.sandbox.private.clone()]);
     assert!(
@@ -136,13 +140,10 @@ pub(crate) fn external_profile_asks_and_all_reach_does_not() {
     let calls = runner.calls.lock().expect("锁");
     assert_eq!(calls.len(), 1);
     let one = &calls[0];
-    assert!(
-        one.ephemeral,
-        "external 也走按次 profile：不把更宽的根留到下一次调用"
-    );
-    assert!(
-        one.fence.agent.contains("#shell-"),
-        "按次 profile 名要带独有后缀"
+    assert_eq!(
+        (one.fence.agent.as_str(), one.fence.lease.as_str()),
+        (mt.sandbox.agent.as_str(), mt.sandbox.session.as_str()),
+        "external 与 sandbox 共用会话身份，根集合不同才分 SID"
     );
     assert!(
         one.fence.ro_tree.contains(&mt.sandbox.shared),
@@ -169,9 +170,9 @@ pub(crate) fn external_profile_asks_and_all_reach_does_not() {
     assert_eq!(runner2.calls.lock().expect("锁").len(), 1);
 }
 
-/// 目的：模块工具每次调用都带唯一租约，并在跑完后按该租约撤销（Windows 上不把更宽的根留给下一次）。
+/// 目的：模块工具的容器身份归会话（lease = 会话 id），调用结束**不**做按次释放（授权按会话持有）。
 #[test]
-pub(crate) fn module_tool_call_releases_its_own_lease() {
+pub(crate) fn module_tools_hold_the_session_lease_and_do_not_release_per_call() {
     let runner = Arc::new(RecordingRunner::new("ok", true));
     let fence = Arc::new(crate::tests::doubles::RecordingFence::new());
     let mut m = member_with_tools("m0", Vec::new(), Arc::clone(&runner));
@@ -186,26 +187,19 @@ pub(crate) fn module_tool_call_releases_its_own_lease() {
     let cancel = AtomicBool::new(false);
     let plan = |_: &str| vec![(Some("m0".to_string()), "grep".to_string(), "{}".to_string())];
     let mut sink = |_: SessionEvent| {};
-    let done = run_batch(&mut mt, &plan("a"), None, None, &cancel, &mut sink);
-    assert!(done[0].1.ok, "{}", done[0].1.output);
-    let first = fence
-        .leases
-        .lock()
-        .expect("锁")
-        .first()
-        .cloned()
-        .expect("这次调用要请求撤权");
-    assert!(first.contains("#call-"), "租约要按调用唯一（实际 {first}）");
-    assert_eq!(
-        fence.released.lock().expect("锁").as_slice(),
-        ["m0"],
-        "撤销的是这个 agent 的容器 SID"
+    for _ in 0..2 {
+        let done = run_batch(&mut mt, &plan("a"), None, None, &cancel, &mut sink);
+        assert!(done[0].1.ok, "{}", done[0].1.output);
+    }
+    assert!(
+        fence.released.lock().expect("锁").is_empty()
+            && fence.leases.lock().expect("锁").is_empty(),
+        "调用结束不做按次释放：授权按会话持有"
     );
-    let done2 = run_batch(&mut mt, &plan("b"), None, None, &cancel, &mut sink);
-    assert!(done2[0].1.ok, "{}", done2[0].1.output);
-    let leases = fence.leases.lock().expect("锁");
-    assert_eq!(leases.len(), 2);
-    assert_ne!(leases[0], leases[1], "两次调用不能共用一个租约");
+    assert!(
+        fence.lease_releases.lock().expect("锁").is_empty(),
+        "调用结束也不按会话撤（那发生在会话改配/删除时）"
+    );
 }
 
 /// 目的：view 档不发放 shell、workspace 及以上发放。

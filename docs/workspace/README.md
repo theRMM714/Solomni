@@ -41,7 +41,7 @@
 
 模块事实（含 `has_userdata`）由 `modules` 提供：沙箱把它收成 `modules_with_userdata` 一起注入，围栏派生据此决定派不派这条落点——domain 层不读盘。
 
-沙箱还带**会话 id**（`Sandbox.session`）：围栏把它当**会话租约**（`FenceSpec.lease`）带进授权台账，同名 agent 的多个并发会话释放时互不误撤（机制侧见 [docs/kernel/README.md](../kernel/README.md) 的「释放按会话租约」）。
+沙箱还带**会话 id**（`Sandbox.session`）：围栏把它当容器身份里的会话租约，配合 agent 与受保护根集合派生 SID（见 [docs/kernel/README.md](../kernel/README.md) 的「身份按 reach、生命周期按会话」）；授权按会话持有，会话结束统一回收。
 
 虚拟机档的沙箱还带**路径翻译器**（`Sandbox.path_codec`，本机档为 None = 恒等）：系统工具寻址、模块工具在 guest 里
 执行、以及用户 `@` 引用的改写共用同一座桥，三处给的是同一种写法（见 [docs/tools/tools-and-roles.md](../tools/tools-and-roles.md) 的「路径模型」）。

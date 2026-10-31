@@ -156,8 +156,6 @@ pub struct ShellRun<'a> {
     pub path: Option<&'a std::ffi::OsStr>,
     /// 目的：这一趟的提问端口（围栏必要落点授不上时经它问用户；None = 没有可回答的前端）。
     pub ask: Option<&'a dyn AskUser>,
-    /// 目的：这次调用用的是**按次临时容器 profile**（Windows sandbox）：跑完要撤 ACE 并删 profile。
-    pub ephemeral: bool,
 }
 
 /// 目的：一次外部进程执行端口——机制（围栏安装、进程拉起、stdin 送参、超时杀树、截断）在适配层。
@@ -213,16 +211,20 @@ pub trait SessionHost: Send + Sync {
     fn open(&self, spec: &SessionSpec) -> Result<Box<dyn Session>, String>;
 }
 
-/// 目的：围栏授权释放端口——会话删除时由核心请求一次，把该会话各 agent 的围栏授权撤掉。
-/// 参数：`spec` = 该席的围栏（按 `lease` 区分同名 agent 的并发会话）。
-/// 返回：撤权失败或平台限制时如实报错。
-/// 约束：调用方只提出请求，不碰任何 ACL；本平台没有该机制时实现为空操作。
+/// 目的：围栏授权的**按次**释放端口——一次调用结束，撤它自己写下的 ACE、删它的按次容器 profile 与临时目录。
+/// 参数：`spec` = 这一次调用的围栏（`lease` 已按调用唯一）。
+/// 返回：撤权/删 profile 失败时如实报错。
+/// 约束：调用方只提出请求，不碰任何 ACL；本平台没有按次 profile 时实现为空操作。
 pub trait FenceHost: Send + Sync {
-    fn release(&self, spec: &FenceSpec) -> Result<(), String>;
+    /// 目的：按**会话租约**撤销本进程为该会话写下的授权与 profile（会话改配 / 删除时调用）。
+    /// 约束：默认空操作（其它平台没有持久授权）；调用方只提出请求，不碰 ACL。
+    fn release_by_lease(&self, _lease: &str) -> Result<(), String> {
+        Ok(())
+    }
 
-    /// 目的：撤销一次**临时容器 profile**（Windows sandbox shell）的授权并删 profile。
-    /// 约束：默认空操作（其它平台没有按次 profile）；调用方只提出请求，不碰 ACL。
-    fn release_shell(&self, _spec: &FenceSpec) -> Result<(), String> {
+    /// 目的：撤销一次**一次性调用**（构建 / 独立调用）的围栏授权：撤 ACE、删按次 profile、删按次临时目录。
+    /// 约束：默认空操作；会话内的调用**不**走它（授权按会话持有）。
+    fn release_call(&self, _spec: &FenceSpec) -> Result<(), String> {
         Ok(())
     }
 }

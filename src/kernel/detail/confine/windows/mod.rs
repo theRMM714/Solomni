@@ -198,7 +198,7 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
     let base_owner = current_owner();
     let mut rec = load_record(home);
     let container = container_name(spec);
-    if let Err(e) = journal_add_profile(home, &mut rec, &container, base_owner.clone()) {
+    if let Err(e) = journal_add_profile(home, &mut rec, &container, container_owner.clone()) {
         // 台账落不下就不能动本机权限项（这一环是必要的）：如实收尾，让调用方去问用户。
         eprintln!("[围栏] 授权台账落盘失败：{}", e);
         prep.fail(FencePart::Ledger, PathBuf::new(), e);
@@ -255,12 +255,8 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
             }
         }
     }
-    // **祖先链不用授穿过**：容器令牌自带 SeChangeNotifyPrivilege；给祖先授穿过要改写巨型目录 DACL（真机 ~90 s/条）。
-    // shell 例外：PowerShell 起动要逐级读 cwd 属性，只给 shell 的祖先补 RIGHTS_STAT（不递归/继承/读内容），见 grant_targets。
-    free_sid(base);
-
-    // 数据边界（会话目录、模块目录）→ 授给该 agent 自己的容器 SID（互相看不见）；
-    // 落点清单由 grant_targets 统一给出（叶子 + 父目录的只读属性），prepare 与 release 共用同一份。
+    // **祖先链不用授穿过**：令牌自带 SeChangeNotifyPrivilege；给祖先授穿过要改写巨型目录 DACL（真机 ~90 s/条），
+    // shell 例外只补 RIGHTS_STAT（见 grant_targets）；base 在下面的数据边界循环里还要用，循环后再释放。
     let sid = match container_sid(&container) {
         Ok(sid) => sid,
         Err(e) => {
@@ -289,18 +285,29 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
             eprintln!("[诊断] 授权落点不存在，跳过（{}）", path.display());
             continue;
         }
+        // 工具链 / 运行包是**可信执行基座**：只读、无 scope 信息，授给 baseline 一次即可（之后按实际 ACE 跳过）。
+        // 其余落点才授给本次调用的容器 SID（数据边界的可见性按 reach 收窄）。
+        let to_base = rights == RIGHTS_RO && is_trusted_base(path, &root);
+        if to_base && has_ace_for(base, path, rights) {
+            continue;
+        }
+        let (grant_sid, grant_text, grant_owner) = if to_base {
+            (base, &base_text, base_owner.clone())
+        } else {
+            (sid, &sid_text, container_owner.clone())
+        };
         // 归属总要补记（同名 agent 的另一个会话靠它保住这条授权）；改不改 ACL 由 grant_one_journaled
         // 按**实际 ACE** 判断——权限收窄并撤权后，下一次 prepare 必须能把仍需要的授权补回来。
         match grant_one_journaled(
             home,
             &mut rec,
-            sid,
-            &sid_text,
+            grant_sid,
+            grant_text,
             &target,
             &root,
-            container_owner.clone(),
+            grant_owner,
         ) {
-            Ok(true) => written.push((sid_text.clone(), target.path.clone(), rights)),
+            Ok(true) => written.push((grant_text.clone(), target.path.clone(), rights)),
             Ok(false) => {}
             Err(e) => {
                 // 按这一环的**必要性**分流：必要落点授不上要问用户（不许降级），可选落点只记事实。
@@ -310,6 +317,7 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
         }
     }
     free_sid(sid);
+    free_sid(base);
     if !written.is_empty() {
         // 如实打印足迹：用户看得见到底动了哪些目录、授给了谁。
         let list: Vec<String> = written
@@ -378,7 +386,7 @@ pub fn run_fenced(
     }
     // 建过就记进台账：守门进程是唯一真正建 profile 的地方，外层只知道"该建"、不知道"建成了"。
     if let Some(h) = home {
-        record_profile(h, &name);
+        record_profile(h, &name, &spec.lease);
     }
     let sid = match container_sid(&name) {
         Ok(s) => s,

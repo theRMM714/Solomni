@@ -406,11 +406,13 @@ fn main() {
     let io = capabilities::tools::detail::FsSysIo::default();
     // **工具能力**：三张表由加载器读进来，三个出站端口（外部执行 / 内置读写 / 围栏释放）
     // 只由它的 service 持有（R12）。装配期就挡下"悬空引用 / 缺能力"。
+    let fence_host: Arc<dyn kernel::ports::FenceHost + Send + Sync> =
+        Arc::new(kernel::detail::confine::FenceHostAdapter::new(home.clone()));
     let tools_svc = match capabilities::tools::service::ToolsService::new(
         &systools_source,
         Arc::new(tools),
         Arc::new(io),
-        Arc::new(kernel::detail::confine::FenceHostAdapter::new(home.clone())),
+        Arc::clone(&fence_host),
     ) {
         Ok(svc) if capabilities::tools::api::Tools::problems(&svc).is_empty() => Arc::new(svc),
         Ok(svc) => {
@@ -558,6 +560,7 @@ fn main() {
             Arc::clone(&vm),
             Arc::clone(&provision),
             Arc::new(build_runner),
+            Arc::clone(&fence_host),
             Arc::new(kernel::detail::HostProbeAdapter),
             std::sync::Arc::clone(&log),
             base_roots.clone(),

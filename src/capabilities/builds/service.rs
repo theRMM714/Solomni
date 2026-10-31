@@ -13,7 +13,7 @@ use crate::capabilities::packages::api::{
 use crate::capabilities::provision::api::Provision;
 use crate::capabilities::vm::api::{self as vm, ExecPlan, GuestRun, GuestSpec, MissingEntry, Vm};
 use crate::kernel::api::{FenceSpec, Tier};
-use crate::kernel::ports::{HostProbe, Log, ProcessRunner};
+use crate::kernel::ports::{FenceHost, HostProbe, Log, ProcessRunner};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -25,6 +25,7 @@ pub struct BuildsService {
     vm: Arc<dyn Vm + Send + Sync>,
     provision: Arc<dyn Provision + Send + Sync>,
     runner: Arc<dyn ProcessRunner + Send + Sync>,
+    fence: Arc<dyn FenceHost + Send + Sync>,
     probe: Arc<dyn HostProbe + Send + Sync>,
     log: Arc<dyn Log + Send + Sync>,
     /// 项目内基础工具链的只读安装根：本机档构建围栏要放行它们（编译器要读自己的 libexec / 动态库）。
@@ -41,6 +42,7 @@ impl BuildsService {
         vm: Arc<dyn Vm + Send + Sync>,
         provision: Arc<dyn Provision + Send + Sync>,
         runner: Arc<dyn ProcessRunner + Send + Sync>,
+        fence: Arc<dyn FenceHost + Send + Sync>,
         probe: Arc<dyn HostProbe + Send + Sync>,
         log: Arc<dyn Log + Send + Sync>,
         toolchain_roots: Vec<PathBuf>,
@@ -51,6 +53,7 @@ impl BuildsService {
             vm,
             provision,
             runner,
+            fence,
             probe,
             log,
             toolchain_roots,
@@ -206,9 +209,11 @@ impl BuildsService {
         let state_dir = self.root.join(".vm").join("build-state");
         let home = state_dir.join(&module.manifest.id).join("home");
         std::fs::create_dir_all(&home).map_err(|e| format!("建状态目录失败：{}", e))?;
+        // 构建也是一次调用：按次 lease → Windows 上独立容器身份，跑完自己的 profile/ACE 自己收。
+        let agent = format!("build:{}", module.manifest.id);
         let fence = FenceSpec {
-            agent: format!("build:{}", module.manifest.id),
-            lease: String::new(),
+            agent: agent.clone(),
+            lease: crate::kernel::api::call_lease(&agent),
             rw: vec![module.root.clone(), state_dir.join(&module.manifest.id)],
             ro: self.toolchain_roots.clone(),
             ro_tree: plan.roots.clone(),
@@ -226,6 +231,11 @@ impl BuildsService {
         let out = self
             .runner
             .run(&fence, &decl.command, "{}", &[], plan.path.as_deref(), None);
+        // 按次收尾：撤 ACE、删按次 profile 与临时目录；失败如实记录（残留由 reconcile 按死归属回收）。
+        if let Err(e) = self.fence.release_call(&fence) {
+            self.log
+                .warn("builds::host", &format!("围栏按次收尾未完成：{}", e));
+        }
         if !out.ok {
             return Err(format!("构建命令失败（目标 host）{}", tail(&out.output)));
         }

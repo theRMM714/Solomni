@@ -1,13 +1,12 @@
 //! 入站能力面：**其它能力与呈现层只准用这里**（不许碰 `domain` / `ports`）。
 
-pub use crate::capabilities::tools::domain::fence::call_lease;
 pub use crate::capabilities::tools::domain::patch::{EditFault, Fault};
 pub use crate::capabilities::tools::domain::roles::{action_audit, RoleTable, SystemTools};
 pub use crate::capabilities::tools::domain::schema::{
     json_schema_lines, ArgFault, ToolBook, ToolSchema,
 };
 pub use crate::capabilities::tools::domain::shell::{
-    ephemeral_names, exit_code, guest_script, parse as parse_shell, with_scope_hint,
+    exit_code, guest_script, parse as parse_shell, with_scope_hint,
 };
 pub use crate::capabilities::tools::domain::systool::{
     arg_fault_text, is_builtin, is_exec, is_freeform, names, patch_decl, refuse, tool_notes,
@@ -79,6 +78,9 @@ pub trait ToolExec: Send + Sync {
         args_json: &str,
     ) -> ToolOutcome;
 
-    /// 会话删除时请求一次：把该会话各 agent 的围栏授权撤掉（调用方只提出请求，不碰任何 ACL）。
-    fn release_fence(&self, spec: &crate::kernel::api::FenceSpec) -> Result<(), String>;
+    /// 一次调用的收尾：撤它自己的 ACE、删按次容器 profile 与临时目录（调用方只提出请求，不碰任何 ACL）。
+    fn release_call(&self, spec: &crate::kernel::api::FenceSpec) -> Result<(), String>;
+
+    /// 按会话租约撤销：该会话的授权与 profile 由核心在改配 / 删除时统一回收。
+    fn release_by_lease(&self, lease: &str) -> Result<(), String>;
 }

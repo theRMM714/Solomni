@@ -408,7 +408,6 @@ pub(crate) struct ShellRecord {
     /// 目的：调用时取消旗是否已置位。
     pub(crate) cancel_set: bool,
     /// 目的：是否按次临时容器 profile。
-    pub(crate) ephemeral: bool,
     /// 目的：这一趟的 PATH。
     pub(crate) path: Option<std::ffi::OsString>,
 }
@@ -456,7 +455,6 @@ impl ProcessRunner for ShellRunner {
                 .cancel
                 .map(|c| c.load(std::sync::atomic::Ordering::Relaxed))
                 .unwrap_or(false),
-            ephemeral: run.ephemeral,
             path: run.path.map(|p| p.to_os_string()),
         });
         ToolOutcome {

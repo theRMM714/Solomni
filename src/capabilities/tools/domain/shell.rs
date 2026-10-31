@@ -96,19 +96,6 @@ pub fn exit_code(output: &str) -> Option<i32> {
     })
 }
 
-/// 目的：sandbox shell 的按次临时容器 profile 名与租约名（Windows W1 用；其它平台只是日志标识）。
-/// 约束：同一进程内单调递增 + pid，避免并发调用撞名；agent / lease 都带同一个后缀。
-pub fn ephemeral_names(agent: &str, session: &str) -> (String, String) {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    let tag = format!("{}-{}", std::process::id(), n);
-    (
-        format!("{}#shell-{}", agent, tag),
-        format!("{}#shell-{}", session, tag),
-    )
-}
-
 /// 目的：guest Linux 里跑 shell 的脚本包装：子 shell 接住用户脚本，打印退出码并原样退出。
 /// 约束：用户脚本里的 exit 只退出子 shell，包装仍能打印退出码；命令的 stdin 不提供交互。
 pub fn guest_script(script: &str) -> String {

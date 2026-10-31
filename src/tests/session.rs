@@ -1369,7 +1369,8 @@ pub(crate) fn edit_session_enforces_the_same_rules_as_creation() {
 }
 
 #[test]
-pub(crate) fn deleting_a_session_asks_the_fence_to_release_its_grants() {
+pub(crate) fn deleting_a_session_releases_its_fence_lease() {
+    use crate::tests::doubles::{InMemorySysIo, RecordingFence};
     let hist = Arc::new(InMemoryHistory::new());
     let fence = Arc::new(RecordingFence::new());
     seed_session(
@@ -1409,10 +1410,14 @@ pub(crate) fn deleting_a_session_asks_the_fence_to_release_its_grants() {
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     );
     assert!(core.history_delete("w").unwrap(), "会话目录该被删掉");
-    assert_eq!(
-        fence.released.lock().expect("锁").as_slice(),
-        &["甲".to_string()],
-        "删除会话要先请适配层撤销该 agent 的围栏授权（痕迹与会话同生共死）"
+    assert!(
+        fence
+            .lease_releases
+            .lock()
+            .expect("锁")
+            .iter()
+            .any(|l| l == "w"),
+        "删除会话要按会话租约撤销围栏授权（调用结束不释放，生命周期归会话）"
     );
 }
 

@@ -581,12 +581,8 @@ fn run_shell(
     fence.ro_tree.extend(ctx.runtime_roots.iter().cloned());
     fence.ro_tree.sort();
     fence.ro_tree.dedup();
-    // sandbox 与 external 都走按次临时 profile：Windows 上这次调用加的 ACE 跑完就撤，
-    // 不把更宽的根留给同一 agent 的下一次调用（scope 只决定本次 reach，不是 profile 的生命周期）。
-    let ephemeral = true;
-    let (agent, lease) = api::ephemeral_names(&ctx.sandbox.agent, &ctx.sandbox.session);
-    fence.agent = agent;
-    fence.lease = lease;
+    // 容器身份按"会话 + agent + 受保护根集合"派生（见 container_name）：scope 不同 → 根集合不同 → 不同 SID；
+    // 同一 reach 的后续调用复用 SID 与 ACL。生命周期归会话，调用结束不释放。
     if ctx.tier == crate::kernel::api::Tier::Vm && ctx.guest_lease.is_empty() {
         return ToolOutcome {
             ok: false,
@@ -625,7 +621,6 @@ fn run_shell(
             cancel: Some(cancel),
             path: ctx.runtime_path.as_deref(),
             ask,
-            ephemeral,
         };
         ctx.tools.run_shell(&run)
     };
@@ -722,15 +717,14 @@ pub(crate) fn dispatch_external(
                 .map(|v| v.as_slice())
                 .unwrap_or(&[]);
             // 每次调用按生效 reach 派生围栏：sh 与模块工具同一把尺子，不再用会话并集围栏执行。
-            // 租约按**调用**唯一：Windows 上这次调用加的 ACE 跑完就撤，不把更宽的根留给同一 agent 的下一次调用。
-            let mut fence = crate::kernel::api::FenceSpec::for_call(
+            // 容器身份 = 会话 + agent + 受保护根集合（见 container_name）；租约就是会话 id，调用结束不释放。
+            let fence = crate::kernel::api::FenceSpec::for_call(
                 &ctx.sandbox,
                 &grant.reach,
                 Some(&module),
                 &ctx.fence,
             )
             .at(&mt.root);
-            fence.lease = crate::capabilities::tools::api::call_lease(&ctx.sandbox.session);
             let outcome = if ctx.tier == crate::kernel::api::Tier::Vm {
                 // 虚拟机档：命令送进这个会话的 guest；per-call 断网由 guest helper 落实。
                 if ctx.guest_lease.is_empty() {
@@ -763,11 +757,6 @@ pub(crate) fn dispatch_external(
                     ask,
                 )
             };
-            // 按次撤 ACE：每次调用自己的租约只撤自己那份；并发调用各持 owner，互不撤权。
-            if let Err(e) = ctx.tools.release_fence(&fence) {
-                ctx.log
-                    .info("tools", &format!("模块工具调用围栏撤权未完成：{}", e));
-            }
             (module, outcome)
         }
         None => {

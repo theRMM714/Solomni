@@ -33,14 +33,36 @@ use windows_sys::Win32::System::Threading::{
 
 /// 文件对象（SetNamedSecurityInfoW / GetNamedSecurityInfoW 的对象类型）。
 use super::*;
-/// 目的：容器名：**只由 agent 名决定**——一个 agent 一个 profile，跨会话复用（数量有界），
-///   外层授权与守门进程因此各自能算出同一个 SID。各会话之间的路径隔离仍由那些目录上的 ACE 决定
-///   （同名 agent 的多个会话共用一个容器身份，这是"数量有界"换来的取舍）。
+/// 目的：容器名：**按"会话 + agent + 受保护根集合"派生**（reach 指纹）——同一会话里不同 scope 的调用
+///   根集合不同 → 不同 SID（窄调用看不到宽调用的根）；同一 reach 的后续调用复用同一个 SID 与已有 ACE。
+///   工具链/运行包是可信执行基座（授给 baseline），不在指纹里承担 scope 含义；net 是令牌能力，也不进指纹。
+///   外层授权与守门进程各自能算出同一个 SID；其它平台行为不变（这个名字只用于 Windows 的容器身份与日志）。
 pub(crate) fn container_name(spec: &FenceSpec) -> String {
     // FNV-1a：只为把名字收敛成定长标识（不是安全用途），避免容器名里出现中文与路径。
+    // 字段值逐段喂入并补分隔符，避免 ("ab","c") 与 ("a","bc") 撞成同一个身份。
+    let mut parts: Vec<String> = vec![
+        spec.lease.clone(),
+        spec.agent.clone(),
+        spec.private.to_string_lossy().into_owned(),
+        spec.cwd.to_string_lossy().into_owned(),
+    ];
+    for list in [&spec.rw, &spec.ro, &spec.ro_tree] {
+        let mut v: Vec<String> = list
+            .iter()
+            .map(|p| p.to_string_lossy().to_ascii_lowercase())
+            .collect();
+        v.sort();
+        v.dedup();
+        parts.extend(v);
+        parts.push("\u{1}".to_string());
+    }
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in spec.agent.as_bytes() {
-        h ^= *b as u64;
+    for part in &parts {
+        for b in part.as_bytes() {
+            h ^= *b as u64;
+            h = h.wrapping_mul(0x100_0000_01b3);
+        }
+        h ^= 0u64;
         h = h.wrapping_mul(0x100_0000_01b3);
     }
     format!("{}{:016x}", PROFILE_PREFIX, h)
@@ -52,17 +74,18 @@ pub(crate) fn container_name(spec: &FenceSpec) -> String {
 /// 约束：`prepare_fence` 在授权前把它建出来。`GetTempPath2` **不读 TMP/TEMP**：容器里缺了它，
 ///   编译器这类程序连临时文件都写不了（真机：g++ 直接 abort）。
 pub(crate) fn container_temp_dir(spec: &FenceSpec) -> Option<PathBuf> {
+    container_package_dir(spec).map(|dir| dir.join("AC").join("Temp"))
+}
+
+/// 目的：按次容器在私有沙箱里的**包目录**（`<私有沙箱>/Packages/<容器名>`）——临时目录的父级。
+/// 返回：私有沙箱为空（连 cwd 也没有）时 `None`。
+/// 约束：按次调用结束要连这份目录一起删（profile 被删后它就是空壳）；只在 release_call 里用。
+pub(crate) fn container_package_dir(spec: &FenceSpec) -> Option<PathBuf> {
     let private = spec.private_or_cwd();
     if private.as_os_str().is_empty() {
         return None;
     }
-    Some(
-        private
-            .join("Packages")
-            .join(container_name(spec))
-            .join("AC")
-            .join("Temp"),
-    )
+    Some(private.join("Packages").join(container_name(spec)))
 }
 
 /// 目的：名字是不是本程序建过的容器 profile（Windows 把包目录名转成小写，所以按不区分大小写比）。

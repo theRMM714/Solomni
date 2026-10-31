@@ -96,12 +96,13 @@ fn acl_round_trip(base: &Path, tag: &str) -> bool {
     ok
 }
 
-/// 容器 profile **一个 agent 一个**：同名 agent 跨会话复用同一个容器身份（数量有界），换 agent 就换 profile。
+/// 容器 profile **按"会话 + agent + 受保护根集合"派生**：同一次派生的两个进程算出同一个身份；
+/// 换会话、换 agent、换 reach（根集合）都是不同身份；`net` 不进指纹（它是令牌能力，不改变 ACL 可见性）。
 #[test]
-fn container_profile_is_one_per_agent() {
+fn container_profile_follows_the_session_and_reach() {
     let a = FenceSpec {
         agent: "甲".to_string(),
-        lease: String::new(),
+        lease: "w".to_string(),
         private: PathBuf::new(),
         ro_tree: Vec::new(),
         rw: vec![PathBuf::from("session").join("w1")],
@@ -109,17 +110,32 @@ fn container_profile_is_one_per_agent() {
         ro: Vec::new(),
         net: false,
     };
+    // 同一个（会话, agent, reach）重复派生：身份稳定（外层授权与守门进程各算一次必须一致）。
+    assert_eq!(container_name(&a), container_name(&a.clone()));
+    // 换会话：独立身份（同 reach 也不共用）。
     let mut b = a.clone();
-    b.rw = vec![PathBuf::from("session").join("w2")];
-    b.cwd = PathBuf::from("modules").join("m1");
-    let mut c = a.clone();
-    c.agent = "乙".to_string();
-    assert_eq!(
+    b.lease = "w2".to_string();
+    assert_ne!(
         container_name(&a),
         container_name(&b),
-        "同一个 agent 的不同会话共用一个 profile"
+        "同 reach 的另一个会话不共用 profile（撤销按会话）"
     );
-    assert_ne!(container_name(&a), container_name(&c), "不同 agent 不共用");
+    // 同会话、不同 reach：独立身份（窄调用看不到宽调用的根）。
+    let mut c = a.clone();
+    c.rw = vec![PathBuf::from("session").join("w2")];
+    assert_ne!(
+        container_name(&a),
+        container_name(&c),
+        "同一会话的不同根集合必须是不同身份"
+    );
+    // 换 agent：自然不共用。
+    let mut d = a.clone();
+    d.agent = "乙".to_string();
+    assert_ne!(container_name(&a), container_name(&d), "不同 agent 不共用");
+    // net 不进指纹：同一 reach 开/断网共用一个身份（可见范围不变，能力在令牌里按次给）。
+    let mut e = a.clone();
+    e.net = true;
+    assert_eq!(container_name(&a), container_name(&e), "net 不进容器身份");
     assert!(is_our_profile(&container_name(&a)));
 }
 
@@ -1806,6 +1822,54 @@ fn reconcile_reclaims_dead_owners_and_keeps_live_ones() {
     discard(&base);
 }
 
+/// 【启动对账】台账外的按次 profile：只报告，不自动删（没有归属证明，删了会误伤在跑实例）。
+#[test]
+fn reconcile_reports_ledger_less_profiles_without_deleting_them() {
+    if std::env::var("SOLOMNI_FENCE_LIVE")
+        .map(|v| v != "1")
+        .unwrap_or(true)
+    {
+        eprintln!(
+            "[探针] 未开启真机围栏测试：reconcile_reports_ledger_less_profiles_without_deleting_them 会创建 AppContainer profile（改本机状态），已跳过；要真跑加 --fence-live"
+        );
+        return;
+    }
+    let base =
+        std::env::temp_dir().join(format!("solomni-reconcile-orphan-{}", std::process::id()));
+    let home = base.join(".home");
+    std::fs::create_dir_all(&home).expect("建台账目录");
+    let spec = FenceSpec {
+        agent: "probe-reconcile-orphan".to_string(),
+        lease: "call-orphan".to_string(),
+        private: PathBuf::new(),
+        ro_tree: Vec::new(),
+        rw: Vec::new(),
+        cwd: PathBuf::new(),
+        ro: Vec::new(),
+        net: false,
+    };
+    let name = container_name(&spec);
+    // 只建 profile、不记台账（模拟台账被删 / 非台账路径留下的残留）。
+    assert!(ensure_profile(&name).is_ok(), "建探针 profile");
+    let rep = reconcile(&home);
+    assert!(
+        rep.orphan_profiles
+            .iter()
+            .any(|n| n.eq_ignore_ascii_case(&name)),
+        "台账外的 profile 要列进报告：{:?}",
+        rep.orphan_profiles
+    );
+    assert!(
+        rep.summary().contains("台账外还有"),
+        "摘要要说明现象与处置入口：{}",
+        rep.summary()
+    );
+    assert!(profile_exists(&name), "只报告，不自动删");
+    // 收尾：探针自己删，不留痕。
+    assert!(delete_profile(&name), "探针 profile 应当删得掉");
+    discard(&base);
+}
+
 /// 【启动对账】缺归属/判不了的条目：如实报告并跳过，一条都不回收。
 #[test]
 fn reconcile_skips_entries_without_ownership() {
@@ -1858,11 +1922,171 @@ fn reconcile_skips_entries_without_ownership() {
     discard(&base);
 }
 
-/// 【归属集合】释放只撤"当前进程"的那一份归属；同一 SID 还有别的归属时 ACE 必须留着。
+/// 【真机并发】同一 agent 的两个不同 scope 调用**重叠**时：各自独立容器身份，窄调用读不到宽调用临时加的根；
+/// 释放一次不影响另一次；收尾不留孤儿 ACE / profile / 临时目录。
+/// 约束：只在 --fence-live（SOLOMNI_FENCE_LIVE=1）且本机能做 ACL 往返时跑；会创建 AppContainer profile，
+///   收尾按台账撤权、删 profile 与临时目录。
 #[test]
-fn release_fence_only_removes_the_calling_sessions_claim() {
+fn concurrent_calls_of_one_agent_are_isolated_and_released_independently() {
+    if std::env::var("SOLOMNI_FENCE_LIVE")
+        .map(|v| v != "1")
+        .unwrap_or(true)
+    {
+        eprintln!(
+            "[探针] 未开启真机围栏测试：concurrent_calls_of_one_agent_are_isolated_and_released_independently 会创建 AppContainer profile（改本机状态），已跳过；要真跑加 --fence-live"
+        );
+        return;
+    }
+    if !capability().fs {
+        eprintln!(
+            "[探针] 本机不允许改目录 ACL（{}）：并发隔离探针跳过（不静默当作通过）",
+            capability().note
+        );
+        return;
+    }
+    use crate::kernel::ports::FenceHost;
+    let base = std::env::temp_dir().join(format!("solomni-overlap-{}", std::process::id()));
+    let wide = base.join("wide");
+    let narrow = base.join("narrow");
+    std::fs::create_dir_all(&wide).expect("建宽根");
+    std::fs::create_dir_all(&narrow).expect("建窄根");
+    std::fs::write(wide.join("secret.txt"), "WIDE-SECRET").expect("写宽根文件");
+    std::fs::write(narrow.join("ok.txt"), "NARROW-OK").expect("写窄根文件");
+    if !acl_round_trip(&base, "overlap") {
+        eprintln!(
+            "[探针] 本机做不了 ACL 完整往返（写→读回→撤）：并发隔离探针跳过（不静默当作通过）"
+        );
+        discard(&base);
+        return;
+    }
+    let home = base.join(".home");
+    let spec_of = |lease: &str, root: &Path, private: &Path| FenceSpec {
+        agent: "probe-overlap".to_string(),
+        lease: lease.to_string(),
+        private: private.to_path_buf(),
+        ro_tree: Vec::new(),
+        rw: vec![root.to_path_buf()],
+        cwd: root.to_path_buf(),
+        ro: Vec::new(),
+        net: false,
+    };
+    // 同一会话的两个不同 reach（宽/窄）+ 另一个会话（对照：撤销互不影响）。
+    let wide_spec = spec_of("session-x", &wide, &base.join("private-wide"));
+    let narrow_spec = spec_of("session-x", &narrow, &base.join("private-narrow"));
+    let other_root = base.join("other");
+    std::fs::create_dir_all(&other_root).expect("建另一会话的根");
+    let other_spec = spec_of("session-y", &other_root, &base.join("private-other"));
+    for spec in [&wide_spec, &narrow_spec, &other_spec] {
+        expect_granted(&prepare_fence(spec, "cmd", &home), "授权应当成功");
+        assert!(
+            ensure_profile(&container_name(spec)).is_ok(),
+            "建容器 profile"
+        );
+    }
+    let wide_sid = container_sid(&container_name(&wide_spec)).expect("派生宽调用 SID");
+    let narrow_sid = container_sid(&container_name(&narrow_spec)).expect("派生窄调用 SID");
+    let other_sid = container_sid(&container_name(&other_spec)).expect("派生另一会话 SID");
+    assert_ne!(
+        sid_to_string(wide_sid),
+        sid_to_string(narrow_sid),
+        "同一会话的不同根集合必须是不同容器身份"
+    );
+
+    // 宽调用在容器里活着（约 5 秒），同时窄调用尝试读宽根。
+    let wide_addr = wide_sid as usize;
+    let wide_spec_bg = wide_spec.clone();
+    let holding = std::thread::spawn(move || {
+        // PSID 只在本次探针内有效；线程结束前 main 不会 free。
+        run_in_container(
+            wide_addr as PSID,
+            &wide_spec_bg,
+            "ping -n 6 127.0.0.1 > nul",
+        )
+    });
+    std::thread::sleep(std::time::Duration::from_millis(800));
+
+    // 窄调用：自己的文件读得到。
+    let own = run_in_container(narrow_sid, &narrow_spec, "type ok.txt > own.txt 2>&1")
+        .expect("窄调用要能启动");
+    let own_text = std::fs::read_to_string(narrow.join("own.txt")).unwrap_or_default();
+    assert!(
+        own == 0 && own_text.contains("NARROW-OK"),
+        "窄调用自己的根要读得到（exit={}，拿到 {:?}）",
+        own,
+        own_text
+    );
+    // 窄调用：宽根的密文读不到（宽调用此刻还活着）。
+    let leak_cmd = format!(
+        "type \"{}\" > \"{}\" 2>&1",
+        wide.join("secret.txt").display(),
+        narrow.join("leak.txt").display()
+    );
+    let leak = run_in_container(narrow_sid, &narrow_spec, &leak_cmd).expect("窄调用要能启动");
+    let leak_text = std::fs::read_to_string(narrow.join("leak.txt")).unwrap_or_default();
+    assert!(
+        leak != 0 && !leak_text.contains("WIDE-SECRET"),
+        "窄调用不该读到宽调用的额外根（exit={}，拿到 {:?}）",
+        leak,
+        leak_text
+    );
+
+    let wide_exit = holding.join().expect("宽调用线程");
+    assert!(
+        wide_exit.is_ok(),
+        "宽调用容器进程应当正常结束：{:?}",
+        wide_exit
+    );
+
+    // 会话级撤销：session-x 的宽/窄都撤掉，另一个会话不受影响。
+    let host = crate::kernel::detail::confine::FenceHostAdapter::new(home.clone());
+    host.release_by_lease("session-x")
+        .expect("按会话释放应当成功");
+    assert!(
+        !has_any_ace_for(wide_sid, &wide) && !has_any_ace_for(narrow_sid, &narrow),
+        "会话的两种 reach 都要撤掉"
+    );
+    assert!(
+        has_ace_for(other_sid, &other_root, RIGHTS_RW),
+        "别的会话的授权不能跟着撤"
+    );
+    assert!(
+        !profile_exists(&container_name(&wide_spec))
+            && !profile_exists(&container_name(&narrow_spec)),
+        "本会话的 profile 要删掉"
+    );
+    assert!(
+        profile_exists(&container_name(&other_spec)),
+        "别的会话 profile 要留着"
+    );
+
+    // 再释放另一个会话：收尾不留孤儿。
+    host.release_by_lease("session-y")
+        .expect("第二个会话释放应当成功");
+    assert!(!has_any_ace_for(other_sid, &other_root));
+    assert!(!profile_exists(&container_name(&other_spec)));
+    assert!(
+        orphan_package_aces(&narrow).unwrap_or_default().is_empty()
+            && orphan_package_aces(&wide).unwrap_or_default().is_empty()
+            && orphan_package_aces(&other_root)
+                .unwrap_or_default()
+                .is_empty(),
+        "收尾后不该留台账外的包 SID ACE"
+    );
+    free_sid(wide_sid);
+    free_sid(narrow_sid);
+    free_sid(other_sid);
+    let _ = clean(&home);
+    discard(&base);
+}
+
+/// 【一次性调用】构建 / 独立调用这类没有会话的调用：各自独立身份，释放一次不影响另一次；
+/// 收尾要把自己的 ACE、profile 与按次临时目录都带走，不留孤儿。
+#[test]
+fn one_shot_release_only_removes_its_own_grant_and_profile() {
+    use crate::kernel::ports::FenceHost;
     let base = std::env::temp_dir().join(format!("solomni-release-owner-{}", std::process::id()));
     let target = base.join("target");
+    let private = base.join("private");
     std::fs::create_dir_all(&target).expect("建探针目录");
     if !acl_round_trip(&base, "release-owner") {
         eprintln!(
@@ -1873,59 +2097,72 @@ fn release_fence_only_removes_the_calling_sessions_claim() {
     }
     let home = base.join(".home");
     let spec_of = |lease: &str| FenceSpec {
-        agent: "probe-release-owner".to_string(),
+        agent: "probe-per-call".to_string(),
         lease: lease.to_string(),
-        private: PathBuf::new(),
+        private: private.clone(),
         ro_tree: Vec::new(),
         rw: vec![target.clone()],
         cwd: target.clone(),
         ro: Vec::new(),
         net: false,
     };
-    let s1 = spec_of("session-1");
-    let s2 = spec_of("session-2");
-    // 同名 agent 的两个并发会话：同一容器 SID、同一批落点。
-    expect_granted(&prepare_fence(&s1, "cmd", &home), "会话 1 授权应当成功");
-    expect_granted(&prepare_fence(&s2, "cmd", &home), "会话 2 授权应当成功");
-    let sid = container_sid(&container_name(&s1)).expect("派生容器 SID");
-    let sid_text = sid_to_string(sid);
-    free_sid(sid);
-    // 台账里这条 (SID, 路径) 有两个归属（两个会话各一份）。
-    {
-        let rec = load_record(&home);
-        let e = rec
-            .grants
-            .iter()
-            .find(|g| g.sid == sid_text && Path::new(&g.path) == target)
-            .expect("目标授权应在台账里");
-        assert_eq!(e.owners.len(), 2, "两个会话各一份归属：{:?}", e.owners);
-    }
-    // 释放会话 1：只撤它那份归属，ACE 与会话 2 的归属都留着。
-    release_fence(&s1, &home).expect("释放会话 1 应当成功");
-    let sid = container_sid(&container_name(&s1)).expect("再派生容器 SID");
+    let s1 = spec_of("call-1");
+    let s2 = spec_of("call-2");
+    // 同一 agent 的两次调用：各自授权、各自 profile。
+    expect_granted(&prepare_fence(&s1, "cmd", &home), "调用 1 授权应当成功");
+    expect_granted(&prepare_fence(&s2, "cmd", &home), "调用 2 授权应当成功");
     assert!(
-        has_ace_for(sid, &target, RIGHTS_RW),
-        "会话 2 还在用，ACE 必须留着"
+        ensure_profile(&container_name(&s1)).is_ok()
+            && ensure_profile(&container_name(&s2)).is_ok(),
+        "探针要建出两个按次 profile"
     );
-    free_sid(sid);
-    {
-        let rec = load_record(&home);
-        let e = rec
-            .grants
-            .iter()
-            .find(|g| g.sid == sid_text && Path::new(&g.path) == target)
-            .expect("授权条目应当还在");
-        assert_eq!(e.owners.len(), 1, "只剩会话 2 一份归属");
-        assert_eq!(e.owners[0].lease, "session-2");
-    }
-    // 释放会话 2：最后一个归属走了，ACE 撤掉。
-    release_fence(&s2, &home).expect("释放会话 2 应当成功");
-    let sid = container_sid(&container_name(&s1)).expect("再派生容器 SID");
+    let sid1 = container_sid(&container_name(&s1)).expect("派生调用 1 的 SID");
+    let sid2 = container_sid(&container_name(&s2)).expect("派生调用 2 的 SID");
+    assert_ne!(
+        sid_to_string(sid1),
+        sid_to_string(sid2),
+        "同一 agent 的两次调用必须是不同容器身份"
+    );
     assert!(
-        !has_any_ace_for(sid, &target),
-        "两个会话都释放后不该再有该容器 SID 的 ACE"
+        has_ace_for(sid1, &target, RIGHTS_RW) && has_ace_for(sid2, &target, RIGHTS_RW),
+        "两次调用各自的 ACE 都要在"
     );
-    free_sid(sid);
+    let host = crate::kernel::detail::confine::FenceHostAdapter::new(home.clone());
+    // 释放调用 1：只带走它自己的 ACE / profile / 临时目录。
+    host.release_call(&s1).expect("调用 1 的按次释放应当成功");
+    assert!(!has_any_ace_for(sid1, &target), "调用 1 的 ACE 要撤掉");
+    assert!(
+        has_ace_for(sid2, &target, RIGHTS_RW),
+        "调用 2 还在跑，它的 ACE 必须留着"
+    );
+    assert!(
+        !profile_exists(&container_name(&s1)),
+        "调用 1 的 profile 要删掉"
+    );
+    assert!(
+        profile_exists(&container_name(&s2)),
+        "调用 2 的 profile 要留着"
+    );
+    if let Some(dir) = container_package_dir(&s1) {
+        assert!(
+            !dir.exists(),
+            "调用 1 的按次临时目录要删掉：{}",
+            dir.display()
+        );
+    }
+    // 释放调用 2：收尾不留孤儿。
+    host.release_call(&s2).expect("调用 2 的按次释放应当成功");
+    assert!(!has_any_ace_for(sid1, &target) && !has_any_ace_for(sid2, &target));
+    assert!(
+        !profile_exists(&container_name(&s2)),
+        "调用 2 的 profile 要删掉"
+    );
+    assert!(
+        orphan_package_aces(&target).unwrap_or_default().is_empty(),
+        "按次收尾后不该留台账外的包 SID ACE"
+    );
+    free_sid(sid1);
+    free_sid(sid2);
     let _ = clean(&home);
     discard(&base);
 }

@@ -44,9 +44,18 @@ pub(crate) struct GrantEntry {
     pub(crate) rights: u32,
     #[serde(default)]
     pub(crate) at: u64,
+    /// 目的：当次授权是否递归（撤权要按它来：父目录的只读属性只授了根，撤权**不能**整树扫）。
+    /// 约束：缺省 true——旧条目没记这一位，按"递归"撤更彻底（宁可多撤自己的 ACE，也不留残留）。
+    #[serde(default = "recursive_by_default")]
+    pub(crate) recursive: bool,
     /// 目的：还需要这条授权的进程（空 = 缺归属，按"无法判定"处理，不主动回收）。
     #[serde(default)]
     pub(crate) owners: Vec<Owner>,
+}
+
+/// 目的：旧台账条目没记 "recursive" 时的缺省（按递归撤，宁可多扫也不留残留）。
+fn recursive_by_default() -> bool {
+    true
 }
 
 /// 目的：台账里一个我们建过的容器 profile（名字 + 记录时刻 + 归属集合）。
@@ -275,9 +284,9 @@ pub(crate) fn owners_state(owners: &[Owner]) -> OwnersState {
 }
 
 /// 目的：按 SID 字符串撤一条 ACE（先转 PSID，用完即释放）。
-fn revoke_one_text(sid_text: &str, path: &Path) -> Result<(), String> {
+fn revoke_one_text(sid_text: &str, path: &Path, recursive: bool) -> Result<(), String> {
     let sid = sid_from_string(sid_text)?;
-    let r = revoke_one(sid, path, true);
+    let r = revoke_one(sid, path, recursive);
     free_sid(sid);
     r
 }
@@ -296,7 +305,8 @@ pub(crate) fn save_record(home: &Path, rec: &GrantRecord) -> Result<(), String> 
 }
 
 /// 目的：记下我们建过这个容器 profile（与 prepare_fence 共用同一份台账），供收尾精确回收。
-pub(crate) fn record_profile(home: &Path, name: &str) {
+/// 约束：owner 带会话租约——会话结束时按租约回收，进程崩溃时按进程回收。
+pub(crate) fn record_profile(home: &Path, name: &str, lease: &str) {
     let _lock = match lock_ledger(home) {
         Ok(l) => l,
         Err(e) => {
@@ -311,10 +321,12 @@ pub(crate) fn record_profile(home: &Path, name: &str) {
     if rec.profiles.iter().any(|p| p.name == name) {
         return;
     }
+    let mut owner = current_owner();
+    owner.lease = lease.to_string();
     rec.profiles.push(ProfileEntry {
         name: name.to_string(),
         at: now_secs(),
-        owners: vec![current_owner()],
+        owners: vec![owner],
     });
     if let Err(e) = save_record(home, &rec) {
         eprintln!(
@@ -343,8 +355,8 @@ fn our_profile_names() -> Result<Vec<String>, String> {
         .collect())
 }
 
-/// 这个具名 profile 还在不在（列清单时如实报“挂着的还在不在”）。
-fn profile_exists(name: &str) -> bool {
+/// 目的：这个具名 profile 还在不在（列清单时如实报"挂着的还在不在"）。
+pub(crate) fn profile_exists(name: &str) -> bool {
     our_profile_names()
         .map(|names| names.iter().any(|n| n.eq_ignore_ascii_case(name)))
         .unwrap_or(false)
@@ -532,6 +544,7 @@ pub(crate) fn journal_claim_grant(
     sid: &str,
     path: &Path,
     rights: u32,
+    recursive: bool,
     owner: Owner,
 ) -> Result<(bool, bool), String> {
     let key = path.to_string_lossy().into_owned();
@@ -561,6 +574,7 @@ pub(crate) fn journal_claim_grant(
         path: key.clone(),
         rights,
         at: now_secs(),
+        recursive,
         owners: vec![owner],
     });
     if let Err(e) = save_record(home, rec) {
@@ -653,7 +667,8 @@ pub(crate) fn grant_one_journaled(
     } else {
         false
     };
-    let (_, owner_added) = journal_claim_grant(home, rec, sid_text, path, rights, owner.clone())?;
+    let (_, owner_added) =
+        journal_claim_grant(home, rec, sid_text, path, rights, recursive, owner.clone())?;
     // ACE 已够用：归属已经补记（同名 agent 的另一个会话靠它保住这条授权），不重复改 DACL。
     if has_ace_for(sid, path, rights) {
         return Ok(false);
@@ -828,57 +843,137 @@ pub fn release_fence(spec: &FenceSpec, home: &Path) -> Result<(), String> {
     let mut errors: Vec<String> = Vec::new();
     for key in &keys {
         // 先把本次归属从这条授权里撤掉；还有别的归属（活的、或判不了的）就留着给它用。
-        let empty = match rec
+        let (empty, recursive) = match rec
             .grants
             .iter_mut()
             .find(|g| g.sid == sid_text && g.path == *key)
         {
             Some(g) => {
                 g.owners.retain(|o| *o != owner);
-                g.owners.is_empty()
+                (g.owners.is_empty(), g.recursive)
             }
             None => continue,
         };
         if !empty {
             continue;
         }
-        let path = PathBuf::from(key);
-        // 同一个路径上还有别的 SID 的授权吗（不同 agent 共用路径）：有就只撤自己这一条。
-        let has_other = rec
-            .grants
-            .iter()
-            .any(|g| g.sid != sid_text && g.path == *key);
-        let snapshot = rec.snapshots.iter().find(|s| s.path == *key).cloned();
-        if std::fs::symlink_metadata(&path).is_err() {
-            // 路径不在了：ACE 跟着没了，销账即可。
-            rec.grants
-                .retain(|g| !(g.sid == sid_text && g.path == *key));
-            if !has_other {
-                rec.snapshots.retain(|s| s.path != *key);
+        finalize_grant(&mut rec, &sid_text, key, recursive, &mut errors);
+    }
+    if had_record {
+        if let Err(e) = save_record(home, &rec) {
+            errors.push(format!("授权台账更新失败：{}", e));
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("；"))
+    }
+}
+
+/// 目的：一条授权没有归属了——按快照还原（产品根内）或精确撤掉自己的 ACE（根外 / 同路径还有别的 SID）。
+fn finalize_grant(
+    rec: &mut GrantRecord,
+    sid_text: &str,
+    key: &str,
+    recursive: bool,
+    errors: &mut Vec<String>,
+) {
+    let path = PathBuf::from(key);
+    let has_other = rec
+        .grants
+        .iter()
+        .any(|g| g.sid != sid_text && g.path == key);
+    let snapshot = rec.snapshots.iter().find(|s| s.path == key).cloned();
+    if std::fs::symlink_metadata(&path).is_err() {
+        // 路径不在了：ACE 跟着没了，销账即可。
+        rec.grants.retain(|g| !(g.sid == sid_text && g.path == key));
+        if !has_other {
+            rec.snapshots.retain(|s| s.path != key);
+        }
+        return;
+    }
+    if !has_other {
+        if let Some(snap) = snapshot {
+            // 根内：最后一个归属走了，按快照整体还原。
+            match restore_sd(&path, &snap.bytes) {
+                Ok(()) => {
+                    rec.grants.retain(|g| !(g.sid == sid_text && g.path == key));
+                    rec.snapshots.retain(|s| s.path != key);
+                }
+                Err(e) => errors.push(e),
             }
+            return;
+        }
+    }
+    // 根外（或同路径还有别的 SID）：只精确撤自己这条 ACE。
+    match revoke_one_text(sid_text, &path, recursive) {
+        Ok(()) => {
+            rec.grants.retain(|g| !(g.sid == sid_text && g.path == key));
+        }
+        Err(e) => errors.push(e),
+    }
+}
+
+/// 目的：按**会话租约**撤销本进程为该会话写下的全部授权与 profile（会话改配 / 删除时调用）。
+/// 约束：只撤"当前进程 + 该租约"的归属；同会话的其它进程、其它会话与工具链 baseline 都不受影响。
+pub fn release_by_lease(home: &Path, lease: &str) -> Result<(), String> {
+    if lease.trim().is_empty() {
+        return Err("按会话释放需要一个租约（空租约不留归属）".to_string());
+    }
+    let me = current_owner();
+    let matches =
+        |o: &super::super::Owner| o.pid == me.pid && o.start == me.start && o.lease == lease;
+    let _lock = lock_ledger(home)?;
+    let had_record = record_path(home).exists();
+    let mut rec = load_record(home);
+    let mut keys: Vec<(String, String)> = rec
+        .grants
+        .iter()
+        .filter(|g| g.owners.iter().any(matches))
+        .map(|g| (g.sid.clone(), g.path.clone()))
+        .collect();
+    keys.sort();
+    keys.dedup();
+    let mut errors: Vec<String> = Vec::new();
+    for (sid_text, key) in &keys {
+        let (empty, recursive) = match rec
+            .grants
+            .iter_mut()
+            .find(|g| g.sid == *sid_text && g.path == *key)
+        {
+            Some(g) => {
+                g.owners
+                    .retain(|o| !(o.pid == me.pid && o.start == me.start && o.lease == lease));
+                (g.owners.is_empty(), g.recursive)
+            }
+            None => continue,
+        };
+        if !empty {
             continue;
         }
-        if !has_other {
-            if let Some(snap) = snapshot {
-                // 根内：最后一个归属走了，按快照整体还原。
-                match restore_sd(&path, &snap.bytes) {
-                    Ok(()) => {
-                        rec.grants
-                            .retain(|g| !(g.sid == sid_text && g.path == *key));
-                        rec.snapshots.retain(|s| s.path != *key);
-                    }
-                    Err(e) => errors.push(e),
-                }
-                continue;
+        finalize_grant(&mut rec, sid_text, key, recursive, &mut errors);
+    }
+    // profile 与授权同生命周期：这个会话的归属走了就删 profile（删不掉如实记错）。
+    let mut names: Vec<String> = rec
+        .profiles
+        .iter()
+        .filter(|p| p.owners.iter().any(matches))
+        .map(|p| p.name.clone())
+        .collect();
+    names.sort();
+    names.dedup();
+    for name in &names {
+        let empty = match rec.profiles.iter_mut().find(|p| p.name == *name) {
+            Some(p) => {
+                p.owners
+                    .retain(|o| !(o.pid == me.pid && o.start == me.start && o.lease == lease));
+                p.owners.is_empty()
             }
-        }
-        // 根外（或同路径还有别的 SID）：只精确撤自己这条 ACE。
-        match revoke_one_text(&sid_text, &path) {
-            Ok(()) => {
-                rec.grants
-                    .retain(|g| !(g.sid == sid_text && g.path == *key));
-            }
-            Err(e) => errors.push(e),
+            None => continue,
+        };
+        if empty && delete_profile(name) {
+            rec.profiles.retain(|p| p.name != *name);
         }
     }
     if had_record {
@@ -1159,7 +1254,8 @@ fn prune_backups(dir: &Path, keep: usize) {
 
 /// 目的：启动期对账——按台账回收"归属明确已死"的陈旧授权；无法判定的报告后跳过。
 /// 约束：不问用户；只回收归属明确已死的条目（活着的不动）；失败保留台账供下次重试。
-///   **不做**孤儿清扫（sweep_orphan_aces / sweep_profiles）——那两条无归属，会误伤在跑实例，只归手动 --fence-clean。
+///   **不做**孤儿清扫（sweep_orphan_aces / sweep_profiles）——那两条无归属，会误伤在跑实例，只归手动 --fence-clean；
+///   但会**报告**台账之外的按次 profile（按次调用后数量随调用增长），处置入口仍是手动。
 pub fn reconcile(home: &Path) -> super::super::ReconcileReport {
     let mut rep = super::super::ReconcileReport::default();
     let _lock = match lock_ledger(home) {
@@ -1170,6 +1266,21 @@ pub fn reconcile(home: &Path) -> super::super::ReconcileReport {
         }
     };
     let mut rec = load_record(home);
+    // 台账外的本程序 profile：只列出来（没有归属证明，自动删会误伤在跑实例）。
+    match our_profile_names() {
+        Ok(names) => {
+            let known: Vec<String> = rec
+                .profiles
+                .iter()
+                .map(|p| p.name.to_ascii_lowercase())
+                .collect();
+            rep.orphan_profiles = names
+                .into_iter()
+                .filter(|n| !known.contains(&n.to_ascii_lowercase()))
+                .collect();
+        }
+        Err(e) => rep.errors.push(format!("列举容器 profile 失败：{}", e)),
+    }
     if rec.is_empty() {
         rep.note = "没有台账：本程序没在本机写过权限项".to_string();
         return rep;
@@ -1242,7 +1353,7 @@ pub fn reconcile(home: &Path) -> super::super::ReconcileReport {
         if has_snap && !kept_here {
             continue; // 交给下面快照整体还原
         }
-        match revoke_one_text(&g.sid, &path) {
+        match revoke_one_text(&g.sid, &path, g.recursive) {
             Ok(()) => rep.reclaimed_grants += 1,
             Err(e) => errors.push(e),
         }

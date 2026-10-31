@@ -31,6 +31,7 @@ fn builds_service(
         crate::diagnostics::build_vm(root),
         Arc::new(crate::capabilities::provision::ProvisionService::new(root)),
         Arc::new(runner),
+        Arc::new(crate::tests::doubles::NoFenceHost),
         Arc::new(crate::kernel::detail::host_probe::HostProbeAdapter),
         Arc::new(crate::kernel::ports::NoopLog),
         Vec::new(),

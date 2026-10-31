@@ -84,12 +84,22 @@ impl FenceHostAdapter {
 }
 
 impl crate::kernel::ports::FenceHost for FenceHostAdapter {
-    fn release(&self, spec: &FenceSpec) -> Result<(), String> {
-        release_fence(spec, &self.home)
+    /// 目的：按会话租约撤销本进程为该会话写下的全部授权与 profile（会话改配 / 删除时调用）。
+    fn release_by_lease(&self, lease: &str) -> Result<(), String> {
+        #[cfg(windows)]
+        {
+            windows::release_by_lease(&self.home, lease)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = lease;
+            Ok(())
+        }
     }
 
-    /// 目的：撤掉一次 shell 调用的围栏授权；Windows 上再删掉它的按次临时容器 profile。
-    fn release_shell(&self, spec: &FenceSpec) -> Result<(), String> {
+    /// 目的：一次**一次性调用**的收尾——撤它自己的 ACE、删它的按次 profile、删 `private/Packages/<名字>` 空壳。
+    /// 约束：三步各自记错、合并返回；profile 删不掉时临时目录仍要尽力清（它只是宿主侧的空壳）。
+    fn release_call(&self, spec: &FenceSpec) -> Result<(), String> {
         #[cfg(windows)]
         {
             let mut errors: Vec<String> = Vec::new();
@@ -99,6 +109,13 @@ impl crate::kernel::ports::FenceHost for FenceHostAdapter {
             let name = windows::container_name(spec);
             if let Err(e) = windows::remove_profile_one(&self.home, &name) {
                 errors.push(e);
+            }
+            if let Some(dir) = windows::container_package_dir(spec) {
+                if dir.is_dir() {
+                    if let Err(e) = std::fs::remove_dir_all(&dir) {
+                        errors.push(format!("删按次临时目录失败（{}）：{}", dir.display(), e));
+                    }
+                }
             }
             if errors.is_empty() {
                 Ok(())
@@ -430,6 +447,10 @@ pub struct ReconcileReport {
     /// 目的：没清掉的部分（失败保留供下次重试）。
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub errors: Vec<String>,
+    /// 目的：**台账之外**的本程序容器 profile（只报告，不自动删——没有归属证明，删了会误伤在跑实例）。
+    /// 约束：按次 profile 之后数量随调用增长；处置入口是手动的 `--fence-clean`。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub orphan_profiles: Vec<String>,
 }
 
 impl ReconcileReport {
@@ -440,6 +461,19 @@ impl ReconcileReport {
             || self.deleted_profiles > 0
             || self.skipped_unjudgeable > 0
             || !self.errors.is_empty()
+            || !self.orphan_profiles.is_empty()
+    }
+
+    /// 目的：台账外 profile 的一句提示（没有就空串）；只报告，不在这里删。
+    fn orphan_note(&self) -> String {
+        if self.orphan_profiles.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "；台账外还有 {} 个容器 profile（不自动回收，用 --fence-clean 处理）",
+                self.orphan_profiles.len()
+            )
+        }
     }
 
     /// 目的：一行如实摘要（启动打印与手动入口共用）。
@@ -451,20 +485,21 @@ impl ReconcileReport {
                 String::new()
             };
             return format!(
-                "对账未完成：{}（已还原 {} 处、撤销 {} 条、删 {} 个 profile；台账保留供重试{}）",
+                "对账未完成：{}（已还原 {} 处、撤销 {} 条、删 {} 个 profile；台账保留供重试{}）{}",
                 self.errors.join("；"),
                 self.restored_snapshots,
                 self.reclaimed_grants,
                 self.deleted_profiles,
-                skipped
+                skipped,
+                self.orphan_note()
             );
         }
         if !self.note.is_empty() {
-            return self.note.clone();
+            return format!("{}{}", self.note, self.orphan_note());
         }
         if self.reclaimed_grants == 0 && self.restored_snapshots == 0 && self.deleted_profiles == 0
         {
-            return if self.skipped_unjudgeable > 0 {
+            let base = if self.skipped_unjudgeable > 0 {
                 format!(
                     "没有可回收的陈旧授权；{} 条无法判定已跳过（用 --fence-clean 处置）",
                     self.skipped_unjudgeable
@@ -472,9 +507,10 @@ impl ReconcileReport {
             } else {
                 "没有陈旧授权，无需回收".to_string()
             };
+            return format!("{}{}", base, self.orphan_note());
         }
         format!(
-            "已回收陈旧授权：还原快照 {} 处、撤销授权 {} 条、删除 profile {} 个；保留 {} 条{}",
+            "已回收陈旧授权：还原快照 {} 处、撤销授权 {} 条、删除 profile {} 个；保留 {} 条{}{}",
             self.restored_snapshots,
             self.reclaimed_grants,
             self.deleted_profiles,
@@ -483,7 +519,8 @@ impl ReconcileReport {
                 format!("（另有 {} 条无法判定已跳过）", self.skipped_unjudgeable)
             } else {
                 String::new()
-            }
+            },
+            self.orphan_note()
         )
     }
 }
@@ -590,17 +627,11 @@ pub fn remove_profile_one(home: &std::path::Path, name: &str) -> Result<String, 
     }
 }
 
-/// 目的：撤销一次会话的围栏授权（会话删除时由核心经 FenceHost 端口请求；其它平台是空操作）。
+/// 目的：撤销一次调用的围栏授权（Windows 的按次释放用；其它平台没有持久授权这一步）。
+/// 约束：只在 Windows 编译——非 Windows 没有任何调用方，留着就是死代码。
+#[cfg(windows)]
 pub fn release_fence(spec: &FenceSpec, home: &std::path::Path) -> Result<(), String> {
-    #[cfg(windows)]
-    {
-        windows::release_fence(spec, home)
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = (spec, home);
-        Ok(())
-    }
+    windows::release_fence(spec, home)
 }
 
 /// 目的：命令里可能出现的外部程序：按 PATH 解析出真实路径（解析不出的跳过，不猜）。

@@ -35,13 +35,11 @@ pub(crate) struct PendingWork {
     discard: Option<(String, Vec<String>)>,
 }
 
-/// 目的：一次改配的准备结果——旧 meta（撤围栏用）与新的（落盘用）。
+/// 目的：一次改配的准备结果——新的 meta 与要同步的子树（落盘用）。
+/// 约束：围栏授权是按次的（调用结束即撤），改配不再按旧配置撤权，所以这里不留旧值。
 pub(crate) struct PreparedEdit {
     pub(crate) sid: String,
-    pub(crate) old_meta: SessionMeta,
     pub(crate) new_meta: SessionMeta,
-    /// 目的：主会话改档位时要同步的子树（旧值用于撤围栏，新值用于落盘）。
-    pub(crate) old_children: Vec<SessionMeta>,
     pub(crate) new_children: Vec<SessionMeta>,
 }
 /// 目的：模块声明的能力（模块 id → 能力名，升序；去重）——报告 metadata。
@@ -632,20 +630,7 @@ impl Conductor {
             }
         }
         // 同一 agent 全树只有一份配置：子会话编辑写回所属名单；主会话 / proxy 子工作编辑同步整棵子树。
-        let mut old_children: Vec<SessionMeta> = Vec::new();
         let mut new_children: Vec<SessionMeta> = Vec::new();
-        // 子会话改权限时，它自己的后代有效权限也跟着变：旧围栏一并撤销（它们不重写 meta）。
-        if owner.name != meta.name && edit.permission.is_some() {
-            for child in self.subtree_of(sid) {
-                if child == sid {
-                    continue;
-                }
-                let cm = self.history.meta(&child)?;
-                if !old_children.iter().any(|x| x.name == cm.name) {
-                    old_children.push(cm);
-                }
-            }
-        }
         if owner.name != meta.name {
             let mut new_owner = owner.clone();
             for a in &metas {
@@ -654,7 +639,6 @@ impl Conductor {
                 }
             }
             new_owner.modules = flat_modules(&new_owner.agents);
-            old_children.push(owner.clone());
             new_children.push(new_owner);
         } else {
             for child in self.subtree_of(sid) {
@@ -662,7 +646,6 @@ impl Conductor {
                     continue;
                 }
                 let mut cm = self.history.meta(&child)?;
-                old_children.push(cm.clone());
                 cm.exec = spec.clone();
                 for ca in &mut cm.agents {
                     if let Some(na) = new_meta.agents.iter().find(|a| a.name == ca.name) {
@@ -725,9 +708,7 @@ impl Conductor {
         Ok((
             PreparedEdit {
                 sid: sid.to_string(),
-                old_meta: meta,
                 new_meta,
-                old_children,
                 new_children,
             },
             job,
@@ -775,36 +756,33 @@ impl Conductor {
             new_meta.sandbox.ceiling = None;
         }
         let changed = self.subtree_of(sid);
-        for s in &changed {
-            if let Ok(m) = self.history.meta(s) {
-                self.release_session_fences(&m);
-            }
-        }
         self.history.save_meta(&new_meta)?;
         self.record_config(sid, &new_meta);
+        for s in &changed {
+            self.release_fences(s);
+        }
         for s in changed {
             self.sessions.remove(&s);
         }
         Ok(())
     }
 
-    /// 目的：改配的第二段（核心）——写回 meta、撤旧围栏授权、记旁路配置、丢掉内存会话。
+    /// 目的：改配的第二段（核心）——写回 meta、记旁路配置、丢掉内存会话。
     pub(crate) fn commit_edit(&mut self, prepared: PreparedEdit) -> Result<(), String> {
         let PreparedEdit {
             sid,
-            old_meta,
             new_meta,
-            old_children,
             new_children,
+            ..
         } = prepared;
         self.history.save_meta(&new_meta)?;
         for child in &new_children {
             self.history.save_meta(child)?;
         }
-        // 权限或模块可能变了：撤掉按**旧配置**写下的围栏授权；下一次工具执行按新配置重授（即时生效）。
-        self.release_session_fences(&old_meta);
-        for child in &old_children {
-            self.release_session_fences(child);
+        // 权限 / 模块可能变了：按会话租约撤掉旧配置写下的授权与 profile；下一次调用按新 reach 惰性重授。
+        self.release_fences(&sid);
+        for child in &new_children {
+            self.release_fences(&child.name);
         }
         self.record_config(&sid, &new_meta);
         // 内存里那份是按旧配置装的：丢掉主会话与整棵子树，下一次访问按新配置从转录重建。
@@ -815,31 +793,14 @@ impl Conductor {
         Ok(())
     }
 
-    /// 撤掉一次会话按**给定 meta** 写下的围栏授权（权限或模块变更后调用）。
-    /// 其它平台没有持久授权（release 是空操作）；Windows 撤 ACE，下一次 `prepare_fence` 按实际 ACE 重授。
-    /// 约束：**不在这里停 guest**——销毁要等 guest 落盘（秒级），那一段交给调用方线程（见 GuestBoot / GuestStop）。
-    fn release_session_fences(&self, meta: &SessionMeta) {
-        let roster = self.modules.roster();
-        match self.sandboxes(meta, &roster) {
-            Ok(sandboxes) => {
-                for sb in &sandboxes.list {
-                    let spec = crate::kernel::api::FenceSpec::for_session(
-                        sb,
-                        &self.host_read_roots(),
-                        self.network_allowed(),
-                    );
-                    if let Err(e) = self.tools.release_fence(&spec) {
-                        self.log.warn(
-                            "conductor::release_session_fences",
-                            &format!("撤销围栏授权未完成：{}", e),
-                        );
-                    }
-                }
-            }
-            Err(e) => self.log.warn(
-                "conductor::release_session_fences",
-                &format!("取沙箱失败，未撤销授权：{}", e),
-            ),
+    /// 目的：按会话租约撤掉围栏授权与 profile（权限 / 模块变更、会话删除时调用）。
+    /// 约束：失败如实记日志，不阻断改配；残留由下一次启动对账按死归属回收。
+    pub(crate) fn release_fences(&self, lease: &str) {
+        if let Err(e) = self.tools.release_by_lease(lease) {
+            self.log.warn(
+                "conductor::release_fences",
+                &format!("按会话撤销围栏授权未完成（{}）：{}", lease, e),
+            );
         }
     }
 

@@ -1505,7 +1505,6 @@ mod tests {
             cancel: None,
             path: None,
             ask: None,
-            ephemeral: false,
         });
         assert!(!out.ok, "退出码 3 应如实失败：{}", out.output);
         assert!(out.output.contains("中文"), "{}", out.output);
@@ -1537,7 +1536,6 @@ mod tests {
             cancel: None,
             path: None,
             ask: None,
-            ephemeral: false,
         });
         assert!(out.ok, "{}", out.output);
         assert!(out.output.contains("TAIL"), "结尾要保留：{}", out.output);
@@ -1571,7 +1569,6 @@ mod tests {
             cancel: None,
             path: None,
             ask: None,
-            ephemeral: false,
         });
         assert!(!out.ok, "{}", out.output);
         assert!(out.output.contains("超时"), "{}", out.output);
@@ -1592,7 +1589,6 @@ mod tests {
                 cancel: Some(&set),
                 path: None,
                 ask: None,
-                ephemeral: false,
             })
         });
         std::thread::sleep(Duration::from_millis(300));
@@ -1629,7 +1625,6 @@ mod tests {
             cancel: None,
             path: None,
             ask: None,
-            ephemeral: false,
         });
         assert!(!out.ok, "{}", out.output);
         assert!(!out.output.contains("SHELL-SECRET"), "{}", out.output);
@@ -1670,7 +1665,6 @@ mod tests {
                 cancel: None,
                 path: None,
                 ask: None,
-                ephemeral: false,
             });
             assert!(!out.ok, "{}（{}）", out.output, program);
             assert!(out.output.contains("中文"), "{}（{}）", out.output, program);
@@ -1720,7 +1714,6 @@ mod tests {
             cancel: None,
             path: None,
             ask: None,
-            ephemeral: false,
         });
         let file = dir.join("shell-ok.txt");
         assert!(

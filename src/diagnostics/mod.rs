@@ -447,6 +447,9 @@ fn build_service(
         build_vm(root),
         provision,
         runner,
+        Arc::new(crate::kernel::detail::confine::FenceHostAdapter::new(
+            root.join(".home"),
+        )),
         Arc::new(crate::kernel::detail::host_probe::HostProbeAdapter),
         Arc::new(crate::kernel::ports::NoopLog),
         crate::entry::toolchains::active_roots(root),
