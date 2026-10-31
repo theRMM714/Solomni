@@ -2440,6 +2440,156 @@ pub(crate) fn vm_live_two_guests_share_one_base_without_writing_it() {
     let _ = std::fs::remove_dir_all(&overlay_dir);
 }
 
+/// 目的：真机验收（默认跳过）：**不依赖任何共享后端**，只验 guest 内的取消与超时。
+/// 约束：原来唯一覆盖取消的 `vm_live_guest_runs_command_inside_guest` 把取消和 SMB 共享绑在一起，
+///   共享挂载失败时连取消脚本都跑不到；这条只走 NoneShare + guest 内 /tmp 围栏，
+///   取消机制本身不该被共享链路的故障挡住。
+/// 约束：只在 SOLOMNI_VM_LIVE=1 且 SOLOMNI_VM_QEMU 指向真东西、虚拟根（默认 `debian`）在场时执行；否则打印 [探针] 如实跳过。
+/// 约束：取消回执含「用户停止」且 15 秒内返回、guest 内没有残留的 sleep；`timeout_secs` 到点仍照常收口。
+///   取消路径上 helper 自己的 stderr 可能被 QGA 丢掉（时有时无），所以"信号处理器生效"用**无孤儿 + 快速返回**证明；
+///   超时路径的 helper stderr 稳定可见，直接断言它。
+#[test]
+pub(crate) fn vm_live_cancel_kills_the_guest_process_tree() {
+    let live = std::env::var("SOLOMNI_VM_LIVE").as_deref() == Ok("1");
+    let qemu = std::env::var("SOLOMNI_VM_QEMU").unwrap_or_default();
+    let guest = std::env::var("SOLOMNI_VM_GUEST").unwrap_or_else(|_| "debian".to_string());
+    if !live || qemu.trim().is_empty() {
+        eprintln!("[探针] 未开启取消的真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑（虚拟根默认 debian，可用 SOLOMNI_VM_GUEST 换）");
+        return;
+    }
+    let probe = crate::kernel::detail::HostProbeAdapter;
+    let base_dir = match crate::capabilities::vm::api::resolve_guest(
+        &crate::tests::root_dir(),
+        &guest,
+    ) {
+        Ok(d) if probe.is_dir(&d) => d,
+        _ => {
+            eprintln!(
+                "[探针] 本机没有虚拟根「{}」：先 solomni --provision --ensure --yes，或用 SOLOMNI_VM_GUEST 指定",
+                guest
+            );
+            return;
+        }
+    };
+    // 同一个虚拟根不能被两台 guest 同时写：真机用例之间串行（见 doubles::live_guest_lock）。
+    let _live = crate::tests::doubles::live_guest_lock();
+    let image = classify_base(&base_dir, &probe).expect("虚拟根要可用");
+    let overlay_dir = crate::tests::scratch("vm-live-cancel-overlays");
+    let engine = crate::capabilities::vm::detail::QemuEngine::with_overlay_dir(overlay_dir.clone());
+    // 不挂任何共享：这条用例只验取消 / 超时，共享链路的问题归 SMB 挂载那条缺口。
+    use crate::capabilities::vm::ports::ShareBackend;
+    let backend = crate::capabilities::vm::detail::NoneShare::new();
+    let (plan, _guard) = backend
+        .prepare("qemu", &[], None)
+        .expect("共享计划要能派生");
+    let spec = GuestSpec {
+        lease: "vm-live-cancel".to_string(),
+        image,
+        mounts: Vec::new(),
+        net: false,
+        engine_path: Some(qemu),
+        share_path: None,
+        shares: Vec::new(),
+        seed: None,
+        isolated: true,
+    };
+    let mut guest = engine.boot(&spec, &plan).expect("起 guest");
+    // guest 内的允许集：/tmp 读写，其它一切按 Landlock 拒绝。
+    let access = crate::capabilities::vm::domain::guest::GuestAccess {
+        agent: "cancel".to_string(),
+        rw: vec!["/tmp".to_string()],
+        ro: Vec::new(),
+        ro_tree: Vec::new(),
+        private: "/tmp".to_string(),
+        cwd: "/tmp".to_string(),
+        net: false,
+    };
+    let run = |cmd: &str, secs: u64| GuestRun {
+        command: cmd.to_string(),
+        args_json: "{}".to_string(),
+        env: Vec::new(),
+        cwd: "/tmp".to_string(),
+        timeout_secs: secs,
+        output_limit: crate::capabilities::vm::domain::guest::OutputLimit::HeadAndTail,
+    };
+
+    // 取消：sleep 30 起跑后由 host 置位取消旗，helper 收 SIGTERM 杀子进程组，不能等满 timeout。
+    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flip = std::sync::Arc::clone(&cancel);
+    let thread = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        flip.store(true, std::sync::atomic::Ordering::Relaxed);
+    });
+    let started = std::time::Instant::now();
+    let cancelled = guest.channel().exec_fenced_cancellable(
+        &run("sleep 30; echo SHOULD_NOT_FINISH", 30),
+        &access,
+        Some(&cancel),
+    );
+    let _ = thread.join();
+    let elapsed = started.elapsed();
+    eprintln!(
+        "[探针] 取消：ok={} 耗时={:?} 输出={:?}",
+        cancelled.ok, elapsed, cancelled.output
+    );
+    assert!(!cancelled.ok, "取消后命令不能报成功：{}", cancelled.output);
+    assert!(
+        cancelled.output.contains("用户停止"),
+        "回执要说明用户停止：{}",
+        cancelled.output
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(15),
+        "取消要及时，不能等满 30 秒：{:?}",
+        elapsed
+    );
+    // 无孤儿：helper 的信号处理器杀掉的是**整棵进程组**；只杀 helper 自己会留下这个 sleep。
+    let alive = guest.channel().exec(&run("pgrep -x sleep || true", 10));
+    eprintln!("[探针] 取消后残留 sleep：{:?}", alive.output);
+    assert!(
+        alive.output.trim().is_empty(),
+        "取消后不该有残留的 guest 进程：{:?}",
+        alive.output
+    );
+
+    // 超时：没有取消旗时，timeout_secs 到点由 helper 杀树并给出「超时」。
+    let started = std::time::Instant::now();
+    let timed_out = guest
+        .channel()
+        .exec_fenced_cancellable(&run("sleep 30", 2), &access, None);
+    let elapsed = started.elapsed();
+    eprintln!(
+        "[探针] 超时：ok={} 耗时={:?} 输出={:?}",
+        timed_out.ok, elapsed, timed_out.output
+    );
+    assert!(!timed_out.ok, "超时后命令不能报成功：{}", timed_out.output);
+    assert!(
+        timed_out.output.contains("超时"),
+        "回执要说明超时：{}",
+        timed_out.output
+    );
+    assert!(
+        timed_out
+            .output
+            .contains("solomni-guest-fence: 工具进程超时"),
+        "helper 的收口行要在回执里：{}",
+        timed_out.output
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(12),
+        "两秒的超时要很快收口：{:?}",
+        elapsed
+    );
+
+    guest.stop();
+    assert!(
+        !overlay_dir.join("vm-live-cancel.qcow2").is_file(),
+        "删租约要把可写层也删掉：{}",
+        overlay_dir.join("vm-live-cancel.qcow2").display()
+    );
+    let _ = std::fs::remove_dir_all(&overlay_dir);
+}
+
 /// 目的：并发准入——到上限拒绝、同一租约重启放行、0 = 不限制。
 #[test]
 pub(crate) fn guest_admission_caps_concurrency() {
