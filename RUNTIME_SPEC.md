@@ -110,7 +110,7 @@ files:                      # 包内文件指纹：用于可复现与呈现
 当前状态：选型、诊断、装配计划、逐项前置检测、guest 生命周期与**执行分派**都已就位，并按**五轴组合**做成可插的形状——
 宿主 × `VmEngine`（当前 `QemuEngine`）× `GuestImage`（虚拟根里可放 `guest.yaml` 声明 id / arch / os / agent / clients / runtimes）×
 `GuestChannel`（当前 QGA）× `ShareBackend`（用户档 `VirtioFsShare` / `NinePShare` / `SmbShare`；`CopyShare` 仅开发/应急；`NoneShare` 仅供给编排）。按平台的用户组合链是数据（`default_combos` / `share_chain`），
-加速器按平台给（`accel=kvm:tcg` / `accel=whpx:tcg` / `accel=hvf:tcg`）。**root 只有磁盘镜像一种**，会话每次叠一份每租约可写层（镜像清单见下）。
+加速器只用硬件加速（`accel=kvm` / `accel=whpx` / `accel=hvf`，不退回软件模拟）。**root 只有磁盘镜像一种**，会话每次叠一份每租约可写层（镜像清单见下）。
 **建 / 改配 / 删除会话都分两段**：核心线程只做校验、占名与出计划，起停 guest 在调用方线程上跑，核心不陪着等 guest。
 宿主路径 ↔ guest 路径只有一座桥（`domain/paths.rs`：同方言恒等，跨方言编进镜像根，**正反两向**），**挂载点、命令 `cwd` / 路径型 `env`、
 工作环境提示词、系统工具的寻址四处共用它**；运行包按目标平台分包（`host-*` / `guest-*` / 通用）。guest 装配住在独立能力 `vm`

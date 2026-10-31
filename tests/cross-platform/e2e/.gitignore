@@ -2,6 +2,8 @@
 # 提示词册是产品的一部分，每次运行从产品根整份复制（它已按角色分成目录）；.home 与 session/logs/userdata 都是运行期状态。
 root/prompts/
 root/systools/
+# 项目内工具链由编排器链进夹具（junction / symlink，不是副本）：不入库。
+root/.tools/
 root/.home
 root/modules/toolbox/module.yaml
 root/session/

@@ -80,6 +80,8 @@ T0 与业务测试在同一次运行里出结果，但结论分开记：质量�
 > L4 端到端在 `tests/cross-platform/e2e/root/` 下**现场生成**夹具：`orchestrator.js` 把产品根的
 > `prompts/`、`systools/` 与三个真模块（`harvest` / `render` / `indexer`）拷进去再启动产品。那是**运行时副本、不是文档面**——
 > 不要手改、不要当文档审计；要改就改产品根的那一份，副本每次重跑都会覆盖。
+> 仓库有项目内工具链（`.tools/toolchains/active.json`）时，编排器把 `.tools/` 链进夹具根：产品按**产品根**找工具链，
+> 夹具根没有就会回落宿主 PATH；宿主解释器装在用户目录（scoop / nvm）时容器围栏里跑不到。没有项目内工具链（如 CI 未装置备）则保持宿主回退。
 
 ### 环境引导自检（`tests/env-bootstrap.mjs`）
 
@@ -271,6 +273,8 @@ required context 因此永远停在 pending——纯文档 PR 会卡在「检查
 `publish-report` 把三条 lane 的产物（`structure-report`、`docs-report`、`test-report-<os>` 与 `e2e-report-<os>`）汇总：
 平台的 quality / e2e 两份先用 `tests/ci-merge.mjs` 合并成该平台唯一的 `test-report.json`，再由 `tests/ci-publish.mjs` 发布。
 **任一半缺报告都补一条 `fail` 步骤**——"没跑到"不能读成"通过"。
+两份产物的上传根必须都是 `target/`（发布端把它们 `cp` 进 `target/` 再找 `target/e2e-report.json`）；e2e 的夹具日志先收进 `target/e2e-logs/` 再上传，
+否则上传根会被抬到仓库根，报告落成 `target/target/e2e-report.json` 而被判成"没产出"。发布步骤为此留了一条布局检查：落到嵌套路径就让发布红，不静默丢 L4。
 Draft 的 run 里依赖 job 都跳过，发布也跳过：不拿空产物发报告。
 
 **报告统一到 `ci-report`**：该分支每次运行都会被重建为空分支再写入，只留最近一次运行。目录按 lane 分键：
@@ -313,6 +317,9 @@ CI 借 runner 自带 Rust（`CARGO_HOME` / `SOLOMNI_CARGO_HOME` 指项目内）�
 
 **触发**：PR 标 Ready（或对 Ready 的 PR 推送）即自动跑；Draft 不跑。需要单独验证某个分支或干净机器时手动派发，
 用 `gh` 发起，`--ref` 指向要验证的分支（`main` 禁止直接 push，通常是 `development`）：
+
+> **Draft 的 run 只证明工作流文件被接受**（YAML 解析通过）：所有 job 跳过、不产报告、不发布 `ci-report`，
+> 不能当任何验收结论。要验证工作流本身（产物上传/下载、合并与发布链路），必须手动派发或等 Ready 后跑一次。
 
 ```text
 gh workflow run test.yml --ref <分支>

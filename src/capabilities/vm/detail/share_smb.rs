@@ -62,8 +62,10 @@ fn smb_plan(mounts: &[GuestMount], port: u16) -> SharePlan {
     let mut guest_scripts = Vec::new();
     for (i, m) in mounts.iter().enumerate() {
         let ro = if m.read_only { ",ro" } else { "" };
+        // 有界重试：SMB 握手在慢启动 / 嵌套虚拟化下会瞬时报 "server abruptly closed"；一次就判整台起不来
+        // 会把瞬时失败放大成"虚拟机档不可用"。三次都失败必须**非零退出**（循环末尾的子命令不许吞掉失败）。
         guest_scripts.push(format!(
-            "mkdir -p '{g}' && mount -t cifs //{ip}/s{i} '{g}' -o port={p},guest,soft,nounix,noserverino,uid=0,gid=0,file_mode=0666,dir_mode=0777{ro}",
+            "mkdir -p '{g}' && n=0 && ok=0 && while [ $n -lt 3 ]; do n=$((n+1)); if mount -t cifs //{ip}/s{i} '{g}' -o port={p},guest,soft,nounix,noserverino,uid=0,gid=0,file_mode=0666,dir_mode=0777{ro}; then ok=1; break; fi; sleep 2; done; if [ $ok -ne 1 ]; then printf '共享 %s 挂载失败（已尝试 %s 次）' '{g}' $n; exit 1; fi",
             g = m.guest,
             ip = GUEST_SMB_IP,
             i = i,
@@ -148,9 +150,10 @@ impl ShareBackend for SmbShare {
         }
         // 父死子亡（Unix）：核心被强杀时 helper 不该继续占着共享目录。
         procs::guard(&mut cmd);
+        // stderr 不丢：握手失败时现场（helper 自己说的话）是唯一能区分"谁关的连接"的证据。
         cmd.stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            .stderr(Stdio::piped());
         let mut child = procs::spawn(cmd)
             .map_err(|e| format!("起不了 SMB helper（{}）：{}", exe.display(), e))?;
         let launched = procs::attach(&child, "share:smb");
@@ -173,13 +176,27 @@ impl ShareBackend for SmbShare {
             .stdout
             .take()
             .ok_or_else(|| "SMB helper 没有 stdout".to_string())?;
+        // helper 的诊断输出逐行转出来（带前缀，便于和 guest 侧 mount 报错对上时间）。
+        if let Some(stderr) = child.stderr.take() {
+            std::thread::spawn(move || {
+                let reader = BufReader::new(stderr);
+                for line in reader.lines().map_while(Result::ok) {
+                    eprintln!("[虚拟机] smbd：{}", line);
+                }
+            });
+        }
         // 有界等待 helper 打出第一行 LISTENING <addr>：它卡住时不能让我们干等。
         let (tx, rx) = mpsc::channel::<String>();
         std::thread::spawn(move || {
             let reader = BufReader::new(stdout);
             for line in reader.lines().map_while(Result::ok) {
-                if tx.send(line).is_err() {
-                    break;
+                // 首行是 LISTENING <addr>；其余是 helper 自己的诊断，转出来，不静默丢。
+                if line.starts_with("LISTENING ") {
+                    if tx.send(line).is_err() {
+                        break;
+                    }
+                } else {
+                    eprintln!("[虚拟机] smbd：{}", line);
                 }
             }
         });
@@ -188,7 +205,8 @@ impl ShareBackend for SmbShare {
                 book.forget(child.id());
             }
             let _ = child.kill();
-            "等 SMB helper 的 LISTENING 超时".to_string()
+            "等 SMB helper 的 LISTENING 超时（helper 自己的输出见上方 [虚拟机] smbd 行）"
+                .to_string()
         })?;
         let addr = first
             .strip_prefix("LISTENING ")
@@ -223,6 +241,7 @@ mod tests {
     }
 
     /// 目的：一条 guestfwd 隧道 + 每个挂载点一条 cifs 挂载；只读点带 ro。
+    /// 约束：挂载必须有界重试，且三次失败要**非零退出**（循环末尾的子命令不许把失败吞成成功）。
     #[test]
     fn plan_builds_guestfwd_and_cifs_mounts() {
         let plan = smb_plan(
@@ -235,18 +254,32 @@ mod tests {
             plan.net_options,
             vec!["guestfwd=tcp:10.0.2.100:445-tcp:127.0.0.1:45678".to_string()]
         );
+        let script = &plan.guest_scripts[0];
         assert!(
-            plan.guest_scripts[0].contains("//10.0.2.100/s0 '/a'")
-                && plan.guest_scripts[0].contains("port=445")
-                && !plan.guest_scripts[0].ends_with(",ro"),
+            script.contains("//10.0.2.100/s0 '/a'") && script.contains("port=445"),
             "{:?}",
-            plan.guest_scripts[0]
+            script
         );
         assert!(
-            plan.guest_scripts[1].contains("//10.0.2.100/s1 '/b'")
-                && plan.guest_scripts[1].ends_with(",ro"),
-            "{:?}",
-            plan.guest_scripts[1]
+            !script.contains("dir_mode=0777,ro"),
+            "可写挂载不该带 ro：{:?}",
+            script
+        );
+        assert!(
+            script.contains("while [ $n -lt 3 ]") && script.contains("sleep 2"),
+            "挂载要有界重试：{:?}",
+            script
+        );
+        assert!(
+            script.contains("if [ $ok -ne 1 ]") && script.contains("exit 1"),
+            "三次都失败要非零退出，不能被循环吞掉：{:?}",
+            script
+        );
+        let ro_script = &plan.guest_scripts[1];
+        assert!(
+            ro_script.contains("//10.0.2.100/s1 '/b'") && ro_script.contains("dir_mode=0777,ro;"),
+            "只读点要把 ro 写进 mount 选项：{:?}",
+            ro_script
         );
     }
 
