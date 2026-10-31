@@ -71,14 +71,14 @@ secret 不是 reach：模块只声明自己有哪些隐秘字段，值只由系�
 - sandbox（缺省）：只 private + 基础 / 项目工具链只读；net=false；workspace 及以上 allow，view 不发放；不碰共享 / 模块 / 主机只读根。
 - external：在 sandbox 之上加 shared-read / module-read / host-read / network；external 档 ask、all_reach 档 allow；共享区 / 模块目录仍只读，module-write 不声明，模块 secrets 不注入。
 - sandbox 与 external 都要求围栏真强制（`allow_degraded=false`），装不上就拒绝；命令被围栏拒绝时回执提示 external，**不自动升级**。
-- Windows 上**每次宿主工具调用**（shell 的 sandbox / external、模块工具、独立调用、构建）都用**按次容器 profile**（W1）：身份按 `agent + lease` 派生，调用结束撤 ACE、删 profile、删按次临时目录；这是让按次收窄在 Windows 上真实成立的机制。
+- Windows 上容器身份 = `会话租约 + agent + 受保护根集合`（reach 指纹，不含工具链、不含 net）：同一会话里不同 scope 的调用根集合不同 → 不同 SID（按次收窄因此真实成立）；同一 reach 的后续调用复用 SID 与 ACL。授权**按会话持有**，会话改配 / 删除时撤销；一次性调用（构建 / 独立模块工具）各自唯一租约、跑完即撤。
 - **工具链与运行包不是 reach**：`.tools/` 与 `runtimes/<包>` 是可信执行基座（只读、无秘密、本来就要执行），一次性授给 `ALL APPLICATION PACKAGES`，不参与按 reach 的容器身份与按次授权；共享区 / 模块目录 / 用户只读根才按 reach 收窄。
 
 ## 五、围栏派生
 
 FenceSpec::for_call 按本次 granted 派生：private 进 rw；module-write 只把该模块的 userdata 放进 rw；shared-read / module-read 进 ro_tree；host-read 进 ro；network 与全局开关求交。shared-write 永不进 rw。shell 的 per-call 围栏另加项目内**基础工具链根**（只读）；模块工具的放行仍走它自己的命令解释器基线。
 
-FenceSpec::for_session 用会话 profile 的 reach 并集，用于撤销 Windows ACL 等持久授权与生命周期；它不用于单次执行。
+FenceSpec::for_session 只作**会话 base**（提供主机只读根与全局断网事实）再派生按次围栏；撤销走会话租约（`release_by_lease`），不再按"会话并集"反推落点。
 
 VM guest 的 per-call 断网由 guest helper 按策略里的 net 做 unshare(CLONE_NEWNET)；失败 fail-closed，不静默降级。
 
@@ -91,7 +91,7 @@ VM guest 的 per-call 断网由 guest helper 按策略里的 net 做 unshare(CLO
 - 共享区范围用三态：all / none / 路径数组。字段 None = 不覆盖，Some(none) = 显式无权限，两者必须分开；
 - 父级编辑只更新 ceiling，再与子 narrowing 求交，不覆盖子收窄；父级收窄到无交集时子会话无权限，并如实提示；
 - 档位切换是根级动作：整棵 work tree 有会话在生成时拒绝（先停再切）；切换在下一次权限判定生效，已经在执行的调用不追溯。
-- Windows 的 ACL 是持久的：每次调用带**唯一租约**，容器身份按 `agent + lease` 派生，跑完撤自己的 ACE、删自己的 profile 与临时目录；并发调用各有独立身份，互不影响。档位收窄后不会再读到别的调用留下的外部根（这正是并发重叠场景的判据）。
+- Windows 的 ACL 是持久的：容器身份按 `会话 + agent + 可达根集合` 派生；同一 reach 的调用复用授权，会话结束统一回收（`release_by_lease`）。档位收窄后不会再读到别的 scope 留下的外部根（这正是并发重叠场景的判据）。
 
 ## 七、工具级确认的引擎路径
 

@@ -198,7 +198,7 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
     let base_owner = current_owner();
     let mut rec = load_record(home);
     let container = container_name(spec);
-    if let Err(e) = journal_add_profile(home, &mut rec, &container, base_owner.clone()) {
+    if let Err(e) = journal_add_profile(home, &mut rec, &container, container_owner.clone()) {
         // 台账落不下就不能动本机权限项（这一环是必要的）：如实收尾，让调用方去问用户。
         eprintln!("[围栏] 授权台账落盘失败：{}", e);
         prep.fail(FencePart::Ledger, PathBuf::new(), e);
@@ -386,7 +386,7 @@ pub fn run_fenced(
     }
     // 建过就记进台账：守门进程是唯一真正建 profile 的地方，外层只知道"该建"、不知道"建成了"。
     if let Some(h) = home {
-        record_profile(h, &name);
+        record_profile(h, &name, &spec.lease);
     }
     let sid = match container_sid(&name) {
         Ok(s) => s,

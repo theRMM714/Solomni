@@ -305,7 +305,8 @@ pub(crate) fn save_record(home: &Path, rec: &GrantRecord) -> Result<(), String> 
 }
 
 /// 目的：记下我们建过这个容器 profile（与 prepare_fence 共用同一份台账），供收尾精确回收。
-pub(crate) fn record_profile(home: &Path, name: &str) {
+/// 约束：owner 带会话租约——会话结束时按租约回收，进程崩溃时按进程回收。
+pub(crate) fn record_profile(home: &Path, name: &str, lease: &str) {
     let _lock = match lock_ledger(home) {
         Ok(l) => l,
         Err(e) => {
@@ -320,10 +321,12 @@ pub(crate) fn record_profile(home: &Path, name: &str) {
     if rec.profiles.iter().any(|p| p.name == name) {
         return;
     }
+    let mut owner = current_owner();
+    owner.lease = lease.to_string();
     rec.profiles.push(ProfileEntry {
         name: name.to_string(),
         at: now_secs(),
-        owners: vec![current_owner()],
+        owners: vec![owner],
     });
     if let Err(e) = save_record(home, &rec) {
         eprintln!(
@@ -854,43 +857,123 @@ pub fn release_fence(spec: &FenceSpec, home: &Path) -> Result<(), String> {
         if !empty {
             continue;
         }
-        let path = PathBuf::from(key);
-        // 同一个路径上还有别的 SID 的授权吗（不同 agent 共用路径）：有就只撤自己这一条。
-        let has_other = rec
-            .grants
-            .iter()
-            .any(|g| g.sid != sid_text && g.path == *key);
-        let snapshot = rec.snapshots.iter().find(|s| s.path == *key).cloned();
-        if std::fs::symlink_metadata(&path).is_err() {
-            // 路径不在了：ACE 跟着没了，销账即可。
-            rec.grants
-                .retain(|g| !(g.sid == sid_text && g.path == *key));
-            if !has_other {
-                rec.snapshots.retain(|s| s.path != *key);
+        finalize_grant(&mut rec, &sid_text, key, recursive, &mut errors);
+    }
+    if had_record {
+        if let Err(e) = save_record(home, &rec) {
+            errors.push(format!("授权台账更新失败：{}", e));
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("；"))
+    }
+}
+
+/// 目的：一条授权没有归属了——按快照还原（产品根内）或精确撤掉自己的 ACE（根外 / 同路径还有别的 SID）。
+fn finalize_grant(
+    rec: &mut GrantRecord,
+    sid_text: &str,
+    key: &str,
+    recursive: bool,
+    errors: &mut Vec<String>,
+) {
+    let path = PathBuf::from(key);
+    let has_other = rec
+        .grants
+        .iter()
+        .any(|g| g.sid != sid_text && g.path == key);
+    let snapshot = rec.snapshots.iter().find(|s| s.path == key).cloned();
+    if std::fs::symlink_metadata(&path).is_err() {
+        // 路径不在了：ACE 跟着没了，销账即可。
+        rec.grants.retain(|g| !(g.sid == sid_text && g.path == key));
+        if !has_other {
+            rec.snapshots.retain(|s| s.path != key);
+        }
+        return;
+    }
+    if !has_other {
+        if let Some(snap) = snapshot {
+            // 根内：最后一个归属走了，按快照整体还原。
+            match restore_sd(&path, &snap.bytes) {
+                Ok(()) => {
+                    rec.grants.retain(|g| !(g.sid == sid_text && g.path == key));
+                    rec.snapshots.retain(|s| s.path != key);
+                }
+                Err(e) => errors.push(e),
             }
+            return;
+        }
+    }
+    // 根外（或同路径还有别的 SID）：只精确撤自己这条 ACE。
+    match revoke_one_text(sid_text, &path, recursive) {
+        Ok(()) => {
+            rec.grants.retain(|g| !(g.sid == sid_text && g.path == key));
+        }
+        Err(e) => errors.push(e),
+    }
+}
+
+/// 目的：按**会话租约**撤销本进程为该会话写下的全部授权与 profile（会话改配 / 删除时调用）。
+/// 约束：只撤"当前进程 + 该租约"的归属；同会话的其它进程、其它会话与工具链 baseline 都不受影响。
+pub fn release_by_lease(home: &Path, lease: &str) -> Result<(), String> {
+    if lease.trim().is_empty() {
+        return Err("按会话释放需要一个租约（空租约不留归属）".to_string());
+    }
+    let me = current_owner();
+    let matches =
+        |o: &super::super::Owner| o.pid == me.pid && o.start == me.start && o.lease == lease;
+    let _lock = lock_ledger(home)?;
+    let had_record = record_path(home).exists();
+    let mut rec = load_record(home);
+    let mut keys: Vec<(String, String)> = rec
+        .grants
+        .iter()
+        .filter(|g| g.owners.iter().any(matches))
+        .map(|g| (g.sid.clone(), g.path.clone()))
+        .collect();
+    keys.sort();
+    keys.dedup();
+    let mut errors: Vec<String> = Vec::new();
+    for (sid_text, key) in &keys {
+        let (empty, recursive) = match rec
+            .grants
+            .iter_mut()
+            .find(|g| g.sid == *sid_text && g.path == *key)
+        {
+            Some(g) => {
+                g.owners
+                    .retain(|o| !(o.pid == me.pid && o.start == me.start && o.lease == lease));
+                (g.owners.is_empty(), g.recursive)
+            }
+            None => continue,
+        };
+        if !empty {
             continue;
         }
-        if !has_other {
-            if let Some(snap) = snapshot {
-                // 根内：最后一个归属走了，按快照整体还原。
-                match restore_sd(&path, &snap.bytes) {
-                    Ok(()) => {
-                        rec.grants
-                            .retain(|g| !(g.sid == sid_text && g.path == *key));
-                        rec.snapshots.retain(|s| s.path != *key);
-                    }
-                    Err(e) => errors.push(e),
-                }
-                continue;
+        finalize_grant(&mut rec, sid_text, key, recursive, &mut errors);
+    }
+    // profile 与授权同生命周期：这个会话的归属走了就删 profile（删不掉如实记错）。
+    let mut names: Vec<String> = rec
+        .profiles
+        .iter()
+        .filter(|p| p.owners.iter().any(matches))
+        .map(|p| p.name.clone())
+        .collect();
+    names.sort();
+    names.dedup();
+    for name in &names {
+        let empty = match rec.profiles.iter_mut().find(|p| p.name == *name) {
+            Some(p) => {
+                p.owners
+                    .retain(|o| !(o.pid == me.pid && o.start == me.start && o.lease == lease));
+                p.owners.is_empty()
             }
-        }
-        // 根外（或同路径还有别的 SID）：只精确撤自己这条 ACE。
-        match revoke_one_text(&sid_text, &path, recursive) {
-            Ok(()) => {
-                rec.grants
-                    .retain(|g| !(g.sid == sid_text && g.path == *key));
-            }
-            Err(e) => errors.push(e),
+            None => continue,
+        };
+        if empty && delete_profile(name) {
+            rec.profiles.retain(|p| p.name != *name);
         }
     }
     if had_record {

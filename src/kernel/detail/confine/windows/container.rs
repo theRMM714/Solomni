@@ -33,22 +33,36 @@ use windows_sys::Win32::System::Threading::{
 
 /// 文件对象（SetNamedSecurityInfoW / GetNamedSecurityInfoW 的对象类型）。
 use super::*;
-/// 目的：容器名：**按调用身份（agent + lease）派生**——一次调用一个 profile（独立 SID），
-///   外层授权与守门进程各自能算出同一个 SID。lease 已经是按次的（`call_lease` / `ephemeral_names`），
-///   所以同一 agent 的两个并发调用不共用身份：窄调用看不到宽调用临时加的根；调用结束删自己的 profile，
-///   并发撤销互不影响。其它平台行为不变（这个名字只用于 Windows 的容器身份与日志）。
+/// 目的：容器名：**按"会话 + agent + 受保护根集合"派生**（reach 指纹）——同一会话里不同 scope 的调用
+///   根集合不同 → 不同 SID（窄调用看不到宽调用的根）；同一 reach 的后续调用复用同一个 SID 与已有 ACE。
+///   工具链/运行包是可信执行基座（授给 baseline），不在指纹里承担 scope 含义；net 是令牌能力，也不进指纹。
+///   外层授权与守门进程各自能算出同一个 SID；其它平台行为不变（这个名字只用于 Windows 的容器身份与日志）。
 pub(crate) fn container_name(spec: &FenceSpec) -> String {
     // FNV-1a：只为把名字收敛成定长标识（不是安全用途），避免容器名里出现中文与路径。
-    // 两个字段之间用 NUL 分隔，避免 ("ab","c") 与 ("a","bc") 撞成同一个身份。
+    // 字段值逐段喂入并补分隔符，避免 ("ab","c") 与 ("a","bc") 撞成同一个身份。
+    let mut parts: Vec<String> = vec![
+        spec.lease.clone(),
+        spec.agent.clone(),
+        spec.private.to_string_lossy().into_owned(),
+        spec.cwd.to_string_lossy().into_owned(),
+    ];
+    for list in [&spec.rw, &spec.ro, &spec.ro_tree] {
+        let mut v: Vec<String> = list
+            .iter()
+            .map(|p| p.to_string_lossy().to_ascii_lowercase())
+            .collect();
+        v.sort();
+        v.dedup();
+        parts.extend(v);
+        parts.push("\u{1}".to_string());
+    }
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in spec
-        .agent
-        .as_bytes()
-        .iter()
-        .chain(&[0u8])
-        .chain(spec.lease.as_bytes())
-    {
-        h ^= *b as u64;
+    for part in &parts {
+        for b in part.as_bytes() {
+            h ^= *b as u64;
+            h = h.wrapping_mul(0x100_0000_01b3);
+        }
+        h ^= 0u64;
         h = h.wrapping_mul(0x100_0000_01b3);
     }
     format!("{}{:016x}", PROFILE_PREFIX, h)

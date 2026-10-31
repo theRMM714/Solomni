@@ -758,6 +758,9 @@ impl Conductor {
         let changed = self.subtree_of(sid);
         self.history.save_meta(&new_meta)?;
         self.record_config(sid, &new_meta);
+        for s in &changed {
+            self.release_fences(s);
+        }
         for s in changed {
             self.sessions.remove(&s);
         }
@@ -776,7 +779,11 @@ impl Conductor {
         for child in &new_children {
             self.history.save_meta(child)?;
         }
-        // 围栏授权是按次写的：旧配置写下的那些在各自调用结束时已经撤掉，这里只记配置并丢内存会话。
+        // 权限 / 模块可能变了：按会话租约撤掉旧配置写下的授权与 profile；下一次调用按新 reach 惰性重授。
+        self.release_fences(&sid);
+        for child in &new_children {
+            self.release_fences(&child.name);
+        }
         self.record_config(&sid, &new_meta);
         // 内存里那份是按旧配置装的：丢掉主会话与整棵子树，下一次访问按新配置从转录重建。
         self.sessions.remove(&sid);
@@ -784,6 +791,17 @@ impl Conductor {
             self.sessions.remove(&child.name);
         }
         Ok(())
+    }
+
+    /// 目的：按会话租约撤掉围栏授权与 profile（权限 / 模块变更、会话删除时调用）。
+    /// 约束：失败如实记日志，不阻断改配；残留由下一次启动对账按死归属回收。
+    pub(crate) fn release_fences(&self, lease: &str) {
+        if let Err(e) = self.tools.release_by_lease(lease) {
+            self.log.warn(
+                "conductor::release_fences",
+                &format!("按会话撤销围栏授权未完成（{}）：{}", lease, e),
+            );
+        }
     }
 
     /// 追加一条旁路配置记录：只作呈现与审计（不进模型上下文，回放与状态派生都跳过它）。

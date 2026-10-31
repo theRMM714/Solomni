@@ -79,8 +79,10 @@ impl Conductor {
                 return Err(Self::running_refusal(sid));
             }
         }
-        // 围栏授权是按次写的（调用结束即撤）：会话删除只回收常驻服务租约与 guest，不再按会话并集撤权。
-        // 常驻服务的会话租约随会话消失一起回收。
+        // 围栏授权按会话租约持有：会话删除时按租约撤掉（调用结束不释放）。常驻服务租约同一时机回收。
+        for sid in &subtree {
+            self.release_fences(sid);
+        }
         for sid in &subtree {
             if let Err(e) = self.residents.reap(sid) {
                 self.log.warn(

@@ -1383,11 +1383,13 @@ impl crate::kernel::ports::FenceHost for NoFenceHost {
     }
 }
 
-/// 记录型围栏端口：断言「每次调用结束真的请求了按次收尾」。
+/// 记录型围栏端口：记录按会话（`lease_releases`）与按次（`released` / `leases`）两类释放请求。
 pub(crate) struct RecordingFence {
     pub(crate) released: Mutex<Vec<String>>,
-    /// 目的：每次撤销请求携带的租约（按次调用的唯一性断言用）。
+    /// 目的：每次按次撤销请求携带的租约（一次性调用断言用）。
     pub(crate) leases: Mutex<Vec<String>>,
+    /// 目的：按会话租约撤销的请求（会话改配 / 删除的断言用）。
+    pub(crate) lease_releases: Mutex<Vec<String>>,
     fail: Option<String>,
 }
 impl RecordingFence {
@@ -1395,6 +1397,7 @@ impl RecordingFence {
         RecordingFence {
             released: Mutex::new(Vec::new()),
             leases: Mutex::new(Vec::new()),
+            lease_releases: Mutex::new(Vec::new()),
             fail: None,
         }
     }
@@ -1405,6 +1408,17 @@ impl RecordingFence {
     }
 }
 impl crate::kernel::ports::FenceHost for RecordingFence {
+    fn release_by_lease(&self, lease: &str) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.lease_releases
+            .lock()
+            .expect("锁")
+            .push(lease.to_string());
+        Ok(())
+    }
+
     fn release_call(&self, spec: &crate::kernel::api::FenceSpec) -> Result<(), String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());

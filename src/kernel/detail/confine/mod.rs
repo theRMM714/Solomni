@@ -84,7 +84,20 @@ impl FenceHostAdapter {
 }
 
 impl crate::kernel::ports::FenceHost for FenceHostAdapter {
-    /// 目的：一次调用的收尾——撤它自己的 ACE、删它的按次 profile、删 `private/Packages/<名字>` 空壳。
+    /// 目的：按会话租约撤销本进程为该会话写下的全部授权与 profile（会话改配 / 删除时调用）。
+    fn release_by_lease(&self, lease: &str) -> Result<(), String> {
+        #[cfg(windows)]
+        {
+            windows::release_by_lease(&self.home, lease)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = lease;
+            Ok(())
+        }
+    }
+
+    /// 目的：一次**一次性调用**的收尾——撤它自己的 ACE、删它的按次 profile、删 `private/Packages/<名字>` 空壳。
     /// 约束：三步各自记错、合并返回；profile 删不掉时临时目录仍要尽力清（它只是宿主侧的空壳）。
     fn release_call(&self, spec: &FenceSpec) -> Result<(), String> {
         #[cfg(windows)]

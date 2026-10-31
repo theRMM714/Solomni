@@ -1369,6 +1369,59 @@ pub(crate) fn edit_session_enforces_the_same_rules_as_creation() {
 }
 
 #[test]
+pub(crate) fn deleting_a_session_releases_its_fence_lease() {
+    use crate::tests::doubles::{InMemorySysIo, RecordingFence};
+    let hist = Arc::new(InMemoryHistory::new());
+    let fence = Arc::new(RecordingFence::new());
+    seed_session(
+        &hist,
+        "w",
+        "single",
+        vec![agent_meta("甲", &["a"], None)],
+        ExecSpec::default(),
+    );
+    let gateway: Arc<dyn ChatGateway + Send + Sync> =
+        Arc::new(gw(BTreeMap::new(), vec!["[]".into()]));
+    let llm = test_llm(
+        Arc::clone(&gateway),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+    );
+    let mut core = Conductor::new(
+        crate::tests::root_dir(),
+        registry_service(InMemorySettings::new(), Arc::clone(&llm)),
+        test_history_of(Arc::clone(&hist)),
+        test_workspace(Arc::new(InMemoryWorkspace::new())),
+        test_vm(),
+        test_packages(Arc::new(InMemoryPackages::empty())),
+        test_provision(),
+        test_modules(Arc::new(VecSource(vec![module_of("a")]))),
+        Arc::new(crate::capabilities::builds::api::NoBuilds),
+        llm,
+        test_tools_svc_with(
+            Arc::new(SilentRunner),
+            Arc::new(InMemorySysIo::new()),
+            Arc::clone(&fence) as Arc<dyn crate::kernel::ports::FenceHost + Send + Sync>,
+        ),
+        test_prompt(),
+        test_tools_svc(),
+        Arc::new(crate::kernel::ports::NoopLog),
+        crate::tests::doubles::test_host_probe(),
+        Arc::new(crate::capabilities::residents::api::NoResidents),
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+    );
+    assert!(core.history_delete("w").unwrap(), "会话目录该被删掉");
+    assert!(
+        fence
+            .lease_releases
+            .lock()
+            .expect("锁")
+            .iter()
+            .any(|l| l == "w"),
+        "删除会话要按会话租约撤销围栏授权（调用结束不释放，生命周期归会话）"
+    );
+}
+
+#[test]
 pub(crate) fn session_meta_exec_section_roundtrips_and_defaults_to_host() {
     let meta = SessionMeta {
         name: "w".to_string(),
