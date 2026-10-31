@@ -318,6 +318,9 @@ CI 借 runner 自带 Rust（`CARGO_HOME` / `SOLOMNI_CARGO_HOME` 指项目内）�
 **触发**：PR 标 Ready（或对 Ready 的 PR 推送）即自动跑；Draft 不跑。需要单独验证某个分支或干净机器时手动派发，
 用 `gh` 发起，`--ref` 指向要验证的分支（`main` 禁止直接 push，通常是 `development`）：
 
+> **Draft 的 run 只证明工作流文件被接受**（YAML 解析通过）：所有 job 跳过、不产报告、不发布 `ci-report`，
+> 不能当任何验收结论。要验证工作流本身（产物上传/下载、合并与发布链路），必须手动派发或等 Ready 后跑一次。
+
 ```text
 gh workflow run test.yml --ref <分支>
 ```
