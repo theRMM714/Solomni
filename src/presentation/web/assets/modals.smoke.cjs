@@ -84,7 +84,7 @@ const sandbox = {
           providers: [{ id: "p1", base_url: "http://x" }],
           models: [{ id: "m1", name: "M", api_model: "m", provider: "p1", note: "", tools: "native", context: 32000, is_core: true }],
           agents: [],
-          settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70, max_guests: 2, sandbox: { policy: { network: false, enforce: { filesystem: "require", network: "require", process_tree: "require", env_whitelist: "require" }, on_unavailable: "ask", windows: { write_acl: false }, host_read_roots: [], deny: [] }, defaults: { profile: "workspace", shared: { read: "all", write: "all", deny: [] }, tools: {} } } },
+          settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70, compact_keep_percent: 15, compact_model: '', max_guests: 2, sandbox: { policy: { network: false, enforce: { filesystem: "require", network: "require", process_tree: "require", env_whitelist: "require" }, on_unavailable: "ask", windows: { write_acl: false }, host_read_roots: [], deny: [] }, defaults: { profile: "workspace", shared: { read: "all", write: "all", deny: [] }, tools: {} } } },
           history: [],
         }),
       };
@@ -219,11 +219,12 @@ if (!loadErrors.length) {
     return !!msg && String(msg.textContent).indexOf("不能为空") >= 0;
   });
   // ② 设置中心：分页后生成页只有三项数字（超时 / 提醒 / 压缩），同时上台数在资源页。
-  check("设置中心：生成页含超时、提醒、压缩", () => {
+  check("设置中心：生成页含超时、提醒、压缩、保留与总结模型", () => {
     vm.runInNewContext("openSettingsModal()", sandbox);
     const page = openPage("generate");
     const nums = inputsIn(page).filter((i) => i.type === "number");
-    return nums.length >= 3;
+    const text = walk(page, []).map((n) => String(n.textContent || "")).join(" ");
+    return nums.length >= 4 && text.indexOf("压缩用模型") >= 0 && text.indexOf("至少保留") >= 0;
   });
   // ②之二 思考等级目录在生成页：默认四档是标签（后端 settings.thinking 是权威）。
   check("设置中心：生成页含思考等级标签", () => {

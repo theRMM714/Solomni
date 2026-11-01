@@ -76,7 +76,7 @@ const sandbox = {
         json: async () => ({
           modules: [{ id: "research", brief: "调研", runtimes: ["python", "ruby"] }],
           providers: [], rejected: ["broken-mod"], agents: [], history: [],
-          settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70 },
+          settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70, compact_keep_percent: 15, compact_model: '' },
           fence: stateStub.fence,
           sessions: stateStub.sessions,
         }),
@@ -856,11 +856,11 @@ setTimeout(async () => {
           "})()",
         sandbox
       );
-      const singleOk = r.single.length === 2 && /18,432/.test(r.single[0]) && /14\.4%/.test(r.single[0]) && /#7/.test(r.single[1]);
-      const proxyOk = r.proxy.length === 2 && /1,000/.test(r.proxy[0]) && /10\.0%/.test(r.proxy[0]);
-      const collabOk = r.collab.length === 1 && /#7/.test(r.collab[0]);
-      const shellOk = r.withShell.length === 3 && r.withShell.some((t) => /shell 退出码 0/.test(t));
-      const thinkingOk = r.withThinking.length === 3 && r.withThinking.some((t) => /思考 high/.test(t));
+      const singleOk = r.single.length === 3 && /18,432/.test(r.single[0]) && /14\.4%/.test(r.single[0]) && /工具/.test(r.single[1]) && /#7/.test(r.single[2]);
+      const proxyOk = r.proxy.length === 3 && /1,000/.test(r.proxy[0]) && /10\.0%/.test(r.proxy[0]) && /工具/.test(r.proxy[1]);
+      const collabOk = r.collab.length === 2 && /工具/.test(r.collab[0]) && /#7/.test(r.collab[1]);
+      const shellOk = r.withShell.length === 4 && r.withShell.some((t) => /shell 退出码 0/.test(t));
+      const thinkingOk = r.withThinking.length === 4 && r.withThinking.some((t) => /思考 high/.test(t));
       statusBarRules = singleOk && proxyOk && collabOk && shellOk && thinkingOk;
       if (!statusBarRules) loadErrors.push("状态栏检查：" + JSON.stringify(r));
     } catch (e) { loadErrors.push("状态栏检查失败：" + e.message); }
