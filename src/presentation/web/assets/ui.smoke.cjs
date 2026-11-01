@@ -127,6 +127,17 @@ check("锚点 aria-expanded", anchor.attrs["aria-expanded"] === "true");
 pop.close();
 check("关闭后移除小卡片", menuRoot.children.length === 0 && anchor.attrs["aria-expanded"] === "false");
 
+// 关闭回调：主动关与"被下一张顶掉"都要响，调用方才能清掉自己的计时器。
+let closedCount = 0;
+const pop2 = ui.popover(anchor, el("div"), { label: "关闭回调", onClose: () => { closedCount += 1; } });
+pop2.close();
+check("关闭回调响一次", closedCount === 1, String(closedCount));
+let replaced = 0;
+ui.popover(anchor, el("div"), { onClose: () => { replaced += 1; } });
+const third = ui.popover(anchor, el("div"), {});
+check("换一张卡片会关掉旧的（旧回调要响）", replaced === 1, String(replaced));
+third.close();
+
 if (failures.length) {
   console.log(failures.join("\n"));
   console.log("UI-SMOKE-FAIL（" + failures.length + " 条）");

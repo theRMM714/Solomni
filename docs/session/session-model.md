@@ -129,8 +129,10 @@ session/<工作名>/
 它**不落成转录行、不进模型上下文**，随会话流水落盘（刷新/重建可恢复）；`line` 是这次调用产出第一行的行号，
 回档折叠到它之前时这条用量随之失效。`SessionView.context` 是同一份事实的快照，**只给有持续对话的
 `Session::Single`**（single / proxy / 协作的 agent 子会话）；协作主会话 `Session::Collab` 没有这个字段。
-**shell 状态也是快照**：`SessionView.shell` 取该会话最近一次 shell 的运行槽（命令、scope、cwd、起止、退出码与回执预览），
-由工具循环写、状态栏读；它只服务界面，不进模型上下文，也不替代转录里的 shell 工具行。
+**shell 状态也是快照**：`SessionView.shell` 取该会话最近一次 shell 的运行槽（命令、scope、cwd、起止、耗时、退出码与回执预览），
+由工具循环写、状态栏读；它只服务界面，不进模型上下文，也不替代转录里的 shell 工具行。**重建 / 回放按转录派生**：
+`last_shell(events)` 取最后一条带命令的 shell 工具行（cwd 与耗时读回执末尾的 `[shell] cwd … · 耗时 … 秒`），
+标 `historical`、不伪造起止时间；回档折叠掉的行不参与派生。`/api/history` 在响应里带同一份快照，前端本地没有时才填。
 **裁决卡与回答是例外**：`DecisionCard` / `DecisionAnswer` 按上表落盘（单 agent 与协作会话都留、系统会话不留）——
 "用户答过什么"是会话的事实，重启后卡与答案都要在（见"请用户裁决"一节）。
 

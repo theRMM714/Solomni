@@ -114,6 +114,9 @@ impl Conductor {
                         // 截掉的尾部里的 usage 事件也随 kept 过滤；状态栏不能继续显示旧数字。
                         s.set_last_usage(crate::capabilities::session::api::last_usage(&kept));
                     }
+                    // 就地回退没重建对象：shell 快照也按截断后的转录重算（被截掉的 shell 不能继续显示）。
+                    self.shell_slot(sid)
+                        .set(crate::capabilities::session::api::last_shell(&kept));
                     crate::capabilities::session::api::truncate_events(&kept)
                 } else {
                     let next = crate::capabilities::session::api::next_line_id(&kept);
@@ -312,8 +315,8 @@ impl Conductor {
         // 整队的权威是**转录**：重建之前先把队清空并按已发出的卡号续号（内存里那一份不作数）。
         self.desk_of(&meta.name)
             .rebuild(crate::capabilities::session::api::issued_in(events));
-        match meta.mode.as_str() {
-            "collab" => Ok(Session::Collab(CollabSession::restore(
+        let built = match meta.mode.as_str() {
+            "collab" => Session::Collab(CollabSession::restore(
                 Arc::clone(&self.llm),
                 Arc::clone(&self.vm),
                 Arc::clone(&self.modules),
@@ -328,7 +331,7 @@ impl Conductor {
                 self.guest_lease_for(meta)?,
                 // 重建出来的整队进**同一条队**（按转录里已发出的卡号续号，已答过的不重问）。
                 self.desk_of(&meta.name),
-            )?)),
+            )?),
             // 单 agent：按 meta.agents[0] 重建（名单是唯一真相；模块数不限）。
             "single" => {
                 let a = meta
@@ -418,7 +421,7 @@ impl Conductor {
                 s.set_model(a.model.clone().or_else(|| self.registry.core_model()));
                 s.set_compact_factory(self.compact_factory());
                 s.set_last_usage(crate::capabilities::session::api::last_usage(events));
-                Ok(Session::Single(s))
+                Session::Single(s)
             }
             // 代理会话：没有 agent（核心自己说话）；外壳由 build_proxy 装配，回放与单 agent 共用同一件。
             "proxy" => {
@@ -436,13 +439,19 @@ impl Conductor {
                     t.reply_seq = crate::capabilities::session::api::max_reply(events);
                 }
                 s.set_last_usage(crate::capabilities::session::api::last_usage(events));
-                Ok(Session::Single(s))
+                Session::Single(s)
             }
-            other => Err(format!(
-                "未知会话形态：{}（只认 single / collab / proxy）",
-                other
-            )),
-        }
+            other => {
+                return Err(format!(
+                    "未知会话形态：{}（只认 single / collab / proxy）",
+                    other
+                ))
+            }
+        };
+        // 状态栏的 shell 快照同样按转录派生：重启 / 启用 / 回档重建后不再"失忆"。
+        self.shell_slot(&meta.name)
+            .set(crate::capabilities::session::api::last_shell(events));
+        Ok(built)
     }
 }
 /// 目的：把转录事件还原成（对话, 每行历史长度, 每行回复号, 每行 id, 压缩点, 压缩行 id）。

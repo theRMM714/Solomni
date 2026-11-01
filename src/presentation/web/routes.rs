@@ -198,7 +198,7 @@ pub const ROUTES: &[Route] = &[
         pattern: "/api/history/{name}",
         capability: "HistoryOps::open",
         request: "—",
-        response: "{meta,events,live,head}",
+        response: "{meta,events,live,head,shell}",
         statuses: &[200, 404],
         note: "读回历史：盘上转录 + 事件台上它之外的实时尾巴 + 合流时的头部序号（水位）",
     },

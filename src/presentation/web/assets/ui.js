@@ -220,6 +220,7 @@
     const p = openPopover;
     openPopover = null;
     if (p._cleanup) p._cleanup();
+    if (typeof p.onClose === 'function') p.onClose();
     if (p.node && p.node.parentNode) p.node.parentNode.removeChild(p.node);
     else if (p.node && p.node.remove) p.node.remove();
     if (p.anchor && p.anchor.setAttribute) p.anchor.setAttribute('aria-expanded', 'false');
@@ -278,6 +279,7 @@
     openPopover = {
       anchor,
       node,
+      onClose: o.onClose,
       _cleanup: () => {
         if (doc.removeEventListener) {
           doc.removeEventListener('pointerdown', onDown, true);
