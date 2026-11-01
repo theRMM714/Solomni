@@ -629,7 +629,7 @@ fn run_shell(
         ctx.tools.run_shell(&run)
     };
     // 回执补「落点 + 本次耗时」：模型据此判断相对路径与耗时，回放也从这一行派生。
-    // 只对**真正跑起来**的调用追加；围栏拒绝 / 起进程失败不虚报执行过。
+    // 只对执行层给出 `[shell]` 收尾行的调用追加；参数拒绝 / 起进程失败没有这一行。
     if api::did_run(&outcome.output) {
         outcome.output.push('\n');
         outcome.output.push_str(&api::cwd_elapsed_line(

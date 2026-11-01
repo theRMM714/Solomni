@@ -138,7 +138,7 @@ roles:
 
 `systools/tools.yaml` 的 `shell` 是唯一声明 per-call `scope` 的系统工具；它不新建执行机制：host 走 kernel 的 `ProcessRunner`，VM 走 guest helper。
 
-- 参数：`command`（必填）、`scope`（sandbox / external，缺省 sandbox）、`timeout_secs`（缺省 120，最大 600）。cwd 固定私有沙箱；无交互 stdin / TTY；输出 16k（4k 开头 + 12k 结尾）；命令上限 8000 字符；回执带退出码、cwd 与本次耗时（后者由工具层在真正执行后追加，回放也从这一行派生）。
+- 参数：`command`（必填）、`scope`（sandbox / external，缺省 sandbox）、`timeout_secs`（缺省 120，最大 600）。cwd 固定私有沙箱；无交互 stdin / TTY；输出 16k（4k 开头 + 12k 结尾）；命令上限 8000 字符；回执带退出码、cwd 与本次耗时（后者由工具层在守门进程给出 shell 收尾行后追加，回放也从这一行派生）。
 - **scope 是本次调用的 reach 请求，profile 才是用户上限**：sandbox 只给 private + 基础 / 项目工具链只读（net=false）；external 在 sandbox 上再加 shared-read / module-read / host-read / network。requested 不是 granted 子集 = 拒绝，不弹卡。
 - profile：view 不发放；workspace sandbox allow、external deny；external sandbox allow、external ask；all_reach sandbox / external allow。sandbox 与 external 都要求围栏真强制（`allow_degraded=false`），装不上拒绝。
 - 围栏：shell 的 `for_call` 另加 `runtime_roots`（项目内基础工具链 + 本 agent 模块运行包根）；这些是**可信执行基座**，Windows 上一次性授给 `ALL APPLICATION PACKAGES`、不参与按次授权。其余可达范围按 `会话 + agent + 根集合` 派生容器身份，授权按会话持有（调用结束不释放，会话改配/删除时回收）；一次性调用（构建/独立模块工具）各自唯一租约、跑完即撤。
