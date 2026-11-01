@@ -492,7 +492,7 @@ impl ProcTools {
 }
 
 #[cfg(windows)]
-const PS_PRELUDE: &str = "try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }\n$OutputEncoding = [System.Text.Encoding]::UTF8\nSet-Location -LiteralPath $PSScriptRoot -ErrorAction Stop\n";
+const PS_PRELUDE: &str = "$ErrorActionPreference = 'Stop'\ntry { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }\n$OutputEncoding = [System.Text.Encoding]::UTF8\nSet-Location -LiteralPath $PSScriptRoot -ErrorAction Stop\n";
 #[cfg(windows)]
 const PS_TAIL: &str = "\nif ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE }\n";
 
@@ -513,7 +513,7 @@ impl ProcTools {
 
 #[cfg(windows)]
 impl ProcTools {
-    /// 目的：把 shell 脚本写进 cwd 下的临时 .ps1（UTF-8 BOM + 输出编码前导 + 退出码尾巴）；返回相对名与全路径。
+    /// 目的：把 shell 脚本写进 cwd 下的临时 .ps1（UTF-8 BOM + 错误即止 / 输出编码前导 + 退出码尾巴）；返回相对名与全路径。
     /// 约束：create_new 防跟随同名符号链接；名字由本进程生成，不含模型内容。
     fn shell_script_file(
         &self,
@@ -1637,6 +1637,79 @@ mod tests {
         let _ = std::fs::remove_dir_all(&outside);
     }
 
+    /// 目的：生成的 .ps1 让**未处理的 PowerShell 错误**以非 0 收场；显式容错与原生退出码不变。
+    /// 约束：这条契约只测脚本包装本身，不装容器围栏（CI 无 ACL 也能跑）；缺 PowerShell 就如实跳过。
+    #[cfg(windows)]
+    #[test]
+    fn generated_shell_script_fails_on_unhandled_powershell_errors() {
+        let dir = crate::tests::scratch("proc-shell-script-stop");
+        let tools = ProcTools::new(
+            PathBuf::from("not-used"),
+            code_texts(),
+            dir.clone(),
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        );
+        let program = tools.powershell_program();
+        if crate::kernel::detail::host_probe::find_exe(program).is_none() {
+            eprintln!("[探针] 本机没有 {}：跳过 PowerShell 脚本契约", program);
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
+        let spec = spec_for(&dir);
+        let cases = [
+            (
+                "Get-Content C:\\definitely-missing-solomni-xyz",
+                Some(1),
+                "未处理的 cmdlet 错误要以 1 中止",
+            ),
+            ("Write-Error \"boom\"", Some(1), "Write-Error 要以 1 中止"),
+            (
+                "Get-Content C:\\definitely-missing-solomni-xyz -ErrorAction SilentlyContinue; Write-Output ok",
+                Some(0),
+                "显式静默的错误不算失败",
+            ),
+            ("cmd /c exit 3", Some(3), "原生退出码照旧转发"),
+        ];
+        for (script, want, why) in cases {
+            let (_, path) = tools
+                .shell_script_file(&crate::kernel::ports::ShellRun {
+                    fence: &spec,
+                    script,
+                    timeout: Duration::from_secs(10),
+                    cancel: None,
+                    path: None,
+                    ask: None,
+                })
+                .expect("生成 shell 脚本");
+            let out = std::process::Command::new(program)
+                .args([
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                ])
+                .arg(&path)
+                .output()
+                .expect("跑 PowerShell");
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            assert_eq!(
+                out.status.code(),
+                want,
+                "{}（{}，script = {}）",
+                why,
+                stderr,
+                script
+            );
+            if want == Some(1) {
+                assert!(!stderr.trim().is_empty(), "错误要留在 stderr：{}", script);
+            }
+            let _ = std::fs::remove_file(&path);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[cfg(windows)]
     #[test]
     fn real_shell_uses_powershell_utf8_exit_code_and_cleans_its_script() {
@@ -1670,6 +1743,22 @@ mod tests {
             assert!(out.output.contains("中文"), "{}（{}）", out.output, program);
             assert!(
                 out.output.contains("[shell] 退出码 3"),
+                "{}（{}）",
+                out.output,
+                program
+            );
+            // PowerShell 的未处理 cmdlet 错误也必须以非 0 收场（不再只转发 $LASTEXITCODE）。
+            let out = tools.run_shell(&crate::kernel::ports::ShellRun {
+                fence: &spec,
+                script: "Get-Content C:\\definitely-missing-solomni-xyz",
+                timeout: Duration::from_secs(30),
+                cancel: None,
+                path: None,
+                ask: None,
+            });
+            assert!(!out.ok, "未处理错误要失败（{}）：{}", program, out.output);
+            assert!(
+                out.output.contains("[shell] 退出码 1"),
                 "{}（{}）",
                 out.output,
                 program

@@ -105,7 +105,7 @@
 - 外层用**当前程序自己**当守门进程：`--fence-run <FenceJob JSON> -- <命令>`。
 - `FenceJob` = `FenceSpec` + `prepared`（外层是否已写完本机授权）+ `home`（容器 profile 的台账落点）+ `policy`（本进程的强制项与降级许可）；扁平成一个 JSON 传给守门进程。
 - 命令作为**一个 argv** 交给守门进程，外层不拼 shell；模块工具的参数 JSON 经 stdin 送进工具进程，不进命令行；shell 的脚本自身经 stdin（Unix）或临时 `.ps1`（Windows）送达。
-- 守门进程用系统 shell 执行模块作者写的命令行（`sh -c` / `cmd /C`）——命令行是模块声明的一部分。shell 的启动命令由机制生成：Unix `sh -c "$(cat)"`；Windows PowerShell（pwsh 7 优先、5.1 回退，`-File` 临时 .ps1）。
+- 守门进程用系统 shell 执行模块作者写的命令行（`sh -c` / `cmd /C`）——命令行是模块声明的一部分。shell 的启动命令由机制生成：Unix `sh -c "$(cat)"`；Windows PowerShell（pwsh 7 优先、5.1 回退，`-File` 临时 .ps1；脚本先设 `$ErrorActionPreference = 'Stop'`，未处理的 PowerShell 错误当场中止并以非 0 结束，原生进程码与显式 `exit N` 不变）。
 - **容器里的程序名先相对化**（仅 Windows）：AppContainer 下**绝对路径**的程序会被拒（真机：同一文件用
   `D:\…\x.exe` 报 Access denied，用 `..\x.exe` 正常——相对路径走 cwd 的目录句柄，不遍历卷根；非系统盘的卷根
   DACL 要管理员才写得动）。执行前把首 token 的程序名解析成绝对路径、再改写成相对 cwd 的路径（同卷才改；
