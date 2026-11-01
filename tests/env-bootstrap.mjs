@@ -172,6 +172,12 @@ function runSetup(dir, env) {
  *   （node 打印版本、-vV 给不出 host，正好代表"能跑但构建不了"的借用工具链。）
  */
 function fixtureEnv(dir, c) {
+  // projectStub 要的就是"项目内那套"这条路：不能被 SOLOMNI_CARGO 抢走。
+  if (c.projectStub) {
+    const env = { ...process.env };
+    delete env.SOLOMNI_CARGO;
+    return env;
+  }
   if (c.borrowStub) {
     const bin = path.join(dir, "bin");
     fs.mkdirSync(bin, { recursive: true });
@@ -192,6 +198,13 @@ async function runCase(c) {
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.join(dir, ".tools"), { recursive: true });
   fs.copyFileSync(path.join(ROOT, "env.js"), path.join(dir, "env.js"));
+  if (c.projectStub) {
+    // 项目内工具链存在（下载中断留下的半套也长这样）：路径对、跑得起来，但构建不出东西。
+    const bin = path.join(dir, "platform", IS_WIN ? "windows" : process.platform === "darwin" ? "macos" : "linux", "cargo", "bin");
+    fs.mkdirSync(bin, { recursive: true });
+    const stub = path.join(bin, IS_WIN ? "cargo.exe" : "cargo");
+    try { fs.linkSync(process.execPath, stub); } catch (e) { fs.copyFileSync(process.execPath, stub); }
+  }
   const { server, requests, base } = await startServer(c.mode);
   const url = base + (c.path || "/winlibs.zip");
   try {
@@ -203,6 +216,8 @@ async function runCase(c) {
     );
     if (c.prepare) c.prepare(path.join(dir, ".tools"), url);
     const env = fixtureEnv(dir, c);
+    // 调用方环境里的代理不能连夹具的 loopback 应答源一起代理（代理回 502 会让下载用例假失败）。
+    for (const k of ["NO_PROXY", "no_proxy"]) env[k] = "127.0.0.1,localhost";
     // 这两个开关不能从调用者的环境漏进来（否则会跳过要测的那条路）。
     delete env.SOLOMNI_MINGW_BIN;
     delete env.SOLOMNI_ACCEPT_ASSET_CHANGE;
@@ -343,6 +358,18 @@ const CASES = [
       assert.match(out, /借用不成立/, "要说明这套工具链构建不出二进制：" + tail(out));
       assert.ok(/host/.test(out), "要点名借来的 host");
       assert.ok(!/environment ready/.test(out), "不许打印 environment ready");
+    },
+  },
+  {
+    // 下载中断会留下"装了一半"的项目内工具链：它存在、能跑，但构建不了。这种状态不许被当成就绪。
+    name: "half-installed-project-toolchain-is-reported",
+    projectStub: true,
+    mode: "range",
+    check: ({ out, code }) => {
+      assert.equal(code, 1, "半套的项目内工具链不能宣告就绪：" + tail(out));
+      assert.match(out, /项目内工具链构建不出二进制/, "要说明项目内工具链构建不了：" + tail(out));
+      assert.match(out, /rustup toolchain uninstall/, "修复步骤要先卸掉半套（再装一次会回 unchanged）");
+      assert.match(out, /node env.js setup/, "并指回安装入口");
     },
   },
   {

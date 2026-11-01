@@ -119,6 +119,25 @@ function tail(text, lines) {
   return all.slice(-(lines || 6)).join("\n");
 }
 
+/**
+ * 一条可执行的修复步骤：项目内工具链装了一半（下载中断留下的半套）或缺 default 时用。
+ * 半套不能靠"再装一次"修：rustup 认为这套已安装、会回 "unchanged"，必须先卸再装。
+ */
+function repairHint(host) {
+  const toolchain = host ? "stable-" + host : "stable";
+  return "修复（半套通常是下载中断留下的）：\n" +
+    "  1) RUSTUP_HOME=" + P_RUSTUP + " CARGO_HOME=" + P_CARGO + " rustup toolchain uninstall " + toolchain + "\n" +
+    "  2) node env.js setup --yes（重新装进项目内）";
+}
+
+/** 目的：项目内那套工具链**真的能构建**才放行；不能就带着修复命令停下（下载中断会留下半套）。 */
+function assertProjectBuildable(r) {
+  const p = probeBuild(r);
+  if (p.ok) return p;
+  die("项目内工具链构建不出二进制（host " + (p.host || "读不到") + "）：\n  " +
+    (firstError(p.detail) || "构建探测失败") + "\n  " + repairHint(p.host));
+}
+
 /** 一句能当结论的错误行：优先第一条 error:，否则第一行（摘要里要塞得下，不能只给 "aborting"）。 */
 function firstError(text) {
   const all = String(text || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
@@ -131,7 +150,7 @@ let buildProbe = null;
  * 为什么必须真编：Windows 上 `cargo --version` 能跑、host 却是 msvc 且机器没有 link.exe（没装 VS C++）时，
  *   一链接就报 `linker link.exe not found`。只查版本会把这种工具链当"可用"，借来之后在构建阶段才炸，
  *   入口层还会把它归成"是不是另一个窗口在跑"。
- * 约束：只对借用 / 显式指定的工具链探测（项目内那套由本层装出来，坏了由构建输出说明）；
+ * 约束：借用 / 显式指定 / 项目内三处都探（下载中断会留下"装了一半"的项目内工具链，同样得当成不可用）；
  *   编译一个空程序并链接，用**同一份**拼好的环境（PATH 里已有 mingw bin）；
  *   每进程只探一次；产物只落 `target/tmp/env-probe-<pid>/`，探完即删。
  * 返回：{ ok, host, detail }（detail = 编译器原文尾部）。
@@ -280,6 +299,7 @@ async function ensureProject(opts) {
   }
   const r = resolve({ requireProject: true });
   if (!r) die("项目内工具链装好了却仍找不到 cargo（platform/<os>/cargo/bin）");
+  assertProjectBuildable(r);
   return r;
 }
 
@@ -315,13 +335,18 @@ async function ensure(opts) {
   if (!r) {
     await installRust({ yes });
   }
+  // 先验工具链能不能构建，再谈 dlltool：半套的项目内工具链要当场停下，别再多下一份 MinGW。
+  let ready = resolve({});
+  if (!ready) die("environment not ready: no usable cargo (project or PATH)");
+  if (ready.source === "project") assertProjectBuildable(ready);
   if (IS_WIN) {
     // dlltool 只服务 GNU 目标（windows-sys 的 raw-dylib 要它）；借到能链接的 msvc 工具链时不需要它。
-    if (!host && r) host = cargoVv(r).host;
+    if (!host) host = cargoVv(ready).host;
     if (!host || /-gnu$/.test(host)) await ensureDlltool(yes);
     else log("dlltool not required: host " + host + " links with its own toolchain");
   }
-  const ready = resolve({});
+  // dlltool 目录刚进 EXTRA_PATH，PATH 要重新拼一次。
+  ready = resolve({});
   if (!ready) die("environment not ready: no usable cargo (project or PATH)");
   return ready;
 }
