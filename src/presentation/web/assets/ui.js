@@ -272,7 +272,12 @@
         closePopover();
       }
     };
-    const onViewport = () => closePopover();
+    // 页面/视口滚动 → 收起（卡片是 fixed，锚点会跑）；但卡片**自己**的滚动（长回执）不能关掉它。
+    const onViewport = (e) => {
+      const t = e && e.target;
+      if (t && (t === node || (node.contains && node.contains(t)))) return;
+      closePopover();
+    };
     if (doc.addEventListener) {
       doc.addEventListener('pointerdown', onDown, true);
       doc.addEventListener('keydown', onKey, true);

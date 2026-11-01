@@ -153,6 +153,22 @@ check("锚点被重建后沿用上次位置", parseInt(clamped.node.style.top, 1
 clamped.close();
 delete sandbox.innerHeight;
 
+// 视口滚动监听：卡片自己滚（长回执）不能关，页面滚才关。
+const winHandlers = {};
+sandbox.addEventListener = (t, f) => { (winHandlers[t] = winHandlers[t] || []).push(f); };
+sandbox.removeEventListener = (t, f) => {
+  const list = winHandlers[t] || [];
+  const i = list.indexOf(f);
+  if (i >= 0) list.splice(i, 1);
+};
+const scrollAnchor = el("button");
+const scrollCard = ui.popover(scrollAnchor, el("div"), { label: "滚动" });
+const fireScroll = (target) => (winHandlers.scroll || []).slice().forEach((f) => f({ target }));
+fireScroll(scrollCard.node);
+check("卡片内部滚动不关闭卡片", scrollCard.node.parentNode === menuRoot, String(scrollCard.node.parentNode && scrollCard.node.parentNode.tagName));
+fireScroll(el("div"));
+check("页面滚动关闭卡片", menuRoot.children.length === 0);
+
 if (failures.length) {
   console.log(failures.join("\n"));
   console.log("UI-SMOKE-FAIL（" + failures.length + " 条）");
