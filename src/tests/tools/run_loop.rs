@@ -177,6 +177,32 @@ pub(crate) fn tool_loop_rejects_undeclared_tool() {
     );
 }
 
+/// 系统工具册里、但不在本回合工具面的工具（如 compact）必须按越权拒绝，不能落进模块工具兜底。
+#[test]
+pub(crate) fn tool_loop_refuses_book_only_tools_not_in_the_face() {
+    let mut m = member_with_tools(
+        "m0",
+        vec![
+            "{\"type\":\"tool\",\"name\":\"compact\",\"args\":{}}".into(),
+            "{\"type\":\"say\",\"text\":\"完成\"}".into(),
+        ],
+        Arc::new(SilentRunner),
+    );
+    let prompts = test_prompts();
+    let exec = run_execution(std::slice::from_mut(&mut m), "任务", &prompts);
+    let trace = exec.traces.get("m0").expect("工具调用应入册");
+    assert!(
+        trace.iter().any(|v| v.output.contains("没有工具 compact")),
+        "册里但不在工具面的工具该按越权拒绝：{:?}",
+        trace.iter().map(|v| &v.output).collect::<Vec<_>>()
+    );
+    assert!(
+        !trace.iter().any(|v| v.output.contains("缺少必填参数")),
+        "越权拒绝不该先走参数校验：{:?}",
+        trace.iter().map(|v| &v.output).collect::<Vec<_>>()
+    );
+}
+
 #[test]
 pub(crate) fn tool_loop_has_no_call_cap() {
     let runner = Arc::new(RecordingRunner {

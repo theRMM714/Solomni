@@ -1034,6 +1034,76 @@ fn manual_compaction_reports_when_there_is_nothing_to_compact() {
     );
 }
 
+/// 整段输入恰好 /compact：服务端把它当动作，不把命令本身发给模型。
+#[test]
+fn slash_compact_message_runs_the_command_instead_of_the_model() {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut member = std::collections::BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![
+            "第一件事".to_string(),
+            "{\"type\":\"tool\",\"name\":\"compact\",\"args\":{\"summary\":\"摘要\"}}".to_string(),
+        ],
+    );
+    let gateway = super::RecordingGateway {
+        inner: super::doubles::ScriptGateway::new(member, vec![]),
+        seen: Arc::clone(&seen),
+    };
+    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+        super::doubles::core_with_gateway(vec![module_of("a")], gateway),
+    )
+    .expect("起核心线程");
+    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let mut st = ops.registry.settings().expect("读设置");
+    st.compact_at_percent = 0;
+    st.compact_keep_percent = 0;
+    st.sandbox.policy.windows.write_acl = true;
+    ops.registry.set_settings(st).expect("写设置");
+    let sid = ops
+        .sessions
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话")
+        .0
+        .sid;
+    ops.sessions
+        .say(
+            &sid,
+            "先说一句",
+            crate::capabilities::conductor::api::Output::Final,
+        )
+        .expect("第一轮");
+    let acted = ops
+        .actions
+        .act(ActionCall {
+            id: "send_message".to_string(),
+            args: serde_json::json!({ "session_id": sid, "text": "/compact" }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .expect("斜杠命令该走动作");
+    assert!(matches!(
+        acted,
+        crate::capabilities::conductor::api::Acted::Advanced(_)
+    ));
+
+    let (batches, _, _) = handle.events().snapshot(Some(&sid), 0);
+    let events: Vec<&SessionEvent> = batches.iter().flat_map(|b| b.events.iter()).collect();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Transcript(lines)
+            if lines.iter().any(|l| l.kind == "compacted"))),
+        "斜杠命令该落压缩记录行：{events:?}"
+    );
+    let all = seen.lock().expect("锁").clone();
+    assert!(
+        !all.iter()
+            .any(|msgs| msgs.iter().any(|c| c.contains("/compact"))),
+        "命令本身不该发给模型：{all:?}"
+    );
+}
+
 /// 全局压缩模型：已有会话在**触发时**读共享目标；改设置不刷新会话。
 #[test]
 fn compaction_model_is_global_and_resolved_at_trigger() {

@@ -476,6 +476,11 @@ impl ConductorHandle {
                 ))
             }
             "send_message" => {
+                // 整段输入恰好是 `/compact`：命令走动作，不把命令本身发给模型。
+                // 服务端收口，Web 旧缓存 / CLI 直接输入也能触发。
+                if s("text").trim() == "/compact" {
+                    return SessionOps::compact(self, &s("session_id")).map(Acted::Advanced);
+                }
                 SessionOps::say(self, &s("session_id"), &s("text"), out).map(Acted::Advanced)
             }
             "set_module_enabled" => {
