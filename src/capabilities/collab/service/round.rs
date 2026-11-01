@@ -778,6 +778,7 @@ pub fn build_round_lines(
             system: false,
             task: false,
             turn,
+            payload: None,
         }
     };
     let mut out = Vec::new();

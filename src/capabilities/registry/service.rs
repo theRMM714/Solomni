@@ -46,6 +46,8 @@ impl RegistryService {
             &settings.app.sandbox,
         )
         .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
+        providers::validate_compact_percents(&settings.app)
+            .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
         providers::validate_thinking(&settings.models, &settings.app.thinking)
             .map_err(|e| format!("登记处配置非法：{}", e))?;
         Ok(RegistryService {
@@ -257,6 +259,12 @@ impl Registry for RegistryService {
                 id
             ));
         }
+        if self.settings.app.compact_model.trim() == id {
+            return Err(format!(
+                "{} 是压缩用模型；请先把设置里的压缩模型改成别的再删",
+                id
+            ));
+        }
         let removed = self.settings.models.remove(id).is_some();
         if removed {
             self.save("registry::model_remove")?;
@@ -318,6 +326,8 @@ impl Registry for RegistryService {
     fn set_app_settings(&mut self, app: AppSettings) -> Result<(), String> {
         // 不合法就如实拒绝，不把坏的策略（绝对路径 / .. / 未知字段）落进登记处。
         crate::capabilities::registry::domain::providers::validate_sandbox_settings(&app.sandbox)
+            .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
+        providers::validate_compact_settings(&app, &self.settings.models)
             .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
         crate::capabilities::registry::domain::providers::validate_sandbox_authorization(
             &app.sandbox.policy,

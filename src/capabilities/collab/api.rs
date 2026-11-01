@@ -4,5 +4,5 @@ pub use crate::capabilities::collab::domain::collab_state::tool_runs;
 pub use crate::capabilities::collab::service::collab::CollabSession;
 pub use crate::capabilities::collab::service::discussion::{AfterTurn, MemberTurn};
 pub use crate::capabilities::collab::service::driver::{
-    compact_turn, continue_reply, discussion_turn, dispatch_task, say,
+    compact_session, continue_reply, discussion_turn, dispatch_task, say,
 };

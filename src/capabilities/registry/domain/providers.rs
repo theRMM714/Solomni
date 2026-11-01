@@ -339,6 +339,14 @@ pub struct AppSettings {
     /// 默认 70：留三成余量给"这一轮还要生成的内容"，免得刚压完又爆。
     #[serde(default = "default_compact_percent")]
     pub compact_at_percent: u8,
+    /// 目的：压缩时至少保留最近多少内容（占模型窗口的百分比）。
+    /// 约束：默认 15；更早的内容压成摘要，最近的尾部原样保留；0 = 只留摘要。
+    #[serde(default = "default_compact_keep_percent")]
+    pub compact_keep_percent: u8,
+    /// 目的：压缩用的模型：空 = 会话同模型；否则是登记处里的模型 id。
+    /// 约束：只在压缩触发时解析，不参与每个回合。
+    #[serde(default)]
+    pub compact_model: String,
     /// **一轮内对同一个成员最多提醒几次**（提醒 = 系统注入"你还没用讨论动词表态"）。
     /// 到顶就放它过去：主会话如实记一行"未回应"，整轮继续（不阻塞）。
     #[serde(default = "default_discuss_remind_cap")]
@@ -356,6 +364,10 @@ fn default_max_guests() -> u32 {
 
 fn default_compact_percent() -> u8 {
     70
+}
+
+fn default_compact_keep_percent() -> u8 {
+    15
 }
 
 fn default_llm_timeout_secs() -> u64 {
@@ -380,9 +392,41 @@ impl Default for AppSettings {
             max_guests: 2,
             llm_timeout_secs: crate::kernel::api::DEFAULT_LLM_TIMEOUT_SECS,
             compact_at_percent: 70,
+            compact_keep_percent: 15,
+            compact_model: String::new(),
             discuss_remind_cap: 3,
         }
     }
+}
+
+/// 目的：压缩两个百分比的硬范围（0..=100）；不校验两者大小关系。
+pub fn validate_compact_percents(app: &AppSettings) -> Result<(), String> {
+    if app.compact_at_percent > 100 {
+        return Err(format!(
+            "compact_at_percent 必须在 0..=100（现在是 {}）",
+            app.compact_at_percent
+        ));
+    }
+    if app.compact_keep_percent > 100 {
+        return Err(format!(
+            "compact_keep_percent 必须在 0..=100（现在是 {}）",
+            app.compact_keep_percent
+        ));
+    }
+    Ok(())
+}
+
+/// 目的：保存设置时的完整校验：百分比范围 + 压缩模型必须已登记。
+pub fn validate_compact_settings(
+    app: &AppSettings,
+    models: &BTreeMap<String, ModelEntry>,
+) -> Result<(), String> {
+    validate_compact_percents(app)?;
+    let id = app.compact_model.trim();
+    if !id.is_empty() && !models.contains_key(id) {
+        return Err(format!("compact_model 未登记：{}", id));
+    }
+    Ok(())
 }
 
 /// 目的：校验 settings.yaml 的沙箱段——路径、枚举与硬黑名单。

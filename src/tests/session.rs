@@ -1139,21 +1139,52 @@ pub(crate) fn node_task_is_a_system_line_but_a_user_message() {
         .expect("准备节点回合");
     let crate::capabilities::conductor::service::Prepared::Run {
         session,
+        identity,
         prefix,
+        task,
         llm,
         ..
     } = prepared
     else {
         panic!("节点回合该是可以跑的");
     };
-    // 节点执行跟随设置里的流式开关。
+    // 节点执行跟随设置里的流式开关；任务由工作线程在压缩后注入。
     assert!(llm.stream, "默认设置下节点执行也要流式");
+    let task = task.expect("节点回合带任务");
+    let mut session = session;
+    let events = std::cell::RefCell::new(prefix);
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    {
+        let mut live = Live {
+            llm,
+            cancel,
+            emit: &mut |ev| events.borrow_mut().push(ev),
+            decisions: None,
+            ask: None,
+        };
+        let mut sink = |ev| events.borrow_mut().push(ev);
+        crate::capabilities::collab::api::dispatch_task(
+            &mut session,
+            &task,
+            &identity,
+            &mut live,
+            &mut sink,
+        );
+    }
+    let events = events.into_inner();
     let dialogue = session.dialogue();
-    let last = dialogue.last().expect("注入过任务");
-    assert_eq!(last.role, "user", "派发行进上下文是 user 角色：{:?}", last);
-    assert!(last.content.contains("把事做完"), "{}", last.content);
+    let task_msg = dialogue
+        .iter()
+        .rev()
+        .find(|m| m.role == "user" && m.content.contains("把事做完"))
+        .expect("注入过任务");
+    assert_eq!(
+        task_msg.role, "user",
+        "派发行进上下文是 user 角色：{:?}",
+        task_msg
+    );
     assert!(
-        prefix.iter().any(|e| matches!(
+        events.iter().any(|e| matches!(
             e,
             crate::capabilities::session::api::SessionEvent::Transcript(lines)
                 if lines.iter().any(|l| l.system && l.task && l.line.contains("把事做完"))
@@ -1175,7 +1206,7 @@ pub(crate) fn node_task_is_a_system_line_but_a_user_message() {
         msgs.iter().map(|m| m.role.clone()).collect::<Vec<_>>()
     );
     // 重建 = 实时：重启后从落盘流水重建，最后这条还得是同一条 user 消息。
-    core.put_single_recorded(&sid, *session, &prefix);
+    core.put_single_recorded(&sid, *session, &events);
     drop(core);
     let mut core2 = core_with_all(
         vec![module_of("a")],
@@ -1193,9 +1224,16 @@ pub(crate) fn node_task_is_a_system_line_but_a_user_message() {
         )
         .expect("回档即重建");
     let rebuilt = core2.single_history(&sid).expect("重建后应在内存里");
-    let tail = rebuilt.last().expect("重建后仍有任务行");
-    assert_eq!(tail.role, "user", "重建后派发行仍是 user 角色：{:?}", tail);
-    assert!(tail.content.contains("把事做完"), "{}", tail.content);
+    let task_msg = rebuilt
+        .iter()
+        .rev()
+        .find(|m| m.role == "user" && m.content.contains("把事做完"))
+        .expect("重建后仍有任务行");
+    assert_eq!(
+        task_msg.role, "user",
+        "重建后派发行仍是 user 角色：{:?}",
+        task_msg
+    );
 }
 
 #[test]
@@ -1978,8 +2016,9 @@ pub(crate) fn notice_lines_stay_out_of_the_model_dialogue() {
         }));
         vec![serde_json::json!({"type": "transcript", "lines": lines})]
     };
-    let (plain, plain_marks, plain_reply, _) = replay_dialogue(&events(false), ToolMode::Envelope);
-    let (shown, marks, line_reply, _) = replay_dialogue(&events(true), ToolMode::Envelope);
+    let (plain, plain_marks, plain_reply, _, _, _) =
+        replay_dialogue(&events(false), ToolMode::Envelope);
+    let (shown, marks, line_reply, _, _, _) = replay_dialogue(&events(true), ToolMode::Envelope);
     assert_eq!(shown.len(), plain.len(), "提示不进对话");
     assert_eq!(
         shown.iter().map(|m| m.role.as_str()).collect::<Vec<_>>(),

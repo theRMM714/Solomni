@@ -86,8 +86,11 @@ pub(crate) fn run_branch(
 /// 这次调用在**本回合的工具面**里吗：内置按角色表发放的 id 清单，外部工具按"这一回合给不给模块工具"
 /// 与模块归属（判据只有这一处——执行侧与"如实说一句越权"都读它）。
 pub(crate) fn face_has(ctx: &MemberTools, module: Option<&str>, name: &str) -> bool {
+    // 系统工具册里的名字（含 `compact` 这类只由系统发起的工具）也按工具面校验：
+    // 不能因为“没写 module”就落进模块工具的兜底分支。
     if crate::capabilities::tools::api::is_builtin(name)
         || crate::capabilities::tools::api::is_exec(name)
+        || ctx.builtin_tools.contains_key(name)
     {
         ctx.allowed.iter().any(|t| t == name)
     } else if handler_for(ctx, name).is_some() {

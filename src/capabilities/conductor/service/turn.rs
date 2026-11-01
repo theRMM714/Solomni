@@ -162,12 +162,14 @@ impl Conductor {
             _ => return Ok(Prepared::NotSingle),
         };
         let mut session = self.take_single(sid)?;
+        self.refresh_context_budget(&mut session);
         session.set_thinking(llm.thinking.clone());
         let persister = self.persister(sid);
         Ok(Prepared::Run {
             session: Box::new(session),
             identity,
             prefix,
+            task: None,
             llm,
             persister,
         })
@@ -194,18 +196,18 @@ impl Conductor {
             prefix.push(SessionEvent::Notice(n));
         }
         let mut session = self.take_single(child)?;
+        self.refresh_context_budget(&mut session);
         session.set_thinking(llm.thinking.clone());
-        // 核心注入：派发行（界面系统行、上下文 user 角色），这里只记录、不跑模型——
-        // 生成交给工作线程（与 CLI 的 `drive_node` 同一段语义，见 session-model.md 四之二）。
-        prefix.extend(session.note_task(objective));
         let identity = session
             .params()
             .identity(&*self.prompt, session.tool_mode());
         let persister = self.persister(child);
+        // 派发行由工作线程在**压缩之后**注入（`dispatch_task`）：这样本轮任务不会被压进摘要。
         Ok(Prepared::Run {
             session: Box::new(session),
             identity,
             prefix,
+            task: Some(objective.to_string()),
             llm,
             persister,
         })

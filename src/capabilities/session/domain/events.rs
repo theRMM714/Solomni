@@ -139,9 +139,6 @@ pub enum SessionEvent {
         /// 核心给出的任务链（审查关卡要连同链一起给用户看）。
         chain: crate::capabilities::taskchain::api::TaskChain,
     },
-    /// 上下文压缩：`up_to` 之前的转录**不再发给模型**（转录本身完整保留、用户仍可查看），
-    /// 由一份 summary 代替（见 docs/session/session-model.md 六）。
-    Compacted { up_to: u64, summary: String },
     /// 任务链的一个节点开工：它跑在自己的**子会话**里（用户可进去干预）。
     NodeStarted {
         node: String,
@@ -337,6 +334,10 @@ pub struct LineView {
     /// （见 docs/session/session-model.md 五）。
     #[serde(default, skip_serializing_if = "is_zero")]
     pub turn: u64,
+    /// 目的：控制行的结构化载荷（如 `compacted` 的 `up_to`）；普通消息行没有。
+    /// 约束：呈现与重建只读它，不从正文里解析控制字段。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload: Option<serde_json::Value>,
 }
 
 impl LineView {
@@ -431,18 +432,31 @@ pub struct CheckView {
     pub note: String,
 }
 
-/// 流水里**最后一次**压缩（`compacted` 事件）：重建发送视图时按它把 `up_to` 之前的行换成摘要。
-/// 回档到压缩点之前时这条事件已随转录被截掉，所以「没有它」就是「回到压缩前」。
-pub fn last_compaction(events: &[serde_json::Value]) -> Option<(u64, String)> {
+/// 目的：取流水里**最后一次**压缩行（`up_to`、摘要、行 id）。
+/// 约束：回档到压缩行之前时它已随转录被截掉，所以「没有它」就是「回到压缩前」。
+pub fn last_compaction(events: &[serde_json::Value]) -> Option<(u64, String, u64)> {
     let mut found = None;
     for ev in events {
-        if ev.get("type").and_then(|t| t.as_str()) != Some("compacted") {
+        if ev.get("type").and_then(|t| t.as_str()) != Some("transcript") {
             continue;
         }
-        let up_to = ev.get("up_to").and_then(|u| u.as_u64()).unwrap_or(0);
-        let summary = ev.get("summary").and_then(|s| s.as_str()).unwrap_or("");
-        if up_to > 0 && !summary.is_empty() {
-            found = Some((up_to, summary.to_string()));
+        let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) else {
+            continue;
+        };
+        for l in lines {
+            if l.get("kind").and_then(|k| k.as_str()) != Some("compacted") {
+                continue;
+            }
+            let up_to = l
+                .get("payload")
+                .and_then(|p| p.get("up_to"))
+                .and_then(|u| u.as_u64())
+                .unwrap_or(0);
+            let summary = l.get("line").and_then(|s| s.as_str()).unwrap_or("");
+            let id = l.get("id").and_then(|i| i.as_u64()).unwrap_or(0);
+            if up_to > 0 && !summary.is_empty() {
+                found = Some((up_to, summary.to_string(), id));
+            }
         }
     }
     found
@@ -456,11 +470,6 @@ impl SessionEvent {
             SessionEvent::PlanReview { plan, chain } => {
                 serde_json::json!({ "type": "plan_review", "plan": plan, "chain": chain })
             }
-            SessionEvent::Compacted { up_to, summary } => serde_json::json!({
-                "type": "compacted",
-                "up_to": up_to,
-                "summary": summary
-            }),
             SessionEvent::NodeStarted {
                 node,
                 sid,

@@ -9,30 +9,52 @@ use crate::capabilities::llm::api::{Chunk, Msg};
 use crate::capabilities::session::api::{
     stream_piece, AgentSession, LineView, Live, SessionEvent, ToolCallView, TurnRun,
 };
-/// 压缩回合：把提示词追加到历史之后、**只声明 compact 工具**，跑一次模型；拿到摘要就返回。
-/// 两条通道都认：native 从结构化槽位取，信封通道从正文里的信封取（与讨论回合同口径）。
+/// 目的：只把被总结的前缀发给模型、只声明 compact 工具，跑一次模型并返回摘要。
+/// 约束：两条通道都认：native 从结构化槽位取，信封通道从正文里的信封取（与讨论回合同口径）。
 pub fn compact_turn(
     s: &mut AgentSession,
     prompt: &str,
-    decl: Option<&crate::capabilities::llm::api::ToolDecl>,
+    plan: &crate::capabilities::session::api::CompactionPlan,
     identity: &str,
 ) -> Result<String, String> {
-    // 整条消息**只有这一处装配**：身份 + 本回合工具（只有 compact）+ 对话 + 压缩提示。
+    let decl = s
+        .tools
+        .as_ref()
+        .and_then(|t| t.builtin_tools.get("compact"))
+        .map(|t| t.decl("compact"));
+    let mut spec = s.compact_chat()?;
+    let thinking = if spec.is_some() { None } else { s.thinking() };
+    let cut = plan.cut.min(s.dialogue.len());
+    // 整条消息**只有这一处装配**：身份 + 本回合工具（只有 compact）+ 被总结前缀 + 压缩提示。
     let msgs = crate::capabilities::collab::service::round::assemble(
         identity,
         s.tools.as_ref(),
         &["compact".to_string()],
         false,
-        &s.dialogue,
+        &s.dialogue[..cut],
         &[Msg::user(prompt.to_string())],
     );
+    if let Some(c) = spec.as_ref() {
+        let chars: usize = msgs.iter().map(|m| m.content.chars().count()).sum();
+        let estimate = (chars / 4).max(if chars > 0 { 1 } else { 0 }) as u64;
+        if c.window > 0 && estimate > c.window {
+            return Err(format!(
+                "压缩模型 {} 的上下文窗口不足：被总结前缀约 {} tokens，窗口 {}；换更大窗口的模型或提高保留比例",
+                c.model, estimate, c.window
+            ));
+        }
+    }
     let mut opts =
-        crate::capabilities::llm::api::CompleteOpts::plain(false).with_thinking(s.thinking());
-    if let Some(d) = decl {
+        crate::capabilities::llm::api::CompleteOpts::plain(false).with_thinking(thinking);
+    if let Some(d) = decl.as_ref() {
         opts.tools = Some(std::slice::from_ref(d));
     }
     let mut keep = |_c: crate::capabilities::llm::api::Chunk| true;
-    let done = s.chat.complete(&msgs, opts, &mut keep);
+    let chat: &mut crate::capabilities::llm::api::BoxedChat = match spec.as_mut() {
+        Some(c) => &mut c.chat,
+        None => &mut s.chat,
+    };
+    let done = chat.complete(&msgs, opts, &mut keep);
     if let Some(err) = done.error {
         return Err(err);
     }
@@ -63,9 +85,44 @@ pub fn compact_turn(
     Ok(summary)
 }
 
+/// 目的：一次压缩的完整结果（记录行 + 用量）。
+/// 约束：调用方负责推事件 / 落盘。
+pub struct CompactedTurn {
+    /// 目的：压缩记录行（摘要 + up_to）。
+    pub line: LineView,
+    /// 目的：压完后的发送视图估算用量。
+    pub usage: crate::capabilities::session::api::ContextUsage,
+}
+
+/// 目的：压一次：算切分点 → 只把被总结前缀交给模型 → 应用并落压缩记录行。
+/// 返回：没有可压缩内容时 `None`（调用方决定提示还是静默跳过）。
+/// 错误：模型调用失败 / 摘要为空时如实返回原因。
+pub fn compact_session(
+    s: &mut AgentSession,
+    identity: &str,
+    protect_from: Option<u64>,
+) -> Result<Option<CompactedTurn>, String> {
+    let Some(plan) = s.plan_compaction(protect_from) else {
+        return Ok(None);
+    };
+    let prompt = s.compact_prompt.clone();
+    let summary = compact_turn(s, &prompt, &plan, identity)?;
+    let Some(line) = s.apply_compaction(&plan, &summary) else {
+        return Ok(None);
+    };
+    let usage = s.estimate_usage();
+    s.set_last_usage(Some(usage));
+    Ok(Some(CompactedTurn { line, usage }))
+}
+
 /// 到点自动压一次：有供应商 usage 用精确 token；拿不到才按字符估算（≈ tokens × 4）。
 /// 压不动就**如实通知并继续用完整上下文**（不静默降级、不假装压过）。
-fn maybe_compact(s: &mut AgentSession, identity: &str, sink: &mut dyn FnMut(SessionEvent)) {
+fn maybe_compact(
+    s: &mut AgentSession,
+    identity: &str,
+    protect_from: Option<u64>,
+    sink: &mut dyn FnMut(SessionEvent),
+) {
     if s.compact_percent == 0 {
         return;
     }
@@ -83,22 +140,16 @@ fn maybe_compact(s: &mut AgentSession, identity: &str, sink: &mut dyn FnMut(Sess
     if !exceeded {
         return;
     }
-    let decl = s
-        .tools
-        .as_ref()
-        .and_then(|t| t.builtin_tools.get("compact"))
-        .map(|s| s.decl("compact"));
-    let prompt = s.compact_prompt.clone();
-    let up_to = s.next_line;
-    match compact_turn(s, &prompt, decl.as_ref(), identity) {
-        Ok(summary) => {
-            s.compact(up_to, &summary);
+    match compact_session(s, identity, protect_from) {
+        Ok(Some(c)) => {
+            sink(SessionEvent::Transcript(vec![c.line.clone()]));
             // 压完发送视图变小了：留一份估算用量，别让下一轮继续拿旧的大数字反复触发。
-            let usage = s.estimate_usage();
-            s.set_last_usage(Some(usage));
-            sink(SessionEvent::Usage { usage, line: up_to });
-            sink(SessionEvent::Compacted { up_to, summary });
+            sink(SessionEvent::Usage {
+                usage: c.usage,
+                line: c.line.id,
+            });
         }
+        Ok(None) => {}
         Err(err) => {
             let note = format!("[警告] 自动压缩没成功：{}（继续用完整上下文）", err);
             for ev in s.note_notice(&note) {
@@ -117,15 +168,16 @@ pub fn say(
     live: &mut Live,
     sink: &mut dyn FnMut(SessionEvent),
 ) {
-    // 到点先压一次：**同一个工作线程内**跑，不阻塞核心。
-    maybe_compact(s, identity, sink);
     let text = crate::capabilities::prompt::api::rewrite(text, Some(&s.id), &s.roots());
     s.dialogue.push(Msg::user(text.clone()));
     // 用户行不属于任何模型回复：给它**自己的行号**当回复号（与重建时的规则一致），
     // 否则它会继承上一轮的回复号，回档时与上一轮误并成一组。
     s.cur_reply = s.next_line;
     let user_line = s.line(text.to_string(), "user", "用户", "", None, None);
+    let user_line_id = user_line.id;
     sink(SessionEvent::Transcript(vec![user_line]));
+    // 到点先压一次：本轮刚收到的用户消息必须原样保留，更早的内容才进摘要。
+    maybe_compact(s, identity, Some(user_line_id), sink);
     rounds_events(s, identity, live, sink);
 }
 
@@ -138,10 +190,22 @@ pub fn dispatch_task(
     live: &mut Live,
     sink: &mut dyn FnMut(SessionEvent),
 ) {
-    maybe_compact(s, identity, sink);
+    let mut task_line = 0u64;
     for e in s.note_task(text) {
+        if let SessionEvent::Transcript(lines) = &e {
+            if let Some(l) = lines.first() {
+                task_line = l.id;
+            }
+        }
         sink(e);
     }
+    // 本轮派发的任务必须原样保留，更早的内容才进摘要。
+    maybe_compact(
+        s,
+        identity,
+        if task_line > 0 { Some(task_line) } else { None },
+        sink,
+    );
     rounds_events(s, identity, live, sink);
 }
 
@@ -160,6 +224,7 @@ pub fn discussion_turn(
     live: &mut Live,
     sink: &mut dyn FnMut(SessionEvent),
 ) -> Result<MemberTurn, String> {
+    maybe_compact(s, identity, None, sink);
     // 回合标记是**系统消息**（不是谁说的）：进上下文与转录都按 system，回档按同一口径还原。
     for e in s.note_system(&format!("[回合 t{}｜第 {} 轮]", turn_id, round)) {
         sink(e);
@@ -195,6 +260,7 @@ pub fn continue_reply(
     live: &mut Live,
     sink: &mut dyn FnMut(SessionEvent),
 ) {
+    maybe_compact(s, identity, None, sink);
     rounds_events(s, identity, live, sink);
 }
 
@@ -269,6 +335,7 @@ fn run_rounds(
                 if has_line {
                     if let Some(v) = it.next() {
                         s.line_reply.push(v.reply);
+                        s.line_ids.push(v.id);
                         s.marks.push(s.dialogue.len());
                     }
                 }
@@ -280,6 +347,7 @@ fn run_rounds(
                 }
                 if let Some(v) = it.next() {
                     s.line_reply.push(v.reply);
+                    s.line_ids.push(v.id);
                     s.marks.push(s.dialogue.len());
                 }
             }
@@ -290,6 +358,7 @@ fn run_rounds(
                 }
                 if let Some(v) = it.next() {
                     s.line_reply.push(v.reply);
+                    s.line_ids.push(v.id);
                     s.marks.push(s.dialogue.len());
                 }
             }

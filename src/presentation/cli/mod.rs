@@ -639,19 +639,25 @@ fn render(events: &[SessionEvent]) {
             SessionEvent::Transcript(lines) => {
                 println!("---- 转录 ----");
                 for l in lines {
+                    if l.kind == "compacted" {
+                        let up_to = l
+                            .payload
+                            .as_ref()
+                            .and_then(|p| p.get("up_to"))
+                            .and_then(|u| u.as_u64())
+                            .unwrap_or(0);
+                        println!(
+                            "[压缩] 第 {} 行之前已压成摘要；此后原样保留（仍可查看）：\n{}",
+                            up_to, l.line
+                        );
+                        continue;
+                    }
                     // 系统消息（提醒/"未回应"这类**不是谁说的**内容）标出来，别和用户/发言混在一起。
                     let mark = if l.system { "[系统] " } else { "" };
                     println!("{}{}", mark, l.line);
                 }
             }
             SessionEvent::DiscussionDone { .. } => {}
-            SessionEvent::Compacted { up_to, summary } => {
-                println!(
-                    "[压缩] 此前内容已压成摘要（不再发给模型，仍可查看）：\n{}",
-                    summary
-                );
-                println!("  （压缩到第 {} 行）", up_to);
-            }
             SessionEvent::NodeStarted {
                 node,
                 sid,

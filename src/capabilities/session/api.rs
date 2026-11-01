@@ -19,7 +19,7 @@ pub use crate::capabilities::session::domain::rewind::{
 };
 pub use crate::capabilities::session::domain::session::{
     keep_whole_replies, stream_piece, summary_message, unique_work_name, AgentSession,
-    SessionParams, TurnRun,
+    CompactChatFactory, CompactChatSpec, CompactionPlan, SessionParams, TurnRun,
 };
 pub use crate::capabilities::session::domain::tools::{
     service_ops_for_modules, tool_table, MemberTools, ServiceOp, ShellLive, ShellSlot,

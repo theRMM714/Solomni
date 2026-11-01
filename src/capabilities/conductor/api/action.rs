@@ -476,6 +476,11 @@ impl ConductorHandle {
                 ))
             }
             "send_message" => {
+                // 整段输入恰好是 `/compact`：命令走动作，不把命令本身发给模型。
+                // 服务端收口，Web 旧缓存 / CLI 直接输入也能触发。
+                if s("text").trim() == "/compact" {
+                    return SessionOps::compact(self, &s("session_id")).map(Acted::Advanced);
+                }
                 SessionOps::say(self, &s("session_id"), &s("text"), out).map(Acted::Advanced)
             }
             "set_module_enabled" => {
@@ -792,6 +797,14 @@ impl ConductorHandle {
             compact_at_percent: num("compact_at_percent")
                 .map(|v| v as u8)
                 .unwrap_or(current.compact_at_percent),
+            compact_keep_percent: num("compact_keep_percent")
+                .map(|v| v as u8)
+                .unwrap_or(current.compact_keep_percent),
+            compact_model: args
+                .get("compact_model")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim().to_string())
+                .unwrap_or_else(|| current.compact_model.clone()),
             discuss_remind_cap: num("discuss_remind_cap")
                 .map(|v| v as u32)
                 .unwrap_or(current.discuss_remind_cap),
@@ -913,12 +926,22 @@ impl ActionOps for ConductorHandle {
                 None => Err(format!("未知动作：{}", id)),
                 Some(schema) => {
                     let mut args = call.args;
-                    if let Err(fault) = schema.check(&args) {
-                        Err(arg_fault_text(&id, schema, &fault))
+                    // `compact` 在册子里是**压缩回合的模型工具**（必填 summary）；用户动作只带信封里的
+                    // session_id，不能拿工具参数来校验动作。动作的 callers 仍按同一张表授权。
+                    let checked = if id == "compact" {
+                        Ok(())
                     } else {
-                        schema.apply_defaults(&mut args);
-                        self.authorize_action(&id, &caller, schema)
-                            .and_then(|_| self.execute_action(&id, &caller, &args, call.out))
+                        schema
+                            .check(&args)
+                            .map_err(|fault| arg_fault_text(&id, schema, &fault))
+                    };
+                    match checked {
+                        Err(e) => Err(e),
+                        Ok(()) => {
+                            schema.apply_defaults(&mut args);
+                            self.authorize_action(&id, &caller, schema)
+                                .and_then(|_| self.execute_action(&id, &caller, &args, call.out))
+                        }
                     }
                 }
             }

@@ -13,7 +13,7 @@ const $ = (s) => document.querySelector(s);
 const state = {
   modules: [], providers: [], models: [], core: null, rejected: [], agents: [],
   history: [],           // 会话历史（名字/mode/时间）
-  settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70 }, // 基本设置
+  settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70, compact_keep_percent: 15, compact_model: '' }, // 基本设置
   fence: null,           // /api/state 的围栏事实：只有降级 / 要求未满足时进横幅
   toolchains: null,      // /api/state 的基础工具链事实：项目内 / 宿主回退 / 缺失
   sessions: new Map(),   // sid -> { sid, mode, title, lines, pending, sending, running, working, done, awaiting, readonly }
@@ -2513,6 +2513,17 @@ function settingsForm() {
   const to = numberInput('等待首个响应的超时（秒）', state.settings.llm_timeout_secs, 10, 3600);
   const remind = numberInput('一轮内最多提醒几次', state.settings.discuss_remind_cap, 0, 20);
   const pct = numberInput('上下文用到百分之多少就压缩', state.settings.compact_at_percent, 0, 100);
+  const keep = numberInput('压缩时至少保留最近内容（占模型窗口 %）', state.settings.compact_keep_percent, 0, 100);
+  const compactModels = [{ value: '', label: '默认（会话同模型）' }].concat(
+    (state.models || []).map((m) => ({
+      value: m.id,
+      label: m.name + '（' + m.id + (m.context ? ' · ' + m.context + ' tokens' : '') + '）',
+    })),
+  );
+  if (state.settings.compact_model && !compactModels.some((o) => o.value === state.settings.compact_model)) {
+    compactModels.push({ value: state.settings.compact_model, label: state.settings.compact_model + '（登记处已无此模型）' });
+  }
+  const compactModel = selectInput(compactModels, state.settings.compact_model || '');
   const guests = numberInput('虚拟机档同时最多几台', state.settings.max_guests, 0, 64);
   const sb = state.settings.sandbox || {};
   const sp = sb.policy || {};
@@ -2575,7 +2586,7 @@ function settingsForm() {
     '默认逐工具决定（每行一条：工具名=allow/ask/deny）',
     Object.entries(sd.tools || {}).map(([k, v]) => k + '=' + v),
   );
-  return { stream, cot, to, remind, pct, guests, thinkLevels, network, writeAcl, enFs, enNet, enTree, enEnv, onUnavailable, hostRoots, hardDeny, defProfile, defSharedRead, defSharedWrite, defTools };
+  return { stream, cot, to, remind, pct, keep, compactModel, guests, thinkLevels, network, writeAcl, enFs, enNet, enTree, enEnv, onUnavailable, hostRoots, hardDeny, defProfile, defSharedRead, defSharedWrite, defTools };
 }
 
 /// 1 页：生成与上下文。
@@ -2591,6 +2602,10 @@ function buildGeneratePage(c, f) {
   c.body.appendChild(cfgHint('一轮内提醒到顶就记一行「未回应」放过它，整轮继续（不阻塞）。'));
   c.body.appendChild(f.pct.wrap);
   c.body.appendChild(cfgHint('压缩由 AI 自己做：到点自动压一次；也可以随时手动 /compact。填 0 = 不自动压。'));
+  c.body.appendChild(f.keep.wrap);
+  c.body.appendChild(cfgHint('按模型窗口算：压缩时至少保留最近这么多内容，更早的压成摘要；填 0 = 只留摘要。建议小于上面的压缩阈值。'));
+  c.body.appendChild(field('压缩用模型', f.compactModel));
+  c.body.appendChild(cfgHint('默认与会话同模型，保住前缀缓存；也可以选登记处里的另一个模型专门做总结。只在压缩触发时解析，不按回合、不刷新会话。'));
 }
 
 /// 2 页：沙箱围栏（全局硬约束）。
@@ -2651,6 +2666,8 @@ function collectSettings(f) {
     llm_timeout_secs: Number(f.to.input.value) || 300,
     discuss_remind_cap: Number(f.remind.input.value) || 0,
     compact_at_percent: Number(f.pct.input.value) || 0,
+    compact_keep_percent: Number(f.keep.input.value) || 0,
+    compact_model: f.compactModel.value || '',
     max_guests: Number(f.guests.input.value) || 0,
     sandbox: {
       policy: {
@@ -3461,14 +3478,6 @@ function applySnapshot(s, events) {
 function absorb(s, ev) {
   switch (ev.type) {
     case 'notice': s.lines.push({ cls: 'sys', who: '', text: ev.text }); break;
-    // 压缩：显示**分界 + 摘要**（旧内容仍在上方可查——它只是不再发给模型）。
-    case 'compacted':
-      s.lines.push({
-        cls: 'sys compacted',
-        who: '',
-        text: '[压缩] 此前内容已压成摘要（不再发给模型，仍可查看）：\n' + ev.summary,
-      });
-      break;
     // 上下文用量：不是转录行、不进模型上下文；只更新状态栏（持久事件，刷新后仍在）。
     case 'usage':
       s.context = {
@@ -3658,6 +3667,16 @@ function lineParts(l) {
       reply: l.reply || (l.tool && l.tool.reply) || 0,
     }];
   }
+  // 压缩记录：转录里的一等行（有 id，可删除/留档/恢复）；摘要 + 从哪一行起保留原文。
+  if (kind === 'compacted') {
+    const upTo = (l.payload && l.payload.up_to) || 0;
+    return [{
+      cls: 'sys compacted',
+      who: '',
+      text: '[压缩] 第 ' + upTo + ' 行之前已压成摘要；此后原样保留（旧内容仍可查看）：\n' + text,
+      reply: l.reply || 0,
+    }];
+  }
   // 内容类系统提示：转录里的一等行（有 id，可回档/折叠），界面仍按系统行画。
   if (kind === 'notice') return [{ cls: 'sys notice', who: speaker, text: text }];
   // 系统行：系统注入的提醒/边界（没有说话人），或核心自己的行（代拟…）。
@@ -3777,6 +3796,9 @@ function statusPrintOf(s) {
     c && c.window, c && c.exact, w && w.head && w.head.id, w && w.total, w && w.error,
     s && s.workError, s && s.workAt ? 1 : 0,
     (state.settings && state.settings.compact_at_percent) || 0,
+    (state.settings && state.settings.compact_keep_percent) || 0,
+    (state.settings && state.settings.compact_model) || '',
+    s && s.mode,
     s && s.permission_profile, s && s.permission_label, s && s.permission_narrowed ? 1 : 0,
     s && s.permission_parent,
     s && s.thinking ? [s.thinking.level, s.thinking.default_level, s.thinking.label, (s.thinking.options || []).length] : 0,
@@ -3985,6 +4007,16 @@ function syncStatusbar(s) {
     inner.appendChild(chip);
   }
 
+  // 工具：先放手动压缩；所有会话都给入口，协作主会话的项置灰并写明原因。
+  const toolsChip = ui.statusChip({
+    icon: 'gear',
+    text: '工具',
+    label: '工具',
+    title: '压缩上下文（/compact）',
+    onClick: () => openToolsMenu(toolsChip, s),
+  });
+  inner.appendChild(toolsChip);
+
   // 共享区提交：head + 相对时间；点击看详情 / 全部提交。
   const work = s.work;
   const head = work && work.head;
@@ -4120,6 +4152,11 @@ function openContextCard(s, anchor) {
   box.appendChild(popoverRow('占用', pct == null ? '—' : pct.toFixed(1) + '%'));
   box.appendChild(popoverRow('上次输入 / 输出', fmtInt(c.prompt_tokens) + ' / ' + fmtInt(c.completion_tokens)));
   box.appendChild(popoverRow('自动压缩', at > 0 ? at + '%' : '已关闭'));
+  const keep = Number((state.settings && state.settings.compact_keep_percent) || 0);
+  box.appendChild(popoverRow('压缩保留', keep > 0 ? '至少 ' + keep + '% 窗口' : '只留摘要'));
+  box.appendChild(
+    popoverRow('总结模型', (state.settings && state.settings.compact_model) || '默认（会话同模型）'),
+  );
   const badge = document.createElement('span');
   badge.className = 'badge-soft ' + (c.exact ? 'ok' : 'warn');
   badge.textContent = c.exact ? '供应商 usage（精确）' : '按字符估算';
@@ -4128,6 +4165,38 @@ function openContextCard(s, anchor) {
     ? '数字来自供应商返回的 usage；工具结果回灌的瞬间可能略小于下一请求。'
     : '供应商没回 usage：按对话字符 ÷ 4 估算，只作参考。'));
   ui.popover(anchor, box, { label: '上下文用量' });
+}
+
+/* 手动压缩：协作主会话没有一条持续对话，由成员会话各自压。 */
+function compactNow(s) {
+  if (!s) return;
+  if (s.mode === 'collab') {
+    notice('协作会话不直接压缩', '协作主会话没有一条持续发给模型的对话；打开成员会话再用工具菜单压缩。', 'info');
+    return;
+  }
+  act('compact');
+}
+
+/* 状态栏「工具」菜单：先放手动压缩；以后再加其它工具。 */
+function openToolsMenu(chip, s) {
+  const keep = Number((state.settings && state.settings.compact_keep_percent) || 0);
+  const model = (state.settings && state.settings.compact_model) || '默认（会话同模型）';
+  const blocked = s.mode === 'collab'
+    ? '协作主会话没有持续对话；成员会话各自压缩'
+    : (isBusy(s) ? '生成中，先停止或等这一轮结束' : (s.readonly ? '历史回放为只读' : ''));
+  ui.menu(chip, [
+    {
+      label: '压缩上下文（/compact）',
+      icon: 'box',
+      disabled: !!blocked,
+      reason: blocked,
+      onClick: () => compactNow(s),
+    },
+    {
+      label: '保留 ' + (keep > 0 ? '至少 ' + keep + '% 窗口' : '只留摘要') + ' · 总结模型 ' + model,
+      disabled: true,
+    },
+  ]);
 }
 
 function openWorkCard(s, anchor) {
@@ -5406,7 +5475,8 @@ async function continueContext() {
  * 菜单只列已存在的文件（上传仍走输入区那个 ＋ 按钮）；前端只负责**插入与渲染**，
  * 不做任何路径改写——@work:… / @sandbox:… 由核心在入转录前改写成 work:/… / sandbox:/…。 */
 const filesCache = new Map();
-const atState = { open: false, loading: false, items: [], all: [], active: 0, start: -1, sid: null };
+const atState = { open: false, loading: false, items: [], all: [], active: 0, start: -1, sid: null, mode: '' };
+const COMMANDS = [{ name: '/compact', insert: '/compact', desc: '压缩上下文' }];
 
 function atMenuEl() { return $('#at-menu'); }
 
@@ -5426,7 +5496,7 @@ function atToken() {
 
 function atClose() {
   atState.open = false; atState.loading = false; atState.items = []; atState.all = [];
-  atState.active = 0; atState.start = -1; atState.sid = null;
+  atState.active = 0; atState.start = -1; atState.sid = null; atState.mode = '';
   const box = atMenuEl();
   if (box) { box.className = 'at-menu hidden'; box.innerHTML = ''; }
 }
@@ -5537,9 +5607,18 @@ function atOpen(frag) {
   atRender();
 }
 
-/* 插入：把 @ 与已输入的前缀一起替换成完整引用，光标落在其后。 */
+/* 插入：普通引用替换 @ 片段；命令直接成为整段输入（已经是它时一次 Enter 就执行）。 */
 function atInsert(it) {
   const t = $('#input');
+  if (it.command) {
+    const already = String(t.value || '').trim() === it.insert;
+    t.value = it.insert;
+    atClose();
+    autoGrow();
+    if (typeof t.focus === 'function') t.focus();
+    if (already) onSend();
+    return;
+  }
   const v = String(t.value || '');
   const pos = typeof t.selectionStart === 'number' ? t.selectionStart : v.length;
   const start = atState.start >= 0 ? atState.start : pos;
@@ -5575,7 +5654,53 @@ function atKey(e) {
   return false;
 }
 
+/* 输入框以 `/` 开头的命令菜单：只在整段输入仍是单个命令片段时弹，匹配不到就交回普通发送。 */
+function cmdSync() {
+  const t = $('#input');
+  const v = String(t.value || '');
+  const pos = typeof t.selectionStart === 'number' ? t.selectionStart : v.length;
+  const before = v.slice(0, pos);
+  if (!before.startsWith('/')) {
+    if (atState.mode === 'command') atClose();
+    return false;
+  }
+  const frag = before.slice(1);
+  if (/\s/.test(frag)) {
+    if (atState.mode === 'command') atClose();
+    return false;
+  }
+  const s = activeSession();
+  if (!s || isBusy(s) || s.readonly) {
+    if (atState.mode === 'command') atClose();
+    return false;
+  }
+  const q = frag.toLowerCase();
+  const items = COMMANDS.filter((c) => !q || c.name.slice(1).toLowerCase().startsWith(q));
+  if (!items.length) {
+    if (atState.mode === 'command') atClose();
+    return false;
+  }
+  const keep = Number((state.settings && state.settings.compact_keep_percent) || 0);
+  const desc = keep > 0 ? '压缩上下文（保留最近 ' + keep + '% 窗口）' : '压缩上下文（只留摘要）';
+  atState.mode = 'command';
+  atState.open = true;
+  atState.loading = false;
+  atState.sid = s.sid;
+  atState.start = 0;
+  atState.items = items.map((c) => ({
+    group: '命令',
+    label: c.name + ' — ' + (c.name === '/compact' ? desc : c.desc),
+    insert: c.insert,
+    command: true,
+  }));
+  atState.all = atState.items.slice();
+  atState.active = 0;
+  atRender();
+  return true;
+}
+
 async function atOnInput() {
+  if (cmdSync()) return;
   const tok = atToken();
   const s = activeSession();
   // 忙碌（生成中）仍拒绝，避免与「停止」抢键盘；readonly（历史只读会话）允许——插入文本无害。
@@ -5627,6 +5752,12 @@ function onSend() {
   if (!s) return;
   if (s.readonly) { notice('历史回放为只读', '点「启用会话」后才能发送消息。', 'info'); return; }
   if (isBusy(s)) { stopGeneration(); return; } // 生成中：同一个键变成「停止」
+  // 整段输入恰好是命令：`/compact` 走动作，不把命令本身发给模型。
+  if (String($('#input').value || '').trim() === '/compact') {
+    takeInput();
+    compactNow(s);
+    return;
+  }
   if (s.awaiting === 'task') { const v = takeInput(); if (v) act('task', v); return; }
   // 裁决门挂着时不从这里发：那是卡片上的选项（要补充的话写在卡片里的附言框）。
   if (s.pending && s.pending.type === 'decision_card') {

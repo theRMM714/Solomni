@@ -104,7 +104,8 @@ impl Conductor {
                 // 删除的算子是"截掉尾部"：单 agent 且压缩点没被切到时**就地精确回退**（不重建，
                 // 保住通道与运行态）；否则按转录重建（协作与跨压缩点都得重建）。
                 let precise = match self.sessions.get(sid) {
-                    Some(Session::Single(s)) => s.compacted_upto == 0 || before >= s.compacted_upto,
+                    // 压缩记录行被截在保留点之后才就地回退；截到它本身或更早必须重建。
+                    Some(Session::Single(s)) => s.compacted_line == 0 || before > s.compacted_line,
                     _ => false,
                 };
                 let active = if precise {
@@ -368,7 +369,8 @@ impl Conductor {
                 .with_chara(a.chara.clone())
                 .with_guest(self.guest_os_of(&meta.exec));
                 let chat = self.llm.member_channel(&channel, &a.name);
-                let (history, marks, line_reply, compacted_upto) = replay_dialogue(events, mode);
+                let (history, marks, line_reply, line_ids, compacted_upto, compacted_line) =
+                    replay_dialogue(events, mode);
                 let unavailable = self.unavailable_modules(&meta.exec, &modules);
                 // 身份与角色**同一把尺子**（重建与实时不能各写一份，见 Conductor::role_of）：
                 // 协作派生的成员 / 节点 = executor（拿得到回报工具）；其余单 agent 工作 = solo。
@@ -401,7 +403,9 @@ impl Conductor {
                     history,
                     marks,
                     line_reply,
+                    line_ids,
                     compacted_upto,
+                    compacted_line,
                     chat,
                     Some(tools),
                     self.prompt
@@ -409,20 +413,24 @@ impl Conductor {
                         .to_string(),
                 );
                 // 重建也要恢复上下文预算与最近一次用量：否则重启后自动压缩与状态栏都失忆。
-                let (window, percent) = self.context_budget(a.model.as_deref());
-                s.set_context_budget(window, percent);
+                let (window, percent, keep_percent) = self.context_budget(a.model.as_deref());
+                s.set_context_budget(window, percent, keep_percent);
+                s.set_model(a.model.clone().or_else(|| self.registry.core_model()));
+                s.set_compact_factory(self.compact_factory());
                 s.set_last_usage(crate::capabilities::session::api::last_usage(events));
                 Ok(Session::Single(s))
             }
             // 代理会话：没有 agent（核心自己说话）；外壳由 build_proxy 装配，回放与单 agent 共用同一件。
             "proxy" => {
                 let mut s = self.build_proxy(meta)?;
-                let (history, marks, line_reply, compacted_upto) =
+                let (history, marks, line_reply, line_ids, compacted_upto, compacted_line) =
                     replay_dialogue(events, s.tool_mode());
                 s.dialogue = history;
                 s.marks = marks;
                 s.line_reply = line_reply;
+                s.line_ids = line_ids;
                 s.compacted_upto = compacted_upto;
+                s.compacted_line = compacted_line;
                 s.next_line = s.marks.len() as u64;
                 if let Some(t) = s.tools.as_mut() {
                     t.reply_seq = crate::capabilities::session::api::max_reply(events);
@@ -437,7 +445,7 @@ impl Conductor {
         }
     }
 }
-/// 目的：把转录事件还原成（对话, 每行历史长度, 每行回复号, 压缩点）——单 agent 与代理会话共用同一件。
+/// 目的：把转录事件还原成（对话, 每行历史长度, 每行回复号, 每行 id, 压缩点, 压缩行 id）。
 /// 约束：重建必须与实时逐条一致（见 `reply_msgs` 与 session-model.md）。
 pub(crate) fn replay_dialogue(
     events: &[serde_json::Value],
@@ -446,6 +454,8 @@ pub(crate) fn replay_dialogue(
     Vec<crate::capabilities::llm::api::Msg>,
     Vec<usize>,
     Vec<u64>,
+    Vec<u64>,
+    u64,
     u64,
 ) {
     // 先把转录行按顺序摊平：分组判断要看「下一行是不是 tool 行」。
@@ -458,26 +468,29 @@ pub(crate) fn replay_dialogue(
             rows.extend(lines.iter());
         }
     }
-    // **压缩过**的会话：按 `compacted` 事件重建发送视图（见 session-model.md 六）——
+    // **压缩过**的会话：按最后一条压缩行重建发送视图（见 session-model.md 六）——
     // `up_to` 之前的行不再进对话，由一份摘要代替（转录本身完整保留，用户照样能查）。
-    // 回档到压缩点之前时这条事件已随转录被截掉，所以「没有它」就是「回到压缩前」。
+    // 回档到压缩行之前时它已随转录被截掉，所以「没有它」就是「回到压缩前」。
     let compacted = crate::capabilities::session::api::last_compaction(events);
-    let compacted_upto = compacted.as_ref().map(|(up_to, _)| *up_to).unwrap_or(0);
+    let compacted_upto = compacted.as_ref().map(|(up_to, _, _)| *up_to).unwrap_or(0);
+    let compacted_line = compacted.as_ref().map(|(_, _, id)| *id).unwrap_or(0);
     // 对话里**只有**真正发生过的事；身份与环境由 params 现渲染。
     let mut history: Vec<Msg> = compacted
         .as_ref()
-        .map(|(_, summary)| crate::capabilities::session::api::summary_message(summary))
+        .map(|(_, summary, _)| crate::capabilities::session::api::summary_message(summary))
         .into_iter()
         .collect();
     let mut marks: Vec<usize> = Vec::new();
     let mut line_reply: Vec<u64> = Vec::new();
+    let mut line_ids: Vec<u64> = Vec::new();
     let reply_of = |v: &serde_json::Value| v.get("reply").and_then(|x| x.as_u64()).unwrap_or(0);
+    let id_of = |v: &serde_json::Value| v.get("id").and_then(|x| x.as_u64()).unwrap_or(0);
     let mut i = 0usize;
     while i < rows.len() {
         let l = rows[i];
-        // 被总结掉的行：不进对话，但仍占一行（marks / line_reply 与转录行一一对应）。
-        if compacted_upto > 0 && l.get("id").and_then(|x| x.as_u64()).unwrap_or(0) < compacted_upto
-        {
+        let id = id_of(l);
+        // 被总结掉的行：不进对话，但仍占一行（marks / line_reply / line_ids 与转录行一一对应）。
+        if compacted_upto > 0 && id < compacted_upto {
             if l.get("tool").is_some() {
                 // 同一次回复的 tool 行连续同号：整组一起跳，别从中间切开。
                 let reply = reply_of(l.get("tool").expect("已判存在"));
@@ -485,11 +498,13 @@ pub(crate) fn replay_dialogue(
                     && reply_of(rows[i].get("tool").unwrap_or(&serde_json::Value::Null)) == reply
                 {
                     line_reply.push(reply);
+                    line_ids.push(id_of(rows[i]));
                     marks.push(history.len().max(1));
                     i += 1;
                 }
             } else {
                 line_reply.push(reply_of(l));
+                line_ids.push(id);
                 marks.push(history.len().max(1));
                 i += 1;
             }
@@ -498,9 +513,16 @@ pub(crate) fn replay_dialogue(
         let line = l.get("line").and_then(|x| x.as_str()).unwrap_or("");
         // **读结构化字段**（种类 / 系统标记 / 正文），不从正文里抠 [标签]。
         let kind = l.get("kind").and_then(|x| x.as_str()).unwrap_or("");
-        // **内容类系统提示**只给人看：不进对话，但仍占一行（marks / line_reply 与转录行一一对应）。
-        if kind == "notice" {
-            line_reply.push(l.get("id").and_then(|x| x.as_u64()).unwrap_or(0));
+        // **压缩记录**只给人看：它不产生对话消息；摘要由最后一条记录行在顶部合成。
+        if kind == "compacted" {
+            line_reply.push(id);
+            line_ids.push(id);
+            marks.push(history.len());
+            i += 1;
+        // **内容类系统提示**只给人看：不进对话，但仍占一行。
+        } else if kind == "notice" {
+            line_reply.push(id);
+            line_ids.push(id);
             marks.push(history.len());
             i += 1;
         // 系统注入的行按它该有的角色还原：提醒/边界是 system，
@@ -512,14 +534,16 @@ pub(crate) fn replay_dialogue(
             } else {
                 Msg::system(line.to_string())
             });
-            line_reply.push(l.get("id").and_then(|x| x.as_u64()).unwrap_or(0));
+            line_reply.push(id);
+            line_ids.push(id);
             marks.push(history.len());
             i += 1;
         } else if kind == "user" {
             // 用户说的行：正文就是用户那句话（[用户] / [用户:需求] 这类标签在字段里）。
             history.push(Msg::user(line.to_string()));
             // 用户行不属于任何回复：给它自己的行号，回档时才不会与相邻行误并成一组。
-            line_reply.push(l.get("id").and_then(|x| x.as_u64()).unwrap_or(0));
+            line_reply.push(id);
+            line_ids.push(id);
             marks.push(history.len());
             i += 1;
         } else if l.get("tool").is_some() {
@@ -551,8 +575,9 @@ pub(crate) fn replay_dialogue(
             for m in crate::capabilities::session::api::reply_msgs(mode, raw, &views) {
                 history.push(m);
             }
-            for _ in 0..group.len() {
+            for row in &group {
                 line_reply.push(reply);
+                line_ids.push(id_of(row));
                 marks.push(history.len());
             }
         } else {
@@ -567,9 +592,17 @@ pub(crate) fn replay_dialogue(
                 history.push(Msg::assistant(line.to_string()));
             }
             line_reply.push(reply_of(l));
+            line_ids.push(id);
             marks.push(history.len());
             i += 1;
         }
     }
-    (history, marks, line_reply, compacted_upto)
+    (
+        history,
+        marks,
+        line_reply,
+        line_ids,
+        compacted_upto,
+        compacted_line,
+    )
 }

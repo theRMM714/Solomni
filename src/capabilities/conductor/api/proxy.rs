@@ -264,14 +264,11 @@ impl RegistryOps for ConductorHandle {
     }
     fn upsert_provider(&self, id: &str, base_url: &str, api_key: &str) -> Result<(), String> {
         let (id, base_url, api_key) = (id.to_string(), base_url.to_string(), api_key.to_string());
-        self.call(move |core| {
-            core.registry_mut()
-                .provider_upsert(&id, &base_url, &api_key)
-        })
+        self.call(move |core| core.registry_write(|r| r.provider_upsert(&id, &base_url, &api_key)))
     }
     fn remove_provider(&self, id: &str) -> Result<bool, String> {
         let id = id.to_string();
-        self.call(move |core| core.registry_mut().provider_remove(&id))
+        self.call(move |core| core.registry_write(|r| r.provider_remove(&id)))
     }
     fn models(&self) -> Result<Vec<ModelView>, String> {
         self.call(|core| Ok(core.registry().model_views()))
@@ -283,11 +280,11 @@ impl RegistryOps for ConductorHandle {
         &self,
         draft: crate::capabilities::registry::api::ModelDraft,
     ) -> Result<(), String> {
-        self.call(move |core| core.registry_mut().model_upsert(draft))
+        self.call(move |core| core.registry_write(|r| r.model_upsert(draft)))
     }
     fn remove_model(&self, id: &str) -> Result<bool, String> {
         let id = id.to_string();
-        self.call(move |core| core.registry_mut().model_remove(&id))
+        self.call(move |core| core.registry_write(|r| r.model_remove(&id)))
     }
     fn set_core_model(&self, id: &str) -> Result<bool, String> {
         let id = id.to_string();
@@ -334,7 +331,7 @@ impl RegistryOps for ConductorHandle {
         self.call(|core| Ok(core.registry().app_settings()))
     }
     fn set_settings(&self, app: AppSettings) -> Result<(), String> {
-        self.call(move |core| core.registry_mut().set_app_settings(app))
+        self.call(move |core| core.registry_write(|r| r.set_app_settings(app)))
     }
     fn discover_models(&self, provider_id: &str) -> Result<Vec<String>, String> {
         let provider_id = provider_id.to_string();

@@ -28,8 +28,8 @@
   "src/capabilities/collab/service/driver.rs": {
     "头块：槽外有行或自造槽": 4,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 11,
-    "条目：首行不是目的": 5
+    "条目：槽外有行或自造槽": 9,
+    "条目：首行不是目的": 4
   },
   "src/capabilities/collab/service/mod.rs": {
     "头块：槽外有行或自造槽": 4,
@@ -133,8 +133,8 @@
   "src/capabilities/conductor/service/mod.rs": {
     "头块：槽外有行或自造槽": 3,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 47,
-    "条目：首行不是目的": 24
+    "条目：槽外有行或自造槽": 42,
+    "条目：首行不是目的": 22
   },
   "src/capabilities/conductor/service/proxy.rs": {
     "头块：槽外有行或自造槽": 4,
@@ -357,8 +357,8 @@
   "src/capabilities/session/domain/events.rs": {
     "头块：槽外有行或自造槽": 2,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 64,
-    "条目：首行不是目的": 39
+    "条目：槽外有行或自造槽": 62,
+    "条目：首行不是目的": 38
   },
   "src/capabilities/session/domain/history.rs": {
     "头块：槽外有行或自造槽": 2,
@@ -375,8 +375,8 @@
   "src/capabilities/session/domain/session.rs": {
     "头块：槽外有行或自造槽": 4,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 78,
-    "条目：首行不是目的": 46
+    "条目：槽外有行或自造槽": 74,
+    "条目：首行不是目的": 43
   },
   "src/capabilities/session/domain/tools.rs": {
     "头块：槽外有行或自造槽": 4,

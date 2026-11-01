@@ -772,6 +772,10 @@ fn compacting_replaces_the_send_view_with_one_rolling_summary() {
     )
     .expect("起核心线程");
     let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let mut st = ops.registry.settings().expect("读设置");
+    st.compact_keep_percent = 0;
+    st.sandbox.policy.windows.write_acl = true;
+    ops.registry.set_settings(st).expect("写设置");
     let sid = ops
         .sessions
         .create_work(single_work("w", &["a"]))
@@ -791,8 +795,9 @@ fn compacting_replaces_the_send_view_with_one_rolling_summary() {
     let s1: Vec<&SessionEvent> = b1.iter().flat_map(|l| l.events.iter()).collect();
     assert!(
         s1.iter()
-            .any(|e| matches!(e, SessionEvent::Compacted { summary, .. } if summary == "摘要一")),
-        "第一次压缩该如实落一条压缩事件（头部 {}）",
+            .any(|e| matches!(e, SessionEvent::Transcript(lines)
+            if lines.iter().any(|l| l.kind == "compacted" && l.line == "摘要一"))),
+        "第一次压缩该如实落一条压缩记录行（头部 {}）",
         first.head
     );
     let second = ops.sessions.compact(&sid).expect("第二次压缩");
@@ -800,8 +805,9 @@ fn compacting_replaces_the_send_view_with_one_rolling_summary() {
     let s2: Vec<&SessionEvent> = b2.iter().flat_map(|l| l.events.iter()).collect();
     assert!(
         s2.iter()
-            .any(|e| matches!(e, SessionEvent::Compacted { summary, .. } if summary == "摘要二")),
-        "第二次压缩该如实落一条压缩事件（头部 {}）",
+            .any(|e| matches!(e, SessionEvent::Transcript(lines)
+            if lines.iter().any(|l| l.kind == "compacted" && l.line == "摘要二"))),
+        "第二次压缩该如实落一条压缩记录行（头部 {}）",
         second.head
     );
 
@@ -863,6 +869,7 @@ fn auto_compaction_kicks_in_when_the_history_exceeds_the_budget() {
     // 阈值调到 1%：预算 = 32000 × 1% × 4 ≈ 1280 字符，上面那条长回复会超。
     let mut st = ops.registry.settings().expect("读设置");
     st.compact_at_percent = 1;
+    st.compact_keep_percent = 0;
     // Windows 上 require + write_acl=false 是非法组合；这条只验压缩阈值，先给授权。
     st.sandbox.policy.windows.write_acl = true;
     ops.registry.set_settings(st).expect("写设置");
@@ -904,6 +911,450 @@ fn auto_compaction_kicks_in_when_the_history_exceeds_the_budget() {
         "被总结掉的内容该移出发送视图（不是只加摘要）：{last:?}"
     );
 }
+
+/// 保留尾部：更早的内容进摘要，最近的大回复和**本轮新用户消息**留在发送视图。
+#[test]
+fn compaction_keeps_the_recent_tail_and_the_new_user_line() {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let long = "长".repeat(1500);
+    let mut member = std::collections::BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![
+            long.clone(),
+            "{\"type\":\"tool\",\"name\":\"compact\",\"args\":{\"summary\":\"保留摘要\"}}"
+                .to_string(),
+            "第二轮回复".to_string(),
+        ],
+    );
+    let gateway = super::RecordingGateway {
+        inner: super::doubles::ScriptGateway::new(member, vec![]),
+        seen: Arc::clone(&seen),
+    };
+    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+        super::doubles::core_with_gateway(vec![module_of("a")], gateway),
+    )
+    .expect("起核心线程");
+    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let mut st = ops.registry.settings().expect("读设置");
+    st.compact_at_percent = 1;
+    st.compact_keep_percent = 1;
+    st.sandbox.policy.windows.write_acl = true;
+    ops.registry.set_settings(st).expect("写设置");
+    let sid = ops
+        .sessions
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话")
+        .0
+        .sid;
+    ops.sessions
+        .say(
+            &sid,
+            "第一句话",
+            crate::capabilities::conductor::api::Output::Final,
+        )
+        .expect("第一轮");
+    ops.sessions
+        .say(
+            &sid,
+            "第二句话",
+            crate::capabilities::conductor::api::Output::Final,
+        )
+        .expect("第二轮（开头该压一次）");
+
+    let all = seen.lock().expect("锁").clone();
+    let last = all.last().expect("至少问过一次").clone();
+    assert!(
+        last.iter().any(|c| c.contains("保留摘要")),
+        "压缩后的发送视图该带上摘要：{last:?}"
+    );
+    assert!(
+        last.iter().any(|c| c.contains(&long)),
+        "最近的大回复该原样保留：{last:?}"
+    );
+    assert!(
+        last.iter().any(|c| c.contains("第二句话")),
+        "本轮新用户消息必须原样保留：{last:?}"
+    );
+    assert!(
+        !last.iter().any(|c| c.contains("第一句话")),
+        "更早的内容该进摘要、不再原文发送：{last:?}"
+    );
+}
+
+/// 手动压缩没有可压缩内容时如实提示，不空转模型、不假装压过。
+#[test]
+fn manual_compaction_reports_when_there_is_nothing_to_compact() {
+    let mut member = std::collections::BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec!["{\"type\":\"say\",\"text\":\"收到\"}".to_string()],
+    );
+    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+        super::doubles::core_with_gateway(
+            vec![module_of("a")],
+            super::doubles::ScriptGateway::new(member, vec![]),
+        ),
+    )
+    .expect("起核心线程");
+    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let mut st = ops.registry.settings().expect("读设置");
+    st.compact_at_percent = 0;
+    st.compact_keep_percent = 15;
+    st.sandbox.policy.windows.write_acl = true;
+    ops.registry.set_settings(st).expect("写设置");
+    let sid = ops
+        .sessions
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话")
+        .0
+        .sid;
+    ops.sessions
+        .say(
+            &sid,
+            "你好",
+            crate::capabilities::conductor::api::Output::Final,
+        )
+        .expect("第一轮");
+    ops.sessions.compact(&sid).expect("手动压缩");
+    let (batches, _, _) = handle.events().snapshot(Some(&sid), 0);
+    let events: Vec<&SessionEvent> = batches.iter().flat_map(|b| b.events.iter()).collect();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Notice(t) if t.contains("没有可压缩的内容"))),
+        "没有可压缩内容时该明确提示：{events:?}"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Transcript(lines)
+            if lines.iter().any(|l| l.kind == "compacted"))),
+        "没有可压缩内容时不该落压缩记录行"
+    );
+}
+
+/// 整段输入恰好 /compact：服务端把它当动作，不把命令本身发给模型。
+#[test]
+fn slash_compact_message_runs_the_command_instead_of_the_model() {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut member = std::collections::BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![
+            "第一件事".to_string(),
+            "{\"type\":\"tool\",\"name\":\"compact\",\"args\":{\"summary\":\"摘要\"}}".to_string(),
+        ],
+    );
+    let gateway = super::RecordingGateway {
+        inner: super::doubles::ScriptGateway::new(member, vec![]),
+        seen: Arc::clone(&seen),
+    };
+    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+        super::doubles::core_with_gateway(vec![module_of("a")], gateway),
+    )
+    .expect("起核心线程");
+    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let mut st = ops.registry.settings().expect("读设置");
+    st.compact_at_percent = 0;
+    st.compact_keep_percent = 0;
+    st.sandbox.policy.windows.write_acl = true;
+    ops.registry.set_settings(st).expect("写设置");
+    let sid = ops
+        .sessions
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话")
+        .0
+        .sid;
+    ops.sessions
+        .say(
+            &sid,
+            "先说一句",
+            crate::capabilities::conductor::api::Output::Final,
+        )
+        .expect("第一轮");
+    let acted = ops
+        .actions
+        .act(ActionCall {
+            id: "send_message".to_string(),
+            args: serde_json::json!({ "session_id": sid, "text": "/compact" }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .expect("斜杠命令该走动作");
+    assert!(matches!(
+        acted,
+        crate::capabilities::conductor::api::Acted::Advanced(_)
+    ));
+
+    let (batches, _, _) = handle.events().snapshot(Some(&sid), 0);
+    let events: Vec<&SessionEvent> = batches.iter().flat_map(|b| b.events.iter()).collect();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Transcript(lines)
+            if lines.iter().any(|l| l.kind == "compacted"))),
+        "斜杠命令该落压缩记录行：{events:?}"
+    );
+    let all = seen.lock().expect("锁").clone();
+    assert!(
+        !all.iter()
+            .any(|msgs| msgs.iter().any(|c| c.contains("/compact"))),
+        "命令本身不该发给模型：{all:?}"
+    );
+}
+
+/// 目的：动作 /compact 只带 session_id；册子里的 summary 是压缩回合的模型工具参数，不能拿来校验动作。
+#[test]
+fn compact_action_takes_only_session_id() {
+    let mut member = std::collections::BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![
+            "第一件事".to_string(),
+            "{\"type\":\"tool\",\"name\":\"compact\",\"args\":{\"summary\":\"摘要\"}}".to_string(),
+        ],
+    );
+    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+        super::doubles::core_with_gateway(
+            vec![module_of("a")],
+            super::doubles::ScriptGateway::new(member, vec![]),
+        ),
+    )
+    .expect("起核心线程");
+    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let mut st = ops.registry.settings().expect("读设置");
+    st.compact_at_percent = 0;
+    st.compact_keep_percent = 0;
+    st.sandbox.policy.windows.write_acl = true;
+    ops.registry.set_settings(st).expect("写设置");
+    let sid = ops
+        .sessions
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话")
+        .0
+        .sid;
+    ops.sessions
+        .say(
+            &sid,
+            "先说一句",
+            crate::capabilities::conductor::api::Output::Final,
+        )
+        .expect("第一轮");
+    ops.actions
+        .act(ActionCall {
+            id: "compact".to_string(),
+            args: serde_json::json!({ "session_id": sid }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .expect("动作 /compact 只该要 session_id");
+    let (batches, _, _) = handle.events().snapshot(Some(&sid), 0);
+    let events: Vec<&SessionEvent> = batches.iter().flat_map(|b| b.events.iter()).collect();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Transcript(lines)
+            if lines.iter().any(|l| l.kind == "compacted"))),
+        "动作 /compact 该落压缩记录行：{events:?}"
+    );
+}
+
+/// 目的：调低保留比例对活会话的手动压缩立即生效，不等到会话重建。
+#[test]
+fn lowering_keep_percent_applies_to_live_manual_compaction() {
+    let mut member = std::collections::BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![
+            "第一件事".to_string(),
+            "{\"type\":\"tool\",\"name\":\"compact\",\"args\":{\"summary\":\"摘要\"}}".to_string(),
+        ],
+    );
+    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+        super::doubles::core_with_gateway(
+            vec![module_of("a")],
+            super::doubles::ScriptGateway::new(member, vec![]),
+        ),
+    )
+    .expect("起核心线程");
+    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let mut st = ops.registry.settings().expect("读设置");
+    st.compact_at_percent = 0;
+    st.compact_keep_percent = 15;
+    st.sandbox.policy.windows.write_acl = true;
+    ops.registry.set_settings(st).expect("写设置");
+    let sid = ops
+        .sessions
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话")
+        .0
+        .sid;
+    ops.sessions
+        .say(
+            &sid,
+            "先说一句",
+            crate::capabilities::conductor::api::Output::Final,
+        )
+        .expect("第一轮");
+    // 活会话是在 keep=15 时建的；这里设为 0，手动压缩必须按新值重算。
+    let mut st = ops.registry.settings().expect("读设置");
+    st.compact_keep_percent = 0;
+    ops.registry.set_settings(st).expect("改保留比例");
+    ops.actions
+        .act(ActionCall {
+            id: "compact".to_string(),
+            args: serde_json::json!({ "session_id": sid }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .expect("手动压缩");
+    let (batches, _, _) = handle.events().snapshot(Some(&sid), 0);
+    let events: Vec<&SessionEvent> = batches.iter().flat_map(|b| b.events.iter()).collect();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Transcript(lines)
+            if lines.iter().any(|l| l.kind == "compacted"))),
+        "保留比例改成 0 后，活会话的手动压缩不该再说没有可压缩内容：{events:?}"
+    );
+}
+
+/// 全局压缩模型：已有会话在**触发时**读共享目标；改设置不刷新会话。
+#[test]
+fn compaction_model_is_global_and_resolved_at_trigger() {
+    let mut core = super::doubles::core_with_gateway(
+        vec![module_of("a")],
+        super::doubles::gw(std::collections::BTreeMap::new(), vec![]),
+    );
+    let sid = core
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话")
+        .sid;
+    core.registry_mut()
+        .model_upsert(model_draft("m2", "M2", "m2", "p", "", 32_000))
+        .expect("登记第二个模型");
+    let mut st = core.registry().app_settings();
+    st.compact_model = "m2".to_string();
+    st.sandbox.policy.windows.write_acl = true;
+    core.registry_mut().set_app_settings(st).expect("写设置");
+    core.sync_compact_choice();
+
+    let session = core.take_single(&sid).expect("取会话");
+    let spec = session
+        .compact_chat()
+        .expect("读压缩通道")
+        .expect("独立总结模型");
+    assert_eq!(spec.model, "m2");
+    assert_eq!(spec.window, 32_000);
+    core.put_single(&sid, session);
+
+    // 与会话同模型：复用会话通道（None）。
+    let mut st = core.registry().app_settings();
+    st.compact_model = "m".to_string();
+    core.registry_mut().set_app_settings(st).expect("写设置");
+    core.sync_compact_choice();
+    let session = core.take_single(&sid).expect("取会话");
+    assert!(
+        session.compact_chat().expect("读压缩通道").is_none(),
+        "同模型不该另建通道"
+    );
+    core.put_single(&sid, session);
+
+    // 未登记模型：保存即拒绝。
+    let mut st = core.registry().app_settings();
+    st.compact_model = "nope".to_string();
+    assert!(
+        core.registry_mut().set_app_settings(st).is_err(),
+        "未登记的压缩模型该被拒绝"
+    );
+
+    // 仍被压缩设置引用的模型：删除即拒绝。
+    let mut st = core.registry().app_settings();
+    st.compact_model = "m2".to_string();
+    core.registry_mut().set_app_settings(st).expect("写设置");
+    let err = core.registry_mut().model_remove("m2").unwrap_err();
+    assert!(err.contains("压缩用模型"), "{err}");
+}
+
+/// 压缩记录是一条转录行：删除它 = 解除压缩，旧内容回到发送视图。
+#[test]
+fn deleting_the_compaction_line_restores_the_full_send_view() {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut member = std::collections::BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![
+            "第一件事".to_string(),
+            "{\"type\":\"tool\",\"name\":\"compact\",\"args\":{\"summary\":\"摘要\"}}".to_string(),
+            "收尾".to_string(),
+        ],
+    );
+    let gateway = super::RecordingGateway {
+        inner: super::doubles::ScriptGateway::new(member, vec![]),
+        seen: Arc::clone(&seen),
+    };
+    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+        super::doubles::core_with_gateway(vec![module_of("a")], gateway),
+    )
+    .expect("起核心线程");
+    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let mut st = ops.registry.settings().expect("读设置");
+    st.compact_at_percent = 0; // 只测手动压缩与删除
+    st.compact_keep_percent = 0;
+    st.sandbox.policy.windows.write_acl = true;
+    ops.registry.set_settings(st).expect("写设置");
+    let sid = ops
+        .sessions
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话")
+        .0
+        .sid;
+    ops.sessions
+        .say(
+            &sid,
+            "先说一句",
+            crate::capabilities::conductor::api::Output::Final,
+        )
+        .expect("第一轮");
+    ops.sessions.compact(&sid).expect("手动压缩");
+    let (batches, _, _) = handle.events().snapshot(Some(&sid), 0);
+    let marker = batches
+        .iter()
+        .flat_map(|b| b.events.iter())
+        .find_map(|e| match e {
+            SessionEvent::Transcript(lines) => {
+                lines.iter().find(|l| l.kind == "compacted").map(|l| l.id)
+            }
+            _ => None,
+        })
+        .expect("压缩记录行");
+    ops.sessions
+        .rewind(
+            &sid,
+            crate::capabilities::conductor::api::RewindTarget::Delete(marker),
+        )
+        .expect("删除压缩记录行");
+    ops.sessions
+        .say(
+            &sid,
+            "继续",
+            crate::capabilities::conductor::api::Output::Final,
+        )
+        .expect("删除后再问一轮");
+
+    let all = seen.lock().expect("锁").clone();
+    let last = all.last().expect("至少问过一次").clone();
+    assert!(
+        last.iter().any(|c| c.contains("第一件事")),
+        "删除压缩记录行后旧内容该回到发送视图：{last:?}"
+    );
+    assert!(
+        !last.iter().any(|c| c.contains("此前内容摘要")),
+        "删除压缩记录行后摘要该消失：{last:?}"
+    );
+}
+
 /// 供应商 usage：会话视图给出精确数字，落盘 usage 事件，刷新/重建仍能读回来。
 #[test]
 fn provider_usage_is_exposed_in_session_view_and_persisted() {
@@ -1074,6 +1525,7 @@ fn auto_compaction_uses_provider_usage_when_it_is_available() {
     let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
     let mut st = ops.registry.settings().expect("读设置");
     st.compact_at_percent = 10; // 128K × 10% = 12.8K < 20K
+    st.compact_keep_percent = 0;
     st.sandbox.policy.windows.write_acl = true;
     ops.registry.set_settings(st).expect("写设置");
     let sid = ops
@@ -1134,7 +1586,7 @@ fn compaction_survives_a_restart_and_rewinds_back_through_the_point() {
         .map(|m| m + 1)
         .unwrap_or(0);
     let line = |id: u64, kind: &str, text: &str| serde_json::json!({"id": id, "reply": id, "line": text, "kind": kind, "speaker": "", "verb": "", "turn": 0});
-    // 两份行 + 一次压缩（覆盖到 next+2）+ 之后的一行：模拟「压过之后再重启」的落盘历史。
+    // 两份行 + 一条压缩记录行（覆盖到 next+2）+ 之后的一行：模拟「压过之后再重启」的落盘历史。
     for (id, kind, text) in [
         (next, "user", "第一句话"),
         (next + 1, "assistant", "第一句的回复"),
@@ -1147,12 +1599,25 @@ fn compaction_survives_a_restart_and_rewinds_back_through_the_point() {
     }
     core.history_append(
         &sid,
-        &[serde_json::json!({"type": "compacted", "up_to": next + 2, "summary": "前两句的摘要"})],
+        &[serde_json::json!({
+            "type": "transcript",
+            "lines": [{
+                "id": next + 2,
+                "reply": next + 2,
+                "line": "前两句的摘要",
+                "kind": "compacted",
+                "system": true,
+                "payload": {"up_to": next + 2},
+                "speaker": "",
+                "verb": "",
+                "turn": 0
+            }]
+        })],
     )
-    .expect("落压缩事件");
+    .expect("落压缩记录行");
     core.history_append(
         &sid,
-        &[serde_json::json!({"type": "transcript", "lines": [line(next + 2, "user", "之后的新内容")]})],
+        &[serde_json::json!({"type": "transcript", "lines": [line(next + 3, "user", "之后的新内容")]})],
     )
     .expect("落之后的新行");
     let shown = |msgs: &[crate::capabilities::llm::api::Msg]| {
@@ -1182,7 +1647,12 @@ fn compaction_survives_a_restart_and_rewinds_back_through_the_point() {
     assert_eq!(
         rebuilt.compacted_upto,
         next + 2,
-        "重建也要恢复压缩点（回档分流靠它）"
+        "重建也要恢复压缩点（发送视图靠它）"
+    );
+    assert_eq!(
+        rebuilt.compacted_line,
+        next + 2,
+        "重建也要恢复压缩记录行（回档分流靠它）"
     );
     drop(rebuilt);
     core.abort_running(&sid);
@@ -1530,6 +2000,39 @@ fn set_settings_action_accepts_max_guests() {
         })
         .expect("set_settings 应接受 max_guests");
     assert_eq!(ops.registry.settings().expect("读设置").max_guests, 5);
+}
+
+/// set_settings 接受压缩保留比例与总结模型；未登记的模型保存即拒绝。
+#[test]
+fn set_settings_action_accepts_compact_options() {
+    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
+    let mut st = ops.registry.settings().expect("读设置");
+    st.sandbox.policy.windows.write_acl = true;
+    ops.registry
+        .set_settings(st)
+        .expect("准备 Windows 合法的沙箱策略");
+    ops.actions
+        .act(ActionCall {
+            id: "set_settings".to_string(),
+            args: serde_json::json!({ "compact_keep_percent": 20, "compact_model": "m" }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .expect("set_settings 应接受压缩选项");
+    let got = ops.registry.settings().expect("读设置");
+    assert_eq!(got.compact_keep_percent, 20);
+    assert_eq!(got.compact_model, "m");
+
+    let err = ops
+        .actions
+        .act(ActionCall {
+            id: "set_settings".to_string(),
+            args: serde_json::json!({ "compact_model": "nope" }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .unwrap_err();
+    assert!(err.contains("compact_model"), "{err}");
 }
 
 /// 建会话动作与改配置都带着人设走：人设是会话快照，不是登记处联动。

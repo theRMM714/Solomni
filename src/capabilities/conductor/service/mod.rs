@@ -30,7 +30,7 @@ use crate::capabilities::tools::api::{ToolExec, Tools};
 use crate::kernel::api::SessionId;
 use crate::kernel::ports::Log;
 use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 /// 会话实例：单 agent 会话或协作会话（本体自带端口，可跨线程移动）。
 /// 两变体大小差得远（协作会话带整份讨论状态），装箱只换来一次间接寻址、
@@ -192,6 +192,8 @@ pub(crate) enum Prepared {
         identity: String,
         /// 生成前要先给用户的事件（例如工具形态变更的提示）。
         prefix: Vec<SessionEvent>,
+        /// 本回合要注入的**派发任务**（节点执行）：在工作线程上先压缩、再注入，任务不会被压掉。
+        task: Option<String>,
         llm: crate::capabilities::llm::api::LlmOpts,
         /// 增量落盘手柄：逐轮外送的同时就落盘（中途刷新页面因此看得到已产生的部分）。
         persister: Persister,
@@ -224,6 +226,68 @@ pub(crate) struct ReadyActivation {
 /// **应用服务**：持有注入的端口、能力面与会话中心；前端拿不到它（只拿 `conductor::api::Ops`）。
 /// 组合根在 `ConductorHandle::spawn` 里把它**移进核心自己的执行线程**——此后状态只被那一个线程碰，
 /// 所以这里不加任何锁（并发不变式见 ARCHITECTURE.md §一）。
+/// 目的：压缩模型的选择（全局设置；只读触发时解析，不参与每个回合）。
+#[derive(Debug, Clone)]
+enum CompactChoice {
+    /// 空设置 = 会话同模型。
+    Session,
+    /// 指定模型：解析好的通道 + 窗口。
+    Model {
+        id: String,
+        channel: Channel,
+        window: u64,
+    },
+    /// 设置指向的模型 / 供应商不可用：压缩触发时如实报错。
+    Unavailable(String),
+}
+
+/// 目的：压缩通道工厂：设置 / 模型 / 供应商变更时由 conductor 更新选择，会话在触发时读。
+struct CompactRuntime {
+    llm: Arc<dyn Llm + Send + Sync>,
+    choice: RwLock<CompactChoice>,
+}
+
+impl CompactRuntime {
+    fn new(llm: Arc<dyn Llm + Send + Sync>) -> CompactRuntime {
+        CompactRuntime {
+            llm,
+            choice: RwLock::new(CompactChoice::Session),
+        }
+    }
+
+    fn set(&self, choice: CompactChoice) {
+        *self.choice.write().unwrap_or_else(|e| e.into_inner()) = choice;
+    }
+}
+
+impl crate::capabilities::session::api::CompactChatFactory for CompactRuntime {
+    fn build(
+        &self,
+        module: &str,
+        session_model: Option<&str>,
+    ) -> Result<Option<crate::capabilities::session::api::CompactChatSpec>, String> {
+        let guard = self.choice.read().unwrap_or_else(|e| e.into_inner());
+        match &*guard {
+            CompactChoice::Session => Ok(None),
+            CompactChoice::Unavailable(err) => Err(err.clone()),
+            CompactChoice::Model {
+                id,
+                channel,
+                window,
+            } => {
+                if session_model == Some(id.as_str()) {
+                    return Ok(None);
+                }
+                Ok(Some(crate::capabilities::session::api::CompactChatSpec {
+                    chat: self.llm.member_channel(channel, module),
+                    model: id.clone(),
+                    window: *window,
+                }))
+            }
+        }
+    }
+}
+
 pub struct Conductor {
     /// 产品根：虚拟根这类"装在项目内"的东西按它解析成绝对路径（`vm::resolve_guest`）。
     root: std::path::PathBuf,
@@ -245,6 +309,8 @@ pub struct Conductor {
     builds: Arc<dyn Builds + Send + Sync>,
     /// llm 用例面：按解析出来的通道造收发句柄 + 信封的无歧义修复（通道的**解析**在登记处能力）。
     llm: Arc<dyn Llm + Send + Sync>,
+    /// 压缩通道工厂：全局设置只在这里对账；会话在压缩触发时现取（不刷新会话）。
+    compact: Arc<CompactRuntime>,
     /// 工具执行面（**不持它的端口**，R12）：跑外部/内置工具、释放围栏授权都走它。
     tools: Arc<dyn ToolExec + Send + Sync>,
     log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
@@ -321,7 +387,8 @@ impl Conductor {
         residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
         secrets: Arc<dyn crate::capabilities::secrets::api::SecretOps + Send + Sync>,
     ) -> Conductor {
-        Conductor {
+        let compact = Arc::new(CompactRuntime::new(Arc::clone(&llm)));
+        let c = Conductor {
             root,
             registry,
             history,
@@ -332,6 +399,7 @@ impl Conductor {
             modules,
             builds,
             llm,
+            compact,
             tools,
             log,
             probe,
@@ -345,7 +413,36 @@ impl Conductor {
             desk: crate::capabilities::session::api::DecisionDesk::new(),
             running: std::collections::BTreeSet::new(),
             starting: std::collections::BTreeSet::new(),
-        }
+        };
+        c.sync_compact_choice();
+        c
+    }
+
+    /// 目的：从登记处重算压缩选择（设置 / 模型 / 供应商变更后调用）。
+    /// 约束：只读登记处、只换共享选择；不重建任何会话。
+    pub(crate) fn sync_compact_choice(&self) {
+        let app = self.registry.app();
+        let id = app.compact_model.trim();
+        let choice = if id.is_empty() {
+            CompactChoice::Session
+        } else {
+            match self.registry.channel(Some(id)) {
+                Ok(channel) => CompactChoice::Model {
+                    id: id.to_string(),
+                    channel,
+                    window: self.registry.context_of(Some(id)),
+                },
+                Err(e) => CompactChoice::Unavailable(format!("压缩模型 {} 不可用：{}", id, e)),
+            }
+        };
+        self.compact.set(choice);
+    }
+
+    /// 目的：注入给新会话 / 重建会话的压缩通道工厂。
+    pub(crate) fn compact_factory(
+        &self,
+    ) -> Arc<dyn crate::capabilities::session::api::CompactChatFactory> {
+        self.compact.clone()
     }
 
     /// 目的：注入项目内基础工具链的只读安装根；组合根读到 active.json 后调用。
@@ -439,6 +536,16 @@ impl Conductor {
     /// 登记处能力面（可写）：登记处的用例只经它调用。
     pub fn registry_mut(&mut self) -> &mut dyn Registry {
         self.registry.as_mut()
+    }
+
+    /// 目的：登记处写操作的统一出口——写完重算压缩选择，避免汇总模型指向旧通道。
+    pub(crate) fn registry_write<T>(
+        &mut self,
+        f: impl FnOnce(&mut dyn Registry) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let out = f(self.registry.as_mut())?;
+        self.sync_compact_choice();
+        Ok(out)
     }
 
     /// 目录保留名（`systools/names.yaml`）：agent 实例名不得占用（与工作区布局同源）。
@@ -625,40 +732,31 @@ impl Conductor {
         }
     }
 
-    /// 压缩一个会话的上下文：**让 AI 自己压**（核心只给 compact 工具），不是系统替它总结。
-    /// 返回（提示词, compact 的声明, 压缩点, 本回合的身份块）——模型调用由调用方在工作线程上跑（界面不被阻塞）。
-    pub fn compact_plan(
-        &self,
-        sid: &str,
-    ) -> Result<
-        (
-            String,
-            Option<crate::capabilities::llm::api::ToolDecl>,
-            u64,
-            String,
-        ),
-        String,
-    > {
-        let compact_prompt = self
-            .prompt
-            .text(crate::capabilities::prompt::api::Segment::CompactPrompt)
-            .to_string();
-        let decl = self
-            .systools
-            .book()
-            .get("compact")
-            .map(|t| t.decl("compact"));
-        // 会话不在世或不是单 agent：**报错**，不给出"空身份块 + 压缩点 0"这种假计划
+    /// 目的：给压缩回合准备身份块；切分与模型调用都在工作线程上（界面不被阻塞）。
+    /// 返回：本回合的身份块。
+    /// 错误：会话不在世或不是单 agent 时如实报错。
+    pub fn compact_plan(&mut self, sid: &str) -> Result<String, String> {
+        // 会话不在世或不是单 agent：**报错**，不给出"空身份块"这种假计划
         // （压缩只对单 agent 会话成立；协作会话由各成员会话按阈值自己压）。
-        let Some(Session::Single(s)) = self.sessions.get(sid) else {
+        let model = match self.sessions.get(sid) {
+            Some(Session::Single(s)) => s.model_id().map(str::to_string),
+            _ => {
+                return Err(format!(
+                    "压缩只支持单 agent 会话（{} 不在世或不是单 agent）",
+                    sid
+                ))
+            }
+        };
+        // 手动压缩也要读**当前**设置：用户刚把保留比例调低，不该等会话重建才生效。
+        let (window, percent, keep) = self.context_budget(model.as_deref());
+        let Some(Session::Single(s)) = self.sessions.get_mut(sid) else {
             return Err(format!(
                 "压缩只支持单 agent 会话（{} 不在世或不是单 agent）",
                 sid
             ));
         };
-        let up_to = s.next_line_id();
-        let identity = s.params().identity(&*self.prompt, s.tool_mode());
-        Ok((compact_prompt, decl, up_to, identity))
+        s.set_context_budget(window, percent, keep);
+        Ok(s.params().identity(&*self.prompt, s.tool_mode()))
     }
 
     /// 往某个会话注入一条**系统消息**（讨论的提醒走这条；见 session-model.md 二"系统消息"）。
