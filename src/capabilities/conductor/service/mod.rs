@@ -286,6 +286,8 @@ mod env;
 mod flow;
 pub(crate) mod guest_job;
 mod history;
+#[cfg(test)]
+pub(crate) use history::SessionDelete;
 pub mod proxy;
 mod rewind;
 #[cfg(test)]

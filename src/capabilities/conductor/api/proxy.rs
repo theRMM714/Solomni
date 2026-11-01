@@ -368,10 +368,9 @@ impl crate::capabilities::session::api::HistoryOps for ConductorHandle {
     }
     fn delete(&self, name: &str) -> Result<bool, String> {
         let name = name.to_string();
-        // 删除的核心动作毫秒级做完；销毁 guest 要等它落盘，在这一段（调用方线程）上跑。
-        let (ok, stop) = self.call(move |core| core.delete_bookkeeping(&name))?;
-        stop.run();
-        Ok(ok)
+        // 核心只做毫秒级的账；guest 销毁与目录删除在这一段（调用方线程）上按序执行。
+        let delete = self.call(move |core| core.delete_bookkeeping(&name))?;
+        delete.run()
     }
 }
 
