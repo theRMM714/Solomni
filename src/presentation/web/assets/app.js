@@ -154,7 +154,8 @@ async function refreshState() {
     cur.permission_parent = v.permission_parent || null;
     // 上下文用量以快照兜底；实时 usage 事件到达后以事件为准（同一份事实，事件更新）。
     if (v.context !== undefined) cur.context = v.context || null;
-    if (v.shell !== undefined) cur.shell = v.shell || null;
+    // shell 快照：活动会话以服务端运行槽为准（null = 被回档截掉）；历史回放保留 /api/history 的派生值。
+    if (!cur.readonly && v.shell !== undefined) cur.shell = v.shell || null;
     // 运行态**只对账、不覆盖**：这条会话已经有实时知识（事件就是真相）时，快照比它滞后——
     // 一次迟到的轮询不能把已经收尾的回合标回"在跑"。没有实时知识时按快照补齐，并清掉本地遗留
     // （快照说没跑就是没跑）；谁在跑未知时照旧显示"正在工作…"。
@@ -541,6 +542,8 @@ async function hydrateHistory(s) {
     for (const ev of (got.events || [])) absorb(s, ev);
     for (const ev of (got.live || [])) absorb(s, ev);
     if (typeof got.head === 'number') s.floor = got.head;
+    // 状态槽只活在本进程里：重启 / 重建后按转录派生的快照补上（已有的实时快照更新，不覆盖）。
+    if (got.shell && !s.shell) s.shell = got.shell;
   }
   // 合流期间到达的实时批次先攒着；水位定好后按同一把尺子接上（水位及以上的才接）。
   const buffered = s.buffer || [];
@@ -572,7 +575,7 @@ async function openHistory(name) {
       lines: [], live: [], pending: null, sending: false,
       running: false, working: null, running_known: false,
       activating: false, continue_action: null,
-      context: null, shell: null, work: null, workAt: 0, workDirty: false, workError: '',
+      context: null, shell: r.shell || null, work: null, workAt: 0, workDirty: false, workError: '',
       permission_profile: '', permission_label: '', thinking: null,
       permission_narrowed: false, permission_parent: null,
       done: true, awaiting: null, readonly: true, fold: {}, scroll: {},
@@ -3591,6 +3594,8 @@ function absorb(s, ev) {
       s.live.push({ kind: 'tool', tool: ev });
       // agent 提交会改共享区 head：让状态栏 / 提交弹窗下次刷新时跟上。
       if (ev.name === 'work_commit') s.workDirty = true;
+      // shell 跑完了：运行槽只经 /api/state 下发，立刻拉一次——chip 与打开的卡片不用等 3 秒轮询。
+      if (ev.name === 'shell') needState = true;
       return true; // 同上：卡片节点只 append，绝不重建
     case 'discussion_done':
       if (ev.over_cap) s.lines.push({ cls: 'sys', who: '', text: '讨论超轮次上限，进入裁决。' });
@@ -3764,6 +3769,14 @@ function ctxChipClass(percent) {
   if (at > 0 && percent >= at) return 'warn';
   return '';
 }
+/// shell 是不是仍在跑：回放派生的快照没有 finished_at，但它不是"正在跑"。
+function shellRunning(sh) { return !!sh && !sh.historical && !sh.finished_at; }
+/// shell 的耗时（秒）：实时槽按墙钟差；回放派生用回执里的耗时行。
+function shellSecs(sh) {
+  if (sh.elapsed_secs != null) return Math.max(0, Number(sh.elapsed_secs) || 0);
+  const end = sh.finished_at || Math.floor(Date.now() / 1000);
+  return Math.max(0, end - (sh.started_at || 0));
+}
 function fmtDuration(sec) {
   const s = Math.max(0, Math.floor(Number(sec) || 0));
   if (s < 60) return s + ' 秒';
@@ -3803,9 +3816,10 @@ function statusPrintOf(s) {
     s && s.permission_parent,
     s && s.thinking ? [s.thinking.level, s.thinking.default_level, s.thinking.label, (s.thinking.options || []).length] : 0,
     s && s.shell ? [
-      s.shell.command, s.shell.scope, s.shell.started_at, s.shell.finished_at,
-      s.shell.ok, s.shell.exit_code, (s.shell.output || '').length,
-      s.shell.finished_at ? 0 : Math.floor(Date.now() / 1000),
+      s.shell.command, s.shell.scope, s.shell.cwd, s.shell.started_at, s.shell.finished_at,
+      s.shell.elapsed_secs, s.shell.ok, s.shell.exit_code, (s.shell.output || '').length,
+      s.shell.historical ? 1 : 0,
+      shellRunning(s.shell) ? Math.floor(Date.now() / 1000) : 0,
     ] : 0,
   ]);
 }
@@ -3930,6 +3944,7 @@ function syncStatusbar(s) {
   const print = statusPrintOf(s);
   if (s.statusPrint === print) {
     box.classList.remove('hidden');
+    paintShellCard();
     return;
   }
   s.statusPrint = print;
@@ -3967,12 +3982,14 @@ function syncStatusbar(s) {
   // shell：运行中 / 最近一次的结果；点开看命令、scope、cwd、退出码与回执预览。
   if (s.shell) {
     const sh = s.shell;
-    const running = !sh.finished_at;
-    const end = sh.finished_at || Math.floor(Date.now() / 1000);
-    const dur = fmtDuration(end - sh.started_at);
+    const running = shellRunning(sh);
+    const dur = fmtDuration(shellSecs(sh));
     let text;
     if (running) text = 'shell 运行中 · ' + dur;
-    else if (sh.exit_code == null) text = 'shell ' + (sh.ok ? '完成' : '中止') + ' · ' + dur;
+    else if (sh.historical) {
+      const code = sh.exit_code == null ? (sh.ok ? '完成' : '中止') : '退出码 ' + sh.exit_code;
+      text = 'shell ' + code + '（历史）' + (sh.elapsed_secs != null ? ' · ' + dur : '');
+    } else if (sh.exit_code == null) text = 'shell ' + (sh.ok ? '完成' : '中止') + ' · ' + dur;
     else text = 'shell 退出码 ' + sh.exit_code + ' · ' + dur;
     const shellChip = ui.statusChip({
       icon: 'terminal',
@@ -4033,6 +4050,7 @@ function syncStatusbar(s) {
   });
   inner.appendChild(workChip);
   box.appendChild(inner);
+  paintShellCard();
 }
 
 async function loadWork(sid, force) {
@@ -4090,35 +4108,85 @@ function popoverNote(text, cls) {
 }
 
 
-function openShellCard(s, anchor) {
-  const box = popoverBox('shell');
-  const sh = s.shell;
-  if (!sh) {
-    box.appendChild(popoverNote('这条会话还没有执行过 shell。'));
-    ui.popover(anchor, box, { label: 'shell' });
-    return;
+/* 最近一次 shell 的卡片：内容可重画——运行中每秒刷新耗时，结束后由状态刷新重画终态。 */
+let shellCardOpen = null; // { sid, box, body, dur, sig }
+
+function shellCardSig(sh) {
+  return [sh.command, sh.scope, sh.cwd, sh.started_at, sh.finished_at, sh.elapsed_secs,
+    sh.exit_code, sh.ok, sh.historical ? 1 : 0, (sh.output || '').length].join('\u0001');
+}
+
+/// 画一张 shell 卡片的内容；返回「耗时」那一格，运行中只改它。
+function fillShellCard(body, sh) {
+  body.innerHTML = '';
+  const running = shellRunning(sh);
+  if (sh.command) {
+    const cmd = document.createElement('pre');
+    cmd.className = 'tool-pre';
+    cmd.textContent = sh.command;
+    body.appendChild(cmd);
   }
-  const running = !sh.finished_at;
-  const end = sh.finished_at || Math.floor(Date.now() / 1000);
-  const cmd = document.createElement('pre');
-  cmd.className = 'tool-pre';
-  cmd.textContent = sh.command;
-  box.appendChild(cmd);
-  box.appendChild(popoverRow('scope', sh.scope === 'external'
+  body.appendChild(popoverRow('scope', sh.scope === 'external'
     ? 'external（共享区 / 模块目录 / 主机只读根 / 网络）'
     : 'sandbox（只碰私有沙箱）'));
-  box.appendChild(popoverRow('cwd', sh.cwd || '—'));
-  box.appendChild(popoverRow('状态', running ? '运行中…' : (sh.ok ? '成功' : '失败')));
-  box.appendChild(popoverRow('退出码', sh.exit_code == null ? '—' : String(sh.exit_code)));
-  box.appendChild(popoverRow('耗时', fmtDuration(end - sh.started_at)));
+  body.appendChild(popoverRow('cwd', sh.cwd || '—'));
+  body.appendChild(popoverRow('状态', running ? '运行中…' : (sh.ok ? '成功' : '失败')));
+  body.appendChild(popoverRow('退出码', sh.exit_code == null ? '—' : String(sh.exit_code)));
+  const durRow = popoverRow('耗时', sh.historical && sh.elapsed_secs == null
+    ? '—（历史记录没有留下）'
+    : fmtDuration(shellSecs(sh)));
+  body.appendChild(durRow);
   if (sh.output) {
     const out = document.createElement('pre');
     out.className = 'tool-pre';
     out.textContent = sh.output;
-    box.appendChild(out);
+    body.appendChild(out);
   }
-  box.appendChild(popoverNote('完整回执在转录的 shell 工具行；这里只保留最近一次。'));
-  ui.popover(anchor, box, { label: 'shell' });
+  body.appendChild(popoverNote(sh.historical
+    ? '来自转录回放：耗时与 cwd 取自当时的回执；完整回执在转录的 shell 工具行。'
+    : '完整回执在转录的 shell 工具行；这里只保留最近一次。'));
+  return durRow.children[1];
+}
+
+function paintShellCard() {
+  const o = shellCardOpen;
+  if (!o) return;
+  const s = state.sessions.get(o.sid);
+  const sh = s && s.shell;
+  if (!sh) {
+    if (o.sig !== 'none') {
+      o.sig = 'none'; o.dur = null;
+      o.body.innerHTML = '';
+      o.body.appendChild(popoverNote('这条会话还没有执行过 shell。'));
+      if (typeof o.place === 'function') o.place();
+    }
+    return;
+  }
+  const sig = shellCardSig(sh);
+  if (sig !== o.sig) {
+    o.sig = sig;
+    o.dur = fillShellCard(o.body, sh);
+    // 内容变高/变矮：重新夹一次位置，别让新增的回执把卡片顶出视口底部。
+    if (typeof o.place === 'function') o.place();
+  } else if (o.dur && shellRunning(sh)) {
+    o.dur.textContent = fmtDuration(shellSecs(sh));
+  }
+}
+
+function openShellCard(s, anchor) {
+  const box = popoverBox('shell');
+  const body = document.createElement('div');
+  box.appendChild(body);
+  const timer = typeof setInterval === 'function' ? setInterval(paintShellCard, 1000) : null;
+  const pop = ui.popover(anchor, box, {
+    label: 'shell',
+    onClose: () => {
+      if (timer != null && typeof clearInterval === 'function') clearInterval(timer);
+      if (shellCardOpen && shellCardOpen.box === box) shellCardOpen = null;
+    },
+  });
+  shellCardOpen = { sid: s.sid, box: box, body: body, dur: null, sig: '', place: pop.place };
+  paintShellCard();
 }
 
 function openContextCard(s, anchor) {
@@ -5443,6 +5511,8 @@ function applyActivation(s, v) {
   s.permission_label = v.permission_label || s.permission_label;
   s.permission_narrowed = !!v.permission_narrowed;
   s.permission_parent = v.permission_parent || null;
+  // 启用时后端已按转录回填 shell 快照：贴回来，不用等下一次 /api/state。
+  if (v.shell) s.shell = v.shell;
 }
 
 /* 上下文「继续」：后端说确实有断点时才出现（单 agent 上一轮 / 协作泵）。

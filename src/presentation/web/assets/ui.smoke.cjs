@@ -127,6 +127,48 @@ check("锚点 aria-expanded", anchor.attrs["aria-expanded"] === "true");
 pop.close();
 check("关闭后移除小卡片", menuRoot.children.length === 0 && anchor.attrs["aria-expanded"] === "false");
 
+// 关闭回调：主动关与"被下一张顶掉"都要响，调用方才能清掉自己的计时器。
+let closedCount = 0;
+const pop2 = ui.popover(anchor, el("div"), { label: "关闭回调", onClose: () => { closedCount += 1; } });
+pop2.close();
+check("关闭回调响一次", closedCount === 1, String(closedCount));
+let replaced = 0;
+ui.popover(anchor, el("div"), { onClose: () => { replaced += 1; } });
+const third = ui.popover(anchor, el("div"), {});
+check("换一张卡片会关掉旧的（旧回调要响）", replaced === 1, String(replaced));
+third.close();
+
+// 小卡片夹在视口内：锚点贴底 + 卡片比"锚点下方"高时，底边不得越出视口；锚点被重建后沿用上次位置。
+sandbox.innerHeight = 300;
+const lowAnchor = el("button");
+lowAnchor.getBoundingClientRect = () => ({ left: 10, top: 260, right: 120, bottom: 290 });
+const clamped = ui.popover(lowAnchor, el("div"), { label: "夹住底部" });
+clamped.node.getBoundingClientRect = () => ({ width: 400, height: 250 });
+clamped.place();
+const clampedTop = parseInt(clamped.node.style.top, 10);
+check("小卡片底边不越出视口", clampedTop >= 8 && clampedTop + 250 <= 292, clamped.node.style.top);
+lowAnchor.getBoundingClientRect = () => ({ left: 0, top: 0, right: 0, bottom: 0 });
+clamped.place();
+check("锚点被重建后沿用上次位置", parseInt(clamped.node.style.top, 10) === clampedTop, clamped.node.style.top);
+clamped.close();
+delete sandbox.innerHeight;
+
+// 视口滚动监听：卡片自己滚（长回执）不能关，页面滚才关。
+const winHandlers = {};
+sandbox.addEventListener = (t, f) => { (winHandlers[t] = winHandlers[t] || []).push(f); };
+sandbox.removeEventListener = (t, f) => {
+  const list = winHandlers[t] || [];
+  const i = list.indexOf(f);
+  if (i >= 0) list.splice(i, 1);
+};
+const scrollAnchor = el("button");
+const scrollCard = ui.popover(scrollAnchor, el("div"), { label: "滚动" });
+const fireScroll = (target) => (winHandlers.scroll || []).slice().forEach((f) => f({ target }));
+fireScroll(scrollCard.node);
+check("卡片内部滚动不关闭卡片", scrollCard.node.parentNode === menuRoot, String(scrollCard.node.parentNode && scrollCard.node.parentNode.tagName));
+fireScroll(el("div"));
+check("页面滚动关闭卡片", menuRoot.children.length === 0);
+
 if (failures.length) {
   console.log(failures.join("\n"));
   console.log("UI-SMOKE-FAIL（" + failures.length + " 条）");

@@ -732,6 +732,48 @@ pub(crate) fn rebuilt_context_keeps_tool_result() {
         .any(|m| m.role == "assistant" && m.content.contains("写完了")));
 }
 
+/// 目的：重建会话时 shell 状态栏快照按转录回填（重启 / 启用后不再"没有 chip"）。
+#[test]
+pub(crate) fn rebuild_restores_the_last_shell_snapshot_from_the_transcript() {
+    let hist = Arc::new(InMemoryHistory::new());
+    let io = Arc::new(InMemorySysIo::new());
+    let mut core = core_with_all(
+        vec![module_of("a")],
+        gw(BTreeMap::new(), vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::clone(&io),
+    );
+    let sid = core
+        .create_work(work("w", WorkMode::Single, &["a"]))
+        .unwrap()
+        .sid;
+    hist.append(
+        &sid,
+        &[serde_json::json!({
+            "type": "transcript",
+            "lines": [{
+                "id": 0,
+                "tool": {
+                    "speaker": "a", "module": "", "name": "shell", "ok": true,
+                    "args": "{\"command\":\"npm test\",\"scope\":\"sandbox\"}",
+                    "output": "ok\n[shell] 退出码 0\n[shell] cwd /w/a · 耗时 7 秒"
+                }
+            }]
+        })],
+    )
+    .unwrap();
+    let (meta, events) = core.history_open(&sid).unwrap();
+    drop(core.rebuild_session(&meta, &events).expect("按转录重建"));
+    let live = core.shell_view(&sid).expect("重建后状态栏要有 shell 快照");
+    assert_eq!(live.command, "npm test");
+    assert_eq!(live.cwd, "/w/a");
+    assert_eq!(live.elapsed_secs, Some(7));
+    assert_eq!(live.exit_code, Some(0));
+    assert!(live.historical, "派生快照要标历史");
+}
+
 #[test]
 pub(crate) fn create_work_validates_user_choices() {
     let mut core = core_with(

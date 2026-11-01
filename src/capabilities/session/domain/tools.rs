@@ -21,12 +21,19 @@ pub struct ShellLive {
     pub started_at: u64,
     /// 目的：结束时间；None = 仍在跑。
     pub finished_at: Option<u64>,
+    /// 目的：本次执行耗时（秒）；运行中为 None。回放派生时来自回执里的「耗时」行。
+    #[serde(default)]
+    pub elapsed_secs: Option<u64>,
     /// 目的：退出码（超时 / 停止 / 拿不到时为 None）。
     pub exit_code: Option<i32>,
     /// 目的：成败；None = 仍在跑。
     pub ok: Option<bool>,
     /// 目的：回执预览（最多 4000 字符；完整回执在转录的 shell 工具行）。
     pub output: String,
+    /// 目的：true = 从转录派生（回放 / 重建），不是本次进程的运行槽：此时没有起止墙钟时间，
+    ///   耗时与 cwd 来自回执末尾的「[shell] cwd … · 耗时 … 秒」行。
+    #[serde(default)]
+    pub historical: bool,
 }
 
 /// 目的：一个会话的 shell 实时状态槽——工具循环写、状态栏快照读。
@@ -43,9 +50,11 @@ impl ShellSlot {
             cwd: cwd.to_string(),
             started_at: now_secs(),
             finished_at: None,
+            elapsed_secs: None,
             exit_code: None,
             ok: None,
             output: String::new(),
+            historical: false,
         });
     }
 
@@ -55,10 +64,17 @@ impl ShellSlot {
         let Some(s) = g.as_mut() else {
             return;
         };
-        s.finished_at = Some(now_secs());
+        let end = now_secs();
+        s.finished_at = Some(end);
+        s.elapsed_secs = Some(end.saturating_sub(s.started_at));
         s.ok = Some(ok);
         s.exit_code = exit_code;
         s.output = output.chars().take(4000).collect();
+    }
+
+    /// 目的：整体替换快照（重建 / 回档按转录回填；None = 清掉）。
+    pub fn set(&self, live: Option<ShellLive>) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = live;
     }
 
     /// 目的：读一份快照；没有运行过 shell 就是 None。
@@ -72,6 +88,72 @@ fn now_secs() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+/// 目的：从转录派生最近一次 shell 的状态（回放 / 重建用）：命令、scope、cwd、耗时、成败、退出码与回执预览。
+/// 约束：只读结构化字段（tool.name / tool.args / tool.output），不匹配正文；跳过回档折叠的行；
+///   参数里没有命令（调用没解析出来）的行跳过；有命令但没真正执行（如围栏拒绝）仍算「最近一次尝试」。
+pub fn last_shell(events: &[serde_json::Value]) -> Option<ShellLive> {
+    let marks = super::rewind::rewind_marks(events);
+    let mut found = None;
+    for ev in events {
+        if ev.get("type").and_then(|t| t.as_str()) != Some("transcript") {
+            continue;
+        }
+        let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) else {
+            continue;
+        };
+        for line in lines {
+            let id = line.get("id").and_then(|i| i.as_u64()).unwrap_or(0);
+            if super::rewind::folded(&marks, id) {
+                continue;
+            }
+            let Some(tool) = line.get("tool") else {
+                continue;
+            };
+            if tool.get("name").and_then(|n| n.as_str()) != Some("shell")
+                || !tool
+                    .get("module")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("")
+                    .is_empty()
+            {
+                continue;
+            }
+            let output = tool.get("output").and_then(|o| o.as_str()).unwrap_or("");
+            let args: serde_json::Value =
+                serde_json::from_str(tool.get("args").and_then(|a| a.as_str()).unwrap_or(""))
+                    .unwrap_or_default();
+            let command = args
+                .get("command")
+                .and_then(|c| c.as_str())
+                .unwrap_or("")
+                .to_string();
+            if command.is_empty() {
+                continue;
+            }
+            let (cwd, elapsed_secs) = crate::capabilities::tools::api::cwd_elapsed(output)
+                .map(|(cwd, secs)| (cwd, Some(secs)))
+                .unwrap_or_default();
+            found = Some(ShellLive {
+                command,
+                scope: args
+                    .get("scope")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("sandbox")
+                    .to_string(),
+                cwd,
+                started_at: 0,
+                finished_at: None,
+                elapsed_secs,
+                exit_code: crate::capabilities::tools::api::exit_code(output),
+                ok: Some(tool.get("ok").and_then(|o| o.as_bool()).unwrap_or(false)),
+                output: output.chars().take(4000).collect(),
+                historical: true,
+            });
+        }
+    }
+    found
 }
 
 /// 一个模块的外部工具环境：模块目录（外部工具进程的 cwd）+ 它声明的工具表 + 已启动常驻服务的操作。
@@ -266,4 +348,68 @@ pub fn tool_table(
             )
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn transcript(lines: serde_json::Value) -> serde_json::Value {
+        json!({ "type": "transcript", "lines": lines })
+    }
+
+    #[test]
+    fn last_shell_reads_command_scope_cwd_and_elapsed_from_the_tool_row() {
+        let events = vec![transcript(json!([
+            {"id": 0, "tool": {"name": "shell", "module": "", "ok": false,
+             "args": r#"{"command":"first"}"#, "output": "x\n[shell] 退出码 1"}},
+            {"id": 1, "tool": {"name": "shell", "module": "", "ok": true,
+             "args": r#"{"command":"npm test","scope":"external"}"#,
+             "output": "ok\n[shell] 退出码 0\n[shell] cwd /w/a · 耗时 7 秒"}}
+        ]))];
+        let live = last_shell(&events).expect("要派生最后一条");
+        assert_eq!(live.command, "npm test");
+        assert_eq!(live.scope, "external");
+        assert_eq!(live.cwd, "/w/a");
+        assert_eq!(live.elapsed_secs, Some(7));
+        assert_eq!(live.exit_code, Some(0));
+        assert_eq!(live.ok, Some(true));
+        assert!(live.historical);
+        assert!(live.finished_at.is_none(), "派生快照不伪造墙钟时间");
+    }
+
+    #[test]
+    fn last_shell_skips_folded_rows_and_other_tools() {
+        let events = vec![
+            transcript(json!([
+                {"id": 0, "tool": {"name": "read", "module": "", "ok": true, "args": "{}", "output": "x"}},
+                {"id": 1, "tool": {"name": "shell", "module": "", "ok": true,
+                 "args": r#"{"command":"gone"}"#, "output": "[shell] 退出码 0"}}
+            ])),
+            json!({"type": "rewind", "mark": 1, "mode": "archive", "before": 0, "from": 2}),
+            transcript(json!([
+                {"id": 2, "tool": {"name": "shell", "module": "m", "ok": true,
+                 "args": r#"{"command":"module"}"#, "output": "[shell] 退出码 0"}}
+            ])),
+        ];
+        assert!(
+            last_shell(&events).is_none(),
+            "被折叠的 shell 与模块工具都不算"
+        );
+    }
+
+    #[test]
+    fn last_shell_keeps_a_refused_attempt_without_inventing_cwd() {
+        let events = vec![transcript(json!([
+            {"id": 0, "tool": {"name": "shell", "module": "", "ok": false,
+             "args": r#"{"command":"cat ../x","scope":"external"}"#,
+             "output": "[围栏] 这次调用没有执行"}}
+        ]))];
+        let live = last_shell(&events).expect("最近一次尝试");
+        assert_eq!(live.ok, Some(false));
+        assert_eq!(live.cwd, "");
+        assert_eq!(live.elapsed_secs, None);
+        assert_eq!(live.exit_code, None);
+    }
 }

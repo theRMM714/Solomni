@@ -474,7 +474,11 @@ pub(crate) fn route(
         "history.open" => match ops.history.open(&name) {
             Ok((meta, events)) => {
                 let (live, head) = ops.events.tail_excluding(&name, &events);
-                ok_json(json!({ "meta": meta, "events": events, "live": live, "head": head }))
+                // 状态栏的 shell 快照按转录派生：回放 / 重建 / 重启后前端不再"没有 chip 可画"。
+                let shell = crate::capabilities::session::api::last_shell(&events);
+                ok_json(
+                    json!({ "meta": meta, "events": events, "live": live, "head": head, "shell": shell }),
+                )
             }
             Err(e) => complaint(404, e),
         },

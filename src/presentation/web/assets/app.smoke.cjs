@@ -872,7 +872,9 @@ setTimeout(async () => {
           " const withShell = run('s4', 'single', ctx, head, shellLive);" +
           " const th = { level: null, default_level: 'high', label: 'high', options: [{ id: 'high', label: 'high' }], note: '' };" +
           " const withThinking = run('s5', 'single', ctx, head, null, th);" +
-          " return { single: single, proxy: proxy, collab: collab, withShell: withShell, withThinking: withThinking };" +
+          " const shellHist = { command: 'echo hi', scope: 'sandbox', cwd: '/x', started_at: 0, finished_at: null, elapsed_secs: 2, exit_code: 1, ok: false, output: 'x', historical: true };" +
+          " const withHist = run('s6', 'single', ctx, head, shellHist);" +
+          " return { single: single, proxy: proxy, collab: collab, withShell: withShell, withThinking: withThinking, withHist: withHist };" +
           "})()",
         sandbox
       );
@@ -881,7 +883,8 @@ setTimeout(async () => {
       const collabOk = r.collab.length === 2 && /工具/.test(r.collab[0]) && /#7/.test(r.collab[1]);
       const shellOk = r.withShell.length === 4 && r.withShell.some((t) => /shell 退出码 0/.test(t));
       const thinkingOk = r.withThinking.length === 4 && r.withThinking.some((t) => /思考 high/.test(t));
-      statusBarRules = singleOk && proxyOk && collabOk && shellOk && thinkingOk;
+      const histOk = r.withHist.length === 4 && r.withHist.some((t) => /shell 退出码 1（历史）/.test(t));
+      statusBarRules = singleOk && proxyOk && collabOk && shellOk && thinkingOk && histOk;
       if (!statusBarRules) loadErrors.push("状态栏检查：" + JSON.stringify(r));
     } catch (e) { loadErrors.push("状态栏检查失败：" + e.message); }
   }
@@ -929,12 +932,43 @@ setTimeout(async () => {
       if (!thinkingMenuRules) loadErrors.push("思考菜单检查：" + JSON.stringify(r));
     } catch (e) { loadErrors.push("思考菜单检查失败：" + e.message); }
   }
+  // **shell 卡片**：打开时按当前快照画；状态变了重画（不需要用户重开）；关闭后句柄清掉。
+  let shellCardRules = false;
+  if (!loadErrors.length) {
+    try {
+      const r = vm.runInNewContext(
+        "(function () {" +
+          " state.sessions.clear();" +
+          " const s = { sid: 'sh', mode: 'single', lines: [], live: [], fold: {}, scroll: {}, context: null," +
+          "   shell: { command: 'echo hi', scope: 'sandbox', cwd: '/w', started_at: Math.floor(Date.now()/1000) - 3," +
+          "     finished_at: null, elapsed_secs: null, exit_code: null, ok: null, output: '', historical: false }," +
+          "   work: null, workAt: 1, workDirty: false, workError: '', running: true, sending: false, readonly: false };" +
+          " state.sessions.set('sh', s); state.activeSid = 'sh';" +
+          " const chip = document.createElement('button');" +
+          " openShellCard(s, chip);" +
+          " function text(n) { let t = String(n.textContent || ''); for (const c of (n.children || [])) t += ' ' + text(c); return t; }" +
+          " const before = text(shellCardOpen.body);" +
+          " s.shell.finished_at = Math.floor(Date.now()/1000); s.shell.elapsed_secs = 3; s.shell.exit_code = 0; s.shell.ok = true; s.shell.output = 'hi';" +
+          " paintShellCard();" +
+          " const after = text(shellCardOpen.body);" +
+          " const opened = !!shellCardOpen;" +
+          " ui.closePopover();" +
+          " return { before: before, after: after, opened: opened, closed: shellCardOpen === null };" +
+          "})()",
+        sandbox
+      );
+      const beforeOk = r.opened && /运行中/.test(r.before) && /耗时 3 秒/.test(r.before);
+      const afterOk = /成功/.test(r.after) && /退出码 0/.test(r.after) && /hi/.test(r.after);
+      shellCardRules = beforeOk && afterOk && r.closed;
+      if (!shellCardRules) loadErrors.push("shell 卡片检查：" + JSON.stringify(r));
+    } catch (e) { loadErrors.push("shell 卡片检查失败：" + e.message); }
+  }
   const ok = alerts.length === 0 && loadErrors.length === 0 && rendered && tierWarned && identityKept
     && pollConn === "已连接" && pollApplied && hydratedHistory && liveReplaced && liveClearedOnIdle && toolReasoningRendered
     && rewoundApplies && readonlyRule
     && taskButtonRule && decisionCardRule && onlyLastStreams && lineRule && toolOnlyReasoning && incrementalAppend && pendingReplaced && noticeRow && modalDismiss && rewindIcon && runningRules && atMenuRefetches && slashMenu
     && wizardProxy && wizardBlocked && sessionNoteRule && historyRunTag && fenceBanner && nodeCard && tabLadder
-    && statusBarRules && thinkingMenuRules && consoleErrors.length === 0;
+    && statusBarRules && thinkingMenuRules && shellCardRules && consoleErrors.length === 0;
   if (!ok) {
     console.log("alerts（原生弹窗被调用的次数，应为 0）:", JSON.stringify(alerts));
     console.log("notice 渲染:", rendered, "| 虚拟机档不可用提示:", tierWarned, "| 身份标题保留:", identityKept);
