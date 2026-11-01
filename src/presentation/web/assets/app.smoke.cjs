@@ -629,6 +629,26 @@ setTimeout(async () => {
       }
     } catch (e) { loadErrors.push("@ 菜单重拉检查失败：" + e.message); }
   }
+  // **输入框 `/` 命令菜单**：整段是 `/compact` 时弹出；选中项就是这条命令。
+  let slashMenu = false;
+  if (!loadErrors.length) {
+    try {
+      const r = await vm.runInNewContext(
+        "(async function () {" +
+          " const s = { sid: 'cmd-w', mode: 'single', lines: [], live: [], pending: null, sending: false," +
+          "   running: false, running_known: true, done: false, readonly: false, fold: {}, scroll: {} };" +
+          " state.sessions.set('cmd-w', s); state.activeSid = 'cmd-w';" +
+          " const i = document.querySelector('#input'); i.value = '/compact'; i.selectionStart = 8;" +
+          " const opened = cmdSync();" +
+          " const out = { opened: opened, n: atState.items.length, insert: atState.items[0] && atState.items[0].insert };" +
+          " atClose(); return out;" +
+          "})()",
+        sandbox
+      );
+      slashMenu = r.opened === true && r.n === 1 && r.insert === "/compact";
+      if (!slashMenu) loadErrors.push("`/` 菜单检查：" + JSON.stringify(r));
+    } catch (e) { loadErrors.push("`/` 菜单检查失败：" + e.message); }
+  }
   // **向导的第三人形态**：形态选择里必须真有「代理」，且它的说明说清了"没有名单 + 全权 + 停止即全停"。
   let wizardProxy = false;
   let wizardGuest = false;
@@ -912,7 +932,7 @@ setTimeout(async () => {
   const ok = alerts.length === 0 && loadErrors.length === 0 && rendered && tierWarned && identityKept
     && pollConn === "已连接" && pollApplied && hydratedHistory && liveReplaced && liveClearedOnIdle && toolReasoningRendered
     && rewoundApplies && readonlyRule
-    && taskButtonRule && decisionCardRule && onlyLastStreams && lineRule && toolOnlyReasoning && incrementalAppend && pendingReplaced && noticeRow && modalDismiss && rewindIcon && runningRules && atMenuRefetches
+    && taskButtonRule && decisionCardRule && onlyLastStreams && lineRule && toolOnlyReasoning && incrementalAppend && pendingReplaced && noticeRow && modalDismiss && rewindIcon && runningRules && atMenuRefetches && slashMenu
     && wizardProxy && wizardBlocked && sessionNoteRule && historyRunTag && fenceBanner && nodeCard && tabLadder
     && statusBarRules && thinkingMenuRules && consoleErrors.length === 0;
   if (!ok) {
@@ -920,7 +940,7 @@ setTimeout(async () => {
     console.log("notice 渲染:", rendered, "| 虚拟机档不可用提示:", tierWarned, "| 身份标题保留:", identityKept);
     console.log("轮询状态点:", JSON.stringify(pollConn), "| 事件已应用:", pollApplied, "| 盘上转录已补:", hydratedHistory, "| 流式被替换:", liveReplaced, "| 空闲清理:", liveClearedOnIdle, "| 思维链:", toolReasoningRendered);
     console.log("回档重置:", rewoundApplies, "| 只读会话:", readonlyRule, "| notice 行:", noticeRow, "| 弹层判据:", modalDismiss, "| 回档图标:", rewindIcon, "| tool-only 思维链:", toolOnlyReasoning, "| 增量追加:", incrementalAppend, "| 乐观替换:", pendingReplaced);
-    console.log("运行态归一（事件为准 / 快照只对账）:", runningRules, "| @ 菜单每次重拉:", atMenuRefetches);
+    console.log("运行态归一（事件为准 / 快照只对账）:", runningRules, "| @ 菜单每次重拉:", atMenuRefetches, "| / 命令菜单:", slashMenu);
     console.log("向导代理形态:", wizardProxy, "| 会话级说明:", sessionNoteRule, "| 侧栏运行态:", historyRunTag, "| 围栏横幅:", fenceBanner, "| 节点卡:", nodeCard, "| 标签梯级:", tabLadder, "| 状态栏:", statusBarRules);
     console.log("应用侧 console.error:", JSON.stringify(consoleErrors.slice(0, 3)));
     console.log("loadErrors:", JSON.stringify(loadErrors));
