@@ -241,7 +241,7 @@ tools:
   compact:
     capability: none              # 不碰文件：改的是"发给模型什么"，不是"留下什么"
     callers: [user]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
-    desc: 压缩上下文：把此前的内容写成一份 summary（此后不再发给模型，但用户仍可查看）。**只在压缩回合由系统发起时使用**。
+    desc: 压缩上下文：把较早的内容写成一份 summary（此后不再发给模型，但用户仍可查看；保留段与之后的新内容不参与）。**只在压缩回合由系统发起时使用**。
     params:
       summary:
         type: string
