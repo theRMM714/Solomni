@@ -1,7 +1,7 @@
 //! 目的：一段"要等 guest"的活（起 / 停），**在调用方线程上跑**——核心只负责准备参数与提交结果。
 //! 管：起 guest 前的并发准入与规格装配、起之后的运行包软链；停 guest 的租约清单。
 //! 不管：会话建/改/删的校验与落盘（在 work.rs / history.rs 的 prepare、commit 两段里）。
-//! 联动：由 `Conductor::guest_boot` / `history_delete_bookkeeping` 产出，`api` 层的句柄在调用方线程上 `run()`；
+//! 联动：由 `Conductor::guest_boot` / `delete_bookkeeping` 产出，`api` 层的句柄在调用方线程上 `run()`；
 //!   契约见 docs/conductor/README.md 的「长步骤」与 docs/vm/README.md 的「并发」。
 
 use crate::capabilities::vm::api::{

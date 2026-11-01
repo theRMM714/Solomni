@@ -200,6 +200,85 @@ pub(crate) fn history_delete_cascades_to_children_and_refuses_child_delete() {
     assert!(hist.load(&child).is_err(), "子会话随父一起消失");
 }
 
+/// 目的：删除 VM 会话时**先停 guest，再删目录**——Windows 上 guest 还占着会话目录里的文件，反过来会 sharing violation。
+#[test]
+pub(crate) fn session_delete_stops_the_guest_before_removing_directories() {
+    use crate::capabilities::conductor::service::guest_job::GuestStop;
+    use crate::capabilities::conductor::service::SessionDelete;
+    use crate::capabilities::vm::api::Vm;
+    use crate::capabilities::vm::domain::guest::{GuestRun, GuestSpec};
+    use crate::kernel::api::FenceSpec;
+
+    struct StopVm {
+        history: Arc<InMemoryHistory>,
+        saw_directory: Arc<Mutex<bool>>,
+    }
+
+    impl Vm for StopVm {
+        fn guest_start(&self, _spec: &GuestSpec) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn guest_run(&self, _lease: &str, _run: &GuestRun) -> ToolOutcome {
+            unimplemented!("这条用例只验删除顺序")
+        }
+
+        fn guest_run_fenced(
+            &self,
+            _lease: &str,
+            _run: &GuestRun,
+            _fence: &FenceSpec,
+        ) -> ToolOutcome {
+            unimplemented!("这条用例只验删除顺序")
+        }
+
+        fn guest_packages(&self, _lease: &str) -> Option<Vec<String>> {
+            None
+        }
+
+        fn guest_set_packages(&self, _lease: &str, _packages: Vec<String>) {}
+
+        fn guest_wait_agent(&self, _lease: &str, _timeout: Duration) -> bool {
+            true
+        }
+
+        fn guest_stop(&self, _lease: &str) {
+            *self.saw_directory.lock().expect("锁") = self.history.load("w").is_ok();
+        }
+
+        fn guest_leases(&self) -> Vec<String> {
+            Vec::new()
+        }
+    }
+
+    let store = Arc::new(InMemoryHistory::new());
+    seed_session(
+        &store,
+        "w",
+        "single",
+        vec![agent_meta("a", &[], None)],
+        ExecSpec::default(),
+    );
+    let hist = test_history_of(Arc::clone(&store));
+    let saw = Arc::new(Mutex::new(false));
+    let vm: Arc<dyn Vm + Send + Sync> = Arc::new(StopVm {
+        history: Arc::clone(&store),
+        saw_directory: Arc::clone(&saw),
+    });
+    let delete = SessionDelete::for_test(
+        GuestStop::new(vm, vec!["w".to_string()]),
+        hist,
+        vec!["w".to_string()],
+        "w".to_string(),
+    );
+    assert!(delete.run().expect("删除收尾"), "会话目录该删掉");
+    assert!(
+        *saw.lock().expect("锁"),
+        "停 guest 时必须还没删目录（否则 Windows 会 sharing violation）"
+    );
+    assert!(store.load("w").is_err(), "停完 guest 后再删目录");
+}
+
 /// 目的：工作根沿父链走到顶：代理 → 多 agent 子会话 → 它的节点子会话，第三层也锚在**顶层**那一个 work/ 上。
 #[test]
 pub(crate) fn work_root_walks_to_the_top_across_nested_sub_sessions() {

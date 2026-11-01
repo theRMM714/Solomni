@@ -17,7 +17,7 @@ const BIN = path.join(PRODUCT_ROOT, "target", "debug", process.platform === "win
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** 清掉夹具根的 .vm：**软链只删链本身**——绝不顺着链删仓库那份（缓存 3GB 且是真机验收要用的）。 */
+/** 清掉夹具根的 .vm：**链接只删链本身**（含 Windows junction）——绝不顺着链接删仓库那份（缓存 3GB 且是真机验收要用的）。 */
 function dropFixtureVm() {
   const p = path.join(FIXTURE, ".vm");
   let st;
@@ -260,11 +260,16 @@ async function main() {
   const home = path.join(FIXTURE, ".home");
   fs.rmSync(home, { recursive: true, force: true });
   fs.mkdirSync(home, { recursive: true });
-  // 虚拟机档真机验收：夹具根也要看得到**真虚拟根**——仓库的 .vm 用软链挂进夹具（真机跑完删掉，别把 3GB 缓存留在夹具里）。
+  // 虚拟机档真机验收：夹具根也要看得到**真虚拟根**——仓库的 .vm 挂进夹具（真机跑完删掉，别把 3GB 缓存留在夹具里）。
+  // Windows 用 junction（不需要管理员/开发者模式）；其它平台用目录符号链接。
   const vmLink = path.join(FIXTURE, ".vm");
   dropFixtureVm();
   if (process.env.SOLOMNI_VM_LIVE === "1" || process.env.SOLOMNI_VM_QEMU) {
-    fs.symlinkSync(path.join(PRODUCT_ROOT, ".vm"), vmLink, "dir");
+    fs.symlinkSync(
+      path.join(PRODUCT_ROOT, ".vm"),
+      vmLink,
+      process.platform === "win32" ? "junction" : "dir"
+    );
     console.log("[e2e] 夹具 .vm → 仓库 .vm（真机跑用）");
   }
   // 夹具的 settings.yaml 要**自洽**：Windows 上 require 文件系统/网络围栏必须授权写 ACL。

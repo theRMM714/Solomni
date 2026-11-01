@@ -7,6 +7,52 @@
 
 use super::*;
 
+/// 目的：删除会话的收尾——**先停 guest，再删会话目录**。
+/// 约束：在调用方线程上执行；Windows 上 guest / 共享进程可能还占着会话目录里的文件，顺序反过来会 sharing violation。
+pub(crate) struct SessionDelete {
+    stop: super::guest_job::GuestStop,
+    history: Arc<dyn History + Send + Sync>,
+    /// 待删目录（已按**先子后父**排好）。
+    dirs: Vec<String>,
+    /// 调用方要的“目标会话是否真的删掉了”。
+    target: String,
+}
+
+impl SessionDelete {
+    #[cfg(test)]
+    pub(crate) fn for_test(
+        stop: super::guest_job::GuestStop,
+        history: Arc<dyn History + Send + Sync>,
+        dirs: Vec<String>,
+        target: String,
+    ) -> SessionDelete {
+        SessionDelete {
+            stop,
+            history,
+            dirs,
+            target,
+        }
+    }
+
+    pub(crate) fn run(self) -> Result<bool, String> {
+        let SessionDelete {
+            stop,
+            history,
+            dirs,
+            target,
+        } = self;
+        stop.run();
+        let mut deleted = false;
+        for sid in dirs {
+            let ok = history.delete(&sid)?;
+            if sid == target {
+                deleted = ok;
+            }
+        }
+        Ok(deleted)
+    }
+}
+
 impl Conductor {
     /// 历史列表：**树序**（每个父会话紧跟它的子会话）——侧栏据此缩进，
     /// 顺序与缩进同源，不会再出现"子会话排到父会话上面"的错位（见 session-model.md 一）。
@@ -39,32 +85,27 @@ impl Conductor {
     ///
     /// 口径（见 docs/session/session-model.md 七）：
     /// - **子会话不允许单独删**：它由核心按节点派生，删父会话会一起删掉；单独删会让父子关系断掉。
-    /// - **删父带子**：按 `meta.parent` 收集整棵子树，**先子后父**逐个撤围栏授权 → 移出内存 → 删目录。
+    /// - **删父带子**：按 `meta.parent` 收集整棵子树，**先子后父**逐个撤围栏授权 → 移出内存 → 收集待删目录；目录删除在收尾层先停 guest 再执行。
     /// - **子树里任一节点在生成中就整体拒绝**：不能删到一半留下半个状态。
     ///
     /// 内部的 `session::History::delete`（纯存储）不受影响——系统路径还需要它。
     #[cfg(test)]
     pub fn history_delete(&mut self, name: &str) -> Result<bool, String> {
-        let (ok, stop) = self.delete_bookkeeping(name)?;
-        // 销毁要等 guest 落盘（秒级）：同步入口自己跑（测试与 CLI 用），句柄把它挪到调用方线程。
-        stop.run();
-        Ok(ok)
+        self.delete_bookkeeping(name)?.run()
     }
 
-    /// 目的：删除的核心动作（毫秒级）：撤授权、回收常驻服务、清内存与目录——**不停 guest**。
-    /// 返回：删除结果 + 要在调用方线程上执行的销毁（销毁要等 guest 落盘，秒级）。
-    pub(crate) fn delete_bookkeeping(
-        &mut self,
-        name: &str,
-    ) -> Result<(bool, super::guest_job::GuestStop), String> {
-        // 不是落盘会话（或已不存在）：只清内存，交存储层如实回 false。
+    /// 目的：删除的核心动作（毫秒级）：撤授权、回收常驻服务、移出内存、收集待删目录——**不停 guest、不删目录**。
+    /// 返回：调用方线程要执行的收尾（先停 guest，再删目录）。
+    pub(crate) fn delete_bookkeeping(&mut self, name: &str) -> Result<SessionDelete, String> {
+        // 不是落盘会话（或已不存在）：只清内存，目录交给收尾层如实回 false。
         let Ok((meta, _)) = self.history.load(name) else {
             self.sessions.remove(name);
-            let ok = self.history.delete(name)?;
-            return Ok((
-                ok,
-                super::guest_job::GuestStop::new(Arc::clone(&self.vm), Vec::new()),
-            ));
+            return Ok(SessionDelete {
+                stop: super::guest_job::GuestStop::new(Arc::clone(&self.vm), Vec::new()),
+                history: Arc::clone(&self.history),
+                dirs: vec![name.to_string()],
+                target: name.to_string(),
+            });
         };
         // 子会话由核心管理，不允许用户单独删。
         if let Some(parent) = meta.parent.clone() {
@@ -110,15 +151,15 @@ impl Conductor {
             // 会话没了，它的裁决队随会话一起消失（等待方与转录都不复存在）。
             self.forget_desk(sid);
         }
-        // 后序删除：先子后父。父会话目录被删时，落在它内部的子会话目录一起消失。
-        let mut target_deleted = false;
-        for sid in subtree.iter().rev() {
-            let ok = self.history.delete(sid)?;
-            if sid == name {
-                target_deleted = ok;
-            }
-        }
-        Ok((target_deleted, stop))
+        // 目录按后序删：先子后父；父目录被删时，落在它内部的子会话目录一起消失。
+        // 真正删除在 `SessionDelete::run`（先停 guest，再删目录）。
+        let dirs: Vec<String> = subtree.iter().rev().cloned().collect();
+        Ok(SessionDelete {
+            stop,
+            history: Arc::clone(&self.history),
+            dirs,
+            target: name.to_string(),
+        })
     }
 
     /// 一个会话的整棵子树（含它自己，父在前、子在后）：父子关系以 `meta.parent` 为唯一判据。
