@@ -45,6 +45,7 @@
   引入新包时要求树空闲后按新装配重建，不做运行包动态加载。
 - 就绪项 `guest` 按**已验平台数据表**（`VERIFIED_HOSTS` = linux / windows）放开，并带上本平台**已实现**的组合。
 - 已验组合：Linux QEMU/KVM + virtiofs（virtiofsd 不在场或**不能执行**时退 9p）；Windows QEMU/WHPX + SMB guestfwd（缺 smbd 时虚拟机档不可用，先补齐，不降级）。
+- Windows 真机验收以硬件加速（WHPX）可用为前提；当前已验组合是物理宿主，嵌套虚拟化宿主未验。
 - macOS 未验，缺口见 [tests/macos/gaps.yaml](../../tests/macos/gaps.yaml)。
 
 ### 判据与预检
