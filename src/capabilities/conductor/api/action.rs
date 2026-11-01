@@ -926,12 +926,22 @@ impl ActionOps for ConductorHandle {
                 None => Err(format!("未知动作：{}", id)),
                 Some(schema) => {
                     let mut args = call.args;
-                    if let Err(fault) = schema.check(&args) {
-                        Err(arg_fault_text(&id, schema, &fault))
+                    // `compact` 在册子里是**压缩回合的模型工具**（必填 summary）；用户动作只带信封里的
+                    // session_id，不能拿工具参数来校验动作。动作的 callers 仍按同一张表授权。
+                    let checked = if id == "compact" {
+                        Ok(())
                     } else {
-                        schema.apply_defaults(&mut args);
-                        self.authorize_action(&id, &caller, schema)
-                            .and_then(|_| self.execute_action(&id, &caller, &args, call.out))
+                        schema
+                            .check(&args)
+                            .map_err(|fault| arg_fault_text(&id, schema, &fault))
+                    };
+                    match checked {
+                        Err(e) => Err(e),
+                        Ok(()) => {
+                            schema.apply_defaults(&mut args);
+                            self.authorize_action(&id, &caller, schema)
+                                .and_then(|_| self.execute_action(&id, &caller, &args, call.out))
+                        }
                     }
                 }
             }

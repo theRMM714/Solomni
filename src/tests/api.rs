@@ -1104,6 +1104,62 @@ fn slash_compact_message_runs_the_command_instead_of_the_model() {
     );
 }
 
+/// 目的：动作 /compact 只带 session_id；册子里的 summary 是压缩回合的模型工具参数，不能拿来校验动作。
+#[test]
+fn compact_action_takes_only_session_id() {
+    let mut member = std::collections::BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![
+            "第一件事".to_string(),
+            "{\"type\":\"tool\",\"name\":\"compact\",\"args\":{\"summary\":\"摘要\"}}".to_string(),
+        ],
+    );
+    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+        super::doubles::core_with_gateway(
+            vec![module_of("a")],
+            super::doubles::ScriptGateway::new(member, vec![]),
+        ),
+    )
+    .expect("起核心线程");
+    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let mut st = ops.registry.settings().expect("读设置");
+    st.compact_at_percent = 0;
+    st.compact_keep_percent = 0;
+    st.sandbox.policy.windows.write_acl = true;
+    ops.registry.set_settings(st).expect("写设置");
+    let sid = ops
+        .sessions
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话")
+        .0
+        .sid;
+    ops.sessions
+        .say(
+            &sid,
+            "先说一句",
+            crate::capabilities::conductor::api::Output::Final,
+        )
+        .expect("第一轮");
+    ops.actions
+        .act(ActionCall {
+            id: "compact".to_string(),
+            args: serde_json::json!({ "session_id": sid }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .expect("动作 /compact 只该要 session_id");
+    let (batches, _, _) = handle.events().snapshot(Some(&sid), 0);
+    let events: Vec<&SessionEvent> = batches.iter().flat_map(|b| b.events.iter()).collect();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Transcript(lines)
+            if lines.iter().any(|l| l.kind == "compacted"))),
+        "动作 /compact 该落压缩记录行：{events:?}"
+    );
+}
+
 /// 全局压缩模型：已有会话在**触发时**读共享目标；改设置不刷新会话。
 #[test]
 fn compaction_model_is_global_and_resolved_at_trigger() {
