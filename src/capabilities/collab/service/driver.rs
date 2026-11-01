@@ -9,8 +9,8 @@ use crate::capabilities::llm::api::{Chunk, Msg};
 use crate::capabilities::session::api::{
     stream_piece, AgentSession, LineView, Live, SessionEvent, ToolCallView, TurnRun,
 };
-/// 压缩回合：只把**被总结的前缀**发出去、只声明 compact 工具，跑一次模型；拿到摘要就返回。
-/// 两条通道都认：native 从结构化槽位取，信封通道从正文里的信封取（与讨论回合同口径）。
+/// 目的：只把被总结的前缀发给模型、只声明 compact 工具，跑一次模型并返回摘要。
+/// 约束：两条通道都认：native 从结构化槽位取，信封通道从正文里的信封取（与讨论回合同口径）。
 pub fn compact_turn(
     s: &mut AgentSession,
     prompt: &str,
@@ -85,14 +85,18 @@ pub fn compact_turn(
     Ok(summary)
 }
 
-/// 一次压缩的完整结果：记录行 + 用量（调用方负责推事件 / 落盘）。
+/// 目的：一次压缩的完整结果（记录行 + 用量）。
+/// 约束：调用方负责推事件 / 落盘。
 pub struct CompactedTurn {
+    /// 目的：压缩记录行（摘要 + up_to）。
     pub line: LineView,
+    /// 目的：压完后的发送视图估算用量。
     pub usage: crate::capabilities::session::api::ContextUsage,
 }
 
-/// 压一次：算切分点 → 只把被总结的前缀交给模型 → 应用到发送视图并落一条压缩记录行。
-/// 没有可压缩内容时返回 `Ok(None)`（调用方决定提示还是静默跳过）。
+/// 目的：压一次：算切分点 → 只把被总结前缀交给模型 → 应用并落压缩记录行。
+/// 返回：没有可压缩内容时 `None`（调用方决定提示还是静默跳过）。
+/// 错误：模型调用失败 / 摘要为空时如实返回原因。
 pub fn compact_session(
     s: &mut AgentSession,
     identity: &str,

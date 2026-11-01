@@ -363,8 +363,8 @@ pub struct AgentSession {
     /// 每行属于哪次模型回复（id 相同 = 同一次回复）。回档**按回复原子**截断靠它：
     /// 截在一次回复中间会留下"孤儿工具结果"，而协议要求结果紧跟发起它的那条助手消息。
     pub(crate) line_reply: Vec<u64>,
-    /// 每一行对应的**行 id**（与 `marks` / `line_reply` 同长）。
-    /// 留档折叠后行 id 会有空洞，压缩切分必须按 id 记账，不能拿行下标冒充 id。
+    /// 目的：每一行对应的**行 id**（与 `marks` / `line_reply` 同长）。
+    /// 约束：留档折叠后行 id 会有空洞，压缩切分必须按 id 记账，不能拿行下标冒充 id。
     pub(crate) line_ids: Vec<u64>,
     /// 正在落行的回复 id（每轮开始时设置；line() 用它，免得每个调用点都传一遍）。
     pub(crate) cur_reply: u64,
@@ -381,9 +381,11 @@ pub struct AgentSession {
     pub(crate) context_window: u64,
     /// 目的：最近一次模型调用的用量；None = 还没调用过。
     pub(crate) last_usage: Option<crate::capabilities::session::api::ContextUsage>,
-    /// 压缩点（第一行保留行的 id）：0 = 没压过。此前的内容已被摘要取代，对话里补不回来。
+    /// 目的：压缩点（第一行保留行的 id）；0 = 没压过。
+    /// 约束：此前的内容已被摘要取代，对话里补不回来。
     pub(crate) compacted_upto: u64,
-    /// 最近一条压缩记录行的 id：0 = 没压过。回档按它判断「压缩记录是否被截掉」。
+    /// 目的：最近一条压缩记录行的 id；0 = 没压过。
+    /// 约束：回档按它判断「压缩记录是否被截掉」。
     pub(crate) compacted_line: u64,
     /// 目的：压缩时至少保留最近多少内容（占模型窗口的百分比）；0 = 只留摘要。
     pub(crate) compact_keep_percent: u8,
@@ -397,26 +399,31 @@ pub struct AgentSession {
 }
 
 /// 目的：一次压缩的切分计划。
-/// - `up_to` = 第一行保留行的**行 id**（此前的行被摘要取代）；
-/// - `cut` = 被移出对话的下标边界（含摘要消息的偏移）。
+/// 约束：`up_to` 是第一行保留行的行 id（此前的行被摘要取代）；`cut` 是被移出对话的下标边界。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CompactionPlan {
+    /// 目的：第一行保留行的行 id。
     pub up_to: u64,
+    /// 目的：被移出对话的下标边界（含摘要消息的偏移）。
     pub cut: usize,
 }
 
 /// 目的：独立总结模型的一条临时通道（只在压缩触发时建）。
 pub struct CompactChatSpec {
+    /// 目的：这次压缩用的临时通道。
     pub chat: BoxedChat,
-    /// 登记处的模型 id（报错与日志用）。
+    /// 目的：登记处的模型 id（报错与日志用）。
     pub model: String,
-    /// 这个模型的上下文窗口；被总结前缀超过它时如实报错。
+    /// 目的：这个模型的上下文窗口；被总结前缀超过它时如实报错。
     pub window: u64,
 }
 
 /// 目的：压缩通道的工厂（组合根注入；会话只认这个口，不持登记处）。
-/// 返回 `None` = 会话同模型，复用会话自己的通道与思考档。
+/// 约束：返回 `None` = 会话同模型，复用会话自己的通道与思考档。
 pub trait CompactChatFactory: Send + Sync {
+    /// 目的：在压缩触发时现建总结通道。
+    /// 返回：`None` = 会话同模型；`Some` = 独立总结模型。
+    /// 错误：模型 / 通道不可用时如实返回原因。
     fn build(
         &self,
         module: &str,
@@ -701,7 +708,7 @@ impl AgentSession {
     }
 
     /// 目的：算这次压缩的切分点：保留段从哪一行开始（行 id + 对话下标）。
-    /// 参数 `protect_from`：本轮新注入的用户行 / 任务行的 id——它必须原样保留，不能被压进摘要。
+    /// 参数：`protect_from` 是本轮新注入的用户行 / 任务行的 id——它必须原样保留，不能被压进摘要。
     /// 约束：从尾部累计估算 token（字符 ÷ 4）到保留预算；切分点对齐完整回复组。`keep = 0` = 全压。
     pub fn plan_compaction(&self, protect_from: Option<u64>) -> Option<CompactionPlan> {
         if self.dialogue.is_empty() || self.marks.is_empty() {
@@ -791,8 +798,9 @@ impl AgentSession {
         })
     }
 
-    /// 上下文压缩：把 `plan.cut` 之前的内容移出**发送视图**，用一份摘要代替，并落一条压缩记录行。
-    /// 见 docs/session/session-model.md 六：改的是"发给模型什么"，不是"留下什么"。
+    /// 目的：把 `plan.cut` 之前的内容移出**发送视图**，用一份摘要代替，并落一条压缩记录行。
+    /// 返回：切分点无效（0）时 `None`；否则 `Some(记录行)`。
+    /// 约束：改的是"发给模型什么"，不是"留下什么"；见 docs/session/session-model.md 六。
     pub fn apply_compaction(&mut self, plan: &CompactionPlan, summary: &str) -> Option<LineView> {
         if plan.cut == 0 {
             return None;

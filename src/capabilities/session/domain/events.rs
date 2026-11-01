@@ -432,8 +432,8 @@ pub struct CheckView {
     pub note: String,
 }
 
-/// 流水里**最后一次**压缩行：返回（`up_to`、摘要、行 id）。
-/// 回档到压缩行之前时它已随转录被截掉，所以「没有它」就是「回到压缩前」。
+/// 目的：取流水里**最后一次**压缩行（`up_to`、摘要、行 id）。
+/// 约束：回档到压缩行之前时它已随转录被截掉，所以「没有它」就是「回到压缩前」。
 pub fn last_compaction(events: &[serde_json::Value]) -> Option<(u64, String, u64)> {
     let mut found = None;
     for ev in events {

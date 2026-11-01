@@ -339,11 +339,11 @@ pub struct AppSettings {
     /// 默认 70：留三成余量给"这一轮还要生成的内容"，免得刚压完又爆。
     #[serde(default = "default_compact_percent")]
     pub compact_at_percent: u8,
-    /// **压缩时至少保留最近多少内容**（占模型窗口的百分比）。
-    /// 默认 15：更早的内容压成摘要，最近的尾部原样保留；0 = 只留摘要。
+    /// 目的：压缩时至少保留最近多少内容（占模型窗口的百分比）。
+    /// 约束：默认 15；更早的内容压成摘要，最近的尾部原样保留；0 = 只留摘要。
     #[serde(default = "default_compact_keep_percent")]
     pub compact_keep_percent: u8,
-    /// **压缩用的模型**：空 = 会话同模型；否则是登记处里的模型 id。
+    /// 目的：压缩用的模型：空 = 会话同模型；否则是登记处里的模型 id。
     /// 约束：只在压缩触发时解析，不参与每个回合。
     #[serde(default)]
     pub compact_model: String,
