@@ -177,7 +177,7 @@ pub(crate) fn tool_loop_rejects_undeclared_tool() {
     );
 }
 
-/// 系统工具册里、但不在本回合工具面的工具（如 compact）必须按越权拒绝，不能落进模块工具兜底。
+/// 目的：系统工具册里、但不在本回合工具面的工具（如 compact）必须按越权拒绝，不能落进模块工具兜底。
 #[test]
 pub(crate) fn tool_loop_refuses_book_only_tools_not_in_the_face() {
     let mut m = member_with_tools(
