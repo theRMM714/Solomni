@@ -96,6 +96,34 @@ pub fn exit_code(output: &str) -> Option<i32> {
     })
 }
 
+/// 目的：shell 回执末尾的「落点 + 本次耗时」行：模型与回放读同一行。
+/// 约束：形状是稳定的（`[shell] cwd <路径> · 耗时 <秒> 秒`）；解析见 `cwd_elapsed`。
+pub fn cwd_elapsed_line(cwd: &str, secs: u64) -> String {
+    format!("[shell] cwd {} · 耗时 {} 秒", cwd, secs)
+}
+
+/// 目的：从 shell 回执里取（cwd, 耗时秒数）；没有这一行 = None（本次之前的转录）。
+/// 约束：只认本模块产出的形状；命令自己的输出伪造同形行时，更靠后的真行会取代它。
+pub fn cwd_elapsed(output: &str) -> Option<(String, u64)> {
+    output.lines().rev().find_map(|line| {
+        let rest = line.trim().strip_prefix("[shell] cwd ")?;
+        let (cwd, tail) = rest.rsplit_once(" · 耗时 ")?;
+        let secs = tail.strip_suffix(" 秒")?.parse().ok()?;
+        if cwd.is_empty() {
+            return None;
+        }
+        Some((cwd.to_string(), secs))
+    })
+}
+
+/// 目的：这条回执来自一次**真正跑起来**的 shell（不是参数拒绝 / 围栏拒绝 / 起进程失败）。
+/// 约束：判据是执行层追加的 `[shell]` 收尾行；拒绝类回执没有它，回执里因此不虚报落点与耗时。
+pub fn did_run(output: &str) -> bool {
+    output
+        .lines()
+        .any(|l| l.trim_start().starts_with("[shell] "))
+}
+
 /// 目的：guest Linux 里跑 shell 的脚本包装：子 shell 接住用户脚本，打印退出码并原样退出。
 /// 约束：用户脚本里的 exit 只退出子 shell，包装仍能打印退出码；命令的 stdin 不提供交互。
 pub fn guest_script(script: &str) -> String {
@@ -170,5 +198,28 @@ params:
             with_scope_hint(ordinary.clone(), CallScope::Sandbox, Decision::Ask),
             ordinary
         );
+    }
+
+    #[test]
+    fn cwd_and_elapsed_line_round_trips_and_is_stable() {
+        let line = cwd_elapsed_line("C:\\work\\a b", 12);
+        assert_eq!(
+            cwd_elapsed(&format!("[shell] 退出码 0\n{}", line)),
+            Some(("C:\\work\\a b".to_string(), 12))
+        );
+        assert_eq!(cwd_elapsed("没有这一行"), None);
+        assert_eq!(
+            cwd_elapsed("[shell] cwd C:\\a · 耗时 3 秒 · 耗时 4 秒"),
+            Some(("C:\\a · 耗时 3 秒".to_string(), 4)),
+            "路径里出现同样的分隔符时取最后一个"
+        );
+    }
+
+    #[test]
+    fn did_run_only_when_the_execution_layer_wrote_a_shell_tail() {
+        assert!(did_run("[shell] 退出码 0"));
+        assert!(did_run("[shell] 超时（5 秒）"));
+        assert!(!did_run("[围栏] 这次调用没有执行"));
+        assert!(!did_run("工具进程启动失败：找不到"));
     }
 }

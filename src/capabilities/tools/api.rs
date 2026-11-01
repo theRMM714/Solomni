@@ -6,7 +6,8 @@ pub use crate::capabilities::tools::domain::schema::{
     json_schema_lines, ArgFault, ToolBook, ToolSchema,
 };
 pub use crate::capabilities::tools::domain::shell::{
-    exit_code, guest_script, parse as parse_shell, with_scope_hint,
+    cwd_elapsed, cwd_elapsed_line, did_run, exit_code, guest_script, parse as parse_shell,
+    with_scope_hint,
 };
 pub use crate::capabilities::tools::domain::systool::{
     arg_fault_text, is_builtin, is_exec, is_freeform, names, patch_decl, refuse, tool_notes,

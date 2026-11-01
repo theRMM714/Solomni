@@ -79,6 +79,29 @@ pub(crate) fn sandbox_shell_only_gets_the_private_sandbox_and_runtime_roots() {
     assert!(live.output.contains("ok"), "回执预览要进快照");
 }
 
+/// 目的：shell 回执末尾带 cwd 与本次耗时（模型与回放共用同一行）。
+#[test]
+fn shell_receipt_carries_cwd_and_elapsed_after_a_real_run() {
+    // 真进程的回执由执行层写「[shell] 退出码 N」；替身只回这一行，判据就落在同一条契约上。
+    let runner = Arc::new(ShellRunner::new("[shell] 退出码 0", true));
+    let mut mt = member(Arc::clone(&runner));
+    let cancel = AtomicBool::new(false);
+    let mut sink = |_: SessionEvent| {};
+    let done = run_batch(
+        &mut mt,
+        &shell_plan(r#"{"command":"echo hi","timeout_secs":5}"#),
+        None,
+        None,
+        &cancel,
+        &mut sink,
+    );
+    let out = &done[0].1;
+    assert!(out.ok, "{}", out.output);
+    let (cwd, _) =
+        crate::capabilities::tools::api::cwd_elapsed(&out.output).expect("回执要有落点与耗时");
+    assert_eq!(cwd, mt.sandbox.private.display().to_string());
+}
+
 /// 目的：workspace 档拒绝 external 且不弹卡、不落进程。
 #[test]
 pub(crate) fn workspace_rejects_external_without_asking_or_running() {
@@ -103,6 +126,11 @@ pub(crate) fn workspace_rejects_external_without_asking_or_running() {
     assert!(
         runner.calls.lock().expect("锁").is_empty(),
         "越界请求不落进程"
+    );
+    assert!(
+        !done[0].1.output.contains("[shell] cwd "),
+        "没执行的调用不追加落点与耗时：{}",
+        done[0].1.output
     );
 }
 

@@ -592,6 +592,7 @@ fn run_shell(
             output: "这条虚拟机档会话没有 guest 租约，shell 没有执行。".to_string(),
         };
     }
+    let started = std::time::Instant::now();
     let slot = ctx.shell_live.clone();
     if let Some(slot) = &slot {
         let scope = match call.scope {
@@ -605,7 +606,7 @@ fn run_shell(
             &ctx.sandbox.private.display().to_string(),
         );
     }
-    let outcome = if ctx.tier == crate::kernel::api::Tier::Vm {
+    let mut outcome = if ctx.tier == crate::kernel::api::Tier::Vm {
         let run = crate::capabilities::vm::api::GuestRun {
             command: api::guest_script(&call.script),
             args_json: String::new(),
@@ -627,6 +628,15 @@ fn run_shell(
         };
         ctx.tools.run_shell(&run)
     };
+    // 回执补「落点 + 本次耗时」：模型据此判断相对路径与耗时，回放也从这一行派生。
+    // 只对**真正跑起来**的调用追加；围栏拒绝 / 起进程失败不虚报执行过。
+    if api::did_run(&outcome.output) {
+        outcome.output.push('\n');
+        outcome.output.push_str(&api::cwd_elapsed_line(
+            &ctx.sandbox.private.display().to_string(),
+            started.elapsed().as_secs(),
+        ));
+    }
     let external = ctx.sandbox.permissions.decision_for(
         name,
         Effect::Exec,
