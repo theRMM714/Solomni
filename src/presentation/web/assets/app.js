@@ -5670,7 +5670,7 @@ function cmdSync() {
     return false;
   }
   const s = activeSession();
-  if (!s) {
+  if (!s || isBusy(s) || s.readonly) {
     if (atState.mode === 'command') atClose();
     return false;
   }

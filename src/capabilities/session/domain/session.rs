@@ -733,6 +733,9 @@ impl AgentSession {
                     if cut == 0 || cut >= self.dialogue.len() {
                         return None;
                     }
+                    if self.compacted_upto > 0 && cut <= 1 {
+                        return None; // 前缀里只剩上一份摘要：再压也不会变小。
+                    }
                     return Some(CompactionPlan {
                         up_to: self.line_ids[k],
                         cut,
