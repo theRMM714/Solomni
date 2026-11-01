@@ -1197,7 +1197,7 @@ fn lowering_keep_percent_applies_to_live_manual_compaction() {
             crate::capabilities::conductor::api::Output::Final,
         )
         .expect("第一轮");
-    // 活会话是在 keep=15 时建的；这里改成 0，手动压缩必须按新值重算。
+    // 活会话是在 keep=15 时建的；这里设为 0，手动压缩必须按新值重算。
     let mut st = ops.registry.settings().expect("读设置");
     st.compact_keep_percent = 0;
     ops.registry.set_settings(st).expect("改保留比例");
