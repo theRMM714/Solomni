@@ -491,9 +491,8 @@ impl ProcTools {
     }
 }
 
-/// 目的：Windows PowerShell 5.1 在容器里自动加载内核模块时会带一条非终止错误；开了 Stop 后
-///   这条错误会终止加载，Set-Location 之类就变成「命令不存在」。先把常用内核模块按 Continue 载入，
-///   再开 Stop，让偏好只作用于脚本自己的错误。
+/// 目的：Windows PowerShell 5.1 在容器里自动加载内核模块会带非终止错误；先按 Continue 载入常用模块，
+///   再开 Stop（否则 Stop 会把加载错误变终止，Set-Location 之类就成了「命令不存在」）。
 #[cfg(windows)]
 const PS_PRELUDE: &str = "try { Import-Module Microsoft.PowerShell.Management, Microsoft.PowerShell.Utility -ErrorAction SilentlyContinue } catch { }\n$ErrorActionPreference = 'Stop'\ntry { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }\n$OutputEncoding = [System.Text.Encoding]::UTF8\ntry { Set-Location -LiteralPath $PSScriptRoot -ErrorAction Stop } catch { }\n";
 #[cfg(windows)]
@@ -1755,9 +1754,8 @@ mod tests {
                 out.output,
                 program
             );
-            // PowerShell 的未处理 cmdlet 错误也必须以非 0 收场（不再只转发 $LASTEXITCODE）。
-            // 用 Write-Error：它只依赖内核自带的 Utility 模块；容器里的 5.1 找不到 Management
-            // 模块（Get-Content 会变成 CommandNotFound），不适合拿它验这条契约。
+            // 未处理 cmdlet 错误也要非 0。用 Write-Error：它只依赖内核自带 Utility；
+            // 容器里的 5.1 找不到 Management（Get-Content 会变 CommandNotFound），不适合验这条契约。
             let out = tools.run_shell(&crate::kernel::ports::ShellRun {
                 fence: &spec,
                 script: "Write-Error 'boom'",
