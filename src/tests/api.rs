@@ -1160,6 +1160,66 @@ fn compact_action_takes_only_session_id() {
     );
 }
 
+/// 目的：调低保留比例对活会话的手动压缩立即生效，不等到会话重建。
+#[test]
+fn lowering_keep_percent_applies_to_live_manual_compaction() {
+    let mut member = std::collections::BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![
+            "第一件事".to_string(),
+            "{\"type\":\"tool\",\"name\":\"compact\",\"args\":{\"summary\":\"摘要\"}}".to_string(),
+        ],
+    );
+    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+        super::doubles::core_with_gateway(
+            vec![module_of("a")],
+            super::doubles::ScriptGateway::new(member, vec![]),
+        ),
+    )
+    .expect("起核心线程");
+    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let mut st = ops.registry.settings().expect("读设置");
+    st.compact_at_percent = 0;
+    st.compact_keep_percent = 15;
+    st.sandbox.policy.windows.write_acl = true;
+    ops.registry.set_settings(st).expect("写设置");
+    let sid = ops
+        .sessions
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话")
+        .0
+        .sid;
+    ops.sessions
+        .say(
+            &sid,
+            "先说一句",
+            crate::capabilities::conductor::api::Output::Final,
+        )
+        .expect("第一轮");
+    // 活会话是在 keep=15 时建的；这里改成 0，手动压缩必须按新值重算。
+    let mut st = ops.registry.settings().expect("读设置");
+    st.compact_keep_percent = 0;
+    ops.registry.set_settings(st).expect("改保留比例");
+    ops.actions
+        .act(ActionCall {
+            id: "compact".to_string(),
+            args: serde_json::json!({ "session_id": sid }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .expect("手动压缩");
+    let (batches, _, _) = handle.events().snapshot(Some(&sid), 0);
+    let events: Vec<&SessionEvent> = batches.iter().flat_map(|b| b.events.iter()).collect();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Transcript(lines)
+            if lines.iter().any(|l| l.kind == "compacted"))),
+        "保留比例改成 0 后，活会话的手动压缩不该再说没有可压缩内容：{events:?}"
+    );
+}
+
 /// 全局压缩模型：已有会话在**触发时**读共享目标；改设置不刷新会话。
 #[test]
 fn compaction_model_is_global_and_resolved_at_trigger() {

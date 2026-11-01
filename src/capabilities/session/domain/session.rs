@@ -568,6 +568,11 @@ impl AgentSession {
         self.model = model;
     }
 
+    /// 目的：本会话自己的模型 id；None = 核心默认。
+    pub fn model_id(&self) -> Option<&str> {
+        self.model.as_deref()
+    }
+
     /// 目的：在压缩触发时现建总结通道；None = 会话同模型。
     pub fn compact_chat(&self) -> Result<Option<CompactChatSpec>, String> {
         match self.compact_factory.as_ref() {

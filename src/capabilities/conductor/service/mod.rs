@@ -735,15 +735,27 @@ impl Conductor {
     /// 目的：给压缩回合准备身份块；切分与模型调用都在工作线程上（界面不被阻塞）。
     /// 返回：本回合的身份块。
     /// 错误：会话不在世或不是单 agent 时如实报错。
-    pub fn compact_plan(&self, sid: &str) -> Result<String, String> {
+    pub fn compact_plan(&mut self, sid: &str) -> Result<String, String> {
         // 会话不在世或不是单 agent：**报错**，不给出"空身份块"这种假计划
         // （压缩只对单 agent 会话成立；协作会话由各成员会话按阈值自己压）。
-        let Some(Session::Single(s)) = self.sessions.get(sid) else {
+        let model = match self.sessions.get(sid) {
+            Some(Session::Single(s)) => s.model_id().map(str::to_string),
+            _ => {
+                return Err(format!(
+                    "压缩只支持单 agent 会话（{} 不在世或不是单 agent）",
+                    sid
+                ))
+            }
+        };
+        // 手动压缩也要读**当前**设置：用户刚把保留比例调低，不该等会话重建才生效。
+        let (window, percent, keep) = self.context_budget(model.as_deref());
+        let Some(Session::Single(s)) = self.sessions.get_mut(sid) else {
             return Err(format!(
                 "压缩只支持单 agent 会话（{} 不在世或不是单 agent）",
                 sid
             ));
         };
+        s.set_context_budget(window, percent, keep);
         Ok(s.params().identity(&*self.prompt, s.tool_mode()))
     }
 

@@ -421,6 +421,17 @@ impl Conductor {
         )
     }
 
+    /// 目的：把当前设置与模型窗口刷到一条活会话（设置改了不用重建会话）。
+    /// 参数：`s` = 单 agent 会话；窗口按它自己的模型解析。
+    pub(crate) fn refresh_context_budget(
+        &self,
+        s: &mut crate::capabilities::session::api::AgentSession,
+    ) {
+        let model = s.model_id().map(str::to_string);
+        let (window, percent, keep) = self.context_budget(model.as_deref());
+        s.set_context_budget(window, percent, keep);
+    }
+
     /// 角色表发放的系统工具 id 清单（工具面的名字部分）。
     /// 为什么不留第二份名单：代码里出现"哪个角色能调哪个工具"必然与表漂。
     pub(crate) fn role_tools(&self, role: &str) -> Vec<String> {

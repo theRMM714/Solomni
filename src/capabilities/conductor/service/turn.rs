@@ -162,6 +162,7 @@ impl Conductor {
             _ => return Ok(Prepared::NotSingle),
         };
         let mut session = self.take_single(sid)?;
+        self.refresh_context_budget(&mut session);
         session.set_thinking(llm.thinking.clone());
         let persister = self.persister(sid);
         Ok(Prepared::Run {
@@ -195,6 +196,7 @@ impl Conductor {
             prefix.push(SessionEvent::Notice(n));
         }
         let mut session = self.take_single(child)?;
+        self.refresh_context_budget(&mut session);
         session.set_thinking(llm.thinking.clone());
         let identity = session
             .params()
