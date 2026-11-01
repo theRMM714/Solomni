@@ -97,5 +97,24 @@
     不再出现 `Server abruptly closed` / `Host is down`；node run-tests.js 全绿。
   blocked_by: 缺少可复现的宿主或 smbd/QEMU 关闭原因（嵌套虚拟化宿主上间歇失败，尚未定位）
 
-
-
+- id: release.binary-distribution
+  scope: global
+  level: T5
+  why: |
+    产品承诺"发行版二进制为纯 Rust，用户开箱即用，不装环境"，但仓库里没有任何发布链路：没有 release 工作流
+    （`.github/workflows` 只有 test / pins / mutants），没有打包脚本，也没有"拿到二进制怎么跑"的说明。现实里唯一的
+    入口是 `node start.js`——它要先有 Rust 才能构建核心，所以"用户"目前等于开发者。
+    还有一件未决的事是**构建口味**：CI 借 Windows runner 自带的 msvc 工具链，而项目内安装的（`env.js` 的
+    `installRust`、`setup-dev.js`）统一是 GNU。若发行产物由 msvc 产出，"本机绿"与发行版就不是同一套编译器 /
+    CRT / 链接器行为（raw-dylib、FFI 与 CRT 交互都在其中）；反过来 GNU 产物需要实测不依赖 MinGW 运行时 DLL。
+  how: |
+    1) 定发行口味并让 CI 与本地一致：选 msvc 则发行构建机必须有 VS C++（开发者不必装），选 GNU 则 Windows 构建机
+       要备 GNU 工具链 + winlibs，并实测产物不依赖 libgcc_s_seh-1.dll / libwinpthread-1.dll，核对默认 CRT 静态性；
+    2) 加 release 工作流：三平台 `cargo build --release` + 打包（二进制 + `modules/` 布局）+ 校验和；
+    3) 写"二进制用户"文档（不需要 Node / Rust / `start.js`），与 README 现在的"运行环境 / 开发环境"两层对齐或替换；
+    4) 验收：在一台**没有** Node、Rust、VS 的干净机器上解包即跑。
+  accept: |
+    三平台各有可下载的发行产物与校验和；干净机器（无 Node、无 Rust、无 VS）解包即能启动；
+    构建口味与 CI 一致且有记录；README 的安装与运行一章只描述真实存在的两条路径。
+  blocked_by: |
+    本期不做（用户决定：仍在开发阶段）。发行链路与口味统一需要新建 CI 工作流与打包脚本，另立任务。

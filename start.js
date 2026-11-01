@@ -75,7 +75,7 @@ function runLoop(cargoEnv) {
 }
 
 (async () => {
-  const ready = await env.ensure();
+  const ready = await env.ensure({ yes: process.argv.includes("--yes") });
   // 基础工具链是运行前提：首启问一次，之后只由核心每次启动报告缺失；--yes 可补装。
   const target = TOOLCHAINS.hostTarget();
   const before = target ? TC.profileState(target, TOOLCHAINS.PROFILE) : { ok: true };
@@ -109,9 +109,11 @@ function runLoop(cargoEnv) {
   const cargo = ready.cargo;
   const cargoEnv = ready.env;
   env.pinTemp(cargoEnv); // 临时文件不出项目
-  const v = spawnSync(cargo, ["--version"], { cwd: ROOT, env: cargoEnv, encoding: "utf8" });
+  // 版本行带 host：借来的工具链是 msvc 还是 gnu，决定了它需要什么链接器（只打版本号看不出这件事）。
+  const v = spawnSync(cargo, ["-vV"], { cwd: ROOT, env: cargoEnv, encoding: "utf8" });
   if (v.error || v.status !== 0) die("cargo not runnable: " + (v.error && v.error.message));
-  log(v.stdout.trim());
+  const vv = (v.stdout || "").trim().split(/\r?\n/);
+  log([vv[0], vv.find((l) => l.startsWith("host:")) || ""].filter(Boolean).join(" · "));
   if (process.argv.includes("-test")) {
     runTests(cargoEnv);
     return;
@@ -126,7 +128,12 @@ function runLoop(cargoEnv) {
   log(fs.existsSync(BIN) ? "checking build..." : "binary not found, building (first run is slow)...");
   const args = RELEASE ? ["build", "--release"] : ["build"];
   const b = spawnSync(cargo, args, { cwd: ROOT, env: cargoEnv, stdio: "inherit" });
-  if (b.status !== 0) die("build failed (is solomni running in another window? close it and retry)");
+  if (b.status !== 0) {
+    // 只有真的被占用才说占用；编译/链接失败另有原因，别把用户引到无关的方向。
+    die(binLocked(BIN)
+      ? "build failed: the binary is held by a running Solomni instance - close that window and retry"
+      : "build failed: see the cargo output above (toolchain cannot link? run node env.js for the build probe)");
+  }
 
   // 构建可能替换了锁探针刚检查过的文件；用之前再确认一次。
   if (!fs.existsSync(BIN)) die("build reported success but no binary at " + path.relative(ROOT, BIN));

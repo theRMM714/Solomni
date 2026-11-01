@@ -57,6 +57,17 @@ function main() {
     console.error("[dev] 环境没就绪：跑 node env.js setup，或看 node env.js 的解析结果");
     return 1;
   }
+  // 借用的工具链要先真的能构建，否则 cargo 会在链接阶段才报一句看不出原因的错。
+  // 显式指定（SOLOMNI_CARGO）不在这里拦：与 env.js 同一口径，只在那边告警。
+  if (resolved.source === "ambient") {
+    const p = env.probeBuild(resolved);
+    if (!p.ok) {
+      console.error("[dev] 借用的工具链构建不出二进制（host " + (p.host || "读不到") + "）：");
+      for (const line of (p.detail || "").split(/\r?\n/).filter(Boolean).slice(-3)) console.error("[dev]   " + line);
+      console.error("[dev] 跑 node env.js setup 装项目内工具链（Windows 用 GNU，不需要 Visual Studio）；node env.js 看探测结论。");
+      return 1;
+    }
+  }
   env.pinTemp(resolved.env);
   console.log("[dev] " + scenario.why + " → " + resolved.cargo + " " + scenario.args.join(" "));
   const r = spawnSync(resolved.cargo, scenario.args, { cwd: ROOT, stdio: "inherit", env: resolved.env });

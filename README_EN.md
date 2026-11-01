@@ -73,10 +73,12 @@ node start.js --provision --ensure --yes # optional (Linux / Windows): install Q
   (directory ACLs); choosing no writes nothing and enters the startup gate (unfenced this run / reconfigure / exit).
   `-webUI` does not bypass that gate. When the base toolchain is missing, `start.js` also asks once whether to
   install it into the project; later starts only report the missing pieces and the install command.
-- Toolchain and caches stay **inside the project**: a usable Rust is **borrowed read-only** (caches and artifacts
-  still land under `platform/<os>/`); only when none is usable does it ask for consent and install into the
-  project, never touching the system; with **no interactive terminal** it skips the install, prints the manual
-  steps, and exits. Borrowing means the system `~/.cargo/config.toml` (mirrors / credentials) is not read and
+- Toolchain and caches stay **inside the project**: a Rust that can **actually build** is **borrowed read-only**
+  (probed by compiling and linking an empty program first — on Windows an msvc host without `link.exe`, i.e. no
+  VS C++ build tools, does not count as usable; caches and artifacts still land under `platform/<os>/`); only when
+  none is usable does it ask for consent and install into the project (GNU on Windows, which brings its own linker,
+  so no Visual Studio needed), never touching the system; with **no interactive terminal** it skips the install,
+  prints the manual steps, and exits. `node env.js` reports the host, the build verdict and whether it borrows. Borrowing means the system `~/.cargo/config.toml` (mirrors / credentials) is not read and
   deps are re-downloaded into the project — the price of "no writes outside"; the gate also snapshots
   out-of-project cache roots and fails if anything was written.
 - The **base toolchains** for module tools/builds (Python / Node / C-C++) are a runtime prerequisite: they live
@@ -108,9 +110,10 @@ node dev.js test|fmt|clippy   # one-layer dev commands; do not call cargo direct
 - The environment is its own layer ([env.js](env.js)): path conventions, toolchain detection, environment
   composition and installation all live there; `node env.js` shows the resolved environment and
   `node env.js --print-env` prints it machine-readable. `setup-runtime.js` / `setup-dev.js` only orchestrate;
-  `node setup-runtime.js` and `node env.js setup` are equivalent. On Windows the first run asks for consent and installs
-  a portable MinGW (`dlltool.exe`, needed by `windows-sys` raw-dylib) into the project's `.tools/`; a machine with a full
-  binutils can point `SOLOMNI_MINGW_BIN=<bin dir>` at it instead of downloading ~260 MB.
+  `node setup-runtime.js` and `node env.js setup` are equivalent. On Windows with a **GNU build target** the first run
+  asks for consent and installs a portable MinGW (`dlltool.exe`, needed by `windows-sys` raw-dylib) into the project's
+  `.tools/` — a borrowed msvc toolchain that links needs no dlltool; a machine with a full binutils can point
+  `SOLOMNI_MINGW_BIN=<bin dir>` at it instead of downloading ~260 MB.
 - **Outbound-link ledger**: `links.yaml` is the single authority for external URLs the project uses and that may
   change (currently: toolchain bootstrap sources, the pinned winlibs upstream asset, the download root for versioned self-hosted dependency releases, guest image sources, and the SMB helper asset); edit it once and the whole
   repository follows. **A download's checksum lives next to the link it guards** in the same ledger (`<link-key>.sha256`);

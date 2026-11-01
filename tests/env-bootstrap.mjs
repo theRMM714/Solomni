@@ -1,6 +1,7 @@
 /**
  * 环境引导自检：\`env.js\` 的 MinGW 引导链——下载、续传、结构判定、sha256 闸与显式接受开关。
- * 管：用**真实子进程**跑 \`<临时根>/env.js setup --yes\`，配一个本地 HTTP 服务器按需应答（206 / 不认 Range / 中途断开）。
+ * 管：用**真实子进程**跑 \`<临时根>/env.js setup --yes\`，配一个本地 HTTP 服务器按需应答（206 / 不认 Range / 中途断开）；
+ *     借用工具的"能构建"门槛（\`probeBuild\`）与 \`node env.js\` 的自诊断输出。
  * 不管：Rust 侧 provision 的校验（在 \`provision\` 的单元用例里）、dev.js 的子命令表（在 \`tests/dev-loop.mjs\`）。
  * 判据：见 \`docs/testing/execution-ci.md\` 的「环境引导自检」。dlltool 只在 Windows 那条路上，别的平台如实跳过。
  * 约束：只写 \`target/test-scratch/\`（不入库）；不碰真实 \`.tools/\`、不碰外网、不起 Rust 安装。
@@ -11,7 +12,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -164,13 +165,33 @@ function runSetup(dir, env) {
   });
 }
 
+/**
+ * 目的：夹具里的"工具链"——两种都不可用，但**不可用的方式**不同，因此走不同分支：
+ *   - 默认：一个不是可执行文件的 fake-cargo（SOLOMNI_CARGO 显式指定）⇒ 只告警，流程照旧；
+ *   - borrowStub：把 node 复制成 PATH 上的 cargo ⇒ 第一道探测（--version）过得去，构建探测不成立 ⇒ 不借用。
+ *   （node 打印版本、-vV 给不出 host，正好代表"能跑但构建不了"的借用工具链。）
+ */
+function fixtureEnv(dir, c) {
+  if (c.borrowStub) {
+    const bin = path.join(dir, "bin");
+    fs.mkdirSync(bin, { recursive: true });
+    const stub = path.join(bin, IS_WIN ? "cargo.exe" : "cargo");
+    try { fs.linkSync(process.execPath, stub); } catch (e) { fs.copyFileSync(process.execPath, stub); }
+    const key = Object.keys(process.env).find((k) => k.toUpperCase() === "PATH") || "PATH";
+    const env = { ...process.env, [key]: bin + path.delimiter + (process.env[key] || "") };
+    delete env.SOLOMNI_CARGO;
+    return env;
+  }
+  // 假 cargo：env.js 只查它在不在（也就不会去装 Rust、不碰网络）。
+  fs.writeFileSync(path.join(dir, "fake-cargo"), "");
+  return { ...process.env, SOLOMNI_CARGO: path.join(dir, "fake-cargo") };
+}
+
 async function runCase(c) {
   const dir = path.join(SCRATCH, c.name);
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.join(dir, ".tools"), { recursive: true });
   fs.copyFileSync(path.join(ROOT, "env.js"), path.join(dir, "env.js"));
-  // 假 cargo：env.js 只查它在不在（也就不会去装 Rust、不碰网络）。
-  fs.writeFileSync(path.join(dir, "fake-cargo"), "");
   const { server, requests, base } = await startServer(c.mode);
   const url = base + (c.path || "/winlibs.zip");
   try {
@@ -181,7 +202,7 @@ async function runCase(c) {
         "winlibs.upstream.asset.sha256: " + (c.sha256 || FIXTURE_SHA) + "\n",
     );
     if (c.prepare) c.prepare(path.join(dir, ".tools"), url);
-    const env = { ...process.env, SOLOMNI_CARGO: path.join(dir, "fake-cargo") };
+    const env = fixtureEnv(dir, c);
     // 这两个开关不能从调用者的环境漏进来（否则会跳过要测的那条路）。
     delete env.SOLOMNI_MINGW_BIN;
     delete env.SOLOMNI_ACCEPT_ASSET_CHANGE;
@@ -215,6 +236,8 @@ const CASES = [
     check: ({ dir, out, code }) => {
       assert.equal(code, 0, "整份下载要成功并装好：" + tail(out));
       assert.match(out, /sha256 verified/, "要过完整性闸");
+      // 显式指定（SOLOMNI_CARGO）探测不过时只告警，不推翻用户的选择、也不改流程。
+      assert.match(out, /SOLOMNI_CARGO 指定的工具链构建不出二进制/, "显式指定的工具链要如实告警");
       assert.ok(installed(dir), "要解出 .tools/mingw64/bin/dlltool.exe");
       assert.ok(!keptZip(dir), "装完要删掉归档");
       assert.ok(!keptMarker(dir), "装完要删掉来源标记");
@@ -310,6 +333,19 @@ const CASES = [
     },
   },
   {
+    // 本机踩过的坑：借来的 cargo 能打印版本，但没有链接器（Windows 上 msvc host 缺 VS C++）。
+    // 这种工具链不算可用：不许宣告就绪，要报出借用不成立与原因。
+    name: "borrowed-toolchain-that-cannot-build-is-not-used",
+    borrowStub: true,
+    mode: "range",
+    check: ({ out, code }) => {
+      assert.equal(code, 1, "借用不成立时不能宣告就绪：" + tail(out));
+      assert.match(out, /借用不成立/, "要说明这套工具链构建不出二进制：" + tail(out));
+      assert.ok(/host/.test(out), "要点名借来的 host");
+      assert.ok(!/environment ready/.test(out), "不许打印 environment ready");
+    },
+  },
+  {
     name: "connection-dropped-midway-keeps-the-partial",
     mode: "drop",
     check: ({ dir, out, code }) => {
@@ -323,12 +359,38 @@ const CASES = [
 ];
 
 
+/**
+ * 目的：`node env.js`（只读状态）必须能自诊断——有 host、有构建探测结论；借用不可用时明说"不借用"。
+ * 为什么机器查：本机掉进去的正是这条假绿——状态的每一行都"正常"，构建却必然失败（缺链接器）。
+ */
+function statusSelfCheck() {
+  const st = spawnSync(process.execPath, ["env.js"], { cwd: ROOT, encoding: "utf8", timeout: 180000 });
+  assert.equal(st.status, 0, "node env.js 要能正常退出：" + (st.stderr || ""));
+  const out = st.stdout || "";
+  assert.match(out, /^build: (可用|不可用)/m, "状态要给构建探测结论：" + tail(out));
+  const resolved = /^resolved: .+\[([a-z]+)\]/m.exec(out);
+  if (!resolved) {
+    assert.match(out, /^build: 不可用/m, "没有 cargo 时构建结论必须是不可用");
+    return;
+  }
+  assert.match(out, /^host: /m, "有工具链时状态要报 host：" + tail(out));
+  if (resolved[1] === "ambient") {
+    assert.equal(
+      /^borrow: 不借用/m.test(out),
+      /^build: 不可用/m.test(out),
+      "借用不可用时状态必须明说不借用：" + tail(out),
+    );
+  }
+}
+
 if (!IS_WIN) {
   // dlltool 只在 Windows 那条路上：这里如实跳过，不静默当作通过。
   console.log("[探针] env.js 的 MinGW 引导只在 Windows 上存在：本平台跳过环境引导自检");
+  statusSelfCheck();
   console.log("ENV-BOOTSTRAP-OK");
 } else {
   fs.rmSync(SCRATCH, { recursive: true, force: true });
   for (const c of CASES) await runCase(c);
+  statusSelfCheck();
   console.log("ENV-BOOTSTRAP-OK");
 }

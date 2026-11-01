@@ -63,7 +63,7 @@ node run-tests.js
 14. 开发回路自检（`tests/dev-loop.mjs`：`dev.js` 的子命令表与"环境没就绪就如实拒绝"）；
 15. 依赖哈希工具自检（`tests/pins-tool.mjs`：`pins.js` 的台账解析 / 来源推导 / 原地重写；不碰网络）；
 16. 变更分流自检（`tests/ci-changes.mjs --self-test`：`code_changed` / `docs_changed` 两个谓词、`include_str!/include_bytes!` 文档消费、失败兜底）；
-17. 环境引导自检（`tests/env-bootstrap.mjs`：`env.js` 的下载 / 续传 / 结构判定 / sha256 闸，见下文；仅 Windows 真跑，时限 5 分钟）；
+17. 环境引导自检（`tests/env-bootstrap.mjs`：`env.js` 的下载 / 续传 / 结构判定 / sha256 闸与**借用门槛**，见下文；MinGW 部分仅 Windows 真跑，时限 5 分钟）；
 18. 存在编排器时运行 `L4 端到端`（编排器会**现场构建 indexer**：编译器版本进日志，构建失败即失败；`--skip-e2e` 时这一步整步不出现）；
 19. `T0 项目外写`（快照项目外缓存根，新增 / 变化即硬失败；顺带清理系统临时目录里上次崩溃残留的 `solomni-*`）；
 20. 写入 `target/test-report.json` 并打印 `TEST-REPORT-OK` 或 `TEST-REPORT-FAIL`；平台缺口账为空时再打印 `TEST-REPORT-ACCEPTED`。
@@ -86,8 +86,10 @@ T0 与业务测试在同一次运行里出结果，但结论分开记：质量�
 ### 环境引导自检（`tests/env-bootstrap.mjs`）
 
 `env.js` 跑在门禁与产品**之前**（`start.bat` / `node env.js setup`）：它坏了等于用户装不上环境。这条自检用
-**真实子进程**（`<临时根>/env.js setup --yes`）+ **本地应答源**把 Windows 的 MinGW 引导链逐条钉住；只写
-`target/test-scratch/`、不碰外网、不装 Rust（给一个假 cargo 文件）。原样跑它：`node tests/env-bootstrap.mjs`。
+**真实子进程**（`<临时根>/env.js setup --yes`）+ **本地应答源**把 Windows 的 MinGW 引导链逐条钉住，并钉住
+**借用门槛**（借来的 cargo 能打印版本但构建不了时必须拒绝借用）；只写 `target/test-scratch/`、不碰外网、不装
+Rust（假 cargo 文件，或一个"能跑但编不出东西"的 node 替身）。另跑一次只读的 `node env.js` 自诊断：状态里必须
+始终有 `build:` 结论，借用不可用时明说"不借用"。原样跑它：`node tests/env-bootstrap.mjs`。
 
 | 场景 | 判据 |
 | --- | --- |
@@ -97,6 +99,7 @@ T0 与业务测试在同一次运行里出结果，但结论分开记：质量�
 | 结构不对（能下完但不是归档） | 退出 1、明说结构不对、删掉归档、不装 |
 | sha256 不符 | 退出 1、报台账值 / 实际值 / 来源、**保留文件**；只有 `SOLOMNI_ACCEPT_ASSET_CHANGE=1` 放行 |
 | 源不认 Range / 传到一半断开 | 退出 1、明说下载没完成、分片与来源标记都留着 |
+| 借用来的工具链构建不了 | 退出 1、明说"借用不成立"与借来的 host、不打印 `environment ready`（替身：node 冒充 cargo，`--version` 能过、构建探测不过） |
 
 非 Windows 上那条路（`dlltool`）不存在：先打一条 `[探针]` 再照常打印 `ENV-BOOTSTRAP-OK`——env-skip，不算通过。
 
@@ -195,6 +198,8 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 ```
 
 入口与门禁共用同一份环境解析（[env.js](../../env.js)）：借用系统 `cargo` 可以，但 `CARGO_HOME` 与临时目录仍钉在项目内。
+借用的门槛是**能构建**：借用前编译并链接一个空程序，链接不了就当没有可用工具链（Windows 上 msvc host 缺 `link.exe` 是常见原因），
+如实报出 host 与编译器原文，再走项目内安装。
 
 **开发环境同步**：换机器 / 换人开发时跑 `node setup-dev.js`（`--check` 只读校验）。它统一用**项目内**工具链
 （`platform/<os>/rustup`、`platform/<os>/cargo`），组件、交叉 target 与项目内工具都装那里——**不写系统 `~/.rustup`、`~/.cargo`**；条目清单见 [dev-tools.js](../../dev-tools.js)。

@@ -95,13 +95,75 @@ function findAmbientCargo() {
   return ambientCache || null;
 }
 
-/** 借用系统 cargo 前的可用性探测：跑得起来才算可用（rustup proxy 解析不到 toolchain 会失败）。 */
+/** 借用系统 cargo 前的第一道探测：跑得起来才值得往下看（rustup proxy 解析不到 toolchain 会失败）。 */
 function probeUsable(cargo) {
   try {
     const r = spawnSync(cargo, ["--version"], { stdio: "ignore", timeout: 15000 });
     return !r.error && r.status === 0;
   } catch (e) {
     return false;
+  }
+}
+
+/** 目的：cargo -vV 的 host 行——借来的到底是哪种口味（msvc / gnu）；顺带留全文给人看。 */
+function cargoVv(r) {
+  const v = spawnSync(r.cargo, ["-vV"], { cwd: ROOT, env: r.env, encoding: "utf8", timeout: 20000 });
+  const text = ((v.stdout || "") + (v.stderr || "")).trim();
+  const host = ((text.match(/^host:\s*(\S+)/m) || [])[1]) || "";
+  return { ok: !v.error && v.status === 0 && !!host, host, detail: text };
+}
+
+/** 输出尾部：错误原文留最后几行，去掉空行（探测器只负责给证据，不负责翻译）。 */
+function tail(text, lines) {
+  const all = String(text || "").split(/\r?\n/).map((s) => s.trimEnd()).filter(Boolean);
+  return all.slice(-(lines || 6)).join("\n");
+}
+
+/** 一句能当结论的错误行：优先第一条 error:，否则第一行（摘要里要塞得下，不能只给 "aborting"）。 */
+function firstError(text) {
+  const all = String(text || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  return all.find((s) => /^error(\[|:)/.test(s)) || all[0] || "";
+}
+
+let buildProbe = null;
+/**
+ * 目的：判断一套工具链**能不能构建出二进制**，而不只是能打印版本。
+ * 为什么必须真编：Windows 上 `cargo --version` 能跑、host 却是 msvc 且机器没有 link.exe（没装 VS C++）时，
+ *   一链接就报 `linker link.exe not found`。只查版本会把这种工具链当"可用"，借来之后在构建阶段才炸，
+ *   入口层还会把它归成"是不是另一个窗口在跑"。
+ * 约束：只对借用 / 显式指定的工具链探测（项目内那套由本层装出来，坏了由构建输出说明）；
+ *   编译一个空程序并链接，用**同一份**拼好的环境（PATH 里已有 mingw bin）；
+ *   每进程只探一次；产物只落 `target/tmp/env-probe-<pid>/`，探完即删。
+ * 返回：{ ok, host, detail }（detail = 编译器原文尾部）。
+ */
+function probeBuild(r) {
+  if (buildProbe && buildProbe.cargo === r.cargo) return buildProbe.result;
+  const result = probeBuildUncached(r);
+  buildProbe = { cargo: r.cargo, result };
+  return result;
+}
+
+function probeBuildUncached(r) {
+  const vv = cargoVv(r);
+  if (!vv.ok) return { ok: false, host: vv.host, detail: tail(vv.detail) || "读不到 cargo -vV 的 host" };
+  // rustc 与 cargo 同在 bin 目录（rustup proxy 也一样）；找不到才退回 PATH 上的。
+  const sibling = path.join(path.dirname(r.cargo), IS_WIN ? "rustc.exe" : "rustc");
+  const rustc = fs.existsSync(sibling) ? sibling : "rustc";
+  // 目录带 pid：门禁与启动器可能同时跑，互不踩同一份探测产物。
+  const dir = path.join(ROOT, "target", "tmp", "env-probe-" + process.pid);
+  const src = path.join(dir, "probe.rs");
+  const out = path.join(dir, IS_WIN ? "probe.exe" : "probe");
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(src, "fn main() {}\n");
+    const p = spawnSync(rustc, [src, "-o", out], { cwd: ROOT, env: r.env, encoding: "utf8", timeout: 120000 });
+    if (p.error) return { ok: false, host: vv.host, detail: p.error.message };
+    if (p.status !== 0) return { ok: false, host: vv.host, detail: (p.stderr || "") + (p.stdout || "") };
+    return { ok: true, host: vv.host, detail: "" };
+  } catch (e) {
+    return { ok: false, host: vv.host, detail: (e && e.message) || String(e) };
+  } finally {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { /* 清不掉不影响判定 */ }
   }
 }
 
@@ -222,41 +284,71 @@ async function ensureProject(opts) {
 }
 
 /**
- * 保证环境就绪（缺工具链时征求同意后装进项目内），返回 resolve 的结果。
+ * 保证环境就绪（缺**可用**工具链时征求同意后装进项目内），返回 resolve 的结果。
+ * 借用门槛是"能构建"（见 probeBuild）：能打印版本但链接不了的工具链不算可用——这是本机踩过的坑。
  * 无交互终端且没给 --yes 时不做任何安装，如实报错并给手动步骤（不挂着等输入）。
  */
 async function ensure(opts) {
   const yes = !!(opts && opts.yes);
-  // 有可用工具链（项目内或系统）就借用；借用只读，缓存与产物仍落项目内。没有或有问题的才装进项目内。
-  if (!resolve({})) {
+  let r = resolve({});
+  let host = "";
+  if (r && r.source === "ambient") {
+    const p = probeBuild(r);
+    host = p.host;
+    if (p.ok) {
+      log("borrowed Rust can build: host " + p.host);
+    } else {
+      // 借用是只读的；借来的东西构建不出来就等于没有工具链，明说原因再走安装流程。
+      console.error("[env] 借用不成立：这套 cargo 能打印版本，却构建不出二进制。");
+      console.error("[env]   source " + r.cargo);
+      console.error("[env]   host   " + (p.host || "(读不到)"));
+      for (const line of [firstError(p.detail)].concat(tail(p.detail, 4).split("\n")).filter(Boolean)) console.error("[env]   " + line);
+      console.error("[env] 不借用它：按下面的流程装项目内工具链（Windows 用 GNU，不需要 Visual Studio）。");
+      r = null;
+    }
+  } else if (r && r.source === "override") {
+    // 显式指定压倒一切（与 SOLOMNI_MINGW_BIN 同一口径），但把探测结果如实说出来。
+    const p = probeBuild(r);
+    host = p.host;
+    if (!p.ok) log("注意：SOLOMNI_CARGO 指定的工具链构建不出二进制（host " + (p.host || "读不到") + "）：仍按显式指定使用。");
+  }
+  if (!r) {
     await installRust({ yes });
   }
   if (IS_WIN) {
-    const probe = locateDlltool();
-    if (probe.dir) {
-      if (!EXTRA_PATH.includes(probe.dir)) EXTRA_PATH.push(probe.dir);
-      log("dlltool working: " + probe.dir);
-    } else {
-      if (probe.broken.length) log("dlltool present but unusable (no assembler): " + probe.broken.join(", "));
-      else {
-        console.error("[env] dlltool.exe NOT found at any fixed location (rust-lang/rust#140704:");
-        console.error("[env] windows-sys raw-dylib needs dlltool; rust-mingw on this toolchain lacks it).");
-      }
-      const ans = await ask("Install portable MinGW now? winlibs ~260MB into project .tools, no admin, no system changes [y/N] ", { yes });
-      if (ans !== null && ans.trim().toLowerCase() === "y") {
-        await installWinlibs();
-        if (!EXTRA_PATH.includes(WINLIBS_BIN)) EXTRA_PATH.push(WINLIBS_BIN);
-      } else {
-        console.error("[env] manual route (keeps everything inside the project):");
-        console.error("  browser-download a winlibs zip, save it as .tools/winlibs.zip, re-run;");
-        console.error("  or point at an existing full binutils: SOLOMNI_MINGW_BIN=<dir with dlltool.exe + as.exe>");
-        console.error("  speed-up flags for auto-download: SOLOMNI_GH_MIRROR=<prefix> or HTTPS_PROXY=<url>");
-      }
-    }
+    // dlltool 只服务 GNU 目标（windows-sys 的 raw-dylib 要它）；借到能链接的 msvc 工具链时不需要它。
+    if (!host && r) host = cargoVv(r).host;
+    if (!host || /-gnu$/.test(host)) await ensureDlltool(yes);
+    else log("dlltool not required: host " + host + " links with its own toolchain");
   }
-  const r = resolve({});
-  if (!r) die("environment not ready: no usable cargo (project or PATH)");
-  return r;
+  const ready = resolve({});
+  if (!ready) die("environment not ready: no usable cargo (project or PATH)");
+  return ready;
+}
+
+/** 目的：Windows GNU 目标的 dlltool（windows-sys 的 raw-dylib 要它；这份 rust-mingw 不带）。 */
+async function ensureDlltool(yes) {
+  const probe = locateDlltool();
+  if (probe.dir) {
+    if (!EXTRA_PATH.includes(probe.dir)) EXTRA_PATH.push(probe.dir);
+    log("dlltool working: " + probe.dir);
+    return;
+  }
+  if (probe.broken.length) log("dlltool present but unusable (no assembler): " + probe.broken.join(", "));
+  else {
+    console.error("[env] dlltool.exe NOT found at any fixed location (rust-lang/rust#140704:");
+    console.error("[env] windows-sys raw-dylib needs dlltool; rust-mingw on this toolchain lacks it).");
+  }
+  const ans = await ask("Install portable MinGW now? winlibs ~260MB into project .tools, no admin, no system changes [y/N] ", { yes });
+  if (ans !== null && ans.trim().toLowerCase() === "y") {
+    await installWinlibs();
+    if (!EXTRA_PATH.includes(WINLIBS_BIN)) EXTRA_PATH.push(WINLIBS_BIN);
+  } else {
+    console.error("[env] manual route (keeps everything inside the project):");
+    console.error("  browser-download a winlibs zip, save it as .tools/winlibs.zip, re-run;");
+    console.error("  or point at an existing full binutils: SOLOMNI_MINGW_BIN=<dir with dlltool.exe + as.exe>");
+    console.error("  speed-up flags for auto-download: SOLOMNI_GH_MIRROR=<prefix> or HTTPS_PROXY=<url>");
+  }
 }
 
 /**
@@ -530,7 +622,21 @@ function status() {
     lines.push("binutils: " + (override && binutilsReady(override) ? override + "（SOLOMNI_MINGW_BIN）" :
       binutilsReady(WINLIBS_BIN) ? WINLIBS_BIN : "(not ready)"));
   }
-  lines.push("resolved: " + (r ? r.cargo + " [" + r.source + "]" : "(not found)"));
+  if (!r) {
+    lines.push("resolved: (not found)");
+    lines.push("build: 不可用 —— 项目内与 PATH 上都没有 cargo（补全：node env.js setup）");
+    console.log(lines.join("\n"));
+    return;
+  }
+  // 状态是诊断入口：给出 host 与**构建探测**结论，不出现"就绪但构建不了"的假绿。
+  const p = probeBuild(r);
+  lines.push("resolved: " + r.cargo + " [" + r.source + "]");
+  lines.push("host: " + (p.host || "(读不到)"));
+  lines.push("build: " + (p.ok ? "可用" : "不可用 —— " + (firstError(p.detail) || "构建探测失败")));
+  if (r.source === "ambient") lines.push("borrow: " + (p.ok ? "借用" : "不借用（ensure / setup 会装项目内工具链）"));
+  if (IS_WIN) {
+    lines.push("dlltool: " + (!p.host || /-gnu$/.test(p.host) ? "需要（GNU 目标）" : "不需要（host 不是 GNU）"));
+  }
   console.log(lines.join("\n"));
 }
 
@@ -541,9 +647,11 @@ function printEnv() {
     process.exitCode = 1;
     return;
   }
+  const p = probeBuild(r);
   console.log(JSON.stringify({
     osKey: r.osKey, cargo: r.cargo, source: r.source, cargoHome: r.cargoHome, rustupHome: r.rustupHome,
     platformDir: r.platformDir, toolsDir: r.toolsDir, mingwBin: r.mingwBin,
+    host: p.host, canBuild: p.ok,
   }, null, 2));
 }
 
@@ -561,7 +669,7 @@ async function main() {
 module.exports = {
   ROOT, IS_WIN, OS_KEY, PLATFORM_DIR, P_RUSTUP, P_CARGO, TOOLS, WINLIBS_BIN,
   resolve, ensure, ensureProject, pinTemp, findProjectCargo, findAmbientCargo, envPath, setEnvPath,
-  link,
+  probeBuild, cargoVv, link,
 };
 
 if (require.main === module) main();
