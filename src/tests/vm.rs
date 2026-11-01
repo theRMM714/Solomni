@@ -2129,11 +2129,16 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
     let share = crate::tests::scratch("vm-live-share");
     std::fs::create_dir_all(&share).expect("建共享目录");
     std::fs::write(share.join("marker.txt"), "SHARE_MARKER").expect("写标记");
+    // 第二个只读共享：生产会话会同时挂工作树与模块树，单挂载通过不代表多条 cifs 连接都稳。
+    let ro_share = crate::tests::scratch("vm-live-share-ro");
+    std::fs::create_dir_all(&ro_share).expect("建只读共享目录");
+    std::fs::write(ro_share.join("ro.txt"), "RO_MARKER").expect("写只读标记");
     std::fs::create_dir_all(share.join("a")).expect("建 A 沙箱");
     std::fs::write(share.join("a").join("ok.txt"), "A_OK").expect("写 A 文件");
     std::fs::create_dir_all(share.join("b")).expect("建 B 沙箱");
     std::fs::write(share.join("b").join("secret.txt"), "B_SECRET").expect("写 B 文件");
     let guest_dir = "/solomni-vm-live-share";
+    let ro_guest_dir = "/solomni-vm-live-ro";
     // 会话走**每租约可写层**（与产品同一条路）：基础镜像只读，可写层落在临时目录、随 guest 一起删。
     let overlay_dir = crate::tests::scratch("vm-live-overlays");
     let engine = crate::capabilities::vm::detail::QemuEngine::with_overlay_dir(overlay_dir.clone());
@@ -2146,11 +2151,18 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
     let spec = GuestSpec {
         lease: "vm-live".to_string(),
         image,
-        mounts: vec![GuestMount {
-            host: share.clone(),
-            guest: guest_dir.to_string(),
-            read_only: false,
-        }],
+        mounts: vec![
+            GuestMount {
+                host: share.clone(),
+                guest: guest_dir.to_string(),
+                read_only: false,
+            },
+            GuestMount {
+                host: ro_share.clone(),
+                guest: ro_guest_dir.to_string(),
+                read_only: true,
+            },
+        ],
         net: false,
         engine_path: Some(qemu),
         share_path: virtiofsd.clone(),
@@ -2200,9 +2212,10 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
     }
     let run = GuestRun {
         command: format!(
-            "cat /etc/os-release; test -e '{}' && echo HOST_VISIBLE || echo HOST_HIDDEN; cat {}/marker.txt; echo VM_LIVE_OK > {}/from-guest.txt; echo VM_LIVE_OK_WRITTEN",
+            "cat /etc/os-release; test -e '{}' && echo HOST_VISIBLE || echo HOST_HIDDEN; cat {}/marker.txt; cat {}/ro.txt; echo VM_LIVE_OK > {}/from-guest.txt; echo VM_LIVE_OK_WRITTEN",
             std::env::current_dir().expect("cwd").display(),
             guest_dir,
+            ro_guest_dir,
             guest_dir
         ),
         args_json: "{}".to_string(),
@@ -2345,7 +2358,13 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
         "额外共享要真进 guest：{}",
         out.output
     );
+    assert!(
+        out.output.contains("RO_MARKER"),
+        "第二个只读共享要真进 guest：{}",
+        out.output
+    );
     let _ = std::fs::remove_dir_all(&share);
+    let _ = std::fs::remove_dir_all(&ro_share);
 }
 
 /// 目的：真机验收（默认跳过）：同一基础镜像**并行起两台** guest，各自叠一份可写层，基础镜像谁都不写。
