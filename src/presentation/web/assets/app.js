@@ -4158,6 +4158,7 @@ function paintShellCard() {
       o.sig = 'none'; o.dur = null;
       o.body.innerHTML = '';
       o.body.appendChild(popoverNote('这条会话还没有执行过 shell。'));
+      if (typeof o.place === 'function') o.place();
     }
     return;
   }
@@ -4165,6 +4166,8 @@ function paintShellCard() {
   if (sig !== o.sig) {
     o.sig = sig;
     o.dur = fillShellCard(o.body, sh);
+    // 内容变高/变矮：重新夹一次位置，别让新增的回执把卡片顶出视口底部。
+    if (typeof o.place === 'function') o.place();
   } else if (o.dur && shellRunning(sh)) {
     o.dur.textContent = fmtDuration(shellSecs(sh));
   }
@@ -4175,14 +4178,14 @@ function openShellCard(s, anchor) {
   const body = document.createElement('div');
   box.appendChild(body);
   const timer = typeof setInterval === 'function' ? setInterval(paintShellCard, 1000) : null;
-  ui.popover(anchor, box, {
+  const pop = ui.popover(anchor, box, {
     label: 'shell',
     onClose: () => {
       if (timer != null && typeof clearInterval === 'function') clearInterval(timer);
       if (shellCardOpen && shellCardOpen.box === box) shellCardOpen = null;
     },
   });
-  shellCardOpen = { sid: s.sid, box: box, body: body, dur: null, sig: '' };
+  shellCardOpen = { sid: s.sid, box: box, body: body, dur: null, sig: '', place: pop.place };
   paintShellCard();
 }
 

@@ -235,10 +235,14 @@
     node.appendChild(content);
     const root = doc.querySelector('#menu-root') || doc.body;
     root.appendChild(node);
+    // 锚点可能被整帧重建换掉（状态栏会重建 chip）：沿用最后一次量到的位置，别把卡片弹到 0,0。
+    let lastRect = null;
     const place = () => {
-      const r = anchor && typeof anchor.getBoundingClientRect === 'function'
+      const now = anchor && typeof anchor.getBoundingClientRect === 'function'
         ? anchor.getBoundingClientRect()
-        : { left: 8, right: 128, top: 40, bottom: 64 };
+        : null;
+      if (now && (now.width || now.height || now.top || now.bottom)) lastRect = now;
+      const r = lastRect || now || { left: 8, right: 128, top: 40, bottom: 64 };
       const box = typeof node.getBoundingClientRect === 'function'
         ? node.getBoundingClientRect()
         : { width: 360, height: 240 };
@@ -246,8 +250,10 @@
       const ph = box.height || 240;
       const vw = global.innerWidth || 800;
       const vh = global.innerHeight || 600;
-      const topWanted = o.placement === 'bottom' ? r.bottom + 8 : r.top - ph - 8;
-      const top = topWanted < 8 ? Math.min(r.bottom + 8, vh - 8) : topWanted;
+      let top = o.placement === 'bottom' ? r.bottom + 8 : r.top - ph - 8;
+      // 上面放不下就翻到下面；无论翻到哪边，整张卡都夹在视口里（底边不越界）。
+      if (o.placement !== 'bottom' && top < 8) top = r.bottom + 8;
+      top = Math.max(8, Math.min(top, vh - ph - 8));
       const left = Math.max(8, Math.min(r.left, vw - pw - 8));
       if (node.style) {
         node.style.left = Math.round(left) + 'px';
@@ -291,7 +297,7 @@
         }
       },
     };
-    return { node, close: closePopover };
+    return { node, close: closePopover, place };
   }
 
   global.ui = {

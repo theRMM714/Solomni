@@ -138,6 +138,21 @@ const third = ui.popover(anchor, el("div"), {});
 check("换一张卡片会关掉旧的（旧回调要响）", replaced === 1, String(replaced));
 third.close();
 
+// 小卡片夹在视口内：锚点贴底 + 卡片比"锚点下方"高时，底边不得越出视口；锚点被重建后沿用上次位置。
+sandbox.innerHeight = 300;
+const lowAnchor = el("button");
+lowAnchor.getBoundingClientRect = () => ({ left: 10, top: 260, right: 120, bottom: 290 });
+const clamped = ui.popover(lowAnchor, el("div"), { label: "夹住底部" });
+clamped.node.getBoundingClientRect = () => ({ width: 400, height: 250 });
+clamped.place();
+const clampedTop = parseInt(clamped.node.style.top, 10);
+check("小卡片底边不越出视口", clampedTop >= 8 && clampedTop + 250 <= 292, clamped.node.style.top);
+lowAnchor.getBoundingClientRect = () => ({ left: 0, top: 0, right: 0, bottom: 0 });
+clamped.place();
+check("锚点被重建后沿用上次位置", parseInt(clamped.node.style.top, 10) === clampedTop, clamped.node.style.top);
+clamped.close();
+delete sandbox.innerHeight;
+
 if (failures.length) {
   console.log(failures.join("\n"));
   console.log("UI-SMOKE-FAIL（" + failures.length + " 条）");
