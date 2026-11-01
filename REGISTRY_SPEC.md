@@ -146,6 +146,8 @@ smbd_path: ""          # 虚拟机档 smb 共享档要用的外部 helper 路径
 max_guests: 2          # 虚拟机档同时最多几台 guest（0 = 不限制；每台固定 -m 2048 -smp 2）
 llm_timeout_secs: 300  # 单次模型调用的总预算（秒），全局通用（讨论/执行/验收/单 agent）
 compact_at_percent: 70 # 上下文用到模型窗口的百分之多少就自动压一次（0 = 关）
+compact_keep_percent: 15 # 压缩时至少保留最近多少内容（占模型窗口 %；0 = 只留摘要）
+compact_model: ""      # 压缩用模型 id；空 = 会话同模型
 discuss_remind_cap: 3  # 讨论里一轮内对同一个成员最多提醒几次（提醒 = "你还没用动词表态"）
 ```
 
@@ -155,6 +157,12 @@ discuss_remind_cap: 3  # 讨论里一轮内对同一个成员最多提醒几次�
   会话里切档是**会话级事实**（写在 `session/<工作>/meta.yaml` 的 `thinking`，工作根持有、子会话共享）；
   状态栏与配置页只列这组模型都登记了的档，没选过档时直接显示共同默认档，
   见 [docs/session/session-model.md](docs/session/session-model.md)。
+- `compact_at_percent` / `compact_keep_percent` 都按**模型窗口**算：前者是自动压缩阈值（0 = 关），
+  后者是压缩时至少保留的最近内容（0 = 只留摘要）。压缩只改“发给模型什么”，转录完整保留；
+  压缩记录本身是一条带 `kind = compacted` 的转录行，删除/留档/恢复走普通行操作。
+  本轮新注入的用户消息 / 派发任务不会被压进摘要。见 [docs/session/session-model.md](docs/session/session-model.md) 六。
+- `compact_model` 是**全局压缩用模型**：空 = 与会话同模型；非空必须是已登记的模型。
+  它只在压缩触发时解析（不按回合、不刷新会话）；被它引用的模型不能直接删除。
 - `sandbox.policy` 是**全局硬约束**：会话、子会话、agent 都不能覆盖；改它要保存后整体重启，
   让所有 guest / 常驻服务 / 工具进程按新策略重建。配置写错（拼错键、未知键、相对的主机只读根、非法路径）启动即报 `settings.yaml 配置非法`。
 - sandbox.defaults 是会话权限的全局默认；会话级权限层写在 meta.yaml 的 sandbox.ceiling / sandbox.narrowing

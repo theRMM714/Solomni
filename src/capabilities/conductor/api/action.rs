@@ -792,6 +792,14 @@ impl ConductorHandle {
             compact_at_percent: num("compact_at_percent")
                 .map(|v| v as u8)
                 .unwrap_or(current.compact_at_percent),
+            compact_keep_percent: num("compact_keep_percent")
+                .map(|v| v as u8)
+                .unwrap_or(current.compact_keep_percent),
+            compact_model: args
+                .get("compact_model")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim().to_string())
+                .unwrap_or_else(|| current.compact_model.clone()),
             discuss_remind_cap: num("discuss_remind_cap")
                 .map(|v| v as u32)
                 .unwrap_or(current.discuss_remind_cap),

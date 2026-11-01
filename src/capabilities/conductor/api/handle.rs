@@ -400,7 +400,7 @@ impl ConductorHandle {
     ) -> Result<Advance, String> {
         let bus = Arc::clone(&self.bus);
         let jobs = Arc::clone(&self.jobs);
-        let (session, identity, prefix, llm, persister) = match prepared {
+        let (session, identity, prefix, task, llm, persister) = match prepared {
             // 不用跑模型（例如"末条是 AI 发言"）：提示本身也是事实，进事件台；回包只给头部。
             Prepared::Immediate(events) => {
                 let head = bus.push(sid, &events);
@@ -418,9 +418,10 @@ impl ConductorHandle {
                 session,
                 identity,
                 prefix,
+                task,
                 llm,
                 persister,
-            } => (*session, identity, prefix, llm, persister),
+            } => (*session, identity, prefix, task, llm, persister),
         };
         let mut session = session;
         // 代理会话：把代理工具的成员侧执行面装进这一回合（经队列桥回核心线程执行）。
@@ -477,15 +478,23 @@ impl ConductorHandle {
                     for ev in prefix {
                         sink(ev);
                     }
-                    match &text {
-                        Some(t) => crate::capabilities::collab::api::say(
+                    match (task.as_deref(), text.as_deref()) {
+                        // 节点执行：工作线程先压缩本轮之前的上下文，再注入任务。
+                        (Some(t), _) => crate::capabilities::collab::api::dispatch_task(
                             &mut session,
                             t,
                             &identity,
                             &mut live,
                             &mut sink,
                         ),
-                        None => crate::capabilities::collab::api::continue_reply(
+                        (None, Some(t)) => crate::capabilities::collab::api::say(
+                            &mut session,
+                            t,
+                            &identity,
+                            &mut live,
+                            &mut sink,
+                        ),
+                        (None, None) => crate::capabilities::collab::api::continue_reply(
                             &mut session,
                             &identity,
                             &mut live,
@@ -710,8 +719,8 @@ impl ConductorHandle {
     /// 压不动就**如实说**（通知 + 继续用完整上下文），不静默降级、不假装压过。
     pub fn compact(&self, sid: &str) -> Result<Advance, String> {
         let bus = Arc::clone(&self.bus);
-        // 计划必须在**取走会话之前**读：compact_plan 要现读会话的身份块与压缩点。
-        let (prompt, decl, up_to, identity) = self.call({
+        // 身份块必须在**取走会话之前**读；切分计划与模型调用都在工作线程上。
+        let identity = self.call({
             let sid = sid.to_string();
             move |core| core.compact_plan(&sid)
         })?;
@@ -723,18 +732,8 @@ impl ConductorHandle {
             .name("solomni-compact".to_string())
             .spawn(move || {
                 let mut s = session;
-                let made = crate::capabilities::collab::api::compact_turn(
-                    &mut s,
-                    &prompt,
-                    decl.as_ref(),
-                    &identity,
-                );
-                if let Ok(summary) = &made {
-                    s.compact(up_to, summary);
-                    // 压完发送视图变小了：留一份估算用量，避免状态栏还挂着压缩前的大数字。
-                    let usage = s.estimate_usage();
-                    s.set_last_usage(Some(usage));
-                }
+                let made =
+                    crate::capabilities::collab::api::compact_session(&mut s, &identity, None);
                 (s, made)
             })
             .map_err(|e| format!("起压缩线程失败：{}", e))?
@@ -752,8 +751,8 @@ impl ConductorHandle {
                 return Err("压缩线程崩溃：会话已按落盘转录保留".to_string());
             }
         };
-        let summary = match made {
-            Ok(sm) => sm,
+        let made = match made {
+            Ok(v) => v,
             Err(err) => {
                 self.call({
                     let sid = sid.to_string();
@@ -770,10 +769,29 @@ impl ConductorHandle {
                 return Ok(Advance { head });
             }
         };
-        let mut events = vec![SessionEvent::Compacted { up_to, summary }];
-        if let Some(usage) = s.context_usage() {
-            events.push(SessionEvent::Usage { usage, line: up_to });
-        }
+        let Some(c) = made else {
+            self.call({
+                let sid = sid.to_string();
+                move |core| {
+                    core.put_single(&sid, s);
+                    Ok(())
+                }
+            })?;
+            let note = SessionEvent::Notice(
+                "没有可压缩的内容：当前对话已在保留预算内（可调低保留比例或先继续对话）"
+                    .to_string(),
+            );
+            let head = bus.push(sid, std::slice::from_ref(&note));
+            return Ok(Advance { head });
+        };
+        let line_id = c.line.id;
+        let events = vec![
+            SessionEvent::Transcript(vec![c.line]),
+            SessionEvent::Usage {
+                usage: c.usage,
+                line: line_id,
+            },
+        ];
         self.call({
             let sid = sid.to_string();
             let events = events.clone();

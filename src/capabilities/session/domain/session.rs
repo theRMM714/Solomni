@@ -363,6 +363,9 @@ pub struct AgentSession {
     /// 每行属于哪次模型回复（id 相同 = 同一次回复）。回档**按回复原子**截断靠它：
     /// 截在一次回复中间会留下"孤儿工具结果"，而协议要求结果紧跟发起它的那条助手消息。
     pub(crate) line_reply: Vec<u64>,
+    /// 每一行对应的**行 id**（与 `marks` / `line_reply` 同长）。
+    /// 留档折叠后行 id 会有空洞，压缩切分必须按 id 记账，不能拿行下标冒充 id。
+    pub(crate) line_ids: Vec<u64>,
     /// 正在落行的回复 id（每轮开始时设置；line() 用它，免得每个调用点都传一遍）。
     pub(crate) cur_reply: u64,
     /// 正在落行的**回合 id**（讨论的回合标记用它；单 agent 回合为 0）。
@@ -378,11 +381,47 @@ pub struct AgentSession {
     pub(crate) context_window: u64,
     /// 目的：最近一次模型调用的用量；None = 还没调用过。
     pub(crate) last_usage: Option<crate::capabilities::session::api::ContextUsage>,
-    /// 压缩点（转录行 id）：0 = 没压过。此前的内容已被摘要取代，对话里补不回来。
+    /// 压缩点（第一行保留行的 id）：0 = 没压过。此前的内容已被摘要取代，对话里补不回来。
     pub(crate) compacted_upto: u64,
+    /// 最近一条压缩记录行的 id：0 = 没压过。回档按它判断「压缩记录是否被截掉」。
+    pub(crate) compacted_line: u64,
+    /// 目的：压缩时至少保留最近多少内容（占模型窗口的百分比）；0 = 只留摘要。
+    pub(crate) compact_keep_percent: u8,
+    /// 目的：压缩通道工厂（触发时现建；None = 只用会话自己的通道，测试/旧装配）。
+    compact_factory: Option<std::sync::Arc<dyn CompactChatFactory>>,
+    /// 目的：本会话自己的模型 id（用于判断压缩模型是否与会话同模型）；None = 核心默认。
+    model: Option<String>,
     /// 目的：本会话解析好的思考参数片段（登记处按"这个 agent 的模型 + 工作根的档位"给）。
     /// 约束：只影响**出站请求**；会话重建时由生成前的准备段重新解析，不落盘。
     thinking: Option<std::sync::Arc<serde_json::Value>>,
+}
+
+/// 目的：一次压缩的切分计划。
+/// - `up_to` = 第一行保留行的**行 id**（此前的行被摘要取代）；
+/// - `cut` = 被移出对话的下标边界（含摘要消息的偏移）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CompactionPlan {
+    pub up_to: u64,
+    pub cut: usize,
+}
+
+/// 目的：独立总结模型的一条临时通道（只在压缩触发时建）。
+pub struct CompactChatSpec {
+    pub chat: BoxedChat,
+    /// 登记处的模型 id（报错与日志用）。
+    pub model: String,
+    /// 这个模型的上下文窗口；被总结前缀超过它时如实报错。
+    pub window: u64,
+}
+
+/// 目的：压缩通道的工厂（组合根注入；会话只认这个口，不持登记处）。
+/// 返回 `None` = 会话同模型，复用会话自己的通道与思考档。
+pub trait CompactChatFactory: Send + Sync {
+    fn build(
+        &self,
+        module: &str,
+        session_model: Option<&str>,
+    ) -> Result<Option<CompactChatSpec>, String>;
 }
 
 /// 摘要消息（发送视图里是 **user 角色**）：`compact` 与重建共用一份口径，实时与回放才逐条相同。
@@ -423,9 +462,13 @@ impl AgentSession {
             compact_at: 0,
             compact_tokens: 0,
             compact_percent: 0,
+            compact_keep_percent: 0,
             context_window: 0,
             last_usage: None,
             compacted_upto: 0,
+            compacted_line: 0,
+            compact_factory: None,
+            model: None,
             thinking: None,
             id: id.to_string(),
             params,
@@ -436,6 +479,7 @@ impl AgentSession {
             next_line: 0,
             marks: Vec::new(),
             line_reply: Vec::new(),
+            line_ids: Vec::new(),
             cur_reply: 0,
         };
         s.set_next_line(0);
@@ -452,7 +496,9 @@ impl AgentSession {
         dialogue: Vec<Msg>,
         marks: Vec<usize>,
         line_reply: Vec<u64>,
+        line_ids: Vec<u64>,
         compacted_upto: u64,
+        compacted_line: u64,
         chat: BoxedChat,
         tools: Option<MemberTools>,
         compact_prompt: String,
@@ -463,9 +509,13 @@ impl AgentSession {
             compact_at: 0,
             compact_tokens: 0,
             compact_percent: 0,
+            compact_keep_percent: 0,
             context_window: 0,
             last_usage: None,
             compacted_upto,
+            compacted_line,
+            compact_factory: None,
+            model: None,
             thinking: None,
             id: id.to_string(),
             next_line: next,
@@ -476,6 +526,7 @@ impl AgentSession {
             compact_prompt,
             marks,
             line_reply,
+            line_ids,
             cur_reply: 0,
         };
         s.set_next_line(next);
@@ -505,6 +556,24 @@ impl AgentSession {
         self.thinking.clone()
     }
 
+    /// 目的：记下本会话自己的模型 id（压缩判断“是否同模型”用）。
+    pub fn set_model(&mut self, model: Option<String>) {
+        self.model = model;
+    }
+
+    /// 目的：在压缩触发时现建总结通道；None = 会话同模型。
+    pub fn compact_chat(&self) -> Result<Option<CompactChatSpec>, String> {
+        match self.compact_factory.as_ref() {
+            Some(f) => f.build(&self.id, self.model.as_deref()),
+            None => Ok(None),
+        }
+    }
+
+    /// 目的：注入压缩通道工厂（组合根提供；触发时现建，设置改了也不用刷新会话）。
+    pub fn set_compact_factory(&mut self, factory: std::sync::Arc<dyn CompactChatFactory>) {
+        self.compact_factory = Some(factory);
+    }
+
     /// 注入一条**系统消息**（提醒/边界这类"不是用户说的、也不是模型说的"内容）：
     /// 上下文里是 system 角色，转录里是系统行。
     /// 它**不得在界面与记录里长得像用户发的**——身份是核心，界面按系统行样式（见 session-model.md 二）。
@@ -521,14 +590,23 @@ impl AgentSession {
         vec![SessionEvent::Transcript(vec![v])]
     }
 
-    /// 目的：分配一条 notice 行（id / marks / line_reply 与普通行同一套账），不碰对话。
-    fn notice_line(&mut self, text: &str) -> LineView {
+    /// 目的：分配一条**控制行**（id / marks / line_reply / line_ids 与普通行同一套账），不碰对话。
+    /// 约束：控制行不产生对话消息；回档按普通行原子截断。
+    fn control_line(
+        &mut self,
+        kind: &str,
+        text: String,
+        system: bool,
+        payload: Option<serde_json::Value>,
+    ) -> LineView {
         let id = self.next_line;
         let v = LineView {
             id,
             reply: id,
-            line: text.to_string(),
-            kind: "notice".to_string(),
+            line: text,
+            kind: kind.to_string(),
+            system,
+            payload,
             turn: self.cur_turn,
             ..Default::default()
         };
@@ -538,7 +616,27 @@ impl AgentSession {
                 .store(self.next_line, std::sync::atomic::Ordering::Relaxed);
         }
         self.line_reply.push(id);
+        self.line_ids.push(id);
         self.marks.push(self.dialogue.len());
+        v
+    }
+
+    /// 目的：分配一条 notice 行（内容类系统提示；不碰对话）。
+    fn notice_line(&mut self, text: &str) -> LineView {
+        self.control_line("notice", text.to_string(), false, None)
+    }
+
+    /// 目的：在发送视图压缩后落一条**压缩记录行**：正文 = 摘要，payload.up_to = 第一行保留行。
+    /// 约束：它不产生对话消息；删除/留档它本身 = 解除这次压缩。
+    pub fn note_compacted(&mut self, up_to: u64, summary: &str) -> LineView {
+        let v = self.control_line(
+            "compacted",
+            summary.to_string(),
+            true,
+            Some(serde_json::json!({ "up_to": up_to })),
+        );
+        self.compacted_upto = up_to;
+        self.compacted_line = v.id;
         v
     }
 
@@ -554,11 +652,12 @@ impl AgentSession {
         vec![SessionEvent::Transcript(vec![LineView { task: true, ..v }])]
     }
 
-    /// 目的：设本会话的上下文预算：窗口、压缩阈值百分比（0 = 关）与字符兜底一起算好。
+    /// 目的：设本会话的上下文预算：窗口、压缩阈值百分比（0 = 关）、保留百分比与字符兜底一起算好。
     /// 约束：装配、重建、改模型都走这一处；last_usage 已有时把窗口换成当前模型的窗口。
-    pub fn set_context_budget(&mut self, window: u64, percent: u8) {
+    pub fn set_context_budget(&mut self, window: u64, percent: u8, keep_percent: u8) {
         self.context_window = window;
         self.compact_percent = percent;
+        self.compact_keep_percent = keep_percent;
         let pct = percent as u64;
         self.compact_tokens = window * pct / 100;
         self.compact_at = (self.compact_tokens * 4) as usize;
@@ -601,33 +700,112 @@ impl AgentSession {
         )
     }
 
-    /// 当前下一条转录行的 id（压缩点用它：把此前的行全部移出发送视图）。
-    pub fn next_line_id(&self) -> u64 {
-        self.next_line
+    /// 目的：算这次压缩的切分点：保留段从哪一行开始（行 id + 对话下标）。
+    /// 参数 `protect_from`：本轮新注入的用户行 / 任务行的 id——它必须原样保留，不能被压进摘要。
+    /// 约束：从尾部累计估算 token（字符 ÷ 4）到保留预算；切分点对齐完整回复组。`keep = 0` = 全压。
+    pub fn plan_compaction(&self, protect_from: Option<u64>) -> Option<CompactionPlan> {
+        if self.dialogue.is_empty() || self.marks.is_empty() {
+            return None;
+        }
+        if self.line_ids.len() != self.marks.len() {
+            return None;
+        }
+        let full = || CompactionPlan {
+            up_to: self.next_line,
+            cut: self.dialogue.len(),
+        };
+        let keep = self.compact_keep_percent;
+        if keep == 0 || self.context_window == 0 {
+            // 只留摘要也必须保护本轮新输入：切在它前面，把它留在尾部。
+            if let Some(id) = protect_from {
+                if let Some(k) = self.line_ids.iter().position(|x| *x == id) {
+                    if k == 0 {
+                        return None;
+                    }
+                    let cut = self.marks[k - 1];
+                    if cut == 0 || cut >= self.dialogue.len() {
+                        return None;
+                    }
+                    return Some(CompactionPlan {
+                        up_to: self.line_ids[k],
+                        cut,
+                    });
+                }
+            }
+            return Some(full());
+        }
+        let budget_tokens = self.context_window.saturating_mul(keep as u64) / 100;
+        let budget_chars = budget_tokens.saturating_mul(4).min(usize::MAX as u64) as usize;
+        if budget_chars == 0 {
+            return Some(full());
+        }
+        // prefix[i] = dialogue[..i] 的字符数；行 i 的字符数 = prefix[marks[i]] - prefix[marks[i-1]]。
+        let mut prefix = Vec::with_capacity(self.dialogue.len() + 1);
+        prefix.push(0usize);
+        let mut acc = 0usize;
+        for m in &self.dialogue {
+            acc += m.content.chars().count();
+            prefix.push(acc);
+        }
+        let line_chars = |i: usize| {
+            let start = if i == 0 { 0 } else { self.marks[i - 1] };
+            let end = self.marks[i];
+            prefix[end].saturating_sub(prefix[start])
+        };
+        let rows = self.marks.len();
+        let mut split = rows;
+        let mut tail = 0usize;
+        for i in (0..rows).rev() {
+            tail += line_chars(i);
+            split = i;
+            if tail >= budget_chars {
+                break;
+            }
+        }
+        if split == 0 {
+            return None; // 整段都在保留预算内：没有更早的内容可压。
+        }
+        // 不切开一次回复：切分点向前退到该回复组的第一行（保留量只会更多）。
+        while split > 0 && self.line_reply[split] == self.line_reply[split - 1] {
+            split -= 1;
+        }
+        // 本轮新注入的用户行 / 任务行必须原样保留。
+        if let Some(id) = protect_from {
+            if let Some(k) = self.line_ids.iter().position(|x| *x == id) {
+                split = split.min(k);
+            }
+        }
+        if split == 0 {
+            return None;
+        }
+        let cut = self.marks[split - 1];
+        if cut == 0 || cut >= self.dialogue.len() {
+            return None;
+        }
+        if self.compacted_upto > 0 && cut <= 1 {
+            return None; // 前缀里只剩上一份摘要：再压也不会变小。
+        }
+        Some(CompactionPlan {
+            up_to: self.line_ids[split],
+            cut,
+        })
     }
 
-    /// 上下文压缩：把 up_to 之前的行移出**发送视图**（转录不动、用户照样能看），用一份摘要代替。
+    /// 上下文压缩：把 `plan.cut` 之前的内容移出**发送视图**，用一份摘要代替，并落一条压缩记录行。
     /// 见 docs/session/session-model.md 六：改的是"发给模型什么"，不是"留下什么"。
-    pub fn compact(&mut self, up_to: u64, summary: &str) {
-        // 按行找到历史里的截断点（marks 就是"行 → 该行完成时的历史长度"）。
-        let keep = self
-            .marks
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| (*i as u64) < up_to)
-            .count();
-        // 被总结掉的那一段要**移出**发送视图——不是保留前缀（保留前缀会把新内容丢掉）。
-        let cut = if keep == 0 { 0 } else { self.marks[keep - 1] };
+    pub fn apply_compaction(&mut self, plan: &CompactionPlan, summary: &str) -> Option<LineView> {
+        if plan.cut == 0 {
+            return None;
+        }
+        let cut = plan.cut.min(self.dialogue.len());
         self.dialogue.drain(0..cut);
         // 摘要放在**对话最前面**（身份与环境由参数现渲染，不占对话的位置）：
-        // 此后模型只看到"身份 + 摘要 + 之后的内容"。
+        // 此后模型只看到"身份 + 摘要 + 之后保留的内容"。
         self.dialogue.insert(0, summary_message(summary));
-        // 移出 cut 条、又插入一条：marks 整体前移 cut、再后移一格。
         for m in self.marks.iter_mut() {
             *m = m.saturating_sub(cut) + 1;
         }
-        // 记下压缩点：回档到它之前，被销毁的对话在内存里补不回来（编排改走重建）。
-        self.compacted_upto = up_to;
+        Some(self.note_compacted(plan.up_to, summary))
     }
 
     /// 给接下来的行打上回合 id（节点执行也用整场工作的同一套计数：回档才对得上）。
@@ -667,6 +845,7 @@ impl AgentSession {
             system: kind == "system",
             task: false,
             turn: self.cur_turn,
+            payload: None,
         };
         self.next_line += 1;
         if let Some(t) = self.tools.as_ref() {
@@ -674,6 +853,7 @@ impl AgentSession {
                 .store(self.next_line, std::sync::atomic::Ordering::Relaxed);
         }
         self.line_reply.push(reply);
+        self.line_ids.push(v.id);
         self.marks.push(self.dialogue.len());
         v
     }
@@ -694,6 +874,7 @@ impl AgentSession {
         }
         let rows = self.marks.len();
         self.line_reply.truncate(rows);
+        self.line_ids.truncate(rows);
         let keep = if keep_id == u64::MAX {
             // `align_keep` 的「不截」语义：保留全部，不能拿 line_reply 的长度当行数。
             rows
@@ -701,6 +882,7 @@ impl AgentSession {
             keep_whole_replies(&self.line_reply, keep_id as usize).min(rows)
         };
         self.line_reply.truncate(keep);
+        self.line_ids.truncate(keep);
         if keep == 0 {
             self.marks.clear();
             self.dialogue.clear();
