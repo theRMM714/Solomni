@@ -155,6 +155,14 @@ pub fn engine_args(
         spec.image.disk.display(),
         disk_format(&spec.image.disk)
     ));
+    // 构建缓存卷：第二块 virtio-blk（稀疏 qcow2）。discard / detect-zeroes 让 guest 的 fstrim 把空块还给宿主。
+    if let Some(cache) = &spec.cache_disk {
+        a.push("-drive".to_string());
+        a.push(format!(
+            "file={},if=virtio,format=qcow2,discard=unmap,detect-zeroes=unmap",
+            cache.display()
+        ));
+    }
     // 有内核就直启、由命令行给根设备；没有内核靠镜像自带引导（固件）。
     if spec.image.kernel.is_some() {
         a.push("-append".to_string());
@@ -428,6 +436,35 @@ fn qemu_img_for(engine_exe: &str) -> String {
         Some(dir) if !dir.as_os_str().is_empty() => dir.join(name).to_string_lossy().into_owned(),
         _ => name.to_string(),
     }
+}
+
+/// 目的：建一块稀疏的空盘（qcow2）——构建缓存卷用，与任何镜像无关。
+/// 参数：`engine_exe` = QEMU 可执行文件（同目录找 qemu-img）；`path` = 落点；`mib` = 虚拟大小。
+/// 错误：起不了 qemu-img 或它报失败。
+pub fn create_disk(engine_exe: &str, path: &Path, mib: u64) -> Result<(), String> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)
+            .map_err(|e| format!("建缓存卷目录失败（{}）：{}", dir.display(), e))?;
+    }
+    let out = Command::new(qemu_img_for(engine_exe))
+        .arg("create")
+        .arg("-f")
+        .arg("qcow2")
+        .arg(path)
+        .arg(format!("{}M", mib))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| format!("起不了 qemu-img（{}）：{}", qemu_img_for(engine_exe), e))?;
+    if !out.status.success() {
+        return Err(format!(
+            "建缓存卷失败：{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    Ok(())
 }
 
 /// 目的：在基础镜像上建一份每租约可写层（qcow2 覆盖）。
@@ -1182,6 +1219,7 @@ mod tests {
             shares: Vec::new(),
             seed: None,
             isolated: false,
+            cache_disk: None,
         };
         let with = engine_args(&spec, "opts", false, false, Some("http://10.0.2.2:9/"), &[]);
         assert!(
@@ -1192,6 +1230,41 @@ mod tests {
         );
         let without = engine_args(&spec, "opts", false, false, None, &[]);
         assert!(!without.iter().any(|a| a == "-smbios"), "{:?}", without);
+    }
+
+    /// 目的：给了构建缓存卷就多一块 virtio-blk（qcow2 + discard，好让 fstrim 归还空间）；没给就不加。
+    #[test]
+    fn cache_disk_becomes_a_second_virtio_drive() {
+        let image = GuestImage::linux("t", std::path::PathBuf::from("/img/root.qcow2"), None, None);
+        let spec = GuestSpec {
+            lease: "w".to_string(),
+            image,
+            mounts: Vec::new(),
+            net: false,
+            engine_path: None,
+            share_path: None,
+            shares: Vec::new(),
+            seed: None,
+            isolated: false,
+            cache_disk: None,
+        };
+        let without = engine_args(&spec, "opts", false, false, None, &[]);
+        assert!(
+            !without.iter().any(|a| a.contains("discard=unmap")),
+            "没有缓存卷就不该多一块盘：{:?}",
+            without
+        );
+        let mut with = spec.clone();
+        with.cache_disk = Some(std::path::PathBuf::from("/cache/x.qcow2"));
+        let args = engine_args(&with, "opts", false, false, None, &[]);
+        assert!(
+            args.windows(2).any(|w| w[0] == "-drive"
+                && w[1].contains("file=/cache/x.qcow2")
+                && w[1].contains("format=qcow2")
+                && w[1].contains("discard=unmap")),
+            "缓存卷要作为第二块 virtio 盘挂上：{:?}",
+            args
+        );
     }
 
     /// 目的：有可写层就把镜像的根换成它（内核仍取自基础根）；没有就原样。

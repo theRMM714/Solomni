@@ -733,6 +733,7 @@ pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
         shares: Vec::new(),
         seed: None,
         isolated: false,
+        cache_disk: None,
     };
     let args = crate::capabilities::vm::detail::qemu::engine_args(
         &spec,
@@ -828,6 +829,7 @@ pub(crate) fn accelerators_and_nic_follow_the_platform_and_share_need() {
         shares: Vec::new(),
         seed: None,
         isolated: false,
+        cache_disk: None,
     };
     let expected = if cfg!(windows) {
         "accel=whpx"
@@ -931,6 +933,7 @@ pub(crate) fn disk_root_without_kernel_boots_via_firmware() {
         shares: Vec::new(),
         seed: None,
         isolated: false,
+        cache_disk: None,
     };
     let args = engine_args(&spec, "opts", false, false, None, &[]);
     assert!(
@@ -970,6 +973,7 @@ pub(crate) fn disk_root_uses_a_virtio_disk_not_9p() {
         shares: Vec::new(),
         seed: None,
         isolated: false,
+        cache_disk: None,
     };
     let args = engine_args(&spec, "opts", false, false, None, &[]);
     assert!(
@@ -1011,6 +1015,7 @@ pub(crate) fn share_syncs_around_each_run_and_releases_on_stop() {
         shares: Vec::new(),
         seed: None,
         isolated: false,
+        cache_disk: None,
     };
     vm.guest_start(&spec).expect("起 guest");
     let run = GuestRun {
@@ -1097,6 +1102,7 @@ pub(crate) fn provision_vm_holds_internal_none_share() {
         shares: vec!["none"],
         seed: None,
         isolated: false,
+        cache_disk: None,
     };
     vm.guest_start(&spec)
         .expect("补齐面要能用内部 none 档起 guest");
@@ -1184,6 +1190,7 @@ pub(crate) fn disk_image_base_is_classified_as_a_disk_root() {
             shares: Vec::new(),
             seed: None,
             isolated: false,
+            cache_disk: None,
         },
         "opts",
         false,
@@ -1227,6 +1234,7 @@ pub(crate) fn vm_service_refuses_unfit_engine_and_share_with_a_reason() {
         shares: Vec::new(),
         seed: None,
         isolated: false,
+        cache_disk: None,
     };
     let why = svc.guest_start(&spec).expect_err("架构不匹配要被拒绝");
     assert!(why.contains("承载不了"), "{}", why);
@@ -1245,6 +1253,7 @@ pub(crate) fn vm_service_refuses_unfit_engine_and_share_with_a_reason() {
         shares: Vec::new(),
         seed: None,
         isolated: false,
+        cache_disk: None,
     };
     let why2 = svc.guest_start(&spec2).expect_err("共享落不上要被拒绝");
     assert!(why2.contains("落不到引擎"), "{}", why2);
@@ -1778,6 +1787,7 @@ pub(crate) fn share_is_picked_per_guest_at_start() {
         shares,
         seed: None,
         isolated: false,
+        cache_disk: None,
     };
     // 第一档落不上 → 用第二档（顺序就是候选给的顺序）。
     vm.guest_start(&spec("w1", vec!["slow", "fast"]))
@@ -1886,6 +1896,7 @@ pub(crate) fn test_vm_holds_a_share_for_each_platform_chain() {
             shares: vec![share],
             seed: None,
             isolated: false,
+            cache_disk: None,
         };
         svc.guest_start(&spec)
             .unwrap_or_else(|why| panic!("测试 vm 面要持有 {share} 替身：{why}"));
@@ -1931,6 +1942,7 @@ pub(crate) fn emergency_share_is_not_picked_without_an_explicit_candidate() {
         shares,
         seed: None,
         isolated: false,
+        cache_disk: None,
     };
     svc.guest_start(&spec("w1", Vec::new()))
         .expect("空候选应该只用用户档");
@@ -2080,6 +2092,7 @@ pub(crate) fn vm_service_holds_guests_by_lease() {
         shares: Vec::new(),
         seed: None,
         isolated: false,
+        cache_disk: None,
     };
     vm.guest_start(&spec).expect("替身一定能起");
     let run = GuestRun {
@@ -2169,6 +2182,7 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
         shares: Vec::new(),
         seed: None,
         isolated: true,
+        cache_disk: None,
     };
     // 共享后端按平台用户链选（与组合根同一份判据）：smb(Windows) > virtiofs > 9p。
     // 没有可用的用户档就如实跳过探针——copy 是开发/应急通道，不在这里兜底。
@@ -2414,6 +2428,7 @@ pub(crate) fn vm_live_two_guests_share_one_base_without_writing_it() {
         shares: Vec::new(),
         seed: None,
         isolated: true,
+        cache_disk: None,
     };
     let mut a = engine
         .boot(&spec("vm-live-a"), &plan)
@@ -2511,6 +2526,7 @@ pub(crate) fn vm_live_cancel_kills_the_guest_process_tree() {
         shares: Vec::new(),
         seed: None,
         isolated: true,
+        cache_disk: None,
     };
     let mut guest = engine.boot(&spec, &plan).expect("起 guest");
     // guest 内的允许集：/tmp 读写，其它一切按 Landlock 拒绝。
@@ -2695,6 +2711,7 @@ pub(crate) fn guests_on_different_leases_run_concurrently() {
             shares: Vec::new(),
             seed: None,
             isolated: false,
+            cache_disk: None,
         })
         .expect("拉起");
     }
@@ -2921,6 +2938,7 @@ pub(crate) fn vm_service_runs_fenced_and_records_packages() {
         shares: Vec::new(),
         seed: None,
         isolated: false,
+        cache_disk: None,
     };
     svc.guest_start(&spec).expect("起替身 guest");
     svc.guest_set_packages("w", vec!["python@3.12".to_string()]);

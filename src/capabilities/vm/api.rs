@@ -3,6 +3,7 @@
 //! 不管：纯逻辑实现（domain/）与端口（ports.rs）；运行包契约与选包在 packages 能力。
 //! 联动：被 conductor / collab / cli 与入口层消费。
 
+pub use crate::capabilities::vm::detail::qemu::create_disk;
 pub use crate::capabilities::vm::domain::exec::resolve_guest;
 pub use crate::capabilities::vm::domain::exec::{
     admit_guest, capability_refusal, copy_share_enabled, diagnose_text_for, guest_platform,

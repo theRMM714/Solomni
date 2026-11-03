@@ -193,6 +193,9 @@ pub struct GuestSpec {
     /// 目的：要不要给这次启动一份**每租约可写层**（会话要：多台并发不能同写一份基础镜像）。
     /// 约束：根永远是磁盘镜像，所以总建得了可写层；供给编排要改的正是基础镜像本身，填 false。
     pub isolated: bool,
+    /// 目的：构建期缓存卷（宿主上的 qcow2）——挂成第二块 virtio-blk 盘，由调用方在 guest 里挂载与对账。
+    /// 约束：只有构建 guest 给；会话 guest 与供给编排为 None（它们的盘布局不受影响）。
+    pub cache_disk: Option<PathBuf>,
 }
 
 /// 目的：一次 guest 执行要用的 per-agent 允许集（已是 guest 写法）。
