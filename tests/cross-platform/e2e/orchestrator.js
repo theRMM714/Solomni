@@ -334,6 +334,8 @@ async function main() {
       env: Object.assign({}, process.env, {
         E2E_BASE: "http://127.0.0.1:" + PORT_SRV,
         E2E_MOCK_BASE: "http://127.0.0.1:" + mockPort,
+        // 这次是安全模式还是真机围栏：严格围栏的场景（容器 shell）只有真机围栏才跑得动。
+        E2E_FENCE_LIVE: fenceWrite,
         // 驱动最后要强杀核心来验父死子亡：pid 由它自己拿到，不靠驱动去猜。
         E2E_SRV_PID: String(srv.pid),
       }),
