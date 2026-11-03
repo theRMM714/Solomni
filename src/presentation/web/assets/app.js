@@ -2676,7 +2676,7 @@ function buildStoragePage(c, f) {
   c.body.appendChild(cfgHint('上限只约束可回收缓存（构建缓存 / 下载缓存 / 过期可写层 / 日志），不约束会话、虚拟根与模块产物。到上限先回收一次，不拒绝构建；全局回收默认且至少 15 分钟一次，关闭自动回收后只剩手动。', 'warn'));
   c.body.appendChild(cfgHint('还原虚拟根会删除 guest 内未落宿主的数据，并用清单重建；不备份、不可撤销。', 'err'));
   const box = document.createElement('div');
-  box.className = 'cfg-log';
+  box.className = 'storage-report';
   box.textContent = '读取中…';
   c.body.appendChild(box);
   const refresh = async () => {
@@ -2700,14 +2700,14 @@ function fmtBytes(n) {
 
 function renderStorage(box, report, refresh) {
   box.innerHTML = '';
+  box.className = 'storage-report';
   const head = document.createElement('div');
-  head.className = 'cfg-hint';
+  head.className = 'storage-summary' + (report.overCap ? ' err' : '');
   head.textContent = '可回收缓存 ' + fmtBytes(report.managedBytes) + ' / 上限 ' + fmtBytes(report.capBytes) +
     '；宿主剩余 ' + fmtBytes(report.freeBytes) + (report.overCap ? '（已超限）' : '');
-  if (report.overCap) head.className = 'cfg-hint err';
   box.appendChild(head);
   const bar = document.createElement('div');
-  bar.className = 'cfg-hint';
+  bar.className = 'storage-actions';
   const gc = btn('立即回收', 'btn btn-primary');
   gc.onclick = async () => {
     try {
@@ -2735,39 +2735,66 @@ function renderStorage(box, report, refresh) {
   bar.appendChild(clear);
   box.appendChild(bar);
   for (const cat of report.categories || []) {
-    const row = document.createElement('div');
-    row.className = 'cfg-hint';
-    row.textContent = '[' + cat.label + '] ' + fmtBytes(cat.bytes) + (cat.autoEvictable ? ' · 自动回收' : ' · 不自动回收') + ' — ' + cat.note;
+    const catEl = document.createElement('div');
+    catEl.className = 'storage-cat';
+    const catHead = document.createElement('div');
+    catHead.className = 'storage-cat-head';
+    const title = document.createElement('span');
+    title.className = 'storage-cat-title';
+    title.textContent = cat.label;
+    const size = document.createElement('span');
+    size.className = 'storage-size';
+    size.textContent = fmtBytes(cat.bytes);
+    const note = document.createElement('span');
+    note.className = 'storage-cat-note';
+    note.textContent = (cat.autoEvictable ? '自动回收' : '不自动回收') + ' · ' + cat.note;
+    catHead.appendChild(title);
+    catHead.appendChild(size);
+    catHead.appendChild(note);
     if (['download-cache', 'overlays', 'logs'].includes(cat.id) && (cat.items || []).length) {
-      const clear = btn('清理整类', 'link-btn danger');
-      clear.onclick = () => cleanStorage(cat.id, null, null, refresh);
-      row.appendChild(clear);
+      const clearOne = btn('清理整类', 'link-btn danger');
+      clearOne.onclick = () => cleanStorage(cat.id, null, null, refresh);
+      catHead.appendChild(clearOne);
     }
-    box.appendChild(row);
-    const limit = (cat.items || []).slice(0, 12);
+    catEl.appendChild(catHead);
+    const limit = (cat.items || []).slice(0, 20);
     for (const item of limit) {
-      const line = document.createElement('div');
-      line.className = 'cfg-hint';
-      line.textContent = '  ' + item.label + ' · ' + fmtBytes(item.bytes) + (item.active ? ' · 受保护' : '') + ' · ' + item.detail;
+      const itemEl = document.createElement('div');
+      itemEl.className = 'storage-item';
+      const main = document.createElement('div');
+      main.className = 'storage-item-main';
+      main.textContent = item.label + ' · ' + fmtBytes(item.bytes) +
+        (item.active ? ' · 受保护' : '') + ' · ' + item.detail;
+      itemEl.appendChild(main);
+      const acts = document.createElement('div');
+      acts.className = 'storage-item-actions';
       if (cat.id === 'build-cache') {
         const opt = btn('优化', 'link-btn');
         opt.onclick = () => cleanStorage('compact', item.id, null, refresh);
-        line.appendChild(opt);
+        acts.appendChild(opt);
         const del = btn('清理整卷', 'link-btn danger');
         del.onclick = () => cleanStorage('build-cache', item.id, null, refresh);
-        line.appendChild(del);
+        acts.appendChild(del);
         for (const mod of item.modules || []) {
           const mb = btn('排队清理 ' + mod, 'link-btn');
           mb.onclick = () => cleanStorage('build-cache', item.id, mod, refresh);
-          line.appendChild(mb);
+          acts.appendChild(mb);
         }
       } else if (cat.id === 'guest-bases') {
         const reset = btn('还原到初始状态', 'link-btn danger');
         reset.onclick = () => resetGuest(item.id, refresh);
-        line.appendChild(reset);
+        acts.appendChild(reset);
       }
-      box.appendChild(line);
+      if (acts.children.length) itemEl.appendChild(acts);
+      catEl.appendChild(itemEl);
     }
+    if ((cat.items || []).length > limit.length) {
+      const more = document.createElement('div');
+      more.className = 'storage-item-more';
+      more.textContent = '还有 ' + (cat.items.length - limit.length) + ' 项未显示';
+      catEl.appendChild(more);
+    }
+    box.appendChild(catEl);
   }
 }
 

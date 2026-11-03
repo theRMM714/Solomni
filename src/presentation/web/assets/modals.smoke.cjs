@@ -308,7 +308,9 @@ if (!loadErrors.length) {
     const nodes = walk(page, []);
     const text = nodes.map((n) => String(n.textContent || "")).join(" ");
     const nums = inputsIn(page).filter((i) => i.type === "number");
-    return nums.length >= 5 && text.indexOf("可回收缓存") >= 0 && text.indexOf("还原虚拟根") >= 0;
+    const report = nodes.find((n) => String(n.className) === "storage-report");
+    const log = nodes.find((n) => String(n.className) === "cfg-log");
+    return nums.length >= 5 && !!report && !log && text.indexOf("可回收缓存") >= 0 && text.indexOf("还原虚拟根") >= 0;
   });
   check("设置中心：底栏保存接线", () => {
     vm.runInNewContext("openSettingsModal()", sandbox);
