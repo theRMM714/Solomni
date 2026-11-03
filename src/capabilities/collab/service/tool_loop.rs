@@ -628,6 +628,12 @@ fn run_shell(
         };
         ctx.tools.run_shell(&run)
     };
+    // 共享区不承载执行位：相对路径脚本被直接执行（EACCES）时，补一句"用解释器跑"的出路。
+    if !outcome.ok {
+        if let Some(hint) = api::shared_exec_hint(&call.script, &outcome.output) {
+            outcome.output.push_str(&hint);
+        }
+    }
     // 回执补「落点 + 本次耗时」：模型据此判断相对路径与耗时，回放也从这一行派生。
     // 只对执行层给出 `[shell]` 收尾行的调用追加；参数拒绝 / 起进程失败没有这一行。
     if api::did_run(&outcome.output) {
