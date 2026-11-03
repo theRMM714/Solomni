@@ -2757,6 +2757,11 @@ function renderStorage(box, report, refresh) {
       catHead.appendChild(clearOne);
     }
     catEl.appendChild(catHead);
+    if (cat.id === 'logs') {
+      note.textContent += ' · 共 ' + (cat.items || []).length + ' 份';
+      box.appendChild(catEl);
+      continue;
+    }
     const limit = (cat.items || []).slice(0, 20);
     for (const item of limit) {
       const itemEl = document.createElement('div');
