@@ -4,14 +4,17 @@
 //! 联动：`ProcessRunner` / `HostProbe` / `Log` 是 kernel 的共享机制；其余依赖走各能力的 api。
 
 use crate::capabilities::builds::api::{Builds, Built, Target};
+use crate::capabilities::builds::detail::cache;
 use crate::capabilities::builds::detail::fingerprint as fp;
 use crate::capabilities::modules::api::{BuildDecl, Module};
 use crate::capabilities::packages::api::{
     build_packages, diagnose_text, plan_host_requests, requests_for, Facts, Library, Packages,
-    PinPolicy, Provider,
+    PinPolicy, PlannedPackage, Provider,
 };
 use crate::capabilities::provision::api::Provision;
-use crate::capabilities::vm::api::{self as vm, ExecPlan, GuestRun, GuestSpec, MissingEntry, Vm};
+use crate::capabilities::vm::api::{
+    self as vm, ExecPlan, GuestOs, GuestRun, GuestSpec, MissingEntry, Vm,
+};
 use crate::kernel::api::{FenceSpec, Tier};
 use crate::kernel::ports::{FenceHost, HostProbe, Log, ProcessRunner};
 use std::collections::BTreeMap;
@@ -145,20 +148,25 @@ impl BuildsService {
         )
     }
 
-    /// 目的：按声明跑一次构建（入口预判已由调用方做过）。
-    /// 参数：`module` = 模块；`decl` = 构建声明；`target` = 目标环境；`target_os` = 目标平台；`net` = 放不放行出站网络。
-    /// 返回：这次的事实；`skipped` = 缓存命中没编。
-    fn run(
+    /// 目的：按声明把这批模块编出来（入口预判已由调用方做过）——本机档逐个在宿主编，虚拟机档共用一个 guest。
+    /// 参数：`jobs` = 模块与构建声明；`target` = 目标环境；`target_os` = 目标平台；`net` = 放不放行出站网络。
+    /// 返回：每个模块这次的事实（顺序与 `jobs` 一致）。
+    fn run_jobs(
         &self,
-        module: &Module,
-        decl: &BuildDecl,
+        jobs: Vec<(Module, BuildDecl)>,
         target: &Target,
         target_os: &str,
         net: bool,
-    ) -> Result<Built, String> {
+    ) -> Result<Vec<Built>, String> {
         match target {
-            Target::Host => self.host(module, decl, target_os, net),
-            Target::Guest(guest) => self.guest(module, decl, guest, target_os, net),
+            Target::Host => {
+                let mut out = Vec::new();
+                for (module, decl) in &jobs {
+                    out.push(self.host(module, decl, target_os, net)?);
+                }
+                Ok(out)
+            }
+            Target::Guest(guest) => self.guest(&jobs, guest, target_os, net),
         }
     }
 
@@ -255,18 +263,27 @@ impl BuildsService {
         })
     }
 
-    /// 目的：虚拟机档构建——在目标虚拟根里用它的编译包编，模块目录读写挂进去（产物直接落回宿主那份）。
+    /// 目的：虚拟机档构建——在 guest 本地工作区（缓存卷）里编，产物按差异回写宿主那份模块目录。
+    /// 参数：`jobs` = 这批要编的模块与构建声明（一次调用共用一台构建 guest）；`guest` = 虚拟根名；`target_os` = 目标平台；`net` = 放不放行出站网络。
+    /// 约束：同一虚拟根一把构建锁（缓存卷独占）；任何一步失败都不回写、不落状态。
     fn guest(
         &self,
-        module: &Module,
-        decl: &BuildDecl,
+        jobs: &[(Module, BuildDecl)],
         guest: &str,
         target_os: &str,
         net: bool,
-    ) -> Result<Built, String> {
+    ) -> Result<Vec<Built>, String> {
         let dir = self.guest_dir(guest)?;
         let image = vm::classify_base(&dir, self.probe.as_ref())
             .map_err(|why| format!("虚拟根「{}」不可用（{}）", guest, why))?;
+        // 构建命令与缓存卷都按 POSIX 装配：非 Linux guest 不具备这条链，如实拒绝而不是半路炸。
+        if image.os != GuestOs::Linux {
+            return Err(format!(
+                "虚拟机档构建只支持 Linux guest（虚拟根「{}」的 os 是 {}）",
+                guest,
+                image.os.as_str()
+            ));
+        }
         let deps = self.provision.status().unwrap_or_default();
         let pick = |prefix: &str| {
             deps.iter()
@@ -286,44 +303,72 @@ impl BuildsService {
             &self.packages.library(),
             &crate::capabilities::packages::api::Target::guest(&platform),
         );
-        let (packages, missing) = build_packages(&decl.needs, &eligible, &image.runtimes);
-        if !missing.is_empty() {
-            return Err(format!(
-                "guest「{}」里没有这些构建期能力，包库也没提供：{}（把适用于该 guest 目标的包放进 runtimes/，或给虚拟根装一个）",
-                guest,
-                missing.join("、")
-            ));
-        }
-        let providers: Vec<String> = packages
-            .iter()
-            .map(|p| format!("{}@{}", p.id, p.version))
-            .collect();
-        let fingerprint = fp::source(&module.root, decl, &providers)?;
-        let state_path = fp::state_path(&self.root, &module.manifest.id);
-        if self.fresh(&state_path, guest, target_os, &fingerprint, module) {
-            return Ok(Built {
-                module: module.manifest.id.clone(),
-                target: guest.to_string(),
-                skipped: true,
-                output: String::new(),
+        // 逐个定包、算指纹、判缓存：命中的模块不进这次 guest，结果照样按入参顺序给回。
+        let mut plans: Vec<GuestPlan> = Vec::new();
+        let mut done: Vec<Option<Built>> = Vec::new();
+        for (module, decl) in jobs {
+            let (packages, missing) = build_packages(&decl.needs, &eligible, &image.runtimes);
+            if !missing.is_empty() {
+                return Err(format!(
+                    "guest「{}」里没有这些构建期能力，包库也没提供：{}（把适用于该 guest 目标的包放进 runtimes/，或给虚拟根装一个）",
+                    guest,
+                    missing.join("、")
+                ));
+            }
+            let providers: Vec<String> = packages
+                .iter()
+                .map(|p| format!("{}@{}", p.id, p.version))
+                .collect();
+            let fingerprint = fp::source(&module.root, decl, &providers)?;
+            let state_path = fp::state_path(&self.root, &module.manifest.id);
+            if self.fresh(&state_path, guest, target_os, &fingerprint, module) {
+                done.push(Some(Built {
+                    module: module.manifest.id.clone(),
+                    target: guest.to_string(),
+                    skipped: true,
+                    output: String::new(),
+                }));
+                continue;
+            }
+            done.push(None);
+            plans.push(GuestPlan {
+                module: module.clone(),
+                decl: decl.clone(),
+                packages,
+                providers,
+                fingerprint,
+                state_path,
             });
         }
-        let lease = format!("build-{}", module.manifest.id);
+        if plans.is_empty() {
+            return Ok(done.into_iter().flatten().collect());
+        }
+        // 缓存卷：同一虚拟根独占；没有就建一块稀疏空盘（大小即配额）。
+        let volume = cache::volume_path(&self.root, guest);
+        let _lock = cache::VolumeLock::acquire(cache::lock_path(&self.root, guest))?;
+        if !self.probe.is_file(&volume) {
+            vm::create_disk(&engine_path, &volume, cache::VOLUME_MIB)
+                .map_err(|e| format!("建构建缓存卷失败：{}", e))?;
+        }
+        let lease = format!("build-{}", guest);
+        let mut rw: Vec<PathBuf> = plans.iter().map(|p| p.module.root.clone()).collect();
+        rw.sort();
+        rw.dedup();
+        let fence = FenceSpec {
+            agent: "build".to_string(),
+            lease: lease.clone(),
+            rw,
+            ro: Vec::new(),
+            ro_tree: Vec::new(),
+            private: PathBuf::new(),
+            cwd: PathBuf::new(),
+            net,
+        };
         let plan = ExecPlan {
             tier: Tier::Vm,
             net,
             guest: Some(guest.to_string()),
-            packages,
-        };
-        let fence = FenceSpec {
-            agent: format!("build:{}", module.manifest.id),
-            lease: lease.clone(),
-            rw: vec![module.root.clone()],
-            ro: Vec::new(),
-            ro_tree: Vec::new(),
-            private: PathBuf::new(),
-            cwd: module.root.clone(),
-            net,
+            packages: merged_packages(plans.iter()),
         };
         let mounts = vm::mounts_from(&plan, &fence, &image.bridge());
         let spec = GuestSpec {
@@ -340,120 +385,246 @@ impl BuildsService {
             ),
             seed: None,
             isolated: true,
+            cache_disk: Some(volume),
         };
         self.log.info(
             "builds::guest",
             &format!(
-                "模块 {} 在 guest「{}」里编（出站网络：{}）",
-                module.manifest.id, guest, net
+                "模块 {} 在 guest「{}」里编（本地工作区，出站网络：{}）",
+                plans
+                    .iter()
+                    .map(|p| p.module.manifest.id.as_str())
+                    .collect::<Vec<_>>()
+                    .join("、"),
+                guest,
+                net
             ),
         );
         self.vm
             .guest_start(&spec)
             .map_err(|e| format!("起 guest 失败：{}", e))?;
+        let result = self.build_in_guest(&lease, &plans, &image, &plan, guest, target_os);
+        self.vm.guest_stop(&lease);
+        let built = result?;
+        let mut it = built.into_iter();
+        Ok(done
+            .into_iter()
+            .map(|slot| slot.unwrap_or_else(|| it.next().expect("构建结果与计划一一对应")))
+            .collect())
+    }
+
+    /// 目的：在这台构建 guest 里跑完这批模块——挂卷、逐模块同步源、本地构建、差异回写、复验落状态。
+    fn build_in_guest(
+        &self,
+        lease: &str,
+        plans: &[GuestPlan],
+        image: &vm::GuestImage,
+        plan: &ExecPlan,
+        guest: &str,
+        target_os: &str,
+    ) -> Result<Vec<Built>, String> {
         if !self
             .vm
-            .guest_wait_agent(&lease, std::time::Duration::from_secs(15 * 60))
+            .guest_wait_agent(lease, std::time::Duration::from_secs(15 * 60))
         {
-            self.vm.guest_stop(&lease);
             return Err("等 guest 的 qemu-guest-agent 超时".to_string());
         }
-        // 先把编译包接进 guest（prefix 的 bin 进 PATH、system 的载荷叠写进系统路径），再跑构建。
-        for script in vm::package_setup_scripts(&plan) {
-            let _ = self.vm.guest_run(
-                &lease,
-                &GuestRun {
-                    command: script,
-                    args_json: "{}".to_string(),
-                    env: Vec::new(),
-                    cwd: String::new(),
-                    timeout_secs: 30,
-                    output_limit: crate::capabilities::vm::api::OutputLimit::Head,
-                },
-            );
+        // 运行包先接进 guest（prefix 的 bin 进 PATH、system 的载荷叠写进系统路径），再跑构建。
+        for script in vm::package_setup_scripts(plan) {
+            let _ = self.guest_script(lease, &script, 120);
         }
-        let out = self.vm.guest_run(
-            &lease,
+        // 缓存卷：挂载 + 卷级对账（整批只做一次）。
+        let mounted = self.guest_script(
+            lease,
+            &cache::mount_script(&cache::volume_epoch(image)),
+            120,
+        );
+        if !mounted.ok {
+            return Err(format!("准备构建缓存卷失败{}", tail(&mounted.output)));
+        }
+        let mut out = Vec::new();
+        for job in plans {
+            out.push(self.build_one(lease, job, plans.len(), image, guest, target_os)?);
+        }
+        Ok(out)
+    }
+
+    /// 目的：编一个模块——模块对账 → 源同步 → 快照 → 本地构建 → 差异回写 → 复验落状态 → 收尾。
+    #[allow(clippy::too_many_arguments)]
+    fn build_one(
+        &self,
+        lease: &str,
+        job: &GuestPlan,
+        total: usize,
+        image: &vm::GuestImage,
+        guest: &str,
+        target_os: &str,
+    ) -> Result<Built, String> {
+        let id = job.module.manifest.id.clone();
+        let src = image.bridge().to_guest(&job.module.root);
+        let name = |what: &str, why: String| module_why(&id, total, format!("{}{}", what, why));
+        let step = |what: &str, out: crate::kernel::api::ToolOutcome| {
+            if out.ok {
+                Ok(())
+            } else {
+                Err(name(what, tail(&out.output)))
+            }
+        };
+        step(
+            "模块工作区对账失败",
+            self.guest_script(
+                lease,
+                &cache::module_script(&id, &cache::module_epoch(&job.decl.needs, &job.providers)),
+                120,
+            ),
+        )?;
+        let entry = crate::capabilities::modules::api::local_entry(&job.decl.command);
+        step(
+            "同步模块源失败",
+            self.guest_script(lease, &cache::sync_in_script(&id, &src, entry), 600),
+        )?;
+        step(
+            "记录构建前快照失败",
+            self.guest_script(lease, &cache::snapshot_script(&id), 120),
+        )?;
+        let env = vec![
+            ("HOME".to_string(), cache::home(&id)),
+            ("TMPDIR".to_string(), cache::tmp(&id)),
+            ("TMP".to_string(), cache::tmp(&id)),
+            ("TEMP".to_string(), cache::tmp(&id)),
+        ];
+        let command = format!(
+            "cd {} && {}",
+            cache::sh_quote(&cache::workspace(&id)),
+            job.decl.command
+        );
+        let built = self.vm.guest_run(
+            lease,
             &GuestRun {
-                command: decl.command.clone(),
+                command,
                 args_json: "{}".to_string(),
-                env: Vec::new(),
-                cwd: module.root.display().to_string(),
+                env,
+                cwd: String::new(),
                 timeout_secs: 30,
                 output_limit: crate::capabilities::vm::api::OutputLimit::Head,
             },
         );
-        self.vm.guest_stop(&lease);
-        if !out.ok {
-            return Err(format!(
-                "构建命令失败（目标 guest「{}」）{}",
-                guest,
-                tail(&out.output)
+        // 构建失败：缓存留着（现场可复现），一个字节都不回写。
+        if !built.ok {
+            return Err(name(
+                "构建命令失败",
+                format!(
+                    "{}；缓存留在 {}（怀疑缓存陈旧就删掉宿主 .vm/build-cache）",
+                    tail(&built.output),
+                    cache::workspace(&id)
+                ),
             ));
         }
+        step(
+            "回写产物失败",
+            self.guest_script(
+                lease,
+                &cache::sync_out_script(&id, &src, &product_entries(&job.module)),
+                600,
+            ),
+        )?;
         self.finish(
-            module,
+            &job.module,
             guest,
             target_os,
-            &fingerprint,
-            &state_path,
-            &out.output,
+            &job.fingerprint,
+            &job.state_path,
+            &built.output,
         )?;
+        let _ = self.guest_script(lease, &cache::cleanup_script(&id), 120);
         Ok(Built {
-            module: module.manifest.id.clone(),
+            module: id,
             target: guest.to_string(),
             skipped: false,
-            output: out.output,
+            output: built.output,
         })
+    }
+
+    /// 目的：一段构建链内部用的 guest 脚本（输出保留开头与结尾）。
+    fn guest_script(
+        &self,
+        lease: &str,
+        script: &str,
+        timeout_secs: u64,
+    ) -> crate::kernel::api::ToolOutcome {
+        self.vm.guest_run(
+            lease,
+            &GuestRun {
+                command: script.to_string(),
+                args_json: "{}".to_string(),
+                env: Vec::new(),
+                cwd: String::new(),
+                timeout_secs,
+                output_limit: crate::capabilities::vm::api::OutputLimit::HeadAndTail,
+            },
+        )
     }
 }
 
 impl Builds for BuildsService {
-    fn ensure(&self, module: &Module, target: &Target, net: bool) -> Result<Built, String> {
+    fn ensure_many(
+        &self,
+        modules: &[&Module],
+        target: &Target,
+        net: bool,
+    ) -> Result<Vec<Built>, String> {
         let target_os = self.target_os(target)?;
-        let left = self.entries_left(module, &target_os);
-        let Some(decl) = module.manifest.build.clone() else {
-            // 没有 build 段：入口在目标环境是否可用只能看入口本身。
-            if left.is_empty() {
-                return Ok(Built {
+        let mut slots: Vec<Option<Built>> = Vec::new();
+        let mut jobs: Vec<(Module, BuildDecl)> = Vec::new();
+        let mut job_slots: Vec<usize> = Vec::new();
+        for (i, module) in modules.iter().enumerate() {
+            let left = self.entries_left(module, &target_os);
+            let skip = |slots: &mut Vec<Option<Built>>| {
+                slots.push(Some(Built {
                     module: module.manifest.id.clone(),
                     target: target.label(),
                     skipped: true,
                     output: String::new(),
-                });
+                }));
+            };
+            let Some(decl) = module.manifest.build.clone() else {
+                // 没有 build 段：入口在目标环境是否可用只能看入口本身。
+                if left.is_empty() {
+                    skip(&mut slots);
+                    continue;
+                }
+                return Err(format!(
+                    "模块 {} 的工具 {} 入口不在场：{}（模块没声明 build 段：要自带产物，或按模块 README 自己编一次）",
+                    module.manifest.id,
+                    left.first().map(|e| e.tool.as_str()).unwrap_or(""),
+                    left.first().map(|e| e.command.as_str()).unwrap_or("")
+                ));
+            };
+            // 有 build 段：入口存在不等于**这个目标**的产物。只有构建状态明确属于当前目标才跳过；
+            // 状态是别的目标（宿主产物进 guest）就重编。状态缺失视为随仓自带产物，仍跳过。
+            if left.is_empty()
+                && fp::read_state(&fp::state_path(&self.root, &module.manifest.id))
+                    .map(|prev| prev.target == target.label())
+                    .unwrap_or(true)
+            {
+                skip(&mut slots);
+                continue;
             }
-            return Err(format!(
-                "模块 {} 的工具 {} 入口不在场：{}（模块没声明 build 段：要自带产物，或按模块 README 自己编一次）",
-                module.manifest.id,
-                left.first().map(|e| e.tool.as_str()).unwrap_or(""),
-                left.first().map(|e| e.command.as_str()).unwrap_or("")
-            ));
-        };
-        // 有 build 段：入口存在不等于**这个目标**的产物。只有构建状态明确属于当前目标才跳过；
-        // 状态是别的目标（宿主产物进 guest）就交给 run 重编。状态缺失视为随仓自带产物，仍跳过。
-        if left.is_empty() {
-            let state_path = fp::state_path(&self.root, &module.manifest.id);
-            match fp::read_state(&state_path) {
-                Some(prev) if prev.target == target.label() => {
-                    return Ok(Built {
-                        module: module.manifest.id.clone(),
-                        target: target.label(),
-                        skipped: true,
-                        output: String::new(),
-                    });
-                }
-                Some(_) => return self.run(module, &decl, target, &target_os, net),
-                None => {
-                    return Ok(Built {
-                        module: module.manifest.id.clone(),
-                        target: target.label(),
-                        skipped: true,
-                        output: String::new(),
-                    });
-                }
+            job_slots.push(i);
+            slots.push(None);
+            jobs.push(((*module).clone(), decl));
+        }
+        if !jobs.is_empty() {
+            let built = self.run_jobs(jobs, target, &target_os, net)?;
+            let mut it = built.into_iter();
+            for i in job_slots {
+                slots[i] = Some(it.next().expect("构建结果与计划一一对应"));
             }
         }
-        self.run(module, &decl, target, &target_os, net)
+        Ok(slots
+            .into_iter()
+            .map(|b| b.expect("每个槽都有结果"))
+            .collect())
     }
 
     fn build(&self, module: &Module, target: &Target, net: bool) -> Result<Built, String> {
@@ -464,7 +635,52 @@ impl Builds for BuildsService {
                 module.manifest.id
             ));
         };
-        self.run(module, &decl, target, &target_os, net)
+        self.run_jobs(vec![(module.clone(), decl)], target, &target_os, net)?
+            .pop()
+            .ok_or_else(|| "构建没有给出结果".to_string())
+    }
+}
+
+/// 目的：一个待编模块的全部准备事实（包、指纹、状态落点）——批量构建时一次算好。
+struct GuestPlan {
+    module: Module,
+    decl: BuildDecl,
+    packages: Vec<PlannedPackage>,
+    providers: Vec<String>,
+    fingerprint: String,
+    state_path: PathBuf,
+}
+
+/// 目的：这批模块要的运行包合起来（同一份只留一次，顺序按第一次出现）。
+fn merged_packages<'a>(plans: impl Iterator<Item = &'a GuestPlan>) -> Vec<PlannedPackage> {
+    let mut out: Vec<PlannedPackage> = Vec::new();
+    for p in plans.flat_map(|p| p.packages.iter()) {
+        if !out.iter().any(|q| q.id == p.id && q.version == p.version) {
+            out.push(p.clone());
+        }
+    }
+    out
+}
+
+/// 目的：模块声明的工具入口（相对模块根）——回写时一律带回宿主，宿主那份可能被手工删掉。
+fn product_entries(module: &Module) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for tool in module.manifest.tools.values() {
+        if let Some(entry) = crate::capabilities::modules::api::local_entry(&tool.command) {
+            if !out.iter().any(|x| x == entry) {
+                out.push(entry.to_string());
+            }
+        }
+    }
+    out
+}
+
+/// 目的：批量构建的错误带上是哪个模块（单模块时保持原来的文案，不重复说）。
+fn module_why(id: &str, total: usize, why: String) -> String {
+    if total > 1 {
+        format!("模块 {}：{}", id, why)
+    } else {
+        why
     }
 }
 

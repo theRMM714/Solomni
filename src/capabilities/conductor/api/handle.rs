@@ -101,21 +101,32 @@ impl ConductorHandle {
         };
         let roster = self.modules.roster();
         let net = self.call(|core| Ok(core.network_allowed()))?;
-        for id in ids {
-            let Some(module) = roster.modules.iter().find(|m| &m.manifest.id == id) else {
-                // 没有这个模块：准备段会如实拒绝，这里不重复判。
-                continue;
-            };
-            let built = self
-                .builds
-                .ensure(module, &target, net)
-                .map_err(|e| format!("模块 {} 构建失败（目标 {}）：{}", id, target.label(), e))?;
-            if !built.skipped {
-                self.log.info(
-                    "conductor::create_session",
-                    &format!("已补编模块 {}（目标 {}）", id, built.target),
-                );
-            }
+        // 一批一起交给构建能力：虚拟机档只起一台 guest、一块缓存卷，不按模块反复起停。
+        let modules: Vec<&crate::capabilities::modules::api::Module> = ids
+            .iter()
+            .filter_map(|id| roster.modules.iter().find(|m| &m.manifest.id == id))
+            .collect();
+        if modules.is_empty() {
+            return Ok(());
+        }
+        let built = self
+            .builds
+            .ensure_many(&modules, &target, net)
+            // 单模块时指名模块；多个模块时内层错误已经点出是哪一个。
+            .map_err(|e| match modules.as_slice() {
+                [one] => format!(
+                    "模块 {} 构建失败（目标 {}）：{}",
+                    one.manifest.id,
+                    target.label(),
+                    e
+                ),
+                _ => format!("构建失败（目标 {}）：{}", target.label(), e),
+            })?;
+        for b in built.iter().filter(|b| !b.skipped) {
+            self.log.info(
+                "conductor::create_session",
+                &format!("已补编模块 {}（目标 {}）", b.module, b.target),
+            );
         }
         Ok(())
     }

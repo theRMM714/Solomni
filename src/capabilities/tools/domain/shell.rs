@@ -116,6 +116,27 @@ pub fn cwd_elapsed(output: &str) -> Option<(String, u64)> {
     })
 }
 
+/// 目的：共享区里的相对路径脚本被直接执行（EACCES）时，给一句"用解释器跑"的提示。
+/// 参数：`script` = 本次 shell 脚本；`output` = 执行回执。
+/// 返回：要追加的一行；不该提示时给 None。
+/// 约束：只在"非零 + Permission denied + 首 token 是相对路径"时提示——共享盘（cifs 合成权限位）不承载执行位。
+pub fn shared_exec_hint(script: &str, output: &str) -> Option<String> {
+    if !output.contains("Permission denied") {
+        return None;
+    }
+    let first = script.lines().find(|l| !l.trim().is_empty())?.trim();
+    let token = first.split_whitespace().next()?;
+    let path_like = token.contains('/') || token.contains('\\');
+    let absolute = token.starts_with('/') || token.starts_with('\\') || token.contains(":\\");
+    if !path_like || absolute {
+        return None;
+    }
+    Some(format!(
+        "\n[shell] 共享区不承载执行位：{} 不能直接执行，用解释器跑（例如 bash {} 或 sh {}）",
+        token, token, token
+    ))
+}
+
 /// 目的：这条回执带执行层的 `[shell]` 收尾行（说明守门进程已经走到跑命令这一步）。
 /// 约束：参数拒绝、严格模式拒绝与起进程失败都没有这一行；经过守门进程的围栏失败会带 111 的收尾行。
 pub fn did_run(output: &str) -> bool {
@@ -197,6 +218,30 @@ params:
         assert_eq!(
             with_scope_hint(ordinary.clone(), CallScope::Sandbox, Decision::Ask),
             ordinary
+        );
+    }
+
+    #[test]
+    fn shared_exec_hint_only_for_relative_entries_denied_by_permissions() {
+        let denied = "[stderr]\n/bin/sh: 1: ./deploy.sh: Permission denied\n";
+        assert!(shared_exec_hint("./deploy.sh --yes", denied)
+            .expect("相对路径脚本被拒要提示")
+            .contains("bash ./deploy.sh"));
+        assert!(shared_exec_hint("tools/build deploy", denied).is_some());
+        assert_eq!(
+            shared_exec_hint("/usr/bin/foo", denied),
+            None,
+            "绝对路径不是共享区入口"
+        );
+        assert_eq!(
+            shared_exec_hint("python tools/x.py", denied),
+            None,
+            "裸名（解释器）不是这条提示的对象"
+        );
+        assert_eq!(
+            shared_exec_hint("./deploy.sh", "[stderr]\nboom\n"),
+            None,
+            "不是权限拒绝就不提示"
         );
     }
 

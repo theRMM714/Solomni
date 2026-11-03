@@ -9,6 +9,7 @@ use crate::capabilities::vm::domain::guest::{
 use crate::capabilities::vm::ports::{GuestChannel, GuestVm, SharePlan, VmEngine};
 use crate::kernel::api::ToolOutcome;
 use crate::kernel::detail::procs::{self, Entry, ProcessBook};
+use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -49,6 +50,8 @@ pub struct QemuEngine {
     overlay_dir: Option<PathBuf>,
     /// 长驻子进程的账（组合根注入；None = 不记账——测试与不需要对账的场合）。
     book: Option<std::sync::Arc<ProcessBook>>,
+    /// 运行日志（组合根注入；None = 只转控制台）：QEMU 自己的话要能进 logs/ 与对账现场。
+    log: Option<std::sync::Arc<dyn crate::kernel::ports::Log + Send + Sync>>,
 }
 
 impl QemuEngine {
@@ -57,6 +60,7 @@ impl QemuEngine {
         QemuEngine {
             overlay_dir: None,
             book: None,
+            log: None,
         }
     }
 
@@ -65,6 +69,7 @@ impl QemuEngine {
         QemuEngine {
             overlay_dir: Some(dir),
             book: None,
+            log: None,
         }
     }
 
@@ -73,6 +78,96 @@ impl QemuEngine {
         self.book = Some(book);
         self
     }
+
+    /// 目的：接上运行日志（组合根注入）：QEMU 的 stderr 逐行进 logs/，同时仍转控制台。
+    pub fn with_log(
+        mut self,
+        log: std::sync::Arc<dyn crate::kernel::ports::Log + Send + Sync>,
+    ) -> QemuEngine {
+        self.log = Some(log);
+        self
+    }
+
+    /// 目的：把 QEMU 的 stderr 收成管道并持续抽干——裸字节直写 CP936 控制台会把 UTF-8 文本解成乱码。
+    /// 返回：最近几行（启动失败时拼进错误，别丢 QEMU 自己说的话）。
+    /// 约束：管道必须一直抽，否则写满会把 QEMU 卡住。
+    fn supervise_stderr(
+        &self,
+        child: &mut Child,
+    ) -> std::sync::Arc<std::sync::Mutex<VecDeque<String>>> {
+        let tail = std::sync::Arc::new(std::sync::Mutex::new(VecDeque::new()));
+        let Some(stderr) = child.stderr.take() else {
+            return tail;
+        };
+        let kept = std::sync::Arc::clone(&tail);
+        let log = self.log.clone();
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            let mut pending: Vec<u8> = Vec::new();
+            let mut reader = std::io::BufReader::new(stderr);
+            loop {
+                use std::io::Read;
+                match reader.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        pending.extend_from_slice(&buf[..n]);
+                        while let Some(at) = pending.iter().position(|b| *b == b'\n') {
+                            let line: Vec<u8> = pending.drain(..=at).collect();
+                            emit_stderr_line(&line, log.as_deref(), &kept);
+                        }
+                    }
+                }
+            }
+            if !pending.is_empty() {
+                emit_stderr_line(&pending, log.as_deref(), &kept);
+            }
+        });
+        tail
+    }
+}
+
+/// 目的：QEMU 的一行 stderr 去哪——日志、控制台与最近几行各一份。
+fn emit_stderr_line(
+    raw: &[u8],
+    log: Option<&(dyn crate::kernel::ports::Log + Send + Sync)>,
+    tail: &std::sync::Arc<std::sync::Mutex<VecDeque<String>>>,
+) {
+    let text = decode_stderr_line(raw);
+    if text.is_empty() {
+        return;
+    }
+    if let Some(log) = log {
+        log.warn("vm::qemu", &text);
+    }
+    eprintln!("[虚拟机] qemu：{}", text);
+    if let Ok(mut q) = tail.lock() {
+        q.push_back(text);
+        while q.len() > 20 {
+            q.pop_front();
+        }
+    }
+}
+
+/// 目的：把一行 stderr 字节解成可读文本——QEMU 的 Windows 错误文本是 UTF-8，按 UTF-8 宽容解码即可。
+fn decode_stderr_line(raw: &[u8]) -> String {
+    String::from_utf8_lossy(raw)
+        .trim_end_matches(['\r', '\n'])
+        .trim()
+        .to_string()
+}
+
+/// 目的：启动失败时把 QEMU 最近说的话拼进错误（没有就空串）。
+fn last_words(tail: &std::sync::Mutex<VecDeque<String>>) -> String {
+    let Ok(q) = tail.lock() else {
+        return String::new();
+    };
+    if q.is_empty() {
+        return String::new();
+    }
+    format!(
+        "；QEMU：{}",
+        q.iter().cloned().collect::<Vec<_>>().join("；")
+    )
 }
 
 /// 目的：guest 内存大小（MiB）——`-m` 与共享内存后端（vhost-user 要）必须同一尺寸，所以只写一处。
@@ -155,6 +250,14 @@ pub fn engine_args(
         spec.image.disk.display(),
         disk_format(&spec.image.disk)
     ));
+    // 构建缓存卷：第二块 virtio-blk（稀疏 qcow2）。discard / detect-zeroes 让 guest 的 fstrim 把空块还给宿主。
+    if let Some(cache) = &spec.cache_disk {
+        a.push("-drive".to_string());
+        a.push(format!(
+            "file={},if=virtio,format=qcow2,discard=unmap,detect-zeroes=unmap",
+            cache.display()
+        ));
+    }
     // 有内核就直启、由命令行给根设备；没有内核靠镜像自带引导（固件）。
     if spec.image.kernel.is_some() {
         a.push("-append".to_string());
@@ -272,11 +375,13 @@ impl VmEngine for QemuEngine {
         cmd.args(&args)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            // stderr 继承：QEMU 起不来时（固件缺失这类）错误要能看见，不能吞进 null。
-            .stderr(Stdio::inherit());
+            // stderr 收成管道再逐行转出来：QEMU 的 Windows 错误文本是 UTF-8，裸字节直写 CP936 控制台会变乱码。
+            .stderr(Stdio::piped());
         // 父死子亡（Unix）与独立进程组：核心被强杀时不许 QEMU 继续攥着镜像。
         procs::guard(&mut cmd);
         let mut child = procs::spawn(cmd).map_err(|e| format!("起不了 QEMU（{}）：{}", exe, e))?;
+        // 管道必须一直抽干（写满会把 QEMU 卡住）；同时留最近几行给启动失败用。
+        let said = self.supervise_stderr(&mut child);
         // 作业对象（Windows）/ 守门进程（macOS）：核心一死，它跟着死；挂不上只如实少一层兜底，不阻断启动。
         let launched = procs::attach(&child, "guest");
         let pid = child.id();
@@ -313,7 +418,7 @@ impl VmEngine for QemuEngine {
                 } else {
                     String::new()
                 };
-                return Err(format!("{}{}", e, hint));
+                return Err(format!("{}{}{}", e, hint, last_words(&said)));
             }
         };
         // 读超时：agent 还没起时不能让 read_line 干等——首启轮询与运行期失败都要有界。
@@ -428,6 +533,35 @@ fn qemu_img_for(engine_exe: &str) -> String {
         Some(dir) if !dir.as_os_str().is_empty() => dir.join(name).to_string_lossy().into_owned(),
         _ => name.to_string(),
     }
+}
+
+/// 目的：建一块稀疏的空盘（qcow2）——构建缓存卷用，与任何镜像无关。
+/// 参数：`engine_exe` = QEMU 可执行文件（同目录找 qemu-img）；`path` = 落点；`mib` = 虚拟大小。
+/// 错误：起不了 qemu-img 或它报失败。
+pub fn create_disk(engine_exe: &str, path: &Path, mib: u64) -> Result<(), String> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)
+            .map_err(|e| format!("建缓存卷目录失败（{}）：{}", dir.display(), e))?;
+    }
+    let out = Command::new(qemu_img_for(engine_exe))
+        .arg("create")
+        .arg("-f")
+        .arg("qcow2")
+        .arg(path)
+        .arg(format!("{}M", mib))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| format!("起不了 qemu-img（{}）：{}", qemu_img_for(engine_exe), e))?;
+    if !out.status.success() {
+        return Err(format!(
+            "建缓存卷失败：{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    Ok(())
 }
 
 /// 目的：在基础镜像上建一份每租约可写层（qcow2 覆盖）。
@@ -715,10 +849,11 @@ impl QemuHandle {
         if let Err(why) = self.sync_or_heal() {
             return fail(&why);
         }
-        let env: Vec<serde_json::Value> = run
+        // QGA 的 guest-exec 只收 "NAME=VALUE" 的字符串数组（对象形状会被它按参数类型拒掉）。
+        let env: Vec<String> = run
             .env
             .iter()
-            .map(|(k, v)| serde_json::json!({"name":k,"value":v}))
+            .map(|(k, v)| format!("{}={}", k, v))
             .collect();
         let request = if let Some(access) = access {
             let policy = serde_json::json!({
@@ -779,7 +914,8 @@ impl QemuHandle {
                 .and_then(|p| p.as_i64())
             {
                 Some(p) => p,
-                None => return fail("QGA 没给出进程号"),
+                // 回执里没有 pid 通常是一条 error（例如 QGA 拒了这次 exec）：把原话带出来，别只说"没给"。
+                None => return fail(&format!("QGA 没给出进程号：{}", v)),
             },
             Err(why) => return fail(&why),
         };
@@ -1112,6 +1248,16 @@ mod tests {
         assert!(handle.ping(), "被 RST 的那条连接要能靠重连救回来");
         server.join().expect("服务器线程");
     }
+    /// 目的：QEMU 的一行 stderr 按 UTF-8 宽容解码——中文系统错误不再被 CP936 解成乱码；坏字节也不炸。
+    #[test]
+    fn qemu_stderr_lines_decode_as_utf8() {
+        let chinese = "qemu-system-x86_64.exe: warning: failed to WSAEventSelect(): 在一个非套接字上尝试了一个操作。";
+        assert_eq!(decode_stderr_line(chinese.as_bytes()), chinese);
+        assert_eq!(decode_stderr_line(b"line\r\n"), "line");
+        assert!(decode_stderr_line(&[0xff, 0xfe, b'x']).contains('x'));
+        assert_eq!(decode_stderr_line(b"   "), "");
+    }
+
     /// 目的：便携包的固件目录认 `bin/` 的兄弟 `share/qemu`；没有就给 None（不瞎指）。
     #[test]
     fn firmware_dir_is_beside_bin() {
@@ -1182,6 +1328,7 @@ mod tests {
             shares: Vec::new(),
             seed: None,
             isolated: false,
+            cache_disk: None,
         };
         let with = engine_args(&spec, "opts", false, false, Some("http://10.0.2.2:9/"), &[]);
         assert!(
@@ -1192,6 +1339,41 @@ mod tests {
         );
         let without = engine_args(&spec, "opts", false, false, None, &[]);
         assert!(!without.iter().any(|a| a == "-smbios"), "{:?}", without);
+    }
+
+    /// 目的：给了构建缓存卷就多一块 virtio-blk（qcow2 + discard，好让 fstrim 归还空间）；没给就不加。
+    #[test]
+    fn cache_disk_becomes_a_second_virtio_drive() {
+        let image = GuestImage::linux("t", std::path::PathBuf::from("/img/root.qcow2"), None, None);
+        let spec = GuestSpec {
+            lease: "w".to_string(),
+            image,
+            mounts: Vec::new(),
+            net: false,
+            engine_path: None,
+            share_path: None,
+            shares: Vec::new(),
+            seed: None,
+            isolated: false,
+            cache_disk: None,
+        };
+        let without = engine_args(&spec, "opts", false, false, None, &[]);
+        assert!(
+            !without.iter().any(|a| a.contains("discard=unmap")),
+            "没有缓存卷就不该多一块盘：{:?}",
+            without
+        );
+        let mut with = spec.clone();
+        with.cache_disk = Some(std::path::PathBuf::from("/cache/x.qcow2"));
+        let args = engine_args(&with, "opts", false, false, None, &[]);
+        assert!(
+            args.windows(2).any(|w| w[0] == "-drive"
+                && w[1].contains("file=/cache/x.qcow2")
+                && w[1].contains("format=qcow2")
+                && w[1].contains("discard=unmap")),
+            "缓存卷要作为第二块 virtio 盘挂上：{:?}",
+            args
+        );
     }
 
     /// 目的：有可写层就把镜像的根换成它（内核仍取自基础根）；没有就原样。

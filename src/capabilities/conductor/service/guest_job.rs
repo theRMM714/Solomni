@@ -149,6 +149,7 @@ impl GuestBoot {
             seed: None,
             // 会话要每租约可写层：多台并发不能同写一份基础镜像。
             isolated: true,
+            cache_disk: None,
         };
         vm.guest_start(&spec)?;
         vm.guest_set_packages(

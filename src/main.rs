@@ -482,7 +482,8 @@ fn main() {
                 capabilities::vm::detail::QemuEngine::with_overlay_dir(
                     root.join(".vm").join("overlays"),
                 )
-                .with_book(std::sync::Arc::clone(&book)),
+                .with_book(std::sync::Arc::clone(&book))
+                .with_log(log.clone()),
             ),
             shares,
         ));

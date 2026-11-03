@@ -193,6 +193,7 @@ pub(super) fn install_guest_runtime(
             }),
             // 供给编排要改的就是基础镜像本身（装 agent / 装运行包），不能写进会被丢掉的可写层。
             isolated: false,
+            cache_disk: None,
         };
         if let Err(e) = vm.guest_start(&spec) {
             return Err(format!("首启 guest 起不来：{}", e));
@@ -239,6 +240,7 @@ pub(super) fn install_guest_runtime(
             shares: vec!["none"],
             seed: None,
             isolated: false,
+            cache_disk: None,
         };
         if let Err(e) = vm.guest_start(&spec) {
             return Err(format!("维护启动起不来：{}", e));

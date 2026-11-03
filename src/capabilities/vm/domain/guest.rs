@@ -193,6 +193,9 @@ pub struct GuestSpec {
     /// 目的：要不要给这次启动一份**每租约可写层**（会话要：多台并发不能同写一份基础镜像）。
     /// 约束：根永远是磁盘镜像，所以总建得了可写层；供给编排要改的正是基础镜像本身，填 false。
     pub isolated: bool,
+    /// 目的：构建期缓存卷（宿主上的 qcow2）——挂成第二块 virtio-blk 盘，由调用方在 guest 里挂载与对账。
+    /// 约束：只有构建 guest 给；会话 guest 与供给编排为 None（它们的盘布局不受影响）。
+    pub cache_disk: Option<PathBuf>,
 }
 
 /// 目的：一次 guest 执行要用的 per-agent 允许集（已是 guest 写法）。
@@ -257,6 +260,42 @@ pub struct GuestRun {
     pub output_limit: OutputLimit,
 }
 
+/// 目的：模块入口在 guest 本地副本里的落点（`/usr/local/lib/solomni/modules/<模块>/<入口>`）。
+/// 约束：`/usr` 在 guest 内 helper 的只读基线里（含执行位），落这里不用给围栏加新根。
+pub fn staged_entry_path(module: &str, entry: &str) -> String {
+    let rel = entry.trim_start_matches("./").replace('\\', "/");
+    format!(
+        "/usr/local/lib/solomni/modules/{}/{}",
+        safe_segment(module),
+        rel
+    )
+}
+
+/// 目的：把入口复制进 guest 本地副本的脚本——建目录、复制、给执行位，任何一步失败都非零退出。
+pub fn stage_script(src: &str, dest: &str) -> String {
+    let dir = dest.rsplit_once('/').map(|(d, _)| d).unwrap_or("/");
+    format!(
+        "mkdir -p {} && cp -f {} {} && chmod 0755 {}",
+        sh_quote(dir),
+        sh_quote(src),
+        sh_quote(dest),
+        sh_quote(dest),
+    )
+}
+
+/// 目的：路径段的安全化（模块 id 只该是一段；这里再兜一层，不让分隔符进落点）。
+fn safe_segment(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 /// 目的：把一次 guest 运行的路径译成 guest 拼法——只译**工作目录**与**本机路径型环境变量**（同方言原样）。
 /// 约束：命令与参数不动——模型看到的工作环境块给的就是 guest 拼法（见 prompts/shared/tools.yaml 的 envs）。
 pub fn translate_run(run: &GuestRun, os: GuestOs, mounts: &[GuestMount]) -> GuestRun {
@@ -286,6 +325,11 @@ pub fn translate_run(run: &GuestRun, os: GuestOs, mounts: &[GuestMount]) -> Gues
         timeout_secs: run.timeout_secs,
         output_limit: run.output_limit,
     }
+}
+
+/// 目的：宿主机上的某个文件在 guest 里的写法（挂载表优先）——落本地副本时要用它找源。
+pub(crate) fn guest_path(host: &Path, os: GuestOs, mounts: &[GuestMount]) -> String {
+    to_guest_path(host, os, mounts)
 }
 
 /// 目的：一条宿主路径 → guest 路径——**先按挂载表**（包目录挂在 /<prefix>，围栏根挂在它的 guest 点），

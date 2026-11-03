@@ -733,6 +733,7 @@ pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
         shares: Vec::new(),
         seed: None,
         isolated: false,
+        cache_disk: None,
     };
     let args = crate::capabilities::vm::detail::qemu::engine_args(
         &spec,
@@ -828,6 +829,7 @@ pub(crate) fn accelerators_and_nic_follow_the_platform_and_share_need() {
         shares: Vec::new(),
         seed: None,
         isolated: false,
+        cache_disk: None,
     };
     let expected = if cfg!(windows) {
         "accel=whpx"
@@ -931,6 +933,7 @@ pub(crate) fn disk_root_without_kernel_boots_via_firmware() {
         shares: Vec::new(),
         seed: None,
         isolated: false,
+        cache_disk: None,
     };
     let args = engine_args(&spec, "opts", false, false, None, &[]);
     assert!(
@@ -970,6 +973,7 @@ pub(crate) fn disk_root_uses_a_virtio_disk_not_9p() {
         shares: Vec::new(),
         seed: None,
         isolated: false,
+        cache_disk: None,
     };
     let args = engine_args(&spec, "opts", false, false, None, &[]);
     assert!(
@@ -1011,6 +1015,7 @@ pub(crate) fn share_syncs_around_each_run_and_releases_on_stop() {
         shares: Vec::new(),
         seed: None,
         isolated: false,
+        cache_disk: None,
     };
     vm.guest_start(&spec).expect("起 guest");
     let run = GuestRun {
@@ -1097,6 +1102,7 @@ pub(crate) fn provision_vm_holds_internal_none_share() {
         shares: vec!["none"],
         seed: None,
         isolated: false,
+        cache_disk: None,
     };
     vm.guest_start(&spec)
         .expect("补齐面要能用内部 none 档起 guest");
@@ -1184,6 +1190,7 @@ pub(crate) fn disk_image_base_is_classified_as_a_disk_root() {
             shares: Vec::new(),
             seed: None,
             isolated: false,
+            cache_disk: None,
         },
         "opts",
         false,
@@ -1227,6 +1234,7 @@ pub(crate) fn vm_service_refuses_unfit_engine_and_share_with_a_reason() {
         shares: Vec::new(),
         seed: None,
         isolated: false,
+        cache_disk: None,
     };
     let why = svc.guest_start(&spec).expect_err("架构不匹配要被拒绝");
     assert!(why.contains("承载不了"), "{}", why);
@@ -1245,6 +1253,7 @@ pub(crate) fn vm_service_refuses_unfit_engine_and_share_with_a_reason() {
         shares: Vec::new(),
         seed: None,
         isolated: false,
+        cache_disk: None,
     };
     let why2 = svc.guest_start(&spec2).expect_err("共享落不上要被拒绝");
     assert!(why2.contains("落不到引擎"), "{}", why2);
@@ -1778,6 +1787,7 @@ pub(crate) fn share_is_picked_per_guest_at_start() {
         shares,
         seed: None,
         isolated: false,
+        cache_disk: None,
     };
     // 第一档落不上 → 用第二档（顺序就是候选给的顺序）。
     vm.guest_start(&spec("w1", vec!["slow", "fast"]))
@@ -1886,6 +1896,7 @@ pub(crate) fn test_vm_holds_a_share_for_each_platform_chain() {
             shares: vec![share],
             seed: None,
             isolated: false,
+            cache_disk: None,
         };
         svc.guest_start(&spec)
             .unwrap_or_else(|why| panic!("测试 vm 面要持有 {share} 替身：{why}"));
@@ -1931,6 +1942,7 @@ pub(crate) fn emergency_share_is_not_picked_without_an_explicit_candidate() {
         shares,
         seed: None,
         isolated: false,
+        cache_disk: None,
     };
     svc.guest_start(&spec("w1", Vec::new()))
         .expect("空候选应该只用用户档");
@@ -2080,6 +2092,7 @@ pub(crate) fn vm_service_holds_guests_by_lease() {
         shares: Vec::new(),
         seed: None,
         isolated: false,
+        cache_disk: None,
     };
     vm.guest_start(&spec).expect("替身一定能起");
     let run = GuestRun {
@@ -2169,6 +2182,7 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
         shares: Vec::new(),
         seed: None,
         isolated: true,
+        cache_disk: None,
     };
     // 共享后端按平台用户链选（与组合根同一份判据）：smb(Windows) > virtiofs > 9p。
     // 没有可用的用户档就如实跳过探针——copy 是开发/应急通道，不在这里兜底。
@@ -2225,6 +2239,35 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
             output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
     };
     let out = guest.channel().exec(&run);
+    // 执行物本地化：共享盘不承载执行位——把脚本落进 guest 本地副本，再**直接执行**它（不是 `sh 它`）。
+    let script = share.join("deploy.sh");
+    std::fs::write(&script, "#!/bin/sh\necho DEPLOY_OK\n").expect("写共享区脚本");
+    let dest = crate::capabilities::vm::domain::guest::staged_entry_path("probe", "deploy.sh");
+    let staged = guest.channel().exec(&GuestRun {
+        command: crate::capabilities::vm::domain::guest::stage_script(
+            &format!("{guest_dir}/deploy.sh"),
+            &dest,
+        ),
+        args_json: "{}".to_string(),
+        env: Vec::new(),
+        cwd: String::new(),
+        timeout_secs: 30,
+        output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
+    });
+    assert!(staged.ok, "把入口落进 guest 本地失败：{}", staged.output);
+    let ran = guest.channel().exec(&GuestRun {
+        command: dest,
+        args_json: "{}".to_string(),
+        env: Vec::new(),
+        cwd: String::new(),
+        timeout_secs: 30,
+        output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
+    });
+    assert!(
+        ran.ok && ran.output.contains("DEPLOY_OK"),
+        "本地副本要能直接执行：{}",
+        ran.output
+    );
     // per-agent 围栏：A 只拿到自己的沙箱，B 的沙箱必须被 guest 内 helper 拒绝。
     let access = crate::capabilities::vm::domain::guest::GuestAccess {
         agent: "a".to_string(),
@@ -2414,6 +2457,7 @@ pub(crate) fn vm_live_two_guests_share_one_base_without_writing_it() {
         shares: Vec::new(),
         seed: None,
         isolated: true,
+        cache_disk: None,
     };
     let mut a = engine
         .boot(&spec("vm-live-a"), &plan)
@@ -2511,6 +2555,7 @@ pub(crate) fn vm_live_cancel_kills_the_guest_process_tree() {
         shares: Vec::new(),
         seed: None,
         isolated: true,
+        cache_disk: None,
     };
     let mut guest = engine.boot(&spec, &plan).expect("起 guest");
     // guest 内的允许集：/tmp 读写，其它一切按 Landlock 拒绝。
@@ -2695,6 +2740,7 @@ pub(crate) fn guests_on_different_leases_run_concurrently() {
             shares: Vec::new(),
             seed: None,
             isolated: false,
+            cache_disk: None,
         })
         .expect("拉起");
     }
@@ -2921,6 +2967,7 @@ pub(crate) fn vm_service_runs_fenced_and_records_packages() {
         shares: Vec::new(),
         seed: None,
         isolated: false,
+        cache_disk: None,
     };
     svc.guest_start(&spec).expect("起替身 guest");
     svc.guest_set_packages("w", vec!["python@3.12".to_string()]);
@@ -3001,6 +3048,36 @@ pub(crate) fn stable_roots_cover_the_work_tree_and_module_tree() {
         rw
     );
     assert!(ro_tree.is_empty(), "模块 userdata 要可写，稳定根进 rw");
+}
+
+/// 目的：模块入口落 guest 本地副本——落点在 /usr/local/lib/solomni（guest 内 helper 的只读基线已放行 /usr），
+///   脚本先建目录、再复制、最后给执行位；声明里的 `./` 前缀不能带进落点。
+#[test]
+pub(crate) fn module_entries_are_staged_into_a_local_copy() {
+    use crate::capabilities::vm::domain::guest::{stage_script, staged_entry_path};
+    assert_eq!(
+        staged_entry_path("indexer", "build/indexer"),
+        "/usr/local/lib/solomni/modules/indexer/build/indexer"
+    );
+    assert_eq!(
+        staged_entry_path("indexer", "./tools/build"),
+        "/usr/local/lib/solomni/modules/indexer/tools/build",
+        "声明里的 ./ 前缀不能带进落点"
+    );
+    let script = stage_script(
+        "/solomni-host/d/proj/modules/indexer/build/indexer",
+        "/usr/local/lib/solomni/modules/indexer/build/indexer",
+    );
+    assert!(
+        script.starts_with("mkdir -p '/usr/local/lib/solomni/modules/indexer/build'"),
+        "{}",
+        script
+    );
+    assert!(
+        script.contains("&& cp -f ") && script.contains("&& chmod 0755 "),
+        "{}",
+        script
+    );
 }
 
 /// 目的：新子会话只在活 guest 缺包时才重建；包已覆盖就直接加入，不做运行包动态加载。

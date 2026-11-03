@@ -2378,6 +2378,17 @@ impl crate::capabilities::vm::api::Vm for RecordingVm {
         }
     }
 
+    fn stage_exec(
+        &self,
+        _lease: &str,
+        _module: &str,
+        _host: &std::path::Path,
+        entry: &str,
+    ) -> Result<String, String> {
+        // 替身没有 guest 本地副本：按声明的入口原样返回（调用方重写后命令不变）。
+        Ok(entry.to_string())
+    }
+
     fn guest_packages(&self, lease: &str) -> Option<Vec<String>> {
         self.packages.lock().expect("锁").get(lease).cloned()
     }

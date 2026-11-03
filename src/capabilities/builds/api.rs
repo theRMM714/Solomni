@@ -38,35 +38,49 @@ pub struct Built {
     pub output: String,
 }
 
-/// 目的：构建能力的用例面——"确保这个模块在目标环境里有能直接跑的入口"。
+/// 目的：构建能力的用例面——"确保这批模块在目标环境里都有能直接跑的入口"。
 pub trait Builds: Send + Sync {
-    /// 目的：确保模块在目标环境里有能直接跑的入口：入口与 `build-state.target` 都匹配才跳过；
-    /// 不在场、或状态是别的目标就照 `build:` 编一次；没有状态视为随仓自带产物。
-    /// 参数：`module` = 模块（清单事实）；`target` = 目标环境；`net` = 这次构建放不放行出站网络（全局开关与模块声明取交集）。
-    /// 返回：这次的事实（是否跳过、构建输出）。
+    /// 目的：确保这批模块在目标环境里都有能直接跑的入口：入口与 `build-state.target` 都匹配才跳过；
+    /// 不在场、或状态是别的目标就照 `build:` 编一次；没有状态视为随仓自带产物。一批共用一次构建
+    /// （虚拟机档一台 guest、一块缓存卷），不按模块反复起停。
+    /// 参数：`modules` = 模块（清单事实）；`target` = 目标环境；`net` = 这次构建放不放行出站网络（全局开关与模块声明取交集）。
+    /// 返回：每个模块这次的事实（顺序与 `modules` 一致；是否跳过、构建输出）。
     /// 错误：入口不在场且模块没声明 `build:`、构建期能力缺失、构建命令失败、编完入口仍不在场——都如实拒绝并给原因。
-    fn ensure(&self, module: &Module, target: &Target, net: bool) -> Result<Built, String>;
+    fn ensure_many(
+        &self,
+        modules: &[&Module],
+        target: &Target,
+        net: bool,
+    ) -> Result<Vec<Built>, String>;
     /// 目的：按声明编一次（`--build` 的语义）：入口在场也看源指纹，变了就重编，没变就跳过。
-    /// 参数：同 `ensure`。
+    /// 参数：同 `ensure_many`（只是单个）。
     /// 返回：这次的事实（是否跳过、构建输出）。
     /// 错误：模块没声明 `build:`、构建期能力缺失、构建命令失败、编完入口仍不在场。
     fn build(&self, module: &Module, target: &Target, net: bool) -> Result<Built, String>;
 }
 
 /// 目的：未接入的构建面——测试装配用的默认值（生产组合根一律注入真实现）。
-/// 约束：`ensure` 一律"跳过"（不补编，入口判据照旧由准备段执行）；`build` 如实失败。
+/// 约束：`ensure_many` 一律"跳过"（不补编，入口判据照旧由准备段执行）；`build` 如实失败。
 #[cfg(test)]
 pub struct NoBuilds;
 
 #[cfg(test)]
 impl Builds for NoBuilds {
-    fn ensure(&self, module: &Module, target: &Target, _net: bool) -> Result<Built, String> {
-        Ok(Built {
-            module: module.manifest.id.clone(),
-            target: target.label(),
-            skipped: true,
-            output: String::new(),
-        })
+    fn ensure_many(
+        &self,
+        modules: &[&Module],
+        target: &Target,
+        _net: bool,
+    ) -> Result<Vec<Built>, String> {
+        Ok(modules
+            .iter()
+            .map(|module| Built {
+                module: module.manifest.id.clone(),
+                target: target.label(),
+                skipped: true,
+                output: String::new(),
+            })
+            .collect())
     }
     fn build(&self, _module: &Module, _target: &Target, _net: bool) -> Result<Built, String> {
         Err("构建能力未接入".to_string())

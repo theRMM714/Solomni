@@ -277,10 +277,11 @@ fn host_build_failure_is_honest_and_leaves_no_state() {
     assert!(err.contains("没声明 build 段"), "错误要指到声明：{}", err);
 }
 
-/// 目的：真机验收（默认跳过）：虚拟机档构建——在 guest 里编出产物，产物经挂载落回模块目录。
-#[cfg(unix)]
+/// 目的：真机验收（默认跳过）：虚拟机档构建——在 guest 本地工作区里编，产物按差异回写模块目录。
+/// 约束：只在 `SOLOMNI_VM_LIVE=1` 且 QEMU 与虚拟根（`SOLOMNI_VM_GUEST`，默认 `debian`）都在场时跑；否则 [探针] 如实跳过。
+/// 约束：断言落在**产物回写与内容**上，不断言宿主文件的执行位——虚拟机档的执行由 guest 本地副本承担。
 #[test]
-fn guest_build_makes_the_entry_in_the_guest() {
+fn guest_build_writes_products_back_from_the_local_workspace() {
     use crate::kernel::detail::process::ProcTools;
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
@@ -289,6 +290,7 @@ fn guest_build_makes_the_entry_in_the_guest() {
         eprintln!("[探针] 未开启虚拟机档构建的真机验收：设 SOLOMNI_VM_LIVE=1 后重跑");
         return;
     }
+    let guest = std::env::var("SOLOMNI_VM_GUEST").unwrap_or_else(|_| "debian".to_string());
     let repo = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let deps = crate::capabilities::provision::api::Provision::status(
         &crate::capabilities::provision::ProvisionService::new(&repo),
@@ -298,21 +300,30 @@ fn guest_build_makes_the_entry_in_the_guest() {
     let has_qemu = deps
         .iter()
         .any(|d| d.present && d.id.starts_with("vm.qemu."));
-    let has_guest = repo.join(".vm").join("guest").join("debian").is_dir();
+    let has_guest = repo.join(".vm").join("guest").join(&guest).is_dir();
     if !has_qemu || !has_guest {
-        eprintln!("[探针] 本机没有可用的 QEMU 或虚拟根 debian，跳过虚拟机档构建验收");
+        eprintln!(
+            "[探针] 本机没有可用的 QEMU 或虚拟根 {}，跳过虚拟机档构建验收",
+            guest
+        );
         return;
     }
-    // 夹具根借仓库的 `.vm`（虚拟根、QEMU、包库都在那儿）；跑完删链本身，不碰仓库那份。
+    // 夹具根借仓库的 `.vm`（虚拟根、QEMU、包库与缓存卷都在那儿）；跑完只删链本身，不碰仓库那份。
     let root = crate::tests::scratch("guest-build");
-    std::os::unix::fs::symlink(repo.join(".vm"), root.join(".vm")).expect("链 .vm");
+    link_vm(&repo.join(".vm"), &root.join(".vm")).expect("链 .vm");
     let module_dir = root.join("modules").join("greet");
-    std::fs::create_dir_all(&module_dir).expect("建模块目录");
+    std::fs::create_dir_all(module_dir.join("tools")).expect("建模块目录");
     std::fs::write(
         module_dir.join("module.yaml"),
-        "id: greet\nbrief: 虚拟机档构建用例\nsystem: 用法：打招呼\nbuild:\n  command: \"mkdir -p build && printf '#!/bin/sh\\necho GUEST-OK\\n' > build/hello && chmod +x build/hello\"\ntools:\n  hi:\n    command: build/hello\n",
+        "id: greet\nbrief: 虚拟机档构建用例\nsystem: 用法：打招呼\nbuild:\n  command: tools/build\ntools:\n  hi:\n    command: build/hello\n",
     )
     .expect("写模块清单");
+    // 构建脚本写一个能直接跑的产物：脚本本身由产品在 guest 本地给执行位，不靠共享盘。
+    std::fs::write(
+        module_dir.join("tools").join("build"),
+        "#!/bin/sh\nset -e\nmkdir -p build\nprintf '#!/bin/sh\\necho GUEST-OK\\n' > build/hello\n",
+    )
+    .expect("写构建脚本");
     let Some(exe) = crate::tests::doubles::built_exe() else {
         eprintln!("[探针] 未找到已构建的可执行文件，跳过虚拟机档构建验收");
         return;
@@ -326,29 +337,66 @@ fn guest_build_makes_the_entry_in_the_guest() {
     let builds = builds_service(&root, runner);
     // 同一个虚拟根不能被两台 guest 同时写：真机用例之间串行（见 doubles::live_guest_lock）。
     let _live = crate::tests::doubles::live_guest_lock();
+    let module = module_of(&root, "greet");
     let built = builds
-        .build(
-            &module_of(&root, "greet"),
-            &Target::Guest("debian".to_string()),
-            false,
-        )
+        .ensure_many(&[&module], &Target::Guest(guest.clone()), false)
         .expect("guest 里要能编出产物");
-    // 先清理：状态文件写在借来的 `.vm` 里（别留下夹具的痕迹）。
-    let _ = std::fs::remove_file(root.join(".vm").join("build-state").join("greet.json"));
-    let _ = std::fs::remove_file(root.join(".vm"));
-    assert!(!built.skipped);
+    assert!(!built[0].skipped, "第一次要真编：{:?}", built[0]);
     let artifact = module_dir.join("build").join("hello");
     assert!(
         artifact.is_file(),
-        "产物要经挂载落回模块目录：{}",
+        "产物要按差异回写模块目录：{}",
         artifact.display()
     );
-    use std::os::unix::fs::PermissionsExt;
-    let mode = std::fs::metadata(&artifact)
-        .expect("读权限")
-        .permissions()
-        .mode();
-    assert!(mode & 0o111 != 0, "产物要能直接跑（拿到 {:o}）", mode);
+    let text = std::fs::read_to_string(&artifact).expect("读产物");
+    assert!(
+        text.contains("GUEST-OK"),
+        "产物内容要来自 guest 里的构建：{}",
+        text
+    );
+    // 缓存卷落在借来的 `.vm` 下：卷在场才说明构建确实用了本地工作区。
+    let volume = root
+        .join(".vm")
+        .join("build-cache")
+        .join(format!("{}.qcow2", guest));
+    assert!(volume.is_file(), "构建缓存卷要在：{}", volume.display());
+    // 收尾：状态文件写在借来的 `.vm` 里，链接本身也要删掉（别留下夹具的痕迹）。
+    let _ = std::fs::remove_file(root.join(".vm").join("build-state").join("greet.json"));
+    unlink_vm(&root.join(".vm"));
+}
+
+/// 目的：把仓库的 `.vm` 链到夹具根——unix 用符号链接，Windows 用 junction（不需要管理员）。
+fn link_vm(target: &std::path::Path, link: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(target, link)
+    }
+    #[cfg(windows)]
+    {
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(std::io::Error::other("mklink /J 失败"))
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (target, link);
+        Err(std::io::Error::other("这个平台没有夹具链接的写法"))
+    }
+}
+
+/// 目的：删掉夹具链接本身（Windows 的 junction 只认 `remove_dir`）。
+fn unlink_vm(link: &std::path::Path) {
+    let _ = std::fs::remove_file(link);
+    let _ = std::fs::remove_dir(link);
 }
 
 /// 目的：清单事实（构建用例要拿模块对象）。
@@ -486,9 +534,9 @@ fn ensure_rebuilds_when_the_target_changed() {
     )
     .expect("写旧目标状态");
     let again = builds
-        .ensure(&module, &Target::Host, false)
+        .ensure_many(&[&module], &Target::Host, false)
         .expect("目标变化后重编");
-    assert!(!again.skipped, "目标不匹配不能算缓存命中");
+    assert!(!again[0].skipped, "目标不匹配不能算缓存命中");
     assert_eq!(build_runs(&module_dir), 2, "构建命令要真重跑一次");
     assert!(artifact.is_file(), "产物仍在：{}", artifact.display());
     let state: serde_json::Value = serde_json::from_str(
@@ -500,9 +548,9 @@ fn ensure_rebuilds_when_the_target_changed() {
     // 随仓自带产物没有 build-state：不能因为缺状态就反复重编。
     std::fs::remove_file(root.join(".vm").join("build-state").join("hello.json")).expect("删状态");
     let prebuilt = builds
-        .ensure(&module, &Target::Host, false)
+        .ensure_many(&[&module], &Target::Host, false)
         .expect("自带产物可跳过");
-    assert!(prebuilt.skipped, "没有构建状态时按自带产物跳过");
+    assert!(prebuilt[0].skipped, "没有构建状态时按自带产物跳过");
     assert_eq!(build_runs(&module_dir), 2, "跳过时构建命令不再跑");
 }
 
@@ -518,14 +566,22 @@ fn activating_a_session_ensures_the_target_build() {
         calls: Arc<AtomicUsize>,
     }
     impl Builds for CountingBuilds {
-        fn ensure(&self, module: &Module, target: &Target, _net: bool) -> Result<Built, String> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(Built {
-                module: module.manifest.id.clone(),
-                target: target.label(),
-                skipped: true,
-                output: String::new(),
-            })
+        fn ensure_many(
+            &self,
+            modules: &[&Module],
+            target: &Target,
+            _net: bool,
+        ) -> Result<Vec<Built>, String> {
+            self.calls.fetch_add(modules.len(), Ordering::SeqCst);
+            Ok(modules
+                .iter()
+                .map(|module| Built {
+                    module: module.manifest.id.clone(),
+                    target: target.label(),
+                    skipped: true,
+                    output: String::new(),
+                })
+                .collect())
         }
         fn build(&self, _module: &Module, _target: &Target, _net: bool) -> Result<Built, String> {
             Err("启用用例不走 build".to_string())

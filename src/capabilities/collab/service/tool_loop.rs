@@ -628,6 +628,12 @@ fn run_shell(
         };
         ctx.tools.run_shell(&run)
     };
+    // 共享区不承载执行位：相对路径脚本被直接执行（EACCES）时，补一句"用解释器跑"的出路。
+    if !outcome.ok {
+        if let Some(hint) = api::shared_exec_hint(&call.script, &outcome.output) {
+            outcome.output.push_str(&hint);
+        }
+    }
     // 回执补「落点 + 本次耗时」：模型据此判断相对路径与耗时，回放也从这一行派生。
     // 只对执行层给出 `[shell]` 收尾行的调用追加；参数拒绝 / 起进程失败没有这一行。
     if api::did_run(&outcome.output) {
@@ -746,10 +752,29 @@ pub(crate) fn dispatch_external(
                         deny(ctx, "这条虚拟机档会话没有 guest 租约".to_string()),
                     );
                 }
+                // 共享盘不承载执行位：模块声明的相对入口先落进 guest 本地副本，再把首 token 换成它
+                // （cwd 仍是共享的模块根，数据与 userdata 不动）。
+                let declared = command.trim_start();
+                let dispatched = match crate::capabilities::modules::api::local_entry(declared) {
+                    Some(entry) => {
+                        match ctx.vm.stage_exec(
+                            &ctx.guest_lease,
+                            &module,
+                            &mt.root.join(entry),
+                            entry,
+                        ) {
+                            Ok(staged) => {
+                                format!("{}{}", staged, &declared[entry.len()..])
+                            }
+                            Err(why) => return (module, deny(ctx, why)),
+                        }
+                    }
+                    None => declared.to_string(),
+                };
                 ctx.vm.guest_run_fenced(
                     &ctx.guest_lease,
                     &crate::capabilities::vm::api::GuestRun {
-                        command: command.to_string(),
+                        command: dispatched,
                         args_json: inv.args_json.clone(),
                         env: env.to_vec(),
                         cwd: mt.root.display().to_string(),

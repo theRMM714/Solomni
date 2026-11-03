@@ -127,8 +127,15 @@
 copy 不在任何用户链里；只有进程级开发/应急开关（`SOLOMNI_VM_SHARE=copy`）会把它作为该进程 VM 会话的唯一候选，并在日志里警告性能不可用。自定义 guest 没有声明本平台可承载的客户端时，`tier_readiness` 在起 guest 前拒绝。
 
 - **root 只能是一份磁盘镜像**（qcow2 / raw ext4；`classify_base` 只认这个）：会话每次叠一份每租约可写层，谁也不写基础镜像；有内核就直启（`root=/dev/vda`），没有就靠镜像自带引导。需要共享时 guest 拿 `restrict=on` 的网卡（出站全断，`guestfwd` 内部隧道可用）。
-- **模块构建也能落 guest**（创建会话前自动补编；手动入口是 `solomni --build=<模块 id> --guest=<虚拟根>`，见 [builds](../builds/README.md)）：模块目录以读写挂进 guest、构建期能力按 `needs` 装载，
-  在 guest 里用它的编译包编，产物经挂载直接落回宿主那份模块目录（宿主工具链不进这条链）。
+- **模块构建也能落 guest**（创建会话前自动补编；手动入口是 `solomni --build=<模块 id> --guest=<虚拟根>`，见 [builds](../builds/README.md)）：
+  共享盘只承担**数据面**（源、产物、userdata 的权威副本），**程序面**在 guest 本地。构建在缓存卷上的工作区里发生
+  （`.vm/build-cache/<虚拟根>.qcow2`，16 GiB 稀疏，挂到 `/var/lib/solomni/build`）：源从共享盘复制进来、`HOME`/`TMPDIR` 也在卷上，
+  构建成功后按**差异**把新增/修改的文件 + 模块声明入口回写宿主那份模块目录，`userdata/` 永不参与；失败一个字节都不回写。
+  卷与模块各有一份环境标识（镜像/runtimes、`needs`+实际提供者），变了就清对应范围；卷挂不上会重建文件系统再挂；
+  同一虚拟根一把构建锁（不并写），构建完 `fstrim` 把空块还给宿主。批次补编共用一台 guest 与一块卷。
+  会话里**要执行的相对入口**（`tools.*.command` 的首 token）复制到 `/usr/local/lib/solomni/modules/<模块>/<入口>` 并给执行位，
+  cwd 仍是共享的模块根（数据与 userdata 不动）——共享盘（cifs 的合成权限位）不承载执行位，脚本一律用解释器跑（`bash x.sh`）。
+  宿主工具链不进这条链。
 - **prefix 包**：`packages` 选出的 `kind: prefix` 包只读挂在 `/<prefix>`；起 guest 后把它的 `<prefix>/bin/*` 软链进 `/usr/local/bin`，模块声明的裸名命令因此在 guest 里可用。
 - **system 包**：载荷按 `provides_paths` **叠写**进系统路径（复制合并 + "已叠"标记，不挂载覆盖）。
 - **包库在 `packages` 单元**：契约、扫描与选包都在那里；`vm` 只消费 `PackagePlan` 做挂载/软链/叠写，不再持有 `PackageSource`。

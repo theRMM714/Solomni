@@ -3,6 +3,7 @@
 //! 不管：纯逻辑实现（domain/）与端口（ports.rs）；运行包契约与选包在 packages 能力。
 //! 联动：被 conductor / collab / cli 与入口层消费。
 
+pub use crate::capabilities::vm::detail::qemu::create_disk;
 pub use crate::capabilities::vm::domain::exec::resolve_guest;
 pub use crate::capabilities::vm::domain::exec::{
     admit_guest, capability_refusal, copy_share_enabled, diagnose_text_for, guest_platform,
@@ -41,6 +42,18 @@ pub trait Vm: Send + Sync {
     ) -> crate::kernel::api::ToolOutcome {
         self.guest_run_fenced(lease, run, fence)
     }
+    /// 目的：把模块声明的相对入口复制进 guest 本地并给执行位（共享盘不承载执行位：cifs 的合成权限位没有 x）。
+    /// 参数：`lease` = 会话租约；`module` = 模块 id（落点目录）；`host` = 宿主上的入口文件；`entry` = 相对模块根的入口。
+    /// 返回：guest 里的绝对路径（调用方据此重写命令的首个 token）。
+    /// 错误：入口不合法或读不到、复制或 chmod 失败、租约不在场——都如实拒绝（不回退到共享路径执行）。
+    fn stage_exec(
+        &self,
+        lease: &str,
+        module: &str,
+        host: &std::path::Path,
+        entry: &str,
+    ) -> Result<String, String>;
+
     /// 目的：这台 guest 启动时装载的运行包（id@version，排序去重）；没有活 guest = None。
     fn guest_packages(&self, lease: &str) -> Option<Vec<String>>;
     /// 目的：把本次启动实际装载的运行包记进租约（供"新子会话要不要重建"判断）。
