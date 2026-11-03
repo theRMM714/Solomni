@@ -67,7 +67,7 @@ impl StorageService {
                     // 30 秒一醒：策略改了（关掉 / 调间隔）最多半分钟就生效，不必重启。
                     std::thread::sleep(std::time::Duration::from_secs(30));
                     let policy = me.policy();
-                    if !policy.auto_gc {
+                    if !policy.periodic_gc {
                         last = std::time::Instant::now();
                         continue;
                     }
@@ -313,10 +313,8 @@ impl Storage for StorageService {
     }
 
     fn ensure_headroom(&self, protect: Option<&str>) -> Result<GcReport, String> {
+        // 构建 / 起 guest 前的 headroom 是安全闸，不受“周期回收”开关控制。
         let policy = self.policy();
-        if !policy.auto_gc {
-            return Ok(GcReport::default());
-        }
         let report = self.scan(false)?;
         let min_free = policy.min_free_gib.saturating_mul(GIB);
         let over = report.managed_bytes > report.cap_bytes;

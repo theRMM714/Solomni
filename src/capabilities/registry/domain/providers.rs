@@ -299,8 +299,8 @@ pub struct WindowsSandbox {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct StorageSettings {
-    /// 目的：到上限 / 构建前自动回收一次，并按间隔做全局回收；false = 只手动。
-    pub auto_gc: bool,
+    /// 目的：启用全局周期回收；构建前 headroom 始终启用，不受它控制。
+    pub periodic_gc: bool,
     /// 目的：全局自动回收间隔（分钟）；至少 15，默认 15。
     pub gc_interval_minutes: u64,
     /// 目的：可回收缓存总预算（GiB）；0 = 按磁盘 10% 自动，夹在 10–50 GiB。
@@ -318,7 +318,7 @@ pub struct StorageSettings {
 impl Default for StorageSettings {
     fn default() -> Self {
         StorageSettings {
-            auto_gc: true,
+            periodic_gc: true,
             gc_interval_minutes: 15,
             cache_cap_gib: 20,
             cache_keep_days: 30,

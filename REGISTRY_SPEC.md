@@ -145,7 +145,7 @@ virtiofsd_path: ""     # 虚拟机档共享后端要用的外部程序路径（�
 smbd_path: ""          # 虚拟机档 smb 共享档要用的外部 helper 路径（默认空 = 判据每次取用时采用项目内补齐的 helper；否则兜底看 PATH）
 max_guests: 2          # 虚拟机档同时最多几台 guest（0 = 不限制；每台固定 -m 2048 -smp 2）
 storage:               # 可回收缓存的空间预算与保留策略（不影响会话/虚拟根/模块产物）
-  auto_gc: true        # 到上限 / 构建前自动回收一次，并按间隔做全局回收；false = 只手动
+  periodic_gc: true    # 启用全局周期回收；构建前 headroom 始终启用
   gc_interval_minutes: 15 # 全局自动回收间隔（分钟，至少 15）
   cache_cap_gib: 20    # 可回收缓存总预算（GiB）；0 = 按磁盘 10%，夹 10–50 GiB
   cache_keep_days: 30  # 超过多久未使用可回收（天）；0 = 不按龄
@@ -167,7 +167,7 @@ discuss_remind_cap: 3  # 讨论里一轮内对同一个成员最多提醒几次�
   见 [docs/session/session-model.md](docs/session/session-model.md)。
 - `storage` 只约束**可回收缓存**（构建缓存卷 / 下载缓存 / 过期可写层 / 日志），不约束会话、虚拟根、模块产物；
   到上限先回收一次，不拒绝构建；只有宿主剩余低于 `min_free_gib` 且回收后仍低才拒绝。字段范围保存时校验。
-  `auto_gc=false` 关闭全部自动回收（含构建前 headroom），只保留手动入口；`gc_interval_minutes` 控制全局周期回收，
+  `periodic_gc=false` 只关闭全局周期回收；构建前 headroom 始终保留。`gc_interval_minutes` 控制全局周期回收，
   默认且最小 15 分钟，改设置最多 30 秒生效、不重启。
 - `compact_at_percent` / `compact_keep_percent` 都按**模型窗口**算：前者是自动压缩阈值（0 = 关），
   后者是压缩时至少保留的最近内容（0 = 只留摘要）。压缩只改“发给模型什么”，转录完整保留；

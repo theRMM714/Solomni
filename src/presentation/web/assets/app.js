@@ -2590,14 +2590,14 @@ function settingsForm() {
     Object.entries(sd.tools || {}).map(([k, v]) => k + '=' + v),
   );
   const st = state.settings.storage || {};
-  const stAuto = checkbox('到上限 / 构建前自动回收一次，并按间隔做全局回收（关掉只手动）', st.auto_gc !== false);
+  const stPeriodic = checkbox('启用全局周期回收（关掉只停周期；构建前 headroom 始终启用）', st.periodic_gc !== false);
   const stInterval = numberInput('全局自动回收间隔（分钟，至少 15）', st.gc_interval_minutes == null ? 15 : st.gc_interval_minutes, 15, 10080);
   const stCap = numberInput('可回收缓存总预算（GiB；0 = 按磁盘 10%）', st.cache_cap_gib == null ? 20 : st.cache_cap_gib, 0, 4096);
   const stKeep = numberInput('超过多少天未使用可回收（0 = 不按龄）', st.cache_keep_days == null ? 30 : st.cache_keep_days, 0, 3650);
   const stVolume = numberInput('新构建缓存卷大小（GiB）', st.build_volume_gib == null ? 16 : st.build_volume_gib, 1, 1024);
   const stFree = numberInput('宿主最低剩余空间（GiB）', st.min_free_gib == null ? 2 : st.min_free_gib, 0, 1024);
   const stLog = numberInput('日志保留天数（0 = 不按龄）', st.log_keep_days == null ? 14 : st.log_keep_days, 0, 3650);
-  return { stream, cot, to, remind, pct, keep, compactModel, guests, thinkLevels, network, writeAcl, enFs, enNet, enTree, enEnv, onUnavailable, hostRoots, hardDeny, defProfile, defSharedRead, defSharedWrite, defTools, stAuto, stInterval, stCap, stKeep, stVolume, stFree, stLog };
+  return { stream, cot, to, remind, pct, keep, compactModel, guests, thinkLevels, network, writeAcl, enFs, enNet, enTree, enEnv, onUnavailable, hostRoots, hardDeny, defProfile, defSharedRead, defSharedWrite, defTools, stPeriodic, stInterval, stCap, stKeep, stVolume, stFree, stLog };
 }
 
 /// 1 页：生成与上下文。
@@ -2666,7 +2666,7 @@ function buildResourcesPage(c, f) {
 
 /// 5 页：存储空间（盘点 + 回收 + 显式清理 + 策略）。
 function buildStoragePage(c, f) {
-  c.body.appendChild(f.stAuto.wrap);
+  c.body.appendChild(f.stPeriodic.wrap);
   c.body.appendChild(f.stInterval.wrap);
   c.body.appendChild(f.stCap.wrap);
   c.body.appendChild(f.stKeep.wrap);
@@ -2822,7 +2822,7 @@ function collectSettings(f) {
     compact_model: f.compactModel.value || '',
     max_guests: Number(f.guests.input.value) || 0,
     storage: {
-      auto_gc: f.stAuto.box.checked,
+      periodic_gc: f.stPeriodic.box.checked,
       gc_interval_minutes: Number(f.stInterval.input.value) || 15,
       cache_cap_gib: Number(f.stCap.input.value) || 0,
       cache_keep_days: Number(f.stKeep.input.value) || 0,
