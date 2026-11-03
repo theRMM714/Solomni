@@ -5,7 +5,7 @@
 
 use super::*;
 use crate::capabilities::conductor::domain::proxy as d;
-use crate::capabilities::registry::api::{AppSettings, RegistryOps};
+use crate::capabilities::registry::api::{AppSettings, RegistryOps, StorageSettings};
 use crate::capabilities::tools::api::{arg_fault_text, ToolSchema};
 use crate::capabilities::workspace::api::MAX_ASSET_BYTES;
 
@@ -775,6 +775,11 @@ impl ConductorHandle {
                 .map_err(|e| format!("settings.thinking 配置非法：{}", e))?,
             None => current.thinking.clone(),
         };
+        let storage: StorageSettings = match args.get("storage") {
+            Some(v) => serde_json::from_value(v.clone())
+                .map_err(|e| format!("settings.storage 配置非法：{}", e))?,
+            None => current.storage.clone(),
+        };
         let settings = AppSettings {
             streaming: args
                 .get("streaming")
@@ -793,6 +798,7 @@ impl ConductorHandle {
             max_guests: num("max_guests")
                 .map(|v| v as u32)
                 .unwrap_or(current.max_guests),
+            storage,
             llm_timeout_secs: num("llm_timeout_secs").unwrap_or(current.llm_timeout_secs),
             compact_at_percent: num("compact_at_percent")
                 .map(|v| v as u8)

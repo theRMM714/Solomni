@@ -146,6 +146,7 @@ select.field-input { cursor: pointer; }
 .notice-panel.notice-err { border-color: var(--color-err); }
 .notice-title { padding: 14px var(--sp-4) 0; font-weight: 600; }
 .notice-text { padding: var(--sp-2) var(--sp-4) var(--sp-1); overflow-y: auto; color: var(--color-text-dim); white-space: pre-wrap; }
+.notice-text.notice-danger { color: var(--color-err); }
 .notice-actions { display: flex; gap: var(--sp-2); justify-content: flex-end; padding: var(--sp-3) var(--sp-4) var(--sp-4); }
 
 /* ---- 状态 chip + 锚定小卡片（会话状态栏） ---- */

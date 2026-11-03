@@ -144,6 +144,13 @@ qemu_path: ""          # 虚拟机档用的 QEMU 可执行文件路径（默认�
 virtiofsd_path: ""     # 虚拟机档共享后端要用的外部程序路径（如 virtiofsd；默认同 qemu_path：登记优先，否则用项目内补齐的那个）
 smbd_path: ""          # 虚拟机档 smb 共享档要用的外部 helper 路径（默认空 = 判据每次取用时采用项目内补齐的 helper；否则兜底看 PATH）
 max_guests: 2          # 虚拟机档同时最多几台 guest（0 = 不限制；每台固定 -m 2048 -smp 2）
+storage:               # 可回收缓存的空间预算与保留策略（不影响会话/虚拟根/模块产物）
+  auto_gc: true        # 到上限 / 构建前自动回收一次；false = 只手动
+  cache_cap_gib: 20    # 可回收缓存总预算（GiB）；0 = 按磁盘 10%，夹 10–50 GiB
+  cache_keep_days: 30  # 超过多久未使用可回收（天）；0 = 不按龄
+  build_volume_gib: 16 # 新构建缓存卷的虚拟大小（GiB）；现有卷不自动缩
+  min_free_gib: 2      # 宿主剩余低于它先回收；回收后仍低才拒绝构建
+  log_keep_days: 14    # 日志保留天数（另保留最近 50 份）
 llm_timeout_secs: 300  # 单次模型调用的总预算（秒），全局通用（讨论/执行/验收/单 agent）
 compact_at_percent: 70 # 上下文用到模型窗口的百分之多少就自动压一次（0 = 关）
 compact_keep_percent: 15 # 压缩时至少保留最近多少内容（占模型窗口 %；0 = 只留摘要）
@@ -157,6 +164,8 @@ discuss_remind_cap: 3  # 讨论里一轮内对同一个成员最多提醒几次�
   会话里切档是**会话级事实**（写在 `session/<工作>/meta.yaml` 的 `thinking`，工作根持有、子会话共享）；
   状态栏与配置页只列这组模型都登记了的档，没选过档时直接显示共同默认档，
   见 [docs/session/session-model.md](docs/session/session-model.md)。
+- `storage` 只约束**可回收缓存**（构建缓存卷 / 下载缓存 / 过期可写层 / 日志），不约束会话、虚拟根、模块产物；
+  到上限先回收一次，不拒绝构建；只有宿主剩余低于 `min_free_gib` 且回收后仍低才拒绝。字段范围保存时校验。
 - `compact_at_percent` / `compact_keep_percent` 都按**模型窗口**算：前者是自动压缩阈值（0 = 关），
   后者是压缩时至少保留的最近内容（0 = 只留摘要）。压缩只改“发给模型什么”，转录完整保留；
   压缩记录本身是一条带 `kind = compacted` 的转录行，删除/留档/恢复走普通行操作。

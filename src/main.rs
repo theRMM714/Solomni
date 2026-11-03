@@ -118,6 +118,16 @@ fn main() {
     {
         std::process::exit(diagnostics::work_gc(&root, &args, i));
     }
+    // 存储空间：报告与回收（隐藏维护入口；Web 设置页是同一份能力的另一种呈现）。
+    if args.iter().any(|a| a == "--storage") {
+        std::process::exit(diagnostics::storage(&root));
+    }
+    if let Some(i) = args
+        .iter()
+        .position(|a| a == "--gc" || a.starts_with("--gc="))
+    {
+        std::process::exit(diagnostics::gc(&root, &args, i));
+    }
     // 隐藏模式：构建一个模块声明的产物（**系统动作**：在目标环境里跑 module.yaml 的 build.command）。
     if let Some(i) = args
         .iter()
@@ -544,6 +554,15 @@ fn main() {
     let provision: Arc<dyn capabilities::provision::api::Provision + Send + Sync> = Arc::new(
         capabilities::provision::ProvisionService::with_vm(&root, provision_vm(Arc::clone(&book))),
     );
+    // **存储空间**：回收策略来自 settings；构建与呈现层共用同一份。
+    let storage_service = Arc::new(capabilities::storage::service::StorageService::new(
+        root.clone(),
+        Arc::clone(&provision),
+        std::sync::Arc::clone(&log),
+        capabilities::storage::api::StoragePolicy::from(&registry.app_settings().storage),
+    ));
+    let storage: Arc<dyn capabilities::storage::api::Storage + Send + Sync> =
+        storage_service.clone();
     // **构建能力**：创建会话前补编模块产物（本机档宿主、虚拟机档 guest）；执行器与 `--build` 同一条路——
     // **不申请容器身份**（构建是系统动作）：AppContainer 的临时目录写不了文件；可达范围仍由围栏规格给出。
     let build_runner = kernel::detail::process::ProcTools::new(
@@ -560,6 +579,7 @@ fn main() {
             Arc::clone(&packages),
             Arc::clone(&vm),
             Arc::clone(&provision),
+            Arc::clone(&storage),
             Arc::new(build_runner),
             Arc::clone(&fence_host),
             Arc::new(kernel::detail::HostProbeAdapter),
@@ -686,6 +706,8 @@ fn main() {
     let mut ops = capabilities::conductor::api::Ops::from_handle(&handle);
     // 依赖补齐面：组合根注入（能力面默认未接入，这里换成真实现）。
     ops.provision = Arc::clone(&provision);
+    ops.storage = Arc::clone(&storage);
+    storage_service.start_auto();
     // 基础工具链事实：Web 端横幅与 CLI 启动报告读同一份。
     ops.toolchains = entry::toolchains::json(&base);
 

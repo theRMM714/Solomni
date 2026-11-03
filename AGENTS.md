@@ -92,6 +92,7 @@
 | 项目方向、承诺与判据 | `PHILOSOPHY.md` |
 | 模块开发或修改 | `MODULE_SPEC.md` |
 | 模块产物的构建（创建前自动补编、目标环境、缓存、失败） | `docs/builds/README.md` |
+| 存储空间、缓存回收与虚拟根还原 | `docs/storage/README.md` |
 | 系统工具、角色、路径模型、回报与验收 | `SYSTOOL.md` |
 | 待实现的系统工具清单与方案 | `SYSTOOL.md` → `systool_gaps.yaml` |
 | 运行包开发或修改 | `RUNTIME_SPEC.md` |

@@ -9,8 +9,6 @@ use std::time::{Duration, SystemTime};
 
 /// 目的：卷的布局版本——布局变了就清空旧卷，不把两种布局混在一起。
 const FORMAT: &str = "v1";
-/// 目的：卷的虚拟大小（MiB）——qcow2 稀疏增长，实际占用由 guest 写了多少决定（上限即磁盘配额）。
-pub(crate) const VOLUME_MIB: u64 = 16 * 1024;
 /// 目的：guest 里的挂载点——构建期的工作区、HOME、TMPDIR 都在这下面，因此中间产物不占 guest 根盘。
 pub(crate) const MOUNT: &str = "/var/lib/solomni/build";
 /// 目的：guest 里挂载的设备名——构建 guest 只有根盘（vda）与缓存卷（vdb）两块 virtio-blk。
@@ -87,25 +85,68 @@ fn changed_list(id: &str) -> String {
 
 /// 目的：挂载脚本——把缓存卷挂上并按环境标识对账（卷级只在整卷不可信时清空）。
 /// 约束：没有文件系统就建；挂不上说明卷坏了——重建文件系统（缓存可以丢）再挂，仍挂不上就如实失败。
+#[cfg(test)]
 pub(crate) fn mount_script(volume_epoch: &str) -> String {
+    mount_script_with(volume_epoch, 0, &[], &[])
+}
+
+/// 目的：带按龄 / 待清理列表的挂载脚本；模块目录用 USED 时间戳判断。
+/// 参数：keep_secs = 保留秒数（0 = 不按龄）；keep = 本次构建的模块 id；purge = 已排队删除的模块 id。
+pub(crate) fn mount_script_with(
+    volume_epoch: &str,
+    keep_secs: u64,
+    keep: &[String],
+    purge: &[String],
+) -> String {
+    let cutoff = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs().saturating_sub(keep_secs))
+        .unwrap_or(0);
+    let list = |ids: &[String]| {
+        let mut out = String::from(" ");
+        for id in ids {
+            out.push_str(&safe_name(id));
+            out.push(' ');
+        }
+        out
+    };
     format!(
         r#"set -e
 MNT={mnt}
 DEV={dev}
+KEEP={keep}
+PURGE={purge}
+CUTOFF={cutoff}
 mkdir -p "$MNT"
 if [ -z "$(blkid -o value -s TYPE "$DEV" 2>/dev/null)" ]; then mkfs.ext4 -q -F "$DEV" >/dev/null; fi
 if ! mount -t ext4 "$DEV" "$MNT" 2>/dev/null; then
   mkfs.ext4 -q -F "$DEV" >/dev/null 2>&1 || {{ printf '构建缓存卷建不出文件系统：%s' "$DEV"; exit 1; }}
-  mount -t ext4 "$DEV" "$MNT" || {{ printf '构建缓存卷挂不上：%s（怀疑卷损坏就删掉宿主 .vm/build-cache 里对应的文件）' "$DEV"; exit 1; }}
+  mount -t ext4 "$DEV" "$MNT" || {{ printf '构建缓存卷挂不上：%s（怀疑卷损坏就在设置→存储空间清理该虚拟根缓存）' "$DEV"; exit 1; }}
 fi
 VE="$MNT/EPOCH"; WANT={volume}
 if [ ! -f "$VE" ] || [ "$(cat "$VE")" != "$WANT" ]; then
   find "$MNT" -mindepth 1 -maxdepth 1 ! -name EPOCH -exec rm -rf {{}} + 2>/dev/null || true
   printf '%s' "$WANT" > "$VE"
-fi"#,
+fi
+if [ -d "$MNT/modules" ]; then
+  for d in "$MNT"/modules/*; do
+    [ -d "$d" ] || continue
+    n=$(basename "$d")
+    case "$PURGE" in *" $n "*) rm -rf "$d"; continue;; esac
+    [ "$CUTOFF" -gt 0 ] || continue
+    u=$(cat "$d/USED" 2>/dev/null || echo 0)
+    if [ "$u" -gt 0 ] && [ "$u" -lt "$CUTOFF" ]; then
+      case "$KEEP" in *" $n "*) ;; *) rm -rf "$d";; esac
+    fi
+  done
+fi
+fstrim "$MNT" >/dev/null 2>&1 || true"#,
         mnt = sh_quote(MOUNT),
         dev = sh_quote(DEVICE),
         volume = sh_quote(volume_epoch),
+        keep = sh_quote(&list(keep)),
+        purge = sh_quote(&list(purge)),
+        cutoff = cutoff,
     )
 }
 
@@ -115,6 +156,7 @@ pub(crate) fn module_script(id: &str, module_epoch: &str) -> String {
         r#"set -e
 MOD={module}; ME="$MOD/EPOCH"; WANTM={module_epoch}
 mkdir -p "$MOD/home" "$MOD/tmp" "$MOD/ws"
+date +%s > "$MOD/USED" 2>/dev/null || true
 if [ ! -f "$ME" ] || [ "$(cat "$ME")" != "$WANTM" ]; then
   rm -rf "$MOD/ws"; mkdir -p "$MOD/ws"; printf '%s' "$WANTM" > "$ME"
 fi"#,
@@ -216,6 +258,77 @@ pub(crate) fn cleanup_script(id: &str) -> String {
         "rm -rf {}/* 2>/dev/null || true; fstrim {} >/dev/null 2>&1 || true",
         sh_quote(&tmp(id)),
         sh_quote(MOUNT),
+    )
+}
+
+/// 目的：构建缓存卷旁的元数据落点（builds 写，storage 读；不参与判据）。
+pub(crate) fn meta_path(root: &Path, guest: &str) -> PathBuf {
+    dir(root).join(format!("{}.json", safe_name(guest)))
+}
+
+/// 目的：读已排队的按模块清理标记；执行成功后再删文件（挂载失败要能重试）。
+pub(crate) fn read_purge(root: &Path, guest: &str) -> Vec<String> {
+    let p = dir(root).join(format!("{}.purge", safe_name(guest)));
+    let text = std::fs::read_to_string(&p).unwrap_or_default();
+    text.lines()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// 目的：清理已执行的按模块标记。
+pub(crate) fn clear_purge(root: &Path, guest: &str) {
+    let _ = std::fs::remove_file(dir(root).join(format!("{}.purge", safe_name(guest))));
+}
+
+/// 目的：写卷的模块占用元数据（只给界面与回收参考；失败不阻断构建）。
+pub(crate) fn write_meta(
+    root: &Path,
+    guest: &str,
+    modules: &std::collections::BTreeMap<String, (u64, u64)>,
+) {
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let mods: serde_json::Map<String, serde_json::Value> = modules
+        .iter()
+        .map(|(id, (bytes, used))| {
+            (
+                id.clone(),
+                serde_json::json!({ "bytes": bytes, "last_used": used }),
+            )
+        })
+        .collect();
+    let text = serde_json::json!({
+        "version": 1,
+        "guest": safe_name(guest),
+        "last_used": now,
+        "modules": mods,
+    });
+    let p = meta_path(root, guest);
+    if let Some(parent) = p.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let tmp = p.with_extension("json.tmp");
+    if std::fs::write(&tmp, text.to_string()).is_ok() {
+        let _ = std::fs::rename(&tmp, &p);
+    }
+}
+
+/// 目的：构建批次结束后统计每个模块工作区（字节 + USED 时间戳），给宿主写元数据。
+pub(crate) fn usage_script() -> String {
+    format!(
+        r#"for d in {mnt}/modules/*; do
+  [ -d "$d" ] || continue
+  n=$(basename "$d")
+  b=$(du -sB1 "$d" 2>/dev/null | awk '{{print $1}}')
+  t=$(cat "$d/USED" 2>/dev/null || echo 0)
+  printf '%s	%s	%s
+' "$n" "[object Object]" "$t"
+done"#,
+        mnt = sh_quote(MOUNT),
     )
 }
 
@@ -361,6 +474,20 @@ mod tests {
             m
         );
         assert!(m.contains("rm -rf \"$MOD/ws\""), "{}", m);
+        assert!(m.contains("USED"), "模块要记最近使用时间：{}", m);
+    }
+
+    /// 目的：挂载时按龄 / 排队列表清理模块工作区；批次结束的统计脚本给宿主元数据。
+    #[test]
+    fn mount_script_prunes_old_modules_and_usage_script_reports_them() {
+        let s = mount_script_with("v1", 3600, &["keep".to_string()], &["gone".to_string()]);
+        assert!(s.contains("PURGE=' gone '"), "{}", s);
+        assert!(s.contains("KEEP=' keep '"), "{}", s);
+        assert!(s.contains("CUTOFF="), "{}", s);
+        assert!(s.contains("fstrim"), "{}", s);
+        let u = usage_script();
+        assert!(u.contains("du -sB1"), "{}", u);
+        assert!(u.contains("USED"), "{}", u);
     }
 
     /// 目的：源同步排除 `userdata/`、按上次清单删掉被删掉的源，并给构建入口执行位。

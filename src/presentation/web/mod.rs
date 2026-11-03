@@ -382,6 +382,14 @@ pub(crate) fn route(
                 Ok(Acted::Replayed(events)) => ok_json(json!({ "events": events })),
                 // 其余给一份结构化结果（{ok:true} / {sid,agents} …）。
                 Ok(Acted::Done(v)) => {
+                    // 设置保存后把最新的 storage 策略推给存储面（不重启；下次构建/回收生效）。
+                    if id == "set_settings" {
+                        if let Ok(s) = ops.registry.settings() {
+                            ops.storage.set_policy(
+                                crate::capabilities::storage::api::StoragePolicy::from(&s.storage),
+                            );
+                        }
+                    }
                     // 全局沙箱策略变了：先把回包发出去，再整体重启（启动器按退出码拉起）。
                     if v.get("restart").and_then(|b| b.as_bool()) == Some(true) {
                         std::thread::spawn(|| {
@@ -492,6 +500,61 @@ pub(crate) fn route(
             Ok(v) => ok_json(json!({ "tiers": v })),
             Err(e) => complaint(400, e),
         },
+
+        // ---- 存储空间：盘点 / 回收 / 显式清理 ----
+        "storage" => match ops.storage.report() {
+            Ok(report) => ok_json(json!({ "report": report })),
+            Err(e) => complaint(400, e),
+        },
+        "storage.gc" => {
+            let req = match parse_body(body) {
+                Ok(v) => v,
+                Err(e) => return complaint(400, e),
+            };
+            let apply = req.get("apply").and_then(|v| v.as_bool()).unwrap_or(false);
+            match ops.storage.gc(apply) {
+                Ok(report) => ok_json(json!({ "ok": true, "report": report })),
+                Err(e) => complaint(400, e),
+            }
+        }
+        "storage.clean" => {
+            let req = match parse_body(body) {
+                Ok(v) => v,
+                Err(e) => return complaint(400, e),
+            };
+            let kind =
+                match crate::capabilities::storage::api::CleanKind::parse(&str_field(&req, "kind"))
+                {
+                    Ok(k) => k,
+                    Err(e) => return complaint(400, e),
+                };
+            let id = req
+                .get("id")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+            let module = req
+                .get("module")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+            let confirm = req
+                .get("confirm")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let req = crate::capabilities::storage::api::CleanRequest {
+                kind,
+                id,
+                module,
+                confirm,
+            };
+            match ops.storage.clean(&req) {
+                Ok(outcome) => ok_json(json!({ "ok": true, "result": outcome })),
+                Err(e) => complaint(400, e),
+            }
+        }
 
         // ---- 现在在跑什么（长驻子进程的账：QEMU / 共享进程） ----
         "processes" => match ops.provision.processes() {

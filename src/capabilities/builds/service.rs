@@ -12,6 +12,7 @@ use crate::capabilities::packages::api::{
     PinPolicy, PlannedPackage, Provider,
 };
 use crate::capabilities::provision::api::Provision;
+use crate::capabilities::storage::api::Storage;
 use crate::capabilities::vm::api::{
     self as vm, ExecPlan, GuestOs, GuestRun, GuestSpec, MissingEntry, Vm,
 };
@@ -27,6 +28,7 @@ pub struct BuildsService {
     packages: Arc<dyn Packages + Send + Sync>,
     vm: Arc<dyn Vm + Send + Sync>,
     provision: Arc<dyn Provision + Send + Sync>,
+    storage: Arc<dyn Storage + Send + Sync>,
     runner: Arc<dyn ProcessRunner + Send + Sync>,
     fence: Arc<dyn FenceHost + Send + Sync>,
     probe: Arc<dyn HostProbe + Send + Sync>,
@@ -44,6 +46,7 @@ impl BuildsService {
         packages: Arc<dyn Packages + Send + Sync>,
         vm: Arc<dyn Vm + Send + Sync>,
         provision: Arc<dyn Provision + Send + Sync>,
+        storage: Arc<dyn Storage + Send + Sync>,
         runner: Arc<dyn ProcessRunner + Send + Sync>,
         fence: Arc<dyn FenceHost + Send + Sync>,
         probe: Arc<dyn HostProbe + Send + Sync>,
@@ -55,6 +58,7 @@ impl BuildsService {
             packages,
             vm,
             provision,
+            storage,
             runner,
             fence,
             probe,
@@ -343,11 +347,16 @@ impl BuildsService {
         if plans.is_empty() {
             return Ok(done.into_iter().flatten().collect());
         }
-        // 缓存卷：同一虚拟根独占；没有就建一块稀疏空盘（大小即配额）。
+        // 缓存卷：同一虚拟根独占；起 guest 前先按存储预算回收一次（当前目标卷受保护）。
+        let _headroom = self
+            .storage
+            .ensure_headroom(Some(guest))
+            .map_err(|e| format!("构建前空间检查失败：{}", e))?;
         let volume = cache::volume_path(&self.root, guest);
         let _lock = cache::VolumeLock::acquire(cache::lock_path(&self.root, guest))?;
         if !self.probe.is_file(&volume) {
-            vm::create_disk(&engine_path, &volume, cache::VOLUME_MIB)
+            let gib = self.storage.policy().build_volume_gib.max(1);
+            vm::create_disk(&engine_path, &volume, gib.saturating_mul(1024))
                 .map_err(|e| format!("建构建缓存卷失败：{}", e))?;
         }
         let lease = format!("build-{}", guest);
@@ -433,18 +442,41 @@ impl BuildsService {
         for script in vm::package_setup_scripts(plan) {
             let _ = self.guest_script(lease, &script, 120);
         }
-        // 缓存卷：挂载 + 卷级对账（整批只做一次）。
+        // 缓存卷：挂载 + 卷级对账 + 按龄/排队清理（整批只做一次）。
+        let purge = cache::read_purge(&self.root, guest);
+        let keep: Vec<String> = plans.iter().map(|p| p.module.manifest.id.clone()).collect();
+        let keep_secs = self.storage.policy().cache_keep_days.saturating_mul(86_400);
         let mounted = self.guest_script(
             lease,
-            &cache::mount_script(&cache::volume_epoch(image)),
+            &cache::mount_script_with(&cache::volume_epoch(image), keep_secs, &keep, &purge),
             120,
         );
         if !mounted.ok {
             return Err(format!("准备构建缓存卷失败{}", tail(&mounted.output)));
         }
+        if !purge.is_empty() {
+            cache::clear_purge(&self.root, guest);
+        }
         let mut out = Vec::new();
         for job in plans {
             out.push(self.build_one(lease, job, plans.len(), image, guest, target_os)?);
+        }
+        let usage = self.guest_script(lease, &cache::usage_script(), 120);
+        if usage.ok {
+            let mut modules: std::collections::BTreeMap<String, (u64, u64)> =
+                std::collections::BTreeMap::new();
+            for line in usage.output.lines() {
+                let mut it = line.split('\t');
+                let (Some(id), Some(bytes), Some(used)) = (it.next(), it.next(), it.next()) else {
+                    continue;
+                };
+                if let (Ok(b), Ok(u)) = (bytes.parse::<u64>(), used.parse::<u64>()) {
+                    modules.insert(id.to_string(), (b, u));
+                }
+            }
+            if !modules.is_empty() {
+                cache::write_meta(&self.root, guest, &modules);
+            }
         }
         Ok(out)
     }
@@ -509,12 +541,13 @@ impl BuildsService {
                 output_limit: crate::capabilities::vm::api::OutputLimit::Head,
             },
         );
-        // 构建失败：缓存留着（现场可复现），一个字节都不回写。
+        // 构建失败：缓存留着（现场可复现），但清临时目录并 trim，避免失败也把卷撑大。
         if !built.ok {
+            let _ = self.guest_script(lease, &cache::cleanup_script(&id), 120);
             return Err(name(
                 "构建命令失败",
                 format!(
-                    "{}；缓存留在 {}（怀疑缓存陈旧就删掉宿主 .vm/build-cache）",
+                    "{}；缓存留在 {}（怀疑缓存陈旧就在设置→存储空间清理该虚拟根缓存）",
                     tail(&built.output),
                     cache::workspace(&id)
                 ),

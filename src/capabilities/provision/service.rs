@@ -274,6 +274,46 @@ impl Provision for ProvisionService {
     fn cancel(&self) {
         self.cancel.store(true, Ordering::Relaxed);
     }
+
+    fn reset_guest(&self, guest: &str, on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
+        let all = for_host(&deps()?, std::env::consts::OS, std::env::consts::ARCH);
+        let picked: Vec<&Dep> = all
+            .iter()
+            .filter(|d| d.guest.as_deref() == Some(guest))
+            .collect();
+        if picked.is_empty() {
+            return Err(format!(
+                "虚拟根「{}」不是产品清单构造的（清单里没有它的 guest 条目），不能自动还原",
+                guest
+            ));
+        }
+        // 有产品起着的 guest 就不动：删除目录会踩到正在读基础镜像的 QEMU。
+        let book = crate::kernel::detail::procs::ProcessBook::open(&self.root.join(".home"));
+        if book
+            .list()
+            .iter()
+            .any(|e| e.purpose == "guest" && crate::kernel::detail::procs::alive(e.pid))
+        {
+            return Err("还有 guest 在跑：先停止所有虚拟机会话，再还原虚拟根".to_string());
+        }
+        let dir = crate::capabilities::vm::api::resolve_guest(&self.root, guest)?;
+        let lock = self
+            .root
+            .join(".vm")
+            .join("build-cache")
+            .join(format!("{}.lock", guest));
+        if lock.exists() {
+            return Err("这个虚拟根有构建在跑：等构建结束再还原".to_string());
+        }
+        if dir.is_dir() {
+            on_line(&format!("删除旧虚拟根 {}", guest));
+            fs::remove_dir_all(&dir)
+                .map_err(|e| format!("删除旧虚拟根失败（{}）：{}", dir.display(), e))?;
+        }
+        let ids: Vec<String> = picked.iter().map(|d| d.id.clone()).collect();
+        on_line(&format!("按清单重建 {}（{} 条依赖）", guest, ids.len()));
+        self.ensure(&ids, on_line)
+    }
 }
 
 impl ProvisionService {

@@ -51,6 +51,10 @@
   （`.vm/build-cache/<虚拟根>.qcow2` → `/var/lib/solomni/build`；源复制进来，`HOME`/`TMPDIR` 也在卷上），
   成功后才按**差异**回写宿主那份模块目录（`userdata/` 不参与）。编译能力由 guest 自带（`guest.yaml` 的 `runtimes`）或运行包库提供。
   需要 QEMU 与可用虚拟根；缺了如实拒绝。
+- **卷大小与回收**：新卷虚拟大小取 `settings.yaml` 的 `storage.build_volume_gib`（默认 16 GiB）；实际占用看 qemu-img 的 actual-size。
+  起 guest 前由 `storage` 做 `ensure_headroom`（到预算/宿主余量不足先回收一次，当前目标卷受保护）；
+  构建失败也清临时目录并 `fstrim`；epoch 清空卷后也 trim。模块工作区有 `USED` 时间戳，
+  超过 `storage.cache_keep_days` 且不在本批构建名单里的会在下次挂载时回收；按模块清理先写 `.purge`，下次构建前执行。
 
 ## 构建期能力
 

@@ -68,6 +68,8 @@
 - 同时台上限是设置项 `max_guests`（默认 2，0 = 不限制），按主会话树计数，到上限如实拒绝；同一租约重启不占新名额（见 [REGISTRY_SPEC.md](../../REGISTRY_SPEC.md) 与 `domain/exec.rs` 的 `admit_guest`）。
 - 会话启动时用 qemu-img 在基础镜像上建一份**每租约可写层**（`.vm/overlays/<租约>.qcow2`），删会话即丢——多台并发**不同写一份基础镜像**；供给编排直写基础镜像（它要改的就是镜像本身，`GuestSpec.isolated = false`）。
   启用 = 按基础镜像重建 guest：guest 内未落到宿主挂载点（共享区 / 沙箱 / 模块目录）的改动不保留。
+- **还原到初始状态**：设置 → 存储空间 / `solomni --provision --reset=<虚拟根> --yes` 会删掉 `.vm/guest/<名>` 再按清单重装（不备份、不可撤销）；
+  成功后同时清该虚拟根的构建缓存。它**不是删除虚拟根**：基础镜像仍会重建出来；有活跃 guest 或构建锁时拒绝。
 - **guest 内 per-agent 围栏**：宿主把该 agent 的围栏翻成 guest 路径与允许集，经 guest 内 Linux helper（Landlock + no_new_privs）执行；
   helper 缺失或装不上时 fail-closed，不回退到无围栏执行。只支持 Linux guest；Windows / macOS guest 未适配，按不支持处理。
   本次隔离覆盖文件系统可达范围，并对齐本机 Linux 的只读基线、解释器目录、`cwd`、env 白名单、按 `GuestRun.timeout_secs` 超时杀整棵进程树与输出截断；
@@ -129,7 +131,7 @@ copy 不在任何用户链里；只有进程级开发/应急开关（`SOLOMNI_VM
 - **root 只能是一份磁盘镜像**（qcow2 / raw ext4；`classify_base` 只认这个）：会话每次叠一份每租约可写层，谁也不写基础镜像；有内核就直启（`root=/dev/vda`），没有就靠镜像自带引导。需要共享时 guest 拿 `restrict=on` 的网卡（出站全断，`guestfwd` 内部隧道可用）。
 - **模块构建也能落 guest**（创建会话前自动补编；手动入口是 `solomni --build=<模块 id> --guest=<虚拟根>`，见 [builds](../builds/README.md)）：
   共享盘只承担**数据面**（源、产物、userdata 的权威副本），**程序面**在 guest 本地。构建在缓存卷上的工作区里发生
-  （`.vm/build-cache/<虚拟根>.qcow2`，16 GiB 稀疏，挂到 `/var/lib/solomni/build`）：源从共享盘复制进来、`HOME`/`TMPDIR` 也在卷上，
+  （`.vm/build-cache/<虚拟根>.qcow2`，默认 16 GiB 稀疏、可在 `storage.build_volume_gib` 配置，挂到 `/var/lib/solomni/build`）：源从共享盘复制进来、`HOME`/`TMPDIR` 也在卷上，
   构建成功后按**差异**把新增/修改的文件 + 模块声明入口回写宿主那份模块目录，`userdata/` 永不参与；失败一个字节都不回写。
   卷与模块各有一份环境标识（镜像/runtimes、`needs`+实际提供者），变了就清对应范围；卷挂不上会重建文件系统再挂；
   同一虚拟根一把构建锁（不并写），构建完 `fstrim` 把空块还给宿主。批次补编共用一台 guest 与一块卷。

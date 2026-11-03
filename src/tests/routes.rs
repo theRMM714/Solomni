@@ -71,6 +71,60 @@ impl FakeProvision {
     }
 }
 
+/// 目的：假存储面——报告 / 回收 / 清理都随 fail 走；不碰真实文件。
+struct FakeStorage {
+    fail: Option<String>,
+}
+
+impl FakeStorage {
+    fn new(fail: Option<&str>) -> FakeStorage {
+        FakeStorage {
+            fail: fail.map(|s| s.to_string()),
+        }
+    }
+
+    fn guard(&self) -> Result<(), String> {
+        match &self.fail {
+            Some(m) => Err(m.clone()),
+            None => Ok(()),
+        }
+    }
+}
+
+impl crate::capabilities::storage::api::Storage for FakeStorage {
+    fn report(&self) -> Result<crate::capabilities::storage::api::SpaceReport, String> {
+        self.guard()?;
+        Ok(crate::capabilities::storage::api::SpaceReport::default())
+    }
+    fn gc(&self, _apply: bool) -> Result<crate::capabilities::storage::api::GcReport, String> {
+        self.guard()?;
+        Ok(crate::capabilities::storage::api::GcReport::default())
+    }
+    fn ensure_headroom(
+        &self,
+        _protect: Option<&str>,
+    ) -> Result<crate::capabilities::storage::api::GcReport, String> {
+        self.guard()?;
+        Ok(crate::capabilities::storage::api::GcReport::default())
+    }
+    fn clean(
+        &self,
+        _req: &crate::capabilities::storage::api::CleanRequest,
+    ) -> Result<crate::capabilities::storage::api::CleanOutcome, String> {
+        self.guard()?;
+        Ok(crate::capabilities::storage::api::CleanOutcome::Report(
+            crate::capabilities::storage::api::GcReport::default(),
+        ))
+    }
+    fn job(&self) -> crate::capabilities::storage::api::JobState {
+        Default::default()
+    }
+    fn set_policy(&self, _policy: crate::capabilities::storage::api::StoragePolicy) {}
+    fn policy(&self) -> crate::capabilities::storage::api::StoragePolicy {
+        crate::capabilities::storage::api::StoragePolicy::default()
+    }
+}
+
 /// 目的：假补齐面的清单——一条在场、一条没装（`pending` 只该含后者）。
 fn fake_deps() -> Vec<crate::capabilities::provision::api::DepStatus> {
     use crate::capabilities::provision::api::DepStatus;
@@ -105,6 +159,9 @@ impl crate::capabilities::provision::api::Provision for FakeProvision {
         self.guard()
     }
     fn cancel(&self) {}
+    fn reset_guest(&self, _guest: &str, _on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
+        self.guard()
+    }
 }
 
 fn fake_ops(fail: Option<&str>) -> Ops {
@@ -121,6 +178,7 @@ fn fake_ops(fail: Option<&str>) -> Ops {
         residents: Arc::new(crate::capabilities::residents::api::NoResidents),
         secrets: Arc::new(crate::capabilities::secrets::api::NoSecrets),
         provision: Arc::new(FakeProvision::new(fail)),
+        storage: Arc::new(FakeStorage::new(fail)),
         toolchains: serde_json::Value::Null,
     }
 }
@@ -755,6 +813,7 @@ fn sample_body(route: &routes::Route) -> &'static str {
     match route.id {
         "action" => r#"{"mode":"single","agents":[]}"#,
         "suggest" => r#"{"task":"t","mode":"single"}"#,
+        "storage.clean" => r#"{"kind":"build-cache","confirm":true}"#,
         _ => "{}",
     }
 }
@@ -1138,6 +1197,15 @@ fn success_shapes_are_pinned_per_route() {
         ),
         ("GET", "/api/processes", "", 200, "\"procs\""),
         ("GET", "/api/setup/status", "", 200, "\"pending\""),
+        ("GET", "/api/storage", "", 200, "\"report\""),
+        ("POST", "/api/storage/gc", "{}", 200, "\"report\""),
+        (
+            "POST",
+            "/api/storage/clean",
+            r#"{"kind":"build-cache","confirm":true}"#,
+            200,
+            "\"result\"",
+        ),
         ("POST", "/api/setup/ensure", "{}", 200, "\"preview\""),
         ("DELETE", "/api/setup/job", "", 200, "\"ok\""),
     ];

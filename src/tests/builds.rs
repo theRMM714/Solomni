@@ -30,6 +30,7 @@ fn builds_service(
         packages,
         crate::diagnostics::build_vm(root),
         Arc::new(crate::capabilities::provision::ProvisionService::new(root)),
+        Arc::new(crate::capabilities::storage::api::NoStorage),
         Arc::new(runner),
         Arc::new(crate::tests::doubles::NoFenceHost),
         Arc::new(crate::kernel::detail::host_probe::HostProbeAdapter),

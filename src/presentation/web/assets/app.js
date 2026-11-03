@@ -1852,7 +1852,7 @@ function notice(title, text, kind) {
 }
 
 /// 需要用户二选一的确认（顶替原生 confirm）：返回 Promise<boolean>，只认"确认"或"取消"。
-function confirmBox(title, text, confirmLabel) {
+function confirmBox(title, text, confirmLabel, danger) {
   return new Promise((resolve) => {
     const root = $("#notice-root");
     root.innerHTML = "";
@@ -1860,7 +1860,7 @@ function confirmBox(title, text, confirmLabel) {
     const overlay = document.createElement("div"); overlay.className = "notice-overlay";
     const panel = document.createElement("div"); panel.className = "notice-panel notice-warn";
     const head = document.createElement("div"); head.className = "notice-title"; head.textContent = title || "";
-    const body = document.createElement("div"); body.className = "notice-text"; body.textContent = text || "";
+    const body = document.createElement("div"); body.className = "notice-text" + (danger ? " notice-danger" : ""); body.textContent = text || "";
     const row = document.createElement("div"); row.className = "notice-actions";
     let unbind = null;
     const done = (v) => {
@@ -2589,7 +2589,14 @@ function settingsForm() {
     '默认逐工具决定（每行一条：工具名=allow/ask/deny）',
     Object.entries(sd.tools || {}).map(([k, v]) => k + '=' + v),
   );
-  return { stream, cot, to, remind, pct, keep, compactModel, guests, thinkLevels, network, writeAcl, enFs, enNet, enTree, enEnv, onUnavailable, hostRoots, hardDeny, defProfile, defSharedRead, defSharedWrite, defTools };
+  const st = state.settings.storage || {};
+  const stAuto = checkbox('到上限 / 构建前自动回收一次（关掉只手动）', st.auto_gc !== false);
+  const stCap = numberInput('可回收缓存总预算（GiB；0 = 按磁盘 10%）', st.cache_cap_gib == null ? 20 : st.cache_cap_gib, 0, 4096);
+  const stKeep = numberInput('超过多少天未使用可回收（0 = 不按龄）', st.cache_keep_days == null ? 30 : st.cache_keep_days, 0, 3650);
+  const stVolume = numberInput('新构建缓存卷大小（GiB）', st.build_volume_gib == null ? 16 : st.build_volume_gib, 1, 1024);
+  const stFree = numberInput('宿主最低剩余空间（GiB）', st.min_free_gib == null ? 2 : st.min_free_gib, 0, 1024);
+  const stLog = numberInput('日志保留天数（0 = 不按龄）', st.log_keep_days == null ? 14 : st.log_keep_days, 0, 3650);
+  return { stream, cot, to, remind, pct, keep, compactModel, guests, thinkLevels, network, writeAcl, enFs, enNet, enTree, enEnv, onUnavailable, hostRoots, hardDeny, defProfile, defSharedRead, defSharedWrite, defTools, stAuto, stCap, stKeep, stVolume, stFree, stLog };
 }
 
 /// 1 页：生成与上下文。
@@ -2656,6 +2663,146 @@ function buildResourcesPage(c, f) {
   }).catch((e) => { box.textContent = '读不到：' + e.message; });
 }
 
+/// 5 页：存储空间（盘点 + 回收 + 显式清理 + 策略）。
+function buildStoragePage(c, f) {
+  c.body.appendChild(f.stAuto.wrap);
+  c.body.appendChild(f.stCap.wrap);
+  c.body.appendChild(f.stKeep.wrap);
+  c.body.appendChild(f.stVolume.wrap);
+  c.body.appendChild(f.stFree.wrap);
+  c.body.appendChild(f.stLog.wrap);
+  c.body.appendChild(cfgHint('上限只约束可回收缓存（构建缓存 / 下载缓存 / 过期可写层 / 日志），不约束会话、虚拟根与模块产物。到上限先回收一次，不拒绝构建。', 'warn'));
+  c.body.appendChild(cfgHint('还原虚拟根会删除 guest 内未落宿主的数据，并用清单重建；不备份、不可撤销。', 'err'));
+  const box = document.createElement('div');
+  box.className = 'cfg-log';
+  box.textContent = '读取中…';
+  c.body.appendChild(box);
+  const refresh = async () => {
+    try {
+      const r = await api('GET', '/api/storage');
+      renderStorage(box, r.report, refresh);
+    } catch (e) {
+      box.textContent = '读不到：' + e.message;
+    }
+  };
+  refresh();
+}
+
+function fmtBytes(n) {
+  const v = Number(n) || 0;
+  if (v >= 1024 * 1024 * 1024) return (v / (1024 * 1024 * 1024)).toFixed(1) + ' GiB';
+  if (v >= 1024 * 1024) return (v / (1024 * 1024)).toFixed(1) + ' MiB';
+  if (v >= 1024) return (v / 1024).toFixed(1) + ' KiB';
+  return v + ' B';
+}
+
+function renderStorage(box, report, refresh) {
+  box.innerHTML = '';
+  const head = document.createElement('div');
+  head.className = 'cfg-hint';
+  head.textContent = '可回收缓存 ' + fmtBytes(report.managedBytes) + ' / 上限 ' + fmtBytes(report.capBytes) +
+    '；宿主剩余 ' + fmtBytes(report.freeBytes) + (report.overCap ? '（已超限）' : '');
+  if (report.overCap) head.className = 'cfg-hint err';
+  box.appendChild(head);
+  const bar = document.createElement('div');
+  bar.className = 'cfg-hint';
+  const gc = btn('立即回收', 'btn btn-primary');
+  gc.onclick = async () => {
+    try {
+      const preview = await api('POST', '/api/storage/gc', { apply: false });
+      const lines = (preview.report.actions || []).map((a) => a.label + ' · ' + fmtBytes(a.bytes) + ' · ' + a.reason);
+      const text = lines.length ? lines.join('\n') : '没有可回收项。';
+      if (!(await confirmBox('回收预览', text, '回收'))) return;
+      const done = await api('POST', '/api/storage/gc', { apply: true });
+      ui.toast('ok', '已回收 ' + fmtBytes(done.report.freedBytes));
+      await refresh();
+    } catch (e) { ui.toast('err', '回收失败：' + e.message); }
+  };
+  bar.appendChild(gc);
+  const clear = btn('清空全部缓存', 'btn');
+  clear.onclick = async () => {
+    if (!(await confirmBox('清空全部缓存', '会清空构建缓存卷、下载缓存、过期可写层与可清理日志；会话与虚拟根不动。', '清空'))) return;
+    try {
+      for (const kind of ['build-cache', 'download-cache', 'overlays', 'logs']) {
+        await api('POST', '/api/storage/clean', { kind, confirm: true });
+      }
+      ui.toast('ok', '已清空可回收缓存');
+      await refresh();
+    } catch (e) { ui.toast('err', '清空失败：' + e.message); }
+  };
+  bar.appendChild(clear);
+  box.appendChild(bar);
+  for (const cat of report.categories || []) {
+    const row = document.createElement('div');
+    row.className = 'cfg-hint';
+    row.textContent = '[' + cat.label + '] ' + fmtBytes(cat.bytes) + (cat.autoEvictable ? ' · 自动回收' : ' · 不自动回收') + ' — ' + cat.note;
+    if (['download-cache', 'overlays', 'logs'].includes(cat.id) && (cat.items || []).length) {
+      const clear = btn('清理整类', 'link-btn danger');
+      clear.onclick = () => cleanStorage(cat.id, null, null, refresh);
+      row.appendChild(clear);
+    }
+    box.appendChild(row);
+    const limit = (cat.items || []).slice(0, 12);
+    for (const item of limit) {
+      const line = document.createElement('div');
+      line.className = 'cfg-hint';
+      line.textContent = '  ' + item.label + ' · ' + fmtBytes(item.bytes) + (item.active ? ' · 受保护' : '') + ' · ' + item.detail;
+      if (cat.id === 'build-cache') {
+        const opt = btn('优化', 'link-btn');
+        opt.onclick = () => cleanStorage('compact', item.id, null, refresh);
+        line.appendChild(opt);
+        const del = btn('清理整卷', 'link-btn danger');
+        del.onclick = () => cleanStorage('build-cache', item.id, null, refresh);
+        line.appendChild(del);
+        for (const mod of item.modules || []) {
+          const mb = btn('排队清理 ' + mod, 'link-btn');
+          mb.onclick = () => cleanStorage('build-cache', item.id, mod, refresh);
+          line.appendChild(mb);
+        }
+      } else if (cat.id === 'guest-bases') {
+        const reset = btn('还原到初始状态', 'link-btn danger');
+        reset.onclick = () => resetGuest(item.id, refresh);
+        line.appendChild(reset);
+      }
+      box.appendChild(line);
+    }
+  }
+}
+
+async function cleanStorage(kind, id, module, refresh) {
+  const names = { 'build-cache': '构建缓存', 'download-cache': '下载缓存', overlays: '可写层', logs: '日志', compact: '压缩' };
+  if (!(await confirmBox('清理' + (names[kind] || kind), '确认清理：' + (id || '整类') + '？', '清理'))) return;
+  try {
+    const r = await api('POST', '/api/storage/clean', { kind, id: id || null, module: module || null, confirm: true });
+    if (r.result && r.result.started) {
+      ui.toast('ok', '已开始，进度见下方');
+    } else if (module) {
+      ui.toast('ok', '已排队：下次构建前回收 ' + module);
+    } else {
+      ui.toast('ok', '完成；释放 ' + fmtBytes((r.result && r.result.report && r.result.report.freedBytes) || 0));
+    }
+    await refresh();
+  } catch (e) { ui.toast('err', '清理失败：' + e.message); }
+}
+
+async function resetGuest(guest, refresh) {
+  if (!(await confirmBox('还原虚拟根', '会删除 guest 内未落宿主的数据，并按清单重建；不备份、不可撤销。', '继续', true))) return;
+  if (!(await confirmBox('再次确认', '真的要还原「' + guest + '」吗？', '还原', true))) return;
+  try {
+    const r = await api('POST', '/api/storage/clean', { kind: 'guest-reset', id: guest, confirm: true });
+    ui.toast('ok', '已开始还原：' + guest);
+    const poll = async () => {
+      const s = await api('GET', '/api/storage');
+      const j = (s.report && s.report.job) || {};
+      if (j.running) { setTimeout(poll, 1000); return; }
+      await refresh();
+      if (j.error) ui.toast('err', '还原失败：' + j.error);
+      else ui.toast('ok', '已还原：' + guest);
+    };
+    setTimeout(poll, 1000);
+  } catch (e) { ui.toast('err', '还原失败：' + e.message); }
+}
+
 function parseSettingLines(text) {
   return String(text || '').split(/[\n,]/).map((s) => s.trim()).filter((s) => s.length > 0);
 }
@@ -2672,6 +2819,14 @@ function collectSettings(f) {
     compact_keep_percent: Number(f.keep.input.value) || 0,
     compact_model: f.compactModel.value || '',
     max_guests: Number(f.guests.input.value) || 0,
+    storage: {
+      auto_gc: f.stAuto.box.checked,
+      cache_cap_gib: Number(f.stCap.input.value) || 0,
+      cache_keep_days: Number(f.stKeep.input.value) || 0,
+      build_volume_gib: Number(f.stVolume.input.value) || 16,
+      min_free_gib: Number(f.stFree.input.value) || 0,
+      log_keep_days: Number(f.stLog.input.value) || 0,
+    },
     sandbox: {
       policy: {
         network: f.network.box.checked,
@@ -2737,6 +2892,7 @@ const SETTINGS_PAGES = [
   { id: 'sandbox', group: '设置', label: '沙箱围栏', icon: 'shield' },
   { id: 'permissions', group: '设置', label: '权限默认值', icon: 'gear' },
   { id: 'resources', group: '设置', label: '资源与进程', icon: 'dot' },
+  { id: 'storage', group: '设置', label: '存储空间', icon: 'folder' },
   { id: 'providers', group: '登记', label: '供应商', icon: 'box' },
   { id: 'models', group: '登记', label: '模型与核心默认', icon: 'dot' },
   { id: 'agents', group: '登记', label: 'agent 管理', icon: 'users' },
@@ -2759,7 +2915,7 @@ function openSettingsHub(page) {
     save.onclick = () => saveSettings(c, form, save);
     const hint = document.createElement('span');
     hint.className = 'settings-foot-hint';
-    hint.textContent = '这四页共用同一份保存（全量写入）';
+    hint.textContent = '设置页共用同一份保存（全量写入）';
     foot.appendChild(hint);
     foot.appendChild(save);
     const main = document.createElement('div');
@@ -2782,6 +2938,7 @@ function openSettingsHub(page) {
       sandbox: (pane, ctx) => buildSandboxPage(ctx, form),
       permissions: (pane, ctx) => buildPermissionsPage(ctx, form),
       resources: (pane, ctx) => buildResourcesPage(ctx, form),
+      storage: (pane, ctx) => buildStoragePage(ctx, form),
       providers: (pane, ctx) => providersPage(ctx),
       models: (pane, ctx) => {
         // 核心默认块放在模型页顶部：登记 / 删除 / 设核心后由 modelsPage 自己的订阅统一刷新。
@@ -2793,7 +2950,7 @@ function openSettingsHub(page) {
       agents: (pane, ctx) => agentsPage(ctx),
       modules: (pane, ctx) => modulesPage(ctx),
     };
-    const settingsIds = new Set(['generate', 'sandbox', 'permissions', 'resources']);
+    const settingsIds = new Set(['generate', 'sandbox', 'permissions', 'resources', 'storage']);
 
     let group = '';
     for (const p of SETTINGS_PAGES) {

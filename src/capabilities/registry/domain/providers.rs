@@ -294,6 +294,38 @@ pub struct WindowsSandbox {
     pub write_acl: bool,
 }
 
+/// 目的：可回收缓存的空间预算与保留策略（settings.yaml 的 storage 段）。
+/// 约束：上限只约束缓存，不约束会话 / 虚拟根 / 模块产物；0 有各自语义（见 REGISTRY_SPEC）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct StorageSettings {
+    /// 目的：到上限 / 启动 / 构建前自动回收一次；false = 只手动。
+    pub auto_gc: bool,
+    /// 目的：可回收缓存总预算（GiB）；0 = 按磁盘 10% 自动，夹在 10–50 GiB。
+    pub cache_cap_gib: u64,
+    /// 目的：超过这么久未使用可回收（天）；0 = 不按龄。
+    pub cache_keep_days: u64,
+    /// 目的：新构建缓存卷的虚拟大小（GiB）；现有卷不自动缩。
+    pub build_volume_gib: u64,
+    /// 目的：宿主剩余低于它时先回收；回收后仍低才拒绝构建。
+    pub min_free_gib: u64,
+    /// 目的：日志保留天数（0 = 不按龄；仍保留最近若干份）。
+    pub log_keep_days: u64,
+}
+
+impl Default for StorageSettings {
+    fn default() -> Self {
+        StorageSettings {
+            auto_gc: true,
+            cache_cap_gib: 20,
+            cache_keep_days: 30,
+            build_volume_gib: 16,
+            min_free_gib: 2,
+            log_keep_days: 14,
+        }
+    }
+}
+
 /// 基本设置（settings.yaml）：一般 agent 都有的开关。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -330,6 +362,9 @@ pub struct AppSettings {
     /// 约束：每台固定 `-m 2048 -smp 2`；同时开太多会把宿主的 CPU / 内存吃光。默认 2，见 docs/vm/README.md 的「并发」。
     #[serde(default = "default_max_guests")]
     pub max_guests: u32,
+    /// 目的：可回收缓存的空间预算与保留策略（见 REGISTRY_SPEC 的 settings.yaml）。
+    #[serde(default)]
+    pub storage: StorageSettings,
     /// **单次模型调用的总预算（秒）**，全局通用（讨论、执行、验收、单 agent 都用它）。
     /// 默认给得比较宽：非流式下供应商要等整段生成完才发响应头，长回复本来就要几十秒；
     /// 预算用尽 = 中断这一轮并如实告知（用户可以点「继续」重试），不是把会话作废。
@@ -390,6 +425,7 @@ impl Default for AppSettings {
             virtiofsd_path: String::new(),
             smbd_path: String::new(),
             max_guests: 2,
+            storage: StorageSettings::default(),
             llm_timeout_secs: crate::kernel::api::DEFAULT_LLM_TIMEOUT_SECS,
             compact_at_percent: 70,
             compact_keep_percent: 15,
@@ -397,6 +433,42 @@ impl Default for AppSettings {
             discuss_remind_cap: 3,
         }
     }
+}
+
+/// 目的：storage 段的范围校验；保存与加载共用同一把尺子。
+pub fn validate_storage_settings(app: &AppSettings) -> Result<(), String> {
+    let s = &app.storage;
+    if s.cache_cap_gib > 4096 {
+        return Err(format!(
+            "storage.cache_cap_gib 必须在 0..=4096（现在是 {}）",
+            s.cache_cap_gib
+        ));
+    }
+    if s.build_volume_gib == 0 || s.build_volume_gib > 1024 {
+        return Err(format!(
+            "storage.build_volume_gib 必须在 1..=1024（现在是 {}）",
+            s.build_volume_gib
+        ));
+    }
+    if s.cache_keep_days > 3650 {
+        return Err(format!(
+            "storage.cache_keep_days 必须在 0..=3650（现在是 {}）",
+            s.cache_keep_days
+        ));
+    }
+    if s.min_free_gib > 1024 {
+        return Err(format!(
+            "storage.min_free_gib 必须在 0..=1024（现在是 {}）",
+            s.min_free_gib
+        ));
+    }
+    if s.log_keep_days > 3650 {
+        return Err(format!(
+            "storage.log_keep_days 必须在 0..=3650（现在是 {}）",
+            s.log_keep_days
+        ));
+    }
+    Ok(())
 }
 
 /// 目的：压缩两个百分比的硬范围（0..=100）；不校验两者大小关系。
