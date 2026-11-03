@@ -3021,6 +3021,36 @@ pub(crate) fn stable_roots_cover_the_work_tree_and_module_tree() {
     assert!(ro_tree.is_empty(), "模块 userdata 要可写，稳定根进 rw");
 }
 
+/// 目的：模块入口落 guest 本地副本——落点在 /usr/local/lib/solomni（guest 内 helper 的只读基线已放行 /usr），
+///   脚本先建目录、再复制、最后给执行位；声明里的 `./` 前缀不能带进落点。
+#[test]
+pub(crate) fn module_entries_are_staged_into_a_local_copy() {
+    use crate::capabilities::vm::domain::guest::{stage_script, staged_entry_path};
+    assert_eq!(
+        staged_entry_path("indexer", "build/indexer"),
+        "/usr/local/lib/solomni/modules/indexer/build/indexer"
+    );
+    assert_eq!(
+        staged_entry_path("indexer", "./tools/build"),
+        "/usr/local/lib/solomni/modules/indexer/tools/build",
+        "声明里的 ./ 前缀不能带进落点"
+    );
+    let script = stage_script(
+        "/solomni-host/d/proj/modules/indexer/build/indexer",
+        "/usr/local/lib/solomni/modules/indexer/build/indexer",
+    );
+    assert!(
+        script.starts_with("mkdir -p '/usr/local/lib/solomni/modules/indexer/build'"),
+        "{}",
+        script
+    );
+    assert!(
+        script.contains("&& cp -f ") && script.contains("&& chmod 0755 "),
+        "{}",
+        script
+    );
+}
+
 /// 目的：新子会话只在活 guest 缺包时才重建；包已覆盖就直接加入，不做运行包动态加载。
 #[test]
 pub(crate) fn package_rebuild_only_happens_when_the_running_guest_is_missing_one() {

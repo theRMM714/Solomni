@@ -746,10 +746,29 @@ pub(crate) fn dispatch_external(
                         deny(ctx, "这条虚拟机档会话没有 guest 租约".to_string()),
                     );
                 }
+                // 共享盘不承载执行位：模块声明的相对入口先落进 guest 本地副本，再把首 token 换成它
+                // （cwd 仍是共享的模块根，数据与 userdata 不动）。
+                let declared = command.trim_start();
+                let dispatched = match crate::capabilities::modules::api::local_entry(declared) {
+                    Some(entry) => {
+                        match ctx.vm.stage_exec(
+                            &ctx.guest_lease,
+                            &module,
+                            &mt.root.join(entry),
+                            entry,
+                        ) {
+                            Ok(staged) => {
+                                format!("{}{}", staged, &declared[entry.len()..])
+                            }
+                            Err(why) => return (module, deny(ctx, why)),
+                        }
+                    }
+                    None => declared.to_string(),
+                };
                 ctx.vm.guest_run_fenced(
                     &ctx.guest_lease,
                     &crate::capabilities::vm::api::GuestRun {
-                        command: command.to_string(),
+                        command: dispatched,
                         args_json: inv.args_json.clone(),
                         env: env.to_vec(),
                         cwd: mt.root.display().to_string(),

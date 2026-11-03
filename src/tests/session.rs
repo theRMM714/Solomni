@@ -232,6 +232,16 @@ pub(crate) fn session_delete_stops_the_guest_before_removing_directories() {
             unimplemented!("这条用例只验删除顺序")
         }
 
+        fn stage_exec(
+            &self,
+            _lease: &str,
+            _module: &str,
+            _host: &std::path::Path,
+            _entry: &str,
+        ) -> Result<String, String> {
+            unimplemented!("这条用例只验删除顺序")
+        }
+
         fn guest_packages(&self, _lease: &str) -> Option<Vec<String>> {
             None
         }
