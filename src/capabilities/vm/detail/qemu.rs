@@ -849,10 +849,11 @@ impl QemuHandle {
         if let Err(why) = self.sync_or_heal() {
             return fail(&why);
         }
-        let env: Vec<serde_json::Value> = run
+        // QGA 的 guest-exec 只收 "NAME=VALUE" 的字符串数组（对象形状会被它按参数类型拒掉）。
+        let env: Vec<String> = run
             .env
             .iter()
-            .map(|(k, v)| serde_json::json!({"name":k,"value":v}))
+            .map(|(k, v)| format!("{}={}", k, v))
             .collect();
         let request = if let Some(access) = access {
             let policy = serde_json::json!({
@@ -913,7 +914,8 @@ impl QemuHandle {
                 .and_then(|p| p.as_i64())
             {
                 Some(p) => p,
-                None => return fail("QGA 没给出进程号"),
+                // 回执里没有 pid 通常是一条 error（例如 QGA 拒了这次 exec）：把原话带出来，别只说"没给"。
+                None => return fail(&format!("QGA 没给出进程号：{}", v)),
             },
             Err(why) => return fail(&why),
         };

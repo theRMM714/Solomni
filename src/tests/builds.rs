@@ -341,9 +341,6 @@ fn guest_build_writes_products_back_from_the_local_workspace() {
     let built = builds
         .ensure_many(&[&module], &Target::Guest(guest.clone()), false)
         .expect("guest 里要能编出产物");
-    // 先清理：状态文件写在借来的 `.vm` 里（别留下夹具的痕迹）。
-    let _ = std::fs::remove_file(root.join(".vm").join("build-state").join("greet.json"));
-    unlink_vm(&root.join(".vm"));
     assert!(!built[0].skipped, "第一次要真编：{:?}", built[0]);
     let artifact = module_dir.join("build").join("hello");
     assert!(
@@ -363,6 +360,9 @@ fn guest_build_writes_products_back_from_the_local_workspace() {
         .join("build-cache")
         .join(format!("{}.qcow2", guest));
     assert!(volume.is_file(), "构建缓存卷要在：{}", volume.display());
+    // 收尾：状态文件写在借来的 `.vm` 里，链接本身也要删掉（别留下夹具的痕迹）。
+    let _ = std::fs::remove_file(root.join(".vm").join("build-state").join("greet.json"));
+    unlink_vm(&root.join(".vm"));
 }
 
 /// 目的：把仓库的 `.vm` 链到夹具根——unix 用符号链接，Windows 用 junction（不需要管理员）。
