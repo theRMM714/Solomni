@@ -148,28 +148,25 @@ impl BuildsService {
         )
     }
 
-    /// 目的：按声明跑一次构建（入口预判已由调用方做过）——本机档在宿主，虚拟机档在 guest 本地工作区。
-    /// 参数：`module` = 模块；`decl` = 构建声明；`target` = 目标环境；`target_os` = 目标平台；`net` = 放不放行出站网络。
-    /// 返回：这次的事实；`skipped` = 缓存命中没编。
-    fn run(
+    /// 目的：按声明把这批模块编出来（入口预判已由调用方做过）——本机档逐个在宿主编，虚拟机档共用一个 guest。
+    /// 参数：`jobs` = 模块与构建声明；`target` = 目标环境；`target_os` = 目标平台；`net` = 放不放行出站网络。
+    /// 返回：每个模块这次的事实（顺序与 `jobs` 一致）。
+    fn run_jobs(
         &self,
-        module: &Module,
-        decl: &BuildDecl,
+        jobs: Vec<(Module, BuildDecl)>,
         target: &Target,
         target_os: &str,
         net: bool,
-    ) -> Result<Built, String> {
+    ) -> Result<Vec<Built>, String> {
         match target {
-            Target::Host => self.host(module, decl, target_os, net),
-            Target::Guest(guest) => {
-                let mut out = self.guest(
-                    std::slice::from_ref(&(module.clone(), decl.clone())),
-                    guest,
-                    target_os,
-                    net,
-                )?;
-                out.pop().ok_or_else(|| "构建没有给出结果".to_string())
+            Target::Host => {
+                let mut out = Vec::new();
+                for (module, decl) in &jobs {
+                    out.push(self.host(module, decl, target_os, net)?);
+                }
+                Ok(out)
             }
+            Target::Guest(guest) => self.guest(&jobs, guest, target_os, net),
         }
     }
 
@@ -570,51 +567,64 @@ impl BuildsService {
 }
 
 impl Builds for BuildsService {
-    fn ensure(&self, module: &Module, target: &Target, net: bool) -> Result<Built, String> {
+    fn ensure_many(
+        &self,
+        modules: &[&Module],
+        target: &Target,
+        net: bool,
+    ) -> Result<Vec<Built>, String> {
         let target_os = self.target_os(target)?;
-        let left = self.entries_left(module, &target_os);
-        let Some(decl) = module.manifest.build.clone() else {
-            // 没有 build 段：入口在目标环境是否可用只能看入口本身。
-            if left.is_empty() {
-                return Ok(Built {
+        let mut slots: Vec<Option<Built>> = Vec::new();
+        let mut jobs: Vec<(Module, BuildDecl)> = Vec::new();
+        let mut job_slots: Vec<usize> = Vec::new();
+        for (i, module) in modules.iter().enumerate() {
+            let left = self.entries_left(module, &target_os);
+            let skip = |slots: &mut Vec<Option<Built>>| {
+                slots.push(Some(Built {
                     module: module.manifest.id.clone(),
                     target: target.label(),
                     skipped: true,
                     output: String::new(),
-                });
+                }));
+            };
+            let Some(decl) = module.manifest.build.clone() else {
+                // 没有 build 段：入口在目标环境是否可用只能看入口本身。
+                if left.is_empty() {
+                    skip(&mut slots);
+                    continue;
+                }
+                return Err(format!(
+                    "模块 {} 的工具 {} 入口不在场：{}（模块没声明 build 段：要自带产物，或按模块 README 自己编一次）",
+                    module.manifest.id,
+                    left.first().map(|e| e.tool.as_str()).unwrap_or(""),
+                    left.first().map(|e| e.command.as_str()).unwrap_or("")
+                ));
+            };
+            // 有 build 段：入口存在不等于**这个目标**的产物。只有构建状态明确属于当前目标才跳过；
+            // 状态是别的目标（宿主产物进 guest）就重编。状态缺失视为随仓自带产物，仍跳过。
+            if left.is_empty()
+                && fp::read_state(&fp::state_path(&self.root, &module.manifest.id))
+                    .map(|prev| prev.target == target.label())
+                    .unwrap_or(true)
+            {
+                skip(&mut slots);
+                continue;
             }
-            return Err(format!(
-                "模块 {} 的工具 {} 入口不在场：{}（模块没声明 build 段：要自带产物，或按模块 README 自己编一次）",
-                module.manifest.id,
-                left.first().map(|e| e.tool.as_str()).unwrap_or(""),
-                left.first().map(|e| e.command.as_str()).unwrap_or("")
-            ));
-        };
-        // 有 build 段：入口存在不等于**这个目标**的产物。只有构建状态明确属于当前目标才跳过；
-        // 状态是别的目标（宿主产物进 guest）就交给 run 重编。状态缺失视为随仓自带产物，仍跳过。
-        if left.is_empty() {
-            let state_path = fp::state_path(&self.root, &module.manifest.id);
-            match fp::read_state(&state_path) {
-                Some(prev) if prev.target == target.label() => {
-                    return Ok(Built {
-                        module: module.manifest.id.clone(),
-                        target: target.label(),
-                        skipped: true,
-                        output: String::new(),
-                    });
-                }
-                Some(_) => return self.run(module, &decl, target, &target_os, net),
-                None => {
-                    return Ok(Built {
-                        module: module.manifest.id.clone(),
-                        target: target.label(),
-                        skipped: true,
-                        output: String::new(),
-                    });
-                }
+            job_slots.push(i);
+            slots.push(None);
+            jobs.push(((*module).clone(), decl));
+        }
+        if !jobs.is_empty() {
+            let built = self.run_jobs(jobs, target, &target_os, net)?;
+            let mut it = built.into_iter();
+            for i in job_slots {
+                slots[i] = Some(it.next().expect("构建结果与计划一一对应"));
             }
         }
-        self.run(module, &decl, target, &target_os, net)
+        Ok(slots
+            .into_iter()
+            .map(|b| b.expect("每个槽都有结果"))
+            .collect())
     }
 
     fn build(&self, module: &Module, target: &Target, net: bool) -> Result<Built, String> {
@@ -625,7 +635,9 @@ impl Builds for BuildsService {
                 module.manifest.id
             ));
         };
-        self.run(module, &decl, target, &target_os, net)
+        self.run_jobs(vec![(module.clone(), decl)], target, &target_os, net)?
+            .pop()
+            .ok_or_else(|| "构建没有给出结果".to_string())
     }
 }
 

@@ -486,9 +486,9 @@ fn ensure_rebuilds_when_the_target_changed() {
     )
     .expect("写旧目标状态");
     let again = builds
-        .ensure(&module, &Target::Host, false)
+        .ensure_many(&[&module], &Target::Host, false)
         .expect("目标变化后重编");
-    assert!(!again.skipped, "目标不匹配不能算缓存命中");
+    assert!(!again[0].skipped, "目标不匹配不能算缓存命中");
     assert_eq!(build_runs(&module_dir), 2, "构建命令要真重跑一次");
     assert!(artifact.is_file(), "产物仍在：{}", artifact.display());
     let state: serde_json::Value = serde_json::from_str(
@@ -500,9 +500,9 @@ fn ensure_rebuilds_when_the_target_changed() {
     // 随仓自带产物没有 build-state：不能因为缺状态就反复重编。
     std::fs::remove_file(root.join(".vm").join("build-state").join("hello.json")).expect("删状态");
     let prebuilt = builds
-        .ensure(&module, &Target::Host, false)
+        .ensure_many(&[&module], &Target::Host, false)
         .expect("自带产物可跳过");
-    assert!(prebuilt.skipped, "没有构建状态时按自带产物跳过");
+    assert!(prebuilt[0].skipped, "没有构建状态时按自带产物跳过");
     assert_eq!(build_runs(&module_dir), 2, "跳过时构建命令不再跑");
 }
 
@@ -518,14 +518,22 @@ fn activating_a_session_ensures_the_target_build() {
         calls: Arc<AtomicUsize>,
     }
     impl Builds for CountingBuilds {
-        fn ensure(&self, module: &Module, target: &Target, _net: bool) -> Result<Built, String> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(Built {
-                module: module.manifest.id.clone(),
-                target: target.label(),
-                skipped: true,
-                output: String::new(),
-            })
+        fn ensure_many(
+            &self,
+            modules: &[&Module],
+            target: &Target,
+            _net: bool,
+        ) -> Result<Vec<Built>, String> {
+            self.calls.fetch_add(modules.len(), Ordering::SeqCst);
+            Ok(modules
+                .iter()
+                .map(|module| Built {
+                    module: module.manifest.id.clone(),
+                    target: target.label(),
+                    skipped: true,
+                    output: String::new(),
+                })
+                .collect())
         }
         fn build(&self, _module: &Module, _target: &Target, _net: bool) -> Result<Built, String> {
             Err("启用用例不走 build".to_string())
