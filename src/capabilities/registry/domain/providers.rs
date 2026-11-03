@@ -299,8 +299,10 @@ pub struct WindowsSandbox {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct StorageSettings {
-    /// 目的：到上限 / 启动 / 构建前自动回收一次；false = 只手动。
+    /// 目的：到上限 / 构建前自动回收一次，并按间隔做全局回收；false = 只手动。
     pub auto_gc: bool,
+    /// 目的：全局自动回收间隔（分钟）；至少 15，默认 15。
+    pub gc_interval_minutes: u64,
     /// 目的：可回收缓存总预算（GiB）；0 = 按磁盘 10% 自动，夹在 10–50 GiB。
     pub cache_cap_gib: u64,
     /// 目的：超过这么久未使用可回收（天）；0 = 不按龄。
@@ -317,6 +319,7 @@ impl Default for StorageSettings {
     fn default() -> Self {
         StorageSettings {
             auto_gc: true,
+            gc_interval_minutes: 15,
             cache_cap_gib: 20,
             cache_keep_days: 30,
             build_volume_gib: 16,
@@ -438,6 +441,12 @@ impl Default for AppSettings {
 /// 目的：storage 段的范围校验；保存与加载共用同一把尺子。
 pub fn validate_storage_settings(app: &AppSettings) -> Result<(), String> {
     let s = &app.storage;
+    if s.gc_interval_minutes < 15 || s.gc_interval_minutes > 10_080 {
+        return Err(format!(
+            "storage.gc_interval_minutes 必须在 15..=10080（现在是 {}；全局回收至少 15 分钟）",
+            s.gc_interval_minutes
+        ));
+    }
     if s.cache_cap_gib > 4096 {
         return Err(format!(
             "storage.cache_cap_gib 必须在 0..=4096（现在是 {}）",

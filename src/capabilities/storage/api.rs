@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct StoragePolicy {
     pub auto_gc: bool,
+    /// 目的：全局自动回收间隔（分钟，至少 15）。
+    pub gc_interval_minutes: u64,
     /// 目的：可回收缓存总预算（GiB；0 = 自动）。
     pub cache_cap_gib: u64,
     pub cache_keep_days: u64,
@@ -24,6 +26,7 @@ impl From<&crate::capabilities::registry::api::StorageSettings> for StoragePolic
     fn from(s: &crate::capabilities::registry::api::StorageSettings) -> Self {
         StoragePolicy {
             auto_gc: s.auto_gc,
+            gc_interval_minutes: s.gc_interval_minutes,
             cache_cap_gib: s.cache_cap_gib,
             cache_keep_days: s.cache_keep_days,
             build_volume_gib: s.build_volume_gib,
@@ -38,6 +41,7 @@ impl Default for StoragePolicy {
     fn default() -> Self {
         StoragePolicy {
             auto_gc: true,
+            gc_interval_minutes: 15,
             cache_cap_gib: 20,
             cache_keep_days: 30,
             build_volume_gib: 16,

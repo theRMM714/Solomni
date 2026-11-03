@@ -62,16 +62,19 @@ impl StorageService {
         std::thread::Builder::new()
             .name("solomni-storage".to_string())
             .spawn(move || {
-                let mut first = true;
+                let mut last = std::time::Instant::now();
                 loop {
-                    std::thread::sleep(std::time::Duration::from_secs(if first {
-                        5
-                    } else {
-                        15 * 60
-                    }));
-                    first = false;
-                    if me.policy().auto_gc {
+                    // 30 秒一醒：策略改了（关掉 / 调间隔）最多半分钟就生效，不必重启。
+                    std::thread::sleep(std::time::Duration::from_secs(30));
+                    let policy = me.policy();
+                    if !policy.auto_gc {
+                        last = std::time::Instant::now();
+                        continue;
+                    }
+                    let minutes = policy.gc_interval_minutes.max(15);
+                    if last.elapsed() >= std::time::Duration::from_secs(minutes * 60) {
                         let _ = me.gc(true);
+                        last = std::time::Instant::now();
                     }
                 }
             })

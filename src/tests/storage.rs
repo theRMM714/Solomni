@@ -209,3 +209,16 @@ fn reset_refuses_a_guest_not_in_the_manifest() {
     assert!(lines.is_empty());
     let _ = std::fs::remove_dir_all(&root);
 }
+/// 目的：全局回收间隔至少 15 分钟；默认 15。
+#[test]
+fn gc_interval_is_at_least_fifteen_minutes() {
+    let mut app = crate::capabilities::registry::api::AppSettings::default();
+    assert_eq!(app.storage.gc_interval_minutes, 15);
+    app.storage.gc_interval_minutes = 14;
+    let err = crate::capabilities::registry::domain::providers::validate_storage_settings(&app)
+        .expect_err("14 分钟要拒绝");
+    assert!(err.contains("至少 15 分钟"), "{}", err);
+    app.storage.gc_interval_minutes = 15;
+    crate::capabilities::registry::domain::providers::validate_storage_settings(&app)
+        .expect("15 分钟是合法下限");
+}
