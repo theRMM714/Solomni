@@ -1,6 +1,7 @@
 //! 目的：构建缓存卷的机制——卷落点、对账标识、guest 侧准备/同步脚本与同一虚拟根的构建锁。
 //! 管：卷路径与大小、卷/模块的环境标识、工作区布局、源同步与差异回写脚本、构建锁。
 //! 不管：编什么、什么时候编（`service.rs`）、guest 与盘怎么起（`vm`）。
+//! 联动：由 `service.rs` 组装成 guest 脚本；口径见 docs/builds/README.md 的「目标环境」与单元地图。
 
 use crate::capabilities::vm::api::GuestImage;
 use std::path::{Path, PathBuf};

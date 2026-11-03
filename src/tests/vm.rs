@@ -2239,6 +2239,35 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
             output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
     };
     let out = guest.channel().exec(&run);
+    // 执行物本地化：共享盘不承载执行位——把脚本落进 guest 本地副本，再**直接执行**它（不是 `sh 它`）。
+    let script = share.join("deploy.sh");
+    std::fs::write(&script, "#!/bin/sh\necho DEPLOY_OK\n").expect("写共享区脚本");
+    let dest = crate::capabilities::vm::domain::guest::staged_entry_path("probe", "deploy.sh");
+    let staged = guest.channel().exec(&GuestRun {
+        command: crate::capabilities::vm::domain::guest::stage_script(
+            &format!("{guest_dir}/deploy.sh"),
+            &dest,
+        ),
+        args_json: "{}".to_string(),
+        env: Vec::new(),
+        cwd: String::new(),
+        timeout_secs: 30,
+        output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
+    });
+    assert!(staged.ok, "把入口落进 guest 本地失败：{}", staged.output);
+    let ran = guest.channel().exec(&GuestRun {
+        command: dest,
+        args_json: "{}".to_string(),
+        env: Vec::new(),
+        cwd: String::new(),
+        timeout_secs: 30,
+        output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
+    });
+    assert!(
+        ran.ok && ran.output.contains("DEPLOY_OK"),
+        "本地副本要能直接执行：{}",
+        ran.output
+    );
     // per-agent 围栏：A 只拿到自己的沙箱，B 的沙箱必须被 guest 内 helper 拒绝。
     let access = crate::capabilities::vm::domain::guest::GuestAccess {
         agent: "a".to_string(),
