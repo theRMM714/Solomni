@@ -2703,18 +2703,25 @@ function renderStorage(box, report, refresh) {
   box.className = 'storage-report';
   const head = document.createElement('div');
   head.className = 'storage-summary' + (report.overCap ? ' err' : '');
-  head.textContent = '可回收缓存 ' + fmtBytes(report.managedBytes) + ' / 上限 ' + fmtBytes(report.capBytes) +
+  head.textContent = '缓存占用 ' + fmtBytes(report.managedBytes) + ' / 上限 ' + fmtBytes(report.capBytes) +
     '；宿主剩余 ' + fmtBytes(report.freeBytes) + (report.overCap ? '（已超限）' : '');
   box.appendChild(head);
+  const note = document.createElement('div');
+  note.className = 'cfg-hint';
+  note.textContent = '按策略回收只处理已超上限或超过保留天数的项；未到条件时不会删任何东西。要手动清理，用下方单项或“清空全部缓存”。';
+  box.appendChild(note);
   const bar = document.createElement('div');
   bar.className = 'storage-actions';
-  const gc = btn('立即回收', 'btn btn-primary');
+  const gc = btn('按策略回收', 'btn btn-primary');
   gc.onclick = async () => {
     try {
       const preview = await api('POST', '/api/storage/gc', { apply: false });
       const lines = (preview.report.actions || []).map((a) => a.label + ' · ' + fmtBytes(a.bytes) + ' · ' + a.reason);
-      const text = lines.length ? lines.join('\n') : '没有可回收项。';
-      if (!(await confirmBox('回收预览', text, '回收'))) return;
+      if (!lines.length) {
+        ui.toast('warn', '当前没有达到策略条件的项：未超上限，也没有超过保留天数的缓存；可用单项清理或“清空全部缓存”。');
+        return;
+      }
+      if (!(await confirmBox('回收预览', lines.join('\n'), '回收'))) return;
       const done = await api('POST', '/api/storage/gc', { apply: true });
       ui.toast('ok', '已回收 ' + fmtBytes(done.report.freedBytes));
       await refresh();
