@@ -48,6 +48,7 @@
 | 要找什么 | 读哪一份 |
 | --- | --- |
 | 任务分类、六步流程、开工 / 实施 / 收口、Git / PR | [workflow/README.md](workflow/README.md) |
+| 用户启动文档审计 / 治理（检查、修改、验收） | [workflow/docs-audit.md](workflow/docs-audit.md) |
 | 文档分层、同步表、术语、引用格式 | [conventions.md](conventions.md) |
 
 ## 改动时必须同步

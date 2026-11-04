@@ -79,4 +79,5 @@
 - 全仓常驻规则：[../AGENTS.md](../AGENTS.md)
 - 文档索引：[README.md](README.md)
 - 任务与开发流程：[workflow/README.md](workflow/README.md)
+- 文档审计 / 治理流程：[workflow/docs-audit.md](workflow/docs-audit.md)
 - 测试细则索引：[testing/README.md](testing/README.md)

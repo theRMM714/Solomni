@@ -26,7 +26,8 @@
         "docs/testing/execution-ci.md",
         "docs/collab/task-chain.md",
         "docs/session/session-model.md",
-        "docs/tools/tools-and-roles.md"
+        "docs/tools/tools-and-roles.md",
+        "docs/workflow/docs-audit.md"
       ]
     },
     "reference": {

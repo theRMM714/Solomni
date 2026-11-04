@@ -99,6 +99,7 @@
 | providers、models、agents、settings 登记处 | `REGISTRY_SPEC.md` |
 | 任意测试、测试替身、质量门禁、缺口账或测试报告 | `TESTING.md` |
 | 任务流程 / PR / Git | `docs/workflow/README.md` |
+| 用户启动文档审计 / 治理 | `docs/workflow/docs-audit.md` |
 | 文档分层 / 术语 / 引用 | `docs/conventions.md` |
 | 全部单元与横向细则 | `docs/README.md` |
 
