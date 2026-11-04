@@ -450,7 +450,16 @@ const args = process.argv.slice(2);
 if (args[0] && args[0].indexOf("--dump=") === 0) { console.log(JSON.stringify(loadTemplate(args[0].slice(7)), null, 1)); process.exit(0); }
 if (args.includes("--self-test")) { selfTest(); process.exit(0); }
 const strict = args.includes("--strict");
-const results = runAll();
+const onlyArg = args.find((a) => a.indexOf("--only=") === 0);
+const typeArg = args.find((a) => a.indexOf("--type=") === 0);
+const exArg = args.find((a) => a.indexOf("--exclude=") === 0);
+const only = onlyArg ? onlyArg.slice(7).split(",").map((s) => s.trim()).filter(Boolean) : null;
+const types = typeArg ? typeArg.slice(7).split(",").map((s) => s.trim()).filter(Boolean) : null;
+const excl = exArg ? exArg.slice(10).split(",").map((s) => s.trim()).filter(Boolean) : null;
+let results = runAll();
+if (types) results = results.filter((r) => types.includes(r.type));
+if (only) results = results.filter((r) => only.some((p) => r.rel === p || r.rel.indexOf(p) === 0));
+if (excl) results = results.filter((r) => !excl.some((p) => r.rel === p || r.rel.indexOf(p) === 0));
 const fatal = results.filter((r) => (strict || CFG.enforce.includes(r.type)) && r.problems.length);
 if (args.includes("--json")) {
   console.log(JSON.stringify({ results, fatal: fatal.length }, null, 1));
