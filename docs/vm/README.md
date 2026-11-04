@@ -32,12 +32,17 @@
 - 网络是全局开关（`sandbox.policy.network`），不是会话字段：虚拟机档决定 guest 网卡；本机档由平台围栏决定（Windows `internetClient`、macOS `network-outbound`、Linux `net=false` 用 seccomp 拒绝非本地 socket；Linux `net=true` 不装网络过滤器，不限制入站 / 绑定）；默认 false；Windows 只放行公网出站，不授 private network / loopback。
 - guest 装配按整棵树聚合：plan / 沙箱 / 包冲突 / 定版取作用域根与整棵子树的并集；新子会话的包已被运行 guest 装载就直接加入，引入新包时要求树空闲后按新装配重建，不做运行包动态加载。
 - 建 / 改配 / 删除会话都分两段：核心线程只做校验、占名与出计划，起停 guest 在调用方线程上跑，核心不陪着等 guest。
-- 就绪项 `guest` 按已验平台数据表（`VERIFIED_HOSTS` = linux / windows）放开，并带上本平台已实现的组合。
-- 已验组合：Linux QEMU/KVM + virtiofs（virtiofsd 不在场或不能执行时退 9p）；Windows QEMU/WHPX + SMB guestfwd（缺 smbd 时虚拟机档不可用，先补齐，不降级）。
-- Windows 真机验收以硬件加速（WHPX）可用为前提；当前已验组合是物理宿主，嵌套虚拟化宿主未验。
-- 已真机验收：Linux 与 Windows——引擎级探针（`vm_live_guest_runs_command_inside_guest`）+ 并发可写层探针（`vm_live_two_guests_share_one_base_without_writing_it`）与 e2e 的虚拟机档会话场景都过（虚拟根默认 `debian`，`SOLOMNI_VM_GUEST` 可换）；两端的 QEMU 与 guest 镜像由 provision 能力按清单装入。
+- 就绪项 `guest` 按平台验收数据表（`VERIFIED_HOSTS` = linux / windows）放开，并带上本平台已实现的组合。
+
+<!-- BEGIN:platform-status -->
+> 已真机验收：Linux、Windows；未验：macOS（缺口见 `tests/macos/gaps.yaml`）。
+<!-- END:platform-status -->
+
+- 组合：Linux QEMU/KVM + virtiofs（virtiofsd 不在场或不能执行时退 9p）；Windows QEMU/WHPX + SMB guestfwd（缺 smbd 时虚拟机档不可用，先补齐，不降级）。
+- Windows 验收前提：硬件加速（WHPX）可用；当前只验过物理宿主，嵌套虚拟化宿主未验（`tests/windows/gaps.yaml`）。
+- 验收证据：引擎级探针（`vm_live_guest_runs_command_inside_guest`）+ 并发可写层探针（`vm_live_two_guests_share_one_base_without_writing_it`）与 e2e 的虚拟机档会话场景都过（虚拟根默认 `debian`，`SOLOMNI_VM_GUEST` 可换）；两端的 QEMU 与 guest 镜像由 provision 能力按清单装入。
 - 多台虚拟机档会话并发时各写自己的每租约可写层（不共写基础镜像），同时台上限 `max_guests`（见「五、并发与可写层」）。
-- macOS 未验：`VERIFIED_HOSTS` 只放开 linux / windows；缺 QEMU 取包与 Apple vz 引擎 + 自研 agent（vsock 通道）。缺口与验收标准只记在 `tests/macos/gaps.yaml`。
+- macOS 组合：缺 QEMU 取包与 Apple vz 引擎 + 自研 agent（vsock 通道）；缺口与验收标准只记在 `tests/macos/gaps.yaml`。
 
 ## 三、判据与预检
 - 判据分两层：机器能力（`vm_capability`：hypervisor / guest 后端 / 引擎 / 共享档）决定虚拟机档能不能选；虚拟根是会话级——创建（`create_session` 的 `guest`）或会话配置里从清单选（界面给下拉，不让人填路径），保存 /「开始」时才合并成严格判据（`tier_readiness` / `tier_refusal`）。
@@ -48,7 +53,7 @@
 - 前置检测是一份逐项清单（机器能力 `vm::vm_requirements`，界面与 `--doctor` 照抄同一份）：虚拟机监视器、guest 本体、共享档、QEMU（引擎）；虚拟根（会话级）在保存 /「开始」时合并进来；每项给出"现状 + 怎么补"。
 - 共享档是硬前置：用户共享链为空则虚拟机档不可用；Linux 缺 `virtiofsd` 仍可用 9p；Windows 缺 `smbd` 直接拒绝（先补齐，copy 不兜底）。
 - 缺任何一项都如实拒绝、先预检再启动（不拉一台跑不了工具的 guest）：`packages::plan_guest` 对缺包返回问题，`diagnose_text` 给出「把包放进 `runtimes/`、或让镜像声明」的说法；`vm::plan` 只把选好的包落进执行计划。
-- 本机承载不了（本机没有虚拟机监视器 / guest 后端未验 / 引擎或共享档不在场）= 虚拟机档不允许创建或改入，配置界面禁用并说明缺什么——这是用户环境问题，不是选型问题。
+- 本机承载不了（本机没有虚拟机监视器 / guest 后端未通过验收 / 引擎或共享档不在场）= 虚拟机档不允许创建或改入，配置界面禁用并说明缺什么——这是用户环境问题，不是选型问题。
 
 ## 四、运行包装配（消费 `PackagePlan`）
 - `packages` 做选型诊断（缺包 / 定版 / 冲突），`vm` 消费它给出的 `PackagePlan` 派生装配计划（装载顺序、虚拟根）。
@@ -104,7 +109,7 @@
 ## 七、多平台组合与路径桥
 - 宿主 / 引擎 / guest / 通道 / 共享五轴都可插——"统一 Debian guest"只是默认实例，不是硬约束。
 - 端口职责（适配器默认在前）：`VmEngine` 探测可用性、拉 / 停 VM、加速器、磁盘、网卡 → `QemuEngine`（三平台）；`GuestImage` 镜像描述：id / arch / os / 磁盘镜像 / kernel / initrd / agent / 声明的共享客户端与运行能力 → 虚拟根 `debian`（默认，画像 id `debian-13-genericcloud-amd64`）、`windows`、用户自备；`GuestChannel` 在 guest 里执行、文件读写、销毁 → `QemuHandle`（QEMU + QGA）；`ShareBackend` 宿主↔guest 共享，声明支持的引擎与 guest → `VirtioFsShare`（Linux 默认）、`NinePShare`（Linux 回退）、`SmbShare`（Windows 默认，guestfwd + 用户态 smbd helper）、`CopyShare`（仅开发 / 应急）、`NoneShare`（内部无共享，供给编排）。
-- 各平台用户共享链（性能优先）：Linux QEMU + virtiofs（已验，默认；缺 virtiofsd 时退 9p）+ `accel=kvm`，链路 virtiofs → 9p；macOS QEMU（未验）+ 9p + `accel=hvf`；Windows QEMU + smb（已验，硬前置）+ `accel=whpx`。
+- 各平台用户共享链（性能优先）：Linux QEMU + virtiofs（默认；缺 virtiofsd 时退 9p）+ `accel=kvm`，链路 virtiofs → 9p；macOS QEMU（未通过验收，缺口见 `tests/macos/gaps.yaml`）+ 9p + `accel=hvf`；Windows QEMU + smb（已验，硬前置）+ `accel=whpx`。
 - copy 不在任何用户链里；只有进程级开发 / 应急开关（`SOLOMNI_VM_SHARE=copy`）会把它作为该进程 VM 会话的唯一候选，并在日志里警告性能不可用；自定义 guest 没有声明本平台可承载的客户端时，`tier_readiness` 在起 guest 前拒绝。
 - 模块构建也能落 guest（创建会话前自动补编；手动入口是 `solomni --build=<模块 id> --guest=<虚拟根>`），细节见 `docs/builds/README.md`。
 - 包库在 `packages` 单元：契约、扫描与选包都在那里；`vm` 只消费 `PackagePlan` 做挂载 / 软链 / 叠写，不再持有 `PackageSource`。

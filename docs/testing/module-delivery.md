@@ -65,7 +65,7 @@
 - 用了哪些 Stub / Fake / Mock / Spy / Fixture，各自覆盖什么（语义见 [doubles.md](doubles.md)）；
 - 工具协议或产品端口契约在哪里验证；
 - 临时文件、进程、端口、日志等资源如何清理；
-- Windows / macOS / Linux 的假设、已验证项与未验证项；
+- 各平台的假设与验证范围（证据在 `tests/<平台>/` 与 [levels.md](levels.md)）；
 - 通过、缺口、环境跳过与"不适用"项的证据；
 - 本次测试是否产生外部副作用，以及是否已清理。
 

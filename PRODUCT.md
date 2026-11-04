@@ -79,7 +79,11 @@
 - 用户投喂走同一条提交路径（作者 = user，权威覆盖）。每个提交记录带 `(agent, line)` 行锚，回档时按行**精确物化**：任一提交点都能还原出当时的共享区内容，回档也把共享区一起带回那一刻（见 [docs/session/session-model.md](docs/session/session-model.md) 的「回档：三种模式 + 工作级标记」）。
 - **执行档位**（`exec` 段）：本机档（默认）= 脚本直接在宿主上跑；虚拟机档 = 一整套 guest。
 - 虚拟机档的选型、诊断、装配计划、逐项前置检测、guest 端口、QEMU 后端与**执行分派**都已就位（建会话 / 启用历史会话时按计划与沙箱装配挂载并拉起 guest，工具命令送进 guest，会话删除时销毁）。
-- **一个主会话树共用一台 guest**（子会话与 proxy 子工作的工具租约都指向顶层工作；guest 内按 agent 用 Linux helper 做文件可达范围隔离；环境随主会话，AI 不能给子会话另选档位 / 虚拟根）；**按组合放开**：guest 做成五轴可扩展组合（宿主 × 引擎 × guest × 通道 × 共享），各平台按用户共享链取第一个可用档；copy 不在用户链里（只作开发/应急）；Linux（QEMU/KVM + virtiofs，缺 virtiofsd 时退 9p）与 Windows（QEMU/WHPX + SMB guestfwd）已真机验收；Windows 缺 smbd 时虚拟机档不可用（先补齐，不降级）；macOS 的组合未验（未验组合禁用并逐项列出缺什么、每项怎么补）；未开放组合上已存在的会话不拦打开（列表标注"虚拟机档不可用"，本次按本机档执行）。
+- **一个主会话树共用一台 guest**（子会话与 proxy 子工作的工具租约都指向顶层工作；guest 内按 agent 用 Linux helper 做文件可达范围隔离；环境随主会话，AI 不能给子会话另选档位 / 虚拟根）；**按组合放开**：guest 做成五轴可扩展组合（宿主 × 引擎 × guest × 通道 × 共享），各平台按用户共享链取第一个可用档；copy 不在用户链里（只作开发/应急）；组合、前提与缺口细节见 [docs/vm/README.md](docs/vm/README.md) 的「多平台组合与路径桥」；未开放组合上已存在的会话不拦打开（列表标注"虚拟机档不可用"，本次按本机档执行）。
+
+<!-- BEGIN:platform-status -->
+> 已真机验收：Linux、Windows；未验：macOS（缺口见 `tests/macos/gaps.yaml`）。
+<!-- END:platform-status -->
 - guest 默认 Debian stable（13 / trixie）；QEMU 等依赖**不预置、不分发**，由 provision 能力在 Linux / Windows 上按清单下载并解包进项目内（需用户同意），产品检测、指路并给出"怎么补"（入口 `--provision`，清单与字段见 [dependencies.yaml](dependencies.yaml)，机制见 [docs/provision/README.md](docs/provision/README.md)）。
 - **运行能力**：模块用 `runtimes` 声明需要的能力。本机档按**宿主目标**装载 `runtimes/` 里的 `prefix` 包（包 `bin/` 前置到本次执行的 PATH），基础工具链（Python / Node / C-C++，装进 `.tools/toolchains`）是运行前提，启动时拼进产品 PATH，shell 的只读根也对它们放行；模块 `runtimes/` 包按该 agent 的模块进本次 PATH / 只读根；宿主 PATH 是回退（Windows 上还要围栏能授权）；`system` 类包只服务虚拟机档。
 - 虚拟机档按 guest 平台装载包，能力也可由 guest 画像（`guest.yaml` 的 `runtimes`）满足。
