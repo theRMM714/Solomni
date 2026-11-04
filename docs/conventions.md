@@ -71,6 +71,7 @@
 ## 检查
 - 文档分层与路由 → T0 结构审查的 docRefs / unitMap（`node run-tests.js`）。
 - 文档模板、效力行与锚点 → `docs-gov`（`node run-tests.js --docs` 调用，硬失败）。
+- 季度审计候选 → `node tests/docs-audit.mjs`（只报不拦：过期 / 状态缺证据 / 重复事实 / 失效锚点 / 孤儿 / 例外）。
 - 术语与引用 → `node run-tests.js --docs` 的文档审查。
 
 ## 路由
