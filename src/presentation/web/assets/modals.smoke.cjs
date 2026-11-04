@@ -302,6 +302,16 @@ if (!loadErrors.length) {
     const log = nodes.find((n) => n.className === "cfg-log");
     return nums.length >= 1 && !!title && !!log;
   });
+  check("设置中心：存储页含预算、回收与还原入口", () => {
+    vm.runInNewContext("openSettingsModal()", sandbox);
+    const page = openPage("storage");
+    const nodes = walk(page, []);
+    const text = nodes.map((n) => String(n.textContent || "")).join(" ");
+    const nums = inputsIn(page).filter((i) => i.type === "number");
+    const report = nodes.find((n) => String(n.className) === "storage-report");
+    const log = nodes.find((n) => String(n.className) === "cfg-log");
+    return nums.length >= 5 && !!report && !log && text.indexOf("可回收缓存") >= 0 && text.indexOf("还原虚拟根") >= 0;
+  });
   check("设置中心：底栏保存接线", () => {
     vm.runInNewContext("openSettingsModal()", sandbox);
     openPage("generate");

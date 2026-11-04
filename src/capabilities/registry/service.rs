@@ -48,6 +48,8 @@ impl RegistryService {
         .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
         providers::validate_compact_percents(&settings.app)
             .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
+        providers::validate_storage_settings(&settings.app)
+            .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
         providers::validate_thinking(&settings.models, &settings.app.thinking)
             .map_err(|e| format!("登记处配置非法：{}", e))?;
         Ok(RegistryService {
@@ -328,6 +330,8 @@ impl Registry for RegistryService {
         crate::capabilities::registry::domain::providers::validate_sandbox_settings(&app.sandbox)
             .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
         providers::validate_compact_settings(&app, &self.settings.models)
+            .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
+        providers::validate_storage_settings(&app)
             .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
         crate::capabilities::registry::domain::providers::validate_sandbox_authorization(
             &app.sandbox.policy,

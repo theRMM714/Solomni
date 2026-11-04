@@ -87,6 +87,11 @@ pub trait Provision: Send + Sync {
     fn start(&self, ids: Vec<String>) -> Result<(), String>;
     /// 目的：请求取消当前作业。
     fn cancel(&self);
+    /// 目的：把某个由产品清单构造的虚拟根还原到初始状态（删掉旧 guest 目录，按清单重装镜像与运行期）。
+    /// 参数：`guest` = 虚拟根名；`on_line` = 进度行回调。
+    /// 错误：不是清单构造的虚拟根、有活跃 guest、删除或重装失败。
+    /// 约束：不备份旧目录；失败后可能只剩半成品，下一次还原会从干净目录重来。
+    fn reset_guest(&self, guest: &str, on_line: &mut dyn FnMut(&str)) -> Result<(), String>;
 }
 
 /// 目的：未接入的补齐面——组合根未注入时的默认值；调用如实失败，不假装可用。
@@ -109,4 +114,7 @@ impl Provision for NoProvision {
         Err("依赖补齐未接入".to_string())
     }
     fn cancel(&self) {}
+    fn reset_guest(&self, _guest: &str, _on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
+        Err("依赖补齐未接入".to_string())
+    }
 }

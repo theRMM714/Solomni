@@ -14,7 +14,7 @@ pub use crate::capabilities::registry::domain::agents::{
 };
 pub use crate::capabilities::registry::domain::providers::{
     AppSettings, ModelDraft, ModelEntry, ModelView, Provider, ProviderView, SandboxEnforceLevel,
-    SandboxUnavailable, Settings, ThinkingSpec,
+    SandboxUnavailable, Settings, StorageSettings, ThinkingSpec,
 };
 
 use crate::capabilities::llm::api::{Channel, ProbeOutcome, ReplayReport, ToolMode};

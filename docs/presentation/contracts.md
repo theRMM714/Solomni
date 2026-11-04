@@ -121,6 +121,9 @@
 | GET | `/api/setup/status` | `Provision::status + job` | 查询 `since` / `wait` | `{deps:[{id,guest,present,install,probe,source,url,size_mb,note}],job:{running,seq,lines,error},missing,pending:[id]}` | 200, 400 |
 | POST | `/api/setup/ensure` | `Provision::status + start` | `{deps?:[id],confirm?:bool}`（不点名 = 只补现在缺的） | `{preview:[{id,url,size_mb,present}]}` / `{ok,deps}`（都装好了 → `{ok,deps:[]}`） | 200, 400 |
 | DELETE | `/api/setup/job` | `Provision::cancel` | — | `{ok}` | 200 |
+| GET | `/api/storage` | `Storage::report` | — | `{report:{generatedAt,managedBytes,capBytes,categories,policy,job}}` | 200, 400 |
+| POST | `/api/storage/gc` | `Storage::gc` | `{apply?:bool}` | `{ok,report:{actions,skipped,freedBytes,overCap}}` | 200, 400 |
+| POST | `/api/storage/clean` | `Storage::clean` | `{kind,id?,module?,confirm:bool}` | `{ok,result}`（report 或 started 作业） | 200, 400 |
 | POST | `/api/suggest-models` | `ConductorOps::suggest_models` | `{task,mode}` | `{ok,agents}` | 200, 400 |
 <!-- ROUTES:END -->
 

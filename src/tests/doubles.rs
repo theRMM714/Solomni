@@ -1592,6 +1592,9 @@ pub(crate) fn test_provision_with(
             Err("测试不跑补齐作业".to_string())
         }
         fn cancel(&self) {}
+        fn reset_guest(&self, _guest: &str, _on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
+            Err("测试不跑虚拟根还原".to_string())
+        }
     }
     Arc::new(FixedProvision(deps))
 }

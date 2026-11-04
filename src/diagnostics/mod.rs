@@ -2,6 +2,8 @@
 //! 退出码按各模式的约定（多数恒 0：**判定归调用方**，这里只报事实）。
 //! 隐藏模式：用户经文档知道它们，不列进面向用户的帮助。
 
+use crate::capabilities::storage::api::Storage as _;
+
 /// 目的：把归档解到目录（跨平台纯 Rust，不依赖用户装解压工具；用法 solomni --unpack <archive> <dest>）。
 pub fn unpack_cli(args: &[String], i: usize) -> i32 {
     let archive = args.get(i + 1).cloned().unwrap_or_default();
@@ -87,6 +89,181 @@ pub fn work_gc(root: &std::path::Path, args: &[String], i: usize) -> i32 {
     }
 }
 
+/// 目的：存储空间的机器可读报告（--storage）。
+pub fn storage(root: &std::path::Path) -> i32 {
+    match storage_service(root).report() {
+        Ok(report) => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&report).unwrap_or_default()
+            );
+            0
+        }
+        Err(e) => {
+            eprintln!("[存储] {}", e);
+            1
+        }
+    }
+}
+
+/// 目的：存储回收（--gc [--yes] [--category=…] [--guest=…] [--module=…]）；默认 dry-run。
+pub fn gc(root: &std::path::Path, args: &[String], i: usize) -> i32 {
+    let apply = args.iter().any(|a| a == "--yes");
+    let category = args
+        .iter()
+        .find_map(|a| a.strip_prefix("--category="))
+        .map(str::to_string)
+        .or_else(|| {
+            args.get(i)
+                .and_then(|a| a.strip_prefix("--gc="))
+                .map(str::to_string)
+        });
+    let guest = args
+        .iter()
+        .find_map(|a| a.strip_prefix("--guest="))
+        .map(str::to_string);
+    let module = args
+        .iter()
+        .find_map(|a| a.strip_prefix("--module="))
+        .map(str::to_string);
+    let svc = storage_service(root);
+    use crate::capabilities::storage::api::Storage;
+    if let Some(cat) = category {
+        let kind = match crate::capabilities::storage::api::CleanKind::parse(&cat) {
+            Ok(k) => k,
+            Err(e) => {
+                eprintln!("[存储] {}", e);
+                return 2;
+            }
+        };
+        let req = crate::capabilities::storage::api::CleanRequest {
+            kind,
+            id: guest,
+            module,
+            confirm: apply,
+        };
+        if !apply {
+            println!("[存储] 预览模式：确认后加 --yes 才会清理 {}", cat);
+            match svc.report() {
+                Ok(r) => {
+                    let c = r
+                        .categories
+                        .iter()
+                        .find(|c| c.id == cat || c.id == "guest-bases");
+                    if let Some(c) = c {
+                        println!(
+                            "[存储] {}：{} 字节 / {} 项",
+                            c.label,
+                            c.bytes,
+                            c.items.len()
+                        );
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[存储] {}", e);
+                    return 1;
+                }
+            }
+            return 0;
+        }
+        match svc.clean(&req) {
+            Ok(crate::capabilities::storage::api::CleanOutcome::Report(r)) => {
+                print_gc(&r);
+                0
+            }
+            Ok(crate::capabilities::storage::api::CleanOutcome::Started(job)) => {
+                println!("[存储] 已启动作业：{}", job.lines.join(" / "));
+                while svc.job().running {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                }
+                let j = svc.job();
+                for line in &j.lines {
+                    println!("[存储] {}", line);
+                }
+                if let Some(e) = j.error {
+                    eprintln!("[存储] {}", e);
+                    1
+                } else {
+                    0
+                }
+            }
+            Err(e) => {
+                eprintln!("[存储] {}", e);
+                1
+            }
+        }
+    } else {
+        match svc.gc(apply) {
+            Ok(r) => {
+                print_gc(&r);
+                0
+            }
+            Err(e) => {
+                eprintln!("[存储] {}", e);
+                1
+            }
+        }
+    }
+}
+
+/// 目的：打印一次回收报告（CLI 人类可读；不打印机器路径）。
+fn print_gc(r: &crate::capabilities::storage::api::GcReport) {
+    if r.actions.is_empty() {
+        println!(
+            "[存储] {}；当前 {} 字节",
+            if r.applied {
+                "没有可回收项"
+            } else {
+                "没有候选"
+            },
+            r.before_bytes
+        );
+        return;
+    }
+    for a in &r.actions {
+        println!(
+            "[存储] {} {}：{}（{}）{}",
+            if a.applied { "回收" } else { "可回收" },
+            a.category,
+            a.label,
+            a.bytes,
+            a.error.clone().unwrap_or_else(|| a.reason.clone())
+        );
+    }
+    println!("[存储] 释放 {} 字节；仍超限={}", r.freed_bytes, r.over_cap);
+}
+
+/// 目的：按 settings.yaml 取存储策略；读不到用默认。
+fn storage_policy(root: &std::path::Path) -> crate::capabilities::storage::api::StoragePolicy {
+    std::fs::read_to_string(root.join(".home").join("settings.yaml"))
+        .ok()
+        .and_then(|t| {
+            yaml_serde::from_str::<crate::capabilities::registry::api::AppSettings>(&t).ok()
+        })
+        .map(|a| crate::capabilities::storage::api::StoragePolicy::from(&a.storage))
+        .unwrap_or_default()
+}
+
+/// 目的：CLI 用的存储能力面（不装完整核心；guest 还原走同一条 provision）。
+fn storage_service(
+    root: &std::path::Path,
+) -> crate::capabilities::storage::service::StorageService {
+    use std::sync::Arc;
+    let provision: Arc<dyn crate::capabilities::provision::api::Provision + Send + Sync> =
+        Arc::new(crate::capabilities::provision::ProvisionService::with_vm(
+            root,
+            crate::provision_vm(crate::kernel::detail::procs::ProcessBook::open(
+                &root.join(".home"),
+            )),
+        ));
+    crate::capabilities::storage::service::StorageService::new(
+        root.to_path_buf(),
+        provision,
+        Arc::new(crate::kernel::ports::NoopLog),
+        storage_policy(root),
+    )
+}
+
 /// 自检：本机事实（平台 + 围栏能力 + 外部解释器）。只报事实，不猜、不改任何东西（围栏自检那个临时目录除外）。
 /// 参数：root = 产品根——虚拟机档要按它读"项目内已装了什么"（与会话判据同一份来源，不另编一套）。
 pub fn doctor(root: &std::path::Path) -> i32 {
@@ -163,6 +340,19 @@ pub(crate) fn doctor_json_with(
                 "id": r.id, "met": r.met, "detail": r.detail, "how": r.how,
             })).collect::<Vec<_>>(),
         },
+        "storage": match storage_service(root).report() {
+            Ok(s) => serde_json::json!({
+                "managed_bytes": s.managed_bytes,
+                "cap_bytes": s.cap_bytes,
+                "free_bytes": s.free_bytes,
+                "over_cap": s.over_cap,
+                "categories": s.categories.iter().map(|c| serde_json::json!({
+                    "id": c.id, "bytes": c.bytes, "items": c.items.len(), "auto": c.auto_evictable,
+                })).collect::<Vec<_>>(),
+                "last_gc": s.last_gc,
+            }),
+            Err(e) => serde_json::json!({ "error": e }),
+        },
     });
     doc
 }
@@ -199,6 +389,37 @@ pub(crate) fn build_vm(
 
 /// 目的：隐藏模式——依赖补齐：不带 `--ensure` 报状态（机器可读）；带 `--ensure[=id,…] --yes` 真下载安装。
 pub fn provision(root: &std::path::Path, args: &[String]) -> i32 {
+    if let Some(guest) = args.iter().find_map(|a| a.strip_prefix("--reset=")) {
+        if !args.iter().any(|a| a == "--yes") {
+            eprintln!("[依赖补齐] 还原虚拟根会删除 guest 内状态并重建；确认后加 --yes");
+            return 2;
+        }
+        let svc = crate::capabilities::provision::ProvisionService::with_vm(
+            root,
+            crate::provision_vm(crate::kernel::detail::procs::ProcessBook::open(
+                &root.join(".home"),
+            )),
+        );
+        use crate::capabilities::provision::api::Provision;
+        return match svc.reset_guest(guest, &mut |line| eprintln!("[依赖补齐] {}", line)) {
+            Ok(()) => {
+                let req = crate::capabilities::storage::api::CleanRequest {
+                    kind: crate::capabilities::storage::api::CleanKind::BuildCache,
+                    id: Some(guest.to_string()),
+                    module: None,
+                    confirm: true,
+                };
+                if let Err(e) = storage_service(root).clean(&req) {
+                    eprintln!("[依赖补齐] 清构建缓存失败：{}", e);
+                }
+                0
+            }
+            Err(e) => {
+                eprintln!("[依赖补齐] {}", e);
+                1
+            }
+        };
+    }
     let ids: Vec<String> = args
         .iter()
         .find_map(|a| a.strip_prefix("--ensure="))
@@ -439,6 +660,13 @@ fn build_service(
     );
     let provision: Arc<dyn crate::capabilities::provision::api::Provision + Send + Sync> =
         Arc::new(crate::capabilities::provision::ProvisionService::new(root));
+    let storage: Arc<dyn crate::capabilities::storage::api::Storage + Send + Sync> =
+        Arc::new(crate::capabilities::storage::service::StorageService::new(
+            root.to_path_buf(),
+            Arc::clone(&provision),
+            Arc::new(crate::kernel::ports::NoopLog),
+            crate::capabilities::storage::api::StoragePolicy::default(),
+        ));
     let runner: Arc<dyn crate::kernel::ports::ProcessRunner + Send + Sync> =
         Arc::new(build_runner(root)?);
     Ok(crate::capabilities::builds::service::BuildsService::new(
@@ -446,6 +674,7 @@ fn build_service(
         packages,
         build_vm(root),
         provision,
+        storage,
         runner,
         Arc::new(crate::kernel::detail::confine::FenceHostAdapter::new(
             root.join(".home"),
