@@ -106,8 +106,7 @@ roles:
 
 - **两个适配器**：模型侧（`ToolHandler`，按名字认领）与呈现侧（`POST /api/actions/{id}`、`GET /api/actions` 动作目录）都只负责造一次 `ActionCall`（动作 id + 参数 + 调用者身份）并各按自己的媒介呈现结果——模型侧拿文本回执，呈现侧拿结构化结果。**同一份声明，两种呈现。**
 - **读取与视图不进动作表**：会话列表 / 配置 / 文件清单 / 历史是读接口，事实仍只有**事件台**一条来路。
-- **人经呈现层调用**（`caller = user`）与**模型经工具调用**（`caller = 角色 id`）走同一次校验、同一处授权、同一条审计；
-- 适配器不各自校验、也不各自判权。
+- **人经呈现层调用**（`caller = user`）与**模型经工具调用**（`caller = 角色 id`）走同一次校验、同一处授权、同一条审计；适配器不各自校验、也不各自判权。
 - **登记处动作只给 user**：供应商 / 密钥 / 模型 / agent / 设置的写面（`upsert_provider` / `remove_provider` / `discover_models` / `upsert_model` / `remove_model` / `set_core_model` / `probe_model_tools` / `probe_replay_shape` / `upsert_agent` / `remove_agent` / `set_settings`）的 `callers` 只有 `user`——产品级资源默认不开放给任何角色；`api_key` 只进登记处，不进动作目录、不进审计。读（`GET /api/settings`、`/api/state`）仍是独立读接口。
 - **工作区回滚动作也只给 user**：`restore_work_commit`（`session_id` / `commit` / `expect_head`）——非破坏性物化共享区，目标之后的提交仍保留；同一工作子树里有会话在生成时拒绝；成功后由核心落一条可回放的 `notice` 行。
 - 提交历史 / 详情 / 文件预览是**只读视图**（`SessionOps::work_log` / `work_commit_view` / `work_commit_file`），不进动作表。
@@ -120,8 +119,7 @@ roles:
   - 调用经 `ResidentOps::call` 转给常驻服务；**未启动的服务不出现**（操作是跑起来才发现的）。
   - 就绪服务的操作同样进**动作目录**（`GET /api/actions` 对 user 可见），Web / CLI 的动作面板因此不必另建一份清单。
 - **隐秘字段的设置只给 user**：`set_secret` / `clear_secret`（`module` + `name`，值 `value`）——值只落 `.home/` 的 `secrets.yaml`，不进转录 / 日志 / 命令行，永不回显；审计只记动作 id 与成败，不记值。
-- **模块工具也是动作**（动态动作，来自清单）：id = `module.<模块id>.<工具名>`。人可直接跑（无会话，围栏按模块目录 + 可选工作目录派生）；
-- 会话里由成员循环执行（同一份 `module.yaml` 声明、同一个 `ToolExec::run_module`）。两条路径的审计记录同一处格式化（`action_audit`），只是各自进自己的账本：呈现层进运行日志，模型侧进**转录工具行**（可回放）。**缺运行包 = 不执行**：两条路径读同一把尺子（`runtime_report.missing`），目录里如实标不可用，不静默降级。
+- **模块工具也是动作**（动态动作，来自清单）：id = `module.<模块id>.<工具名>`。人可直接跑（无会话，围栏按模块目录 + 可选工作目录派生）；会话里由成员循环执行（同一份 `module.yaml` 声明、同一个 `ToolExec::run_module`）。两条路径的审计记录同一处格式化（`action_audit`），只是各自进自己的账本：呈现层进运行日志，模型侧进**转录工具行**（可回放）。**缺运行包 = 不执行**：两条路径读同一把尺子（`runtime_report.missing`），目录里如实标不可用，不静默降级。
 
 ## 五、执行类系统工具：shell
 
@@ -249,8 +247,7 @@ prompts/
 - `take=local` 在本地与基线一致时拒绝、主副本提交变化时拒绝；`take=upstream` 覆盖/删除前备份到 `lost/`，`work_lost` 可按当前 hash 恢复。
 - 文本、图片、视频与其它二进制都按字节处理；`work_versions` 给 hash、大小与扩展名媒体类型提示，文本预览最多 16 KiB；单文件超过 64 MiB 时提交 / 上传明确拒绝。
 - 用户投喂是同一条提交路径里的**权威提交**（作者 = user）。
-- 用户可在 Web 会话状态栏或 CLI `work` 命令看提交历史、提交详情与文本预览，并把共享区非破坏性回滚到任一提交点；
-- agent 侧仍只拿 `work_*` 工具，不给回滚入口。
+- 用户可在 Web 会话状态栏或 CLI `work` 命令看提交历史、提交详情与文本预览，并把共享区非破坏性回滚到任一提交点；agent 侧仍只拿 `work_*` 工具，不给回滚入口。
 
 - 执行类系统工具 `shell` 对 executor / solo / core_proxy 发放：sandbox 只碰私有沙箱 + 基础 / 项目工具链只读；external 按档位 ask / allow；Windows 上按"会话 + agent + 根集合"派生容器身份（与模块工具同一口径）。
 - 工具面**按回合按身份注入**（总表不进提示词）；越权调用如实拒绝并落工具行；悬空引用由装配期 `problems()` 挡下。

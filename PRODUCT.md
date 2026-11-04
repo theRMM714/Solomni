@@ -79,10 +79,7 @@
 - 用户投喂走同一条提交路径（作者 = user，权威覆盖）。每个提交记录带 `(agent, line)` 行锚，回档时按行**精确物化**：任一提交点都能还原出当时的共享区内容，回档也把共享区一起带回那一刻（见 [docs/session/session-model.md](docs/session/session-model.md) 的「回档：三种模式 + 工作级标记」）。
 - **执行档位**（`exec` 段）：本机档（默认）= 脚本直接在宿主上跑；虚拟机档 = 一整套 guest。
 - 虚拟机档的选型、诊断、装配计划、逐项前置检测、guest 端口、QEMU 后端与**执行分派**都已就位（建会话 / 启用历史会话时按计划与沙箱装配挂载并拉起 guest，工具命令送进 guest，会话删除时销毁）。
-- **一个主会话树共用一台 guest**（子会话与 proxy 子工作的工具租约都指向顶层工作；guest 内按 agent 用 Linux helper 做文件可达范围隔离；环境随主会话，AI 不能给子会话另选档位 / 虚拟根）；
-- **按组合放开**：guest 做成五轴可扩展组合（宿主 × 引擎 × guest × 通道 × 共享），各平台按用户共享链取第一个可用档；copy 不在用户链里（只作开发/应急）；
-- Linux（QEMU/KVM + virtiofs，缺 virtiofsd 时退 9p）与 Windows（QEMU/WHPX + SMB guestfwd）已真机验收；Windows 缺 smbd 时虚拟机档不可用（先补齐，不降级）；macOS 的组合未验（未验组合禁用并逐项列出缺什么、每项怎么补）；
-- 未开放组合上已存在的会话不拦打开（列表标注"虚拟机档不可用"，本次按本机档执行）。
+- **一个主会话树共用一台 guest**（子会话与 proxy 子工作的工具租约都指向顶层工作；guest 内按 agent 用 Linux helper 做文件可达范围隔离；环境随主会话，AI 不能给子会话另选档位 / 虚拟根）；**按组合放开**：guest 做成五轴可扩展组合（宿主 × 引擎 × guest × 通道 × 共享），各平台按用户共享链取第一个可用档；copy 不在用户链里（只作开发/应急）；Linux（QEMU/KVM + virtiofs，缺 virtiofsd 时退 9p）与 Windows（QEMU/WHPX + SMB guestfwd）已真机验收；Windows 缺 smbd 时虚拟机档不可用（先补齐，不降级）；macOS 的组合未验（未验组合禁用并逐项列出缺什么、每项怎么补）；未开放组合上已存在的会话不拦打开（列表标注"虚拟机档不可用"，本次按本机档执行）。
 - guest 默认 Debian stable（13 / trixie）；QEMU 等依赖**不预置、不分发**，由 provision 能力在 Linux / Windows 上按清单下载并解包进项目内（需用户同意），产品检测、指路并给出"怎么补"（入口 `--provision`，契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)）。
 - **运行能力**：模块用 `runtimes` 声明需要的能力。本机档按**宿主目标**装载 `runtimes/` 里的 `prefix` 包（包 `bin/` 前置到本次执行的 PATH），基础工具链（Python / Node / C-C++，装进 `.tools/toolchains`）是运行前提，启动时拼进产品 PATH，shell 的只读根也对它们放行；模块 `runtimes/` 包按该 agent 的模块进本次 PATH / 只读根；宿主 PATH 是回退（Windows 上还要围栏能授权）；`system` 类包只服务虚拟机档。
 - 虚拟机档按 guest 平台装载包，能力也可由 guest 画像（`guest.yaml` 的 `runtimes`）满足。
@@ -95,8 +92,7 @@
 - **门不过就不起前端**：默认 CLI 与 `-webUI` 都先过环境检查；没有可回答的前端时直接退出，不会“先开 Web 再说”。
 - **必要落点授不上不静默降级**：经统一裁决通道问一次（本轮无围栏跑一次 / 放弃这次调用）；拒绝、没人答或没有可回答的前端一律不执行；**可选落点**授不上只记事实（`src/capabilities/conductor/service/ask_user.rs`）。
 - 机制细节见 [ARCHITECTURE.md](ARCHITECTURE.md)，三平台真机探针见 [TESTING.md](TESTING.md)。
-- **出站网络是全局开关**（`sandbox.policy.network`）：会话工具、直接模块工具、常驻服务、模块构建共用；
-- 虚拟机档决定 guest 网卡；本机档 Windows 授 `internetClient`（只公网出站，不授 private network / loopback）、macOS 放行 `network-outbound`、Linux 在 `network=false` 时由 seccomp 拒绝非 AF_UNIX / AF_NETLINK socket（TCP/UDP/raw 与回环都出不去）。Linux 的 `network=true` 不装网络过滤器，不限制入站/绑定（平台差异）。Windows 未授权 `windows.write_acl` 时容器不装，网络不生效。
+- **出站网络是全局开关**（`sandbox.policy.network`）：会话工具、直接模块工具、常驻服务、模块构建共用；虚拟机档决定 guest 网卡；本机档 Windows 授 `internetClient`（只公网出站，不授 private network / loopback）、macOS 放行 `network-outbound`、Linux 在 `network=false` 时由 seccomp 拒绝非 AF_UNIX / AF_NETLINK socket（TCP/UDP/raw 与回环都出不去）。Linux 的 `network=true` 不装网络过滤器，不限制入站/绑定（平台差异）。Windows 未授权 `windows.write_acl` 时容器不装，网络不生效。
 - **未授权不等于无围栏**：Windows 的容器围栏（路径级可达范围与断网）要授权才装得上；Linux / macOS 的围栏在守门进程里自足，不受授权影响。进程树与环境白名单两种时段都生效；启动报告把"本机能力"与"本次实际"分两行说清。
 - **围栏要用就征得同意**：Windows 的路径级围栏要写本机权限项，程序**默认不写**——只有显式授权（`settings.yaml` 的 `sandbox.policy.windows.write_acl: true` 或 `SOLOMNI_FENCE_WRITE=1`）才做；授权后每次写入逐条列出并记进台账。
 - 授权台账、启动对账与按条处置的语义见 [docs/kernel/README.md](docs/kernel/README.md)；分层边界见 [ARCHITECTURE.md](ARCHITECTURE.md)。
@@ -199,8 +195,7 @@ $ start.bat                 # Windows（或 node start.js）；macOS/Linux 用 .
 
 ### 会话与历史
 
-- **创建工作**：填工作名 → 选形态 → 选执行档位（虚拟机档不可用时禁用并逐项说明）→ 加 agent（点加号新建临时 agent，或从登记处加入；
-- 模块在弹层里点卡片加入（已加入置顶、可选区可搜索），人设 / 模型在卡片里看与改）→ 协作再写下本次需求。工作名即落盘目录名。
+- **创建工作**：填工作名 → 选形态 → 选执行档位（虚拟机档不可用时禁用并逐项说明）→ 加 agent（点加号新建临时 agent，或从登记处加入；模块在弹层里点卡片加入（已加入置顶、可选区可搜索），人设 / 模型在卡片里看与改）→ 协作再写下本次需求。工作名即落盘目录名。
 - **落盘**：记录**只追加**；回档以**留档标记**为轴——留档只在流水追加一条 `rewind` 记录（字节全留、可恢复），删除与恢复会**整体重写**流水（真的删）。会话内容 = 按标记回放出的活动窗口；要留审计痕迹就用留档。
 - **历史侧栏**：每项三个动作——**打开**（转录 + 启用 / 上下文继续 / 停止）、**编辑**（配置视图）、**删除**（永久删除；工作区非空时先列出共享区与各 agent 沙箱的文件数与总字节，让你确认"连文件一起删"）。
 - **子会话不渲染删除按钮**（它由核心管理，删主会话会一起删掉它）。
@@ -217,8 +212,7 @@ $ start.bat                 # Windows（或 node start.js）；macOS/Linux 用 .
 - 它是会话的上下文动作，不是历史回放的入口（入口是启用）。
 - **撤回同意**：协作里某个 agent 的 `agree` 可单独撤回，核心按剩余转录重新判定收敛。
 - **基本设置**（写回 `.home/settings.yaml`，字段全表见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)）：流式传输、思维链显示（渲染在回答上方，**永远默认折叠、点击才展开**）、思考等级标签（默认 off/low/high/max，可追加任意标签）、单次模型调用的超时、一轮内最多提醒几次、上下文用到百分之多少就压缩、可回收缓存的空间预算与保留策略。
-- **存储空间**（设置 → 存储空间）：看构建缓存 / 下载缓存 / 过期可写层 / 日志 / 虚拟根 / 会话 / 模块产物的体积；
-- 到上限自动回收一次，不拒绝构建；全局周期回收间隔可设（默认且至少 15 分钟，可关闭周期回收；构建前 headroom 始终启用）；可整卷 / 按模块清理、压缩构建卷；虚拟根可“还原到初始状态”（不备份，红字警告 + 二次确认）。
+- **存储空间**（设置 → 存储空间）：看构建缓存 / 下载缓存 / 过期可写层 / 日志 / 虚拟根 / 会话 / 模块产物的体积；到上限自动回收一次，不拒绝构建；全局周期回收间隔可设（默认且至少 15 分钟，可关闭周期回收；构建前 headroom 始终启用）；可整卷 / 按模块清理、压缩构建卷；虚拟根可“还原到初始状态”（不备份，红字警告 + 二次确认）。
 - 回档 / 继续 / 改需求只改会话，不改世界；生成过程中的即时播报不写进历史，历史只记定稿后的内容。
 
 ## 九、模块清单动态性

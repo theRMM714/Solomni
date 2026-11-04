@@ -39,20 +39,15 @@ session/<工作名>/
 - **落盘在主会话目录内部**：`session/<工作>/children/<工作>--<名字>/`——位置与 `meta.parent` 同源（看位置就知道归属）；`session/` 下不出现与主会话并列的子会话目录，**删主会话就是删一个目录**。
 - **可以再往下嵌套**：子会话自己还能有子会话（代理建的协作子工作会派生节点子会话），每一层都是父会话目录下的 `children/<名字>/`；查找、列清单、级联删除都按**任意深度**走整棵 children/ 树。
 - **整棵树只有一个 `work/`**：不论嵌套多少层，共享区始终是**顶层**那一个（工作根 = 沿 `meta.parent` 走到顶），各 agent 沙箱也建在它下面；实例名因此在**整棵子树**里唯一（重名自动带尾号，见 registry 的命名策略）。
-- **环境属于顶层工作**：`exec`（档位 / 虚拟根 / 定版）由人建主会话时决定，整棵子树只读继承；
-- 核心代理建子会话时不能自选环境。**同一 agent 全树只有一份名单**：子会话编辑模块 / 模型时写回这份名单，guest 装配按整棵树重新聚合；只改模型 / 权限不重建 guest，改模块 / 环境才重建。
+- **环境属于顶层工作**：`exec`（档位 / 虚拟根 / 定版）由人建主会话时决定，整棵子树只读继承；核心代理建子会话时不能自选环境。**同一 agent 全树只有一份名单**：子会话编辑模块 / 模型时写回这份名单，guest 装配按整棵树重新聚合；只改模型 / 权限不重建 guest，改模块 / 环境才重建。
 - 会话权限是**根 ceiling + 子会话逐层 narrowing**：根写 sandbox.ceiling，子写 sandbox.narrowing；子只能换更低档、只能收窄，父编辑只改 ceiling 并与子 narrowing 求交，不覆盖子收窄（`src/capabilities/permission/domain/permission.rs`）。
 - **共享区是版本化工作区**：主副本 `work/` 与版本库 `.work/` 都锚在顶层工作上；agent 只写自己的沙箱，`work_pull` / `work_commit` 与主副本同步（文件级三方比较），`work_versions` 看三方，`work_resolve` 显式选边，`work_status` 看状态。
-- 文本、图片、视频与其它二进制都按字节处理（内容流式读写、不整份进上下文；单文件有上限）；
-- `work_versions` 给 hash、大小与扩展名媒体类型提示；文本可人工合并后用 `take=local`，图片 / 视频 / 二进制只能选边，不做自动合并（`src/capabilities/workspace/service.rs`）。
-- **会话权限层**写在 meta.yaml 的 sandbox.ceiling（根）与 sandbox.narrowing（子）：
-- 四档 profile + 共享区三态 + 逐工具决定；缺省继承 settings.yaml 的 sandbox.defaults；sandbox.policy.deny 是硬底线，会话只能追加、不能清空。语义见 [docs/permission/README.md](../permission/README.md)。
-- **出站网络是全局开关**（`sandbox.policy.network`）：会话工具、直接模块工具、常驻服务、模块构建共用；
-- 虚拟机档决定 guest 网卡；本机档 Windows 授 `internetClient`、macOS 放行 `network-outbound`、Linux `net=false` 用 seccomp 拒绝非本地 socket（`net=true` 不装网络过滤器，不限制入站/绑定）。
+- 文本、图片、视频与其它二进制都按字节处理（内容流式读写、不整份进上下文；单文件有上限）；`work_versions` 给 hash、大小与扩展名媒体类型提示；文本可人工合并后用 `take=local`，图片 / 视频 / 二进制只能选边，不做自动合并（`src/capabilities/workspace/service.rs`）。
+- **会话权限层**写在 meta.yaml 的 sandbox.ceiling（根）与 sandbox.narrowing（子）：四档 profile + 共享区三态 + 逐工具决定；缺省继承 settings.yaml 的 sandbox.defaults；sandbox.policy.deny 是硬底线，会话只能追加、不能清空。语义见 [docs/permission/README.md](../permission/README.md)。
+- **出站网络是全局开关**（`sandbox.policy.network`）：会话工具、直接模块工具、常驻服务、模块构建共用；虚拟机档决定 guest 网卡；本机档 Windows 授 `internetClient`、macOS 放行 `network-outbound`、Linux `net=false` 用 seccomp 拒绝非本地 socket（`net=true` 不装网络过滤器，不限制入站/绑定）。
 - Windows 只放行公网出站，不授 private network / loopback；Windows 未授权 `windows.write_acl` 时容器不装，网络不生效。
 - 侧栏**可见**：agent 会话挂在主会话下（`meta.parent`），用户可进入查看与发言干预。
-- 侧栏顺序是**树序**，由核心给出（父会话紧跟它的子会话，深度优先、各自按时间倒序）：
-- 顺序与缩进是同一件事的两面，各排各的就会出现"子会话排在父会话上面"的错位。
+- 侧栏顺序是**树序**，由核心给出（父会话紧跟它的子会话，深度优先、各自按时间倒序）：顺序与缩进是同一件事的两面，各排各的就会出现"子会话排在父会话上面"的错位。
 - 父会话已被删的子会话如实列在最后，不凭空消失。
 
 ## 二、回合（轮）
@@ -80,8 +75,7 @@ session/<工作名>/
 
 - 系统注入的东西（提醒、压缩边界、工具围栏降级这类**不是用户说的、也不是模型说的**内容）必须有**系统消息**这一种转录行（`src/capabilities/session/domain/events.rs`），不能在转录与前端里长得像"用户发的"。
 
-- 结构化信号随行落档（`system: true`），呈现层据此换样式，**不靠匹配文本**；
-- 进上下文时按它该有的角色进去（提醒是给模型的指令），但**用户看到的是系统行**。
+- 结构化信号随行落档（`system: true`），呈现层据此换样式，**不靠匹配文本**；进上下文时按它该有的角色进去（提醒是给模型的指令），但**用户看到的是系统行**。
 
 - **内容类系统提示是另一种行：`kind: "notice"`。** 它只给人看、**不进模型上下文**，有会话内稳定 id，能与普通行一样折叠、回档、删除（建组、阶段验收、返工、停止、中断、代理授予/转达…）。
 - 分配点在会话对象里（`AgentSession::note_notice` / `CollabSession::notice`）——和普通行共用一个单调计数器，落盘、重建、回档因此走同一套账；重建时 `replay_dialogue` 明确跳过它，不产生任何消息。
@@ -91,8 +85,7 @@ session/<工作名>/
 
 - **派发行**是系统行里的一种（`system: true` + `task: true`）：核心给某个 agent 派的活。
 
-- 界面上它和别的系统行一样是核心说的话——**不得显示成"用户"**（`src/capabilities/session/domain/events.rs`）；
-- 上下文里它以 **user 角色**转发：派活是一次**回合**，而会话协议要求请求里至少有一条 user 消息，一条 user 都没有的请求会被供应商**整条拒收**（全 system 的请求返回 400）。
+- 界面上它和别的系统行一样是核心说的话——**不得显示成"用户"**（`src/capabilities/session/domain/events.rs`）；上下文里它以 **user 角色**转发：派活是一次**回合**，而会话协议要求请求里至少有一条 user 消息，一条 user 都没有的请求会被供应商**整条拒收**（全 system 的请求返回 400）。
 - 讨论席同理——它每次都用一条 user 回合（opener / step）开场。
 - 两处口径都随行落档，所以**重建/回放产出发出去的那同一条消息**（见 [六](#六节点执行只有一条管道)）。
 
@@ -121,8 +114,7 @@ session/<工作名>/
 - 判据是结构化相等而不是行 id——`node_started`/`report` 与瞬时提示没有行 id（内容类系统提示已经是 `transcript` 里的 `notice` 行，有 id）。
 - **回档会推进重置水印**：水印之前的批次已被盘上转录取代，`live` 只取水印之后；前端收到 `rewound` 时清空重建。
 
-- **行身份是结构化字段**：一行带 `speaker`（谁说的）/ `verb`（动词：say / agree / 需求 / 开始…）/ `kind`（`msg` 模型发言 / `user` 用户说的 / `system` 系统注入或核心自己的行 / `notice` 内容类系统提示 / `tool` 工具行 / `round` 轮次分隔行），**正文里不带 `[谁:动词]` 标签**。`LineView::render()` 是"字段 → 文本"的**唯一**拼法：
-- 提示词里的转录（`{{transcript}}`）与回放比较都读它；呈现层按 `kind` 换样式、按 `speaker`/`verb` 显示身份，不解析文本（见 [contracts.md](../presentation/contracts.md) 的推的事实）。
+- **行身份是结构化字段**：一行带 `speaker`（谁说的）/ `verb`（动词：say / agree / 需求 / 开始…）/ `kind`（`msg` 模型发言 / `user` 用户说的 / `system` 系统注入或核心自己的行 / `notice` 内容类系统提示 / `tool` 工具行 / `round` 轮次分隔行），**正文里不带 `[谁:动词]` 标签**。`LineView::render()` 是"字段 → 文本"的**唯一**拼法：提示词里的转录（`{{transcript}}`）与回放比较都读它；呈现层按 `kind` 换样式、按 `speaker`/`verb` 显示身份，不解析文本（见 [contracts.md](../presentation/contracts.md) 的推的事实）。
 
 ## 三、谁驱动谁（实现形态）
 
@@ -346,8 +338,7 @@ session/<工作名>/
 
 ### 设置
 
-- `models.yaml`：每个模型可声明 `context`（窗口大小）；填 0 / 留空 = 用户不填，自动压缩按 128K 兜底；
-- `settings.yaml`：
+- `models.yaml`：每个模型可声明 `context`（窗口大小）；填 0 / 留空 = 用户不填，自动压缩按 128K 兜底；`settings.yaml`：
   - `compact_at_percent`（默认 70）：上下文用到窗口的百分之多少就自动压（0 = 关）；
   - `compact_keep_percent`（默认 15）：压缩时至少保留最近多少内容（占窗口 %；0 = 只留摘要）；
   - `compact_model`（默认空）：空 = 会话同模型；非空 = 登记处里的模型 id。
@@ -355,8 +346,7 @@ session/<工作名>/
 
 ### 压不动就如实说
 
-- agent 没给出摘要（没调工具 / 调用失败）→ 记一条通知（"压缩没成功：…"）并**继续用完整上下文**；
-- 没有可压缩内容（对话已在保留预算内 / 只剩上一份摘要）→ 手动给提示、自动静默跳过，不空转模型。
+- agent 没给出摘要（没调工具 / 调用失败）→ 记一条通知（"压缩没成功：…"）并**继续用完整上下文**；没有可压缩内容（对话已在保留预算内 / 只剩上一份摘要）→ 手动给提示、自动静默跳过，不空转模型。
 
 - **不静默降级、不假装压过。**
 

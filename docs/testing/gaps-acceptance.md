@@ -75,8 +75,7 @@ dependency-baseline.json # 依赖方向门禁的基线
 
 ### 平台缺口
 
-- `tests/<platform>/gaps.yaml` 只记录平台机制或平台专属验收缺口。条目存在表示当前未完成，不得留下"已完成"的残条；
-- 平台账非空时，该平台的 `TEST-REPORT-ACCEPTED` 不成立。
+- `tests/<platform>/gaps.yaml` 只记录平台机制或平台专属验收缺口。条目存在表示当前未完成，不得留下"已完成"的残条；平台账非空时，该平台的 `TEST-REPORT-ACCEPTED` 不成立。
 
 ### 缺口格式
 

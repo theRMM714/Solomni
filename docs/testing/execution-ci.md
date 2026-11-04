@@ -71,7 +71,7 @@ node run-tests.js
 
 - `--docs` / `--audit=docs|structure` 是**独立模式**：只跑上面的第 4 步对应的审查（`--docs` 两者都跑），报告 `mode: "docs"` / `"structure"`，不打印 `TEST-REPORT-ACCEPTED`。
 
-- 每一步都有墙钟上限（默认 15 分钟；L4 20 分钟，环境引导自检 5 分钟）：超时即硬失败，证据记进报告的 `timeouts`，不会把本地入口或CI job 拖到外层超时。每步用时记在报告的 `ms`，超预算的标 `[slow]`（只报不拦）。
+- 每一步都有墙钟上限（默认 15 分钟；L4 20 分钟，环境引导自检 5 分钟）：超时即硬失败，证据记进报告的 `timeouts`，不会把本地入口或 CI job 拖到外层超时。每步用时记在报告的 `ms`，超预算的标 `[slow]`（只报不拦）。
 
 - 报告里的 `L1` / `L4` 是入口的步骤名：`L1` = T1 单元，`L4` = T5 端到端；四个测试目标按目标名逐步记录。
 
@@ -87,7 +87,7 @@ node run-tests.js
 
 ### 环境引导自检（`tests/env-bootstrap.mjs`）
 
-- `env.js` 跑在门禁与产品**之前**（`start.bat` / `node env.js setup`）：它坏了等于用户装不上环境。这条自检用**真实子进程**（`<临时根>/env.js setup --yes`）+ **本地应答源**把 Windows 的 MinGW 引导链逐条钉住，并钉住**借用门槛**（借来的 cargo 能打印版本但构建不了时必须拒绝借用）；只写 `target/test-scratch/`、不碰外网、不装Rust（假 cargo 文件，或一个"能跑但编不出东西"的 node 替身）。另跑一次只读的 `node env.js` 自诊断：状态里必须始终有 `build:` 结论，借用不可用时明说"不借用"。原样跑它：`node tests/env-bootstrap.mjs`。
+- `env.js` 跑在门禁与产品**之前**（`start.bat` / `node env.js setup`）：它坏了等于用户装不上环境。这条自检用**真实子进程**（`<临时根>/env.js setup --yes`）+ **本地应答源**把 Windows 的 MinGW 引导链逐条钉住，并钉住**借用门槛**（借来的 cargo 能打印版本但构建不了时必须拒绝借用）；只写 `target/test-scratch/`、不碰外网、不装 Rust（假 cargo 文件，或一个"能跑但编不出东西"的 node 替身）。另跑一次只读的 `node env.js` 自诊断：状态里必须始终有 `build:` 结论，借用不可用时明说"不借用"。原样跑它：`node tests/env-bootstrap.mjs`。
 
 | 场景 | 判据 |
 | --- | --- |
@@ -120,8 +120,7 @@ node run-tests.js --fence-live
 - 普通开发机上**不要**开；本地默认安全模式（见 [quality-isolation.md](quality-isolation.md)）。
 
 - **本地门禁的前提：仓库根没有被 Windows 写沙箱打上 Low 完整性标签。**
-- DSH 的 Windows 写沙箱后端（`@deepseek-ai/dsh-sandbox-windows-acl`）在授写权时给授权根设置 `SYSTEM_MANDATORY_LABEL_ACE`（Low、no-write-up、`(OI)(CI)` 可继承）。标签按**映像文件**生效：
-- Windows 的进程完整性 = min(令牌, 映像)。但标签只对**继承到它的对象**生效：根目录打标后新建的子项才继承，已存在的子目录（例如 `target/`）可能没有标签，里面的测试二进制仍以 Medium 运行——所以"仓库根里的cargo / rustc / 链接器 / 测试二进制 / solomni.exe 全以 Low 运行"并不总成立。判据要按**具体路径**查，不要只看根。它不随会话结束自动撤销，回收要 `SeRelabelPrivilege`。
+- DSH 的 Windows 写沙箱后端（`@deepseek-ai/dsh-sandbox-windows-acl`）在授写权时给授权根设置 `SYSTEM_MANDATORY_LABEL_ACE`（Low、no-write-up、`(OI)(CI)` 可继承）。标签按**映像文件**生效：Windows 的进程完整性 = min(令牌, 映像)。但标签只对**继承到它的对象**生效：根目录打标后新建的子项才继承，已存在的子目录（例如 `target/`）可能没有标签，里面的测试二进制仍以 Medium 运行——所以"仓库根里的 cargo / rustc / 链接器 / 测试二进制 / solomni.exe 全以 Low 运行"并不总成立。判据要按**具体路径**查，不要只看根。它不随会话结束自动撤销，回收要 `SeRelabelPrivilege`。
 
 - 带标签时以下失败都是**假失败**，不是产品缺陷：
 
@@ -265,8 +264,7 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 
 - `workflow_dispatch` 的 `clean` 输入（`true`）跳过 `actions/cache` 按干净机器跑；PR 触发没有这个输入，缓存照用。缓存只覆盖**项目内**路径（`platform/ci/cargo`：借用 runner 自带 Rust 时的 `CARGO_HOME`，含 registry / git / 工具；以及 `target/debug`），**不缓存 `target/` 根**（报告与日志必须来自本次运行）。缓存身份包含 `path`，改路径即新缓存项、旧项自动淘汰，首次冷启动重下一次。
 - CI 借 runner 自带 Rust（`CARGO_HOME` / `SOLOMNI_CARGO_HOME` 指项目内），不跑 `rustup` 安装——不写项目外。
-- 供应链工具在进门前预编译装（工具获取策略见 [quality-isolation.md](quality-isolation.md)）；
-- 安装用时经 `SOLOMNI_CI_PREINSTALL_MS` 带进门禁报告，在 `steps` 里以「CI 前置：供应链工具安装」出现——安装不在 `run-tests.js` 内，只能这样进报告。
+- 供应链工具在进门前预编译装（工具获取策略见 [quality-isolation.md](quality-isolation.md)）；安装用时经 `SOLOMNI_CI_PREINSTALL_MS` 带进门禁报告，在 `steps` 里以「CI 前置：供应链工具安装」出现——安装不在 `run-tests.js` 内，只能这样进报告。
 
 - **为什么必须有 CI**（`run-tests.js`）——下面这些结论本地拿不到：
 
@@ -337,10 +335,7 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 
 - **发布通道**（由 `tests/ci-publish.mjs` 在 CI 里自助发布，成败都发）：
 
-- Actions 注释：失败逐条 `::error::`（带断言原文），通过一条 `::notice::` 概览——匿名可读，不需要凭据；
-- `ci-report` 滚动分支（三路共用）：同一路径每次覆盖，**只留最近一次**；结构审查在 `runs/structure/`，文档审查在 `runs/docs/`，三平台在 `runs/<os>/`（要历史看 Actions 产物 `test-report-<os>`）；
-- **Ready 的 PR 与手动派发都发布** `ci-report`（`push` 不触发；Draft 的 run 全部跳过，不发布）；PR 报告的 `sha` 是 PR head（fork PR 不发布，见上）；
-- 报告发布失败（例如 token 权限不对）只是 `::warning::`，**不影响**测试本身的成败——所以"没读到报告"不等于"测试没过"。
+- Actions 注释：失败逐条 `::error::`（带断言原文），通过一条 `::notice::` 概览——匿名可读，不需要凭据；`ci-report` 滚动分支（三路共用）：同一路径每次覆盖，**只留最近一次**；结构审查在 `runs/structure/`，文档审查在 `runs/docs/`，三平台在 `runs/<os>/`（要历史看 Actions 产物 `test-report-<os>`）；**Ready 的 PR 与手动派发都发布** `ci-report`（`push` 不触发；Draft 的 run 全部跳过，不发布）；PR 报告的 `sha` 是 PR head（fork PR 不发布，见上）；报告发布失败（例如 token 权限不对）只是 `::warning::`，**不影响**测试本身的成败——所以"没读到报告"不等于"测试没过"。
 
 - **本地与 CI 的关系**：本地入口是快速反馈；CI 在 Ready 的 PR 上自动跑（Draft 期按需手动派发），给出**跨平台与真机**的最终判据。
 - 本次改动若结论依赖本机之外，则本地 + CI 两边都跑通、且 CI 的 `sha` 对得上才算验收完成；否则本地入口通过即验收完成（PR 的 CI 结果照读，`env-skip` 不算通过；判据见 [gaps-acceptance.md](gaps-acceptance.md)）。

@@ -49,9 +49,7 @@ cargo deny check
 
 - `cargo tree --duplicates` 只检查依赖树中的重复版本，`cargo deny` 的 `bans` 与它同口径但更全面（许可证、禁用、来源）；它们都不等于源码重复检查。`clippy` 也不能替代业务测试。这些检查的职责必须分开记录（`run-tests.js`）。
 
-- 当前状态：九项全部并入 `node run-tests.js`。七项零容忍硬失败（编译、结构审查、格式、clippy、编译告警、依赖重复、项目外写），没有容差基线；
-- 注释契约另按只减不增的存量快照比对（结构审查里的一条；比对工具本身不进 T0，见 [quality-isolation.md](quality-isolation.md) 的「门禁之外」）；
-- 交叉类型检查在 target 未装或本机缺该平台交叉 C 工具链时 `env-skip`，供应链一项在工具缺失或取不到 advisory 数据时 `env-skip`：
+- 当前状态：九项全部并入 `node run-tests.js`。七项零容忍硬失败（编译、结构审查、格式、clippy、编译告警、依赖重复、项目外写），没有容差基线；注释契约另按只减不增的存量快照比对（结构审查里的一条；比对工具本身不进 T0，见 [quality-isolation.md](quality-isolation.md) 的「门禁之外」）；交叉类型检查在 target 未装或本机缺该平台交叉 C 工具链时 `env-skip`，供应链一项在工具缺失或取不到 advisory 数据时 `env-skip`：
 
 - `cargo check --all-targets`；
 - 结构审查（测试目标登记、孤儿测试文件、缺口账格式、单元地图双向一致、文档链接与代码注释里的文档引用、提示词键表与真相源表比对、根文档路由、外部连接台账、**注释契约棘轮**（按 文件×规则 只减不增）、**平台专属字面量与标记**（`FenceSpec` 必带 `ro`；macOS 探针不得出现 Linux 标记）（`run-tests.js`）、**批处理脚本只允许 ASCII**（cmd 按代码页解释字节，非 ASCII 会吞掉下一行）、**门禁解析器自测**与 **`#[ignore]` 禁令**）（`run-tests.js`）。
@@ -66,7 +64,7 @@ cargo deny check
 - 供应链：`cargo audit` + `cargo deny check`（配置在 `deny.toml`）——工具获取见 [quality-isolation.md](quality-isolation.md)。
 
 - 任何一项不过即硬失败：结构审查、格式、clippy、编译告警、依赖重复记 `quality-fail`；编译、交叉类型检查、供应链、项目外写记 `fail`。
-- 工具缺失（没装 rustfmt / clippy / cargo-audit / cargo-deny）或**取不到 advisory 数据**记 `env-skip` 并写明怎么装——环境跳过不算通过。设计取舍类 lint 要**带理由窄 allow**，清单见[quality-isolation.md](quality-isolation.md)。每步都有墙钟上限（超时 = 硬失败，证据进报告 `timeouts`），每步用时超预算只标 `[slow]`、不改变成败。
+- 工具缺失（没装 rustfmt / clippy / cargo-audit / cargo-deny）或**取不到 advisory 数据**记 `env-skip` 并写明怎么装——环境跳过不算通过。设计取舍类 lint 要**带理由窄 allow**，清单见 [quality-isolation.md](quality-isolation.md)。每步都有墙钟上限（超时 = 硬失败，证据进报告 `timeouts`），每步用时超预算只标 `[slow]`、不改变成败。
 
 ### T1：单元测试
 

@@ -37,7 +37,7 @@
 - `tests/cross-platform/e2e/` 的 L4 覆盖 MCP 常驻服务调用与**父死子亡**：核心被强杀后，常驻服务进程跟着消失；macOS 的守门进程另有 `tests/macos/` 探针；
 - **谁做任务谁补测试**：做完就补上这次改动的用例并跑门禁，通过后同步文档（见 [AGENTS.md](AGENTS.md) 九）；
 - `node run-tests.js` 测试汇总入口（`node start.js -test` 是备好环境后的同一入口）；纯叙述型文档改动用 `node run-tests.js --docs`（文档审查 + 结构审查，含文档与真相源比对；不跑 cargo / 单元 / 平台目标 / L4；CI 用 `--audit=docs` / `--audit=structure` 拆成独立 job）。
-- `docs/presentation/contracts.md` 是机器契约文档（ROUTES 表由 Rust 测试消费），仍走全量。CI 的文档/结构分流见[docs/testing/execution-ci.md](docs/testing/execution-ci.md)；开发环境先跑 `node setup-dev.js`（条目清单 [dev-tools.js](dev-tools.js)，`--check` 只读校验；运行环境另见 [setup-runtime.js](setup-runtime.js)）。
+- `docs/presentation/contracts.md` 是机器契约文档（ROUTES 表由 Rust 测试消费），仍走全量。CI 的文档/结构分流见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md)；开发环境先跑 `node setup-dev.js`（条目清单 [dev-tools.js](dev-tools.js)，`--check` 只读校验；运行环境另见 [setup-runtime.js](setup-runtime.js)）。
 - `src/capabilities/llm/detail/fake_chat.rs` 中的 `FakeChat` 与 `DemoGateway`；
 - `src/tests/doubles.rs` 与 `src/tests/builders.rs` 的端口替身与测试装配（支持失败注入，供 T2 复用）；
 - `src/tests/` 中的契约测试（T2）：
@@ -47,8 +47,7 @@
  - `api.rs`（入站契约：命令与事件、生成期间停止立刻生效、错误如实传播、单条命令 panic 不带垮核心）；
  - `routes.rs`（HTTP 路由目录 ↔ 处理器 ↔ 文档 ↔ 前端调用 ↔ 演示脚本机器比对；假能力面逐条验成功 / 错误 / 空 / 边界）；
 - **入站契约也是契约**：呈现层只依赖各能力的能力接口（见 [docs/presentation/contracts.md](docs/presentation/contracts.md)）与事件台（拿不到 `Core`、拿不到任何核心锁），所以它能被假实现整体替换——`routes.rs` 的 `FakeOps` 就是这么逐条测路由的。
-- T0 质量门禁已并入同一入口：编译、结构审查、格式、clippy、编译告警、**交叉类型检查（已装 target）**、依赖重复、**项目外写（env / 工具链）**零容忍硬失败（`run-tests.js`）；
-- 供应链（`cargo audit` / `cargo deny`）同为硬失败，但工具缺失或取不到 advisory 数据时记 `env-skip`。
+- T0 质量门禁已并入同一入口：编译、结构审查、格式、clippy、编译告警、**交叉类型检查（已装 target）**、依赖重复、**项目外写（env / 工具链）**零容忍硬失败（`run-tests.js`）；供应链（`cargo audit` / `cargo deny`）同为硬失败，但工具缺失或取不到 advisory 数据时记 `env-skip`。
 - 结构审查里还含**门禁解析器自测**、**`#[ignore]` 禁令**（报告里 `ignored > 0` 也算失败）与**批处理脚本只允许 ASCII**（`run-tests.js`）；
 - 项目外写与供应链工具的获取 / 判定见 [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md)。
 - 默认**并行**跑用例（`--serial` 只在排查并发/隔离问题时用）；每步都有墙钟上限，超时即硬失败并把证据记进报告 `timeouts`；每步用时进报告，超预算标 `[slow]`（只报不拦）。
@@ -63,7 +62,7 @@
 - 格式与验收见 [docs/testing/gaps-acceptance.md](docs/testing/gaps-acceptance.md)。
 - 判「环境不允许」的判据只有一条：**看被测试进程自己的令牌与行为**，不拿二手字符串特征当判据。
 - Windows 容器里 `whoami /groups` 不含包 SID 组是**正常**的（包 SID 在令牌的 `TokenAppContainerSid` 字段，不在组列表里），按它判「环境降级」是假阴性；容器是否生效由**行为对照**给结论——授权落点写得进、从父目录按名走得到叶子、父目录里的其它条目看不到。
-- 工作区被写沙箱挡住时，原因不是「受限令牌会话」，而是 DSH 的 Windows 写沙箱后端授写权时给授权根打上的Low 完整性标签；判据、后果与处置见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md) 的「真机入口」一节。
+- 工作区被写沙箱挡住时，原因不是「受限令牌会话」，而是 DSH 的 Windows 写沙箱后端授写权时给授权根打上的 Low 完整性标签；判据、后果与处置见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md) 的「真机入口」一节。
 - Windows 的「模块目录只读 + `userdata/` 可写 + 另一席不可达」由容器往返探针在真机上验收。
 
 - 缺口是否完成只看账本：条目存在 = 尚未完成，补齐后删除；门户不复述条目内容，也不保留完成历史。
