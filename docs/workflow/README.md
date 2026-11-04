@@ -1,15 +1,19 @@
 # 任务与开发流程
 
-> 本文是任务期细则：请求分类补充、六步流程、开工 / 实施 / 收口、PR 与 Git。
-> 入口：[`AGENTS.md`](../../AGENTS.md) §六；CI 报告细节见 [execution-ci.md](../testing/execution-ci.md)；文档索引见 [docs/README.md](../README.md)。
+> 定位：任务期细则：请求分类补充、六步流程、开工 / 实施 / 收口、PR 与 Git。
+> 效力：规范｜核对：2026-11-04｜依据：`AGENTS.md`
+
+## 适用与判据
+- 所有任务期操作以本文为准；入口是 `AGENTS.md` 的请求分类与任务流程。
+- 违反由 PR 检查与 `node run-tests.js` 判定；agent 不自行 Ready / 合并（`AGENTS.md`）。
 
 ## 一、请求分类
 
-分类判据见 `AGENTS.md` §五。任务期补充规则：
+- 分类判据见 `AGENTS.md` §五。任务期补充规则：
 
 - 混合请求按最高风险类别处理。
 - 涉及真实数据、权限或线上环境时，无论是否看似低级，都先取得用户确认。
-- 用户批准的方案在约定范围和验收标准内持续有效，不重复请求批准；范围、接口、数据、安全、依赖或验收变化时，必须重新确认。
+- 用户批准的方案在约定范围和验收标准内持续有效，不重复请求批准；范围、接口、数据、安全、依赖或验收变化时，必须重新确认（`AGENTS.md`）。
 - 用户发言无疑问并明确要求执行某个具体方案时，视为该方案已获批准；有疑问先解答，确认无意义后再执行。
 - 开发中发现不属于当前范围的新问题，不混入本次修改；向用户说明并另行处理。
 
@@ -33,20 +37,20 @@
 | 收口 | 全量门禁；差异自查 | 全绿、工作树干净、用户确认（闸门 2） |
 | Ready / 合并 | 用户确认后销账、同步文档、改最终 PR 正文 | 用户执行 Ready / 合并；agent 不自行做 |
 
-每一步完成后才能进入下一步；闸门不通过就停下报告，不跳步。
+- 每一步完成后才能进入下一步；闸门不通过就停下报告，不跳步。
 
-方案是任务期记录：写进 PR 正文，不写进长期文档；长期文档只在收口时改成当前状态。
+- 方案是任务期记录：写进 PR 正文，不写进长期文档；长期文档只在收口时改成当前状态。
 
 ## 三、开工：分支 + Draft PR（闸门 1 后的第一个动作）
 
-顺序不可交换：
+- 顺序不可交换：
 
 1. 从最新 `main` 切任务分支：
    ```sh
    git fetch origin main
    git switch -c <分支> origin/main
    ```
-   分支名用 `task/<简述>`；`main` 有分支保护，不直接提交、不 push。
+- 分支名用 `task/<简述>`；`main` 有分支保护，不直接提交、不 push。
 2. 空提交占位：
    ```sh
    git commit --allow-empty -m "chore: 开工 <任务>"
@@ -56,15 +60,15 @@
    ```sh
    gh pr create --draft --base main --head <分支>
    ```
-   正文按 [.github/pull_request_template.md](../../.github/pull_request_template.md) 写全：目标与范围、明确不做、验收标准、实施清单、风险。
+- 正文按 [.github/pull_request_template.md](../../.github/pull_request_template.md) 写全：目标与范围、明确不做、验收标准、实施清单、风险。
 4. 开工自检（全部为是才允许写实现代码）：
    - [ ] 分支从最新 `main` 切出并 push
    - [ ] 空提交已推送
    - [ ] Draft PR 已创建
    - [ ] PR 正文含方案 / 验收 / 实施清单 / 明确不做
 
-   任一项为否：停下修，不得先写代码。
-5. 无法创建或访问 PR（无远程、无权限、网络不通）：停下报告，不得先把活干完再补。
+- 任一项为否：停下修，不得先写代码（`.github/pull_request_template.md`）。
+5. 无法创建或访问 PR（无远程、无权限、网络不通）：停下报告，不得先把活干完再补（`AGENTS.md`）。
 6. Draft 期不跑 CI：本机按「本机开发回路」迭代；需要他平台结论时手动派发（见 §七）。Ready 之后要继续做 WIP，可以转回 Draft。
 7. 决定、证据、CI 结论都记录到 PR；PR 是任务进度的唯一落点。
 
@@ -88,13 +92,24 @@
 3. 交用户确认（闸门 2）。
 4. 用户确认后缺口销账：`tests/gaps.yaml` 删已补条目，并按规则同步门户与现状描述；检查权威文档，删掉过期、临时和矛盾的说法。
 5. 把 PR 正文改成最终状态：做了什么 / 未做 / 风险，并写明验收证据（命令、成功标记、CI 的 `sha`）。
-6. 用户确认后，Ready 与合并由用户执行；agent 不自行 Ready、不自行合并。PR 标题即主线提交信息，必须能独立说明本次任务主题；合并后删任务分支。
+6. 用户确认后，Ready 与合并由用户执行；agent 不自行 Ready、不自行合并。PR 标题即主线提交信息，必须能独立说明本次任务主题；合并后删任务分支（`AGENTS.md`）。
 
 ## 六、例外
 - 咨询 / 审查：只出结论，不建分支。
+- 文档审计 / 治理：用户启动时按 [docs-audit.md](docs-audit.md) 执行（检查顺序、修改规则、验收标准），不套用编程任务的实施节奏。
 
 ## 七、Git 与 CI
 
 - 硬规则见 `AGENTS.md` §七：`main` 保护、任务分支、agent 不自行 Ready / 合并。
 - 需要他平台或真机结论时，用 `gh workflow run test.yml --ref <分支>` 手动派发；触发时机、报告读取与 `sha` 比对一律以 [execution-ci.md](../testing/execution-ci.md) 为准。
-- 纯文档 PR 在 Ready 后走 `changes` + `docs` + `structure` + `验收闸门`：平台 job 跳过（矩阵 job 跳过时不会展开，规则集不按平台名要求它们，见 [execution-ci.md](../testing/execution-ci.md) 的 CI 一节），报告写 `ci-report` 的 `runs/docs` / `runs/structure`；不要把文档审查或结构审查的结果当成三平台验收。
+- 纯文档 PR 在 Ready 后走 `changes` + `docs` + `structure` + 合并闸门：平台 job 跳过；规则集与合并判定见 [execution-ci.md](../testing/execution-ci.md) 的「规则集」，报告写 `ci-report` 的 `runs/docs` / `runs/structure`；不要把文档审查或结构审查的结果当成三平台验收。
+
+## 检查
+- 流程闸门 → 用户确认与 Draft PR 正文（`.github/pull_request_template.md`）。
+- 收口门禁 → `node run-tests.js`（纯文档 `node run-tests.js --docs`）。
+
+## 路由
+- 全仓常驻规则：[../../AGENTS.md](../../AGENTS.md)
+- CI 报告细节：[../testing/execution-ci.md](../testing/execution-ci.md)
+- 文档索引：[../README.md](../README.md)
+- PR 模板：[../../.github/pull_request_template.md](../../.github/pull_request_template.md)

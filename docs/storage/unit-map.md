@@ -1,5 +1,8 @@
 # storage 单元地图
 
+> 定位：storage（存储空间）逐文件职责的唯一权威；由 T0 结构审查与磁盘双向比对。
+> 效力：契约｜核对：2026-11-04｜依据：`src/capabilities/storage/api.rs`
+
 | 文件 | 职责 |
 | --- | --- |
 | `src/capabilities/storage/mod.rs` | 能力入口：装配声明与文件头 |

@@ -99,7 +99,30 @@
 | providers、models、agents、settings 登记处 | `REGISTRY_SPEC.md` |
 | 任意测试、测试替身、质量门禁、缺口账或测试报告 | `TESTING.md` |
 | 任务流程 / PR / Git | `docs/workflow/README.md` |
+| 用户启动文档审计 / 治理 | `docs/workflow/docs-audit.md` |
 | 文档分层 / 术语 / 引用 | `docs/conventions.md` |
 | 全部单元与横向细则 | `docs/README.md` |
 
 新增根 `*.md` 必须进本表；临时工作清单按 `run-tests.js` 的白名单处理。
+
+## 九、文档效力与取证
+
+文档是**某个提交上的断言**，不是权威。冲突时按这个顺序取事实（高 → 低）：
+
+1. 可执行事实：测试、命令输出、CI 报告、生成段；
+2. 代码与配置（`src/`、`.github/workflows/`、`links.yaml`、`tests/*/gaps.yaml`）；
+3. 机器生成段（`<!-- BEGIN:… -->`）；
+4. 文档叙述（含本文件与各门户）。
+
+- 文档与事实冲突：以事实为准，**先报告冲突再修文档**；不按文档改代码。
+- 文档格式由 `docs/templates/` 锁定（门户 / 规范 / 参考 / 单元 / 表）；`node run-tests.js --docs` 对骨架、重复块、表头、效力行、锚点与路径做硬检查，违规即失败。
+- 每条「必须 / 不得」必须带锚点（仓库路径、测试名、命令、缺口 id、生成段）；没有锚点的判断只能写成「原则 / 建议」，不得据此改行为。
+- 查事实先取证，不靠读散文：
+
+| 要确认的事实 | 取证 |
+| --- | --- |
+| `main` 的必填检查 | `gh api repos/<owner>/<repo>/rulesets` |
+| 工作流触发 / 跳过 / 汇总 | `.github/workflows/test.yml` |
+| 测试入口参数 | `run-tests.js` 顶部开关定义 |
+| 平台支持与验收状态 | `tests/gaps.yaml`、`tests/<平台>/gaps.yaml`、代码里的 `VERIFIED_HOSTS` |
+| 外部链接与工具链版本 | `links.yaml`、`dev-tools.js` |

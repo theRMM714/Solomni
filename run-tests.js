@@ -1078,6 +1078,20 @@ function docsAudit() {
       if (!agentsText.includes(BT + e + BT)) problems.push("根文档 " + e + " 没进 AGENTS.md 的文档路由表");
     }
   }
+  // 文档模板检查（模板与类型映射在 docs/templates/）：强制类型为空时只报不拦。
+  const gov = path.join(ROOT, "tests", "docs-gov.mjs");
+  if (fs.existsSync(gov)) {
+    const r = spawnSync(process.execPath, [gov, "--summary"], { cwd: ROOT, encoding: "utf8" });
+    if (r.stdout) process.stdout.write(r.stdout);
+    if (r.status !== 0) problems.push("文档模板不合规：见上方 docs-gov 输出");
+  }
+  // 生成段（平台验收状态等）：与代码常量 / 缺口账比对，不一致即失败。
+  const sync = path.join(ROOT, "tests", "docs-sync.mjs");
+  if (fs.existsSync(sync)) {
+    const r = spawnSync(process.execPath, [sync, "--check"], { cwd: ROOT, encoding: "utf8" });
+    if (r.stdout) process.stdout.write(r.stdout);
+    if (r.status !== 0) problems.push("生成段与来源不一致：跑 node tests/docs-sync.mjs --write");
+  }
   return { problems };
 }
 

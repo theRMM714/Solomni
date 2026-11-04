@@ -1,14 +1,18 @@
 # 工具与角色
 
-> 本文是**系统工具、角色（身份）、以及"谁能用哪些工具"的唯一权威**。
-> 模块工具在各自 `module.yaml` 声明（见 [MODULE_SPEC.md](../../MODULE_SPEC.md)），本文只管系统工具。
-> 门户：[SYSTOOL.md](../../SYSTOOL.md)（入口与真相源表）。
+> 定位：系统工具、角色（身份）与"谁能用哪些工具"的唯一权威。
+> 效力：规范｜核对：2026-11-04｜依据：`systools/tools.yaml`
+
+## 适用与判据
+- 声明系统工具、角色工具面与越权校验时以本文为准（`docs/tools/tools-and-roles.md`）。
+- 模块工具在各自 `module.yaml` 声明（`MODULE_SPEC.md`），本文只管系统工具。
+- 违反由 T0 结构审查与 `src/tests/detail.rs` 的悬空引用用例判定。
 
 ## 一、两张授权表与字段
 
-工具**是什么**在 `systools/tools.yaml`；这个**身份有什么**在 `systools/roles.yaml`。
-授权只有这两张表；`systools/names.yaml` 是布局的第三份（`session/<工作>/` 的保留目录名），不是工具或角色授权。
-代码里**不得**出现"哪个角色能调哪个工具"的判断：只有两个动作——**按角色组装工具面**、**按表校验调用**。
+- 工具**是什么**在 `systools/tools.yaml`；这个**身份有什么**在 `systools/roles.yaml`。
+- 授权只有这两张表；`systools/names.yaml` 是布局的第三份（`session/<工作>/` 的保留目录名），不是工具或角色授权。
+- 代码里**不得**出现"哪个角色能调哪个工具"的判断：只有两个动作——**按角色组装工具面**、**按表校验调用**（`src/tests/detail.rs`）。
 
 ```yaml
 tools:
@@ -27,12 +31,10 @@ tools:
         desc: 要读取的路径（用【工作环境】的写法）
 ```
 
-- **`effect` / `reach` 决定收口，不按“系统 / 模块”一刀切**：`read` / `list` / `search` / `write` / `edit` / `patch` 虽都是系统工具，
-  但碰文件系统，照样受权限档位与围栏约束；`say` / `agree` 这类 effect=none，不碰文件。
+- **`effect` / `reach` 决定收口，不按“系统 / 模块”一刀切**：`read` / `list` / `search` / `write` / `edit` / `patch` 虽都是系统工具，但碰文件系统，照样受权限档位与围栏约束；`say` / `agree` 这类 effect=none，不碰文件。
 - **`scope`**：执行类工具可声明 per-call scope（sandbox / external）；当前只有 shell 声明它。
 - **工具卡**：`decision=ask` 时进统一裁决队；选项 id 是 `allow` / `deny` / `allow_turn`。`allow_turn` 只对本轮后续 ask 生效，不改 reach、不落盘。
-- **`callers` 是授权判据**：`user` = 人经呈现层调用，其余是角色 id。它与角色表的（这个身份有什么）是**同一关系的两面**，
-  由 `SystemTools::problems` 双向锁死——任何一边漏写 / 多写都是装配错误。
+- **`callers` 是授权判据**：`user` = 人经呈现层调用，其余是角色 id。它与角色表的（这个身份有什么）是**同一关系的两面**，由 `SystemTools::problems` 双向锁死——任何一边漏写 / 多写都是装配错误。
 - **列目录是"核实"的前提**：`read` 只读文件、`search` 要关键词，**没有 `list` 就确认不了"资料齐不齐"**；`read` 遇到目录会如实引导到 `list`。
 - 参数不合法 → **如实拒绝并落工具行**。
 
@@ -53,10 +55,9 @@ roles:
 本会话可用工具 = 系统工具表 ∩ 该角色表 ∩ 当前权限档位 + 该成员所属模块的工具（同样过权限档位）
 ```
 
-越权防线分两段：**角色表**决定这个身份有哪些工具，**权限档位**决定其中哪些还能用（deny 的工具不发放，ask 的照常发放）；模块工具查**该成员有没有这个模块**（module 消歧）。两段缺一不可。
+- 越权防线分两段：**角色表**决定这个身份有哪些工具，**权限档位**决定其中哪些还能用（deny 的工具不发放，ask 的照常发放）；模块工具查**该成员有没有这个模块**（module 消歧）。两段缺一不可。
 
-**注入口径（唯一）**：**总表不进提示词**。每回合由核心查"这一回合的身份能用的工具"，
-把那一份的说明与参数作为一条系统消息随回合注入；原生通道同时用它做工具声明槽。
+- **注入口径（唯一）**：**总表不进提示词**。每回合由核心查"这一回合的身份能用的工具"，把那一份的说明与参数作为一条系统消息随回合注入；原生通道同时用它做工具声明槽。
 
 | 回合 | 这一份是什么 |
 | --- | --- |
@@ -65,61 +66,51 @@ roles:
 | 执行回合·协作节点 | `executor` + 该 agent 的模块工具（比 `solo` 多一个回报工具） |
 | 核心代理回合 | `core_proxy`（代理工具 + 只读核实），**不含模块工具**（它代用户决定，不替 agent 干活） |
 
-发放与校验是**同一份判据**：列出来的就是这一刻真能调的；没拿到的既不在提示词里、也不在声明槽里，真去调会被如实拒绝。
-发放只有一处：`SystemTools::role_face`（id 清单 + 是否给模块工具），未知名在装配期就如实报错。
-驱动把它装进**这一回合**的工具环境（`session::TurnRun.face`），跑完还原——同一个会话因此能用两种身份干活（讨论席说话 / 执行席干活）。
+- 发放与校验是**同一份判据**：列出来的就是这一刻真能调的；没拿到的既不在提示词里、也不在声明槽里，真去调会被如实拒绝。
+- 发放只有一处：`SystemTools::role_face`（id 清单 + 是否给模块工具），未知名在装配期就如实报错。
+- 驱动把它装进**这一回合**的工具环境（`session::TurnRun.face`），跑完还原——同一个会话因此能用两种身份干活（讨论席说话 / 执行席干活）。
 
-**两条硬口径**（`systools/tools.yaml` 是唯一真相）：
+- **两条硬口径**（`systools/tools.yaml` 是唯一真相）：
 
-- **agent 对系统的每个操作都要有对应工具 + 身份限制**：没有工具的操作 = 契约缺口（例如"要返工哪个节点"必须是 `checklist.items[].rework` 这类**字段**，不能塞进自由文本）。
+- **agent 对系统的每个操作都要有对应工具 + 身份限制**：没有工具的操作 = 契约缺口（例如"要返工哪个节点"必须是 `checklist.items[].rework` 这类**字段**，不能塞进自由文本）（`systools/tools.yaml`）。
 - **工具的"后果"写进声明**：会驱动核心动作的工具要写清"这个结论会让系统做什么"。
   - `node_verdict` 的 `ok=false` = 该节点退回待办、点上下文「恢复协作」只重派它；
-  - `checklist` 的 `fail` 必须填 `rework` = 要返工的节点 id；
+  - `checklist` 的 `fail` 必须填 `rework` = 要返工的节点 id（`systools/tools.yaml`）；
   - `verdict.clear=true` 才照用户说的开工 / 放行。
 - 写了表里没有的 id 或漏填 = 这次判定用不了，核心**要求重填**。
 
-身份与环境同理：它们是**会话参数**（`session::SessionParams`），每次调用现渲染成系统消息，不占对话的位置
-（见 [session-model.md](../session/session-model.md) 的「会话参数与对话分开」）。
+- 身份与环境同理：它们是**会话参数**（`session::SessionParams`），每次调用现渲染成系统消息，不占对话的位置（见 [session-model.md](../session/session-model.md) 的「会话参数与对话分开」）。
 
-核心自己的操作（`planner` / `orchestrator`）不走 agent 会话：原生通道由声明槽给出它们的面，
-信封通道由各自的角色提示词写清载荷形状——总表同样不进提示词。
+- 核心自己的操作（`planner` / `orchestrator`）不走 agent 会话：原生通道由声明槽给出它们的面，信封通道由各自的角色提示词写清载荷形状——总表同样不进提示词。
 
 ## 三、越权校验
 
-**工具面与越权校验都出自角色表**：
+- **工具面与越权校验都出自角色表**：
 
 - 讨论回合按 `discussant`；
 - 执行回合**按身份**：用户建的单 agent 工作用 `solo`，协作的节点子会话用 `executor`，两者只差回报工具；
 - 核心代理回合按 `core_proxy`（`module_tools: false`）。
 
-代码里**没有任何**"哪个角色能调哪个工具"的名单，加一个工具只改两张表（工具总表 + 角色表；名字表只管布局保留名）。
+- 代码里**没有任何**"哪个角色能调哪个工具"的名单，加一个工具只改两张表（工具总表 + 角色表；名字表只管布局保留名）。
 
-越权判定的约束：
+- 越权判定的约束：
 
 - **原生模式与信封模式走同一个校验点**；两者**互斥但等价**——等价性一破，回放就与实时不一致。
 - 越权调用 → **如实拒绝 + 落工具行**（用户要能看到"它越权了"）。
 - **悬空引用**（角色引用总表里不存在的 id）→ **装配期 `SystemTools::problems()` 硬失败**（`src/tests/detail.rs` 锁死）。这是两张表不漂的机制保证。
 - `--audit=structure` 只比文件与文档结构，不解析这两张表；改角色表 / 工具表要跑全量入口（或至少 `src/tests/detail.rs` 的用例）。
 
-## 三之二、动作与分发（唯一一处）
+## 四、动作与分发（唯一一处）
 
-**动作表是授权与执行的唯一真相**：每条动作声明参数契约与 `callers`；分发只有一处（`conductor` 的 `ActionOps`）——
-**参数按声明校验 → 按 `callers` 授权 → 执行 → 审计**。
+- **动作表是授权与执行的唯一真相**：每条动作声明参数契约与 `callers`；分发只有一处（`conductor` 的 `ActionOps`）——**参数按声明校验 → 按 `callers` 授权 → 执行 → 审计**。
 
-- **两个适配器**：模型侧（`ToolHandler`，按名字认领）与呈现侧（`POST /api/actions/{id}`、`GET /api/actions` 动作目录）
-  都只负责造一次 `ActionCall`（动作 id + 参数 + 调用者身份）并各按自己的媒介呈现结果——
-  模型侧拿文本回执，呈现侧拿结构化结果。**同一份声明，两种呈现。**
+- **两个适配器**：模型侧（`ToolHandler`，按名字认领）与呈现侧（`POST /api/actions/{id}`、`GET /api/actions` 动作目录）都只负责造一次 `ActionCall`（动作 id + 参数 + 调用者身份）并各按自己的媒介呈现结果——模型侧拿文本回执，呈现侧拿结构化结果。**同一份声明，两种呈现。**
 - **读取与视图不进动作表**：会话列表 / 配置 / 文件清单 / 历史是读接口，事实仍只有**事件台**一条来路。
-- **人经呈现层调用**（`caller = user`）与**模型经工具调用**（`caller = 角色 id`）走同一次校验、同一处授权、同一条审计；
-  适配器不各自校验、也不各自判权。
-- **登记处动作只给 user**：供应商 / 密钥 / 模型 / agent / 设置的写面（`upsert_provider` / `remove_provider` / `discover_models` / `upsert_model` / `remove_model` /
-  `set_core_model` / `probe_model_tools` / `probe_replay_shape` / `upsert_agent` / `remove_agent` / `set_settings`）的 `callers` 只有 `user`——
-  产品级资源默认不开放给任何角色；`api_key` 只进登记处，不进动作目录、不进审计。读（`GET /api/settings`、`/api/state`）仍是独立读接口。
-- **工作区回滚动作也只给 user**：`restore_work_commit`（`session_id` / `commit` / `expect_head`）——非破坏性物化共享区，
-  目标之后的提交仍保留；同一工作子树里有会话在生成时拒绝；成功后由核心落一条可回放的 `notice` 行。
-  提交历史 / 详情 / 文件预览是**只读视图**（`SessionOps::work_log` / `work_commit_view` / `work_commit_file`），不进动作表。
-- **常驻服务的生命周期动作也只给 user**：`control_resident`（`start` / `stop` / `enable` / `disable`，参数 `module` / `name` / `action` / `lease`）——
-  agent 用已启动的实例，不负责拉起；服务清单是独立只读视图（`ResidentOps::services`，CLI `resident`）。会话删除时按租约回收该会话拉起的实例。
+- **人经呈现层调用**（`caller = user`）与**模型经工具调用**（`caller = 角色 id`）走同一次校验、同一处授权、同一条审计；适配器不各自校验、也不各自判权。
+- **登记处动作只给 user**：供应商 / 密钥 / 模型 / agent / 设置的写面（`upsert_provider` / `remove_provider` / `discover_models` / `upsert_model` / `remove_model` / `set_core_model` / `probe_model_tools` / `probe_replay_shape` / `upsert_agent` / `remove_agent` / `set_settings`）的 `callers` 只有 `user`——产品级资源默认不开放给任何角色；`api_key` 只进登记处，不进动作目录、不进审计。读（`GET /api/settings`、`/api/state`）仍是独立读接口。
+- **工作区回滚动作也只给 user**：`restore_work_commit`（`session_id` / `commit` / `expect_head`）——非破坏性物化共享区，目标之后的提交仍保留；同一工作子树里有会话在生成时拒绝；成功后由核心落一条可回放的 `notice` 行。
+- 提交历史 / 详情 / 文件预览是**只读视图**（`SessionOps::work_log` / `work_commit_view` / `work_commit_file`），不进动作表。
+- **常驻服务的生命周期动作也只给 user**：`control_resident`（`start` / `stop` / `enable` / `disable`，参数 `module` / `name` / `action` / `lease`）——agent 用已启动的实例，不负责拉起；服务清单是独立只读视图（`ResidentOps::services`，CLI `resident`）。会话删除时按租约回收该会话拉起的实例。
 - **已启动常驻服务的操作也走模块动作**：id = `module.<模块id>.<服务名>.<操作名>`（静态模块工具优先，其次常驻服务操作）。
   - 人可直接调（`ResidentOps::call`）。
   - agent 侧：已就绪服务的操作以 `<服务名>.<操作名>` 进成员工具面（原生声明与信封清单都列）；原生声明的线上名把点换成下划线并带模块前缀。
@@ -127,16 +118,12 @@ roles:
   - 核心**不预校验**服务参数——服务是权威，错了由它如实回绝。
   - 调用经 `ResidentOps::call` 转给常驻服务；**未启动的服务不出现**（操作是跑起来才发现的）。
   - 就绪服务的操作同样进**动作目录**（`GET /api/actions` 对 user 可见），Web / CLI 的动作面板因此不必另建一份清单。
-- **隐秘字段的设置只给 user**：`set_secret` / `clear_secret`（`module` + `name`，值 `value`）——
-  值只落 `.home/secrets.yaml`，不进转录 / 日志 / 命令行，永不回显；审计只记动作 id 与成败，不记值。
-- **模块工具也是动作**（动态动作，来自清单）：id = `module.<模块id>.<工具名>`。人可直接跑（无会话，围栏按模块目录 + 可选工作目录派生）；
-  会话里由成员循环执行（同一份 `module.yaml` 声明、同一个 `ToolExec::run_module`）。两条路径的审计记录同一处格式化（`action_audit`），
-  只是各自进自己的账本：呈现层进运行日志，模型侧进**转录工具行**（可回放）。**缺运行包 = 不执行**：两条路径读同一把尺子（`runtime_report.missing`），
-  目录里如实标不可用，不静默降级。
+- **隐秘字段的设置只给 user**：`set_secret` / `clear_secret`（`module` + `name`，值 `value`）——值只落 `.home/` 的 `secrets.yaml`，不进转录 / 日志 / 命令行，永不回显；审计只记动作 id 与成败，不记值。
+- **模块工具也是动作**（动态动作，来自清单）：id = `module.<模块id>.<工具名>`。人可直接跑（无会话，围栏按模块目录 + 可选工作目录派生）；会话里由成员循环执行（同一份 `module.yaml` 声明、同一个 `ToolExec::run_module`）。两条路径的审计记录同一处格式化（`action_audit`），只是各自进自己的账本：呈现层进运行日志，模型侧进**转录工具行**（可回放）。**缺运行包 = 不执行**：两条路径读同一把尺子（`runtime_report.missing`），目录里如实标不可用，不静默降级。
 
-## 三之三、执行类系统工具：shell
+## 五、执行类系统工具：shell
 
-`systools/tools.yaml` 的 `shell` 是唯一声明 per-call `scope` 的系统工具；它不新建执行机制：host 走 kernel 的 `ProcessRunner`，VM 走 guest helper。
+- `systools/tools.yaml` 的 `shell` 是唯一声明 per-call `scope` 的系统工具；它不新建执行机制：host 走 kernel 的 `ProcessRunner`，VM 走 guest helper。
 
 - 参数：`command`（必填）、`scope`（sandbox / external，缺省 sandbox）、`timeout_secs`（缺省 120，最大 600）。cwd 固定私有沙箱；无交互 stdin / TTY；输出 16k（4k 开头 + 12k 结尾）；命令上限 8000 字符；回执带退出码、cwd 与本次耗时（后者由工具层在守门进程给出 shell 收尾行后追加，回放也从这一行派生）。
 - **scope 是本次调用的 reach 请求，profile 才是用户上限**：sandbox 只给 private + 基础 / 项目工具链只读（net=false）；external 在 sandbox 上再加 shared-read / module-read / host-read / network。requested 不是 granted 子集 = 拒绝，不弹卡。
@@ -145,27 +132,24 @@ roles:
 - 平台：Linux / macOS 用 sh；Windows 用 PowerShell（pwsh 7 优先、5.1 回退；`-File` 临时 .ps1，UTF-8 BOM；脚本先设 `$ErrorActionPreference = 'Stop'`，未处理的 cmdlet 错误中止并以非 0 结束，要容错就在脚本里显式 `-ErrorAction SilentlyContinue` 或 try/catch）；VM Linux guest 用 /bin/sh，helper 按 `timeout_secs` 杀树；host 停止经 QGA 给 helper 发 SIGTERM，立即杀整棵进程树。
 - 状态：最近一次 shell 在会话状态栏出 chip（运行中 / 退出码 + 耗时），点开看命令、scope、cwd、成败、耗时与回执预览；数据来自 `SessionView.shell`，不替代转录里的工具行。重建 / 回放的会话按转录派生（`historical`）：cwd 与耗时读回执，起止时间不伪造。
 - 角色：executor / solo / core_proxy。代理的 shell 只做验收性核对，不替执行席产出；共享区只读，仍没有 work_pull / work_commit / 模块工具。
-- 路径：shell 不接受模型给的 path 参数，**不适用** §五 的路径寻址表；边界是围栏。共享区内容先 work_pull 进沙箱；external 只额外读主副本，不写。
+- 路径：shell 不接受模型给的 path 参数，**不适用** §七 的路径寻址表；边界是围栏。共享区内容先 work_pull 进沙箱；external 只额外读主副本，不写。
 - 隐私：shell 不注入模块 secrets，不声明 module-write；模块 userdata 不可写。
 
-## 四、核心操作必须走工具调用
+## 六、核心操作必须走工具调用
 
-**规则**：任何**会驱动核心**的产出都必须是一次**工具调用**——建任务链、节点验收、总验收、代拟 / 推荐名单、执行席回报。
-两条通道等价（原生走结构化槽位、信封走手写信封），核心只从**工具参数**取载荷；正文里手写的同形 JSON **不当作载荷**。
+- **规则**：任何**会驱动核心**的产出都必须是一次**工具调用**——建任务链、节点验收、总验收、代拟 / 推荐名单、执行席回报（`systools/tools.yaml`）。
+- 两条通道等价（原生走结构化槽位、信封走手写信封），核心只从**工具参数**取载荷；正文里手写的同形 JSON **不当作载荷**。
 
 - **为什么**：这些载荷要驱动下一步（建会话、派发、推进或定向返工）；正文 JSON 既没有 schema 校验、也不进工具台账，写坏就整轮失败。
 - **普通说话仍可以是正文**：不驱动核心的发言（讨论意见、执行席的收尾话）不必包成工具——这就是"说话"与"操作"的分界。
 - **工具与载荷形状**在 `systools/tools.yaml`（`plan` / `node_verdict` / `checklist` / `slate` / `submit_report` …）。
-- **核心代理的工具面**（`core_proxy`，逐项见「角色与工具面」表）同样只从工具参数取载荷；外部动作经 `ports::ProxyHost`
-  （生产宿主是 `service/proxy.rs` 的队列桥，见「边界」）。子会话**不把整份转录推给核心**：门与意外停止由机制送达，正文经 `read_session_messages` 倒查。
+- **核心代理的工具面**（`core_proxy`，逐项见「角色与工具面」表）同样只从工具参数取载荷；外部动作经 `ports::ProxyHost`（生产宿主是 `src/capabilities/conductor/service/proxy.rs` 的队列桥，见「边界」）。子会话**不把整份转录推给核心**：门与意外停止由机制送达，正文经 `read_session_messages` 倒查。
 - **载荷不合法 → 如实失败并中止这一步**（不猜、不回落正文 JSON）。
-- **核心可以先核实**：模型先请求 `read` / `search` 时，核心执行并把结果回灌，然后再要那一次核心操作调用；
-  它用的是**只读**小环境（根 = 本次工作的共享区，只发声明里 `capability: fs-read` 的工具）。没有这条回路，模型一想核实就会被判"没有调用 X"而整步中断。
+- **核心可以先核实**：模型先请求 `read` / `search` 时，核心执行并把结果回灌，然后再要那一次核心操作调用；它用的是**只读**小环境（根 = 本次工作的共享区，只发声明里 `capability: fs-read` 的工具）。没有这条回路，模型一想核实就会被判"没有调用 X"而整步中断。
 
-## 五、路径模型：工具用本环境的写法
+## 七、路径模型：工具用本环境的写法
 
-仓库里（代码、提示词册、`module.yaml`、文档）一律只用**占位符**，运行时由核心取真实目录替换进提示词——
-仓库永不出现机器路径；系统工具与模块工具**用同一套路径语言**（布局见 [session-model.md](../session/session-model.md) 一）：
+- 仓库里（代码、提示词册、`module.yaml`、文档）一律只用**占位符**，运行时由核心取真实目录替换进提示词——仓库永不出现机器路径；系统工具与模块工具**用同一套路径语言**（布局见 [session-model.md](../session/session-model.md) 一）：
 
 - **一种写法，一处说明**：
   - 模型对本环境用绝对路径：本机档是宿主路径，虚拟机档是 guest 内路径（路径桥渲染）；**虚拟机档不认宿主写法**，写了按“不是本环境的写法”拒绝。
@@ -181,26 +165,28 @@ roles:
 | `{{module_roots}}` | 该 agent 使用的模块目录的绝对路径（一行一个） | 只有使用该模块的 agent（**对 agent 的内置文件工具永久只读，含 `userdata/`**：agent 只有使用权；模块工具 / 服务进程可写自己的 `userdata/`） |
 
 - **越界即拒绝**：
-  - 路径必须是列出的真实根**之下**的绝对路径。
-  - 相对路径、`..` 跳出、不在任何根之内：一律拒绝，并把允许的根列回去（如实报错，不纠正）。
+  - 路径必须是列出的真实根**之下**的绝对路径（`src/capabilities/tools/domain/fence.rs`）。
+  - 相对路径、`..` 跳出、不在任何根之内：一律拒绝，并把允许的根列回去（如实报错，不纠正）（`src/capabilities/tools/service/mod.rs`）。
   - **这张表只管系统工具**：模块工具的入参不查它；可达范围由围栏（本机档）/ guest 边界（虚拟机档）约束。
+- **可达根与直接父目录可判断存在性**：`exists` / `stat` 在围栏里得到真实结果，「产物目录不存在就先建」这类写法可用；Windows 依赖容器父目录只读项（默认开启，关掉会让这条走偏，报错来自命令自己）。写进未授权目录仍会失败，且失败只发生在该路径所在的调用，不连累无关路径。
+- **Windows 下路径仍统一写 `/`**：守门进程只把**程序名**里的 `/` 换成 `\` 再交 `cmd` 解释；参数里的路径不动。
 - **会话权限叠加在落点之上**：
   - 共享区读写受**该会话**的权限档位与共享区范围约束（范围三态 all / none / 路径数组；黑名单只做减法；全局黑名单是硬底线）。
   - `work_commit` 只接受允许范围内的相对路径（越界**整条拒绝**）；`work_pull` 只拉允许范围内的路径。
   - 私有沙箱不受共享区路径范围限制；模块目录对内置文件工具永久只读。
   - `work_versions` / `work_resolve` / `work_lost` 走读作用域（它们不写共享主副本，提交仍由 `work_commit` 收口；`work_lost` 的 restore 只写自己的沙箱）。
   - 语义见 [docs/permission/README.md](../permission/README.md)。
-- **编码**：内置 `read` / `write` 读严格 UTF-8（非法字节按替换字符呈现并如实标注——**本程序不猜编码**），写一律 UTF-8；
-  `work_pull` / `work_commit` / `work_versions` / `work_resolve` 按**字节**处理，图片、视频与其它二进制不走 UTF-8 假设。
-  内容按块流式读写、不整份进上下文；单文件有上限（`MAX_ASSET_BYTES`，见 [workspace](../workspace/README.md)），超限提交 / 上传整次拒绝。
-  **二进制内容由模块工具或用户投喂产出**，内置 `write` 不是二进制通道；产出后用 `work_commit` 提交。
+- **编码**：内置 `read` / `write` 读严格 UTF-8（非法字节按替换字符呈现并如实标注——**本程序不猜编码**），写一律 UTF-8（`src/capabilities/tools/detail/sys_io.rs`）；
+- `work_pull` / `work_commit` / `work_versions` / `work_resolve` 按**字节**处理，图片、视频与其它二进制不走 UTF-8 假设。
+- 内容按块流式读写、不整份进上下文；单文件有上限（`MAX_ASSET_BYTES`，见 [workspace](../workspace/README.md)），超限提交 / 上传整次拒绝。
+- **二进制内容由模块工具或用户投喂产出**，内置 `write` 不是二进制通道；产出后用 `work_commit` 提交。
 - **用户也能引用**：
   - 输入框里用 `@` 挑文件：`@work:相对路径` / `@sandbox:<agent>/相对路径`（**给人用**）。
   - 核心按**本环境的写法**渲染成绝对路径之后才进转录与上下文：本机档 = 宿主真实路径；虚拟机档 = guest 写法（同一座路径桥，模块工具在 guest 里直接能用）。
   - 所以 `@` 引用与系统工具寻址用同一种写法；系统工具先译回宿主再校验。
   - 引用别人的私有沙箱时如实说明无权读取，且不泄漏对方的真实路径。
 
-## 六、提示词按角色分配
+## 八、提示词按角色分配
 
 ```text
 prompts/
@@ -208,10 +194,10 @@ prompts/
   roles/   discussant / executor / planner / orchestrator / core_proxy（solo 复用 executor 的文件）
 ```
 
-每份文件里**具体有哪些键、每个键干什么**：[prompts.md](../prompt/prompts.md)。
+- 每份文件里**具体有哪些键、每个键干什么**：[prompts.md](../prompt/prompts.md)。
 
 - **角色声明 = 提示词 + 工具面 + 渲染规则，三者同处声明**：信封模式下该角色能用的信封清单**要渲染进该回合的上下文**（原生通道则由声明槽给出），分开声明必然漂。
-- **角色必须可派生**：提示词与工具面决定了上下文与转录，重启 / 回档后必须重建出**同样的角色与上下文**（回放与实时产出同样的消息），所以角色**不能**是运行时内存里的临时状态。
+- **角色必须可派生**：提示词与工具面决定了上下文与转录，重启 / 回档后必须重建出**同样的角色与上下文**（回放与实时产出同样的消息），所以角色**不能**是运行时内存里的临时状态（`src/capabilities/prompt/domain/prompt.rs`）。
 - **planner 与 orchestrator 分开**（上下文不同、工具面不同、指令互斥），只共享**背景知识**（链的语义、节点状态定义、信封协议）——共享的是背景，不是指令。
 - **executor 是全新上下文**：讨论内容只经任务提示词带入，不继承讨论转录。
 - **solo 与 executor 只差回报工具**：`submit_report` 的消费者只有协作的节点；用户建的单 agent 会话没有消费者——发了它只会多一次工具往返、把最终答复塞进工具参数。
@@ -227,15 +213,16 @@ prompts/
 | `orchestrator` | 核心链中推进 | `read` `search` `node_verdict` `checklist` |
 | `core_proxy` | 核心代理（用户把决定权整块交给它，代用户决定） | `catalog_agents` `create_session` `send_session_message` `observe_session` `read_session_messages` `control_session` `read` `list` `search` `shell`（**不发**模块工具） |
 
-**验收不是独立角色**：它是 `orchestrator` 的一个工具 / 一步（"根据验收情况推进任务"本就是同一个循环）。
+- **验收不是独立角色**：它是 `orchestrator` 的一个工具 / 一步（"根据验收情况推进任务"本就是同一个循环）。
 
-## 七、协作动词工具化
+## 九、协作动词工具化
 
-`say` / `agree` / `leave` / `ask` 是**声明式工具**（声明在 `systools/tools.yaml`，由角色面发放）：原生模式走供应商的结构化槽位，
-信封模式走**同一份声明**渲染出的信封——两套产出同样语义，参数经同一处 schema 校验：
-写坏的信封**不降级成普通发言**，而是如实记一条失败的工具行；没有信封的纯正文 = 这一轮**没表态**。
+- `say` / `agree` / `leave` / `ask` 是**声明式工具**（声明在 `systools/tools.yaml`，由角色面发放）：原生模式走供应商的结构化槽位，信封模式走**同一份声明**渲染出的信封——两套产出同样语义，参数经同一处 schema 校验：
+- 写坏的信封**不降级成普通发言**，而是如实记一条失败的工具行；没有信封的纯正文 = 这一轮**没表态**。
 
-## 八、边界
+## 十、边界
+
+- 边界处置按表约定：代理工具、建会话、回档与系统工具均按此收口。
 
 | 场景 | 约定 |
 | --- | --- |
@@ -246,13 +233,13 @@ prompts/
 | 代理模式下的子会话审查关卡 | 不问用户：作为**门**交给核心判断，核心用 `send_session_message(kind=user_reply, reply=<选项 id>)` 回答 |
 | 代理模式下子会话的转录 | **不转发给核心**：核心只拿门的通知与意外停止通知，正文经 `read_session_messages`（0 = 最新）主动倒查 |
 | 改任务目标 | 等于**改任务提示词**；改完**不作废**，让它跑完再由核心验收；链有问题则与用户在**主会话**讨论改链 |
-| 回档 | **整棵子树按同一回合 id 同步收窗**；留档折叠（可再恢复），删除 / 恢复真的截断（见 [session-model.md](../session/session-model.md) 的五） |
+| 回档 | **整棵子树按同一回合 id 同步收窗**；留档折叠（可再恢复），删除 / 恢复真的截断（见 [session-model.md](../session/session-model.md) 的「回档：三种模式 + 工作级标记」） |
 | 共享区提交历史 / 回滚 | 只读视图 + user-only 动作 `restore_work_commit`：非破坏性、`expect_head` 防陈旧、运行中拒绝；目标之后的提交仍在历史里（细则见 [workspace](../workspace/README.md)） |
 | 系统工具调用 | 与模块工具同路径：工具行 + `[工具结果]`，可审计、可回放 |
 
-## 九、当前状态
+## 十一、当前状态
 
-**共享区是版本化工作区**：
+- **共享区是版本化工作区**：
 
 - 主副本 `work/` 对 agent 只读，agent 只写自己的沙箱（工作副本）。
 - `work_pull` / `work_commit` / `work_status` / `work_versions` / `work_resolve` / `work_lost` 六个**核心自有工具**做同步、查看、三方比较、显式解决冲突与备份恢复。
@@ -260,8 +247,7 @@ prompts/
 - `take=local` 在本地与基线一致时拒绝、主副本提交变化时拒绝；`take=upstream` 覆盖/删除前备份到 `lost/`，`work_lost` 可按当前 hash 恢复。
 - 文本、图片、视频与其它二进制都按字节处理；`work_versions` 给 hash、大小与扩展名媒体类型提示，文本预览最多 16 KiB；单文件超过 64 MiB 时提交 / 上传明确拒绝。
 - 用户投喂是同一条提交路径里的**权威提交**（作者 = user）。
-- 用户可在 Web 会话状态栏或 CLI `work` 命令看提交历史、提交详情与文本预览，并把共享区非破坏性回滚到任一提交点；
-  agent 侧仍只拿 `work_*` 工具，不给回滚入口。
+- 用户可在 Web 会话状态栏或 CLI `work` 命令看提交历史、提交详情与文本预览，并把共享区非破坏性回滚到任一提交点；agent 侧仍只拿 `work_*` 工具，不给回滚入口。
 
 - 执行类系统工具 `shell` 对 executor / solo / core_proxy 发放：sandbox 只碰私有沙箱 + 基础 / 项目工具链只读；external 按档位 ask / allow；Windows 上按"会话 + agent + 根集合"派生容器身份（与模块工具同一口径）。
 - 工具面**按回合按身份注入**（总表不进提示词）；越权调用如实拒绝并落工具行；悬空引用由装配期 `problems()` 挡下。
@@ -269,10 +255,28 @@ prompts/
 - 代理会话复用**通用成员循环**（没有「代理专用」分支）；工具动作经队列桥回核心线程执行。
 - 呈现面：Web 建工作向导含代理形态，会话状态栏显示上下文用量与共享区提交；CLI 有 `resident` / `secret` / `work` 入口。链的流程见 [task-chain.md](../collab/task-chain.md)。
 
-## 十、联动
+## 十二、联动
 
 - 模块工具的声明与执行见 [MODULE_SPEC.md](../../MODULE_SPEC.md)；
 - 会话、围栏与并发模型见 [ARCHITECTURE.md](../../ARCHITECTURE.md)；
 - 呈现层入站契约见 [contracts.md](../presentation/contracts.md)；
 - 产品行为（讨论 / 审查关卡 / 任务链）见 [PRODUCT.md](../../PRODUCT.md)；
 - 测试层级与缺口账见 [TESTING.md](../../TESTING.md)。
+
+## 十三、工具进程边界
+
+- 模块工具与 `shell` 都从**守门进程**里跑：外层 `env_clear`，只注入 `fence_env` 与该模块的隐秘字段；到点连根杀树（模块工具 30 秒，`shell` 用本次 `timeout_secs`）；可达范围按平台围栏强制；能力等级在启动报告里如实给出（机制见 [docs/kernel/README.md](../kernel/README.md) 的「工具进程与守门协议」）。
+- 模块作者仍应把工具写成**只碰自己工作区**的样子；围栏是兜底，不是许可。
+
+## 检查
+- 两张表一致性 → `src/tests/detail.rs`（`SystemTools::problems()`）。
+- 工具面与越权 → `src/tests/tools/` 与 `src/tests/api.rs`。
+
+## 路由
+- 系统工具门户：[../../SYSTOOL.md](../../SYSTOOL.md)
+- 模块契约：[../../MODULE_SPEC.md](../../MODULE_SPEC.md)
+- 会话模型：[../session/session-model.md](../session/session-model.md)
+- 架构约束：[../../ARCHITECTURE.md](../../ARCHITECTURE.md)
+- 呈现层契约：[../presentation/contracts.md](../presentation/contracts.md)
+- 产品行为：[../../PRODUCT.md](../../PRODUCT.md)
+- 测试规范：[../../TESTING.md](../../TESTING.md)

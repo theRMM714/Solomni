@@ -1,13 +1,15 @@
 # 架构与开发规则（ARCHITECTURE）
 
-> 改代码前必读。本文是**分层的唯一权威**：谁依赖谁、端口画在哪、机制放哪一层、日志与提示词册怎么用、落盘契约长什么样。
-> 项目方向见 [PHILOSOPHY.md](PHILOSOPHY.md)，产品行为见 [PRODUCT.md](PRODUCT.md)，模块作者契约见 [MODULE_SPEC.md](MODULE_SPEC.md)，
-> 运行包契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)，登记处契约见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)，
-> 测试规范见 [TESTING.md](TESTING.md)（门户与路由），仓库协作规则见 [AGENTS.md](AGENTS.md)。
+> 定位：分层的唯一权威：依赖方向、端口画在哪、机制落哪一层，以及日志、提示词册与落盘契约。
+> 效力：规范｜核对：2026-11-04｜依据：`src/main.rs`
+
+## 适用与判据
+- 改代码前必须先读本文；分层判断以本文为准（`ARCHITECTURE.md`）。
+- 违反由 T0 结构审查与 `node run-tests.js` 判定；依赖方向基线在 `tests/dependency-baseline.json`。
 
 ## 一、分层与依赖方向
 
-依赖箭头只有一种画法（每层只指向它的下层）：
+- 依赖箭头只有一种画法（每层只指向它的下层）：
 
 ```text
 presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）──▶ kernel
@@ -22,17 +24,17 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 | `presentation/{cli,web}/` | **前端（交付机制）**：各渠道一个子目录，完全分开——传输（argv/stdout vs HTTP）、路由、纯渲染。**不是业务能力** | 只依赖各能力的 `::api`；**拿不到端口对象，也拿不到 `Core`**；两者互不依赖 |
 | `entry/` + `main.rs` + `diagnostics/` + `guard/` | **入口层**：组合根（`main.rs`：`new` 出所有适配器并注入）+ 机器可读探针（`--doctor` / `--https-check` / `--print-routes` / `--print-fence-env` / `--fence-verify`）+ 围栏守门进程与台账处置（`--fence-run`；以及 `--fence-clean` / `--fence-reconcile` / `--fence-ledger` / `--fence-restore` / `--fence-revoke` / `--fence-profile-rm`）+ 长驻子进程守门进程（`--proc-watchdog`，macOS 的父死子亡） | 它依赖所有人，**任何人都不许依赖它**；除装配与探针外无业务 |
 
-推论：
+- 推论：
 
 - 「用哪个供应商 / 模型」是**策略**（`registry` 的解析链决定）；「怎么建通道」是**机制**（llm 的 `detail`）。两者不互换。
 - 出站依赖由**各能力定义端口**、**各能力的 `detail` 实现**；入站依赖由**各能力定义 `api`**；`Ops` 只把它们**组装**给呈现层。
-  **能力不定义"前端接口让别人实现"**。
+- **能力不定义"前端接口让别人实现"**。
 - 呈现层拿到的是 `Ops`（各能力的能力接口 + 核心自己的两个 + 事件台），不是 `Core`，也不是任何锁。
 
 ## 二、端口：只画在 IO 与可替换点上
 
-端口 = 各能力 `ports.rs` 与 `kernel/` 里的 trait。判据只有一条：**这里有 IO，或者这里有可替换的实现**。
-纯逻辑（信封解析、引擎循环、协作状态派生、提示词渲染）**刻意不抽象**。
+- 端口 = 各能力 `ports.rs` 与 `kernel/` 里的 trait。判据只有一条：**这里有 IO，或者这里有可替换的实现**。
+- 纯逻辑（信封解析、引擎循环、协作状态派生、提示词渲染）**刻意不抽象**。
 
 | 端口 | 职责 | 适配层实现 |
 | --- | --- | --- |
@@ -55,22 +57,22 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 | `ProcessRunner` | 外部进程执行（围栏安装、拉起、stdin 送参、超时/取消杀树、head/head+tail 截断、一次性 shell）；**kernel 共享机制端口** | `ProcTools`（守门进程 = 本程序的 `--fence-run` 模式） |
 | `EnvelopeRepair` | 手写信封不合法时的**无歧义**补救（改了字段含义就是错；拿不准就不修） | `UnambiguousRepair` |
 | `ServiceAdapter` | 一个常驻服务的协议适配器：拉起、发现操作、调用、关闭（按行协议走 kernel 的 `SessionHost`） | `residents/detail::McpAdapter`（MCP stdio） |
-| `SecretStore` | 模块隐秘字段的落盘（`.home/secrets.yaml`；值不进提示词、转录与日志） | `secrets/detail::YamlSecrets` |
+| `SecretStore` | 模块隐秘字段的落盘（`.home/` 的 `secrets.yaml`；值不进提示词、转录与日志） | `secrets/detail::YamlSecrets` |
 | `FenceHost` | 围栏授权的释放：`release_by_lease` 按会话租约撤 ACE/删 profile（会话改配、删除），`release_call` 服务一次性调用（撤 ACE、删 profile 与临时目录）；**kernel 共享机制端口** | `confine::FenceHostAdapter`（本平台无该机制时为空操作） |
 | `Log` / `HostProbe` / `PathCodec` / `ProcessTexts` | 运行日志（三级）/ 宿主能力探测（**只问事实**：路径存在性、PATH 上的可执行文件、本机虚拟化能力）/ 模型侧路径 ↔ 宿主路径的翻译 / 外部进程回执的收尾文案 | `FileLog` / `HostProbeAdapter` / `vm` 的路径桥 / `kernel::detail::process::CodeProcessTexts`（测试 `NoopLog` / `FixedProbe`） |
 | `ToolHandler` | **一类工具的执行者**（按名字认领）：内置、模块与核心自有工具因此走**同一条派发路径** | 各能力注入（工具能力管内置与模块；conductor 注入代理工具那个） |
 | `AskUser` | **请用户裁决的提问端口**：需要用户裁决的机制（工具执行层、围栏）推一条问题并**阻塞**等一个选项 id——走会话的**统一裁决通道**（不是第二条） | 会话侧实现（conductor 的 `SessionAsk`：卡片进那一条队、`answer_card` 作答；构不出可用选项时停会话 + 落警告） |
 
-端口只有一个持有者：**定义它的那个能力的 `service.rs`**（R12）。**例外**：`kernel` 的机制端口（`Log` / `HostProbe` / `ToolHandler` / `AskUser` / `ProcessRunner` / `FenceHost` / `PathCodec` / `ProcessTexts` / `SessionHost`）全项目共享。
-新增端口前先问一句：**这是 IO 或可替换点吗**？不是就别加 trait。
+- 端口只有一个持有者：**定义它的那个能力的 `service.rs`**（R12）。**例外**：`kernel` 的机制端口（`Log` / `HostProbe` / `ToolHandler` / `AskUser` / `ProcessRunner` / `FenceHost` / `PathCodec` / `ProcessTexts` / `SessionHost`）全项目共享。
+- 新增端口前先问一句：**这是 IO 或可替换点吗**？不是就别加 trait。
 
 ## 三、单元地图与入站契约
 
-这两块是查阅型细则，各只有一份：
+- 这两块是查阅型细则，各只有一份：
 
 - 逐个文件讲某个单元（`capabilities/` 含 `conductor/`、`kernel/`、`entry/`、`presentation/`）各干什么：各单元自己的 `docs/<单元>/unit-map.md`（单元划分与完整路由见 [AGENTS.md](AGENTS.md)「文档路由」）。
 - 呈现层入站契约与机器可读的 HTTP 路由目录：[docs/presentation/contracts.md](docs/presentation/contracts.md)
-  （**路由表由 `src/tests/routes.rs` 直接读本文比对**，对不上就是测试失败）。
+- （**路由表由 `src/tests/routes.rs` 直接读本文比对**，对不上就是测试失败）。
 - 系统工具总表、角色表与"谁能用哪些工具"：[docs/tools/tools-and-roles.md](docs/tools/tools-and-roles.md)
 - 协作如何从讨论走到交付（审查关卡、任务链、子会话、验收）：[docs/collab/task-chain.md](docs/collab/task-chain.md)
 - 提示词册（`prompts/`）的结构与键清单：[docs/prompt/prompts.md](docs/prompt/prompts.md)
@@ -78,76 +80,72 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 
 ## 四、运行日志（Log 端口）
 
-- `kernel/ports.rs` 定义 `Log`（`info`/`warn`/`error`），**只调用**；文件、时间戳、目录机制在 `kernel/detail/file_log.rs`。
+- `src/kernel/ports.rs` 定义 `Log`（`info`/`warn`/`error`），**只调用**；文件、时间戳、目录机制在 `src/kernel/detail/file_log.rs`。
 - 组合根创建唯一的 `FileLog` 并注入协调业务与呈现层；测试用 `NoopLog`。每次运行在根目录 `logs/` 下按时间戳建一个 `.log` 文件；`logs/` 不入库。
-- 关键节点必须埋点：通道降级、HTTP 失败、会话动作失败、装配失败、工具执行异常。出问题时**看日志定因**，不靠推理猜。
+- 关键节点必须埋点：通道降级、HTTP 失败、会话动作失败、装配失败、工具执行异常。出问题时**看日志定因**，不靠推理猜（`src/kernel/detail/file_log.rs`）。
 
 ## 五、提示词册（prompts/）
 
-- **所有发给 LLM 的指令、身份、协议、环境提示词一律写入 `prompts/`**，禁止硬编码进代码；运行时回执不在此列（见下一条）。改文案只改册子；占位符 `{{key}}`，渲染器在 `capabilities/prompt/domain/prompt.rs`。
-- **缺文件 / 缺键 / 缺变量 = 报错暴露**，禁止静默兜底文案。**册子只由提示词能力持有一次**，以 `Arc` 共享。
+- **所有发给 LLM 的指令、身份、协议、环境提示词一律写入 `prompts/`**，禁止硬编码进代码；运行时回执不在此列（见下一条）。改文案只改册子；占位符 `{{key}}`，渲染器在 `src/capabilities/prompt/domain/prompt.rs`。
+- **缺文件 / 缺键 / 缺变量 = 报错暴露**，禁止静默兜底文案。**册子只由提示词能力持有一次**，以 `Arc` 共享（`src/capabilities/prompt/service.rs`）。
 - **别的能力不点字段路径**：按名字取段（`Prompt::text` / `render` + `Segment`）；
-  "哪个回合发哪几段"的组装留在各业务（身份块归 `session`、工具说明归 `tools`、清单文本归 `registry` / `workspace`）。
+- "哪个回合发哪几段"的组装留在各业务（身份块归 `session`、工具说明归 `tools`、清单文本归 `registry` / `workspace`）。
 - 路径占位符（`{{work_root}}` 等）由协调业务在运行时替换成**真实根目录**后才交给 agent——仓库里永远不出现机器路径。
 - **不进册子的两类**：①行身份是结构化字段（`LineView` 的 `speaker` / `verb` / `kind`，认字段不认文案）；
-  ②只给用户看的呈现层文案（各类 `Notice`、工具轨迹行的成败字样、面向界面 / CLI 的 `Err`）。
-  运行时回执**按产生它的模块归属**：路径/权限拒绝由 workspace 代码直接返回；工具回执、信封/围栏标注、清单行等由产生它们的模块代码返回。判断标准是"谁做决定谁拥有文案"，不是"进上下文就进册子"。键清单见 [docs/prompt/prompts.md](docs/prompt/prompts.md)。
+- ②只给用户看的呈现层文案（各类 `Notice`、工具轨迹行的成败字样、面向界面 / CLI 的 `Err`）。
+- 运行时回执**按产生它的模块归属**：路径/权限拒绝由 workspace 代码直接返回；工具回执、信封/围栏标注、清单行等由产生它们的模块代码返回。判断标准是"谁做决定谁拥有文案"，不是"进上下文就进册子"。键清单见 [docs/prompt/prompts.md](docs/prompt/prompts.md)。
 
 ## 六、状态与落盘契约
 
-**布局**（机制口径）只在 [docs/session/session-model.md](docs/session/session-model.md) 的「形态」画一次：
-`session/<工作名>/` 下是 `meta.yaml`、`transcript.jsonl`、共享区主副本 `work/`、版本库 `.work/`、各 agent 沙箱与 `children/`。
-共享区是**版本化工作区**：主副本对 agent 只读，agent 的沙箱就是它的工作副本，`work_pull` / `work_commit` 做同步，`work_versions` / `work_resolve` 看三方与显式解决冲突；
-提交点是内容寻址的整棵树，每条记录带 `(agent, line)` 行锚；回档按锚把共享区**精确物化**到那一刻
-（留档 / 删除 / 恢复三种模式见 [docs/session/session-model.md](docs/session/session-model.md) 的五）。
-**目录保留名**（`work` / `children`）的名单在 `systools/names.yaml`：布局一改就改表，代码里不硬编码。
+- **布局**（机制口径）只在 [docs/session/session-model.md](docs/session/session-model.md) 的「形态」画一次：`session/<工作名>/` 下是 `meta.yaml`、`transcript.jsonl`、共享区主副本 `work/`、版本库 `.work/`、各 agent 沙箱与 `children/`。
+- 共享区是**版本化工作区**：主副本对 agent 只读，agent 的沙箱就是它的工作副本，`work_pull` / `work_commit` 做同步，`work_versions` / `work_resolve` 看三方与显式解决冲突；提交点是内容寻址的整棵树，每条记录带 `(agent, line)` 行锚；回档按锚把共享区**精确物化**到那一刻（留档 / 删除 / 恢复三种模式见 [docs/session/session-model.md](docs/session/session-model.md) 的「回档：三种模式 + 工作级标记」）。
+- **目录保留名**（`work` / `children`）的名单在 `systools/names.yaml`：布局一改就改表，代码里不硬编码。
 
 - **转录即状态**：留档只在流水追加一条 `{"type":"rewind",mode:"archive"}` 记录并折叠活动窗口（字节全留、可恢复）；删除与恢复会**整体重写** `transcript.jsonl`（真的删）。会话内容 = 按标记回放出的活动窗口。内存与落盘不一致时**以流水为准**。
 - **转录行的稳定 id**：一轮模型调用 = 一条行；工具调用自成一条行；id 在会话内单调、回放可复现（回档按 id 定位）。
-  行上带 `reply`（= 该回复第一行的 id）：重建按它把同一次回复的工具行归成一组，回档按它**原子**截断。
+- 行上带 `reply`（= 该回复第一行的 id）：重建按它把同一次回复的工具行归成一组，回档按它**原子**截断。
 - **流式增量是短暂事件**：`delta` / `tool_call` 不落盘；历史只记定稿后的行。**行上的判定走结构化字段**（如降级的 `degraded: true`），呈现层不匹配行文本。
 - **工具调用形态**（`ToolMode`：`envelope` 手写信封 / `native` 原生调用）是**登记处的事实**（`models.yaml` 的 `tools`），**不钉在会话里**：每次生成前重新解析；变了就就地刷新系统提示并给用户一句通知。**两套形态互斥**。
-  一次回复在上下文里是「一条助手消息 + N 条结果」，两种形状由唯一的构造函数（`session::api::reply_msgs`）按当前形态产出——"重建与实时逐条一致"因此是结构保证。
+- 一次回复在上下文里是「一条助手消息 + N 条结果」，两种形状由唯一的构造函数（`session::api::reply_msgs`）按当前形态产出——"重建与实时逐条一致"因此是结构保证。
 - **工具声明里的 `parallel` 决定并发**（缺省 false = 独占）：一次回复里**连续**的可并发调用合成一批并发跑，其余各自独占；
-  工具行、结果消息与账本合并**一律按原始调用顺序**——并发只影响执行，不影响上下文里的顺序。
+- 工具行、结果消息与账本合并**一律按原始调用顺序**——并发只影响执行，不影响上下文里的顺序（`src/capabilities/session/domain/session.rs`）。
 - **观察账本**（`systool::Observations`）是**进程内状态，不落盘**：记"本次会话完整读过 / 由核心写过哪些文件、当时的内容指纹"，只用于决定整份覆盖要不要放行。回档时清空；按落盘重建的会话从空账本开始。
 - **会话参数与对话分开**：身份、工作环境、调用约定是**参数**（`session::SessionParams`），每次调用现场渲染；对话里只有真正发生过的事。
-  装配式与理由见 [docs/session/session-model.md](docs/session/session-model.md) 的「会话参数与对话分开」。
-- `meta.yaml` 的 `agents` 是名单的唯一真相（代拟路径在用户确认那一刻写回）；`exec` 段是执行选型的唯一真相
-  （档位 / 虚拟根名 / 定版 `pins`；缺段按默认读回）；会话级权限层在 `sandbox.ceiling`（根）/ `sandbox.narrowing`（子）。
-  执行计划本身**从不落盘**（含真实路径，只在运行时派生）；网络与围栏要求是全局策略，不在会话里。
+- 装配式与理由见 [docs/session/session-model.md](docs/session/session-model.md) 的「会话参数与对话分开」。
+- `meta.yaml` 的 `agents` 是名单的唯一真相（代拟路径在用户确认那一刻写回）；`exec` 段是执行选型的唯一真相（档位 / 虚拟根名 / 定版 `pins`；缺段按默认读回）；会话级权限层在 `sandbox.ceiling`（根）/ `sandbox.narrowing`（子）。
+- 执行计划本身**从不落盘**（含真实路径，只在运行时派生）；网络与围栏要求是全局策略，不在会话里。
 - 会话的旁路配置记录（`{"type":"config"}`）只在编辑提交时追加：供呈现与审计，**不进模型上下文**，回放与状态派生跳过它。
 - 出站模型调用的参数由核心决定、随端口传下去（`LlmOpts{stream, timeout_secs}`），取值来自**全局设置**；`Output` 只管回包形状。
-  调用失败**不是**模型的回复：`Completion.error` 与正文分离，上层据此发 `Notice` 并**中断本轮**（不落转录行），会话保持可继续。
+- 调用失败**不是**模型的回复：`Completion.error` 与正文分离，上层据此发 `Notice` 并**中断本轮**（不落转录行），会话保持可继续。
 - **权限与围栏**（策略在 capabilities/tools/domain/fence.rs，机制在 detail/confine/）：
-  权限拆成 **reach × effect × decision**：reach = private / shared-read / shared-write / module-read / module-write / host-read / network；
-  decision = allow / ask / deny。四档 profile：仅可查看 / 工作区内修改 / 外部可达（逐次确认）/ 全可达（自动放行）；默认工作区内修改。
-  单次调用 granted = 会话 reach ∩ 工具最大 reach；执行类再按 sandbox / external scope 求交；requested 越界 = 拒绝。
-  围栏由 granted 派生：shared-write 永不进 rw；module-write 只给模块工具写自己的 userdata；host-read / network 受全局上限。
-  根会话 ceiling + 子会话逐层 narrowing：子只能收窄，父编辑不覆盖子收窄；路径范围只作用于共享区，私有沙箱不受路径范围限制（但受 profile 写决定约束）。
-  工具级确认命中 ask 时进统一裁决队；回答 allow / deny / allow_turn；没有可回答前端一律拒绝。
-  模块目录对 agent 的内置文件工具永久只读（含 userdata）；模块 userdata 只由模块工具 / 服务进程写。
-  VM guest 的 per-call 断网由 guest helper 的 unshare(CLONE_NEWNET) 落实；失败 fail-closed。
-  **shell 的 scope 是单次 reach 请求**：sandbox 只 private + 基础 / 项目工具链只读（net=false）；external 加 shared-read / module-read / host-read / network；两者都要求围栏真强制，装不上拒绝。shell 的只读根另加 `runtime_roots`（基础工具链 + 本 agent 运行包）。
-  工具进程走**守门进程**（本程序 `--fence-run`），环境不继承父进程（**密钥与凭据不进工具进程**），`HOME` / `TEMP` 等落进该 agent 的沙箱。
-  **模块工具一个 agent 一个容器 profile**，但每次调用带唯一租约，跑完按它撤自己那份 ACE；shell 的 sandbox / external 用**按次临时 profile**（W1，结束撤 ACE 并删 profile），所以按次收窄在 Windows 上真实成立。守门进程是唯一建 profile 的地方并记进 `.home/fence-grants.json` 台账；每次写 ACL **先把记录落盘**（根内路径存原始安全描述符、根外只存 ACE 摘要），写后核对 ACE 与原有权限项、失败回滚并如实报错；
-  台账每条授权 / profile 带**归属**（pid + 进程创建时刻 + **会话租约**），写事务用**进程内互斥 + 跨进程文件锁**串行。
-  **启动期**（会话尚未开工）按归属**对账一次**：只回收归属明确已死的条目、无法判定的如实报告并跳过，失败保留供重试——不询问用户、不阻塞启动，也不做孤儿清扫（那留手动）；手动重试用 `--fence-reconcile`。
-  `--fence-clean` 按台账**整体还原**根内路径、精确撤销根外条目，再扫掉台账外的孤儿授权（含任何显式包 SID ACE）与遗留 profile；按条处置是 `--fence-ledger` / `--fence-restore` / `--fence-revoke` / `--fence-profile-rm`。
-  机制验证分三态：`Enforced` / `EnvUnavailable`（本机不允许：`require` 且未同意降级时拒绝，否则如实降级）/ `Broken`（我们写错了，**拒绝执行**）；
-  `FenceJob.policy` 把 `require` / `allow_degraded` 交给守门进程，三平台同一把尺子。
-  **必要落点授不上不许降级**（解释器目录 / 模块目录 / 工作目录 / 私有沙箱 / 其余数据边界 / 容器身份 / 台账）：
-  经统一裁决通道问用户（`fence_unfenced_once` 本轮无围栏跑一次 / `fence_abort` 放弃这次调用）；
-  拒绝、没人答、按停止（整队作废 = 拒绝）与**没有可回答的前端**一律不执行。**可选落点**（用户授权的只读根、父目录的只读属性、不存在的落点）授不上只记事实。
-  **装不上就如实报告能力等级；未授权不等于无围栏**（进程树、资源上限与环境白名单两种时段都生效）。落点判据、平台差异与真机验收见 [docs/kernel/README.md](docs/kernel/README.md) 的「围栏落点：必要与可选」。
+- 权限拆成 **reach × effect × decision**：reach = private / shared-read / shared-write / module-read / module-write / host-read / network；
+- decision = allow / ask / deny。四档 profile：仅可查看 / 工作区内修改 / 外部可达（逐次确认）/ 全可达（自动放行）；默认工作区内修改。
+- 单次调用 granted = 会话 reach ∩ 工具最大 reach；执行类再按 sandbox / external scope 求交；requested 越界 = 拒绝。
+- 围栏由 granted 派生：shared-write 永不进 rw；module-write 只给模块工具写自己的 userdata；host-read / network 受全局上限。
+- 根会话 ceiling + 子会话逐层 narrowing：子只能收窄，父编辑不覆盖子收窄；路径范围只作用于共享区，私有沙箱不受路径范围限制（但受 profile 写决定约束）（`src/capabilities/permission/domain/permission.rs`）。
+- 工具级确认命中 ask 时进统一裁决队；回答 allow / deny / allow_turn；没有可回答前端一律拒绝（`src/capabilities/conductor/service/ask_user.rs`）。
+- 模块目录对 agent 的内置文件工具永久只读（含 userdata）；模块 userdata 只由模块工具 / 服务进程写。
+- VM guest 的 per-call 断网由 guest helper 的 unshare(CLONE_NEWNET) 落实；失败 fail-closed。
+- **shell 的 scope 是单次 reach 请求**：sandbox 只 private + 基础 / 项目工具链只读（net=false）；external 加 shared-read / module-read / host-read / network；两者都要求围栏真强制，装不上拒绝。shell 的只读根另加 `runtime_roots`（基础工具链 + 本 agent 运行包）。
+- 工具进程走**守门进程**（本程序 `--fence-run`），环境不继承父进程（**密钥与凭据不进工具进程**），`HOME` / `TEMP` 等落进该 agent 的沙箱。
+- **模块工具一个 agent 一个容器 profile**，但每次调用带唯一租约，跑完按它撤自己那份 ACE；shell 的 sandbox / external 用**按次临时 profile**（W1，结束撤 ACE 并删 profile），所以按次收窄在 Windows 上真实成立。守门进程是唯一建 profile 的地方并记进 `.home/fence-grants.json` 台账；每次写 ACL **先把记录落盘**（根内路径存原始安全描述符、根外只存 ACE 摘要），写后核对 ACE 与原有权限项、失败回滚并如实报错；
+- 台账每条授权 / profile 带**归属**（pid + 进程创建时刻 + **会话租约**），写事务用**进程内互斥 + 跨进程文件锁**串行。
+- **启动期**（会话尚未开工）按归属**对账一次**：只回收归属明确已死的条目、无法判定的如实报告并跳过，失败保留供重试——不询问用户、不阻塞启动，也不做孤儿清扫（那留手动）；手动重试用 `--fence-reconcile`。
+- `--fence-clean` 按台账**整体还原**根内路径、精确撤销根外条目，再扫掉台账外的孤儿授权（含任何显式包 SID ACE）与遗留 profile；按条处置是 `--fence-ledger` / `--fence-restore` / `--fence-revoke` / `--fence-profile-rm`。
+- 机制验证分三态：`Enforced` / `EnvUnavailable`（本机不允许：`require` 且未同意降级时拒绝，否则如实降级）/ `Broken`（我们写错了，**拒绝执行**）；
+- `FenceJob.policy` 把 `require` / `allow_degraded` 交给守门进程，三平台同一把尺子。
+- **必要落点授不上不许降级**（解释器目录 / 模块目录 / 工作目录 / 私有沙箱 / 其余数据边界 / 容器身份 / 台账）：
+- 经统一裁决通道问用户（`fence_unfenced_once` 本轮无围栏跑一次 / `fence_abort` 放弃这次调用）；
+- 拒绝、没人答、按停止（整队作废 = 拒绝）与**没有可回答的前端**一律不执行。**可选落点**（用户授权的只读根、父目录的只读属性、不存在的落点）授不上只记事实（`src/capabilities/conductor/service/ask_user.rs`）。
+- **装不上就如实报告能力等级；未授权不等于无围栏**（进程树、资源上限与环境白名单两种时段都生效）。落点判据、平台差异与真机验收见 [docs/kernel/README.md](docs/kernel/README.md) 的「围栏落点：必要与可选」。
 - `capabilities/vm/` 的 `packages` 是运行包契约与包库事实，`exec` 是执行档位、执行计划派生与就绪检测；两者都是纯逻辑。契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)。
-  登记处四份 yaml 的字段与读写规则见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)。
+- 登记处四份 yaml 的字段与读写规则见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)。
 
 ## 七、可测性（架构约束）
 
-测试的层级、替身语义、端口契约矩阵、质量门禁、缺口账与执行入口全部由 [TESTING.md](TESTING.md) 与 `docs/testing/` 规定；本节只列架构硬约束。
+- 测试的层级、替身语义、端口契约矩阵、质量门禁、缺口账与执行入口全部由 [TESTING.md](TESTING.md) 与 `docs/testing/` 规定；本节只列架构硬约束。
 
-- 任意需要 IO 或存在可替换实现的机制必须通过端口注入；能力不直接依赖真实模型、网络、文件系统、时钟、随机数或外部进程。
+- 任意需要 IO 或存在可替换实现的机制必须通过端口注入；能力不直接依赖真实模型、网络、文件系统、时钟、随机数或外部进程（`src/kernel/ports.rs`）。
 - 纯逻辑不为测试强行增加 trait；端口只放在真实边界和确有替换价值的点上。
 - 端口的输入、输出、错误、取消、超时、重复调用与资源清理语义是**架构契约**：生产适配器与测试替身遵守同一份。
 - 端口不为了测试暴露生产实现的内部状态；要观察交互就用替身的记录能力或公开行为。
@@ -160,7 +158,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 
 - 路径一律用 `PathBuf` / `Path` 组件拼接：**禁止把 `/` 或 `\` 写进字符串再拼**。
 - **对外**（提示词、工具参数、回执、API）一律用 `/` 书写形式（Windows 反斜杠在 JSON 字符串里是非法转义）；由 `kernel::path::slash` 统一给出。
-- 编码：读严格 UTF-8、非法字节如实标注（**不猜编码**）；写一律 UTF-8；为工具子进程强制 UTF-8 环境。
+- 编码：读严格 UTF-8、非法字节如实标注（**不猜编码**）；写一律 UTF-8；为工具子进程强制 UTF-8 环境（`src/capabilities/tools/detail/sys_io.rs`）。
 - 不假设平台：不写死盘符；模块工具的命令由模块作者声明，系统 `shell` 按平台选 sh / PowerShell。
 - 围栏按平台给不同机制（`detail/confine/` 一个平台一个文件）；某平台没有接入的部分**就是没有**——文档与界面照实说。
 
@@ -174,7 +172,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 1. **有自己的用例**：一组有领域词、有**自有协议**、有**用户可见后果**的行为。**它说的概念属于某个参与方 → 就归那个参与方**；不属于任何参与方的概念（名单、任务链）才自成业务。
 2. **能指名 ≥2 个调用方**：不抽出来，这两个（或更多）能力就会各写一遍。**已被证实的重复是最强证据**；**只有一个调用方的编排不抽**，留在它自己的 `service.rs`。
 
-**状态不参与这条判据**——它只在 §九.2 回答「这块状态归谁」。
+- **状态不参与这条判据**——它只在 §九.2 回答「这块状态归谁」。
 
 ### 九.2 状态归属
 
@@ -182,7 +180,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 - 没有参与方拥有、且 ≥2 个参与方共同依赖 → 归**协调业务**（`conductor` 的会话在世表、命令队列与运行态）；
 - 只被一个参与方用、自己又没有不变式 → 它是**派生值**，留在 owner 的 `domain/`，现算。
 
-**协调业务可以持状态**；唯一的限制是：**它的状态只能它自己写，别人的状态只能经 `api` 拿**（R4）。
+- **协调业务可以持状态**；唯一的限制是：**它的状态只能它自己写，别人的状态只能经 `api` 拿**（R4）（`src/capabilities/conductor/service/mod.rs`）。
 
 ### 九.3 三分法（正交：只决定它持有什么、依赖谁）
 
@@ -198,7 +196,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 - **纯逻辑 / 派生**（解析器、状态派生、提示词渲染）→ 所属业务的 `domain/`，**不加 trait**；
 - **纯交付**（HTTP 路由、终端渲染）→ `presentation/{cli,web}/`，**不是能力**；
 - **只服务单一调用方的脚本 / 编排** → 它自己的 `service.rs`；
-- **DTO 中转站**（把两个能力的类型拼一起的适配业务）→ 新的水平层，禁止。
+- **DTO 中转站**（把两个能力的类型拼一起的适配业务）→ 新的水平层，禁止（`node run-tests.js` 的 T0 结构审查）。
 
 ### 九.5 粒度上限
 
@@ -227,32 +225,31 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 
 ### 九.7 依赖方向门禁与基线
 
-`node run-tests.js` 的 T0 结构审查按下列判据机器判定（规则在 `run-tests.js`，豁免清单在 `tests/dependency-baseline.json`）：
+- `node run-tests.js` 的 T0 结构审查按下列判据机器判定（规则在 `run-tests.js`，豁免清单在 `tests/dependency-baseline.json`）：
 
 - **apiOnly**：跨能力引用必须以 `::api` 结尾；任何非入口层引用别人的 `ports` 都算违规；
 - **apiPorts** / **domainPorts**：`api` 与 `domain` 都不引端口；
-- **foreignImpl**：不得给别的能力的类型写 `impl`；
+- **foreignImpl**：不得给别的能力的类型写 `impl`（`node run-tests.js`）；
 - **coreCycles**：能力节点图无环；
 - **reverse** / **presentation**：能力不反向依赖入口层或呈现层；
 - **channelCross**：呈现层的两个渠道（`cli` 与 `web`）互不依赖；
 - **unitMap** / **docRefs**：各单元的 `unit-map.md` 合起来与磁盘**双向一致**；文档链接与代码注释里的 `docs/**.md` 引用都存在；
 - **commentContract**：全仓 `.rs` 的文件头四槽（目的 / 管 / 不管 / 联动）、`pub` 项的条目槽（目的 / 参数 / 返回 / 错误 / 约束）与行内注释限量；存量（`文件 × 规则` → 计数）记在 `tests/comment-baseline.json`，门禁只减不增：新增与应销账都硬失败（见 §十）。
 
-**当前基线为空（零豁免）**：任一判据不成立即报错；豁免条目一旦不再成立，门禁报「基线豁免已过期」强制销账。
+- **当前基线为空（零豁免）**：任一判据不成立即报错；豁免条目一旦不再成立，门禁报「基线豁免已过期」强制销账。
 
 ## 十、注释契约
 
 > 代码注释只描述**当前**情况：这份文件是什么、管什么、不管什么、和谁联动。
 > **格式**由 T0 的 `commentContract` 判据机器判定（棘轮 + 销账，见十.4）；**内容**层面的卫生（悬挂引用这类）另由 `run-hygiene.js` 报，不进 T0。
 
-开发历史归 git，待办与路线归 `tests/gaps.yaml`，行为约束归用例——注释里复述它们只会多一份会漂的副本。
+- 开发历史归 git，待办与路线归 `tests/gaps.yaml`，行为约束归用例——注释里复述它们只会多一份会漂的副本。
 
-**槽名一律中文 + 全角冒号**：它们是仓库自己的词（`管` / `不管` 就是 `docs/<单元>/README.md` 的节词），
-译成英文等于给同一个概念造第二份词汇；全角冒号在代码注释里是唯一形态，不必兼容半角。
+- **槽名一律中文 + 全角冒号**：它们是仓库自己的词（`管` / `不管` 就是 `docs/<单元>/README.md` 的节词），译成英文等于给同一个概念造第二份词汇；全角冒号在代码注释里是唯一形态，不必兼容半角。
 
 ### 十.1 文件头（`//!`）
 
-每个 `.rs` 文件开头第一段 `//!` 就是文件头（它前面只允许 `#![…]` 内部属性与空行）。**四槽、固定顺序、槽名精确**（全角冒号）：
+- 每个 `.rs` 文件开头第一段 `//!` 就是文件头（它前面只允许 `#![…]` 内部属性与空行）。**四槽、固定顺序、槽名精确**（全角冒号）：
 
 ```rust
 //! 目的：这份文件是什么（名词性一句话，不写"为什么现在做"）。
@@ -266,7 +263,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 
 ### 十.2 条目（`///`，只强制 `pub` 项）
 
-`pub` 项（含 `pub(crate)`、含 `pub` 字段）的文档块：**首行必须是 `目的：…`**，之后每一行**必须是已知槽**或缩进续行——槽外不许有行，散文没有地方藏：
+- `pub` 项（含 `pub(crate)`、含 `pub` 字段）的文档块：**首行必须是 `目的：…`**，之后每一行**必须是已知槽**或缩进续行——槽外不许有行，散文没有地方藏（`tests/comment-baseline.json`）：
 
 ```rust
 /// 目的：它是什么（一句话）。
@@ -282,23 +279,41 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 
 ### 十.3 行内（`//`）
 
-行内注释只回答"就地为什么"，而且必须**紧贴**它解释的那一行：
+- 行内注释只回答"就地为什么"，而且必须**紧贴**它解释的那一行（`node run-hygiene.js`）：
 
 - 连续 `//` ≤ 2 行、单行 ≤ 150 字；中间不许空行，后面必须紧跟代码（成段说明属于文件头或 `///`）；
 - 契约、边界、机制位置这类信息只能进文件头或条目的 `///`；
 - 禁块注释 `/* */`（判定按词法：字符串、glob、散文里的 `/*` 不算）；
-- 历史措辞（曾经 / 原来 / 旧版 / 旧实现 / 改成 / 先是 / 后来 / 以前 / 与旧逻辑）与显式待办标记（TODO / FIXME / 待补）一律不许出现。<!-- hygiene-ignore -->
-  词表只收**叙事性**词：领域词（`临时 agent`、`后续片段`、`本地遗留`、`暂未暴露`）不算——它们描述的是当前状态。
-  全仓同类措辞由 `run-hygiene.js` 的语义卫生只报（见 `docs/testing/quality-isolation.md`），不进门禁。
+- 历史措辞（曾经 / 原来 / 旧版 / 旧实现 / 改成 / 先是 / 后来 / 以前 / 与旧逻辑）与显式待办标记（TODO / FIXME / 待补）一律不许出现（`node run-hygiene.js`）。<!-- hygiene-ignore -->
+- 词表只收**叙事性**词：领域词（`临时 agent`、`后续片段`、`本地遗留`、`暂未暴露`）不算——它们描述的是当前状态。
+- 全仓同类措辞由 `run-hygiene.js` 的语义卫生只报（见 `docs/testing/quality-isolation.md`），不进门禁。
 
 ### 十.4 强制方式（棘轮 + 销账）
 
-`commentContract` 对**全仓**都判，存量放在 `tests/comment-baseline.json` 里（键是 `文件 × 规则`，值是**计数**——
-不记行号，行号会漂）。棘轮**只减不增**，T0 结构审查报两种：
+- `commentContract` 对**全仓**都判，存量放在 `tests/comment-baseline.json` 里（键是 `文件 × 规则`，值是**计数**——不记行号，行号会漂）。棘轮**只减不增**，T0 结构审查报两种：
 
-- **新增**：某 `文件 × 规则` 的计数比快照多 → 硬失败。快照里没有的文件从 0 起算，所以**新文件零容忍**；
-  老文件同类变多同样算新增（不许把新违规藏进老文件的同类存量里）；
-- **应销账**：某计数比快照少（含整条消失）→ 同样硬失败（本仓基线的既有规矩：条目一旦不再成立必须销账，见 §九.7 的依赖基线）。
+- **新增**：某 `文件 × 规则` 的计数比快照多 → 硬失败。快照里没有的文件从 0 起算，所以**新文件零容忍**（`tests/comment-baseline.json`）；
+- 老文件同类变多同样算新增（不许把新违规藏进老文件的同类存量里）；
+- **应销账**：某计数比快照少（含整条消失）→ 同样硬失败（本仓基线的既有规矩：条目一旦不再成立必须销账，见 §九.7 的依赖基线）（`tests/comment-baseline.json`）。
 
-收紧快照：`node run-hygiene.js --tighten`——**卫生工具是唯一会写它的地方**，且**只能往下**：出现任何新增就拒绝写盘
-（先违规、再收紧等于把违规洗成存量）。门禁只读、不做任何写动作。收紧后连同本次改动一起提交，diff 里就是减少的那些计数。
+- 收紧快照：`node run-hygiene.js --tighten`——**卫生工具是唯一会写它的地方**，且**只能往下**：出现任何新增就拒绝写盘（`tests/comment-baseline.json`）（先违规、再收紧等于把违规洗成存量）。门禁只读、不做任何写动作。收紧后连同本次改动一起提交，diff 里就是减少的那些计数。
+
+## 检查
+- 分层与依赖方向 → T0 结构审查（`node run-tests.js`）的 apiOnly / apiPorts / domainPorts / foreignImpl / coreCycles / reverse / presentation 判据。
+- 注释契约 → `commentContract` 判据（存量快照 `tests/comment-baseline.json`，只减不增）。
+- 文档引用与单元地图 → `unitMap` / `docRefs` 判据。
+
+## 路由
+- 项目方向：[PHILOSOPHY.md](PHILOSOPHY.md)
+- 产品行为：[PRODUCT.md](PRODUCT.md)
+- 模块契约：[MODULE_SPEC.md](MODULE_SPEC.md)
+- 运行包契约：[RUNTIME_SPEC.md](RUNTIME_SPEC.md)
+- 登记处契约：[REGISTRY_SPEC.md](REGISTRY_SPEC.md)
+- 测试规范门户：[TESTING.md](TESTING.md)
+- 仓库协作规则：[AGENTS.md](AGENTS.md)
+- 会话与落盘布局：[docs/session/session-model.md](docs/session/session-model.md)
+- 提示词键表：[docs/prompt/prompts.md](docs/prompt/prompts.md)
+- 工具与角色：[docs/tools/tools-and-roles.md](docs/tools/tools-and-roles.md)
+- 任务链：[docs/collab/task-chain.md](docs/collab/task-chain.md)
+- 呈现层契约：[docs/presentation/contracts.md](docs/presentation/contracts.md)
+- 围栏落点：[docs/kernel/README.md](docs/kernel/README.md)

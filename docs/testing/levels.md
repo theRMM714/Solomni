@@ -1,17 +1,19 @@
 # 测试层级与判定（T0-T5）
 
-> 本文是**测试层级的唯一权威**：每一层验证什么、放在哪、允许与禁止什么、怎么判定。
-> 门户与路由见 [TESTING.md](../../TESTING.md)；替身语义见 [doubles.md](doubles.md)，端口矩阵见 [doubles.md](doubles.md) 三，
-> 质量与隔离见 [quality-isolation.md](quality-isolation.md)，入口与 CI 见 [execution-ci.md](execution-ci.md)，
-> 缺口账与验收见 [gaps-acceptance.md](gaps-acceptance.md)，模块作者要交付什么见 [module-delivery.md](module-delivery.md)。
+> 定位：测试层级的唯一权威：每一层验证什么、放在哪、允许与禁止什么、怎么判定。
+> 效力：规范｜核对：2026-11-04｜依据：`run-tests.js`
 
-## 三、测试分类（T0-T5）
+## 适用与判据
+- 判断一个测试属于哪层、放哪、允许与禁止什么时以本文为准（`docs/testing/levels.md`）。
+- 违反由 T0 结构审查与 `node run-tests.js` 判定。
+
+## 一、测试分类（T0-T5）
 
 ### T0：静态质量、结构和冗余检查
 
-T0 不验证业务运行结果，而验证代码和测试系统自身是否保持健康。
+- T0 不验证业务运行结果，而验证代码和测试系统自身是否保持健康。
 
-检查项：
+- 检查项：
 
 ```text
 cargo fmt --all -- --check
@@ -22,11 +24,10 @@ cargo audit
 cargo deny check
 ```
 
-`--keep-going` 不是可选项：`-D warnings` 会让**首个失败的单元中断调度**，而 lint 计数取决于哪些单元真的被编译过，
-于是同一个提交连跑两次可能得到不同计数。
-加上它，所有目标单元都编译完，测量才可复现——门禁读的是计数，不是退出码。
+- `--keep-going` 不是可选项：`-D warnings` 会让**首个失败的单元中断调度**，而 lint 计数取决于哪些单元真的被编译过，于是同一个提交连跑两次可能得到不同计数。
+- 加上它，所有目标单元都编译完，测量才可复现——门禁读的是计数，不是退出码。
 
-同时需要检查：
+- 同时需要检查：
 
 - `Cargo.toml` 是否登记所有应运行的集成测试目标；
 - 新增测试文件是否确实被入口执行；
@@ -34,92 +35,72 @@ cargo deny check
 - 报告 JSON 是否符合约定；
 - `gaps.yaml` 是否可解析、字段完整；
 - **依赖方向是否仍然成立**：层间不反向、`presentation` 只经入站能力面驱动、业务层内部不成环。
-  依赖方向门禁的豁免清单在 `tests/dependency-baseline.json`（当前为空 = 零豁免），**条目一旦不再成立即失败**——
-  规则与口径见 [../../ARCHITECTURE.md](../../ARCHITECTURE.md) §九.7；
+- 依赖方向门禁的豁免清单在 `tests/dependency-baseline.json`（当前为空 = 零豁免），**条目一旦不再成立即失败**——规则与口径见 [../../ARCHITECTURE.md](../../ARCHITECTURE.md) §九.7。
 - 测试是否写入项目外绝对路径或真实用户目录；
 - 测试结束后是否遗留子进程、端口、临时目录、权限或句柄；
 - 是否存在重复测试、重复 Fixture、重复测试替身或无理由的跨层重复断言；
-- **"某份文档列出另一处清单"的段落是否还与盘上一致**：提示词键表 ↔ `prompts/**`（每份 yaml 的顶层键双向比对）、
-  `systools/**` 是否被门户或细则提到、根目录 `*.md` 是否都进了 `AGENTS.md` 的路由表；
+- **"某份文档列出另一处清单"的段落是否还与盘上一致**：提示词键表 ↔ `prompts/**`（每份 yaml 的顶层键双向比对）、`systools/**` 是否被门户或细则提到、根目录 `*.md` 是否都进了 `AGENTS.md` 的路由表。
 - **外部连接台账（`links.yaml`）是否与消费点一一对应**：值必须是 `https://`、域在白名单内、键不重复；
-  代码里 `link(...)` 引用的键都在台账里，台账里也没有没人用的键（新增外链要连同消费点一起进）；
-  **校验值与它守护的那条链接成对**：键写 `<链接键>.sha256`、值必须是 64 位十六进制、对应的链接键必须存在
-  （pin 与 URL 分居两处会腐烂：升级链接时漏改另一处，下载会反复判“不符 → 删文件 → 重跑”）；哈希由
-  `node pins.js update` 生成，结构审查只做离线的格式与配对检查，联网比对在 `pins-check` workflow；
-- **依赖清单（`dependencies.yaml`）的校验值格式**：写了 `sha256:` 就必须是 64 位十六进制；不写 = 没 pin
-  （上游 `latest` 这种会滚动的源只能这样，如实不校验，不假装验过）；
-- **门禁自己是否可信**：解析器自测（`run-tests.js` 的 `gateParserSelfTest`）必须过——`cargo tree --duplicates`
-  退出码恒为 0，解析器坏掉就是静默全绿；
-- **是否存在 `#[ignore]` 或未授权的跳过**：`#[ignore]` 一律禁止，报告里 `ignored > 0` 即失败。
+- 代码里 `link(...)` 引用的键都在台账里，台账里也没有没人用的键（新增外链要连同消费点一起进）；
+- **校验值与它守护的那条链接成对**：键写 `<链接键>.sha256`、值必须是 64 位十六进制、对应的链接键必须存在（`links.yaml`）（pin 与 URL 分居两处会腐烂：升级链接时漏改另一处，下载会反复判“不符 → 删文件 → 重跑”）；哈希由 `node pins.js update` 生成，结构审查只做离线的格式与配对检查，联网比对在 `pins-check` workflow。
+- **依赖清单（`dependencies.yaml`）的校验值格式**：写了 `sha256:` 就必须是 64 位十六进制；不写 = 没 pin（上游 `latest` 这种会滚动的源只能这样，如实不校验，不假装验过）（`dependencies.yaml`）。
+- **门禁自己是否可信**：解析器自测（`run-tests.js` 的 `gateParserSelfTest`）必须过——`cargo tree --duplicates` 退出码恒为 0，解析器坏掉就是静默全绿。
+- **是否存在 `#[ignore]` 或未授权的跳过**：`#[ignore]` 一律禁止，报告里 `ignored > 0` 即失败（`run-tests.js`）。
 
-`cargo tree --duplicates` 只检查依赖树中的重复版本，`cargo deny` 的 `bans` 与它同口径但更全面
-（许可证、禁用、来源）；它们都不等于源码重复检查。`clippy` 也不能替代业务测试。这些检查的职责必须分开记录。
+- `cargo tree --duplicates` 只检查依赖树中的重复版本，`cargo deny` 的 `bans` 与它同口径但更全面（许可证、禁用、来源）；它们都不等于源码重复检查。`clippy` 也不能替代业务测试。这些检查的职责必须分开记录（`run-tests.js`）。
 
-当前状态：九项全部并入 `node run-tests.js`。七项零容忍硬失败（编译、结构审查、格式、clippy、编译告警、依赖重复、项目外写），没有容差基线；
-注释契约另按只减不增的存量快照比对（结构审查里的一条；比对工具本身不进 T0，见 [quality-isolation.md](quality-isolation.md) 的「门禁之外」）；
-交叉类型检查在 target 未装或本机缺该平台交叉 C 工具链时 `env-skip`，供应链一项在工具缺失或取不到 advisory 数据时 `env-skip`：
+- 当前状态：九项全部并入 `node run-tests.js`。七项零容忍硬失败（编译、结构审查、格式、clippy、编译告警、依赖重复、项目外写），没有容差基线；注释契约另按只减不增的存量快照比对（结构审查里的一条；比对工具本身不进 T0，见 [quality-isolation.md](quality-isolation.md) 的「门禁之外」）；交叉类型检查在 target 未装或本机缺该平台交叉 C 工具链时 `env-skip`，供应链一项在工具缺失或取不到 advisory 数据时 `env-skip`：
 
 - `cargo check --all-targets`；
-- 结构审查（测试目标登记、孤儿测试文件、缺口账格式、单元地图双向一致、文档链接与代码注释里的文档引用、提示词键表与真相源表比对、根文档路由、外部连接台账、
-  **注释契约棘轮**（按 文件×规则 只减不增）、**平台专属字面量与标记**（`FenceSpec` 必带 `ro`；macOS 探针不得出现 Linux 标记）、
-  **批处理脚本只允许 ASCII**（cmd 按代码页解释字节，非 ASCII 会吞掉下一行）、**门禁解析器自测**与 **`#[ignore]` 禁令**）；
+- 结构审查（测试目标登记、孤儿测试文件、缺口账格式、单元地图双向一致、文档链接与代码注释里的文档引用、提示词键表与真相源表比对、根文档路由、外部连接台账、**注释契约棘轮**（按 文件×规则 只减不增）、**平台专属字面量与标记**（`FenceSpec` 必带 `ro`；macOS 探针不得出现 Linux 标记）（`run-tests.js`）、**批处理脚本只允许 ASCII**（cmd 按代码页解释字节，非 ASCII 会吞掉下一行）、**门禁解析器自测**与 **`#[ignore]` 禁令**）（`run-tests.js`）。
 - `cargo fmt --all -- --check`；
 - `cargo clippy --all-targets --all-features --keep-going -- -D warnings`；
 - `cargo check` 的 rustc 告警数；
 - 交叉类型检查（**开发机专属**）：对已装 target 跑 `cargo check --target <三元组> --all-targets`——平台专属 `#[cfg]`（含测试代码）本机不编译，靠它兜住类型错误；
-  target 清单与开发环境同源（`node setup-dev.js` 按 [dev-tools.js](../../dev-tools.js) 装）；
-  target 未装或本机缺该平台交叉 C 工具链 / SDK = `env-skip`；**CI 上直接跳过这一步**（三平台矩阵各自原生 `--all-targets` 已覆盖本平台，记 `skip-platform`）；
+- target 清单与开发环境同源（`node setup-dev.js` 按 [dev-tools.js](../../dev-tools.js) 装）；
+- target 未装或本机缺该平台交叉 C 工具链 / SDK = `env-skip`；**CI 上直接跳过这一步**（三平台矩阵各自原生 `--all-targets` 已覆盖本平台，记 `skip-platform`）；
 - `cargo tree --duplicates`；
 - 项目外写（env / 工具链）——判据见 [quality-isolation.md](quality-isolation.md) 的「隔离、清理与副作用」；
 - 供应链：`cargo audit` + `cargo deny check`（配置在 `deny.toml`）——工具获取见 [quality-isolation.md](quality-isolation.md)。
 
-任何一项不过即硬失败：结构审查、格式、clippy、编译告警、依赖重复记 `quality-fail`；编译、交叉类型检查、供应链、项目外写记 `fail`。
-工具缺失（没装 rustfmt / clippy / cargo-audit / cargo-deny）或**取不到 advisory 数据**记 `env-skip` 并写明怎么装——环境跳过不算通过。设计取舍类 lint 要**带理由窄 allow**，清单见
-[quality-isolation.md](quality-isolation.md)。每步都有墙钟上限（超时 = 硬失败，证据进报告 `timeouts`），
-每步用时超预算只标 `[slow]`、不改变成败。
+- 任何一项不过即硬失败：结构审查、格式、clippy、编译告警、依赖重复记 `quality-fail`；编译、交叉类型检查、供应链、项目外写记 `fail`。
+- 工具缺失（没装 rustfmt / clippy / cargo-audit / cargo-deny）或**取不到 advisory 数据**记 `env-skip` 并写明怎么装——环境跳过不算通过。设计取舍类 lint 要**带理由窄 allow**，清单见 [quality-isolation.md](quality-isolation.md)。每步都有墙钟上限（超时 = 硬失败，证据进报告 `timeouts`），每步用时超预算只标 `[slow]`、不改变成败。
 
 ### T1：单元测试
 
-位置：实现模块内部的 `#[cfg(test)] mod tests`，以及 `src/tests/` 下**按业务分文件**的全内存装配用例
-（一个能力一个文件，见 [gaps-acceptance.md](gaps-acceptance.md) 的目录与命名）。同一目录里还有真实适配器契约
-（`detail.rs` / `mcp.rs`）与入口 / 围栏契约用例（`diagnostics.rs` / `fence_reach.rs`）：前者按 T2 判定，后者按真实进程边界判定。
+- 位置：实现模块内部的 `#[cfg(test)] mod tests`，以及 `src/tests/` 下**按业务分文件**的全内存装配用例（一个能力一个文件，见 [gaps-acceptance.md](gaps-acceptance.md) 的目录与命名）。同一目录里还有真实适配器契约（`detail.rs` / `mcp.rs`）与入口 / 围栏契约用例（`diagnostics.rs` / `fence_reach.rs`）：前者按 T2 判定，后者按真实进程边界判定。
 
-验证：
+- 验证：
 
 - 纯函数和状态转换；
 - 信封解析、协作状态派生、提示词渲染、路径寻址；
-- 工具调用形态：两个通道各自只走一套协议——原生通道声明工具（含 `patch` 的 `body` 参数）、
-  一次回复多个调用各成一条工具行、结果按序回填、**正文里的信封不执行**但如实记失败行；
-  形态改动在**下一次生成前**重新解析并就地刷新（没改则什么都不做）；
+- 工具调用形态：两个通道各自只走一套协议——原生通道声明工具（含 `patch` 的 `body` 参数）、一次回复多个调用各成一条工具行、结果按序回填、**正文里的信封不执行**但如实记失败行。
+- 形态改动在**下一次生成前**重新解析并就地刷新（没改则什么都不做）；
 - 两个通道的**批量调用**：原生由供应商给数组、手写信封写在同一个信封的 `calls` 数组里（两种信封形态互斥，混用 = 一条失败工具行且一个都不执行）；
-- 回放一致性（**实时与重建逐条相同**）：一次回复里的多个原生调用在上下文里是「一条带 `tool_calls` 的助手消息 +
-  每条调用一条 `role:"tool"` 的结果」；重启/回档重建出来的消息与实时推的逐条一致（key 相等，含 `tool_calls` 与 `tool_call_id`）；
-  回档按回复**原子**（截在一次回复中间时整条回复一起丢，不留孤儿工具结果）；留档折叠 `[before, from)` 且新行从全量最大 id 续号、删除真的重写文件、恢复删掉该标记及其后（见 [docs/session/session-model.md](../session/session-model.md) 的五）；
-  回档成功后事件台推 `rewound` 并推进重置水印；`history.open` 的 live 不取水印前批次（刷新/多端不会把旧消息拼回）；
-  连续删除回档不 panic，`line_reply` / `marks` / 工具行锚一起回退；
-- 工具并发**按声明**调度（`parallel`：系统工具在册子、模块工具在 `module.yaml`）：连续的可并发调用真的并发
-  （记录型替身断言"同时在跑"的峰值），未声明的一律串行、写入类是批次之间的屏障；
-  工具行与结果**一律按原始调用顺序**回填，观察账本按原序合并（并发批次与串行结果相同）；
-- 系统工具的行为与边界：读取区间与分页、精确替换（唯一命中 / 只差空白）、**自由格式补丁的解析与原子应用**
-  （缺 `*** End File`、SEARCH 找不到 / 多处命中、CRLF 保持、任何一块失败即整体不写盘）；
+- 回放一致性（**实时与重建逐条相同**）：一次回复里的多个原生调用在上下文里是「一条带 `tool_calls` 的助手消息 + 每条调用一条 `role:"tool"` 的结果」；重启/回档重建出来的消息与实时推的逐条一致（key 相等，含 `tool_calls` 与 `tool_call_id`）。
+- 回档按回复**原子**（截在一次回复中间时整条回复一起丢，不留孤儿工具结果）；留档折叠 `[before, from)` 且新行从全量最大 id 续号、删除真的重写文件、恢复删掉该标记及其后（见 [docs/session/session-model.md](../session/session-model.md) 的「回档：三种模式 + 工作级标记」）；
+- 回档成功后事件台推 `rewound` 并推进重置水印；`history.open` 的 live 不取水印前批次（刷新/多端不会把旧消息拼回）；
+- 连续删除回档不 panic，`line_reply` / `marks` / 工具行锚一起回退；
+- 工具并发**按声明**调度（`parallel`：系统工具在册子、模块工具在 `module.yaml`）：连续的可并发调用真的并发（记录型替身断言"同时在跑"的峰值），未声明的一律串行、写入类是批次之间的屏障（`src/tests/builders.rs`）。
+- 工具行与结果**一律按原始调用顺序**回填，观察账本按原序合并（并发批次与串行结果相同）（`src/capabilities/session/domain/session.rs`）；
+- 系统工具的行为与边界：读取区间与分页、精确替换（唯一命中 / 只差空白）、**自由格式补丁的解析与原子应用**（缺 `*** End File`、SEARCH 找不到 / 多处命中、CRLF 保持、任何一块失败即整体不写盘）。
 - 单个实现的边界与错误行为；
 - 使用内存测试替身装配的协调业务行为。
 
-硬规矩：
+- 硬规矩：
 
 - 默认不碰真实网络、真实用户文件、特权权限或常驻服务；真实进程只出现在 T2 的适配器契约与入口 / 围栏契约用例里；
-- IO、网络、进程、时间、随机数等可替换点必须注入替身；
-- 每个重要失败分支必须有明确断言；
+- IO、网络、进程、时间、随机数等可替换点必须注入替身（`src/tests/doubles.rs`）；
+- 每个重要失败分支必须有明确断言（`src/tests/ports.rs`）；
 - 不用"返回非空""没有 panic"代替对行为的断言；
 - 需要观察交互时，断言记录型 Spy/Fake 的可观察记录，不暴露生产实现内部状态。
 
 ### T2：端口与适配器契约测试
 
-T2 验证同一个端口的不同实现是否遵守同一份契约；端口 × 替身 × 真实适配器的现状见 [doubles.md](doubles.md) 的「端口测试矩阵」。
-位置：`src/tests/` 的 `ports.rs`（替身语义）、`fakes.rs`（`FakeChat` / `DemoGateway` 契约）、`detail.rs`（真实文件系统与环回 HTTP 适配器）
-与 `mcp.rs`（MCP stdio 真实子进程）。`diagnostics.rs` / `fence_reach.rs` 不是端口契约：它们是入口与围栏的真实进程用例，只是同样跑在 L1 目标里。
+- T2 验证同一个端口的不同实现是否遵守同一份契约；端口 × 替身 × 真实适配器的现状见 [doubles.md](doubles.md) 的「端口测试矩阵」。
+- 位置：`src/tests/` 的 `ports.rs`（替身语义）、`fakes.rs`（`FakeChat` / `DemoGateway` 契约）、`detail.rs`（真实文件系统与环回 HTTP 适配器）与 `mcp.rs`（MCP stdio 真实子进程）。`diagnostics.rs` / `fence_reach.rs` 不是端口契约：它们是入口与围栏的真实进程用例，只是同样跑在 L1 目标里。
 
-每个端口至少需要明确：
+- 每个端口至少需要明确：
 
 1. 输入和输出；
 2. 成功行为；
@@ -131,11 +112,10 @@ T2 验证同一个端口的不同实现是否遵守同一份契约；端口 × �
 8. Fake/Stub/Spy 的注入方式；
 9. 真实适配器的验证方式。
 
-适配层里的**诊断探针**（`http_probe`：工具调用支持探测、回放形状探测）按同一份契约测：
-在环回假供应商上逐项验"供应商收了没有 / 模型真的读到了没有"，并断言**发出去的形状就是线上会发的形状**
-（请求体的组装只有一处，探针与真实会话共用）；通道不通时如实报"测不了"，不把失败归因到形状上。
+- 适配层里的**诊断探针**（`http_probe`：工具调用支持探测、回放形状探测）按同一份契约测：
+- 在环回假供应商上逐项验"供应商收了没有 / 模型真的读到了没有"，并断言**发出去的形状就是线上会发的形状**（请求体的组装只有一处，探针与真实会话共用）；通道不通时如实报"测不了"，不把失败归因到形状上。
 
-T2 不替代：
+- T2 不替代：
 
 - 协调业务的纯逻辑单元测试；
 - 真实文件系统、真实进程或真实权限的跨平台集成测试；
@@ -143,9 +123,9 @@ T2 不替代：
 
 ### T3：跨平台集成测试
 
-位置：`tests/cross-platform/`。
+- 位置：`tests/cross-platform/`。
 
-验证所有目标平台都应成立的真实边界：
+- 验证所有目标平台都应成立的真实边界：
 
 - 真实进程协议；
 - 隔离文件系统与共享区；
@@ -156,86 +136,76 @@ T2 不替代：
 - 日志、报告和路径编码；
 - 前端冒烟（由 `src/presentation/web/assets/smoke.cjs` 自动发现同目录 `*.smoke.cjs`）。
 
-禁止依赖：外网、真实隐秘字段、用户目录、已有常驻服务、平台特权或本机偶然配置。
+- 禁止依赖：外网、真实隐秘字段、用户目录、已有常驻服务、平台特权或本机偶然配置（`tests/cross-platform/`）。
 
 ### T4：平台探针
 
-位置：`tests/windows/`、`tests/linux/`、`tests/macos/`。
+- 位置：`tests/windows/`、`tests/linux/`、`tests/macos/`。
 
-只验证平台机制本身，例如：
+- 只验证平台机制本身，例如：
 
 - 文件系统围栏；
 - 断网；
 - 进程树和杀树；
 - ACL、容器 profile、Landlock、seatbelt；
 - 平台解释器或系统能力；
-- **HTTPS/TLS**：走产品自己的出站链路打一次公网端点（`--https-check`），验这条构建的 TLS 后端
-  （Windows = native-tls、unix = rustls）真能连外网；连不上外网 = env-skip（附命令行原话），
-  **本进程取不到系统 TLS 凭证**（稳定错误码 `0x8009030E` / `-2146893042`，例如沙箱挡住工作区外的
-  用户凭证存储）= env-skip 并附原话；其余 TLS/HTTP 坏了 = 失败——绝不把"我们链路坏了"说成"环境不允许"。
-  判据只认错误码、不认文案（错误消息是本地化的），且 TLS 家族的两个变体（`Tls` 与 Windows 的 `NativeTls`）
-  走同一份判据；其余一切照旧算失败。
+- **HTTPS/TLS**：走产品自己的出站链路打一次公网端点（`--https-check`），验这条构建的 TLS 后端（Windows = native-tls、unix = rustls）真能连外网；连不上外网 = env-skip（附命令行原话），**本进程取不到系统 TLS 凭证**（稳定错误码 `0x8009030E` / `-2146893042`，例如沙箱挡住工作区外的用户凭证存储）= env-skip 并附原话；其余 TLS/HTTP 坏了 = 失败——绝不把"我们链路坏了"说成"环境不允许"。
+- 判据只认错误码、不认文案（错误消息是本地化的），且 TLS 家族的两个变体（`Tls` 与 Windows 的 `NativeTls`）走同一份判据；其余一切照旧算失败。
 
-探针**必须在与运行期同一个入参下**驱动守门进程：围栏 JSON 走 `job_json`（`prepared` 说明外层有没有做完
-本机授权：验容器机制传 `true`，验协议与降级路径传 `false`），环境问产品自己要（`--print-fence-env <job> -- <命令>`：
-白名单随命令而变——`node <文件>` 的命令会多带解释器基线，探针必须按同一条命令问）。
-探针的环境与运行期不一致就会漏掉只有真实环境才暴露的问题。
+- 探针**必须在与运行期同一个入参下**驱动守门进程：围栏 JSON 走 `job_json`（`prepared` 说明外层有没有做完（`src/kernel/detail/confine/`）本机授权：验容器机制传 `true`，验协议与降级路径传 `false`），环境问产品自己要（`--print-fence-env <job> -- <命令>`：
+- 白名单随命令而变——`node <文件>` 的命令会多带解释器基线，探针必须按同一条命令问）（`src/kernel/detail/confine/`）。
+- 探针的环境与运行期不一致就会漏掉只有真实环境才暴露的问题。
 
-**环境不允许那一路要确定性地覆盖，不靠真机偶然**：`EnvUnavailable`（内核不支持 / 私有 ABI 失效 /
-环境拒绝建容器）在正常 runner 上碰不到，只靠真机偶然就是没验收。所以 `--fence-verify` 认一个
-**测试专用注入开关** `SOLOMNI_FENCE_SELFCHECK_FAIL`（`confine::SELFCHECK_FAIL_FLAG`）：打开它 =
-自检按"本机不允许"处理。三平台各有一条探针用它断言两件事——结论是 `env-unavailable`（不是 `broken`），
-且守门进程**照常执行命令**（如实降级，不是拒绝执行）。开关只在探针里给守门进程带，运行期永不设置它；
-它不改本机状态（不写 ACL、不建 profile），因此不归 `--fence-live` 管。
+- **环境不允许那一路要确定性地覆盖，不靠真机偶然**：`EnvUnavailable`（内核不支持 / 私有 ABI 失效 / 环境拒绝建容器）在正常 runner 上碰不到，只靠真机偶然就是没验收。所以 `--fence-verify` 认一个**测试专用注入开关** `SOLOMNI_FENCE_SELFCHECK_FAIL`（`confine::SELFCHECK_FAIL_FLAG`）：打开它 =自检按"本机不允许"处理。三平台各有一条探针用它断言两件事——结论是 `env-unavailable`（不是 `broken`），且守门进程**照常执行命令**（如实降级，不是拒绝执行）。开关只在探针里给守门进程带，运行期永不设置它。
+- 它不改本机状态（不写 ACL、不建 profile），因此不归 `--fence-live` 管。
 
-**注入验证必须在子进程里做**（守门进程 / `--fence-verify`）：unix 上 Landlock / seccomp 与 seatbelt 是**进程级且不可逆**的，
-在测试进程内调真实后端会把围栏装到测试进程自身，连 `target/` 都写不了，后续用例会整片挂在
-「建契约测试隔离根：Operation not permitted」。所以单元层只钉注入开关的语义，真实后端的行为由平台探针验收。
+- **注入验证必须在子进程里做**（守门进程 / `--fence-verify`）：unix 上 Landlock / seccomp 与 seatbelt 是**进程级且不可逆**的（`tests/windows/`），在测试进程内调真实后端会把围栏装到测试进程自身，连 `target/` 都写不了，后续用例会整片挂在「建契约测试隔离根：Operation not permitted」。所以单元层只钉注入开关的语义，真实后端的行为由平台探针验收。
 
-**真机用例统一 opt-in**：会写本机围栏状态的探针用 `--fence-live`；虚拟机档真机用例（L1 与 L4）用
-`SOLOMNI_VM_LIVE=1`，约定与用例清单见 [execution-ci.md](execution-ci.md) 的「真机入口」与「虚拟机档真机用例」。
+- **真机用例统一 opt-in**：会写本机围栏状态的探针用 `--fence-live`；虚拟机档真机用例（L1 与 L4）用 `SOLOMNI_VM_LIVE=1`，约定与用例清单见 [execution-ci.md](execution-ci.md) 的「真机入口」与「虚拟机档真机用例」。
 
-每条探针必须区分：
+- 每条探针必须区分（`tests/windows/`）：
 
 - 代码失败：`fail`（报告里没有 `test-fail` 这个状态）；
-- 环境不允许：`env-skip`，必须有事实原因；
+- 环境不允许：`env-skip`，必须有事实原因（`tests/windows/`）；
 - 尚未实现：`gap`；
 - 机制不存在：记录能力事实，不伪装成通过。
 
-探针不得用"本机无法运行"吞掉实现错误。探针具体缺口继续记录在 `tests/<平台>/gaps.yaml`。
+- 探针不得用"本机无法运行"吞掉实现错误。探针具体缺口继续记录在 `tests/<平台>/gaps.yaml`。
 
 ### T5：端到端测试
 
-位置：`tests/cross-platform/e2e/`。
+- 位置：`tests/cross-platform/e2e/`。
 
-使用本地假供应商、隔离根和可重复夹具，验证完整用户旅程：
+- 使用本地假供应商、隔离根和可重复夹具，验证完整用户旅程：
 
 - 单 agent 会话；
-- 多 agent 协作与回报，**协作状态机的承诺逐条钉住**：agree 收敛（有人同意、有人没同意时不收敛）、
-  leave 不可逆（退场后不再被询问，且不算收敛门槛）、轮次上限（交用户裁决）、返工闭环（验收 fail → 定向返工 → 重验 → 交付）、
-  撤回同意（撤回行进转录、讨论重开）、ask 中止（不授权自裁时轮转中止并呈给用户，回答后并入上下文）；
-- **三种语言的模块在真进程里真的能用**：真模块（harvest=python / render=node / indexer=C++）按需复制进夹具，
-  CI 里**现场编译 indexer**（编译器版本进日志；构建失败是**硬失败**，不 env-skip），
-  再真跑 harvest.scan → render.report → indexer.build → indexer.query，断言报告按语料逐条列出目录、检索有命中；
-- **MCP 常驻服务**：夹具声明一个 `mcp-toolbox` 服务，先 `control_resident` enable + start，再建只装这一个模块的
-  单 agent 会话——服务操作进模型工具面、经真进程被调用，回执与本地算出的摘要对账（真机演示见 `demo/run-demo-mcp.mjs`）；
-- **父死子亡**：核心被强杀后，常驻服务的进程跟着消失（服务启动时把自己的 pid 记进模块 `userdata/`，
-  SIGKILL 核心后按 pid 断言它已没了）——放在最后一步，核心一死就没有后续场景；
+- 多 agent 协作与回报，**协作状态机的承诺逐条钉住**：agree 收敛（有人同意、有人没同意时不收敛）、leave 不可逆（退场后不再被询问，且不算收敛门槛）、轮次上限（交用户裁决）、返工闭环（验收 fail → 定向返工 → 重验 → 交付）、撤回同意（撤回行进转录、讨论重开）、ask 中止（不授权自裁时轮转中止并呈给用户，回答后并入上下文）。
+- **三种语言的模块在真进程里真的能用**：真模块（harvest=python / render=node / indexer=C++）按需复制进夹具，CI 里**现场编译 indexer**（编译器版本进日志；构建失败是**硬失败**，不 env-skip），再真跑 harvest.scan → render.report → indexer.build → indexer.query，断言报告按语料逐条列出目录、检索有命中。
+- **MCP 常驻服务**：夹具声明一个 `mcp-toolbox` 服务，先 `control_resident` enable + start，再建只装这一个模块的单 agent 会话——服务操作进模型工具面、经真进程被调用，回执与本地算出的摘要对账（真机演示见 `demo/run-demo-mcp.mjs`）。
+- **父死子亡**：核心被强杀后，常驻服务的进程跟着消失（服务启动时把自己的 pid 记进模块 `userdata/`，SIGKILL 核心后按 pid 断言它已没了）——放在最后一步，核心一死就没有后续场景。
 - 代拟、回档和会话编辑；
-- **原生工具调用**：先在真二进制上探测（结论写回登记处），再跑一次"一次回复两个调用"，
-  并让假供应商核对**发回去的历史就是协议形状**（一条助手消息带 `tool_calls` + 每条结果一条 `role:"tool"`）；
-  夹具的 `.home/` 每次清空，免得上次跑出来的形态漏进这次；
+- **原生工具调用**：先在真二进制上探测（结论写回登记处），再跑一次"一次回复两个调用"，并让假供应商核对**发回去的历史就是协议形状**（一条助手消息带 `tool_calls` + 每条结果一条 `role:"tool"`）。
+- 夹具的 `.home/` 每次清空，免得上次跑出来的形态漏进这次；
 - 文件读写、搜索和共享区隔离；
 - 工具正常、失败、超时、拒绝和异常退出；
 - 模型通道失败、回落和非法响应；
 - 历史恢复、损坏和重复启动；
 - 删除会话后的权限回收和资源清理。
 
-T5 验证的是跨模块行为，不把所有内部函数重复断言一遍。
+- T5 验证的是跨模块行为，不把所有内部函数重复断言一遍。
 
-**为什么协作状态机在 T5 而不是只在 T1**：T1 钉的是单个状态机函数的输入输出，T5 钉的是"真二进制 + 真 HTTP + 真进程"
-这一整条链路上它仍然成立（会话落盘、回档派生、裁决门、工具进程都在里面）。两处都要有，不是重复。
+- **为什么协作状态机在 T5 而不是只在 T1**：T1 钉的是单个状态机函数的输入输出，T5 钉的是"真二进制 + 真 HTTP + 真进程"这一整条链路上它仍然成立（会话落盘、回档派生、裁决门、工具进程都在里面）。两处都要有，不是重复。
 
-**为什么真工具链路要跑真进程**：假供应商能验协议形状，但验不了"三种语言在真进程里跑得起来"——
-编译器、解释器、stdin 编码、cwd、围栏可达范围，这些只有真进程才暴露。
+- **为什么真工具链路要跑真进程**：假供应商能验协议形状，但验不了"三种语言在真进程里跑得起来"——编译器、解释器、stdin 编码、cwd、围栏可达范围，这些只有真进程才暴露。
 
+## 检查
+- T0 → `node run-tests.js` 的质量 job。
+- T1-T5 → 四个测试目标与 `tests/cross-platform/e2e/`。
+
+## 路由
+- 测试门户：[../../TESTING.md](../../TESTING.md)
+- 替身语义：[doubles.md](doubles.md)
+- 质量与隔离：[quality-isolation.md](quality-isolation.md)
+- 入口与 CI：[execution-ci.md](execution-ci.md)
+- 缺口账与验收：[gaps-acceptance.md](gaps-acceptance.md)
+- 模块交付：[module-delivery.md](module-delivery.md)

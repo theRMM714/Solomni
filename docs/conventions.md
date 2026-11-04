@@ -1,7 +1,11 @@
 # 文档与术语约定
 
-> 本文是文档分层、同步、术语与引用格式的唯一细则；入口 [`AGENTS.md`](../AGENTS.md) §四。
-> 文档索引见 [docs/README.md](README.md)。
+> 定位：文档分层、同步、术语与引用格式的唯一细则。
+> 效力：规范｜核对：2026-11-04｜依据：`AGENTS.md`
+
+## 适用与判据
+- 写或改文档、定术语、写引用时以本文为准（`docs/conventions.md`）。
+- 违反由 `node run-tests.js --docs` 的文档审查与结构审查判定。
 
 ## 一、两层文档
 
@@ -13,7 +17,7 @@
 
 ## 二、改文档必须同步
 
-下列任一处改动，都要在同一次提交里把相关方一起改掉，不得留下过期引用或两处说法：
+- 下列任一处改动，都要在同一次提交里把相关方一起改掉，不得留下过期引用或两处说法（`AGENTS.md`）：
 
 | 改了什么 | 必须同时检查 |
 | --- | --- |
@@ -24,12 +28,12 @@
 | `tests/gaps.yaml` 的条目 | [`TESTING.md`](../TESTING.md) 门户与 [`gaps-acceptance.md`](testing/gaps-acceptance.md) 的现状描述 |
 
 - 引用一律用**相对仓库根的路径**（`docs/testing/levels.md`），不写机器路径、不写绝对路径。
-- 文档里的当前状态必须与代码一致；未实现的内容写进缺口账，不写成当前能力。
+- 文档里的当前状态必须与代码一致；未实现的内容写进缺口账，不写成当前能力（`tests/gaps.yaml`）。
 - 门户与细则都只保留当前状态，不写变更历史。
 
 ## 三、术语
 
-同一个概念全仓只用一个词；下表是唯一口径（左列是要用的词）：
+- 同一个概念全仓只用一个词；下表是唯一口径（左列是要用的词）：
 
 | 概念 | 用 | 不用 |
 | --- | --- | --- |
@@ -55,3 +59,25 @@
 - 引用一律用**文件 + 标题**（例如 `docs/session/session-model.md` 的「会话参数与对话分开」），不写深层节号（`§三之二` 这类会随节序失效）。
 - 顶层节号（`ARCHITECTURE.md` 的 §一 / §九）是稳定锚点，允许。
 - 链接按所在文件解析：根门户写 `docs/<...>`，`docs/` 内部写同级或 `../` 相对路径。
+
+## 五、文档模板与效力行
+
+- 每份受治理文档必须符合 `docs/templates/<类型>.md` 的骨架；类型映射与例外在 `docs/templates/index.json`（门户 / 规范 / 参考 / 单元 / 表）。例外仅限 `AGENTS.md`、`README.md`、`README_EN.md`、PR 模板、两处机器契约（`docs/presentation/contracts.md`、`docs/prompt/prompts.md`）与模板目录自身。
+- 头部固定两行：`> 定位：…` 与 `> 效力：<索引|规范|契约>｜核对：YYYY-MM-DD｜依据：…`；规范 / 契约必须带核对与依据（校验在 `tests/docs-gov.mjs`）。`核对` 是人工确认日，不是文件 mtime。
+- 骨架之外只允许「重复块」：同一个块模板重复 N 次（规则组 / 字段组 / 专题 / 表行），N 由对象数量决定；不得新增模板外的固定章节（唯一来源：`docs/templates/`）。
+- 块内只允许列表项、表格、代码块、引用行；每块最多 1 行纯段落引导语且 ≤150 字。强约束句（必须 / 不得 / 禁止 / 只允许 / 只能 / 一律 / 零容忍）必须带锚点；没有锚点的判断只能写成「原则 / 建议」（`AGENTS.md` 九）。
+- 模板即契约：改 `docs/templates/**` 必须同一次提交改完受影响文档，否则检查失败。
+
+## 检查
+- 文档分层与路由 → T0 结构审查的 docRefs / unitMap（`node run-tests.js`）。
+- 文档模板、效力行与锚点 → `docs-gov`（`node run-tests.js --docs` 调用，硬失败）。
+- 季度审计候选 → `node tests/docs-audit.mjs`（只报不拦：过期 / 状态缺证据 / 重复事实 / 失效锚点 / 孤儿 / 例外）。
+- 生成段（平台验收状态）→ `node tests/docs-sync.mjs`（`--check` 由 `--docs` 调用，与代码常量 / 缺口账字节比对）。
+- 术语与引用 → `node run-tests.js --docs` 的文档审查。
+
+## 路由
+- 全仓常驻规则：[../AGENTS.md](../AGENTS.md)
+- 文档索引：[README.md](README.md)
+- 任务与开发流程：[workflow/README.md](workflow/README.md)
+- 文档审计 / 治理流程：[workflow/docs-audit.md](workflow/docs-audit.md)
+- 测试细则索引：[testing/README.md](testing/README.md)

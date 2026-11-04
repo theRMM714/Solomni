@@ -41,10 +41,12 @@ Solomni is an **agent runtime environment (AgentOS) that runs on your own machin
 - **Shell**: a one-shot `shell` for build / test / scripts (executor, solo and the core proxy for verification). Default `scope=sandbox` touches only the private sandbox plus read-only base / project toolchains; `scope=external` also reads the shared area, module dirs and authorized host roots and may use the network, with the session profile deciding ask / allow. The shared area stays read-only and module secrets are never injected.
 - **Three isolation layers**: path checks inside the built-in file tools (shell's boundary is the fence) → every tool process and shell runs behind the gate process (environment allowlist / process tree / timeout or cancel kills the whole tree)
   → platform fences (Windows AppContainer, Linux Landlock, macOS seatbelt); if a mechanism cannot be installed, the capability grade is reported honestly.
-- **Two execution tiers**: host tier (default) and vm tier (module tools run inside a guest). The vm tier is pluggable along host × engine × guest × channel × share;
-  Linux (QEMU/KVM + virtiofs, falling back to 9p when virtiofsd is absent) and Windows (QEMU/WHPX + SMB guestfwd) are verified on real machines; without smbd the Windows vm tier is unavailable (provision it; no copy fallback). copy is a development/emergency-only channel and never a user backend;
-  macOS is unverified (`VERIFIED_HOSTS` only admits Linux / Windows; QEMU packaging and the Apple vz engine are missing — see [tests/macos/gaps.yaml](tests/macos/gaps.yaml)). When the vm tier is unavailable on Linux / Windows, the web UI and the CLI install the same manifest into the project's `.vm/`.
-  Details in [docs/vm/README.md](docs/vm/README.md); runtime package contract in [RUNTIME_SPEC.md](RUNTIME_SPEC.md).
+- **Two execution tiers**: host tier (default) and vm tier (module tools run inside a guest). The vm tier is pluggable along host × engine × guest × channel × share.
+- Combination details and prerequisites: [docs/vm/README.md](docs/vm/README.md). Without `smbd` the Windows vm tier is unavailable (provision it; no copy fallback); copy is a development/emergency-only channel and never a user backend. When the vm tier is unavailable on Linux / Windows, the web UI and the CLI install the same manifest into the project's `.vm/`; runtime package contract in [RUNTIME_SPEC.md](RUNTIME_SPEC.md).
+
+<!-- BEGIN:platform-status-en -->
+> Verified on real hardware: Linux, Windows; not verified: macOS (gaps in `tests/macos/gaps.yaml`).
+<!-- END:platform-status-en -->
 - **Registry**: four YAML files for providers / models / agents / settings, all under `.home/`, managed from the UI; channel keys live only in the local registry and in the core's outbound calls
   (boundaries in [REGISTRY_SPEC.md](REGISTRY_SPEC.md)).
 - **Two interfaces**: the terminal transcript center (default) and the local web UI (`-webUI`, binds `127.0.0.1` only, port 3081 by default). The web session page has a status bar for context usage and shared-area commits.

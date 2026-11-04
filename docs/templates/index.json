@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "templates": {
+    "portal": {
+      "file": "portal.md",
+      "globs": [
+        "SYSTOOL.md",
+        "docs/README.md",
+        "docs/testing/README.md"
+      ]
+    },
+    "spec": {
+      "file": "spec.md",
+      "globs": [
+        "ARCHITECTURE.md",
+        "PRODUCT.md",
+        "PHILOSOPHY.md",
+        "TESTING.md",
+        "docs/conventions.md",
+        "docs/workflow/README.md",
+        "docs/testing/levels.md",
+        "docs/testing/quality-isolation.md",
+        "docs/testing/doubles.md",
+        "docs/testing/gaps-acceptance.md",
+        "docs/testing/module-delivery.md",
+        "docs/testing/execution-ci.md",
+        "docs/collab/task-chain.md",
+        "docs/session/session-model.md",
+        "docs/tools/tools-and-roles.md",
+        "docs/workflow/docs-audit.md"
+      ]
+    },
+    "reference": {
+      "file": "reference.md",
+      "globs": [
+        "MODULE_SPEC.md",
+        "RUNTIME_SPEC.md",
+        "REGISTRY_SPEC.md"
+      ]
+    },
+    "unit": {
+      "file": "unit.md",
+      "globs": [
+        "docs/*/README.md",
+        "docs/presentation/*/README.md"
+      ]
+    },
+    "map": {
+      "file": "map.md",
+      "globs": [
+        "docs/*/unit-map.md",
+        "docs/presentation/*/unit-map.md"
+      ]
+    }
+  },
+  "exceptions": [
+    {
+      "path": "AGENTS.md",
+      "reason": "agent 指令文件，允许散文"
+    },
+    {
+      "path": "README.md",
+      "reason": "对外介绍，允许散文"
+    },
+    {
+      "path": "README_EN.md",
+      "reason": "对外介绍（英文），允许散文"
+    },
+    {
+      "path": ".github/pull_request_template.md",
+      "reason": "PR 模板自身"
+    },
+    {
+      "path": "docs/presentation/contracts.md",
+      "reason": "机器契约：由 src/tests/routes.rs 消费并比对"
+    },
+    {
+      "path": "docs/prompt/prompts.md",
+      "reason": "机器契约：键表由结构审查与 prompts/** 双向比对"
+    },
+    {
+      "path": "docs/templates/**",
+      "reason": "模板自身"
+    }
+  ],
+  "enforce": [
+    "portal",
+    "spec",
+    "reference",
+    "unit",
+    "map"
+  ]
+}
