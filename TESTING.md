@@ -1,90 +1,77 @@
 # 测试架构（TESTING）
 
-> 本文是测试领域的**门户与路由**：测试的目的是什么、现在处于什么状态、要做事时该读哪一份细则。
-> 层级定义、替身语义、端口矩阵、质量门禁、入口与 CI、缺口账与验收各自只有一份权威，都在 `docs/testing/` 下——
-> **门户不复述细则正文**（见 [AGENTS.md](AGENTS.md)「文档分层与同步」）。
->
-> 架构约束见 [ARCHITECTURE.md](ARCHITECTURE.md)，模块交付要求见 [MODULE_SPEC.md](MODULE_SPEC.md)，仓库协作约束见 [AGENTS.md](AGENTS.md)。
+> 定位：测试领域的门户与路由：目的、当前状态、要做事时读哪一份细则。
+> 效力：规范｜核对：2026-11-04｜依据：`run-tests.js`
+
+## 适用与判据
+- 任意测试、测试替身、质量门禁、缺口账或测试报告以本文为入口（`TESTING.md`）。
+- 门户不复述细则正文；违反由 `node run-tests.js` / `--docs` 的文档审查与结构审查判定。
 
 ## 一、测试的目的与硬原则
 
-测试要回答的是"当前实现是否满足可观察的行为契约"，不是"测试数量是否很多"或"代码覆盖率是否好看"。
+- 测试要回答的是"当前实现是否满足可观察的行为契约"，不是"测试数量是否很多"或"代码覆盖率是否好看"。
 
-- 测试记录事实：通过、失败、环境跳过、缺口必须分开。
-- 环境不允许执行不等于通过；必须记录 `env-skip` 与原因。
-- 尚未实现测试不等于通过；必须进入缺口账。
-- 失败必须有可定位证据：断言、输入、观察结果和必要的日志尾部。
-- 测试必须可重复、可隔离、可清理，不依赖执行顺序。
+- 测试记录事实：通过、失败、环境跳过、缺口必须分开（`run-tests.js`）。
+- 环境不允许执行不等于通过；必须记录 `env-skip` 与原因（`run-tests.js`）。
+- 尚未实现测试不等于通过；必须进入缺口账（`tests/gaps.yaml`）。
+- 失败必须有可定位证据：断言、输入、观察结果和必要的日志尾部（`target/test-report.json`）。
+- 测试必须可重复、可隔离、可清理，不依赖执行顺序（`run-tests.js`）。
 - 默认测试不得修改真实用户数据、真实 `.home/`、真实 `session/`、真实权限或外部服务。
 - 真实网络、真实密钥、开发者个人配置不能成为默认测试依赖。
-- 跨平台测试必须优先使用路径组件、隔离根和平台能力探针，不把某个平台的行为猜测成所有平台的行为。
-- 测试替身也属于代码：Fake、Mock、Stub、Spy 和 Fixture 必须有自己的最小验证。
+- 跨平台测试必须优先使用路径组件、隔离根和平台能力探针，不把某个平台的行为猜测成所有平台的行为（`tests/helpers/probe.rs`）。
+- 测试替身也属于代码：Fake、Mock、Stub、Spy 和 Fixture 必须有自己的最小验证（`src/tests/ports.rs`）。
 - 质量门禁和业务测试是两类不同事实；质量门禁失败不能被业务测试通过抵消。
-- 不为了测试制造无意义的 trait、包装层、公共状态或重复测试；可测性必须服从架构边界。
+- 不为了测试制造无意义的 trait、包装层、公共状态或重复测试；可测性必须服从架构边界（`ARCHITECTURE.md`）。
 - **门禁自身也是被测对象**：解析器与清单比对要能自证——一个会静默全绿的门禁比缺工具更危险。
 
 ## 二、当前状态
 
-当前仓库已经具备：
+- 当前仓库已经具备：
 
 - `src/tests/` 的单元与契约测试：**与 `capabilities/` 同构的一个能力一个文件**，用例多的按域分成子模块；`doubles.rs` 放端口替身，`builders.rs` 放测试装配脚手架；
 - `tests/cross-platform/` 跨平台集成与端到端测试；
 - `tests/windows/`、`tests/linux/`、`tests/macos/` 平台探针（`tests/helpers/probe.rs` 提供共用探针设施）；
-- `tests/dev-loop.mjs` 开发回路自检（`dev.js` 的固定子命令表与拒绝出口）；`tests/pins-tool.mjs` 依赖哈希工具自检
-  （`pins.js` 的台账解析 / 来源推导 / 原地重写，只读、不碰网络）；`tests/ci-changes.mjs` 变更分流自检
-  （分类样例、`include_str!/include_bytes!` 文档消费、取不到 diff 时落回全量）；`tests/env-bootstrap.mjs` 环境引导自检
-  （`env.js` 的下载 / 续传 / 结构判定 / sha256 闸与显式接受开关，真实子进程 + 本地应答源；仅 Windows 真跑）；
-  `src/presentation/web/assets/*.smoke.cjs` 前端冒烟测试；
+- `tests/dev-loop.mjs` 开发回路自检（`dev.js` 的固定子命令表与拒绝出口）；`tests/pins-tool.mjs` 依赖哈希工具自检（`pins.js` 的台账解析 / 来源推导 / 原地重写，只读、不碰网络）；`tests/ci-changes.mjs` 变更分流自检（分类样例、`include_str!/include_bytes!` 文档消费、取不到 diff 时落回全量）；`tests/env-bootstrap.mjs` 环境引导自检（`env.js` 的下载 / 续传 / 结构判定 / sha256 闸与显式接受开关，真实子进程 + 本地应答源；仅 Windows 真跑）。
+- `src/presentation/web/assets/*.smoke.cjs` 前端冒烟测试；
 - `tests/gaps.yaml`（全局）与 `tests/<平台>/gaps.yaml`（平台）缺口账；
 - `tests/cross-platform/e2e/` 的 L4 覆盖 MCP 常驻服务调用与**父死子亡**：核心被强杀后，常驻服务进程跟着消失；macOS 的守门进程另有 `tests/macos/` 探针；
 - **谁做任务谁补测试**：做完就补上这次改动的用例并跑门禁，通过后同步文档（见 [AGENTS.md](AGENTS.md) 九）；
-- `node run-tests.js` 测试汇总入口（`node start.js -test` 是备好环境后的同一入口）；纯叙述型文档改动用
-  `node run-tests.js --docs`（文档审查 + 结构审查，含文档与真相源比对；不跑 cargo / 单元 / 平台目标 / L4；CI 用 `--audit=docs` / `--audit=structure` 拆成独立 job）；
-  `docs/presentation/contracts.md` 是机器契约文档（ROUTES 表由 Rust 测试消费），仍走全量。CI 的文档/结构分流见
-  [docs/testing/execution-ci.md](docs/testing/execution-ci.md)；开发环境先跑 `node setup-dev.js`
-  （条目清单 [dev-tools.js](dev-tools.js)，`--check` 只读校验；运行环境另见 [setup-runtime.js](setup-runtime.js)）；
+- `node run-tests.js` 测试汇总入口（`node start.js -test` 是备好环境后的同一入口）；纯叙述型文档改动用 `node run-tests.js --docs`（文档审查 + 结构审查，含文档与真相源比对；不跑 cargo / 单元 / 平台目标 / L4；CI 用 `--audit=docs` / `--audit=structure` 拆成独立 job）。
+- `docs/presentation/contracts.md` 是机器契约文档（ROUTES 表由 Rust 测试消费），仍走全量。CI 的文档/结构分流见[docs/testing/execution-ci.md](docs/testing/execution-ci.md)；开发环境先跑 `node setup-dev.js`（条目清单 [dev-tools.js](dev-tools.js)，`--check` 只读校验；运行环境另见 [setup-runtime.js](setup-runtime.js)）。
 - `src/capabilities/llm/detail/fake_chat.rs` 中的 `FakeChat` 与 `DemoGateway`；
 - `src/tests/doubles.rs` 与 `src/tests/builders.rs` 的端口替身与测试装配（支持失败注入，供 T2 复用）；
 - `src/tests/` 中的契约测试（T2）：
- - `ports.rs`（端口替身的同一组语义：成功 / 失败传播 / 空边界 / 交互记录 / 重复调用；`Log` 在 `kernel/ports.rs`，见 [docs/kernel/unit-map.md](docs/kernel/unit-map.md)）、
- `fakes.rs`（FakeChat / DemoGateway 的独立契约）；
+ - `ports.rs`（端口替身的同一组语义：成功 / 失败传播 / 空边界 / 交互记录 / 重复调用；`Log` 在 `src/kernel/ports.rs`，见 [docs/kernel/unit-map.md](docs/kernel/unit-map.md)）；
+- `fakes.rs`（FakeChat / DemoGateway 的独立契约）；
  - `detail.rs`（真实文件系统实现的边界 + 本机环回 HTTP 适配器）；
  - `api.rs`（入站契约：命令与事件、生成期间停止立刻生效、错误如实传播、单条命令 panic 不带垮核心）；
  - `routes.rs`（HTTP 路由目录 ↔ 处理器 ↔ 文档 ↔ 前端调用 ↔ 演示脚本机器比对；假能力面逐条验成功 / 错误 / 空 / 边界）；
-- **入站契约也是契约**：呈现层只依赖各能力的能力接口（见 [docs/presentation/contracts.md](docs/presentation/contracts.md)）与事件台（拿不到 `Core`、拿不到任何核心锁），
- 所以它能被假实现整体替换——`routes.rs` 的 `FakeOps` 就是这么逐条测路由的。
-- T0 质量门禁已并入同一入口：编译、结构审查、格式、clippy、编译告警、**交叉类型检查（已装 target）**、依赖重复、**项目外写（env / 工具链）**零容忍硬失败；
-  供应链（`cargo audit` / `cargo deny`）同为硬失败，但工具缺失或取不到 advisory 数据时记 `env-skip`。
-  结构审查里还含**门禁解析器自测**、**`#[ignore]` 禁令**（报告里 `ignored > 0` 也算失败）与**批处理脚本只允许 ASCII**；
-  项目外写与供应链工具的获取 / 判定见 [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md)。
-- 默认**并行**跑用例（`--serial` 只在排查并发/隔离问题时用）；每步都有墙钟上限，超时即硬失败并把证据记进报告
-  `timeouts`；每步用时进报告，超预算标 `[slow]`（只报不拦）。
-- `node run-tests.js --coverage` 是**手动覆盖率发现模式**：只用来找盲区，不做通过判据、不设阈值
-  （判据与局限见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md)）。
-- 突变测试是**独立的手动 CI 工作流** `.github/workflows/mutants.yml`（入口 `tests/ci-mutation.mjs`、
-  范围 `tests/mutation-scope.json`）：只有 `core`（小而精）与 `capability`（单能力抽查）两个范围，刻意不做 `all`；
-  结果只作调查，**不参与 `TEST-REPORT-ACCEPTED`**，发它自己独占的 `ci-mutation` 滚动分支（各推各的，不碰 `ci-report`），
-  完整现场走 Actions 产物。
+- **入站契约也是契约**：呈现层只依赖各能力的能力接口（见 [docs/presentation/contracts.md](docs/presentation/contracts.md)）与事件台（拿不到 `Core`、拿不到任何核心锁），所以它能被假实现整体替换——`routes.rs` 的 `FakeOps` 就是这么逐条测路由的。
+- T0 质量门禁已并入同一入口：编译、结构审查、格式、clippy、编译告警、**交叉类型检查（已装 target）**、依赖重复、**项目外写（env / 工具链）**零容忍硬失败（`run-tests.js`）；
+- 供应链（`cargo audit` / `cargo deny`）同为硬失败，但工具缺失或取不到 advisory 数据时记 `env-skip`。
+- 结构审查里还含**门禁解析器自测**、**`#[ignore]` 禁令**（报告里 `ignored > 0` 也算失败）与**批处理脚本只允许 ASCII**（`run-tests.js`）；
+- 项目外写与供应链工具的获取 / 判定见 [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md)。
+- 默认**并行**跑用例（`--serial` 只在排查并发/隔离问题时用）；每步都有墙钟上限，超时即硬失败并把证据记进报告 `timeouts`；每步用时进报告，超预算标 `[slow]`（只报不拦）。
+- `node run-tests.js --coverage` 是**手动覆盖率发现模式**：只用来找盲区，不做通过判据、不设阈值（判据与局限见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md)）。
+- 突变测试是**独立的手动 CI 工作流** `.github/workflows/mutants.yml`（入口 `tests/ci-mutation.mjs`、范围 `tests/mutation-scope.json`）：只有 `core`（小而精）与 `capability`（单能力抽查）两个范围，刻意不做 `all`。
+- 结果只作调查，**不参与 `TEST-REPORT-ACCEPTED`**，发它自己独占的 `ci-mutation` 滚动分支（各推各的，不碰 `ci-report`），完整现场走 Actions 产物。
 - 门禁之外另有一个**仓库卫生审查**脚本 `run-hygiene.js`（注释契约存量棘轮 + 内容卫生 + 语义卫生；报告只报不拦、收紧只能往下，也不进 `TEST-REPORT-*`）：
-  判据与用法见 [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md) 的「门禁之外」。
+- 判据与用法见 [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md) 的「门禁之外」。
 
-**缺口账在哪**：全局 `tests/gaps.yaml`，平台 `tests/<平台>/gaps.yaml`，跨平台 `tests/cross-platform/gaps.yaml`。
-平台与跨平台账决定 `TEST-REPORT-ACCEPTED`；全局账不影响。条目、数量与当前状态一律以账本为准，门户不复述；
-格式与验收见 [docs/testing/gaps-acceptance.md](docs/testing/gaps-acceptance.md)。
-判「环境不允许」的判据只有一条：**看被测试进程自己的令牌与行为**，不拿二手字符串特征当判据。
-- Windows 容器里 `whoami /groups` 不含包 SID 组是**正常**的（包 SID 在令牌的 `TokenAppContainerSid` 字段，
-  不在组列表里），按它判「环境降级」是假阴性；容器是否生效由**行为对照**给结论——授权落点写得进、
-  从父目录按名走得到叶子、父目录里的其它条目看不到。
-- 工作区被写沙箱挡住时，原因不是「受限令牌会话」，而是 DSH 的 Windows 写沙箱后端授写权时给授权根打上的
-  Low 完整性标签；判据、后果与处置见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md) 的「真机入口」一节。
+- **缺口账在哪**：全局 `tests/gaps.yaml`，平台 `tests/<平台>/gaps.yaml`，跨平台 `tests/cross-platform/gaps.yaml`。
+- 平台与跨平台账决定 `TEST-REPORT-ACCEPTED`；全局账不影响。条目、数量与当前状态一律以账本为准，门户不复述（`tests/gaps.yaml`）；
+- 格式与验收见 [docs/testing/gaps-acceptance.md](docs/testing/gaps-acceptance.md)。
+- 判「环境不允许」的判据只有一条：**看被测试进程自己的令牌与行为**，不拿二手字符串特征当判据。
+- Windows 容器里 `whoami /groups` 不含包 SID 组是**正常**的（包 SID 在令牌的 `TokenAppContainerSid` 字段，不在组列表里），按它判「环境降级」是假阴性；容器是否生效由**行为对照**给结论——授权落点写得进、从父目录按名走得到叶子、父目录里的其它条目看不到。
+- 工作区被写沙箱挡住时，原因不是「受限令牌会话」，而是 DSH 的 Windows 写沙箱后端授写权时给授权根打上的Low 完整性标签；判据、后果与处置见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md) 的「真机入口」一节。
 - Windows 的「模块目录只读 + `userdata/` 可写 + 另一席不可达」由容器往返探针在真机上验收。
 
-缺口是否完成只看账本：条目存在 = 尚未完成，补齐后删除；门户不复述条目内容，也不保留完成历史。
-全局账**不**影响 `TEST-REPORT-ACCEPTED`：那个标记只看平台与跨平台层的缺口账。
+- 缺口是否完成只看账本：条目存在 = 尚未完成，补齐后删除；门户不复述条目内容，也不保留完成历史。
+- 全局账**不**影响 `TEST-REPORT-ACCEPTED`：那个标记只看平台与跨平台层的缺口账。
 
 ## 三、要做事时读哪一份
 
-专项要求具有强制性；一次工作涉及多个领域时，必读文档累加。
+- 专项要求具有强制性；一次工作涉及多个领域时，必读文档累加。
 
 | 要做的事 | 读这一份 |
 | --- | --- |
@@ -100,9 +87,23 @@
 ## 四、判据速查（细则为准）
 
 - **缺口的唯一真相**是 `tests/gaps.yaml`（全局）与 `tests/<平台>/gaps.yaml`（平台）；门户与细则都不复述条目内容。
-- **成功标记**（`FRONTEND-SMOKE-OK` / `DEV-LOOP-OK` / `ENV-BOOTSTRAP-OK` / `E2E-OK` / `TEST-REPORT-OK` / `TEST-REPORT-FAIL` / `TEST-REPORT-ACCEPTED`）
-  的固定含义见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md)。
-  `TEST-REPORT-OK` 在 `--docs` / `--audit` 模式下只代表对应审查（文档审查 / 结构审查）通过，不代表代码 / 三平台 / L4 已验收；CI 报告统一写 `ci-report` 的 `runs/structure` / `runs/docs` / `runs/<os>`。
+- **成功标记**（`FRONTEND-SMOKE-OK` / `DEV-LOOP-OK` / `ENV-BOOTSTRAP-OK` / `E2E-OK` / `TEST-REPORT-OK` / `TEST-REPORT-FAIL` / `TEST-REPORT-ACCEPTED`）的固定含义见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md)。
+- `TEST-REPORT-OK` 在 `--docs` / `--audit` 模式下只代表对应审查（文档审查 / 结构审查）通过，不代表代码 / 三平台 / L4 已验收；CI 报告统一写 `ci-report` 的 `runs/structure` / `runs/docs` / `runs/<os>`。
 - **质量失败不能被业务测试通过抵消**：两边的结论分别记，判据见 [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md)。
-- **需要 CI 的场景**（平台专属代码、真机围栏、HTTPS/TLS、其它平台的质量分区）本地跑不出结论，
- 必须等 CI 并按 [docs/testing/execution-ci.md](docs/testing/execution-ci.md) 的读法核对 `sha`。
+- **需要 CI 的场景**（平台专属代码、真机围栏、HTTPS/TLS、其它平台的质量分区）本地跑不出结论，必须等 CI 并按 [docs/testing/execution-ci.md](docs/testing/execution-ci.md) 的读法核对 `sha`。
+
+## 检查
+- 测试目的与硬原则 → T0 结构审查与 `node run-tests.js`。
+- 缺口账 → `tests/gaps.yaml`（全局）与 `tests/<平台>/gaps.yaml`（平台）。
+- 文档结构 → `node run-tests.js --docs` 的文档审查。
+
+## 路由
+- 测试层级与判定：[docs/testing/levels.md](docs/testing/levels.md)
+- 测试替身：[docs/testing/doubles.md](docs/testing/doubles.md)
+- 隔离、清理与质量门禁：[docs/testing/quality-isolation.md](docs/testing/quality-isolation.md)
+- 执行入口、报告与 CI：[docs/testing/execution-ci.md](docs/testing/execution-ci.md)
+- 缺口账与验收：[docs/testing/gaps-acceptance.md](docs/testing/gaps-acceptance.md)
+- 模块测试交付：[docs/testing/module-delivery.md](docs/testing/module-delivery.md)
+- 测试细则索引：[docs/testing/README.md](docs/testing/README.md)
+- 架构约束：[ARCHITECTURE.md](ARCHITECTURE.md)
+- 仓库协作约束：[AGENTS.md](AGENTS.md)
