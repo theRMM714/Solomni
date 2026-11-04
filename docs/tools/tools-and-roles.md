@@ -147,8 +147,7 @@ roles:
 - **工具与载荷形状**在 `systools/tools.yaml`（`plan` / `node_verdict` / `checklist` / `slate` / `submit_report` …）。
 - **核心代理的工具面**（`core_proxy`，逐项见「角色与工具面」表）同样只从工具参数取载荷；外部动作经 `ports::ProxyHost`（生产宿主是 `src/capabilities/conductor/service/proxy.rs` 的队列桥，见「边界」）。子会话**不把整份转录推给核心**：门与意外停止由机制送达，正文经 `read_session_messages` 倒查。
 - **载荷不合法 → 如实失败并中止这一步**（不猜、不回落正文 JSON）。
-- **核心可以先核实**：模型先请求 `read` / `search` 时，核心执行并把结果回灌，然后再要那一次核心操作调用；
-- 它用的是**只读**小环境（根 = 本次工作的共享区，只发声明里 `capability: fs-read` 的工具）。没有这条回路，模型一想核实就会被判"没有调用 X"而整步中断。
+- **核心可以先核实**：模型先请求 `read` / `search` 时，核心执行并把结果回灌，然后再要那一次核心操作调用；它用的是**只读**小环境（根 = 本次工作的共享区，只发声明里 `capability: fs-read` 的工具）。没有这条回路，模型一想核实就会被判"没有调用 X"而整步中断。
 
 ## 七、路径模型：工具用本环境的写法
 

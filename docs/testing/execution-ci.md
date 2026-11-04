@@ -241,8 +241,7 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 - **不要改成 workflow 级 `paths-ignore`**：workflow 不启动时 required context 根本不会上报，会永远停在 pending。
 
 - `gate`（检查名 `验收闸门`）在非 Draft 的 run 里始终运行，只读四个 job 的 `needs.*.result`，按 `changes` 的分类结果判「跳过是否合法」：
-- `code_changed=false` 时 `quality` / `e2e` 可以 skipped，`docs_changed=false` 时 `docs` 可以 skipped，`structure` 必须 success（`.github/workflows/test.yml`）；
-- 其余任何 skipped / failure / cancelled 都判失败。`changes` 自身不参与判定（它只是路由；失败时下游已按全量兜底），所以分类器故障不会单独阻塞合并，但真跑挂了的 job 一定会被闸门拦下。`gate` 不写 `ci-report`，结论只在 PR 检查项里。
+- `code_changed=false` 时 `quality` / `e2e` 可以 skipped，`docs_changed=false` 时 `docs` 可以 skipped，`structure` 必须 success（`.github/workflows/test.yml`）；其余任何 skipped / failure / cancelled 都判失败。`changes` 自身不参与判定（它只是路由；失败时下游已按全量兜底），所以分类器故障不会单独阻塞合并，但真跑挂了的 job 一定会被闸门拦下。`gate` 不写 `ci-report`，结论只在 PR 检查项里。
 
 - `changes` 先跑分类器自测；全量入口的「变更分流自检」步骤也会跑同一个 `--self-test`。分类器**从 base 取副本**（`git show base:tests/ci-changes.mjs`）再执行——PR 改自己的分类脚本不能把自己判成全文档；base 还没有该文件时两路都跑。取不到 diff、空 diff 或未知路径时同样落回全量。
 - 新分类器写 `code_changed` / `docs_changed`；分类字段缺失（例如 base 的分类器还没有该键）时，下游条件按 `!= 'false'` 兜底为全量跑，不会出现启动期全跳过。
@@ -344,8 +343,7 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 - 报告发布失败（例如 token 权限不对）只是 `::warning::`，**不影响**测试本身的成败——所以"没读到报告"不等于"测试没过"。
 
 - **本地与 CI 的关系**：本地入口是快速反馈；CI 在 Ready 的 PR 上自动跑（Draft 期按需手动派发），给出**跨平台与真机**的最终判据。
-- 本次改动若结论依赖本机之外，则本地 + CI 两边都跑通、且 CI 的 `sha` 对得上才算验收完成；
-- 否则本地入口通过即验收完成（PR 的 CI 结果照读，`env-skip` 不算通过；判据见 [gaps-acceptance.md](gaps-acceptance.md)）。
+- 本次改动若结论依赖本机之外，则本地 + CI 两边都跑通、且 CI 的 `sha` 对得上才算验收完成；否则本地入口通过即验收完成（PR 的 CI 结果照读，`env-skip` 不算通过；判据见 [gaps-acceptance.md](gaps-acceptance.md)）。
 
 ### 当前报告状态
 
@@ -360,8 +358,7 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 
 - 本地 `target/` 下的 `test-report.json` 的字段：`mode`（`full` / `docs` / `structure`；`--docs` 是文档审查 + 结构审查，`--audit=docs` / `--audit=structure` 只跑其中一路）、`platform` / `arch` / `osKey` / `profile` / `fenceLive` / `doctor`（本次运行的环境事实）、`steps`（逐步骤状态、用时 `ms` 与超预算标记 `slow`——"哪一步慢"要看它，不看感觉）、`envSkips`（探针级跳过）、`timeouts`（被墙钟超时终止的命令）、`quality`（`failed` / `steps`）、`gaps`（平台缺口账）、`globalGaps`（`tests/gaps.yaml` 的长期目标）、`failed`（状态为 `fail` 的步骤数；`quality-fail` 另由 `quality.failed` 计）。
 - CI 合并后的平台报告由 `tests/ci-merge.mjs` 生成：`mode` 固定为 `full`，保留上述环境字段与 `steps` / `envSkips` / `quality` / `globalGaps` / `gaps` / `failed`，不保留 `timeouts` 与 `steps[].slow`。
-- `mode: "docs"` / `mode: "structure"` 的报告不走 `ci-merge.mjs`（没有 e2e 半份），由 `tests/ci-publish.mjs` 直接发布到 `ci-report` 的 `runs/docs/` / `runs/structure/`；
-- 它们的 `gaps` / `globalGaps` 为空，`steps` 只有 `T0 文档审查` / `T0 结构审查`（本地 `--docs` 是 `T0 文档门禁`），不代表平台缺口验收。
+- `mode: "docs"` / `mode: "structure"` 的报告不走 `ci-merge.mjs`（没有 e2e 半份），由 `tests/ci-publish.mjs` 直接发布到 `ci-report` 的 `runs/docs/` / `runs/structure/`；它们的 `gaps` / `globalGaps` 为空，`steps` 只有 `T0 文档审查` / `T0 结构审查`（本地 `--docs` 是 `T0 文档门禁`），不代表平台缺口验收。
 - `runs/<key>/meta.json` 的 key 是 `structure` / `docs` / `windows` / `linux` / `macos`，也带 `mode`（`full` / `docs` / `structure` / `none`），读报告时先比 `sha`，再认 `mode`。
 - 报告没有 `test-fail` / `blocked` 这两个状态：失败只有 `fail`，缺口只有 `gap`。
 

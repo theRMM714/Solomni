@@ -130,8 +130,7 @@ session/<工作名>/
 
 - **讨论不由泵自己调模型，而是"泵只决定、核心驱动"**——与任务链的节点派发**同一套路**。
 
-- 理由是会话归属：生成期间协作会话被**移出核心表**（own-and-return），它碰不到表里的 agent 会话；
-- 而 agent 会话必须留在表里，用户才能随时进去发言。所以**驱动权归核心**（它同时看得到两边）（`src/capabilities/conductor/service/flow.rs`）。
+- 理由是会话归属：生成期间协作会话被**移出核心表**（own-and-return），它碰不到表里的 agent 会话；而 agent 会话必须留在表里，用户才能随时进去发言。所以**驱动权归核心**（它同时看得到两边）（`src/capabilities/conductor/service/flow.rs`）。
 
 ### 看不见的回合：运行态与逐片外送
 
