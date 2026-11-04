@@ -82,5 +82,11 @@
       "reason": "模板自身"
     }
   ],
-  "enforce": []
+  "enforce": [
+    "portal",
+    "spec",
+    "reference",
+    "unit",
+    "map"
+  ]
 }

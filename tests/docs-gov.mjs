@@ -143,6 +143,10 @@ function hasAnchor(line) {
 function validateBlock(rel, type, tpl, sec, problems) {
   const at = rel + "：" + sec.no + " 行「" + stripNum(sec.heading) + "」";
   const body = sec.body;
+  for (const it of body) {
+    const tt = it.line.trim();
+    if (/^[-*]\s+/.test(tt) && /[，、]$/.test(tt)) problems.push(at + "：" + it.no + " 行列表项以逗号/顿号结尾（原段落被拆分，请合并成一条）");
+  }
   let inFence = false, fenceCount = 0, bullets = 0, paras = [];
   const tables = [];
   let curTable = null;
