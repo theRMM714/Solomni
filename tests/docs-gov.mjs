@@ -277,6 +277,8 @@ function checkClaims(rel, content, problems) {
       if (/^(node|cargo|gh|git|solomni|npm|npx|rustup)\b/.test(token.trim())) continue;
       const clean = token.replace(/:\d+(-\d+)?$/, "").replace(/#.*$/, "");
       if (!/\.(rs|js|mjs|cjs|md|ya?ml|toml|json)$/.test(clean)) continue;
+      // 运行期目录不随仓库分发（.gitignore）：只校验仓库内文件。
+      if (/^(\.home|\.tools|\.vm|target|session|runtimes|logs)\//.test(clean)) continue;
       if (!fs.existsSync(path.join(ROOT, clean))) problems.push(rel + "：" + (i + 1) + " 行锚点不存在：" + clean);
     }
   }
@@ -443,6 +445,7 @@ function selfTest() {
     { name: "reference 实现细节", rel: "RUNTIME_SPEC.md", body: reference.map((l) => l === "- " + BT + "docs/README.md" + BT ? "- " + BT + "src/main.rs" + BT : l), expect: ["实现细节"] },
     { name: "map 表头错误", rel: "docs/demo/unit-map.md", body: map.map((l) => l === "| 文件 | 职责 |" ? "| 路径 | 职责 |" : l), expect: ["表头"] },
     { name: "spec 缺规则组", rel: "ARCHITECTURE.md", body: spec.filter((l) => !/^## 一、基础$/.test(l) && !/必须保持/.test(l)), expect: ["规则组"] },
+    { name: "运行期路径不校验", rel: "docs/demo/README.md", body: unit.map((l) => l === "- " + BT + "src/main.rs" + BT + " → 同步" ? "- " + BT + ".home/settings.yaml" + BT + " → 同步" : l), expect: [] },
     { name: "未登记文档", rel: "foo/bar.md", body: unit, expect: ["未登记"] },
     { name: "引导语超长", rel: "docs/demo/README.md", body: unit.map((l) => l === "- " + BT + "api::Demo" + BT + " 是入站面" ? "长".repeat(151) : l), expect: ["150"] }
   ];
