@@ -1085,6 +1085,13 @@ function docsAudit() {
     if (r.stdout) process.stdout.write(r.stdout);
     if (r.status !== 0) problems.push("文档模板不合规：见上方 docs-gov 输出");
   }
+  // 生成段（平台验收状态等）：与代码常量 / 缺口账比对，不一致即失败。
+  const sync = path.join(ROOT, "tests", "docs-sync.mjs");
+  if (fs.existsSync(sync)) {
+    const r = spawnSync(process.execPath, [sync, "--check"], { cwd: ROOT, encoding: "utf8" });
+    if (r.stdout) process.stdout.write(r.stdout);
+    if (r.status !== 0) problems.push("生成段与来源不一致：跑 node tests/docs-sync.mjs --write");
+  }
   return { problems };
 }
 

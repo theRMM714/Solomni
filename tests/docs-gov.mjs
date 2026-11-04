@@ -147,11 +147,14 @@ function validateBlock(rel, type, tpl, sec, problems) {
     const tt = it.line.trim();
     if (/^[-*]\s+/.test(tt) && /[，、]$/.test(tt)) problems.push(at + "：" + it.no + " 行列表项以逗号/顿号结尾（原段落被拆分，请合并成一条）");
   }
-  let inFence = false, fenceCount = 0, bullets = 0, paras = [];
+  let inFence = false, inGen = false, fenceCount = 0, bullets = 0, paras = [];
   const tables = [];
   let curTable = null;
   for (const it of body) {
     const t = it.line.trim();
+    if (/<!--\s*BEGIN:/.test(t)) { inGen = true; continue; }
+    if (/<!--\s*END:/.test(t)) { inGen = false; continue; }
+    if (inGen) continue;
     if (/^```/.test(t)) { inFence = !inFence; if (inFence) fenceCount++; curTable = null; continue; }
     if (inFence) continue;
     if (!t) { curTable = null; continue; }
@@ -256,12 +259,16 @@ function validateSections(rel, type, tpl, parsed, problems) {
 
 function checkClaims(rel, content, problems) {
   const lines = content.split("\n");
-  let inFence = false;
+  let inFence = false, inGen = false;
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
-    if (/^```/.test(raw.trim())) { inFence = !inFence; continue; }
+    const t0 = raw.trim();
+    if (/<!--\s*BEGIN:/.test(t0)) { inGen = true; continue; }
+    if (/<!--\s*END:/.test(t0)) { inGen = false; continue; }
+    if (inGen) continue;
+    if (/^```/.test(t0)) { inFence = !inFence; continue; }
     if (inFence) continue;
-    const tt = raw.trim();
+    const tt = t0;
     if (!/^[#>|]/.test(tt) && MODAL.test(raw) && !hasAnchor(raw)) problems.push(rel + "：" + (i + 1) + " 行强约束缺少锚点");
     for (const m of raw.matchAll(/`([^`]+)`/g)) {
       const token = m[1];

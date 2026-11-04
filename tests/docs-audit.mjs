@@ -69,10 +69,13 @@ for (const rel of docs) {
   const headings = [];
   const status = [];
   const principles = [];
-  let inFence = false;
+  let inFence = false, inGen = false;
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
     const t = raw.trim();
+    if (/<!--\s*BEGIN:/.test(t)) { inGen = true; continue; }
+    if (/<!--\s*END:/.test(t)) { inGen = false; continue; }
+    if (inGen) continue;
     if (/^```/.test(t)) { inFence = !inFence; continue; }
     if (inFence) continue;
     const hm = raw.match(/^(#{1,6})\s+(.+)$/);
@@ -82,6 +85,8 @@ for (const rel of docs) {
       status.push({ line: i + 1, text: t.slice(0, 100) });
     }
     if (/原则[：:]/.test(t)) principles.push({ line: i + 1, text: t.slice(0, 100) });
+    const boiler = /^-\s*(文档结构|分层与依赖方向|测试缺口|经\s*`?::api|本目录|会话、围栏与并发模型|呈现层入站契约)/;
+    if (boiler.test(t)) continue;
     if (t.length >= 20 && t.replace(/\[[^\]]*\]\([^)]*\)/g, "").replace(/[`*_>\s，。；、：|]/g, "").length >= 10) {
       const key = t.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[\x60*_>]/g, "").replace(/[\s，。；、：]/g, "").replace(/[""'']/g, "");
       if (key.length >= 16) {
@@ -140,9 +145,12 @@ const TOPICS = [
 const topicHits = TOPICS.map((t) => ({ name: t.name, hits: [] }));
 for (const rel of docs) {
   const lines = fs.readFileSync(path.join(ROOT, rel), "utf8").split("\n");
-  let f = false;
+  let f = false, g = false;
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
+    if (/<!--\s*BEGIN:/.test(raw.trim())) { g = true; continue; }
+    if (/<!--\s*END:/.test(raw.trim())) { g = false; continue; }
+    if (g) continue;
     if (/^```/.test(raw.trim())) { f = !f; continue; }
     if (f) continue;
     for (const t of TOPICS) if (t.re.test(raw)) topicHits[TOPICS.indexOf(t)].hits.push({ rel, line: i + 1, text: raw.trim().slice(0, 90) });
