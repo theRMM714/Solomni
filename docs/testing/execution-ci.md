@@ -262,12 +262,12 @@ PR 验收 PR head 提交（`SOURCE_SHA`），报告的 `sha` 因此等于 PR 头
 （删 unit-map 一行、删提示词键表一个键、从 `SYSTOOL.md` 删表名）。所以它不是“纯文档检查”，而是两边都要对得上的门禁。
 它平台无关，只跑一次，不放进三平台的 `quality`。
 
-`quality` / `e2e` / `docs` 用 **job 级 `if` 跳过**，被跳过的 required check 计为 Success——但这条只对**非矩阵 job** 成立。
-`docs` 名字固定，跳过就上报一条同名的 skipped；`quality` / `e2e` 是矩阵 job，而 `jobs.<job_id>.if` 在**矩阵展开之前**求值
+`quality` / `e2e` / `docs` 用 **job 级 `if` 跳过**；`docs` 名字固定，跳过就上报一条同名的 skipped。
+`quality` / `e2e` 是矩阵 job，而 `jobs.<job_id>.if` 在**矩阵展开之前**求值
 （[GitHub 文档](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idif)），
 被跳过时不会展开成 `（windows-latest）` 等名字，只报一条名字带字面量 `${{ matrix.os }}` 的 skipped。按平台名配置的
-required context 因此永远停在 pending——纯文档 PR 会卡在「检查全绿/跳过，但不能合并」。所以平台 job 不进规则集，
-改由固定名字的 `gate` 汇总。
+required context 因此永远停在 pending——纯文档 PR 会卡在「检查全绿/跳过，但不能合并」。所以平台 job 不进规则集；
+**规则集只要求固定名字的 `gate` 一项**，`docs` / `structure` 也不是 required context，它们的结论经 `gate` 进入合并判定。
 **不要改成 workflow 级 `paths-ignore`**：workflow 不启动时 required context 根本不会上报，会永远停在 pending。
 
 `gate`（检查名 `验收闸门`）在非 Draft 的 run 里始终运行，只读四个 job 的 `needs.*.result`，按 `changes` 的分类结果判「跳过是否合法」：
@@ -289,10 +289,12 @@ Draft 的 run 里依赖 job 都跳过，发布也跳过：不拿空产物发报�
 `runs/structure/`、`runs/docs/`、`runs/<os>/`。文档审查 / 结构审查与三平台共用同一个分支。
 纯代码 PR 没有 `runs/docs/`，纯文档 PR 没有平台目录；读的时候按存在的 key 比 `sha`。`gate` 不写报告，别在 `ci-report` 里找它。
 
-> **规则集**：`main` 的必填检查是 `文档审查`、`结构审查`、`验收闸门`。
+> **规则集**：`main` 的唯一必填检查是 `验收闸门`（`gate`）。`文档审查` / `结构审查` / 平台 job 都不是 required context——
+> 它们跑不跑、跳过是否合法，都由 `gate` 按 `changes` 的分类汇总判定；合并判定只看这一个检查名。
 > **不要**把六个平台 job 或 `变更分流` 设为 required：平台 job 是矩阵 job，纯文档 PR 跳过时不会产出 `（windows-latest）` 这类名字（永远 pending）；
-> `变更分流` 只是路由 job，卡住不应阻塞合并。纯文档 PR 的平台 job 是 skipped，由 `验收闸门` 判为合法；
-> 纯代码 PR 的文档审查是 skipped，闸门同样只核对实际跑了的 job。本仓的规则集修改由用户在 GitHub 设置里执行。
+> `变更分流` 只是路由 job，卡住不应阻塞合并。
+> 规则集是仓库外的事实（GitHub 设置），本仓由用户在 GitHub 设置里改；核实用只读命令：
+> `gh api repos/<owner>/<repo>/rulesets --jq '.[].id'`，再取对应 id 的 `required_status_checks`。
 
 `workflow_dispatch` 的 `clean` 输入（`true`）跳过 `actions/cache` 按干净机器跑；PR 触发没有这个输入，缓存照用。缓存只覆盖**项目内**路径
 （`platform/ci/cargo`：借用 runner 自带 Rust 时的 `CARGO_HOME`，含 registry / git / 工具；以及 `target/debug`），
@@ -312,7 +314,7 @@ CI 借 runner 自带 Rust（`CARGO_HOME` / `SOLOMNI_CARGO_HOME` 指项目内）�
 | 三种语言的模块（python / node / C++）在真进程里跑 | 本机只代表本平台的解释器与编译器 | 三平台各跑一次真工具链路，indexer 现场编译 |
 | 发布前验收 | 本地通过 ≠ 三平台通过 | 三平台报告 + 三平台 `TEST-REPORT-ACCEPTED` |
 
-文档审查与结构审查本身是本地可复现的确定性检查；CI 里跑它们是为了 required check 与合并闸门，不是补平台结论。
+文档审查与结构审查本身是本地可复现的确定性检查；CI 里跑它们是为了让 `gate` 能给出合并判定（它们不是 required context），不是补平台结论。
 
 **什么时候手动派发**：Draft 阶段不自动跑 CI，需要他平台结论时手动派发；PR 标 Ready 后自动跑，不必再派发。
 手动派发还用于「没有 PR 的分支」与「干净机器复验」。

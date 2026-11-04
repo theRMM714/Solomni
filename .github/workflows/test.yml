@@ -465,7 +465,7 @@ jobs:
             if [ -d "ci-artifacts/e2e-report-${platform}" ]; then
               cp -R "ci-artifacts/e2e-report-${platform}/." target/
             fi
-            # 上传根错了会落成 target/target/…：宁可让发布红，也别静默丢 L4（这一条曾经吞过整条 e2e）。
+            # 上传根错了会落成 target/target/…：宁可让发布红，也别静默丢 L4。
             if [ -f "target/target/e2e-report.json" ]; then
               echo "e2e 产物布局不对：报告落在 target/target/ 下（检查 e2e job 的上传根）" >&2
               exit 1

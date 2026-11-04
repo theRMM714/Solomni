@@ -95,6 +95,7 @@
 | 跑本地入口、读报告、认成功标记，或处理 CI 与报告发布 | [docs/testing/execution-ci.md](docs/testing/execution-ci.md) |
 | 记缺口、看目录与命名、按验收清单收口 | [docs/testing/gaps-acceptance.md](docs/testing/gaps-acceptance.md) |
 | 交付一个模块（模块作者要交什么证据） | [docs/testing/module-delivery.md](docs/testing/module-delivery.md) |
+| 看测试与质量细则的目录索引 | [docs/testing/README.md](docs/testing/README.md) |
 
 ## 四、判据速查（细则为准）
 
