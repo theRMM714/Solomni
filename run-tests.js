@@ -1078,6 +1078,13 @@ function docsAudit() {
       if (!agentsText.includes(BT + e + BT)) problems.push("根文档 " + e + " 没进 AGENTS.md 的文档路由表");
     }
   }
+  // 文档模板检查（模板与类型映射在 docs/templates/）：强制类型为空时只报不拦。
+  const gov = path.join(ROOT, "tests", "docs-gov.mjs");
+  if (fs.existsSync(gov)) {
+    const r = spawnSync(process.execPath, [gov, "--summary"], { cwd: ROOT, encoding: "utf8" });
+    if (r.stdout) process.stdout.write(r.stdout);
+    if (r.status !== 0) problems.push("文档模板不合规：见上方 docs-gov 输出");
+  }
   return { problems };
 }
 
