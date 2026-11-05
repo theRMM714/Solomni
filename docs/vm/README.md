@@ -75,7 +75,7 @@
 - 还原到初始状态：设置 → 存储空间 / `solomni --provision --reset=<虚拟根> --yes` 会删掉 `.vm/guest/<名>` 再按清单重装（不备份、不可撤销）；成功后同时清该虚拟根的构建缓存；它不是删除虚拟根：基础镜像仍会重建出来；有活跃 guest 或构建锁时拒绝。
 - guest 内 per-agent 围栏：宿主把该 agent 的围栏翻成 guest 路径与允许集，经 guest 内 Linux helper（Landlock + no_new_privs）执行；helper 缺失或装不上时 fail-closed，不回退到无围栏执行。
 - per-agent 围栏只支持 Linux guest；Windows / macOS guest 未适配，按不支持处理；同 guest 内仍是同一 UID/root，per-agent 进程信号、`/proc` 与 `system` 包的全局可见性不在承诺内。
-- 本次隔离覆盖文件系统可达范围，并对齐本机 Linux 的只读基线、解释器目录、`cwd`、env 白名单、按 `GuestRun.timeout_secs` 超时杀整棵进程树与输出截断。guest 通道产出与本机同形的正文与状态行（`[shell]` 收尾四态；cwd·耗时尾行由工具层追加）：超时 / 信号由 `src/capabilities/vm/detail/guest_helper.rs` 的机器标记（`solomni-guest-fence: timeout` / `solomni-guest-fence: signal`）表达、用户停止按宿主取消旗判定，通道翻译成状态行、不写人读句（装配见 `src/kernel/domain/receipt.rs`）。
+- 本次隔离覆盖文件系统可达范围，并对齐本机 Linux 的只读基线、解释器目录、`cwd`、env 白名单、按 `GuestRun.timeout_secs` 超时杀整棵进程树与输出截断。只读基线里的 `/dev/null` 例外给写权（标准重定向要能丢弃输出，`2>/dev/null` 不能 EACCES）。guest 通道产出与本机同形的正文与状态行（`[shell]` 收尾四态；cwd·耗时尾行由工具层追加）：超时 / 信号由 `src/capabilities/vm/detail/guest_helper.rs` 的机器标记（`solomni-guest-fence: timeout` / `solomni-guest-fence: signal`）表达、用户停止按宿主取消旗判定，通道翻译成状态行、不写人读句（装配见 `src/kernel/domain/receipt.rs`）。
 - 网络按 per-call `GuestAccess.net`：false 时 helper 在子进程前 `unshare(CLONE_NEWNET)`，失败 fail-closed；QEMU 网卡仍受 VM 级全局开关。
 - 用户在生成中按停止：host 置取消旗后经 QGA 给 guest helper 发 SIGTERM，helper 杀掉子进程组并退出；`timeout_secs` 仍照常收口。
 - 稳定挂载根：共享 guest 只挂工作树与模块树两个根，新 agent 沙箱 / 新模块目录按状态出现；具体某个 agent 能看什么由当次围栏决定。

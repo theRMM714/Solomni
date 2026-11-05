@@ -76,9 +76,9 @@
   - **容器里的程序名先相对化**（仅 Windows）：AppContainer 下**绝对路径**的程序会被拒（真机：同一文件用 `D:\…\x.exe` 报 Access denied，用 `..\x.exe` 正常——相对路径走 cwd 的目录句柄，不遍历卷根；非系统盘的卷根 DACL 要管理员才写得动）。执行前把首 token 的程序名解析成绝对路径、再改写成相对 cwd 的路径（同卷才改；裸名按容器里生效的 PATH / PATHEXT 解析；跨卷或解析不出则原样）。参数里的路径不动。
   - 环境白名单：外层 `env_clear`，只注入 `fence_env`（PATH / PATHEXT / 系统根 / LANG / TZ 等，`HOME` 与 `TEMP` 指向该 agent 私有沙箱）与模块隐秘字段；其它环境与凭据不进工具进程。
   - **围栏由本次权限 reach 派生**（策略在 `src/capabilities/tools/domain/fence.rs`）：`FenceSpec::for_call` 只把 granted 的 private / shared-read / module-read / module-write / host-read / network 放进 rw / ro_tree / ro / net；shared-write 永不进 rw，module-write 只给指定模块自己的 userdata。`for_session` 只作为**会话 base**（提供主机只读根与全局断网事实）再派生按次围栏，不用于撤权。
-  - **shell 的一次执行**：`run_shell` 走同一个守门进程；`timeout_secs` 是本次的（不沿用模块工具的 30 秒），到点或取消旗置位都杀整棵树；输出 head+tail（4k 开头 + 12k 结尾），回执末尾另带 cwd 与本次耗时（由工具层在守门进程给出 shell 收尾行后追加；参数拒绝 / 启动失败不追加）；sandbox / external 都 `require_fs + require_net + allow_degraded=false`，装不上拒绝；Windows 的容器身份按 `会话 + agent + 受保护根集合` 派生（同一 reach 的调用复用 SID 与 ACL；不同 scope 根集合不同 → 不同 SID），授权按会话持有、会话改配 / 删除时回收；工具链与运行包是基础工具链基线，不参与按 reach 授权。
+  - **shell 的一次执行**：`run_shell` 走同一个守门进程；`timeout_secs` 是本次的（不沿用模块工具的 30 秒），到点或取消旗置位都杀整棵树；输出 head+tail（约 4k 开头 + 约 12k 结尾，按完整行取整；单行超长时按字符切），回执末尾另带 cwd 与本次耗时（由工具层在守门进程给出 shell 收尾行后追加；参数拒绝 / 启动失败不追加）；sandbox / external 都 `require_fs + require_net + allow_degraded=false`，装不上拒绝；Windows 的容器身份按 `会话 + agent + 受保护根集合` 派生（同一 reach 的调用复用 SID 与 ACL；不同 scope 根集合不同 → 不同 SID），授权按会话持有、会话改配 / 删除时回收；工具链与运行包是基础工具链基线，不参与按 reach 授权。
   - **VM guest 的 per-call 断网**：guest helper 读策略里的 `net`，false 时在子进程前 `unshare(CLONE_NEWNET)`；失败以 111 fail-closed，不静默降级。helper 同时读 `timeout_secs` 并按它杀树；guest 输出按 `GuestRun.output_limit` 只留开头或开头 + 结尾。
-  - 收尾：stdout / stderr 分别读；模块工具超时 30 秒（`ProcTools::timeout`），shell 用本次 `timeout_secs`；到时连根杀树；输出上限 16000 字符（模块只留开头，shell 开头 + 结尾）。超时、截断、围栏失败的文案经 `ProcessTexts` 注入，机制不硬编码。
+  - 收尾：stdout / stderr 分别读；模块工具超时 30 秒（`ProcTools::timeout`），shell 用本次 `timeout_secs`；到时连根杀树；输出上限 16000 字符（模块只留开头，shell 开头 + 结尾；shell 的截断按完整行取整，单行超长时按字符切）。超时、截断、围栏失败的文案经 `ProcessTexts` 注入，机制不硬编码。
   - 围栏装不上（本机不支持 / 容器起不来）：命中 `require_fs` / `require_net` 且未同意降级时，守门进程以 `FENCE_FAILED` **拒绝执行**；已同意降级才如实降级继续。Linux 的文件系统与网络两项**独立**判定，一项装不上不影响另一项。能力等级已在启动报告里说明。
   - Windows 外层未授权（`sandbox.policy.windows.write_acl=false`）：容器不装；启动门要求强制时只能本次降级 / 重设 / 退出（`src/main.rs`），否则按无围栏执行；全局网络开关不生效于容器，启动报告的「本次实际」已标出。
   - Windows 未授权时段先自检（`confine::verify`）：`EnvUnavailable` = 本机不支持，降级照跑；`Broken` = 自检说机制有效却装不上（我们写错了），**拒绝执行**，不按无围栏跑。
@@ -88,7 +88,7 @@
 
 | 平台 | 文件系统 | 出站网络 | 机制 |
 | --- | --- | --- | --- |
-| Linux | Landlock（运行基线 / 系统只读区只读，其余按 reach；内核不支持或规则被拒时如实降级） | 按 `net`（真 = 不装网络过滤器；假 = seccomp 拒绝非 AF_UNIX / AF_NETLINK socket，TCP/UDP/raw 与回环都出不去） | 守门进程内装 Landlock 与 seccomp |
+| Linux | Landlock（运行基线 / 系统只读区只读，`/dev/null` 例外可写；其余按 reach；内核不支持或规则被拒时如实降级） | 按 `net`（真 = 不装网络过滤器；假 = seccomp 拒绝非 AF_UNIX / AF_NETLINK socket，TCP/UDP/raw 与回环都出不去） | 守门进程内装 Landlock 与 seccomp |
 | macOS | seatbelt（`sandbox_init` 是私有且已弃用的 ABI；失效时如实降级） | 按 `net`（真 = 放行 `network-outbound`；假 = 拒绝 `network*`） | 守门进程内装 seatbelt；祖先元数据放行 `file-read-metadata` |
 | Windows | AppContainer（外层 `prepare_fence` 把可达范围写进目录 ACL） | 按 `net`（真 = 授 `internetClient` 公网出站；假 = 不授） | 守门进程建容器 profile 并在容器内跑；作业对象管进程树与进程数上限 |
 | 其它 | 无（如实降级） | 无 | 只有超时与整棵树终止 |

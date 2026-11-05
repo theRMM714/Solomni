@@ -85,7 +85,7 @@ impl ProcessTexts for CodeProcessTexts {
     }
     fn truncated_middle(&self, chars: &str, head: &str, tail: &str) -> String {
         format!(
-            "[截断] 输出共 {} 字符；保留开头 {} 与结尾 {} 字符",
+            "[截断] 输出共 {} 字符；保留开头 {} 与结尾 {} 字符（按完整行取整）",
             chars, head, tail
         )
     }

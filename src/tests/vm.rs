@@ -2578,6 +2578,18 @@ pub(crate) fn vm_live_cancel_kills_the_guest_process_tree() {
         output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Shell,
     };
 
+    // 标准重定向：围栏里 /dev/null 必须可写（`2>/dev/null` 是常见脚本习语，只读基线会让它 EACCES）。
+    let devnull = guest.channel().exec_fenced(
+        &run("echo dropped >/dev/null && echo DEVNULL-OK", 10),
+        &access,
+    );
+    assert!(devnull.ok, "围栏里要能写 /dev/null：{}", devnull.output);
+    assert!(
+        devnull.output.contains("DEVNULL-OK"),
+        "重定向后命令要继续跑：{}",
+        devnull.output
+    );
+
     // 取消：sleep 30 起跑后由 host 置位取消旗，helper 收 SIGTERM 杀子进程组，不能等满 timeout。
     let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let flip = std::sync::Arc::clone(&cancel);
@@ -2904,6 +2916,11 @@ pub(crate) fn guest_helper_is_a_fail_closed_landlock_launcher() {
         script
     );
     assert!(script.contains("TMPDIR"), "{}", script);
+    assert!(
+        script.contains("write_file = 1 << 1") && script.contains("base == \"/dev/null\""),
+        "标准重定向要能写 /dev/null（否则 2>/dev/null 在围栏里 EACCES）：{}",
+        script
+    );
     assert!(
         script.contains("env_names"),
         "环境白名单要按模块隐秘字段名注入：{}",

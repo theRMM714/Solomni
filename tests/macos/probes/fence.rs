@@ -52,6 +52,23 @@ fn fence_denies_outside_paths_and_allows_the_given_roots() {
     }
     assert_eq!(code, Some(0), "{} / {}", out, err);
 
+    // 标准重定向：/dev/null 是设备节点，基线必须给它写权（`2>/dev/null` 的脚本习语不能 EACCES）。
+    let (null_code, null_out, null_err) =
+        run_launcher_env(&spec, "echo dropped >/dev/null && echo DEVNULL-OK", profile);
+    assert_eq!(
+        null_code,
+        Some(0),
+        "围栏里要能写 /dev/null：{} / {}",
+        null_out,
+        null_err
+    );
+    assert!(
+        null_out.contains("DEVNULL-OK"),
+        "重定向后命令要继续跑：{} / {}",
+        null_out,
+        null_err
+    );
+
     // 允许的根之外：同一个用户、同一台机器，只有围栏能挡住这一读。
     let (code, out, err) = run_launcher_env(&spec, &format!("cat {}", secret.display()), profile);
     assert!(

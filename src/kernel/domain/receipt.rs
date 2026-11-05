@@ -48,22 +48,60 @@ pub fn shell_receipt(
     output
 }
 
-/// 目的：head+tail 截断（开头 1/4、结尾 3/4），截断标记在中间；未超限原样返回。
+/// 目的：head+tail 截断（开头约 1/4、结尾约 3/4），截断标记在中间；未超限原样返回。
+/// 约束：**优先在行边界切**（开头取完整行、结尾从整行开始），不把一行劈成两段；
+///   第一行 / 最后一段本身超过预算（单行超长）时退化为按字符切。标记里报的是**实际保留**的字符数。
 fn truncate_middle(texts: &dyn ProcessTexts, text: &str, max_chars: usize) -> String {
     let count = text.chars().count();
     if count <= max_chars {
         return text.to_string();
     }
-    let head_n = max_chars / 4;
-    let tail_n = max_chars - head_n;
-    let head: String = text.chars().take(head_n).collect();
-    let tail: String = text.chars().skip(count - tail_n).collect();
-    format!(
-        "{}\n{}\n{}",
-        head,
-        texts.truncated_middle(&count.to_string(), &head_n.to_string(), &tail_n.to_string()),
-        tail
-    )
+    let head_budget = max_chars / 4;
+    let tail_budget = max_chars - head_budget;
+    // 开头：截到预算内最后一个换行；换行本身让给标记行，不留在正文里。
+    let head_raw: String = text.chars().take(head_budget).collect();
+    let mut head = match head_raw.rfind('\n') {
+        Some(at) => head_raw[..at].to_string(),
+        None => head_raw.clone(),
+    };
+    if head.is_empty() {
+        // 第一行就超过预算：没有行边界可用，按字符切。
+        head = head_raw;
+    }
+    // 结尾：预算窗口若从行中间开始，丢掉那半行，从下一个完整行开始。
+    let tail_start = count - tail_budget;
+    let tail_raw: String = text.chars().skip(tail_start).collect();
+    let at_line_start = tail_start == 0 || text.chars().nth(tail_start - 1) == Some('\n');
+    let mut tail = if at_line_start {
+        tail_raw.clone()
+    } else {
+        match tail_raw.find('\n') {
+            Some(at) => tail_raw[at + 1..].to_string(),
+            None => tail_raw.clone(),
+        }
+    };
+    if tail.is_empty() {
+        // 最后一段是一整行超长：没有行边界可用，按字符切。
+        tail = tail_raw;
+    }
+    let kept_head = head.chars().count();
+    let kept_tail = tail.chars().count();
+    let marker = texts.truncated_middle(
+        &count.to_string(),
+        &kept_head.to_string(),
+        &kept_tail.to_string(),
+    );
+    let mut out = String::new();
+    if !head.is_empty() {
+        out.push_str(&head);
+        out.push('\n');
+    }
+    out.push_str(&marker);
+    if !tail.is_empty() {
+        out.push('\n');
+        out.push_str(&tail);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -114,5 +152,61 @@ mod tests {
             "状态行必须在最后：{}",
             &out[out.len().saturating_sub(80)..]
         );
+    }
+
+    #[test]
+    fn truncation_cuts_on_line_boundaries_and_reports_actual_counts() {
+        let mut text = String::new();
+        for i in 0..1_000 {
+            text.push_str(&format!("line-{:04}\n", i));
+        }
+        let out = shell_receipt(&texts(), &text, "", ShellEnd::Exit(Some(0)), 120);
+        let (before, after) = out.split_once("[截断]").expect("要有截断标记");
+        let head = before.trim_end_matches('\n');
+        let marker = after.lines().next().unwrap_or_default();
+        assert!(
+            marker.contains("按完整行取整"),
+            "标记要说明切分口径：{}",
+            marker
+        );
+        let marker_numbers: Vec<usize> = marker
+            .split(|c: char| !c.is_ascii_digit())
+            .filter(|s| !s.is_empty())
+            .filter_map(|s| s.parse().ok())
+            .collect();
+        assert_eq!(marker_numbers.len(), 3, "总数 / 开头 / 结尾：{}", marker);
+        let rest = after.split_once('\n').map(|(_, t)| t).unwrap_or_default();
+        // 尾行（状态行）由 shell_receipt 追加在正文之后，不算在「结尾保留」里。
+        let tail = rest
+            .rsplit_once("\n[shell] ")
+            .map(|(t, _)| t)
+            .unwrap_or(rest);
+        assert_eq!(
+            head.chars().count(),
+            marker_numbers[1],
+            "开头要报实际保留数"
+        );
+        assert_eq!(
+            tail.chars().count(),
+            marker_numbers[2],
+            "结尾要报实际保留数"
+        );
+        assert!(
+            marker_numbers[1] <= 30,
+            "开头不超预算：{}",
+            marker_numbers[1]
+        );
+        assert!(
+            marker_numbers[2] <= 90,
+            "结尾不超预算：{}",
+            marker_numbers[2]
+        );
+        for line in head.lines().chain(tail.lines()) {
+            assert!(
+                line.starts_with("line-"),
+                "截断不能把一行劈成两段：{:?}",
+                line
+            );
+        }
     }
 }

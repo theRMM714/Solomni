@@ -167,7 +167,9 @@ def main():
         die("landlock_create_ruleset: " + os.strerror(ctypes.get_errno()))
 
     read_ok = (1 << 0) | (1 << 2) | (1 << 3)
-    # 只读运行基线：与本机 Linux 后端同一份范围（guest 里也只需要这些就能起解释器）。
+    write_file = 1 << 1
+    # 运行基线：与本机 Linux 后端同一份范围（guest 里也只需要这些就能起解释器）；
+    # /dev/null 额外可写——标准重定向要能丢弃输出（`>/dev/null` / `2>/dev/null`），只给这个设备节点。
     for base in (
         "/usr", "/bin", "/sbin", "/lib", "/lib64", "/lib32",
         "/etc/ld.so.cache", "/etc/localtime", "/etc/terminfo",
@@ -175,7 +177,8 @@ def main():
         "/dev/null", "/dev/zero", "/dev/urandom", "/dev/random",
         "/proc/self", "/proc/meminfo", "/sys/devices/system/cpu",
     ):
-        add_dir(base, read_ok, fd, read_ok, handled)
+        rights = read_ok | write_file if base == "/dev/null" else read_ok
+        add_dir(base, rights, fd, read_ok, handled)
     for p in policy.get("ro_tree", []) + policy.get("ro", []):
         required_dir(p, read_ok, fd, read_ok, handled)
     cwd = policy.get("cwd", "")
