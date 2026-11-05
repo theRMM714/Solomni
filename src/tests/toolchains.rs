@@ -1,10 +1,10 @@
 //! 目的：启动期基础工具链解析的单元测试——项目 bin 前置、缺失回退、路径安全与目标匹配。
 //! 管：只测 `compose` 的纯逻辑与 `active.json` 形状，不读真实工具链、不改进程环境。
-//! 不管：安装器（setup-toolchains.js）、真实进程围栏与 guest 工具链。
+//! 不管：安装器（provision 能力的 `kind: toolchain`）、真实进程围栏与 guest 工具链。
 //! 联动：被测实现见 src/entry/toolchains.rs；启动期调用见 src/main.rs。
 
 use crate::capabilities::packages::api::{BaseFacts, HostFallback};
-use crate::entry::toolchains::{active_roots, compose, report_lines, target, PROFILE};
+use crate::entry::toolchains::{active_roots, compose, report_lines, target};
 
 type ToolSpec<'a> = (&'a str, &'a str, &'a [&'a str], &'a [(&'a str, &'a str)]);
 
@@ -40,20 +40,72 @@ fn active(target: &str, profile: &[&str], tools: &[ToolSpec<'_>]) -> String {
     )
 }
 
+/// 目的：基础工具链装好后的登记与启动期读取是同一份事实：安装（provision 写 active.json）→
+///   启动期（entry 读同一份）把项目 bin 前置到 PATH；缺 bin 的工具如实算缺，不假装装上。
 #[test]
-pub(crate) fn profile_matches_toolchains_js() {
-    let js = include_str!("../../toolchains.js");
-    let line = js
-        .lines()
-        .find(|l| l.contains("const PROFILE"))
-        .expect("toolchains.js 里应有 PROFILE");
-    for id in PROFILE {
-        assert!(
-            line.contains(&format!("\"{}\"", id)),
-            "toolchains.js 的 PROFILE 少 {}：{}",
-            id,
-            line
-        );
+pub(crate) fn installed_toolchains_are_registered_and_read_back_at_startup() {
+    let Some(target) = target() else { return };
+    let root = crate::tests::scratch("toolchains-register");
+    // 两个工具：python 的两个 bin 目录都在场；node 的安装目录不在场（缺件）。
+    let py = format!(".tools/toolchains/{}/python/9.9.9", target);
+    std::fs::create_dir_all(root.join(&py).join("bin")).unwrap();
+    std::fs::create_dir_all(root.join(&py).join("site")).unwrap();
+    let deps = [
+        toolchain_dep("toolchain.python", target, &py, &["bin", "site"], "python"),
+        toolchain_dep(
+            "toolchain.node",
+            target,
+            ".tools/toolchains/x/node/1",
+            &["bin"],
+            "node",
+        ),
+    ];
+    crate::capabilities::provision::sync_toolchain_active(&root, &deps).expect("登记 active.json");
+    let file = root.join(".tools").join("toolchains").join("active.json");
+    let raw = std::fs::read_to_string(&file).expect("active.json 要在场");
+    let c = compose(&root, &raw, std::ffi::OsStr::new(""), target).expect("启动期要能读");
+    assert_eq!(
+        c.active,
+        vec![("python".to_string(), "9.9.9".to_string())],
+        "只登记 bin 目录都在场的工具"
+    );
+    assert_eq!(c.missing, vec!["node".to_string()], "缺件如实算缺");
+    let first = std::env::split_paths(&c.path)
+        .next()
+        .expect("PATH 有第一段");
+    assert_eq!(first, root.join(&py).join("bin"), "项目 bin 要前置到 PATH");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 目的：造一条 kind: toolchain 的清单条目（字段形状与 dependencies.yaml 一致）。
+fn toolchain_dep(
+    id: &str,
+    target: &str,
+    install: &str,
+    bins: &[&str],
+    tool: &str,
+) -> crate::capabilities::provision::Dep {
+    crate::capabilities::provision::Dep {
+        id: id.to_string(),
+        os: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        install: install.to_string(),
+        probe: format!("{}/{}", install, bins.first().copied().unwrap_or("bin")),
+        source: "toolchain.python.3.14.9.windows-x86_64".to_string(),
+        kind: "toolchain".to_string(),
+        guest: None,
+        toolchain: Some(crate::capabilities::provision::ToolchainSpec {
+            tool: tool.to_string(),
+            version: "9.9.9".to_string(),
+            target: Some(target.to_string()),
+            bins: bins.iter().map(|b| b.to_string()).collect(),
+            wrappers: false,
+        }),
+        family: None,
+        strip: 0,
+        size_mb: 0,
+        sha256: String::new(),
+        note: String::new(),
     }
 }
 
@@ -93,7 +145,11 @@ pub(crate) fn report_lines_name_project_missing_host_fallback_and_gap() {
         text
     );
     assert!(text.contains("宿主回退 cc：宿主 PATH 也没有"), "{}", text);
-    assert!(text.contains("node setup-runtime.js --yes"), "{}", text);
+    assert!(
+        text.contains("solomni --provision --ensure=toolchain --yes"),
+        "{}",
+        text
+    );
 }
 
 #[test]

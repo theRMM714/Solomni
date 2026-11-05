@@ -673,10 +673,24 @@ function printEnv() {
     return;
   }
   const p = probeBuild(r);
+  // 临时目录也钉在项目内：导出的环境与 dev.js / run-tests.js / start.js 实际用的是同一份。
+  pinTemp(r.env);
+  const pathKey = Object.keys(r.env).find((k) => k.toUpperCase() === "PATH") || "PATH";
   console.log(JSON.stringify({
-    osKey: r.osKey, cargo: r.cargo, source: r.source, cargoHome: r.cargoHome, rustupHome: r.rustupHome,
+    osKey: r.osKey, cargo: r.cargo, source: r.source, cargoHome: r.cargoHome,
+    rustupHome: r.env.RUSTUP_HOME || r.rustupHome,
     platformDir: r.platformDir, toolsDir: r.toolsDir, mingwBin: r.mingwBin,
     host: p.host, canBuild: p.ok,
+    // 给「要在终端直接敲 cargo」的人一份完整变量表（机器读；就是解析后的那一份，不另拼一套）。
+    // 借用系统 rustup 时 RUSTUP_HOME 如实给系统值（未导出时给 rustup 的默认目录）。
+    env: {
+      PATH: r.env[pathKey] || "",
+      CARGO_HOME: r.env.CARGO_HOME || "",
+      RUSTUP_HOME: r.env.RUSTUP_HOME || path.join(require("os").homedir(), ".rustup"),
+      TMP: r.env.TMP || "",
+      TMPDIR: r.env.TMPDIR || "",
+      TEMP: r.env.TEMP || "",
+    },
   }, null, 2));
 }
 
@@ -691,10 +705,8 @@ async function main() {
   return status();
 }
 
-module.exports = {
-  ROOT, IS_WIN, OS_KEY, PLATFORM_DIR, P_RUSTUP, P_CARGO, TOOLS, WINLIBS_BIN,
-  resolve, ensure, ensureProject, pinTemp, findProjectCargo, findAmbientCargo, envPath, setEnvPath,
-  probeBuild, cargoVv, link,
-};
+// 只导出入口层（dev.js / setup-dev.js / start.js / 门禁的 tests/lib/proc.js）真正用到的这些；
+// 路径常量、下载与安装细节是这个文件自己的实现。
+module.exports = { resolve, ensure, ensureProject, pinTemp, findProjectCargo, probeBuild };
 
 if (require.main === module) main();

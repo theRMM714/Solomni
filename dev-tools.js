@@ -1,7 +1,7 @@
 /**
  * 开发环境清单：**唯一真相**——setup-dev.js 按它装，run-tests.js 按它查 / 跳过。
  * 管：开发与门禁需要的 Rust 组件、交叉 target、项目内工具（crates）与只探测的运行时。
- * 不管：运行环境（那是 setup-runtime.js 与 env.js 的事）；安装方式（在 setup-dev.js 一处）。
+ * 不管：运行前提的基础工具链（由产品 solomni --provision --ensure=toolchain 补）；安装方式（在 setup-dev.js 一处）。
  * 约束：条目只写「名字 + 为什么」；新增一项先想清楚「门禁是不是真的需要它」。
  */
 "use strict";

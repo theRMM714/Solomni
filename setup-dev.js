@@ -2,7 +2,7 @@
 /**
  * 开发环境安装 / 同步：把开发与门禁需要的东西装到**项目内**（platform/<os>/ 与 .tools/）。
  * 管：项目内 Rust 工具链、Rust 组件、交叉 target、供应链工具；--check 只读校验、--offline 不下载。
- * 不管：运行环境（setup-runtime.js）；条目清单（dev-tools.js，唯一真相）。
+ * 不管：运行前提的基础工具链（Python / Node / C-C++，由产品 solomni --provision --ensure=toolchain 自己补）；条目清单（dev-tools.js，唯一真相）。
  * 用法：node setup-dev.js [--check] [--yes] [--offline]
  * 约束：只写项目内（RUSTUP_HOME / CARGO_HOME / .tools）；不碰系统 ~/.rustup、~/.cargo。
  */
@@ -12,7 +12,6 @@ const fs = require("fs");
 const path = require("path");
 const env = require("./env.js");
 const DEV = require("./dev-tools.js");
-const TC = require("./setup-toolchains.js");
 
 const ROOT = __dirname;
 const CHECK = process.argv.includes("--check");
@@ -69,10 +68,8 @@ function probeRunnable(name, e) {
   if (!ready) die("项目内工具链不可用（platform/<os>/）：先 node setup-dev.js --yes");
   const e = ready.env;
   log("项目内工具链：" + ready.cargo);
-  // 开发与门禁同样需要基础 profile：python / node / cc 是运行前提。
-  const tc = await TC.ensureProfile({ yes: YES });
-  if (!tc.ok) die("基础工具链未就绪：" + (tc.missing.join("、") || tc.reason) + "（补全：node setup-toolchains.js --yes）");
-  log("基础工具链：" + tc.installed.map((t) => t.id + " " + t.version).join("、"));
+  // 运行前提（Python / Node / C-C++）不在这里装：核心编出来后由产品补齐（下载源与版本在 dependencies.yaml）。
+  log("运行前提基础工具链由产品补：solomni --provision --ensure=toolchain --yes");
 
   const comps = installedComponents(e);
   const targets = installedTargets(e);

@@ -70,9 +70,8 @@ function links(root) {
     if (!fs.existsSync(abs)) return;
     for (const m of fs.readFileSync(abs, "utf8").matchAll(/\blink\("([A-Za-z0-9_.-]+)"\)/g)) used.add(m[1]);
   };
-  // 消费点：环境层（rustup 安装）与依赖清单的 source（产品侧下载源都在 dependencies.yaml）。
+  // 消费点：环境层（rustup / MinGW 引导）与依赖清单的 source（工具链与产品侧下载源都在 dependencies.yaml）。
   scanLinkUses(path.join(root, "env.js"));
-  scanLinkUses(path.join(root, "toolchains.js"));
   const depsFile = path.join(root, "dependencies.yaml");
   if (fs.existsSync(depsFile)) {
     for (const m of fs.readFileSync(depsFile, "utf8").matchAll(/^\s*source:\s*([A-Za-z0-9_.:/-]+)\s*$/gm)) {

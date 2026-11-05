@@ -1,6 +1,6 @@
 //! 目的：启动期把项目内基础工具链（.tools/toolchains）前置到 PATH，并设置工具需要的环境变量。
 //! 管：读 active.json、校验目标平台与相对路径、拼出"项目 bin 在前、宿主 PATH 在后"的环境、产生回退报告。
-//! 不管：下载 / 解包 / 版本选择（setup-toolchains.js）；guest 内工具链（后续阶段）；模块工具协议与围栏。
+//! 不管：下载 / 解包 / 版本选择（provision 能力的 `kind: toolchain`）；guest 内工具链；模块工具协议与围栏。
 //! 联动：由 main 在根解析后调用；环境随后由 fence_env / interpreter_dirs / HostProbe 共用。
 
 use crate::capabilities::packages::api::{BaseFacts, HostFallback};
@@ -8,10 +8,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{OsStr, OsString};
 use std::path::{Component, Path, PathBuf};
 
-/// 目的：基础 profile 的工具 id（唯一真相是 toolchains.js 的 PROFILE；这里用用例钉住一致）。
+/// 目的：基础 profile 的工具 id——与清单 dependencies.yaml 的 toolchain 条目同一组（active.json 缺失时仍能报出缺哪几个）。
 pub(crate) const PROFILE: [&str; 3] = ["python", "node", "cc"];
 
-/// 目的：当前宿主的目标名（与 setup-toolchains.js 的 TARGETS 同一套写法）。
+/// 目的：当前宿主的目标名（与 dependencies.yaml 的 `toolchain.target`、安装布局同一套写法）。
 pub(crate) fn target() -> Option<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("linux", "x86_64") => Some("linux-x86_64"),
@@ -274,7 +274,7 @@ pub(crate) fn active_tools(root: &Path) -> Vec<(String, String)> {
     out
 }
 
-/// 目的：能力名 → 宿主上可能的可执行名（与 toolchains.js 的 profile 一一对应）。
+/// 目的：能力名 → 宿主上可能的可执行名（与清单 toolchain 条目的 tool id 一一对应）。
 fn host_names(id: &str) -> &'static [&'static str] {
     match id {
         "python" => &["python", "python3"],
@@ -344,7 +344,7 @@ pub(crate) fn report_lines(base: &BaseFacts) -> Vec<String> {
         .collect();
     if !missing.is_empty() {
         lines.push(format!(
-            "项目内未安装：{}；补全：node setup-runtime.js --yes",
+            "项目内未安装：{}；补全：solomni --provision --ensure=toolchain --yes",
             missing.join("、")
         ));
         for id in missing {

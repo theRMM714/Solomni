@@ -372,6 +372,7 @@ mod tests {
             probe: probe.to_string(),
             guest: Some(guest.to_string()),
             family: None,
+            toolchain: None,
             source: "guest.debian.image".to_string(),
             strip: 0,
             size_mb: 0,

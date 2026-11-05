@@ -119,7 +119,11 @@ pub(crate) fn base_capability_uses_host_fallback_even_when_fence_cannot_grant() 
         plan.problems
     );
     let text = pkgs::diagnose_text(&plan.problems);
-    assert!(text.contains("node setup-runtime.js --yes"), "{}", text);
+    assert!(
+        text.contains("solomni --provision --ensure=toolchain --yes"),
+        "{}",
+        text
+    );
 }
 
 #[test]
