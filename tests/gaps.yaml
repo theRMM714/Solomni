@@ -76,35 +76,6 @@
   blocked_by: |
     本期不做（用户决定）；macOS 另有平台机制缺口，Windows guest 需要完整的新机制。
 
-- id: vm.guest-diagnostics
-  scope: global
-  level: T4
-  why: |
-    guest 里出问题（例如某个进程把 vCPU 跑满、内存 / 负载异常）时，产品没有可用的**诊断入口**：
-    既不能列 guest 进程 / CPU / 内存，也没有在 guest 里跑只读探针的正规通道。
-    - 外部直连 QGA 不可行：QEMU 的 chardev 是单客户端（`server=on`），产品自己占用后第二个连接被拒
-      （真机复现：对 QGA 端口 Connect 返回 RST / actively refused）。
-    - 会话内的 `shell` 不是诊断面：per-agent Landlock 基线只放行 `/proc/self` 与 `/proc/meminfo`，
-      `ps` / `top` 读不到 `/proc`（procps 报 "mount -t proc proc /proc"，容易被误判成 /proc 未挂载）；
-      `shell` 还受模型回合与信封协议牵制，不能当作故障排查入口。
-    结果是这类问题只能看宿主上的 QEMU 线程，定位不到 guest 里是谁。
-  how: |
-    1) 定入口：优先做**诊断专用动作**（CLI `solomni --guest-diagnose=<会话 / 租约>` 或只读 Web 动作），
-       走现有 `Vm` 能力面，不另起第二套 guest 通道；输出固定字段：guest 进程表
-       （pid / ppid / cpu / mem / stat / etime / comm / args 前若干）、`/proc/loadavg`、`/proc/meminfo` 摘要、
-       `/proc/stat` 的 CPU 汇总、磁盘 / 挂载摘要。
-    2) 权限：诊断动作是**系统动作**（caller = user / 启动诊断），不是 agent 工具；在 guest 里以 helper 的
-       **诊断模式**执行（不按 agent 围栏），只读、不写 guest；宿主侧只用已持有的 QGA 通道，不要求外部可连。
-    3) 失败如实：QGA 不通 / guest 不在 / helper 缺 python3 各给不同原因；不把"读不到"说成"没有进程"。
-    4) 验收：真机（`SOLOMNI_VM_LIVE=1`）启动 guest 后，诊断能列出 guest 进程与 CPU 汇总；故意起一个忙进程能被看到；
-       停止 guest 后如实报不可用；宿主不要求外部端口。
-  accept: |
-    在 Linux guest（Windows / macOS guest 本期不支持）上，产品自带的诊断入口能列出 guest 进程、CPU 汇总与内存 / 负载摘要；
-    guest 内故意制造的忙进程可被定位；QGA / guest 不可用时如实报原因；`node run-tests.js` 全绿
-    （真机用例按 `SOLOMNI_VM_LIVE` 约定）。
-  blocked_by: |
-    缺少实现（当前只有会话内 shell；QGA chardev 单客户端、外部不可连，per-agent Landlock 不放行 /proc）
-
 - id: release.binary-distribution
   scope: global
   level: T5
@@ -127,22 +98,3 @@
   blocked_by: |
     本期不做（用户决定：仍在开发阶段）。发行链路与口味统一需要新建 CI 工作流与打包脚本，另立任务。
 
-- id: ci.zizmor-advisory
-  scope: global
-  level: T0
-  why: |
-    工作流静态检查（`.github/workflows/test.yml` 的 workflow job）里 actionlint 阻断、zizmor 只报不拦
-    （continue-on-error）：workflow 安全目前没有必填约束。artipacked findings 已处置：9 个只读 job 的 checkout
-    设 `persist-credentials: false`；2 个发布 job（`publish-report` 与 mutation 的 publish）需要 `git push`
-    重建滚动分支，保留凭据并用行内 `zizmor: ignore[artipacked]` + 理由豁免；zizmor 已固定 1.32.0。
-  how: |
-    1) 连续观察非 Draft 的三平台 CI（建议 ≥5 次），确认固定版本下 `No findings`（当前 2 条有记录豁免）且不漂；
-    2) findings 有新增时先处置或写豁免，不允许直接转阻断；
-    3) 观察稳定后去掉 zizmor 的 continue-on-error，并让 `tests/ci-gate.mjs` 把「工作流静态检查」当恒跑必需项
-       （与 structure 同档）；
-    4) 同次更新 `docs/testing/execution-ci.md` 的 workflow job 说明与 `node run-tests.js --list` 的口径。
-  accept: |
-    zizmor 不再 continue-on-error；`No findings`（当前 2 条有记录豁免）；gate 在工作流安全审查失败时红；
-    文档、`--list` 与 workflow 里的步骤一致。
-  blocked_by: |
-    观察窗口：需要 ≥5 次非 Draft 的 CI 记录（PR #40 的 run 42044083491 是第 1 次，12 个 job 全绿）。
