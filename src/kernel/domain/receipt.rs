@@ -69,9 +69,8 @@ fn truncate_middle(texts: &dyn ProcessTexts, text: &str, max_chars: usize) -> St
         // 第一行就超过预算：没有行边界可用，按字符切。
         head = head_raw;
     }
-    // 结尾：预算窗口若从行中间开始，优先从下一个完整行开始；但若这样会丢掉窗口的大半
-    // （例如整段输出就是一条超长行，后面只剩一行 stderr），保留窗口原文——不能为了凑行
-    // 把结尾内容本身丢掉。
+    // 结尾：预算窗口若从行中间开始，优先从下一完整行开始；但若会丢掉窗口大半
+    // （超长单行 + 后面只有 stderr），保留窗口原文——不能为了凑行把结尾内容丢掉。
     let tail_start = count - tail_budget;
     let tail_raw: String = text.chars().skip(tail_start).collect();
     let at_line_start = tail_start == 0 || text.chars().nth(tail_start - 1) == Some('\n');
@@ -217,8 +216,8 @@ mod tests {
 
     #[test]
     fn tail_keeps_a_single_long_line_instead_of_dropping_it() {
-        // macOS 真机回归：整段 stdout 是一条 2 万字符的长行 + "TAIL"，后面只有一行 stderr。
-        // 若"从整行开始"会把整条长行丢掉、只剩 53 字符的 stderr；这里必须保留 12000 字符窗口。
+        // macOS 真机回归：整段 stdout 是一条 2 万字符长行 + TAIL，后面只有一行 stderr。
+        // 若"从整行开始"会丢掉整条长行、结尾只剩 53 字符；这里必须保留 12000 字符窗口。
         let mut text = "a".repeat(20_000);
         text.push_str("TAIL\n[stderr]\n[围栏] seatbelt 规则 37 条\n");
         let out = shell_receipt(&texts(), &text, "", ShellEnd::Exit(Some(0)), 16_000);
