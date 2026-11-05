@@ -227,7 +227,7 @@ $ start.bat                 # Windows（或 node start.js）；macOS/Linux 用 .
 
 ## 检查
 - 产品行为与契约 → 呈现层路由测试（`src/tests/routes.rs`）与 L4 端到端（`node run-tests.js`）。
-- 文档结构 → `node run-tests.js --docs` 的文档审查。
+- 文档结构 → `node run-tests.js --docs` 的文档审查（`tests/gates/docs/`）。
 
 ## 路由
 - 实现与开发规则：[ARCHITECTURE.md](ARCHITECTURE.md)

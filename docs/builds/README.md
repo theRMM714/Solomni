@@ -49,7 +49,7 @@
 - 本机档：项目内基础工具链（Python / Node / C-C++）优先，其次宿主 PATH 回退，再其次是 `runtimes/` 里的包；缺了如实拒绝——「声明不构成保证」。
 - 虚拟机档：guest 自带的运行能力优先，其次包库（prefix 的 `bin` 进 PATH、system 的载荷叠写进系统路径）。
 - 选包规则与运行能力同一套，见 `RUNTIME_SPEC.md` 与 `docs/vm/README.md`。
-- 项目内基础工具链由 `setup-runtime.js` 默认装好；`start.js` 首启询问安装、之后每次启动报告状态（见 `README.md` 的「安装与运行」）。
+- 项目内基础工具链由产品 provision 补齐（`solomni --provision --ensure=toolchain --yes`，kind 组别名只补缺项；装完由 Rust 侧登记 `.tools/toolchains/active.json`）；`start.js` 只指路（见 `README.md` 的「安装与运行」）。
 
 ## 五、缓存与回收
 - 状态落 `.vm/build-state/<模块>.json`：`target`（`host` / 虚拟根名）+ `fingerprint`；本机档与各虚拟根共用一份，靠 `target` 区分。
@@ -64,7 +64,7 @@
 - 构建命令写成模块内的脚本：unix 放 `tools/build`（要执行位），Windows 放 `tools/build.cmd`；两个文件并排，各自的壳自己找得到（Windows 的 cmd 按 PATHEXT，与 `npm` 的 shim 同一条规矩）。
 - `.cmd` 只写 ASCII：cmd 按控制台代码页解释批处理字节，非 ASCII 的 `rem` 注释会把下一行整行吞掉，构建直接失败；`chcp 65001` 在管道 stdio 下也救不了。
 - 失败判定用 `||`，不要用 `if errorlevel`：`g++ … || exit /b 1`；`if errorlevel 1` 的语义是「errorlevel ≥ 1」，编译器崩溃时退出码是负数（如 `0xC0000409`），判断为假、脚本以 0 退出，产品只能靠入口复验发现——归因会变得含糊。
-- 说明文字写进模块 README，`--build` 与门禁都按这条判（`run-tests.js` 的结构审查扫 `.cmd` / `.bat` 的非 ASCII 与 BOM）。
+- 说明文字写进模块 README，`--build` 与门禁都按这条判（结构审查的 platform 门禁 `tests/gates/structure/platform.js` 扫 `.cmd` / `.bat` 的非 ASCII 与 BOM）。
 - 会话里要执行的相对入口（`tools.*.command` 的首 token）复制到 `/usr/local/lib/solomni/modules/<模块>/<入口>` 并给执行位，cwd 仍是共享的模块根（数据与 userdata 不动）——共享盘（cifs 的合成权限位）不承载执行位，脚本一律用解释器跑（`bash x.sh`）。
 
 ## 改动本单元时必须同步

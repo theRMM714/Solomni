@@ -8,10 +8,7 @@
 const { spawnSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
-const readline = require("readline");
 const env = require("./env.js");
-const TOOLCHAINS = require("./toolchains.js");
-const TC = require("./setup-toolchains.js");
 
 const ROOT = __dirname;
 const IS_WIN = process.platform === "win32";
@@ -23,10 +20,6 @@ const BIN = path.join(ROOT, "target", PROFILE, EXE);
 const log = (m) => console.log("[start] " + m);
 const die = (m) => { console.error("[start] " + m); process.exit(1); };
 
-function ask(q) {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve) => rl.question(q, (a) => { rl.close(); resolve(a); }));
-}
 // 与 src/presentation/web/mod.rs 的 RESTART_EXIT_CODE 同源：全局沙箱策略保存后整体重启。
 const RESTART_EXIT_CODE = 75;
 
@@ -76,34 +69,10 @@ function runLoop(cargoEnv) {
 
 (async () => {
   const ready = await env.ensure({ yes: process.argv.includes("--yes") });
-  // 基础工具链是运行前提：首启问一次，之后只由核心每次启动报告缺失；--yes 可补装。
-  const target = TOOLCHAINS.hostTarget();
-  const before = target ? TC.profileState(target, TOOLCHAINS.PROFILE) : { ok: true };
-  if (target && !before.ok) {
-    const marker = path.join(ROOT, ".tools", "toolchains", ".install-asked");
-    const asked = fs.existsSync(marker);
-    const force = process.argv.includes("--yes");
-    if (force || (!asked && process.stdin.isTTY)) {
-      try {
-        fs.mkdirSync(path.dirname(marker), { recursive: true });
-        if (!asked) fs.writeFileSync(marker, new Date().toISOString() + "\n");
-      } catch (e) {
-        log("无法写首次询问标记：" + (e && e.message ? e.message : e));
-      }
-      try {
-        let install = force;
-        if (!force) {
-          const a = await ask("首次启动：把 Python / Node / C-C++ 装进项目内 .tools/toolchains？[y/N] ");
-          install = a.trim().toLowerCase() === "y";
-        }
-        if (install) {
-          const st = await TC.ensureProfile({ yes: true, target });
-          if (!st.ok) log("基础工具链未装好：" + (st.missing.join("、") || st.reason) + "（可运行 node setup-runtime.js --yes）");
-        }
-      } catch (e) {
-        log("基础工具链安装失败：" + (e && e.message ? e.message : e));
-      }
-    }
+  // 运行前提（Python / Node / C-C++）由产品自己补：active.json 不在场时给一次一句话指路，
+  // 之后就由产品每次启动如实报缺件与同一条命令（这里不重复 profile 判据）。
+  if (!fs.existsSync(path.join(ROOT, ".tools", "toolchains", "active.json"))) {
+    log("运行前提未安装：构建后跑 solomni --provision --ensure=toolchain --yes（产品每次启动也会提示）");
   }
   log("platform " + process.platform + " " + process.arch);
   const cargo = ready.cargo;

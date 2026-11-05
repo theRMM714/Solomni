@@ -8,10 +8,11 @@ use crate::capabilities::vm::api::Vm;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::fs;
-use std::io;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 /// 清单与台账在构建期嵌进二进制：分发的二进制不依赖仓库里的文件，读到的仍是同一份真相。
 const DEPS_YAML: &str = include_str!("../../../dependencies.yaml");
@@ -36,12 +37,16 @@ pub struct Dep {
     pub install: String,
     pub probe: String,
     pub source: String,
-    /// 目的：安装方式：archive（默认，解归档）/ appimage / file（单文件直下）/ guest-rootfs（多步构造）。
+    /// 目的：安装方式：archive（默认，解归档）/ appimage / file（单文件直下）/ guest-rootfs（多步构造）/
+    ///   toolchain（基础工具链：装进 .tools/toolchains 并登记 active.json）。
     #[serde(default = "default_kind")]
     pub kind: String,
     /// 目的：归属的虚拟根名（只有 guest 类条目有）；一个虚拟根可以由多条条目共同装。
     #[serde(default)]
     pub guest: Option<String>,
+    /// 目的：kind: toolchain 的载荷；缺了就是清单写错（安装时如实拒绝，不猜版本或布局）。
+    #[serde(default)]
+    pub toolchain: Option<ToolchainSpec>,
     /// 目的：Linux 虚拟根构造用的发行版族（只有 guest-rootfs 有）；没有声明 = 没有构造配方。
     #[serde(default)]
     pub family: Option<String>,
@@ -59,6 +64,24 @@ pub struct Dep {
     pub note: String,
 }
 
+/// 目的：基础工具链条目的载荷（kind: toolchain）——装哪个工具、什么版本、哪些 bin 目录进 active.json。
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct ToolchainSpec {
+    /// 目的：active.json 的工具 id（python / node / cc）。
+    pub tool: String,
+    /// 目的：安装布局与 active.json 里的版本（Zig 是 Zig 的版本，MinGW 是 GCC 的版本）。
+    pub version: String,
+    /// 目的：宿主目标名（与 install 路径同一套写法）；安装时与当前宿主比对，不符即拒绝。
+    #[serde(default)]
+    pub target: Option<String>,
+    /// 目的：相对安装目录的 bin 目录（按顺序写进 active.json；启动期把它们前置到 PATH）。
+    #[serde(default)]
+    pub bins: Vec<String>,
+    /// 目的：装完是否写 cc / gcc / g++ / clang 包装——Zig 包用它把 zig cc 装成常规编译器名。
+    #[serde(default)]
+    pub wrappers: bool,
+}
+
 /// 目的：解析内嵌的依赖清单。
 pub fn deps() -> Result<Vec<Dep>, String> {
     let parsed: DepsFile =
@@ -74,7 +97,12 @@ pub fn links() -> Result<BTreeMap<String, String>, String> {
 /// 目的：把 source 解析成可下载的 URL——`release:<tag>/<资产名>` 走自托管包，其余按 links.yaml 的键。
 pub fn source_url(source: &str, links: &BTreeMap<String, String>) -> Result<String, String> {
     if let Some(asset) = source.strip_prefix("release:") {
-        let base = link("release.base").ok_or_else(|| "links.yaml 缺 release.base".to_string())?;
+        // 优先用调用方给的台账（用例注入本地源）；生产传的就是内嵌那份，结果一致。
+        let base = links
+            .get("release.base")
+            .cloned()
+            .or_else(|| link("release.base"))
+            .ok_or_else(|| "links.yaml 缺 release.base".to_string())?;
         return Ok(format!("{}/{}", base.trim_end_matches('/'), asset));
     }
     links
@@ -153,6 +181,137 @@ pub fn for_host(deps: &[Dep], os: &str, arch: &str) -> Vec<Dep> {
         .collect()
 }
 
+/// 目的：宿主目标名——与清单 `toolchain.target`、安装布局同一套写法（windows-x86_64 等）。
+pub(crate) fn host_target() -> String {
+    format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
+}
+
+/// 目的：这条依赖是不是基础工具链（运行前提：每次启动都要读 active.json）。
+fn is_toolchain(dep: &Dep) -> bool {
+    dep.kind == "toolchain"
+}
+
+/// 目的：这条依赖的 probe 是否已在场（文件或目录；与 status 的判据同一把尺子）。
+fn probe_present(root: &Path, dep: &Dep) -> bool {
+    let p = under(root, &dep.probe);
+    p.is_file() || p.is_dir()
+}
+
+/// 目的：`--ensure` 取值的两种含义——依赖 id 列表（原语义），或按清单 kind 的组别名（只补缺项）。
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum EnsureSpec {
+    Ids(Vec<String>),
+    Kinds(Vec<String>),
+}
+
+/// 目的：解析 `--ensure=<取值>`：全为清单里的 kind 时按组别名解释；否则原样当 id 列表。
+/// 约束：kind 与 id 混写如实拒绝（两种语义装的不是一回事，猜一种会装错东西）；
+///   未知 id 交给 run 的「没有匹配」拒绝。
+pub(crate) fn split_ensure_spec(all: &[Dep], spec: &str) -> Result<EnsureSpec, String> {
+    let tokens: Vec<String> = spec
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let mut kinds: Vec<&str> = all.iter().map(|d| d.kind.as_str()).collect();
+    kinds.sort_unstable();
+    kinds.dedup();
+    let is_kind = |t: &str| kinds.contains(&t);
+    if !tokens.is_empty() && tokens.iter().all(|t| is_kind(t)) {
+        return Ok(EnsureSpec::Kinds(tokens));
+    }
+    if tokens.iter().any(|t| is_kind(t)) {
+        return Err(format!(
+            "--ensure 不能混写 kind（{}）与依赖 id：{}",
+            kinds.join(" / "),
+            spec
+        ));
+    }
+    Ok(EnsureSpec::Ids(tokens))
+}
+
+/// 目的：按 kind 组取「还没在场」的条目 id——组别名只补缺项，已在位的不重装（260 MB 的包不重解）。
+pub(crate) fn pending_of_kinds(all: &[Dep], root: &Path, kinds: &[String]) -> Vec<String> {
+    let mut ids: Vec<String> = Vec::new();
+    for dep in all {
+        if kinds.iter().any(|k| k == &dep.kind)
+            && !probe_present(root, dep)
+            && !ids.contains(&dep.id)
+        {
+            ids.push(dep.id.clone());
+        }
+    }
+    ids
+}
+
+/// 目的：把两段相对路径拼起来（统一用 `/` 书写，与清单同一套写法）；空段忽略，不产生 `//`。
+fn join_rel(base: &str, rel: &str) -> String {
+    let mut out = base.trim_end_matches('/').to_string();
+    for seg in rel.split('/').filter(|s| !s.is_empty()) {
+        out.push('/');
+        out.push_str(seg);
+    }
+    out
+}
+
+/// 目的：把**已在场**的基础工具链登记进 `.tools/toolchains/active.json`（启动期只读这一份，见 entry::toolchains）。
+/// 约束：以磁盘为准而不是以「这次装了什么」为准——先装 python 后装 node 时，两次都要登记到同一份；
+///   有 bin 目录不在场的工具如实不登记（启动期据此报缺哪个，不假装装上）；写盘走临时文件再改名。
+pub(crate) fn sync_toolchain_active(root: &Path, all: &[Dep]) -> Result<(), String> {
+    let target = host_target();
+    let mut profile: Vec<String> = Vec::new();
+    let mut tools: Vec<serde_json::Value> = Vec::new();
+    for dep in all.iter().filter(|d| is_toolchain(d)) {
+        let spec = dep
+            .toolchain
+            .as_ref()
+            .ok_or_else(|| format!("{}：kind: toolchain 缺 toolchain 段", dep.id))?;
+        if spec.tool.trim().is_empty() || spec.version.trim().is_empty() || spec.bins.is_empty() {
+            return Err(format!(
+                "{}：toolchain 段的 tool / version / bins 都不能空",
+                dep.id
+            ));
+        }
+        if let Some(want) = &spec.target {
+            if want != &target {
+                return Err(format!(
+                    "{}：工具链目标不符（清单 {}，当前 {}）",
+                    dep.id, want, target
+                ));
+            }
+        }
+        if !profile.contains(&spec.tool) {
+            profile.push(spec.tool.clone());
+        }
+        let bins: Vec<String> = spec
+            .bins
+            .iter()
+            .map(|b| join_rel(&dep.install, b))
+            .collect();
+        let present = bins.iter().all(|b| under(root, b).is_dir());
+        if present {
+            tools.push(serde_json::json!({
+                "id": spec.tool,
+                "version": spec.version,
+                "bin": bins,
+                "env": {},
+            }));
+        }
+    }
+    let file = root.join(".tools").join("toolchains").join("active.json");
+    let dir = file
+        .parent()
+        .ok_or_else(|| "active.json 没有父目录".to_string())?;
+    fs::create_dir_all(dir).map_err(|e| format!("建 {} 失败：{}", dir.display(), e))?;
+    let doc = serde_json::json!({ "target": target, "profile": profile, "tools": tools });
+    let text = serde_json::to_string_pretty(&doc)
+        .map_err(|e| format!("序列化 active.json 失败：{}", e))?;
+    let tmp = file.with_extension("json.tmp");
+    fs::write(&tmp, text + "\n").map_err(|e| format!("写 {} 失败：{}", tmp.display(), e))?;
+    fs::rename(&tmp, &file).map_err(|e| format!("提交 {} 失败：{}", file.display(), e))?;
+    Ok(())
+}
+
 /// 目的：依赖补齐的实现——持产品根、作业状态、取消旗与（可选的）vm 能力面；下载 / 解包在下面同一文件。
 pub struct ProvisionService {
     root: PathBuf,
@@ -184,6 +343,38 @@ impl ProvisionService {
     /// 目的：同步补齐（CLI 用）：逐条下载 / 解包 / 校验，进度逐行回调。
     pub fn ensure(&self, ids: &[String], on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
         run_ensure(&self.root, ids, &self.cancel, on_line, self.vm.as_deref())
+    }
+
+    /// 目的：`--ensure=<取值>` 的补齐入口：kind 组别名只补缺项（如 `toolchain`），
+    ///   id 列表按原语义点名安装（空列表 = 清单全部）。
+    /// 约束：组别名一条都不缺时如实说「都在场」且不碰网络；在位项不重装。
+    pub fn ensure_spec(&self, spec: &str, on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
+        let all = for_host(&deps()?, std::env::consts::OS, std::env::consts::ARCH);
+        match split_ensure_spec(&all, spec)? {
+            EnsureSpec::Ids(ids) => self.ensure(&ids, on_line),
+            EnsureSpec::Kinds(kinds) => {
+                let pending = pending_of_kinds(&all, &self.root, &kinds);
+                if pending.is_empty() {
+                    on_line(&format!("{}：没有缺项，无需补齐", kinds.join(" / ")));
+                    return Ok(());
+                }
+                on_line(&format!(
+                    "{}：补 {} 条（{}）",
+                    kinds.join(" / "),
+                    pending.len(),
+                    pending.join(" / ")
+                ));
+                run(
+                    &self.root,
+                    &all,
+                    &links()?,
+                    &pending,
+                    &self.cancel,
+                    on_line,
+                    self.vm.as_deref(),
+                )
+            }
+        }
     }
 }
 
@@ -420,6 +611,12 @@ fn run(
             on_line("已取消");
             return Ok(());
         }
+        // 基础工具链是每次启动都要用的运行前提：全量补齐时已在场就不重装
+        // （260 MB 的 MinGW 重解一遍没有意义）；其余 kind 的「在位即跳过」由调用方筛 pending。
+        if is_toolchain(dep) && !explicit && probe_present(root, dep) {
+            on_line(&format!("{}：已就位（跳过）", dep.id));
+            continue;
+        }
         let url = source_url(&dep.source, links)?;
         let asset = asset_name(&url);
         let cached = cache.join(&asset);
@@ -446,6 +643,8 @@ fn run(
                 "guest-disk" => install_guest_disk(&cached, &dest, &dep.probe, on_line)
                     .map_err(|e| format!("{}：{}", dep.id, e)),
                 "guest-rootfs" => install_guest_rootfs(root, dep, &cached, &agent, on_line)
+                    .map_err(|e| format!("{}：{}", dep.id, e)),
+                "toolchain" => install_toolchain(&cached, &dest, dep, on_line)
                     .map_err(|e| format!("{}：{}", dep.id, e)),
                 "guest-runtime" => {
                     let r = super::guest::install_guest_runtime(root, dep, vm, explicit, on_line);
@@ -475,6 +674,11 @@ fn run(
         }
         on_line(&format!("{}：就绪（{}）", dep.id, dep.install));
     }
+    // 装完就把基础工具链登记进 active.json：启动期只读这一份（entry::toolchains）；
+    // 单独点名装一条时也要刷新，所以登记以磁盘为准（见 sync_toolchain_active）。
+    if all.iter().any(is_toolchain) {
+        sync_toolchain_active(root, all)?;
+    }
     Ok(())
 }
 
@@ -489,29 +693,195 @@ fn asset_name(url: &str) -> String {
         .to_string()
 }
 
-/// 目的：把 URL 下到目标文件——先写 .part 再改名，避免半截文件被当成缓存。
+/// 目的：把 URL 下到目标文件——选源（前缀镜像测速）后带续传下载；半截文件留作下次续传的断点。
+/// 代理：ureq 的默认配置从环境拾取（HTTPS_PROXY / HTTP_PROXY / NO_PROXY），这里不另写一套。
 fn download(
     agent: &ureq::Agent,
     url: &str,
     dest: &Path,
     on_line: &mut dyn FnMut(&str),
 ) -> Result<(), String> {
-    let resp = agent
-        .get(url)
-        .call()
-        .map_err(|e| format!("下载失败（{}）：{}", url, e))?;
-    if !resp.status().is_success() {
-        return Err(format!("下载 {} 返回 {}", url, resp.status().as_u16()));
+    let picked = pick_source(agent, &source_candidates(url), on_line)?;
+    download_with_resume(agent, &picked, dest, on_line)
+}
+
+/// 目的：下载候选——上游 URL 在前；配了 SOLOMNI_GH_MIRROR 时再加一条前缀镜像（只对 GitHub 资产）。
+fn source_candidates(upstream: &str) -> Vec<String> {
+    let mirror = std::env::var("SOLOMNI_GH_MIRROR").unwrap_or_default();
+    let mut out = vec![upstream.to_string()];
+    if let Some(m) = mirror_of(upstream, &mirror) {
+        out.push(m);
     }
-    let body = resp.into_body();
-    let mut reader = body.into_reader();
-    let tmp = dest.with_extension("part");
-    let mut f = fs::File::create(&tmp).map_err(|e| format!("建 {} 失败：{}", tmp.display(), e))?;
-    let n =
-        io::copy(&mut reader, &mut f).map_err(|e| format!("写 {} 失败：{}", tmp.display(), e))?;
+    out
+}
+
+/// 目的：前缀镜像的写法——`<镜像根>/github.com/<owner>/<repo>/...`；不是 GitHub 资产或没配镜像就不加。
+fn mirror_of(upstream: &str, mirror: &str) -> Option<String> {
+    let root = mirror.trim().trim_end_matches('/');
+    let rest = upstream.strip_prefix("https://github.com/")?;
+    if root.is_empty() {
+        return None;
+    }
+    Some(format!("{}/github.com/{}", root, rest))
+}
+
+/// 目的：选源——只有一个候选就直接用（没有选择时测速是白花的时间）；多个时各探 2 MB，取最快且可达的。
+fn pick_source(
+    agent: &ureq::Agent,
+    urls: &[String],
+    on_line: &mut dyn FnMut(&str),
+) -> Result<String, String> {
+    if urls.len() <= 1 {
+        return urls
+            .first()
+            .cloned()
+            .ok_or_else(|| "没有下载源".to_string());
+    }
+    on_line(&format!("测速选源（{} 个候选，各探 2 MB）...", urls.len()));
+    let mut samples: Vec<(String, u16, f64)> = Vec::new();
+    for u in urls {
+        let (code, kbps) = probe_speed(agent, u);
+        on_line(&format!("  {:.0} KB/s  [http {}]  {}", kbps, code, u));
+        samples.push((u.clone(), code, kbps));
+    }
+    choose_fastest(&samples)
+}
+
+/// 目的：从探测结果里选源——2xx 且有数据的最快者；都不行时把状态码含义说清（不静默换源硬试）。
+fn choose_fastest(samples: &[(String, u16, f64)]) -> Result<String, String> {
+    let best = samples
+        .iter()
+        .filter(|(_, code, kbps)| (200..300).contains(code) && *kbps > 0.0)
+        .max_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
+    if let Some((url, _, _)) = best {
+        return Ok(url.clone());
+    }
+    let codes: Vec<String> = samples.iter().map(|(_, c, _)| c.to_string()).collect();
+    Err(format!(
+        "没有可用的下载源（HTTP {}）：000 = 网络层失败（配 HTTPS_PROXY，或浏览器下载后放进缓存），403 = 被限流，404 = 该源没有这个资产",
+        codes.join(" / ")
+    ))
+}
+
+/// 目的：一次 2 MB 的范围 GET，回 (状态码, KB/s)；网络层失败记 000（与 curl 的观感一致）。
+/// 约束：非 2xx 再试一次——受限网络上瞬时重置很常见，只探一次会把可达源误杀。
+fn probe_speed(agent: &ureq::Agent, url: &str) -> (u16, f64) {
+    let first = probe_speed_once(agent, url);
+    if (200..300).contains(&first.0) {
+        return first;
+    }
+    probe_speed_once(agent, url)
+}
+
+fn probe_speed_once(agent: &ureq::Agent, url: &str) -> (u16, f64) {
+    let started = Instant::now();
+    let resp = match agent.get(url).header("Range", "bytes=0-2097151").call() {
+        Ok(r) => r,
+        Err(_) => return (0, 0.0),
+    };
+    let code = resp.status().as_u16();
+    if !(200..300).contains(&code) {
+        return (code, 0.0);
+    }
+    let mut reader = resp.into_body().into_reader().take(2 * 1024 * 1024);
+    let bytes = io::copy(&mut reader, &mut io::sink()).unwrap_or(0);
+    let secs = started.elapsed().as_secs_f64().max(0.001);
+    (code, bytes as f64 / 1024.0 / secs)
+}
+
+/// 目的：分片路径（`.part`）——下载先写它再改名，半截文件不会被当成缓存。
+fn part_path(dest: &Path) -> PathBuf {
+    dest.with_extension("part")
+}
+
+/// 目的：分片的来源标记——续传必须打向产出这份分片的那条源（换源续等于把两份字节接起来）。
+fn part_source_marker(part: &Path) -> PathBuf {
+    let mut s = part.as_os_str().to_os_string();
+    s.push(".src");
+    PathBuf::from(s)
+}
+
+/// 目的：带续传的下载——`.part` 在场且来源标记与本次 URL 一致就从断点续（Range）；
+///   来源不明 / 换了源就从头下；服务端忽略 Range（回 200）时从零重写。
+/// 约束：失败时保留分片与来源标记（续传证据），成功才改名并删标记。
+fn download_with_resume(
+    agent: &ureq::Agent,
+    url: &str,
+    dest: &Path,
+    on_line: &mut dyn FnMut(&str),
+) -> Result<(), String> {
+    let part = part_path(dest);
+    let marker = part_source_marker(&part);
+    let same_source = fs::read_to_string(&marker)
+        .map(|s| s.trim() == url)
+        .unwrap_or(false);
+    let offset = if part.is_file() {
+        if same_source {
+            fs::metadata(&part).map(|m| m.len()).unwrap_or(0)
+        } else {
+            let _ = fs::remove_file(&part);
+            0
+        }
+    } else {
+        0
+    };
+    if offset == 0 {
+        let _ = fs::remove_file(&marker);
+    }
+    fs::write(&marker, url).map_err(|e| format!("写来源标记 {} 失败：{}", marker.display(), e))?;
+    let mut req = agent.get(url);
+    if offset > 0 {
+        req = req.header("Range", format!("bytes={}-", offset));
+    }
+    let resp = match req.call() {
+        Ok(r) => r,
+        Err(e) => return Err(format!("下载失败（{}）：{}（分片保留，重跑续传）", url, e)),
+    };
+    let code = resp.status().as_u16();
+    if !(200..300).contains(&code) {
+        return Err(format!(
+            "下载 {} 返回 {}（分片保留，重跑续传；要换源先删分片与来源标记 {}）",
+            url,
+            code,
+            part.display()
+        ));
+    }
+    let append = offset > 0 && code == 206;
+    let mut opts = fs::OpenOptions::new();
+    opts.create(true).write(true);
+    if append {
+        opts.append(true);
+    } else {
+        opts.truncate(true);
+    }
+    let mut f = opts
+        .open(&part)
+        .map_err(|e| format!("建 {} 失败：{}", part.display(), e))?;
+    let mut reader = resp.into_body().into_reader();
+    let mut added = 0u64;
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let got = reader
+            .read(&mut buf)
+            .map_err(|e| format!("读下载流失败（{}）：{}", url, e))?;
+        if got == 0 {
+            break;
+        }
+        io::Write::write_all(&mut f, &buf[..got])
+            .map_err(|e| format!("写 {} 失败：{}", part.display(), e))?;
+        added += got as u64;
+    }
     drop(f);
-    fs::rename(&tmp, dest).map_err(|e| format!("改名 {} 失败：{}", dest.display(), e))?;
-    on_line(&format!("下载完成：{} 字节", n));
+    fs::rename(&part, dest).map_err(|e| format!("改名 {} 失败：{}", part.display(), e))?;
+    let _ = fs::remove_file(&marker);
+    if append {
+        on_line(&format!(
+            "续传完成：断点 {} 字节 + 新增 {} 字节",
+            offset, added
+        ));
+    } else {
+        on_line(&format!("下载完成：{} 字节", added));
+    }
     Ok(())
 }
 
@@ -557,6 +927,94 @@ fn verify_cached(id: &str, pinned: Option<&str>, cached: &Path, url: &str) -> Re
         url,
         cached.display()
     ))
+}
+
+/// 目的：基础工具链条目——解归档到安装目录；Zig 包再写 cc / gcc / g++ / clang 包装。
+fn install_toolchain(
+    cached: &Path,
+    dest: &Path,
+    dep: &Dep,
+    on_line: &mut dyn FnMut(&str),
+) -> Result<(), String> {
+    let spec = dep
+        .toolchain
+        .as_ref()
+        .ok_or_else(|| "kind: toolchain 缺 toolchain 段".to_string())?;
+    crate::kernel::detail::unpack::extract_into(cached, dest, dep.strip)?;
+    if spec.wrappers {
+        write_zig_wrappers(dest)?;
+        on_line("已写 cc / gcc / g++ / clang 包装（Zig 提供）");
+    }
+    Ok(())
+}
+
+/// 目的：在安装目录里找 Zig 可执行文件（包根目录名带平台与版本，不写死）。
+fn find_zig(root: &Path) -> Option<PathBuf> {
+    fn walk(dir: &Path, depth: usize) -> Option<PathBuf> {
+        if depth > 4 {
+            return None;
+        }
+        let mut subdirs = Vec::new();
+        for e in fs::read_dir(dir).ok()? {
+            let e = e.ok()?;
+            let p = e.path();
+            if e.file_type().ok()?.is_dir() {
+                subdirs.push(p);
+            } else {
+                let name = e.file_name().to_string_lossy().into_owned();
+                if name == "zig" || name == "zig.exe" {
+                    return Some(p);
+                }
+            }
+        }
+        subdirs.into_iter().find_map(|d| walk(&d, depth + 1))
+    }
+    walk(root, 0)
+}
+
+/// 目的：把 `zig cc` / `zig c++` 包成常规编译器名（模块构建按 `gcc` / `g++` 这类能力名声明）。
+/// 约束：包装用相对路径（`$DIR/../…`），产品根整体搬移后仍可用；unix 上给执行位（其它平台清单不用 Zig）。
+fn write_zig_wrappers(install: &Path) -> Result<(), String> {
+    let zig = find_zig(install)
+        .ok_or_else(|| format!("包里找不到 zig 可执行文件：{}", install.display()))?;
+    let rel = zig
+        .strip_prefix(install)
+        .map_err(|_| format!("zig 不在安装目录里：{}", zig.display()))?;
+    let rel = rel.to_string_lossy().replace('\\', "/");
+    let bin = install.join("bin");
+    fs::create_dir_all(&bin).map_err(|e| format!("建 {} 失败：{}", bin.display(), e))?;
+    let zig_body = format!(
+        "#!/bin/sh\nDIR=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\nexec \"$DIR/../{}\" \"$@\"\n",
+        rel
+    );
+    write_exe(&bin.join("zig"), &zig_body)?;
+    for (name, sub) in [
+        ("cc", "cc"),
+        ("gcc", "cc"),
+        ("clang", "cc"),
+        ("c++", "c++"),
+        ("g++", "c++"),
+        ("clang++", "c++"),
+    ] {
+        let body = format!(
+            "#!/bin/sh\nDIR=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\nexec \"$DIR/zig\" {} \"$@\"\n",
+            sub
+        );
+        write_exe(&bin.join(name), &body)?;
+    }
+    Ok(())
+}
+
+/// 目的：写一个可执行包装脚本；unix 上补执行位（Windows 只写文件，清单不用 Zig）。
+fn write_exe(path: &Path, body: &str) -> Result<(), String> {
+    fs::write(path, body).map_err(|e| format!("写 {} 失败：{}", path.display(), e))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755))
+            .map_err(|e| format!("给 {} 执行位失败：{}", path.display(), e))?;
+    }
+    Ok(())
 }
 
 /// 目的：单文件依赖——把缓存里的文件按 probe 的文件名放进安装目录（如 guest 的 qcow2）。
@@ -1601,6 +2059,91 @@ fn purge_except(base: &Path, keep: &[&str]) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    /// 目的：造一条任意 kind 的清单条目（组别名/缺项判定的用例夹具）。
+    fn dep_of(id: &str, kind: &str, install: &str, probe: &str) -> Dep {
+        Dep {
+            id: id.to_string(),
+            os: "any".to_string(),
+            arch: "any".to_string(),
+            install: install.to_string(),
+            probe: probe.to_string(),
+            source: "release:x".to_string(),
+            kind: kind.to_string(),
+            guest: None,
+            toolchain: None,
+            family: None,
+            strip: 0,
+            size_mb: 0,
+            sha256: String::new(),
+            note: String::new(),
+        }
+    }
+
+    /// 目的：`--ensure` 取值的两种解释——全为 kind 时按组别名，否则按 id 列表；混写如实拒绝。
+    #[test]
+    fn ensure_spec_splits_kinds_from_ids_and_refuses_mixed() {
+        let all = [
+            dep_of("toolchain.python.x", "toolchain", ".t/py", ".t/py/bin"),
+            dep_of("vm.qemu.x", "archive", ".t/q", ".t/q/bin"),
+        ];
+        assert_eq!(
+            split_ensure_spec(&all, "toolchain").expect("组别名"),
+            EnsureSpec::Kinds(vec!["toolchain".to_string()])
+        );
+        assert_eq!(
+            split_ensure_spec(&all, "vm.qemu.x,vm.guest.x").expect("id 列表"),
+            EnsureSpec::Ids(vec!["vm.qemu.x".to_string(), "vm.guest.x".to_string()])
+        );
+        let err = split_ensure_spec(&all, "toolchain,vm.qemu.x").expect_err("混写要拒绝");
+        assert!(err.contains("不能混写"), "{}", err);
+    }
+
+    /// 目的：组别名只挑「不在场」的条目——在位的不重装（260 MB 的包不重解）。
+    #[test]
+    fn pending_of_a_kind_lists_only_missing_entries() {
+        let root = crate::tests::scratch("provision-kind-pending");
+        let present = dep_of("toolchain.python.x", "toolchain", ".t/py", ".t/py/bin");
+        let missing = dep_of("toolchain.node.x", "toolchain", ".t/node", ".t/node/bin");
+        let other = dep_of("vm.qemu.x", "archive", ".t/q", ".t/q/bin");
+        fs::create_dir_all(under(&root, ".t/py/bin")).expect("铺在位工具");
+        let all = [present, missing, other];
+        assert_eq!(
+            pending_of_kinds(&all, &root, &["toolchain".to_string()]),
+            vec!["toolchain.node.x".to_string()]
+        );
+        assert_eq!(
+            pending_of_kinds(&all, &root, &["archive".to_string()]),
+            vec!["vm.qemu.x".to_string()]
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 目的：`--ensure=toolchain` 在本机工具链都在场时是一条**不联网**的幂等命令（启动提示就靠它）。
+    /// 约束：按当前宿主清单铺出 probe（缺当前平台条目就如实跳过）；不下载、不写安装目录。
+    #[test]
+    fn ensure_spec_group_is_a_noop_when_every_toolchain_is_present() {
+        let root = crate::tests::scratch("provision-ensure-group");
+        let all = for_host(
+            &deps().expect("清单"),
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+        );
+        let toolchains: Vec<&Dep> = all.iter().filter(|d| d.kind == "toolchain").collect();
+        if toolchains.is_empty() {
+            eprintln!("[探针] 当前平台没有工具链条目，跳过");
+            return;
+        }
+        for dep in &toolchains {
+            fs::create_dir_all(under(&root, &dep.probe)).expect("铺 probe");
+        }
+        let svc = ProvisionService::new(&root);
+        let mut lines: Vec<String> = Vec::new();
+        svc.ensure_spec("toolchain", &mut |l| lines.push(l.to_string()))
+            .expect("都在场时不该碰网络");
+        assert!(lines.iter().any(|l| l.contains("没有缺项")), "{:?}", lines);
+        let _ = fs::remove_dir_all(&root);
+    }
+
     /// 目的：sha256 计算与已知向量一致（完整性闸的第一环：算法本身不能错）。
     #[test]
     fn sha256_matches_a_known_vector() {
@@ -1657,6 +2200,7 @@ mod tests {
             kind: "file".to_string(),
             guest: None,
             family: None,
+            toolchain: None,
             strip: 0,
             size_mb: 1,
             sha256: String::new(),
@@ -1732,6 +2276,7 @@ mod tests {
             kind: "guest-rootfs".to_string(),
             guest: Some("debian".to_string()),
             family: Some("alpine".to_string()),
+            toolchain: None,
             strip: 0,
             size_mb: 0,
             sha256: String::new(),
@@ -1914,6 +2459,7 @@ mod tests {
             probe: ".vm/tool/tool".to_string(),
             guest: None,
             family: None,
+            toolchain: None,
             source: "release:t.tar".to_string(),
             strip: 0,
             size_mb: 1,
@@ -1960,6 +2506,7 @@ mod tests {
             probe: ".vm/guest/debian/rootfs.qcow2".to_string(),
             guest: Some("debian".to_string()),
             family: None,
+            toolchain: None,
             source: "release:a.bin".to_string(),
             strip: 0,
             size_mb: 0,
@@ -2006,6 +2553,7 @@ mod tests {
             probe: ".vm/guest/debian/rootfs.qcow2".to_string(),
             guest: Some("debian".to_string()),
             family: None,
+            toolchain: None,
             source: "release:d.qcow2".to_string(),
             strip: 0,
             size_mb: 0,
@@ -2124,6 +2672,7 @@ mod tests {
             probe: probe.to_string(),
             guest: Some(guest.to_string()),
             family: None,
+            toolchain: None,
             source: "release:a".to_string(),
             strip: 0,
             size_mb: 0,
@@ -2173,6 +2722,7 @@ mod tests {
             probe: probe.to_string(),
             guest: Some("debian".to_string()),
             family: None,
+            toolchain: None,
             source: source.to_string(),
             strip: 0,
             size_mb: 0,
@@ -2284,6 +2834,7 @@ mod tests {
             probe: ".vm/x/f.txt".to_string(),
             guest: None,
             family: None,
+            toolchain: None,
             source: "release:a.tar".to_string(),
             strip: 0,
             size_mb: 0,
@@ -2591,6 +3142,373 @@ mod tests {
             .find(|g| g.path == "/usr/bin/sudo")
             .expect("最终镜像里要有 sudo");
         assert_eq!(sudo.mode & 0o7777, 0o4755, "最终镜像里的 sudo 要带 setuid");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 目的：kind: toolchain 走同一条补齐内核——从缓存解归档到安装目录，装完把工具登记进 active.json
+    ///   （启动期 entry::toolchains 只读这一份）；全程不碰网络。
+    #[test]
+    fn toolchain_install_extracts_and_registers_the_tool() {
+        let root = crate::tests::scratch("provision-toolchain-install");
+        let target = host_target();
+        let cache = root.join(".vm").join("cache");
+        fs::create_dir_all(&cache).expect("建缓存");
+        let install = format!(".tools/toolchains/{}/python/9.9.9", target);
+        let tar_path = cache.join("py.tar");
+        {
+            let f = fs::File::create(&tar_path).expect("建 tar");
+            let mut b = tar::Builder::new(f);
+            let mut h = tar::Header::new_gnu();
+            h.set_size(2);
+            h.set_mode(0o755);
+            h.set_cksum();
+            b.append_data(&mut h, "bin/python3", &b"py"[..])
+                .expect("写文件");
+            b.finish().expect("收尾");
+        }
+        let dep = Dep {
+            id: "toolchain.python.test".to_string(),
+            os: "any".to_string(),
+            arch: "any".to_string(),
+            install: install.clone(),
+            probe: format!("{}/bin", install),
+            source: "release:py.tar".to_string(),
+            kind: "toolchain".to_string(),
+            guest: None,
+            toolchain: Some(ToolchainSpec {
+                tool: "python".to_string(),
+                version: "9.9.9".to_string(),
+                target: Some(target.clone()),
+                bins: vec!["bin".to_string()],
+                wrappers: false,
+            }),
+            family: None,
+            strip: 0,
+            size_mb: 0,
+            sha256: String::new(),
+            note: String::new(),
+        };
+        let mut links = BTreeMap::new();
+        links.insert(
+            "release.base".to_string(),
+            "https://example.invalid".to_string(),
+        );
+        let mut lines: Vec<String> = Vec::new();
+        run(
+            &root,
+            &[dep],
+            &links,
+            &[],
+            &AtomicBool::new(false),
+            &mut |l| lines.push(l.to_string()),
+            None,
+        )
+        .expect("从缓存装工具链");
+        assert!(under(&root, &install).join("bin").is_dir(), "{:?}", lines);
+        let active = root.join(".tools").join("toolchains").join("active.json");
+        let raw = fs::read_to_string(&active).expect("要写 active.json");
+        let doc: serde_json::Value = serde_json::from_str(&raw).expect("active.json 是 JSON");
+        assert_eq!(doc["target"], serde_json::json!(target));
+        assert_eq!(doc["profile"], serde_json::json!(["python"]));
+        assert_eq!(doc["tools"][0]["id"], serde_json::json!("python"));
+        assert_eq!(
+            doc["tools"][0]["bin"][0],
+            serde_json::json!(format!("{}/bin", install))
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 目的：Zig 包解出来只有 zig 本体；装完补 cc / gcc / g++ / clang 包装（相对路径，产品根搬移后仍可用）。
+    #[test]
+    fn zig_toolchain_gets_compiler_wrappers() {
+        let root = crate::tests::scratch("provision-toolchain-zig");
+        let target = host_target();
+        let cache = root.join(".vm").join("cache");
+        fs::create_dir_all(&cache).expect("建缓存");
+        let install = format!(".tools/toolchains/{}/cc/9.9.9", target);
+        let tar_path = cache.join("zig.tar");
+        {
+            let f = fs::File::create(&tar_path).expect("建 tar");
+            let mut b = tar::Builder::new(f);
+            let mut h = tar::Header::new_gnu();
+            h.set_size(3);
+            h.set_mode(0o755);
+            h.set_cksum();
+            b.append_data(&mut h, "zig-demo/zig", &b"zig"[..])
+                .expect("写 zig");
+            b.finish().expect("收尾");
+        }
+        let dep = Dep {
+            id: "toolchain.cc.test".to_string(),
+            os: "any".to_string(),
+            arch: "any".to_string(),
+            install: install.clone(),
+            probe: format!("{}/bin", install),
+            source: "release:zig.tar".to_string(),
+            kind: "toolchain".to_string(),
+            guest: None,
+            toolchain: Some(ToolchainSpec {
+                tool: "cc".to_string(),
+                version: "9.9.9".to_string(),
+                target: Some(target),
+                bins: vec!["bin".to_string()],
+                wrappers: true,
+            }),
+            family: None,
+            strip: 0,
+            size_mb: 0,
+            sha256: String::new(),
+            note: String::new(),
+        };
+        let mut links = BTreeMap::new();
+        links.insert(
+            "release.base".to_string(),
+            "https://example.invalid".to_string(),
+        );
+        run(
+            &root,
+            &[dep],
+            &links,
+            &[],
+            &AtomicBool::new(false),
+            &mut |_| {},
+            None,
+        )
+        .expect("装 Zig 工具链");
+        let bin = under(&root, &install).join("bin");
+        let zig = fs::read_to_string(bin.join("zig")).expect("zig 包装");
+        assert!(
+            zig.contains("../zig-demo/zig"),
+            "zig 包装要指向包内本体：{}",
+            zig
+        );
+        let gcc = fs::read_to_string(bin.join("gcc")).expect("gcc 包装");
+        assert!(gcc.contains("zig\" cc"), "gcc 包装要调 zig cc：{}", gcc);
+        let gxx = fs::read_to_string(bin.join("g++")).expect("g++ 包装");
+        assert!(gxx.contains("zig\" c++"), "g++ 包装要调 zig c++：{}", gxx);
+        for name in ["cc", "gcc", "g++", "c++", "clang", "clang++"] {
+            assert!(bin.join(name).is_file(), "缺包装：{}", name);
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(bin.join("gcc"))
+                .expect("看模式")
+                .permissions()
+                .mode();
+            assert!(mode & 0o111 != 0, "包装要有执行位：{:o}", mode);
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 目的：全量补齐时已在场的基础工具链不重装（260 MB 的 MinGW 不该每次重解）；显式点名才强制重装。
+    #[test]
+    fn present_toolchain_is_skipped_on_full_ensure() {
+        let root = crate::tests::scratch("provision-toolchain-skip");
+        let target = host_target();
+        let install = format!(".tools/toolchains/{}/python/9.9.9", target);
+        fs::create_dir_all(under(&root, &install).join("bin")).expect("铺已装好的工具");
+        let dep = Dep {
+            id: "toolchain.python.test".to_string(),
+            os: "any".to_string(),
+            arch: "any".to_string(),
+            install: install.clone(),
+            probe: format!("{}/bin", install),
+            source: "release:missing.tar".to_string(),
+            kind: "toolchain".to_string(),
+            guest: None,
+            toolchain: Some(ToolchainSpec {
+                tool: "python".to_string(),
+                version: "9.9.9".to_string(),
+                target: Some(target),
+                bins: vec!["bin".to_string()],
+                wrappers: false,
+            }),
+            family: None,
+            strip: 0,
+            size_mb: 0,
+            sha256: String::new(),
+            note: String::new(),
+        };
+        let mut links = BTreeMap::new();
+        links.insert("release.base".to_string(), "http://127.0.0.1:1".to_string());
+        let mut lines: Vec<String> = Vec::new();
+        run(
+            &root,
+            std::slice::from_ref(&dep),
+            &links,
+            &[],
+            &AtomicBool::new(false),
+            &mut |l| lines.push(l.to_string()),
+            None,
+        )
+        .expect("在位就跳过，不碰网络");
+        assert!(
+            lines.iter().any(|l| l.contains("已就位（跳过）")),
+            "{:?}",
+            lines
+        );
+        // 显式点名 = 你要的就是它：缓存里没有、源不可达时如实失败，不假装成功。
+        let err = run(
+            &root,
+            &[dep],
+            &links,
+            &["toolchain.python.test".to_string()],
+            &AtomicBool::new(false),
+            &mut |_| {},
+            None,
+        )
+        .expect_err("点名就必须真装");
+        assert!(err.contains("下载失败"), "{}", err);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 目的：校验不符拒绝落盘——报台账值 / 实际值，安装目录一个字节都不写；缓存保留（证据与续传都靠它）。
+    #[test]
+    fn toolchain_pin_mismatch_refuses_to_land() {
+        let root = crate::tests::scratch("provision-toolchain-pin");
+        let target = host_target();
+        let cache = root.join(".vm").join("cache");
+        fs::create_dir_all(&cache).expect("建缓存");
+        fs::write(cache.join("py.tar"), b"abc").expect("写缓存");
+        let install = format!(".tools/toolchains/{}/python/9.9.9", target);
+        let dep = Dep {
+            id: "toolchain.python.test".to_string(),
+            os: "any".to_string(),
+            arch: "any".to_string(),
+            install: install.clone(),
+            probe: format!("{}/bin", install),
+            source: "release:py.tar".to_string(),
+            kind: "toolchain".to_string(),
+            guest: None,
+            toolchain: Some(ToolchainSpec {
+                tool: "python".to_string(),
+                version: "9.9.9".to_string(),
+                target: Some(target),
+                bins: vec!["bin".to_string()],
+                wrappers: false,
+            }),
+            family: None,
+            strip: 0,
+            size_mb: 0,
+            sha256: "0".repeat(64),
+            note: String::new(),
+        };
+        let mut links = BTreeMap::new();
+        links.insert(
+            "release.base".to_string(),
+            "https://example.invalid".to_string(),
+        );
+        let err = run(
+            &root,
+            &[dep],
+            &links,
+            &[],
+            &AtomicBool::new(false),
+            &mut |_| {},
+            None,
+        )
+        .expect_err("pin 不符要拒绝");
+        assert!(err.contains("sha256 与台账不符"), "{}", err);
+        assert!(err.contains(&"0".repeat(64)), "要报台账值：{}", err);
+        assert!(
+            err.contains("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"),
+            "要报实际值：{}",
+            err
+        );
+        assert!(!under(&root, &install).exists(), "校验失败不许落盘");
+        assert!(
+            cache.join("py.tar").is_file(),
+            "不删缓存（证据与续传都靠它）"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 目的：镜像只是候选之一（上游在前），GitHub 资产才加；选源排除不可达的候选，全都不可达时说清状态码。
+    #[test]
+    fn mirror_and_source_choice() {
+        assert_eq!(
+            mirror_of("https://github.com/a/b/c.zip", "https://gh.example/"),
+            Some("https://gh.example/github.com/a/b/c.zip".to_string())
+        );
+        assert_eq!(
+            mirror_of("https://example.test/a.zip", "https://gh.example"),
+            None
+        );
+        assert_eq!(mirror_of("https://github.com/a/b", ""), None);
+        let sample = |url: &str, code: u16, kbps: f64| (url.to_string(), code, kbps);
+        let picked = choose_fastest(&[
+            sample("https://a", 200, 10.0),
+            sample("https://b", 200, 900.0),
+            sample("https://c", 404, 0.0),
+        ])
+        .expect("要选出最快的可达源");
+        assert_eq!(picked, "https://b");
+        let err = choose_fastest(&[sample("https://a", 0, 0.0)]).unwrap_err();
+        assert!(err.contains("没有可用的下载源"), "{}", err);
+    }
+
+    /// 目的：断点续传——分片与来源标记一致时带 Range 续上；来源不明就从头下（不把两份字节接起来）。
+    #[test]
+    fn resume_uses_range_only_for_a_known_source() {
+        use std::sync::Arc;
+        use std::time::Duration;
+        let body: &'static [u8] = b"0123456789";
+        let server = Arc::new(tiny_http::Server::http("127.0.0.1:0").expect("起本地源"));
+        let addr = server.server_addr().to_ip().expect("TCP 地址");
+        let url = format!("http://127.0.0.1:{}/a.bin", addr.port());
+        let stop = Arc::new(AtomicBool::new(false));
+        let seen = Arc::new(Mutex::new(Vec::<Option<String>>::new()));
+        let (srv, st, sn) = (Arc::clone(&server), Arc::clone(&stop), Arc::clone(&seen));
+        let handle = std::thread::spawn(move || {
+            while !st.load(Ordering::Relaxed) {
+                let Ok(Some(req)) = srv.recv_timeout(Duration::from_millis(50)) else {
+                    continue;
+                };
+                let range = req
+                    .headers()
+                    .iter()
+                    .find(|h| h.field.equiv("Range"))
+                    .map(|h| h.value.as_str().to_string());
+                sn.lock().expect("锁").push(range.clone());
+                let resp = match range {
+                    Some(r) => {
+                        let start: usize = r
+                            .trim_start_matches("bytes=")
+                            .trim_end_matches('-')
+                            .parse()
+                            .unwrap_or(0);
+                        tiny_http::Response::from_data(body[start..].to_vec()).with_status_code(206)
+                    }
+                    None => tiny_http::Response::from_data(body.to_vec()),
+                };
+                let _ = req.respond(resp);
+            }
+        });
+        let root = crate::tests::scratch("provision-resume");
+        let dest = root.join("a.bin");
+        let part = part_path(&dest);
+        // 分片 + 来源标记一致：续传（Range: bytes=<断点>-）。
+        fs::write(&part, &body[..4]).expect("写分片");
+        fs::write(part_source_marker(&part), &url).expect("写来源标记");
+        let agent = crate::kernel::detail::outbound::agent(5, 30);
+        download_with_resume(&agent, &url, &dest, &mut |_| {}).expect("续传");
+        assert_eq!(
+            fs::read(&dest).expect("读下载结果"),
+            body,
+            "续传后内容要完整"
+        );
+        assert!(!part.exists(), "成功后分片要改名掉");
+        // 来历不明的分片：从头下（不发 Range）。
+        fs::write(&part, b"XYZ").expect("写来历不明的分片");
+        download_with_resume(&agent, &url, &dest, &mut |_| {}).expect("从头下");
+        assert_eq!(fs::read(&dest).expect("读下载结果"), body);
+        let ranges = seen.lock().expect("锁").clone();
+        assert_eq!(ranges.len(), 2, "{:?}", ranges);
+        assert_eq!(ranges[0].as_deref(), Some("bytes=4-"), "首个请求要带断点");
+        assert_eq!(ranges[1], None, "来源不明必须从头下");
+        stop.store(true, Ordering::Relaxed);
+        handle.join().expect("收本地源线程");
         let _ = fs::remove_dir_all(&root);
     }
 }

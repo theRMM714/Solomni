@@ -46,6 +46,9 @@ function main() {
     profile: base.profile || "debug",
     fenceLive: base.fenceLive === undefined ? true : base.fenceLive,
     doctor: quality ? quality.doctor : null,
+    // 工具链版本由 quality 半份带入（tests/lib/report.js 的 detectToolchain）；e2e 半份没有这个字段，
+    // 缺 quality 时如实给 null，不假装合并出了编译器身份。
+    toolchain: base.toolchain || null,
     steps: steps.map((s) => ({ step: s.step, status: s.status, detail: s.detail, ms: s.ms })),
     envSkips: [].concat(quality ? quality.envSkips || [] : [], e2e ? e2e.envSkips || [] : []),
     quality: { failed: qualityFailed.length, steps: qualityFailed.map((s) => ({ step: s.step, detail: s.detail })) },

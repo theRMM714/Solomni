@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
  * Solomni 开发回路：本机的单层开发命令（编译检查 / 单元测试 / 格式 / 静态检查）。
- * 管：把"这一层怎么跑"映射成固定子命令，并保证用**项目内工具链与缓存**（环境解析交给 env.js，一处口径）。
+ * 管：把"这一层怎么跑"映射成固定子命令，并保证用**项目内工具链与缓存**（环境解析交给 env.js，一处口径）；
+ *     唯一的透传口 `cargo -- <参数>` 也走同一份环境解析，让只读查询 / 单例测试不必另造入口。
  * 不管：完整门禁与全量测试（那是 run-tests.js）、构建与启动（那是 start.js）、装环境（那是 setup-dev.js / env.js）。
- * 约束：子命令固定，**不透传任意 cargo 参数**——要跑别的组合一律用 node run-tests.js，别把闸门绕出第二条路。
+ * 约束：固定子命令之外只有 `cargo -- <参数>` 一条透传口；两者都注入 env.js 的环境，**裸 shell 里的 cargo 仍不可用**。
  * 用法：node dev.js test | fmt | clippy（--help 看全部）；本机开发回路见 docs/testing/execution-ci.md 的「执行入口与报告」。
  */
 "use strict";
@@ -11,6 +12,8 @@ const { spawnSync } = require("child_process");
 const env = require("./env.js");
 
 const ROOT = __dirname;
+// 透传口：只认 `--` 之后的参数。它不改变环境解析，也不给第二条"绕过 env.js"的路。
+const PASSTHROUGH = "cargo";
 // 固定子命令 → cargo 参数。--color never：输出可判读、不吃终端能力（门禁与重定向同一份结果）。
 const SCENARIOS = {
   test: {
@@ -35,6 +38,9 @@ function usage() {
     "子命令：",
     ...Object.entries(SCENARIOS).map(([name, s]) => "  " + name.padEnd(7) + " " + s.why),
     "",
+    "透传：",
+    "  cargo -- <参数>  任意 cargo 子命令（环境与缓存仍钉在项目内；不要绕过它裸跑 cargo）",
+    "",
     "要跑完整门禁与全量测试：node run-tests.js（迭代时加 --skip-e2e，见 docs/testing/execution-ci.md）。",
   ].join("\n");
 }
@@ -46,11 +52,26 @@ function main() {
     return argv.length ? 0 : 1;
   }
   const name = argv[0];
-  const scenario = SCENARIOS[name];
-  if (!scenario) {
-    console.error("[dev] 没有这个子命令：" + name);
-    console.error(usage());
-    return 1;
+  let args;
+  let why;
+  if (name === PASSTHROUGH) {
+    // 只认 `node dev.js cargo -- <参数>`：别名 / 额外前缀一律拒绝，避免长成第二个命令入口。
+    const sep = argv.indexOf("--");
+    if (sep !== 1 || sep === argv.length - 1) {
+      console.error("[dev] 用法：node dev.js cargo -- <cargo 参数>");
+      return 1;
+    }
+    args = argv.slice(sep + 1);
+    why = "透传 cargo（环境、缓存与临时目录仍钉在项目内）";
+  } else {
+    const scenario = SCENARIOS[name];
+    if (!scenario) {
+      console.error("[dev] 没有这个子命令：" + name);
+      console.error(usage());
+      return 1;
+    }
+    args = scenario.args;
+    why = scenario.why;
   }
   const resolved = env.resolve({});
   if (!resolved) {
@@ -69,8 +90,8 @@ function main() {
     }
   }
   env.pinTemp(resolved.env);
-  console.log("[dev] " + scenario.why + " → " + resolved.cargo + " " + scenario.args.join(" "));
-  const r = spawnSync(resolved.cargo, scenario.args, { cwd: ROOT, stdio: "inherit", env: resolved.env });
+  console.log("[dev] " + why + " → " + resolved.cargo + " " + args.join(" "));
+  const r = spawnSync(resolved.cargo, args, { cwd: ROOT, stdio: "inherit", env: resolved.env });
   if (r.error) {
     console.error("[dev] 起不了 cargo：" + r.error.message);
     return 1;
@@ -78,6 +99,6 @@ function main() {
   return r.status === null ? 1 : r.status;
 }
 
-module.exports = { SCENARIOS, usage, main };
+module.exports = { SCENARIOS, PASSTHROUGH, usage, main };
 
 if (require.main === module) process.exit(main());

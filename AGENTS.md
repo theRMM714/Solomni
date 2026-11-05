@@ -65,7 +65,7 @@
 3. 开工：最新 `main` 切分支 → 空提交 → push → 立刻 Draft PR（正文=方案）；**没有 Draft PR 不写实现代码**。
 4. 实施：一个阶段一个提交；每次 push 更新 PR 的清单、阶段记录与测试证据；范围变化先改 PR 并重新确认。
 5. 收口：代码任务 `node run-tests.js` 全绿；纯叙述型文档任务 `node run-tests.js --docs` 全绿（只代表文档审查 + 结构审查，`docs/presentation/contracts.md` 仍走全量）；`git status` 干净；交用户确认；确认后销账、改最终 PR 正文；用户 Ready/合并。
-6. 本机回路：`node dev.js test|fmt|clippy`；门禁 `node run-tests.js`（纯文档用 `--docs`）；不直接调 `cargo`。
+6. 本机回路：`node dev.js test|fmt|clippy`（透传 `node dev.js cargo -- <参数>`）；门禁 `node run-tests.js`（纯文档用 `--docs`）；cargo 只经这些入口跑，要在终端直接敲，先按 `env.js` 注入环境（细则见 `docs/testing/execution-ci.md` 的「本机开发回路」）。
 
 开工命令、开工自检、阶段定义、PR 更新节奏与完整流程见 `docs/workflow/README.md`。
 
@@ -103,7 +103,7 @@
 | 文档分层 / 术语 / 引用 | `docs/conventions.md` |
 | 全部单元与横向细则 | `docs/README.md` |
 
-新增根 `*.md` 必须进本表；临时工作清单按 `run-tests.js` 的白名单处理。
+新增根 `*.md` 必须进本表；临时工作清单按 `tests/gates/docs/root-router.js` 的白名单处理。
 
 ## 九、文档效力与取证
 
@@ -123,6 +123,7 @@
 | --- | --- |
 | `main` 的必填检查 | `gh api repos/<owner>/<repo>/rulesets` |
 | 工作流触发 / 跳过 / 汇总 | `.github/workflows/test.yml` |
-| 测试入口参数 | `run-tests.js` 顶部开关定义 |
+| 测试入口参数 / 模式 / 车道 / 步骤 / 标记 | `node run-tests.js --list [--json]`（`tests/gates/registry.js`、`tests/gates/steps.js`、`tests/lib/markers.js`） |
 | 平台支持与验收状态 | `tests/gaps.yaml`、`tests/<平台>/gaps.yaml`、代码里的 `VERIFIED_HOSTS` |
 | 外部链接与工具链版本 | `links.yaml`、`dev-tools.js` |
+| 文档与真相源的机器比对 | `tests/gates/structure/`（8 文件）、`tests/gates/docs/`（4 文件）、`node tests/docs-sync.mjs` |

@@ -7,8 +7,11 @@
 #   install  装到产品根下的哪个目录（相对路径，用 / 分段）
 #   probe    判"在不在场"的那个路径（相对产品根；文件或目录存在即在位）
 #   source   下载源：links.yaml 的键，或 release:<release-tag>/<资产名>（= links.yaml 的 release.base + tag + 资产名，项目自托管便携包）
-#   kind     安装方式：archive（默认，解归档）/ appimage / file（单文件直下）/ guest-disk（单文件 + 画像）/ guest-rootfs（多步构造）/ guest-runtime（起 guest 自证运行能力）
+#   kind     安装方式：archive（默认，解归档）/ appimage / file（单文件直下）/ guest-disk（单文件 + 画像）/ guest-rootfs（多步构造）/ guest-runtime（起 guest 自证运行能力）/ toolchain（基础工具链：装进 .tools/toolchains 并登记 active.json）
 #   guest    虚拟机档的**虚拟根名**（只有 guest 类条目有；`install` 指它那一格目录，一个虚拟根可以由多条条目共同装）
+#   toolchain 【可选】kind: toolchain 的载荷：tool（active.json 的工具 id）/ version（安装布局与 active.json 的版本）/
+#            target（宿主目标名，与 install 路径同一套写法）/ bins（相对安装目录、写进 active.json 的 bin 目录）/
+#            wrappers（可选，装完写 cc / gcc / g++ / clang 包装——Zig 包用）
 #   family   【可选】Linux 虚拟根的发行版族（只有 guest-rootfs 有；构造配方按它取，当前只有 debian）
 #   strip    解包时剥掉归档里的前 N 段目录（缺省 0）
 #   size_mb  大致体积（提示与带宽预估）
@@ -22,6 +25,181 @@
 # 规则：这里只收"不预置、不分发、按需下载"的依赖；guest 镜像按已定方向**不自托管**（指上游 cdimage）。
 # 自托管的便携包一律保持**原样**，并登记进 dependencies/THIRD-PARTY-NOTICES.md（许可证 + 对应源码）。
 deps:
+  # ---- 基础工具链：运行前提（模块工具与构建按它们跑），装进 .tools/toolchains 并写 active.json ----
+  # 运行期由产品自己补齐（solomni --provision --ensure --yes）；版本与下载键来自 links.yaml。
+  - id: toolchain.python.windows-x86_64
+    os: windows
+    arch: x86_64
+    kind: toolchain
+    install: .tools/toolchains/windows-x86_64/python/3.14.9
+    probe: .tools/toolchains/windows-x86_64/python/3.14.9/python/python.exe
+    source: toolchain.python.3.14.9.windows-x86_64
+    size_mb: 48
+    toolchain:
+      tool: python
+      version: 3.14.9
+      target: windows-x86_64
+      bins: [python, python/Scripts]
+    note: 本机档模块工具的 Python（python-build-standalone，解包即用）
+  - id: toolchain.node.windows-x86_64
+    os: windows
+    arch: x86_64
+    kind: toolchain
+    install: .tools/toolchains/windows-x86_64/node/24.11.0
+    probe: .tools/toolchains/windows-x86_64/node/24.11.0/node-v24.11.0-win-x64/node.exe
+    source: toolchain.node.24.11.0.windows-x86_64
+    size_mb: 36
+    toolchain:
+      tool: node
+      version: 24.11.0
+      target: windows-x86_64
+      bins: [node-v24.11.0-win-x64]
+    note: 本机档模块工具的 Node（官方二进制，解包即用）
+  - id: toolchain.cc.windows-x86_64
+    os: windows
+    arch: x86_64
+    kind: toolchain
+    install: .tools/mingw64
+    probe: .tools/mingw64/bin/g++.exe
+    source: winlibs.upstream.asset
+    strip: 1
+    size_mb: 260
+    toolchain:
+      tool: cc
+      version: 16.2.0
+      target: windows-x86_64
+      bins: [bin]
+    note: 本机档模块构建的 C/C++（MinGW-w64；Windows 不再另装一套，与链接 Rust 用的那份同一个安装目录）
+  - id: toolchain.python.linux-x86_64
+    os: linux
+    arch: x86_64
+    kind: toolchain
+    install: .tools/toolchains/linux-x86_64/python/3.14.9
+    probe: .tools/toolchains/linux-x86_64/python/3.14.9/python/bin/python3
+    source: toolchain.python.3.14.9.linux-x86_64
+    size_mb: 48
+    toolchain:
+      tool: python
+      version: 3.14.9
+      target: linux-x86_64
+      bins: [python/bin, python]
+    note: 本机档模块工具的 Python（python-build-standalone，解包即用）
+  - id: toolchain.node.linux-x86_64
+    os: linux
+    arch: x86_64
+    kind: toolchain
+    install: .tools/toolchains/linux-x86_64/node/24.11.0
+    probe: .tools/toolchains/linux-x86_64/node/24.11.0/node-v24.11.0-linux-x64/bin/node
+    source: toolchain.node.24.11.0.linux-x86_64
+    size_mb: 36
+    toolchain:
+      tool: node
+      version: 24.11.0
+      target: linux-x86_64
+      bins: [node-v24.11.0-linux-x64/bin]
+    note: 本机档模块工具的 Node（官方二进制，解包即用）
+  - id: toolchain.cc.linux-x86_64
+    os: linux
+    arch: x86_64
+    kind: toolchain
+    install: .tools/toolchains/linux-x86_64/cc/0.15.2
+    probe: .tools/toolchains/linux-x86_64/cc/0.15.2/bin/gcc
+    source: toolchain.zig.0.15.2.linux-x86_64
+    size_mb: 48
+    toolchain:
+      tool: cc
+      version: 0.15.2
+      target: linux-x86_64
+      bins: [bin]
+      wrappers: true
+    note: 本机档模块构建的 C/C++（Zig 提供 cc / gcc / g++ / clang 包装）
+  - id: toolchain.python.macos-x86_64
+    os: macos
+    arch: x86_64
+    kind: toolchain
+    install: .tools/toolchains/macos-x86_64/python/3.14.9
+    probe: .tools/toolchains/macos-x86_64/python/3.14.9/python/bin/python3
+    source: toolchain.python.3.14.9.macos-x86_64
+    size_mb: 48
+    toolchain:
+      tool: python
+      version: 3.14.9
+      target: macos-x86_64
+      bins: [python/bin, python]
+    note: 本机档模块工具的 Python（python-build-standalone，解包即用）
+  - id: toolchain.node.macos-x86_64
+    os: macos
+    arch: x86_64
+    kind: toolchain
+    install: .tools/toolchains/macos-x86_64/node/24.11.0
+    probe: .tools/toolchains/macos-x86_64/node/24.11.0/node-v24.11.0-darwin-x64/bin/node
+    source: toolchain.node.24.11.0.macos-x86_64
+    size_mb: 36
+    toolchain:
+      tool: node
+      version: 24.11.0
+      target: macos-x86_64
+      bins: [node-v24.11.0-darwin-x64/bin]
+    note: 本机档模块工具的 Node（官方二进制，解包即用）
+  - id: toolchain.cc.macos-x86_64
+    os: macos
+    arch: x86_64
+    kind: toolchain
+    install: .tools/toolchains/macos-x86_64/cc/0.15.2
+    probe: .tools/toolchains/macos-x86_64/cc/0.15.2/bin/gcc
+    source: toolchain.zig.0.15.2.macos-x86_64
+    size_mb: 48
+    toolchain:
+      tool: cc
+      version: 0.15.2
+      target: macos-x86_64
+      bins: [bin]
+      wrappers: true
+    note: 本机档模块构建的 C/C++（Zig 提供 cc / gcc / g++ / clang 包装）
+  - id: toolchain.python.macos-aarch64
+    os: macos
+    arch: aarch64
+    kind: toolchain
+    install: .tools/toolchains/macos-aarch64/python/3.14.9
+    probe: .tools/toolchains/macos-aarch64/python/3.14.9/python/bin/python3
+    source: toolchain.python.3.14.9.macos-aarch64
+    size_mb: 48
+    toolchain:
+      tool: python
+      version: 3.14.9
+      target: macos-aarch64
+      bins: [python/bin, python]
+    note: 本机档模块工具的 Python（python-build-standalone，解包即用）
+  - id: toolchain.node.macos-aarch64
+    os: macos
+    arch: aarch64
+    kind: toolchain
+    install: .tools/toolchains/macos-aarch64/node/24.11.0
+    probe: .tools/toolchains/macos-aarch64/node/24.11.0/node-v24.11.0-darwin-arm64/bin/node
+    source: toolchain.node.24.11.0.macos-aarch64
+    size_mb: 36
+    toolchain:
+      tool: node
+      version: 24.11.0
+      target: macos-aarch64
+      bins: [node-v24.11.0-darwin-arm64/bin]
+    note: 本机档模块工具的 Node（官方二进制，解包即用）
+  - id: toolchain.cc.macos-aarch64
+    os: macos
+    arch: aarch64
+    kind: toolchain
+    install: .tools/toolchains/macos-aarch64/cc/0.15.2
+    probe: .tools/toolchains/macos-aarch64/cc/0.15.2/bin/gcc
+    source: toolchain.zig.0.15.2.macos-aarch64
+    size_mb: 48
+    toolchain:
+      tool: cc
+      version: 0.15.2
+      target: macos-aarch64
+      bins: [bin]
+      wrappers: true
+    note: 本机档模块构建的 C/C++（Zig 提供 cc / gcc / g++ / clang 包装）
+
   - id: vm.qemu.linux
     os: linux
     arch: x86_64

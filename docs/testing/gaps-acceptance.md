@@ -5,7 +5,7 @@
 
 ## 适用与判据
 - 记缺口、定目录与命名、按验收清单收口时以本文为准（`docs/testing/gaps-acceptance.md`）。
-- 违反由 T0 结构审查（缺口账格式、孤儿测试）与 CI 判定。
+- 违反由 T0 结构审查（缺口账格式、孤儿测试；`tests/gates/structure/ledgers.js` / `targets.js`）与 CI 判定。
 
 ## 一、目录、目标与命名
 
@@ -14,39 +14,50 @@
 ```text
 tests/
  fixtures/
- mcp_echo.py # MCP 端到端用的假服务
+  mcp_echo.py # MCP 端到端用的假服务
  helpers/
- probe.rs # T4 共用探针设施
- https_probe.rs # T4 HTTPS/TLS 探针（三平台目标共用这一份正文）
+  probe.rs # T4 共用探针设施
+  https_probe.rs # T4 HTTPS/TLS 探针（三平台目标共用这一份正文）
  cross-platform/
- main.rs # T3 目标入口
- integration/ # T3（含 fence_launcher.rs）
- e2e/ # T5：假供应商（mock.js）、驱动（driver.js）、编排（orchestrator.js）与隔离根
- gaps.yaml # T3 缺口账
+  main.rs # T3 目标入口
+  integration/ # T3（含 fence_launcher.rs）
+  e2e/ # T5：假供应商（mock.js）、驱动（driver.js）、编排（orchestrator.js）与隔离根
+  gaps.yaml # T3 缺口账
  windows/
- main.rs # 平台目标入口
- probes/ # T4
- gaps.yaml
+  main.rs # 平台目标入口
+  probes/ # T4
+  gaps.yaml
  linux/
- main.rs
- probes/
- gaps.yaml
+  main.rs
+  probes/
+  gaps.yaml
  macos/
- main.rs
- probes/
- gaps.yaml
+  main.rs
+  probes/
+  gaps.yaml
  gaps.yaml # 全局长期目标（不影响 TEST-REPORT-ACCEPTED）
+ lib/ # 入口与门禁的共享实现（cli / proc / step / report / parsers / outside / fsutil）
+ gates/ # 质量门禁的唯一清单与实现（--list 的 gate / 步骤来源）
+  registry.js # gate 清单：结构审查 8 个文件、文档审查 4 个文件
+  steps.js # 步骤表：顺序 / 依赖 / 可行状态 / 环境跳过（--list 的步骤来源）
+  structure/ # 8 个：targets / ledgers / map / comments / platform / selftest / docsTruth / dependency
+  docs/ # 4 个：portals / root-router / templates / generated
+ docs-gov.mjs # 文档模板检查（--docs 硬失败）
+ docs-sync.mjs # 生成段同步（平台验收状态 / T0 步骤 / 成功标记）
+ docs-audit.mjs # 季度审计候选清单（只报不拦）
+ ci-changes.mjs # 变更分流（CI changes job 的分类器）
+ ci-gate.mjs # 验收闸门判定（CI gate job；--self-test）
  ci-publish.mjs # CI 报告发布脚本（把三平台报告写入 ci-report 分支）
- ci-e2e.mjs     # CI 的 e2e job 入口（构建 + 跑 L4 编排，写 e2e-report.json）
- ci-merge.mjs   # 发布前把 quality 与 e2e 两份报告合并成该平台唯一的一份
- dev-loop.mjs    # 开发回路自检（dev.js 的子命令表与拒绝出口）
- pins-tool.mjs   # 依赖哈希工具自检（pins.js 的解析 / 来源推导 / 原地重写；不碰网络）
+ ci-e2e.mjs # CI 的 e2e job 入口（构建 + 跑 L4 编排，写 e2e-report.json）
+ ci-merge.mjs # 发布前把 quality 与 e2e 两份报告合并成该平台唯一的一份
+ dev-loop.mjs # 开发回路自检（dev.js 的子命令表与拒绝出口）
+ pins-tool.mjs # 依赖哈希工具自检（pins.js 的解析 / 来源推导 / 原地重写；不碰网络）
  env-bootstrap.mjs # 环境引导自检（env.js 的下载 / 续传 / 结构判定 / sha256 闸；仅 Windows 真跑）
-ci-mutation.mjs # 突变测试入口（core / capability 两个范围；范围见 tests/mutation-scope.json）
-ci-mutation-publish.mjs # 把突变小结发到 ci-mutation 滚动分支（各推各的，不碰 ci-report）
-mutation-scope.json # 突变测试范围（文件级清单；core + 各能力）
-comment-baseline.json # 注释契约棘轮基线（run-hygiene.js）
-dependency-baseline.json # 依赖方向门禁的基线
+ ci-mutation.mjs # 突变测试入口（core / capability 两个范围；范围见 tests/mutation-scope.json）
+ ci-mutation-publish.mjs # 把突变小结发到 ci-mutation 滚动分支（各推各的，不碰 ci-report）
+ mutation-scope.json # 突变测试范围（文件级清单；core + 各能力）
+ comment-baseline.json # 注释契约棘轮基线（run-hygiene.js）
+ dependency-baseline.json # 依赖方向门禁的基线
 ```
 
 - 单元层与 `capabilities/` **同构**：T1 用例按业务分文件——`taskchain.rs` / `prompt.rs` / `registry.rs` / `llm.rs` / `workspace.rs` / `session.rs` / `slate.rs` / `modules.rs` / `packages.rs` / `vm.rs` / `permission.rs` / `residents.rs` / `secrets.rs`，加**协调业务**自己的 `conductor.rs` 与 `conductor/`（`ask_user` / `proxy`）。

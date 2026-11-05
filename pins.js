@@ -2,7 +2,7 @@
 /**
  * 目的：维护 links.yaml 与 dependencies.yaml 里的校验值，把"手抄哈希"变成"按上游校验源生成"。
  * 管：update（刷新现有 pin）、check（只读比对）、bump（smbd 的 URL + 哈希一起换）。
- * 不管：下载依赖、安装依赖、产品运行期校验（那些在 provision / env.js / setup-toolchains.js）。
+ * 不管：下载依赖、安装依赖、产品运行期校验（那些在 provision 与 env.js 的引导层）。
  * 联动：links.yaml、dependencies.yaml、.github/workflows/pins.yml；规则见 docs/provision/README.md。
  */
 "use strict";

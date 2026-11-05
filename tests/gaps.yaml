@@ -97,3 +97,22 @@
     构建口味与 CI 一致且有记录；README 的安装与运行一章只描述真实存在的两条路径。
   blocked_by: |
     本期不做（用户决定：仍在开发阶段）。发行链路与口味统一需要新建 CI 工作流与打包脚本，另立任务。
+
+- id: ci.zizmor-advisory
+  scope: global
+  level: T0
+  why: |
+    工作流静态检查（`.github/workflows/test.yml` 的 workflow job）里 actionlint 阻断、zizmor 只报不拦
+    （continue-on-error）：workflow 安全目前没有必填约束。已知 11 条 artipacked（medium / Low confidence，
+    checkout 未关 persist-credentials）；publish / mutants 的发布步骤依赖 checkout 持久凭据，不能一刀切关闭。
+  how: |
+    1) 连续观察非 Draft 的三平台 CI（建议 ≥5 次），记录 zizmor findings 与误报；
+    2) artipacked 逐条处置：需要 git push 的 job 保留凭据并写豁免理由，其余 checkout 设 persist-credentials: false；
+    3) findings 清零或有记录的豁免后，去掉 zizmor 的 continue-on-error，并让 `tests/ci-gate.mjs` 把「工作流静态检查」
+       当恒跑必需项（与 structure 同档）；
+    4) 同次更新 `docs/testing/execution-ci.md` 的 workflow job 说明与 `node run-tests.js --list` 的口径。
+  accept: |
+    zizmor 不再 continue-on-error；findings 为 0 或每条都有书面豁免；gate 在工作流安全审查失败时红；
+    文档、`--list` 与 workflow 里的步骤一致。
+  blocked_by: |
+    需要一段稳定的 CI 观察期（当前只报不拦，先积累 findings 与误报样本）。

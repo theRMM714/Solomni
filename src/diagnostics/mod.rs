@@ -387,7 +387,8 @@ pub(crate) fn build_vm(
     ))
 }
 
-/// 目的：隐藏模式——依赖补齐：不带 `--ensure` 报状态（机器可读）；带 `--ensure[=id,…] --yes` 真下载安装。
+/// 目的：隐藏模式——依赖补齐：不带 `--ensure` 报状态（机器可读）；带 `--ensure[=id,…|kind,…] --yes` 真下载安装。
+/// 约束：`--ensure=<kind>` 是组别名（只补该 kind 里不在场的条目，如 `toolchain`）；
 pub fn provision(root: &std::path::Path, args: &[String]) -> i32 {
     if let Some(guest) = args.iter().find_map(|a| a.strip_prefix("--reset=")) {
         if !args.iter().any(|a| a == "--yes") {
@@ -420,17 +421,11 @@ pub fn provision(root: &std::path::Path, args: &[String]) -> i32 {
             }
         };
     }
-    let ids: Vec<String> = args
+    let spec = args
         .iter()
         .find_map(|a| a.strip_prefix("--ensure="))
-        .map(|s| {
-            s.split(',')
-                .filter(|x| !x.is_empty())
-                .map(|x| x.to_string())
-                .collect()
-        })
-        .unwrap_or_default();
-    if args.iter().any(|a| a == "--ensure") || !ids.is_empty() {
+        .map(|s| s.to_string());
+    if args.iter().any(|a| a == "--ensure") || spec.is_some() {
         if !args.iter().any(|a| a == "--yes") {
             eprintln!(
                 "[依赖补齐] 会从网络下载并写进项目内。确认后加 --yes（先用 --provision 看清单）。"
@@ -444,7 +439,12 @@ pub fn provision(root: &std::path::Path, args: &[String]) -> i32 {
                 &root.join(".home"),
             )),
         );
-        return match p.ensure(&ids, &mut |line| eprintln!("[依赖补齐] {}", line)) {
+        let outcome = match spec {
+            // 组别名（如 toolchain）只补该 kind 的缺项；裸 --ensure 仍是清单全量。
+            Some(spec) => p.ensure_spec(&spec, &mut |line| eprintln!("[依赖补齐] {}", line)),
+            None => p.ensure(&[], &mut |line| eprintln!("[依赖补齐] {}", line)),
+        };
+        return match outcome {
             Ok(()) => 0,
             Err(e) => {
                 eprintln!("[依赖补齐] {}", e);

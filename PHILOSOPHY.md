@@ -6,7 +6,7 @@
 ## 适用与判据
 - 判断项目方向、承诺与取舍时以本文为准（`PHILOSOPHY.md`）。
 - 本文不写实现、不写现状、不记缺口（`PHILOSOPHY.md`）。
-- 违反由评审与 `node run-tests.js --docs` 的文档审查判定。
+- 违反由评审判断（无机器判据）；文档结构另由 `node run-tests.js --docs` 判定（`tests/gates/docs/`）。
 
 ## 一、要建成的东西
 
@@ -41,7 +41,7 @@
 
 ## 检查
 - 方向与承诺 → 评审（`AGENTS.md` 的请求分类）。
-- 文档结构 → `node run-tests.js --docs` 的文档审查。
+- 文档结构 → `node run-tests.js --docs` 的文档审查（`tests/gates/docs/`）。
 
 ## 路由
 - 当前能力：[README.md](README.md)

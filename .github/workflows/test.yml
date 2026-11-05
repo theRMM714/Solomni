@@ -8,12 +8,17 @@
 # 真机围栏、TLS 出站）；文档/结构审查在 CI 里跑是为了合并闸门，不是补平台结论。inputs.clean=true 跳过缓存，用于「干净机器」验收。契约见 docs/testing/execution-ci.md。
 #
 # job 结构：平台相关的是 quality（平台门禁 + 单元 + 探针 + 前端冒烟）与 e2e（L4 端到端）；
-# 平台无关的是 changes（分流）、docs（文档审查）、structure（结构审查）、gate（验收闸门）与 publish-report（汇总发布）。
-# 有代码变更 → quality / e2e；有文档变更 → docs；structure 始终跑（代码或文档变更都可能破坏代码↔文档结构）。
-# gate 汇总四个 job 的结果，是规则集里唯一代表代码/文档验收的必填检查：quality / e2e 是矩阵 job，被 job 级 if 跳过时
+# 平台无关的是 changes（分流）、docs（文档审查）、structure（结构审查）、workflow（工作流静态检查）、
+# gate（验收闸门）与 publish-report（汇总发布）。
+# 有代码变更 → quality / e2e；有文档变更 → docs；structure / workflow 始终跑（结构代码和文档两边都能破坏；
+# workflow 改坏会让必填检查不上报，所以不按变更类型跳过）。
+# gate 汇总五个 job 的结果，是规则集里唯一代表代码/文档验收的必填检查：quality / e2e 是矩阵 job，被 job 级 if 跳过时
 # 矩阵不展开，只报一条名字带字面量 ${{ matrix.os }} 的 skipped，永远对不上按平台名配置的 required context。
+# gate 的判定逻辑在 tests/ci-gate.mjs（--self-test 覆盖跳过合法性），本文件只把 needs.*.result 传进去。
 # 报告统一到 ci-report：runs/structure、runs/docs、runs/<os>；gate 只做闸门，不产报告。
 # changes 只是路由，不要设为 required（卡住不应阻塞合并）；也不要用 workflow 级 paths-ignore（required check 会永远 pending）。
+# 第三方 action 一律 SHA pin（行尾注释保留可读版本）；升级时同一个 diff 改 SHA 与注释，不跑无人审的浮动 tag。
+# 缓存只读不写：任何 ref 都能恢复，保存只在 main（PR 的缓存分支作用域只对同分支可见，存了只会挤掉主线缓存项）。
 name: 测试
 
 on:
@@ -53,13 +58,13 @@ jobs:
       code_changed: ${{ steps.classify.outputs.code_changed }}
       docs_changed: ${{ steps.classify.outputs.docs_changed }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # 与三个重 job 同一份 head；分类只看 PR 的提交差异。
           ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/head', github.event.pull_request.number) || github.sha }}
           fetch-depth: 0
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "lts/*"
 
@@ -98,11 +103,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/head', github.event.pull_request.number) || github.sha }}
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "lts/*"
 
@@ -112,7 +117,7 @@ jobs:
 
       - name: 留产物（文档审查报告；无论成败）
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: docs-report
           path: target/test-report.json
@@ -126,11 +131,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/head', github.event.pull_request.number) || github.sha }}
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "lts/*"
 
@@ -140,11 +145,54 @@ jobs:
 
       - name: 留产物（结构审查报告；无论成败）
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: structure-report
           path: target/test-report.json
           if-no-files-found: ignore
+
+  workflow:
+    name: 工作流静态检查
+    # 恒跑（与 structure 同理）：workflow 文件本身坏了，必填检查可能根本不上报，所以不按变更类型跳过。
+    # actionlint 阻断（YAML / 表达式 / 内联 bash 的 shellcheck）；zizmor 先只报不拦（安全审查，观察噪声后再定）。
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/head', github.event.pull_request.number) || github.sha }}
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "lts/*"
+
+      # 闸门判定脚本自身的自测：要合并进去的 gate 逻辑必须在这一步就验过（8 个跳过合法性样例）。
+      - name: 闸门判定自测
+        run: node tests/ci-gate.mjs --self-test
+
+      # go install 用固定版本 tag（runner 自带 go）；不用浮动下载脚本，避免"今天能跑明天不能跑"。
+      - name: 工作流静态检查（actionlint）
+        run: |
+          set -euo pipefail
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          # 不带参数 = 自动检查 .github/workflows 下所有 workflow（当前 3 个，新文件自动纳入）；
+          # 内联 bash 由 actionlint 调 shellcheck 检查（ubuntu runner 自带）。
+          "$(go env GOPATH)/bin/actionlint" -no-color
+
+      # zizmor：GitHub Actions 的安全审查（未 pin 的 action、危险触发器、权限过宽等）。
+      # 先只报不拦（continue-on-error），噪声与规则取舍稳定后再转为阻断；安装走 taiki-e/install-action（TOOLS.md 有 zizmor）。
+      - name: 安装 zizmor（advisory）
+        continue-on-error: true
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: zizmor
+
+      - name: 工作流安全审查（zizmor，只报不拦）
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          zizmor --persona=regular --format=plain .github/workflows
 
   quality:
     name: 质量与单元（${{ matrix.os }}）
@@ -163,13 +211,13 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # fork PR 的 head 分支在对方仓；用 base 仓为每个 PR 建的 refs/pull/<N>/head（同仓 PR 同样可用）。
           ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/head', github.event.pull_request.number) || github.sha }}
 
       # 最新稳定线：Node 的 lts/* = 当前 LTS（生产稳定线），随 LTS 迁移自动跟进，不用手工改版本号。
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "lts/*"
 
@@ -186,9 +234,10 @@ jobs:
         run: mkdir -p platform/ci/cargo
 
       # 只缓存项目内路径：缓存身份含 path，改路径即新缓存项（旧项自动淘汰，见 docs/testing/execution-ci.md）。
-      - name: 缓存依赖与编译产物（inputs.clean 时跳过）
+      # 恢复所有 ref（PR 读 main 的缓存）；保存只在 main，见每个 job 末尾的 save 步骤。
+      - name: 恢复依赖与编译产物缓存（inputs.clean 时跳过）
         if: ${{ !inputs.clean }}
-        uses: actions/cache@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             platform/ci/cargo
@@ -204,7 +253,7 @@ jobs:
         run: echo "SOLOMNI_PREINSTALL_START_MS=$(node -e 'console.log(Date.now())')" >> "$GITHUB_ENV"
 
       - name: 安装供应链检查工具（预编译，仅 CI）
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: cargo-audit,cargo-deny
 
@@ -214,7 +263,22 @@ jobs:
 
       # 结构审查已由 structure job 跑过；这里只跑平台相关门禁与测试（--skip-audit）。
       - name: 质量门禁 + 单元 + 平台探针（跳过 L4 与结构审查）
-        run: node run-tests.js --fence-live --skip-e2e --skip-audit
+        # --strict-env：必装工具（rustfmt / clippy / cargo-audit / cargo-deny）缺失或取不到数据时，不许记 env-skip 冒充通过。
+        run: node run-tests.js --fence-live --skip-e2e --skip-audit --strict-env
+
+      # 锁文件漂移：改了 Cargo.toml 却没带 Cargo.lock 时，cargo 会在 CI 里默默更新锁文件、测试照样绿，
+      # 合并后仓库里的锁就过期了。只读工作树：本次运行改过锁文件即失败（改动原文打进日志）。
+      - name: 锁文件漂移检查（Cargo.lock 必须与清单一致）
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "$(git status --porcelain -- Cargo.lock)" ]; then
+            echo "::error title=Cargo.lock 漂移::Cargo.lock 被本次运行改动（Cargo.toml / Cargo.lock 必须同一提交）"
+            git --no-pager diff -- Cargo.lock
+            exit 1
+          fi
+          echo "Cargo.lock 无漂移"
 
       - name: 抓 macOS 沙箱拒绝记录（无论成败都留；非 macOS 跳过）
         if: always() && runner.os == 'macOS'
@@ -227,13 +291,24 @@ jobs:
 
       - name: 留产物（报告与日志，供人下载；无论成败）
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-report-${{ matrix.os }}
           path: |
             target/test-report.json
             target/test-logs/
           if-no-files-found: ignore
+
+      # 保存只在 main：PR 的缓存作用域只对同分支可见，存了只会挤掉主线缓存项；save 失败不挡验收。
+      - name: 保存依赖与编译产物缓存（仅 main）
+        if: ${{ !inputs.clean && github.ref == 'refs/heads/main' }}
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            platform/ci/cargo
+            target/debug
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
 
   e2e:
     name: 端到端（${{ matrix.os }}）
@@ -250,11 +325,11 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/head', github.event.pull_request.number) || github.sha }}
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "lts/*"
 
@@ -270,9 +345,10 @@ jobs:
         run: mkdir -p platform/ci/cargo
 
       # 只缓存项目内路径：缓存身份含 path，改路径即新缓存项（旧项自动淘汰，见 docs/testing/execution-ci.md）。
-      - name: 缓存依赖与编译产物（inputs.clean 时跳过）
+      # 恢复所有 ref（PR 读 main 的缓存）；保存只在 main，见每个 job 末尾的 save 步骤。
+      - name: 恢复依赖与编译产物缓存（inputs.clean 时跳过）
         if: ${{ !inputs.clean }}
-        uses: actions/cache@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             platform/ci/cargo
@@ -296,7 +372,7 @@ jobs:
 
       - name: 留产物（e2e 报告与日志；无论成败）
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-report-${{ matrix.os }}
           path: |
@@ -305,47 +381,49 @@ jobs:
             target/e2e-logs/
           if-no-files-found: ignore
 
+      # 保存只在 main（同 quality job）：PR 只恢复 main 的缓存，不往缓存池里加同分支私有项。
+      - name: 保存依赖与编译产物缓存（仅 main）
+        if: ${{ !inputs.clean && github.ref == 'refs/heads/main' }}
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            platform/ci/cargo
+            target/debug
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+
   gate:
     name: 验收闸门
     # 规则集里代表「代码/文档验收可合并」的必填检查：质量与单元 / 端到端是矩阵 job，被 job 级 if 跳过时矩阵不展开，
     # 只报一条名字带字面量 ${{ matrix.os }} 的 skipped，按平台名配置的 required context 永远不会上报。
-    # 这里用固定名字汇总：跳过是否合法按变更分类判，不按「有没有跑」猜。
+    # 这里用固定名字汇总：跳过是否合法按变更分类判，不按「有没有跑」猜；判定逻辑在 tests/ci-gate.mjs（可自测）。
     # always()：依赖失败或被跳过也要给出结论；取消的 job 结果不是 success，同样判失败，不让 skipped 冒充通过。
-    needs: [changes, docs, structure, quality, e2e]
+    needs: [changes, docs, structure, workflow, quality, e2e]
     if: ${{ always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: 按变更类型核对四个 job
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # gate 判定逻辑取自可信来源：同仓 PR 用 head（本 PR 要改 gate 本身），fork PR 用 base
+          # （对方不能改闸门逻辑；与 changes 从 base 取分类器同一口径）。非 PR 用 github.sha。
+          ref: ${{ github.event.pull_request.head.repo.full_name == github.repository && format('refs/pull/{0}/head', github.event.pull_request.number) || github.event.pull_request.base.sha || github.sha }}
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "lts/*"
+
+      - name: 按变更类型核对五个 job
         env:
           CHANGES: ${{ needs.changes.result }}
           CODE_CHANGED: ${{ needs.changes.outputs.code_changed }}
           DOCS_CHANGED: ${{ needs.changes.outputs.docs_changed }}
           DOCS: ${{ needs.docs.result }}
           STRUCTURE: ${{ needs.structure.result }}
+          WORKFLOW: ${{ needs.workflow.result }}
           QUALITY: ${{ needs.quality.result }}
           E2E: ${{ needs.e2e.result }}
-        run: |
-          set -euo pipefail
-          failed=0
-          # 只有「本次变更本来就不跑这个 lane」才允许 skipped；其余 skipped（取消、异常）都算失败。
-          require() {
-            echo "- $1：$2（允许跳过：$3）" >> "$GITHUB_STEP_SUMMARY"
-            if [ "$2" = "success" ]; then return 0; fi
-            if [ "$2" = "skipped" ] && [ "$3" = "yes" ]; then return 0; fi
-            echo "::error::$1 未通过：result=$2"
-            failed=1
-          }
-          # 分类字段缺失 / 取不到 diff 时按「有变更」处理，与 job 级兜底一致；changes 自身只是路由，不设闸。
-          if [ "${CHANGES}" != "success" ]; then echo "::warning title=验收闸门::变更分流未成功，按全量兜底核对"; fi
-          if [ "${DOCS_CHANGED}" = "false" ]; then allow_docs=yes; else allow_docs=no; fi
-          if [ "${CODE_CHANGED}" = "false" ]; then allow_code=yes; else allow_code=no; fi
-          require "文档审查" "${DOCS}" "${allow_docs}"
-          require "结构审查" "${STRUCTURE}" no
-          require "质量与单元" "${QUALITY}" "${allow_code}"
-          require "端到端" "${E2E}" "${allow_code}"
-          if [ "${failed}" -ne 0 ]; then exit 1; fi
-          echo "GATE-OK"
+        run: node tests/ci-gate.mjs
 
   publish-report:
     name: 汇总并发布 ci-report
@@ -362,7 +440,7 @@ jobs:
       group: ci-report-publish
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.SOURCE_SHA }}
           fetch-depth: 0
@@ -370,7 +448,7 @@ jobs:
       # 结构审查始终跑；报告缺失（更早失败）不阻塞发布：ci-publish 会记成失败证据。
       - name: 下载结构审查报告
         continue-on-error: true
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: structure-report
           path: ci-artifacts/structure-report
@@ -378,14 +456,14 @@ jobs:
       - name: 下载文档审查报告
         if: ${{ needs.docs.result != 'skipped' }}
         continue-on-error: true
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: docs-report
           path: ci-artifacts/docs-report
 
       - name: 下载 quality 报告产物
         if: ${{ needs.quality.result != 'skipped' }}
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: test-report-*
           path: ci-artifacts
@@ -393,7 +471,7 @@ jobs:
 
       - name: 下载 e2e 报告产物
         if: ${{ needs.e2e.result != 'skipped' }}
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: e2e-report-*
           path: ci-artifacts

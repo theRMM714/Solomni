@@ -33,8 +33,15 @@
 | `guest-disk` | 单文件（Debian cloud qcow2）+ `guest.yaml` 基础画像；镜像已在场时**不覆盖**（运行期状态在里面）。 |
 | `guest-rootfs` | Debian 虚拟根多步构造，见「二、guest-rootfs」；构造配方按清单 `family` 取。 |
 | `guest-runtime` | 虚拟根的运行期编排，见「三、guest-runtime」。 |
+| `toolchain` | 基础工具链（Python / Node / C-C++）：装进 `.tools/toolchains/`，登记 `active.json`——布局与 `--ensure` 语义见下。 |
 
 - 解归档的入口程序（清单 `probe` 指到的那个）装完会补**可执行位**：zip 不一定带 unix 权限位，解出来会是不能跑的 0644（例如 `virtiofsd` 的便携包）。
+
+### 基础工具链（`kind: toolchain`）
+
+- 清单的 `toolchain` 段是载荷：`tool`（工具 id，如 `python` / `node` / `cc`）、`version`（安装布局与 `active.json` 的版本）、`target`（可选的宿主目标名）、`bins`（相对 `install` 的目录，进 PATH）。缺段或空字段在安装时如实拒绝，不猜版本或布局。
+- 装完由 **Rust 侧**扫清单、核对每个 `bin` 目录在场，把在场项写进 `.tools/toolchains/active.json`：`{target, profile:[工具 id], tools:[{id, version, bin:[…], env:{}}]}`（临时文件 + rename 原子提交）。启动期（`entry::toolchains`）只读这一份把项目内 `bin` 前置到 PATH，不重新扫盘。
+- **组别名**：`--ensure=toolchain` 按清单的 `kind` 取**还没在场**的条目 id，已在位的不重装（260 MB 的包不重解）；一条不缺时直接打印 `toolchain：没有缺项，无需补齐`，不起作业、不联网。`--ensure=<id>`（如 `toolchain.node.windows-x86_64`）仍按 id 点名；裸 `--ensure` 是清单全量（含 QEMU / guest 等大件）；kind 与 id 不能混写（如实拒绝）。
 
 ## 二、guest-rootfs：Debian 虚拟根的多步构造
 
@@ -92,7 +99,7 @@
 
 - 作业状态带单调 `seq`；`GET /api/setup/status?since=N&wait=1` 是长轮询（最多 20s），拿到新行即回，前端按 `seq` 增量取。
 - **进度只有这一条通道**：`seq` + `lines`（留最近 200 行）——不另存「当前步骤」摘要，界面要看当前步骤就取最后一行。
-- **要装什么由后端定**：`status` 的 `pending` 列出还没在场的条目 id；`ensure` 不点名时只补这些（执行核心不跳过在位项，不滤就会把已装的重下一遍、重解一遍），都装好了直接回 `{ok,deps:[]}` 且不起作业。显式点名 = 逐条失败硬报（不是全量补齐那种「跳过继续」）。
+- **要装什么由后端定**：`status` 的 `pending` 列出还没在场的条目 id；`ensure` 不点名时只补这些（执行核心不跳过在位项，不滤就会把已装的重下一遍、重解一遍），都装好了直接回 `{ok,deps:[]}` 且不起作业。**`--ensure=<kind>` 是组别名**（CLI 与 Web 的「补齐虚拟机依赖」同语义）：只补该 kind 的缺项，全齐时打印 `<kind>：没有缺项，无需补齐` 并退出 0。显式点名 = 逐条失败硬报（不是全量补齐那种「跳过继续」）。
 - 呈现层：**Web 的「补齐虚拟机依赖」弹层**——配置面板与创建向导在虚拟机档不可用、或选中的虚拟根未装齐时给这个动作：先看清单与体积、再确认下载、然后按 `seq` 长轮询进度、最后如实说清生效范围。
 - 无界面时的等价路径：CLI `--provision`（`src/diagnostics/`，隐藏模式，`--ensure[=id,…] --yes` 才真下载）。路由表见 [docs/presentation/contracts.md](../presentation/contracts.md)。
 

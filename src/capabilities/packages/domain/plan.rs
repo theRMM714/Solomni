@@ -638,7 +638,7 @@ pub fn diagnose_text(diags: &[Problem]) -> String {
                 capability,
             } => {
                 format!(
-                    "模块 {} 的基础运行能力 {} 未安装：先运行 node setup-runtime.js --yes 把项目内基础工具链装好",
+                    "模块 {} 的基础运行能力 {} 未安装：先运行 solomni --provision --ensure=toolchain --yes 把项目内基础工具链装好",
                     module, capability
                 )
             }

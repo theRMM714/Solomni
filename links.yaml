@@ -22,7 +22,7 @@ winlibs.upstream.asset: https://github.com/brechtsanders/winlibs_mingw/releases/
 # 来源：同一个 release 里的 `winlibs-x86_64-posix-seh-gcc-16.2.0-mingw-w64ucrt-14.0.0-r2.zip.sha256`
 # （GitHub API 该资产的 digest 字段是同一个值）。升版本时照上游重取，不要手抄下载结果。
 winlibs.upstream.asset.sha256: d5dbafc4a170e762ca6143151ec918fb9e2c72736fb14cd704abebc6bdd5276a
-# 基础工具链（项目内 .tools/toolchains；由 setup-toolchains.js 消费）。
+# 基础工具链（项目内 .tools/toolchains；由 dependencies.yaml 的 kind: toolchain 条目消费）。
 # Python 来源：python-build-standalone 20261021 release 资产的 digest（GitHub API）。
 toolchain.python.3.14.9.linux-x86_64: https://github.com/astral-sh/python-build-standalone/releases/download/20261021/cpython-3.14.9+20261021-x86_64-unknown-linux-gnu-install_only.tar.gz
 toolchain.python.3.14.9.linux-x86_64.sha256: dfa4c5a40c47f338f41658017be550c72247c391e6bfb1fa4da03ebc8451abdf

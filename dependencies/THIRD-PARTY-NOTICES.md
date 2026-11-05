@@ -51,9 +51,9 @@
 - **Source Code**: https://github.com/theRMM714/rust-smb-server
 - **Note**: 上游 [paltaio/rust-smb-server](https://github.com/paltaio/rust-smb-server)（MIT）的 fork；上游代码不改，本仓只新增 helper CLI 与发布工作流，由该仓 CI 构建并发布 `smbd.exe` 与 `.sha256` 资产；Solomni 只按 URL 下载，不携带其提交史。
 
-## 5. 基础工具链（运行前提，首次安装；不随仓分发）
+## 5. 基础工具链（运行前提，按需安装；不随仓分发）
 
-以下组件由 `setup-runtime.js` 默认、`setup-toolchains.js` 按需在用户同意后从上游下载到项目内 `.tools/toolchains/`；本仓不携带二进制：
+以下组件由产品 `--provision --ensure=toolchain`（清单 `kind: toolchain`）在用户确认后从上游下载到项目内 `.tools/toolchains/`——组别名只补缺项，已在位的不重装；本仓不携带二进制：
 
 - **Python**：python-build-standalone（CPython 3.14.9），PSF-2.0；来源 https://github.com/astral-sh/python-build-standalone 。
 - **Node.js**：Node 24.11.0，MIT；来源 https://nodejs.org/dist/ 。
@@ -125,10 +125,11 @@ This file documents the third-party dependency bundles self-hosted and distribut
 - **Source Code**: https://github.com/theRMM714/rust-smb-server
 - **Note**: A fork of upstream `paltaio/rust-smb-server` (MIT); upstream code is unchanged, and the fork only adds the helper CLI and the release workflow. Its CI builds and publishes the `smbd.exe` and `.sha256` assets; Solomni only downloads it by URL and does not carry its commit history.
 
-## 5. Base toolchains (runtime prerequisite, first install; not shipped)
+## 5. Base toolchains (runtime prerequisite, installed on demand; not shipped)
 
-The following components are installed by `setup-runtime.js` by default (or `setup-toolchains.js` on demand) with
-user consent into the project's `.tools/toolchains/`; this repository does not carry their binaries:
+The following components are installed by the product via `--provision --ensure=toolchain` (`kind: toolchain` in the
+manifest) with user consent into the project's `.tools/toolchains/` — the group alias fills only what is missing and
+does not reinstall what is already present; this repository does not carry their binaries:
 
 - **Python**: python-build-standalone (CPython 3.14.9), PSF-2.0; https://github.com/astral-sh/python-build-standalone .
 - **Node.js**: Node 24.11.0, MIT; https://nodejs.org/dist/ .

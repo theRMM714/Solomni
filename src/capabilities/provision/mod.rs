@@ -8,3 +8,6 @@ mod guest;
 mod service;
 
 pub use service::ProvisionService;
+/// 目的：给跨层用例提供 kind: toolchain 的清单条目形状与登记入口（只在测试构建里出现）。
+#[cfg(test)]
+pub(crate) use service::{sync_toolchain_active, Dep, ToolchainSpec};

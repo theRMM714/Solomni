@@ -7,7 +7,7 @@
 
 册子按**共享 / 角色**两个目录切分；加载经 `PromptSource` 端口（`capabilities/prompt/ports.rs`，实现在 `capabilities/prompt/detail/yaml_prompts.rs`），
 `{{key}}` 渲染与"缺键即报错"在 `capabilities/prompt/domain/prompt.rs`（纯逻辑，不读文件）。
-键的完整清单就是下面这张表——**本表由 `node run-tests.js` 的 T0 结构审查与盘上的册子双向比对**：加了键没改表、表里的键已不存在，都是硬失败。
+键的完整清单就是下面这张表——**本表由结构审查的 docsTruth 门禁（`tests/gates/structure/docsTruth.js`）与盘上的册子双向比对**（gate id 见 `node run-tests.js --list`）：加了键没改表、表里的键已不存在，都是硬失败。
 
 ## 一、结构与键
 
