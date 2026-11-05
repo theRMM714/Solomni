@@ -87,6 +87,53 @@ pub fn with_scope_hint(outcome: ToolOutcome, scope: CallScope, external: Decisio
     ToolOutcome { ok: false, output }
 }
 
+/// 目的：shell 回执的状态行分类——退出码之外的三种收尾（超时 / 用户停止 / 被信号结束）。
+/// 约束：与退出码互补；状态行是「上一行是状态、末行是 cwd·耗时」契约的一半。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShellStatus {
+    /// 目的：正常返回了退出码。
+    Exit,
+    /// 目的：到点被连根杀树。
+    Timeout,
+    /// 目的：用户停止。
+    Stopped,
+    /// 目的：被信号结束，拿不到退出码。
+    Signal,
+}
+
+impl ShellStatus {
+    /// 目的：给状态栏 / JSON 用的稳定取值（exit / timeout / stopped / signal）。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ShellStatus::Exit => "exit",
+            ShellStatus::Timeout => "timeout",
+            ShellStatus::Stopped => "stopped",
+            ShellStatus::Signal => "signal",
+        }
+    }
+}
+
+/// 目的：从 shell 回执里取状态（取最后一行的 `[shell] ` 收尾行）；没有收尾行（没执行过）给 None。
+/// 约束：只认本模块与 ProcessTexts 产出的形状；命令自己的输出伪造同形行时，更靠后的真行会取代它。
+pub fn status(output: &str) -> Option<ShellStatus> {
+    output.lines().rev().find_map(|line| {
+        let rest = line.trim().strip_prefix("[shell] ")?;
+        if rest.starts_with("退出码未知") {
+            return Some(ShellStatus::Signal);
+        }
+        if rest.starts_with("退出码 ") {
+            return Some(ShellStatus::Exit);
+        }
+        if rest.starts_with("超时（") {
+            return Some(ShellStatus::Timeout);
+        }
+        if rest.starts_with("用户停止") {
+            return Some(ShellStatus::Stopped);
+        }
+        None
+    })
+}
+
 /// 目的：从 shell 回执里取退出码（host 与 guest 的统一标记）；超时 / 停止 / 拿不到时为 None。
 pub fn exit_code(output: &str) -> Option<i32> {
     output.lines().rev().find_map(|l| {
@@ -143,15 +190,6 @@ pub fn did_run(output: &str) -> bool {
     output
         .lines()
         .any(|l| l.trim_start().starts_with("[shell] "))
-}
-
-/// 目的：guest Linux 里跑 shell 的脚本包装：子 shell 接住用户脚本，打印退出码并原样退出。
-/// 约束：用户脚本里的 exit 只退出子 shell，包装仍能打印退出码；命令的 stdin 不提供交互。
-pub fn guest_script(script: &str) -> String {
-    format!(
-        "( {}\n); __solomni_shell_code=$?\nprintf '[shell] 退出码 %s\\n' \"$__solomni_shell_code\"\nexit $__solomni_shell_code\n",
-        script
-    )
 }
 
 #[cfg(test)]
@@ -266,5 +304,38 @@ params:
         assert!(did_run("[shell] 超时（5 秒）"));
         assert!(!did_run("[围栏] 这次调用没有执行"));
         assert!(!did_run("工具进程启动失败：找不到"));
+    }
+
+    #[test]
+    fn status_reads_the_tail_line_and_ignores_unexecuted_receipts() {
+        assert_eq!(status("[shell] 退出码 7"), Some(ShellStatus::Exit));
+        assert_eq!(
+            status("[shell] 退出码未知（被信号结束）"),
+            Some(ShellStatus::Signal)
+        );
+        assert_eq!(
+            status("[shell] 超时（2 秒）：工具进程与它拉起的整棵进程树已被终止"),
+            Some(ShellStatus::Timeout)
+        );
+        assert_eq!(
+            status("[shell] 用户停止：工具进程与它拉起的整棵进程树已被终止"),
+            Some(ShellStatus::Stopped)
+        );
+        assert_eq!(status("没有收尾行"), None);
+        assert_eq!(status("[围栏] 这次调用没有执行"), None);
+        assert_eq!(
+            status("[shell] cwd C:\\a · 耗时 3 秒"),
+            None,
+            "只有 cwd 行不算状态行"
+        );
+        assert_eq!(
+            [
+                ShellStatus::Exit.as_str(),
+                ShellStatus::Timeout.as_str(),
+                ShellStatus::Stopped.as_str(),
+                ShellStatus::Signal.as_str(),
+            ],
+            ["exit", "timeout", "stopped", "signal"]
+        );
     }
 }

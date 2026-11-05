@@ -26,6 +26,9 @@ pub struct ShellLive {
     pub elapsed_secs: Option<u64>,
     /// 目的：退出码（超时 / 停止 / 拿不到时为 None）。
     pub exit_code: Option<i32>,
+    /// 目的：回执状态（exit / timeout / stopped / signal）；None = 运行中、没执行或旧数据。
+    #[serde(default)]
+    pub status: Option<String>,
     /// 目的：成败；None = 仍在跑。
     pub ok: Option<bool>,
     /// 目的：回执预览（最多 4000 字符；完整回执在转录的 shell 工具行）。
@@ -52,14 +55,21 @@ impl ShellSlot {
             finished_at: None,
             elapsed_secs: None,
             exit_code: None,
+            status: None,
             ok: None,
             output: String::new(),
             historical: false,
         });
     }
 
-    /// 目的：收尾一次 shell：写结束时间、成败、退出码与回执预览（超过 4000 字符截断）。
-    pub fn finish(&self, ok: bool, exit_code: Option<i32>, output: &str) {
+    /// 目的：收尾一次 shell：写结束时间、成败、退出码、状态与回执预览（超过 4000 字符截断）。
+    pub fn finish(
+        &self,
+        ok: bool,
+        exit_code: Option<i32>,
+        status: Option<&str>,
+        output: &str,
+    ) {
         let mut g = self.0.lock().unwrap_or_else(|e| e.into_inner());
         let Some(s) = g.as_mut() else {
             return;
@@ -69,6 +79,7 @@ impl ShellSlot {
         s.elapsed_secs = Some(end.saturating_sub(s.started_at));
         s.ok = Some(ok);
         s.exit_code = exit_code;
+        s.status = status.map(str::to_string);
         s.output = output.chars().take(4000).collect();
     }
 
@@ -147,6 +158,8 @@ pub fn last_shell(events: &[serde_json::Value]) -> Option<ShellLive> {
                 finished_at: None,
                 elapsed_secs,
                 exit_code: crate::capabilities::tools::api::exit_code(output),
+                status: crate::capabilities::tools::api::shell_status(output)
+                    .map(|s| s.as_str().to_string()),
                 ok: Some(tool.get("ok").and_then(|o| o.as_bool()).unwrap_or(false)),
                 output: output.chars().take(4000).collect(),
                 historical: true,
@@ -374,6 +387,7 @@ mod tests {
         assert_eq!(live.cwd, "/w/a");
         assert_eq!(live.elapsed_secs, Some(7));
         assert_eq!(live.exit_code, Some(0));
+        assert_eq!(live.status.as_deref(), Some("exit"));
         assert_eq!(live.ok, Some(true));
         assert!(live.historical);
         assert!(live.finished_at.is_none(), "派生快照不伪造墙钟时间");
@@ -411,5 +425,6 @@ mod tests {
         assert_eq!(live.cwd, "");
         assert_eq!(live.elapsed_secs, None);
         assert_eq!(live.exit_code, None);
+        assert_eq!(live.status, None, "没执行的调用没有状态行");
     }
 }

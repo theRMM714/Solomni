@@ -430,29 +430,8 @@ impl ProcTools {
         out
     }
 
-    /// 目的：把 shell 输出按 head+tail 截断（开头 1/4、结尾 3/4），截断标记在中间。
-    fn truncate_middle(&self, s: &str) -> String {
-        let count = s.chars().count();
-        if count <= self.max_output_chars {
-            return s.to_string();
-        }
-        let head_n = self.max_output_chars / 4;
-        let tail_n = self.max_output_chars - head_n;
-        let head: String = s.chars().take(head_n).collect();
-        let tail: String = s.chars().skip(count - tail_n).collect();
-        format!(
-            "{}\n{}\n{}",
-            head,
-            self.texts.truncated_middle(
-                &count.to_string(),
-                &head_n.to_string(),
-                &tail_n.to_string()
-            ),
-            tail
-        )
-    }
-
-    /// 目的：拼 shell 回执：head+tail 截断 + 退出码 / 超时 / 用户停止 / 围栏失败。
+    /// 目的：拼 shell 回执：正文分区 + 截断 + 退出码 / 超时 / 用户停止 / 围栏失败。
+    /// 约束：形状与本机/guest 共用（见 kernel::domain::receipt）；cwd 与耗时由工具层追加。
     fn assemble_shell(
         &self,
         out: String,
@@ -462,24 +441,22 @@ impl ProcTools {
         code: Option<i32>,
         timeout: Duration,
     ) -> ToolOutcome {
-        let mut body = out;
-        if !err.is_empty() {
-            if !body.is_empty() {
-                body.push('\n');
-            }
-            body.push_str(&self.texts.stderr_header());
-            body.push('\n');
-            body.push_str(&err);
-        }
-        let mut output = self.truncate_middle(&body);
-        output.push('\n');
-        if cancelled {
-            output.push_str(&self.texts.shell_cancelled());
+        let end = if cancelled {
+            crate::kernel::domain::receipt::ShellEnd::Cancelled
         } else if timed_out {
-            output.push_str(&self.texts.shell_timeout(timeout.as_secs()));
+            crate::kernel::domain::receipt::ShellEnd::TimedOut {
+                secs: timeout.as_secs(),
+            }
         } else {
-            output.push_str(&self.texts.shell_exit(code));
-        }
+            crate::kernel::domain::receipt::ShellEnd::Exit(code)
+        };
+        let mut output = crate::kernel::domain::receipt::shell_receipt(
+            self.texts.as_ref(),
+            &out,
+            &err,
+            end,
+            self.max_output_chars,
+        );
         if code == Some(confine::FENCE_FAILED) {
             output.push('\n');
             output.push_str(&self.texts.fence_failed());

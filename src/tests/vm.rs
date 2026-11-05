@@ -2510,7 +2510,8 @@ pub(crate) fn vm_live_two_guests_share_one_base_without_writing_it() {
 /// 约束：只在 SOLOMNI_VM_LIVE=1 且 SOLOMNI_VM_QEMU 指向真东西、虚拟根（默认 `debian`）在场时执行；否则打印 [探针] 如实跳过。
 /// 约束：取消回执含「用户停止」且 15 秒内返回、guest 内没有残留的 sleep；`timeout_secs` 到点仍照常收口。
 ///   取消路径上 helper 自己的 stderr 可能被 QGA 丢掉（时有时无），所以"信号处理器生效"用**无孤儿 + 快速返回**证明；
-///   超时路径的 helper stderr 稳定可见，直接断言它。
+///   超时路径由通道产出与本机同形的状态行 `[shell] 超时（N 秒）`（helper 只留机器标记，通道剥掉）。
+///   本用例直接调 guest 通道：只有状态行，没有工具层追加的 cwd·耗时尾行。
 #[test]
 pub(crate) fn vm_live_cancel_kills_the_guest_process_tree() {
     let live = std::env::var("SOLOMNI_VM_LIVE").as_deref() == Ok("1");
@@ -2574,7 +2575,7 @@ pub(crate) fn vm_live_cancel_kills_the_guest_process_tree() {
         env: Vec::new(),
         cwd: "/tmp".to_string(),
         timeout_secs: secs,
-        output_limit: crate::capabilities::vm::domain::guest::OutputLimit::HeadAndTail,
+        output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Shell,
     };
 
     // 取消：sleep 30 起跑后由 host 置位取消旗，helper 收 SIGTERM 杀子进程组，不能等满 timeout。
@@ -2616,7 +2617,7 @@ pub(crate) fn vm_live_cancel_kills_the_guest_process_tree() {
         alive.output
     );
 
-    // 超时：没有取消旗时，timeout_secs 到点由 helper 杀树并给出「超时」。
+    // 超时：没有取消旗时，timeout_secs 到点由 helper 杀树，通道产出与本机同形的状态行。
     let started = std::time::Instant::now();
     let timed_out = guest
         .channel()
@@ -2628,15 +2629,13 @@ pub(crate) fn vm_live_cancel_kills_the_guest_process_tree() {
     );
     assert!(!timed_out.ok, "超时后命令不能报成功：{}", timed_out.output);
     assert!(
-        timed_out.output.contains("超时"),
-        "回执要说明超时：{}",
+        timed_out.output.contains("[shell] 超时（2 秒）"),
+        "回执要给出同形超时状态行：{}",
         timed_out.output
     );
     assert!(
-        timed_out
-            .output
-            .contains("solomni-guest-fence: 工具进程超时"),
-        "helper 的收口行要在回执里：{}",
+        !timed_out.output.contains("solomni-guest-fence:"),
+        "helper 的机器标记不能漏进回执：{}",
         timed_out.output
     );
     assert!(
@@ -2935,6 +2934,17 @@ pub(crate) fn guest_helper_is_a_fail_closed_landlock_launcher() {
     assert!(
         crate::capabilities::vm::detail::guest_helper::HELPER_PATH.contains("solomni-guest-fence"),
         "助手路径要稳定"
+    );
+    assert!(
+        script.contains(crate::capabilities::vm::detail::guest_helper::HELPER_TIMEOUT_MARKER)
+            && script.contains(crate::capabilities::vm::detail::guest_helper::HELPER_SIGNAL_MARKER),
+        "超时 / 被信号结束要用机器标记（人读文案由通道产出）：{}",
+        script
+    );
+    assert!(
+        !script.contains("工具进程超时，已终止整棵进程树"),
+        "helper 不再写人读收尾句（回执形状由通道统一装配）：{}",
+        script
     );
 }
 

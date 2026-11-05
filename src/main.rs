@@ -493,7 +493,8 @@ fn main() {
                     root.join(".vm").join("overlays"),
                 )
                 .with_book(std::sync::Arc::clone(&book))
-                .with_log(log.clone()),
+                .with_log(log.clone())
+                .with_texts(std::sync::Arc::clone(&process_texts)),
             ),
             shares,
         ));

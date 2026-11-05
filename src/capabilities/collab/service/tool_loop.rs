@@ -593,6 +593,11 @@ fn run_shell(
         };
     }
     let started = std::time::Instant::now();
+    // cwd 用**本环境写法**：本机档是宿主路径，虚拟机档是 guest 内路径（与文件工具、提示词同一座路径桥）。
+    let cwd_view = match ctx.sandbox.path_codec.as_ref() {
+        Some(codec) => codec.to_view(&ctx.sandbox.private),
+        None => ctx.sandbox.private.display().to_string(),
+    };
     let slot = ctx.shell_live.clone();
     if let Some(slot) = &slot {
         let scope = match call.scope {
@@ -600,20 +605,16 @@ fn run_shell(
             CallScope::External => "external",
             CallScope::None => "",
         };
-        slot.start(
-            &call.script,
-            scope,
-            &ctx.sandbox.private.display().to_string(),
-        );
+        slot.start(&call.script, scope, &cwd_view);
     }
     let mut outcome = if ctx.tier == crate::kernel::api::Tier::Vm {
         let run = crate::capabilities::vm::api::GuestRun {
-            command: api::guest_script(&call.script),
+            command: call.script.clone(),
             args_json: String::new(),
             env: Vec::new(),
             cwd: ctx.sandbox.private.display().to_string(),
             timeout_secs: call.timeout.as_secs(),
-            output_limit: crate::capabilities::vm::api::OutputLimit::HeadAndTail,
+            output_limit: crate::capabilities::vm::api::OutputLimit::Shell,
         };
         ctx.vm
             .guest_run_fenced_cancellable(&ctx.guest_lease, &run, &fence, Some(cancel))
@@ -635,11 +636,11 @@ fn run_shell(
         }
     }
     // 回执补「落点 + 本次耗时」：模型据此判断相对路径与耗时，回放也从这一行派生。
-    // 只对执行层给出 `[shell]` 收尾行的调用追加；参数拒绝 / 起进程失败没有这一行。
+    // 只对执行层给出 `[shell]` 收尾行的调用追加；参数拒绝 / 起进程失败 / 围栏拒绝没有这一行。
     if api::did_run(&outcome.output) {
         outcome.output.push('\n');
         outcome.output.push_str(&api::cwd_elapsed_line(
-            &ctx.sandbox.private.display().to_string(),
+            &cwd_view,
             started.elapsed().as_secs(),
         ));
     }
@@ -651,7 +652,12 @@ fn run_shell(
     );
     let outcome = api::with_scope_hint(outcome, call.scope, external);
     if let Some(slot) = &slot {
-        slot.finish(outcome.ok, api::exit_code(&outcome.output), &outcome.output);
+        slot.finish(
+            outcome.ok,
+            api::exit_code(&outcome.output),
+            api::shell_status(&outcome.output).map(|s| s.as_str()),
+            &outcome.output,
+        );
     }
     outcome
 }

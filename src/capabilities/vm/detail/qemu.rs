@@ -8,7 +8,10 @@ use crate::capabilities::vm::domain::guest::{
 };
 use crate::capabilities::vm::ports::{GuestChannel, GuestVm, SharePlan, VmEngine};
 use crate::kernel::api::ToolOutcome;
+use crate::kernel::detail::process::CodeProcessTexts;
 use crate::kernel::detail::procs::{self, Entry, ProcessBook};
+use crate::kernel::domain::receipt::{shell_receipt, ShellEnd};
+use crate::kernel::ports::ProcessTexts;
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
@@ -52,6 +55,8 @@ pub struct QemuEngine {
     book: Option<std::sync::Arc<ProcessBook>>,
     /// 运行日志（组合根注入；None = 只转控制台）：QEMU 自己的话要能进 logs/ 与对账现场。
     log: Option<std::sync::Arc<dyn crate::kernel::ports::Log + Send + Sync>>,
+    /// shell 回执的收尾文案（与本机守门进程同一份 ProcessTexts）：guest 通道据此产出同形状态行。
+    texts: std::sync::Arc<dyn ProcessTexts>,
 }
 
 impl QemuEngine {
@@ -61,6 +66,7 @@ impl QemuEngine {
             overlay_dir: None,
             book: None,
             log: None,
+            texts: std::sync::Arc::new(CodeProcessTexts),
         }
     }
 
@@ -70,7 +76,14 @@ impl QemuEngine {
             overlay_dir: Some(dir),
             book: None,
             log: None,
+            texts: std::sync::Arc::new(CodeProcessTexts),
         }
+    }
+
+    /// 目的：接上 shell 回执文案（组合根注入与本机守门进程同一份；不接就用生产实现）。
+    pub fn with_texts(mut self, texts: std::sync::Arc<dyn ProcessTexts>) -> QemuEngine {
+        self.texts = texts;
+        self
     }
 
     /// 目的：接上长驻子进程的账（组合根注入）：每次 boot 登记一条，销毁时注销。
@@ -435,6 +448,7 @@ impl VmEngine for QemuEngine {
             overlay,
             book: self.book.clone(),
             pid,
+            texts: std::sync::Arc::clone(&self.texts),
         };
         // agent 要等内核起来才通；投种子时（首启装 agent）不等，交给编排轮询，其余情况先等到就绪再挂载/回命令。
         if spec.seed.is_none() {
@@ -633,6 +647,8 @@ struct QemuHandle {
     book: Option<std::sync::Arc<ProcessBook>>,
     /// 这个句柄对应的 QEMU 进程（注销登记用）。
     pid: u32,
+    /// shell 回执的收尾文案（来自引擎，与本机守门进程同一份）。
+    texts: std::sync::Arc<dyn ProcessTexts>,
 }
 
 /// 目的：首启种子的小 HTTP 服务（cloud-init NoCloud net）——只在这次 boot 期间活着，随 guest 一起收掉。
@@ -968,25 +984,145 @@ impl QemuHandle {
                     .and_then(|d| d.as_str())
                     .map(unb64)
                     .unwrap_or_default();
-                let mut output = format!(
-                    "{}{}",
-                    String::from_utf8_lossy(&out),
-                    String::from_utf8_lossy(&err)
-                );
-                if cancel_sent {
-                    output.push_str("\n[shell] 用户停止：工具进程与它拉起的整棵进程树已被终止");
+                let out = String::from_utf8_lossy(&out).into_owned();
+                let err = String::from_utf8_lossy(&err).into_owned();
+                if run.output_limit == OutputLimit::Shell {
+                    return self.shell_outcome(run, &out, &err, code, cancel_sent);
                 }
                 return ToolOutcome {
                     ok: code == 0,
-                    output: cap_output(output, run.output_limit),
+                    output: cap_output(format!("{}{}", out, err), run.output_limit),
                 };
             }
             if Instant::now() >= deadline {
+                // 外层兜底：helper 没在预算内收场——按取消通道杀它（helper 会杀整棵进程组），再按 shell 契约收口。
+                let kill = format!("kill -TERM {}", pid);
+                let _ = self.exec_run(
+                    &GuestRun {
+                        command: kill,
+                        args_json: "{}".to_string(),
+                        env: Vec::new(),
+                        cwd: String::new(),
+                        timeout_secs: 5,
+                        output_limit: OutputLimit::Head,
+                    },
+                    None,
+                    None,
+                );
+                if run.output_limit == OutputLimit::Shell {
+                    return ToolOutcome {
+                        ok: false,
+                        output: shell_receipt(
+                            self.texts.as_ref(),
+                            "",
+                            "",
+                            ShellEnd::TimedOut {
+                                secs: run.timeout_secs,
+                            },
+                            GUEST_SHELL_MAX_CHARS,
+                        ),
+                    };
+                }
                 return fail("等 guest 里的命令超时");
             }
             std::thread::sleep(Duration::from_millis(20));
         }
     }
+
+    /// 目的：把一次 guest 执行的结果翻成 shell 回执（正文分区 + 状态行）；非 shell 运行的形状不受影响。
+    /// 约束：只有真正跑过命令才产出 `[shell]` 收尾行；helper 的围栏/启动失败保留诊断原文。
+    fn shell_outcome(
+        &self,
+        run: &GuestRun,
+        out: &str,
+        err: &str,
+        code: i64,
+        cancel_sent: bool,
+    ) -> ToolOutcome {
+        let end = guest_shell_end(err, code, cancel_sent);
+        if end == GuestShellEnd::NotRun {
+            return ToolOutcome {
+                ok: false,
+                output: cap_output(format!("{}{}", out, err), run.output_limit),
+            };
+        }
+        let cleaned = strip_helper_markers(err);
+        let (end, ok) = match end {
+            GuestShellEnd::Exit(c) => (ShellEnd::Exit(Some(c as i32)), c == 0),
+            GuestShellEnd::Timeout => (
+                ShellEnd::TimedOut {
+                    secs: run.timeout_secs,
+                },
+                false,
+            ),
+            GuestShellEnd::Cancelled => (ShellEnd::Cancelled, false),
+            GuestShellEnd::Signal => (ShellEnd::Exit(None), false),
+            GuestShellEnd::NotRun => unreachable!("上面已提前返回"),
+        };
+        ToolOutcome {
+            ok,
+            output: shell_receipt(self.texts.as_ref(), out, &cleaned, end, GUEST_SHELL_MAX_CHARS),
+        }
+    }
+}
+
+/// 目的：shell 回执的正文上限（与本机守门进程同一口径）。
+const GUEST_SHELL_MAX_CHARS: usize = 16_000;
+
+/// 目的：guest shell 回执的收尾判定——只看 helper 的机器标记与宿主取消旗，不猜自然语言。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GuestShellEnd {
+    /// 目的：子进程（脚本）返回了退出码。
+    Exit(i64),
+    /// 目的：helper 到点杀了整棵进程树。
+    Timeout,
+    /// 目的：宿主取消旗已置位。
+    Cancelled,
+    /// 目的：子进程被信号结束，没有退出码。
+    Signal,
+    /// 目的：helper 的围栏/启动失败——命令没有执行，不产出 shell 收尾行。
+    NotRun,
+}
+
+/// 目的：按 helper 的机器标记与取消旗判定收尾；围栏失败（die 诊断）判为没执行。
+fn guest_shell_end(err: &str, code: i64, cancel_sent: bool) -> GuestShellEnd {
+    if cancel_sent {
+        return GuestShellEnd::Cancelled;
+    }
+    let mut not_run = false;
+    for line in err.lines() {
+        let line = line.trim();
+        if line == super::guest_helper::HELPER_TIMEOUT_MARKER {
+            return GuestShellEnd::Timeout;
+        }
+        if line == super::guest_helper::HELPER_SIGNAL_MARKER {
+            return GuestShellEnd::Signal;
+        }
+        if line.starts_with(super::guest_helper::HELPER_DIAG_PREFIX) {
+            not_run = true;
+        }
+    }
+    if not_run {
+        return GuestShellEnd::NotRun;
+    }
+    GuestShellEnd::Exit(code)
+}
+
+/// 目的：把 helper 的机器标记行剥掉（人读文案由 ProcessTexts 产出；标记不进最终回执）。
+fn strip_helper_markers(err: &str) -> String {
+    let kept: Vec<&str> = err
+        .lines()
+        .filter(|l| {
+            let line = l.trim();
+            line != super::guest_helper::HELPER_TIMEOUT_MARKER
+                && line != super::guest_helper::HELPER_SIGNAL_MARKER
+        })
+        .collect();
+    let mut out = kept.join("\n");
+    if !out.is_empty() && err.ends_with('\n') {
+        out.push('\n');
+    }
+    out
 }
 
 impl GuestChannel for QemuHandle {
@@ -1121,7 +1257,7 @@ fn cap_output(text: String, limit: OutputLimit) -> String {
             let head: String = text.chars().take(MAX).collect();
             format!("{}\n[截断] 输出共 {} 字符，仅保留前 {}", head, count, MAX)
         }
-        OutputLimit::HeadAndTail => {
+        OutputLimit::HeadAndTail | OutputLimit::Shell => {
             let head_n = MAX / 4;
             let tail_n = MAX - head_n;
             let head: String = text.chars().take(head_n).collect();
@@ -1244,6 +1380,7 @@ mod tests {
             overlay: None,
             book: None,
             pid: 0,
+            texts: std::sync::Arc::new(CodeProcessTexts),
         };
         assert!(handle.ping(), "被 RST 的那条连接要能靠重连救回来");
         server.join().expect("服务器线程");
@@ -1403,5 +1540,56 @@ mod tests {
         assert_eq!(lease_file_name("demo-1"), "demo-1");
         assert_eq!(lease_file_name("a/b\\c"), "a_b_c");
         assert_eq!(lease_file_name("会话"), "__");
+    }
+
+    /// 目的：guest shell 回执的收尾只看 helper 机器标记与宿主取消旗，不猜自然语言。
+    #[test]
+    fn guest_shell_end_reads_machine_markers_only() {
+        assert_eq!(guest_shell_end("", 3, false), GuestShellEnd::Exit(3));
+        assert_eq!(
+            guest_shell_end("warn\nsolomni-guest-fence: timeout\n", 124, false),
+            GuestShellEnd::Timeout
+        );
+        assert_eq!(
+            guest_shell_end("solomni-guest-fence: signal\n", 111, false),
+            GuestShellEnd::Signal
+        );
+        assert_eq!(
+            guest_shell_end(
+                "solomni-guest-fence: landlock is unavailable\n",
+                111,
+                false
+            ),
+            GuestShellEnd::NotRun,
+            "helper 的 die 诊断 = 没执行，不产出 shell 收尾行"
+        );
+        assert_eq!(
+            guest_shell_end("solomni-guest-fence: something\n", 0, true),
+            GuestShellEnd::Cancelled,
+            "取消旗优先"
+        );
+        assert_eq!(
+            guest_shell_end("用户脚本自己的报错\n", 1, false),
+            GuestShellEnd::Exit(1),
+            "普通 stderr 不是标记"
+        );
+    }
+
+    /// 目的：helper 的机器标记不能漏进最终回执；围栏失败的诊断原文要保留。
+    #[test]
+    fn helper_markers_are_stripped_but_diagnostics_are_kept() {
+        assert_eq!(
+            strip_helper_markers("warn\nsolomni-guest-fence: timeout\n"),
+            "warn\n"
+        );
+        assert_eq!(strip_helper_markers("solomni-guest-fence: timeout\n"), "");
+        assert_eq!(
+            strip_helper_markers("solomni-guest-fence: signal\n"),
+            ""
+        );
+        assert_eq!(
+            strip_helper_markers("solomni-guest-fence: landlock is unavailable\n"),
+            "solomni-guest-fence: landlock is unavailable\n"
+        );
     }
 }
