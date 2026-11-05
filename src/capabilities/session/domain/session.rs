@@ -932,6 +932,14 @@ pub fn stream_piece(acc: &str, piece: &str) -> (String, String) {
     };
     (send, format!("{}{}", acc, piece))
 }
+
+/// 目的：这一片要不要外送成 Delta 事件——`start` 要（前端据此重置本轮流），**空片段不要**
+/// （信封被抑制的片段、被合并掉的重复片段都不该刷事件流）。
+/// 约束：与 `stream_piece` 同处一条流式规则；只认 kind 与文本，不判断内容。
+pub fn delta_visible(kind: &str, text: &str) -> bool {
+    kind == "start" || !text.is_empty()
+}
+
 /// 工作名的缺省与唯一化：`base` 去空白；为空用 `fallback`；重名追加 `-2` / `-3`（进程内唯一即可）。
 /// **纯策略**：`exists` 由调用方给——会话存在性归存储，本函数不关心它从哪来。
 /// 归属：命名是**会话自己的策略**（它拥有会话身份），不是前端的便利函数。

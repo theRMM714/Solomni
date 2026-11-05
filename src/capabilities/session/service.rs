@@ -220,11 +220,14 @@ pub fn core_operation(
                         piece = r.clone();
                     }
                 }
-                sink(crate::capabilities::session::api::SessionEvent::Delta {
-                    speaker: "核心".to_string(),
-                    kind: kind.to_string(),
-                    text: piece,
-                });
+                // 空片段不刷事件流（信封被抑制 / 重复快照合并掉的片都不外送）。
+                if crate::capabilities::session::api::delta_visible(kind, &piece) {
+                    sink(crate::capabilities::session::api::SessionEvent::Delta {
+                        speaker: "核心".to_string(),
+                        kind: kind.to_string(),
+                        text: piece,
+                    });
+                }
                 match cancel {
                     Some(c) => !c.load(std::sync::atomic::Ordering::Relaxed),
                     None => true,

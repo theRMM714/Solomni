@@ -18,8 +18,8 @@ pub use crate::capabilities::session::domain::rewind::{
     next_line_id, rewind_marks, truncate_events, turn_of_line, RewindMark, RewindMode,
 };
 pub use crate::capabilities::session::domain::session::{
-    keep_whole_replies, stream_piece, summary_message, unique_work_name, AgentSession,
-    CompactChatFactory, CompactChatSpec, CompactionPlan, SessionParams, TurnRun,
+    delta_visible, keep_whole_replies, stream_piece, summary_message, unique_work_name,
+    AgentSession, CompactChatFactory, CompactChatSpec, CompactionPlan, SessionParams, TurnRun,
 };
 pub use crate::capabilities::session::domain::tools::{
     last_shell, service_ops_for_modules, tool_table, MemberTools, ServiceOp, ShellLive, ShellSlot,

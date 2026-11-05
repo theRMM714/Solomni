@@ -562,6 +562,19 @@ pub(crate) fn streaming_stops_at_the_envelope_brace() {
 }
 
 #[test]
+pub(crate) fn suppressed_stream_pieces_do_not_emit_delta_events() {
+    use crate::capabilities::session::api::delta_visible;
+    assert!(delta_visible("start", ""), "start 用来重置本轮流，必须外送");
+    assert!(delta_visible("text", "正文"));
+    assert!(delta_visible("reasoning", "想一想"));
+    assert!(
+        !delta_visible("text", ""),
+        "信封被抑制的片段不该刷事件流（每秒几十条空 delta 会让界面假死）"
+    );
+    assert!(!delta_visible("reasoning", ""));
+}
+
+#[test]
 pub(crate) fn reasoning_is_kept_on_final_transcript_lines() {
     let mut core = core_with_io_gateway(
         vec![module_of("a")],

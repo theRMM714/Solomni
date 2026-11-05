@@ -106,8 +106,8 @@ pub(crate) fn collab_update_task_rewinds_and_latest_wins() {
 #[test]
 pub(crate) fn core_operation_streams_its_text_to_the_facts_outlet() {
     // 核心操作的正文也**逐片上屏**（与成员、单 agent 同一条规则，见 session::api::core_operation）：
-    // 替身只发一片正文，出口必须收到 start + text 两条 Delta：核心的正文逐片上屏、不整块蹦出。
-    // 同时钉住"信封不当正文流"：正文片以 { 开头，外送的那片必须是空的。
+    // 替身只发一片正文，出口必须收到 start（用于重置本轮流）；正文以 { 开头 = 信封，整片被抑制，
+    // 因此**不该再推一条空 text delta**（空片段不刷事件流）。
     let raw = "{\"type\":\"tool\",\"name\":\"slate\",\"args\":{\"picks\":[{\"name\":\"甲\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"}]}}";
     let core = core_with_gateway(
         vec![module_of("a")],
@@ -131,13 +131,8 @@ pub(crate) fn core_operation_streams_its_text_to_the_facts_outlet() {
         deltas
     );
     assert!(
-        deltas.iter().any(|(k, _)| k == "text"),
-        "核心的正文要逐片上屏：{:?}",
-        deltas
-    );
-    assert!(
-        deltas.iter().all(|(k, t)| k != "text" || t.is_empty()),
-        "工具信封绝不当正文流上屏：{:?}",
+        !deltas.iter().any(|(k, _)| k == "text"),
+        "信封被整片抑制时不该推空 text delta：{:?}",
         deltas
     );
 }
