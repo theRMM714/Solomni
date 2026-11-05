@@ -50,7 +50,8 @@ pub fn shell_receipt(
 
 /// 目的：head+tail 截断（开头约 1/4、结尾约 3/4），截断标记在中间；未超限原样返回。
 /// 约束：**优先在行边界切**（开头取完整行、结尾从整行开始），不把一行劈成两段；
-///   第一行 / 最后一段本身超过预算（单行超长）时退化为按字符切。标记里报的是**实际保留**的字符数。
+///   第一行超过开头预算、或"从整行开始"会丢掉结尾窗口大半（超长单行 + 后面的 stderr）时，
+///   退化为按字符切——保住内容优先于凑整行。标记里报的是**实际保留**的字符数。
 fn truncate_middle(texts: &dyn ProcessTexts, text: &str, max_chars: usize) -> String {
     let count = text.chars().count();
     if count <= max_chars {
@@ -68,11 +69,13 @@ fn truncate_middle(texts: &dyn ProcessTexts, text: &str, max_chars: usize) -> St
         // 第一行就超过预算：没有行边界可用，按字符切。
         head = head_raw;
     }
-    // 结尾：预算窗口若从行中间开始，丢掉那半行，从下一个完整行开始。
+    // 结尾：预算窗口若从行中间开始，优先从下一个完整行开始；但若这样会丢掉窗口的大半
+    // （例如整段输出就是一条超长行，后面只剩一行 stderr），保留窗口原文——不能为了凑行
+    // 把结尾内容本身丢掉。
     let tail_start = count - tail_budget;
     let tail_raw: String = text.chars().skip(tail_start).collect();
     let at_line_start = tail_start == 0 || text.chars().nth(tail_start - 1) == Some('\n');
-    let mut tail = if at_line_start {
+    let line_started = if at_line_start {
         tail_raw.clone()
     } else {
         match tail_raw.find('\n') {
@@ -80,10 +83,12 @@ fn truncate_middle(texts: &dyn ProcessTexts, text: &str, max_chars: usize) -> St
             None => tail_raw.clone(),
         }
     };
-    if tail.is_empty() {
-        // 最后一段是一整行超长：没有行边界可用，按字符切。
-        tail = tail_raw;
-    }
+    let tail = if line_started.chars().count() * 2 >= tail_raw.chars().count() {
+        line_started
+    } else {
+        // 起步的半行太长（超长单行）：按字符切，保住结尾窗口。
+        tail_raw
+    };
     let kept_head = head.chars().count();
     let kept_tail = tail.chars().count();
     let marker = texts.truncated_middle(
@@ -208,5 +213,28 @@ mod tests {
                 line
             );
         }
+    }
+
+    #[test]
+    fn tail_keeps_a_single_long_line_instead_of_dropping_it() {
+        // macOS 真机回归：整段 stdout 是一条 2 万字符的长行 + "TAIL"，后面只有一行 stderr。
+        // 若"从整行开始"会把整条长行丢掉、只剩 53 字符的 stderr；这里必须保留 12000 字符窗口。
+        let mut text = "a".repeat(20_000);
+        text.push_str("TAIL\n[stderr]\n[围栏] seatbelt 规则 37 条\n");
+        let out = shell_receipt(&texts(), &text, "", ShellEnd::Exit(Some(0)), 16_000);
+        let (before, after) = out.split_once("[截断]").expect("要有截断标记");
+        let marker = after.lines().next().unwrap_or_default();
+        assert_eq!(
+            before.trim_end_matches('\n').chars().count(),
+            4_000,
+            "开头超长单行按字符切"
+        );
+        assert!(
+            marker.contains("结尾 12000 字符"),
+            "结尾要保住整个窗口：{}",
+            marker
+        );
+        assert!(out.contains("TAIL"), "结尾内容不能被行取整丢掉");
+        assert!(out.contains("seatbelt"), "stderr 段也要保留");
     }
 }
