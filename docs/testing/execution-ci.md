@@ -232,7 +232,7 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 | `changes` | 判定 `code_changed` / `docs_changed`；从 base 取分类器副本，自测 + `include_str!/include_bytes!` 文档消费自检 | `node tests/ci-changes.mjs`（副本） |
 | `docs` | 有文档变更：文档审查（门户 / 链接 / 根文档路由） | `node run-tests.js --audit=docs` |
 | `structure` | 始终跑：结构审查（代码↔文档结构；文档与真相源比对 + 纯文本检查） | `node run-tests.js --audit=structure` |
-| `workflow` | 始终跑：工作流静态检查（闸门判定自测 + actionlint 阻断 + zizmor 只报不拦，观察稳定后转阻断） | `node tests/ci-gate.mjs --self-test`；`actionlint -no-color`（阻断）；`zizmor --persona=regular --format=plain .github/workflows`（advisory） |
+| `workflow` | 始终跑：工作流静态检查（闸门判定自测 + actionlint 阻断 + zizmor 固定 1.32.0、只报不拦；9 个只读 checkout 关凭据，2 个发布 job 有行内豁免） | `node tests/ci-gate.mjs --self-test`；`actionlint -no-color`（阻断）；`zizmor@1.32.0 --persona=regular --format=plain .github/workflows`（advisory） |
 | `gate` | 汇总五个 job 的结果（`changes` 的分类 + `docs` / `structure` / `workflow` / `quality` / `e2e`），规则集里唯一代表代码/文档验收的必填检查；不产报告 | `node tests/ci-gate.mjs` |
 | `publish-report` | 汇总三条 lane 的报告并发布 `ci-report` | `tests/ci-merge.mjs` + `tests/ci-publish.mjs` |
 
@@ -295,7 +295,7 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 | 发布前验收 | 本地通过 ≠ 三平台通过 | 三平台报告 + 三平台 `TEST-REPORT-ACCEPTED` |
 
 - 文档审查与结构审查本身是本地可复现的确定性检查；CI 里跑它们是为了让 `gate` 能给出合并判定（它们不是 required context），不是补平台结论。工作流静态检查同理：闸门判定自测本地可跑（`node tests/ci-gate.mjs --self-test`），`actionlint` / `zizmor` 只在 CI 装。
-- zizmor 现在是**观察期**：只报不拦，连续若干次非 Draft CI 稳定、findings 处置完后转阻断；观察与转阻断的验收记在缺口 `ci.zizmor-advisory`（`tests/gaps.yaml`），不靠口头约定。
+- zizmor 现在是**观察期**：版本固定 `1.32.0`，只报不拦；9 个只读 job 的 checkout 已设 `persist-credentials: false`，2 个需要 `git push` 的发布 job 保留凭据并用行内 `zizmor: ignore[artipacked]` + 理由豁免。连续 ≥5 次非 Draft CI 稳定后去掉 `continue-on-error`，并让 `tests/ci-gate.mjs` 把工作流静态检查当恒跑必需项；观察与转阻断的验收记在缺口 `ci.zizmor-advisory`（`tests/gaps.yaml`），不靠口头约定。
 
 - **什么时候手动派发**：Draft 阶段不自动跑 CI，需要他平台结论时手动派发；PR 标 Ready 后自动跑，不必再派发。
 - 手动派发还用于「没有 PR 的分支」与「干净机器复验」。

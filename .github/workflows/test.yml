@@ -60,6 +60,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # 只读 job：分类不写仓库，关闭令牌持久化（zizmor artipacked）。
+          persist-credentials: false
           # 与三个重 job 同一份 head；分类只看 PR 的提交差异。
           ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/head', github.event.pull_request.number) || github.sha }}
           fetch-depth: 0
@@ -105,6 +107,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # 只读 job：不写仓库，关闭令牌持久化（zizmor artipacked）。
+          persist-credentials: false
           ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/head', github.event.pull_request.number) || github.sha }}
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -133,6 +137,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # 只读 job：不写仓库，关闭令牌持久化（zizmor artipacked）。
+          persist-credentials: false
           ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/head', github.event.pull_request.number) || github.sha }}
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -161,6 +167,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # 只读 job：不写仓库，关闭令牌持久化（zizmor artipacked）。
+          persist-credentials: false
           ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/head', github.event.pull_request.number) || github.sha }}
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -186,7 +194,7 @@ jobs:
         continue-on-error: true
         uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
-          tool: zizmor
+          tool: zizmor@1.32.0
 
       - name: 工作流安全审查（zizmor，只报不拦）
         continue-on-error: true
@@ -213,6 +221,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # 只读 job：不写仓库，关闭令牌持久化（zizmor artipacked）。
+          persist-credentials: false
           # fork PR 的 head 分支在对方仓；用 base 仓为每个 PR 建的 refs/pull/<N>/head（同仓 PR 同样可用）。
           ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/head', github.event.pull_request.number) || github.sha }}
 
@@ -327,6 +337,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # 只读 job：不写仓库，关闭令牌持久化（zizmor artipacked）。
+          persist-credentials: false
           ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/head', github.event.pull_request.number) || github.sha }}
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -405,6 +417,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # 只读 job：闸门只读 needs 结果、不写仓库，关闭令牌持久化（zizmor artipacked）。
+          persist-credentials: false
           # gate 判定逻辑取自可信来源：同仓 PR 用 head（本 PR 要改 gate 本身），fork PR 用 base
           # （对方不能改闸门逻辑；与 changes 从 base 取分类器同一口径）。非 PR 用 github.sha。
           ref: ${{ github.event.pull_request.head.repo.full_name == github.repository && format('refs/pull/{0}/head', github.event.pull_request.number) || github.event.pull_request.base.sha || github.sha }}
@@ -440,7 +454,8 @@ jobs:
       group: ci-report-publish
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # actions/checkout v7.0.1：本 job 用 git push 重建 ci-report 滚动分支，需要 checkout 凭据；其余 checkout 均已关闭持久化。
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # zizmor: ignore[artipacked] 本 job 需要凭据重建滚动分支
         with:
           ref: ${{ env.SOURCE_SHA }}
           fetch-depth: 0
