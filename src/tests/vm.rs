@@ -2609,7 +2609,15 @@ pub(crate) fn vm_live_cancel_kills_the_guest_process_tree() {
         elapsed
     );
     // 无孤儿：helper 的信号处理器杀掉的是**整棵进程组**；只杀 helper 自己会留下这个 sleep。
-    let alive = guest.channel().exec(&run("pgrep -x sleep || true", 10));
+    // 这条探针不是 shell 回执，用 Head（别让通道补 [shell] 收尾行）。
+    let alive = guest.channel().exec(&GuestRun {
+        command: "pgrep -x sleep || true".to_string(),
+        args_json: "{}".to_string(),
+        env: Vec::new(),
+        cwd: "/tmp".to_string(),
+        timeout_secs: 10,
+        output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
+    });
     eprintln!("[探针] 取消后残留 sleep：{:?}", alive.output);
     assert!(
         alive.output.trim().is_empty(),
