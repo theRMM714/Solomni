@@ -63,13 +63,7 @@ impl ShellSlot {
     }
 
     /// 目的：收尾一次 shell：写结束时间、成败、退出码、状态与回执预览（超过 4000 字符截断）。
-    pub fn finish(
-        &self,
-        ok: bool,
-        exit_code: Option<i32>,
-        status: Option<&str>,
-        output: &str,
-    ) {
+    pub fn finish(&self, ok: bool, exit_code: Option<i32>, status: Option<&str>, output: &str) {
         let mut g = self.0.lock().unwrap_or_else(|e| e.into_inner());
         let Some(s) = g.as_mut() else {
             return;

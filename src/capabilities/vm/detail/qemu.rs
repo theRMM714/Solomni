@@ -987,7 +987,7 @@ impl QemuHandle {
                 let out = String::from_utf8_lossy(&out).into_owned();
                 let err = String::from_utf8_lossy(&err).into_owned();
                 if run.output_limit == OutputLimit::Shell {
-                    return self.shell_outcome(run, &out, &err, code, cancel_sent);
+                    return shell_outcome(self.texts.as_ref(), run, &out, &err, code, cancel_sent);
                 }
                 return ToolOutcome {
                     ok: code == 0,
@@ -1028,42 +1028,6 @@ impl QemuHandle {
             std::thread::sleep(Duration::from_millis(20));
         }
     }
-
-    /// 目的：把一次 guest 执行的结果翻成 shell 回执（正文分区 + 状态行）；非 shell 运行的形状不受影响。
-    /// 约束：只有真正跑过命令才产出 `[shell]` 收尾行；helper 的围栏/启动失败保留诊断原文。
-    fn shell_outcome(
-        &self,
-        run: &GuestRun,
-        out: &str,
-        err: &str,
-        code: i64,
-        cancel_sent: bool,
-    ) -> ToolOutcome {
-        let end = guest_shell_end(err, code, cancel_sent);
-        if end == GuestShellEnd::NotRun {
-            return ToolOutcome {
-                ok: false,
-                output: cap_output(format!("{}{}", out, err), run.output_limit),
-            };
-        }
-        let cleaned = strip_helper_markers(err);
-        let (end, ok) = match end {
-            GuestShellEnd::Exit(c) => (ShellEnd::Exit(Some(c as i32)), c == 0),
-            GuestShellEnd::Timeout => (
-                ShellEnd::TimedOut {
-                    secs: run.timeout_secs,
-                },
-                false,
-            ),
-            GuestShellEnd::Cancelled => (ShellEnd::Cancelled, false),
-            GuestShellEnd::Signal => (ShellEnd::Exit(None), false),
-            GuestShellEnd::NotRun => unreachable!("上面已提前返回"),
-        };
-        ToolOutcome {
-            ok,
-            output: shell_receipt(self.texts.as_ref(), out, &cleaned, end, GUEST_SHELL_MAX_CHARS),
-        }
-    }
 }
 
 /// 目的：shell 回执的正文上限（与本机守门进程同一口径）。
@@ -1082,6 +1046,42 @@ enum GuestShellEnd {
     Signal,
     /// 目的：helper 的围栏/启动失败——命令没有执行，不产出 shell 收尾行。
     NotRun,
+}
+
+/// 目的：把一次 guest 执行的结果翻成 shell 回执（正文分区 + 状态行）；非 shell 运行的形状不受影响。
+/// 约束：只有真正跑过命令才产出 `[shell]` 收尾行；helper 的围栏/启动失败保留诊断原文。
+fn shell_outcome(
+    texts: &dyn ProcessTexts,
+    run: &GuestRun,
+    out: &str,
+    err: &str,
+    code: i64,
+    cancel_sent: bool,
+) -> ToolOutcome {
+    let end = guest_shell_end(err, code, cancel_sent);
+    if end == GuestShellEnd::NotRun {
+        return ToolOutcome {
+            ok: false,
+            output: cap_output(format!("{}{}", out, err), run.output_limit),
+        };
+    }
+    let cleaned = strip_helper_markers(err);
+    let (end, ok) = match end {
+        GuestShellEnd::Exit(c) => (ShellEnd::Exit(Some(c as i32)), c == 0),
+        GuestShellEnd::Timeout => (
+            ShellEnd::TimedOut {
+                secs: run.timeout_secs,
+            },
+            false,
+        ),
+        GuestShellEnd::Cancelled => (ShellEnd::Cancelled, false),
+        GuestShellEnd::Signal => (ShellEnd::Exit(None), false),
+        GuestShellEnd::NotRun => unreachable!("上面已提前返回"),
+    };
+    ToolOutcome {
+        ok,
+        output: shell_receipt(texts, out, &cleaned, end, GUEST_SHELL_MAX_CHARS),
+    }
 }
 
 /// 目的：按 helper 的机器标记与取消旗判定收尾；围栏失败（die 诊断）判为没执行。
@@ -1555,11 +1555,7 @@ mod tests {
             GuestShellEnd::Signal
         );
         assert_eq!(
-            guest_shell_end(
-                "solomni-guest-fence: landlock is unavailable\n",
-                111,
-                false
-            ),
+            guest_shell_end("solomni-guest-fence: landlock is unavailable\n", 111, false),
             GuestShellEnd::NotRun,
             "helper 的 die 诊断 = 没执行，不产出 shell 收尾行"
         );
@@ -1583,13 +1579,52 @@ mod tests {
             "warn\n"
         );
         assert_eq!(strip_helper_markers("solomni-guest-fence: timeout\n"), "");
-        assert_eq!(
-            strip_helper_markers("solomni-guest-fence: signal\n"),
-            ""
-        );
+        assert_eq!(strip_helper_markers("solomni-guest-fence: signal\n"), "");
         assert_eq!(
             strip_helper_markers("solomni-guest-fence: landlock is unavailable\n"),
             "solomni-guest-fence: landlock is unavailable\n"
         );
+    }
+
+    /// 目的：guest 通道装出来的 shell 回执与本机（kernel 装配）逐字节同形。
+    #[test]
+    fn guest_shell_receipt_matches_the_host_shape() {
+        let run = GuestRun {
+            command: "true".to_string(),
+            args_json: "{}".to_string(),
+            env: Vec::new(),
+            cwd: "/w".to_string(),
+            timeout_secs: 3,
+            output_limit: OutputLimit::Shell,
+        };
+        let texts = CodeProcessTexts;
+        let host = shell_receipt(
+            &texts,
+            "hello\n",
+            "",
+            ShellEnd::Exit(Some(0)),
+            GUEST_SHELL_MAX_CHARS,
+        );
+        let guest = shell_outcome(&texts, &run, "hello\n", "", 0, false);
+        assert_eq!(guest.output, host, "正常回执要同形");
+        assert!(guest.ok);
+
+        let host_timeout = shell_receipt(
+            &texts,
+            "",
+            "",
+            ShellEnd::TimedOut { secs: 3 },
+            GUEST_SHELL_MAX_CHARS,
+        );
+        let guest_timeout = shell_outcome(
+            &texts,
+            &run,
+            "",
+            "solomni-guest-fence: timeout\n",
+            124,
+            false,
+        );
+        assert_eq!(guest_timeout.output, host_timeout, "超时回执要同形");
+        assert!(!guest_timeout.ok);
     }
 }

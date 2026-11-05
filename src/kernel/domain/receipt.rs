@@ -61,11 +61,7 @@ fn truncate_middle(texts: &dyn ProcessTexts, text: &str, max_chars: usize) -> St
     format!(
         "{}\n{}\n{}",
         head,
-        texts.truncated_middle(
-            &count.to_string(),
-            &head_n.to_string(),
-            &tail_n.to_string()
-        ),
+        texts.truncated_middle(&count.to_string(), &head_n.to_string(), &tail_n.to_string()),
         tail
     )
 }
@@ -81,7 +77,13 @@ mod tests {
 
     #[test]
     fn normal_receipt_puts_the_exit_line_after_the_stderr_section() {
-        let out = shell_receipt(&texts(), "hello\n", "warn\n", ShellEnd::Exit(Some(3)), 16_000);
+        let out = shell_receipt(
+            &texts(),
+            "hello\n",
+            "warn\n",
+            ShellEnd::Exit(Some(3)),
+            16_000,
+        );
         assert_eq!(out, "hello\n\n[stderr]\nwarn\n\n[shell] 退出码 3");
         assert!(!out.contains("[shell] cwd"), "cwd 由工具层追加，不在装配里");
     }

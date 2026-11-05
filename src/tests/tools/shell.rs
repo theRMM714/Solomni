@@ -316,8 +316,8 @@ fn vm_timeout_receipt_gets_cwd_and_elapsed_trailer() {
         "状态行要在回执里：{}",
         out.output
     );
-    let (cwd, secs) =
-        crate::capabilities::tools::api::cwd_elapsed(&out.output).expect("超时回执也要有落点与耗时");
+    let (cwd, secs) = crate::capabilities::tools::api::cwd_elapsed(&out.output)
+        .expect("超时回执也要有落点与耗时");
     assert_eq!(cwd, mt.sandbox.private.display().to_string());
     assert_eq!(secs, 0, "刚跑完的耗时按墙钟秒");
     assert_eq!(
@@ -327,9 +327,7 @@ fn vm_timeout_receipt_gets_cwd_and_elapsed_trailer() {
     );
     assert_eq!(
         crate::capabilities::tools::api::shell_status(&out.output),
-        Some(
-            crate::capabilities::tools::domain::shell::ShellStatus::Timeout
-        )
+        Some(crate::capabilities::tools::domain::shell::ShellStatus::Timeout)
     );
     let live = slot.get().expect("状态栏快照");
     assert_eq!(live.status.as_deref(), Some("timeout"));
