@@ -1,7 +1,7 @@
 # 单元地图 · presentation/cli
 
 > 定位：presentation/cli（终端呈现）逐文件职责的唯一权威；由 T0 结构审查与磁盘双向比对。
-> 效力：契约｜核对：2026-11-04｜依据：`src/presentation/cli/mod.rs`
+> 效力：契约｜核对：2026-11-06｜依据：`src/presentation/cli/mod.rs`
 
 > 本文是 **presentation/cli** 逐文件职责的唯一权威；由 `node run-tests.js` 的 T0 结构审查与磁盘**双向比对**
 > （表里每个路径必须存在；`src/` 下每个 `.rs` 都必须出现在某一张单元地图里）。
@@ -9,4 +9,4 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/presentation/cli/mod.rs` | 终端转录中心：argv 解析 → 入站能力面 → 渲染事件流（含 `resident` / `module` / `rewind` 等子命令）；不做业务判断、不持状态 |
+| `src/presentation/cli/mod.rs` | 终端转录中心：argv 解析 → 入站能力面 → 渲染事件流（含 `resident` / `module` / `rewind` / `diagnose` 等子命令）；不做业务判断、不持状态 |

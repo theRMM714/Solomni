@@ -1,7 +1,7 @@
 # 测试替身与 Fake 专项验收
 
 > 定位：替身语义的唯一权威：Stub / Fake / Mock / Spy / Fixture 的规范与端口测试矩阵。
-> 效力：规范｜核对：2026-11-04｜依据：`src/tests/doubles.rs`
+> 效力：规范｜核对：2026-11-06｜依据：`src/tests/doubles.rs`
 
 ## 适用与判据
 - 写或验收测试替身、新增端口时以本文为准（`docs/testing/doubles.md`）。
@@ -128,7 +128,7 @@
 | `ModuleStateStore`（modules） | `InMemoryModuleState`（经 `test_modules_store`） | 覆盖落盘可观察 | 不适用 | 不适用 | `detail::YamlModuleState` | 已验收 |
 | `PackageSource` | `InMemoryPackages` | 不适用 | 不适用（错误进 `rejected`） | 不适用 | `FsPackages` | 已验收；**持有者只有 `packages::service.rs`**（R12） |
 | `VmEngine`（vm） | `FakeEngine`（返回的 `GuestVm` 替身是 `FakeVm`，通道是 `FakeChannel`） | `calls`（start / stop / run / fenced；`RecordingVm` 记 `guest_run` 与租约的包集合；`stage_exec` 替身按声明入口原样返回（真实实现把入口落进 guest 本地副本）） | `boot_error` 注入启动失败、`boot_delay` 注入慢启动 | 不适用 | `QemuEngine`（真机验：`vm_live_guest_runs_command_inside_guest` 在 KVM / WHPX 下真起 guest、按平台同步或挂载额外共享、验宿主路径不可达；`vm_live_guest_runs_command_inside_guest` 另验"共享区脚本落进 guest 本地副本后能直接执行"；`vm_live_two_guests_share_one_base_without_writing_it` 同一基础镜像并发起两台、各写自己的可写层、验基础镜像 mtime 不变；e2e 的 vm 档会话场景（虚拟根默认 `debian`，`SOLOMNI_VM_GUEST` 可换）真跑模块工具并验删会话销毁 guest（Windows 的会话级验收已通过）；环境由 provision 能力（`--provision`）装入 `.vm/`，默认 `[探针]` 跳过） | 契约测试与执行分派已验收；真机探针与产品级会话验收都已跑通（Linux KVM / Windows WHPX） |
-| `GuestChannel`（vm） | `FakeChannel`（经 `FakeEngine`） | `calls`（run / fenced + agent / guest cwd / rw） | 不适用；**未实现 `exec_fenced` 的通道默认 fail-closed** | 不适用 | `QemuHandle`（QGA 通道，随 `QemuEngine.boot` 起；会话 guest 装 Linux helper，按 `GuestAccess` 走 Landlock） | 契约测试与 Linux 真机验收已通过 |
+| `GuestChannel`（vm） | `FakeChannel`（经 `FakeEngine`；围栏执行可预设输出 `fenced_output`，诊断用例用它回一份 JSON 报告） | `calls`（run / fenced + agent / guest cwd / rw / diagnose） | 不适用；**未实现 `exec_fenced` 的通道默认 fail-closed** | 不适用 | `QemuHandle`（QGA 通道，随 `QemuEngine.boot` 起；会话 guest 装 Linux helper，按 `GuestAccess` 走 Landlock；`diagnose: true` 时 helper 在 Landlock 后走诊断模式，不 spawn 命令、只输出一份只读诊断 JSON） | 契约测试与 Linux 真机验收已通过 |
 | `ShareBackend`（vm） | `FakeShare`、`NamedShare`（可标 emergency）；资源句柄 `FakeGuard` / `FakeGuard2` | `calls`（prepare / sync_in / sync_out / release）、共享计划可观察（恒空） | 不适用 | 不适用 | 用户档 `NinePShare` / `VirtioFsShare` / `SmbShare`；`CopyShare`（仅开发/应急，空候选不自动选）；`NoneShare`（内部无共享，供给编排）。`src/tests/vm.rs` 钉住各自的引擎参数、netdev 选项与 guest 端命令；virtiofsd 与 smbd 的起停、超时与清理用假可执行文件验；真机验同 vm 探针；`ShareGuard` 的真实实现是 `VirtioFsGuard` / `SmbGuard` / `NoShareGuard` | 契约测试已验收；Linux 真机（virtiofs）与 Windows 真机（SMB 实时共享）都已跑通；copy 不作验收路径 |
 | `ProxyHost`（conductor） | `FakeProxyHost` | `calls`（catalog / create / send / observe / control / messages）、`created`、`relayed` | `fail_create` / `fail_send` / `fail_control` | 不适用 | `ProxyBridge`（把动作交给核心线程） | 已验收（`src/tests/conductor/proxy.rs`） |
 | `Workdirs` | `InMemoryWorkspace` | 内存布局可观察 | `fail_with` | 不适用 | `FsWorkspace` | 已验收 |

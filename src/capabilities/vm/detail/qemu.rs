@@ -884,6 +884,8 @@ impl QemuHandle {
                 "timeout_secs": run.timeout_secs,
                 // 只传隐秘字段的**名字**（值走 QGA env），不把值写进临时文件。
                 "env_names": run.env.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>(),
+                // 系统级只读诊断：helper 在 Landlock restrict 之后走诊断模式（不 spawn 命令）。
+                "diagnose": access.diagnose,
             });
             let n = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

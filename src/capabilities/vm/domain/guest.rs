@@ -210,6 +210,9 @@ pub struct GuestAccess {
     pub cwd: String,
     /// 目的：本次执行要不要保留出站网络；false = guest helper 里 unshare 一个空网络命名空间。
     pub net: bool,
+    /// 目的：这次执行是不是**系统级只读诊断**：helper 在 Landlock restrict 之后走诊断模式（不 spawn 命令）。
+    /// 约束：诊断是系统动作（不是 per-agent 围栏）——rw / private / cwd 都是空，只给只读根。
+    pub diagnose: bool,
 }
 
 impl GuestAccess {
@@ -234,6 +237,8 @@ impl GuestAccess {
                 to_guest_path(&fence.cwd, os, mounts)
             },
             net: fence.net,
+            // per-agent 围栏永远不是诊断模式；诊断走 service.rs 自己构造的只读系统允许集。
+            diagnose: false,
         }
     }
 }

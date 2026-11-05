@@ -416,6 +416,19 @@ tools:
         required: true
         non_empty: true
         desc: 要启用的会话 id
+  guest_diagnose:
+    capability: none              # 不碰文件：只读 guest 内的进程 / CPU / 内存 / 负载 / 挂载
+    callers: [user]               # 人经呈现层：诊断一条虚拟机档会话的 guest
+    desc: |
+      只读诊断一条虚拟机档会话的 guest：进程表（pid / ppid / CPU / 内存 / 状态 / 运行时长）、
+      CPU 汇总、内存、负载与挂载；**不写 guest、不改会话状态**。
+      虚拟机档才有 guest；代理父会话本身没有，要对它下面的某个工作诊断。
+    params:
+      session_id:
+        type: string
+        required: true
+        non_empty: true
+        desc: 要诊断的会话 id（虚拟机档）
 
   # —— 共享区版本化工作区：agent 只写自己的沙箱，用 pull / commit / resolve 与主副本同步 ——
   work_pull:

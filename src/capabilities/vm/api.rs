@@ -4,6 +4,7 @@
 //! 联动：被 conductor / collab / cli 与入口层消费。
 
 pub use crate::capabilities::vm::detail::qemu::create_disk;
+pub use crate::capabilities::vm::domain::diagnose::GuestDiagnosis;
 pub use crate::capabilities::vm::domain::exec::resolve_guest;
 pub use crate::capabilities::vm::domain::exec::{
     admit_guest, capability_refusal, copy_share_enabled, diagnose_text_for, guest_platform,
@@ -66,4 +67,13 @@ pub trait Vm: Send + Sync {
     fn guest_stop(&self, lease: &str);
     /// 目的：此刻活着的租约名（并发上限判断用；按名字升序）。
     fn guest_leases(&self) -> Vec<String>;
+
+    /// 目的：在该租约的 guest 里采一次**只读诊断**（进程表 / CPU / 内存 / 负载 / 挂载）。
+    /// 约束：系统动作、只读、不写 guest；失败如实区分原因（没有活 guest / 非 Linux / 通道不通 /
+    ///   helper 不可用 / 缺 python3 / 超时 / 输出不可解析），绝不返回空诊断。
+    /// 默认实现：这台引擎没有诊断能力（替身不必全改）。
+    fn guest_diagnose(&self, lease: &str) -> Result<GuestDiagnosis, String> {
+        let _ = lease;
+        Err("这台 guest 引擎没有诊断能力".to_string())
+    }
 }

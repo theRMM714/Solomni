@@ -1,13 +1,13 @@
 # vm（虚拟机档）
 > 定位：执行档位的选型诊断、就绪检测与 guest 生命周期；运行包由 `packages` 选好，本单元只消费 `PackagePlan`。
-> 效力：规范｜核对：2026-11-04｜依据：`src/capabilities/vm/api.rs`
+> 效力：规范｜核对：2026-11-06｜依据：`src/capabilities/vm/api.rs`
 
 ## 管什么 / 不管什么
-- 管：执行档位（本机 / 虚拟机）的选型诊断、执行计划派生（运行包由 `packages` 选好，本能力只消费 `PackagePlan`）、就绪检测（本机能不能承载虚拟机档；缺哪几项、每项怎么补），以及 guest 生命周期（按会话租约起 / 跑 / 销毁）。
+- 管：执行档位（本机 / 虚拟机）的选型诊断、执行计划派生（运行包由 `packages` 选好，本能力只消费 `PackagePlan`）、就绪检测（本机能不能承载虚拟机档；缺哪几项、每项怎么补），以及 guest 生命周期（按会话租约起 / 跑 / 销毁）与 guest 只读诊断。
 - 不管：运行包契约、包库与选包（`packages`）、会话与档案（`session`）、工作区与沙箱（`workspace`，本能力只收它给的中立路径）、模块清单（`modules`，只消费它声明的 `runtimes`）、实际执行工具（`tools`）。
 
 ## 入站契约与状态归属
-- 入站面：`api::Vm`（`guest_start` / `guest_run` / `guest_wait_agent` / `guest_stop` / `guest_leases`）+ 档位与计划的纯函数（`plan` / `tier_readiness` / `tier_refusal` / `vm_requirements` / `vm_capability` / `capability_refusal` / …）。
+- 入站面：`api::Vm`（`guest_start` / `guest_run` / `guest_wait_agent` / `guest_stop` / `guest_leases` / `guest_diagnose`）+ 档位与计划的纯函数（`plan` / `tier_readiness` / `tier_refusal` / `vm_requirements` / `vm_capability` / `capability_refusal` / …）。
 - 出站端口 `VmEngine` / `ShareBackend` 只由 `service.rs` 持有（R12）；`GuestVm` / `GuestChannel` 由引擎在 boot 时交出。
 - `ExecSpec` 是共享事实（在 `kernel`），本能力只读它；包库与选包在 `packages`。
 - 状态归属：虚拟根在项目内 `.vm/guest/<名>`；可写层在 `.vm/overlays/<租约>.qcow2`；构建缓存卷在 `.vm/build-cache/`（归 `builds`）；guest 租约按主会话树。
@@ -41,8 +41,10 @@
 - 组合：Linux QEMU/KVM + virtiofs（virtiofsd 不在场或不能执行时退 9p）；Windows QEMU/WHPX + SMB guestfwd（缺 smbd 时虚拟机档不可用，先补齐，不降级）。
 - Windows 验收前提：硬件加速（WHPX）可用；当前只验过物理宿主，嵌套虚拟化宿主未验（`tests/windows/gaps.yaml`）。
 - Windows 上 WHPX 的已知宿主 CPU 开销：guest 空闲（HLT）在默认 `kernel-irqchip=on` 下不上报给 QEMU，QEMU 的一个 vCPU 线程会持续占用约一个核；QEMU 11.1 的 `HV_X64_MSR_GUEST_IDLE` 只在 `kernel-irqchip=off` 下生效，当前启动行用默认 `accel=whpx`。不影响 guest 功能与结果，只增加宿主 CPU 占用；要消掉需评估 `kernel-irqchip=off` 并补真机 CPU 数据。
-- guest 内诊断入口当前缺失（进程 / CPU / 内存看不进去；QGA 单客户端外部不可连，per-agent Landlock 不放行 `/proc`）：见 `tests/gaps.yaml` 的 `vm.guest-diagnostics`。
+- guest 内诊断入口：CLI 交互命令 `diagnose <会话>` 造一次 `guest_diagnose` 动作（`systools/tools.yaml`，`callers: [user]`，参数 `session_id` 必填非空）——只读列出 guest 进程表（pid / ppid / 状态 / CPU 占用 / RSS / 运行时长 / 命令与参数）、CPU 汇总、内存、负载、挂载与内核 / 核数；诊断本身只读、不写 guest 文件（为复用既有 fenced 通道，宿主会按既有机制写一份策略临时文件，helper 读取后立即删除）、不改会话状态、不套 per-agent 围栏，guest 内走 helper 的只读诊断模式，宿主侧只用已持有的 QGA 通道（不新增外部端口，见 `src/capabilities/vm/service.rs` 的 `guest_diagnose`）。
+- 诊断失败如实分类：没有活 guest / 只有 Linux guest / QGA 通道不通 / guest 诊断助手不在或不支持 / guest 缺 python3 / 诊断超时 / 输出不可解析；「读不到」不说成「没有进程」（`src/capabilities/vm/domain/diagnose.rs`）。
 - 验收证据：引擎级探针（`vm_live_guest_runs_command_inside_guest`）+ 并发可写层探针（`vm_live_two_guests_share_one_base_without_writing_it`）与 e2e 的虚拟机档会话场景都过（虚拟根默认 `debian`，`SOLOMNI_VM_GUEST` 可换）；两端的 QEMU 与 guest 镜像由 provision 能力按清单装入。
+- 诊断的真机探针 `vm_live_guest_diagnose_lists_processes`（`SOLOMNI_VM_LIVE=1` + `SOLOMNI_VM_QEMU`，默认 `[探针]` 跳过）验：guest 里起一个忙进程后诊断能列出该 pid 与 CPU / 内存 / 负载 / 挂载，停 guest 后如实报没有活 guest。
 - 多台虚拟机档会话并发时各写自己的每租约可写层（不共写基础镜像），同时台上限 `max_guests`（见「五、并发与可写层」）。
 - macOS 组合：缺 QEMU 取包与 Apple vz 引擎 + 自研 agent（vsock 通道）；缺口与验收标准只记在 `tests/macos/gaps.yaml`。
 
