@@ -33,7 +33,7 @@ const MARKERS = [
   { text: TEXT.E2E_FAILED, owner: "tests/cross-platform/e2e/orchestrator.js", meaning: "L4 端到端编排失败（失败证据在 e2e 日志）" },
   { text: TEXT.MUTATION_OK, owner: "tests/ci-mutation.mjs", meaning: "突变测试全捕获（手动工作流，不参与验收）" },
   { text: TEXT.MUTATION_FOUND, owner: "tests/ci-mutation.mjs", meaning: "突变测试有漏网（手动工作流，不参与验收）" },
-  { text: TEXT.GATE_OK, owner: ".github/workflows/test.yml", meaning: "CI 验收闸门按变更分类核对四个 job 全部通过" },
+  { text: TEXT.GATE_OK, owner: "tests/ci-gate.mjs", meaning: "CI 验收闸门按变更分类核对五个 lane（docs / structure / workflow / quality / e2e）全部通过" },
 ];
 
 module.exports = { TEXT, MARKERS };

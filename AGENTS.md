@@ -103,7 +103,7 @@
 | 文档分层 / 术语 / 引用 | `docs/conventions.md` |
 | 全部单元与横向细则 | `docs/README.md` |
 
-新增根 `*.md` 必须进本表；临时工作清单按 `run-tests.js` 的白名单处理。
+新增根 `*.md` 必须进本表；临时工作清单按 `tests/gates/docs/root-router.js` 的白名单处理。
 
 ## 九、文档效力与取证
 
@@ -123,6 +123,7 @@
 | --- | --- |
 | `main` 的必填检查 | `gh api repos/<owner>/<repo>/rulesets` |
 | 工作流触发 / 跳过 / 汇总 | `.github/workflows/test.yml` |
-| 测试入口参数 | `run-tests.js` 顶部开关定义 |
+| 测试入口参数 / 模式 / 车道 / 步骤 / 标记 | `node run-tests.js --list [--json]`（`tests/gates/registry.js`、`tests/gates/steps.js`、`tests/lib/markers.js`） |
 | 平台支持与验收状态 | `tests/gaps.yaml`、`tests/<平台>/gaps.yaml`、代码里的 `VERIFIED_HOSTS` |
 | 外部链接与工具链版本 | `links.yaml`、`dev-tools.js` |
+| 文档与真相源的机器比对 | `tests/gates/structure/`（8 文件）、`tests/gates/docs/`（4 文件）、`node tests/docs-sync.mjs` |

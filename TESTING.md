@@ -28,7 +28,7 @@
 
 - 测试分区：`src/tests/` 与 `capabilities/` 同构（一个能力一个文件，用例多的按域分子模块；`doubles.rs` 端口替身、`builders.rs` 装配脚手架），跨平台集成与 L4 在 `tests/cross-platform/`，平台探针 `tests/<平台>/`，前端冒烟 `src/presentation/web/assets/*.smoke.cjs`（索引见 [docs/testing/README.md](docs/testing/README.md)）。
 - 入口：`node run-tests.js`（`node start.js -test` 是备好环境后的同一入口）；纯叙述型文档改动用 `--docs`；`--coverage`、突变工作流、真机 `--fence-live` 等手动模式见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md)；机器契约 `docs/presentation/contracts.md`（ROUTES 表由 Rust 测试消费）仍走全量。
-- T0 九项已并入同一入口（`run-tests.js`）：编译、结构审查、格式、clippy、编译告警、依赖重复、项目外写**七项零容忍硬失败**；交叉类型检查与供应链两项在环境不具备时记 `env-skip`（不算通过）；清单与判定见 [docs/testing/levels.md](docs/testing/levels.md) 的 T0。
+- T0 九项已并入同一入口（`run-tests.js`）：步骤、可行状态与环境跳过口径以 [docs/testing/levels.md](docs/testing/levels.md) 的 T0 生成段为准（`env-skip` 不算通过）；查清单用 `node run-tests.js --list`。
 - 缺口账：全局 `tests/gaps.yaml`、跨平台 `tests/cross-platform/gaps.yaml`、平台 `tests/<平台>/gaps.yaml`；条目、数量与状态一律以账本为准（门户不复述，也不保留完成历史），`TEST-REPORT-ACCEPTED` 只看平台与跨平台账（`run-tests.js`）；格式与验收见 [docs/testing/gaps-acceptance.md](docs/testing/gaps-acceptance.md)。
 - 判「环境不允许」只看被测试进程自己的令牌与行为，不拿二手字符串特征当判据；Windows 容器与写沙箱的判据、后果与处置见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md) 的「真机入口」。
 - 门禁之外的仓库卫生由 `node run-hygiene.js` 报（注释契约棘轮 + 内容 / 语义卫生；不进 T0、不进 `TEST-REPORT-*`、不改成败），见 [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md) 的「门禁之外」。
@@ -52,8 +52,7 @@
 ## 四、判据速查（细则为准）
 
 - **缺口的唯一真相**是 `tests/gaps.yaml`（全局）与 `tests/<平台>/gaps.yaml`（平台）；门户与细则都不复述条目内容。
-- **成功标记**（`FRONTEND-SMOKE-OK` / `DEV-LOOP-OK` / `ENV-BOOTSTRAP-OK` / `E2E-OK` / `TEST-REPORT-OK` / `TEST-REPORT-FAIL` / `TEST-REPORT-ACCEPTED`）的固定含义见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md)。
-- `TEST-REPORT-OK` 在 `--docs` / `--audit` 模式下只代表对应审查（文档审查 / 结构审查）通过，不代表代码 / 三平台 / L4 已验收；CI 报告统一写 `ci-report` 的 `runs/structure` / `runs/docs` / `runs/<os>`。
+- **成功标记**的固定清单与含义以 [docs/testing/execution-ci.md](docs/testing/execution-ci.md) 的生成段为准（唯一声明在 `tests/lib/markers.js`，`node run-tests.js --list` 可查）；注意 `TEST-REPORT-OK` 在 `--docs` / `--audit` 下只代表对应审查通过，CI 报告统一写 `ci-report` 的 `runs/structure` / `runs/docs` / `runs/<os>`。
 - **质量失败不能被业务测试通过抵消**：两边的结论分别记，判据见 [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md)。
 - **需要 CI 的场景**（平台专属代码、真机围栏、HTTPS/TLS、其它平台的质量分区）本地跑不出结论，必须等 CI 并按 [docs/testing/execution-ci.md](docs/testing/execution-ci.md) 的读法核对 `sha`。
 

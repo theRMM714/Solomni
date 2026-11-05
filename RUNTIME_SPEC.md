@@ -38,7 +38,7 @@ runtimes/<包文件夹>/
 - `files` 里的 sha256 用于可复现，不用于信任：用户自造的包没有可信基准，本程序不据此判断包是否安全。
 - `files` 随包库扫描一起解析并保留，供呈现与后续装配使用，但不参与装配判断，也不做校验（指纹对不上不会报错，也不会因此换版本）；包内容的组织方式由包作者决定，核心只认清单事实。
 - 产品不预置任何包：库里有什么能力，完全取决于用户往 `runtimes/` 放了什么；`python` / `node` / `bash` / `cc`（C/C++ 工具链）只是常见写法的示例，没有特殊含义。
-- 基础工具链不是运行包：产品把 Python / Node / C-C++ 的固定版本作为运行前提装进 `.tools/toolchains`，服务本机档；虚拟机档的同一组能力由 guest 镜像的 `guest.yaml` 声明，`vm` 的运行期编排负责安装并逐个自证（见 `docs/vm/README.md`）。
+- 基础工具链不是运行包：产品把 Python / Node / C-C++ 的固定版本作为运行前提装进 `.tools/toolchains`（由 `--provision` 的 `kind: toolchain` 补，组别名只补缺项；登记进 `.tools/toolchains/active.json`），服务本机档；虚拟机档的同一组能力由 guest 镜像的 `guest.yaml` 声明，`vm` 的运行期编排负责安装并逐个自证（见 `docs/vm/README.md`）。
 
 ## 二、kind 与装配
 | 字段 | 类型 | 必填 | 默认 | 说明 |

@@ -27,7 +27,7 @@
 
 - 先处理**不需要装配核心**的模式：`--proc-watchdog`、`--fence-run`、`--https-check`、`--unpack`、`--print-fence-env`、`--fence-verify`、`--print-routes`。
 - 再解析产品根：`--root <路径>`，缺省 `.`；相对路径与当前目录做纯词法拼接，取不到当前目录才退回 `canonicalize`（Windows 上剥掉 `\\?\` 前缀）。
-- 根解析后立即应用**基础工具链**：读 `.tools/toolchains/active.json`，把项目内 `bin` 前置到 PATH；目标不符 / 路径不安全 / bin 不在场只报告，不阻断启动。**每次启动**都打印基础 profile 的项目内 / 宿主回退（Windows 探围栏能否授权）/ 缺失与补全指令；之后 `--doctor`、`--build`、会话工具与常驻服务都看这份生效 PATH。
+- 根解析后立即应用**基础工具链**：读 `.tools/toolchains/active.json`（由 provision 的 `kind: toolchain` 写入），把项目内 `bin` 前置到 PATH；目标不符 / 路径不安全 / bin 不在场只报告，不阻断启动。**每次启动**都打印基础 profile 的项目内 / 宿主回退（Windows 探围栏能否授权）/ 缺失与补全指令；之后 `--doctor`、`--build`、会话工具与常驻服务都看这份生效 PATH。
 - `--doctor`、`--provision`、`--build`、围栏台账系列（`--fence-reconcile` / `--fence-ledger` / `--fence-restore` / `--fence-revoke` / `--fence-profile-rm` / `--fence-clean`）只需要产品根，不装配核心。
 - 装配期失败一律打印 `[装配失败]` 并以 1 退出（`src/main.rs`）：登记处四份 yaml 读不了、提示词册缺文件 / 缺键、工具总表与角色表不自洽、模块清单装配失败、隐秘字段加载失败、核心执行线程起不来；日志文件起不来只降级到 stderr（进程继续）。
 - **启动对账**在会话开工前跑两份：围栏授权台账（`confine::reconcile`）与长驻子进程账（`ProcessBook::reconcile`，`.home/processes.json`）。
@@ -50,7 +50,7 @@
 | --- | --- | --- |
 | `--doctor` | 机器可读自检 | JSON：`platform` / `arch` / `fence` / `externals` / `processes` / `vm_tier`；0 |
 | `--provision` | 依赖补齐状态：缺什么、装到哪、从哪来（源为编译期内嵌的 `dependencies.yaml` + `links.yaml`） | JSON；0，读清单失败 1 |
-| `--provision --ensure[=id,…] --yes` | 下载并安装（只写项目内） | 0 成功 / 1 失败 / 2 没给 `--yes` |
+| `--provision --ensure[=id,…\|kind,…] --yes` | 下载并安装（只写项目内）；`kind` 组别名只补缺项（如 `toolchain`），kind 与 id 不能混写 | 0 成功 / 1 失败 / 2 没给 `--yes`；组别名无缺项时打印「没有缺项，无需补齐」 |
 | `--https-check <url>` | 用产品自己的出站链路打一次最小 HTTPS 请求 | `ok` / `no-net` / `env-tls` / `tls-fail\|fail`；0，缺 URL 2 |
 | `--unpack <archive> <dest>` | 解归档：tar / tar.gz / tgz / tar.zst / tzst / tar.xz / txz / zip | 0 / 1 失败 / 2 用法错 |
 | `--build=<模块 id> [--guest=<虚拟根>]` | 在目标环境跑 `module.yaml` 的 `build.command`：本机档用产品围栏，虚拟机档在 guest 里；**创建会话前也会按需自动补编**（见 [docs/builds](../builds/README.md)），这条是手动入口 | 0 / 1 失败 / 2 用法错、没有该模块或没有 `build` 声明 |

@@ -72,7 +72,7 @@
 - 文档分层与路由 → 文档审查的 md 链接与根文档路由检查、结构审查的 `unitMap` 与代码注释文档引用（`node run-tests.js`）。
 - 文档模板、效力行与锚点 → `docs-gov`（`node run-tests.js --docs` 调用，硬失败）。
 - 季度审计候选 → `node tests/docs-audit.mjs`（只报不拦：过期 / 状态缺证据 / 重复事实 / 失效锚点 / 孤儿 / 例外）。
-- 生成段（平台验收状态）→ `node tests/docs-sync.mjs`（`--check` 由 `--docs` 调用，与代码常量 / 缺口账字节比对）。
+- 生成段（平台验收状态 / T0 步骤 / 成功标记）→ `node tests/docs-sync.mjs`（`--check` 由 `--docs` 调用；来源是代码常量、缺口账与 `--list` 同源模块，目标列表在脚本的 `TARGETS`，改生成段同次改它）。
 - 术语与引用 → `node run-tests.js --docs` 的文档审查。
 
 ## 路由

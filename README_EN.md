@@ -61,11 +61,9 @@ the **runtime environment** (just running the product) and the **dev environment
 ### Runtime environment
 
 ```bash
-node setup-runtime.js    # prepare the runtime environment: platform/<os>/ and .tools/ inside the project; borrows a usable Rust read-only
-node setup-toolchains.js # base toolchain only (setup-runtime installs it by default; --yes confirms the download)
-node setup-toolchains.js --check # read-only check: lists what is missing, exits non-zero if anything is
 node start.js            # any platform; on Windows also start.bat, on macOS / Linux also ./start.sh
 node start.js -webUI     # go straight to the local web UI (127.0.0.1:3081)
+solomni --provision --ensure=toolchain --yes # after the build: add runtime prerequisites (Python / Node / C-C++); the kind group alias fills only what is missing and touches no network when nothing is
 node start.js --provision                # optional: read-only vm tier status (JSON: QEMU / guest image / agent and runtimes)
 node start.js --provision --ensure --yes # optional (Linux / Windows): install QEMU and a Debian guest into the project's .vm/ (--yes confirms the download)
 # the web UI can do the same on Linux / Windows from the dialog shown when the vm tier is unavailable (no CLI needed)
@@ -73,8 +71,9 @@ node start.js --provision --ensure --yes # optional (Linux / Windows): install Q
 
 - **First start**: without `.home/settings.yaml`, Windows first asks whether to authorize the container fence
   (directory ACLs); choosing no writes nothing and enters the startup gate (unfenced this run / reconfigure / exit).
-  `-webUI` does not bypass that gate. When the base toolchain is missing, `start.js` also asks once whether to
-  install it into the project; later starts only report the missing pieces and the install command.
+  `-webUI` does not bypass that gate. Runtime prerequisites (Python / Node / C-C++) are not installed by the
+  launcher: the product fills them in via `solomni --provision --ensure=toolchain --yes` (the group alias fills only
+  what is missing), and `start.js` just points to it.
 - Toolchain and caches stay **inside the project**: a Rust that can **actually build** is **borrowed read-only**
   (probed by compiling and linking an empty program first — on Windows an msvc host without `link.exe`, i.e. no
   VS C++ build tools, does not count as usable; caches and artifacts still land under `platform/<os>/`); only when
@@ -84,8 +83,10 @@ node start.js --provision --ensure --yes # optional (Linux / Windows): install Q
   deps are re-downloaded into the project — the price of "no writes outside"; the gate also snapshots
   out-of-project cache roots and fails if anything was written.
 - The **base toolchains** for module tools/builds (Python / Node / C-C++) are a runtime prerequisite: they live
-  under `.tools/toolchains/` and are prepended to PATH at startup. `setup-runtime.js` installs them by default;
-  `start.js` asks once on first start and reports project / host fallback / missing on every start afterwards. The
+  under `.tools/toolchains/` and are prepended to PATH at startup. Only the product installs them (`--provision`,
+  `kind: toolchain`, group alias fills only what is missing); afterwards the Rust side writes what is present into
+  `.tools/toolchains/active.json` (`profile` / `target` / per-tool `id` / `version` / `bin` / `env`), which startup
+  reads read-only. The
   host fallback is only usable when the Windows fence can grant it (an adequate existing entry, or the directory is
   owned by the current user); otherwise the reason is reported and the project-local install is required. C# and
   other non-base capabilities can be added as host-targeted packages under `runtimes/` (their `bin/` joins that
@@ -100,7 +101,7 @@ node setup-dev.js        # install the dev environment: dev uses the **project-l
 node setup-dev.js --check  # read-only check: lists what is missing, exits non-zero if anything is
 node run-tests.js        # quality gate + full test run (see TESTING.md)
 node run-tests.js --skip-e2e  # gate without L4 (the quality-job mode used while iterating)
-node dev.js test|fmt|clippy   # one-layer dev commands; do not call cargo directly (see docs/testing/execution-ci.md)
+node dev.js test|fmt|clippy   # one-layer dev commands; cargo only runs through these entry points, inject env.js first for a raw shell (see docs/testing/execution-ci.md)
 ```
 
 - The **item inventory** of the dev environment is [dev-tools.js](dev-tools.js) (the single authority): `setup-dev.js`
@@ -109,10 +110,11 @@ node dev.js test|fmt|clippy   # one-layer dev commands; do not call cargo direct
   (cargo-audit / cargo-deny / cargo-llvm-cov).
 - Why it is separate from the runtime environment: people who only run the product do not need any of it, and the
   gate still runs on a runtime-only machine — missing items are reported as `env-skip`, never silently.
-- The environment is its own layer ([env.js](env.js)): path conventions, toolchain detection, environment
-  composition and installation all live there; `node env.js` shows the resolved environment and
-  `node env.js --print-env` prints it machine-readable. `setup-runtime.js` / `setup-dev.js` only orchestrate;
-  `node setup-runtime.js` and `node env.js setup` are equivalent. On Windows with a **GNU build target** the first run
+- The environment is its own layer ([env.js](env.js)): path conventions, **Rust / MinGW** toolchain detection,
+  environment composition and installation live there (runtime prerequisites are not installed here); `node env.js`
+  shows the resolved environment and `node env.js --print-env` prints the machine-readable result plus the full
+  variable table (`env`: `PATH` / `CARGO_HOME` / `RUSTUP_HOME` / `TMP` / `TMPDIR` / `TEMP`). `setup-dev.js` installs
+  only Rust (components / targets / crates) and points at the product for the rest. On Windows with a **GNU build target** the first run
   asks for consent and installs a portable MinGW (`dlltool.exe`, needed by `windows-sys` raw-dylib) into the project's
   `.tools/` — a borrowed msvc toolchain that links needs no dlltool; a machine with a full binutils can point
   `SOLOMNI_MINGW_BIN=<bin dir>` at it instead of downloading ~260 MB.
@@ -186,10 +188,10 @@ Every unfinished item, how to fix it and its acceptance criteria have exactly on
 - Not a runtime that keeps modules resident: `tools` start a one-shot process per task; the `services` a module declares are resident services started and reaped by the core under your authorization.
 - Not a server: it binds `127.0.0.1` only — no server side, no account.
 
-**Quality**: `node run-tests.js` is the single entry point — T0 (nine checks: compile / structural review / format /
-clippy / compiler warnings / duplicate deps / out-of-project writes are zero-tolerance; cross-target type check and
-supply chain report `env-skip` when the environment cannot run them) + unit + cross-platform integration + frontend
-smoke + end-to-end; the real-machine fence probes run on three CI platforms (see [TESTING.md](TESTING.md)).
+**Quality**: `node run-tests.js` is the single entry point — T0 (nine checks; step states and `env-skip` rules are
+maintained in the T0 generated section of [docs/testing/levels.md](docs/testing/levels.md); list them with `--list`) +
+unit + cross-platform integration + frontend smoke + end-to-end; the real-machine fence probes run on three CI
+platforms (see [TESTING.md](TESTING.md)).
 
 ## Document guide
 

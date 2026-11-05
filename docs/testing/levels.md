@@ -49,22 +49,28 @@ cargo deny check
 
 - `cargo tree --duplicates` 只检查依赖树中的重复版本，`cargo deny` 的 `bans` 与它同口径但更全面（许可证、禁用、来源）；它们都不等于源码重复检查。`clippy` 也不能替代业务测试。这些检查的职责必须分开记录（`run-tests.js`）。
 
-- 当前状态：九项全部并入 `node run-tests.js`。七项零容忍硬失败（编译、结构审查、格式、clippy、编译告警、依赖重复、项目外写），没有容差基线；注释契约另按只减不增的存量快照比对（结构审查里的一条；比对工具本身不进 T0，见 [quality-isolation.md](quality-isolation.md) 的「门禁之外」）；交叉类型检查在 target 未装或本机缺该平台交叉 C 工具链时 `env-skip`，供应链一项在工具缺失或取不到 advisory 数据时 `env-skip`：
+- 注释契约另按只减不增的存量快照比对（结构审查里的一条；比对工具本身不进 T0，见 [quality-isolation.md](quality-isolation.md) 的「门禁之外」）。
 
-- `cargo check --all-targets`；
-- 结构审查（测试目标登记、孤儿测试文件、缺口账格式、单元地图双向一致、代码注释里的 `docs/**.md` 引用、提示词键表与真相源表比对、外部连接台账、**注释契约棘轮**（按 文件×规则 只减不增）、**平台专属字面量与标记**（`FenceSpec` 必带 `ro`；macOS 探针不得出现 Linux 标记）（`run-tests.js`）、**批处理脚本只允许 ASCII**（cmd 按代码页解释字节，非 ASCII 会吞掉下一行）、**门禁解析器自测**与 **`#[ignore]` 禁令**）（`run-tests.js`）。
-- `cargo fmt --all -- --check`；
-- `cargo clippy --all-targets --all-features --keep-going -- -D warnings`；
-- `cargo check` 的 rustc 告警数；
-- 交叉类型检查（**开发机专属**）：对已装 target 跑 `cargo check --target <三元组> --all-targets`——平台专属 `#[cfg]`（含测试代码）本机不编译，靠它兜住类型错误；
-- target 清单与开发环境同源（`node setup-dev.js` 按 [dev-tools.js](../../dev-tools.js) 装）；
-- target 未装或本机缺该平台交叉 C 工具链 / SDK = `env-skip`；**CI 上直接跳过这一步**（三平台矩阵各自原生 `--all-targets` 已覆盖本平台，记 `skip-platform`）；
-- `cargo tree --duplicates`；
-- 项目外写（env / 工具链）——判据见 [quality-isolation.md](quality-isolation.md) 的「隔离、清理与副作用」；
-- 供应链：`cargo audit` + `cargo deny check`（配置在 `deny.toml`）——工具获取见 [quality-isolation.md](quality-isolation.md)。
+- T0 的步骤清单、可行状态与环境跳过口径以生成段为准（来源 `tests/gates/steps.js` 的 `listModel()`，与 `node run-tests.js --list` 同源；改常量后跑 `node tests/docs-sync.mjs --write`）：
 
-- 任何一项不过即硬失败：结构审查、格式、clippy、编译告警、依赖重复记 `quality-fail`；编译、交叉类型检查、供应链、项目外写记 `fail`。
-- 工具缺失（没装 rustfmt / clippy / cargo-audit / cargo-deny）或**取不到 advisory 数据**记 `env-skip` 并写明怎么装——环境跳过不算通过。设计取舍类 lint 要**带理由窄 allow**，清单见 [quality-isolation.md](quality-isolation.md)。每步都有墙钟上限（超时 = 硬失败，证据进报告 `timeouts`），每步用时超预算只标 `[slow]`、不改变成败。
+<!-- BEGIN:gate-steps -->
+| 步骤（报告 `steps[].step`） | 可行状态（`status[]`） | 环境跳过（`envSkip`） |
+| --- | --- | --- |
+| `T0 编译（--all-targets）` | pass / fail | — |
+| `T0 结构审查` | pass / quality-fail | — |
+| `T0 格式（fmt --check）` | pass / quality-fail / env-skip | cargo-fmt 未安装 |
+| `T0 静态检查（clippy）` | pass / quality-fail / env-skip | cargo-clippy 未安装 |
+| `T0 编译告警` | pass / quality-fail | — |
+| `T0 交叉类型检查` | pass / fail / env-skip / skip-platform | 该 target 未安装，或本机缺该平台的 C 工具链 / SDK；CI 上整步记 skip-platform |
+| `T0 依赖重复（cargo tree）` | pass / quality-fail / env-skip | cargo-tree 不可用 |
+| `T0 供应链（audit/deny）` | pass / fail / env-skip | cargo-audit / cargo-deny 未安装，或取不到 advisory 数据 |
+| `T0 项目外写` | pass / fail | — |
+
+> 9 项：4 项没有环境跳过出口（不过即硬失败），5 项在工具 / 环境不具备时可记 `env-skip`（不算通过）。
+<!-- END:gate-steps -->
+
+- 环境跳过不算通过；没装工具要写明怎么装（`node setup-dev.js`，条目清单 [dev-tools.js](../../dev-tools.js)）。交叉类型检查是**开发机专属**（CI 由三平台矩阵各自原生 `--all-targets` 覆盖，记 `skip-platform`）；target 清单与开发环境同源。
+- 设计取舍类 lint 要**带理由窄 allow**，清单见 [quality-isolation.md](quality-isolation.md)。每步都有墙钟上限（超时 = 硬失败，证据进报告 `timeouts`），每步用时超预算只标 `[slow]`、不改变成败。
 
 ### T1：单元测试
 

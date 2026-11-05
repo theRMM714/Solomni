@@ -34,7 +34,7 @@ node run-tests.js --audit=structure  # 只跑结构审查（CI structure job）
 
 - `--docs` 同时跑文档审查（门户存在 / 链接、根文档路由、模板、生成段）与结构审查（代码↔文档结构：unit-map、提示词键表、systools、links.yaml、注释契约、依赖方向、测试目标 / 孤儿 / `#[ignore]` 等；不编译），报告标 `mode: "docs"`。CI 把两者拆成独立的 `docs` / `structure` job，`--audit=docs|structure` 只跑其中一路（structure 报告 `mode: "structure"`）。
 - `docs/presentation/contracts.md` 是机器契约文档（ROUTES 表由 Rust 测试消费），改它仍要走全量；同时它是文档，文档审查也会查它的链接。
-- 多个模式同时出现时 `--coverage` 优先于审查模式，`--docs` 优先于 `--audit`；`--skip-audit` 只作用于全量模式。纯文档任务不要为了凑流程跑全量。
+- 多个模式同时出现时 `--coverage` 优先于审查模式，`--docs` 优先于 `--audit`；`--skip-audit` 只作用于全量模式。`--list` / `--only` / `--changed` 在模式判定之前处理（查询或子集，不写报告）。纯文档任务不要为了凑流程跑全量。
 
 - 迭代到一定段落、要按门禁判一次时用完整入口的**质量 job 模式**（T0 全套 + L1 单元 + 四个平台目标 + 前端冒烟 + 开发回路自检 + 环境引导自检，只省 L4）：
 
@@ -42,7 +42,7 @@ node run-tests.js --audit=structure  # 只跑结构审查（CI structure job）
 node run-tests.js --skip-e2e
 ```
 
-- 注意：`node dev.js test` 与 `node dev.js fmt`、`node dev.js clippy` **都预期全绿**——T0 九项里七项零容忍硬失败，没有容差基线（注释契约的存量快照只减不增）；交叉类型检查与供应链两项在环境不具备时记 `env-skip`（未装 target 或本机缺交叉 C 工具链；工具缺失或取不到 advisory 数据），`env-skip` 不算通过（`run-tests.js`）。
+- 注意：`node dev.js test` 与 `node dev.js fmt`、`node dev.js clippy` **都预期全绿**——T0 九项的步骤、可行状态与环境跳过口径见 [levels.md](levels.md) 的 T0 生成段；`env-skip` 不算通过，没有容差基线（注释契约的存量快照只减不增）。
 - 用例默认**并行**跑；排查并发 / 隔离问题时用 `node run-tests.js --serial`。找测试盲区用 `node run-tests.js --coverage`（见下文「覆盖率发现模式」，只报不拦）。
 
 ### 完整本地入口
@@ -56,11 +56,11 @@ node run-tests.js
 1. `cargo build`（并打印安全模式 / 真机围栏模式说明）；
 2. 运行 `solomni --doctor`，记录当前平台和围栏能力；
 3. `T0 编译（--all-targets）`（硬失败）；
-4. `T0 结构审查`（文档审查 + 结构审查；硬失败；逐项判定见 [levels.md](levels.md) 的 T0）；
+4. `T0 结构审查`（文档审查 + 结构审查；硬失败；判据实现只有两处——`tests/gates/structure/` 8 个文件与 `tests/gates/docs/` 4 个文件，逐条清单以 `node run-tests.js --list` 为准，判定口径见 [levels.md](levels.md) 的 T0）；
 5. `T0 格式（fmt --check）`（硬失败）；
 6. `T0 静态检查（clippy）`（硬失败）；
 7. `T0 编译告警`（硬失败）；
-8. `T0 交叉类型检查（各已装 target）`（**开发机专属**：`cargo check --target … --all-targets` 兜平台专属 `#[cfg]`（含测试）的类型错误；target 未装或本机缺交叉 C 工具链 = `env-skip`；**CI 上记 `skip-platform` 直接跳过**，因为三平台矩阵各自原生 `--all-targets` 已覆盖）；
+8. `T0 交叉类型检查`（各已装 target）（**开发机专属**：`cargo check --target … --all-targets` 兜平台专属 `#[cfg]`（含测试）的类型错误；target 未装或本机缺交叉 C 工具链 = `env-skip`；**CI 上记 `skip-platform` 直接跳过**，因为三平台矩阵各自原生 `--all-targets` 已覆盖）；
 9. `T0 依赖重复（cargo tree）`（硬失败）；
 10. `T0 供应链（audit/deny）`（工具缺失或取不到 advisory 数据 = env-skip）；
 11. `L1 单元（--bin solomni）`（默认并行；`--serial` 改为串行，仅诊断用）；
@@ -75,6 +75,13 @@ node run-tests.js
 20. 写入 `target/` 下的 `test-report.json` 并打印 `TEST-REPORT-OK` 或 `TEST-REPORT-FAIL`；平台缺口账为空时再打印 `TEST-REPORT-ACCEPTED`。
 
 - `--docs` / `--audit=docs|structure` 是**独立模式**：只跑上面的第 4 步对应的审查（`--docs` 两者都跑），报告 `mode: "docs"` / `"structure"`，不打印 `TEST-REPORT-ACCEPTED`。
+
+### 选择性执行（`--list` / `--only` / `--changed`）
+
+- `node run-tests.js --list [--json]` 是模式 / 车道 / gate / 步骤 / 标记的**唯一清单**（数量随常量变化，不在这里写死）；同一份数据由 `tests/gates/registry.js`、`tests/gates/steps.js` 与 `tests/lib/markers.js` 提供，`--only` / `--changed` 的取值也从这里读。
+- `--only=<gate|lane|step>`：只跑需要的那几项（步骤依赖自动补齐；`--only=full|docs|structure|selftest` 是车道别名）。
+- `--changed [--run]`：按工作树与 HEAD 的差异反查受影响的 gate、步骤与建议车道（默认只打印，`--run` 才执行；门禁引擎自身改动按全量处理）。
+- **报告只由车道级运行产出**：`full` / `docs` / `structure` / `--only=<车道>` 才写 `target/test-report.json`、才打 `TEST-REPORT-*`；任意 gate 或步骤子集不写报告、不能当验收。
 
 - 每一步都有墙钟上限（默认 15 分钟；L4 20 分钟，环境引导自检 5 分钟）：超时即硬失败，证据记进报告的 `timeouts`，不会把本地入口或 CI job 拖到外层超时。每步用时记在报告的 `ms`，超预算的标 `[slow]`（只报不拦）。
 
@@ -106,6 +113,7 @@ node run-tests.js
 | 项目内工具链装了一半 | 退出 1、说明项目内工具链构建不了、给"先卸再装"的修复步骤（下载中断会留下这种半套） |
 
 - 非 Windows 上那条路（`dlltool`）不存在：先打一条 `[探针]` 再照常打印 `ENV-BOOTSTRAP-OK`——env-skip，不算通过。
+- **这条自检只钉保留的引导链**：`env.js` 现在只做 Rust / MinGW 引导（`node env.js setup`）；运行前提基础工具链（Python / Node / C-C++）改由产品 `solomni --provision --ensure=toolchain --yes` 补齐（`kind: toolchain` 组别名只补缺项，全齐时打印「没有缺项，无需补齐」且不联网），不在门禁里跑、也不在这条自检里。
 
 ### 依赖哈希检查（`pins.js`）
 
@@ -358,29 +366,38 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 - `skip-platform`：当前平台不适用的空平台目标；
 - `gap`：入口没有找到应运行的部分。
 
-- 本地 `target/` 下的 `test-report.json` 的字段：`mode`（`full` / `docs` / `structure`；`--docs` 是文档审查 + 结构审查，`--audit=docs` / `--audit=structure` 只跑其中一路）、`platform` / `arch` / `osKey` / `profile` / `fenceLive` / `doctor`（本次运行的环境事实）、`steps`（逐步骤状态、用时 `ms` 与超预算标记 `slow`——"哪一步慢"要看它，不看感觉）、`envSkips`（探针级跳过）、`timeouts`（被墙钟超时终止的命令）、`quality`（`failed` / `steps`）、`gaps`（平台缺口账）、`globalGaps`（`tests/gaps.yaml` 的长期目标）、`failed`（状态为 `fail` 的步骤数；`quality-fail` 另由 `quality.failed` 计）。
+- 本地 `target/` 下的 `test-report.json` 的字段：`mode`（`full` / `docs` / `structure`；`--docs` 是文档审查 + 结构审查，`--audit=docs` / `--audit=structure` 只跑其中一路）、`platform` / `arch` / `osKey` / `profile` / `fenceLive` / `doctor`（本次运行的环境事实）、`toolchain`（`rustc` / `cargo` / `git` 的版本事实；取不到记 `null`，不猜）、`steps`（逐步骤状态、用时 `ms` 与超预算标记 `slow`——"哪一步慢"要看它，不看感觉）、`envSkips`（探针级跳过）、`timeouts`（被墙钟超时终止的命令）、`quality`（`failed` / `steps`）、`gaps`（平台缺口账）、`globalGaps`（`tests/gaps.yaml` 的长期目标）、`failed`（状态为 `fail` 的步骤数；`quality-fail` 另由 `quality.failed` 计）。
 - CI 合并后的平台报告由 `tests/ci-merge.mjs` 生成：`mode` 固定为 `full`，保留上述环境字段与 `steps` / `envSkips` / `quality` / `globalGaps` / `gaps` / `failed`，不保留 `timeouts` 与 `steps[].slow`。
+- `toolchain`（`rustc` / `cargo` / `git` 版本）由 **quality 半份**带入（`base.toolchain`）；缺 quality 半份（只有 e2e 的合并）时为 `null`——不猜、不回填。
 - `mode: "docs"` / `mode: "structure"` 的报告不走 `ci-merge.mjs`（没有 e2e 半份），由 `tests/ci-publish.mjs` 直接发布到 `ci-report` 的 `runs/docs/` / `runs/structure/`；它们的 `gaps` / `globalGaps` 为空，`steps` 只有 `T0 文档审查` / `T0 结构审查`（本地 `--docs` 是 `T0 文档门禁`），不代表平台缺口验收。
 - `runs/<key>/meta.json` 的 key 是 `structure` / `docs` / `windows` / `linux` / `macos`，也带 `mode`（`full` / `docs` / `structure` / `none`），读报告时先比 `sha`，再认 `mode`。
 - 报告没有 `test-fail` / `blocked` 这两个状态：失败只有 `fail`，缺口只有 `gap`。
 
 ## 二、成功标记
 
-- 固定标记只增不删，改动含义必须同步更新测试设计（`run-tests.js`）：
+- 固定标记的唯一声明在 `tests/lib/markers.js`（只增不删；改含义必须同步测试设计）。下表由生成段维护，含义以常量与 `node run-tests.js --list` 为准：
 
-- `FRONTEND-SMOKE-OK`：前端冒烟完成；
-- `DEV-LOOP-OK`：开发回路自检完成（`dev.js` 的子命令表与拒绝出口）；
-- `ENV-BOOTSTRAP-OK`：环境引导自检完成（`env.js` 的下载 / 续传 / 结构判定 / sha256 闸；非 Windows 会先打一条 `[探针]`）；
-- `E2E-OK`：端到端场景完成；
-- `TEST-REPORT-OK`：当前入口的运行步骤没有失败；`--docs` / `--audit` 模式只代表对应审查（文档审查 / 结构审查）通过，不代表代码、三平台或 L4 已验收；
-- `TEST-REPORT-FAIL`：当前入口有硬失败步骤**或** T0 任一项不过（同时以非零退出码暴露）；
-- `TEST-REPORT-ACCEPTED`：当前平台缺口账为空；
-- `MUTATION-OK` / `MUTATION-FOUND`：突变测试工作流全捕获 / 有未捕获或超时——**只用于调查，不参与验收**。
+<!-- BEGIN:success-markers -->
+| 标记 | 含义（`tests/lib/markers.js`） | 产生处 |
+| --- | --- | --- |
+| `TEST-REPORT-OK` | 本次车道的步骤没有失败；--docs / --audit 模式下只代表对应审查通过，不代表代码 / 三平台 / L4 已验收 | `run-tests.js` |
+| `TEST-REPORT-FAIL` | 本次车道有硬失败步骤或 T0 任一项不过（同时以非零退出码暴露） | `run-tests.js` |
+| `TEST-REPORT-ACCEPTED` | 本平台与跨平台缺口账为空；只在整跑模式打印，审查模式不打印 | `run-tests.js` |
+| `FRONTEND-SMOKE-OK` | 前端冒烟全部通过（steps.js 据此判通过） | `src/presentation/web/assets/smoke.cjs` |
+| `DEV-LOOP-OK` | dev.js 的固定子命令表、cargo -- 透传口与拒绝出口自检通过 | `tests/dev-loop.mjs` |
+| `PINS-TOOL-OK` | pins.js 的台账解析 / 来源推导 / 原地重写自检通过（不碰网络） | `tests/pins-tool.mjs` |
+| `ENV-BOOTSTRAP-OK` | env.js 的下载 / 续传 / 结构判定 / sha256 闸自检通过；非 Windows 那部分记 [探针] | `tests/env-bootstrap.mjs` |
+| `E2E-OK` | L4 端到端编排通过（整跑与 ci-e2e 都按它判） | `tests/cross-platform/e2e/orchestrator.js` |
+| `E2E-FAILED` | L4 端到端编排失败（失败证据在 e2e 日志） | `tests/cross-platform/e2e/orchestrator.js` |
+| `MUTATION-OK` | 突变测试全捕获（手动工作流，不参与验收） | `tests/ci-mutation.mjs` |
+| `MUTATION-FOUND` | 突变测试有漏网（手动工作流，不参与验收） | `tests/ci-mutation.mjs` |
+| `GATE-OK` | CI 验收闸门按变更分类核对五个 lane（docs / structure / workflow / quality / e2e）全部通过 | `tests/ci-gate.mjs` |
+<!-- END:success-markers -->
 
 - 固定标记不能替代质量门禁，也不能覆盖 `env-skip`、`gap` 或 `quality-fail`。测试入口必须以非零退出码暴露失败（`run-tests.js`）。
 
 ## 检查
-- 入口与报告 → `node run-tests.js`。
+- 入口与报告 → `node run-tests.js`；模式 / 车道 / gate / 步骤 / 标记清单 → `node run-tests.js --list`。
 - CI → `.github/workflows/test.yml` 与 `ci-report` 的 `sha` 比对。
 - 成功标记 → `node run-tests.js` 的输出与 `target/` 下的 `test-report.json`。
 

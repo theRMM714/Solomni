@@ -81,7 +81,7 @@
 5. 遇到阻塞或方案需要实质变化：先改 PR 正文或评论说明事实，再询问用户，不硬做。
 6. 原方案范围内暴露的实现错误可直接修复；证明原方案错误时，回到方案阶段重新确认。
 7. 范围外的问题记进 PR（或缺口账），不混进本次改动。
-8. 本机开发回路：改一层验一层用 `node dev.js test|fmt|clippy`（它用项目内工具链与缓存，见 [execution-ci.md](../testing/execution-ci.md) 的「本机开发回路」）；迭代时按门禁判一次用 `node run-tests.js --skip-e2e`，验收用 `node run-tests.js`；**纯叙述型文档**改动用 `node run-tests.js --docs`（文档审查 + 结构审查，不跑代码 / 三平台 / L4；`docs/presentation/contracts.md` 除外，它走全量）。cargo 只经这些入口跑（透传口 `node dev.js cargo -- <参数>`）；要在终端直接敲，先按 `env.js` 注入环境——`CARGO_HOME`、`RUSTUP_HOME`、`TMPDIR` / `TMP` / `TEMP` 与 `PATH` 的清单见 [execution-ci.md](../testing/execution-ci.md) 的「本机开发回路」；不注入会用 PATH 上的系统工具链并把缓存、临时目录写到项目外（`AGENTS.md` 六）。
+8. 本机开发回路：改一层验一层用 `node dev.js test|fmt|clippy`（它用项目内工具链与缓存，见 [execution-ci.md](../testing/execution-ci.md) 的「本机开发回路」）；迭代时按门禁判一次用 `node run-tests.js --skip-e2e`，验收用 `node run-tests.js`；查清单 / 步骤 / 标记用 `node run-tests.js --list`，只跑需要的几项用 `--only=<gate|lane|step>`（任意子集不写报告、不能当验收）；**纯叙述型文档**改动用 `node run-tests.js --docs`（文档审查 + 结构审查，不跑代码 / 三平台 / L4；`docs/presentation/contracts.md` 除外，它走全量）。cargo 只经这些入口跑（透传口 `node dev.js cargo -- <参数>`）；要在终端直接敲，先按 `env.js` 注入环境——`CARGO_HOME`、`RUSTUP_HOME`、`TMPDIR` / `TMP` / `TEMP` 与 `PATH` 的清单见 [execution-ci.md](../testing/execution-ci.md) 的「本机开发回路」；不注入会用 PATH 上的系统工具链并把缓存、临时目录写到项目外（`AGENTS.md` 六）。
 9. 测试与文档跟代码同一次提交：新行为有新用例，改了行为改对应用例；权威文档改成当前状态，不留「实施中」。
 10. 完成修改和适用测试后再提交；提交前检查 `.gitignore` 与 `git status`，不提交无关修改。
 

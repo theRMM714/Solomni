@@ -225,7 +225,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 
 ### 九.7 依赖方向门禁与基线
 
-- `node run-tests.js` 的 T0 结构审查按下列判据机器判定（规则在 `run-tests.js`，豁免清单在 `tests/dependency-baseline.json`）：
+- `node run-tests.js` 的 T0 结构审查按下列判据机器判定（规则在 `tests/gates/structure/dependency.js`，逐条清单用 `node run-tests.js --list`；豁免清单在 `tests/dependency-baseline.json`）：
 
 - **apiOnly**：跨能力引用必须以 `::api` 结尾；任何非入口层引用别人的 `ports` 都算违规；
 - **apiPorts** / **domainPorts**：`api` 与 `domain` 都不引端口；
@@ -299,9 +299,9 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 - 收紧快照：`node run-hygiene.js --tighten`——**卫生工具是唯一会写它的地方**，且**只能往下**：出现任何新增就拒绝写盘（`tests/comment-baseline.json`）（先违规、再收紧等于把违规洗成存量）。门禁只读、不做任何写动作。收紧后连同本次改动一起提交，diff 里就是减少的那些计数。
 
 ## 检查
-- 分层与依赖方向 → T0 结构审查（`node run-tests.js`）的 apiOnly / apiPorts / domainPorts / foreignImpl / coreCycles / reverse / presentation 判据。
-- 注释契约 → `commentContract` 判据（存量快照 `tests/comment-baseline.json`，只减不增）。
-- 文档引用与单元地图 → 结构审查的 `unitMap` 与代码注释文档引用、文档审查的 md 链接与根文档路由（`node run-tests.js`）。
+- 分层与依赖方向 → T0 结构审查（`node run-tests.js`）的 apiOnly / apiPorts / domainPorts / foreignImpl / coreCycles / reverse / presentation 判据（`tests/gates/structure/dependency.js`；清单 `node run-tests.js --list`）。
+- 注释契约 → `commentContract` 判据（`tests/gates/structure/comments.js`，存量快照 `tests/comment-baseline.json`，只减不增）。
+- 文档引用与单元地图 → 结构审查的 `unitMap` 与代码注释文档引用（`tests/gates/structure/map.js`）、文档审查的 md 链接与根文档路由（`tests/gates/docs/`）。
 
 ## 路由
 - 项目方向：[PHILOSOPHY.md](PHILOSOPHY.md)

@@ -47,9 +47,7 @@
 - 依赖重复不一定是错误，必须有解释或后续治理记录（`tests/dependency-baseline.json`）；
 - 重复代码检查不得诱导新增抽象。先判断重复是否属于同一职责，再决定合并、保留或记录原因（`run-tests.js`）。
 
-- 当前 `node run-tests.js` 已执行 [levels.md](levels.md) 的 T0 全部九项：编译、结构审查、格式、clippy、编译告警、依赖重复、项目外写**七项零容忍硬失败**（没有容差基线；注释契约的存量快照只减不增，见「五、门禁之外」）；交叉类型检查与供应链两项在环境不具备时记 `env-skip`（未装 target / 缺交叉 C 工具链；工具缺失或取不到 advisory 数据），`env-skip` 不算通过；清单与判定以 [levels.md](levels.md) 的 T0 为准（`run-tests.js`）。
-- 报告状态按步骤分：结构审查、格式、clippy、编译告警、依赖重复记 `quality-fail`；编译、交叉类型检查、项目外写记 `fail`。
-- 供应链（`cargo audit` / `cargo deny check`）同为硬失败，但**工具缺失或取不到 advisory 数据**记 `env-skip`。
+- 当前 `node run-tests.js` 已执行 [levels.md](levels.md) 的 T0 全部九项：**步骤、可行状态（含报告里的 `fail` / `quality-fail` / `env-skip`）与环境跳过口径以该文 T0 生成段为准**；`env-skip` 不算通过，没有容差基线（注释契约的存量快照只减不增，见「五、门禁之外」，`run-tests.js`）。
 
 - 三平台各自跑同一套检查（`.github/workflows/test.yml`）：clippy 只编译当前平台的 `#[cfg]` 代码（Windows 的容器围栏在 unix 上不存在，反之亦然），依赖上 Windows 走 native-tls、unix 走 rustls——所以**任一项都必须在三平台 CI 上分别成立**（`.github/workflows/test.yml`）。
 - 格式偏差与平台无关，但路径先做**词法归一**（收掉 `.` 与 `..` 段）：同一个文件被多个测试目标用 `#[path]` 引用时（rustfmt 在 unix 上会报成 `tests/<目标>/../helpers/probe.rs`）不会被算成两个。
