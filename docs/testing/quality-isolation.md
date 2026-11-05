@@ -20,7 +20,7 @@
 - 临时目录：ACL 测试与探针不在共享临时根上授父目录 ACE——在自有 base 下再套一层 `target/`，父目录就是自有 base，home 也落在 base 内，收尾删整个 base；
 - 配置：不得读取真实 `.home/`，不得覆盖用户设置；
 - 日志和报告：写入 `target/` 下的测试目录，不把产物写进源码目录；
-- 项目外写：借用系统工具链可以，但**缓存与临时一律在项目内**——`CARGO_HOME` 钉 `platform/<os>/`、`TMPDIR/TMP/TEMP` 钉 `target/tmp`（借用的构建探测也只写 `target/tmp/env-probe-<pid>/`，探完即删）；
+- 项目外写：借用系统工具链可以，但**缓存与临时一律在项目内**——`CARGO_HOME` 钉 `platform/<os>/`、`TMPDIR/TMP/TEMP` 钉 `target/tmp`（借用的构建探测也只写 `target/tmp/env-probe-<pid>/`，探完即删）；入口与终端直敲的环境契约见 [execution-ci.md](execution-ci.md) 的「本机开发回路」；
 - 启动时清理系统临时目录里上次崩溃残留的 `solomni-*`，结束时快照 `~/.cargo` / `~/.rustup` 等缓存根，**新增即硬失败（零豁免）**；
 - 并发：测试不得共享可变全局状态，除非明确验证并发语义（`run-tests.js`）；
 - 时间和随机数：需要确定性时注入 Stub 或固定种子。

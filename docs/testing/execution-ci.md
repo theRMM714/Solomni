@@ -11,13 +11,18 @@
 
 ### 本机开发回路
 
-- 改一层、验一层用 [dev.js](../../dev.js)（它把固定子命令映射到项目内的 cargo，**不要直接调 `cargo`**——裸 shell 里 `CARGO_HOME` 会指到系统用户目录，缓存只读、编译起不来）：
+- 改一层、验一层用 [dev.js](../../dev.js)：固定子命令映射到 `cargo`，并注入 [env.js](../../env.js) 解析出的环境（工具链、缓存与临时目录全钉在项目内）：
 
 ```text
 node dev.js test      # L1 单元（cargo test --bin solomni）
 node dev.js fmt       # T0 格式（cargo fmt --all -- --check）
 node dev.js clippy    # T0 静态检查（cargo clippy --all-targets --all-features --keep-going -- -D warnings）
 ```
+
+- **cargo 只经入口跑**：`node dev.js …` / `node run-tests.js` / `node start.js` 都注入同一份环境解析；`node dev.js cargo -- <参数>` 是唯一透传口（任意 cargo 子命令，环境与缓存不变）。
+- **要在终端直接敲 `cargo`，先按 `env.js` 注入环境**：`CARGO_HOME=platform/<os>/cargo`、`RUSTUP_HOME=platform/<os>/rustup`（借用 PATH 上的 rustup proxy 时保留系统的 `RUSTUP_HOME`——它靠这个找 toolchain）、`TMPDIR` / `TMP` / `TEMP`=`target/tmp`、`PATH` 前置 `platform/<os>/cargo/bin` 与 Windows GNU 的 `.tools/mingw64/bin`（门禁另外前置 `.tools/bin`，`cargo install --root .tools` 装的工具在那里）。具体值以 `node env.js` 的解析结果为准（机器可读：`node env.js --print-env`）；IDE / rust-analyzer 同配置。
+- **未注入就不要敲**：裸 shell 的 `cargo build/test/fmt/clippy/install` 会用 PATH 上的系统工具链（Windows 多为 msvc，缺 `link.exe`；门禁与 CI 用项目内 GNU），缓存与临时目录也会落到项目外（项目外写零容忍，见 [quality-isolation.md](quality-isolation.md) 的「项目外写」）；只把 `platform/<os>/cargo/bin` 加进系统 PATH 却不给 `RUSTUP_HOME`、用 ambient cargo 装东西，同样不成立。
+- **原因**：①工具链一致性——不注入就用 PATH 上的系统工具链（Windows 多为 msvc）；②项目外写零容忍——`CARGO_HOME`、临时目录必须钉在项目内（[quality-isolation.md](quality-isolation.md) 的「项目外写」）；③门禁解析器与 CI 用同一份环境（[env.js](../../env.js)），手工绕开会让本地结论与 CI 对不上。
 
 - 纯**叙述型文档**改动用审查模式（不跑 cargo、单元、平台目标与 L4，只读仓库并写本次报告）：
 
@@ -27,7 +32,7 @@ node run-tests.js --audit=docs       # 只跑文档审查（CI docs job）
 node run-tests.js --audit=structure  # 只跑结构审查（CI structure job）
 ```
 
-- `--docs` 同时跑 `docsAudit()`（文档自身：门户存在 / 链接、根文档路由）与 `structureAudit()`（代码↔文档结构：unit-map、提示词键表、systools、links.yaml、注释契约、依赖方向、测试目标 / 孤儿 / `#[ignore]` 等；不编译），报告标 `mode: "docs"`。CI 把两者拆成独立的 `docs` / `structure` job，`--audit=docs|structure` 只跑其中一路（structure 报告 `mode: "structure"`）。
+- `--docs` 同时跑文档审查（门户存在 / 链接、根文档路由、模板、生成段）与结构审查（代码↔文档结构：unit-map、提示词键表、systools、links.yaml、注释契约、依赖方向、测试目标 / 孤儿 / `#[ignore]` 等；不编译），报告标 `mode: "docs"`。CI 把两者拆成独立的 `docs` / `structure` job，`--audit=docs|structure` 只跑其中一路（structure 报告 `mode: "structure"`）。
 - `docs/presentation/contracts.md` 是机器契约文档（ROUTES 表由 Rust 测试消费），改它仍要走全量；同时它是文档，文档审查也会查它的链接。
 - 多个模式同时出现时 `--coverage` 优先于审查模式，`--docs` 优先于 `--audit`；`--skip-audit` 只作用于全量模式。纯文档任务不要为了凑流程跑全量。
 
@@ -208,7 +213,7 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 - 矩阵 `windows-latest / ubuntu-latest / macos-latest`（`fail-fast: false`，一个平台失败不影响另外两个出结论）。
 - 来自 fork 的 PR 照跑测试，但不发布 `ci-report`（token 只读）。
 
-- 平台相关的 job 是 `quality` 与 `e2e`；`changes` / `docs` / `structure` / `gate` / `publish-report` 是平台无关的 job：
+- 平台相关的 job 是 `quality` 与 `e2e`；`changes` / `docs` / `structure` / `workflow` / `gate` / `publish-report` 是平台无关的 job：
 
 | job | 跑什么 | 对应入口 |
 | --- | --- | --- |
@@ -217,7 +222,8 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 | `changes` | 判定 `code_changed` / `docs_changed`；从 base 取分类器副本，自测 + `include_str!/include_bytes!` 文档消费自检 | `node tests/ci-changes.mjs`（副本） |
 | `docs` | 有文档变更：文档审查（门户 / 链接 / 根文档路由） | `node run-tests.js --audit=docs` |
 | `structure` | 始终跑：结构审查（代码↔文档结构；文档与真相源比对 + 纯文本检查） | `node run-tests.js --audit=structure` |
-| `gate` | 汇总四个 job 的结果，规则集里唯一代表代码/文档验收的必填检查；不产报告 | 内联脚本读 `needs.*.result` |
+| `workflow` | 始终跑：工作流静态检查（闸门判定自测 + actionlint 阻断 + zizmor 只报不拦） | `node tests/ci-gate.mjs --self-test`；`actionlint -no-color`（阻断）；`zizmor --persona=regular --format=plain .github/workflows`（advisory） |
+| `gate` | 汇总五个 job 的结果（`changes` 的分类 + `docs` / `structure` / `workflow` / `quality` / `e2e`），规则集里唯一代表代码/文档验收的必填检查；不产报告 | `node tests/ci-gate.mjs` |
 | `publish-report` | 汇总三条 lane 的报告并发布 `ci-report` | `tests/ci-merge.mjs` + `tests/ci-publish.mjs` |
 
 - **三路分流**：`changes` 输出两个谓词：
@@ -225,22 +231,22 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 - `code_changed`：至少一个非叙述型文档路径（`docs/presentation/contracts.md` 也算代码——ROUTES 表由 `src/tests/routes.rs` 的 `include_str!` 消费）；
 - `docs_changed`：至少一个文档路径（`*.md`、`docs/**`、`LICENSE`；contracts.md 同时算文档，文档审查也查它的链接）。
 
-| PR | `docs` 文档审查 | `structure` 结构审查 | `quality` / `e2e` 三平台 | `gate` |
-| --- | --- | --- | --- | --- |
-| 纯文档 | 跑 | 跑 | 跳过（闸门判为合法） | 跑 |
-| 纯代码 | 跳过（闸门判为合法） | 跑 | 跑 | 跑 |
-| 混合 | 跑 | 跑 | 跑 | 跑 |
+| PR | `docs` 文档审查 | `structure` 结构审查 | `workflow` 工作流静态检查 | `quality` / `e2e` 三平台 | `gate` |
+| --- | --- | --- | --- | --- | --- |
+| 纯文档 | 跑 | 跑 | 跑（恒跑） | 跳过（闸门判为合法） | 跑 |
+| 纯代码 | 跳过（闸门判为合法） | 跑 | 跑（恒跑） | 跑 | 跑 |
+| 混合 | 跑 | 跑 | 跑（恒跑） | 跑 | 跑 |
 
 - **结构审查始终跑**：代码变更会破坏代码↔文档结构（新增 `src/**/*.rs` 没进 unit-map），文档变更同样会（删 unit-map 一行、删提示词键表一个键、从 `SYSTOOL.md` 删表名）。所以它不是“纯文档检查”，而是两边都要对得上的门禁。
 - 它平台无关，只跑一次，不放进三平台的 `quality`。
 
-- `quality` / `e2e` / `docs` 用 **job 级 `if` 跳过**；`docs` 名字固定，跳过就上报一条同名的 skipped。
+- `quality` / `e2e` / `docs` 用 **job 级 `if` 跳过**；`docs` 名字固定，跳过就上报一条同名的 skipped。`structure` / `workflow` 恒跑（除 Draft 与取消外不跳过），所以它们必须 success（`tests/ci-gate.mjs` 的 `allowSkip` 对两者恒为 false）。
 - `quality` / `e2e` 是矩阵 job，而 `jobs.<job_id>.if` 在**矩阵展开之前**求值（[GitHub 文档](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idif)），被跳过时不会展开成 `（windows-latest）` 等名字，只报一条名字带字面量 `${{ matrix.os }}` 的 skipped。按平台名配置的required context 因此永远停在 pending——纯文档 PR 会卡在「检查全绿/跳过，但不能合并」。所以平台 job 不进规则集。
-- **规则集只要求固定名字的 `gate` 一项**，`docs` / `structure` 也不是 required context，它们的结论经 `gate` 进入合并判定。
+- **规则集只要求固定名字的 `gate` 一项**，`docs` / `structure` / `workflow` 也不是 required context，它们的结论经 `gate` 进入合并判定。
 - **不要改成 workflow 级 `paths-ignore`**：workflow 不启动时 required context 根本不会上报，会永远停在 pending。
 
-- `gate`（检查名 `验收闸门`）在非 Draft 的 run 里始终运行，只读四个 job 的 `needs.*.result`，按 `changes` 的分类结果判「跳过是否合法」：
-- `code_changed=false` 时 `quality` / `e2e` 可以 skipped，`docs_changed=false` 时 `docs` 可以 skipped，`structure` 必须 success（`.github/workflows/test.yml`）；其余任何 skipped / failure / cancelled 都判失败。`changes` 自身不参与判定（它只是路由；失败时下游已按全量兜底），所以分类器故障不会单独阻塞合并，但真跑挂了的 job 一定会被闸门拦下。`gate` 不写 `ci-report`，结论只在 PR 检查项里。
+- `gate`（检查名 `验收闸门`）在非 Draft 的 run 里始终运行，汇总五个 lane（`docs` / `structure` / `workflow` / `quality` / `e2e`）的 `needs.*.result`，按 `changes` 的分类结果判「跳过是否合法」（判定逻辑在 `tests/ci-gate.mjs`，自测 8 个样例；`changes` 只提供分类输入，失败只告警、不单独判失败）：
+- `code_changed=false` 时 `quality` / `e2e` 可以 skipped，`docs_changed=false` 时 `docs` 可以 skipped，`structure` 与 `workflow` 必须 success（`.github/workflows/test.yml`、`tests/ci-gate.mjs`）；其余任何 skipped / failure / cancelled 都判失败。`changes` 自身不参与判定（它只是路由；失败时下游已按全量兜底），所以分类器故障不会单独阻塞合并，但真跑挂了的 job 一定会被闸门拦下。`gate` 不写 `ci-report`，结论只在 PR 检查项里。
 
 - `changes` 先跑分类器自测；全量入口的「变更分流自检」步骤也会跑同一个 `--self-test`。分类器**从 base 取副本**（`git show base:tests/ci-changes.mjs`）再执行——PR 改自己的分类脚本不能把自己判成全文档；base 还没有该文件时两路都跑。取不到 diff、空 diff 或未知路径时同样落回全量。
 - 新分类器写 `code_changed` / `docs_changed`；分类字段缺失（例如 base 的分类器还没有该键）时，下游条件按 `!= 'false'` 兜底为全量跑，不会出现启动期全跳过。
@@ -255,14 +261,15 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 - `runs/structure/`、`runs/docs/`、`runs/<os>/`。文档审查 / 结构审查与三平台共用同一个分支。
 - 纯代码 PR 没有 `runs/docs/`，纯文档 PR 没有平台目录；读的时候按存在的 key 比 `sha`。`gate` 不写报告，别在 `ci-report` 里找它。
 
-> **规则集**：`main` 的唯一必填检查是 `验收闸门`（`gate`）。`文档审查` / `结构审查` / 平台 job 都不是 required context——
-> 它们跑不跑、跳过是否合法，都由 `gate` 按 `changes` 的分类汇总判定；合并判定只看这一个检查名。
+> **规则集**：`main` 的唯一必填检查是 `验收闸门`（`gate`）。`文档审查` / `结构审查` / `工作流静态检查` / 平台 job 都不是 required context——
+> 它们跑不跑、跳过是否合法，都由 `gate` 按 `changes` 的分类汇总判定（工作流静态检查恒跑，`skipped` 一律不合法）；合并判定只看这一个检查名。
 > **不要**把六个平台 job 或 `变更分流` 设为 required：平台 job 是矩阵 job，纯文档 PR 跳过时不会产出 `（windows-latest）` 这类名字（永远 pending）；
 > `变更分流` 只是路由 job，卡住不应阻塞合并。
 > 规则集是仓库外的事实（GitHub 设置），本仓由用户在 GitHub 设置里改；核实用只读命令：
 > `gh api repos/<owner>/<repo>/rulesets --jq '.[].id'`，再取对应 id 的 `required_status_checks`。
 
-- `workflow_dispatch` 的 `clean` 输入（`true`）跳过 `actions/cache` 按干净机器跑；PR 触发没有这个输入，缓存照用。缓存只覆盖**项目内**路径（`platform/ci/cargo`：借用 runner 自带 Rust 时的 `CARGO_HOME`，含 registry / git / 工具；以及 `target/debug`），**不缓存 `target/` 根**（报告与日志必须来自本次运行）。缓存身份包含 `path`，改路径即新缓存项、旧项自动淘汰，首次冷启动重下一次。
+- `workflow_dispatch` 的 `clean` 输入（`true`）跳过缓存恢复，按干净机器跑；PR 触发没有这个输入，缓存照用。缓存覆盖**项目内**路径（`platform/ci/cargo`：借用 runner 自带 Rust 时的 `CARGO_HOME`，含 registry / git / 工具；以及 `target/debug`），**不缓存 `target/` 根**（报告与日志必须来自本次运行）。
+- **恢复与保存拆开**：所有 ref 都用 `actions/cache/restore`（PR 读 main 的缓存），只有 `main` 上的运行才 `actions/cache/save`——PR 的缓存作用域只对同分支可见，存了只会挤掉主线缓存项；save 失败不挡验收。本工作流**没有 `push` 触发**，所以 main 的缓存只靠「手动派发到 main」刷新（合并后的 Ready PR 在 PR head 上跑，不写 main 缓存）。缓存身份包含 `path`，改路径即新缓存项、旧项自动淘汰，首次冷启动重下一次。
 - CI 借 runner 自带 Rust（`CARGO_HOME` / `SOLOMNI_CARGO_HOME` 指项目内），不跑 `rustup` 安装——不写项目外。
 - 供应链工具在进门前预编译装（工具获取策略见 [quality-isolation.md](quality-isolation.md)）；安装用时经 `SOLOMNI_CI_PREINSTALL_MS` 带进门禁报告，在 `steps` 里以「CI 前置：供应链工具安装」出现——安装不在 `run-tests.js` 内，只能这样进报告。
 
@@ -277,7 +284,7 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 | 三种语言的模块（python / node / C++）在真进程里跑 | 本机只代表本平台的解释器与编译器 | 三平台各跑一次真工具链路，indexer 现场编译 |
 | 发布前验收 | 本地通过 ≠ 三平台通过 | 三平台报告 + 三平台 `TEST-REPORT-ACCEPTED` |
 
-- 文档审查与结构审查本身是本地可复现的确定性检查；CI 里跑它们是为了让 `gate` 能给出合并判定（它们不是 required context），不是补平台结论。
+- 文档审查与结构审查本身是本地可复现的确定性检查；CI 里跑它们是为了让 `gate` 能给出合并判定（它们不是 required context），不是补平台结论。工作流静态检查同理：闸门判定自测本地可跑（`node tests/ci-gate.mjs --self-test`），`actionlint` / `zizmor` 只在 CI 装。
 
 - **什么时候手动派发**：Draft 阶段不自动跑 CI，需要他平台结论时手动派发；PR 标 Ready 后自动跑，不必再派发。
 - 手动派发还用于「没有 PR 的分支」与「干净机器复验」。
@@ -285,7 +292,7 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 
 - **依赖** → Draft 期手动派发一次（或直接 Ready 让 PR 跑），并按下面的读法比对 `sha`；
 - **不依赖** → 本地入口就是验收结论；PR 标 Ready 时会照跑，但不把 CI 的 `env-skip` 当通过。
-- **纯叙述型文档** → 不依赖本机之外：本地 `node run-tests.js --docs`（文档审查 + 结构审查）通过即可；PR 标 Ready 时走 `changes` + `docs` + `structure` + `gate`，不产生三平台验收。
+- **纯叙述型文档** → 不依赖本机之外：本地 `node run-tests.js --docs`（文档审查 + 结构审查）通过即可；PR 标 Ready 时走 `changes` + `docs` + `structure` + `workflow` + `gate`，不产生三平台验收。
 - 用户明确要求派发时例外。
 
 - **触发**：PR 标 Ready（或对 Ready 的 PR 推送）即自动跑；Draft 不跑。需要单独验证某个分支或干净机器时手动派发，用 `gh` 发起，`--ref` 指向要验证的分支（`main` 禁止直接 push，通常派发任务分支 `task/<简述>`，`AGENTS.md`）：
