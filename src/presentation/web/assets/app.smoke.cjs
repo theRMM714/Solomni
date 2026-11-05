@@ -868,13 +868,21 @@ setTimeout(async () => {
           " const single = run('s1', 'single', ctx, head);" +
           " const proxy = run('s2', 'proxy', { prompt_tokens: 900, completion_tokens: 100, total_tokens: 1000, window: 10000, exact: true }, null);" +
           " const collab = run('s3', 'collab', ctx, head);" +
-          " const shellLive = { command: 'echo hi', scope: 'sandbox', cwd: '/x', started_at: Math.floor(Date.now()/1000) - 12, finished_at: Math.floor(Date.now()/1000), exit_code: 0, ok: true, output: 'hi' };" +
+          " const shellLive = { command: 'echo hi', scope: 'sandbox', cwd: '/x', started_at: Math.floor(Date.now()/1000) - 12, finished_at: Math.floor(Date.now()/1000), exit_code: 0, ok: true, status: 'exit', output: 'hi' };" +
           " const withShell = run('s4', 'single', ctx, head, shellLive);" +
+          " const shellTimeout = { command: 'sleep 99', scope: 'sandbox', cwd: '/x', started_at: Math.floor(Date.now()/1000) - 30, finished_at: Math.floor(Date.now()/1000), elapsed_secs: 30, exit_code: null, ok: false, status: 'timeout', output: '' };" +
+          " const withTimeout = run('s7', 'single', ctx, head, shellTimeout);" +
+          " const shellStopped = { command: 'sleep 99', scope: 'sandbox', cwd: '/x', started_at: Math.floor(Date.now()/1000) - 5, finished_at: Math.floor(Date.now()/1000), elapsed_secs: 5, exit_code: null, ok: false, status: 'stopped', output: '' };" +
+          " const withStopped = run('s8', 'single', ctx, head, shellStopped);" +
+          " const shellSignal = { command: 'sleep 99', scope: 'sandbox', cwd: '/x', started_at: Math.floor(Date.now()/1000) - 5, finished_at: Math.floor(Date.now()/1000), elapsed_secs: 5, exit_code: null, ok: false, status: 'signal', output: '' };" +
+          " const withSignal = run('s9', 'single', ctx, head, shellSignal);" +
           " const th = { level: null, default_level: 'high', label: 'high', options: [{ id: 'high', label: 'high' }], note: '' };" +
           " const withThinking = run('s5', 'single', ctx, head, null, th);" +
-          " const shellHist = { command: 'echo hi', scope: 'sandbox', cwd: '/x', started_at: 0, finished_at: null, elapsed_secs: 2, exit_code: 1, ok: false, output: 'x', historical: true };" +
+          " const shellHist = { command: 'echo hi', scope: 'sandbox', cwd: '/x', started_at: 0, finished_at: null, elapsed_secs: 2, exit_code: 1, ok: false, status: 'exit', output: 'x', historical: true };" +
           " const withHist = run('s6', 'single', ctx, head, shellHist);" +
-          " return { single: single, proxy: proxy, collab: collab, withShell: withShell, withThinking: withThinking, withHist: withHist };" +
+          " const shellHistTimeout = { command: 'sleep 99', scope: 'sandbox', cwd: '/x', started_at: 0, finished_at: null, elapsed_secs: 2, exit_code: null, ok: false, status: 'timeout', output: '', historical: true };" +
+          " const withHistTimeout = run('s10', 'single', ctx, head, shellHistTimeout);" +
+          " return { single: single, proxy: proxy, collab: collab, withShell: withShell, withTimeout: withTimeout, withStopped: withStopped, withSignal: withSignal, withThinking: withThinking, withHist: withHist, withHistTimeout: withHistTimeout };" +
           "})()",
         sandbox
       );
@@ -882,9 +890,13 @@ setTimeout(async () => {
       const proxyOk = r.proxy.length === 3 && /1,000/.test(r.proxy[0]) && /10\.0%/.test(r.proxy[0]) && /工具/.test(r.proxy[1]);
       const collabOk = r.collab.length === 2 && /工具/.test(r.collab[0]) && /#7/.test(r.collab[1]);
       const shellOk = r.withShell.length === 4 && r.withShell.some((t) => /shell 退出码 0/.test(t));
+      const timeoutOk = r.withTimeout.length === 4 && r.withTimeout.some((t) => /shell 超时 · 30 秒/.test(t));
+      const stoppedOk = r.withStopped.length === 4 && r.withStopped.some((t) => /shell 停止 · 5 秒/.test(t));
+      const signalOk = r.withSignal.length === 4 && r.withSignal.some((t) => /shell 中止（信号） · 5 秒/.test(t));
       const thinkingOk = r.withThinking.length === 4 && r.withThinking.some((t) => /思考 high/.test(t));
       const histOk = r.withHist.length === 4 && r.withHist.some((t) => /shell 退出码 1（历史）/.test(t));
-      statusBarRules = singleOk && proxyOk && collabOk && shellOk && thinkingOk && histOk;
+      const histTimeoutOk = r.withHistTimeout.length === 4 && r.withHistTimeout.some((t) => /shell 超时（历史）/.test(t));
+      statusBarRules = singleOk && proxyOk && collabOk && shellOk && timeoutOk && stoppedOk && signalOk && thinkingOk && histOk && histTimeoutOk;
       if (!statusBarRules) loadErrors.push("状态栏检查：" + JSON.stringify(r));
     } catch (e) { loadErrors.push("状态栏检查失败：" + e.message); }
   }
@@ -941,25 +953,29 @@ setTimeout(async () => {
           " state.sessions.clear();" +
           " const s = { sid: 'sh', mode: 'single', lines: [], live: [], fold: {}, scroll: {}, context: null," +
           "   shell: { command: 'echo hi', scope: 'sandbox', cwd: '/w', started_at: Math.floor(Date.now()/1000) - 3," +
-          "     finished_at: null, elapsed_secs: null, exit_code: null, ok: null, output: '', historical: false }," +
+          "     finished_at: null, elapsed_secs: null, exit_code: null, status: null, ok: null, output: '', historical: false }," +
           "   work: null, workAt: 1, workDirty: false, workError: '', running: true, sending: false, readonly: false };" +
           " state.sessions.set('sh', s); state.activeSid = 'sh';" +
           " const chip = document.createElement('button');" +
           " openShellCard(s, chip);" +
           " function text(n) { let t = String(n.textContent || ''); for (const c of (n.children || [])) t += ' ' + text(c); return t; }" +
           " const before = text(shellCardOpen.body);" +
-          " s.shell.finished_at = Math.floor(Date.now()/1000); s.shell.elapsed_secs = 3; s.shell.exit_code = 0; s.shell.ok = true; s.shell.output = 'hi';" +
+          " s.shell.finished_at = Math.floor(Date.now()/1000); s.shell.elapsed_secs = 3; s.shell.exit_code = 0; s.shell.status = 'exit'; s.shell.ok = true; s.shell.output = 'hi';" +
           " paintShellCard();" +
           " const after = text(shellCardOpen.body);" +
+          " s.shell.status = 'timeout'; s.shell.exit_code = null; s.shell.ok = false; s.shell.output = '';" +
+          " paintShellCard();" +
+          " const afterTimeout = text(shellCardOpen.body);" +
           " const opened = !!shellCardOpen;" +
           " ui.closePopover();" +
-          " return { before: before, after: after, opened: opened, closed: shellCardOpen === null };" +
+          " return { before: before, after: after, afterTimeout: afterTimeout, opened: opened, closed: shellCardOpen === null };" +
           "})()",
         sandbox
       );
       const beforeOk = r.opened && /运行中/.test(r.before) && /耗时 3 秒/.test(r.before);
       const afterOk = /成功/.test(r.after) && /退出码 0/.test(r.after) && /hi/.test(r.after);
-      shellCardRules = beforeOk && afterOk && r.closed;
+      const timeoutOk = /超时/.test(r.afterTimeout) && !/成功/.test(r.afterTimeout) && /退出码 —/.test(r.afterTimeout);
+      shellCardRules = beforeOk && afterOk && timeoutOk && r.closed;
       if (!shellCardRules) loadErrors.push("shell 卡片检查：" + JSON.stringify(r));
     } catch (e) { loadErrors.push("shell 卡片检查失败：" + e.message); }
   }

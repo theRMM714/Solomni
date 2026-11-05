@@ -3970,6 +3970,22 @@ function ctxChipClass(percent) {
 }
 /// shell 是不是仍在跑：回放派生的快照没有 finished_at，但它不是"正在跑"。
 function shellRunning(sh) { return !!sh && !sh.historical && !sh.finished_at; }
+/// shell 回执状态里要跟退出码分开显示的几类：超时 / 停止 / 信号；exit 与旧数据（null）留空走退出码。
+function shellAbnormal(sh) {
+  if (!sh) return '';
+  if (sh.status === 'timeout') return '超时';
+  if (sh.status === 'stopped') return '停止';
+  if (sh.status === 'signal') return '中止（信号）';
+  return '';
+}
+/// shell 卡片的「状态」行：超时 / 停止 / 信号从「失败」里分出来；exit 与旧数据按成败。
+function shellStatusLabel(sh, running) {
+  if (running) return '运行中…';
+  if (sh.status === 'timeout') return '超时';
+  if (sh.status === 'stopped') return '停止';
+  if (sh.status === 'signal') return '被信号结束';
+  return sh.ok ? '成功' : '失败';
+}
 /// shell 的耗时（秒）：实时槽按墙钟差；回放派生用回执里的耗时行。
 function shellSecs(sh) {
   if (sh.elapsed_secs != null) return Math.max(0, Number(sh.elapsed_secs) || 0);
@@ -4183,13 +4199,18 @@ function syncStatusbar(s) {
     const sh = s.shell;
     const running = shellRunning(sh);
     const dur = fmtDuration(shellSecs(sh));
+    // 历史回放没有墙钟时间：耗时只取回执里的「耗时」行，没留下就不写。
+    const hist = sh.historical ? '（历史）' : '';
+    const since = sh.historical && sh.elapsed_secs == null ? '' : ' · ' + dur;
+    const abnormal = shellAbnormal(sh);
     let text;
     if (running) text = 'shell 运行中 · ' + dur;
+    else if (abnormal) text = 'shell ' + abnormal + hist + since;
     else if (sh.historical) {
       const code = sh.exit_code == null ? (sh.ok ? '完成' : '中止') : '退出码 ' + sh.exit_code;
-      text = 'shell ' + code + '（历史）' + (sh.elapsed_secs != null ? ' · ' + dur : '');
-    } else if (sh.exit_code == null) text = 'shell ' + (sh.ok ? '完成' : '中止') + ' · ' + dur;
-    else text = 'shell 退出码 ' + sh.exit_code + ' · ' + dur;
+      text = 'shell ' + code + hist + since;
+    } else if (sh.exit_code == null) text = 'shell ' + (sh.ok ? '完成' : '中止') + since;
+    else text = 'shell 退出码 ' + sh.exit_code + since;
     const shellChip = ui.statusChip({
       icon: 'terminal',
       text,
@@ -4312,7 +4333,7 @@ let shellCardOpen = null; // { sid, box, body, dur, sig }
 
 function shellCardSig(sh) {
   return [sh.command, sh.scope, sh.cwd, sh.started_at, sh.finished_at, sh.elapsed_secs,
-    sh.exit_code, sh.ok, sh.historical ? 1 : 0, (sh.output || '').length].join('\u0001');
+    sh.exit_code, sh.status, sh.ok, sh.historical ? 1 : 0, (sh.output || '').length].join('\u0001');
 }
 
 /// 画一张 shell 卡片的内容；返回「耗时」那一格，运行中只改它。
@@ -4329,7 +4350,7 @@ function fillShellCard(body, sh) {
     ? 'external（共享区 / 模块目录 / 主机只读根 / 网络）'
     : 'sandbox（只碰私有沙箱）'));
   body.appendChild(popoverRow('cwd', sh.cwd || '—'));
-  body.appendChild(popoverRow('状态', running ? '运行中…' : (sh.ok ? '成功' : '失败')));
+  body.appendChild(popoverRow('状态', shellStatusLabel(sh, running)));
   body.appendChild(popoverRow('退出码', sh.exit_code == null ? '—' : String(sh.exit_code)));
   const durRow = popoverRow('耗时', sh.historical && sh.elapsed_secs == null
     ? '—（历史记录没有留下）'
