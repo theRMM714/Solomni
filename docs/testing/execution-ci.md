@@ -37,7 +37,7 @@ node run-tests.js --audit=structure  # 只跑结构审查（CI structure job）
 node run-tests.js --skip-e2e
 ```
 
-- 注意：`node dev.js test` 与 `node dev.js fmt`、`node dev.js clippy` **都预期全绿**——T0 九项里七项零容忍硬失败，没有容差基线（注释契约的存量快照只减不增）；交叉类型检查对已装 target 零容忍（未装 target 或本机缺交叉 C 工具链时 `env-skip`），供应链在工具缺失或取不到 advisory 数据时 `env-skip`（`run-tests.js`）。
+- 注意：`node dev.js test` 与 `node dev.js fmt`、`node dev.js clippy` **都预期全绿**——T0 九项里七项零容忍硬失败，没有容差基线（注释契约的存量快照只减不增）；交叉类型检查与供应链两项在环境不具备时记 `env-skip`（未装 target 或本机缺交叉 C 工具链；工具缺失或取不到 advisory 数据），`env-skip` 不算通过（`run-tests.js`）。
 - 用例默认**并行**跑；排查并发 / 隔离问题时用 `node run-tests.js --serial`。找测试盲区用 `node run-tests.js --coverage`（见下文「覆盖率发现模式」，只报不拦）。
 
 ### 完整本地入口
@@ -288,7 +288,7 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 - **纯叙述型文档** → 不依赖本机之外：本地 `node run-tests.js --docs`（文档审查 + 结构审查）通过即可；PR 标 Ready 时走 `changes` + `docs` + `structure` + `gate`，不产生三平台验收。
 - 用户明确要求派发时例外。
 
-- **触发**：PR 标 Ready（或对 Ready 的 PR 推送）即自动跑；Draft 不跑。需要单独验证某个分支或干净机器时手动派发，用 `gh` 发起，`--ref` 指向要验证的分支（`main` 禁止直接 push，通常是 `development`，`AGENTS.md`）：
+- **触发**：PR 标 Ready（或对 Ready 的 PR 推送）即自动跑；Draft 不跑。需要单独验证某个分支或干净机器时手动派发，用 `gh` 发起，`--ref` 指向要验证的分支（`main` 禁止直接 push，通常派发任务分支 `task/<简述>`，`AGENTS.md`）：
 
 > **Draft 的 run 只证明工作流文件被接受**（YAML 解析通过）：所有 job 跳过、不产报告、不发布 `ci-report`，
 > 不能当任何验收结论。要验证工作流本身（产物上传/下载、合并与发布链路），必须手动派发或等 Ready 后跑一次。
@@ -299,7 +299,7 @@ gh workflow run test.yml --ref <分支>
 
 - 按干净机器跑（跳过缓存）时加 `-f clean=true`。Ready 的 PR 不必另派发；触发后按下面的读法比对 `sha`。
 
-- **报告怎么读（硬规矩）**：只用 `git` 或 git CLI 拉滚动分支，**禁止轮询网页**；时机无法确认时委托用户拉取（见 `AGENTS.md`）。
+- **报告怎么读（硬规矩）**：只用 `git` 或 git CLI 拉滚动分支，**禁止轮询网页**（报告只发布到 `ci-report` 滚动分支，发布逻辑在 `tests/ci-publish.mjs`）；时机无法确认时委托用户拉取。
 - 代码 / 文档 / 结构验收都读 `ci-report`：
 
 ```text
@@ -331,7 +331,7 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 > 容器是否生效用**行为对照**（授权落点写得进、父目录按名可用、父目录内容不可见），见 [levels.md](levels.md) 的 T4。
 
 - **等多久再拉（推荐节奏）**：触发之后（PR 标 Ready 或手动派发）**先等 5 分钟**再拉 `ci-report`；若本次跑了的 lane 的 `meta.json` 的 `sha` 还对不上（这次 run 没结束），**每次再等 2 分钟**重拉一次，直到对应 key 的 `sha` 都对得上（纯文档看 `runs/structure` + `runs/docs`；有代码看 `runs/structure` + 三平台），或确认 run 已失败/取消。
-- 等的是 git 拉取，不是网页轮询——`AGENTS.md` 禁止查网页；时间上拿不准（比如 runner 排队很久）就委托用户拉取。
+- 等的是 git 拉取，不是网页轮询——报告只在 `ci-report`（发布逻辑在 `tests/ci-publish.mjs`）；时间上拿不准（比如 runner 排队很久）就委托用户拉取。
 
 - **发布通道**（由 `tests/ci-publish.mjs` 在 CI 里自助发布，成败都发）：
 

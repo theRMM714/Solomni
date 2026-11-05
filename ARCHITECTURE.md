@@ -233,7 +233,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 - **coreCycles**：能力节点图无环；
 - **reverse** / **presentation**：能力不反向依赖入口层或呈现层；
 - **channelCross**：呈现层的两个渠道（`cli` 与 `web`）互不依赖；
-- **unitMap** / **docRefs**：各单元的 `unit-map.md` 合起来与磁盘**双向一致**；文档链接与代码注释里的 `docs/**.md` 引用都存在；
+- **unitMap**：各单元的 `unit-map.md` 合起来与磁盘**双向一致**（结构审查）；**文档链接**：代码注释里的 `docs/**.md` 引用由结构审查判，文档之间的 md 链接与根 `*.md` 路由表由**文档审查**判（本地 T0 的「结构审查」步骤跑 `auditAll`，含文档审查；CI 拆成 `docs` / `structure` 两个 job，`node run-tests.js --audit=docs` / `--audit=structure`）；
 - **commentContract**：全仓 `.rs` 的文件头四槽（目的 / 管 / 不管 / 联动）、`pub` 项的条目槽（目的 / 参数 / 返回 / 错误 / 约束）与行内注释限量；存量（`文件 × 规则` → 计数）记在 `tests/comment-baseline.json`，门禁只减不增：新增与应销账都硬失败（见 §十）。
 
 - **当前基线为空（零豁免）**：任一判据不成立即报错；豁免条目一旦不再成立，门禁报「基线豁免已过期」强制销账。
@@ -301,7 +301,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 ## 检查
 - 分层与依赖方向 → T0 结构审查（`node run-tests.js`）的 apiOnly / apiPorts / domainPorts / foreignImpl / coreCycles / reverse / presentation 判据。
 - 注释契约 → `commentContract` 判据（存量快照 `tests/comment-baseline.json`，只减不增）。
-- 文档引用与单元地图 → `unitMap` / `docRefs` 判据。
+- 文档引用与单元地图 → 结构审查的 `unitMap` 与代码注释文档引用、文档审查的 md 链接与根文档路由（`node run-tests.js`）。
 
 ## 路由
 - 项目方向：[PHILOSOPHY.md](PHILOSOPHY.md)

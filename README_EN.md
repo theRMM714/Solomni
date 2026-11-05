@@ -186,10 +186,10 @@ Every unfinished item, how to fix it and its acceptance criteria have exactly on
 - Not a runtime that keeps modules resident: `tools` start a one-shot process per task; the `services` a module declares are resident services started and reaped by the core under your authorization.
 - Not a server: it binds `127.0.0.1` only — no server side, no account.
 
-**Quality**: `node run-tests.js` is the single entry point — T0 (format / compile / clippy / duplicate deps /
-structural review / cross-target type check / out-of-project writes / supply chain, zero tolerance; supply-chain
-tools report `env-skip` when absent) + unit + cross-platform integration + frontend smoke + end-to-end; the
-real-machine fence probes run on three CI platforms (see [TESTING.md](TESTING.md)).
+**Quality**: `node run-tests.js` is the single entry point — T0 (nine checks: compile / structural review / format /
+clippy / compiler warnings / duplicate deps / out-of-project writes are zero-tolerance; cross-target type check and
+supply chain report `env-skip` when the environment cannot run them) + unit + cross-platform integration + frontend
+smoke + end-to-end; the real-machine fence probes run on three CI platforms (see [TESTING.md](TESTING.md)).
 
 ## Document guide
 

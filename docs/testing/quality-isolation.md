@@ -47,7 +47,7 @@
 - 依赖重复不一定是错误，必须有解释或后续治理记录（`tests/dependency-baseline.json`）；
 - 重复代码检查不得诱导新增抽象。先判断重复是否属于同一职责，再决定合并、保留或记录原因（`run-tests.js`）。
 
-- 当前 `node run-tests.js` 已执行 [levels.md](levels.md) 的 T0 全部检查：编译、结构审查（含**门禁解析器自测**与 **`#[ignore]` 禁令**）（`run-tests.js`）、格式、clippy、编译告警、依赖重复、项目外写**零容忍硬失败**；交叉类型检查对已装 target 零容忍（未装 target = `env-skip`），**没有容差基线**（注释契约的存量快照只减不增，见「五、门禁之外」，`run-tests.js`）。
+- 当前 `node run-tests.js` 已执行 [levels.md](levels.md) 的 T0 全部九项：编译、结构审查、格式、clippy、编译告警、依赖重复、项目外写**七项零容忍硬失败**（没有容差基线；注释契约的存量快照只减不增，见「五、门禁之外」）；交叉类型检查与供应链两项在环境不具备时记 `env-skip`（未装 target / 缺交叉 C 工具链；工具缺失或取不到 advisory 数据），`env-skip` 不算通过；清单与判定以 [levels.md](levels.md) 的 T0 为准（`run-tests.js`）。
 - 报告状态按步骤分：结构审查、格式、clippy、编译告警、依赖重复记 `quality-fail`；编译、交叉类型检查、项目外写记 `fail`。
 - 供应链（`cargo audit` / `cargo deny check`）同为硬失败，但**工具缺失或取不到 advisory 数据**记 `env-skip`。
 
