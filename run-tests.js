@@ -1,33 +1,46 @@
 #!/usr/bin/env node
 /**
- * 测试总入口（见 TESTING.md）：先问本机事实（solomni --doctor），再逐目标点名跑，最后汇总四态。
- * T0 质量门禁全部是**零容忍硬失败**：编译、结构审查、格式、clippy、编译告警、依赖重复——
- * 没有存量基线（见 docs/testing/quality-isolation.md）。
+ * 测试总入口（见 TESTING.md）：**薄编排**——参数解析、车道 / 步骤选择、依赖调度、步骤渲染、报告写一次。
+ * 质量门禁的判定在 tests/gates（registry 是唯一清单，纯文本、只读）；子进程 / 环境 / 步骤框架 / 报告在 tests/lib。
+ * 选择性执行：--list 查清单、--only=<gate|lane|step> 只跑需要的那几项、--changed 按 git 影响面反查。
+ * 任意子集**不写 target/test-report.json、不打 TEST-REPORT-***：报告只由车道级运行产出，验收只认车道。
  * 直接跑，或经 node start.js -test（后者会先把项目内工具链环境备好，再调本脚本）。
  */
 "use strict";
-const { spawnSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
-const os = require("os");
+const { execFileSync } = require("child_process");
 
 const ROOT = __dirname;
+const cli = require("./tests/lib/cli.js");
+const opts = cli.parse(process.argv.slice(2));
+if (opts.invalid) {
+  console.error(opts.invalid);
+  process.exit(2);
+}
+if (opts.help) {
+  console.log(cli.usage());
+  process.exit(0);
+}
+
+const proc = require("./tests/lib/proc.js").create({ root: ROOT, fenceLive: opts.fenceLive });
+const step = require("./tests/lib/step.js").create();
+const reportLib = require("./tests/lib/report.js");
+const markers = require("./tests/lib/markers.js");
+const outside = require("./tests/lib/outside.js");
+const gates = require("./tests/gates/registry.js");
+const stepsLib = require("./tests/gates/steps.js");
+const { matchAny } = require("./tests/lib/fsutil.js");
+
 const IS_WIN = process.platform === "win32";
 const OS_KEY = IS_WIN ? "windows" : process.platform === "darwin" ? "macos" : "linux";
 const EXE = IS_WIN ? "solomni.exe" : "solomni";
-const PROFILE = process.argv.includes("--release") ? "release" : "debug";
+const PROFILE = opts.release ? "release" : "debug";
 const BIN = path.join(ROOT, "target", PROFILE, EXE);
 const PLATFORM_TARGETS = ["cross-platform", "windows", "linux", "macos"];
 // 交叉类型检查的 target 与开发环境清单**同源**（dev-tools.js，唯一真相）：setup-dev.js 按它装，这里按它查。
 // **只查不装**：装 target 是开发环境准备（node setup-dev.js），门禁不写系统工具链。
-// macOS 的 C 依赖（ring）在 Linux 上没有 Apple SDK / 交叉 C 工具链，那类失败按 env-skip 如实标注。
 const CROSS_TARGETS = require("./dev-tools.js").targets.map((t) => t.triple);
-// 默认并行：线程时序敏感的用例已改为等"可停止/可观察"的确定状态，低核加压与正常并行都验过。
-// --serial 只在排查并发/隔离问题时用（加 --test-threads=1）。
-const SERIAL = process.argv.includes("--serial");
-// 每步墙钟上限：没有它，一个挂死的子进程会把本地入口永久卡住（CI 只能靠 job 级 30 分钟兜底）。
-const STEP_TIMEOUT_MS = 15 * 60 * 1000;
-const E2E_TIMEOUT_MS = 20 * 60 * 1000;
 // 只报不拦的步骤时间预算（秒）：超了在报告里标 [slow]，给找慢步骤留基线（对齐 run-hygiene 的"只报不拦"）。
 const STEP_BUDGET_S = {
   "cargo build": 300,
@@ -41,1123 +54,147 @@ const STEP_BUDGET_S = {
   "目标 cross-platform": 300,
   "L4 端到端": 600,
 };
-// 覆盖率发现模式（手动，不进默认门禁；判据与局限见 docs/testing/execution-ci.md 与 quality-isolation.md）。
-const COVERAGE = process.argv.includes("--coverage");
-// 审查模式：只跑纯文本审查，不跑 cargo、单元、平台目标、前端冒烟与 L4。
-// - --docs：文档审查 + 结构审查（本地纯文档任务用）；
-// - --audit=docs / --audit=structure：只跑其中一路（CI 的 docs / structure job 用）；
-// 同时给 --docs 与 --audit 时 --docs（两路一起）优先。判据见 docs/testing/execution-ci.md。
-const DOCS = process.argv.includes("--docs");
-const AUDIT_ARG = process.argv.find((a) => a.startsWith("--audit="));
-const AUDIT_SCOPE = AUDIT_ARG ? AUDIT_ARG.slice("--audit=".length) : null;
-if (AUDIT_SCOPE !== null && AUDIT_SCOPE !== "docs" && AUDIT_SCOPE !== "structure") {
-  console.error("用法：--audit=docs|structure");
-  process.exit(2);
-}
-// CI 的 quality job 用：平台无关的结构审查已由独立 structure job 承担，报告里不再出现这一步。
-const SKIP_AUDIT = process.argv.includes("--skip-audit");
-// 真机围栏测试（会改本机状态：建 AppContainer profile、写目录 ACL）默认不跑，必须显式开启。
-const FENCE_LIVE = process.argv.includes("--fence-live") || process.env.SOLOMNI_FENCE_LIVE === "1";
-// CI 的 quality job 用 --skip-e2e 跳过 L4，L4 由独立的 e2e job（tests/ci-e2e.mjs）跑；
-// 发布时两份报告合并。本地直接跑不带这个开关。
-const SKIP_E2E = process.argv.includes("--skip-e2e");
-const REPORT = path.join(ROOT, "target", "test-report.json");
-// 缺口账：唯一真相是这些文件。平台账决定 TEST-REPORT-ACCEPTED；全局账是长期目标（每条都进报告）。
-const GAP_FILES = [
-  path.join(ROOT, "tests", "gaps.yaml"),
-  path.join(ROOT, "tests", "cross-platform", "gaps.yaml"),
-  ...[IS_WIN ? "windows" : OS_KEY, "windows", "linux", "macos"].map((p) => path.join(ROOT, "tests", p, "gaps.yaml")),
-];
 
-function buildEnv() {
-  // 环境解析统一交给 env.js（与启动器同一份，换开发环境只改一处）；
-  // start.js -test 会带着现成环境进来；直接跑时解析项目内工具链，没有就借用系统工具链（CARGO_HOME 仍指项目内）。
-  const envLayer = require("./env.js");
-  const resolved = envLayer.resolve();
-  const e = Object.assign({}, resolved ? resolved.env : process.env);
-  envLayer.pinTemp(e); // 临时文件不出项目
-  // 项目内工具区（AGENTS.md：工具链收敛在 platform/<os>/ 与 .tools/）：把 .tools/bin 放到 PATH 前，
-  // cargo 子命令（cargo-audit / cargo-deny / cargo-llvm-cov）才找得到；没装就是 env-skip。
-  const toolsBin = path.join(ROOT, ".tools", "bin");
-  if (fs.existsSync(toolsBin)) {
-    const pk = Object.keys(e).find((k) => k.toUpperCase() === "PATH") || "PATH";
-    e[pk] = toolsBin + path.delimiter + (e[pk] || "");
-  }
-  // 把开关传给测试与产品：默认"不写本机状态"，只有 --fence-live 才允许。
-  e.SOLOMNI_FENCE_LIVE = FENCE_LIVE ? "1" : "0";
-  e.SOLOMNI_FENCE_WRITE = FENCE_LIVE ? "1" : "0";
-  return e;
-}
-
-// ---- 项目外写检测（只覆盖 env / 工具链；判据见 docs/testing/quality-isolation.md） ----
-// 借用系统工具链也不许把缓存/配置写进它的 home：CARGO_HOME 与 TMP 都已钉在项目内。
-// 这一层是运行期自检：快照若干项目外缓存根，跑完对比，新增/变化即硬失败（零豁免）。
-function outsideWatchRoots() {
-  const home = os.homedir();
-  const p = (x) => path.join(home, x);
-  return [
-    p(".cargo"),
-    p(path.join(".rustup", "settings.toml")),
-    p(path.join(".rustup", "downloads")),
-    p(path.join(".rustup", "tmp")),
-    p(path.join(".rustup", "update-hashes")),
-    p(".npm"),
-  ];
-}
-/** 递归记下目录树（目录/文件的 mtime 与大小）；封顶避免大目录拖慢门禁。 */
-function snapshotTree(abs, acc, budget) {
-  if (budget.n <= 0 || !fs.existsSync(abs)) return;
-  let st;
-  try { st = fs.lstatSync(abs); } catch (e) { return; }
-  acc[abs] = st.isDirectory() ? "d:" + st.mtimeMs : "f:" + st.mtimeMs + ":" + st.size;
-  budget.n--;
-  if (!st.isDirectory()) return;
-  let names;
-  try { names = fs.readdirSync(abs); } catch (e) { return; }
-  for (const n of names) {
-    if (budget.n <= 0) break;
-    snapshotTree(path.join(abs, n), acc, budget);
-  }
-}
-function outsideSnapshot() {
-  const acc = {};
-  const budget = { n: 20000 };
-  for (const r of outsideWatchRoots()) snapshotTree(r, acc, budget);
-  return acc;
-}
-function outsideDiff(before, after) {
-  const changed = [];
-  for (const k of new Set(Object.keys(before).concat(Object.keys(after)))) {
-    if (before[k] !== after[k]) changed.push(k + (before[k] === undefined ? "（新增）" : after[k] === undefined ? "（删除）" : "（变化）"));
-  }
-  return changed;
-}
-/** 自测：项目外写检测必须能分辨新增 / 删除 / 变化（门禁自己不可信就没有意义）。 */
-function outsideSelfTest() {
-  const bad = [];
-  const eqo = (name, got, want) => { if (got !== want) bad.push("项目外写自测失败：" + name + "：实际 " + got + "，期望 " + want); };
-  eqo("检出新增", outsideDiff({ a: "d:1" }, { a: "d:1", b: "f:2:3" }).length, 1);
-  eqo("检出删除", outsideDiff({ a: "d:1", b: "f:2:3" }, { a: "d:1" }).length, 1);
-  eqo("检出变化", outsideDiff({ a: "d:1" }, { a: "d:2" }).length, 1);
-  eqo("无变化不误报", outsideDiff({ a: "d:1" }, { a: "d:1" }).length, 0);
-  return bad;
-}
-/** 清掉上次崩溃残留在系统临时目录里的 solomni-*（pid 已不在 = 崩溃残留）。返回清掉的条目名。 */
-function sweepStaleTemp() {
-  const dir = os.tmpdir();
-  const swept = [];
-  let names;
-  try { names = fs.readdirSync(dir); } catch (e) { return swept; }
-  for (const n of names) {
-    if (!/^solomni-/.test(n)) continue;
-    const full = path.join(dir, n);
-    const m = n.match(/-(\d+)$/);
-    let stale = false;
-    if (m) {
-      try { process.kill(Number(m[1]), 0); stale = false; }
-      catch (e) { stale = e && e.code === "EPERM" ? false : true; }
-    } else {
-      try { stale = Date.now() - fs.statSync(full).mtimeMs > 60 * 60 * 1000; } catch (e) { stale = true; }
-    }
-    if (!stale) continue;
-    try { fs.rmSync(full, { recursive: true, force: true }); swept.push(n); } catch (e) { /* 清不掉就留着，报告里如实说 */ }
-  }
-  return swept;
-}
-
-let stepNo = 0;
-/// 每步的起跑时刻：报告里带 ms，才能看出"哪一步慢"（真机上 Windows 的 L1 比 Linux 慢两个数量级，就是靠这个定位）
-let stepStart = Date.now();
-/// 被墙钟超时终止的命令；进报告与汇总，作为"这一步为什么失败"的证据。
-const timeouts = [];
-function announce(label) {
-  stepNo++;
-  stepStart = Date.now();
-  process.stdout.write("[" + stepNo + "] " + label + " ... ");
-}
-function announceDone(status, detail) {
-  console.log(status + (detail ? "（" + detail + "）" : "") + "  [" + ((Date.now() - stepStart) / 1000).toFixed(1) + "s]");
-}
-function sh(cmd, args, timeoutMs) {
-  // 输出走文件而不是管道：受限环境里"用管道抓子进程输出"会 EPERM；落成日志还顺带留了档案。
-  const logDir = path.join(ROOT, "target", "test-logs");
-  fs.mkdirSync(logDir, { recursive: true });
-  const slug = (s) => String(s).replace(/[^\w.-]+/g, "_");
-  const logFile = path.join(logDir, slug(path.basename(cmd)) + "-" + args.map(slug).join("_") + ".log");
-  const fd = fs.openSync(logFile, "w");
-  // 跑之前先报出这一步的**实时日志落点**：门禁卡住时直接读这个文件就知道停在哪（子进程边走边写）。
-  process.stdout.write("    实时日志：" + path.relative(ROOT, logFile) + "\n");
-  // 每步都有墙钟上限：挂死的子进程必须被终止，不能把本地入口永久卡住、也不能让 CI 只剩 job 级兜底。
-  const budget = timeoutMs || STEP_TIMEOUT_MS;
-  const r = spawnSync(cmd, args, { cwd: ROOT, env: buildEnv(), stdio: ["ignore", fd, fd], timeout: budget, killSignal: "SIGKILL" });
-  fs.closeSync(fd);
-  const out = fs.readFileSync(logFile, "utf8");
-  const timedOut = !!(r.error && (r.error.code === "ETIMEDOUT" || /timed?\s*out/i.test(String(r.error.message))));
-  if (timedOut) timeouts.push("超时 " + Math.round(budget / 1000) + "s：" + path.basename(cmd) + " " + args.join(" "));
+/** 步骤对象共享的运行上下文：谁跑谁拿这一份，不依赖模块级可变全局。 */
+function makeCtx() {
   return {
-    code: r.error ? -1 : r.status,
-    out: out,
-    error: r.error ? String(r.error.message) : null,
-    timedOut: timedOut,
-    log: path.relative(ROOT, logFile),
+    root: ROOT,
+    opts,
+    proc,
+    step,
+    bin: BIN,
+    exe: EXE,
+    osKey: OS_KEY,
+    platformTargets: PLATFORM_TARGETS,
+    crossTargets: CROSS_TARGETS,
+    state: { doctor: null, checkOut: null, build: null, outsideBefore: null, tempSwept: [] },
   };
 }
 
-/** 已安装的交叉 target（rustup 不在或查不动 = null；门禁只查不装）。 */
-function installedTargets() {
-  const r = sh("rustup", ["target", "list", "--installed"]);
-  if (r.code !== 0) return null;
-  return r.out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+// ---------- 清单（--list） ----------
+
+/** 车道 / gate / 步骤的机器可读清单：--only 与 --changed 的取值都从这里读。 */
+function listModel() {
+  return {
+    modes: [
+      { id: "full", write: true, note: "整跑：质量门禁 + 单元 + 平台目标 + L4（写报告、打 TEST-REPORT-*）" },
+      { id: "docs", write: true, note: "--docs：文档审查 + 结构审查（写报告）" },
+      { id: "structure", write: true, note: "--audit=structure：只跑结构审查（写报告）" },
+      { id: "selftest", write: false, note: "--only=selftest：只跑门禁自测（不写报告）" },
+    ],
+    lanes: [
+      { id: "full", alias: "--only=full", write: true },
+      { id: "docs", alias: "--only=docs（= --audit=docs）", write: true },
+      { id: "structure", alias: "--only=structure（= --audit=structure）", write: true },
+      { id: "selftest", alias: "--only=selftest", write: false },
+    ],
+    markers: markers.MARKERS,
+    gates: gates.listModel(),
+    steps: stepsLib.listModel(),
+  };
 }
 
-/** 交叉检查失败是不是"本机没有该平台的 C 工具链 / SDK"这类环境结论（只对 macOS 判定，别处一律当失败）。 */
-function crossEnvLimited(target, out) {
-  if (!target.includes("apple-darwin")) return false;
-  return /unrecognized command-line option '-arch'/.test(out)
-    || /-mmacosx-version-min/.test(out)
-    || /error occurred in cc-rs/.test(out);
-}
-
-/** 汇总 cargo 的 test result 行：一次运行可能有多条（多目标/多测试）。 */
-function cargoCounts(out) {
-  let passed = 0, failed = 0, ignored = 0, resultLines = 0;
-  for (const line of out.split(/\r?\n/)) {
-    const m = line.match(/^test result: (ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored/);
-    if (m) { resultLines++; passed += Number(m[2]); failed += Number(m[3]); ignored += Number(m[4]); }
+function printList() {
+  const model = listModel();
+  if (opts.json) {
+    console.log(JSON.stringify(model, null, 2));
+    return;
   }
-  // ignored > 0 视为未授权的跳过（#[ignore] 被禁，见结构审查）：调用方必须据此判失败。
-  return { passed, failed, ignored, resultLines };
+  console.log("模式（优先级：--coverage > --docs > --audit=… > 整跑）：");
+  for (const m of model.modes) console.log("  " + m.id.padEnd(10) + (m.write ? "写报告  " : "不写报告") + "  " + m.note);
+  // 列宽按内容算：id 长度不一，固定宽度会让最长的 id 顶掉后面的列。
+  const gateIdW = Math.max(...model.gates.map((g) => g.id.length)) + 2;
+  const stepIdW = Math.max(...model.steps.map((s) => s.id.length)) + 2;
+  const stepNameW = Math.max(...model.steps.map((s) => s.name.length)) + 2;
+  console.log("");
+  console.log("gate（--only=<id>；纯文本 / 只读；不写报告）：");
+  for (const g of model.gates) console.log("  " + g.id.padEnd(gateIdW) + g.lane.padEnd(11) + g.inputs.join(", "));
+  console.log("");
+  console.log("步骤（--only=<id>；不写报告；依赖自动补齐）：");
+  for (const s of model.steps) console.log("  " + s.id.padEnd(stepIdW) + s.name.padEnd(stepNameW) + (s.deps.length ? "deps=" + s.deps.join(",") : "") + (s.requiresFull ? "（只能整跑）" : ""));
+  console.log("");
+  console.log("标记（打印点引用 tests/lib/markers.js，含义同源）：");
+  for (const m of model.markers) console.log("  " + m.text.padEnd(22) + m.owner);
+  console.log("");
+  console.log("车道别名：--only=full / docs / structure / selftest（车道级写报告，selftest 不写）");
+  console.log("影响面：--changed [--run]（依据工作树 vs HEAD，取不到差异按全量）");
 }
 
-function skipsIn(out) {
-  // 只认**行首**的 [探针]（诚实标记），不把测试输出里恰好含这三个字的内容算成环境跳过。
-  return out.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.startsWith("[探针]"));
-}
-
-/** 读该平台（含跨平台层）的缺口账：条目存在 = 这条测试还没有。 */
-function gapLedgers() {
-  const files = [path.join(ROOT, "tests", "cross-platform", "gaps.yaml"), path.join(ROOT, "tests", OS_KEY, "gaps.yaml")];
-  const ids = [];
-  for (const f of files) {
-    if (!fs.existsSync(f)) continue;
-    for (const line of fs.readFileSync(f, "utf8").split(/\r?\n/)) {
-      const m = line.match(/^\s*-\s*id:\s*(\S+)/);
-      if (m) ids.push(m[1]);
-    }
-  }
-  return ids;
-}
-
-/** 全局缺口账（tests/gaps.yaml）：长期目标；每条都进报告，但不影响平台的 ACCEPTED 判定。 */
-function globalGaps() {
-  const files = [path.join(ROOT, "tests", "gaps.yaml")];
-  const ids = [];
-  for (const f of files) {
-    if (!fs.existsSync(f)) continue;
-    for (const line of fs.readFileSync(f, "utf8").split(/\r?\n/)) {
-      const m = line.match(/^\s*-\s*id:\s*(\S+)/);
-      if (m) ids.push(m[1]);
-    }
-  }
-  return ids;
-}
-
-// ---------- T0：质量检查的解析（路径归一 + 四项的原始输出解析） ----------
-
-// 词法归一：统一分隔符、去掉 \\?\ 扩展前缀、收掉 '.' 与 '..' 段。
-// 为什么必须收 '..'：同一个文件可以被多个测试目标用 #[path] 引用，rustfmt 会按"目标根 + 相对路径"
-// 报出来（unix 上是 tests/cross-platform/../helpers/probe.rs），Windows 上则报规范化后的路径。
-// 归一之后三平台得到同一份名单，同一个文件不会被算成两个。
-const normPath = (s) => {
-  const parts = s.replace(/\\/g, "/").replace(/^\/\/\?\//, "").split("/");
-  const out = [];
-  for (const seg of parts) {
-    if (seg === "" || seg === ".") continue;
-    if (seg === "..") {
-      out.pop();
-      continue;
-    }
-    out.push(seg);
-  }
-  return out.join("/");
-};
-const ROOT_NORM = normPath(ROOT) + "/";
-
-/** fmt --check：有偏差的文件集合（仓库相对路径、/ 分隔）。 */
-function fmtDeviations(out) {
-  const files = new Set();
-  // 先剥 ANSI 颜色转义：Windows 上 rustfmt 会带颜色输出，而下面按**行首**锚定，
-  // 带转义前缀的行会被整条漏掉（实测：一条真正的格式偏差就是这样从 Windows 门禁眼皮底下溜过去的）。
-  for (const line of out.replace(/\u001b\[[0-9;]*m/g, "").split(/\r?\n/)) {
-    const m = line.match(/^Diff in (.+?):\d+:\s*$/);
-    if (!m) continue;
-    let p = normPath(m[1]);
-    if (p.startsWith(ROOT_NORM)) p = p.slice(ROOT_NORM.length);
-    files.add(p);
-  }
-  return files;
-}
-
-/** clippy：按 lint 名计数（每条诊断恰好一个 rust-clippy 文档锚点）。 */
-function clippyLints(out) {
-  const counts = {};
-  for (const m of out.matchAll(/rust-clippy\/[^#\s]*#([a-z0-9_-]+)/g)) {
-    const name = m[1].replace(/-/g, "_");
-    counts[name] = (counts[name] || 0) + 1;
-  }
-  return counts;
-}
-
-/** cargo check 的 rustc 层告警数（不把"generated N warnings"这类汇总行算进去）。 */
-function checkWarnings(out) {
-  let n = 0;
-  for (const line of out.split(/\r?\n/)) {
-    if (/^warning: /.test(line) && !/generated \d+ warning/.test(line)) n++;
-  }
-  return n;
-}
-
-/** cargo tree --duplicates 报出的重复 crate 名（列首的 "name vX.Y.Z"）。 */
-function duplicateCrates(out) {
-  const names = new Set();
-  for (const line of out.split(/\r?\n/)) {
-    const m = line.match(/^([A-Za-z0-9_.-]+) v\d/);
-    if (m) names.add(m[1]);
-  }
-  return [...names].sort();
-}
+// ---------- 审查车道（--docs / --audit=docs|structure / --only=<车道>） ----------
 
 /**
- * 目的：links.yaml 一行值的规矩（纯判定）。链接必须是 https://；**校验值**（键以 `.sha256` 结尾）必须是
- *   64 位十六进制。为什么校验值和链接放同一份台账：pin 与它守护的 URL 分居两处就会腐烂——曾把 URL 升到
- *   新版本却忘了改代码里的常量，于是每次下载都判"不符 → 删文件 → 重跑"，把人挡在门外。
- * 返回：问题描述；合规给 null。
+ * 审查车道：只跑纯文本审查，不跑 cargo、单元、平台目标、前端冒烟与 L4；全程只读并写本次报告。
+ * - all：文档审查 + 结构审查（本地 --docs，也是全量的 T0 结构审查步骤）；
+ * - docs：只查文档自身（CI 的 docs job）；
+ * - structure：只查代码↔文档结构（CI 的 structure job）。
  */
-function linkValueProblem(key, value) {
-  if (key.endsWith(".sha256")) {
-    return /^[a-f0-9]{64}$/i.test(value) ? null : "links.yaml 的校验值必须是 64 位十六进制（键 " + key + "）";
-  }
-  return /^https:\/\//.test(value) ? null : "links.yaml 的值必须是 https://（校验值请写成 `<链接键>.sha256`）：" + key;
-}
+function runAudit(scope) {
+  const label = scope === "docs" ? "T0 文档审查" : scope === "structure" ? "T0 结构审查" : "T0 文档门禁";
+  step.announce(label);
+  const audit = gates.runLane(ROOT, scope === "docs" ? "docs" : scope === "structure" ? "structure" : "all");
+  const ms = step.elapsed();
+  const detail = audit.problems.length
+    ? audit.problems.join("；")
+    : scope === "docs"
+      ? "文档检查通过"
+      : audit.targets.length + " 个目标 / " + audit.testFiles + " 个测试文件";
+  step.announceDone(audit.problems.length ? "失败" : "完成", audit.problems.length ? audit.problems.length + " 条问题" : detail);
+  step.push({ step: label, status: audit.problems.length ? "quality-fail" : "pass", detail, ms, slow: false });
 
-/**
- * 目的：批处理脚本（`.cmd` / `.bat`）里第一处非 ASCII 字节所在的行号（1 起）；全 ASCII 给 0。
- * 为什么是硬约束：cmd 按**控制台代码页**解释批处理字节（实测 936），UTF-8 的多字节序列会被读成行尾的一部分，
- * 把它**下一行整行吞掉**——中文 `rem` 注释曾让 `if not exist build mkdir build` 整行消失，模块构建直接失败。
- * 这不是"注释不好看"：换成 ASCII 之外没有稳妥解（`chcp 65001` 在管道 stdio 下救不了）。
- * 返回 { line, bom }：bom 说明文件以 UTF-8 BOM 开头（cmd 会把首行读成一条不存在的命令）。
- */
-function batchNonAscii(buf) {
-  const bom = buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf;
-  let line = 1;
-  for (const b of buf) {
-    if (b === 0x0a) line++;
-    else if (b > 0x7f) return { line, bom };
-  }
-  return { line: 0, bom };
-}
-
-/**
- * 结构审查：仓库里的批处理脚本只允许 ASCII（判据见 batchNonAscii）。
- * 跳过工具链与产物目录，以及端到端夹具（`root/` 是每次从产品根复制的生成物，不是仓库内容）。
- */
-function batchScriptProblems() {
-  const problems = [];
-  // 只扫**仓库内容**：工具链、产物、运行期记录与端到端夹具都不是仓库的一部分。
-  const SKIP = new Set([
-    ".git", "node_modules", "platform", "target", ".tools", ".vm",
-    ".home", "session", "logs", "runtimes", "mutants.out", "mutants.out.old",
-  ]);
-  const walk = (dir) => {
-    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-      const p = path.join(dir, e.name);
-      const r = normPath(path.relative(ROOT, p));
-      if (e.isDirectory()) {
-        if (SKIP.has(e.name) || r === "tests/cross-platform/e2e/root" || r.startsWith("tests/cross-platform/e2e/root/")) continue;
-        walk(p);
-        continue;
-      }
-      if (!/\.(cmd|bat)$/i.test(e.name)) continue;
-      const hit = batchNonAscii(fs.readFileSync(p));
-      if (hit.bom) {
-        problems.push(r + " 以 UTF-8 BOM 开头（cmd 会把首行读成不存在的命令）：批处理脚本只允许 ASCII，见 MODULE_SPEC 的「跨平台」");
-      }
-      if (hit.line) {
-        problems.push(
-          r + ":" + hit.line + " 含非 ASCII 字节（cmd 按代码页解释会吞掉下一行）：批处理脚本只允许 ASCII，见 MODULE_SPEC 的「跨平台」",
-        );
-      }
-    }
-  };
-  walk(ROOT);
-  return problems;
-}
-
-/**
- * 门禁解析器自测：**门禁自己也要被测**。这些函数决定红灯/绿灯，解析器一坏就是静默全绿
- * （尤其 cargo tree --duplicates 退出码恒为 0：解析不到重复不会有人发现）。用固定样例断言。
- * 判定与比对只有一处（本函数），新增解析器时在这里补一条。
- */
-function gateParserSelfTest() {
-  const bad = [];
-  const eq = (name, got, want) => {
-    const g = JSON.stringify(got);
-    const w = JSON.stringify(want);
-    if (g !== w) bad.push("门禁解析器自测失败：" + name + "：实际 " + g + "，期望 " + w);
-  };
-  eq("normPath 收 .. 并统一分隔符", normPath("tests/cross-platform/../helpers/probe.rs"), "tests/helpers/probe.rs");
-  eq("normPath 去 \\\\?\\ 前缀并收 ..", normPath("\\\\?\\tests\\..\\src\\main.rs"), "src/main.rs");
-  const rootFmt = ROOT_NORM + "src/x.rs";
-  eq(
-    "fmtDeviations 穿透 ANSI 颜色并按根归一",
-    [...fmtDeviations("\u001b[1mDiff in " + rootFmt + ":3:\u001b[0m\nDiff in " + rootFmt + ":9:\n")],
-    ["src/x.rs"],
-  );
-  eq(
-    "clippyLints 从文档锚点取名并归一连字符",
-    clippyLints("...rust-clippy/master/index.html#too_many_arguments...\n...rust-clippy/master/index.html#too-many-arguments..."),
-    { too_many_arguments: 2 },
-  );
-  eq(
-    "checkWarnings 跳过 generated N warnings 汇总行",
-    checkWarnings("warning: unused import\nwarning: solomni (bin) generated 1 warning\nwarning: dead code\n"),
-    2,
-  );
-  eq("duplicateCrates 去重并按名排序", duplicateCrates("serde v1.0.1\nserde v1.0.2\nfoo v0.1.0\n"), ["foo", "serde"]);
-  eq(
-    "cargoCounts 多目标求和并拿到 ignored",
-    cargoCounts(
-      "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n" +
-        "test result: FAILED. 1 passed; 2 failed; 4 ignored; 0 measured; 0 filtered out\n",
-    ),
-    { passed: 4, failed: 2, ignored: 4, resultLines: 2 },
-  );
-  eq("skipsIn 只认行首的 [探针]", skipsIn("ok\n[探针] 环境不允许\n其它 [探针] 出现在中间\n"), ["[探针] 环境不允许"]);
-  eq("linkValueProblem 放过 https 链接", linkValueProblem("winlibs.upstream.asset", "https://x/y.zip"), null);
-  eq("linkValueProblem 放过 64 位校验值（大小写都行）", linkValueProblem("a.b.sha256", "D5DBAFC4".repeat(8)), null);
-  eq("linkValueProblem 拒非十六进制校验值", /校验值必须/.test(linkValueProblem("a.b.sha256", "d5db")), true);
-  eq("linkValueProblem 拒裸 http（并指到 .sha256 写法）", /https/.test(linkValueProblem("a.b", "http://x")), true);
-  eq("batchNonAscii 放过纯 ASCII 脚本", batchNonAscii(Buffer.from("@echo off\r\necho OK\r\n")), { line: 0, bom: false });
-  eq("batchNonAscii 报出非 ASCII 所在行", batchNonAscii(Buffer.from("@echo off\nrem 中文\necho OK\n")), { line: 2, bom: false });
-  eq("batchNonAscii 认 UTF-8 BOM", batchNonAscii(Buffer.from([0xef, 0xbb, 0xbf, 0x40])).bom, true);
-  eq("batchNonAscii 非 ASCII 在首行时不误算行号", batchNonAscii(Buffer.from("echo 中\n")).line, 1);
-  return bad;
-}
-/** 工具缺失 = env-skip（不静默算过）。 */
-function toolAvailable(sub) {
-  return sh("cargo", [sub, "--version"]).code === 0;
-}
-
-/** 结构审查（纯文件分析，不起进程）：代码↔文档结构、目标登记、孤儿测试文件、缺口账、注释契约、依赖方向。 */
-function structureAudit() {
-  const problems = [];
-  const BT = String.fromCharCode(96);
-  const toml = fs.readFileSync(path.join(ROOT, "Cargo.toml"), "utf8");
-  const targets = [];
-  for (const block of toml.split(/\[\[test\]\]/).slice(1)) {
-    const name = (block.match(/^\s*name\s*=\s*"([^"]+)"/m) || [])[1];
-    const p = (block.match(/^\s*path\s*=\s*"([^"]+)"/m) || [])[1];
-    if (!name || !p) { problems.push("Cargo.toml 有 [[test]] 缺 name 或 path"); continue; }
-    if (!fs.existsSync(path.join(ROOT, p))) problems.push("测试目标 " + name + " 的入口不存在：" + p);
-    targets.push({ name, entry: path.join(ROOT, p) });
-  }
-  if (!targets.length) problems.push("Cargo.toml 没有登记任何 [[test]] 目标");
-
-  const reachable = new Set();
-  const walk = (file) => {
-    const abs = path.resolve(file);
-    if (reachable.has(abs) || !fs.existsSync(abs)) return;
-    reachable.add(abs);
-    const dir = path.dirname(abs);
-    const re = /(?:#\[path\s*=\s*"([^"]+)"\]\s*)?(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+([A-Za-z_][A-Za-z0-9_]*)\s*;/g;
-    let m;
-    while ((m = re.exec(fs.readFileSync(abs, "utf8")))) {
-      const mod = m[2];
-      if (!mod) continue;
-      const cands = m[1]
-        ? [path.resolve(dir, m[1])]
-        : [path.join(dir, mod + ".rs"), path.join(dir, mod, "mod.rs")];
-      for (const c of cands) if (fs.existsSync(c)) { walk(c); break; }
-    }
-  };
-  for (const t of targets) walk(t.entry);
-
-  const allTestFiles = [];
-  const collect = (d) => {
-    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-      const p = path.join(d, e.name);
-      if (e.isDirectory()) collect(p);
-      else if (e.name.endsWith(".rs")) allTestFiles.push(p);
-    }
-  };
-  collect(path.join(ROOT, "tests"));
-  for (const f of allTestFiles) {
-    if (!reachable.has(path.resolve(f))) {
-      problems.push("孤儿测试文件（没有任何测试目标引用它）：" + path.relative(ROOT, f).replace(/\\/g, "/"));
-    }
-  }
-
-  const rel = (f) => path.relative(ROOT, f).replace(/\\/g, "/");
-  for (const f of GAP_FILES) {
-    if (!fs.existsSync(f)) { problems.push("缺缺口账：" + rel(f)); continue; }
-    const blocks = fs.readFileSync(f, "utf8").split(/^\s*-\s*id:/m).slice(1);
-    blocks.forEach((b, i) => {
-      for (const key of ["scope", "level", "why", "how", "accept", "blocked_by"]) {
-        if (!new RegExp("^\\s+" + key + ":", "m").test(b)) problems.push(rel(f) + " 第 " + (i + 1) + " 条缺口缺 " + key);
-      }
-    });
-  }
-
-  // 单元地图与磁盘**双向一致**（`docs/<单元>/unit-map.md` 是各单元逐文件职责的唯一权威；
-  // 表现层两个渠道各一份。所有地图文件的行合成一张表，再与磁盘比对）：
-  // ① 每行第一格是仓库根相对路径（src/…），必须存在；② src/ 下每个 .rs 都要在**某一张**地图里有一行
-  // （src/tests/** 归测试分区、纯 mod 声明的目录入口不要求逐行列出）。
-  // 为什么机器查：这张表逐文件写着职责，人手维护必然漂移（曾出现表错位与整族文件漏记）。
-  const mapFiles = [];
-  (function collectMaps(d) {
-    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-      const p = path.join(d, e.name);
-      if (e.isDirectory()) collectMaps(p);
-      else if (e.name === "unit-map.md") mapFiles.push(p);
-    }
-  })(path.join(ROOT, "docs"));
-  if (!mapFiles.length) problems.push("找不到任何单元地图（docs/**/unit-map.md）");
-  const mapRows = [];
-  for (const f of mapFiles) {
-    for (const m of fs.readFileSync(f, "utf8").matchAll(new RegExp("^\\| " + BT + "([^" + BT + "]+)" + BT + " \\|", "gm"))) mapRows.push(m[1]);
-  }
-  const seenRows = new Set();
-  for (const r of mapRows) {
-    if (seenRows.has(r)) problems.push("单元地图有重复行：" + r);
-    seenRows.add(r);
-    if (!fs.existsSync(path.join(ROOT, r))) problems.push("单元地图引用的文件不存在：" + r);
-  }
-  // 目录入口：只声明模块 / 重导出（不定义任何条目）的文件不必逐行入册。
-  const isBarrel = (abs) => !/^(pub(\([^)]*\))? )?(fn|struct|enum|impl|trait|const|static|type|macro_rules!) /m.test(fs.readFileSync(abs, "utf8"));
-  const collectSrc = (d) => {
-    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-      const p = path.join(d, e.name);
-      if (e.isDirectory()) { collectSrc(p); continue; }
-      if (!e.name.endsWith(".rs")) continue;
-      const r = rel(p);
-      if (r.startsWith("src/tests/")) continue;
-      if (e.name === "mod.rs" && isBarrel(p)) continue;
-      if (!seenRows.has(r)) problems.push("src 下的文件没进单元地图：" + r);
-    }
-  };
-  collectSrc(path.join(ROOT, "src"));
-  // 代码注释里的文档引用（docs/**.md）必须存在：注释也是长期文档的一部分（AGENTS.md 四）。
-  const checkCodeDocRefs = (d) => {
-    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-      const p = path.join(d, e.name);
-      if (e.isDirectory()) { checkCodeDocRefs(p); continue; }
-      if (!e.name.endsWith(".rs")) continue;
-      for (const m of fs.readFileSync(p, "utf8").matchAll(/docs\/[A-Za-z0-9_./-]+\.md/g)) {
-        if (!fs.existsSync(path.join(ROOT, m[0]))) problems.push(rel(p) + " 注释引用的文档不存在：" + m[0]);
-      }
-    }
-  };
-  checkCodeDocRefs(path.join(ROOT, "src"));
-  // 注释契约（ARCHITECTURE.md 十）：判定与棘轮比对只有一处——run-hygiene.js 的 scanCommentContract
-  // 与 compareContract。棘轮**只减不增**：新文件零容忍（快照里没有 = 从 0 起算），老文件同类变多也是新增；
-  // 变少 = 应销账，同样硬失败（收紧只能往下，见 --tighten）。
-  const { scanCommentContract, compareContract, ratchetSelfTest, commentLexerSelfTest, semanticSelfTest } = require("./run-hygiene.js");
-  const COMMENT_BASELINE = path.join(ROOT, "tests", "comment-baseline.json");
-  const contractNow = scanCommentContract().byFileRule;
-  if (!fs.existsSync(COMMENT_BASELINE)) {
-    problems.push("缺注释契约快照：tests/comment-baseline.json（建它：node run-hygiene.js --tighten）");
-  } else {
-    const baselineRaw = JSON.parse(fs.readFileSync(COMMENT_BASELINE, "utf8"));
-    delete baselineRaw._comment;
-    const { added, stale } = compareContract(contractNow, baselineRaw);
-    for (const a of added) problems.push("注释契约新增违规（棘轮只减不增）：" + a);
-    for (const s of stale) problems.push("注释契约快照应销账（现在变少了）：" + s + "（收紧：node run-hygiene.js --tighten）");
-  }
-  for (const b of ratchetSelfTest()) problems.push("棘轮自测失败：" + b);
-  for (const b of commentLexerSelfTest()) problems.push("注释词法自测失败：" + b);
-  for (const b of semanticSelfTest()) problems.push("语义卫生自测失败：" + b);
-  // 结构审查：**跨平台字面量完整性**——平台专属代码本地不编译（unix 的 #[cfg] 在 Windows 上不存在，
-  // 反之亦然），漏字段这类错只在别的平台炸。这里按文本检查：每个 FenceSpec 字面量都要写全字段
-  // （`ro` 与 `rw` 同层），本地就能抓住 CI 才会暴露的那类问题。
-  const checkFenceSpecLiterals = (dir) => {
-    const walk = (d) => {
-      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-        const p = path.join(d, e.name);
-        if (e.isDirectory()) { walk(p); continue; }
-        if (!e.name.endsWith(".rs")) continue;
-        const text = fs.readFileSync(p, "utf8");
-        const lines = text.split(/\r?\n/);
-        lines.forEach((line, i) => {
-          // 只认**字面量**：排除 `struct FenceSpec {` / `impl FenceSpec {` 与函数签名（含 `->`）。
-          const t = line.trim();
-          if (!t.endsWith("FenceSpec {") || t.includes("->")) return;
-          if (/^(pub\s+)?(struct|enum|impl|fn)\b/.test(t)) return;
-          // 字面量以单独一行 `}` 或 `};` 收尾：在这之前必须出现 ro。
-          let end = i + 1;
-          while (end < lines.length && !/^\s*\};?\s*$/.test(lines[end])) end++;
-          const body = lines.slice(i + 1, end).join("\n");
-          if (!/\bro:/.test(body)) {
-            problems.push(rel(p) + ":" + (i + 1) + " 的 FenceSpec 字面量缺 ro（平台专属代码本地不编译，CI 才会炸）");
-          }
-        });
-      }
-    };
-    walk(dir);
-  };
-  checkFenceSpecLiterals(path.join(ROOT, "src"));
-
-  // 批处理脚本只允许 ASCII：cmd 按代码页解释字节，非 ASCII 注释会吞掉下一行（这种错只在中文
-  // Windows 上炸，本机与英文 CI runner 都照不出来，所以只能按文本挡）。
-  for (const p of batchScriptProblems()) problems.push(p);
-
-  // 平台专属文件本地不编译（tests/<平台>/main.rs 首行是 #![cfg(target_os = …)]）：
-  // 常量名写串了（macOS 探针里写 Linux 的标记）只在那个平台上炸。按文本挡住这一对。
-  const crossPlatformMarks = [
-    ["tests/macos", "RULES_REJECTED_MARK", "Linux 的标记出现在 macOS 探针里"],
-    ["tests/linux", "PROFILE_REJECTED_MARK", "macOS 的标记出现在 Linux 探针里"],
-  ];
-  for (const [dir, needle, why] of crossPlatformMarks) {
-    const abs = path.join(ROOT, dir);
-    if (!fs.existsSync(abs)) continue;
-    const walkMarks = (d) => {
-      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-        const p = path.join(d, e.name);
-        if (e.isDirectory()) { walkMarks(p); continue; }
-        if (!e.name.endsWith(".rs")) continue;
-        fs.readFileSync(p, "utf8")
-          .split(/\r?\n/)
-          .forEach((line, i) => {
-            if (line.includes(needle) && !line.trim().startsWith("//")) {
-              problems.push(rel(p) + ":" + (i + 1) + " " + why + "（本地不编译，CI 才会炸）");
-            }
-          });
-      }
-    };
-    walkMarks(abs);
-  }
-
-  // 门禁解析器自测：门禁自己也要被测（解析器一坏就是静默全绿，见 gateParserSelfTest）。
-  for (const b of gateParserSelfTest()) problems.push(b);
-  for (const b of outsideSelfTest()) problems.push(b);
-  // #[ignore] 一律不许：跳过必须显式、可判（进缺口账或 env-skip），不能用测试框架的 ignore 藏起来。
-  // 与报告里的 ignored 计数双保险（见 main 的 L1 与平台目标判定）。
-  for (const d of [path.join(ROOT, "src"), path.join(ROOT, "tests")]) {
-    const scanIgnore = (dir) => {
-      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-        const p = path.join(dir, e.name);
-        if (e.isDirectory()) { scanIgnore(p); continue; }
-        if (!e.name.endsWith(".rs")) continue;
-        fs.readFileSync(p, "utf8").split(/\r?\n/).forEach((line, i) => {
-          if (/^\s*#\[ignore/.test(line)) problems.push("#[ignore] 被禁止（跳过要如实记账，不能用框架 ignore）：" + rel(p) + ":" + (i + 1));
-        });
-      }
-    };
-    scanIgnore(d);
-  }
-
-
-
-  // ---------- 文档与配置的真相源比对 ----------
-  // 为什么机器查：这些"某份文档列出另一处的清单"的段落，人一定会忘记同步。
-  // 三处比对：① 提示词键表 ↔ prompts/**；② systools/** ↔ 文档是否提到；③ 根 *.md ↔ AGENTS.md 路由表。
-
-  // ① 提示词键表 ↔ 册子：docs/prompt/prompts.md 的「结构与键」是"每份文件里有什么键"的唯一权威。
-  const promptsDoc = path.join(ROOT, "docs", "prompt", "prompts.md");
-  const promptsRoot = path.join(ROOT, "prompts");
-  if (fs.existsSync(promptsDoc) && fs.existsSync(promptsRoot)) {
-    const stated = new Map(); // 文件（相对 prompts/）→ 表里提到的顶层键
-    let tableFile = null;
-    for (const line of fs.readFileSync(promptsDoc, "utf8").split(/\r?\n/)) {
-      if (!line.trim().startsWith("|")) continue;
-      const cells = line.split("|").map((c) => c.trim());
-      if (cells.length < 4) continue;
-      if (/^[-: ]+$/.test(cells[1]) && /^[-: ]+$/.test(cells[2])) continue; // 分隔行
-      const cell = cells[1].replace(/`/g, "").trim();
-      if (cell) tableFile = cell;
-      if (!tableFile || !tableFile.endsWith(".yaml")) continue;
-      if (!stated.has(tableFile)) stated.set(tableFile, new Set());
-      for (const m of cells[2].matchAll(/`([A-Za-z_][A-Za-z0-9_]*)/g)) stated.get(tableFile).add(m[1]);
-    }
-    const topKeys = (abs) =>
-      new Set(
-        fs.readFileSync(abs, "utf8").split(/\r?\n/)
-          .map((l) => { const m = l.match(/^([A-Za-z_][A-Za-z0-9_]*):/); return m && m[1]; })
-          .filter(Boolean),
-      );
-    for (const [file, keys] of stated) {
-      const abs = path.join(promptsRoot, file);
-      if (!fs.existsSync(abs)) { problems.push("提示词键表列了不存在的文件：" + file); continue; }
-      const top = topKeys(abs);
-      for (const k of keys) if (!top.has(k)) problems.push("提示词键表里的键已不存在：" + file + " 的 " + k);
-      for (const k of top) if (!keys.has(k)) problems.push("提示词的键没进键表：" + file + " 的 " + k + "（docs/prompt/prompts.md「结构与键」）");
-    }
-    const walkPrompts = (d) => {
-      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-        const p = path.join(d, e.name);
-        if (e.isDirectory()) { walkPrompts(p); continue; }
-        if (!e.name.endsWith(".yaml")) continue;
-        const relf = path.relative(promptsRoot, p).replace(/\\/g, "/");
-        if (!stated.has(relf)) problems.push("提示词册的文件没进键表：" + relf);
-      }
-    };
-    walkPrompts(promptsRoot);
-  }
-
-  // ② systools/** ↔ 文档：每张真相源表都要在门户或细则里被点名（新增表不能只落在盘上）。
-  const systoolsDir = path.join(ROOT, "systools");
-  if (fs.existsSync(systoolsDir)) {
-    const tablesDoc = ["SYSTOOL.md", "docs/tools/tools-and-roles.md"]
-      .map((f) => { const abs = path.join(ROOT, f); return fs.existsSync(abs) ? fs.readFileSync(abs, "utf8") : ""; })
-      .join("\n");
-    for (const e of fs.readdirSync(systoolsDir)) {
-      if (!e.endsWith(".yaml")) continue;
-      if (!tablesDoc.includes(e)) problems.push("systools/" + e + " 没被 SYSTOOL.md 或 docs/tools/tools-and-roles.md 提到（新增真相源表要进门户）");
-    }
-  }
-
-  // ④ 外部连接台账 ↔ 消费点：links.yaml 的键与代码里 link(...) 的引用一一对应。
-  // 为什么机器查：台账多个没人用的键 = 死数据；少一个被引用的键 = 运行期才炸（env.js 是引导层，炸在这里没得救）。
-  const linksFile = path.join(ROOT, "links.yaml");
-  const linkDomains = ["rustup", "winlibs", "release", "guest", "smbd", "toolchain"];
-  if (!fs.existsSync(linksFile)) {
-    problems.push("缺外部连接台账：links.yaml");
-  } else {
-    const declared = new Map();
-    for (const raw of fs.readFileSync(linksFile, "utf8").split(/\r?\n/)) {
-      const line = raw.trim();
-      if (!line || line.startsWith("#")) continue;
-      const m = line.match(/^([A-Za-z0-9_.-]+):\s*(\S+)\s*$/);
-      if (!m) { problems.push("links.yaml 不是扁平的 键: 值：" + raw); continue; }
-      const key = m[1];
-      const bad = linkValueProblem(key, m[2]);
-      if (bad) problems.push(bad);
-      if (!linkDomains.includes(key.split(".")[0])) problems.push("links.yaml 的域不在白名单（" + linkDomains.join(" / ") + "）：" + key);
-      if (declared.has(key)) problems.push("links.yaml 重复键：" + key);
-      declared.set(key, m[2]);
-    }
-    // 校验值必须与真实存在的链接成对：写成孤儿键 = 它守护的那条连接根本不存在。
-    for (const [k, v] of declared) {
-      if (!k.endsWith(".sha256")) continue;
-      const base = k.slice(0, -".sha256".length);
-      if (!declared.has(base) || !/^https:\/\//.test(declared.get(base) || "")) {
-        problems.push("links.yaml 的校验值没有对应的链接键：" + k + "（应为 " + base + " 的 .sha256）");
-      }
-    }
-    const used = new Set();
-    const scanLinkUses = (abs) => {
-      if (!fs.existsSync(abs)) return;
-      for (const m of fs.readFileSync(abs, "utf8").matchAll(/\blink\("([A-Za-z0-9_.-]+)"\)/g)) used.add(m[1]);
-    };
-    // 消费点：环境层（rustup 安装）与依赖清单的 source（产品侧下载源都在 dependencies.yaml；
-    // release:<tag>/<资产> 走 release.base，不在这里当键）。
-    scanLinkUses(path.join(ROOT, "env.js"));
-    scanLinkUses(path.join(ROOT, "toolchains.js"));
-    const depsFile = path.join(ROOT, "dependencies.yaml");
-    if (fs.existsSync(depsFile)) {
-      for (const m of fs.readFileSync(depsFile, "utf8").matchAll(/^\s*source:\s*([A-Za-z0-9_.:/-]+)\s*$/gm)) {
-        if (!m[1].includes(":")) used.add(m[1]);
-      }
-    }
-    const walkSrc = (d) => {
-      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-        const p = path.join(d, e.name);
-        if (e.isDirectory()) walkSrc(p);
-        else if (e.name.endsWith(".rs")) scanLinkUses(p);
-      }
-    };
-    const srcDir = path.join(ROOT, "src");
-    if (fs.existsSync(srcDir)) walkSrc(srcDir);
-    // 校验值跟着它守护的那条链接一起被消费：代码按 `<源>.sha256` 取（不逐条写 link()），
-    // 所以"基础链接有人用"就等于"它的校验值有人用"。
-    const consumed = new Set(used);
-    for (const k of declared.keys()) {
-      if (!k.endsWith(".sha256")) continue;
-      if (used.has(k.slice(0, -".sha256".length))) consumed.add(k);
-    }
-    for (const k of used) if (!declared.has(k)) problems.push("links.yaml 缺被引用的键：" + k);
-    for (const k of declared.keys()) if (!consumed.has(k)) problems.push("links.yaml 的键没有消费点（死数据）：" + k);
-  }
-
-  // ⑤ 依赖清单的校验值：写了就必须是 64 位十六进制（与 links.yaml 同一口径）；不写 = 没 pin（`latest` 源只能这样）。
-  const depsLedger = path.join(ROOT, "dependencies.yaml");
-  if (fs.existsSync(depsLedger)) {
-    fs.readFileSync(depsLedger, "utf8").split(/\r?\n/).forEach((line, i) => {
-      const m = line.match(/^\s+sha256:\s*(\S+)\s*$/);
-      if (m && !/^[a-f0-9]{64}$/i.test(m[1])) problems.push("dependencies.yaml:" + (i + 1) + " 的 sha256 必须是 64 位十六进制");
-    });
-  }
-
-
-  // ---------- 依赖方向门禁 ----------
-  // 权威：AGENTS.md「核心约束」（按业务功能垂直切分、业务之间通过 API 契约协作）与
-  // 判据：ARCHITECTURE.md §一「分层与依赖方向」与 §九.7「依赖方向门禁」；豁免清单在 tests/dependency-baseline.json。
-  // 三条规则：① 业务/机制层不得反向依赖 adapters / presentation；
-  //          ② presentation 只经入站能力面（core::api）驱动，不碰端口与内部模块；
-  //          ③ 业务层内部不得成环（按强连通分量判定）。
-  // 依赖方向的现状违规进 tests/dependency-baseline.json；**条目一旦不再成立必须删除**（过期即失败）——
-  // 这是"每拆一个分区就销一次账"的机器判据，不靠人看。
-  const depBaselineFile = path.join(ROOT, "tests", "dependency-baseline.json");
-  let depBaseline = null;
-  try {
-    depBaseline = JSON.parse(fs.readFileSync(depBaselineFile, "utf8"));
-  } catch (e) {
-    problems.push("依赖方向：基线不可读或不是合法 JSON：" + rel(depBaselineFile) + "（" + e.message + "）");
-  }
-
-  if (depBaseline) {
-    // 模块级 `#[cfg(test)] mod tests { … }` 不是生产依赖边，剔除；
-    // `#[cfg(test)]` 加在函数上的保留（它是这个文件里真实存在的一处代码）。
-    const stripTestModules = (text) => {
-      const lines = text.split(/\r?\n/);
-      const out = [];
-      for (let i = 0; i < lines.length; i++) {
-        if (/^\s*#\[cfg\(test\)\]\s*$/.test(lines[i])) {
-          let j = i + 1;
-          while (j < lines.length && lines[j].trim() === "") j++;
-          if (j < lines.length && /^\s*(pub\s+)?mod\s+\w+/.test(lines[j])) {
-            let k = j;
-            while (k < lines.length && !/^\}/.test(lines[k])) k++;
-            i = k;
-            continue;
-          }
-        }
-        out.push(lines[i]);
-      }
-      return out.join("\n");
-    };
-    // 归一深度：能力取「层 + 能力 + 子模块」三级
-    // ——后者要能区分 ::api（唯一合法入口）与 ::domain / ::ports（内部）。
-    // 归一只为让基线稳定：同一依赖换个更细的写法不该让账本跳动。
-    const normTarget = (full) => {
-      const parts = full.split("::");
-      const depth = parts[0] === "capabilities" ? 3 : 2;
-      return "crate::" + parts.slice(0, Math.min(depth, parts.length)).join("::");
-    };
-    const LAYER_OF = (r) => {
-      // 前端（交付机制）：各渠道一个顶层目录；不是业务能力。
-      if (r.startsWith("src/presentation/")) return "presentation";
-      // 程序入口层：组合根 + 机器可读探针 + 围栏守门进程（第二个程序入口）+ 入口层共用机制。
-      // 它依赖所有人，**任何人都不许依赖它**。
-      if (
-        r === "src/main.rs" ||
-        r.startsWith("src/entry/") ||
-        r.startsWith("src/diagnostics/") ||
-        r.startsWith("src/guard/")
-      )
-        return "entry";
-      if (r.startsWith("src/kernel/")) return "kernel";
-      if (r.startsWith("src/capabilities/")) return "capabilities";
-      if (r.startsWith("src/tests/")) return "tests";
-      if (r === "src/main.rs") return "main";
-      return null;
-    };
-    // 层 → 它不得引用的层。端口由能力定义、它的 detail（与 kernel 的机制实现）实现，永不反向。
-    const FORBIDDEN = {
-      // kernel 在最底层：无领域语义的机制，**不依赖任何人**（它的实现住在自己的 detail/）。
-      kernel: ["capabilities", "presentation", "entry"],
-      // 能力（含协调业务 conductor）是业务层：不反向依赖呈现层或入口层。
-      capabilities: ["presentation", "entry"],
-    };
-
-    const rsFiles = [];
-    const collectRs = (d) => {
-      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-        const p = path.join(d, e.name);
-        if (e.isDirectory()) collectRs(p);
-        else if (e.name.endsWith(".rs")) rsFiles.push(p);
-      }
-    };
-    collectRs(path.join(ROOT, "src"));
-
-    const reverse = new Set();
-    const presentation = new Set();
-    const apiOnly = new Set();
-    // 给别能力的类型写 impl、domain 里引端口。
-    const foreignImpl = new Set();
-    const domainPorts = new Set();
-    const apiPorts = new Set();
-    // 呈现层两个渠道（cli / web）互不依赖：有共享层就等于有隐式契约。
-    const channelCross = new Set();
-    const coreGraph = {};
-    for (const abs of rsFiles) {
-      const f = rel(abs);
-      const layer = LAYER_OF(f);
-      if (layer === null) {
-        // 新分区建目录时必须先归层，否则它会绕过门禁——**不留静默空洞**。
-        problems.push("依赖方向：未分类的源码目录（门禁需要先把它归层）：" + f);
-        continue;
-      }
-      if (layer === "tests" || layer === "main") continue;
-      const text = stripTestModules(fs.readFileSync(abs, "utf8"));
-      for (const m of text.matchAll(/crate::([a-z_][a-z0-9_]*(?:::[a-z_][a-z0-9_]*)*)/g)) {
-        const t = normTarget(m[1]);
-        // 前端是两个顶层目录（cli / web），它们同属呈现层。
-      const targetLayer = t.split("::")[1];
-        // 渠道互不依赖：呈现层的文件不得引用**另一个渠道**（各自一个子目录，没有共享层）。
-        if (layer === "presentation" && t.startsWith("crate::presentation::")) {
-          const own = f.startsWith("src/presentation/cli/") ? "cli" : f.startsWith("src/presentation/web/") ? "web" : null;
-          const other = t.split("::")[2];
-          if (own && other && own !== other) channelCross.add(f + " -> " + t);
-        }
-        if ((FORBIDDEN[layer] || []).includes(targetLayer)) reverse.add(f + " -> " + t);
-        // 呈现层只认入站能力面：某个能力的 ::api（协调业务 conductor 也不例外）。
-        const presOk = t.startsWith("crate::capabilities::") && t.endsWith("::api");
-        if (layer === "presentation" && !presOk && targetLayer !== "presentation") {
-          presentation.add(f + " -> " + t);
-        }
-        // 业务之间**只经对方的 `api`** 交流（R1）：`::ports` 是"对方与它自己 detail 之间的事"（R12），
-        // 跨能力引用一律不许；`::domain` / `::detail` 同样是实现。能力内部的互相引用不算"业务之间"。
-        if (layer === "capabilities" && targetLayer === "capabilities") {
-          const selfCap = f.split("/")[2];
-          const otherCap = t.split("::")[2];
-          if (otherCap && otherCap !== selfCap && !t.endsWith("::api")) apiOnly.add(f + " -> " + t);
-        }
-        // `domain/` 是**纯逻辑**：不得引用任何**能力端口**（自己的也不行，引了就不是纯的了）。
-        // kernel 的机制端口（`Log` / `HostProbe`）是全项目共享的机制接口（R12 例外），不在此列。
-        if (f.includes("/domain/") && t.startsWith("crate::capabilities::") && t.endsWith("::ports"))
-          domainPorts.add(f + " -> " + t);
-        // **端口只由定义它的能力持有**（R12）：任何非入口层引用别的能力的 `ports` 都是违规——
-        // 协调业务 `conductor` 也算，它不该拿着别人的端口替别人做 IO。
-        if (
-          layer !== "entry" &&
-          t.startsWith("crate::capabilities::") &&
-          t.endsWith("::ports") &&
-          t.split("::")[2] !== (layer === "capabilities" ? f.split("/")[2] : null)
-        ) {
-          apiOnly.add(f + " -> " + t);
-        }
-        // `api.rs` 是**入站用例面**：不得把**能力端口**再导出去。
-        // kernel 的机制端口（`Log` / `HostProbe`）是全项目共享的机制接口（R12 例外），不在此列。
-        if (f.endsWith("/api.rs") && t.startsWith("crate::capabilities::") && t.endsWith("::ports"))
-          apiPorts.add(f + " -> " + t);
-        // `::detail` 是**实现**：跨能力引用一律不许，只有入口层的组合根能构造它。
-        if (
-          layer !== "entry" &&
-          t.startsWith("crate::capabilities::") &&
-          t.endsWith("::detail") &&
-          t.split("::")[2] !== f.split("/")[2]
-        ) {
-          apiOnly.add(f + " -> " + t);
-        }
-        // 环的节点：能力用 capabilities/<名字>（协调业务与别的能力同处一张图）。
-        // 两者同处一张图，所以"能力级环"与"模块级环"一起被判定。
-        const selfNode = "capabilities/" + f.split("/")[2];
-        const otherNode =
-          targetLayer === "capabilities" ? "capabilities/" + t.split("::")[2] : null;
-        if (otherNode && otherNode !== selfNode) {
-          (coreGraph[selfNode] = coreGraph[selfNode] || new Set()).add(otherNode);
-        }
-      }
-      // 不许给**别的能力**的类型写 impl（R1）：这是另一种"互相引入"，`use` 边看不见它。
-      // 只认"路径直接写在 impl 行上"的形式（引用后写短名的情况由评审兜底）。
-      if (layer !== "entry") {
-        const selfCap = layer === "capabilities" ? f.split("/")[2] : null;
-        const foreignPaths = (s) =>
-          [...s.matchAll(/crate::([a-z_][a-z0-9_]*(?:::[a-z_][a-z0-9_]*)*)/g)]
-            .map((m) => normTarget(m[1]))
-            .filter((t2) => t2.startsWith("crate::capabilities::") && t2.split("::")[2] !== selfCap);
-        for (const line of text.split("\n")) {
-          if (!/^impl\b/.test(line)) continue;
-          // `impl Trait for Type` → 只看 **Type**（实现别人的 api trait 是正当的队列代理）；
-          // `impl Type` → 看 Type。
-          const forIdx = line.indexOf(" for ");
-          const traitPart = forIdx >= 0 ? line.slice(4, forIdx) : "";
-          const typePart = forIdx >= 0 ? line.slice(forIdx + 5) : line.slice(4);
-          for (const t2 of foreignPaths(typePart)) foreignImpl.add(f + " -> " + t2);
-          // trait 侧只在**显式引用了别人的 ports** 时才算违规（那是替别人实现端口，R12 不许）。
-          for (const t2 of foreignPaths(traitPart)) {
-            if (t2.endsWith("::ports")) foreignImpl.add(f + " -> " + t2);
-          }
-        }
-      }
-    }
-
-    // 强连通分量：> 1 个模块的分量 = 一个环。
-    const coreSccs = [];
+  const qualityFailed = step.steps.filter((s) => s.status === "quality-fail");
+  reportLib.write(
+    ROOT,
     {
-      const idx = {}, low = {}, on = {}, stack = [];
-      let counter = 0;
-      const visit = (v) => {
-        idx[v] = low[v] = counter++;
-        stack.push(v);
-        on[v] = true;
-        for (const w of coreGraph[v] || []) {
-          if (!(w in idx)) { visit(w); low[v] = Math.min(low[v], low[w]); }
-          else if (on[w]) low[v] = Math.min(low[v], idx[w]);
-        }
-        if (low[v] === idx[v]) {
-          const comp = [];
-          let w;
-          do { w = stack.pop(); on[w] = false; comp.push(w); } while (w !== v);
-          if (comp.length > 1) coreSccs.push(comp.sort());
-        }
-      };
-      for (const v of Object.keys(coreGraph)) if (!(v in idx)) visit(v);
-    }
-    const sortSccs = (list) => list.map((s) => s.slice().sort()).sort((a, b) => a.join(",").localeCompare(b.join(",")));
+      mode: scope === "structure" ? "structure" : "docs",
+      osKey: OS_KEY,
+      profile: PROFILE,
+      fenceLive: false,
+      doctor: null,
+      envSkips: [],
+      quality: { failed: qualityFailed.length, steps: qualityFailed.map((s) => ({ step: s.step, detail: s.detail })) },
+      globalGaps: [],
+      gaps: [],
+      timeouts: proc.timeouts,
+      failed: 0,
+      toolchain: reportLib.detectToolchain(proc),
+    },
+    step.steps,
+  );
 
-    // 每条规则比两次：**新增 = 失败；基线里已不成立 = 也失败**（强制销账）。
-    const compare = (name, actualList, baselineList, hint) => {
-      for (const a of actualList) {
-        if (!baselineList.includes(a)) problems.push("依赖方向：" + hint + "：" + a);
-      }
-      for (const b of baselineList) {
-        if (!actualList.includes(b)) {
-          problems.push("依赖方向：基线豁免已过期，请从 " + rel(depBaselineFile) + " 的 " + name + " 删除：" + b);
-        }
-      }
-    };
-    compare("reverse", [...reverse].sort(), depBaseline.reverse || [], "业务层不得反向依赖呈现层或入口层");
-    compare("presentation", [...presentation].sort(), depBaseline.presentation || [], "presentation 只能经各能力的 ::api 驱动");
-    compare("apiOnly", [...apiOnly].sort(), depBaseline.apiOnly || [], "业务之间只能经对方的 ::api（R1）；::domain / ::detail 是实现，跨能力一律不许碰");
-    compare("foreignImpl", [...foreignImpl].sort(), depBaseline.foreignImpl || [], "不得给别的能力的类型写 impl（R1：另一种互相引入）");
-    compare("domainPorts", [...domainPorts].sort(), depBaseline.domainPorts || [], "domain 是纯逻辑：不得引用任何 ports");
-    compare("apiPorts", [...apiPorts].sort(), depBaseline.apiPorts || [], "api 是入站用例面：不得把本能力的 ports 再导出去（R12）");
-    compare("channelCross", [...channelCross].sort(), depBaseline.channelCross || [], "呈现层的两个渠道（cli / web）互不依赖：不得引用对方");
-
-    const actualCycles = sortSccs(coreSccs);
-    const baselineCycles = sortSccs(depBaseline.coreCycles || []);
-    const fmtCycles = (l) => (l.length ? l.map((s) => "[" + s.length + "] " + s.join(", ")).join("；") : "（无）");
-    if (JSON.stringify(actualCycles) !== JSON.stringify(baselineCycles)) {
-      problems.push(
-        "依赖方向：业务层内部的环与基线不一致（分区拆出后请同步更新 " + rel(depBaselineFile) + " 的 coreCycles）：" +
-        "\n    实际：" + fmtCycles(actualCycles) +
-        "\n    基线：" + fmtCycles(baselineCycles)
-      );
-    }
+  const what = scope === "docs" ? "文档审查" : scope === "structure" ? "结构审查" : "文档审查 + 结构审查";
+  console.log("");
+  console.log("=== 测试汇总（" + what + "，报告见 target/test-report.json）===");
+  for (const s of step.steps) {
+    console.log("  " + s.status.padEnd(13) + " " + s.step.padEnd(24) + " " + (s.detail || "") + (s.ms ? "  [" + (s.ms / 1000).toFixed(1) + "s]" : ""));
   }
-
-  return { problems, targets: targets.map((t) => t.name), testFiles: allTestFiles.length };
+  if (qualityFailed.length) {
+    for (const s of qualityFailed) {
+      console.log("=== 质量详情：" + s.step + " ===");
+      console.log(s.detail || "");
+    }
+    console.log(markers.TEXT.REPORT_FAIL);
+    process.exit(1);
+  }
+  console.log(markers.TEXT.REPORT_OK);
+  console.log("[audit] 本次只跑" + what + "：代码门禁、三平台与 L4 未运行；CI 报告统一写 ci-report。");
 }
+
+// ---------- 覆盖率发现模式（手动，不进默认门禁） ----------
 
 /**
- * 文档审查（只查文档自身）：门户存在与链接、docs/ 下的 .md 链接、根 *.md ↔ AGENTS.md 路由表。
- * 只被文档变更影响：纯代码 PR 不碰这些文件，可以跳过。判据见 docs/testing/execution-ci.md。
- */
-function docsAudit() {
-  const problems = [];
-  const BT = String.fromCharCode(96);
-  const rel = (f) => path.relative(ROOT, f).replace(/\\/g, "/");
-  // 文档分层（AGENTS.md「文档分层与同步」）：门户引用 docs/ 下的细则，细则引用彼此——
-  // 两边都要真实存在。只查引用不查正文，避免把文档写法变成门禁。
-  // **相对解析**：链接按所在文件的目录解析（门户在根、细则在 docs/<领域>/），所以 docs/ 内部写错的同级引用也会被抓到。
-  const mdLinks = (text) => [...text.matchAll(/\]\(([^)#\s]+\.md)(?:#[^)]*)?\)/g)].map((m) => m[1]);
-  const checkDocLinks = (absFile, label) => {
-    const dir = path.dirname(absFile);
-    for (const ref of mdLinks(fs.readFileSync(absFile, "utf8"))) {
-      if (/^[a-z]+:/i.test(ref)) continue; // 外链不查
-      if (!fs.existsSync(path.resolve(dir, ref))) problems.push(label + " 引用的文档不存在：" + ref);
-    }
-  };
-  const portalFiles = ["README.md", "README_EN.md", "AGENTS.md", "ARCHITECTURE.md", "PRODUCT.md", "MODULE_SPEC.md", "SYSTOOL.md", "RUNTIME_SPEC.md", "REGISTRY_SPEC.md", "TESTING.md"];
-  for (const p of portalFiles) {
-    const abs = path.join(ROOT, p);
-    if (!fs.existsSync(abs)) { problems.push("缺门户文档：" + p); continue; }
-    checkDocLinks(abs, p);
-  }
-  const docsDir = path.join(ROOT, "docs");
-  if (fs.existsSync(docsDir)) {
-    const walkDocs = (d) => {
-      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-        const p = path.join(d, e.name);
-        if (e.isDirectory()) { walkDocs(p); continue; }
-        if (!e.name.endsWith(".md")) continue;
-        checkDocLinks(p, rel(p));
-      }
-    };
-    walkDocs(docsDir);
-  }
-  // 根 *.md ↔ AGENTS.md 路由表：新增根文档必须同时进路由表。
-  // 白名单只有 AGENTS.md 自己（路由表不列它）；出现不进路由表的临时工作清单时，在这里加名字并写明理由。
-  const rootDocAllow = ["AGENTS.md"];
-  const agentsDoc = path.join(ROOT, "AGENTS.md");
-  if (fs.existsSync(agentsDoc)) {
-    const agentsText = fs.readFileSync(agentsDoc, "utf8");
-    for (const e of fs.readdirSync(ROOT)) {
-      if (!e.endsWith(".md") || rootDocAllow.includes(e)) continue;
-      if (!agentsText.includes(BT + e + BT)) problems.push("根文档 " + e + " 没进 AGENTS.md 的文档路由表");
-    }
-  }
-  // 文档模板检查（模板与类型映射在 docs/templates/）：强制类型为空时只报不拦。
-  const gov = path.join(ROOT, "tests", "docs-gov.mjs");
-  if (fs.existsSync(gov)) {
-    const r = spawnSync(process.execPath, [gov, "--summary"], { cwd: ROOT, encoding: "utf8" });
-    if (r.stdout) process.stdout.write(r.stdout);
-    if (r.status !== 0) problems.push("文档模板不合规：见上方 docs-gov 输出");
-  }
-  // 生成段（平台验收状态等）：与代码常量 / 缺口账比对，不一致即失败。
-  const sync = path.join(ROOT, "tests", "docs-sync.mjs");
-  if (fs.existsSync(sync)) {
-    const r = spawnSync(process.execPath, [sync, "--check"], { cwd: ROOT, encoding: "utf8" });
-    if (r.stdout) process.stdout.write(r.stdout);
-    if (r.status !== 0) problems.push("生成段与来源不一致：跑 node tests/docs-sync.mjs --write");
-  }
-  return { problems };
-}
-
-/** 全量审查：文档审查 + 结构审查（本地 --docs 与全量入口的 T0 步骤用）。 */
-function auditAll() {
-  const d = docsAudit();
-  const s = structureAudit();
-  return { problems: [...d.problems, ...s.problems], targets: s.targets, testFiles: s.testFiles };
-}
-
-/**
- * 供应链门禁：已知 CVE（cargo audit）与许可证/禁用/来源策略（cargo deny，配置在 deny.toml）。
- * 工具缺失 = env-skip（离线开发机常见）；工具在但失败要分清"真的有问题"与"取不到数据"。
- */
-function supplyChainCheck() {
-  const wanted = [
-    { tool: "audit", args: ["audit", "--color", "never"], why: "已知 CVE" },
-    { tool: "deny", args: ["deny", "--color", "never", "check"], why: "许可证 / 禁用 / 来源" },
-  ];
-  const has = wanted.filter((w) => toolAvailable(w.tool));
-  if (!has.length) {
-    return {
-      status: "env-skip",
-      detail: "cargo-audit / cargo-deny 未安装（装：node setup-dev.js，落在项目内 .tools/）",
-      raw: null,
-    };
-  }
-  const missing = wanted.filter((w) => !has.includes(w)).map((w) => w.tool);
-  const ran = [];
-  const failed = [];
-  const skipped = [];
-  for (const w of has) {
-    const r = sh("cargo", w.args);
-    ran.push(w.tool);
-    if (r.code === 0) continue;
-    // 取不到 advisory 数据 / 连不上网 = 环境不允许（env-skip）；有确凿结论（CVE、许可证不合规）= 硬失败。
-    const findings = /(\d+ vulnerabilit|vulnerabilit(y|ies) found|advisories FAILED|licenses FAILED|bans FAILED|sources FAILED|error\[)/i;
-    const dataIssue = /(could not|couldn't|failed to) (fetch|connect|download)|connection (refused|reset)|dns|network|advisory.db|proxy|timed? ?out/i;
-    if (dataIssue.test(r.out) && !findings.test(r.out)) {
-      skipped.push(w.tool + "（取不到数据）");
-    } else {
-      failed.push(w.tool + "：" + ((r.error || "") + "（日志 " + r.log + "）"));
-    }
-  }
-  if (failed.length) return { status: "fail", detail: failed.join("；"), raw: null };
-  const parts = [];
-  if (ran.length) parts.push("通过：" + ran.join("、"));
-  if (missing.length) parts.push("未安装（env-skip）：" + missing.join("、"));
-  if (skipped.length) parts.push("取不到数据（env-skip）：" + skipped.join("、"));
-  return { status: parts.some((p) => p.startsWith("通过")) ? "pass" : "env-skip", detail: parts.join("；"), raw: null };
-}
-
-/**
- * 覆盖率发现模式（手动：node run-tests.js --coverage）：**只用来找盲区，不做通过判据、不设阈值**。
+ * 覆盖率发现模式（node run-tests.js --coverage）：**只用来找盲区，不做通过判据、不设阈值**。
  * 两个已知局限：① 平台 #[cfg] 在别的平台上根本不编译，覆盖率必须逐平台看；
  * ② 产品二进制（守门进程、L4 端到端）由本入口单独 cargo build，未插桩，进程内覆盖率不包含它们。
  */
 function runCoverage() {
-  if (!toolAvailable("llvm-cov")) {
+  if (!proc.toolAvailable("llvm-cov")) {
     console.log("[覆盖率] env-skip：未安装 cargo-llvm-cov。");
     console.log("  装：node setup-dev.js（cargo-llvm-cov + llvm-tools-preview 都落项目内）");
     process.exit(0);
   }
   // 缺 llvm-tools-preview 时 cargo-llvm-cov 会就地提示安装（非交互环境下自行往下走然后失败）：
   // 先问一句，缺就如实 env-skip，不把"没装组件"报成覆盖率失败。
-  const comp = sh("rustup", ["component", "list", "--installed"]);
+  const comp = proc.sh("rustup", ["component", "list", "--installed"]);
   if (comp.code === 0 && !/llvm-tools/.test(comp.out)) {
     console.log("[覆盖率] env-skip：缺 llvm-tools-preview 组件（装：node setup-dev.js）。");
     process.exit(0);
@@ -1165,7 +202,7 @@ function runCoverage() {
   const outDir = path.join(ROOT, "target", "coverage");
   fs.mkdirSync(outDir, { recursive: true });
   const args = ["llvm-cov", "--workspace", "--all-targets", "--text", "--output-dir", outDir];
-  const r = sh("cargo", args.concat(SERIAL ? ["--", "--test-threads=1"] : []));
+  const r = proc.sh("cargo", args.concat(opts.serial ? ["--", "--test-threads=1"] : []));
   console.log(r.out.trim().split(/\r?\n/).slice(-40).join("\n"));
   if (r.code !== 0 && /llvm-tools|component download failed|Proceed\?/i.test(r.out)) {
     console.log("[覆盖率] env-skip：缺 llvm-tools-preview 组件（装：node setup-dev.js）。");
@@ -1175,451 +212,71 @@ function runCoverage() {
   process.exit(r.code === 0 ? 0 : 1);
 }
 
-/**
- * 审查模式（--docs / --audit=docs|structure）：只跑纯文本审查，不跑 cargo、单元、平台目标、前端冒烟与 L4。
- * 复用 docsAudit / structureAudit 这一处权威，不复制检查逻辑；全程只读。
- * - all：文档审查 + 结构审查（本地纯文档任务）；
- * - docs：只查文档自身（CI 的 docs job）；
- * - structure：只查代码↔文档结构（CI 的 structure job）。
- * 判据见 docs/testing/execution-ci.md。
- */
-function runAudit(scope) {
-  const label = scope === "docs" ? "T0 文档审查" : scope === "structure" ? "T0 结构审查" : "T0 文档门禁";
-  const steps = [];
-  announce(label);
-  const audit = scope === "docs" ? docsAudit() : scope === "structure" ? structureAudit() : auditAll();
-  const ms = Date.now() - stepStart;
-  const detail = audit.problems.length
-    ? audit.problems.join("；")
-    : scope === "docs"
-      ? "文档检查通过"
-      : audit.targets.length + " 个目标 / " + audit.testFiles + " 个测试文件";
-  announceDone(audit.problems.length ? "失败" : "完成", audit.problems.length ? audit.problems.length + " 条问题" : detail);
-  steps.push({
-    step: label,
-    status: audit.problems.length ? "quality-fail" : "pass",
-    detail,
-    ms,
-    slow: false,
-  });
-  const qualityFailed = steps.filter((s) => s.status === "quality-fail");
-  const report = {
-    mode: scope === "structure" ? "structure" : "docs",
-    platform: process.platform,
-    arch: process.arch,
-    osKey: OS_KEY,
-    profile: PROFILE,
-    fenceLive: false,
-    doctor: null,
-    steps,
-    envSkips: [],
-    quality: {
-      failed: qualityFailed.length,
-      steps: qualityFailed.map((s) => ({ step: s.step, detail: s.detail })),
-    },
-    globalGaps: [],
-    gaps: [],
-    timeouts: [],
-    failed: 0,
-  };
-  fs.mkdirSync(path.dirname(REPORT), { recursive: true });
-  fs.writeFileSync(REPORT, JSON.stringify(report, null, 2));
+// ---------- 全量（整跑） ----------
 
-  const what = scope === "docs" ? "文档审查" : scope === "structure" ? "结构审查" : "文档审查 + 结构审查";
-  console.log("");
-  console.log("=== 测试汇总（" + what + "，报告见 target/test-report.json）===");
-  for (const s of steps) {
-    console.log("  " + s.status.padEnd(13) + " " + s.step.padEnd(24) + " " + (s.detail || "") + (s.ms ? "  [" + (s.ms / 1000).toFixed(1) + "s]" : ""));
-  }
-  if (qualityFailed.length) {
-    for (const s of qualityFailed) {
-      console.log("=== 质量详情：" + s.step + " ===");
-      console.log(s.detail || "");
-    }
-    console.log("TEST-REPORT-FAIL");
-    process.exit(1);
-  }
-  console.log("TEST-REPORT-OK");
-  console.log("[audit] 本次只跑" + what + "：代码门禁、三平台与 L4 未运行；CI 报告统一写 ci-report。");
-}
-
-function main() {
-  // 覆盖率发现模式：手动、不进门禁（判据与局限见 docs/testing/execution-ci.md）。
-  if (COVERAGE) {
-    runCoverage();
-    return;
-  }
-  // 审查模式：文档审查 / 结构审查 / 两者（不跑 cargo、单元、平台目标、前端冒烟与 L4）。
-  if (DOCS) {
-    runAudit("all");
-    return;
-  }
-  if (AUDIT_SCOPE) {
-    runAudit(AUDIT_SCOPE);
-    return;
-  }
+function runFull() {
   // 项目外缓存快照与上次崩溃残留清理（清零前先记，跑完再对）。
-  const outsideBefore = outsideSnapshot();
-  const tempSwept = sweepStaleTemp();
-  const steps = [];
-/** 记一步：用时自动带上（步骤对象不关心时间时也不用写两遍）。 */
-function pushStep(obj) {
-  steps.push(Object.assign({ ms: Date.now() - stepStart }, obj));
-}
-  // CI 前置步骤（门禁之外执行，如预编译装供应链工具）的墙钟由 workflow 经环境变量带进来，进报告，免得只能靠感觉。
+  const outsideBefore = outside.snapshot(ROOT);
+  const tempSwept = outside.sweepStaleTemp();
+  const ctx = makeCtx();
+  ctx.state.outsideBefore = outsideBefore;
+  ctx.state.tempSwept = tempSwept;
+
+  // CI 前置步骤（门禁之外执行）的墙钟由 workflow 经环境变量带进来，进报告，免得只能靠感觉。
   const preinstallMs = Number(process.env.SOLOMNI_CI_PREINSTALL_MS || 0);
   if (preinstallMs > 0) {
-    pushStep({ step: "CI 前置：供应链工具安装", status: "pass", ms: preinstallMs, detail: "在 run-tests 之前完成（CI 墙钟）", raw: null });
-  }
-  let doctor = null;
-  announce("cargo build");
-  console.log(FENCE_LIVE
-    ? "[安全性] 已开启真机围栏测试：会在本机写权限（本工作区及其每一层祖先目录 + 命令用到的解释器安装目录）并创建容器 profile；一次性环境（CI / VM）里才建议开"
-    : "[安全性] 安全模式：会改本机状态的测试已跳过（Windows 容器探针、端到端里的真实围栏写入）；要真跑加 --fence-live");
-  const build = sh("cargo", ["build", "--color", "never"].concat(PROFILE === "release" ? ["--release"] : []));
-  announceDone(build.code === 0 ? "完成" : "失败", build.code === 0 ? "" : build.log);
-  pushStep({
-    step: "cargo build",
-    status: build.code === 0 ? "pass" : "fail",
-    detail: build.code === 0 ? "" : (build.error || "") + " 日志：" + build.log,
-    raw: build.code === 0 ? null : build.out.slice(-800),
-  });
-  if (build.code === 0 && fs.existsSync(BIN)) {
-    const d = sh(BIN, ["--doctor"]);
-    try { doctor = JSON.parse(d.out.trim()); } catch { doctor = { error: d.out.slice(0, 400) }; }
+    step.push({ step: "CI 前置：供应链工具安装", status: "pass", ms: preinstallMs, detail: "在 run-tests 之前完成（CI 墙钟）", raw: null });
   }
 
-  // ---- T0：硬失败（编译 + 结构审查） ----
-  announce("T0 编译（--all-targets）");
-  const check = sh("cargo", ["check", "--all-targets", "--color", "never"]);
-  announceDone(check.code === 0 ? "完成" : "失败", check.code === 0 ? "" : check.log);
-  pushStep({
-    step: "T0 编译（--all-targets）",
-    status: check.code === 0 ? "pass" : "fail",
-    detail: check.code === 0 ? "" : (check.error || "") + " 日志：" + check.log,
-    raw: check.code === 0 ? null : check.out.slice(-800),
-  });
-
-  if (!SKIP_AUDIT) {
-    announce("T0 结构审查");
-    const audit = auditAll();
-    announceDone(
-      audit.problems.length ? "失败" : "完成",
-      audit.problems.length ? audit.problems.length + " 条问题" : audit.targets.length + " 个目标 / " + audit.testFiles + " 个测试文件"
-    );
-    pushStep({
-      step: "T0 结构审查",
-      status: audit.problems.length ? "quality-fail" : "pass",
-      detail: audit.problems.join("；"),
-      raw: null,
-    });
-  } else {
-    // CI 的 quality job：平台无关的结构审查已由独立 structure job 承担，避免三平台各跑一次。
-    console.log("[T0] 已跳过结构审查（--skip-audit）：由 CI 的 structure job 承担");
-  }
-
-  // ---- T0：四项零容忍硬失败（基线机制已删除，见 docs/testing/quality-isolation.md） ----
-  announce("T0 格式（fmt --check）");
-  if (!toolAvailable("fmt")) {
-    announceDone("env-skip", "cargo-fmt 未安装");
-    pushStep({ step: "T0 格式（fmt --check）", status: "env-skip", detail: "cargo-fmt 未安装：node setup-dev.js" });
-  } else {
-    const r = sh("cargo", ["fmt", "--all", "--", "--check", "--color", "never"]);
-    const files = [...fmtDeviations(r.out)];
-    const ok = r.code === 0 && !files.length;
-    announceDone(ok ? "完成" : "失败", ok ? "" : files.length + " 个文件有格式偏差");
-    pushStep({
-      step: "T0 格式（fmt --check）",
-      status: ok ? "pass" : "quality-fail",
-      detail: ok ? "" : "有格式偏差（跑 cargo fmt --all 后再提交）：" + files.join("、"),
-      raw: ok ? null : r.out.slice(-1200),
-    });
-  }
-
-  announce("T0 静态检查（clippy）");
-  if (!toolAvailable("clippy")) {
-    announceDone("env-skip", "cargo-clippy 未安装");
-    pushStep({ step: "T0 静态检查（clippy）", status: "env-skip", detail: "cargo-clippy 未安装：node setup-dev.js" });
-  } else {
-    // --keep-going：-D warnings 会让首个失败的单元中断调度；加上它所有目标单元都编译完，计数才可复现。
-    const r = sh("cargo", ["clippy", "--all-targets", "--all-features", "--keep-going", "--color", "never", "--", "-D", "warnings"]);
-    const got = clippyLints(r.out);
-    const total = Object.values(got).reduce((a, b) => a + b, 0);
-    const ok = r.code === 0 && total === 0;
-    announceDone(ok ? "完成" : "失败", ok ? "零告警" : total + " 处（" + Object.keys(got).join("、") + "）");
-    pushStep({
-      step: "T0 静态检查（clippy）",
-      status: ok ? "pass" : "quality-fail",
-      detail: ok ? "" : "clippy 有告警：" + Object.entries(got).map(([k, v]) => k + "=" + v).join("、") + "（设计取舍项要带理由 allow，见 docs/testing/quality-isolation.md）",
-      raw: ok ? null : r.out.slice(-1200),
-    });
-  }
-
-  announce("T0 编译告警");
-  {
-    const got = checkWarnings(check.out);
-    const ok = got === 0;
-    announceDone(ok ? "完成" : "失败", ok ? "零告警" : got + " 条");
-    pushStep({
-      step: "T0 编译告警",
-      status: ok ? "pass" : "quality-fail",
-      detail: ok ? "" : "rustc 告警 " + got + " 条（cargo check 的原文见日志）",
-      raw: ok ? null : check.out.slice(-1200),
-    });
-  }
-
-  // ---- T0：交叉类型检查（**开发机专属**：CI 由三平台矩阵各自原生编译 --all-targets 覆盖，这里不跑） ----
-  if (process.env.CI) {
-    announce("T0 交叉类型检查");
-    announceDone("skip-platform", "CI 各平台原生编译已覆盖");
-    pushStep({
-      step: "T0 交叉类型检查",
-      status: "skip-platform",
-      detail: "CI：三平台矩阵各自原生 cargo check --all-targets 已覆盖本平台；交叉检查是开发机补齐它平台的手段，这里不跑",
-    });
-  } else {
-    const installed = installedTargets();
-    for (const target of CROSS_TARGETS) {
-      const label = "T0 交叉类型检查（" + target + "）";
-      announce(label);
-      if (!installed || !installed.includes(target)) {
-        announceDone("env-skip", "未安装该 target");
-        pushStep({ step: label, status: "env-skip", detail: "未安装 " + target + "：rustup target add " + target });
-        continue;
-      }
-      // --all-targets：平台专属的**测试代码**本机也不编译，必须一起查（CI 就是在 Windows 上这样红的）。
-      const r = sh("cargo", ["check", "--target", target, "--all-targets", "--color", "never"]);
-      if (r.code === 0) {
-        announceDone("完成", "");
-        pushStep({ step: label, status: "pass", detail: "" });
-      } else if (crossEnvLimited(target, r.out)) {
-        announceDone("env-skip", "本机没有该平台的 C 工具链 / SDK");
-        pushStep({
-          step: label,
-          status: "env-skip",
-          detail: "本机无法交叉编译 " + target + "（缺 Apple SDK / 交叉 C 工具链）：真实检查归该平台的真机 CI",
-        });
-      } else {
-        announceDone("失败", "编译失败");
-        pushStep({
-          step: label,
-          status: "fail",
-          detail: "交叉类型检查失败（平台专属代码本机不编译）：" + (r.error || "") + " 日志：" + r.log,
-          raw: r.out.slice(-1200),
-        });
-      }
+  for (const s of stepsLib.STEPS) {
+    if (s.skip && s.skip(opts)) {
+      if (s.skipNote) console.log(s.skipNote);
+      continue;
     }
+    s.run(ctx);
   }
-
-  announce("T0 依赖重复（cargo tree）");
-  if (!toolAvailable("tree")) {
-    announceDone("env-skip", "cargo-tree 不可用");
-    pushStep({ step: "T0 依赖重复（cargo tree）", status: "env-skip", detail: "cargo tree 不可用" });
-  } else {
-    const r = sh("cargo", ["tree", "--duplicates", "--color", "never"]);
-    const dups = duplicateCrates(r.out);
-    const ok = r.code === 0 && !dups.length;
-    announceDone(ok ? "完成" : "失败", ok ? "无重复" : dups.length + " 个重复 crate");
-    pushStep({
-      step: "T0 依赖重复（cargo tree）",
-      status: ok ? "pass" : "quality-fail",
-      detail: ok ? "" : "重复依赖（要有解释或治理记录）：" + dups.join("、"),
-      raw: ok ? null : r.out.slice(-1200),
-    });
-  }
-
-  // T0 供应链：已知 CVE 与许可证/来源策略（工具缺失或取不到数据 = env-skip）。
-  announce("T0 供应链（audit/deny）");
-  const supply = supplyChainCheck();
-  announceDone(supply.status === "pass" ? "完成" : supply.status === "env-skip" ? "env-skip" : "失败", supply.detail);
-  pushStep({
-    step: "T0 供应链（audit/deny）",
-    status: supply.status,
-    detail: supply.detail,
-    raw: supply.raw,
-  });
-
-  // L1：crate 内联单元测试（默认并行；--serial 只在排查并发/隔离问题时用）
-  announce("L1 单元（--bin solomni）");
-  const unitArgs = ["test", "--color", "never", "--bin", "solomni", "--", "--nocapture"].concat(SERIAL ? ["--test-threads=1"] : []);
-  const unit = sh("cargo", unitArgs);
-  const uc = cargoCounts(unit.out);
-  const unitOk = unit.code === 0 && uc.ignored === 0;
-  const unitDetail =
-    uc.passed + " passed / " + uc.failed + " failed" +
-    (uc.ignored ? " / " + uc.ignored + " ignored（#[ignore] 被禁止）" : "") +
-    (SERIAL ? "；--serial" : "");
-  announceDone(unitOk ? "完成" : "失败", unitDetail);
-  pushStep({
-    step: "L1 单元（--bin solomni）",
-    status: unitOk ? "pass" : "fail",
-    detail: unitDetail,
-    skips: skipsIn(unit.out),
-    raw: unitOk ? null : unit.out.slice(-800),
-  });
-
-  // L2/L3：四个按平台分的测试目标逐一点名（缺目标即失败：新增测试文件必须挂到目标上）
-  for (const t of PLATFORM_TARGETS) {
-    announce("目标 " + t);
-    const tArgs = ["test", "--color", "never", "--test", t, "--", "--nocapture"].concat(SERIAL ? ["--test-threads=1"] : []);
-    const r = sh("cargo", tArgs);
-    const c = cargoCounts(r.out);
-    const skips = skipsIn(r.out);
-    const isOtherPlatform = t !== "cross-platform" && t !== OS_KEY;
-    let status;
-    if (r.code !== 0) status = "fail";
-    else if (c.ignored > 0) status = "fail";
-    else if (c.resultLines === 0) status = "fail";
-    else if (c.passed === 0 && isOtherPlatform) status = "skip-platform";
-    else status = "pass";
-    const counts = c.passed + " passed / " + c.failed + " failed" + (c.ignored ? " / " + c.ignored + " ignored（#[ignore] 被禁止）" : "");
-    announceDone(status === "fail" ? "失败" : status === "skip-platform" ? "本平台不适用" : "完成", counts);
-    pushStep({
-      step: "目标 " + t,
-      status: status,
-      detail:
-        counts +
-        (status === "skip-platform" ? "（本平台不适用）" : "") +
-        (skips.length ? "；env-skip " + skips.length + " 条" : ""),
-      skips: skips,
-      raw: status === "fail" ? r.out.slice(-800) : null,
-    });
-  }
-
-  // 前端冒烟（自动发现同目录 *.smoke.cjs）
-  announce("前端冒烟");
-  const fe = sh(process.execPath, [path.join("src", "presentation", "web", "assets", "smoke.cjs")]);
-  announceDone(fe.code === 0 ? "完成" : "失败", "");
-  pushStep({
-    step: "前端冒烟",
-    status: fe.code === 0 && fe.out.includes("FRONTEND-SMOKE-OK") ? "pass" : "fail",
-    detail: fe.out.trim().split(/\r?\n/).slice(-2).join(" / "),
-    raw: fe.code === 0 ? null : fe.out.slice(-600),
-  });
-
-  // 开发回路自检：dev.js 的固定子命令表与"环境没就绪就如实拒绝"那条出口（见 docs/testing/execution-ci.md）
-  announce("开发回路自检");
-  const dl = sh(process.execPath, [path.join("tests", "dev-loop.mjs")]);
-  announceDone(dl.code === 0 ? "完成" : "失败", "");
-  pushStep({
-    step: "开发回路自检",
-    status: dl.code === 0 && dl.out.includes("DEV-LOOP-OK") ? "pass" : "fail",
-    detail: dl.out.trim().split(/\r?\n/).slice(-1).join(""),
-    raw: dl.code === 0 ? null : dl.out.slice(-600),
-  });
-
-  // 依赖哈希工具自检：pins.js 的解析 / 来源推导 / 原地重写；只读、不碰网络。
-  announce("依赖哈希工具自检");
-  const pt = sh(process.execPath, [path.join("tests", "pins-tool.mjs")]);
-  announceDone(pt.code === 0 ? "完成" : "失败", "");
-  pushStep({
-    step: "依赖哈希工具自检",
-    status: pt.code === 0 && pt.out.includes("PINS-TOOL-OK") ? "pass" : "fail",
-    detail: pt.out.trim().split(/\r?\n/).slice(-1).join(""),
-    raw: pt.code === 0 ? null : pt.out.slice(-600),
-  });
-
-  // 变更分流自检：CI 的 changes job 用 base 副本决定是否跳过代码测试；分类器自身必须有样例与 include 消费自检。
-  announce("变更分流自检");
-  const cc = sh(process.execPath, [path.join("tests", "ci-changes.mjs"), "--self-test"]);
-  announceDone(cc.code === 0 ? "完成" : "失败", "");
-  pushStep({
-    step: "变更分流自检",
-    status: cc.code === 0 ? "pass" : "fail",
-    detail: cc.out.trim().split(/\r?\n/).slice(-1).join(""),
-    raw: cc.code === 0 ? null : cc.out.slice(-600),
-  });
-
-  // 环境引导自检：env.js 的下载 / 续传 / 结构判定 / sha256 闸（真实子进程 + 本地应答源；仅 Windows 真跑，
-  // 别的平台那条路不存在，如实记 [探针]）。判据见 docs/testing/execution-ci.md 的「环境引导自检」。
-  announce("环境引导自检");
-  const eb = sh(process.execPath, [path.join("tests", "env-bootstrap.mjs")], 5 * 60 * 1000);
-  const ebSkips = skipsIn(eb.out);
-  announceDone(eb.code !== 0 ? "失败" : ebSkips.length ? "env-skip" : "完成", "");
-  pushStep({
-    step: "环境引导自检",
-    // 非 Windows 上那条路（dlltool）不存在：自检自己打 [探针] 并照常结束——那是 env-skip，不是通过。
-    status: eb.code !== 0 ? "fail" : ebSkips.length ? "env-skip" : "pass",
-    detail: ebSkips.length ? ebSkips.join(" / ") : eb.out.trim().split(/\r?\n/).slice(-1).join(""),
-    skips: ebSkips,
-    raw: eb.code === 0 ? null : eb.out.slice(-1200),
-  });
-
-  // L4：端到端（有编排才跑；没有就是一条缺口，不装作跑过）
-  // 质量 job 用 --skip-e2e 跳过它（报告里也不留空占位）：L4 由独立 e2e job 跑，发布时合并。
-  if (!SKIP_E2E) {
-    const e2e = path.join(ROOT, "tests", "cross-platform", "e2e", "orchestrator.js");
-    if (fs.existsSync(e2e)) {
-      announce("L4 端到端");
-      const r = sh(process.execPath, [e2e], E2E_TIMEOUT_MS);
-      announceDone(r.code === 0 ? "完成" : "失败", "");
-      pushStep({
-        step: "L4 端到端",
-        status: r.code === 0 && r.out.includes("E2E-OK") ? "pass" : "fail",
-        detail: r.out.trim().split(/\r?\n/).slice(-2).join(" / "),
-        raw: r.code === 0 ? null : r.out.slice(-800),
-      });
-    } else {
-      pushStep({ step: "L4 端到端", status: "gap", detail: "cross-platform.e2e.not-in-runner（编排尚未迁入）" });
-    }
-  }
-
-  // T0：项目外写检测（零豁免）。借用系统 cargo 也不许把 registry/git/bin 写进它的 home。
-  announce("T0 项目外写");
-  const outsideChanged = outsideDiff(outsideBefore, outsideSnapshot());
-  announceDone(outsideChanged.length ? "失败" : "完成", outsideChanged.length ? outsideChanged.length + " 处项目外写入" : (tempSwept.length ? "清理了上次残留 " + tempSwept.length + " 项" : ""));
-  pushStep({
-    step: "T0 项目外写",
-    status: outsideChanged.length ? "fail" : "pass",
-    detail: outsideChanged.length
-      ? "检测到项目外缓存/工具链目录被写：" + outsideChanged.join("、") + "（借用系统工具链也不许写它的 home；确认不是其它进程同写后重跑）"
-      : (tempSwept.length ? "系统临时目录清掉上次崩溃残留：" + tempSwept.join("、") : ""),
-    raw: null,
-  });
 
   // 只报不拦的时间预算：超预算标 [slow]（找慢步骤的基线，不改变成败）。
-  for (const s of steps) {
+  for (const s of step.steps) {
     const budget = STEP_BUDGET_S[s.step];
     if (budget && s.ms > budget * 1000) s.slow = true;
   }
-  const gaps = gapLedgers();
-  const globalGapsList = globalGaps();
-  const failed = steps.filter((s) => s.status === "fail");
-  const qualityFailed = steps.filter((s) => s.status === "quality-fail");
-  const envSkips = steps.filter((s) => s.status === "env-skip");
-  const skips = steps.flatMap((s) => s.skips || []);
-  const report = {
-    mode: "full",
-    platform: process.platform,
-    arch: process.arch,
-    osKey: OS_KEY,
-    profile: PROFILE,
-    fenceLive: FENCE_LIVE,
-    doctor: doctor,
-    steps: steps.map((s) => ({ step: s.step, status: s.status, detail: s.detail, ms: s.ms, slow: !!s.slow })),
-    envSkips: skips,
-    quality: {
-      failed: qualityFailed.length,
-      steps: qualityFailed.map((s) => ({ step: s.step, detail: s.detail })),
+  const gaps = reportLib.readPlatformGaps(ROOT, OS_KEY);
+  const globalGapsList = reportLib.readGlobalGaps(ROOT);
+  const failed = step.steps.filter((s) => s.status === "fail");
+  const qualityFailed = step.steps.filter((s) => s.status === "quality-fail");
+  const envSkips = step.steps.filter((s) => s.status === "env-skip");
+  const skips = step.steps.flatMap((s) => s.skips || []);
+  const doctor = ctx.state.doctor;
+  reportLib.write(
+    ROOT,
+    {
+      mode: "full",
+      osKey: OS_KEY,
+      profile: PROFILE,
+      fenceLive: opts.fenceLive,
+      doctor: doctor,
+      envSkips: skips,
+      quality: { failed: qualityFailed.length, steps: qualityFailed.map((s) => ({ step: s.step, detail: s.detail })) },
+      globalGaps: globalGapsList,
+      gaps: gaps,
+      timeouts: proc.timeouts,
+      failed: failed.length,
+      toolchain: reportLib.detectToolchain(proc),
     },
-    globalGaps: globalGapsList,
-    gaps: gaps,
-    timeouts: timeouts,
-    failed: failed.length,
-  };
-  fs.mkdirSync(path.dirname(REPORT), { recursive: true });
-  fs.writeFileSync(REPORT, JSON.stringify(report, null, 2));
+    step.steps,
+  );
 
   console.log("");
   console.log("=== 测试汇总（" + process.platform + " " + process.arch + "，报告见 target/test-report.json）===");
-  for (const s of steps) {
+  for (const s of step.steps) {
     console.log("  " + s.status.padEnd(13) + " " + s.step.padEnd(24) + " " + (s.detail || "") + (s.ms ? "  [" + (s.ms / 1000).toFixed(1) + "s]" : "") + (s.slow ? " [slow]" : ""));
   }
-  if (SKIP_E2E) console.log("  [stage] 已跳过 L4 端到端：由独立 e2e job 承担，两份报告在发布时合并（见 docs/testing/execution-ci.md）");
+  if (opts.skipE2e) console.log("  [stage] 已跳过 L4 端到端：由独立 e2e job 承担，两份报告在发布时合并（见 docs/testing/execution-ci.md）");
   if (doctor && doctor.fence) console.log("  [doctor] 围栏 fs=" + doctor.fence.fs + " net=" + doctor.fence.net + " tree=" + doctor.fence.tree + "（" + doctor.fence.note + "）");
   for (const s of envSkips) console.log("  [env-skip] " + s.step + "：" + s.detail);
   for (const s of skips) console.log("  [env-skip] " + s);
-  for (const t of timeouts) console.log("  [超时] " + t);
+  for (const t of proc.timeouts) console.log("  [超时] " + t);
   for (const s of qualityFailed) console.log("  [quality-fail] " + s.step + "：" + s.detail);
   for (const g of gaps) console.log("  [gap] " + g);
   for (const g of globalGapsList) console.log("  [global-gap] " + g);
@@ -1634,15 +291,183 @@ function pushStep(obj) {
       if (s.detail) console.log(s.detail);
       console.log(s.raw || "");
     }
-    console.log("TEST-REPORT-FAIL");
+    console.log(markers.TEXT.REPORT_FAIL);
     process.exit(1);
   }
-  console.log("TEST-REPORT-OK");
-  if (gaps.length === 0) console.log("TEST-REPORT-ACCEPTED（本平台缺口账为空）");
+  console.log(markers.TEXT.REPORT_OK);
+  if (gaps.length === 0) console.log(markers.TEXT.REPORT_ACCEPTED + "（本平台缺口账为空）");
   else console.log("[验收] 本平台仍有 " + gaps.length + " 条缺口未关账（tests/" + OS_KEY + "/gaps.yaml 与 tests/cross-platform/gaps.yaml）");
   if (globalGapsList.length) {
     console.log("[验收] 仍有 " + globalGapsList.length + " 条全局长期目标（tests/gaps.yaml）：" + globalGapsList.join("、"));
   }
+}
+
+// ---------- 门禁自测（--only=selftest） ----------
+
+function runSelftestLane() {
+  console.log("[selftest] 门禁自测：解析器 / 项目外写 / 注释契约三项 / 门禁清单 / 步骤表");
+  const groups = [
+    ["结构审查内自测（解析器 + 项目外写 + 注释契约三项）", () => gates.runLane(ROOT, "selftest").problems],
+    ["门禁清单", () => gates.selfTest(ROOT)],
+    ["步骤表", () => stepsLib.selfTest()],
+  ];
+  let bad = 0;
+  for (const [name, fn] of groups) {
+    const problems = fn();
+    if (problems.length) {
+      bad += problems.length;
+      console.log("[selftest] " + name + " FAIL（" + problems.length + " 条）");
+      for (const p of problems) console.log("  " + p);
+    } else {
+      console.log("[selftest] " + name + " ok");
+    }
+  }
+  process.exitCode = bad ? 1 : 0;
+}
+
+// ---------- 选择性子集（--only=<gate|step>） ----------
+
+/** 跑任意子集：**不写报告、不打 TEST-REPORT-***（报告只由车道级运行产出）。 */
+function runSelection(names) {
+  if (names.length === 1 && cli.isLane(names[0])) {
+    const lane = names[0];
+    if (lane === "full") return runFull();
+    if (lane === "docs" || lane === "structure") return runAudit(lane);
+    return runSelftestLane();
+  }
+  const gateIds = [];
+  const stepIds = [];
+  for (const n of names) {
+    if (gates.find(n)) gateIds.push(n);
+    else if (stepsLib.STEPS.some((s) => s.id === n)) stepIds.push(n);
+    else {
+      console.error("未知 gate 或步骤：" + n + "（用 --list 看清单，--only=车道名 跑整条车道）");
+      process.exit(2);
+    }
+  }
+  console.log("[only] 子集运行：不写 target/test-report.json、不打印 TEST-REPORT-*；验收请跑车道（--docs / --audit=… / 整跑）");
+  let bad = 0;
+  // gate 按清单顺序跑（同一车道内顺序固定，输出可比）。
+  const ordered = gates.GATES.filter((g) => gateIds.includes(g.id)).map((g) => g.id);
+  for (const id of ordered) {
+    const res = gates.runGates(ROOT, [id]);
+    if (res.problems.length) {
+      bad += res.problems.length;
+      console.log("[gate] " + id + " FAIL（" + res.problems.length + " 条）");
+      for (const p of res.problems) console.log("  " + p);
+    } else {
+      console.log("[gate] " + id + " ok");
+    }
+  }
+  // 步骤按表顺序跑，依赖先补齐（比如 warnings 需要 check 的输出）。
+  const wanted = new Set(stepIds);
+  const orderedSteps = [];
+  const addWithDeps = (id) => {
+    const s = stepsLib.STEPS.find((x) => x.id === id);
+    for (const d of s.deps) addWithDeps(d);
+    if (!orderedSteps.includes(id)) orderedSteps.push(id);
+  };
+  for (const s of stepsLib.STEPS) if (wanted.has(s.id)) addWithDeps(s.id);
+  const ctx = makeCtx();
+  for (const id of orderedSteps) {
+    const s = stepsLib.STEPS.find((x) => x.id === id);
+    if (s.requiresFull) {
+      console.log("[step] " + id + " 只能整跑（需要整跑的项目外写快照窗口）：node run-tests.js");
+      bad++;
+      continue;
+    }
+    const before = step.steps.length;
+    s.run(ctx);
+    for (const rec of step.steps.slice(before)) {
+      if (rec.status === "fail" || rec.status === "quality-fail") {
+        bad++;
+        console.log("[step] " + rec.step + " " + rec.status + (rec.detail ? "：" + rec.detail : ""));
+      } else {
+        console.log("[step] " + rec.step + " " + rec.status);
+      }
+    }
+  }
+  process.exitCode = bad ? 1 : 0;
+}
+
+// ---------- 变更影响面（--changed） ----------
+
+function isDocPath(file) {
+  const p = String(file).replace(/\\/g, "/");
+  return p.startsWith("docs/") || p.endsWith(".md") || p === "LICENSE";
+}
+
+/** 取本次差异：优先工作树 vs HEAD；没有未提交差异时退到 HEAD~1..HEAD；取不到就是 null（按全量）。 */
+function gitChanged() {
+  const run = (args) => {
+    try {
+      return execFileSync("git", args, { cwd: ROOT, encoding: "utf8", maxBuffer: 32 * 1024 * 1024 }).split(/\r?\n/).filter(Boolean);
+    } catch (e) {
+      return null;
+    }
+  };
+  const wt = run(["diff", "--name-only", "HEAD", "--", "."]);
+  if (wt && wt.length) return { files: wt, source: "工作树 vs HEAD" };
+  const last = run(["diff", "--name-only", "HEAD~1", "HEAD"]);
+  if (last && last.length) return { files: last, source: "HEAD~1..HEAD" };
+  return { files: null, source: "取不到差异" };
+}
+
+// 门禁引擎自身的路径：改动它们 = 全部文本 gate 与整条车道都受影响（不猜具体哪一项）。
+const ENGINE_INPUTS = ["run-tests.js", "tests/lib/**/*.js", "tests/gates/**/*.js"];
+
+function runChanged() {
+  const { files, source } = gitChanged();
+  if (!files) {
+    console.log("[changed] " + source + "：按全量处理（宁可全量，不可漏测）");
+    if (opts.run) runSelection(["docs", "structure"]);
+    return;
+  }
+  const matchedGates = gates.GATES.filter((g) => files.some((f) => matchAny(g.inputs, f))).map((g) => g.id);
+  const matchedSteps = stepsLib.STEPS.filter((s) => files.some((f) => matchAny(s.inputs, f))).map((s) => s.id);
+  const unknown = files.filter((f) => !gates.GATES.some((g) => matchAny(g.inputs, f)) && !stepsLib.STEPS.some((s) => matchAny(s.inputs, f)) && !isDocPath(f));
+  const engineChanged = files.some((f) => matchAny(ENGINE_INPUTS, f));
+  const fallback = unknown.length > 0 || engineChanged;
+  const ids = fallback ? gates.GATES.map((g) => g.id) : matchedGates;
+  const lanes = new Set();
+  if (files.some(isDocPath)) lanes.add("docs");
+  lanes.add("structure");
+  if (files.some((f) => !isDocPath(f)) || fallback) lanes.add("full");
+  console.log("[changed] 依据：" + source + "（" + files.length + " 个文件）");
+  if (engineChanged) console.log("[changed] 门禁引擎自身有改动（run-tests.js / tests/lib / tests/gates）：全部文本 gate 与车道都受影响");
+  if (unknown.length) console.log("[changed] 有未归类路径（" + unknown.length + " 个），按全量处理：" + unknown.slice(0, 5).join("、") + (unknown.length > 5 ? " …" : ""));
+  console.log("[changed] 受影响 gate（" + ids.length + "）：");
+  for (const id of ids) console.log("  " + id);
+  if (matchedSteps.length) console.log("[changed] 受影响步骤（" + matchedSteps.length + "）：" + matchedSteps.join("、"));
+  console.log("[changed] 建议车道：" + [...lanes].join(" / "));
+  console.log("[changed] 子集运行不写报告、不能当验收；full 车道请整跑：node run-tests.js");
+  if (!opts.run) return;
+  console.log("");
+  console.log("[changed] --run：只跑受影响 gate（不写报告）");
+  runSelection(ids);
+}
+
+// ---------- main ----------
+
+function main() {
+  if (opts.list) {
+    printList();
+    return;
+  }
+  if (opts.only.length) {
+    runSelection(opts.only);
+    return;
+  }
+  if (opts.changed) {
+    runChanged();
+    return;
+  }
+  const mode = cli.mode(opts);
+  if (mode === "coverage") return runCoverage();
+  if (mode === "docs-all") return runAudit("all");
+  if (mode === "audit-docs") return runAudit("docs");
+  if (mode === "audit-structure") return runAudit("structure");
+  return runFull();
 }
 
 main();
