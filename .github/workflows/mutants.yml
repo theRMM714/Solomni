@@ -32,6 +32,9 @@ jobs:
       SOLOMNI_CARGO_HOME: ${{ github.workspace }}/platform/ci/cargo
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # 只读 job：突变调查不写仓库，关闭令牌持久化（zizmor artipacked）。
+          persist-credentials: false
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -103,7 +106,8 @@ jobs:
       group: ci-mutation-publish
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # actions/checkout v7.0.1：本 job 用 git push 重建 ci-mutation 滚动分支，需要 checkout 凭据；其余 checkout 均已关闭持久化。
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # zizmor: ignore[artipacked] 本 job 需要凭据重建滚动分支
 
       # 关键：把 ci-mutation 重建为**空分支**再写报告。否则 Contents API 建分支时会以默认分支 HEAD 为底座，
       # 把整棵源码树背进报告分支（ci-report 的 publish job 也是这么做的）。
