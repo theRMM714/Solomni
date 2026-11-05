@@ -934,7 +934,7 @@ pub fn stream_piece(acc: &str, piece: &str) -> (String, String) {
 }
 
 /// 目的：这一片要不要外送成 Delta 事件——`start` 要（前端据此重置本轮流），**空片段不要**
-/// （信封被抑制的片段、被合并掉的重复片段都不该刷事件流）。
+///   （信封被抑制的片段、被合并掉的重复片段都不该刷事件流）。
 /// 约束：与 `stream_piece` 同处一条流式规则；只认 kind 与文本，不判断内容。
 pub fn delta_visible(kind: &str, text: &str) -> bool {
     kind == "start" || !text.is_empty()
