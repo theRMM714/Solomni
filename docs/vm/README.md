@@ -75,7 +75,7 @@
 - 还原到初始状态：设置 → 存储空间 / `solomni --provision --reset=<虚拟根> --yes` 会删掉 `.vm/guest/<名>` 再按清单重装（不备份、不可撤销）；成功后同时清该虚拟根的构建缓存；它不是删除虚拟根：基础镜像仍会重建出来；有活跃 guest 或构建锁时拒绝。
 - guest 内 per-agent 围栏：宿主把该 agent 的围栏翻成 guest 路径与允许集，经 guest 内 Linux helper（Landlock + no_new_privs）执行；helper 缺失或装不上时 fail-closed，不回退到无围栏执行。
 - per-agent 围栏只支持 Linux guest；Windows / macOS guest 未适配，按不支持处理；同 guest 内仍是同一 UID/root，per-agent 进程信号、`/proc` 与 `system` 包的全局可见性不在承诺内。
-- 本次隔离覆盖文件系统可达范围，并对齐本机 Linux 的只读基线、解释器目录、`cwd`、env 白名单、按 `GuestRun.timeout_secs` 超时杀整棵进程树与输出截断。
+- 本次隔离覆盖文件系统可达范围，并对齐本机 Linux 的只读基线、解释器目录、`cwd`、env 白名单、按 `GuestRun.timeout_secs` 超时杀整棵进程树与输出截断。guest 通道产出与本机同形的正文与状态行（`[shell]` 收尾四态；cwd·耗时尾行由工具层追加）：超时 / 信号由 `src/capabilities/vm/detail/guest_helper.rs` 的机器标记（`solomni-guest-fence: timeout` / `solomni-guest-fence: signal`）表达、用户停止按宿主取消旗判定，通道翻译成状态行、不写人读句（装配见 `src/kernel/domain/receipt.rs`）。
 - 网络按 per-call `GuestAccess.net`：false 时 helper 在子进程前 `unshare(CLONE_NEWNET)`，失败 fail-closed；QEMU 网卡仍受 VM 级全局开关。
 - 用户在生成中按停止：host 置取消旗后经 QGA 给 guest helper 发 SIGTERM，helper 杀掉子进程组并退出；`timeout_secs` 仍照常收口。
 - 稳定挂载根：共享 guest 只挂工作树与模块树两个根，新 agent 沙箱 / 新模块目录按状态出现；具体某个 agent 能看什么由当次围栏决定。
@@ -103,7 +103,7 @@
 - 一格目录里的 `guest.yaml` 声明画像（`id` / `arch` / `os` / `agent` / `clients` / `runtimes`）：`runtimes` 是 guest 里确实可用的运行能力名，如 python / node，选型诊断据此不必再要 `runtimes/` 包；缺省按目录名与 Debian 默认（os 缺省 linux），不认识的值如实拒收。
 - 清单（`dependencies.yaml`）给每条 guest 条目一个 `guest:` 名，多条条目可以共同装一个虚拟根；界面读 provision 的虚拟根清单，不自己看盘。
 - 真机探针的门槛：`SOLOMNI_VM_LIVE=1` + `SOLOMNI_VM_QEMU` / `SOLOMNI_VM_VIRTIOFSD` / `SOLOMNI_VM_SMBD` 指向 `.vm/`；虚拟根默认 `debian`，可用 `SOLOMNI_VM_GUEST` 换；默认 `[探针]` 跳过。
-- 取消与超时的真机证据走不依赖共享后端的 `vm_live_cancel_kills_the_guest_process_tree`（`NoneShare` + guest 内 `/tmp` 围栏）：取消要 15 秒内返回、回执含「用户停止」、guest 内无残留 `sleep`；`timeout_secs` 到点回执含 helper 的「工具进程超时」；取消路径上 helper 自己的 stderr 可能被 QGA 丢掉（实测时有时无），所以判决以无孤儿 + 快速返回为准；超时路径的 helper stderr 稳定可见，直接断言。
+- 取消与超时的真机证据走不依赖共享后端的 `vm_live_cancel_kills_the_guest_process_tree`（`NoneShare` + guest 内 `/tmp` 围栏）：取消要 15 秒内返回、回执含 `[shell] 用户停止`、guest 内无残留 `sleep`；`timeout_secs` 到点回执含 `[shell] 超时（2 秒）`（用例给 2 秒）；直调通道只到状态行，cwd·耗时尾行由工具层在端到端 shell 回执里追加（见 `docs/tools/tools-and-roles.md` 的「执行类系统工具：shell」）；判决以无孤儿 + 快速返回为准。
 - macOS 保持检测 + 指路（缺口见 `tests/macos/gaps.yaml`）；产品侧构造链当前只有 Debian 配方，其它 Linux 发行版可用预构造镜像 + `guest.yaml`。
 
 ## 七、多平台组合与路径桥

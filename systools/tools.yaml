@@ -118,8 +118,11 @@ tools:
     callers: [executor, solo, core_proxy]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: |
       在本环境跑一条一次性命令（构建 / 测试 / 跑脚本）：cwd 固定是你的私有沙箱，无交互 stdin / TTY；
-      输出超限保留开头与结尾，回执带退出码、cwd 与本次耗时；返回值非 0 就是这条命令失败（Windows 上
-      PowerShell 的未处理错误也会让命令中止并返回非 0；要容错请显式 -ErrorAction SilentlyContinue 或 try/catch）。
+      输出超限保留开头与结尾；回执末行是 cwd 与本次耗时、上一行是状态行（退出码 / 超时 / 用户停止），
+      尾行不随输出截断；cwd 用本环境的写法（虚拟机档是 guest 内路径）。退出码是**整条脚本**的退出状态
+      （最后一条命令或显式 exit），不是每条命令的：要看单条命令的退出码，用 `cmd; echo exit=$?` 或
+      `cmd || exit $?`。返回值非 0 就是这条命令失败（Windows 上 PowerShell 的未处理错误也会让命令中止
+      并返回非 0；要容错请显式 -ErrorAction SilentlyContinue 或 try/catch）。
       scope=sandbox（默认）：只能读写你的私有沙箱，另可只读系统与项目内基础工具链（python / node / cc 等）；
       不碰共享区 / 模块目录 / 主机只读根，不联网。工作区内修改及以上档位直接执行；仅可查看档不发放。
       scope=external：额外可读共享区主副本、模块目录与你被授权的主机只读根，并按全局开关联网；

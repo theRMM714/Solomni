@@ -125,12 +125,20 @@ roles:
 
 - `systools/tools.yaml` 的 `shell` 是唯一声明 per-call `scope` 的系统工具；它不新建执行机制：host 走 kernel 的 `ProcessRunner`，VM 走 guest helper。
 
-- 参数：`command`（必填）、`scope`（sandbox / external，缺省 sandbox）、`timeout_secs`（缺省 120，最大 600）。cwd 固定私有沙箱；无交互 stdin / TTY；输出 16k（4k 开头 + 12k 结尾）；命令上限 8000 字符；回执带退出码、cwd 与本次耗时（后者由工具层在守门进程给出 shell 收尾行后追加，回放也从这一行派生）。
+- 参数：`command`（必填）、`scope`（sandbox / external，缺省 sandbox）、`timeout_secs`（缺省 120，最大 600）。cwd 固定私有沙箱；无交互 stdin / TTY；输出 16k（4k 开头 + 12k 结尾）；命令上限 8000 字符。
+- **回执形状**（正文与状态行装配见 `src/kernel/domain/receipt.rs`，末行由工具层追加）：正文（stdout；有 stderr 时折成 `[stderr]` 段）/ 空行 / 状态行 / 末行，末行是 `[shell] cwd <本环境写法> · 耗时 <N> 秒`：
+  - 状态行四种：`[shell] 退出码 N`、`[shell] 超时（N 秒）：工具进程与它拉起的整棵进程树已被终止`、`[shell] 用户停止：工具进程与它拉起的整棵进程树已被终止`、`[shell] 退出码未知（被信号结束）`。
+  - 末行恒为 cwd·耗时、上一行恒为状态行：两条都在 = 这次调用真的跑过；都没有 = 没跑（围栏拒绝 / 无租约 / helper 起不来 / 共享同步失败），此时不补尾行（`src/capabilities/tools/domain/shell.rs` 的 `did_run`）。
+  - 截断只作用在正文，尾行永远保留（`src/kernel/domain/receipt.rs`）。
+  - 退出码是**整条脚本**的退出状态（最后一条命令或显式 exit），不是每条命令的；要看单条命令的退出码写 `cmd; echo exit=$?` 或 `cmd || exit $?`。
+  - 超时与用户停止没有命令退出码（`src/capabilities/tools/domain/shell.rs` 的 `exit_code` 返回 None），只用状态行表达，不伪造 124 / 143。
+  - cwd 用本环境写法：本机档 = 宿主路径；虚拟机档 = guest 内路径（路径桥，宿主 `D:\a\b` → `/solomni-host/d/a/b`，见 `src/capabilities/vm/domain/paths.rs`）。
+- 回放从末行派生：`src/capabilities/session/domain/tools.rs` 的 `last_shell` 取最后一条带命令的 shell 工具行的 cwd 与耗时，标 `historical`。
 - **scope 是本次调用的 reach 请求，profile 才是用户上限**：sandbox 只给 private + 基础 / 项目工具链只读（net=false）；external 在 sandbox 上再加 shared-read / module-read / host-read / network。requested 不是 granted 子集 = 拒绝，不弹卡。
 - profile：view 不发放；workspace sandbox allow、external deny；external sandbox allow、external ask；all_reach sandbox / external allow。sandbox 与 external 都要求围栏真强制（`allow_degraded=false`），装不上拒绝。
 - 围栏：shell 的 `for_call` 另加 `runtime_roots`（项目内基础工具链 + 本 agent 模块运行包根）；这些是**可信执行基座**，Windows 上一次性授给 `ALL APPLICATION PACKAGES`、不参与按次授权。其余可达范围按 `会话 + agent + 根集合` 派生容器身份，授权按会话持有（调用结束不释放，会话改配/删除时回收）；一次性调用（构建/独立模块工具）各自唯一租约、跑完即撤。
-- 平台：Linux / macOS 用 sh；Windows 用 PowerShell（pwsh 7 优先、5.1 回退；`-File` 临时 .ps1，UTF-8 BOM；脚本先设 `$ErrorActionPreference = 'Stop'`，未处理的 cmdlet 错误中止并以非 0 结束，要容错就在脚本里显式 `-ErrorAction SilentlyContinue` 或 try/catch）；VM Linux guest 用 /bin/sh，helper 按 `timeout_secs` 杀树；host 停止经 QGA 给 helper 发 SIGTERM，立即杀整棵进程树。
-- 状态：最近一次 shell 在会话状态栏出 chip（运行中 / 退出码 + 耗时），点开看命令、scope、cwd、成败、耗时与回执预览；数据来自 `SessionView.shell`，不替代转录里的工具行。重建 / 回放的会话按转录派生（`historical`）：cwd 与耗时读回执，起止时间不伪造。
+- 平台：Linux / macOS 用 sh；Windows 用 PowerShell（pwsh 7 优先、5.1 回退；`-File` 临时 .ps1，UTF-8 BOM；脚本先设 `$ErrorActionPreference = 'Stop'`，未处理的 cmdlet 错误中止并以非 0 结束，要容错就在脚本里显式 `-ErrorAction SilentlyContinue` 或 try/catch）；VM Linux guest 用 /bin/sh，helper 按 `timeout_secs` 杀树；host 停止经 QGA 给 helper 发 SIGTERM，立即杀整棵进程树。guest 通道产出与本机同形的正文与状态行：超时 / 信号由 `src/capabilities/vm/detail/guest_helper.rs` 的机器标记（`solomni-guest-fence: timeout` / `solomni-guest-fence: signal`）表达、用户停止按宿主取消旗判定，由通道翻译成状态行；cwd·耗时尾行由工具层在通道返回后统一追加（`src/capabilities/collab/service/tool_loop.rs`）。围栏拒绝（helper 的 `solomni-guest-fence:` 诊断）没有 `[shell]` 收尾行——命令没有执行。
+- 状态：最近一次 shell 在会话状态栏出 chip（运行中；结束后按 `ShellLive.status` 分退出码 / 超时 / 停止 / 信号 + 耗时），点开看命令、scope、cwd、状态、退出码、耗时与回执预览；数据来自 `SessionView.shell`，不替代转录里的工具行。重建 / 回放的会话按转录派生（`historical`）：cwd 与耗时读回执，起止时间不伪造。
 - 角色：executor / solo / core_proxy。代理的 shell 只做验收性核对，不替执行席产出；共享区只读，仍没有 work_pull / work_commit / 模块工具。
 - 路径：shell 不接受模型给的 path 参数，**不适用** §七 的路径寻址表；边界是围栏。共享区内容先 work_pull 进沙箱；external 只额外读主副本，不写。
 - 隐私：shell 不注入模块 secrets，不声明 module-write；模块 userdata 不可写。

@@ -103,7 +103,7 @@ session/<工作名>/
 
 - **上下文用量是独立事件**：`usage` 记录最近一次模型调用的 prompt / completion / total、当时的窗口与"精确还是估算"。
 - 它**不落成转录行、不进模型上下文**，随会话流水落盘（刷新/重建可恢复）；`line` 是这次调用产出第一行的行号，回档折叠到它之前时这条用量随之失效。`SessionView.context` 是同一份事实的快照，**只给有持续对话的 `Session::Single`**（single / proxy / 协作的 agent 子会话）；协作主会话 `Session::Collab` 没有这个字段。
-- **shell 状态也是快照**：`SessionView.shell` 取该会话最近一次 shell 的运行槽（命令、scope、cwd、起止、耗时、退出码与回执预览），由工具循环写、状态栏读；它只服务界面，不进模型上下文，也不替代转录里的 shell 工具行。**重建 / 回放按转录派生**：`last_shell(events)` 取最后一条带命令的 shell 工具行（cwd 与耗时读回执末尾的 `[shell] cwd … · 耗时 … 秒`），标 `historical`、不伪造起止时间；回档折叠掉的行不参与派生。`/api/history` 在响应里带同一份快照，前端本地没有时才填。
+- **shell 状态也是快照**：`SessionView.shell` 取该会话最近一次 shell 的运行槽（命令、scope、cwd（本环境写法：本机档是宿主路径，虚拟机档是 guest 内路径）、起止、耗时、退出码、状态 `status` 与回执预览；`status` 取 `exit` / `timeout` / `stopped` / `signal`，None = 运行中 / 未执行 / 旧数据），由工具循环写、状态栏读；它只服务界面，不进模型上下文，也不替代转录里的 shell 工具行。**重建 / 回放按转录派生**：`last_shell(events)` 取最后一条带命令的 shell 工具行（cwd 与耗时读回执末尾的 `[shell] cwd … · 耗时 … 秒`），标 `historical`、不伪造起止时间；回档折叠掉的行不参与派生。`/api/history` 在响应里带同一份快照，前端本地没有时才填。
 - **裁决卡与回答是例外**：`DecisionCard` / `DecisionAnswer` 按上表落盘（单 agent 与协作会话都留、系统会话不留）——"用户答过什么"是会话的事实，重启后卡与答案都要在（见"请用户裁决"一节）。
 
 - **会话表由后端给，前端不自己造会话**：前端只为 `/api/state` 会话表里"后端说在跑"的会话建标签页，事件流里出现**不认识的 sid** 一律不动（只置位，等下一次状态刷新把会话表带进来）（`src/presentation/web/assets/app.js`）。
