@@ -181,7 +181,7 @@ jobs:
           "$(go env GOPATH)/bin/actionlint" -no-color
 
       # zizmor：GitHub Actions 的安全审查（未 pin 的 action、危险触发器、权限过宽等）。
-      # 先只报不拦（continue-on-error），噪声与规则取舍稳定后再改成阻断；安装走 taiki-e/install-action（TOOLS.md 有 zizmor）。
+      # 先只报不拦（continue-on-error），噪声与规则取舍稳定后再转为阻断；安装走 taiki-e/install-action（TOOLS.md 有 zizmor）。
       - name: 安装 zizmor（advisory）
         continue-on-error: true
         uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
