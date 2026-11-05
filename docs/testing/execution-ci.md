@@ -43,6 +43,7 @@ node run-tests.js --skip-e2e
 ```
 
 - 注意：`node dev.js test` 与 `node dev.js fmt`、`node dev.js clippy` **都预期全绿**——T0 九项的步骤、可行状态与环境跳过口径见 [levels.md](levels.md) 的 T0 生成段；`env-skip` 不算通过，没有容差基线（注释契约的存量快照只减不增）。
+- `--strict-env`：必装工具（rustfmt / clippy / cargo-audit / cargo-deny）缺失或取不到 advisory 数据时，这几步记失败而不是 `env-skip`；交叉 target 属可选项，不受影响。CI 的 `quality` job 固定带它，本地开发默认不带（离线机器仍能跑其余项，缺项如实体现在报告里）。
 - 用例默认**并行**跑；排查并发 / 隔离问题时用 `node run-tests.js --serial`。找测试盲区用 `node run-tests.js --coverage`（见下文「覆盖率发现模式」，只报不拦）。
 
 ### 完整本地入口
@@ -200,6 +201,7 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 - 借用的门槛是**能构建**：借用前编译并链接一个空程序，链接不了就当没有可用工具链（Windows 上 msvc host 缺 `link.exe` 是常见原因），如实报出 host 与编译器原文，再走项目内安装。
 
 - **开发环境同步**：换机器 / 换人开发时跑 `node setup-dev.js`（`--check` 只读校验）。它统一用**项目内**工具链（`platform/<os>/rustup`、`platform/<os>/cargo`），组件、交叉 target 与项目内工具都装那里——**不写系统 `~/.rustup`、`~/.cargo`**；条目清单见 [dev-tools.js](../../dev-tools.js)。
+- 清单分**必装**（rustfmt / clippy / cargo-audit / cargo-deny：T0 判据本身）与**可选**（交叉 target、llvm-tools-preview / cargo-llvm-cov）：`--check` 只对必装项非零，`--strict` 才要求全齐；缺可选项目不阻断开发，但报告里会如实记 `env-skip`。
 
 - 突变测试的测试命令固定「只跑 `--bin solomni`」并按串行跑（逐条变异单独复现，与门禁的默认并行无关）。`cargo-mutants` 按「工具获取」策略在 CI 预编译装（见 [quality-isolation.md](quality-isolation.md)；一次性临时环境，不改本机）。已知**等价变异体**在仓库根的 `.cargo/mutants.toml` 的 `exclude_re` 里排除（每条都要写明为什么等价，当前 1 条）。
 
@@ -225,12 +227,12 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 
 | job | 跑什么 | 对应入口 |
 | --- | --- | --- |
-| `quality` | 平台门禁 + 供应链 + L1 单元 + 平台探针 + 前端冒烟 + 开发回路 / 变更分流 / 环境引导自检（**跳过 L4 与结构审查**） | `node run-tests.js --fence-live --skip-e2e --skip-audit` |
+| `quality` | 平台门禁 + 供应链 + L1 单元 + 平台探针 + 前端冒烟 + 开发回路 / 变更分流 / 环境引导自检（**跳过 L4 与结构审查**） | `node run-tests.js --fence-live --skip-e2e --skip-audit --strict-env` |
 | `e2e` | L4 端到端（自己构建产品，与 `quality` 并行） | `node tests/ci-e2e.mjs`（CI 专用；本地整跑用 `node run-tests.js --fence-live`） |
 | `changes` | 判定 `code_changed` / `docs_changed`；从 base 取分类器副本，自测 + `include_str!/include_bytes!` 文档消费自检 | `node tests/ci-changes.mjs`（副本） |
 | `docs` | 有文档变更：文档审查（门户 / 链接 / 根文档路由） | `node run-tests.js --audit=docs` |
 | `structure` | 始终跑：结构审查（代码↔文档结构；文档与真相源比对 + 纯文本检查） | `node run-tests.js --audit=structure` |
-| `workflow` | 始终跑：工作流静态检查（闸门判定自测 + actionlint 阻断 + zizmor 只报不拦） | `node tests/ci-gate.mjs --self-test`；`actionlint -no-color`（阻断）；`zizmor --persona=regular --format=plain .github/workflows`（advisory） |
+| `workflow` | 始终跑：工作流静态检查（闸门判定自测 + actionlint 阻断 + zizmor 只报不拦，观察稳定后转阻断） | `node tests/ci-gate.mjs --self-test`；`actionlint -no-color`（阻断）；`zizmor --persona=regular --format=plain .github/workflows`（advisory） |
 | `gate` | 汇总五个 job 的结果（`changes` 的分类 + `docs` / `structure` / `workflow` / `quality` / `e2e`），规则集里唯一代表代码/文档验收的必填检查；不产报告 | `node tests/ci-gate.mjs` |
 | `publish-report` | 汇总三条 lane 的报告并发布 `ci-report` | `tests/ci-merge.mjs` + `tests/ci-publish.mjs` |
 
@@ -293,6 +295,7 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 | 发布前验收 | 本地通过 ≠ 三平台通过 | 三平台报告 + 三平台 `TEST-REPORT-ACCEPTED` |
 
 - 文档审查与结构审查本身是本地可复现的确定性检查；CI 里跑它们是为了让 `gate` 能给出合并判定（它们不是 required context），不是补平台结论。工作流静态检查同理：闸门判定自测本地可跑（`node tests/ci-gate.mjs --self-test`），`actionlint` / `zizmor` 只在 CI 装。
+- zizmor 现在是**观察期**：只报不拦，连续若干次非 Draft CI 稳定、findings 处置完后转阻断；观察与转阻断的验收记在缺口 `ci.zizmor-advisory`（`tests/gaps.yaml`），不靠口头约定。
 
 - **什么时候手动派发**：Draft 阶段不自动跑 CI，需要他平台结论时手动派发；PR 标 Ready 后自动跑，不必再派发。
 - 手动派发还用于「没有 PR 的分支」与「干净机器复验」。
@@ -362,7 +365,7 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 - `pass`：步骤完成；
 - `fail`：断言或命令失败（硬失败，含编译、交叉类型检查、供应链、项目外写与业务用例）；
 - `quality-fail`：结构审查 / 格式 / clippy / 编译告警 / 依赖重复不过；
-- `env-skip`：工具缺失等环境性跳过（步骤级），与 `envSkips`（探针级的 `[探针]` 行）并列；
+- `env-skip`：工具缺失等环境性跳过（步骤级），与 `envSkips`（探针级的 `[探针]` 行）并列；带 `--strict-env` 时必装项不产生 `env-skip`（记失败）；
 - `skip-platform`：当前平台不适用的空平台目标；
 - `gap`：入口没有找到应运行的部分。
 

@@ -22,6 +22,7 @@ function parse(argv) {
     skipE2e: false,
     list: false,
     json: false,
+    strictEnv: false,
     only: [],
     changed: false,
     run: false,
@@ -40,6 +41,7 @@ function parse(argv) {
     } else if (a === "--skip-audit") o.skipAudit = true;
     else if (a === "--fence-live") o.fenceLive = true;
     else if (a === "--skip-e2e") o.skipE2e = true;
+    else if (a === "--strict-env") o.strictEnv = true;
     else if (a === "--list") o.list = true;
     else if (a === "--json") o.json = true;
     else if (a.startsWith("--only=")) {
@@ -82,6 +84,8 @@ function usage() {
     "  --list [--json]      列出车道 / gate / 步骤（机器可读）",
     "  --only=<id>          跑单个 gate 或步骤（逗号分隔，可重复；车道名=对应车道）",
     "  --changed [--run]    按 git 影响面反查 gate（默认只打印）",
+    "",
+    "环境：--strict-env       必装工具缺失时记失败而不是 env-skip（CI 用；可选交叉 target 不受影响）",
     "",
     "其它：--skip-e2e / --skip-audit / --serial / --release / --fence-live / --help",
     "判据与报告字段见 TESTING.md 与 docs/testing/execution-ci.md。",

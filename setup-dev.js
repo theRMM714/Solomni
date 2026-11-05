@@ -3,7 +3,8 @@
  * 开发环境安装 / 同步：把开发与门禁需要的东西装到**项目内**（platform/<os>/ 与 .tools/）。
  * 管：项目内 Rust 工具链、Rust 组件、交叉 target、供应链工具；--check 只读校验、--offline 不下载。
  * 不管：运行前提的基础工具链（Python / Node / C-C++，由产品 solomni --provision --ensure=toolchain 自己补）；条目清单（dev-tools.js，唯一真相）。
- * 用法：node setup-dev.js [--check] [--yes] [--offline]
+ * 用法：node setup-dev.js [--check] [--strict] [--yes] [--offline]
+ * 约束：required: false 的条目（交叉 target、覆盖率工具）缺了不阻断 --check；--strict 要求清单全齐。
  * 约束：只写项目内（RUSTUP_HOME / CARGO_HOME / .tools）；不碰系统 ~/.rustup、~/.cargo。
  */
 "use strict";
@@ -15,6 +16,7 @@ const DEV = require("./dev-tools.js");
 
 const ROOT = __dirname;
 const CHECK = process.argv.includes("--check");
+const STRICT = process.argv.includes("--strict");
 const YES = process.argv.includes("--yes");
 const OFFLINE = process.argv.includes("--offline");
 const TOOLS_ROOT = path.join(ROOT, ".tools");
@@ -74,14 +76,15 @@ function probeRunnable(name, e) {
   const comps = installedComponents(e);
   const targets = installedTargets(e);
   const missing = [];
+  // required 缺省为 true：清单里没写 required 的条目按必装处理，新增条目不会静默变成可选。
   for (const c of DEV.components) {
-    if (!componentPresent(comps, c.name, c.listed)) missing.push({ kind: "component", id: c.name, why: c.why });
+    if (!componentPresent(comps, c.name, c.listed)) missing.push({ kind: "component", id: c.name, why: c.why, required: c.required !== false });
   }
   for (const t of DEV.targets) {
-    if (!targets.has(t.triple)) missing.push({ kind: "target", id: t.triple, why: t.why });
+    if (!targets.has(t.triple)) missing.push({ kind: "target", id: t.triple, why: t.why, required: t.required !== false });
   }
   for (const c of DEV.crates) {
-    if (!fs.existsSync(crateBin(c.name))) missing.push({ kind: "crate", id: c.name, why: c.why });
+    if (!fs.existsSync(crateBin(c.name))) missing.push({ kind: "crate", id: c.name, why: c.why, required: c.required !== false });
   }
   for (const p of DEV.probe) {
     const found = probeRunnable(p.name, e);
@@ -92,12 +95,18 @@ function probeRunnable(name, e) {
     log("开发环境齐备（组件 / target / 工具都在项目内）。");
     process.exit(0);
   }
-  log("缺 " + missing.length + " 项：");
-  for (const m of missing) log("  - " + m.kind + " " + m.id + "（" + m.why + "）");
+  const requiredMissing = missing.filter((m) => m.required || STRICT);
+  const optionalMissing = missing.filter((m) => !(m.required || STRICT));
+  log("缺 " + missing.length + " 项（必装 " + requiredMissing.length + " / 建议 " + optionalMissing.length + "）：");
+  for (const m of missing) log("  - " + m.kind + " " + m.id + "（" + m.why + "，" + (m.required || STRICT ? "必装" : "建议") + "）");
 
   if (CHECK) {
-    bad("开发环境不齐：跑 node setup-dev.js 补齐（或加 --yes 免询问）。");
-    process.exit(1);
+    if (requiredMissing.length) {
+      bad("开发环境不齐（必装项缺 " + requiredMissing.length + "）：跑 node setup-dev.js 补齐（或加 --yes 免询问）。");
+      process.exit(1);
+    }
+    log("必装项齐备；可选项目未装：" + optionalMissing.map((m) => m.id).join("、") + "（不阻断，--strict 才要求全齐）。");
+    process.exit(0);
   }
   if (OFFLINE) {
     bad("--offline：缺项需要下载，按上面清单手动装（都落项目内）。");

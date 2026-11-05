@@ -63,6 +63,13 @@ function finish(ctx, obj) {
   ctx.step.push(obj);
 }
 
+/** --strict-env：必装工具缺失时把 env-skip 升为失败；可选项（交叉 target）不经过这里。 */
+function envSkipResult(ctx, detail, failStatus) {
+  return ctx.opts.strictEnv
+    ? { status: failStatus || "quality-fail", detail: "strict-env：必装工具缺失（CI 必须装齐）→ " + detail }
+    : { status: "env-skip", detail: detail };
+}
+
 const STEPS = [
   {
     id: "build",
@@ -137,8 +144,9 @@ const STEPS = [
     run(ctx) {
       ctx.step.announce("T0 格式（fmt --check）");
       if (!ctx.proc.toolAvailable("fmt")) {
-        ctx.step.announceDone("env-skip", "cargo-fmt 未安装");
-        finish(ctx, { step: "T0 格式（fmt --check）", status: "env-skip", detail: "cargo-fmt 未安装：node setup-dev.js" });
+        const s = envSkipResult(ctx, "cargo-fmt 未安装：node setup-dev.js", "quality-fail");
+        ctx.step.announceDone(s.status === "env-skip" ? "env-skip" : "失败", s.detail);
+        finish(ctx, { step: "T0 格式（fmt --check）", status: s.status, detail: s.detail });
         return;
       }
       const r = ctx.proc.sh("cargo", ["fmt", "--all", "--", "--check", "--color", "never"]);
@@ -161,8 +169,9 @@ const STEPS = [
     run(ctx) {
       ctx.step.announce("T0 静态检查（clippy）");
       if (!ctx.proc.toolAvailable("clippy")) {
-        ctx.step.announceDone("env-skip", "cargo-clippy 未安装");
-        finish(ctx, { step: "T0 静态检查（clippy）", status: "env-skip", detail: "cargo-clippy 未安装：node setup-dev.js" });
+        const s = envSkipResult(ctx, "cargo-clippy 未安装：node setup-dev.js", "quality-fail");
+        ctx.step.announceDone(s.status === "env-skip" ? "env-skip" : "失败", s.detail);
+        finish(ctx, { step: "T0 静态检查（clippy）", status: s.status, detail: s.detail });
         return;
       }
       // --keep-going：-D warnings 会让首个失败的单元中断调度；加上它所有目标单元都编译完，计数才可复现。
@@ -246,8 +255,9 @@ const STEPS = [
     run(ctx) {
       ctx.step.announce("T0 依赖重复（cargo tree）");
       if (!ctx.proc.toolAvailable("tree")) {
-        ctx.step.announceDone("env-skip", "cargo-tree 不可用");
-        finish(ctx, { step: "T0 依赖重复（cargo tree）", status: "env-skip", detail: "cargo tree 不可用" });
+        const s = envSkipResult(ctx, "cargo tree 不可用", "quality-fail");
+        ctx.step.announceDone(s.status === "env-skip" ? "env-skip" : "失败", s.detail);
+        finish(ctx, { step: "T0 依赖重复（cargo tree）", status: s.status, detail: s.detail });
         return;
       }
       const r = ctx.proc.sh("cargo", ["tree", "--duplicates", "--color", "never"]);
@@ -269,7 +279,10 @@ const STEPS = [
     inputs: ["Cargo.lock", "deny.toml"],
     run(ctx) {
       ctx.step.announce("T0 供应链（audit/deny）");
-      const supply = supplyChainCheck(ctx);
+      let supply = supplyChainCheck(ctx);
+      if (ctx.opts.strictEnv && supply.status === "env-skip") {
+        supply = { status: "fail", detail: "strict-env：供应链工具缺失或取不到 advisory 数据 → " + supply.detail, raw: supply.raw };
+      }
       ctx.step.announceDone(supply.status === "pass" ? "完成" : supply.status === "env-skip" ? "env-skip" : "失败", supply.detail);
       finish(ctx, { step: "T0 供应链（audit/deny）", status: supply.status, detail: supply.detail, raw: supply.raw });
     },
@@ -466,12 +479,12 @@ const OUTCOMES = {
   build: { status: ["pass", "fail"], envSkip: null },
   check: { status: ["pass", "fail"], envSkip: null },
   audit: { status: ["pass", "quality-fail"], envSkip: null },
-  fmt: { status: ["pass", "quality-fail", "env-skip"], envSkip: "cargo-fmt 未安装" },
-  clippy: { status: ["pass", "quality-fail", "env-skip"], envSkip: "cargo-clippy 未安装" },
+  fmt: { status: ["pass", "quality-fail", "env-skip"], envSkip: "cargo-fmt 未安装（--strict-env 下算失败）" },
+  clippy: { status: ["pass", "quality-fail", "env-skip"], envSkip: "cargo-clippy 未安装（--strict-env 下算失败）" },
   warnings: { status: ["pass", "quality-fail"], envSkip: null },
-  "cross-check": { status: ["pass", "fail", "env-skip", "skip-platform"], envSkip: "该 target 未安装，或本机缺该平台的 C 工具链 / SDK；CI 上整步记 skip-platform" },
-  duplicates: { status: ["pass", "quality-fail", "env-skip"], envSkip: "cargo-tree 不可用" },
-  supply: { status: ["pass", "fail", "env-skip"], envSkip: "cargo-audit / cargo-deny 未安装，或取不到 advisory 数据" },
+  "cross-check": { status: ["pass", "fail", "env-skip", "skip-platform"], envSkip: "可选：该 target 未安装，或本机缺该平台的 C 工具链 / SDK；CI 原生矩阵才是权威，--strict-env 不强制" },
+  duplicates: { status: ["pass", "quality-fail", "env-skip"], envSkip: "cargo-tree 不可用（--strict-env 下算失败）" },
+  supply: { status: ["pass", "fail", "env-skip"], envSkip: "cargo-audit / cargo-deny 未安装或取不到 advisory 数据（--strict-env 下算失败）" },
   unit: { status: ["pass", "fail"], envSkip: null },
   "target/cross-platform": { status: ["pass", "fail"], envSkip: null },
   "target/windows": { status: ["pass", "fail", "skip-platform"], envSkip: "非本平台且整目标为空记 skip-platform" },

@@ -80,8 +80,9 @@ node dev.js test|fmt|clippy   # 本机开发回路：改一层验一层；cargo 
 ```
 
 - 开发环境的**条目清单**是 [dev-tools.js](dev-tools.js)（唯一真相）：`setup-dev.js` 按它装，`run-tests.js` 按它查 / `env-skip`。
-  含 Rust 组件（rustfmt / clippy / llvm-tools-preview）、交叉 target（Windows + macOS）、项目内工具（cargo-audit / cargo-deny / cargo-llvm-cov）。
-- 与运行环境分开的理由：只想跑产品的人不需要这些；门禁在只有运行环境的机器上仍能跑，缺的项如实 `env-skip`。
+  必装：rustfmt / clippy / cargo-audit / cargo-deny（T0 判据本身）；可选：交叉 target（权威验收是 CI 三平台原生矩阵）与 llvm-tools-preview / cargo-llvm-cov（覆盖率发现模式）。
+- 与运行环境分开的理由：只想跑产品的人不需要这些；门禁在只有运行环境的机器上仍能跑，可选项目缺失如实 `env-skip`。
+- `node setup-dev.js --check` 只校验必装项（`--strict` 才要求清单全齐）；`node run-tests.js --strict-env` 把必装工具缺失记为失败，CI 的 `quality` job 用它，缺工具不许冒充通过。
 - 环境是独立一层（[env.js](env.js)）：路径约定、**Rust / MinGW** 工具链的探测、环境拼装与安装都在这里（运行前提不在这里装）；`node env.js` 看解析结果，`node env.js --print-env` 给出机器可读的解析结果与完整变量表（`env`：`PATH` / `CARGO_HOME` / `RUSTUP_HOME` / `TMP` / `TMPDIR` / `TEMP`）。`setup-dev.js` 只装 Rust（组件 / target / crates）并指路产品补齐。
   Windows **且构建目标是 GNU** 时，首次运行会征得同意后把可携 MinGW（`dlltool.exe`，`windows-sys` 的 raw-dylib 需要）装进项目内 `.tools/`（借到能链接的 msvc 工具链时不需要它）；
   已有完整 binutils 的机器用 `SOLOMNI_MINGW_BIN=<bin 目录>` 指过去即可，不必再下 260 MB。

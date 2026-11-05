@@ -58,12 +58,12 @@ cargo deny check
 | --- | --- | --- |
 | `T0 编译（--all-targets）` | pass / fail | — |
 | `T0 结构审查` | pass / quality-fail | — |
-| `T0 格式（fmt --check）` | pass / quality-fail / env-skip | cargo-fmt 未安装 |
-| `T0 静态检查（clippy）` | pass / quality-fail / env-skip | cargo-clippy 未安装 |
+| `T0 格式（fmt --check）` | pass / quality-fail / env-skip | cargo-fmt 未安装（--strict-env 下算失败） |
+| `T0 静态检查（clippy）` | pass / quality-fail / env-skip | cargo-clippy 未安装（--strict-env 下算失败） |
 | `T0 编译告警` | pass / quality-fail | — |
-| `T0 交叉类型检查` | pass / fail / env-skip / skip-platform | 该 target 未安装，或本机缺该平台的 C 工具链 / SDK；CI 上整步记 skip-platform |
-| `T0 依赖重复（cargo tree）` | pass / quality-fail / env-skip | cargo-tree 不可用 |
-| `T0 供应链（audit/deny）` | pass / fail / env-skip | cargo-audit / cargo-deny 未安装，或取不到 advisory 数据 |
+| `T0 交叉类型检查` | pass / fail / env-skip / skip-platform | 可选：该 target 未安装，或本机缺该平台的 C 工具链 / SDK；CI 原生矩阵才是权威，--strict-env 不强制 |
+| `T0 依赖重复（cargo tree）` | pass / quality-fail / env-skip | cargo-tree 不可用（--strict-env 下算失败） |
+| `T0 供应链（audit/deny）` | pass / fail / env-skip | cargo-audit / cargo-deny 未安装或取不到 advisory 数据（--strict-env 下算失败） |
 | `T0 项目外写` | pass / fail | — |
 
 > 9 项：4 项没有环境跳过出口（不过即硬失败），5 项在工具 / 环境不具备时可记 `env-skip`（不算通过）。

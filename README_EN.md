@@ -105,11 +105,14 @@ node dev.js test|fmt|clippy   # one-layer dev commands; cargo only runs through 
 ```
 
 - The **item inventory** of the dev environment is [dev-tools.js](dev-tools.js) (the single authority): `setup-dev.js`
-  installs per it, `run-tests.js` checks / `env-skip`s per it. It covers Rust components
-  (rustfmt / clippy / llvm-tools-preview), cross targets (Windows + macOS) and project-local tools
-  (cargo-audit / cargo-deny / cargo-llvm-cov).
+  installs per it, `run-tests.js` checks / `env-skip`s per it. Required: rustfmt / clippy / cargo-audit / cargo-deny
+  (the T0 checks themselves); optional: cross targets (the CI three-platform matrix is authoritative) and
+  llvm-tools-preview / cargo-llvm-cov (coverage discovery mode).
 - Why it is separate from the runtime environment: people who only run the product do not need any of it, and the
-  gate still runs on a runtime-only machine — missing items are reported as `env-skip`, never silently.
+  gate still runs on a runtime-only machine — missing optional items are reported as `env-skip`, never silently.
+- `node setup-dev.js --check` validates required items only (`--strict` requires the whole list);
+  `node run-tests.js --strict-env` turns missing required tools into failures, and the CI `quality` job uses it so a
+  missing tool can never masquerade as a pass.
 - The environment is its own layer ([env.js](env.js)): path conventions, **Rust / MinGW** toolchain detection,
   environment composition and installation live there (runtime prerequisites are not installed here); `node env.js`
   shows the resolved environment and `node env.js --print-env` prints the machine-readable result plus the full

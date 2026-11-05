@@ -263,7 +263,8 @@ jobs:
 
       # 结构审查已由 structure job 跑过；这里只跑平台相关门禁与测试（--skip-audit）。
       - name: 质量门禁 + 单元 + 平台探针（跳过 L4 与结构审查）
-        run: node run-tests.js --fence-live --skip-e2e --skip-audit
+        # --strict-env：必装工具（rustfmt / clippy / cargo-audit / cargo-deny）缺失或取不到数据时，不许记 env-skip 冒充通过。
+        run: node run-tests.js --fence-live --skip-e2e --skip-audit --strict-env
 
       # 锁文件漂移：改了 Cargo.toml 却没带 Cargo.lock 时，cargo 会在 CI 里默默更新锁文件、测试照样绿，
       # 合并后仓库里的锁就过期了。只读工作树：本次运行改过锁文件即失败（改动原文打进日志）。
