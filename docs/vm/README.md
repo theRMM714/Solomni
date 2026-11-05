@@ -40,6 +40,8 @@
 
 - 组合：Linux QEMU/KVM + virtiofs（virtiofsd 不在场或不能执行时退 9p）；Windows QEMU/WHPX + SMB guestfwd（缺 smbd 时虚拟机档不可用，先补齐，不降级）。
 - Windows 验收前提：硬件加速（WHPX）可用；当前只验过物理宿主，嵌套虚拟化宿主未验（`tests/windows/gaps.yaml`）。
+- Windows 上 WHPX 的已知宿主 CPU 开销：guest 空闲（HLT）在默认 `kernel-irqchip=on` 下不上报给 QEMU，QEMU 的一个 vCPU 线程会持续占用约一个核；QEMU 11.1 的 `HV_X64_MSR_GUEST_IDLE` 只在 `kernel-irqchip=off` 下生效，当前启动行用默认 `accel=whpx`。不影响 guest 功能与结果，只增加宿主 CPU 占用；要消掉需评估 `kernel-irqchip=off` 并补真机 CPU 数据。
+- guest 内诊断入口当前缺失（进程 / CPU / 内存看不进去；QGA 单客户端外部不可连，per-agent Landlock 不放行 `/proc`）：见 `tests/gaps.yaml` 的 `vm.guest-diagnostics`。
 - 验收证据：引擎级探针（`vm_live_guest_runs_command_inside_guest`）+ 并发可写层探针（`vm_live_two_guests_share_one_base_without_writing_it`）与 e2e 的虚拟机档会话场景都过（虚拟根默认 `debian`，`SOLOMNI_VM_GUEST` 可换）；两端的 QEMU 与 guest 镜像由 provision 能力按清单装入。
 - 多台虚拟机档会话并发时各写自己的每租约可写层（不共写基础镜像），同时台上限 `max_guests`（见「五、并发与可写层」）。
 - macOS 组合：缺 QEMU 取包与 Apple vz 引擎 + 自研 agent（vsock 通道）；缺口与验收标准只记在 `tests/macos/gaps.yaml`。
