@@ -58,7 +58,7 @@ pub trait ProcessTexts: Send + Sync {
     fn no_answerer_refused(&self, part: &str, path: &str) -> String;
     /// 无围栏跑一次时的如实标注（part / path / why）。
     fn fence_unfenced(&self, part: &str, path: &str, why: &str) -> String;
-    /// 目的：shell 输出 head+tail 截断的尾部说明（chars = 原字符数，head / tail = 各留多少）。
+    /// 目的：shell 输出 head+tail 截断的尾部说明（chars = 原字符数，head / tail = **实际保留**的字符数）。
     fn truncated_middle(&self, chars: &str, head: &str, tail: &str) -> String;
     /// 目的：shell 的退出码回执（None = 被信号结束，拿不到退出码）。
     fn shell_exit(&self, code: Option<i32>) -> String;

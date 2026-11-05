@@ -318,11 +318,14 @@ impl Discussion {
                     piece = r.clone();
                 }
             }
-            (sink_cell.borrow_mut())(SessionEvent::Delta {
-                speaker: speaker.to_string(),
-                kind: kind.to_string(),
-                text: piece,
-            });
+            // 空片段不刷事件流（同 driver：信封被抑制 / 重复快照合并掉的片都不外送）。
+            if crate::capabilities::session::api::delta_visible(kind, &piece) {
+                (sink_cell.borrow_mut())(SessionEvent::Delta {
+                    speaker: speaker.to_string(),
+                    kind: kind.to_string(),
+                    text: piece,
+                });
+            }
             !cancel.load(std::sync::atomic::Ordering::Relaxed)
         };
         // 定稿行不走这个出口（讨论席的发言由主会话投影写）：给它一个占位，别把两处的行写重。

@@ -6,4 +6,5 @@
 pub mod fence;
 pub mod jobs;
 pub mod path;
+pub mod receipt;
 pub mod types;

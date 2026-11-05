@@ -2337,6 +2337,8 @@ pub(crate) struct RecordingVm {
     pub leases: Mutex<Vec<String>>,
     /// 目的：每个租约启动时装载的运行包（判定新子会话要不要重建）。
     pub packages: Mutex<std::collections::BTreeMap<String, Vec<String>>>,
+    /// 目的：fenced 执行的返回值覆盖（None = 恒成功）；超时 / 停止回执的成员侧断言用。
+    pub fenced_result: Mutex<Option<crate::kernel::api::ToolOutcome>>,
 }
 
 impl crate::capabilities::vm::api::Vm for RecordingVm {
@@ -2375,10 +2377,14 @@ impl crate::capabilities::vm::api::Vm for RecordingVm {
             run.timeout_secs,
             run.output_limit,
         ));
-        crate::kernel::api::ToolOutcome {
-            ok: true,
-            output: "guest".to_string(),
-        }
+        self.fenced_result
+            .lock()
+            .expect("锁")
+            .clone()
+            .unwrap_or(crate::kernel::api::ToolOutcome {
+                ok: true,
+                output: "guest".to_string(),
+            })
     }
 
     fn stage_exec(

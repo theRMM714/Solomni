@@ -54,6 +54,10 @@ const READ_ONLY_BASELINE: &[&str] = &[
     "/sys/devices/system/cpu",
 ];
 
+/// 目的：运行时基线里**要可写**的设备文件——不是数据落点，是标准重定向要能丢弃输出（`>/dev/null` / `2>/dev/null`）。
+/// 约束：只给这些设备文件本身，不给整个 /dev；其余基线路径仍只读。
+const WRITABLE_BASELINE: &[&str] = &["/dev/null"];
+
 const LANDLOCK_CREATE_RULESET_VERSION: u32 = 1;
 const LANDLOCK_RULE_PATH_BENEATH: u32 = 1;
 
@@ -557,9 +561,18 @@ fn install_rules(spec: &FenceSpec, command: &str) -> Result<(), String> {
         }
     }
     for p in READ_ONLY_BASELINE {
-        let path = Path::new(p);
+        if WRITABLE_BASELINE.contains(p) {
+            continue;
+        }
+        let path = Path::new(*p);
         if path.exists() {
             wanted.push((path.to_path_buf(), RO_ALL));
+        }
+    }
+    for p in WRITABLE_BASELINE {
+        let path = Path::new(p);
+        if path.exists() {
+            wanted.push((path.to_path_buf(), mask_for(abi, RO_ALL | FS_WRITE_FILE)));
         }
     }
     // 命令里解释器的安装目录也要只读放行：否则解释器装在 /usr 之外（pyenv、homebrew、自装）时，工具在围栏里起不来。

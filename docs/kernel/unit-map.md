@@ -19,6 +19,7 @@
 | `src/kernel/domain/fence.rs` | 围栏描述符（`FenceSpec`）与落点判据（`FencePart`/`FenceBlocked`/`fence_ask`）：纯数据 |
 | `src/kernel/domain/path.rs` | 路径的对外书写形式：把路径统一写成 `/` 分隔的字符串（给提示词、回执与 JSON 用；纯逻辑） |
 | `src/kernel/domain/jobs.rs` | 生成中作业的取消表（`JobRegistry`）：同一会话每次生成各持一面旗，停止置位全部、摘旗按身份 |
+| `src/kernel/domain/receipt.rs` | host/guest 共用的 shell 回执装配（stdout + `[stderr]` 区 + head+tail 截断（按完整行取整）+ 状态行；词表来自 `ProcessTexts`） |
 | `src/kernel/detail/file_log.rs` | `Log` 端口的文件实现：每次运行在 `logs/` 下按时间戳建文件并逐行追加（写经 `Mutex` 串行） |
 | `src/kernel/detail/host_probe.rs` | `HostProbe` 端口的机制实现：查环境变量与 `PATH` 里的可执行文件、路径存在性，并按平台判定虚拟机能力 |
 | `src/kernel/detail/outbound.rs` | 出站 HTTPS 的共享机制：唯一一处 TLS 后端装配与通用 ureq 代理 |

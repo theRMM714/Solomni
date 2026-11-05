@@ -7,7 +7,7 @@ use super::discussion::*;
 use super::round::*;
 use crate::capabilities::llm::api::{Chunk, Msg};
 use crate::capabilities::session::api::{
-    stream_piece, AgentSession, LineView, Live, SessionEvent, ToolCallView, TurnRun,
+    delta_visible, stream_piece, AgentSession, LineView, Live, SessionEvent, ToolCallView, TurnRun,
 };
 /// 目的：只把被总结的前缀发给模型、只声明 compact 工具，跑一次模型并返回摘要。
 /// 约束：两条通道都认：native 从结构化槽位取，信封通道从正文里的信封取（与讨论回合同口径）。
@@ -510,11 +510,14 @@ fn run(
                         piece = r.clone();
                     }
                 }
-                (emit.borrow_mut())(SessionEvent::Delta {
-                    speaker: label.clone(),
-                    kind: kind.to_string(),
-                    text: piece,
-                });
+                // 空片段不刷事件流：信封被抑制、重复快照合并掉的片都不该让前端每秒收几十条空 delta。
+                if delta_visible(kind, &piece) {
+                    (emit.borrow_mut())(SessionEvent::Delta {
+                        speaker: label.clone(),
+                        kind: kind.to_string(),
+                        text: piece,
+                    });
+                }
                 !cancel.load(std::sync::atomic::Ordering::Relaxed)
             },
             &mut |view: &ToolCallView| {

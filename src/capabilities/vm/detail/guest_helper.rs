@@ -13,6 +13,15 @@ pub const HELPER_PATH: &str = "/usr/local/sbin/solomni-guest-fence";
 #[allow(dead_code)]
 pub const HELPER_TIMEOUT_SECS: u64 = 30;
 
+/// 目的：助手诊断行的统一前缀（围栏装不上 / 起不了进程这类「没执行」的事实）。
+pub const HELPER_DIAG_PREFIX: &str = "solomni-guest-fence: ";
+
+/// 目的：超时的机器标记——通道据此产出 `[shell] 超时（N 秒）` 并把标记剥掉（人读文案在 ProcessTexts）。
+pub const HELPER_TIMEOUT_MARKER: &str = "solomni-guest-fence: timeout";
+
+/// 目的：被信号结束的机器标记——通道据此产出「退出码未知（被信号结束）」并剥掉标记。
+pub const HELPER_SIGNAL_MARKER: &str = "solomni-guest-fence: signal";
+
 /// 目的：助手脚本正文。guest 只需 python3（虚拟根基线已自证）；缺 python3 时执行必然失败，不降级。
 pub const HELPER_SCRIPT: &str = r#"#!/usr/bin/env python3
 import ctypes
@@ -40,7 +49,7 @@ def on_term(signum, frame):
             os.killpg(child.pid, signal.SIGKILL)
         except OSError:
             pass
-    sys.stderr.write("solomni-guest-fence: 用户停止，已终止整棵进程树\n")
+    # 取消由宿主侧的取消旗判定（通道据此产出「用户停止」状态行）；这里只杀树、只留退出码。
     sys.exit(143)
 
 
@@ -158,7 +167,9 @@ def main():
         die("landlock_create_ruleset: " + os.strerror(ctypes.get_errno()))
 
     read_ok = (1 << 0) | (1 << 2) | (1 << 3)
-    # 只读运行基线：与本机 Linux 后端同一份范围（guest 里也只需要这些就能起解释器）。
+    write_file = 1 << 1
+    # 运行基线：与本机 Linux 后端同一份范围（guest 里也只需要这些就能起解释器）；
+    # /dev/null 额外可写——标准重定向要能丢弃输出（`>/dev/null` / `2>/dev/null`），只给这个设备节点。
     for base in (
         "/usr", "/bin", "/sbin", "/lib", "/lib64", "/lib32",
         "/etc/ld.so.cache", "/etc/localtime", "/etc/terminfo",
@@ -166,7 +177,8 @@ def main():
         "/dev/null", "/dev/zero", "/dev/urandom", "/dev/random",
         "/proc/self", "/proc/meminfo", "/sys/devices/system/cpu",
     ):
-        add_dir(base, read_ok, fd, read_ok, handled)
+        rights = read_ok | write_file if base == "/dev/null" else read_ok
+        add_dir(base, rights, fd, read_ok, handled)
     for p in policy.get("ro_tree", []) + policy.get("ro", []):
         required_dir(p, read_ok, fd, read_ok, handled)
     cwd = policy.get("cwd", "")
@@ -237,9 +249,12 @@ def main():
             child.wait(timeout=5)
         except Exception:
             pass
-        sys.stderr.write("solomni-guest-fence: 工具进程超时，已终止整棵进程树\n")
+        sys.stderr.write("solomni-guest-fence: timeout\n")
+        sys.stderr.flush()
         sys.exit(124)
     if code is None or code < 0:
+        sys.stderr.write("solomni-guest-fence: signal\n")
+        sys.stderr.flush()
         sys.exit(111)
     sys.exit(code)
 

@@ -238,13 +238,15 @@ impl GuestAccess {
     }
 }
 
-/// 目的：guest 执行输出的截断方式：工具回执只留开头；shell 回执保留开头与结尾（退出码在尾部）。
+/// 目的：guest 执行输出的截断方式，同时决定回执形状：工具回执只留开头；shell 回执按 shell 契约装配。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputLimit {
     /// 目的：只留开头（模块工具沿用）。
     Head,
-    /// 目的：保留开头 1/4 与结尾 3/4（shell）。
+    /// 目的：保留开头 1/4 与结尾 3/4（构建等内部脚本）。
     HeadAndTail,
+    /// 目的：shell 回执——正文 head+tail 截断，且由通道产出与本机同形的状态行；cwd 与耗时由工具层追加。
+    Shell,
 }
 
 /// 目的：在 guest 里跑一次工具（命令 + 参数 + 环境 + 工作目录 + 按次超时与输出截断）。

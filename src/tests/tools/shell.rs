@@ -278,13 +278,99 @@ pub(crate) fn guest_shell_goes_through_the_guest_helper_with_per_call_timeout() 
     assert_eq!(runs[0].1, 7, "按次 timeout 要送进 guest");
     assert_eq!(
         runs[0].2,
-        crate::capabilities::vm::domain::guest::OutputLimit::HeadAndTail
+        crate::capabilities::vm::domain::guest::OutputLimit::Shell,
+        "shell 要显式标成 Shell 回执，通道才会产出同形状态行"
     );
-    assert!(runs[0].0.contains("echo guest"), "{}", runs[0].0);
+    assert_eq!(runs[0].0, "echo guest", "脚本原样送进 guest，不再套包装");
+}
+
+/// 目的：虚拟机档的超时回执也要有执行层状态行，并由工具层补 cwd 与耗时（与正常回执同形）。
+#[test]
+fn vm_timeout_receipt_gets_cwd_and_elapsed_trailer() {
+    let runner = Arc::new(ShellRunner::new("host", true));
+    let mut mt = member(Arc::clone(&runner));
+    mt.tier = crate::kernel::api::Tier::Vm;
+    mt.guest_lease = "lease".to_string();
+    let slot = Arc::new(crate::capabilities::session::api::ShellSlot::default());
+    mt.shell_live = Some(Arc::clone(&slot));
+    let vm = Arc::new(crate::tests::doubles::RecordingVm::default());
+    *vm.fenced_result.lock().expect("锁") = Some(ToolOutcome {
+        ok: false,
+        output: "[shell] 超时（2 秒）：工具进程与它拉起的整棵进程树已被终止".to_string(),
+    });
+    mt.vm = vm.clone();
+    let cancel = AtomicBool::new(false);
+    let mut sink = |_: SessionEvent| {};
+    let done = run_batch(
+        &mut mt,
+        &shell_plan(r#"{"command":"sleep 5","timeout_secs":2}"#),
+        None,
+        None,
+        &cancel,
+        &mut sink,
+    );
+    let out = &done[0].1;
+    assert!(!out.ok, "超时不能报成功：{}", out.output);
     assert!(
-        runs[0].0.contains("[shell] 退出码"),
-        "guest 脚本要带回退出码：{}",
-        runs[0].0
+        out.output.contains("[shell] 超时（2 秒）"),
+        "状态行要在回执里：{}",
+        out.output
+    );
+    let (cwd, secs) = crate::capabilities::tools::api::cwd_elapsed(&out.output)
+        .expect("超时回执也要有落点与耗时");
+    assert_eq!(cwd, mt.sandbox.private.display().to_string());
+    assert_eq!(secs, 0, "刚跑完的耗时按墙钟秒");
+    assert_eq!(
+        crate::capabilities::tools::api::exit_code(&out.output),
+        None,
+        "超时没有命令退出码"
+    );
+    assert_eq!(
+        crate::capabilities::tools::api::shell_status(&out.output),
+        Some(crate::capabilities::tools::domain::shell::ShellStatus::Timeout)
+    );
+    let live = slot.get().expect("状态栏快照");
+    assert_eq!(live.status.as_deref(), Some("timeout"));
+    assert_eq!(live.exit_code, None);
+}
+
+/// 目的：虚拟机档回执的 cwd 用本环境（guest）写法，不再露宿主写法。
+#[test]
+fn vm_shell_receipt_uses_the_environment_path_form() {
+    use crate::capabilities::vm::api::PathBridge;
+    use crate::capabilities::vm::domain::paths::PathDialect;
+    use crate::kernel::ports::PathCodec;
+    let bridge = Arc::new(PathBridge::new("windows", PathDialect::Posix));
+    let runner = Arc::new(ShellRunner::new("host", true));
+    let mut mt = member(Arc::clone(&runner));
+    mt.tier = crate::kernel::api::Tier::Vm;
+    mt.guest_lease = "lease".to_string();
+    mt.sandbox.path_codec = Some(bridge.clone());
+    let vm = Arc::new(crate::tests::doubles::RecordingVm::default());
+    *vm.fenced_result.lock().expect("锁") = Some(ToolOutcome {
+        ok: true,
+        output: "[shell] 退出码 0".to_string(),
+    });
+    mt.vm = vm.clone();
+    let cancel = AtomicBool::new(false);
+    let mut sink = |_: SessionEvent| {};
+    let done = run_batch(
+        &mut mt,
+        &shell_plan(r#"{"command":"pwd"}"#),
+        None,
+        None,
+        &cancel,
+        &mut sink,
+    );
+    let out = &done[0].1;
+    assert!(out.ok, "{}", out.output);
+    let (cwd, _) =
+        crate::capabilities::tools::api::cwd_elapsed(&out.output).expect("回执要有落点与耗时");
+    assert_eq!(cwd, bridge.to_view(&mt.sandbox.private));
+    assert!(
+        !cwd.contains("\\"),
+        "虚拟机档回执的 cwd 不能是宿主写法：{}",
+        cwd
     );
 }
 

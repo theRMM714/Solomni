@@ -1,5 +1,5 @@
 //! 目的：macOS 后端——seatbelt（sandbox_init，私有且已弃用的 ABI）把「可达到哪些路径」变成内核强制。
-//! 管：生成 profile 文本——默认拒绝一切，再逐条放行运行基线（只读）与 spec.rw（读写）；
+//! 管：生成 profile 文本——默认拒绝一切，再逐条放行运行基线（只读；/dev/null 例外：可写，供标准重定向丢弃输出）与 spec.rw（读写）；
 //!   网络按 spec.net：真 = 放行出站，假 = 拒绝。
 //! 不管：入站 / 局域网 / 回环的细分策略——本档只按 spec.net 放行出站。
 //! 联动：装不上时如实降级（打印说明后照常执行）；降级原因分「本机 ABI 失效」（环境结论）与「profile 被拒」（写错，探针硬失败）。
@@ -258,6 +258,10 @@ fn profile_text(spec: &FenceSpec, command: &str) -> String {
     ro_paths.dedup();
     for p in &ro_paths {
         out.push_str(&format!("(allow file-read* (subpath \"{}\"))\n", escape(p)));
+    }
+    // 标准重定向要能丢弃输出（`>/dev/null` / `2>/dev/null`）：只给这个设备文件写权，不给整个 /dev。
+    if Path::new("/dev/null").exists() {
+        out.push_str("(allow file-write* (literal \"/dev/null\"))\n");
     }
     let mut rw_paths: Vec<String> = Vec::new();
     for root in &spec.rw {

@@ -19,6 +19,6 @@
 | `src/capabilities/tools/domain/module_tools.rs` | 模块清单 → 工具面：把 `module.yaml` 声明的工具与参数契约转成工具能力认识的形态，并把静态模块工具与已就绪服务操作的参数合并渲染成**一段** |
 | `src/capabilities/tools/domain/roles.rs` | 角色表与工具总表的纯数据形态（`RoleDecl` / `SystemTools`）：按角色组装工具面、装配期自检与动作审计格式化 |
 | `src/capabilities/tools/domain/fence.rs` | 围栏描述符的派生策略（其余中立类型在 `src/kernel/domain/fence.rs`） |
-| `src/capabilities/tools/domain/shell.rs` | 执行类系统工具 shell 的纯规则：参数 / scope / timeout 解析、命令长度、失败回执的 scope 提示与 guest 脚本包装 |
+| `src/capabilities/tools/domain/shell.rs` | 执行类系统工具 shell 的纯规则：参数 / scope / timeout 解析、命令长度、失败回执的 scope 提示、回执解析（退出码 / 状态 / cwd·耗时） |
 | `src/capabilities/tools/detail/sys_io.rs` | `SysIo` 端口的磁盘实现：纯 Rust 直接读写（严格 UTF-8、非法字节如实标注、写时建父目录） |
 | `src/capabilities/tools/detail/yaml_systools.rs` | `SystoolsSource` 的磁盘实现：读 `systools/tools.yaml`、`roles.yaml` 与 `names.yaml`（缺文件如实报装配错误） |
