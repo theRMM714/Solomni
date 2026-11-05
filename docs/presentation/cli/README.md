@@ -1,13 +1,14 @@
 # cli（终端转录中心）
 
 > 定位：argv → 入站能力面 → 渲染事件流。
-> 效力：规范｜核对：2026-11-04｜依据：`src/presentation/cli/mod.rs`
+> 效力：规范｜核对：2026-11-06｜依据：`src/presentation/cli/mod.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [ARCHITECTURE.md](../../../ARCHITECTURE.md) §一，业务边界判据见 §九，测试规范见 [TESTING.md](../../../TESTING.md)。
 
 ## 管什么 / 不管什么
 
 - 管：终端转录中心——argv → 入站能力面 → 渲染事件流；`split_names` 与空登记处的引导文案是它自己的传输侧的事。
 - 管：共享区提交历史与回滚入口——`work <会话>` 看 head + 最近提交，`work <会话> log [条数]` 列提交，`work <会话> show <提交号>` 看详情，`work <会话> restore <提交号> [--yes]` 走统一的 `restore_work_commit` 动作（非破坏性；交互模式要求输入 yes，`--yes` 仅用于显式脚本）。
+- 管：虚拟机档会话的只读诊断入口——`diagnose <会话>` 造一次 `guest_diagnose` 动作（`caller = user`），把动作返回的结构化 JSON（guest 进程表 / CPU 汇总 / 内存 / 负载 / 挂载）原样打印；与 `work` / `resident` / `module` 同类，不做业务判断。
 - 不管：不做业务判断、不持状态、不落盘；**永不接触端口对象，也拿不到 `Core` 本身**（`src/presentation/cli/mod.rs`）。
 
 ## 入站契约与状态归属

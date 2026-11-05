@@ -1,7 +1,7 @@
 # 单元地图 · vm
 
 > 定位：vm（虚拟机档）逐文件职责的唯一权威；由 T0 结构审查与磁盘双向比对。
-> 效力：契约｜核对：2026-11-04｜依据：`src/capabilities/vm/api.rs`
+> 效力：契约｜核对：2026-11-06｜依据：`src/capabilities/vm/api.rs`
 
 > 本文是 **vm** 逐文件职责的唯一权威；由 `node run-tests.js` 的 T0 结构审查与磁盘**双向比对**
 > （表里每个路径必须存在；`src/` 下每个 `.rs` 都必须出现在某一张单元地图里）。
@@ -9,9 +9,10 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/capabilities/vm/api.rs` | 入站面：`Vm` 用例 trait（guest 生命周期）与档位、计划、入口诊断、就绪检测的重导出 |
-| `src/capabilities/vm/service.rs` | 用例与端口持有者：持 `VmEngine` / `ShareBackend`（R12），按租约管理 guest（每租约一把锁：跨租约并行、同一租约串行） |
+| `src/capabilities/vm/api.rs` | 入站面：`Vm` 用例 trait（guest 生命周期与 `guest_diagnose` 只读诊断）与档位、计划、入口诊断、就绪检测的重导出 |
+| `src/capabilities/vm/service.rs` | 用例与端口持有者：持 `VmEngine` / `ShareBackend`（R12），按租约管理 guest（每租约一把锁：跨租约并行、同一租约串行）；`guest_diagnose` 用只读系统允许集走 helper 诊断模式并如实区分失败原因 |
 | `src/capabilities/vm/ports.rs` | 出站端口：`VmEngine` / `GuestVm` / `GuestChannel`（起 / 跑 / 销毁 guest）与 `ShareBackend` / `SharePlan`（宿主↔guest 共享） |
+| `src/capabilities/vm/domain/diagnose.rs` | guest 只读诊断的纯逻辑：报告结构（键与 helper 输出一一对应）、`parse_report` 的合法性判定，以及失败原因文案（没有活 guest / 非 Linux guest / 通道不通 / helper 不可用 / 缺 python3 / 超时 / 执行失败 / 输出不可解析） |
 | `src/capabilities/vm/domain/exec.rs` | 执行档位诊断、执行计划派生（消费 `PackagePlan`）、承载判定、就绪检测与并发准入（纯逻辑） |
 | `src/capabilities/vm/domain/guest.rs` | guest 镜像判定（`GuestImage`）、挂载清单、prefix 软链与 system 叠写脚本、`GuestRun` 的按次超时与输出截断方式（纯逻辑） |
 | `src/capabilities/vm/domain/paths.rs` | 宿主 ↔ guest 路径桥（恒等 / 镜像根，可逆；纯逻辑） |

@@ -303,6 +303,106 @@ impl Vm for VmService {
             .map(|g| g.keys().cloned().collect())
             .unwrap_or_default()
     }
+
+    /// 目的：一次 guest **只读诊断**——系统动作，走 helper 诊断模式（与 per-agent 围栏同一条通道）。
+    /// 约束：不跑共享同步（诊断不进出文件）；失败如实区分原因，绝不返回空诊断。
+    fn guest_diagnose(
+        &self,
+        lease: &str,
+    ) -> Result<crate::capabilities::vm::api::GuestDiagnosis, String> {
+        use crate::capabilities::vm::detail::guest_helper as helper;
+        use crate::capabilities::vm::domain::diagnose as diag;
+        let entry = self
+            .guests
+            .lock()
+            .map_err(|_| "guest 表锁坏了".to_string())?
+            .get(lease)
+            .cloned()
+            .ok_or_else(|| diag::no_live_guest(lease))?;
+        let mut held = entry.lock().unwrap_or_else(|e| e.into_inner());
+        let held = &mut *held;
+        // Windows / macOS guest 本期没有 helper 诊断模式（只有 Linux guest 装了 helper）。
+        if held.os != GuestOs::Linux {
+            return Err(diag::not_linux(held.os.as_str()));
+        }
+        // 只读系统允许集：**不**按 agent 围栏，只给诊断要读的只读根（rw / private / cwd 全空）。
+        let access = guest::GuestAccess {
+            agent: "guest-diagnose".to_string(),
+            rw: Vec::new(),
+            ro: Vec::new(),
+            ro_tree: ["/proc", "/sys", "/dev", "/etc"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            private: String::new(),
+            cwd: String::new(),
+            net: false,
+            diagnose: true,
+        };
+        let run = GuestRun {
+            command: String::new(),
+            args_json: "{}".to_string(),
+            env: Vec::new(),
+            cwd: String::new(),
+            timeout_secs: diag::DIAGNOSE_TIMEOUT_SECS,
+            output_limit: OutputLimit::Head,
+        };
+        let out = held.vm.channel().exec_fenced(&run, &access);
+        if out.ok {
+            // 支持诊断的 helper 只打一个 JSON；旧 helper 会把空命令交给 /bin/sh（退出 0、输出为空或非 JSON）。
+            if !out.output.contains('{') {
+                return Err(diag::helper_unavailable(&first_detail(&out.output)));
+            }
+            return diag::parse_report(&out.output, lease);
+        }
+        // 超时优先：helper 的机器标记，或宿主外层的等待预算到点。
+        if out.output.contains(helper::HELPER_TIMEOUT_MARKER) || out.output.contains("超时") {
+            return Err(diag::timed_out());
+        }
+        // helper 真进了诊断模式、但 Python 侧自己失败（前缀是诊断专用的）：原因在它的原话里。
+        if out.output.contains(helper::HELPER_DIAGNOSE_PREFIX) {
+            return Err(diag::exec_failed(&first_detail(&out.output)));
+        }
+        // 失败后的**有界预检**（命令自带 timeout 10）：区分 helper 不在 / 缺 python3 / 通道不通。
+        let probe = held.vm.channel().exec(&GuestRun {
+            command: helper::probe_command(),
+            args_json: "{}".to_string(),
+            env: Vec::new(),
+            cwd: String::new(),
+            timeout_secs: diag::DIAGNOSE_TIMEOUT_SECS,
+            output_limit: OutputLimit::Head,
+        });
+        let said = probe.output.trim().to_string();
+        if said.contains(helper::PROBE_NO_HELPER) {
+            return Err(diag::helper_unavailable(&first_detail(&said)));
+        }
+        if said.contains(helper::PROBE_NO_PYTHON) {
+            return Err(diag::python_missing(&first_detail(&said)));
+        }
+        if probe.ok && said.contains(helper::PROBE_OK) {
+            return Err(diag::exec_failed(&first_detail(&out.output)));
+        }
+        let detail = first_detail(&said);
+        Err(diag::channel_down(if detail.is_empty() {
+            "guest 没有回应诊断预检"
+        } else {
+            &detail
+        }))
+    }
+}
+
+/// 目的：失败现场只留第一行（QGA / helper 的原话，后面的行多是重复输出）。
+fn first_detail(text: &str) -> String {
+    let line = text
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("");
+    if line.chars().count() > 200 {
+        line.chars().take(200).collect()
+    } else {
+        line.to_string()
+    }
 }
 
 /// 目的：销毁一份租约（杀 guest + 放共享凭据）；等它的在途执行收尾，幂等。

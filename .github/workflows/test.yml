@@ -160,7 +160,7 @@ jobs:
   workflow:
     name: 工作流静态检查
     # 恒跑（与 structure 同理）：workflow 文件本身坏了，必填检查可能根本不上报，所以不按变更类型跳过。
-    # actionlint 阻断（YAML / 表达式 / 内联 bash 的 shellcheck）；zizmor 先只报不拦（安全审查，观察噪声后再定）。
+    # actionlint 阻断（YAML / 表达式 / 内联 bash 的 shellcheck）；zizmor 阻断（安全审查，findings 即整个 job 失败）。
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -189,15 +189,13 @@ jobs:
           "$(go env GOPATH)/bin/actionlint" -no-color
 
       # zizmor：GitHub Actions 的安全审查（未 pin 的 action、危险触发器、权限过宽等）。
-      # 先只报不拦（continue-on-error），噪声与规则取舍稳定后再转为阻断；安装走 taiki-e/install-action（TOOLS.md 有 zizmor）。
-      - name: 安装 zizmor（advisory）
-        continue-on-error: true
+      # 阻断：findings（退出码 11–14）即 job 失败，gate 随之红；安装走 taiki-e/install-action，版本固定 1.32.0。
+      - name: 安装 zizmor
         uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: zizmor@1.32.0
 
-      - name: 工作流安全审查（zizmor，只报不拦）
-        continue-on-error: true
+      - name: 工作流安全审查（zizmor）
         run: |
           set -euo pipefail
           zizmor --persona=regular --format=plain .github/workflows

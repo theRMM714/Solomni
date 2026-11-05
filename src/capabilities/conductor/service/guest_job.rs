@@ -6,7 +6,7 @@
 
 use crate::capabilities::vm::api::{
     admit_guest, classify_base, mounts_from, package_setup_scripts, resolve_guest, ExecPlan,
-    GuestRun, GuestSpec, Vm,
+    GuestDiagnosis, GuestRun, GuestSpec, Vm,
 };
 use crate::capabilities::workspace::api::Sandboxes;
 use crate::kernel::api::FenceSpec;
@@ -272,5 +272,25 @@ impl EditGuest {
                 Ok(())
             }
         }
+    }
+}
+
+/// 目的：一次 guest **只读诊断**（慢：要在 guest 里采两轮 /proc 快照）——同样在调用方线程上跑。
+/// 约束：只读——不写 guest、不改会话状态；采集与解析的细节在 vm 能力里。
+pub struct GuestDiagnose {
+    vm: Arc<dyn Vm + Send + Sync>,
+    /// 这条会话要诊断的那台 guest 的租约。
+    lease: String,
+}
+
+impl GuestDiagnose {
+    /// 目的：组装备好的那一段（核心侧调用，毫秒级）。
+    pub(crate) fn new(vm: Arc<dyn Vm + Send + Sync>, lease: String) -> GuestDiagnose {
+        GuestDiagnose { vm, lease }
+    }
+
+    /// 目的：执行诊断；失败如实返回原因（租约没有活 guest / 非 Linux / 通道不通等）。
+    pub fn run(self) -> Result<GuestDiagnosis, String> {
+        self.vm.guest_diagnose(&self.lease)
     }
 }

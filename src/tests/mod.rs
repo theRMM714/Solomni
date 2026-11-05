@@ -92,6 +92,54 @@ pub(crate) fn ops_with(
     (handle, ops)
 }
 
+/// 目的：注入**指定 vm 能力面与会话历史**的内存装配（guest 诊断动作要断言"回包就是 guest 报的事实"）。
+/// 约束：与 `core_with_gateway` 同形，只把 vm 与历史换成本次用例给的替身。
+pub(crate) fn ops_with_vm(
+    modules: Vec<crate::capabilities::modules::api::Module>,
+    history: std::sync::Arc<doubles::InMemoryHistory>,
+    vm: std::sync::Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync>,
+) -> (
+    crate::capabilities::conductor::api::ConductorHandle,
+    crate::capabilities::conductor::api::Ops,
+) {
+    let gateway: std::sync::Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
+        std::sync::Arc::new(doubles::gw(std::collections::BTreeMap::new(), Vec::new()));
+    let llm = doubles::test_llm(
+        std::sync::Arc::clone(&gateway),
+        std::sync::Arc::new(doubles::FakeCatalog::new(vec!["m".to_string()])),
+    );
+    let core = crate::capabilities::conductor::service::Conductor::new(
+        root_dir(),
+        doubles::registry_service(
+            doubles::InMemorySettings::new(),
+            std::sync::Arc::clone(&llm),
+        ),
+        doubles::test_history_of(history),
+        doubles::test_workspace(std::sync::Arc::new(doubles::InMemoryWorkspace::new())),
+        vm,
+        doubles::test_packages(std::sync::Arc::new(doubles::InMemoryPackages::empty())),
+        doubles::test_provision(),
+        doubles::test_modules(std::sync::Arc::new(doubles::VecSource(modules))),
+        std::sync::Arc::new(crate::capabilities::builds::api::NoBuilds),
+        llm,
+        doubles::test_tools_svc_with(
+            std::sync::Arc::new(builders::SilentRunner),
+            std::sync::Arc::new(doubles::InMemorySysIo::new()),
+            std::sync::Arc::new(doubles::NoFenceHost),
+        ),
+        doubles::test_prompt(),
+        doubles::test_tools_svc(),
+        std::sync::Arc::new(crate::kernel::ports::NoopLog),
+        doubles::test_host_probe(),
+        std::sync::Arc::new(crate::capabilities::residents::api::NoResidents),
+        std::sync::Arc::new(crate::capabilities::secrets::api::NoSecrets),
+    );
+    let handle =
+        crate::capabilities::conductor::api::ConductorHandle::spawn(core).expect("起核心线程");
+    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    (handle, ops)
+}
+
 /// 一次单 agent 工作的规格（契约测试共用）。
 pub(crate) fn single_work(
     name: &str,

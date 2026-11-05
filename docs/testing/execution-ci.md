@@ -1,7 +1,7 @@
 # 执行入口、报告与 CI
 
 > 定位：测试执行入口、报告状态、成功标记与 CI 流程的唯一权威。
-> 效力：规范｜核对：2026-11-04｜依据：`run-tests.js`
+> 效力：规范｜核对：2026-11-06｜依据：`run-tests.js`
 
 ## 适用与判据
 - 跑入口、读报告、认成功标记、发布 CI 报告时以本文为准（`docs/testing/execution-ci.md`）。
@@ -163,6 +163,7 @@ node run-tests.js --fence-live
 - 虚拟机档真机用例默认跳过，设 `SOLOMNI_VM_LIVE=1` 才真跑（按需再给 `SOLOMNI_VM_QEMU` / `SOLOMNI_VM_GUEST`，虚拟根默认 `debian`）：
 
 - `src/tests/vm.rs`：guest 起停、并发可写层；**取消与超时**用不依赖共享后端的 `vm_live_cancel_kills_the_guest_process_tree`（`NoneShare` + guest 内 `/tmp` 围栏；取消回执含「用户停止」且 15 秒内返回、无残留 `sleep`；`timeout_secs` 到点回执含 helper 的「工具进程超时」）。取消路径的 helper stderr 可能被 QGA 丢掉（时有时无），以无孤儿 + 快速返回证明处理器生效；
+- `src/tests/vm.rs` 的**guest 诊断**探针 `vm_live_guest_diagnose_lists_processes`（`NoneShare`，不需要共享后端）：guest 里起忙进程后诊断要列出该 pid 与 CPU / 内存 / 负载 / 挂载；停 guest 后如实报没有活 guest；
 - `src/tests/builds.rs`：本机构建、缓存、失败与创建前补编（guest 内构建在 `SOLOMNI_VM_LIVE=1` 时真跑）；
 - `src/capabilities/provision/guest.rs`：Linux 运行期编排；
 - `src/capabilities/provision/service.rs`：guest-rootfs 属性真机用例（`guest_rootfs_pipeline_keeps_source_attrs_on_the_real_image`，用 `.vm/cache/rootfs.ext4`）；
@@ -232,7 +233,7 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 | `changes` | 判定 `code_changed` / `docs_changed`；从 base 取分类器副本，自测 + `include_str!/include_bytes!` 文档消费自检 | `node tests/ci-changes.mjs`（副本） |
 | `docs` | 有文档变更：文档审查（门户 / 链接 / 根文档路由） | `node run-tests.js --audit=docs` |
 | `structure` | 始终跑：结构审查（代码↔文档结构；文档与真相源比对 + 纯文本检查） | `node run-tests.js --audit=structure` |
-| `workflow` | 始终跑：工作流静态检查（闸门判定自测 + actionlint 阻断 + zizmor 固定 1.32.0、只报不拦；9 个只读 checkout 关凭据，2 个发布 job 有行内豁免） | `node tests/ci-gate.mjs --self-test`；`actionlint -no-color`（阻断）；`zizmor@1.32.0 --persona=regular --format=plain .github/workflows`（advisory） |
+| `workflow` | 始终跑：工作流静态检查（闸门判定自测 + actionlint 阻断 + zizmor 固定 1.32.0 阻断，findings 即失败；9 个只读 checkout 关凭据，2 个发布 job 有行内豁免） | `node tests/ci-gate.mjs --self-test`；`actionlint -no-color`（阻断）；`zizmor@1.32.0 --persona=regular --format=plain .github/workflows`（findings 即失败） |
 | `gate` | 汇总五个 job 的结果（`changes` 的分类 + `docs` / `structure` / `workflow` / `quality` / `e2e`），规则集里唯一代表代码/文档验收的必填检查；不产报告 | `node tests/ci-gate.mjs` |
 | `publish-report` | 汇总三条 lane 的报告并发布 `ci-report` | `tests/ci-merge.mjs` + `tests/ci-publish.mjs` |
 
@@ -295,7 +296,7 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 | 发布前验收 | 本地通过 ≠ 三平台通过 | 三平台报告 + 三平台 `TEST-REPORT-ACCEPTED` |
 
 - 文档审查与结构审查本身是本地可复现的确定性检查；CI 里跑它们是为了让 `gate` 能给出合并判定（它们不是 required context），不是补平台结论。工作流静态检查同理：闸门判定自测本地可跑（`node tests/ci-gate.mjs --self-test`），`actionlint` / `zizmor` 只在 CI 装。
-- zizmor 现在是**观察期**：版本固定 `1.32.0`，只报不拦；9 个只读 job 的 checkout 已设 `persist-credentials: false`，2 个需要 `git push` 的发布 job 保留凭据并用行内 `zizmor: ignore[artipacked]` + 理由豁免。连续 ≥5 次非 Draft CI 稳定后去掉 `continue-on-error`，并让 `tests/ci-gate.mjs` 把工作流静态检查当恒跑必需项；观察与转阻断的验收记在缺口 `ci.zizmor-advisory`（`tests/gaps.yaml`），不靠口头约定。
+- zizmor 是**阻断项**：版本固定 `1.32.0`，发现任何 finding（退出码 11–14）即 workflow job 失败、`gate` 红；9 个只读 job 的 checkout 已设 `persist-credentials: false`，2 个需要 `git push` 的发布 job 保留凭据并用行内 `zizmor: ignore[artipacked]` + 理由豁免。阻断依据：6 次非 Draft run 的 workflow job 全绿，zizmor 摘要 `No findings to report. Good job! (2 ignored, 4 suppressed)` 无漂移（其中两次整跑失败是 `quality` / `structure` 失败，与 zizmor 无关）。
 
 - **什么时候手动派发**：Draft 阶段不自动跑 CI，需要他平台结论时手动派发；PR 标 Ready 后自动跑，不必再派发。
 - 手动派发还用于「没有 PR 的分支」与「干净机器复验」。

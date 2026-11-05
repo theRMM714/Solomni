@@ -2018,12 +2018,14 @@ pub(crate) fn test_workspace_store_with_max(
 }
 
 /// 目的：VM 引擎的测试替身——不起真 VM，只记录 start / run / stop。
-/// 约束：`boot_delay` 让"起 guest 很慢"可复现（验核心线程不被占）；`boot_error` 让起不来可复现（验失败不留痕）。
+/// 约束：`boot_delay` 让"起 guest 很慢"可复现（验核心线程不被占）；`boot_error` 让起不来可复现（验失败不留痕）；
+///   `fenced_output` 给围栏执行预设输出（None = 恒 `fake-guest`，默认行为不变），诊断用例用它给回一份 JSON。
 #[derive(Clone, Default)]
 pub(crate) struct FakeEngine {
     pub calls: Arc<Mutex<Vec<String>>>,
     pub boot_delay: Option<std::time::Duration>,
     pub boot_error: Option<String>,
+    pub fenced_output: Option<String>,
 }
 
 impl FakeEngine {
@@ -2061,6 +2063,7 @@ impl crate::capabilities::vm::ports::VmEngine for FakeEngine {
             channel: FakeChannel {
                 lease: spec.lease.clone(),
                 calls: self.calls.clone(),
+                fenced_output: self.fenced_output.clone(),
             },
             lease: spec.lease.clone(),
             calls: self.calls.clone(),
@@ -2267,6 +2270,8 @@ struct FakeVm {
 struct FakeChannel {
     lease: String,
     calls: Arc<Mutex<Vec<String>>>,
+    /// 围栏执行的预设输出（None = 恒 `fake-guest`）：诊断用例给它一份 helper 形状的 JSON。
+    fenced_output: Option<String>,
 }
 
 impl crate::capabilities::vm::ports::GuestChannel for FakeChannel {
@@ -2294,17 +2299,22 @@ impl crate::capabilities::vm::ports::GuestChannel for FakeChannel {
         _run: &crate::capabilities::vm::domain::guest::GuestRun,
         access: &crate::capabilities::vm::domain::guest::GuestAccess,
     ) -> crate::kernel::api::ToolOutcome {
+        // 记录形状沿用既有前缀（既有用例按 `fenced:<租约>:<agent>:<cwd>:<rw>` 断言），
+        // 后面再追加只读根与诊断标记——诊断用例据此断言「走的是只读系统允许集」。
         self.calls.lock().expect("锁").push(format!(
-            "fenced:{}:{}:{}:{}",
+            "fenced:{}:{}:{}:{}:{}:{}",
             self.lease,
             access.agent,
             access.cwd,
-            access.rw.join(",")
+            access.rw.join(","),
+            access.ro_tree.join(","),
+            access.diagnose
         ));
-        crate::kernel::api::ToolOutcome {
-            ok: true,
-            output: "fake-guest".to_string(),
-        }
+        let output = self
+            .fenced_output
+            .clone()
+            .unwrap_or_else(|| "fake-guest".to_string());
+        crate::kernel::api::ToolOutcome { ok: true, output }
     }
 }
 

@@ -22,6 +22,28 @@ pub const HELPER_TIMEOUT_MARKER: &str = "solomni-guest-fence: timeout";
 /// 目的：被信号结束的机器标记——通道据此产出「退出码未知（被信号结束）」并剥掉标记。
 pub const HELPER_SIGNAL_MARKER: &str = "solomni-guest-fence: signal";
 
+/// 目的：诊断出错时 helper 写到 stderr 的前缀（与围栏的 `solomni-guest-fence: ` 分开，便于宿主分流）。
+pub const HELPER_DIAGNOSE_PREFIX: &str = "solomni-guest-diagnose: ";
+
+/// 目的：诊断失败后的**有界预检**——一条命令区分「helper 不在 / 缺 python3 / 都对」，宿主据此给不同原因。
+/// 约束：命令自带 `timeout 10`（未围栏通道的外层预算很长，不能靠它兜底）；三个标记互斥。
+pub fn probe_command() -> String {
+    format!(
+        "timeout 10 sh -c 'test -x {helper} || {{ echo {no_helper}; exit 3; }}; command -v python3 >/dev/null 2>&1 || {{ echo {no_python}; exit 4; }}; echo {ok}'",
+        helper = HELPER_PATH,
+        no_helper = PROBE_NO_HELPER,
+        no_python = PROBE_NO_PYTHON,
+        ok = PROBE_OK
+    )
+}
+
+/// 目的：预检标记——helper 可执行位不在。
+pub const PROBE_NO_HELPER: &str = "SOLOMNI_DIAG_PROBE=no-helper";
+/// 目的：预检标记——helper 在，但 guest 里没有 python3。
+pub const PROBE_NO_PYTHON: &str = "SOLOMNI_DIAG_PROBE=no-python";
+/// 目的：预检标记——helper 与 python3 都在（失败原因不是这两个）。
+pub const PROBE_OK: &str = "SOLOMNI_DIAG_PROBE=ok";
+
 /// 目的：助手脚本正文。guest 只需 python3（虚拟根基线已自证）；缺 python3 时执行必然失败，不降级。
 pub const HELPER_SCRIPT: &str = r#"#!/usr/bin/env python3
 import ctypes
@@ -30,6 +52,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 import warnings
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -120,6 +143,306 @@ def interpreter_dirs(script):
     return sorted(d for d in dirs if d and os.path.isdir(d))
 
 
+def read_text(path):
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def cpu_counters():
+    for line in read_text("/proc/stat").splitlines():
+        if line.startswith("cpu "):
+            vals = []
+            for part in line.split()[1:]:
+                try:
+                    vals.append(int(part))
+                except ValueError:
+                    vals.append(0)
+            while len(vals) < 8:
+                vals.append(0)
+            return vals[:8]
+    return [0, 0, 0, 0, 0, 0, 0, 0]
+
+
+def counter_sum(vals):
+    total = 0
+    for v in vals:
+        total += v
+    return total
+
+
+def read_pid_stat(pid):
+    data = read_text("/proc/" + str(pid) + "/stat")
+    if not data:
+        return None
+    left = data.find("(")
+    right = data.rfind(")")
+    if left < 0 or right < left:
+        return None
+    comm = data[left + 1:right]
+    rest = data[right + 2:].split()
+    if len(rest) < 20:
+        return None
+    try:
+        return {
+            "state": rest[0],
+            "ppid": int(rest[1]),
+            "ticks": int(rest[11]) + int(rest[12]),
+            "starttime": int(rest[19]),
+            "comm": comm,
+        }
+    except (ValueError, IndexError):
+        return None
+
+
+def process_table():
+    table = {}
+    try:
+        names = os.listdir("/proc")
+    except OSError:
+        return table
+    for name in names:
+        if not name.isdigit():
+            continue
+        pid = int(name)
+        stat = read_pid_stat(pid)
+        if stat is None:
+            continue
+        table[pid] = stat
+    return table
+
+
+def read_rss_kb(pid):
+    for line in read_text("/proc/" + str(pid) + "/status").splitlines():
+        if line.startswith("VmRSS:"):
+            parts = line.split()
+            if len(parts) >= 2:
+                try:
+                    return int(parts[1])
+                except ValueError:
+                    return 0
+    return 0
+
+
+def read_args(pid, fallback):
+    text = read_text("/proc/" + str(pid) + "/cmdline").replace(chr(0), " ").strip()
+    if not text:
+        text = fallback
+    return text[:80]
+
+
+def read_meminfo():
+    out = {}
+    for line in read_text("/proc/meminfo").splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        parts = value.split()
+        if not parts:
+            continue
+        try:
+            out[key.strip()] = int(parts[0])
+        except ValueError:
+            continue
+    return out
+
+
+def read_loadavg():
+    parts = read_text("/proc/loadavg").split()
+    values = []
+    for i in range(3):
+        try:
+            values.append(round(float(parts[i]), 2))
+        except (ValueError, IndexError):
+            values.append(0.0)
+    return values
+
+
+def read_uptime():
+    parts = read_text("/proc/uptime").split()
+    try:
+        return float(parts[0])
+    except (ValueError, IndexError):
+        return 0.0
+
+
+def read_mounts():
+    out = []
+    for line in read_text("/proc/mounts").splitlines():
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        source = parts[0]
+        target = parts[1]
+        fstype = parts[2]
+        try:
+            st = os.statvfs(target)
+        except OSError:
+            continue
+        total = st.f_blocks * st.f_frsize
+        free = st.f_bavail * st.f_frsize
+        if total <= 0:
+            continue
+        out.append({
+            "source": source[:120],
+            "target": target[:160],
+            "fstype": fstype[:32],
+            "total_kb": total // 1024,
+            "free_kb": free // 1024,
+        })
+        if len(out) >= 40:
+            break
+    return out
+
+
+def read_nproc():
+    try:
+        return max(1, len(os.sched_getaffinity(0)))
+    except (AttributeError, OSError):
+        cpus = os.cpu_count()
+        if cpus and cpus > 0:
+            return cpus
+        return 1
+
+
+def read_hz():
+    try:
+        hz = int(os.sysconf("SC_CLK_TCK"))
+    except (AttributeError, ValueError, OSError):
+        hz = 100
+    if hz < 1:
+        return 100
+    return hz
+
+
+def encode_report(report):
+    return json.dumps(report, ensure_ascii=False, separators=(",", ":"))
+
+
+def shrink_report(report):
+    limit = 11800
+    if len(encode_report(report)) > limit:
+        for row in report["processes"]:
+            row["args"] = row["args"][:24]
+            row["comm"] = row["comm"][:16]
+        report["truncated"] = True
+    while len(encode_report(report)) > limit and len(report["mounts"]) > 8:
+        report["mounts"].pop()
+        report["truncated"] = True
+    while len(encode_report(report)) > limit and report["processes"]:
+        report["processes"].pop()
+        report["truncated"] = True
+    if len(encode_report(report)) > limit:
+        report["mounts"] = []
+        report["processes"] = []
+        report["truncated"] = True
+    return report
+
+
+def collect_diagnosis():
+    first = process_table()
+    first_cpu = cpu_counters()
+    time.sleep(1.0)
+    second = process_table()
+    second_cpu = cpu_counters()
+    up = read_uptime()
+    hz = read_hz()
+    ncpu = read_nproc()
+    delta_total = counter_sum(second_cpu) - counter_sum(first_cpu)
+    if delta_total < 1:
+        delta_total = 1
+    rows = []
+    for pid in second:
+        stat = second[pid]
+        before = first.get(pid)
+        delta = 0
+        if before is not None:
+            delta = stat["ticks"] - before["ticks"]
+        if delta < 0:
+            delta = 0
+        percent = round(delta / float(delta_total) * 100.0 * ncpu, 1)
+        etime = up - stat["starttime"] / float(hz)
+        if etime < 0:
+            etime = 0.0
+        rows.append({
+            "pid": pid,
+            "ppid": stat["ppid"],
+            "state": stat["state"][:8],
+            "cpu_percent": percent,
+            "rss_kb": read_rss_kb(pid),
+            "etime_secs": int(etime),
+            "comm": stat["comm"][:64],
+            "args": read_args(pid, stat["comm"]),
+        })
+    process_total = len(rows)
+    rows.sort(key=lambda row: (row["cpu_percent"], row["rss_kb"]), reverse=True)
+    truncated = process_total > 80
+    rows = rows[:80]
+    mem = read_meminfo()
+    total_kb = mem.get("MemTotal", 0)
+    available_kb = mem.get("MemAvailable", 0)
+    if available_kb == 0:
+        available_kb = mem.get("MemFree", 0) + mem.get("Buffers", 0) + mem.get("Cached", 0)
+    used_percent = 0.0
+    if total_kb > 0:
+        used_percent = round((total_kb - available_kb) * 100.0 / total_kb, 1)
+    if used_percent < 0:
+        used_percent = 0.0
+    cpu = cpu_counters()
+    cpu_sum = counter_sum(cpu)
+    idle_percent = 0.0
+    if cpu_sum > 0:
+        idle_percent = round(cpu[3] * 100.0 / cpu_sum, 1)
+    report = {
+        "uptime_secs": round(up, 1),
+        "loadavg": read_loadavg(),
+        "process_total": process_total,
+        "truncated": truncated,
+        "processes": rows,
+        "memory": {
+            "total_kb": total_kb,
+            "available_kb": available_kb,
+            "free_kb": mem.get("MemFree", 0),
+            "buffers_kb": mem.get("Buffers", 0),
+            "cached_kb": mem.get("Cached", 0),
+            "swap_total_kb": mem.get("SwapTotal", 0),
+            "swap_free_kb": mem.get("SwapFree", 0),
+            "used_percent": used_percent,
+        },
+        "cpu": {
+            "user": cpu[0],
+            "nice": cpu[1],
+            "system": cpu[2],
+            "idle": cpu[3],
+            "iowait": cpu[4],
+            "irq": cpu[5],
+            "softirq": cpu[6],
+            "steal": cpu[7],
+            "idle_percent": idle_percent,
+        },
+        "mounts": read_mounts(),
+        "guest": {
+            "kernel": os.uname().release[:120],
+            "nproc": ncpu,
+        },
+    }
+    return shrink_report(report)
+
+
+def run_diagnosis():
+    try:
+        report = collect_diagnosis()
+    except Exception as exc:
+        sys.stderr.write("solomni-guest-diagnose: " + str(exc) + "\n")
+        sys.stderr.flush()
+        sys.exit(111)
+    sys.stdout.write(encode_report(report) + "\n")
+    sys.stdout.flush()
+    sys.exit(0)
+
+
 def main():
     global CHILD
     if len(sys.argv) != 2:
@@ -199,6 +522,10 @@ def main():
     if libc.syscall(SYS_RESTRICT, fd, 0) < 0:
         die("landlock_restrict_self: " + os.strerror(ctypes.get_errno()))
     os.close(fd)
+
+    # 系统级只读诊断：Landlock 已 restrict（只读根由策略给），不 spawn 命令、只采 /proc。
+    if policy.get("diagnose"):
+        run_diagnosis()
 
     if cwd:
         try:

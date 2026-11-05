@@ -48,6 +48,8 @@ pub fn run(ops: Ops, web_default_port: u16) -> CliExit {
             "secret" => secret_cmd(&ops),
             // 直接用模块工具（不经 AI）：清单与动作 id 都来自核心的动作目录。
             "module" => module_cmd(&ops, &arg),
+            // 只读诊断一条虚拟机档会话的 guest（进程 / CPU / 内存 / 负载 / 挂载）。
+            "diagnose" => diagnose_cmd(&ops, &arg),
             "rescan" => print_roster(&ops),
             // 转入 Web 转录中心：接受 webui / -webUI（启动参数也这么写），可选端口。
             "webui" | "-webui" | "web" | "-web" => {
@@ -158,6 +160,28 @@ fn module_cmd(ops: &Ops, arg: &str) {
                 println!("[失败] 模块工具返回 ok=false（回执见上）");
             }
         }
+        Ok(_) => println!("[完成]"),
+        Err(e) => println!("[错误] {}", e),
+    }
+}
+
+/// 只读诊断一条虚拟机档会话的 guest：输出结构化 JSON（进程 / CPU / 内存 / 负载 / 挂载）。
+fn diagnose_cmd(ops: &Ops, arg: &str) {
+    let sid = arg.trim();
+    if sid.is_empty() {
+        println!("用法：diagnose <会话>");
+        return;
+    }
+    match ops.actions.act(ActionCall {
+        id: "guest_diagnose".to_string(),
+        args: serde_json::json!({ "session_id": sid }),
+        caller: Caller::User,
+        out: Output::Final,
+    }) {
+        Ok(Acted::Done(v)) => match serde_json::to_string_pretty(&v) {
+            Ok(text) => println!("{}", text),
+            Err(e) => println!("[错误] 诊断结果序列化失败：{}", e),
+        },
         Ok(_) => println!("[完成]"),
         Err(e) => println!("[错误] {}", e),
     }
@@ -603,7 +627,7 @@ fn print_menu(ops: &Ops) {
             model_label(a.model.as_deref())
         );
     }
-    println!("命令：single [agent名…] | collab [agent名…|?] | proxy（决定权整块交给核心） | module [模块id.工具名 [json]]（不经 AI 直接用模块工具） | provider list|add|rm|discover | model list|add|rm | core <模型id> | rewind <会话> archive|delete <行id> | rewind <会话> restore <标记id> | work <会话> log|show|restore <提交号> | resident list|start|stop|enable|disable|call <模块id> <服务名> [操作名] [json] | secret | rescan | webui | exit");
+    println!("命令：single [agent名…] | collab [agent名…|?] | proxy（决定权整块交给核心） | module [模块id.工具名 [json]]（不经 AI 直接用模块工具） | provider list|add|rm|discover | model list|add|rm | core <模型id> | rewind <会话> archive|delete <行id> | rewind <会话> restore <标记id> | work <会话> log|show|restore <提交号> | resident list|start|stop|enable|disable|call <模块id> <服务名> [操作名] [json] | secret | diagnose <会话> | rescan | webui | exit");
 }
 
 /// 模型标签（CLI 展示文案；核心默认是登记处的概念，不是提示词）。

@@ -45,6 +45,28 @@ impl Conductor {
             .unwrap_or_default())
     }
 
+    /// 目的：一次 guest 只读诊断的准备（毫秒级）：定位这条会话的 guest 租约。
+    /// 约束：本机档没有 guest；代理父会话自己没有 guest，要诊断它下面的某个工作。
+    pub(crate) fn prepare_guest_diagnose(
+        &self,
+        sid: &str,
+    ) -> Result<super::guest_job::GuestDiagnose, String> {
+        let meta = self.history.meta(sid)?;
+        if meta.exec.tier != crate::kernel::api::Tier::Vm {
+            return Err("这条会话是本机档，没有 guest 可诊断".to_string());
+        }
+        match self.guest_scope(&meta)? {
+            Some((lease, _)) => Ok(super::guest_job::GuestDiagnose::new(
+                Arc::clone(&self.vm),
+                lease,
+            )),
+            None if meta.mode == "proxy" && meta.parent.is_none() => {
+                Err("代理父会话本身没有 guest，请对它下面某个工作诊断".to_string())
+            }
+            None => Err("这条会话没有可诊断的 guest".to_string()),
+        }
+    }
+
     /// 目的：一个 agent 的配置归属哪份名单：协作成员会话的名单在主会话，
     ///   proxy 子工作（父是代理）或顶层会话自己就是名单所有者；嵌套协作继续向上找。
     /// 约束：同一 agent 全树只有一份配置——子会话编辑写回这里，不留两份会漂的 meta。
