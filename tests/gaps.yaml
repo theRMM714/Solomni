@@ -143,6 +143,10 @@
        失败只 warn，见 helper 的 files/table.rs）。cap-primitives 3.4.6 / 4.0.3 / 上游 main 同代码，
        升依赖无效；把共享映射成本地盘符也不行（句柄 final path 仍是 \\?\UNC\…）。因此 guest 即使
        cifs 挂载成功，一 ls 就失败，VM 档不可用；产品侧无法绕过，必须先修 helper。
+       上游现状：同一根因已在 cap-std 的 issue #318（2023，entries 失败）与 #348（2024，
+       UNC / DOS device 路径）记录；维护者说明 proper fix 需要把剩余"路径拼接 + 路径式 API"
+       迁移到 NtCreateFile，且 cap-std 已移出 Bytecode Alliance、作者称仅最小维护并考虑归档
+       （issue #426）。因此不能把"等上游发版"当唯一路径，需要下游补丁。
     3) 本机档阻塞：Windows 容器只授 internetClient（container.rs:221-242/259-275），不授
        privateNetworkClientServer、不做 loopback 豁免；文件围栏 ACL 还是递归 TreeSetNamedSecurityInfo，
        对网络共享会递归改远端 DACL。无围栏的降级模式不算能力承诺，所以本机档不做网络工作区。
@@ -155,13 +159,17 @@
        B 实施时要放开输入并做后端校验。
   how: |
     方案 B（先上游、后产品；本轮不实施）：
-    一、上游 helper
+    一、上游 helper（不必等上游发版）
     1) 修 cap-primitives 的 Windows 路径重建：get_path 对 \\?\UNC\server\share\… 不能只剥 \\?\；
-       要么还原成非 verbatim 的 \\server\share\…（与盘符分支同策略），要么保留 verbatim 形态并让
-       所有路径式操作都接受（长路径更稳）。补 read_dir / create_dir / remove / rename 的 UNC 回归测试。
-    2) smbd helper（theRMM714/rust-smb-server）：以上游修复或 fork 内补丁（[patch.crates-io] 指向修好的
-       cap-primitives）重新构建；补 helper 级 UNC 共享根测试（枚举 / 建 / 改名 / 删必须真生效）；发新
-       Release（如 smbd-v0.1.1）。FORK.md 的"不维护上游补丁"策略按实际做法更新。
+       短期最小补丁是还原成非 verbatim 的 \\server\share\…（与盘符分支同策略；\\?\Volume{} 等
+       不可还原的保持原样），补 read_dir / create_dir / remove / rename 的 UNC 回归测试；
+       彻底方案是把剩余的路径拼接 + 路径式 API 迁到 NtCreateFile（与上游维护者的判断一致）。
+       同时在 cap-std issue #318 / #348 评论（避免开重复 issue）并附本仓复现与补丁链接。
+    2) smbd helper（theRMM714/rust-smb-server）：不必等上游 release——在 fork 里用
+       [patch.crates-io] 指向自己 fork / vendor 的 cap-primitives（只有 UNC 归一化一个补丁），
+       或直接 vendor 源码；补 helper 级 UNC 共享根测试（枚举 / 建 / 改名 / 删必须真生效）；发新
+       Release（如 smbd-v0.1.1）。FORK.md 的"不维护上游补丁"策略按实际做法更新为
+       "临时补丁 + tracking issue；上游发版后移除"。
     3) 产品依赖：node pins.js bump smbd <新 tag>（同时更新 links.yaml 的 URL + sha256），同步
        dependencies.yaml 的 note（helper 版本 / 能力），再跑 pins check。
     二、产品侧（Windows，范围 = 虚拟机档；本机档明确拒绝网络工作区）
@@ -193,8 +201,9 @@
     8) 文档：docs/workspace、docs/session、docs/vm、docs/tools 的路径模型、docs/testing/execution-ci、
        PRODUCT / README 同步为"Windows 虚拟机档支持 UNC；本机档明确拒绝；映射盘符不解决；
        凭据 = 当前登录用户；共享根 / 不可达 / 无权限按真实原因拒绝"。
-    三、上游修复后的收尾顺序
-    1) 上游补丁合并或 fork 版本可复现构建 → 新 smbd Release 可下载（URL + sha256 已发布）；
+    三、补丁/上游修复后的收尾顺序
+    1) 我们的 fork 补丁（或上游合并后的 release）可复现构建 → 新 smbd Release 可下载
+       （URL + sha256 已发布）；上游正式发版后把 [patch] 切回 registry 版本（可再发一次，不阻塞 B）；
     2) 产品升 pins（links.yaml / dependencies.yaml）并全绿；
     3) 按上面 7 的 T1 / T2 / T4 / e2e 在 Windows 真机跑通，把命令与回执贴进 PR
        （SOLOMNI_UNC_ROOT 用本机可写 UNC 目录，如 \\localhost\D$\…；CI 无 UNC / WHPX，不能代劳）；
@@ -209,5 +218,7 @@
     回归：node run-tests.js 全绿；Linux / macOS 行为不变（POSIX 的 //server/share 只是普通绝对路径，
     不承诺网络语义）。
   blocked_by: |
-    上游阻塞：cap-primitives 的 Windows UNC 路径重建 bug（3.4.6 / 4.0.3 / main 未修），
-    smbd helper 需打补丁并发版，产品才能升依赖；本机档另受 AppContainer 无私有网络 / 回环能力阻塞。
+    helper 阻塞：cap-primitives 的 Windows UNC 路径重建 bug（3.4.6 / 4.0.3 / main 未修；上游
+    issue #318 / #348 已记录，维护者称 proper fix 需迁到 NtCreateFile；cap-std 已移出 Bytecode
+    Alliance、仅最小维护并考虑归档）。不必等上游发版：在 fork 用 [patch.crates-io]/vendor 打最小
+    UNC 归一化补丁并发 smbd 版本即可；本机档另受 AppContainer 无私有网络 / 回环能力阻塞。
