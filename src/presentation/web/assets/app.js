@@ -3304,7 +3304,8 @@ async function openWizard(draft) {
 /* 选择工作区目录：目录列表来自本机 Web 的 /api/dirs；只选路径，不开文件。 */
 function pickWorkspaceDir(onPick) {
   let parentPath = null;
-  openModal('选择工作区目录', (c) => {
+  // 叠在“新建工作”之上开一层：关掉选择器后创建表单还在。
+  openModalLayer('选择工作区目录', (c) => {
     const pathIn = textInput('当前目录');
     pathIn.readOnly = true;
     const rootsRow = document.createElement('div');
