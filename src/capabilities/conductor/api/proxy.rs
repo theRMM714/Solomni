@@ -3,6 +3,7 @@
 //! 每个方法都是「克隆要用的东西 → 进队列执行 → 取回结果」，不做业务判断（判断在 `service/`）。
 
 use super::*;
+use crate::capabilities::llm::api::{ProbeOutcome, ToolMode};
 use crate::capabilities::modules::api::Roster;
 use crate::capabilities::registry::api::RegistryOps;
 use crate::capabilities::registry::api::{AgentView, AppSettings, ModelView, ProviderView};
@@ -280,6 +281,34 @@ impl RegistryOps for ConductorHandle {
         &self,
         draft: crate::capabilities::registry::api::ModelDraft,
     ) -> Result<(), String> {
+        // 原生形态：**保存前实测**（所有写入口都走这里，不只是 Web 表单）。
+        // 信封形态是用户显式选择，直接保存（不测试）。
+        if draft.tools == ToolMode::Native {
+            let (provider, api_model) = (draft.provider.clone(), draft.api_model.clone());
+            let outcome =
+                self.call(move |core| core.registry().probe_channel_tools(&provider, &api_model))?;
+            match &outcome {
+                ProbeOutcome::Supported { .. } => {}
+                ProbeOutcome::Unsupported { detail } => {
+                    return Err(format!(
+                        "供应商不支持原生工具调用：{}；模型未保存。",
+                        detail
+                    ))
+                }
+                ProbeOutcome::Unknown { detail } => {
+                    return Err(format!(
+                        "无法判定该通道是否支持原生工具调用：{}；模型未保存，请重试。",
+                        detail
+                    ))
+                }
+            }
+            let (provider, api_model) = (draft.provider.clone(), draft.api_model.clone());
+            let report =
+                self.call(move |core| core.registry().probe_channel_replay(&provider, &api_model))?;
+            if !report.shapes.iter().any(|s| s.accepted) {
+                return Err("该通道不接受任何工具调用回放形状；模型未保存。".to_string());
+            }
+        }
         self.call(move |core| core.registry_write(|r| r.model_upsert(draft)))
     }
     fn remove_model(&self, id: &str) -> Result<bool, String> {

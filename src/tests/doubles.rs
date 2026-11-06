@@ -3544,6 +3544,7 @@ pub(crate) fn model_draft(
         api_model: api_model.to_string(),
         provider: provider.to_string(),
         note: note.to_string(),
+        tools: crate::capabilities::llm::api::ToolMode::Envelope,
         context,
         thinking: Default::default(),
     }

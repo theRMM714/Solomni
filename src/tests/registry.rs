@@ -32,7 +32,7 @@ pub(crate) fn settings_resolves_model_to_channel() {
         "发给供应商的是 api_model，不是展示名"
     );
     assert_eq!(ch.base_url, "http://x");
-    // 缺省 = envelope（手写信封：任何供应商都能用）；模型视图也如实带出来
+    // 缺省 = native（工具调用默认走原生）；模型视图也如实带出来
     s.models.insert(
         "d".into(),
         ModelEntry {
@@ -46,6 +46,14 @@ pub(crate) fn settings_resolves_model_to_channel() {
         },
     );
     assert!(s.resolve("d").is_ok(), "缺省形态的模型照样能解析出通道");
+    assert_eq!(
+        s.model_views()
+            .iter()
+            .find(|v| v.id == "d")
+            .map(|v| v.tools),
+        Some(crate::capabilities::llm::api::ToolMode::Native),
+        "不填 tools 的模型缺省走原生"
+    );
     assert_eq!(
         s.model_views()
             .iter()
@@ -414,7 +422,7 @@ pub(crate) fn a_probe_writes_back_only_conclusive_results() {
     assert_eq!(
         mode_of(&core),
         Some(ToolMode::Envelope),
-        "探测前是缺省 envelope"
+        "替身登记成信封；探测前保持原值"
     );
     assert!(matches!(
         core.registry_mut().probe_model_tools("m"),

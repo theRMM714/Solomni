@@ -112,6 +112,12 @@ pub trait Registry: Send + Sync {
     ) -> Result<Option<serde_json::Value>, String>;
     /// 该模型（缺省用核心默认）是否登记了这一档（会话切换前的可用性判据）。
     fn thinking_supports(&self, model: Option<&str>, level: &str) -> bool;
+    /// 目的：按 draft 的供应商 + api_model 实测原生工具调用（要真实网络；不落盘）。
+    /// 约束：保存闸门在 conductor 的模型保存用例里用它——原生态只有明确支持才允许落盘。
+    fn probe_channel_tools(&self, provider: &str, api_model: &str) -> Result<ProbeOutcome, String>;
+    /// 目的：按 draft 的供应商 + api_model 实测回放形状（要真实网络；不落盘）。
+    fn probe_channel_replay(&self, provider: &str, api_model: &str)
+        -> Result<ReplayReport, String>;
     /// 登记处**快照**：协作会话自持一份（与今日 `settings.clone()` 同义，语义不变）。
     fn snapshot(&self) -> Settings;
     // ---- 写：只有这里改登记处，改完就落盘 ----

@@ -1339,6 +1339,7 @@ fn model_flow(ops: &Ops, arg: &str) {
                 api_model: w[2].to_string(),
                 provider: w[3].to_string(),
                 note: note.to_string(),
+                tools: Default::default(),
                 context: 0,
                 thinking: Default::default(),
             };

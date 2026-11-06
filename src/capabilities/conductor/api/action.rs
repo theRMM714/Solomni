@@ -709,12 +709,26 @@ impl ConductorHandle {
                         })
                         .unwrap_or_default(),
                 };
+                // 工具调用形态：表单带 tools 就用它；没带 = 编辑保留原值，新建缺省（native）。
+                let tools = match args.get("tools").and_then(|v| v.as_str()) {
+                    Some(raw) => serde_json::from_value::<crate::capabilities::llm::api::ToolMode>(
+                        serde_json::json!(raw),
+                    )
+                    .map_err(|_| format!("工具调用方式只认 native / envelope：{}", raw))?,
+                    None => self
+                        .models()?
+                        .into_iter()
+                        .find(|m| m.id == s("id"))
+                        .map(|m| m.tools)
+                        .unwrap_or_default(),
+                };
                 let draft = crate::capabilities::registry::api::ModelDraft {
                     id: s("id"),
                     name: s("name"),
                     api_model: s("api_model"),
                     provider: s("provider"),
                     note: s("note"),
+                    tools,
                     context,
                     thinking,
                 };

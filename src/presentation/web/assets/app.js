@@ -2304,6 +2304,11 @@ function modelsPage(c, coreBody) {
     const noteIn = textInput('note（能力说明）');
     // 上下文窗口：0 / 留空 = 用户不填；自动压缩按 128K 兜底（见后端 DEFAULT_CONTEXT_TOKENS）。
     const ctxIn = numberInput('上下文窗口（tokens，0 或留空 = 不填；自动压缩按 128K 兜底）', 0, 0, 2000000);
+    // 工具调用形态：原生 = 保存前实测（通道基线 + tools + 回放形状）；手写信封 = 用户显式选择，不测试。
+    const toolsSel = selectInput([
+      { value: 'native', label: '原生工具调用（保存前实测）' },
+      { value: 'envelope', label: '手写信封（不测试）' },
+    ], 'native');
     // 思考强度：一行 = 左选档位、右填映射值；默认档只能从已映射的档里选。
     const thinkEditor = thinkingMapEditor();
     const save = btn('登记 / 更新', 'btn btn-primary btn-block');
@@ -2356,6 +2361,7 @@ function modelsPage(c, coreBody) {
           idIn.value = m.id; nameIn.value = m.name; apiIn.value = m.api_model;
           providerSel.value = m.provider; noteIn.value = m.note || '';
           ctxIn.input.value = m.context || 0;
+          toolsSel.value = m.tools || 'native';
           thinkEditor.setSpec(m.thinking || { default: null, levels: {} });
           c.setMsg('编辑 ' + m.id);
         };
@@ -2438,12 +2444,16 @@ function modelsPage(c, coreBody) {
         id: idIn.value.trim(), name: nameIn.value.trim(), api_model: apiIn.value.trim(),
         provider: providerSel.value, note: noteIn.value.trim(),
         context: Number(ctxIn.input.value) || 0,
+        tools: toolsSel.value,
         thinking: think.spec,
       };
       if (!body.id || !body.name || !body.api_model || !body.provider) {
         c.setMsg('id / 名字 / api_model / 供应商 均不能为空', true); return;
       }
       try {
+        if (body.tools === 'native') {
+          c.setMsg('正在保存：先实测原生工具调用与回放形状（几条最小请求，可能要几秒）…');
+        }
         await c.mutate('upsert_model', body);
         c.setMsg('已保存：' + body.id +
           (state.core ? '' : '（还没有核心默认模型：点这一行的「设为核心」即可）'));
@@ -2470,6 +2480,7 @@ function modelsPage(c, coreBody) {
     // numberInput 返回 { input, wrap }，而 wrap **已经带标签**——直接把 wrap 挂上去
     //（传对象给 field 会让 appendChild 抛异常，整个表单就建不起来）。
     form.appendChild(ctxIn.wrap);
+    form.appendChild(field('工具调用', toolsSel));
     form.appendChild(field('思考档位映射（可选）', thinkEditor.mapping));
     form.appendChild(thinkEditor.defaultField);
     form.appendChild(thinkEditor.defaultHint);

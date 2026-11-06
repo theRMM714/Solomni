@@ -32,14 +32,15 @@ pub struct ReplayReport {
     pub shapes: Vec<ReplayShape>,
 }
 
-/// 该通道的工具调用形态（登记处里的事实；**缺省 envelope** = 任何供应商都能用的手写信封）。
+/// 该通道的工具调用形态（登记处里的事实；**缺省 native** = 现代供应商普遍支持）。
+/// 手写信封保留给模型表单里**显式选择**的通道（保存前不实测）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ToolMode {
-    /// 手写信封：模型在正文里写 {"type":"tool",…}，核心解析。任何供应商都支持。
-    #[default]
+    /// 手写信封：模型在正文里写 {"type":"tool",…}，核心解析。
     Envelope,
-    /// 原生工具调用：参数走供应商的结构化槽位（需要该通道确实支持 function calling）。
+    /// 原生工具调用：参数走供应商的结构化槽位（保存前实测通过才允许落盘）。
+    #[default]
     Native,
 }
 

@@ -22,6 +22,47 @@ fn spawn(modules: Vec<Module>, core_script: Vec<&str>) -> ConductorHandle {
     ops_with(modules, core_script).0
 }
 
+/// 原生形态的模型保存前必须实测通过；信封形态是显式选择，不测试直接保存。
+#[test]
+fn native_model_save_is_gated_by_measurement_but_envelope_is_not() {
+    let handle = spawn(vec![module_of("a")], Vec::new());
+    let ops = Ops::from_handle(&handle);
+    let draft = |id: &str, tools| crate::capabilities::registry::api::ModelDraft {
+        tools,
+        ..model_draft(id, id, id, "p", "", 0)
+    };
+    // 信封：不测试，直接落盘。
+    ops.registry
+        .upsert_model(draft(
+            "env-model",
+            crate::capabilities::llm::api::ToolMode::Envelope,
+        ))
+        .expect("信封形态不需要实测");
+    assert!(ops
+        .registry
+        .models()
+        .expect("读模型")
+        .iter()
+        .any(|m| m.id == "env-model"));
+    // 原生：替身没有真实供应商，实测不能给出明确结论 → 不保存。
+    let err = ops
+        .registry
+        .upsert_model(draft(
+            "native-model",
+            crate::capabilities::llm::api::ToolMode::Native,
+        ))
+        .unwrap_err();
+    assert!(!err.is_empty(), "实测没结论要如实报错");
+    assert!(
+        !ops.registry
+            .models()
+            .expect("读模型")
+            .iter()
+            .any(|m| m.id == "native-model"),
+        "实测没结论时模型不得落盘"
+    );
+}
+
 // ---------- 命令在自己的线程上跑，状态只被它碰 ----------
 
 #[test]

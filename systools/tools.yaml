@@ -729,13 +729,14 @@ tools:
   upsert_model:
     capability: none
     callers: [user]
-    desc: 登记（或更新）一个模型：展示名 / 实际模型串 / 所属供应商 / 能力说明 / 上下文窗口。
+    desc: 登记（或更新）一个模型：展示名 / 实际模型串 / 所属供应商 / 能力说明 / 工具调用方式 / 上下文窗口。原生形态保存前实测（工具调用 + 回放形状），明确通过才落盘；手写信封不测试。
     params:
       id: { type: string, required: true, non_empty: true, desc: 模型 id }
       name: { type: string, required: true, non_empty: true, desc: 展示名 }
       api_model: { type: string, required: true, non_empty: true, desc: 发给供应商的实际模型串 }
       provider: { type: string, required: true, non_empty: true, desc: 所属供应商 id }
       note: { type: string, desc: 能力说明（给人看） }
+      tools: { type: string, desc: "工具调用方式：native（缺省；保存前实测通过才落盘）/ envelope（手写信封，用户显式选择，不测试）；省略 = 编辑保留原值、新建缺省 native" }
       context: { type: integer, min: 0, desc: 上下文窗口（token，估算用）；省略 = 0（未知） }
       thinking: { type: object, desc: "思考强度：default = 档位 id 或空；levels = 档位 id → 字符串（reasoning_effort 简写）或 JSON 对象；省略 = 保留原值；levels 为空 = 该模型不发思考参数" }
   remove_model:

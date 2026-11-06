@@ -22,7 +22,7 @@ pub struct ModelEntry {
     pub provider: String,
     #[serde(default)]
     pub note: String,
-    /// 工具调用形态（缺省 envelope；填 native 前应当用探测确认真实支持，见 REGISTRY_SPEC）。
+    /// 工具调用形态（缺省 native；原生形态在保存前实测通过才允许落盘，见 REGISTRY_SPEC）。
     #[serde(default)]
     pub tools: ToolMode,
     /// 这个模型的**上下文窗口**（tokens）。缺省给保守值：宁可早压，也别撑爆。
@@ -124,6 +124,8 @@ pub struct ModelDraft {
     pub provider: String,
     /// 目的：能力说明（给人看）。
     pub note: String,
+    /// 目的：工具调用形态；原生形态在保存前实测通过才允许落盘。
+    pub tools: ToolMode,
     /// 目的：上下文窗口（tokens）；0 = 用户不填（自动压缩按 DEFAULT_CONTEXT_TOKENS 兜底）。
     pub context: u64,
     /// 目的：思考强度（默认档 + 档位映射）。
@@ -587,7 +589,7 @@ impl Settings {
         })
     }
 
-    /// 某 agent 的工具调用形态：它自己的模型优先，其次核心默认；两者都没有 = envelope（兜底，任何供应商都能用）。
+    /// 某 agent 的工具调用形态：它自己的模型优先，其次核心默认；两者都没有 = native（缺省形态）。
     pub fn tool_mode_for(&self, model: Option<&str>) -> ToolMode {
         model
             .or(self.core.as_deref())
