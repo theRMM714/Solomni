@@ -592,6 +592,25 @@ async function openHistory(name) {
 }
 
 async function deleteHistory(name) {
+  // 外部工作区不归本产品所有：删除只删会话目录，必须先说清“工作区文件保留”。
+  const sess = state.sessions.get(name);
+  if (sess && sess.workspace) {
+    if (!(await confirmBox('删除会话', '删除会话「' + name + '」？记录与版本库将被永久删除；工作区 ' + sess.workspace + ' 里的文件会保留，不会被删除。', '删除'))) return;
+    try {
+      await api('POST', '/api/history/' + encodeURIComponent(name) + '/delete', {});
+      if (state.sessions.has(name)) {
+        state.sessions.delete(name);
+        if (state.activeSid === name) {
+          const it = state.sessions.keys().next();
+          state.activeSid = it.done ? null : it.value;
+        }
+      }
+      await refreshState();
+      renderAll();
+      ui.toast('ok', '已删除会话：' + name);
+    } catch (err) { notice('操作失败', err.message, 'err'); }
+    return;
+  }
   // 删除前如实交代工作区：会被一起删掉的产物先列出来（数量 + 字节），避免"以为只删记录"。
   // 一次 GET /files 拿到同一份清单与用量；拉不到（会话已不存在）就退回一步确认。
   let usage = null;
@@ -3279,6 +3298,8 @@ async function openWizard(draft) {
   openModal('新建工作', (c) => {
     const nameIn = textInput('工作名称（必填，会话落盘目录名）');
     if (w.name) nameIn.value = w.name;   // 草稿重开：把用户填过的带回来
+    const workspaceIn = textInput('工作区（可选：已存在的绝对目录；留空 = 会话内）');
+    if (w.workspace) workspaceIn.value = w.workspace;
     const modeSel = selectInput([
       { value: 'single', label: '单 agent（1 个或多个模块）' },
       { value: 'collab', label: '协作（多个 agent）' },
@@ -3548,7 +3569,9 @@ async function openWizard(draft) {
       let agents;
       if (w.mode === 'proxy') {
         // 代理：没有名单、没有需求——选这个形态就是授予全权（档位由上面的选择显式落盘）。
-        await submit({ name, mode: 'proxy', agents: [], tier: w.tier, guest: w.tier === 'vm' ? vmGuest : null, permission: w.permission || 'all_reach' });
+        const proxyBody = { name, mode: 'proxy', agents: [], tier: w.tier, guest: w.tier === 'vm' ? vmGuest : null, permission: w.permission || 'all_reach' };
+        if (workspaceIn.value.trim()) proxyBody.workspace = workspaceIn.value.trim();
+        await submit(proxyBody);
         return;
       }
       if (w.mode === 'single') {
@@ -3579,6 +3602,7 @@ async function openWizard(draft) {
       const names = agents.map((a) => a.name);
       const dup = names.filter((n, i) => names.indexOf(n) !== i)[0];
       const body = { name, mode: w.mode, agents, tier: w.tier, permission: w.permission || 'workspace' };
+      if (workspaceIn.value.trim()) body.workspace = workspaceIn.value.trim();
       if (w.tier === 'vm') body.guest = vmGuest;
       if (task) body.task = task;
       if (dup) {
@@ -3592,6 +3616,7 @@ async function openWizard(draft) {
     };
 
     c.body.appendChild(field('工作名称', nameIn));
+    c.body.appendChild(field('工作区（可选）', workspaceIn));
     c.body.appendChild(field('形态', modeSel));
     c.body.appendChild(modeHint);
     c.body.appendChild(tierField);

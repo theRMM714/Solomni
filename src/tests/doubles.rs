@@ -1304,6 +1304,10 @@ impl HistoryStore for InMemoryHistory {
                     .unwrap_or(false),
                 exec: m.exec.clone(),
                 parent: m.parent.clone(),
+                workspace: m
+                    .workspace
+                    .as_ref()
+                    .map(|binding| binding.root.display().to_string()),
                 run: m.run,
             })
             .collect())

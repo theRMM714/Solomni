@@ -152,6 +152,9 @@ pub struct HistoryView {
     /// 谁编排的（子会话 = 父会话名）：侧栏据此把子会话缩进挂在父会话下。
     #[serde(default)]
     pub parent: Option<String>,
+    /// 目的：外部工作区根；None = 产品内布局。侧栏据此把删除文案说成“只删记录”。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
     /// 运行态（`active` / `stopped` / `closed`）：侧栏据此标出已停止 / 已关闭的会话
     /// （"这一刻在不在跑"是另一回事，见 `SessionView.running`）。
     pub run: RunState,

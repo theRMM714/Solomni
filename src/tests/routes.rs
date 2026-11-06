@@ -282,6 +282,7 @@ impl SessionOps for FakeOps {
             continue_action: None,
             context: None,
             shell: None,
+            workspace: None,
         })
     }
     fn continue_flow(&self, _sid: &str, _out: Output) -> Result<Advance, String> {
@@ -538,6 +539,7 @@ impl SessionOps for FakeOps {
                 continue_action: None,
                 context: None,
                 shell: None,
+                workspace: h.workspace.clone(),
             })
             .collect())
     }
@@ -685,6 +687,7 @@ impl HistoryOps for FakeOps {
             done: false,
             exec: Default::default(),
             parent: None,
+            workspace: None,
             run: crate::capabilities::session::api::RunState::Active,
         }])
     }

@@ -841,6 +841,9 @@ pub struct SessionView {
     /// 目的：最近一次 shell 的运行状态（状态栏卡片）；没跑过 shell 就是 null。
     /// 约束：总是出现（null = 没有）——前端据此清掉回档已经截掉的旧快照。
     pub shell: Option<crate::capabilities::session::api::ShellLive>,
+    /// 目的：外部工作区根；None = 产品内布局。界面据此显示“删除只删记录”、工作区标记。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
 }
 
 /// 目的：思考强度视图：当前选择 + 共同默认档 + 可选档（状态栏与配置页共用一份事实）。

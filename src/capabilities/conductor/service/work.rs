@@ -1275,6 +1275,7 @@ impl Conductor {
                     continue_action,
                     context,
                     shell,
+                    workspace: entry.and_then(|h| h.workspace.clone()),
                 }
             })
             .collect()
