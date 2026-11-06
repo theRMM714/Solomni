@@ -274,16 +274,21 @@ impl MemberTools {
     /// 为什么随回合：同一个 agent 会话会用两种身份干活（说话 / 干活），能用的工具随回合变。
     /// 空串 = 这一回合没有可用工具（调用方不注入空块）。
     pub(crate) fn tools_block(&self, ids: &[String], with_modules: bool) -> String {
+        // 原生通道的工具面由**声明槽**下发（名字 / 说明 / JSON Schema），这里不再重复文字清单：
+        // 只保留声明表达不了的内容（patch 的自由格式写法）。信封通道仍由这段文字承载全部工具说明。
+        let native = self.mode == crate::capabilities::llm::api::ToolMode::Native;
         let mut parts: Vec<String> = Vec::new();
-        for id in ids {
-            if let Some(schema) = self.builtin_tools.get(id) {
-                // 环境参数只属于人经呈现层：核心代理的 create_session 工具面不列 tier / guest。
-                let text = if self.role == "core_proxy" && id == "create_session" {
-                    schema.render_for_prompt_hiding(&["tier", "guest"])
-                } else {
-                    schema.render_for_prompt()
-                };
-                parts.push(format!("{}\n{}", id, text));
+        if !native {
+            for id in ids {
+                if let Some(schema) = self.builtin_tools.get(id) {
+                    // 环境参数只属于人经呈现层：核心代理的 create_session 工具面不列 tier / guest。
+                    let text = if self.role == "core_proxy" && id == "create_session" {
+                        schema.render_for_prompt_hiding(&["tier", "guest"])
+                    } else {
+                        schema.render_for_prompt()
+                    };
+                    parts.push(format!("{}\n{}", id, text));
+                }
             }
         }
         // patch 是自由格式工具：它不在参数清单里，写法跟一段补丁正文（只有拿到它的席位才给）。
@@ -293,7 +298,7 @@ impl MemberTools {
         {
             parts.push(self.notes.patch_guide.clone());
         }
-        if with_modules {
+        if with_modules && !native {
             parts.push(self.notes.module_tools.clone());
             parts.push(self.notes.module_tool_params.clone());
         }
