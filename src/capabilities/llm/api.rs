@@ -32,8 +32,8 @@ pub struct ReplayReport {
     pub shapes: Vec<ReplayShape>,
 }
 
-/// 该通道的工具调用形态（登记处里的事实；**缺省 native** = 现代供应商普遍支持）。
-/// 手写信封保留给模型表单里**显式选择**的通道（保存前不实测）。
+/// 目的：该通道的工具调用形态（登记处里的事实；**缺省 native** = 现代供应商普遍支持）。
+/// 约束：手写信封只给模型表单里**显式选择**的通道（保存前不实测）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ToolMode {

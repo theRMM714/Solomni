@@ -1,13 +1,14 @@
-//! 工具结果的**单次预算**：所有工具回执在送回模型前统一 head+tail 截断。
-//! 为什么统一：read / search / list / shell / 模块工具各有自己的上限，口径不一；
-//! 上下文预算应该只有一处（见 docs/tools/tools-and-roles.md 五）。
-//! 约束：截断只作用在回执正文；read 的续读 offset、shell 的状态行/末行都在尾部，head+tail 会保住它们。
+//! 目的：工具结果的**单次预算**——所有工具回执在送回模型前统一 head+tail 截断。
+//! 管：字符上限与截断标记文案；read 的续读 offset、shell 的状态行 / 末行都保留在尾部。
+//! 不管：各工具自己的分页与截断（在 tools 的 systool / kernel 的 receipt）；上下文压缩（在 session）。
+//! 联动：由 tools 的 service 在所有执行路径返回前调用；细则见 docs/tools/tools-and-roles.md 二。
 
-/// 单次工具结果回执的字符上限（约 4k tokens）：超出按 head+tail 截断并给出续读提示。
+/// 目的：单次工具结果回执的字符上限（约 4k tokens）。
+/// 约束：超出按 head+tail 截断并给出续读提示。
 pub const MAX_RESULT_CHARS: usize = 16_000;
 
 /// 目的：把一次工具回执收进统一预算；未超限原样返回。
-/// 保留开头约 1/4、结尾约 3/4（尾部常含 read 的续读 offset / shell 的状态行与末行）。
+/// 约束：保留开头约 1/4、结尾约 3/4（尾部常含 read 的续读 offset / shell 的状态行与末行）。
 pub fn cap_result(text: String) -> String {
     let total = text.chars().count();
     if total <= MAX_RESULT_CHARS {

@@ -89,7 +89,7 @@ pub(crate) fn tool_views(
         .collect()
 }
 
-/// 转录里所有非空的行级原文（每条回复应只有一份）。
+/// 目的：转录里所有非空的行级原文（每条回复应只有一份）。
 pub(crate) fn transcript_raws(events: &[SessionEvent]) -> Vec<String> {
     events
         .iter()
@@ -124,6 +124,7 @@ pub(crate) fn tool_line_texts(events: &[SessionEvent]) -> Vec<String> {
 pub(crate) struct ExecLike {
     pub reports: BTreeMap<String, String>,
     pub traces: BTreeMap<String, Vec<crate::capabilities::session::api::ToolCallView>>,
+    /// 目的：每个成员的各回复原文（每条回复一份）。
     pub raws: BTreeMap<String, Vec<String>>,
 }
 

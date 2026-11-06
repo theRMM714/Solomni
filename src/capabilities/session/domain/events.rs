@@ -308,8 +308,8 @@ pub struct LineView {
     /// 思维链（若该轮模型给出）；前端永远默认折叠，点击才展开。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<String>,
-    /// 本行所属回复的**助手消息原文**（重建上下文用；每条回复只落一份，挂在该回复首行）。
-    /// 信封模式下含信封 JSON；原生模式下即可见正文。呈现层只在整轮气泡里展示一次。
+    /// 目的：本行所属回复的**助手消息原文**（重建上下文用；每条回复只落一份，挂在该回复首行）。
+    /// 约束：信封模式下含信封 JSON，原生模式下即可见正文；呈现层只在整轮气泡里展示一次。
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub raw: String,
     /// 该行是一次工具调用时带上调用视图；普通文本行没有。

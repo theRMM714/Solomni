@@ -88,8 +88,8 @@ pub fn arg_text(args_json: &str) -> String {
         .unwrap_or_default()
 }
 
-/// 一轮模型调用的产出（一轮 = 一条文本转录行；有工具时紧跟一条工具行）。
-/// 原始输出不进工具行：它由 Round.raw 随该回复首轮携带，工具行只记参数与回执。
+/// 目的：一轮模型调用的产出（一轮 = 一条文本转录行；有工具时紧跟一条工具行）。
+/// 约束：原始输出不进工具行——由 Round.raw 随该回复首轮携带，工具行只记参数与回执。
 pub struct Round {
     /// 这一轮属于哪次模型回复（一次回复可能产出多条工具行）。
     pub reply: u64,
@@ -99,7 +99,7 @@ pub struct Round {
     pub reasoning: String,
     /// 该轮压进历史的消息：工具轮 = [assistant(raw)]，末轮 = [assistant(text)]。
     pub text_msgs: Vec<Msg>,
-    /// 该回复的助手消息原文（重建上下文用；每条回复只落一份，由该回复首轮携带）。
+    /// 目的：该回复的助手消息原文（重建上下文用；每条回复只落一份，由该回复首轮携带）。
     pub raw: String,
     pub tool: Option<ToolRun>,
     /// 供应商给的结束原因（原样；没给 = 空串）：核心据此分辨"写完停"还是"被长度截断"。

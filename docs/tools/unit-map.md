@@ -13,6 +13,7 @@
 | `src/capabilities/tools/service/mod.rs` | 工具能力的用例与端口持有者：持工具总表、角色表与名字表（`SystemTools`）及 `SysIo` / `ProcessRunner` / `FenceHost` 三个端口 |
 | `src/capabilities/tools/ports.rs` | 出站端口：三张表的加载 `SystoolsSource` 与内置文件工具的读写 `SysIo`（含 `FileRead` / `DirEntry` 数据形态） |
 | `src/capabilities/tools/service/systool.rs` | 内置工具的执行编排：解析入参 → 按声明校验 → 沙箱寻址 → 经 `SysIo` 读写盘（规则在 `src/capabilities/tools/domain/systool.rs`） |
+| `src/capabilities/tools/domain/budget.rs` | 工具结果的**单次预算**：所有回执送回模型前统一 head+tail 截断（16k 字符）并给出续读提示；read 的续读 offset、shell 的状态行/末行在尾部保留 |
 | `src/capabilities/tools/domain/systool.rs` | 内置文件工具与回报（read / write / edit / patch / delete / list / search / submit_report）的纯规则：参数校验、观察账本、回执文案与 `ToolOutcome`；系统工具保留名（含 shell） |
 | `src/capabilities/tools/domain/patch.rs` | 补丁通道（patch 工具）的纯逻辑：解析自由格式的改动文本并在文件内容上按整行应用 |
 | `src/capabilities/tools/domain/schema.rs` | 工具参数契约：解析、校验与渲染声明在文本层的参数 schema（内置工具在 `systools/tools.yaml`，模块工具在 `module.yaml`） |

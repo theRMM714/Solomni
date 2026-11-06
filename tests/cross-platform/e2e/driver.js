@@ -223,8 +223,9 @@ async function lines(sid) {
 
   // 登记处：一个供应商 + 两个模型
   assert((await reg('upsert_provider', { id: 'mock', base_url: MOCK_BASE + '/v1', api_key: 'k' })).status === 200, '登记供应商');
-  assert((await reg('upsert_model', { id: 'm1', name: 'M1', api_model: 'm1', provider: 'mock', note: '' })).status === 200, '登记模型 m1');
-  assert((await reg('upsert_model', { id: 'm2', name: 'M2', api_model: 'm2', provider: 'mock', note: '' })).status === 200, '登记模型 m2');
+  // 假供应商按**手写信封**回话（见 mock.js）：这里显式选信封，别用缺省 native。
+  assert((await reg('upsert_model', { id: 'm1', name: 'M1', api_model: 'm1', provider: 'mock', note: '', tools: 'envelope' })).status === 200, '登记模型 m1');
+  assert((await reg('upsert_model', { id: 'm2', name: 'M2', api_model: 'm2', provider: 'mock', note: '', tools: 'envelope' })).status === 200, '登记模型 m2');
   assert((await reg('set_core_model', { id: 'm1' })).status === 200, '设核心默认 m1');
   assert((await reg('upsert_agent', { name: '单兵', modules: ['summarizer'], model: 'm1', note: 'e2e' })).status === 200, '登记 agent 单兵');
   assert((await reg('upsert_agent', { name: '双子', modules: ['research', 'reviewer'], model: 'm2', note: 'e2e 多模块' })).status === 200, '登记 agent 双子（2 模块 / m2）');
