@@ -2007,6 +2007,7 @@ impl Conductor {
         sid: &str,
         commit: u64,
         expect_head: u64,
+        force: bool,
     ) -> Result<(Option<u64>, Vec<SessionEvent>), String> {
         let work = self.work_root(sid)?;
         let tree = self.subtree_of(&work);
@@ -2021,7 +2022,11 @@ impl Conductor {
             ));
         }
         let target = self.workspace.work_commit_view(&work, commit)?;
-        self.workspace.work_restore(&work, commit)?;
+        if force {
+            self.workspace.work_restore_force(&work, commit)?;
+        } else {
+            self.workspace.work_restore(&work, commit)?;
+        }
         let after = self.workspace.work_head(&work)?;
         let before = if current == 0 {
             "空共享区".to_string()

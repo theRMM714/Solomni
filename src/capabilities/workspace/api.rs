@@ -167,6 +167,9 @@ pub trait Workspace: Send + Sync {
     /// 目的：把主副本物化回某个提交点（只改共享区，不动各会话）。
     /// 约束：非破坏性——目标之后的提交仍保留，可再次回滚。
     fn work_restore(&self, work: &str, commit: u64) -> Result<(), String>;
+    /// **确认后覆盖**：与 `work_restore` 相同，但允许覆盖工作区里被外部改过的受管路径。
+    /// 约束：只给用户经危险确认后的动作；权限与生成中检查仍在调用方。
+    fn work_restore_force(&self, work: &str, commit: u64) -> Result<(), String>;
     /// 共享区当前提交点（留档记 after 用）。
     fn work_head(&self, work: &str) -> Result<Option<u64>, String>;
     /// 物化到"各会话都还没越过自己保留行"的最后一个提交点；返回选中的提交（None = 空共享区）。

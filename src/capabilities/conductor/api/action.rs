@@ -650,9 +650,11 @@ impl ConductorHandle {
                         "restore_work_commit 需要 expect_head（看到详情时的 head；空共享区传 0）"
                             .to_string()
                     })?;
+                let force = args.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
                 let target = sid.clone();
-                let (after, events) =
-                    self.call(move |core| core.restore_work_commit(&target, commit, expect_head))?;
+                let (after, events) = self.call(move |core| {
+                    core.restore_work_commit(&target, commit, expect_head, force)
+                })?;
                 self.bus.push(&sid, &events);
                 Ok(Acted::Done(
                     serde_json::json!({ "ok": true, "head": after }),

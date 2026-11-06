@@ -4755,6 +4755,22 @@ async function restoreCommit(modal, s, d) {
     ui.toast('ok', '已回滚到提交 #' + d.id);
     if (modal && modal.close) modal.close();
   } catch (e) {
+    if (/被外部改动/.test(e.message) &&
+        await confirmBox('覆盖工作区外部改动', e.message + '\n\n确认后会覆盖这些路径当前的内容；建议先 work_sync，保留外部修改。', '仍要覆盖')) {
+      try {
+        await api('POST', actionUrl('restore_work_commit'), {
+          session_id: s.sid, commit: d.id, expect_head: head, force: true,
+        });
+        s.workAt = 0; s.workDirty = false;
+        await loadWork(s.sid, true);
+        ui.toast('ok', '已确认覆盖并回滚到提交 #' + d.id);
+        if (modal && modal.close) modal.close();
+      } catch (e2) {
+        if (modal && modal.setMsg) modal.setMsg('回滚失败：' + e2.message, true);
+        else notice('回滚失败', e2.message, 'err');
+      }
+      return;
+    }
     if (modal && modal.setMsg) modal.setMsg('回滚失败：' + e.message, true);
     else notice('回滚失败', e.message, 'err');
     s.workAt = 0;

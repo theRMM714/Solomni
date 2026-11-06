@@ -105,6 +105,33 @@ impl WorkspaceService {
             .clone()
     }
 
+    /// 目的：回滚到某个提交点的唯一实现；`force` = 用户已做危险确认，允许覆盖外部改动。
+    fn restore_impl(&self, work: &str, commit: u64, force: bool) -> Result<(), String> {
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let _shared = self.dirs.lock_shared(work)?;
+        let (shared, store) = self.work_roots(work)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)?;
+        if self.store.read_commit(&store, commit)?.is_none() {
+            return Err(format!("没有提交点 {}", commit));
+        }
+        let conflicts = self.external_materialize_conflicts(work, &shared, &store, Some(commit))?;
+        if !force && !conflicts.is_empty() {
+            return Err(format!(
+                "回档会覆盖工作区里被外部改动的内容：{}——先 work_sync 采纳外部版本；确认覆盖后重试。",
+                conflicts.join("、")
+            ));
+        }
+        let pending = Pending::Restore {
+            target: Some(commit),
+        };
+        self.store.write_pending(&store, &pending)?;
+        let result =
+            WorkspaceService::materialize(self.store.as_ref(), &shared, &store, Some(commit));
+        self.settle(work, &shared, &store, result)
+    }
+
     /// 目的：把共享区物化到某个提交点（None = 清空），head 同步。
     /// 约束：删除域只取**当前 head 树**里目标树没有的路径——工作区里从未受管的文件永不自动删。
     fn materialize(
@@ -1580,29 +1607,11 @@ impl Workspace for WorkspaceService {
     }
 
     fn work_restore(&self, work: &str, commit: u64) -> Result<(), String> {
-        let gate = self.gate(work);
-        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
-        let _shared = self.dirs.lock_shared(work)?;
-        let (shared, store) = self.work_roots(work)?;
-        let _lock = self.store.lock(&store)?;
-        self.recover_locked(work, &shared, &store)?;
-        if self.store.read_commit(&store, commit)?.is_none() {
-            return Err(format!("没有提交点 {}", commit));
-        }
-        let conflicts = self.external_materialize_conflicts(work, &shared, &store, Some(commit))?;
-        if !conflicts.is_empty() {
-            return Err(format!(
-                "回档会覆盖工作区里被外部改动的内容：{}——先 work_sync 采纳外部版本；强制覆盖需要用户危险确认。",
-                conflicts.join("、")
-            ));
-        }
-        let pending = Pending::Restore {
-            target: Some(commit),
-        };
-        self.store.write_pending(&store, &pending)?;
-        let result =
-            WorkspaceService::materialize(self.store.as_ref(), &shared, &store, Some(commit));
-        self.settle(work, &shared, &store, result)
+        self.restore_impl(work, commit, false)
+    }
+
+    fn work_restore_force(&self, work: &str, commit: u64) -> Result<(), String> {
+        self.restore_impl(work, commit, true)
     }
 
     fn work_head(&self, work: &str) -> Result<Option<u64>, String> {
