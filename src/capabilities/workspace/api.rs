@@ -109,6 +109,9 @@ pub trait Workspace: Send + Sync {
     /// **外部同步**：读工作区磁盘，把与 head 不同的路径采纳成一条 `author=external` 的提交。
     /// 约束：不改任何沙箱与工作区内容；同路径沙箱里有未提交改动时留给后续提交判冲突。
     fn work_sync(&self, work: &str, paths: &[String], time: i64) -> Result<SyncReport, String>;
+    /// 目的：把当前 head 树里所有受管路径的外部改动一次性采纳（确认覆盖前的保护动作）。
+    /// 约束：无受管路径 = 无操作；不碰未跟踪文件。
+    fn work_sync_tracked(&self, work: &str, time: i64) -> Result<SyncReport, String>;
     /// 目的：把该工作未完成的版本库事务重放到一致状态；没有待恢复事务 = 无操作。
     fn work_recover(&self, work: &str) -> Result<(), String>;
     /// 目的：回收该工作中不再可达的内容对象；apply=false 只统计不删除。

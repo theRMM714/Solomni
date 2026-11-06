@@ -584,9 +584,10 @@ impl ConductorHandle {
                     _ => RewindTarget::Archive(n),
                 };
                 let sid = s("session_id");
+                let force = args.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
                 // 回档成功后：主/子会话各推一条 rewound（重置快照）并推进事件台水印。
                 // 主视图仍随动作回包给调用方；推送让刷新与其它已打开标签页看到同一份重置。
-                let outcome = self.rewind_with_reset(&sid, target)?;
+                let outcome = self.rewind_with_reset(&sid, target, force)?;
                 Ok(Acted::Replayed(outcome.main))
             }
             "update_task" => self

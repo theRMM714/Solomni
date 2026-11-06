@@ -914,6 +914,16 @@ impl Workspace for WorkspaceService {
         })
     }
 
+    fn work_sync_tracked(&self, work: &str, time: i64) -> Result<SyncReport, String> {
+        let (shared, store) = self.work_roots(work)?;
+        let (_, tree) = self.head_tree(&store)?;
+        let paths: Vec<String> = tree.keys().cloned().collect();
+        if paths.is_empty() {
+            return Ok(SyncReport::default());
+        }
+        self.work_sync(work, &paths, time)
+    }
+
     fn work_commit_user(
         &self,
         work: &str,

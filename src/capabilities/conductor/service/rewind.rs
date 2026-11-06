@@ -25,7 +25,7 @@ impl Conductor {
         sid: &str,
         target: RewindTarget,
     ) -> Result<Vec<serde_json::Value>, String> {
-        Ok(self.rewind_outcome(sid, target)?.main)
+        Ok(self.rewind_outcome(sid, target, false)?.main)
     }
 
     /// 目的：回档的完整结果——主会话活动视图 + 受影响的非运行子会话活动视图。
@@ -34,6 +34,7 @@ impl Conductor {
         &mut self,
         sid: &str,
         target: RewindTarget,
+        force: bool,
     ) -> Result<RewindOutcome, String> {
         if self.running.contains(sid) {
             return Err(Self::running_refusal(sid));
@@ -46,6 +47,11 @@ impl Conductor {
             &crate::capabilities::session::api::truncate_events(&raw),
         );
         let work = self.work_root(sid)?;
+        if force {
+            // 用户已确认覆盖：先把受管路径的外部改动采纳成提交，随后的回档就不会再撞上“被外部改动”。
+            self.workspace
+                .work_sync_tracked(&work, crate::capabilities::conductor::service::now_ts())?;
+        }
         let (mut active, children) = match target {
             RewindTarget::Archive(line) => {
                 let before = crate::capabilities::session::api::align_keep(&raw, line);

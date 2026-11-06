@@ -5732,7 +5732,21 @@ async function applyRewind(s, body) {
     s.workDirty = true;
     renderAll();
     ui.toast('ok', '已回档');
-  } catch (err) { notice('操作失败', err.message, 'err'); }
+  } catch (err) {
+    if (/被外部改动/.test(err.message) &&
+        await confirmBox('覆盖工作区外部改动', err.message + '\n\n确认后会先采纳这些外部改动，再把工作区回档到目标提交；未跟踪文件不受影响。', '仍要回档')) {
+      try {
+        const r = await api('POST', actionUrl('rewind'), Object.assign({ session_id: s.sid, force: true }, body));
+        if (typeof r.head === 'number') s.floor = r.head;
+        applySnapshot(s, (r.events || []).concat(r.live || []));
+        s.workDirty = true;
+        renderAll();
+        ui.toast('ok', '已确认覆盖并回档');
+      } catch (e2) { notice('操作失败', e2.message, 'err'); }
+      return;
+    }
+    notice('操作失败', err.message, 'err');
+  }
 }
 
 /* 撤回某 agent 的同意（转录追加撤回行，协作才有意义）；值 = agent 实例名。 */
