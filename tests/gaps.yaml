@@ -106,7 +106,8 @@
     与代码 / 单测两层已收口：
     虚拟机档的稳定挂载拆成会话树根（rw）+ 外部工作区根（rw，仅外部绑定时）+ 模块树根，不再用
     shared.parent()；起 guest 前校验各 agent 私沙在会话树根下、每个稳定根能经路径桥往返，不能表示的根
-    （Windows UNC / 网络路径）如实拒绝并提示先映射成本机盘符；建会话失败时 discard 连版本库 .work 一起清。
+    （Windows UNC / 网络路径）如实拒绝（映射盘符不解决，支持计划见 workspace.external-root-unc）；
+    建会话失败时 discard 连版本库 .work 一起清。
     外部工作区根保持可写——宿主会把只读挂载无条件并入每次调用的允许集，只读会绕过 per-agent 的共享区
     读取范围；guest 不直接写共享区，写共享区走宿主侧 work_commit。
     仍缺 Linux 真机验收：virtiofs（默认档）与 9p（回退档）两条用户链都还没跑过「绑定外部根后 guest 内
@@ -126,19 +127,87 @@
   scope: global
   level: T4
   why: |
-    外部工作区绑定到 Windows 的 UNC / 网络路径（\\server\share\dir）时虚拟机档不成立，且绑定链本身先坏：
-    1) 绑定入口 canonicalize 后得到 \\?\UNC\…，kernel/domain/path.rs 的 native() 只剥 \\?\ 前缀
-       （path.rs:14-21），留下 UNC\server\… 这种相对形态，随后按绝对路径 / metadata 校验失败；
-    2) 路径桥的镜像根只认盘符：posix_mirror 把 UNC 前缀里的反斜杠原样拼进 POSIX guest 路径，
-       posix_unmirror 又要求第一段是单字母盘符，正反向都不能往返；
-    3) smbd helper 能否以 UNC 目录作为 --share 根未验证（helper 用 capability 目录句柄，UNC 打开行为未知）。
-    本轮明确不支持：本机档在绑定层就会失败；虚拟机档即便绑定成功，起 guest 前 check_stable_roots 也会拒绝并提示先映射成本机盘符。
+    Windows 的 UNC / 网络路径（\\server\share\dir，以及映射到网络共享的盘符）暂不能作为外部工作区。
+    本轮只把现状与失败原因如实记清（并纠正"先映射成盘符"的错误建议）；真正支持按方案 B：
+    先修 rust-smb-server 依赖的 cap-primitives，再由产品支持 **Windows 虚拟机档** 的 UNC 外部工作区
+    （本机档因 Windows 容器围栏限制明确不做网络工作区）。
+    调查证据（Windows 真机 + 源码）：
+    1) 产品绑定层：canonicalize 的 \\?\UNC\… 被 kernel/domain/path.rs 的 native() 只剥 \\?\ 前缀，
+       变成相对路径 UNC\server\…（entry/root.rs 与 kernel/detail/confine/mod.rs 另有两处同款副本）。
+       这是"创建即失败"的直接原因；修好这三处是 B 的前置，但不构成支持（见第 2/3 条）。
+    2) 虚拟机档阻塞（决定性）：smbd helper 用 cap-primitives 3.4.6 的 Dir 打开共享根；其 Windows
+       get_path 只剥 4 个字符 \\?\，把句柄的 \\?\UNC\server\share\… 变成相对路径 UNC\server\…；
+       read_dir / create_dir / remove_file / remove_dir / rename 都用它拼路径再调 std::fs（路径式 API
+       按进程 CWD 解析）。真机匿名 SMB 实测：open / read / write / stat / 卷信息正常；目录枚举、
+       建目录、重命名返回 STATUS_OBJECT_NAME_NOT_FOUND；删除返回成功但宿主文件仍在（delete-on-close
+       失败只 warn，见 helper 的 files/table.rs）。cap-primitives 3.4.6 / 4.0.3 / 上游 main 同代码，
+       升依赖无效；把共享映射成本地盘符也不行（句柄 final path 仍是 \\?\UNC\…）。因此 guest 即使
+       cifs 挂载成功，一 ls 就失败，VM 档不可用；产品侧无法绕过，必须先修 helper。
+    3) 本机档阻塞：Windows 容器只授 internetClient（container.rs:221-242/259-275），不授
+       privateNetworkClientServer、不做 loopback 豁免；文件围栏 ACL 还是递归 TreeSetNamedSecurityInfo，
+       对网络共享会递归改远端 DACL。无围栏的降级模式不算能力承诺，所以本机档不做网络工作区。
+    4) 连带安全问题（B 实施时必须同批修，否则开放 UNC 会引入越界与并发风险）：
+       - UNC 别名可绕过"外部根与产品根互不包含"的文本 starts_with 校验（实测
+         \\localhost\D$\…\Solomni 与产品根 FileID 相同）；
+       - 跨会话工作区锁按 canonical 字符串做键，同一物理目录的 UNC / 盘符两种写法会拿到两把锁；
+       - same_host_path 的 lossy 比较会把非 UTF-8（unpaired surrogate）路径误判成可往返，破坏路径桥单射。
+    5) 入口：Web 创建工作区的输入框只读、目录选择器只列盘符，UNC 目前只能经 API 的 workspace 传入；
+       B 实施时要放开输入并做后端校验。
   how: |
-    1) 修 native()：先识别 \\?\UNC\ 并还原成 \\server\share\…，再处理普通 \\?\；
-    2) 扩展路径桥：给 UNC 增加单射编码与反向解码，或改成挂载表驱动的双根映射（不再把宿主路径编进 guest 路径）；
-    3) 让 smbd 以 UNC 目录为 --share 根并实测（含网络断开 / 权限错误的失败路径），必要时共享前先映射成本地盘符；
-    4) 同步 resolve_workspace_binding 的校验与文案，补绑定层 / 路径桥 / 两档真机用例。
+    方案 B（先上游、后产品；本轮不实施）：
+    一、上游 helper
+    1) 修 cap-primitives 的 Windows 路径重建：get_path 对 \\?\UNC\server\share\… 不能只剥 \\?\；
+       要么还原成非 verbatim 的 \\server\share\…（与盘符分支同策略），要么保留 verbatim 形态并让
+       所有路径式操作都接受（长路径更稳）。补 read_dir / create_dir / remove / rename 的 UNC 回归测试。
+    2) smbd helper（theRMM714/rust-smb-server）：以上游修复或 fork 内补丁（[patch.crates-io] 指向修好的
+       cap-primitives）重新构建；补 helper 级 UNC 共享根测试（枚举 / 建 / 改名 / 删必须真生效）；发新
+       Release（如 smbd-v0.1.1）。FORK.md 的"不维护上游补丁"策略按实际做法更新。
+    3) 产品依赖：node pins.js bump smbd <新 tag>（同时更新 links.yaml 的 URL + sha256），同步
+       dependencies.yaml 的 note（helper 版本 / 能力），再跑 pins check。
+    二、产品侧（Windows，范围 = 虚拟机档；本机档明确拒绝网络工作区）
+    1) 收敛 native() / entry/root.rs::strip_unc_prefix / confine/mod.rs::strip_verbatim_prefix 三处
+       同款剥离逻辑为一个 kernel helper（按 Prefix::VerbatimUNC / VerbatimDisk 重建，保留 \\?\Volume{}
+       等不可还原形态）；新增 is_network_path(Path)（覆盖 // 与 \\ 两种写法）。
+    2) 路径桥：posix_mirror / posix_unmirror 增加 UNC 段编码
+       /solomni-host/unc/<server>/<share>[/<rest…>]（raw 段；server/share 用 Prefix::UNC 取段，
+       不要用 as_os_str；非 UTF-8 与 . / .. 段拒绝）；保持 GuestMount.guest == bridge.to_guest(host)，
+       不做双根 codec。
+    3) 绑定：resolve_workspace_binding 增加档位参数——本机档对网络路径（UNC + GetDriveTypeW=DRIVE_REMOTE
+       的映射盘）在 canonicalize 之前拒绝（不触网、无凭据提示）；虚拟机档允许 UNC，拒绝共享根
+       （\\server\share 的 parent()==None，文案说清绑到共享下目录）与非 UTF-8。
+    4) 落点身份与锁：用 (volume serial, file index)（Windows FFI）做 same-location 与外部根 / 产品根
+       物理包含校验；锁键改用落点身份而不是 canonical 字符串；同批补"手改 meta"的加载复检。
+    5) 起 guest 前 check_stable_roots 接受 UNC（round_trips 通过）；mount 计划与 per-call 围栏逻辑不变。
+    6) Web：创建工作区的输入框允许手填 UNC，错误由后端如实展示。
+    7) 测试：
+       - T1（cfg(windows) 纯逻辑）：native / strip 的 UNC 还原、is_network_path、
+         PathBridge UNC 往返 / 无歧义 / 拒绝 verbatim 与非 UTF-8、stable_roots + check_stable_roots、
+         绑定分档拒绝文案与"不触网"、same_location（硬链接）；
+       - T2（假引擎 / 假工作区）：VM 档 UNC 外部根的 mounts 计划含 UNC host 与编码后的 guest 点；
+         本机档拒绝；
+       - T4（真机，SOLOMNI_UNC_ROOT 指向可写 UNC 目录，缺省 [探针] 跳过）：绑定 / 导入 / pull / commit /
+         sync / status、.work-root 为 native UNC、删会话不删外部；产品根 UNC 别名必须拒；VM 档 SMB 真机
+         探针（guest 读 UNC 根、写私沙落宿主、写共享区被拒、删会话不删外部；**断言目录枚举 / 建 / 改名 /
+         删除全部真生效**）；
+       - L4 e2e：设 SOLOMNI_UNC_ROOT 才跑 UNC 第二遍，同一组断言，不新开场景。
+    8) 文档：docs/workspace、docs/session、docs/vm、docs/tools 的路径模型、docs/testing/execution-ci、
+       PRODUCT / README 同步为"Windows 虚拟机档支持 UNC；本机档明确拒绝；映射盘符不解决；
+       凭据 = 当前登录用户；共享根 / 不可达 / 无权限按真实原因拒绝"。
+    三、上游修复后的收尾顺序
+    1) 上游补丁合并或 fork 版本可复现构建 → 新 smbd Release 可下载（URL + sha256 已发布）；
+    2) 产品升 pins（links.yaml / dependencies.yaml）并全绿；
+    3) 按上面 7 的 T1 / T2 / T4 / e2e 在 Windows 真机跑通，把命令与回执贴进 PR
+       （SOLOMNI_UNC_ROOT 用本机可写 UNC 目录，如 \\localhost\D$\…；CI 无 UNC / WHPX，不能代劳）；
+    4) node run-tests.js 全绿（node run-tests.js --docs 亦绿），文档改成支持状态；
+    5) 删除本条缺口。若上游修复长期不落地，本条保留在 global 账（不挪进 tests/windows/gaps.yaml，
+       避免影响 TEST-REPORT-ACCEPTED）。
   accept: |
-    UNC 外部工作区在本机档与虚拟机档都能绑定：本机档读写正常；虚拟机档能起 guest 并在 guest 内读写该工作区、
-    越界被拒；网络路径不可达时按真实原因拒绝；node run-tests.js 全绿。
-  blocked_by: 缺少实现（本轮明确不支持，先拒绝并给映射盘符指引）
+    Windows 虚拟机档：UNC 外部工作区能绑定、起 guest；guest 内目录枚举 / 读 / 建 / 改名 / 删除全部真生效
+    （删除后宿主文件确实消失），写私沙落宿主、写共享区被拒、停 / 删会话不删外部；路径桥 UNC 编解码与
+    绑定分档有 cfg(windows) 单测；产品根 UNC 别名 / 共享根 / 不可达 / 无权限按真实原因拒绝。
+    Windows 本机档：网络工作区（UNC 与映射网络盘）在绑定层明确拒绝并给出围栏原因。
+    回归：node run-tests.js 全绿；Linux / macOS 行为不变（POSIX 的 //server/share 只是普通绝对路径，
+    不承诺网络语义）。
+  blocked_by: |
+    上游阻塞：cap-primitives 的 Windows UNC 路径重建 bug（3.4.6 / 4.0.3 / main 未修），
+    smbd helper 需打补丁并发版，产品才能升依赖；本机档另受 AppContainer 无私有网络 / 回环能力阻塞。
