@@ -533,12 +533,6 @@ pub(crate) fn route(
                                 }
                             }
                         }
-                        #[cfg(not(windows))]
-                        {
-                            if name.starts_with('.') {
-                                continue;
-                            }
-                        }
                         if p.is_dir() {
                             dirs.push((name, p.display().to_string()));
                         }

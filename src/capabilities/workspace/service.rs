@@ -25,6 +25,20 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+/// 首次导入外部工作区的文件数 / 字节上限（超出只导入可导入的部分，不拖垮建会话）。
+const MAX_IMPORT_FILES: usize = 2000;
+const MAX_IMPORT_BYTES: u64 = 256 * 1024 * 1024;
+
+/// 首次导入时忽略的目录（VCS 元数据与依赖缓存；用户仍可之后显式 work_sync）。
+fn import_ignored(rel: &str) -> bool {
+    rel.split('/').any(|seg| {
+        matches!(
+            seg,
+            ".git" | ".svn" | ".hg" | "node_modules" | "target" | "__pycache__" | ".venv" | "venv"
+        )
+    })
+}
+
 /// 一次 status 里主副本路径清单的上限（超出如实标注截断，不假装列全）。
 const MAX_STATUS_TREE: usize = 200;
 /// status 里附带的最近提交条数。
@@ -912,6 +926,36 @@ impl Workspace for WorkspaceService {
             unchanged,
             missing,
         })
+    }
+
+    fn work_import_root(&self, work: &str, time: i64) -> Result<SyncReport, String> {
+        if !self.dirs.is_external(work) {
+            return Ok(SyncReport::default());
+        }
+        let (shared, store) = self.work_roots(work)?;
+        if self.store.head(&store)?.is_some() {
+            return Ok(SyncReport::default());
+        }
+        let mut paths: Vec<String> = Vec::new();
+        let mut total: u64 = 0;
+        for rel in self.store.list(&shared)? {
+            if import_ignored(&rel) {
+                continue;
+            }
+            let size = self.store.stat_under(&shared, &rel)?.unwrap_or(0);
+            if size > self.max_asset_bytes {
+                continue;
+            }
+            total = total.saturating_add(size);
+            paths.push(rel);
+            if paths.len() >= MAX_IMPORT_FILES || total >= MAX_IMPORT_BYTES {
+                break;
+            }
+        }
+        if paths.is_empty() {
+            return Ok(SyncReport::default());
+        }
+        self.work_sync(work, &paths, time)
     }
 
     fn work_sync_tracked(&self, work: &str, time: i64) -> Result<SyncReport, String> {

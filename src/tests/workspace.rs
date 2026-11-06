@@ -78,6 +78,43 @@ pub(crate) fn workspace_discard_removes_only_empty_dirs() {
     assert!(keep.is_file(), "有内容的目录绝不能删");
     let _ = std::fs::remove_dir_all(&root);
 }
+/// 目的：首次绑定时自动导入工作区已有文件成初始提交；VCS / 依赖目录不导入。
+#[test]
+pub(crate) fn import_root_seeds_initial_external_commit_without_vcs_dirs() {
+    use crate::capabilities::workspace::api::Workspace;
+    use crate::capabilities::workspace::detail::{FsWorkStore, FsWorkspace};
+    let root = crate::tests::scratch("ws-external-import");
+    let sessions = root.join("session");
+    let external = root.join("outside");
+    std::fs::create_dir_all(external.join(".git")).expect("建 .git");
+    std::fs::create_dir_all(external.join("node_modules")).expect("建 node_modules");
+    std::fs::create_dir_all(external.join("sub")).expect("建 sub");
+    std::fs::write(external.join("a.txt"), b"a").expect("写 a");
+    std::fs::write(external.join(".git").join("config"), b"git").expect("写 git");
+    std::fs::write(external.join("node_modules").join("x.js"), b"x").expect("写 dep");
+    std::fs::write(external.join("sub").join("b.md"), b"b").expect("写 b");
+    let ws = crate::capabilities::workspace::service::WorkspaceService::new(
+        Arc::new(FsWorkspace::new(sessions.clone())),
+        Arc::new(FsWorkStore::new()),
+    );
+    ws.bind("w", Some(external.as_path())).expect("绑定");
+    ws.prepare("w", &["a".to_string()]).expect("准备");
+    let seeded = ws.work_import_root("w", 1).expect("初始导入");
+    assert!(seeded.commit.is_some(), "首次导入必须产生初始提交");
+    assert_eq!(seeded.changes.len(), 2, "只导入 a.txt 与 sub/b.md");
+    let pulled = ws
+        .work_pull("w", "a", &["a.txt".to_string()])
+        .expect("拉取初始内容");
+    assert_eq!(pulled.updated, vec!["a.txt".to_string()]);
+    assert_eq!(
+        std::fs::read(sessions.join("w").join("a").join("a.txt")).unwrap(),
+        b"a"
+    );
+    let again = ws.work_import_root("w", 2).expect("已有 head");
+    assert!(again.commit.is_none(), "已有 head 时无操作");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// 目的：同一外部工作区的跨会话写闸共用一把锁；第二个写者必须等第一个释放。
 #[test]
 pub(crate) fn external_workspace_lock_is_shared_and_blocks_a_second_writer() {

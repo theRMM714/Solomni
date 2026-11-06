@@ -321,6 +321,15 @@ impl Conductor {
         let work = self.work_root_of(meta)?;
         let binding = self.workspace_binding_of(meta)?;
         self.workspace.bind(&work, binding.as_deref())?;
+        if binding.is_some() {
+            // 旧会话首次启用：补一次初始导入（有 head 时无操作）。
+            if let Err(e) = self.workspace.work_import_root(&work, now_ts()) {
+                self.log.warn(
+                    "conductor::rebuild_session",
+                    &format!("工作区初始导入失败：{}", e),
+                );
+            }
+        }
         let sandboxes = self.sandboxes(meta, &roster)?;
         // 整队的权威是**转录**：重建之前先把队清空并按已发出的卡号续号（内存里那一份不作数）。
         self.desk_of(&meta.name)

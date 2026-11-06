@@ -1594,6 +1594,15 @@ impl Conductor {
         self.workspace
             .bind(&root, workspace.as_ref().map(|w| w.root.as_path()))?;
         self.workspace.prepare(&root, &agent_names)?;
+        if workspace.is_some() {
+            // 首次绑定：把工作区现有文件导入成初始提交，agent 立刻就能 pull；失败不挡建会话。
+            if let Err(e) = self.workspace.work_import_root(&root, now_ts()) {
+                self.log.warn(
+                    "conductor::create_work",
+                    &format!("工作区初始导入失败：{}", e),
+                );
+            }
+        }
         let sandboxes = self.sandboxes(&meta, &roster)?;
         // 扫描事实如实埋点：本会话用到的模块里，哪些声明的运行包不在包库（缺包同样会在下面按计划拒绝，文件与 guest 声明都看）。
         // 虚拟机档缺包在「开始」前就拒绝；这里的警告只补一条扫描事实。本机档由宿主计划在工具执行时如实拒绝。

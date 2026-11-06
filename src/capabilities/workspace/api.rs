@@ -112,6 +112,9 @@ pub trait Workspace: Send + Sync {
     /// 目的：把当前 head 树里所有受管路径的外部改动一次性采纳（确认覆盖前的保护动作）。
     /// 约束：无受管路径 = 无操作；不碰未跟踪文件。
     fn work_sync_tracked(&self, work: &str, time: i64) -> Result<SyncReport, String>;
+    /// 目的：首次绑定外部工作区时把工作区现有文件导入成初始提交（有上限、忽略 VCS / 依赖目录）。
+    /// 约束：已有 head 时无操作；单文件超限 / 总上限截断时只导入可导入的部分。
+    fn work_import_root(&self, work: &str, time: i64) -> Result<SyncReport, String>;
     /// 目的：把该工作未完成的版本库事务重放到一致状态；没有待恢复事务 = 无操作。
     fn work_recover(&self, work: &str) -> Result<(), String>;
     /// 目的：回收该工作中不再可达的内容对象；apply=false 只统计不删除。
