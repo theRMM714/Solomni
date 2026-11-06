@@ -1057,6 +1057,21 @@ impl ChatGateway for NativeGateway {
             detail: "替身".to_string(),
         })
     }
+
+    /// 保存闸门要同时看回放形状：这个替身固定报「协议形状被接受」。
+    fn probe_replay(
+        &self,
+        _c: &Channel,
+    ) -> Result<crate::capabilities::llm::api::ReplayReport, String> {
+        Ok(crate::capabilities::llm::api::ReplayReport {
+            shapes: vec![crate::capabilities::llm::api::ReplayShape {
+                name: "content-empty".to_string(),
+                accepted: true,
+                understood: true,
+                detail: "替身".to_string(),
+            }],
+        })
+    }
     fn member_channel(&self, _c: &Channel, _id: &str) -> BoxedChat {
         let steps = self.scripts.lock().expect("锁").pop().unwrap_or_default();
         Box::new(NativeChat {

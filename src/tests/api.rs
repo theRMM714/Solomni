@@ -61,6 +61,35 @@ fn native_model_save_is_gated_by_measurement_but_envelope_is_not() {
             .any(|m| m.id == "native-model"),
         "实测没结论时模型不得落盘"
     );
+
+    // 通过替身：工具调用 + 回放形状都明确通过 → 原生模型落盘。
+    let core = crate::tests::builders::native_core(
+        crate::tests::builders::NativeGateway {
+            scripts: std::sync::Mutex::new(Vec::new()),
+        },
+        Arc::new(InMemoryHistory::new()),
+        Arc::new(crate::tests::doubles::InMemorySysIo::new()),
+    );
+    let ok_handle = ConductorHandle::spawn(core).expect("起核心");
+    let ok_ops = Ops::from_handle(&ok_handle);
+    ok_ops
+        .registry
+        .upsert_model(draft(
+            "native-ok",
+            crate::capabilities::llm::api::ToolMode::Native,
+        ))
+        .expect("实测明确通过应允许保存");
+    assert_eq!(
+        ok_ops
+            .registry
+            .models()
+            .expect("读模型")
+            .iter()
+            .find(|m| m.id == "native-ok")
+            .map(|m| m.tools),
+        Some(crate::capabilities::llm::api::ToolMode::Native),
+        "保存的就是实测通过的原生形态"
+    );
 }
 
 // ---------- 命令在自己的线程上跑，状态只被它碰 ----------
