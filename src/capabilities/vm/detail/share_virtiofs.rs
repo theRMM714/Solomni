@@ -3,7 +3,7 @@
 //! 不管：QEMU 进程本身与共享内存后端（detail/qemu.rs 按 SharePlan.needs_shared_mem 给）。
 //! 联动：实现 ports::ShareBackend；由组合根构造、service.rs 持有；只支持 Rust 版 virtiofsd（--shared-dir / --socket-path）。
 
-use crate::capabilities::vm::domain::guest::{GuestImage, GuestMount};
+use crate::capabilities::vm::domain::guest::{sh_quote, GuestImage, GuestMount};
 use crate::capabilities::vm::ports::{ShareBackend, ShareGuard, SharePlan};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -73,7 +73,6 @@ impl ShareBackend for VirtioFsShare {
         let mut guard = VirtioFsGuard::default();
         guard.book = self.book.clone();
         let mut engine_args: Vec<String> = Vec::new();
-        let mut guest_scripts: Vec<String> = Vec::new();
         for (i, m) in mounts.iter().enumerate() {
             let sock = socket_path();
             // 先把套接字与子进程交给凭据：中途任一步失败，Drop 都会把它们一起收掉，不留残留。
@@ -104,26 +103,35 @@ impl ShareBackend for VirtioFsShare {
             engine_args.push(format!("socket,id=vf{},path={}", i, sock.display()));
             engine_args.push("-device".to_string());
             engine_args.push(format!("vhost-user-fs-pci,chardev=vf{},tag=m{}", i, i));
+        }
+        Ok((virtiofs_plan(mounts, engine_args), Box::new(guard)))
+    }
+}
+
+/// 目的：把挂载清单翻成 virtiofs 共享计划——引擎参数由 prepare 按已起的守护进程给，guest 端每条挂载一条
+///   mkdir + mount 脚本；guest 路径可能含单引号（外部工作区镜像进 guest 后），拼进脚本一律走 `sh_quote`。
+pub(crate) fn virtiofs_plan(mounts: &[GuestMount], engine_args: Vec<String>) -> SharePlan {
+    let guest_scripts = mounts
+        .iter()
+        .enumerate()
+        .map(|(i, m)| {
             let mount_ro = if m.read_only { ",ro" } else { "" };
-            guest_scripts.push(format!(
-                "mkdir -p '{g}' && mount -t virtiofs{ro} m{i} '{g}'",
-                g = m.guest,
+            format!(
+                "mkdir -p {g} && mount -t virtiofs{ro} m{i} {g}",
+                g = sh_quote(&m.guest),
                 ro = mount_ro,
                 i = i
-            ));
-        }
-        Ok((
-            SharePlan {
-                kind: "virtiofs",
-                engine_args,
-                net_options: Vec::new(),
-                guest_scripts,
-                needs_net: false,
-                // 有 vhost-user 设备才要共享内存；没有挂载就没有设备。
-                needs_shared_mem: !mounts.is_empty(),
-            },
-            Box::new(guard),
-        ))
+            )
+        })
+        .collect();
+    SharePlan {
+        kind: "virtiofs",
+        engine_args,
+        net_options: Vec::new(),
+        guest_scripts,
+        needs_net: false,
+        // 有 vhost-user 设备才要共享内存；没有挂载就没有设备。
+        needs_shared_mem: !mounts.is_empty(),
     }
 }
 

@@ -264,6 +264,9 @@ impl Sandbox {
 pub struct Sandboxes {
     /// 本工作共享区的真实根（@ 改写要它；代拟还没名单时也有）。
     pub shared: PathBuf,
+    /// 目的：本次工作的**会话树根**（`session/<顶层工作名>`）——各 agent 私沙与 `.work` 的父目录。
+    /// 约束：布局归工作区能力；虚拟机档据此挂稳定根，不靠 `shared.parent()` 猜（外部绑定时后者不是会话树）。
+    pub session_root: PathBuf,
     pub list: Vec<Sandbox>,
     /// 目的：这场会话的路径翻译器（虚拟机档 guest↔宿主；本机档 None = 恒等）。
     /// 约束：@ 改写发生在名单确认**之前**（协作需求），那时 `list` 还是空的，所以这里单独存一份。
@@ -301,6 +304,9 @@ pub struct WorkFiles {
 pub struct WorkRoots {
     /// 本工作共享区。
     pub shared: PathBuf,
+    /// 目的：本次工作的**会话树根**（`session/<顶层工作名>`）：各 agent 私沙与 `.work` 的父目录。
+    /// 约束：会话目录内的布局事实由本能力给出，虚拟机档不再自己从 `shared.parent()` 反推。
+    pub session_root: PathBuf,
     /// agent 实例名 → 私有沙箱目录。
     pub agents: BTreeMap<String, PathBuf>,
     /// 版本库目录（`session/<工作名>/.work`）：提交记录、内容寻址对象与各 agent 的拉取基线。

@@ -315,6 +315,10 @@ pub(crate) fn external_workspace_keeps_store_in_session_and_outside_untouched() 
     assert!(session.join(".work-root").is_file(), "布局投影要落盘");
     let roots = ws.roots("w", &["a".to_string()]).expect("根");
     assert_eq!(roots.shared, external, "共享区根 = 外部目录");
+    assert_eq!(
+        roots.session_root, session,
+        "会话树根 = 会话目录（两套布局下都是布局事实，不由 shared.parent() 反推）"
+    );
     assert_eq!(roots.store, session.join(".work"), "版本库仍在会话目录");
     assert_eq!(
         roots.agents.get("a"),
@@ -338,6 +342,173 @@ pub(crate) fn external_workspace_keeps_store_in_session_and_outside_untouched() 
     assert!(
         managed.join("work").is_dir(),
         "无绑定时仍是 session/<名>/work"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 目的：会话树根在两套布局下都等于会话目录——虚拟机档的稳定挂载按它挂，不再从 shared.parent() 猜。
+#[test]
+pub(crate) fn session_root_is_the_session_dir_for_both_layouts() {
+    use crate::capabilities::workspace::detail::FsWorkspace;
+    use crate::capabilities::workspace::ports::Workdirs;
+    let root = crate::tests::scratch("ws-session-root");
+    let sessions = root.join("session");
+    let external = root.join("outside");
+    std::fs::create_dir_all(&external).expect("建外部目录");
+    let ws = FsWorkspace::new(sessions.clone());
+    // 内部布局：shared 就在会话树内，三处根同父。
+    ws.prepare("managed", &["a".to_string()]).expect("准备");
+    let inner = ws.roots("managed", &["a".to_string()]).expect("根");
+    let managed = sessions.join("managed");
+    assert_eq!(inner.session_root, managed, "内部布局：会话树根 = 会话目录");
+    assert_eq!(
+        inner.shared,
+        managed.join("work"),
+        "内部布局：共享区在会话树内"
+    );
+    assert_eq!(inner.store, managed.join(".work"), "版本库在会话树内");
+    assert_eq!(
+        inner.agents.get("a"),
+        Some(&managed.join("a")),
+        "私沙在会话树内"
+    );
+    assert_eq!(
+        inner.shared.parent(),
+        Some(inner.session_root.as_path()),
+        "内部布局下 shared.parent() 恰好是会话树根"
+    );
+    assert!(inner.store.starts_with(&inner.session_root));
+    for private in inner.agents.values() {
+        assert!(private.starts_with(&inner.session_root));
+    }
+    // 外部绑定：shared 在产品外，但会话树根、版本库与私沙仍锚在会话目录。
+    ws.bind("bound", Some(external.as_path())).expect("绑定");
+    ws.prepare("bound", &["a".to_string()]).expect("准备");
+    let outer = ws.roots("bound", &["a".to_string()]).expect("根");
+    let bound = sessions.join("bound");
+    assert_eq!(outer.session_root, bound, "外部布局：会话树根 = 会话目录");
+    assert_eq!(outer.shared, external, "外部布局：共享区 = 外部根");
+    assert_eq!(
+        outer.store,
+        bound.join(".work"),
+        "外部布局：版本库仍在会话树内"
+    );
+    assert_eq!(
+        outer.agents.get("a"),
+        Some(&bound.join("a")),
+        "外部布局：私沙仍在会话树内"
+    );
+    assert!(outer.store.starts_with(&outer.session_root));
+    for private in outer.agents.values() {
+        assert!(private.starts_with(&outer.session_root));
+    }
+    assert_ne!(
+        outer.shared.parent(),
+        Some(outer.session_root.as_path()),
+        "外部布局下 shared.parent() 不是会话树根——这正是虚拟机档曾挂错的地方"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 目的：首次导入后起 guest 失败（建会话失败）→ 撤销连 .work 一起清；外部工作区文件不动。
+///   内部布局的变体：work/ 里有用户文件时撤销不删它，但产品自己的 .work 仍清掉。
+#[test]
+pub(crate) fn discard_removes_failed_store_and_keeps_external_files() {
+    use crate::capabilities::workspace::api::Workspace;
+    use crate::capabilities::workspace::detail::{FsWorkStore, FsWorkspace};
+    use crate::capabilities::workspace::service::WorkspaceService;
+    let root = crate::tests::scratch("ws-discard-failed-create");
+    let sessions = root.join("session");
+    let external = root.join("outside");
+    std::fs::create_dir_all(&external).expect("建外部目录");
+    std::fs::write(external.join("keep.txt"), b"user").expect("用户文件");
+    let ws = WorkspaceService::new(
+        Arc::new(FsWorkspace::new(sessions.clone())),
+        Arc::new(FsWorkStore::new()),
+    );
+    // 外部绑定：走真实的首次导入，让 session/.work 真有对象与提交（模拟“导入完、起 guest 失败”）。
+    ws.bind("w", Some(external.as_path())).expect("绑定");
+    ws.prepare("w", &["a".to_string()]).expect("准备");
+    let seeded = ws.work_import_root("w", 1).expect("首次导入");
+    assert!(seeded.commit.is_some(), "首次导入必须落出初始提交");
+    let session = sessions.join("w");
+    assert!(session.join(".work").is_dir(), "版本库已落在会话目录");
+    assert!(session.join(".work-root").is_file(), "布局投影已落盘");
+    ws.discard("w", &["a".to_string()]).expect("撤销失败的准备");
+    assert!(
+        !session.exists(),
+        "会话目录（含 .work 与 .work-root）要整棵清掉"
+    );
+    assert!(external.is_dir(), "撤销不删外部根");
+    assert_eq!(
+        std::fs::read(external.join("keep.txt")).unwrap(),
+        b"user",
+        "外部工作区里的用户文件必须保留"
+    );
+    // 内部布局变体：work/ 非空 → 会话目录保留、用户文件保留；.work 是产品自己的，仍清掉。
+    ws.prepare("m", &["b".to_string()]).expect("准备");
+    let managed = sessions.join("m");
+    std::fs::write(managed.join("work").join("keep.txt"), b"user").expect("用户文件");
+    std::fs::create_dir_all(managed.join(".work").join("commits")).expect("造版本库");
+    std::fs::write(managed.join(".work").join("commits").join("1.json"), b"{}").expect("造提交");
+    ws.discard("m", &["b".to_string()]).expect("撤销");
+    assert!(managed.is_dir(), "work/ 有用户文件时会话目录保留");
+    assert_eq!(
+        std::fs::read(managed.join("work").join("keep.txt")).unwrap(),
+        b"user",
+        "撤销不删用户在 work/ 里的文件"
+    );
+    assert!(!managed.join(".work").exists(), "产品自己的版本库仍要清掉");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 目的：起 guest 失败后同名重建能重新做初始导入——不被上次残留的 .work head 跳过。
+///   回归点：旧 .work（有 head）若留下，重建换外部根时会静默跳过导入，agent 看到的是上一次的内容。
+#[test]
+pub(crate) fn recreated_external_workspace_imports_again_after_failed_create() {
+    use crate::capabilities::workspace::api::Workspace;
+    use crate::capabilities::workspace::detail::{FsWorkStore, FsWorkspace};
+    use crate::capabilities::workspace::service::WorkspaceService;
+    let root = crate::tests::scratch("ws-external-recreate");
+    let sessions = root.join("session");
+    let external = root.join("outside");
+    std::fs::create_dir_all(&external).expect("建外部目录");
+    std::fs::write(external.join("a.txt"), b"a").expect("用户文件");
+    let ws = WorkspaceService::new(
+        Arc::new(FsWorkspace::new(sessions.clone())),
+        Arc::new(FsWorkStore::new()),
+    );
+    // 第一次建：绑定 → 准备 → 初始导入（有 head）→ 起 guest 失败 → 撤销。
+    ws.bind("w", Some(external.as_path())).expect("绑定");
+    ws.prepare("w", &["a".to_string()]).expect("准备");
+    let first = ws.work_import_root("w", 1).expect("首次导入");
+    assert!(first.commit.is_some(), "第一次建会话要导入出初始提交");
+    assert!(
+        ws.work_head("w").expect("读 head").is_some(),
+        "撤销前版本库有 head"
+    );
+    ws.discard("w", &["a".to_string()]).expect("撤销失败的准备");
+    assert!(!sessions.join("w").exists(), "撤销后会话目录不存在");
+    // 同名重建：上一次的 .work 必须已经没了，初始导入要重新发生而不是“已有 head”空转。
+    ws.bind("w", Some(external.as_path())).expect("重新绑定");
+    ws.prepare("w", &["a".to_string()]).expect("重新准备");
+    let again = ws.work_import_root("w", 2).expect("重建后重新导入");
+    assert!(
+        again.commit.is_some(),
+        "同名重建必须重新导入（旧 .work 的 head 不能让它空转）"
+    );
+    assert_eq!(
+        again
+            .changes
+            .iter()
+            .map(|c| c.path.as_str())
+            .collect::<Vec<_>>(),
+        vec!["a.txt"],
+        "重新导入的是当前外部根里的文件"
+    );
+    assert!(
+        ws.work_head("w").expect("读 head").is_some(),
+        "重建后的版本库重新有 head"
     );
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -374,6 +545,7 @@ pub(crate) fn missing_external_workspace_reports_same_error_and_discard_keeps_it
 pub(crate) fn sandboxes_lookup_is_by_agent() {
     let boxes = crate::capabilities::workspace::api::Sandboxes {
         shared: abs(&["w", "work"]),
+        session_root: abs(&["w"]),
         list: vec![test_sandbox("甲", &["a"])],
         codec: None,
     };

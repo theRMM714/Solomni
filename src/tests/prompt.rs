@@ -344,6 +344,7 @@ pub(crate) fn ref_rewrite_uses_the_session_path_dialect() {
     // 协作入口（set_task / answer / note_user）没有"自己的沙箱"：根的翻译器由沙箱清单给。
     let boxes = Sandboxes {
         shared: sb.shared.clone(),
+        session_root: std::path::PathBuf::new(),
         list: Vec::new(),
         codec: sb.path_codec.clone(),
     };

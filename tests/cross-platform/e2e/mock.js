@@ -214,6 +214,42 @@ http.createServer((req, res) => {
       } else {
         content = '子工作已经开工，我盯着它。';
       }
+    } else if (allUser.includes('虚拟机档外部工作区')) {
+      // 虚拟机档 + 外部工作区（**真机会话**，默认不跑）：按本轮已收到的工具结果数推进。
+      // workRoot / sandboxRoot 都是**系统提示词里给的 guest 写法**（与挂载点走同一座路径桥）——
+      // 外部根在 guest 的挂载树里，所以读它只能用 workRoot 拼出来的路径。
+      let boundary = -1;
+      for (let i = 0; i < msgs.length; i++) if (msgs[i].role === 'user') boundary = i;
+      const n = msgs.slice(boundary + 1).filter((m) => m.role === 'tool').length;
+      const w = workRoot || '';
+      const call = (id, name, args) => [{ id, type: 'function', function: { name, arguments: JSON.stringify(args) } }];
+      if (!w) {
+        content = JSON.stringify({ type: 'say', text: '没从系统提示词里取到共享区根（guest 写法）' });
+      } else if (n === 0) {
+        // 工具在 guest 里读**外部工作区**的文件：shell 在 guest 内执行、围栏带 shared-read；
+        // 挂载计划不对这里会 fail-closed（私沙不在挂载树时连 helper 都起不来），或读不到 marker。
+        // 说明：模块工具（exec 默认 reach）不含 shared-read，读共享区不是它的职责——这里用 shell 验。
+        calls = call('call_ext_read', 'shell', {
+          command: "cat '" + w + "/marker.txt'",
+          scope: 'external',
+          timeout_secs: 30,
+        });
+      } else if (n === 1) {
+        // 共享区对 agent 只读：往外部根写必须被拒（Landlock），且宿主外部目录不能出现这个文件。
+        calls = call('call_ext_deny', 'shell', {
+          command: "printf 'DENIED\\n' > '" + w + "/deny.txt' && printf 'DENIED\\n'",
+          scope: 'external',
+          timeout_secs: 30,
+        });
+      } else if (n === 2) {
+        // 私沙（会话树）可写：写回宿主要落在 session/<名>/<agent>/ 下。
+        calls = call('call_ext_priv', 'shell', {
+          command: "printf 'VM-EXT-PRIV-OK\\n' > ext-priv.txt && printf 'VM-EXT-PRIV-OK\\n'",
+          timeout_secs: 30,
+        });
+      } else {
+        content = JSON.stringify({ type: 'say', text: '外部工作区与私沙都验完了' });
+      }
     } else if (sawToolResult && allUser.includes('跑 shell')) {
       // shell 的第二轮：两次调用都拿到结果后收尾（第一条成功、第二条非零退出）。
       content = JSON.stringify({ type: 'say', text: 'shell 跑完了' });

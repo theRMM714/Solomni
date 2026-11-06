@@ -173,6 +173,193 @@ pub(crate) fn a_failed_guest_boot_leaves_no_session_behind() {
         .create_work(again)
         .expect("同一名字在本机档上应该建得起来（失败那次没占住名字）");
 }
+/// 目的：外部工作区 × 虚拟机档的组合装配：隔离产品根（内含可用虚拟根）+ 产品根之外的目录。
+/// 返回（核心、产品根、外部根、虚拟根名）；引擎由调用方给——`specs` 记起 guest 时的挂载计划。
+/// 约束：产品根与外部根是兄弟目录，所以"外部根"天然在产品根之外（`resolve_workspace_binding` 才放行）。
+#[cfg(not(target_os = "macos"))]
+fn core_for_external_vm(
+    tag: &str,
+    engine: FakeEngine,
+) -> (Conductor, std::path::PathBuf, std::path::PathBuf, String) {
+    use crate::capabilities::workspace::detail::FsWorkspace;
+    let root = crate::tests::scratch(tag);
+    let product = root.join("product");
+    let external = root.join("outside");
+    std::fs::create_dir_all(&product).expect("建产品根");
+    std::fs::create_dir_all(&external).expect("建外部目录");
+    std::fs::write(external.join("marker.txt"), b"OUTSIDE").expect("写外部文件");
+    // 虚拟根长在**注入的产品根**里：默认产品根解析不到它（`test_guest` 只造在当前目录）。
+    let guest = test_guest_at(&product, "vm-ext");
+    let core = core_with_workdirs_vm(
+        product.clone(),
+        vec![module_of("a")],
+        gw(BTreeMap::new(), vec![]),
+        Arc::new(FsWorkspace::new(product.join("session"))),
+        engine,
+    );
+    (core, product, external, guest)
+}
+
+/// 目的：一次起 guest 的**稳定挂载计划**：会话树根与外部工作区根各一条，私沙被会话树根覆盖。
+/// 约束：退回 `shared.parent()` 会命中"外部根的父目录"（外部根是被挂的兄弟目录）——那一条必须不出现。
+#[cfg(not(target_os = "macos"))]
+fn assert_two_stable_mounts(
+    engine: &FakeEngine,
+    product: &std::path::Path,
+    external: &std::path::Path,
+    work_name: &str,
+) {
+    let specs = engine.specs.lock().expect("锁").clone();
+    let spec = specs.first().expect("起过一次 guest");
+    let hosts: Vec<std::path::PathBuf> = spec.mounts.iter().map(|m| m.host.clone()).collect();
+    let session_root = product.join("session").join(work_name);
+    let external = crate::kernel::api::native(&external.canonicalize().expect("规范化外部根"));
+    assert!(
+        hosts.contains(&session_root),
+        "会话树根（私沙 + .work 的父目录）要单独挂：{:?}",
+        hosts
+    );
+    assert!(
+        hosts.contains(&external),
+        "外部工作区根要单独挂：{:?}",
+        hosts
+    );
+    assert!(
+        !hosts.iter().any(|h| Some(h.as_path()) == external.parent()),
+        "不能退回 shared.parent()（会把外部根的父目录整棵挂进去）：{:?}",
+        hosts
+    );
+    // 私沙不在挂载树里 → guest 内译成镜像根 → helper 起围栏时 fail-closed，所以这条要钉住。
+    let private = session_root.join("a");
+    assert!(
+        hosts.iter().any(|h| private.starts_with(h)),
+        "私沙要被某条挂载覆盖：{:?}",
+        hosts
+    );
+}
+
+/// 目的：外部工作区 × 虚拟机档建会话时，起 guest 的挂载计划是"会话树 + 外部根"两条稳定根。
+/// 约束：两条根互不包含（绑定校验保证外部根在产品根之外），所以不能再用 `shared.parent()` 猜挂载点。
+#[cfg(not(target_os = "macos"))]
+#[test]
+pub(crate) fn external_workspace_vm_session_boots_with_two_stable_mounts() {
+    let engine = FakeEngine::new();
+    let (mut core, product, external, guest) = core_for_external_vm("vm-ext-boot", engine.clone());
+    let mut spec = work("wx", WorkMode::Single, &["a"]);
+    spec.tier = Tier::Vm;
+    spec.guest = Some(guest);
+    spec.workspace = Some(external.clone());
+    let sid = core
+        .create_work(spec)
+        .expect("外部工作区 + 虚拟机档可建")
+        .sid;
+    assert_eq!(sid, "wx");
+    let (meta, _) = core.history_open(&sid).expect("会话");
+    assert_eq!(
+        meta.workspace.as_ref().map(|b| b.root.clone()),
+        Some(crate::kernel::api::native(
+            &external.canonicalize().expect("规范化外部路径")
+        )),
+        "绑定写进根会话 meta（规范化绝对路径）"
+    );
+    let session = product.join("session").join("wx");
+    assert!(session.join(".work-root").is_file(), "布局投影已落盘");
+    assert!(!session.join("work").exists(), "外部绑定不建会话内 work/");
+    assert_two_stable_mounts(&engine, &product, &external, "wx");
+}
+
+/// 目的：先建本机档 + 外部绑定，再切进虚拟机档——起 guest 的挂载计划与直接建虚拟机档一致。
+/// 约束：改配走的是 `EditGuest::Boot`（不是创建那段），所以两条稳定根要在两处都成立。
+#[cfg(not(target_os = "macos"))]
+#[test]
+pub(crate) fn vm_edit_from_host_to_vm_keeps_external_workspace_mounts() {
+    let engine = FakeEngine::new();
+    let (mut core, product, external, guest) = core_for_external_vm("vm-ext-edit", engine.clone());
+    let mut spec = work("wx", WorkMode::Single, &["a"]);
+    spec.workspace = Some(external.clone());
+    let sid = core.create_work(spec).expect("本机档 + 外部工作区可建").sid;
+    assert!(
+        engine.specs.lock().expect("锁").is_empty(),
+        "本机档不起 guest"
+    );
+    core.edit_session(
+        &sid,
+        SessionEdit {
+            agents: vec![ConfigAgent {
+                name: "a".to_string(),
+                modules: vec!["a".to_string()],
+                model: String::new(),
+                chara: String::new(),
+            }],
+            tier: "vm".to_string(),
+            guest: Some(guest),
+            pins: BTreeMap::new(),
+            permission: None,
+        },
+    )
+    .expect("切进虚拟机档");
+    assert_two_stable_mounts(&engine, &product, &external, "wx");
+}
+
+/// 目的：删掉绑定了外部工作区的虚拟机档会话：guest 被销毁、会话目录被清掉，外部目录里的文件一个不少。
+#[cfg(not(target_os = "macos"))]
+#[test]
+pub(crate) fn external_workspace_vm_delete_stops_guest_and_keeps_external() {
+    let engine = FakeEngine::new();
+    let (mut core, product, external, guest) =
+        core_for_external_vm("vm-ext-delete", engine.clone());
+    let mut spec = work("wx", WorkMode::Single, &["a"]);
+    spec.tier = Tier::Vm;
+    spec.guest = Some(guest);
+    spec.workspace = Some(external.clone());
+    let sid = core.create_work(spec).expect("建会话").sid;
+    let session = product.join("session").join("wx");
+    assert!(session.is_dir(), "会话目录在");
+    core.history_delete(&sid).expect("删除会话");
+    let calls = engine.calls.lock().expect("锁").clone();
+    assert!(calls.iter().any(|c| c == "start:wx"), "{:?}", calls);
+    assert!(
+        calls.iter().any(|c| c == "stop:wx"),
+        "删除会话要销毁 guest：{:?}",
+        calls
+    );
+    assert!(!session.exists(), "会话目录要清掉");
+    assert_eq!(
+        std::fs::read(external.join("marker.txt")).expect("外部文件还在"),
+        b"OUTSIDE",
+        "删除会话不删外部工作区"
+    );
+}
+
+/// 目的：起 guest 失败时，外部绑定的半成品要一并撤掉（会话目录连同 .work 不残留），外部文件不少。
+/// 约束：绑定会先落 `.work-root` 并把外部文件导入成初始提交（`.work/`）；只删空目录的撤销会留下残档。
+#[cfg(not(target_os = "macos"))]
+#[test]
+pub(crate) fn failed_guest_boot_cleans_external_workspace_store() {
+    let engine = FakeEngine {
+        boot_error: Some("起不来（测试注入）".to_string()),
+        ..Default::default()
+    };
+    let (mut core, product, external, guest) = core_for_external_vm("vm-ext-boot-fail", engine);
+    let mut spec = work("wx", WorkMode::Single, &["a"]);
+    spec.tier = Tier::Vm;
+    spec.guest = Some(guest);
+    spec.workspace = Some(external.clone());
+    let err = core.create_work(spec).expect_err("起不来要如实拒绝");
+    assert!(err.contains("起不来"), "{}", err);
+    let session = product.join("session").join("wx");
+    assert!(
+        !session.exists(),
+        "失败的准备不能让会话目录（含 .work）留下：{:?}",
+        session
+    );
+    assert!(core.history_list().is_empty(), "历史里不该留下这条会话");
+    assert_eq!(
+        std::fs::read(external.join("marker.txt")).expect("外部文件还在"),
+        b"OUTSIDE",
+        "撤销失败准备不碰外部目录"
+    );
+}
 /// 目的：虚拟机档的外部工具路径**每次判据取用时现算**：设置里没登记就采用补齐面报的"已装在项目内"那一个。
 /// 约束：补齐作业（Web 或另一个终端）装完就该立刻可用——"装完还得重启"会让用户以为补齐没成功；
 ///   显式登记永远优先，登记了就不看项目内那份（登记是用户的意思）。

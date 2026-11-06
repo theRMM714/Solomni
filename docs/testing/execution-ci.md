@@ -164,12 +164,13 @@ node run-tests.js --fence-live
 
 - `src/tests/vm.rs`：guest 起停、并发可写层；**取消与超时**用不依赖共享后端的 `vm_live_cancel_kills_the_guest_process_tree`（`NoneShare` + guest 内 `/tmp` 围栏；取消回执含「用户停止」且 15 秒内返回、无残留 `sleep`；`timeout_secs` 到点回执含 helper 的「工具进程超时」）。取消路径的 helper stderr 可能被 QGA 丢掉（时有时无），以无孤儿 + 快速返回证明处理器生效；
 - `src/tests/vm.rs` 的**guest 诊断**探针 `vm_live_guest_diagnose_lists_processes`（`NoneShare`，不需要共享后端）：guest 里起忙进程后诊断要列出该 pid 与 CPU / 内存 / 负载 / 挂载；停 guest 后如实报没有活 guest；
+- `src/tests/vm.rs` 的**外部工作区往返**探针 `vm_live_external_workspace_round_trip`：绑定产品根之外的目录后，guest 内能读写该工作区、越界被拒、会话树里的私沙仍可用；Windows 需要 `SOLOMNI_VM_SMBD`（Windows 侧已真机通过：WHPX + SMB，另有 e2e 外部工作区场景），Linux 需要 KVM + `SOLOMNI_VM_VIRTIOFSD` 跑 virtiofs 变体、不设它跑 9p 变体，两个变体各跑一次；
 - `src/tests/builds.rs`：本机构建、缓存、失败与创建前补编（guest 内构建在 `SOLOMNI_VM_LIVE=1` 时真跑）；
 - `src/capabilities/provision/guest.rs`：Linux 运行期编排；
 - `src/capabilities/provision/service.rs`：guest-rootfs 属性真机用例（`guest_rootfs_pipeline_keeps_source_attrs_on_the_real_image`，用 `.vm/cache/rootfs.ext4`）；
 - `tests/cross-platform/e2e/`：vm 会话场景。
 
-- 未开启时用例打印行首 `[探针]`，入口按 `env-skip` 记进报告，不算通过。
+- 未开启时用例打印行首 `[探针]`，入口按 `env-skip` 记进报告，不算通过。CI **不设** `SOLOMNI_VM_LIVE`：真机证据只能在有 KVM / WHPX 的机器上手工产出（`node dev.js cargo -- test --bin solomni -- vm_live_external_workspace_round_trip`，探针在 `src/tests/vm.rs`），报告里如实记 env-skip。
 
 - **Linux 的 ext4 工具链用例按环境判据跳过**：`unshare -r` / `mke2fs` / `debugfs` 不可用（Linux CI 就是这样）时，`packed_guest_image_uses_4k_blocks` 与 `guest_rootfs_restores_privilege_bits_and_ownership` 打印 `[探针]` 并跳过。
 - 跳过 = `env-skip`，不是通过。补装 e2fsprogs 并允许非特权用户命名空间后才真跑。

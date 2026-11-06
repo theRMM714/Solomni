@@ -102,17 +102,43 @@
   scope: global
   level: T4
   why: |
-    外部工作区（会话把共享区主副本绑定到产品根之外的绝对目录）v1 只支持本机档。
-    虚拟机档的共享 guest 按 `shared.parent()` 装稳定挂载根，agent 私沙必须与共享区在同一挂载树；
-    共享区换到外部根时，guest 会挂到用户目录的父目录（或私沙不在挂载树里而 helper fail-closed）。
-    Windows 宿主只有 SMB、UNC 路径反解也受限。
+    外部工作区（会话把共享区主副本绑定到产品根之外的绝对目录）在 Windows 真机（WHPX + SMB 的探针与 e2e 场景）
+    与代码 / 单测两层已收口：
+    虚拟机档的稳定挂载拆成会话树根（rw）+ 外部工作区根（rw，仅外部绑定时）+ 模块树根，不再用
+    shared.parent()；起 guest 前校验各 agent 私沙在会话树根下、每个稳定根能经路径桥往返，不能表示的根
+    （Windows UNC / 网络路径）如实拒绝并提示先映射成本机盘符；建会话失败时 discard 连版本库 .work 一起清。
+    外部工作区根保持可写——宿主会把只读挂载无条件并入每次调用的允许集，只读会绕过 per-agent 的共享区
+    读取范围；guest 不直接写共享区，写共享区走宿主侧 work_commit。
+    仍缺 Linux 真机验收：virtiofs（默认档）与 9p（回退档）两条用户链都还没跑过「绑定外部根后 guest 内
+    读写工作区、越界被拒」；Windows 侧 SMB 档已通过 vm_live_external_workspace_round_trip 与 e2e 外部工作区
+    场景（读外部根 / 写私沙落宿主 / 写共享区被拒 / 删会话不删外部根），macOS 由既有平台缺口阻断、不在本条范围。
   how: |
-    1) 挂载计划拆成“会话树（私沙 + .work）+ 外部工作区根”两个稳定挂载；
-    2) path_codec 支持两个根；guest helper 的 required_dir 与围栏范围按新布局派生；
-    3) 三平台共享后端验证（Linux virtiofs/9p、Windows SMB、macOS 9p）；
-    4) 同步 docs/vm 与对应测试。
+    在有 KVM 的 Linux 真机上跑外部工作区往返探针（虚拟根默认 debian，可用 SOLOMNI_VM_GUEST 换）：
+    `SOLOMNI_VM_LIVE=1 SOLOMNI_VM_QEMU=<.vm/qemu/bin/qemu-system-x86_64> node dev.js cargo -- test --bin solomni -- vm_live_external_workspace_round_trip`
+    virtiofs 变体再设 `SOLOMNI_VM_VIRTIOFSD=<.vm/virtiofsd/virtiofsd>`；9p 变体不设它（候选落到 9p），
+    两个变体各跑一次并把命令与回执贴进 PR。
   accept: |
-    绑定外部工作区的虚拟机档会话能起 guest、工具在 guest 内读写工作区、越界被拒、
-    删除会话不删工作区；node run-tests.js 全绿。
-  blocked_by: |
-    本期不做（用户决定：外部工作区 v1 仅本机档）。
+    Linux 的 virtiofs 与 9p 两个共享档各有一条真机通过：绑定产品根之外的目录能起 guest、工具在 guest 内
+    读写该工作区、越界被拒、会话树里的私沙仍可用；证据（命令与回执）贴在 PR 上。
+  blocked_by: 缺少 Linux KVM 真机
+
+- id: workspace.external-root-unc
+  scope: global
+  level: T4
+  why: |
+    外部工作区绑定到 Windows 的 UNC / 网络路径（\\server\share\dir）时虚拟机档不成立，且绑定链本身先坏：
+    1) 绑定入口 canonicalize 后得到 \\?\UNC\…，kernel/domain/path.rs 的 native() 只剥 \\?\ 前缀
+       （path.rs:14-21），留下 UNC\server\… 这种相对形态，随后按绝对路径 / metadata 校验失败；
+    2) 路径桥的镜像根只认盘符：posix_mirror 把 UNC 前缀里的反斜杠原样拼进 POSIX guest 路径，
+       posix_unmirror 又要求第一段是单字母盘符，正反向都不能往返；
+    3) smbd helper 能否以 UNC 目录作为 --share 根未验证（helper 用 capability 目录句柄，UNC 打开行为未知）。
+    本轮明确不支持：本机档在绑定层就会失败；虚拟机档即便绑定成功，起 guest 前 check_stable_roots 也会拒绝并提示先映射成本机盘符。
+  how: |
+    1) 修 native()：先识别 \\?\UNC\ 并还原成 \\server\share\…，再处理普通 \\?\；
+    2) 扩展路径桥：给 UNC 增加单射编码与反向解码，或改成挂载表驱动的双根映射（不再把宿主路径编进 guest 路径）；
+    3) 让 smbd 以 UNC 目录为 --share 根并实测（含网络断开 / 权限错误的失败路径），必要时共享前先映射成本地盘符；
+    4) 同步 resolve_workspace_binding 的校验与文案，补绑定层 / 路径桥 / 两档真机用例。
+  accept: |
+    UNC 外部工作区在本机档与虚拟机档都能绑定：本机档读写正常；虚拟机档能起 guest 并在 guest 内读写该工作区、
+    越界被拒；网络路径不可达时按真实原因拒绝；node run-tests.js 全绿。
+  blocked_by: 缺少实现（本轮明确不支持，先拒绝并给映射盘符指引）

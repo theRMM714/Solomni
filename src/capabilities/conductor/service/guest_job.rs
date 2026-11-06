@@ -137,6 +137,8 @@ impl GuestBoot {
         };
         // 挂载点走那座桥：同方言时是宿主原路径，跨方言时是 guest 镜像根。
         let bridge = image.bridge();
+        // 起 guest 前先校验稳定根可表示：外部工作区是 UNC / 网络路径时在这里如实拒绝（不拉一台用不了的 guest）。
+        check_stable_roots(&sandboxes, &bridge)?;
         let mounts = mounts_from(&plan, &fence, &bridge);
         let spec = GuestSpec {
             lease: lease.clone(),
@@ -184,14 +186,20 @@ impl GuestBoot {
     }
 }
 
-/// 目的：共享 guest 的稳定挂载根——工作树（含所有 agent 沙箱）与模块根（含 userdata）。
+/// 目的：共享 guest 的稳定挂载根——会话树根（各 agent 私沙与 .work）、外部工作区根（仅外部绑定时）
+///   与模块根（含 userdata）。
 /// 约束：这里只给"可见范围"，不表达某个 agent 的权限；per-agent 允许集由当次 GuestAccess 决定。
+///   内部布局下 shared 在会话树内，不重复挂；外部绑定下两者互不包含（绑定校验保证），各挂一条。
 pub(crate) fn stable_roots(sandboxes: &Sandboxes) -> (Vec<PathBuf>, Vec<PathBuf>) {
     let mut rw: Vec<PathBuf> = Vec::new();
-    if let Some(work) = sandboxes.shared.parent() {
-        if !work.as_os_str().is_empty() {
-            rw.push(work.to_path_buf());
-        }
+    if !sandboxes.session_root.as_os_str().is_empty() {
+        rw.push(sandboxes.session_root.clone());
+    }
+    let external = !sandboxes.shared.as_os_str().is_empty()
+        && (sandboxes.session_root.as_os_str().is_empty()
+            || !sandboxes.shared.starts_with(&sandboxes.session_root));
+    if external {
+        rw.push(sandboxes.shared.clone());
     }
     let mut module_roots: Vec<PathBuf> = sandboxes
         .list
@@ -214,6 +222,42 @@ pub(crate) fn stable_roots(sandboxes: &Sandboxes) -> (Vec<PathBuf>, Vec<PathBuf>
     // 模块根的读写位由 helper 按 agent 沙箱派生的围栏决定（模块目录只读、userdata 只给模块进程）；
     // 这里整棵挂可写，是为了让 userdata 真的能落回宿主。
     (rw, Vec::new())
+}
+
+/// 目的：起 guest 前校验稳定挂载——每个 agent 私沙都在会话树根下，且每个稳定根都能经路径桥往返。
+/// 约束：UNC / 网络路径在 Windows 宿主下无法编码成 guest 写法（镜像根只认盘符）；这里显式拒绝，
+///   不让它变成"guest 起来了、每次工具调用一条 fail-closed 诊断"。
+pub(crate) fn check_stable_roots(
+    sandboxes: &Sandboxes,
+    bridge: &crate::capabilities::vm::api::PathBridge,
+) -> Result<(), String> {
+    let root = &sandboxes.session_root;
+    if root.as_os_str().is_empty() {
+        return Err("虚拟机档挂载计划不一致：会话树根为空".to_string());
+    }
+    for sb in &sandboxes.list {
+        if !sb.private.starts_with(root) {
+            return Err(format!(
+                "虚拟机档挂载计划不一致：agent {} 的私沙不在会话树内（{}）",
+                sb.agent,
+                sb.private.display()
+            ));
+        }
+    }
+    if !bridge.round_trips(root) {
+        return Err(format!(
+            "虚拟机档挂载计划不一致：会话树根无法在 guest 内表示：{}",
+            root.display()
+        ));
+    }
+    let external = !sandboxes.shared.starts_with(root);
+    if external && !bridge.round_trips(&sandboxes.shared) {
+        return Err(format!(
+            "外部工作区无法用在虚拟机档：{} 在 guest 内表示不了（Windows 的 UNC / 网络路径不支持；先映射成本机盘符后重新绑定）",
+            sandboxes.shared.display()
+        ));
+    }
+    Ok(())
 }
 
 /// 目的：一组路径的最长公共祖先；不同盘符或公共部分只剩根时返回 None（退回逐项挂载）。

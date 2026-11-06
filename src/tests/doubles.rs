@@ -215,6 +215,7 @@ impl Workdirs for InMemoryWorkspace {
         }
         Ok(crate::capabilities::workspace::api::WorkRoots {
             shared: abs(&[session, "work"]),
+            session_root: abs(&[session]),
             agents: map,
             store: abs(&[session, ".work"]),
         })
@@ -2041,13 +2042,16 @@ pub(crate) fn test_workspace_store_with_max(
 
 /// 目的：VM 引擎的测试替身——不起真 VM，只记录 start / run / stop。
 /// 约束：`boot_delay` 让"起 guest 很慢"可复现（验核心线程不被占）；`boot_error` 让起不来可复现（验失败不留痕）；
-///   `fenced_output` 给围栏执行预设输出（None = 恒 `fake-guest`，默认行为不变），诊断用例用它给回一份 JSON。
+///   `fenced_output` 给围栏执行预设输出（None = 恒 `fake-guest`，默认行为不变），诊断用例用它给回一份 JSON；
+///   `specs` 记每次 `boot` 的启动规格——**挂载计划**（哪些宿主根真的挂进 guest）只在引擎边界看得见。
 #[derive(Clone, Default)]
 pub(crate) struct FakeEngine {
     pub calls: Arc<Mutex<Vec<String>>>,
     pub boot_delay: Option<std::time::Duration>,
     pub boot_error: Option<String>,
     pub fenced_output: Option<String>,
+    /// 目的：每次 `boot()` 收到的 `GuestSpec` 快照（含 `mounts`；失败尝试也记——"试过哪个计划"同样是事实）。
+    pub specs: Arc<Mutex<Vec<crate::capabilities::vm::domain::guest::GuestSpec>>>,
 }
 
 impl FakeEngine {
@@ -2074,6 +2078,7 @@ impl crate::capabilities::vm::ports::VmEngine for FakeEngine {
         if let Some(delay) = self.boot_delay {
             std::thread::sleep(delay);
         }
+        self.specs.lock().expect("锁").push(spec.clone());
         if let Some(why) = &self.boot_error {
             return Err(why.clone());
         }
@@ -2686,6 +2691,69 @@ pub(crate) fn core_with_workdirs(
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
         test_host_probe(),
+        Arc::new(crate::capabilities::residents::api::NoResidents),
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+    )
+}
+
+/// 目的：在**指定产品根**下造一格虚拟根（`<root>/.vm/guest/<名>`），返回名字。
+/// 约束：`crate::tests::test_guest` 只能造在当前目录（那正是 `Conductor` 的默认产品根）；这里给注入产品根的用例用。
+///   内容与它同形（占位磁盘镜像 + 内核 + 三平台共享客户端声明）；收尾由调用方连根删，不影响真实 `.vm/`。
+pub(crate) fn test_guest_at(root: &std::path::Path, name: &str) -> String {
+    let dir = root.join(".vm").join("guest").join(name);
+    std::fs::create_dir_all(&dir).expect("建虚拟根目录");
+    std::fs::write(dir.join("rootfs.ext4"), b"img").expect("写占位磁盘镜像");
+    std::fs::write(dir.join("vmlinuz"), b"stub").expect("写占位内核");
+    std::fs::write(
+        dir.join("guest.yaml"),
+        format!("id: {name}\nclients: [9p, virtiofs, cifs]\n"),
+    )
+    .expect("写 guest.yaml");
+    name.to_string()
+}
+
+/// 目的：注入**产品根 + 工作区端口 + 可观察 VM 引擎**的装配（外部工作区 × 虚拟机档用例）。
+/// 约束：`core_with_workdirs` 装的是本机档默认件（`test_vm()` 的引擎不可注入、探针不声明能起虚拟机），
+///   这里两样都接上：引擎用调用方给的 `FakeEngine`（`specs` 记挂载计划），探针按"本机能起虚拟机"作答。
+///   历史用**真实 FsHistory**（落 `<产品根>/session`）：删会话要真删目录，`InMemoryHistory` 给不出这条事实。
+pub(crate) fn core_with_workdirs_vm(
+    root: std::path::PathBuf,
+    modules: Vec<Module>,
+    gateway: ScriptGateway,
+    dirs: Arc<dyn Workdirs + Send + Sync>,
+    engine: FakeEngine,
+) -> Conductor {
+    let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
+        Arc::new(gateway);
+    let llm = test_llm(
+        Arc::clone(&gateway),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+    );
+    let history: Arc<dyn crate::capabilities::session::api::History + Send + Sync> = Arc::new(
+        crate::capabilities::session::service::SessionService::new(Arc::new(
+            crate::capabilities::session::detail::fs_history::FsHistory::new(root.join("session")),
+        )),
+    );
+    Conductor::new(
+        root,
+        registry_service(InMemorySettings::new(), Arc::clone(&llm)),
+        history,
+        test_workspace(dirs),
+        test_vm_with_engine(engine),
+        test_packages(Arc::new(InMemoryPackages::empty())),
+        test_provision(),
+        test_modules(Arc::new(VecSource(modules))),
+        Arc::new(crate::capabilities::builds::api::NoBuilds),
+        llm,
+        test_tools_svc_with(
+            Arc::new(SilentRunner),
+            Arc::new(InMemorySysIo::new()),
+            Arc::new(NoFenceHost),
+        ),
+        test_prompt(),
+        test_tools_svc(),
+        Arc::new(crate::kernel::ports::NoopLog),
+        vm_capable_host_probe(),
         Arc::new(crate::capabilities::residents::api::NoResidents),
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     )

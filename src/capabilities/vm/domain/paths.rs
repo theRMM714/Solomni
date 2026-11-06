@@ -58,6 +58,33 @@ impl PathBridge {
             PathDialect::Windows => windows_mirror(host),
         }
     }
+
+    /// 目的：这条宿主路径能不能**经这座桥往返**（`guest_to_host(to_guest(host))` 仍是同一条路径）。
+    /// 约束：用来在起 guest 前拦掉无法编码的稳定根——Windows 的 UNC / 网络路径无法单射进镜像根
+    ///   （`posix_mirror` 只认盘符、`posix_unmirror` 只认单字母盘符），非 UTF-8 路径在 `to_string_lossy` 下也会丢字节。
+    ///   盘符大小写不敏感（Windows 语义），其余段严格比较。
+    pub fn round_trips(self, host: &Path) -> bool {
+        match guest_to_host(self, &self.to_guest(host)) {
+            Some(back) => same_host_path(&back, host),
+            None => false,
+        }
+    }
+}
+
+/// 目的：判断两条宿主路径是不是同一个落点（Windows 盘符大小写不敏感，其余严格比较）。
+fn same_host_path(a: &Path, b: &Path) -> bool {
+    if a == b {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        a.to_string_lossy()
+            .eq_ignore_ascii_case(&b.to_string_lossy())
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
 }
 
 /// 目的：Windows 宿主路径编进 POSIX guest——盘符小写当第一段（Windows 文件名不含 /，所以天然单射）。

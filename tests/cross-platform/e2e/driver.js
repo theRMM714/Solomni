@@ -109,6 +109,10 @@ async function waitPidGone(pid, ms) {
   }
 }
 const dir = (name) => path.join(ROOT, 'session', name);
+/** 两个绝对路径是不是同一落点：Windows 大小写不敏感、分隔符统一（核心存的是 native 绝对路径）。 */
+const samePath = (a, b) =>
+  path.resolve(String(a || '')).toLowerCase().replace(/\\/g, '/') ===
+  path.resolve(String(b || '')).toLowerCase().replace(/\\/g, '/');
 /** 假供应商那一侧看到的最后一条请求（它记下了消息形状）：原生通道的协议形状只能在这里验。 */
 async function mockSeen() {
   try {
@@ -984,6 +988,7 @@ async function approvePlan(name) {
     assert(running.length === 0, '停止即全停：相关会话都不再跑', JSON.stringify(running));
   }
   // 虚拟机档真机会话（opt-in）：工具真在 guest 里跑，删会话后 guest 销毁。
+  // 本段另含「外部工作区 + 虚拟机档」：会话树与外部根各挂一条稳定根（guest 内读外部根、写外部根被拒、写私沙落回宿主）。
   // 虚拟根名默认 debian（清单里的默认项）；装了别的再设 SOLOMNI_VM_GUEST 指定。
   const vmGuest = process.env.SOLOMNI_VM_GUEST || 'debian';
   const vmLive = process.env.SOLOMNI_VM_LIVE === '1' || process.env.SOLOMNI_VM_QEMU;
@@ -1046,6 +1051,61 @@ async function approvePlan(name) {
       const vfp = require('child_process').spawnSync('pgrep', ['-af', 'virtiofsd'], { encoding: 'utf8' });
       const vfAlive = (vfp.stdout || '').split('\n').filter((l) => l.includes('--socket-path') && l.includes('solomni-virtiofs-'));
       assert(vfAlive.length === 0, '删除会话后 virtiofsd 进程销毁', vfAlive.join(' | ').slice(0, 240));
+    }
+    // 虚拟机档 + 外部工作区（opt-in 真机）：会话树与外部根各挂一条稳定根，guest 内读写都要成立。
+    // 外部目录放 target/（仓库内、产品根 e2e/root 之外）：既是"产品根之外"，也不写系统临时目录。
+    {
+      const extDir = path.resolve(__dirname, '..', '..', '..', 'target', 'e2e-ext-ws-' + process.pid);
+      fs.rmSync(extDir, { recursive: true, force: true });
+      fs.mkdirSync(extDir, { recursive: true });
+      fs.writeFileSync(path.join(extDir, 'marker.txt'), 'VM-EXT-MARKER');
+      const nameExt = 'e2e-vm-ext-' + Date.now();
+      try {
+        const ce = await api('POST', '/api/actions/create_session', {
+          name: nameExt, mode: 'single',
+          agents: [{ name: '探针兵', transient: true, modules: ['toolbox'], model: 'm1' }],
+          tier: 'vm', guest: vmGuest, workspace: extDir,
+          // shell 的默认 scope=sandbox（只到私沙）；读共享区要显式 scope=external，档位得放行它。
+          permission: 'all_reach',
+        });
+        assert(ce.status === 200, '建虚拟机档工作并绑定外部工作区', ce.text.slice(0, 240));
+        if (ce.status === 200) {
+          const rootMark = path.join(dir(nameExt), '.work-root');
+          assert(fs.existsSync(rootMark), '外部绑定落成布局投影 .work-root', rootMark);
+          const bound = fs.existsSync(rootMark) ? fs.readFileSync(rootMark, 'utf8').trim() : '';
+          assert(samePath(bound, extDir), '.work-root 指向外部目录', bound + ' vs ' + extDir);
+          assert(!fs.existsSync(path.join(dir(nameExt), 'work')), '外部绑定不建会话内 work/');
+          const saidExt = await act(nameExt, 'send_message', { text: '虚拟机档外部工作区' });
+          assert(saidExt.status === 200, '虚拟机档外部工作区发言', saidExt.text.slice(0, 200));
+          const le = (await lines(nameExt)).filter((x) => x.tool).map((x) => x.tool);
+          const shellExt = le.filter((t) => t.name === 'shell');
+          assert(shellExt.length >= 3, '三趟 guest shell 都落了工具行', JSON.stringify(le.map((t) => t.name)));
+          assert(
+            shellExt[0] && shellExt[0].ok === true && String(shellExt[0].output || '').includes('VM-EXT-MARKER'),
+            'guest 里读到外部工作区的 marker（外部根已挂进 guest）',
+            JSON.stringify(shellExt[0] || {}).slice(0, 300),
+          );
+          assert(shellExt[1] && shellExt[1].ok === false, '共享区在 guest 内只读：往外部根写被拒', JSON.stringify(shellExt[1] || {}).slice(0, 300));
+          assert(!fs.existsSync(path.join(extDir, 'deny.txt')), '被拒的写没有落到宿主外部目录');
+          assert(shellExt[2] && shellExt[2].ok === true, 'guest shell 写私沙成功', JSON.stringify(shellExt[2] || {}).slice(0, 300));
+          const privFile = path.join(dir(nameExt), '探针兵', 'ext-priv.txt');
+          assert(
+            fs.existsSync(privFile) && fs.readFileSync(privFile, 'utf8').includes('VM-EXT-PRIV-OK'),
+            'guest 写私沙落回会话树（宿主可见）',
+            privFile,
+          );
+          const delExt = await api('POST', '/api/history/' + encodeURIComponent(nameExt) + '/delete', {});
+          assert(delExt.status === 200, '删除外部工作区的虚拟机档会话', delExt.text.slice(0, 200));
+          await new Promise((res) => setTimeout(res, 1500));
+          assert(!fs.existsSync(dir(nameExt)), '删除会话后目录清掉', nameExt);
+          assert(
+            fs.existsSync(path.join(extDir, 'marker.txt')) && fs.readFileSync(path.join(extDir, 'marker.txt'), 'utf8').includes('VM-EXT-MARKER'),
+            '删除会话不删外部工作区',
+          );
+        }
+      } finally {
+        fs.rmSync(extDir, { recursive: true, force: true });
+      }
     }
   }
   /* ---------- 父死子亡（L4）：核心被强杀，常驻服务进程必须跟着没 ----------

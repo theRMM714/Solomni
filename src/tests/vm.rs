@@ -3069,40 +3069,46 @@ pub(crate) fn vm_service_runs_fenced_and_records_packages() {
     );
 }
 
-/// 目的：共享 guest 只挂工作树与模块根两个稳定根，新 agent/模块按状态出现，而不是启动时逐项枚举。
+/// 目的：共享 guest 只挂稳定根（会话树 + 外部工作区根 + 模块根），新 agent / 模块按状态出现，不逐项枚举。
+/// 约束：外部布局下两个根各挂一条，且**不能**挂 shared.parent()——旧实现会把外部根的父目录整棵暴露给 guest。
 #[test]
 pub(crate) fn stable_roots_cover_the_work_tree_and_module_tree() {
     use crate::capabilities::workspace::api::{Sandbox, Sandboxes};
     use std::collections::BTreeMap;
-    let sb = |agent: &str, module: &str| Sandbox {
+    use std::path::PathBuf;
+    let sb = |agent: &str, shared: &PathBuf, session_root: &PathBuf, module: &str| Sandbox {
         work_name: "w".to_string(),
         session: "w".to_string(),
         agent: agent.to_string(),
-        shared: std::path::PathBuf::from("/session/w/work"),
-        private: std::path::PathBuf::from("/session/w").join(agent),
-        modules: BTreeMap::from([(
-            module.to_string(),
-            std::path::PathBuf::from("/modules").join(module),
-        )]),
+        shared: shared.clone(),
+        private: session_root.join(agent),
+        modules: BTreeMap::from([(module.to_string(), PathBuf::from("/modules").join(module))]),
         modules_with_userdata: Default::default(),
         permissions: Default::default(),
         path_codec: None,
     };
-    let sandboxes = Sandboxes {
-        shared: std::path::PathBuf::from("/session/w/work"),
-        list: vec![sb("a", "m1"), sb("b", "m2")],
+    // 内部布局：shared = <会话树>/work，已隐含在会话树根下，不重复挂。
+    let session_root = PathBuf::from("/session/w");
+    let internal_shared = session_root.join("work");
+    let internal = Sandboxes {
+        shared: internal_shared.clone(),
+        session_root: session_root.clone(),
+        list: vec![
+            sb("a", &internal_shared, &session_root, "m1"),
+            sb("b", &internal_shared, &session_root, "m2"),
+        ],
         codec: None,
     };
-    let (rw, ro_tree) =
-        crate::capabilities::conductor::service::guest_job::stable_roots(&sandboxes);
+    let (rw, ro_tree) = crate::capabilities::conductor::service::guest_job::stable_roots(&internal);
+    assert!(rw.contains(&session_root), "会话树根要整棵挂：{:?}", rw);
     assert!(
-        rw.contains(&std::path::PathBuf::from("/session/w")),
-        "工作树根要整棵挂：{:?}",
+        rw.contains(&PathBuf::from("/modules")),
+        "模块树根要整棵挂：{:?}",
         rw
     );
     assert!(
-        rw.contains(&std::path::PathBuf::from("/modules")),
-        "模块树根要整棵挂：{:?}",
+        !rw.contains(&internal_shared),
+        "shared 在会话树内不再重复挂：{:?}",
         rw
     );
     assert!(
@@ -3111,6 +3117,292 @@ pub(crate) fn stable_roots_cover_the_work_tree_and_module_tree() {
         rw
     );
     assert!(ro_tree.is_empty(), "模块 userdata 要可写，稳定根进 rw");
+
+    // 外部布局：shared 不在会话树内（外部工作区绑定），两个根各挂一条。
+    let external_shared = PathBuf::from("/external/root");
+    let external = Sandboxes {
+        shared: external_shared.clone(),
+        session_root: session_root.clone(),
+        list: vec![
+            sb("a", &external_shared, &session_root, "m1"),
+            sb("b", &external_shared, &session_root, "m2"),
+        ],
+        codec: None,
+    };
+    let (rw, ro_tree) = crate::capabilities::conductor::service::guest_job::stable_roots(&external);
+    assert!(
+        rw.contains(&session_root) && rw.contains(&external_shared),
+        "会话树根与外部工作区根都要挂：{:?}",
+        rw
+    );
+    assert!(
+        !rw.contains(&PathBuf::from("/external")),
+        "不能挂 shared.parent()（会把外部根的父目录整棵暴露）：{:?}",
+        rw
+    );
+    assert!(
+        !rw.iter().any(|p| p.ends_with("a") || p.ends_with("b")),
+        "外部布局也不逐 agent 枚举：{:?}",
+        rw
+    );
+    assert!(ro_tree.is_empty(), "外部根与模块根都不进只读稳定根");
+}
+
+/// 目的：起 guest 前的可表示判据——稳定根必须能经路径桥往返；盘符能、UNC 不能
+///   （UNC 在 POSIX 镜像根里编不成单射路径，guest 内解不回来，起 guest 前就该拒）。
+#[test]
+pub(crate) fn mount_plan_round_trips_every_stable_root() {
+    use crate::capabilities::vm::api::PathBridge;
+    use crate::capabilities::vm::domain::paths::PathDialect;
+    use std::path::Path;
+    // 桥按**构造的**宿主平台判（与 path_bridge_round_trips_guest_and_host 同一口径），跨平台都跑。
+    let windows_to_posix = PathBridge::new("windows", PathDialect::Posix);
+    if cfg!(windows) {
+        assert!(
+            windows_to_posix.round_trips(Path::new(r"D:\proj\work")),
+            "盘符路径要能往返"
+        );
+        assert!(
+            !windows_to_posix.round_trips(Path::new(r"\\server\share\work")),
+            "UNC 路径不是单字母盘符：不能往返（起 guest 前要拒）"
+        );
+        assert!(
+            !windows_to_posix.round_trips(Path::new(r"\\?\D:\proj\work")),
+            "扩展长度前缀路径也不能往返"
+        );
+    }
+    // 同方言恒等：宿主写法原样即 guest 写法，往返成立。
+    let identity = PathBridge::new(
+        std::env::consts::OS,
+        if cfg!(windows) {
+            PathDialect::Windows
+        } else {
+            PathDialect::Posix
+        },
+    );
+    let here = std::env::current_dir().expect("取当前目录");
+    assert!(identity.round_trips(&here), "同方言路径要能往返");
+    // 跨方言（POSIX 宿主 → Windows guest）同样成立；这条在任何平台都按构造的平台判。
+    let posix_to_windows = PathBridge::new("linux", PathDialect::Windows);
+    assert!(
+        posix_to_windows.round_trips(Path::new("/home/u/work")),
+        "POSIX 路径编进 Windows 镜像根后要能解回"
+    );
+}
+
+/// 目的：把「不在挂载表就 fail-closed」变成可判定属性——外部工作区布局下，per-call 围栏里的每个根
+///   （私沙 / 共享区 / 模块 / cwd）翻成 guest 写法后，都必须落在某个稳定挂载的 guest 路径之下。
+/// 约束：同方言与跨方言各验一次（跨方言 = 本机宿主 → 另一侧方言的 guest，走镜像根）。
+#[test]
+pub(crate) fn guest_access_roots_are_all_covered_by_stable_mounts() {
+    use crate::capabilities::vm::api::{mounts_from, ExecPlan, PathBridge};
+    use crate::capabilities::vm::domain::guest::{GuestAccess, GuestOs};
+    use crate::capabilities::vm::domain::paths::PathDialect;
+    use crate::capabilities::workspace::api::{Sandbox, Sandboxes};
+    use crate::kernel::api::{FenceSpec, Tier};
+    use std::collections::BTreeMap;
+    use std::path::PathBuf;
+
+    // 真的绝对路径（scratch 里，不落仓库）：会话树与外部根互不包含，和外部工作区绑定后的布局同形。
+    let base = crate::tests::scratch("mount-coverage");
+    let session_root = base.join("session");
+    let external = base.join("outside");
+    let module_root = base.join("modules").join("m1");
+    let private = session_root.join("a");
+    let sandboxes = Sandboxes {
+        shared: external.clone(),
+        session_root: session_root.clone(),
+        list: vec![Sandbox {
+            work_name: "w".to_string(),
+            session: "w".to_string(),
+            agent: "a".to_string(),
+            shared: external.clone(),
+            private: private.clone(),
+            modules: BTreeMap::from([("m1".to_string(), module_root.clone())]),
+            modules_with_userdata: Default::default(),
+            permissions: Default::default(),
+            path_codec: None,
+        }],
+        codec: None,
+    };
+    let covers = |mount_guest: &str, path: &str| {
+        let base = mount_guest.trim_end_matches('/');
+        path == base || path.starts_with(&format!("{base}/"))
+    };
+    let check = |bridge: PathBridge, os: GuestOs| {
+        let (rw, ro_tree) =
+            crate::capabilities::conductor::service::guest_job::stable_roots(&sandboxes);
+        let plan = ExecPlan {
+            tier: Tier::Vm,
+            net: false,
+            guest: Some("debian".to_string()),
+            packages: Vec::new(),
+        };
+        // boot fence 照 guest_job 的造法：稳定根进 rw，host_read_roots 为空。
+        let boot = FenceSpec {
+            agent: String::new(),
+            lease: "w".to_string(),
+            rw,
+            ro: Vec::new(),
+            ro_tree,
+            private: PathBuf::new(),
+            cwd: PathBuf::new(),
+            net: false,
+        };
+        let mounts = mounts_from(&plan, &boot, &bridge);
+        assert!(
+            mounts.iter().any(|m| m.host == session_root),
+            "会话树根要在挂载表里：{:?}",
+            mounts
+        );
+        assert!(
+            mounts.iter().any(|m| m.host == external),
+            "外部工作区根要在挂载表里：{:?}",
+            mounts
+        );
+        assert!(
+            !mounts
+                .iter()
+                .any(|m| Some(m.host.as_path()) == external.parent()),
+            "外部根的父目录不许进挂载表：{:?}",
+            mounts
+        );
+        // 一次 shell 调用的围栏：私沙可写、共享区与模块只读（与 FenceSpec::for_call 同形）。
+        let per_call = FenceSpec {
+            agent: "a".to_string(),
+            lease: "w".to_string(),
+            rw: vec![private.clone()],
+            ro: Vec::new(),
+            ro_tree: vec![external.clone(), module_root.clone()],
+            private: private.clone(),
+            cwd: private.clone(),
+            net: true,
+        };
+        let access = GuestAccess::from_fence(&per_call, os, &mounts);
+        let mut roots: Vec<String> = vec![access.private.clone(), access.cwd.clone()];
+        roots.extend(access.rw.iter().cloned());
+        roots.extend(access.ro.iter().cloned());
+        roots.extend(access.ro_tree.iter().cloned());
+        for guest_path in roots {
+            assert!(!guest_path.is_empty(), "per-call 根不能为空");
+            assert!(
+                mounts.iter().any(|m| covers(&m.guest, &guest_path)),
+                "per-call 根 {} 不在任何稳定挂载之下（helper 会 fail-closed）：{:?}",
+                guest_path,
+                mounts.iter().map(|m| m.guest.clone()).collect::<Vec<_>>()
+            );
+        }
+    };
+    // 同方言：本平台宿主 → 本平台写法的 guest（恒等桥）。
+    check(
+        PathBridge::new(
+            std::env::consts::OS,
+            if cfg!(windows) {
+                PathDialect::Windows
+            } else {
+                PathDialect::Posix
+            },
+        ),
+        if cfg!(windows) {
+            GuestOs::Windows
+        } else {
+            GuestOs::Linux
+        },
+    );
+    // 跨方言：Windows 宿主 → POSIX guest（本机是 Windows 时就是生产那条链）；否则反方向。
+    if cfg!(windows) {
+        check(
+            PathBridge::new("windows", PathDialect::Posix),
+            GuestOs::Linux,
+        );
+    } else {
+        check(
+            PathBridge::new("linux", PathDialect::Windows),
+            GuestOs::Windows,
+        );
+    }
+}
+
+/// 目的：外部工作区的 guest 路径可能含单引号（宿主目录名带 ' 时镜像路径会原样带上）；四个共享后端
+///   拼进 guest shell 的路径必须统一走 sh_quote，否则挂载脚本会在 guest 里被拆成两条命令。
+#[test]
+pub(crate) fn share_backend_scripts_quote_guest_paths() {
+    use crate::capabilities::vm::detail::{copy, share_ninep, share_smb, share_virtiofs};
+    use crate::capabilities::vm::domain::guest::{sh_quote, GuestMount};
+    let quoted_path = "/solomni-host/c/it's here";
+    let mounts = [
+        GuestMount {
+            host: std::path::PathBuf::from("C:/host/a"),
+            guest: quoted_path.to_string(),
+            read_only: false,
+        },
+        GuestMount {
+            host: std::path::PathBuf::from("C:/host/b"),
+            guest: "/solomni-host/c/ro dir".to_string(),
+            read_only: true,
+        },
+    ];
+    // 单引号的 POSIX 拼法：闭引号 + 反斜杠转义的引号 + 重开引号（sh_quote 的唯一合法写法）。
+    assert!(
+        sh_quote(quoted_path).contains("'\\''"),
+        "sh_quote 要按 POSIX 拆合单引号：{}",
+        sh_quote(quoted_path)
+    );
+    let plans = [
+        ("9p", share_ninep::ninep_plan(&mounts)),
+        (
+            "virtiofs",
+            share_virtiofs::virtiofs_plan(&mounts, Vec::new()),
+        ),
+        ("smb", share_smb::smb_plan(&mounts, 45678)),
+        ("copy", copy::copy_plan(&mounts)),
+    ];
+    for (id, plan) in plans {
+        assert_eq!(
+            plan.guest_scripts.len(),
+            mounts.len(),
+            "{} 每条挂载一条脚本",
+            id
+        );
+        for (i, script) in plan.guest_scripts.iter().enumerate() {
+            let quoted = sh_quote(&mounts[i].guest);
+            assert!(
+                script.contains(&quoted),
+                "{} 的 guest 路径没走 sh_quote：{}",
+                id,
+                script
+            );
+            // 把已引用的写法剥掉后，不能还剩裸路径——否则 shell 会在含引号/空格的路径上拆错。
+            assert!(
+                !script.replace(&quoted, "").contains(&mounts[i].guest),
+                "{} 里还有没走 sh_quote 的裸 guest 路径：{}",
+                id,
+                script
+            );
+        }
+    }
+    // copy 后端的同步脚本（tar -C / rm 的路径）同样要引用。
+    let temp = "/tmp/solomni-copy-in-0.tar";
+    let quoted = sh_quote(quoted_path);
+    for script in [
+        copy::copy_in_script(temp, quoted_path),
+        copy::copy_out_script(temp, quoted_path),
+    ] {
+        assert!(
+            script.contains(&quoted),
+            "copy 同步脚本没走 sh_quote：{}",
+            script
+        );
+        assert!(
+            !script.replace(&quoted, "").contains(quoted_path),
+            "copy 同步脚本里还有裸 guest 路径：{}",
+            script
+        );
+    }
+    assert!(
+        copy::copy_cleanup_script(temp).contains(&sh_quote(temp)),
+        "删临时包的脚本也要引用路径"
+    );
 }
 
 /// 目的：模块入口落 guest 本地副本——落点在 /usr/local/lib/solomni（guest 内 helper 的只读基线已放行 /usr），
@@ -3461,4 +3753,253 @@ pub(crate) fn vm_live_guest_diagnose_lists_processes() {
         .guest_diagnose("vm-live-diagnose")
         .expect_err("停了 guest 就要拒绝");
     assert!(gone.contains("没有活着的 guest"), "{}", gone);
+}
+
+/// 目的：真机验收（默认跳过）：外部工作区挂载计划——会话树与共享区是两棵目录时，guest 读得到外部根、
+///   写得进私沙、写不了共享区（fenced 拒绝），停 guest 也不动外部文件。
+/// 约束：只在 SOLOMNI_VM_LIVE=1 且 SOLOMNI_VM_QEMU 指向真东西、虚拟根（默认 debian）在场时执行；
+///   与其它共虚拟根的真机用例串行（doubles::live_guest_lock）。Windows 走 smb（要 SOLOMNI_VM_SMBD），
+///   Linux 各起一台验 virtiofs（要 SOLOMNI_VM_VIRTIOFSD）与 9p。
+#[test]
+pub(crate) fn vm_live_external_workspace_round_trip() {
+    use crate::capabilities::vm::api::{mounts_from, ExecPlan};
+    use crate::capabilities::vm::domain::guest::{guest_path, sh_quote, GuestAccess};
+    use crate::capabilities::workspace::api::{Sandbox, Sandboxes};
+    use crate::kernel::api::{FenceSpec, Tier};
+    use std::collections::BTreeMap;
+
+    let live = std::env::var("SOLOMNI_VM_LIVE").as_deref() == Ok("1");
+    let qemu = std::env::var("SOLOMNI_VM_QEMU").unwrap_or_default();
+    let guest_name = std::env::var("SOLOMNI_VM_GUEST").unwrap_or_else(|_| "debian".to_string());
+    if !live || qemu.trim().is_empty() {
+        eprintln!(
+            "[探针] 未开启外部工作区真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑（虚拟根默认 debian，可用 SOLOMNI_VM_GUEST 换）"
+        );
+        return;
+    }
+    let probe = crate::kernel::detail::HostProbeAdapter;
+    let base_dir = match crate::capabilities::vm::api::resolve_guest(
+        &crate::tests::root_dir(),
+        &guest_name,
+    ) {
+        Ok(d) if probe.is_dir(&d) => d,
+        _ => {
+            eprintln!(
+                "[探针] 本机没有虚拟根「{}」：先 solomni --provision --ensure --yes，或用 SOLOMNI_VM_GUEST 指定",
+                guest_name
+            );
+            return;
+        }
+    };
+    // 同一个虚拟根不能被两台 guest 同时写：真机用例之间串行。
+    let _live = crate::tests::doubles::live_guest_lock();
+    let image = classify_base(&base_dir, &probe).expect("虚拟根要可用");
+    // 外部布局：会话树与外部根分处两棵目录（生产里前者在产品根 session/ 下，后者在任意绝对路径）。
+    let base = crate::tests::scratch("vm-live-ext");
+    let session_root = base.join("session");
+    let external = base.join("outside");
+    let private = session_root.join("a");
+    std::fs::create_dir_all(&private).expect("建私沙");
+    std::fs::create_dir_all(&external).expect("建外部根");
+    std::fs::write(external.join("marker.txt"), "EXT_MARKER").expect("写外部标记");
+    // Sandboxes / stable_roots / check_stable_roots / mounts_from 全用生产同源函数，不手拼挂载。
+    let sandboxes = Sandboxes {
+        shared: external.clone(),
+        session_root: session_root.clone(),
+        list: vec![Sandbox {
+            work_name: "w".to_string(),
+            session: "w".to_string(),
+            agent: "a".to_string(),
+            shared: external.clone(),
+            private: private.clone(),
+            modules: BTreeMap::new(),
+            modules_with_userdata: Default::default(),
+            permissions: Default::default(),
+            path_codec: None,
+        }],
+        codec: None,
+    };
+    let bridge = image.bridge();
+    let (rw, ro_tree) =
+        crate::capabilities::conductor::service::guest_job::stable_roots(&sandboxes);
+    crate::capabilities::conductor::service::guest_job::check_stable_roots(&sandboxes, &bridge)
+        .expect("外部布局的稳定根要能起 guest");
+    let boot = FenceSpec {
+        agent: String::new(),
+        lease: "vm-live-ext".to_string(),
+        rw,
+        ro: Vec::new(),
+        ro_tree,
+        private: std::path::PathBuf::new(),
+        cwd: std::path::PathBuf::new(),
+        net: false,
+    };
+    let plan = ExecPlan {
+        tier: Tier::Vm,
+        net: false,
+        guest: Some(guest_name.clone()),
+        packages: Vec::new(),
+    };
+    let mounts = mounts_from(&plan, &boot, &bridge);
+    assert!(
+        mounts.iter().any(|m| m.host == session_root),
+        "会话树根要进稳定挂载：{:?}",
+        mounts
+    );
+    assert!(
+        mounts.iter().any(|m| m.host == external),
+        "外部工作区根要单独进稳定挂载：{:?}",
+        mounts
+    );
+    assert!(
+        !mounts
+            .iter()
+            .any(|m| Some(m.host.as_path()) == external.parent()),
+        "外部根的父目录不许进挂载表：{:?}",
+        mounts
+    );
+    // 共享档按平台用户链选：Windows = smb；Linux = virtiofs（工具在场时）+ 9p。
+    let nine = crate::capabilities::vm::detail::NinePShare::new();
+    let virtiofs = crate::capabilities::vm::detail::VirtioFsShare::new();
+    let smb = crate::capabilities::vm::detail::SmbShare::new();
+    let virtiofsd = std::env::var("SOLOMNI_VM_VIRTIOFSD")
+        .ok()
+        .filter(|p| !p.trim().is_empty());
+    let smbd = std::env::var("SOLOMNI_VM_SMBD")
+        .ok()
+        .filter(|p| !p.trim().is_empty());
+    let mut variants: Vec<(&'static str, &dyn ShareBackend, Option<String>)> = Vec::new();
+    if cfg!(windows) {
+        let Some(smbd) = smbd else {
+            eprintln!("[探针] 没有 SOLOMNI_VM_SMBD（Windows 外部工作区走 SMB）：跳过");
+            return;
+        };
+        if !image.clients.cifs {
+            eprintln!("[探针] 虚拟根没声明 cifs 客户端：跳过");
+            return;
+        }
+        variants.push(("smb", &smb as &dyn ShareBackend, Some(smbd)));
+    } else if cfg!(target_os = "linux") {
+        if image.clients.virtio_fs {
+            if let Some(tool) = virtiofsd.clone() {
+                variants.push(("virtiofs", &virtiofs as &dyn ShareBackend, Some(tool)));
+            }
+        }
+        if image.clients.nine_p {
+            variants.push(("9p", &nine as &dyn ShareBackend, None));
+        }
+        if variants.is_empty() {
+            eprintln!("[探针] 没有可用的用户共享档（Linux 需要 9p 或 virtiofsd）：跳过");
+            return;
+        }
+    } else {
+        eprintln!("[探针] 外部工作区真机探针本期只覆盖 Windows(SMB) 与 Linux(virtiofs/9p)：跳过");
+        return;
+    }
+    let overlay_dir = crate::tests::scratch("vm-live-ext-overlays");
+    let engine = crate::capabilities::vm::detail::QemuEngine::with_overlay_dir(overlay_dir);
+    let guest_private = guest_path(&private, image.os, &mounts);
+    let guest_external = guest_path(&external, image.os, &mounts);
+    for (id, backend, tool) in variants {
+        let lease = format!("vm-live-ext-{id}");
+        let spec = GuestSpec {
+            lease: lease.clone(),
+            image: image.clone(),
+            mounts: mounts.clone(),
+            net: false,
+            engine_path: Some(qemu.clone()),
+            share_path: tool.clone(),
+            shares: Vec::new(),
+            seed: None,
+            isolated: true,
+            cache_disk: None,
+        };
+        let (share_plan, mut guard) = backend
+            .prepare("qemu", &spec.mounts, tool.as_deref())
+            .expect("共享计划要能派生");
+        let mut guest = engine.boot(&spec, &share_plan).expect("起 guest");
+        // 1) 外部工作区可读：挂载式共享是实时视图，marker 要读得到。
+        let marker = format!("{guest_external}/marker.txt");
+        let read = guest.channel().exec(&GuestRun {
+            command: format!("cat {}", sh_quote(&marker)),
+            args_json: "{}".to_string(),
+            env: Vec::new(),
+            cwd: String::new(),
+            timeout_secs: 30,
+            output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
+        });
+        assert!(
+            read.ok && read.output.contains("EXT_MARKER"),
+            "{} guest 要读得到外部工作区：{}",
+            id,
+            read.output
+        );
+        // 2) fenced：私沙可写（围栏只给私沙 rw，共享区在 ro_tree）。
+        let per_call = FenceSpec {
+            agent: "a".to_string(),
+            lease: lease.clone(),
+            rw: vec![private.clone()],
+            ro: Vec::new(),
+            ro_tree: vec![external.clone()],
+            private: private.clone(),
+            cwd: private.clone(),
+            net: true,
+        };
+        let access = GuestAccess::from_fence(&per_call, image.os, &mounts);
+        let own_file = format!("{guest_private}/written.txt");
+        let write_own = guest.channel().exec_fenced(
+            &GuestRun {
+                command: format!("printf EXT_OK > {}", sh_quote(&own_file)),
+                args_json: "{}".to_string(),
+                env: Vec::new(),
+                cwd: String::new(),
+                timeout_secs: 30,
+                output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
+            },
+            &access,
+        );
+        assert!(
+            write_own.ok,
+            "{} fenced 要能在私沙写：{}",
+            id, write_own.output
+        );
+        let landed = std::fs::read_to_string(private.join("written.txt")).unwrap_or_default();
+        assert!(
+            landed.contains("EXT_OK"),
+            "{} 私沙的写要实时落到宿主会话树：{:?}",
+            id,
+            landed
+        );
+        // 3) fenced 写共享区（外部根）必须被拒，且宿主外部目录里不能出现该文件。
+        let escaped = format!("{guest_external}/escaped.txt");
+        let write_shared = guest.channel().exec_fenced(
+            &GuestRun {
+                command: format!("printf NOPE > {}", sh_quote(&escaped)),
+                args_json: "{}".to_string(),
+                env: Vec::new(),
+                cwd: String::new(),
+                timeout_secs: 30,
+                output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
+            },
+            &access,
+        );
+        assert!(
+            !write_shared.ok,
+            "{} fenced 写共享区必须被拒：{}",
+            id, write_shared.output
+        );
+        assert!(
+            !external.join("escaped.txt").exists(),
+            "{} 共享区不该出现 guest 写进去的文件",
+            id
+        );
+        guest.stop();
+        // 4) 停 guest 不碰外部工作区：外部文件仍在。
+        assert!(
+            external.join("marker.txt").is_file(),
+            "{} 停 guest 后外部文件仍要在",
+            id
+        );
+        guard.release();
+    }
 }
