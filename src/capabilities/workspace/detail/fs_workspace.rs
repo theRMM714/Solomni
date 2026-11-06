@@ -93,7 +93,7 @@ impl FsWorkspace {
         let mark = self.mark_path(session);
         match std::fs::read_to_string(&mark) {
             Ok(text) => {
-                let root = PathBuf::from(text.trim());
+                let root = crate::kernel::api::native(&PathBuf::from(text.trim()));
                 if !root.is_absolute() {
                     return Err(format!("工作区绑定不是绝对路径：{}", root.display()));
                 }
@@ -172,6 +172,7 @@ impl Workdirs for FsWorkspace {
                 if !p.is_absolute() {
                     return Err(format!("工作区根不是绝对路径：{}", p.display()));
                 }
+                let p = crate::kernel::api::native(p);
                 std::fs::write(&mark, p.to_string_lossy().as_bytes())
                     .map_err(|e| format!("写工作区绑定失败（{}）：{}", mark.display(), e))
             }

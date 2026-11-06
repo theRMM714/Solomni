@@ -8,3 +8,15 @@
 pub fn slash(p: &std::path::Path) -> String {
     p.to_string_lossy().replace('\\', "/")
 }
+
+/// 目的：把宿主真实路径还原成用户能认的写法——Windows 去掉 `\\?\` 扩展前缀。
+/// 约束：只影响显示 / 绑定存储；真正访问文件系统仍可用扩展前缀。
+pub fn native(p: &std::path::Path) -> std::path::PathBuf {
+    #[cfg(windows)]
+    {
+        if let Some(rest) = p.to_string_lossy().strip_prefix(r"\\?\") {
+            return std::path::PathBuf::from(rest);
+        }
+    }
+    p.to_path_buf()
+}

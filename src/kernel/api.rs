@@ -7,7 +7,7 @@ pub use crate::kernel::domain::fence::{
     call_lease, FenceRunPolicy, FenceSpec, SandboxMode, SandboxRequirements, FENCE_BOUNDARY_MARK,
 };
 pub use crate::kernel::domain::jobs::JobRegistry;
-pub use crate::kernel::domain::path::slash;
+pub use crate::kernel::domain::path::{native, slash};
 pub use crate::kernel::domain::types::{
     valid_capability, Ask, AskOutcome, ExecSpec, SessionId, Tier, ToolOutcome,
     DEFAULT_LLM_TIMEOUT_SECS,

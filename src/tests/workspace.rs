@@ -242,7 +242,9 @@ pub(crate) fn conductor_records_external_workspace_and_rejects_overlap() {
     let (meta, _) = core.history_open(&sid).expect("会话");
     assert_eq!(
         meta.workspace.as_ref().map(|b| b.root.clone()),
-        Some(external.canonicalize().expect("规范化外部路径")),
+        Some(crate::kernel::api::native(
+            &external.canonicalize().expect("规范化外部路径")
+        )),
         "绑定写进根会话 meta（规范化绝对路径）"
     );
     let session = product.join("session").join("wx");

@@ -520,11 +520,27 @@ pub(crate) fn route(
                 Ok(rd) => {
                     for e in rd.flatten() {
                         let p = e.path();
+                        let name = e.file_name().to_string_lossy().to_string();
+                        // 目录选择器不列隐藏 / 系统目录（$RECYCLE.BIN、System Volume Information 等）。
+                        #[cfg(windows)]
+                        {
+                            use std::os::windows::fs::MetadataExt;
+                            if let Ok(m) = e.metadata() {
+                                const HIDDEN: u32 = 0x2;
+                                const SYSTEM: u32 = 0x4;
+                                if m.file_attributes() & (HIDDEN | SYSTEM) != 0 {
+                                    continue;
+                                }
+                            }
+                        }
+                        #[cfg(not(windows))]
+                        {
+                            if name.starts_with('.') {
+                                continue;
+                            }
+                        }
                         if p.is_dir() {
-                            dirs.push((
-                                e.file_name().to_string_lossy().to_string(),
-                                p.display().to_string(),
-                            ));
+                            dirs.push((name, p.display().to_string()));
                         }
                     }
                 }

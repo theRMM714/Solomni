@@ -1375,9 +1375,10 @@ impl Conductor {
         if !raw.is_absolute() {
             return Err(format!("工作区必须是绝对路径：{}", raw.display()));
         }
-        let root = raw
-            .canonicalize()
-            .map_err(|e| format!("工作区不可达：{}（{}）", raw.display(), e))?;
+        let root = crate::kernel::api::native(
+            &raw.canonicalize()
+                .map_err(|e| format!("工作区不可达：{}（{}）", raw.display(), e))?,
+        );
         if root.parent().is_none() {
             return Err("工作区不能是文件系统根目录".to_string());
         }
@@ -1388,10 +1389,12 @@ impl Conductor {
         }
         // 工作区不能与产品目录互相包含：否则 /workspace 会把 .home、modules、session 一起纳入
         // 共享区，回档与围栏都会越界。
-        let product = self
-            .root
-            .canonicalize()
-            .unwrap_or_else(|_| self.root.clone());
+        let product = crate::kernel::api::native(
+            &self
+                .root
+                .canonicalize()
+                .unwrap_or_else(|_| self.root.clone()),
+        );
         if root == product || product.starts_with(&root) || root.starts_with(&product) {
             return Err(
                 "工作区不能与产品目录互相包含（会越过会话 / 模块 / 配置的边界）".to_string(),
