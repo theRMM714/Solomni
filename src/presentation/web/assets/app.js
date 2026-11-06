@@ -284,7 +284,6 @@ function toolCard(t, sess, key, who) {
   el.appendChild(head);
   el.appendChild(toolDetail('参数', info.args, sess, key + ':args'));
   el.appendChild(toolDetail('结果', info.output, sess, key + ':output'));
-  if (typeof info.raw === 'string' && info.raw.trim()) el.appendChild(toolDetail('原文', info.raw, sess, key + ':raw', true));
   return el;
 }
 
@@ -3869,6 +3868,7 @@ function lineParts(l) {
       text: '',
       speaker: (l.tool && l.tool.speaker) || speaker,
       reply: l.reply || (l.tool && l.tool.reply) || 0,
+      raw: l.raw || '',
     }];
   }
   // 压缩记录：转录里的一等行（有 id，可删除/留档/恢复）；摘要 + 从哪一行起保留原文。
@@ -3900,6 +3900,7 @@ function lineParts(l) {
     verb: verb,
     degraded: deg,
     reply: l.reply || 0,
+    raw: l.raw || '',
   }];
 }
 
@@ -5059,6 +5060,11 @@ function buildTurn(group, s) {
     t.className = 'turn-text';
     appendBody(t, head.cls, text);
     body.appendChild(t);
+  }
+  // 原文是**回复级事实**：一条回复只显示一次；原生模式与可见正文相同，不重复。
+  const raw = parts.map((p) => p.raw).find((x) => typeof x === 'string' && x.trim()) || '';
+  if (raw.trim() && raw.trim() !== text.trim()) {
+    body.appendChild(toolDetail('原文', raw, s, key + ':raw', true));
   }
   if (tools.length) {
     const groupEl = document.createElement('details');

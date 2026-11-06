@@ -262,9 +262,6 @@ pub struct ToolCallView {
     pub args: String,
     /// 回注给模型的结果原文（转录即内容）。
     pub output: String,
-    /// 该行所属回复的**助手消息正文**（重建上下文用；与实时推出去的那条取同一个串；界面默认不展开）。
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub raw: String,
     /// 供应商给的调用 id：重建时靠它把结果消息与助手消息里的调用对上（手写信封通道为空）。
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub call_id: String,
@@ -311,6 +308,10 @@ pub struct LineView {
     /// 思维链（若该轮模型给出）；前端永远默认折叠，点击才展开。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<String>,
+    /// 本行所属回复的**助手消息原文**（重建上下文用；每条回复只落一份，挂在该回复首行）。
+    /// 信封模式下含信封 JSON；原生模式下即可见正文。呈现层只在整轮气泡里展示一次。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub raw: String,
     /// 该行是一次工具调用时带上调用视图；普通文本行没有。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<ToolCallView>,
@@ -554,7 +555,6 @@ impl SessionEvent {
                 "ok": v.ok,
                 "args": v.args,
                 "output": v.output,
-                "raw": v.raw,
             }),
         }
     }

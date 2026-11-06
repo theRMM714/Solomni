@@ -73,6 +73,7 @@ fn head_chars(s: &str, n: usize) -> String {
 fn core_rows(
     tool: &str,
     view: crate::capabilities::session::api::ToolCallView,
+    raw: &str,
     reasoning: &str,
     text: &str,
 ) -> Vec<crate::capabilities::session::api::LineView> {
@@ -100,6 +101,7 @@ fn core_rows(
         } else {
             Some(reasoning.to_string())
         },
+        raw: raw.to_string(),
         tool: Some(view),
         ..Default::default()
     });
@@ -257,10 +259,10 @@ pub fn core_operation(
                     ok: true,
                     args: c.args_json.clone(),
                     output: head_chars(&payload.to_string(), 400),
-                    raw: done.raw.clone(),
                     call_id: c.id.clone(),
                     reply: 0,
                 },
+                &done.raw,
                 &done.reasoning,
                 &parsed.text,
             ) {
@@ -283,10 +285,10 @@ pub fn core_operation(
                     ok: true,
                     args: t.args_json.clone(),
                     output: head_chars(&payload.to_string(), 400),
-                    raw: done.raw.clone(),
                     call_id: String::new(),
                     reply: 0,
                 },
+                &done.raw,
                 &done.reasoning,
                 &parsed.text,
             ) {
@@ -354,12 +356,11 @@ pub fn core_operation(
                 ok: out.ok,
                 args,
                 output: out.output,
-                raw: done.raw.clone(),
                 call_id,
                 reply: 0,
             };
             // 核心"先核实"这一步也如实推出去（用户看得到它在读什么、查什么）。
-            for row in core_rows(&view.name, view.clone(), "", "") {
+            for row in core_rows(&view.name, view.clone(), &done.raw, "", "") {
                 sink(crate::capabilities::session::api::SessionEvent::Transcript(
                     vec![row],
                 ));

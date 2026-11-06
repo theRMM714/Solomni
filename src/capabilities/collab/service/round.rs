@@ -89,7 +89,7 @@ pub fn arg_text(args_json: &str) -> String {
 }
 
 /// 一轮模型调用的产出（一轮 = 一条文本转录行；有工具时紧跟一条工具行）。
-/// 原始输出不进这里：工具轮由 ToolCallView.raw 承载、文本轮进上下文的就是解析后的文本。
+/// 原始输出不进工具行：它由 Round.raw 随该回复首轮携带，工具行只记参数与回执。
 pub struct Round {
     /// 这一轮属于哪次模型回复（一次回复可能产出多条工具行）。
     pub reply: u64,
@@ -99,6 +99,8 @@ pub struct Round {
     pub reasoning: String,
     /// 该轮压进历史的消息：工具轮 = [assistant(raw)]，末轮 = [assistant(text)]。
     pub text_msgs: Vec<Msg>,
+    /// 该回复的助手消息原文（重建上下文用；每条回复只落一份，由该回复首轮携带）。
+    pub raw: String,
     pub tool: Option<ToolRun>,
     /// 供应商给的结束原因（原样；没给 = 空串）：核心据此分辨"写完停"还是"被长度截断"。
     pub finish: String,
@@ -265,6 +267,7 @@ pub fn converse_with(
                 text: String::new(),
                 reasoning: String::new(),
                 text_msgs: Vec::new(),
+                raw: String::new(),
                 tool: None,
                 finish: String::new(),
                 error: Some(err),
@@ -354,6 +357,7 @@ pub fn converse_with(
                     text,
                     reasoning,
                     text_msgs,
+                    raw: String::new(),
                     tool: None,
                     finish,
                     error: None,
@@ -389,7 +393,6 @@ pub fn converse_with(
                         "这一回合走**信封通道**，但供应商返回了原生工具调用（name={}，finish_reason={}）；核心没有执行。请把同样的调用写成信封重发：{{\"type\":\"tool\",\"name\":\"...\",\"args\":{{...}}}}。",
                         c.name, finish
                     ),
-                    raw: raw.clone(),
                     call_id: String::new(),
                     reply: reply_id,
                 };
@@ -403,6 +406,7 @@ pub fn converse_with(
                     text: reply.text.clone(),
                     reasoning: std::mem::take(&mut reasoning),
                     text_msgs: vec![msgs_of[0].clone()],
+                    raw: raw.clone(),
                     tool: Some(ToolRun {
                         view,
                         msgs: vec![msgs_of[1].clone()],
@@ -469,8 +473,6 @@ pub fn converse_with(
                                 ok: outcome.ok,
                                 args: plan[i].2.clone(),
                                 output: outcome.output,
-                                // 助手消息正文 = 这一回复的原文（正文与调用进的是同一条消息）
-                                raw: reply_text.clone(),
                                 call_id: c.id.clone(),
                                 reply: reply_id,
                             }
@@ -496,6 +498,12 @@ pub fn converse_with(
                             } else {
                                 Vec::new()
                             },
+                            // 助手消息正文 = 这一回复的原文（每条回复只带一份）
+                            raw: if i == 0 {
+                                reply_text.clone()
+                            } else {
+                                String::new()
+                            },
                             tool: Some(ToolRun {
                                 view,
                                 msgs: vec![msgs_of[i + 1].clone()],
@@ -518,7 +526,6 @@ pub fn converse_with(
                             ok: false,
                             args: inv.args_json.clone(),
                             output: "这条通道用**原生工具调用**：正文里的 JSON 信封不会被当成调用执行。需要工具时请直接发起工具调用（一次可以发起多个）。".to_string(),
-                            raw: raw.clone(),
                             call_id: String::new(),
                             reply: reply_id,
                         };
@@ -533,6 +540,7 @@ pub fn converse_with(
                             text: reply.text.clone(),
                             reasoning,
                             text_msgs: vec![msgs_of[0].clone()],
+                            raw: raw.clone(),
                             tool: Some(ToolRun {
                                 view,
                                 msgs: vec![msgs_of[1].clone()],
@@ -570,7 +578,6 @@ pub fn converse_with(
                     ok: false,
                     args: inv.args_json.clone(),
                     output: why,
-                    raw: raw.clone(),
                     call_id: String::new(),
                     reply: reply_id,
                 };
@@ -584,6 +591,7 @@ pub fn converse_with(
                     text: reply.text.clone(),
                     reasoning,
                     text_msgs: vec![msgs_of[0].clone()],
+                    raw: raw.clone(),
                     tool: Some(ToolRun {
                         view,
                         msgs: vec![msgs_of[1].clone()],
@@ -653,7 +661,6 @@ pub fn converse_with(
                             ok: outcome.ok,
                             args: invokes[i].args_json.clone(),
                             output: outcome.output,
-                            raw: raw.clone(),
                             call_id: String::new(),
                             reply: reply_id,
                         }
@@ -680,6 +687,7 @@ pub fn converse_with(
                         } else {
                             Vec::new()
                         },
+                        raw: if i == 0 { raw.clone() } else { String::new() },
                         tool: Some(ToolRun {
                             view,
                             msgs: vec![msgs_of[i + 1].clone()],
@@ -707,6 +715,7 @@ pub fn converse_with(
                     text,
                     reasoning,
                     text_msgs,
+                    raw: String::new(),
                     tool: None,
                     finish,
                     error: None,
@@ -773,6 +782,7 @@ pub fn build_round_lines(
             verb: verb.to_string(),
             kind: kind.to_string(),
             reasoning,
+            raw: String::new(),
             tool,
             degraded: false,
             system: false,
@@ -813,6 +823,12 @@ pub fn build_round_lines(
             ));
         }
         None => text_line(&mut reasoning, &mut out),
+    }
+    // 助手消息原文是**回复级事实**：只挂在该回复的首行（有正文时是正文行，纯工具轮是工具行）。
+    if !round.raw.is_empty() {
+        if let Some(first) = out.first_mut() {
+            first.raw = round.raw.clone();
+        }
     }
     out
 }

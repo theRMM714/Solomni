@@ -381,8 +381,10 @@ pub(crate) fn tool_loop_runs_declared_tool() {
         trace[0]
     );
     assert!(
-        trace[0].raw.contains("\"type\":\"tool\""),
-        "原始输出要留档（重建上下文用）"
+        exec.raws
+            .get("m0")
+            .is_some_and(|raws| raws.iter().any(|r| r.contains("\"type\":\"tool\""))),
+        "原始输出要留档（重建上下文用；每条回复一份）"
     );
 }
 

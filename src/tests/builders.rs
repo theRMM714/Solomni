@@ -89,6 +89,21 @@ pub(crate) fn tool_views(
         .collect()
 }
 
+/// 转录里所有非空的行级原文（每条回复应只有一份）。
+pub(crate) fn transcript_raws(events: &[SessionEvent]) -> Vec<String> {
+    events
+        .iter()
+        .flat_map(|e| match e {
+            SessionEvent::Transcript(ls) => ls
+                .iter()
+                .filter(|l| !l.raw.is_empty())
+                .map(|l| l.raw.clone())
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        })
+        .collect()
+}
+
 /// 事件流里 tool 行的行文本（给人看的那一行）。
 pub(crate) fn tool_line_texts(events: &[SessionEvent]) -> Vec<String> {
     events
@@ -109,6 +124,7 @@ pub(crate) fn tool_line_texts(events: &[SessionEvent]) -> Vec<String> {
 pub(crate) struct ExecLike {
     pub reports: BTreeMap<String, String>,
     pub traces: BTreeMap<String, Vec<crate::capabilities::session::api::ToolCallView>>,
+    pub raws: BTreeMap<String, Vec<String>>,
 }
 
 pub(crate) fn run_execution(
@@ -119,6 +135,7 @@ pub(crate) fn run_execution(
     let mut out = ExecLike {
         reports: BTreeMap::new(),
         traces: BTreeMap::new(),
+        raws: BTreeMap::new(),
     };
     for m in members.iter_mut() {
         if !m.present {
@@ -156,7 +173,15 @@ pub(crate) fn run_execution(
         );
         let text = rounds.last().map(|r| r.text.clone()).unwrap_or_default();
         out.reports.insert(id.clone(), text);
-        out.traces.insert(id, views);
+        out.traces.insert(id.clone(), views);
+        out.raws.insert(
+            id,
+            rounds
+                .iter()
+                .map(|r| r.raw.clone())
+                .filter(|r| !r.is_empty())
+                .collect(),
+        );
     }
     out
 }

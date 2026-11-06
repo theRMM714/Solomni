@@ -235,7 +235,6 @@ pub(crate) fn tool_round_reasoning_lands_on_the_tool_line() {
         ok: true,
         args: "{}".to_string(),
         output: "内容".to_string(),
-        raw: String::new(),
         call_id: String::new(),
         reply: 0,
     };
@@ -245,6 +244,7 @@ pub(crate) fn tool_round_reasoning_lands_on_the_tool_line() {
         text: String::new(),
         reasoning: "先思考".to_string(),
         text_msgs: Vec::new(),
+        raw: "原始回复".to_string(),
         tool: Some(crate::capabilities::collab::service::round::ToolRun {
             view: tool,
             msgs: Vec::new(),
@@ -263,6 +263,10 @@ pub(crate) fn tool_round_reasoning_lands_on_the_tool_line() {
         lines[0].reasoning.as_deref(),
         Some("先思考"),
         "工具轮的思维链要随该行落档：{lines:?}"
+    );
+    assert_eq!(
+        lines[0].raw, "原始回复",
+        "回复级原文挂在该回复首行（纯工具轮就是工具行）：{lines:?}"
     );
 }
 
