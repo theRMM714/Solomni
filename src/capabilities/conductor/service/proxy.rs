@@ -518,6 +518,7 @@ impl Conductor {
             crate::kernel::api::Tier::Host,
             None,
             crate::capabilities::permission::api::ProfileId::AllReach,
+            None,
         )
         .map(|(sid, _)| sid)
     }
@@ -533,6 +534,7 @@ impl Conductor {
         tier: crate::kernel::api::Tier,
         guest: Option<&str>,
         profile: crate::capabilities::permission::api::ProfileId,
+        workspace: Option<crate::capabilities::session::api::WorkspaceBinding>,
     ) -> Result<(String, Vec<SessionEvent>), String> {
         validate_work_name(name)?;
         if self.sessions.contains_key(name) || self.history.load(name).is_ok() {
@@ -577,10 +579,21 @@ impl Conductor {
             node: None,
             delegation: Some(Delegation { granted_at }),
             thinking: None,
+            workspace: workspace.clone(),
             run: RunState::Active,
         };
         self.workspace
+            .bind(name, workspace.as_ref().map(|w| w.root.as_path()))?;
+        self.workspace
             .prepare(name, &[PROXY_PRIVATE_DIR.to_string()])?;
+        if workspace.is_some() {
+            if let Err(e) = self.workspace.work_import_root(name, now_ts()) {
+                self.log.warn(
+                    "conductor::create_proxy",
+                    &format!("工作区初始导入失败：{}", e),
+                );
+            }
+        }
         let mut session = self.build_proxy_with(&meta, &channel)?;
         let mut events = Vec::new();
         // 授予事实既是 meta 的 `delegation`（可重建），也留一条**可回放记录**：

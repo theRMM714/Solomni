@@ -498,10 +498,6 @@
     "条目：槽外有行或自造槽": 2,
     "条目：首行不是目的": 1
   },
-  "src/capabilities/workspace/detail/fs_workspace.rs": {
-    "头块：槽外有行或自造槽": 2,
-    "头块：缺文件头": 1
-  },
   "src/capabilities/workspace/detail/fs_workstore.rs": {
     "头块：槽外有行或自造槽": 9,
     "头块：缺文件头": 1

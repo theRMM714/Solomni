@@ -11,7 +11,7 @@ pub use crate::capabilities::workspace::domain::workstore::{
     Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, GcReport, LostEntry,
     LostReport, PullReport, ResolveAction, ResolveEntry, ResolveReport, ResolveRequest,
     ResolveTake, ResolveWarning, ResolveWarningKind, RestoreLostReport, StatusEntry, StatusReport,
-    VersionView,
+    SyncReport, VersionView,
 };
 
 /// 目的：提交历史的一条（不含整棵树，列表可安全分页）。
@@ -79,6 +79,9 @@ pub struct CommitFileView {
 /// 工作区的**用例面**（`service.rs` 实现）：别的能力要工作区目录与版本化，走这里；
 /// 出站端口（`Workdirs` / `WorkStore`）**只由它持有**（R12）。
 pub trait Workspace: Send + Sync {
+    /// 目的：把根会话的工作区绑定落成布局投影（`Some` = 外部工作区根；`None` = 产品内布局）。
+    /// 约束：会话 meta 是绑定的唯一真相；本调用只刷新会话目录里的布局投影，不碰工作区文件。
+    fn bind(&self, session: &str, root: Option<&std::path::Path>) -> Result<(), String>;
     /// 准备工作区：建 session/<工作名>/work 与每个 agent 的沙箱目录。
     fn prepare(&self, session: &str, agents: &[String]) -> Result<(), String>;
     /// 撤销一次准备：只删**空**目录（有什么都不删）——建会话失败时用。
@@ -103,6 +106,15 @@ pub trait Workspace: Send + Sync {
         session: &str,
         req: &CommitRequest,
     ) -> Result<CommitReport, String>;
+    /// **外部同步**：读工作区磁盘，把与 head 不同的路径采纳成一条 `author=external` 的提交。
+    /// 约束：不改任何沙箱与工作区内容；同路径沙箱里有未提交改动时留给后续提交判冲突。
+    fn work_sync(&self, work: &str, paths: &[String], time: i64) -> Result<SyncReport, String>;
+    /// 目的：把当前 head 树里所有受管路径的外部改动一次性采纳（确认覆盖前的保护动作）。
+    /// 约束：无受管路径 = 无操作；不碰未跟踪文件。
+    fn work_sync_tracked(&self, work: &str, time: i64) -> Result<SyncReport, String>;
+    /// 目的：首次绑定外部工作区时把工作区现有文件导入成初始提交（有上限、忽略 VCS / 依赖目录）。
+    /// 约束：已有 head 时无操作；单文件超限 / 总上限截断时只导入可导入的部分。
+    fn work_import_root(&self, work: &str, time: i64) -> Result<SyncReport, String>;
     /// 目的：把该工作未完成的版本库事务重放到一致状态；没有待恢复事务 = 无操作。
     fn work_recover(&self, work: &str) -> Result<(), String>;
     /// 目的：回收该工作中不再可达的内容对象；apply=false 只统计不删除。
@@ -161,6 +173,9 @@ pub trait Workspace: Send + Sync {
     /// 目的：把主副本物化回某个提交点（只改共享区，不动各会话）。
     /// 约束：非破坏性——目标之后的提交仍保留，可再次回滚。
     fn work_restore(&self, work: &str, commit: u64) -> Result<(), String>;
+    /// **确认后覆盖**：与 `work_restore` 相同，但允许覆盖工作区里被外部改过的受管路径。
+    /// 约束：只给用户经危险确认后的动作；权限与生成中检查仍在调用方。
+    fn work_restore_force(&self, work: &str, commit: u64) -> Result<(), String>;
     /// 共享区当前提交点（留档记 after 用）。
     fn work_head(&self, work: &str) -> Result<Option<u64>, String>;
     /// 物化到"各会话都还没越过自己保留行"的最后一个提交点；返回选中的提交（None = 空共享区）。

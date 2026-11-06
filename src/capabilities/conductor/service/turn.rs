@@ -409,7 +409,7 @@ impl Conductor {
         // 回档语义是「保留 id < keep」：需求行本身要留下（新需求随后追加），所以传 keep + 1。
         // 改需求走**删除**模式：真的截掉旧需求之后的派生，再按新需求重新展开。
         let crate::capabilities::conductor::api::RewindOutcome { mut main, children } =
-            self.rewind_outcome(sid, RewindTarget::Delete(keep + 1))?;
+            self.rewind_outcome(sid, RewindTarget::Delete(keep + 1), false)?;
         let mut fresh = Vec::new();
         {
             let s = self.sessions.get_mut(sid).ok_or("无此会话")?;

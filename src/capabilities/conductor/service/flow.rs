@@ -367,6 +367,7 @@ impl Conductor {
             delegation: None,
             thinking: None,
             run: RunState::Active,
+            workspace: None,
         };
         // 沙箱锚在**顶层工作**上：该 agent 的目录在共享区那一层已经建好。
         let work = self.work_root(parent)?;

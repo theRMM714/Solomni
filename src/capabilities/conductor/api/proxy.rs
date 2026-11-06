@@ -150,7 +150,7 @@ impl SessionOps for ConductorHandle {
     }
 
     fn rewind(&self, sid: &str, target: RewindTarget) -> Result<Vec<serde_json::Value>, String> {
-        Ok(self.rewind_with_reset(sid, target)?.main)
+        Ok(self.rewind_with_reset(sid, target, false)?.main)
     }
 
     fn update_task(&self, sid: &str, text: &str) -> Result<Vec<serde_json::Value>, String> {

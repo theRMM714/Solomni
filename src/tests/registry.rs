@@ -225,6 +225,7 @@ pub(crate) fn agent_crud_and_work_with_agents() {
         permission: None,
         tier: crate::kernel::api::Tier::Host,
         guest: None,
+        workspace: None,
     };
     let opened = core.create_work(spec).unwrap();
     assert_eq!(opened.agents, vec!["调研".to_string()]);
@@ -267,6 +268,7 @@ pub(crate) fn agent_crud_and_work_with_agents() {
         permission: None,
         tier: crate::kernel::api::Tier::Host,
         guest: None,
+        workspace: None,
     };
     let opened = core.create_work(cross).expect("同一模块可跨 agent 共用");
     assert_eq!(opened.agents, vec!["x".to_string(), "y".to_string()]);

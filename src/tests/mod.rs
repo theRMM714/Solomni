@@ -160,6 +160,7 @@ pub(crate) fn single_work(
         permission: None,
         tier: crate::kernel::api::Tier::Host,
         guest: None,
+        workspace: None,
     }
 }
 

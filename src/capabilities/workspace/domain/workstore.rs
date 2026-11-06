@@ -763,6 +763,8 @@ pub struct PullReport {
     pub conflicts: Vec<ConflictAt>,
     /// 主副本里没有这些路径。
     pub missing: Vec<String>,
+    /// 目的：工作区磁盘内容与 head 不一致（外部改动或删除）；这些路径未拉取，先 `work_sync`。
+    pub external: Vec<String>,
 }
 
 /// 一次提交的请求（收口成对象：路径 + 显式删除 + 说明 + 时间）。
@@ -784,6 +786,19 @@ pub struct CommitReport {
     pub changes: Vec<Change>,
 }
 
+/// 目的：`work_sync` 的结果——把工作区当前内容采纳成一条 author=external 的提交。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SyncReport {
+    /// 目的：采纳后的新 head；没有可同步的改动 = None。
+    pub commit: Option<u64>,
+    /// 目的：采纳的变更（新增 / 修改 / 删除）。
+    pub changes: Vec<Change>,
+    /// 目的：磁盘与 head 一致、无需变更的路径。
+    pub unchanged: Vec<String>,
+    /// 目的：请求里工作区与版本库都没有的路径。
+    pub missing: Vec<String>,
+}
+
 /// work_status 的结果。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StatusReport {
@@ -798,6 +813,8 @@ pub struct StatusReport {
     pub local_only: Vec<String>,
     /// 目的：`local_only` 是否被截断（如实标注，不假装列全）。
     pub local_only_truncated: bool,
+    /// 目的：工作区磁盘与 head 不一致的路径（外部改动 / 删除；先 work_sync）。
+    pub external: Vec<String>,
     /// 最近几条提交（新→旧）。
     pub recent: Vec<CommitSummary>,
 }

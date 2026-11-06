@@ -303,6 +303,9 @@ tools:
       guest:
         type: string
         desc: 仅人经呈现层可用（核心代理建子会话时**永远继承主会话的虚拟根**；模型给了也忽略）
+      workspace:
+        type: string
+        desc: 仅人经呈现层可用：共享区主副本绑定的外部工作区根（已存在的绝对目录）；省略 = 会话内 work/。子会话继承父会话，不接受自选
       permission:
         type: string
         desc: 创建时的权限档位：view / workspace / external / all_reach（仅人经呈现层；代理子会话继承父 ceiling）
@@ -486,6 +489,21 @@ tools:
       paths:
         type: array
         desc: 只看这些路径（相对共享区、/ 分隔）；省略 = 你已拉取过的全部路径 + 沙箱未跟踪清单
+  work_sync:
+    capability: none              # 由 workspace 能力执行；把工作区磁盘现状采纳成外部提交
+    effect: write
+    reach: [shared-read, shared-write]
+    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    desc: |
+      把工作区磁盘上指定路径的当前内容采纳成一条 author=external 的提交，推进共享区 head；不改任何沙箱。
+      用于 work_pull 回执提示“工作区有外部修改 / 独有文件”之后：用户或其它工具在产品之外改了工作区，先同步基线。
+      只同步你点名的路径（文件或文件夹）；同路径沙箱里有未提交改动时不会自动合并，后续 work_commit 会照常判冲突。
+      只对点名路径做新增 / 修改 / 删除；未点名的文件不受影响。
+    params:
+      paths:
+        type: array
+        required: true
+        desc: 要采纳的工作区路径数组（相对共享区、/ 分隔；文件夹会整棵展开）
   work_versions:
     capability: none              # 只读：读基线对象、主副本对象与沙箱文件
     effect: read

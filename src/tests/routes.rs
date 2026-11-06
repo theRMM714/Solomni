@@ -232,6 +232,7 @@ fn meta(name: &str) -> SessionMeta {
         delegation: None,
         thinking: None,
         run: crate::capabilities::session::api::RunState::Active,
+        workspace: None,
     }
 }
 
@@ -281,6 +282,8 @@ impl SessionOps for FakeOps {
             continue_action: None,
             context: None,
             shell: None,
+            workspace: None,
+            workspace_missing: false,
         })
     }
     fn continue_flow(&self, _sid: &str, _out: Output) -> Result<Advance, String> {
@@ -537,6 +540,8 @@ impl SessionOps for FakeOps {
                 continue_action: None,
                 context: None,
                 shell: None,
+                workspace: h.workspace.clone(),
+                workspace_missing: h.workspace_missing,
             })
             .collect())
     }
@@ -684,6 +689,8 @@ impl HistoryOps for FakeOps {
             done: false,
             exec: Default::default(),
             parent: None,
+            workspace: None,
+            workspace_missing: false,
             run: crate::capabilities::session::api::RunState::Active,
         }])
     }
@@ -1023,7 +1030,11 @@ fn demo_scripts_only_call_catalogued_paths() {
 fn every_api_route_reports_capability_failure_as_4xx() {
     let ops = fake_ops(Some("假能力面：一律失败"));
     for route in ROUTES {
-        if route.capability == "静态资源" || route.id == "events" || route.id == "setup.job" {
+        if route.capability == "静态资源"
+            || route.id == "events"
+            || route.id == "setup.job"
+            || route.id == "dirs"
+        {
             continue; // 静态资源不碰能力；取消是即发即忘，不读状态
         }
         let (code, text) = call(&ops, route.method, &sample_url(route), sample_body(route));
@@ -1120,6 +1131,7 @@ fn success_shapes_are_pinned_per_route() {
         ("GET", "/ui.css", "", 200, ".btn"),
         ("GET", "/ui.js", "", 200, "global.ui"),
         ("GET", "/api/events?sid=&since=0", "", 200, "\"head\""),
+        ("GET", "/api/dirs?path=.", "", 200, "\"path\""),
         ("GET", "/api/state", "", 200, "\"modules\""),
         (
             "POST",

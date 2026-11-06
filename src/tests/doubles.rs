@@ -177,6 +177,18 @@ impl InMemoryWorkspace {
 }
 
 impl Workdirs for InMemoryWorkspace {
+    fn is_external(&self, _session: &str) -> bool {
+        false
+    }
+
+    fn lock_shared(&self, _session: &str) -> Result<Option<std::fs::File>, String> {
+        Ok(None)
+    }
+
+    fn bind(&self, _session: &str, _root: Option<&std::path::Path>) -> Result<(), String> {
+        // 内存实现不做布局投影；外部工作区用例走真实 FsWorkspace。
+        Ok(())
+    }
     fn prepare(&self, _session: &str, _agents: &[String]) -> Result<(), String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
@@ -1292,6 +1304,15 @@ impl HistoryStore for InMemoryHistory {
                     .unwrap_or(false),
                 exec: m.exec.clone(),
                 parent: m.parent.clone(),
+                workspace: m
+                    .workspace
+                    .as_ref()
+                    .map(|binding| binding.root.display().to_string()),
+                workspace_missing: m
+                    .workspace
+                    .as_ref()
+                    .map(|binding| !binding.root.is_dir())
+                    .unwrap_or(false),
                 run: m.run,
             })
             .collect())
@@ -1559,6 +1580,7 @@ pub(crate) fn work(name: &str, mode: WorkMode, modules: &[&str]) -> WorkSpec {
         permission: None,
         tier: crate::kernel::api::Tier::Host,
         guest: None,
+        workspace: None,
     }
 }
 
@@ -2611,6 +2633,44 @@ pub(crate) fn core_with_workspace(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
         test_workspace(ws),
+        test_vm(),
+        test_packages(Arc::new(InMemoryPackages::empty())),
+        test_provision(),
+        test_modules(Arc::new(VecSource(modules))),
+        Arc::new(crate::capabilities::builds::api::NoBuilds),
+        llm,
+        test_tools_svc_with(
+            Arc::new(SilentRunner),
+            Arc::new(InMemorySysIo::new()),
+            Arc::new(NoFenceHost),
+        ),
+        test_prompt(),
+        test_tools_svc(),
+        Arc::new(crate::kernel::ports::NoopLog),
+        test_host_probe(),
+        Arc::new(crate::capabilities::residents::api::NoResidents),
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+    )
+}
+
+/// 目的：注入指定工作区端口与**产品根**的装配（外部工作区用例：真实 FsWorkspace + 隔离产品根）。
+pub(crate) fn core_with_workdirs(
+    root: std::path::PathBuf,
+    modules: Vec<Module>,
+    gateway: ScriptGateway,
+    dirs: Arc<dyn Workdirs + Send + Sync>,
+) -> Conductor {
+    let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
+        Arc::new(gateway);
+    let llm = test_llm(
+        Arc::clone(&gateway),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+    );
+    Conductor::new(
+        root,
+        registry_service(InMemorySettings::new(), Arc::clone(&llm)),
+        test_history(),
+        test_workspace(dirs),
         test_vm(),
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),

@@ -129,6 +129,8 @@ async function refreshState() {
       shell: v.shell || null,
       work: null, workAt: 0, workDirty: false, workError: '',
       readonly: false, hydrated: false, buffer: [],
+      workspace: v.workspace || (h && h.workspace) || null,
+      workspace_missing: !!(v.workspace_missing || (h && h.workspace_missing)),
     };
     state.sessions.set(v.sid, s);
     // 盘上转录是这条会话的**前缀**：补上它，之后的实时事件按 seq 接上（同 id 的行不重复）。
@@ -423,8 +425,8 @@ function renderHistory() {
   const branch = (parent, into) => {
     for (const h of (by.get(parent) || [])) {
       const row = document.createElement('div');
-      row.className = 'history-item';
-      row.title = '点击打开会话';
+      row.className = 'history-item' + (h.workspace_missing ? ' bad' : '');
+      row.title = h.workspace_missing ? '工作区已不存在：只能查看记录，不能启用' : '点击打开会话';
       row.onclick = () => openHistory(h.name);
       const kids = by.get(h.name) || [];
       const open = state.treeOpen.has(h.name);
@@ -452,7 +454,8 @@ function renderHistory() {
         : h.run === 'closed' ? '·已关闭'
           : (h.done ? '' : '·进行中 ');
       mode.textContent = stateTag + h.mode +
-        (h.tier === 'vm' && h.tier_ready === false ? '·虚拟机档不可用' : '');
+        (h.tier === 'vm' && h.tier_ready === false ? '·虚拟机档不可用' : '') +
+        (h.workspace_missing ? '·工作区不存在' : '');
       const pencil = ui.iconButton({ icon: 'pencil', label: '会话操作', tip: '', cls: 'hpen' });
       pencil.onclick = (e) => { e.stopPropagation(); ui.menu(pencil, historyMenu(h)); };
       row.appendChild(name); row.appendChild(mode); row.appendChild(pencil);
@@ -579,6 +582,9 @@ async function openHistory(name) {
       permission_narrowed: false, permission_parent: null,
       done: true, awaiting: null, readonly: true, fold: {}, scroll: {},
     };
+    const hist = (state.history || []).find((x) => x.name === name);
+    s.workspace = (hist && hist.workspace) || null;
+    s.workspace_missing = !!(hist && hist.workspace_missing);
     s.hydrated = true;
     // 合流：盘上转录 + 事件台尾巴一次给全；水位 = 合流时的头部（之后的实时批次照收）。
     if (typeof r.head === 'number') s.floor = r.head;
@@ -592,6 +598,25 @@ async function openHistory(name) {
 }
 
 async function deleteHistory(name) {
+  // 外部工作区不归本产品所有：删除只删会话目录，必须先说清“工作区文件保留”。
+  const sess = state.sessions.get(name);
+  if (sess && sess.workspace) {
+    if (!(await confirmBox('删除会话', '删除会话「' + name + '」？记录与版本库将被永久删除；工作区 ' + sess.workspace + ' 里的文件会保留，不会被删除。', '删除'))) return;
+    try {
+      await api('POST', '/api/history/' + encodeURIComponent(name) + '/delete', {});
+      if (state.sessions.has(name)) {
+        state.sessions.delete(name);
+        if (state.activeSid === name) {
+          const it = state.sessions.keys().next();
+          state.activeSid = it.done ? null : it.value;
+        }
+      }
+      await refreshState();
+      renderAll();
+      ui.toast('ok', '已删除会话：' + name);
+    } catch (err) { notice('操作失败', err.message, 'err'); }
+    return;
+  }
   // 删除前如实交代工作区：会被一起删掉的产物先列出来（数量 + 字节），避免"以为只删记录"。
   // 一次 GET /files 拿到同一份清单与用量；拉不到（会话已不存在）就退回一步确认。
   let usage = null;
@@ -3276,9 +3301,71 @@ async function openWizard(draft) {
     syncGuestSetup();
     syncGuestGap();
   }
+/* 选择工作区目录：目录列表来自本机 Web 的 /api/dirs；只选路径，不开文件。 */
+function pickWorkspaceDir(onPick) {
+  let parentPath = null;
+  // 叠在“新建工作”之上开一层：关掉选择器后创建表单还在。
+  openModalLayer('选择工作区目录', (c) => {
+    const pathIn = textInput('当前目录');
+    pathIn.readOnly = true;
+    const rootsRow = document.createElement('div');
+    rootsRow.style.display = 'flex';
+    rootsRow.style.gap = '6px';
+    rootsRow.style.flexWrap = 'wrap';
+    const list = document.createElement('div');
+    list.style.maxHeight = '40vh';
+    list.style.overflow = 'auto';
+    const up = btn('上一级', 'btn btn-block');
+    const pick = btn('选这个目录', 'btn btn-primary btn-block');
+    const cancel = btn('取消', 'btn btn-block');
+    async function load(p) {
+      const r = await api('GET', '/api/dirs' + (p ? '?path=' + encodeURIComponent(p) : ''));
+      pathIn.value = r.path || '';
+      parentPath = r.parent || null;
+      up.disabled = !parentPath;
+      rootsRow.innerHTML = '';
+      for (const root of (r.roots || [])) {
+        const rb = btn(root, 'btn btn-ghost');
+        rb.onclick = () => load(root).catch((e) => c.setMsg(e.message, true));
+        rootsRow.appendChild(rb);
+      }
+      list.innerHTML = '';
+      for (const d of (r.dirs || [])) {
+        const b = btn(d.name, 'btn btn-block');
+        b.style.textAlign = 'left';
+        b.onclick = () => load(d.path).catch((e) => c.setMsg(e.message, true));
+        list.appendChild(b);
+      }
+    }
+    up.onclick = () => { if (parentPath) load(parentPath).catch((e) => c.setMsg(e.message, true)); };
+    pick.onclick = () => { if (pathIn.value) { onPick(pathIn.value); c.close(); } };
+    cancel.onclick = () => c.close();
+    c.body.appendChild(pathIn);
+    c.body.appendChild(rootsRow);
+    c.body.appendChild(up);
+    c.body.appendChild(list);
+    c.body.appendChild(pick);
+    c.body.appendChild(cancel);
+    load(null).catch((e) => c.setMsg(e.message, true));
+  }, true);
+}
+
   openModal('新建工作', (c) => {
     const nameIn = textInput('工作名称（必填，会话落盘目录名）');
     if (w.name) nameIn.value = w.name;   // 草稿重开：把用户填过的带回来
+    const workspaceIn = textInput('默认（会话内 work/）');
+    workspaceIn.readOnly = true;
+    if (w.workspace) workspaceIn.value = w.workspace;
+    const wsPick = btn('选择目录', 'btn btn-ghost');
+    const wsDefault = btn('默认', 'btn btn-ghost');
+    wsPick.onclick = () => pickWorkspaceDir((p) => { workspaceIn.value = p; w.workspace = p; });
+    wsDefault.onclick = () => { workspaceIn.value = ''; w.workspace = ''; };
+    const workspaceRow = document.createElement('div');
+    workspaceRow.style.display = 'flex';
+    workspaceRow.style.gap = '8px';
+    workspaceRow.appendChild(workspaceIn);
+    workspaceRow.appendChild(wsPick);
+    workspaceRow.appendChild(wsDefault);
     const modeSel = selectInput([
       { value: 'single', label: '单 agent（1 个或多个模块）' },
       { value: 'collab', label: '协作（多个 agent）' },
@@ -3548,7 +3635,9 @@ async function openWizard(draft) {
       let agents;
       if (w.mode === 'proxy') {
         // 代理：没有名单、没有需求——选这个形态就是授予全权（档位由上面的选择显式落盘）。
-        await submit({ name, mode: 'proxy', agents: [], tier: w.tier, guest: w.tier === 'vm' ? vmGuest : null, permission: w.permission || 'all_reach' });
+        const proxyBody = { name, mode: 'proxy', agents: [], tier: w.tier, guest: w.tier === 'vm' ? vmGuest : null, permission: w.permission || 'all_reach' };
+        if (workspaceIn.value.trim()) proxyBody.workspace = workspaceIn.value.trim();
+        await submit(proxyBody);
         return;
       }
       if (w.mode === 'single') {
@@ -3579,6 +3668,7 @@ async function openWizard(draft) {
       const names = agents.map((a) => a.name);
       const dup = names.filter((n, i) => names.indexOf(n) !== i)[0];
       const body = { name, mode: w.mode, agents, tier: w.tier, permission: w.permission || 'workspace' };
+      if (workspaceIn.value.trim()) body.workspace = workspaceIn.value.trim();
       if (w.tier === 'vm') body.guest = vmGuest;
       if (task) body.task = task;
       if (dup) {
@@ -3592,6 +3682,7 @@ async function openWizard(draft) {
     };
 
     c.body.appendChild(field('工作名称', nameIn));
+    c.body.appendChild(field('工作区（可选）', workspaceRow));
     c.body.appendChild(field('形态', modeSel));
     c.body.appendChild(modeHint);
     c.body.appendChild(tierField);
@@ -3931,6 +4022,11 @@ function renderReadonly(s) {
   bar.classList.remove('hidden');
   const note = document.createElement('span');
   note.className = 'readonly-note';
+  if (s.workspace_missing) {
+    note.textContent = '工作区已不存在：恢复目录或删除会话后才能启用（当前只能查看记录）';
+    bar.appendChild(note);
+    return;
+  }
   note.textContent = s.run === 'closed' ? '历史回放（只读）· 已关闭' : '历史回放（只读）：启用后才能发送消息';
   bar.appendChild(note);
   if (s.run === 'closed') return;
@@ -4730,6 +4826,22 @@ async function restoreCommit(modal, s, d) {
     ui.toast('ok', '已回滚到提交 #' + d.id);
     if (modal && modal.close) modal.close();
   } catch (e) {
+    if (/被外部改动/.test(e.message) &&
+        await confirmBox('覆盖工作区外部改动', e.message + '\n\n确认后会覆盖这些路径当前的内容；建议先 work_sync，保留外部修改。', '仍要覆盖')) {
+      try {
+        await api('POST', actionUrl('restore_work_commit'), {
+          session_id: s.sid, commit: d.id, expect_head: head, force: true,
+        });
+        s.workAt = 0; s.workDirty = false;
+        await loadWork(s.sid, true);
+        ui.toast('ok', '已确认覆盖并回滚到提交 #' + d.id);
+        if (modal && modal.close) modal.close();
+      } catch (e2) {
+        if (modal && modal.setMsg) modal.setMsg('回滚失败：' + e2.message, true);
+        else notice('回滚失败', e2.message, 'err');
+      }
+      return;
+    }
     if (modal && modal.setMsg) modal.setMsg('回滚失败：' + e.message, true);
     else notice('回滚失败', e.message, 'err');
     s.workAt = 0;
@@ -5691,7 +5803,21 @@ async function applyRewind(s, body) {
     s.workDirty = true;
     renderAll();
     ui.toast('ok', '已回档');
-  } catch (err) { notice('操作失败', err.message, 'err'); }
+  } catch (err) {
+    if (/被外部改动/.test(err.message) &&
+        await confirmBox('覆盖工作区外部改动', err.message + '\n\n确认后会先采纳这些外部改动，再把工作区回档到目标提交；未跟踪文件不受影响。', '仍要回档')) {
+      try {
+        const r = await api('POST', actionUrl('rewind'), Object.assign({ session_id: s.sid, force: true }, body));
+        if (typeof r.head === 'number') s.floor = r.head;
+        applySnapshot(s, (r.events || []).concat(r.live || []));
+        s.workDirty = true;
+        renderAll();
+        ui.toast('ok', '已确认覆盖并回档');
+      } catch (e2) { notice('操作失败', e2.message, 'err'); }
+      return;
+    }
+    notice('操作失败', err.message, 'err');
+  }
 }
 
 /* 撤回某 agent 的同意（转录追加撤回行，协作才有意义）；值 = agent 实例名。 */
@@ -5714,6 +5840,7 @@ function withdrawAgree(agent) {
    前端只把返回的会话视图贴回本地并渲染。启用本身不跑模型。 */
 async function activateFlow() {
   const s = activeSession();
+  if (s && s.workspace_missing) { notice('工作区已不存在', '这条会话绑定的工作区已不可达：恢复目录或删除会话后再启用。', 'err'); return; }
   if (!s || !s.readonly || s.activating) return;
   s.activating = true;
   renderAll();

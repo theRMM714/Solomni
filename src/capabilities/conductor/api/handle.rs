@@ -187,10 +187,11 @@ impl ConductorHandle {
         &self,
         sid: &str,
         target: RewindTarget,
+        force: bool,
     ) -> Result<RewindOutcome, String> {
         let outcome = self.call({
             let sid = sid.to_string();
-            move |core| core.rewind_outcome(&sid, target)
+            move |core| core.rewind_outcome(&sid, target, force)
         })?;
         self.publish_rewound(sid, &outcome);
         Ok(outcome)

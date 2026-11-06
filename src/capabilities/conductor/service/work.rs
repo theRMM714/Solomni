@@ -1275,6 +1275,8 @@ impl Conductor {
                     continue_action,
                     context,
                     shell,
+                    workspace: entry.and_then(|h| h.workspace.clone()),
+                    workspace_missing: entry.map(|h| h.workspace_missing).unwrap_or(false),
                 }
             })
             .collect()
@@ -1353,6 +1355,63 @@ impl Conductor {
         Ok((channels, core))
     }
 
+    /// 目的：解析并校验本次创建的工作区绑定：只有顶层会话能指定，路径必须绝对、已存在为目录、
+    ///   可写，且不与产品根互相包含；子会话沿父链继承同一个根，不接受自选。
+    fn resolve_workspace_binding(
+        &self,
+        raw: Option<&std::path::Path>,
+        parent: Option<&str>,
+    ) -> Result<Option<crate::capabilities::session::api::WorkspaceBinding>, String> {
+        if let Some(p) = parent {
+            if raw.is_some() {
+                return Err("子会话不能自选工作区：沿父会话继承".to_string());
+            }
+            let top = self.work_root(p)?;
+            return Ok(self.history.meta(&top)?.workspace);
+        }
+        let Some(raw) = raw else {
+            return Ok(None);
+        };
+        if !raw.is_absolute() {
+            return Err(format!("工作区必须是绝对路径：{}", raw.display()));
+        }
+        let root = crate::kernel::api::native(
+            &raw.canonicalize()
+                .map_err(|e| format!("工作区不可达：{}（{}）", raw.display(), e))?,
+        );
+        if root.parent().is_none() {
+            return Err("工作区不能是文件系统根目录".to_string());
+        }
+        let meta = std::fs::metadata(&root)
+            .map_err(|e| format!("读工作区失败：{}（{}）", root.display(), e))?;
+        if !meta.is_dir() {
+            return Err(format!("工作区不是目录：{}", root.display()));
+        }
+        // 工作区不能与产品目录互相包含：否则 /workspace 会把 .home、modules、session 一起纳入
+        // 共享区，回档与围栏都会越界。
+        let product = crate::kernel::api::native(
+            &self
+                .root
+                .canonicalize()
+                .unwrap_or_else(|_| self.root.clone()),
+        );
+        if root == product || product.starts_with(&root) || root.starts_with(&product) {
+            return Err(
+                "工作区不能与产品目录互相包含（会越过会话 / 模块 / 配置的边界）".to_string(),
+            );
+        }
+        // 写探测：外部目录必须真的可写；探针建在根目录下，随后立即清掉。
+        let probe = root.join(format!(".solomni-write-probe-{}", std::process::id()));
+        let ok = std::fs::write(&probe, b"probe").is_ok();
+        let _ = std::fs::remove_file(&probe);
+        if !ok {
+            return Err(format!("工作区不可写：{}", root.display()));
+        }
+        Ok(Some(crate::capabilities::session::api::WorkspaceBinding {
+            root,
+        }))
+    }
+
     /// 目的：创建的第一段（核心，毫秒级）——校验 / 占名 / 建工作区 / 出计划；要起 guest 时把那一段交出去。
     /// 返回：准备结果 + 可选的那段"要等 guest"的活（虚拟机档才有）。
     /// 错误：形态、名字、档位、名单、模型通道或选型不成立时如实拒绝，什么都不留下。
@@ -1368,6 +1427,7 @@ impl Conductor {
         {
             return Err(format!("工作名已存在：{}", spec.name));
         }
+        let workspace = self.resolve_workspace_binding(spec.workspace.as_deref(), parent)?;
         // **代理形态**（第三人形态）：没有名单、没有需求——用户选这一形态就是**授予全权**。
         // 它不是一个 agent 工作，装配与其余形态没有共同点，所以在这里就地分岔、不往下走。
         if spec.mode == WorkMode::Proxy {
@@ -1390,6 +1450,7 @@ impl Conductor {
                 spec.guest.as_deref(),
                 spec.permission
                     .unwrap_or(crate::capabilities::permission::api::ProfileId::AllReach),
+                workspace,
             )?;
             return Ok((
                 PreparedWork::Ready(WorkOpened {
@@ -1495,6 +1556,12 @@ impl Conductor {
                     ..crate::kernel::api::ExecSpec::default()
                 },
             },
+            // 绑定只写在工作根上；子会话沿 parent 链继承，不复制一份。
+            workspace: if parent.is_none() {
+                workspace.clone()
+            } else {
+                None
+            },
             sandbox: match parent {
                 // 子会话只带自己的 narrowing；根 ceiling 沿祖先链现算，不再复制父权限。
                 Some(_) => Default::default(),
@@ -1522,9 +1589,20 @@ impl Conductor {
         ) {
             return Err(why);
         }
-        // 工作区：整棵树只有顶层一个 work/；各 agent 沙箱按实例名建在它下面。
-        // （失败即失败，不假装已建；代拟确认名单时再补建。）
+        // 工作区：整棵树只有顶层一个 work/（或外部绑定的根）；各 agent 沙箱按实例名建在会话目录下。
+        // 先把绑定刷成布局投影，再建沙箱；失败即失败，不假装已建。
+        self.workspace
+            .bind(&root, workspace.as_ref().map(|w| w.root.as_path()))?;
         self.workspace.prepare(&root, &agent_names)?;
+        if workspace.is_some() {
+            // 首次绑定：把工作区现有文件导入成初始提交，agent 立刻就能 pull；失败不挡建会话。
+            if let Err(e) = self.workspace.work_import_root(&root, now_ts()) {
+                self.log.warn(
+                    "conductor::create_work",
+                    &format!("工作区初始导入失败：{}", e),
+                );
+            }
+        }
         let sandboxes = self.sandboxes(&meta, &roster)?;
         // 扫描事实如实埋点：本会话用到的模块里，哪些声明的运行包不在包库（缺包同样会在下面按计划拒绝，文件与 guest 声明都看）。
         // 虚拟机档缺包在「开始」前就拒绝；这里的警告只补一条扫描事实。本机档由宿主计划在工具执行时如实拒绝。
@@ -1942,6 +2020,7 @@ impl Conductor {
         sid: &str,
         commit: u64,
         expect_head: u64,
+        force: bool,
     ) -> Result<(Option<u64>, Vec<SessionEvent>), String> {
         let work = self.work_root(sid)?;
         let tree = self.subtree_of(&work);
@@ -1956,7 +2035,11 @@ impl Conductor {
             ));
         }
         let target = self.workspace.work_commit_view(&work, commit)?;
-        self.workspace.work_restore(&work, commit)?;
+        if force {
+            self.workspace.work_restore_force(&work, commit)?;
+        } else {
+            self.workspace.work_restore(&work, commit)?;
+        }
         let after = self.workspace.work_head(&work)?;
         let before = if current == 0 {
             "空共享区".to_string()

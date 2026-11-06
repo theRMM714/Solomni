@@ -575,6 +575,9 @@ pub struct WorkSpec {
     pub permission: Option<crate::capabilities::permission::api::ProfileId>,
     /// 目的：虚拟机档用的虚拟根名（可省 = 空；会话建好后也可在会话配置里改）。
     pub guest: Option<String>,
+    /// 目的：外部工作区根（已规范化的绝对路径）；None = 产品内 `session/<名>/work`。
+    /// 约束：只有顶层会话能指定；子会话沿父链继承同一个根。
+    pub workspace: Option<std::path::PathBuf>,
 }
 
 /// 目的：创建工作后的结果：最终实例名（重名已加尾号）、名单，以及**开场事实**。
@@ -838,6 +841,12 @@ pub struct SessionView {
     /// 目的：最近一次 shell 的运行状态（状态栏卡片）；没跑过 shell 就是 null。
     /// 约束：总是出现（null = 没有）——前端据此清掉回档已经截掉的旧快照。
     pub shell: Option<crate::capabilities::session::api::ShellLive>,
+    /// 目的：外部工作区根；None = 产品内布局。界面据此显示“删除只删记录”、工作区标记。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    /// 目的：外部工作区根不可达（界面禁止打开 / 不渲染启动按钮）。
+    #[serde(default)]
+    pub workspace_missing: bool,
 }
 
 /// 目的：思考强度视图：当前选择 + 共同默认档 + 可选档（状态栏与配置页共用一份事实）。

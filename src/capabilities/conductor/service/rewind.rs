@@ -25,7 +25,7 @@ impl Conductor {
         sid: &str,
         target: RewindTarget,
     ) -> Result<Vec<serde_json::Value>, String> {
-        Ok(self.rewind_outcome(sid, target)?.main)
+        Ok(self.rewind_outcome(sid, target, false)?.main)
     }
 
     /// 目的：回档的完整结果——主会话活动视图 + 受影响的非运行子会话活动视图。
@@ -34,6 +34,7 @@ impl Conductor {
         &mut self,
         sid: &str,
         target: RewindTarget,
+        force: bool,
     ) -> Result<RewindOutcome, String> {
         if self.running.contains(sid) {
             return Err(Self::running_refusal(sid));
@@ -46,6 +47,11 @@ impl Conductor {
             &crate::capabilities::session::api::truncate_events(&raw),
         );
         let work = self.work_root(sid)?;
+        if force {
+            // 用户已确认覆盖：先把受管路径的外部改动采纳成提交，随后的回档就不会再撞上“被外部改动”。
+            self.workspace
+                .work_sync_tracked(&work, crate::capabilities::conductor::service::now_ts())?;
+        }
         let (mut active, children) = match target {
             RewindTarget::Archive(line) => {
                 let before = crate::capabilities::session::api::align_keep(&raw, line);
@@ -311,6 +317,19 @@ impl Conductor {
         events: &[serde_json::Value],
     ) -> Result<Session, String> {
         let roster = self.modules.roster();
+        // 打开 / 重建时按 meta 刷新布局投影（会话目录可能被复制或迁移；meta 是权威）。
+        let work = self.work_root_of(meta)?;
+        let binding = self.workspace_binding_of(meta)?;
+        self.workspace.bind(&work, binding.as_deref())?;
+        if binding.is_some() {
+            // 旧会话首次启用：补一次初始导入（有 head 时无操作）。
+            if let Err(e) = self.workspace.work_import_root(&work, now_ts()) {
+                self.log.warn(
+                    "conductor::rebuild_session",
+                    &format!("工作区初始导入失败：{}", e),
+                );
+            }
+        }
         let sandboxes = self.sandboxes(meta, &roster)?;
         // 整队的权威是**转录**：重建之前先把队清空并按已发出的卡号续号（内存里那一份不作数）。
         self.desk_of(&meta.name)

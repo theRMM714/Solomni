@@ -27,7 +27,8 @@
 session/<工作名>/
  meta.yaml          # 身份与选型：形态、agent 名单（名字 / 人设 / 模块 / 模型）、需求、会话权限覆盖（sandbox）、执行档位（exec 段）
  transcript.jsonl   # 事件流水（留档只追加 rewind；删除 / 恢复整体重写）
- work/              # 本次工作的共享区**主副本**：用户投喂与成品（整棵树只有顶层这一个，agent 只读）
+ work/              # 本次工作的共享区**主副本**：用户投喂与成品（默认位置；外部绑定时不存在）
+ .work-root         # 外部工作区绑定的布局投影（根会话才有；权威在 meta.yaml 的 workspace 段）
  .work/             # 共享区版本库：内容寻址对象、提交记录、各 agent 的拉取基线、待恢复事务、提交号计数器、跨进程锁（保留名）
  <agent 实例名>/     # 该 agent 的私有沙箱，也是它的**工作副本**（work_pull 落在这里）
  children/          # 子会话（协作派生的执行席、代理建的子工作；可再嵌套）：<父名>--<名字>/
@@ -38,10 +39,11 @@ session/<工作名>/
 - **讨论与执行不分家**：同一个 agent 会话先用于讨论、后用于它的节点，上下文连贯。
 - **落盘在主会话目录内部**：`session/<工作>/children/<工作>--<名字>/`——位置与 `meta.parent` 同源（看位置就知道归属）；`session/` 下不出现与主会话并列的子会话目录，**删主会话就是删一个目录**。
 - **可以再往下嵌套**：子会话自己还能有子会话（代理建的协作子工作会派生节点子会话），每一层都是父会话目录下的 `children/<名字>/`；查找、列清单、级联删除都按**任意深度**走整棵 children/ 树。
-- **整棵树只有一个 `work/`**：不论嵌套多少层，共享区始终是**顶层**那一个（工作根 = 沿 `meta.parent` 走到顶），各 agent 沙箱也建在它下面；实例名因此在**整棵子树**里唯一（重名自动带尾号，见 registry 的命名策略）。
+- **整棵树只有一个共享区根**：不论嵌套多少层，共享区始终是**顶层**那一个（工作根 = 沿 `meta.parent` 走到顶；默认是顶层 `work/`，根会话绑定外部工作区时是 `meta.yaml` 的 `workspace.root`），各 agent 沙箱也建在工作根下；实例名因此在**整棵子树**里唯一（重名自动带尾号，见 registry 的命名策略）。
+- **外部工作区绑定**：根会话可在创建时把共享区主副本绑定到产品目录之外的绝对路径；绑定写进 `meta.yaml` 的 `workspace` 段，整棵子树只读继承，**创建后不可改**。`.work/` 与各 agent 沙箱永远留在会话目录内，外部目录里不出现本产品的状态；`.work-root` 只是布局投影，打开 / 重建时按 meta 刷新。
 - **环境属于顶层工作**：`exec`（档位 / 虚拟根 / 定版）由人建主会话时决定，整棵子树只读继承；核心代理建子会话时不能自选环境。**同一 agent 全树只有一份名单**：子会话编辑模块 / 模型时写回这份名单，guest 装配按整棵树重新聚合；只改模型 / 权限不重建 guest，改模块 / 环境才重建。
 - 会话权限是**根 ceiling + 子会话逐层 narrowing**：根写 sandbox.ceiling，子写 sandbox.narrowing；子只能换更低档、只能收窄，父编辑只改 ceiling 并与子 narrowing 求交，不覆盖子收窄（`src/capabilities/permission/domain/permission.rs`）。
-- **共享区是版本化工作区**：主副本 `work/` 与版本库 `.work/` 都锚在顶层工作上；agent 只写自己的沙箱，`work_pull` / `work_commit` 与主副本同步（文件级三方比较），`work_versions` 看三方，`work_resolve` 显式选边，`work_status` 看状态。
+- **共享区是版本化工作区**：共享区根（默认 `work/`，或外部工作区）与版本库 `.work/` 都锚在顶层工作上；agent 只写自己的沙箱，`work_pull` / `work_commit` 与主副本同步（文件级三方比较），`work_versions` 看三方，`work_resolve` 显式选边，`work_status` 看状态。
 - 文本、图片、视频与其它二进制都按字节处理（内容流式读写、不整份进上下文；单文件有上限）；`work_versions` 给 hash、大小与扩展名媒体类型提示；文本可人工合并后用 `take=local`，图片 / 视频 / 二进制只能选边，不做自动合并（`src/capabilities/workspace/service.rs`）。
 - **会话权限层**写在 meta.yaml 的 sandbox.ceiling（根）与 sandbox.narrowing（子）：四档 profile + 共享区三态 + 逐工具决定；缺省继承 settings.yaml 的 sandbox.defaults；sandbox.policy.deny 是硬底线，会话只能追加、不能清空。语义见 [docs/permission/README.md](../permission/README.md)。
 - **出站网络是全局开关**（`sandbox.policy.network`）：会话工具、直接模块工具、常驻服务、模块构建共用；虚拟机档决定 guest 网卡；本机档 Windows 授 `internetClient`、macOS 放行 `network-outbound`、Linux `net=false` 用 seccomp 拒绝非本地 socket（`net=true` 不装网络过滤器，不限制入站/绑定）。

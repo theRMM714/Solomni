@@ -98,3 +98,21 @@
   blocked_by: |
     本期不做（用户决定：仍在开发阶段）。发行链路与口味统一需要新建 CI 工作流与打包脚本，另立任务。
 
+- id: workspace.external-root-vm-tier
+  scope: global
+  level: T4
+  why: |
+    外部工作区（会话把共享区主副本绑定到产品根之外的绝对目录）v1 只支持本机档。
+    虚拟机档的共享 guest 按 `shared.parent()` 装稳定挂载根，agent 私沙必须与共享区在同一挂载树；
+    共享区换到外部根时，guest 会挂到用户目录的父目录（或私沙不在挂载树里而 helper fail-closed）。
+    Windows 宿主只有 SMB、UNC 路径反解也受限。
+  how: |
+    1) 挂载计划拆成“会话树（私沙 + .work）+ 外部工作区根”两个稳定挂载；
+    2) path_codec 支持两个根；guest helper 的 required_dir 与围栏范围按新布局派生；
+    3) 三平台共享后端验证（Linux virtiofs/9p、Windows SMB、macOS 9p）；
+    4) 同步 docs/vm 与对应测试。
+  accept: |
+    绑定外部工作区的虚拟机档会话能起 guest、工具在 guest 内读写工作区、越界被拒、
+    删除会话不删工作区；node run-tests.js 全绿。
+  blocked_by: |
+    本期不做（用户决定：外部工作区 v1 仅本机档）。

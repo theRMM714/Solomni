@@ -292,6 +292,12 @@ impl ConductorHandle {
                 .and_then(|v| v.as_str())
                 .map(crate::capabilities::permission::api::ProfileId::parse)
                 .transpose()?,
+            workspace: args
+                .get("workspace")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string()),
         })
     }
 
@@ -578,9 +584,10 @@ impl ConductorHandle {
                     _ => RewindTarget::Archive(n),
                 };
                 let sid = s("session_id");
+                let force = args.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
                 // 回档成功后：主/子会话各推一条 rewound（重置快照）并推进事件台水印。
                 // 主视图仍随动作回包给调用方；推送让刷新与其它已打开标签页看到同一份重置。
-                let outcome = self.rewind_with_reset(&sid, target)?;
+                let outcome = self.rewind_with_reset(&sid, target, force)?;
                 Ok(Acted::Replayed(outcome.main))
             }
             "update_task" => self
@@ -644,9 +651,11 @@ impl ConductorHandle {
                         "restore_work_commit 需要 expect_head（看到详情时的 head；空共享区传 0）"
                             .to_string()
                     })?;
+                let force = args.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
                 let target = sid.clone();
-                let (after, events) =
-                    self.call(move |core| core.restore_work_commit(&target, commit, expect_head))?;
+                let (after, events) = self.call(move |core| {
+                    core.restore_work_commit(&target, commit, expect_head, force)
+                })?;
                 self.bus.push(&sid, &events);
                 Ok(Acted::Done(
                     serde_json::json!({ "ok": true, "head": after }),

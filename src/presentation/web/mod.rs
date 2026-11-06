@@ -496,6 +496,74 @@ pub(crate) fn route(
         },
 
         // ---- 新建工作的档位选择（创建向导用） ----
+        "dirs" => {
+            let q = url.split('?').nth(1).unwrap_or("");
+            let picked = q
+                .split('&')
+                .find_map(|kv| kv.strip_prefix("path="))
+                .map(routes::url_decode)
+                .filter(|s| !s.is_empty());
+            let base = picked
+                .or_else(|| std::env::var("USERPROFILE").ok())
+                .or_else(|| std::env::var("HOME").ok())
+                .or_else(|| {
+                    std::env::current_dir()
+                        .ok()
+                        .map(|p| p.display().to_string())
+                });
+            let Some(base) = base else {
+                return complaint(400, "没有可浏览的目录");
+            };
+            let dir = std::path::PathBuf::from(&base);
+            let mut dirs: Vec<(String, String)> = Vec::new();
+            match std::fs::read_dir(&dir) {
+                Ok(rd) => {
+                    for e in rd.flatten() {
+                        let p = e.path();
+                        let name = e.file_name().to_string_lossy().to_string();
+                        // 目录选择器不列隐藏 / 系统目录（$RECYCLE.BIN、System Volume Information 等）。
+                        #[cfg(windows)]
+                        {
+                            use std::os::windows::fs::MetadataExt;
+                            if let Ok(m) = e.metadata() {
+                                const HIDDEN: u32 = 0x2;
+                                const SYSTEM: u32 = 0x4;
+                                if m.file_attributes() & (HIDDEN | SYSTEM) != 0 {
+                                    continue;
+                                }
+                            }
+                        }
+                        if p.is_dir() {
+                            dirs.push((name, p.display().to_string()));
+                        }
+                    }
+                }
+                Err(e) => return complaint(400, format!("读目录失败（{}）：{}", dir.display(), e)),
+            }
+            dirs.sort_by(|a, b| a.0.cmp(&b.0));
+            let parent = dir.parent().map(|p| p.display().to_string());
+            // 盘符根（Windows）/ 文件系统根（Unix）：只靠“上一级”到不了别的盘。
+            let mut roots: Vec<String> = Vec::new();
+            #[cfg(windows)]
+            {
+                for b in b'A'..=b'Z' {
+                    let p = format!("{}:\\", b as char);
+                    if std::path::Path::new(&p).is_dir() {
+                        roots.push(p);
+                    }
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                roots.push("/".to_string());
+            }
+            ok_json(json!({
+                "path": dir.display().to_string(),
+                "parent": parent,
+                "roots": roots,
+                "dirs": dirs.into_iter().map(|(name, path)| json!({"name": name, "path": path})).collect::<Vec<_>>()
+            }))
+        }
         "tiers" => match ops.core.tier_choices() {
             Ok(v) => ok_json(json!({ "tiers": v })),
             Err(e) => complaint(400, e),

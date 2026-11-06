@@ -102,6 +102,15 @@ impl FsHistory {
             exec: meta.exec,
             // 编排者：子会话在侧栏里缩进挂在父会话下。
             parent: meta.parent,
+            workspace: meta
+                .workspace
+                .as_ref()
+                .map(|binding| binding.root.display().to_string()),
+            workspace_missing: meta
+                .workspace
+                .as_ref()
+                .map(|binding| !binding.root.is_dir())
+                .unwrap_or(false),
             // 运行态：侧栏据此标出已暂停 / 已关闭的会话。
             run: meta.run,
         })

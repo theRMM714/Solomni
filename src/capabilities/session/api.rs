@@ -11,7 +11,7 @@ pub use crate::capabilities::session::domain::events::{
     OPT_SLATE_CONFIRM, OPT_TOOL_ALLOW, OPT_TOOL_ALLOW_TURN, OPT_TOOL_DENY,
 };
 pub use crate::capabilities::session::domain::history::{
-    AgentMeta, Delegation, HistoryView, RunState, SessionMeta,
+    AgentMeta, Delegation, HistoryView, RunState, SessionMeta, WorkspaceBinding,
 };
 pub use crate::capabilities::session::domain::rewind::{
     align_keep, cut_before_line, find_line_id, last_line_within, last_usage, max_reply,
