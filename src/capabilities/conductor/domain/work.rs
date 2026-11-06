@@ -222,6 +222,12 @@ pub fn render_status(r: &StatusReport) -> String {
             out.push_str("…（已截断，只列了一部分）");
         }
     }
+    if !r.external.is_empty() {
+        out.push_str(&format!(
+            "\n工作区磁盘与主副本不一致（外部改动 / 删除，未自动处理）：{}——先 work_sync 采纳外部版本再继续。",
+            paths(&r.external)
+        ));
+    }
     if !r.recent.is_empty() {
         out.push_str("\n最近提交：");
         for c in &r.recent {

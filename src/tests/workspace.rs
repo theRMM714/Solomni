@@ -78,6 +78,40 @@ pub(crate) fn workspace_discard_removes_only_empty_dirs() {
     assert!(keep.is_file(), "有内容的目录绝不能删");
     let _ = std::fs::remove_dir_all(&root);
 }
+/// 目的：同一外部工作区的跨会话写闸共用一把锁；第二个写者必须等第一个释放。
+#[test]
+pub(crate) fn external_workspace_lock_is_shared_and_blocks_a_second_writer() {
+    use crate::capabilities::workspace::detail::FsWorkspace;
+    use crate::capabilities::workspace::ports::Workdirs;
+    use std::sync::mpsc;
+    use std::time::Duration;
+    let root = crate::tests::scratch("ws-external-lock");
+    let sessions = root.join("session");
+    let external = root.join("outside");
+    std::fs::create_dir_all(&external).expect("建外部目录");
+    let ws = FsWorkspace::new(sessions.clone());
+    ws.bind("w1", Some(external.as_path())).expect("绑定 1");
+    ws.bind("w2", Some(external.as_path())).expect("绑定 2");
+    let guard = ws.lock_shared("w1").expect("加锁").expect("外部要有锁");
+    let (tx, rx) = mpsc::channel();
+    let sessions2 = sessions.clone();
+    let external2 = external.clone();
+    let worker = std::thread::spawn(move || {
+        let other = FsWorkspace::new(sessions2);
+        other.bind("w2", Some(external2.as_path())).expect("绑定");
+        let got = other.lock_shared("w2").map(|g| g.is_some());
+        tx.send(got).unwrap();
+    });
+    assert!(
+        rx.recv_timeout(Duration::from_millis(250)).is_err(),
+        "第二个写者必须等这把工作区锁"
+    );
+    drop(guard);
+    assert_eq!(rx.recv_timeout(Duration::from_secs(5)).unwrap(), Ok(true));
+    worker.join().unwrap();
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// 目的：外部工作区的磁盘改动让 pull 回执点名、commit 拒绝静默覆盖；work_sync 显式采纳后 pull 才更新。
 #[test]
 pub(crate) fn external_workspace_surfaces_disk_changes_and_sync_adopts_them() {
@@ -109,6 +143,12 @@ pub(crate) fn external_workspace_surfaces_disk_changes_and_sync_adopts_them() {
 
     // 产品之外改了工作区：pull 不拿旧对象覆盖沙箱，而是点名 external。
     std::fs::write(external.join("note.md"), b"v2").expect("外部改");
+    // 状态也要把外部改动标出来（不靠拉取才发现）。
+    let st = ws
+        .work_status("w", "b", &["note.md".to_string()])
+        .expect("status");
+    assert_eq!(st.external, vec!["note.md".to_string()]);
+
     let pull = ws
         .work_pull("w", "b", &["note.md".to_string()])
         .expect("pull");

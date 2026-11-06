@@ -181,6 +181,10 @@ impl Workdirs for InMemoryWorkspace {
         false
     }
 
+    fn lock_shared(&self, _session: &str) -> Result<Option<std::fs::File>, String> {
+        Ok(None)
+    }
+
     fn bind(&self, _session: &str, _root: Option<&std::path::Path>) -> Result<(), String> {
         // 内存实现不做布局投影；外部工作区用例走真实 FsWorkspace。
         Ok(())

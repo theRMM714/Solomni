@@ -513,6 +513,7 @@ impl Workspace for WorkspaceService {
         validate_paths(paths)?;
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let _shared = self.dirs.lock_shared(work)?;
         let (shared, store, sandbox) = self.agent_roots(work, agent)?;
         let external = self.dirs.is_external(work);
         let _lock = self.store.lock(&store)?;
@@ -619,6 +620,7 @@ impl Workspace for WorkspaceService {
         validate_paths(&req.paths)?;
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let _shared = self.dirs.lock_shared(work)?;
         let (shared, store, sandbox) = self.agent_roots(work, agent)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;
@@ -741,6 +743,7 @@ impl Workspace for WorkspaceService {
         validate_paths(paths)?;
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let _shared = self.dirs.lock_shared(work)?;
         let (shared, store) = self.work_roots(work)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;
@@ -854,6 +857,7 @@ impl Workspace for WorkspaceService {
         }
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let _shared = self.dirs.lock_shared(work)?;
         let (shared, store) = self.work_roots(work)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;
@@ -928,6 +932,18 @@ impl Workspace for WorkspaceService {
         } else {
             expand_paths(paths, &available)
         };
+        let external = if self.dirs.is_external(work) {
+            let mut out = Vec::new();
+            for rel in &want {
+                let disk = self.disk_hash(&shared, rel)?;
+                if disk.as_deref() != tree.get(rel).map(String::as_str) {
+                    out.push(rel.clone());
+                }
+            }
+            out
+        } else {
+            Vec::new()
+        };
         let mut entries: Vec<StatusEntry> = Vec::new();
         for rel in want {
             let local = self.store.scan_under(&sandbox, &rel, None)?;
@@ -977,6 +993,7 @@ impl Workspace for WorkspaceService {
             missing,
             local_only,
             local_only_truncated,
+            external,
             recent,
         })
     }
@@ -1515,6 +1532,7 @@ impl Workspace for WorkspaceService {
     fn work_restore(&self, work: &str, commit: u64) -> Result<(), String> {
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let _shared = self.dirs.lock_shared(work)?;
         let (shared, store) = self.work_roots(work)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;
@@ -1546,6 +1564,7 @@ impl Workspace for WorkspaceService {
     ) -> Result<Option<u64>, String> {
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let _shared = self.dirs.lock_shared(work)?;
         let (shared, store) = self.work_roots(work)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;
@@ -1584,6 +1603,7 @@ impl Workspace for WorkspaceService {
     fn work_restore_point(&self, work: &str, commit: Option<u64>) -> Result<(), String> {
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let _shared = self.dirs.lock_shared(work)?;
         let (shared, store) = self.work_roots(work)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;
@@ -1601,6 +1621,7 @@ impl Workspace for WorkspaceService {
     fn work_discard_after(&self, work: &str, keep: Option<u64>) -> Result<(), String> {
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let _shared = self.dirs.lock_shared(work)?;
         let (shared, store) = self.work_roots(work)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;

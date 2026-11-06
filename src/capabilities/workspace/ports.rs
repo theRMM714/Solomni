@@ -15,6 +15,9 @@ pub trait Workdirs {
     fn bind(&self, session: &str, root: Option<&Path>) -> Result<(), String>;
     /// 目的：该会话是否绑定了外部工作区（只读布局投影）。
     fn is_external(&self, session: &str) -> bool;
+    /// 目的：拿住该工作区根的**跨会话写闸**；`None` = 产品内布局（已有按工作 / 版本库的锁）。
+    /// 约束：多个会话绑定同一个外部目录时共用同一把锁；guard 要活到这次操作结束。
+    fn lock_shared(&self, session: &str) -> Result<Option<std::fs::File>, String>;
     /// 准备工作区：建 session/<工作名>/work 与每个 agent 的沙箱目录。
     fn prepare(&self, session: &str, agents: &[String]) -> Result<(), String>;
     /// 撤销一次准备：只删**空**目录（有什么都不删），建会话失败时用。

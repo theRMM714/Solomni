@@ -123,6 +123,46 @@ impl Workdirs for FsWorkspace {
         self.mark_path(session).is_file()
     }
 
+    fn lock_shared(&self, session: &str) -> Result<Option<std::fs::File>, String> {
+        if !self.is_external(session) {
+            return Ok(None);
+        }
+        let shared = self.shared_root(session)?;
+        let canonical = shared
+            .canonicalize()
+            .map_err(|e| format!("工作区不可达：{}（{}）", shared.display(), e))?;
+        // 锁放在产品侧（.home/locks），不写用户目录；同一 canonical 根共用一个文件名。
+        let product = self.sessions.parent().unwrap_or(&self.sessions);
+        let dir = product.join(".home").join("locks");
+        std::fs::create_dir_all(&dir).map_err(|e| format!("建工作区锁目录失败：{}", e))?;
+        let hash = crate::capabilities::workspace::domain::hash::content_hash(
+            canonical.to_string_lossy().as_bytes(),
+        );
+        let path = dir.join(format!("workspace-{}.lock", hash));
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&path)
+            .map_err(|e| format!("打开工作区锁失败（{}）：{}", path.display(), e))?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            match file.try_lock() {
+                Ok(()) => return Ok(Some(file)),
+                Err(std::fs::TryLockError::WouldBlock) => {
+                    if std::time::Instant::now() >= deadline {
+                        return Err("工作区正被另一个会话写入，等待超时（稍后重试）".to_string());
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                }
+                Err(std::fs::TryLockError::Error(e)) => {
+                    return Err(format!("工作区加锁失败：{}", e))
+                }
+            }
+        }
+    }
+
     fn bind(&self, session: &str, root: Option<&Path>) -> Result<(), String> {
         let dir = self.session_dir(session);
         std::fs::create_dir_all(&dir).map_err(|e| format!("建会话目录失败：{}", e))?;

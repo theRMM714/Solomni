@@ -813,6 +813,8 @@ pub struct StatusReport {
     pub local_only: Vec<String>,
     /// 目的：`local_only` 是否被截断（如实标注，不假装列全）。
     pub local_only_truncated: bool,
+    /// 目的：工作区磁盘与 head 不一致的路径（外部改动 / 删除；先 work_sync）。
+    pub external: Vec<String>,
     /// 最近几条提交（新→旧）。
     pub recent: Vec<CommitSummary>,
 }
