@@ -4,7 +4,7 @@
 //! 联动：实现 ports::ShareBackend；由组合根构造、service.rs 持有；helper 是独立仓的预编译产物（见 dependencies.yaml 的 vm.smbd.windows）。
 
 use crate::capabilities::vm::domain::exec::SMBD_BIN;
-use crate::capabilities::vm::domain::guest::{GuestImage, GuestMount};
+use crate::capabilities::vm::domain::guest::{sh_quote, GuestImage, GuestMount};
 use crate::capabilities::vm::ports::{ShareBackend, ShareGuard, SharePlan};
 use crate::kernel::detail::procs::{self, Entry, ProcessBook};
 use std::io::{BufRead, BufReader};
@@ -54,7 +54,8 @@ pub fn find_smbd(registered: Option<&str>) -> Option<PathBuf> {
 }
 
 /// 目的：把挂载清单翻成共享计划——一条 guestfwd 隧道（helper 端口）+ 每个挂载点一条 mount -t cifs。
-fn smb_plan(mounts: &[GuestMount], port: u16) -> SharePlan {
+/// 约束：guest 路径可能含单引号（外部工作区镜像进 guest 后），拼进脚本一律走 `sh_quote`。
+pub(crate) fn smb_plan(mounts: &[GuestMount], port: u16) -> SharePlan {
     let net_options = vec![format!(
         "guestfwd=tcp:{}:{}-tcp:127.0.0.1:{}",
         GUEST_SMB_IP, GUEST_SMB_PORT, port
@@ -65,8 +66,8 @@ fn smb_plan(mounts: &[GuestMount], port: u16) -> SharePlan {
         // 有界重试：SMB 握手在慢启动 / 嵌套虚拟化下会瞬时报 "server abruptly closed"；一次就判整台起不来
         // 会把瞬时失败放大成"虚拟机档不可用"。三次都失败必须**非零退出**（循环末尾的子命令不许吞掉失败）。
         guest_scripts.push(format!(
-            "mkdir -p '{g}' && n=0 && ok=0 && while [ $n -lt 3 ]; do n=$((n+1)); if mount -t cifs //{ip}/s{i} '{g}' -o port={p},guest,soft,nounix,noserverino,uid=0,gid=0,file_mode=0666,dir_mode=0777{ro}; then ok=1; break; fi; sleep 2; done; if [ $ok -ne 1 ]; then printf '共享 %s 挂载失败（已尝试 %s 次）' '{g}' $n; exit 1; fi",
-            g = m.guest,
+            "mkdir -p {g} && n=0 && ok=0 && while [ $n -lt 3 ]; do n=$((n+1)); if mount -t cifs //{ip}/s{i} {g} -o port={p},guest,soft,nounix,noserverino,uid=0,gid=0,file_mode=0666,dir_mode=0777{ro}; then ok=1; break; fi; sleep 2; done; if [ $ok -ne 1 ]; then printf '共享 %s 挂载失败（已尝试 %s 次）' {g} $n; exit 1; fi",
+            g = sh_quote(&m.guest),
             ip = GUEST_SMB_IP,
             i = i,
             p = GUEST_SMB_PORT,

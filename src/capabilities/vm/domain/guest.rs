@@ -542,7 +542,8 @@ fn system_apply_script(p: &PlannedPackage) -> String {
 }
 
 /// 目的：把一段字面量安全地放进 guest 的 shell 脚本里（单引号包裹，内部单引号按 POSIX 拆合）。
-fn sh_quote(s: &str) -> String {
+///   共享后端拼挂载 / 同步脚本也走它——外部工作区把宿主路径镜像进 guest 后，guest 路径可能含单引号。
+pub(crate) fn sh_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 

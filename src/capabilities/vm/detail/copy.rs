@@ -3,7 +3,7 @@
 //! 不管：命令通道与 QGA 细节（detail/qemu.rs）、镜像判定与挂载清单（domain/guest.rs）。
 //! 联动：实现 ports::ShareBackend；只有 `SOLOMNI_VM_SHARE=copy` 的进程会显式选它；不参与用户链。
 
-use crate::capabilities::vm::domain::guest::{GuestImage, GuestMount, GuestRun};
+use crate::capabilities::vm::domain::guest::{sh_quote, GuestImage, GuestMount, GuestRun};
 use crate::capabilities::vm::ports::{
     GuestChannel, NoShareGuard, ShareBackend, ShareGuard, SharePlan,
 };
@@ -43,22 +43,7 @@ impl ShareBackend for CopyShare {
         mounts: &[GuestMount],
         _share_tool: Option<&str>,
     ) -> Result<(SharePlan, Box<dyn ShareGuard>), String> {
-        // 复制后端没有引擎参数；只需在 guest 里把挂载点建出来（内容由 sync_in 拷进去）。
-        let guest_scripts = mounts
-            .iter()
-            .map(|m| format!("mkdir -p '{}'", m.guest))
-            .collect();
-        Ok((
-            SharePlan {
-                kind: "copy",
-                engine_args: Vec::new(),
-                net_options: Vec::new(),
-                guest_scripts,
-                needs_net: false,
-                needs_shared_mem: false,
-            },
-            Box::new(NoShareGuard),
-        ))
+        Ok((copy_plan(mounts), Box::new(NoShareGuard)))
     }
 
     fn sync_in(&self, channel: &mut dyn GuestChannel, mounts: &[GuestMount]) -> Result<(), String> {
@@ -67,7 +52,7 @@ impl ShareBackend for CopyShare {
             let tmp = format!("/tmp/solomni-copy-in-{}.tar", i);
             channel.put_file(&tmp, &tar)?;
             let out = channel.exec(&GuestRun {
-                command: format!("tar -xf '{}' -C '{}' && rm -f '{}'", tmp, m.guest, tmp),
+                command: copy_in_script(&tmp, &m.guest),
                 args_json: "{}".to_string(),
                 env: Vec::new(),
                 cwd: String::new(),
@@ -92,7 +77,7 @@ impl ShareBackend for CopyShare {
             }
             let tmp = format!("/tmp/solomni-copy-out-{}.tar", i);
             let out = channel.exec(&GuestRun {
-                command: format!("tar -cf '{}' -C '{}' .", tmp, m.guest),
+                command: copy_out_script(&tmp, &m.guest),
                 args_json: "{}".to_string(),
                 env: Vec::new(),
                 cwd: String::new(),
@@ -105,7 +90,7 @@ impl ShareBackend for CopyShare {
             let tar = channel.get_file(&tmp)?;
             host_untar(&m.host, &tar)?;
             let _ = channel.exec(&GuestRun {
-                command: format!("rm -f '{}'", tmp),
+                command: copy_cleanup_script(&tmp),
                 args_json: "{}".to_string(),
                 env: Vec::new(),
                 cwd: String::new(),
@@ -115,6 +100,43 @@ impl ShareBackend for CopyShare {
         }
         Ok(())
     }
+}
+
+/// 目的：把挂载清单翻成复制后端的共享计划——没有引擎参数，只在 guest 里把挂载点建出来（内容由 sync_in 拷进去）。
+/// 约束：guest 路径可能含单引号（外部工作区镜像进 guest 后），脚本里一律走 `sh_quote`。
+pub(crate) fn copy_plan(mounts: &[GuestMount]) -> SharePlan {
+    let guest_scripts = mounts
+        .iter()
+        .map(|m| format!("mkdir -p {}", sh_quote(&m.guest)))
+        .collect();
+    SharePlan {
+        kind: "copy",
+        engine_args: Vec::new(),
+        net_options: Vec::new(),
+        guest_scripts,
+        needs_net: false,
+        needs_shared_mem: false,
+    }
+}
+
+/// 目的：把一份宿主 tar 解进 guest 挂载点并删临时包的脚本（guest 路径与临时路径一律 sh_quote）。
+pub(crate) fn copy_in_script(temp: &str, guest_dir: &str) -> String {
+    format!(
+        "tar -xf {} -C {} && rm -f {}",
+        sh_quote(temp),
+        sh_quote(guest_dir),
+        sh_quote(temp)
+    )
+}
+
+/// 目的：把 guest 挂载点打成临时 tar 的脚本。
+pub(crate) fn copy_out_script(temp: &str, guest_dir: &str) -> String {
+    format!("tar -cf {} -C {} .", sh_quote(temp), sh_quote(guest_dir))
+}
+
+/// 目的：删掉 guest 里临时 tar 的脚本。
+pub(crate) fn copy_cleanup_script(temp: &str) -> String {
+    format!("rm -f {}", sh_quote(temp))
 }
 
 /// 目的：把宿主目录打成 tar 字节（三平台都用 PATH 上的 tar：Unix 自带、Windows 10+ 自带 bsdtar）。
