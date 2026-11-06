@@ -13,7 +13,7 @@
 
 - 入站面：`api::Workspace`。
   - 目录与视图：**`bind`**（把根会话的工作区绑定刷成 `.work-root` 布局投影；`None` = 产品内布局）/ `prepare` / **`discard`**（撤销一次准备：只删空目录，建会话失败时用）/ `work_has` / `files` / `usage` / `roots`。
-  - 共享区版本化：`work_pull` / `work_commit` / `work_commit_user` / `work_status` / `work_versions` / `work_resolve` / `work_lost` / `work_restore_lost` / `work_recover` / `work_gc` / `work_restore` / `work_head` / `work_rewind_to` / `work_restore_point` / `work_discard_after`。
+  - 共享区版本化：`work_pull` / `work_commit` / `work_sync` / `work_commit_user` / `work_status` / `work_versions` / `work_resolve` / `work_lost` / `work_restore_lost` / `work_recover` / `work_gc` / `work_restore` / `work_head` / `work_rewind_to` / `work_restore_point` / `work_discard_after`。
   - **提交历史视图**：`work_log(work, limit, before?)` 给当前 head、新→旧的分页提交与每条 `on_head`（是否在当前 head 祖先链）；`work_commit_view` 给提交详情与改动清单（对象大小 / 媒体提示）；`work_commit_file` 给该提交里某个文件的受限预览（路径必须真在这条提交的树里，`src/capabilities/workspace/domain/workspace.rs`）。这些是只读视图，不进动作表。
   - **提交点还原**：`work_restore(work, commit)` 只把主副本物化到目标提交并更新 head，**非破坏性**——目标之后的提交仍保留在历史里，可再次回滚。`work_rewind_to` 只沿**当前 head 的祖先链**按行锚选点；已离开当前线的提交不会被后续转录回档误选。
   - **三方视图与冲突解决**：`work_versions` 只看（文本预览有上限；图片 / 视频 / 二进制只给指纹、大小与类型提示；带主副本提交 id），`work_resolve` 显式选边——`take=upstream` 用主副本覆盖沙箱，`take=local` 保留本地并把基线推进到主副本；不做自动合并。
@@ -30,7 +30,8 @@
     - 内容 IO 一律分块流式（`WorkStore` 的 `stat_under` / `scan_under` / `stat_object` / `scan_object` / `ingest_under` / `copy_object_to_under`，`src/capabilities/workspace/detail/fs_workstore.rs`）：pull 不整份读对象，commit 边读边算指纹边写对象，status 只算指纹，versions 只取元数据与受限预览，resolve / 恢复也走流式复制。
     - 冲突按文件级三方比较：文本可人工合并后用 `take=local`；图片 / 视频 / 二进制不能合并，只能 `take=upstream` 或 `take=local`（`src/capabilities/workspace/api.rs`）；不做自动合并。
     - 上传入口在 base64 解码前按上限检查，Web 请求体也有上界；内置 `read` / `write` 仍是文本通道，二进制由模块工具或用户投喂产生。
-  - **写事务与恢复**：提交 / 物化 / 丢弃先写 `.work/` 的 `pending.json`，再改主副本、提交记录、head 与基线；任一步失败由下一次操作幂等重放。元数据与对象用同目录临时文件 + rename；`.work/next-id` 只增不复用；`.work/lock` 是跨进程写闸；`.work/lost/<agent>/<rel>` 是 `take=upstream` 覆盖 / 删除前的本地版本备份。
+  - **外部工作区**：根会话可把共享区根绑到产品目录之外（绑定在会话 meta，布局投影 `.work-root`）。工作区磁盘是外部内容的真相：`work_pull` 只拉与 head 一致的路径，`D != head` 的路径进回执的 `external`；`work_commit` 写盘前核对同一条路径的磁盘指纹，被外部改过就整次拒绝；`work_sync` 读磁盘把差异采纳成 `author=external` 的提交；回档物化只删**当前 head 树里目标树没有**的路径，未跟踪文件永不自动删。
+  - **写事务与恢复**：提交 / 同步 / 物化 / 丢弃先写 `.work/` 的 `pending.json`，再改主副本、提交记录、head 与基线；任一步失败由下一次操作幂等重放。元数据与对象用同目录临时文件 + rename；`.work/next-id` 只增不复用；`.work/lock` 是跨进程写闸；`.work/lost/<agent>/<rel>` 是 `take=upstream` 覆盖 / 删除前的本地版本备份。
   - **拉取进度**：`work_pull` 逐条写入沙箱与内存基线，最后原子写回 index；中途失败会先落盘已完成部分的基线，并在错误里点名失败路径与已更新数量。进程在 copy 与 index 写之间被杀仍有窗口，重拉会收敛；严格崩溃一致性走后续 pending 日志。
   - **备份与恢复**：`work_lost(work, agent, path?)` 只列该 agent 的 `lost/`；`work_restore_lost(work, agent, path, expect_current)` 按当前沙箱 hash 做 compare-and-swap 后把备份复制回同路径。两者都只读写本 agent 的沙箱与版本库，不碰共享主副本。
   - **对象回收**：`work_gc(work, apply)` 以「所有提交树 + 所有 agent 基线」为可达集合；`apply=false` 只报数量和字节，`apply=true` 才删不可达对象并清对象目录里的临时文件。入口是隐藏维护命令 `solomni --work-gc <工作名>`（默认 dry-run，`--yes` 才删）；不做后台静默清理。

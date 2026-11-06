@@ -119,6 +119,10 @@ impl FsWorkspace {
 }
 
 impl Workdirs for FsWorkspace {
+    fn is_external(&self, session: &str) -> bool {
+        self.mark_path(session).is_file()
+    }
+
     fn bind(&self, session: &str, root: Option<&Path>) -> Result<(), String> {
         let dir = self.session_dir(session);
         std::fs::create_dir_all(&dir).map_err(|e| format!("建会话目录失败：{}", e))?;

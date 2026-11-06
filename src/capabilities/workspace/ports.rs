@@ -13,6 +13,8 @@ pub trait Workdirs {
     /// 目的：把工作区绑定落成布局投影（`Some` = 外部工作区根；`None` = 产品内布局）。
     /// 约束：只写会话目录里的布局文件，不创建 / 不校验外部根，也不碰用户文件。
     fn bind(&self, session: &str, root: Option<&Path>) -> Result<(), String>;
+    /// 目的：该会话是否绑定了外部工作区（只读布局投影）。
+    fn is_external(&self, session: &str) -> bool;
     /// 准备工作区：建 session/<工作名>/work 与每个 agent 的沙箱目录。
     fn prepare(&self, session: &str, agents: &[String]) -> Result<(), String>;
     /// 撤销一次准备：只删**空**目录（有什么都不删），建会话失败时用。

@@ -11,7 +11,7 @@ pub use crate::capabilities::workspace::domain::workstore::{
     Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, GcReport, LostEntry,
     LostReport, PullReport, ResolveAction, ResolveEntry, ResolveReport, ResolveRequest,
     ResolveTake, ResolveWarning, ResolveWarningKind, RestoreLostReport, StatusEntry, StatusReport,
-    VersionView,
+    SyncReport, VersionView,
 };
 
 /// 目的：提交历史的一条（不含整棵树，列表可安全分页）。
@@ -106,6 +106,9 @@ pub trait Workspace: Send + Sync {
         session: &str,
         req: &CommitRequest,
     ) -> Result<CommitReport, String>;
+    /// **外部同步**：读工作区磁盘，把与 head 不同的路径采纳成一条 `author=external` 的提交。
+    /// 约束：不改任何沙箱与工作区内容；同路径沙箱里有未提交改动时留给后续提交判冲突。
+    fn work_sync(&self, work: &str, paths: &[String], time: i64) -> Result<SyncReport, String>;
     /// 目的：把该工作未完成的版本库事务重放到一致状态；没有待恢复事务 = 无操作。
     fn work_recover(&self, work: &str) -> Result<(), String>;
     /// 目的：回收该工作中不再可达的内容对象；apply=false 只统计不删除。

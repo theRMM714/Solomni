@@ -7,7 +7,7 @@
 
 use crate::capabilities::workspace::api::{
     ChangeKind, CommitReport, LostReport, PullReport, ResolveAction, ResolveEntry, ResolveReport,
-    RestoreLostReport, StatusReport, VersionView, VERSION_TEXT_LIMIT,
+    RestoreLostReport, StatusReport, SyncReport, VersionView, VERSION_TEXT_LIMIT,
 };
 
 pub const PULL: &str = "work_pull";
@@ -16,10 +16,14 @@ pub const STATUS: &str = "work_status";
 pub const VERSIONS: &str = "work_versions";
 pub const RESOLVE: &str = "work_resolve";
 pub const LOST: &str = "work_lost";
+pub const SYNC: &str = "work_sync";
 
 /// 目的：判定这个名字是不是共享区版本化的工具面（角色表 executor / solo 引用它们）。
 pub fn is_work_tool(name: &str) -> bool {
-    matches!(name, PULL | COMMIT | STATUS | VERSIONS | RESOLVE | LOST)
+    matches!(
+        name,
+        PULL | COMMIT | STATUS | VERSIONS | RESOLVE | LOST | SYNC
+    )
 }
 
 /// 回执里最多逐个列出的路径数（超出只说数量，不把整棵共享区灌进上下文）。
@@ -45,14 +49,15 @@ fn paths(list: &[String]) -> String {
 /// 返回：写入 / 跳过 / 冲突 / 主副本没有 各若干行（路径截断规则见 `MAX_LISTED`）。
 pub fn render_pull(r: &PullReport) -> String {
     let mut out = format!(
-        "已对准主副本提交 {}。写入沙箱 {} 个，已是最新 {} 个，无变化 {} 个，跳过（沙箱已有同名文件）{} 个，冲突 {} 个，主副本没有 {} 个。",
+        "已对准主副本提交 {}。写入沙箱 {} 个，已是最新 {} 个，无变化 {} 个，跳过（沙箱已有同名文件）{} 个，冲突 {} 个，主副本没有 {} 个，工作区有外部修改 {} 个。",
         r.commit,
         r.updated.len(),
         r.already.len(),
         r.no_change.len(),
         r.occupied.len(),
         r.conflicts.len(),
-        r.missing.len()
+        r.missing.len(),
+        r.external.len()
     );
     if !r.updated.is_empty() {
         out.push_str(&format!("\n写入：{}", paths(&r.updated)));
@@ -80,6 +85,12 @@ pub fn render_pull(r: &PullReport) -> String {
         out.push_str(&format!(
             "\n主副本没有这些路径：{}——可能上游已删除；用 work_versions 看本地与基线，\n再用 work_resolve 选择 take=upstream（删本地）或 take=local（保留为新增）。",
             paths(&r.missing)
+        ));
+    }
+    if !r.external.is_empty() {
+        out.push_str(&format!(
+            "\n工作区磁盘与主副本不一致（未拉取）：{}——这是产品之外发生的改动；\n先 work_sync 把这些路径采纳成外部提交，再重新 work_pull。",
+            paths(&r.external)
         ));
     }
     out
@@ -120,6 +131,56 @@ pub fn render_commit(r: &CommitReport) -> String {
             "\n沙箱里的同名文件如果还在，用 delete 工具清理；工作副本的删除不会自动跟着提交。",
         );
     }
+    out
+}
+
+/// 目的：把 work_sync 的结果说成人能读的几行。
+/// 返回：采纳后的提交 id、新增 / 修改 / 删除、未变与缺失路径。
+pub fn render_sync(r: &SyncReport) -> String {
+    if r.changes.is_empty() {
+        let mut out = "工作区与主副本已经一致，没有需要同步的改动。".to_string();
+        if !r.missing.is_empty() {
+            out.push_str(&format!(
+                "\n工作区与版本库里都没有这些路径：{}",
+                paths(&r.missing)
+            ));
+        }
+        return out;
+    }
+    let mut adds = Vec::new();
+    let mut mods = Vec::new();
+    let mut dels = Vec::new();
+    for c in &r.changes {
+        match c.kind {
+            ChangeKind::Add => adds.push(c.path.clone()),
+            ChangeKind::Modify => mods.push(c.path.clone()),
+            ChangeKind::Delete => dels.push(c.path.clone()),
+        }
+    }
+    let mut out = format!(
+        "外部改动已采纳为提交 {}：新增 {}，修改 {}，删除 {}；未变 {}。",
+        r.commit.unwrap_or(0),
+        adds.len(),
+        mods.len(),
+        dels.len(),
+        r.unchanged.len()
+    );
+    if !adds.is_empty() {
+        out.push_str(&format!("\n新增：{}", paths(&adds)));
+    }
+    if !mods.is_empty() {
+        out.push_str(&format!("\n修改：{}", paths(&mods)));
+    }
+    if !dels.is_empty() {
+        out.push_str(&format!("\n删除：{}", paths(&dels)));
+    }
+    if !r.missing.is_empty() {
+        out.push_str(&format!(
+            "\n工作区与版本库里都没有这些路径：{}",
+            paths(&r.missing)
+        ));
+    }
+    out.push_str("\n各 agent 的沙箱没动；需要这些内容就再 work_pull。");
     out
 }
 

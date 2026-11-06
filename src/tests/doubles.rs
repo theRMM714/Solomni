@@ -177,6 +177,10 @@ impl InMemoryWorkspace {
 }
 
 impl Workdirs for InMemoryWorkspace {
+    fn is_external(&self, _session: &str) -> bool {
+        false
+    }
+
     fn bind(&self, _session: &str, _root: Option<&std::path::Path>) -> Result<(), String> {
         // 内存实现不做布局投影；外部工作区用例走真实 FsWorkspace。
         Ok(())

@@ -82,6 +82,23 @@ impl WorkHandler {
         }
     }
 
+    fn sync(&self, args: &serde_json::Value) -> ToolOutcome {
+        let paths = match dw::str_list(args, "paths") {
+            Ok(p) => p,
+            Err(e) => return outcome(false, e),
+        };
+        if let Err(e) = check_readable(&self.permissions, &paths) {
+            return outcome(false, e);
+        }
+        if let Err(e) = check_writable(&self.permissions, &paths, &[]) {
+            return outcome(false, e);
+        }
+        match self.workspace.work_sync(&self.work, &paths, now_ts()) {
+            Ok(r) => outcome(true, dw::render_sync(&r)),
+            Err(e) => outcome(false, e),
+        }
+    }
+
     fn pull(&self, args: &serde_json::Value) -> ToolOutcome {
         let paths = match dw::str_list(args, "paths") {
             Ok(p) => p,
@@ -284,6 +301,7 @@ impl ToolHandler for WorkHandler {
         match name {
             dw::PULL => self.pull(&args),
             dw::COMMIT => self.commit(ctx.work, ctx.agent, ctx.line, &args),
+            dw::SYNC => self.sync(&args),
             dw::STATUS => self.status(&args),
             dw::VERSIONS => self.versions(&args),
             dw::RESOLVE => self.resolve(&args),
