@@ -78,6 +78,117 @@ pub(crate) fn workspace_discard_removes_only_empty_dirs() {
     assert!(keep.is_file(), "有内容的目录绝不能删");
     let _ = std::fs::remove_dir_all(&root);
 }
+/// 目的：建会话时把外部工作区绑定写进根 meta；产品根内的工作区在创建期如实拒绝。
+#[test]
+pub(crate) fn conductor_records_external_workspace_and_rejects_overlap() {
+    use crate::capabilities::workspace::detail::FsWorkspace;
+    let root = crate::tests::scratch("ws-conductor-external");
+    let product = root.join("product");
+    let external = root.join("outside");
+    std::fs::create_dir_all(&product).expect("建产品根");
+    std::fs::create_dir_all(&external).expect("建外部目录");
+    let gateway = gw(BTreeMap::new(), vec![]);
+    let mut core = core_with_workdirs(
+        product.clone(),
+        vec![module_of("a")],
+        gateway,
+        Arc::new(FsWorkspace::new(product.join("session"))),
+    );
+    let mut spec = work("wx", WorkMode::Single, &["a"]);
+    spec.workspace = Some(external.clone());
+    let sid = core.create_work(spec).expect("外部工作区可建").sid;
+    let (meta, _) = core.history_open(&sid).expect("会话");
+    assert_eq!(
+        meta.workspace.as_ref().map(|b| b.root.clone()),
+        Some(external.canonicalize().expect("规范化外部路径")),
+        "绑定写进根会话 meta（规范化绝对路径）"
+    );
+    let session = product.join("session").join("wx");
+    assert!(!session.join("work").exists(), "外部绑定不建会话内 work/");
+    assert!(session.join(".work-root").is_file(), "布局投影已落盘");
+    // 产品根内 / 与产品根互相包含的目录：创建期拒绝。
+    let inside = product.join("inside");
+    std::fs::create_dir_all(&inside).expect("建产品内目录");
+    let mut bad = work("bad", WorkMode::Single, &["a"]);
+    bad.workspace = Some(inside);
+    let err = core.create_work(bad).expect_err("产品根内的工作区必须拒绝");
+    assert!(err.contains("不能与产品目录互相包含"), "{}", err);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 目的：外部绑定把共享区主副本放到会话目录之外，版本库与沙箱仍留在会话目录内。
+///   删除会话目录不碰外部工作区。
+#[test]
+pub(crate) fn external_workspace_keeps_store_in_session_and_outside_untouched() {
+    use crate::capabilities::workspace::detail::FsWorkspace;
+    use crate::capabilities::workspace::ports::Workdirs;
+    let root = crate::tests::scratch("ws-external");
+    let external = root.join("outside");
+    let sessions = root.join("session");
+    std::fs::create_dir_all(&external).expect("建外部目录");
+    let ws = FsWorkspace::new(sessions.clone());
+    ws.bind("w", Some(external.as_path())).expect("绑定");
+    ws.prepare("w", &["a".to_string()]).expect("准备");
+    let session = sessions.join("w");
+    assert!(!session.join("work").exists(), "外部绑定不在会话内建 work/");
+    assert!(session.join(".work-root").is_file(), "布局投影要落盘");
+    let roots = ws.roots("w", &["a".to_string()]).expect("根");
+    assert_eq!(roots.shared, external, "共享区根 = 外部目录");
+    assert_eq!(roots.store, session.join(".work"), "版本库仍在会话目录");
+    assert_eq!(
+        roots.agents.get("a"),
+        Some(&session.join("a")),
+        "沙箱仍在会话目录"
+    );
+    ws.write_work("w", "n.txt", b"hi").expect("写共享区");
+    assert_eq!(std::fs::read(external.join("n.txt")).unwrap(), b"hi");
+    assert!(ws.work_has("w", "n.txt"));
+    let files = ws.list("w", &["a".to_string()]).expect("列文件");
+    assert_eq!(files.work, vec!["n.txt".to_string()]);
+    let usage = ws.usage("w", &["a".to_string()]).expect("用量");
+    assert_eq!(usage.work.files, 1, "外部工作区计入本次会话的用量视图");
+    // 删会话目录（会话删除的真实动作）不碰外部工作区。
+    std::fs::remove_dir_all(&session).expect("删会话目录");
+    assert_eq!(std::fs::read(external.join("n.txt")).unwrap(), b"hi");
+    // 清掉绑定后回到产品内布局。
+    let managed = sessions.join("m");
+    ws.bind("m", None).expect("清绑定");
+    ws.prepare("m", &[]).expect("准备");
+    assert!(
+        managed.join("work").is_dir(),
+        "无绑定时仍是 session/<名>/work"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 目的：外部根被移走 / 删除时，工作区操作用同一句错误如实拒绝；会话目录本身还能清掉。
+#[test]
+pub(crate) fn missing_external_workspace_reports_same_error_and_discard_keeps_it_absent() {
+    use crate::capabilities::workspace::detail::FsWorkspace;
+    use crate::capabilities::workspace::ports::Workdirs;
+    let root = crate::tests::scratch("ws-external-missing");
+    let external = root.join("gone");
+    let sessions = root.join("session");
+    let ws = FsWorkspace::new(sessions.clone());
+    std::fs::create_dir_all(&external).expect("建外部目录");
+    ws.bind("w", Some(external.as_path())).expect("绑定");
+    ws.prepare("w", &["a".to_string()]).expect("准备");
+    std::fs::remove_dir_all(&external).expect("移走外部目录");
+    let err = ws
+        .roots("w", &["a".to_string()])
+        .expect_err("外部根缺失要拒绝");
+    assert!(err.contains("工作区已不存在"), "{}", err);
+    assert!(!ws.work_has("w", "n.txt"), "缺失时上传冲突判定按不存在");
+    assert!(
+        ws.write_work("w", "n.txt", b"x").is_err(),
+        "缺失时写入要拒绝"
+    );
+    ws.discard("w", &["a".to_string()]).expect("撤销");
+    assert!(!sessions.join("w").exists(), "会话目录可清掉");
+    assert!(!external.exists(), "撤销不会重建外部根");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 #[test]
 pub(crate) fn sandboxes_lookup_is_by_agent() {
     let boxes = crate::capabilities::workspace::api::Sandboxes {

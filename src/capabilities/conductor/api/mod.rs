@@ -575,6 +575,9 @@ pub struct WorkSpec {
     pub permission: Option<crate::capabilities::permission::api::ProfileId>,
     /// 目的：虚拟机档用的虚拟根名（可省 = 空；会话建好后也可在会话配置里改）。
     pub guest: Option<String>,
+    /// 目的：外部工作区根（已规范化的绝对路径）；None = 产品内 `session/<名>/work`。
+    /// 约束：只有顶层会话能指定；子会话沿父链继承同一个根。
+    pub workspace: Option<std::path::PathBuf>,
 }
 
 /// 目的：创建工作后的结果：最终实例名（重名已加尾号）、名单，以及**开场事实**。

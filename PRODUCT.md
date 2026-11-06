@@ -62,7 +62,7 @@
 
 ## 六、工作的落盘与沙箱
 
-- 每个工作一个目录 `session/<工作名>/`：`work/` 是本工作的共享区主副本（用户投喂与成品），版本库在 `.work/`，每个 agent 有自己的私有沙箱（也就是它的工作副本），子会话落在它的 `children/` 下（可再嵌套）——完整布局与命名规则见 [docs/session/session-model.md](docs/session/session-model.md)。
+- 每个工作一个目录 `session/<工作名>/`：`work/` 是本工作的共享区主副本（用户投喂与成品；根会话可绑定产品目录之外的目录作为共享区根），版本库固定在会话目录的 `.work/`，每个 agent 有自己的私有沙箱（也就是它的工作副本），子会话落在它的 `children/` 下（可再嵌套）——完整布局与命名规则见 [docs/session/session-model.md](docs/session/session-model.md)。
 - agent 实例名不得占用 `work` / `children`（名单在 `systools/names.yaml`）。
 
 - **构建 / 测试 / 跑脚本用 shell**（执行类系统工具）：cwd 固定私有沙箱，默认 `scope=sandbox` 只碰私有沙箱 + 只读基础 / 项目工具链；要读共享区 / 模块目录 / 主机只读根或联网用 `scope=external`，按会话档位 ask / allow；共享区永远只读，模块 userdata 不可写，不注入模块 secrets。

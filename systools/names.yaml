@@ -8,3 +8,5 @@ reserved:
   - .proxy
   # 共享区版本库（提交记录、内容寻址对象与各 agent 的拉取基线）：agent 实例名不得占用。
   - .work
+  # 工作区绑定的布局投影（外部工作区根的绝对路径）；agent 实例名不得占用。
+  - .work-root

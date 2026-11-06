@@ -311,6 +311,10 @@ impl Conductor {
         events: &[serde_json::Value],
     ) -> Result<Session, String> {
         let roster = self.modules.roster();
+        // 打开 / 重建时按 meta 刷新布局投影（会话目录可能被复制或迁移；meta 是权威）。
+        let work = self.work_root_of(meta)?;
+        let binding = self.workspace_binding_of(meta)?;
+        self.workspace.bind(&work, binding.as_deref())?;
         let sandboxes = self.sandboxes(meta, &roster)?;
         // 整队的权威是**转录**：重建之前先把队清空并按已发出的卡号续号（内存里那一份不作数）。
         self.desk_of(&meta.name)

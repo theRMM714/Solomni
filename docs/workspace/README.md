@@ -6,13 +6,13 @@
 
 ## 管什么 / 不管什么
 
-- 管：工作区与沙箱寻址（含越界判定）、建工作与上传、文件视图，以及**共享区版本化工作区**（内容寻址的提交记录、各 agent 的拉取基线、文件级三方比较、三方视图与显式冲突解决、按提交点还原）。
+- 管：工作区与沙箱寻址（含越界判定）、建工作与上传、文件视图、根会话的外部工作区绑定投影，以及**共享区版本化工作区**（内容寻址的提交记录、各 agent 的拉取基线、文件级三方比较、三方视图与显式冲突解决、按提交点还原）。
 - 不管：模块清单与 `module.yaml`（在 `modules`，本能力只消费它给的模块事实）、不执行工具（`tools`）、不写会话流水（`session`）、不决定谁能用哪些工具（`tools` 的角色表）。
 
 ## 入站契约与状态归属
 
 - 入站面：`api::Workspace`。
-  - 目录与视图：`prepare` / **`discard`**（撤销一次准备：只删空目录，建会话失败时用）/ `work_has` / `files` / `usage` / `roots`。
+  - 目录与视图：**`bind`**（把根会话的工作区绑定刷成 `.work-root` 布局投影；`None` = 产品内布局）/ `prepare` / **`discard`**（撤销一次准备：只删空目录，建会话失败时用）/ `work_has` / `files` / `usage` / `roots`。
   - 共享区版本化：`work_pull` / `work_commit` / `work_commit_user` / `work_status` / `work_versions` / `work_resolve` / `work_lost` / `work_restore_lost` / `work_recover` / `work_gc` / `work_restore` / `work_head` / `work_rewind_to` / `work_restore_point` / `work_discard_after`。
   - **提交历史视图**：`work_log(work, limit, before?)` 给当前 head、新→旧的分页提交与每条 `on_head`（是否在当前 head 祖先链）；`work_commit_view` 给提交详情与改动清单（对象大小 / 媒体提示）；`work_commit_file` 给该提交里某个文件的受限预览（路径必须真在这条提交的树里，`src/capabilities/workspace/domain/workspace.rs`）。这些是只读视图，不进动作表。
   - **提交点还原**：`work_restore(work, commit)` 只把主副本物化到目标提交并更新 head，**非破坏性**——目标之后的提交仍保留在历史里，可再次回滚。`work_rewind_to` 只沿**当前 head 的祖先链**按行锚选点；已离开当前线的提交不会被后续转录回档误选。

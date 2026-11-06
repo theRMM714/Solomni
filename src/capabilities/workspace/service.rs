@@ -431,6 +431,10 @@ struct ResolvePlan {
 }
 
 impl Workspace for WorkspaceService {
+    fn bind(&self, session: &str, root: Option<&Path>) -> Result<(), String> {
+        self.dirs.bind(session, root)
+    }
+
     fn prepare(&self, session: &str, agents: &[String]) -> Result<(), String> {
         self.dirs.prepare(session, agents)
     }

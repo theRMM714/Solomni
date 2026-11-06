@@ -16,5 +16,5 @@
 | `src/capabilities/workspace/domain/asset.rs` | 通用资产纯逻辑：分块扫描（指纹 / 大小 / NUL 与 UTF-8 判定 / 受限预览）、`FileVersion`、扩展名媒体类型提示与单文件上限 |
 | `src/capabilities/workspace/domain/hash.rs` | 内容指纹 SHA-256：增量实现，共享区内容寻址的唯一键（纯逻辑） |
 | `src/capabilities/workspace/domain/workstore.rs` | 版本化工作区纯逻辑：内容寻址、提交记录、拉取基线、文件级三方比较、三方版本预览、冲突解决判定（含 take=local 守卫 / 备份判定）与路径校验 |
-| `src/capabilities/workspace/detail/fs_workspace.rs` | `Workdirs` 的落盘实现：`session/<工作名>/` 下的 `work/` 与各 agent 沙箱 |
+| `src/capabilities/workspace/detail/fs_workspace.rs` | `Workdirs` 的落盘实现：`session/<工作名>/` 下的 `work/` 与各 agent 沙箱；外部工作区绑定投影 `.work-root` 与共享区根解析 |
 | `src/capabilities/workspace/detail/fs_workstore.rs` | `WorkStore` 的落盘实现：流式扫描 / 写入 / 复制（含跨根备份复制）、原子写、跨进程锁、版本库对象与对象枚举 / 删除、提交记录、基线、待恢复事务与提交号计数器 |

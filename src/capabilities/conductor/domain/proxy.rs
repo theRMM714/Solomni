@@ -374,6 +374,9 @@ pub struct NewSession {
     pub parent: Option<String>,
     /// 目的：创建时的权限档位；None = 用设置默认（子会话忽略并继承父 ceiling）。
     pub permission: Option<crate::capabilities::permission::api::ProfileId>,
+    /// 目的：外部工作区根（仅人经呈现层：产品目录之外的绝对路径）；None = 产品内布局。
+    /// 约束：子会话不接受（沿父会话继承），核心代理的建会话工具也不暴露这个字段。
+    pub workspace: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -597,6 +600,8 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
         guest: None,
         parent: None,
         permission,
+        // 工作区只由人经呈现层给；核心代理建的子会话整段继承父会话。
+        workspace: None,
     })
 }
 

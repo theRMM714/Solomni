@@ -79,6 +79,9 @@ pub struct CommitFileView {
 /// 工作区的**用例面**（`service.rs` 实现）：别的能力要工作区目录与版本化，走这里；
 /// 出站端口（`Workdirs` / `WorkStore`）**只由它持有**（R12）。
 pub trait Workspace: Send + Sync {
+    /// 目的：把根会话的工作区绑定落成布局投影（`Some` = 外部工作区根；`None` = 产品内布局）。
+    /// 约束：会话 meta 是绑定的唯一真相；本调用只刷新会话目录里的布局投影，不碰工作区文件。
+    fn bind(&self, session: &str, root: Option<&std::path::Path>) -> Result<(), String>;
     /// 准备工作区：建 session/<工作名>/work 与每个 agent 的沙箱目录。
     fn prepare(&self, session: &str, agents: &[String]) -> Result<(), String>;
     /// 撤销一次准备：只删**空**目录（有什么都不删）——建会话失败时用。

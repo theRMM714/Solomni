@@ -109,6 +109,7 @@ pub(crate) fn agent_chara_enters_identity_only_when_set() {
             permission: None,
             tier: Tier::Host,
             guest: None,
+            workspace: None,
         })
         .unwrap()
         .sid;
@@ -832,6 +833,7 @@ pub(crate) fn create_work_validates_user_choices() {
         permission: None,
         tier: crate::kernel::api::Tier::Host,
         guest: None,
+        workspace: None,
     };
     let opened = core
         .create_work(two_agents)
@@ -1611,6 +1613,7 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_defaults_to_host() {
         delegation: None,
         thinking: None,
         run: RunState::Active,
+        workspace: None,
     };
     let text = yaml_serde::to_string(&meta).expect("序列化");
     let back: SessionMeta = yaml_serde::from_str(&text).expect("反序列化");
@@ -1625,6 +1628,7 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_defaults_to_host() {
     let stopped = SessionMeta {
         thinking: None,
         run: RunState::Stopped,
+        workspace: None,
         ..meta.clone()
     };
     let back: SessionMeta =
@@ -1805,6 +1809,7 @@ pub(crate) fn child_sessions_share_the_main_guest_and_follow_its_tier() {
         delegation: None,
         thinking: None,
         run: RunState::Active,
+        workspace: None,
     };
     hist.create(&child).expect("子会话落盘");
     let mut core = core_with_pkgs(
@@ -1869,6 +1874,7 @@ pub(crate) fn proxy_children_share_the_proxy_tree_guest() {
         delegation: None,
         thinking: None,
         run: RunState::Active,
+        workspace: None,
     };
     hist.create(&child).expect("子工作落盘");
     let core = core_with_pkgs(
@@ -1920,6 +1926,7 @@ pub(crate) fn child_edit_writes_back_to_the_agent_roster() {
         delegation: None,
         thinking: None,
         run: RunState::Active,
+        workspace: None,
     };
     hist.create(&child).expect("子会话落盘");
     let mut core = core_with_pkgs(
@@ -1983,6 +1990,7 @@ pub(crate) fn tree_wide_module_overlap_is_allowed_on_child_edit() {
         delegation: None,
         thinking: None,
         run: RunState::Active,
+        workspace: None,
     };
     hist.create(&child).expect("子会话落盘");
     let mut core = core_with_pkgs(

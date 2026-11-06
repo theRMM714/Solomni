@@ -731,6 +731,7 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
                 guest: None,
                 parent: Some("w-notify".to_string()),
                 permission: None,
+                workspace: None,
             };
             Ok(core.create_session(&spec)?.0.session)
         })
@@ -1056,6 +1057,7 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
         permission: None,
         tier: Tier::Host,
         guest: None,
+        workspace: None,
     };
     let (opened, _head) = ops.sessions.create_work(spec.clone()).expect("建代理会话");
     assert!(opened.agents.is_empty(), "代理会话没有名单");
@@ -1149,6 +1151,7 @@ pub(crate) fn proxy_session_exposes_context_usage() {
         permission: None,
         tier: Tier::Host,
         guest: None,
+        workspace: None,
     };
     let sid = ops.sessions.create_work(spec).expect("建代理会话").0.sid;
     ops.sessions
@@ -1290,6 +1293,7 @@ pub(crate) fn the_proxy_created_child_publishes_its_opening_facts() {
         guest: None,
         parent: Some(proxy),
         permission: None,
+        workspace: None,
     };
     let created = bridge.create_session(&spec).expect("建协作子工作");
     // 开场事实与"这句是核心代理转达的"来源记录都应当**已经在事件台上**，而不是只在盘上
@@ -1355,6 +1359,7 @@ pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
             permission: None,
             tier: Tier::Host,
             guest: None,
+            workspace: None,
         })
         .expect("建协作工作（代拟）");
     let child = work.sid.clone();
@@ -1429,6 +1434,7 @@ pub(crate) fn ai_created_child_inherits_the_proxy_environment() {
                     guest: Some("nope".to_string()),
                     parent: Some(proxy),
                     permission: None,
+                    workspace: None,
                 };
                 Ok(core.create_session(&spec)?.0.session)
             }
@@ -1453,6 +1459,7 @@ pub(crate) fn proxy_profile_is_explicit_and_uses_a_real_private_sandbox() {
                 crate::kernel::api::Tier::Host,
                 None,
                 ProfileId::View,
+                None,
             )
             .map(|(sid, _)| sid)
         })

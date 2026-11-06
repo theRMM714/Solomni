@@ -70,6 +70,7 @@ fn meta(name: &str) -> SessionMeta {
         delegation: None,
         thinking: None,
         run: crate::capabilities::session::api::RunState::Active,
+        workspace: None,
     }
 }
 

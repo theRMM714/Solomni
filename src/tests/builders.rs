@@ -1020,6 +1020,7 @@ pub(crate) fn seed_session(
         delegation: None,
         thinking: None,
         run: RunState::Active,
+        workspace: None,
     })
     .unwrap();
 }

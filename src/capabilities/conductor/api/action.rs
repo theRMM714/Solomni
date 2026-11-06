@@ -292,6 +292,12 @@ impl ConductorHandle {
                 .and_then(|v| v.as_str())
                 .map(crate::capabilities::permission::api::ProfileId::parse)
                 .transpose()?,
+            workspace: args
+                .get("workspace")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string()),
         })
     }
 
