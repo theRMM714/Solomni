@@ -3307,6 +3307,10 @@ function pickWorkspaceDir(onPick) {
   openModal('选择工作区目录', (c) => {
     const pathIn = textInput('当前目录');
     pathIn.readOnly = true;
+    const rootsRow = document.createElement('div');
+    rootsRow.style.display = 'flex';
+    rootsRow.style.gap = '6px';
+    rootsRow.style.flexWrap = 'wrap';
     const list = document.createElement('div');
     list.style.maxHeight = '40vh';
     list.style.overflow = 'auto';
@@ -3318,6 +3322,12 @@ function pickWorkspaceDir(onPick) {
       pathIn.value = r.path || '';
       parentPath = r.parent || null;
       up.disabled = !parentPath;
+      rootsRow.innerHTML = '';
+      for (const root of (r.roots || [])) {
+        const rb = btn(root, 'btn btn-ghost');
+        rb.onclick = () => load(root).catch((e) => c.setMsg(e.message, true));
+        rootsRow.appendChild(rb);
+      }
       list.innerHTML = '';
       for (const d of (r.dirs || [])) {
         const b = btn(d.name, 'btn btn-block');
@@ -3330,6 +3340,7 @@ function pickWorkspaceDir(onPick) {
     pick.onclick = () => { if (pathIn.value) { onPick(pathIn.value); c.close(); } };
     cancel.onclick = () => c.close();
     c.body.appendChild(pathIn);
+    c.body.appendChild(rootsRow);
     c.body.appendChild(up);
     c.body.appendChild(list);
     c.body.appendChild(pick);

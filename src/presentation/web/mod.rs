@@ -532,9 +532,25 @@ pub(crate) fn route(
             }
             dirs.sort_by(|a, b| a.0.cmp(&b.0));
             let parent = dir.parent().map(|p| p.display().to_string());
+            // 盘符根（Windows）/ 文件系统根（Unix）：只靠“上一级”到不了别的盘。
+            let mut roots: Vec<String> = Vec::new();
+            #[cfg(windows)]
+            {
+                for b in b'A'..=b'Z' {
+                    let p = format!("{}:\\", b as char);
+                    if std::path::Path::new(&p).is_dir() {
+                        roots.push(p);
+                    }
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                roots.push("/".to_string());
+            }
             ok_json(json!({
                 "path": dir.display().to_string(),
                 "parent": parent,
+                "roots": roots,
                 "dirs": dirs.into_iter().map(|(name, path)| json!({"name": name, "path": path})).collect::<Vec<_>>()
             }))
         }
