@@ -172,6 +172,7 @@ impl Conductor {
         }
         Ok(crate::capabilities::workspace::api::Sandboxes {
             shared: roots.shared,
+            session_root: roots.session_root,
             list,
             codec: path_codec,
         })

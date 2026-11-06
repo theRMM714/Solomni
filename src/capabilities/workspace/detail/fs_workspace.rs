@@ -199,11 +199,15 @@ impl Workdirs for FsWorkspace {
     }
 
     fn discard(&self, session: &str, agents: &[String]) -> Result<(), String> {
-        // 只删**空**目录与本产品写下的布局投影：有任何内容都留着（用户的东西绝不因为一次失败的创建被删）。
+        // 撤销一次**失败的准备**：只删本产品建出的东西——空沙箱 / 空 work/、布局投影与版本库 .work。
+        // 约束：调用方只在会话**从未落盘**（建会话失败）时调用；用户文件绝不因为一次失败的创建被删。
+        //   .work 是产品自己的版本库（含首次导入的对象）：不一起清会留下"有 head 但没有会话"的残档，
+        //   同名重建换外部根时还会因为"已有 head"跳过初始导入。
         let dir = self.session_dir(session);
         for a in agents {
             let _ = std::fs::remove_dir(dir.join(a));
         }
+        let _ = std::fs::remove_dir_all(dir.join(".work"));
         let _ = std::fs::remove_dir(dir.join("work"));
         let _ = std::fs::remove_file(dir.join(ROOT_MARK));
         let _ = std::fs::remove_dir(&dir);
@@ -218,6 +222,7 @@ impl Workdirs for FsWorkspace {
         }
         Ok(WorkRoots {
             shared: self.shared_root(session)?,
+            session_root: dir.clone(),
             agents: map,
             store: dir.join(".work"),
         })

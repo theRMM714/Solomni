@@ -374,6 +374,7 @@ pub(crate) fn missing_external_workspace_reports_same_error_and_discard_keeps_it
 pub(crate) fn sandboxes_lookup_is_by_agent() {
     let boxes = crate::capabilities::workspace::api::Sandboxes {
         shared: abs(&["w", "work"]),
+        session_root: abs(&["w"]),
         list: vec![test_sandbox("甲", &["a"])],
         codec: None,
     };

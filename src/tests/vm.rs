@@ -3090,6 +3090,7 @@ pub(crate) fn stable_roots_cover_the_work_tree_and_module_tree() {
     };
     let sandboxes = Sandboxes {
         shared: std::path::PathBuf::from("/session/w/work"),
+        session_root: std::path::PathBuf::from("/session/w"),
         list: vec![sb("a", "m1"), sb("b", "m2")],
         codec: None,
     };

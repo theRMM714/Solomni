@@ -215,6 +215,7 @@ impl Workdirs for InMemoryWorkspace {
         }
         Ok(crate::capabilities::workspace::api::WorkRoots {
             shared: abs(&[session, "work"]),
+            session_root: abs(&[session]),
             agents: map,
             store: abs(&[session, ".work"]),
         })

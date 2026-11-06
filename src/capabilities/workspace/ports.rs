@@ -20,7 +20,8 @@ pub trait Workdirs {
     fn lock_shared(&self, session: &str) -> Result<Option<std::fs::File>, String>;
     /// 准备工作区：建 session/<工作名>/work 与每个 agent 的沙箱目录。
     fn prepare(&self, session: &str, agents: &[String]) -> Result<(), String>;
-    /// 撤销一次准备：只删**空**目录（有什么都不删），建会话失败时用。
+    /// 撤销一次失败的准备：只删本产品建出的空沙箱 / 空 work/、布局投影与版本库 `.work`。
+    /// 约束：调用方只在会话**从未落盘**时调用；用户文件绝不因为一次失败的创建被删。
     fn discard(&self, session: &str, agents: &[String]) -> Result<(), String>;
     /// 界面投喂：把文件写进本工作的 work/（文件名由调用方净化）。
     fn write_work(&self, session: &str, name: &str, bytes: &[u8]) -> Result<(), String>;
