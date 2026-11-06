@@ -23,7 +23,7 @@ const stateStub = {
 function el(tag) {
   const node = {
     tag: tag || "",
-    textContent: "", value: "", className: "", dataset: {},
+    textContent: "", value: "", className: "", dataset: {}, style: {},
     children: [], _h: {},
     classList: { add() {}, remove() {} },
     // 事件处理器**记下来**（不丢）：冒烟要能像用户那样触发它（如向导里切档位、勾模块）。

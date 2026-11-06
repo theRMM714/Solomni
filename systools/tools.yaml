@@ -303,6 +303,9 @@ tools:
       guest:
         type: string
         desc: 仅人经呈现层可用（核心代理建子会话时**永远继承主会话的虚拟根**；模型给了也忽略）
+      workspace:
+        type: string
+        desc: 仅人经呈现层可用：共享区主副本绑定的外部工作区根（已存在的绝对目录）；省略 = 会话内 work/。子会话继承父会话，不接受自选
       permission:
         type: string
         desc: 创建时的权限档位：view / workspace / external / all_reach（仅人经呈现层；代理子会话继承父 ceiling）

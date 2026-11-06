@@ -3301,11 +3301,59 @@ async function openWizard(draft) {
     syncGuestSetup();
     syncGuestGap();
   }
+/* 选择工作区目录：目录列表来自本机 Web 的 /api/dirs；只选路径，不开文件。 */
+function pickWorkspaceDir(onPick) {
+  let parentPath = null;
+  openModal('选择工作区目录', (c) => {
+    const pathIn = textInput('当前目录');
+    pathIn.readOnly = true;
+    const list = document.createElement('div');
+    list.style.maxHeight = '40vh';
+    list.style.overflow = 'auto';
+    const up = btn('上一级', 'btn btn-block');
+    const pick = btn('选这个目录', 'btn btn-primary btn-block');
+    const cancel = btn('取消', 'btn btn-block');
+    async function load(p) {
+      const r = await api('GET', '/api/dirs' + (p ? '?path=' + encodeURIComponent(p) : ''));
+      pathIn.value = r.path || '';
+      parentPath = r.parent || null;
+      up.disabled = !parentPath;
+      list.innerHTML = '';
+      for (const d of (r.dirs || [])) {
+        const b = btn(d.name, 'btn btn-block');
+        b.style.textAlign = 'left';
+        b.onclick = () => load(d.path).catch((e) => c.setMsg(e.message, true));
+        list.appendChild(b);
+      }
+    }
+    up.onclick = () => { if (parentPath) load(parentPath).catch((e) => c.setMsg(e.message, true)); };
+    pick.onclick = () => { if (pathIn.value) { onPick(pathIn.value); c.close(); } };
+    cancel.onclick = () => c.close();
+    c.body.appendChild(pathIn);
+    c.body.appendChild(up);
+    c.body.appendChild(list);
+    c.body.appendChild(pick);
+    c.body.appendChild(cancel);
+    load(null).catch((e) => c.setMsg(e.message, true));
+  }, true);
+}
+
   openModal('新建工作', (c) => {
     const nameIn = textInput('工作名称（必填，会话落盘目录名）');
     if (w.name) nameIn.value = w.name;   // 草稿重开：把用户填过的带回来
-    const workspaceIn = textInput('工作区（可选：已存在的绝对目录；留空 = 会话内）');
+    const workspaceIn = textInput('默认（会话内 work/）');
+    workspaceIn.readOnly = true;
     if (w.workspace) workspaceIn.value = w.workspace;
+    const wsPick = btn('选择目录', 'btn btn-ghost');
+    const wsDefault = btn('默认', 'btn btn-ghost');
+    wsPick.onclick = () => pickWorkspaceDir((p) => { workspaceIn.value = p; w.workspace = p; });
+    wsDefault.onclick = () => { workspaceIn.value = ''; w.workspace = ''; };
+    const workspaceRow = document.createElement('div');
+    workspaceRow.style.display = 'flex';
+    workspaceRow.style.gap = '8px';
+    workspaceRow.appendChild(workspaceIn);
+    workspaceRow.appendChild(wsPick);
+    workspaceRow.appendChild(wsDefault);
     const modeSel = selectInput([
       { value: 'single', label: '单 agent（1 个或多个模块）' },
       { value: 'collab', label: '协作（多个 agent）' },
@@ -3622,7 +3670,7 @@ async function openWizard(draft) {
     };
 
     c.body.appendChild(field('工作名称', nameIn));
-    c.body.appendChild(field('工作区（可选）', workspaceIn));
+    c.body.appendChild(field('工作区（可选）', workspaceRow));
     c.body.appendChild(field('形态', modeSel));
     c.body.appendChild(modeHint);
     c.body.appendChild(tierField);

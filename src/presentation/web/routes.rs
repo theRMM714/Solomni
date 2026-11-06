@@ -173,6 +173,16 @@ pub const ROUTES: &[Route] = &[
         note: "提交详情；带 path = 该提交里这个文件的受限预览（文本 16 KiB，二进制只给元信息）",
     },
     Route {
+        id: "dirs",
+        method: "GET",
+        pattern: "/api/dirs",
+        capability: "宿主目录浏览",
+        request: "查询 path（可选；省略 = 用户主目录）",
+        response: "{path,parent,dirs:[{name,path}]}",
+        statuses: &[200, 400],
+        note: "建会话时选工作区目录用；只在本机 Web 上提供目录列表，不读写文件内容",
+    },
+    Route {
         id: "settings.get",
         method: "GET",
         pattern: "/api/settings",
