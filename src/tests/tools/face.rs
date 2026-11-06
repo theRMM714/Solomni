@@ -74,36 +74,22 @@ pub(crate) fn only_this_turns_tools_are_advertised() {
             .filter(|x| x.role == "system")
             .map(|x| x.content.as_str())
             .collect();
-        assert_eq!(systems.len(), 2, "身份 + 本回合工具块：{:?}", systems);
         assert!(
-            !systems[0].contains("【本回合可用的工具】") && !systems[0].contains("offset（integer"),
-            "系统身份里不许出现工具清单：{}",
-            systems[0]
+            systems
+                .iter()
+                .all(|s| !s.contains("【本回合可用的工具】") || !s.contains("- path（string")),
+            "原生模式不再把工具参数重复成文字块：{:?}",
+            systems
         );
         assert!(
-            systems[1].contains("【本回合可用的工具】"),
-            "工具块随回合注入：{}",
-            systems[1]
+            systems.iter().all(|s| !s.contains("offset（integer")),
+            "系统消息里不许出现工具清单：{:?}",
+            systems
         );
     }
-    // 换成"只拿到 read"的席位：提示词块与声明槽同时收口。
+    // 声明槽与 allowed 同一份判据：只拿到 read 时声明也只有 read。
     m.tools.as_mut().expect("工具环境").allowed = vec!["read".to_string()];
     let _ = run_execution(std::slice::from_mut(&mut m), "任务", &prompts);
-    let log = seen.lock().expect("锁");
-    let block = log[1]
-        .iter()
-        .find(|x| x.role == "system" && x.content.contains("【本回合可用的工具】"))
-        .expect("工具块");
-    assert!(
-        block.content.contains("- path（string，必填）"),
-        "{}",
-        block.content
-    );
-    assert!(
-        !block.content.contains("patch") && !block.content.contains("submit_report"),
-        "没拿到的工具不进工具块：{}",
-        block.content
-    );
     let decls = declared.lock().expect("锁");
     let names: Vec<&str> = decls[1].iter().map(|(n, _)| n.as_str()).collect();
     assert_eq!(

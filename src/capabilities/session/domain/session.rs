@@ -856,6 +856,7 @@ impl AgentSession {
             verb: verb.to_string(),
             kind: kind.to_string(),
             reasoning,
+            raw: String::new(),
             tool,
             degraded: false,
             system: kind == "system",

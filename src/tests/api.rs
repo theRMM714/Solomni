@@ -22,6 +22,76 @@ fn spawn(modules: Vec<Module>, core_script: Vec<&str>) -> ConductorHandle {
     ops_with(modules, core_script).0
 }
 
+/// 原生形态的模型保存前必须实测通过；信封形态是显式选择，不测试直接保存。
+#[test]
+fn native_model_save_is_gated_by_measurement_but_envelope_is_not() {
+    let handle = spawn(vec![module_of("a")], Vec::new());
+    let ops = Ops::from_handle(&handle);
+    let draft = |id: &str, tools| crate::capabilities::registry::api::ModelDraft {
+        tools,
+        ..model_draft(id, id, id, "p", "", 0)
+    };
+    // 信封：不测试，直接落盘。
+    ops.registry
+        .upsert_model(draft(
+            "env-model",
+            crate::capabilities::llm::api::ToolMode::Envelope,
+        ))
+        .expect("信封形态不需要实测");
+    assert!(ops
+        .registry
+        .models()
+        .expect("读模型")
+        .iter()
+        .any(|m| m.id == "env-model"));
+    // 原生：替身没有真实供应商，实测不能给出明确结论 → 不保存。
+    let err = ops
+        .registry
+        .upsert_model(draft(
+            "native-model",
+            crate::capabilities::llm::api::ToolMode::Native,
+        ))
+        .unwrap_err();
+    assert!(!err.is_empty(), "实测没结论要如实报错");
+    assert!(
+        !ops.registry
+            .models()
+            .expect("读模型")
+            .iter()
+            .any(|m| m.id == "native-model"),
+        "实测没结论时模型不得落盘"
+    );
+
+    // 通过替身：工具调用 + 回放形状都明确通过 → 原生模型落盘。
+    let core = crate::tests::builders::native_core(
+        crate::tests::builders::NativeGateway {
+            scripts: std::sync::Mutex::new(Vec::new()),
+        },
+        Arc::new(InMemoryHistory::new()),
+        Arc::new(crate::tests::doubles::InMemorySysIo::new()),
+    );
+    let ok_handle = ConductorHandle::spawn(core).expect("起核心");
+    let ok_ops = Ops::from_handle(&ok_handle);
+    ok_ops
+        .registry
+        .upsert_model(draft(
+            "native-ok",
+            crate::capabilities::llm::api::ToolMode::Native,
+        ))
+        .expect("实测明确通过应允许保存");
+    assert_eq!(
+        ok_ops
+            .registry
+            .models()
+            .expect("读模型")
+            .iter()
+            .find(|m| m.id == "native-ok")
+            .map(|m| m.tools),
+        Some(crate::capabilities::llm::api::ToolMode::Native),
+        "保存的就是实测通过的原生形态"
+    );
+}
+
 // ---------- 命令在自己的线程上跑，状态只被它碰 ----------
 
 #[test]

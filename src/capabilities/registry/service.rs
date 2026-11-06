@@ -35,6 +35,24 @@ pub struct RegistryService {
 }
 
 impl RegistryService {
+    /// 目的：按 draft 的供应商 + api_model 造一条通道（模型还没落盘时给保存闸门用）。
+    /// 约束：供应商必须已在册；密钥只在本层用，不出视图。
+    fn draft_channel(&self, provider: &str, api_model: &str) -> Result<Channel, String> {
+        let p = self
+            .settings
+            .providers
+            .get(provider)
+            .ok_or_else(|| format!("无此供应商：{}", provider))?;
+        if api_model.trim().is_empty() {
+            return Err("api_model 不能为空".to_string());
+        }
+        Ok(Channel {
+            base_url: p.base_url.clone(),
+            api_key: p.api_key.clone(),
+            model: api_model.to_string(),
+        })
+    }
+
     /// 组合根专用：注入端口，并把四份 yaml 读进内存。
     pub fn new(
         store: Arc<dyn SettingsStore + Send + Sync>,
@@ -218,6 +236,7 @@ impl Registry for RegistryService {
             api_model,
             provider,
             note,
+            tools,
             context,
             thinking,
         } = draft;
@@ -227,14 +246,7 @@ impl Registry for RegistryService {
         if !self.settings.providers.contains_key(&provider) {
             return Err(format!("无此供应商：{}", provider));
         }
-        // 工具调用形态：编辑时**保留原值**（登记表单暂不带这个字段，不能因为没带就重置成缺省），
-        // 新建缺省 envelope（任何供应商都能用的手写信封）。
-        let tools = self
-            .settings
-            .models
-            .get(&id)
-            .map(|m| m.tools)
-            .unwrap_or_default();
+        // 工具调用形态随 draft 一起进来（原生形态的实测闸门在 conductor 的保存用例里，落盘前已通过）。
         // 思考强度：档位必须在全局目录里、默认档必须被支持、片段不得覆盖协议字段。
         providers::validate_thinking_spec(&thinking, &self.settings.app.thinking)
             .map_err(|e| format!("模型 {} 的思考强度非法：{}", id, e))?;
@@ -380,6 +392,20 @@ impl Registry for RegistryService {
 
     fn probe_replay_shape(&self, id: &str) -> Result<ReplayReport, String> {
         let channel = self.settings.resolve(id)?;
+        self.llm.probe_replay(&channel)
+    }
+
+    fn probe_channel_tools(&self, provider: &str, api_model: &str) -> Result<ProbeOutcome, String> {
+        let channel = self.draft_channel(provider, api_model)?;
+        self.llm.probe_tools(&channel)
+    }
+
+    fn probe_channel_replay(
+        &self,
+        provider: &str,
+        api_model: &str,
+    ) -> Result<ReplayReport, String> {
+        let channel = self.draft_channel(provider, api_model)?;
         self.llm.probe_replay(&channel)
     }
 

@@ -143,6 +143,10 @@ impl ToolSchema {
                     serde_json::Value::String(p.desc.trim().to_string()),
                 );
             }
+            // 提示词形态用「必填 / 非空」文案表达；JSON Schema 侧用 minLength 表达同一条约束。
+            if p.non_empty && p.ty == ParamType::String {
+                node.insert("minLength".to_string(), serde_json::json!(1));
+            }
             if let Some(lo) = p.min {
                 node.insert("minimum".to_string(), json_num(lo));
             }
@@ -510,6 +514,18 @@ params:
         let hidden = s.render_for_prompt_hiding(&["path"]);
         assert!(!hidden.contains("- path"), "裁掉的参数不发：{}", hidden);
         assert!(hidden.contains("- offset"), "其余参数照发：{}", hidden);
+    }
+
+    #[test]
+    fn non_empty_becomes_min_length_in_native_schema() {
+        let s: ToolSchema =
+            yaml_serde::from_str("params:\n  q: { type: string, non_empty: true }").unwrap();
+        let js = s.to_json_schema();
+        assert_eq!(
+            js["properties"]["q"]["minLength"],
+            serde_json::json!(1),
+            "原生声明要带上与提示词一致的「非空」约束"
+        );
     }
 
     #[test]

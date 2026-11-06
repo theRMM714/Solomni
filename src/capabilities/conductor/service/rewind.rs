@@ -494,6 +494,8 @@ pub(crate) fn replay_dialogue(
     let mut line_ids: Vec<u64> = Vec::new();
     let reply_of = |v: &serde_json::Value| v.get("reply").and_then(|x| x.as_u64()).unwrap_or(0);
     let id_of = |v: &serde_json::Value| v.get("id").and_then(|x| x.as_u64()).unwrap_or(0);
+    // 回复级原文可能挂在该回复的正文行上（正文行随后被工具组跳过）：先接住再交给工具组。
+    let mut pending_raw = String::new();
     let mut i = 0usize;
     while i < rows.len() {
         let l = rows[i];
@@ -566,22 +568,26 @@ pub(crate) fn replay_dialogue(
                 group.push(rows[i]);
                 i += 1;
             }
-            // 这一回复的助手消息正文（空正文的回复不带 raw；组内取一份即可）。
-            let raw = group
-                .iter()
-                .find_map(|t| {
-                    t.get("tool")
-                        .and_then(|x| x.get("raw"))
-                        .and_then(|x| x.as_str())
-                        .filter(|s| !s.is_empty())
-                })
-                .unwrap_or_default();
+            // 这一回复的助手消息原文（每条回复只落一份：可能在正文行上，也可能在组内首行）。
+            let raw = if pending_raw.is_empty() {
+                group
+                    .iter()
+                    .find_map(|t| {
+                        t.get("raw")
+                            .and_then(|x| x.as_str())
+                            .filter(|s| !s.is_empty())
+                    })
+                    .unwrap_or_default()
+                    .to_string()
+            } else {
+                std::mem::take(&mut pending_raw)
+            };
             let views: Vec<crate::capabilities::session::api::ToolCallView> = group
                 .iter()
                 .filter_map(|t| t.get("tool").cloned())
                 .filter_map(|t| serde_json::from_value(t).ok())
                 .collect();
-            for m in crate::capabilities::session::api::reply_msgs(mode, raw, &views) {
+            for m in crate::capabilities::session::api::reply_msgs(mode, &raw, &views) {
                 history.push(m);
             }
             for row in &group {
@@ -596,6 +602,16 @@ pub(crate) fn replay_dialogue(
                 .get(i + 1)
                 .map(|n| n.get("tool").is_some())
                 .unwrap_or(false);
+            // 同一次回复的正文行可能带着回复级原文；工具组在下一轮消费它。
+            if next_is_tool {
+                pending_raw = l
+                    .get("raw")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_string();
+            } else {
+                pending_raw.clear();
+            }
             if !next_is_tool {
                 // 正文本身就是内容（说话人/动词在字段里），直接进助手消息。
                 history.push(Msg::assistant(line.to_string()));

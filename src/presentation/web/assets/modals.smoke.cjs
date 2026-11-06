@@ -151,6 +151,17 @@ if (!loadErrors.length) {
     return nums.length >= 1 && text.indexOf("思考默认档") >= 0 &&
       text.indexOf("思考档位映射") >= 0 && text.indexOf("+ 添加映射") >= 0;
   });
+  // ①之一 工具调用选择：默认原生；信封是显式选项。
+  check("模型表单：工具调用默认原生且保留信封选项", () => {
+    vm.runInNewContext("openModelsModal()", sandbox);
+    const body = roots.get("#modal-root").children[0].children[0].children[1];
+    const picks = walk(body, []).filter((n) => n.tagName === "SELECT");
+    const toolSel = picks.find(
+      (s) => (s.children || []).some((o) => o.value === "native") &&
+        (s.children || []).some((o) => o.value === "envelope")
+    );
+    return !!toolSel && toolSel.value === "native";
+  });
   // ①之二 思考映射：逐行配对；已映射档位在其它行不可再选；默认档只列已映射的档。
   check("模型页：思考映射行去重、可增删、默认档只列已映射", () => {
     seedRegistry();

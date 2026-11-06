@@ -199,7 +199,7 @@ pub fn parse(raw: &str) -> Reply {
                     return Reply {
                         verb: Verb::Tool,
                         // text = 信封之外的那段正文（模型常在同一轮里先写一句再发信封）；只剩信封时为空串。
-                        // 信封 JSON 永不进 text：界面因此不会把 JSON 糊上屏，view.raw 另存完整原文供重建。
+                        // 信封 JSON 永不进 text：界面因此不会把 JSON 糊上屏，回复级 raw 另存完整原文供重建。
                         text: strip_once(raw, &obj).trim().to_string(),
                         degraded: false,
                         tools,

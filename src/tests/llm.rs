@@ -113,7 +113,11 @@ pub(crate) fn malformed_tool_envelope_becomes_a_failed_tool_line() {
         "回注册子文案：{}",
         views[0].output
     );
-    assert_eq!(views[0].raw, broken, "原文留档（重建上下文用）");
+    assert_eq!(
+        transcript_raws(&events),
+        vec![broken.clone()],
+        "原文留档（重建上下文用；每条回复一份）"
+    );
     assert_eq!(
         io.get(&["w", "work", "README.md"]),
         None,
@@ -865,6 +869,11 @@ pub(crate) fn envelope_multi_call_runs_every_call_and_rebuilds_identically() {
     );
     assert!(views[0].call_id.is_empty(), "手写信封没有原生调用 id");
     assert_eq!(views[0].reply, views[1].reply, "同一次回复的工具行同号");
+    assert_eq!(
+        transcript_raws(&events),
+        vec![raw.clone()],
+        "原文是回复级事实：两个调用也只落一份"
+    );
     let live = core.single_history(&sid).unwrap();
     assert!(
         live.iter().all(|m| m.role != "tool"),

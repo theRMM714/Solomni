@@ -81,6 +81,12 @@ impl Tools for ToolsService {
     }
 }
 
+/// 所有工具回执送回模型前都过同一个预算（head+tail + 续读提示）。
+fn within_budget(mut out: ToolOutcome) -> ToolOutcome {
+    out.output = crate::capabilities::tools::domain::budget::cap_result(out.output);
+    out
+}
+
 impl ToolExec for ToolsService {
     fn run_module(
         &self,
@@ -96,16 +102,16 @@ impl ToolExec for ToolsService {
         let lease = self.module_lease(module);
         if parallel {
             let _shared = lease.read().unwrap_or_else(|e| e.into_inner());
-            self.runner.run(fence, command, args_json, env, path, ask)
+            within_budget(self.runner.run(fence, command, args_json, env, path, ask))
         } else {
             let _exclusive = lease.write().unwrap_or_else(|e| e.into_inner());
-            self.runner.run(fence, command, args_json, env, path, ask)
+            within_budget(self.runner.run(fence, command, args_json, env, path, ask))
         }
     }
 
     fn run_shell(&self, run: &crate::kernel::ports::ShellRun<'_>) -> ToolOutcome {
         // 容器授权按会话持有（见 container_name）：调用结束不释放，会话结束/崩溃时统一回收。
-        self.runner.run_shell(run)
+        within_budget(self.runner.run_shell(run))
     }
 
     fn run_builtin(
@@ -116,14 +122,14 @@ impl ToolExec for ToolsService {
         name: &str,
         args_json: &str,
     ) -> ToolOutcome {
-        crate::capabilities::tools::service::systool::execute(
+        within_budget(crate::capabilities::tools::service::systool::execute(
             sb,
             builtin_tools,
             self.io.as_ref(),
             observations,
             name,
             args_json,
-        )
+        ))
     }
 
     fn release_call(&self, spec: &crate::kernel::api::FenceSpec) -> Result<(), String> {

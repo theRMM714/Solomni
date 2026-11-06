@@ -33,14 +33,21 @@
 - 它不改登记处：只报事实，采不采用由人定。
 - 界面上：模型登记里那两行按钮（测工具调用 / 测回放形状）走的就是这两个探测（`model.act` 的 `probe` / `probe-replay`），结论逐项显示。
 
-## 三、写回与写面
+## 三、保存闸门（原生形态）
+
+- 原生形态的模型在**保存前**实测三件事：通道基线（不带 tools）、带 tools 的最小调用、实际要用的回放形状。
+- 只有「明确支持 + 回放形状被接受」才落盘；明确不支持 / 无法判定 = **不保存**，只如实报原因，不静默降级成手写信封，也不引导用户改信封。
+- 手写信封是用户显式选择：**不测试，直接保存**（通道是否可用由使用者自己负责）。
+- 所有写入口（Web 模型表单、CLI、`upsert_model` 动作）都走同一道闸（`RegistryOps::upsert_model`），不各写一份。
+
+## 四、写回与写面
 - 探测写回只发生在 `--probe-tools`：`envelope` / `native` 都写回 `models.yaml` 的 `tools`；`--probe-replay` 永不写回。
 - 写面（登记 / 移除 / 设核心默认 / 探测 / 改设置）以用户动作暴露：声明在 `systools/tools.yaml`（`callers: [user]`），执行体在 `src/capabilities/conductor/api/action.rs` 的 `execute_registry`。
 - 这些动作默认不开放给任何角色（供应商与密钥是产品级资源）。
 - 改一个写方法要同时改动作表、执行体与前端调用点。
 - 密钥回显边界：界面只呈现「供应商 id + 端点」与「模型 id + 展示名」，永不携带密钥；更新供应商时 `api_key` 留空 = 保留原值。
 
-## 四、四份 yaml 的读写
+## 五、四份 yaml 的读写
 - `.home/` 下四份文件分开读写：`load` 逐份读，缺哪份就用哪份的默认；`save` 会同时写四份。
 - 结构定义在 `src/capabilities/registry/domain/providers.rs` 与 `src/capabilities/registry/domain/agents.rs`；解析与写盘在 `src/capabilities/registry/detail/yaml_settings.rs`。
 - yaml 非法（解析失败）= 装配失败并指出是哪一份。

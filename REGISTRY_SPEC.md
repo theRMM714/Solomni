@@ -45,14 +45,15 @@
 | `api_model` | 字符串 | 是 | - | 发给供应商的实际模型串 |
 | `provider` | 字符串 | 是 | - | 供应商 id，必须已存在 |
 | `note` | 字符串 | 否 | 空 | 能力说明 |
-| `tools` | 字符串 | 否 | `envelope` | 工具调用形态；只认 `envelope` / `native` |
+| `tools` | 字符串 | 否 | `native` | 工具调用形态；只认 `envelope` / `native` |
 | `thinking.default` | 字符串 | 否 | 无 | 默认思考档；必须是 `thinking.levels` 里的一个 |
 | `thinking.levels` | 映射 | 否 | 无 | 档位 → 请求体片段；键必须在 `settings.yaml` 的 `thinking.levels` 里 |
 | `core` | 字符串 | 否 | 无 | 核心默认模型 id |
 - `provider` 必须指向 `providers.yaml` 里的一个 id，否则拒绝新增。
-- `tools` 是**该通道用什么协议调工具**：`envelope`（缺省）让模型在正文里写手写信封、核心解析——任何供应商都能用；`native` 用供应商原生的工具调用（参数走结构化槽位）——需要该通道确实支持 function calling。
+- `tools` 是**该通道用什么协议调工具**：`native`（缺省）用供应商原生的工具调用（参数走结构化槽位）——保存前必须实测通过（见 [docs/registry/README.md](docs/registry/README.md) 三）；`envelope` 让模型在正文里写手写信封、核心解析——仅在模型表单里**显式选择**时使用，保存前不测试。
 - 两种形态互斥：一个通道走 native 就只认原生调用，正文里的信封不会被当工具执行（否则模型在正文里讲解参数就会被误当成调用），但会如实记一条失败的工具行。
-- 声明 native 而通道实际不支持时如实报错，不静默降级成信封（那会让模型在不知道信封格式的情况下空转）。
+- **原生形态的保存闸门**：保存前实测「通道基线 + 带 tools 的最小调用 + 实际回放形状」；只有明确支持且回放形状被接受才落盘。明确不支持 / 无法判定 = **不保存**，只如实提示原因，不静默降级成信封、也不引导改用手写信封（用户可自己把表单改成信封再保存）。
+- 信封形态是用户的显式选择：**不测试，直接保存**；通道是否可用由使用者自己负责。
 - `thinking` 是出站请求的思考强度映射：字符串值 = `{"reasoning_effort": 值}` 简写；对象值 = 原样合并；空对象 = 这一档不发任何字段。
 - `models.yaml` 的 `thinking.levels` 片段不得覆盖协议字段（`model` / `messages` / `stream` / `stream_options` / `tools` / `tool_choice`），保存时拒收。
 - 解析优先级：会话选的档 > 模型 `default`；两者都没有 = 不发；会话档在模型里没登记 = 下一次生成如实报错（不静默降级）。
@@ -159,7 +160,7 @@ models:
     name: 快速模型
     api_model: example-fast
     provider: main
-    tools: envelope
+    tools: native
     thinking:
       default: low
       levels:
@@ -180,7 +181,7 @@ agents:
 
 ## 校验与拒收
 - `providers.yaml`：`<供应商 id>`、`base_url`、`api_key` 不能为空；更新时 `api_key` 留空且没有旧值 = 报错；删除仍被模型引用的供应商 = 拒绝并列出引用者。
-- `models.yaml`：`name` / `api_model` / `provider` 必填；`provider` 不指向已存在的供应商 = 拒绝新增；`tools` 不是 `envelope` / `native` = 拒收；`thinking` 片段覆盖协议字段 = 保存时拒收；删除核心默认模型 = 拒绝；`core` 未设定或解析失败 = 建会话 / 核心操作如实拒绝。
+- `models.yaml`：`name` / `api_model` / `provider` 必填；`provider` 不指向已存在的供应商 = 拒绝新增；`tools` 不是 `envelope` / `native` = 拒收；原生形态保存前实测不通过 = 拒绝新增 / 更新；`thinking` 片段覆盖协议字段 = 保存时拒收；删除核心默认模型 = 拒绝；`core` 未设定或解析失败 = 建会话 / 核心操作如实拒绝。
 - `agents.yaml`：agent 名不满足「六、名字与 id」的校验 = 拒收；同一工作内重名按兜底规则处理。
 - `settings.yaml`：`thinking.levels` 的标签为空、有首尾空白 / 控制字符或重复 = 拒收；删掉仍被引用的档位、模型默认档不在目录里 = 拒绝；拼错键 / 未知键 / 相对的主机只读根 / 非法路径 = 启动即报 `settings.yaml 配置非法`；`require` 文件系统 / 网络围栏与 `windows.write_acl: false` 并用 = 保存拒绝；`storage` 字段范围保存时校验。
 - 密钥边界：通道密钥只在 `providers.yaml` 与核心发起的出站调用里存在，永不进入提示词、转录、日志、模块工作区。

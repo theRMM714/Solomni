@@ -527,7 +527,7 @@ pub(crate) fn builtin_tool_book_is_the_one_source_of_names_and_paths() {
     );
 
     // 工具说明来自同一份声明，但**按回合注入**：核心查这一回合的身份，只渲染它那一份。
-    let m = member_with_tools("a1", vec![], Arc::new(SilentRunner));
+    let mut m = member_with_tools("a1", vec![], Arc::new(SilentRunner));
     let block = m
         .tools
         .as_ref()
@@ -559,4 +559,24 @@ pub(crate) fn builtin_tool_book_is_the_one_source_of_names_and_paths() {
         .tools_block(&["read".to_string()], false);
     assert!(only_read.contains("- offset（integer"), "{}", only_read);
     assert!(!only_read.contains("patch"), "{}", only_read);
+
+    // 原生通道：工具面由**声明槽**下发，文字清单不再重复；只保留 patch 的自由格式写法。
+    let mut native_tools = m.tools.take().expect("工具环境");
+    native_tools.mode = crate::capabilities::llm::api::ToolMode::Native;
+    m.tools = Some(native_tools);
+    let native_block = m
+        .tools
+        .as_ref()
+        .expect("工具环境")
+        .tools_block(&crate::capabilities::tools::api::names(), true);
+    assert!(
+        !native_block.contains("- offset（integer"),
+        "原生模式不再重复注入工具参数文本：{}",
+        native_block
+    );
+    assert!(
+        native_block.contains("【改文件：用 patch"),
+        "声明表达不了的 patch 写法仍要保留：{}",
+        native_block
+    );
 }
