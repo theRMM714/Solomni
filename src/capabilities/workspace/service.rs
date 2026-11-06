@@ -146,6 +146,56 @@ impl WorkspaceService {
         Ok(())
     }
 
+    /// 目的：回档物化前核对工作区磁盘：会覆盖 / 删除被外部改过内容的路径整次拒绝。
+    /// 约束：只在外部工作区生效；强制覆盖需要用户危险确认（界面另行接入）。
+    fn external_materialize_conflicts(
+        &self,
+        work: &str,
+        shared: &Path,
+        store: &Path,
+        target: Option<u64>,
+    ) -> Result<Vec<String>, String> {
+        if !self.dirs.is_external(work) {
+            return Ok(Vec::new());
+        }
+        let current = match self.store.head(store)? {
+            Some(id) => {
+                self.store
+                    .read_commit(store, id)?
+                    .ok_or_else(|| format!("head 指向不存在的提交 {}", id))?
+                    .tree
+            }
+            None => Tree::new(),
+        };
+        let target_tree = match target {
+            Some(id) => {
+                self.store
+                    .read_commit(store, id)?
+                    .ok_or_else(|| format!("没有提交点 {}", id))?
+                    .tree
+            }
+            None => Tree::new(),
+        };
+        let mut conflicts: BTreeSet<String> = BTreeSet::new();
+        for (rel, head) in &current {
+            if target_tree.contains_key(rel) {
+                continue;
+            }
+            let disk = self.disk_hash(shared, rel)?;
+            if disk.is_some() && disk.as_deref() != Some(head.as_str()) {
+                conflicts.insert(rel.clone());
+            }
+        }
+        for rel in target_tree.keys() {
+            let expected = current.get(rel).map(String::as_str);
+            let disk = self.disk_hash(shared, rel)?;
+            if disk.as_deref() != expected {
+                conflicts.insert(rel.clone());
+            }
+        }
+        Ok(conflicts.into_iter().collect())
+    }
+
     /// 目的：提交前核对工作区磁盘与 head：外部改过的路径整次提交拒绝，绝不静默覆盖。
     /// 约束：只对绑定了外部工作区的会话调用；删除型改动在磁盘已不存在时视为已达成。
     fn reject_external_changes(
@@ -1539,6 +1589,13 @@ impl Workspace for WorkspaceService {
         if self.store.read_commit(&store, commit)?.is_none() {
             return Err(format!("没有提交点 {}", commit));
         }
+        let conflicts = self.external_materialize_conflicts(work, &shared, &store, Some(commit))?;
+        if !conflicts.is_empty() {
+            return Err(format!(
+                "回档会覆盖工作区里被外部改动的内容：{}——先 work_sync 采纳外部版本；强制覆盖需要用户危险确认。",
+                conflicts.join("、")
+            ));
+        }
         let pending = Pending::Restore {
             target: Some(commit),
         };
@@ -1593,6 +1650,13 @@ impl Workspace for WorkspaceService {
                 target = Some(id);
             }
         }
+        let conflicts = self.external_materialize_conflicts(work, &shared, &store, target)?;
+        if !conflicts.is_empty() {
+            return Err(format!(
+                "回档会覆盖工作区里被外部改动的内容：{}——先 work_sync 采纳外部版本；强制覆盖需要用户危险确认。",
+                conflicts.join("、")
+            ));
+        }
         let pending = Pending::Restore { target };
         self.store.write_pending(&store, &pending)?;
         let result = WorkspaceService::materialize(self.store.as_ref(), &shared, &store, target);
@@ -1612,6 +1676,13 @@ impl Workspace for WorkspaceService {
                 return Err(format!("没有提交点 {}", id));
             }
         }
+        let conflicts = self.external_materialize_conflicts(work, &shared, &store, commit)?;
+        if !conflicts.is_empty() {
+            return Err(format!(
+                "回档会覆盖工作区里被外部改动的内容：{}——先 work_sync 采纳外部版本；强制覆盖需要用户危险确认。",
+                conflicts.join("、")
+            ));
+        }
         let pending = Pending::Restore { target: commit };
         self.store.write_pending(&store, &pending)?;
         let result = WorkspaceService::materialize(self.store.as_ref(), &shared, &store, commit);
@@ -1629,6 +1700,13 @@ impl Workspace for WorkspaceService {
             if self.store.read_commit(&store, id)?.is_none() {
                 return Err(format!("没有提交点 {}", id));
             }
+        }
+        let conflicts = self.external_materialize_conflicts(work, &shared, &store, keep)?;
+        if !conflicts.is_empty() {
+            return Err(format!(
+                "回档会覆盖工作区里被外部改动的内容：{}——先 work_sync 采纳外部版本；强制覆盖需要用户危险确认。",
+                conflicts.join("、")
+            ));
         }
         // 先物化到 keep、写 head，再删非祖先提交；崩溃时 head 不会指向被删提交。
         let pending = Pending::Discard { keep };

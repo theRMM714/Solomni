@@ -198,6 +198,15 @@ pub(crate) fn external_workspace_surfaces_disk_changes_and_sync_adopts_them() {
         b"user"
     );
 
+    // 工作区又被外部改过一次：回档会覆盖它，先拒绝并要求 work_sync（危险确认尚未接界面）。
+    std::fs::write(external.join("note.md"), b"v4").expect("再次外部改");
+    let err = ws
+        .work_restore("w", first)
+        .expect_err("外部改动时回档必须拒绝");
+    assert!(err.contains("被外部改动"), "{}", err);
+    ws.work_sync("w", &["note.md".to_string()], 11)
+        .expect("先采纳外部版本");
+
     // 回档只动受管路径：未跟踪文件永不被物化删除，受管路径按目标树恢复。
     std::fs::write(external.join("keep.txt"), b"keep").expect("未跟踪文件");
     ws.work_restore("w", first).expect("回档");
