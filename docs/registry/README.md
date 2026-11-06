@@ -47,7 +47,7 @@
 - 改一个写方法要同时改动作表、执行体与前端调用点。
 - 密钥回显边界：界面只呈现「供应商 id + 端点」与「模型 id + 展示名」，永不携带密钥；更新供应商时 `api_key` 留空 = 保留原值。
 
-## 四、四份 yaml 的读写
+## 五、四份 yaml 的读写
 - `.home/` 下四份文件分开读写：`load` 逐份读，缺哪份就用哪份的默认；`save` 会同时写四份。
 - 结构定义在 `src/capabilities/registry/domain/providers.rs` 与 `src/capabilities/registry/domain/agents.rs`；解析与写盘在 `src/capabilities/registry/detail/yaml_settings.rs`。
 - yaml 非法（解析失败）= 装配失败并指出是哪一份。
