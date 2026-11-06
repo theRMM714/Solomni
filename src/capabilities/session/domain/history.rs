@@ -155,6 +155,9 @@ pub struct HistoryView {
     /// 目的：外部工作区根；None = 产品内布局。侧栏据此把删除文案说成“只删记录”。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<String>,
+    /// 目的：绑定外部工作区但根已不可达（侧栏标红、禁止打开）。
+    #[serde(default)]
+    pub workspace_missing: bool,
     /// 运行态（`active` / `stopped` / `closed`）：侧栏据此标出已停止 / 已关闭的会话
     /// （"这一刻在不在跑"是另一回事，见 `SessionView.running`）。
     pub run: RunState,

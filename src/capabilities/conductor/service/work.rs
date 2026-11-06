@@ -1276,6 +1276,7 @@ impl Conductor {
                     context,
                     shell,
                     workspace: entry.and_then(|h| h.workspace.clone()),
+                    workspace_missing: entry.map(|h| h.workspace_missing).unwrap_or(false),
                 }
             })
             .collect()

@@ -1308,6 +1308,11 @@ impl HistoryStore for InMemoryHistory {
                     .workspace
                     .as_ref()
                     .map(|binding| binding.root.display().to_string()),
+                workspace_missing: m
+                    .workspace
+                    .as_ref()
+                    .map(|binding| !binding.root.is_dir())
+                    .unwrap_or(false),
                 run: m.run,
             })
             .collect())

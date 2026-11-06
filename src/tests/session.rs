@@ -1722,6 +1722,7 @@ pub(crate) fn history_list_is_ordered_as_a_tree() {
             exec: Default::default(),
             parent: parent.map(|s| s.to_string()),
             workspace: None,
+            workspace_missing: false,
             run: RunState::Active,
         }
     };

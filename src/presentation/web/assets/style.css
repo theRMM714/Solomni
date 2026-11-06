@@ -474,6 +474,8 @@ body {
 .history-list { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
 .history-list:empty::before { content: "（还没有历史会话）"; color: var(--color-text-dim); font-size: 12px; }
 /* 条目本身不是入口（点了不进会话）：进入走「打开」按钮，改动走「编辑」按钮。 */
+.history-item.bad .hname { color: var(--color-err); font-weight: 600; }
+.history-item.bad .hmode { color: var(--color-err); }
 .history-item {
   display: flex; align-items: center; gap: 6px; cursor: pointer;
   background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 6px; padding: 5px 8px;

@@ -129,6 +129,8 @@ async function refreshState() {
       shell: v.shell || null,
       work: null, workAt: 0, workDirty: false, workError: '',
       readonly: false, hydrated: false, buffer: [],
+      workspace: v.workspace || (h && h.workspace) || null,
+      workspace_missing: !!(v.workspace_missing || (h && h.workspace_missing)),
     };
     state.sessions.set(v.sid, s);
     // 盘上转录是这条会话的**前缀**：补上它，之后的实时事件按 seq 接上（同 id 的行不重复）。
@@ -423,8 +425,8 @@ function renderHistory() {
   const branch = (parent, into) => {
     for (const h of (by.get(parent) || [])) {
       const row = document.createElement('div');
-      row.className = 'history-item';
-      row.title = '点击打开会话';
+      row.className = 'history-item' + (h.workspace_missing ? ' bad' : '');
+      row.title = h.workspace_missing ? '工作区已不存在：只能查看记录，不能启用' : '点击打开会话';
       row.onclick = () => openHistory(h.name);
       const kids = by.get(h.name) || [];
       const open = state.treeOpen.has(h.name);
@@ -452,7 +454,8 @@ function renderHistory() {
         : h.run === 'closed' ? '·已关闭'
           : (h.done ? '' : '·进行中 ');
       mode.textContent = stateTag + h.mode +
-        (h.tier === 'vm' && h.tier_ready === false ? '·虚拟机档不可用' : '');
+        (h.tier === 'vm' && h.tier_ready === false ? '·虚拟机档不可用' : '') +
+        (h.workspace_missing ? '·工作区不存在' : '');
       const pencil = ui.iconButton({ icon: 'pencil', label: '会话操作', tip: '', cls: 'hpen' });
       pencil.onclick = (e) => { e.stopPropagation(); ui.menu(pencil, historyMenu(h)); };
       row.appendChild(name); row.appendChild(mode); row.appendChild(pencil);
@@ -579,6 +582,9 @@ async function openHistory(name) {
       permission_narrowed: false, permission_parent: null,
       done: true, awaiting: null, readonly: true, fold: {}, scroll: {},
     };
+    const hist = (state.history || []).find((x) => x.name === name);
+    s.workspace = (hist && hist.workspace) || null;
+    s.workspace_missing = !!(hist && hist.workspace_missing);
     s.hydrated = true;
     // 合流：盘上转录 + 事件台尾巴一次给全；水位 = 合流时的头部（之后的实时批次照收）。
     if (typeof r.head === 'number') s.floor = r.head;
@@ -3956,6 +3962,11 @@ function renderReadonly(s) {
   bar.classList.remove('hidden');
   const note = document.createElement('span');
   note.className = 'readonly-note';
+  if (s.workspace_missing) {
+    note.textContent = '工作区已不存在：恢复目录或删除会话后才能启用（当前只能查看记录）';
+    bar.appendChild(note);
+    return;
+  }
   note.textContent = s.run === 'closed' ? '历史回放（只读）· 已关闭' : '历史回放（只读）：启用后才能发送消息';
   bar.appendChild(note);
   if (s.run === 'closed') return;
@@ -5769,6 +5780,7 @@ function withdrawAgree(agent) {
    前端只把返回的会话视图贴回本地并渲染。启用本身不跑模型。 */
 async function activateFlow() {
   const s = activeSession();
+  if (s && s.workspace_missing) { notice('工作区已不存在', '这条会话绑定的工作区已不可达：恢复目录或删除会话后再启用。', 'err'); return; }
   if (!s || !s.readonly || s.activating) return;
   s.activating = true;
   renderAll();
