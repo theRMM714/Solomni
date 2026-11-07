@@ -279,7 +279,7 @@ fn host_build_failure_is_honest_and_leaves_no_state() {
 }
 
 /// 目的：真机验收（默认跳过）：虚拟机档构建——在 guest 本地工作区里编，产物按差异回写模块目录。
-/// 约束：只在 `SOLOMNI_VM_LIVE=1` 且 QEMU 与虚拟根（`SOLOMNI_VM_GUEST`，默认 `debian`）都在场时跑；否则 [探针] 如实跳过。
+/// 约束：只在 `SOLOMNI_VM_LIVE=1` 且 QEMU 与虚拟根（`SOLOMNI_VM_GUEST`，默认 `debian-13`）都在场时跑；否则 [探针] 如实跳过。
 /// 约束：断言落在**产物回写与内容**上，不断言宿主文件的执行位——虚拟机档的执行由 guest 本地副本承担。
 #[test]
 fn guest_build_writes_products_back_from_the_local_workspace() {
@@ -291,7 +291,7 @@ fn guest_build_writes_products_back_from_the_local_workspace() {
         eprintln!("[探针] 未开启虚拟机档构建的真机验收：设 SOLOMNI_VM_LIVE=1 后重跑");
         return;
     }
-    let guest = std::env::var("SOLOMNI_VM_GUEST").unwrap_or_else(|_| "debian".to_string());
+    let guest = std::env::var("SOLOMNI_VM_GUEST").unwrap_or_else(|_| "debian-13".to_string());
     let repo = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let deps = crate::capabilities::provision::api::Provision::status(
         &crate::capabilities::provision::ProvisionService::new(&repo),

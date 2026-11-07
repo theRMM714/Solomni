@@ -2119,9 +2119,9 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
     let live = std::env::var("SOLOMNI_VM_LIVE").as_deref() == Ok("1");
     let qemu = std::env::var("SOLOMNI_VM_QEMU").unwrap_or_default();
     // 虚拟根名（默认 debian）；在场与否由 resolve_guest 解析出的那一格判。
-    let guest = std::env::var("SOLOMNI_VM_GUEST").unwrap_or_else(|_| "debian".to_string());
+    let guest = std::env::var("SOLOMNI_VM_GUEST").unwrap_or_else(|_| "debian-13".to_string());
     if !live || qemu.trim().is_empty() {
-        eprintln!("[探针] 未开启虚拟机档真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑（虚拟根默认 debian，可用 SOLOMNI_VM_GUEST 换）");
+        eprintln!("[探针] 未开启虚拟机档真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑（虚拟根默认 debian-13，可用 SOLOMNI_VM_GUEST 换）");
         return;
     }
     let probe = crate::kernel::detail::HostProbeAdapter;
@@ -2418,7 +2418,7 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
 pub(crate) fn vm_live_two_guests_share_one_base_without_writing_it() {
     let live = std::env::var("SOLOMNI_VM_LIVE").as_deref() == Ok("1");
     let qemu = std::env::var("SOLOMNI_VM_QEMU").unwrap_or_default();
-    let guest = std::env::var("SOLOMNI_VM_GUEST").unwrap_or_else(|_| "debian".to_string());
+    let guest = std::env::var("SOLOMNI_VM_GUEST").unwrap_or_else(|_| "debian-13".to_string());
     if !live || qemu.trim().is_empty() {
         eprintln!(
             "[探针] 未开启并发可写层的真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑"
@@ -2517,9 +2517,9 @@ pub(crate) fn vm_live_two_guests_share_one_base_without_writing_it() {
 pub(crate) fn vm_live_cancel_kills_the_guest_process_tree() {
     let live = std::env::var("SOLOMNI_VM_LIVE").as_deref() == Ok("1");
     let qemu = std::env::var("SOLOMNI_VM_QEMU").unwrap_or_default();
-    let guest = std::env::var("SOLOMNI_VM_GUEST").unwrap_or_else(|_| "debian".to_string());
+    let guest = std::env::var("SOLOMNI_VM_GUEST").unwrap_or_else(|_| "debian-13".to_string());
     if !live || qemu.trim().is_empty() {
-        eprintln!("[探针] 未开启取消的真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑（虚拟根默认 debian，可用 SOLOMNI_VM_GUEST 换）");
+        eprintln!("[探针] 未开启取消的真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑（虚拟根默认 debian-13，可用 SOLOMNI_VM_GUEST 换）");
         return;
     }
     let probe = crate::kernel::detail::HostProbeAdapter;
@@ -3650,9 +3650,9 @@ pub(crate) fn vm_live_guest_diagnose_lists_processes() {
 
     let live = std::env::var("SOLOMNI_VM_LIVE").as_deref() == Ok("1");
     let qemu = std::env::var("SOLOMNI_VM_QEMU").unwrap_or_default();
-    let guest = std::env::var("SOLOMNI_VM_GUEST").unwrap_or_else(|_| "debian".to_string());
+    let guest = std::env::var("SOLOMNI_VM_GUEST").unwrap_or_else(|_| "debian-13".to_string());
     if !live || qemu.trim().is_empty() {
-        eprintln!("[探针] 未开启 guest 诊断的真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑（虚拟根默认 debian，可用 SOLOMNI_VM_GUEST 换）");
+        eprintln!("[探针] 未开启 guest 诊断的真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑（虚拟根默认 debian-13，可用 SOLOMNI_VM_GUEST 换）");
         return;
     }
     let probe = crate::kernel::detail::HostProbeAdapter;
@@ -3775,10 +3775,10 @@ pub(crate) fn vm_live_external_workspace_round_trip() {
 
     let live = std::env::var("SOLOMNI_VM_LIVE").as_deref() == Ok("1");
     let qemu = std::env::var("SOLOMNI_VM_QEMU").unwrap_or_default();
-    let guest_name = std::env::var("SOLOMNI_VM_GUEST").unwrap_or_else(|_| "debian".to_string());
+    let guest_name = std::env::var("SOLOMNI_VM_GUEST").unwrap_or_else(|_| "debian-13".to_string());
     if !live || qemu.trim().is_empty() {
         eprintln!(
-            "[探针] 未开启外部工作区真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑（虚拟根默认 debian，可用 SOLOMNI_VM_GUEST 换）"
+            "[探针] 未开启外部工作区真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑（虚拟根默认 debian-13，可用 SOLOMNI_VM_GUEST 换）"
         );
         return;
     }

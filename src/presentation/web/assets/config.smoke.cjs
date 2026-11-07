@@ -107,8 +107,8 @@ const CFG = {
     ],
   },
   guests: [
-    { guest: "debian", label: "debian-13-genericcloud-amd64", os: "linux", arch: "amd64", ready: true, missing: [], install: ".vm/guest/debian", runtimes: ["python"] },
-    { guest: "windows", label: "debian-13-genericcloud-amd64", os: "linux", arch: "amd64", ready: false, missing: ["vm.guest-runtime.windows"], install: ".vm/guest/windows" },
+    { guest: "debian-13", label: "debian-13-genericcloud-amd64", os: "linux", arch: "amd64", ready: true, missing: [], install: ".vm/guest/debian-13", runtimes: ["python"] },
+    { guest: "debian-13", label: "debian-13-genericcloud-amd64", os: "linux", arch: "amd64", ready: false, missing: ["vm.guest-runtime.windows"], install: ".vm/guest/debian-13" },
   ],
   pins: { python: "3.12", ruby: "3.2" },
   thinking: { level: null, default_level: "high", label: "high", options: [{ id: "high", label: "high" }], note: "" },
@@ -208,7 +208,7 @@ const sandbox = {
         vm_requirements: tiersVmAvailable ? [] : RAW.vm_requirements,
         guests: tiersVmAvailable
           ? [{ guest: "windows", label: "debian-13", os: "linux", arch: "amd64", ready: tiersGuestReady,
-              missing: tiersGuestReady ? [] : ["vm.guest-runtime.linux"], install: ".vm/guest/windows", runtimes: ["python"] }]
+              missing: tiersGuestReady ? [] : ["vm.guest-runtime.linux"], install: ".vm/guest/debian-13", runtimes: ["python"] }]
           : [],
         available: {},
       } });
