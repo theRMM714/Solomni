@@ -924,7 +924,13 @@ async function ensureBuildCC(yes) {
   if (!dep) {
     die("dependencies.yaml 缺少当前平台的 toolchain.cc 条目（" + TARGET_KEY + "）：无法自举项目内 C 工具链。");
   }
-  if (buildCCReady(dep)) return true;
+  if (buildCCReady(dep)) {
+    // 文件在场不等于能跑（包装指向的 zig 可能被删 / 半套）：真编一个空程序再认。
+    const env = Object.assign({}, process.env);
+    setEnvPath(env, dep.bin + path.delimiter + (envPath(env) || ""));
+    if (probeHostCC({ env }).ok) return true;
+    log("项目内 Zig cc 在场但不能构建，重新安装");
+  }
   const ans = await ask("没有可用的 C 链接器。把项目内 Zig cc（约 51MB）装进 " +
     path.relative(ROOT, dep.install) + " 吗？[y/N] ", { yes });
   if (ans === null || ans.trim().toLowerCase() !== "y") {
