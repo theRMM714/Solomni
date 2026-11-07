@@ -344,7 +344,7 @@ pub(crate) fn report_lines(base: &BaseFacts) -> Vec<String> {
         .collect();
     if !missing.is_empty() {
         lines.push(format!(
-            "项目内未安装：{}；补全：solomni --provision --ensure=toolchain --yes",
+            "项目内未安装：{}；补全：node start.js --provision --ensure=toolchain --yes",
             missing.join("、")
         ));
         for id in missing {

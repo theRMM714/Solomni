@@ -3,7 +3,8 @@
 root/prompts/
 root/systools/
 # 项目内工具链由编排器链进夹具（junction / symlink，不是副本）：不入库。
-root/.tools/
+# 不带尾斜杠：工具链是 symlink，带斜杠的规则只匹配目录，匹配不到链接本身。
+root/.tools
 root/.home
 root/modules/toolbox/module.yaml
 root/session/
