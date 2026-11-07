@@ -322,7 +322,7 @@ fn guest_build_writes_products_back_from_the_local_workspace() {
     // 构建脚本写一个能直接跑的产物：脚本本身由产品在 guest 本地给执行位，不靠共享盘。
     std::fs::write(
         module_dir.join("tools").join("build"),
-        "#!/bin/sh\nset -e\nmkdir -p build\nprintf '#!/bin/sh\\necho GUEST-OK\\n' > build/hello\n",
+        "#!/bin/sh\nset -e\nmkdir -p build\nprintf '#!/bin/sh\\necho GUEST-OK\\n' > build/hello\nchmod 0755 build/hello\n",
     )
     .expect("写构建脚本");
     let Some(exe) = crate::tests::doubles::built_exe() else {

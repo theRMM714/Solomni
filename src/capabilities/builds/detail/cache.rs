@@ -215,6 +215,7 @@ pub(crate) fn snapshot_script(id: &str) -> String {
 /// 目的：回写脚本——本次新增/修改的文件 + 模块声明的入口，一起 tar 回共享盘上的模块目录。
 /// 参数：`dst` = 模块目录在 guest 里的共享路径；`entries` = 入口（相对工作区）。
 /// 约束：入口一律回写（宿主那份可能被手工删掉，差异里看不出来）；不镜像删除，失败不回写。
+///   回写只保留权限位，不保留 guest 属主——共享区（virtiofs / 9p）以宿主用户提供服务，chown 到 root 必失败。
 pub(crate) fn sync_out_script(id: &str, dst: &str, entries: &[String]) -> String {
     let ws = workspace(id);
     let before = before_list(id);
@@ -239,7 +240,9 @@ awk -F'\t' 'NR==FNR{{o[$1]=$2"\t"$3;next}} {{ if (!($1 in o) || o[$1] != $2"\t"$
 {entries}sort -u "$LIST" -o "$LIST"
 if [ -s "$LIST" ]; then
   tar -C "$WS" -cf "$TMP" -T "$LIST"
-  tar -C {dst} -xpf "$TMP"
+  # 产物在 guest 里属 root；共享后端以宿主用户提供服务，无法 chown 到 0。
+  # 只保留权限位，属主交给共享后端（宿主用户）。
+  tar -C {dst} --no-same-owner -xpf "$TMP"
   rm -f "$TMP"
 fi
 rm -f "$BEFORE" "$AFTER" "$LIST""#,
@@ -511,7 +514,11 @@ mod tests {
         assert!(s.contains("awk -F"), "{}", s);
         assert!(s.contains("[ -f \"$WS/'build/indexer'\" ]"), "{}", s);
         assert!(s.contains("sort -u \"$LIST\" -o \"$LIST\""), "{}", s);
-        assert!(s.contains("tar -C '/solomni-host/d/m' -xpf"), "{}", s);
+        assert!(
+            s.contains("tar -C '/solomni-host/d/m' --no-same-owner -xpf"),
+            "回写不能保留 guest 属主（共享区无法 chown 到 root）：{}",
+            s
+        );
     }
 
     /// 目的：收尾要清临时目录并归还空块。
