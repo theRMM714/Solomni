@@ -56,6 +56,6 @@ guest.debian.linux: https://deb.debian.org/debian/pool/main/l/linux/
 # 自托管依赖的下载根；具体版本在 dependencies.yaml 的 `release:<tag>/<资产>`，按依赖族各自发 release。
 release.base: https://github.com/theRMM714/Solomni/releases/download/
 # Windows 的 SMB 共享 helper：独立 fork 仓自己发 Release 资产（源码 + 预编译 smbd.exe）。
-smbd.windows: https://github.com/theRMM714/rust-smb-server/releases/download/smbd-v0.2.0/smbd-windows-x86_64.exe
+smbd.windows: https://github.com/theRMM714/rust-smb-server/releases/download/smbd-v0.3.0/smbd-windows-x86_64.exe
 # 来源：该 release 的 `smbd-windows-x86_64.exe.sha256`（CI 生成；缺失时回退 GitHub API 的资产 digest）。
-smbd.windows.sha256: 507767af5a75201c9de0307fb7982753037fd9cf15f4c07f477c7ba2c0e18ba1
+smbd.windows.sha256: 838a258841a34641b306e1aba67bcd1ec57f894fb4030e3205d3391796afc885

@@ -177,6 +177,7 @@ node run-tests.js --fence-live
 - `tests/cross-platform/e2e/`：vm 会话场景。
 - `src/tests/workspace.rs` 的**UNC 外部工作区往返**探针 `unc_external_workspace_round_trip_on_a_real_share`：设 `SOLOMNI_UNC_ROOT` 指向一个可写 UNC 目录（如 `\\localhost\D$\AIproject\target\unc`）才真跑——虚拟机档绑定落成 native UNC、本机档拒绝且不触网、产品根 UNC 别名按落点身份拒、共享根拒、首绑导入与 pull / commit / status / sync、删会话不删外部；CI 没有 UNC，缺省打印 `[探针]`。
 
+- `src/tests/vm.rs` 的**UNC 共享根往返**探针 `vm_live_unc_share_round_trip`：只 Windows；设 `SOLOMNI_VM_LIVE=1`、`SOLOMNI_VM_QEMU`、`SOLOMNI_VM_SMBD`、`SOLOMNI_UNC_ROOT` 才真跑——helper 以 UNC 目录为共享根（没有 :ro）起服务，guest 经 CIFS 枚举 / 建目录 / 写 / 改名 / 删除，每个结果都要落到宿主那个 UNC 目录里；CI 没有 UNC 与虚拟根，缺省打印 `[探针]`。
 - 未开启时用例打印行首 `[探针]`，入口按 `env-skip` 记进报告，不算通过。CI **不设** `SOLOMNI_VM_LIVE`：真机证据只能在有 KVM / WHPX 的机器上手工产出（`node dev.js cargo -- test --bin solomni -- vm_live_external_workspace_round_trip`，探针在 `src/tests/vm.rs`），报告里如实记 env-skip。
 
 - **Linux 的 ext4 工具链用例按环境判据跳过**：`unshare -r` / `mke2fs` / `debugfs` 不可用（Linux CI 就是这样）时，`packed_guest_image_uses_4k_blocks` 与 `guest_rootfs_restores_privilege_bits_and_ownership` 打印 `[探针]` 并跳过。

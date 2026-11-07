@@ -4111,3 +4111,158 @@ pub(crate) fn vm_live_external_workspace_round_trip() {
         guard.release();
     }
 }
+
+/// 目的：真机验收（默认跳过）：UNC 共享根的可写往返——smbd 以 UNC 目录为共享根时，guest 经 CIFS 枚举、
+///   建目录、写文件、改名、删除，结果都要真落到宿主的那个 UNC 目录里。
+/// 约束：只在 Windows 上、SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU、SOLOMNI_VM_SMBD、SOLOMNI_UNC_ROOT 都在场时执行；
+///   与其它共虚拟根的真机用例串行；共享根取 SOLOMNI_UNC_ROOT 下的临时目录，跑完删掉。
+#[cfg(windows)]
+#[test]
+pub(crate) fn vm_live_unc_share_round_trip() {
+    use crate::capabilities::vm::domain::guest::{
+        guest_path, sh_quote, GuestMount, GuestRun, OutputLimit,
+    };
+
+    let live = std::env::var("SOLOMNI_VM_LIVE").as_deref() == Ok("1");
+    let qemu = std::env::var("SOLOMNI_VM_QEMU").unwrap_or_default();
+    let unc = std::env::var("SOLOMNI_UNC_ROOT").unwrap_or_default();
+    let smbd = std::env::var("SOLOMNI_VM_SMBD").unwrap_or_default();
+    // 本机可用的虚拟根是 Windows 宿主那份 Debian 云镜像，清单里叫 windows。
+    let guest_name = std::env::var("SOLOMNI_VM_GUEST").unwrap_or_else(|_| "windows".to_string());
+    if !live || qemu.trim().is_empty() || unc.trim().is_empty() || smbd.trim().is_empty() {
+        eprintln!(
+            "[探针] 未开启 UNC 共享根真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU、SOLOMNI_VM_SMBD、SOLOMNI_UNC_ROOT 后重跑"
+        );
+        return;
+    }
+    let probe = crate::kernel::detail::HostProbeAdapter;
+    let base_dir = match crate::capabilities::vm::api::resolve_guest(
+        &crate::tests::root_dir(),
+        &guest_name,
+    ) {
+        Ok(d) if probe.is_dir(&d) => d,
+        _ => {
+            eprintln!(
+                "[探针] 本机没有虚拟根「{}」：先用 solomni --provision --ensure --yes，或用 SOLOMNI_VM_GUEST 指定",
+                guest_name
+            );
+            return;
+        }
+    };
+    let _live = crate::tests::doubles::live_guest_lock();
+    let image = classify_base(&base_dir, &probe).expect("虚拟根要可用");
+    if !image.clients.cifs {
+        eprintln!("[探针] 虚拟根没声明 cifs 客户端：跳过");
+        return;
+    }
+    // 共享根本身就是 UNC 目录：这是 cap-primitives 那条"句柄 → 路径字符串 → std::fs"断掉的现场。
+    let external = std::path::PathBuf::from(unc.trim())
+        .join("vm-live-unc")
+        .join(format!("share-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&external);
+    std::fs::create_dir_all(external.join("dir1")).expect("建 UNC 共享根");
+    std::fs::write(external.join("dir1").join("a.txt"), "PRE").expect("写共享里的标记");
+    let mounts = vec![GuestMount {
+        host: external.clone(),
+        guest: "/mnt/ext".to_string(),
+        read_only: false,
+    }];
+    let backend = crate::capabilities::vm::detail::SmbShare::new();
+    let (share_plan, mut guard) = backend
+        .prepare("qemu", &mounts, Some(smbd.trim()))
+        .expect("SMB 共享计划要能派生");
+    let overlay_dir = crate::tests::scratch("vm-live-unc-overlays");
+    let engine = crate::capabilities::vm::detail::QemuEngine::with_overlay_dir(overlay_dir);
+    let spec = GuestSpec {
+        lease: "vm-live-unc".to_string(),
+        image: image.clone(),
+        mounts: mounts.clone(),
+        net: false,
+        engine_path: Some(qemu.clone()),
+        share_path: Some(smbd.trim().to_string()),
+        shares: vec!["smb"],
+        seed: None,
+        isolated: true,
+        cache_disk: None,
+    };
+    let mut guest = engine.boot(&spec, &share_plan).expect("起 guest");
+    let guest_external = guest_path(&external, image.os, &mounts);
+    let ext = sh_quote(&guest_external);
+    // 1) 枚举（read_dir）、建目录（create_dir）、写文件、改名（rename）都要成立。
+    let made = guest.channel().exec(&GuestRun {
+        command: format!(
+            "ls {ext} && mkdir {ext}/made && printf UNC_OK > {ext}/made/a.txt && mv {ext}/made/a.txt {ext}/made/b.txt && cat {ext}/made/b.txt",
+        ),
+        args_json: "{}".to_string(),
+        env: Vec::new(),
+        cwd: String::new(),
+        timeout_secs: 30,
+        output_limit: OutputLimit::Head,
+    });
+    assert!(
+        made.ok,
+        "guest 要能在 UNC 共享根上枚举 / 建目录 / 写 / 改名：{}",
+        made.output
+    );
+    assert!(
+        made.output.contains("dir1") && made.output.contains("UNC_OK"),
+        "枚举要看见共享里原有的目录，写入要读得回：{}",
+        made.output
+    );
+    assert!(
+        std::fs::read_to_string(external.join("made").join("b.txt"))
+            .is_ok_and(|s| s.contains("UNC_OK")),
+        "改名后的文件要真落在宿主 UNC 目录里"
+    );
+    assert!(
+        !external.join("made").join("a.txt").exists(),
+        "改名后旧名字要消失"
+    );
+    // 2) 删除（remove_file）与删空目录（remove_dir）要真的删掉，不能只回成功。
+    let unlinked = guest.channel().exec(&GuestRun {
+        command: format!("rm {ext}/made/b.txt"),
+        args_json: "{}".to_string(),
+        env: Vec::new(),
+        cwd: String::new(),
+        timeout_secs: 30,
+        output_limit: OutputLimit::Head,
+    });
+    assert!(
+        unlinked.ok,
+        "guest 要能删掉 UNC 共享根里的文件：{}",
+        unlinked.output
+    );
+    // SMB 的删除在服务端按 POSIX 语义落盘，宿主侧看见名字消失可能晚一拍：有界等它。
+    let gone = std::time::Instant::now();
+    while external.join("made").join("b.txt").exists() && gone.elapsed().as_secs() < 5 {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert!(
+        !external.join("made").join("b.txt").exists(),
+        "删除要真落到宿主 UNC 目录（不许只回成功）"
+    );
+    let removed = guest.channel().exec(&GuestRun {
+        command: format!("rmdir {ext}/made && ls {ext}"),
+        args_json: "{}".to_string(),
+        env: Vec::new(),
+        cwd: String::new(),
+        timeout_secs: 30,
+        output_limit: OutputLimit::Head,
+    });
+    assert!(
+        removed.ok,
+        "guest 要能删掉 UNC 共享根里的空目录：{}",
+        removed.output
+    );
+    assert!(
+        !external.join("made").exists(),
+        "删除要真落到宿主 UNC 目录（不许只回成功）"
+    );
+    assert!(
+        external.join("dir1").join("a.txt").is_file(),
+        "共享里原有的文件不许被动到"
+    );
+    guest.stop();
+    guard.release();
+    let _ = std::fs::remove_dir_all(&external);
+}
