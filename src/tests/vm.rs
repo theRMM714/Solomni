@@ -2954,6 +2954,11 @@ pub(crate) fn guest_helper_is_a_fail_closed_landlock_launcher() {
         "只读基线要与本机 Linux 对齐，不能整棵 /etc：{}",
         script
     );
+    assert!(
+        script.contains("KEEP_FDS.append(pfd)") && !script.contains("os.close(pfd)"),
+        "规则路径的 O_PATH fd 要保留到 helper 退出：9p cache=none 不复用 inode，提前关闭会让 Landlock 子目录规则失配：{}",
+        script
+    );
     assert_eq!(
         crate::capabilities::vm::detail::guest_helper::HELPER_TIMEOUT_SECS,
         30,

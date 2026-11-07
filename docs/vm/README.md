@@ -42,7 +42,7 @@
 - Windows 验收前提：硬件加速（WHPX）可用；当前只验过物理宿主，嵌套虚拟化宿主未验，不声称支持。
 - guest 内诊断入口：CLI 交互命令 `diagnose <会话>` 造一次 `guest_diagnose` 动作（`systools/tools.yaml`，`callers: [user]`，参数 `session_id` 必填非空）——只读列出 guest 进程表（pid / ppid / 状态 / CPU 占用 / RSS / 运行时长 / 命令与参数）、CPU 汇总、内存、负载、挂载与内核 / 核数；诊断本身只读、不写 guest 文件（为复用既有 fenced 通道，宿主会按既有机制写一份策略临时文件，helper 读取后立即删除）、不改会话状态、不套 per-agent 围栏，guest 内走 helper 的只读诊断模式，宿主侧只用已持有的 QGA 通道（不新增外部端口，见 `src/capabilities/vm/service.rs` 的 `guest_diagnose`）。
 - 诊断失败如实分类：没有活 guest / 只有 Linux guest / QGA 通道不通 / guest 诊断助手不在或不支持 / guest 缺 python3 / 诊断超时 / 输出不可解析；「读不到」不说成「没有进程」（`src/capabilities/vm/domain/diagnose.rs`）。
-- 验收证据：引擎级探针（`vm_live_guest_runs_command_inside_guest`）+ 并发可写层探针（`vm_live_two_guests_share_one_base_without_writing_it`）与 e2e 的虚拟机档会话场景都过（虚拟根默认 `debian`，`SOLOMNI_VM_GUEST` 可换）；外部工作区往返探针 `vm_live_external_workspace_round_trip` 与 e2e 的外部工作区场景已在 Windows 真机通过（WHPX + SMB：guest 内读外部根、写私沙落宿主、写共享区被拒、删会话不删外部根），Linux 的 virtiofs / 9p 两变体待 KVM 真机验收，见 `tests/gaps.yaml` 的 `workspace.external-root-vm-tier`；两端的 QEMU 与 guest 镜像由 provision 能力按清单装入。
+- 验收证据：引擎级探针（`vm_live_guest_runs_command_inside_guest`）+ 并发可写层探针（`vm_live_two_guests_share_one_base_without_writing_it`）与 e2e 的虚拟机档会话场景都过（虚拟根默认 `debian`，`SOLOMNI_VM_GUEST` 可换）；外部工作区往返探针 `vm_live_external_workspace_round_trip` 与 e2e 的外部工作区场景已在 Windows 真机通过（WHPX + SMB：guest 内读外部根、写私沙落宿主、写共享区被拒、删会话不删外部根），Linux 的 virtiofs / 9p 两变体已在 KVM 上通过；两端的 QEMU 与 guest 镜像由 provision 能力按清单装入。
 - 诊断的真机探针 `vm_live_guest_diagnose_lists_processes`（`SOLOMNI_VM_LIVE=1` + `SOLOMNI_VM_QEMU`，默认 `[探针]` 跳过）验：guest 里起一个忙进程后诊断能列出该 pid 与 CPU / 内存 / 负载 / 挂载，停 guest 后如实报没有活 guest。
 - 多台虚拟机档会话并发时各写自己的每租约可写层（不共写基础镜像），同时台上限 `max_guests`（见「五、并发与可写层」）。
 - macOS 组合：缺 QEMU 取包与 Apple vz 引擎 + 自研 agent（vsock 通道）；缺口与验收标准只记在 `tests/macos/gaps.yaml`。
