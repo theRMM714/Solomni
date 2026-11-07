@@ -20,7 +20,7 @@ node dev.js clippy    # T0 静态检查（cargo clippy --all-targets --all-featu
 ```
 
 - **cargo 只经入口跑**：`node dev.js …` / `node run-tests.js` / `node start.js` 都注入同一份环境解析；`node dev.js cargo -- <参数>` 是唯一透传口（任意 cargo 子命令，环境与缓存不变）。
-- **要在终端直接敲 `cargo`，先按 `env.js` 注入环境**：`CARGO_HOME=platform/<os>/cargo`、`RUSTUP_HOME=platform/<os>/rustup`（借用 PATH 上的 rustup proxy 时保留系统的 `RUSTUP_HOME`——它靠这个找 toolchain）、`TMPDIR` / `TMP` / `TEMP`=`target/tmp`、`PATH` 前置 `platform/<os>/cargo/bin` 与 Windows GNU 的 `.tools/mingw64/bin`（门禁另外前置 `.tools/bin`，`cargo install --root .tools` 装的工具在那里）。具体值以 `node env.js` 的解析结果为准（机器可读：`node env.js --print-env`）；IDE / rust-analyzer 同配置。
+- **要在终端直接敲 `cargo`，先按 `env.js` 注入环境**：`CARGO_HOME=platform/<os>/cargo`、`RUSTUP_HOME=platform/<os>/rustup`（借用 PATH 上的 rustup proxy 时保留系统的 `RUSTUP_HOME`——它靠这个找 toolchain）、`TMPDIR` / `TMP` / `TEMP`=`target/tmp`、`PATH` 前置 `platform/<os>/cargo/bin`、Windows GNU 的 `.tools/mingw64/bin` 与 POSIX 项目内 Zig cc 的 `.tools/toolchains/<target>/cc/<version>/bin`（门禁另外前置 `.tools/bin`，`cargo install --root .tools` 装的工具在那里）。具体值以 `node env.js` 的解析结果为准（机器可读：`node env.js --print-env`）；IDE / rust-analyzer 同配置。
 - **未注入就不要敲**：裸 shell 的 `cargo build/test/fmt/clippy/install` 会用 PATH 上的系统工具链（Windows 多为 msvc，缺 `link.exe`；门禁与 CI 用项目内 GNU），缓存与临时目录也会落到项目外（项目外写零容忍，见 [quality-isolation.md](quality-isolation.md) 的「项目外写」）；只把 `platform/<os>/cargo/bin` 加进系统 PATH 却不给 `RUSTUP_HOME`、用 ambient cargo 装东西，同样不成立。
 - **原因**：①工具链一致性——不注入就用 PATH 上的系统工具链（Windows 多为 msvc）；②项目外写零容忍——`CARGO_HOME`、临时目录必须钉在项目内（[quality-isolation.md](quality-isolation.md) 的「项目外写」）；③门禁解析器与 CI 用同一份环境（[env.js](../../env.js)），手工绕开会让本地结论与 CI 对不上。
 
@@ -70,7 +70,7 @@ node run-tests.js
 14. 开发回路自检（`tests/dev-loop.mjs`：`dev.js` 的子命令表与"环境没就绪就如实拒绝"）；
 15. 依赖哈希工具自检（`tests/pins-tool.mjs`：`pins.js` 的台账解析 / 来源推导 / 原地重写；不碰网络）；
 16. 变更分流自检（`tests/ci-changes.mjs --self-test`：`code_changed` / `docs_changed` 两个谓词、`include_str!/include_bytes!` 文档消费、失败兜底）；
-17. 环境引导自检（`tests/env-bootstrap.mjs`：`env.js` 的下载 / 续传 / 结构判定 / sha256 闸与**借用门槛**，见下文；MinGW 部分仅 Windows 真跑，时限 5 分钟）；
+17. 环境引导自检（`tests/env-bootstrap.mjs`：`env.js` 的下载 / 续传 / 结构判定 / sha256 闸、**借用门槛**与 **Zig cc 自举**，见下文；MinGW 仅 Windows 真跑，Zig 仅 Linux / macOS 真跑，时限 5 分钟）；
 18. 存在编排器时运行 `L4 端到端`（编排器会**现场构建 indexer**：编译器版本进日志，构建失败即失败；`--skip-e2e` 时这一步整步不出现）；
 19. `T0 项目外写`（快照项目外缓存根，新增 / 变化即硬失败；顺带清理系统临时目录里上次崩溃残留的 `solomni-*`）；
 20. 写入 `target/` 下的 `test-report.json` 并打印 `TEST-REPORT-OK` 或 `TEST-REPORT-FAIL`；平台缺口账为空时再打印 `TEST-REPORT-ACCEPTED`。
@@ -100,7 +100,7 @@ node run-tests.js
 
 ### 环境引导自检（`tests/env-bootstrap.mjs`）
 
-- `env.js` 跑在门禁与产品**之前**（`start.bat` / `node env.js setup`）：它坏了等于用户装不上环境。这条自检用**真实子进程**（`<临时根>/env.js setup --yes`）+ **本地应答源**把 Windows 的 MinGW 引导链逐条钉住，并钉住**借用门槛**（借来的 cargo 能打印版本但构建不了时必须拒绝借用）；只写 `target/test-scratch/`、不碰外网、不装 Rust（假 cargo 文件，或一个"能跑但编不出东西"的 node 替身）。另跑一次只读的 `node env.js` 自诊断：状态里必须始终有 `build:` 结论，借用不可用时明说"不借用"。原样跑它：`node tests/env-bootstrap.mjs`。
+- `env.js` 跑在门禁与产品**之前**（`start.bat` / `node env.js setup`）：它坏了等于用户装不上环境。这条自检用**真实子进程**（`<临时根>/env.js setup --yes`）+ **本地应答源**把 Windows 的 MinGW 引导链逐条钉住，并钉住**借用门槛**（借来的 cargo 能打印版本但构建不了时必须拒绝借用）；POSIX 上把 Linux / macOS 的 Zig cc 引导链逐条钉住（宿主 cc 可用时零下载、缺失且同意后才装、无 TTY 不下载、sha256 闸、`--target=` 翻译、macOS 缺 CLT 的准确前置）；只写 `target/test-scratch/`、不碰外网、不装 Rust（假 cargo / rustc）。另跑一次只读的 `node env.js` 自诊断：状态里必须始终有 `build:` 结论，借用不可用时明说"不借用"。原样跑它：`node tests/env-bootstrap.mjs`。
 
 | 场景 | 判据 |
 | --- | --- |
@@ -112,9 +112,15 @@ node run-tests.js
 | 源不认 Range / 传到一半断开 | 退出 1、明说下载没完成、分片与来源标记都留着 |
 | 借用来的工具链构建不了 | 退出 1、明说"借用不成立"与借来的 host、不打印 `environment ready`（替身：node 冒充 cargo，`--version` 能过、构建探测不过） |
 | 项目内工具链装了一半 | 退出 1、说明项目内工具链构建不了、给"先卸再装"的修复步骤（下载中断会留下这种半套） |
+| POSIX 宿主 `cc` 可用 | 退出 0、零下载、不请求夹具源、不装项目内 cc |
+| POSIX 宿主 `cc` 缺失 + `--yes` | 退出 0、过 sha256、装出 `cc/gcc/g++/clang…` 包装、`--target=x86_64-unknown-linux-gnu` 翻成 Zig 认的形态 |
+| POSIX 半个 Zig cc（只有 gcc） | 退出 0、重新下载安装、补出 rustc 要用的 `cc` 包装 |
+| POSIX 宿主 `cc` 缺失 + 无 TTY | 退出 1、明说无交互终端不下载、指向 C 工具链与 `node env.js setup --yes`，不请求源 |
+| POSIX sha256 不符 | 退出 1、报不符、保留归档、不解包 |
+| macOS 缺 CLT | 退出 1、报 Xcode Command Line Tools / `xcode-select --install`，不下载 Zig |
 
-- 非 Windows 上那条路（`dlltool`）不存在：先打一条 `[探针]` 再照常打印 `ENV-BOOTSTRAP-OK`——env-skip，不算通过。
-- **这条自检只钉保留的引导链**：`env.js` 现在只做 Rust / MinGW 引导（`node env.js setup`）；运行前提基础工具链（Python / Node / C-C++）改由产品 `solomni --provision --ensure=toolchain --yes` 补齐（`kind: toolchain` 组别名只补缺项，全齐时打印「没有缺项，无需补齐」且不联网），不在门禁里跑、也不在这条自检里。
+- dlltool 只在 Windows、Zig 引导只在 POSIX：各自平台缺的另一条路如实 `[探针]` 跳过，不算通过。
+- **这条自检只钉保留的引导链**：`env.js` 做 Rust / MinGW / Zig cc 引导（`node env.js setup`）；运行前提基础工具链（Python / Node / C-C++）仍由产品 `solomni --provision --ensure=toolchain --yes` 补齐（`kind: toolchain` 组别名只补缺项，全齐时打印「没有缺项，无需补齐」且不联网）；Zig cc 与运行前提共用同一安装路径，`env.js` 先装好后产品只登记 `active.json`。
 
 ### 依赖哈希检查（`pins.js`）
 

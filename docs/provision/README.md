@@ -8,7 +8,7 @@
 
 - 管：内嵌 `dependencies.yaml`（依赖清单）与 `links.yaml`（下载源台账）、本机状态（缺什么、装到哪、从哪来）、下载缓存（`.vm/cache`）、解包落盘（`kernel::detail::unpack`）、一次后台补齐作业（进度 / 取消），以及**本机有哪些长驻子进程在跑**（读 `kernel::detail::procs` 的账：用途、归属、起止）。
 - 不管：虚拟机档的能力语义与档位判定（在 `vm`）。
-- 不管：构建期工具链（本机档由宿主自备，虚拟机档由 guest 的运行能力提供——都不是本能力）。
+- 不管：构建期工具链的引导（本机档由 `env.js` 在宿主 `cc` 不可用时按同一清单装项目内 Zig；虚拟机档由 guest 的运行能力提供——都不是本能力）。
 - 不管：界面怎么展示（在 `presentation`）。
 
 ## 入站契约与状态归属
@@ -40,6 +40,7 @@
 ### 基础工具链（`kind: toolchain`）
 
 - 清单的 `toolchain` 段是载荷：`tool`（工具 id，如 `python` / `node` / `cc`）、`version`（安装布局与 `active.json` 的版本）、`target`（可选的宿主目标名）、`bins`（相对 `install` 的目录，进 PATH）。缺段或空字段在安装时如实拒绝，不猜版本或布局。
+- **构建期与运行期共用同一份 Zig**：Linux / macOS 源码构建时，`env.js` 在宿主 `cc` 缺失或不能构建时，按同一条 `toolchain.cc.*` 条目把 Zig 装进 `install` 路径并前置到构建 PATH；之后 `--ensure=toolchain` 看到它已在场，只登记 `active.json`，不重复下载。macOS 链接系统框架仍需 Xcode CLT / SDK（Zig 包不含 SDK）。
 - 装完由 **Rust 侧**扫清单、核对每个 `bin` 目录在场，把在场项写进 `.tools/toolchains/active.json`：`{target, profile:[工具 id], tools:[{id, version, bin:[…], env:{}}]}`（临时文件 + rename 原子提交）。启动期（`entry::toolchains`）只读这一份把项目内 `bin` 前置到 PATH，不重新扫盘。
 - **组别名**：`--ensure=toolchain` 按清单的 `kind` 取**还没在场**的条目 id，已在位的不重装（260 MB 的包不重解）；一条不缺时直接打印 `toolchain：没有缺项，无需补齐`，不起作业、不联网。`--ensure=<id>`（如 `toolchain.node.windows-x86_64`）仍按 id 点名；裸 `--ensure` 是清单全量（含 QEMU / guest 等大件）；kind 与 id 不能混写（如实拒绝）。
 

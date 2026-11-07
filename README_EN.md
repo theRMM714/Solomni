@@ -55,7 +55,9 @@ Solomni is an **agent runtime environment (AgentOS) that runs on your own machin
 
 ## Install and run
 
-Requirements: **Node** (to run the launcher) and **Rust** (to build the core). The environment has two layers:
+Requirements: **Node** (to run the launcher). Rust is installed into the project on demand; on Linux, when no usable
+host C linker exists, the launcher also installs a project-local Zig cc under `.tools/` (with consent before downloading).
+Linking native macOS frameworks still needs Xcode Command Line Tools / SDK. The environment has two layers:
 the **runtime environment** (just running the product) and the **dev environment** (changing code / running gates).
 
 ### Runtime environment
@@ -78,10 +80,14 @@ node start.js --provision --ensure --yes # optional (Linux / Windows): install Q
   (probed by compiling and linking an empty program first — on Windows an msvc host without `link.exe`, i.e. no
   VS C++ build tools, does not count as usable; caches and artifacts still land under `platform/<os>/`); only when
   none is usable does it ask for consent and install into the project (GNU on Windows, which brings its own linker,
-  so no Visual Studio needed), never touching the system; with **no interactive terminal** it skips the install,
-  prints the manual steps, and exits. `node env.js` reports the host, the build verdict and whether it borrows. Borrowing means the system `~/.cargo/config.toml` (mirrors / credentials) is not read and
-  deps are re-downloaded into the project — the price of "no writes outside"; the gate also snapshots
-  out-of-project cache roots and fails if anything was written.
+  so no Visual Studio needed), never touching the system; the C toolchain follows the same rule on Linux / macOS:
+  a usable host `cc` is used as-is, and only when it is missing / unusable does the launcher ask to install the
+  project-local Zig cc under `.tools/toolchains` (on macOS a missing CLT is reported as a prerequisite instead — Zig
+  does not ship the Apple SDK). With **no interactive terminal** it skips the install, prints the manual steps, and
+  exits. `node env.js` reports the host, the build verdict, the C toolchain source and whether it borrows. Borrowing
+  means the system `~/.cargo/config.toml` (mirrors / credentials) is not read and deps are re-downloaded into the
+  project — the price of "no writes outside"; the gate also snapshots out-of-project cache roots and fails if
+  anything was written.
 - The **base toolchains** for module tools/builds (Python / Node / C-C++) are a runtime prerequisite: they live
   under `.tools/toolchains/` and are prepended to PATH at startup. Only the product installs them (`--provision`,
   `kind: toolchain`, group alias fills only what is missing); afterwards the Rust side writes what is present into
@@ -91,8 +97,9 @@ node start.js --provision --ensure --yes # optional (Linux / Windows): install Q
   owned by the current user); otherwise the reason is reported and the project-local install is required. C# and
   other non-base capabilities can be added as host-targeted packages under `runtimes/` (their `bin/` joins that
   run's PATH; missing packages are reported honestly).
-  C/C++ uses MinGW-w64 on Windows and Zig on Linux / macOS; linking native macOS frameworks still needs the
-  system Xcode Command Line Tools / SDK.
+  C/C++ uses MinGW-w64 on Windows and Zig on Linux / macOS; the same Zig install also serves source builds (env.js
+  installs it first when the host `cc` is unusable). Linking native macOS frameworks still needs the system Xcode
+  Command Line Tools / SDK.
 
 ### Dev environment
 
@@ -113,7 +120,7 @@ node dev.js test|fmt|clippy   # one-layer dev commands; cargo only runs through 
 - `node setup-dev.js --check` validates required items only (`--strict` requires the whole list);
   `node run-tests.js --strict-env` turns missing required tools into failures, and the CI `quality` job uses it so a
   missing tool can never masquerade as a pass.
-- The environment is its own layer ([env.js](env.js)): path conventions, **Rust / MinGW** toolchain detection,
+- The environment is its own layer ([env.js](env.js)): path conventions, **Rust / MinGW / Zig cc** toolchain detection,
   environment composition and installation live there (runtime prerequisites are not installed here); `node env.js`
   shows the resolved environment and `node env.js --print-env` prints the machine-readable result plus the full
   variable table (`env`: `PATH` / `CARGO_HOME` / `RUSTUP_HOME` / `TMP` / `TMPDIR` / `TEMP`). `setup-dev.js` installs
