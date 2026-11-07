@@ -166,7 +166,7 @@ node run-tests.js --fence-live
 
 ### 虚拟机档真机用例（本地 opt-in）
 
-- 虚拟机档真机用例默认跳过，设 `SOLOMNI_VM_LIVE=1` 才真跑（按需再给 `SOLOMNI_VM_QEMU` / `SOLOMNI_VM_GUEST`，虚拟根默认 `debian`）：
+- 虚拟机档真机用例默认跳过，设 `SOLOMNI_VM_LIVE=1` 才真跑（按需再给 `SOLOMNI_VM_QEMU` / `SOLOMNI_VM_GUEST`，虚拟根默认 `debian-13`）：
 
 - `src/tests/vm.rs`：guest 起停、并发可写层；**取消与超时**用不依赖共享后端的 `vm_live_cancel_kills_the_guest_process_tree`（`NoneShare` + guest 内 `/tmp` 围栏；取消回执含「用户停止」且 15 秒内返回、无残留 `sleep`；`timeout_secs` 到点回执含 helper 的「工具进程超时」）。取消路径的 helper stderr 可能被 QGA 丢掉（时有时无），以无孤儿 + 快速返回证明处理器生效；
 - `src/tests/vm.rs` 的**guest 诊断**探针 `vm_live_guest_diagnose_lists_processes`（`NoneShare`，不需要共享后端）：guest 里起忙进程后诊断要列出该 pid 与 CPU / 内存 / 负载 / 挂载；停 guest 后如实报没有活 guest；

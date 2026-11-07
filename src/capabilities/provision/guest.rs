@@ -386,15 +386,15 @@ mod tests {
         dep(
             "vm.guest-runtime.windows",
             "windows",
-            "windows",
-            ".vm/guest/windows",
-            ".vm/guest/windows/.runtimes-ready",
+            "debian-13",
+            ".vm/guest/debian-13",
+            ".vm/guest/debian-13/.runtimes-ready",
         )
     }
 
     /// 目的：在临时产品根里铺一份磁盘根虚拟根 + QEMU 落点。
     fn seed_disk_root(root: &Path) -> std::path::PathBuf {
-        let base = root.join(".vm").join("guest").join("windows");
+        let base = root.join(".vm").join("guest").join("debian-13");
         std::fs::create_dir_all(&base).expect("base");
         std::fs::write(base.join("rootfs.qcow2"), b"qcow2").expect("disk");
         std::fs::write(

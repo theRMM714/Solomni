@@ -1631,6 +1631,7 @@ pub(crate) fn installed_dep(
         id: id.to_string(),
         guest: None,
         present: true,
+        stale: false,
         install: String::new(),
         probe: probe.to_string(),
         source: String::new(),

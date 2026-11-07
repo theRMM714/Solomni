@@ -134,7 +134,7 @@ const sandbox = {
             vm_requirements: [],
             guests: [{
               guest: "debian", label: "debian-13-genericcloud-amd64", os: "linux", arch: "amd64",
-              ready: true, missing: [], install: ".vm/guest/debian", runtimes: ["python"],
+              ready: true, missing: [], install: ".vm/guest/debian-13", runtimes: ["python"],
             }],
             available: {},
           },

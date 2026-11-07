@@ -708,7 +708,7 @@ pub(crate) fn route(
                     if !confirm {
                         ok_json(json!({
                             "preview": picked.iter().map(|d| json!({
-                                "id": d.id, "url": d.url, "size_mb": d.size_mb, "present": d.present,
+                                "id": d.id, "url": d.url, "size_mb": d.size_mb, "present": d.present, "stale": d.stale,
                             })).collect::<Vec<_>>(),
                             "note": "确认后按这些条目起下载安装作业（只写项目内）",
                         }))

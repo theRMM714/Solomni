@@ -15,7 +15,8 @@
 
 - 入站契约：`src/capabilities/provision/api.rs` 的 `Provision`（`status` / `guest_bases` / `job` / `start` / `cancel`）。
 - DTO：`DepStatus` / `GuestBase` / `JobState`；`NoProvision` 是未接入的默认实现（如实失败，不假装可用）。
-- **虚拟根清单**：`guest_bases` 把清单里带 `guest:` 的条目按虚拟根名归并（`ready` = 这一根的各条都在场），一个虚拟根可由多条条目共同装；conductor 的创建向导与会话配置按它渲染下拉。
+- **虚拟根清单**：`guest_bases` 把清单里带 `guest:` 的条目按虚拟根名归并（`ready` = 这一根的各条都按当前清单装好），一个虚拟根可由多条条目共同装；conductor 的创建向导与会话配置按它渲染下拉。
+- **虚拟根名**是 guest 的身份，按「发行版-大版本」取（`debian-13`），不按宿主平台取：两个宿主装的是同一个 Debian 13，目录同叫 `.vm/guest/debian-13`，布局差异由 `guest.yaml` 与镜像类型表达。
 - 状态归属：清单与台账的唯一真相在仓库根 `dependencies.yaml` / `links.yaml`，产品里**编译期内嵌**；作业状态是**进程内**的（不落盘，进程重启即清空）。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
@@ -42,7 +43,7 @@
 - 清单的 `toolchain` 段是载荷：`tool`（工具 id，如 `python` / `node` / `cc`）、`version`（安装布局与 `active.json` 的版本）、`target`（可选的宿主目标名）、`bins`（相对 `install` 的目录，进 PATH）。缺段或空字段在安装时如实拒绝，不猜版本或布局。
 - **构建期与运行期共用同一份 Zig**：Linux / macOS 源码构建时，`env.js` 在宿主 `cc` 缺失或不能构建时，按同一条 `toolchain.cc.*` 条目把 Zig 装进 `install` 路径并前置到构建 PATH；之后 `--ensure=toolchain` 看到它已在场，只登记 `active.json`，不重复下载。包装把 `ZIG_GLOBAL_CACHE_DIR` / `ZIG_LOCAL_CACHE_DIR` 钉在安装目录内，不写 `~/.cache/zig`。macOS 链接系统框架仍需 Xcode CLT / SDK（Zig 包不含 SDK）。
 - 装完（以及 `env.js` 装好构建期 Zig cc 后）由登记者以磁盘在场项为准写 `.tools/toolchains/active.json`：产品 `--provision` 时 Rust 侧按清单全量重写，`env.js` 只合并 `cc` 条目（保留已有 python / node）；格式是 `{target, profile:[工具 id], tools:[{id, version, bin:[…], env:{}}]}`（临时文件 + rename 原子提交）。启动期（`entry::toolchains`）只读这一份把项目内 `bin` 前置到 PATH，不重新扫盘。
-- **组别名**：`--ensure=toolchain` 按清单的 `kind` 取**还没在场**的条目 id，已在位的不重装（260 MB 的包不重解）；一条不缺时直接打印 `toolchain：没有缺项，无需补齐`，不起作业、不联网。`--ensure=<id>`（如 `toolchain.node.windows-x86_64`）仍按 id 点名；裸 `--ensure` 是清单全量（含 QEMU / guest 等大件）；kind 与 id 不能混写（如实拒绝）。
+- **组别名**：`--ensure=toolchain` 按清单的 `kind` 取**还没按当前清单装好**的条目 id，装好的不重装（260 MB 的包不重解）；一条不缺时直接打印 `toolchain：没有缺项，无需补齐`，不起作业、不联网。`--ensure=<id>`（如 `toolchain.node.windows-x86_64`）仍按 id 点名；裸 `--ensure` 是清单全量（含 QEMU / guest 等大件）；kind 与 id 不能混写（如实拒绝）。
 
 ## 二、guest-rootfs：Debian 虚拟根的多步构造
 
@@ -73,7 +74,14 @@
   - 当前基础镜像按 2.3 GB 构造（留 1.5 GB 余量）；不是这个基线的虚拟根**不在支持范围**，不自动修补——删除 `.vm/guest/<名>` 后重新 `--provision --ensure --yes`。
   - 全量补齐时这一条失败只如实跳过并继续；显式点名才硬失败——它依赖本机能起 guest。
 
-## 四、缓存与完整性
+## 四、安装身份与台账
+
+- **装好 ≠ 探针在场**：每条依赖有一个安装身份，算自清单字段、pin 的 sha256 与工具链载荷（再加一个模式版本号，安装布局或判定口径变了就加一）。身份不同的旧产物是「旧安装」，不是「装好了」。
+- 台账在 `.vm/state/deps.json`：`{依赖 id: 身份}`，每装好一条就以临时文件 + rename 写一次（后面某条失败时，前面装好的不会白装）。
+- 身份变了（pin 升级、清单改布局、模式版本加一）就先清掉这条依赖自己产出的那份东西再重装：`guest-disk` / `guest-rootfs` / `archive` / `appimage` / `toolchain` 清整个 `install` 目录，`file` / `guest-runtime` 只清 `probe`；缓存按 pin 现验：旧 pin 下缓存的那份会在下次下载时被替换一次（校验仍不符才如实报错）。
+- 状态（`status` / `--provision` / 界面的「缺什么」）与 `--ensure=<kind>` 的缺项判定都走这套：`present` = 探针在场且身份一致；探针在场但身份不符时 `stale` 为真，界面与 CLI 能分清「没装」与「装的是旧版本」。
+
+## 五、缓存与完整性
 
 - 缓存目录 `.vm/cache`。缓存里那份（复用的、刚下好的）进解包前按台账核对 sha256：
   - 自托管 release 资产读清单条目（`source: release:<tag>/<资产>` 与 `sha256:`）；
@@ -82,7 +90,7 @@
   - 不 pin 的源如实不校验，靠解包 / 解析成功判。
 - 不符时**不删缓存**：报出台账值、实际值与来源——删了会在 pin 过期时变成每次重下的死循环。
 
-## 五、自托管依赖的 Release 版本
+## 六、自托管依赖的 Release 版本
 
 - 按依赖族发版：QEMU 用 `qemu/<版本>`，virtiofsd 用 `virtiofsd/<版本>`；不走一个包住所有依赖的 `deps` 大包。
 - 清单写 `source: release:<tag>/<资产>`；`links.yaml` 的 `release.base` 只是下载根，不带具体版本。
@@ -90,13 +98,13 @@
 - 旧 release 在仍被 Solomni 版本引用时**不删、不覆盖**；升级时新增 tag，旧 tag 保留。
 - 哈希仍由 `node pins.js update` 生成；`pins.js check` 只读比对当前 pin，不判断是否有新版本。
 
-## 六、补齐后的生效方式
+## 七、补齐后的生效方式
 
 - 主程序**每次判据取用时**自动采用项目内补齐的可执行文件（`qemu_path` / `virtiofsd_path` / `smbd_path` 未登记时；显式登记优先，取到的是拼接产品根后的绝对路径）——装完即生效，不需要重启进程。
 - 共享后端全部在装配期持有，哪一档在起 guest 那一刻按候选挑（见 [docs/vm/README.md](../vm/README.md) 的「多平台组合」）。
 - 补齐面与会话面是**两份 vm 能力面**：补齐面只持内部 `none`（运行期编排只经 QGA，不挂载），会话面只持用户档；`none` 不进用户候选链——否则 `clients` 为空的 guest 会被静默当成无共享启动。
 
-## 七、作业与进度
+## 八、作业与进度
 
 - 作业状态带单调 `seq`；`GET /api/setup/status?since=N&wait=1` 是长轮询（最多 20s），拿到新行即回，前端按 `seq` 增量取。
 - **进度只有这一条通道**：`seq` + `lines`（留最近 200 行）——不另存「当前步骤」摘要，界面要看当前步骤就取最后一行。

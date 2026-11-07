@@ -197,6 +197,107 @@ fn probe_present(root: &Path, dep: &Dep) -> bool {
     p.is_file() || p.is_dir()
 }
 
+/// 目的：安装身份的模式版本——安装布局或判定口径变了就加一，让所有旧安装自动算作过期。
+const INSTALL_SCHEMA: u32 = 1;
+
+/// 目的：一条依赖「按当前清单装出来应该是什么」的指纹：清单字段 + pin 的 sha256 + 工具链载荷。
+/// 约束：纯函数，不碰网络与磁盘；pin 与校验闸用同一个来源（`dep.sha256` 或 `links.yaml` 的 `<source>.sha256`）。
+fn install_identity(dep: &Dep) -> String {
+    let pin = pinned_sha256(dep, &links().unwrap_or_default()).unwrap_or_default();
+    let tool = dep
+        .toolchain
+        .as_ref()
+        .map(|t| {
+            format!(
+                "{}|{}|{}|{}|{}",
+                t.tool,
+                t.version,
+                t.target.clone().unwrap_or_default(),
+                t.bins.join(","),
+                t.wrappers
+            )
+        })
+        .unwrap_or_default();
+    let material = format!(
+        "schema={}\nid={}\nkind={}\ninstall={}\nprobe={}\nsource={}\npin={}\nguest={}\nfamily={}\nsize={}\ntoolchain={}\n",
+        INSTALL_SCHEMA,
+        dep.id,
+        dep.kind,
+        dep.install,
+        dep.probe,
+        dep.source,
+        pin,
+        dep.guest.clone().unwrap_or_default(),
+        dep.family.clone().unwrap_or_default(),
+        dep.size_mb,
+        tool
+    );
+    crate::capabilities::workspace::api::content_hash(material.as_bytes())
+}
+
+/// 目的：安装台账——「这条依赖是按哪个身份装好的」记在这里（清单变了才重装，没变就不碰网络）。
+fn ledger_path(root: &Path) -> PathBuf {
+    root.join(".vm").join("state").join("deps.json")
+}
+
+fn read_ledger(root: &Path) -> BTreeMap<String, String> {
+    fs::read_to_string(ledger_path(root))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default()
+}
+
+/// 目的：写台账——临时文件再改名，中途被杀不会留下半份 JSON。
+fn write_ledger(root: &Path, ledger: &BTreeMap<String, String>) -> Result<(), String> {
+    let file = ledger_path(root);
+    let dir = file.parent().ok_or_else(|| "台账没有父目录".to_string())?;
+    fs::create_dir_all(dir).map_err(|e| format!("建 {} 失败：{}", dir.display(), e))?;
+    let text =
+        serde_json::to_string_pretty(ledger).map_err(|e| format!("序列化安装台账失败：{}", e))?;
+    let tmp = file.with_extension("json.tmp");
+    fs::write(&tmp, text + "\n").map_err(|e| format!("写 {} 失败：{}", tmp.display(), e))?;
+    fs::rename(&tmp, &file).map_err(|e| format!("提交 {} 失败：{}", file.display(), e))?;
+    Ok(())
+}
+
+/// 目的：登记「这条依赖按当前身份装好了」——每装好一条就落一次盘（后面某条失败时前面的成果不丢）。
+pub(crate) fn record_installed(root: &Path, dep: &Dep) -> Result<(), String> {
+    let mut ledger = read_ledger(root);
+    ledger.insert(dep.id.clone(), install_identity(dep));
+    write_ledger(root, &ledger)
+}
+
+/// 目的：这条依赖现在算不算装好——探针在场 **且** 台账里的身份与当前清单一致。
+/// 约束：只看探针在场不算装好（pin 升级后旧产物仍然在场，这正是上一版会漏掉的缺口）。
+fn installed(root: &Path, dep: &Dep, ledger: &BTreeMap<String, String>) -> bool {
+    probe_present(root, dep) && ledger.get(&dep.id) == Some(&install_identity(dep))
+}
+
+/// 目的：清掉这条依赖自己产出的那份东西——只有身份变了才调；共享同一安装目录的条目只动自己的探针。
+fn clear_install(root: &Path, dep: &Dep) -> Result<(), String> {
+    let probe = under(root, &dep.probe);
+    let install = under(root, &dep.install);
+    let removed = match dep.kind.as_str() {
+        "guest-runtime" | "file" => {
+            if probe.is_file() {
+                fs::remove_file(&probe)
+            } else if probe.is_dir() {
+                fs::remove_dir_all(&probe)
+            } else {
+                Ok(())
+            }
+        }
+        _ => {
+            if install.is_dir() {
+                fs::remove_dir_all(&install)
+            } else {
+                Ok(())
+            }
+        }
+    };
+    removed.map_err(|e| format!("{}：清旧安装失败：{}", dep.id, e))
+}
+
 /// 目的：`--ensure` 取值的两种含义——依赖 id 列表（原语义），或按清单 kind 的组别名（只补缺项）。
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum EnsureSpec {
@@ -232,10 +333,11 @@ pub(crate) fn split_ensure_spec(all: &[Dep], spec: &str) -> Result<EnsureSpec, S
 
 /// 目的：按 kind 组取「还没在场」的条目 id——组别名只补缺项，已在位的不重装（260 MB 的包不重解）。
 pub(crate) fn pending_of_kinds(all: &[Dep], root: &Path, kinds: &[String]) -> Vec<String> {
+    let ledger = read_ledger(root);
     let mut ids: Vec<String> = Vec::new();
     for dep in all {
         if kinds.iter().any(|k| k == &dep.kind)
-            && !probe_present(root, dep)
+            && !installed(root, dep, &ledger)
             && !ids.contains(&dep.id)
         {
             ids.push(dep.id.clone());
@@ -381,14 +483,17 @@ impl ProvisionService {
 impl Provision for ProvisionService {
     fn status(&self) -> Result<Vec<DepStatus>, String> {
         let links = links()?;
+        let ledger = read_ledger(&self.root);
         let mut out = Vec::new();
         for dep in for_host(&deps()?, std::env::consts::OS, std::env::consts::ARCH) {
-            let probe = under(&self.root, &dep.probe);
             let url = source_url(&dep.source, &links).ok();
+            let present = installed(&self.root, &dep, &ledger);
+            let stale = !present && probe_present(&self.root, &dep);
             out.push(DepStatus {
                 id: dep.id,
                 guest: dep.guest.clone(),
-                present: probe.is_file() || probe.is_dir(),
+                present,
+                stale,
                 install: dep.install,
                 probe: dep.probe,
                 source: dep.source,
@@ -521,15 +626,13 @@ impl ProvisionService {
             }
             by_guest.entry(name).or_default().push(dep);
         }
+        let ledger = read_ledger(&self.root);
         let mut out = Vec::new();
         for name in order {
             let members = &by_guest[&name];
             let missing: Vec<String> = members
                 .iter()
-                .filter(|d| {
-                    let p = under(&self.root, &d.probe);
-                    !p.is_file() && !p.is_dir()
-                })
+                .filter(|d| !installed(&self.root, d, &ledger))
                 .map(|d| d.id.clone())
                 .collect();
             let install = members
@@ -606,6 +709,7 @@ fn run(
     let agent = crate::kernel::detail::outbound::agent(15, 7200);
     let cache = root.join(".vm").join("cache");
     fs::create_dir_all(&cache).map_err(|e| format!("建缓存目录失败：{}", e))?;
+    let mut ledger = read_ledger(root);
     for dep in picked {
         if cancel.load(Ordering::Relaxed) {
             on_line("已取消");
@@ -613,23 +717,40 @@ fn run(
         }
         // 基础工具链是每次启动都要用的运行前提：全量补齐时已在场就不重装
         // （260 MB 的 MinGW 重解一遍没有意义）；其余 kind 的「在位即跳过」由调用方筛 pending。
-        if is_toolchain(dep) && !explicit && probe_present(root, dep) {
+        if is_toolchain(dep) && !explicit && installed(root, dep, &ledger) {
             on_line(&format!("{}：已就位（跳过）", dep.id));
             continue;
         }
         let url = source_url(&dep.source, links)?;
         let asset = asset_name(&url);
         let cached = cache.join(&asset);
+        let identity = install_identity(dep);
+        let stale = probe_present(root, dep) && ledger.get(&dep.id) != Some(&identity);
+        if stale {
+            on_line(&format!("{}：装的是旧版本，清掉重装", dep.id));
+            clear_install(root, dep)?;
+            ledger.remove(&dep.id);
+            write_ledger(root, &ledger)?;
+        }
         // 运行期编排自己不下东西：它要的镜像必须已由 guest-disk 装好；缺了编排会如实拒绝。
         if dep.kind != "guest-runtime" {
-            if cached.is_file() {
+            let pinned = pinned_sha256(dep, links);
+            // 缓存按 pin 现验：旧 pin 下缓存的那份不是错误证据，而是该换一份——删掉重下一次。
+            let cached_ok = cached.is_file()
+                && verify_cached(&dep.id, pinned.as_deref(), &cached, &url).is_ok();
+            if cached_ok {
                 on_line(&format!("{}：用缓存 {}", dep.id, asset));
             } else {
-                on_line(&format!("{}：下载 {}", dep.id, url));
+                if cached.is_file() {
+                    on_line(&format!("{}：缓存与 pin 不符，重新下载", dep.id));
+                    fs::remove_file(&cached)
+                        .map_err(|e| format!("删 {} 失败：{}", cached.display(), e))?;
+                } else {
+                    on_line(&format!("{}：下载 {}", dep.id, url));
+                }
                 download(&agent, &url, &cached, on_line)?;
             }
-            // 完整性闸：缓存里那份和刚下好的一样都要验（缓存可能是上次中断留下的）。
-            let pinned = pinned_sha256(dep, links);
+            // 完整性闸：刚下好的这份必须与 pin 一致（再不符就是台账或上游的问题，如实报错）。
             verify_cached(&dep.id, pinned.as_deref(), &cached, &url)?;
         }
         let dest = under(root, &dep.install);
@@ -672,6 +793,10 @@ fn run(
         if dep.kind == "archive" {
             ensure_executable(&probe);
         }
+        record_installed(root, dep)?;
+        // 台账以磁盘为准：上面清旧安装时写的是本轮开始时的快照，
+        // 不刷新就会把前几条刚登记的身份覆盖掉（表现为「装完的条目又变成没装」）。
+        ledger = read_ledger(root);
         on_line(&format!("{}：就绪（{}）", dep.id, dep.install));
     }
     // 装完就把基础工具链登记进 active.json：启动期只读这一份（entry::toolchains）；
@@ -2132,6 +2257,7 @@ mod tests {
         let missing = dep_of("toolchain.node.x", "toolchain", ".t/node", ".t/node/bin");
         let other = dep_of("vm.qemu.x", "archive", ".t/q", ".t/q/bin");
         fs::create_dir_all(under(&root, ".t/py/bin")).expect("铺在位工具");
+        record_installed(&root, &present).expect("台账");
         let all = [present, missing, other];
         assert_eq!(
             pending_of_kinds(&all, &root, &["toolchain".to_string()]),
@@ -2139,6 +2265,57 @@ mod tests {
         );
         assert_eq!(
             pending_of_kinds(&all, &root, &["archive".to_string()]),
+            vec!["vm.qemu.x".to_string()]
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 目的：安装身份跟着清单走——pin / 载荷变了身份就变，没变就稳定。
+    #[test]
+    fn install_identity_follows_the_manifest() {
+        let dep = dep_of("vm.qemu.x", "archive", ".t/q", ".t/q/bin");
+        let base = install_identity(&dep);
+        assert_eq!(base, install_identity(&dep), "同一份清单身份稳定");
+        let mut pinned = dep.clone();
+        pinned.sha256 = "a".repeat(64);
+        assert_ne!(base, install_identity(&pinned), "pin 变了身份要变");
+        let mut resized = dep.clone();
+        resized.size_mb = 999;
+        assert_ne!(base, install_identity(&resized), "体积变了身份要变");
+    }
+
+    /// 目的：探针在场但台账里没有记录 = 还没按当前清单装好（升级后第一次跑要重装）。
+    #[test]
+    fn a_probe_without_a_ledger_entry_is_not_installed() {
+        let root = crate::tests::scratch("provision-ledger-missing");
+        let dep = dep_of("vm.qemu.x", "archive", ".t/q", ".t/q/bin");
+        fs::create_dir_all(under(&root, ".t/q/bin")).expect("铺 probe");
+        assert!(probe_present(&root, &dep), "探针确实在场");
+        assert!(
+            !installed(&root, &dep, &read_ledger(&root)),
+            "没台账不算装好"
+        );
+        record_installed(&root, &dep).expect("台账");
+        assert!(installed(&root, &dep, &read_ledger(&root)), "登记后算装好");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 目的：台账里记的是旧身份（pin 升级）时，探针在场也要算缺项。
+    #[test]
+    fn a_changed_pin_makes_the_old_install_missing() {
+        let root = crate::tests::scratch("provision-ledger-stale");
+        let mut dep = dep_of("vm.qemu.x", "archive", ".t/q", ".t/q/bin");
+        dep.sha256 = "a".repeat(64);
+        fs::create_dir_all(under(&root, ".t/q/bin")).expect("铺 probe");
+        record_installed(&root, &dep).expect("按旧身份登记");
+        assert!(installed(&root, &dep, &read_ledger(&root)));
+        dep.sha256 = "b".repeat(64);
+        assert!(
+            !installed(&root, &dep, &read_ledger(&root)),
+            "换了 pin 就是旧装"
+        );
+        assert_eq!(
+            pending_of_kinds(&[dep.clone()], &root, &["archive".to_string()]),
             vec!["vm.qemu.x".to_string()]
         );
         let _ = fs::remove_dir_all(&root);
@@ -2161,6 +2338,7 @@ mod tests {
         }
         for dep in &toolchains {
             fs::create_dir_all(under(&root, &dep.probe)).expect("铺 probe");
+            record_installed(&root, dep).expect("台账");
         }
         let svc = ProvisionService::new(&root);
         let mut lines: Vec<String> = Vec::new();
@@ -2705,6 +2883,9 @@ mod tests {
             sha256: String::new(),
             note: String::new(),
         };
+        // 镜像那条已按当前清单装好（台账登记过），运行期那条还没装。
+        let image = dep("g.img", ".vm/guest/debian/vmlinuz", "debian");
+        record_installed(&root, &image).expect("台账");
         let svc = ProvisionService::new(&root);
         // 两条条目同属一个虚拟根：都在场 = 就绪；缺一条 = 如实列出缺哪条。
         let both = svc
@@ -2826,6 +3007,7 @@ mod tests {
             let probe = under(&root, &dep.probe);
             fs::create_dir_all(probe.parent().expect("probe 有父目录")).expect("建目录");
             fs::write(&probe, b"x").expect("写 probe");
+            record_installed(&root, &dep).expect("台账");
             let items = svc.status().expect("状态");
             let hit = items.iter().find(|s| s.id == dep.id).expect("条目在");
             assert!(hit.present, "probe 在场就该判在位：{}", dep.probe);
@@ -3366,6 +3548,7 @@ mod tests {
             sha256: String::new(),
             note: String::new(),
         };
+        record_installed(&root, &dep).expect("台账");
         let mut links = BTreeMap::new();
         links.insert("release.base".to_string(), "http://127.0.0.1:1".to_string());
         let mut lines: Vec<String> = Vec::new();
@@ -3399,9 +3582,9 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
-    /// 目的：校验不符拒绝落盘——报台账值 / 实际值，安装目录一个字节都不写；缓存保留（证据与续传都靠它）。
+    /// 目的：缓存与 pin 不符时换一份重下，而不是把旧缓存当证据；换不到就如实失败、安装目录一个字节都不写。
     #[test]
-    fn toolchain_pin_mismatch_refuses_to_land() {
+    fn cache_pin_mismatch_is_replaced_not_trusted() {
         let root = crate::tests::scratch("provision-toolchain-pin");
         let target = host_target();
         let cache = root.join(".vm").join("cache");
@@ -3444,18 +3627,12 @@ mod tests {
             &mut |_| {},
             None,
         )
-        .expect_err("pin 不符要拒绝");
-        assert!(err.contains("sha256 与台账不符"), "{}", err);
-        assert!(err.contains(&"0".repeat(64)), "要报台账值：{}", err);
+        .expect_err("pin 不符不能装");
+        assert!(err.contains("下载失败"), "换不到源要如实失败：{}", err);
+        assert!(!under(&root, &install).exists(), "装不上不许落盘");
         assert!(
-            err.contains("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"),
-            "要报实际值：{}",
-            err
-        );
-        assert!(!under(&root, &install).exists(), "校验失败不许落盘");
-        assert!(
-            cache.join("py.tar").is_file(),
-            "不删缓存（证据与续传都靠它）"
+            !cache.join("py.tar").is_file(),
+            "不符的旧缓存要被换掉，不能当证据留着"
         );
         let _ = fs::remove_dir_all(&root);
     }

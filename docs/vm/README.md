@@ -42,7 +42,7 @@
 - Windows 验收前提：硬件加速（WHPX）可用；当前只验过物理宿主，嵌套虚拟化宿主未验，不声称支持。
 - guest 内诊断入口：CLI 交互命令 `diagnose <会话>` 造一次 `guest_diagnose` 动作（`systools/tools.yaml`，`callers: [user]`，参数 `session_id` 必填非空）——只读列出 guest 进程表（pid / ppid / 状态 / CPU 占用 / RSS / 运行时长 / 命令与参数）、CPU 汇总、内存、负载、挂载与内核 / 核数；诊断本身只读、不写 guest 文件（为复用既有 fenced 通道，宿主会按既有机制写一份策略临时文件，helper 读取后立即删除）、不改会话状态、不套 per-agent 围栏，guest 内走 helper 的只读诊断模式，宿主侧只用已持有的 QGA 通道（不新增外部端口，见 `src/capabilities/vm/service.rs` 的 `guest_diagnose`）。
 - 诊断失败如实分类：没有活 guest / 只有 Linux guest / QGA 通道不通 / guest 诊断助手不在或不支持 / guest 缺 python3 / 诊断超时 / 输出不可解析；「读不到」不说成「没有进程」（`src/capabilities/vm/domain/diagnose.rs`）。
-- 验收证据：引擎级探针（`vm_live_guest_runs_command_inside_guest`）+ 并发可写层探针（`vm_live_two_guests_share_one_base_without_writing_it`）与 e2e 的虚拟机档会话场景都过（虚拟根默认 `debian`，`SOLOMNI_VM_GUEST` 可换）；外部工作区往返探针 `vm_live_external_workspace_round_trip` 与 e2e 的外部工作区场景已在 Windows 真机通过（WHPX + SMB：guest 内读外部根、写私沙落宿主、写共享区被拒、删会话不删外部根），Linux 的 virtiofs / 9p 两变体已在 KVM 上通过；两端的 QEMU 与 guest 镜像由 provision 能力按清单装入。
+- 验收证据：引擎级探针（`vm_live_guest_runs_command_inside_guest`）+ 并发可写层探针（`vm_live_two_guests_share_one_base_without_writing_it`）与 e2e 的虚拟机档会话场景都过（虚拟根默认 `debian-13`，`SOLOMNI_VM_GUEST` 可换）；外部工作区往返探针 `vm_live_external_workspace_round_trip` 与 e2e 的外部工作区场景已在 Windows 真机通过（WHPX + SMB：guest 内读外部根、写私沙落宿主、写共享区被拒、删会话不删外部根），Linux 的 virtiofs / 9p 两变体已在 KVM 上通过；两端的 QEMU 与 guest 镜像由 provision 能力按清单装入。
 - 诊断的真机探针 `vm_live_guest_diagnose_lists_processes`（`SOLOMNI_VM_LIVE=1` + `SOLOMNI_VM_QEMU`，默认 `[探针]` 跳过）验：guest 里起一个忙进程后诊断能列出该 pid 与 CPU / 内存 / 负载 / 挂载，停 guest 后如实报没有活 guest。
 - 多台虚拟机档会话并发时各写自己的每租约可写层（不共写基础镜像），同时台上限 `max_guests`（见「五、并发与可写层」）。
 - macOS 组合：缺 QEMU 取包与 Apple vz 引擎 + 自研 agent（vsock 通道）；缺口与验收标准只记在 `tests/macos/gaps.yaml`。
@@ -94,8 +94,8 @@
 - 依赖由 `provision` 能力按清单（`dependencies.yaml` + `links.yaml`，需用户同意、只写项目内）装进 `.vm/`。
 - 依赖（QEMU / `virtiofsd` / SMB helper / 镜像）不预置、不分发（解归档的入口程序装完补可执行位——便携包里的 zip 常常不带 unix 权限位），由 provision 能力在 Linux / Windows 上按 `dependencies.yaml` + `links.yaml` 下载并解包进项目内 `.vm/`（需用户同意；入口 `solomni --provision --ensure --yes`；下载后按台账核对 sha256——自托管资产在清单条目里（`release:<tag>/<资产>` + `sha256:`）、链接类在 `links.yaml` 里成对，不 pin 的源如实不校验）。
 - 产品检测、指路并给出补齐入口；`qemu_path` / `virtiofsd_path` / `smbd_path` 可登记。
-- Linux：QEMU（pkgforge Anylinux AppImage）、virtiofsd 与默认虚拟根 `debian`（cloud 镜像 rootfs → `rootfs.ext4` 磁盘镜像 + 通用内核 + initrd + qemu-guest-agent，装进 `.vm/guest/debian/`；会话的可写层叠在镜像上）；构造配方按清单 `family: debian` 取，当前只有 Debian 一份。
-- Windows：官方源码在 MSYS2（mingw-w64）下自建的 QEMU 11.1.1 便携包（`--enable-slirp`，固件按真实文件打包）、Debian cloud qcow2（虚拟根 `windows`，装进 `.vm/guest/windows/`）与 `guest.yaml`。
+- Linux：QEMU（pkgforge Anylinux AppImage）、virtiofsd 与默认虚拟根 `debian-13`（cloud 镜像 rootfs → `rootfs.ext4` 磁盘镜像 + 通用内核 + initrd + qemu-guest-agent，装进 `.vm/guest/debian-13/`；会话的可写层叠在镜像上）；构造配方按清单 `family: debian` 取，当前只有 Debian 一份。
+- Windows：官方源码在 MSYS2（mingw-w64）下自建的 QEMU 11.1.1 便携包（`--enable-slirp`，固件按真实文件打包）、Debian cloud qcow2（与 Linux 同一个虚拟根 `debian-13`，装进 `.vm/guest/debian-13/`）与 `guest.yaml`。
 - 虚拟根里真有什么由 `kind: guest-runtime` 的运行期编排（Rust 侧，不依赖仓库脚本）起一次 guest 逐个自证后写进画像。
 - 两端都只把自证过的能力写进 `guest.yaml` 的 `runtimes`（例如 `[python, node, cc, gcc]`；`gcc` 是 `build.needs` 用的可执行名）。
 - Windows：首启经 cloud-init 装 `qemu-guest-agent`；维护启动装 `python3` / `cifs-utils` / C-C++（`gcc` `g++` `make` `libc6-dev`），并从固定版本官方二进制装 Node。
@@ -105,14 +105,14 @@
 - 全量补齐（`--ensure --yes`）时这一条起不了 guest（缺 KVM / WHPX 这类机器事实）只如实跳过并继续；显式点名（`--ensure=vm.guest-runtime.linux`）才硬失败。
 - 虚拟根 = 项目内 `.vm/guest/<名>` 的一格目录：一份磁盘镜像（`rootfs.ext4` / `rootfs.qcow2` / `disk.qcow2` / `disk.raw` / `rootdisk.qcow2`）——会话的每租约可写层叠在它上面；可选 `vmlinuz` / `initrd.img`（有内核就直启并传 `root=/dev/vda`，没有就靠镜像自带引导）。
 - 一格目录里的 `guest.yaml` 声明画像（`id` / `arch` / `os` / `agent` / `clients` / `runtimes`）：`runtimes` 是 guest 里确实可用的运行能力名，如 python / node，选型诊断据此不必再要 `runtimes/` 包；缺省按目录名与 Debian 默认（os 缺省 linux），不认识的值如实拒收。
-- 清单（`dependencies.yaml`）给每条 guest 条目一个 `guest:` 名，多条条目可以共同装一个虚拟根；界面读 provision 的虚拟根清单，不自己看盘。
-- 真机探针的门槛：`SOLOMNI_VM_LIVE=1` + `SOLOMNI_VM_QEMU` / `SOLOMNI_VM_VIRTIOFSD` / `SOLOMNI_VM_SMBD` 指向 `.vm/`；虚拟根默认 `debian`，可用 `SOLOMNI_VM_GUEST` 换；外部工作区往返探针 `vm_live_external_workspace_round_trip` 另按平台要求共享工具（Windows 要 `SOLOMNI_VM_SMBD`；Linux 要 KVM + `SOLOMNI_VM_VIRTIOFSD` 跑 virtiofs 变体，不设它跑 9p 变体，两条各跑一次）；默认 `[探针]` 跳过。
+- 清单（`dependencies.yaml`）给每条 guest 条目一个 `guest:` 名，多条条目可以共同装一个虚拟根；名字按 guest 的「发行版-大版本」取（`debian-13`），不按宿主平台取——两个宿主装的是同一个 Debian 13；界面读 provision 的虚拟根清单，不自己看盘。
+- 真机探针的门槛：`SOLOMNI_VM_LIVE=1` + `SOLOMNI_VM_QEMU` / `SOLOMNI_VM_VIRTIOFSD` / `SOLOMNI_VM_SMBD` 指向 `.vm/`；虚拟根默认 `debian-13`，可用 `SOLOMNI_VM_GUEST` 换；外部工作区往返探针 `vm_live_external_workspace_round_trip` 另按平台要求共享工具（Windows 要 `SOLOMNI_VM_SMBD`；Linux 要 KVM + `SOLOMNI_VM_VIRTIOFSD` 跑 virtiofs 变体，不设它跑 9p 变体，两条各跑一次）；默认 `[探针]` 跳过。
 - 取消与超时的真机证据走不依赖共享后端的 `vm_live_cancel_kills_the_guest_process_tree`（`NoneShare` + guest 内 `/tmp` 围栏）：取消要 15 秒内返回、回执含 `[shell] 用户停止`、guest 内无残留 `sleep`；`timeout_secs` 到点回执含 `[shell] 超时（2 秒）`（用例给 2 秒）；直调通道只到状态行，cwd·耗时尾行由工具层在端到端 shell 回执里追加（见 `docs/tools/tools-and-roles.md` 的「执行类系统工具：shell」）；判决以无孤儿 + 快速返回为准。
 - macOS 保持检测 + 指路（缺口见 `tests/macos/gaps.yaml`）；产品侧构造链当前只有 Debian 配方，其它 Linux 发行版可用预构造镜像 + `guest.yaml`。
 
 ## 七、多平台组合与路径桥
 - 宿主 / 引擎 / guest / 通道 / 共享五轴都可插——"统一 Debian guest"只是默认实例，不是硬约束。
-- 端口职责（适配器默认在前）：`VmEngine` 探测可用性、拉 / 停 VM、加速器、磁盘、网卡 → `QemuEngine`（三平台）；`GuestImage` 镜像描述：id / arch / os / 磁盘镜像 / kernel / initrd / agent / 声明的共享客户端与运行能力 → 虚拟根 `debian`（默认，画像 id `debian-13-genericcloud-amd64`）、`windows`、用户自备；`GuestChannel` 在 guest 里执行、文件读写、销毁 → `QemuHandle`（QEMU + QGA）；`ShareBackend` 宿主↔guest 共享，声明支持的引擎与 guest → `VirtioFsShare`（Linux 默认）、`NinePShare`（Linux 回退）、`SmbShare`（Windows 默认，guestfwd + 用户态 smbd helper）、`CopyShare`（仅开发 / 应急）、`NoneShare`（内部无共享，供给编排）。
+- 端口职责（适配器默认在前）：`VmEngine` 探测可用性、拉 / 停 VM、加速器、磁盘、网卡 → `QemuEngine`（三平台）；`GuestImage` 镜像描述：id / arch / os / 磁盘镜像 / kernel / initrd / agent / 声明的共享客户端与运行能力 → 虚拟根 `debian-13`（默认，画像 id `debian-13-genericcloud-amd64`）、用户自备；`GuestChannel` 在 guest 里执行、文件读写、销毁 → `QemuHandle`（QEMU + QGA）；`ShareBackend` 宿主↔guest 共享，声明支持的引擎与 guest → `VirtioFsShare`（Linux 默认）、`NinePShare`（Linux 回退）、`SmbShare`（Windows 默认，guestfwd + 用户态 smbd helper）、`CopyShare`（仅开发 / 应急）、`NoneShare`（内部无共享，供给编排）。
 - 各平台用户共享链（性能优先）：Linux QEMU + virtiofs（默认；缺 virtiofsd 时退 9p）+ `accel=kvm`，链路 virtiofs → 9p；macOS QEMU（未通过验收，缺口见 `tests/macos/gaps.yaml`）+ 9p + `accel=hvf`；Windows QEMU + smb（已验，硬前置）+ `accel=whpx`。
 - copy 不在任何用户链里；只有进程级开发 / 应急开关（`SOLOMNI_VM_SHARE=copy`）会把它作为该进程 VM 会话的唯一候选，并在日志里警告性能不可用；自定义 guest 没有声明本平台可承载的客户端时，`tier_readiness` 在起 guest 前拒绝。
 - 模块构建也能落 guest（创建会话前自动补编；手动入口是 `solomni --build=<模块 id> --guest=<虚拟根>`），细节见 `docs/builds/README.md`。

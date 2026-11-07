@@ -132,6 +132,7 @@ fn fake_deps() -> Vec<crate::capabilities::provision::api::DepStatus> {
         id: id.to_string(),
         guest: None,
         present,
+        stale: false,
         install: ".vm/qemu".to_string(),
         probe: ".vm/qemu/bin/qemu-system-x86_64".to_string(),
         source: "release:qemu".to_string(),

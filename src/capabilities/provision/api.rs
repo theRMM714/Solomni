@@ -31,6 +31,8 @@ pub struct DepStatus {
     /// 目的：归属的虚拟根名（只有 guest 类条目有；其余为空）。
     pub guest: Option<String>,
     pub present: bool,
+    /// 目的：探针在场、但装的不是当前清单那一版（pin 升级或布局改过后还没重装）。
+    pub stale: bool,
     pub install: String,
     pub probe: String,
     pub source: String,
