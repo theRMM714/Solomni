@@ -3,7 +3,9 @@
 //! 不管：工作区绑定策略（`src/tests/workspace.rs`）与虚拟机档挂载（`src/tests/vm.rs`）。
 //! 联动：职责与契约见 docs/kernel/unit-map.md 与 ARCHITECTURE.md。
 
-use crate::kernel::api::{is_unc, locus_of, native, place_contains, unc_parts};
+#[cfg(windows)]
+use crate::kernel::api::{is_unc, native, unc_parts};
+use crate::kernel::api::{locus_of, place_contains};
 
 /// 目的：native 还原两种有普通形态的 verbatim 前缀，UNC 不能被剥成相对路径。
 #[cfg(windows)]
