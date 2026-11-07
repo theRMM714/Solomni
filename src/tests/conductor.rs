@@ -268,6 +268,53 @@ pub(crate) fn external_workspace_vm_session_boots_with_two_stable_mounts() {
     assert_two_stable_mounts(&engine, &product, &external, "wx");
 }
 
+/// 目的：工作区绑定按档位分档——本机档拒绝网络工作区（且在 canonicalize 之前，不触网），
+///   虚拟机档接受 UNC、拒绝共享根与文件系统根。
+/// 约束：不可路由的地址（TEST-NET-1）一旦真去连就会挂很久；用时耗把「不触网」变成可判定属性。
+#[cfg(windows)]
+#[test]
+pub(crate) fn workspace_policy_splits_network_roots_by_tier() {
+    use crate::capabilities::conductor::service::workspace_root::policy;
+    use crate::kernel::api::Tier;
+    use std::path::Path;
+    use std::time::{Duration, Instant};
+
+    let unreachable = Path::new(r"\\192.0.2.1\share\proj");
+    let started = Instant::now();
+    let err = policy(unreachable, Tier::Host).expect_err("本机档必须拒绝网络工作区");
+    assert!(err.contains("本机档不能用网络工作区"), "{err}");
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "本机档的拒绝不能触网：耗时 {:?}",
+        started.elapsed()
+    );
+
+    policy(Path::new(r"\\server\share\proj"), Tier::Vm).expect("虚拟机档接受 UNC");
+    let err = policy(Path::new(r"\\server\share"), Tier::Vm).expect_err("共享根要拒");
+    assert!(err.contains("网络共享的根目录"), "{err}");
+    let err = policy(Path::new(r"D:\"), Tier::Vm).expect_err("文件系统根要拒");
+    assert!(err.contains("文件系统根目录"), "{err}");
+}
+
+/// 目的：加载复检——手改 meta 塞进策略违例的绑定要如实拒绝；只是目录不可达不算违例。
+#[cfg(windows)]
+#[test]
+pub(crate) fn loaded_binding_is_rechecked_against_the_tier() {
+    use crate::capabilities::conductor::service::workspace_root::{product_root, recheck};
+    use crate::kernel::api::Tier;
+    use std::path::Path;
+
+    let product = super::scratch("conduct-recheck").join("product");
+    std::fs::create_dir_all(&product).expect("建产品根");
+    let product = product_root(&product);
+    let err = recheck(Path::new(r"\\server\share\proj"), Tier::Host, &product)
+        .expect_err("本机档的 UNC 绑定要拒");
+    assert!(err.contains("本机档不能用网络工作区"), "{err}");
+    let err = recheck(&product, Tier::Host, &product).expect_err("越界绑定要拒");
+    assert!(err.contains("互相包含"), "{err}");
+    recheck(&product.join("gone"), Tier::Host, &product).expect("不可达不挡开会话");
+}
+
 /// 目的：先建本机档 + 外部绑定，再切进虚拟机档——起 guest 的挂载计划与直接建虚拟机档一致。
 /// 约束：改配走的是 `EditGuest::Boot`（不是创建那段），所以两条稳定根要在两处都成立。
 #[cfg(not(target_os = "macos"))]

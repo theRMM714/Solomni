@@ -134,7 +134,7 @@ roles:
   - 截断只作用在正文，尾行永远保留（`src/kernel/domain/receipt.rs`）；开头 / 结尾**按完整行取整**（单行超长时退化为按字符切），标记报的是实际保留字符数。
   - 退出码是**整条脚本**的退出状态（最后一条命令或显式 exit），不是每条命令的；要看单条命令的退出码写 `cmd; echo exit=$?` 或 `cmd || exit $?`。
   - 超时与用户停止没有命令退出码（`src/capabilities/tools/domain/shell.rs` 的 `exit_code` 返回 None），只用状态行表达，不伪造 124 / 143。
-  - cwd 用本环境写法：本机档 = 宿主路径；虚拟机档 = guest 内路径（路径桥，宿主 `D:\a\b` → `/solomni-host/d/a/b`，见 `src/capabilities/vm/domain/paths.rs`）。
+  - cwd 用本环境写法：本机档 = 宿主路径；虚拟机档 = guest 内路径（路径桥，宿主 `D:\a\b` → `/solomni-host/d/a/b`，见 `src/capabilities/vm/domain/paths.rs`；UNC 外部根在 guest 里是 `/solomni-host/unc/<server>/<share>/…`，模型照此写法给路径即可）。
 - 回放从末行派生：`src/capabilities/session/domain/tools.rs` 的 `last_shell` 取最后一条带命令的 shell 工具行的 cwd 与耗时，标 `historical`。
 - **scope 是本次调用的 reach 请求，profile 才是用户上限**：sandbox 只给 private + 基础 / 项目工具链只读（net=false）；external 在 sandbox 上再加 shared-read / module-read / host-read / network。requested 不是 granted 子集 = 拒绝，不弹卡。
 - profile：view 不发放；workspace sandbox allow、external deny；external sandbox allow、external ask；all_reach sandbox / external allow。sandbox 与 external 都要求围栏真强制（`allow_degraded=false`），装不上拒绝。

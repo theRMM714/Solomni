@@ -131,13 +131,15 @@ impl Workdirs for FsWorkspace {
         let canonical = shared
             .canonicalize()
             .map_err(|e| format!("工作区不可达：{}（{}）", shared.display(), e))?;
-        // 锁放在产品侧（.home/locks），不写用户目录；同一 canonical 根共用一个文件名。
+        // 锁放在产品侧（.home/locks），不写用户目录；键按**落点身份**——同一物理目录的 UNC 写法、
+        // 映射盘写法与盘符写法因此共用一把锁（取不到文件 id 时退回规范化文本）。
+        let key = crate::kernel::api::locus_of(&canonical)
+            .map(|l| l.key())
+            .unwrap_or_else(|_| canonical.to_string_lossy().into_owned());
         let product = self.sessions.parent().unwrap_or(&self.sessions);
         let dir = product.join(".home").join("locks");
         std::fs::create_dir_all(&dir).map_err(|e| format!("建工作区锁目录失败：{}", e))?;
-        let hash = crate::capabilities::workspace::domain::hash::content_hash(
-            canonical.to_string_lossy().as_bytes(),
-        );
+        let hash = crate::capabilities::workspace::domain::hash::content_hash(key.as_bytes());
         let path = dir.join(format!("workspace-{}.lock", hash));
         let file = std::fs::OpenOptions::new()
             .create(true)

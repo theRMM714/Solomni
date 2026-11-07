@@ -46,10 +46,10 @@
 ## 4. smbd（SMB 共享 helper，独立仓）
 
 - **Binary Asset**: `smbd-windows-x86_64.exe`
-- **Version**: v0.1.0（独立仓 tag `smbd-v0.1.0`）
+- **Version**: v0.3.0（独立仓 tag `smbd-v0.3.0`）
 - **License**: MIT（上游 rust-smb-server 亦为 MIT）
 - **Source Code**: https://github.com/theRMM714/rust-smb-server
-- **Note**: 上游 [paltaio/rust-smb-server](https://github.com/paltaio/rust-smb-server)（MIT）的 fork；上游代码不改，本仓只新增 helper CLI 与发布工作流，由该仓 CI 构建并发布 `smbd.exe` 与 `.sha256` 资产；Solomni 只按 URL 下载，不携带其提交史。
+- **Note**: 上游 [paltaio/rust-smb-server](https://github.com/paltaio/rust-smb-server)（MIT）的 fork；本仓维护最小补丁集（helper CLI、发布工作流，以及用自有 rooted 目录层取代 cap-std），由该仓 CI 构建并发布 `smbd.exe` 与 `.sha256` 资产；Solomni 只按 URL 下载，不携带其提交史。
 
 ## 5. 基础工具链（运行前提，按需安装；不随仓分发）
 
@@ -120,10 +120,10 @@ This file documents the third-party dependency bundles self-hosted and distribut
 ## 4. smbd (SMB share helper, separate repository)
 
 - **Binary Asset**: `smbd-windows-x86_64.exe`
-- **Version**: v0.1.0 (tag `smbd-v0.1.0` in the separate repository)
+- **Version**: v0.3.0 (tag `smbd-v0.3.0` in the separate repository)
 - **License**: MIT (upstream rust-smb-server is MIT as well)
 - **Source Code**: https://github.com/theRMM714/rust-smb-server
-- **Note**: A fork of upstream `paltaio/rust-smb-server` (MIT); upstream code is unchanged, and the fork only adds the helper CLI and the release workflow. Its CI builds and publishes the `smbd.exe` and `.sha256` assets; Solomni only downloads it by URL and does not carry its commit history.
+- **Note**: A fork of upstream `paltaio/rust-smb-server` (MIT); the fork keeps a minimal patch set (helper CLI, release workflow, and a built-in rooted directory layer in place of cap-std). Its CI builds and publishes the `smbd.exe` and `.sha256` assets; Solomni only downloads it by URL and does not carry its commit history.
 
 ## 5. Base toolchains (runtime prerequisite, installed on demand; not shipped)
 

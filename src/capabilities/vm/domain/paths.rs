@@ -1,9 +1,9 @@
 //! 目的：宿主路径 → guest 路径的桥（纯逻辑）——按 guest 方言给拼法，同方言走恒等。
-//! 管：宿主路径与 guest 路径两个方向的互换（跨方言时编进镜像根；单射、可逆的编码规则集中在这里）——系统工具跑在宿主侧，靠反向把模型给的 guest 写法译回宿主路径再校验。
+//! 管：宿主路径与 guest 路径两个方向的互换（跨方言时编进镜像根；盘符与 UNC 各有一段编码，单射、可逆）——系统工具跑在宿主侧，靠反向把模型给的 guest 写法译回宿主路径再校验。
 //! 不管：谁在什么时候用它（挂载 / 命令装配 / 提示词 / 系统工具的寻址各自调用）、文件是否真存在。
 //! 联动：GuestImage 的 os 决定 guest 方言；mounts_from 与命令装配共用同一座桥。
 
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, Path, PathBuf, Prefix};
 
 /// 目的：路径方言——决定分隔符与根的写法。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,6 +24,9 @@ pub struct PathBridge {
 /// 目的：非恒等时 guest 侧的镜像根（POSIX guest 用；Windows guest 用系统盘下的同名根）。
 const POSIX_MIRROR: &str = "/solomni-host";
 const WINDOWS_MIRROR: &str = "C:\\solomni-host";
+/// 目的：UNC 在 POSIX 镜像里的保留段：`/solomni-host/unc/<server>/<share>/…`。
+/// 约束：盘符编码只可能是单字母段，`unc` 不会和它撞；这里不做转义（服务器名与共享名不含 `/`）。
+const UNC_SEGMENT: &str = "unc";
 
 /// 目的：宿主平台的路径方言（平台名就是 std::env::consts::OS 的取值）。
 pub fn host_dialect(host: &str) -> PathDialect {
@@ -60,8 +63,8 @@ impl PathBridge {
     }
 
     /// 目的：这条宿主路径能不能**经这座桥往返**（`guest_to_host(to_guest(host))` 仍是同一条路径）。
-    /// 约束：用来在起 guest 前拦掉无法编码的稳定根——Windows 的 UNC / 网络路径无法单射进镜像根
-    ///   （`posix_mirror` 只认盘符、`posix_unmirror` 只认单字母盘符），非 UTF-8 路径在 `to_string_lossy` 下也会丢字节。
+    /// 约束：用来在起 guest 前拦掉无法编码的稳定根——盘符与 UNC 都有单射编码，但卷 GUID 形态
+    ///   （`\\?\Volume{…}`）没有普通写法、非 UTF-8 路径在 `to_string_lossy` 下会丢字节，两者往返不成立。
     ///   盘符大小写不敏感（Windows 语义），其余段严格比较。
     pub fn round_trips(self, host: &Path) -> bool {
         match guest_to_host(self, &self.to_guest(host)) {
@@ -72,14 +75,18 @@ impl PathBridge {
 }
 
 /// 目的：判断两条宿主路径是不是同一个落点（Windows 盘符大小写不敏感，其余严格比较）。
+/// 约束：非 UTF-8 在 `to_string_lossy` 下会丢字节，lossy 比较会把两条不同的路径判成同一条——两边都是
+///   合法 UTF-8 才比，否则给 false（宁可往返不成立，也不给一条假的"可表示"）。
 fn same_host_path(a: &Path, b: &Path) -> bool {
     if a == b {
         return true;
     }
     #[cfg(windows)]
     {
-        a.to_string_lossy()
-            .eq_ignore_ascii_case(&b.to_string_lossy())
+        match (a.to_str(), b.to_str()) {
+            (Some(x), Some(y)) => x.eq_ignore_ascii_case(y),
+            _ => false,
+        }
     }
     #[cfg(not(windows))]
     {
@@ -87,29 +94,54 @@ fn same_host_path(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// 目的：Windows 宿主路径编进 POSIX guest——盘符小写当第一段（Windows 文件名不含 /，所以天然单射）。
+/// 目的：Windows 宿主路径编进 POSIX guest——盘符小写当第一段、UNC 编成保留段
+///   （Windows 文件名不含 /，所以两种编码都天然单射）。
 fn posix_mirror(host: &Path) -> String {
     let mut out = String::from(POSIX_MIRROR);
-    for c in host.components() {
-        match c {
-            Component::Prefix(p) => {
+    let mut comps = host.components();
+    match comps.next() {
+        Some(Component::Prefix(p)) => match p.kind() {
+            Prefix::UNC(server, share) | Prefix::VerbatimUNC(server, share) => {
                 out.push('/');
-                out.push_str(
-                    &p.as_os_str()
-                        .to_string_lossy()
-                        .replace(':', "")
-                        .to_lowercase(),
-                );
+                out.push_str(UNC_SEGMENT);
+                posix_push(&mut out, &server.to_string_lossy());
+                posix_push(&mut out, &share.to_string_lossy());
             }
-            Component::Normal(s) => {
+            Prefix::Disk(d) | Prefix::VerbatimDisk(d) => {
                 out.push('/');
-                out.push_str(&s.to_string_lossy());
+                out.push(char::from(d).to_ascii_lowercase());
             }
-            Component::ParentDir => out.push_str("/.."),
-            Component::RootDir | Component::CurDir => {}
-        }
+            // 卷 GUID / 设备路径没有普通写法：照旧转成本段，往返会在 round_trips 里被拦下。
+            _ => posix_push(
+                &mut out,
+                &p.as_os_str()
+                    .to_string_lossy()
+                    .replace(':', "")
+                    .to_lowercase(),
+            ),
+        },
+        Some(c) => posix_push_component(&mut out, c),
+        None => {}
+    }
+    for c in comps {
+        posix_push_component(&mut out, c);
     }
     out
+}
+
+/// 目的：往镜像路径里推一段（Normal 与 `..` 之外的分量不推）。
+fn posix_push_component(out: &mut String, c: Component<'_>) {
+    match c {
+        Component::Normal(s) => posix_push(out, &s.to_string_lossy()),
+        Component::ParentDir => out.push_str("/.."),
+        Component::Prefix(_) | Component::RootDir | Component::CurDir => {}
+    }
+}
+
+/// 目的：推一个 `/段`。
+fn posix_push(out: &mut String, seg: &str) {
+    out.push('/');
+    out.push_str(seg);
 }
 
 /// 目的：POSIX 宿主路径编进 Windows guest——镜像根下逐段，非法字符转义（可逆）。
@@ -148,22 +180,43 @@ pub fn guest_to_host(bridge: PathBridge, guest: &str) -> Option<PathBuf> {
     }
 }
 
-/// 目的：POSIX guest 的镜像路径解回 Windows 宿主路径（`/solomni-host/d/a/b` → `D:\a\b`）。
+/// 目的：POSIX guest 的镜像路径解回 Windows 宿主路径（`/solomni-host/d/a/b` → `D:\a\b`；
+///   `/solomni-host/unc/server/share/a` → `\\server\share\a`）。
+/// 约束：UNC 的服务器名与共享名必须是合法段（非空、不是 `.` / `..`、不含反斜杠），其余段同样；
+///   段非法给 None——宁可不认，也不把半截路径拼成另一条路径。
 fn posix_unmirror(guest: &str) -> Option<PathBuf> {
     let rest = guest.strip_prefix(POSIX_MIRROR)?.strip_prefix('/')?;
     let mut parts = rest.split('/');
-    let drive = parts.next()?;
-    if drive.len() != 1 || !drive.as_bytes()[0].is_ascii_alphabetic() {
+    let first = parts.next()?;
+    if first.eq_ignore_ascii_case(UNC_SEGMENT) {
+        let server = unc_segment(parts.next()?)?;
+        let share = unc_segment(parts.next()?)?;
+        let mut out = PathBuf::from(format!("\\\\{server}\\{share}"));
+        for seg in parts {
+            out.push(unc_segment(seg)?);
+        }
+        return Some(out);
+    }
+    if first.len() != 1 || !first.as_bytes()[0].is_ascii_alphabetic() {
         return None;
     }
     let mut out = String::new();
-    out.push_str(&drive.to_ascii_uppercase());
+    out.push_str(&first.to_ascii_uppercase());
     out.push(':');
     for seg in parts {
         out.push('\\');
         out.push_str(seg);
     }
     Some(PathBuf::from(out))
+}
+
+/// 目的：检查 UNC 编码里的一个段（服务器名 / 共享名 / 共享内路径段）。
+/// 约束：空段会让 `\\server\\\share` 这类写法歧义，`.` / `..` 会改变落点，反斜杠会把一段变成两段。
+fn unc_segment(seg: &str) -> Option<&str> {
+    if seg.is_empty() || seg == "." || seg == ".." || seg.contains('\\') {
+        return None;
+    }
+    Some(seg)
 }
 
 /// 目的：Windows guest 的镜像路径解回 POSIX 宿主路径（`C:\solomni-host\home\u\a` → `/home/u/a`）。

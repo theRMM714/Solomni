@@ -664,14 +664,6 @@ fn exec_extensions(pathext: Option<&str>) -> Vec<String> {
     exts
 }
 
-/// 去掉 Windows 规范化路径的 `\\?\` 前缀：安全描述符接口不认这个前缀，带上就是白写一条授权。
-fn strip_verbatim_prefix(path: &std::path::Path) -> std::path::PathBuf {
-    match path.to_string_lossy().strip_prefix(r"\\?\") {
-        Some(rest) => std::path::PathBuf::from(rest),
-        None => path.to_path_buf(),
-    }
-}
-
 /// 命令里出现的**程序**：按 PATH 解析出真实路径（解析不出的跳过，不猜）。
 /// 约束：绝对路径的 token 一律不算——那可能是数据文件，把它当程序会连带把它放行（见 interpreter_dirs 的用例）。
 /// 约束：解释器目录与「命令用到了哪个解释器」都从这一份派生——两处各写一遍迟早会漏掉某一类
@@ -745,7 +737,7 @@ pub(crate) fn interpreter_roots_for_exe(exe: &std::path::Path) -> Vec<std::path:
     let parent = exe.parent();
     let real = std::fs::canonicalize(exe)
         .ok()
-        .map(|p| strip_verbatim_prefix(&p));
+        .map(|p| crate::kernel::domain::path::native(&p));
     #[cfg(windows)]
     {
         if !parent.map(is_reparse_point).unwrap_or(false) {
@@ -875,7 +867,7 @@ fn is_node_program(program: &std::path::Path) -> bool {
         return true;
     }
     std::fs::canonicalize(program)
-        .map(|real| named_node(&strip_verbatim_prefix(&real)))
+        .map(|real| named_node(&crate::kernel::domain::path::native(&real)))
         .unwrap_or(false)
 }
 

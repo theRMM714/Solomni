@@ -19,12 +19,13 @@
 | `src/capabilities/conductor/api/proxy.rs` | 队列代理：把各能力的入站契约挂到核心手柄上（呈现层因此只持 `Ops`） |
 | `src/capabilities/conductor/service/mod.rs` | 会话中心：会话在世表、命令队列、运行态与派发闸（`dispatch_gate`） |
 | `src/capabilities/conductor/service/action.rs` | 动作的核心实现：把规整后的建会话载荷变成一条会话 |
-| `src/capabilities/conductor/service/work.rs` | 工作与会话配置：配置读写、建工作与上传、文件视图、会话视图 |
+| `src/capabilities/conductor/service/work.rs` | 工作与会话配置：配置读写、建工作与上传（含外部工作区根的分档解析）、文件视图、会话视图 |
+| `src/capabilities/conductor/service/workspace_root.rs` | 外部工作区根的策略：按档位判网络路径 / 共享根 / 文件系统根 / UTF-8 与产品根的互包含（文本 + 落点身份），并做目录与可写探测；创建走 `resolve`，加载复检走 `recheck` |
 | `src/capabilities/conductor/service/turn.rs` | 回合收发与协作动作：名单分发、单 agent 的话、协作推进入口、会话生命周期 |
 | `src/capabilities/conductor/service/flow.rs` | 协作流水线推进：链推进、节点派发与子会话、协作步（`take_*` / `put_*`） |
 | `src/capabilities/conductor/service/rewind.rs` | 跨会话回档编排：按同一回合 id 收窗整棵子树 |
 | `src/capabilities/conductor/service/env.rs` | 装配材料：成员通道、沙箱清单、工具环境、单 agent 会话构造（纯派生，不落盘） |
-| `src/capabilities/conductor/service/history.rs` | 历史列出 / 打开 / 删除、事件收编与增量落盘手柄 |
+| `src/capabilities/conductor/service/history.rs` | 历史列出 / 打开 / 删除、事件收编与增量落盘手柄；会话加载时按 meta 的档位复检外部工作区绑定 |
 | `src/capabilities/conductor/service/guest_job.rs` | 起停 guest 的两段式：核心准备参数（`GuestBoot` / `GuestStop`），调用方线程执行 |
 | `src/capabilities/conductor/service/ask_user.rs` | 工具层提问端口的会话侧实现：推一条问题并阻塞等一个选项 id |
 | `src/capabilities/conductor/ports.rs` | 出站端口：核心代理工具要做的外部动作（`ProxyHost`） |

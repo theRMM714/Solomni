@@ -516,7 +516,7 @@ pub(crate) fn product_root(home: &Path) -> PathBuf {
 pub(crate) fn inside_root(path: &Path, root: &Path) -> bool {
     let canon = |p: &Path| {
         std::fs::canonicalize(p)
-            .map(|c| super::super::strip_verbatim_prefix(&c))
+            .map(|c| crate::kernel::domain::path::native(&c))
             .unwrap_or_else(|_| p.to_path_buf())
     };
     let path_owned = canon(path);

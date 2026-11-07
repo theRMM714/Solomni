@@ -3353,9 +3353,11 @@ function pickWorkspaceDir(onPick) {
   openModal('新建工作', (c) => {
     const nameIn = textInput('工作名称（必填，会话落盘目录名）');
     if (w.name) nameIn.value = w.name;   // 草稿重开：把用户填过的带回来
-    const workspaceIn = textInput('默认（会话内 work/）');
-    workspaceIn.readOnly = true;
+    // 可手填：选择器只列本机盘符，网络共享（UNC）要自己写——虚拟机档接受，本机档由后端如实拒绝。
+    const workspaceIn = textInput('默认（会话内 work/）；也可填绝对路径或 UNC：\\\\server\\share\\目录');
     if (w.workspace) workspaceIn.value = w.workspace;
+    // 手填也算草稿：重开时带回来的是最后填的写法。
+    workspaceIn.addEventListener('input', () => { w.workspace = workspaceIn.value; });
     const wsPick = btn('选择目录', 'btn btn-ghost');
     const wsDefault = btn('默认', 'btn btn-ghost');
     wsPick.onclick = () => pickWorkspaceDir((p) => { workspaceIn.value = p; w.workspace = p; });
@@ -3366,6 +3368,12 @@ function pickWorkspaceDir(onPick) {
     workspaceRow.appendChild(workspaceIn);
     workspaceRow.appendChild(wsPick);
     workspaceRow.appendChild(wsDefault);
+    const wsHint = document.createElement('div'); wsHint.className = 'wf-hint';
+    wsHint.textContent = '本机档只接受本机目录（网络工作区会被拒绝，容器围栏访问不了私有网络）；' +
+      '虚拟机档可填 UNC 共享下的目录，凭据用当前登录用户。';
+    const workspaceWrap = document.createElement('div');
+    workspaceWrap.appendChild(workspaceRow);
+    workspaceWrap.appendChild(wsHint);
     const modeSel = selectInput([
       { value: 'single', label: '单 agent（1 个或多个模块）' },
       { value: 'collab', label: '协作（多个 agent）' },
@@ -3682,7 +3690,7 @@ function pickWorkspaceDir(onPick) {
     };
 
     c.body.appendChild(field('工作名称', nameIn));
-    c.body.appendChild(field('工作区（可选）', workspaceRow));
+    c.body.appendChild(field('工作区（可选）', workspaceWrap));
     c.body.appendChild(field('形态', modeSel));
     c.body.appendChild(modeHint);
     c.body.appendChild(tierField);
