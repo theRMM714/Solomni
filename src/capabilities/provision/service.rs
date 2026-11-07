@@ -794,6 +794,9 @@ fn run(
             ensure_executable(&probe);
         }
         record_installed(root, dep)?;
+        // 台账以磁盘为准：上面清旧安装时写的是本轮开始时的快照，
+        // 不刷新就会把前几条刚登记的身份覆盖掉（表现为「装完的条目又变成没装」）。
+        ledger = read_ledger(root);
         on_line(&format!("{}：就绪（{}）", dep.id, dep.install));
     }
     // 装完就把基础工具链登记进 active.json：启动期只读这一份（entry::toolchains）；
