@@ -65,17 +65,20 @@ the **runtime environment** (just running the product) and the **dev environment
 ```bash
 node start.js            # any platform; on Windows also start.bat, on macOS / Linux also ./start.sh
 node start.js -webUI     # go straight to the local web UI (127.0.0.1:3081)
-solomni --provision --ensure=toolchain --yes # after the build: add runtime prerequisites (Python / Node / C-C++); the kind group alias fills only what is missing and touches no network when nothing is
+node start.js --provision --ensure=toolchain --yes # after the build: add runtime prerequisites (Python / Node / C-C++); the kind group alias fills only what is missing and touches no network when nothing is
 node start.js --provision                # optional: read-only vm tier status (JSON: QEMU / guest image / agent and runtimes)
 node start.js --provision --ensure --yes # optional (Linux / Windows): install QEMU and a Debian guest into the project's .vm/ (--yes confirms the download)
 # the web UI can do the same on Linux / Windows from the dialog shown when the vm tier is unavailable (no CLI needed)
 ```
 
+> In the vm / storage examples below, `solomni` means the built binary at `target/<profile>/solomni`; the
+> equivalent source-tree entry is `node start.js ...`.
+
 - **First start**: without `.home/settings.yaml`, Windows first asks whether to authorize the container fence
   (directory ACLs); choosing no writes nothing and enters the startup gate (unfenced this run / reconfigure / exit).
   `-webUI` does not bypass that gate. Runtime prerequisites (Python / Node / C-C++) are not installed by the
-  launcher: the product fills them in via `solomni --provision --ensure=toolchain --yes` (the group alias fills only
-  what is missing), and `start.js` just points to it.
+  launcher: the product fills them in via `node start.js --provision --ensure=toolchain --yes` (the group alias fills
+  only what is missing), and `start.js` just points to it.
 - Toolchain and caches stay **inside the project**: a Rust that can **actually build** is **borrowed read-only**
   (probed by compiling and linking an empty program first — on Windows an msvc host without `link.exe`, i.e. no
   VS C++ build tools, does not count as usable; caches and artifacts still land under `platform/<os>/`); only when

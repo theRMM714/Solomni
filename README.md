@@ -54,16 +54,18 @@ Solomni 是一个**跑在自己机器上的 agent 运行环境（AgentOS）**：
 ```bash
 node start.js            # 任意平台；Windows 也可双击 start.bat，macOS / Linux 也可 ./start.sh
 node start.js -webUI     # 直接进本地网页（127.0.0.1:3081）
-solomni --provision --ensure=toolchain --yes # 构建后补运行前提（Python / Node / C-C++）：kind 组别名只补缺项，一条不缺时打印「没有缺项，无需补齐」且不联网
+node start.js --provision --ensure=toolchain --yes # 构建后补运行前提（Python / Node / C-C++）：kind 组别名只补缺项，一条不缺时打印「没有缺项，无需补齐」且不联网
 node start.js --provision                # 可选：虚拟机档只读状态（JSON：QEMU / guest 镜像 / agent 与运行包）
 node start.js --provision --ensure --yes # 可选（Linux / Windows）：把 QEMU 与 Debian guest 装进项目内 .vm/（下载前要 --yes）
 # 网页里也能直接补（Linux / Windows）：虚拟机档不可用、或选中的虚拟根未装齐时，配置面板 / 创建向导给的「补齐虚拟机依赖」就是这条（不必开终端）
 ```
 
+> 下文虚拟机 / 存储示例里的 `solomni` 指构建出的 `target/<profile>/solomni`；源码树里等价入口是 `node start.js ...`。
+
 - **首次启动**：没有 `.home/settings.yaml` 时，Windows 会先问一次是否授权容器围栏（写目录 ACL）；
   选是就写盘并整体重启；选否不写设置、进入启动门（本次无围栏 / 重设 / 退出）。`-webUI` 也要先过这关，
   不会“带参数就直接开网页”。运行前提（Python / Node / C-C++）不在启动器里装：由产品
-  `solomni --provision --ensure=toolchain --yes` 按清单补（组别名只补缺项），`start.js` 只指路。
+  `node start.js --provision --ensure=toolchain --yes` 按清单补（组别名只补缺项），`start.js` 只指路。
 - 工具链与缓存收敛在**项目内**：检测到**真能构建**的 Rust 才**只读借用**（借用前编译一个空程序探测：Windows 上 msvc host 缺 `link.exe`、例如没装 VS C++ 时不算可用），缓存与产物仍落 `platform/<os>/`；没有或有问题的才先征求同意装进项目内（Windows 装 GNU，自带链接器，不需要 Visual Studio），不动系统；Linux / macOS 的 C 工具链同口径：宿主 `cc` 能构建就直接用，缺了才征得同意把 Zig cc 装进 `.tools/toolchains`（macOS 缺 CLT 时直接给前置，不假装 Zig 能替代 SDK）。**无交互终端时不做安装**，打印手动步骤后退出。`node env.js` 给出 host、构建结论、C 工具链来源与借不借用。
 - 模块工具/构建的**基础工具链**（Python / Node / C-C++）是运行前提，装进 `.tools/toolchains/`，启动时前置 PATH。安装者只有产品 `--provision`（`kind: toolchain`，组别名只补缺项）；装完由 Rust 侧把在场项写进 `.tools/toolchains/active.json`（`profile` / `target` / 每项的 `id` / `version` / `bin` / `env`），启动期只读这一份。宿主回退只在 Windows 围栏能授权时可用（按**真身安装根**判：已有足够权限项、目录属主是当前用户、或当前用户对该目录有 WRITE_DAC；命令名经链接进来时链接本身不授）；否则如实报原因并要求先装项目内。C# 等额外能力可由用户把适用于本机目标的包放进 `runtimes/`（包 `bin/` 进本次执行的 PATH；缺包如实报告）。
   C/C++ 在 Windows 用 MinGW-w64、Linux / macOS 用 Zig；构建期复用同一条 Zig 安装（`env.js` 在宿主 `cc` 不可用时先装好），macOS 链接原生框架仍需要系统的 Xcode Command Line Tools / SDK。

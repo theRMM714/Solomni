@@ -49,7 +49,7 @@
 - 本机档：项目内基础工具链（Python / Node / C-C++）优先，其次宿主 PATH 回退，再其次是 `runtimes/` 里的包；缺了如实拒绝——「声明不构成保证」。
 - 虚拟机档：guest 自带的运行能力优先，其次包库（prefix 的 `bin` 进 PATH、system 的载荷叠写进系统路径）。
 - 选包规则与运行能力同一套，见 `RUNTIME_SPEC.md` 与 `docs/vm/README.md`。
-- 项目内基础工具链由产品 provision 补齐（`solomni --provision --ensure=toolchain --yes`，kind 组别名只补缺项；装完由 Rust 侧登记 `.tools/toolchains/active.json`）；`start.js` 只指路（见 `README.md` 的「安装与运行」）。
+- 项目内基础工具链由产品 provision 补齐（`node start.js --provision --ensure=toolchain --yes`，kind 组别名只补缺项；装完由 Rust 侧按清单重写 `.tools/toolchains/active.json`；`env.js` 装构建期 Zig cc 时也会合并登记 `cc`）；`start.js` 只指路（见 `README.md` 的「安装与运行」）。
 
 ## 五、缓存与回收
 - 状态落 `.vm/build-state/<模块>.json`：`target`（`host` / 虚拟根名）+ `fingerprint`；本机档与各虚拟根共用一份，靠 `target` 区分。

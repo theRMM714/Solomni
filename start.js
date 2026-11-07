@@ -49,7 +49,9 @@ function runTests(cargoEnv) {
 }
 
 function run(cargoEnv) {
-  const pass = process.argv.slice(2).filter((a) => a !== "--release" && a !== "--yes");
+  // --yes 同时是 env.ensure 的同意开关与产品诊断命令（--provision 等）的确认开关，必须透传；
+  // 只把构建档位参数留给启动器自己。
+  const pass = process.argv.slice(2).filter((a) => a !== "--release");
   const argv = [BIN, "."].concat(pass);
   log(process.argv.includes("-webUI")
     ? "starting Web UI (default 127.0.0.1:3081, open http://127.0.0.1:3081)"
@@ -72,7 +74,7 @@ function runLoop(cargoEnv) {
   // 运行前提（Python / Node / C-C++）由产品自己补：active.json 不在场时给一次一句话指路，
   // 之后就由产品每次启动如实报缺件与同一条命令（这里不重复 profile 判据）。
   if (!fs.existsSync(path.join(ROOT, ".tools", "toolchains", "active.json"))) {
-    log("运行前提未安装：构建后跑 solomni --provision --ensure=toolchain --yes（产品每次启动也会提示）");
+    log("运行前提未安装：构建后跑 node start.js --provision --ensure=toolchain --yes（产品每次启动也会提示）");
   }
   log("platform " + process.platform + " " + process.arch);
   const cargo = ready.cargo;

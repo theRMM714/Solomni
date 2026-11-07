@@ -1287,7 +1287,7 @@ function renderToolchainBanner() {
   const fallback = t.fallback || {};
   const bad = missing.filter((id) => fallback[id] && fallback[id].fenced === false);
   const absent = missing.filter((id) => !fallback[id]);
-  let msg = '基础工具链未安装：' + missing.join('、') + '。补全：solomni --provision --ensure=toolchain --yes';
+  let msg = '基础工具链未安装：' + missing.join('、') + '。补全：node start.js --provision --ensure=toolchain --yes';
   if (bad.length) msg += ' 宿主回退在围栏下不可授权（' + bad.join('、') + '）；工具调用会问是否本次无围栏跑。';
   if (absent.length) msg += ' 宿主 PATH 也没有：' + absent.join('、') + '。';
   text.textContent = msg;

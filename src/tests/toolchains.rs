@@ -146,7 +146,7 @@ pub(crate) fn report_lines_name_project_missing_host_fallback_and_gap() {
     );
     assert!(text.contains("宿主回退 cc：宿主 PATH 也没有"), "{}", text);
     assert!(
-        text.contains("solomni --provision --ensure=toolchain --yes"),
+        text.contains("node start.js --provision --ensure=toolchain --yes"),
         "{}",
         text
     );
