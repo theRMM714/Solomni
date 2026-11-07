@@ -996,8 +996,26 @@ fn write_zig_wrappers(install: &Path) -> Result<(), String> {
         ("g++", "c++"),
         ("clang++", "c++"),
     ] {
+        // cc-rs 把 clang 形编译器当跨平台 clang，传 Rust 三元组（x86_64-unknown-linux-gnu）；
+        // Zig 不认 `unknown-`，不翻译时 ring 等 C 依赖直接构建失败。
         let body = format!(
-            "#!/bin/sh\nDIR=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\nexec \"$DIR/zig\" {} \"$@\"\n",
+            r#"#!/bin/sh
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+n=$#
+i=0
+while [ "$i" -lt "$n" ]; do
+  a=$1
+  shift
+  case "$a" in
+    --target=*unknown-*) a=$(printf '%s\n' "$a" | sed 's/^--target=\(.*\)-unknown-/--target=\1-/') ;;
+    --target=x86_64-apple-darwin) a=--target=x86_64-macos ;;
+    --target=aarch64-apple-darwin) a=--target=aarch64-macos ;;
+  esac
+  set -- "$@" "$a"
+  i=$((i + 1))
+done
+exec "$DIR/zig" {} "$@"
+"#,
             sub
         );
         write_exe(&bin.join(name), &body)?;
@@ -3286,6 +3304,11 @@ mod tests {
         assert!(gcc.contains("zig\" cc"), "gcc 包装要调 zig cc：{}", gcc);
         let gxx = fs::read_to_string(bin.join("g++")).expect("g++ 包装");
         assert!(gxx.contains("zig\" c++"), "g++ 包装要调 zig c++：{}", gxx);
+        assert!(
+            gcc.contains("--target=*unknown-*") && gcc.contains("--target=\\1-"),
+            "gcc 包装要把 Rust 三元组的 unknown- 去掉且保留 --target= 前缀：{}",
+            gcc
+        );
         for name in ["cc", "gcc", "g++", "c++", "clang", "clang++"] {
             assert!(bin.join(name).is_file(), "缺包装：{}", name);
         }
