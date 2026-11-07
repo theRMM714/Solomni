@@ -464,6 +464,7 @@ pub fn provision(root: &std::path::Path, args: &[String]) -> i32 {
                 "deps": items.iter().map(|s| serde_json::json!({
                     "id": s.id,
                     "present": s.present,
+                    "stale": s.stale,
                     "note": s.note,
                     "install": s.install,
                     "probe": s.probe,
