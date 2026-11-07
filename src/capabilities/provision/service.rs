@@ -983,8 +983,14 @@ fn write_zig_wrappers(install: &Path) -> Result<(), String> {
     let rel = rel.to_string_lossy().replace('\\', "/");
     let bin = install.join("bin");
     fs::create_dir_all(&bin).map_err(|e| format!("建 {} 失败：{}", bin.display(), e))?;
+    // Zig 默认把全局缓存写到 ~/.cache/zig（项目外）；钉进安装目录，项目根整体搬移后仍成立。
     let zig_body = format!(
-        "#!/bin/sh\nDIR=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\nexec \"$DIR/../{}\" \"$@\"\n",
+        r#"#!/bin/sh
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+export ZIG_GLOBAL_CACHE_DIR="${{ZIG_GLOBAL_CACHE_DIR:-$DIR/../cache/global}}"
+export ZIG_LOCAL_CACHE_DIR="${{ZIG_LOCAL_CACHE_DIR:-$DIR/../cache/local}}"
+exec "$DIR/../{}" "$@"
+"#,
         rel
     );
     write_exe(&bin.join("zig"), &zig_body)?;
@@ -1001,6 +1007,8 @@ fn write_zig_wrappers(install: &Path) -> Result<(), String> {
         let body = format!(
             r#"#!/bin/sh
 DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+export ZIG_GLOBAL_CACHE_DIR="${{ZIG_GLOBAL_CACHE_DIR:-$DIR/../cache/global}}"
+export ZIG_LOCAL_CACHE_DIR="${{ZIG_LOCAL_CACHE_DIR:-$DIR/../cache/local}}"
 n=$#
 i=0
 while [ "$i" -lt "$n" ]; do
@@ -3298,6 +3306,11 @@ mod tests {
         assert!(
             zig.contains("../zig-demo/zig"),
             "zig 包装要指向包内本体：{}",
+            zig
+        );
+        assert!(
+            zig.contains("ZIG_GLOBAL_CACHE_DIR") && zig.contains("cache/global"),
+            "zig 包装要把缓存钉在安装目录内：{}",
             zig
         );
         let gcc = fs::read_to_string(bin.join("gcc")).expect("gcc 包装");

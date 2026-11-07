@@ -840,19 +840,28 @@ function writeExecutable(file, body) {
  * 目的：把 `zig cc` / `zig c++` 包成常规编译器名，并翻译 cc-rs 传的 Rust 三元组。
  * 为什么翻译：cc-rs 把 clang 形编译器当跨平台 clang，传 `--target=x86_64-unknown-linux-gnu`；
  *   Zig 不认 `unknown-`（报 UnknownOperatingSystem），不翻译时 ring 等 C 依赖直接构建失败。
- * 约束：POSIX sh；相对路径，产品根整体搬移后仍可用。
+ * 约束：POSIX sh；相对路径，产品根整体搬移后仍可用；Zig 缓存钉在安装目录内，不写 ~/.cache/zig。
  */
 function writeZigWrappers(install, zig) {
   const rel = path.relative(install, zig).split(path.sep).join("/");
   const bin = path.join(install, "bin");
   fs.mkdirSync(bin, { recursive: true });
-  writeExecutable(path.join(bin, "zig"),
-    "#!/bin/sh\nDIR=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\nexec \"$DIR/../" + rel + "\" \"$@\"\n");
+  writeExecutable(path.join(bin, "zig"), [
+    "#!/bin/sh",
+    "DIR=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)",
+    // Zig 默认把全局缓存写到 ~/.cache/zig（项目外）；钉进安装目录，项目根整体搬移后仍成立。
+    "export ZIG_GLOBAL_CACHE_DIR=\"${ZIG_GLOBAL_CACHE_DIR:-$DIR/../cache/global}\"",
+    "export ZIG_LOCAL_CACHE_DIR=\"${ZIG_LOCAL_CACHE_DIR:-$DIR/../cache/local}\"",
+    "exec \"$DIR/../" + rel + "\" \"$@\"",
+    "",
+  ].join("\n"));
   for (const [name, sub] of [["cc", "cc"], ["gcc", "cc"], ["clang", "cc"],
     ["c++", "c++"], ["g++", "c++"], ["clang++", "c++"]]) {
     const body = [
       "#!/bin/sh",
       "DIR=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)",
+      "export ZIG_GLOBAL_CACHE_DIR=\"${ZIG_GLOBAL_CACHE_DIR:-$DIR/../cache/global}\"",
+      "export ZIG_LOCAL_CACHE_DIR=\"${ZIG_LOCAL_CACHE_DIR:-$DIR/../cache/local}\"",
       "n=$#",
       "i=0",
       "while [ \"$i\" -lt \"$n\" ]; do",

@@ -410,7 +410,11 @@ function makeTarBody(dir) {
   const src = path.join(dir, "tar-src");
   const pkg = path.join(src, "zig-demo");
   fs.mkdirSync(pkg, { recursive: true });
-  fs.writeFileSync(path.join(pkg, "zig"), "#!/bin/sh\nprintf '%s\\n' \"$@\"\n", { mode: 0o755 });
+  fs.writeFileSync(
+    path.join(pkg, "zig"),
+    "#!/bin/sh\nprintf 'GLOBAL=%s\\nLOCAL=%s\\n' \"$ZIG_GLOBAL_CACHE_DIR\" \"$ZIG_LOCAL_CACHE_DIR\"\nprintf '%s\\n' \"$@\"\n",
+    { mode: 0o755 },
+  );
   const tar = path.join(dir, "zig-fixture.tar");
   const r = spawnSync("tar", ["-cf", tar, "-C", src, "zig-demo"], { encoding: "utf8" });
   assert.equal(r.status, 0, "造 tar 夹具失败：" + (r.stderr || ""));
@@ -536,6 +540,9 @@ async function runPosixCases() {
         assert.equal(w.status, 0, "包装要能执行：" + (w.stderr || ""));
         assert.match(w.stdout, /--target=x86_64-linux-gnu/, "要把 Rust 三元组翻成 Zig 认的形态：" + w.stdout);
         assert.ok(!/unknown-/.test(w.stdout), "不能把 unknown- 传给 Zig：" + w.stdout);
+        const cacheBase = path.join(dir, CC_INSTALL, "bin") + "/../cache";
+        assert.ok(w.stdout.includes("GLOBAL=" + cacheBase + "/global"), "Zig 全局缓存要钉在安装目录内：" + w.stdout);
+        assert.ok(w.stdout.includes("LOCAL=" + cacheBase + "/local"), "Zig 本地缓存要钉在安装目录内：" + w.stdout);
         assert.ok(!fs.existsSync(path.join(dir, ".tools", "zig.tar.xz")), "装完要删归档");
         assert.ok(requests.length > 0, "夹具源要被请求");
       } finally {
