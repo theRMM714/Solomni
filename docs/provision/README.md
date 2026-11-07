@@ -41,7 +41,7 @@
 
 - 清单的 `toolchain` 段是载荷：`tool`（工具 id，如 `python` / `node` / `cc`）、`version`（安装布局与 `active.json` 的版本）、`target`（可选的宿主目标名）、`bins`（相对 `install` 的目录，进 PATH）。缺段或空字段在安装时如实拒绝，不猜版本或布局。
 - **构建期与运行期共用同一份 Zig**：Linux / macOS 源码构建时，`env.js` 在宿主 `cc` 缺失或不能构建时，按同一条 `toolchain.cc.*` 条目把 Zig 装进 `install` 路径并前置到构建 PATH；之后 `--ensure=toolchain` 看到它已在场，只登记 `active.json`，不重复下载。包装把 `ZIG_GLOBAL_CACHE_DIR` / `ZIG_LOCAL_CACHE_DIR` 钉在安装目录内，不写 `~/.cache/zig`。macOS 链接系统框架仍需 Xcode CLT / SDK（Zig 包不含 SDK）。
-- 装完由 **Rust 侧**扫清单、核对每个 `bin` 目录在场，把在场项写进 `.tools/toolchains/active.json`：`{target, profile:[工具 id], tools:[{id, version, bin:[…], env:{}}]}`（临时文件 + rename 原子提交）。启动期（`entry::toolchains`）只读这一份把项目内 `bin` 前置到 PATH，不重新扫盘。
+- 装完（以及 `env.js` 装好构建期 Zig cc 后）由登记者以磁盘在场项为准写 `.tools/toolchains/active.json`：产品 `--provision` 时 Rust 侧按清单全量重写，`env.js` 只合并 `cc` 条目（保留已有 python / node）；格式是 `{target, profile:[工具 id], tools:[{id, version, bin:[…], env:{}}]}`（临时文件 + rename 原子提交）。启动期（`entry::toolchains`）只读这一份把项目内 `bin` 前置到 PATH，不重新扫盘。
 - **组别名**：`--ensure=toolchain` 按清单的 `kind` 取**还没在场**的条目 id，已在位的不重装（260 MB 的包不重解）；一条不缺时直接打印 `toolchain：没有缺项，无需补齐`，不起作业、不联网。`--ensure=<id>`（如 `toolchain.node.windows-x86_64`）仍按 id 点名；裸 `--ensure` 是清单全量（含 QEMU / guest 等大件）；kind 与 id 不能混写（如实拒绝）。
 
 ## 二、guest-rootfs：Debian 虚拟根的多步构造

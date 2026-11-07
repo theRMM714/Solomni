@@ -114,13 +114,13 @@ node run-tests.js
 | 项目内工具链装了一半 | 退出 1、说明项目内工具链构建不了、给"先卸再装"的修复步骤（下载中断会留下这种半套） |
 | POSIX 宿主 `cc` 可用 | 退出 0、零下载、不请求夹具源、不装项目内 cc |
 | POSIX 宿主 `cc` 缺失 + `--yes` | 退出 0、过 sha256、装出 `cc/gcc/g++/clang…` 包装、`--target=x86_64-unknown-linux-gnu` 翻成 Zig 认的形态 |
-| POSIX 半个 Zig cc（只有 gcc） | 退出 0、重新下载安装、补出 rustc 要用的 `cc` 包装 |
+| POSIX 半个 Zig cc（只有 gcc） | 退出 0、重新下载安装、补出 rustc 要用的 `cc` 包装；已有 python 条目保留、cc 合并登记进 `active.json` |
 | POSIX 宿主 `cc` 缺失 + 无 TTY | 退出 1、明说无交互终端不下载、指向 C 工具链与 `node env.js setup --yes`，不请求源 |
 | POSIX sha256 不符 | 退出 1、报不符、保留归档、不解包 |
 | macOS 缺 CLT | 退出 1、报 Xcode Command Line Tools / `xcode-select --install`，不下载 Zig |
 
 - dlltool 只在 Windows、Zig 引导只在 POSIX：各自平台缺的另一条路如实 `[探针]` 跳过，不算通过。
-- **这条自检只钉保留的引导链**：`env.js` 做 Rust / MinGW / Zig cc 引导（`node env.js setup`）；运行前提基础工具链（Python / Node / C-C++）仍由产品 `solomni --provision --ensure=toolchain --yes` 补齐（`kind: toolchain` 组别名只补缺项，全齐时打印「没有缺项，无需补齐」且不联网）；Zig cc 与运行前提共用同一安装路径，`env.js` 先装好后产品只登记 `active.json`。
+- **这条自检只钉保留的引导链**：`env.js` 做 Rust / MinGW / Zig cc 引导（`node env.js setup`）；运行前提基础工具链（Python / Node / C-C++）仍由产品 `node start.js --provision --ensure=toolchain --yes` 补齐（`kind: toolchain` 组别名只补缺项，全齐时打印「没有缺项，无需补齐」且不联网）；Zig cc 与运行前提共用同一安装路径，`env.js` 先装好并合并登记 `cc`，产品补齐时按磁盘在场项重写 `active.json`。
 
 ### 依赖哈希检查（`pins.js`）
 

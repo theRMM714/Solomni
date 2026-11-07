@@ -470,7 +470,12 @@ function writePosixFixture(dir, opts) {
       "  - id: toolchain.cc." + TARGET + "\n" +
       "    install: " + CC_INSTALL + "\n" +
       "    probe: " + CC_INSTALL + "/bin/gcc\n" +
-      "    source: fixture.zig\n",
+      "    source: fixture.zig\n" +
+      "    toolchain:\n" +
+      "      tool: cc\n" +
+      "      version: " + CC_VERSION + "\n" +
+      "      target: " + TARGET + "\n" +
+      "      bins: [bin]\n",
   );
   fs.writeFileSync(
     path.join(dir, "links.yaml"),
@@ -544,6 +549,13 @@ async function runPosixCases() {
         assert.ok(w.stdout.includes("GLOBAL=" + cacheBase + "/global"), "Zig 全局缓存要钉在安装目录内：" + w.stdout);
         assert.ok(w.stdout.includes("LOCAL=" + cacheBase + "/local"), "Zig 本地缓存要钉在安装目录内：" + w.stdout);
         assert.ok(!fs.existsSync(path.join(dir, ".tools", "zig.tar.xz")), "装完要删归档");
+        const active = JSON.parse(fs.readFileSync(path.join(dir, ".tools", "toolchains", "active.json"), "utf8"));
+        assert.equal(active.target, TARGET, "active.json 要写当前目标");
+        assert.ok(active.profile.includes("cc"), "profile 要包含 cc：" + JSON.stringify(active.profile));
+        const cc = active.tools.find((t) => t && t.id === "cc");
+        assert.ok(cc, "tools 要登记 cc：" + JSON.stringify(active.tools));
+        assert.equal(cc.version, CC_VERSION, "要登记清单版本");
+        assert.deepEqual(cc.bin, [CC_INSTALL + "/bin"], "bin 要指向安装目录下的 bin");
         assert.ok(requests.length > 0, "夹具源要被请求");
       } finally {
         server.close();
@@ -585,10 +597,20 @@ async function runPosixCases() {
         const half = path.join(dir, CC_INSTALL, "bin");
         fs.mkdirSync(half, { recursive: true });
         fs.writeFileSync(path.join(half, "gcc"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+        // 已有别的工具登记：重装 cc 时必须保留，不能整份覆盖。
+        const activePath = path.join(dir, ".tools", "toolchains", "active.json");
+        fs.writeFileSync(activePath, JSON.stringify({
+          target: TARGET,
+          profile: ["python", "cc"],
+          tools: [{ id: "python", version: "9.9.9", bin: [".tools/python/bin"], env: {} }],
+        }, null, 2) + "\n");
         const r = await runEnv(dir, baseEnv(dir, true), ["setup", "--yes"]);
         assert.equal(r.code, 0, "半个安装要能被重装修好：" + tailOut(r.out));
         assert.match(r.out, /downloading/, "缺 cc 包装必须重新安装，不能当成就绪");
         assert.ok(fs.existsSync(path.join(half, "cc")), "重装后要有 cc 包装");
+        const active = JSON.parse(fs.readFileSync(activePath, "utf8"));
+        assert.ok(active.tools.some((t) => t && t.id === "python"), "已有 python 条目要保留");
+        assert.ok(active.tools.some((t) => t && t.id === "cc"), "重装后要登记 cc");
       } finally {
         server.close();
       }

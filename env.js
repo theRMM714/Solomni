@@ -136,18 +136,92 @@ function buildCC() {
     }
     if (!inDep) continue;
     const kv = line.match(/^([a-z_]+):\s*(\S+)$/);
-    if (kv && (kv[1] === "install" || kv[1] === "probe" || kv[1] === "source")) dep[kv[1]] = kv[2];
+    if (kv && (kv[1] === "install" || kv[1] === "probe" || kv[1] === "source" || kv[1] === "version")) {
+      dep[kv[1]] = kv[2];
+    }
   }
   if (!dep || !dep.install || !dep.probe || !dep.source) return null;
   const install = path.join(ROOT, ...dep.install.split("/"));
   const probe = path.join(ROOT, ...dep.probe.split("/"));
-  buildCCCache = { id: dep.id, source: dep.source, install, probe, bin: path.dirname(probe) };
+  buildCCCache = {
+    id: dep.id,
+    source: dep.source,
+    version: dep.version || "",
+    installRel: dep.install.replace(/\/+$/, ""),
+    install,
+    probe,
+    bin: path.dirname(probe),
+  };
   return buildCCCache;
+}
+
+let profileCache;
+/** 目的：清单里当前目标的基础工具链 tool id（与 Rust 侧 active.json 的 profile 同一套）。 */
+function baseToolchainProfile() {
+  if (profileCache !== undefined) return profileCache;
+  profileCache = [];
+  if (IS_WIN) return profileCache;
+  const file = path.join(ROOT, "dependencies.yaml");
+  if (!fs.existsSync(file)) return profileCache;
+  for (const raw of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
+    const m = raw.trim().match(/^-\s+id:\s*toolchain\.([a-z0-9_]+)\.(.+)$/);
+    if (m && m[2] === TARGET_KEY && !profileCache.includes(m[1])) profileCache.push(m[1]);
+  }
+  return profileCache;
 }
 
 /** 目的：项目内 Zig cc 是否完整可用——清单的 probe（gcc 包装）与 rustc 要用的 cc 包装都必须在场。 */
 function buildCCReady(dep) {
   return !!dep && fs.existsSync(dep.probe) && fs.existsSync(path.join(dep.bin, "cc"));
+}
+
+/**
+ * 目的：把 env.js 装好的 Zig cc 合并登记进 `.tools/toolchains/active.json`。
+ * 为什么：启动报告与 active_roots 只读 active.json；不登记就会把项目内 cc 报成宿主回退，围栏也看不到它的只读根。
+ * 约束：保留已有工具条目（python / node）；原子替换；清单版本缺失时不写半份登记；字段已一致时不写盘。
+ */
+function syncBuildCCActive(dep) {
+  if (IS_WIN || !buildCCReady(dep) || !dep.version) return;
+  const file = path.join(TOOLS, "toolchains", "active.json");
+  const bin = dep.installRel + "/bin";
+  const wanted = { id: "cc", version: dep.version, bin: [bin], env: {} };
+  const profile = baseToolchainProfile().slice();
+  if (!profile.includes("cc")) profile.push("cc");
+  let current = null;
+  try {
+    current = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (e) {
+    current = null;
+    if (fs.existsSync(file)) log("active.json 非法，重写为项目内工具登记");
+  }
+  const usable = current && current.target === TARGET_KEY
+    && Array.isArray(current.profile) && Array.isArray(current.tools);
+  if (usable) {
+    const cc = current.tools.find((t) => t && t.id === "cc");
+    const same = cc && cc.version === wanted.version
+      && Array.isArray(cc.bin) && cc.bin.length === 1 && cc.bin[0] === bin
+      && profile.every((id) => current.profile.includes(id));
+    if (same) return;
+  }
+  const doc = {
+    target: TARGET_KEY,
+    profile: usable ? current.profile.filter((id) => typeof id === "string") : profile.slice(),
+    tools: usable
+      ? current.tools.filter((t) => t && typeof t === "object" && t.id && t.id !== "cc")
+      : [],
+  };
+  for (const id of profile) if (!doc.profile.includes(id)) doc.profile.push(id);
+  doc.tools.push(wanted);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = file + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(doc, null, 2) + "\n");
+  fs.renameSync(tmp, file);
+}
+
+/** 目的：cc 已可用时登记；由 ensure / ensureProject 在返回前调用（status / --print-env 保持只读）。 */
+function registerBuildCC() {
+  const dep = buildCC();
+  if (buildCCReady(dep)) syncBuildCCActive(dep);
 }
 
 /** 目的：拼 PATH 时该放项目内 C 工具链的哪个 bin 目录；没装就返回空。 */
@@ -412,6 +486,7 @@ async function ensureProject(opts) {
     if (!r) die("项目内工具链装好了却仍找不到 cargo（platform/<os>/cargo/bin）");
   }
   assertProjectBuildable(r);
+  registerBuildCC();
   return r;
 }
 
@@ -492,6 +567,7 @@ async function ensure(opts) {
   // dlltool 目录刚进 EXTRA_PATH，PATH 要重新拼一次。
   ready = resolve({});
   if (!ready) die("environment not ready: no usable cargo (project or PATH)");
+  registerBuildCC();
   return ready;
 }
 
@@ -937,7 +1013,10 @@ async function ensureBuildCC(yes) {
     // 文件在场不等于能跑（包装指向的 zig 可能被删 / 半套）：真编一个空程序再认。
     const env = Object.assign({}, process.env);
     setEnvPath(env, dep.bin + path.delimiter + (envPath(env) || ""));
-    if (probeHostCC({ env }).ok) return true;
+    if (probeHostCC({ env }).ok) {
+      syncBuildCCActive(dep);
+      return true;
+    }
     log("项目内 Zig cc 在场但不能构建，重新安装");
   }
   const ans = await ask("没有可用的 C 链接器。把项目内 Zig cc（约 51MB）装进 " +
@@ -947,6 +1026,7 @@ async function ensureBuildCC(yes) {
     return false;
   }
   installBuildCC(dep);
+  syncBuildCCActive(dep);
   return buildCCReady(dep);
 }
 
