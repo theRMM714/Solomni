@@ -41,7 +41,7 @@ session/<工作名>/
 - **可以再往下嵌套**：子会话自己还能有子会话（代理建的协作子工作会派生节点子会话），每一层都是父会话目录下的 `children/<名字>/`；查找、列清单、级联删除都按**任意深度**走整棵 children/ 树。
 - **整棵树只有一个共享区根**：不论嵌套多少层，共享区始终是**顶层**那一个（工作根 = 沿 `meta.parent` 走到顶；默认是顶层 `work/`，根会话绑定外部工作区时是 `meta.yaml` 的 `workspace.root`），各 agent 沙箱也建在工作根下；实例名因此在**整棵子树**里唯一（重名自动带尾号，见 registry 的命名策略）。
 - **外部工作区绑定**：根会话可在创建时把共享区主副本绑定到产品目录之外的绝对路径；绑定写进 `meta.yaml` 的 `workspace` 段，整棵子树只读继承，**创建后不可改**。`.work/` 与各 agent 沙箱永远留在会话目录内，外部目录里不出现本产品的状态；`.work-root` 只是布局投影，打开 / 重建时按 meta 刷新。
-- **虚拟机档的挂载布局**：起 guest 时把**会话树根**（`session/<工作名>`，各 agent 私沙与 `.work` 的父目录）与**外部工作区根**（仅外部绑定时）各挂一条稳定挂载，另加模块树根——三根互不包含，guest 内的路径写法由同一座路径桥给出；外部根是 UNC / 网络路径时当前不可用（本机档容器围栏与虚拟机档 smbd helper 都不支持；映射盘符无效；见 `tests/gaps.yaml` 的 `workspace.external-root-unc`）。
+- **虚拟机档的挂载布局**：起 guest 时把**会话树根**（`session/<工作名>`，各 agent 私沙与 `.work` 的父目录）与**外部工作区根**（仅外部绑定时）各挂一条稳定挂载，另加模块树根——三根互不包含，guest 内的路径写法由同一座路径桥给出；外部根是 UNC / 网络路径时只有虚拟机档支持（guest 内写成 `/solomni-host/unc/<server>/<share>/…`；本机档因容器围栏拒绝网络工作区）。
 - **环境属于顶层工作**：`exec`（档位 / 虚拟根 / 定版）由人建主会话时决定，整棵子树只读继承；核心代理建子会话时不能自选环境。**同一 agent 全树只有一份名单**：子会话编辑模块 / 模型时写回这份名单，guest 装配按整棵树重新聚合；只改模型 / 权限不重建 guest，改模块 / 环境才重建。
 - 会话权限是**根 ceiling + 子会话逐层 narrowing**：根写 sandbox.ceiling，子写 sandbox.narrowing；子只能换更低档、只能收窄，父编辑只改 ceiling 并与子 narrowing 求交，不覆盖子收窄（`src/capabilities/permission/domain/permission.rs`）。
 - **共享区是版本化工作区**：共享区根（默认 `work/`，或外部工作区）与版本库 `.work/` 都锚在顶层工作上；agent 只写自己的沙箱，`work_pull` / `work_commit` 与主副本同步（文件级三方比较），`work_versions` 看三方，`work_resolve` 显式选边，`work_status` 看状态。

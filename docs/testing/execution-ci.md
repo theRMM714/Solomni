@@ -175,6 +175,7 @@ node run-tests.js --fence-live
 - `src/capabilities/provision/guest.rs`：Linux 运行期编排；
 - `src/capabilities/provision/service.rs`：guest-rootfs 属性真机用例（`guest_rootfs_pipeline_keeps_source_attrs_on_the_real_image`，用 `.vm/cache/rootfs.ext4`）；
 - `tests/cross-platform/e2e/`：vm 会话场景。
+- `src/tests/workspace.rs` 的**UNC 外部工作区往返**探针 `unc_external_workspace_round_trip_on_a_real_share`：设 `SOLOMNI_UNC_ROOT` 指向一个可写 UNC 目录（如 `\\localhost\D$\AIproject\target\unc`）才真跑——虚拟机档绑定落成 native UNC、本机档拒绝且不触网、产品根 UNC 别名按落点身份拒、共享根拒、首绑导入与 pull / commit / status / sync、删会话不删外部；CI 没有 UNC，缺省打印 `[探针]`。
 
 - 未开启时用例打印行首 `[探针]`，入口按 `env-skip` 记进报告，不算通过。CI **不设** `SOLOMNI_VM_LIVE`：真机证据只能在有 KVM / WHPX 的机器上手工产出（`node dev.js cargo -- test --bin solomni -- vm_live_external_workspace_round_trip`，探针在 `src/tests/vm.rs`），报告里如实记 env-skip。
 

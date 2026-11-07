@@ -297,6 +297,195 @@ pub(crate) fn conductor_records_external_workspace_and_rejects_overlap() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// 目的：真机验收（默认跳过）：UNC 外部工作区的全链路——虚拟机档绑定落成 native UNC、写探测真的落在共享上、
+///   首绑导入 / pull / commit / status / sync 都走真实共享、删会话不删外部；产品根的 UNC 别名必须按落点身份拒。
+/// 约束：只在 SOLOMNI_UNC_ROOT 指向一个可写的 UNC 目录时执行（如 \\\\localhost\D$\\\\AIproject\\target\\unc）；
+///   CI 没有 UNC，缺省打印 [探针] 如实跳过；用例自己在 UNC 根下建子目录并在结束时清掉。
+#[cfg(windows)]
+#[test]
+pub(crate) fn unc_external_workspace_round_trip_on_a_real_share() {
+    use crate::capabilities::conductor::service::workspace_root::{product_root, resolve};
+    use crate::capabilities::workspace::api::{ChangeKind, Workspace};
+    use crate::capabilities::workspace::detail::{FsWorkStore, FsWorkspace};
+    use crate::capabilities::workspace::service::WorkspaceService;
+    use crate::kernel::api::{is_network_path, native, Tier};
+    use std::path::PathBuf;
+
+    let unc = match std::env::var("SOLOMNI_UNC_ROOT") {
+        Ok(v) if !v.trim().is_empty() => PathBuf::from(v.trim()),
+        _ => {
+            eprintln!(
+                r"[探针] 未开启 UNC 外部工作区真机验收：把 SOLOMNI_UNC_ROOT 指向可写 UNC 目录后重跑（如 \\\\localhost\D$\\\\AIproject\\target\\unc）"
+            );
+            return;
+        }
+    };
+    assert!(
+        is_network_path(&unc),
+        "SOLOMNI_UNC_ROOT 要是网络路径：{}",
+        unc.display()
+    );
+    let base = unc.join(format!("solomni-unc-{}", std::process::id()));
+    let external = base.join("proj");
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(&external).expect("建 UNC 外部目录");
+    std::fs::write(external.join("existing.txt"), b"seeded").expect("写共享区已有文件");
+
+    let root = crate::tests::scratch("ws-unc-host");
+    let product = root.join("product");
+    std::fs::create_dir_all(&product).expect("建产品根");
+    let product = product_root(&product);
+
+    // 1) 绑定层：虚拟机档接受 UNC；规范化结果仍是 native UNC（不是相对路径 UNC\server\…）。
+    //    resolve 里的写探测会真的在共享上建删一个文件——能过就说明共享可写。
+    let bound = resolve(&external, Tier::Vm, &product).expect("虚拟机档要接受 UNC 外部工作区");
+    assert_eq!(
+        bound,
+        native(&external.canonicalize().expect("规范化 UNC 根"))
+    );
+    let text = bound.to_string_lossy().into_owned();
+    assert!(
+        text.starts_with(r"\\"),
+        "绑定要保留 UNC 的 \\ 前缀：{}",
+        text
+    );
+    assert!(
+        !text.contains(r"\\?\"),
+        "绑定不能留 verbatim 前缀：{}",
+        text
+    );
+
+    // 2) 本机档：拒绝网络工作区，而且**不触网**（耗时是"没去连共享"的可判定证据）。
+    let started = std::time::Instant::now();
+    let err = resolve(&external, Tier::Host, &product).expect_err("本机档必须拒绝网络工作区");
+    assert!(err.contains("本机档不能用网络工作区"), "{}", err);
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(3),
+        "本机档的拒绝不能触网：耗时 {:?}",
+        started.elapsed()
+    );
+
+    let share_root = share_root_of(&unc).expect("UNC 根要能拆出 server 与 share");
+    // 3) 产品根的 UNC 别名：同一物理目录换个写法，文本 starts_with 拦不住，要靠落点身份拒。
+    match drive_share_alias(&share_root, &product) {
+        Some(alias) => {
+            let err = resolve(&alias, Tier::Vm, &product).expect_err("产品根的 UNC 别名必须拒");
+            assert!(err.contains("互相包含"), "{}", err);
+        }
+        None => eprintln!("[探针] SOLOMNI_UNC_ROOT 不是盘符共享的写法：跳过产品根 UNC 别名断言"),
+    }
+    let err = resolve(&share_root, Tier::Vm, &product).expect_err("共享根要拒");
+    assert!(err.contains("网络共享的根目录"), "{}", err);
+
+    // 4) 真实共享上的版本化全链路：布局投影、首绑导入、pull / commit / status / sync。
+    let sessions = root.join("session");
+    let ws = WorkspaceService::new(
+        Arc::new(FsWorkspace::new(sessions.clone())),
+        Arc::new(FsWorkStore::new()),
+    );
+    ws.bind("u", Some(external.as_path())).expect("绑定");
+    let projection = std::fs::read_to_string(sessions.join("u").join(".work-root"))
+        .expect("读布局投影 .work-root");
+    assert_eq!(projection.trim(), text, "布局投影要写成 native UNC");
+    ws.prepare("u", &["a".to_string()]).expect("准备");
+    let seeded = ws.work_import_root("u", 1).expect("首绑导入");
+    assert!(seeded.commit.is_some(), "共享区已有文件要导成初始提交");
+    let pulled = ws
+        .work_pull("u", "a", &["existing.txt".to_string()])
+        .expect("拉取导入内容");
+    assert_eq!(pulled.updated, vec!["existing.txt".to_string()]);
+    assert_eq!(
+        std::fs::read(sessions.join("u").join("a").join("existing.txt")).unwrap(),
+        b"seeded"
+    );
+    // 提交要真的落到 UNC 目录（写的是共享上的文件，不是会话里的副本）。
+    std::fs::write(sessions.join("u").join("a").join("new.txt"), b"from-agent").expect("写沙箱");
+    ws.work_commit(
+        "u",
+        "a",
+        "u--a",
+        &commit_req(&["new.txt"], &[], "加 new", 2),
+    )
+    .expect("提交");
+    assert_eq!(
+        std::fs::read(external.join("new.txt")).unwrap(),
+        b"from-agent"
+    );
+    // 共享区被外部改：status / pull 点名，sync 采纳之后 pull 才更新。
+    std::fs::write(external.join("existing.txt"), b"outside").expect("共享区改");
+    let st = ws
+        .work_status("u", "a", &["existing.txt".to_string()])
+        .expect("状态");
+    assert_eq!(st.external, vec!["existing.txt".to_string()]);
+    let synced = ws
+        .work_sync("u", &["existing.txt".to_string()], 3)
+        .expect("同步");
+    assert!(synced.commit.is_some(), "有外部改动必须产生提交");
+    assert_eq!(synced.changes[0].kind, ChangeKind::Modify);
+    ws.work_pull("u", "a", &["existing.txt".to_string()])
+        .expect("再拉");
+    assert_eq!(
+        std::fs::read(sessions.join("u").join("a").join("existing.txt")).unwrap(),
+        b"outside"
+    );
+
+    // 5) 删会话不删外部：会话目录整棵删掉，共享区文件原样。
+    std::fs::remove_dir_all(sessions.join("u")).expect("删会话目录");
+    assert!(!sessions.join("u").exists());
+    assert_eq!(
+        std::fs::read(external.join("new.txt")).unwrap(),
+        b"from-agent"
+    );
+    assert_eq!(
+        std::fs::read(external.join("existing.txt")).unwrap(),
+        b"outside"
+    );
+
+    let _ = std::fs::remove_dir_all(&base);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 目的：从一个 UNC 目录取出它的共享根（\\server\share）——用来断言"共享根不能当工作区"。
+#[cfg(windows)]
+fn share_root_of(unc: &std::path::Path) -> Option<std::path::PathBuf> {
+    let (server, share, _) = crate::kernel::api::unc_parts(unc)?;
+    Some(std::path::PathBuf::from(format!(
+        r"\\{}\{}",
+        server.to_string_lossy(),
+        share.to_string_lossy()
+    )))
+}
+
+/// 目的：把本机盘符路径换成同一个盘符共享（X$）下的 UNC 写法——用来造"产品根的 UNC 别名"。
+/// 返回：共享名不是 <字母>$ 或盘符对不上时为 None（调用方如实跳过这条断言）。
+#[cfg(windows)]
+fn drive_share_alias(unc: &std::path::Path, local: &std::path::Path) -> Option<std::path::PathBuf> {
+    let (_, share, rest) = crate::kernel::api::unc_parts(unc)?;
+    if !rest.as_os_str().is_empty() {
+        return None;
+    }
+    let share = share.to_string_lossy().into_owned();
+    let letter = share.strip_suffix('$')?;
+    let mut letter_chars = letter.chars();
+    let drive = letter_chars.next()?.to_ascii_uppercase();
+    if letter_chars.next().is_some() {
+        return None;
+    }
+    let local_text = local.to_str()?;
+    let mut chars = local_text.chars();
+    if chars.next()?.to_ascii_uppercase() != drive || chars.next()? != ':' {
+        return None;
+    }
+    let tail = chars.as_str().trim_start_matches(std::path::MAIN_SEPARATOR);
+    let mut alias = unc.to_path_buf();
+    for part in tail.split(std::path::MAIN_SEPARATOR) {
+        if !part.is_empty() {
+            alias.push(part);
+        }
+    }
+    Some(alias)
+}
+
 /// 目的：外部绑定把共享区主副本放到会话目录之外，版本库与沙箱仍留在会话目录内。
 ///   删除会话目录不碰外部工作区。
 #[test]

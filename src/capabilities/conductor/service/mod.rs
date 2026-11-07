@@ -363,6 +363,7 @@ mod work;
 #[cfg(test)]
 pub(crate) use work::needs_guest_packages_rebuild;
 pub(crate) mod work_tools;
+pub(crate) mod workspace_root;
 impl Conductor {
     /// 组合根专用：main 负责创建适配器并注入；conductor 不自建任何具体实现。
     // 组合根注入的构造函数：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读。

@@ -218,24 +218,31 @@ impl Conductor {
 
     /// 目的：一个会话沿父链继承的工作区根（仅外部绑定；`None` = 产品内布局）。
     /// 约束：与 `work_root_of` 同一走向：自己带绑定就用它，否则看工作根的 meta。
+    ///   取到根后按它所在会话的档位复检（见 workspace_root）——meta 是磁盘上的文本，手改也要过同一套策略。
     pub(crate) fn workspace_binding_of(
         &self,
         meta: &SessionMeta,
     ) -> Result<Option<std::path::PathBuf>, String> {
-        if let Some(binding) = &meta.workspace {
-            return Ok(Some(binding.root.clone()));
-        }
-        match &meta.parent {
-            None => Ok(None),
-            Some(p) => {
-                let top = self.work_root(p)?;
-                Ok(self
-                    .history
-                    .meta(&top)?
-                    .workspace
-                    .map(|binding| binding.root))
-            }
-        }
+        let (root, tier) = match &meta.workspace {
+            Some(binding) => (binding.root.clone(), meta.exec.tier),
+            None => match &meta.parent {
+                None => return Ok(None),
+                Some(p) => {
+                    let top = self.work_root(p)?;
+                    let top_meta = self.history.meta(&top)?;
+                    match top_meta.workspace {
+                        Some(binding) => (binding.root, top_meta.exec.tier),
+                        None => return Ok(None),
+                    }
+                }
+            },
+        };
+        super::workspace_root::recheck(
+            &root,
+            tier,
+            &super::workspace_root::product_root(&self.root),
+        )?;
+        Ok(Some(root))
     }
 
     /// 一个会话的**工作根**，从它自己的 meta 起算：`meta` 可能**还没落盘**

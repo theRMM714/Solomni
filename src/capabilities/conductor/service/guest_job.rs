@@ -137,7 +137,7 @@ impl GuestBoot {
         };
         // 挂载点走那座桥：同方言时是宿主原路径，跨方言时是 guest 镜像根。
         let bridge = image.bridge();
-        // 起 guest 前先校验稳定根可表示：外部工作区是 UNC / 网络路径时在这里如实拒绝（不拉一台用不了的 guest）。
+        // 起 guest 前先校验稳定根可表示：编不进 guest 写法的根（卷 GUID、非 UTF-8）在这里如实拒绝（不拉一台用不了的 guest）。
         check_stable_roots(&sandboxes, &bridge)?;
         let mounts = mounts_from(&plan, &fence, &bridge);
         let spec = GuestSpec {
@@ -225,8 +225,8 @@ pub(crate) fn stable_roots(sandboxes: &Sandboxes) -> (Vec<PathBuf>, Vec<PathBuf>
 }
 
 /// 目的：起 guest 前校验稳定挂载——每个 agent 私沙都在会话树根下，且每个稳定根都能经路径桥往返。
-/// 约束：UNC / 网络路径在 Windows 宿主下无法编码成 guest 写法（镜像根只认盘符）；这里显式拒绝，
-///   不让它变成"guest 起来了、每次工具调用一条 fail-closed 诊断"。
+/// 约束：能往返的根才能挂（UNC 有单射编码，Windows 虚拟机档因此支持网络工作区）；卷 GUID 与非 UTF-8
+///   表示不了，这里显式拒绝——不让它变成"guest 起来了、每次工具调用一条 fail-closed 诊断"。
 pub(crate) fn check_stable_roots(
     sandboxes: &Sandboxes,
     bridge: &crate::capabilities::vm::api::PathBridge,
@@ -253,7 +253,7 @@ pub(crate) fn check_stable_roots(
     let external = !sandboxes.shared.starts_with(root);
     if external && !bridge.round_trips(&sandboxes.shared) {
         return Err(format!(
-            "外部工作区无法用在虚拟机档：{} 在 guest 内表示不了（Windows 的 UNC / 网络路径不支持；先映射成本机盘符后重新绑定）",
+            "外部工作区无法用在虚拟机档：{} 在 guest 内表示不了（卷 GUID 与非 UTF-8 路径没有 guest 写法）",
             sandboxes.shared.display()
         ));
     }

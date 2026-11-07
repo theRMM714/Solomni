@@ -1054,8 +1054,13 @@ async function approvePlan(name) {
     }
     // 虚拟机档 + 外部工作区（opt-in 真机）：会话树与外部根各挂一条稳定根，guest 内读写都要成立。
     // 外部目录放 target/（仓库内、产品根 e2e/root 之外）：既是"产品根之外"，也不写系统临时目录。
-    {
-      const extDir = path.resolve(__dirname, '..', '..', '..', 'target', 'e2e-ext-ws-' + process.pid);
+    // 设了 SOLOMNI_UNC_ROOT 就跑第二遍，同一组断言换成 UNC 外部根（虚拟机档的 UNC 支持）；
+    // UNC 根要是共享下的目录（共享根会被绑定层按真实原因拒）。
+    const extDirs = [path.resolve(__dirname, '..', '..', '..', 'target', 'e2e-ext-ws-' + process.pid)];
+    if (process.env.SOLOMNI_UNC_ROOT) {
+      extDirs.push(path.join(process.env.SOLOMNI_UNC_ROOT, 'e2e-ext-ws-' + process.pid));
+    }
+    for (const extDir of extDirs) {
       fs.rmSync(extDir, { recursive: true, force: true });
       fs.mkdirSync(extDir, { recursive: true });
       fs.writeFileSync(path.join(extDir, 'marker.txt'), 'VM-EXT-MARKER');

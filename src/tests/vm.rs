@@ -3153,8 +3153,8 @@ pub(crate) fn stable_roots_cover_the_work_tree_and_module_tree() {
     assert!(ro_tree.is_empty(), "外部根与模块根都不进只读稳定根");
 }
 
-/// 目的：起 guest 前的可表示判据——稳定根必须能经路径桥往返；盘符能、UNC 不能
-///   （UNC 在 POSIX 镜像根里编不成单射路径，guest 内解不回来，起 guest 前就该拒）。
+/// 目的：起 guest 前的可表示判据——稳定根必须能经路径桥往返；盘符与 UNC 都能，
+///   卷 GUID 形态与非 UTF-8 不能（编成 guest 写法会丢字节或没有普通写法）。
 #[test]
 pub(crate) fn mount_plan_round_trips_every_stable_root() {
     use crate::capabilities::vm::api::PathBridge;
@@ -3168,12 +3168,18 @@ pub(crate) fn mount_plan_round_trips_every_stable_root() {
             "盘符路径要能往返"
         );
         assert!(
-            !windows_to_posix.round_trips(Path::new(r"\\server\share\work")),
-            "UNC 路径不是单字母盘符：不能往返（起 guest 前要拒）"
+            windows_to_posix.round_trips(Path::new(r"\\server\share\work")),
+            "UNC 走保留段编码后要能往返（Windows 虚拟机档的外部工作区靠它）"
         );
         assert!(
             !windows_to_posix.round_trips(Path::new(r"\\?\D:\proj\work")),
-            "扩展长度前缀路径也不能往返"
+            "扩展长度前缀的写法本身不能原样往返（编码后是普通盘符写法）"
+        );
+        assert!(
+            !windows_to_posix.round_trips(Path::new(
+                r"\\?\Volume{01234567-89ab-cdef-0123-456789abcdef}\work"
+            )),
+            "卷 GUID 没有 guest 写法：不能往返"
         );
     }
     // 同方言恒等：宿主写法原样即 guest 写法，往返成立。
@@ -3193,6 +3199,103 @@ pub(crate) fn mount_plan_round_trips_every_stable_root() {
         posix_to_windows.round_trips(Path::new("/home/u/work")),
         "POSIX 路径编进 Windows 镜像根后要能解回"
     );
+}
+
+/// 目的：UNC 的 guest 写法——保留段 unc 编出服务器名与共享名，逆变换还原成 \\server\share\…。
+/// 约束：盘符段只可能是单字母，unc 段不会撞；..、空段、反斜杠走私一律不认（宁可不解，也不拼出另一条路径）。
+#[cfg(windows)]
+#[test]
+pub(crate) fn unc_workspace_encodes_into_the_posix_mirror() {
+    use crate::capabilities::vm::api::PathBridge;
+    use crate::capabilities::vm::domain::paths::PathDialect;
+    use crate::kernel::ports::PathCodec;
+    use std::path::Path;
+
+    let bridge = PathBridge::new("windows", PathDialect::Posix);
+    let host = Path::new(r"\\server\share\dir\a.txt");
+    assert_eq!(
+        bridge.to_view(host),
+        "/solomni-host/unc/server/share/dir/a.txt"
+    );
+    assert_eq!(
+        bridge.to_host("/solomni-host/unc/server/share/dir/a.txt"),
+        Some(host.to_path_buf())
+    );
+    // 共享根本身也在编码内（挂载点可以是共享下的子目录，也可以是共享根——绑定层另有拦截）。
+    let share = Path::new(r"\\server\share");
+    assert_eq!(bridge.to_view(share), "/solomni-host/unc/server/share");
+    assert!(bridge.round_trips(share));
+    // 段非法：..、空段、反斜杠走私、缺共享名。
+    for bad in [
+        "/solomni-host/unc/server/share/../x",
+        "/solomni-host/unc/server//x",
+        "/solomni-host/unc/server/share/a\\b",
+        "/solomni-host/unc/server",
+        "/solomni-host/unc",
+    ] {
+        assert_eq!(bridge.to_host(bad), None, "不该认：{bad}");
+    }
+}
+
+/// 目的：Windows 虚拟机档的外部工作区是 UNC 时，挂载计划把 UNC 根当稳定根、guest 侧用编码后的镜像路径。
+/// 约束：不碰网络——稳定根与私沙都只是路径：check_stable_roots 只做编码往返，mounts_from 只做翻译。
+#[cfg(windows)]
+#[test]
+pub(crate) fn unc_external_workspace_plans_a_guest_mount() {
+    use crate::capabilities::vm::api::{mounts_from, ExecPlan, PathBridge};
+    use crate::capabilities::vm::domain::paths::PathDialect;
+    use crate::capabilities::workspace::api::{Sandbox, Sandboxes};
+    use crate::kernel::api::{FenceSpec, Tier};
+    use std::collections::BTreeMap;
+    use std::path::PathBuf;
+
+    let session_root = PathBuf::from(r"D:\product\session\w");
+    let shared = PathBuf::from(r"\\server\share\proj");
+    let sandboxes = Sandboxes {
+        shared: shared.clone(),
+        session_root: session_root.clone(),
+        list: vec![Sandbox {
+            work_name: "w".to_string(),
+            session: "w".to_string(),
+            agent: "a".to_string(),
+            shared: shared.clone(),
+            private: session_root.join("a"),
+            modules: BTreeMap::new(),
+            modules_with_userdata: Default::default(),
+            permissions: Default::default(),
+            path_codec: None,
+        }],
+        codec: None,
+    };
+    let bridge = PathBridge::new("windows", PathDialect::Posix);
+    crate::capabilities::conductor::service::guest_job::check_stable_roots(&sandboxes, &bridge)
+        .expect("UNC 外部工作区要能起 guest");
+    let (rw, ro_tree) =
+        crate::capabilities::conductor::service::guest_job::stable_roots(&sandboxes);
+    assert!(rw.contains(&shared), "UNC 外部根要单独进稳定根：{:?}", rw);
+    let boot = FenceSpec {
+        agent: String::new(),
+        lease: "unc".to_string(),
+        rw,
+        ro: Vec::new(),
+        ro_tree,
+        private: PathBuf::new(),
+        cwd: PathBuf::new(),
+        net: false,
+    };
+    let plan = ExecPlan {
+        tier: Tier::Vm,
+        net: false,
+        guest: Some("windows".to_string()),
+        packages: Vec::new(),
+    };
+    let mounts = mounts_from(&plan, &boot, &bridge);
+    let unc = mounts
+        .iter()
+        .find(|m| m.host == shared)
+        .expect("UNC 根要有挂载");
+    assert_eq!(unc.guest, "/solomni-host/unc/server/share/proj");
+    assert!(!unc.read_only, "外部工作区根要可写");
 }
 
 /// 目的：把「不在挂载表就 fail-closed」变成可判定属性——外部工作区布局下，per-call 围栏里的每个根

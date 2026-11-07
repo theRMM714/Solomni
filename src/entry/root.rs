@@ -1,5 +1,5 @@
 //! 目的：产品根规范化——传入的根变成**干净的绝对路径**。
-//! 管：纯词法拼接与归一化（不解析 `..`、不碰盘符大小写、不碰盘）；取不到当前目录时退回 canonicalize（并剥掉 Windows 的 `\\?\` 前缀）。
+//! 管：纯词法拼接与归一化（不解析 `..`、不碰盘符大小写、不碰盘）；取不到当前目录时退回 canonicalize（并还原 Windows 的扩展前缀）。
 //! 不管：路径是否真实存在（不验证）；各能力怎么用这个根。
 //! 联动：由入口层调用（`src/main.rs`）——解析出的根交给组合根（日志、围栏回收、各能力）。
 
@@ -8,7 +8,7 @@ use std::path::PathBuf;
 /// 目的：把传入的产品根规范成干净的绝对路径。
 /// 参数：`raw` 绝对路径直接用；相对路径与当前目录做**纯词法**拼接。
 /// 返回：规范化的根；以及一条说明——退回别的办法时写明原因，正常情况是 `None`。
-/// 约束：只有取不到当前目录才退回 canonicalize（Windows 上并剥掉 `\\?\` 扩展长度前缀）。
+/// 约束：只有取不到当前目录才退回 canonicalize（Windows 上并由 kernel 还原扩展前缀与 UNC）。
 pub fn resolve_root(raw: &std::path::Path) -> (PathBuf, Option<String>) {
     match std::env::current_dir() {
         Ok(cwd) => {
@@ -21,7 +21,7 @@ pub fn resolve_root(raw: &std::path::Path) -> (PathBuf, Option<String>) {
         }
         Err(e) => match std::fs::canonicalize(raw) {
             Ok(p) => (
-                strip_unc_prefix(p),
+                crate::kernel::api::native(&p),
                 Some(format!(
                     "取不到当前目录（{}）：改用 canonicalize 规范化产品根",
                     e
@@ -52,19 +52,4 @@ fn lexical_abs(p: &std::path::Path) -> PathBuf {
         }
     }
     out
-}
-
-/// Windows 上 canonicalize 会给出 \\?\C:\… 形式：它对多数工具可用但会污染提示词，去掉这个前缀。
-#[cfg(windows)]
-fn strip_unc_prefix(p: PathBuf) -> PathBuf {
-    let s = p.to_string_lossy().into_owned();
-    match s.strip_prefix(r"\\?\") {
-        Some(rest) => PathBuf::from(rest),
-        None => p,
-    }
-}
-
-#[cfg(not(windows))]
-fn strip_unc_prefix(p: PathBuf) -> PathBuf {
-    p
 }

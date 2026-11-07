@@ -52,7 +52,7 @@
 - 会话级还会检查所选 guest 的 `clients` 有没有本平台用户档能承载的，没有就在起 guest 前拒绝并指路 `guest.yaml`。
 - 静态预检在「开始」那一刻一次走完：机器能力 × 虚拟根（名字 → `.vm/guest/<名>`，`resolve_guest`）× guest 声明的运行能力（`guest.yaml` 的 `runtimes`）× 模块声明 × `packages` 的选包计划。
 - 共享档按所选 guest 的 `clients` 再判：没有本平台用户档能承载的客户端就在起 guest 前拒绝，并指路 `guest.yaml`；copy 不参与这条判据（开发 / 应急开关除外）。
-- 外部工作区路径必须能在 guest 内表示：虚拟机档起 guest 前校验会话树根与（外部绑定时）外部工作区根都能经路径桥往返；Windows 的 UNC / 网络路径当前不成立：即使路径桥能编码，smbd helper 依赖的 cap-std 也不支持以 UNC 目录为共享根（目录枚举 / 建 / 改名 / 删会失败），`check_stable_roots` 因此在起 guest 前拒绝；映射盘符不解决。收口计划（先修上游 helper）见 `tests/gaps.yaml` 的 `workspace.external-root-unc`。
+- 外部工作区路径必须能在 guest 内表示：虚拟机档起 guest 前校验会话树根与（外部绑定时）外部工作区根都能经路径桥往返；Windows 的 UNC 路径经保留段编码后可表示（guest 内写成 `/solomni-host/unc/<server>/<share>/…`），虚拟机档因此支持 UNC 外部根；卷 GUID 形态与非 UTF-8 路径仍拒绝（没有单射的 guest 写法）。
 - 模块工具的入口（`module.yaml` 的 `tools.<名>.command`）：相对路径入口必须在场且能跑；两档都查——虚拟机档按 guest 的 os 解析名字，跨平台还看文件形式（宿主编出来的产物在 guest 里跑不了，一样算缺）。
 - 前置检测是一份逐项清单（机器能力 `vm::vm_requirements`，界面与 `--doctor` 照抄同一份）：虚拟机监视器、guest 本体、共享档、QEMU（引擎）；虚拟根（会话级）在保存 /「开始」时合并进来；每项给出"现状 + 怎么补"。
 - 共享档是硬前置：用户共享链为空则虚拟机档不可用；Linux 缺 `virtiofsd` 仍可用 9p；Windows 缺 `smbd` 直接拒绝（先补齐，copy 不兜底）。
@@ -118,9 +118,9 @@
 - 模块构建也能落 guest（创建会话前自动补编；手动入口是 `solomni --build=<模块 id> --guest=<虚拟根>`），细节见 `docs/builds/README.md`。
 - 包库在 `packages` 单元：契约、扫描与选包都在那里；`vm` 只消费 `PackagePlan` 做挂载 / 软链 / 叠写，不再持有 `PackageSource`。
 - 就绪检测按组合逐项报"现状 + 怎么补"；"验过没有"是数据表（`VERIFIED_HOSTS`），不是平台 `cfg`。
-- 路径桥（`src/capabilities/vm/domain/paths.rs`）：宿主路径 ↔ guest 路径只有一座桥；同方言时恒等（宿主路径原样在 guest 里成立）；跨方言时编进镜像根（宿主 `D:\a\b` → POSIX guest `/solomni-host/d/a/b`；POSIX 宿主 → Windows guest `C:\solomni-host\…`，非法字符转义）；宿主文件系统自己的错误（例如 Windows 对 `<>` 这类非法文件名的错误码）会原样出现在 guest 的回执里——这是共享盘语义，不是 guest 内核的判定。
+- 路径桥（`src/capabilities/vm/domain/paths.rs`）：宿主路径 ↔ guest 路径只有一座桥；同方言时恒等（宿主路径原样在 guest 里成立）；跨方言时编进镜像根（宿主 `D:\a\b` → POSIX guest `/solomni-host/d/a/b`；POSIX 宿主 → Windows guest `C:\solomni-host\…`，非法字符转义）；UNC 根编成保留段（宿主 `\\server\share\a` → `/solomni-host/unc/server/share/a`，盘符段只可能是单字母，两种段不会撞）；宿主文件系统自己的错误（例如 Windows 对 `<>` 这类非法文件名的错误码）会原样出现在 guest 的回执里——这是共享盘语义，不是 guest 内核的判定。
 - 挂载表优先：宿主路径落在某个已挂稳定根 / 包根内时用该挂载的 guest 点，表外才退镜像根；外部工作区根同样由桥给挂载点（内部布局下共享区在会话树内，不额外挂）。
-- 挂载点与命令装配（`cwd` / 路径型 `env`）都走路径桥；反向也走它：系统工具跑在宿主侧，靠它把模型给的 guest 写法译回宿主路径（`PathCodec`，见 `docs/tools/tools-and-roles.md` 的「路径模型」）。起 guest 前校验每个稳定根都能经桥往返（`check_stable_roots`）；UNC / 网络路径当前往返不成立（且 smbd helper 依赖的 cap-std 不支持 UNC 共享根），如实拒绝；映射盘符不解决，见 `tests/gaps.yaml` 的 `workspace.external-root-unc`。
+- 挂载点与命令装配（`cwd` / 路径型 `env`）都走路径桥；反向也走它：系统工具跑在宿主侧，靠它把模型给的 guest 写法译回宿主路径（`PathCodec`，见 `docs/tools/tools-and-roles.md` 的「路径模型」）。起 guest 前校验每个稳定根都能经桥往返（`check_stable_roots`）；UNC 经保留段编码后往返成立（虚拟机档因此支持 UNC 外部根），卷 GUID 与非 UTF-8 如实拒绝。
 - 工作环境提示词按环境分发（`prompts/shared/tools.yaml` 的 `env_hosts` / `env_guests` / `envs`）：本机档按宿主平台给，虚拟机档按 guest 的 os 给——虚拟机档给出的路径就是 guest 内路径；系统工具与模块工具同一套写法（路径规矩只在提示词册的 `path_rules` 里说一次，核心在寻址前翻译）。
 - 补齐入口是界面里的一个动作：虚拟机档不可用、或选中的虚拟根未装齐时，配置面板与创建向导给出「补齐虚拟机依赖」（先看清单与体积、再确认下载、按进度长轮询）；CLI `solomni --provision --ensure --yes` 是没有界面时的等价路径。
 - 设置里没登记 `qemu_path` / `virtiofsd_path` / `smbd_path` 时，判据每次取用时自动采用项目内补齐的那个可执行文件（显式登记优先）——装完即生效，不必重启。

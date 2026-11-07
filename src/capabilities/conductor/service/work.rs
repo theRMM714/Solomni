@@ -1355,11 +1355,12 @@ impl Conductor {
         Ok((channels, core))
     }
 
-    /// 目的：解析并校验本次创建的工作区绑定：只有顶层会话能指定，路径必须绝对、已存在为目录、
-    ///   可写，且不与产品根互相包含；子会话沿父链继承同一个根，不接受自选。
+    /// 目的：解析本次创建的工作区绑定：只有顶层会话能指定，路径按档位策略校验（见 workspace_root）；
+    ///   子会话沿父链继承同一个根，不接受自选。
     fn resolve_workspace_binding(
         &self,
         raw: Option<&std::path::Path>,
+        tier: crate::kernel::api::Tier,
         parent: Option<&str>,
     ) -> Result<Option<crate::capabilities::session::api::WorkspaceBinding>, String> {
         if let Some(p) = parent {
@@ -1372,41 +1373,11 @@ impl Conductor {
         let Some(raw) = raw else {
             return Ok(None);
         };
-        if !raw.is_absolute() {
-            return Err(format!("工作区必须是绝对路径：{}", raw.display()));
-        }
-        let root = crate::kernel::api::native(
-            &raw.canonicalize()
-                .map_err(|e| format!("工作区不可达：{}（{}）", raw.display(), e))?,
-        );
-        if root.parent().is_none() {
-            return Err("工作区不能是文件系统根目录".to_string());
-        }
-        let meta = std::fs::metadata(&root)
-            .map_err(|e| format!("读工作区失败：{}（{}）", root.display(), e))?;
-        if !meta.is_dir() {
-            return Err(format!("工作区不是目录：{}", root.display()));
-        }
-        // 工作区不能与产品目录互相包含：否则 /workspace 会把 .home、modules、session 一起纳入
-        // 共享区，回档与围栏都会越界。
-        let product = crate::kernel::api::native(
-            &self
-                .root
-                .canonicalize()
-                .unwrap_or_else(|_| self.root.clone()),
-        );
-        if root == product || product.starts_with(&root) || root.starts_with(&product) {
-            return Err(
-                "工作区不能与产品目录互相包含（会越过会话 / 模块 / 配置的边界）".to_string(),
-            );
-        }
-        // 写探测：外部目录必须真的可写；探针建在根目录下，随后立即清掉。
-        let probe = root.join(format!(".solomni-write-probe-{}", std::process::id()));
-        let ok = std::fs::write(&probe, b"probe").is_ok();
-        let _ = std::fs::remove_file(&probe);
-        if !ok {
-            return Err(format!("工作区不可写：{}", root.display()));
-        }
+        let root = super::workspace_root::resolve(
+            raw,
+            tier,
+            &super::workspace_root::product_root(&self.root),
+        )?;
         Ok(Some(crate::capabilities::session::api::WorkspaceBinding {
             root,
         }))
@@ -1427,7 +1398,8 @@ impl Conductor {
         {
             return Err(format!("工作名已存在：{}", spec.name));
         }
-        let workspace = self.resolve_workspace_binding(spec.workspace.as_deref(), parent)?;
+        let workspace =
+            self.resolve_workspace_binding(spec.workspace.as_deref(), spec.tier, parent)?;
         // **代理形态**（第三人形态）：没有名单、没有需求——用户选这一形态就是**授予全权**。
         // 它不是一个 agent 工作，装配与其余形态没有共同点，所以在这里就地分岔、不往下走。
         if spec.mode == WorkMode::Proxy {

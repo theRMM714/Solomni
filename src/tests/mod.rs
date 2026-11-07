@@ -14,6 +14,7 @@ mod diagnostics;
 pub(crate) mod doubles;
 mod fakes;
 mod fence_reach;
+mod kernel;
 mod llm;
 mod mcp;
 mod modules;
