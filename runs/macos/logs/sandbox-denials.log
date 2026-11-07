@@ -1,0 +1,200 @@
+					"com.apple.DifferentialPrivacy.TelemetryAggregator" => <bool: 0x1effd9d00>: true
+				}
+			}
+		}
+		"EnvironmentVariables" => <dictionary: 0xbc04bdb60> { count = 2, transaction: 0, voucher = 0x0, contents =
+			"EXTENSION_KIT_EXTENSION_TYPE" => <string: 0xbc04b78a0> { string cache = 0x0, length = 1, contents = "1" }
+			"BSServiceDomains" => <string: 0xbc04b5800> { string cache = 0x0, length = 46, contents = "{"XPCService":{"Services":{"MainService":{}}}}" }
+		}
+		"_OmitSandboxParameters" => <bool: 0x1effd9d00>: true
+		"_AbandonCoalition" => <bool: 0x1effd9d00>: true
+		"_MultipleInstances" => <bool: 0x1effd9d00>: true
+		"ServiceType" => <string: 0xbc04b7810> { string cache = 0x0, length = 11, contents = "Application" }
+		"ProgramArguments" => <array: 0xbc04b77e0> { count = 3, capacity = 8, contents =
+			0: <string: 0xbc04b75a0> { string cache = 0x0, length = 100, contents = "/System/Library/ExtensionKit/Extensions/TelemetryAggregator.appex/Contents/MacOS/TelemetryAggregator" }
+			1: <string: 0xbc04b7540> { string cache = 0x0, length = 16, contents = "-LaunchArguments" }
+			2: <string: 0xbc04b7030> { string cache = 0x0, length = 136, contents = "eyJ0eXBlIjoxLCJlbmhhbmNlZFNlY3VyaXR5IjpmYWxzZSwic2VydmljZU5hbWUiOiJjb20uYXBwbGUuRGlmZmVyZW50aWFsUHJpdmFjeS5UZWxlbWV0cnlBZ2dyZWdhdG9yIn0=" }
+		}
+		"_ManagedBy_Services" => <array: 0xbc04b7900> { count = 2, capacity = 8, contents =
+			0: <string: 0xbc04b78d0> { string cache = 0x0, length = 49, contents = "com.apple.DifferentialPrivacy.TelemetryAggregator" }
+			1: <string: 0xbc04b7870> { string cache = 0x0, length = 61, contents = "com.apple.DifferentialPrivacy.TelemetryAggregator.xpc-session" }
+		}
+	}
+	"CFBundlePackageType" => <string: 0xbc04b6ca0> { string cache = 0x0, length = 4, contents = "XPC!" }
+}
+2026-11-07 13:43:49.930 A  TelemetryAggregator[7981:66d6] (libsystem_secinit.dylib) AppSandbox
+2026-11-07 13:43:50.080 Df secinitd[361:641a] TelemetryAggregator[7981]: AppSandbox request successful
+2026-11-07 13:43:50.902 Df runningboardd[165:5c67] [com.apple.runningboard:job_oversize] 'B430677D-7F3D-4C59-8868-C0A11603B6EE' Submitting extension overlay (host PID 7081, path /System/Library/ExtensionKit/Extensions/DevicePropertiesExtension.appex/Contents/MacOS/DevicePropertiesExtension):
+<dictionary: 0xbc04bf780> { count = 2, transaction: 0, voucher = 0x0, contents =
+	"XPCService" => <dictionary: 0xbc04bf5a0> { count = 14, transaction: 0, voucher = 0x0, contents =
+		"_ManagedBy" => <string: 0xbc04b7c60> { string cache = 0x0, length = 22, contents = "com.apple.runningboard" }
+		"RunLoopType" => <string: 0xbc0482fd0> { string cache = 0x0, length = 9, contents = "NSRunLoop" }
+		"Platform" => <int64: 0x958cb07abdb2cc67>: 1
+		"JoinExistingSession" => <bool: 0x1effd9d00>: true
+		"_SandboxProfile" => <string: 0xbc04823d0> { string cache = 0x0, length = 11, contents = "application" }
+		"_AdditionalSubServices" => <dictionary: 0xbc04bf7e0> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"xpc-session" => <bool: 0x1effd9d00>: true
+		}
+		"_AdditionalProperties" => <dictionary: 0xbc04bfae0> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"RunningBoard" => <dictionary: 0xbc04bfb40> { count = 3, transaction: 0, voucher = 0x0, contents =
+				"RunningBoardLaunchedIdentity" => <dictionary: 0xbc04bfc00> { count = 7, transaction: 0, voucher = 0x0, contents =
+					"e" => <int64: 0x958cb07abdb2c3c7>: 501
+					"TYPE" => <int64: 0x958cb07abdb2cc4f>: 4
+					"v" => <data: 0xbc1101380>: { length = 209 bytes, contents = 0x7b226164646974696f6e616c456e7669726f6e6d656e7456... }
+					"h" => <int64: 0x958cb07abdb21127>: 7081
+					"i" => <string: 0xbc04b7c00> { string cache = 0x0, length = 48, contents = "com.apple.siri.metrics.DevicePropertiesExtension" }
+					"r" => <int64: 0x958cb07abdb2cc7f>: 2
+					"H" => <dictionary: 0xbc04bfa80> { count = 5, transaction: 0, voucher = 0x0, contents =
+						"l" => <string: 0xbc04b7c30> { string cache = 0x0, length = 17, contents = "com.apple.mlhostd" }
+						"t" => <int64: 0x958cb07abdb2cc7f>: 2
+						"TYPE" => <int64: 0x958cb07abdb2cc5f>: 6
+						"a" => <int64: 0x958cb07abdb2c3c7>: 501
+						"p" => <int64: 0x958cb07abdb2cc6f>: 0
+					}
+				}
+				"RunningBoardLaunched" => <bool: 0x1effd9d00>: true
+				"LaunchRequestEndpointIdentifiers" => <dictionary: 0xbc04bfba0> { count = 2, transaction: 0, voucher = 0x0, contents =
+					"com.apple.siri.metrics.DevicePropertiesExtension" => <bool: 0x1effd9d00>: true
+					"com.apple.siri.metrics.DevicePropertiesExtension.xpc-session" => <bool: 0x1effd9d00>: true
+				}
+			}
+		}
+		"EnvironmentVariables" => <dictionary: 0xbc04bf9c0> { count = 2, transaction: 0, voucher = 0x0, contents =
+			"EXTENSION_KIT_EXTENSION_TYPE" => <string: 0xbc049ba80> { string cache = 0x0, length = 1, contents = "1" }
+			"BSServiceDomains" => <string: 0xbc049bc00> { string cache = 0x0, length = 46, contents = "{"XPCService":{"Services":{"MainService":{}}}}" }
+		}
+		"_OmitSandboxParameters" => <bool: 0x1effd9d00>: true
+		"_AbandonCoalition" => <bool: 0x1effd9d00>: true
+		"_MultipleInstances" => <bool: 0x1effd9d00>: true
+		"ServiceType" => <string: 0xbc04824f0> { string cache = 0x0, length = 11, contents = "Application" }
+		"ProgramArguments" => <array: 0xbc0482670> { count = 3, capacity = 8, contents =
+			0: <string: 0xbc04b79f0> { string cache = 0x0, length = 112, contents = "/System/Library/ExtensionKit/Extensions/DevicePropertiesExtension.appex/Contents/MacOS/DevicePropertiesExtension" }
+			1: <string: 0xbc04b7bd0> { string cache = 0x0, length = 16, contents = "-LaunchArguments" }
+			2: <string: 0xbc04b7cf0> { string cache = 0x0, length = 136, contents = "eyJ0eXBlIjoxLCJlbmhhbmNlZFNlY3VyaXR5IjpmYWxzZSwic2VydmljZU5hbWUiOiJjb20uYXBwbGUuc2lyaS5tZXRyaWNzLkRldmljZVByb3BlcnRpZXNFeHRlbnNpb24ifQ==" }
+		}
+		"_ManagedBy_Services" => <array: 0xbc049bc60> { count = 2, capacity = 8, contents =
+			0: <string: 0xbc0ff29a0> { string cache = 0x0, length = 48, contents = "com.apple.siri.metrics.DevicePropertiesExtension" }
+			1: <string: 0xbc0482cd0> { string cache = 0x0, length = 60, contents = "com.apple.siri.metrics.DevicePropertiesExtension.xpc-session" }
+		}
+	}
+	"CFBundlePackageType" => <string: 0xbc04b7c90> { string cache = 0x0, length = 4, contents = "XPC!" }
+}
+2026-11-07 13:43:50.930 A  DevicePropertiesExtension[8026:67a6] (libsystem_secinit.dylib) AppSandbox
+2026-11-07 13:43:51.130 Df secinitd[361:66e1] DevicePropertiesExtension[8026]: AppSandbox request successful
+2026-11-07 13:43:51.895 Df runningboardd[165:5c67] [com.apple.runningboard:job_oversize] 'CDFEE38E-DDD6-4CB5-A28D-5AF85F463DC8' Submitting extension overlay (host PID 7081, path /System/Library/ExtensionKit/Extensions/SiriSuggestionsLightHousePlugin.appex/Contents/MacOS/SiriSuggestionsLightHousePlugin):
+<dictionary: 0xbc048cc60> { count = 2, transaction: 0, voucher = 0x0, contents =
+	"XPCService" => <dictionary: 0xbc048fc00> { count = 14, transaction: 0, voucher = 0x0, contents =
+		"_ManagedBy" => <string: 0xbc04d01b0> { string cache = 0x0, length = 22, contents = "com.apple.runningboard" }
+		"RunLoopType" => <string: 0xbc04d04e0> { string cache = 0x0, length = 9, contents = "NSRunLoop" }
+		"Platform" => <int64: 0x958cb07abdb2cc67>: 1
+		"JoinExistingSession" => <bool: 0x1effd9d00>: true
+		"_SandboxProfile" => <string: 0xbc04d04b0> { string cache = 0x0, length = 11, contents = "application" }
+		"_AdditionalSubServices" => <dictionary: 0xbc0451fe0> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"xpc-session" => <bool: 0x1effd9d00>: true
+		}
+		"_AdditionalProperties" => <dictionary: 0xbc04bff00> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"RunningBoard" => <dictionary: 0xbc04bff60> { count = 3, transaction: 0, voucher = 0x0, contents =
+				"RunningBoardLaunchedIdentity" => <dictionary: 0xbc04bfea0> { count = 7, transaction: 0, voucher = 0x0, contents =
+					"e" => <int64: 0x958cb07abdb2c3c7>: 501
+					"TYPE" => <int64: 0x958cb07abdb2cc4f>: 4
+					"v" => <data: 0xbc1101800>: { length = 213 bytes, contents = 0x7b226164646974696f6e616c456e7669726f6e6d656e7456... }
+					"h" => <int64: 0x958cb07abdb21127>: 7081
+					"i" => <string: 0xbc04d01e0> { string cache = 0x0, length = 46, contents = "com.apple.siri.SiriSuggestionsLightHousePlugin" }
+					"r" => <int64: 0x958cb07abdb2cc7f>: 2
+					"H" => <dictionary: 0xbc0417de0> { count = 5, transaction: 0, voucher = 0x0, contents =
+						"l" => <string: 0xbc04d0210> { string cache = 0x0, length = 17, contents = "com.apple.mlhostd" }
+						"t" => <int64: 0x958cb07abdb2cc7f>: 2
+						"TYPE" => <int64: 0x958cb07abdb2cc5f>: 6
+						"a" => <int64: 0x958cb07abdb2c3c7>: 501
+						"p" => <int64: 0x958cb07abdb2cc6f>: 0
+					}
+				}
+				"RunningBoardLaunched" => <bool: 0x1effd9d00>: true
+				"LaunchRequestEndpointIdentifiers" => <dictionary: 0xbc04bfc00> { count = 2, transaction: 0, voucher = 0x0, contents =
+					"com.apple.siri.SiriSuggestionsLightHousePlugin" => <bool: 0x1effd9d00>: true
+					"com.apple.siri.SiriSuggestionsLightHousePlugin.xpc-session" => <bool: 0x1effd9d00>: true
+				}
+			}
+		}
+		"EnvironmentVariables" => <dictionary: 0xbc048cba0> { count = 2, transaction: 0, voucher = 0x0, contents =
+			"EXTENSION_KIT_EXTENSION_TYPE" => <string: 0xbc04d05a0> { string cache = 0x0, length = 1, contents = "1" }
+			"BSServiceDomains" => <string: 0xbc04d0540> { string cache = 0x0, length = 46, contents = "{"XPCService":{"Services":{"MainService":{}}}}" }
+		}
+		"_OmitSandboxParameters" => <bool: 0x1effd9d00>: true
+		"_AbandonCoalition" => <bool: 0x1effd9d00>: true
+		"_MultipleInstances" => <bool: 0x1effd9d00>: true
+		"ServiceType" => <string: 0xbc04d0480> { string cache = 0x0, length = 11, contents = "Application" }
+		"ProgramArguments" => <array: 0xbc04d0240> { count = 3, capacity = 8, contents =
+			0: <string: 0xbc04d00f0> { string cache = 0x0, length = 124, contents = "/System/Library/ExtensionKit/Extensions/SiriSuggestionsLightHousePlugin.appex/Contents/MacOS/SiriSuggestionsLightHousePlugin" }
+			1: <string: 0xbc04d0180> { string cache = 0x0, length = 16, contents = "-LaunchArguments" }
+			2: <string: 0xbc04d0150> { string cache = 0x0, length = 132, contents = "eyJ0eXBlIjoxLCJlbmhhbmNlZFNlY3VyaXR5IjpmYWxzZSwic2VydmljZU5hbWUiOiJjb20uYXBwbGUuc2lyaS5TaXJpU3VnZ2VzdGlvbnNMaWdodEhvdXNlUGx1Z2luIn0=" }
+		}
+		"_ManagedBy_Services" => <array: 0xbc04d0570> { count = 2, capacity = 8, contents =
+			0: <string: 0xbc04d0510> { string cache = 0x0, length = 46, contents = "com.apple.siri.SiriSuggestionsLightHousePlugin" }
+			1: <string: 0xbc04d0450> { string cache = 0x0, length = 58, contents = "com.apple.siri.SiriSuggestionsLightHousePlugin.xpc-session" }
+		}
+	}
+	"CFBundlePackageType" => <string: 0xbc04d0120> { string cache = 0x0, length = 4, contents = "XPC!" }
+}
+2026-11-07 13:43:51.922 A  SiriSuggestionsLightHousePlugin[8039:680d] (libsystem_secinit.dylib) AppSandbox
+2026-11-07 13:43:52.119 Df secinitd[361:66e1] SiriSuggestionsLightHousePlugin[8039]: AppSandbox request successful
+2026-11-07 13:43:52.306 A  recentsd[7999:675c] (libsystem_secinit.dylib) AppSandbox
+2026-11-07 13:43:52.339 Df secinitd[361:66e1] recentsd[7999]: AppSandbox request successful
+2026-11-07 13:43:53.139 Df log[8141:6906] [com.apple.log:] log run noninteractively, parent: 8139 (sudo), args: 'log' 'show' '--last' '10m' '--style' 'compact' '--predicate' 'eventMessage CONTAINS "Sandbox"'
+2026-11-07 13:43:53.364 Df runningboardd[165:5c67] [com.apple.runningboard:job_oversize] 'BC50AD01-200D-4DDE-92B7-8CA4404ECC52' Submitting extension overlay (host PID 7081, path /System/Library/ExtensionKit/Extensions/BitacoraWorker.appex/Contents/MacOS/BitacoraWorker):
+<dictionary: 0xbc04d4000> { count = 2, transaction: 0, voucher = 0x0, contents =
+	"XPCService" => <dictionary: 0xbc04d4060> { count = 14, transaction: 0, voucher = 0x0, contents =
+		"_ManagedBy" => <string: 0xbc04d0930> { string cache = 0x0, length = 22, contents = "com.apple.runningboard" }
+		"RunLoopType" => <string: 0xbc04d0b70> { string cache = 0x0, length = 9, contents = "NSRunLoop" }
+		"Platform" => <int64: 0x958cb07abdb2cc67>: 1
+		"JoinExistingSession" => <bool: 0x1effd9d00>: true
+		"_SandboxProfile" => <string: 0xbc04d0c00> { string cache = 0x0, length = 11, contents = "application" }
+		"_AdditionalSubServices" => <dictionary: 0xbc04d4420> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"xpc-session" => <bool: 0x1effd9d00>: true
+		}
+		"_AdditionalProperties" => <dictionary: 0xbc04d41e0> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"RunningBoard" => <dictionary: 0xbc04d4480> { count = 3, transaction: 0, voucher = 0x0, contents =
+				"RunningBoardLaunchedIdentity" => <dictionary: 0xbc04d4600> { count = 7, transaction: 0, voucher = 0x0, contents =
+					"e" => <int64: 0x958cb07abdb2c3c7>: 501
+					"TYPE" => <int64: 0x958cb07abdb2cc4f>: 4
+					"v" => <data: 0xbc1103c80>: { length = 202 bytes, contents = 0x7b226164646974696f6e616c456e7669726f6e6d656e7456... }
+					"h" => <int64: 0x958cb07abdb21127>: 7081
+					"i" => <string: 0xbc04d08a0> { string cache = 0x0, length = 52, contents = "com.apple.LighthouseBitacoraFramework.BitacoraWorker" }
+					"r" => <int64: 0x958cb07abdb2cc7f>: 2
+					"H" => <dictionary: 0xbc04d43c0> { count = 5, transaction: 0, voucher = 0x0, contents =
+						"l" => <string: 0xbc04d0900> { string cache = 0x0, length = 17, contents = "com.apple.mlhostd" }
+						"t" => <int64: 0x958cb07abdb2cc7f>: 2
+						"TYPE" => <int64: 0x958cb07abdb2cc5f>: 6
+						"a" => <int64: 0x958cb07abdb2c3c7>: 501
+						"p" => <int64: 0x958cb07abdb2cc6f>: 0
+					}
+				}
+				"RunningBoardLaunched" => <bool: 0x1effd9d00>: true
+				"LaunchRequestEndpointIdentifiers" => <dictionary: 0xbc04d45a0> { count = 2, transaction: 0, voucher = 0x0, contents =
+					"com.apple.LighthouseBitacoraFramework.BitacoraWorker" => <bool: 0x1effd9d00>: true
+					"com.apple.LighthouseBitacoraFramework.BitacoraWorker.xpc-session" => <bool: 0x1effd9d00>: true
+				}
+			}
+		}
+		"EnvironmentVariables" => <dictionary: 0xbc04d40c0> { count = 2, transaction: 0, voucher = 0x0, contents =
+			"EXTENSION_KIT_EXTENSION_TYPE" => <string: 0xbc04d0c60> { string cache = 0x0, length = 1, contents = "1" }
+			"BSServiceDomains" => <string: 0xbc04d02d0> { string cache = 0x0, length = 46, contents = "{"XPCService":{"Services":{"MainService":{}}}}" }
+		}
+		"_OmitSandboxParameters" => <bool: 0x1effd9d00>: true
+		"_AbandonCoalition" => <bool: 0x1effd9d00>: true
+		"_MultipleInstances" => <bool: 0x1effd9d00>: true
+		"ServiceType" => <string: 0xbc04d0bd0> { string cache = 0x0, length = 11, contents = "Application" }
+		"ProgramArguments" => <array: 0xbc04d0ba0> { count = 3, capacity = 8, contents =
+			0: <string: 0xbc04d0630> { string cache = 0x0, length = 90, contents = "/System/Library/ExtensionKit/Extensions/BitacoraWorker.appex/Contents/MacOS/BitacoraWorker" }
+			1: <string: 0xbc04d0960> { string cache = 0x0, length = 16, contents = "-LaunchArguments" }
+			2: <string: 0xbc04d07e0> { string cache = 0x0, length = 140, contents = "eyJ0eXBlIjoxLCJlbmhhbmNlZFNlY3VyaXR5IjpmYWxzZSwic2VydmljZU5hbWUiOiJjb20uYXBwbGUuTGlnaHRob3VzZUJpdGFjb3JhRnJhbWV3b3JrLkJpdGFjb3JhV29ya2VyIn0=" }
+		}
+		"_ManagedBy_Services" => <array: 0xbc04d0cc0> { count = 2, capacity = 8, contents =
+			0: <string: 0xbc04d0c90> { string cache = 0x0, length = 52, contents = "com.apple.LighthouseBitacoraFramework.BitacoraWorker" }
+			1: <string: 0xbc04d0c30> { string cache = 0x0, length = 64, contents = "com.apple.LighthouseBitacoraFramework.BitacoraWorker.xpc-session" }
+		}
+	}
+	"CFBundlePackageType" => <string: 0xbc04d05d0> { string cache = 0x0, length = 4, contents = "XPC!" }
+}
+2026-11-07 13:43:53.387 A  BitacoraWorker[8142:6909] (libsystem_secinit.dylib) AppSandbox
+2026-11-07 13:43:53.549 Df secinitd[361:6844] BitacoraWorker[8142]: AppSandbox request successful
