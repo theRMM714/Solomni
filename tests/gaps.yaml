@@ -98,31 +98,6 @@
   blocked_by: |
     本期不做（用户决定：仍在开发阶段）。发行链路与口味统一需要新建 CI 工作流与打包脚本，另立任务。
 
-- id: workspace.external-root-vm-tier
-  scope: global
-  level: T4
-  why: |
-    外部工作区（会话把共享区主副本绑定到产品根之外的绝对目录）在 Windows 真机（WHPX + SMB 的探针与 e2e 场景）
-    与代码 / 单测两层已收口：
-    虚拟机档的稳定挂载拆成会话树根（rw）+ 外部工作区根（rw，仅外部绑定时）+ 模块树根，不再用
-    shared.parent()；起 guest 前校验各 agent 私沙在会话树根下、每个稳定根能经路径桥往返，不能表示的根
-    （Windows UNC / 网络路径）如实拒绝（映射盘符不解决，支持计划见 workspace.external-root-unc）；
-    建会话失败时 discard 连版本库 .work 一起清。
-    外部工作区根保持可写——宿主会把只读挂载无条件并入每次调用的允许集，只读会绕过 per-agent 的共享区
-    读取范围；guest 不直接写共享区，写共享区走宿主侧 work_commit。
-    仍缺 Linux 真机验收：virtiofs（默认档）与 9p（回退档）两条用户链都还没跑过「绑定外部根后 guest 内
-    读写工作区、越界被拒」；Windows 侧 SMB 档已通过 vm_live_external_workspace_round_trip 与 e2e 外部工作区
-    场景（读外部根 / 写私沙落宿主 / 写共享区被拒 / 删会话不删外部根），macOS 由既有平台缺口阻断、不在本条范围。
-  how: |
-    在有 KVM 的 Linux 真机上跑外部工作区往返探针（虚拟根默认 debian，可用 SOLOMNI_VM_GUEST 换）：
-    `SOLOMNI_VM_LIVE=1 SOLOMNI_VM_QEMU=<.vm/qemu/bin/qemu-system-x86_64> node dev.js cargo -- test --bin solomni -- vm_live_external_workspace_round_trip`
-    virtiofs 变体再设 `SOLOMNI_VM_VIRTIOFSD=<.vm/virtiofsd/virtiofsd>`；9p 变体不设它（候选落到 9p），
-    两个变体各跑一次并把命令与回执贴进 PR。
-  accept: |
-    Linux 的 virtiofs 与 9p 两个共享档各有一条真机通过：绑定产品根之外的目录能起 guest、工具在 guest 内
-    读写该工作区、越界被拒、会话树里的私沙仍可用；证据（命令与回执）贴在 PR 上。
-  blocked_by: 缺少 Linux KVM 真机
-
 - id: workspace.external-root-unc
   scope: global
   level: T4

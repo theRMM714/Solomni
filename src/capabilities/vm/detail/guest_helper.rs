@@ -63,6 +63,10 @@ SYS_RESTRICT = 446
 RULE_PATH_BENEATH = 1
 CLONE_NEWNET = 0x40000000
 CHILD = None
+# 规则路径的 O_PATH fd 要活到 helper 退出（子进程仍在跑）：9p 默认 cache=none 不复用 inode，
+# 规则绑定子目录 inode 后，dentry 一旦被回收，后续查找拿到的新 inode 就匹配不上，围栏会拒绝合法写。
+# fd 带 CLOEXEC、不继承给子进程，只在父进程里钉住 dentry / inode。
+KEEP_FDS = []
 
 
 def on_term(signum, frame):
@@ -88,20 +92,19 @@ def add_dir(path, rights, ruleset, read_ok, handled):
         pfd = os.open(path, os.O_PATH | os.O_CLOEXEC)
     except OSError:
         return
-    try:
-        if os.path.isdir(path):
-            allowed = rights
-        else:
-            allowed = ((1 << 0) | (1 << 1) | (1 << 2)) & rights
-            if rights & (1 << 13):
-                allowed |= 1 << 13
-            if rights & (1 << 14):
-                allowed |= 1 << 14
-        rule = PathBeneath(allowed, pfd)
-        if libc.syscall(SYS_ADD, ruleset, RULE_PATH_BENEATH, ctypes.byref(rule), 0) < 0:
-            die("landlock_add_rule(" + path + "): " + os.strerror(ctypes.get_errno()))
-    finally:
-        os.close(pfd)
+    if os.path.isdir(path):
+        allowed = rights
+    else:
+        allowed = ((1 << 0) | (1 << 1) | (1 << 2)) & rights
+        if rights & (1 << 13):
+            allowed |= 1 << 13
+        if rights & (1 << 14):
+            allowed |= 1 << 14
+    rule = PathBeneath(allowed, pfd)
+    if libc.syscall(SYS_ADD, ruleset, RULE_PATH_BENEATH, ctypes.byref(rule), 0) < 0:
+        die("landlock_add_rule(" + path + "): " + os.strerror(ctypes.get_errno()))
+    # 不在这里 close：见 KEEP_FDS。提前关闭，9p 子目录规则会随 dentry 回收失配。
+    KEEP_FDS.append(pfd)
 
 
 def required_dir(path, rights, ruleset, read_ok, handled):
