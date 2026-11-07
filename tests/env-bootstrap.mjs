@@ -1,9 +1,10 @@
 /**
- * 环境引导自检：\`env.js\` 的 MinGW 引导链——下载、续传、结构判定、sha256 闸与显式接受开关。
+ * 环境引导自检：\`env.js\` 的 MinGW（Windows）与 Zig cc（Linux / macOS）引导链。
  * 管：用**真实子进程**跑 \`<临时根>/env.js setup --yes\`，配一个本地 HTTP 服务器按需应答（206 / 不认 Range / 中途断开）；
- *     借用工具的"能构建"门槛（\`probeBuild\`）与 \`node env.js\` 的自诊断输出。
+ *     借用工具的"能构建"门槛（\`probeBuild\`）、POSIX 的"宿主 cc 可用就不下载 / 缺失才自举"、
+ *     \`--target=\` 翻译与 \`node env.js\` 的自诊断输出。
  * 不管：Rust 侧 provision 的校验（在 \`provision\` 的单元用例里）、dev.js 的子命令表（在 \`tests/dev-loop.mjs\`）。
- * 判据：见 \`docs/testing/execution-ci.md\` 的「环境引导自检」。dlltool 只在 Windows 那条路上，别的平台如实跳过。
+ * 判据：见 \`docs/testing/execution-ci.md\` 的「环境引导自检」。dlltool 只在 Windows；Zig 只在 POSIX。
  * 约束：只写 \`target/test-scratch/\`（不入库）；不碰真实 \`.tools/\`、不碰外网、不起 Rust 安装。
  */
 
@@ -18,7 +19,14 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SCRATCH = path.join(ROOT, "target", "test-scratch", "env-bootstrap");
 const IS_WIN = process.platform === "win32";
+const IS_MAC = process.platform === "darwin";
 const MB = 1024 * 1024;
+// 与 env.js 同一套宿主目标写法；POSIX 夹具只在 Linux / macOS 跑。
+const ARCH = process.arch === "arm64" ? "aarch64" : "x86_64";
+const TARGET = (IS_MAC ? "macos-" : "linux-") + ARCH;
+const HOST = IS_MAC ? ARCH + "-apple-darwin" : ARCH + "-unknown-linux-gnu";
+const CC_VERSION = "9.9.9";
+const CC_INSTALL = ".tools/toolchains/" + TARGET + "/cc/" + CC_VERSION;
 
 // ---------- 夹具：一个结构合法、体积过 10MB 闸、含 mingw64/bin/{dlltool,as}.exe 的 zip ----------
 function crc32(buf) {
@@ -386,6 +394,264 @@ const CASES = [
 ];
 
 
+// ---------- POSIX：宿主 cc 缺失时项目内 Zig 自举（本地夹具，不连外网） ----------
+
+function findInPath(name, pathValue) {
+  return (pathValue || process.env.PATH || "")
+    .split(path.delimiter)
+    .map((d) => d.trim().replace(/^"|"$/g, ""))
+    .filter(Boolean)
+    .map((d) => path.join(d, name))
+    .find((p) => { try { return fs.existsSync(p); } catch (e) { return false; } }) || null;
+}
+
+/** 目的：造一份最小 Zig 归档（未压缩 tar；env.js 的 tar -xf 会自动识别）。假 zig 只回显参数。 */
+function makeTarBody(dir) {
+  const src = path.join(dir, "tar-src");
+  const pkg = path.join(src, "zig-demo");
+  fs.mkdirSync(pkg, { recursive: true });
+  fs.writeFileSync(path.join(pkg, "zig"), "#!/bin/sh\nprintf '%s\\n' \"$@\"\n", { mode: 0o755 });
+  const tar = path.join(dir, "zig-fixture.tar");
+  const r = spawnSync("tar", ["-cf", tar, "-C", src, "zig-demo"], { encoding: "utf8" });
+  assert.equal(r.status, 0, "造 tar 夹具失败：" + (r.stderr || ""));
+  const body = fs.readFileSync(tar);
+  return { body, sha: crypto.createHash("sha256").update(body).digest("hex") };
+}
+
+function startBodyServer(body) {
+  const requests = [];
+  const server = http.createServer((req, res) => {
+    requests.push({ url: req.url, range: req.headers.range || null });
+    res.writeHead(200, { "Content-Length": body.length });
+    res.end(body);
+  });
+  return new Promise((done) => {
+    server.listen(0, "127.0.0.1", () => {
+      done({ server, requests, base: "http://127.0.0.1:" + server.address().port });
+    });
+  });
+}
+
+const POSIX_OS = IS_MAC ? "macos" : "linux";
+
+/** 目的：夹具项目根——copied env.js、当前平台清单条目、假 cargo / rustc、只含 curl/tar 的 PATH。 */
+function writePosixFixture(dir, opts) {
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(path.join(dir, "bin"), { recursive: true });
+  fs.copyFileSync(path.join(ROOT, "env.js"), path.join(dir, "env.js"));
+  for (const name of ["curl", "tar"]) {
+    const found = findInPath(name);
+    assert.ok(found, "夹具需要系统 " + name);
+    fs.symlinkSync(found, path.join(dir, "bin", name));
+  }
+  if (opts.hostCC) {
+    fs.writeFileSync(path.join(dir, "bin", "cc"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  }
+  const cargoBin = path.join(dir, "platform", POSIX_OS, "cargo", "bin");
+  fs.mkdirSync(cargoBin, { recursive: true });
+  fs.writeFileSync(
+    path.join(cargoBin, "cargo"),
+    "#!/bin/sh\nif [ \"$1\" = \"-vV\" ]; then printf 'cargo 1.99.1\\nhost: " + HOST + "\\n'; exit 0; fi\nexit 0\n",
+    { mode: 0o755 },
+  );
+  // 宿主或项目内 cc 可用时探测成功；否则报真机上的缺链接器错误。
+  fs.writeFileSync(
+    path.join(cargoBin, "rustc"),
+    "#!/bin/sh\nif command -v cc >/dev/null 2>&1; then exit 0; fi\necho 'error: linker `cc` not found' >&2\nexit 1\n",
+    { mode: 0o755 },
+  );
+  fs.writeFileSync(
+    path.join(dir, "dependencies.yaml"),
+    "deps:\n" +
+      "  - id: toolchain.cc." + TARGET + "\n" +
+      "    install: " + CC_INSTALL + "\n" +
+      "    probe: " + CC_INSTALL + "/bin/gcc\n" +
+      "    source: fixture.zig\n",
+  );
+  fs.writeFileSync(
+    path.join(dir, "links.yaml"),
+    "fixture.zig: " + opts.url + "\nfixture.zig.sha256: " + opts.sha + "\n",
+  );
+}
+
+function baseEnv(dir, override) {
+  const key = Object.keys(process.env).find((k) => k.toUpperCase() === "PATH") || "PATH";
+  const env = { ...process.env, [key]: path.join(dir, "bin") };
+  if (override) env.SOLOMNI_CARGO = path.join(dir, "platform", POSIX_OS, "cargo", "bin", "cargo");
+  else delete env.SOLOMNI_CARGO;
+  for (const k of ["NO_PROXY", "no_proxy"]) env[k] = "127.0.0.1,localhost";
+  delete env.SOLOMNI_MINGW_BIN;
+  delete env.SOLOMNI_ACCEPT_ASSET_CHANGE;
+  return env;
+}
+
+function runEnv(dir, env, args) {
+  return new Promise((resolve, reject) => {
+    const logPath = path.join(dir, "run.log");
+    const fd = fs.openSync(logPath, "w");
+    const child = spawn(process.execPath, ["env.js"].concat(args), {
+      cwd: dir, env, stdio: ["ignore", fd, fd],
+    });
+    const timer = setTimeout(() => {
+      try { child.kill(); } catch (e) { /* 已退出 */ }
+      reject(new Error("env.js 超时（60s）"));
+    }, 60000);
+    child.on("error", (e) => { clearTimeout(timer); fs.closeSync(fd); reject(e); });
+    child.on("exit", (code) => {
+      clearTimeout(timer);
+      fs.closeSync(fd);
+      resolve({ code, out: fs.readFileSync(logPath, "utf8") });
+    });
+  });
+}
+
+/** 目的：POSIX 上逐条钉住“宿主 cc 可用就不下载 / 缺失才自举 / 不擅自下载 / 校验闸 / macOS 前置”。 */
+async function runPosixCases() {
+  fs.rmSync(SCRATCH, { recursive: true, force: true });
+  const tailOut = (out) => "\n" + out.split(/\r?\n/).slice(-12).join("\n");
+
+  if (!IS_MAC) {
+    // ① 宿主没有 cc：--yes 后自举 Zig，包装可用，--target= 翻译正确。
+    {
+      const name = "posix-bootstraps-zig-when-host-cc-missing";
+      const dir = path.join(SCRATCH, name);
+      fs.mkdirSync(dir, { recursive: true });
+      const { body, sha } = makeTarBody(dir);
+      const { server, requests, base } = await startBodyServer(body);
+      try {
+        writePosixFixture(dir, { url: base + "/zig.tar", sha });
+        const r = await runEnv(dir, baseEnv(dir, true), ["setup", "--yes"]);
+        assert.equal(r.code, 0, "自举要成功：" + tailOut(r.out));
+        assert.match(r.out, /downloading/, "要下载 Zig");
+        assert.match(r.out, /sha256 verified/, "要过完整性闸");
+        assert.match(r.out, /project-local C toolchain ready/, "要装好项目内工具链");
+        assert.match(r.out, /environment ready/, "构建探测要通过");
+        const bin = path.join(dir, CC_INSTALL, "bin");
+        for (const n of ["zig", "cc", "gcc", "g++", "c++", "clang", "clang++"]) {
+          assert.ok(fs.existsSync(path.join(bin, n)), "缺包装：" + n);
+        }
+        const w = spawnSync(path.join(bin, "cc"), ["--target=x86_64-unknown-linux-gnu"], {
+          env: { ...process.env, PATH: "/usr/bin:/bin" }, encoding: "utf8",
+        });
+        assert.equal(w.status, 0, "包装要能执行：" + (w.stderr || ""));
+        assert.match(w.stdout, /--target=x86_64-linux-gnu/, "要把 Rust 三元组翻成 Zig 认的形态：" + w.stdout);
+        assert.ok(!/unknown-/.test(w.stdout), "不能把 unknown- 传给 Zig：" + w.stdout);
+        assert.ok(!fs.existsSync(path.join(dir, ".tools", "zig.tar.xz")), "装完要删归档");
+        assert.ok(requests.length > 0, "夹具源要被请求");
+      } finally {
+        server.close();
+      }
+      console.log("PASS " + name);
+    }
+
+    // ② 无 TTY 且没给 --yes：不擅自下载，停点明确指向 C 工具链（不是重装 Rust）。
+    {
+      const name = "posix-no-tty-does-not-download-and-points-at-c-toolchain";
+      const dir = path.join(SCRATCH, name);
+      fs.mkdirSync(dir, { recursive: true });
+      const { body, sha } = makeTarBody(dir);
+      const { server, requests, base } = await startBodyServer(body);
+      try {
+        writePosixFixture(dir, { url: base + "/zig.tar", sha });
+        const r = await runEnv(dir, baseEnv(dir, false), ["setup"]);
+        assert.equal(r.code, 1, "无 TTY 要如实失败：" + tailOut(r.out));
+        assert.match(r.out, /无交互终端/, "要说明没有擅自下载");
+        assert.match(r.out, /缺少可用的 C 链接器/, "要指向 C 工具链：" + tailOut(r.out));
+        assert.match(r.out, /node env\.js setup --yes/, "要给项目内自举入口");
+        assert.equal(requests.length, 0, "没同意就不该请求下载");
+        assert.ok(!fs.existsSync(path.join(dir, CC_INSTALL)), "没同意就不该装");
+      } finally {
+        server.close();
+      }
+      console.log("PASS " + name);
+    }
+
+    // ③ 半个项目内 cc（只有 gcc、没有 rustc 要用的 cc）：必须重装，不能当成就绪。
+    {
+      const name = "posix-half-installed-zig-is-reinstalled";
+      const dir = path.join(SCRATCH, name);
+      fs.mkdirSync(dir, { recursive: true });
+      const { body, sha } = makeTarBody(dir);
+      const { server, base } = await startBodyServer(body);
+      try {
+        writePosixFixture(dir, { url: base + "/zig.tar", sha });
+        const half = path.join(dir, CC_INSTALL, "bin");
+        fs.mkdirSync(half, { recursive: true });
+        fs.writeFileSync(path.join(half, "gcc"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+        const r = await runEnv(dir, baseEnv(dir, true), ["setup", "--yes"]);
+        assert.equal(r.code, 0, "半个安装要能被重装修好：" + tailOut(r.out));
+        assert.match(r.out, /downloading/, "缺 cc 包装必须重新安装，不能当成就绪");
+        assert.ok(fs.existsSync(path.join(half, "cc")), "重装后要有 cc 包装");
+      } finally {
+        server.close();
+      }
+      console.log("PASS " + name);
+    }
+
+    // ④ sha256 闸：不符时拒绝解包，保留归档与两值。
+    {
+      const name = "posix-sha-mismatch-keeps-archive-and-refuses";
+      const dir = path.join(SCRATCH, name);
+      fs.mkdirSync(dir, { recursive: true });
+      const { body } = makeTarBody(dir);
+      const { server, base } = await startBodyServer(body);
+      try {
+        writePosixFixture(dir, { url: base + "/zig.tar", sha: "0".repeat(64) });
+        const r = await runEnv(dir, baseEnv(dir, true), ["setup", "--yes"]);
+        assert.equal(r.code, 1, "哈希不符要拒绝：" + tailOut(r.out));
+        assert.match(r.out, /sha256 不符/, "要报哈希不符");
+        assert.ok(fs.existsSync(path.join(dir, ".tools", "zig.tar.xz")), "不许删归档");
+        assert.ok(!fs.existsSync(path.join(dir, CC_INSTALL)), "不符的归档不准解包");
+      } finally {
+        server.close();
+      }
+      console.log("PASS " + name);
+    }
+  }
+
+  // ⑤ 宿主 cc 能构建：零下载，直接用宿主工具链。
+  {
+    const name = "posix-no-download-when-host-cc-builds";
+    const dir = path.join(SCRATCH, name);
+    fs.mkdirSync(dir, { recursive: true });
+    const { body, sha } = makeTarBody(dir);
+    const { server, requests, base } = await startBodyServer(body);
+    try {
+      writePosixFixture(dir, { url: base + "/zig.tar", sha, hostCC: true });
+      const r = await runEnv(dir, baseEnv(dir, true), ["setup", "--yes"]);
+      assert.equal(r.code, 0, "宿主能构建要直接通过：" + tailOut(r.out));
+      assert.ok(!/downloading/.test(r.out), "宿主 cc 可用时不该下载");
+      assert.equal(requests.length, 0, "宿主 cc 可用时不该请求夹具源");
+      assert.ok(!fs.existsSync(path.join(dir, ".tools", "toolchains", TARGET, "cc")), "不该装项目内 cc");
+    } finally {
+      server.close();
+    }
+    console.log("PASS " + name);
+  }
+
+  // ⑥ macOS 缺 CLT：Zig 不含 SDK，直接给准确前置，不下载。
+  if (IS_MAC) {
+    const name = "macos-missing-clt-reports-prerequisite";
+    const dir = path.join(SCRATCH, name);
+    fs.mkdirSync(dir, { recursive: true });
+    const { body, sha } = makeTarBody(dir);
+    const { server, requests, base } = await startBodyServer(body);
+    try {
+      writePosixFixture(dir, { url: base + "/zig.tar", sha });
+      const r = await runEnv(dir, baseEnv(dir, true), ["setup", "--yes"]);
+      assert.equal(r.code, 1, "缺 CLT 要如实失败：" + tailOut(r.out));
+      assert.match(r.out, /Xcode Command Line Tools/, "要说明 Apple SDK 前置");
+      assert.match(r.out, /xcode-select --install/, "要给安装命令");
+      assert.equal(requests.length, 0, "不该假装 Zig 能替代 SDK");
+    } finally {
+      server.close();
+    }
+    console.log("PASS " + name);
+  }
+
+  console.log("POSIX-ENV-BOOTSTRAP-OK");
+}
+
 /**
  * 目的：`node env.js`（只读状态）必须能自诊断——有 host、有构建探测结论；借用不可用时明说"不借用"。
  * 为什么机器查：本机掉进去的正是这条假绿——状态的每一行都"正常"，构建却必然失败（缺链接器）。
@@ -411,8 +677,8 @@ function statusSelfCheck() {
 }
 
 if (!IS_WIN) {
-  // dlltool 只在 Windows 那条路上：这里如实跳过，不静默当作通过。
-  console.log("[探针] env.js 的 MinGW 引导只在 Windows 上存在：本平台跳过环境引导自检");
+  // Windows 的 MinGW 用例不适用；POSIX 走 Zig cc 自举用例（本地夹具，不连外网）。
+  await runPosixCases();
   statusSelfCheck();
   console.log("ENV-BOOTSTRAP-OK");
 } else {
