@@ -13,11 +13,15 @@ const { spawnSync, spawn } = require("child_process");
 const readline = require("readline");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 
 const ROOT = __dirname;
 const IS_WIN = process.platform === "win32";
 // 平台目录按 OS 区分（windows / macos / linux）；不再让 macOS 借用 linux。
 const OS_KEY = IS_WIN ? "windows" : process.platform === "darwin" ? "macos" : "linux";
+// 清单里宿主目标的写法（dependencies.yaml 的 toolchain.target / install 路径同一套）。
+const ARCH_KEY = process.arch === "x64" ? "x86_64" : process.arch === "arm64" ? "aarch64" : process.arch;
+const TARGET_KEY = OS_KEY + "-" + ARCH_KEY;
 const PLATFORM_DIR = path.join(ROOT, "platform", OS_KEY);
 const P_RUSTUP = path.join(PLATFORM_DIR, "rustup");
 const P_CARGO = path.join(PLATFORM_DIR, "cargo");
@@ -95,6 +99,95 @@ function findAmbientCargo() {
   return ambientCache || null;
 }
 
+/** 目的：在给定 PATH 上找一个可执行名（不依赖 where/which）；找不到返回 null。 */
+function findOnPath(name, pathValue) {
+  return (pathValue || process.env.PATH || "")
+    .split(path.delimiter)
+    .map((d) => d.trim().replace(/^"|"$/g, ""))
+    .filter(Boolean)
+    .map((d) => path.join(d, name))
+    .find((p) => { try { return fs.existsSync(p); } catch (e) { return false; } }) || null;
+}
+
+let buildCCCache;
+/**
+ * 目的：从清单窄读当前平台的 `toolchain.cc.*` 条目——构建期 C 工具链（Linux / macOS 的 Zig）。
+ * 为什么读清单：版本、安装路径、下载源在 dependencies.yaml 只有一份；在 JS 里再抄一份必然腐烂。
+ * 约束：只认本文件用到的三个字段（install / probe / source）；找不到条目返回 null，由调用方如实报。
+ */
+function buildCC() {
+  if (buildCCCache !== undefined) return buildCCCache;
+  buildCCCache = null;
+  if (IS_WIN) return null;
+  const file = path.join(ROOT, "dependencies.yaml");
+  if (!fs.existsSync(file)) return null;
+  const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
+  const want = "toolchain.cc." + TARGET_KEY;
+  let dep = null;
+  let inDep = false;
+  for (const raw of lines) {
+    const line = raw.replace(/\s+#.*$/, "").trim();
+    if (!line || line.startsWith("#")) continue;
+    const id = line.match(/^-\s+id:\s*(\S+)$/);
+    if (id) {
+      if (inDep) break; // 只读这一条，下一条开始就停
+      if (id[1] === want) { inDep = true; dep = { id: id[1] }; }
+      continue;
+    }
+    if (!inDep) continue;
+    const kv = line.match(/^([a-z_]+):\s*(\S+)$/);
+    if (kv && (kv[1] === "install" || kv[1] === "probe" || kv[1] === "source")) dep[kv[1]] = kv[2];
+  }
+  if (!dep || !dep.install || !dep.probe || !dep.source) return null;
+  const install = path.join(ROOT, ...dep.install.split("/"));
+  const probe = path.join(ROOT, ...dep.probe.split("/"));
+  buildCCCache = { id: dep.id, source: dep.source, install, probe, bin: path.dirname(probe) };
+  return buildCCCache;
+}
+
+/** 目的：项目内 Zig cc 是否完整可用——清单的 probe（gcc 包装）与 rustc 要用的 cc 包装都必须在场。 */
+function buildCCReady(dep) {
+  return !!dep && fs.existsSync(dep.probe) && fs.existsSync(path.join(dep.bin, "cc"));
+}
+
+/** 目的：拼 PATH 时该放项目内 C 工具链的哪个 bin 目录；没装就返回空。 */
+function projectCCBinOnPath() {
+  const dep = buildCC();
+  return buildCCReady(dep) ? [dep.bin] : [];
+}
+
+/**
+ * 目的：判断宿主 PATH 上的 `cc` 能不能真的编译并链接一个空程序。
+ * 为什么真编：`cc` 存在不等于能用（macOS 缺 CLT 时是 xcrun 报错、Linux 缺 libc 开发包时找不到 crt1.o）；
+ *   只有编译探测失败才值得改用项目内 Zig。
+ * 约束：用调用方拼好的环境（PATH 里已有项目内 cc）；产物只落 target/tmp/，探完即删。
+ */
+function probeHostCC(r) {
+  if (IS_WIN) return { ok: true, detail: "" };
+  const env = r && r.env ? r.env : process.env;
+  const cc = findOnPath("cc", envPath(env));
+  if (!cc) return { ok: false, detail: "PATH 上没有 cc" };
+  const dir = path.join(ROOT, "target", "tmp", "env-cc-probe-" + process.pid);
+  const out = path.join(dir, "probe" + (IS_WIN ? ".exe" : ""));
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const p = spawnSync(cc, ["-x", "c", "-", "-o", out], {
+      cwd: ROOT, env, input: "int main(void){return 0;}\n", encoding: "utf8", timeout: 30000,
+    });
+    return { ok: !p.error && p.status === 0, detail: ((p.stderr || "") + (p.stdout || "")).trim() };
+  } catch (e) {
+    return { ok: false, detail: (e && e.message) || String(e) };
+  } finally {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { /* 清不掉不影响判定 */ }
+  }
+}
+
+/** 目的：构建失败是不是"没有可用 C 链接器"——决定给修 C 工具链的提示，还是给修 Rust 的提示。 */
+function looksLikeMissingCC(detail) {
+  return /linker [`'"]?cc[`'"]? not found|failed to find tool ["']?cc(?:["']|:)|cannot find (?:crt1\.o|-lc)|xcrun: error|invalid active developer path/i
+    .test(String(detail || ""));
+}
+
 /** 借用系统 cargo 前的第一道探测：跑得起来才值得往下看（rustup proxy 解析不到 toolchain 会失败）。 */
 function probeUsable(cargo) {
   try {
@@ -123,7 +216,19 @@ function tail(text, lines) {
  * 一条可执行的修复步骤：项目内工具链装了一半（下载中断留下的半套）或缺 default 时用。
  * 半套不能靠"再装一次"修：rustup 认为这套已安装、会回 "unchanged"，必须先卸再装。
  */
-function repairHint(host) {
+function repairHint(host, detail) {
+  // 缺宿主 C 链接器与"Rust 装了一半"是两回事：前者重装 Rust 修不好，必须指向 C 工具链。
+  if (!IS_WIN && looksLikeMissingCC(detail)) {
+    const lines = [
+      "修复（缺少可用的 C 链接器，不是 Rust 装了一半）：",
+      "  1) 装系统 C 工具链：Debian/Ubuntu `sudo apt install build-essential`；Arch `sudo pacman -S gcc`；macOS `xcode-select --install`",
+      "  2) 或让项目内自举：node env.js setup --yes（把 Zig cc 装进 .tools，约 51MB）",
+    ];
+    if (OS_KEY === "macos") {
+      lines.push("  macOS 链接系统框架必须有 Xcode Command Line Tools / SDK；Zig 包不含 SDK。");
+    }
+    return lines.join("\n");
+  }
   const toolchain = host ? "stable-" + host : "stable";
   return "修复（半套通常是下载中断留下的）：\n" +
     "  1) RUSTUP_HOME=" + P_RUSTUP + " CARGO_HOME=" + P_CARGO + " rustup toolchain uninstall " + toolchain + "\n" +
@@ -135,7 +240,7 @@ function assertProjectBuildable(r) {
   const p = probeBuild(r);
   if (p.ok) return p;
   die("项目内工具链构建不出二进制（host " + (p.host || "读不到") + "）：\n  " +
-    (firstError(p.detail) || "构建探测失败") + "\n  " + repairHint(p.host));
+    (firstError(p.detail) || "构建探测失败") + "\n  " + repairHint(p.host, p.detail));
 }
 
 /** 一句能当结论的错误行：优先第一条 error:，否则第一行（摘要里要塞得下，不能只给 "aborting"）。 */
@@ -226,7 +331,7 @@ function composeEnv(cargo, source) {
   }
   const front = [path.join(cargoHome, "bin"), path.dirname(cargo)]
     .concat(EXTRA_PATH)
-    .concat(IS_WIN ? mingwBinOnPath() : [])
+    .concat(IS_WIN ? mingwBinOnPath() : projectCCBinOnPath())
     .filter(Boolean);
   setEnvPath(env, front.concat([envPath(env)].filter(Boolean)).join(path.delimiter));
   return env;
@@ -297,8 +402,15 @@ async function ensureProject(opts) {
   if (!findProjectCargo()) {
     await installRust({ yes });
   }
-  const r = resolve({ requireProject: true });
+  let r = resolve({ requireProject: true });
   if (!r) die("项目内工具链装好了却仍找不到 cargo（platform/<os>/cargo/bin）");
+  // 宿主 C 链接器不可用时才自举项目内 Zig；能构建就完全不下载。
+  if (!probeBuild(r).ok && !IS_WIN && !probeHostCC(r).ok) {
+    await ensureBuildCC(yes);
+    buildProbe = null; // 安装前的构建失败结论不能复用
+    r = resolve({ requireProject: true });
+    if (!r) die("项目内工具链装好了却仍找不到 cargo（platform/<os>/cargo/bin）");
+  }
   assertProjectBuildable(r);
   return r;
 }
@@ -313,8 +425,21 @@ async function ensure(opts) {
   let r = resolve({});
   let host = "";
   if (r && r.source === "ambient") {
-    const p = probeBuild(r);
+    let p = probeBuild(r);
     host = p.host;
+    let ccBootstrapped = false;
+    // 宿主 Rust 能跑却缺 C 链接器：先补项目内 Zig，再决定借不借——别白白多装一套 Rust。
+    if (!p.ok && !IS_WIN && !probeHostCC(r).ok) {
+      ccBootstrapped = await ensureBuildCC(yes);
+      if (ccBootstrapped) {
+        buildProbe = null;
+        const again = resolve({});
+        if (again && again.source === "ambient") {
+          const retry = probeBuild(again);
+          if (retry.ok) { r = again; p = retry; host = retry.host; }
+        }
+      }
+    }
     if (p.ok) {
       log("borrowed Rust can build: host " + p.host);
     } else {
@@ -323,13 +448,23 @@ async function ensure(opts) {
       console.error("[env]   source " + r.cargo);
       console.error("[env]   host   " + (p.host || "(读不到)"));
       for (const line of [firstError(p.detail)].concat(tail(p.detail, 4).split("\n")).filter(Boolean)) console.error("[env]   " + line);
+      if (!IS_WIN && !probeHostCC(r).ok && !ccBootstrapped) {
+        die("借用不成立：宿主 Rust 存在，但没有可用的 C 链接器；项目内自举未完成。\n  见上面的两条路，完成后重跑。");
+      }
       console.error("[env] 不借用它：按下面的流程装项目内工具链（Windows 用 GNU，不需要 Visual Studio）。");
       r = null;
     }
   } else if (r && r.source === "override") {
     // 显式指定压倒一切（与 SOLOMNI_MINGW_BIN 同一口径），但把探测结果如实说出来。
-    const p = probeBuild(r);
+    let p = probeBuild(r);
     host = p.host;
+    if (!p.ok && !IS_WIN && !probeHostCC(r).ok) {
+      if (await ensureBuildCC(yes)) {
+        buildProbe = null;
+        const again = resolve({});
+        if (again) { r = again; p = probeBuild(r); }
+      }
+    }
     if (!p.ok) log("注意：SOLOMNI_CARGO 指定的工具链构建不出二进制（host " + (p.host || "读不到") + "）：仍按显式指定使用。");
   }
   if (!r) {
@@ -338,7 +473,16 @@ async function ensure(opts) {
   // 先验工具链能不能构建，再谈 dlltool：半套的项目内工具链要当场停下，别再多下一份 MinGW。
   let ready = resolve({});
   if (!ready) die("environment not ready: no usable cargo (project or PATH)");
-  if (ready.source === "project") assertProjectBuildable(ready);
+  if (ready.source === "project") {
+    // 项目内 Rust 没有自带链接器：宿主 cc 不可用时先把项目内 Zig 装好，再验构建。
+    if (!probeBuild(ready).ok && !IS_WIN && !probeHostCC(ready).ok) {
+      await ensureBuildCC(yes);
+      buildProbe = null;
+      ready = resolve({});
+      if (!ready) die("environment not ready: no usable cargo (project or PATH)");
+    }
+    assertProjectBuildable(ready);
+  }
   if (IS_WIN) {
     // dlltool 只服务 GNU 目标（windows-sys 的 raw-dylib 要它）；借到能链接的 msvc 工具链时不需要它。
     if (!host) host = cargoVv(ready).host;
@@ -401,8 +545,9 @@ function runPS(cmd) {
  * 约束：curl 在场就只用 curl（续传失败时保留分片，别用"从头下"把它冲掉）；curl 缺席才走 PowerShell（它从头下）。
  */
 function download(url, dest, resume) {
-  const curl = path.join(process.env.SystemRoot || "C:/Windows", "System32", "curl.exe");
-  if (fs.existsSync(curl)) {
+  const curl = IS_WIN ? path.join(process.env.SystemRoot || "C:/Windows", "System32", "curl.exe") : "curl";
+  const hasCurl = IS_WIN ? fs.existsSync(curl) : !!findOnPath("curl", process.env.PATH);
+  if (hasCurl) {
     const args = ["-L", "--fail", "--retry", "3", "--connect-timeout", "30", "-o", dest];
     if (resume) args.push("-C", "-");
     args.push(url);
@@ -411,6 +556,9 @@ function download(url, dest, resume) {
     // 失败就是失败：分片留着（下次从**同一个**源续），也不再用 PowerShell 从头下把证据冲掉。
     log("curl download failed (exit " + r.status + ") - partial kept for the next run");
     return false;
+  }
+  if (!IS_WIN) {
+    die("curl 不可用：装 curl 后重跑，或手动把 " + url + " 下载到 " + dest + "。");
   }
   // 没有 curl（10 1803 以前的老系统）才走 PowerShell 兜底：它从头下，失败如实失败。
   const ps = runPS("Invoke-WebRequest -UseBasicParsing '" + url + "' -OutFile '" + dest + "'");
@@ -634,6 +782,159 @@ async function installRust(opts) {
   return cargo;
 }
 
+/** 目的：没有可用 C 链接器时的两条路——装系统工具链，或让项目内自举；无 TTY 时明说没有擅自下载。 */
+function manualCCRoute(dep, noTty) {
+  console.error("[env] 项目内 C 工具链未安装" + (noTty ? "（无交互终端，不擅自下载）" : "") + "。两条路：");
+  console.error("  1) 装系统 C 工具链：Debian/Ubuntu `sudo apt install build-essential`；Arch `sudo pacman -S gcc`；macOS `xcode-select --install`");
+  console.error("  2) 允许项目内自举：node env.js setup --yes（Zig cc 装进 " +
+    (dep ? path.relative(ROOT, dep.install) : ".tools") + "，约 51MB）");
+}
+
+/** 目的：跨平台读取文件哈希（Zig 归档校验；不依赖只存在于 Windows 的 certutil）。 */
+function sha256File(file) {
+  return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+}
+
+/** 目的：Zig 归档完整性闸——校验值与下载源成对放在 links.yaml；不符时保留归档并报出两值与来源。 */
+function verifyBuildCCHash(archive, dep, url, want) {
+  const got = sha256File(archive);
+  if (got === want) {
+    log("sha256 verified");
+    return;
+  }
+  if (process.env.SOLOMNI_ACCEPT_ASSET_CHANGE === "1") {
+    log("sha256 与台账不符，但已按 SOLOMNI_ACCEPT_ASSET_CHANGE=1 接受：实际 " + got);
+    return;
+  }
+  die("sha256 不符：\n  台账 " + want + "\n  实际 " + got + "\n  来源 " + url +
+    "\n  上游换过资产就核对同版本的校验值，再改 links.yaml 的 " + dep.source + ".sha256；" +
+    "\n  确认可信、想先跑起来：SOLOMNI_ACCEPT_ASSET_CHANGE=1 重跑一次。");
+}
+
+/** 目的：在解包目录里找 Zig 本体（包根目录名带平台与版本，不写死）。 */
+function findZig(root) {
+  const walk = (dir, depth) => {
+    if (depth > 4) return null;
+    const subdirs = [];
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) subdirs.push(p);
+      else if (e.name === "zig") return p;
+    }
+    for (const d of subdirs) {
+      const found = walk(d, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  };
+  try { return walk(root, 0); } catch (e) { return null; }
+}
+
+/** 目的：写可执行包装；unix 上补执行位（Zig 引导只在 Linux / macOS）。 */
+function writeExecutable(file, body) {
+  fs.writeFileSync(file, body);
+  if (!IS_WIN) fs.chmodSync(file, 0o755);
+}
+
+/**
+ * 目的：把 `zig cc` / `zig c++` 包成常规编译器名，并翻译 cc-rs 传的 Rust 三元组。
+ * 为什么翻译：cc-rs 把 clang 形编译器当跨平台 clang，传 `--target=x86_64-unknown-linux-gnu`；
+ *   Zig 不认 `unknown-`（报 UnknownOperatingSystem），不翻译时 ring 等 C 依赖直接构建失败。
+ * 约束：POSIX sh；相对路径，产品根整体搬移后仍可用。
+ */
+function writeZigWrappers(install, zig) {
+  const rel = path.relative(install, zig).split(path.sep).join("/");
+  const bin = path.join(install, "bin");
+  fs.mkdirSync(bin, { recursive: true });
+  writeExecutable(path.join(bin, "zig"),
+    "#!/bin/sh\nDIR=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\nexec \"$DIR/../" + rel + "\" \"$@\"\n");
+  for (const [name, sub] of [["cc", "cc"], ["gcc", "cc"], ["clang", "cc"],
+    ["c++", "c++"], ["g++", "c++"], ["clang++", "c++"]]) {
+    const body = [
+      "#!/bin/sh",
+      "DIR=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)",
+      "n=$#",
+      "i=0",
+      "while [ \"$i\" -lt \"$n\" ]; do",
+      "  a=$1",
+      "  shift",
+      "  case \"$a\" in",
+      "    --target=*unknown-*) a=$(printf '%s\\n' \"$a\" | sed 's/^--target=\\(.*\\)-unknown-/--target=\\1-/') ;;",
+      "    --target=x86_64-apple-darwin) a=--target=x86_64-macos ;;",
+      "    --target=aarch64-apple-darwin) a=--target=aarch64-macos ;;",
+      "  esac",
+      "  set -- \"$@\" \"$a\"",
+      "  i=$((i + 1))",
+      "done",
+      "exec \"$DIR/zig\" " + sub + " \"$@\"",
+      "",
+    ].join("\n");
+    writeExecutable(path.join(bin, name), body);
+  }
+}
+
+/**
+ * 目的：把清单里的 Zig 装进项目内，作为构建期 C 工具链（与产品运行前提同一安装位置）。
+ * 约束：先解到临时目录再 rename；只有完整解出 Zig 并写好包装才替换旧目录。
+ */
+function installBuildCC(dep) {
+  const url = link(dep.source);
+  const want = link(dep.source + ".sha256").toLowerCase();
+  fs.mkdirSync(TOOLS, { recursive: true });
+  const archive = path.join(TOOLS, "zig.tar.xz");
+  // 归档是一次性的（51MB）：不做续传，避免“完整文件被当成半截”再接出坏归档。
+  fs.rmSync(archive, { force: true });
+  log("downloading " + url + " (about 51 MB)");
+  if (!download(url, archive, false)) {
+    die("下载没有完成（网络中断？）。重跑会重新下载整份；也可以手动把归档放到 " + archive + "。");
+  }
+  verifyBuildCCHash(archive, dep, url, want);
+  const tmp = dep.install + ".tmp-" + process.pid;
+  fs.rmSync(tmp, { recursive: true, force: true });
+  fs.mkdirSync(tmp, { recursive: true });
+  log("extracting Zig...");
+  const tar = spawnSync("tar", ["-xf", archive, "-C", tmp], { stdio: "inherit" });
+  if (tar.error || tar.status !== 0) {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    die("解包 " + archive + " 失败：检查系统 tar（Linux / macOS 都应有）。");
+  }
+  const zig = findZig(tmp);
+  if (!zig) {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    die("解出的包里找不到 zig 可执行文件：" + path.relative(ROOT, tmp));
+  }
+  writeZigWrappers(tmp, zig);
+  fs.rmSync(dep.install, { recursive: true, force: true });
+  fs.renameSync(tmp, dep.install);
+  fs.rmSync(archive, { force: true });
+  log("project-local C toolchain ready: " + path.relative(ROOT, dep.install));
+}
+
+/**
+ * 目的：宿主没有可用 cc 时征得同意，把项目内 Zig cc 装好；返回是否可用。
+ * 约束：macOS 直接给 CLT 前置（Zig 不含 Apple SDK，装了下也一样链接不了系统框架）。
+ */
+async function ensureBuildCC(yes) {
+  if (IS_WIN) return true;
+  if (OS_KEY === "macos") {
+    die("macOS 构建需要 Xcode Command Line Tools / SDK（Zig 包不含 Apple SDK）：\n" +
+      "  xcode-select --install\n  装好后重跑。");
+  }
+  const dep = buildCC();
+  if (!dep) {
+    die("dependencies.yaml 缺少当前平台的 toolchain.cc 条目（" + TARGET_KEY + "）：无法自举项目内 C 工具链。");
+  }
+  if (buildCCReady(dep)) return true;
+  const ans = await ask("没有可用的 C 链接器。把项目内 Zig cc（约 51MB）装进 " +
+    path.relative(ROOT, dep.install) + " 吗？[y/N] ", { yes });
+  if (ans === null || ans.trim().toLowerCase() !== "y") {
+    manualCCRoute(dep, ans === null);
+    return false;
+  }
+  installBuildCC(dep);
+  return buildCCReady(dep);
+}
+
 function status() {
   const r = resolve({});
   const lines = [
@@ -658,6 +959,13 @@ function status() {
   lines.push("resolved: " + r.cargo + " [" + r.source + "]");
   lines.push("host: " + (p.host || "(读不到)"));
   lines.push("build: " + (p.ok ? "可用" : "不可用 —— " + (firstError(p.detail) || "构建探测失败")));
+  if (!IS_WIN) {
+    const dep = buildCC();
+    const project = buildCCReady(dep);
+    const hostCC = project ? null : findOnPath("cc", envPath(r.env));
+    lines.push("build cc: " + (project ? "项目内 " + path.relative(ROOT, dep.bin)
+      : hostCC ? "宿主 " + hostCC : "缺失（node env.js setup 可自举 Zig cc）"));
+  }
   if (r.source === "ambient") lines.push("borrow: " + (p.ok ? "借用" : "不借用（ensure / setup 会装项目内工具链）"));
   if (IS_WIN) {
     lines.push("dlltool: " + (!p.host || /-gnu$/.test(p.host) ? "需要（GNU 目标）" : "不需要（host 不是 GNU）"));
