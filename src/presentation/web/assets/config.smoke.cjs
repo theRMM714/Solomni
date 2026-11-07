@@ -91,7 +91,7 @@ function check(name, cond, extra) {
 const CFG = {
   sid: "w", mode: "single", started: true,
   agents: [{ name: "调研员", modules: ["research"], model: "m1", chara: "会话快照人设" }],
-  tier: "vm", guest: "debian", net: true,
+  tier: "vm", guest: "debian-13", net: true,
   permission: {
     profile: "workspace", label: "工作区内修改", summary: "",
     reach: ["private", "shared-read", "shared-write", "module-read", "module-write"],
@@ -108,7 +108,7 @@ const CFG = {
   },
   guests: [
     { guest: "debian-13", label: "debian-13-genericcloud-amd64", os: "linux", arch: "amd64", ready: true, missing: [], install: ".vm/guest/debian-13", runtimes: ["python"] },
-    { guest: "debian-13", label: "debian-13-genericcloud-amd64", os: "linux", arch: "amd64", ready: false, missing: ["vm.guest-runtime.windows"], install: ".vm/guest/debian-13" },
+    { guest: "debian-12", label: "debian-12-genericcloud-amd64", os: "linux", arch: "amd64", ready: false, missing: ["vm.guest-runtime.windows"], install: ".vm/guest/debian-12" },
   ],
   pins: { python: "3.12", ruby: "3.2" },
   thinking: { level: null, default_level: "high", label: "high", options: [{ id: "high", label: "high" }], note: "" },
@@ -207,7 +207,7 @@ const sandbox = {
         vm_unavailable_reason: tiersVmAvailable ? "" : "虚拟机档现在不可用（没有找到 qemu-system-x86_64（按PATH找过））",
         vm_requirements: tiersVmAvailable ? [] : RAW.vm_requirements,
         guests: tiersVmAvailable
-          ? [{ guest: "windows", label: "debian-13", os: "linux", arch: "amd64", ready: tiersGuestReady,
+          ? [{ guest: "debian-13", label: "debian-13", os: "linux", arch: "amd64", ready: tiersGuestReady,
               missing: tiersGuestReady ? [] : ["vm.guest-runtime.linux"], install: ".vm/guest/debian-13", runtimes: ["python"] }]
           : [],
         available: {},
@@ -354,7 +354,7 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
     JSON.stringify(Object.keys(sent).sort()) === JSON.stringify(["agents", "guest", "permission", "pins", "session_id", "tier"])
       && sent.session_id === "w", editCall.body);
   check("config: 提交体内容（名单/模块/模型/档位/虚拟根/pins/会话权限）",
-    sent.tier === "vm" && sent.guest === "debian"
+    sent.tier === "vm" && sent.guest === "debian-13"
     && sent.agents[0].name === "调研员" && JSON.stringify(sent.agents[0].modules) === JSON.stringify(["research"])
     && sent.agents[0].model === "m1" && sent.agents[0].chara === "临时改的人设"
     && JSON.stringify(sent.pins) === JSON.stringify({ python: "3.12", ruby: "3.2" })
