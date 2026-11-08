@@ -1,12 +1,12 @@
 # 上下文新鲜度与全局版本化 · 施工计划
 
-> 临时施工文档，不对外。三个 PR 顺序合并：每完成一个，删掉对应章节并把状态改成"已合并"；三个全部合并后删除本文件，并移除 `tests/gates/docs/root-router.js` 里 `plan.md` 的白名单条目。
+> 临时施工文档，不对外。三个 PR 顺序合并（PR1 已合并）：每完成一个，删掉对应章节并把状态改成"已合并"；三个全部合并后删除本文件，并移除 `tests/gates/docs/root-router.js` 里 `plan.md` 的白名单条目。
 
 ## 0. 状态
 
 | # | 分支 | 内容 | 状态 |
 | --- | --- | --- | --- |
-| 1 | `task/ws-refs` | 存储层：refs、增量提交、祖先遍历 GC | 实现完成，待评审 |
+| 1 | `task/ws-refs` | 存储层：refs、增量提交、祖先遍历 GC | 已合并（#53） |
 | 2 | `task/context-freshness` | 写路径提交、读事实、过期判定 | 待开始 |
 | 3 | `task/archive-checkpoint` | 留档全局检查点、恢复剪叉、开关与读数 | 待开始 |
 
@@ -41,99 +41,13 @@
 3. 完成判据：`node dev.js fmt` / `clippy` 干净；`node run-tests.js` 全绿；纯文档改动 `node run-tests.js --docs` 全绿；`git status` 干净。
 4. 不写兼容层；旧 `.work` 不做解析迁移（见 2.5）。
 
-## 2. PR1 存储层
+## 2. PR2 写路径提交与过期判定
 
 ### 2.1 目标
 
-把"提交 = 整棵树快照 + GC 枚举全部提交"改成"提交 = 增量 + 从 refs 遍历"。**外部行为不变**，本 PR 不改变任何工具或会话可见结果。
-
-### 2.2 改动文件
-
-| 文件 | 改动 |
-| --- | --- |
-| `src/capabilities/workspace/domain/workstore.rs` | `Commit.tree` 改 `Option<Tree>`；增 `base`、`depth`、`source`；新增 `Source`/`Ref`/`RefKind`；`GcReport` 增 `removed_commits` |
-| `src/capabilities/workspace/ports.rs` | `WorkStore` 增 `read_ref`/`write_ref`/`list_refs`/`remove_ref`（`remove_commit` 原本已有） |
-| `src/capabilities/workspace/detail/fs_workstore.rs` | refs 落 `.work/refs/<name>.json`；`head` 走 `refs/main`，旧 `head` 文件读到一次即升级并删除 |
-| `src/capabilities/workspace/service.rs` | 三处提交构造改落增量；`tree_of` 回溯重建；`work_gc` 从 refs 算活集合并删不活提交；回档 / 留档前 `pin_head` 钉 `refs/live/<id>`；丢弃后清悬空引用 |
-| `src/tests/workspace.rs`、`src/tests/detail.rs`、`src/tests/doubles.rs` | 增量树、refs 往返、旧 head 升级、GC 两态；内存替身补 refs 端口 |
-
-### 2.3 结构
-
-```rust
-pub struct Commit {
-    pub id: u64,
-    pub parent: Option<u64>,
-    /// 分支 fork 点；提交准入与树重建都靠它。
-    #[serde(default)]
-    pub base: u64,
-    pub author: String,
-    #[serde(default)]
-    pub session: String,
-    pub time: i64,
-    pub message: String,
-    pub changes: Vec<Change>,
-    /// Some = 根提交；None = 增量，树由最近的根 + 沿途 changes 重建。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tree: Option<Tree>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub anchor: Option<CommitAnchor>,
-    #[serde(default)]
-    pub source: Source, // tool / pull / external / archive / checkout
-}
-
-pub enum RefKind { Main, Agent, Archive, Live }
-
-pub struct Ref {
-    pub kind: RefKind,
-    pub target: Option<u64>,
-    /// 归档与剪叉携带的多工作树快照：agent 名 → HEAD。
-    #[serde(default)]
-    pub heads: BTreeMap<String, Option<u64>>,
-}
-```
-
-### 2.4 算法
-
-**树重建**：从提交沿 `parent` 回溯到最近的 `tree: Some`；沿途 `changes` 按从旧到新正放（Add/Modify 置 hash，Delete 移除）。回溯长度超过 512 视为损坏，直接报错。
-
-**根间隔**：写提交时若"距最近根 ≥ 256"或调用方显式要求（留档、基线、checkout），落根提交（`tree: Some`）。
-
-**GC 两段**：
-
-1. 根集合 = `refs/main` + `refs/agents/*` + `refs/archive/*` + `refs/live/*` + 各 agent 索引（基线）。
-2. 从根回溯得活提交集合；根提交展开 `tree.values()`，增量提交取 `changes[].hash`，合成活 blob 集合。
-3. 删不活的提交记录（先写 `intent`，失败可重试）。
-4. 删不活的对象；保留 `is_content_hash` 之外的临时文件策略不变。
-5. `GcReport` 增 `kept_commits`/`removed_commits`。
-
-**旧线保护**：回档 / 留档这类"移 head"的操作，动 head 之前先 `pin_head`——把当前 head 写成 `refs/live/<id>`。没有这一步，新 GC 会把回档离开的提交当垃圾删掉；有钉子则旧线永远可达（零拷贝）。
-
-**本 PR 不做 checkout / intent**：切到非祖先提交要连带"工作树有未提交改动就拒绝、force 先备份 lost"的语义，归 PR3 与留档一起做；本 PR 不引入没有调用方的死代码。
-
-### 2.5 旧数据
-
-旧提交本来就带整棵树，而 `tree: Option<Tree>` 对"有 tree"的 JSON 天然解析成 `Some`；`base`/`depth`/`source` 都有默认值。所以旧数据**不需要解析分支**：`head()` 在 `refs/main` 缺失时读旧 `head` 文件，把它写成 `refs/main` 再删旧文件；旧提交因 `depth = 0` 一律当根。原计划的"报错要求重建"作废——那会让用户丢历史，且迁移本身只有几行。
-
-### 2.6 测试
-
-`src/tests/workspace.rs` 新增：
-
-- `work_commits_store_roots_and_deltas_but_read_full_tree`：只有根带整棵树，增量只记 changes；`work_status` 的树仍完整；
-- `work_gc_reclaims_commits_only_after_refs_drop`：有 `live` 钉子时提交全保住；引用全删后才回收；
-- `fs_work_store_round_trips_and_refuses_symlink_escapes` 增补：旧 `head` 一次性升级成 `refs/main`、refs 写 / 列 / 删往返。
-
-### 2.7 收尾
-
-- [ ] PR 合并后删除本章，状态改"已合并"
-- [ ] 更新 `docs/workspace/` 的存储与回收说明
-
-## 3. PR2 写路径提交与过期判定
-
-### 3.1 目标
-
 每次工具写后提交；读事实落工具行；发送前按 refs 链重算过期并替换占位符。开关默认关（只记录、不呈现）。
 
-### 3.2 改动文件
+### 2.2 改动文件
 
 | 文件 | 改动 |
 | --- | --- |
@@ -146,7 +60,7 @@ pub struct Ref {
 | `src/capabilities/collab/service/round.rs` | `assemble` 在压缩边界之后替换占位符 |
 | `src/capabilities/session/domain/session.rs` | `meta.context_freshness` |
 
-### 3.3 算法
+### 2.3 算法
 
 **写路径**：工具调用后取 `Observations.touched` 调 `work_commit_auto(work, agent, touched)`，无差异 no-op；回合末 `work_sync_branch` 全量扫沙箱，差异落 `source=external` 提交，兜 shell/模块/外部编辑。`work_pull` 末尾落 `source=pull` 提交。`work_commit` 准入改 fast-forward。
 
@@ -156,25 +70,25 @@ pub struct Ref {
 
 **呈现**：只在压缩边界之后替换，同回合批量；占位符文本 `[已过期：<path> <from>-<to>，读取后文件已修改]`。
 
-### 3.4 测试
+### 2.4 测试
 
 - 同回合并发工具，提交顺序 = 调用顺序；
 - 崩溃后 sweep 自愈；fast-forward 拒绝有明确错误；
 - 文件头插一行不让整份读失效；块内改一行只失效相交结果；
 - shell 改文件也能判过期；两次 `assemble` 逐字节相同。
 
-### 3.5 收尾
+### 2.5 收尾
 
 - [ ] PR 合并后删除本章
 - [ ] 更新 `docs/session/` 的发送视图说明
 
-## 4. PR3 留档检查点与恢复
+## 3. PR3 留档检查点与恢复
 
-### 4.1 目标
+### 3.1 目标
 
 留档 = 全局检查点 + ref 分叉；恢复 = 切回兄弟枝，剪叉前先钉 `live`。
 
-### 4.2 改动文件
+### 3.2 改动文件
 
 | 文件 | 改动 |
 | --- | --- |
@@ -185,7 +99,7 @@ pub struct Ref {
 | `src/capabilities/session/domain/events.rs` | `ContextUsage` 增 `cache_read`/`cache_creation` |
 | 设置界面 | 开关与占用显示 |
 
-### 4.3 算法
+### 3.3 算法
 
 **留档**：
 
@@ -208,7 +122,7 @@ pub struct Ref {
 
 **开关**：`meta.context_freshness` 默认 false；`cache_read`/`cache_creation` 由适配器解析后进 `ContextUsage`。文案用"过期内容自动清理"，副标题"可能增加缓存成本"。
 
-### 4.4 测试
+### 3.4 测试
 
 - 三个 agent 一起留档后沙箱同点；
 - 恢复后全部回退，且 `live` 仍可再恢复；
@@ -216,12 +130,12 @@ pub struct Ref {
 - 档案往返 10 次后 GC 只回收 `live` 被删的那部分；
 - 回放 = 实时（开关打开）。
 
-### 4.5 收尾
+### 3.5 收尾
 
 - [ ] PR 合并后删除本章
 - [ ] 更新 `docs/session/session-model.md` 的留档/恢复语义
 
-## 5. 全部完成
+## 4. 全部完成
 
 - [ ] 删除 `plan.md`
 - [ ] 移除 `tests/gates/docs/root-router.js` 的白名单条目
