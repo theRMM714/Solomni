@@ -18,7 +18,7 @@ use crate::capabilities::workspace::domain::hash::{content_hash, is_content_hash
 use crate::capabilities::workspace::domain::workstore::{
     clean_rel, expand_paths, local_take_verdict, lost_rel, needs_backup, plan_commit, pull_verdict,
     status_of, validate_paths, Commit, CommitAnchor, Conflict, ConflictAt, Index, LocalTakeVerdict,
-    Pending, PendingIndex, PullVerdict, Tree, Unchanged,
+    Pending, PendingIndex, PullVerdict, Ref, RefKind, Source, Tree, Unchanged,
 };
 use crate::capabilities::workspace::ports::{WorkStore, Workdirs};
 use std::collections::{BTreeMap, BTreeSet};
@@ -28,6 +28,28 @@ use std::sync::{Arc, Mutex};
 /// 首次导入外部工作区的文件数 / 字节上限（超出只导入可导入的部分，不拖垮建会话）。
 const MAX_IMPORT_FILES: usize = 2000;
 const MAX_IMPORT_BYTES: u64 = 256 * 1024 * 1024;
+/// 每多少条增量提交落一次整棵树；越大越省空间，读树回溯越久。
+const ROOT_INTERVAL: u32 = 256;
+
+/// 目的：这条提交要不要落整棵树；要落就从基线树正放 changes 得到它，不落 = `None`。
+/// 约束：只在 `depth % ROOT_INTERVAL == 0` 时落根，其余提交只记 changes。
+fn deltas_tree(base: &Tree, changes: &[Change], depth: u32) -> Option<Tree> {
+    if !depth.is_multiple_of(ROOT_INTERVAL) {
+        return None;
+    }
+    let mut tree = base.clone();
+    for ch in changes {
+        match ch.kind {
+            ChangeKind::Add | ChangeKind::Modify => {
+                tree.insert(ch.path.clone(), ch.hash.clone());
+            }
+            ChangeKind::Delete => {
+                tree.remove(&ch.path);
+            }
+        }
+    }
+    Some(tree)
+}
 
 /// 首次导入时忽略的目录（VCS 元数据与依赖缓存；用户仍可之后显式 work_sync）。
 fn import_ignored(rel: &str) -> bool {
@@ -119,6 +141,77 @@ impl WorkspaceService {
             .clone()
     }
 
+    /// 目的：把一条提交还原成整棵树：根提交自带树，增量提交沿 parent 回溯后按 changes 正放。
+    /// 约束：旧格式提交（带整棵树）天然是根；回溯遇到断链或过深一律报错，不猜。
+    fn tree_of(store_port: &dyn WorkStore, store: &Path, id: u64) -> Result<Tree, String> {
+        let mut deltas: Vec<Commit> = Vec::new();
+        let mut cur = id;
+        let base = loop {
+            let c = store_port
+                .read_commit(store, cur)?
+                .ok_or_else(|| format!("没有提交点 {}", cur))?;
+            if let Some(t) = c.tree.clone() {
+                break t;
+            }
+            let parent = c
+                .parent
+                .ok_or_else(|| format!("提交 {} 既没有树也没有父提交", cur))?;
+            deltas.push(c);
+            cur = parent;
+            if deltas.len() > 100_000 {
+                return Err(format!("提交 {} 的回溯链过深", id));
+            }
+        };
+        let mut tree = base;
+        for c in deltas.iter().rev() {
+            for ch in &c.changes {
+                match ch.kind {
+                    ChangeKind::Add | ChangeKind::Modify => {
+                        tree.insert(ch.path.clone(), ch.hash.clone());
+                    }
+                    ChangeKind::Delete => {
+                        tree.remove(&ch.path);
+                    }
+                }
+            }
+        }
+        Ok(tree)
+    }
+
+    /// 目的：新提交在树重建链上的深度（父提交 depth + 1；根 = 0）。
+    fn next_depth(&self, store: &Path, parent: Option<u64>) -> Result<u32, String> {
+        match parent {
+            Some(p) => Ok(self
+                .store
+                .read_commit(store, p)?
+                .ok_or_else(|| format!("没有提交点 {}", p))?
+                .depth
+                .saturating_add(1)),
+            None => Ok(0),
+        }
+    }
+
+    /// 目的：把当前 head 钉成 `refs/live/<id>`——回档 / 切枝之后旧线仍可达，GC 不回收。
+    /// 约束：只在移动 head 之前调用；已钉过 = 无操作。
+    fn pin_head(&self, store: &Path) -> Result<(), String> {
+        let Some(id) = self.store.head(store)? else {
+            return Ok(());
+        };
+        let name = format!("live/{}", id);
+        if self.store.read_ref(store, &name)?.is_some() {
+            return Ok(());
+        }
+        self.store.write_ref(
+            store,
+            &name,
+            &Ref {
+                kind: RefKind::Live,
+                target: Some(id),
+                heads: BTreeMap::new(),
+            },
+        )
+    }
+
     /// 目的：回滚到某个提交点的唯一实现；`force` = 用户已做危险确认，允许覆盖外部改动。
     fn restore_impl(&self, work: &str, commit: u64, force: bool) -> Result<(), String> {
         let gate = self.gate(work);
@@ -137,6 +230,7 @@ impl WorkspaceService {
                 conflicts.join("、")
             ));
         }
+        self.pin_head(&store)?;
         let pending = Pending::Restore {
             target: Some(commit),
         };
@@ -155,21 +249,11 @@ impl WorkspaceService {
         target: Option<u64>,
     ) -> Result<(), String> {
         let tree = match target {
-            Some(id) => {
-                store_port
-                    .read_commit(store, id)?
-                    .ok_or_else(|| format!("没有提交点 {}", id))?
-                    .tree
-            }
+            Some(id) => WorkspaceService::tree_of(store_port, store, id)?,
             None => Tree::new(),
         };
         let current = match store_port.head(store)? {
-            Some(id) => {
-                store_port
-                    .read_commit(store, id)?
-                    .ok_or_else(|| format!("head 指向不存在的提交 {}", id))?
-                    .tree
-            }
+            Some(id) => WorkspaceService::tree_of(store_port, store, id)?,
             None => Tree::new(),
         };
         for rel in current.keys() {
@@ -200,21 +284,11 @@ impl WorkspaceService {
             return Ok(Vec::new());
         }
         let current = match self.store.head(store)? {
-            Some(id) => {
-                self.store
-                    .read_commit(store, id)?
-                    .ok_or_else(|| format!("head 指向不存在的提交 {}", id))?
-                    .tree
-            }
+            Some(id) => Self::tree_of(self.store.as_ref(), store, id)?,
             None => Tree::new(),
         };
         let target_tree = match target {
-            Some(id) => {
-                self.store
-                    .read_commit(store, id)?
-                    .ok_or_else(|| format!("没有提交点 {}", id))?
-                    .tree
-            }
+            Some(id) => Self::tree_of(self.store.as_ref(), store, id)?,
             None => Tree::new(),
         };
         let mut conflicts: BTreeSet<String> = BTreeSet::new();
@@ -338,6 +412,14 @@ impl WorkspaceService {
                 self.store.remove_commit(store, id)?;
             }
         }
+        // 指向已删提交的引用一并清掉，免得引用的活集合里留下悬空目标。
+        for (name, r) in self.store.list_refs(store)? {
+            if let Some(t) = r.target {
+                if self.store.read_commit(store, t)?.is_none() {
+                    self.store.remove_ref(store, &name)?;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -394,11 +476,7 @@ impl WorkspaceService {
         let Some(id) = self.store.head(store)? else {
             return Ok((None, Tree::new()));
         };
-        let commit = self
-            .store
-            .read_commit(store, id)?
-            .ok_or_else(|| format!("head 指向不存在的提交 {}", id))?;
-        Ok((Some(id), commit.tree))
+        Ok((Some(id), Self::tree_of(self.store.as_ref(), store, id)?))
     }
 
     /// 当前 head 的祖先链（含 head）。用户回滚离开过的提交仍留在库里，但不在这一条线上。
@@ -769,22 +847,15 @@ impl Workspace for WorkspaceService {
         let changes = plan.changes;
         // 先落对象，再写事务日志；主副本与元数据由事务统一应用/恢复。
         let id = self.reserve_id(&store)?;
-        let mut new_tree = tree.clone();
         for ch in &changes {
-            match ch.kind {
-                ChangeKind::Add | ChangeKind::Modify => {
-                    self.store.ingest_under(
-                        &store,
-                        &sandbox,
-                        &ch.path,
-                        &ch.hash,
-                        self.max_asset_bytes,
-                    )?;
-                    new_tree.insert(ch.path.clone(), ch.hash.clone());
-                }
-                ChangeKind::Delete => {
-                    new_tree.remove(&ch.path);
-                }
+            if matches!(ch.kind, ChangeKind::Add | ChangeKind::Modify) {
+                self.store.ingest_under(
+                    &store,
+                    &sandbox,
+                    &ch.path,
+                    &ch.hash,
+                    self.max_asset_bytes,
+                )?;
             }
         }
         let mut new_index = index;
@@ -798,15 +869,19 @@ impl Workspace for WorkspaceService {
                 }
             }
         }
+        let depth = self.next_depth(&store, head_id)?;
         let commit = Commit {
             id,
             parent: head_id,
+            base: head_id.unwrap_or(0),
             author: agent.to_string(),
             session: session.to_string(),
             time: req.time,
             message: msg.to_string(),
             changes: changes.clone(),
-            tree: new_tree,
+            tree: deltas_tree(&tree, &changes, depth),
+            depth,
+            source: Source::Tool,
             anchor: Some(CommitAnchor {
                 agent: agent.to_string(),
                 line: req.line,
@@ -849,14 +924,12 @@ impl Workspace for WorkspaceService {
         let (want, missing) = expand_paths(paths, &available);
         let mut changes: Vec<Change> = Vec::new();
         let mut unchanged: Vec<String> = Vec::new();
-        let mut new_tree = tree.clone();
         for rel in want {
             let disk = self.disk_hash(&shared, &rel)?;
             let head = tree.get(&rel).map(String::as_str);
             match (disk.as_deref(), head) {
                 (None, None) => {}
                 (None, Some(_)) => {
-                    new_tree.remove(&rel);
                     changes.push(Change {
                         path: rel,
                         kind: ChangeKind::Delete,
@@ -864,7 +937,6 @@ impl Workspace for WorkspaceService {
                     });
                 }
                 (Some(d), None) => {
-                    new_tree.insert(rel.clone(), d.to_string());
                     changes.push(Change {
                         path: rel,
                         kind: ChangeKind::Add,
@@ -873,7 +945,6 @@ impl Workspace for WorkspaceService {
                 }
                 (Some(d), Some(h)) if d == h => unchanged.push(rel),
                 (Some(d), Some(_)) => {
-                    new_tree.insert(rel.clone(), d.to_string());
                     changes.push(Change {
                         path: rel,
                         kind: ChangeKind::Modify,
@@ -902,15 +973,19 @@ impl Workspace for WorkspaceService {
             }
         }
         let id = self.reserve_id(&store)?;
+        let depth = self.next_depth(&store, head_id)?;
         let commit = Commit {
             id,
             parent: head_id,
+            base: head_id.unwrap_or(0),
             author: "external".to_string(),
             session: String::new(),
             time,
             message: format!("外部工作区同步：{} 条", changes.len()),
             changes: changes.clone(),
-            tree: new_tree,
+            tree: deltas_tree(&tree, &changes, depth),
+            depth,
+            source: Source::External,
             anchor: None,
         };
         let pending = Pending::Commit {
@@ -1001,21 +1076,24 @@ impl Workspace for WorkspaceService {
             ChangeKind::Add
         };
         let id = self.reserve_id(&store)?;
-        let mut new_tree = tree;
-        new_tree.insert(rel.clone(), hash.clone());
+        let changes = vec![Change {
+            path: rel.clone(),
+            kind,
+            hash,
+        }];
+        let depth = self.next_depth(&store, head_id)?;
         let commit = Commit {
             id,
             parent: head_id,
+            base: head_id.unwrap_or(0),
             author: "user".to_string(),
             session: String::new(),
             time,
             message: format!("用户投喂：{}", rel),
-            changes: vec![Change {
-                path: rel.clone(),
-                kind,
-                hash,
-            }],
-            tree: new_tree,
+            changes: changes.clone(),
+            tree: deltas_tree(&tree, &changes, depth),
+            depth,
+            source: Source::User,
             anchor: Some(CommitAnchor {
                 agent: String::new(),
                 line,
@@ -1234,12 +1312,8 @@ impl Workspace for WorkspaceService {
         let (shared, store) = self.work_roots(work)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;
-        let c = self
-            .store
-            .read_commit(&store, commit)?
-            .ok_or_else(|| format!("没有提交点 {}", commit))?;
-        let hash = c
-            .tree
+        let tree = Self::tree_of(self.store.as_ref(), &store, commit)?;
+        let hash = tree
             .get(&rel)
             .ok_or_else(|| format!("提交 {} 里没有路径：{}", commit, rel))?;
         let binary = media_hint(&rel).map(|h| h.binary).unwrap_or(false);
@@ -1614,13 +1688,37 @@ impl Workspace for WorkspaceService {
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;
 
-        // 可达 = 所有现存提交树的 hash + 所有 agent 基线的 hash；只被基线引用的对象也必须保留。
+        // 先让旧布局的 head 升级成 refs/main，再只从引用出发算活集合：
+        // 引用指向的提交 + 祖先链；不在这条集合里的提交与对象都可回收。
+        let _ = self.store.head(&store)?;
+        let refs = self.store.list_refs(&store)?;
+        let mut stack: Vec<u64> = Vec::new();
+        for r in refs.values() {
+            stack.extend(r.target);
+            stack.extend(r.heads.values().flatten().copied());
+        }
+        let mut live: BTreeSet<u64> = BTreeSet::new();
         let mut reachable: BTreeSet<String> = BTreeSet::new();
-        for id in self.store.list_commits(&store)? {
-            if let Some(commit) = self.store.read_commit(&store, id)? {
-                reachable.extend(commit.tree.values().cloned());
+        while let Some(id) = stack.pop() {
+            if !live.insert(id) {
+                continue;
+            }
+            let Some(commit) = self.store.read_commit(&store, id)? else {
+                continue;
+            };
+            for ch in &commit.changes {
+                if !ch.hash.is_empty() {
+                    reachable.insert(ch.hash.clone());
+                }
+            }
+            if let Some(tree) = &commit.tree {
+                reachable.extend(tree.values().cloned());
+            }
+            if let Some(parent) = commit.parent {
+                stack.push(parent);
             }
         }
+        // 只被基线引用的对象也必须保留。
         for (_, index) in self.store.list_indexes(&store)? {
             reachable.extend(index.values().cloned());
         }
@@ -1654,6 +1752,15 @@ impl Workspace for WorkspaceService {
                         .map_err(|e| format!("回收对象 {} 失败：{}", object.hash, e))?;
                     report.removed_objects += 1;
                     report.removed_bytes += object.size;
+                }
+            }
+        }
+        if apply {
+            let ids = self.store.list_commits(&store)?;
+            for id in ids {
+                if !live.contains(&id) {
+                    self.store.remove_commit(&store, id)?;
+                    report.removed_commits += 1;
                 }
             }
         }
@@ -1720,6 +1827,7 @@ impl Workspace for WorkspaceService {
                 conflicts.join("、")
             ));
         }
+        self.pin_head(&store)?;
         let pending = Pending::Restore { target };
         self.store.write_pending(&store, &pending)?;
         let result = WorkspaceService::materialize(self.store.as_ref(), &shared, &store, target);
@@ -1746,6 +1854,7 @@ impl Workspace for WorkspaceService {
                 conflicts.join("、")
             ));
         }
+        self.pin_head(&store)?;
         let pending = Pending::Restore { target: commit };
         self.store.write_pending(&store, &pending)?;
         let result = WorkspaceService::materialize(self.store.as_ref(), &shared, &store, commit);

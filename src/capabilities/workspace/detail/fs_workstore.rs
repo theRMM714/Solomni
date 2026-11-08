@@ -10,7 +10,7 @@
 
 use crate::capabilities::workspace::domain::asset::{AssetScanner, FileVersion, ASSET_CHUNK_BYTES};
 use crate::capabilities::workspace::domain::workstore::{
-    join_rel, Commit, Index, ObjectInfo, Pending,
+    join_rel, Commit, Index, ObjectInfo, Pending, Ref, RefKind,
 };
 use crate::capabilities::workspace::ports::WorkStore;
 use serde::de::DeserializeOwned;
@@ -100,6 +100,46 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
         return Err(format!("写入临时文件失败（{}）：{}", tmp.display(), e));
     }
     rename_temp(&tmp, path)
+}
+
+/// 目的：引用名 → `store/refs/<name>.json`。
+/// 约束：只接受由 `/` 分段的普通名字；空段、`.`、`..`、反斜杠、盘符一律拒绝。
+fn ref_path(store: &Path, name: &str) -> Result<PathBuf, String> {
+    let mut path = store.join("refs");
+    let mut segments = 0usize;
+    for seg in name.split('/') {
+        if seg.is_empty() || seg == "." || seg == ".." || seg.contains('\\') || seg.contains(':') {
+            return Err(format!("引用名非法：{}", name));
+        }
+        path.push(seg);
+        segments += 1;
+    }
+    if segments == 0 {
+        return Err("引用名为空".to_string());
+    }
+    Ok(path.with_extension("json"))
+}
+
+/// 目的：递归收集 refs 目录下的引用（名字用 `/` 拼接，不含 `.json`）。
+fn walk_refs(dir: &Path, prefix: &str, out: &mut BTreeMap<String, Ref>) -> Result<(), String> {
+    let entries = std::fs::read_dir(dir).map_err(|e| format!("列引用失败：{}", e))?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let file_name = entry.file_name().to_string_lossy().into_owned();
+        if path.is_dir() {
+            walk_refs(&path, &format!("{}{}/", prefix, file_name), out)?;
+            continue;
+        }
+        let Some(stem) = file_name.strip_suffix(".json") else {
+            continue;
+        };
+        let name = format!("{}{}", prefix, stem);
+        let text = std::fs::read_to_string(&path).map_err(|e| format!("读引用失败：{}", e))?;
+        let r: Ref =
+            serde_json::from_str(&text).map_err(|e| format!("引用 {} 非法：{}", name, e))?;
+        out.insert(name, r);
+    }
+    Ok(())
 }
 
 /// 目的：流式扫描一个文件；`preview = None` 只算指纹与大小。
@@ -401,27 +441,86 @@ impl WorkStore for FsWorkStore {
         result
     }
 
+    /// 主线指针就是 `refs/main`；旧布局的 `head` 文件读到一次就升级成引用再删掉。
     fn head(&self, store: &Path) -> Result<Option<u64>, String> {
-        match std::fs::read_to_string(store.join("head")) {
-            Ok(t) => t
-                .trim()
-                .parse::<u64>()
-                .map(Some)
-                .map_err(|e| format!("head 记录非法：{}", e)),
+        if let Some(r) = self.read_ref(store, "main")? {
+            return Ok(r.target);
+        }
+        let legacy = store.join("head");
+        match std::fs::read_to_string(&legacy) {
+            Ok(t) => {
+                let id = t
+                    .trim()
+                    .parse::<u64>()
+                    .map_err(|e| format!("head 记录非法：{}", e))?;
+                self.write_ref(
+                    store,
+                    "main",
+                    &Ref {
+                        kind: RefKind::Main,
+                        target: Some(id),
+                        heads: BTreeMap::new(),
+                    },
+                )?;
+                let _ = std::fs::remove_file(&legacy);
+                Ok(Some(id))
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(format!("读 head 失败：{}", e)),
         }
     }
 
     fn set_head(&self, store: &Path, id: u64) -> Result<(), String> {
-        write_atomic(&store.join("head"), id.to_string().as_bytes())
+        let mut r = self.read_ref(store, "main")?.unwrap_or(Ref {
+            kind: RefKind::Main,
+            target: None,
+            heads: BTreeMap::new(),
+        });
+        r.target = Some(id);
+        self.write_ref(store, "main", &r)
     }
 
     fn clear_head(&self, store: &Path) -> Result<(), String> {
+        self.remove_ref(store, "main")?;
         match std::fs::remove_file(store.join("head")) {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(format!("清 head 失败：{}", e)),
+        }
+    }
+
+    fn read_ref(&self, store: &Path, name: &str) -> Result<Option<Ref>, String> {
+        let path = ref_path(store, name)?;
+        match std::fs::read_to_string(&path) {
+            Ok(t) => serde_json::from_str(&t)
+                .map(Some)
+                .map_err(|e| format!("引用 {} 非法：{}", name, e)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(format!("读引用失败：{}", e)),
+        }
+    }
+
+    fn write_ref(&self, store: &Path, name: &str, r: &Ref) -> Result<(), String> {
+        let text = serde_json::to_string_pretty(r).map_err(|e| format!("引用序列化失败：{}", e))?;
+        write_atomic(&ref_path(store, name)?, text.as_bytes())
+    }
+
+    fn list_refs(&self, store: &Path) -> Result<BTreeMap<String, Ref>, String> {
+        let mut out = BTreeMap::new();
+        let root = store.join("refs");
+        if !root.exists() {
+            return Ok(out);
+        }
+        walk_refs(&root, "", &mut out)?;
+        Ok(out)
+    }
+
+    fn remove_ref(&self, store: &Path, name: &str) -> Result<(), String> {
+        let path = ref_path(store, name)?;
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(format!("删引用失败：{}", e)),
         }
     }
 
