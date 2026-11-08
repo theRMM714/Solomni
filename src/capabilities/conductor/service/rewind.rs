@@ -348,6 +348,7 @@ impl Conductor {
                 events,
                 sandboxes,
                 self.guest_lease_for(meta)?,
+                Arc::clone(&self.workspace),
                 // 重建出来的整队进**同一条队**（按转录里已发出的卡号续号，已答过的不重问）。
                 self.desk_of(&meta.name),
             )?),

@@ -112,6 +112,8 @@ impl CollabSession {
             ),
             // 核心核实用的是只读内置工具，没有模块工具进程，也就没有注入项。
             module_env: Default::default(),
+            // 核心核实的工具面只读：没有共享区提交这回事。
+            workspace: None,
             runtime_path: None,
             runtime_roots: Vec::new(),
             shell_live: None,

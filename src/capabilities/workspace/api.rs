@@ -110,15 +110,14 @@ pub trait Workspace: Send + Sync {
     ) -> Result<CommitReport, String>;
     /// **自动提交**：工具写完之后提交，只接受快进——待提交路径的基线必须等于主线当前头。
     /// 约束：不 pull、不合并、不降级；基线过期即 `CommitRefusal::Stale`，调用方只能上报或让模型先 pull。
-    // 接线前（PR2 写后自动提交）bin 目标里有不到使用者，接上即删这行。
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// `Ok(None)` = 内容与主线一致、没有可发布的改动（不算失败）。
     fn work_commit_auto(
         &self,
         work: &str,
         agent: &str,
         session: &str,
         req: &CommitRequest,
-    ) -> Result<CommitReport, CommitRefusal>;
+    ) -> Result<Option<CommitReport>, CommitRefusal>;
     /// **外部同步**：读工作区磁盘，把与 head 不同的路径采纳成一条 `author=external` 的提交。
     /// 约束：不改任何沙箱与工作区内容；同路径沙箱里有未提交改动时留给后续提交判冲突。
     fn work_sync(&self, work: &str, paths: &[String], time: i64) -> Result<SyncReport, String>;

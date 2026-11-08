@@ -7,16 +7,12 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 /// 目的：一条基线——精确的提交号；"主线现在是什么"不是基线，是要跟它比较的对象。
-// 接线前（PR2 写后自动提交）bin 目标里有不到使用者，接上即删这行。
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct BaseRef {
     pub oid: u64,
 }
 
 /// 目的：一条路径的基线与主线当前头不一致。
-// 接线前（PR2 写后自动提交）bin 目标里有不到使用者，接上即删这行。
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StalePath {
     pub path: String,
@@ -25,8 +21,6 @@ pub struct StalePath {
 }
 
 /// 目的：自动提交被拒绝的原因（自动路径不降级，只允许拒绝）。
-// 接线前（PR2 写后自动提交）bin 目标里有不到使用者，接上即删这行。
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CommitRefusal {
     /// 目的：待提交路径的基线不是主线当前头——先 `work_pull` 再写。
@@ -63,8 +57,6 @@ impl fmt::Display for CommitRefusal {
 
 impl std::error::Error for CommitRefusal {}
 
-// 接线前（PR2 写后自动提交）bin 目标里有不到使用者，接上即删这行。
-#[cfg_attr(not(test), allow(dead_code))]
 /// 目的：按路径核校基线——待提交的每条路径，记录的基线都必须等于主线当前头。
 /// 约束：主线里没有、且从没拉取过的路径按新文件放行；主线里有却从没拉取过的路径拒绝
 ///   （否则等于拿没读过的旧内容覆盖上游）。

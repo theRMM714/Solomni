@@ -7,7 +7,7 @@
 | # | 分支 | 内容 | 状态 |
 | --- | --- | --- | --- |
 | 1 | `task/ws-refs` | 存储层：refs、增量提交、祖先遍历 GC | 已合并（#53） |
-| 2 | `task/context-freshness` | 写路径提交、读事实、过期判定 | 进行中：2A 基线事实与准入已落（#54） |
+| 2 | `task/context-freshness` | 写路径提交、读事实、过期判定 | 进行中：2A 基线事实与准入、2B 写后自动提交已落（#54） |
 | 3 | `task/archive-checkpoint` | 留档全局检查点、恢复剪叉、开关与读数 | 待开始 |
 
 顺序依赖：2 需要 1 的 refs 与增量提交；3 需要 2 的读事实。每个 PR 从最新 `main` 切，前一个合并后才开下一个。
@@ -63,7 +63,7 @@
 
 ### 2.3 算法
 
-**写路径**：工具调用后取 `Observations.touched` 调 `work_commit_auto(work, agent, touched)`，无差异 no-op；回合末 `work_sync_branch` 全量扫沙箱，差异落 `source=external` 提交，兜 shell/模块/外部编辑。`work_pull` 末尾把拉到的路径基线与 `source=pull` 提交一起落。显式 `work_commit` 保留逐路径冲突判定；**只有自动提交**走 fast-forward。
+**写路径**：工具调用后取 `Observations.take_written()`（这次调用真正写过的路径）调 `work_commit_auto`，无差异 = `Ok(None)`；回合末全量扫沙箱兜 shell / 模块 / 外部编辑（待办 2B′）。`work_pull` 末尾把拉到的路径基线与 `source=pull` 提交一起落。显式 `work_commit` 保留逐路径冲突判定；**只有自动提交**走 fast-forward。
 
 **准入（已定口径）**：基线是显式事实 `BaseRef { oid }`，落在 `refs/agents/<agent>` 的 `heads: path -> oid`；没有记录 = 从未拉取，不伪造历史。两个落点——工具执行前（写前准入）与提交时（CAS 复核），都在写共享区之前判定，失败不产出 `Pending`（否则 `recover_locked` 会重放）。自动提交**不 pull**：基线过期即 `CommitRefusal::Stale` 硬失败，由模型/用户显式 `work_pull` 后再写。新文件（主线里没有、也没拉过）放行，否则模型写不出第一份文件。
 
@@ -83,7 +83,8 @@
 ### 2.5 进度
 
 - [x] 2A 基线事实与准入：`domain/base.rs`、`refs/agents/<agent>` 逐路径基线（pull / 提交后写实）、`work_commit_auto`（CAS → 提交 → 基线推进）、类型化拒绝；
-- [ ] 2B 接线：`MemberTools` 增工作区句柄，`tool_loop` 在写工具后调 `work_commit_auto`，同时删掉 `cfg_attr(not(test), allow(dead_code))` 的六处临时标记；
+- [x] 2B 接线：`MemberTools.workspace`（`CollabSession` 注入，生产必为 `Some`）、`tool_loop::commit_writes` 在写工具落地后按 `Observations.take_written()` 自动提交（锚 = 工具调用行）、`work_commit_auto` 返回 `Option`（无改动不算失败）、六处临时 `allow(dead_code)` 已删；提示词与 `docs/session/session-model.md`、`docs/permission/README.md`、`systools/tools.yaml` 同步为"自动提交 + 基线过期只留在沙箱"；
+- [ ] 2B′ 回合末全量扫沙箱（shell / 模块 / 外部写的文件）落 `source=external` 提交；
 - [ ] 2C `ReadFact` 与 `freshness`；2D `assemble` 占位符与 `meta.context_freshness`。
 
 ### 2.6 收尾

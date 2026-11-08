@@ -2662,7 +2662,8 @@ pub(crate) fn work_commit_auto_accepts_only_fresh_bases() {
     store.write_under(&sb_a, "note.md", b"v2").unwrap();
     let first = ws
         .work_commit_auto("w", "a", "w--a", &commit_req(&["note.md"], &[], "a 改", 2))
-        .expect("基线新鲜的自动提交");
+        .expect("基线新鲜的自动提交")
+        .expect("有可发布的改动");
     assert_eq!(first.id, 2);
 
     // b 拉到的就是 v2，改完自动提交 → 主线推进到 3；a 的基线仍停在 2。
@@ -2671,7 +2672,8 @@ pub(crate) fn work_commit_auto_accepts_only_fresh_bases() {
     store.write_under(&sb_b, "note.md", b"v3").unwrap();
     let second = ws
         .work_commit_auto("w", "b", "w--b", &commit_req(&["note.md"], &[], "b 改", 3))
-        .expect("b 的基线也新鲜");
+        .expect("b 的基线也新鲜")
+        .expect("有可发布的改动");
     assert_eq!(second.id, 3);
 
     // a 再写同一路径：基线 2 ≠ 主线 3 → 拒绝，点到路径与两边提交号，且不留半个提交。
@@ -2706,6 +2708,114 @@ pub(crate) fn work_commit_auto_accepts_only_fresh_bases() {
             "w--a",
             &commit_req(&["fresh.md"], &[], "新文件", 5),
         )
-        .expect("新文件不要求基线");
+        .expect("新文件不要求基线")
+        .expect("有可发布的改动");
     assert_eq!(third.id, 4);
+}
+
+/// 目的：钉住写工具落地后的自动提交——路径取自这次调用写过的文件，锚是工具调用那一行；基线过期只上报不发布。
+#[test]
+pub(crate) fn write_tools_publish_to_shared_area_and_report_stale_bases() {
+    use crate::capabilities::collab::service::tool_loop::commit_writes;
+    use crate::capabilities::tools::api::Observations;
+    use crate::capabilities::tools::domain::systool::fnv1a;
+    use crate::capabilities::workspace::ports::WorkStore;
+
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string(), "b".to_string()])
+        .unwrap();
+    let sb_dir = sandbox_of(&ws, "w", "a");
+    let mut sb = test_sandbox("a", &[]);
+    sb.work_name = "w".to_string();
+    sb.session = "w--a".to_string();
+    sb.private = sb_dir.clone();
+    sb.shared = shared_of(&ws, "w");
+    let mut m = member_with_tools("m0", Vec::new(), Arc::new(SilentRunner));
+    {
+        let t = m.tools.as_mut().expect("成员工具面");
+        t.sandbox = sb;
+        t.workspace = Some(ws.clone());
+        // 锚点 = 这次工具调用那一行（回档据此退掉这次写入）。
+        t.line.store(7, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    // 主线已有 note.md，a 拉过它 → 基线新鲜，写完自动发布。
+    ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
+    ws.work_pull("w", "a", &["note.md".to_string()]).unwrap();
+    store.write_under(&sb_dir, "note.md", b"v2").unwrap();
+    let mut obs = Observations::default();
+    obs.note_written(&sb_dir.join("note.md"), 0);
+    let mut out = crate::kernel::api::ToolOutcome {
+        ok: true,
+        output: "写入完成".to_string(),
+    };
+    commit_writes(m.tools.as_ref().unwrap(), &mut obs, &mut out);
+    assert_eq!(out.output, "写入完成", "基线新鲜时不该有告警");
+    assert_eq!(ws.work_head("w").unwrap(), Some(2), "写入应当已发布");
+    let shared = shared_of(&ws, "w");
+    assert_eq!(
+        store.read_under(&shared, "note.md").unwrap().as_deref(),
+        Some(b"v2".as_slice()),
+        "共享区内容必须换成新写的这份"
+    );
+
+    // b 推进主线后，a 的基线过期：这次写入只留在沙箱，回执如实说清。
+    ws.work_pull("w", "b", &["note.md".to_string()]).unwrap();
+    store
+        .write_under(&sandbox_of(&ws, "w", "b"), "note.md", b"v3")
+        .unwrap();
+    ws.work_commit_auto("w", "b", "w--b", &commit_req(&["note.md"], &[], "b 改", 3))
+        .unwrap();
+    store.write_under(&sb_dir, "note.md", b"v4").unwrap();
+    let mut obs = Observations::default();
+    obs.note_written(&sb_dir.join("note.md"), 0);
+    let mut out = crate::kernel::api::ToolOutcome {
+        ok: true,
+        output: "写入完成".to_string(),
+    };
+    commit_writes(m.tools.as_ref().unwrap(), &mut obs, &mut out);
+    assert!(
+        out.output.contains("[自动提交未完成]"),
+        "过期基线必须在回执里说清：{}",
+        out.output
+    );
+    assert!(
+        out.output.contains("work_pull"),
+        "要给出下一步：{}",
+        out.output
+    );
+    assert_eq!(ws.work_head("w").unwrap(), Some(3), "拒绝不得留下提交");
+
+    // 删除也走自动提交：路径进 deletes，共享区同步删掉。
+    // 用新文件避开上面被拒的本地改动——那条路径的基线仍是旧的，删除一样会被判过期。
+    store.write_under(&sb_dir, "gone.md", b"tmp\n").unwrap();
+    let mut obs = Observations::default();
+    obs.note_written(&sb_dir.join("gone.md"), fnv1a("tmp\n"));
+    let mut out = crate::kernel::api::ToolOutcome {
+        ok: true,
+        output: "已写入".to_string(),
+    };
+    commit_writes(m.tools.as_ref().unwrap(), &mut obs, &mut out);
+    assert_eq!(out.output, "已写入", "新文件的自动提交不该有告警");
+    assert_eq!(ws.work_head("w").unwrap(), Some(4), "新文件应当已发布");
+    let shared = shared_of(&ws, "w");
+    assert!(
+        store.read_under(&shared, "gone.md").unwrap().is_some(),
+        "共享区里必须有刚发布的新文件"
+    );
+
+    store.remove_under(&sb_dir, "gone.md").unwrap();
+    let mut obs = Observations::default();
+    obs.note_removed(&sb_dir.join("gone.md"));
+    let mut out = crate::kernel::api::ToolOutcome {
+        ok: true,
+        output: "已删除".to_string(),
+    };
+    commit_writes(m.tools.as_ref().unwrap(), &mut obs, &mut out);
+    assert_eq!(out.output, "已删除", "删除的自动提交不该有告警");
+    assert_eq!(ws.work_head("w").unwrap(), Some(5), "删除应当已发布");
+    assert!(
+        store.read_under(&shared, "gone.md").unwrap().is_none(),
+        "共享区里的文件必须跟着删掉"
+    );
 }

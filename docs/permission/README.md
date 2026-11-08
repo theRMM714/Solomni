@@ -26,7 +26,7 @@
 - **Reach（能到哪）**
   - private：自己的私有沙箱；
   - shared-read：读共享区主副本；
-  - shared-write：写共享区（只有 work_commit 这条路径使用，外部工具进程永远不直接写主副本）；
+  - shared-write：写共享区（只有 work_commit 与写工具后的自动提交这条路径使用，外部工具进程永远不直接写主副本）；
   - module-read：读成员模块目录；
   - module-write：写模块自己的 userdata（只给模块工具进程）；
   - host-read：用户显式授权的主机只读根；
@@ -51,7 +51,7 @@
 | external | 外部可达（逐次确认） | workspace + host-read + network | allow | allow | allow | ask |
 | all_reach | 全可达（自动放行） | 同 external | allow | allow | allow | allow |
 
-- shared-write 只给 work_commit；它不会把共享区放进任何外部进程的 rw。
+- shared-write 只给 work_commit（含写工具落地后的自动提交）；它不会把共享区放进任何外部进程的 rw。
 - module-write 只给模块工具写自己的 userdata；shell 不声明它，所以全可达也写不进模块 userdata。
 - 私有沙箱不受共享区路径范围约束，但 profile 的 write decision 仍然作用于它（仅可查看档禁写）。
 - 最高档按 reach 命名，不叫「完全权限」；它仍受全局 network / host_read_roots / deny / 围栏强制等级上限。

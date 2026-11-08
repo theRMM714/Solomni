@@ -258,6 +258,10 @@ pub struct MemberTools {
     pub handlers: Vec<Arc<dyn crate::kernel::ports::ToolHandler>>,
     /// 目的：常驻服务的统一管理面——模块的 `services` 操作经它调用（**不持它的端口**，R12）。
     pub residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
+    /// 目的：工作区用例面——写工具落地后按**逐路径基线**自动提交（**不持它的端口**，R12）。
+    /// 约束：None = 这一席没有工作区（核心核实用途、部分测试装配）；有工作区的席位必须给 Some，
+    ///   否则写入只落在沙箱、共享区永远不动（静默漏提交）。
+    pub workspace: Option<Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync>>,
 }
 
 impl MemberTools {

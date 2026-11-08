@@ -555,6 +555,8 @@ impl CollabSession {
                 runtime_roots: Vec::new(),
                 shell_live: None,
                 residents: Arc::new(crate::capabilities::residents::api::NoResidents),
+                // 讨论席也有沙箱与写工具：写后照样自动提交（基线过期时如实拒绝）。
+                workspace: Some(Arc::clone(&self.workspace)),
                 // 讨论席的系统工具面由角色表发放，再按权限档位过滤。
                 allowed,
                 // 讨论席不干活：拿不到自己模块的工具（角色表的 module_tools）。

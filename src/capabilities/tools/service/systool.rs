@@ -58,7 +58,7 @@ pub fn execute(
         };
     }
     if name == DELETE {
-        return delete(sb, io, &args);
+        return delete(sb, io, obs, &args);
     }
     let spec = match args.get("path").and_then(|p| p.as_str()) {
         Some(p) => p.to_string(),
@@ -128,7 +128,12 @@ fn list(io: &dyn SysIo, spec: &str, path: &Path) -> ToolOutcome {
 /// delete：只删**该 agent 自己的沙箱**。默认只删文件；目录必须显式 recursive=true。
 /// 共享区走 work_commit 的 deletes，模块目录（含 userdata）由模块自己的工具维护。
 /// 删除链接只删链接本身，绝不顺着链接去删目标。
-fn delete(sb: &Sandbox, io: &dyn SysIo, args: &serde_json::Value) -> ToolOutcome {
+fn delete(
+    sb: &Sandbox,
+    io: &dyn SysIo,
+    obs: &mut Observations,
+    args: &serde_json::Value,
+) -> ToolOutcome {
     let Some(raw_paths) = args.get("paths").and_then(|v| v.as_array()) else {
         return fail("缺少必填参数 paths（要删除的路径数组）".to_string());
     };
@@ -197,11 +202,17 @@ fn delete(sb: &Sandbox, io: &dyn SysIo, args: &serde_json::Value) -> ToolOutcome
     let mut out = String::from("已删除：");
     for p in plans {
         match io.delete(&p.path, recursive) {
-            Ok(()) => out.push_str(&format!(
-                "\n- {}（{}）",
-                p.spec,
-                if p.is_dir { "目录" } else { "文件/链接" }
-            )),
+            Ok(()) => {
+                // 自动提交要按路径发 deletes；递归删目录暂不逐文件展开（见 plan.md 的 2B′）。
+                if !p.is_dir {
+                    obs.note_removed(&p.path);
+                }
+                out.push_str(&format!(
+                    "\n- {}（{}）",
+                    p.spec,
+                    if p.is_dir { "目录" } else { "文件/链接" }
+                ))
+            }
             Err(e) => {
                 return fail(format!(
                     "删除中断：{} 失败：{}；它前面的已删，后面的未动",

@@ -6,7 +6,7 @@ use super::discussion::*;
 use crate::capabilities::llm::api::ToolInvoke;
 use crate::capabilities::permission::api::{CallScope, Decision, Effect, Reach, ReachSet};
 use crate::capabilities::session::api::{MemberTools, SessionEvent};
-use crate::capabilities::tools::api::ToolSchema;
+use crate::capabilities::tools::api::{Observations, ToolSchema};
 use crate::kernel::api::ToolOutcome;
 /// 执行一次工具调用：内置优先；外部工具按模块走（模块为空时由 dispatch_external 如实报错）。
 /// 账本经**分支副本**回到本成员（见 run_branch）——串行与并发只有这一条执行路径。
@@ -46,16 +46,15 @@ pub(crate) fn run_branch(
         // **按这一回合的工具面校验**：不在面里的调用一律如实拒绝（不静默执行、也不当表态）。
         (String::new(), crate::capabilities::tools::api::refuse(name))
     } else if crate::capabilities::tools::api::is_builtin(name) {
-        (
-            String::new(),
-            ctx.tools.run_builtin(
-                &ctx.sandbox,
-                &ctx.builtin_tools,
-                &mut branch,
-                name,
-                args_json,
-            ),
-        )
+        let mut outcome = ctx.tools.run_builtin(
+            &ctx.sandbox,
+            &ctx.builtin_tools,
+            &mut branch,
+            name,
+            args_json,
+        );
+        commit_writes(ctx, &mut branch, &mut outcome);
+        (String::new(), outcome)
     } else if crate::capabilities::tools::api::is_exec(name) {
         (
             String::new(),
@@ -81,6 +80,65 @@ pub(crate) fn run_branch(
         dispatch_external(ctx, &inv, ask, grant)
     };
     (label, outcome, branch)
+}
+
+/// 目的：写工具落地后**自动提交**——路径取自这次调用真正写过的文件（观察账本的分支副本，见 Observations::take_written）。
+/// 约束：准入在 workspace（逐路径 CAS）；基线过期 = 这次写入只留在沙箱、共享区不动，原因如实写回工具回执，
+///   由模型显式 work_pull 后再写——不降级（不替它合并，也不静默留下"写了但没提交"）。
+pub(crate) fn commit_writes(
+    ctx: &MemberTools,
+    branch: &mut Observations,
+    outcome: &mut ToolOutcome,
+) {
+    let written = branch.take_written();
+    let removed = branch.take_removed();
+    if written.is_empty() && removed.is_empty() {
+        return;
+    }
+    let Some(ws) = ctx.workspace.as_ref() else {
+        return;
+    };
+    let rel = |abs: &std::path::PathBuf| -> Option<String> {
+        abs.strip_prefix(&ctx.sandbox.private)
+            .ok()
+            .map(crate::kernel::api::slash)
+    };
+    let mut paths: Vec<String> = written.iter().filter_map(rel).collect();
+    let mut deletes: Vec<String> = removed.iter().filter_map(rel).collect();
+    paths.sort();
+    paths.dedup();
+    deletes.sort();
+    deletes.dedup();
+    if paths.is_empty() && deletes.is_empty() {
+        return;
+    }
+    let message = if paths.is_empty() {
+        "工具删除"
+    } else {
+        "工具写入"
+    };
+    let req = crate::capabilities::workspace::api::CommitRequest {
+        paths,
+        deletes,
+        message: message.to_string(),
+        time: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0),
+        // 锚 = 这次工具调用所属的那一行：回档才能把这次写入和它的转录证据一起退掉。
+        line: ctx.line.load(std::sync::atomic::Ordering::Relaxed),
+    };
+    if let Err(e) = ws.work_commit_auto(
+        &ctx.sandbox.work_name,
+        &ctx.sandbox.agent,
+        &ctx.sandbox.session,
+        &req,
+    ) {
+        outcome.output.push_str(&format!(
+            "\n\n[自动提交未完成] 这次写入只落在你的沙箱，共享区没有更新：{}",
+            e
+        ));
+    }
 }
 
 /// 这次调用在**本回合的工具面**里吗：内置按角色表发放的 id 清单，外部工具按"这一回合给不给模块工具"

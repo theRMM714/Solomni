@@ -386,6 +386,8 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         runtime_roots: Vec::new(),
         shell_live: None,
         residents: Arc::new(crate::capabilities::residents::api::NoResidents),
+        // 核实工具面只读：没有共享区提交这回事。
+        workspace: None,
         reply_seq: 0,
         line: Default::default(),
         allowed: vec!["read".to_string(), "plan".to_string()],

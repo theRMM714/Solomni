@@ -1773,6 +1773,7 @@ impl Conductor {
                     metas.clone(),
                     delegate,
                     sandboxes.clone(),
+                    Arc::clone(&self.workspace),
                     door,
                 )?;
                 let mut out = Vec::new();

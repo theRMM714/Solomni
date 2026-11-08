@@ -3647,6 +3647,8 @@ pub(crate) fn member_with_service_tools(
         notes: Default::default(),
         handlers: Vec::new(),
         residents,
+        // 工具面用例不接工作区：写工具落地后不自动提交。
+        workspace: None,
     }
 }
 

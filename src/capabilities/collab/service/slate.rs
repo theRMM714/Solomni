@@ -226,6 +226,8 @@ impl CollabSession {
         events: &[serde_json::Value],
         sandboxes: Sandboxes,
         guest_lease: String,
+        // 工作区用例面：写工具落地后自动提交（基线过期时如实拒绝，不降级）。
+        workspace: Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync>,
         // 本会话的裁决队（核心按会话 id 与转录里已发出的卡号给）：重建出来的整队进它。
         door: Arc<DecisionDoor>,
     ) -> Result<CollabSession, String> {
@@ -284,6 +286,7 @@ impl CollabSession {
             spec: meta.exec.clone(),
             guest_lease,
             sandboxes,
+            workspace,
             done: st.ended,
             cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             plan_approved: st.plan_approved,

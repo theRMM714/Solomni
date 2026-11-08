@@ -158,6 +158,8 @@ pub struct CollabSession {
     pub(crate) guest_lease: String,
     /// 本工作的沙箱清单（按 agent 实例名取）。
     pub(crate) sandboxes: Sandboxes,
+    /// 目的：工作区用例面（**不持它的端口**，R12）——写工具落地后按逐路径基线自动提交。
+    pub(crate) workspace: Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync>,
     pub(crate) done: bool,
     /// 「停止」标志：由 ConductorHandle 在派发时把任务登记处的取消标志注入（见 set_cancel）。
     pub(crate) cancel: Arc<std::sync::atomic::AtomicBool>,
@@ -188,6 +190,8 @@ impl CollabSession {
         roster: Vec<AgentMeta>,
         delegated: bool,
         sandboxes: Sandboxes,
+        // 工作区用例面：写工具落地后自动提交（基线过期时如实拒绝，不降级）。
+        workspace: Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync>,
         // 本会话的裁决队（核心按会话 id 给；与工具级确认共用同一条）。
         door: Arc<DecisionDoor>,
     ) -> Result<CollabSession, String> {
@@ -222,6 +226,7 @@ impl CollabSession {
             spec,
             guest_lease,
             sandboxes,
+            workspace,
             done: false,
             cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             plan_approved: false,

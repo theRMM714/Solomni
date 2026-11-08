@@ -143,6 +143,11 @@ pub fn tool_notes(
 #[derive(Debug, Clone, Default)]
 pub struct Observations {
     seen: BTreeMap<PathBuf, Seen>,
+    /// 目的：本次调用里由核心**写过**的路径（自动提交据此知道该发布哪些文件）。
+    /// 约束：只活在一次调用的分支副本里——循环在调用前清空、调用后取走；不参与 absorb。
+    written: std::collections::BTreeSet<PathBuf>,
+    /// 目的：本次调用里由核心**删掉**的路径（自动提交的 `deletes` 由此而来）。
+    removed: std::collections::BTreeSet<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -157,6 +162,23 @@ impl Observations {
     /// 回档（删除模式）时清空：转录里那段读取证据已经不存在了。
     pub fn clear(&mut self) {
         self.seen.clear();
+        self.written.clear();
+        self.removed.clear();
+    }
+
+    /// 目的：取走"这次调用写过哪些路径"（取走即清空，下一次调用从零开始）。
+    pub fn take_written(&mut self) -> Vec<PathBuf> {
+        std::mem::take(&mut self.written).into_iter().collect()
+    }
+
+    /// 目的：取走"这次调用删掉了哪些路径"（取走即清空，下一次调用从零开始）。
+    pub fn take_removed(&mut self) -> Vec<PathBuf> {
+        std::mem::take(&mut self.removed).into_iter().collect()
+    }
+
+    /// 目的：记一次删除——自动提交要把它写成 `deletes`，否则沙箱删了、共享区还留着。
+    pub(crate) fn note_removed(&mut self, path: &Path) {
+        self.removed.insert(path.to_path_buf());
     }
 
     /// 记一次读取：完整读到 = 记指纹（可覆盖）；不完整 = 记下"只读到一部分"的原因。
@@ -174,6 +196,7 @@ impl Observations {
     /// 记一次写入：文件内容由核心产生，所以核心确切知道它现在是什么。
     pub(crate) fn note_written(&mut self, path: &Path, hash: u64) {
         self.seen.insert(path.to_path_buf(), Seen::Known(hash));
+        self.written.insert(path.to_path_buf());
     }
 
     /// 合并一个**并发分支**的账本（分支里只跑声明可并发的只读工具）。

@@ -681,6 +681,8 @@ pub(crate) fn member_with_tools(
         runtime_roots: Vec::new(),
         shell_live: None,
         residents: Arc::new(crate::capabilities::residents::api::NoResidents),
+        // 这些用例只跑工具面：写工具落地后不自动提交（没有工作区）。
+        workspace: None,
         reply_seq: 0,
         line: Default::default(),
         // 测试替身按"执行席"发放全部内置工具（角色表的越权校验另有专门用例）。
@@ -966,6 +968,8 @@ pub(crate) fn native_member(
         runtime_roots: Vec::new(),
         shell_live: None,
         residents: Arc::new(crate::capabilities::residents::api::NoResidents),
+        // 这些用例只跑工具面：写工具落地后不自动提交（没有工作区）。
+        workspace: None,
         reply_seq: 0,
         line: Default::default(),
         // 测试替身按"执行席"发放全部内置工具（角色表的越权校验另有专门用例）。

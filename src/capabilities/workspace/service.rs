@@ -837,8 +837,6 @@ impl WorkspaceService {
     }
 
     /// 目的：这次提交会碰到的**全部**路径（`paths` 里的文件夹展开 + `deletes`）——基线准入的对象。
-    // 接线前（PR2 写后自动提交）bin 目标里有不到使用者，接上即删这行。
-    #[cfg_attr(not(test), allow(dead_code))]
     fn commit_paths(&self, sandbox: &Path, req: &CommitRequest) -> Result<Vec<String>, String> {
         let files: BTreeSet<String> = self.store.list(sandbox)?.into_iter().collect();
         let (mut paths, _missing) = expand_paths(&req.paths, &files);
@@ -1010,7 +1008,7 @@ impl Workspace for WorkspaceService {
         agent: &str,
         session: &str,
         req: &CommitRequest,
-    ) -> Result<CommitReport, CommitRefusal> {
+    ) -> Result<Option<CommitReport>, CommitRefusal> {
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
         let _shared = self.dirs.lock_shared(work).map_err(CommitRefusal::Broken)?;
@@ -1040,12 +1038,16 @@ impl Workspace for WorkspaceService {
                 });
             }
         }
-        let report = self
-            .commit_locked(work, &shared, &store, &sandbox, agent, session, req)
-            .map_err(CommitRefusal::Broken)?;
+        let report = match self.commit_locked(work, &shared, &store, &sandbox, agent, session, req)
+        {
+            Ok(r) => r,
+            // 内容与主线一致（如把同样内容再写一遍）：没有可发布的改动，不算失败。
+            Err(e) if e.starts_with("没有可提交的改动") => return Ok(None),
+            Err(e) => return Err(CommitRefusal::Broken(e)),
+        };
         self.record_committed_bases(&store, agent, &report)
             .map_err(CommitRefusal::Broken)?;
-        Ok(report)
+        Ok(Some(report))
     }
 
     fn work_sync(&self, work: &str, paths: &[String], time: i64) -> Result<SyncReport, String> {

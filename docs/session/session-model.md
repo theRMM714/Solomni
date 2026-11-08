@@ -44,7 +44,7 @@ session/<工作名>/
 - **虚拟机档的挂载布局**：起 guest 时把**会话树根**（`session/<工作名>`，各 agent 私沙与 `.work` 的父目录）与**外部工作区根**（仅外部绑定时）各挂一条稳定挂载，另加模块树根——三根互不包含，guest 内的路径写法由同一座路径桥给出；外部根是 UNC / 网络路径时只有虚拟机档支持（guest 内写成 `/solomni-host/unc/<server>/<share>/…`；本机档因容器围栏拒绝网络工作区）。
 - **环境属于顶层工作**：`exec`（档位 / 虚拟根 / 定版）由人建主会话时决定，整棵子树只读继承；核心代理建子会话时不能自选环境。**同一 agent 全树只有一份名单**：子会话编辑模块 / 模型时写回这份名单，guest 装配按整棵树重新聚合；只改模型 / 权限不重建 guest，改模块 / 环境才重建。
 - 会话权限是**根 ceiling + 子会话逐层 narrowing**：根写 sandbox.ceiling，子写 sandbox.narrowing；子只能换更低档、只能收窄，父编辑只改 ceiling 并与子 narrowing 求交，不覆盖子收窄（`src/capabilities/permission/domain/permission.rs`）。
-- **共享区是版本化工作区**：共享区根（默认 `work/`，或外部工作区）与版本库 `.work/` 都锚在顶层工作上；agent 只写自己的沙箱，`work_pull` / `work_commit` 与主副本同步（文件级三方比较），`work_versions` 看三方，`work_resolve` 显式选边，`work_status` 看状态。
+- **共享区是版本化工作区**：共享区根（默认 `work/`，或外部工作区）与版本库 `.work/` 都锚在顶层工作上；agent 只写自己的沙箱，`work_pull` 拉取；写工具落地后由核心按**逐路径基线快进**自动提交回主副本（基线过期即拒绝、只留在沙箱），显式补提交用 `work_commit`（文件级三方比较）；`work_versions` 看三方，`work_resolve` 显式选边，`work_status` 看状态。
 - 文本、图片、视频与其它二进制都按字节处理（内容流式读写、不整份进上下文；单文件有上限）；`work_versions` 给 hash、大小与扩展名媒体类型提示；文本可人工合并后用 `take=local`，图片 / 视频 / 二进制只能选边，不做自动合并（`src/capabilities/workspace/service.rs`）。
 - **会话权限层**写在 meta.yaml 的 sandbox.ceiling（根）与 sandbox.narrowing（子）：四档 profile + 共享区三态 + 逐工具决定；缺省继承 settings.yaml 的 sandbox.defaults；sandbox.policy.deny 是硬底线，会话只能追加、不能清空。语义见 [docs/permission/README.md](../permission/README.md)。
 - **出站网络是全局开关**（`sandbox.policy.network`）：会话工具、直接模块工具、常驻服务、模块构建共用；虚拟机档决定 guest 网卡；本机档 Windows 授 `internetClient`、macOS 放行 `network-outbound`、Linux `net=false` 用 seccomp 拒绝非本地 socket（`net=true` 不装网络过滤器，不限制入站/绑定）。
@@ -310,7 +310,7 @@ session/<工作名>/
 - 跨会话同步：主会话回档时，**整棵子树**（子会话、孙会话……）按同一个**回合 id** 收窗——每个会话截到"最后一个 `turn ≤ T` 的行"，并写同一个 `mark` id；恢复时按这个 id 在各会话里找到标记并一起截断。
 - 正在跑的会话跳过（它自己的收尾会落盘），但共享区保住它的提交。
 
-- **按行精确物化共享区**：每个提交记录带 `(agent, line)` 锚（用户投喂锚在主会话当时的行号，agent 提交锚在它自己会话的行号）。回档时按"各会话的保留行"逐个提交比对，取最后一个"所有锚都还没越过保留行"的提交点再物化；删除 / 恢复额外丢弃不再可达的提交。行锚由每席的 `MemberTools.line` 随转录推进，经 `ToolCtx` 交给工具执行者（`work_commit`）。
+- **按行精确物化共享区**：每个提交记录带 `(agent, line)` 锚（用户投喂锚在主会话当时的行号，agent 提交锚在它自己会话的行号）。回档时按"各会话的保留行"逐个提交比对，取最后一个"所有锚都还没越过保留行"的提交点再物化；删除 / 恢复额外丢弃不再可达的提交。行锚由每席的 `MemberTools.line` 随转录推进：显式 `work_commit` 经 `ToolCtx` 拿到它，写工具落地后的自动提交直接读同一处。
 
 - 被折叠 / 被截断的行不进发送视图，也不进压缩摘要的输入；`truncate_events` 是"活动窗口"的唯一算术，界面按 `rewind` 事件画折叠分界（见「上下文压缩」）。
 
