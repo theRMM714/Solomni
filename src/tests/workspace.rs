@@ -3188,6 +3188,76 @@ pub(crate) fn work_restore_archive_rewinds_every_sandbox_and_pins_the_line_it_le
     );
 }
 
+/// 目的：删除把主副本与所有沙箱一起回退到同一个提交点，未提交内容进 lost，删除点之后的留档一并作废。
+#[test]
+pub(crate) fn work_delete_rolls_every_sandbox_back_and_prunes_archives() {
+    use crate::capabilities::workspace::ports::WorkStore;
+    let (ws, _dirs, store) = work_ws();
+    let agents = ["a".to_string(), "b".to_string()];
+    ws.prepare("w", &agents).unwrap();
+    let shared = shared_of(&ws, "w");
+    let sa = sandbox_of(&ws, "w", "a");
+    let sb = sandbox_of(&ws, "w", "b");
+    let root = ws.roots("w", &[]).unwrap().store;
+
+    // 第 2 行：a 提交 v1，并在这一点留档。
+    store.write_under(&sa, "note.md", b"v1").unwrap();
+    let mut r = commit_req(&["note.md"], &[], "v1", 1);
+    r.line = 2;
+    let id1 = ws.work_commit("w", "a", "w--a", &r).unwrap().id;
+    let mut keep = std::collections::BTreeMap::new();
+    for name in ["", "a", "b"] {
+        keep.insert(name.to_string(), 2u64);
+    }
+    ws.work_archive("w", &keep, &agents, 1).unwrap();
+
+    // 留档之后继续走：第 6 行提交 v2；两个沙箱各留一份未提交内容。
+    store.write_under(&sa, "note.md", b"v2").unwrap();
+    let mut r2 = commit_req(&["note.md"], &[], "v2", 2);
+    r2.line = 6;
+    let id2 = ws.work_commit("w", "a", "w--a", &r2).unwrap().id;
+    store.write_under(&sa, "note.md", b"a-local").unwrap();
+    store.write_under(&sb, "b-draft.md", b"b-draft").unwrap();
+    assert_eq!(ws.work_head("w").unwrap(), Some(id2));
+
+    let report = ws.work_delete("w", &keep, &agents, &[]).unwrap();
+    assert_eq!(report.point, Some(id1));
+    assert_eq!(report.backed_up.get("a"), Some(&1));
+    assert_eq!(report.backed_up.get("b"), Some(&1));
+    assert_eq!(report.pruned, vec![1]);
+    assert_eq!(ws.work_head("w").unwrap(), Some(id1), "删除点之后提交不留");
+
+    for (name, path) in [("主副本", &shared), ("a", &sa), ("b", &sb)] {
+        assert_eq!(
+            store.read_under(path, "note.md").unwrap().as_deref(),
+            Some(&b"v1"[..]),
+            "{} 要落到删除点",
+            name
+        );
+    }
+    assert!(store.read_under(&sb, "b-draft.md").unwrap().is_none());
+    assert!(
+        ws.work_lost("w", "a", None)
+            .unwrap()
+            .entries
+            .iter()
+            .any(|e| e.path == "delete-1/note.md"),
+        "删除前的沙箱内容要进 lost"
+    );
+    assert!(
+        ws.work_lost("w", "b", None)
+            .unwrap()
+            .entries
+            .iter()
+            .any(|e| e.path == "delete-1/b-draft.md"),
+        "删除前的草稿要进 lost"
+    );
+
+    // 删除点之后的留档级联作废。
+    assert!(store.read_ref(&root, "archive/1").unwrap().is_none());
+    assert!(ws.work_archives("w").unwrap().is_empty());
+}
+
 fn store_of(ws: &WorkFace, work: &str) -> PathBuf {
     ws.roots(work, &[]).unwrap().store
 }

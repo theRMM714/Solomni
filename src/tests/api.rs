@@ -1472,6 +1472,74 @@ fn deleting_the_compaction_line_restores_the_full_send_view() {
     );
 }
 
+/// 目的：删除点之后的留档先报出数量、要一声确认；确认后才真删，且不再拒绝。
+#[test]
+fn delete_past_an_archive_reports_the_casualties_and_needs_a_confirm() {
+    use crate::capabilities::conductor::api::RewindTarget;
+    let mut member = std::collections::BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![
+            "第一句".to_string(),
+            "第二句".to_string(),
+            "第三句".to_string(),
+        ],
+    );
+    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+        super::doubles::core_with_gateway(
+            vec![module_of("a")],
+            super::doubles::ScriptGateway::new(member, vec![]),
+        ),
+    )
+    .expect("起核心线程");
+    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let mut st = ops.registry.settings().expect("读设置");
+    st.compact_at_percent = 0;
+    st.sandbox.policy.windows.write_acl = true;
+    ops.registry.set_settings(st).expect("写设置");
+    let sid = ops
+        .sessions
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话")
+        .0
+        .sid;
+    ops.sessions
+        .say(
+            &sid,
+            "先说一句",
+            crate::capabilities::conductor::api::Output::Final,
+        )
+        .expect("第一轮");
+    ops.sessions
+        .rewind(&sid, RewindTarget::Archive(1))
+        .expect("留档一次");
+    ops.sessions
+        .say(
+            &sid,
+            "留档之后再说",
+            crate::capabilities::conductor::api::Output::Final,
+        )
+        .expect("第二轮");
+
+    let err = ops
+        .sessions
+        .rewind(&sid, RewindTarget::Delete(1))
+        .expect_err("删除点之后的留档要先确认");
+    assert!(err.contains("作废后不可恢复"), "{err}");
+    assert!(err.contains("1 个留档"), "{err}");
+
+    handle
+        .rewind_with_reset(&sid, RewindTarget::Delete(1), true)
+        .expect("确认后删除");
+    ops.sessions
+        .say(
+            &sid,
+            "删完继续",
+            crate::capabilities::conductor::api::Output::Final,
+        )
+        .expect("删除后还能继续");
+}
+
 /// 供应商 usage：会话视图给出精确数字，落盘 usage 事件，刷新/重建仍能读回来。
 #[test]
 fn provider_usage_is_exposed_in_session_view_and_persisted() {

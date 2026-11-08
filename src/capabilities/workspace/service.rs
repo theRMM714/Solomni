@@ -8,11 +8,11 @@
 
 use crate::capabilities::workspace::api::{
     media_hint, AdoptReport, ArchiveReport, Change, ChangeKind, ChangeView, CommitDetail,
-    CommitFileView, CommitReport, CommitRequest, CommitSummary, FileVersion, GcReport, HeldChange,
-    LostEntry, LostReport, PullReport, ReadQuery, ResolveAction, ResolveEntry, ResolveReport,
-    ResolveRequest, ResolveTake, ResolveWarning, ResolveWarningKind, RestoreLostReport,
-    StatusEntry, StatusReport, SyncReport, VersionView, WorkFiles, WorkLog, WorkLogEntry,
-    WorkRoots, WorkUsage, Workspace, MAX_ASSET_BYTES, VERSION_TEXT_LIMIT,
+    CommitFileView, CommitReport, CommitRequest, CommitSummary, DeleteReport, FileVersion,
+    GcReport, HeldChange, LostEntry, LostReport, PullReport, ReadQuery, ResolveAction,
+    ResolveEntry, ResolveReport, ResolveRequest, ResolveTake, ResolveWarning, ResolveWarningKind,
+    RestoreLostReport, StatusEntry, StatusReport, SyncReport, VersionView, WorkFiles, WorkLog,
+    WorkLogEntry, WorkRoots, WorkUsage, Workspace, MAX_ASSET_BYTES, VERSION_TEXT_LIMIT,
 };
 use crate::capabilities::workspace::domain::base::{stale_paths, BaseRef, CommitRefusal};
 use crate::capabilities::workspace::domain::freshness::lines_changed;
@@ -438,7 +438,19 @@ impl WorkspaceService {
             Pending::Restore { target } => {
                 WorkspaceService::materialize(self.store.as_ref(), shared, store, *target)?
             }
-            Pending::Discard { keep } => {
+            Pending::Discard { keep, agents } => {
+                if !agents.is_empty() {
+                    let tree = match keep {
+                        Some(id) => Self::tree_of(self.store.as_ref(), store, *id)?,
+                        None => Tree::new(),
+                    };
+                    let prefix = Self::delete_prefix(*keep);
+                    for agent in agents {
+                        let (_, _, sandbox) = self.agent_roots(work, agent)?;
+                        self.lay_down_tree(store, &sandbox, &tree, agent, Some(&prefix))?;
+                        self.reset_agent_point(store, agent, *keep, &tree)?;
+                    }
+                }
                 WorkspaceService::materialize(self.store.as_ref(), shared, store, *keep)?;
                 self.discard_commits_locked(store, *keep)?;
             }
@@ -938,6 +950,39 @@ impl WorkspaceService {
             }
             None => self.store.remove_ref(store, &format!("agents/{}", agent)),
         }
+    }
+
+    /// 目的：删除硬回退时备份进 lost/ 的目录前缀（按落点区分，便于用户认领）。
+    fn delete_prefix(point: Option<u64>) -> String {
+        match point {
+            Some(id) => format!("delete-{}", id),
+            None => "delete-empty".to_string(),
+        }
+    }
+
+    /// 目的：作废不在 `keep_marks` 里的留档引用，返回作废号。
+    /// 约束：只删引用，不删提交与 lost 备份；调用方已持有版本库锁。
+    fn prune_archives_locked(&self, store: &Path, keep_marks: &[u64]) -> Result<Vec<u64>, String> {
+        let keep: BTreeSet<u64> = keep_marks.iter().copied().collect();
+        let mut pruned = Vec::new();
+        for (name, r) in self.store.list_refs(store)? {
+            if r.kind != RefKind::Archive {
+                continue;
+            }
+            let Some(id) = name
+                .strip_prefix("archive/")
+                .and_then(|s| s.parse::<u64>().ok())
+            else {
+                continue;
+            };
+            if keep.contains(&id) {
+                continue;
+            }
+            self.store.remove_ref(store, &name)?;
+            pruned.push(id);
+        }
+        pruned.sort_unstable();
+        Ok(pruned)
     }
 }
 
@@ -2189,6 +2234,7 @@ impl Workspace for WorkspaceService {
         self.store.head(&store)
     }
 
+    #[cfg(test)]
     fn work_rewind_to(
         &self,
         work: &str,
@@ -2299,6 +2345,88 @@ impl Workspace for WorkspaceService {
         })
     }
 
+    fn work_delete(
+        &self,
+        work: &str,
+        keep_by_agent: &BTreeMap<String, u64>,
+        agents: &[String],
+        keep_marks: &[u64],
+    ) -> Result<DeleteReport, String> {
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let _shared = self.dirs.lock_shared(work)?;
+        let (shared, store) = self.work_roots(work)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)?;
+        let head = self.store.head(&store)?;
+        let target = self.archive_point(&store, head, keep_by_agent)?;
+        let tree = match target {
+            Some(id) => Self::tree_of(self.store.as_ref(), &store, id)?,
+            None => Tree::new(),
+        };
+        let conflicts = self.external_materialize_conflicts(work, &shared, &store, target)?;
+        if !conflicts.is_empty() {
+            return Err(format!(
+                "删除会覆盖工作区里被外部改动的内容：{}——先 work_sync 采纳外部版本；强制覆盖需要用户危险确认。",
+                conflicts.join("、")
+            ));
+        }
+        let mut uniq: BTreeSet<String> = BTreeSet::new();
+        for agent in agents {
+            if !agent.is_empty() {
+                uniq.insert(agent.clone());
+            }
+        }
+        // 先落恢复日志：中途崩了，下一次操作会按同一份名单把沙箱与主副本一起补完。
+        let pending = Pending::Discard {
+            keep: target,
+            agents: uniq.iter().cloned().collect(),
+        };
+        self.store.write_pending(&store, &pending)?;
+        let mut backed_up: BTreeMap<String, usize> = BTreeMap::new();
+        let result = (|| -> Result<(), String> {
+            let prefix = Self::delete_prefix(target);
+            for agent in &uniq {
+                let (_, _, sandbox) = self.agent_roots(work, agent)?;
+                let n = self.lay_down_tree(&store, &sandbox, &tree, agent, Some(&prefix))?;
+                self.reset_agent_point(&store, agent, target, &tree)?;
+                backed_up.insert(agent.clone(), n);
+            }
+            WorkspaceService::materialize(self.store.as_ref(), &shared, &store, target)?;
+            self.discard_commits_locked(&store, target)
+        })();
+        self.settle(work, &shared, &store, result)?;
+        // 提交已丢：不在保留转录里的留档引用一并作废（它们的标记已随转录被截掉）。
+        let pruned = self.prune_archives_locked(&store, keep_marks)?;
+        Ok(DeleteReport {
+            point: target,
+            backed_up,
+            pruned,
+        })
+    }
+
+    fn work_archives(&self, work: &str) -> Result<Vec<u64>, String> {
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let _shared = self.dirs.lock_shared(work)?;
+        let (_shared_root, store) = self.work_roots(work)?;
+        let _lock = self.store.lock(&store)?;
+        let mut out = Vec::new();
+        for (name, r) in self.store.list_refs(&store)? {
+            if r.kind != RefKind::Archive {
+                continue;
+            }
+            if let Some(id) = name
+                .strip_prefix("archive/")
+                .and_then(|s| s.parse::<u64>().ok())
+            {
+                out.push(id);
+            }
+        }
+        out.sort_unstable();
+        Ok(out)
+    }
+
     fn work_restore_archive(&self, work: &str, mark: u64) -> Result<Option<u64>, String> {
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
@@ -2370,6 +2498,7 @@ impl Workspace for WorkspaceService {
         self.settle(work, &shared, &store, result)
     }
 
+    #[cfg(test)]
     fn work_discard_after(&self, work: &str, keep: Option<u64>) -> Result<(), String> {
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
@@ -2390,7 +2519,10 @@ impl Workspace for WorkspaceService {
             ));
         }
         // 先物化到 keep、写 head，再删非祖先提交；崩溃时 head 不会指向被删提交。
-        let pending = Pending::Discard { keep };
+        let pending = Pending::Discard {
+            keep,
+            agents: Vec::new(),
+        };
         self.store.write_pending(&store, &pending)?;
         let result = (|| {
             WorkspaceService::materialize(self.store.as_ref(), &shared, &store, keep)?;

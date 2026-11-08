@@ -156,8 +156,8 @@ impl SessionOps for ConductorHandle {
     fn update_task(&self, sid: &str, text: &str) -> Result<Vec<serde_json::Value>, String> {
         let sid = sid.to_string();
         let text = text.to_string();
-        // 改需求内部也走回档（截掉旧需求之后的派生）；它同样改写盘上转录，
-        // 所以要把最终活动视图（含新需求）作为重置快照推上事件台，刷新/多端才不会把旧派生拼回来。
+        // 改需求改写盘上转录（旧需求行清掉、末尾追加新需求行），
+        // 所以要把最终活动视图作为重置快照推上事件台，刷新/多端才看到同一条需求。
         let outcome = self.call({
             let sid = sid.clone();
             move |core| core.update_task_outcome(&sid, &text)

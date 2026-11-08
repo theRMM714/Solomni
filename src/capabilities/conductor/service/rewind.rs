@@ -108,18 +108,49 @@ impl Conductor {
             }
             RewindTarget::Delete(line) => {
                 let before = crate::capabilities::session::api::align_keep(&raw, line);
-                // before = u64::MAX = 「保留全部」：子会话也要原样保留（不能按 turn 0 截空）。
-                let turn = if before == u64::MAX {
-                    u64::MAX
-                } else {
-                    crate::capabilities::session::api::turn_of_line(&raw, before)
-                };
+                // before = u64::MAX = 「保留全部」：删不到任何东西，转录与文件都不动。
+                if before == u64::MAX {
+                    let (_kids, rewound) = self.cut_children(sid, u64::MAX)?;
+                    let kept = crate::capabilities::session::api::cut_before_line(&raw, before);
+                    let next = crate::capabilities::session::api::next_line_id(&kept);
+                    let active = self.restore_session(sid, &meta, &kept, next)?;
+                    return Ok(RewindOutcome {
+                        main: active,
+                        children: rewound,
+                    });
+                }
+                let kept = crate::capabilities::session::api::cut_before_line(&raw, before);
+                // 删除会截掉转录里的留档标记；版本库里的 refs/archive/* 必须跟着作废，
+                // 否则留下"文件里有档案、转录里找不到"的孤儿。先算清楚并在确认前报数量。
+                let kept_marks: Vec<u64> = crate::capabilities::session::api::rewind_marks(&kept)
+                    .iter()
+                    .map(|m| m.mark)
+                    .collect();
+                let all_marks = self.workspace.work_archives(&work)?;
+                let doomed: Vec<u64> = all_marks
+                    .iter()
+                    .copied()
+                    .filter(|m| !kept_marks.contains(m))
+                    .collect();
+                if !doomed.is_empty() && !force {
+                    let list = doomed
+                        .iter()
+                        .map(|m| format!("#{}", m))
+                        .collect::<Vec<_>>()
+                        .join("、");
+                    return Err(format!(
+                        "删除会连同工作区文件一起回退，并作废 {} 个留档（{}）：它们的标记在这条删除线之后，作废后不可恢复。确认后继续。",
+                        doomed.len(),
+                        list
+                    ));
+                }
+                let turn = crate::capabilities::session::api::turn_of_line(&raw, before);
                 let (kids, rewound) = self.cut_children(sid, turn)?;
                 let keep = Self::keep_by_agent(&meta, before, &kids);
-                // 共享区：物化到删除点，并**真的丢弃**该点之后的提交（删除就是删除）。
-                let point = self.workspace.work_rewind_to(&work, &keep)?;
-                self.workspace.work_discard_after(&work, point)?;
-                let kept = crate::capabilities::session::api::cut_before_line(&raw, before);
+                let agents = self.archive_agents(sid, &meta)?;
+                // 共享区与每个受影响沙箱一起落到删除点；该点之后的提交真的丢掉（删除就是删除）。
+                self.workspace
+                    .work_delete(&work, &keep, &agents, &kept_marks)?;
                 self.history
                     .replace(sid, &kept)
                     .map_err(|e| format!("删除落盘失败：{}", e))?;
@@ -183,9 +214,10 @@ impl Conductor {
         })
     }
 
-    /// 重建并放回会话（回档后状态全部派生）；next = 新行续号（全量最大 id + 1，永不回退）。
-    /// 返回这次重建采用的活动视图（回档重置事件的载荷）。
-    fn restore_session(
+    /// 目的：重建并放回会话（回档后状态全部派生）。
+    /// 参数：next = 新行续号（全量最大 id + 1，永不回退）。
+    /// 返回：这次重建采用的活动视图（回档重置事件的载荷）。
+    pub(crate) fn restore_session(
         &mut self,
         sid: &str,
         meta: &SessionMeta,

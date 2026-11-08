@@ -295,32 +295,6 @@ pub fn line_reply_of(l: &serde_json::Value) -> u64 {
     stored.filter(|r| *r != 0).unwrap_or(own)
 }
 
-/// 找最后一条满足条件的转录行的 id（按**结构化字段**判，不匹配正文）。
-pub fn find_line_id(
-    events: &[serde_json::Value],
-    pick: impl Fn(&crate::capabilities::session::api::LineView) -> bool,
-) -> Option<u64> {
-    let mut found = None;
-    for ev in events {
-        if ev.get("type").and_then(|t| t.as_str()) != Some("transcript") {
-            continue;
-        }
-        let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) else {
-            continue;
-        };
-        for l in lines {
-            if let Ok(v) =
-                serde_json::from_value::<crate::capabilities::session::api::LineView>(l.clone())
-            {
-                if pick(&v) {
-                    found = Some(v.id);
-                }
-            }
-        }
-    }
-    found
-}
-
 /// 转录流水里用过的最大回复 id：重建时据此续号。
 /// 为什么必须续号：回复 id 是分组依据，重复就会把新回复与旧回复并成一组。
 pub fn max_reply(events: &[serde_json::Value]) -> u64 {

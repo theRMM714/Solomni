@@ -5687,7 +5687,7 @@ async function answerCard(card, option, note) {
 }
 
 /* 改需求：**用户自己点的动作**（不是核心推的门）。
-   服务端回到需求行并追加新需求，返回完整重放，前端整体重建。 */
+   服务端清掉旧需求行、在末尾追加新需求（不回档、不动文件），返回完整重放，前端整体重建。 */
 async function updateTaskFlow() {
   const s = activeSession();
   if (!s || isBusy(s) || !s.can_update_task) return;
@@ -5823,7 +5823,7 @@ async function act(action, text) {
 function rewindTo(id) {
   const s = activeSession();
   if (!s || isBusy(s)) return;
-  choiceModal('回档到此处', '留档：保留内容、折叠成标记，可随时恢复，工作区文件（共享区与各 agent 沙箱）也一起记入档案；删除：真的删掉这一行及其后的全部，不可恢复。', [
+  choiceModal('回档到此处', '留档：保留内容、折叠成标记，可随时恢复，工作区文件（共享区与各 agent 沙箱）也一起记入档案；删除：真的删掉这一行及其后的全部，工作区文件一起回到该行（未提交内容进 lost 备份），删除点之后的留档一并作废，不可恢复。', [
     ['留档', 'btn', () => applyRewind(s, { id, mode: 'archive' })],
     ['删除', 'btn btn-danger', () => applyRewind(s, { id, mode: 'delete' })],
     ['取消', 'btn btn-ghost', () => {}],
@@ -5860,6 +5860,18 @@ async function applyRewind(s, body) {
         s.workDirty = true;
         renderAll();
         ui.toast('ok', '已确认覆盖并回档');
+      } catch (e2) { notice('操作失败', e2.message, 'err'); }
+      return;
+    }
+    if (/个留档/.test(err.message) &&
+        await confirmBox('删除会作废留档', err.message + '\n\n确认后会连同共享区与各 agent 沙箱一起回到该行；这些留档作废后不可恢复。', '仍要删除')) {
+      try {
+        const r = await api('POST', actionUrl('rewind'), Object.assign({ session_id: s.sid, force: true }, body));
+        if (typeof r.head === 'number') s.floor = r.head;
+        applySnapshot(s, (r.events || []).concat(r.live || []));
+        s.workDirty = true;
+        renderAll();
+        ui.toast('ok', '已确认删除');
       } catch (e2) { notice('操作失败', e2.message, 'err'); }
       return;
     }

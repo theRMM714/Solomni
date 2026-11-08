@@ -189,9 +189,12 @@ impl ConductorHandle {
         target: RewindTarget,
         force: bool,
     ) -> Result<RewindOutcome, String> {
-        // 留档 / 恢复要动文件与转录：在跑的回合先停稳，否则它收尾时的写会落到已被改写的旧线上。
-        // 删除只截转录、不动文件，保持原有的"在跑的会话跳过"语义。
-        if matches!(target, RewindTarget::Archive(_) | RewindTarget::Restore(_)) {
+        // 三种回档都改写转录，删除还一起回退工作区文件：在跑的回合先停稳，
+        // 否则它收尾时的写会落到已被改写的旧线或刚铺好的树上。
+        if matches!(
+            target,
+            RewindTarget::Archive(_) | RewindTarget::Restore(_) | RewindTarget::Delete(_)
+        ) {
             self.settle_tree(sid)?;
         }
         let outcome = self.call({
@@ -202,7 +205,7 @@ impl ConductorHandle {
         Ok(outcome)
     }
 
-    /// 目的：留档 / 恢复前把整棵子树在跑的回合停下来，并等它们把会话交回核心。
+    /// 目的：留档 / 删除 / 恢复前把整棵子树在跑的回合停下来，并等它们把会话交回核心。
     /// 返回：实际停下的会话 id。
     /// 约束：等待期间**不占核心队列**——收尾要靠核心交回会话；30 秒仍未收尾 = 拒绝，文件与转录都还没动。
     fn settle_tree(&self, root: &str) -> Result<Vec<String>, String> {
