@@ -9,7 +9,8 @@ const BT = String.fromCharCode(96);
 
 function rootRouter(root) {
   const problems = [];
-  const rootDocAllow = ["AGENTS.md"];
+  // plan.md：上下文版本化施工计划，三个 PR 合并后删除（见 plan.md 收尾清单）。
+  const rootDocAllow = ["AGENTS.md", "plan.md"];
   const agentsDoc = path.join(root, "AGENTS.md");
   if (!fs.existsSync(agentsDoc)) return problems;
   const agentsText = fs.readFileSync(agentsDoc, "utf8");

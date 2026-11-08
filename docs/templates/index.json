@@ -55,6 +55,10 @@
   },
   "exceptions": [
     {
+      "path": "plan.md",
+      "reason": "临时施工计划，三个 PR 合并后删除"
+    },
+    {
       "path": "AGENTS.md",
       "reason": "agent 指令文件，允许散文"
     },
