@@ -2589,3 +2589,59 @@ pub(crate) fn sandbox_resolves_guest_written_paths() {
     let why = sb.resolve(&outside).expect_err("越界要拒");
     assert!(why.contains("系统工具允许的根"), "{}", why);
 }
+
+/// 目的：提交按"根 + 增量"落盘，读树仍给出完整结果；work_status 的树由回溯重建。
+/// 约束：只有根提交带整棵树，增量只记 changes。
+#[test]
+pub(crate) fn work_commits_store_roots_and_deltas_but_read_full_tree() {
+    use crate::capabilities::workspace::ports::WorkStore;
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.work_commit_user("w", "a.md", b"1", 1, 0).unwrap();
+    ws.work_commit_user("w", "b.md", b"2", 2, 0).unwrap();
+    ws.work_commit_user("w", "c.md", b"3", 3, 0).unwrap();
+    let sd = ws.roots("w", &[]).unwrap().store;
+
+    let c1 = store.read_commit(&sd, 1).unwrap().unwrap();
+    let c2 = store.read_commit(&sd, 2).unwrap().unwrap();
+    let c3 = store.read_commit(&sd, 3).unwrap().unwrap();
+    assert!(c1.tree.is_some(), "根提交带整棵树");
+    assert!(c2.tree.is_none(), "增量提交不落整棵树");
+    assert!(c3.tree.is_none(), "增量提交不落整棵树");
+    assert_eq!((c1.depth, c2.depth, c3.depth), (0, 1, 2));
+    assert_eq!((c2.base, c3.base), (1, 2));
+
+    // 树由根 + 沿途增量重建：三份文件都在。
+    let st = ws.work_status("w", "a", &[]).unwrap();
+    let mut tree = st.tree.clone();
+    tree.sort();
+    assert_eq!(
+        tree,
+        vec!["a.md".to_string(), "b.md".to_string(), "c.md".to_string()]
+    );
+}
+
+/// 目的：GC 只从引用出发算活集合：有 live 钉子时旧提交保住，引用全删才真正回收。
+/// 约束：留档/回档不删提交，删引用才省空间。
+#[test]
+pub(crate) fn work_gc_reclaims_commits_only_after_refs_drop() {
+    use crate::capabilities::workspace::ports::WorkStore;
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.work_commit_user("w", "a.md", b"1", 1, 0).unwrap();
+    ws.work_commit_user("w", "b.md", b"2", 2, 0).unwrap();
+    let sd = ws.roots("w", &[]).unwrap().store;
+
+    // 回档前把当前线钉成 live/2：旧提交仍可达。
+    ws.work_restore("w", 1).unwrap();
+    assert!(store.read_ref(&sd, "live/2").unwrap().is_some());
+    assert_eq!(ws.work_gc("w", true).unwrap().removed_commits, 0);
+    assert_eq!(store.list_commits(&sd).unwrap(), vec![1, 2]);
+
+    // 删掉 live 与 main 两条引用后，两条提交都不可达，GC 才回收。
+    store.remove_ref(&sd, "live/2").unwrap();
+    store.remove_ref(&sd, "main").unwrap();
+    let rep = ws.work_gc("w", true).unwrap();
+    assert_eq!(rep.removed_commits, 2);
+    assert!(store.list_commits(&sd).unwrap().is_empty());
+}

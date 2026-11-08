@@ -6,7 +6,7 @@
 
 | # | 分支 | 内容 | 状态 |
 | --- | --- | --- | --- |
-| 1 | `task/ws-refs` | 存储层：refs、增量提交、祖先遍历 GC、checkout | 进行中 |
+| 1 | `task/ws-refs` | 存储层：refs、增量提交、祖先遍历 GC | 实现完成，待评审 |
 | 2 | `task/context-freshness` | 写路径提交、读事实、过期判定 | 待开始 |
 | 3 | `task/archive-checkpoint` | 留档全局检查点、恢复剪叉、开关与读数 | 待开始 |
 
@@ -51,12 +51,11 @@
 
 | 文件 | 改动 |
 | --- | --- |
-| `src/capabilities/workspace/domain/workstore.rs` | `Commit.tree` 改 `Option<Tree>`；增 `base`、`source`；新增 `Ref`/`RefKind`；`GcReport` 增提交计数 |
-| `src/capabilities/workspace/ports.rs` | `WorkStore` 增 `read_ref`/`write_ref`/`list_refs`/`remove_ref`/`remove_commit` |
-| `src/capabilities/workspace/detail/fs_workstore.rs` | refs 落 `.work/refs/<name>`（单文件 JSON）；提交落盘支持 `tree: None`；实现新增端口 |
-| `src/capabilities/workspace/service.rs` | `work_commit` 落增量；`work_gc` 重写为两段；新增 `work_checkout`；`recover_locked` 接 `intent` |
-| `src/capabilities/workspace/api.rs` | `Workspace` 增 `work_checkout`、`work_refs` |
-| `src/capabilities/workspace/domain/mod.rs`、`detail/mod.rs` | 导出新类型 |
+| `src/capabilities/workspace/domain/workstore.rs` | `Commit.tree` 改 `Option<Tree>`；增 `base`、`depth`、`source`；新增 `Source`/`Ref`/`RefKind`；`GcReport` 增 `removed_commits` |
+| `src/capabilities/workspace/ports.rs` | `WorkStore` 增 `read_ref`/`write_ref`/`list_refs`/`remove_ref`（`remove_commit` 原本已有） |
+| `src/capabilities/workspace/detail/fs_workstore.rs` | refs 落 `.work/refs/<name>.json`；`head` 走 `refs/main`，旧 `head` 文件读到一次即升级并删除 |
+| `src/capabilities/workspace/service.rs` | 三处提交构造改落增量；`tree_of` 回溯重建；`work_gc` 从 refs 算活集合并删不活提交；回档 / 留档前 `pin_head` 钉 `refs/live/<id>`；丢弃后清悬空引用 |
+| `src/tests/workspace.rs`、`src/tests/detail.rs`、`src/tests/doubles.rs` | 增量树、refs 往返、旧 head 升级、GC 两态；内存替身补 refs 端口 |
 
 ### 2.3 结构
 
@@ -107,24 +106,21 @@ pub struct Ref {
 4. 删不活的对象；保留 `is_content_hash` 之外的临时文件策略不变。
 5. `GcReport` 增 `kept_commits`/`removed_commits`。
 
-**checkout**：目标可以是任意 ref（不要求祖先）。先 `refs/live/<id> = 当前 heads`（零拷贝），再物化目标树，最后移 HEAD。工作树有未提交改动时拒绝；`force` 时先落 `.work/lost/<agent>/<id>/`。
+**旧线保护**：回档 / 留档这类"移 head"的操作，动 head 之前先 `pin_head`——把当前 head 写成 `refs/live/<id>`。没有这一步，新 GC 会把回档离开的提交当垃圾删掉；有钉子则旧线永远可达（零拷贝）。
 
-**intent**：`.work/intent.json` 记 `{op, id, targets, from, to, started}`。`recover_locked` 启动时处理：物化回 `from` 后删除 intent；不允许半状态被读取。
+**本 PR 不做 checkout / intent**：切到非祖先提交要连带"工作树有未提交改动就拒绝、force 先备份 lost"的语义，归 PR3 与留档一起做；本 PR 不引入没有调用方的死代码。
 
 ### 2.5 旧数据
 
-升级后首次打开若发现 `.work` 存在但没有 `refs/`：直接报错"工作区版本库格式已升级，请重建"，并提示 `work_init`（把当前磁盘落成一条根提交）。**不写解析旧格式的代码路径**；共享区与沙箱文件不受影响。
+旧提交本来就带整棵树，而 `tree: Option<Tree>` 对"有 tree"的 JSON 天然解析成 `Some`；`base`/`depth`/`source` 都有默认值。所以旧数据**不需要解析分支**：`head()` 在 `refs/main` 缺失时读旧 `head` 文件，把它写成 `refs/main` 再删旧文件；旧提交因 `depth = 0` 一律当根。原计划的"报错要求重建"作废——那会让用户丢历史，且迁移本身只有几行。
 
 ### 2.6 测试
 
 `src/tests/workspace.rs` 新增：
 
-- 增量提交 100 条后树重建结果等于逐次全量快照；
-- 根间隔触发正确；回溯超限报错；
-- GC 在"有 ref / 删 ref"两种状态下回收对象数符合预期，共享祖先不被误删；
-- checkout 非祖先目标成功，且 `live` 钉住后原 HEAD 仍可达；
-- intent 残留后 `work_recover` 能回到 `from`；
-- 旧 `.work` 报错且不修改任何文件。
+- `work_commits_store_roots_and_deltas_but_read_full_tree`：只有根带整棵树，增量只记 changes；`work_status` 的树仍完整；
+- `work_gc_reclaims_commits_only_after_refs_drop`：有 `live` 钉子时提交全保住；引用全删后才回收；
+- `fs_work_store_round_trips_and_refuses_symlink_escapes` 增补：旧 `head` 一次性升级成 `refs/main`、refs 写 / 列 / 删往返。
 
 ### 2.7 收尾
 

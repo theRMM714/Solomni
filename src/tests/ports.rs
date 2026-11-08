@@ -340,7 +340,10 @@ fn work_store_double_round_trips_files_commits_index_and_objects() {
             kind: ChangeKind::Add,
             hash: "h1".to_string(),
         }],
-        tree,
+        tree: Some(tree),
+        base: 0,
+        depth: 0,
+        source: Default::default(),
         anchor: None,
     };
     s.write_commit(&store, &c).unwrap();

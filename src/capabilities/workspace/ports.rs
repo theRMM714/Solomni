@@ -2,7 +2,7 @@
 
 use crate::capabilities::workspace::domain::asset::FileVersion;
 use crate::capabilities::workspace::domain::workspace::{WorkFiles, WorkRoots, WorkUsage};
-use crate::capabilities::workspace::domain::workstore::{Commit, Index, ObjectInfo, Pending};
+use crate::capabilities::workspace::domain::workstore::{Commit, Index, ObjectInfo, Pending, Ref};
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::path::Path;
@@ -132,4 +132,12 @@ pub trait WorkStore: Send + Sync {
     fn list_objects(&self, store: &Path) -> Result<Vec<ObjectInfo>, String>;
     /// 目的：删一个对象目录里的文件；不存在 = 幂等成功。
     fn remove_object(&self, store: &Path, hash: &str) -> Result<(), String>;
+    /// 目的：读一条命名引用（`main` / `agents/<agent>` / `archive/<id>` / `live/<id>`）；没有 = None。
+    fn read_ref(&self, store: &Path, name: &str) -> Result<Option<Ref>, String>;
+    /// 目的：写一条命名引用（同目录临时文件 + rename）。
+    fn write_ref(&self, store: &Path, name: &str, r: &Ref) -> Result<(), String>;
+    /// 目的：列出全部命名引用；没有 refs 目录 = 空。
+    fn list_refs(&self, store: &Path) -> Result<BTreeMap<String, Ref>, String>;
+    /// 目的：删一条命名引用；不存在 = 幂等成功。
+    fn remove_ref(&self, store: &Path, name: &str) -> Result<(), String>;
 }

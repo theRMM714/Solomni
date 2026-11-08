@@ -301,7 +301,7 @@ pub(crate) struct InMemoryWorkStore {
     files: Mutex<BTreeMap<String, Vec<u8>>>,
     objects: Mutex<BTreeMap<String, Vec<u8>>>,
     commits: Mutex<BTreeMap<String, crate::capabilities::workspace::domain::workstore::Commit>>,
-    heads: Mutex<BTreeMap<String, u64>>,
+    refs: Mutex<BTreeMap<String, crate::capabilities::workspace::domain::workstore::Ref>>,
     index: Mutex<BTreeMap<String, crate::capabilities::workspace::domain::workstore::Index>>,
     pending: Mutex<BTreeMap<String, crate::capabilities::workspace::domain::workstore::Pending>>,
     next_ids: Mutex<BTreeMap<String, u64>>,
@@ -602,15 +602,7 @@ impl WorkStore for InMemoryWorkStore {
     }
 
     fn head(&self, store: &std::path::Path) -> Result<Option<u64>, String> {
-        if let Some(m) = &self.fail {
-            return Err(m.clone());
-        }
-        Ok(self
-            .heads
-            .lock()
-            .expect("锁")
-            .get(&store.to_string_lossy().to_string())
-            .copied())
+        Ok(self.read_ref(store, "main")?.and_then(|r| r.target))
     }
 
     fn set_head(&self, store: &std::path::Path, id: u64) -> Result<(), String> {
@@ -618,21 +610,78 @@ impl WorkStore for InMemoryWorkStore {
             return Err(m.clone());
         }
         self.enter("set_head")?;
-        self.heads
-            .lock()
-            .expect("锁")
-            .insert(store.to_string_lossy().to_string(), id);
-        Ok(())
+        let mut r = self.read_ref(store, "main")?.unwrap_or(
+            crate::capabilities::workspace::domain::workstore::Ref {
+                kind: crate::capabilities::workspace::domain::workstore::RefKind::Main,
+                target: None,
+                heads: BTreeMap::new(),
+            },
+        );
+        r.target = Some(id);
+        self.write_ref(store, "main", &r)
     }
 
     fn clear_head(&self, store: &std::path::Path) -> Result<(), String> {
+        self.remove_ref(store, "main")
+    }
+
+    fn read_ref(
+        &self,
+        store: &std::path::Path,
+        name: &str,
+    ) -> Result<Option<crate::capabilities::workspace::domain::workstore::Ref>, String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
-        self.heads
+        Ok(self
+            .refs
             .lock()
             .expect("锁")
-            .remove(&store.to_string_lossy().to_string());
+            .get(&ws_key(store, name))
+            .cloned())
+    }
+
+    fn write_ref(
+        &self,
+        store: &std::path::Path,
+        name: &str,
+        r: &crate::capabilities::workspace::domain::workstore::Ref,
+    ) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.enter("write_ref")?;
+        self.refs
+            .lock()
+            .expect("锁")
+            .insert(ws_key(store, name), r.clone());
+        Ok(())
+    }
+
+    fn list_refs(
+        &self,
+        store: &std::path::Path,
+    ) -> Result<BTreeMap<String, crate::capabilities::workspace::domain::workstore::Ref>, String>
+    {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        let prefix = format!("{}|", store.to_string_lossy());
+        let refs = self.refs.lock().expect("锁");
+        let mut out = BTreeMap::new();
+        for (k, v) in refs.iter() {
+            if let Some(name) = k.strip_prefix(&prefix) {
+                out.insert(name.to_string(), v.clone());
+            }
+        }
+        Ok(out)
+    }
+
+    fn remove_ref(&self, store: &std::path::Path, name: &str) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.refs.lock().expect("锁").remove(&ws_key(store, name));
         Ok(())
     }
 

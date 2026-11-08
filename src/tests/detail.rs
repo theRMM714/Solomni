@@ -148,7 +148,9 @@ fn fs_workspace_reports_usage_by_area() {
 #[test]
 fn fs_work_store_round_trips_and_refuses_symlink_escapes() {
     use crate::capabilities::workspace::detail::fs_workstore::FsWorkStore;
-    use crate::capabilities::workspace::domain::workstore::{Change, ChangeKind, Commit, Index};
+    use crate::capabilities::workspace::domain::workstore::{
+        Change, ChangeKind, Commit, Index, Ref, RefKind,
+    };
     use crate::capabilities::workspace::ports::WorkStore;
 
     let root = scratch("fs-workstore");
@@ -161,6 +163,28 @@ fn fs_work_store_round_trips_and_refuses_symlink_escapes() {
 
     // 空仓库不是错误。
     assert_eq!(s.head(&store).unwrap(), None);
+    // 旧布局：只有 head 文件时读到一次就升级成 refs/main，旧文件随之删除。
+    std::fs::create_dir_all(&store).expect("建版本库");
+    std::fs::write(store.join("head"), b"7").expect("写旧 head");
+    assert_eq!(s.head(&store).unwrap(), Some(7));
+    assert!(!store.join("head").exists(), "升级后旧 head 文件要删掉");
+    assert_eq!(s.read_ref(&store, "main").unwrap().unwrap().target, Some(7));
+    s.clear_head(&store).unwrap();
+    assert!(s.read_ref(&store, "main").unwrap().is_none());
+    // 命名引用：写 / 列 / 删都能跨调用往返。
+    s.write_ref(
+        &store,
+        "archive/3",
+        &Ref {
+            kind: RefKind::Archive,
+            target: Some(7),
+            heads: Default::default(),
+        },
+    )
+    .unwrap();
+    assert!(s.list_refs(&store).unwrap().contains_key("archive/3"));
+    s.remove_ref(&store, "archive/3").unwrap();
+    assert!(s.read_ref(&store, "archive/3").unwrap().is_none());
     assert!(s.list(&shared).unwrap().is_empty());
     assert!(s.read_index(&store, "a").unwrap().is_empty());
     assert!(s.read_commit(&store, 1).unwrap().is_none());
@@ -191,7 +215,10 @@ fn fs_work_store_round_trips_and_refuses_symlink_escapes() {
             kind: ChangeKind::Add,
             hash: "h1".to_string(),
         }],
-        tree,
+        tree: Some(tree),
+        base: 0,
+        depth: 0,
+        source: Default::default(),
         anchor: None,
     };
     s.write_commit(&store, &c).unwrap();
