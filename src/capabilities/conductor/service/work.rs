@@ -815,6 +815,7 @@ impl Conductor {
             "net": self.network_allowed(),
             "pins": meta.exec.pins,
             "thinking": meta.thinking,
+            "context_freshness": meta.context_freshness,
             "permission": serde_json::to_value(&meta.sandbox).unwrap_or(serde_json::Value::Null),
             "permission_effective": self.permissions_for(meta).ok().map(|p| serde_json::json!({
                 "profile": p.profile,
@@ -1040,6 +1041,29 @@ impl Conductor {
         Ok(())
     }
 
+    /// 目的：切换这条工作的**过期内容替换**开关：写在工作根 meta 上，整棵子树共享。
+    /// 约束：整棵 work tree 有会话在生成时拒绝（发送视图在回合内不换）；切换后丢掉内存里的会话，
+    ///   下一次访问按新开关从转录重建（开关是落盘事实，回放与实时必须同一条请求）。
+    pub(crate) fn set_context_freshness(&mut self, sid: &str, on: bool) -> Result<(), String> {
+        let root = self.work_root(sid)?;
+        for s in self.subtree_of(&root) {
+            if self.running.contains(&s) {
+                return Err(Self::running_refusal(&s));
+            }
+        }
+        let mut meta = self.history.meta(&root)?;
+        if meta.context_freshness == on {
+            return Ok(());
+        }
+        meta.context_freshness = on;
+        self.history.save_meta(&meta)?;
+        self.record_config(&root, &meta);
+        for s in self.subtree_of(&root) {
+            self.sessions.remove(&s);
+        }
+        Ok(())
+    }
+
     /// 目的：本机实际要用的 QEMU 可执行文件：设置里登记了就用它，没登记就采用依赖补齐装进项目内的那一个。
     /// 约束：**每次判据取用时现算**（不是启动时定一次）——补齐作业装完即生效，不需要重启进程；
     ///   显式登记永远优先，这里不改用户的 `settings.yaml`。
@@ -1243,6 +1267,15 @@ impl Conductor {
                         Err(_) => (String::new(), String::new(), false, None),
                     };
                 let shell = self.shell_view(&sid);
+                // 过期内容替换是**工作根**的会话级事实：子会话与工作根共享同一个开关。
+                let context_freshness = match self.work_root(&sid) {
+                    Ok(root) => self
+                        .history
+                        .meta(&root)
+                        .map(|m| m.context_freshness)
+                        .unwrap_or(false),
+                    Err(_) => false,
+                };
                 let thinking = match self.work_root(&sid) {
                     Ok(root) => thinking_cache
                         .entry(root.clone())
@@ -1267,6 +1300,7 @@ impl Conductor {
                     permission_profile,
                     permission_label,
                     thinking,
+                    context_freshness,
                     permission_narrowed,
                     permission_parent,
                     can_update_task,

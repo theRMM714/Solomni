@@ -87,13 +87,13 @@
 - [x] 2B 接线：`MemberTools.workspace`（`CollabSession` 注入，生产必为 `Some`）、`tool_loop::commit_writes` 在写工具落地后按 `Observations.take_written()` 自动提交（锚 = 工具调用行）、`work_commit_auto` 返回 `Option`（无改动不算失败）、六处临时 `allow(dead_code)` 已删；提示词与 `docs/session/session-model.md`、`docs/permission/README.md`、`systools/tools.yaml` 同步为"自动提交 + 基线过期只留在沙箱"；
 - [ ] 2B′ 回合末全量扫沙箱（shell / 模块 / 外部写的文件）落 `source=external` 提交；
 - [x] 2C `ReadFact` 与 `freshness`：`domain/readfact.rs`（事实随工具行落盘，`ToolCallView.read`）、`domain/freshness.rs`（按内容找连续行窗口）、`work_stale_reads`（指纹相同即新鲜，不同才比行区间；对象缺失按过期）；整份读到的 `read` 才留事实；
-- [ ] 2E 用户开关：`set_context_freshness` 动作（写工作根 meta、整棵子树共享、生成中拒绝）+ 状态栏入口；在它接上之前，开关只能手改 meta 文件，对用户等于不可达
+- [x] 2E 用户开关：`set_context_freshness` 动作（写工作根 meta、整棵子树共享、生成中拒绝）+ 状态栏「工具」菜单勾选项；切换后子树从内存丢掉、按新开关重建；API 契约测试 `set_context_freshness_action_flips_the_work_switch_and_reports_it`
 - [x] 2D 发送视图占位符与 `meta.context_freshness`：事实落转录、读台账按正文匹配（压缩移位不失配）、`freshness_view` 纯函数派生、单/代理会话装配与重建都装回开关与台账、开关默认关（成本由用户按钮控制）；`docs/session/session-model.md` 的「过期读取的占位符」为口径。
 
 ### 2.6 收尾
 
 - [ ] PR 合并后删除本章
-- [ ] 更新 `docs/session/` 的发送视图说明
+- [x] 更新 `docs/session/` 的发送视图说明（压缩与过期占位符同属"改发送视图、不动转录"）
 
 ## 3. PR3 留档检查点与恢复
 

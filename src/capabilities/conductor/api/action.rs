@@ -607,6 +607,12 @@ impl ConductorHandle {
                 self.call(move |core| core.set_thinking(&sid, &level))?;
                 Ok(Acted::Done(serde_json::json!({ "ok": true })))
             }
+            "set_context_freshness" => {
+                let sid = s("session_id");
+                let on = args.get("on").and_then(|v| v.as_bool()).unwrap_or(false);
+                self.call(move |core| core.set_context_freshness(&sid, on))?;
+                Ok(Acted::Done(serde_json::json!({ "ok": true })))
+            }
             "edit_session" => {
                 // 动作信封的 session_id 不属于编辑体：先摘掉再按严格 DTO 反序列化。
                 let mut body = args.clone();

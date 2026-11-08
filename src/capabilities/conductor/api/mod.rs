@@ -812,6 +812,9 @@ pub struct SessionView {
     pub permission_label: String,
     /// 目的：思考强度（工作根会话级）：状态栏 chip 的文字与菜单都用它。
     pub thinking: ThinkingView,
+    /// 目的：过期内容替换开关（工作根会话级）：状态栏「工具」菜单据此画勾。
+    /// 约束：总是出现（false = 关）；子会话沿工作根共享同一个值。
+    pub context_freshness: bool,
     /// 目的：这条会话是不是带收窄层（子会话）。
     pub permission_narrowed: bool,
     /// 目的：子会话的父档位（根为空）；权限快速切换据此禁用更高档。
