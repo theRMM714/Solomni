@@ -8,13 +8,26 @@
 
 use super::*;
 use crate::capabilities::conductor::api::RewindOutcome;
-use crate::capabilities::session::api::RewindMode;
 
 /// 目的：子会话回档结果——`agent 名 → 该会话的保留行` + `子会话 → 回档后的活动视图`。
 pub(crate) type RewindChildren = (
     std::collections::BTreeMap<String, u64>,
     Vec<(String, Vec<serde_json::Value>)>,
 );
+
+/// 目的：子会话折叠计划——各 agent 的保留行 + 每个子会话的 `(子会话, 保留行, 新行起点)`。
+pub(crate) type ChildFolds = (
+    std::collections::BTreeMap<String, u64>,
+    Vec<(String, u64, u64)>,
+);
+
+/// 目的：一次留档的公共标记内容（主会话与各子会话共用同一个 mark、指针与标签）。
+struct ArchiveStamp {
+    mark: u64,
+    shared: Option<u64>,
+    heads: std::collections::BTreeMap<String, Option<u64>>,
+    label: String,
+}
 
 impl Conductor {
     /// 目的：回档——**留档**（标记 + 折叠，可恢复）、**删除**（真的截断）或**恢复**（在该标记处截断）。
@@ -64,26 +77,30 @@ impl Conductor {
                 let from = next_line;
                 let mark = Self::next_mark_id(&raw);
                 let turn = crate::capabilities::session::api::turn_of_line(&raw, before);
-                // 先记下留档前的共享区头，再算各会话保留行（子会话的收窗会落盘）。
-                let after = self.workspace.work_head(&work)?;
-                let (kids, rewound) =
-                    self.rewind_children(sid, turn, mark, RewindMode::Archive, after)?;
+                let label = crate::capabilities::session::api::archive_label(&raw, before, from);
+                // 先算各子会话的折叠点（不落盘），再算共享区点：两者都成功才动文件。
+                let (kids, folds) = self.archive_children_plan(sid, turn)?;
                 let keep = Self::keep_by_agent(&meta, before, &kids);
-                let commit = self.workspace.work_rewind_to(&work, &keep)?;
-                self.history
-                    .append(
-                        sid,
-                        &[serde_json::json!({
-                            "type": "rewind",
-                            "mark": mark,
-                            "mode": "archive",
-                            "before": before,
-                            "from": from,
-                            "commit": commit,
-                            "after": after
-                        })],
-                    )
-                    .map_err(|e| format!("留档落盘失败：{}", e))?;
+                let agents = self.archive_agents(sid, &meta)?;
+                let report = self.workspace.work_archive(&work, &keep, &agents, mark)?;
+                let heads: std::collections::BTreeMap<String, Option<u64>> =
+                    agents.iter().map(|a| (a.clone(), report.shared)).collect();
+                let stamp = ArchiveStamp {
+                    mark,
+                    shared: report.shared,
+                    heads,
+                    label,
+                };
+                // 文件已就位，最后写转录标记（顺序反了会出现"标记说已留档、文件还在新枝"）。
+                self.write_archive_mark(sid, &stamp, before, from)?;
+                let mut rewound = Vec::new();
+                for (kid, kid_before, kid_from) in folds {
+                    self.write_archive_mark(&kid, &stamp, kid_before, kid_from)?;
+                    let (kmeta, kraw) = self.history.load(&kid)?;
+                    let next = crate::capabilities::session::api::next_line_id(&kraw);
+                    let active = self.restore_session(&kid, &kmeta, &kraw, next)?;
+                    rewound.push((kid, active));
+                }
                 let (_, raw_after) = self.history.load(sid)?;
                 let next = crate::capabilities::session::api::next_line_id(&raw_after);
                 let active = self.restore_session(sid, &meta, &raw_after, next)?;
@@ -91,19 +108,49 @@ impl Conductor {
             }
             RewindTarget::Delete(line) => {
                 let before = crate::capabilities::session::api::align_keep(&raw, line);
-                // before = u64::MAX = 「保留全部」：子会话也要原样保留（不能按 turn 0 截空）。
-                let turn = if before == u64::MAX {
-                    u64::MAX
-                } else {
-                    crate::capabilities::session::api::turn_of_line(&raw, before)
-                };
-                let (kids, rewound) =
-                    self.rewind_children(sid, turn, 0, RewindMode::Delete, None)?;
-                let keep = Self::keep_by_agent(&meta, before, &kids);
-                // 共享区：物化到删除点，并**真的丢弃**该点之后的提交（删除就是删除）。
-                let point = self.workspace.work_rewind_to(&work, &keep)?;
-                self.workspace.work_discard_after(&work, point)?;
+                // before = u64::MAX = 「保留全部」：删不到任何东西，转录与文件都不动。
+                if before == u64::MAX {
+                    let (_kids, rewound) = self.cut_children(sid, u64::MAX)?;
+                    let kept = crate::capabilities::session::api::cut_before_line(&raw, before);
+                    let next = crate::capabilities::session::api::next_line_id(&kept);
+                    let active = self.restore_session(sid, &meta, &kept, next)?;
+                    return Ok(RewindOutcome {
+                        main: active,
+                        children: rewound,
+                    });
+                }
                 let kept = crate::capabilities::session::api::cut_before_line(&raw, before);
+                // 删除会截掉转录里的留档标记；版本库里的 refs/archive/* 必须跟着作废，
+                // 否则留下"文件里有档案、转录里找不到"的孤儿。先算清楚并在确认前报数量。
+                let kept_marks: Vec<u64> = crate::capabilities::session::api::rewind_marks(&kept)
+                    .iter()
+                    .map(|m| m.mark)
+                    .collect();
+                let all_marks = self.workspace.work_archives(&work)?;
+                let doomed: Vec<u64> = all_marks
+                    .iter()
+                    .copied()
+                    .filter(|m| !kept_marks.contains(m))
+                    .collect();
+                if !doomed.is_empty() && !force {
+                    let list = doomed
+                        .iter()
+                        .map(|m| format!("#{}", m))
+                        .collect::<Vec<_>>()
+                        .join("、");
+                    return Err(format!(
+                        "删除会连同工作区文件一起回退，并作废 {} 个留档（{}）：它们的标记在这条删除线之后，作废后不可恢复。确认后继续。",
+                        doomed.len(),
+                        list
+                    ));
+                }
+                let turn = crate::capabilities::session::api::turn_of_line(&raw, before);
+                let (kids, rewound) = self.cut_children(sid, turn)?;
+                let keep = Self::keep_by_agent(&meta, before, &kids);
+                let agents = self.archive_agents(sid, &meta)?;
+                // 共享区与每个受影响沙箱一起落到删除点；该点之后的提交真的丢掉（删除就是删除）。
+                self.workspace
+                    .work_delete(&work, &keep, &agents, &kept_marks)?;
                 self.history
                     .replace(sid, &kept)
                     .map_err(|e| format!("删除落盘失败：{}", e))?;
@@ -138,17 +185,13 @@ impl Conductor {
                             && ev.get("mark").and_then(|m| m.as_u64()) == Some(mark)
                     })
                     .ok_or_else(|| format!("没有回档标记 {}（可能已被恢复）", mark))?;
-                let recorded = crate::capabilities::session::api::RewindMark::from_value(&raw[idx]);
-                let after = recorded.as_ref().and_then(|m| m.after);
+                // 先恢复文件（失败则转录原封不动），再展开转录；提交一条不删。
+                self.workspace.work_restore_archive(&work, mark)?;
                 let kept: Vec<serde_json::Value> = raw[..idx].to_vec();
                 self.history
                     .replace(sid, &kept)
                     .map_err(|e| format!("恢复落盘失败：{}", e))?;
-                let (_kids, rewound) =
-                    self.rewind_children(sid, 0, mark, RewindMode::Restore, None)?;
-                // 共享区回到留档前那一刻，并丢弃留档之后的所有提交。
-                self.workspace.work_restore_point(&work, after)?;
-                self.workspace.work_discard_after(&work, after)?;
+                let (_kids, rewound) = self.unfold_children(sid, mark)?;
                 let next = crate::capabilities::session::api::next_line_id(&kept);
                 let active = self.restore_session(sid, &meta, &kept, next)?;
                 (active, rewound)
@@ -171,9 +214,10 @@ impl Conductor {
         })
     }
 
-    /// 重建并放回会话（回档后状态全部派生）；next = 新行续号（全量最大 id + 1，永不回退）。
-    /// 返回这次重建采用的活动视图（回档重置事件的载荷）。
-    fn restore_session(
+    /// 目的：重建并放回会话（回档后状态全部派生）。
+    /// 参数：next = 新行续号（全量最大 id + 1，永不回退）。
+    /// 返回：这次重建采用的活动视图（回档重置事件的载荷）。
+    pub(crate) fn restore_session(
         &mut self,
         sid: &str,
         meta: &SessionMeta,
@@ -220,17 +264,77 @@ impl Conductor {
         keep
     }
 
-    /// 目的：把整棵子树的会话同步到同一个回档点。
-    /// 返回：`agent 名 → 该会话的保留行`（供共享区对齐）+ `子会话 → 回档后的活动视图`（供事件台推重置快照）。
-    /// 约束：留档按回合边界收窗并写同一个 mark id；删除按回合边界真的截断；恢复删该 mark 记录及其后。
-    pub(crate) fn rewind_children(
+    /// 目的：留档前先算各子会话的折叠点，不落盘、不动文件。
+    /// 返回：`agent 名 → 保留行`（供共享区对齐）+ `(子会话, 保留行, 新行起点)`。
+    /// 约束：在跑的会话给 `u64::MAX`（共享区保住它的提交）；它的折叠由收尾路径自己落盘。
+    fn archive_children_plan(&mut self, sid: &str, keep_turn: u64) -> Result<ChildFolds, String> {
+        let kids: Vec<String> = self.subtree_of(sid).into_iter().skip(1).collect();
+        let mut keeps = std::collections::BTreeMap::new();
+        let mut folds = Vec::new();
+        for kid in kids {
+            let (meta, raw) = self.history.load(&kid)?;
+            let agent = meta
+                .agents
+                .first()
+                .map(|a| a.name.clone())
+                .unwrap_or_default();
+            if self.running.contains(&kid) {
+                if !agent.is_empty() {
+                    keeps.insert(agent, u64::MAX);
+                }
+                continue;
+            }
+            let active = crate::capabilities::session::api::truncate_events(&raw);
+            let before = crate::capabilities::session::api::last_line_within(&active, keep_turn);
+            let from = crate::capabilities::session::api::next_line_id(&raw);
+            if !agent.is_empty() {
+                keeps.insert(agent, before);
+            }
+            folds.push((kid, before, from));
+        }
+        Ok((keeps, folds))
+    }
+
+    /// 目的：这次留档要一起回滚的 agent 名单（主/子会话名单的并集）。
+    fn archive_agents(&mut self, sid: &str, meta: &SessionMeta) -> Result<Vec<String>, String> {
+        let mut out: std::collections::BTreeSet<String> =
+            meta.agents.iter().map(|a| a.name.clone()).collect();
+        for kid in self.subtree_of(sid).into_iter().skip(1) {
+            let (km, _) = self.history.load(&kid)?;
+            if let Some(a) = km.agents.first() {
+                out.insert(a.name.clone());
+            }
+        }
+        Ok(out.into_iter().collect())
+    }
+
+    /// 目的：把一条留档标记追加到某个会话的流水里（主/子用同一个 mark 与同一份指针）。
+    fn write_archive_mark(
         &mut self,
         sid: &str,
-        keep_turn: u64,
-        mark: u64,
-        mode: RewindMode,
-        after: Option<u64>,
-    ) -> Result<RewindChildren, String> {
+        stamp: &ArchiveStamp,
+        before: u64,
+        from: u64,
+    ) -> Result<(), String> {
+        self.history
+            .append(
+                sid,
+                &[serde_json::json!({
+                    "type": "rewind",
+                    "mark": stamp.mark,
+                    "mode": "archive",
+                    "before": before,
+                    "from": from,
+                    "shared": stamp.shared,
+                    "heads": stamp.heads,
+                    "label": stamp.label
+                })],
+            )
+            .map_err(|e| format!("会话 {} 留档落盘失败：{}", sid, e))
+    }
+
+    /// 目的：按回合边界截断整棵子树的会话（删除模式），返回共享区对齐用的保留行。
+    fn cut_children(&mut self, sid: &str, keep_turn: u64) -> Result<RewindChildren, String> {
         let kids: Vec<String> = self.subtree_of(sid).into_iter().skip(1).collect();
         let mut keeps = std::collections::BTreeMap::new();
         let mut rewound: Vec<(String, Vec<serde_json::Value>)> = Vec::new();
@@ -242,72 +346,51 @@ impl Conductor {
                 .map(|a| a.name.clone())
                 .unwrap_or_default();
             if self.running.contains(&kid) {
-                // 正在跑的会话跳过（它自己的收尾会落盘）；共享区要保住它的提交。
                 if !agent.is_empty() {
                     keeps.insert(agent, u64::MAX);
                 }
                 continue;
             }
-            match mode {
-                RewindMode::Archive => {
-                    let active = crate::capabilities::session::api::truncate_events(&raw);
-                    let before =
-                        crate::capabilities::session::api::last_line_within(&active, keep_turn);
-                    let from = crate::capabilities::session::api::next_line_id(&raw);
-                    self.history
-                        .append(
-                            &kid,
-                            &[serde_json::json!({
-                                "type": "rewind",
-                                "mark": mark,
-                                "mode": "archive",
-                                "before": before,
-                                "from": from,
-                                "after": after
-                            })],
-                        )
-                        .map_err(|e| format!("子会话 {} 留档落盘失败：{}", kid, e))?;
-                    let (_, raw_after) = self.history.load(&kid)?;
-                    let next = crate::capabilities::session::api::next_line_id(&raw_after);
-                    let active = self.restore_session(&kid, &meta, &raw_after, next)?;
-                    rewound.push((kid.clone(), active));
-                    if !agent.is_empty() {
-                        keeps.insert(agent, before);
-                    }
-                }
-                RewindMode::Delete => {
-                    let active = crate::capabilities::session::api::truncate_events(&raw);
-                    let before =
-                        crate::capabilities::session::api::last_line_within(&active, keep_turn);
-                    let kept = crate::capabilities::session::api::cut_before_line(&raw, before);
-                    self.history
-                        .replace(&kid, &kept)
-                        .map_err(|e| format!("子会话 {} 删除落盘失败：{}", kid, e))?;
-                    let next = crate::capabilities::session::api::next_line_id(&kept);
-                    let active = self.restore_session(&kid, &meta, &kept, next)?;
-                    rewound.push((kid.clone(), active));
-                    if !agent.is_empty() {
-                        keeps.insert(agent, before);
-                    }
-                }
-                RewindMode::Restore => {
-                    let Some(idx) = raw.iter().position(|ev| {
-                        ev.get("type").and_then(|t| t.as_str()) == Some("rewind")
-                            && ev.get("mark").and_then(|m| m.as_u64()) == Some(mark)
-                    }) else {
-                        continue;
-                    };
-                    let kept: Vec<serde_json::Value> = raw[..idx].to_vec();
-                    self.history
-                        .replace(&kid, &kept)
-                        .map_err(|e| format!("子会话 {} 恢复落盘失败：{}", kid, e))?;
-                    let next = crate::capabilities::session::api::next_line_id(&kept);
-                    let active = self.restore_session(&kid, &meta, &kept, next)?;
-                    rewound.push((kid.clone(), active));
-                }
+            let active = crate::capabilities::session::api::truncate_events(&raw);
+            let before = crate::capabilities::session::api::last_line_within(&active, keep_turn);
+            let kept = crate::capabilities::session::api::cut_before_line(&raw, before);
+            self.history
+                .replace(&kid, &kept)
+                .map_err(|e| format!("子会话 {} 删除落盘失败：{}", kid, e))?;
+            let next = crate::capabilities::session::api::next_line_id(&kept);
+            let active = self.restore_session(&kid, &meta, &kept, next)?;
+            rewound.push((kid.clone(), active));
+            if !agent.is_empty() {
+                keeps.insert(agent, before);
             }
         }
         Ok((keeps, rewound))
+    }
+
+    /// 目的：在同一个 mark 处展开整棵子树的转录（恢复模式）。
+    fn unfold_children(&mut self, sid: &str, mark: u64) -> Result<RewindChildren, String> {
+        let kids: Vec<String> = self.subtree_of(sid).into_iter().skip(1).collect();
+        let mut rewound: Vec<(String, Vec<serde_json::Value>)> = Vec::new();
+        for kid in kids {
+            let (meta, raw) = self.history.load(&kid)?;
+            if self.running.contains(&kid) {
+                continue;
+            }
+            let Some(idx) = raw.iter().position(|ev| {
+                ev.get("type").and_then(|t| t.as_str()) == Some("rewind")
+                    && ev.get("mark").and_then(|m| m.as_u64()) == Some(mark)
+            }) else {
+                continue;
+            };
+            let kept: Vec<serde_json::Value> = raw[..idx].to_vec();
+            self.history
+                .replace(&kid, &kept)
+                .map_err(|e| format!("子会话 {} 恢复落盘失败：{}", kid, e))?;
+            let next = crate::capabilities::session::api::next_line_id(&kept);
+            let active = self.restore_session(&kid, &meta, &kept, next)?;
+            rewound.push((kid.clone(), active));
+        }
+        Ok((std::collections::BTreeMap::new(), rewound))
     }
 
     /// 按会话元信息 + 转录事件重建会话对象（通道是机制，按记录的选择重新装配）。

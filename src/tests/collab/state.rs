@@ -82,25 +82,25 @@ pub(crate) fn collab_rewind_rebuilds_from_transcript_and_resume_waits_at_gate() 
 }
 
 #[test]
-pub(crate) fn collab_update_task_rewinds_and_latest_wins() {
+pub(crate) fn collab_update_task_rewrites_the_requirement_without_rewinding() {
     let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]));
     let sid = core
         .create_work(collab_work("c", &["a"], false, "旧需求"))
         .unwrap()
         .sid;
     let replayed = core.update_task(&sid, "新需求").unwrap();
+    // 只改需求提示词：旧需求行清掉，新需求行追加在末尾；建组与裁决门原样留着。
     assert_eq!(
         replay_lines(&replayed),
         vec![
-            "[用户:需求] 旧需求".to_string(),
-            "[用户:需求] 新需求".to_string(),
-            "[建组] a".to_string()
+            "[建组] a".to_string(),
+            "[用户:需求] 需求已修改，以下是新需求：新需求".to_string()
         ]
     );
     // 派生以最后一条需求为准
     let (_, events) = core.history_open("c").unwrap();
     let st = crate::capabilities::collab::domain::collab_state::derive(&events, &["a".to_string()]);
-    assert_eq!(st.task.as_deref(), Some("新需求"));
+    assert_eq!(st.task.as_deref(), Some("需求已修改，以下是新需求：新需求"));
 }
 
 #[test]

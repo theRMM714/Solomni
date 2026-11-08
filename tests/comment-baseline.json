@@ -369,8 +369,8 @@
   "src/capabilities/session/domain/rewind.rs": {
     "头块：槽外有行或自造槽": 6,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 26,
-    "条目：首行不是目的": 19
+    "条目：槽外有行或自造槽": 25,
+    "条目：首行不是目的": 18
   },
   "src/capabilities/session/domain/session.rs": {
     "头块：槽外有行或自造槽": 4,

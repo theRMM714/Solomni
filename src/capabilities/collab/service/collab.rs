@@ -567,6 +567,13 @@ impl CollabSession {
         self.roster.iter().map(|a| a.name.clone()).collect()
     }
 
+    /// 目的：只把新需求按本会话环境改写（@ 引用按沙箱清单翻译），不落行、不重开门。
+    /// 约束：行由 Conductor 统一替换/追加（改需求要连旧行一起清掉，见 `update_task_outcome`）。
+    pub(crate) fn retask_text(&self, task: &str) -> String {
+        let roots = self.sandboxes.ref_roots();
+        crate::capabilities::prompt::api::rewrite(task, None, &roots)
+    }
+
     /// 提交需求（总是第一步）。需求入转录（用户看到的与进上下文的一致）。
     /// 协作里用户不属任何 agent 的沙箱：@ 引用按 speaker = None 改写（共读同一段文字）。
     pub fn set_task(&mut self, task: &str, sink: &mut dyn FnMut(SessionEvent)) {

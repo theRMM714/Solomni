@@ -428,6 +428,52 @@ fn stop_takes_effect_while_generation_is_still_running() {
     );
 }
 
+/// 目的：留档 / 恢复前先把在跑的回合停稳——文件与转录都要在"没有并发写者"时再动。
+#[test]
+fn archive_stops_a_running_turn_before_rewinding() {
+    use crate::capabilities::conductor::api::RewindTarget;
+    let (_handle, ops, ticks) = slow_ops(vec![module_of("a")]);
+    let sid = ops
+        .sessions
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话")
+        .0
+        .sid;
+    let worker = {
+        let sessions = Arc::clone(&ops.sessions);
+        let sid = sid.clone();
+        std::thread::spawn(move || sessions.say(&sid, "慢慢来", Output::Stream))
+    };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while ticks.load(Ordering::Relaxed) == 0 {
+        assert!(Instant::now() < deadline, "生成没有启动");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // 在跑的时候留档：先停、再动文件，不能回"正在生成"的拒绝。
+    let view = ops
+        .sessions
+        .rewind(&sid, RewindTarget::Archive(0))
+        .expect("留档要把在跑的回合停下来");
+    let out = worker.join().expect("被停的回合也要正常收尾");
+    assert!(out.is_ok(), "停止是正常收尾：{:?}", out.err());
+    assert!(!ops.sessions.is_running(&sid), "收尾后不再标记在跑");
+    assert!(
+        view.iter()
+            .any(|v| v.get("type").and_then(|t| t.as_str()) == Some("rewind")),
+        "留档视图要带标记：{:?}",
+        view
+    );
+    let (_meta, events) = ops.history.open(&sid).expect("读留档后的转录");
+    assert!(
+        events.iter().any(|e| {
+            e.get("type").and_then(|t| t.as_str()) == Some("rewind")
+                && e.get("mode").and_then(|m| m.as_str()) == Some("archive")
+        }),
+        "标记要落盘且带 archive：{:?}",
+        events
+    );
+}
+
 /// 生成期间，**只读命令不再排队**：生成不占用命令队列，读接口（历史列表 / 会话视图）
 /// 会一直等到生成结束——界面因此"假死"。现在生成在工作线程上，队列只占"取/交"两步。
 #[test]
@@ -1424,6 +1470,74 @@ fn deleting_the_compaction_line_restores_the_full_send_view() {
         !last.iter().any(|c| c.contains("此前内容摘要")),
         "删除压缩记录行后摘要该消失：{last:?}"
     );
+}
+
+/// 目的：删除点之后的留档先报出数量、要一声确认；确认后才真删，且不再拒绝。
+#[test]
+fn delete_past_an_archive_reports_the_casualties_and_needs_a_confirm() {
+    use crate::capabilities::conductor::api::RewindTarget;
+    let mut member = std::collections::BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![
+            "第一句".to_string(),
+            "第二句".to_string(),
+            "第三句".to_string(),
+        ],
+    );
+    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+        super::doubles::core_with_gateway(
+            vec![module_of("a")],
+            super::doubles::ScriptGateway::new(member, vec![]),
+        ),
+    )
+    .expect("起核心线程");
+    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let mut st = ops.registry.settings().expect("读设置");
+    st.compact_at_percent = 0;
+    st.sandbox.policy.windows.write_acl = true;
+    ops.registry.set_settings(st).expect("写设置");
+    let sid = ops
+        .sessions
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话")
+        .0
+        .sid;
+    ops.sessions
+        .say(
+            &sid,
+            "先说一句",
+            crate::capabilities::conductor::api::Output::Final,
+        )
+        .expect("第一轮");
+    ops.sessions
+        .rewind(&sid, RewindTarget::Archive(1))
+        .expect("留档一次");
+    ops.sessions
+        .say(
+            &sid,
+            "留档之后再说",
+            crate::capabilities::conductor::api::Output::Final,
+        )
+        .expect("第二轮");
+
+    let err = ops
+        .sessions
+        .rewind(&sid, RewindTarget::Delete(1))
+        .expect_err("删除点之后的留档要先确认");
+    assert!(err.contains("作废后不可恢复"), "{err}");
+    assert!(err.contains("1 个留档"), "{err}");
+
+    handle
+        .rewind_with_reset(&sid, RewindTarget::Delete(1), true)
+        .expect("确认后删除");
+    ops.sessions
+        .say(
+            &sid,
+            "删完继续",
+            crate::capabilities::conductor::api::Output::Final,
+        )
+        .expect("删除后还能继续");
 }
 
 /// 供应商 usage：会话视图给出精确数字，落盘 usage 事件，刷新/重建仍能读回来。

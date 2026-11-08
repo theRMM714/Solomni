@@ -381,15 +381,16 @@ impl Conductor {
         Ok(out)
     }
 
-    /// 协作中途改需求：回到需求行并追加一条新需求（旧需求留在流水里，派生以最后一条为准）。
+    /// 协作中途改需求：只改需求那一行提示词——旧需求整行清掉，末尾追加一条「需求已修改」的新需求。
     /// 返回重放后的完整事件流（前端整体重建，再吸收新产生的门事件）。
     #[cfg(test)]
     pub fn update_task(&mut self, sid: &str, text: &str) -> Result<Vec<serde_json::Value>, String> {
         Ok(self.update_task_outcome(sid, text)?.main)
     }
 
-    /// 目的：改需求的完整结果——主视图 + 受影响的子会话视图。
-    /// 约束：改需求内部走删除回档，子会话也按同一回合收窗；事件台要按同一份结果推重置快照。
+    /// 目的：改需求的完整结果——主视图 + 受影响的子会话视图（改需求不再动子会话，children 恒空）。
+    /// 约束：不截断转录、不回退工作区；旧需求行删除后，新需求行追加在末尾，
+    ///   这样讨论进行中的新需求也落在 [开始] 之后，成员下一轮看得到。
     pub(crate) fn update_task_outcome(
         &mut self,
         sid: &str,
@@ -399,28 +400,60 @@ impl Conductor {
         if text.is_empty() {
             return Err("需求不能为空".to_string());
         }
-        self.ensure_session(sid)?;
-        let (_, events) = self.history_open(sid)?;
-        // 需求行按**结构化字段**认（种类=user、动词=需求），不匹配正文。
-        let keep = crate::capabilities::session::api::find_line_id(&events, |l| {
-            l.kind == "user" && l.verb == "需求"
-        })
-        .ok_or("该会话没有需求行")?;
-        // 回档语义是「保留 id < keep」：需求行本身要留下（新需求随后追加），所以传 keep + 1。
-        // 改需求走**删除**模式：真的截掉旧需求之后的派生，再按新需求重新展开。
-        let crate::capabilities::conductor::api::RewindOutcome { mut main, children } =
-            self.rewind_outcome(sid, RewindTarget::Delete(keep + 1), false)?;
-        let mut fresh = Vec::new();
-        {
-            let s = self.sessions.get_mut(sid).ok_or("无此会话")?;
-            match s {
-                Session::Collab(c) => c.set_task(text, &mut |e| fresh.push(e)),
-                _ => return Err("只有协作会话有「本次需求」".to_string()),
-            }
+        if self.running.contains(sid) {
+            return Err(Self::running_refusal(sid));
         }
-        self.record_events(sid, &mut fresh);
-        main.extend(fresh.iter().map(|e| e.to_json()));
-        Ok(crate::capabilities::conductor::api::RewindOutcome { main, children })
+        self.ensure_session(sid)?;
+        // @ 引用按本会话沙箱改写（与首次提交需求同一口径）。
+        let text = match self.sessions.get(sid) {
+            Some(Session::Collab(c)) => c.retask_text(text),
+            _ => return Err("只有协作会话有「本次需求」".to_string()),
+        };
+        let (meta, raw) = self.history.load(sid)?;
+        let next = crate::capabilities::session::api::next_line_id(&raw);
+        let mut kept = Vec::with_capacity(raw.len() + 1);
+        for ev in &raw {
+            if ev.get("type").and_then(|t| t.as_str()) != Some("transcript") {
+                kept.push(ev.clone());
+                continue;
+            }
+            let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) else {
+                kept.push(ev.clone());
+                continue;
+            };
+            // 旧需求行按**结构化字段**认（种类=user、动词=需求），不匹配正文。
+            let lines: Vec<serde_json::Value> = lines
+                .iter()
+                .filter(|l| {
+                    !(l.get("kind").and_then(|k| k.as_str()) == Some("user")
+                        && l.get("verb").and_then(|v| v.as_str()) == Some("需求"))
+                })
+                .cloned()
+                .collect();
+            if lines.is_empty() {
+                continue;
+            }
+            let mut e2 = ev.clone();
+            e2["lines"] = serde_json::Value::Array(lines);
+            kept.push(e2);
+        }
+        let mut line = crate::capabilities::session::api::LineView::user(
+            "需求",
+            format!("需求已修改，以下是新需求：{}", text),
+        );
+        line.id = next;
+        line.reply = next;
+        kept.push(
+            crate::capabilities::session::api::SessionEvent::Transcript(vec![line]).to_json(),
+        );
+        self.history
+            .replace(sid, &kept)
+            .map_err(|e| format!("改需求落盘失败：{}", e))?;
+        let active = self.restore_session(sid, &meta, &kept, next + 1)?;
+        Ok(crate::capabilities::conductor::api::RewindOutcome {
+            main: active,
+            children: Vec::new(),
+        })
     }
 
     /// 撤回某 agent 的「同意」：转录追加一条撤回行并提醒（模型/用户都看得到）。

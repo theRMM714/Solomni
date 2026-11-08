@@ -499,10 +499,25 @@ pub(crate) fn archive_folds_the_tail_and_restore_brings_it_back() {
     let (_, raw) = hist.load("w").unwrap();
     assert_eq!(rows(&raw), vec![0, 1, 2, 3], "留档不删字节");
     assert_eq!(next_line_id(&raw), 4, "新行从最大 id 续号，绝不复用");
-    assert!(
-        raw.iter()
-            .any(|e| e.get("type").and_then(|t| t.as_str()) == Some("rewind")),
-        "留档标记要进流水"
+    let mark = raw
+        .iter()
+        .find(|e| e.get("type").and_then(|t| t.as_str()) == Some("rewind"))
+        .expect("留档标记要进流水");
+    assert_eq!(
+        mark.get("shared").and_then(|v| v.as_u64()),
+        None,
+        "没有提交时共享区头是空的"
+    );
+    assert_eq!(
+        mark.get("heads").and_then(|h| h.get("a")),
+        Some(&serde_json::Value::Null),
+        "每个 agent 的头要写进标记：{:?}",
+        mark
+    );
+    assert_eq!(
+        mark.get("label").and_then(|v| v.as_str()),
+        Some("答二"),
+        "标签取折叠区间里最后一条内容行"
     );
     assert_eq!(
         crate::capabilities::session::api::truncate_events(&raw)

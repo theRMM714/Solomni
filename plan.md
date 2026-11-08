@@ -7,8 +7,8 @@
 | # | 分支 | 内容 | 状态 |
 | --- | --- | --- | --- |
 | 1 | `task/ws-refs` | 存储层：refs、增量提交、祖先遍历 GC | 已合并（#53） |
-| 2 | `task/context-freshness` | 写路径提交、读事实、过期判定 | 进行中：2A 基线事实与准入、2B 写后自动提交已落（#54） |
-| 3 | `task/archive-checkpoint` | 留档全局检查点、恢复剪叉、开关与读数 | 待开始 |
+| 2 | `task/context-freshness` | 写路径提交、读事实、过期判定、用户开关 | 已合并（#54） |
+| 3 | `task/archive-checkpoint` | 留档全局检查点、恢复剪叉、缓存读数、删除硬回退、改需求改写 | 已完成，待合并 |
 
 顺序依赖：2 需要 1 的 refs 与增量提交；3 需要 2 的读事实。每个 PR 从最新 `main` 切，前一个合并后才开下一个。
 
@@ -22,6 +22,7 @@
 - **I4** 留档零删除：只新增 ref，不删提交、不改历史。
 - **I5** 恢复零删除：剪叉前先钉 `refs/live/<id>`。
 - **I6** GC 从 refs 遍历祖先，不再枚举全部提交。
+- **I7** 凡丢弃提交的删除，主副本、每个受影响沙箱与逐路径基线一起落到同一个提交点；未提交内容先进 `lost`。
 
 ### 1.2 术语（实现与文档用同一组词）
 
@@ -99,54 +100,72 @@
 
 ### 3.1 目标
 
-留档 = 全局检查点 + ref 分叉；恢复 = 切回兄弟枝，剪叉前先钉 `live`。
+留档 = 全局检查点 + ref 分叉；恢复 = 切回兄弟枝，剪叉前先钉 `live`；删除 = 硬回退到该点（文件、沙箱、基线同点），删除点之后的留档级联作废；改需求只改写提示词，不回滚转录与文件。
 
 ### 3.2 改动文件
 
 | 文件 | 改动 |
 | --- | --- |
-| `src/capabilities/session/domain/rewind.rs` | `RewindMark` 扩为 `ArchiveMark`（`heads`、`shared`、`label`） |
-| `src/capabilities/session/service.rs` | 留档/恢复编排：屏障、受影响判定、跨会话 |
-| `src/capabilities/workspace/service.rs` | `work_archive`、`work_restore_archive`、多工作树物化 |
-| `src/capabilities/collab/service/turn_io.rs` | 在途 turn 的中断入口 |
-| `src/capabilities/session/domain/events.rs` | `ContextUsage` 增 `cache_read`/`cache_creation` |
-| 设置界面 | 开关与占用显示 |
+| `src/capabilities/workspace/api.rs` | `ArchiveReport`；`work_archive` / `work_restore_archive` 两个面 |
+| `src/capabilities/workspace/service.rs` | `archive_point` 抽出复用、`lay_down_tree`（先备份进 lost 再铺树）、`reset_agent_point`、档案引用与恢复 |
+| `src/capabilities/session/domain/rewind.rs` | `RewindMark` 扩为 `ArchiveMark`（`shared` / `heads` / `label`）、`archive_label` |
+| `src/capabilities/conductor/service/rewind.rs` | 留档 / 恢复 / 删除编排：子会话折叠计划、agent 名单并集、标记落盘、展开子会话、留档级联作废与二次确认 |
+| `src/capabilities/conductor/service/turn.rs` | `update_task_outcome` 改为只清旧需求行并在末尾追加新需求，不再截断转录或回滚工作区 |
+| `src/capabilities/collab/service/collab.rs` | `retask_text`：改需求时重写提示词里的需求段 |
+| `src/capabilities/conductor/api/handle.rs` | `settle_tree` 屏障（作废裁决队 + 取消生成 + 轮询交回，30 秒拒绝） |
+| `src/capabilities/session/domain/events.rs` | `ContextUsage` 增 `cache_read` / `cache_creation`，usage 事件与快照透出 |
+| `src/capabilities/llm/detail/http_stream.rs` | `usage_of` 解析 OpenAI `prompt_tokens_details.cached_tokens` 与 Anthropic 两个 cache 字段 |
+| `src/presentation/web/assets/app.js` | 折叠分界显示 `label`；上下文浮层显示缓存读 / 写；留档 / 恢复文案写明文件一起回滚 |
 
 ### 3.3 算法
 
 **留档**：
 
-1. 屏障：中断全部在途 turn，等空闲。
-2. `P` = 折叠点的主副本提交；`affected = [a | base(a) != P 且 P 不是 base(a) 的祖先]`。
-3. 未提交内容 → `.work/lost/<agent>/<mark>/`。
-4. 物化 `P` 到主副本与所有 affected 沙箱；各沙箱落 `parent = P` 的新提交，`base = P`。
-5. `refs/archive/<mark> = {shared: 旧 main, heads: 旧各 HEAD}`。
-6. `refs/main = P`。
-7. **最后**写转录标记（顺序反了会出现"标记说已留档、文件还在新枝"）。
+1. 屏障（`handle.settle_tree`）：整棵子树在跑的回合先作废裁决队、取消生成，再轮询到核心交回会话；30 秒仍未收尾 = 拒绝，文件与转录都还没动。
+2. 先算各子会话的折叠点（回合对齐，不落盘）→ `keep_by_agent` → 受影响 agent 名单 = 主 / 子会话名单并集。
+3. `refs/archive/<mark>` 先写：`target` = 留档前主线头，`heads` = 每个受影响 agent → 同一个头（没有 per-agent HEAD）。
+4. 每个受影响沙箱：不一致的文件备份进 `lost/<agent>/archive-<mark>/`，删掉，铺目标树；index / 逐路径基线对齐到目标点。
+5. 主副本 `Pending::Restore` + `materialize(target)`。
+6. 失败撤销档案引用。
+7. **最后**写转录标记（主会话与各子会话同一个 `mark` / `shared` / `heads` / `label`），再重建会话对象。
 
 **恢复**：
 
 1. 屏障。
-2. `refs/live/<mark> = {main, agents}`（零拷贝）。
-3. 物化 `archive/<mark>` 的 shared + heads 到全部工作树。
-4. 移除 `refs/archive/<mark>`，展开转录行。
+2. 读 `refs/archive/<mark>`、校验目标提交还在、外部冲突检查。
+3. `pin_head`：当前线钉成 `refs/live/<id>`（零拷贝，提交一条不删）。
+4. 主副本与 `heads` 里的每个沙箱物化回档案头（现状先进 `lost/<agent>/restore-<mark>/`）。
+5. 移除 `refs/archive/<mark>`；转录在该标记处截断，子会话按同一 `mark` 展开。
 
-**跨会话**：枚举 `refs/agents/*` 得到全部工作树；中断走 collab 的中断入口，拿不到就拒绝回档；被回滚会话的上下文靠过期标记自然失效。
+**删除**：
 
-**开关**：`meta.context_freshness` 默认 false；`cache_read`/`cache_creation` 由适配器解析后进 `ContextUsage`。文案用"过期内容自动清理"，副标题"可能增加缓存成本"。
+1. 屏障（与留档 / 恢复同一条）。
+2. 先算保留线 `kept`；`kept_marks` 里没有、而 `refs/archive` 里还在的标记 = 会被级联作废的留档。非空且未 `force` 时拒绝，错误里报出数量与标记（界面据此二次确认）。
+3. `cut_children` → `keep_by_agent` → 受影响 agent 名单 → `work_delete(work, keep, agents, kept_marks)`：按行锚取提交点，外部冲突整次拒绝；不一致的文件先进 `lost/<agent>/delete-<点>/`，再铺目标树并把 index / 逐路径基线对齐到该点；主副本物化、丢弃该点之后的提交（`Pending::Discard` 带 `agents` 以便崩溃重放）；最后删掉未保留的档案引用。
+4. 截断转录并重建会话对象。
+
+**改需求**：不再调用删除。过滤掉转录里所有 `kind=user && verb=需求` 的行，在末尾追加一条 `需求已修改，以下是新需求：<text>`（id 续号），落盘后重建；工作区、沙箱与既有对话都不动。
+
+**跨会话**：受影响名单从主 / 子会话的 `meta.agents` 并集得出；在跑的子会话在屏障里一起停掉；被回滚会话的上下文靠过期标记自然失效。
+
+**开关**：`meta.context_freshness` 默认 false（2E 已接用户按钮）。`cache_read` / `cache_creation` 由适配器解析后进 `ContextUsage`，缺失 = None（不伪造成 0），状态栏浮层显示"缓存读 / 写"。
 
 ### 3.4 测试
 
-- 三个 agent 一起留档后沙箱同点；
-- 恢复后全部回退，且 `live` 仍可再恢复；
-- 在途 turn 被中断且不留半状态；
-- 档案往返 10 次后 GC 只回收 `live` 被删的那部分；
-- 回放 = 实时（开关打开）。
+- [x] 三个 agent 一起留档后沙箱同点、未提交内容进 lost 可读回（`work_archive_moves_every_sandbox_to_one_point_and_keeps_uncommitted_in_lost`）；
+- [x] 恢复后全部回退，且 `refs/live` 仍可再回滚（`work_restore_archive_rewinds_every_sandbox_and_pins_the_line_it_left`）；
+- [x] 在途回合被停稳再留档（`archive_stops_a_running_turn_before_rewinding`）；
+- [x] 标记携带 `shared` / `heads` / `label`，标签取折叠区间最后一条内容行（`archive_folds_the_tail_and_restore_brings_it_back`、`archive_label_takes_the_last_content_line_in_the_folded_range`、`archive_mark_reads_shared_heads_and_label_only_for_archive_rows`）；
+- [x] 缓存读写解析（`usage_of_reads_cache_fields_without_inventing_zeros`）；
+- [x] 删除把主副本与所有沙箱一起回退到同一点，未提交内容进 lost，删除点之后的留档作废（`work_delete_rolls_every_sandbox_back_and_prunes_archives`）；
+- [x] 删除越过留档时先报数量、要确认，`force` 后成功（`delete_past_an_archive_reports_the_casualties_and_needs_a_confirm`）；
+- [x] 改需求只改写转录、不回滚（`collab_update_task_rewrites_the_requirement_without_rewinding`）；
+- [x] 回放 = 实时（开关打开）：`read_facts_rebuild_identically_to_live`——读事实随工具行落盘，切换开关重建后与实时逐条相同（正文按 `tool_result_body` 现算）。
 
 ### 3.5 收尾
 
 - [ ] PR 合并后删除本章
-- [ ] 更新 `docs/session/session-model.md` 的留档/恢复语义
+- [x] 更新 `docs/session/session-model.md` 的留档/恢复语义
 
 ## 4. 全部完成
 

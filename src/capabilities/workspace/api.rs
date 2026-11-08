@@ -49,6 +49,30 @@ pub struct AdoptReport {
     pub held: Vec<HeldChange>,
 }
 
+/// 目的：一次留档（全局检查点）的结果：主副本与各沙箱一起物化到留档点。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ArchiveReport {
+    /// 目的：档案号（转录标记与 refs/archive/<id> 共用）。
+    pub mark: u64,
+    /// 目的：留档前的主副本头（None = 空共享区）。
+    pub shared: Option<u64>,
+    /// 目的：物化到的提交点（None = 清空）。
+    pub point: Option<u64>,
+    /// 目的：各工作树备份进 lost/ 的未提交文件数（agent 名 → 条数）。
+    pub backed_up: std::collections::BTreeMap<String, usize>,
+}
+
+/// 目的：一次删除硬回退的结果：主副本与各沙箱一起落到的提交点 + 各工作树备份条数。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DeleteReport {
+    /// 目的：物化到的提交点（None = 清空）。
+    pub point: Option<u64>,
+    /// 目的：各工作树备份进 lost/ 的未提交文件数（agent 名 → 条数）。
+    pub backed_up: std::collections::BTreeMap<String, usize>,
+    /// 目的：这次一并作废的留档号。
+    pub pruned: Vec<u64>,
+}
+
 /// 目的：提交历史的一条（不含整棵树，列表可安全分页）。
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct WorkLogEntry {
@@ -241,14 +265,45 @@ pub trait Workspace: Send + Sync {
     fn work_restore_force(&self, work: &str, commit: u64) -> Result<(), String>;
     /// 共享区当前提交点（留档记 after 用）。
     fn work_head(&self, work: &str) -> Result<Option<u64>, String>;
-    /// 物化到"各会话都还没越过自己保留行"的最后一个提交点；返回选中的提交（None = 空共享区）。
+    /// 仅测试用：物化到"各会话都还没越过自己保留行"的最后一个提交点（None = 空共享区）。
+    #[cfg(test)]
     fn work_rewind_to(
         &self,
         work: &str,
         keep_by_agent: &std::collections::BTreeMap<String, u64>,
     ) -> Result<Option<u64>, String>;
-    /// 物化到某个提交点（None = 清空），不改提交记录（恢复用）。
+    /// **留档全局检查点**：算出留档点，把主副本与列出的全部沙箱一起物化过去，
+    /// 各沙箱不一致的未提交内容先备份进 lost/，并记 `refs/archive/<mark>`。
+    /// 返回：留档前的主副本头与各工作树的备份条数。
+    /// 约束：`keep_by_agent` 与 `work_rewind_to` 同义；只动文件与引用，不删提交；
+    ///   外部工作区会先做覆盖检查，有外部改动就整次拒绝。
+    fn work_archive(
+        &self,
+        work: &str,
+        keep_by_agent: &std::collections::BTreeMap<String, u64>,
+        agents: &[String],
+        mark: u64,
+    ) -> Result<ArchiveReport, String>;
+    /// **恢复档案**：先把当前主线钉成 `refs/live/<id>`，再把主副本与档案里的工作树一起物化回档案头。
+    /// 返回：恢复到的提交点（None = 清空）。
+    /// 约束：提交一条不删；档案引用用完即移除（当前线由 live 钉住，仍可达）。
+    fn work_restore_archive(&self, work: &str, mark: u64) -> Result<Option<u64>, String>;
+    /// **删除的硬回退**：主副本与列出的全部沙箱一起落到删除点，再丢掉该点之后的提交。
+    /// 约束：沙箱里与删除点不一致的内容先备份进 lost/；凡是提交记录被丢掉的留档引用
+    ///   （`refs/archive/*` 不在 `keep_marks` 里的）一并作废；外部改动按覆盖检查整次拒绝。
+    fn work_delete(
+        &self,
+        work: &str,
+        keep_by_agent: &std::collections::BTreeMap<String, u64>,
+        agents: &[String],
+        keep_marks: &[u64],
+    ) -> Result<DeleteReport, String>;
+    /// 现存留档号（`refs/archive/*`），供删除前报出会作废几个。
+    fn work_archives(&self, work: &str) -> Result<Vec<u64>, String>;
+    /// 仅测试用：把主副本物化到某个提交点（None = 清空），不改提交记录；生产走留档/恢复。
+    #[cfg(test)]
     fn work_restore_point(&self, work: &str, commit: Option<u64>) -> Result<(), String>;
-    /// 丢弃不是 keep 祖先的提交记录并物化到 keep（删除 / 恢复的"丢弃历史"）。
+    /// 仅测试用：丢弃不是 keep 祖先的提交记录并物化到 keep。
+    #[cfg(test)]
     fn work_discard_after(&self, work: &str, keep: Option<u64>) -> Result<(), String>;
 }

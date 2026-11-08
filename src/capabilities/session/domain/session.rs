@@ -407,7 +407,7 @@ pub struct AgentSession {
 
 /// 目的：一条读事实与它落成的那条工具结果消息的正文。
 /// 约束：正文用于在发送视图里定位消息（对话会被压缩移位，下标不可靠）。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadAt {
     pub body: String,
     pub fact: crate::capabilities::workspace::api::ReadFact,

@@ -13,9 +13,10 @@
 
 - 入站面：`api::Workspace`。
   - 目录与视图：**`bind`**（把根会话的工作区绑定刷成 `.work-root` 布局投影；`None` = 产品内布局）/ `prepare` / **`discard`**（撤销一次准备：只删本产品建出的东西——空沙箱 / 空 `work/`、布局投影与版本库 `.work`；建会话失败时用）/ `work_has` / `files` / `usage` / `roots`（共享区根、会话树根 `session_root` 与各 agent 私沙根）。
-  - 共享区版本化：`work_pull` / `work_commit` / `work_sync` / `work_commit_user` / `work_status` / `work_versions` / `work_resolve` / `work_lost` / `work_restore_lost` / `work_recover` / `work_gc` / `work_restore` / `work_head` / `work_rewind_to` / `work_restore_point` / `work_discard_after`。
+  - 共享区版本化：`work_pull` / `work_commit` / `work_sync` / `work_commit_user` / `work_status` / `work_versions` / `work_resolve` / `work_lost` / `work_restore_lost` / `work_recover` / `work_gc` / `work_restore` / `work_head` / `work_archive` / `work_restore_archive` / `work_delete` / `work_archives`。
   - **提交历史视图**：`work_log(work, limit, before?)` 给当前 head、新→旧的分页提交与每条 `on_head`（是否在当前 head 祖先链）；`work_commit_view` 给提交详情与改动清单（对象大小 / 媒体提示）；`work_commit_file` 给该提交里某个文件的受限预览（路径必须真在这条提交的树里，`src/capabilities/workspace/domain/workspace.rs`）。这些是只读视图，不进动作表。
-  - **提交点还原**：`work_restore(work, commit)` 只把主副本物化到目标提交并更新 head，**非破坏性**——目标之后的提交仍保留在历史里，可再次回滚。`work_rewind_to` 只沿**当前 head 的祖先链**按行锚选点；已离开当前线的提交不会被后续转录回档误选。
+  - **提交点还原**：`work_restore(work, commit)` 只把主副本物化到目标提交并更新 head，**非破坏性**——目标之后的提交仍保留在历史里，可再次回滚。
+  - **删除是硬回退**：`work_delete(work, keep, agents, keep_marks)` 沿当前 head 的祖先链按行锚选点，把主副本、每个受影响沙箱与逐路径基线一起落到该点；沙箱里不一致的文件先进 `lost/<agent>/delete-<点>/`，未在 `keep_marks` 里的档案引用（`refs/archive/*`）一并作废并返回 `pruned`。`work_archives` 供编排层在确认前报出会作废的数量。
   - **三方视图与冲突解决**：`work_versions` 只看（文本预览有上限；图片 / 视频 / 二进制只给指纹、大小与类型提示；带主副本提交 id），`work_resolve` 显式选边——`take=upstream` 用主副本覆盖沙箱，`take=local` 保留本地并把基线推进到主副本；不做自动合并。
   - **冲突解决的安全边界**：
     - `take=local` 必须带 `expect_head`（调用方看到的主副本提交 id，`src/capabilities/workspace/api.rs`）；与当前 head 不符就整次拒绝，不把旧合并结果登记到新版本。

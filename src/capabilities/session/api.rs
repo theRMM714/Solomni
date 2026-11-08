@@ -14,8 +14,8 @@ pub use crate::capabilities::session::domain::history::{
     AgentMeta, Delegation, HistoryView, RunState, SessionMeta, WorkspaceBinding,
 };
 pub use crate::capabilities::session::domain::rewind::{
-    align_keep, cut_before_line, find_line_id, last_line_within, last_usage, max_reply,
-    next_line_id, rewind_marks, truncate_events, turn_of_line, RewindMark, RewindMode,
+    align_keep, archive_label, cut_before_line, last_line_within, last_usage, max_reply,
+    next_line_id, rewind_marks, truncate_events, turn_of_line,
 };
 pub use crate::capabilities::session::domain::session::{
     delta_visible, freshness_view, keep_whole_replies, stream_piece, summary_message,

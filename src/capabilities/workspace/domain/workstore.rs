@@ -655,10 +655,13 @@ pub enum Pending {
         /// 目的：目标提交号。
         target: Option<u64>,
     },
-    /// 目的：丢弃 keep 之外的提交并物化到 keep。
+    /// 目的：丢弃 keep 之外的提交，并让主副本与列出的沙箱一起落到 keep。
     Discard {
         /// 目的：要保留的提交点。
         keep: Option<u64>,
+        /// 目的：要一起回退的 agent 沙箱（空 = 只动主副本，测试用的低层语义）。
+        #[serde(default)]
+        agents: Vec<String>,
     },
 }
 

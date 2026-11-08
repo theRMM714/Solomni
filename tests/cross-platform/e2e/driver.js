@@ -263,10 +263,17 @@ async function lines(sid) {
   const t1 = (l1[1] || {}).tool || {};
   assert(t1.name === 'write' && t1.ok === true && t1.module === '', '工具调用是一条 tool 行（内置工具 module 为空）', JSON.stringify(t1).slice(0, 200));
   assert(l1[2] && !l1[2].tool, '最后一行是纯文本行', JSON.stringify(l1[2] || {}).slice(0, 160));
-  // 回档：删除该行及其后（点第一行 → 转录清空）
-  assert((await act(name1, 'rewind', { id: 0 })).status === 200, '回档到第一行');
+  // 回档：删除该行及其后（点第一行 → 转录清空）；删除也把沙箱一起退回该点，成品进 lost。
+  assert((await act(name1, 'rewind', { id: 0, mode: 'delete' })).status === 200, '回档到第一行');
   const l1r = await lines(name1);
   assert(l1r.length === 0, '删除第一行后转录清空', JSON.stringify(l1r).slice(0, 160));
+  assert(!fs.existsSync(note), '删除把沙箱里的成品一起退回删除点', note);
+  const lostRoot = path.join(dir(name1), '.work', 'lost', '专属');
+  const lostFiles = fs.existsSync(lostRoot) ? fs.readdirSync(lostRoot, { recursive: true }).map(String) : [];
+  assert(lostFiles.some((p) => p.endsWith('mock-note.txt')), '删除前的沙箱成品进了 lost 备份', JSON.stringify(lostFiles));
+  // 后面的文件清单场景还要看沙箱成品：再跑一轮把它写回来。
+  assert((await act(name1, 'send_message', { text: '再记一笔' })).status === 200, '删除后再记一笔');
+  assert(fs.existsSync(note) && fs.readFileSync(note, 'utf8') === '来自内置工具', '新的一轮重新写出成品', note);
 
   // 零模块 agent 的 shell：sandbox 只碰私有沙箱；成功与退出码两条都落成 tool 行。
   // 容器围栏对 shell 是**严格**的（不允许降级）：安全模式（不写 ACL）下这条必然被拒，

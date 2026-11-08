@@ -999,6 +999,57 @@ pub(crate) fn native_multi_call_rebuilds_identically_to_live() {
     );
 }
 
+/// 目的：读事实随工具行落盘，切换开关重建会话后与实时逐条一致（发送视图拿到的判定输入不变）。
+/// 约束：正文必须同源——回放按 `tool_result_body` 现算，差一个字节就定位不到那条消息。
+#[test]
+pub(crate) fn read_facts_rebuild_identically_to_live() {
+    use crate::capabilities::llm::api::ToolCall;
+    let hist = Arc::new(InMemoryHistory::new());
+    let io = Arc::new(InMemorySysIo::new());
+    io.seed(&["w", "a", "a.txt"], "A1\nA2\n");
+    let a = s(&["w", "a", "a.txt"]);
+    let mut core = native_core(
+        NativeGateway {
+            scripts: Mutex::new(vec![vec![
+                NativeStep::Calls(vec![ToolCall {
+                    id: "c1".to_string(),
+                    name: "read".to_string(),
+                    args_json: format!("{{\"path\":\"{}\"}}", a),
+                }]),
+                NativeStep::Text("{\"type\":\"say\",\"text\":\"读了\"}".to_string()),
+            ]]),
+        },
+        Arc::clone(&hist),
+        Arc::clone(&io),
+    );
+    core.registry_mut().probe_model_tools("m").expect("探测");
+    let sid = core
+        .create_work(work("w", WorkMode::Single, &["a"]))
+        .unwrap()
+        .sid;
+    let events = with_live(|l| core.single_say(&sid, "读 a.txt", l)).unwrap();
+    let live = core.single_reads(&sid).expect("单 agent 会话");
+    assert_eq!(live.len(), 1, "整份读完要留下一条读事实");
+    assert_eq!(
+        (live[0].fact.from, live[0].fact.to),
+        (1, 2),
+        "记下读过的行窗口"
+    );
+    assert!(!live[0].fact.blob.is_empty(), "快照要记内容哈希");
+    assert!(
+        live[0].body.contains("A1"),
+        "正文用于在发送视图里定位消息：{}",
+        live[0].body
+    );
+    assert!(tool_views(&events)[0].read.is_some(), "工具行要带上读事实");
+
+    // 开关打开会丢掉内存会话：下一次访问按转录重建（回放必须与实时同一份台账）。
+    core.set_context_freshness(&sid, true).expect("开开关");
+    core.ensure_session(&sid).expect("重建");
+    let rebuilt = core.single_reads(&sid).expect("重建后的单 agent 会话");
+    assert_eq!(rebuilt, live, "回放的读事实必须与实时逐条一致");
+}
+
 /// 目的：一个模型都没登记时**不能建会话**——不能再用内置假模型把流程跑起来。
 #[test]
 fn creating_a_session_without_any_model_is_refused_and_leaves_no_history() {
