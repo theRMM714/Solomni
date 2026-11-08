@@ -18,15 +18,16 @@ pub use crate::capabilities::session::domain::rewind::{
     next_line_id, rewind_marks, truncate_events, turn_of_line, RewindMark, RewindMode,
 };
 pub use crate::capabilities::session::domain::session::{
-    delta_visible, keep_whole_replies, stream_piece, summary_message, unique_work_name,
-    AgentSession, CompactChatFactory, CompactChatSpec, CompactionPlan, SessionParams, TurnRun,
+    delta_visible, freshness_view, keep_whole_replies, stream_piece, summary_message,
+    unique_work_name, AgentSession, CompactChatFactory, CompactChatSpec, CompactionPlan, ReadAt,
+    SessionParams, TurnRun,
 };
 pub use crate::capabilities::session::domain::tools::{
     last_shell, service_ops_for_modules, tool_table, MemberTools, ServiceOp, ShellLive, ShellSlot,
 };
 
 // 核心操作回路 + 原生回灌消息：`service.rs` 实现（它驱动 IO，不是纯派生）。
-pub use crate::capabilities::session::service::{core_operation, reply_msgs};
+pub use crate::capabilities::session::service::{core_operation, reply_msgs, tool_result_body};
 
 /// 落盘会话的**队列面**：呈现层经 conductor 的队列代理调它（列表 / 打开 / 删除）。
 ///

@@ -7,6 +7,7 @@ use crate::capabilities::llm::api::ToolInvoke;
 use crate::capabilities::permission::api::{CallScope, Decision, Effect, Reach, ReachSet};
 use crate::capabilities::session::api::{MemberTools, SessionEvent};
 use crate::capabilities::tools::api::{Observations, ToolSchema};
+use crate::capabilities::workspace::api::ReadFact;
 use crate::kernel::api::ToolOutcome;
 /// 执行一次工具调用：内置优先；外部工具按模块走（模块为空时由 dispatch_external 如实报错）。
 /// 账本经**分支副本**回到本成员（见 run_branch）——串行与并发只有这一条执行路径。
@@ -18,11 +19,12 @@ pub(crate) fn run_one(
     ask: Option<&dyn crate::kernel::ports::AskUser>,
     grant: &CallGrant,
     cancel: &std::sync::atomic::AtomicBool,
-) -> (String, ToolOutcome) {
-    let (label, outcome, branch) = run_branch(ctx, module, name, args_json, ask, grant, cancel);
+) -> (String, ToolOutcome, Option<ReadFact>) {
+    let (label, outcome, branch, read) =
+        run_branch(ctx, module, name, args_json, ask, grant, cancel);
     // 串行：分支的副本就是"这次调用之后"的账本，直接接管（与逐个记账等价）。
     ctx.observations = branch;
-    (label, outcome)
+    (label, outcome, read)
 }
 
 /// 一次调用的执行体（**不碰本成员的账本**）：分支各持账本副本，由调用方按原始顺序合并/接管。
@@ -40,8 +42,11 @@ pub(crate) fn run_branch(
     String,
     ToolOutcome,
     crate::capabilities::tools::api::Observations,
+    Option<ReadFact>,
 ) {
     let mut branch = ctx.observations.clone();
+    // 这一趟若是一次完整的 read：它读到了哪几行、当时的指纹（挂到工具行上，发送视图据此判过期）。
+    let mut read: Option<ReadFact> = None;
     let (label, outcome) = if !face_has(ctx, module, name) {
         // **按这一回合的工具面校验**：不在面里的调用一律如实拒绝（不静默执行、也不当表态）。
         (String::new(), crate::capabilities::tools::api::refuse(name))
@@ -54,6 +59,8 @@ pub(crate) fn run_branch(
             args_json,
         );
         commit_writes(ctx, &mut branch, &mut outcome);
+        // read 只产生一条事实（一次调用只读一个路径）；没读到整份原文时是 None。
+        read = branch.take_reads().into_iter().next();
         (String::new(), outcome)
     } else if crate::capabilities::tools::api::is_exec(name) {
         (
@@ -79,7 +86,7 @@ pub(crate) fn run_branch(
         };
         dispatch_external(ctx, &inv, ask, grant)
     };
-    (label, outcome, branch)
+    (label, outcome, branch, read)
 }
 
 /// 目的：写工具落地后**自动提交**——路径取自这次调用真正写过的文件（观察账本的分支副本，见 Observations::take_written）。
@@ -347,8 +354,9 @@ pub(crate) fn run_batch(
     ask: Option<&dyn crate::kernel::ports::AskUser>,
     cancel: &std::sync::atomic::AtomicBool,
     sink: &mut dyn FnMut(SessionEvent),
-) -> Vec<(String, ToolOutcome)> {
-    let mut done: Vec<Option<(String, ToolOutcome)>> = (0..plan.len()).map(|_| None).collect();
+) -> Vec<(String, ToolOutcome, Option<ReadFact>)> {
+    let mut done: Vec<Option<(String, ToolOutcome, Option<ReadFact>)>> =
+        (0..plan.len()).map(|_| None).collect();
     let grants: Vec<Result<CallGrant, String>> = plan
         .iter()
         .map(|(module, tool, args)| grant_for(ctx, module.as_deref(), tool, args))
@@ -360,7 +368,7 @@ pub(crate) fn run_batch(
         let grant = match &grants[i] {
             Ok(g) => g.clone(),
             Err(why) => {
-                done[i] = Some((label, deny(ctx, why.clone())));
+                done[i] = Some((label, deny(ctx, why.clone()), None));
                 i += 1;
                 continue;
             }
@@ -370,7 +378,7 @@ pub(crate) fn run_batch(
                 "当前档位「{}」不允许这次调用。",
                 ctx.sandbox.permissions.profile.label()
             );
-            done[i] = Some((label, deny(ctx, why)));
+            done[i] = Some((label, deny(ctx, why), None));
             i += 1;
             continue;
         }
@@ -395,7 +403,7 @@ pub(crate) fn run_batch(
             let Some(gate) = confirms.as_deref_mut() else {
                 let why = "这次调用需要用户确认，但当前没有可回答的前端；按拒绝处理，未执行。"
                     .to_string();
-                done[i] = Some((label, deny(ctx, why)));
+                done[i] = Some((label, deny(ctx, why), None));
                 i += 1;
                 continue;
             };
@@ -418,7 +426,7 @@ pub(crate) fn run_batch(
                 let why =
                     "用户没有放行这次工具调用：它没有执行。请换一种做法，或请用户调整会话权限。"
                         .to_string();
-                (label, deny(ctx, why))
+                (label, deny(ctx, why), None)
             });
             i += 1;
             continue;
@@ -436,6 +444,7 @@ pub(crate) fn run_batch(
                 String,
                 ToolOutcome,
                 crate::capabilities::tools::api::Observations,
+                Option<ReadFact>,
             )> = std::thread::scope(|s| {
                 let handles: Vec<_> = plan[i..j]
                     .iter()
@@ -455,9 +464,9 @@ pub(crate) fn run_batch(
                     .map(|h| h.join().unwrap_or_else(|e| std::panic::resume_unwind(e)))
                     .collect()
             });
-            for (k, (label, outcome, branch)) in batch.into_iter().enumerate() {
+            for (k, (label, outcome, branch, read)) in batch.into_iter().enumerate() {
                 ctx.observations.absorb(&branch);
-                done[i + k] = Some((label, outcome));
+                done[i + k] = Some((label, outcome, read));
             }
             i = j;
         } else {
@@ -475,7 +484,7 @@ pub(crate) fn run_batch(
     }
     // 每一次调用都留一条**同形状的审计记录**（与呈现层的动作记录同一处格式化）：可查、可对账。
     for ((module, tool, _args), slot) in plan.iter().zip(done.iter()) {
-        if let Some((_label, outcome)) = slot {
+        if let Some((_label, outcome, _read)) = slot {
             let name = match module {
                 Some(m) => format!("{}.{}", m, tool),
                 None => tool.clone(),

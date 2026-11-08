@@ -440,6 +440,10 @@ impl Conductor {
                 s.set_context_budget(window, percent, keep_percent);
                 s.set_model(a.model.clone().or_else(|| self.registry.core_model()));
                 s.set_compact_factory(self.compact_factory());
+                s.set_context_freshness(meta.context_freshness);
+                for (body, fact) in replay_reads(events) {
+                    s.note_read_at(body, fact);
+                }
                 s.set_last_usage(crate::capabilities::session::api::last_usage(events));
                 Session::Single(s)
             }
@@ -458,6 +462,10 @@ impl Conductor {
                 if let Some(t) = s.tools.as_mut() {
                     t.reply_seq = crate::capabilities::session::api::max_reply(events);
                 }
+                s.set_context_freshness(meta.context_freshness);
+                for (body, fact) in replay_reads(events) {
+                    s.note_read_at(body, fact);
+                }
                 s.set_last_usage(crate::capabilities::session::api::last_usage(events));
                 Session::Single(s)
             }
@@ -474,6 +482,41 @@ impl Conductor {
         Ok(built)
     }
 }
+/// 目的：把转录里的读事实重新装回读台账（重建后的发送视图与实时一致）。
+///
+/// 约束：正文按 `tool_result_body` 现算，必须与 `reply_msgs` 同源——发送视图按正文找消息。
+///   被压缩吃掉的行不会命中任何消息，留着也无害。
+fn replay_reads(
+    events: &[serde_json::Value],
+) -> Vec<(String, crate::capabilities::workspace::api::ReadFact)> {
+    let mut out = Vec::new();
+    for ev in events {
+        if ev.get("type").and_then(|t| t.as_str()) != Some("transcript") {
+            continue;
+        }
+        let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) else {
+            continue;
+        };
+        for l in lines {
+            let Some(t) = l.get("tool") else {
+                continue;
+            };
+            let Ok(c) = serde_json::from_value::<crate::capabilities::session::api::ToolCallView>(
+                t.clone(),
+            ) else {
+                continue;
+            };
+            if let Some(fact) = c.read.clone() {
+                out.push((
+                    crate::capabilities::session::api::tool_result_body(&c),
+                    fact,
+                ));
+            }
+        }
+    }
+    out
+}
+
 /// 目的：把转录事件还原成（对话, 每行历史长度, 每行回复号, 每行 id, 压缩点, 压缩行 id）。
 /// 约束：重建必须与实时逐条一致（见 `reply_msgs` 与 session-model.md）。
 pub(crate) fn replay_dialogue(

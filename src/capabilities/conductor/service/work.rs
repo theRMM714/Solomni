@@ -1507,6 +1507,7 @@ impl Conductor {
         let name = spec.name.clone();
         let agent_names: Vec<String> = metas.iter().map(|m| m.name.clone()).collect();
         let meta = SessionMeta {
+            context_freshness: false,
             name: name.clone(),
             mode: mode_str(spec.mode).to_string(),
             delegate,
@@ -1738,7 +1739,7 @@ impl Conductor {
                 } else {
                     pkgs::PackagePlan::default()
                 };
-                let (s, opened) = self.build_single(
+                let (mut s, opened) = self.build_single(
                     a,
                     &chosen,
                     channel,
@@ -1750,6 +1751,8 @@ impl Conductor {
                     self.guest_lease_for(&meta)?,
                     &host_plan,
                 );
+                // 过期清理是**落盘事实**：装配时按 meta 装回开关，默认关。
+                s.set_context_freshness(meta.context_freshness);
                 (Session::Single(s), opened)
             }
             WorkMode::Collab => {

@@ -351,6 +351,7 @@ impl Conductor {
             return Ok(child);
         }
         let meta = SessionMeta {
+            context_freshness: false,
             name: child.clone(),
             mode: "single".to_string(),
             delegate: false,

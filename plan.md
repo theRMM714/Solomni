@@ -56,10 +56,11 @@
 | `src/capabilities/tools/service/systool.rs` | read 前确保状态已提交；记录 blob |
 | `src/capabilities/workspace/domain/base.rs`（新增） | `BaseRef`、`CommitRefusal`、`stale_paths` 准入纯函数 |
 | `src/capabilities/workspace/service.rs` | `work_commit_auto`、逐路径基线落 `refs/agents/<agent>`、`work_sync_branch` |
-| `src/capabilities/session/domain/freshness.rs`（新增） | 过期判定纯函数 |
+| `src/capabilities/workspace/domain/freshness.rs`（新增） | 过期判定纯函数 |
 | `src/capabilities/session/domain/events.rs` | 工具结果 payload 增 `read` 事实 |
-| `src/capabilities/collab/service/round.rs` | `assemble` 在压缩边界之后替换占位符 |
-| `src/capabilities/session/domain/session.rs` | `meta.context_freshness` |
+| `src/capabilities/collab/service/driver.rs` | 发送视图 = `send_view`（过期读取换占位符）；读台账登记 |
+| `src/capabilities/session/domain/session.rs` | 读台账 `ReadAt` 与 `freshness_view` 纯函数 |
+| `src/capabilities/session/domain/history.rs` | `SessionMeta.context_freshness`（落盘） |
 
 ### 2.3 算法
 
@@ -67,11 +68,11 @@
 
 **准入（已定口径）**：基线是显式事实 `BaseRef { oid }`，落在 `refs/agents/<agent>` 的 `heads: path -> oid`；没有记录 = 从未拉取，不伪造历史。两个落点——工具执行前（写前准入）与提交时（CAS 复核），都在写共享区之前判定，失败不产出 `Pending`（否则 `recover_locked` 会重放）。自动提交**不 pull**：基线过期即 `CommitRefusal::Stale` 硬失败，由模型/用户显式 `work_pull` 后再写。新文件（主线里没有、也没拉过）放行，否则模型写不出第一份文件。
 
-**读事实**：`ReadFact { worktree, path, from, to, blob, complete }` 随工具结果行落盘。读之前若该路径有未提交差异，先落一条单路径 `external` 提交，保证 blob 在库里。
+**读事实**：`ReadFact { worktree, path, from, to, blob }` 随工具结果行落盘；`blob` 是读到的整份正文指纹（对象由写后自动提交落库），只有整份读到的 `read` 才留事实。
 
-**判定**：沿 `worktree` 对应 ref 的提交链找同路径后续 `Change`；blob 不同则 diff，按 16 行块判相交；命中即整条读取标过期。时间戳、遍历顺序不得进判定。
+**判定**：取共享区当前提交树里同路径的 blob；与读事实的指纹相同即新鲜；路径不在树里即过期；不同则把读过的行窗口在新正文里按内容找——找不到即过期。时间戳、遍历顺序不进判定。
 
-**呈现**：只在压缩边界之后替换，同回合批量；占位符文本 `[已过期：<path> <from>-<to>，读取后文件已修改]`。
+**呈现**：发送前一次性派生（同回合批量）；占位符文本 `[已过期：<path> 第<from>-<to>行，读取后文件已修改；需要时重新 read]`。已进摘要的旧读不再进发送视图，自然无需替换。
 
 ### 2.4 测试
 
@@ -85,7 +86,9 @@
 - [x] 2A 基线事实与准入：`domain/base.rs`、`refs/agents/<agent>` 逐路径基线（pull / 提交后写实）、`work_commit_auto`（CAS → 提交 → 基线推进）、类型化拒绝；
 - [x] 2B 接线：`MemberTools.workspace`（`CollabSession` 注入，生产必为 `Some`）、`tool_loop::commit_writes` 在写工具落地后按 `Observations.take_written()` 自动提交（锚 = 工具调用行）、`work_commit_auto` 返回 `Option`（无改动不算失败）、六处临时 `allow(dead_code)` 已删；提示词与 `docs/session/session-model.md`、`docs/permission/README.md`、`systools/tools.yaml` 同步为"自动提交 + 基线过期只留在沙箱"；
 - [ ] 2B′ 回合末全量扫沙箱（shell / 模块 / 外部写的文件）落 `source=external` 提交；
-- [ ] 2C `ReadFact` 与 `freshness`；2D `assemble` 占位符与 `meta.context_freshness`。
+- [x] 2C `ReadFact` 与 `freshness`：`domain/readfact.rs`（事实随工具行落盘，`ToolCallView.read`）、`domain/freshness.rs`（按内容找连续行窗口）、`work_stale_reads`（指纹相同即新鲜，不同才比行区间；对象缺失按过期）；整份读到的 `read` 才留事实；
+- [ ] 2E 用户开关：`set_context_freshness` 动作（写工作根 meta、整棵子树共享、生成中拒绝）+ 状态栏入口；在它接上之前，开关只能手改 meta 文件，对用户等于不可达
+- [x] 2D 发送视图占位符与 `meta.context_freshness`：事实落转录、读台账按正文匹配（压缩移位不失配）、`freshness_view` 纯函数派生、单/代理会话装配与重建都装回开关与台账、开关默认关（成本由用户按钮控制）；`docs/session/session-model.md` 的「过期读取的占位符」为口径。
 
 ### 2.6 收尾
 

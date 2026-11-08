@@ -5,6 +5,7 @@ pub use crate::capabilities::workspace::domain::asset::{
 };
 pub use crate::capabilities::workspace::domain::base::CommitRefusal;
 pub use crate::capabilities::workspace::domain::hash::content_hash;
+pub use crate::capabilities::workspace::domain::readfact::ReadFact;
 pub use crate::capabilities::workspace::domain::workspace::{
     safe_file_name, AreaUsage, Place, Sandbox, Sandboxes, WorkFiles, WorkRoots, WorkUsage,
 };
@@ -14,6 +15,19 @@ pub use crate::capabilities::workspace::domain::workstore::{
     ResolveTake, ResolveWarning, ResolveWarningKind, RestoreLostReport, StatusEntry, StatusReport,
     SyncReport, VersionView,
 };
+
+/// 目的：一条待判定的读取（一次 `read` 读到的行区间 + 当时的整份指纹）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadQuery {
+    /// 目的：工作树内的相对路径（斜杠分隔）。
+    pub path: String,
+    /// 目的：读的那一刻整份内容的指纹。
+    pub blob: String,
+    /// 目的：读到的第一行（从 1 数起）。
+    pub from: u64,
+    /// 目的：读到的最后一行（含）。
+    pub to: u64,
+}
 
 /// 目的：提交历史的一条（不含整棵树，列表可安全分页）。
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -182,6 +196,11 @@ pub trait Workspace: Send + Sync {
         path: &str,
         expect_current: &str,
     ) -> Result<RestoreLostReport, String>;
+    /// **读取是否过期**：一批读取事实（工作树、路径、行区间、当时的指纹）逐个判定。
+    /// 返回：与 `queries` 同序的布尔值；true = 读过的行在主副本里已经变了（这段内容该被替换成占位符）。
+    /// 约束：判据是**内容**不是时间——路径没了算过期；指纹相同算不过期；指纹不同才比行区间。
+    ///   旧版本从内容寻址对象库里取；对象缺失时按过期处理（宁可供模型重读，不供奉可能错的旧内容）。
+    fn work_stale_reads(&self, work: &str, queries: &[ReadQuery]) -> Result<Vec<bool>, String>;
     /// 目的：把主副本物化回某个提交点（只改共享区，不动各会话）。
     /// 约束：非破坏性——目标之后的提交仍保留，可再次回滚。
     fn work_restore(&self, work: &str, commit: u64) -> Result<(), String>;

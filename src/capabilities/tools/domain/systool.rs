@@ -148,6 +148,9 @@ pub struct Observations {
     written: std::collections::BTreeSet<PathBuf>,
     /// 目的：本次调用里由核心**删掉**的路径（自动提交的 `deletes` 由此而来）。
     removed: std::collections::BTreeSet<PathBuf>,
+    /// 目的：本次调用里 `read` 产生的**读取事实**（哪个工作树、哪个路径、哪几行、当时的指纹）。
+    /// 约束：取走后挂到工具行上随转录落盘；发送视图据它判定这段内容是否过期。
+    reads: Vec<crate::capabilities::workspace::api::ReadFact>,
 }
 
 #[derive(Debug, Clone)]
@@ -164,6 +167,7 @@ impl Observations {
         self.seen.clear();
         self.written.clear();
         self.removed.clear();
+        self.reads.clear();
     }
 
     /// 目的：取走"这次调用写过哪些路径"（取走即清空，下一次调用从零开始）。
@@ -174,6 +178,16 @@ impl Observations {
     /// 目的：取走"这次调用删掉了哪些路径"（取走即清空，下一次调用从零开始）。
     pub fn take_removed(&mut self) -> Vec<PathBuf> {
         std::mem::take(&mut self.removed).into_iter().collect()
+    }
+
+    /// 目的：取走"这次调用产生了哪些读取事实"（取走即清空，下一次调用从零开始）。
+    pub fn take_reads(&mut self) -> Vec<crate::capabilities::workspace::api::ReadFact> {
+        std::mem::take(&mut self.reads)
+    }
+
+    /// 目的：记一条读取事实——发送视图据此判断这段读过的内容过期没有。
+    pub(crate) fn note_read_fact(&mut self, fact: crate::capabilities::workspace::api::ReadFact) {
+        self.reads.push(fact);
     }
 
     /// 目的：记一次删除——自动提交要把它写成 `deletes`，否则沙箱删了、共享区还留着。
@@ -215,6 +229,8 @@ impl Observations {
                 }
             }
         }
+        // 读取事实是"这次调用读到的东西"，并发分支按原序并入（去重靠事实本身的内容）。
+        self.reads.extend(branch.reads.iter().cloned());
     }
 
     fn known(&self, path: &Path) -> Option<u64> {

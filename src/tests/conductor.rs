@@ -471,6 +471,7 @@ pub(crate) fn tool_round_reasoning_lands_on_the_tool_line() {
         output: "内容".to_string(),
         call_id: String::new(),
         reply: 0,
+        read: None,
     };
     let round = crate::capabilities::collab::service::round::Round {
         reply: 1,

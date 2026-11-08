@@ -9,12 +9,13 @@
 use crate::capabilities::workspace::api::{
     media_hint, Change, ChangeKind, ChangeView, CommitDetail, CommitFileView, CommitReport,
     CommitRequest, CommitSummary, FileVersion, GcReport, LostEntry, LostReport, PullReport,
-    ResolveAction, ResolveEntry, ResolveReport, ResolveRequest, ResolveTake, ResolveWarning,
-    ResolveWarningKind, RestoreLostReport, StatusEntry, StatusReport, SyncReport, VersionView,
-    WorkFiles, WorkLog, WorkLogEntry, WorkRoots, WorkUsage, Workspace, MAX_ASSET_BYTES,
-    VERSION_TEXT_LIMIT,
+    ReadQuery, ResolveAction, ResolveEntry, ResolveReport, ResolveRequest, ResolveTake,
+    ResolveWarning, ResolveWarningKind, RestoreLostReport, StatusEntry, StatusReport, SyncReport,
+    VersionView, WorkFiles, WorkLog, WorkLogEntry, WorkRoots, WorkUsage, Workspace,
+    MAX_ASSET_BYTES, VERSION_TEXT_LIMIT,
 };
 use crate::capabilities::workspace::domain::base::{stale_paths, BaseRef, CommitRefusal};
+use crate::capabilities::workspace::domain::freshness::lines_changed;
 use crate::capabilities::workspace::domain::hash::{content_hash, is_content_hash};
 use crate::capabilities::workspace::domain::workstore::{
     clean_rel, expand_paths, local_take_verdict, lost_rel, needs_backup, plan_commit, pull_verdict,
@@ -1048,6 +1049,46 @@ impl Workspace for WorkspaceService {
         self.record_committed_bases(&store, agent, &report)
             .map_err(CommitRefusal::Broken)?;
         Ok(Some(report))
+    }
+
+    fn work_stale_reads(&self, work: &str, queries: &[ReadQuery]) -> Result<Vec<bool>, String> {
+        if queries.is_empty() {
+            return Ok(Vec::new());
+        }
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let (shared, store) = self.work_roots(work)?;
+        let _ = shared;
+        let _lock = self.store.lock(&store)?;
+        let (_head, tree) = self.head_tree(&store)?;
+        let mut out = Vec::with_capacity(queries.len());
+        for q in queries {
+            // 路径在主副本里没了 = 读过的东西已经不在了。
+            let Some(now) = tree.get(&q.path) else {
+                out.push(true);
+                continue;
+            };
+            // 指纹相同 = 读的就是现在的版本（文件头插一行不会走到这里，插入会改指纹，
+            // 但下面的行区间比较会把"读过的行没变"判成不过期）。
+            if *now == q.blob {
+                out.push(false);
+                continue;
+            }
+            let old = self.store.read_object(&store, &q.blob).ok();
+            let new = self.store.read_object(&store, now).ok();
+            match (old, new) {
+                (Some(old), Some(new)) => match (String::from_utf8(old), String::from_utf8(new)) {
+                    (Ok(old), Ok(new)) => {
+                        out.push(lines_changed(&old, &new, q.from, q.to));
+                    }
+                    // 非 UTF-8（二进制 / 编码坏掉）：没法按行比，按过期处理。
+                    _ => out.push(true),
+                },
+                // 旧对象缺失（被 GC 或从未入库）：宁可供模型重读，不供奉可能错的旧内容。
+                _ => out.push(true),
+            }
+        }
+        Ok(out)
     }
 
     fn work_sync(&self, work: &str, paths: &[String], time: i64) -> Result<SyncReport, String> {

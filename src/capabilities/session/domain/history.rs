@@ -50,6 +50,11 @@ pub struct SessionMeta {
     /// 任务级委托（全权）：`Some` = 这条会话的核心可以用代理工具代用户决定。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delegation: Option<Delegation>,
+    /// 目的：**过期内容自动清理**开关（用户在界面上控制：省上下文，但每次判过期都要读对象库）。
+    /// 约束：必须落盘——回放与实时要产出同一条请求，开关状态不能只活在内存里。
+    ///   缺省 false = 只记读事实、发送视图原样（不付判定的成本）。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub context_freshness: bool,
     /// 运行态：停止后不再被派发或唤醒；关闭是终态。缺省（active）= 正常运行。
     /// 它与"这一刻在不在跑"（推的 `Working`，短暂不落盘）是两件事：**它是持久事实**，
     /// 重启/回档后照样成立（见 docs/session/session-model.md 二）。

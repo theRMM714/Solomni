@@ -1226,6 +1226,90 @@ fn shared_of(ws: &WorkFace, work: &str) -> PathBuf {
     ws.roots(work, &[]).unwrap().shared
 }
 
+/// 目的：过期判定按内容——指纹相同不过期，改到读过的行才过期。
+#[test]
+pub(crate) fn work_stale_reads_judges_by_content_not_by_clock() {
+    use crate::capabilities::workspace::api::{content_hash, ReadQuery};
+    let (ws, _dirs, _store) = work_ws();
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    let v1 = b"a\nb\nc\n";
+    ws.work_commit_user("w", "note.md", v1, 1, 0).unwrap();
+    let q = |from: u64, to: u64, blob: String| ReadQuery {
+        path: "note.md".to_string(),
+        blob,
+        from,
+        to,
+    };
+    let old = content_hash(v1);
+
+    // 内容与读的时候完全一样：不过期。
+    assert_eq!(
+        ws.work_stale_reads("w", &[q(1, 3, old.clone())]).unwrap(),
+        vec![false]
+    );
+
+    // 只改第 3 行：读 1-2 不受影响，读 3-3 过期。
+    ws.work_commit_user("w", "note.md", b"a\nb\nC\n", 2, 0)
+        .unwrap();
+    assert_eq!(
+        ws.work_stale_reads(
+            "w",
+            &[
+                q(1, 2, old.clone()),
+                q(3, 3, old.clone()),
+                q(9, 9, old.clone())
+            ]
+        )
+        .unwrap(),
+        vec![false, true, false],
+        "区间不与改动相交 = 那次读仍然可信"
+    );
+
+    // 文件头插一行：行号全移了，但读过的那几行一个字没变 → 不算过期。
+    ws.work_commit_user("w", "note.md", b"zero\na\nb\nC\n", 3, 0)
+        .unwrap();
+    assert_eq!(
+        ws.work_stale_reads("w", &[q(1, 2, old.clone())]).unwrap(),
+        vec![false]
+    );
+
+    // 文件被删：读过的东西不在了。
+    ws.work_commit_user("w", "gone.md", b"x\n", 4, 0).unwrap();
+    assert_eq!(
+        ws.work_stale_reads(
+            "w",
+            &[ReadQuery {
+                path: "gone.md".to_string(),
+                blob: content_hash(b"x\n"),
+                from: 1,
+                to: 1,
+            }]
+        )
+        .unwrap(),
+        vec![false]
+    );
+    ws.work_pull("w", "a", &["gone.md".to_string()]).unwrap();
+    let sb = sandbox_of(&ws, "w", "a");
+    crate::capabilities::workspace::ports::WorkStore::remove_under(&*_store, &sb, "gone.md")
+        .unwrap();
+    ws.work_commit_auto("w", "a", "s", &commit_req(&[], &["gone.md"], "删", 5))
+        .unwrap()
+        .expect("应当发布一次删除");
+    assert_eq!(
+        ws.work_stale_reads(
+            "w",
+            &[ReadQuery {
+                path: "gone.md".to_string(),
+                blob: content_hash(b"x\n"),
+                from: 1,
+                to: 1,
+            }]
+        )
+        .unwrap(),
+        vec![true]
+    );
+}
+
 /// 三方比较的核心承诺：a、b 同基线各改同一文件，后者提交必须**报冲突**而不是覆盖；
 /// 任一提交点都能还原出当时的共享区内容。
 #[test]

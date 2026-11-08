@@ -109,6 +109,7 @@ pub(crate) fn mode_vocabulary_is_single_or_collab_only() {
         Arc::new(InMemorySysIo::new()),
     );
     hist.create(&SessionMeta {
+        context_freshness: false,
         name: "未知形态".to_string(),
         mode: "unknown_mode".to_string(),
         delegate: false,

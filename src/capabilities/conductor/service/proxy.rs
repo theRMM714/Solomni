@@ -560,6 +560,7 @@ impl Conductor {
         // 先解析核心通道：没有模型就不建（工作区都还没有，失败什么都不留）。
         let channel = self.registry.core_channel()?;
         let meta = SessionMeta {
+            context_freshness: false,
             name: name.to_string(),
             mode: "proxy".to_string(),
             delegate: false,
@@ -668,6 +669,7 @@ impl Conductor {
         );
         let (window, percent, keep_percent) = self.context_budget(None);
         s.set_context_budget(window, percent, keep_percent);
+        s.set_context_freshness(meta.context_freshness);
         s.set_model(self.registry.core_model());
         s.set_compact_factory(self.compact_factory());
         Ok(s)

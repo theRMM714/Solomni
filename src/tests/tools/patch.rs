@@ -262,6 +262,56 @@ pub(crate) fn builtin_list_shows_a_directory_and_read_guides_to_it() {
     );
 }
 
+/// 目的：整份读到的 read 留下"工作树 + 路径 + 行区间 + 当时的指纹"，半份读不留。
+#[test]
+pub(crate) fn builtin_read_records_a_fact_only_when_it_read_the_whole_text() {
+    use crate::capabilities::tools::api::Observations;
+    let io = InMemorySysIo::new();
+    let sb = test_sandbox("a1", &[]);
+    io.seed(
+        &["demo", "work", "note.txt"],
+        "l1
+l2
+l3
+",
+    );
+    let note = s(&["demo", "work", "note.txt"]);
+    let mut obs = Observations::default();
+
+    let full = crate::capabilities::tools::service::systool::execute(
+        &sb,
+        &test_systools().tools,
+        &io,
+        &mut obs,
+        "read",
+        &format!("{{\"path\":\"{}\"}}", note),
+    );
+    assert!(full.ok, "{}", full.output);
+    let facts = obs.take_reads();
+    assert_eq!(facts.len(), 1, "整读必须留下一条读取事实");
+    let fact = &facts[0];
+    assert_eq!(fact.path, "note.txt", "路径是相对工作树的");
+    assert_eq!((fact.from, fact.to), (1, 3));
+    assert_eq!(fact.blob.len(), 64, "指纹是内容寻址的 sha256");
+    assert_eq!(
+        fact.blob,
+        crate::capabilities::workspace::api::content_hash(b"l1\nl2\nl3\n"),
+        "指纹取自文件原文"
+    );
+
+    // 只读一段：半份内容没法与后续版本按行对齐，不留事实。
+    let part = crate::capabilities::tools::service::systool::execute(
+        &sb,
+        &test_systools().tools,
+        &io,
+        &mut obs,
+        "read",
+        &format!("{{\"path\":\"{}\",\"limit\":1}}", note),
+    );
+    assert!(part.ok, "{}", part.output);
+    assert!(obs.take_reads().is_empty(), "区间读不该留事实");
+}
+
 #[test]
 pub(crate) fn builtin_read_range_numbers_lines_and_points_at_the_next_offset() {
     let io = InMemorySysIo::new();

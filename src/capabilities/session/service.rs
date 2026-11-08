@@ -108,6 +108,11 @@ fn core_rows(
     rows
 }
 
+/// 目的：一条工具结果消息的**正文**（回放与实时唯一来源；发送视图按它定位读过的那条消息）。
+pub fn tool_result_body(c: &crate::capabilities::session::api::ToolCallView) -> String {
+    format!("[工具结果] {}\n{}", c.label(), c.output)
+}
+
 /// 把**一次模型回复**翻译成发给模型的消息——**实时与重建都只走这一处**。
 ///
 /// 为什么必须只有一处：转录行与消息列表是同一件事的两份表示，两边各拼一次就会漂移：
@@ -142,7 +147,7 @@ pub fn reply_msgs(
         out.push(crate::capabilities::llm::api::Msg::assistant(raw));
     }
     for c in calls {
-        let body = format!("[工具结果] {}\n{}", c.label(), c.output);
+        let body = tool_result_body(c);
         out.push(if protocol {
             crate::capabilities::llm::api::Msg::tool(&c.call_id, body)
         } else {
@@ -261,6 +266,7 @@ pub fn core_operation(
                     output: head_chars(&payload.to_string(), 400),
                     call_id: c.id.clone(),
                     reply: 0,
+                    read: None,
                 },
                 &done.raw,
                 &done.reasoning,
@@ -287,6 +293,7 @@ pub fn core_operation(
                     output: head_chars(&payload.to_string(), 400),
                     call_id: String::new(),
                     reply: 0,
+                    read: None,
                 },
                 &done.raw,
                 &done.reasoning,
@@ -358,6 +365,7 @@ pub fn core_operation(
                 output: out.output,
                 call_id,
                 reply: 0,
+                read: None,
             };
             // 核心"先核实"这一步也如实推出去（用户看得到它在读什么、查什么）。
             for row in core_rows(&view.name, view.clone(), &done.raw, "", "") {

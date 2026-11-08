@@ -86,7 +86,7 @@ pub fn execute(
         return fail(e);
     }
     match name {
-        READ => read(io, obs, &args, &spec, &path),
+        READ => read(sb, &place, io, obs, &args, &spec, &path),
         WRITE => write(io, obs, &args, &spec, &path),
         EDIT => edit(io, obs, &args, &spec, &path),
         LIST => list(io, &spec, &path),
@@ -229,6 +229,8 @@ fn delete(
 
 /// read：按行区间返回，行号从 1 数起；回执末尾告诉模型接着用哪个 offset，并如实记账"读到的是不是全文"。
 fn read(
+    sb: &Sandbox,
+    place: &Place,
     io: &dyn SysIo,
     obs: &mut Observations,
     args: &serde_json::Value,
@@ -302,6 +304,25 @@ fn read(
         format!("只读了第 {}-{} 行（共 {} 行）", offset, to, total)
     };
     obs.note_read(path, complete, why, hash);
+    // 读取事实：只有"整份原文都读到了"才记——半份内容没法与后续版本按行对齐，
+    // 拿它判过期只会误导模型（宁可让它多读一次）。
+    if complete {
+        if let Some(root) = sb.root_of(place) {
+            if let Ok(rel) = path.strip_prefix(root) {
+                obs.note_read_fact(crate::capabilities::workspace::api::ReadFact {
+                    worktree: if matches!(place, Place::Shared) {
+                        String::new()
+                    } else {
+                        sb.work_name.clone()
+                    },
+                    path: crate::kernel::api::slash(rel),
+                    from: offset as u64,
+                    to: to as u64,
+                    blob: crate::capabilities::workspace::api::content_hash(got.text.as_bytes()),
+                });
+            }
+        }
+    }
     let mut out = header(body.join("\n"));
     let tail = if got.cut {
         // 机制层只读了开头：总行数不可知，也不能声称"到文件末尾"。

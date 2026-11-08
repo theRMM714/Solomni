@@ -50,6 +50,7 @@ fn provider() -> Provider {
 
 fn meta(name: &str) -> SessionMeta {
     SessionMeta {
+        context_freshness: false,
         name: name.to_string(),
         mode: "direct".to_string(),
         delegate: false,

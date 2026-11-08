@@ -1595,6 +1595,7 @@ pub(crate) fn deleting_a_session_releases_its_fence_lease() {
 #[test]
 pub(crate) fn session_meta_exec_section_roundtrips_and_defaults_to_host() {
     let meta = SessionMeta {
+        context_freshness: false,
         name: "w".to_string(),
         mode: "single".to_string(),
         delegate: false,
@@ -1626,6 +1627,7 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_defaults_to_host() {
     assert_eq!(back.run, RunState::Active, "缺省运行态 = 正常运行");
     // 运行态是**持久事实**：停止 / 关闭写进 meta 后重启照样成立。
     let stopped = SessionMeta {
+        context_freshness: false,
         thinking: None,
         run: RunState::Stopped,
         workspace: None,
@@ -1797,6 +1799,7 @@ pub(crate) fn child_sessions_share_the_main_guest_and_follow_its_tier() {
         vm_spec(),
     );
     let child = SessionMeta {
+        context_freshness: false,
         name: "w--a".to_string(),
         mode: "single".to_string(),
         delegate: false,
@@ -1862,6 +1865,7 @@ pub(crate) fn proxy_children_share_the_proxy_tree_guest() {
     let hist = Arc::new(InMemoryHistory::new());
     seed_session(&hist, "p", "proxy", Vec::new(), vm_spec());
     let child = SessionMeta {
+        context_freshness: false,
         name: "p--a".to_string(),
         mode: "single".to_string(),
         delegate: false,
@@ -1914,6 +1918,7 @@ pub(crate) fn child_edit_writes_back_to_the_agent_roster() {
         Default::default(),
     );
     let child = SessionMeta {
+        context_freshness: false,
         name: "w--a".to_string(),
         mode: "single".to_string(),
         delegate: false,
@@ -1978,6 +1983,7 @@ pub(crate) fn tree_wide_module_overlap_is_allowed_on_child_edit() {
         Default::default(),
     );
     let child = SessionMeta {
+        context_freshness: false,
         name: "w--a".to_string(),
         mode: "single".to_string(),
         delegate: false,
