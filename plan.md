@@ -229,4 +229,5 @@ pub struct Ref {
 
 - [ ] 删除 `plan.md`
 - [ ] 移除 `tests/gates/docs/root-router.js` 的白名单条目
+- [ ] 移除 `docs/templates/index.json` 里 `plan.md` 的例外
 - [ ] 三处文档同步完成，`node run-tests.js` 全绿
