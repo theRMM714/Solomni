@@ -2645,3 +2645,67 @@ pub(crate) fn work_gc_reclaims_commits_only_after_refs_drop() {
     assert_eq!(rep.removed_commits, 2);
     assert!(store.list_commits(&sd).unwrap().is_empty());
 }
+
+/// 目的：自动提交只走快进——基线必须等于主线头；主线被推进后同一路径必须被拒，不悄悄变成本地优先。
+#[test]
+pub(crate) fn work_commit_auto_accepts_only_fresh_bases() {
+    use crate::capabilities::workspace::api::CommitRefusal;
+    use crate::capabilities::workspace::ports::WorkStore;
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string(), "b".to_string()])
+        .unwrap();
+    ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
+
+    // a 先拉、再改：基线等于主线头 → 自动提交成立。
+    ws.work_pull("w", "a", &["note.md".to_string()]).unwrap();
+    let sb_a = sandbox_of(&ws, "w", "a");
+    store.write_under(&sb_a, "note.md", b"v2").unwrap();
+    let first = ws
+        .work_commit_auto("w", "a", "w--a", &commit_req(&["note.md"], &[], "a 改", 2))
+        .expect("基线新鲜的自动提交");
+    assert_eq!(first.id, 2);
+
+    // b 拉到的就是 v2，改完自动提交 → 主线推进到 3；a 的基线仍停在 2。
+    ws.work_pull("w", "b", &["note.md".to_string()]).unwrap();
+    let sb_b = sandbox_of(&ws, "w", "b");
+    store.write_under(&sb_b, "note.md", b"v3").unwrap();
+    let second = ws
+        .work_commit_auto("w", "b", "w--b", &commit_req(&["note.md"], &[], "b 改", 3))
+        .expect("b 的基线也新鲜");
+    assert_eq!(second.id, 3);
+
+    // a 再写同一路径：基线 2 ≠ 主线 3 → 拒绝，点到路径与两边提交号，且不留半个提交。
+    store.write_under(&sb_a, "note.md", b"v4").unwrap();
+    let refused = ws
+        .work_commit_auto(
+            "w",
+            "a",
+            "w--a",
+            &commit_req(&["note.md"], &[], "a 再改", 4),
+        )
+        .expect_err("过期基线必须被拒");
+    match &refused {
+        CommitRefusal::Stale { main, paths } => {
+            assert_eq!(main.oid, 3);
+            assert_eq!(paths.len(), 1);
+            assert_eq!(paths[0].path, "note.md");
+            assert_eq!(paths[0].base, Some(2));
+        }
+        other => panic!("拒绝类型不对：{}", other),
+    }
+    assert!(refused.to_string().contains("work_pull"), "{}", refused);
+    let head = store.head(&ws.roots("w", &[]).unwrap().store).unwrap();
+    assert_eq!(head, Some(3), "拒绝不得留下提交");
+
+    // 新文件（主线里没有、也没拉过）按新文件放行：不然模型永远写不出第一个文件。
+    store.write_under(&sb_a, "fresh.md", b"new").unwrap();
+    let third = ws
+        .work_commit_auto(
+            "w",
+            "a",
+            "w--a",
+            &commit_req(&["fresh.md"], &[], "新文件", 5),
+        )
+        .expect("新文件不要求基线");
+    assert_eq!(third.id, 4);
+}
