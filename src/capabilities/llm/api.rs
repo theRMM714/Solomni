@@ -245,6 +245,12 @@ pub struct TokenUsage {
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
     pub total_tokens: u64,
+    /// 目的：输入里命中前缀缓存、按缓存价计费的那部分（供应商没报 = None，不是 0）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_read: Option<u64>,
+    /// 目的：这次写进前缀缓存的输入（供应商没报 = None，不是 0）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_creation: Option<u64>,
 }
 
 impl TokenUsage {
@@ -258,6 +264,8 @@ impl TokenUsage {
             prompt_tokens,
             completion_tokens,
             total_tokens: total_tokens.unwrap_or(prompt_tokens + completion_tokens),
+            cache_read: None,
+            cache_creation: None,
         }
     }
 }

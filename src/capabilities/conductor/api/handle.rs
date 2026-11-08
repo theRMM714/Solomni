@@ -189,12 +189,47 @@ impl ConductorHandle {
         target: RewindTarget,
         force: bool,
     ) -> Result<RewindOutcome, String> {
+        // 留档 / 恢复要动文件与转录：在跑的回合先停稳，否则它收尾时的写会落到已被改写的旧线上。
+        // 删除只截转录、不动文件，保持原有的"在跑的会话跳过"语义。
+        if matches!(target, RewindTarget::Archive(_) | RewindTarget::Restore(_)) {
+            self.settle_tree(sid)?;
+        }
         let outcome = self.call({
             let sid = sid.to_string();
             move |core| core.rewind_outcome(&sid, target, force)
         })?;
         self.publish_rewound(sid, &outcome);
         Ok(outcome)
+    }
+
+    /// 目的：留档 / 恢复前把整棵子树在跑的回合停下来，并等它们把会话交回核心。
+    /// 返回：实际停下的会话 id。
+    /// 约束：等待期间**不占核心队列**——收尾要靠核心交回会话；30 秒仍未收尾 = 拒绝，文件与转录都还没动。
+    fn settle_tree(&self, root: &str) -> Result<Vec<String>, String> {
+        let root_owned = root.to_string();
+        let tree: Vec<String> = self.call(move |core| Ok(core.subtree_of(&root_owned)))?;
+        if !tree.iter().any(|s| self.jobs.is_running(s)) {
+            return Ok(Vec::new());
+        }
+        // 等用户裁决的卡先作废（停止 = 拒绝），生成线程才不会卡在确认上。
+        self.void_gates(root);
+        let stopped = self.stop_tree(root)?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            let jobs_busy = tree.iter().any(|s| self.jobs.is_running(s));
+            let ids = tree.clone();
+            let core_busy = self.call(move |core| Ok(core.running_any(&ids)))?;
+            if !jobs_busy && !core_busy {
+                return Ok(stopped);
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(
+                    "整棵子树里有回合 30 秒内没停下来：这次操作没有动文件与转录，请稍后重试"
+                        .to_string(),
+                );
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
     }
 
     /// 目的：把一次回档结果发布成事件台上的重置快照（受影响的每个会话各一条 `rewound`）。

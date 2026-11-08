@@ -263,8 +263,8 @@ async function lines(sid) {
   const t1 = (l1[1] || {}).tool || {};
   assert(t1.name === 'write' && t1.ok === true && t1.module === '', '工具调用是一条 tool 行（内置工具 module 为空）', JSON.stringify(t1).slice(0, 200));
   assert(l1[2] && !l1[2].tool, '最后一行是纯文本行', JSON.stringify(l1[2] || {}).slice(0, 160));
-  // 回档：删除该行及其后（点第一行 → 转录清空）
-  assert((await act(name1, 'rewind', { id: 0 })).status === 200, '回档到第一行');
+  // 回档：删除该行及其后（点第一行 → 转录清空）；这里要验的是**删除**，留档会连沙箱文件一起回到留档点。
+  assert((await act(name1, 'rewind', { id: 0, mode: 'delete' })).status === 200, '回档到第一行');
   const l1r = await lines(name1);
   assert(l1r.length === 0, '删除第一行后转录清空', JSON.stringify(l1r).slice(0, 160));
 

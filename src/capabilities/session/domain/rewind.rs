@@ -38,64 +38,97 @@ pub fn last_line_within(events: &[serde_json::Value], keep_turn: u64) -> u64 {
     cut
 }
 
-/// 回档模式：**留档**（标记 + 折叠，可恢复）或**删除**（真的截断，不可恢复）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RewindMode {
-    Archive,
-    Delete,
-    /// 仅用于子会话同步的"恢复"动作（不作为标记写入流水）。
-    Restore,
-}
-
-/// 流水里一条回档标记（只追加；删除模式会重写文件，因此新数据里通常只有留档标记）。
+/// 流水里一条留档标记（只追加；恢复 = 在它之前截断）。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RewindMark {
+pub struct ArchiveMark {
     /// 标记的单调 id（呈现与恢复按它定位）。
     pub mark: u64,
-    pub mode: RewindMode,
     /// 保留 id < before 的行。
     pub before: u64,
     /// 标记之后新行从此起的 id（留档用；删除模式等于 before）。
     pub from: u64,
-    /// 标记点对应的共享区提交（None = 空共享区）。
-    pub commit: Option<u64>,
-    /// 标记之前的共享区头（恢复时回到它）。
-    pub after: Option<u64>,
+    /// 留档前的主副本头（None = 空共享区）。
+    pub shared: Option<u64>,
+    /// 留档前各 agent 沙箱的物化点（档案 ref 的同一份）。
+    pub heads: std::collections::BTreeMap<String, Option<u64>>,
+    /// 给用户看的一句话（折叠区间里最后一条内容行）。
+    pub label: String,
 }
 
-impl RewindMark {
-    /// 从一条流水事件解析；不是当前格式的回档记录 = None。
+impl ArchiveMark {
+    /// 从一条流水事件解析；不是留档记录 = None。
     /// 当前格式只有留档标记：`before`（保留 id < before）与 `mode: archive`。
-    pub fn from_value(ev: &serde_json::Value) -> Option<RewindMark> {
+    pub fn from_value(ev: &serde_json::Value) -> Option<ArchiveMark> {
         if ev.get("type").and_then(|t| t.as_str()) != Some("rewind") {
             return None;
         }
         let before = ev.get("before").and_then(|v| v.as_u64())?;
-        let mode = match ev.get("mode").and_then(|m| m.as_str()) {
-            Some("archive") => RewindMode::Archive,
-            _ => return None,
-        };
-        Some(RewindMark {
+        // 只有留档标记带 mode=archive；删除与恢复都不写标记。
+        if ev.get("mode").and_then(|m| m.as_str()) != Some("archive") {
+            return None;
+        }
+        let heads = ev
+            .get("heads")
+            .and_then(|h| h.as_object())
+            .map(|o| o.iter().map(|(k, v)| (k.clone(), v.as_u64())).collect())
+            .unwrap_or_default();
+        Some(ArchiveMark {
             mark: ev.get("mark").and_then(|v| v.as_u64()).unwrap_or(0),
-            mode,
             before,
             from: ev.get("from").and_then(|v| v.as_u64()).unwrap_or(before),
-            commit: ev.get("commit").and_then(|v| v.as_u64()),
-            after: ev.get("after").and_then(|v| v.as_u64()),
+            shared: ev.get("shared").and_then(|v| v.as_u64()),
+            heads,
+            label: ev
+                .get("label")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
         })
     }
 }
 
-/// 流水里全部回档标记（按出现顺序）。恢复 = 在该标记处截断文件，所以更晚的标记随之一并消失。
-pub fn rewind_marks(events: &[serde_json::Value]) -> Vec<RewindMark> {
-    events.iter().filter_map(RewindMark::from_value).collect()
+/// 流水里全部留档标记（按出现顺序）。恢复 = 在该标记处截断文件，所以更晚的标记随之一并消失。
+pub fn rewind_marks(events: &[serde_json::Value]) -> Vec<ArchiveMark> {
+    events.iter().filter_map(ArchiveMark::from_value).collect()
+}
+
+/// 目的：留档标记给用户看的标签——折叠区间里最后一条内容行，截到 40 个字符。
+/// 约束：纯派生；没有内容行时退回"第 N 行"，不写时间也不写随机量。
+pub fn archive_label(events: &[serde_json::Value], before: u64, from: u64) -> String {
+    let mut found = String::new();
+    for ev in events {
+        if ev.get("type").and_then(|t| t.as_str()) != Some("transcript") {
+            continue;
+        }
+        let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) else {
+            continue;
+        };
+        for l in lines {
+            let Some(id) = l.get("id").and_then(|i| i.as_u64()) else {
+                continue;
+            };
+            if id < before || id >= from {
+                continue;
+            }
+            let kind = l.get("kind").and_then(|k| k.as_str()).unwrap_or("");
+            if matches!(kind, "compacted" | "notice") || l.get("tool").is_some() {
+                continue;
+            }
+            let text = l.get("line").and_then(|x| x.as_str()).unwrap_or("").trim();
+            if !text.is_empty() {
+                found = text.to_string();
+            }
+        }
+    }
+    if found.is_empty() {
+        return format!("第 {} 行", before);
+    }
+    found.chars().take(40).collect()
 }
 
 /// 一行是否被某个**留档**标记折叠（落在它的 [before, from) 内）。
-pub fn folded(marks: &[RewindMark], id: u64) -> bool {
-    marks
-        .iter()
-        .any(|m| m.mode == RewindMode::Archive && m.before <= id && id < m.from)
+pub fn folded(marks: &[ArchiveMark], id: u64) -> bool {
+    marks.iter().any(|m| m.before <= id && id < m.from)
 }
 
 /// 应用回档标记后的**活动视图**：
@@ -164,6 +197,8 @@ pub fn last_usage(
             total_tokens: ev.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
             window: ev.get("window").and_then(|v| v.as_u64()).unwrap_or(0),
             exact: ev.get("exact").and_then(|v| v.as_bool()).unwrap_or(false),
+            cache_read: ev.get("cache_read").and_then(|v| v.as_u64()),
+            cache_creation: ev.get("cache_creation").and_then(|v| v.as_u64()),
         })
     })
 }
@@ -339,5 +374,41 @@ mod tests {
         assert_eq!(next_line_id(&events), 6, "新行从最大 id + 1 续号");
         assert!(folded(&rewind_marks(&events), 3));
         assert!(!folded(&rewind_marks(&events), 4));
+    }
+
+    /// 目的：标签取折叠区间里最后一条内容行——工具行 / 提示行 / 压缩提示不算，超长截到 40 字。
+    #[test]
+    fn archive_label_takes_the_last_content_line_in_the_folded_range() {
+        let events = vec![json!({"type":"transcript","lines":[
+            {"id":0,"kind":"msg","line":"第一句"},
+            {"id":1,"kind":"tool","line":"[工具]","tool":{}},
+            {"id":2,"kind":"msg","line":"最后一句"},
+            {"id":3,"kind":"notice","line":"[提示] x"},
+            {"id":4,"kind":"msg","line":"范围外"}
+        ]})];
+        assert_eq!(archive_label(&events, 0, 4), "最后一句");
+        assert_eq!(archive_label(&events, 4, 9), "范围外");
+        assert_eq!(
+            archive_label(&events, 0, 0),
+            "第 0 行",
+            "没有内容行时退回行号"
+        );
+        let long = "字".repeat(60);
+        let events = vec![json!({"type":"transcript","lines":[{"id":0,"kind":"msg","line":long}]})];
+        assert_eq!(archive_label(&events, 0, 1).chars().count(), 40);
+    }
+
+    /// 目的：留档标记解析出共享区头、每个 agent 的头与标签；非留档记录一律不算标记。
+    #[test]
+    fn archive_mark_reads_shared_heads_and_label_only_for_archive_rows() {
+        let ev = json!({"type":"rewind","mark":3,"mode":"archive","before":5,"from":8,
+            "shared":7,"heads":{"a":7,"b":null},"label":"改完了"});
+        let m = ArchiveMark::from_value(&ev).expect("留档记录");
+        assert_eq!((m.mark, m.before, m.from, m.shared), (3, 5, 8, Some(7)));
+        assert_eq!(m.heads.get("a"), Some(&Some(7)));
+        assert_eq!(m.heads.get("b"), Some(&None));
+        assert_eq!(m.label, "改完了");
+        assert!(ArchiveMark::from_value(&json!({"type":"rewind","mode":"delete"})).is_none());
+        assert!(ArchiveMark::from_value(&json!({"type":"notice"})).is_none());
     }
 }

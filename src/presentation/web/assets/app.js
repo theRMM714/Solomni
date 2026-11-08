@@ -3798,6 +3798,8 @@ function absorb(s, ev) {
         total_tokens: ev.total_tokens || 0,
         window: ev.window || 0,
         exact: ev.exact === true,
+        cache_read: typeof ev.cache_read === 'number' ? ev.cache_read : null,
+        cache_creation: typeof ev.cache_creation === 'number' ? ev.cache_creation : null,
       };
       return true;
     // 留档回档：折叠分界。内容保留在文件里，可恢复。
@@ -3806,7 +3808,9 @@ function absorb(s, ev) {
       s.lines.push({
         cls: 'sys rewind',
         who: '',
-        text: '[留档] 以下内容已折叠（保留在文件里，可恢复）',
+        text: ev.label
+          ? '[留档] ' + ev.label + '（折叠内容仍在文件里，可恢复）'
+          : '[留档] 以下内容已折叠（保留在文件里，可恢复）',
         mark: ev.mark,
       });
       break;
@@ -4557,6 +4561,13 @@ function openContextCard(s, anchor) {
   box.appendChild(popoverRow('窗口', fmtInt(c.window) + ' tokens'));
   box.appendChild(popoverRow('占用', pct == null ? '—' : pct.toFixed(1) + '%'));
   box.appendChild(popoverRow('上次输入 / 输出', fmtInt(c.prompt_tokens) + ' / ' + fmtInt(c.completion_tokens)));
+  if (c.cache_read != null || c.cache_creation != null) {
+    box.appendChild(popoverRow(
+      '缓存读 / 写',
+      (c.cache_read == null ? '—' : fmtInt(c.cache_read)) + ' / ' +
+        (c.cache_creation == null ? '—' : fmtInt(c.cache_creation)),
+    ));
+  }
   box.appendChild(popoverRow('自动压缩', at > 0 ? at + '%' : '已关闭'));
   const keep = Number((state.settings && state.settings.compact_keep_percent) || 0);
   box.appendChild(popoverRow('压缩保留', keep > 0 ? '至少 ' + keep + '% 窗口' : '只留摘要'));
@@ -5812,7 +5823,7 @@ async function act(action, text) {
 function rewindTo(id) {
   const s = activeSession();
   if (!s || isBusy(s)) return;
-  choiceModal('回档到此处', '留档：保留内容、折叠成标记，可随时恢复；删除：真的删掉这一行及其后的全部，不可恢复。', [
+  choiceModal('回档到此处', '留档：保留内容、折叠成标记，可随时恢复，工作区文件（共享区与各 agent 沙箱）也一起记入档案；删除：真的删掉这一行及其后的全部，不可恢复。', [
     ['留档', 'btn', () => applyRewind(s, { id, mode: 'archive' })],
     ['删除', 'btn btn-danger', () => applyRewind(s, { id, mode: 'delete' })],
     ['取消', 'btn btn-ghost', () => {}],
@@ -5823,7 +5834,7 @@ function rewindTo(id) {
 function restoreMark(mark) {
   const s = activeSession();
   if (!s || isBusy(s)) return;
-  choiceModal('恢复这次留档', '恢复到留档之前：该标记及其后的全部内容（含留档期间的新工作）会被删除。', [
+  choiceModal('恢复这次留档', '恢复到留档之前：该标记及其后的全部内容（含留档期间的新工作）会被删除；工作区文件（共享区与各 agent 沙箱）一起回到留档点，未提交的改动进 lost 备份。', [
     ['恢复', 'btn btn-danger', () => applyRewind(s, { id: mark, mode: 'restore' })],
     ['取消', 'btn btn-ghost', () => {}],
   ]);

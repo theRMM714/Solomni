@@ -457,7 +457,17 @@ fn usage_of(v: &serde_json::Value) -> Option<TokenUsage> {
     if prompt == 0 && completion == 0 && total.unwrap_or(0) == 0 {
         return None;
     }
-    Some(TokenUsage::new(prompt, completion, total))
+    // 缓存：Anthropic 形状给顶层两个字段；OpenAI 形状给 prompt_tokens_details.cached_tokens。
+    let cache_read = n(&["cache_read_input_tokens"]).or_else(|| {
+        u.get("prompt_tokens_details")
+            .and_then(|d| d.get("cached_tokens"))
+            .and_then(|x| x.as_u64())
+    });
+    let cache_creation = n(&["cache_creation_input_tokens"]);
+    let mut usage = TokenUsage::new(prompt, completion, total);
+    usage.cache_read = cache_read;
+    usage.cache_creation = cache_creation;
+    Some(usage)
 }
 
 /// 解析补全响应：取 choices[0].message.content、finish_reason 与原生 tool_calls（后两者可能没有）。
@@ -523,4 +533,38 @@ fn native_call(v: &serde_json::Value) -> Option<ToolCall> {
         name,
         args_json,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::usage_of;
+    use serde_json::json;
+
+    /// 目的：usage 归一成供应商形状能给的四个数——缓存读/写缺失就是 None，不伪造成 0。
+    #[test]
+    fn usage_of_reads_cache_fields_without_inventing_zeros() {
+        let openai = json!({"usage": {"prompt_tokens": 900, "completion_tokens": 30,
+            "prompt_tokens_details": {"cached_tokens": 800}}});
+        let u = usage_of(&openai).expect("有 usage");
+        assert_eq!(
+            (u.prompt_tokens, u.completion_tokens, u.total_tokens),
+            (900, 30, 930)
+        );
+        assert_eq!(u.cache_read, Some(800));
+        assert_eq!(u.cache_creation, None, "没报缓存写入就是 None");
+
+        let anthropic = json!({"usage": {"input_tokens": 50, "output_tokens": 10,
+            "cache_read_input_tokens": 1200, "cache_creation_input_tokens": 300}});
+        let u = usage_of(&anthropic).expect("有 usage");
+        assert_eq!(u.total_tokens, 60);
+        assert_eq!(u.cache_read, Some(1200));
+        assert_eq!(u.cache_creation, Some(300));
+
+        let plain = json!({"usage": {"prompt_tokens": 7, "completion_tokens": 3}});
+        let u = usage_of(&plain).expect("有 usage");
+        assert_eq!((u.cache_read, u.cache_creation), (None, None));
+        assert!(
+            usage_of(&json!({"usage": {"prompt_tokens": 0, "completion_tokens": 0}})).is_none()
+        );
+    }
 }

@@ -75,6 +75,12 @@ pub struct ContextUsage {
     pub window: u64,
     /// 目的：true = 供应商回的 usage；false = 按对话字符估算（界面必须标注）。
     pub exact: bool,
+    /// 目的：输入里命中前缀缓存的那部分（供应商没报 = None，不是 0）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_read: Option<u64>,
+    /// 目的：这次写进前缀缓存的输入（供应商没报 = None，不是 0）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_creation: Option<u64>,
 }
 
 impl ContextUsage {
@@ -89,6 +95,8 @@ impl ContextUsage {
             total_tokens: tokens.total_tokens,
             window,
             exact: true,
+            cache_read: tokens.cache_read,
+            cache_creation: tokens.cache_creation,
         }
     }
 
@@ -101,6 +109,8 @@ impl ContextUsage {
             total_tokens: tokens,
             window,
             exact: false,
+            cache_read: None,
+            cache_creation: None,
         }
     }
 }
@@ -515,15 +525,26 @@ impl SessionEvent {
             SessionEvent::Working { agent } => {
                 serde_json::json!({ "type": "working", "agent": agent })
             }
-            SessionEvent::Usage { usage, line } => serde_json::json!({
-                "type": "usage",
-                "prompt_tokens": usage.prompt_tokens,
-                "completion_tokens": usage.completion_tokens,
-                "total_tokens": usage.total_tokens,
-                "window": usage.window,
-                "exact": usage.exact,
-                "line": line,
-            }),
+            SessionEvent::Usage { usage, line } => {
+                let mut v = serde_json::json!({
+                    "type": "usage",
+                    "prompt_tokens": usage.prompt_tokens,
+                    "completion_tokens": usage.completion_tokens,
+                    "total_tokens": usage.total_tokens,
+                    "window": usage.window,
+                    "exact": usage.exact,
+                    "line": line,
+                });
+                if let Some(o) = v.as_object_mut() {
+                    if let Some(n) = usage.cache_read {
+                        o.insert("cache_read".to_string(), serde_json::json!(n));
+                    }
+                    if let Some(n) = usage.cache_creation {
+                        o.insert("cache_creation".to_string(), serde_json::json!(n));
+                    }
+                }
+                v
+            }
             SessionEvent::DecisionCard {
                 card,
                 gate,

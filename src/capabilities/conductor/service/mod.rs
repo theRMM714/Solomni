@@ -657,6 +657,11 @@ impl Conductor {
         self.desk.forget(sid);
     }
 
+    /// 目的：这些会话里是否有任何一个的回合还攥在生成线程手里（核心里"生成中"）。
+    pub(crate) fn running_any(&self, ids: &[String]) -> bool {
+        ids.iter().any(|s| self.running.contains(s))
+    }
+
     /// 目的：把 root 及其整棵子树里等用户裁决的队**一律作废**（停止 = 拒绝），按会话给出作废事件。
     /// 约束：会话此刻被生成线程拿在手里时它不在表里——那一份由 put_collab 交回时按运行态作废。
     pub(crate) fn void_gates_in_subtree(&mut self, root: &str) -> Vec<(String, Vec<SessionEvent>)> {
@@ -800,6 +805,17 @@ impl Conductor {
     pub fn single_history(&self, sid: &str) -> Option<Vec<Msg>> {
         match self.sessions.get(sid) {
             Some(Session::Single(s)) => Some(s.dialogue().to_vec()),
+            _ => None,
+        }
+    }
+
+    // 测试访问器：读台账（验证"回放 = 实时"：重建后的事实与正文必须逐条一致）。
+    pub fn single_reads(
+        &self,
+        sid: &str,
+    ) -> Option<Vec<crate::capabilities::session::api::ReadAt>> {
+        match self.sessions.get(sid) {
+            Some(Session::Single(s)) => Some(s.reads().to_vec()),
             _ => None,
         }
     }
