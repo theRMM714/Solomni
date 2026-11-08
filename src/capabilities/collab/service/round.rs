@@ -122,7 +122,13 @@ impl Round {
 }
 
 /// 用户已停止：**不执行**，但每个调用仍留一条失败行，说明为什么没有执行。
-fn refused_batch(plan: &[(Option<String>, String, String)]) -> Vec<(String, ToolOutcome)> {
+fn refused_batch(
+    plan: &[(Option<String>, String, String)],
+) -> Vec<(
+    String,
+    ToolOutcome,
+    Option<crate::capabilities::workspace::api::ReadFact>,
+)> {
     plan.iter()
         .map(|(module, _, _)| {
             (
@@ -131,6 +137,7 @@ fn refused_batch(plan: &[(Option<String>, String, String)]) -> Vec<(String, Tool
                     ok: false,
                     output: "用户已停止：这一轮的工具调用**没有执行**。".to_string(),
                 },
+                None,
             )
         })
         .collect()
@@ -395,6 +402,7 @@ pub fn converse_with(
                     ),
                     call_id: String::new(),
                     reply: reply_id,
+                    read: None,
                 };
                 let msgs_of = reply_msgs(mode, &raw, std::slice::from_ref(&view));
                 for m in &msgs_of {
@@ -465,7 +473,7 @@ pub fn converse_with(
                         .iter()
                         .enumerate()
                         .map(|(i, c)| {
-                            let (label, outcome) = done[i].clone();
+                            let (label, outcome, read) = done[i].clone();
                             ToolCallView {
                                 speaker: speaker.to_string(),
                                 module: label,
@@ -475,6 +483,7 @@ pub fn converse_with(
                                 output: outcome.output,
                                 call_id: c.id.clone(),
                                 reply: reply_id,
+                                read,
                             }
                         })
                         .collect();
@@ -528,6 +537,7 @@ pub fn converse_with(
                             output: "这条通道用**原生工具调用**：正文里的 JSON 信封不会被当成调用执行。需要工具时请直接发起工具调用（一次可以发起多个）。".to_string(),
                             call_id: String::new(),
                             reply: reply_id,
+                            read: None,
                         };
                         on_tool(&view);
                         // 这条没有合法原生 id（模型是手写的信封）：走文本形状，不能发 role=tool。
@@ -580,6 +590,7 @@ pub fn converse_with(
                     output: why,
                     call_id: String::new(),
                     reply: reply_id,
+                    read: None,
                 };
                 on_tool(&view);
                 let msgs_of = reply_msgs(mode, &raw, std::slice::from_ref(&view));
@@ -652,7 +663,7 @@ pub fn converse_with(
                     .iter()
                     .enumerate()
                     .map(|(i, (_module, tool, _args))| {
-                        let (label, outcome) = done[i].clone();
+                        let (label, outcome, read) = done[i].clone();
                         let outcome = annotate(outcome);
                         ToolCallView {
                             speaker: speaker.to_string(),
@@ -663,6 +674,7 @@ pub fn converse_with(
                             output: outcome.output,
                             call_id: String::new(),
                             reply: reply_id,
+                            read,
                         }
                     })
                     .collect();

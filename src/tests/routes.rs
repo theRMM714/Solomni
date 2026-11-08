@@ -219,6 +219,7 @@ fn report() -> RuntimeReport {
 
 fn meta(name: &str) -> SessionMeta {
     SessionMeta {
+        context_freshness: false,
         name: name.to_string(),
         mode: "direct".to_string(),
         delegate: false,
@@ -267,6 +268,7 @@ impl SessionOps for FakeOps {
             tier_missing: Vec::new(),
             permission_profile: "workspace".to_string(),
             permission_label: "工作区内修改".to_string(),
+            context_freshness: false,
             thinking: crate::capabilities::conductor::api::ThinkingView {
                 level: None,
                 default_level: None,
@@ -525,6 +527,7 @@ impl SessionOps for FakeOps {
                 tier_missing: Vec::new(),
                 permission_profile: "workspace".to_string(),
                 permission_label: "工作区内修改".to_string(),
+                context_freshness: false,
                 thinking: crate::capabilities::conductor::api::ThinkingView {
                     level: None,
                     default_level: None,

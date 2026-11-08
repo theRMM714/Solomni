@@ -2677,6 +2677,46 @@ fn set_thinking_action_switches_the_work_level_and_rejects_unmapped_levels() {
     assert_eq!(after.thinking.label, "未设置", "没有选择也没有默认");
 }
 
+/// 目的：过期内容替换是**工作根**的会话级开关：动作写 meta，会话视图据此画勾，关回去同样生效。
+#[test]
+fn set_context_freshness_action_flips_the_work_switch_and_reports_it() {
+    let handle = spawn(vec![module_of("a")], Vec::new());
+    let ops = Ops::from_handle(&handle);
+    let (opened, _) = ops
+        .sessions
+        .create_work(single_work("w-fresh", &["a"]))
+        .expect("建会话");
+    let sid = opened.sid;
+    let view = |ops: &Ops| {
+        ops.sessions
+            .session_views(&ops.history.list().expect("列历史"))
+            .expect("会话视图")
+            .into_iter()
+            .find(|v| v.sid == sid)
+            .expect("找到会话")
+    };
+    assert!(
+        !view(&ops).context_freshness,
+        "默认关：只记读事实、不改发送视图"
+    );
+    for on in [true, false] {
+        ops.actions
+            .act(ActionCall {
+                id: "set_context_freshness".to_string(),
+                args: serde_json::json!({ "session_id": sid, "on": on }),
+                caller: Caller::User,
+                out: Output::Final,
+            })
+            .expect("切开关");
+        // 切开关会把子树会话从内存移除（与思考档一致），所以查**落盘事实**而不是视图。
+        assert_eq!(
+            ops.history.open(&sid).expect("读 meta").0.context_freshness,
+            on,
+            "开关写到工作根 meta 上"
+        );
+    }
+}
+
 /// 目的：没选过档时视图直接给出这组模型的共同默认；可选档只列已映射的档。
 #[test]
 fn thinking_view_uses_the_common_default_and_hides_unmapped_levels() {

@@ -58,7 +58,7 @@ pub fn execute(
         };
     }
     if name == DELETE {
-        return delete(sb, io, &args);
+        return delete(sb, io, obs, &args);
     }
     let spec = match args.get("path").and_then(|p| p.as_str()) {
         Some(p) => p.to_string(),
@@ -86,7 +86,7 @@ pub fn execute(
         return fail(e);
     }
     match name {
-        READ => read(io, obs, &args, &spec, &path),
+        READ => read(sb, &place, io, obs, &args, &spec, &path),
         WRITE => write(io, obs, &args, &spec, &path),
         EDIT => edit(io, obs, &args, &spec, &path),
         LIST => list(io, &spec, &path),
@@ -128,7 +128,12 @@ fn list(io: &dyn SysIo, spec: &str, path: &Path) -> ToolOutcome {
 /// delete：只删**该 agent 自己的沙箱**。默认只删文件；目录必须显式 recursive=true。
 /// 共享区走 work_commit 的 deletes，模块目录（含 userdata）由模块自己的工具维护。
 /// 删除链接只删链接本身，绝不顺着链接去删目标。
-fn delete(sb: &Sandbox, io: &dyn SysIo, args: &serde_json::Value) -> ToolOutcome {
+fn delete(
+    sb: &Sandbox,
+    io: &dyn SysIo,
+    obs: &mut Observations,
+    args: &serde_json::Value,
+) -> ToolOutcome {
     let Some(raw_paths) = args.get("paths").and_then(|v| v.as_array()) else {
         return fail("缺少必填参数 paths（要删除的路径数组）".to_string());
     };
@@ -197,11 +202,17 @@ fn delete(sb: &Sandbox, io: &dyn SysIo, args: &serde_json::Value) -> ToolOutcome
     let mut out = String::from("已删除：");
     for p in plans {
         match io.delete(&p.path, recursive) {
-            Ok(()) => out.push_str(&format!(
-                "\n- {}（{}）",
-                p.spec,
-                if p.is_dir { "目录" } else { "文件/链接" }
-            )),
+            Ok(()) => {
+                // 自动提交要按路径发 deletes；递归删目录暂不逐文件展开（见 plan.md 的 2B′）。
+                if !p.is_dir {
+                    obs.note_removed(&p.path);
+                }
+                out.push_str(&format!(
+                    "\n- {}（{}）",
+                    p.spec,
+                    if p.is_dir { "目录" } else { "文件/链接" }
+                ))
+            }
             Err(e) => {
                 return fail(format!(
                     "删除中断：{} 失败：{}；它前面的已删，后面的未动",
@@ -218,6 +229,8 @@ fn delete(sb: &Sandbox, io: &dyn SysIo, args: &serde_json::Value) -> ToolOutcome
 
 /// read：按行区间返回，行号从 1 数起；回执末尾告诉模型接着用哪个 offset，并如实记账"读到的是不是全文"。
 fn read(
+    sb: &Sandbox,
+    place: &Place,
     io: &dyn SysIo,
     obs: &mut Observations,
     args: &serde_json::Value,
@@ -291,6 +304,25 @@ fn read(
         format!("只读了第 {}-{} 行（共 {} 行）", offset, to, total)
     };
     obs.note_read(path, complete, why, hash);
+    // 读取事实：只有"整份原文都读到了"才记——半份内容没法与后续版本按行对齐，
+    // 拿它判过期只会误导模型（宁可让它多读一次）。
+    if complete {
+        if let Some(root) = sb.root_of(place) {
+            if let Ok(rel) = path.strip_prefix(root) {
+                obs.note_read_fact(crate::capabilities::workspace::api::ReadFact {
+                    worktree: if matches!(place, Place::Shared) {
+                        String::new()
+                    } else {
+                        sb.work_name.clone()
+                    },
+                    path: crate::kernel::api::slash(rel),
+                    from: offset as u64,
+                    to: to as u64,
+                    blob: crate::capabilities::workspace::api::content_hash(got.text.as_bytes()),
+                });
+            }
+        }
+    }
     let mut out = header(body.join("\n"));
     let tail = if got.cut {
         // 机制层只读了开头：总行数不可知，也不能声称"到文件末尾"。

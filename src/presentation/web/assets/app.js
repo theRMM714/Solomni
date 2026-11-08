@@ -152,6 +152,7 @@ async function refreshState() {
     cur.permission_profile = v.permission_profile || cur.permission_profile;
     cur.permission_label = v.permission_label || cur.permission_label;
     if (v.thinking !== undefined) cur.thinking = v.thinking || null;
+    if (v.context_freshness !== undefined) cur.context_freshness = !!v.context_freshness;
     cur.permission_narrowed = !!v.permission_narrowed;
     cur.permission_parent = v.permission_parent || null;
     // 上下文用量以快照兜底；实时 usage 事件到达后以事件为准（同一份事实，事件更新）。
@@ -578,7 +579,7 @@ async function openHistory(name) {
       running: false, working: null, running_known: false,
       activating: false, continue_action: null,
       context: null, shell: r.shell || null, work: null, workAt: 0, workDirty: false, workError: '',
-      permission_profile: '', permission_label: '', thinking: null,
+      permission_profile: '', permission_label: '', thinking: null, context_freshness: false,
       permission_narrowed: false, permission_parent: null,
       done: true, awaiting: null, readonly: true, fold: {}, scroll: {},
     };
@@ -4146,6 +4147,7 @@ function statusPrintOf(s) {
     s && s.permission_profile, s && s.permission_label, s && s.permission_narrowed ? 1 : 0,
     s && s.permission_parent,
     s && s.thinking ? [s.thinking.level, s.thinking.default_level, s.thinking.label, (s.thinking.options || []).length] : 0,
+    s && s.context_freshness ? 1 : 0,
     s && s.shell ? [
       s.shell.command, s.shell.scope, s.shell.cwd, s.shell.started_at, s.shell.finished_at,
       s.shell.elapsed_secs, s.shell.ok, s.shell.exit_code, (s.shell.output || '').length,
@@ -4600,7 +4602,33 @@ function openToolsMenu(chip, s) {
       label: '保留 ' + (keep > 0 ? '至少 ' + keep + '% 窗口' : '只留摘要') + ' · 总结模型 ' + model,
       disabled: true,
     },
+    { sep: true },
+    {
+      label: '过期内容换成占位符' + (s.context_freshness ? '（已开）' : '（关）'),
+      icon: s.context_freshness ? 'check' : 'box',
+      disabled: !!blocked,
+      reason: blocked,
+      onClick: () => switchContextFreshness(s.sid, !s.context_freshness),
+    },
+    {
+      label: '开：读过的文件被改后，那条工具结果换成占位符（省上下文；每次发送要多读一遍对象库，且会失效部分缓存）',
+      disabled: true,
+    },
   ]);
+}
+
+/* 切换过期内容替换：写工作根 meta，整棵子树共享；后端拒绝时原样显示原因。 */
+async function switchContextFreshness(sid, on) {
+  const s = state.sessions.get(sid);
+  if (!s) return;
+  if (isBusy(s)) { ui.toast('warn', '会话正在生成：先停止再切换'); return; }
+  try {
+    await api('POST', actionUrl('set_context_freshness'), { session_id: sid, on: !!on });
+    await refreshState();
+    ui.toast('ok', on ? '过期内容：已改为占位符' : '过期内容：保持原样');
+  } catch (e) {
+    ui.toast('err', e.message || String(e));
+  }
 }
 
 function openWorkCard(s, anchor) {

@@ -412,3 +412,74 @@ pub(crate) fn conductor_base_roots_are_only_put_on_host_member_tools() {
         "宿主基础工具链根不能进 guest 围栏"
     );
 }
+
+/// 目的：这一批里跑过 shell 时，回合末把沙箱里不是 write / edit 落下的改动采纳进共享区，
+///   并把回执（提交号 + 路径）挂在那条工具结果后面；只读批次不触发整盘扫描。
+#[test]
+pub(crate) fn shell_batch_adopts_sandbox_changes_into_the_shared_area() {
+    use crate::capabilities::workspace::api::Workspace;
+    use crate::capabilities::workspace::detail::{FsWorkStore, FsWorkspace};
+    use crate::capabilities::workspace::service::WorkspaceService;
+
+    let root = crate::tests::scratch("tool-shell-adopt");
+    let ws = Arc::new(WorkspaceService::new(
+        Arc::new(FsWorkspace::new(root.join("session"))),
+        Arc::new(FsWorkStore::new()),
+    ));
+    ws.bind("w", None).expect("绑定");
+    ws.prepare("w", &["a".to_string()]).expect("准备");
+    let sandbox = root.join("session").join("w").join("a");
+    let shared = ws.roots("w", &[]).expect("布局").shared;
+    // 模拟 shell 直接写沙箱（不经过 write 工具，因此没有 tool_loop 的自动提交）。
+    std::fs::write(sandbox.join("made-by-shell.txt"), b"hi").expect("写沙箱");
+
+    let runner = Arc::new(ShellRunner::new("ok", true));
+    let mut mt = member(Arc::clone(&runner));
+    mt.sandbox.work_name = "w".to_string();
+    mt.sandbox.agent = "a".to_string();
+    mt.sandbox.session = "w--a".to_string();
+    mt.sandbox.private = sandbox.clone();
+    mt.sandbox.shared = shared.clone();
+    let ws_dyn: Arc<dyn Workspace + Send + Sync> = ws.clone();
+    mt.workspace = Some(ws_dyn);
+
+    let cancel = AtomicBool::new(false);
+    let mut sink = |_: SessionEvent| {};
+    let done = run_batch(
+        &mut mt,
+        &shell_plan(r#"{"command":"echo hi","timeout_secs":5}"#),
+        None,
+        None,
+        &cancel,
+        &mut sink,
+    );
+    assert!(done[0].1.ok, "{}", done[0].1.output);
+    let out = &done[0].1.output;
+    assert!(out.contains("[沙箱改动已提交"), "回执要给出提交号：{}", out);
+    assert!(
+        out.contains("made-by-shell.txt"),
+        "回执要列出被采纳的路径：{}",
+        out
+    );
+    assert_eq!(
+        std::fs::read(shared.join("made-by-shell.txt")).unwrap(),
+        b"hi",
+        "沙箱改动必须真的写进共享区"
+    );
+    // 第二次同一批：沙箱与主线一致 → 不再有提交回执。
+    let done = run_batch(
+        &mut mt,
+        &shell_plan(r#"{"command":"echo hi","timeout_secs":5}"#),
+        None,
+        None,
+        &cancel,
+        &mut sink,
+    );
+    assert!(done[0].1.ok);
+    assert!(
+        !done[0].1.output.contains("[沙箱改动已提交"),
+        "没有改动就不该再提交：{}",
+        done[0].1.output
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}

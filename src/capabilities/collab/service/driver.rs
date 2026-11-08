@@ -328,6 +328,14 @@ fn run_rounds(
             break;
         }
         s.cur_reply = round.reply;
+        // 读台账：一条读事实跟着它那条工具结果消息的正文走（发送视图据此判过期）。
+        for v in &views {
+            if let Some(c) = v.tool.as_ref() {
+                if let Some(fact) = c.read.clone() {
+                    s.note_read_at(crate::capabilities::session::api::tool_result_body(c), fact);
+                }
+            }
+        }
         let has_line = !round.text.trim().is_empty() || !round.reasoning.trim().is_empty();
         let mut it = views.into_iter();
         match &round.tool {
@@ -392,6 +400,47 @@ fn run_rounds(
         }
     }
     rounds
+}
+
+/// 目的：发给模型的对话视图——过期读取换成占位符，其余原样。
+///
+/// 约束：只改**派生视图**，不动 `dialogue` 与转录。开关关、没有工作区、判定失败三者都原样返回——
+///   判定失败宁可供旧内容，也不悄悄丢内容。只判主副本（`worktree` 为空的读）；私有沙箱里的读判不了就不动。
+fn send_view(s: &AgentSession) -> Vec<crate::capabilities::llm::api::Msg> {
+    let mut msgs = s.dialogue.clone();
+    if !s.context_freshness() || s.reads().is_empty() {
+        return msgs;
+    }
+    let Some(tools) = s.tools.as_ref() else {
+        return msgs;
+    };
+    let Some(ws) = tools.workspace.as_ref() else {
+        return msgs;
+    };
+    let reads: Vec<&crate::capabilities::session::api::ReadAt> = s
+        .reads()
+        .iter()
+        .filter(|r| r.fact.worktree.is_empty())
+        .collect();
+    let queries: Vec<crate::capabilities::workspace::api::ReadQuery> = reads
+        .iter()
+        .map(|r| crate::capabilities::workspace::api::ReadQuery {
+            path: r.fact.path.clone(),
+            blob: r.fact.blob.clone(),
+            from: r.fact.from,
+            to: r.fact.to,
+        })
+        .collect();
+    if queries.is_empty() {
+        return msgs;
+    }
+    let Ok(stale) = ws.work_stale_reads(&tools.sandbox.work_name, &queries) else {
+        return msgs;
+    };
+    let judged: Vec<(&crate::capabilities::session::api::ReadAt, bool)> =
+        reads.into_iter().zip(stale).collect();
+    msgs = crate::capabilities::session::api::freshness_view(&msgs, &judged);
+    msgs
 }
 
 /// 以现有对话跑一次工具循环；流式时逐片外送短暂 Delta（信封正文不外流，避免糊屏）。
@@ -477,18 +526,15 @@ fn run(
     // 两个回调（流式分片 / 工具完成）都要外送短暂事件：把 emit 借出来共享（顺序因此天然正确）。
     let emit = std::cell::RefCell::new(&mut *live.emit);
     let mut acc = String::new();
+    // 发给模型的对话视图：开着过期清理时，过期读取已换成占位符（见 send_view）。
+    let view = send_view(s);
     let rounds = {
-        let AgentSession {
-            dialogue,
-            chat,
-            tools,
-            ..
-        } = s;
+        let AgentSession { chat, tools, .. } = s;
         crate::capabilities::collab::service::round::converse_with(
             chat.as_mut(),
             tools.as_mut(),
             spec.identity,
-            dialogue.clone(),
+            view,
             llm,
             &label,
             std::sync::Arc::clone(&cancel),

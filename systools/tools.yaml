@@ -458,7 +458,8 @@ tools:
     reach: [private, shared-write]
     callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: |
-      把沙箱里选中的文件提交回共享区。逐个路径做三方比较（你拉取时的基线 / 沙箱当前 / 共享区当前）：
+      把沙箱里选中的文件**显式**提交回共享区（write / edit / patch 落地后核心已自动提交过，这里补提交或改说明）。
+      逐个路径做三方比较（你拉取时的基线 / 沙箱当前 / 共享区当前）：
       任一条冲突 → **整个提交被拒**并逐条点名，绝不静默覆盖别的 agent 的改动。
       文本、图片、视频与其它二进制都按字节提交；单文件有上限，超过会**整次拒绝**并点名路径、大小与替代路径。
       内容流式读取与校验，不整份进上下文；二进制冲突只能显式选边，不做自动合并。
@@ -776,6 +777,13 @@ tools:
     params:
       session_id: { type: string, required: true, non_empty: true, desc: 会话 id（子会话也可以，作用在工作根上） }
       level: { type: string, desc: 思考档位 id；空串 = 跟随模型默认（不指定） }
+  set_context_freshness:
+    capability: none
+    callers: [user]
+    desc: 切换这条工作（会话级）的过期内容替换：开着时，读过的文件被改过之后，那条工具结果在发给模型前整条换成占位符（省上下文；代价是替换点之后的缓存失效）。写在工作根会话的 meta 上，子会话共享；生成中拒绝。
+    params:
+      session_id: { type: string, required: true, non_empty: true, desc: 会话 id（子会话也可以，作用在工作根上） }
+      on: { type: boolean, desc: 开 / 关（省略 = 关） }
   probe_model_tools:
     capability: none
     callers: [user]

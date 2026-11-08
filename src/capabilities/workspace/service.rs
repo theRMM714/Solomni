@@ -7,18 +7,20 @@
 //! pull / commit 的三方比较与 resolve 的选边规则在 `domain::workstore`（纯逻辑），落盘在 `WorkStore` 端口后面。
 
 use crate::capabilities::workspace::api::{
-    media_hint, Change, ChangeKind, ChangeView, CommitDetail, CommitFileView, CommitReport,
-    CommitRequest, CommitSummary, FileVersion, GcReport, LostEntry, LostReport, PullReport,
-    ResolveAction, ResolveEntry, ResolveReport, ResolveRequest, ResolveTake, ResolveWarning,
-    ResolveWarningKind, RestoreLostReport, StatusEntry, StatusReport, SyncReport, VersionView,
-    WorkFiles, WorkLog, WorkLogEntry, WorkRoots, WorkUsage, Workspace, MAX_ASSET_BYTES,
-    VERSION_TEXT_LIMIT,
+    media_hint, AdoptReport, Change, ChangeKind, ChangeView, CommitDetail, CommitFileView,
+    CommitReport, CommitRequest, CommitSummary, FileVersion, GcReport, HeldChange, LostEntry,
+    LostReport, PullReport, ReadQuery, ResolveAction, ResolveEntry, ResolveReport, ResolveRequest,
+    ResolveTake, ResolveWarning, ResolveWarningKind, RestoreLostReport, StatusEntry, StatusReport,
+    SyncReport, VersionView, WorkFiles, WorkLog, WorkLogEntry, WorkRoots, WorkUsage, Workspace,
+    MAX_ASSET_BYTES, VERSION_TEXT_LIMIT,
 };
+use crate::capabilities::workspace::domain::base::{stale_paths, BaseRef, CommitRefusal};
+use crate::capabilities::workspace::domain::freshness::lines_changed;
 use crate::capabilities::workspace::domain::hash::{content_hash, is_content_hash};
 use crate::capabilities::workspace::domain::workstore::{
     clean_rel, expand_paths, local_take_verdict, lost_rel, needs_backup, plan_commit, pull_verdict,
     status_of, validate_paths, Commit, CommitAnchor, Conflict, ConflictAt, Index, LocalTakeVerdict,
-    Pending, PendingIndex, PullVerdict, Ref, RefKind, Source, Tree, Unchanged,
+    Pending, PendingIndex, PullVerdict, Ref, RefKind, Source, StatusState, Tree, Unchanged,
 };
 use crate::capabilities::workspace::ports::{WorkStore, Workdirs};
 use std::collections::{BTreeMap, BTreeSet};
@@ -646,6 +648,207 @@ struct ResolvePlan {
     backup: Option<String>,
 }
 
+/// 目的：提交与基线落盘的共用实现——已持 gate / shared / store 锁的调用方复用，避免二次加锁。
+impl WorkspaceService {
+    /// 目的：提交的唯一实现（调用方已持 gate、shared、store 锁并已恢复事务）。
+    /// 约束：不做基线准入——自动提交的准入由 `work_commit_auto` 在调用前做。
+    #[allow(clippy::too_many_arguments)]
+    fn commit_locked(
+        &self,
+        work: &str,
+        shared: &Path,
+        store: &Path,
+        sandbox: &Path,
+        agent: &str,
+        session: &str,
+        req: &CommitRequest,
+        source: Source,
+        anchor: Option<CommitAnchor>,
+    ) -> Result<CommitReport, String> {
+        let msg = req.message.trim();
+        if msg.is_empty() {
+            return Err("提交说明不能为空".to_string());
+        }
+        validate_paths(&req.paths)?;
+        let shared = shared.to_path_buf();
+        let store = store.to_path_buf();
+        let sandbox = sandbox.to_path_buf();
+        let (head_id, tree) = self.head_tree(&store)?;
+        let index: Index = self.store.read_index(&store, agent)?;
+        // 沙箱里的文件全集（paths 里的文件夹据此展开）。
+        let sandbox_files: BTreeSet<String> = self.store.list(&sandbox)?.into_iter().collect();
+        let (want, missing) = expand_paths(&req.paths, &sandbox_files);
+        if !missing.is_empty() {
+            return Err(format!(
+                "沙箱里没有这些路径（要删除共享区的文件请放进 deletes）：{}",
+                missing.join("、")
+            ));
+        }
+        let mut locals: BTreeMap<String, Option<String>> = BTreeMap::new();
+        let mut oversize: Vec<(String, u64)> = Vec::new();
+        for rel in want {
+            let size = self
+                .store
+                .stat_under(&sandbox, &rel)?
+                .ok_or_else(|| format!("沙箱里没有：{}", rel))?;
+            if size > self.max_asset_bytes {
+                oversize.push((rel, size));
+                continue;
+            }
+            let scanned = self
+                .store
+                .scan_under(&sandbox, &rel, None)?
+                .ok_or_else(|| format!("沙箱里没有：{}", rel))?;
+            locals.insert(rel, Some(scanned.hash));
+        }
+        if !oversize.is_empty() {
+            return Err(render_oversize(&oversize, self.max_asset_bytes));
+        }
+        for raw in &req.deletes {
+            let rel = clean_rel(raw)?;
+            if locals.contains_key(&rel) {
+                return Err(format!("{} 同时出现在 paths 与 deletes 里", rel));
+            }
+            locals.insert(rel, None);
+        }
+        if locals.is_empty() {
+            return Err("没有可提交的改动：paths 与 deletes 都是空的".to_string());
+        }
+        if self.dirs.is_external(work) {
+            self.reject_external_changes(&shared, &tree, &locals)?;
+        }
+        let plan = match plan_commit(&index, &tree, &locals) {
+            Ok(p) => p,
+            Err(conflicts) => return Err(render_conflicts(&conflicts)),
+        };
+        if plan.changes.is_empty() {
+            return Err(render_unchanged(&plan.unchanged));
+        }
+        let changes = plan.changes;
+        // 先落对象，再写事务日志；主副本与元数据由事务统一应用/恢复。
+        let id = self.reserve_id(&store)?;
+        for ch in &changes {
+            if matches!(ch.kind, ChangeKind::Add | ChangeKind::Modify) {
+                self.store.ingest_under(
+                    &store,
+                    &sandbox,
+                    &ch.path,
+                    &ch.hash,
+                    self.max_asset_bytes,
+                )?;
+            }
+        }
+        let mut new_index = index;
+        for ch in &changes {
+            match ch.kind {
+                ChangeKind::Delete => {
+                    new_index.remove(&ch.path);
+                }
+                _ => {
+                    new_index.insert(ch.path.clone(), ch.hash.clone());
+                }
+            }
+        }
+        let depth = self.next_depth(&store, head_id)?;
+        let commit = Commit {
+            id,
+            parent: head_id,
+            base: head_id.unwrap_or(0),
+            author: agent.to_string(),
+            session: session.to_string(),
+            time: req.time,
+            message: msg.to_string(),
+            changes: changes.clone(),
+            tree: deltas_tree(&tree, &changes, depth),
+            depth,
+            source,
+            anchor,
+        };
+        let pending_index = PendingIndex {
+            agent: agent.to_string(),
+            index: new_index,
+        };
+        let pending = Pending::Commit {
+            commit: Box::new(commit.clone()),
+            index: Some(pending_index.clone()),
+        };
+        self.store.write_pending(&store, &pending)?;
+        let result =
+            self.apply_commit_pending(work, &shared, &store, &commit, Some(&pending_index));
+        self.settle(work, &shared, &store, result)?;
+        Ok(CommitReport { id, changes })
+    }
+
+    /// 目的：读该 agent 的逐路径基线（`refs/agents/<agent>`）：路径 → 拉取时的提交号。
+    /// 约束：没有记录 = 空表；不伪造历史，第一次 pull / commit 自然写实。
+    fn agent_bases(&self, store: &Path, agent: &str) -> Result<BTreeMap<String, u64>, String> {
+        let name = format!("agents/{}", agent);
+        let Some(reference) = self.store.read_ref(store, &name)? else {
+            return Ok(BTreeMap::new());
+        };
+        Ok(reference
+            .heads
+            .into_iter()
+            .filter_map(|(path, oid)| oid.map(|oid| (path, oid)))
+            .collect())
+    }
+
+    /// 目的：写回该 agent 的逐路径基线；`main` 记成这次写入时的主线头。
+    fn write_agent_bases(
+        &self,
+        store: &Path,
+        agent: &str,
+        main: u64,
+        bases: &BTreeMap<String, u64>,
+    ) -> Result<(), String> {
+        self.store.write_ref(
+            store,
+            &format!("agents/{}", agent),
+            &Ref {
+                kind: RefKind::Agent,
+                target: Some(main),
+                heads: bases
+                    .iter()
+                    .map(|(path, oid)| (path.clone(), Some(*oid)))
+                    .collect(),
+            },
+        )
+    }
+
+    /// 目的：提交成功后把这些路径的基线推进到新提交号：下一次自动提交才是快进。
+    fn record_committed_bases(
+        &self,
+        store: &Path,
+        agent: &str,
+        report: &CommitReport,
+    ) -> Result<(), String> {
+        let mut bases = self.agent_bases(store, agent)?;
+        for change in &report.changes {
+            match change.kind {
+                ChangeKind::Delete => {
+                    bases.remove(&change.path);
+                }
+                _ => {
+                    bases.insert(change.path.clone(), report.id);
+                }
+            }
+        }
+        self.write_agent_bases(store, agent, report.id, &bases)
+    }
+
+    /// 目的：这次提交会碰到的**全部**路径（`paths` 里的文件夹展开 + `deletes`）——基线准入的对象。
+    fn commit_paths(&self, sandbox: &Path, req: &CommitRequest) -> Result<Vec<String>, String> {
+        let files: BTreeSet<String> = self.store.list(sandbox)?.into_iter().collect();
+        let (mut paths, _missing) = expand_paths(&req.paths, &files);
+        for raw in &req.deletes {
+            paths.push(clean_rel(raw)?);
+        }
+        paths.sort();
+        paths.dedup();
+        Ok(paths)
+    }
+}
+
 impl Workspace for WorkspaceService {
     fn bind(&self, session: &str, root: Option<&Path>) -> Result<(), String> {
         self.dirs.bind(session, root)
@@ -772,6 +975,12 @@ impl Workspace for WorkspaceService {
                 e
             ));
         }
+        // 逐路径基线 = 这次拉到的提交号；之后自动提交据此判快进。
+        let mut bases = self.agent_bases(&store, agent)?;
+        for rel in report.updated.iter().chain(report.already.iter()) {
+            bases.insert(rel.clone(), head);
+        }
+        self.write_agent_bases(&store, agent, head, &bases)?;
         Ok(report)
     }
 
@@ -782,124 +991,228 @@ impl Workspace for WorkspaceService {
         session: &str,
         req: &CommitRequest,
     ) -> Result<CommitReport, String> {
-        let msg = req.message.trim();
-        if msg.is_empty() {
-            return Err("提交说明不能为空".to_string());
-        }
-        validate_paths(&req.paths)?;
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
         let _shared = self.dirs.lock_shared(work)?;
         let (shared, store, sandbox) = self.agent_roots(work, agent)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;
-        let (head_id, tree) = self.head_tree(&store)?;
-        let index: Index = self.store.read_index(&store, agent)?;
-        // 沙箱里的文件全集（paths 里的文件夹据此展开）。
-        let sandbox_files: BTreeSet<String> = self.store.list(&sandbox)?.into_iter().collect();
-        let (want, missing) = expand_paths(&req.paths, &sandbox_files);
-        if !missing.is_empty() {
-            return Err(format!(
-                "沙箱里没有这些路径（要删除共享区的文件请放进 deletes）：{}",
-                missing.join("、")
-            ));
+        let anchor = CommitAnchor {
+            agent: agent.to_string(),
+            line: req.line,
+        };
+        let report = self.commit_locked(
+            work,
+            &shared,
+            &store,
+            &sandbox,
+            agent,
+            session,
+            req,
+            Source::Tool,
+            Some(anchor),
+        )?;
+        self.record_committed_bases(&store, agent, &report)?;
+        Ok(report)
+    }
+
+    fn work_commit_auto(
+        &self,
+        work: &str,
+        agent: &str,
+        session: &str,
+        req: &CommitRequest,
+    ) -> Result<Option<CommitReport>, CommitRefusal> {
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let _shared = self.dirs.lock_shared(work).map_err(CommitRefusal::Broken)?;
+        let (shared, store, sandbox) = self
+            .agent_roots(work, agent)
+            .map_err(CommitRefusal::Broken)?;
+        let _lock = self.store.lock(&store).map_err(CommitRefusal::Broken)?;
+        self.recover_locked(work, &shared, &store)
+            .map_err(CommitRefusal::Broken)?;
+        // 基线准入在写共享区之前：过期就一条 pending 都不留。
+        if let Some(main) = self.store.head(&store).map_err(CommitRefusal::Broken)? {
+            let tree =
+                Self::tree_of(self.store.as_ref(), &store, main).map_err(CommitRefusal::Broken)?;
+            let paths = self
+                .commit_paths(&sandbox, req)
+                .map_err(CommitRefusal::Broken)?;
+            let bases = self
+                .agent_bases(&store, agent)
+                .map_err(CommitRefusal::Broken)?;
+            let stale = stale_paths(BaseRef { oid: main }, &bases, &paths, |path| {
+                tree.contains_key(path)
+            });
+            if !stale.is_empty() {
+                return Err(CommitRefusal::Stale {
+                    main: BaseRef { oid: main },
+                    paths: stale,
+                });
+            }
         }
-        let mut locals: BTreeMap<String, Option<String>> = BTreeMap::new();
-        let mut oversize: Vec<(String, u64)> = Vec::new();
-        for rel in want {
-            let size = self
-                .store
-                .stat_under(&sandbox, &rel)?
-                .ok_or_else(|| format!("沙箱里没有：{}", rel))?;
-            if size > self.max_asset_bytes {
-                oversize.push((rel, size));
+        let anchor = CommitAnchor {
+            agent: agent.to_string(),
+            line: req.line,
+        };
+        let report = match self.commit_locked(
+            work,
+            &shared,
+            &store,
+            &sandbox,
+            agent,
+            session,
+            req,
+            Source::Tool,
+            Some(anchor),
+        ) {
+            Ok(r) => r,
+            // 内容与主线一致（如把同样内容再写一遍）：没有可发布的改动，不算失败。
+            Err(e) if e.starts_with("没有可提交的改动") => return Ok(None),
+            Err(e) => return Err(CommitRefusal::Broken(e)),
+        };
+        self.record_committed_bases(&store, agent, &report)
+            .map_err(CommitRefusal::Broken)?;
+        Ok(Some(report))
+    }
+
+    fn work_adopt_sandbox(
+        &self,
+        work: &str,
+        agent: &str,
+        session: &str,
+        time: i64,
+        line: u64,
+    ) -> Result<AdoptReport, String> {
+        // 外部工作区的真相是磁盘（work_sync 采纳）；沙箱副本不是它的权威版本。
+        if self.dirs.is_external(work) {
+            return Ok(AdoptReport::default());
+        }
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let _shared = self.dirs.lock_shared(work)?;
+        let (shared, store, sandbox) = self.agent_roots(work, agent)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)?;
+        let (_, tree) = self.head_tree(&store)?;
+        let index: Index = self.store.read_index(&store, agent)?;
+        // 候选 = 受管路径 + 沙箱里的全部文件：新增 / 修改 / 删除都在这一遍里认出来。
+        let mut all: BTreeSet<String> = index.keys().cloned().collect();
+        all.extend(tree.keys().cloned());
+        all.extend(self.store.list(&sandbox)?);
+        let mut paths: Vec<String> = Vec::new();
+        let mut deletes: Vec<String> = Vec::new();
+        let mut held: Vec<HeldChange> = Vec::new();
+        for rel in all {
+            let local = self.store.scan_under(&sandbox, &rel, None)?;
+            let local_hash = local.as_ref().map(|v| v.hash.as_str());
+            let state = status_of(
+                index.get(&rel).map(String::as_str),
+                tree.get(&rel).map(String::as_str),
+                local_hash,
+            );
+            match state {
+                StatusState::LocalOnly | StatusState::LocalModified => {
+                    // 超大文件会让整次提交被拒：单列出来，让剩下的照常进共享区。
+                    let size = self.store.stat_under(&sandbox, &rel)?.unwrap_or(0);
+                    if size > self.max_asset_bytes {
+                        held.push(HeldChange {
+                            path: rel,
+                            why: format!("超过单文件上限（{} 字节）", self.max_asset_bytes),
+                        });
+                        continue;
+                    }
+                    paths.push(rel);
+                }
+                StatusState::LocalDeleted => deletes.push(rel),
+                StatusState::BothPresent => held.push(HeldChange {
+                    path: rel,
+                    why: "共享区已有这个路径、你的沙箱还没有基线：先 work_pull 再改".to_string(),
+                }),
+                StatusState::Conflict => held.push(HeldChange {
+                    path: rel,
+                    why: "共享区先改过、你的沙箱也改了：先 work_pull（冲突用 work_resolve）"
+                        .to_string(),
+                }),
+                _ => {}
+            }
+        }
+        if paths.is_empty() && deletes.is_empty() {
+            return Ok(AdoptReport {
+                commit: None,
+                changed: Vec::new(),
+                held,
+            });
+        }
+        let req = CommitRequest {
+            paths,
+            deletes,
+            message: "沙箱改动（shell / 模块工具）".to_string(),
+            time,
+            line,
+        };
+        let anchor = CommitAnchor {
+            agent: agent.to_string(),
+            line,
+        };
+        let report = self.commit_locked(
+            work,
+            &shared,
+            &store,
+            &sandbox,
+            agent,
+            session,
+            &req,
+            Source::External,
+            Some(anchor),
+        )?;
+        self.record_committed_bases(&store, agent, &report)?;
+        Ok(AdoptReport {
+            commit: Some(report.id),
+            changed: report.changes.iter().map(|c| c.path.clone()).collect(),
+            held,
+        })
+    }
+
+    fn work_stale_reads(&self, work: &str, queries: &[ReadQuery]) -> Result<Vec<bool>, String> {
+        if queries.is_empty() {
+            return Ok(Vec::new());
+        }
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let (shared, store) = self.work_roots(work)?;
+        let _ = shared;
+        let _lock = self.store.lock(&store)?;
+        let (_head, tree) = self.head_tree(&store)?;
+        let mut out = Vec::with_capacity(queries.len());
+        for q in queries {
+            // 路径在主副本里没了 = 读过的东西已经不在了。
+            let Some(now) = tree.get(&q.path) else {
+                out.push(true);
+                continue;
+            };
+            // 指纹相同 = 读的就是现在的版本（文件头插一行不会走到这里，插入会改指纹，
+            // 但下面的行区间比较会把"读过的行没变"判成不过期）。
+            if *now == q.blob {
+                out.push(false);
                 continue;
             }
-            let scanned = self
-                .store
-                .scan_under(&sandbox, &rel, None)?
-                .ok_or_else(|| format!("沙箱里没有：{}", rel))?;
-            locals.insert(rel, Some(scanned.hash));
-        }
-        if !oversize.is_empty() {
-            return Err(render_oversize(&oversize, self.max_asset_bytes));
-        }
-        for raw in &req.deletes {
-            let rel = clean_rel(raw)?;
-            if locals.contains_key(&rel) {
-                return Err(format!("{} 同时出现在 paths 与 deletes 里", rel));
-            }
-            locals.insert(rel, None);
-        }
-        if locals.is_empty() {
-            return Err("没有可提交的改动：paths 与 deletes 都是空的".to_string());
-        }
-        if self.dirs.is_external(work) {
-            self.reject_external_changes(&shared, &tree, &locals)?;
-        }
-        let plan = match plan_commit(&index, &tree, &locals) {
-            Ok(p) => p,
-            Err(conflicts) => return Err(render_conflicts(&conflicts)),
-        };
-        if plan.changes.is_empty() {
-            return Err(render_unchanged(&plan.unchanged));
-        }
-        let changes = plan.changes;
-        // 先落对象，再写事务日志；主副本与元数据由事务统一应用/恢复。
-        let id = self.reserve_id(&store)?;
-        for ch in &changes {
-            if matches!(ch.kind, ChangeKind::Add | ChangeKind::Modify) {
-                self.store.ingest_under(
-                    &store,
-                    &sandbox,
-                    &ch.path,
-                    &ch.hash,
-                    self.max_asset_bytes,
-                )?;
+            let old = self.store.read_object(&store, &q.blob).ok();
+            let new = self.store.read_object(&store, now).ok();
+            match (old, new) {
+                (Some(old), Some(new)) => match (String::from_utf8(old), String::from_utf8(new)) {
+                    (Ok(old), Ok(new)) => {
+                        out.push(lines_changed(&old, &new, q.from, q.to));
+                    }
+                    // 非 UTF-8（二进制 / 编码坏掉）：没法按行比，按过期处理。
+                    _ => out.push(true),
+                },
+                // 旧对象缺失（被 GC 或从未入库）：宁可供模型重读，不供奉可能错的旧内容。
+                _ => out.push(true),
             }
         }
-        let mut new_index = index;
-        for ch in &changes {
-            match ch.kind {
-                ChangeKind::Delete => {
-                    new_index.remove(&ch.path);
-                }
-                _ => {
-                    new_index.insert(ch.path.clone(), ch.hash.clone());
-                }
-            }
-        }
-        let depth = self.next_depth(&store, head_id)?;
-        let commit = Commit {
-            id,
-            parent: head_id,
-            base: head_id.unwrap_or(0),
-            author: agent.to_string(),
-            session: session.to_string(),
-            time: req.time,
-            message: msg.to_string(),
-            changes: changes.clone(),
-            tree: deltas_tree(&tree, &changes, depth),
-            depth,
-            source: Source::Tool,
-            anchor: Some(CommitAnchor {
-                agent: agent.to_string(),
-                line: req.line,
-            }),
-        };
-        let pending_index = PendingIndex {
-            agent: agent.to_string(),
-            index: new_index,
-        };
-        let pending = Pending::Commit {
-            commit: Box::new(commit.clone()),
-            index: Some(pending_index.clone()),
-        };
-        self.store.write_pending(&store, &pending)?;
-        let result =
-            self.apply_commit_pending(work, &shared, &store, &commit, Some(&pending_index));
-        self.settle(work, &shared, &store, result)?;
-        Ok(CommitReport { id, changes })
+        Ok(out)
     }
 
     fn work_sync(&self, work: &str, paths: &[String], time: i64) -> Result<SyncReport, String> {
