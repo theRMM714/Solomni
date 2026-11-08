@@ -482,6 +482,7 @@ pub(crate) fn run_batch(
             i += 1;
         }
     }
+    adopt_sandbox(ctx, plan, &mut done);
     // 每一次调用都留一条**同形状的审计记录**（与呈现层的动作记录同一处格式化）：可查、可对账。
     for ((module, tool, _args), slot) in plan.iter().zip(done.iter()) {
         if let Some((_label, outcome, _read)) = slot {
@@ -503,6 +504,70 @@ pub(crate) fn run_batch(
     done.into_iter()
         .map(|d| d.expect("每个调用都有执行结果"))
         .collect()
+}
+
+/// 目的：把 shell / 模块工具落进沙箱的改动，在**回合边界**采纳成共享区提交
+///   （write / edit / patch 的改动已在各自调用后由 commit_writes 提交）。
+/// 约束：只有这一批里真的跑成过不透明工具（shell / 模块工具）才扫全盘；工作区缺失、外部工作区、
+///   采纳失败都不打断回合——回执挂在这一批最后一个跑成的不透明工具结果后面。
+fn adopt_sandbox(
+    ctx: &MemberTools,
+    plan: &[(Option<String>, String, String)],
+    done: &mut [Option<(String, ToolOutcome, Option<ReadFact>)>],
+) {
+    let Some(ws) = ctx.workspace.as_ref() else {
+        return;
+    };
+    if ctx.sandbox.work_name.is_empty() {
+        return;
+    }
+    // 最后一个跑成的不透明工具：回执挂它的结果后面（下一次生成能看到的通道）。
+    let mut last: Option<usize> = None;
+    for (i, (module, tool, _)) in plan.iter().enumerate() {
+        if module.is_none() && !crate::capabilities::tools::api::is_exec(tool) {
+            continue;
+        }
+        if matches!(&done[i], Some((_, o, _)) if o.ok) {
+            last = Some(i);
+        }
+    }
+    let Some(i) = last else {
+        return;
+    };
+    let time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let line = ctx.line.load(std::sync::atomic::Ordering::Relaxed);
+    let note = match ws.work_adopt_sandbox(
+        &ctx.sandbox.work_name,
+        &ctx.sandbox.agent,
+        &ctx.sandbox.session,
+        time,
+        line,
+    ) {
+        Ok(report) => adopt_note(&report),
+        Err(e) => format!("\n\n[沙箱改动未提交] 共享区没有更新：{}", e),
+    };
+    if let Some((_, outcome, _)) = &mut done[i] {
+        outcome.output.push_str(&note);
+    }
+}
+
+/// 目的：沙箱采纳的回执（给模型看）；没有改动也没有没采纳的路径时为空串。
+fn adopt_note(report: &crate::capabilities::workspace::api::AdoptReport) -> String {
+    let mut out = String::new();
+    if let Some(id) = report.commit {
+        out.push_str(&format!(
+            "\n\n[沙箱改动已提交 {}] 这些文件不是 write / edit 改的（shell 或模块工具），已写进共享区：{}",
+            id,
+            report.changed.join("、")
+        ));
+    }
+    for h in &report.held {
+        out.push_str(&format!("\n[未采纳] {}：{}", h.path, h.why));
+    }
+    out
 }
 
 /// 本成员这次请求要声明的工具（原生通道用）：内置工具 + 模块工具。

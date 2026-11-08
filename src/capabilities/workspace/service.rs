@@ -7,11 +7,11 @@
 //! pull / commit 的三方比较与 resolve 的选边规则在 `domain::workstore`（纯逻辑），落盘在 `WorkStore` 端口后面。
 
 use crate::capabilities::workspace::api::{
-    media_hint, Change, ChangeKind, ChangeView, CommitDetail, CommitFileView, CommitReport,
-    CommitRequest, CommitSummary, FileVersion, GcReport, LostEntry, LostReport, PullReport,
-    ReadQuery, ResolveAction, ResolveEntry, ResolveReport, ResolveRequest, ResolveTake,
-    ResolveWarning, ResolveWarningKind, RestoreLostReport, StatusEntry, StatusReport, SyncReport,
-    VersionView, WorkFiles, WorkLog, WorkLogEntry, WorkRoots, WorkUsage, Workspace,
+    media_hint, AdoptReport, Change, ChangeKind, ChangeView, CommitDetail, CommitFileView,
+    CommitReport, CommitRequest, CommitSummary, FileVersion, GcReport, HeldChange, LostEntry,
+    LostReport, PullReport, ReadQuery, ResolveAction, ResolveEntry, ResolveReport, ResolveRequest,
+    ResolveTake, ResolveWarning, ResolveWarningKind, RestoreLostReport, StatusEntry, StatusReport,
+    SyncReport, VersionView, WorkFiles, WorkLog, WorkLogEntry, WorkRoots, WorkUsage, Workspace,
     MAX_ASSET_BYTES, VERSION_TEXT_LIMIT,
 };
 use crate::capabilities::workspace::domain::base::{stale_paths, BaseRef, CommitRefusal};
@@ -20,7 +20,7 @@ use crate::capabilities::workspace::domain::hash::{content_hash, is_content_hash
 use crate::capabilities::workspace::domain::workstore::{
     clean_rel, expand_paths, local_take_verdict, lost_rel, needs_backup, plan_commit, pull_verdict,
     status_of, validate_paths, Commit, CommitAnchor, Conflict, ConflictAt, Index, LocalTakeVerdict,
-    Pending, PendingIndex, PullVerdict, Ref, RefKind, Source, Tree, Unchanged,
+    Pending, PendingIndex, PullVerdict, Ref, RefKind, Source, StatusState, Tree, Unchanged,
 };
 use crate::capabilities::workspace::ports::{WorkStore, Workdirs};
 use std::collections::{BTreeMap, BTreeSet};
@@ -662,6 +662,8 @@ impl WorkspaceService {
         agent: &str,
         session: &str,
         req: &CommitRequest,
+        source: Source,
+        anchor: Option<CommitAnchor>,
     ) -> Result<CommitReport, String> {
         let msg = req.message.trim();
         if msg.is_empty() {
@@ -759,11 +761,8 @@ impl WorkspaceService {
             changes: changes.clone(),
             tree: deltas_tree(&tree, &changes, depth),
             depth,
-            source: Source::Tool,
-            anchor: Some(CommitAnchor {
-                agent: agent.to_string(),
-                line: req.line,
-            }),
+            source,
+            anchor,
         };
         let pending_index = PendingIndex {
             agent: agent.to_string(),
@@ -998,7 +997,21 @@ impl Workspace for WorkspaceService {
         let (shared, store, sandbox) = self.agent_roots(work, agent)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;
-        let report = self.commit_locked(work, &shared, &store, &sandbox, agent, session, req)?;
+        let anchor = CommitAnchor {
+            agent: agent.to_string(),
+            line: req.line,
+        };
+        let report = self.commit_locked(
+            work,
+            &shared,
+            &store,
+            &sandbox,
+            agent,
+            session,
+            req,
+            Source::Tool,
+            Some(anchor),
+        )?;
         self.record_committed_bases(&store, agent, &report)?;
         Ok(report)
     }
@@ -1039,8 +1052,21 @@ impl Workspace for WorkspaceService {
                 });
             }
         }
-        let report = match self.commit_locked(work, &shared, &store, &sandbox, agent, session, req)
-        {
+        let anchor = CommitAnchor {
+            agent: agent.to_string(),
+            line: req.line,
+        };
+        let report = match self.commit_locked(
+            work,
+            &shared,
+            &store,
+            &sandbox,
+            agent,
+            session,
+            req,
+            Source::Tool,
+            Some(anchor),
+        ) {
             Ok(r) => r,
             // 内容与主线一致（如把同样内容再写一遍）：没有可发布的改动，不算失败。
             Err(e) if e.starts_with("没有可提交的改动") => return Ok(None),
@@ -1049,6 +1075,104 @@ impl Workspace for WorkspaceService {
         self.record_committed_bases(&store, agent, &report)
             .map_err(CommitRefusal::Broken)?;
         Ok(Some(report))
+    }
+
+    fn work_adopt_sandbox(
+        &self,
+        work: &str,
+        agent: &str,
+        session: &str,
+        time: i64,
+        line: u64,
+    ) -> Result<AdoptReport, String> {
+        // 外部工作区的真相是磁盘（work_sync 采纳）；沙箱副本不是它的权威版本。
+        if self.dirs.is_external(work) {
+            return Ok(AdoptReport::default());
+        }
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let _shared = self.dirs.lock_shared(work)?;
+        let (shared, store, sandbox) = self.agent_roots(work, agent)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)?;
+        let (_, tree) = self.head_tree(&store)?;
+        let index: Index = self.store.read_index(&store, agent)?;
+        // 候选 = 受管路径 + 沙箱里的全部文件：新增 / 修改 / 删除都在这一遍里认出来。
+        let mut all: BTreeSet<String> = index.keys().cloned().collect();
+        all.extend(tree.keys().cloned());
+        all.extend(self.store.list(&sandbox)?);
+        let mut paths: Vec<String> = Vec::new();
+        let mut deletes: Vec<String> = Vec::new();
+        let mut held: Vec<HeldChange> = Vec::new();
+        for rel in all {
+            let local = self.store.scan_under(&sandbox, &rel, None)?;
+            let local_hash = local.as_ref().map(|v| v.hash.as_str());
+            let state = status_of(
+                index.get(&rel).map(String::as_str),
+                tree.get(&rel).map(String::as_str),
+                local_hash,
+            );
+            match state {
+                StatusState::LocalOnly | StatusState::LocalModified => {
+                    // 超大文件会让整次提交被拒：单列出来，让剩下的照常进共享区。
+                    let size = self.store.stat_under(&sandbox, &rel)?.unwrap_or(0);
+                    if size > self.max_asset_bytes {
+                        held.push(HeldChange {
+                            path: rel,
+                            why: format!("超过单文件上限（{} 字节）", self.max_asset_bytes),
+                        });
+                        continue;
+                    }
+                    paths.push(rel);
+                }
+                StatusState::LocalDeleted => deletes.push(rel),
+                StatusState::BothPresent => held.push(HeldChange {
+                    path: rel,
+                    why: "共享区已有这个路径、你的沙箱还没有基线：先 work_pull 再改".to_string(),
+                }),
+                StatusState::Conflict => held.push(HeldChange {
+                    path: rel,
+                    why: "共享区先改过、你的沙箱也改了：先 work_pull（冲突用 work_resolve）"
+                        .to_string(),
+                }),
+                _ => {}
+            }
+        }
+        if paths.is_empty() && deletes.is_empty() {
+            return Ok(AdoptReport {
+                commit: None,
+                changed: Vec::new(),
+                held,
+            });
+        }
+        let req = CommitRequest {
+            paths,
+            deletes,
+            message: "沙箱改动（shell / 模块工具）".to_string(),
+            time,
+            line,
+        };
+        let anchor = CommitAnchor {
+            agent: agent.to_string(),
+            line,
+        };
+        let report = self.commit_locked(
+            work,
+            &shared,
+            &store,
+            &sandbox,
+            agent,
+            session,
+            &req,
+            Source::External,
+            Some(anchor),
+        )?;
+        self.record_committed_bases(&store, agent, &report)?;
+        Ok(AdoptReport {
+            commit: Some(report.id),
+            changed: report.changes.iter().map(|c| c.path.clone()).collect(),
+            held,
+        })
     }
 
     fn work_stale_reads(&self, work: &str, queries: &[ReadQuery]) -> Result<Vec<bool>, String> {

@@ -29,6 +29,26 @@ pub struct ReadQuery {
     pub to: u64,
 }
 
+/// 目的：沙箱里改了、却没被采纳的一条路径（模型据此先 pull 再重做）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeldChange {
+    /// 目的：工作树内的相对路径。
+    pub path: String,
+    /// 目的：不采纳的原因（给模型看的一句话）。
+    pub why: String,
+}
+
+/// 目的：一次沙箱采纳的结果：一次提交只带一批改动；没有可采纳的改动时 `commit = None`。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AdoptReport {
+    /// 目的：采纳后的新提交号；None = 沙箱与主线一致。
+    pub commit: Option<u64>,
+    /// 目的：已采纳的路径（新增 / 修改 / 删除）。
+    pub changed: Vec<String>,
+    /// 目的：沙箱改了但基线过期 / 未拉取 / 三方冲突的路径（没有采纳）。
+    pub held: Vec<HeldChange>,
+}
+
 /// 目的：提交历史的一条（不含整棵树，列表可安全分页）。
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct WorkLogEntry {
@@ -196,6 +216,18 @@ pub trait Workspace: Send + Sync {
         path: &str,
         expect_current: &str,
     ) -> Result<RestoreLostReport, String>;
+    /// **沙箱采纳**：把该 agent 沙箱里不是 write / edit / patch 落下的改动（shell、模块工具、外部写入）
+    /// 采纳成一条 `source=external` 的提交，锚在这条转录行上。
+    /// 约束：只收快进——基线过期、未拉取、三方冲突的路径不采纳，逐条放进 `held` 交调用方回执；
+    ///   不改任何沙箱内容；外部工作区不采纳（它的真相是磁盘，走 `work_sync`）。
+    fn work_adopt_sandbox(
+        &self,
+        work: &str,
+        agent: &str,
+        session: &str,
+        time: i64,
+        line: u64,
+    ) -> Result<AdoptReport, String>;
     /// **读取是否过期**：一批读取事实（工作树、路径、行区间、当时的指纹）逐个判定。
     /// 返回：与 `queries` 同序的布尔值；true = 读过的行在主副本里已经变了（这段内容该被替换成占位符）。
     /// 约束：判据是**内容**不是时间——路径没了算过期；指纹相同算不过期；指纹不同才比行区间。

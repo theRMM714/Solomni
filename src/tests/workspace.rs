@@ -2903,3 +2903,139 @@ pub(crate) fn write_tools_publish_to_shared_area_and_report_stale_bases() {
         "共享区里的文件必须跟着删掉"
     );
 }
+
+/// 目的：沙箱采纳把 shell / 模块工具落下的改动（新增 / 修改 / 删除）一次提交进共享区，来源记为 external；
+///   重复采纳无改动即无提交——回合末扫描必须收敛。
+#[test]
+pub(crate) fn adopt_sandbox_publishes_shell_changes_and_converges() {
+    use crate::capabilities::workspace::domain::workstore::Source;
+    use crate::capabilities::workspace::ports::WorkStore;
+
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    let sb_dir = sandbox_of(&ws, "w", "a");
+    // 主线先有两条：note.md 要改、gone.md 要删、keep.md 不动。
+    ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
+    ws.work_commit_user("w", "gone.md", b"tmp", 2, 0).unwrap();
+    ws.work_commit_user("w", "keep.md", b"keep", 3, 0).unwrap();
+    ws.work_pull(
+        "w",
+        "a",
+        &[
+            "note.md".to_string(),
+            "gone.md".to_string(),
+            "keep.md".to_string(),
+        ],
+    )
+    .unwrap();
+    let head = ws.work_head("w").unwrap().unwrap();
+
+    // 模拟 shell / 模块工具直接改沙箱：改一条、删一条、新增一条。
+    store.write_under(&sb_dir, "note.md", b"v2").unwrap();
+    store.remove_under(&sb_dir, "gone.md").unwrap();
+    store.write_under(&sb_dir, "new.md", b"shell").unwrap();
+    let report = ws.work_adopt_sandbox("w", "a", "w--a", 9, 7).unwrap();
+    let id = report.commit.expect("有改动必须提交");
+    assert_eq!(id, head + 1, "一次采纳只产生一条提交");
+    let mut changed = report.changed.clone();
+    changed.sort();
+    assert_eq!(
+        changed,
+        vec![
+            "gone.md".to_string(),
+            "new.md".to_string(),
+            "note.md".to_string()
+        ],
+        "新增 / 修改 / 删除都在同一条提交里"
+    );
+    assert!(report.held.is_empty(), "全部快进，不该有没采纳的路径");
+    let shared = shared_of(&ws, "w");
+    assert_eq!(
+        store.read_under(&shared, "note.md").unwrap().as_deref(),
+        Some(b"v2".as_slice())
+    );
+    assert!(store.read_under(&shared, "gone.md").unwrap().is_none());
+    assert_eq!(
+        store.read_under(&shared, "new.md").unwrap().as_deref(),
+        Some(b"shell".as_slice())
+    );
+
+    // 来源与锚：不是工具写，而是"采纳沙箱"，锚在这条转录行上（留档据此一起退掉）。
+    let commit = store.read_commit(&store_of(&ws, "w"), id).unwrap().unwrap();
+    assert_eq!(commit.source, Source::External);
+    assert_eq!(commit.author, "a");
+    assert_eq!(commit.session, "w--a");
+    assert_eq!(commit.message, "沙箱改动（shell / 模块工具）");
+    assert_eq!(
+        commit.anchor.as_ref().map(|a| (a.agent.as_str(), a.line)),
+        Some(("a", 7))
+    );
+
+    // 再扫一遍：沙箱与主线一致 → 不再产生提交（回合末扫盘不能每次都长出一条）。
+    let again = ws.work_adopt_sandbox("w", "a", "w--a", 10, 8).unwrap();
+    assert_eq!(again.commit, None, "没有改动就不提交");
+    assert!(again.changed.is_empty());
+    assert_eq!(ws.work_head("w").unwrap(), Some(id));
+}
+
+/// 目的：基线过期时的沙箱改动不被采纳——留在沙箱并逐条点名，主线一个提交都不准多；
+///   拉取后同一条改动才能快进发布。
+#[test]
+pub(crate) fn adopt_sandbox_holds_stale_changes_until_pulled() {
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string(), "b".to_string()])
+        .unwrap();
+    ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
+    ws.work_pull("w", "a", &["note.md".to_string()]).unwrap();
+    ws.work_pull("w", "b", &["note.md".to_string()]).unwrap();
+    // b 先改并发布：a 的基线从此过期。
+    let sb_b = sandbox_of(&ws, "w", "b");
+    store.write_under(&sb_b, "note.md", b"v2").unwrap();
+    ws.work_commit_auto("w", "b", "w--b", &commit_req(&["note.md"], &[], "b 改", 2))
+        .unwrap();
+    // a 的沙箱里也改了（shell），但基线没跟上：不采纳。
+    let sb_a = sandbox_of(&ws, "w", "a");
+    store.write_under(&sb_a, "note.md", b"v3").unwrap();
+    let held = ws.work_adopt_sandbox("w", "a", "w--a", 3, 4).unwrap();
+    assert_eq!(held.commit, None, "过期基线不得留下提交");
+    assert_eq!(held.held.len(), 1, "没采纳的路径要逐条点名");
+    assert_eq!(held.held[0].path, "note.md");
+    assert!(
+        held.held[0].why.contains("work_pull"),
+        "要给出下一步：{}",
+        held.held[0].why
+    );
+    assert_eq!(
+        store
+            .read_under(&shared_of(&ws, "w"), "note.md")
+            .unwrap()
+            .as_deref(),
+        Some(b"v2".as_slice()),
+        "共享区保持 b 发布的那一版"
+    );
+
+    // 模型按回执先处置冲突（take=upstream 覆盖本地、被覆盖的那份进 lost），再改才能发布。
+    ws.work_resolve(
+        "w",
+        "a",
+        &resolve_req(
+            &["note.md"],
+            crate::capabilities::workspace::api::ResolveTake::Upstream,
+        ),
+    )
+    .unwrap();
+    store.write_under(&sb_a, "note.md", b"v4").unwrap();
+    let published = ws.work_adopt_sandbox("w", "a", "w--a", 5, 6).unwrap();
+    assert!(published.commit.is_some(), "拉取到最新基线后应当能发布");
+    assert_eq!(
+        store
+            .read_under(&shared_of(&ws, "w"), "note.md")
+            .unwrap()
+            .as_deref(),
+        Some(b"v4".as_slice())
+    );
+}
+
+fn store_of(ws: &WorkFace, work: &str) -> PathBuf {
+    ws.roots(work, &[]).unwrap().store
+}

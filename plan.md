@@ -51,11 +51,11 @@
 
 | 文件 | 改动 |
 | --- | --- |
-| `src/capabilities/collab/service/tool_loop.rs` | 工具执行边界统一提交；回合末 sweep |
+| `src/capabilities/collab/service/tool_loop.rs` | 工具执行边界统一提交；批次末 `adopt_sandbox` 扫沙箱采纳 shell / 模块改动 |
 | `src/capabilities/tools/domain/systool.rs` | `Observations` 暴露 `touched` 路径集合；read 产出 `ReadFact` |
 | `src/capabilities/tools/service/systool.rs` | read 前确保状态已提交；记录 blob |
 | `src/capabilities/workspace/domain/base.rs`（新增） | `BaseRef`、`CommitRefusal`、`stale_paths` 准入纯函数 |
-| `src/capabilities/workspace/service.rs` | `work_commit_auto`、逐路径基线落 `refs/agents/<agent>`、`work_sync_branch` |
+| `src/capabilities/workspace/service.rs` | `work_commit_auto`、`work_adopt_sandbox`（按 `status_of` 认新增 / 修改 / 删除，只收快进）、逐路径基线落 `refs/agents/<agent>` |
 | `src/capabilities/workspace/domain/freshness.rs`（新增） | 过期判定纯函数 |
 | `src/capabilities/session/domain/events.rs` | 工具结果 payload 增 `read` 事实 |
 | `src/capabilities/collab/service/driver.rs` | 发送视图 = `send_view`（过期读取换占位符）；读台账登记 |
@@ -64,7 +64,7 @@
 
 ### 2.3 算法
 
-**写路径**：工具调用后取 `Observations.take_written()`（这次调用真正写过的路径）调 `work_commit_auto`，无差异 = `Ok(None)`；回合末全量扫沙箱兜 shell / 模块 / 外部编辑（待办 2B′）。`work_pull` 末尾把拉到的路径基线与 `source=pull` 提交一起落。显式 `work_commit` 保留逐路径冲突判定；**只有自动提交**走 fast-forward。
+**写路径**：工具调用后取 `Observations.take_written()`（这次调用真正写过的路径）调 `work_commit_auto`，无差异 = `Ok(None)`；批次里跑过 shell / 模块工具时，批次末调 `work_adopt_sandbox` 扫一遍沙箱（基线 = `status_of(index, head, local)`）：`LocalOnly` / `LocalModified` / `LocalDeleted` 一次提交（`source=external`、锚 = 批次行），`BothPresent` / `Conflict` / 超大文件逐条 `held` 并在该工具回执里点名。只读批次不扫。`work_pull` 末尾把拉到的路径基线与 `source=pull` 提交一起落。显式 `work_commit` 保留逐路径冲突判定；**只有自动提交**走 fast-forward。
 
 **准入（已定口径）**：基线是显式事实 `BaseRef { oid }`，落在 `refs/agents/<agent>` 的 `heads: path -> oid`；没有记录 = 从未拉取，不伪造历史。两个落点——工具执行前（写前准入）与提交时（CAS 复核），都在写共享区之前判定，失败不产出 `Pending`（否则 `recover_locked` 会重放）。自动提交**不 pull**：基线过期即 `CommitRefusal::Stale` 硬失败，由模型/用户显式 `work_pull` 后再写。新文件（主线里没有、也没拉过）放行，否则模型写不出第一份文件。
 
@@ -85,7 +85,7 @@
 
 - [x] 2A 基线事实与准入：`domain/base.rs`、`refs/agents/<agent>` 逐路径基线（pull / 提交后写实）、`work_commit_auto`（CAS → 提交 → 基线推进）、类型化拒绝；
 - [x] 2B 接线：`MemberTools.workspace`（`CollabSession` 注入，生产必为 `Some`）、`tool_loop::commit_writes` 在写工具落地后按 `Observations.take_written()` 自动提交（锚 = 工具调用行）、`work_commit_auto` 返回 `Option`（无改动不算失败）、六处临时 `allow(dead_code)` 已删；提示词与 `docs/session/session-model.md`、`docs/permission/README.md`、`systools/tools.yaml` 同步为"自动提交 + 基线过期只留在沙箱"；
-- [ ] 2B′ 回合末全量扫沙箱（shell / 模块 / 外部写的文件）落 `source=external` 提交；
+- [x] 2B′ 批次末扫沙箱：`work_adopt_sandbox`（`AdoptReport { commit, changed, held }`，一次提交带新增 / 修改 / 删除，只收快进）、`tool_loop::adopt_sandbox`（只在批次跑过 shell / 模块工具时触发，回执挂最后一个跑成的调用）、提交带 `source=external` 与 `(agent, line)` 锚；外部工作区不采纳（真相是磁盘，走 `work_sync`）；`commit_locked` 的来源与锚改为调用方给；
 - [x] 2C `ReadFact` 与 `freshness`：`domain/readfact.rs`（事实随工具行落盘，`ToolCallView.read`）、`domain/freshness.rs`（按内容找连续行窗口）、`work_stale_reads`（指纹相同即新鲜，不同才比行区间；对象缺失按过期）；整份读到的 `read` 才留事实；
 - [x] 2E 用户开关：`set_context_freshness` 动作（写工作根 meta、整棵子树共享、生成中拒绝）+ 状态栏「工具」菜单勾选项；切换后子树从内存丢掉、按新开关重建；API 契约测试 `set_context_freshness_action_flips_the_work_switch_and_reports_it`
 - [x] 2D 发送视图占位符与 `meta.context_freshness`：事实落转录、读台账按正文匹配（压缩移位不失配）、`freshness_view` 纯函数派生、单/代理会话装配与重建都装回开关与台账、开关默认关（成本由用户按钮控制）；`docs/session/session-model.md` 的「过期读取的占位符」为口径。
