@@ -1,7 +1,7 @@
 # 单元地图 · conductor
 
 > 定位：conductor（协调业务）逐文件职责的唯一权威；由 T0 结构审查与磁盘双向比对。
-> 效力：契约｜核对：2026-11-04｜依据：`src/capabilities/conductor/api/mod.rs`
+> 效力：契约｜核对：2026-11-09｜依据：`src/capabilities/conductor/api/mod.rs`
 
 > 本文是 **conductor** 逐文件职责的唯一权威；由 `node run-tests.js` 的 T0 结构审查与磁盘**双向比对**
 > （表里每个路径必须存在；`src/` 下每个 `.rs` 都必须出现在某一张单元地图里）。
@@ -19,10 +19,20 @@
 | `src/capabilities/conductor/api/proxy.rs` | 队列代理：把各能力的入站契约挂到核心手柄上（呈现层因此只持 `Ops`） |
 | `src/capabilities/conductor/service/mod.rs` | 会话中心：会话在世表、命令队列、运行态与派发闸（`dispatch_gate`） |
 | `src/capabilities/conductor/service/action.rs` | 动作的核心实现：把规整后的建会话载荷变成一条会话 |
-| `src/capabilities/conductor/service/work.rs` | 工作与会话配置：配置读写、建工作与上传（含外部工作区根的分档解析）、文件视图、会话视图 |
+| `src/capabilities/conductor/service/work/mod.rs` | 工作方法族入口：建工作的两段结果、改配准备结果、模块声明的能力表、运行包重建判据 |
+| `src/capabilities/conductor/service/work/report.rs` | 运行包报告与档位视图：模块声明的能力、包库可用版本、缺失清单、平台与库、计划与权限视图 |
+| `src/capabilities/conductor/service/work/config.rs` | 会话配置读写：配置视图、改配两段、权限档提交、围栏撤权、配置记录落盘 |
+| `src/capabilities/conductor/service/work/model.rs` | 调用参数与思考档：流式与预算取值、思考片段、树上可用思考档、按根设置 |
+| `src/capabilities/conductor/service/work/host.rs` | 宿主工具与网络开关：QEMU / virtiofsd / smbd 路径、宿主只读根 |
+| `src/capabilities/conductor/service/work/views.rs` | 会话与文件视图：在世会话 × 历史的并集、继续判据、文件视图 / 上传 / 日志 / 提交恢复 |
+| `src/capabilities/conductor/service/work/create.rs` | 建工作两段与 guest 启动：占名、备工作区、装通道、起 guest、失败撤销 |
 | `src/capabilities/conductor/service/workspace_root.rs` | 外部工作区根的策略：按档位判网络路径 / 共享根 / 文件系统根 / UTF-8 与产品根的互包含（文本 + 落点身份），并做目录与可写探测；创建走 `resolve`，加载复检走 `recheck` |
-| `src/capabilities/conductor/service/turn.rs` | 回合收发与协作动作：名单分发、单 agent 的话、协作推进入口、会话生命周期 |
-| `src/capabilities/conductor/service/flow.rs` | 协作流水线推进：链推进、节点派发与子会话、协作步（`take_*` / `put_*`） |
+| `src/capabilities/conductor/service/turn.rs` | 单 agent 的回合收发：工具形态刷新、生成前准备、节点派发准备、同步生成入口、继续 |
+| `src/capabilities/conductor/service/suggest.rs` | 拟名单入口：按本次需求推荐 agent 名单（队列分发与行解析） |
+| `src/capabilities/conductor/service/activation.rs` | 会话启用与激活两段：按转录重建为活动会话、构建请求、准备与提交 |
+| `src/capabilities/conductor/service/persist.rs` | 落盘策略与增量落盘手柄：哪种会话留档、哪些事件算定稿、失败怎么报 |
+| `src/capabilities/conductor/service/compact.rs` | 压缩通道工厂：全局设置指向的压缩模型解析与更新 |
+| `src/capabilities/conductor/service/flow.rs` | 协作流水线推进与协作动作：链推进、节点派发与子会话、协作步（`take_*` / `put_*`）、裁决卡动作与改需求 |
 | `src/capabilities/conductor/service/rewind.rs` | 跨会话回档编排：按同一回合 id 收窗整棵子树 |
 | `src/capabilities/conductor/service/env.rs` | 装配材料：成员通道、沙箱清单、工具环境、单 agent 会话构造（纯派生，不落盘） |
 | `src/capabilities/conductor/service/history.rs` | 历史列出 / 打开 / 删除、事件收编与增量落盘手柄；会话加载时按 meta 的档位复检外部工作区绑定 |
