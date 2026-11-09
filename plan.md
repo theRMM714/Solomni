@@ -8,7 +8,7 @@
 
 | # | 分支 | 内容 | 状态 |
 | --- | --- | --- | --- |
-| S0 | `task/arch-upgrade` | 三条结构判据 + `[big]` 大文件回执 + 空基线 | 进行中 |
+| S0 | `task/arch-upgrade` | 三条结构判据 + `[big]` 大文件回执 + 空基线 | 已销账（证据见 §4） |
 | S1 | `task/builds-ports` | builds：抽端口、拆 service | 未开始 |
 | S2 | `task/storage-ports` | storage：抽端口、拆 service | 未开始 |
 | S3 | `task/workspace-split` | workspace：只拆文件，不抽端口 | 未开始 |
@@ -28,7 +28,7 @@
 
 ## 2. S0 判据规格（实现以本节为准）
 
-实现位置：`tests/gates/structure/dependency.js`（复用其 `normTarget` / `stripTestModules`），基线 `tests/structure-baseline.json`（与 `dependency-baseline.json` 同构：每条判据一个数组，条目过期即失败）。
+实现位置：`tests/gates/structure/capability.js`（复用 `dependency.js` 的 `stripTestModules`；注册为 `structure/capability-internal`），基线 `tests/structure-baseline.json`（与 `dependency-baseline.json` 同构：每条判据一个数组，条目过期即失败；另加 `bigFiles` 快照仅供回执显示增量与判定「新建」）。
 
 | 判据 | 命中条件 | 豁免 |
 | --- | --- | --- |
@@ -52,7 +52,7 @@
 
 ## 4. 各阶段销账条件
 
-- **S0**：三条判据对故意构造的违规能红；存量全部进基线后全绿；`[big]` 在汇总行出现；`node run-tests.js --docs` 绿（本文件在根路由白名单内）。
+- **S0**：三条判据对故意构造的违规能红（已验：新增 `use std::fs` → serviceIo 红；基线留空条目 → 「已过期」红；新建 1201 行文件 → 硬线红）；存量全部进基线后全绿（现 0 问题 / 15 条 `[big]`）；`[big]` 在汇总尾出现；`node run-tests.js --docs` 绿（本文件在根路由白名单内）。
 - **S1 builds**：`service.rs` ≤800 行；`std::fs` 经端口；`serviceIo` 基线销 1 条；端口契约测试在 `src/tests/builds.rs`。
 - **S2 storage**：同上，且不再直接 `ProcessBook`（改经端口），`serviceToDetail` 基线销 1 条。
 - **S3 workspace**：2533 行拆到各文件 ≤800，依赖边无环（`siblingCycles` 保持为空）。

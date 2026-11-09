@@ -36,6 +36,8 @@ cargo deny check
 - `gaps.yaml` 是否可解析、字段完整；
 - **依赖方向是否仍然成立**：层间不反向、`presentation` 只经入站能力面驱动、业务层内部不成环。
 - 依赖方向门禁的豁免清单在 `tests/dependency-baseline.json`（当前为空 = 零豁免），**条目一旦不再成立即失败**——规则与口径见 [../../ARCHITECTURE.md](../../ARCHITECTURE.md) §九.7。
+- **能力内部**同样机器判定（`service` 不引本能力 `detail` / `kernel::detail`、`service` 不直接做 IO、同能力方法族不成环），豁免在 `tests/structure-baseline.json`，同样是「条目一旦不再成立即失败」。
+- **文件粒度只报不拦**：超过 800 行的实现文件按 `[big]` 回执行数 / 增量 / IO 数 / impl 数 / 文件头目的槽，不改变成败；唯一硬线是**新建**文件超过 1200 行（`node run-tests.js`）。
 - 测试是否写入项目外绝对路径或真实用户目录；
 - 测试结束后是否遗留子进程、端口、临时目录、权限或句柄；
 - 是否存在重复测试、重复 Fixture、重复测试替身或无理由的跨层重复断言；

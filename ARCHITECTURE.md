@@ -201,7 +201,8 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 
 ### 九.5 粒度上限
 
-- 一个能力的实现文件（`service/**` / `domain/**` / `detail/**`）≤ **800 行**（`conductor/service/` 与 `collab/service/` 按方法族分块）；
+- 一个能力的实现文件（`service/**` / `domain/**` / `detail/**`）≤ **800 行**（`conductor/service/` 与 `collab/service/` 按方法族分块）——这是**软线**：超线只进 `[big]` 回执（`node run-tests.js` 打印行数 / 增量 / IO 数 / impl 数 / 文件头目的槽，**不改变成败**，行数是气味、依赖才是规则）；
+- 唯一硬线是**新建**文件的 **1200 行**：新文件没有历史包袱，超线说明职责没拆，门禁直接失败；存量文件永不为行数失败，只按能力重构逐步消账；
 - 一个能力的 `api.rs` ≤ **20 个方法**——按「一个调用角色的面」计数；`registry` 是已知的宽面，**它仍是一个能力**（判据是 §九.1，不是方法数）；
 - 测试文件按 R10 的上限（2000 行）；
 - 平台后端按**平台目录**切，再按关注点分（如 Windows 的 `acl` / `record` / `container`）。
@@ -226,12 +227,13 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 
 ### 九.7 依赖方向门禁与基线
 
-- `node run-tests.js` 的 T0 结构审查按下列判据机器判定（规则在 `tests/gates/structure/dependency.js`，逐条清单用 `node run-tests.js --list`；豁免清单在 `tests/dependency-baseline.json`）：
+- `node run-tests.js` 的 T0 结构审查按下列判据机器判定（规则在 `tests/gates/structure/dependency.js` 与 `tests/gates/structure/capability.js`，逐条清单用 `node run-tests.js --list`；豁免清单分别在 `tests/dependency-baseline.json` 与 `tests/structure-baseline.json`）：
 
 - **apiOnly**：跨能力引用必须以 `::api` 结尾；任何非入口层引用别人的 `ports` 都算违规；
 - **apiPorts** / **domainPorts**：`api` 与 `domain` 都不引端口；
 - **foreignImpl**：不得给别的能力的类型写 `impl`（`node run-tests.js`）；
 - **coreCycles**：能力节点图无环；
+- **internal**（能力内部）：`service` 不引本能力 `detail` 或 `kernel::detail`；`service` 不直接做 IO（`std::fs` / `Command` / 网络）；同能力的方法族之间不成环；
 - **reverse** / **presentation**：能力不反向依赖入口层或呈现层；
 - **channelCross**：呈现层的两个渠道（`cli` 与 `web`）互不依赖；
 - **unitMap**：各单元的 `unit-map.md` 合起来与磁盘**双向一致**（结构审查）；**文档链接**：代码注释里的 `docs/**.md` 引用由结构审查判，文档之间的 md 链接与根 `*.md` 路由表由**文档审查**判（本地全量入口的「T0 结构审查」步骤跑全部门禁、含文档审查；CI 拆成 `docs` / `structure` 两个 job，`node run-tests.js --audit=docs` / `--audit=structure`）；

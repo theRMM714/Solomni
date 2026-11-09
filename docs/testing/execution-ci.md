@@ -57,7 +57,7 @@ node run-tests.js
 1. `cargo build`（并打印安全模式 / 真机围栏模式说明）；
 2. 运行 `solomni --doctor`，记录当前平台和围栏能力；
 3. `T0 编译（--all-targets）`（硬失败）；
-4. `T0 结构审查`（文档审查 + 结构审查；硬失败；判据实现只有两处——`tests/gates/structure/` 8 个文件与 `tests/gates/docs/` 4 个文件，逐条清单以 `node run-tests.js --list` 为准，判定口径见 [levels.md](levels.md) 的 T0）；
+4. `T0 结构审查`（文档审查 + 结构审查；硬失败；判据实现只有两处——`tests/gates/structure/` 9 个文件与 `tests/gates/docs/` 4 个文件，逐条清单以 `node run-tests.js --list` 为准，判定口径见 [levels.md](levels.md) 的 T0）；
 5. `T0 格式（fmt --check）`（硬失败）；
 6. `T0 静态检查（clippy）`（硬失败）；
 7. `T0 编译告警`（硬失败）；

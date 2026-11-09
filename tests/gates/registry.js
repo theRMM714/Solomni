@@ -17,6 +17,7 @@ const S = {
   selftest: require("./structure/selftest.js"),
   docsTruth: require("./structure/docsTruth.js"),
   dependency: require("./structure/dependency.js"),
+  capability: require("./structure/capability.js"),
 };
 const D = {
   portals: require("./docs/portals.js"),
@@ -45,6 +46,18 @@ const GATES = [
   { id: "structure/links", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["links.yaml", "dependencies.yaml", "env.js", "src/**/*.rs"], run: (root) => S.ledgers.links(root) },
   { id: "structure/deps-sha256", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["dependencies.yaml"], run: (root) => S.ledgers.depsSha256(root) },
   { id: "structure/dependency", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["src/**/*.rs", "tests/dependency-baseline.json"], run: (root) => S.dependency.direction(root) },
+  {
+    id: "structure/capability-internal",
+    lane: "structure",
+    step: "T0 结构审查",
+    kind: "text",
+    inputs: ["src/capabilities/**/*.rs", "tests/structure-baseline.json"],
+    run: (root, ctx) => {
+      const r = S.capability.internal(root);
+      ctx.stats.notes = (ctx.stats.notes || []).concat(r.notes);
+      return r.problems;
+    },
+  },
   { id: "docs/portals", lane: "docs", step: "T0 文档审查", kind: "text", inputs: ["*.md", "docs/**/*.md"], run: (root) => D.portals.portals(root) },
   { id: "docs/root-router", lane: "docs", step: "T0 文档审查", kind: "text", inputs: ["*.md", "AGENTS.md"], run: (root) => D.rootRouter.rootRouter(root) },
   { id: "docs/templates", lane: "docs", step: "T0 文档审查", kind: "spawn", inputs: ["docs/templates/**", "docs/**/*.md"], run: (root) => D.templates.templates(root) },
@@ -73,6 +86,7 @@ const LANE_ORDER = {
     "structure/links",
     "structure/deps-sha256",
     "structure/dependency",
+    "structure/capability-internal",
   ],
 };
 
@@ -105,7 +119,12 @@ function runGates(root, ids) {
     if (!g) throw new Error("未知 gate：" + id);
     for (const p of g.run(root, ctx) || []) problems.push(p);
   }
-  return { problems, targets: ctx.stats.targets || [], testFiles: ctx.stats.testFiles || 0 };
+  return {
+    problems,
+    notes: ctx.stats.notes || [],
+    targets: ctx.stats.targets || [],
+    testFiles: ctx.stats.testFiles || 0,
+  };
 }
 
 function runLane(root, name) {

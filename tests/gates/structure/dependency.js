@@ -9,6 +9,26 @@ const fs = require("fs");
 const path = require("path");
 const { rel } = require("../../lib/fsutil.js");
 
+// 模块级 #[cfg(test)] mod tests 不是生产依赖边，剔除；#[cfg(test)] 加在函数上的保留。
+function stripTestModules(text) {
+  const lines = text.split(/\r?\n/);
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*#\[cfg\(test\)\]\s*$/.test(lines[i])) {
+      let j = i + 1;
+      while (j < lines.length && lines[j].trim() === "") j++;
+      if (j < lines.length && /^\s*(pub\s+)?mod\s+\w+/.test(lines[j])) {
+        let k = j;
+        while (k < lines.length && !/^\}/.test(lines[k])) k++;
+        i = k;
+        continue;
+      }
+    }
+    out.push(lines[i]);
+  }
+  return out.join("\n");
+}
+
 function direction(root) {
   const problems = [];
   // 依赖方向的现状违规进基线；条目一旦不再成立必须删除（过期即失败）。
@@ -21,25 +41,6 @@ function direction(root) {
   }
   if (!depBaseline) return problems;
 
-  // 模块级 #[cfg(test)] mod tests 不是生产依赖边，剔除；#[cfg(test)] 加在函数上的保留。
-  const stripTestModules = (text) => {
-    const lines = text.split(/\r?\n/);
-    const out = [];
-    for (let i = 0; i < lines.length; i++) {
-      if (/^\s*#\[cfg\(test\)\]\s*$/.test(lines[i])) {
-        let j = i + 1;
-        while (j < lines.length && lines[j].trim() === "") j++;
-        if (j < lines.length && /^\s*(pub\s+)?mod\s+\w+/.test(lines[j])) {
-          let k = j;
-          while (k < lines.length && !/^\}/.test(lines[k])) k++;
-          i = k;
-          continue;
-        }
-      }
-      out.push(lines[i]);
-    }
-    return out.join("\n");
-  };
   // 归一深度：能力取「层 + 能力 + 子模块」三级——要能区分 ::api（唯一合法入口）与 ::domain / ::ports（内部）。
   const normTarget = (full) => {
     const parts = full.split("::");
@@ -212,4 +213,4 @@ function direction(root) {
   return problems;
 }
 
-module.exports = { direction };
+module.exports = { direction, stripTestModules };
