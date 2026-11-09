@@ -56,7 +56,7 @@
 
 ## 检查
 
-- 结构与锚点 → `tests/docs-gov.mjs`（`node run-tests.js --docs` 调用）；判据实现在 `tests/gates/docs/`（4 文件）与 `tests/gates/structure/`（8 文件）。
+- 结构与锚点 → `tests/docs-gov.mjs`（`node run-tests.js --docs` 调用）；判据实现在 `tests/gates/docs/`（4 文件）与 `tests/gates/structure/`（9 文件）。
 - 候选清单可复现 → `tests/docs-audit.mjs`。
 - 生成段一致 → `tests/docs-sync.mjs`（6 个目标：平台验收状态 ×4、T0 步骤、成功标记）。
 

@@ -278,6 +278,12 @@ function runFull() {
   for (const s of skips) console.log("  [env-skip] " + s);
   for (const t of proc.timeouts) console.log("  [超时] " + t);
   for (const s of qualityFailed) console.log("  [quality-fail] " + s.step + "：" + s.detail);
+  // 文件粒度回执：超 800 行的实现文件逐个列出，只报不拦——行数是气味，依赖才是规则。
+  const bigNotes = step.steps.flatMap((s) => s.notes || []);
+  if (bigNotes.length) {
+    console.log("  [big] 行数不是失败条件：新增独立职责优先拆子模块或抽端口，仅为数字拆文件会更乱。");
+    for (const n of bigNotes) console.log("  " + n);
+  }
   for (const g of gaps) console.log("  [gap] " + g);
   for (const g of globalGapsList) console.log("  [global-gap] " + g);
   if (failed.length || qualityFailed.length) {

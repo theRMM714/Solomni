@@ -126,12 +126,15 @@ const STEPS = [
       const audit = gates.runLane(ctx.root, "all");
       ctx.step.announceDone(
         audit.problems.length ? "失败" : "完成",
-        audit.problems.length ? audit.problems.length + " 条问题" : audit.targets.length + " 个目标 / " + audit.testFiles + " 个测试文件",
+        audit.problems.length
+          ? audit.problems.length + " 条问题"
+          : audit.targets.length + " 个目标 / " + audit.testFiles + " 个测试文件" + (audit.notes.length ? " / " + audit.notes.length + " 个文件超行数软线" : ""),
       );
       finish(ctx, {
         step: "T0 结构审查",
         status: audit.problems.length ? "quality-fail" : "pass",
         detail: audit.problems.join("；"),
+        notes: audit.notes,
         raw: null,
       });
     },
