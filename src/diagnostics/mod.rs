@@ -250,8 +250,11 @@ fn storage_service(
 ) -> crate::capabilities::storage::service::StorageService {
     use std::sync::Arc;
     let provision: Arc<dyn crate::capabilities::provision::api::Provision + Send + Sync> =
-        Arc::new(crate::capabilities::provision::ProvisionService::with_vm(
+        Arc::new(crate::capabilities::provision::assemble_with_vm(
             root,
+            std::sync::Arc::new(
+                crate::capabilities::provision::detail::fetch::HttpFetch::new(15, 7200),
+            ),
             crate::provision_vm(crate::kernel::detail::procs::ProcessBook::open(
                 &root.join(".home"),
             )),
@@ -288,7 +291,12 @@ pub(crate) fn doctor_json_with(
 ) -> serde_json::Value {
     // 虚拟机档的逐项前置（**只读事实**）：项目内补齐过就按那一份问，否则按 PATH 问（与核心同一把尺子）。
     let installed = crate::capabilities::provision::api::Provision::status(
-        &crate::capabilities::provision::ProvisionService::new(root),
+        &crate::capabilities::provision::assemble(
+            root,
+            std::sync::Arc::new(
+                crate::capabilities::provision::detail::fetch::HttpFetch::new(15, 7200),
+            ),
+        ),
     )
     .unwrap_or_default();
     let installed_at = |prefix: &str| {
@@ -399,8 +407,11 @@ pub fn provision(root: &std::path::Path, args: &[String]) -> i32 {
             eprintln!("[依赖补齐] 还原虚拟根会删除 guest 内状态并重建；确认后加 --yes");
             return 2;
         }
-        let svc = crate::capabilities::provision::ProvisionService::with_vm(
+        let svc = crate::capabilities::provision::assemble_with_vm(
             root,
+            std::sync::Arc::new(
+                crate::capabilities::provision::detail::fetch::HttpFetch::new(15, 7200),
+            ),
             crate::provision_vm(crate::kernel::detail::procs::ProcessBook::open(
                 &root.join(".home"),
             )),
@@ -437,8 +448,11 @@ pub fn provision(root: &std::path::Path, args: &[String]) -> i32 {
             return 2;
         }
         // 与网页补齐同一条装配：只持内部 `none`，不拿会话 vm 顶替。
-        let p = crate::capabilities::provision::ProvisionService::with_vm(
+        let p = crate::capabilities::provision::assemble_with_vm(
             root,
+            std::sync::Arc::new(
+                crate::capabilities::provision::detail::fetch::HttpFetch::new(15, 7200),
+            ),
             crate::provision_vm(crate::kernel::detail::procs::ProcessBook::open(
                 &root.join(".home"),
             )),
@@ -457,7 +471,12 @@ pub fn provision(root: &std::path::Path, args: &[String]) -> i32 {
         };
     }
     use crate::capabilities::provision::api::Provision;
-    let svc = crate::capabilities::provision::ProvisionService::new(root);
+    let svc = crate::capabilities::provision::assemble(
+        root,
+        std::sync::Arc::new(
+            crate::capabilities::provision::detail::fetch::HttpFetch::new(15, 7200),
+        ),
+    );
     match svc.status() {
         Ok(items) => {
             let missing = items.iter().filter(|s| !s.present).count();
@@ -664,7 +683,12 @@ fn build_service(
         ),
     );
     let provision: Arc<dyn crate::capabilities::provision::api::Provision + Send + Sync> =
-        Arc::new(crate::capabilities::provision::ProvisionService::new(root));
+        Arc::new(crate::capabilities::provision::assemble(
+            root,
+            std::sync::Arc::new(
+                crate::capabilities::provision::detail::fetch::HttpFetch::new(15, 7200),
+            ),
+        ));
     let storage: Arc<dyn crate::capabilities::storage::api::Storage + Send + Sync> =
         Arc::new(crate::capabilities::storage::service::StorageService::new(
             Arc::clone(&provision),

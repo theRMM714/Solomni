@@ -12,7 +12,7 @@
 | S1 | `task/builds-ports` | builds：抽端口、拆 service | 已销账（证据见 §4） |
 | S2 | `task/storage-ports` | storage：抽端口、拆 service | 已销账（证据见 §4） |
 | S3 | `task/workspace-split` | workspace：只拆文件，不抽端口 | 已销账（证据见 §4） |
-| S4 | `task/provision-ports` | provision：三个端口 + 拆 service + 测试外迁 | 未开始 |
+| S4 | `task/provision-ports` | provision：六个端口 + 拆 service + 测试外迁 | 已销账（证据见 §4） |
 | S5 | `task/conductor-split` | conductor：拆 work/turn、方法族声明依赖面 | 未开始 |
 | S6 | （待定） | proxy 方法族是否升格为能力（评估，可取消） | 未开始 |
 
@@ -56,7 +56,7 @@
 - **S1 builds**：`service.rs` ≤800 行（741 → 726）；`std::fs` 经端口（`create_dir_all` 移进 `BuildStore::prepare_home`）；`serviceIo` 与 `serviceToDetail` 各销 1 条（剩 7 / 4）；端口契约测试在 `src/tests/builds.rs`（4 条，L1 886 passed）；`node run-tests.js` 与 `--docs` 全绿；顺手修掉用量脚本的 `[object Object]` 字节列。
 - **S2 storage**：`service.rs` 876 → 473 行；盘点 / 回收 / 存活三个端口（`storage/ports.rs`，适配器 `detail::{survey,reclaim,guests}`）接住 `std::fs`、`qemu-img`、回收锁与 `ProcessBook`；`serviceToDetail` 销 2 条、`serviceIo` 销 1 条（剩 2 / 6）；端口契约测试 6 条在 `src/tests/storage.rs`（L1 892 passed）；顺手修掉显式清理 `freed_bytes` 恒 0（旧实现删完才盘点）；`node run-tests.js` 与 `--docs` 全绿，`[big]` 从 15 条降到 14 条。
 - **S3 workspace**：2533 行拆到 service.rs 633 + service/{commit 492, sync 393, history 268, resolve 252, lifecycle 504, facade 194}，全在 800 行内；`siblingCycles` 保持为空；`[big]` 从 14 条降到 13 条（`workspace/service.rs` 退出软线，快照改为 633）；`Workspace` 的 trait impl 收进 `service/facade.rs`（Rust 不允许 impl 分块），29 个方法逐条转发；L1 仍 892 passed；`node run-tests.js` 与 `--docs` 全绿，`run-hygiene --tighten` 后 3493 处。
-- **S4 provision**：3727 行拆到 ≤800/文件；`std::fs`/`Command`/`ureq` 全部经端口；1350 行内联测试迁 `src/tests/provision*.rs`；`serviceIo` 与 `serviceToDetail` 各销 1 条。
+- **S4 provision**：`service.rs` 3727 → 566 行、`guest.rs` 617 → 357 行，生产段全部进 800 行软线；六个端口（`provision/ports.rs`：`Fetcher` / `HostFs` / `Ledger` / `Installers` / `GuestImage` / `Procs`，适配器 `detail::{fetch,host,ledger,install,guest_image,procs}`）接住 `std::fs`、`Command`、`ureq`、`ext4` 工具链与进程台账，`service` 只留编排（`run` / `ensure` / `status` / `reset_guest` + 选择与校验的自由函数）；`serviceToDetail` 销 1 条（剩 1）、`serviceIo` 销 3 条（剩 3）、`[big]` 从 13 条降到 12 条（`provision/service.rs` 退出软线，快照改为 566）；1519 行内联测试迁 `src/tests/provision.rs`（46 条，含 4 条端口契约）；L1 896 passed；`node run-tests.js` 与 `--docs` 全绿，`run-hygiene --tighten` 通过；CI 首轮 Linux 红（16 处 E0616：`GuestAttr` 拆到 `detail/guest_image/image.rs` 后字段仍私有，`#[cfg(target_os = "linux")]` 用例本机编不到），字段提到 `pub(crate)` 后 `gh workflow run test.yml --ref task/provision-ports` 重跑 11 个 job 全绿（`6983eb6a`）。
 - **S5 conductor**：`work.rs` 拆 `work/{lifecycle,files,config}`；`turn.rs` 的 4 件事拆回各自编排位置；五个方法族文件头的「看得见父模块私有字段」改成「只用到 a/b/c 三个依赖」；`[big]` 里 conductor 两文件降到 800 以下。
 - **S6**：按 D5 判据给 proxy 方法族出结论（升格 / 不升格 + 理由），结论写进 ARCHITECTURE，不升格也要留理由。
 
@@ -73,3 +73,4 @@
 - 拆 provision 要与真实 guest（qemu/ext4/debugfs）联调，S4 可能被拉长；S1–S3 先交付以免全线阻塞。
 - `[big]` 回执若无人读会退化成装饰；对策是 PR 正文必须贴一次，且 `[big]` 出现在每次 `run-tests.js` 的汇总尾。
 - 基线只减不增；若某阶段必须临时增加豁免，PR 里单独说明并限期销账。
+- 平台条件编译的用例（`#[cfg(target_os = "linux")]` 等）在本机编不到：拆模块改动可见性时按这些块专门审读，Draft 阶段要平台结论用 `gh workflow run test.yml --ref <分支>`（`workflow_dispatch` 不受 Draft 跳过影响）。

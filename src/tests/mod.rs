@@ -23,6 +23,7 @@ mod permission;
 mod ports;
 mod prelude;
 mod prompt;
+mod provision;
 mod registry;
 mod residents;
 mod routes;

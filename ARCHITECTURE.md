@@ -51,6 +51,12 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 | `SpaceSurvey` | 可回收空间的盘点：时间戳、宿主总量 / 可用量、各分类（构建卷 / 下载缓存 / 可写层 / 日志 / 用户数据）与条目；只读 | `DiskSurvey`（`storage/detail::survey`） |
 | `SpaceReclaim` | 回收动作：跨进程回收锁（凭据 drop 释放）、按分类删条目、按模块排队清理、构建卷压缩、上次回收摘要读写、构建占用判定 | `DiskReclaim`（`storage/detail::reclaim`） |
 | `GuestLiveness` | 有没有 guest 在跑（删除可写层与还原虚拟根的前置判据） | `ProcessGuests`（`storage/detail::guests`，读进程台账） |
+| `Fetcher` | 取数：按 URL 取文本、算文件 sha256、按候选源下载（测速选源 + 断点续传 + 逐行回执） | `HttpFetch`（`provision/detail::fetch`） |
+| `HostFs` | 依赖落盘的宿主侧原语：存在性、建目录、原子写、删除、执行位 | `RealHost`（`provision/detail::host`） |
+| `Ledger` | 依赖台账（`.vm/state/deps.json`）：快照、在场判定、guest 画像、装好登记与清旧、工具链生效登记 | `FileLedger`（`provision/detail::ledger`） |
+| `Installers` | 按 `kind` 落盘：归档解包、单文件、AppImage、工具链包装、guest 磁盘与 `guest.yaml` 画像 | `HostInstallers`（`provision/detail::install`） |
+| `GuestImage` | `guest-rootfs` 的 ext4 镜像构造（选 deb、内核 / QGA / initrd、属性回填） | `Ext4Images`（`provision/detail::guest_image`） |
+| `Procs` | 进程台账条目与 `guest` 是否在跑（安装期 `reset_guest` 的前置判据） | `BookProcs`（`provision/detail::procs`） |
 | `VmEngine` / `GuestVm` / `GuestChannel` | 虚拟机档的引擎：按规格拉起一台 guest、在它里面执行、销毁；通道是在 guest 里执行的入口 | `vm/detail::QemuEngine` + `QemuHandle`（QEMU + QGA） |
 | `ShareBackend` | 宿主↔guest 的共享：声明能落哪些引擎 / guest，产出引擎参数、netdev 附加选项与 guest 端挂载命令，并可持有外部资源（`ShareGuard`） | `vm/detail::VirtioFsShare`（vhost-user-fs + virtiofsd）/ `NinePShare`（9p）/ `SmbShare`（用户态 SMB helper + guestfwd，Windows 实时共享）/ `CopyShare`（QGA 复制，仅开发/应急）/ `NoneShare`（内部无共享，供给编排） |
 | `Workdirs` | 一次工作的共享区、各 agent 沙箱、版本库目录、文件清单、用量与寻址根 | `FsWorkspace` |
