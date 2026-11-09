@@ -1,9 +1,11 @@
 //! 目的：构建缓存卷的机制——卷落点、对账标识、guest 侧准备/同步脚本与同一虚拟根的构建锁。
-//! 管：卷路径与大小、卷/模块的环境标识、工作区布局、源同步与差异回写脚本、构建锁。
+//! 管：卷路径与大小、卷/模块的环境标识、工作区布局、源同步与差异回写脚本、构建锁（`CacheOnDisk`）。
 //! 不管：编什么、什么时候编（`service.rs`）、guest 与盘怎么起（`vm`）。
-//! 联动：由 `service.rs` 组装成 guest 脚本；口径见 docs/builds/README.md 的「目标环境」与单元地图。
+//! 联动：端口见 `ports.rs`；口径见 docs/builds/README.md 的「目标环境」与单元地图。
 
+use crate::capabilities::builds::ports::{BuildCache, CacheGuard, CacheMount, ModuleWorkspace};
 use crate::capabilities::vm::api::GuestImage;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -329,7 +331,7 @@ pub(crate) fn usage_script() -> String {
   b=$(du -sB1 "$d" 2>/dev/null | awk '{{print $1}}')
   t=$(cat "$d/USED" 2>/dev/null || echo 0)
   printf '%s	%s	%s
-' "$n" "[object Object]" "$t"
+' "$n" "$b" "$t"
 done"#,
         mnt = sh_quote(MOUNT),
     )
@@ -397,6 +399,83 @@ impl Drop for VolumeLock {
 /// 目的：把一段字面量安全地放进 guest 的 shell 脚本里（单引号包裹，内部单引号按 POSIX 拆合）。
 pub(crate) fn sh_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// 目的：端口 `BuildCache` 的落盘实现——卷文件、构建锁、待清理账与用量元数据都在产品根下。
+/// 约束：由组合根构造并交给 `BuildsService`（端口只有一个持有者，R12）。
+pub(crate) struct CacheOnDisk {
+    root: PathBuf,
+}
+
+impl CacheOnDisk {
+    /// 目的：按产品根建适配器。
+    /// 参数：`root` = 产品根。
+    pub(crate) fn new(root: PathBuf) -> CacheOnDisk {
+        CacheOnDisk { root }
+    }
+}
+
+impl CacheGuard for VolumeLock {}
+
+impl BuildCache for CacheOnDisk {
+    fn volume(&self, guest: &str) -> PathBuf {
+        volume_path(&self.root, guest)
+    }
+
+    fn lock(&self, guest: &str) -> Result<Box<dyn CacheGuard>, String> {
+        Ok(Box::new(VolumeLock::acquire(lock_path(&self.root, guest))?))
+    }
+
+    fn pending_purge(&self, guest: &str) -> Vec<String> {
+        read_purge(&self.root, guest)
+    }
+
+    fn clear_purge(&self, guest: &str) {
+        clear_purge(&self.root, guest)
+    }
+
+    fn record_usage(&self, guest: &str, usage: &BTreeMap<String, (u64, u64)>) {
+        write_meta(&self.root, guest, usage)
+    }
+
+    fn mount(
+        &self,
+        image: &GuestImage,
+        keep_secs: u64,
+        keep: &[String],
+        purge: &[String],
+    ) -> CacheMount {
+        CacheMount {
+            script: mount_script_with(&volume_epoch(image), keep_secs, keep, purge),
+            usage_script: usage_script(),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn workspace(
+        &self,
+        module_id: &str,
+        needs: &[String],
+        providers: &[String],
+        src: &str,
+        entry: Option<&str>,
+        entries: &[String],
+    ) -> ModuleWorkspace {
+        ModuleWorkspace {
+            reconcile: module_script(module_id, &module_epoch(needs, providers)),
+            sync_in: sync_in_script(module_id, src, entry),
+            snapshot: snapshot_script(module_id),
+            sync_out: sync_out_script(module_id, src, entries),
+            cleanup: cleanup_script(module_id),
+            home: home(module_id),
+            tmp: tmp(module_id),
+            workspace: workspace(module_id),
+        }
+    }
+
+    fn quote(&self, text: &str) -> String {
+        sh_quote(text)
+    }
 }
 
 /// 目的：把名字收成一段安全的路径段（虚拟根名与模块 id 都只该是一段，这里再兜一层）。

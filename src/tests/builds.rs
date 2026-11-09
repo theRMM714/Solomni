@@ -1,7 +1,8 @@
 //! 目的：构建能力的契约——入口在场即跳过、缺失才编、编完复验、缓存命中与失败如实报。
-//! 管：本机档（宿主围栏）与虚拟机档（guest 里编）的构建用例；夹具模块的跨平台构建脚本。
+//! 管：本机档（宿主围栏）与虚拟机档（guest 里编）的构建用例；三个端口（源指纹、构建状态、缓存卷）的契约；
+//!   夹具模块的跨平台构建脚本。
 //! 不管：CLI 参数解析与退出码（`diagnostics::build` 是薄壳）、模块清单校验（在 `modules.rs`）。
-//! 联动：契约见 docs/builds/README.md 与 MODULE_SPEC 的「构建」；状态落 `.vm/build-state/<模块>.json`。
+//! 联动：契约见 docs/builds/README.md 与 MODULE_SPEC 的「构建」；端口定义在 `builds/ports.rs`；状态落 `.vm/build-state/<模块>.json`。
 
 use crate::capabilities::builds::api::{Builds, Target};
 use crate::capabilities::builds::service::BuildsService;
@@ -25,12 +26,18 @@ fn builds_service(
             BaseFacts::default(),
         ),
     );
+    let store = Arc::new(
+        crate::capabilities::builds::detail::fingerprint::BuildStore::new(root.to_path_buf()),
+    );
     BuildsService::new(
         root.to_path_buf(),
         packages,
         crate::diagnostics::build_vm(root),
         Arc::new(crate::capabilities::provision::ProvisionService::new(root)),
         Arc::new(crate::capabilities::storage::api::NoStorage),
+        store.clone(),
+        store,
+        Arc::new(crate::capabilities::builds::detail::cache::CacheOnDisk::new(root.to_path_buf())),
         Arc::new(runner),
         Arc::new(crate::tests::doubles::NoFenceHost),
         Arc::new(crate::kernel::detail::host_probe::HostProbeAdapter),
@@ -620,4 +627,153 @@ fn activating_a_session_ensures_the_target_build() {
     assert_eq!(calls.load(Ordering::SeqCst), 1, "建会话先确保一次");
     handle.activate(&opened.sid).expect("启用会话");
     assert_eq!(calls.load(Ordering::SeqCst), 2, "启用历史会话也要确保一次");
+}
+
+#[test]
+fn source_digest_tracks_sources_and_round_trips_state() {
+    use crate::capabilities::builds::detail::fingerprint::BuildStore;
+    use crate::capabilities::builds::ports::{BuildStates, BuiltRecord, SourceDigest};
+
+    let root = crate::tests::scratch("builds-port-digest");
+    let module_dir = root.join("modules").join("hello");
+    host_build_module(&module_dir);
+    let module = module_of(&root, "hello");
+    let decl = module.manifest.build.clone().expect("夹具有构建声明");
+    let store = BuildStore::new(root.clone());
+    let no_needs: [String; 0] = [];
+
+    // 指纹：同一份源稳定；加一个源文件就变；构建期能力集变了也变。
+    let first = store.digest(&module, &decl, &no_needs).expect("算指纹");
+    assert_eq!(
+        first,
+        store.digest(&module, &decl, &no_needs).expect("再算一次"),
+        "同一份源指纹要稳定"
+    );
+    std::fs::write(module_dir.join("extra.txt"), "x").expect("加源文件");
+    let second = store.digest(&module, &decl, &no_needs).expect("改源后再算");
+    assert_ne!(first, second, "源变了指纹要变");
+    let with_needs = store
+        .digest(&module, &decl, &["cc".to_string()])
+        .expect("带能力算指纹");
+    assert_ne!(second, with_needs, "构建期能力变了指纹要变");
+
+    // 状态：没构建过就是 None；写过能原样读回，落点在 .vm/build-state/<id>.json。
+    assert!(store.record("hello").is_none(), "没构建过不该有状态");
+    store
+        .record_built(
+            "hello",
+            &BuiltRecord {
+                target: "host".to_string(),
+                fingerprint: second.clone(),
+            },
+        )
+        .expect("写状态");
+    let back = store.record("hello").expect("读回状态");
+    assert_eq!(back.target, "host");
+    assert_eq!(back.fingerprint, second);
+    assert!(
+        root.join(".vm")
+            .join("build-state")
+            .join("hello.json")
+            .is_file(),
+        "状态落点是 .vm/build-state/<id>.json"
+    );
+}
+
+#[test]
+fn build_states_prepare_a_private_home_per_build() {
+    use crate::capabilities::builds::detail::fingerprint::BuildStore;
+    use crate::capabilities::builds::ports::BuildStates;
+
+    let root = crate::tests::scratch("builds-port-home");
+    let store = BuildStore::new(root.clone());
+    let place = store.prepare_home("hello").expect("备好按次家目录");
+    assert_eq!(
+        place.state,
+        root.join(".vm").join("build-state").join("hello"),
+        "状态目录按模块分"
+    );
+    assert_eq!(place.home, place.state.join("home"), "家目录在状态目录下");
+    assert!(
+        place.home.is_dir(),
+        "家目录要真建出来（围栏的 private 落点）：{}",
+        place.home.display()
+    );
+}
+
+#[test]
+fn cache_adapter_lands_volume_lock_and_usage_under_build_cache() {
+    use crate::capabilities::builds::detail::cache::CacheOnDisk;
+    use crate::capabilities::builds::ports::BuildCache;
+    use std::collections::BTreeMap;
+
+    let root = crate::tests::scratch("builds-port-cache");
+    let cache = CacheOnDisk::new(root.clone());
+    let dir = root.join(".vm").join("build-cache");
+    assert_eq!(
+        cache.volume("guest-a"),
+        dir.join("guest-a.qcow2"),
+        "一虚拟根一卷"
+    );
+    assert!(
+        cache.pending_purge("guest-a").is_empty(),
+        "没排队的清理标记"
+    );
+    cache.record_usage(
+        "guest-a",
+        &BTreeMap::from([("hello".to_string(), (10u64, 100u64))]),
+    );
+    let meta = std::fs::read_to_string(dir.join("guest-a.json")).expect("用量元数据要落盘");
+    assert!(meta.contains("\"hello\""), "元数据要记模块：{}", meta);
+    let guard = cache.lock("guest-a").expect("拿构建锁");
+    assert!(
+        dir.join("guest-a.lock").is_file(),
+        "锁文件要在场（一个虚拟根一把）"
+    );
+    drop(guard);
+    assert_eq!(cache.quote("a b"), "'a b'", "脚本文本按 sh 单引号转义");
+}
+
+#[test]
+fn cache_workspace_speaks_guest_paths_and_carries_the_environment() {
+    use crate::capabilities::builds::detail::cache::CacheOnDisk;
+    use crate::capabilities::builds::ports::BuildCache;
+
+    let root = crate::tests::scratch("builds-port-ws");
+    let cache = CacheOnDisk::new(root.clone());
+    let ws = cache.workspace(
+        "hello",
+        &["cc".to_string()],
+        &["gcc".to_string()],
+        "/mnt/src/hello",
+        Some("build/hello"),
+        &["build/hello".to_string()],
+    );
+    for (name, script) in [
+        ("reconcile", &ws.reconcile),
+        ("sync_in", &ws.sync_in),
+        ("snapshot", &ws.snapshot),
+        ("sync_out", &ws.sync_out),
+        ("cleanup", &ws.cleanup),
+    ] {
+        assert!(!script.trim().is_empty(), "{} 脚本不该为空", name);
+    }
+    let base = "/var/lib/solomni/build/modules/hello";
+    assert!(
+        ws.workspace.starts_with(base),
+        "工作区在缓存卷上：{}",
+        ws.workspace
+    );
+    assert!(ws.home.starts_with(base), "家目录在缓存卷上：{}", ws.home);
+    assert!(ws.tmp.starts_with(base), "临时目录在缓存卷上：{}", ws.tmp);
+    assert!(
+        ws.sync_in.contains("/mnt/src/hello"),
+        "同步源用来源路径：{}",
+        ws.sync_in
+    );
+    assert!(
+        ws.reconcile.contains("cc") && ws.reconcile.contains("gcc"),
+        "对账脚本带构建期能力与实际提供者：{}",
+        ws.reconcile
+    );
 }

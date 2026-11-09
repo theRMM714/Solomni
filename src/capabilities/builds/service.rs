@@ -1,11 +1,10 @@
 //! 目的：构建能力的用例实现——按模块声明在目标环境把产物编出来，并复验入口。
 //! 管：本机档（宿主 + 产品围栏）与虚拟机档（guest + 编译包）两条构建路径、构建期能力选包、缓存命中、编完复验。
-//! 不管：源指纹与状态文件的机制（`detail/fingerprint.rs`）、包库与引擎的机制（`packages` / `vm` / `provision`）、CLI 文案（`diagnostics`）。
-//! 联动：`ProcessRunner` / `HostProbe` / `Log` 是 kernel 的共享机制；其余依赖走各能力的 api。
+//! 不管：源指纹、构建状态与缓存卷的机制（`ports.rs` 定接口，`detail/` 实现）、包库与引擎的机制（`packages` / `vm` / `provision`）、CLI 文案（`diagnostics`）。
+//! 联动：`ProcessRunner` / `HostProbe` / `Log` 是 kernel 的共享机制；`SourceDigest` / `BuildStates` / `BuildCache` 是本能力的端口，实现只在组合根注入。
 
 use crate::capabilities::builds::api::{Builds, Built, Target};
-use crate::capabilities::builds::detail::cache;
-use crate::capabilities::builds::detail::fingerprint as fp;
+use crate::capabilities::builds::ports::{BuildCache, BuildStates, BuiltRecord, SourceDigest};
 use crate::capabilities::modules::api::{BuildDecl, Module};
 use crate::capabilities::packages::api::{
     build_packages, diagnose_text, plan_host_requests, requests_for, Facts, Library, Packages,
@@ -29,6 +28,9 @@ pub struct BuildsService {
     vm: Arc<dyn Vm + Send + Sync>,
     provision: Arc<dyn Provision + Send + Sync>,
     storage: Arc<dyn Storage + Send + Sync>,
+    digest: Arc<dyn SourceDigest + Send + Sync>,
+    states: Arc<dyn BuildStates + Send + Sync>,
+    cache: Arc<dyn BuildCache + Send + Sync>,
     runner: Arc<dyn ProcessRunner + Send + Sync>,
     fence: Arc<dyn FenceHost + Send + Sync>,
     probe: Arc<dyn HostProbe + Send + Sync>,
@@ -38,8 +40,8 @@ pub struct BuildsService {
 }
 
 impl BuildsService {
-    /// 目的：组合根专用——注入包库、虚拟机、补齐、执行器与工具链安装根（具体实现只在组合根 new）。
-    /// 参数：`root` = 产品根；`packages` / `vm` / `provision` = 各能力的用例面；`runner` = 外部进程执行；`probe` = 宿主事实；`log` = 运行日志；`toolchain_roots` = 基础工具链安装根。
+    /// 目的：组合根专用——注入包库、虚拟机、补齐、三个本能力端口、执行器与工具链安装根。
+    /// 参数：`root` = 产品根；`packages` / `vm` / `provision` = 各能力的用例面；`digest` / `states` / `cache` = 源指纹、构建状态、缓存卷的适配器；`runner` = 外部进程执行；`probe` = 宿主事实；`log` = 运行日志；`toolchain_roots` = 基础工具链安装根。
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         root: PathBuf,
@@ -47,6 +49,9 @@ impl BuildsService {
         vm: Arc<dyn Vm + Send + Sync>,
         provision: Arc<dyn Provision + Send + Sync>,
         storage: Arc<dyn Storage + Send + Sync>,
+        digest: Arc<dyn SourceDigest + Send + Sync>,
+        states: Arc<dyn BuildStates + Send + Sync>,
+        cache: Arc<dyn BuildCache + Send + Sync>,
         runner: Arc<dyn ProcessRunner + Send + Sync>,
         fence: Arc<dyn FenceHost + Send + Sync>,
         probe: Arc<dyn HostProbe + Send + Sync>,
@@ -59,6 +64,9 @@ impl BuildsService {
             vm,
             provision,
             storage,
+            digest,
+            states,
+            cache,
             runner,
             fence,
             probe,
@@ -107,13 +115,13 @@ impl BuildsService {
     /// 目的：缓存命中吗——目标与源指纹都得一致，且入口都在场（否则等于没编）。
     fn fresh(
         &self,
-        state_path: &Path,
+        id: &str,
         target: &str,
         target_os: &str,
         fingerprint: &str,
         module: &Module,
     ) -> bool {
-        let Some(prev) = fp::read_state(state_path) else {
+        let Some(prev) = self.states.record(id) else {
             return false;
         };
         prev.target == target
@@ -128,7 +136,6 @@ impl BuildsService {
         target: &str,
         target_os: &str,
         fingerprint: &str,
-        state_path: &Path,
         output: &str,
     ) -> Result<(), String> {
         let left = self.entries_left(module, target_os);
@@ -142,10 +149,9 @@ impl BuildsService {
                 tail(output)
             ));
         }
-        fp::write_state(
-            state_path,
-            &fp::BuildState {
-                module: module.manifest.id.clone(),
+        self.states.record_built(
+            &module.manifest.id,
+            &BuiltRecord {
                 target: target.to_string(),
                 fingerprint: fingerprint.to_string(),
             },
@@ -208,9 +214,8 @@ impl BuildsService {
             ));
         }
         let providers = providers_of(&plan);
-        let fingerprint = fp::source(&module.root, decl, &providers)?;
-        let state_path = fp::state_path(&self.root, &module.manifest.id);
-        if self.fresh(&state_path, "host", target_os, &fingerprint, module) {
+        let fingerprint = self.digest.digest(module, decl, &providers)?;
+        if self.fresh(&module.manifest.id, "host", target_os, &fingerprint, module) {
             return Ok(Built {
                 module: module.manifest.id.clone(),
                 target: "host".to_string(),
@@ -218,18 +223,16 @@ impl BuildsService {
                 output: String::new(),
             });
         }
-        let state_dir = self.root.join(".vm").join("build-state");
-        let home = state_dir.join(&module.manifest.id).join("home");
-        std::fs::create_dir_all(&home).map_err(|e| format!("建状态目录失败：{}", e))?;
+        let place = self.states.prepare_home(&module.manifest.id)?;
         // 构建也是一次调用：按次 lease → Windows 上独立容器身份，跑完自己的 profile/ACE 自己收。
         let agent = format!("build:{}", module.manifest.id);
         let fence = FenceSpec {
             agent: agent.clone(),
             lease: crate::kernel::api::call_lease(&agent),
-            rw: vec![module.root.clone(), state_dir.join(&module.manifest.id)],
+            rw: vec![module.root.clone(), place.state],
             ro: self.toolchain_roots.clone(),
             ro_tree: plan.roots.clone(),
-            private: home,
+            private: place.home,
             cwd: module.root.clone(),
             net,
         };
@@ -251,14 +254,7 @@ impl BuildsService {
         if !out.ok {
             return Err(format!("构建命令失败（目标 host）{}", tail(&out.output)));
         }
-        self.finish(
-            module,
-            "host",
-            target_os,
-            &fingerprint,
-            &state_path,
-            &out.output,
-        )?;
+        self.finish(module, "host", target_os, &fingerprint, &out.output)?;
         Ok(Built {
             module: module.manifest.id.clone(),
             target: "host".to_string(),
@@ -323,9 +319,8 @@ impl BuildsService {
                 .iter()
                 .map(|p| format!("{}@{}", p.id, p.version))
                 .collect();
-            let fingerprint = fp::source(&module.root, decl, &providers)?;
-            let state_path = fp::state_path(&self.root, &module.manifest.id);
-            if self.fresh(&state_path, guest, target_os, &fingerprint, module) {
+            let fingerprint = self.digest.digest(module, decl, &providers)?;
+            if self.fresh(&module.manifest.id, guest, target_os, &fingerprint, module) {
                 done.push(Some(Built {
                     module: module.manifest.id.clone(),
                     target: guest.to_string(),
@@ -341,7 +336,6 @@ impl BuildsService {
                 packages,
                 providers,
                 fingerprint,
-                state_path,
             });
         }
         if plans.is_empty() {
@@ -352,8 +346,8 @@ impl BuildsService {
             .storage
             .ensure_headroom(Some(guest))
             .map_err(|e| format!("构建前空间检查失败：{}", e))?;
-        let volume = cache::volume_path(&self.root, guest);
-        let _lock = cache::VolumeLock::acquire(cache::lock_path(&self.root, guest))?;
+        let volume = self.cache.volume(guest);
+        let _lock = self.cache.lock(guest)?;
         if !self.probe.is_file(&volume) {
             let gib = self.storage.policy().build_volume_gib.max(1);
             vm::create_disk(&engine_path, &volume, gib.saturating_mul(1024))
@@ -443,25 +437,22 @@ impl BuildsService {
             let _ = self.guest_script(lease, &script, 120);
         }
         // 缓存卷：挂载 + 卷级对账 + 按龄/排队清理（整批只做一次）。
-        let purge = cache::read_purge(&self.root, guest);
+        let purge = self.cache.pending_purge(guest);
         let keep: Vec<String> = plans.iter().map(|p| p.module.manifest.id.clone()).collect();
         let keep_secs = self.storage.policy().cache_keep_days.saturating_mul(86_400);
-        let mounted = self.guest_script(
-            lease,
-            &cache::mount_script_with(&cache::volume_epoch(image), keep_secs, &keep, &purge),
-            120,
-        );
+        let mount = self.cache.mount(image, keep_secs, &keep, &purge);
+        let mounted = self.guest_script(lease, &mount.script, 120);
         if !mounted.ok {
             return Err(format!("准备构建缓存卷失败{}", tail(&mounted.output)));
         }
         if !purge.is_empty() {
-            cache::clear_purge(&self.root, guest);
+            self.cache.clear_purge(guest);
         }
         let mut out = Vec::new();
         for job in plans {
             out.push(self.build_one(lease, job, plans.len(), image, guest, target_os)?);
         }
-        let usage = self.guest_script(lease, &cache::usage_script(), 120);
+        let usage = self.guest_script(lease, &mount.usage_script, 120);
         if usage.ok {
             let mut modules: std::collections::BTreeMap<String, (u64, u64)> =
                 std::collections::BTreeMap::new();
@@ -475,7 +466,7 @@ impl BuildsService {
                 }
             }
             if !modules.is_empty() {
-                cache::write_meta(&self.root, guest, &modules);
+                self.cache.record_usage(guest, &modules);
             }
         }
         Ok(out)
@@ -494,6 +485,15 @@ impl BuildsService {
     ) -> Result<Built, String> {
         let id = job.module.manifest.id.clone();
         let src = image.bridge().to_guest(&job.module.root);
+        let entry = crate::capabilities::modules::api::local_entry(&job.decl.command);
+        let ws = self.cache.workspace(
+            &id,
+            &job.decl.needs,
+            &job.providers,
+            &src,
+            entry,
+            &product_entries(&job.module),
+        );
         let name = |what: &str, why: String| module_why(&id, total, format!("{}{}", what, why));
         let step = |what: &str, out: crate::kernel::api::ToolOutcome| {
             if out.ok {
@@ -504,30 +504,22 @@ impl BuildsService {
         };
         step(
             "模块工作区对账失败",
-            self.guest_script(
-                lease,
-                &cache::module_script(&id, &cache::module_epoch(&job.decl.needs, &job.providers)),
-                120,
-            ),
+            self.guest_script(lease, &ws.reconcile, 120),
         )?;
-        let entry = crate::capabilities::modules::api::local_entry(&job.decl.command);
-        step(
-            "同步模块源失败",
-            self.guest_script(lease, &cache::sync_in_script(&id, &src, entry), 600),
-        )?;
+        step("同步模块源失败", self.guest_script(lease, &ws.sync_in, 600))?;
         step(
             "记录构建前快照失败",
-            self.guest_script(lease, &cache::snapshot_script(&id), 120),
+            self.guest_script(lease, &ws.snapshot, 120),
         )?;
         let env = vec![
-            ("HOME".to_string(), cache::home(&id)),
-            ("TMPDIR".to_string(), cache::tmp(&id)),
-            ("TMP".to_string(), cache::tmp(&id)),
-            ("TEMP".to_string(), cache::tmp(&id)),
+            ("HOME".to_string(), ws.home.clone()),
+            ("TMPDIR".to_string(), ws.tmp.clone()),
+            ("TMP".to_string(), ws.tmp.clone()),
+            ("TEMP".to_string(), ws.tmp.clone()),
         ];
         let command = format!(
             "cd {} && {}",
-            cache::sh_quote(&cache::workspace(&id)),
+            self.cache.quote(&ws.workspace),
             job.decl.command
         );
         let built = self.vm.guest_run(
@@ -543,33 +535,25 @@ impl BuildsService {
         );
         // 构建失败：缓存留着（现场可复现），但清临时目录并 trim，避免失败也把卷撑大。
         if !built.ok {
-            let _ = self.guest_script(lease, &cache::cleanup_script(&id), 120);
+            let _ = self.guest_script(lease, &ws.cleanup, 120);
             return Err(name(
                 "构建命令失败",
                 format!(
                     "{}；缓存留在 {}（怀疑缓存陈旧就在设置→存储空间清理该虚拟根缓存）",
                     tail(&built.output),
-                    cache::workspace(&id)
+                    ws.workspace
                 ),
             ));
         }
-        step(
-            "回写产物失败",
-            self.guest_script(
-                lease,
-                &cache::sync_out_script(&id, &src, &product_entries(&job.module)),
-                600,
-            ),
-        )?;
+        step("回写产物失败", self.guest_script(lease, &ws.sync_out, 600))?;
         self.finish(
             &job.module,
             guest,
             target_os,
             &job.fingerprint,
-            &job.state_path,
             &built.output,
         )?;
-        let _ = self.guest_script(lease, &cache::cleanup_script(&id), 120);
+        let _ = self.guest_script(lease, &ws.cleanup, 120);
         Ok(Built {
             module: id,
             target: guest.to_string(),
@@ -636,7 +620,9 @@ impl Builds for BuildsService {
             // 有 build 段：入口存在不等于**这个目标**的产物。只有构建状态明确属于当前目标才跳过；
             // 状态是别的目标（宿主产物进 guest）就重编。状态缺失视为随仓自带产物，仍跳过。
             if left.is_empty()
-                && fp::read_state(&fp::state_path(&self.root, &module.manifest.id))
+                && self
+                    .states
+                    .record(&module.manifest.id)
                     .map(|prev| prev.target == target.label())
                     .unwrap_or(true)
             {
@@ -681,7 +667,6 @@ struct GuestPlan {
     packages: Vec<PlannedPackage>,
     providers: Vec<String>,
     fingerprint: String,
-    state_path: PathBuf,
 }
 
 /// 目的：这批模块要的运行包合起来（同一份只留一次，顺序按第一次出现）。

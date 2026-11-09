@@ -574,6 +574,10 @@ fn main() {
     );
     // 项目内基础工具链的只读安装根：构建与 shell 共用同一份（不按 agent 重复注入）。
     let base_roots = entry::toolchains::active_roots(&root);
+    // 构建的三个端口各一个适配器：源指纹与构建状态共用一份本机档（BuildStore），缓存卷落盘（CacheOnDisk）。
+    let build_store = Arc::new(capabilities::builds::detail::fingerprint::BuildStore::new(
+        root.clone(),
+    ));
     let builds: Arc<dyn capabilities::builds::api::Builds + Send + Sync> =
         Arc::new(capabilities::builds::service::BuildsService::new(
             root.clone(),
@@ -581,6 +585,11 @@ fn main() {
             Arc::clone(&vm),
             Arc::clone(&provision),
             Arc::clone(&storage),
+            build_store.clone(),
+            build_store.clone(),
+            Arc::new(capabilities::builds::detail::cache::CacheOnDisk::new(
+                root.clone(),
+            )),
             Arc::new(build_runner),
             Arc::clone(&fence_host),
             Arc::new(kernel::detail::HostProbeAdapter),

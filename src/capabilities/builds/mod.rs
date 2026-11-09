@@ -5,4 +5,5 @@
 
 pub mod api;
 pub mod detail;
+pub mod ports;
 pub mod service;

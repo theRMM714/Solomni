@@ -670,12 +670,18 @@ fn build_service(
         ));
     let runner: Arc<dyn crate::kernel::ports::ProcessRunner + Send + Sync> =
         Arc::new(build_runner(root)?);
+    let store = Arc::new(
+        crate::capabilities::builds::detail::fingerprint::BuildStore::new(root.to_path_buf()),
+    );
     Ok(crate::capabilities::builds::service::BuildsService::new(
         root.to_path_buf(),
         packages,
         build_vm(root),
         provision,
         storage,
+        store.clone(),
+        store,
+        Arc::new(crate::capabilities::builds::detail::cache::CacheOnDisk::new(root.to_path_buf())),
         runner,
         Arc::new(crate::kernel::detail::confine::FenceHostAdapter::new(
             root.join(".home"),
