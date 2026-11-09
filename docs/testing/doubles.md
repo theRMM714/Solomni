@@ -150,10 +150,13 @@
 | `ServiceAdapter`（residents） | `FakeServiceAdapter`、`DyingServiceAdapter`（一启动就"死"：调用恒失败且 `is_alive=false`，崩溃检测用）；返回的 `ServiceInstance` 替身是 `FakeServiceInstance` / `DyingServiceInstance` | `calls`（start / call / stop） | 由替身注入启动失败 | 不适用 | `detail::McpAdapter`（MCP stdio；真实服务端到端见 `src/tests/mcp.rs`）；ACP 未接入 | 已验收（`src/tests/residents.rs`、`src/tests/mcp.rs`） |
 | `SessionHost`（kernel 共享） | `ScriptedHost`（按脚本逐行应答；可演 `list_changed` 通知与 EOF）；返回的 `Session` 替身是 `ScriptedSession` | `sent`（发出的每一行与关闭） | 脚本用尽 = 如实报错 | EOF / 读错误 = `alive()` 转 false（崩溃检测） | `ProcessSessions`（返回 `FencedSession`；真实 MCP 服务端到端见 `src/tests/mcp.rs`，非 unix 或缺 python 时如实跳过） | 已验收 |
 | `SecretStore`（secrets） | `InMemorySecretStore` | `values`、写入次数 | 由替身注入失败 | 不适用 | `detail::YamlSecrets`（`.home/` 的 `secrets.yaml`，unix 0600） | 契约测试已验收（`src/tests/secrets.rs`）；生产消费点已接入（CLI `secret`、常驻服务与一次性模块工具的 env 注入、常驻服务回执脱敏） |
+| `SpaceSurvey`（storage） | 不适用（用真实 `DiskSurvey` + 临时产品根） | `SpaceFacts` 可观察（时间戳、宿主余量、分类与条目；非 full 不扫用户数据） | 不适用（读不到按 0 计） | 不适用 | `storage/detail::survey::DiskSurvey` | 契约测试已验收（`src/tests/storage.rs`） |
+| `SpaceReclaim`（storage） | 同上 | 锁独占与 drop 释放、删除后现场、排队标记内容、上次摘要往返、构建占用拒绝 | 构建锁在场时拒绝删除 | 不适用 | `storage/detail::reclaim::DiskReclaim` | 契约测试已验收（`src/tests/storage.rs`） |
+| `GuestLiveness`（storage） | 同上 | 无台账时如实说没有 | 不适用 | 不适用 | `storage/detail::guests::ProcessGuests` | 契约测试已验收（`src/tests/storage.rs`） |
 | `Log` | `NoopLog`（Stub）、`RecordingLog`（记录 `(级别, 位置, 文案)`，供"事实被记进日志"的断言） | `RecordingLog` 可查 | 不适用 | 不适用 | `FileLog`（三个级别都落盘） | 已验收 |
 | `HostProbe` | `FixedProbe`（只按声明回答）、`TestHostProbe`（真实事实 + 平台共享工具视为在场） | 不适用 | 不适用 | 不适用 | `HostProbeAdapter`（真实路径事实；PATH 上不存在的名字如实说没有） | 已验收 |
 
-- **持有者（R12）**：`ModuleSource` / `ModuleStateStore` 只由 `modules::service.rs` 持有（别的能力经 `modules::api::ModulesOps` 要清单与启停有效值）；`PackageSource` 只由 `packages::service.rs` 持有（别的能力经 `packages::api::Packages` 要运行包库）；`Workdirs` / `WorkStore` 只由 `workspace::service.rs` 持有（别的能力经 `workspace::api::Workspace` 要目录与版本库用例）；`SourceDigest` / `BuildStates` / `BuildCache` 只由 `builds::service.rs` 持有（别的能力经 `builds::api::Builds` 要"确保产物可用"）。
+- **持有者（R12）**：`ModuleSource` / `ModuleStateStore` 只由 `modules::service.rs` 持有（别的能力经 `modules::api::ModulesOps` 要清单与启停有效值）；`PackageSource` 只由 `packages::service.rs` 持有（别的能力经 `packages::api::Packages` 要运行包库）；`Workdirs` / `WorkStore` 只由 `workspace::service.rs` 持有（别的能力经 `workspace::api::Workspace` 要目录与版本库用例）；`SourceDigest` / `BuildStates` / `BuildCache` 只由 `builds::service.rs` 持有（别的能力经 `builds::api::Builds` 要"确保产物可用"）；`SpaceSurvey` / `SpaceReclaim` / `GuestLiveness` 只由 `storage::service.rs` 持有（别的能力经 `storage::api::Storage` 要空间报告、headroom 与清理）。
 
 - `Log`、`PathCodec`、`ProcessTexts`、`ToolHandler`、`HostProbe`、`AskUser`、`ProcessRunner`、`SessionHost` / `Session` 与 `FenceHost` 是**不在某个能力 `ports.rs`** 的端口：它们在 `src/kernel/ports.rs`（机制型业务单元 `kernel`，无领域语义，R12 的例外）。
 - 见 [../kernel/unit-map.md](../kernel/unit-map.md)。

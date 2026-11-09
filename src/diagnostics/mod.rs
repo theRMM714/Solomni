@@ -257,8 +257,12 @@ fn storage_service(
             )),
         ));
     crate::capabilities::storage::service::StorageService::new(
-        root.to_path_buf(),
         provision,
+        Arc::new(crate::capabilities::storage::detail::survey::DiskSurvey::new(root.to_path_buf())),
+        Arc::new(
+            crate::capabilities::storage::detail::reclaim::DiskReclaim::new(root.to_path_buf()),
+        ),
+        Arc::new(crate::capabilities::storage::detail::guests::ProcessGuests::new(root)),
         Arc::new(crate::kernel::ports::NoopLog),
         storage_policy(root),
     )
@@ -663,8 +667,14 @@ fn build_service(
         Arc::new(crate::capabilities::provision::ProvisionService::new(root));
     let storage: Arc<dyn crate::capabilities::storage::api::Storage + Send + Sync> =
         Arc::new(crate::capabilities::storage::service::StorageService::new(
-            root.to_path_buf(),
             Arc::clone(&provision),
+            Arc::new(
+                crate::capabilities::storage::detail::survey::DiskSurvey::new(root.to_path_buf()),
+            ),
+            Arc::new(
+                crate::capabilities::storage::detail::reclaim::DiskReclaim::new(root.to_path_buf()),
+            ),
+            Arc::new(crate::capabilities::storage::detail::guests::ProcessGuests::new(root)),
             Arc::new(crate::kernel::ports::NoopLog),
             crate::capabilities::storage::api::StoragePolicy::default(),
         ));

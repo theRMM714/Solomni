@@ -2,8 +2,6 @@
   "_comment": "能力内部结构门禁的豁免清单（判据见 tests/gates/structure/capability.js）。条目存在 = 该判据还有一处豁免；条目一旦不再成立，门禁报「基线豁免已过期」强制销账。bigFiles 是文件粒度回执的快照：只用于显示增量与判定「新建」，不参与行数失败判定。",
   "serviceToDetail": [
     "src/capabilities/provision/service.rs -> crate::kernel::detail",
-    "src/capabilities/storage/service.rs -> crate::capabilities::storage::detail",
-    "src/capabilities/storage/service.rs -> crate::kernel::detail",
     "src/capabilities/vm/service.rs -> crate::capabilities::vm::detail"
   ],
   "serviceIo": [
@@ -12,7 +10,6 @@
     "src/capabilities/provision/service.rs -> std::fs",
     "src/capabilities/provision/service.rs -> std::process::Command",
     "src/capabilities/provision/service.rs -> ureq",
-    "src/capabilities/storage/service.rs -> std::fs",
     "src/capabilities/vm/service.rs -> std::fs"
   ],
   "siblingCycles": [],

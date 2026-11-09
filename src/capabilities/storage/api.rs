@@ -1,9 +1,18 @@
 //! 目的：存储空间的入站能力面——空间报告、回收、显式清理、作业与策略。
-//! 管：Storage trait 与 DTO（SpaceReport / GcReport / CleanRequest / JobState）、未接入的 NoStorage。
+//! 管：Storage trait 与 DTO（SpaceReport / GcReport / CleanRequest / JobState）、分类 id（CAT_*）、未接入的 NoStorage。
 //! 不管：怎么扫描（service/detail）、怎么删（service）；工作对象回收仍在 workspace。
 //! 联动：Ops 持它；Web / CLI / builds 经这里拿事实与动作。
 
 use serde::{Deserialize, Serialize};
+
+/// 目的：空间分类 id——盘点产出、策略排序与删除三处共用的线格式。
+pub const CAT_BUILD: &str = "build-cache";
+pub const CAT_DOWNLOAD: &str = "download-cache";
+pub const CAT_OVERLAYS: &str = "overlays";
+pub const CAT_LOGS: &str = "logs";
+pub const CAT_GUESTS: &str = "guest-bases";
+pub const CAT_SESSIONS: &str = "sessions";
+pub const CAT_OUTPUTS: &str = "module-outputs";
 
 /// 目的：可回收缓存的空间预算与保留策略（settings.yaml 的 storage 段的运行形态）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
