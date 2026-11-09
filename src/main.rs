@@ -556,9 +556,18 @@ fn main() {
         capabilities::provision::ProvisionService::with_vm(&root, provision_vm(Arc::clone(&book))),
     );
     // **存储空间**：回收策略来自 settings；构建与呈现层共用同一份。
+    // 存储的三个端口各一个适配器：盘点（只读）、回收（锁与删除）、guest 存活（进程台账）。
     let storage_service = Arc::new(capabilities::storage::service::StorageService::new(
-        root.clone(),
         Arc::clone(&provision),
+        Arc::new(capabilities::storage::detail::survey::DiskSurvey::new(
+            root.clone(),
+        )),
+        Arc::new(capabilities::storage::detail::reclaim::DiskReclaim::new(
+            root.clone(),
+        )),
+        Arc::new(capabilities::storage::detail::guests::ProcessGuests::new(
+            &root,
+        )),
         std::sync::Arc::clone(&log),
         capabilities::storage::api::StoragePolicy::from(&registry.app_settings().storage),
     ));

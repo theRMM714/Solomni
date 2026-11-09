@@ -1,9 +1,11 @@
 //! 目的：存储空间的纯策略——哪些缓存项先回收、按龄还是按上限。
-//! 管：plan 的排序与选择；不碰文件系统。
+//! 管：plan 的排序与选择、id 的名字安全判定；不碰文件系统。
 //! 不管：扫描、删除、锁（在 detail/service）。
 //! 联动：service 调 plan 得到候选；测试直接钉策略。
 
-use crate::capabilities::storage::api::{SpaceCategory, SpaceReport, StoragePolicy};
+use crate::capabilities::storage::api::{
+    SpaceCategory, SpaceReport, StoragePolicy, CAT_BUILD, CAT_DOWNLOAD, CAT_LOGS, CAT_OVERLAYS,
+};
 use std::collections::BTreeSet;
 
 /// 目的：一条待回收候选；category 是 SpaceCategory.id。
@@ -16,10 +18,14 @@ pub struct Candidate {
     pub reason: String,
 }
 
-const LOGS: &str = "logs";
-const OVERLAYS: &str = "overlays";
-const DOWNLOAD: &str = "download-cache";
-const BUILD: &str = "build-cache";
+/// 目的：虚拟根 / 缓存项的 id 是否可安全拼进路径（非空、非 . 或 ..、只含字母数字与 - _ .）。
+pub fn safe_id(s: &str) -> bool {
+    !s.is_empty()
+        && s != "."
+        && s != ".."
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
 
 /// 目的：按策略排一次回收候选；不删任何东西。
 /// 参数：report = 当前盘点；policy = 预算；now = unix 秒；protect = 本次要用的虚拟根。
@@ -42,7 +48,7 @@ pub fn plan(
             continue;
         }
         match cat.id.as_str() {
-            LOGS => {
+            CAT_LOGS => {
                 let mut logs: Vec<_> = cat.items.iter().collect();
                 logs.sort_by_key(|i| i.last_used.unwrap_or(0));
                 let keep_recent = 50usize;
@@ -53,7 +59,7 @@ pub fn plan(
                     }
                 }
             }
-            OVERLAYS => {
+            CAT_OVERLAYS => {
                 for item in &cat.items {
                     if !item.active
                         && item
@@ -65,14 +71,14 @@ pub fn plan(
                     }
                 }
             }
-            DOWNLOAD if keep_secs > 0 => {
+            CAT_DOWNLOAD if keep_secs > 0 => {
                 for item in &cat.items {
                     if item.last_used.map(|t| t < cutoff).unwrap_or(false) {
                         add(&mut out, &mut seen, cat, item, "超过缓存保留期限");
                     }
                 }
             }
-            BUILD if keep_secs > 0 => {
+            CAT_BUILD if keep_secs > 0 => {
                 for item in &cat.items {
                     if item.active || protect == Some(item.id.as_str()) {
                         continue;
@@ -102,7 +108,7 @@ pub fn plan(
                 if item.active || !item.cleanable {
                     continue;
                 }
-                if cat.id == BUILD && protect == Some(item.id.as_str()) {
+                if cat.id == CAT_BUILD && protect == Some(item.id.as_str()) {
                     continue;
                 }
                 if seen.contains(&(cat.id.clone(), item.id.clone())) {
