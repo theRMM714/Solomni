@@ -10,7 +10,13 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/capabilities/workspace/api.rs` | 入站能力面：寻址 / 文件视图 / 共享区版本化 / 备份恢复的契约与共享类型（其它能力只准用这里） |
-| `src/capabilities/workspace/service.rs` | 用例与端口持有者：`Workdirs` / `WorkStore` 只在这里（R12）；版本库写事务与恢复、提交号分配、对象回收、pull / commit / 三方视图 / 显式解决冲突（含 head token、未合并守卫与备份）/ 备份恢复 / 状态 |
+| `src/capabilities/workspace/service.rs` | 门面与底座：`Workdirs` / `WorkStore` 只在这里（R12）；`WorkspaceService` 的构造、实例级 gate、树回溯、恢复事务、提交号预留、待恢复事务与外部工作区冲突核校 |
+| `src/capabilities/workspace/service/commit.rs` | 提交族：`commit_locked` 的三方核校与对象落盘、agent 基线记录、归档点、树铺设、归档清理、自动提交与用户提交 |
+| `src/capabilities/workspace/service/sync.rs` | 同步族：pull、沙箱采纳、过期读取、双向同步、导入根、跟踪同步 |
+| `src/capabilities/workspace/service/history.rs` | 历史族：状态盘点、日志、单次提交视图、单文件差异、版本列表 |
+| `src/capabilities/workspace/service/resolve.rs` | 冲突解决族：`ResolvePlan`、拒绝对话渲染、`work_resolve` 的选边、备份与未合并守卫 |
+| `src/capabilities/workspace/service/lifecycle.rs` | 生命周期族：丢失文件、恢复、回收、回滚、归档、删除、归档恢复、还原点、提交后丢弃 |
+| `src/capabilities/workspace/service/facade.rs` | `Workspace` 的唯一 trait 实现：七个基础用例直接委托 `Workdirs`，其余方法逐条转发到同级子模块（Rust 不允许 trait impl 分块） |
 | `src/capabilities/workspace/ports.rs` | 出站端口：`Workdirs`（目录布局）与 `WorkStore`（流式资产原语 + 跨根复制 + 内容寻址对象 + 提交记录 + 拉取基线 + 待恢复事务 + 提交号 + 跨进程锁 + 对象枚举 / 删除） |
 | `src/capabilities/workspace/domain/workspace.rs` | 工作区与沙箱的纯数据与寻址（含越界判定） |
 | `src/capabilities/workspace/domain/asset.rs` | 通用资产纯逻辑：分块扫描（指纹 / 大小 / NUL 与 UTF-8 判定 / 受限预览）、`FileVersion`、扩展名媒体类型提示与单文件上限 |

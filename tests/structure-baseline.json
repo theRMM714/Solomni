@@ -15,7 +15,7 @@
   "siblingCycles": [],
   "bigFiles": {
     "src/capabilities/provision/service.rs": 3727,
-    "src/capabilities/workspace/service.rs": 2533,
+    "src/capabilities/workspace/service.rs": 633,
     "src/capabilities/conductor/service/work.rs": 2103,
     "src/capabilities/vm/detail/qemu.rs": 1632,
     "src/capabilities/workspace/domain/workstore.rs": 1162,
