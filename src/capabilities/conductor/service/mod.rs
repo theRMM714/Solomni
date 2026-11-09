@@ -29,12 +29,13 @@ use crate::capabilities::session::api::{AgentMeta, HistoryView, RunState, Sessio
 use crate::capabilities::tools::api::{ToolExec, Tools};
 use crate::kernel::api::SessionId;
 use crate::kernel::ports::Log;
+use compact::{CompactChoice, CompactRuntime};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, RwLock};
 
-/// 会话实例：单 agent 会话或协作会话（本体自带端口，可跨线程移动）。
-/// 两变体大小差得远（协作会话带整份讨论状态），装箱只换来一次间接寻址、
-/// 却把"会话本体可直接移动"这个形状改掉——有意不装箱（见 docs/testing/quality-isolation.md 的 allow 清单）。
+/// 目的：会话实例：单 agent 会话或协作会话（本体自带端口，可跨线程移动）。
+///  两变体大小差得远（协作会话带整份讨论状态），装箱只换来一次间接寻址、
+///  却把"会话本体可直接移动"这个形状改掉——有意不装箱（见 docs/testing/quality-isolation.md 的 allow 清单）。
 #[allow(clippy::large_enum_variant)]
 pub enum Session {
     Single(crate::capabilities::session::api::AgentSession),
@@ -85,104 +86,7 @@ fn merge_into_one(picked: &[AgentInstance], name: &str) -> AgentInstance {
     }
 }
 
-/// **这个会话要不要留档**：由**会话种类**定，不由调用点定。
-/// - `Keep`：定稿事件落盘（单 agent 会话与协作会话都要回放——前者是模型上下文的一部分，
-///   后者是派生状态的来源）；
-/// - `Drop`：只推不留（**系统会话**：一次性动作，如"让核心推荐 agent"，重启后本来就该是空的）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PersistPolicy {
-    Keep,
-    Drop,
-}
-
-impl PersistPolicy {
-    /// 一条事件该不该留：`Drop` 一条都不留；`Keep` 也不留**短暂事件**
-    /// （流式增量 / 运行态 / 实时工具卡——它们只给在场的前端看；裁决卡与回答按会话种类落盘）。
-    pub(crate) fn keeps(&self, ev: &SessionEvent) -> bool {
-        if *self == PersistPolicy::Drop {
-            return false;
-        }
-        !matches!(
-            ev,
-            SessionEvent::Delta { .. }
-                | SessionEvent::Working { .. }
-                | SessionEvent::ToolCall(_)
-                | SessionEvent::Rewound { .. }
-                // 原始 Notice 是**瞬时提示**（没有行 id，无法回档）：只推给在场的前端，
-                // 不落盘。真正可回放的内容提示是 Transcript 里的 `LineView kind=notice`。
-                | SessionEvent::Notice(_)
-        )
-    }
-}
-
-/// **系统会话的 sid 约定**：以 `#` 开头的是"没有地方落盘"的一次性动作（只推不留）。
-/// 见 docs/session/session-model.md 二（会话种类 × 推 / 落）。
-pub(crate) fn is_system_session(sid: &str) -> bool {
-    sid.starts_with('#')
-}
-
-/// 核心推荐（suggest_models）的系统会话 sid：一次性的推荐动作**没有工作区**，
-/// 它的行只推给在场的前端看（推荐是弹窗里的一次问答），不落盘，也不进会话列表。
-pub(crate) const SYSTEM_SID_SUGGEST: &str = "#suggest";
-
-/// 这个会话的落盘策略（**判定只有这一处**：会话种类 → 策略）。
-fn persist_policy_for(sid: &str) -> PersistPolicy {
-    if is_system_session(sid) {
-        PersistPolicy::Drop
-    } else {
-        PersistPolicy::Keep
-    }
-}
-
-/// 事件落盘（按该会话的策略；短暂事件不落盘）：失败如实告知，返回要外送的警告（None = 一切正常）。
-///
-/// 为什么抽成自由函数：工作线程按**一次模型调用**的粒度增量落盘，必须与核心走同一段逻辑——
-/// 两条路径各写一份的话，"什么算定稿、什么不落盘"迟早会不一致。
-pub(crate) fn persist_events(
-    history: &dyn History,
-    log: &dyn Log,
-    sid: &str,
-    events: &[SessionEvent],
-) -> Option<String> {
-    // 留不留由**这个会话的策略**说了算（会话种类 → 策略，见 persist_policy_for）。
-    let policy = persist_policy_for(sid);
-    let jsons: Vec<serde_json::Value> = events
-        .iter()
-        .filter(|e| policy.keeps(e))
-        .map(|e| e.to_json())
-        .collect();
-    if jsons.is_empty() {
-        return None;
-    }
-    match history.append(sid, &jsons) {
-        Ok(()) => None,
-        Err(e) => {
-            log.error(
-                "conductor::history_append",
-                &format!("会话 {} 落盘失败：{}", sid, e),
-            );
-            Some(format!("[警告] 会话记录落盘失败：{}", e))
-        }
-    }
-}
-
-/// 增量落盘手柄：工作线程按"一次模型调用"的粒度把定稿事件落盘。
-/// 为什么要它：整段生成跑完才落一次盘，会让中途刷新看不到已经产生的部分。
-#[derive(Clone)]
-pub(crate) struct Persister {
-    history: Arc<dyn History + Send + Sync>,
-    log: Arc<dyn Log + Send + Sync>,
-    sid: String,
-}
-
-impl Persister {
-    /// 落盘这一批；返回要外送给用户的警告（None = 正常）。
-    pub(crate) fn persist(&self, events: &[SessionEvent]) -> Option<String> {
-        persist_events(self.history.as_ref(), self.log.as_ref(), &self.sid, events)
-    }
-}
-
-/// 一次单 agent 生成的**准备结果**（核心线程上只算到这里，模型调用在工作线程上）。
+/// 目的：一次单 agent 生成的**准备结果**（核心线程上只算到这里，模型调用在工作线程上）。
 pub(crate) enum Prepared {
     /// 可以跑：会话已从核心表取出，由工作线程独占。
     Run {
@@ -223,71 +127,9 @@ pub(crate) struct ReadyActivation {
     pub(crate) lease: Option<String>,
 }
 
-/// **应用服务**：持有注入的端口、能力面与会话中心；前端拿不到它（只拿 `conductor::api::Ops`）。
-/// 组合根在 `ConductorHandle::spawn` 里把它**移进核心自己的执行线程**——此后状态只被那一个线程碰，
-/// 所以这里不加任何锁（并发不变式见 ARCHITECTURE.md §一）。
-/// 目的：压缩模型的选择（全局设置；只读触发时解析，不参与每个回合）。
-#[derive(Debug, Clone)]
-enum CompactChoice {
-    /// 空设置 = 会话同模型。
-    Session,
-    /// 指定模型：解析好的通道 + 窗口。
-    Model {
-        id: String,
-        channel: Channel,
-        window: u64,
-    },
-    /// 设置指向的模型 / 供应商不可用：压缩触发时如实报错。
-    Unavailable(String),
-}
-
-/// 目的：压缩通道工厂：设置 / 模型 / 供应商变更时由 conductor 更新选择，会话在触发时读。
-struct CompactRuntime {
-    llm: Arc<dyn Llm + Send + Sync>,
-    choice: RwLock<CompactChoice>,
-}
-
-impl CompactRuntime {
-    fn new(llm: Arc<dyn Llm + Send + Sync>) -> CompactRuntime {
-        CompactRuntime {
-            llm,
-            choice: RwLock::new(CompactChoice::Session),
-        }
-    }
-
-    fn set(&self, choice: CompactChoice) {
-        *self.choice.write().unwrap_or_else(|e| e.into_inner()) = choice;
-    }
-}
-
-impl crate::capabilities::session::api::CompactChatFactory for CompactRuntime {
-    fn build(
-        &self,
-        module: &str,
-        session_model: Option<&str>,
-    ) -> Result<Option<crate::capabilities::session::api::CompactChatSpec>, String> {
-        let guard = self.choice.read().unwrap_or_else(|e| e.into_inner());
-        match &*guard {
-            CompactChoice::Session => Ok(None),
-            CompactChoice::Unavailable(err) => Err(err.clone()),
-            CompactChoice::Model {
-                id,
-                channel,
-                window,
-            } => {
-                if session_model == Some(id.as_str()) {
-                    return Ok(None);
-                }
-                Ok(Some(crate::capabilities::session::api::CompactChatSpec {
-                    chat: self.llm.member_channel(channel, module),
-                    model: id.clone(),
-                    window: *window,
-                }))
-            }
-        }
-    }
-}
-
+/// 目的：**应用服务**：持有注入的端口、能力面与会话中心；前端拿不到它（只拿 `conductor::api::Ops`）。
+///  组合根在 `ConductorHandle::spawn` 里把它**移进核心自己的执行线程**——此后状态只被那一个线程碰，
+///  所以这里不加任何锁（并发不变式见 ARCHITECTURE.md §一）。
 pub struct Conductor {
     /// 产品根：虚拟根这类"装在项目内"的东西按它解析成绝对路径（`vm::resolve_guest`）。
     root: std::path::PathBuf,
@@ -347,11 +189,16 @@ pub struct Conductor {
 }
 
 mod action;
+mod activation;
 pub(crate) mod ask_user;
+mod compact;
 mod env;
 mod flow;
 pub(crate) mod guest_job;
 mod history;
+pub(crate) mod persist;
+pub(crate) use persist::{persist_events, Persister, SYSTEM_SID_SUGGEST};
+mod suggest;
 #[cfg(test)]
 pub(crate) use history::SessionDelete;
 pub mod proxy;
@@ -519,7 +366,7 @@ impl Conductor {
         Arc::clone(&self.secrets)
     }
 
-    /// 日志端口句柄：入站手柄（conductor::api）与组合根共用同一份事实记录。
+    /// 目的：日志端口句柄：入站手柄（conductor::api）与组合根共用同一份事实记录。
     pub fn log_handle(&self) -> Arc<dyn crate::kernel::ports::Log + Send + Sync> {
         Arc::clone(&self.log)
     }
@@ -529,12 +376,12 @@ impl Conductor {
         Arc::clone(&self.tools)
     }
 
-    /// 登记处能力面（只读）：组合根与测试读登记处的事实走这里。
+    /// 目的：登记处能力面（只读）：组合根与测试读登记处的事实走这里。
     pub fn registry(&self) -> &dyn Registry {
         self.registry.as_ref()
     }
 
-    /// 登记处能力面（可写）：登记处的用例只经它调用。
+    /// 目的：登记处能力面（可写）：登记处的用例只经它调用。
     pub fn registry_mut(&mut self) -> &mut dyn Registry {
         self.registry.as_mut()
     }
@@ -549,12 +396,12 @@ impl Conductor {
         Ok(out)
     }
 
-    /// 目录保留名（`systools/names.yaml`）：agent 实例名不得占用（与工作区布局同源）。
+    /// 目的：目录保留名（`systools/names.yaml`）：agent 实例名不得占用（与工作区布局同源）。
     pub(crate) fn reserved_names(&self) -> Vec<String> {
         self.systools.reserved_names()
     }
 
-    /// 工具总表的声明书（代理执行者在队列桥那一侧校验参数/拼回执要用）。
+    /// 目的：工具总表的声明书（代理执行者在队列桥那一侧校验参数/拼回执要用）。
     pub(crate) fn systools_book(&self) -> crate::capabilities::tools::api::ToolBook {
         self.systools.book()
     }
@@ -564,8 +411,8 @@ impl Conductor {
         format!("会话 {} 正在生成中：先「停止」或等它结束，再做这一步", sid)
     }
 
-    /// 把单 agent 会话**交给工作线程**（核心表里留"生成中"）。
-    /// 取出的窗口内，核心队列是空的——读接口与其它会话的命令因此照常。
+    /// 目的：把单 agent 会话**交给工作线程**（核心表里留"生成中"）。
+    ///  取出的窗口内，核心队列是空的——读接口与其它会话的命令因此照常。
     pub(crate) fn take_single(
         &mut self,
         sid: &str,
@@ -589,8 +436,8 @@ impl Conductor {
         }
     }
 
-    /// 把协作会话**交给工作线程**（核心表里留"生成中"）。
-    /// 会话还没装进内存时先从落盘重建：协作的"继续"可能先于"打开"到达。
+    /// 目的：把协作会话**交给工作线程**（核心表里留"生成中"）。
+    ///  会话还没装进内存时先从落盘重建：协作的"继续"可能先于"打开"到达。
     pub(crate) fn take_collab(&mut self, sid: &str) -> Result<CollabSession, String> {
         // 同上：运行态闸门是第一道，先于"取出来"。
         self.dispatch_gate(sid)?;
@@ -675,9 +522,9 @@ impl Conductor {
         out
     }
 
-    /// 协作生成结束**交回**：重新插入 + 解除"生成中"，并**为就绪节点派发子会话**。
-    /// 转录已由工作线程按"一次模型调用"的粒度增量落盘（见 `Persister`），这里不重复落。
-    /// 返回值：派发产生的事件（调用方负责入台）。
+    /// 目的：协作生成结束**交回**：重新插入 + 解除"生成中"，并**为就绪节点派发子会话**。
+    ///  转录已由工作线程按"一次模型调用"的粒度增量落盘（见 `Persister`），这里不重复落。
+    ///  返回值：派发产生的事件（调用方负责入台）。
     pub(crate) fn put_collab(
         &mut self,
         sid: &str,
@@ -765,8 +612,8 @@ impl Conductor {
         Ok(s.params().identity(&*self.prompt, s.tool_mode()))
     }
 
-    /// 往某个会话注入一条**系统消息**（讨论的提醒走这条；见 session-model.md 二"系统消息"）。
-    /// 返回要外送/落盘的事件。
+    /// 目的：往某个会话注入一条**系统消息**（讨论的提醒走这条；见 session-model.md 二"系统消息"）。
+    ///  返回要外送/落盘的事件。
     pub fn note_system(&mut self, sid: &str, text: &str) -> Result<Vec<SessionEvent>, String> {
         let mut s = self.take_single(sid)?;
         let events = s.note_system(text);
@@ -775,8 +622,8 @@ impl Conductor {
         Ok(events)
     }
 
-    /// 给某个会话接下来的行打上**整场工作的下一个回合 id**（节点执行也用同一套编号）。
-    /// 一个 agent 一个会话：它的回合计数来自父会话——回档同步靠两边同一套编号。
+    /// 目的：给某个会话接下来的行打上**整场工作的下一个回合 id**（节点执行也用同一套编号）。
+    ///  一个 agent 一个会话：它的回合计数来自父会话——回档同步靠两边同一套编号。
     pub(crate) fn bump_turn_of_child(&mut self, child: &str) -> u64 {
         let parent = self
             .history
@@ -820,7 +667,7 @@ impl Conductor {
         }
     }
 
-    /// 测试用：往某个会话的流水追加事件（造「压过之后再重启」这类历史）。
+    /// 目的：测试用：往某个会话的流水追加事件（造「压过之后再重启」这类历史）。
     pub fn history_append(
         &mut self,
         sid: &str,
@@ -829,7 +676,7 @@ impl Conductor {
         self.history.append(sid, events)
     }
 
-    /// 该会话此刻的**身份块**（按当前提示词册与形态现渲染）：测试用它断言"它被告诉了什么"。
+    /// 目的：该会话此刻的**身份块**（按当前提示词册与形态现渲染）：测试用它断言"它被告诉了什么"。
     pub fn single_identity(&self, sid: &str) -> Option<String> {
         match self.sessions.get(sid) {
             Some(Session::Single(s)) => Some(s.params().identity(&*self.prompt, s.tool_mode())),
@@ -841,9 +688,9 @@ impl Conductor {
 /// 继续被拦下时的提醒（单 agent 会话：该轮到用户发言）。
 const NEED_USER: &str = "最后一条是 AI 发言：部分供应商不允许连续 AI 发言；请先发言再继续。";
 
-/// 会话列表按**树序**排：顶层保持后端给的时间倒序，每个会话后面**紧跟**它的子会话
-/// （子会话内部同样按时间倒序），深度优先。
-/// 为什么必须在后端做：顺序与缩进是同一件事的两面——前端各排各的，就会出现子会话排在父会话上面。
+/// 目的：会话列表按**树序**排：顶层保持后端给的时间倒序，每个会话后面**紧跟**它的子会话
+///  （子会话内部同样按时间倒序），深度优先。
+///  为什么必须在后端做：顺序与缩进是同一件事的两面——前端各排各的，就会出现子会话排在父会话上面。
 pub(crate) fn tree_order(list: Vec<HistoryView>) -> Vec<HistoryView> {
     let mut kids: std::collections::BTreeMap<String, Vec<HistoryView>> =
         std::collections::BTreeMap::new();

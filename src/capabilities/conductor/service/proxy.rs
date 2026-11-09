@@ -13,7 +13,7 @@ use std::sync::Arc;
 /// 目的：代理会话自己的私有沙箱目录名（与 work/、children/ 同级，写进保留名表）。
 pub(crate) const PROXY_PRIVATE_DIR: &str = ".proxy";
 
-/// 代理工具的执行器：持有宿主端口、工具声明书、回执文案与幂等账本。
+/// 目的：代理工具的执行器：持有宿主端口、工具声明书、回执文案与幂等账本。
 pub struct ProxyTools {
     host: Arc<dyn ProxyHost + Send + Sync>,
     book: ToolBook,
@@ -30,8 +30,8 @@ impl ProxyTools {
         }
     }
 
-    /// 执行一次代理工具调用：name 必须是六个代理工具之一；args_json 是模型给的参数。
-    /// 参数先按总表声明校验（形状只有一份真相），再做语义校验、授权与宿主调用。
+    /// 目的：执行一次代理工具调用：name 必须是六个代理工具之一；args_json 是模型给的参数。
+    ///  参数先按总表声明校验（形状只有一份真相），再做语义校验、授权与宿主调用。
     pub fn call(&mut self, ctx: &d::ProxyCall, name: &str, args_json: &str) -> ToolOutcome {
         if !d::is_proxy_tool(name) {
             return deny(format!("不是代理工具：{}", name));
@@ -323,7 +323,7 @@ impl Conductor {
         Ok(out)
     }
 
-    /// 代理工具：只读清单（agent / 模块 / 模型），只回公开事实，不碰密钥与私有路径。
+    /// 目的：代理工具：只读清单（agent / 模块 / 模型），只回公开事实，不碰密钥与私有路径。
     pub fn proxy_catalog(&self, scope: d::CatalogScope) -> Result<d::Catalog, String> {
         let agents = if scope.covers_agents() {
             self.registry()
@@ -372,7 +372,7 @@ impl Conductor {
         })
     }
 
-    /// 代理工具：观察（元信息；**不回消息正文**）。
+    /// 目的：代理工具：观察（元信息；**不回消息正文**）。
     pub fn proxy_observe(
         &self,
         sid: &str,
@@ -430,7 +430,7 @@ impl Conductor {
         })
     }
 
-    /// 代理工具：消息倒查（0 = 最新一条，按新→旧）。
+    /// 目的：代理工具：消息倒查（0 = 最新一条，按新→旧）。
     pub fn proxy_messages(
         &self,
         sid: &str,
@@ -460,18 +460,18 @@ impl Conductor {
         })
     }
 
-    /// 一个会话的形态（single / collab）：落盘 meta 是唯一真相；取不到就回空串。
+    /// 目的：一个会话的形态（single / collab）：落盘 meta 是唯一真相；取不到就回空串。
     pub(crate) fn session_mode_str(&self, sid: &str) -> String {
         self.history_open(sid)
             .map(|(m, _)| m.mode)
             .unwrap_or_default()
     }
 
-    /// 代理工具：控制里的**终态关闭**（只做运行态的状态转移，不启动也不停止生成——
-    /// 停止 / 继续要 JobRegistry 与唤醒，只有句柄拿得到，见 `ProxyBridge::control`）。
-    /// 可回放记录也由句柄那一侧写（它才推得到事件台）。
-    /// - close：终态。整棵子树里还有在生成的就拒绝（先 stop），不留半个状态；
-    /// - stop / continue：级联停与解冻唤醒由句柄承担，不进这条。
+    /// 目的：代理工具：控制里的**终态关闭**（只做运行态的状态转移，不启动也不停止生成——
+    ///  停止 / 继续要 JobRegistry 与唤醒，只有句柄拿得到，见 `ProxyBridge::control`）。
+    ///  可回放记录也由句柄那一侧写（它才推得到事件台）。
+    ///  - close：终态。整棵子树里还有在生成的就拒绝（先 stop），不留半个状态；
+    ///  - stop / continue：级联停与解冻唤醒由句柄承担，不进这条。
     pub fn proxy_control(
         &self,
         sid: &str,
@@ -507,9 +507,9 @@ impl Conductor {
         })
     }
 
-    /// 建一个**代理会话**（`mode="proxy"` + 全权委托）：核心在这里跟用户对话，用代理工具代他决定。
-    /// 没有 agent、没有模块工具；这一回合的工具面是 `core_proxy`（六项代理工具 + 只读核实）。
-    /// 测试便捷入口：只要引用（产品入口经 `create_work(WorkMode::Proxy)`）。
+    /// 目的：建一个**代理会话**（`mode="proxy"` + 全权委托）：核心在这里跟用户对话，用代理工具代他决定。
+    ///  没有 agent、没有模块工具；这一回合的工具面是 `core_proxy`（六项代理工具 + 只读核实）。
+    ///  测试便捷入口：只要引用（产品入口经 `create_work(WorkMode::Proxy)`）。
     #[cfg(test)]
     pub fn create_proxy(&mut self, name: &str, granted_at: i64) -> Result<String, String> {
         self.create_proxy_with_facts(
@@ -523,10 +523,10 @@ impl Conductor {
         .map(|(sid, _)| sid)
     }
 
-    /// 建代理会话的真身：返回（会话引用, **开场事实**）——事实交给 api 层发布到事件台
-    /// （核心不持有事件台；与 `create_work` 同一条口径）。
-    /// `tier` 是用户在向导里选的档位：它既是这条会话自己的工作区档位，也是它**建子工作时的默认档位**
-    /// （`proxy_create` 取 `pmeta.exec.tier`）。承载不了就如实拒绝，不偷偷降级。
+    /// 目的：建代理会话的真身：返回（会话引用, **开场事实**）——事实交给 api 层发布到事件台
+    ///  （核心不持有事件台；与 `create_work` 同一条口径）。
+    ///  `tier` 是用户在向导里选的档位：它既是这条会话自己的工作区档位，也是它**建子工作时的默认档位**
+    ///  （`proxy_create` 取 `pmeta.exec.tier`）。承载不了就如实拒绝，不偷偷降级。
     pub(crate) fn create_proxy_with_facts(
         &mut self,
         name: &str,
@@ -608,7 +608,7 @@ impl Conductor {
         Ok((name.to_string(), events))
     }
 
-    /// 装配一个代理会话对象（创建与重建**共用同一处**，两处不各拼一遍）。
+    /// 目的：装配一个代理会话对象（创建与重建**共用同一处**，两处不各拼一遍）。
     pub(crate) fn build_proxy(&self, meta: &SessionMeta) -> Result<AgentSession, String> {
         let channel = self.registry.core_channel()?;
         self.build_proxy_with(meta, &channel)
@@ -676,11 +676,10 @@ impl Conductor {
     }
 }
 
-/// 代理工具的**队列宿主**：把 ProxyHost 的每个方法交给核心线程执行。
-///
-/// 为什么需要它：代理工具会改核心状态（建会话 / 派发），而模型循环跑在工作线程上——
-/// 状态所有权不变（只有核心线程写），这里只做“发一条命令并等回包”。
-/// `mpsc::Sender` 不是 `Sync`，所以用一把锁串行化入队；入队本身不参与任何业务判定。
+/// 目的：代理工具的**队列宿主**：把 ProxyHost 的每个方法交给核心线程执行。
+///  为什么需要它：代理工具会改核心状态（建会话 / 派发），而模型循环跑在工作线程上——
+///  状态所有权不变（只有核心线程写），这里只做“发一条命令并等回包”。
+///  `mpsc::Sender` 不是 `Sync`，所以用一把锁串行化入队；入队本身不参与任何业务判定。
 pub struct ProxyBridge {
     handle: std::sync::Mutex<ConductorHandle>,
 }
@@ -801,11 +800,10 @@ impl ProxyHost for ProxyBridge {
         self.call(move |core| core.proxy_messages(&session, from, count))
     }
 }
-/// 代理工具的**成员侧执行者**：把 `core_proxy` 会话那一回合里的代理工具调用接到 `ProxyTools` 上。
-///
-/// 装配进代理会话的 `MemberTools.handlers` 之后，代理会话就是一个**普通成员会话**——
-/// `converse_with` / 转录 / 回档 / 压缩 / 停止全部复用，循环里没有任何“代理专用”分支。
-/// 执行经队列桥回核心线程（`ProxyHost`），核心状态的所有权不变。
+/// 目的：代理工具的**成员侧执行者**：把 `core_proxy` 会话那一回合里的代理工具调用接到 `ProxyTools` 上。
+///  装配进代理会话的 `MemberTools.handlers` 之后，代理会话就是一个**普通成员会话**——
+///  `converse_with` / 转录 / 回档 / 压缩 / 停止全部复用，循环里没有任何“代理专用”分支。
+///  执行经队列桥回核心线程（`ProxyHost`），核心状态的所有权不变。
 pub struct ProxyHandler {
     tools: std::sync::Mutex<ProxyTools>,
     ctx: d::ProxyCall,

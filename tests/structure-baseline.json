@@ -12,18 +12,16 @@
   "bigFiles": {
     "src/capabilities/provision/service.rs": 566,
     "src/capabilities/workspace/service.rs": 633,
-    "src/capabilities/conductor/service/work.rs": 2103,
     "src/capabilities/vm/detail/qemu.rs": 1632,
     "src/capabilities/workspace/domain/workstore.rs": 1162,
     "src/capabilities/conductor/domain/proxy.rs": 1151,
     "src/capabilities/session/domain/session.rs": 1080,
     "src/capabilities/permission/domain/permission.rs": 1023,
     "src/capabilities/collab/service/tool_loop.rs": 943,
-    "src/capabilities/conductor/service/mod.rs": 935,
     "src/capabilities/session/domain/events.rs": 892,
     "src/capabilities/vm/domain/exec.rs": 892,
     "src/capabilities/storage/service.rs": 876,
     "src/capabilities/collab/service/round.rs": 846,
-    "src/capabilities/conductor/service/proxy.rs": 841
+    "src/capabilities/conductor/service/proxy.rs": 839
   }
 }

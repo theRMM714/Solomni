@@ -1,10 +1,8 @@
-//! **装配材料**：成员通道、沙箱清单、工具环境、预算与角色工具面、单 agent 会话对象（build_single）。
-//!
-//! 它是"把各能力的事实拼成一个能跑的会话"的那一层：纯派生，不落盘。
-//!
-//! 它是 Conductor 的一个方法族：与 mod.rs 同在 service 模块下（子模块看得见父模块的私有字段），
-//! 方法取 pub(crate)（或 pub）供兄弟族与 conductor/api.rs 调用。
-
+//! 目的：会话装配材料——成员通道、沙箱清单、工具环境、预算与角色工具面、单 agent 会话对象（build_single）。
+//! 管：把各能力的事实拼成一个能跑的会话；纯派生，不落盘。
+//! 不管：会话怎么落盘（history.rs）、协作链怎么推进（flow.rs）、建工作的两段（work/create.rs）。
+//! 联动：建工作与 turn 的准备工作经这里取会话对象。
+//!   本方法族只碰 registry / history / systools / workspace 这几个字段。
 use super::*;
 use crate::capabilities::packages::api as pkgs;
 
@@ -126,9 +124,9 @@ impl Conductor {
         Ok(out)
     }
 
-    /// 组装本次工作的沙箱清单：工作根来自 Workspace 端口，模块目录来自清单。
-    /// 权限策略在此收口：模块目录只对使用它的 agent 可达；同一模块可被多个 agent 共用（各自独立沙箱与工具面）。
-    /// 每个 agent 的沙箱按 meta.agents 建；共享区根任何时候都有（代拟还没名单时也有，@ 改写要用）。
+    /// 目的：组装本次工作的沙箱清单：工作根来自 Workspace 端口，模块目录来自清单。
+    ///  权限策略在此收口：模块目录只对使用它的 agent 可达；同一模块可被多个 agent 共用（各自独立沙箱与工具面）。
+    ///  每个 agent 的沙箱按 meta.agents 建；共享区根任何时候都有（代拟还没名单时也有，@ 改写要用）。
     pub(crate) fn sandboxes(
         &self,
         meta: &SessionMeta,
@@ -429,7 +427,7 @@ impl Conductor {
         )]
     }
 
-    /// 一轮内对同一个成员最多提醒几次（用户可设，见 session-model.md 二）。
+    /// 目的：一轮内对同一个成员最多提醒几次（用户可设，见 session-model.md 二）。
     pub fn discuss_remind_cap(&self) -> u32 {
         self.registry.app().discuss_remind_cap
     }
@@ -456,8 +454,8 @@ impl Conductor {
         s.set_context_budget(window, percent, keep);
     }
 
-    /// 角色表发放的系统工具 id 清单（工具面的名字部分）。
-    /// 为什么不留第二份名单：代码里出现"哪个角色能调哪个工具"必然与表漂。
+    /// 目的：角色表发放的系统工具 id 清单（工具面的名字部分）。
+    ///  为什么不留第二份名单：代码里出现"哪个角色能调哪个工具"必然与表漂。
     pub(crate) fn role_tools(&self, role: &str) -> Vec<String> {
         self.systools
             .tool_face(role)
