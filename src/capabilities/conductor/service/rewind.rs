@@ -1,11 +1,8 @@
-//! **跨会话回档编排**：主会话回到某一行（含该行），各 agent 子会话按同一个**回合 id** 同步截断，
-//! 然后把新的行与元信息写回；协作/历史会话按转录重建（状态全部派生）。
-//!
-//! 纯行与事件算术在 session 的 domain/rewind.rs；回档的**副作用告知**（工具执行次数）也在这里。
-//!
-//! 它是 Conductor 的一个方法族：与 mod.rs 同在 service 模块下（子模块看得见父模块的私有字段），
-//! 方法取 pub(crate) 供兄弟族（会话生命周期、改需求）调用。
-
+//! 目的：跨会话回档编排——主会话回到某一行（含该行），各 agent 子会话按同一个回合 id 同步截断，然后把新行与元信息写回。
+//! 管：协作 / 历史会话按转录重建（状态全部派生）、回档的副作用告知（工具执行次数）。
+//! 不管：纯行与事件算术（session 的 domain/rewind.rs）。
+//! 联动：api 层的回档接口与改需求经这里调用。
+//!   本方法族只碰 history / workspace / running / sessions 这几个字段。
 use super::*;
 use crate::capabilities::conductor::api::RewindOutcome;
 
@@ -393,7 +390,7 @@ impl Conductor {
         Ok((std::collections::BTreeMap::new(), rewound))
     }
 
-    /// 按会话元信息 + 转录事件重建会话对象（通道是机制，按记录的选择重新装配）。
+    /// 目的：按会话元信息 + 转录事件重建会话对象（通道是机制，按记录的选择重新装配）。
     pub(crate) fn rebuild_session(
         &self,
         meta: &SessionMeta,

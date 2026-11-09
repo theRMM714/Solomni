@@ -22,8 +22,8 @@ pub struct WorkHandler {
     permissions: PermissionSet,
 }
 
-/// 逐条路径过读权限：拉不进来的东西，读了也没有，所以在这里就拒绝（不作为提交/冲突问题）。
-/// 纯判定（输入只有生效权限与路径），便于 T1 直接钉规则。
+/// 目的：逐条路径过读权限：拉不进来的东西，读了也没有，所以在这里就拒绝（不作为提交/冲突问题）。
+///  纯判定（输入只有生效权限与路径），便于 T1 直接钉规则。
 pub(crate) fn check_readable(permissions: &PermissionSet, paths: &[String]) -> Result<(), String> {
     if !permissions.reach.contains(Reach::SharedRead) {
         return Err(format!(
@@ -43,7 +43,7 @@ pub(crate) fn check_readable(permissions: &PermissionSet, paths: &[String]) -> R
     Ok(())
 }
 
-/// 逐条路径过写权限：任一条越界 → 整次提交拒绝（与冲突拒绝同一风格，不静默放过）。
+/// 目的：逐条路径过写权限：任一条越界 → 整次提交拒绝（与冲突拒绝同一风格，不静默放过）。
 pub(crate) fn check_writable(
     permissions: &PermissionSet,
     paths: &[String],

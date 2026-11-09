@@ -1020,7 +1020,7 @@ pub(crate) fn single_mode_accepts_multi_module_agent_and_converses() {
 /// 目的：**落盘策略由会话种类定、判定只有一处**：短暂事件任何会话都不留；系统会话（`#` 开头）一条都不留。
 #[test]
 pub(crate) fn persist_policy_is_decided_by_the_session_kind() {
-    use crate::capabilities::conductor::service::{is_system_session, PersistPolicy};
+    use crate::capabilities::conductor::service::persist::{is_system_session, PersistPolicy};
     use crate::capabilities::session::api::SessionEvent;
     let line = SessionEvent::Transcript(vec![crate::capabilities::session::api::LineView::system(
         "",
