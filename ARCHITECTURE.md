@@ -48,6 +48,9 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 | `SourceDigest` | 模块源指纹：构建命令、构建期能力、网络开关与全部源文件内容 → 一段稳定指纹（缓存命中的判据） | `BuildStore`（`builds/detail::fingerprint`） |
 | `BuildStates` | 构建状态：某模块上次构建的目标与指纹；每次构建的私有家目录落点 | `BuildStore`（同上） |
 | `BuildCache` | 构建缓存卷：卷落点、同一虚拟根的构建锁、待清理账、模块用量元数据、挂载/对账/源同步/差异回写的脚本文本 | `CacheOnDisk`（`builds/detail::cache`） |
+| `SpaceSurvey` | 可回收空间的盘点：时间戳、宿主总量 / 可用量、各分类（构建卷 / 下载缓存 / 可写层 / 日志 / 用户数据）与条目；只读 | `DiskSurvey`（`storage/detail::survey`） |
+| `SpaceReclaim` | 回收动作：跨进程回收锁（凭据 drop 释放）、按分类删条目、按模块排队清理、构建卷压缩、上次回收摘要读写、构建占用判定 | `DiskReclaim`（`storage/detail::reclaim`） |
+| `GuestLiveness` | 有没有 guest 在跑（删除可写层与还原虚拟根的前置判据） | `ProcessGuests`（`storage/detail::guests`，读进程台账） |
 | `VmEngine` / `GuestVm` / `GuestChannel` | 虚拟机档的引擎：按规格拉起一台 guest、在它里面执行、销毁；通道是在 guest 里执行的入口 | `vm/detail::QemuEngine` + `QemuHandle`（QEMU + QGA） |
 | `ShareBackend` | 宿主↔guest 的共享：声明能落哪些引擎 / guest，产出引擎参数、netdev 附加选项与 guest 端挂载命令，并可持有外部资源（`ShareGuard`） | `vm/detail::VirtioFsShare`（vhost-user-fs + virtiofsd）/ `NinePShare`（9p）/ `SmbShare`（用户态 SMB helper + guestfwd，Windows 实时共享）/ `CopyShare`（QGA 复制，仅开发/应急）/ `NoneShare`（内部无共享，供给编排） |
 | `Workdirs` | 一次工作的共享区、各 agent 沙箱、版本库目录、文件清单、用量与寻址根 | `FsWorkspace` |

@@ -10,7 +10,7 @@
 | --- | --- | --- | --- |
 | S0 | `task/arch-upgrade` | 三条结构判据 + `[big]` 大文件回执 + 空基线 | 已销账（证据见 §4） |
 | S1 | `task/builds-ports` | builds：抽端口、拆 service | 已销账（证据见 §4） |
-| S2 | `task/storage-ports` | storage：抽端口、拆 service | 未开始 |
+| S2 | `task/storage-ports` | storage：抽端口、拆 service | 已销账（证据见 §4） |
 | S3 | `task/workspace-split` | workspace：只拆文件，不抽端口 | 未开始 |
 | S4 | `task/provision-ports` | provision：三个端口 + 拆 service + 测试外迁 | 未开始 |
 | S5 | `task/conductor-split` | conductor：拆 work/turn、方法族声明依赖面 | 未开始 |
@@ -54,7 +54,7 @@
 
 - **S0**：三条判据对故意构造的违规能红（已验：新增 `use std::fs` → serviceIo 红；基线留空条目 → 「已过期」红；新建 1201 行文件 → 硬线红）；存量全部进基线后全绿（现 0 问题 / 15 条 `[big]`）；`[big]` 在汇总尾出现；`node run-tests.js --docs` 绿（本文件在根路由白名单内）。
 - **S1 builds**：`service.rs` ≤800 行（741 → 726）；`std::fs` 经端口（`create_dir_all` 移进 `BuildStore::prepare_home`）；`serviceIo` 与 `serviceToDetail` 各销 1 条（剩 7 / 4）；端口契约测试在 `src/tests/builds.rs`（4 条，L1 886 passed）；`node run-tests.js` 与 `--docs` 全绿；顺手修掉用量脚本的 `[object Object]` 字节列。
-- **S2 storage**：同上，且不再直接 `ProcessBook`（改经端口），`serviceToDetail` 基线销 1 条。
+- **S2 storage**：`service.rs` 876 → 473 行；盘点 / 回收 / 存活三个端口（`storage/ports.rs`，适配器 `detail::{survey,reclaim,guests}`）接住 `std::fs`、`qemu-img`、回收锁与 `ProcessBook`；`serviceToDetail` 销 2 条、`serviceIo` 销 1 条（剩 2 / 6）；端口契约测试 6 条在 `src/tests/storage.rs`（L1 892 passed）；顺手修掉显式清理 `freed_bytes` 恒 0（旧实现删完才盘点）；`node run-tests.js` 与 `--docs` 全绿，`[big]` 从 15 条降到 14 条。
 - **S3 workspace**：2533 行拆到各文件 ≤800，依赖边无环（`siblingCycles` 保持为空）。
 - **S4 provision**：3727 行拆到 ≤800/文件；`std::fs`/`Command`/`ureq` 全部经端口；1350 行内联测试迁 `src/tests/provision*.rs`；`serviceIo` 与 `serviceToDetail` 各销 1 条。
 - **S5 conductor**：`work.rs` 拆 `work/{lifecycle,files,config}`；`turn.rs` 的 4 件事拆回各自编排位置；五个方法族文件头的「看得见父模块私有字段」改成「只用到 a/b/c 三个依赖」；`[big]` 里 conductor 两文件降到 800 以下。
