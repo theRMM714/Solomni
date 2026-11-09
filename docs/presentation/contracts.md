@@ -11,7 +11,7 @@
 
 | 东西 | 定义在 | 形态 |
 | --- | --- | --- |
-| 能力接口 | **各能力自己的 `api.rs`** | `Ops` 里的面：`SessionOps` / `ConductorOps` / `ActionOps` / `LogOps` 在 `src/capabilities/conductor/api/mod.rs`（会话中心、核心自己的用例与**动作目录 / 分发**），`RegistryOps` 在 `src/capabilities/registry/api.rs`，`HistoryOps` 在 `src/capabilities/session/api.rs`，`ModulesOps` 在 `src/capabilities/modules/api.rs`，`ResidentOps` / `SecretOps` / `Provision` 各在 `src/capabilities/<能力>/api.rs`。**全 `&self`、可替换成假实现**；实现都是 `src/capabilities/conductor/api/proxy.rs` 里的队列代理（`ConductorHandle`）|
+| 能力接口 | **各能力自己的 `api.rs`** | `Ops` 里的面：`SessionOps` / `ConductorOps` / `ActionOps` / `LogOps` 在 `src/capabilities/conductor/api/mod.rs`（会话中心、核心自己的用例与**动作目录 / 分发**），`RegistryOps` 在 `src/capabilities/registry/api.rs`，`HistoryOps` 在 `src/capabilities/session/api.rs`，`ModulesOps` 在 `src/capabilities/modules/api.rs`，`ResidentOps` / `SecretOps` / `Provision` 各在 `src/capabilities/<能力>/api.rs`。**全 `&self`、可替换成假实现**；实现都是 `src/capabilities/conductor/api/contract_impls.rs` 里 `ConductorHandle` 的队列代理（`impl` 在核心线程上执行）|
 | 事件台 | `src/capabilities/conductor/api/mod.rs` | `EventBus`：核心独占生产，任意数量的消费者按序号增量取 |
 
 规则：
