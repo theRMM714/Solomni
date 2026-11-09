@@ -45,6 +45,9 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 | `ModuleSource` | 模块清单来源（扫描 `modules/`） | `modules/detail::FsModules` |
 | `ModuleStateStore` | 模块与服务的启停覆盖落盘（`.home/modules.yaml`） | `modules/detail::YamlModuleState` |
 | `PackageSource` | 运行包库来源（扫描依赖文件夹 `runtimes/`） | `vm/detail::FsPackages` |
+| `SourceDigest` | 模块源指纹：构建命令、构建期能力、网络开关与全部源文件内容 → 一段稳定指纹（缓存命中的判据） | `BuildStore`（`builds/detail::fingerprint`） |
+| `BuildStates` | 构建状态：某模块上次构建的目标与指纹；每次构建的私有家目录落点 | `BuildStore`（同上） |
+| `BuildCache` | 构建缓存卷：卷落点、同一虚拟根的构建锁、待清理账、模块用量元数据、挂载/对账/源同步/差异回写的脚本文本 | `CacheOnDisk`（`builds/detail::cache`） |
 | `VmEngine` / `GuestVm` / `GuestChannel` | 虚拟机档的引擎：按规格拉起一台 guest、在它里面执行、销毁；通道是在 guest 里执行的入口 | `vm/detail::QemuEngine` + `QemuHandle`（QEMU + QGA） |
 | `ShareBackend` | 宿主↔guest 的共享：声明能落哪些引擎 / guest，产出引擎参数、netdev 附加选项与 guest 端挂载命令，并可持有外部资源（`ShareGuard`） | `vm/detail::VirtioFsShare`（vhost-user-fs + virtiofsd）/ `NinePShare`（9p）/ `SmbShare`（用户态 SMB helper + guestfwd，Windows 实时共享）/ `CopyShare`（QGA 复制，仅开发/应急）/ `NoneShare`（内部无共享，供给编排） |
 | `Workdirs` | 一次工作的共享区、各 agent 沙箱、版本库目录、文件清单、用量与寻址根 | `FsWorkspace` |
