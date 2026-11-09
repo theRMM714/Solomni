@@ -4,6 +4,7 @@
 //! 联动：清单与台账的唯一真相在仓库根，产品里编译期内嵌；呈现层经 api 调，组合根注入实现。
 
 pub mod api;
+pub mod domain;
 pub mod detail;
 mod guest;
 pub mod ports;
@@ -12,4 +13,6 @@ mod service;
 pub use service::ProvisionService;
 /// 目的：给跨层用例提供 kind: toolchain 的清单条目形状与登记入口（只在测试构建里出现）。
 #[cfg(test)]
-pub(crate) use service::{sync_toolchain_active, Dep, ToolchainSpec};
+pub(crate) use domain::{Dep, ToolchainSpec};
+#[cfg(test)]
+pub(crate) use service::sync_toolchain_active;

@@ -33,18 +33,13 @@ impl Fetcher for HttpFetch {
         sha256_file(path)
     }
 
-    fn sample(&self, url: &str) -> (u16, f64) {
-        probe_speed(&self.agent, url)
-    }
-
     fn download(
         &self,
         url: &str,
         dest: &Path,
         on_line: &mut dyn FnMut(&str),
     ) -> Result<(), String> {
-        let picked = pick_source(&self.agent, &source_candidates(url), on_line)?;
-        download_with_resume(&self.agent, &picked, dest, on_line)
+        download(&self.agent, url, dest, on_line)
     }
 }
 

@@ -3,7 +3,7 @@
 //! 不管：清单、下载与作业状态（service.rs）；guest 引擎本身（vm 能力）；运行包库（runtimes/ 与包库扫描）。
 //! 联动：由 service.rs 的 guest-runtime 分支调用；vm 能力经 ::api 注入（组合根或 --provision 入口装配）；契约见 RUNTIME_SPEC.md。
 
-use super::service::{deps, links, source_url, under, Dep};
+use super::domain::{deps, links, source_url, under, Dep};
 use crate::capabilities::vm::api::{
     classify_base, GuestArch, GuestClients, GuestImage, GuestRun, GuestSpec, SeedDocs, Vm,
 };
@@ -359,7 +359,7 @@ pub(super) fn install_guest_runtime(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capabilities::provision::service::Dep;
+    use crate::capabilities::provision::domain::Dep;
 
     /// 目的：造一条 guest-runtime 清单条目（字段取自 dependencies.yaml 的真实形状）。
     fn dep(id: &str, os: &str, guest: &str, install: &str, probe: &str) -> Dep {
