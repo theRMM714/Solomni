@@ -44,7 +44,7 @@ impl Fetcher for HttpFetch {
 }
 
 /// 目的：把 URL 下到目标文件——选源（前缀镜像测速）后带续传下载；半截文件留作下次续传的断点。
-/// 代理：ureq 的默认配置从环境拾取（HTTPS_PROXY / HTTP_PROXY / NO_PROXY），这里不另写一套。
+/// 约束：代理走 ureq 的默认配置（从环境拾取 HTTPS_PROXY / HTTP_PROXY / NO_PROXY），这里不另写一套。
 pub(crate) fn download(
     agent: &ureq::Agent,
     url: &str,

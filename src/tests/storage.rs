@@ -204,7 +204,7 @@ fn active_volume_is_protected_and_module_cleanup_is_queued() {
 fn reset_refuses_a_guest_not_in_the_manifest() {
     use crate::capabilities::provision::api::Provision;
     let root = crate::tests::scratch("storage-reset-unknown");
-    let svc = crate::capabilities::provision::ProvisionService::new(
+    let svc = crate::capabilities::provision::assemble(
         &root,
         std::sync::Arc::new(
             crate::capabilities::provision::detail::fetch::HttpFetch::new(15, 7200),

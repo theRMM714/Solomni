@@ -33,7 +33,7 @@ fn builds_service(
         root.to_path_buf(),
         packages,
         crate::diagnostics::build_vm(root),
-        Arc::new(crate::capabilities::provision::ProvisionService::new(
+        Arc::new(crate::capabilities::provision::assemble(
             root,
             Arc::new(crate::capabilities::provision::detail::fetch::HttpFetch::new(15, 7200)),
         )),
@@ -304,7 +304,7 @@ fn guest_build_writes_products_back_from_the_local_workspace() {
     let guest = std::env::var("SOLOMNI_VM_GUEST").unwrap_or_else(|_| "debian-13".to_string());
     let repo = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let deps = crate::capabilities::provision::api::Provision::status(
-        &crate::capabilities::provision::ProvisionService::new(
+        &crate::capabilities::provision::assemble(
             &repo,
             Arc::new(crate::capabilities::provision::detail::fetch::HttpFetch::new(15, 7200)),
         ),

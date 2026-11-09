@@ -262,15 +262,14 @@ fn main() {
     };
     // 依赖补齐后的**自动发现**：设置里没登记时，把装到项目内的可运行包直接当登记值（显式登记优先）。
     // 只填内存、不写用户的 settings.yaml；同进程内新装的包要下次启动才生效（Web 的 setup 作业即属此列）。
-    let installed = capabilities::provision::api::Provision::status(
-        &capabilities::provision::ProvisionService::new(
+    let installed =
+        capabilities::provision::api::Provision::status(&capabilities::provision::assemble(
             &root,
             Arc::new(capabilities::provision::detail::fetch::HttpFetch::new(
                 15, 7200,
             )),
-        ),
-    )
-    .unwrap_or_default();
+        ))
+        .unwrap_or_default();
     // 清单里的 probe 是**相对产品根**的写法：这里拼成绝对路径再当登记值用（否则只在 CWD = 产品根时才成立）。
     let picked = |prefix: &str| {
         installed
@@ -558,7 +557,7 @@ fn main() {
     // 依赖补齐面先建出来：Conductor（选虚拟根要读清单）与呈现层（setup 路由）各持同一份。
     // vm 用**补齐面专用**的那份：运行期编排显式点名内部 none，不能拿会话 vm 顶替（那边只有用户档）。
     let provision: Arc<dyn capabilities::provision::api::Provision + Send + Sync> =
-        Arc::new(capabilities::provision::ProvisionService::with_vm(
+        Arc::new(capabilities::provision::assemble_with_vm(
             &root,
             Arc::new(capabilities::provision::detail::fetch::HttpFetch::new(
                 15, 7200,

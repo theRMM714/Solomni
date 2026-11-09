@@ -4,3 +4,8 @@
 //! 联动：组合根构造这些实现，经 ports 交给 service。
 
 pub mod fetch;
+pub mod guest_image;
+pub mod host;
+pub mod install;
+pub mod ledger;
+pub mod procs;

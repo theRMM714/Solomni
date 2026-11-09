@@ -111,7 +111,7 @@ pub(crate) fn link(key: &str) -> Option<String> {
 }
 
 /// 目的：按组件把清单里的相对路径落到产品根下（不用字符串拼分隔符）。
-pub(super) fn under(root: &Path, rel: &str) -> PathBuf {
+pub(crate) fn under(root: &Path, rel: &str) -> PathBuf {
     let mut out = root.to_path_buf();
     for seg in rel.split('/').filter(|s| !s.is_empty()) {
         out.push(seg);
@@ -193,4 +193,14 @@ pub(crate) fn pinned_sha256(dep: &Dep, links: &BTreeMap<String, String>) -> Opti
     links
         .get(&format!("{}.sha256", dep.source))
         .map(|v| v.trim().to_ascii_lowercase())
+}
+
+/// 目的：把两段相对路径拼起来（统一用 `/` 书写，与清单同一套写法）；空段忽略，不产生 `//`。
+pub(crate) fn join_rel(base: &str, rel: &str) -> String {
+    let mut out = base.trim_end_matches('/').to_string();
+    for seg in rel.split('/').filter(|s| !s.is_empty()) {
+        out.push('/');
+        out.push_str(seg);
+    }
+    out
 }
