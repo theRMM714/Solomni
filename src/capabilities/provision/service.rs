@@ -4,15 +4,14 @@
 //! 联动：呈现层经 api::Provision 用它；组合根构造它；下载走 kernel::detail::outbound，解包走 kernel::detail::unpack。
 
 use super::api::{DepStatus, GuestBase, JobState, Provision};
+use crate::capabilities::provision::ports::Fetcher;
 use crate::capabilities::vm::api::Vm;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 /// 清单与台账在构建期嵌进二进制：分发的二进制不依赖仓库里的文件，读到的仍是同一份真相。
 const DEPS_YAML: &str = include_str!("../../../dependencies.yaml");
@@ -419,32 +418,46 @@ pub struct ProvisionService {
     root: PathBuf,
     job: Arc<Mutex<JobState>>,
     cancel: Arc<AtomicBool>,
+    /// 下载、取文本与校验摘要的出口；组合根注入具体实现，本层不知道它是不是 HTTP。
+    fetch: Arc<dyn Fetcher>,
     /// Windows guest 的运行期编排要起 guest；组合根或 --provision 入口注入；只查状态时可为 None。
     vm: Option<Arc<dyn Vm + Send + Sync>>,
 }
 
 impl ProvisionService {
     /// 目的：以产品根建一个实现（只查状态、或只装不启动 guest 的条目用；guest-runtime 会被如实拒绝）。
-    pub fn new(root: &Path) -> ProvisionService {
+    pub fn new(root: &Path, fetch: Arc<dyn Fetcher>) -> ProvisionService {
         ProvisionService {
             root: root.to_path_buf(),
             job: Arc::new(Mutex::new(JobState::default())),
             cancel: Arc::new(AtomicBool::new(false)),
+            fetch,
             vm: None,
         }
     }
 
     /// 目的：带 vm 能力面的实现（组合根 / --provision 入口用）；guest-runtime 编排需要它。
-    pub fn with_vm(root: &Path, vm: Arc<dyn Vm + Send + Sync>) -> ProvisionService {
+    pub fn with_vm(
+        root: &Path,
+        fetch: Arc<dyn Fetcher>,
+        vm: Arc<dyn Vm + Send + Sync>,
+    ) -> ProvisionService {
         ProvisionService {
             vm: Some(vm),
-            ..ProvisionService::new(root)
+            ..ProvisionService::new(root, fetch)
         }
     }
 
     /// 目的：同步补齐（CLI 用）：逐条下载 / 解包 / 校验，进度逐行回调。
     pub fn ensure(&self, ids: &[String], on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
-        run_ensure(&self.root, ids, &self.cancel, on_line, self.vm.as_deref())
+        run_ensure(
+            &self.root,
+            ids,
+            &self.cancel,
+            on_line,
+            self.vm.as_deref(),
+            self.fetch.as_ref(),
+        )
     }
 
     /// 目的：`--ensure=<取值>` 的补齐入口：kind 组别名只补缺项（如 `toolchain`），
@@ -474,6 +487,7 @@ impl ProvisionService {
                     &self.cancel,
                     on_line,
                     self.vm.as_deref(),
+                    self.fetch.as_ref(),
                 )
             }
         }
@@ -553,10 +567,18 @@ impl Provision for ProvisionService {
         let job = Arc::clone(&self.job);
         let cancel = Arc::clone(&self.cancel);
         let vm = self.vm.clone();
+        let fetch = Arc::clone(&self.fetch);
         std::thread::spawn(move || {
             let sink = Arc::clone(&job);
             let mut on_line = move |line: &str| push_line(&sink, line);
-            let r = run_ensure(&root, &ids, &cancel, &mut on_line, vm.as_deref());
+            let r = run_ensure(
+                &root,
+                &ids,
+                &cancel,
+                &mut on_line,
+                vm.as_deref(),
+                fetch.as_ref(),
+            );
             if let Ok(mut j) = job.lock() {
                 j.running = false;
                 if let Err(e) = r {
@@ -677,11 +699,12 @@ fn run_ensure(
     cancel: &AtomicBool,
     on_line: &mut dyn FnMut(&str),
     vm: Option<&(dyn Vm + Send + Sync)>,
+    fetch: &dyn Fetcher,
 ) -> Result<(), String> {
     let all = deps()?;
     let links = links()?;
     let all = for_host(&all, std::env::consts::OS, std::env::consts::ARCH);
-    run(root, &all, &links, ids, cancel, on_line, vm)
+    run(root, &all, &links, ids, cancel, on_line, vm, fetch)
 }
 
 /// 目的：在给定的依赖清单上执行补齐（清单/台账由调用方给，便于用例注入）。
@@ -693,6 +716,7 @@ fn run(
     cancel: &AtomicBool,
     on_line: &mut dyn FnMut(&str),
     vm: Option<&(dyn Vm + Send + Sync)>,
+    fetch: &dyn Fetcher,
 ) -> Result<(), String> {
     let picked: Vec<&Dep> = if ids.is_empty() {
         all.iter().collect()
@@ -706,7 +730,6 @@ fn run(
     }
     // 显式点名 vs 全量补齐：运行期编排的失败在两种情形下处置不同（见下面 guest-runtime 分支）。
     let explicit = !ids.is_empty();
-    let agent = crate::kernel::detail::outbound::agent(15, 7200);
     let cache = root.join(".vm").join("cache");
     fs::create_dir_all(&cache).map_err(|e| format!("建缓存目录失败：{}", e))?;
     let mut ledger = read_ledger(root);
@@ -737,7 +760,7 @@ fn run(
             let pinned = pinned_sha256(dep, links);
             // 缓存按 pin 现验：旧 pin 下缓存的那份不是错误证据，而是该换一份——删掉重下一次。
             let cached_ok = cached.is_file()
-                && verify_cached(&dep.id, pinned.as_deref(), &cached, &url).is_ok();
+                && verify_cached(&dep.id, pinned.as_deref(), &cached, &url, fetch).is_ok();
             if cached_ok {
                 on_line(&format!("{}：用缓存 {}", dep.id, asset));
             } else {
@@ -748,10 +771,10 @@ fn run(
                 } else {
                     on_line(&format!("{}：下载 {}", dep.id, url));
                 }
-                download(&agent, &url, &cached, on_line)?;
+                fetch.download(&url, &cached, on_line)?;
             }
             // 完整性闸：刚下好的这份必须与 pin 一致（再不符就是台账或上游的问题，如实报错）。
-            verify_cached(&dep.id, pinned.as_deref(), &cached, &url)?;
+            verify_cached(&dep.id, pinned.as_deref(), &cached, &url, fetch)?;
         }
         let dest = under(root, &dep.install);
         fs::create_dir_all(&dest).map_err(|e| format!("建安装目录 {} 失败：{}", dep.install, e))?;
@@ -763,7 +786,7 @@ fn run(
                     .map_err(|e| format!("{}：{}", dep.id, e)),
                 "guest-disk" => install_guest_disk(&cached, &dest, &dep.probe, on_line)
                     .map_err(|e| format!("{}：{}", dep.id, e)),
-                "guest-rootfs" => install_guest_rootfs(root, dep, &cached, &agent, on_line)
+                "guest-rootfs" => install_guest_rootfs(root, dep, &cached, fetch, on_line)
                     .map_err(|e| format!("{}：{}", dep.id, e)),
                 "toolchain" => install_toolchain(&cached, &dest, dep, on_line)
                     .map_err(|e| format!("{}：{}", dep.id, e)),
@@ -818,207 +841,6 @@ fn asset_name(url: &str) -> String {
         .to_string()
 }
 
-/// 目的：把 URL 下到目标文件——选源（前缀镜像测速）后带续传下载；半截文件留作下次续传的断点。
-/// 代理：ureq 的默认配置从环境拾取（HTTPS_PROXY / HTTP_PROXY / NO_PROXY），这里不另写一套。
-fn download(
-    agent: &ureq::Agent,
-    url: &str,
-    dest: &Path,
-    on_line: &mut dyn FnMut(&str),
-) -> Result<(), String> {
-    let picked = pick_source(agent, &source_candidates(url), on_line)?;
-    download_with_resume(agent, &picked, dest, on_line)
-}
-
-/// 目的：下载候选——上游 URL 在前；配了 SOLOMNI_GH_MIRROR 时再加一条前缀镜像（只对 GitHub 资产）。
-fn source_candidates(upstream: &str) -> Vec<String> {
-    let mirror = std::env::var("SOLOMNI_GH_MIRROR").unwrap_or_default();
-    let mut out = vec![upstream.to_string()];
-    if let Some(m) = mirror_of(upstream, &mirror) {
-        out.push(m);
-    }
-    out
-}
-
-/// 目的：前缀镜像的写法——`<镜像根>/github.com/<owner>/<repo>/...`；不是 GitHub 资产或没配镜像就不加。
-fn mirror_of(upstream: &str, mirror: &str) -> Option<String> {
-    let root = mirror.trim().trim_end_matches('/');
-    let rest = upstream.strip_prefix("https://github.com/")?;
-    if root.is_empty() {
-        return None;
-    }
-    Some(format!("{}/github.com/{}", root, rest))
-}
-
-/// 目的：选源——只有一个候选就直接用（没有选择时测速是白花的时间）；多个时各探 2 MB，取最快且可达的。
-fn pick_source(
-    agent: &ureq::Agent,
-    urls: &[String],
-    on_line: &mut dyn FnMut(&str),
-) -> Result<String, String> {
-    if urls.len() <= 1 {
-        return urls
-            .first()
-            .cloned()
-            .ok_or_else(|| "没有下载源".to_string());
-    }
-    on_line(&format!("测速选源（{} 个候选，各探 2 MB）...", urls.len()));
-    let mut samples: Vec<(String, u16, f64)> = Vec::new();
-    for u in urls {
-        let (code, kbps) = probe_speed(agent, u);
-        on_line(&format!("  {:.0} KB/s  [http {}]  {}", kbps, code, u));
-        samples.push((u.clone(), code, kbps));
-    }
-    choose_fastest(&samples)
-}
-
-/// 目的：从探测结果里选源——2xx 且有数据的最快者；都不行时把状态码含义说清（不静默换源硬试）。
-fn choose_fastest(samples: &[(String, u16, f64)]) -> Result<String, String> {
-    let best = samples
-        .iter()
-        .filter(|(_, code, kbps)| (200..300).contains(code) && *kbps > 0.0)
-        .max_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
-    if let Some((url, _, _)) = best {
-        return Ok(url.clone());
-    }
-    let codes: Vec<String> = samples.iter().map(|(_, c, _)| c.to_string()).collect();
-    Err(format!(
-        "没有可用的下载源（HTTP {}）：000 = 网络层失败（配 HTTPS_PROXY，或浏览器下载后放进缓存），403 = 被限流，404 = 该源没有这个资产",
-        codes.join(" / ")
-    ))
-}
-
-/// 目的：一次 2 MB 的范围 GET，回 (状态码, KB/s)；网络层失败记 000（与 curl 的观感一致）。
-/// 约束：非 2xx 再试一次——受限网络上瞬时重置很常见，只探一次会把可达源误杀。
-fn probe_speed(agent: &ureq::Agent, url: &str) -> (u16, f64) {
-    let first = probe_speed_once(agent, url);
-    if (200..300).contains(&first.0) {
-        return first;
-    }
-    probe_speed_once(agent, url)
-}
-
-fn probe_speed_once(agent: &ureq::Agent, url: &str) -> (u16, f64) {
-    let started = Instant::now();
-    let resp = match agent.get(url).header("Range", "bytes=0-2097151").call() {
-        Ok(r) => r,
-        Err(_) => return (0, 0.0),
-    };
-    let code = resp.status().as_u16();
-    if !(200..300).contains(&code) {
-        return (code, 0.0);
-    }
-    let mut reader = resp.into_body().into_reader().take(2 * 1024 * 1024);
-    let bytes = io::copy(&mut reader, &mut io::sink()).unwrap_or(0);
-    let secs = started.elapsed().as_secs_f64().max(0.001);
-    (code, bytes as f64 / 1024.0 / secs)
-}
-
-/// 目的：分片路径（`.part`）——下载先写它再改名，半截文件不会被当成缓存。
-fn part_path(dest: &Path) -> PathBuf {
-    dest.with_extension("part")
-}
-
-/// 目的：分片的来源标记——续传必须打向产出这份分片的那条源（换源续等于把两份字节接起来）。
-fn part_source_marker(part: &Path) -> PathBuf {
-    let mut s = part.as_os_str().to_os_string();
-    s.push(".src");
-    PathBuf::from(s)
-}
-
-/// 目的：带续传的下载——`.part` 在场且来源标记与本次 URL 一致就从断点续（Range）；
-///   来源不明 / 换了源就从头下；服务端忽略 Range（回 200）时从零重写。
-/// 约束：失败时保留分片与来源标记（续传证据），成功才改名并删标记。
-fn download_with_resume(
-    agent: &ureq::Agent,
-    url: &str,
-    dest: &Path,
-    on_line: &mut dyn FnMut(&str),
-) -> Result<(), String> {
-    let part = part_path(dest);
-    let marker = part_source_marker(&part);
-    let same_source = fs::read_to_string(&marker)
-        .map(|s| s.trim() == url)
-        .unwrap_or(false);
-    let offset = if part.is_file() {
-        if same_source {
-            fs::metadata(&part).map(|m| m.len()).unwrap_or(0)
-        } else {
-            let _ = fs::remove_file(&part);
-            0
-        }
-    } else {
-        0
-    };
-    if offset == 0 {
-        let _ = fs::remove_file(&marker);
-    }
-    fs::write(&marker, url).map_err(|e| format!("写来源标记 {} 失败：{}", marker.display(), e))?;
-    let mut req = agent.get(url);
-    if offset > 0 {
-        req = req.header("Range", format!("bytes={}-", offset));
-    }
-    let resp = match req.call() {
-        Ok(r) => r,
-        Err(e) => return Err(format!("下载失败（{}）：{}（分片保留，重跑续传）", url, e)),
-    };
-    let code = resp.status().as_u16();
-    if !(200..300).contains(&code) {
-        return Err(format!(
-            "下载 {} 返回 {}（分片保留，重跑续传；要换源先删分片与来源标记 {}）",
-            url,
-            code,
-            part.display()
-        ));
-    }
-    let append = offset > 0 && code == 206;
-    let mut opts = fs::OpenOptions::new();
-    opts.create(true).write(true);
-    if append {
-        opts.append(true);
-    } else {
-        opts.truncate(true);
-    }
-    let mut f = opts
-        .open(&part)
-        .map_err(|e| format!("建 {} 失败：{}", part.display(), e))?;
-    let mut reader = resp.into_body().into_reader();
-    let mut added = 0u64;
-    let mut buf = [0u8; 64 * 1024];
-    loop {
-        let got = reader
-            .read(&mut buf)
-            .map_err(|e| format!("读下载流失败（{}）：{}", url, e))?;
-        if got == 0 {
-            break;
-        }
-        io::Write::write_all(&mut f, &buf[..got])
-            .map_err(|e| format!("写 {} 失败：{}", part.display(), e))?;
-        added += got as u64;
-    }
-    drop(f);
-    fs::rename(&part, dest).map_err(|e| format!("改名 {} 失败：{}", part.display(), e))?;
-    let _ = fs::remove_file(&marker);
-    if append {
-        on_line(&format!(
-            "续传完成：断点 {} 字节 + 新增 {} 字节",
-            offset, added
-        ));
-    } else {
-        on_line(&format!("下载完成：{} 字节", added));
-    }
-    Ok(())
-}
-
-/// 目的：一个文件的 sha256（小写十六进制）——依赖补齐的完整性判据。
-/// 约束：复用 workspace 的 `content_hash`（项目里唯一那份零依赖 SHA-256，见其模块注释：
-///   "不引入加密库（项目依赖刻意保持最小）"）。整份读进内存是一次性的补齐全动作，最多几百 MB——
-///   宁可这样，也不引第二套算法或加密库。
-pub(crate) fn sha256_file(path: &Path) -> Result<String, String> {
-    let bytes = fs::read(path).map_err(|e| format!("读不了 {}：{}", path.display(), e))?;
-    Ok(crate::capabilities::workspace::api::content_hash(&bytes))
-}
-
 /// 目的：这条依赖 pin 的 sha256——**校验值与它守护的那条连接写在同一条**：
 ///   自托管 release 资产在清单条目里（`sha256:`），链接类源在 `links.yaml` 的 `<source>.sha256`。
 /// 返回：小写十六进制；没 pin 给 None（`latest` 这种会滚动的源只能这样，如实不校验）。
@@ -1035,12 +857,18 @@ fn pinned_sha256(dep: &Dep, links: &BTreeMap<String, String>) -> Option<String> 
 /// 目的：缓存里那份文件与 pin 的 sha256 一致吗——**下载完要验，复用旧缓存也要验**。
 /// 参数：id = 依赖 id（报错点名）；pinned = pin 的校验值（None = 没 pin）；cached = 缓存文件；url = 下载源。
 /// 约束：不符时**不删缓存**——删了既丢证据、又会在 pin 过期时变成"每次重下 165 MB"的死循环，改由人看结论决定。
-fn verify_cached(id: &str, pinned: Option<&str>, cached: &Path, url: &str) -> Result<(), String> {
+fn verify_cached(
+    id: &str,
+    pinned: Option<&str>,
+    cached: &Path,
+    url: &str,
+    fetch: &dyn Fetcher,
+) -> Result<(), String> {
     let Some(want) = pinned else {
         return Ok(());
     };
     let want = want.trim().to_ascii_lowercase();
-    let got = sha256_file(cached)?;
+    let got = fetch.digest(cached)?;
     if got == want {
         return Ok(());
     }
@@ -1326,20 +1154,6 @@ fn root_partition(disk: &Path) -> Result<(u64, u64), String> {
     Ok((start, size))
 }
 
-/// 目的：取一个目录页的纯文本（列 Debian 包名用）。
-fn get_text(agent: &ureq::Agent, url: &str) -> Result<String, String> {
-    let resp = agent
-        .get(url)
-        .call()
-        .map_err(|e| format!("取 {} 失败：{}", url, e))?;
-    if !resp.status().is_success() {
-        return Err(format!("取 {} 返回 {}", url, resp.status().as_u16()));
-    }
-    let mut body = resp.into_body();
-    body.read_to_string()
-        .map_err(|e| format!("读 {} 响应失败：{}", url, e))
-}
-
 /// 目的：把版本号里的数字段零填充，得到一个可字典序比较的键（数字感知排序）。
 fn version_key(s: &str) -> String {
     let mut out = String::new();
@@ -1430,7 +1244,7 @@ fn usable_guest_abi(base: &Path) -> Option<String> {
 fn ensure_guest_kernel(
     cache: &Path,
     base: &Path,
-    agent: &ureq::Agent,
+    fetch: &dyn Fetcher,
     on_line: &mut dyn FnMut(&str),
 ) -> Result<String, String> {
     if let Some(abi) = usable_guest_abi(base) {
@@ -1438,13 +1252,13 @@ fn ensure_guest_kernel(
     }
     let url =
         link("guest.debian.linux").ok_or_else(|| "links.yaml 缺 guest.debian.linux".to_string())?;
-    let listing = get_text(agent, &url)?;
+    let listing = fetch.text(&url)?;
     let major = debian_major(base);
     let name = pick_kernel_deb(&listing, major.as_deref())
         .ok_or_else(|| "内核源里没找到 amd64 通用内核包".to_string())?;
     let deb = cache.join(&name);
     if !deb.is_file() {
-        download(agent, &format!("{}{}", url, name), &deb, on_line)?;
+        fetch.download(&format!("{}{}", url, name), &deb, on_line)?;
     }
     on_line(&format!("装入通用内核（带 9p 模块）：{}", name));
     extract_deb(&deb, base, cache)?;
@@ -1509,18 +1323,18 @@ fn pick_kernel_deb(listing: &str, major: Option<&str>) -> Option<String> {
 fn ensure_guest_qga(
     cache: &Path,
     base: &Path,
-    agent: &ureq::Agent,
+    fetch: &dyn Fetcher,
     on_line: &mut dyn FnMut(&str),
 ) -> Result<(), String> {
     if !base.join("usr").join("sbin").join("qemu-ga").is_file() {
         let url = link("guest.debian.pool")
             .ok_or_else(|| "links.yaml 缺 guest.debian.pool".to_string())?;
-        let listing = get_text(agent, &url)?;
+        let listing = fetch.text(&url)?;
         let name = pick_deb(&listing, "qemu-guest-agent_", "amd64.deb")
             .ok_or_else(|| "qemu 源里没找到 guest agent 包".to_string())?;
         let deb = cache.join(&name);
         if !deb.is_file() {
-            download(agent, &format!("{}{}", url, name), &deb, on_line)?;
+            fetch.download(&format!("{}{}", url, name), &deb, on_line)?;
         }
         on_line(&format!("装入 qemu-guest-agent：{}", name));
         extract_deb(&deb, base, cache)?;
@@ -1789,7 +1603,7 @@ fn install_guest_rootfs(
     root: &Path,
     dep: &Dep,
     image_tar: &Path,
-    agent: &ureq::Agent,
+    fetch: &dyn Fetcher,
     on_line: &mut dyn FnMut(&str),
 ) -> Result<(), String> {
     let family = family_of(dep)?;
@@ -1849,8 +1663,8 @@ fn install_guest_rootfs(
     }
     // 这时目录树与源镜像一一对应：先把"打包会丢的属性"读出来（之后会装内核 / agent，树不再对应）。
     let attrs = guest_attrs_to_restore(&rootfs, &base)?;
-    let abi = ensure_guest_kernel(&cache, &base, agent, on_line)?;
-    ensure_guest_qga(&cache, &base, agent, on_line)?;
+    let abi = ensure_guest_kernel(&cache, &base, fetch, on_line)?;
+    ensure_guest_qga(&cache, &base, fetch, on_line)?;
     sanitize_guest_base(&base)?;
     ensure_guest_initrd(&base, &abi, family, on_line)?;
     link_guest_kernel(&base, &abi)?;
@@ -2209,6 +2023,47 @@ fn purge_except(base: &Path, keep: &[&str]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capabilities::provision::detail::fetch::{
+        choose_fastest, download_with_resume, mirror_of, part_path, part_source_marker, HttpFetch,
+    };
+
+    /// 目的：测试里用一个真实取数实现（不联网的用例只用它的摘要与路径函数）。
+    fn test_fetch() -> Arc<dyn Fetcher> {
+        Arc::new(HttpFetch::new(15, 7200))
+    }
+
+    /// 目的：测试用的服务构造——端口用真实实现，免得每条用例都写一遍装配。
+    fn service(root: &Path) -> ProvisionService {
+        ProvisionService::new(root, test_fetch())
+    }
+
+    /// 目的：遮蔽被测的 run，用例不必关心端口参数（真实实现即可）。
+    fn run(
+        root: &Path,
+        all: &[Dep],
+        links: &BTreeMap<String, String>,
+        ids: &[String],
+        cancel: &AtomicBool,
+        on_line: &mut dyn FnMut(&str),
+        vm: Option<&(dyn crate::capabilities::vm::api::Vm + Send + Sync)>,
+    ) -> Result<(), String> {
+        let fetch = HttpFetch::new(15, 7200);
+        super::run(root, all, links, ids, cancel, on_line, vm, &fetch)
+    }
+
+    fn verify_cached(
+        id: &str,
+        pinned: Option<&str>,
+        cached: &Path,
+        url: &str,
+    ) -> Result<(), String> {
+        let fetch = HttpFetch::new(15, 7200);
+        super::verify_cached(id, pinned, cached, url, &fetch)
+    }
+
+    fn sha256_file(path: &Path) -> Result<String, String> {
+        crate::capabilities::provision::detail::fetch::sha256_file(path)
+    }
 
     /// 目的：造一条任意 kind 的清单条目（组别名/缺项判定的用例夹具）。
     fn dep_of(id: &str, kind: &str, install: &str, probe: &str) -> Dep {
@@ -2340,7 +2195,7 @@ mod tests {
             fs::create_dir_all(under(&root, &dep.probe)).expect("铺 probe");
             record_installed(&root, dep).expect("台账");
         }
-        let svc = ProvisionService::new(&root);
+        let svc = service(&root);
         let mut lines: Vec<String> = Vec::new();
         svc.ensure_spec("toolchain", &mut |l| lines.push(l.to_string()))
             .expect("都在场时不该碰网络");
@@ -2886,7 +2741,7 @@ mod tests {
         // 镜像那条已按当前清单装好（台账登记过），运行期那条还没装。
         let image = dep("g.img", ".vm/guest/debian/vmlinuz", "debian");
         record_installed(&root, &image).expect("台账");
-        let svc = ProvisionService::new(&root);
+        let svc = service(&root);
         // 两条条目同属一个虚拟根：都在场 = 就绪；缺一条 = 如实列出缺哪条。
         let both = svc
             .guest_bases_of(&[
@@ -2990,7 +2845,7 @@ mod tests {
     #[test]
     fn status_reads_real_filesystem() {
         let root = crate::tests::scratch("provision-status");
-        let svc = ProvisionService::new(&root);
+        let svc = service(&root);
         let items = svc.status().expect("状态");
         assert!(
             items.iter().all(|s| !s.present),
@@ -3078,7 +2933,7 @@ mod tests {
     #[test]
     fn unknown_dep_id_is_refused() {
         let root = crate::tests::scratch("provision-missing");
-        let p = ProvisionService::new(&root);
+        let p = service(&root);
         let err = p
             .ensure(&["不存在".to_string()], &mut |_| {})
             .expect_err("不存在的 id 要拒");

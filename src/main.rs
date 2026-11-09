@@ -263,7 +263,12 @@ fn main() {
     // 依赖补齐后的**自动发现**：设置里没登记时，把装到项目内的可运行包直接当登记值（显式登记优先）。
     // 只填内存、不写用户的 settings.yaml；同进程内新装的包要下次启动才生效（Web 的 setup 作业即属此列）。
     let installed = capabilities::provision::api::Provision::status(
-        &capabilities::provision::ProvisionService::new(&root),
+        &capabilities::provision::ProvisionService::new(
+            &root,
+            Arc::new(capabilities::provision::detail::fetch::HttpFetch::new(
+                15, 7200,
+            )),
+        ),
     )
     .unwrap_or_default();
     // 清单里的 probe 是**相对产品根**的写法：这里拼成绝对路径再当登记值用（否则只在 CWD = 产品根时才成立）。
@@ -552,9 +557,14 @@ fn main() {
 
     // 依赖补齐面先建出来：Conductor（选虚拟根要读清单）与呈现层（setup 路由）各持同一份。
     // vm 用**补齐面专用**的那份：运行期编排显式点名内部 none，不能拿会话 vm 顶替（那边只有用户档）。
-    let provision: Arc<dyn capabilities::provision::api::Provision + Send + Sync> = Arc::new(
-        capabilities::provision::ProvisionService::with_vm(&root, provision_vm(Arc::clone(&book))),
-    );
+    let provision: Arc<dyn capabilities::provision::api::Provision + Send + Sync> =
+        Arc::new(capabilities::provision::ProvisionService::with_vm(
+            &root,
+            Arc::new(capabilities::provision::detail::fetch::HttpFetch::new(
+                15, 7200,
+            )),
+            provision_vm(Arc::clone(&book)),
+        ));
     // **存储空间**：回收策略来自 settings；构建与呈现层共用同一份。
     // 存储的三个端口各一个适配器：盘点（只读）、回收（锁与删除）、guest 存活（进程台账）。
     let storage_service = Arc::new(capabilities::storage::service::StorageService::new(

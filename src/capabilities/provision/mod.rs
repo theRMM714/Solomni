@@ -4,7 +4,9 @@
 //! 联动：清单与台账的唯一真相在仓库根，产品里编译期内嵌；呈现层经 api 调，组合根注入实现。
 
 pub mod api;
+pub mod detail;
 mod guest;
+pub mod ports;
 mod service;
 
 pub use service::ProvisionService;

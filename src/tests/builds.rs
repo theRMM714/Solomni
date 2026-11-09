@@ -33,7 +33,10 @@ fn builds_service(
         root.to_path_buf(),
         packages,
         crate::diagnostics::build_vm(root),
-        Arc::new(crate::capabilities::provision::ProvisionService::new(root)),
+        Arc::new(crate::capabilities::provision::ProvisionService::new(
+            root,
+            Arc::new(crate::capabilities::provision::detail::fetch::HttpFetch::new(15, 7200)),
+        )),
         Arc::new(crate::capabilities::storage::api::NoStorage),
         store.clone(),
         store,
@@ -301,7 +304,10 @@ fn guest_build_writes_products_back_from_the_local_workspace() {
     let guest = std::env::var("SOLOMNI_VM_GUEST").unwrap_or_else(|_| "debian-13".to_string());
     let repo = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let deps = crate::capabilities::provision::api::Provision::status(
-        &crate::capabilities::provision::ProvisionService::new(&repo),
+        &crate::capabilities::provision::ProvisionService::new(
+            &repo,
+            Arc::new(crate::capabilities::provision::detail::fetch::HttpFetch::new(15, 7200)),
+        ),
     )
     .unwrap_or_default();
     // 引擎与虚拟根不在场就如实跳过（真机验收只在装齐的机器上跑）。
