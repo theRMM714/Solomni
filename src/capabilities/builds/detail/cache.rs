@@ -329,7 +329,7 @@ pub(crate) fn usage_script() -> String {
   b=$(du -sB1 "$d" 2>/dev/null | awk '{{print $1}}')
   t=$(cat "$d/USED" 2>/dev/null || echo 0)
   printf '%s	%s	%s
-' "$n" "[object Object]" "$t"
+' "$n" "$b" "$t"
 done"#,
         mnt = sh_quote(MOUNT),
     )
