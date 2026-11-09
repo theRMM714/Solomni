@@ -209,6 +209,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 - **纯逻辑 / 派生**（解析器、状态派生、提示词渲染）→ 所属业务的 `domain/`，**不加 trait**；
 - **纯交付**（HTTP 路由、终端渲染）→ `presentation/{cli,web}/`，**不是能力**；
 - **只服务单一调用方的脚本 / 编排** → 它自己的 `service.rs`；
+- **代理方法族（`core_proxy`）** → 留在 `conductor`，不升格：没有自有落盘真相（幂等账在内存，授予读会话 `meta.delegation`，转录与工作区分别归 `session` / `workspace`），§九.1 第 2 条也不成立——唯一调用方是 `conductor` 自己；升格还会成环，代理工具的执行面必须回到核心线程改核心状态（`ProxyBridge` → `ConductorHandle::call`），而 `conductor` 又要调它建代理会话（判据见 `src/capabilities/conductor/ports.rs` 的 `ProxyHost` 与 `src/capabilities/conductor/service/proxy.rs`）；
 - **DTO 中转站**（把两个能力的类型拼一起的适配业务）→ 新的水平层，禁止（`node run-tests.js` 的 T0 结构审查）。
 
 ### 九.5 粒度上限

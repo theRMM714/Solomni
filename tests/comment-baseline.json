@@ -89,11 +89,6 @@
     "行内：注释串后面必须是代码（不能是空行）": 5,
     "行内：连续超过 2 行": 1
   },
-  "src/capabilities/conductor/api/proxy.rs": {
-    "头块：槽外有行或自造槽": 3,
-    "头块：缺文件头": 1,
-    "行内：注释串后面必须是代码（不能是空行）": 2
-  },
   "src/capabilities/conductor/domain/proxy.rs": {
     "头块：槽外有行或自造槽": 3,
     "头块：缺文件头": 1,

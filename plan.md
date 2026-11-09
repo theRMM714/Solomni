@@ -14,7 +14,7 @@
 | S3 | `task/workspace-split` | workspace：只拆文件，不抽端口 | 已销账（证据见 §4） |
 | S4 | `task/provision-ports` | provision：六个端口 + 拆 service + 测试外迁 | 已销账（证据见 §4） |
 | S5 | `task/conductor-split` | conductor：拆 work/turn、方法族声明依赖面 | 已销账（证据见 §4） |
-| S6 | （待定） | proxy 方法族是否升格为能力（评估，可取消） | 未开始 |
+| S6 | `task/proxy-verdict` | proxy 方法族是否升格为能力（评估，可取消） | 已销账（证据见 §4） |
 
 顺序依赖：S0 提供判据与基线，S1–S5 每个 PR 只做「减基线」；S6 依赖 S5。
 
@@ -58,7 +58,7 @@
 - **S3 workspace**：2533 行拆到 service.rs 633 + service/{commit 492, sync 393, history 268, resolve 252, lifecycle 504, facade 194}，全在 800 行内；`siblingCycles` 保持为空；`[big]` 从 14 条降到 13 条（`workspace/service.rs` 退出软线，快照改为 633）；`Workspace` 的 trait impl 收进 `service/facade.rs`（Rust 不允许 impl 分块），29 个方法逐条转发；L1 仍 892 passed；`node run-tests.js` 与 `--docs` 全绿，`run-hygiene --tighten` 后 3493 处。
 - **S4 provision**：`service.rs` 3727 → 566 行、`guest.rs` 617 → 357 行，生产段全部进 800 行软线；六个端口（`provision/ports.rs`：`Fetcher` / `HostFs` / `Ledger` / `Installers` / `GuestImage` / `Procs`，适配器 `detail::{fetch,host,ledger,install,guest_image,procs}`）接住 `std::fs`、`Command`、`ureq`、`ext4` 工具链与进程台账，`service` 只留编排（`run` / `ensure` / `status` / `reset_guest` + 选择与校验的自由函数）；`serviceToDetail` 销 1 条（剩 1）、`serviceIo` 销 3 条（剩 3）、`[big]` 从 13 条降到 12 条（`provision/service.rs` 退出软线，快照改为 566）；1519 行内联测试迁 `src/tests/provision.rs`（46 条，含 4 条端口契约）；L1 896 passed；`node run-tests.js` 与 `--docs` 全绿，`run-hygiene --tighten` 通过；CI 首轮 Linux 红（16 处 E0616：`GuestAttr` 拆到 `detail/guest_image/image.rs` 后字段仍私有，`#[cfg(target_os = "linux")]` 用例本机编不到），字段提到 `pub(crate)` 后 `gh workflow run test.yml --ref task/provision-ports` 重跑 11 个 job 全绿（`6983eb6a`）。
 - **S5 conductor**：`service/work.rs` 2103 行拆成 `service/work/` 七个文件（`mod.rs` 99、`report.rs` 321、`config.rs` 475、`model.rs` 227、`host.rs` 78、`views.rs` 342、`create.rs` 617）；`turn.rs` 613 → 219，拆出 `suggest.rs` 84 与 `activation.rs` 94，协作动作并进 `flow.rs`（489 → 725）；`service/mod.rs` 935 → 786（`persist.rs` 与 `compact.rs` 移出，`service::Persister` 等既有路径用 `pub(crate) use` 保住）；六个方法族文件头的「子模块看得见父模块私有字段」改写成「本方法族只碰 a / b / c / d」；跨文件调用的 5 个私有方法提 `pub(crate)`；`[big]` 从 12 条降到 10 条（`work.rs` 与 `service/mod.rs` 退出软线，基线快照删除）；L1 仍 896 passed；`node run-tests.js` 与 `--docs` 全绿；`run-hygiene --tighten` 后 3182 处 / 143 个文件（搬运用例的 88 个文档块顺带改写成「目的 / 约束」槽格式）；`gh workflow run test.yml --ref task/conductor-split` 的 11 个 job 全绿（run 42648603941，含三平台质量与单元、三平台端到端、验收闸门）。
-- **S6**：按 D5 判据给 proxy 方法族出结论（升格 / 不升格 + 理由），结论写进 ARCHITECTURE，不升格也要留理由。
+- **S6 proxy 结论**：**不升格**，留在 `conductor` 的方法族里。三条理由：①没有自有落盘真相——幂等账是 `ProxyTools.done`（内存 `BTreeMap`），授予读 `history_open(sid)?.0.delegation`，转录与工作区分别归 `session` / `workspace`；②§九.1 第 2 条不成立——全仓除 `conductor` 自身，只有 `src/tests/` 引 `domain::proxy` / `ProxyHost` / `is_proxy_tool`；③升格会成环——代理工具的执行面必须回到核心线程改核心状态（`ProxyBridge` → `ConductorHandle::call`），而 `conductor` 又要调它建代理会话（`service/proxy.rs` 的 `create_proxy_with_facts`）。结论写进 `ARCHITECTURE.md` §九.4 的反例清单（带三个路径锚点）；顺带修掉同名歧义：`src/capabilities/conductor/api/proxy.rs`（队列代理，与 `core_proxy` 无关）改为 `api/contract_impls.rs`，文件头补成四槽、两处「注释后空行」并掉，`comment-baseline` 收紧到 3176 处 / 142 个文件；本阶段不动逻辑代码；`service/proxy.rs` 839 行仍在软线以上，不拆（它只超 39 行，且工具执行面 / 核心线程桥 / 成员侧 handler 分属两个线程，拆是独立阶段）；`node run-tests.js --docs` 绿；`gh workflow run test.yml --ref task/proxy-verdict` 的 12 个 job 全绿（run 42655787434：三平台质量与单元、三平台端到端、结构 / 文档 / 工作流静态检查、变更分流、验收闸门、ci-report）。
 
 ## 5. 不做清单
 

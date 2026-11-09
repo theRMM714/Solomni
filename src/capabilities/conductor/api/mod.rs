@@ -372,8 +372,8 @@ pub(crate) struct AskReq {
     turn_id: u64,
 }
 mod action;
+mod contract_impls;
 mod handle;
-mod proxy;
 
 /// 目的：入站能力面：**各能力自己的契约**+ 核心自己的两个 + 事件台。
 /// 克隆廉价；呈现层只依赖它需要的字段，契约测试可以用假实现替换任意一个字段。

@@ -16,7 +16,7 @@
 | `src/capabilities/conductor/api/mod.rs` | 入站契约：`SessionOps` / `ConductorOps` / `ActionOps` / `LogOps`、`Ops` 组装面与事件台（`EventBus`） |
 | `src/capabilities/conductor/api/action.rs` | 动作分发：参数校验 → 按 `callers` 授权 → 执行 → 审计（各只有一处） |
 | `src/capabilities/conductor/api/handle.rs` | 核心手柄：自持线程 + 命令队列 + 事件台；`stop` 不进队列 |
-| `src/capabilities/conductor/api/proxy.rs` | 队列代理：把各能力的入站契约挂到核心手柄上（呈现层因此只持 `Ops`） |
+| `src/capabilities/conductor/api/contract_impls.rs` | 各能力入站契约的队列代理：每个方法克隆入参 → 进命令队列 → 取回结果（呈现层因此只持 `Ops`，拿不到 `Conductor`） |
 | `src/capabilities/conductor/service/mod.rs` | 会话中心：会话在世表、命令队列、运行态与派发闸（`dispatch_gate`） |
 | `src/capabilities/conductor/service/action.rs` | 动作的核心实现：把规整后的建会话载荷变成一条会话 |
 | `src/capabilities/conductor/service/work/mod.rs` | 工作方法族入口：建工作的两段结果、改配准备结果、模块声明的能力表、运行包重建判据 |
