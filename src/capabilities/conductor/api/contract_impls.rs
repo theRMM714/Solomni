@@ -1,6 +1,7 @@
-//! **队列代理**：把各能力的入站契约挂在核心手柄上——呈现层因此只持 `Ops`，拿不到 `Conductor`。
-//!
-//! 每个方法都是「克隆要用的东西 → 进队列执行 → 取回结果」，不做业务判断（判断在 `service/`）。
+//! 目的：各能力入站契约在核心手柄上的实现——呈现层因此只持 `Ops`，拿不到 `Conductor`。
+//! 管：每个契约方法「克隆入参 → 进命令队列执行 → 取回结果」，转发给核心线程的 `Conductor`。
+//! 不管：业务判断（在 `service/`）；契约定义（在 `api/mod.rs` 与各能力的 `api.rs`）。
+//! 联动：`Ops::from_handle` 按角色把这些实现装箱；核心线程与事件台由 `api/handle.rs` 持有。
 
 use super::*;
 use crate::capabilities::llm::api::{ProbeOutcome, ToolMode};
@@ -382,8 +383,7 @@ impl RegistryOps for ConductorHandle {
     }
 }
 
-// ---------- 归各能力自己的入站契约（本文件只实现队列代理） ----------
-
+// ---------- 归各能力自己的入站契约（本文件只实现队列转发） ----------
 impl crate::capabilities::session::api::HistoryOps for ConductorHandle {
     fn list(&self) -> Result<Vec<HistoryView>, String> {
         self.call(|core| Ok(core.history_list()))
@@ -439,7 +439,6 @@ impl ConductorOps for ConductorHandle {
 }
 
 // ---------- 日志能力 ----------
-
 impl LogOps for ConductorHandle {
     fn info(&self, at: &str, msg: &str) {
         self.log.info(at, msg)
