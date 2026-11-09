@@ -203,7 +203,7 @@ fn delete(
     for p in plans {
         match io.delete(&p.path, recursive) {
             Ok(()) => {
-                // 自动提交要按路径发 deletes；递归删目录暂不逐文件展开（见 plan.md 的 2B′）。
+                // 自动提交要按路径发 deletes；递归删目录暂不逐文件展开。
                 if !p.is_dir {
                     obs.note_removed(&p.path);
                 }

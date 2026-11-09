@@ -1,7 +1,7 @@
 # kernel（机制型业务）
 
 > 定位：没有领域语义的机制；依赖图最底层。
-> 效力：规范｜核对：2026-11-04｜依据：`src/kernel/api.rs`
+> 效力：规范｜核对：2026-11-09｜依据：`src/kernel/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -64,6 +64,7 @@
   - **围栏里失败的统一说明**：工具在围栏里非零退出时，守门进程补一条**不分语言**的话（可达范围 + 范围外被围栏拒绝）；成功不打扰。
 - 平台：只有 Windows 有「外层授权写 ACL」这一步；Linux 的 Landlock 与 macOS 的 seatbelt 在守门进程里自足，那里没有 `prepare_fence`（不是存在但空转）。三个平台各自的强制项与降级条件见「二、工具进程与守门协议」。
 - **启动对账只回收归属明确已死的条目**：`reconcile` 走台账、**不调用** `sweep_orphan_aces` / `sweep_profiles`（那两条无归属、会误伤在跑实例）；孤儿清扫只在用户手动的 `--fence-clean`。台账之外的本程序 profile 会以「只报告、不自动删」列出来（没有归属证明，删了会误伤在跑实例），处置入口同样是 `--fence-clean`。
+- **台账写事务串行**：每条授权 / profile 带**归属**（pid + 进程创建时刻 + 会话租约），台账落在 `.home/fence-grants.json`；写事务用**进程内互斥 + 跨进程文件锁**，两个进程不会同时改同一份台账。
 - **身份按 reach、生命周期按会话**：Windows 的容器身份 = `会话租约 + agent + 受保护根集合（reach 指纹，不含工具链、不含 net）`——同一会话里不同 scope 的调用根集合不同 → 不同 SID（窄调用看不到宽调用的根），同一 reach 的后续调用复用 SID 与 ACL。授权由会话持有：调用结束**不**释放，会话改配 / 删除时由 `release_by_lease` 按会话租约撤 ACE、删 profile；崩溃残留由 `reconcile` 按死归属回收。一次性调用（构建 / 独立模块工具）没有会话，各自唯一租约，跑完走 `release_call`（含 `private/Packages/<名字>` 临时目录）。
 
 ## 二、工具进程与守门协议
@@ -128,6 +129,13 @@
   - QEMU 引擎、SMB helper、virtiofsd 在起进程处走 `guard` → `spawn` → `attach`，并在 `ProcessBook` 里 `record`（带 `created` / `guard_note`）；销毁时 `forget`。
   - 常驻服务的守门进程（`src/kernel/detail/session.rs` 的 `ProcessSessions::open`）同样走 `guard` → `spawn` → `attach`，并登记进同一份账本（`purpose = resident`）：会话收掉时注销，核心被强杀留下的孤儿由启动对账按身份收掉。
   - 观测：`--doctor` 的 `processes` 与 `GET /api/processes` 读同一份账本，每条带 `orphanRisk` / `guardNote`；覆盖 QEMU、共享 helper 与常驻服务守门进程。
+
+## 四、运行日志（`Log` 端口）
+
+- `src/kernel/ports.rs` 定义 `Log`（`info` / `warn` / `error`），业务只**调用**；文件、时间戳与目录机制在 `src/kernel/detail/file_log.rs`。
+- **唯一实例**：组合根创建一个 `FileLog` 并注入协调业务与呈现层；测试用 `NoopLog`。
+- **按运行分文件**：每次运行在根目录 `logs/` 下按时间戳建一个 `.log` 文件；`logs/` 不入库。一次运行的因果链在同一份文件里，排查不跨文件拼。
+- **关键节点必须埋点**：通道降级、HTTP 失败、会话动作失败、装配失败、工具执行异常（端口在 `src/kernel/ports.rs`，机制在 `src/kernel/detail/file_log.rs`）。出问题时**看日志定因**，不靠推理猜。
 
 ## 改动本单元时必须同步
 
