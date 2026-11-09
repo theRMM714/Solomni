@@ -7,10 +7,10 @@ use super::*;
 /// 目的：一条"打包会丢的属性"——镜像内绝对路径 + 完整 mode（含类型位）+ uid / gid。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct GuestAttr {
-    path: String,
-    mode: u32,
-    uid: u32,
-    gid: u32,
+    pub(crate) path: String,
+    pub(crate) mode: u32,
+    pub(crate) uid: u32,
+    pub(crate) gid: u32,
 }
 
 /// 目的：把源 rootfs 分区解成目录树（debugfs rdump）。
