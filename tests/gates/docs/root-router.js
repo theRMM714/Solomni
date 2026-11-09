@@ -1,6 +1,6 @@
 /**
  * 文档审查·根文档路由：根目录每个 .md 都必须进 AGENTS.md 的文档路由表（新增根文档不能只落在盘上）。
- * 白名单只有 AGENTS.md 自己（路由表不列它）；临时工作清单按需要在白名单里加并写明理由。
+ * 白名单只有 AGENTS.md 自己（路由表不列它）。
  */
 "use strict";
 const fs = require("fs");
@@ -9,8 +9,7 @@ const BT = String.fromCharCode(96);
 
 function rootRouter(root) {
   const problems = [];
-  // plan.md：上下文版本化施工计划，三个 PR 合并后删除（见 plan.md 收尾清单）。
-  const rootDocAllow = ["AGENTS.md", "plan.md"];
+  const rootDocAllow = ["AGENTS.md"];
   const agentsDoc = path.join(root, "AGENTS.md");
   if (!fs.existsSync(agentsDoc)) return problems;
   const agentsText = fs.readFileSync(agentsDoc, "utf8");
