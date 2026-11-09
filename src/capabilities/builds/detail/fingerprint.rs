@@ -1,9 +1,10 @@
 //! 目的：构建缓存的机制——源指纹与 `.vm/build-state/<模块>.json` 的读写。
-//! 管：算源指纹（构建命令 + 能力 + 网络 + 全部源文件）、读/写构建状态。
+//! 管：算源指纹（构建命令 + 能力 + 网络 + 全部源文件）、读/写构建状态、本机档按次家目录（`BuildStore`）。
 //! 不管：什么时候该重编（在 `service.rs`，按入口在场与目标比对）。
-//! 联动：落点与字段见 MODULE_SPEC 的「构建·缓存」。
+//! 联动：端口见 `ports.rs`；落点与字段见 MODULE_SPEC 的「构建·缓存」。
 
-use crate::capabilities::modules::api::BuildDecl;
+use crate::capabilities::builds::ports::{BuildHome, BuildStates, BuiltRecord, SourceDigest};
+use crate::capabilities::modules::api::{BuildDecl, Module};
 use std::path::{Path, PathBuf};
 
 /// 目的：构建状态的落点（`.vm/build-state/<模块>.json`）——本机档与各虚拟根共用一份，靠 `target` 区分。
@@ -68,6 +69,58 @@ pub(crate) fn source(
     buf.push(0);
     collect_sources(module_root, module_root, &mut buf)?;
     Ok(crate::capabilities::workspace::api::content_hash(&buf))
+}
+
+/// 目的：端口 `SourceDigest` 与 `BuildStates` 的落盘实现——状态文件与按次家目录都在产品根的 `.vm/build-state/` 下。
+/// 约束：由组合根构造并交给 `BuildsService`（端口只有一个持有者，R12）。
+pub(crate) struct BuildStore {
+    root: PathBuf,
+}
+
+impl BuildStore {
+    /// 目的：按产品根建适配器。
+    /// 参数：`root` = 产品根。
+    pub(crate) fn new(root: PathBuf) -> BuildStore {
+        BuildStore { root }
+    }
+}
+
+impl SourceDigest for BuildStore {
+    fn digest(
+        &self,
+        module: &Module,
+        decl: &BuildDecl,
+        providers: &[String],
+    ) -> Result<String, String> {
+        source(&module.root, decl, providers)
+    }
+}
+
+impl BuildStates for BuildStore {
+    fn record(&self, id: &str) -> Option<BuiltRecord> {
+        read_state(&state_path(&self.root, id)).map(|prev| BuiltRecord {
+            target: prev.target,
+            fingerprint: prev.fingerprint,
+        })
+    }
+
+    fn record_built(&self, id: &str, record: &BuiltRecord) -> Result<(), String> {
+        write_state(
+            &state_path(&self.root, id),
+            &BuildState {
+                module: id.to_string(),
+                target: record.target.clone(),
+                fingerprint: record.fingerprint.clone(),
+            },
+        )
+    }
+
+    fn prepare_home(&self, id: &str) -> Result<BuildHome, String> {
+        let state = self.root.join(".vm").join("build-state").join(id);
+        let home = state.join("home");
+        std::fs::create_dir_all(&home).map_err(|e| format!("建状态目录失败：{}", e))?;
+        Ok(BuildHome { state, home })
+    }
 }
 
 /// 目的：把模块根下的源文件按相对路径 + 内容收进指纹缓冲。
