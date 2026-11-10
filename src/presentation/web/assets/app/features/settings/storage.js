@@ -20,8 +20,8 @@ function buildStoragePage(c, f) {
   c.body.appendChild(f.stVolume.wrap);
   c.body.appendChild(f.stFree.wrap);
   c.body.appendChild(f.stLog.wrap);
-  c.body.appendChild(app.cfgHint('上限只约束可回收缓存（构建缓存 / 下载缓存 / 过期可写层 / 日志），不约束会话、虚拟根与模块产物。到上限先回收一次，不拒绝构建；全局回收默认且至少 15 分钟一次，关闭自动回收后只剩手动。', 'warn'));
-  c.body.appendChild(app.cfgHint('还原虚拟根会删除 guest 内未落宿主的数据，并用清单重建；不备份、不可撤销。', 'err'));
+  c.body.appendChild(ui.hint('上限只约束可回收缓存（构建缓存 / 下载缓存 / 过期可写层 / 日志），不约束会话、虚拟根与模块产物。到上限先回收一次，不拒绝构建；全局回收默认且至少 15 分钟一次，关闭自动回收后只剩手动。', 'warn'));
+  c.body.appendChild(ui.hint('还原虚拟根会删除 guest 内未落宿主的数据，并用清单重建；不备份、不可撤销。', 'err'));
   const box = doc.createElement('div');
   box.className = 'storage-report';
   box.textContent = '读取中…';

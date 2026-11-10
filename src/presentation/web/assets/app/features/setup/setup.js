@@ -38,12 +38,12 @@ function openSetupModal(onDone) {
     async function load() {
       box.innerHTML = '';
       log.textContent = '';
-      box.appendChild(app.cfgHint('正在读本机的依赖状态…'));
+      box.appendChild(ui.hint('正在读本机的依赖状态…'));
       let st = null;
       try { st = await api('GET', '/api/setup/status'); }
       catch (e) {
         box.innerHTML = '';
-        box.appendChild(app.cfgHint('读不到依赖状态：' + e.message, 'err'));
+        box.appendChild(ui.hint('读不到依赖状态：' + e.message, 'err'));
         return;
       }
       box.innerHTML = '';
@@ -52,19 +52,19 @@ function openSetupModal(onDone) {
       if (job.running) { watch(st); return; }
       const pending = Array.isArray(st.pending) ? st.pending : null;
       if (!pending) {
-        box.appendChild(app.cfgHint('这个进程没有给出要补哪些条目（界面与核心版本不一致）：重启应用后再试。', 'err'));
+        box.appendChild(ui.hint('这个进程没有给出要补哪些条目（界面与核心版本不一致）：重启应用后再试。', 'err'));
         const close = btn('关闭', 'btn btn-block'); close.onclick = finish;
         box.appendChild(close);
         return;
       }
       if (!pending.length) {
-        box.appendChild(app.cfgHint('依赖都已在场：不需要补齐。', 'ok'));
+        box.appendChild(ui.hint('依赖都已在场：不需要补齐。', 'ok'));
         const close = btn('关闭', 'btn btn-block'); close.onclick = finish;
         box.appendChild(close);
         return;
       }
       const deps = (st.deps || []).filter((d) => pending.indexOf(d.id) >= 0);
-      box.appendChild(app.cfgDiv('cfg-sec-title', '要装 ' + deps.length + ' 条（只写项目内，不动系统）'));
+      box.appendChild(ui.div('cfg-sec-title', '要装 ' + deps.length + ' 条（只写项目内，不动系统）'));
       let total = 0;
       for (const d of deps) {
         total += d.size_mb || 0;
@@ -74,7 +74,7 @@ function openSetupModal(onDone) {
         box.appendChild(line);
         if (d.url) { const u = doc.createElement('div'); u.className = 'cfg-dir'; u.textContent = d.url; box.appendChild(u); }
       }
-      box.appendChild(app.cfgHint('合计约 ' + total + ' MB：从网络下载后解包进项目内的 .vm/。'));
+      box.appendChild(ui.hint('合计约 ' + total + ' MB：从网络下载后解包进项目内的 .vm/。'));
       const go = btn('开始下载安装', 'btn btn-primary btn-block');
       go.onclick = () => start(pending, go);
       box.appendChild(go);
@@ -95,8 +95,8 @@ function openSetupModal(onDone) {
     function watch(st) {
       box.innerHTML = '';
       log.textContent = '';
-      box.appendChild(app.cfgDiv('cfg-sec-title', '正在补齐（只写项目内）'));
-      const step = app.cfgHint('等待第一条进度…');
+      box.appendChild(ui.div('cfg-sec-title', '正在补齐（只写项目内）'));
+      const step = ui.hint('等待第一条进度…');
       box.appendChild(step);
       const cancel = btn('取消作业', 'btn btn-block');
       cancel.onclick = async () => {

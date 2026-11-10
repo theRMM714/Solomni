@@ -6,6 +6,9 @@
 
 import { installBridge } from './bridge.js';
 import * as format from './core/format.js';
+import * as stateStore from './stores/state.js';
+import { mount as mountSessions } from './stores/sessions.js';
+import { mount as mountSettings } from './stores/settings.js';
 import { mount as mountSettingsPages } from './features/settings/pages.js';
 import { mount as mountSettingsRuntime } from './features/settings/runtime.js';
 import { mount as mountSettingsStorage } from './features/settings/storage.js';
@@ -14,12 +17,46 @@ import { mount as mountAgents } from './features/agents/agents.js';
 import { mount as mountFiles } from './features/files/files.js';
 import { mount as mountSetup } from './features/setup/setup.js';
 import { mount as mountModules } from './features/modules/modules.js';
+import { mount as mountSidebar } from './features/sidebar/sidebar.js';
+import { mount as mountWizard } from './features/wizard/wizard.js';
+import { mount as mountSessionConfig } from './features/session-config/session-config.js';
+import { mount as mountTabs } from './features/tabs/tabs.js';
+import { mount as mountStatusBar } from './features/status-bar/status-bar.js';
+import { mount as mountComposer } from './features/composer/composer.js';
 
 /* 迁移期：这些入口仍在经典脚本 app.js 里（阶段 5–7 陆续迁走），功能经 app.* 晚绑定调用。 */
 const APP_GLOBALS = [
-  "openModal", "openModalLayer", "closeModal", "notice", "confirmBox", "refreshState",
-  "modelOptions", "oneLine", "thinkingLevels", "actionUrl", "activeSession", "loadWork",
-  "cfgDiv", "cfgHint", "closeDrawer", "setupSidebar", "openWizard", "pollLoop", "onRegistryChange",
+  "absorb",
+  "absorbEvents",
+  "act",
+  "actionUrl",
+  "buildRootList",
+  "closeModal",
+  "compactNow",
+  "confirmBox",
+  "ctxChipClass",
+  "eventError",
+  "loadWork",
+  "modelOptions",
+  "notice",
+  "openContextCard",
+  "openModal",
+  "openModalLayer",
+  "openShellCard",
+  "openToolsMenu",
+  "openWorkCard",
+  "paintShellCard",
+  "refreshState",
+  "renderAll",
+  "renderGate",
+  "renderReadonly",
+  "renderStream",
+  "shellAbnormal",
+  "shellRunning",
+  "shellSecs",
+  "shortPathRoots",
+  "statusPrintOf",
+  "takeInput",
 ];
 
 /* 迁移期：已迁入口按原名挂到全局，供尚未改成按模块 import 的旧冒烟调用（阶段 7 删）。 */
@@ -30,12 +67,22 @@ const MIGRATED = [
   "collectSettings", "saveSettings", "SETTINGS_PAGES", "choiceModal",
   "buildGeneratePage", "buildSandboxPage", "buildPermissionsPage", "buildResourcesPage",
   "buildStoragePage", "renderStorage", "cleanStorage", "resetGuest",
+  "oneLine", "escHtml", "fmtInt", "ctxPercent", "fmtDuration", "timeAgo", "fmtDateTime",
+  "activeSession", "snapshotRunning", "isBusy", "generating", "historyByParent", "activePath",
+  "sessionParent", "knownChildren",
+  "DEFAULT_THINKING_LEVELS", "thinkingLevels", "thinkingLabel", "PERMISSION_ORDER", "PERMISSION_LABELS",
   "openSettingsModal", "openSettingsHub", "openAgentsModal", "agentsPage",
   "moduleById", "moduleMatches", "moduleChips", "openModulePicker", "cloneAgent", "agentPreview",
   "agentForm", "openAgentEditor", "openTempAgentSheet", "openRegistryAgentPicker", "agentCard",
   "filesCache", "pickUploadFile", "suggestAltName", "sendUpload", "conflictUpload", "renameUpload",
   "setupAction", "openSetupModal", "diagnosisText",
   "modulesPage", "openModulesPanel", "renderModulesPanel", "useRow", "openUseCard", "fire", "panelSection", "actionRunner",
+  "historyMenu", "renderHistory", "warnIfTierUnavailable", "hydrateHistory", "openHistory", "deleteHistory", "renderSidebar", "RAIL_KEY", "isNarrow", "readRail", "saveRail", "applyRail", "openDrawer", "closeDrawer", "toggleSidebar", "setupSidebar",
+  "openWizard", "startSession", "setActive", "applyPathRoots", "loadPathRoots",
+  "openConfig", "loadConfig", "buildConfigForm", "cfgAgentBlock", "cfgRuntimeBlock", "guestPicker",
+  "tabLabel", "tabBusy", "tabPending", "tabPendingDeep", "closeView", "openPath", "renderTabs",
+  "openPermissionMenu", "openThinkingMenu", "switchThinking", "switchPermission", "syncStatusbar",
+  "atState", "COMMANDS", "atMenuEl", "atToken", "atClose", "atHint", "atLoad", "atFetch", "AT_QUOTE_CHARS", "AT_QUOTE_RE", "atQuotePath", "atItems", "atRender", "atOpen", "atInsert", "atKey", "cmdSync", "atOnInput", "autoGrow", "stopGeneration", "onSend", "syncComposer", "syncSendButton",
 ];
 
 /** 装配一次：装桥、挂功能、补转发；浏览器与冒烟沙箱走同一条路径。 */
@@ -43,8 +90,10 @@ export function boot(g) {
   const core = installBridge(g);
   const app = {};
   core.app = app;
-  const deps = { g, doc: g.document, state: core.state, api: core.api, ui: g.ui, app };
+  const deps = { g, doc: g.document, state: core.state, stores: stateStore, api: core.api, ui: g.ui, app };
   Object.assign(app, format);
+  mountSessions(app, deps);
+  mountSettings(app, deps);
   mountSettingsPages(app, deps);
   mountSettingsRuntime(app, deps);
   mountSettingsStorage(app, deps);
@@ -53,6 +102,12 @@ export function boot(g) {
   mountFiles(app, deps);
   mountSetup(app, deps);
   mountModules(app, deps);
+  mountSidebar(app, deps);
+  mountWizard(app, deps);
+  mountSessionConfig(app, deps);
+  mountTabs(app, deps);
+  mountStatusBar(app, deps);
+  mountComposer(app, deps);
   for (const name of APP_GLOBALS) app[name] = (...args) => g[name](...args);
   for (const name of MIGRATED) g[name] = app[name];
   return app;

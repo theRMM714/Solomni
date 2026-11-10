@@ -194,6 +194,11 @@ const rd = ui.radio("虚拟机档", false, "tier", true);
 check("单选", rd.box.type === "radio" && rd.box.name === "tier" && rd.box.checked === false && rd.box.disabled === true);
 const eh = ui.emptyHint("还没有模型");
 check("空态提示", eh.className === "reg-empty" && eh.textContent === "还没有模型");
+const dv = ui.div("cfg-sec-title", "服务");
+check("说明块", dv.className === "cfg-sec-title" && dv.textContent === "服务" && dv.children.length === 0);
+const nt = ui.hint("读了后端字段", "warn");
+check("旁注带状态类", nt.className === "cfg-hint warn" && nt.textContent === "读了后端字段");
+check("旁注无状态类", ui.hint("纯说明").className === "cfg-hint");
 
 // h()：保留键各归其位，其余直接赋属性，空子节点跳过。
 let hClicked = 0;

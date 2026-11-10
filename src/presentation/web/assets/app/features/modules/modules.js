@@ -61,7 +61,7 @@ function renderModulesPanel(ctx, mods, services, actions, reload) {
     sec.appendChild(head);
 
     // 服务：模块声明的常驻服务（声明在 modules[].services，运行态在 services）。
-    sec.appendChild(app.cfgDiv('cfg-sec-title', '服务'));
+    sec.appendChild(ui.div('cfg-sec-title', '服务'));
     const declared = m.services || [];
     if (!declared.length) {
       sec.appendChild(emptyHint('（没有声明常驻服务）'));
@@ -84,7 +84,7 @@ function renderModulesPanel(ctx, mods, services, actions, reload) {
     }
 
     // 功能：本模块的工具与服务操作（每个一行；参数与运行在子卡片里）。
-    sec.appendChild(app.cfgDiv('cfg-sec-title', '功能'));
+    sec.appendChild(ui.div('cfg-sec-title', '功能'));
     const acts = actions.filter((a) => a.id.indexOf('module.' + m.id + '.') === 0);
     if (!acts.length) {
       sec.appendChild(emptyHint('（只能经 AI 使用：没有可直跑的 tools / services）'));

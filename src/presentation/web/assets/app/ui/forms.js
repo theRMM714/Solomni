@@ -76,10 +76,22 @@ export function createForms(dom) {
     return r;
   }
 
+  /// 说明块：面板里的段落容器，cls 决定是分区标题、提示行还是错误提示。
+  function div(cls, text) {
+    const d = doc.createElement('div'); d.className = cls;
+    if (text != null) d.textContent = text;
+    return d;
+  }
+
+  /// 旁注 / 提示：kind 是 err / warn / ok 时带对应配色（样式类 .cfg-hint）。
+  function hint(text, kind) {
+    return div('cfg-hint' + (kind ? ' ' + kind : ''), text);
+  }
+
   function emptyHint(text) {
     const e = doc.createElement('div'); e.className = 'reg-empty'; e.textContent = text;
     return e;
   }
 
-  return { textInput, field, numberInput, areaInput, selectInput, syncSelect, checkbox, radio, emptyHint };
+  return { div, hint, textInput, field, numberInput, areaInput, selectInput, syncSelect, checkbox, radio, emptyHint };
 }
