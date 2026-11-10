@@ -25,7 +25,7 @@ check(opened[0].continue_action && opened[0].continue_action.id === "c", "上下
 check(opened[0].running === true && opened[0].running_known === false, "新条目按快照对账运行态");
 check(s.snapshotRunning(st, "w3") === true, "子会话在跑也算父会话在跑");
 check(s.snapshotRunning(st, "w2") === false && s.snapshotRunning(st, "") === false, "未在跑 / 空 sid");
-check(st.settings.streaming === true && st.settings.compact_keep_percent === undefined, "缺 settings 时退回默认值");
+check(st.settings.streaming === true && st.settings.compact_keep_percent === 15 && st.settings.compact_model === "", "缺 settings 时退回默认值（含压缩保留与总结模型）");
 check(s.projectSnapshot(st, snap).length === 0, "已建的条目不重复建");
 
 const w1 = st.sessions.get("w1");

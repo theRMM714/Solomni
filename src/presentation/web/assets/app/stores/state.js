@@ -6,13 +6,16 @@
  * 联动：会话表与运行态规则见 `docs/presentation/contracts.md` 的「顺序与去重」与
  *   `docs/session/session-model.md`；`app/main.js` 把它交给界面层。 */
 
-const DEFAULT_SETTINGS = { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70 };
+const DEFAULT_SETTINGS = {
+  streaming: true, show_reasoning: true, llm_timeout_secs: 300,
+  discuss_remind_cap: 3, compact_at_percent: 70, compact_keep_percent: 15, compact_model: '',
+};
 
 export function createState() {
   return {
     modules: [], providers: [], models: [], core: null, rejected: [], agents: [],
     history: [],
-    settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70, compact_keep_percent: 15, compact_model: '' },
+    settings: { ...DEFAULT_SETTINGS },
     fence: null,
     toolchains: null,
     sessions: new Map(),
