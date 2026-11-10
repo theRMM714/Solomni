@@ -1,7 +1,7 @@
 /* 目的：零依赖截图与自检工具：把真实 index.html + 合成 fixture 喂给 headless Edge，按视图与宽度出图。
  * 管：静态服务与 fetch/时钟注入、CDP 驱动、截图、--audit 的对比度/溢出/焦点/动效复算。
  * 不管：视觉决策与 fixture 内容（见 fixtures.js）；不启动产品二进制、不读写 .home。
- * 用法：node tests/screenshots/shots.cjs [--audit] [--after] [--only=chat,gate] [--widths=375,768,1280]
+ * 用法：node tests/screenshots/shots.cjs [--audit] [--after|--tag=名字] [--only=chat,gate] [--widths=375,768,1280]
  * 输出：.shots/before|after/<view>-<width>.png + .shots/<mode>-audit.json
  */
 "use strict";
@@ -18,7 +18,8 @@ const ASSETS = path.join(ROOT, "src", "presentation", "web", "assets");
 const ARGS = process.argv.slice(2);
 const AFTER = ARGS.includes("--after");
 const AUDIT = ARGS.includes("--audit");
-const MODE = AFTER ? "after" : "before";
+const TAG = (ARGS.find((a) => a.startsWith("--tag=")) || "").slice(6) || (AFTER ? "after" : "before");
+const MODE = TAG;
 const OUT = path.join(ROOT, ".shots", MODE);
 const ONLY = (ARGS.find((a) => a.startsWith("--only=")) || "").slice(7).split(",").filter(Boolean);
 const WIDTHS = ((ARGS.find((a) => a.startsWith("--widths=")) || "").slice(9) || "375,768,1280")
@@ -276,6 +277,7 @@ const AUDIT_FN = function () {
     samples.push({
       sel: sel, size: fs, need: large ? 3 : 4.5,
       ratio: Math.round(ratio(fg, bgOf(el)) * 100) / 100,
+      color: cs.color, bg: "rgb(" + bgOf(el).r + ", " + bgOf(el).g + ", " + bgOf(el).b + ")",
     });
   }
   const first = document.querySelector("button:not([disabled]), [href], input, textarea, select, summary");

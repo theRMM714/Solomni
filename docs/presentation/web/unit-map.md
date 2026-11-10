@@ -15,7 +15,7 @@
 | `build.rs` | 编译期扫描 `src/presentation/web/assets/` 生成嵌入表：按扩展名定 MIME，跳过 `.cjs` / `.mjs` 开发脚本与 `package.json`，未知扩展名让构建失败 |
 | `src/presentation/web/assets/` | 浏览器端资源（`index.html` 只放挂载点、`tokens.css` / `ui.css` / `style.css`、`md.js`，经 `/assets/{*path}` 提供）与冒烟脚本（`*.smoke.cjs` / `*.smoke.mjs`，`smoke.cjs` 递归发现） |
 | `src/presentation/web/assets/app/` | 浏览器端 ES Module 的唯一入口 `main.js`（装配点：建共享上下文、按顺序 `mount`、启动接线）；`package.json` 只给 node 声明模块类型 |
-| `src/presentation/web/assets/app/core/` | 不依赖其它层的原语：`http.js` HTTP 封装、`events.js` 长轮询传输、`dom.js` 的 DOM 原语与 `h()`、`format.js` 纯格式化函数 |
+| `src/presentation/web/assets/app/core/` | 不依赖其它层的原语：`http.js` HTTP 封装、`events.js` 长轮询传输、`dom.js` 的 DOM 原语、`format.js` 纯格式化函数 |
 | `src/presentation/web/assets/app/stores/` | API 回包与事件的投影（只由回包与事件写入）：`state.js` 快照、`sessions.js` 会话读法、`settings.js` 思考档位与权限文案 |
 | `src/presentation/web/assets/app/ui/` | 组件库（只收参数、发回调，只依赖 `core/`）：`index.js` 组装，`icons` / `buttons` / `forms` / `overlays` / `dialog` / `modal` |
 | `src/presentation/web/assets/app/features/` | 各功能区（每个导出 `mount(root, deps)`，功能之间互不 import）：`sidebar` / `wizard` / `session-config` / `tabs` / `status-bar` / `composer` / `transcript` / `actions` / `work` / `shell` / `settings` / `agents` / `files` / `setup` / `modules` |

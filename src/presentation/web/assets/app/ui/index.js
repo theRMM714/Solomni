@@ -14,7 +14,6 @@ export function createUi(g) {
   const icons = createIcons(dom);
   return {
     el: dom.el,
-    h: dom.h,
     ...icons,
     ...createButtons(dom, icons),
     ...createForms(dom),

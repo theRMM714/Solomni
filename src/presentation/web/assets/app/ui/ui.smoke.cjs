@@ -200,14 +200,6 @@ const nt = ui.hint("读了后端字段", "warn");
 check("旁注带状态类", nt.className === "cfg-hint warn" && nt.textContent === "读了后端字段");
 check("旁注无状态类", ui.hint("纯说明").className === "cfg-hint");
 
-// h()：保留键各归其位，其余直接赋属性，空子节点跳过。
-let hClicked = 0;
-const hn = ui.h("button", { class: "btn", text: "去", type: "button", attrs: { "aria-label": "去设置" }, dataset: { id: "x" }, on: { click: () => { hClicked += 1; } } }, null, ui.icon("gear"), false);
-check("h：类 / 文字 / 属性", hn.className === "btn" && hn.textContent === "去" && hn.type === "button" && hn.attrs["aria-label"] === "去设置" && hn.dataset.id === "x");
-check("h：只挂元素子节点", hn.children.length === 1 && hn.children[0].className === "ui-icon");
-hn._h.click[0]();
-check("h：事件接线", hClicked === 1);
-
 if (failures.length) {
   console.log(failures.join("\n"));
   console.log("UI-SMOKE-FAIL（" + failures.length + " 条）");
