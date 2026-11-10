@@ -22,7 +22,6 @@ const renderAll = (...a) => app.renderAll(...a);
 const renderGate = (...a) => app.renderGate(...a);
 const renderStream = (...a) => app.renderStream(...a);
 const renderTabs = (...a) => app.renderTabs(...a);
-const shortPathRoots = (...a) => app.shortPathRoots(...a);
 const syncComposer = (...a) => app.syncComposer(...a);
 
 /// 选择器简写：模块内的 DOM 查找一律走注入的 doc。
@@ -559,9 +558,9 @@ function setActive(sid) {
   atClose(); // 换会话 = 换一份文件清单，菜单先收起来
   state.activeSid = sid;
   // 换会话先清掉上一份根（免得拿别人的根去缩）；缓存里有就同步先缩，避免先长后短的闪烁。
-  shortPathRoots = null;
+  state.pathRoots = null;
   const cached = app.filesCache.get(sid);
-  if (cached) shortPathRoots = buildRootList(cached.roots);
+  if (cached) state.pathRoots = buildRootList(cached.roots);
   renderTabs(); renderStream(true); renderGate(state.sessions.get(sid));
   const s = state.sessions.get(sid);
   if (s) { syncComposer(s); loadWork(sid); }
@@ -573,8 +572,8 @@ function setActive(sid) {
 function applyPathRoots(sid, data) {
   if (state.activeSid !== sid) return false;
   const next = buildRootList(data && data.roots);
-  const same = JSON.stringify(next) === JSON.stringify(shortPathRoots);
-  shortPathRoots = next;
+  const same = JSON.stringify(next) === JSON.stringify(state.pathRoots);
+  state.pathRoots = next;
   return !same;
 }
 

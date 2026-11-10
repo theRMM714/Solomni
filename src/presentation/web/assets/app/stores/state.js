@@ -2,6 +2,7 @@
  * 管：建初始状态；把快照写进状态（只为「后端说在跑」的会话建条目，已开的条目对齐快照）；
  *   运行态快照的唯一读法；登记处指纹变化时通知订阅者。
  * 不管：拉取快照（调用方用 `app/core/http.js`）、补历史、渲染；不为事件流里冒出的 sid 造会话。
+ *   长路径缩写的根列表 pathRoots 也放这里（向导写入、转录读），它是界面状态，不对应任何接口。
  * 联动：会话表与运行态规则见 `docs/presentation/contracts.md` 的「顺序与去重」与
  *   `docs/session/session-model.md`；`app/bridge.js` 把它交给界面层。 */
 
@@ -20,6 +21,7 @@ export function createState() {
     autoOpenedFor: null,
     rail: false,
     nodeBySid: new Map(),
+    pathRoots: null,
   };
 }
 

@@ -422,11 +422,11 @@ if (!loadErrors.length) {
     const got = vm.runInNewContext(`
       (() => {
         state.sessions.set("s1", { sid: "s1", lines: [], live: [], pending: null, sending: false, done: false, fold: {}, scroll: {} });
-        appliedSeq = 0;
+        progress.seq = 0;
         applyBatch(1, "s1", [{ type: "notice", text: "第一" }]);
         applyBatch(2, "s1", [{ type: "notice", text: "第二" }]);
         const lines = state.sessions.get("s1").lines.map((l) => l.text);
-        return { lines, applied: appliedSeq };
+        return { lines, applied: progress.seq };
       })()
     `, sandbox);
     return got.applied === 2 && got.lines.length === 2 &&

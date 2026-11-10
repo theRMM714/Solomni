@@ -23,14 +23,13 @@ import { mount as mountSessionConfig } from './features/session-config/session-c
 import { mount as mountTabs } from './features/tabs/tabs.js';
 import { mount as mountStatusBar } from './features/status-bar/status-bar.js';
 import { mount as mountComposer } from './features/composer/composer.js';
+import { mount as mountTranscript } from './features/transcript/transcript.js';
 
 /* 迁移期：这些入口仍在经典脚本 app.js 里（阶段 5–7 陆续迁走），功能经 app.* 晚绑定调用。 */
 const APP_GLOBALS = [
-  "absorb",
-  "absorbEvents",
   "act",
   "actionUrl",
-  "buildRootList",
+  "activateFlow",
   "closeModal",
   "compactNow",
   "confirmBox",
@@ -47,16 +46,13 @@ const APP_GLOBALS = [
   "openWorkCard",
   "paintShellCard",
   "refreshState",
-  "renderAll",
-  "renderGate",
-  "renderReadonly",
-  "renderStream",
+  "restoreMark",
+  "rewindTo",
   "shellAbnormal",
   "shellRunning",
   "shellSecs",
-  "shortPathRoots",
   "statusPrintOf",
-  "takeInput",
+  "withdrawAgree",
 ];
 
 /* 迁移期：已迁入口按原名挂到全局，供尚未改成按模块 import 的旧冒烟调用（阶段 7 删）。 */
@@ -79,11 +75,11 @@ const MIGRATED = [
   "modulesPage", "openModulesPanel", "renderModulesPanel", "useRow", "openUseCard", "fire", "panelSection", "actionRunner",
   "historyMenu", "renderHistory", "warnIfTierUnavailable", "hydrateHistory", "openHistory", "deleteHistory", "renderSidebar", "RAIL_KEY", "isNarrow", "readRail", "saveRail", "applyRail", "openDrawer", "closeDrawer", "toggleSidebar", "setupSidebar",
   "openWizard", "startSession", "setActive", "applyPathRoots", "loadPathRoots",
-  "openConfig", "loadConfig", "buildConfigForm", "cfgAgentBlock", "cfgRuntimeBlock", "guestPicker",
+  "openConfig", "loadConfig", "buildConfigForm", "cfgAgentBlock", "cfgRuntimeBlock", "guestPicker", "cfgRadio",
   "tabLabel", "tabBusy", "tabPending", "tabPendingDeep", "closeView", "openPath", "renderTabs",
   "openPermissionMenu", "openThinkingMenu", "switchThinking", "switchPermission", "syncStatusbar",
   "atState", "COMMANDS", "atMenuEl", "atToken", "atClose", "atHint", "atLoad", "atFetch", "AT_QUOTE_CHARS", "AT_QUOTE_RE", "atQuotePath", "atItems", "atRender", "atOpen", "atInsert", "atKey", "cmdSync", "atOnInput", "autoGrow", "stopGeneration", "onSend", "syncComposer", "syncSendButton",
-];
+ "applySnapshot", "progress", "absorb", "absorbEvents", "applyBatch", "applyLines", "trimAlign", "resyncActive", "markNeedState", "lineParts", "mdNode", "appendBody", "foldOpen", "foldBind", "scrollKey", "flushScroll", "toolDetail", "toolCard", "buildRootList", "shortPath", "reasoningBlock", "rewindButton", "lineBlock", "sessionNote", "buildTurn", "nodeCard", "appendFinalRow", "appendFinalLine", "renderDone", "liveTurnNode", "updateLiveGroup", "renderLive", "renderStream", "scheduleLiveTick", "renderLiveTick", "renderGate", "renderCard", "answerCard", "gateCard", "updateTaskFlow", "updateTask", "takeInput", "renderAll", "renderReadonly", "syncTyping", "nearBottom", "buildStreamBoxes", "turnWorthy", "turnKey", "turnText", "turnReasoning", "pendingScroll", "doneState", "liveTickScheduled",];
 
 /** 装配一次：装桥、挂功能、补转发；浏览器与冒烟沙箱走同一条路径。 */
 export function boot(g) {
@@ -108,6 +104,7 @@ export function boot(g) {
   mountTabs(app, deps);
   mountStatusBar(app, deps);
   mountComposer(app, deps);
+  mountTranscript(app, deps);
   for (const name of APP_GLOBALS) app[name] = (...args) => g[name](...args);
   for (const name of MIGRATED) g[name] = app[name];
   return app;
