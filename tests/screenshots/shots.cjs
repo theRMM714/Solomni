@@ -93,7 +93,8 @@ const SHIM = [
   "    for (var i = 0; i < 160 && !window.__solomni; i += 1) await wait(50);",
   "    if (!window.__solomni) throw new Error(window.__shotsError || \"boot timeout\");",
   "    var c = window.__solomni, app = c.app, state = c.state, s = null;",
-  "    if (view === \"readonly\") { await app.openHistory(\"release-check\"); }",
+  "    if (view === \"empty\") { app.renderAll(); }" +
+  "    else if (view === \"readonly\") { await app.openHistory(\"release-check\"); }",
   "    else if (view === \"wizard\") { app.openWizard(); }",
   "    else if (view.indexOf(\"settings-\") === 0) { app.openSettingsHub(view.slice(9)); }",
   "    else {",
