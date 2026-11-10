@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Solomni · 组件陈列</title>
+<link rel="stylesheet" href="/assets/tokens.css">
+<link rel="stylesheet" href="/assets/ui.css">
+<link rel="stylesheet" href="/assets/style.css">
+<style>
+  body { margin: 0; }
+  .gal-head { padding: var(--sp-6) var(--sp-4) var(--sp-2); max-width: var(--w-read); margin: 0 auto; }
+  .gal-head h1 { margin: 0 0 var(--sp-1); font-size: var(--fs-xl); line-height: var(--lh-tight); }
+  .gal-head p { margin: 0; color: var(--color-text-dim); font-size: var(--fs-s); }
+  .gal-main { max-width: var(--w-read); margin: 0 auto; padding: 0 var(--sp-4) var(--sp-6); }
+  .gal-sec { padding: var(--sp-4) 0; border-top: 1px solid var(--color-border); }
+  .gal-sec h2 { margin: 0 0 var(--sp-2); font-size: var(--fs-l); line-height: var(--lh-tight); }
+  .gal-note { margin: 0 0 var(--sp-2); color: var(--color-text-dim); font-size: var(--fs-s); }
+  .gal-row { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
+  .gal-stack { display: flex; flex-direction: column; gap: var(--sp-2); }
+  .gal-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: var(--sp-2); }
+  .gal-swatch { border: 1px solid var(--color-border); border-radius: var(--r-2); overflow: hidden; }
+  .gal-swatch i { display: block; height: 48px; }
+  .gal-swatch span { display: block; padding: var(--sp-1); font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--color-text-dim); }
+  .gal-icons { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: var(--sp-2); }
+  .gal-icon { display: flex; align-items: center; gap: var(--sp-1); padding: var(--sp-1); border: 1px solid var(--color-border); border-radius: var(--r-1); font-size: var(--fs-xs); color: var(--color-text-dim); }
+  .gal-icon .ui-icon { color: var(--color-text); }
+  .gal-track { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-3) 0 0; }
+  @media (max-width: 899px) { .gal-head, .gal-main { padding-left: var(--sp-3); padding-right: var(--sp-3); } }
+</style>
+</head>
+<body>
+<header class="gal-head">
+  <h1>组件陈列</h1>
+  <p>只在 debug 构建嵌入；发行版没有这个页面。所有颜色、字号、间距取自 tokens.css。</p>
+</header>
+<main class="gal-main" id="gallery"></main>
+<div id="modal-root"></div>
+<div id="notice-root"></div>
+<div id="toast-root"></div>
+<div id="menu-root"></div>
+<script type="module" src="/assets/dev/gallery.js"></script>
+</body>
+</html>
