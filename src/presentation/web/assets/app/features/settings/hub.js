@@ -1,7 +1,7 @@
 /* 目的：设置中心的分页框架（左侧分页、右侧单页、底栏统一保存）与各入口。
  * 管：分页切换、共享设置表单的挂载、底栏保存；agent 管理页的列表骨架。
- * 不管：各页内容（pages.js / runtime.js / storage.js）、弹层栈（app.js）。
- * 联动：app.js 的侧栏与向导调用 openSettingsHub；本文件按页调用各页构建函数。
+ * 不管：各页内容（pages.js / runtime.js / storage.js）、弹层栈（ui/modal.js）。
+ * 联动：侧栏与向导调用 openSettingsHub；本文件按页调用各页构建函数。
  */
 let g, doc, state, ui, app;
 let btn, emptyHint;

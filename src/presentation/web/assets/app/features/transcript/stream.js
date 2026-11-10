@@ -8,8 +8,6 @@ import { buildTurn, renderDone } from './turn.js';
 import { boxes } from './dom.js';
 
 let g, doc, state, stores, api, ui, app;
-const renderGate = (...a) => app.renderGate(...a);
-const loadWork = (...a) => app.loadWork(...a);
 
 /// 选择器简写：模块内的 DOM 查找一律走注入的 doc。
 const $ = (sel) => doc.querySelector(sel);

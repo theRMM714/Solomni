@@ -100,9 +100,18 @@ function load(file) {
     vm.runInNewContext(fs.readFileSync(path.join(__dirname, file), "utf8"), sandbox, { filename: file });
   } catch (e) { loadErrors.push(file + " 载入失败：" + e.message); }
 }
-require("./app/main.js").boot(sandbox); // 与浏览器同一段装配：装桥、挂功能、补迁移期转发
 load("md.js");
-load("app.js");
+// 与浏览器同一段装配；再把入口铺到沙箱上，让 vm 片段按原名调用（测试内作用，生产没有全局业务函数）。
+const main = require("./app/main.js");
+try {
+  const booted = main.boot(sandbox);
+  // 入口按原名挂到沙箱（getter 转发，读到的永远是模块里的当前值）；state / api / ui 与 $ 由装配提供。
+  for (const k of Object.keys(booted)) Object.defineProperty(sandbox, k, { get: () => booted[k], configurable: true });
+  sandbox.state = main.context.state;
+  sandbox.api = main.context.api;
+  sandbox.ui = main.context.ui;
+  sandbox.$ = (sel) => sandbox.document.querySelector(sel);
+} catch (e) { loadErrors.push("boot error: " + e.message); }
 
 // 递归收集树里的节点（判"表单真的建出来了"）。
 function walk(node, out) {

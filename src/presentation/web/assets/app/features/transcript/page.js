@@ -7,8 +7,6 @@ import { renderStream } from './stream.js';
 import { renderGate } from './cards.js';
 
 let g, doc, state, stores, api, ui, app;
-const loadWork = (...a) => app.loadWork(...a);
-const activateFlow = (...a) => app.activateFlow(...a);
 
 /// 选择器简写：模块内的 DOM 查找一律走注入的 doc。
 const $ = (sel) => doc.querySelector(sel);

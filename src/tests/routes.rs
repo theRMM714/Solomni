@@ -786,7 +786,7 @@ fn sample_param(_route_id: &str, name: &str) -> &'static str {
         "name" => "a1",
         "id" => "create_session",
         "commit" => "1",
-        "path" => "app.js",
+        "path" => "a.txt",
         _ => "x",
     }
 }
@@ -1225,7 +1225,7 @@ fn success_shapes_are_pinned_per_route() {
     let cases: Vec<(&str, &str, &str, u16, &str)> = vec![
         ("GET", "/", "", 200, "<!DOCTYPE"),
         ("GET", "/assets/style.css", "", 200, "--"),
-        ("GET", "/assets/app.js", "", 200, "/api/"),
+        ("GET", "/assets/app/main.js", "", 200, "boot"),
         ("GET", "/assets/md.js", "", 200, "function esc"),
         ("GET", "/assets/tokens.css", "", 200, "--color-bg"),
         ("GET", "/assets/ui.css", "", 200, ".btn"),

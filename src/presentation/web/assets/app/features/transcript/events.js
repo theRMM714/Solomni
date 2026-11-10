@@ -10,7 +10,6 @@ let g, doc, state, stores, api, ui, app;
 const renderStream = (...a) => app.renderStream(...a);
 const refreshState = (...a) => app.refreshState(...a);
 const renderAll = (...a) => app.renderAll(...a);
-const scheduleLiveTick = (...a) => app.scheduleLiveTick(...a);
 
 /* 已应用到的批序号（**单调游标**）。
    事实只有一条来路（事件台）：批次按 seq 到达，游标只前进；服务端裁剪造成跳号时由

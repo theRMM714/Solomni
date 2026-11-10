@@ -4,13 +4,6 @@
  * 联动：提交走 /api/actions；回答后重画经 app.renderStream / app.renderAll，置位经 app.markNeedState。 */
 
 let g, doc, state, stores, api, ui, app;
-const act = (...a) => app.act(...a);
-const actionUrl = (...a) => app.actionUrl(...a);
-const notice = (...a) => app.notice(...a);
-const absorb = (...a) => app.absorb(...a);
-const renderStream = (...a) => app.renderStream(...a);
-const renderAll = (...a) => app.renderAll(...a);
-const markNeedState = (...a) => app.markNeedState(...a);
 
 /// 选择器简写：模块内的 DOM 查找一律走注入的 doc。
 const $ = (sel) => doc.querySelector(sel);

@@ -77,8 +77,8 @@
     </main>
   </div>
 </div>
-<script type="module" src="/assets/app/main.js"></script>
+<!-- md.js 先执行：装配后的首次渲染要用 window.markdownToHtml；两者都在解析后按顺序执行。 -->
 <script defer src="/assets/md.js"></script>
-<script defer src="/assets/app.js"></script>
+<script type="module" src="/assets/app/main.js"></script>
 </body>
 </html>

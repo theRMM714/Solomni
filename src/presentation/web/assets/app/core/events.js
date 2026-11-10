@@ -3,7 +3,7 @@
  *   钩子抛出的异常报给 `onError`（界面自己的问题，不是断线），轮询照常继续。
  * 不管：事件含义、应用游标 `appliedSeq`、会话状态与渲染——都在钩子另一侧。
  * 联动：契约见 `docs/presentation/contracts.md` 的「传输选择：长轮询」；`fetch` / `setTimeout` 由
- *   `app/bridge.js` 注入。 */
+ *   `app/main.js` 注入。 */
 
 const RETRY_MS = 3000;
 

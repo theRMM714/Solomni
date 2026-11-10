@@ -8,8 +8,6 @@ import { turnWorthy, turnKey, turnText, turnReasoning } from './model.js';
 import { lineBlock, appendBody, foldBind, toolDetail, toolCard, reasoningBlock, rewindButton, flushScroll, sessionNote } from './parts.js';
 
 let g, doc, state, stores, api, ui, app;
-const withdrawAgree = (...a) => app.withdrawAgree(...a);
-const restoreMark = (...a) => app.restoreMark(...a);
 
 /* 转录 DOM：定稿容器 + 流式容器（都挂在 #stream 下）。
  * 定稿容器只在"整帧重建"时重建；流式容器在 delta / tool_call 路径上只做**增量 append**，

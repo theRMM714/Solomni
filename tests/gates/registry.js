@@ -18,6 +18,7 @@ const S = {
   docsTruth: require("./structure/docsTruth.js"),
   dependency: require("./structure/dependency.js"),
   capability: require("./structure/capability.js"),
+  webLayers: require("./structure/webLayers.js"),
 };
 const D = {
   portals: require("./docs/portals.js"),
@@ -46,6 +47,18 @@ const GATES = [
   { id: "structure/links", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["links.yaml", "dependencies.yaml", "env.js", "src/**/*.rs"], run: (root) => S.ledgers.links(root) },
   { id: "structure/deps-sha256", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["dependencies.yaml"], run: (root) => S.ledgers.depsSha256(root) },
   { id: "structure/dependency", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["src/**/*.rs", "tests/dependency-baseline.json"], run: (root) => S.dependency.direction(root) },
+  {
+    id: "structure/web-layers",
+    lane: "structure",
+    step: "T0 结构审查",
+    kind: "text",
+    inputs: ["src/presentation/web/assets/**/*.js", "src/presentation/web/assets/index.html"],
+    run: (root, ctx) => {
+      const r = S.webLayers.webLayers(root);
+      ctx.stats.notes = (ctx.stats.notes || []).concat(r.notes);
+      return r.problems;
+    },
+  },
   {
     id: "structure/capability-internal",
     lane: "structure",
@@ -86,6 +99,7 @@ const LANE_ORDER = {
     "structure/links",
     "structure/deps-sha256",
     "structure/dependency",
+    "structure/web-layers",
     "structure/capability-internal",
   ],
 };

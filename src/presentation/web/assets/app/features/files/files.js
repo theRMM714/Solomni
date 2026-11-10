@@ -1,7 +1,7 @@
 /* 目的：把本地文件上传进当前会话的 work/：选择、命名、重名替换与失败提示。
  * 管：上传交互与 /api/sessions/{sid}/files 的调用；filesCache 记每个会话的文件清单。
  * 不管：输入区的 @ 菜单渲染、上传后的全局刷新（经 app.refreshState）。
- * 联动：app.js 的上传按钮、模块与服务页、迁移后的向导都调用 pickUploadFile。
+ * 联动：侧栏的上传按钮、模块与服务页、向导都调用 pickUploadFile。
  */
 let g, doc, api, ui, app;
 let btn, textInput, field;

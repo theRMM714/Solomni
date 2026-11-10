@@ -1,7 +1,7 @@
 /* 目的：依赖补齐：一键执行 setup 动作，并把命令输出与诊断翻译成人话。
  * 管：补齐弹层的进度展示与轮询。
- * 不管：动作清单与执行（后端 /api/actions）、弹层栈（app.js）。
- * 联动：app.js 的横幅与向导调用 openSetupModal / setupAction。
+ * 不管：动作清单与执行（后端 /api/actions）、弹层栈（ui/modal.js）。
+ * 联动：shell 的横幅与向导调用 openSetupModal / setupAction。
  */
 let g, doc, api, ui, app;
 let btn;

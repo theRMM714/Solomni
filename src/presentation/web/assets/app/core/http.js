@@ -1,7 +1,7 @@
 /* 目的：HTTP 调用的唯一封装（JSON 进出 + 统一错误形状）。
  * 管：发请求、解析 JSON、非 2xx 抛出带 `status` / `data` 的 Error（文案取后端 `{error}`）。
  * 不管：路由含义、重试、长轮询（`app/core/events.js`）；不读任何界面状态。
- * 联动：`fetch` 由调用方注入（`app/bridge.js`），冒烟可换桩；路由目录见 `src/presentation/web/routes.rs`。 */
+ * 联动：`fetch` 由调用方注入（`app/main.js`），冒烟可换桩；路由目录见 `src/presentation/web/routes.rs`。 */
 
 /**
  * @param {(url: string, init?: object) => Promise<{ok: boolean, status?: number, json: () => Promise<any>}>} fetchImpl

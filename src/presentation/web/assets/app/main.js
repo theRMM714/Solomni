@@ -1,14 +1,19 @@
-/* 目的：浏览器端的模块入口，也是唯一的组装点：建共享上下文、挂载各功能、填迁移桥。
- * 管：装配顺序与依赖注入（state / api / ui / app）；功能之间互不 import，只认 app 上的入口。
- * 不管：任何业务、渲染与 DOM 细节；功能自己决定用到哪些注入。
- * 联动：`index.html` 先引本文件（type="module"），再引 defer 的 `md.js` / `app.js`；
- *       冒烟（`*.smoke.cjs`）对沙箱调用 `boot`，与浏览器走同一段装配。 */
+/* 目的：浏览器端的模块入口，也是唯一的组装点：建共享上下文（状态 / API / 组件库）、按顺序挂载各功能、启动接线。
+ * 管：装配顺序与依赖注入；把 core/format.js 的纯函数直接放到 app 上；最后调用 shell 的启动接线。
+ * 不管：任何业务、渲染与 DOM 细节；功能自己决定用到哪些注入，功能之间互不 import。
+ * 联动：`index.html` 先引本文件（type="module"）；`md.js` 提供 `markdownToHtml`。
+ *       冒烟（`*.smoke.cjs`）对沙箱调用 `boot`，与浏览器走同一段装配；`context` 暴露本次装配的共享对象。 */
 
-import { installBridge } from './bridge.js';
-import * as format from './core/format.js';
+import { createApi } from './core/http.js';
+import { createEventStream } from './core/events.js';
+import { createUi } from './ui/index.js';
 import * as stateStore from './stores/state.js';
+import * as format from './core/format.js';
 import { mount as mountSessions } from './stores/sessions.js';
 import { mount as mountSettings } from './stores/settings.js';
+import { mount as mountDialog } from './ui/dialog.js';
+import { mount as mountModal } from './ui/modal.js';
+import { mount as mountPrint } from './features/status-bar/print.js';
 import { mount as mountSettingsPages } from './features/settings/pages.js';
 import { mount as mountSettingsRuntime } from './features/settings/runtime.js';
 import { mount as mountSettingsStorage } from './features/settings/storage.js';
@@ -24,89 +29,46 @@ import { mount as mountTabs } from './features/tabs/tabs.js';
 import { mount as mountStatusBar } from './features/status-bar/status-bar.js';
 import { mount as mountComposer } from './features/composer/composer.js';
 import { mount as mountTranscript } from './features/transcript/transcript.js';
+import { mount as mountActions } from './features/actions/actions.js';
+import { mount as mountWork } from './features/work/work.js';
+import { mount as mountCommits } from './features/work/commits.js';
+import { mount as mountShell, start } from './features/shell/shell.js';
 
-/* 迁移期：这些入口仍在经典脚本 app.js 里（阶段 5–7 陆续迁走），功能经 app.* 晚绑定调用。 */
-const APP_GLOBALS = [
-  "act",
-  "actionUrl",
-  "activateFlow",
-  "closeModal",
-  "compactNow",
-  "confirmBox",
-  "ctxChipClass",
-  "eventError",
-  "loadWork",
-  "modelOptions",
-  "notice",
-  "openContextCard",
-  "openModal",
-  "openModalLayer",
-  "openShellCard",
-  "openToolsMenu",
-  "openWorkCard",
-  "paintShellCard",
-  "refreshState",
-  "restoreMark",
-  "rewindTo",
-  "shellAbnormal",
-  "shellRunning",
-  "shellSecs",
-  "statusPrintOf",
-  "withdrawAgree",
+/* 装配顺序：先是读法（stores）与通用组件（ui/dialog、ui/modal、状态栏派生），再是各功能区，
+ * 最后是外壳（它要在启动时调用前面所有入口）。 */
+const MOUNTS = [
+  mountSessions, mountSettings,
+  mountDialog, mountModal, mountPrint,
+  mountSettingsPages, mountSettingsRuntime, mountSettingsStorage, mountSettingsHub,
+  mountAgents, mountFiles, mountSetup, mountModules,
+  mountSidebar, mountWizard, mountSessionConfig, mountTabs, mountStatusBar, mountComposer,
+  mountTranscript, mountActions, mountWork, mountCommits, mountShell,
 ];
 
-/* 迁移期：已迁入口按原名挂到全局，供尚未改成按模块 import 的旧冒烟调用（阶段 7 删）。 */
-const MIGRATED = [
-  "escapeRe", "fmtBytes",
-  "providersPage", "openProvidersModal", "thinkingTagsEditor", "thinkingMapEditor", "modelsPage",
-  "openModelsModal", "coreModelBlock", "openCoreModal", "settingsForm", "parseSettingLines",
-  "collectSettings", "saveSettings", "SETTINGS_PAGES", "choiceModal",
-  "buildGeneratePage", "buildSandboxPage", "buildPermissionsPage", "buildResourcesPage",
-  "buildStoragePage", "renderStorage", "cleanStorage", "resetGuest",
-  "oneLine", "escHtml", "fmtInt", "ctxPercent", "fmtDuration", "timeAgo", "fmtDateTime",
-  "activeSession", "snapshotRunning", "isBusy", "generating", "historyByParent", "activePath",
-  "sessionParent", "knownChildren",
-  "DEFAULT_THINKING_LEVELS", "thinkingLevels", "thinkingLabel", "PERMISSION_ORDER", "PERMISSION_LABELS",
-  "openSettingsModal", "openSettingsHub", "openAgentsModal", "agentsPage",
-  "moduleById", "moduleMatches", "moduleChips", "openModulePicker", "cloneAgent", "agentPreview",
-  "agentForm", "openAgentEditor", "openTempAgentSheet", "openRegistryAgentPicker", "agentCard",
-  "filesCache", "pickUploadFile", "suggestAltName", "sendUpload", "conflictUpload", "renameUpload",
-  "setupAction", "openSetupModal", "diagnosisText",
-  "modulesPage", "openModulesPanel", "renderModulesPanel", "useRow", "openUseCard", "fire", "panelSection", "actionRunner",
-  "historyMenu", "renderHistory", "warnIfTierUnavailable", "hydrateHistory", "openHistory", "deleteHistory", "renderSidebar", "RAIL_KEY", "isNarrow", "readRail", "saveRail", "applyRail", "openDrawer", "closeDrawer", "toggleSidebar", "setupSidebar",
-  "openWizard", "startSession", "setActive", "applyPathRoots", "loadPathRoots",
-  "openConfig", "loadConfig", "buildConfigForm", "cfgAgentBlock", "cfgRuntimeBlock", "guestPicker", "cfgRadio",
-  "tabLabel", "tabBusy", "tabPending", "tabPendingDeep", "closeView", "openPath", "renderTabs",
-  "openPermissionMenu", "openThinkingMenu", "switchThinking", "switchPermission", "syncStatusbar",
-  "atState", "COMMANDS", "atMenuEl", "atToken", "atClose", "atHint", "atLoad", "atFetch", "AT_QUOTE_CHARS", "AT_QUOTE_RE", "atQuotePath", "atItems", "atRender", "atOpen", "atInsert", "atKey", "cmdSync", "atOnInput", "autoGrow", "stopGeneration", "onSend", "syncComposer", "syncSendButton",
- "applySnapshot", "progress", "absorb", "absorbEvents", "applyBatch", "applyLines", "trimAlign", "resyncActive", "markNeedState", "lineParts", "mdNode", "appendBody", "foldOpen", "foldBind", "scrollKey", "flushScroll", "toolDetail", "toolCard", "buildRootList", "shortPath", "reasoningBlock", "rewindButton", "lineBlock", "sessionNote", "buildTurn", "nodeCard", "appendFinalRow", "appendFinalLine", "renderDone", "liveTurnNode", "updateLiveGroup", "renderLive", "renderStream", "scheduleLiveTick", "renderLiveTick", "renderGate", "renderCard", "answerCard", "gateCard", "updateTaskFlow", "updateTask", "takeInput", "renderAll", "renderReadonly", "syncTyping", "nearBottom", "buildStreamBoxes", "turnWorthy", "turnKey", "turnText", "turnReasoning", "pendingScroll", "doneState", "liveTickScheduled",];
+/** 本次装配的共享对象；冒烟用它取 state / api / ui。 */
+export let context = null;
 
-/** 装配一次：装桥、挂功能、补转发；浏览器与冒烟沙箱走同一条路径。 */
+/** 装配一次：浏览器与冒烟沙箱走同一条路径。 */
 export function boot(g) {
-  const core = installBridge(g);
+  const doc = g.document;
+  const fetchImpl = (url, init) => g.fetch(url, init);
+  const state = stateStore.createState();
+  const api = createApi(fetchImpl);
+  const ui = createUi(g);
   const app = {};
-  core.app = app;
-  const deps = { g, doc: g.document, state: core.state, stores: stateStore, api: core.api, ui: g.ui, app };
+  const deps = {
+    g, doc, state, stores: stateStore, api, ui, app,
+    // 事件流要宿主提供的 fetch / setTimeout，由这里收口，功能自己不碰宿主。
+    createEventStream: (hooks) => createEventStream({
+      fetch: fetchImpl,
+      setTimeout: (fn, ms) => g.setTimeout(fn, ms),
+      ...hooks,
+    }),
+  };
   Object.assign(app, format);
-  mountSessions(app, deps);
-  mountSettings(app, deps);
-  mountSettingsPages(app, deps);
-  mountSettingsRuntime(app, deps);
-  mountSettingsStorage(app, deps);
-  mountSettingsHub(app, deps);
-  mountAgents(app, deps);
-  mountFiles(app, deps);
-  mountSetup(app, deps);
-  mountModules(app, deps);
-  mountSidebar(app, deps);
-  mountWizard(app, deps);
-  mountSessionConfig(app, deps);
-  mountTabs(app, deps);
-  mountStatusBar(app, deps);
-  mountComposer(app, deps);
-  mountTranscript(app, deps);
-  for (const name of APP_GLOBALS) app[name] = (...args) => g[name](...args);
-  for (const name of MIGRATED) g[name] = app[name];
+  for (const mount of MOUNTS) mount(app, deps);
+  start();
+  context = { state, api, ui, app, deps };
   return app;
 }
 

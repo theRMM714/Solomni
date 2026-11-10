@@ -1,6 +1,6 @@
 /* 目的：模块与服务页：模块清单、启停、密钥、服务进程与工具调用实测。
  * 管：该页的清单渲染与动作（经 /api/actions 的 available 决定可做什么）。
- * 不管：设置中心分页框架（settings/hub.js）、弹层栈（app.js）。
+ * 不管：设置中心分页框架（settings/hub.js）、弹层栈（ui/modal.js）。
  * 联动：settings/hub.js 调用 modulesPage；本文件经 app 调用 refreshState / pollLoop / openWizard。
  */
 let g, doc, state, api, ui, app;

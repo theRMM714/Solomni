@@ -5,7 +5,6 @@
  * 联动：折叠与滚动位置存在会话上（fold / scroll）；长路径根来自 state.pathRoots（由向导写入）。 */
 
 let g, doc, state, stores, api, ui, app;
-const rewindTo = (...a) => app.rewindTo(...a);
 
 /// 思维链块：永远默认折叠，点击（原生 details）才展开。
 /// Markdown 容器：有渲染器就渲染，没有就退回纯文本（安全）。

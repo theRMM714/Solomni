@@ -98,3 +98,35 @@
   blocked_by: |
     本期不做（用户决定：仍在开发阶段）。发行链路与口味统一需要新建 CI 工作流与打包脚本，另立任务。
 
+
+- id: testing.frontend-browser-e2e
+  scope: global
+  level: T3
+  why: |
+    前端行为目前只在桩 DOM 的冒烟里跑（`*.smoke.cjs`）：能判渲染结构与接线，判不了真实浏览器的布局、
+    原生事件顺序、`localStorage` 与滚动位置。分层落地后页面只剩一个 ESM 入口，回归面更依赖真实页面的端到端旅程，
+    而仓库还没有 Playwright 或任何浏览器驱动。
+  how: |
+    1) 起本地 web 服务（`solomni webui` 的测试端口）+ Playwright 驱动真实 Chromium；
+    2) 覆盖关键旅程：建会话向导、发送与流式渲染、裁决卡提交、设置中心保存、存储回收、上传；
+    3) 失败留截图 / 轨迹，产物不进仓库；CI 增加一条前端端到端步骤（缺浏览器时如实 env-skip）。
+  accept: |
+    关键旅程在 CI 的真实浏览器里通过；失败有截图或轨迹可查；桩 DOM 冒烟作为快检继续保留；
+    `node run-tests.js` 全绿。
+  blocked_by: 缺少实现（无 Playwright 依赖与浏览器安装）
+
+- id: testing.frontend-typecheck
+  scope: global
+  level: T3
+  why: |
+    前端的 JSDoc 类型只写在注释里，没有 `tsc --checkJs` 这类静态校验：仓库不带 npm 依赖，dev-tools 与 links
+    里也没有 TypeScript。当前靠 `node --check`、9 个前端冒烟与 `structure/web-layers` 的依赖方向门禁兜底，
+    函数签名与数据结构写错只能等运行时暴露。
+  how: |
+    1) 把 TypeScript 收进 dev-tools（固定版本 + 校验值，与其它工具链同一条路径）；
+    2) 加 `tsconfig.json`（`checkJs` / `noEmit` / `allowJs`，只检查 `assets/app/`）；
+    3) 现有问题逐条收敛或写进豁免清单；
+    4) 接进 `node run-tests.js` 的前端步骤，与 `frontend-smoke` 并列。
+  accept: |
+    本机与 CI 都能跑该检查且零错误（或全量豁免清单有据）；`node run-tests.js` 全绿。
+  blocked_by: 缺少工具链（未登记 TypeScript）
