@@ -7,7 +7,7 @@ import { PERMISSION_LABELS, PERMISSION_ORDER, thinkingLabel } from '../../stores
 import { ctxChipClass, shellAbnormal, shellRunning, shellSecs, statusPrintOf } from './print.js';
 import { ctxPercent, fmtDuration, fmtInt, timeAgo } from '../../core/format.js';
 
-let doc, state, api, ui, app;
+let g, doc, state, api, ui, app;
 let icon;
 const actionUrl = (...a) => app.actionUrl(...a);
 const openConfig = (...a) => app.openConfig(...a);
@@ -106,6 +106,77 @@ async function switchPermission(sid, profile) {
   }
 }
 
+/* 状态栏横向滚动：内容超出 760px 列时给左右按钮、鼠标拖拽，触屏走原生滑动。
+ * 按钮只在对应方向还有内容时出现，滚到两端就收起来。 */
+let statusScroll = { inner: null, prev: null, next: null };
+
+function statusScrollBtn(dir, label, inner, sign) {
+  const b = doc.createElement('button');
+  b.type = 'button';
+  b.className = 'status-scroll-btn ' + dir;
+  b.setAttribute('aria-label', label);
+  b.appendChild(ui.icon('chevron-right'));
+  b.onclick = () => {
+    const view = doc.defaultView;
+    const reduce = !!(view && view.matchMedia && view.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    inner.scrollBy({
+      left: sign * Math.max(160, Math.round(inner.clientWidth * 0.6)),
+      behavior: reduce ? 'auto' : 'smooth',
+    });
+  };
+  return b;
+}
+
+function updateStatusScroll() {
+  const { inner, prev, next } = statusScroll;
+  if (!inner || !prev || !next) return;
+  const max = inner.scrollWidth - inner.clientWidth;
+  const can = inner.clientWidth > 0 && max > 1;
+  prev.hidden = !can || inner.scrollLeft <= 1;
+  next.hidden = !can || inner.scrollLeft >= max - 1;
+}
+
+/* 鼠标拖拽滚动；拖过 4px 就把这次 click 吞掉，避免拖动后误开 chip 的菜单。 */
+function bindStatusDrag(inner) {
+  let down = false, moved = false, startX = 0, startLeft = 0;
+  inner.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'touch' || e.button !== 0) return;
+    down = true; moved = false; startX = e.clientX; startLeft = inner.scrollLeft;
+    inner.classList.add('dragging');
+    if (inner.setPointerCapture) inner.setPointerCapture(e.pointerId);
+  });
+  inner.addEventListener('pointermove', (e) => {
+    if (!down) return;
+    const dx = e.clientX - startX;
+    if (!moved && Math.abs(dx) < 4) return;
+    moved = true;
+    inner.scrollLeft = startLeft - dx;
+    e.preventDefault();
+  });
+  const end = (e) => {
+    if (!down) return;
+    down = false;
+    inner.classList.remove('dragging');
+    if (inner.releasePointerCapture && e.pointerId != null) {
+      try { inner.releasePointerCapture(e.pointerId); } catch (err) { /* 指针已失效 */ }
+    }
+  };
+  inner.addEventListener('pointerup', end);
+  inner.addEventListener('pointercancel', end);
+  inner.addEventListener('click', (e) => {
+    if (!moved) return;
+    e.stopPropagation();
+    e.preventDefault();
+    moved = false;
+  }, true);
+  inner.addEventListener('scroll', updateStatusScroll, { passive: true });
+  inner.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    inner.scrollBy({ left: (e.key === 'ArrowLeft' ? -1 : 1) * 160, behavior: 'smooth' });
+  });
+}
+
 function syncStatusbar(s) {
   const box = $('#session-status');
   if (!box) return;
@@ -125,6 +196,10 @@ function syncStatusbar(s) {
   box.classList.remove('hidden');
   const inner = doc.createElement('div');
   inner.className = 'session-status-inner';
+  inner.tabIndex = 0;
+  inner.setAttribute('role', 'group');
+  inner.setAttribute('aria-label', '会话状态，可横向滚动');
+  bindStatusDrag(inner);
 
   // 权限档位：proxy 与子会话都必须看得见它实际用的档。
   if (s.permission_label) {
@@ -227,13 +302,23 @@ function syncStatusbar(s) {
     onClick: () => openWorkCard(s, workChip),
   });
   inner.appendChild(workChip);
-  box.appendChild(inner);
+  const bar = doc.createElement('div');
+  bar.className = 'session-status-bar';
+  const prev = statusScrollBtn('prev', '向左滚动', inner, -1);
+  const next = statusScrollBtn('next', '向右滚动', inner, 1);
+  bar.appendChild(prev);
+  bar.appendChild(inner);
+  bar.appendChild(next);
+  box.appendChild(bar);
+  statusScroll = { inner, prev, next };
+  updateStatusScroll();
   paintShellCard();
 }
 
 /// 挂载：装配依赖并把本模块的入口交给组装点。
 export function mount(root, deps) {
-  ({ doc, state, api, ui, app } = deps);
+  ({ g, doc, state, api, ui, app } = deps);
   ({ icon } = ui);
+  if (g && g.addEventListener) g.addEventListener('resize', () => updateStatusScroll());
   Object.assign(root, { openPermissionMenu, openThinkingMenu, switchThinking, switchPermission, syncStatusbar });
 }

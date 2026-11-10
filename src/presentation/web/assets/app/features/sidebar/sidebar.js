@@ -275,15 +275,22 @@ function applyRail(railed) {
 function openDrawer() {
   const sb = $('#sidebar'); if (sb) sb.classList.add('open');
   const mask = $('#drawer-mask'); if (mask) mask.classList.add('show');
+  const btn = $('#btn-drawer'); if (btn) btn.setAttribute('aria-expanded', 'true');
 }
 
 function closeDrawer() {
   const sb = $('#sidebar'); if (sb) sb.classList.remove('open');
   const mask = $('#drawer-mask'); if (mask) mask.classList.remove('show');
+  const btn = $('#btn-drawer'); if (btn) btn.setAttribute('aria-expanded', 'false');
 }
 
 function toggleSidebar() {
-  if (isNarrow()) { openDrawer(); return; }
+  if (isNarrow()) {
+    const sb = $('#sidebar');
+    if (sb && sb.classList.contains('open')) closeDrawer();
+    else openDrawer();
+    return;
+  }
   applyRail(!state.rail);
   saveRail();
 }

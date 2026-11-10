@@ -218,12 +218,28 @@ body {
   flex: none; padding: 0 var(--sp-4);
   background: var(--color-bg); border-top: 1px solid var(--color-border);
 }
+.session-status-bar {
+  width: 100%; max-width: var(--w-read); margin: 0 auto;
+  display: flex; align-items: center; gap: var(--sp-1);
+}
 .session-status-inner {
-  width: 100%; max-width: var(--w-read); margin: 0 auto; min-height: 36px;
+  flex: 1; min-width: 0; min-height: 36px;
   display: flex; align-items: center; gap: var(--sp-2);
-  overflow-x: auto; scrollbar-width: none;
+  overflow-x: auto; scrollbar-width: none; cursor: grab;
 }
 .session-status-inner::-webkit-scrollbar { display: none; }
+.session-status-inner.dragging { cursor: grabbing; user-select: none; }
+.session-status-inner:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.status-scroll-btn {
+  flex: none; width: 24px; height: 24px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: 1px solid var(--color-border); border-radius: var(--r-1);
+  color: var(--color-text-dim); cursor: pointer;
+}
+.status-scroll-btn:hover { color: var(--color-accent); border-color: var(--color-accent); }
+.status-scroll-btn .ui-icon { width: 14px; height: 14px; }
+.status-scroll-btn.prev .ui-icon { transform: rotate(180deg); }
+.status-scroll-btn[hidden] { display: none; }
 /* 状态栏本身已有上边线：紧挨着的输入区 / 只读条不重复画一条。 */
 .session-status:not(.hidden) + .readonly-bar,
 .session-status:not(.hidden) + .composer { border-top: none; }
@@ -288,7 +304,7 @@ body {
 
 @media (max-width: 899px) {
   .session-status { padding-left: 10px; padding-right: 10px; }
-  .session-status-inner { max-width: none; }
+  .session-status-bar { max-width: none; }
   .work-history { grid-template-columns: 1fr; }
   .work-history-list { max-height: 30vh; }
   .work-detail { max-height: 34vh; }
@@ -461,7 +477,11 @@ body {
 .reg-acts { display: flex; gap: 8px; flex: none; }
 .reg-empty { font-size: var(--fs-s); color: var(--color-text-dim); }
 /* 会话级说明（代理身份 / 已停止 / 已关闭）：转录最上方一行，不冒充任何一方的发言。 */
-.agent-note { font-size: var(--fs-s); color: var(--color-text-dim); border-left: 2px solid var(--color-accent); padding: 4px 8px; margin: 6px 0; white-space: pre-wrap; }
+.agent-note {
+  width: 100%; max-width: var(--w-read); margin: 0 auto;
+  font-size: var(--fs-s); color: var(--color-text-dim); text-align: center;
+  white-space: pre-wrap; line-height: var(--lh-base);
+}
 .svc-sec { display: flex; flex-direction: column; gap: 8px; }
 .svc-title { font-weight: 600; font-size: var(--fs-s); }
 .svc-run { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: 6px; }

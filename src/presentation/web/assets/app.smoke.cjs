@@ -886,7 +886,15 @@ setTimeout(async () => {
           " const withHist = run('s6', 'single', ctx, head, shellHist);" +
           " const shellHistTimeout = { command: 'sleep 99', scope: 'sandbox', cwd: '/x', started_at: 0, finished_at: null, elapsed_secs: 2, exit_code: null, ok: false, status: 'timeout', output: '', historical: true };" +
           " const withHistTimeout = run('s10', 'single', ctx, head, shellHistTimeout);" +
-          " return { single: single, proxy: proxy, collab: collab, withShell: withShell, withTimeout: withTimeout, withStopped: withStopped, withSignal: withSignal, withThinking: withThinking, withHist: withHist, withHistTimeout: withHistTimeout };" +
+          " const bar = box.children[0];" +
+          " const kids = bar ? (bar.children || []) : [];" +
+          " const has = function (c, cls) { return String(c.className).indexOf(cls) >= 0; };" +
+          " const innerEl = kids.filter(function (c) { return has(c, 'session-status-inner'); })[0];" +
+          " const btns = kids.filter(function (c) { return has(c, 'status-scroll-btn'); });" +
+          " return { single: single, proxy: proxy, collab: collab, withShell: withShell, withTimeout: withTimeout, withStopped: withStopped, withSignal: withSignal, withThinking: withThinking, withHist: withHist, withHistTimeout: withHistTimeout," +
+          "   bar: bar ? bar.className : '', btns: btns.length," +
+          "   innerLabel: innerEl && innerEl.attrs ? innerEl.attrs['aria-label'] : ''," +
+          "   innerRole: innerEl && innerEl.attrs ? innerEl.attrs.role : '', innerTab: innerEl ? innerEl.tabIndex : -1 };" +
           "})()",
         sandbox
       );
@@ -900,7 +908,10 @@ setTimeout(async () => {
       const thinkingOk = r.withThinking.length === 4 && r.withThinking.some((t) => /思考 high/.test(t));
       const histOk = r.withHist.length === 4 && r.withHist.some((t) => /shell 退出码 1（历史）/.test(t));
       const histTimeoutOk = r.withHistTimeout.length === 4 && r.withHistTimeout.some((t) => /shell 超时（历史）/.test(t));
-      statusBarRules = singleOk && proxyOk && collabOk && shellOk && timeoutOk && stoppedOk && signalOk && thinkingOk && histOk && histTimeoutOk;
+      // 横向滚动的容器与左右按钮：溢出时才显形，结构必须一直在（否则窄屏无法用键盘/按钮滚到底）。
+      const scrollOk = r.bar === 'session-status-bar' && r.btns === 2
+        && r.innerLabel === '会话状态，可横向滚动' && r.innerRole === 'group' && r.innerTab === 0;
+      statusBarRules = singleOk && proxyOk && collabOk && shellOk && timeoutOk && stoppedOk && signalOk && thinkingOk && histOk && histTimeoutOk && scrollOk;
       if (!statusBarRules) loadErrors.push("状态栏检查：" + JSON.stringify(r));
     } catch (e) { loadErrors.push("状态栏检查失败：" + e.message); }
   }
