@@ -1,71 +1,12 @@
-'use strict';
-/* Solomni 组件工厂：内联图标、图标按钮、折叠、浮层菜单、toast、弹层关闭规则。
- * 约束：无依赖、no-build；只创建节点，不读业务状态；样式类在 /ui.css，数值在 /tokens.css。
- * 联动：/app.js 只调用这里，不再自己拼同一套 DOM；冒烟见 ui.smoke.cjs。 */
-(function (global) {
-  const doc = global.document;
-  const SVG_HEAD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
-    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">';
-  const ICONS = {
-    plus: '<path d="M12 5v14M5 12h14"/>',
-    undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h9a7 7 0 0 1 0 14h-1"/>',
-    pencil: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
-    gear: '<path d="M4 7h6M14 7h6M4 12h10M18 12h2M4 17h4M12 17h8"/>' +
-      '<circle cx="12" cy="7" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="10" cy="17" r="2"/>',
-    chevron: '<path d="m6 9 6 6 6-6"/>',
-    close: '<path d="M18 6 6 18M6 6l12 12"/>',
-    check: '<path d="m5 13 4 4L19 7"/>',
-    alert: '<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/>',
-    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/>',
-    folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
-    cpu: '<rect x="7" y="7" width="10" height="10" rx="2"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/>',
-    shield: '<path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6Z"/>',
-    users: '<circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M16 5a3 3 0 0 1 0 6"/><path d="M18 20a6 6 0 0 0-3-5"/>',
-    box: '<path d="m12 3 8 4v10l-8 4-8-4V7Z"/><path d="m4 7 8 4 8-4M12 11v10"/>',
-    panel: '<path d="M3 5h18v14H3z"/><path d="M9 5v14"/>',
-    more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
-    dot: '<circle cx="12" cy="12" r="4"/>',
-    chart: '<path d="M4 19V5"/><path d="M4 19h16"/><path d="m7 15 4-4 3 2 5-6"/>',
-    git: '<circle cx="6" cy="6" r="2"/><circle cx="18" cy="18" r="2"/><path d="M6 8v4a6 6 0 0 0 6 6h4"/><path d="M13 7h5v5"/>',
-    file: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>',
-    terminal: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/>',
-  };
+/* 目的：浮层类组件（折叠、浮层菜单、toast、弹层关闭判据与弹层栈、锚定小卡片）。
+ * 管：建节点、定位（夹在视口内）、点外面 / Esc 关闭；弹层栈保证 Esc 只关最上面一层。
+ * 不管：浮层里装什么、关掉之后做什么（调用方的回调）。
+ * 联动：挂载点 `#menu-root` / `#toast-root` 在 `assets/index.html`；样式在 `assets/ui.css`；
+ *   弹层关闭判据见 `docs/presentation/web/README.md` 的「弹层关闭判据」。 */
 
-  function el(tag, cls, text) {
-    const n = doc.createElement(tag || 'div');
-    if (cls) n.className = cls;
-    if (text != null) n.textContent = text;
-    return n;
-  }
-
-  function attr(n, name, value) {
-    if (typeof n.setAttribute === 'function') n.setAttribute(name, value);
-    else if (name === 'aria-label') n.ariaLabel = value;
-  }
-
-  function icon(name) {
-    const n = el('span', 'ui-icon');
-    n.innerHTML = SVG_HEAD + (ICONS[name] || ICONS.dot) + '</svg>';
-    attr(n, 'aria-hidden', 'true');
-    return n;
-  }
-
-  function iconButton(opts) {
-    const o = opts || {};
-    const b = el('button', 'icon-btn' + (o.cls ? ' ' + o.cls : '') + (o.danger ? ' danger' : ''));
-    b.type = 'button';
-    const label = o.label || '';
-    if (label) {
-      attr(b, 'aria-label', label);
-      b.title = label;
-    }
-    const tip = o.tip === undefined ? label : o.tip;
-    if (tip) b.dataset.tip = tip;
-    b.appendChild(icon(o.icon));
-    if (typeof o.onClick === 'function') b.onclick = o.onClick;
-    if (o.disabled) b.disabled = true;
-    return b;
-  }
+export function createOverlays(dom, icons) {
+  const { el, attr, doc } = dom;
+  const g = dom.g;
 
   function fold(opts) {
     const o = opts || {};
@@ -103,7 +44,7 @@
       const b = el('button', 'menu-item' + (it.danger ? ' danger' : ''));
       b.type = 'button';
       attr(b, 'role', 'menuitem');
-      if (it.icon) b.appendChild(icon(it.icon));
+      if (it.icon) b.appendChild(icons.icon(it.icon));
       b.appendChild(el('span', '', it.label || ''));
       if (it.disabled) {
         b.disabled = true;
@@ -119,9 +60,9 @@
       : { left: 0, top: 0, bottom: 0 };
     const root = doc.querySelector('#menu-root') || doc.body;
     if (root) root.appendChild(m);
-    // 菜单优先贴锚点下方；下方放不下就翻到上方。状态栏靠近视口底部，不翻会直接被裁掉。
+    // 菜单优先贴锚点下方；下方放不下就翻到上方（状态栏靠近视口底部，不翻会被裁掉）。
     const box = typeof m.getBoundingClientRect === 'function' ? m.getBoundingClientRect() : null;
-    const vh = global.innerHeight || 600;
+    const vh = g.innerHeight || 600;
     const mh = (box && box.height) || Math.min(320, 44 * (items || []).length);
     let top = r.bottom + 4;
     if (top + mh > vh - 8) top = Math.max(8, r.top - mh - 4);
@@ -160,14 +101,14 @@
       const first = root.children[0];
       if (root.removeChild) root.removeChild(first); else break;
     }
-    global.setTimeout(() => {
+    g.setTimeout(() => {
       if (n.parentNode && n.parentNode.removeChild) n.parentNode.removeChild(n);
       else if (n.remove) n.remove();
     }, 2400);
     return n;
   }
 
-  /* 弹层关闭判据：按下与松开**都在遮罩上**才算“点外面”。纯函数，冒烟直接测四种组合。 */
+  /* 弹层关闭判据：按下与松开都在遮罩上才算「点外面」。纯函数，冒烟直接测四种组合。 */
   function dismisses(overlay, downTarget, clickTarget) {
     return !!overlay && downTarget === overlay && clickTarget === overlay;
   }
@@ -197,20 +138,6 @@
       }
       if (doc.removeEventListener) doc.removeEventListener('keydown', onKey);
     };
-  }
-
-  /* 状态 chip：图标 + 简要文字，语义是按钮（展开详情小卡片）。 */
-  function statusChip(opts) {
-    const o = opts || {};
-    const b = el('button', 'status-chip' + (o.cls ? ' ' + o.cls : ''));
-    b.type = 'button';
-    if (o.label) attr(b, 'aria-label', o.label);
-    if (o.title) b.title = o.title;
-    if (o.icon) b.appendChild(icon(o.icon));
-    if (o.text != null) b.appendChild(el('span', 'status-chip-text', o.text));
-    if (o.hint != null) b.appendChild(el('span', 'status-chip-hint', o.hint));
-    if (typeof o.onClick === 'function') b.onclick = o.onClick;
-    return b;
   }
 
   /* 锚定小卡片：状态 chip 的详情。点外面 / Esc 关闭；上一张没关就换下一张。 */
@@ -248,8 +175,8 @@
         : { width: 360, height: 240 };
       const pw = box.width || 360;
       const ph = box.height || 240;
-      const vw = global.innerWidth || 800;
-      const vh = global.innerHeight || 600;
+      const vw = g.innerWidth || 800;
+      const vh = g.innerHeight || 600;
       let top = o.placement === 'bottom' ? r.bottom + 8 : r.top - ph - 8;
       // 上面放不下就翻到下面；无论翻到哪边，整张卡都夹在视口里（底边不越界）。
       if (o.placement !== 'bottom' && top < 8) top = r.bottom + 8;
@@ -272,7 +199,7 @@
         closePopover();
       }
     };
-    // 页面/视口滚动 → 收起（卡片是 fixed，锚点会跑）；但卡片**自己**的滚动（长回执）不能关掉它。
+    // 页面 / 视口滚动 → 收起（卡片是 fixed，锚点会跑）；卡片自己的滚动（长回执）不关。
     const onViewport = (e) => {
       const t = e && e.target;
       if (t && (t === node || (node.contains && node.contains(t)))) return;
@@ -282,9 +209,9 @@
       doc.addEventListener('pointerdown', onDown, true);
       doc.addEventListener('keydown', onKey, true);
     }
-    if (typeof global.addEventListener === 'function') {
-      global.addEventListener('resize', place);
-      global.addEventListener('scroll', onViewport, true);
+    if (typeof g.addEventListener === 'function') {
+      g.addEventListener('resize', place);
+      g.addEventListener('scroll', onViewport, true);
     }
     if (anchor && anchor.setAttribute) anchor.setAttribute('aria-expanded', 'true');
     openPopover = {
@@ -296,27 +223,14 @@
           doc.removeEventListener('pointerdown', onDown, true);
           doc.removeEventListener('keydown', onKey, true);
         }
-        if (typeof global.removeEventListener === 'function') {
-          global.removeEventListener('resize', place);
-          global.removeEventListener('scroll', onViewport, true);
+        if (typeof g.removeEventListener === 'function') {
+          g.removeEventListener('resize', place);
+          g.removeEventListener('scroll', onViewport, true);
         }
       },
     };
     return { node, close: closePopover, place };
   }
 
-  global.ui = {
-    el,
-    icon,
-    iconButton,
-    statusChip,
-    popover,
-    closePopover,
-    fold,
-    menu,
-    closeMenu,
-    toast,
-    dismisses,
-    bindDismiss,
-  };
-})(typeof window !== 'undefined' ? window : globalThis);
+  return { fold, menu, closeMenu, toast, dismisses, bindDismiss, popover, closePopover };
+}

@@ -5,7 +5,7 @@
  *      冻结（started=true）与未冻结两种配置、档位 radio 切换与虚拟根选择器显隐、运行能力六项事实的中文呈现、
  *      只有多版本能力才出现定版选择、保存成功与失败（失败显示后端 error 原文）、提交体形状、
  *      「重新扫描」重新 GET 并重绘、点「打开」真的进入会话视图。
- * 为什么需要：app.js 是 no-build 原生 JS，这些交互只有跑起来才发现引用错误与文案缺失。
+ * 为什么需要：前端是 no-build 原生 JS，这些交互只有跑起来才发现引用错误与文案缺失。
  */
 const fs = require("fs");
 const path = require("path");
@@ -14,7 +14,7 @@ const checks = [];
 const loadErrors = [];
 const alerts = [];
 
-/* ---------- 桩 DOM：只用 app.js 真正用到的 API ---------- */
+/* ---------- 桩 DOM：只用前端真正用到的 API ---------- */
 class N {
   constructor(tag) {
     this.tag = tag; this.children = []; this.textContent = ""; this.className = "";
@@ -39,7 +39,7 @@ class N {
   get innerHTML() { return this._html; }
   focus() {} setAttribute() {} getAttribute() { return null; }
 }
-const reg = new Map(); // 选择器 -> 同一个节点（app.js 靠 $ 复用容器）
+const reg = new Map(); // 选择器 -> 同一个节点（前端靠 $ 复用容器）
 const document = {
   querySelector(s) { if (!reg.has(s)) reg.set(s, new N("div")); return reg.get(s); },
   createElement(t) { return new N(t); },
@@ -234,12 +234,17 @@ const ctx = vm.createContext(sandbox);
 try {
   vm.runInContext(fs.readFileSync(path.join(__dirname, "md.js"), "utf8"), ctx, { filename: "md.js" });
 } catch (e) { loadErrors.push("md load error: " + e.message); }
+// 与浏览器同一段装配；再把入口铺到沙箱上，让 vm 片段按原名调用（测试内作用，生产没有全局业务函数）。
+const main = require("./app/main.js");
 try {
-  vm.runInContext(fs.readFileSync(path.join(__dirname, "ui.js"), "utf8"), ctx, { filename: "ui.js" });
-} catch (e) { loadErrors.push("ui load error: " + e.message); }
-try {
-  vm.runInContext(fs.readFileSync(path.join(__dirname, "app.js"), "utf8"), ctx, { filename: "app.js" });
-} catch (e) { loadErrors.push("load error: " + e.message); }
+  const booted = main.boot(sandbox);
+  // 入口按原名挂到沙箱（getter 转发，读到的永远是模块里的当前值）；state / api / ui 与 $ 由装配提供。
+  for (const k of Object.keys(booted)) Object.defineProperty(sandbox, k, { get: () => booted[k], configurable: true });
+  sandbox.state = main.context.state;
+  sandbox.api = main.context.api;
+  sandbox.ui = main.context.ui;
+  sandbox.$ = (sel) => sandbox.document.querySelector(sel);
+} catch (e) { loadErrors.push("boot error: " + e.message); }
 let state = null, renderHistory = null, openConfig = null, closeModalIfAny = null;
 if (!loadErrors.length) {
   state = vm.runInContext("state", ctx);

@@ -6,9 +6,9 @@
 <meta name="theme-color" content="#16181d">
 <title>Solomni · 转录中心</title>
 <!-- 令牌 → 组件 → 页面：页面不写字面量样式，组件只引用令牌。 -->
-<link rel="stylesheet" href="/tokens.css">
-<link rel="stylesheet" href="/ui.css">
-<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/assets/tokens.css">
+<link rel="stylesheet" href="/assets/ui.css">
+<link rel="stylesheet" href="/assets/style.css">
 </head>
 <body>
 <div id="app">
@@ -77,8 +77,8 @@
     </main>
   </div>
 </div>
-<script src="/md.js"></script>
-<script src="/ui.js"></script>
-<script src="/app.js"></script>
+<!-- md.js 先执行：装配后的首次渲染要用 window.markdownToHtml；两者都在解析后按顺序执行。 -->
+<script defer src="/assets/md.js"></script>
+<script type="module" src="/assets/app/main.js"></script>
 </body>
 </html>

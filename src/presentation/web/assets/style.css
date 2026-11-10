@@ -481,7 +481,7 @@ body {
   background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 6px; padding: 5px 8px;
 }
 .history-item:hover { border-color: var(--color-accent); }
-/* 会话树：根行可展开，子行缩进挂在父行下（见 app.js 的 renderHistory）。 */
+/* 会话树：根行可展开，子行缩进挂在父行下（见 `app/features/sidebar/sidebar.js` 的 renderHistory）。 */
 .history-toggle {
   flex: none; width: 18px; height: 18px; padding: 0;
   display: inline-flex; align-items: center; justify-content: center;

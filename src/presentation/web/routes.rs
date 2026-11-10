@@ -33,64 +33,14 @@ pub const ROUTES: &[Route] = &[
         note: "界面壳（no-store，改完立刻生效）",
     },
     Route {
-        id: "style",
+        id: "asset",
         method: "GET",
-        pattern: "/style.css",
+        pattern: "/assets/{*path}",
         capability: "静态资源",
         request: "—",
-        response: "style.css",
-        statuses: &[200],
-        note: "样式",
-    },
-    Route {
-        id: "app",
-        method: "GET",
-        pattern: "/app.js",
-        capability: "静态资源",
-        request: "—",
-        response: "app.js",
-        statuses: &[200],
-        note: "前端逻辑",
-    },
-    Route {
-        id: "md",
-        method: "GET",
-        pattern: "/md.js",
-        capability: "静态资源",
-        request: "—",
-        response: "md.js",
-        statuses: &[200],
-        note: "Markdown 渲染（先转义再拼标签）",
-    },
-    Route {
-        id: "tokens",
-        method: "GET",
-        pattern: "/tokens.css",
-        capability: "静态资源",
-        request: "—",
-        response: "tokens.css",
-        statuses: &[200],
-        note: "设计令牌（颜色 / 间距 / 动效 / 层级的唯一来源）",
-    },
-    Route {
-        id: "ui_css",
-        method: "GET",
-        pattern: "/ui.css",
-        capability: "静态资源",
-        request: "—",
-        response: "ui.css",
-        statuses: &[200],
-        note: "组件库样式（只引用令牌）",
-    },
-    Route {
-        id: "ui_js",
-        method: "GET",
-        pattern: "/ui.js",
-        capability: "静态资源",
-        request: "—",
-        response: "ui.js",
-        statuses: &[200],
-        note: "组件工厂与内联图标",
+        response: "编译期嵌入表里的文件",
+        statuses: &[200, 404],
+        note: "前端脚本 / 样式（build.rs 扫描 assets/ 生成；表外路径一律 404）",
     },
     Route {
         id: "events",
@@ -331,7 +281,8 @@ impl Matched {
     }
 }
 
-/// 按目录匹配一次请求（方法 + 路径；查询串不参与匹配）。
+/// 目的：按目录匹配一次请求（方法 + 路径；查询串不参与匹配）。
+/// 约束：末段 `{*name}` 是尾部通配，吞下其余一个或多个段，逐段解码后用 `/` 连接。
 pub fn matches(method: &str, url: &str) -> Option<Matched> {
     let path = url.split('?').next().unwrap_or("");
     let segs: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
@@ -340,12 +291,25 @@ pub fn matches(method: &str, url: &str) -> Option<Matched> {
             continue;
         }
         let pat: Vec<&str> = route.pattern.split('/').filter(|s| !s.is_empty()).collect();
-        if pat.len() != segs.len() {
+        let tail = pat
+            .last()
+            .and_then(|p| p.strip_prefix("{*"))
+            .and_then(|x| x.strip_suffix('}'));
+        let fixed = if tail.is_some() {
+            pat.len() - 1
+        } else {
+            pat.len()
+        };
+        let len_ok = match tail {
+            Some(_) => segs.len() > fixed,
+            None => segs.len() == fixed,
+        };
+        if !len_ok {
             continue;
         }
         let mut params: Vec<(&'static str, String)> = Vec::new();
         let mut hit = true;
-        for (p, s) in pat.iter().zip(segs.iter()) {
+        for (p, s) in pat[..fixed].iter().zip(segs.iter()) {
             if let Some(name) = p.strip_prefix('{').and_then(|x| x.strip_suffix('}')) {
                 // p 取自 route.pattern（'static），所以参数名同样是 'static。
                 params.push((name, url_decode(s)));
@@ -355,6 +319,10 @@ pub fn matches(method: &str, url: &str) -> Option<Matched> {
             }
         }
         if hit {
+            if let Some(name) = tail {
+                let rest: Vec<String> = segs[fixed..].iter().map(|s| url_decode(s)).collect();
+                params.push((name, rest.join("/")));
+            }
             return Some(Matched { route, params });
         }
     }

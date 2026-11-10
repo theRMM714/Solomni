@@ -101,8 +101,17 @@ function load(file) {
   } catch (e) { loadErrors.push(file + " 载入失败：" + e.message); }
 }
 load("md.js");
-load("ui.js");
-load("app.js");
+// 与浏览器同一段装配；再把入口铺到沙箱上，让 vm 片段按原名调用（测试内作用，生产没有全局业务函数）。
+const main = require("./app/main.js");
+try {
+  const booted = main.boot(sandbox);
+  // 入口按原名挂到沙箱（getter 转发，读到的永远是模块里的当前值）；state / api / ui 与 $ 由装配提供。
+  for (const k of Object.keys(booted)) Object.defineProperty(sandbox, k, { get: () => booted[k], configurable: true });
+  sandbox.state = main.context.state;
+  sandbox.api = main.context.api;
+  sandbox.ui = main.context.ui;
+  sandbox.$ = (sel) => sandbox.document.querySelector(sel);
+} catch (e) { loadErrors.push("boot error: " + e.message); }
 
 // 递归收集树里的节点（判"表单真的建出来了"）。
 function walk(node, out) {
@@ -127,7 +136,7 @@ function seedRegistry() {
     state.models = [{ id: "m1", name: "M", api_model: "m", provider: "p1", note: "", tools: "native", context: 0, is_core: true }];
     state.core = "m1";
     state.agents = [];
-    notifyRegistryChange();
+    registry.notify();
   `, sandbox);
 }
 
@@ -144,7 +153,7 @@ function check(name, fn) {
 if (!loadErrors.length) {
   // ① 模型登记弹窗：建得起来，且有"上下文窗口"数字输入（此前误用对象让整个表单炸掉）。
   check("模型登记弹窗建得起来且含窗口输入", () => {
-    vm.runInNewContext("openModelsModal()", sandbox);
+    vm.runInNewContext("openSettingsHub('models')", sandbox);
     const body = roots.get("#modal-root").children[0].children[0].children[1];
     const nums = inputsIn(body).filter((i) => i.type === "number");
     const text = walk(body, []).map((n) => String(n.textContent || "")).join(" ");
@@ -153,7 +162,7 @@ if (!loadErrors.length) {
   });
   // ①之一 工具调用选择：默认原生；信封是显式选项。
   check("模型表单：工具调用默认原生且保留信封选项", () => {
-    vm.runInNewContext("openModelsModal()", sandbox);
+    vm.runInNewContext("openSettingsHub('models')", sandbox);
     const body = roots.get("#modal-root").children[0].children[0].children[1];
     const picks = walk(body, []).filter((n) => n.tagName === "SELECT");
     const toolSel = picks.find(
@@ -165,7 +174,7 @@ if (!loadErrors.length) {
   // ①之二 思考映射：逐行配对；已映射档位在其它行不可再选；默认档只列已映射的档。
   check("模型页：思考映射行去重、可增删、默认档只列已映射", () => {
     seedRegistry();
-    vm.runInNewContext("openSettingsModal()", sandbox);
+    vm.runInNewContext("openSettingsHub('generate')", sandbox);
     const page = openPage("models");
     const find = (pred) => walk(page, []).find(pred);
     const add = find((n) => n.tagName === "BUTTON" && n.textContent === "+ 添加映射");
@@ -196,9 +205,9 @@ if (!loadErrors.length) {
     vm.runInNewContext(`
       state.providers = [{ id: "p1", base_url: "http://x" }];
       state.models = [{ id: "m1", name: "M", api_model: "m", provider: "p1", note: "", tools: "native", context: 0, is_core: true, thinking: { default: "high", levels: { off: { thinking: { type: "disabled" } }, high: "high" } } }];
-      state.core = "m1"; state.agents = []; notifyRegistryChange();
+      state.core = "m1"; state.agents = []; registry.notify();
     `, sandbox);
-    vm.runInNewContext("openSettingsModal()", sandbox);
+    vm.runInNewContext("openSettingsHub('generate')", sandbox);
     const page = openPage("models");
     const row = walk(page, []).find((n) => String(n.className) === "reg-item");
     const edit = row && walk(row, []).find((n) => n.tagName === "BUTTON" && n.textContent === "编辑");
@@ -214,7 +223,7 @@ if (!loadErrors.length) {
   // ①之四 映射值为空：保存前就拒绝，不把空串发给后端。
   check("模型页：思考映射空值拒绝保存", () => {
     seedRegistry();
-    vm.runInNewContext("openSettingsModal()", sandbox);
+    vm.runInNewContext("openSettingsHub('generate')", sandbox);
     const page = openPage("models");
     const row = walk(page, []).find((n) => String(n.className) === "reg-item");
     const edit = row && walk(row, []).find((n) => n.tagName === "BUTTON" && n.textContent === "编辑");
@@ -231,7 +240,7 @@ if (!loadErrors.length) {
   });
   // ② 设置中心：分页后生成页只有三项数字（超时 / 提醒 / 压缩），同时上台数在资源页。
   check("设置中心：生成页含超时、提醒、压缩、保留与总结模型", () => {
-    vm.runInNewContext("openSettingsModal()", sandbox);
+    vm.runInNewContext("openSettingsHub('generate')", sandbox);
     const page = openPage("generate");
     const nums = inputsIn(page).filter((i) => i.type === "number");
     const text = walk(page, []).map((n) => String(n.textContent || "")).join(" ");
@@ -239,7 +248,7 @@ if (!loadErrors.length) {
   });
   // ②之二 思考等级目录在生成页：默认四档是标签（后端 settings.thinking 是权威）。
   check("设置中心：生成页含思考等级标签", () => {
-    vm.runInNewContext("openSettingsModal()", sandbox);
+    vm.runInNewContext("openSettingsHub('generate')", sandbox);
     const page = openPage("generate");
     const nodes = walk(page, []);
     const text = nodes.map((n) => String(n.textContent || "")).join(" ");
@@ -250,7 +259,7 @@ if (!loadErrors.length) {
   });
   // ②之三 标签录入：空值 / 重复当场拒绝，新档位可加可删。
   check("设置中心：思考等级标签可加、拒重复与空值、可删", () => {
-    vm.runInNewContext("openSettingsModal()", sandbox);
+    vm.runInNewContext("openSettingsHub('generate')", sandbox);
     const page = openPage("generate");
     const find = (pred) => walk(page, []).find(pred);
     const input = find((n) => n.tagName === "INPUT" && String(n.placeholder).indexOf("新档位") >= 0);
@@ -285,7 +294,7 @@ if (!loadErrors.length) {
       return original(url, opts);
     };
     try {
-      vm.runInNewContext("openSettingsModal()", sandbox);
+      vm.runInNewContext("openSettingsHub('generate')", sandbox);
       const page = openPage("generate");
       const find = (pred) => walk(page, []).find(pred);
       const input = find((n) => n.tagName === "INPUT" && String(n.placeholder).indexOf("新档位") >= 0);
@@ -305,7 +314,7 @@ if (!loadErrors.length) {
   });
   // ⑥ 同时上台数要随保存一起提交（后端 set_settings 收这个字段）；"现在在跑什么"同页。
   check("设置中心：资源页含同时上台数与进程区块", () => {
-    vm.runInNewContext("openSettingsModal()", sandbox);
+    vm.runInNewContext("openSettingsHub('generate')", sandbox);
     const page = openPage("resources");
     const nums = inputsIn(page).filter((i) => i.type === "number");
     const nodes = walk(page, []);
@@ -314,7 +323,7 @@ if (!loadErrors.length) {
     return nums.length >= 1 && !!title && !!log;
   });
   check("设置中心：存储页含预算、回收与还原入口", () => {
-    vm.runInNewContext("openSettingsModal()", sandbox);
+    vm.runInNewContext("openSettingsHub('generate')", sandbox);
     const page = openPage("storage");
     const nodes = walk(page, []);
     const text = nodes.map((n) => String(n.textContent || "")).join(" ");
@@ -324,14 +333,14 @@ if (!loadErrors.length) {
     return nums.length >= 5 && !!report && !log && text.indexOf("可回收缓存") >= 0 && text.indexOf("还原虚拟根") >= 0;
   });
   check("设置中心：底栏保存接线", () => {
-    vm.runInNewContext("openSettingsModal()", sandbox);
+    vm.runInNewContext("openSettingsHub('generate')", sandbox);
     openPage("generate");
     const hub = hubBody();
     const save = walk(hub, []).find((n) => n.tagName === "BUTTON" && n.textContent === "保存");
     return !!save && typeof save.onclick === "function";
   });
   check("设置中心：沙箱页含硬约束与网络围栏", () => {
-    vm.runInNewContext("openSettingsModal()", sandbox);
+    vm.runInNewContext("openSettingsHub('generate')", sandbox);
     const page = openPage("sandbox");
     const text = walk(page, []).map((n) => String(n.textContent || "")).join(" ");
     return text.indexOf("全局硬约束") >= 0 && text.indexOf("网络围栏") >= 0;
@@ -339,10 +348,10 @@ if (!loadErrors.length) {
   // 登记处同步：页面已建好并缓存后，新登记的东西必须立刻出现在它的列表 / 下拉里。
   check("模型页先建好，登记供应商后下拉与发现区即时更新", () => {
     seedRegistry();
-    vm.runInNewContext("openSettingsModal()", sandbox);
+    vm.runInNewContext("openSettingsHub('generate')", sandbox);
     const page = openPage("models");
     vm.runInNewContext(
-      'state.providers = state.providers.concat([{ id: "p2", base_url: "http://y" }]); notifyRegistryChange();',
+      'state.providers = state.providers.concat([{ id: "p2", base_url: "http://y" }]); registry.notify();',
       sandbox
     );
     const text = walk(page, []).map((n) => String(n.textContent || "")).join(" ");
@@ -350,10 +359,10 @@ if (!loadErrors.length) {
   });
   check("模型页先建好，登记模型后列表与核心下拉即时更新", () => {
     seedRegistry();
-    vm.runInNewContext("openSettingsModal()", sandbox);
+    vm.runInNewContext("openSettingsHub('generate')", sandbox);
     const page = openPage("models");
     vm.runInNewContext(
-      'state.models = state.models.concat([{ id: "m2", name: "M2", api_model: "m2", provider: "p1", note: "", tools: "envelope", context: 0, is_core: false }]); notifyRegistryChange();',
+      'state.models = state.models.concat([{ id: "m2", name: "M2", api_model: "m2", provider: "p1", note: "", tools: "envelope", context: 0, is_core: false }]); registry.notify();',
       sandbox
     );
     const text = walk(page, []).map((n) => String(n.textContent || "")).join(" ");
@@ -361,10 +370,10 @@ if (!loadErrors.length) {
   });
   check("设为核心后模型行的「核心」徽标即时移动", () => {
     seedRegistry();
-    vm.runInNewContext("openSettingsModal()", sandbox);
+    vm.runInNewContext("openSettingsHub('generate')", sandbox);
     const page = openPage("models");
     vm.runInNewContext(
-      'state.models = state.models.concat([{ id: "m2", name: "M2", api_model: "m2", provider: "p1", note: "", tools: "envelope", context: 0, is_core: false }]); state.core = "m2"; state.models = state.models.map((m) => ({ ...m, is_core: m.id === "m2" })); notifyRegistryChange();',
+      'state.models = state.models.concat([{ id: "m2", name: "M2", api_model: "m2", provider: "p1", note: "", tools: "envelope", context: 0, is_core: false }]); state.core = "m2"; state.models = state.models.map((m) => ({ ...m, is_core: m.id === "m2" })); registry.notify();',
       sandbox
     );
     const idNode = walk(page, []).find((n) => n.className === "reg-id" && String(n.textContent) === "m2");
@@ -372,31 +381,31 @@ if (!loadErrors.length) {
   });
   check("登记处同步不重建表单（正在填的输入不丢）", () => {
     seedRegistry();
-    vm.runInNewContext("openSettingsModal()", sandbox);
+    vm.runInNewContext("openSettingsHub('generate')", sandbox);
     const page = openPage("models");
     const idInput = walk(page, []).find((n) => n.tagName === "INPUT" && n.placeholder === "id");
     idInput.value = "正在填的 id";
     vm.runInNewContext(
-      'state.providers = state.providers.concat([{ id: "p3", base_url: "http://z" }]); notifyRegistryChange();',
+      'state.providers = state.providers.concat([{ id: "p3", base_url: "http://z" }]); registry.notify();',
       sandbox
     );
     return idInput.value === "正在填的 id";
   });
   check("agent 页新建弹层：登记模型后默认模型下拉即时更新", () => {
     seedRegistry();
-    vm.runInNewContext("openSettingsModal()", sandbox);
+    vm.runInNewContext("openSettingsHub('generate')", sandbox);
     const page = openPage("agents");
     const add = walk(page, []).find((n) => n.tagName === "BUTTON" && n.textContent === "+ 新建 agent");
     if (!add) return false;
     add.onclick();
     vm.runInNewContext(
-      'state.models = state.models.concat([{ id: "m3", name: "M3", api_model: "m3", provider: "p1", note: "", tools: "envelope", context: 0, is_core: false }]); notifyRegistryChange();',
+      'state.models = state.models.concat([{ id: "m3", name: "M3", api_model: "m3", provider: "p1", note: "", tools: "envelope", context: 0, is_core: false }]); registry.notify();',
       sandbox
     );
     return optionValues(roots.get("#modal-root")).indexOf("m3") >= 0;
   });
   check("模型表单说明 0 = 不填且自动压缩按 128K 兜底", () => {
-    vm.runInNewContext("openModelsModal()", sandbox);
+    vm.runInNewContext("openSettingsHub('models')", sandbox);
     const body = roots.get("#modal-root").children[0].children[0].children[1];
     const text = walk(body, []).map((n) => String(n.textContent || "")).join(" ");
     return text.indexOf("0 或留空 = 不填") >= 0 && text.indexOf("128K") >= 0;
@@ -422,11 +431,11 @@ if (!loadErrors.length) {
     const got = vm.runInNewContext(`
       (() => {
         state.sessions.set("s1", { sid: "s1", lines: [], live: [], pending: null, sending: false, done: false, fold: {}, scroll: {} });
-        appliedSeq = 0;
+        progress.seq = 0;
         applyBatch(1, "s1", [{ type: "notice", text: "第一" }]);
         applyBatch(2, "s1", [{ type: "notice", text: "第二" }]);
         const lines = state.sessions.get("s1").lines.map((l) => l.text);
-        return { lines, applied: appliedSeq };
+        return { lines, applied: progress.seq };
       })()
     `, sandbox);
     return got.applied === 2 && got.lines.length === 2 &&
@@ -484,7 +493,7 @@ if (!loadErrors.length) {
   // ⑧ 核心默认块：设置模型页顶部有下拉与保存，容器须给二者留间距（保存按钮紧贴下拉的回归）。
   check("核心默认块：下拉与保存按钮在设置模型页且有间距", () => {
     seedRegistry();
-    vm.runInNewContext("openSettingsModal()", sandbox);
+    vm.runInNewContext("openSettingsHub('generate')", sandbox);
     const page = openPage("models");
     const core = walk(page, []).find((n) => String(n.className) === "settings-core");
     const save = core && walk(core, []).find((n) => n.tagName === "BUTTON" && n.textContent === "保存");

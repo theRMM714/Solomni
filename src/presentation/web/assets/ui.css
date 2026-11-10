@@ -1,6 +1,6 @@
 /* Solomni 组件库：按钮、图标按钮、提示、表单、弹层、菜单、折叠、toast、空态与骨架。
  * 约束：只引用 /tokens.css 的变量；不写字面量颜色或时长（tokens.smoke.cjs 守着）。
- * 联动：页面布局在 /style.css；组件工厂在 /ui.js。 */
+ * 联动：页面布局在 /style.css；组件工厂在 app/ui/。 */
 .hidden { display: none !important; }
 
 /* ---- 统一滚动条：跟随主题，不露出系统白条 ---- */

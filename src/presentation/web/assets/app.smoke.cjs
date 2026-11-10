@@ -1,6 +1,6 @@
-/* 前端冒烟测试（桩 DOM + 桩 fetch）：跑 app.js 的初始化路径，暴露引用错误。
+/* 前端冒烟测试（桩 DOM + 桩 fetch）：跑 app/ 分层入口的初始化路径，暴露引用错误。
  * 用法：node src/presentation/web/app.smoke.cjs   （输出 FRONTEND-INIT-OK / FAIL）
- * 为什么需要：app.js 是 no-build 原生 JS，浏览器只在运行时才发现未定义变量，
+ * 为什么需要：前端是 no-build 原生 JS，浏览器只在运行时才发现未定义变量，
  * 这类错误会让整个界面初始化失败（例：renderSidebar 误引用外部作用域变量）。
  */
 const fs = require("fs");
@@ -9,7 +9,7 @@ const vm = require("vm");
 const alerts = [];
 const loadErrors = [];
 let eventPolls = 0;
-// 应用侧异常一律走 console.error（app.js 的 eventError）：这里记下来，当成硬失败。
+// 应用侧异常一律走 console.error（features/shell/shell.js 的 eventError）：这里记下来，当成硬失败。
 // 为什么必须有它：连接状态已经不看应用异常了，没有这一条，"渲染里抛异常"就会悄悄溜过去。
 const consoleErrors = [];
 // /api/sessions/{sid}/files 的桩：按会话记被拉取的次数——"每次打开 @ 菜单都重拉"靠它验。
@@ -171,13 +171,17 @@ sandbox.globalThis = sandbox;
 try {
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "md.js"), "utf8"), sandbox, { filename: "md.js" });
 } catch (e) { loadErrors.push("md load error: " + e.message); }
+// 与浏览器同一段装配；再把入口铺到沙箱上，让 vm 片段按原名调用（测试内作用，生产没有全局业务函数）。
+const main = require("./app/main.js");
 try {
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, "ui.js"), "utf8"), sandbox, { filename: "ui.js" });
-} catch (e) { loadErrors.push("ui load error: " + e.message); }
-const appPath = path.join(__dirname, "app.js");
-try {
-  vm.runInNewContext(fs.readFileSync(appPath, "utf8"), sandbox, { filename: "app.js" });
-} catch (e) { loadErrors.push("load error: " + e.message); }
+  const booted = main.boot(sandbox);
+  // 入口按原名挂到沙箱（getter 转发，读到的永远是模块里的当前值）；state / api / ui 与 $ 由装配提供。
+  for (const k of Object.keys(booted)) Object.defineProperty(sandbox, k, { get: () => booted[k], configurable: true });
+  sandbox.state = main.context.state;
+  sandbox.api = main.context.api;
+  sandbox.ui = main.context.ui;
+  sandbox.$ = (sel) => sandbox.document.querySelector(sel);
+} catch (e) { loadErrors.push("boot error: " + e.message); }
 setTimeout(async () => {
   // 正向观察面：自研居中弹窗真的渲染出来（只断言"原生没被调用"是不够的——那样全删掉也能过）。
   let rendered = false;

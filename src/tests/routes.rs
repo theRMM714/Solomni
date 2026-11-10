@@ -786,6 +786,7 @@ fn sample_param(_route_id: &str, name: &str) -> &'static str {
         "name" => "a1",
         "id" => "create_session",
         "commit" => "1",
+        "path" => "a.txt",
         _ => "x",
     }
 }
@@ -794,7 +795,11 @@ fn sample_url(route: &routes::Route) -> String {
     let mut path = String::new();
     for seg in route.pattern.split('/').filter(|s| !s.is_empty()) {
         path.push('/');
-        match seg.strip_prefix('{').and_then(|x| x.strip_suffix('}')) {
+        match seg
+            .strip_prefix('{')
+            .and_then(|x| x.strip_suffix('}'))
+            .map(|x| x.trim_start_matches('*'))
+        {
             Some(name) => path.push_str(sample_param(route.id, name)),
             None => path.push_str(seg),
         }
@@ -808,13 +813,21 @@ fn sample_url(route: &routes::Route) -> String {
     path
 }
 
-/// 路径是否落在某条目录 pattern 的形状上（参数段匹配任意非空段；查询串不参与）。
+/// 路径是否落在某条目录 pattern 的形状上（参数段匹配任意非空段，末段 `{*…}` 匹配其余一个或多个段；查询串不参与）。
 fn shape_matches(pattern: &str, url: &str) -> bool {
     let p: Vec<&str> = pattern.split('/').filter(|s| !s.is_empty()).collect();
     let path = url.split('?').next().unwrap_or("");
     let q: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-    p.len() == q.len()
-        && p.iter()
+    let tail = p.last().is_some_and(|s| s.starts_with("{*"));
+    let fixed = if tail { p.len() - 1 } else { p.len() };
+    let len_ok = if tail {
+        q.len() > fixed
+    } else {
+        q.len() == fixed
+    };
+    len_ok
+        && p[..fixed]
+            .iter()
             .zip(q.iter())
             .all(|(a, b)| a.starts_with('{') || a == b)
 }
@@ -953,27 +966,32 @@ fn documented_route_table_matches_the_catalog() {
 
 #[test]
 fn frontend_only_calls_catalogued_paths() {
-    let src = include_str!("../presentation/web/assets/app.js");
+    // 扫发行版里的全部脚本：前端拆成多少个文件，这条都盯得住。
     let mut hits: Vec<String> = Vec::new();
-    let mut from = 0;
-    while let Some(pos) = src[from..].find("/api/") {
-        let start = from + pos;
-        let tail = &src[start..];
-        let end = tail
-            .find(|c: char| !(c.is_alphanumeric() || matches!(c, '/' | '_' | '-' | '.')))
-            .unwrap_or(tail.len());
-        let path = &tail[..end];
-        if !hits.iter().any(|h| h == path) {
-            hits.push(path.to_string());
-        }
-        from = start + 4;
-        if from >= src.len() {
-            break;
+    for (_, _, src) in web::assets::ASSETS
+        .iter()
+        .filter(|(p, _, _)| p.ends_with(".js"))
+    {
+        let mut from = 0;
+        while let Some(pos) = src[from..].find("/api/") {
+            let start = from + pos;
+            let tail = &src[start..];
+            let end = tail
+                .find(|c: char| !(c.is_alphanumeric() || matches!(c, '/' | '_' | '-' | '.')))
+                .unwrap_or(tail.len());
+            let path = &tail[..end];
+            if !hits.iter().any(|h| h == path) {
+                hits.push(path.to_string());
+            }
+            from = start + 4;
+            if from >= src.len() {
+                break;
+            }
         }
     }
     assert!(
         !hits.is_empty(),
-        "没从 app.js 里认出任何 /api/ 调用（提取逻辑失效了？）"
+        "没从前端脚本里认出任何 /api/ 调用（提取逻辑失效了？）"
     );
     for p in &hits {
         // 字面前缀即可：动态段由前端拼在后面（'/api/sessions/' + encodeURIComponent(sid) + '/config'）。
@@ -1025,6 +1043,84 @@ fn demo_scripts_only_call_catalogued_paths() {
             .iter()
             .any(|r| r.pattern == p.as_str() || r.pattern.starts_with(p.as_str()));
         assert!(known, "演示脚本调用了目录里没有的路径：{}", p);
+    }
+}
+
+/// 静态资源只从编译期嵌入表里出：表外的写法（穿越、编码斜杠、开发脚本）一律 404，命中的都是 no-store。
+/// 为什么钉：资源路由是尾部通配，任何「顺手读一下磁盘」的改动都会把它变成任意文件读取。
+#[test]
+fn assets_are_served_only_from_the_embedded_table() {
+    let ops = fake_ops(None);
+    let log: Arc<dyn crate::capabilities::conductor::api::LogOps + Send + Sync> =
+        Arc::new(super::doubles::NoopLogOps);
+    let get = |url: &str| web::route(&ops, &fence(), &log, "GET", url, "");
+
+    assert!(
+        web::assets::ASSETS
+            .iter()
+            .any(|(p, _, _)| *p == "index.html"),
+        "嵌入表里必须有 index.html"
+    );
+    for (path, mime, body) in web::assets::ASSETS {
+        assert!(!path.contains('\\'), "嵌入表的键必须是 URL 路径：{}", path);
+        let (code, headers, text) = get(&format!("/assets/{}", path));
+        assert_eq!(code, 200, "/assets/{} 应命中", path);
+        assert_eq!(text.as_str(), *body, "/assets/{} 内容应与嵌入表一致", path);
+        let has = |k: &str, v: &str| headers.iter().any(|(hk, hv)| *hk == k && hv.starts_with(v));
+        assert!(
+            has("Content-Type", mime),
+            "/assets/{} 的 MIME 应为 {}",
+            path,
+            mime
+        );
+        assert!(
+            has("Cache-Control", "no-store"),
+            "/assets/{} 应带 no-store",
+            path
+        );
+    }
+    assert!(
+        !web::assets::ASSETS
+            .iter()
+            .any(|(p, _, _)| p.ends_with(".cjs") || p.ends_with(".mjs")),
+        "开发脚本不进发行版"
+    );
+    assert!(
+        web::assets::lookup("app/package.json").is_none(),
+        "node 用的 package.json 不进发行版"
+    );
+    assert_eq!(
+        web::assets::lookup("app/main.js").map(|(m, _)| m),
+        Some("application/javascript"),
+        "子目录里的模块入口按 JS 提供"
+    );
+
+    let (code, _, text) = get("/");
+    assert_eq!(code, 200);
+    assert!(text.contains("<!DOCTYPE"), "/ 应给 index.html");
+    // 界面壳引用的每个 /assets/ 资源都要在表里：写错一个前缀就是白屏。
+    let mut refs = 0;
+    for piece in text.split("\"/assets/").skip(1) {
+        let path = piece.split('"').next().unwrap_or("");
+        refs += 1;
+        assert!(
+            web::assets::lookup(path).is_some(),
+            "index.html 引用了表里没有的资源：/assets/{}",
+            path
+        );
+    }
+    assert!(refs > 0, "index.html 应至少引用一个 /assets/ 资源");
+
+    for bad in [
+        "/assets/nope.js",
+        "/assets/smoke.cjs",
+        "/assets/../Cargo.toml",
+        "/assets/..%2FCargo.toml",
+        "/assets/%2e%2e/Cargo.toml",
+        "/assets/",
+    ] {
+        let (code, _, text) = get(bad);
+        assert_eq!(code, 404, "{} 应为 404：{}", bad, text);
     }
 }
 
@@ -1128,12 +1224,12 @@ fn success_shapes_are_pinned_per_route() {
     ops.events.seed_for_test("w1");
     let cases: Vec<(&str, &str, &str, u16, &str)> = vec![
         ("GET", "/", "", 200, "<!DOCTYPE"),
-        ("GET", "/style.css", "", 200, "--"),
-        ("GET", "/app.js", "", 200, "/api/"),
-        ("GET", "/md.js", "", 200, "function esc"),
-        ("GET", "/tokens.css", "", 200, "--color-bg"),
-        ("GET", "/ui.css", "", 200, ".btn"),
-        ("GET", "/ui.js", "", 200, "global.ui"),
+        ("GET", "/assets/style.css", "", 200, "--"),
+        ("GET", "/assets/app/main.js", "", 200, "boot"),
+        ("GET", "/assets/md.js", "", 200, "function esc"),
+        ("GET", "/assets/tokens.css", "", 200, "--color-bg"),
+        ("GET", "/assets/ui.css", "", 200, ".btn"),
+        ("GET", "/assets/app/ui/index.js", "", 200, "createUi"),
         ("GET", "/api/events?sid=&since=0", "", 200, "\"head\""),
         ("GET", "/api/dirs?path=.", "", 200, "\"path\""),
         ("GET", "/api/state", "", 200, "\"modules\""),

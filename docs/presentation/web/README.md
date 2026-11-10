@@ -1,12 +1,12 @@
 # web（本地网页）
 
 > 定位：本地 HTTP + 长轮询；路由目录是机器比对的锚点。
-> 效力：规范｜核对：2026-11-04｜依据：`src/presentation/web/routes.rs`
+> 效力：规范｜核对：2026-11-10｜依据：`src/presentation/web/routes.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [ARCHITECTURE.md](../../../ARCHITECTURE.md) §一，业务边界判据见 §九，测试规范见 [TESTING.md](../../../TESTING.md)。
 
 ## 管什么 / 不管什么
 
-- 管：本地 HTTP（tiny_http，**只绑 `127.0.0.1`**）+ 长轮询增量推送 + HTTP 路由目录 + 浏览器端资源与冒烟（`assets/*.smoke.cjs`）。
+- 管：本地 HTTP（tiny_http，**只绑 `127.0.0.1`**）+ 长轮询增量推送 + HTTP 路由目录 + 浏览器端资源与冒烟（`assets/` 下递归发现的 `*.smoke.cjs` / `*.smoke.mjs`）。
 - 管：浏览器端覆盖三种工作形态（single / collab / **proxy**）的建工作向导与会话视图：代理形态不问名单与需求（选它就是授予全权），会话说明与侧栏标出「已停止 / 已关闭」（持久运行态）。
 - 管：转录里的**内容类系统提示**是 `notice` 行（有会话内 id、可回档 / 折叠）；过程性提示、工具层确认与基础设施故障仍是瞬时事件——前端两种都按系统行画，只有前者带 id（见 [session-model.md](../../session/session-model.md) 的「系统消息」）。
 - **一轮 = 一条回复**：同 `reply` 的正文 / 思维链 / 工具行合成一个气泡（身份 / 思维链 / 正文 / 工具组，整轮可折叠）；定稿渲染只**追加**新行，同一回复的后续工具行只重建最后那一轮；流式块也按同一轮容器渲染（消息 + 随后的工具调用），增量按 `requestAnimationFrame` 合并。**工具卡只有「参数 / 结果」**；助手原文是回复级事实，整轮气泡里只显示一次（原生模式下与可见正文相同则不重复）。
@@ -39,9 +39,17 @@
 - 经 `::api` 用到：`conductor`（`Ops` 字段里带 `provision` 面）
 - 谁在用我：（无）
 
+## 一、前端分层
+
+- 入口只有一个：`src/presentation/web/assets/index.html` 只放挂载点，加载 `src/presentation/web/assets/app/main.js`（`type="module"`）与 `src/presentation/web/assets/md.js`；`src/presentation/web/assets/app/main.js` 是唯一的组装点（建共享上下文、按顺序 `mount`、启动接线），页面没有全局业务函数。
+- 目录即依赖方向：`src/presentation/web/assets/app/core/` 不依赖其它层；`src/presentation/web/assets/app/stores/` 与 `src/presentation/web/assets/app/ui/` 只依赖 `core/`；`src/presentation/web/assets/app/features/` 下的每个功能只依赖 `core/`、`stores/`、`ui/` 与自己的目录，功能之间互不 import——跨功能调用经装配点注入的晚绑定入口。
+- 判定：`tests/gates/structure/webLayers.js`（T0 结构审查的 `structure/web-layers`）扫描 `src/presentation/web/assets/app/**/*.js` 的 import 方向与 `src/presentation/web/assets/index.html` 的入口脚本；文件 400 行只是回执软线，超线不判失败。
+
 ## 改动本单元时必须同步
 
 - 增删路由 → 五处同改：`src/presentation/web/routes.rs` 的 `ROUTES`、前端调用点、`docs/presentation/contracts.md` 的 ROUTES 段、`src/tests/routes.rs`（机器比对）、`demo/*.mjs` 的调用点；前端资源改动跑冒烟。
+- 增删前端文件 → **不改路由**：`build.rs` 编译期扫描 `assets/` 自动进嵌入表（经 `/assets/{*path}` 提供）；新扩展名要先加进 `build.rs` 的 `SERVED`，否则构建失败。
+- 增删或移动前端模块 → 依赖方向由 `tests/gates/structure/webLayers.js` 判定（`structure/web-layers`），并跑 `node run-tests.js` 的 `frontend-smoke`；分区职责改完同步本页与 [`unit-map.md`](unit-map.md)。
 - 测试缺口：本单元**不是业务能力**，没有独立的缺口账；缺口记在 `tests/gaps.yaml`；格式见 [docs/testing/gaps-acceptance.md](../../../docs/testing/gaps-acceptance.md) 的「缺口账」。
 
 ## 本目录

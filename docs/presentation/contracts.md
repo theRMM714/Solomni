@@ -31,7 +31,7 @@
   子会话拿完整的一份（含定稿行）。客户端打开哪个标签页读哪条流，不靠"从别人的流里猜自己"。
 - **连接状态只看事件流的取用**：客户端把"取事件失败"（服务没起来 / 连接断了）与"事件应用/渲染出错"分开——
   后者不是断线，如实报错并留在日志里；两类都要落到日志，不能只亮状态点
-  （见 `src/presentation/web/assets/app.js` 的 `setConn` / `eventError`）。
+  （传输层 `src/presentation/web/assets/app/core/events.js` 把两类分别交给 `onConn` / `onError`）。
 - **并发归核心**：`stop` 直接置位核心内部的取消标志，**不进命令队列**，所以生成期间照样立刻生效；
   呈现层不需要知道「生成时核心状态被占用」这类内部事实。
 - **生成不占命令队列**（单 agent 与协作的长步骤都是）：命令队列只做**状态变更**与**派发**——生成时先把会话对象
@@ -91,19 +91,15 @@
 
 下面这张表由契约测试与 `ROUTES` 机器比对——对不上就是测试失败，不是靠人记得改文档：
 
-静态资源（`/`、`style.css`、`app.js`、`md.js`、`tokens.css`、`ui.css`、`ui.js`）一律 `Cache-Control: no-store`：改了前端**刷新即生效**，
-不需要硬刷新（`src/presentation/web/mod.rs` 的 `static_head`）。
+静态资源只有两条路由：`/` 给 `index.html`，`/assets/{*path}` 给其余文件。文件来自编译期嵌入表（`build.rs` 扫描 `src/presentation/web/assets/`，`.cjs` / `.mjs` 开发脚本不进表；未知扩展名让构建失败），
+请求只查这张表、不读文件系统，表外路径一律 404（`src/presentation/web/assets.rs`）。增删前端文件**不改路由**。
+静态资源一律 `Cache-Control: no-store`：改了前端**刷新即生效**，不需要硬刷新（`src/presentation/web/mod.rs` 的 `static_head`）。
 
 <!-- ROUTES:BEGIN -->
 | 方法 | 路径 | 能力 | 请求 | 响应 | 状态码 |
 | --- | --- | --- | --- | --- | --- |
 | GET | `/` | 静态资源 | — | `index.html` | 200 |
-| GET | `/style.css` | 静态资源 | — | `style.css` | 200 |
-| GET | `/app.js` | 静态资源 | — | `app.js` | 200 |
-| GET | `/md.js` | 静态资源 | — | `md.js` | 200 |
-| GET | `/tokens.css` | 静态资源 | — | `tokens.css` | 200 |
-| GET | `/ui.css` | 静态资源 | — | `ui.css` | 200 |
-| GET | `/ui.js` | 静态资源 | — | `ui.js` | 200 |
+| GET | `/assets/{*path}` | 静态资源 | — | 编译期嵌入表里的文件 | 200, 404 |
 | GET | `/api/events` | 事件台（`EventBus`） | 查询 `sid` / `since` | `{lines:[{seq,sid,events}],head,oldest}` | 200 |
 | GET | `/api/state` | `ModulesOps::roster / module_enabled / service_enabled` + `SessionOps::session_views` + `RegistryOps` + `HistoryOps::list` | — | `{modules,services,rejected,fence,providers,models,core,agents,settings,sessions,history}`（`modules[].runtimes` 是模块声明的运行能力，创建向导据此预判虚拟根够不够；`modules[].enabled` 与 `modules[].services[].enabled` 是**有效启停**；`services` 是常驻服务的**运行态** `{module,name,adapter,state,reason,operations}`；`sessions[].pending` 是**当前那张裁决卡**的快照，与推的 `decision_card` 同一份；`sessions[].context` 是最近一次模型调用的上下文用量，只对 `Session::Single`（single / proxy / agent 子会话）存在；`sessions[].shell` 是最近一次 shell 的运行状态，没跑过就是 null） | 200, 400 |
 | GET | `/api/actions` | `ActionOps::catalog` | 查询 `sid` | `{actions:[{id,desc,params,available,reason}]}` | 200, 400 |
