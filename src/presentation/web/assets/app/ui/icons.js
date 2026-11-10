@@ -8,6 +8,10 @@ const SVG_HEAD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" str
 
 export const ICONS = {
   plus: '<path d="M12 5v14M5 12h14"/>',
+  menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  upload: '<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 20h16"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/>',
+  "chevron-right": '<path d="m9 6 6 6-6 6"/>',
   undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h9a7 7 0 0 1 0 14h-1"/>',
   pencil: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
   gear: '<path d="M4 7h6M14 7h6M4 12h10M18 12h2M4 17h4M12 17h8"/>' +

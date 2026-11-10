@@ -95,7 +95,8 @@ function toolCard(t, sess, key, who) {
   const head = doc.createElement('div'); head.className = 'tool-head';
   const name = doc.createElement('span'); name.className = 'tool-name';
   name.textContent = (info.module ? info.module + '.' : '') + (info.name || '工具');
-  const mark = doc.createElement('span'); mark.className = 'tool-mark'; mark.textContent = info.ok ? '✓' : '✗';
+  const mark = doc.createElement('span'); mark.className = 'tool-mark';
+  mark.appendChild(ui.icon(info.ok ? 'check' : 'close'));
   head.appendChild(name); head.appendChild(mark);
   el.appendChild(head);
   el.appendChild(toolDetail('参数', info.args, sess, key + ':args'));

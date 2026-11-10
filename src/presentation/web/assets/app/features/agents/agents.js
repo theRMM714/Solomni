@@ -54,8 +54,10 @@ function moduleChips(opts) {
       chip.appendChild(label);
       if (!o.disabled) {
         const x = doc.createElement('button');
-        x.type = 'button'; x.className = 'mod-chip-x'; x.textContent = '×';
+        x.type = 'button'; x.className = 'mod-chip-x';
+        x.setAttribute('aria-label', '移除 ' + id);
         x.title = '移除 ' + id;
+        x.appendChild(ui.icon('close'));
         x.onclick = () => commit(ids.filter((xid) => xid !== id));
         chip.appendChild(x);
       }
@@ -100,7 +102,7 @@ function openModulePicker(opts) {
       const head = doc.createElement('span'); head.className = 'mod-tile-head';
       const id = doc.createElement('span'); id.className = 'mod-tile-id'; id.textContent = m.id;
       const mark = doc.createElement('span'); mark.className = 'mod-tile-mark';
-      mark.textContent = isAdded ? '✓' : '+';
+      mark.appendChild(ui.icon(isAdded ? 'check' : 'plus'));
       head.appendChild(id); head.appendChild(mark);
       const brief = doc.createElement('span'); brief.className = 'mod-tile-brief'; brief.textContent = m.brief || '';
       b.appendChild(head); b.appendChild(brief);

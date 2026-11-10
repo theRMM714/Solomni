@@ -68,8 +68,10 @@ const fold = ui.fold({ label: "思维链", count: 12, body: el("div") });
 check("折叠是 details", fold.tagName === "DETAILS");
 check("折叠有 summary", (fold.children[0] || {}).tagName === "SUMMARY");
 const sum = fold.children[0] || { children: [] };
-check("折叠标签", String(sum.children[0] && sum.children[0].textContent) === "思维链");
-check("折叠计数", String(sum.children[1] && sum.children[1].textContent) === "12");
+const sumParts = sum.children || [];
+check("折叠图标", sumParts.some((c) => c.className === "ui-icon"));
+check("折叠标签", String((sumParts.find((c) => c.className === "fold-label") || {}).textContent) === "思维链");
+check("折叠计数", String((sumParts.find((c) => c.className === "fold-count") || {}).textContent) === "12");
 check("折叠体在 .fold-body", (fold.children[1] || {}).className === "fold-body");
 
 const overlay = el("div");

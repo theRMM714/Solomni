@@ -70,6 +70,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--color-accent);
 .icon-btn:active { transform: scale(.96); }
 .icon-btn.danger:hover { color: var(--color-err); border-color: var(--color-err-line); }
 .ui-icon { display: inline-flex; width: 16px; height: 16px; }
+.icon-btn > svg { width: 16px; height: 16px; }
 .ui-icon svg { width: 100%; height: 100%; }
 
 [data-tip] { position: relative; }
@@ -121,7 +122,7 @@ select.field-input { cursor: pointer; }
 .modal-panel.wide { width: min(880px, 100%); }
 .modal-head { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--color-border); }
 .modal-title { flex: 1; font-weight: 600; }
-.modal-close { background: none; border: none; color: var(--color-text-dim); font-size: var(--fs-l); cursor: pointer; }
+.modal-close { color: var(--color-text-dim); }
 .modal-close:hover { color: var(--color-err); }
 .modal-body { padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-4); overflow-y: auto; max-height: 70vh; }
 .modal-msg { min-height: 1.2em; padding: 0 var(--sp-4) var(--sp-3); font-size: var(--fs-base); color: var(--color-text-dim); }
@@ -238,11 +239,11 @@ select.field-input { cursor: pointer; }
   cursor: pointer; list-style: none; color: var(--color-text-dim); font-size: var(--fs-s);
 }
 .fold > summary::-webkit-details-marker { display: none; }
-.fold > summary::before {
-  content: "▸"; display: inline-block; width: 12px;
+.fold > summary .ui-icon {
+  width: 12px; height: 12px; flex: none;
   transition: transform var(--dur-fast) var(--ease-out);
 }
-.fold[open] > summary::before { transform: rotate(90deg); }
+.fold[open] > summary .ui-icon { transform: rotate(90deg); }
 .fold-count { color: var(--color-text-dim); opacity: .85; }
 .fold-body { margin-top: var(--sp-1); animation: fold-in var(--dur-fast) var(--ease-out); }
 
@@ -265,7 +266,7 @@ select.field-input { cursor: pointer; }
 
 /* ---- 空态 / 骨架 / 小徽标 ---- */
 .empty { margin: auto; text-align: center; color: var(--color-text-dim); }
-.empty .logo { font-size: var(--fs-xl); margin-bottom: var(--sp-2); }
+.empty-logo { display: block; width: var(--fs-xl); height: var(--fs-xl); margin: 0 auto var(--sp-2); color: var(--color-text-dim); }
 .empty .tip { font-size: var(--fs-s); }
 .empty .hint { font-size: var(--fs-s); margin-top: var(--sp-3); color: var(--color-text-dim); opacity: .8; }
 .chip {

@@ -115,8 +115,10 @@ function thinkingTagsEditor(levels) {
       label.className = 'mod-chip-label';
       label.textContent = id;
       chip.title = id;
-      const x = btn('×', 'mod-chip-x');
+      const x = btn('', 'mod-chip-x');
       x.title = '移除 ' + id;
+      x.setAttribute('aria-label', '移除 ' + id);
+      x.appendChild(ui.icon('close'));
       x.onclick = () => {
         const i = ids.indexOf(id);
         if (i >= 0) ids.splice(i, 1);
@@ -226,8 +228,10 @@ function thinkingMapEditor() {
     input.className = 'field-input think-value';
     input.value = row.value;
     input.addEventListener('input', () => { row.value = input.value; });
-    const del = btn('×', 'link-btn danger');
+    const del = btn('', 'link-btn danger');
     del.title = '移除这一行';
+    del.setAttribute('aria-label', '移除这一行');
+    del.appendChild(ui.icon('close'));
     del.onclick = () => removeRow(row);
     sel.onchange = () => { row.level = sel.value; syncAll(); };
     node.appendChild(sel); node.appendChild(eq); node.appendChild(input); node.appendChild(del);

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="theme-color" content="#16181d">
+<meta name="theme-color" content="#121110">
 <title>Solomni · 转录中心</title>
 <!-- 令牌 → 组件 → 页面：页面不写字面量样式，组件只引用令牌。 -->
 <link rel="stylesheet" href="/assets/tokens.css">
@@ -14,7 +14,7 @@
 <div id="app">
   <!-- 顶栏：品牌 + 状态 + 侧栏开关（桌面收起 / 移动端抽屉） -->
   <header class="topbar">
-    <button id="btn-drawer" class="icon-btn" aria-label="收起或展开侧栏">☰</button>
+    <button id="btn-drawer" class="icon-btn" aria-label="收起或展开侧栏"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
     <div class="brand">Solomni <span class="brand-sub">转录中心</span></div>
     <div id="conn-state" class="conn-state" title="服务器连接状态"><span class="dot dot-ok"></span><span id="conn-text">已连接</span></div>
   </header>
@@ -63,7 +63,7 @@
       <div id="composer" class="composer">
         <div id="at-menu" class="at-menu hidden"></div>
         <div class="composer-inner">
-          <button id="btn-upload" class="btn btn-add" type="button" title="上传文件到本次工作的 work/">＋</button>
+          <button id="btn-upload" class="btn btn-add" type="button" title="上传文件到本次工作的 work/" aria-label="上传文件"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 20h16"/></svg></button>
           <textarea id="input" rows="1" placeholder="输入消息…（Enter 发送，Shift+Enter 换行）"></textarea>
           <button id="btn-update-task" class="btn hidden" title="改本次需求（回到需求行，追加新需求）">改需求</button>
           <button id="btn-continue" class="btn hidden" title="">继续</button>

@@ -86,10 +86,12 @@ body {
   font-size: var(--fs-s); color: var(--color-text-dim); cursor: pointer; white-space: nowrap;
 }
 .tab.active { color: var(--color-text); border-bottom-color: var(--color-accent); }
-.tab .close { opacity: .5; }
+.tab .close { opacity: .5; display: inline-flex; }
+.tab .close .ui-icon { width: 12px; height: 12px; }
 .tab .close:hover { opacity: 1; color: var(--color-err); }
 .tab[data-badge="1"]::after {
-  content: "…"; color: var(--color-warn); font-weight: 700; margin-left: 2px;
+  content: ""; width: 4px; height: 4px; border-radius: var(--r-pill);
+  background: var(--color-warn); margin-left: 2px;
 }
 
 /* ---- 转录流 ---- */
@@ -320,6 +322,7 @@ body {
   flex: none; width: 46px; height: 46px; padding: 0;
   font-size: var(--fs-l); line-height: 1; color: var(--color-text-dim);
 }
+.btn-add svg { width: 20px; height: 20px; }
 .btn-add:hover { color: var(--color-accent); }
 /* ---- 抽屉遮罩 ---- */
 .drawer-mask { display: none; }
@@ -487,7 +490,8 @@ body {
 .tool-card.ok .tool-head { color: var(--color-ok); }
 .tool-card.bad .tool-head { color: var(--color-err); }
 .tool-name { font-weight: 600; color: var(--color-text); }
-.tool-mark { font-weight: 700; }
+.tool-mark { display: inline-flex; }
+.tool-mark .ui-icon { width: 14px; height: 14px; }
 .tool-card.ok .tool-mark { color: var(--color-ok); }
 .tool-card.bad .tool-mark { color: var(--color-err); }
 .tool-raw { margin: var(--sp-1) 0 0; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--color-text-dim); }
@@ -661,6 +665,9 @@ body {
   padding: 6px 8px; word-break: break-all; cursor: text;
 }
 .cfg-hint { font-size: var(--fs-s); color: var(--color-text-dim); word-break: break-word; }
+.cfg-hint .cfg-mark { width: 14px; height: 14px; vertical-align: -2px; margin-right: var(--sp-1); }
+.cfg-hint .cfg-mark.ok { color: var(--color-ok); }
+.cfg-hint .cfg-mark.err { color: var(--color-err); }
 .cfg-hint.warn { color: var(--color-warn); }
 .cfg-hint.err { color: var(--color-err); }
 .cfg-hint.ok { color: var(--color-ok); }

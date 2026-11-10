@@ -55,7 +55,7 @@ function openModalLayer(title, build, wide) {
   const panel = doc.createElement('div'); panel.className = 'modal-panel' + (wide ? ' wide' : '');
   const head = doc.createElement('div'); head.className = 'modal-head';
   const h = doc.createElement('div'); h.className = 'modal-title'; h.textContent = title;
-  const close = btn('✕', 'modal-close');
+  const close = ui.iconButton({ icon: 'close', label: '关闭', cls: 'modal-close' });
   const layer = { overlay, disposers: [], unbind: null };
   const closeThis = () => closeModalLayer(layer);
   close.onclick = closeThis;

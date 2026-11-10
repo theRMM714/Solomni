@@ -127,8 +127,12 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
       for (const r of reqs) {
         const line = doc.createElement('div');
         line.className = 'cfg-hint' + (r.met ? '' : ' err');
-        line.textContent =
-          (r.met ? '✓ ' : '✗ ') + r.detail + (r.met ? '' : '　怎么补：' + r.how);
+        const mark = ui.icon(r.met ? 'check' : 'close');
+        mark.className += ' cfg-mark' + (r.met ? ' ok' : ' err');
+        const text = doc.createElement('span');
+        text.textContent = r.detail + (r.met ? '' : '　怎么补：' + r.how);
+        line.appendChild(mark);
+        line.appendChild(text);
         box2.appendChild(line);
       }
       secT.appendChild(box2);

@@ -46,7 +46,7 @@ function popoverBox(title, close) {
   x.type = 'button';
   x.className = 'popover-close';
   x.setAttribute('aria-label', '关闭');
-  x.textContent = '✕';
+  x.appendChild(ui.icon('close'));
   x.onclick = close || (() => ui.closePopover());
   head.appendChild(h); head.appendChild(x);
   box.appendChild(head);

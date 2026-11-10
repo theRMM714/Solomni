@@ -13,6 +13,7 @@ export function createOverlays(dom, icons) {
     const d = el('details', 'fold' + (o.cls ? ' ' + o.cls : ''));
     if (o.open) d.open = true;
     const s = el('summary');
+    s.appendChild(icons.icon('chevron-right'));
     s.appendChild(el('span', 'fold-label', o.label || ''));
     if (o.count != null) s.appendChild(el('span', 'fold-count', String(o.count)));
     d.appendChild(s);
