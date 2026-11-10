@@ -1,5 +1,5 @@
 /* 目的：截图与审计用的合成数据——形状对齐 /api/state 与 /api/history 的真实契约，内容全部虚构。
- * 管：state / histories / work / files / tiers 五类响应，以及 empty 变体。
+ * 管：state / histories / work / files / tiers / storage 六类响应，以及 empty 变体。
  * 不管：网络与浏览器（tests/screenshots/shots.cjs）；不读 .home、不读任何真实会话。
  * 联动：由 shots.cjs 的注入 shim 按 URL 路由；改了接口形状要同步前端的读法。 */
 "use strict";
@@ -213,9 +213,34 @@ const tiers = {
   },
 };
 
+const GB = 1024 * 1024 * 1024;
+// 存储页的合成报告：形状对齐 GET /api/storage 的 { report }，数字虚构但量级合理。
+const storage = {
+  report: {
+    managedBytes: 6.4 * GB, capBytes: 20 * GB, freeBytes: 118 * GB, overCap: false, actions: [],
+    categories: [
+      {
+        id: "build-cache", label: "构建缓存", bytes: 4.1 * GB, autoEvictable: true, note: "可重建；占用最大",
+        items: [
+          { id: "web-art", label: "web-art 构建卷", bytes: 3.2 * GB, active: false, detail: "上次构建 2 小时前" },
+          { id: "release-check", label: "release-check 构建卷", bytes: 0.9 * GB, active: false, detail: "上次构建 1 天前" },
+        ],
+      },
+      {
+        id: "download-cache", label: "下载缓存", bytes: 1.6 * GB, autoEvictable: true, note: "可重下",
+        items: [{ id: "python", label: "python 运行时包", bytes: 1.6 * GB, active: false, detail: "3 个版本" }],
+      },
+      {
+        id: "logs", label: "日志", bytes: 0.7 * GB, autoEvictable: true, note: "按天轮转",
+        items: [{ label: "solomni.log", bytes: 0.7 * GB, active: false, detail: "7 天" }],
+      },
+    ],
+  },
+};
+
 function byQuery(search) {
   const q = new URLSearchParams(search || "");
   return q.get("empty") === "1" ? emptyState : state;
 }
 
-module.exports = { NOW, state, emptyState, histories, work, files, tiers, byQuery, gateCard };
+module.exports = { NOW, state, emptyState, histories, work, files, tiers, storage, byQuery, gateCard };

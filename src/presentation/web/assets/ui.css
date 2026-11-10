@@ -25,7 +25,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--color-accent);
 
 /* ---- 按钮 ---- */
 .btn {
-  min-height: 36px;
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: var(--sp-2); min-height: 36px;
   border: 1px solid var(--color-border);
   background: var(--color-surface-2);
   color: var(--color-text);
@@ -33,6 +34,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--color-accent);
   padding: var(--sp-2) var(--sp-4);
   cursor: pointer;
   font: inherit;
+  line-height: var(--lh-snug);
+  text-align: center;
   white-space: nowrap;
   transition: border-color var(--dur-fast) var(--ease-out),
     background-color var(--dur-fast) var(--ease-out),
@@ -40,13 +43,21 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--color-accent);
 }
 .btn:hover { border-color: var(--color-border-strong); background: var(--color-surface-3); }
 .btn:active { transform: scale(.98); }
-.btn:disabled { opacity: .5; cursor: not-allowed; }
 .btn-primary { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-accent-contrast); }
-.btn-primary:hover { background: var(--color-accent-strong); border-color: var(--color-accent-strong); }
+.btn-primary:hover { background: var(--color-accent-hover); border-color: var(--color-accent-hover); }
 .btn-primary:active { background: var(--color-accent); }
 .btn-ghost { background: transparent; }
 .btn-block { width: 100%; }
 .btn-danger { background: var(--color-err); border-color: var(--color-err); color: var(--color-text-inverse); }
+.btn-danger:hover { background: var(--color-err); border-color: var(--color-text); }
+/* 禁用：换成中性纸色，不再用半透明把强调色压成脏灰。 */
+.btn:disabled,
+.btn-primary:disabled,
+.btn-danger:disabled {
+  background: var(--color-surface); border-color: var(--color-border);
+  color: var(--color-text-dim); cursor: not-allowed;
+}
+.btn:disabled:active, .btn-primary:disabled:active, .btn-danger:disabled:active { transform: none; }
 /* 正在做一件要等的事：按钮上转圈 + 进度光标（避免用户以为点没生效） */
 .btn.busy { cursor: progress; }
 .btn.busy::before {
@@ -98,8 +109,10 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--color-accent);
 .field-input:focus { border-color: var(--color-accent); }
 textarea.field-input { resize: vertical; min-height: 64px; }
 select.field-input { cursor: pointer; }
-.chk { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-base); margin: var(--sp-2) 0; cursor: pointer; }
-.chk input { width: auto; }
+.chk { display: flex; align-items: flex-start; gap: var(--sp-2); font-size: var(--fs-base); cursor: pointer; }
+.chk input { width: auto; margin-top: 3px; }
+.chk-text { display: flex; flex-direction: column; gap: 2px; line-height: var(--lh-snug); }
+.chk-note { color: var(--color-text-dim); font-size: var(--fs-s); line-height: var(--lh-base); }
 
 /* ---- 主区弹层 ---- */
 .modal-root { display: none; position: absolute; inset: 0; z-index: var(--z-modal); }
@@ -229,7 +242,7 @@ select.field-input { cursor: pointer; }
 }
 .menu-item:hover { background: var(--color-surface-2); }
 .menu-item.danger { color: var(--color-err); }
-.menu-item:disabled { opacity: .45; cursor: not-allowed; }
+.menu-item:disabled { color: var(--color-text-dim); cursor: not-allowed; }
 .menu-sep { height: 1px; background: var(--color-border); margin: var(--sp-1) 0; }
 
 /* ---- 折叠块（思维链 / 工具组 / 参数） ---- */
@@ -247,11 +260,22 @@ select.field-input { cursor: pointer; }
 .fold-count { color: var(--color-text-dim); opacity: .85; }
 .fold-body { margin-top: var(--sp-1); animation: fold-in var(--dur-fast) var(--ease-out); }
 
-/* ---- 分层说明 ---- */
+/* ---- 说明按钮（圆框感叹号）与分层说明 ---- */
+.help-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; padding: 0; flex: none;
+  border: 1px solid var(--color-border-strong); border-radius: 50%;
+  background: none; color: var(--color-text-dim); cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+.help-btn:hover { color: var(--color-accent); border-color: var(--color-accent); }
+.help-btn .ui-icon { width: 12px; height: 12px; }
+.help-body { display: flex; flex-direction: column; gap: var(--sp-2); max-width: 44ch; }
+.help-text { margin: 0; color: var(--color-text); font-size: var(--fs-s); line-height: var(--lh-base); }
 .detail { display: flex; flex-direction: column; gap: var(--sp-1); }
-.detail-lead { margin: 0; }
-.detail .fold > summary { font-size: var(--fs-s); }
-.detail-text { color: var(--color-text-dim); font-size: var(--fs-s); line-height: var(--lh-base); }
+.detail-line { display: flex; align-items: flex-start; gap: var(--sp-1); }
+.detail-lead { margin: 0; color: var(--color-text-dim); font-size: var(--fs-s); line-height: var(--lh-base); }
 .detail-safety {
   margin: 0; padding-left: var(--sp-2);
   border-left: 2px solid var(--color-warn);

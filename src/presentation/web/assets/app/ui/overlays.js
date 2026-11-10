@@ -27,16 +27,45 @@ export function createOverlays(dom, icons) {
   }
 
   /**
-   * 分层说明：lead 是第一层（做决定所需），detail 收进「详情」，safety 永远可见。
-   * 返回一个块，可直接 append 到字段或弹层正文。
+   * 说明按钮：圆框感叹号，点开锚定小卡片。放在字段标题旁（forms 的 label 行）
+   * 或一段说明的末尾；里面装 lead / detail / safety，安全类文案仍然常显、不藏。
+   */
+  function help(o) {
+    const opts = o || {};
+    const label = opts.label || '说明';
+    const b = el('button', 'help-btn');
+    b.type = 'button';
+    attr(b, 'aria-label', label);
+    attr(b, 'aria-expanded', 'false');
+    b.appendChild(icons.icon('bang'));
+    b.addEventListener('click', (e) => {
+      if (e.preventDefault) e.preventDefault();
+      if (e.stopPropagation) e.stopPropagation();
+      if (openPopover && openPopover.anchor === b) { closePopover(); return; }
+      const body = el('div', 'help-body');
+      if (opts.lead) body.appendChild(el('p', 'help-text', opts.lead));
+      if (opts.detail) body.appendChild(el('p', 'help-text', opts.detail));
+      if (opts.safety) {
+        body.appendChild(el('p', 'detail-safety' + (opts.safetyKind ? ' ' + opts.safetyKind : ''), opts.safety));
+      }
+      popover(b, body, { label });
+    });
+    return b;
+  }
+
+  /**
+   * 分层说明：lead 是第一层（做决定所需），detail 只藏在感叹号按钮里，safety 永远可见。
+   * 返回一个块，可直接 append 到弹层正文或没有标题可挂的说明处。
    */
   function detail(o) {
     const opts = o || {};
     const wrap = el('div', 'detail');
-    if (opts.lead) wrap.appendChild(el('p', 'detail-lead', opts.lead));
+    const line = el('div', 'detail-line');
+    if (opts.lead) line.appendChild(el('p', 'detail-lead', opts.lead));
     if (opts.detail) {
-      wrap.appendChild(fold({ label: '详情', body: el('div', 'detail-text', opts.detail) }));
+      line.appendChild(help({ lead: opts.lead, detail: opts.detail, label: opts.helpLabel || '说明' }));
     }
+    if (line.children.length) wrap.appendChild(line);
     if (opts.safety) {
       wrap.appendChild(el('p', 'detail-safety' + (opts.safetyKind ? ' ' + opts.safetyKind : ''), opts.safety));
     }
@@ -250,5 +279,5 @@ export function createOverlays(dom, icons) {
     return { node, close: closePopover, place };
   }
 
-  return { fold, detail, menu, closeMenu, toast, dismisses, bindDismiss, popover, closePopover };
+  return { fold, help, detail, menu, closeMenu, toast, dismisses, bindDismiss, popover, closePopover };
 }

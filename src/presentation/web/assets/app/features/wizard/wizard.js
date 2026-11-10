@@ -48,8 +48,10 @@ async function openWizard(draft) {
   const vmR = ui.radio('虚拟机档（脚本在 guest 里跑）', w.tier === 'vm', 'wf-tier', !vmOk);
   hostR.box.addEventListener('change', () => { if (hostR.box.checked) { w.tier = 'host'; syncWizardTier(); } });
   vmR.box.addEventListener('change', () => { if (vmR.box.checked) { w.tier = 'vm'; syncWizardTier(); } });
-  tierField.appendChild(tierLabel); tierField.appendChild(hostR.wrap); tierField.appendChild(vmR.wrap);
-  tierField.appendChild(ui.detail(wizardCopy.tier));
+  const tierGroup = doc.createElement('div'); tierGroup.className = 'form-col';
+  tierGroup.appendChild(hostR.wrap); tierGroup.appendChild(vmR.wrap);
+  tierField.appendChild(tierLabel); tierField.appendChild(tierGroup);
+  ui.attachHelp(tierField, wizardCopy.tier);
   const profileField = doc.createElement('div'); profileField.className = 'wf-field';
   const profileLabel = doc.createElement('div'); profileLabel.className = 'wf-label'; profileLabel.textContent = '权限档位';
   const profileSel = selectInput([
@@ -184,10 +186,8 @@ function pickWorkspaceDir(onPick) {
     workspaceRow.appendChild(workspaceIn);
     workspaceRow.appendChild(wsPick);
     workspaceRow.appendChild(wsDefault);
-    const wsHint = ui.detail(wizardCopy.workspace);
     const workspaceWrap = doc.createElement('div');
     workspaceWrap.appendChild(workspaceRow);
-    workspaceWrap.appendChild(wsHint);
     const modeSel = selectInput([
       { value: 'single', label: '单 agent（1 个或多个模块）' },
       { value: 'collab', label: '协作（多个 agent）' },
@@ -210,9 +210,9 @@ function pickWorkspaceDir(onPick) {
     snapshotDraft = () => { w.name = nameIn.value; w.task = taskIn.value; };
     // 需求那一格与推荐按钮都是**非代理形态**才问的：形态一换就收起来（见 renderParts）。
     const taskField = field('本次需求', taskIn);
-    const recBtn = btn('让核心推荐', 'btn btn-block');
-    const createBtn = btn('创建并开始', 'btn btn-primary btn-block');
-    const cancelBtn = btn('取消', 'btn btn-block');
+    const recBtn = btn('让核心推荐', 'btn btn-lead');
+    const createBtn = btn('创建并开始', 'btn btn-primary');
+    const cancelBtn = btn('取消', 'btn');
     // 没有可用模型就**不允许创建**：后端也会拒绝，这里先把原因说在前面。
     function createBlocked() {
       if (!state.models.length) {
@@ -340,7 +340,7 @@ function pickWorkspaceDir(onPick) {
       // 代理形态没有名单也没有模型要选：把该说的说清，把不该问的收起来。
       const proxy = w.mode === 'proxy';
       taskField.className = proxy ? 'wf-field hidden' : 'wf-field';
-      recBtn.className = proxy ? 'btn btn-block hidden' : 'btn btn-block';
+      recBtn.className = proxy ? 'btn btn-lead hidden' : 'btn btn-lead';
       if (proxy) {
         partWrap.appendChild(emptyHint(
           '（代理形态不需要选人）核心会用登记处里当前有效的 agent 与模块自己组队，' +
@@ -502,7 +502,7 @@ function pickWorkspaceDir(onPick) {
     };
 
     c.body.appendChild(field('工作名称', nameIn));
-    c.body.appendChild(field('工作区（可选）', workspaceWrap));
+    c.body.appendChild(field('工作区（可选）', workspaceWrap, wizardCopy.workspace));
     c.body.appendChild(field('形态', modeSel));
     c.body.appendChild(modeHint);
     c.body.appendChild(tierField);
@@ -514,9 +514,12 @@ function pickWorkspaceDir(onPick) {
     c.body.appendChild(partWrap);
     c.body.appendChild(modelWrap);
     c.body.appendChild(taskField);
-    c.body.appendChild(recBtn);
-    c.body.appendChild(createBtn);
-    c.body.appendChild(cancelBtn);
+    const actions = doc.createElement('div');
+    actions.className = 'form-actions';
+    actions.appendChild(recBtn);
+    actions.appendChild(cancelBtn);
+    actions.appendChild(createBtn);
+    c.body.appendChild(actions);
 
     renderParts(); renderModels(); syncWizardTier(); syncCreateButton();
     // 别的标签页 / 设置在轮询后改了登记处：只换模型提示与创建按钮，不重建名字 / 需求输入框。

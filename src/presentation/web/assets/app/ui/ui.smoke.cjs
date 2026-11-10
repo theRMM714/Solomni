@@ -75,9 +75,18 @@ check("折叠计数", String((sumParts.find((c) => c.className === "fold-count")
 check("折叠体在 .fold-body", (fold.children[1] || {}).className === "fold-body");
 
 const det = ui.detail({ lead: "第一层", detail: "第二层", safety: "不可逆" });
-check("分层说明：三段齐全", det.children.length === 3, String(det.children.length));
-check("分层说明：详情收在折叠里", String(det.children[1].className).indexOf("fold") === 0);
-check("分层说明：安全文案不折叠", det.children[2].className === "detail-safety" && det.children[2].textContent === "不可逆");
+check("分层说明：首层 + 安全文案", det.children.length === 2, String(det.children.length));
+const detLine = det.children[0] || { children: [] };
+check("分层说明：首层文字", (detLine.children[0] || {}).textContent === "第一层");
+const helpBtn = detLine.children[1] || {};
+check("说明按钮是圆框感叹号", helpBtn.className === "help-btn" && helpBtn.ariaLabel === "说明", helpBtn.className);
+helpBtn._h.click[0]({ preventDefault() {}, stopPropagation() {} });
+const helpPop = menuRoot.children[0] || { children: [] };
+check("点说明开小卡片", String(helpPop.className).indexOf("popover") === 0);
+const helpBody = helpPop.children[0] || { children: [] };
+check("小卡片装完整说明", helpBody.children.some((c) => c.textContent === "第二层"));
+check("分层说明：安全文案不折叠", det.children[1].className === "detail-safety" && det.children[1].textContent === "不可逆");
+ui.closePopover();
 
 const overlay = el("div");
 const panel = el("div");

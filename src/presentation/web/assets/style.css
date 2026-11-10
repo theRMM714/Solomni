@@ -360,11 +360,54 @@ body {
   .composer textarea { flex: 1 1 calc(100% - 60px); }
 }
 
-.wf-field, .form-col { display: flex; flex-direction: column; gap: 6px; }
+.wf-field, .form-col { display: flex; flex-direction: column; gap: var(--sp-2); }
+/* 设置 / 向导表单：左标签列 + 右控件列。说明文字挂在标题列下方，控件始终与标题同一行起点。 */
+.wf-field:has(> .wf-label) {
+  display: grid; grid-template-columns: 240px minmax(0, 1fr);
+  column-gap: var(--sp-5); row-gap: var(--sp-1); align-items: start;
+}
+.wf-field:has(> .wf-label) > .wf-label {
+  grid-column: 1; grid-row: 1;
+  display: flex; align-items: flex-start; gap: var(--sp-2);
+  font-size: var(--fs-base); color: var(--color-text); line-height: var(--lh-snug);
+}
+.wf-field:has(> .wf-label) > .wf-lead {
+  grid-column: 2; grid-row: 2; margin: 0;
+  color: var(--color-text-dim); font-size: var(--fs-s); line-height: var(--lh-base);
+}
+.wf-field:has(> .wf-label) > :not(.wf-label):not(.wf-lead) { grid-column: 2; }
+.wf-field:has(> .wf-label) > .detail-safety { grid-column: 1 / -1; }
+.wf-field > input.field-input[type="number"] { max-width: 160px; }
+.wf-field > select.field-input { max-width: 360px; }
 .wf-label, .wf-hint { font-size: var(--fs-s); color: var(--color-text-dim); }
-.wf-inline { display: flex; gap: 8px; align-items: center; }
+.wf-field > .wf-label { font-size: var(--fs-base); color: var(--color-text); }
+.wf-inline { display: flex; gap: var(--sp-2); align-items: center; }
+.wf-inline .field-input { flex: 1 1 auto; min-width: 0; }
+.wf-inline .btn { flex: none; }
 .wf-models { display: flex; flex-direction: column; gap: 6px; }
 .wf-why { flex-basis: 100%; font-size: var(--fs-s); color: var(--color-text-dim); }
+/* 表单动作：主次按钮靠右排一行，不再整宽堆叠。 */
+.form-actions {
+  display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sp-2);
+  margin-top: var(--sp-2); padding-top: var(--sp-4);
+  border-top: 1px solid var(--color-border);
+}
+.form-actions .btn-lead { margin-right: auto; }
+/* 分区标题：上边线分组，第一个不画线。 */
+.form-sec-title {
+  display: flex; align-items: center; gap: var(--sp-2);
+  margin: var(--sp-2) 0 0; padding-top: var(--sp-4);
+  border-top: 1px solid var(--color-border);
+  font-size: var(--fs-s); font-weight: 600; color: var(--color-text);
+}
+.settings-page > .form-sec-title:first-child { border-top: none; padding-top: 0; margin-top: 0; }
+@media (max-width: 720px) {
+  .wf-field:has(> .wf-label) { display: flex; flex-direction: column; gap: var(--sp-1); }
+  .wf-field:has(> .wf-label) > .wf-label { order: 0; }
+  .wf-field:has(> .wf-label) > .wf-lead { order: 1; }
+  .wf-field:has(> .wf-label) > :not(.wf-label):not(.wf-lead) { order: 2; }
+  .form-actions .btn { flex: 1; }
+}
 
 /* ---- 设置中心：左侧分页 + 右侧单页 ---- */
 .settings-hub { display: grid; grid-template-columns: 172px minmax(0, 1fr); gap: 16px; min-height: 420px; }
@@ -392,8 +435,12 @@ body {
 .settings-foot .btn { flex: none; white-space: nowrap; }
 .settings-foot-hint { flex: 1; text-align: right; font-size: var(--fs-s); color: var(--color-text-dim); }
 @media (max-width: 700px) {
-  .settings-hub { grid-template-columns: 1fr; }
-  .settings-nav { flex-direction: row; flex-wrap: wrap; }
+  .settings-hub { grid-template-columns: 1fr; gap: 12px; }
+  .settings-nav {
+    flex-direction: row; flex-wrap: nowrap; gap: 4px;
+    overflow-x: auto; padding-bottom: 4px;
+  }
+  .settings-nav-item { width: auto; flex: 0 0 auto; white-space: nowrap; border-color: var(--color-border); }
   .settings-nav-group { display: none; }
 }
 
@@ -592,6 +639,7 @@ body {
   border: 1px dashed var(--color-border); background: none; color: var(--color-accent);
   border-radius: 999px; padding: 3px 10px; font: inherit; font-size: var(--fs-s); cursor: pointer;
 }
+.mod-add { white-space: nowrap; }
 .mod-add:hover { border-color: var(--color-accent); }
 .mod-add:disabled { opacity: .5; cursor: not-allowed; }
 

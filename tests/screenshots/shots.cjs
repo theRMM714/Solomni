@@ -1,7 +1,7 @@
 /* 目的：零依赖截图与自检工具：把真实 index.html + 合成 fixture 喂给 headless Edge，按视图与宽度出图。
  * 管：静态服务与 fetch/时钟注入、CDP 驱动、截图、--audit 的对比度/溢出/焦点/动效复算。
  * 不管：视觉决策与 fixture 内容（见 fixtures.js）；不启动产品二进制、不读写 .home。
- * 用法：node tests/screenshots/shots.cjs [--audit] [--after|--tag=名字] [--only=chat,gate] [--widths=375,768,1280]
+ * 用法：node tests/screenshots/shots.cjs [--audit] [--after|--tag=名字] [--only=chat,gate] [--widths=375,768,1280] [--scroll=bottom]
  * 输出：.shots/before|after/<view>-<width>.png + .shots/<mode>-audit.json
  */
 "use strict";
@@ -24,6 +24,8 @@ const OUT = path.join(ROOT, ".shots", MODE);
 const ONLY = (ARGS.find((a) => a.startsWith("--only=")) || "").slice(7).split(",").filter(Boolean);
 const WIDTHS = ((ARGS.find((a) => a.startsWith("--widths=")) || "").slice(9) || "375,768,1280")
   .split(",").map(Number).filter((n) => n > 0);
+// 弹层内容比视口长时，把面板滚到底再拍（用于看动作按钮行）。
+const SCROLL_BOTTOM = ARGS.includes("--scroll=bottom");
 
 const VIEWS = [
   { id: "chat", label: "会话：转录、工具回执、状态条" },
@@ -82,6 +84,7 @@ const SHIM = [
   "    if (/^\\/api\\/sessions\\/[^/]+\\/files$/.test(p)) return answer(F.files);",
   "    if (p === \"/api/actions\") return answer({ actions: [] });",
   "    if (p === \"/api/processes\") return answer({ processes: [] });",
+  "    if (p === \"/api/storage\") return answer(F.storage);",
   "    if (p === \"/api/setup/status\") return answer({ ready: true, deps: [] });",
   "    return answer({});",
   "  };",
@@ -114,6 +117,10 @@ const SHIM = [
   "      var btn = document.querySelector(\"#session-status button[aria-label=\\\"共享区提交\\\"]\");",
   "      if (btn) app.openWorkCard(s, btn);",
   "    }",
+  "    if (window.__shotsScrollBottom) {",
+  "      var mb = document.querySelector(\".modal-body\");",
+  "      if (mb) mb.scrollTop = mb.scrollHeight;",
+  "    }",
   "  };",
   "})();",
 ].join("\n");
@@ -131,7 +138,10 @@ function startServer() {
     if (u.pathname === "/__shots/fixtures.js") {
       return send(res, 200, MIME[".js"], "window.__FIXTURES = " + JSON.stringify(fixtures) + ";");
     }
-    if (u.pathname === "/__shots/shim.js") return send(res, 200, MIME[".js"], SHIM);
+    if (u.pathname === "/__shots/shim.js") {
+      const flag = "window.__shotsScrollBottom = " + (SCROLL_BOTTOM ? "true" : "false") + ";\n";
+      return send(res, 200, MIME[".js"], flag + SHIM);
+    }
     if (u.pathname.startsWith("/assets/")) {
       const file = readAsset(u.pathname);
       if (file) return send(res, 200, MIME[path.extname(file)] || "application/octet-stream", fs.readFileSync(file));

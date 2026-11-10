@@ -17,12 +17,11 @@ export function mount(root, deps) {
 function buildStoragePage(c, f) {
   c.body.appendChild(f.stPeriodic.wrap);
   c.body.appendChild(f.stInterval.wrap);
-  c.body.appendChild(f.stCap.wrap);
+  c.body.appendChild(ui.attachHelp(f.stCap.wrap, settingsCopy.storageBudget));
   c.body.appendChild(f.stKeep.wrap);
   c.body.appendChild(f.stVolume.wrap);
   c.body.appendChild(f.stFree.wrap);
   c.body.appendChild(f.stLog.wrap);
-  c.body.appendChild(ui.detail(settingsCopy.storageBudget));
   c.body.appendChild(ui.detail(settingsCopy.storageRestore));
   const box = doc.createElement('div');
   box.className = 'storage-report';

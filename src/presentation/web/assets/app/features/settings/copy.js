@@ -36,9 +36,6 @@ export const settingsCopy = {
   guestLimits: {
     detail: '每台虚拟机固定 2 GB 内存 / 2 核：到上限时新建会如实拒绝，不会悄悄抢资源。填 0 = 不限制。',
   },
-  thinkingTagList: {
-    detail: '标签就是档位；模型登记按它映射。可以任意写（如 high、高、xhigh），不能为空或重复。',
-  },
   thinkingMapping: {
     detail: '字符串 = {"reasoning_effort": 值} 简写；{...} = 原样合并进请求体（保留键会被拒）。每行的值都不能为空。',
   },

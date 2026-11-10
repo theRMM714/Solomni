@@ -20,6 +20,8 @@ export const ICONS = {
   close: '<path d="M18 6 6 18M6 6l12 12"/>',
   check: '<path d="m5 13 4 4L19 7"/>',
   alert: '<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/>',
+  // 说明图标的字形：只有感叹号，圆框由 .help-btn 的边框画（与 info 的双圆不重复）。
+  bang: '<path d="M12 7v6M12 17h.01"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/>',
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
   cpu: '<rect x="7" y="7" width="10" height="10" rx="2"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/>',

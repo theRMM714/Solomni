@@ -12,8 +12,8 @@
   --c-graphite-400: #7a7264;
   --c-graphite-300: #a49d92;
   --c-graphite-100: #ece8e1;
+  --c-ice-400: #a6dbe4;
   --c-ice-500: #8fc7d1;
-  --c-ice-600: #7ab7c2;
   --c-ice-900: #223234;
   --c-green-500: #86c48f;
   --c-amber-500: #dcb05a;
@@ -35,7 +35,7 @@
   --color-text-dim: var(--c-graphite-300);
   --color-text-inverse: var(--c-graphite-900);
   --color-accent: var(--c-ice-500);
-  --color-accent-strong: var(--c-ice-600);
+  --color-accent-hover: var(--c-ice-400);
   --color-accent-contrast: var(--c-graphite-900);
   --color-focus: var(--c-ice-500);
   --color-ok: var(--c-green-500);
