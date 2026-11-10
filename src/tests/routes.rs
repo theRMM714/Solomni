@@ -1085,6 +1085,15 @@ fn assets_are_served_only_from_the_embedded_table() {
             .any(|(p, _, _)| p.ends_with(".cjs") || p.ends_with(".mjs")),
         "开发脚本不进发行版"
     );
+    assert!(
+        web::assets::lookup("app/package.json").is_none(),
+        "node 用的 package.json 不进发行版"
+    );
+    assert_eq!(
+        web::assets::lookup("app/main.js").map(|(m, _)| m),
+        Some("application/javascript"),
+        "子目录里的模块入口按 JS 提供"
+    );
 
     let (code, _, text) = get("/");
     assert_eq!(code, 200);

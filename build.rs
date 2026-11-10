@@ -1,7 +1,7 @@
 //! 目的：编译期把 `src/presentation/web/assets/` 生成为浏览器端资源的嵌入表。
 //! 管：递归扫描资源目录；按扩展名定 MIME；生成 `OUT_DIR/web_assets.rs`（按 URL 路径排序的 `(路径, MIME, 内容)` 表）。
 //! 不管：HTTP 分发与缓存头（`src/presentation/web/assets.rs`、`src/presentation/web/mod.rs`）；
-//!   node 侧开发脚本（`.cjs` / `.mjs` 只给冒烟跑手用，不进发行版）。
+//!   node 侧开发文件（`.cjs` / `.mjs` 冒烟脚本与 `package.json` 只给 node 用，不进发行版）。
 //! 联动：`src/presentation/web/assets.rs` 用 `include!` 引入生成表；路由 `GET /assets/{*path}` 见
 //!   `src/presentation/web/routes.rs`；未知扩展名直接让构建失败，防止资源被静默漏掉。
 
@@ -19,6 +19,9 @@ const SERVED: &[(&str, &str)] = &[
 
 /// 只给 node 用的开发脚本：留在资源目录里，但不嵌入。
 const DEV_ONLY: &[&str] = &["cjs", "mjs"];
+
+/// 只给 node 用的文件名（`package.json` 声明 `app/` 下的 `.js` 是 ES Module）：不嵌入。
+const DEV_ONLY_NAMES: &[&str] = &["package.json"];
 
 fn main() {
     let root =
@@ -65,7 +68,8 @@ fn collect(base: &Path, dir: &Path, out: &mut Vec<(String, &'static str, PathBuf
             continue;
         }
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        if DEV_ONLY.contains(&ext) {
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if DEV_ONLY.contains(&ext) || DEV_ONLY_NAMES.contains(&name) {
             continue;
         }
         let Some((_, mime)) = SERVED.iter().find(|(e, _)| *e == ext) else {

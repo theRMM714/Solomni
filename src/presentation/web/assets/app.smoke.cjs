@@ -174,6 +174,7 @@ try {
 try {
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "ui.js"), "utf8"), sandbox, { filename: "ui.js" });
 } catch (e) { loadErrors.push("ui load error: " + e.message); }
+require("./app/bridge.js").installBridge(sandbox); // 与浏览器同一段装配：app.js 从 globalThis.solomni 取状态 / HTTP / 事件流
 const appPath = path.join(__dirname, "app.js");
 try {
   vm.runInNewContext(fs.readFileSync(appPath, "utf8"), sandbox, { filename: "app.js" });

@@ -10,41 +10,16 @@
  */
 
 const $ = (s) => document.querySelector(s);
-const state = {
-  modules: [], providers: [], models: [], core: null, rejected: [], agents: [],
-  history: [],           // 会话历史（名字/mode/时间）
-  settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70, compact_keep_percent: 15, compact_model: '' }, // 基本设置
-  fence: null,           // /api/state 的围栏事实：只有降级 / 要求未满足时进横幅
-  toolchains: null,      // /api/state 的基础工具链事实：项目内 / 宿主回退 / 缺失
-  sessions: new Map(),   // sid -> { sid, mode, title, lines, pending, sending, running, working, done, awaiting, readonly }
-  activeSid: null,
-  treeOpen: new Set(),   // 会话树展开的父会话（纯 UI 状态，不落盘）
-  autoOpenedFor: null,   // 上次自动展开过的活跃会话：只在切换时展开祖先，不抢用户手的折叠
-  rail: false,           // 侧栏是否收起为图标栏（偏好记 localStorage）
-  nodeBySid: new Map(),  // 子会话 sid -> {node, assignee}：节点卡与标签共用同一份标题
-};
+/* 状态、HTTP 与事件流由模块提供（app/bridge.js 在本脚本之前装好）。 */
+const core = globalThis.solomni;
+const state = core.state;
+const stores = core.stores;
+const api = core.api;
 
-/* ---------- 登记处状态同步（供应商 / 模型 / agent / 核心默认 / 思考等级） ----------
- * 页面只建一次并缓存；登记处一变，所有已打开的分页都要跟着变，不能等用户刷新整页。
- * 约定：订阅者只同步**列表与下拉选项**，绝不重建表单主体——3 秒轮询也会走到这里，
- * 重建输入框会把用户正在填的 id / 密钥 / note 冲掉。 */
-const registryListeners = new Set();
-let registryPrint = "";
-function registryFingerprint() {
-  return JSON.stringify([
-    state.providers, state.models, state.agents, state.core,
-    state.settings && state.settings.thinking,
-  ]);
-}
-function onRegistryChange(fn) {
-  registryListeners.add(fn);
-  return () => registryListeners.delete(fn);
-}
-function notifyRegistryChange() {
-  for (const fn of Array.from(registryListeners)) {
-    try { fn(); } catch (e) { console.error("登记处视图刷新失败：", e); }
-  }
-}
+/* 登记处一变，所有已打开的分页都跟着同步列表与下拉选项（app/stores/state.js 的 createRegistryWatch）。 */
+const registry = stores.createRegistryWatch(state, (e) => console.error("登记处视图刷新失败：", e));
+function onRegistryChange(fn) { return registry.on(fn); }
+function notifyRegistryChange() { registry.notify(); }
 /** 下拉选项原地换新：保留当前选中；值已不在选项里时退回第一个（或空串）。 */
 function syncSelect(sel, options, current) {
   const want = current === undefined || current === null ? sel.value : current;
@@ -68,124 +43,27 @@ function modelOptions(current, needEmpty) {
   return opts;
 }
 
-/* ---------- API ---------- */
-async function api(method, url, body) {
-  const res = await fetch(url, {
-    method,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const err = new Error(data.error || ('HTTP ' + res.status));
-    err.status = res.status;
-    err.data = data;
-    throw err;
-  }
-  return data;
-}
-
 /* ---------- 状态与侧栏 ---------- */
+/** 拉一次 /api/state：快照投影进状态（app/stores/state.js），再补新会话的盘上转录并重画。 */
 async function refreshState() {
   const s = await api('GET', '/api/state');
-  state.modules = s.modules || [];
-  state.providers = s.providers || [];
-  state.models = s.models || [];
-  state.core = s.core || null;
-  state.rejected = s.rejected || [];
-  state.agents = s.agents || [];
-  state.history = s.history || [];
-  // 服务端的**权威会话视图**：有没有"本次需求" / 有没有等裁决。
-  // 事件流给增量（推），这里是刷新后照样成立的快照（拉）——两面同一个事实。
-  state.views = new Map((s.sessions || []).map((v) => [v.sid, v]));
-  // 运行态的**对账副本**：事件是唯一真相（见 isBusy）；这份快照只在"本页对这条会话还没有实时
-  // 知识"时用——刚刷新页面、事件台有缺口、别人建的会话。
-  state.running = new Set(
-    [].concat(
-      (s.sessions || []).filter((v) => v.running).map((v) => v.sid),
-      (state.history || []).filter((h) => h.running).map((h) => h.name),
-    ),
-  );
-  // **会话表由后端给**：这里只为"后端说在跑"的会话建标签页。前端绝不为事件流里冒出来的 sid
-  // 造会话状态——那是前端自己造会话（系统会话就是这么长出多余标签页的）。
-  let opened = false;
-  for (const v of state.views.values()) {
-    if (state.sessions.has(v.sid) || !state.running.has(v.sid)) continue;
-    const h = (state.history || []).find((x) => x.name === v.sid);
-    const s = {
-      sid: v.sid, mode: v.mode || 'single', title: (h && h.name) || v.sid, run: v.run || 'active',
-      parent: (h && h.parent) || null,
-      lines: [], live: [], pending: v.pending || null, sending: false,
-      running: false, working: null, running_known: false,
-      can_update_task: !!v.can_update_task,
-      continue_action: v.continue || null,
-      tier: v.tier, tier_ready: v.tier_ready, tier_missing: v.tier_missing || [],
-      permission_profile: v.permission_profile || '', permission_label: v.permission_label || '',
-      thinking: v.thinking || null,
-      permission_narrowed: !!v.permission_narrowed, permission_parent: v.permission_parent || null,
-      activating: false,
-      done: !!(h && h.done), awaiting: null, fold: {}, scroll: {},
-      context: v.context || null,
-      shell: v.shell || null,
-      work: null, workAt: 0, workDirty: false, workError: '',
-      readonly: false, hydrated: false, buffer: [],
-      workspace: v.workspace || (h && h.workspace) || null,
-      workspace_missing: !!(v.workspace_missing || (h && h.workspace_missing)),
-    };
-    state.sessions.set(v.sid, s);
-    // 盘上转录是这条会话的**前缀**：补上它，之后的实时事件按 seq 接上（同 id 的行不重复）。
-    hydrateHistory(s);
-    opened = true;
-  }
-  // 已打开的标签页跟着快照对齐（增量事件到达时会覆盖成同一份）。
-  for (const cur of state.sessions.values()) {
-    const v = state.views.get(cur.sid);
-    if (!v) continue;
-    cur.can_update_task = !!v.can_update_task;
-    cur.run = v.run || 'active';
-    cur.pending = v.pending || null;
-    // 上下文继续与档位提示都以后端视图为准；只读视图不显示继续（只有启用）。
-    if (!cur.readonly) cur.continue_action = v.continue || null;
-    cur.tier = v.tier;
-    cur.tier_ready = v.tier_ready;
-    cur.tier_missing = v.tier_missing || [];
-    cur.permission_profile = v.permission_profile || cur.permission_profile;
-    cur.permission_label = v.permission_label || cur.permission_label;
-    if (v.thinking !== undefined) cur.thinking = v.thinking || null;
-    if (v.context_freshness !== undefined) cur.context_freshness = !!v.context_freshness;
-    cur.permission_narrowed = !!v.permission_narrowed;
-    cur.permission_parent = v.permission_parent || null;
-    // 上下文用量以快照兜底；实时 usage 事件到达后以事件为准（同一份事实，事件更新）。
-    if (v.context !== undefined) cur.context = v.context || null;
-    // shell 快照：活动会话以服务端运行槽为准（null = 被回档截掉）；历史回放保留 /api/history 的派生值。
-    if (!cur.readonly && v.shell !== undefined) cur.shell = v.shell || null;
-    // 运行态**只对账、不覆盖**：这条会话已经有实时知识（事件就是真相）时，快照比它滞后——
-    // 一次迟到的轮询不能把已经收尾的回合标回"在跑"。没有实时知识时按快照补齐，并清掉本地遗留
-    // （快照说没跑就是没跑）；谁在跑未知时照旧显示"正在工作…"。
-    if (!cur.running_known) {
-      cur.running = snapshotRunning(cur.sid);
-      if (!cur.running) cur.working = null;
-    }
-  }
-  state.settings = s.settings || { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70 };
-  state.fence = s.fence || null;
-  state.toolchains = s.toolchains || null;
+  const opened = stores.projectSnapshot(state, s);
+  // 盘上转录是新会话的前缀：补上它，之后的实时事件按 seq 接上。
+  for (const cur of opened) hydrateHistory(cur);
   // 登记处真变了才通知：轮询每 3 秒都会进来，每次重画会让用户填到一半的表单被冲掉。
-  const nextRegistryPrint = registryFingerprint();
-  const registryChanged = nextRegistryPrint !== registryPrint;
-  registryPrint = nextRegistryPrint;
+  const registryChanged = registry.check();
   renderFenceBanner();
   renderToolchainBanner();
   renderSidebar();
   renderHistory();
-  if (opened) renderTabs();
+  if (opened.length) renderTabs();
   const cur = activeSession();
   if (cur) {
     syncTyping(cur); syncSendButton(cur); syncComposer(cur);
     // 提交信息不塞进每 3 秒的 /api/state：按需、低频刷新（后台 agent 提交也能跟上）。
     if (!cur.workAt || Date.now() - cur.workAt > 15000) loadWork(cur.sid);
   }
-  if (registryChanged) notifyRegistryChange();
+  if (registryChanged) registry.notify();
 }
 
 /// 思维链块：永远默认折叠，点击（原生 details）才展开。
@@ -473,14 +351,7 @@ function renderHistory() {
 
 /// 快照（/api/state）说这条会话、或它的任一子会话在跑吗。
 /// **对账副本的唯一读法**：只在 isBusy 的第三档（本页没有实时知识）用。
-function snapshotRunning(sid) {
-  const run = state.running;
-  if (!run || !sid) return false;
-  if (run.has(sid)) return true;
-  const pre = sid + '--';
-  for (const k of run) if (k.indexOf(pre) === 0) return true;
-  return false;
-}
+function snapshotRunning(sid) { return stores.snapshotRunning(state, sid); }
 
 /// 这条会话此刻在不在干活。**运行态的唯一真相是事件**（每个生产者在起止各推一条 `Working`；
 /// 刷新页面或事件台有缺口时用快照对账）——三个来源各司其职，不是三份互相打架的真话：
@@ -6262,68 +6133,45 @@ function onSend() {
 }
 
 /* ---------- 长轮询：增量事件 + 连接状态 ---------- */
-let pollSince = 0;
-let pollActive = false;
-async function pollLoop() {
-  if (pollActive) return;
-  pollActive = true;
-  while (true) {
-    // ① 取事件：**只有这一步失败才算断线**（服务没起来 / 连接断了）。
-    let data;
+/* 传输（取批次、游标、断线重试）在 app/core/events.js；这里只管裁剪对齐与批次的应用。
+ * 取事件失败才算断线（setConn）；应用 / 渲染出错走 eventError，连接照常是好的。 */
+const eventStream = core.createEventStream({
+  onConn: setConn,
+  onTrim: trimAlign,
+  onLines: applyLines,
+  onError: eventError,
+});
+function pollLoop() { return eventStream.run(); }
+
+/** 事件台裁剪过：since 之后有一段永久丢了。丢掉滞留，跳到还留着的起点，并按历史重放当前会话。 */
+async function trimAlign(oldest) {
+  if (!(oldest > 0 && oldest > appliedSeq + 1)) return;
+  appliedSeq = oldest - 1;
+  // 运行态的实时知识作废（收尾那条可能就在丢掉的那段里），退回用快照对账。
+  for (const cur of state.sessions.values()) cur.running_known = false;
+  needState = true;
+  await resyncActive();
+}
+
+async function applyLines(lines) {
+  let mode = 'none';
+  for (const item of lines) {
     try {
-      const r = await fetch('/api/events?sid=&since=' + pollSince);
-      if (!r.ok) throw new Error('轮询失败 ' + r.status);
-      data = await r.json();
-    } catch (err) {
-      setConn(false, err);
-      await new Promise((res) => setTimeout(res, 3000));
-      continue;
-    }
-    setConn(true);
-    // ② 应用事件：出错是**界面自己的问题**，不能说成断线（连接明明好着），也不能吞掉。
-    // 为什么必须分开：渲染里的一个异常曾被当成"网络断了"，于是状态点一直红着、
-    // 而真正的异常连一行日志都没有——用户只看到"重连中"，服务其实好好的。
-    try {
-      const head = data.head != null ? data.head : pollSince;
-      const oldest = typeof data.oldest === 'number' ? data.oldest : 0;
-      // 事件台裁剪过：since 之后有一段**永久丢了**。按 seq 干等会让后续批次全部滞留
-      // （只有刷新页面才恢复）——所以这里重新对齐：丢掉滞留，跳到还留着的起点，
-      // 并把当前会话按历史重放一次。
-      if (oldest > 0 && oldest > appliedSeq + 1) {
-        appliedSeq = oldest - 1;
-        // 事件台裁掉了一段：**运行态的实时知识作废**（收尾那条可能就在丢掉的那段里），
-        // 退回"用快照对账"，直到事件重新告诉我们为止。
-        for (const cur of state.sessions.values()) cur.running_known = false;
-        needState = true;
-        await resyncActive();
-      }
-      pollSince = head;
-      let mode = 'none';
-      for (const item of data.lines) {
-        try {
-          const m = applyBatch(item.seq, item.sid, item.events);
-          if (m === 'full') mode = 'full';
-          else if (m === 'live' && mode !== 'full') mode = 'live';
-          // 运行态只在 applyBatch 里由事件改（`working`）——
-    // 这里碰它，一个迟到的流式增量就会把「停止」按钮误翻回「发送」。
-        } catch { /* 单行损坏不拖垮轮询 */ }
-      }
-      // 状态对齐：别的客户端（演示脚本、另一个标签页）建/删/改会话时，侧栏自己跟上——
-      // 不需要用户刷新浏览器；未知会话会立刻置 needState，其余靠 3 秒兜底。
-      if (needState || Date.now() - lastStateAt > 3000) {
-        needState = false;
-        lastStateAt = Date.now();
-        // refreshState 自己会把侧栏与历史重画；agent 登记弹窗里的列表归那个弹窗自己管。
-        await refreshState();
-      }
-      // 纯流式增量：只 append 新节点（折叠、<pre> 滚动、外层滚动都不被打断）。
-      if (mode === 'full') renderAll();
-      else if (mode === 'live') scheduleLiveTick();
-      // 有会话动作在等回包时，让动作回包自己刷新 pending；轮询只补漏。
-    } catch (err) {
-      eventError(err);
-    }
+      const m = applyBatch(item.seq, item.sid, item.events);
+      if (m === 'full') mode = 'full';
+      else if (m === 'live' && mode !== 'full') mode = 'live';
+      // 运行态只在 applyBatch 里由事件改：这里碰它，迟到的流式增量会把「停止」误翻回「发送」。
+    } catch { /* 单行损坏不拖垮轮询 */ }
   }
+  // 别的客户端（演示脚本、另一个标签页）建 / 删 / 改会话时侧栏自己跟上：未知会话立刻置 needState，其余靠 3 秒兜底。
+  if (needState || Date.now() - lastStateAt > 3000) {
+    needState = false;
+    lastStateAt = Date.now();
+    await refreshState();
+  }
+  // 纯流式增量只 append 新节点（折叠、<pre> 滚动、外层滚动都不被打断）。
+  if (mode === 'full') renderAll();
+  else if (mode === 'live') scheduleLiveTick();
 }
 function setConn(ok, err) {
   $('#conn-state .dot').className = 'dot ' + (ok ? 'dot-ok' : 'dot-bad');

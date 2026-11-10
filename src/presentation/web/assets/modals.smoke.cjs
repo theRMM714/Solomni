@@ -100,6 +100,7 @@ function load(file) {
     vm.runInNewContext(fs.readFileSync(path.join(__dirname, file), "utf8"), sandbox, { filename: file });
   } catch (e) { loadErrors.push(file + " 载入失败：" + e.message); }
 }
+require("./app/bridge.js").installBridge(sandbox); // 与浏览器同一段装配：app.js 从 globalThis.solomni 取状态 / HTTP / 事件流
 load("md.js");
 load("ui.js");
 load("app.js");
