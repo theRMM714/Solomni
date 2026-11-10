@@ -1128,7 +1128,9 @@ fn assets_are_served_only_from_the_embedded_table() {
 /// 为什么钉：陈列页会随组件演进而过期，发行版不该带一份会漂移的展示页。
 #[test]
 fn dev_assets_follow_build_profile() {
-    let has_dev = web::assets::ASSETS.iter().any(|(p, _, _)| p.starts_with("dev/"));
+    let has_dev = web::assets::ASSETS
+        .iter()
+        .any(|(p, _, _)| p.starts_with("dev/"));
     if cfg!(debug_assertions) {
         assert!(has_dev, "debug 构建应嵌入 dev/ 下的组件陈列页");
     } else {

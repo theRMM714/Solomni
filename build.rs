@@ -37,7 +37,9 @@ fn main() {
     println!("cargo:rerun-if-changed={}", assets.display());
     // PROFILE 变化要重跑：同一份 OUT_DIR 可能先 debug 后 release。
     println!("cargo:rerun-if-env-changed=PROFILE");
-    let debug = std::env::var("PROFILE").map(|p| p == "debug").unwrap_or(false);
+    let debug = std::env::var("PROFILE")
+        .map(|p| p == "debug")
+        .unwrap_or(false);
 
     let mut entries: Vec<(String, &'static str, PathBuf)> = Vec::new();
     collect(&assets, &assets, debug, &mut entries);
@@ -70,7 +72,11 @@ fn collect(base: &Path, dir: &Path, debug: bool, out: &mut Vec<(String, &'static
     items.sort();
     for path in items {
         if path.is_dir() {
-            let dev = path.file_name().and_then(|n| n.to_str()).map(|n| DEV_ONLY_DIRS.contains(&n)).unwrap_or(false);
+            let dev = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| DEV_ONLY_DIRS.contains(&n))
+                .unwrap_or(false);
             if dev && !debug {
                 continue;
             }
