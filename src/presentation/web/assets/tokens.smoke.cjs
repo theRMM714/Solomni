@@ -56,6 +56,31 @@ for (const [name, css] of [["ui.css", ui], ["style.css", page]]) {
   for (const m of css.matchAll(/\b\d+(?:\.\d+)?m?s\b/g)) {
     problems.push(name + " 出现字面量时长：" + m[0]);
   }
+  /* 排版三件套只准走令牌：字面量字号会让字号阶梯名存实亡。 */
+  for (const m of css.matchAll(/(?:^|[;{\s])(font-size|line-height|font-family)\s*:\s*([^;}]+)/g)) {
+    if (!/var\(--/.test(m[2])) problems.push(name + " 出现字面量 " + m[1] + "：" + m[2].trim());
+  }
+  for (const m of css.matchAll(/(?:^|[;{\s])font\s*:\s*([^;}]+)/g)) {
+    const v = m[1].trim();
+    if (v !== "inherit" && v.indexOf("var(--") !== 0) problems.push(name + " 出现字面量 font：" + v);
+  }
+}
+
+/* ---- 令牌不许闲置：定义了没人引用的令牌就是下一个主题改不动的死角 ---- */
+function walk(dir, out) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) walk(p, out);
+    else if (/\.(css|js|html)$/.test(e.name)) out.push(p);
+  }
+  return out;
+}
+const referenced = new Set();
+for (const f of walk(DIR, [])) {
+  for (const m of stripComments(fs.readFileSync(f, "utf8")).matchAll(/var\(\s*(--[a-z0-9-]+)/g)) referenced.add(m[1]);
+}
+for (const name of defined) {
+  if (!referenced.has(name)) problems.push("令牌定义了却没人引用：" + name);
 }
 
 /* ---- 令牌层级：字号 5 档、间距 4 的倍数、颜色必须是不透明 hex ---- */
@@ -170,5 +195,5 @@ if (problems.length) {
   console.log("TOKENS-SMOKE-FAIL（" + uniq.length + " 条）");
   process.exit(1);
 }
-console.log("令牌检查：" + defined.size + " 个令牌，5 档字号，对比度 " + pairCount + " 对达 AA，ui.css / style.css 无字面量颜色与时长");
+console.log("令牌检查：" + defined.size + " 个令牌全部有引用，5 档字号，对比度 " + pairCount + " 对达 AA，ui.css / style.css 无字面量颜色 / 时长 / 排版");
 console.log("TOKENS-SMOKE-OK");

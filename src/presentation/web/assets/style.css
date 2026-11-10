@@ -320,7 +320,7 @@ body {
 .readonly-bar .btn { flex: none; }
 .btn-add {
   flex: none; width: 46px; height: 46px; padding: 0;
-  font-size: var(--fs-l); line-height: 1; color: var(--color-text-dim);
+  font-size: var(--fs-l); line-height: var(--lh-none); color: var(--color-text-dim);
 }
 .btn-add svg { width: 20px; height: 20px; }
 .btn-add:hover { color: var(--color-accent); }
@@ -332,7 +332,7 @@ body {
   /* 移动：侧栏变抽屉；输入区贴底；点按目标 ≥40px */
   .sidebar {
     position: fixed; top: var(--h-topbar); bottom: 0; left: 0; z-index: var(--z-sidebar);
-    transform: translateX(-100%); transition: transform var(--dur-base) var(--ease-out);
+    transform: translateX(-100%); transition: transform var(--dur-slow) var(--ease-out);
     width: min(84vw, var(--w-sidebar));
     box-shadow: var(--shadow-2);
   }
@@ -371,7 +371,7 @@ body {
   color: var(--color-text-dim); font: inherit; font-size: var(--fs-s); text-align: left; cursor: pointer;
 }
 .settings-nav-item:hover { color: var(--color-text); background: var(--color-surface-2); }
-.settings-nav-item.active { color: var(--color-text); background: var(--color-surface-2); border-color: var(--color-border); }
+.settings-nav-item.active { color: var(--color-text); background: var(--color-accent-weak); border-color: var(--color-border); }
 .settings-main { display: flex; flex-direction: column; min-width: 0; min-height: 420px; }
 .settings-panes { flex: 1; min-width: 0; }
 .settings-page { display: flex; flex-direction: column; gap: 12px; }
@@ -579,7 +579,7 @@ body {
 .mod-chip.is-orphan { border-color: var(--color-warn); color: var(--color-warn); }
 .mod-chip-x {
   border: none; background: none; color: var(--color-text-dim);
-  cursor: pointer; font-size: var(--fs-base); line-height: 1; padding: 0 2px;
+  cursor: pointer; font-size: var(--fs-base); line-height: var(--lh-none); padding: 0 2px;
 }
 .mod-chip-x:hover { color: var(--color-err); }
 .mod-add {
@@ -599,7 +599,7 @@ body {
 .think-row select { flex: 0 1 190px; min-width: 130px; }
 .think-eq { flex: none; color: var(--color-text-dim); }
 .think-row input.field-input { flex: 1 1 220px; min-width: 120px; }
-.think-row .link-btn { flex: none; font-size: var(--fs-base); line-height: 1; }
+.think-row .link-btn { flex: none; font-size: var(--fs-base); line-height: var(--lh-none); }
 .mod-pick-section { display: flex; flex-direction: column; gap: 6px; }
 .mod-pick-title { font-size: var(--fs-s); color: var(--color-text-dim); letter-spacing: .5px; }
 .mod-grid {

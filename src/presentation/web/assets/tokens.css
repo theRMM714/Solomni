@@ -34,8 +34,6 @@
   --color-text: var(--c-graphite-100);
   --color-text-dim: var(--c-graphite-300);
   --color-text-inverse: var(--c-graphite-900);
-  --color-user-bubble: var(--c-graphite-700);
-  --color-user-border: var(--c-graphite-500);
   --color-accent: var(--c-ice-500);
   --color-accent-strong: var(--c-ice-600);
   --color-accent-contrast: var(--c-graphite-900);
@@ -72,6 +70,7 @@
   --lh-tight: 1.3;
   --lh-snug: 1.5;
   --lh-base: 1.75;
+  --lh-none: 1;
 
   /* ---- 动效 ---- */
   --dur-fast: 120ms;
