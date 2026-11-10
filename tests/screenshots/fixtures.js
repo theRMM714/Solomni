@@ -47,7 +47,7 @@ const state = {
       thinking: { default: null, levels: {} },
     },
   ],
-  core: { provider: "anthropic", model: "claude-sonnet-4-5" },
+  core: "claude-sonnet-4-5",
   rejected: [],
   agents: [
     { name: "builder", model: "claude-sonnet-4-5", modules: ["release"], prompt: "实现与自测" },
