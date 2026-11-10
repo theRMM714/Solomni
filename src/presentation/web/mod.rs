@@ -7,6 +7,7 @@
 use crate::capabilities::conductor::api::{Acted, ActionCall, Caller, SessionEvent, WorkMode};
 use crate::capabilities::conductor::api::{Ops, Output};
 use crate::capabilities::workspace::api::MAX_ASSET_BYTES;
+pub(crate) mod assets;
 pub mod routes;
 use serde_json::json;
 use std::io::Read;
@@ -213,9 +214,17 @@ fn json_head() -> Vec<(&'static str, String)> {
 fn static_head(kind: &str) -> Vec<(&'static str, String)> {
     vec![
         ("Content-Type", format!("{}; charset=utf-8", kind)),
-        // 静态资源一律 no-store：避免浏览器拿到旧的 app.js/md.js（改了却不生效的经典陷阱）
+        // 静态资源一律 no-store：避免浏览器拿到旧脚本（改了却不生效的经典陷阱）
         ("Cache-Control", "no-store".to_string()),
     ]
+}
+
+/// 静态资源：只从编译期嵌入表里取；表里没有就是 404，不碰文件系统。
+fn static_asset(path: &str) -> Reply {
+    match assets::lookup(path) {
+        Some((mime, body)) => (200, static_head(mime), body.to_string()),
+        None => complaint(404, "无此资源"),
+    }
 }
 
 /// 统一错误响应：形状与既有前端一致（`{error}`）。
@@ -266,41 +275,8 @@ pub(crate) fn route(
     let name = m.param("name");
 
     match m.route.id {
-        "index" => (
-            200,
-            static_head("text/html"),
-            include_str!("assets/index.html").to_string(),
-        ),
-        "style" => (
-            200,
-            static_head("text/css"),
-            include_str!("assets/style.css").to_string(),
-        ),
-        "app" => (
-            200,
-            static_head("application/javascript"),
-            include_str!("assets/app.js").to_string(),
-        ),
-        "md" => (
-            200,
-            static_head("application/javascript"),
-            include_str!("assets/md.js").to_string(),
-        ),
-        "tokens" => (
-            200,
-            static_head("text/css"),
-            include_str!("assets/tokens.css").to_string(),
-        ),
-        "ui_css" => (
-            200,
-            static_head("text/css"),
-            include_str!("assets/ui.css").to_string(),
-        ),
-        "ui_js" => (
-            200,
-            static_head("application/javascript"),
-            include_str!("assets/ui.js").to_string(),
-        ),
+        "index" => static_asset("index.html"),
+        "asset" => static_asset(&m.param("path")),
 
         "events" => {
             // 长轮询：?sid= 会话，&since= 客户端已见序号。最多等 20s；有新事件立即回。

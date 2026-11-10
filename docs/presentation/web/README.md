@@ -42,6 +42,7 @@
 ## 改动本单元时必须同步
 
 - 增删路由 → 五处同改：`src/presentation/web/routes.rs` 的 `ROUTES`、前端调用点、`docs/presentation/contracts.md` 的 ROUTES 段、`src/tests/routes.rs`（机器比对）、`demo/*.mjs` 的调用点；前端资源改动跑冒烟。
+- 增删前端文件 → **不改路由**：`build.rs` 编译期扫描 `assets/` 自动进嵌入表（经 `/assets/{*path}` 提供）；新扩展名要先加进 `build.rs` 的 `SERVED`，否则构建失败。
 - 测试缺口：本单元**不是业务能力**，没有独立的缺口账；缺口记在 `tests/gaps.yaml`；格式见 [docs/testing/gaps-acceptance.md](../../../docs/testing/gaps-acceptance.md) 的「缺口账」。
 
 ## 本目录
