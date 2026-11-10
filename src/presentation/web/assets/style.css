@@ -401,11 +401,15 @@ body {
   font-size: var(--fs-s); font-weight: 600; color: var(--color-text);
 }
 .settings-page > .form-sec-title:first-child { border-top: none; padding-top: 0; margin-top: 0; }
+@media (min-width: 721px) {
+  .modal-body > .wf-hint { margin-left: calc(240px + var(--sp-5)); }
+}
 @media (max-width: 720px) {
   .wf-field:has(> .wf-label) { display: flex; flex-direction: column; gap: var(--sp-1); }
   .wf-field:has(> .wf-label) > .wf-label { order: 0; }
-  .wf-field:has(> .wf-label) > .wf-lead { order: 1; }
-  .wf-field:has(> .wf-label) > :not(.wf-label):not(.wf-lead) { order: 2; }
+  .wf-field:has(> .wf-label) > :not(.wf-label):not(.wf-lead):not(.detail-safety) { order: 1; }
+  .wf-field:has(> .wf-label) > .wf-lead { order: 2; }
+  .wf-field:has(> .wf-label) > .detail-safety { order: 3; }
   .form-actions .btn { flex: 1; }
 }
 
