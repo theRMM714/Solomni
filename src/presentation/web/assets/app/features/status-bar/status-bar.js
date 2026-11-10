@@ -3,7 +3,7 @@
  * 不管：不改会话内容；档位切换走统一动作分发。
  * 联动：档位目录来自 app/stores/settings.js；工作卡来自 app 上的 loadWork / openShellCard。 */
 
-let g, doc, state, stores, api, ui, app;
+let doc, state, api, ui, app;
 let icon;
 const PERMISSION_LABELS = (...a) => app.PERMISSION_LABELS(...a);
 const PERMISSION_ORDER = (...a) => app.PERMISSION_ORDER(...a);
@@ -241,7 +241,7 @@ function syncStatusbar(s) {
 
 /// 挂载：装配依赖并把本模块的入口交给组装点。
 export function mount(root, deps) {
-  ({ g, doc, state, stores, api, ui, app } = deps);
+  ({ doc, state, api, ui, app } = deps);
   ({ icon } = ui);
   Object.assign(root, { openPermissionMenu, openThinkingMenu, switchThinking, switchPermission, syncStatusbar });
 }

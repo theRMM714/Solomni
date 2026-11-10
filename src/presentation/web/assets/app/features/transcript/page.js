@@ -6,7 +6,7 @@
 import { renderStream } from './stream.js';
 import { renderGate } from './cards.js';
 
-let g, doc, state, stores, api, ui, app;
+let doc, app;
 
 /// 选择器简写：模块内的 DOM 查找一律走注入的 doc。
 const $ = (sel) => doc.querySelector(sel);
@@ -46,6 +46,6 @@ export { renderAll, renderReadonly };
 
 /// 挂载：装配依赖并把本模块的入口交给组装点。
 export function mount(root, deps) {
-  ({ g, doc, state, stores, api, ui, app } = deps);
+  ({ doc, app } = deps);
   Object.assign(root, { renderAll, renderReadonly });
 }

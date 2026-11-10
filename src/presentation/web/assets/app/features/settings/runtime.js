@@ -3,11 +3,11 @@
  * 不管：提交与保存（见 pages.js 的 settingsForm / saveSettings）、分页框架（hub.js）。
  * 联动：pages.js 的 settingsForm 逐页调用。
  */
-let g, doc, api, ui, app;
+let doc, api, ui;
 let field;
 /** 挂载：把本功能的入口登记到 app；跨功能调用一律经 app 晚绑定。 */
 export function mount(root, deps) {
-  ({ g, doc, api, ui, app } = deps);
+  ({ doc, api, ui } = deps);
   ({ field } = ui);
   Object.assign(root, { buildGeneratePage, buildSandboxPage, buildPermissionsPage, buildResourcesPage });
 }

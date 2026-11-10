@@ -3,11 +3,11 @@
  * 不管：输入区的 @ 菜单渲染、上传后的全局刷新（经 app.refreshState）。
  * 联动：侧栏的上传按钮、模块与服务页、向导都调用 pickUploadFile。
  */
-let g, doc, api, ui, app;
+let doc, api, ui, app;
 let btn, textInput, field;
 /** 挂载：把本功能的入口登记到 app；跨功能调用一律经 app 晚绑定。 */
 export function mount(root, deps) {
-  ({ g, doc, api, ui, app } = deps);
+  ({ doc, api, ui, app } = deps);
   ({ btn, textInput, field } = ui);
   Object.assign(root, { filesCache, pickUploadFile, suggestAltName, sendUpload, conflictUpload, renameUpload });
 }

@@ -3,7 +3,7 @@
  * 不管：工作卡本身与上下文/工具浮层（见 work.js）；取数与状态落库由 work.js 的 `loadWork` 负责。
  * 联动：由 app/main.js 装配；`work.js` 经 app.openWorkHistory 晚绑定打开，弹层与提示走 ui/ 与 dialog。 */
 
-let g, doc, state, stores, api, ui, app;
+let doc, api, ui, app;
 let btn;
 const actionUrl = (...a) => app.actionUrl(...a);
 const confirmBox = (...a) => app.confirmBox(...a);
@@ -216,7 +216,7 @@ async function restoreCommit(modal, s, d) {
 
 
 export function mount(root, deps) {
-  ({ g, doc, state, stores, api, ui, app } = deps);
+  ({ doc, api, ui, app } = deps);
   btn = ui.btn;
   Object.assign(root, { openWorkHistory, previewCommitFile, restoreCommit });
 }

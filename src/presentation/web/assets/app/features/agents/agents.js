@@ -3,11 +3,11 @@
  * 不管：agent 的落盘（走调用方传入的回调 / app 动作）、设置中心分页框架（settings/hub.js）。
  * 联动：settings/pages.js 与向导都用这里的表单与卡片。
  */
-let g, doc, state, ui, app;
+let doc, state, ui, app;
 let btn, textInput, field, areaInput, selectInput, syncSelect, emptyHint;
 /** 挂载：把本功能的入口登记到 app；跨功能调用一律经 app 晚绑定。 */
 export function mount(root, deps) {
-  ({ g, doc, state, ui, app } = deps);
+  ({ doc, state, ui, app } = deps);
   ({ btn, textInput, field, areaInput, selectInput, syncSelect, emptyHint } = ui);
   Object.assign(root, { moduleById, moduleMatches, moduleChips, openModulePicker, cloneAgent, agentPreview, agentForm, openAgentEditor, openTempAgentSheet, openRegistryAgentPicker, agentCard });
 }

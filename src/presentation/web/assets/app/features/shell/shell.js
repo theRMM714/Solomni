@@ -3,7 +3,7 @@
  * 不管：各功能怎么画（只调 app.* 上的入口）；事件吸收与渲染本身（见 features/transcript/）。
  * 联动：由 app/main.js 最后装配，并在所有功能挂好后调用 start()。 */
 
-let g, doc, state, stores, api, ui, app;
+let doc, state, stores, api, app;
 let registry;
 let eventStream;
 const loadWork = (...a) => app.loadWork(...a);
@@ -21,8 +21,6 @@ function modelOptions(current, needEmpty) {
 }
 
 function onRegistryChange(fn) { return registry.on(fn); }
-
-function notifyRegistryChange() { registry.notify(); }
 
 /** 拉一次 /api/state：快照投影进状态（app/stores/state.js），再补新会话的盘上转录并重画。 */
 async function refreshState() {
@@ -116,7 +114,7 @@ function eventError(err) {
 }
 
 export function mount(root, deps) {
-  ({ g, doc, state, stores, api, ui, app } = deps);
+  ({ doc, state, stores, api, app } = deps);
   // 登记处一变，所有已打开的分页都跟着同步列表与下拉选项（stores.createRegistryWatch）。
   registry = stores.createRegistryWatch(state, (e) => console.error("登记处视图刷新失败：", e));
   // 传输（取批次、游标、断线重试）在 core/events.js；这里只接三条回调。
@@ -126,7 +124,7 @@ export function mount(root, deps) {
     onLines: (...a) => app.applyLines(...a),
     onError: eventError,
   });
-  Object.assign(root, { modelOptions, registry, onRegistryChange, notifyRegistryChange, refreshState, renderFenceBanner, renderToolchainBanner, eventStream, pollLoop, setConn, eventError });
+  Object.assign(root, { modelOptions, registry, onRegistryChange, refreshState, renderFenceBanner, renderToolchainBanner, eventStream, pollLoop, setConn, eventError });
 }
 
 /* 启动接线：输入区、抽屉遮罩、首次刷新；由 main.js 在所有功能挂好之后调用。 */

@@ -4,7 +4,7 @@
  * 不管：不决定渲染哪些行、不管整帧与增量策略（见 ./stream.js 与 ./page.js）。
  * 联动：折叠与滚动位置存在会话上（fold / scroll）；长路径根来自 state.pathRoots（由向导写入）。 */
 
-let g, doc, state, stores, api, ui, app;
+let g, doc, state, ui, app;
 
 /// 思维链块：永远默认折叠，点击（原生 details）才展开。
 /// Markdown 容器：有渲染器就渲染，没有就退回纯文本（安全）。
@@ -222,6 +222,6 @@ export { mdNode, appendBody, foldOpen, foldBind, scrollKey, flushScroll, toolDet
 
 /// 挂载：装配依赖并把本模块的入口交给组装点。
 export function mount(root, deps) {
-  ({ g, doc, state, stores, api, ui, app } = deps);
+  ({ g, doc, state, ui, app } = deps);
   Object.assign(root, { mdNode, appendBody, foldOpen, foldBind, scrollKey, flushScroll, toolDetail, toolCard, buildRootList, shortPath, reasoningBlock, rewindButton, lineBlock, sessionNote, pendingScroll });
 }

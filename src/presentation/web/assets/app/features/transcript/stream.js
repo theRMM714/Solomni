@@ -3,11 +3,11 @@
  * 不管：不定义行的长相（./parts.js）、不定义气泡（./turn.js）、不决定整帧时机（./page.js）。
  * 联动：裁决门要整帧重画时经 app.renderGate 晚绑定，避免与本模块互相 import。 */
 
-import { mdNode, appendBody, toolCard, reasoningBlock, shortPath, flushScroll, lineBlock, sessionNote } from './parts.js';
-import { buildTurn, renderDone } from './turn.js';
+import { mdNode, toolCard, reasoningBlock, shortPath, flushScroll } from './parts.js';
+import { renderDone } from './turn.js';
 import { boxes } from './dom.js';
 
-let g, doc, state, stores, api, ui, app;
+let g, doc, state, ui, app;
 
 /// 选择器简写：模块内的 DOM 查找一律走注入的 doc。
 const $ = (sel) => doc.querySelector(sel);
@@ -219,6 +219,6 @@ export { renderStream, syncTyping, scheduleLiveTick, renderLiveTick, buildStream
 
 /// 挂载：装配依赖并把本模块的入口交给组装点。
 export function mount(root, deps) {
-  ({ g, doc, state, stores, api, ui, app } = deps);
+  ({ g, doc, state, ui, app } = deps);
   Object.assign(root, { renderStream, syncTyping, scheduleLiveTick, renderLiveTick, buildStreamBoxes });
 }

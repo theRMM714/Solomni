@@ -3,7 +3,7 @@
  * 不管：不渲染转录、不管历史树；起完会话只提交给 app 的刷新入口。
  * 联动：agent 表单与模块选择来自 app/features/agents；会话配置来自 session-config。 */
 
-let g, doc, state, stores, api, ui, app;
+let g, doc, state, api, ui, app;
 let areaInput, btn, busyButton, emptyHint, field, fold, hint, selectInput, textInput;
 const actionUrl = (...a) => app.actionUrl(...a);
 const atClose = (...a) => app.atClose(...a);
@@ -586,7 +586,7 @@ async function loadPathRoots(sid) {
 
 /// 挂载：装配依赖并把本模块的入口交给组装点。
 export function mount(root, deps) {
-  ({ g, doc, state, stores, api, ui, app } = deps);
+  ({ g, doc, state, api, ui, app } = deps);
   ({ areaInput, btn, busyButton, emptyHint, field, fold, hint, selectInput, textInput } = ui);
   Object.assign(root, { openWizard, startSession, setActive, applyPathRoots, loadPathRoots });
 }

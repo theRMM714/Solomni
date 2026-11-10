@@ -3,13 +3,13 @@
  * 不管：弹层栈本身、设置中心的分页框架（见同目录 hub.js）、保存后的全局重绘。
  * 联动：hub.js 组装分页并调用本文件；本文件经 app 调用 openModalLayer / refreshState；数据来自 state 投影。
  */
-let g, doc, state, api, ui, app;
+let doc, state, api, ui, app;
 let icon, btn, busyButton, textInput, field, numberInput, areaInput, selectInput, syncSelect, checkbox, emptyHint;
 /** 挂载：把本功能的入口登记到 app；跨功能调用一律经 app 晚绑定。 */
 export function mount(root, deps) {
-  ({ g, doc, state, api, ui, app } = deps);
+  ({ doc, state, api, ui, app } = deps);
   ({ icon, btn, busyButton, textInput, field, numberInput, areaInput, selectInput, syncSelect, checkbox, emptyHint } = ui);
-  Object.assign(root, { providersPage, openProvidersModal, thinkingTagsEditor, thinkingMapEditor, modelsPage, openModelsModal, coreModelBlock, openCoreModal, settingsForm, parseSettingLines, collectSettings, saveSettings, SETTINGS_PAGES, choiceModal });
+  Object.assign(root, { providersPage, thinkingTagsEditor, thinkingMapEditor, modelsPage, coreModelBlock, settingsForm, parseSettingLines, collectSettings, saveSettings, SETTINGS_PAGES, choiceModal });
 }
 /* ---------- 设置①：供应商登记（录入 / 修改 / 删除） ---------- */
 function providersPage(c) {
@@ -69,10 +69,6 @@ function providersPage(c) {
     form.appendChild(field('api_key', keyIn));
     form.appendChild(save);
     c.body.appendChild(form);
-}
-
-function openProvidersModal() {
-  app.openModal('供应商登记', providersPage);
 }
 
 /* ---------- 思考等级标签 / 模型档位映射 ---------- */
@@ -541,10 +537,6 @@ function modelsPage(c, coreBody) {
     c.body.appendChild(discWrap);
 }
 
-function openModelsModal() {
-  app.openModal('模型登记', modelsPage);
-}
-
 /* ---------- 设置③：核心 AI 默认模型 ---------- */
 function coreModelBlock(c, subscribe) {
     const sel = selectInput(app.modelOptions(state.core), state.core);
@@ -562,10 +554,6 @@ function coreModelBlock(c, subscribe) {
     if (!state.models.length) c.body.appendChild(emptyHint('（未登记模型，先到「模型登记」添加）'));
     c.body.appendChild(field('核心 AI 使用的模型', sel));
     c.body.appendChild(save);
-}
-
-function openCoreModal() {
-  app.openModal('核心 AI 默认模型', coreModelBlock);
 }
 
 /* ---------- 设置④：基本设置 ---------- */

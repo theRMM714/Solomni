@@ -9,12 +9,8 @@ let btn, emptyHint;
 export function mount(root, deps) {
   ({ g, doc, state, ui, app } = deps);
   ({ btn, emptyHint } = ui);
-  Object.assign(root, { openSettingsModal, openSettingsHub, openAgentsModal, agentsPage });
+  Object.assign(root, { openSettingsHub, agentsPage });
 }
-function openSettingsModal() {
-  openSettingsHub('generate');
-}
-
 function openSettingsHub(page) {
   app.openModal('设置', (c) => {
     const hub = doc.createElement('div');
@@ -114,10 +110,6 @@ function openSettingsHub(page) {
     c.body.appendChild(hub);
     show(page || 'generate');
   }, true);
-}
-
-function openAgentsModal() {
-  app.openModal('agent 管理', agentsPage, true);
 }
 
 /* ---------- 设置⑤：agent 管理（列表 / 新建 / 编辑 / 删除） ---------- */

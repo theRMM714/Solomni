@@ -3,7 +3,7 @@
  * 不管：卡上的四格全部来自后端（信封 / 消息 / 选项），前端不认识业务含义、不按 kind 猜按钮。
  * 联动：提交走 /api/actions；回答后重画经 app.renderStream / app.renderAll，置位经 app.markNeedState。 */
 
-let g, doc, state, stores, api, ui, app;
+let doc, api, ui, app;
 
 /// 选择器简写：模块内的 DOM 查找一律走注入的 doc。
 const $ = (sel) => doc.querySelector(sel);
@@ -159,6 +159,6 @@ export { renderGate, renderCard, answerCard, gateCard, updateTaskFlow, updateTas
 
 /// 挂载：装配依赖并把本模块的入口交给组装点。
 export function mount(root, deps) {
-  ({ g, doc, state, stores, api, ui, app } = deps);
+  ({ doc, api, ui, app } = deps);
   Object.assign(root, { renderGate, renderCard, answerCard, gateCard, updateTaskFlow, updateTask, takeInput });
 }

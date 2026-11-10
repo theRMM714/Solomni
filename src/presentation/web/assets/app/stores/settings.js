@@ -3,7 +3,7 @@
  * 不管：不读写其它状态、不发请求、不碰 DOM。
  * 联动：状态栏与设置中心按这里的档位渲染，兜底值只在本文件出现一次。 */
 
-let g, doc, state, stores, api, ui, app;
+let state;
 
 /* 思考强度的兜底目录：后端 /api/state 的 settings.thinking 是权威；桩或加载失败时仍能画出四档。 */
 const DEFAULT_THINKING_LEVELS = [
@@ -36,6 +36,6 @@ const PERMISSION_LABELS = {
 
 /// 挂载：装配依赖并把本模块的入口交给组装点。
 export function mount(root, deps) {
-  ({ g, doc, state, stores, api, ui, app } = deps);
+  ({ state } = deps);
   Object.assign(root, { DEFAULT_THINKING_LEVELS, thinkingLevels, thinkingLabel, PERMISSION_ORDER, PERMISSION_LABELS });
 }

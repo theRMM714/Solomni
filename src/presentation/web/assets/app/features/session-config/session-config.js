@@ -3,7 +3,7 @@
  * 不管：不写会话状态、不发事件；保存走统一动作分发。
  * 联动：模型选项来自 app.modelOptions；弹层来自 app/openModal；刷新走 app.refreshState。 */
 
-let g, doc, state, stores, api, ui, app;
+let g, doc, api, ui, app;
 let areaInput, btn, cfgRadio, emptyHint, field, hint, selectInput, syncSelect, textInput;
 const actionUrl = (...a) => app.actionUrl(...a);
 const closeModal = (...a) => app.closeModal(...a);
@@ -11,9 +11,6 @@ const modelOptions = (...a) => app.modelOptions(...a);
 const openModal = (...a) => app.openModal(...a);
 const refreshState = (...a) => app.refreshState(...a);
 const thinkingLabel = (...a) => app.thinkingLabel(...a);
-
-/// 选择器简写：模块内的 DOM 查找一律走注入的 doc。
-const $ = (sel) => doc.querySelector(sel);
 
 /// 从会话列表的「编辑」进入：面板自己拉配置、自己重绘（保存 / 重新扫描都走这里）。
 function openConfig(sid) {
@@ -449,7 +446,7 @@ function guestPicker(guests, current, onChange) {
 
 /// 挂载：装配依赖并把本模块的入口交给组装点。
 export function mount(root, deps) {
-  ({ g, doc, state, stores, api, ui, app } = deps);
+  ({ g, doc, api, ui, app } = deps);
   ({ areaInput, btn, emptyHint, field, hint, selectInput, syncSelect, textInput } = ui);
   cfgRadio = ui.radio;
   Object.assign(root, { openConfig, loadConfig, buildConfigForm, cfgAgentBlock, cfgRuntimeBlock, guestPicker, cfgRadio });

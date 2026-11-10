@@ -3,7 +3,7 @@
  * 不管：状态栏的布局与刷新时机（见 status-bar/status-bar.js 的 syncStatusbar）。
  * 联动：由 app/main.js 装配；settings 来自 app/stores/state.js，长时任务的时间基准是回包的 started_at。 */
 
-let g, doc, state, stores, api, ui, app;
+let state;
 
 function ctxChipClass(percent) {
   const at = Number((state.settings && state.settings.compact_at_percent) || 0);
@@ -66,6 +66,6 @@ function statusPrintOf(s) {
 }
 
 export function mount(root, deps) {
-  ({ g, doc, state, stores, api, ui, app } = deps);
+  ({ state } = deps);
   Object.assign(root, { ctxChipClass, shellRunning, shellAbnormal, shellStatusLabel, shellSecs, statusPrintOf });
 }

@@ -3,7 +3,7 @@
  * 不管：主区弹层（见 ui/modal.js，那个在主区里、可叠层）；业务文案与跳转。
  * 联动：由 app/main.js 装配；关闭判据用 ui/overlays.js 的 bindDismiss，按钮用 ui/buttons.js。 */
 
-let g, doc, state, stores, api, ui, app;
+let doc, ui;
 let btn;
 const $ = (sel) => doc.querySelector(sel);
 
@@ -61,7 +61,7 @@ function confirmBox(title, text, confirmLabel, danger) {
 }
 
 export function mount(root, deps) {
-  ({ g, doc, state, stores, api, ui, app } = deps);
+  ({ doc, ui } = deps);
   btn = ui.btn;
   Object.assign(root, { notice, confirmBox });
 }

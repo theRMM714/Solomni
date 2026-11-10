@@ -3,7 +3,7 @@
  * 不管：按钮长在哪、事件流怎么取（见 features/transcript/events.js 与 shell.js 的长轮询）。
  * 联动：由 app/main.js 装配；渲染经 app.renderAll / app.markNeedState 晚绑定，避免与转录模块互相 import。 */
 
-let g, doc, state, stores, api, ui, app;
+let api, ui, app;
 const confirmBox = (...a) => app.confirmBox(...a);
 const notice = (...a) => app.notice(...a);
 
@@ -185,6 +185,6 @@ async function continueContext() {
 }
 
 export function mount(root, deps) {
-  ({ g, doc, state, stores, api, ui, app } = deps);
+  ({ api, ui, app } = deps);
   Object.assign(root, { ACT_IDS, actionUrl, act, rewindTo, restoreMark, applyRewind, withdrawAgree, activateFlow, applyActivation, continueContext });
 }

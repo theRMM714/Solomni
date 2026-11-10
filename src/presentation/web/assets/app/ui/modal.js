@@ -3,7 +3,7 @@
  * 不管：各弹层里放什么；登记处写操作的具体 URL 与刷新（经 app.actionUrl / app.refreshState 晚绑定）。
  * 联动：由 app/main.js 装配；关闭判据用 ui/overlays.js 的 bindDismiss，按钮用 ui/buttons.js。 */
 
-let g, doc, state, stores, api, ui, app;
+let doc, api, ui, app;
 let btn;
 const actionUrl = (...a) => app.actionUrl(...a);
 const onRegistryChange = (...a) => app.onRegistryChange(...a);
@@ -95,7 +95,7 @@ function openModal(title, build, wide) {
 }
 
 export function mount(root, deps) {
-  ({ g, doc, state, stores, api, ui, app } = deps);
+  ({ doc, api, ui, app } = deps);
   btn = ui.btn;
   Object.defineProperty(root, "modalLayers", { get: () => modalLayers, configurable: true, enumerable: true });
   Object.assign(root, { detachNode, closeModalLayer, closeModal, openModalLayer, openModal });

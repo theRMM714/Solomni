@@ -7,7 +7,7 @@ import { boxes } from './dom.js';
 import { turnWorthy, turnKey, turnText, turnReasoning } from './model.js';
 import { lineBlock, appendBody, foldBind, toolDetail, toolCard, reasoningBlock, rewindButton, flushScroll, sessionNote } from './parts.js';
 
-let g, doc, state, stores, api, ui, app;
+let g, doc, state, ui, app;
 
 /* 转录 DOM：定稿容器 + 流式容器（都挂在 #stream 下）。
  * 定稿容器只在"整帧重建"时重建；流式容器在 delta / tool_call 路径上只做**增量 append**，
@@ -244,6 +244,6 @@ export { buildTurn, nodeCard, appendFinalRow, appendFinalLine, renderDone };
 
 /// 挂载：装配依赖并把本模块的入口交给组装点。
 export function mount(root, deps) {
-  ({ g, doc, state, stores, api, ui, app } = deps);
+  ({ g, doc, state, ui, app } = deps);
   Object.assign(root, { buildTurn, nodeCard, appendFinalRow, appendFinalLine, renderDone });
 }

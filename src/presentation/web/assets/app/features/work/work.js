@@ -3,7 +3,7 @@
  * 不管：状态栏里的那行速览（见 status-bar/）；确认框与提示（见 ui/dialog.js）。
  * 联动：由 app/main.js 装配；渲染与动作经 app.* 晚绑定（含 actions/ 与 transcript/ 的入口）。 */
 
-let g, doc, state, stores, api, ui, app;
+let doc, state, api, ui, app;
 let btn;
 const act = (...a) => app.act(...a);
 const actionUrl = (...a) => app.actionUrl(...a);
@@ -316,7 +316,7 @@ function openWorkCard(s, anchor) {
 }
 
 export function mount(root, deps) {
-  ({ g, doc, state, stores, api, ui, app } = deps);
+  ({ doc, state, api, ui, app } = deps);
   btn = ui.btn;
   Object.defineProperty(root, "shellCardOpen", { get: () => shellCardOpen, set: (v) => { shellCardOpen = v; }, configurable: true, enumerable: true });
   Object.assign(root, { loadWork, popoverBox, popoverRow, popoverNote, shellCardSig, fillShellCard, paintShellCard, openShellCard, openContextCard, compactNow, openToolsMenu, switchContextFreshness, openWorkCard });

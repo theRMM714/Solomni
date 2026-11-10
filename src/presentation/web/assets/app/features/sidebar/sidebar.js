@@ -3,7 +3,7 @@
  * 不管：不拉历史、不改会话内容；打开会话与改配置都走 app 上的入口。
  * 联动：会话读法来自 app/stores/sessions.js；弹层来自 app/ui；刷新走 app.refreshState。 */
 
-let g, doc, state, stores, api, ui, app;
+let g, doc, state, api, ui, app;
 let fold, h, icon;
 const absorb = (...a) => app.absorb(...a);
 const absorbEvents = (...a) => app.absorbEvents(...a);
@@ -326,7 +326,7 @@ function setupSidebar() {
 
 /// 挂载：装配依赖并把本模块的入口交给组装点。
 export function mount(root, deps) {
-  ({ g, doc, state, stores, api, ui, app } = deps);
+  ({ g, doc, state, api, ui, app } = deps);
   ({ fold, h, icon } = ui);
   Object.assign(root, { historyMenu, renderHistory, warnIfTierUnavailable, hydrateHistory, openHistory, deleteHistory, renderSidebar, RAIL_KEY, isNarrow, readRail, saveRail, applyRail, openDrawer, closeDrawer, toggleSidebar, setupSidebar });
 }

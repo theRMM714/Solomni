@@ -3,7 +3,7 @@
  * 不管：不加载会话、不改运行态；打开与关闭都走 app 上的入口。
  * 联动：父子关系与忙态来自 app/stores/sessions.js。 */
 
-let g, doc, state, stores, api, ui, app;
+let doc, state, ui, app;
 let el;
 const activePath = (...a) => app.activePath(...a);
 const knownChildren = (...a) => app.knownChildren(...a);
@@ -136,7 +136,7 @@ function renderTabs() {
 
 /// 挂载：装配依赖并把本模块的入口交给组装点。
 export function mount(root, deps) {
-  ({ g, doc, state, stores, api, ui, app } = deps);
+  ({ doc, state, ui, app } = deps);
   ({ el } = ui);
   Object.assign(root, { tabLabel, tabBusy, tabPending, tabPendingDeep, closeView, openPath, renderTabs });
 }

@@ -3,11 +3,11 @@
  * 不管：动作清单与执行（后端 /api/actions）、弹层栈（ui/modal.js）。
  * 联动：shell 的横幅与向导调用 openSetupModal / setupAction。
  */
-let g, doc, api, ui, app;
+let doc, api, ui, app;
 let btn;
 /** 挂载：把本功能的入口登记到 app；跨功能调用一律经 app 晚绑定。 */
 export function mount(root, deps) {
-  ({ g, doc, api, ui, app } = deps);
+  ({ doc, api, ui, app } = deps);
   ({ btn } = ui);
   Object.assign(root, { setupAction, openSetupModal, diagnosisText });
 }

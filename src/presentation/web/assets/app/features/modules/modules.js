@@ -3,14 +3,14 @@
  * 不管：设置中心分页框架（settings/hub.js）、弹层栈（ui/modal.js）。
  * 联动：settings/hub.js 调用 modulesPage；本文件经 app 调用 refreshState / pollLoop / openWizard。
  */
-let g, doc, state, api, ui, app;
+let doc, state, api, ui, app;
 let btn, textInput, field, emptyHint;
 const $ = (sel) => doc.querySelector(sel);
 /** 挂载：把本功能的入口登记到 app；跨功能调用一律经 app 晚绑定。 */
 export function mount(root, deps) {
-  ({ g, doc, state, api, ui, app } = deps);
+  ({ doc, state, api, ui, app } = deps);
   ({ btn, textInput, field, emptyHint } = ui);
-  Object.assign(root, { modulesPage, openModulesPanel, renderModulesPanel, useRow, openUseCard, fire, panelSection, actionRunner });
+  Object.assign(root, { modulesPage, renderModulesPanel, useRow, openUseCard, fire, panelSection, actionRunner });
 }
 function modulesPage(c) {
   const load = async () => {
@@ -34,10 +34,6 @@ function modulesPage(c) {
     renderModulesPanel(c, mods, services, actions, load);
   };
   load();
-}
-
-function openModulesPanel() {
-  app.openModal('模块与服务', modulesPage, true);
 }
 
 /** 纯渲染（数据注入）：模块 → 服务（开关 + 运行态）→ 功能（「使用」按钮）。 */

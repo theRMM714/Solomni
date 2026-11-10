@@ -3,7 +3,7 @@
  * 不管：不发请求、不写 state、不碰 DOM（写入只发生在 core 与 /api/state 投影里）。
  * 联动：app/core/http.js 的回包经 app/stores/state.js 投影后，功能在这里取读法。 */
 
-let g, doc, state, stores, api, ui, app;
+let state, stores;
 
 /* ---------- 会话历史：树 + 铅笔菜单 ----------
  * 根会话可展开子会话；活跃路径自动展开。点条目直接打开会话；改配置 / 删除走行尾铅笔的浮层菜单。
@@ -102,6 +102,6 @@ function knownChildren(parent) {
 
 /// 挂载：装配依赖并把本模块的入口交给组装点。
 export function mount(root, deps) {
-  ({ g, doc, state, stores, api, ui, app } = deps);
+  ({ state, stores } = deps);
   Object.assign(root, { activeSession, snapshotRunning, isBusy, generating, historyByParent, activePath, sessionParent, knownChildren });
 }

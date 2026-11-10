@@ -3,7 +3,7 @@
  * 不管：不渲染转录、不改会话状态；发送与停止都走统一动作分发。
  * 联动：会话读法来自 app/stores/sessions.js；动作走 app.act。 */
 
-let g, doc, state, stores, api, ui, app;
+let g, doc, state, api, ui, app;
 let h;
 const act = (...a) => app.act(...a);
 const actionUrl = (...a) => app.actionUrl(...a);
@@ -349,7 +349,7 @@ function onSend() {
 
 /// 挂载：装配依赖并把本模块的入口交给组装点。
 export function mount(root, deps) {
-  ({ g, doc, state, stores, api, ui, app } = deps);
+  ({ g, doc, state, api, ui, app } = deps);
   ({ h } = ui);
   Object.assign(root, { syncComposer, syncSendButton, atState, COMMANDS, atMenuEl, atToken, atClose, atHint, atLoad, atFetch, AT_QUOTE_CHARS, AT_QUOTE_RE, atQuotePath, atItems, atRender, atOpen, atInsert, atKey, cmdSync, atOnInput, autoGrow, stopGeneration, onSend });
 }

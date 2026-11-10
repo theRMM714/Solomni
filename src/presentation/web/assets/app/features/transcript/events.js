@@ -6,10 +6,7 @@
 
 import { lineParts } from './model.js';
 
-let g, doc, state, stores, api, ui, app;
-const renderStream = (...a) => app.renderStream(...a);
-const refreshState = (...a) => app.refreshState(...a);
-const renderAll = (...a) => app.renderAll(...a);
+let g, state, api, app;
 
 /* 已应用到的批序号（**单调游标**）。
    事实只有一条来路（事件台）：批次按 seq 到达，游标只前进；服务端裁剪造成跳号时由
@@ -290,6 +287,6 @@ export { applySnapshot, absorb, absorbEvents, applyBatch, applyLines, trimAlign,
 
 /// 挂载：装配依赖并把本模块的入口交给组装点。
 export function mount(root, deps) {
-  ({ g, doc, state, stores, api, ui, app } = deps);
+  ({ g, state, api, app } = deps);
   Object.assign(root, { applySnapshot, absorb, absorbEvents, applyBatch, applyLines, trimAlign, resyncActive, markNeedState, progress });
 }
