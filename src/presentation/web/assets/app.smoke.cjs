@@ -171,7 +171,7 @@ sandbox.globalThis = sandbox;
 try {
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "md.js"), "utf8"), sandbox, { filename: "md.js" });
 } catch (e) { loadErrors.push("md load error: " + e.message); }
-require("./app/bridge.js").installBridge(sandbox); // 与浏览器同一段装配：app.js 从 globalThis.solomni 取状态 / HTTP / 事件流
+require("./app/main.js").boot(sandbox); // 与浏览器同一段装配：装桥、挂功能、补迁移期转发
 const appPath = path.join(__dirname, "app.js");
 try {
   vm.runInNewContext(fs.readFileSync(appPath, "utf8"), sandbox, { filename: "app.js" });

@@ -9,9 +9,14 @@
  *       "模块" 只是 agent 的能力包（只出现在选能力的地方）。
  */
 
-const $ = (s) => document.querySelector(s);
+const $ = (s) => doc.querySelector(s);
 /* 状态、HTTP 与事件流由模块提供（app/bridge.js 在本脚本之前装好）。 */
+/* 迁移期别名：拆分时把 document / window 统一成 doc / g（阶段 7 随文件删）。 */
+const doc = globalThis.document;
+const g = globalThis;
 const core = globalThis.solomni;
+/* 迁移期：已迁到 app/features 的入口由 app/main.js 挂到 core.app，这里按名取用（阶段 7 删）。 */
+const app = core.app || (core.app = {});
 const state = core.state;
 const stores = core.stores;
 const api = core.api;
@@ -58,7 +63,7 @@ async function refreshState() {
 /// 思维链块：永远默认折叠，点击（原生 details）才展开。
 /// Markdown 容器：有渲染器就渲染，没有就退回纯文本（安全）。
 function mdNode(text) {
-  const d = document.createElement('div');
+  const d = doc.createElement('div');
   d.className = 'md';
   if (typeof markdownToHtml === 'function') d.innerHTML = shortPath(markdownToHtml(text));
   else d.textContent = text;
@@ -73,7 +78,7 @@ function appendBody(el, cls, text) {
     el.appendChild(mdNode(text));
     return;
   }
-  const body = document.createElement('div');
+  const body = doc.createElement('div');
   body.className = 'body';
   body.innerHTML = shortPath(escHtml(text)); // 系统/验收等行：纯文本转义后同样缩写长路径
   el.appendChild(body);
@@ -120,10 +125,10 @@ function flushScroll(sess) {
 /// 折叠的原始内容块：默认收起，点开才看（参数 / 结果 / 原文）。
 /// literal = true 时逐字保留（「原文」是要给用户照着复制的记录，不做长路径缩写）。
 function toolDetail(label, text, sess, key, literal) {
-  const d = document.createElement('details'); d.className = 'tool-raw';
+  const d = doc.createElement('details'); d.className = 'tool-raw';
   foldBind(sess, key, d);
-  const s = document.createElement('summary'); s.textContent = label;
-  const pre = document.createElement('pre'); pre.className = 'tool-pre';
+  const s = doc.createElement('summary'); s.textContent = label;
+  const pre = doc.createElement('pre'); pre.className = 'tool-pre';
   // 先转义再缩写：文字内容不变，只是把长路径显示成短式胶囊（「原文」保持逐字）。
   const shown = escHtml(text == null || text === '' ? '（空）' : text);
   pre.innerHTML = literal ? shown : shortPath(shown);
@@ -138,18 +143,18 @@ function toolDetail(label, text, sess, key, literal) {
 /// 流式 tool_call 与权威 transcript 的 tool 行共用这一个渲染函数，也共用同一个折叠键。
 function toolCard(t, sess, key, who) {
   const info = t || {};
-  const el = document.createElement('div');
+  const el = doc.createElement('div');
   el.className = 'line tool-card ' + (info.ok ? 'ok' : 'bad');
   el.title = info.speaker ? info.speaker + ' 调用工具' : '工具调用';
   // 左上角先标出**是谁**在调工具：与其它行同一条规则（每个 kind 都带身份）。
   const speaker = who || info.speaker || '';
   if (speaker) {
-    const w = document.createElement('span'); w.className = 'who'; w.textContent = speaker; el.appendChild(w);
+    const w = doc.createElement('span'); w.className = 'who'; w.textContent = speaker; el.appendChild(w);
   }
-  const head = document.createElement('div'); head.className = 'tool-head';
-  const name = document.createElement('span'); name.className = 'tool-name';
+  const head = doc.createElement('div'); head.className = 'tool-head';
+  const name = doc.createElement('span'); name.className = 'tool-name';
   name.textContent = (info.module ? info.module + '.' : '') + (info.name || '工具');
-  const mark = document.createElement('span'); mark.className = 'tool-mark'; mark.textContent = info.ok ? '✓' : '✗';
+  const mark = doc.createElement('span'); mark.className = 'tool-mark'; mark.textContent = info.ok ? '✓' : '✗';
   head.appendChild(name); head.appendChild(mark);
   el.appendChild(head);
   el.appendChild(toolDetail('参数', info.args, sess, key + ':args'));
@@ -166,11 +171,6 @@ function toolCard(t, sess, key, who) {
  * 所以文件路径不可能出现在 HTML 属性里；字符类里排除 & 是为了不被 &quot; 这类实体的分号吞掉。 */
 let shortPathRoots = null; // 当前活动会话的根列表（先长后短，agent 根排在共享区根前）
 
-/// 正则特殊字符转义：根路径里可能有 . + ( 之类。
-function escapeRe(s) {
-  const special = '\\^$.*+?()[]{}|';
-  return String(s).split('').map((c) => (special.indexOf(c) >= 0 ? '\\' + c : c)).join('');
-}
 
 /// 从 /files 的 roots 构造匹配表；没有 roots（后端未提供 / 还没拉到）→ null = 原样显示。
 function buildRootList(roots) {
@@ -192,7 +192,7 @@ function shortPath(html) {
   const src = String(html == null ? '' : html);
   const list = shortPathRoots;
   if (!list || !list.length) return src;
-  const alt = list.map((it) => escapeRe(it.root)).join('|');
+  const alt = list.map((it) => app.escapeRe(it.root)).join('|');
   const re = new RegExp('(?:' + alt + ')/([^\\s<>\\x22\\x27&]*)', 'g');
   return src.replace(re, (m, rel, offset, whole) => {
     // 前面还是路径字符 → 只是一个更长路径的中间段，不动它
@@ -210,11 +210,11 @@ function shortPath(html) {
 
 /// 思维链块：永远默认折叠；展开状态记在会话的 fold store 里，流式重建也不会被收回。
 function reasoningBlock(text, sess, key) {
-  const d = document.createElement('details');
+  const d = doc.createElement('details');
   d.className = 'cot';
   foldBind(sess, key, d);
-  const s = document.createElement('summary'); s.textContent = '思维链';
-  const b = document.createElement('div'); b.className = 'cot-body'; b.textContent = text;
+  const s = doc.createElement('summary'); s.textContent = '思维链';
+  const b = doc.createElement('div'); b.className = 'cot-body'; b.textContent = text;
   d.appendChild(s); d.appendChild(b);
   return d;
 }
@@ -284,14 +284,14 @@ function renderHistory() {
   const by = historyByParent();
   const branch = (parent, into) => {
     for (const h of (by.get(parent) || [])) {
-      const row = document.createElement('div');
+      const row = doc.createElement('div');
       row.className = 'history-item' + (h.workspace_missing ? ' bad' : '');
       row.title = h.workspace_missing ? '工作区已不存在：只能查看记录，不能启用' : '点击打开会话';
       row.onclick = () => openHistory(h.name);
       const kids = by.get(h.name) || [];
       const open = state.treeOpen.has(h.name);
       if (kids.length) {
-        const t = document.createElement('button');
+        const t = doc.createElement('button');
         t.type = 'button';
         t.className = 'history-toggle' + (open ? ' open' : '');
         t.title = open ? '收起子会话' : '展开子会话';
@@ -304,11 +304,11 @@ function renderHistory() {
         };
         row.appendChild(t);
       } else {
-        const sp = document.createElement('span'); sp.className = 'history-toggle'; row.appendChild(sp);
+        const sp = doc.createElement('span'); sp.className = 'history-toggle'; row.appendChild(sp);
       }
-      const name = document.createElement('span');
+      const name = doc.createElement('span');
       name.className = 'hname'; name.textContent = h.name; name.title = h.name;
-      const mode = document.createElement('span'); mode.className = 'hmode';
+      const mode = doc.createElement('span'); mode.className = 'hmode';
       // 运行态是**持久事实**（停止 / 关闭），与"这一刻在不在跑"分开：侧栏据此标出来。
       const stateTag = h.run === 'stopped' ? '·已停止'
         : h.run === 'closed' ? '·已关闭'
@@ -321,7 +321,7 @@ function renderHistory() {
       row.appendChild(name); row.appendChild(mode); row.appendChild(pencil);
       into.appendChild(row);
       if (kids.length && open) {
-        const wrap = document.createElement('div'); wrap.className = 'history-kids';
+        const wrap = doc.createElement('div'); wrap.className = 'history-kids';
         branch(h.name, wrap);
         into.appendChild(wrap);
       }
@@ -516,7 +516,7 @@ async function deleteHistory(name) {
 
 /* 配置面板里的小构件：都只用冒烟桩支持的 DOM API，与向导/登记处同一写法。 */
 function cfgDiv(cls, text) {
-  const d = document.createElement('div'); d.className = cls;
+  const d = doc.createElement('div'); d.className = cls;
   if (text != null) d.textContent = text;
   return d;
 }
@@ -526,11 +526,10 @@ function cfgHint(text, kind) {
 /// 执行档位二选一：disabled = 本机承载不了（例如虚拟机档的前置条件不具备）。
 const cfgRadio = ui.radio;
 
-
 /// 从会话列表的「编辑」进入：面板自己拉配置、自己重绘（保存 / 重新扫描都走这里）。
 function openConfig(sid) {
   openModal('配置：' + sid, (c) => {
-    const box = document.createElement('div'); box.className = 'cfg';
+    const box = doc.createElement('div'); box.className = 'cfg';
     c.body.appendChild(box);
     // 登记处变了只同步模型下拉；重读配置会换掉 DOM，所以这里只订阅一次，由 syncModels 指向最新一份。
     let syncModels = () => {};
@@ -554,176 +553,6 @@ async function loadConfig(sid, c, box, setSync) {
   box.innerHTML = '';
   if (!cfg) { box.appendChild(cfgHint('后端没有返回 config', 'err')); return; }
   buildConfigForm(sid, cfg, c, box, setSync);
-}
-
-/* ---------- 依赖补齐：把"缺什么"变成"点一下装上" ----------
- * 判据全在后端：`/api/setup/status` 的 `pending` 决定装什么（界面不自己挑条目——挑错了会把已装的重下一遍）。
- * 这里只做两步确认（先看清单、再下载）与进度；装完即生效，不需要重启。
- * 进度必须**看得见**：作业一起就进进度视图（当前步骤 + 滚动日志 + 取消）；关掉窗再打开也接着显示正在跑的那一次。 */
-function setupAction(before, onDone) {
-  const b = btn('补齐虚拟机依赖…', 'btn btn-block');
-  b.onclick = () => {
-    try {
-      if (before) before();
-      openSetupModal(onDone);
-    } catch (e) { notice('打开补齐弹层失败', e.message, 'err'); }
-  };
-  return b;
-}
-function openSetupModal(onDone) {
-  openModal('补齐虚拟机依赖', (c) => {
-    const box = document.createElement('div'); box.className = 'cfg';
-    c.body.appendChild(box);
-    const log = document.createElement('div'); log.className = 'cfg-log';
-    c.body.appendChild(log);
-    const finish = () => { c.close(); if (onDone) onDone(); };
-
-    // 依赖状态 → 三种视图：已在跑（进度）/ 要装什么（清单）/ 都齐了。
-    async function load() {
-      box.innerHTML = '';
-      log.textContent = '';
-      box.appendChild(cfgHint('正在读本机的依赖状态…'));
-      let st = null;
-      try { st = await api('GET', '/api/setup/status'); }
-      catch (e) {
-        box.innerHTML = '';
-        box.appendChild(cfgHint('读不到依赖状态：' + e.message, 'err'));
-        return;
-      }
-      box.innerHTML = '';
-      const job = st.job || {};
-      // 关掉窗又打开：这一次还在跑就接着显示它，而不是再起一个（后端会拒绝第二个作业）。
-      if (job.running) { watch(st); return; }
-      const pending = Array.isArray(st.pending) ? st.pending : null;
-      if (!pending) {
-        box.appendChild(cfgHint('这个进程没有给出要补哪些条目（界面与核心版本不一致）：重启应用后再试。', 'err'));
-        const close = btn('关闭', 'btn btn-block'); close.onclick = finish;
-        box.appendChild(close);
-        return;
-      }
-      if (!pending.length) {
-        box.appendChild(cfgHint('依赖都已在场：不需要补齐。', 'ok'));
-        const close = btn('关闭', 'btn btn-block'); close.onclick = finish;
-        box.appendChild(close);
-        return;
-      }
-      const deps = (st.deps || []).filter((d) => pending.indexOf(d.id) >= 0);
-      box.appendChild(cfgDiv('cfg-sec-title', '要装 ' + deps.length + ' 条（只写项目内，不动系统）'));
-      let total = 0;
-      for (const d of deps) {
-        total += d.size_mb || 0;
-        const line = document.createElement('div');
-        line.className = 'cfg-line';
-        line.textContent = '· ' + d.id + (d.size_mb ? '（约 ' + d.size_mb + ' MB）' : '') + (d.note ? '：' + d.note : '');
-        box.appendChild(line);
-        if (d.url) { const u = document.createElement('div'); u.className = 'cfg-dir'; u.textContent = d.url; box.appendChild(u); }
-      }
-      box.appendChild(cfgHint('合计约 ' + total + ' MB：从网络下载后解包进项目内的 .vm/。'));
-      const go = btn('开始下载安装', 'btn btn-primary btn-block');
-      go.onclick = () => start(pending, go);
-      box.appendChild(go);
-      const later = btn('取消', 'btn btn-block'); later.onclick = c.close;
-      box.appendChild(later);
-    }
-
-    async function start(ids, go) {
-      go.disabled = true;
-      c.setMsg('正在起补齐作业…');
-      try { await api('POST', '/api/setup/ensure', { deps: ids, confirm: true }); }
-      catch (e) { go.disabled = false; c.setMsg('起作业失败：' + e.message, true); return; }
-      c.setMsg('作业已开始：正在下载并解包（进度见下面）');
-      watch({ job: { seq: 0, running: true } });
-    }
-
-    // 进度视图：当前步骤 + 滚动日志 + 取消。轮询是长连接（服务端挂到有新行或 20s 到点）。
-    function watch(st) {
-      box.innerHTML = '';
-      log.textContent = '';
-      box.appendChild(cfgDiv('cfg-sec-title', '正在补齐（只写项目内）'));
-      const step = cfgHint('等待第一条进度…');
-      box.appendChild(step);
-      const cancel = btn('取消作业', 'btn btn-block');
-      cancel.onclick = async () => {
-        try { await api('DELETE', '/api/setup/job'); c.setMsg('已请求取消，等作业收尾…'); }
-        catch (e) { c.setMsg('取消失败：' + e.message, true); }
-      };
-      box.appendChild(cancel);
-      let since = (st.job && st.job.seq) || 0;
-      (async function poll() {
-        for (;;) {
-          let now = null;
-          try { now = await api('GET', '/api/setup/status?since=' + since + '&wait=1'); }
-          catch (e) { c.setMsg('读进度失败：' + e.message, true); return; }
-          const job = now.job || {};
-          if ((job.seq || 0) > since) since = job.seq;
-          const lines = job.lines || [];
-          log.textContent = lines.join('\n');
-          if (lines.length) step.textContent = '现在：' + lines[lines.length - 1];
-          if (!job.running) {
-            if (job.error) {
-              c.setMsg('补齐失败：' + job.error, true);
-              step.textContent = '失败：' + job.error;
-              return;
-            }
-            done(now);
-            return;
-          }
-          c.setMsg('正在补齐…（可以先关掉这个窗，作业会继续跑；再打开还能接着看）');
-        }
-      })();
-    }
-
-    function done(st) {
-      const left = Array.isArray(st.pending) ? st.pending : [];
-      c.setMsg(left.length ? '作业结束了，但还有没装上的：' + left.join('、') : '补齐完成：依赖都齐了');
-      box.innerHTML = '';
-      const note = document.createElement('div'); note.className = 'cfg-hint ok';
-      // 生效时机由后端保证（补齐完即按新状态判定，下一次起 guest 就用新的共享档）：这里只说结论。
-      note.textContent = '已经生效：再打开配置 / 向导就按新状态判定，下一次启动虚拟机就用上，不需要重启。';
-      box.appendChild(note);
-      const again = btn('关闭', 'btn btn-block'); again.onclick = finish;
-      box.appendChild(again);
-    }
-
-    load();
-  }, true);
-}
-
-/// 结构化诊断 → 中文（呈现层文案，不进提示词册）。
-function diagnosisText(d) {
-  if (!d || typeof d !== 'object') return String(d);
-  if (d.Missing) {
-    return '模块 ' + d.Missing.module + ' 需要的运行能力 ' + d.Missing.capability +
-      ' 在本档位没有：把它放进依赖文件夹后点「重新扫描」，或确认基础工具链 / 宿主 PATH。';
-  }
-  if (d.Ambiguous) {
-    return '运行能力 ' + d.Ambiguous.capability + ' 有多个版本（' + (d.Ambiguous.versions || []).join('、') +
-      '）：在下面「定版」里选一个版本，工具才跑得起来。';
-  }
-  if (d.UnknownPin) {
-    return '运行能力 ' + d.UnknownPin.capability + ' 定的版本 ' + d.UnknownPin.version +
-      ' 不在本档位可用的包里：改一个版本，或把该版本的运行包放进依赖文件夹后点「重新扫描」。';
-  }
-  if (d.Conflict) {
-    return '运行包 ' + d.Conflict.a + ' 与 ' + d.Conflict.b + ' 都要写进 ' + d.Conflict.path +
-      '：装配会互相覆盖，换版本或去掉其中一个。';
-  }
-  if (d.NotForTarget) {
-    return '模块 ' + d.NotForTarget.module + ' 需要的运行能力 ' + d.NotForTarget.capability +
-      ' 在本档位用不了：包库里只有 ' + (d.NotForTarget.packages || []).join('、') +
-      '（目标：' + d.NotForTarget.target + '）。换一个包，或改用虚拟机档。';
-  }
-  if (d.NoBin) {
-    return '运行包 ' + d.NoBin.package + ' 没有可执行的 bin/：本机档放不进 PATH。检查包内容或换一个包。';
-  }
-  if (d.Path) {
-    return '运行包 PATH 合成失败：' + d.Path.why;
-  }
-  if (d.MissingEntry) {
-    return '模块 ' + d.MissingEntry.module + ' 的工具 ' + d.MissingEntry.tool +
-      ' 入口不在场：' + d.MissingEntry.command + '。先按模块 README 或 --build 编一次。';
-  }
-  return JSON.stringify(d);
 }
 
 function buildConfigForm(sid, cfg, c, box, setSync) {
@@ -785,7 +614,7 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
     draft.guest = v; guestInfo = g; syncGuestSetup();
   });
   // 机器前置齐、但选中的虚拟根没装齐时，这里给同一个补齐动作（与上面的机器前置入口不重复）。
-  const guestSetup = setupAction(null, () => openConfig(sid));
+  const guestSetup = app.setupAction(null, () => openConfig(sid));
   guestSetup.classList.add('hidden');
   syncGuestSetup = () => {
     const show = vmOk && draft.tier === 'vm' && (!guestInfo || !guestInfo.ready);
@@ -811,7 +640,7 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
       const box2 = cfgDiv('cfg-sec');
       box2.appendChild(cfgDiv('cfg-sec-title', '虚拟机档前置（' + reqs.filter((r) => !r.met).length + ' 项未满足）'));
       for (const r of reqs) {
-        const line = document.createElement('div');
+        const line = doc.createElement('div');
         line.className = 'cfg-hint' + (r.met ? '' : ' err');
         line.textContent =
           (r.met ? '✓ ' : '✗ ') + r.detail + (r.met ? '' : '　怎么补：' + r.how);
@@ -822,7 +651,7 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
     // 缺什么已经列出来了，这里给**一个动作**（不是一句命令行）。
     // 装完重开配置面板：补齐弹层会把 #modal-root 顶掉，旧面板的 DOM 已经不在了——
     // 与其往脱离文档的节点上重绘，不如按新状态整份重读（未保存的改动会丢，和「重新扫描」同一个代价）。
-    secT.appendChild(setupAction(null, () => openConfig(sid)));
+    secT.appendChild(app.setupAction(null, () => openConfig(sid)));
   }
   secT.appendChild(pick.wrap); secT.appendChild(pick.hint); secT.appendChild(guestSetup);
   box.appendChild(secT);
@@ -1024,7 +853,7 @@ function cfgAgentBlock(a, idx, frozen, modelSyncs) {
   row.appendChild(field(frozen ? '名字（只读）' : '名字', nameIn));
   if (frozen) row.appendChild(cfgHint('会话已经开过：名单与形态冻结 —— 名字改不了（要换人请新建会话）；模块与模型仍可改。', 'warn'));
 
-  const chips = moduleChips({
+  const chips = app.moduleChips({
     selected: () => a.modules,
     onChange: (ids) => { a.modules = ids; },
   });
@@ -1084,7 +913,7 @@ function cfgRuntimeBlock(rt, dir, savedTier, rescan) {
   const diags = rt.diagnoses || [];
   if (diags.length) {
     sec.appendChild(cfgDiv('cfg-sub', '运行能力诊断（选型不成立的原因）'));
-    for (const d of diags) sec.appendChild(cfgDiv('cfg-line cfg-bad', '· ' + diagnosisText(d)));
+    for (const d of diags) sec.appendChild(cfgDiv('cfg-line cfg-bad', '· ' + app.diagnosisText(d)));
   }
 
   const rej = rt.rejected || [];
@@ -1150,14 +979,14 @@ function renderSidebar() {
 /* ---------- 侧栏：桌面收起为图标栏，移动端是抽屉 ---------- */
 const RAIL_KEY = 'solomni.ui.sidebar';
 function isNarrow() {
-  try { return typeof matchMedia === 'function' && matchMedia('(max-width: 899px)').matches; }
+  try { return typeof g.matchMedia === 'function' && g.matchMedia('(max-width: 899px)').matches; }
   catch (e) { return false; }
 }
 function readRail() {
-  try { return localStorage.getItem(RAIL_KEY) === 'rail'; } catch (e) { return false; }
+  try { return g.localStorage.getItem(RAIL_KEY) === 'rail'; } catch (e) { return false; }
 }
 function saveRail() {
-  try { localStorage.setItem(RAIL_KEY, state.rail ? 'rail' : 'wide'); } catch (e) { /* 存不了就只留内存态 */ }
+  try { g.localStorage.setItem(RAIL_KEY, state.rail ? 'rail' : 'wide'); } catch (e) { /* 存不了就只留内存态 */ }
 }
 function applyRail(railed) {
   state.rail = !!railed;
@@ -1184,7 +1013,7 @@ function setupSidebar() {
   const foot = $('#btn-settings');
   if (foot && !(foot.children || []).length) {
     foot.appendChild(ui.icon('gear'));
-    const label = document.createElement('span');
+    const label = doc.createElement('span');
     label.className = 'sidebar-action-label';
     label.textContent = '设置';
     foot.appendChild(label);
@@ -1194,7 +1023,7 @@ function setupSidebar() {
     const expand = () => { applyRail(false); saveRail(); };
     rail.appendChild(ui.iconButton({ icon: 'plus', label: '新建工作', tip: '新建工作', onClick: openWizard }));
     rail.appendChild(ui.iconButton({ icon: 'clock', label: '会话历史', tip: '会话历史', onClick: expand }));
-    rail.appendChild(ui.iconButton({ icon: 'gear', label: '设置', tip: '设置', onClick: () => openSettingsHub('generate') }));
+    rail.appendChild(ui.iconButton({ icon: 'gear', label: '设置', tip: '设置', onClick: () => app.openSettingsHub('generate') }));
     rail.appendChild(ui.iconButton({ icon: 'chevron', label: '展开侧栏', tip: '展开侧栏', onClick: expand }));
   }
   const drawer = $('#btn-drawer');
@@ -1204,8 +1033,8 @@ function setupSidebar() {
     drawer.onclick = toggleSidebar;
   }
   applyRail(readRail());
-  if (typeof window !== 'undefined' && window.addEventListener) {
-    window.addEventListener('resize', () => applyRail(state.rail));
+  if (typeof g !== 'undefined' && g.addEventListener) {
+    g.addEventListener('resize', () => applyRail(state.rail));
   }
 }
 
@@ -1242,7 +1071,6 @@ function guestPicker(guests, current, onChange) {
   return { wrap: wrap, sel: sel, hint: hint, sync: sync };
 }
 
-
 /* ---------- 模块选择：已选 chips + 可搜索弹层 ---------- */
 /** 一行预览：把多行压成一行，过长截断（卡片 / 清单用，不冒充全文）。 */
 function oneLine(text, max) {
@@ -1250,390 +1078,6 @@ function oneLine(text, max) {
   const n = max || 80;
   return s.length > n ? s.slice(0, n) + '…' : s;
 }
-function moduleById(id) {
-  return state.modules.find((m) => m.id === id);
-}
-/** 只匹配模块名字（id）与简介（brief）；runtimes / services / system 等字段刻意不查。 */
-function moduleMatches(m, q) {
-  const terms = String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
-  if (!terms.length) return true;
-  const id = String(m.id || '').toLowerCase();
-  const brief = String(m.brief || '').toLowerCase();
-  return terms.every((t) => id.indexOf(t) >= 0 || brief.indexOf(t) >= 0);
-}
-/** 已选模块的 chips；返回 { node, render }。disabled = 只读（登记处 agent 的模块由登记处决定）。 */
-function moduleChips(opts) {
-  const o = opts || {};
-  const box = document.createElement('div');
-  box.className = 'mod-chips' + (o.disabled ? ' readonly' : '');
-  function current() { return (o.selected ? o.selected() : []).slice(); }
-  function commit(ids) {
-    if (o.onChange) o.onChange(ids.slice());
-    render();
-  }
-  function render() {
-    box.innerHTML = '';
-    const ids = current();
-    if (!ids.length) {
-      const empty = document.createElement('span');
-      empty.className = 'mod-chips-empty';
-      empty.textContent = o.emptyText || '（还没有模块：零模块 agent 只用内置文件工具）';
-      box.appendChild(empty);
-    }
-    for (const id of ids) {
-      const m = moduleById(id);
-      const chip = document.createElement('span');
-      chip.className = 'mod-chip' + (m ? '' : ' is-orphan');
-      const label = document.createElement('span');
-      label.className = 'mod-chip-label';
-      label.textContent = id + (m ? '' : '（已不在清单）');
-      if (m && m.brief) chip.title = m.brief;
-      chip.appendChild(label);
-      if (!o.disabled) {
-        const x = document.createElement('button');
-        x.type = 'button'; x.className = 'mod-chip-x'; x.textContent = '×';
-        x.title = '移除 ' + id;
-        x.onclick = () => commit(ids.filter((xid) => xid !== id));
-        chip.appendChild(x);
-      }
-      box.appendChild(chip);
-    }
-    if (!o.disabled) {
-      const add = document.createElement('button');
-      add.type = 'button'; add.className = 'mod-add';
-      add.textContent = '+ 添加模块';
-      add.onclick = () => openModulePicker({ selected: ids, title: '添加模块', onDone: commit });
-      box.appendChild(add);
-    }
-  }
-  render();
-  return { node: box, render };
-}
-/** 模块选择弹层：上方「已加入」始终可见且不参与搜索；下方「可选」可搜索；点卡片切换。 */
-function openModulePicker(opts) {
-  const o = opts || {};
-  const picked = new Set(o.selected || []);
-  openModalLayer(o.title || '添加模块', (c) => {
-    const search = textInput('关键字（只匹配名字与简介）');
-    const addedTitle = document.createElement('div'); addedTitle.className = 'mod-pick-title';
-    const availTitle = document.createElement('div'); availTitle.className = 'mod-pick-title';
-    const addedList = document.createElement('div'); addedList.className = 'mod-grid';
-    const availList = document.createElement('div'); availList.className = 'mod-grid';
-    function ordered() {
-      const out = state.modules.map((m) => m.id).filter((id) => picked.has(id));
-      for (const id of picked) if (out.indexOf(id) < 0) out.push(id);
-      return out;
-    }
-    function moduleOf(id) {
-      return state.modules.find((m) => m.id === id) || { id, brief: '（已不在清单）', missing: true };
-    }
-    function tile(m, isAdded) {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'mod-tile' + (isAdded ? ' is-added' : '') + (m.missing ? ' is-orphan' : '');
-      b.setAttribute('aria-pressed', isAdded ? 'true' : 'false');
-      b.title = (isAdded ? '点击移除：' : '点击加入：') + m.id + (m.brief ? '——' + m.brief : '');
-      const head = document.createElement('span'); head.className = 'mod-tile-head';
-      const id = document.createElement('span'); id.className = 'mod-tile-id'; id.textContent = m.id;
-      const mark = document.createElement('span'); mark.className = 'mod-tile-mark';
-      mark.textContent = isAdded ? '✓' : '+';
-      head.appendChild(id); head.appendChild(mark);
-      const brief = document.createElement('span'); brief.className = 'mod-tile-brief'; brief.textContent = m.brief || '';
-      b.appendChild(head); b.appendChild(brief);
-      b.onclick = () => {
-        if (isAdded) picked.delete(m.id); else picked.add(m.id);
-        render();
-      };
-      return b;
-    }
-    function render() {
-      const chosen = ordered();
-      const chosenSet = new Set(chosen);
-      addedTitle.textContent = '已加入（' + chosen.length + '）';
-      addedList.innerHTML = '';
-      if (!chosen.length) addedList.appendChild(emptyHint('（还没有加入模块）'));
-      else for (const id of chosen) addedList.appendChild(tile(moduleOf(id), true));
-
-      const shown = state.modules.filter((m) => !chosenSet.has(m.id) && moduleMatches(m, search.value));
-      availTitle.textContent = '可选（' + shown.length + '）';
-      availList.innerHTML = '';
-      if (!shown.length) {
-        const q = String(search.value || '').trim();
-        availList.appendChild(emptyHint(!state.modules.length
-          ? '（modules/ 下没有模块）'
-          : (!q && chosenSet.size >= state.modules.length
-            ? '（模块都已加入）'
-            : '（没有匹配的可选模块）')));
-      } else {
-        for (const m of shown) availList.appendChild(tile(m, false));
-      }
-    }
-    search.addEventListener('input', render);
-    const addedSec = document.createElement('div'); addedSec.className = 'mod-pick-section';
-    addedSec.appendChild(addedTitle); addedSec.appendChild(addedList);
-    const availSec = document.createElement('div'); availSec.className = 'mod-pick-section';
-    availSec.appendChild(availTitle); availSec.appendChild(availList);
-    c.body.appendChild(addedSec);
-    c.body.appendChild(field('搜索可选模块', search));
-    c.body.appendChild(availSec);
-    const actions = document.createElement('div'); actions.className = 'wf-inline';
-    const cancel = btn('取消', 'btn'); cancel.onclick = c.close;
-    const ok = btn('确定', 'btn btn-primary');
-    ok.onclick = () => { const ids = ordered(); c.close(); if (o.onDone) o.onDone(ids); };
-    actions.appendChild(cancel); actions.appendChild(ok);
-    c.body.appendChild(actions);
-    render();
-    if (typeof search.focus === 'function') search.focus();
-  }, true);
-}
-
-/* ---------- agent 编辑：设置页 / 向导临时 agent 共用 ---------- */
-function cloneAgent(a) {
-  const x = a || {};
-  return {
-    name: x.name || '',
-    modules: (x.modules || []).slice(),
-    model: x.model || '',
-    chara: x.chara || '',
-    note: x.note || '',
-    transient: !!x.transient,
-    why: x.why || null,
-    reuse: !!x.reuse,
-  };
-}
-/** 人设 / 说明的一行预览（卡片与选择器用）。 */
-function agentPreview(a) {
-  if (a && String(a.chara || '').trim()) return '人设：' + oneLine(a.chara, 96);
-  if (a && String(a.note || '').trim()) return '说明：' + oneLine(a.note, 96);
-  return '';
-}
-/** agent 表单：名字 / 人设 / 模块 chips / 模型 / 说明。锁定项用于“登记处 agent 只改本会话模型”。 */
-function agentForm(opts) {
-  const o = opts || {};
-  const draft = o.draft;
-  const box = document.createElement('div'); box.className = 'form-col';
-  let nameTouched = !!(draft.name || '').trim();
-  const nameIn = textInput('agent 名字（会当沙箱目录名）');
-  nameIn.value = draft.name || '';
-  nameIn.disabled = !!o.lockedName;
-  nameIn.addEventListener('input', () => { nameTouched = true; draft.name = nameIn.value; });
-  const charaIn = areaInput('人设 / 身份（给模型看：角色、语气、职责边界；别写本次任务）');
-  charaIn.value = draft.chara || '';
-  charaIn.disabled = !!o.lockedChara;
-  charaIn.addEventListener('input', () => { draft.chara = charaIn.value; });
-  const chips = moduleChips({
-    selected: () => draft.modules,
-    disabled: !!o.lockedModules,
-    onChange: (ids) => {
-      draft.modules = ids;
-      if (!o.lockedName && !nameTouched && !String(draft.name || '').trim() && ids.length) {
-        draft.name = ids[0];
-        nameIn.value = ids[0];
-      }
-    },
-  });
-  const modelSel = selectInput(modelOptions(draft.model || '', true), draft.model || '');
-  modelSel.addEventListener('change', () => { draft.model = modelSel.value; });
-  const noteIn = textInput('说明（给人看的一句话，可选）');
-  noteIn.value = draft.note || '';
-  noteIn.addEventListener('input', () => { draft.note = noteIn.value; });
-  const syncModels = () => syncSelect(modelSel, modelOptions(draft.model || '', true), draft.model || '');
-  box.appendChild(field(o.lockedName ? '名字（只读）' : '名字', nameIn));
-  box.appendChild(field('人设 / 身份', charaIn));
-  box.appendChild(field('模块（能力）', chips.node));
-  box.appendChild(field('默认模型（空 = 核心默认）', modelSel));
-  box.appendChild(field('说明', noteIn));
-  return { node: box, draft, syncModels, nameIn, charaIn, chipNode: chips.node };
-}
-/** 设置页的 agent 新建 / 编辑（写登记处）。 */
-function openAgentEditor(opts) {
-  const o = opts || {};
-  const editing = o.agent ? o.agent.name : null;
-  const draft = cloneAgent(o.agent);
-  openModalLayer(editing ? '编辑 agent' : '新建 agent', (c) => {
-    const form = agentForm({ draft });
-    c.body.appendChild(form.node);
-    const save = btn('保存 agent', 'btn btn-primary btn-block');
-    save.onclick = async () => {
-      const name = draft.name.trim();
-      if (!name) { c.setMsg('agent 名字不能为空', true); return; }
-      if (state.agents.some((x) => x.name === name && x.name !== editing)) {
-        c.setMsg('已有同名 agent：' + name + '（换一个名字，或先删除旧的）', true);
-        return;
-      }
-      try {
-        if (editing && editing !== name) {
-          const ok = await confirmBox('agent 改名', '改名 = 先删旧「' + editing + '」再建新「' + name + '」。继续？', '继续');
-          if (!ok) return;
-          await c.mutate('remove_agent', { name: editing });
-        }
-        await c.mutate('upsert_agent', {
-          name,
-          modules: draft.modules.slice(),
-          model: draft.model || undefined,
-          note: draft.note.trim(),
-          chara: draft.chara.trim(),
-        });
-        if (o.onSaved) o.onSaved(name);
-        c.close();
-      } catch (e) { c.setMsg(e.message, true); }
-    };
-    const cancel = btn('取消', 'btn btn-block'); cancel.onclick = c.close;
-    c.body.appendChild(save); c.body.appendChild(cancel);
-    c.onRegistryChange(form.syncModels);
-  }, true);
-}
-/** 向导里的临时 agent 新建 / 编辑（不写登记处；可顺手保存为 agent）。 */
-function openTempAgentSheet(opts) {
-  const o = opts || {};
-  const editing = !!o.agent;
-  const draft = cloneAgent(o.agent);
-  if (!editing) draft.transient = true;
-  const title = o.title || (editing ? '编辑临时 agent' : '新建临时 agent');
-  openModalLayer(title, (c) => {
-    const form = agentForm({
-      draft,
-      lockedName: !!o.lockedName,
-      lockedModules: !!o.lockedModules,
-      lockedChara: !!o.lockedChara,
-    });
-    c.body.appendChild(form.node);
-    const add = btn(editing ? '保存' : '加入本次（临时）', 'btn btn-primary btn-block');
-    add.onclick = () => {
-      if (!draft.name.trim()) { c.setMsg('agent 名字不能为空', true); return; }
-      if (o.onAdd) o.onAdd(cloneAgent(draft));
-      c.close();
-    };
-    c.body.appendChild(add);
-    if (o.allowSaveAsAgent !== false) {
-      const keep = btn('保存为 agent 并加入', 'btn btn-block');
-      keep.onclick = async () => {
-        const name = draft.name.trim();
-        if (!name) { c.setMsg('agent 名字不能为空', true); return; }
-        try {
-          if (state.agents.some((x) => x.name === name)) {
-            const ok = await confirmBox('同名 agent', '登记处已有「' + name + '」，保存会更新它。继续？', '更新');
-            if (!ok) return;
-          }
-          await c.mutate('upsert_agent', {
-            name,
-            modules: draft.modules.slice(),
-            model: draft.model || undefined,
-            note: draft.note.trim(),
-            chara: draft.chara.trim(),
-          });
-          if (o.onSaveAsAgent) {
-            const saved = cloneAgent(draft);
-            saved.transient = false;
-            saved.reuse = true;
-            o.onSaveAsAgent(saved);
-          }
-          c.close();
-        } catch (e) { c.setMsg(e.message, true); }
-      };
-      c.body.appendChild(keep);
-    }
-    const cancel = btn('取消', 'btn btn-block'); cancel.onclick = c.close;
-    c.body.appendChild(cancel);
-    c.onRegistryChange(form.syncModels);
-  }, true);
-}
-/** 从登记处挑一个 agent（协作加入 / 单 agent 选择）。 */
-function openRegistryAgentPicker(opts) {
-  const o = opts || {};
-  const taken = o.taken || [];
-  openModalLayer(o.title || (o.single ? '选择 agent' : '从登记处加入'), (c) => {
-    const search = textInput('搜索 agent（名字 / 说明 / 人设）');
-    const list = document.createElement('div'); list.className = 'reg-list';
-    function matches(a, q) {
-      const terms = String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
-      if (!terms.length) return true;
-      const hay = [a.name, a.note, a.chara].map((x) => String(x || '').toLowerCase()).join(' ');
-      return terms.every((t) => hay.indexOf(t) >= 0);
-    }
-    function render() {
-      list.innerHTML = '';
-      const shown = state.agents.filter((a) => matches(a, search.value));
-      if (!shown.length) { list.appendChild(emptyHint('（没有匹配的登记处 agent）')); return; }
-      for (const a of shown) {
-        const row = document.createElement('div'); row.className = 'reg-item';
-        const main = document.createElement('div'); main.className = 'reg-main';
-        const nm = document.createElement('div'); nm.className = 'reg-id';
-        nm.textContent = a.name + (taken.indexOf(a.name) >= 0 ? '（已在本次名单）' : '');
-        const sub = document.createElement('div'); sub.className = 'reg-sub';
-        sub.textContent = (a.modules || []).join(' + ') + ' · 模型 ' + (a.model || '（核心默认）');
-        const line = document.createElement('div'); line.className = 'reg-note';
-        line.textContent = agentPreview(a);
-        main.appendChild(nm); main.appendChild(sub); if (line.textContent) main.appendChild(line);
-        const acts = document.createElement('div'); acts.className = 'reg-acts';
-        const pick = btn(o.single ? '选择' : '加入', 'btn');
-        pick.disabled = taken.indexOf(a.name) >= 0;
-        pick.onclick = () => {
-          if (pick.disabled) return;
-          if (o.onPick) o.onPick(cloneAgent({
-            name: a.name,
-            modules: (a.modules || []).slice(),
-            model: a.model || '',
-            chara: a.chara || '',
-            note: a.note || '',
-            transient: false,
-            reuse: true,
-          }));
-          c.close();
-        };
-        acts.appendChild(pick);
-        row.appendChild(main); row.appendChild(acts);
-        list.appendChild(row);
-      }
-    }
-    search.addEventListener('input', render);
-    c.body.appendChild(field('搜索', search));
-    c.body.appendChild(list);
-    const cancel = btn('关闭', 'btn btn-block'); cancel.onclick = c.close;
-    c.body.appendChild(cancel);
-    render();
-  }, true);
-}
-/** 向导 / 设置列表里的一个 agent 卡片。 */
-function agentCard(a, handlers) {
-  const h = handlers || {};
-  const row = document.createElement('div'); row.className = 'agent-item';
-  const main = document.createElement('div'); main.className = 'reg-main';
-  const head = document.createElement('div'); head.className = 'agent-card-head';
-  const nm = document.createElement('div'); nm.className = 'agent-name'; nm.textContent = a.name;
-  head.appendChild(nm);
-  const badge = document.createElement('span');
-  badge.className = 'agent-badge' + (a.transient ? ' is-transient' : '');
-  badge.textContent = a.transient ? '临时' : '登记处';
-  head.appendChild(badge);
-  main.appendChild(head);
-  const preview = agentPreview(a);
-  if (preview) { const p = document.createElement('div'); p.className = 'agent-preview'; p.textContent = preview; main.appendChild(p); }
-  const mods = document.createElement('div'); mods.className = 'agent-mods';
-  mods.textContent = (a.modules && a.modules.length ? a.modules.join(' + ') : '（无模块）') + ' · 模型 ' + (a.model || '（核心默认）');
-  main.appendChild(mods);
-  if (a.why) { const why = document.createElement('div'); why.className = 'wf-why'; why.textContent = a.why; main.appendChild(why); }
-  const acts = document.createElement('div'); acts.className = 'wf-inline';
-  if (a.transient && h.onSave) {
-    const keep = btn('存为 agent', 'link-btn');
-    keep.onclick = () => h.onSave(a);
-    acts.appendChild(keep);
-  }
-  if (h.onEdit) {
-    const edit = btn('编辑', 'link-btn');
-    edit.onclick = () => h.onEdit(a);
-    acts.appendChild(edit);
-  }
-  if (h.onRemove) {
-    const del = btn('移除', 'link-btn danger');
-    del.onclick = () => h.onRemove(a);
-    acts.appendChild(del);
-  }
-  row.appendChild(main); row.appendChild(acts);
-  return row;
-}
-
-
 /* ---------- 屏幕居中的提示弹窗（自研，顶替原生 alert/confirm） ----------
  * 为什么自己做：原生弹窗样式不可控、会阻塞主线程、在受限环境（内嵌浏览器 / 移动端 webview）里表现不一。
  * 与主区弹层（openModal）分开：那个在主区里、靠上对齐；这个固定在视口正中，任何布局下都在屏幕中间。
@@ -1643,11 +1087,11 @@ function notice(title, text, kind) {
   const root = $("#notice-root");
   root.innerHTML = "";
   root.className = "notice-root open";
-  const overlay = document.createElement("div"); overlay.className = "notice-overlay";
-  const panel = document.createElement("div"); panel.className = "notice-panel notice-" + (kind || "info");
-  const head = document.createElement("div"); head.className = "notice-title"; head.textContent = title || "";
-  const body = document.createElement("div"); body.className = "notice-text"; body.textContent = text || "";
-  const row = document.createElement("div"); row.className = "notice-actions";
+  const overlay = doc.createElement("div"); overlay.className = "notice-overlay";
+  const panel = doc.createElement("div"); panel.className = "notice-panel notice-" + (kind || "info");
+  const head = doc.createElement("div"); head.className = "notice-title"; head.textContent = title || "";
+  const body = doc.createElement("div"); body.className = "notice-text"; body.textContent = text || "";
+  const row = doc.createElement("div"); row.className = "notice-actions";
   const ok = btn("知道了", "btn btn-primary");
   let unbind = null;
   const close = () => {
@@ -1670,11 +1114,11 @@ function confirmBox(title, text, confirmLabel, danger) {
     const root = $("#notice-root");
     root.innerHTML = "";
     root.className = "notice-root open";
-    const overlay = document.createElement("div"); overlay.className = "notice-overlay";
-    const panel = document.createElement("div"); panel.className = "notice-panel notice-warn";
-    const head = document.createElement("div"); head.className = "notice-title"; head.textContent = title || "";
-    const body = document.createElement("div"); body.className = "notice-text" + (danger ? " notice-danger" : ""); body.textContent = text || "";
-    const row = document.createElement("div"); row.className = "notice-actions";
+    const overlay = doc.createElement("div"); overlay.className = "notice-overlay";
+    const panel = doc.createElement("div"); panel.className = "notice-panel notice-warn";
+    const head = doc.createElement("div"); head.className = "notice-title"; head.textContent = title || "";
+    const body = doc.createElement("div"); body.className = "notice-text" + (danger ? " notice-danger" : ""); body.textContent = text || "";
+    const row = doc.createElement("div"); row.className = "notice-actions";
     let unbind = null;
     const done = (v) => {
       if (unbind) { unbind(); unbind = null; }
@@ -1733,17 +1177,17 @@ function closeModal() {
 function openModalLayer(title, build, wide) {
   const root = $('#modal-root');
   root.className = 'modal-root open';
-  const overlay = document.createElement('div'); overlay.className = 'modal-overlay';
-  const panel = document.createElement('div'); panel.className = 'modal-panel' + (wide ? ' wide' : '');
-  const head = document.createElement('div'); head.className = 'modal-head';
-  const h = document.createElement('div'); h.className = 'modal-title'; h.textContent = title;
+  const overlay = doc.createElement('div'); overlay.className = 'modal-overlay';
+  const panel = doc.createElement('div'); panel.className = 'modal-panel' + (wide ? ' wide' : '');
+  const head = doc.createElement('div'); head.className = 'modal-head';
+  const h = doc.createElement('div'); h.className = 'modal-title'; h.textContent = title;
   const close = btn('✕', 'modal-close');
   const layer = { overlay, disposers: [], unbind: null };
   const closeThis = () => closeModalLayer(layer);
   close.onclick = closeThis;
   head.appendChild(h); head.appendChild(close);
-  const body = document.createElement('div'); body.className = 'modal-body';
-  const msg = document.createElement('div'); msg.className = 'modal-msg';
+  const body = doc.createElement('div'); body.className = 'modal-body';
+  const msg = doc.createElement('div'); msg.className = 'modal-msg';
   panel.appendChild(head); panel.appendChild(body); panel.appendChild(msg);
   overlay.appendChild(panel);
   root.appendChild(overlay);
@@ -1775,1229 +1219,7 @@ function openModal(title, build, wide) {
   return openModalLayer(title, build, wide);
 }
 
-/* ---------- 设置①：供应商登记（录入 / 修改 / 删除） ---------- */
-function providersPage(c) {
-    const listWrap = document.createElement('div'); listWrap.className = 'reg-list';
-    const idIn = textInput('id');
-    const urlIn = textInput('base_url');
-    const keyIn = textInput('api_key（保存后不回显）', 'password');
-    const save = btn('登记 / 更新', 'btn btn-primary btn-block');
 
-    function rebuild() {
-      listWrap.innerHTML = '';
-      if (!state.providers.length) { listWrap.appendChild(emptyHint('（暂无供应商）')); return; }
-      for (const p of state.providers) {
-        const row = document.createElement('div'); row.className = 'reg-item';
-        const main = document.createElement('div'); main.className = 'reg-main';
-        const id = document.createElement('div'); id.className = 'reg-id'; id.textContent = p.id;
-        const sub = document.createElement('div'); sub.className = 'reg-sub'; sub.textContent = p.base_url;
-        main.appendChild(id); main.appendChild(sub);
-        const acts = document.createElement('div'); acts.className = 'reg-acts';
-        const edit = btn('编辑', 'link-btn');
-        edit.onclick = () => {
-          idIn.value = p.id; urlIn.value = p.base_url; keyIn.value = '';
-          c.setMsg('编辑 ' + p.id + '：api_key 需重新填写');
-        };
-        const del = btn('删除', 'link-btn danger');
-        del.onclick = async () => {
-          try {
-            await c.mutate('remove_provider', { id: p.id });
-            rebuild();
-            c.setMsg('已删除 ' + p.id);
-          } catch (e) { c.setMsg(e.message, true); }
-        };
-        acts.appendChild(edit); acts.appendChild(del);
-        row.appendChild(main); row.appendChild(acts);
-        listWrap.appendChild(row);
-      }
-    }
-
-    save.onclick = async () => {
-      const id = idIn.value.trim(), url = urlIn.value.trim(), key = keyIn.value;
-      if (!id || !url || !key) { c.setMsg('id / base_url / api_key 均不能为空', true); return; }
-      try {
-        await c.mutate('upsert_provider', { id, base_url: url, api_key: key });
-        keyIn.value = '';
-        rebuild();
-        c.setMsg('已保存：' + id);
-      } catch (e) { c.setMsg(e.message, true); }
-    };
-
-    // 供应商变了：模型页的供应商下拉 / 发现区靠这条通知同步（它们可能已经建好并缓存）。
-    c.onRegistryChange(rebuild);
-    rebuild();
-    c.body.appendChild(listWrap);
-    const form = document.createElement('div'); form.className = 'form-col';
-    form.appendChild(field('id', idIn));
-    form.appendChild(field('base_url', urlIn));
-    form.appendChild(field('api_key', keyIn));
-    form.appendChild(save);
-    c.body.appendChild(form);
-}
-
-function openProvidersModal() {
-  openModal('供应商登记', providersPage);
-}
-
-/* ---------- 思考等级标签 / 模型档位映射 ---------- */
-/** 思考等级标签编辑器：标签就是档位，顺序即界面顺序，界面显示与模型映射都用这一串。
- *  约束：非空、不重复、无首尾空白、无控制字符（与后端校验一致）；不限制字符集。 */
-function thinkingTagsEditor(levels) {
-  const node = document.createElement('div');
-  node.className = 'tag-editor';
-  const chips = document.createElement('div');
-  chips.className = 'mod-chips';
-  const addRow = document.createElement('div');
-  addRow.className = 'wf-inline';
-  const input = textInput('新档位（如 high、高、xhigh）');
-  input.className = 'field-input tag-input';
-  const add = btn('+ 添加档位', 'mod-add');
-  const hint = cfgHint('标签就是档位；模型登记按它映射。可以任意写（如 high、高、xhigh），不能为空或重复。');
-  const err = cfgHint('', 'err');
-  const control = /[\u0000-\u001f\u007f-\u009f]/;
-  addRow.appendChild(input); addRow.appendChild(add);
-  node.appendChild(chips); node.appendChild(hint); node.appendChild(err);
-
-  const ids = [];
-  for (const l of levels || []) {
-    const id = String((l && l.id) || '').trim();
-    if (!id || ids.indexOf(id) >= 0) continue;
-    ids.push(id);
-  }
-
-  function showError(text) { err.textContent = text || ''; }
-  function render() {
-    chips.innerHTML = '';
-    if (!ids.length) {
-      const empty = document.createElement('span');
-      empty.className = 'mod-chips-empty';
-      empty.textContent = '（还没有档位：至少加一个）';
-      chips.appendChild(empty);
-      chips.appendChild(addRow);
-      return;
-    }
-    for (const id of ids) {
-      const chip = document.createElement('span');
-      chip.className = 'mod-chip';
-      const label = document.createElement('span');
-      label.className = 'mod-chip-label';
-      label.textContent = id;
-      chip.title = id;
-      const x = btn('×', 'mod-chip-x');
-      x.title = '移除 ' + id;
-      x.onclick = () => {
-        const i = ids.indexOf(id);
-        if (i >= 0) ids.splice(i, 1);
-        showError('');
-        render();
-      };
-      chip.appendChild(label); chip.appendChild(x);
-      chips.appendChild(chip);
-    }
-    chips.appendChild(addRow);
-  }
-  function addLevel() {
-    const raw = String(input.value || '').trim();
-    if (!raw) { showError('思考档位不能为空'); return; }
-    if (ids.indexOf(raw) >= 0) { showError('思考档位已存在：' + raw); return; }
-    if (control.test(raw)) { showError('思考档位不能包含控制字符'); return; }
-    ids.push(raw);
-    input.value = '';
-    showError('');
-    render();
-    if (typeof input.focus === 'function') input.focus();
-  }
-  add.onclick = addLevel;
-  input.addEventListener('keydown', (e) => {
-    if (e && e.key === 'Enter') addLevel();
-  });
-  function validate() {
-    if (!ids.length) {
-      showError('思考等级至少要有一个档位');
-      return '思考等级至少要有一个档位';
-    }
-    for (const id of ids) {
-      if (control.test(id)) {
-        const msg = '思考档位不能包含控制字符：' + id;
-        showError(msg);
-        return msg;
-      }
-    }
-    showError('');
-    return '';
-  }
-  function list() {
-    return ids.map((id) => ({ id }));
-  }
-  render();
-  return { node, list, validate };
-}
-
-/** 模型思考映射：一行 = 左选档位、右填请求体片段；已映射的档位在其它行不可再选。
- *  约束：每行值非空；{...} 必须是 JSON 对象；默认档只能从已映射的档里选（后端同一条）。 */
-function thinkingMapEditor() {
-  const mapping = document.createElement('div');
-  mapping.className = 'think-editor';
-  const rowsBox = document.createElement('div');
-  rowsBox.className = 'think-rows';
-  const empty = cfgHint('（还没有映射：这个模型不发思考参数）');
-  const addRow = document.createElement('div');
-  addRow.className = 'wf-inline';
-  const add = btn('+ 添加映射', 'mod-add');
-  addRow.appendChild(add);
-  const hint = cfgHint('字符串 = {"reasoning_effort": 值} 简写；{...} = 原样合并进请求体（保留键会被拒）。每行的值都不能为空。');
-  const defSel = selectInput([{ value: '', label: '（不指定：随供应商默认）' }], '');
-  const defaultField = field('思考默认档（只能选已映射的档）', defSel);
-  const defHint = cfgHint('不指定 = 随供应商默认；会话没选档时用它。');
-  mapping.appendChild(rowsBox);
-  mapping.appendChild(empty);
-  mapping.appendChild(addRow);
-  mapping.appendChild(hint);
-
-  const rows = [];
-  const catalog = () => thinkingLevels();
-  function findLevel(id) {
-    return catalog().find((l) => l.id === id) || null;
-  }
-  function optionFor(id) {
-    const l = findLevel(id);
-    return { value: id, label: l ? id : id + '（已不在目录）' };
-  }
-  function usedByOthers(row) {
-    const used = new Set();
-    for (const r of rows) if (r !== row && r.level) used.add(r.level);
-    return used;
-  }
-  function optionsFor(row) {
-    const used = usedByOthers(row);
-    const opts = [];
-    if (!row.level) opts.push({ value: '', label: '（选择档位）' });
-    for (const l of catalog()) {
-      if (used.has(l.id) && l.id !== row.level) continue;
-      if (!opts.some((o) => o.value === l.id)) opts.push({ value: l.id, label: l.id });
-    }
-    if (row.level && !findLevel(row.level) && !opts.some((o) => o.value === row.level)) {
-      opts.push({ value: row.level, label: row.level + '（已不在目录）' });
-    }
-    if (!opts.length) opts.push({ value: '', label: '（没有可用档位）' });
-    return opts;
-  }
-  function createRow(level, value) {
-    const row = { level: level || '', value: value || '', sel: null, input: null, node: null };
-    const node = document.createElement('div');
-    node.className = 'think-row';
-    const sel = selectInput([], row.level);
-    const eq = document.createElement('span');
-    eq.className = 'think-eq';
-    eq.textContent = '=';
-    const input = textInput('参数（如 high 或 {"thinking":{"type":"disabled"}}）');
-    input.className = 'field-input think-value';
-    input.value = row.value;
-    input.addEventListener('input', () => { row.value = input.value; });
-    const del = btn('×', 'link-btn danger');
-    del.title = '移除这一行';
-    del.onclick = () => removeRow(row);
-    sel.onchange = () => { row.level = sel.value; syncAll(); };
-    node.appendChild(sel); node.appendChild(eq); node.appendChild(input); node.appendChild(del);
-    row.node = node; row.sel = sel; row.input = input;
-    rowsBox.appendChild(node);
-    rows.push(row);
-    return row;
-  }
-  function removeRow(row) {
-    const i = rows.indexOf(row);
-    if (i >= 0) rows.splice(i, 1);
-    if (row.node && row.node.parentNode) row.node.parentNode.removeChild(row.node);
-    syncAll();
-  }
-  function syncRow(row) {
-    const v = syncSelect(row.sel, optionsFor(row), row.level);
-    if (v !== row.level) row.level = v;
-  }
-  function defaultOptions() {
-    const opts = [{ value: '', label: '（不指定：随供应商默认）' }];
-    for (const row of rows) {
-      if (!row.level || opts.some((o) => o.value === row.level)) continue;
-      opts.push(optionFor(row.level));
-    }
-    return opts;
-  }
-  function syncDefault(want) {
-    return syncSelect(defSel, defaultOptions(), want === undefined ? defSel.value : want);
-  }
-  function syncRows() {
-    for (const row of rows) syncRow(row);
-    empty.style.display = rows.length ? 'none' : '';
-    const cat = catalog();
-    const unused = cat.filter((l) => !rows.some((r) => r.level === l.id));
-    if (!cat.length) {
-      add.disabled = true;
-      add.textContent = '+ 添加映射';
-      add.title = '先在设置页添加思考等级';
-    } else if (!unused.length) {
-      add.disabled = true;
-      add.textContent = '（档位都已映射）';
-      add.title = '所有思考等级都已映射';
-    } else {
-      add.disabled = false;
-      add.textContent = '+ 添加映射';
-      add.title = '再添加一行映射';
-    }
-  }
-  function syncAll() {
-    syncRows();
-    syncDefault(defSel.value);
-  }
-  function addMapping() {
-    const used = new Set(rows.map((r) => r.level).filter(Boolean));
-    const next = catalog().find((l) => !used.has(l.id));
-    if (!next) return;
-    createRow(next.id, '');
-    syncAll();
-  }
-  add.onclick = addMapping;
-
-  function setSpec(spec) {
-    rowsBox.innerHTML = '';
-    rows.length = 0;
-    defSel.value = '';
-    const map = (spec && spec.levels) || {};
-    const ids = catalog().map((l) => l.id);
-    const known = ids.filter((id) => Object.prototype.hasOwnProperty.call(map, id));
-    const unknown = Object.keys(map).filter((id) => ids.indexOf(id) < 0).sort();
-    for (const id of known.concat(unknown)) {
-      const raw = map[id];
-      createRow(id, typeof raw === 'string' ? raw : JSON.stringify(raw));
-    }
-    syncRows();
-    syncDefault((spec && spec.default) || '');
-  }
-  function refresh() { syncAll(); }
-  function read() {
-    const levels = {};
-    const seen = new Set();
-    for (const row of rows) {
-      const level = String(row.level || '').trim();
-      const raw = String(row.value || '').trim();
-      if (!level) return { error: '有一行还没选思考档位' };
-      if (seen.has(level)) return { error: '思考档位 ' + level + ' 重复' };
-      seen.add(level);
-      if (!raw) return { error: '思考档位 ' + level + ' 的映射不能为空' };
-      if (raw.charAt(0) === '{') {
-        try {
-          const obj = JSON.parse(raw);
-          if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
-            return { error: '思考档位 ' + level + ' 的映射必须是 JSON 对象' };
-          }
-          levels[level] = obj;
-        } catch (e) {
-          return { error: '思考档位 ' + level + ' 的 JSON 不合法：' + e.message };
-        }
-      } else {
-        levels[level] = raw;
-      }
-    }
-    const want = String(defSel.value || '').trim();
-    if (want && !seen.has(want)) return { error: '思考默认档 ' + want + ' 没有映射' };
-    return { spec: { default: want || null, levels } };
-  }
-
-  setSpec({ default: null, levels: {} });
-  return { mapping, defaultField, defaultHint: defHint, setSpec, refresh, read };
-}
-
-/* ---------- 设置②：模型登记（录入 / 修改 / 删除 + 供应商模型发现） ---------- */
-function modelsPage(c, coreBody) {
-    const listWrap = document.createElement('div'); listWrap.className = 'reg-list';
-    const discWrap = document.createElement('div'); discWrap.className = 'reg-list';
-    const coreWrap = coreBody || document.createElement('div');
-    const idIn = textInput('id');
-    const nameIn = textInput('展示名');
-    const apiIn = textInput('api_model（真正发给供应商的串）');
-    const providerSel = selectInput(state.providers.map((p) => ({ value: p.id, label: p.id })), null);
-    const noteIn = textInput('note（能力说明）');
-    // 上下文窗口：0 / 留空 = 用户不填；自动压缩按 128K 兜底（见后端 DEFAULT_CONTEXT_TOKENS）。
-    const ctxIn = numberInput('上下文窗口（tokens，0 或留空 = 不填；自动压缩按 128K 兜底）', 0, 0, 2000000);
-    // 工具调用形态：原生 = 保存前实测（通道基线 + tools + 回放形状）；手写信封 = 用户显式选择，不测试。
-    const toolsSel = selectInput([
-      { value: 'native', label: '原生工具调用（保存前实测）' },
-      { value: 'envelope', label: '手写信封（不测试）' },
-    ], 'native');
-    // 思考强度：一行 = 左选档位、右填映射值；默认档只能从已映射的档里选。
-    const thinkEditor = thinkingMapEditor();
-    const save = btn('登记 / 更新', 'btn btn-primary btn-block');
-
-    function syncProviderSelect() {
-      syncSelect(providerSel, state.providers.map((p) => ({ value: p.id, label: p.id })), providerSel.value);
-    }
-
-    function refreshCore() {
-      coreWrap.innerHTML = '';
-      coreModelBlock({ body: coreWrap, setMsg: c.setMsg, mutate: c.mutate }, false);
-    }
-
-    function rebuild() {
-      listWrap.innerHTML = '';
-      if (!state.models.length) { listWrap.appendChild(emptyHint('（暂无模型）')); return; }
-      for (const m of state.models) {
-        const row = document.createElement('div'); row.className = 'reg-item';
-        const main = document.createElement('div'); main.className = 'reg-main';
-        const id = document.createElement('div'); id.className = 'reg-id'; id.textContent = m.id;
-        if (m.is_core) {
-          const badge = document.createElement('span'); badge.className = 'reg-core'; badge.textContent = '核心';
-          id.appendChild(badge);
-        }
-        const sub = document.createElement('div'); sub.className = 'reg-sub';
-        const tLevels = Object.keys((m.thinking && m.thinking.levels) || {});
-        const tDesc = tLevels.length
-          ? ('默认 ' + ((m.thinking && m.thinking.default) || '随供应商默认') + '（' + tLevels.join(' / ') + '）')
-          : '未登记（不发思考参数）';
-        sub.textContent = m.name + ' · ' + m.api_model + ' · 供应商 ' + m.provider +
-          ' · 工具调用 ' + (m.tools === 'native' ? '原生' : '手写信封') +
-          ' · 窗口 ' + (m.context ? m.context + ' tokens' : '未填（压缩按 128K 兜底）') +
-          ' · 思考 ' + tDesc;
-        const note = document.createElement('div'); note.className = 'reg-note'; note.textContent = m.note || '';
-        main.appendChild(id); main.appendChild(sub); main.appendChild(note);
-        const acts = document.createElement('div'); acts.className = 'reg-acts';
-        if (!m.is_core) {
-          // 登记完就有这条：不必再去上面的核心默认块里找同一个模型。
-          const setCore = btn('设为核心', 'link-btn');
-          setCore.onclick = async () => {
-            try {
-              await c.mutate('set_core_model', { id: m.id });
-              c.setMsg('核心 AI 默认模型：' + m.id);
-            } catch (e) { c.setMsg(e.message, true); }
-          };
-          acts.appendChild(setCore);
-        }
-        const edit = btn('编辑', 'link-btn');
-        edit.onclick = () => {
-          idIn.value = m.id; nameIn.value = m.name; apiIn.value = m.api_model;
-          providerSel.value = m.provider; noteIn.value = m.note || '';
-          ctxIn.input.value = m.context || 0;
-          toolsSel.value = m.tools || 'native';
-          thinkEditor.setSpec(m.thinking || { default: null, levels: {} });
-          c.setMsg('编辑 ' + m.id);
-        };
-        const del = btn('删除', 'link-btn danger');
-        del.onclick = async () => {
-          try {
-            await c.mutate('remove_model', { id: m.id });
-            c.setMsg('已删除 ' + m.id);
-          } catch (e) { c.setMsg(e.message, true); }
-        };
-        // 实测这条通道支不支持原生工具调用（要真实网络）：结论由后端如实回报，只写确定的结论。
-        const probe = btn('测工具调用', 'link-btn');
-        probe.onclick = async () => {
-          probe.disabled = true;
-          c.setMsg('正在实测 ' + m.id + ' 的工具调用支持（要发两条最小请求）…');
-          try {
-            const r = await c.mutate('probe_model_tools', { id: m.id });
-            const what = r.outcome === 'supported' ? '支持原生工具调用'
-              : r.outcome === 'unsupported' ? '**不支持**原生工具调用（供应商拒了带 tools 的请求）'
-              : '无法判定（供应商接受了 tools，但这次没有发起调用）';
-            c.setMsg(what + '｜' + (r.detail || '') + '｜登记处现在是「' +
-              (r.mode === 'native' ? '原生' : '手写信封') + '」，下一次生成起生效');
-          } catch (e) { c.setMsg(e.message, true); }
-        };
-        // 实测「工具调用历史怎么发回去」的几种写法（要真实网络；只报事实、不改登记处）。
-        const probeReplay = btn('测回放形状', 'link-btn');
-        probeReplay.onclick = async () => {
-          probeReplay.disabled = true;
-          c.setMsg('正在实测 ' + m.id + ' 的回放形状（几种写法各发一次）…');
-          try {
-            const r = await api('POST', actionUrl('probe_replay_shape'), { id: m.id });
-            const lines = (r.shapes || []).map((s) => {
-              const verdict = !s.accepted ? '被拒' : (s.understood ? '收+读懂' : '收未懂');
-              return verdict + '  ' + s.name + '  ' + (s.detail || '');
-            });
-            c.setMsg('回放形状（' + m.id + '）：\n' + lines.join('\n'));
-          } catch (e) { c.setMsg(e.message, true); }
-        };
-        acts.appendChild(probeReplay); acts.appendChild(probe); acts.appendChild(edit); acts.appendChild(del);
-        row.appendChild(main); row.appendChild(acts);
-        listWrap.appendChild(row);
-      }
-    }
-
-    function rebuildDiscover() {
-      discWrap.innerHTML = '';
-      if (!state.providers.length) { discWrap.appendChild(emptyHint('（暂无供应商，先登记供应商）')); return; }
-      for (const p of state.providers) {
-        const row = document.createElement('div'); row.className = 'disc-row';
-        const label = document.createElement('span'); label.className = 'disc-id'; label.textContent = p.id;
-        const go = btn('获取模型列表', 'link-btn');
-        const chips = document.createElement('div'); chips.className = 'chips';
-        go.onclick = async () => {
-          chips.innerHTML = '';
-          c.setMsg('正在拉取 ' + p.id + ' 的模型列表…');
-          try {
-            const r = await api('POST', actionUrl('discover_models'), { id: p.id });
-            const list = r.models || [];
-            if (!list.length) { chips.appendChild(emptyHint('（未返回模型）')); }
-            for (const name of list) {
-              const chip = btn(name, 'chip');
-              chip.onclick = () => {
-                apiIn.value = name; providerSel.value = p.id;
-                c.setMsg('已填入 api_model：' + name + '（供应商 ' + p.id + '）');
-              };
-              chips.appendChild(chip);
-            }
-            c.setMsg('获取到 ' + list.length + ' 个模型，点选填入 api_model');
-          } catch (e) { c.setMsg(e.message, true); }
-        };
-        row.appendChild(label); row.appendChild(go); row.appendChild(chips);
-        discWrap.appendChild(row);
-      }
-    }
-
-    save.onclick = async () => {
-      const think = thinkEditor.read();
-      if (think.error) { c.setMsg(think.error, true); return; }
-      const body = {
-        id: idIn.value.trim(), name: nameIn.value.trim(), api_model: apiIn.value.trim(),
-        provider: providerSel.value, note: noteIn.value.trim(),
-        context: Number(ctxIn.input.value) || 0,
-        tools: toolsSel.value,
-        thinking: think.spec,
-      };
-      if (!body.id || !body.name || !body.api_model || !body.provider) {
-        c.setMsg('id / 名字 / api_model / 供应商 均不能为空', true); return;
-      }
-      try {
-        if (body.tools === 'native') {
-          c.setMsg('正在保存：先实测原生工具调用与回放形状（几条最小请求，可能要几秒）…');
-        }
-        await c.mutate('upsert_model', body);
-        c.setMsg('已保存：' + body.id +
-          (state.core ? '' : '（还没有核心默认模型：点这一行的「设为核心」即可）'));
-      } catch (e) { c.setMsg(e.message, true); }
-    };
-
-    // 登记处任何变化都只同步列表 / 下拉 / 核心块，不重建表单（轮询也会走到这里）。
-    c.onRegistryChange(() => {
-      rebuild();
-      rebuildDiscover();
-      syncProviderSelect();
-      refreshCore();
-      thinkEditor.refresh();
-    });
-    rebuild(); rebuildDiscover(); syncProviderSelect(); refreshCore();
-    if (!coreBody) c.body.appendChild(coreWrap);
-    c.body.appendChild(listWrap);
-    const form = document.createElement('div'); form.className = 'form-col';
-    form.appendChild(field('id', idIn));
-    form.appendChild(field('展示名', nameIn));
-    form.appendChild(field('api_model', apiIn));
-    form.appendChild(field('供应商', providerSel));
-    form.appendChild(field('note', noteIn));
-    // numberInput 返回 { input, wrap }，而 wrap **已经带标签**——直接把 wrap 挂上去
-    //（传对象给 field 会让 appendChild 抛异常，整个表单就建不起来）。
-    form.appendChild(ctxIn.wrap);
-    form.appendChild(field('工具调用', toolsSel));
-    form.appendChild(field('思考档位映射（可选）', thinkEditor.mapping));
-    form.appendChild(thinkEditor.defaultField);
-    form.appendChild(thinkEditor.defaultHint);
-    form.appendChild(save);
-    c.body.appendChild(form);
-    const discTitle = document.createElement('div'); discTitle.className = 'wf-label'; discTitle.textContent = '从供应商获取模型（点选填入 api_model）';
-    c.body.appendChild(discTitle);
-    c.body.appendChild(discWrap);
-}
-
-function openModelsModal() {
-  openModal('模型登记', modelsPage);
-}
-
-/* ---------- 设置③：核心 AI 默认模型 ---------- */
-function coreModelBlock(c, subscribe) {
-    const sel = selectInput(modelOptions(state.core), state.core);
-    const save = btn('保存', 'btn btn-primary btn-block');
-    const sync = () => syncSelect(sel, modelOptions(state.core), state.core || sel.value);
-    if (subscribe !== false && typeof c.onRegistryChange === 'function') c.onRegistryChange(sync);
-    save.onclick = async () => {
-      const id = sel.value;
-      if (!id) { c.setMsg('请先登记模型', true); return; }
-      try {
-        await c.mutate('set_core_model', { id });
-        c.setMsg('核心 AI 默认模型：' + id);
-      } catch (e) { c.setMsg(e.message, true); }
-    };
-    if (!state.models.length) c.body.appendChild(emptyHint('（未登记模型，先到「模型登记」添加）'));
-    c.body.appendChild(field('核心 AI 使用的模型', sel));
-    c.body.appendChild(save);
-}
-
-function openCoreModal() {
-  openModal('核心 AI 默认模型', coreModelBlock);
-}
-
-/* ---------- 设置④：基本设置 ---------- */
-/// 设置 1–4 页共用的控件：一次建全，切页只切显示——保存是全量写，不能因为没建过某页丢改动。
-function settingsForm() {
-  const stream = checkbox('流式传输（供应商逐片返回，边收边显示）', state.settings.streaming);
-  const cot = checkbox('思维链显示（每条回答下的思维链，永远默认折叠、点击展开）', state.settings.show_reasoning);
-  const to = numberInput('等待首个响应的超时（秒）', state.settings.llm_timeout_secs, 10, 3600);
-  const remind = numberInput('一轮内最多提醒几次', state.settings.discuss_remind_cap, 0, 20);
-  const pct = numberInput('上下文用到百分之多少就压缩', state.settings.compact_at_percent, 0, 100);
-  const keep = numberInput('压缩时至少保留最近内容（占模型窗口 %）', state.settings.compact_keep_percent, 0, 100);
-  const compactModels = [{ value: '', label: '默认（会话同模型）' }].concat(
-    (state.models || []).map((m) => ({
-      value: m.id,
-      label: m.name + '（' + m.id + (m.context ? ' · ' + m.context + ' tokens' : '') + '）',
-    })),
-  );
-  if (state.settings.compact_model && !compactModels.some((o) => o.value === state.settings.compact_model)) {
-    compactModels.push({ value: state.settings.compact_model, label: state.settings.compact_model + '（登记处已无此模型）' });
-  }
-  const compactModel = selectInput(compactModels, state.settings.compact_model || '');
-  const guests = numberInput('虚拟机档同时最多几台', state.settings.max_guests, 0, 64);
-  const sb = state.settings.sandbox || {};
-  const sp = sb.policy || {};
-  const en = sp.enforce || {};
-  const sd = sb.defaults || {};
-  const lines = (v) => (Array.isArray(v) ? v.join('\n') : '');
-  const area = (label, value) => {
-    const t = areaInput('每行一条');
-    t.value = lines(value);
-    return { t, f: field(label, t) };
-  };
-  // 思考等级目录：标签即档位，顺序即界面顺序。模型登记只能引用这里的标签。
-  const thinkLevels = thinkingTagsEditor(thinkingLevels());
-  const network = checkbox('允许工具 / guest / 常驻服务 / 构建出站（全局）', !!sp.network);
-  const writeAcl = checkbox('允许 Windows 写本机目录 ACL（只影响 Windows 的容器围栏）', !!(sp.windows && sp.windows.write_acl));
-  const level = (v) => selectInput([
-    { value: 'require', label: 'require：必须强制，不可用时询问是否本进程降级' },
-    { value: 'best_effort', label: 'best_effort：尽力而为，不可用时降级并如实报告' },
-  ], v || 'require');
-  const enFs = level(en.filesystem);
-  const enNet = level(en.network);
-  const enTree = level(en.process_tree);
-  const enEnv = level(en.env_whitelist);
-  const onUnavailable = selectInput([
-    { value: 'ask', label: 'ask：启动时询问是否本进程降级（不落盘）' },
-    { value: 'refuse', label: 'refuse：直接拒绝' },
-  ], sp.on_unavailable || 'ask');
-  const hostRoots = area('主机只读根（绝对路径，每行一条）', sp.host_read_roots);
-  const hardDeny = area('全局黑名单（工作区相对路径，只增不减）', sp.deny);
-  const defProfile = selectInput([
-    { value: 'view', label: '仅可查看' },
-    { value: 'workspace', label: '工作区内修改（默认）' },
-    { value: 'external', label: '外部可达（逐次确认）' },
-    { value: 'all_reach', label: '全可达（自动放行）' },
-  ], sd.profile || 'workspace');
-  const scopeArea = (label, value) => {
-    const mode = Array.isArray(value) ? 'paths' : (value === 'none' ? 'none' : 'all');
-    const sel = selectInput([
-      { value: 'all', label: '整棵共享区' },
-      { value: 'none', label: '无权限' },
-      { value: 'paths', label: '指定路径' },
-    ], mode);
-    const t = areaInput('每行一条（相对共享区根）');
-    t.value = Array.isArray(value) ? value.join('\n') : '';
-    const wrap = document.createElement('div'); wrap.className = 'wf-field';
-    wrap.appendChild(field(label + '方式', sel));
-    const pathField = field(label + '路径', t);
-    wrap.appendChild(pathField);
-    const sync = () => { pathField.style.display = sel.value === 'paths' ? '' : 'none'; };
-    sel.addEventListener('change', sync);
-    sync();
-    return {
-      wrap,
-      get: () => (sel.value === 'all' ? 'all' : sel.value === 'none' ? 'none' : parseSettingLines(t.value)),
-    };
-  };
-  const defSharedRead = scopeArea('默认共享区读范围', (sd.shared && sd.shared.read) || 'all');
-  const defSharedWrite = scopeArea('默认共享区写范围', (sd.shared && sd.shared.write) || 'all');
-  const defTools = area(
-    '默认逐工具决定（每行一条：工具名=allow/ask/deny）',
-    Object.entries(sd.tools || {}).map(([k, v]) => k + '=' + v),
-  );
-  const st = state.settings.storage || {};
-  const stPeriodic = checkbox('启用全局周期回收（关掉只停周期；构建前 headroom 始终启用）', st.periodic_gc !== false);
-  const stInterval = numberInput('全局自动回收间隔（分钟，至少 15）', st.gc_interval_minutes == null ? 15 : st.gc_interval_minutes, 15, 10080);
-  const stCap = numberInput('可回收缓存总预算（GiB；0 = 按磁盘 10%）', st.cache_cap_gib == null ? 20 : st.cache_cap_gib, 0, 4096);
-  const stKeep = numberInput('超过多少天未使用可回收（0 = 不按龄）', st.cache_keep_days == null ? 30 : st.cache_keep_days, 0, 3650);
-  const stVolume = numberInput('新构建缓存卷大小（GiB）', st.build_volume_gib == null ? 16 : st.build_volume_gib, 1, 1024);
-  const stFree = numberInput('宿主最低剩余空间（GiB）', st.min_free_gib == null ? 2 : st.min_free_gib, 0, 1024);
-  const stLog = numberInput('日志保留天数（0 = 不按龄）', st.log_keep_days == null ? 14 : st.log_keep_days, 0, 3650);
-  return { stream, cot, to, remind, pct, keep, compactModel, guests, thinkLevels, network, writeAcl, enFs, enNet, enTree, enEnv, onUnavailable, hostRoots, hardDeny, defProfile, defSharedRead, defSharedWrite, defTools, stPeriodic, stInterval, stCap, stKeep, stVolume, stFree, stLog };
-}
-
-/// 1 页：生成与上下文。
-function buildGeneratePage(c, f) {
-  c.body.appendChild(f.stream.wrap);
-  c.body.appendChild(f.cot.wrap);
-  c.body.appendChild(field('思考等级', f.thinkLevels.node));
-  c.body.appendChild(cfgHint('默认 off / low / high / max；可追加任意标签（如 xhigh、高）。标签就是档位，模型登记按它写"标签 → 映射值"；会话状态栏切档时只列这组模型都登记了的标签。'));
-  c.body.appendChild(f.to.wrap);
-  c.body.appendChild(cfgHint('这是“等第一个响应/第一个数据块”的预算，不是整次流的总时长：正常流式只要还在出数据就不会超时；流开始后 120 秒没有新数据才判定断流。用尽时会中断本轮并提示，点「继续」可重试（会话不会作废）。'));
-  c.body.appendChild(f.remind.wrap);
-  c.body.appendChild(cfgHint('调用次数没有上限：模型继续核实就继续跑，直到它给出表态（你可以随时点「停止」）。'));
-  c.body.appendChild(cfgHint('一轮内提醒到顶就记一行「未回应」放过它，整轮继续（不阻塞）。'));
-  c.body.appendChild(f.pct.wrap);
-  c.body.appendChild(cfgHint('压缩由 AI 自己做：到点自动压一次；也可以随时手动 /compact。填 0 = 不自动压。'));
-  c.body.appendChild(f.keep.wrap);
-  c.body.appendChild(cfgHint('按模型窗口算：压缩时至少保留最近这么多内容，更早的压成摘要；填 0 = 只留摘要。建议小于上面的压缩阈值。'));
-  c.body.appendChild(field('压缩用模型', f.compactModel));
-  c.body.appendChild(cfgHint('默认与会话同模型，保住前缀缓存；也可以选登记处里的另一个模型专门做总结。只在压缩触发时解析，不按回合、不刷新会话。'));
-}
-
-/// 2 页：沙箱围栏（全局硬约束）。
-function buildSandboxPage(c, f) {
-  c.body.appendChild(cfgHint('以下沙箱策略是全局硬约束：会话不能改；保存后自动整体重启。', 'warn'));
-  c.body.appendChild(f.network.wrap);
-  c.body.appendChild(field('文件系统围栏', f.enFs));
-  c.body.appendChild(field('网络围栏（仅在网络关闭时需要）', f.enNet));
-  c.body.appendChild(field('进程树围栏', f.enTree));
-  c.body.appendChild(field('环境白名单', f.enEnv));
-  c.body.appendChild(field('机制不可用时', f.onUnavailable));
-  c.body.appendChild(f.writeAcl.wrap);
-  c.body.appendChild(cfgHint('Windows 上 require 文件系统/网络围栏必须先勾选「允许 Windows 写本机目录 ACL」；否则保存会被拒绝。要无围栏请把对应 enforce 降为 best_effort。', 'warn'));
-}
-
-/// 3 页：权限默认值。
-function buildPermissionsPage(c, f) {
-  c.body.appendChild(f.hostRoots.f);
-  c.body.appendChild(f.hardDeny.f);
-  c.body.appendChild(cfgHint('默认权限是新建会话的起点；全局黑名单是硬底线，会话只能追加、不能清空。'));
-  c.body.appendChild(field('默认权限档位', f.defProfile));
-  c.body.appendChild(f.defSharedRead.wrap);
-  c.body.appendChild(f.defSharedWrite.wrap);
-  c.body.appendChild(f.defTools.f);
-}
-
-/// 4 页：资源与进程。
-function buildResourcesPage(c, f) {
-  c.body.appendChild(f.guests.wrap);
-  c.body.appendChild(cfgHint('每台虚拟机固定 2 GB 内存 / 2 核：到上限时新建会如实拒绝，不会悄悄抢资源。填 0 = 不限制。'));
-  const title = document.createElement('div');
-  title.className = 'wf-label';
-  title.textContent = '现在在跑什么';
-  const box = document.createElement('div');
-  box.className = 'cfg-log';
-  box.textContent = '读取中…';
-  c.body.appendChild(title);
-  c.body.appendChild(box);
-  api('GET', '/api/processes').then((r) => {
-    const list = (r && r.procs) || [];
-    box.textContent = list.length ? list.map((p) =>
-      (p.alive ? '在跑' : '已退出（等对账清）') + ' · ' + p.purpose + ' · ' + p.owner + ' · pid ' + p.pid +
-      (p.orphanRisk ? ' · 父死子亡未挂上（核心被强杀会留下）：' + (p.guardNote || '') : '')
-    ).join('\n') : '没有产品起的长驻进程。';
-  }).catch((e) => { box.textContent = '读不到：' + e.message; });
-}
-
-/// 5 页：存储空间（盘点 + 回收 + 显式清理 + 策略）。
-function buildStoragePage(c, f) {
-  c.body.appendChild(f.stPeriodic.wrap);
-  c.body.appendChild(f.stInterval.wrap);
-  c.body.appendChild(f.stCap.wrap);
-  c.body.appendChild(f.stKeep.wrap);
-  c.body.appendChild(f.stVolume.wrap);
-  c.body.appendChild(f.stFree.wrap);
-  c.body.appendChild(f.stLog.wrap);
-  c.body.appendChild(cfgHint('上限只约束可回收缓存（构建缓存 / 下载缓存 / 过期可写层 / 日志），不约束会话、虚拟根与模块产物。到上限先回收一次，不拒绝构建；全局回收默认且至少 15 分钟一次，关闭自动回收后只剩手动。', 'warn'));
-  c.body.appendChild(cfgHint('还原虚拟根会删除 guest 内未落宿主的数据，并用清单重建；不备份、不可撤销。', 'err'));
-  const box = document.createElement('div');
-  box.className = 'storage-report';
-  box.textContent = '读取中…';
-  c.body.appendChild(box);
-  const refresh = async () => {
-    try {
-      const r = await api('GET', '/api/storage');
-      renderStorage(box, r.report, refresh);
-    } catch (e) {
-      box.textContent = '读不到：' + e.message;
-    }
-  };
-  refresh();
-}
-
-function fmtBytes(n) {
-  const v = Number(n) || 0;
-  if (v >= 1024 * 1024 * 1024) return (v / (1024 * 1024 * 1024)).toFixed(1) + ' GiB';
-  if (v >= 1024 * 1024) return (v / (1024 * 1024)).toFixed(1) + ' MiB';
-  if (v >= 1024) return (v / 1024).toFixed(1) + ' KiB';
-  return v + ' B';
-}
-
-function renderStorage(box, report, refresh) {
-  box.innerHTML = '';
-  box.className = 'storage-report';
-  const head = document.createElement('div');
-  head.className = 'storage-summary' + (report.overCap ? ' err' : '');
-  head.textContent = '缓存占用 ' + fmtBytes(report.managedBytes) + ' / 上限 ' + fmtBytes(report.capBytes) +
-    '；宿主剩余 ' + fmtBytes(report.freeBytes) + (report.overCap ? '（已超限）' : '');
-  box.appendChild(head);
-  const note = document.createElement('div');
-  note.className = 'cfg-hint';
-  note.textContent = '按策略回收只处理已超上限或超过保留天数的项；未到条件时不会删任何东西。要手动清理，用下方单项或“清空全部缓存”。';
-  box.appendChild(note);
-  const bar = document.createElement('div');
-  bar.className = 'storage-actions';
-  const gc = btn('按策略回收', 'btn btn-primary');
-  gc.onclick = async () => {
-    try {
-      const preview = await api('POST', '/api/storage/gc', { apply: false });
-      const lines = (preview.report.actions || []).map((a) => a.label + ' · ' + fmtBytes(a.bytes) + ' · ' + a.reason);
-      if (!lines.length) {
-        ui.toast('warn', '当前没有达到策略条件的项：未超上限，也没有超过保留天数的缓存；可用单项清理或“清空全部缓存”。');
-        return;
-      }
-      if (!(await confirmBox('回收预览', lines.join('\n'), '回收'))) return;
-      const done = await api('POST', '/api/storage/gc', { apply: true });
-      ui.toast('ok', '已回收 ' + fmtBytes(done.report.freedBytes));
-      await refresh();
-    } catch (e) { ui.toast('err', '回收失败：' + e.message); }
-  };
-  bar.appendChild(gc);
-  const clear = btn('清空全部缓存', 'btn');
-  clear.onclick = async () => {
-    if (!(await confirmBox('清空全部缓存', '会清空构建缓存卷、下载缓存、过期可写层与可清理日志；会话与虚拟根不动。', '清空'))) return;
-    try {
-      for (const kind of ['build-cache', 'download-cache', 'overlays', 'logs']) {
-        await api('POST', '/api/storage/clean', { kind, confirm: true });
-      }
-      ui.toast('ok', '已清空可回收缓存');
-      await refresh();
-    } catch (e) { ui.toast('err', '清空失败：' + e.message); }
-  };
-  bar.appendChild(clear);
-  box.appendChild(bar);
-  for (const cat of report.categories || []) {
-    const catEl = document.createElement('div');
-    catEl.className = 'storage-cat';
-    const catHead = document.createElement('div');
-    catHead.className = 'storage-cat-head';
-    const title = document.createElement('span');
-    title.className = 'storage-cat-title';
-    title.textContent = cat.label;
-    const size = document.createElement('span');
-    size.className = 'storage-size';
-    size.textContent = fmtBytes(cat.bytes);
-    const note = document.createElement('span');
-    note.className = 'storage-cat-note';
-    note.textContent = (cat.autoEvictable ? '自动回收' : '不自动回收') + ' · ' + cat.note;
-    catHead.appendChild(title);
-    catHead.appendChild(size);
-    catHead.appendChild(note);
-    if (['download-cache', 'overlays', 'logs'].includes(cat.id) && (cat.items || []).length) {
-      const clearOne = btn('清理整类', 'link-btn danger');
-      clearOne.onclick = () => cleanStorage(cat.id, null, null, refresh);
-      catHead.appendChild(clearOne);
-    }
-    catEl.appendChild(catHead);
-    if (cat.id === 'logs') {
-      note.textContent += ' · 共 ' + (cat.items || []).length + ' 份';
-      box.appendChild(catEl);
-      continue;
-    }
-    const limit = (cat.items || []).slice(0, 20);
-    for (const item of limit) {
-      const itemEl = document.createElement('div');
-      itemEl.className = 'storage-item';
-      const main = document.createElement('div');
-      main.className = 'storage-item-main';
-      main.textContent = item.label + ' · ' + fmtBytes(item.bytes) +
-        (item.active ? ' · 受保护' : '') + ' · ' + item.detail;
-      itemEl.appendChild(main);
-      const acts = document.createElement('div');
-      acts.className = 'storage-item-actions';
-      if (cat.id === 'build-cache') {
-        const opt = btn('优化', 'link-btn');
-        opt.onclick = () => cleanStorage('compact', item.id, null, refresh);
-        acts.appendChild(opt);
-        const del = btn('清理整卷', 'link-btn danger');
-        del.onclick = () => cleanStorage('build-cache', item.id, null, refresh);
-        acts.appendChild(del);
-        for (const mod of item.modules || []) {
-          const mb = btn('排队清理 ' + mod, 'link-btn');
-          mb.onclick = () => cleanStorage('build-cache', item.id, mod, refresh);
-          acts.appendChild(mb);
-        }
-      } else if (cat.id === 'guest-bases') {
-        const reset = btn('还原到初始状态', 'link-btn danger');
-        reset.onclick = () => resetGuest(item.id, refresh);
-        acts.appendChild(reset);
-      }
-      if (acts.children.length) itemEl.appendChild(acts);
-      catEl.appendChild(itemEl);
-    }
-    if ((cat.items || []).length > limit.length) {
-      const more = document.createElement('div');
-      more.className = 'storage-item-more';
-      more.textContent = '还有 ' + (cat.items.length - limit.length) + ' 项未显示';
-      catEl.appendChild(more);
-    }
-    box.appendChild(catEl);
-  }
-}
-
-async function cleanStorage(kind, id, module, refresh) {
-  const names = { 'build-cache': '构建缓存', 'download-cache': '下载缓存', overlays: '可写层', logs: '日志', compact: '压缩' };
-  if (!(await confirmBox('清理' + (names[kind] || kind), '确认清理：' + (id || '整类') + '？', '清理'))) return;
-  try {
-    const r = await api('POST', '/api/storage/clean', { kind, id: id || null, module: module || null, confirm: true });
-    if (r.result && r.result.started) {
-      ui.toast('ok', '已开始，进度见下方');
-    } else if (module) {
-      ui.toast('ok', '已排队：下次构建前回收 ' + module);
-    } else {
-      ui.toast('ok', '完成；释放 ' + fmtBytes((r.result && r.result.report && r.result.report.freedBytes) || 0));
-    }
-    await refresh();
-  } catch (e) { ui.toast('err', '清理失败：' + e.message); }
-}
-
-async function resetGuest(guest, refresh) {
-  if (!(await confirmBox('还原虚拟根', '会删除 guest 内未落宿主的数据，并按清单重建；不备份、不可撤销。', '继续', true))) return;
-  if (!(await confirmBox('再次确认', '真的要还原「' + guest + '」吗？', '还原', true))) return;
-  try {
-    const r = await api('POST', '/api/storage/clean', { kind: 'guest-reset', id: guest, confirm: true });
-    ui.toast('ok', '已开始还原：' + guest);
-    const poll = async () => {
-      const s = await api('GET', '/api/storage');
-      const j = (s.report && s.report.job) || {};
-      if (j.running) { setTimeout(poll, 1000); return; }
-      await refresh();
-      if (j.error) ui.toast('err', '还原失败：' + j.error);
-      else ui.toast('ok', '已还原：' + guest);
-    };
-    setTimeout(poll, 1000);
-  } catch (e) { ui.toast('err', '还原失败：' + e.message); }
-}
-
-function parseSettingLines(text) {
-  return String(text || '').split(/[\n,]/).map((s) => s.trim()).filter((s) => s.length > 0);
-}
-
-/// 1–4 页共用一份提交体（set_settings 是部分更新，未提交字段保留现值）。
-function collectSettings(f) {
-  return {
-    streaming: f.stream.box.checked,
-    show_reasoning: f.cot.box.checked,
-    thinking: { levels: f.thinkLevels.list() },
-    llm_timeout_secs: Number(f.to.input.value) || 300,
-    discuss_remind_cap: Number(f.remind.input.value) || 0,
-    compact_at_percent: Number(f.pct.input.value) || 0,
-    compact_keep_percent: Number(f.keep.input.value) || 0,
-    compact_model: f.compactModel.value || '',
-    max_guests: Number(f.guests.input.value) || 0,
-    storage: {
-      periodic_gc: f.stPeriodic.box.checked,
-      gc_interval_minutes: Number(f.stInterval.input.value) || 15,
-      cache_cap_gib: Number(f.stCap.input.value) || 0,
-      cache_keep_days: Number(f.stKeep.input.value) || 0,
-      build_volume_gib: Number(f.stVolume.input.value) || 16,
-      min_free_gib: Number(f.stFree.input.value) || 0,
-      log_keep_days: Number(f.stLog.input.value) || 0,
-    },
-    sandbox: {
-      policy: {
-        network: f.network.box.checked,
-        enforce: {
-          filesystem: f.enFs.value,
-          network: f.enNet.value,
-          process_tree: f.enTree.value,
-          env_whitelist: f.enEnv.value,
-        },
-        on_unavailable: f.onUnavailable.value,
-        windows: { write_acl: f.writeAcl.box.checked },
-        host_read_roots: parseSettingLines(f.hostRoots.t.value),
-        deny: parseSettingLines(f.hardDeny.t.value),
-      },
-      defaults: {
-        profile: f.defProfile.value,
-        shared: {
-          read: f.defSharedRead.get(),
-          write: f.defSharedWrite.get(),
-          deny: [],
-        },
-        tools: (() => {
-          const out = {};
-          for (const line of parseSettingLines(f.defTools.t.value)) {
-            const i = line.indexOf('=');
-            if (i < 0) continue;
-            const k = line.slice(0, i).trim();
-            const v = line.slice(i + 1).trim();
-            if (k && ['allow', 'ask', 'deny'].includes(v)) out[k] = v;
-          }
-          return out;
-        })(),
-      },
-    },
-  };
-}
-
-async function saveSettings(c, f, saveBtn) {
-  const bad = f.thinkLevels.validate();
-  if (bad) { c.setMsg(bad, true); return; }
-  const reset = busyButton(saveBtn, '保存中…');
-  try {
-    const saved = await api('POST', actionUrl('set_settings'), collectSettings(f));
-    await refreshState();
-    c.setMsg(saved && saved.restart ? '已保存：沙箱策略变更，正在重启…' : '已保存');
-    ui.toast(saved && saved.restart ? 'warn' : 'ok', saved && saved.restart ? '已保存，正在重启…' : '设置已保存');
-  } catch (e) {
-    c.setMsg(e.message, true);
-  } finally {
-    reset();
-  }
-}
-
-function openSettingsModal() {
-  openSettingsHub('generate');
-}
-
-/* ---------- 设置中心：左侧分页、右侧单页、底栏统一保存 ----------
- * 1–4 页共享同一份 AppSettings（set_settings 是部分更新，未提交字段保留现值）：控件一次建全，切页只切显示。
- * 5–8 页是即时的登记 / 启停操作，不显示保存栏。 */
-const SETTINGS_PAGES = [
-  { id: 'generate', group: '设置', label: '生成与上下文', icon: 'cpu' },
-  { id: 'sandbox', group: '设置', label: '沙箱围栏', icon: 'shield' },
-  { id: 'permissions', group: '设置', label: '权限默认值', icon: 'gear' },
-  { id: 'resources', group: '设置', label: '资源与进程', icon: 'dot' },
-  { id: 'storage', group: '设置', label: '存储空间', icon: 'folder' },
-  { id: 'providers', group: '登记', label: '供应商', icon: 'box' },
-  { id: 'models', group: '登记', label: '模型与核心默认', icon: 'dot' },
-  { id: 'agents', group: '登记', label: 'agent 管理', icon: 'users' },
-  { id: 'modules', group: '登记', label: '模块与服务', icon: 'folder' },
-];
-
-function openSettingsHub(page) {
-  openModal('设置', (c) => {
-    const hub = document.createElement('div');
-    hub.className = 'settings-hub';
-    const nav = document.createElement('nav');
-    nav.className = 'settings-nav';
-    nav.setAttribute('aria-label', '设置分页');
-    const panes = document.createElement('div');
-    panes.className = 'settings-panes';
-    const foot = document.createElement('div');
-    foot.className = 'settings-foot';
-    const form = settingsForm();
-    const save = btn('保存', 'btn btn-primary');
-    save.onclick = () => saveSettings(c, form, save);
-    const hint = document.createElement('span');
-    hint.className = 'settings-foot-hint';
-    hint.textContent = '设置页共用同一份保存（全量写入）';
-    foot.appendChild(hint);
-    foot.appendChild(save);
-    const main = document.createElement('div');
-    main.className = 'settings-main';
-    main.appendChild(panes);
-    main.appendChild(foot);
-    hub.appendChild(nav);
-    hub.appendChild(main);
-
-    const built = new Map();
-    // 分页也拿得到弹窗级的登记处订阅与写动作入口（否则分页刷新只能各写一套）。
-    const ctxOf = (pane) => ({
-      body: pane,
-      setMsg: c.setMsg,
-      onRegistryChange: c.onRegistryChange,
-      mutate: c.mutate,
-    });
-    const builders = {
-      generate: (pane, ctx) => buildGeneratePage(ctx, form),
-      sandbox: (pane, ctx) => buildSandboxPage(ctx, form),
-      permissions: (pane, ctx) => buildPermissionsPage(ctx, form),
-      resources: (pane, ctx) => buildResourcesPage(ctx, form),
-      storage: (pane, ctx) => buildStoragePage(ctx, form),
-      providers: (pane, ctx) => providersPage(ctx),
-      models: (pane, ctx) => {
-        // 核心默认块放在模型页顶部：登记 / 删除 / 设核心后由 modelsPage 自己的订阅统一刷新。
-        const core = document.createElement('div');
-        core.className = 'settings-core';
-        pane.appendChild(core);
-        modelsPage(ctx, core);
-      },
-      agents: (pane, ctx) => agentsPage(ctx),
-      modules: (pane, ctx) => modulesPage(ctx),
-    };
-    const settingsIds = new Set(['generate', 'sandbox', 'permissions', 'resources', 'storage']);
-
-    let group = '';
-    for (const p of SETTINGS_PAGES) {
-      if (p.group !== group) {
-        group = p.group;
-        const g = document.createElement('div');
-        g.className = 'settings-nav-group';
-        g.textContent = group;
-        nav.appendChild(g);
-      }
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'settings-nav-item';
-      b.dataset.id = p.id;
-      b.appendChild(ui.icon(p.icon));
-      const label = document.createElement('span');
-      label.textContent = p.label;
-      b.appendChild(label);
-      b.onclick = () => show(p.id);
-      nav.appendChild(b);
-    }
-
-    function show(id) {
-      if (!builders[id]) id = 'generate';
-      for (const b of nav.children) {
-        if (!b.dataset || !b.dataset.id) continue;
-        b.className = 'settings-nav-item' + (b.dataset.id === id ? ' active' : '');
-      }
-      let pane = built.get(id);
-      if (!pane) {
-        pane = document.createElement('section');
-        pane.className = 'settings-page';
-        pane.dataset.id = id;
-        panes.appendChild(pane);
-        builders[id](pane, ctxOf(pane));
-        built.set(id, pane);
-      }
-      for (const ch of panes.children) {
-        ch.className = 'settings-page' + (ch.dataset.id === id ? '' : ' hidden');
-      }
-      foot.className = settingsIds.has(id) ? 'settings-foot' : 'settings-foot hidden';
-      c.setMsg('');
-    }
-
-    c.body.appendChild(hub);
-    show(page || 'generate');
-  }, true);
-}
-
-/* ---------- 通用：多选一弹层（顶替原生 confirm 的三选） ---------- */
-function choiceModal(title, question, actions) {
-  // 叠在现有弹层之上：从向导里弹出来时，选完能回到向导（不丢已填内容）。
-  openModalLayer(title, (c) => {
-    const q = document.createElement('div'); q.className = 'wf-label'; q.textContent = question;
-    c.body.appendChild(q);
-    const row = document.createElement('div'); row.className = 'wf-inline';
-    for (const a of actions) {
-      const b = btn(a[0], a[1] || 'btn');
-      b.onclick = () => { c.close(); a[2](); };
-      row.appendChild(b);
-    }
-    c.body.appendChild(row);
-  });
-}
-
-/* ---------- 设置⑤：agent 管理（列表 / 新建 / 编辑 / 删除） ---------- */
-function agentsPage(c) {
-    const listWrap = document.createElement('div'); listWrap.className = 'reg-list';
-    const toolbar = document.createElement('div'); toolbar.className = 'wf-inline';
-    const add = btn('+ 新建 agent', 'btn btn-primary');
-    add.onclick = () => openAgentEditor({ onSaved: (name) => c.setMsg('已保存 agent：' + name) });
-    toolbar.appendChild(add);
-    function renderList() {
-      listWrap.innerHTML = '';
-      if (!state.agents.length) { listWrap.appendChild(emptyHint('（还没有 agent：点「+ 新建 agent」）')); return; }
-      for (const a of state.agents) {
-        listWrap.appendChild(agentCard(a, {
-          onEdit: () => openAgentEditor({
-            agent: a,
-            onSaved: (name) => c.setMsg('已保存 agent：' + name),
-          }),
-          onRemove: async () => {
-            try {
-              await c.mutate('remove_agent', { name: a.name });
-              c.setMsg('已删除 ' + a.name);
-            } catch (e) { c.setMsg(e.message, true); }
-          },
-        }));
-      }
-    }
-    c.onRegistryChange(renderList);
-    renderList();
-    c.body.appendChild(toolbar);
-    c.body.appendChild(listWrap);
-}
-
-function openAgentsModal() {
-  openModal('agent 管理', agentsPage, true);
-}
-
-/* ---------- 上传文件到本次工作的 work/ ---------- */
-const uploadPicker = document.createElement('input');
-uploadPicker.type = 'file';
-uploadPicker.addEventListener('change', () => {
-  const f = uploadPicker.files && uploadPicker.files[0];
-  if (!f) return;
-  const s = activeSession();
-  if (!s) { notice('还不能上传', '先打开或新建一个工作，再上传文件到它的 work/。'); uploadPicker.value = ''; return; }
-  const reader = new FileReader();
-  reader.onload = async () => {
-    const b64 = String(reader.result || '').split(',')[1] || '';
-    try {
-      const r = await api('POST', actionUrl('upload'), { session_id: s.sid, name: f.name, data_base64: b64 });
-      if (r.uploaded === false) {
-        conflictUpload(s.sid, f.name, b64);
-      } else {
-        filesCache.delete(s.sid); // 文件清单变了，@ 菜单下次重拉
-        ui.toast('ok', '已上传到 work/：' + f.name);
-      }
-    } catch (err) {
-      notice('操作失败', err.message, 'err');
-    }
-    uploadPicker.value = '';
-  };
-  reader.readAsDataURL(f);
-});
-
-function pickUploadFile() { uploadPicker.click(); }
-
-/* a.txt -> a-2.txt（用于「改名」建议） */
-function suggestAltName(name) {
-  const dot = name.lastIndexOf('.');
-  if (dot <= 0) return name + '-2';
-  return name.slice(0, dot) + '-2' + name.slice(dot);
-}
-
-async function sendUpload(sid, name, b64, overwrite) {
-  try {
-    const body = { session_id: sid, name, data_base64: b64 };
-    if (overwrite) body.overwrite = true;
-    const r = await api('POST', actionUrl('upload'), body);
-    if (r.uploaded === false) {
-      notice('同名文件已存在', '目标里已经有这个名字，请改名或确认覆盖。', 'err');
-      return;
-    }
-    filesCache.delete(sid); // 文件清单变了，@ 菜单下次重拉
-    loadWork(sid, true); // 上传 = 一次提交，状态栏的 head 要跟着变
-    ui.toast('ok', '已上传：' + name);
-  } catch (e) { notice('操作失败', e.message, 'err'); }
-}
-
-function conflictUpload(sid, name, b64) {
-  const alt = suggestAltName(name);
-  choiceModal('文件同名', '本次工作的 work/ 里已有「' + name + '」，怎么办？', [
-    ['覆盖', 'btn btn-danger', () => sendUpload(sid, name, b64, true)],
-    ['改名…', 'btn', () => renameUpload(sid, name, b64, alt)],
-    ['取消', 'btn btn-ghost', () => {}],
-  ]);
-}
-
-function renameUpload(sid, name, b64, alt) {
-  openModal('改文件名上传', (c) => {
-    const inp = textInput('新文件名'); inp.value = alt;
-    const go = btn('上传', 'btn btn-primary btn-block');
-    go.onclick = async () => {
-      const v = inp.value.trim();
-      if (!v) { c.setMsg('文件名不能为空', true); return; }
-      try {
-        const r = await api('POST', actionUrl('upload'), { session_id: sid, name: v, data_base64: b64 });
-        if (r.uploaded === false) { c.setMsg('还是同名，请换一个名字', true); return; }
-        filesCache.delete(sid); // 文件清单变了，@ 菜单下次重拉
-        loadWork(sid, true);
-        closeModal(); ui.toast('ok', '已上传：' + v);
-      } catch (e) {
-        c.setMsg(e.message, true);
-      }
-    };
-    c.body.appendChild(field('文件名', inp));
-    c.body.appendChild(go);
-  });
-}
 /* ---------- 新建工作向导 ---------- */
 async function openWizard(draft) {
   // draft = 上一次没提交的草稿：补齐依赖后要把向导按原样重开，别把用户已经填的东西丢掉。
@@ -3015,16 +1237,16 @@ async function openWizard(draft) {
   try { const r = await api('GET', '/api/tiers'); tiers = (r && r.tiers) || null; } catch (e) { tiers = null; }
   if (!resumed && tiers && tiers.default) w.tier = tiers.default;
   // 档位那一格：虚拟机档不可用时禁用，并逐项说明缺什么、怎么补（照抄后端事实，不自己编话）。
-  const tierField = document.createElement('div'); tierField.className = 'wf-field';
-  const tierLabel = document.createElement('div'); tierLabel.className = 'wf-label'; tierLabel.textContent = '执行档位';
+  const tierField = doc.createElement('div'); tierField.className = 'wf-field';
+  const tierLabel = doc.createElement('div'); tierLabel.className = 'wf-label'; tierLabel.textContent = '执行档位';
   const hostR = cfgRadio('本机档 —— 脚本直接在宿主上跑：宿主自备解释器；隔离就是宿主本身（默认）。', w.tier !== 'vm', 'wf-tier');
   const vmOk = !!(tiers && tiers.vm_available);
   const vmR = cfgRadio('虚拟机档 —— 一整套 guest，隔离更强；按模块声明装载运行包，依赖 guest 本体。', w.tier === 'vm', 'wf-tier', !vmOk);
   hostR.box.addEventListener('change', () => { if (hostR.box.checked) { w.tier = 'host'; syncWizardTier(); } });
   vmR.box.addEventListener('change', () => { if (vmR.box.checked) { w.tier = 'vm'; syncWizardTier(); } });
   tierField.appendChild(tierLabel); tierField.appendChild(hostR.wrap); tierField.appendChild(vmR.wrap);
-  const profileField = document.createElement('div'); profileField.className = 'wf-field';
-  const profileLabel = document.createElement('div'); profileLabel.className = 'wf-label'; profileLabel.textContent = '权限档位';
+  const profileField = doc.createElement('div'); profileField.className = 'wf-field';
+  const profileLabel = doc.createElement('div'); profileLabel.className = 'wf-label'; profileLabel.textContent = '权限档位';
   const profileSel = selectInput([
     { value: 'view', label: '仅可查看' },
     { value: 'workspace', label: '工作区内修改（默认）' },
@@ -3045,7 +1267,7 @@ async function openWizard(draft) {
     ));
     // 装完把向导按草稿重开：判据是后端按新状态算的，界面不自己改结论。
     // 先把用户填的名称与需求抄进草稿（它们只在弹层里读得到），否则重开会把它们清掉。
-    tierField.appendChild(setupAction(snapshotDraft, () => openWizard(w)));
+    tierField.appendChild(app.setupAction(snapshotDraft, () => openWizard(w)));
   }
 
   // 虚拟机档在**创建时**就要选一个虚拟根（会话级选择；机器能力已在上面判过）。
@@ -3054,7 +1276,7 @@ async function openWizard(draft) {
     w.guest = v; w.guestInfo = g; syncGuestSetup();
   });
   // 机器前置齐、但选中的虚拟根没装齐时，虚拟根选择器下面给同一个补齐动作（与机器前置入口不重复）。
-  const guestSetup = setupAction(snapshotDraft, () => openWizard(w));
+  const guestSetup = app.setupAction(snapshotDraft, () => openWizard(w));
   guestSetup.classList.add('hidden');
   syncGuestSetup = () => {
     const show = vmOk && w.tier === 'vm' && (!w.guestInfo || !w.guestInfo.ready);
@@ -3097,11 +1319,11 @@ function pickWorkspaceDir(onPick) {
   openModalLayer('选择工作区目录', (c) => {
     const pathIn = textInput('当前目录');
     pathIn.readOnly = true;
-    const rootsRow = document.createElement('div');
+    const rootsRow = doc.createElement('div');
     rootsRow.style.display = 'flex';
     rootsRow.style.gap = '6px';
     rootsRow.style.flexWrap = 'wrap';
-    const list = document.createElement('div');
+    const list = doc.createElement('div');
     list.style.maxHeight = '40vh';
     list.style.overflow = 'auto';
     const up = btn('上一级', 'btn btn-block');
@@ -3151,16 +1373,16 @@ function pickWorkspaceDir(onPick) {
     const wsDefault = btn('默认', 'btn btn-ghost');
     wsPick.onclick = () => pickWorkspaceDir((p) => { workspaceIn.value = p; w.workspace = p; });
     wsDefault.onclick = () => { workspaceIn.value = ''; w.workspace = ''; };
-    const workspaceRow = document.createElement('div');
+    const workspaceRow = doc.createElement('div');
     workspaceRow.style.display = 'flex';
     workspaceRow.style.gap = '8px';
     workspaceRow.appendChild(workspaceIn);
     workspaceRow.appendChild(wsPick);
     workspaceRow.appendChild(wsDefault);
-    const wsHint = document.createElement('div'); wsHint.className = 'wf-hint';
+    const wsHint = doc.createElement('div'); wsHint.className = 'wf-hint';
     wsHint.textContent = '本机档只接受本机目录（网络工作区会被拒绝，容器围栏访问不了私有网络）；' +
       '虚拟机档可填 UNC 共享下的目录，凭据用当前登录用户。';
-    const workspaceWrap = document.createElement('div');
+    const workspaceWrap = doc.createElement('div');
     workspaceWrap.appendChild(workspaceRow);
     workspaceWrap.appendChild(wsHint);
     const modeSel = selectInput([
@@ -3169,7 +1391,7 @@ function pickWorkspaceDir(onPick) {
       { value: 'proxy', label: '代理（把决定权整块交给核心）' },
     ], 'single');
     // 形态说明随选择走（三种形态的差别就在这一句里说清）。
-    const modeHint = document.createElement('div'); modeHint.className = 'wf-hint';
+    const modeHint = doc.createElement('div'); modeHint.className = 'wf-hint';
     function modeHintText() {
       if (w.mode === 'proxy') {
         return '代理：没有名单要选——核心自己挑人、建子工作并代你决定（选这个形态就是授予全权）。\n' +
@@ -3180,8 +1402,8 @@ function pickWorkspaceDir(onPick) {
       }
       return '单 agent：选 1 个模块 = 直连式；选多个 = 组合式。';
     }
-    const partWrap = document.createElement('div'); partWrap.className = 'wf-field';
-    const modelWrap = document.createElement('div'); modelWrap.className = 'wf-models';
+    const partWrap = doc.createElement('div'); partWrap.className = 'wf-field';
+    const modelWrap = doc.createElement('div'); modelWrap.className = 'wf-models';
     const taskIn = areaInput('本次需求（协作必填；也可写上，核心据此推荐）');
     if (w.task) taskIn.value = w.task;   // 草稿重开：同上
     // 上面那个「补齐虚拟机依赖」按钮在本作用域之外：把抄草稿的钩子交给它，点击时才读现值。
@@ -3217,17 +1439,17 @@ function pickWorkspaceDir(onPick) {
 
     // 向导里的 agent 卡片：新建临时 / 从登记处加入；编辑已加入的卡片。
     function agentActions(single, hasAgent) {
-      const row = document.createElement('div'); row.className = 'wf-inline';
+      const row = doc.createElement('div'); row.className = 'wf-inline';
       const temp = btn(hasAgent ? '+ 更换为临时 agent' : '+ 新建临时 agent', 'btn');
       temp.onclick = () => {
-        openTempAgentSheet({
+        app.openTempAgentSheet({
           onAdd: (a) => { if (single) w.agents = [a]; else w.agents.push(a); renderAll(); },
           onSaveAsAgent: (a) => { if (single) w.agents = [a]; else w.agents.push(a); renderAll(); },
         });
       };
       const reg = btn(hasAgent ? '从登记处更换' : '从登记处加入', 'btn');
       reg.onclick = () => {
-        openRegistryAgentPicker({
+        app.openRegistryAgentPicker({
           single,
           taken: single ? [] : w.agents.map((a) => a.name),
           onPick: (a) => { if (single) w.agents = [a]; else w.agents.push(a); renderAll(); },
@@ -3235,7 +1457,7 @@ function pickWorkspaceDir(onPick) {
       };
       row.appendChild(temp); row.appendChild(reg);
       if (!state.agents.length) {
-        const hint = document.createElement('div'); hint.className = 'wf-hint';
+        const hint = doc.createElement('div'); hint.className = 'wf-hint';
         hint.textContent = '（登记处还没有 agent：可以直接新建临时 agent）';
         row.appendChild(hint);
       }
@@ -3270,7 +1492,7 @@ function pickWorkspaceDir(onPick) {
       return {
         onEdit: (a) => {
           if (a.transient) {
-            openTempAgentSheet({
+            app.openTempAgentSheet({
               agent: a,
               title: '编辑临时 agent',
               onAdd: (next) => { w.agents[i] = next; renderAll(); },
@@ -3278,7 +1500,7 @@ function pickWorkspaceDir(onPick) {
             });
           } else {
             // 登记处 agent 的本次 copy：名字与模块由登记处决定，人设 / 模型可就本工作调整。
-            openTempAgentSheet({
+            app.openTempAgentSheet({
               agent: a,
               title: '编辑本次 agent（不改登记处）',
               lockedName: true,
@@ -3294,16 +1516,16 @@ function pickWorkspaceDir(onPick) {
     }
 
     function agentSection() {
-      const box = document.createElement('div'); box.className = 'form-col';
+      const box = doc.createElement('div'); box.className = 'form-col';
       if (w.mode === 'single') {
-        if (w.agents.length) box.appendChild(agentCard(w.agents[0], cardHandlers(0)));
+        if (w.agents.length) box.appendChild(app.agentCard(w.agents[0], cardHandlers(0)));
         else box.appendChild(emptyHint('（还没有选 agent：新建临时 agent，或从登记处加入）'));
         box.appendChild(agentActions(true, w.agents.length > 0));
         return box;
       }
-      const list = document.createElement('div'); list.className = 'agent-list';
+      const list = doc.createElement('div'); list.className = 'agent-list';
       if (!w.agents.length) list.appendChild(emptyHint('（还没加入 agent）'));
-      w.agents.forEach((a, i) => list.appendChild(agentCard(a, cardHandlers(i))));
+      w.agents.forEach((a, i) => list.appendChild(app.agentCard(a, cardHandlers(i))));
       box.appendChild(list);
       box.appendChild(agentActions(false, false));
       return box;
@@ -3323,7 +1545,7 @@ function pickWorkspaceDir(onPick) {
         ));
         return;
       }
-      const lab = document.createElement('div'); lab.className = 'wf-label';
+      const lab = doc.createElement('div'); lab.className = 'wf-label';
       lab.textContent = w.mode === 'single'
         ? 'agent（单 agent：恰好 1 个；模块数不限）'
         : 'agent 名单（协作：可多个，各自独立沙箱）';
@@ -3469,7 +1691,7 @@ function pickWorkspaceDir(onPick) {
       if (w.tier === 'vm') body.guest = vmGuest;
       if (task) body.task = task;
       if (dup) {
-        choiceModal('agent 重名', '本次工作里有同名 agent「' + dup + '」。', [
+        app.choiceModal('agent 重名', '本次工作里有同名 agent「' + dup + '」。', [
           ['按现名继续（后端自动加尾号 -2…）', 'btn btn-primary', () => submit(body)],
           ['回去改名', 'btn btn-ghost', () => {}],
         ]);
@@ -3530,7 +1752,7 @@ function setActive(sid) {
   state.activeSid = sid;
   // 换会话先清掉上一份根（免得拿别人的根去缩）；缓存里有就同步先缩，避免先长后短的闪烁。
   shortPathRoots = null;
-  const cached = filesCache.get(sid);
+  const cached = app.filesCache.get(sid);
   if (cached) shortPathRoots = buildRootList(cached.roots);
   renderTabs(); renderStream(true); renderGate(state.sessions.get(sid));
   const s = state.sessions.get(sid);
@@ -3821,7 +2043,7 @@ function renderReadonly(s) {
   bar.innerHTML = '';
   if (!s || !s.readonly) { bar.classList.add('hidden'); return; }
   bar.classList.remove('hidden');
-  const note = document.createElement('span');
+  const note = doc.createElement('span');
   note.className = 'readonly-note';
   if (s.workspace_missing) {
     note.textContent = '工作区已不存在：恢复目录或删除会话后才能启用（当前只能查看记录）';
@@ -3831,7 +2053,7 @@ function renderReadonly(s) {
   note.textContent = s.run === 'closed' ? '历史回放（只读）· 已关闭' : '历史回放（只读）：启用后才能发送消息';
   bar.appendChild(note);
   if (s.run === 'closed') return;
-  const b = document.createElement('button');
+  const b = doc.createElement('button');
   b.className = 'btn btn-primary';
   b.textContent = s.activating ? '正在启用…' : '启用会话';
   b.disabled = !!s.activating;
@@ -4075,7 +2297,7 @@ function syncStatusbar(s) {
   s.statusPrint = print;
   box.innerHTML = '';
   box.classList.remove('hidden');
-  const inner = document.createElement('div');
+  const inner = doc.createElement('div');
   inner.className = 'session-status-inner';
 
   // 权限档位：proxy 与子会话都必须看得见它实际用的档。
@@ -4206,13 +2428,13 @@ async function loadWork(sid, force) {
 }
 
 function popoverBox(title, close) {
-  const box = document.createElement('div');
-  const head = document.createElement('div');
+  const box = doc.createElement('div');
+  const head = doc.createElement('div');
   head.className = 'popover-head';
-  const h = document.createElement('div');
+  const h = doc.createElement('div');
   h.className = 'popover-title';
   h.textContent = title || '';
-  const x = document.createElement('button');
+  const x = doc.createElement('button');
   x.type = 'button';
   x.className = 'popover-close';
   x.setAttribute('aria-label', '关闭');
@@ -4223,20 +2445,19 @@ function popoverBox(title, close) {
   return box;
 }
 function popoverRow(k, v) {
-  const row = document.createElement('div');
+  const row = doc.createElement('div');
   row.className = 'popover-row';
-  const a = document.createElement('span'); a.className = 'k'; a.textContent = k;
-  const b = document.createElement('span'); b.className = 'v'; b.textContent = v;
+  const a = doc.createElement('span'); a.className = 'k'; a.textContent = k;
+  const b = doc.createElement('span'); b.className = 'v'; b.textContent = v;
   row.appendChild(a); row.appendChild(b);
   return row;
 }
 function popoverNote(text, cls) {
-  const n = document.createElement('div');
+  const n = doc.createElement('div');
   n.className = 'popover-note' + (cls ? ' ' + cls : '');
   n.textContent = text;
   return n;
 }
-
 
 /* 最近一次 shell 的卡片：内容可重画——运行中每秒刷新耗时，结束后由状态刷新重画终态。 */
 let shellCardOpen = null; // { sid, box, body, dur, sig }
@@ -4251,7 +2472,7 @@ function fillShellCard(body, sh) {
   body.innerHTML = '';
   const running = shellRunning(sh);
   if (sh.command) {
-    const cmd = document.createElement('pre');
+    const cmd = doc.createElement('pre');
     cmd.className = 'tool-pre';
     cmd.textContent = sh.command;
     body.appendChild(cmd);
@@ -4267,7 +2488,7 @@ function fillShellCard(body, sh) {
     : fmtDuration(shellSecs(sh)));
   body.appendChild(durRow);
   if (sh.output) {
-    const out = document.createElement('pre');
+    const out = doc.createElement('pre');
     out.className = 'tool-pre';
     out.textContent = sh.output;
     body.appendChild(out);
@@ -4305,7 +2526,7 @@ function paintShellCard() {
 
 function openShellCard(s, anchor) {
   const box = popoverBox('shell');
-  const body = document.createElement('div');
+  const body = doc.createElement('div');
   box.appendChild(body);
   const timer = typeof setInterval === 'function' ? setInterval(paintShellCard, 1000) : null;
   const pop = ui.popover(anchor, box, {
@@ -4330,14 +2551,14 @@ function openContextCard(s, anchor) {
   const pct = ctxPercent(c);
   const at = Number((state.settings && state.settings.compact_at_percent) || 0);
   if (pct != null) {
-    const bar = document.createElement('div');
+    const bar = doc.createElement('div');
     bar.className = 'ctx-bar';
-    const fill = document.createElement('div');
+    const fill = doc.createElement('div');
     fill.className = 'ctx-fill' + (pct >= 90 ? ' danger' : (at > 0 && pct >= at ? ' warn' : ''));
     fill.style.width = Math.max(0, Math.min(100, pct)) + '%';
     bar.appendChild(fill);
     if (at > 0 && at <= 100) {
-      const mark = document.createElement('span');
+      const mark = doc.createElement('span');
       mark.className = 'ctx-mark';
       mark.style.left = at + '%';
       mark.title = '自动压缩阈值 ' + at + '%';
@@ -4362,7 +2583,7 @@ function openContextCard(s, anchor) {
   box.appendChild(
     popoverRow('总结模型', (state.settings && state.settings.compact_model) || '默认（会话同模型）'),
   );
-  const badge = document.createElement('span');
+  const badge = doc.createElement('span');
   badge.className = 'badge-soft ' + (c.exact ? 'ok' : 'warn');
   badge.textContent = c.exact ? '供应商 usage（精确）' : '按字符估算';
   box.appendChild(badge);
@@ -4448,25 +2669,25 @@ function openWorkCard(s, anchor) {
     const h = s.work.head;
     box.appendChild(popoverRow('当前 head', '#' + h.id));
     box.appendChild(popoverRow('作者 / 时间', h.author + ' · ' + timeAgo(h.time)));
-    const msg = document.createElement('div');
+    const msg = doc.createElement('div');
     msg.className = 'commit-msg';
     msg.textContent = h.message;
     box.appendChild(msg);
     const rows = (s.work.commits || []).slice(0, 5);
     if (rows.length) {
-      const list = document.createElement('div');
+      const list = doc.createElement('div');
       list.className = 'work-history-list';
       list.style.maxHeight = '180px';
       for (const c of rows) {
-        const row = document.createElement('button');
+        const row = doc.createElement('button');
         row.type = 'button';
         row.className = 'work-row' + (c.on_head ? ' current' : '');
-        const rh = document.createElement('div'); rh.className = 'work-row-head';
-        const id = document.createElement('span'); id.className = 'work-id'; id.textContent = '#' + c.id;
-        const meta = document.createElement('span'); meta.className = 'work-meta';
+        const rh = doc.createElement('div'); rh.className = 'work-row-head';
+        const id = doc.createElement('span'); id.className = 'work-id'; id.textContent = '#' + c.id;
+        const meta = doc.createElement('span'); meta.className = 'work-meta';
         meta.textContent = (c.on_head ? '当前线 · ' : '已离开当前线 · ') + c.author + ' · ' + timeAgo(c.time);
         rh.appendChild(id); rh.appendChild(meta);
-        const m = document.createElement('div'); m.className = 'work-msg'; m.textContent = c.message;
+        const m = doc.createElement('div'); m.className = 'work-msg'; m.textContent = c.message;
         row.appendChild(rh); row.appendChild(m);
         row.onclick = () => { ui.closePopover(); openWorkHistory(s, c.id); };
         list.appendChild(row);
@@ -4474,7 +2695,7 @@ function openWorkCard(s, anchor) {
       box.appendChild(list);
     }
   }
-  const foot = document.createElement('div');
+  const foot = doc.createElement('div');
   foot.className = 'popover-foot';
   const all = btn('全部提交', 'btn btn-ghost');
   all.onclick = () => { ui.closePopover(); openWorkHistory(s); };
@@ -4486,11 +2707,11 @@ function openWorkCard(s, anchor) {
 function openWorkHistory(s, selected) {
   loadWork(s.sid, true);
   openModal('提交历史 · ' + s.sid, (c) => {
-    const wrap = document.createElement('div');
+    const wrap = doc.createElement('div');
     wrap.className = 'work-history';
-    const list = document.createElement('div');
+    const list = doc.createElement('div');
     list.className = 'work-history-list';
-    const detail = document.createElement('div');
+    const detail = doc.createElement('div');
     detail.className = 'work-detail';
     wrap.appendChild(list); wrap.appendChild(detail);
     c.body.appendChild(wrap);
@@ -4514,38 +2735,38 @@ function openWorkHistory(s, selected) {
         return;
       }
       detail.innerHTML = '';
-      const head = document.createElement('div');
+      const head = doc.createElement('div');
       head.className = 'work-detail-head';
-      const title = document.createElement('div');
+      const title = doc.createElement('div');
       title.className = 'work-detail-title';
       title.textContent = '#' + d.id + (d.parent ? ' ← #' + d.parent : '');
-      const badge = document.createElement('span');
+      const badge = doc.createElement('span');
       badge.className = 'badge-soft' + (s.work && s.work.head && s.work.head.id === d.id ? ' ok' : '');
       badge.textContent = s.work && s.work.head && s.work.head.id === d.id ? '当前 head' : '历史提交';
       head.appendChild(title); head.appendChild(badge);
       detail.appendChild(head);
       detail.appendChild(popoverRow('作者 / 时间', d.author + ' · ' + fmtDateTime(d.time)));
-      const msg = document.createElement('div');
+      const msg = doc.createElement('div');
       msg.className = 'commit-msg';
       msg.textContent = d.message;
       detail.appendChild(msg);
-      const chHead = document.createElement('div');
+      const chHead = doc.createElement('div');
       chHead.className = 'work-meta';
       chHead.textContent = '改动 ' + d.changes.length + ' 处' + (d.changes_truncated ? '（已截断）' : '');
       detail.appendChild(chHead);
-      const changes = document.createElement('div');
+      const changes = doc.createElement('div');
       changes.className = 'change-list';
       for (const ch of d.changes) {
-        const row = document.createElement('button');
+        const row = doc.createElement('button');
         row.type = 'button';
         row.className = 'change-row';
-        const kind = document.createElement('span');
+        const kind = doc.createElement('span');
         kind.className = 'change-kind ' + ch.kind;
         kind.textContent = ch.kind === 'add' ? '新增' : ch.kind === 'modify' ? '修改' : '删除';
-        const path = document.createElement('span');
+        const path = doc.createElement('span');
         path.className = 'change-path';
         path.textContent = ch.path;
-        const size = document.createElement('span');
+        const size = doc.createElement('span');
         size.className = 'change-size';
         size.textContent = ch.size + ' B';
         row.appendChild(kind); row.appendChild(path); row.appendChild(size);
@@ -4559,7 +2780,7 @@ function openWorkHistory(s, selected) {
         changes.appendChild(row);
       }
       detail.appendChild(changes);
-      const foot = document.createElement('div');
+      const foot = doc.createElement('div');
       foot.className = 'popover-foot';
       const restore = btn('回滚到此处', 'btn btn-primary');
       const blocked = s.readonly ? '历史回放只读：先启用会话' : (isBusy(s) ? '会话正在生成：先停止再回滚' : '');
@@ -4574,16 +2795,16 @@ function openWorkHistory(s, selected) {
       if (!append) list.innerHTML = '';
       for (const cm of page.commits) {
         if (list.querySelector('[data-commit="' + cm.id + '"]')) continue;
-        const row = document.createElement('button');
+        const row = doc.createElement('button');
         row.type = 'button';
         row.dataset.commit = String(cm.id);
         row.className = 'work-row' + (cm.on_head ? ' current' : '');
-        const rh = document.createElement('div'); rh.className = 'work-row-head';
-        const id = document.createElement('span'); id.className = 'work-id'; id.textContent = '#' + cm.id;
-        const meta = document.createElement('span'); meta.className = 'work-meta';
+        const rh = doc.createElement('div'); rh.className = 'work-row-head';
+        const id = doc.createElement('span'); id.className = 'work-id'; id.textContent = '#' + cm.id;
+        const meta = doc.createElement('span'); meta.className = 'work-meta';
         meta.textContent = (cm.on_head ? '当前线 · ' : '已离开 · ') + cm.author + ' · ' + timeAgo(cm.time) + ' · ' + cm.changes + ' 处';
         rh.appendChild(id); rh.appendChild(meta);
-        const m = document.createElement('div'); m.className = 'work-msg'; m.textContent = cm.message;
+        const m = doc.createElement('div'); m.className = 'work-msg'; m.textContent = cm.message;
         row.appendChild(rh); row.appendChild(m);
         row.onclick = () => { selectedId = cm.id; paintDetail(cm.id); };
         list.appendChild(row);
@@ -4622,7 +2843,7 @@ function openWorkHistory(s, selected) {
 async function previewCommitFile(holder, s, commit, path) {
   const old = holder.querySelector('.file-preview');
   if (old) old.remove();
-  const box = document.createElement('div');
+  const box = doc.createElement('div');
   box.className = 'file-preview';
   box.appendChild(popoverNote('读取 ' + path + ' …'));
   holder.appendChild(box);
@@ -4635,7 +2856,7 @@ async function previewCommitFile(holder, s, commit, path) {
     if (r.too_large) box.appendChild(popoverNote('超过共享区单文件上限：只给元信息，不预览。'));
     else if (r.text == null) box.appendChild(popoverNote('二进制 / 非 UTF-8：只给元信息。'));
     else {
-      const pre = document.createElement('pre');
+      const pre = doc.createElement('pre');
       pre.textContent = r.text + (r.truncated ? '\n…（预览已截断，共 ' + r.size + ' B）' : '');
       box.appendChild(pre);
     }
@@ -4793,26 +3014,26 @@ function renderTabs() {
     rows.push({ active: path[i + 1] || null, names: kids, depth: i + 1 });
   }
   for (const row of rows) {
-    const rowEl = document.createElement('div');
+    const rowEl = doc.createElement('div');
     rowEl.className = 'tab-row' + (row.depth ? ' sub' : ' root');
     for (const name of row.names) {
       const opened = state.sessions.has(name);
-      const el = document.createElement('button');
+      const el = doc.createElement('button');
       el.type = 'button';
       el.className = 'tab' + (name === state.activeSid ? ' active' : '') + (opened ? '' : ' ghost');
       el.title = name;
       el.setAttribute('aria-selected', name === state.activeSid ? 'true' : 'false');
       el.dataset.badge = tabPendingDeep(name) && name !== state.activeSid ? '1' : '0';
-      const label = document.createElement('span');
+      const label = doc.createElement('span');
       label.textContent = tabLabel(name);
       el.appendChild(label);
       if (tabBusy(name)) {
-        const dot = document.createElement('span');
+        const dot = doc.createElement('span');
         dot.className = 'dot dot-ok tab-dot';
         el.appendChild(dot);
       }
       if (opened) {
-        const close = document.createElement('span');
+        const close = doc.createElement('span');
         close.className = 'close';
         close.textContent = '✕';
         close.onclick = (e) => { e.stopPropagation(); closeView(name); };
@@ -4883,9 +3104,9 @@ function rewindButton(id) {
 function buildStreamBoxes(sid) {
   const box = $('#stream');
   box.innerHTML = '';
-  doneBox = document.createElement('div'); doneBox.className = 'stream-done';
-  liveBox = document.createElement('div'); liveBox.className = 'stream-live';
-  typingNode = document.createElement('div'); typingNode.className = 'typing hidden'; typingNode.textContent = 'agent 工作中';
+  doneBox = doc.createElement('div'); doneBox.className = 'stream-done';
+  liveBox = doc.createElement('div'); liveBox.className = 'stream-live';
+  typingNode = doc.createElement('div'); typingNode.className = 'typing hidden'; typingNode.textContent = 'agent 工作中';
   box.appendChild(doneBox); box.appendChild(liveBox); box.appendChild(typingNode);
   domOwner = sid;
 }
@@ -4899,10 +3120,10 @@ function lineBlock(p, s, key, live) {
     return { node: card, txt: null, cot: null };
   }
   const cls = p.cls || 'line';
-  const el = document.createElement('div');
+  const el = doc.createElement('div');
   el.className = 'line ' + cls + (live ? ' streaming' : '');
   if (p.who) {
-    const w = document.createElement('span'); w.className = 'who'; w.textContent = p.who; el.appendChild(w);
+    const w = doc.createElement('span'); w.className = 'who'; w.textContent = p.who; el.appendChild(w);
   }
   // 思维链在回答之上（先想后说）；默认折叠，展开状态由 fold store 记住（键 = 行/块的稳定键）。
   let cot = null;
@@ -4932,7 +3153,7 @@ function sessionNote(s) {
   if (s.run === 'closed') bits.push('这条会话已关闭：终态，不会再被派发或唤醒。');
   if (s.readonly) bits.push('历史回放为只读：点「启用会话」后才能发送消息。');
   if (!bits.length) return null;
-  const d = document.createElement('div');
+  const d = doc.createElement('div');
   d.className = 'agent-note';
   d.textContent = bits.join('\n');
   return d;
@@ -4983,24 +3204,24 @@ function buildTurn(group, s) {
   const reasoning = turnReasoning(parts);
   if (!reasoning && !text.trim() && !tools.length) return null;
   const key = turnKey(group);
-  const el = document.createElement('article');
+  const el = doc.createElement('article');
   el.className = 'turn' + (head.cls === 'ok' ? ' ok' : '');
   el.dataset.reply = String(group.reply || '');
 
-  const headEl = document.createElement('div');
+  const headEl = doc.createElement('div');
   headEl.className = 'turn-head';
-  const who = document.createElement('span');
+  const who = doc.createElement('span');
   who.className = 'turn-who';
   who.textContent = head.who || head.speaker || '';
   headEl.appendChild(who);
   if (tools.length) {
     const failed = tools.filter((p) => p.tool && !p.tool.ok).length;
-    const cnt = document.createElement('span');
+    const cnt = doc.createElement('span');
     cnt.className = 'turn-count';
     cnt.textContent = '工具 ' + tools.length + (failed ? ' · ' + failed + ' 失败' : '');
     headEl.appendChild(cnt);
   }
-  const preview = document.createElement('span');
+  const preview = doc.createElement('span');
   preview.className = 'turn-preview';
   preview.textContent = text.replace(/\s+/g, ' ').slice(0, 64);
   headEl.appendChild(preview);
@@ -5008,13 +3229,13 @@ function buildTurn(group, s) {
   headEl.appendChild(toggle);
   el.appendChild(headEl);
 
-  const body = document.createElement('div');
+  const body = doc.createElement('div');
   body.className = 'turn-body';
   if (reasoning && state.settings.show_reasoning) {
     body.appendChild(reasoningBlock(reasoning, s, key + ':cot'));
   }
   if (text.trim()) {
-    const t = document.createElement('div');
+    const t = doc.createElement('div');
     t.className = 'turn-text';
     appendBody(t, head.cls, text);
     body.appendChild(t);
@@ -5025,14 +3246,14 @@ function buildTurn(group, s) {
     body.appendChild(toolDetail('原文', raw, s, key + ':raw', true));
   }
   if (tools.length) {
-    const groupEl = document.createElement('details');
+    const groupEl = doc.createElement('details');
     groupEl.className = 'fold turn-tools';
     foldBind(s, key + ':tools', groupEl);
     const failed = tools.filter((p) => p.tool && !p.tool.ok).length;
-    const sum = document.createElement('summary');
+    const sum = doc.createElement('summary');
     sum.textContent = '工具调用 · ' + tools.length + (failed ? '（' + failed + ' 失败）' : '');
     groupEl.appendChild(sum);
-    const list = document.createElement('div');
+    const list = doc.createElement('div');
     list.className = 'tool-list';
     for (const p of tools) list.appendChild(toolCard(p.tool, s, 'T' + p.id, ''));
     groupEl.appendChild(list);
@@ -5040,7 +3261,7 @@ function buildTurn(group, s) {
   }
   el.appendChild(body);
 
-  const foot = document.createElement('div');
+  const foot = doc.createElement('div');
   foot.className = 'turn-foot';
   if (typeof parts[0].id === 'number') {
     const rb = rewindButton(parts[0].id);
@@ -5076,30 +3297,30 @@ function buildTurn(group, s) {
 /// 节点卡：执行进度，不是转录内容。状态 / 执行人 / 返工轮次 / 回报 / 进入子会话。
 function nodeCard(l, s) {
   const n = l.node || {};
-  const el = document.createElement('article');
+  const el = doc.createElement('article');
   el.className = 'node-card ' + (l.state === 'done' ? 'done' : 'started');
-  const head = document.createElement('div');
+  const head = doc.createElement('div');
   head.className = 'node-head';
-  const dot = document.createElement('span');
+  const dot = doc.createElement('span');
   dot.className = 'node-dot';
   head.appendChild(dot);
-  const title = document.createElement('span');
+  const title = doc.createElement('span');
   title.className = 'node-title';
   title.textContent = '节点 · ' + (n.id || '（未命名）');
   head.appendChild(title);
-  const badge = document.createElement('span');
+  const badge = doc.createElement('span');
   badge.className = 'node-badge';
   badge.textContent = l.state === 'done'
     ? '完成' + (l.rework ? ' · 第 ' + l.rework + ' 轮返工' : '')
     : '进行中';
   head.appendChild(badge);
   if (n.sid) {
-    const go = document.createElement('button');
+    const go = doc.createElement('button');
     go.type = 'button';
     go.className = 'node-open';
     go.title = '进入这个节点的子会话';
     go.appendChild(ui.icon('folder'));
-    const label = document.createElement('span');
+    const label = doc.createElement('span');
     label.textContent = '子会话';
     go.appendChild(label);
     go.onclick = () => openPath(n.sid);
@@ -5107,23 +3328,23 @@ function nodeCard(l, s) {
   }
   el.appendChild(head);
   if (n.assignee) {
-    const sub = document.createElement('div');
+    const sub = doc.createElement('div');
     sub.className = 'node-sub';
     sub.textContent = '执行：' + n.assignee;
     el.appendChild(sub);
   }
   if (l.report) {
-    const prev = document.createElement('div');
+    const prev = doc.createElement('div');
     prev.className = 'node-preview';
     prev.textContent = String(l.report).split('\n')[0].slice(0, 96);
     el.appendChild(prev);
-    const d = document.createElement('details');
+    const d = doc.createElement('details');
     d.className = 'fold node-report';
     foldBind(s, 'N' + (n.id || ''), d);
-    const sum = document.createElement('summary');
+    const sum = doc.createElement('summary');
     sum.textContent = '回报全文';
     d.appendChild(sum);
-    const pre = document.createElement('pre');
+    const pre = doc.createElement('pre');
     pre.className = 'node-report-text';
     pre.textContent = l.report;
     d.appendChild(pre);
@@ -5201,16 +3422,16 @@ function renderDone(s, full) {
 /// 若按到达片段各建节点，流式期间就会冒出两个「思维链」、正文被切成好几段。
 /// 流式 tool 块的键 = 已有权威 tool 行数 + 它在 live 里的 tool 块序号 → 与定稿后的权威行同键。
 function liveTurnNode(owner) {
-  const el = document.createElement('article');
+  const el = doc.createElement('article');
   el.className = 'turn live';
-  const head = document.createElement('div');
+  const head = doc.createElement('div');
   head.className = 'turn-head';
-  const who = document.createElement('span');
+  const who = doc.createElement('span');
   who.className = 'turn-who';
   who.textContent = (owner && owner.speaker) || (owner && owner.tool && owner.tool.speaker) || '';
   head.appendChild(who);
   el.appendChild(head);
-  const body = document.createElement('div');
+  const body = doc.createElement('div');
   body.className = 'turn-body';
   el.appendChild(body);
   return { node: el, body, cot: null, textWrap: null, text: null, textValue: '', tools: null, toolList: null };
@@ -5241,7 +3462,7 @@ function updateLiveGroup(g, gi, s, showCot, streaming) {
   }
   if (txt) {
     if (!ui.textWrap) {
-      ui.textWrap = document.createElement('div');
+      ui.textWrap = doc.createElement('div');
       ui.textWrap.className = 'turn-text';
       ui.body.appendChild(ui.textWrap);
       ui.text = mdNode(txt);
@@ -5255,11 +3476,11 @@ function updateLiveGroup(g, gi, s, showCot, streaming) {
   }
   if (g.tools.length) {
     if (!ui.tools) {
-      ui.tools = document.createElement('details');
+      ui.tools = doc.createElement('details');
       ui.tools.className = 'fold turn-tools';
-      const sum = document.createElement('summary');
+      const sum = doc.createElement('summary');
       ui.tools.appendChild(sum);
-      ui.toolList = document.createElement('div');
+      ui.toolList = doc.createElement('div');
       ui.toolList.className = 'tool-list';
       ui.tools.appendChild(ui.toolList);
       ui.body.appendChild(ui.tools);
@@ -5356,8 +3577,8 @@ function scheduleLiveTick() {
     liveTickScheduled = false;
     renderLiveTick(activeSession());
   };
-  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
-  else setTimeout(run, 0);
+  if (typeof g.requestAnimationFrame === 'function') g.requestAnimationFrame(run);
+  else g.setTimeout(run, 0);
 }
 
 /// 流式增量帧：只 append 新的流式节点，绝不重建已有节点。
@@ -5399,47 +3620,47 @@ function renderGate(s) {
 function renderCard(p, s) {
   const busy = !!(s && s.sending);
   const msg = p.message || {};
-  const el = document.createElement('div');
+  const el = doc.createElement('div');
   el.className = 'gate-card';
-  const who = document.createElement('div');
+  const who = doc.createElement('div');
   who.className = 'who';
   who.textContent = (p.envelope && p.envelope.name) || '';
   if (who.textContent) el.appendChild(who);
   // **谁在等、前面还排着几条**：队首之后还在等的那几张如实列出来（只有队首能答）。
   const waiting = p.waiting || [];
   if (waiting.length) {
-    const wq = document.createElement('div');
+    const wq = doc.createElement('div');
     wq.className = 'queue';
     wq.textContent =
       '后面还排着 ' + waiting.length + ' 张（先答上面这张）：' +
       waiting.map((w) => ((w.envelope && w.envelope.name) || '') + ' 在等 ' + (w.title || '')).join('；');
     el.appendChild(wq);
   }
-  const q = document.createElement('div');
+  const q = doc.createElement('div');
   q.className = 'q';
   q.textContent = msg.title || '';
   el.appendChild(q);
   if (msg.body) {
-    const bd = document.createElement('div');
+    const bd = doc.createElement('div');
     bd.className = 'hint';
     bd.textContent = msg.body;
     el.appendChild(bd);
   }
   if (msg.detail) {
-    const dt = document.createElement('div');
+    const dt = doc.createElement('div');
     dt.className = 'advice';
     dt.textContent = msg.detail;
     el.appendChild(dt);
   }
-  const inp = document.createElement('input');
+  const inp = doc.createElement('input');
   inp.className = 'decision-input';
   inp.placeholder = '附言（可空；要你回话 / 先说一句的那一关必填）…';
   inp.disabled = busy;
   el.appendChild(inp);
-  const bs = document.createElement('div');
+  const bs = doc.createElement('div');
   bs.className = 'btns';
   for (const o of (p.options || [])) {
-    const bt = document.createElement('button');
+    const bt = doc.createElement('button');
     bt.className = 'btn btn-primary';
     bt.textContent = o.label;
     bt.disabled = busy;
@@ -5501,12 +3722,12 @@ async function updateTask(text) {
 }
 
 function gateCard(q, btns) {
-  const el = document.createElement('div');
+  const el = doc.createElement('div');
   el.className = 'gate-card';
-  const qq = document.createElement('div'); qq.className = 'q'; qq.textContent = q; el.appendChild(qq);
-  const bs = document.createElement('div'); bs.className = 'btns';
+  const qq = doc.createElement('div'); qq.className = 'q'; qq.textContent = q; el.appendChild(qq);
+  const bs = doc.createElement('div'); bs.className = 'btns';
   for (const [label, fn] of btns) {
-    const b = document.createElement('button'); b.className = 'btn'; b.textContent = label;
+    const b = doc.createElement('button'); b.className = 'btn'; b.textContent = label;
     b.onclick = () => fn().catch((err) => notice('操作失败', err.message, 'err'));
     bs.appendChild(b);
   }
@@ -5611,7 +3832,7 @@ async function act(action, text) {
 function rewindTo(id) {
   const s = activeSession();
   if (!s || isBusy(s)) return;
-  choiceModal('回档到此处', '留档：保留内容、折叠成标记，可随时恢复，工作区文件（共享区与各 agent 沙箱）也一起记入档案；删除：真的删掉这一行及其后的全部，工作区文件一起回到该行（未提交内容进 lost 备份），删除点之后的留档一并作废，不可恢复。', [
+  app.choiceModal('回档到此处', '留档：保留内容、折叠成标记，可随时恢复，工作区文件（共享区与各 agent 沙箱）也一起记入档案；删除：真的删掉这一行及其后的全部，工作区文件一起回到该行（未提交内容进 lost 备份），删除点之后的留档一并作废，不可恢复。', [
     ['留档', 'btn', () => applyRewind(s, { id, mode: 'archive' })],
     ['删除', 'btn btn-danger', () => applyRewind(s, { id, mode: 'delete' })],
     ['取消', 'btn btn-ghost', () => {}],
@@ -5622,7 +3843,7 @@ function rewindTo(id) {
 function restoreMark(mark) {
   const s = activeSession();
   if (!s || isBusy(s)) return;
-  choiceModal('恢复这次留档', '恢复到留档之前：该标记及其后的全部内容（含留档期间的新工作）会被删除；工作区文件（共享区与各 agent 沙箱）一起回到留档点，未提交的改动进 lost 备份。', [
+  app.choiceModal('恢复这次留档', '恢复到留档之前：该标记及其后的全部内容（含留档期间的新工作）会被删除；工作区文件（共享区与各 agent 沙箱）一起回到留档点，未提交的改动进 lost 备份。', [
     ['恢复', 'btn btn-danger', () => applyRewind(s, { id: mark, mode: 'restore' })],
     ['取消', 'btn btn-ghost', () => {}],
   ]);
@@ -5671,7 +3892,7 @@ async function applyRewind(s, body) {
 function withdrawAgree(agent) {
   const s = activeSession();
   if (!s || isBusy(s)) return;
-  choiceModal('撤回同意', '撤回「' + agent + '」的同意？继续时会按剩余转录重新判定。', [
+  app.choiceModal('撤回同意', '撤回「' + agent + '」的同意？继续时会按剩余转录重新判定。', [
     ['撤回', 'btn btn-danger', async () => {
       try {
         await api('POST', actionUrl('withdraw'), { session_id: s.sid, agent });
@@ -5751,11 +3972,6 @@ async function continueContext() {
   }
 }
 
-/* ---------- 输入框 @ 引用（工作区 / 沙箱里的文件） ---------- */
-/* 数据 = GET /api/sessions/{sid}/files，按会话缓存；上传成功即失效；切换会话即清菜单。
- * 菜单只列已存在的文件（上传仍走输入区那个 ＋ 按钮）；前端只负责**插入与渲染**，
- * 不做任何路径改写——@work:… / @sandbox:… 由核心在入转录前改写成 work:/… / sandbox:/…。 */
-const filesCache = new Map();
 const atState = { open: false, loading: false, items: [], all: [], active: 0, start: -1, sid: null, mode: '' };
 const COMMANDS = [{ name: '/compact', insert: '/compact', desc: '压缩上下文' }];
 
@@ -5784,13 +4000,13 @@ function atClose() {
 
 /* 菜单底部的固定提示行（可发现性）。 */
 function atHint(box) {
-  const h = document.createElement('div'); h.className = 'at-hint';
+  const h = doc.createElement('div'); h.className = 'at-hint';
   h.textContent = '↑↓ 选择 · Enter 填入 · Esc 关闭';
   box.appendChild(h);
 }
 
 async function atLoad(sid) {
-  if (filesCache.has(sid)) return filesCache.get(sid);
+  if (app.filesCache.has(sid)) return app.filesCache.get(sid);
   return atFetch(sid);
 }
 
@@ -5800,7 +4016,7 @@ async function atLoad(sid) {
 async function atFetch(sid) {
   try {
     const data = await api('GET', '/api/sessions/' + encodeURIComponent(sid) + '/files');
-    filesCache.set(sid, data);
+    app.filesCache.set(sid, data);
     return data;
   } catch (e) {
     return null; // 会话已结束 / 无此会话：安静地不弹菜单，不打扰用户
@@ -5845,13 +4061,13 @@ function atRender() {
   box.className = 'at-menu';
   box.innerHTML = '';
   if (atState.loading) {
-    const e = document.createElement('div'); e.className = 'at-empty'; e.textContent = '载入中…';
+    const e = doc.createElement('div'); e.className = 'at-empty'; e.textContent = '载入中…';
     box.appendChild(e);
     atHint(box);
     return;
   }
   if (!atState.items.length) {
-    const e = document.createElement('div'); e.className = 'at-empty'; e.textContent = '（没有匹配的文件）';
+    const e = doc.createElement('div'); e.className = 'at-empty'; e.textContent = '（没有匹配的文件）';
     box.appendChild(e);
     atHint(box);
     return;
@@ -5861,10 +4077,10 @@ function atRender() {
   atState.items.forEach((it, i) => {
     if (it.group !== group) {
       group = it.group;
-      const g = document.createElement('div'); g.className = 'at-group'; g.textContent = group;
+      const g = doc.createElement('div'); g.className = 'at-group'; g.textContent = group;
       box.appendChild(g);
     }
-    const row = document.createElement('div');
+    const row = doc.createElement('div');
     const on = i === atState.active;
     row.className = 'at-item' + (on ? ' active' : '');
     row.textContent = it.label;
@@ -6111,177 +4327,13 @@ function eventError(err) {
 /* 事实只有两份：模块清单 + 服务运行态（/api/state）与动作目录（/api/actions）——不在这里另写一份。
    只列 modules/ 下的模块；每个模块下面挂它的服务（带开关）与功能（每个功能一个「使用」子卡片）。
    系统工具各回各的入口，不倒进这一块（模块的全局开关 set_module_enabled 挂在模块头上）。 */
-function modulesPage(c) {
-  const load = async () => {
-    c.body.innerHTML = '';
-    c.setMsg('加载中…');
-    let mods = [];
-    let services = [];
-    let actions = [];
-    try {
-      const st = await api('GET', '/api/state');
-      mods = st.modules || [];
-      services = st.services || [];
-      const ac = await api('GET', '/api/actions');
-      // 隐秘字段的设置面另有入口：值不在这一块面板里回显。
-      actions = (ac.actions || []).filter((a) => a.id !== 'set_secret' && a.id !== 'clear_secret');
-    } catch (e) {
-      c.setMsg('加载失败：' + e.message, true);
-      return;
-    }
-    c.setMsg('');
-    renderModulesPanel(c, mods, services, actions, load);
-  };
-  load();
-}
-
-function openModulesPanel() {
-  openModal('模块与服务', modulesPage, true);
-}
-
-/** 纯渲染（数据注入）：模块 → 服务（开关 + 运行态）→ 功能（「使用」按钮）。 */
-function renderModulesPanel(ctx, mods, services, actions, reload) {
-  if (!mods.length) {
-    ctx.body.appendChild(emptyHint('（modules/ 下没有模块）'));
-    return;
-  }
-  for (const m of mods) {
-    const sec = panelSection(m.id + (m.brief ? ' · ' + m.brief : ''));
-    // 模块开关：停用会连带停掉它的常驻服务（核心侧级联）。
-    const head = document.createElement('div');
-    head.className = 'svc-row';
-    const state = document.createElement('span');
-    state.className = 'svc-state';
-    state.textContent = m.enabled ? '整体启用' : '整体停用';
-    head.appendChild(state);
-    const toggle = btn(m.enabled ? '停用模块' : '启用模块', 'btn');
-    toggle.onclick = () => fire(ctx, 'set_module_enabled', { module: m.id, enabled: !m.enabled }, reload);
-    head.appendChild(toggle);
-    sec.appendChild(head);
-
-    // 服务：模块声明的常驻服务（声明在 modules[].services，运行态在 services）。
-    sec.appendChild(cfgDiv('cfg-sec-title', '服务'));
-    const declared = m.services || [];
-    if (!declared.length) {
-      sec.appendChild(emptyHint('（没有声明常驻服务）'));
-    } else {
-      for (const s of declared) {
-        const rt = services.find((x) => x.module === m.id && x.name === s.name) || {};
-        const row = document.createElement('div');
-        row.className = 'svc-row';
-        const name = document.createElement('span');
-        name.className = 'svc-name';
-        name.textContent = s.name + (rt.adapter ? ' · ' + rt.adapter : '') +
-          ' · ' + (rt.state || (s.enabled ? '未启动' : '已禁用'));
-        row.appendChild(name);
-        const sw = btn(s.enabled ? '停用服务' : '启用服务', 'btn');
-        sw.onclick = () => fire(ctx, 'control_resident',
-          { module: m.id, name: s.name, action: s.enabled ? 'disable' : 'enable' }, reload);
-        row.appendChild(sw);
-        sec.appendChild(row);
-      }
-    }
-
-    // 功能：本模块的工具与服务操作（每个一行；参数与运行在子卡片里）。
-    sec.appendChild(cfgDiv('cfg-sec-title', '功能'));
-    const acts = actions.filter((a) => a.id.indexOf('module.' + m.id + '.') === 0);
-    if (!acts.length) {
-      sec.appendChild(emptyHint('（只能经 AI 使用：没有可直跑的 tools / services）'));
-    } else {
-      for (const a of acts) sec.appendChild(useRow(a));
-    }
-    ctx.body.appendChild(sec);
-  }
-}
-
-/** 功能一行：只显示名字与「使用」；参数与运行在子卡片里，列表不再平铺表单。 */
-function useRow(action) {
-  const row = document.createElement('div');
-  row.className = 'svc-row';
-  const name = document.createElement('span');
-  name.className = 'svc-name';
-  const short = action.id.replace(/^module\.[^.]+\./, '');
-  name.textContent = short + (action.desc ? ' — ' + action.desc : '');
-  row.appendChild(name);
-  const use = btn('使用', 'btn');
-  use.onclick = () => openUseCard(action);
-  row.appendChild(use);
-  return row;
-}
-
-/** 子卡片：一个功能的参数与运行（回执打在卡片里）。 */
-function openUseCard(action) {
-  const ctx = openModalLayer(action.id, () => {});
-  if (action.desc) ctx.setMsg(action.desc);
-  ctx.body.appendChild(actionRunner(action));
-}
-
-/** 跑一条动作后再重绘面板：失败如实显示，成功按新状态重绘。 */
-async function fire(ctx, id, args, reload) {
-  try {
-    await api('POST', actionUrl(id), args);
-  } catch (e) {
-    ctx.setMsg('操作失败：' + e.message, true);
-    return;
-  }
-  await reload();
-}
-
-function panelSection(title) {
-  const sec = document.createElement('div');
-  sec.className = 'svc-sec';
-  const h = document.createElement('div');
-  h.className = 'svc-title';
-  h.textContent = title;
-  sec.appendChild(h);
-  return sec;
-}
-
-/** 一条动作的运行块：参数按声明现渲染，运行走 /api/actions/{id}，回执打在下面。 */
-function actionRunner(action) {
-  const box = document.createElement('div');
-  box.className = 'svc-run';
-  const name = document.createElement('div');
-  name.className = 'svc-name';
-  name.textContent = action.id + (action.desc ? ' — ' + action.desc : '');
-  box.appendChild(name);
-  const inputs = {};
-  for (const p of action.params || []) {
-    const i = textInput(p.name + (p.required ? '（必填）' : ''));
-    inputs[p.name] = { p, i };
-    box.appendChild(field(p.name, i));
-  }
-  const out = document.createElement('pre');
-  out.className = 'svc-out';
-  const run = btn('运行', 'btn');
-  run.onclick = async () => {
-    const args = {};
-    for (const k of Object.keys(inputs)) {
-      const { p, i } = inputs[k];
-      if (i.value === '' && !p.required) continue;
-      if (p.ty === 'integer') args[k] = Number(i.value);
-      else if (p.ty === 'boolean') args[k] = i.value === 'true';
-      else args[k] = i.value;
-    }
-    out.textContent = '运行中…';
-    try {
-      const r = await api('POST', actionUrl(action.id), args);
-      out.textContent = JSON.stringify(r, null, 2);
-    } catch (e) {
-      out.textContent = '失败：' + e.message;
-    }
-  };
-  box.appendChild(run);
-  box.appendChild(out);
-  return box;
-}
 
 /* ---------- 抽屉遮罩 / 顶层接线 ---------- */
 $('#drawer-mask').onclick = closeDrawer;
 $('#btn-new-work').onclick = openWizard;
-$('#btn-settings').onclick = () => openSettingsHub('generate');
-$('#fence-settings').onclick = () => openSettingsHub('sandbox');
-$('#btn-upload').onclick = pickUploadFile;
+$('#btn-settings').onclick = () => app.openSettingsHub('generate');
+$('#fence-settings').onclick = () => app.openSettingsHub('sandbox');
+$('#btn-upload').onclick = () => app.pickUploadFile();
 setupSidebar();
 
 /* ---------- 启动 ---------- */

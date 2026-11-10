@@ -230,7 +230,7 @@ const sandbox = {
 sandbox.window = sandbox; sandbox.globalThis = sandbox;
 
 /* 顶层 const 进的是上下文的词法环境：要拿 state 与内部函数，必须在同一个 context 里再求值。 */
-require("./app/bridge.js").installBridge(sandbox); // 与浏览器同一段装配：app.js 从 globalThis.solomni 取状态 / HTTP / 事件流
+require("./app/main.js").boot(sandbox); // 与浏览器同一段装配：装桥、挂功能、补迁移期转发
 const ctx = vm.createContext(sandbox);
 try {
   vm.runInContext(fs.readFileSync(path.join(__dirname, "md.js"), "utf8"), ctx, { filename: "md.js" });
