@@ -247,6 +247,18 @@ select.field-input { cursor: pointer; }
 .fold-count { color: var(--color-text-dim); opacity: .85; }
 .fold-body { margin-top: var(--sp-1); animation: fold-in var(--dur-fast) var(--ease-out); }
 
+/* ---- 分层说明 ---- */
+.detail { display: flex; flex-direction: column; gap: var(--sp-1); }
+.detail-lead { margin: 0; }
+.detail .fold > summary { font-size: var(--fs-s); }
+.detail-text { color: var(--color-text-dim); font-size: var(--fs-s); line-height: var(--lh-base); }
+.detail-safety {
+  margin: 0; padding-left: var(--sp-2);
+  border-left: 2px solid var(--color-warn);
+  color: var(--color-warn); font-size: var(--fs-s); line-height: var(--lh-snug);
+}
+.detail-safety.err { border-left-color: var(--color-err); color: var(--color-err); }
+
 /* ---- toast ---- */
 .toast-root {
   position: fixed; left: 50%; bottom: var(--sp-5); transform: translateX(-50%);

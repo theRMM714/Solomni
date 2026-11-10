@@ -74,6 +74,11 @@ check("折叠标签", String((sumParts.find((c) => c.className === "fold-label")
 check("折叠计数", String((sumParts.find((c) => c.className === "fold-count") || {}).textContent) === "12");
 check("折叠体在 .fold-body", (fold.children[1] || {}).className === "fold-body");
 
+const det = ui.detail({ lead: "第一层", detail: "第二层", safety: "不可逆" });
+check("分层说明：三段齐全", det.children.length === 3, String(det.children.length));
+check("分层说明：详情收在折叠里", String(det.children[1].className).indexOf("fold") === 0);
+check("分层说明：安全文案不折叠", det.children[2].className === "detail-safety" && det.children[2].textContent === "不可逆");
+
 const overlay = el("div");
 const panel = el("div");
 check("按在遮罩、松在遮罩才关", ui.dismisses(overlay, overlay, overlay) === true);

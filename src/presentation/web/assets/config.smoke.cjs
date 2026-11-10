@@ -305,7 +305,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const modelSel = selects.find((s) => (s.children || []).some((o) => String(o.textContent).indexOf("核心默认") >= 0));
   check("config: 模型下拉含核心默认空选项", !!modelSel);
   check("config: 档位二选一（本机/虚拟机各自说明）",
-    t.indexOf("本机档 —— 脚本直接在宿主上跑") >= 0 && t.indexOf("虚拟机档 —— 一整套 guest") >= 0);
+    t.indexOf("本机档（脚本在宿主上跑）") >= 0 && t.indexOf("虚拟机档（脚本在 guest 里跑）") >= 0 &&
+    t.indexOf("隔离就是宿主本身") >= 0);
   const radios = walk(modal, []).filter((x) => x.type === "radio");
   check("config: 两个档位 radio 同名互斥且选中当前档位",
     radios.length === 2 && radios[0].name === radios[1].name && radios[1].checked === true,

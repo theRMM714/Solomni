@@ -26,6 +26,23 @@ export function createOverlays(dom, icons) {
     return d;
   }
 
+  /**
+   * 分层说明：lead 是第一层（做决定所需），detail 收进「详情」，safety 永远可见。
+   * 返回一个块，可直接 append 到字段或弹层正文。
+   */
+  function detail(o) {
+    const opts = o || {};
+    const wrap = el('div', 'detail');
+    if (opts.lead) wrap.appendChild(el('p', 'detail-lead', opts.lead));
+    if (opts.detail) {
+      wrap.appendChild(fold({ label: '详情', body: el('div', 'detail-text', opts.detail) }));
+    }
+    if (opts.safety) {
+      wrap.appendChild(el('p', 'detail-safety' + (opts.safetyKind ? ' ' + opts.safetyKind : ''), opts.safety));
+    }
+    return wrap;
+  }
+
   let openMenu = null;
   function closeMenu() {
     if (!openMenu) return;
@@ -233,5 +250,5 @@ export function createOverlays(dom, icons) {
     return { node, close: closePopover, place };
   }
 
-  return { fold, menu, closeMenu, toast, dismisses, bindDismiss, popover, closePopover };
+  return { fold, detail, menu, closeMenu, toast, dismisses, bindDismiss, popover, closePopover };
 }

@@ -3,6 +3,8 @@
  * 不管：各功能怎么画（只调 app.* 上的入口）；事件吸收与渲染本身（见 features/transcript/）。
  * 联动：由 app/main.js 最后装配，并在所有功能挂好后调用 start()。 */
 
+import { shellCopy } from './copy.js';
+
 let doc, state, stores, api, ui, app;
 let registry;
 let eventStream;
@@ -81,9 +83,9 @@ function renderToolchainBanner() {
   const fallback = t.fallback || {};
   const bad = missing.filter((id) => fallback[id] && fallback[id].fenced === false);
   const absent = missing.filter((id) => !fallback[id]);
-  let msg = '基础工具链未安装：' + missing.join('、') + '。补全：node start.js --provision --ensure=toolchain --yes';
-  if (bad.length) msg += ' 宿主回退在围栏下不可授权（' + bad.join('、') + '）；工具调用会问是否本次无围栏跑。';
-  if (absent.length) msg += ' 宿主 PATH 也没有：' + absent.join('、') + '。';
+  let msg = shellCopy.missingPrefix + missing.join('、') + '。' + shellCopy.provision;
+  if (bad.length) msg += ' ' + shellCopy.fenced + bad.join('、') + shellCopy.fencedTail;
+  if (absent.length) msg += ' ' + shellCopy.absent + absent.join('、') + '。';
   text.textContent = msg;
   box.className = 'fence-banner';
 }

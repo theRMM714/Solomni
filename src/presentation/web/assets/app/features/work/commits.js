@@ -3,6 +3,8 @@
  * 不管：工作卡本身与上下文/工具浮层（见 work.js）；取数与状态落库由 work.js 的 `loadWork` 负责。
  * 联动：由 app/main.js 装配；`work.js` 经 app.openWorkHistory 晚绑定打开，弹层与提示走 ui/ 与 dialog。 */
 
+import { workCopy } from './copy.js';
+
 let doc, api, ui, app;
 let btn;
 const actionUrl = (...a) => app.actionUrl(...a);
@@ -21,7 +23,7 @@ function openWorkHistory(s, selected) {
     detail.className = 'work-detail';
     wrap.appendChild(list); wrap.appendChild(detail);
     c.body.appendChild(wrap);
-    c.setMsg('回滚是非破坏性的：目标之后的提交仍保留，可再次回滚；只改共享区，不动各 agent 沙箱。');
+    c.setMsg(workCopy.nonDestructive);
     let page = null;
     let selectedId = selected || null;
     let loading = false;
@@ -177,7 +179,7 @@ async function restoreCommit(modal, s, d) {
   if (app.isBusy(s)) { ui.notice('会话正在生成', '先停止再回滚，避免与正在提交的 agent 交错。', 'info'); return; }
   let head = s.work && s.work.head ? s.work.head.id : 0;
   const text = '共享区将从 head #' + head + ' 回滚到提交 #' + d.id + '（' + d.author + '：' + d.message + '）。\n\n' +
-    '这是非破坏性回滚：目标之后的提交仍保留在历史里，可再次回滚；只改共享区主副本，不动各 agent 沙箱，后续拉取可能遇到冲突。';
+    workCopy.rollbackBody;
   if (!(await ui.confirmBox('回滚共享区', text, '回滚'))) return;
   try {
     await api('POST', actionUrl('restore_work_commit'), {
@@ -189,7 +191,7 @@ async function restoreCommit(modal, s, d) {
     if (modal && modal.close) modal.close();
   } catch (e) {
     if (/被外部改动/.test(e.message) &&
-        await ui.confirmBox('覆盖工作区外部改动', e.message + '\n\n确认后会覆盖这些路径当前的内容；建议先 work_sync，保留外部修改。', '仍要覆盖')) {
+        await ui.confirmBox('覆盖工作区外部改动', e.message + '\n\n' + workCopy.overwrite, '仍要覆盖')) {
       try {
         await api('POST', actionUrl('restore_work_commit'), {
           session_id: s.sid, commit: d.id, expect_head: head, force: true,

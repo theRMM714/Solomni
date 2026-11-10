@@ -3,6 +3,8 @@
  * 不管：弹层栈本身、设置中心的分页框架（见同目录 hub.js）、保存后的全局重绘。
  * 联动：hub.js 组装分页并调用本文件；本文件经 app 调用 openModalLayer / refreshState；数据来自 state 投影。
  */
+import { settingsCopy } from './copy.js';
+
 let doc, state, api, ui, app;
 let icon, btn, busyButton, textInput, field, numberInput, areaInput, selectInput, syncSelect, checkbox, emptyHint;
 /** 挂载：把本功能的入口登记到 app；跨功能调用一律经 app 晚绑定。 */
@@ -84,7 +86,7 @@ function thinkingTagsEditor(levels) {
   const input = textInput('新档位（如 high、高、xhigh）');
   input.className = 'field-input tag-input';
   const add = btn('+ 添加档位', 'mod-add');
-  const hint = ui.hint('标签就是档位；模型登记按它映射。可以任意写（如 high、高、xhigh），不能为空或重复。');
+  const hint = ui.detail(settingsCopy.thinkingTagList);
   const err = ui.hint('', 'err');
   const control = /[\u0000-\u001f\u007f-\u009f]/;
   addRow.appendChild(input); addRow.appendChild(add);
@@ -179,7 +181,7 @@ function thinkingMapEditor() {
   addRow.className = 'wf-inline';
   const add = btn('+ 添加映射', 'mod-add');
   addRow.appendChild(add);
-  const hint = ui.hint('字符串 = {"reasoning_effort": 值} 简写；{...} = 原样合并进请求体（保留键会被拒）。每行的值都不能为空。');
+  const hint = ui.detail(settingsCopy.thinkingMapping);
   const defSel = selectInput([{ value: '', label: '（不指定：随供应商默认）' }], '');
   const defaultField = field('思考默认档（只能选已映射的档）', defSel);
   const defHint = ui.hint('不指定 = 随供应商默认；会话没选档时用它。');
@@ -749,8 +751,9 @@ const SETTINGS_PAGES = [
 function choiceModal(title, question, actions) {
   // 叠在现有弹层之上：从向导里弹出来时，选完能回到向导（不丢已填内容）。
   ui.openModalLayer(title, (c) => {
-    const q = doc.createElement('div'); q.className = 'wf-label'; q.textContent = question;
-    c.body.appendChild(q);
+    c.body.appendChild(question && typeof question === 'object'
+      ? ui.detail(question)
+      : (() => { const q = doc.createElement('div'); q.className = 'wf-label'; q.textContent = question; return q; })());
     const row = doc.createElement('div'); row.className = 'wf-inline';
     for (const a of actions) {
       const b = btn(a[0], a[1] || 'btn');

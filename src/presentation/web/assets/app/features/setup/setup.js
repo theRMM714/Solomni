@@ -3,6 +3,8 @@
  * 不管：动作清单与执行（后端 /api/actions）、弹层栈（ui/modal.js）。
  * 联动：shell 的横幅与向导调用 openSetupModal / setupAction。
  */
+import { setupCopy } from './copy.js';
+
 let doc, api, ui, app;
 let btn;
 /** 挂载：把本功能的入口登记到 app；跨功能调用一律经 app 晚绑定。 */
@@ -135,7 +137,7 @@ function openSetupModal(onDone) {
       box.innerHTML = '';
       const note = doc.createElement('div'); note.className = 'cfg-hint ok';
       // 生效时机由后端保证（补齐完即按新状态判定，下一次起 guest 就用新的共享档）：这里只说结论。
-      note.textContent = '已经生效：再打开配置 / 向导就按新状态判定，下一次启动虚拟机就用上，不需要重启。';
+      note.textContent = setupCopy.applied;
       box.appendChild(note);
       const again = btn('关闭', 'btn btn-block'); again.onclick = finish;
       box.appendChild(again);
@@ -148,36 +150,18 @@ function openSetupModal(onDone) {
 /// 结构化诊断 → 中文（呈现层文案，不进提示词册）。
 function diagnosisText(d) {
   if (!d || typeof d !== 'object') return String(d);
-  if (d.Missing) {
-    return '模块 ' + d.Missing.module + ' 需要的运行能力 ' + d.Missing.capability +
-      ' 在本档位没有：把它放进依赖文件夹后点「重新扫描」，或确认基础工具链 / 宿主 PATH。';
-  }
-  if (d.Ambiguous) {
-    return '运行能力 ' + d.Ambiguous.capability + ' 有多个版本（' + (d.Ambiguous.versions || []).join('、') +
-      '）：在下面「定版」里选一个版本，工具才跑得起来。';
-  }
-  if (d.UnknownPin) {
-    return '运行能力 ' + d.UnknownPin.capability + ' 定的版本 ' + d.UnknownPin.version +
-      ' 不在本档位可用的包里：改一个版本，或把该版本的运行包放进依赖文件夹后点「重新扫描」。';
-  }
+  if (d.Missing) return setupCopy.missing(d.Missing);
+  if (d.Ambiguous) return setupCopy.ambiguous(d.Ambiguous);
+  if (d.UnknownPin) return setupCopy.unknownPin(d.UnknownPin);
   if (d.Conflict) {
     return '运行包 ' + d.Conflict.a + ' 与 ' + d.Conflict.b + ' 都要写进 ' + d.Conflict.path +
       '：装配会互相覆盖，换版本或去掉其中一个。';
   }
-  if (d.NotForTarget) {
-    return '模块 ' + d.NotForTarget.module + ' 需要的运行能力 ' + d.NotForTarget.capability +
-      ' 在本档位用不了：包库里只有 ' + (d.NotForTarget.packages || []).join('、') +
-      '（目标：' + d.NotForTarget.target + '）。换一个包，或改用虚拟机档。';
-  }
-  if (d.NoBin) {
-    return '运行包 ' + d.NoBin.package + ' 没有可执行的 bin/：本机档放不进 PATH。检查包内容或换一个包。';
-  }
+  if (d.NotForTarget) return setupCopy.notForTarget(d.NotForTarget);
+  if (d.NoBin) return setupCopy.noBin(d.NoBin);
   if (d.Path) {
     return '运行包 PATH 合成失败：' + d.Path.why;
   }
-  if (d.MissingEntry) {
-    return '模块 ' + d.MissingEntry.module + ' 的工具 ' + d.MissingEntry.tool +
-      ' 入口不在场：' + d.MissingEntry.command + '。先按模块 README 或 --build 编一次。';
-  }
+  if (d.MissingEntry) return setupCopy.missingEntry(d.MissingEntry);
   return JSON.stringify(d);
 }

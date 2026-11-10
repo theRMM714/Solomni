@@ -6,6 +6,7 @@
 import { mdNode, toolCard, reasoningBlock, shortPath, flushScroll } from './parts.js';
 import { renderDone } from './turn.js';
 import { boxes } from './dom.js';
+import { transcriptCopy } from './copy.js';
 
 let g, doc, state, ui, app;
 
@@ -161,8 +162,8 @@ function renderStream(force) {
     box.innerHTML = '<div class="empty">' +
       '<svg class="empty-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">' +
       '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg>' +
-      '<div class="tip">点左上角「+ 新建工作」开始：单 agent（直连式 / 组合式）· 协作</div>' +
-      '<div class="hint">PC：双栏布局　移动端：左上角「菜单」打开侧栏</div></div>';
+      '<div class="tip">' + transcriptCopy.emptyTip + '</div>' +
+      '<div class="hint">' + transcriptCopy.emptyHint + '</div></div>';
     return;
   }
   const full = force === true || boxes.owner !== s.sid || !boxes.done || !boxes.live;

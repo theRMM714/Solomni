@@ -3,6 +3,8 @@
  * 不管：按钮长在哪、事件流怎么取（见 features/transcript/events.js 与 shell.js 的长轮询）。
  * 联动：由 app/main.js 装配；渲染经 app.renderAll / app.markNeedState 晚绑定，避免与转录模块互相 import。 */
 
+import { actionsCopy } from './copy.js';
+
 let api, ui, app;
 
 /* 本地名 → 动作 id 的映射：动作目录与校验都在核心（systools/tools.yaml），这里只做转写。 */
@@ -46,7 +48,7 @@ async function act(action, text) {
 function rewindTo(id) {
   const s = app.activeSession();
   if (!s || app.isBusy(s)) return;
-  app.choiceModal('回档到此处', '留档：保留内容、折叠成标记，可随时恢复，工作区文件（共享区与各 agent 沙箱）也一起记入档案；删除：真的删掉这一行及其后的全部，工作区文件一起回到该行（未提交内容进 lost 备份），删除点之后的留档一并作废，不可恢复。', [
+  app.choiceModal('回档到此处', actionsCopy.rewind, [
     ['留档', 'btn', () => applyRewind(s, { id, mode: 'archive' })],
     ['删除', 'btn btn-danger', () => applyRewind(s, { id, mode: 'delete' })],
     ['取消', 'btn btn-ghost', () => {}],
@@ -57,7 +59,7 @@ function rewindTo(id) {
 function restoreMark(mark) {
   const s = app.activeSession();
   if (!s || app.isBusy(s)) return;
-  app.choiceModal('恢复这次留档', '恢复到留档之前：该标记及其后的全部内容（含留档期间的新工作）会被删除；工作区文件（共享区与各 agent 沙箱）一起回到留档点，未提交的改动进 lost 备份。', [
+  app.choiceModal('恢复这次留档', actionsCopy.restore, [
     ['恢复', 'btn btn-danger', () => applyRewind(s, { id: mark, mode: 'restore' })],
     ['取消', 'btn btn-ghost', () => {}],
   ]);
@@ -75,7 +77,7 @@ async function applyRewind(s, body) {
     ui.toast('ok', '已回档');
   } catch (err) {
     if (/被外部改动/.test(err.message) &&
-        await ui.confirmBox('覆盖工作区外部改动', err.message + '\n\n确认后会先采纳这些外部改动，再把工作区回档到目标提交；未跟踪文件不受影响。', '仍要回档')) {
+        await ui.confirmBox('覆盖工作区外部改动', err.message + '\n\n' + actionsCopy.forceExternal, '仍要回档')) {
       try {
         const r = await api('POST', actionUrl('rewind'), Object.assign({ session_id: s.sid, force: true }, body));
         if (typeof r.head === 'number') s.floor = r.head;
@@ -87,7 +89,7 @@ async function applyRewind(s, body) {
       return;
     }
     if (/个留档/.test(err.message) &&
-        await ui.confirmBox('删除会作废留档', err.message + '\n\n确认后会连同共享区与各 agent 沙箱一起回到该行；这些留档作废后不可恢复。', '仍要删除')) {
+        await ui.confirmBox('删除会作废留档', err.message + '\n\n' + actionsCopy.dropArchive, '仍要删除')) {
       try {
         const r = await api('POST', actionUrl('rewind'), Object.assign({ session_id: s.sid, force: true }, body));
         if (typeof r.head === 'number') s.floor = r.head;
