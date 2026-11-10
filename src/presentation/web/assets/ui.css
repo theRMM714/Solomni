@@ -110,7 +110,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--color-accent);
 textarea.field-input { resize: vertical; min-height: 64px; }
 select.field-input { cursor: pointer; }
 .chk { display: flex; align-items: flex-start; gap: var(--sp-2); font-size: var(--fs-base); cursor: pointer; }
-.chk input { width: auto; margin-top: 3px; }
+.chk input { box-sizing: border-box; width: 16px; height: 16px; flex: none; margin: 0.25em 0 0; accent-color: var(--color-accent); }
 .chk-text { display: flex; flex-direction: column; gap: 2px; line-height: var(--lh-snug); }
 .chk-note { color: var(--color-text-dim); font-size: var(--fs-s); line-height: var(--lh-base); }
 
@@ -137,7 +137,6 @@ select.field-input { cursor: pointer; }
 .modal-title { flex: 1; font-weight: 600; }
 .modal-close { color: var(--color-text-dim); }
 .modal-close:hover { color: var(--color-err); }
-.modal-body.settings-body { padding-bottom: var(--sp-5); }
 .modal-body { padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-4); overflow-y: auto; max-height: 70vh; }
 .modal-msg { min-height: 1.2em; padding: 0 var(--sp-4) var(--sp-3); font-size: var(--fs-base); color: var(--color-text-dim); }
 .modal-msg.err { color: var(--color-err); }

@@ -446,7 +446,7 @@ body {
 .settings-nav-item:hover { color: var(--color-text); background: var(--color-surface-2); }
 .settings-nav-item.active { color: var(--color-text); background: var(--color-accent-weak); border-color: var(--color-border); }
 .settings-main { display: flex; flex-direction: column; min-width: 0; min-height: 420px; }
-.settings-panes { flex: 1; min-width: 0; }
+.settings-panes { flex: 1; min-width: 0; padding-bottom: var(--sp-4); }
 .settings-page { display: flex; flex-direction: column; gap: 12px; }
 .settings-core {
   display: flex; flex-direction: column; gap: 12px;

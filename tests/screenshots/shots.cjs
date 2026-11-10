@@ -1,5 +1,5 @@
 /* 目的：零依赖截图与自检工具：把真实 index.html + 合成 fixture 喂给 headless Edge，按视图与宽度出图。
- * 管：静态服务与 fetch/时钟注入、CDP 驱动、截图、--audit 的对比度/溢出/焦点/动效复算。
+ * 管：静态服务与 fetch/时钟注入、CDP 驱动、截图、--audit 的对比度/溢出/焦点/动效/表单间距/选框对齐复算。
  * 不管：视觉决策与 fixture 内容（见 fixtures.js）；不启动产品二进制、不读写 .home。
  * 用法：node tests/screenshots/shots.cjs [--audit] [--after|--tag=名字] [--only=chat,gate] [--widths=375,768,1280] [--scroll=bottom]
  * 输出：.shots/before|after/<view>-<width>.png + .shots/<mode>-audit.json
@@ -298,11 +298,31 @@ const AUDIT_FN = function () {
     const cs = getComputedStyle(first);
     focus = { tag: first.tagName, outline: cs.outlineStyle + " " + cs.outlineWidth, shadow: cs.boxShadow !== "none" };
   }
+  const page = document.querySelector(".settings-page:not(.hidden)");
+  const foot = document.querySelector(".settings-foot");
+  let footerGap = null;
+  if (page && foot && foot.getClientRects().length && page.lastElementChild) {
+    footerGap = Math.round(foot.getBoundingClientRect().top - page.lastElementChild.getBoundingClientRect().bottom);
+  }
+  let checkOffset = null;
+  const chk = document.querySelector(".chk");
+  if (chk) {
+    const box = chk.querySelector("input");
+    const txt = chk.querySelector(".chk-text");
+    if (box && txt) {
+      const line = parseFloat(getComputedStyle(txt).lineHeight);
+      const br = box.getBoundingClientRect();
+      const tr = txt.getBoundingClientRect();
+      checkOffset = Math.round((br.top + br.height / 2 - (tr.top + line / 2)) * 10) / 10;
+    }
+  }
   return {
     overflow: document.documentElement.scrollWidth - window.innerWidth,
     samples: samples,
     focus: focus,
     animations: document.getAnimations().filter((a) => a.playState === "running").length,
+    footerGap: footerGap,
+    checkOffset: checkOffset,
   };
 };
 
@@ -394,6 +414,8 @@ async function main() {
       const bad = a.samples.filter((s) => s.ratio < s.need);
       const msgs = [];
       if (a.overflow > 1) msgs.push("横向溢出 " + a.overflow + "px");
+      if (a.footerGap !== null && a.footerGap < 12) msgs.push("表单与保存栏间距 " + a.footerGap + "px < 12px");
+      if (a.checkOffset !== null && Math.abs(a.checkOffset) > 1.5) msgs.push("选框中心偏离标题行 " + a.checkOffset + "px");
       for (const s of bad) msgs.push(s.sel + " 对比度 " + s.ratio + ":1 < " + s.need);
       if (!a.focus || a.focus.outline === "none 0px") msgs.push("首个可聚焦元素没有可见轮廓");
       if (name.endsWith("-reduced") && a.animations > 0) msgs.push("reduced-motion 下仍有 " + a.animations + " 个动画");

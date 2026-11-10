@@ -13,8 +13,6 @@ export function mount(root, deps) {
 }
 function openSettingsHub(page) {
   ui.openModal('设置', (c) => {
-    // 底栏与弹层底边之间留出呼吸位；modal-body 自身只有 16px。
-    c.body.classList.add('settings-body');
     const hub = doc.createElement('div');
     hub.className = 'settings-hub';
     const nav = doc.createElement('nav');
