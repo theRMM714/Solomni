@@ -354,6 +354,12 @@ body {
   .btn { padding: 11px 18px; }
 }
 
+/* 窄屏：输入框独占一行，动作按钮换到下一行右对齐——否则输入框只剩几十像素。 */
+@media (max-width: 640px) {
+  .composer-inner { flex-wrap: wrap; justify-content: flex-end; }
+  .composer textarea { flex: 1 1 calc(100% - 60px); }
+}
+
 .wf-field, .form-col { display: flex; flex-direction: column; gap: 6px; }
 .wf-label, .wf-hint { font-size: var(--fs-s); color: var(--color-text-dim); }
 .wf-inline { display: flex; gap: 8px; align-items: center; }
