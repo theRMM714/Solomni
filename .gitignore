@@ -34,6 +34,9 @@ modules/*/build/
 /runtimes/*
 !/runtimes/.gitkeep
 
+# ---- 截图/审计产物（tests/screenshots 本地生成，不入库）----
+/.shots/
+
 # ---- 突变测试产物（cargo-mutants，本地运行会生成）----
 /mutants.out/
 /mutants.out.old/

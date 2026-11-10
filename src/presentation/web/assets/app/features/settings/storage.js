@@ -3,6 +3,8 @@
  * 不管：通用字节格式化（core/format.js 的 fmtBytes）、弹层与提示（ui 层）。
  * 联动：由 pages.js 的 settingsForm 调用；字节显示用 app.fmtBytes。
  */
+import { settingsCopy } from './copy.js';
+
 let g, doc, api, ui, app;
 let btn;
 /** 挂载：把本功能的入口登记到 app；跨功能调用一律经 app 晚绑定。 */
@@ -15,13 +17,12 @@ export function mount(root, deps) {
 function buildStoragePage(c, f) {
   c.body.appendChild(f.stPeriodic.wrap);
   c.body.appendChild(f.stInterval.wrap);
-  c.body.appendChild(f.stCap.wrap);
+  c.body.appendChild(ui.attachHelp(f.stCap.wrap, settingsCopy.storageBudget));
   c.body.appendChild(f.stKeep.wrap);
   c.body.appendChild(f.stVolume.wrap);
   c.body.appendChild(f.stFree.wrap);
   c.body.appendChild(f.stLog.wrap);
-  c.body.appendChild(ui.hint('上限只约束可回收缓存（构建缓存 / 下载缓存 / 过期可写层 / 日志），不约束会话、虚拟根与模块产物。到上限先回收一次，不拒绝构建；全局回收默认且至少 15 分钟一次，关闭自动回收后只剩手动。', 'warn'));
-  c.body.appendChild(ui.hint('还原虚拟根会删除 guest 内未落宿主的数据，并用清单重建；不备份、不可撤销。', 'err'));
+  c.body.appendChild(ui.detail(settingsCopy.storageRestore));
   const box = doc.createElement('div');
   box.className = 'storage-report';
   box.textContent = '读取中…';
@@ -47,7 +48,7 @@ function renderStorage(box, report, refresh) {
   box.appendChild(head);
   const note = doc.createElement('div');
   note.className = 'cfg-hint';
-  note.textContent = '按策略回收只处理已超上限或超过保留天数的项；未到条件时不会删任何东西。要手动清理，用下方单项或“清空全部缓存”。';
+  note.textContent = settingsCopy.storageGc.detail;
   box.appendChild(note);
   const bar = doc.createElement('div');
   bar.className = 'storage-actions';
@@ -57,7 +58,7 @@ function renderStorage(box, report, refresh) {
       const preview = await api('POST', '/api/storage/gc', { apply: false });
       const lines = (preview.report.actions || []).map((a) => a.label + ' · ' + app.fmtBytes(a.bytes) + ' · ' + a.reason);
       if (!lines.length) {
-        ui.toast('warn', '当前没有达到策略条件的项：未超上限，也没有超过保留天数的缓存；可用单项清理或“清空全部缓存”。');
+        ui.toast('warn', settingsCopy.storageEmpty.detail);
         return;
       }
       if (!(await ui.confirmBox('回收预览', lines.join('\n'), '回收'))) return;

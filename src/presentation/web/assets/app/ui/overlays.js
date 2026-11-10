@@ -13,6 +13,7 @@ export function createOverlays(dom, icons) {
     const d = el('details', 'fold' + (o.cls ? ' ' + o.cls : ''));
     if (o.open) d.open = true;
     const s = el('summary');
+    s.appendChild(icons.icon('chevron-right'));
     s.appendChild(el('span', 'fold-label', o.label || ''));
     if (o.count != null) s.appendChild(el('span', 'fold-count', String(o.count)));
     d.appendChild(s);
@@ -23,6 +24,52 @@ export function createOverlays(dom, icons) {
     }
     if (typeof o.onToggle === 'function') d.addEventListener('toggle', () => o.onToggle(!!d.open));
     return d;
+  }
+
+  /**
+   * 说明按钮：圆框感叹号，点开锚定小卡片。放在字段标题旁（forms 的 label 行）
+   * 或一段说明的末尾；里面装 lead / detail / safety，安全类文案仍然常显、不藏。
+   */
+  function help(o) {
+    const opts = o || {};
+    const label = opts.label || '说明';
+    const b = el('button', 'help-btn');
+    b.type = 'button';
+    attr(b, 'aria-label', label);
+    attr(b, 'aria-expanded', 'false');
+    b.appendChild(icons.icon('bang'));
+    b.addEventListener('click', (e) => {
+      if (e.preventDefault) e.preventDefault();
+      if (e.stopPropagation) e.stopPropagation();
+      if (openPopover && openPopover.anchor === b) { closePopover(); return; }
+      const body = el('div', 'help-body');
+      if (opts.lead) body.appendChild(el('p', 'help-text', opts.lead));
+      if (opts.detail) body.appendChild(el('p', 'help-text', opts.detail));
+      if (opts.safety) {
+        body.appendChild(el('p', 'detail-safety' + (opts.safetyKind ? ' ' + opts.safetyKind : ''), opts.safety));
+      }
+      popover(b, body, { label });
+    });
+    return b;
+  }
+
+  /**
+   * 分层说明：lead 是第一层（做决定所需），detail 只藏在感叹号按钮里，safety 永远可见。
+   * 返回一个块，可直接 append 到弹层正文或没有标题可挂的说明处。
+   */
+  function detail(o) {
+    const opts = o || {};
+    const wrap = el('div', 'detail');
+    const line = el('div', 'detail-line');
+    if (opts.lead) line.appendChild(el('p', 'detail-lead', opts.lead));
+    if (opts.detail) {
+      line.appendChild(help({ lead: opts.lead, detail: opts.detail, label: opts.helpLabel || '说明' }));
+    }
+    if (line.children.length) wrap.appendChild(line);
+    if (opts.safety) {
+      wrap.appendChild(el('p', 'detail-safety' + (opts.safetyKind ? ' ' + opts.safetyKind : ''), opts.safety));
+    }
+    return wrap;
   }
 
   let openMenu = null;
@@ -232,5 +279,5 @@ export function createOverlays(dom, icons) {
     return { node, close: closePopover, place };
   }
 
-  return { fold, menu, closeMenu, toast, dismisses, bindDismiss, popover, closePopover };
+  return { fold, help, detail, menu, closeMenu, toast, dismisses, bindDismiss, popover, closePopover };
 }

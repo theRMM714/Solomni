@@ -297,15 +297,16 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const modal = reg.get("#modal-root");
   const t = allText(modal);
   check("config: 标题带会话名", t.indexOf("配置：w") >= 0);
-  check("config: 冻结说明（名单与形态）", t.indexOf("名单与形态冻结") >= 0, t.slice(0, 200));
+  check("config: 冻结说明（名单与形态）", t.indexOf("名单与形态已冻结") >= 0, t.slice(0, 200));
   check("config: 形态说明", t.indexOf("单 agent（恰好 1 个 agent，模块数不限）") >= 0);
   check("config: agent 名字只读", t.indexOf("名字（只读）") >= 0);
-  check("config: 模块选项来自 /api/state", t.indexOf("research") >= 0 && t.indexOf("db") >= 0);
+  check("config: 模块选项来自 /api/state", t.indexOf("research") >= 0 && t.indexOf("+ 添加模块") >= 0);
   const selects = walk(modal, []).filter((x) => x.tag === "select");
   const modelSel = selects.find((s) => (s.children || []).some((o) => String(o.textContent).indexOf("核心默认") >= 0));
   check("config: 模型下拉含核心默认空选项", !!modelSel);
   check("config: 档位二选一（本机/虚拟机各自说明）",
-    t.indexOf("本机档 —— 脚本直接在宿主上跑") >= 0 && t.indexOf("虚拟机档 —— 一整套 guest") >= 0);
+    t.indexOf("本机档（脚本在宿主上跑）") >= 0 && t.indexOf("虚拟机档（脚本在 guest 里跑）") >= 0 &&
+    t.indexOf("隔离更强、代价更重") >= 0);
   const radios = walk(modal, []).filter((x) => x.type === "radio");
   check("config: 两个档位 radio 同名互斥且选中当前档位",
     radios.length === 2 && radios[0].name === radios[1].name && radios[1].checked === true,

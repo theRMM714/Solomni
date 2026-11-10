@@ -3,6 +3,8 @@
  * 不管：不渲染转录、不管历史树；起完会话只提交给 app 的刷新入口。
  * 联动：agent 表单与模块选择来自 app/features/agents；会话配置来自 session-config。 */
 
+import { wizardCopy } from './copy.js';
+
 let g, doc, state, api, ui, app;
 let areaInput, btn, busyButton, emptyHint, field, fold, hint, selectInput, textInput;
 const actionUrl = (...a) => app.actionUrl(...a);
@@ -41,12 +43,15 @@ async function openWizard(draft) {
   // 档位那一格：虚拟机档不可用时禁用，并逐项说明缺什么、怎么补（照抄后端事实，不自己编话）。
   const tierField = doc.createElement('div'); tierField.className = 'wf-field';
   const tierLabel = doc.createElement('div'); tierLabel.className = 'wf-label'; tierLabel.textContent = '执行档位';
-  const hostR = ui.radio('本机档 —— 脚本直接在宿主上跑：宿主自备解释器；隔离就是宿主本身（默认）。', w.tier !== 'vm', 'wf-tier');
+  const hostR = ui.radio('本机档（脚本在宿主上跑）', w.tier !== 'vm', 'wf-tier');
   const vmOk = !!(tiers && tiers.vm_available);
-  const vmR = ui.radio('虚拟机档 —— 一整套 guest，隔离更强；按模块声明装载运行包，依赖 guest 本体。', w.tier === 'vm', 'wf-tier', !vmOk);
+  const vmR = ui.radio('虚拟机档（脚本在 guest 里跑）', w.tier === 'vm', 'wf-tier', !vmOk);
   hostR.box.addEventListener('change', () => { if (hostR.box.checked) { w.tier = 'host'; syncWizardTier(); } });
   vmR.box.addEventListener('change', () => { if (vmR.box.checked) { w.tier = 'vm'; syncWizardTier(); } });
-  tierField.appendChild(tierLabel); tierField.appendChild(hostR.wrap); tierField.appendChild(vmR.wrap);
+  const tierGroup = doc.createElement('div'); tierGroup.className = 'form-col';
+  tierGroup.appendChild(hostR.wrap); tierGroup.appendChild(vmR.wrap);
+  tierField.appendChild(tierLabel); tierField.appendChild(tierGroup);
+  ui.attachHelp(tierField, wizardCopy.tier);
   const profileField = doc.createElement('div'); profileField.className = 'wf-field';
   const profileLabel = doc.createElement('div'); profileLabel.className = 'wf-label'; profileLabel.textContent = '权限档位';
   const profileSel = selectInput([
@@ -103,7 +108,7 @@ async function openWizard(draft) {
       if (miss.length) lack.push(id + ' 需要 ' + miss.join('/'));
     }
     gapHint.textContent = lack.length
-      ? '这个虚拟机可能要缺：' + lack.join('；') + '。可选：把运行包放进 runtimes/、换一个虚拟机、或改用本机档（创建时后端会按同一份事实再判一次）。'
+      ? wizardCopy.gapLead + lack.join('；') + '。' + wizardCopy.gapDetail
       : '';
   }
   function syncWizardTier() {
@@ -181,12 +186,8 @@ function pickWorkspaceDir(onPick) {
     workspaceRow.appendChild(workspaceIn);
     workspaceRow.appendChild(wsPick);
     workspaceRow.appendChild(wsDefault);
-    const wsHint = doc.createElement('div'); wsHint.className = 'wf-hint';
-    wsHint.textContent = '本机档只接受本机目录（网络工作区会被拒绝，容器围栏访问不了私有网络）；' +
-      '虚拟机档可填 UNC 共享下的目录，凭据用当前登录用户。';
     const workspaceWrap = doc.createElement('div');
     workspaceWrap.appendChild(workspaceRow);
-    workspaceWrap.appendChild(wsHint);
     const modeSel = selectInput([
       { value: 'single', label: '单 agent（1 个或多个模块）' },
       { value: 'collab', label: '协作（多个 agent）' },
@@ -195,10 +196,7 @@ function pickWorkspaceDir(onPick) {
     // 形态说明随选择走（三种形态的差别就在这一句里说清）。
     const modeHint = doc.createElement('div'); modeHint.className = 'wf-hint';
     function modeHintText() {
-      if (w.mode === 'proxy') {
-        return '代理：没有名单要选——核心自己挑人、建子工作并代你决定（选这个形态就是授予全权）。\n' +
-          '它的子会话不会把整份对话推给它；它靠观察与倒查消息决定下一步。想接管就按「停止」：相关的会话会一起停下。';
-      }
+      if (w.mode === 'proxy') return wizardCopy.modeProxy;
       if (w.mode === 'collab') {
         return '协作：多个 agent 各自独立沙箱，先分权协商、再按任务链执行，由核心统一验收。';
       }
@@ -212,9 +210,9 @@ function pickWorkspaceDir(onPick) {
     snapshotDraft = () => { w.name = nameIn.value; w.task = taskIn.value; };
     // 需求那一格与推荐按钮都是**非代理形态**才问的：形态一换就收起来（见 renderParts）。
     const taskField = field('本次需求', taskIn);
-    const recBtn = btn('让核心推荐', 'btn btn-block');
-    const createBtn = btn('创建并开始', 'btn btn-primary btn-block');
-    const cancelBtn = btn('取消', 'btn btn-block');
+    const recBtn = btn('让核心推荐', 'btn btn-lead');
+    const createBtn = btn('创建并开始', 'btn btn-primary');
+    const cancelBtn = btn('取消', 'btn');
     // 没有可用模型就**不允许创建**：后端也会拒绝，这里先把原因说在前面。
     function createBlocked() {
       if (!state.models.length) {
@@ -335,11 +333,14 @@ function pickWorkspaceDir(onPick) {
 
     function renderParts() {
       partWrap.innerHTML = '';
-      modeHint.textContent = modeHintText();
+      const text = modeHintText();
+      modeHint.innerHTML = '';
+      if (text && typeof text === 'object') modeHint.appendChild(ui.detail(text));
+      else modeHint.textContent = text;
       // 代理形态没有名单也没有模型要选：把该说的说清，把不该问的收起来。
       const proxy = w.mode === 'proxy';
       taskField.className = proxy ? 'wf-field hidden' : 'wf-field';
-      recBtn.className = proxy ? 'btn btn-block hidden' : 'btn btn-block';
+      recBtn.className = proxy ? 'btn btn-lead hidden' : 'btn btn-lead';
       if (proxy) {
         partWrap.appendChild(emptyHint(
           '（代理形态不需要选人）核心会用登记处里当前有效的 agent 与模块自己组队，' +
@@ -369,7 +370,7 @@ function pickWorkspaceDir(onPick) {
         return;
       }
       if (!state.core && w.agents.some((a) => !a.model)) {
-        modelWrap.appendChild(ui.hint('（核心默认未设定：没指定模型的 agent 不能创建；在卡片里给它选一个模型，或先选定核心默认）', 'warn'));
+        modelWrap.appendChild(ui.hint(wizardCopy.noCore, 'warn'));
       }
     }
 
@@ -423,9 +424,7 @@ function pickWorkspaceDir(onPick) {
     async function submit(body) {
       const release = busyButton(createBtn, '正在创建…');
       cancelBtn.disabled = true;
-      c.setMsg(w.tier === 'vm'
-        ? '正在创建：虚拟机档要先起一台 guest（首次可能要几十秒到几分钟）；缺编译产物时还会先在 guest 里编一次…'
-        : '正在创建：缺编译产物时先补编一次，编完就开工…');
+      c.setMsg(w.tier === 'vm' ? wizardCopy.creatingVm : wizardCopy.creatingHost);
       try {
         await startSession(body);
         ui.closeModal();
@@ -445,7 +444,7 @@ function pickWorkspaceDir(onPick) {
       const task = taskIn.value.trim();
       const vmGuest = (w.guest || '').trim();
       if (w.tier === 'vm' && !vmGuest) {
-        c.setMsg('虚拟机档要先选一个虚拟机（虚拟根）：点上面的「补齐虚拟机依赖」装上，或换一个已装好的。', true);
+        c.setMsg(wizardCopy.vmRequired, true);
         return;
       }
       if (w.tier === 'vm' && w.guestInfo && !w.guestInfo.ready) {
@@ -503,7 +502,7 @@ function pickWorkspaceDir(onPick) {
     };
 
     c.body.appendChild(field('工作名称', nameIn));
-    c.body.appendChild(field('工作区（可选）', workspaceWrap));
+    c.body.appendChild(field('工作区（可选）', workspaceWrap, wizardCopy.workspace));
     c.body.appendChild(field('形态', modeSel));
     c.body.appendChild(modeHint);
     c.body.appendChild(tierField);
@@ -515,9 +514,12 @@ function pickWorkspaceDir(onPick) {
     c.body.appendChild(partWrap);
     c.body.appendChild(modelWrap);
     c.body.appendChild(taskField);
-    c.body.appendChild(recBtn);
-    c.body.appendChild(createBtn);
-    c.body.appendChild(cancelBtn);
+    const actions = doc.createElement('div');
+    actions.className = 'form-actions';
+    actions.appendChild(recBtn);
+    actions.appendChild(cancelBtn);
+    actions.appendChild(createBtn);
+    c.body.appendChild(actions);
 
     renderParts(); renderModels(); syncWizardTier(); syncCreateButton();
     // 别的标签页 / 设置在轮询后改了登记处：只换模型提示与创建按钮，不重建名字 / 需求输入框。

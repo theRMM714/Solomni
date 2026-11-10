@@ -23,6 +23,9 @@ const DEV_ONLY: &[&str] = &["cjs", "mjs"];
 /// 只给 node 用的文件名（`package.json` 声明 `app/` 下的 `.js` 是 ES Module）：不嵌入。
 const DEV_ONLY_NAMES: &[&str] = &["package.json"];
 
+/// 只在 debug 构建嵌入的目录：组件陈列页是开发工具，发行版不带。
+const DEV_ONLY_DIRS: &[&str] = &["dev"];
+
 fn main() {
     let root =
         PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("cargo 必给 CARGO_MANIFEST_DIR"));
@@ -32,9 +35,14 @@ fn main() {
         .join("web")
         .join("assets");
     println!("cargo:rerun-if-changed={}", assets.display());
+    // PROFILE 变化要重跑：同一份 OUT_DIR 可能先 debug 后 release。
+    println!("cargo:rerun-if-env-changed=PROFILE");
+    let debug = std::env::var("PROFILE")
+        .map(|p| p == "debug")
+        .unwrap_or(false);
 
     let mut entries: Vec<(String, &'static str, PathBuf)> = Vec::new();
-    collect(&assets, &assets, &mut entries);
+    collect(&assets, &assets, debug, &mut entries);
     entries.sort_by(|a, b| a.0.cmp(&b.0));
 
     let mut out = String::from("&[\n");
@@ -56,7 +64,7 @@ fn main() {
     fs::write(&dest, out).expect("写生成表失败");
 }
 
-fn collect(base: &Path, dir: &Path, out: &mut Vec<(String, &'static str, PathBuf)>) {
+fn collect(base: &Path, dir: &Path, debug: bool, out: &mut Vec<(String, &'static str, PathBuf)>) {
     let mut items: Vec<_> = fs::read_dir(dir)
         .unwrap_or_else(|e| panic!("读不了资源目录 {}：{}", dir.display(), e))
         .map(|e| e.expect("可读的目录项").path())
@@ -64,7 +72,15 @@ fn collect(base: &Path, dir: &Path, out: &mut Vec<(String, &'static str, PathBuf
     items.sort();
     for path in items {
         if path.is_dir() {
-            collect(base, &path, out);
+            let dev = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| DEV_ONLY_DIRS.contains(&n))
+                .unwrap_or(false);
+            if dev && !debug {
+                continue;
+            }
+            collect(base, &path, debug, out);
             continue;
         }
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");

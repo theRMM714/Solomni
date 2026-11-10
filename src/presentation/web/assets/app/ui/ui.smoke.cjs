@@ -68,9 +68,25 @@ const fold = ui.fold({ label: "思维链", count: 12, body: el("div") });
 check("折叠是 details", fold.tagName === "DETAILS");
 check("折叠有 summary", (fold.children[0] || {}).tagName === "SUMMARY");
 const sum = fold.children[0] || { children: [] };
-check("折叠标签", String(sum.children[0] && sum.children[0].textContent) === "思维链");
-check("折叠计数", String(sum.children[1] && sum.children[1].textContent) === "12");
+const sumParts = sum.children || [];
+check("折叠图标", sumParts.some((c) => c.className === "ui-icon"));
+check("折叠标签", String((sumParts.find((c) => c.className === "fold-label") || {}).textContent) === "思维链");
+check("折叠计数", String((sumParts.find((c) => c.className === "fold-count") || {}).textContent) === "12");
 check("折叠体在 .fold-body", (fold.children[1] || {}).className === "fold-body");
+
+const det = ui.detail({ lead: "第一层", detail: "第二层", safety: "不可逆" });
+check("分层说明：首层 + 安全文案", det.children.length === 2, String(det.children.length));
+const detLine = det.children[0] || { children: [] };
+check("分层说明：首层文字", (detLine.children[0] || {}).textContent === "第一层");
+const helpBtn = detLine.children[1] || {};
+check("说明按钮是圆框感叹号", helpBtn.className === "help-btn" && helpBtn.ariaLabel === "说明", helpBtn.className);
+helpBtn._h.click[0]({ preventDefault() {}, stopPropagation() {} });
+const helpPop = menuRoot.children[0] || { children: [] };
+check("点说明开小卡片", String(helpPop.className).indexOf("popover") === 0);
+const helpBody = helpPop.children[0] || { children: [] };
+check("小卡片装完整说明", helpBody.children.some((c) => c.textContent === "第二层"));
+check("分层说明：安全文案不折叠", det.children[1].className === "detail-safety" && det.children[1].textContent === "不可逆");
+ui.closePopover();
 
 const overlay = el("div");
 const panel = el("div");
@@ -199,14 +215,6 @@ check("说明块", dv.className === "cfg-sec-title" && dv.textContent === "服�
 const nt = ui.hint("读了后端字段", "warn");
 check("旁注带状态类", nt.className === "cfg-hint warn" && nt.textContent === "读了后端字段");
 check("旁注无状态类", ui.hint("纯说明").className === "cfg-hint");
-
-// h()：保留键各归其位，其余直接赋属性，空子节点跳过。
-let hClicked = 0;
-const hn = ui.h("button", { class: "btn", text: "去", type: "button", attrs: { "aria-label": "去设置" }, dataset: { id: "x" }, on: { click: () => { hClicked += 1; } } }, null, ui.icon("gear"), false);
-check("h：类 / 文字 / 属性", hn.className === "btn" && hn.textContent === "去" && hn.type === "button" && hn.attrs["aria-label"] === "去设置" && hn.dataset.id === "x");
-check("h：只挂元素子节点", hn.children.length === 1 && hn.children[0].className === "ui-icon");
-hn._h.click[0]();
-check("h：事件接线", hClicked === 1);
 
 if (failures.length) {
   console.log(failures.join("\n"));

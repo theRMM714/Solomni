@@ -12,12 +12,12 @@ import { createOverlays } from './overlays.js';
 export function createUi(g) {
   const dom = createDom(g);
   const icons = createIcons(dom);
+  const overlays = createOverlays(dom, icons);
   return {
     el: dom.el,
-    h: dom.h,
     ...icons,
     ...createButtons(dom, icons),
-    ...createForms(dom),
-    ...createOverlays(dom, icons),
+    ...createForms(dom, overlays),
+    ...overlays,
   };
 }

@@ -3,6 +3,8 @@
  * 不管：状态栏里的那行速览（见 status-bar/）；确认框与提示（见 ui/dialog.js）。
  * 联动：由 app/main.js 装配；渲染与动作经 app.* 晚绑定（含 actions/ 与 transcript/ 的入口）。 */
 
+import { workCopy } from './copy.js';
+
 let doc, state, api, ui, app;
 let btn;
 const act = (...a) => app.act(...a);
@@ -46,7 +48,7 @@ function popoverBox(title, close) {
   x.type = 'button';
   x.className = 'popover-close';
   x.setAttribute('aria-label', '关闭');
-  x.textContent = '✕';
+  x.appendChild(ui.icon('close'));
   x.onclick = close || (() => ui.closePopover());
   head.appendChild(h); head.appendChild(x);
   box.appendChild(head);
@@ -103,9 +105,7 @@ function fillShellCard(body, sh) {
     out.textContent = sh.output;
     body.appendChild(out);
   }
-  body.appendChild(popoverNote(sh.historical
-    ? '来自转录回放：耗时与 cwd 取自当时的回执；完整回执在转录的 shell 工具行。'
-    : '完整回执在转录的 shell 工具行；这里只保留最近一次。'));
+  body.appendChild(popoverNote(sh.historical ? workCopy.historical : workCopy.fresh));
   return durRow.children[1];
 }
 
@@ -154,7 +154,7 @@ function openContextCard(s, anchor) {
   const box = popoverBox('上下文用量');
   const c = s.context;
   if (!c) {
-    box.appendChild(popoverNote('还没有模型调用。下一次调用后这里会显示精确用量；拿不到供应商 usage 时按字符估算并标注。'));
+    box.appendChild(popoverNote(workCopy.noContext));
     ui.popover(anchor, box, { label: '上下文用量' });
     return;
   }
@@ -241,7 +241,8 @@ function openToolsMenu(chip, s) {
       onClick: () => switchContextFreshness(s.sid, !s.context_freshness),
     },
     {
-      label: '开：读过的文件被改后，那条工具结果换成占位符（省上下文；每次发送要多读一遍对象库，且会失效部分缓存）',
+      label: workCopy.freshnessOff.label,
+      reason: workCopy.freshnessOff.reason,
       disabled: true,
     },
   ]);

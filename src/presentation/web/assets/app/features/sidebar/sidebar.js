@@ -4,6 +4,7 @@
  * 联动：会话读法来自 app/stores/sessions.js；弹层来自 app/ui；刷新走 app.refreshState。 */
 
 import { activePath, generating, historyByParent } from '../../stores/sessions.js';
+import { sidebarCopy } from './copy.js';
 
 let g, doc, state, api, ui, app;
 let fold, h, icon;
@@ -111,11 +112,8 @@ function warnIfTierUnavailable(name) {
   if (!view || view.tier !== 'vm' || view.tier_ready !== false) return;
   const missing = (view.tier_missing || []).join('；') || '本机不具备虚拟机档的前置条件';
   ui.notice(
-    '这条会话的虚拟机档当前不可用',
-    '原因：' + missing +
-      '。\n\n本次仍会打开（历史记录不受影响），但它实际按本机档执行。' +
-      '\n要真正用上虚拟机档：先在本机启用虚拟化（Windows「虚拟机平台」/ Linux 的 /dev/kvm / macOS 11+），' +
-      '并在「编辑」里确认执行档位与虚拟机；暂时不需要就在「编辑」里改回本机档。',
+    sidebarCopy.vmUnavailable.title,
+    '原因：' + missing + '。\n\n' + sidebarCopy.vmUnavailable.kept + '\n' + sidebarCopy.vmUnavailable.enable,
     'warn'
   );
 }
@@ -277,15 +275,22 @@ function applyRail(railed) {
 function openDrawer() {
   const sb = $('#sidebar'); if (sb) sb.classList.add('open');
   const mask = $('#drawer-mask'); if (mask) mask.classList.add('show');
+  const btn = $('#btn-drawer'); if (btn) btn.setAttribute('aria-expanded', 'true');
 }
 
 function closeDrawer() {
   const sb = $('#sidebar'); if (sb) sb.classList.remove('open');
   const mask = $('#drawer-mask'); if (mask) mask.classList.remove('show');
+  const btn = $('#btn-drawer'); if (btn) btn.setAttribute('aria-expanded', 'false');
 }
 
 function toggleSidebar() {
-  if (isNarrow()) { openDrawer(); return; }
+  if (isNarrow()) {
+    const sb = $('#sidebar');
+    if (sb && sb.classList.contains('open')) closeDrawer();
+    else openDrawer();
+    return;
+  }
   applyRail(!state.rail);
   saveRail();
 }

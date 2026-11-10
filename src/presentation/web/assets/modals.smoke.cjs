@@ -194,7 +194,7 @@ if (!loadErrors.length) {
     const defSel = find((n) => n.tagName === "SELECT" && (n.children || []).some((o) => String(o.textContent).indexOf("随供应商默认") >= 0));
     if (!defSel || values(defSel).indexOf("off") < 0) return false;
     if (values(defSel).indexOf("high") >= 0) return false;
-    const del = rows[0].children.find((c) => c.tagName === "BUTTON" && c.textContent === "×");
+    const del = rows[0].children.find((c) => c.tagName === "BUTTON" && String(c.className).indexOf("link-btn") >= 0);
     if (!del) return false;
     del.onclick();
     rows = walk(page, []).filter((n) => String(n.className) === "think-row");

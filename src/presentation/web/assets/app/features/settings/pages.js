@@ -3,6 +3,8 @@
  * 不管：弹层栈本身、设置中心的分页框架（见同目录 hub.js）、保存后的全局重绘。
  * 联动：hub.js 组装分页并调用本文件；本文件经 app 调用 openModalLayer / refreshState；数据来自 state 投影。
  */
+import { settingsCopy } from './copy.js';
+
 let doc, state, api, ui, app;
 let icon, btn, busyButton, textInput, field, numberInput, areaInput, selectInput, syncSelect, checkbox, emptyHint;
 /** 挂载：把本功能的入口登记到 app；跨功能调用一律经 app 晚绑定。 */
@@ -84,11 +86,10 @@ function thinkingTagsEditor(levels) {
   const input = textInput('新档位（如 high、高、xhigh）');
   input.className = 'field-input tag-input';
   const add = btn('+ 添加档位', 'mod-add');
-  const hint = ui.hint('标签就是档位；模型登记按它映射。可以任意写（如 high、高、xhigh），不能为空或重复。');
   const err = ui.hint('', 'err');
   const control = /[\u0000-\u001f\u007f-\u009f]/;
   addRow.appendChild(input); addRow.appendChild(add);
-  node.appendChild(chips); node.appendChild(hint); node.appendChild(err);
+  node.appendChild(chips); node.appendChild(err);
 
   const ids = [];
   for (const l of levels || []) {
@@ -115,8 +116,10 @@ function thinkingTagsEditor(levels) {
       label.className = 'mod-chip-label';
       label.textContent = id;
       chip.title = id;
-      const x = btn('×', 'mod-chip-x');
+      const x = btn('', 'mod-chip-x');
       x.title = '移除 ' + id;
+      x.setAttribute('aria-label', '移除 ' + id);
+      x.appendChild(ui.icon('close'));
       x.onclick = () => {
         const i = ids.indexOf(id);
         if (i >= 0) ids.splice(i, 1);
@@ -177,7 +180,7 @@ function thinkingMapEditor() {
   addRow.className = 'wf-inline';
   const add = btn('+ 添加映射', 'mod-add');
   addRow.appendChild(add);
-  const hint = ui.hint('字符串 = {"reasoning_effort": 值} 简写；{...} = 原样合并进请求体（保留键会被拒）。每行的值都不能为空。');
+  const hint = ui.detail(settingsCopy.thinkingMapping);
   const defSel = selectInput([{ value: '', label: '（不指定：随供应商默认）' }], '');
   const defaultField = field('思考默认档（只能选已映射的档）', defSel);
   const defHint = ui.hint('不指定 = 随供应商默认；会话没选档时用它。');
@@ -226,8 +229,10 @@ function thinkingMapEditor() {
     input.className = 'field-input think-value';
     input.value = row.value;
     input.addEventListener('input', () => { row.value = input.value; });
-    const del = btn('×', 'link-btn danger');
+    const del = btn('', 'link-btn danger');
     del.title = '移除这一行';
+    del.setAttribute('aria-label', '移除这一行');
+    del.appendChild(ui.icon('close'));
     del.onclick = () => removeRow(row);
     sel.onchange = () => { row.level = sel.value; syncAll(); };
     node.appendChild(sel); node.appendChild(eq); node.appendChild(input); node.appendChild(del);
@@ -559,8 +564,8 @@ function coreModelBlock(c, subscribe) {
 /* ---------- 设置④：基本设置 ---------- */
 /// 设置 1–4 页共用的控件：一次建全，切页只切显示——保存是全量写，不能因为没建过某页丢改动。
 function settingsForm() {
-  const stream = checkbox('流式传输（供应商逐片返回，边收边显示）', state.settings.streaming);
-  const cot = checkbox('思维链显示（每条回答下的思维链，永远默认折叠、点击展开）', state.settings.show_reasoning);
+  const stream = checkbox('流式传输', state.settings.streaming, '供应商逐片返回，边收边显示');
+  const cot = checkbox('思维链显示', state.settings.show_reasoning, '每条回答下的思维链，默认折叠、点击展开');
   const to = numberInput('等待首个响应的超时（秒）', state.settings.llm_timeout_secs, 10, 3600);
   const remind = numberInput('一轮内最多提醒几次', state.settings.discuss_remind_cap, 0, 20);
   const pct = numberInput('上下文用到百分之多少就压缩', state.settings.compact_at_percent, 0, 100);
@@ -588,8 +593,8 @@ function settingsForm() {
   };
   // 思考等级目录：标签即档位，顺序即界面顺序。模型登记只能引用这里的标签。
   const thinkLevels = thinkingTagsEditor(app.thinkingLevels());
-  const network = checkbox('允许工具 / guest / 常驻服务 / 构建出站（全局）', !!sp.network);
-  const writeAcl = checkbox('允许 Windows 写本机目录 ACL（只影响 Windows 的容器围栏）', !!(sp.windows && sp.windows.write_acl));
+  const network = checkbox('允许出站网络', !!sp.network, '工具 / guest / 常驻服务 / 构建都算在内，全局生效');
+  const writeAcl = checkbox('允许 Windows 写本机目录 ACL', !!(sp.windows && sp.windows.write_acl), '只影响 Windows 的容器围栏');
   const level = (v) => selectInput([
     { value: 'require', label: 'require：必须强制，不可用时询问是否本进程降级' },
     { value: 'best_effort', label: 'best_effort：尽力而为，不可用时降级并如实报告' },
@@ -638,7 +643,7 @@ function settingsForm() {
     Object.entries(sd.tools || {}).map(([k, v]) => k + '=' + v),
   );
   const st = state.settings.storage || {};
-  const stPeriodic = checkbox('启用全局周期回收（关掉只停周期；构建前 headroom 始终启用）', st.periodic_gc !== false);
+  const stPeriodic = checkbox('启用全局周期回收', st.periodic_gc !== false, '关掉只停周期；构建前 headroom 始终启用');
   const stInterval = numberInput('全局自动回收间隔（分钟，至少 15）', st.gc_interval_minutes == null ? 15 : st.gc_interval_minutes, 15, 10080);
   const stCap = numberInput('可回收缓存总预算（GiB；0 = 按磁盘 10%）', st.cache_cap_gib == null ? 20 : st.cache_cap_gib, 0, 4096);
   const stKeep = numberInput('超过多少天未使用可回收（0 = 不按龄）', st.cache_keep_days == null ? 30 : st.cache_keep_days, 0, 3650);
@@ -745,8 +750,9 @@ const SETTINGS_PAGES = [
 function choiceModal(title, question, actions) {
   // 叠在现有弹层之上：从向导里弹出来时，选完能回到向导（不丢已填内容）。
   ui.openModalLayer(title, (c) => {
-    const q = doc.createElement('div'); q.className = 'wf-label'; q.textContent = question;
-    c.body.appendChild(q);
+    c.body.appendChild(question && typeof question === 'object'
+      ? ui.detail(question)
+      : (() => { const q = doc.createElement('div'); q.className = 'wf-label'; q.textContent = question; return q; })());
     const row = doc.createElement('div'); row.className = 'wf-inline';
     for (const a of actions) {
       const b = btn(a[0], a[1] || 'btn');

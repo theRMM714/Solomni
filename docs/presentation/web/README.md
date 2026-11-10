@@ -10,7 +10,7 @@
 - 管：浏览器端覆盖三种工作形态（single / collab / **proxy**）的建工作向导与会话视图：代理形态不问名单与需求（选它就是授予全权），会话说明与侧栏标出「已停止 / 已关闭」（持久运行态）。
 - 管：转录里的**内容类系统提示**是 `notice` 行（有会话内 id、可回档 / 折叠）；过程性提示、工具层确认与基础设施故障仍是瞬时事件——前端两种都按系统行画，只有前者带 id（见 [session-model.md](../../session/session-model.md) 的「系统消息」）。
 - **一轮 = 一条回复**：同 `reply` 的正文 / 思维链 / 工具行合成一个气泡（身份 / 思维链 / 正文 / 工具组，整轮可折叠）；定稿渲染只**追加**新行，同一回复的后续工具行只重建最后那一轮；流式块也按同一轮容器渲染（消息 + 随后的工具调用），增量按 `requestAnimationFrame` 合并。**工具卡只有「参数 / 结果」**；助手原文是回复级事实，整轮气泡里只显示一次（原生模式下与可见正文相同则不重复）。
-- **输入区上方是会话状态栏**：最多三个状态 chip（图标 + 简要信息，点击展开锚定小卡片）——「上下文」显示最近一次调用的精确 token 数 / 窗口百分比（供应商没回 usage 时标「≈ 估算」；协作主会话没有持续对话，不显示），「共享区」显示当前 head 与相对时间。
+- **输入区上方是会话状态栏**：按会话与运行情况出现状态 chip（图标 + 简要信息，点击展开锚定小卡片）——权限档位、思考强度、`shell` 回执、上下文用量、工具、共享区 head；内容超出 760px 列时可横向滚动（左右按钮、鼠标拖拽、方向键），触屏原生横滑。「上下文」显示最近一次调用的精确 token 数 / 窗口百分比（供应商没回 usage 时标「≈ 估算」；协作主会话没有持续对话，不显示），「共享区」显示当前 head 与相对时间。
 - 「shell」在跑过 shell 后出现：运行中显示耗时（每秒更新），结束后按 `ShellLive.status` 分四种 chip 文案：`shell 退出码 N · 耗时` / `shell 超时 · 耗时` / `shell 停止 · 耗时` / `shell 中止（信号）· 耗时`；点开看命令、scope、cwd、状态、退出码、耗时与回执预览，卡片「状态」行同样区分成功 / 超时 / 用户停止 / 被信号结束（完整回执在转录的 shell 工具行）。
 - 历史回放 / 重建的会话按转录派生同一份快照（chip 加「（历史）」，cwd 与耗时取自当时的回执，cwd 是本环境写法：虚拟机档是 guest 内路径）；运行中打开的卡片随状态刷新重画，不用重开。
 - 「全部提交」打开提交历史（分页、`on_head` 标记、提交详情、文本文件 16 KiB 预览），选中提交可**非破坏性回滚**（目标之后的提交仍保留；`expect_head` 防陈旧，运行中的工作子树拒绝）。回滚成功落一条 `notice` 行，刷新 / 回放仍可见（见 [workspace/README.md](../../workspace/README.md) 与 [session-model.md](../../session/session-model.md)）。
@@ -45,10 +45,21 @@
 - 目录即依赖方向：`src/presentation/web/assets/app/core/` 不依赖其它层；`src/presentation/web/assets/app/stores/` 与 `src/presentation/web/assets/app/ui/` 只依赖 `core/`；`src/presentation/web/assets/app/features/` 下的每个功能只依赖 `core/`、`stores/`、`ui/` 与自己的目录，功能之间互不 import——跨功能调用经装配点注入的晚绑定入口。
 - 判定：`tests/gates/structure/webLayers.js`（T0 结构审查的 `structure/web-layers`）扫描 `src/presentation/web/assets/app/**/*.js` 的 import 方向与 `src/presentation/web/assets/index.html` 的入口脚本；文件 400 行只是回执软线，超线不判失败。
 
+## 二、视觉、文案与开发陈列
+
+- **只做深色**：色板与语义层都在 `src/presentation/web/assets/tokens.css`（中性色阶 + 5 档字号 + 4/8 间距 + 3 档阴影 + 动效时长）；`src/presentation/web/assets/ui.css` 与 `src/presentation/web/assets/style.css` 只用 `var(--…)`，不得出现字面量颜色、时长，也不得写字面量 `font-size` / `line-height` / `font-family`。判据是 `src/presentation/web/assets/tokens.smoke.cjs`。
+- **对比度是门禁**：同一脚本对 23 组前景 / 背景按 WCAG 复算，正文 ≥ 4.5:1、控件边界与焦点 ≥ 3:1；色值或配对改了没重算，`frontend-smoke` 直接失败。`--color-bg` 这个名字被 `src/tests/routes.rs` 钉住，改名要同改测试。
+- **图标只有一处来源**：`src/presentation/web/assets/app/ui/icons.js` 的 `ICONS`（内联 SVG、`stroke="currentColor"`、`aria-hidden="true"`）；字符字形不当图标用，图标按钮必须有 `aria-label` 或 `title`。
+- **文案事实不删、只换位置**：首层只留做决定所需的信息（`lead` ≤ 40 汉字），原理与影响范围收进 `ui.detail`（短说明 → ⓘ 弹层，长说明 → 原生 `details` 的「详情」）；安全、不可逆、生效范围类文案用 `safety` 常显、不折叠、不截断。每个有首层文案的功能一份 `copy.js`（纯数据，不是组件），`src/presentation/web/assets/copy.smoke.cjs` 禁止 `copy.js` 之外出现 ≥ 40 汉字的内联中文。
+- **动效只表示「正在工作」**：转录轮左缘 2px 状态轨在生成 / 工具执行时呼吸，完成收成 1px 中性线、失败转红；弹层进出 120ms。`prefers-reduced-motion: reduce` 下 `tokens.css` 把全部时长归零，不另写分支。
+- **组件陈列页是开发工具**：`src/presentation/web/assets/dev/gallery.html` 经 `/assets/dev/gallery.html` 访问，只在 debug 构建嵌入（`build.rs` 的 `DEV_ONLY_DIRS` + `PROFILE`；`src/tests/routes.rs` 的 `dev_assets_follow_build_profile` 双向断言），发行版不带；`src/presentation/web/assets/dev/gallery.smoke.cjs` 校验它引用的是真实组件工厂、不写死颜色、不引外网。
+
 ## 改动本单元时必须同步
 
 - 增删路由 → 五处同改：`src/presentation/web/routes.rs` 的 `ROUTES`、前端调用点、`docs/presentation/contracts.md` 的 ROUTES 段、`src/tests/routes.rs`（机器比对）、`demo/*.mjs` 的调用点；前端资源改动跑冒烟。
 - 增删前端文件 → **不改路由**：`build.rs` 编译期扫描 `assets/` 自动进嵌入表（经 `/assets/{*path}` 提供）；新扩展名要先加进 `build.rs` 的 `SERVED`，否则构建失败。
+- 改令牌、字号阶梯、间距或对比度配对 → 同改 `tokens.smoke.cjs`（5 档字号严格递增且 `--fs-base: 16px`、`--sp-*` 是 4 的倍数、颜色令牌为不透明 hex、未引用令牌失败、23 组对比度）；改组件外观 → 同步 `src/presentation/web/assets/dev/gallery.js` 的对应分区并跑 `src/presentation/web/assets/dev/gallery.smoke.cjs`。
+- 改首层文案 → 落进该功能的 `copy.js`（`lead` / `detail` / `safety` 三段），跑 `copy.smoke.cjs`；不要为了省事把长说明塞回首层。
 - 增删或移动前端模块 → 依赖方向由 `tests/gates/structure/webLayers.js` 判定（`structure/web-layers`），并跑 `node run-tests.js` 的 `frontend-smoke`；分区职责改完同步本页与 [`unit-map.md`](unit-map.md)。
 - 测试缺口：本单元**不是业务能力**，没有独立的缺口账；缺口记在 `tests/gaps.yaml`；格式见 [docs/testing/gaps-acceptance.md](../../../docs/testing/gaps-acceptance.md) 的「缺口账」。
 

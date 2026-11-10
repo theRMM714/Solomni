@@ -28,6 +28,8 @@ function el(tag) {
     classList: { add() {}, remove() {} },
     // 事件处理器**记下来**（不丢）：冒烟要能像用户那样触发它（如向导里切档位、勾模块）。
     addEventListener(t, f) { (node._h[t] = node._h[t] || []).push(f); },
+    setPointerCapture() { node.captured = (node.captured || 0) + 1; },
+    releasePointerCapture() { node.released = (node.released || 0) + 1; },
     setAttribute(k, v) { (node.attrs = node.attrs || {})[k] = String(v); },
     querySelector: () => el(),
     appendChild(c) { node.children.push(c); if (c) c.parentNode = node; },
@@ -567,6 +569,32 @@ setTimeout(async () => {
       if (!onlyLastStreams) loadErrors.push("流式光标检查：块数=" + r.n + "、首块=" + r.first + "、末块=" + r.last);
     } catch (e) { loadErrors.push("流式光标检查失败：" + e.message); }
   }
+  // **流式 Markdown**：第二片到达时仍要重渲染，不能退回 textContent。
+  // 这里曾因 updateLiveGroup 的参数 g 遮蔽了注入上下文 g，`g.markdownToHtml` 恒为 undefined：
+  // 首片有 Markdown，之后每一片都被纯文本覆盖，直到定稿才恢复。
+  let liveMarkdown = false;
+  if (!loadErrors.length) {
+    try {
+      sandbox.markdownToHtml = (t) => '<b>' + String(t) + '</b>';
+      const r = vm.runInNewContext(
+        "(function () {" +
+          "const s = { sid: 'mdl', lines: [], live: [], sending: true, done: false, readonly: false, fold: {}, scroll: {} };" +
+          "state.sessions.set('mdl', s); state.activeSid = 'mdl';" +
+          "absorb(s, { type: 'delta', kind: 'start', speaker: 'a', text: '' });" +
+          "absorb(s, { type: 'delta', kind: 'text', speaker: 'a', text: '**甲**' });" +
+          "renderStream(true);" +
+          "absorb(s, { type: 'delta', kind: 'text', speaker: 'a', text: '乙' });" +
+          "renderStream();" +
+          "const box = document.querySelector('#stream');" +
+          "let md = null; (function walk(n) { for (const c of (n.children || [])) { if (String(c.className).indexOf('md') >= 0) md = md || c; walk(c); } })(box);" +
+          "return { html: md && md.innerHTML, text: md && md.textContent }; })()",
+        sandbox
+      );
+      liveMarkdown = !!r && r.html === '<b>**甲**乙</b>' && r.text === '';
+      if (!liveMarkdown) loadErrors.push("流式 Markdown 检查：" + JSON.stringify(r));
+    } catch (e) { loadErrors.push("流式 Markdown 检查失败：" + e.message); }
+    finally { delete sandbox.markdownToHtml; }
+  }
   // **运行态归一**：事件是唯一真相，/api/state 的 running 只是**对账副本**。
   //  ① 有实时知识的会话：快照说在跑也不能覆盖（收尾事件到了就是收尾）；
   //  ② 没有实时知识的会话：快照补齐（刚刷新页面照样显示"正在工作"），快照说没跑就清掉本地遗留；
@@ -886,7 +914,23 @@ setTimeout(async () => {
           " const withHist = run('s6', 'single', ctx, head, shellHist);" +
           " const shellHistTimeout = { command: 'sleep 99', scope: 'sandbox', cwd: '/x', started_at: 0, finished_at: null, elapsed_secs: 2, exit_code: null, ok: false, status: 'timeout', output: '', historical: true };" +
           " const withHistTimeout = run('s10', 'single', ctx, head, shellHistTimeout);" +
-          " return { single: single, proxy: proxy, collab: collab, withShell: withShell, withTimeout: withTimeout, withStopped: withStopped, withSignal: withSignal, withThinking: withThinking, withHist: withHist, withHistTimeout: withHistTimeout };" +
+          " const bar = box.children[0];" +
+          " const kids = bar ? (bar.children || []) : [];" +
+          " const has = function (c, cls) { return String(c.className).indexOf(cls) >= 0; };" +
+          " const innerEl = kids.filter(function (c) { return has(c, 'session-status-inner'); })[0];" +
+          " const btns = kids.filter(function (c) { return has(c, 'status-scroll-btn'); });" +
+          " return { single: single, proxy: proxy, collab: collab, withShell: withShell, withTimeout: withTimeout, withStopped: withStopped, withSignal: withSignal, withThinking: withThinking, withHist: withHist, withHistTimeout: withHistTimeout," +
+          "   bar: bar ? bar.className : '', btns: btns.length," +
+          "   drag: (function () { if (!innerEl) return null;" +
+          "     const down = { pointerType: 'mouse', button: 0, clientX: 0, pointerId: 1, preventDefault: function () {} };" +
+          "     const move = { pointerType: 'mouse', button: 0, clientX: 12, pointerId: 1, preventDefault: function () {} };" +
+          "     (innerEl._h.pointerdown || []).forEach(function (f) { f(down); }); const afterDown = innerEl.captured || 0;" +
+          "     (innerEl._h.pointermove || []).forEach(function (f) { f(move); }); const afterMove = innerEl.captured || 0;" +
+          "     (innerEl._h.pointerup || []).forEach(function (f) { f({ pointerId: 1 }); }); const afterUp = innerEl.released || 0;" +
+          "     return { afterDown: afterDown, afterMove: afterMove, afterUp: afterUp, hasDown: !!(innerEl._h.pointerdown || []).length };" +
+          "   })()," +
+          "   innerLabel: innerEl && innerEl.attrs ? innerEl.attrs['aria-label'] : ''," +
+          "   innerRole: innerEl && innerEl.attrs ? innerEl.attrs.role : '', innerTab: innerEl ? innerEl.tabIndex : -1 };" +
           "})()",
         sandbox
       );
@@ -900,7 +944,12 @@ setTimeout(async () => {
       const thinkingOk = r.withThinking.length === 4 && r.withThinking.some((t) => /思考 high/.test(t));
       const histOk = r.withHist.length === 4 && r.withHist.some((t) => /shell 退出码 1（历史）/.test(t));
       const histTimeoutOk = r.withHistTimeout.length === 4 && r.withHistTimeout.some((t) => /shell 超时（历史）/.test(t));
-      statusBarRules = singleOk && proxyOk && collabOk && shellOk && timeoutOk && stoppedOk && signalOk && thinkingOk && histOk && histTimeoutOk;
+      // 横向滚动的容器与左右按钮：溢出时才显形，结构必须一直在（否则窄屏无法用键盘/按钮滚到底）。
+      const scrollOk = r.bar === 'session-status-bar' && r.btns === 2
+        && r.innerLabel === '会话状态，可横向滚动' && r.innerRole === 'group' && r.innerTab === 0;
+      // 按下不能抢指针：抢了 click 就落到滚动容器，chip 自己点不开。只有拖动超过 4px 才捕获。
+      const dragOk = !!r.drag && r.drag.hasDown && r.drag.afterDown === 0 && r.drag.afterMove === 1 && r.drag.afterUp === 1;
+      statusBarRules = singleOk && proxyOk && collabOk && shellOk && timeoutOk && stoppedOk && signalOk && thinkingOk && histOk && histTimeoutOk && scrollOk && dragOk;
       if (!statusBarRules) loadErrors.push("状态栏检查：" + JSON.stringify(r));
     } catch (e) { loadErrors.push("状态栏检查失败：" + e.message); }
   }
@@ -986,7 +1035,7 @@ setTimeout(async () => {
   const ok = alerts.length === 0 && loadErrors.length === 0 && rendered && tierWarned && identityKept
     && pollConn === "已连接" && pollApplied && hydratedHistory && liveReplaced && liveClearedOnIdle && toolReasoningRendered
     && rewoundApplies && readonlyRule
-    && taskButtonRule && decisionCardRule && onlyLastStreams && lineRule && toolOnlyReasoning && incrementalAppend && pendingReplaced && noticeRow && modalDismiss && rewindIcon && runningRules && atMenuRefetches && slashMenu
+    && taskButtonRule && decisionCardRule && onlyLastStreams && liveMarkdown && lineRule && toolOnlyReasoning && incrementalAppend && pendingReplaced && noticeRow && modalDismiss && rewindIcon && runningRules && atMenuRefetches && slashMenu
     && wizardProxy && wizardBlocked && sessionNoteRule && historyRunTag && fenceBanner && nodeCard && tabLadder
     && statusBarRules && thinkingMenuRules && shellCardRules && consoleErrors.length === 0;
   if (!ok) {
@@ -994,7 +1043,7 @@ setTimeout(async () => {
     console.log("notice 渲染:", rendered, "| 虚拟机档不可用提示:", tierWarned, "| 身份标题保留:", identityKept);
     console.log("轮询状态点:", JSON.stringify(pollConn), "| 事件已应用:", pollApplied, "| 盘上转录已补:", hydratedHistory, "| 流式被替换:", liveReplaced, "| 空闲清理:", liveClearedOnIdle, "| 思维链:", toolReasoningRendered);
     console.log("回档重置:", rewoundApplies, "| 只读会话:", readonlyRule, "| notice 行:", noticeRow, "| 弹层判据:", modalDismiss, "| 回档图标:", rewindIcon, "| tool-only 思维链:", toolOnlyReasoning, "| 增量追加:", incrementalAppend, "| 乐观替换:", pendingReplaced);
-    console.log("运行态归一（事件为准 / 快照只对账）:", runningRules, "| @ 菜单每次重拉:", atMenuRefetches, "| / 命令菜单:", slashMenu);
+    console.log("流式 Markdown:", liveMarkdown, "| 运行态归一（事件为准 / 快照只对账）:", runningRules, "| @ 菜单每次重拉:", atMenuRefetches, "| / 命令菜单:", slashMenu);
     console.log("向导代理形态:", wizardProxy, "| 会话级说明:", sessionNoteRule, "| 侧栏运行态:", historyRunTag, "| 围栏横幅:", fenceBanner, "| 节点卡:", nodeCard, "| 标签梯级:", tabLadder, "| 状态栏:", statusBarRules);
     console.log("应用侧 console.error:", JSON.stringify(consoleErrors.slice(0, 3)));
     console.log("loadErrors:", JSON.stringify(loadErrors));

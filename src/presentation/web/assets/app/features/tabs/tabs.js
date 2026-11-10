@@ -121,7 +121,8 @@ function renderTabs() {
       if (opened) {
         const close = doc.createElement('span');
         close.className = 'close';
-        close.textContent = '✕';
+        close.title = '关闭标签';
+        close.appendChild(ui.icon('close'));
         close.onclick = (e) => { e.stopPropagation(); closeView(name); };
         el.appendChild(close);
       }

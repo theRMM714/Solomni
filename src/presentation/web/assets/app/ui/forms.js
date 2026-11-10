@@ -3,7 +3,7 @@
  * 不管：校验规则、选项从哪来、保存。
  * 联动：样式类 `.field-input` / `.wf-field` / `.chk` / `.reg-empty` 在 `assets/style.css` 与 `assets/ui.css`。 */
 
-export function createForms(dom) {
+export function createForms(dom, overlays) {
   const doc = dom.doc;
 
   function textInput(placeholder, type) {
@@ -13,10 +13,34 @@ export function createForms(dom) {
     return i;
   }
 
-  function field(labelText, input) {
+  function field(labelText, input, helpCopy) {
     const wrap = doc.createElement('div'); wrap.className = 'wf-field';
     const lab = doc.createElement('div'); lab.className = 'wf-label'; lab.textContent = labelText;
     wrap.appendChild(lab); wrap.appendChild(input);
+    return helpCopy ? attachHelp(wrap, helpCopy) : wrap;
+  }
+
+  /**
+   * 把说明挂到已有字段上：感叹号按钮进入标题行，lead 挂在标题下方（CSS 定位，不改节点顺序），
+   * safety 常显在控件下方。控件工厂（numberInput 等）先建好节点，调用方拿到 copy 再挂。
+   */
+  function attachHelp(wrap, copy) {
+    if (!wrap || !copy) return wrap;
+    let lab = null;
+    for (const n of wrap.children || wrap.childNodes || []) {
+      if (n.className === 'wf-label') { lab = n; break; }
+    }
+    if (lab && overlays && copy.detail) lab.appendChild(overlays.help(copy));
+    if (lab && copy.lead) {
+      const lead = doc.createElement('p'); lead.className = 'wf-lead'; lead.textContent = copy.lead;
+      wrap.appendChild(lead);
+    }
+    if (copy.safety) {
+      const s = doc.createElement('p');
+      s.className = 'detail-safety' + (copy.safetyKind ? ' ' + copy.safetyKind : '');
+      s.textContent = copy.safety;
+      wrap.appendChild(s);
+    }
     return wrap;
   }
 
@@ -59,19 +83,24 @@ export function createForms(dom) {
     return sel.value;
   }
 
-  function choice(type, labelText, checked) {
+  function choice(type, labelText, checked, note) {
     const wrap = doc.createElement('label'); wrap.className = 'chk';
     const box = doc.createElement('input'); box.type = type; box.checked = !!checked;
-    const span = doc.createElement('span'); span.textContent = labelText;
-    wrap.appendChild(box); wrap.appendChild(span);
+    const text = doc.createElement('span'); text.className = 'chk-text';
+    text.textContent = labelText;
+    if (note) {
+      const small = doc.createElement('span'); small.className = 'chk-note'; small.textContent = note;
+      text.appendChild(small);
+    }
+    wrap.appendChild(box); wrap.appendChild(text);
     return { wrap, box };
   }
 
-  function checkbox(labelText, checked) { return choice('checkbox', labelText, checked); }
+  function checkbox(labelText, checked, note) { return choice('checkbox', labelText, checked, note); }
 
   /** 单选：同 `group` 即互斥；`disabled` = 这一项此刻不可选。 */
-  function radio(labelText, checked, group, disabled) {
-    const r = choice('radio', labelText, checked);
+  function radio(labelText, checked, group, disabled, note) {
+    const r = choice('radio', labelText, checked, note);
     r.box.name = group; r.box.disabled = !!disabled;
     return r;
   }
@@ -93,5 +122,5 @@ export function createForms(dom) {
     return e;
   }
 
-  return { div, hint, textInput, field, numberInput, areaInput, selectInput, syncSelect, checkbox, radio, emptyHint };
+  return { div, hint, textInput, field, attachHelp, numberInput, areaInput, selectInput, syncSelect, checkbox, radio, emptyHint };
 }

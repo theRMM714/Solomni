@@ -4,6 +4,7 @@
  * 联动：模型选项来自 app.modelOptions；弹层来自 app/openModal；刷新走 app.refreshState。 */
 
 import { thinkingLabel } from '../../stores/settings.js';
+import { sessionConfigCopy } from './copy.js';
 
 let g, doc, api, ui, app;
 let areaInput, btn, emptyHint, field, hint, selectInput, syncSelect, textInput;
@@ -67,7 +68,7 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
     ? '协作（N 个 agent，各自独立沙箱）'
     : '单 agent（恰好 1 个 agent，模块数不限）')));
   head.appendChild(frozen
-    ? ui.hint('这轮会话已经开过：agent 名单与形态冻结 —— 名字只读、不能增删 agent（要换人请新建会话）。模块与模型仍可改。', 'warn')
+    ? ui.detail(sessionConfigCopy.frozen)
     : ui.hint('这轮会话还没有内容：agent 名单与形态都还改得动。'));
   box.appendChild(head);
 
@@ -85,8 +86,8 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
   // 与「未接入」是两回事：guest 本体尚未接入这一点写在下面的提示里，两条都如实说。
   const vmOk = cfg.vm_available !== false;
   const tierLocked = !!cfg.tier_locked;
-  const hostR = ui.radio('本机档 —— 脚本直接在宿主上跑：按宿主目标装载 runtimes/ 的包，基础工具链 / 宿主 PATH 回退；隔离就是宿主本身（快，但风险也在宿主上）。', draft.tier === 'host', 'cfg-tier');
-  const vmR = ui.radio('虚拟机档 —— 一整套 guest，脚本在 guest 里跑：按模块声明的运行能力装载运行包；隔离更强，代价是更重、依赖运行包。', draft.tier === 'vm', 'cfg-tier', !vmOk);
+  const hostR = ui.radio('本机档（脚本在宿主上跑）', draft.tier === 'host', 'cfg-tier');
+  const vmR = ui.radio('虚拟机档（脚本在 guest 里跑）', draft.tier === 'vm', 'cfg-tier', !vmOk);
   if (tierLocked) {
     hostR.box.disabled = true;
     vmR.box.disabled = true;
@@ -117,6 +118,7 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
   hostR.box.addEventListener('change', () => { if (hostR.box.checked) { draft.tier = 'host'; syncTier(); } });
   vmR.box.addEventListener('change', () => { if (vmR.box.checked) { draft.tier = 'vm'; syncTier(); } });
   secT.appendChild(hostR.wrap); secT.appendChild(vmR.wrap);
+  secT.appendChild(ui.detail(sessionConfigCopy.tier));
   // 前置逐项照抄后端（缺哪几项、每项怎么补），界面不自己编话、也不笼统说"前置条件不具备"。
   const reqs = cfg.vm_requirements || [];
   if (!vmOk) {
@@ -127,8 +129,12 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
       for (const r of reqs) {
         const line = doc.createElement('div');
         line.className = 'cfg-hint' + (r.met ? '' : ' err');
-        line.textContent =
-          (r.met ? '✓ ' : '✗ ') + r.detail + (r.met ? '' : '　怎么补：' + r.how);
+        const mark = ui.icon(r.met ? 'check' : 'close');
+        mark.className += ' cfg-mark' + (r.met ? ' ok' : ' err');
+        const text = doc.createElement('span');
+        text.textContent = r.detail + (r.met ? '' : '　怎么补：' + r.how);
+        line.appendChild(mark);
+        line.appendChild(text);
         box2.appendChild(line);
       }
       secT.appendChild(box2);
@@ -185,7 +191,7 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
   // 会话权限：四档 + 共享区三态 + 逐工具决定（网络是全局开关，不在这里）
   const secPerm = ui.div('cfg-sec');
   secPerm.appendChild(ui.div('cfg-sec-title', '会话权限'));
-  secPerm.appendChild(ui.hint('网络由全局 sandbox.policy.network 控制；本会话不可单独改。子会话只能换更低档、只能收窄。'));
+  secPerm.appendChild(ui.detail(sessionConfigCopy.network));
   const perm = draft.permission || {};
   const parseLines = (text) => String(text || '')
     .split(/[\n,]/).map((s) => s.trim()).filter((s) => s.length > 0);
@@ -281,7 +287,7 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
     } catch (e) { c.setMsg(e.message, true); }
   };
   secThink.appendChild(field('思考强度', thinkSel));
-  secThink.appendChild(ui.hint(think.note || '只作用于对话生成；核心内部编排保持供应商默认。只列这组模型都登记了的档；选中共同默认档 = 跟随模型默认。'));
+  secThink.appendChild(think.note ? ui.hint(think.note) : ui.detail(sessionConfigCopy.thinkNote));
   box.appendChild(secThink);
 
   // 动作
@@ -336,7 +342,7 @@ function cfgAgentBlock(a, idx, frozen, modelSyncs) {
   nameIn.disabled = frozen;
   nameIn.addEventListener('input', () => { a.name = nameIn.value; });
   row.appendChild(field(frozen ? '名字（只读）' : '名字', nameIn));
-  if (frozen) row.appendChild(ui.hint('会话已经开过：名单与形态冻结 —— 名字改不了（要换人请新建会话）；模块与模型仍可改。', 'warn'));
+  if (frozen) row.appendChild(ui.detail(sessionConfigCopy.agentFrozen));
 
   const chips = app.moduleChips({
     selected: () => a.modules,
@@ -362,16 +368,14 @@ function cfgRuntimeBlock(rt, dir, savedTier, rescan) {
   const head = ui.div('cfg-sec-head');
   head.appendChild(ui.div('cfg-sec-title', '运行能力（模块声明 / 包库可用 / 缺什么）'));
   const again = btn('重新扫描', 'btn');
-  again.title = '重新读取这个会话的配置（模块清单与依赖文件夹每次读取都重扫，放入即出现）；未保存的改动会随之丢弃';
+  again.title = sessionConfigCopy.rescanTitle;
   again.onclick = rescan;
   head.appendChild(again);
   sec.appendChild(head);
 
   sec.appendChild(ui.div('cfg-line', '依赖文件夹（运行包放这里）：'));
   sec.appendChild(ui.div('cfg-dir', dir || '（后端没有给出依赖文件夹路径）'));
-  sec.appendChild(ui.hint(savedTier === 'host'
-    ? '已保存的是本机档：运行包按宿主目标装载，包 bin/ 进本次执行的 PATH；缺包或缺本机载荷 = 该模块的工具不执行（会话照样进行，如实说明缺什么）。'
-    : '已保存的是虚拟机档：按模块声明的运行能力装载运行包；缺包 = 该模块的工具不执行（会话照样进行，如实说明缺什么）。'));
+  sec.appendChild(ui.detail(savedTier === 'host' ? sessionConfigCopy.savedHost : sessionConfigCopy.savedVm));
 
   const declared = rt.declared || {};
   const dIds = Object.keys(declared);
