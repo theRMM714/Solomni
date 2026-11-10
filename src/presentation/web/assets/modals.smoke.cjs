@@ -102,7 +102,6 @@ function load(file) {
 }
 require("./app/bridge.js").installBridge(sandbox); // 与浏览器同一段装配：app.js 从 globalThis.solomni 取状态 / HTTP / 事件流
 load("md.js");
-load("ui.js");
 load("app.js");
 
 // 递归收集树里的节点（判"表单真的建出来了"）。

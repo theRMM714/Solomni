@@ -236,9 +236,6 @@ try {
   vm.runInContext(fs.readFileSync(path.join(__dirname, "md.js"), "utf8"), ctx, { filename: "md.js" });
 } catch (e) { loadErrors.push("md load error: " + e.message); }
 try {
-  vm.runInContext(fs.readFileSync(path.join(__dirname, "ui.js"), "utf8"), ctx, { filename: "ui.js" });
-} catch (e) { loadErrors.push("ui load error: " + e.message); }
-try {
   vm.runInContext(fs.readFileSync(path.join(__dirname, "app.js"), "utf8"), ctx, { filename: "app.js" });
 } catch (e) { loadErrors.push("load error: " + e.message); }
 let state = null, renderHistory = null, openConfig = null, closeModalIfAny = null;

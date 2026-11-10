@@ -15,24 +15,13 @@ const core = globalThis.solomni;
 const state = core.state;
 const stores = core.stores;
 const api = core.api;
+/* 组件库（app/ui/）：按名字绑定成本文件里的局部名。 */
+const { btn, busyButton, textInput, numberInput, areaInput, selectInput, field, syncSelect, checkbox, emptyHint } = ui;
 
 /* 登记处一变，所有已打开的分页都跟着同步列表与下拉选项（app/stores/state.js 的 createRegistryWatch）。 */
 const registry = stores.createRegistryWatch(state, (e) => console.error("登记处视图刷新失败：", e));
 function onRegistryChange(fn) { return registry.on(fn); }
 function notifyRegistryChange() { registry.notify(); }
-/** 下拉选项原地换新：保留当前选中；值已不在选项里时退回第一个（或空串）。 */
-function syncSelect(sel, options, current) {
-  const want = current === undefined || current === null ? sel.value : current;
-  sel.innerHTML = "";
-  for (const o of options) {
-    const op = document.createElement("option");
-    op.value = o.value; op.textContent = o.label;
-    sel.appendChild(op);
-  }
-  const has = options.some((o) => o.value === want);
-  sel.value = has ? want : (options.length ? options[0].value : "");
-  return sel.value;
-}
 /** 模型下拉的选项：needEmpty = 带「（核心默认）」空项（会话配置用）。 */
 function modelOptions(current, needEmpty) {
   const opts = (needEmpty ? [{ value: "", label: "（核心默认）" }] : [])
@@ -228,14 +217,6 @@ function reasoningBlock(text, sess, key) {
   const b = document.createElement('div'); b.className = 'cot-body'; b.textContent = text;
   d.appendChild(s); d.appendChild(b);
   return d;
-}
-
-function checkbox(labelText, checked) {
-  const wrap = document.createElement('label'); wrap.className = 'chk';
-  const box = document.createElement('input'); box.type = 'checkbox'; box.checked = !!checked;
-  const span = document.createElement('span'); span.textContent = labelText;
-  wrap.appendChild(box); wrap.appendChild(span);
-  return { wrap, box };
 }
 
 /* ---------- 会话历史：树 + 铅笔菜单 ----------
@@ -542,15 +523,9 @@ function cfgDiv(cls, text) {
 function cfgHint(text, kind) {
   return cfgDiv('cfg-hint' + (kind ? ' ' + kind : ''), text);
 }
-/// 执行档位二选一：原生 radio（同名即互斥）。disabled = 本机承载不了（例如虚拟机档的前置条件不具备）。
-function cfgRadio(labelText, checked, group, disabled) {
-  const wrap = document.createElement('label'); wrap.className = 'chk';
-  const box = document.createElement('input');
-  box.type = 'radio'; box.name = group; box.checked = !!checked; box.disabled = !!disabled;
-  const span = document.createElement('span'); span.textContent = labelText;
-  wrap.appendChild(box); wrap.appendChild(span);
-  return { wrap, box };
-}
+/// 执行档位二选一：disabled = 本机承载不了（例如虚拟机档的前置条件不具备）。
+const cfgRadio = ui.radio;
+
 
 /// 从会话列表的「编辑」进入：面板自己拉配置、自己重绘（保存 / 重新扫描都走这里）。
 function openConfig(sid) {
@@ -1203,7 +1178,7 @@ function toggleSidebar() {
   saveRail();
 }
 
-/// 侧栏的图标与底部设置按钮：HTML 只留骨架，图标从 ui.js 来（不再写字符画）。
+/// 侧栏的图标与底部设置按钮：HTML 只留骨架，图标从组件库 app/ui/icons.js 来。
 function setupSidebar() {
   if (typeof ui === 'undefined') return;
   const foot = $('#btn-settings');
@@ -1234,61 +1209,7 @@ function setupSidebar() {
   }
 }
 
-/* ---------- 通用小构件（只用冒烟桩支持的 API） ---------- */
-function btn(label, cls) {
-  const b = document.createElement('button');
-  b.type = 'button'; b.className = cls || 'btn'; b.textContent = label;
-  return b;
-}
-/* 把按钮置忙（转圈 + 禁用 + 换文案），返回复位函数。为什么要有：一件要等几十秒的事，
- * 界面不给反应就等于告诉用户「卡了」；复位放在 finally 里，失败也一定恢复可点。 */
-function busyButton(b, label) {
-  const was = b.textContent;
-  const wasDisabled = !!b.disabled;
-  b.disabled = true;
-  b.classList.add('busy');
-  if (label) b.textContent = label;
-  return () => {
-    b.classList.remove('busy');
-    b.textContent = was;
-    b.disabled = wasDisabled;
-  };
-}
-function textInput(placeholder, type) {
-  const i = document.createElement('input');
-  i.className = 'field-input'; i.placeholder = placeholder || ''; i.autocomplete = 'off';
-  if (type) i.type = type;
-  return i;
-}
-/** 数字输入 + 标签 + 边界（设置里的"秒"这类：不许留空、不许越界）。 */
-function numberInput(labelText, value, min, max) {
-  const input = textInput('', 'number');
-  input.min = String(min); input.max = String(max);
-  input.value = String(value === undefined || value === null ? '' : value);
-  return { input, wrap: field(labelText, input) };
-}
-function areaInput(placeholder) {
-  const t = document.createElement('textarea');
-  t.className = 'field-input'; t.rows = 3; t.placeholder = placeholder || '';
-  return t;
-}
-function selectInput(options, value) {
-  const s = document.createElement('select');
-  s.className = 'field-input';
-  for (const o of options) {
-    const op = document.createElement('option');
-    op.value = o.value; op.textContent = o.label;
-    s.appendChild(op);
-  }
-  if (value != null) s.value = value;
-  return s;
-}
-function field(labelText, input) {
-  const wrap = document.createElement('div'); wrap.className = 'wf-field';
-  const lab = document.createElement('div'); lab.className = 'wf-label'; lab.textContent = labelText;
-  wrap.appendChild(lab); wrap.appendChild(input);
-  return wrap;
-}
+/* ---------- 通用小构件：组件库在 app/ui/（btn / field / 各类输入见文件顶部的绑定） ---------- */
 /* 虚拟根选择器：选的是**虚拟机**（清单里的一个虚拟根），不是路径——界面从不让人填目录。
  * 每一项如实标注：没装齐（缺哪几条）、各自是什么系统——界面照抄后端事实，不自己编话。 */
 function guestPicker(guests, current, onChange) {
@@ -1321,10 +1242,6 @@ function guestPicker(guests, current, onChange) {
   return { wrap: wrap, sel: sel, hint: hint, sync: sync };
 }
 
-function emptyHint(text) {
-  const e = document.createElement('div'); e.className = 'reg-empty'; e.textContent = text;
-  return e;
-}
 
 /* ---------- 模块选择：已选 chips + 可搜索弹层 ---------- */
 /** 一行预览：把多行压成一行，过长截断（卡片 / 清单用，不冒充全文）。 */

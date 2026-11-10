@@ -1,10 +1,8 @@
-/* 组件库冒烟：图标 / 图标按钮 / 折叠 / toast / 菜单 / 弹层关闭判据。
- * 用法：node src/presentation/web/assets/ui.smoke.cjs   （输出 UI-SMOKE-OK / FAIL）
- * 为什么需要：ui.js 是 no-build 原生 JS，组件结构错了只有真机才看得出来；这里用最小桩 DOM 钉住形状。
+/* 组件库冒烟：图标 / 按钮 / 表单 / 折叠 / toast / 菜单 / 弹层关闭判据 / 小卡片。
+ * 用法：node src/presentation/web/assets/app/ui/ui.smoke.cjs   （输出 UI-SMOKE-OK / FAIL）
+ * 为什么需要：组件不经构建直接进浏览器，结构错了只有真机才看得出来；这里用最小桩 DOM 钉住形状。
  */
-const fs = require("fs");
-const path = require("path");
-const vm = require("vm");
+const { createUi } = require("./index.js");
 const failures = [];
 function check(name, cond, extra) {
   if (!cond) failures.push(name + (extra === undefined ? "" : " :: " + extra));
@@ -13,8 +11,10 @@ function check(name, cond, extra) {
 function el(tag) {
   const node = {
     tagName: (tag || "div").toUpperCase(),
-    type: "", className: "", textContent: "", innerHTML: "", title: "", ariaLabel: "",
+    type: "", className: "", textContent: "", title: "", ariaLabel: "",
     disabled: false, open: false, dataset: {}, style: {}, attrs: {}, children: [], parentNode: null, _h: {},
+    classes: new Set(),
+    classList: { add(c) { node.classes.add(c); }, remove(c) { node.classes.delete(c); } },
     appendChild(c) { if (!c) throw new Error("appendChild 收到空值"); c.parentNode = node; node.children.push(c); return c; },
     removeChild(c) { const i = node.children.indexOf(c); if (i >= 0) node.children.splice(i, 1); c.parentNode = null; return c; },
     remove() { if (node.parentNode) node.parentNode.removeChild(node); },
@@ -24,6 +24,9 @@ function el(tag) {
     contains(n) { return node.children.indexOf(n) >= 0; },
     getBoundingClientRect() { return { left: 10, top: 0, right: 120, bottom: 24 }; },
   };
+  // 与真实 DOM 一致：innerHTML = '' 清空子节点（下拉换选项靠它）。
+  let html = "";
+  Object.defineProperty(node, "innerHTML", { get: () => html, set: (v) => { html = v; if (v === "") node.children = []; } });
   return node;
 }
 
@@ -42,14 +45,8 @@ const sandbox = {
 };
 sandbox.window = sandbox;
 sandbox.globalThis = sandbox;
-try {
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, "ui.js"), "utf8"), sandbox, { filename: "ui.js" });
-} catch (e) {
-  console.log("ui.js 载入失败：" + e.message);
-  console.log("UI-SMOKE-FAIL");
-  process.exit(1);
-}
-const ui = sandbox.ui;
+const ui = createUi(sandbox);
+
 check("ui 命名空间存在", ui && typeof ui.icon === "function");
 
 const ico = ui.icon("undo");
@@ -168,6 +165,43 @@ fireScroll(scrollCard.node);
 check("卡片内部滚动不关闭卡片", scrollCard.node.parentNode === menuRoot, String(scrollCard.node.parentNode && scrollCard.node.parentNode.tagName));
 fireScroll(el("div"));
 check("页面滚动关闭卡片", menuRoot.children.length === 0);
+
+// 按钮与表单：形状、类名与返回值（numberInput 返回 {input, wrap}，wrap 才挂进表单）。
+const b = ui.btn("保存", "btn btn-primary");
+check("文字按钮", b.tagName === "BUTTON" && b.type === "button" && b.className === "btn btn-primary" && b.textContent === "保存");
+check("文字按钮默认类", ui.btn("x").className === "btn");
+const reset = ui.busyButton(b, "保存中…");
+check("忙态：禁用 + 转圈 + 换文案", b.disabled === true && b.classes.has("busy") && b.textContent === "保存中…");
+reset();
+check("忙态复位", b.disabled === false && !b.classes.has("busy") && b.textContent === "保存");
+const ti = ui.textInput("名字", "password");
+check("文本输入", ti.tagName === "INPUT" && ti.className === "field-input" && ti.placeholder === "名字" && ti.type === "password" && ti.autocomplete === "off");
+const fd = ui.field("名字", ti);
+check("字段 = 标签 + 输入", fd.className === "wf-field" && fd.children[0].className === "wf-label" && fd.children[0].textContent === "名字" && fd.children[1] === ti);
+const num = ui.numberInput("超时（秒）", 300, 10, 3600);
+check("数字输入返回 {input, wrap}", num.input.type === "number" && num.input.min === "10" && num.input.max === "3600" && num.input.value === "300" && num.wrap.className === "wf-field");
+check("数字输入空值", ui.numberInput("x", null, 0, 1).input.value === "");
+const ta = ui.areaInput("需求");
+check("多行输入", ta.tagName === "TEXTAREA" && ta.rows === 3 && ta.placeholder === "需求");
+const sel = ui.selectInput([{ value: "a", label: "甲" }, { value: "b", label: "乙" }], "b");
+check("下拉", sel.tagName === "SELECT" && sel.children.length === 2 && sel.children[1].textContent === "乙" && sel.value === "b");
+check("下拉换选项保留选中", ui.syncSelect(sel, [{ value: "c", label: "丙" }, { value: "b", label: "乙" }]) === "b" && sel.children.length === 2);
+check("下拉选中值消失退回第一个", ui.syncSelect(sel, [{ value: "d", label: "丁" }], "zz") === "d");
+check("下拉空选项", ui.syncSelect(sel, [], "x") === "");
+const cb = ui.checkbox("流式", true);
+check("勾选框", cb.wrap.tagName === "LABEL" && cb.wrap.className === "chk" && cb.box.type === "checkbox" && cb.box.checked === true && cb.wrap.children[1].textContent === "流式");
+const rd = ui.radio("虚拟机档", false, "tier", true);
+check("单选", rd.box.type === "radio" && rd.box.name === "tier" && rd.box.checked === false && rd.box.disabled === true);
+const eh = ui.emptyHint("还没有模型");
+check("空态提示", eh.className === "reg-empty" && eh.textContent === "还没有模型");
+
+// h()：保留键各归其位，其余直接赋属性，空子节点跳过。
+let hClicked = 0;
+const hn = ui.h("button", { class: "btn", text: "去", type: "button", attrs: { "aria-label": "去设置" }, dataset: { id: "x" }, on: { click: () => { hClicked += 1; } } }, null, ui.icon("gear"), false);
+check("h：类 / 文字 / 属性", hn.className === "btn" && hn.textContent === "去" && hn.type === "button" && hn.attrs["aria-label"] === "去设置" && hn.dataset.id === "x");
+check("h：只挂元素子节点", hn.children.length === 1 && hn.children[0].className === "ui-icon");
+hn._h.click[0]();
+check("h：事件接线", hClicked === 1);
 
 if (failures.length) {
   console.log(failures.join("\n"));
