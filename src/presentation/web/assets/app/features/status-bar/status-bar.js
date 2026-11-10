@@ -138,18 +138,24 @@ function updateStatusScroll() {
 
 /* 鼠标拖拽滚动；拖过 4px 就把这次 click 吞掉，避免拖动后误开 chip 的菜单。 */
 function bindStatusDrag(inner) {
-  let down = false, moved = false, startX = 0, startLeft = 0;
+  let down = false, moved = false, captured = false, startX = 0, startLeft = 0;
   inner.addEventListener('pointerdown', (e) => {
     if (e.pointerType === 'touch' || e.button !== 0) return;
-    down = true; moved = false; startX = e.clientX; startLeft = inner.scrollLeft;
-    inner.classList.add('dragging');
-    if (inner.setPointerCapture) inner.setPointerCapture(e.pointerId);
+    down = true; moved = false; captured = false;
+    startX = e.clientX; startLeft = inner.scrollLeft;
   });
   inner.addEventListener('pointermove', (e) => {
     if (!down) return;
     const dx = e.clientX - startX;
     if (!moved && Math.abs(dx) < 4) return;
-    moved = true;
+    if (!moved) {
+      // 只有真的开始拖才捕获指针并进入拖拽态：按下就 capture 会把 chip 的 click
+      // 重定向到这个容器，点卡片就再也收不到事件了。
+      moved = true;
+      captured = true;
+      inner.classList.add('dragging');
+      if (inner.setPointerCapture) inner.setPointerCapture(e.pointerId);
+    }
     inner.scrollLeft = startLeft - dx;
     e.preventDefault();
   });
@@ -157,9 +163,10 @@ function bindStatusDrag(inner) {
     if (!down) return;
     down = false;
     inner.classList.remove('dragging');
-    if (inner.releasePointerCapture && e.pointerId != null) {
+    if (captured && inner.releasePointerCapture && e.pointerId != null) {
       try { inner.releasePointerCapture(e.pointerId); } catch (err) { /* 指针已失效 */ }
     }
+    captured = false;
   };
   inner.addEventListener('pointerup', end);
   inner.addEventListener('pointercancel', end);

@@ -137,6 +137,7 @@ select.field-input { cursor: pointer; }
 .modal-title { flex: 1; font-weight: 600; }
 .modal-close { color: var(--color-text-dim); }
 .modal-close:hover { color: var(--color-err); }
+.modal-body.settings-body { padding-bottom: var(--sp-5); }
 .modal-body { padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-4); overflow-y: auto; max-height: 70vh; }
 .modal-msg { min-height: 1.2em; padding: 0 var(--sp-4) var(--sp-3); font-size: var(--fs-base); color: var(--color-text-dim); }
 .modal-msg.err { color: var(--color-err); }
@@ -263,18 +264,19 @@ select.field-input { cursor: pointer; }
 /* ---- 说明按钮（圆框感叹号）与分层说明 ---- */
 .help-btn {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 18px; height: 18px; padding: 0; flex: none;
+  width: 1.15em; height: 1.15em; min-width: 16px; min-height: 16px; padding: 0; flex: none;
+  line-height: var(--lh-none); vertical-align: middle;
   border: 1px solid var(--color-border-strong); border-radius: 50%;
   background: none; color: var(--color-text-dim); cursor: pointer;
   transition: color var(--dur-fast) var(--ease-out),
     border-color var(--dur-fast) var(--ease-out);
 }
 .help-btn:hover { color: var(--color-accent); border-color: var(--color-accent); }
-.help-btn .ui-icon { width: 14px; height: 14px; }
+.help-btn .ui-icon { width: 0.68em; height: 0.68em; }
 .help-body { display: flex; flex-direction: column; gap: var(--sp-2); max-width: 44ch; }
 .help-text { margin: 0; color: var(--color-text); font-size: var(--fs-s); line-height: var(--lh-base); }
 .detail { display: flex; flex-direction: column; gap: var(--sp-1); }
-.detail-line { display: flex; align-items: flex-start; gap: var(--sp-1); }
+.detail-line { display: flex; align-items: center; gap: var(--sp-1); }
 .detail-lead { margin: 0; color: var(--color-text-dim); font-size: var(--fs-s); line-height: var(--lh-base); }
 .detail-safety {
   margin: 0; padding-left: var(--sp-2);

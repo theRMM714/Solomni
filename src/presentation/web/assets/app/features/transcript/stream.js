@@ -57,9 +57,9 @@ function liveTurnNode(owner) {
   return { node: el, body, cot: null, textWrap: null, text: null, textValue: '', tools: null, toolList: null };
 }
 
-function updateLiveGroup(g, gi, s, showCot, streaming) {
-  const ui = g.ui;
-  const segs = (g.msg && g.msg.segments) || [];
+function updateLiveGroup(grp, gi, s, showCot, streaming) {
+  const ui = grp.ui;
+  const segs = (grp.msg && grp.msg.segments) || [];
   let cot = '';
   let txt = '';
   for (const seg of segs) {
@@ -70,7 +70,7 @@ function updateLiveGroup(g, gi, s, showCot, streaming) {
   }
   if (showCot && cot) {
     if (!ui.cot) {
-      const node = reasoningBlock(cot, s, (g.msg && g.msg.key) || ('V' + gi));
+      const node = reasoningBlock(cot, s, (grp.msg && grp.msg.key) || ('V' + gi));
       if (ui.textWrap) ui.body.insertBefore(node, ui.textWrap);
       else ui.body.appendChild(node);
       ui.cot = { node, text: cot };
@@ -94,7 +94,7 @@ function updateLiveGroup(g, gi, s, showCot, streaming) {
       ui.textValue = txt;
     }
   }
-  if (g.tools.length) {
+  if (grp.tools.length) {
     if (!ui.tools) {
       ui.tools = doc.createElement('details');
       ui.tools.className = 'fold turn-tools';
@@ -105,15 +105,15 @@ function updateLiveGroup(g, gi, s, showCot, streaming) {
       ui.tools.appendChild(ui.toolList);
       ui.body.appendChild(ui.tools);
     }
-    const failed = g.tools.filter((tb) => tb.tool && !tb.tool.ok).length;
-    ui.tools.children[0].textContent = '工具调用 · ' + g.tools.length + (failed ? '（' + failed + ' 失败）' : '');
-    for (const tb of g.tools) {
+    const failed = grp.tools.filter((tb) => tb.tool && !tb.tool.ok).length;
+    ui.tools.children[0].textContent = '工具调用 · ' + grp.tools.length + (failed ? '（' + failed + ' 失败）' : '');
+    for (const tb of grp.tools) {
       if (tb._node) continue;
-      tb._node = toolCard(tb.tool, s, 'LT' + gi + '-' + g.tools.indexOf(tb), '');
+      tb._node = toolCard(tb.tool, s, 'LT' + gi + '-' + grp.tools.indexOf(tb), '');
       ui.toolList.appendChild(tb._node);
     }
   }
-  const visible = (showCot && !!cot) || !!txt || g.tools.length > 0;
+  const visible = (showCot && !!cot) || !!txt || grp.tools.length > 0;
   ui.node.className = 'turn live' + (visible ? '' : ' empty') + (streaming && visible ? ' streaming' : '');
 }
 

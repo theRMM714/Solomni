@@ -380,11 +380,13 @@ body {
 /* 设置 / 向导表单：左标签列 + 右控件列。说明文字挂在标题列下方，控件始终与标题同一行起点。 */
 .wf-field:has(> .wf-label) {
   display: grid; grid-template-columns: 240px minmax(0, 1fr);
-  column-gap: var(--sp-5); row-gap: var(--sp-1); align-items: start;
+  column-gap: var(--sp-5); row-gap: var(--sp-1); align-items: center;
 }
+/* 多行输入不参与行内居中：标签顶对齐，视线才不会被拉到大段空白中间。 */
+.wf-field:has(> .wf-label):has(textarea) { align-items: start; }
 .wf-field:has(> .wf-label) > .wf-label {
   grid-column: 1; grid-row: 1;
-  display: flex; align-items: flex-start; gap: var(--sp-2);
+  display: flex; align-items: center; gap: var(--sp-2);
   font-size: var(--fs-base); color: var(--color-text); line-height: var(--lh-snug);
 }
 .wf-field:has(> .wf-label) > .wf-lead {
@@ -421,8 +423,10 @@ body {
   .modal-body > .wf-hint { margin-left: calc(240px + var(--sp-5)); }
 }
 @media (max-width: 720px) {
-  .wf-field:has(> .wf-label) { display: flex; flex-direction: column; gap: var(--sp-1); }
-  .wf-field:has(> .wf-label) > .wf-label { order: 0; }
+  .wf-field:has(> .wf-label), .wf-field:has(> .wf-label):has(textarea) {
+    display: flex; flex-direction: column; gap: var(--sp-1); align-items: stretch;
+  }
+  .wf-field:has(> .wf-label) > .wf-label { order: 0; justify-content: flex-start; }
   .wf-field:has(> .wf-label) > :not(.wf-label):not(.wf-lead):not(.detail-safety) { order: 1; }
   .wf-field:has(> .wf-label) > .wf-lead { order: 2; }
   .wf-field:has(> .wf-label) > .detail-safety { order: 3; }
