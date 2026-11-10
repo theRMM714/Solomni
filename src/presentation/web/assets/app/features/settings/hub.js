@@ -12,7 +12,7 @@ export function mount(root, deps) {
   Object.assign(root, { openSettingsHub, agentsPage });
 }
 function openSettingsHub(page) {
-  app.openModal('设置', (c) => {
+  ui.openModal('设置', (c) => {
     const hub = doc.createElement('div');
     hub.className = 'settings-hub';
     const nav = doc.createElement('nav');

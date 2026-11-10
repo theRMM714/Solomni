@@ -108,7 +108,7 @@ function useRow(action) {
 
 /** 子卡片：一个功能的参数与运行（回执打在卡片里）。 */
 function openUseCard(action) {
-  const ctx = app.openModalLayer(action.id, () => {});
+  const ctx = ui.openModalLayer(action.id, () => {});
   if (action.desc) ctx.setMsg(action.desc);
   ctx.body.appendChild(actionRunner(action));
 }

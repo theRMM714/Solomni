@@ -28,7 +28,7 @@ function ensurePicker() {
     const f = picker.files && picker.files[0];
     if (!f) return;
     const s = app.activeSession();
-    if (!s) { app.notice('还不能上传', '先打开或新建一个工作，再上传文件到它的 work/。'); picker.value = ''; return; }
+    if (!s) { ui.notice('还不能上传', '先打开或新建一个工作，再上传文件到它的 work/。'); picker.value = ''; return; }
     const reader = new FileReader();
     reader.onload = async () => {
       const b64 = String(reader.result || '').split(',')[1] || '';
@@ -41,7 +41,7 @@ function ensurePicker() {
           ui.toast('ok', '已上传到 work/：' + f.name);
         }
       } catch (err) {
-        app.notice('操作失败', err.message, 'err');
+        ui.notice('操作失败', err.message, 'err');
       }
       picker.value = '';
     };
@@ -66,13 +66,13 @@ async function sendUpload(sid, name, b64, overwrite) {
     if (overwrite) body.overwrite = true;
     const r = await api('POST', app.actionUrl('upload'), body);
     if (r.uploaded === false) {
-      app.notice('同名文件已存在', '目标里已经有这个名字，请改名或确认覆盖。', 'err');
+      ui.notice('同名文件已存在', '目标里已经有这个名字，请改名或确认覆盖。', 'err');
       return;
     }
     filesCache.delete(sid); // 文件清单变了，@ 菜单下次重拉
     app.loadWork(sid, true); // 上传 = 一次提交，状态栏的 head 要跟着变
     ui.toast('ok', '已上传：' + name);
-  } catch (e) { app.notice('操作失败', e.message, 'err'); }
+  } catch (e) { ui.notice('操作失败', e.message, 'err'); }
 }
 
 function conflictUpload(sid, name, b64) {
@@ -85,7 +85,7 @@ function conflictUpload(sid, name, b64) {
 }
 
 function renameUpload(sid, name, b64, alt) {
-  app.openModal('改文件名上传', (c) => {
+  ui.openModal('改文件名上传', (c) => {
     const inp = textInput('新文件名'); inp.value = alt;
     const go = btn('上传', 'btn btn-primary btn-block');
     go.onclick = async () => {
@@ -96,7 +96,7 @@ function renameUpload(sid, name, b64, alt) {
         if (r.uploaded === false) { c.setMsg('还是同名，请换一个名字', true); return; }
         filesCache.delete(sid); // 文件清单变了，@ 菜单下次重拉
         app.loadWork(sid, true);
-        app.closeModal(); ui.toast('ok', '已上传：' + v);
+        ui.closeModal(); ui.toast('ok', '已上传：' + v);
       } catch (e) {
         c.setMsg(e.message, true);
       }

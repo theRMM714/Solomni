@@ -3,15 +3,13 @@
  * 不管：不加载会话、不改运行态；打开与关闭都走 app 上的入口。
  * 联动：父子关系与忙态来自 app/stores/sessions.js。 */
 
+import { activePath, knownChildren, sessionParent, snapshotRunning } from '../../stores/sessions.js';
+
 let doc, state, ui, app;
 let el;
-const activePath = (...a) => app.activePath(...a);
-const knownChildren = (...a) => app.knownChildren(...a);
 const openHistory = (...a) => app.openHistory(...a);
 const renderAll = (...a) => app.renderAll(...a);
-const sessionParent = (...a) => app.sessionParent(...a);
 const setActive = (...a) => app.setActive(...a);
-const snapshotRunning = (...a) => app.snapshotRunning(...a);
 
 /// 选择器简写：模块内的 DOM 查找一律走注入的 doc。
 const $ = (sel) => doc.querySelector(sel);

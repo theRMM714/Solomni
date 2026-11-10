@@ -3,15 +3,14 @@
  * 不管：不渲染转录、不改会话状态；发送与停止都走统一动作分发。
  * 联动：会话读法来自 app/stores/sessions.js；动作走 app.act。 */
 
+import { activeSession, isBusy } from '../../stores/sessions.js';
+
 let g, doc, state, api, ui, app;
 let h;
 const act = (...a) => app.act(...a);
 const actionUrl = (...a) => app.actionUrl(...a);
-const activeSession = (...a) => app.activeSession(...a);
 const compactNow = (...a) => app.compactNow(...a);
-const isBusy = (...a) => app.isBusy(...a);
 const loadPathRoots = (...a) => app.loadPathRoots(...a);
-const notice = (...a) => app.notice(...a);
 const renderReadonly = (...a) => app.renderReadonly(...a);
 const syncStatusbar = (...a) => app.syncStatusbar(...a);
 const takeInput = (...a) => app.takeInput(...a);
@@ -329,7 +328,7 @@ async function stopGeneration() {
 function onSend() {
   const s = activeSession();
   if (!s) return;
-  if (s.readonly) { notice('历史回放为只读', '点「启用会话」后才能发送消息。', 'info'); return; }
+  if (s.readonly) { ui.notice('历史回放为只读', '点「启用会话」后才能发送消息。', 'info'); return; }
   if (isBusy(s)) { stopGeneration(); return; } // 生成中：同一个键变成「停止」
   // 整段输入恰好是命令：`/compact` 走动作，不把命令本身发给模型。
   if (String($('#input').value || '').trim() === '/compact') {
@@ -340,7 +339,7 @@ function onSend() {
   if (s.awaiting === 'task') { const v = takeInput(); if (v) act('task', v); return; }
   // 裁决门挂着时不从这里发：那是卡片上的选项（要补充的话写在卡片里的附言框）。
   if (s.pending && s.pending.type === 'decision_card') {
-    notice('请按卡片作答', '这一关请点卡片上的选项；要补充的话写在卡片里的附言框。', 'info');
+    ui.notice('请按卡片作答', '这一关请点卡片上的选项；要补充的话写在卡片里的附言框。', 'info');
     return;
   }
   if (s.mode !== 'collab') { const v = takeInput(); if (v) act('say', v); return; } // 单 agent 形态可以自由发言

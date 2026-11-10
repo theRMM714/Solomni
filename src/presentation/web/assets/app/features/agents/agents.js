@@ -77,7 +77,7 @@ function moduleChips(opts) {
 function openModulePicker(opts) {
   const o = opts || {};
   const picked = new Set(o.selected || []);
-  app.openModalLayer(o.title || '添加模块', (c) => {
+  ui.openModalLayer(o.title || '添加模块', (c) => {
     const search = textInput('关键字（只匹配名字与简介）');
     const addedTitle = doc.createElement('div'); addedTitle.className = 'mod-pick-title';
     const availTitle = doc.createElement('div'); availTitle.className = 'mod-pick-title';
@@ -217,7 +217,7 @@ function openAgentEditor(opts) {
   const o = opts || {};
   const editing = o.agent ? o.agent.name : null;
   const draft = cloneAgent(o.agent);
-  app.openModalLayer(editing ? '编辑 agent' : '新建 agent', (c) => {
+  ui.openModalLayer(editing ? '编辑 agent' : '新建 agent', (c) => {
     const form = agentForm({ draft });
     c.body.appendChild(form.node);
     const save = btn('保存 agent', 'btn btn-primary btn-block');
@@ -230,7 +230,7 @@ function openAgentEditor(opts) {
       }
       try {
         if (editing && editing !== name) {
-          const ok = await app.confirmBox('agent 改名', '改名 = 先删旧「' + editing + '」再建新「' + name + '」。继续？', '继续');
+          const ok = await ui.confirmBox('agent 改名', '改名 = 先删旧「' + editing + '」再建新「' + name + '」。继续？', '继续');
           if (!ok) return;
           await c.mutate('remove_agent', { name: editing });
         }
@@ -258,7 +258,7 @@ function openTempAgentSheet(opts) {
   const draft = cloneAgent(o.agent);
   if (!editing) draft.transient = true;
   const title = o.title || (editing ? '编辑临时 agent' : '新建临时 agent');
-  app.openModalLayer(title, (c) => {
+  ui.openModalLayer(title, (c) => {
     const form = agentForm({
       draft,
       lockedName: !!o.lockedName,
@@ -280,7 +280,7 @@ function openTempAgentSheet(opts) {
         if (!name) { c.setMsg('agent 名字不能为空', true); return; }
         try {
           if (state.agents.some((x) => x.name === name)) {
-            const ok = await app.confirmBox('同名 agent', '登记处已有「' + name + '」，保存会更新它。继续？', '更新');
+            const ok = await ui.confirmBox('同名 agent', '登记处已有「' + name + '」，保存会更新它。继续？', '更新');
             if (!ok) return;
           }
           await c.mutate('upsert_agent', {
@@ -311,7 +311,7 @@ function openTempAgentSheet(opts) {
 function openRegistryAgentPicker(opts) {
   const o = opts || {};
   const taken = o.taken || [];
-  app.openModalLayer(o.title || (o.single ? '选择 agent' : '从登记处加入'), (c) => {
+  ui.openModalLayer(o.title || (o.single ? '选择 agent' : '从登记处加入'), (c) => {
     const search = textInput('搜索 agent（名字 / 说明 / 人设）');
     const list = doc.createElement('div'); list.className = 'reg-list';
     function matches(a, q) {

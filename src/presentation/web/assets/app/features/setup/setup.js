@@ -21,13 +21,13 @@ function setupAction(before, onDone) {
     try {
       if (before) before();
       openSetupModal(onDone);
-    } catch (e) { app.notice('打开补齐弹层失败', e.message, 'err'); }
+    } catch (e) { ui.notice('打开补齐弹层失败', e.message, 'err'); }
   };
   return b;
 }
 
 function openSetupModal(onDone) {
-  app.openModal('补齐虚拟机依赖', (c) => {
+  ui.openModal('补齐虚拟机依赖', (c) => {
     const box = doc.createElement('div'); box.className = 'cfg';
     c.body.appendChild(box);
     const log = doc.createElement('div'); log.className = 'cfg-log';

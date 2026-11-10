@@ -744,7 +744,7 @@ const SETTINGS_PAGES = [
 /* ---------- 通用：多选一弹层（顶替原生 confirm 的三选） ---------- */
 function choiceModal(title, question, actions) {
   // 叠在现有弹层之上：从向导里弹出来时，选完能回到向导（不丢已填内容）。
-  app.openModalLayer(title, (c) => {
+  ui.openModalLayer(title, (c) => {
     const q = doc.createElement('div'); q.className = 'wf-label'; q.textContent = question;
     c.body.appendChild(q);
     const row = doc.createElement('div'); row.className = 'wf-inline';

@@ -3,18 +3,17 @@
  * 不管：不写会话状态、不发事件；保存走统一动作分发。
  * 联动：模型选项来自 app.modelOptions；弹层来自 app/openModal；刷新走 app.refreshState。 */
 
+import { thinkingLabel } from '../../stores/settings.js';
+
 let g, doc, api, ui, app;
-let areaInput, btn, cfgRadio, emptyHint, field, hint, selectInput, syncSelect, textInput;
+let areaInput, btn, emptyHint, field, hint, selectInput, syncSelect, textInput;
 const actionUrl = (...a) => app.actionUrl(...a);
-const closeModal = (...a) => app.closeModal(...a);
 const modelOptions = (...a) => app.modelOptions(...a);
-const openModal = (...a) => app.openModal(...a);
 const refreshState = (...a) => app.refreshState(...a);
-const thinkingLabel = (...a) => app.thinkingLabel(...a);
 
 /// 从会话列表的「编辑」进入：面板自己拉配置、自己重绘（保存 / 重新扫描都走这里）。
 function openConfig(sid) {
-  openModal('配置：' + sid, (c) => {
+  ui.openModal('配置：' + sid, (c) => {
     const box = doc.createElement('div'); box.className = 'cfg';
     c.body.appendChild(box);
     // 登记处变了只同步模型下拉；重读配置会换掉 DOM，所以这里只订阅一次，由 syncModels 指向最新一份。
@@ -86,8 +85,8 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
   // 与「未接入」是两回事：guest 本体尚未接入这一点写在下面的提示里，两条都如实说。
   const vmOk = cfg.vm_available !== false;
   const tierLocked = !!cfg.tier_locked;
-  const hostR = cfgRadio('本机档 —— 脚本直接在宿主上跑：按宿主目标装载 runtimes/ 的包，基础工具链 / 宿主 PATH 回退；隔离就是宿主本身（快，但风险也在宿主上）。', draft.tier === 'host', 'cfg-tier');
-  const vmR = cfgRadio('虚拟机档 —— 一整套 guest，脚本在 guest 里跑：按模块声明的运行能力装载运行包；隔离更强，代价是更重、依赖运行包。', draft.tier === 'vm', 'cfg-tier', !vmOk);
+  const hostR = ui.radio('本机档 —— 脚本直接在宿主上跑：按宿主目标装载 runtimes/ 的包，基础工具链 / 宿主 PATH 回退；隔离就是宿主本身（快，但风险也在宿主上）。', draft.tier === 'host', 'cfg-tier');
+  const vmR = ui.radio('虚拟机档 —— 一整套 guest，脚本在 guest 里跑：按模块声明的运行能力装载运行包；隔离更强，代价是更重、依赖运行包。', draft.tier === 'vm', 'cfg-tier', !vmOk);
   if (tierLocked) {
     hostR.box.disabled = true;
     vmR.box.disabled = true;
@@ -289,7 +288,7 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
   const acts = ui.div('cfg-actions');
   const save = btn('保存', 'btn btn-primary');
   const cancel = btn('取消', 'btn btn-ghost');
-  cancel.onclick = closeModal;
+  cancel.onclick = ui.closeModal;
   save.onclick = async () => {
     const pins = {}; // 空串 = 不定版：不提交（提交空串会被当成"定版到空版本"）
     for (const cap of Object.keys(draft.pins)) {
@@ -448,6 +447,5 @@ function guestPicker(guests, current, onChange) {
 export function mount(root, deps) {
   ({ g, doc, api, ui, app } = deps);
   ({ areaInput, btn, emptyHint, field, hint, selectInput, syncSelect, textInput } = ui);
-  cfgRadio = ui.radio;
-  Object.assign(root, { openConfig, loadConfig, buildConfigForm, cfgAgentBlock, cfgRuntimeBlock, guestPicker, cfgRadio });
+  Object.assign(root, { openConfig, loadConfig, buildConfigForm, cfgAgentBlock, cfgRuntimeBlock, guestPicker });
 }

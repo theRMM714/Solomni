@@ -6,16 +6,13 @@
 let doc, api, ui, app;
 let btn;
 const actionUrl = (...a) => app.actionUrl(...a);
-const confirmBox = (...a) => app.confirmBox(...a);
 const loadWork = (...a) => app.loadWork(...a);
-const notice = (...a) => app.notice(...a);
-const openModal = (...a) => app.openModal(...a);
 const popoverNote = (...a) => app.popoverNote(...a);
 const popoverRow = (...a) => app.popoverRow(...a);
 
 function openWorkHistory(s, selected) {
   loadWork(s.sid, true);
-  openModal('提交历史 · ' + s.sid, (c) => {
+  ui.openModal('提交历史 · ' + s.sid, (c) => {
     const wrap = doc.createElement('div');
     wrap.className = 'work-history';
     const list = doc.createElement('div');
@@ -176,12 +173,12 @@ async function previewCommitFile(holder, s, commit, path) {
 }
 
 async function restoreCommit(modal, s, d) {
-  if (s.readonly) { notice('历史回放只读', '先启用会话，再回滚共享区。', 'info'); return; }
-  if (app.isBusy(s)) { notice('会话正在生成', '先停止再回滚，避免与正在提交的 agent 交错。', 'info'); return; }
+  if (s.readonly) { ui.notice('历史回放只读', '先启用会话，再回滚共享区。', 'info'); return; }
+  if (app.isBusy(s)) { ui.notice('会话正在生成', '先停止再回滚，避免与正在提交的 agent 交错。', 'info'); return; }
   let head = s.work && s.work.head ? s.work.head.id : 0;
   const text = '共享区将从 head #' + head + ' 回滚到提交 #' + d.id + '（' + d.author + '：' + d.message + '）。\n\n' +
     '这是非破坏性回滚：目标之后的提交仍保留在历史里，可再次回滚；只改共享区主副本，不动各 agent 沙箱，后续拉取可能遇到冲突。';
-  if (!(await confirmBox('回滚共享区', text, '回滚'))) return;
+  if (!(await ui.confirmBox('回滚共享区', text, '回滚'))) return;
   try {
     await api('POST', actionUrl('restore_work_commit'), {
       session_id: s.sid, commit: d.id, expect_head: head,
@@ -192,7 +189,7 @@ async function restoreCommit(modal, s, d) {
     if (modal && modal.close) modal.close();
   } catch (e) {
     if (/被外部改动/.test(e.message) &&
-        await confirmBox('覆盖工作区外部改动', e.message + '\n\n确认后会覆盖这些路径当前的内容；建议先 work_sync，保留外部修改。', '仍要覆盖')) {
+        await ui.confirmBox('覆盖工作区外部改动', e.message + '\n\n确认后会覆盖这些路径当前的内容；建议先 work_sync，保留外部修改。', '仍要覆盖')) {
       try {
         await api('POST', actionUrl('restore_work_commit'), {
           session_id: s.sid, commit: d.id, expect_head: head, force: true,
@@ -203,12 +200,12 @@ async function restoreCommit(modal, s, d) {
         if (modal && modal.close) modal.close();
       } catch (e2) {
         if (modal && modal.setMsg) modal.setMsg('回滚失败：' + e2.message, true);
-        else notice('回滚失败', e2.message, 'err');
+        else ui.notice('回滚失败', e2.message, 'err');
       }
       return;
     }
     if (modal && modal.setMsg) modal.setMsg('回滚失败：' + e.message, true);
-    else notice('回滚失败', e.message, 'err');
+    else ui.notice('回滚失败', e.message, 'err');
     s.workAt = 0;
     loadWork(s.sid, true);
   }

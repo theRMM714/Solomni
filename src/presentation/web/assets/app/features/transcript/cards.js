@@ -114,7 +114,7 @@ async function updateTaskFlow() {
   if (!s || app.isBusy(s) || !s.can_update_task) return;
   const v = takeInput();
   if (!v) {
-    app.notice('改需求', '先在输入框写下新的本次需求，再点「改需求」。', 'info');
+    ui.notice('改需求', '先在输入框写下新的本次需求，再点「改需求」。', 'info');
     return;
   }
   await updateTask(v);
@@ -130,7 +130,7 @@ async function updateTask(text) {
     for (const ev of (r.events || [])) app.absorb(s, ev);
     app.renderAll();
     ui.toast('ok', '已改需求');
-  } catch (err) { app.notice('操作失败', err.message, 'err'); }
+  } catch (err) { ui.notice('操作失败', err.message, 'err'); }
 }
 
 function gateCard(q, btns) {
@@ -140,7 +140,7 @@ function gateCard(q, btns) {
   const bs = doc.createElement('div'); bs.className = 'btns';
   for (const [label, fn] of btns) {
     const b = doc.createElement('button'); b.className = 'btn'; b.textContent = label;
-    b.onclick = () => fn().catch((err) => app.notice('操作失败', err.message, 'err'));
+    b.onclick = () => fn().catch((err) => ui.notice('操作失败', err.message, 'err'));
     bs.appendChild(b);
   }
   el.appendChild(bs);

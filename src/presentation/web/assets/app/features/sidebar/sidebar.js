@@ -3,16 +3,13 @@
  * 不管：不拉历史、不改会话内容；打开会话与改配置都走 app 上的入口。
  * 联动：会话读法来自 app/stores/sessions.js；弹层来自 app/ui；刷新走 app.refreshState。 */
 
+import { activePath, generating, historyByParent } from '../../stores/sessions.js';
+
 let g, doc, state, api, ui, app;
 let fold, h, icon;
 const absorb = (...a) => app.absorb(...a);
 const absorbEvents = (...a) => app.absorbEvents(...a);
-const activePath = (...a) => app.activePath(...a);
-const confirmBox = (...a) => app.confirmBox(...a);
 const eventError = (...a) => app.eventError(...a);
-const generating = (...a) => app.generating(...a);
-const historyByParent = (...a) => app.historyByParent(...a);
-const notice = (...a) => app.notice(...a);
 const openConfig = (...a) => app.openConfig(...a);
 const openWizard = (...a) => app.openWizard(...a);
 const refreshState = (...a) => app.refreshState(...a);
@@ -113,7 +110,7 @@ function warnIfTierUnavailable(name) {
   const view = (state.history || []).find((h) => h.name === name);
   if (!view || view.tier !== 'vm' || view.tier_ready !== false) return;
   const missing = (view.tier_missing || []).join('；') || '本机不具备虚拟机档的前置条件';
-  notice(
+  ui.notice(
     '这条会话的虚拟机档当前不可用',
     '原因：' + missing +
       '。\n\n本次仍会打开（历史记录不受影响），但它实际按本机档执行。' +
@@ -188,14 +185,14 @@ async function openHistory(name) {
     setActive(name);
     renderAll();
     warnIfTierUnavailable(name);
-  } catch (err) { notice('操作失败', err.message, 'err'); }
+  } catch (err) { ui.notice('操作失败', err.message, 'err'); }
 }
 
 async function deleteHistory(name) {
   // 外部工作区不归本产品所有：删除只删会话目录，必须先说清“工作区文件保留”。
   const sess = state.sessions.get(name);
   if (sess && sess.workspace) {
-    if (!(await confirmBox('删除会话', '删除会话「' + name + '」？记录与版本库将被永久删除；工作区 ' + sess.workspace + ' 里的文件会保留，不会被删除。', '删除'))) return;
+    if (!(await ui.confirmBox('删除会话', '删除会话「' + name + '」？记录与版本库将被永久删除；工作区 ' + sess.workspace + ' 里的文件会保留，不会被删除。', '删除'))) return;
     try {
       await api('POST', '/api/history/' + encodeURIComponent(name) + '/delete', {});
       if (state.sessions.has(name)) {
@@ -208,7 +205,7 @@ async function deleteHistory(name) {
       await refreshState();
       renderAll();
       ui.toast('ok', '已删除会话：' + name);
-    } catch (err) { notice('操作失败', err.message, 'err'); }
+    } catch (err) { ui.notice('操作失败', err.message, 'err'); }
     return;
   }
   // 删除前如实交代工作区：会被一起删掉的产物先列出来（数量 + 字节），避免"以为只删记录"。
@@ -230,8 +227,8 @@ async function deleteHistory(name) {
     const text = '会话「' + name + '」的记录将被永久删除，它的工作区里还有 ' + usage.files +
       ' 个文件（共 ' + usage.bytes + ' 字节）：\n' + areas.join('\n') +
       '\n这些文件也会一起删掉（子会话一并删除）。';
-    if (!(await confirmBox('删除会话与工作区文件', text, '一起删除'))) return;
-  } else if (!(await confirmBox('删除会话', '删除会话「' + name + '」？该会话的记录将被永久删除。', '删除'))) {
+    if (!(await ui.confirmBox('删除会话与工作区文件', text, '一起删除'))) return;
+  } else if (!(await ui.confirmBox('删除会话', '删除会话「' + name + '」？该会话的记录将被永久删除。', '删除'))) {
     return;
   }
   try {
@@ -246,7 +243,7 @@ async function deleteHistory(name) {
     await refreshState();
     renderAll();
     ui.toast('ok', '已删除会话：' + name);
-  } catch (err) { notice('操作失败', err.message, 'err'); }
+  } catch (err) { ui.notice('操作失败', err.message, 'err'); }
 }
 
 /* 侧栏：只保留「被拒收模块」的如实提示（模块清单在「新建工作」向导里用）。 */

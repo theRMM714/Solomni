@@ -3,15 +3,13 @@
  * 不管：不改会话内容；档位切换走统一动作分发。
  * 联动：档位目录来自 app/stores/settings.js；工作卡来自 app 上的 loadWork / openShellCard。 */
 
+import { PERMISSION_LABELS, PERMISSION_ORDER, thinkingLabel } from '../../stores/settings.js';
+import { ctxChipClass, shellAbnormal, shellRunning, shellSecs, statusPrintOf } from './print.js';
+import { ctxPercent, fmtDuration, fmtInt, timeAgo } from '../../core/format.js';
+
 let doc, state, api, ui, app;
 let icon;
-const PERMISSION_LABELS = (...a) => app.PERMISSION_LABELS(...a);
-const PERMISSION_ORDER = (...a) => app.PERMISSION_ORDER(...a);
 const actionUrl = (...a) => app.actionUrl(...a);
-const ctxChipClass = (...a) => app.ctxChipClass(...a);
-const ctxPercent = (...a) => app.ctxPercent(...a);
-const fmtDuration = (...a) => app.fmtDuration(...a);
-const fmtInt = (...a) => app.fmtInt(...a);
 const openConfig = (...a) => app.openConfig(...a);
 const openContextCard = (...a) => app.openContextCard(...a);
 const openShellCard = (...a) => app.openShellCard(...a);
@@ -19,12 +17,6 @@ const openToolsMenu = (...a) => app.openToolsMenu(...a);
 const openWorkCard = (...a) => app.openWorkCard(...a);
 const paintShellCard = (...a) => app.paintShellCard(...a);
 const refreshState = (...a) => app.refreshState(...a);
-const shellAbnormal = (...a) => app.shellAbnormal(...a);
-const shellRunning = (...a) => app.shellRunning(...a);
-const shellSecs = (...a) => app.shellSecs(...a);
-const statusPrintOf = (...a) => app.statusPrintOf(...a);
-const thinkingLabel = (...a) => app.thinkingLabel(...a);
-const timeAgo = (...a) => app.timeAgo(...a);
 
 /// 选择器简写：模块内的 DOM 查找一律走注入的 doc。
 const $ = (sel) => doc.querySelector(sel);

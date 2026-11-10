@@ -7,7 +7,6 @@ let doc, state, api, ui, app;
 let btn;
 const act = (...a) => app.act(...a);
 const actionUrl = (...a) => app.actionUrl(...a);
-const notice = (...a) => app.notice(...a);
 const refreshState = (...a) => app.refreshState(...a);
 const shellRunning = (...a) => app.shellRunning(...a);
 const shellSecs = (...a) => app.shellSecs(...a);
@@ -208,7 +207,7 @@ function openContextCard(s, anchor) {
 function compactNow(s) {
   if (!s) return;
   if (s.mode === 'collab') {
-    notice('协作会话不直接压缩', '协作主会话没有一条持续发给模型的对话；打开成员会话再用工具菜单压缩。', 'info');
+    ui.notice('协作会话不直接压缩', '协作主会话没有一条持续发给模型的对话；打开成员会话再用工具菜单压缩。', 'info');
     return;
   }
   act('compact');

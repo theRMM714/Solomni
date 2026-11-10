@@ -60,7 +60,7 @@ function renderStorage(box, report, refresh) {
         ui.toast('warn', '当前没有达到策略条件的项：未超上限，也没有超过保留天数的缓存；可用单项清理或“清空全部缓存”。');
         return;
       }
-      if (!(await app.confirmBox('回收预览', lines.join('\n'), '回收'))) return;
+      if (!(await ui.confirmBox('回收预览', lines.join('\n'), '回收'))) return;
       const done = await api('POST', '/api/storage/gc', { apply: true });
       ui.toast('ok', '已回收 ' + app.fmtBytes(done.report.freedBytes));
       await refresh();
@@ -69,7 +69,7 @@ function renderStorage(box, report, refresh) {
   bar.appendChild(gc);
   const clear = btn('清空全部缓存', 'btn');
   clear.onclick = async () => {
-    if (!(await app.confirmBox('清空全部缓存', '会清空构建缓存卷、下载缓存、过期可写层与可清理日志；会话与虚拟根不动。', '清空'))) return;
+    if (!(await ui.confirmBox('清空全部缓存', '会清空构建缓存卷、下载缓存、过期可写层与可清理日志；会话与虚拟根不动。', '清空'))) return;
     try {
       for (const kind of ['build-cache', 'download-cache', 'overlays', 'logs']) {
         await api('POST', '/api/storage/clean', { kind, confirm: true });
@@ -151,7 +151,7 @@ function renderStorage(box, report, refresh) {
 
 async function cleanStorage(kind, id, module, refresh) {
   const names = { 'build-cache': '构建缓存', 'download-cache': '下载缓存', overlays: '可写层', logs: '日志', compact: '压缩' };
-  if (!(await app.confirmBox('清理' + (names[kind] || kind), '确认清理：' + (id || '整类') + '？', '清理'))) return;
+  if (!(await ui.confirmBox('清理' + (names[kind] || kind), '确认清理：' + (id || '整类') + '？', '清理'))) return;
   try {
     const r = await api('POST', '/api/storage/clean', { kind, id: id || null, module: module || null, confirm: true });
     if (r.result && r.result.started) {
@@ -166,8 +166,8 @@ async function cleanStorage(kind, id, module, refresh) {
 }
 
 async function resetGuest(guest, refresh) {
-  if (!(await app.confirmBox('还原虚拟根', '会删除 guest 内未落宿主的数据，并按清单重建；不备份、不可撤销。', '继续', true))) return;
-  if (!(await app.confirmBox('再次确认', '真的要还原「' + guest + '」吗？', '还原', true))) return;
+  if (!(await ui.confirmBox('还原虚拟根', '会删除 guest 内未落宿主的数据，并按清单重建；不备份、不可撤销。', '继续', true))) return;
+  if (!(await ui.confirmBox('再次确认', '真的要还原「' + guest + '」吗？', '还原', true))) return;
   try {
     const r = await api('POST', '/api/storage/clean', { kind: 'guest-reset', id: guest, confirm: true });
     ui.toast('ok', '已开始还原：' + guest);

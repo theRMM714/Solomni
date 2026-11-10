@@ -9,14 +9,9 @@ const actionUrl = (...a) => app.actionUrl(...a);
 const atClose = (...a) => app.atClose(...a);
 const atLoad = (...a) => app.atLoad(...a);
 const buildRootList = (...a) => app.buildRootList(...a);
-const cfgRadio = (...a) => app.cfgRadio(...a);
-const closeModal = (...a) => app.closeModal(...a);
-const confirmBox = (...a) => app.confirmBox(...a);
 const guestPicker = (...a) => app.guestPicker(...a);
 const hydrateHistory = (...a) => app.hydrateHistory(...a);
 const loadWork = (...a) => app.loadWork(...a);
-const openModal = (...a) => app.openModal(...a);
-const openModalLayer = (...a) => app.openModalLayer(...a);
 const refreshState = (...a) => app.refreshState(...a);
 const renderAll = (...a) => app.renderAll(...a);
 const renderGate = (...a) => app.renderGate(...a);
@@ -46,9 +41,9 @@ async function openWizard(draft) {
   // 档位那一格：虚拟机档不可用时禁用，并逐项说明缺什么、怎么补（照抄后端事实，不自己编话）。
   const tierField = doc.createElement('div'); tierField.className = 'wf-field';
   const tierLabel = doc.createElement('div'); tierLabel.className = 'wf-label'; tierLabel.textContent = '执行档位';
-  const hostR = cfgRadio('本机档 —— 脚本直接在宿主上跑：宿主自备解释器；隔离就是宿主本身（默认）。', w.tier !== 'vm', 'wf-tier');
+  const hostR = ui.radio('本机档 —— 脚本直接在宿主上跑：宿主自备解释器；隔离就是宿主本身（默认）。', w.tier !== 'vm', 'wf-tier');
   const vmOk = !!(tiers && tiers.vm_available);
-  const vmR = cfgRadio('虚拟机档 —— 一整套 guest，隔离更强；按模块声明装载运行包，依赖 guest 本体。', w.tier === 'vm', 'wf-tier', !vmOk);
+  const vmR = ui.radio('虚拟机档 —— 一整套 guest，隔离更强；按模块声明装载运行包，依赖 guest 本体。', w.tier === 'vm', 'wf-tier', !vmOk);
   hostR.box.addEventListener('change', () => { if (hostR.box.checked) { w.tier = 'host'; syncWizardTier(); } });
   vmR.box.addEventListener('change', () => { if (vmR.box.checked) { w.tier = 'vm'; syncWizardTier(); } });
   tierField.appendChild(tierLabel); tierField.appendChild(hostR.wrap); tierField.appendChild(vmR.wrap);
@@ -123,7 +118,7 @@ async function openWizard(draft) {
 function pickWorkspaceDir(onPick) {
   let parentPath = null;
   // 叠在“新建工作”之上开一层：关掉选择器后创建表单还在。
-  openModalLayer('选择工作区目录', (c) => {
+  ui.openModalLayer('选择工作区目录', (c) => {
     const pathIn = textInput('当前目录');
     pathIn.readOnly = true;
     const rootsRow = doc.createElement('div');
@@ -168,7 +163,7 @@ function pickWorkspaceDir(onPick) {
   }, true);
 }
 
-  openModal('新建工作', (c) => {
+  ui.openModal('新建工作', (c) => {
     const nameIn = textInput('工作名称（必填，会话落盘目录名）');
     if (w.name) nameIn.value = w.name;   // 草稿重开：把用户填过的带回来
     // 可手填：选择器只列本机盘符，网络共享（UNC）要自己写——虚拟机档接受，本机档由后端如实拒绝。
@@ -242,7 +237,7 @@ function pickWorkspaceDir(onPick) {
       createBtn.disabled = !!why;
       createBtn.title = why;
     }
-    cancelBtn.onclick = closeModal;
+    cancelBtn.onclick = ui.closeModal;
 
     // 向导里的 agent 卡片：新建临时 / 从登记处加入；编辑已加入的卡片。
     function agentActions(single, hasAgent) {
@@ -279,7 +274,7 @@ function pickWorkspaceDir(onPick) {
       return (async () => {
         try {
           if (state.agents.some((x) => x.name === name)) {
-            const ok = await confirmBox('同名 agent', '登记处已有「' + name + '」，保存会更新它。继续？', '更新');
+            const ok = await ui.confirmBox('同名 agent', '登记处已有「' + name + '」，保存会更新它。继续？', '更新');
             if (!ok) return;
           }
           await c.mutate('upsert_agent', {
@@ -433,7 +428,7 @@ function pickWorkspaceDir(onPick) {
         : '正在创建：缺编译产物时先补编一次，编完就开工…');
       try {
         await startSession(body);
-        closeModal();
+        ui.closeModal();
       } catch (e) {
         c.setMsg('创建失败：' + e.message, true);
       } finally {

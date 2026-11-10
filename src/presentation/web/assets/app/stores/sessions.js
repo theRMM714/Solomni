@@ -8,7 +8,7 @@ let state, stores;
 /* ---------- 会话历史：树 + 铅笔菜单 ----------
  * 根会话可展开子会话；活跃路径自动展开。点条目直接打开会话；改配置 / 删除走行尾铅笔的浮层菜单。
  * 子会话不单独删（删父会话会一起删）。 */
-function historyByParent() {
+export function historyByParent() {
   const by = new Map();
   for (const h of (state.history || [])) {
     const p = h.parent || '';
@@ -20,7 +20,7 @@ function historyByParent() {
 
 
 /// 当前会话的祖先链（自己 → 父 → …）：树据此自动展开，用户不用找。
-function activePath() {
+export function activePath() {
   const out = [];
   const seen = new Set();
   let cur = state.activeSid;
@@ -36,7 +36,7 @@ function activePath() {
 
 /// 快照（/api/state）说这条会话、或它的任一子会话在跑吗。
 /// **对账副本的唯一读法**：只在 isBusy 的第三档（本页没有实时知识）用。
-function snapshotRunning(sid) { return stores.snapshotRunning(state, sid); }
+export function snapshotRunning(sid) { return stores.snapshotRunning(state, sid); }
 
 
 /// 这条会话此刻在不在干活。**运行态的唯一真相是事件**（每个生产者在起止各推一条 `Working`；
@@ -45,7 +45,7 @@ function snapshotRunning(sid) { return stores.snapshotRunning(state, sid); }
 /// 2. `s.running` + `s.running_known`：收到过它的运行态事件 → 以事件为准，快照不得覆盖；
 /// 3. 没有实时知识：用快照对账——成员回合跑在它自己的会话里，主会话整回合收不到事件，
 ///    只靠"有增量"猜就永远切不出「停止」按钮、也没有占位动画。
-function isBusy(s) {
+export function isBusy(s) {
   if (!s) return false;
   if (s.sending) return true;
   // ① 这条会话**自己**的运行态：有实时知识（收过它的 Working）就以事件为准，否则用快照对账。
@@ -66,19 +66,19 @@ function isBusy(s) {
 }
 
 
-function generating(sid) {
+export function generating(sid) {
   const s = state.sessions.get(sid);
   return isBusy(s);
 }
 
 
-function activeSession() { return state.sessions.get(state.activeSid); }
+export function activeSession() { return state.sessions.get(state.activeSid); }
 
 
 /* ---------- 会话标签：主 → 子 → 子子，按活跃路径逐层展开 ----------
  * 第 1 行是根（工作）；第 N 行是上一行活跃会话的孩子。只显示活跃路径上的层。
  * 孩子来源 = history（含没打开过的，弱化显示）+ 已打开的视图；点弱化的才去加载。 */
-function sessionParent(name) {
+export function sessionParent(name) {
   const s = state.sessions.get(name);
   if (s && s.parent) return s.parent;
   const h = (state.history || []).find((x) => x.name === name);
@@ -86,7 +86,7 @@ function sessionParent(name) {
 }
 
 
-function knownChildren(parent) {
+export function knownChildren(parent) {
   const names = [];
   const seen = new Set();
   for (const h of (state.history || [])) {

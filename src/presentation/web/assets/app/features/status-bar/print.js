@@ -5,7 +5,7 @@
 
 let state;
 
-function ctxChipClass(percent) {
+export function ctxChipClass(percent) {
   const at = Number((state.settings && state.settings.compact_at_percent) || 0);
   if (percent == null) return '';
   if (percent >= 90) return 'danger';
@@ -14,10 +14,10 @@ function ctxChipClass(percent) {
 }
 
 /// shell 是不是仍在跑：回放派生的快照没有 finished_at，但它不是"正在跑"。
-function shellRunning(sh) { return !!sh && !sh.historical && !sh.finished_at; }
+export function shellRunning(sh) { return !!sh && !sh.historical && !sh.finished_at; }
 
 /// shell 回执状态里要跟退出码分开显示的几类：超时 / 停止 / 信号；exit 与旧数据（null）留空走退出码。
-function shellAbnormal(sh) {
+export function shellAbnormal(sh) {
   if (!sh) return '';
   if (sh.status === 'timeout') return '超时';
   if (sh.status === 'stopped') return '停止';
@@ -26,7 +26,7 @@ function shellAbnormal(sh) {
 }
 
 /// shell 卡片的「状态」行：超时 / 停止 / 信号从「失败」里分出来；exit 与旧数据按成败。
-function shellStatusLabel(sh, running) {
+export function shellStatusLabel(sh, running) {
   if (running) return '运行中…';
   if (sh.status === 'timeout') return '超时';
   if (sh.status === 'stopped') return '停止';
@@ -35,13 +35,13 @@ function shellStatusLabel(sh, running) {
 }
 
 /// shell 的耗时（秒）：实时槽按墙钟差；回放派生用回执里的耗时行。
-function shellSecs(sh) {
+export function shellSecs(sh) {
   if (sh.elapsed_secs != null) return Math.max(0, Number(sh.elapsed_secs) || 0);
   const end = sh.finished_at || Math.floor(Date.now() / 1000);
   return Math.max(0, end - (sh.started_at || 0));
 }
 
-function statusPrintOf(s) {
+export function statusPrintOf(s) {
   const c = s && s.context;
   const w = s && s.work;
   return JSON.stringify([

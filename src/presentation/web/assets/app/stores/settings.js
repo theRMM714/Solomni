@@ -6,27 +6,27 @@
 let state;
 
 /* 思考强度的兜底目录：后端 /api/state 的 settings.thinking 是权威；桩或加载失败时仍能画出四档。 */
-const DEFAULT_THINKING_LEVELS = [
+export const DEFAULT_THINKING_LEVELS = [
   { id: 'off' },
   { id: 'low' },
   { id: 'high' },
   { id: 'max' },
 ];
 
-function thinkingLevels() {
+export function thinkingLevels() {
   const t = state.settings && state.settings.thinking;
   const levels = t && Array.isArray(t.levels) ? t.levels : [];
   return levels.length ? levels : DEFAULT_THINKING_LEVELS;
 }
 
-function thinkingLabel(id) {
+export function thinkingLabel(id) {
   return String(id || '');
 }
 
 
-const PERMISSION_ORDER = ['view', 'workspace', 'external', 'all_reach'];
+export const PERMISSION_ORDER = ['view', 'workspace', 'external', 'all_reach'];
 
-const PERMISSION_LABELS = {
+export const PERMISSION_LABELS = {
   view: '仅可查看',
   workspace: '工作区内修改',
   external: '外部可达（逐次确认）',

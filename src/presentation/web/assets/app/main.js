@@ -67,6 +67,11 @@ export function boot(g) {
   };
   Object.assign(app, format);
   for (const mount of MOUNTS) mount(app, deps);
+  // 提示框与叠层弹窗是 ui 层的入口：功能统一从 ui 取，不直接依赖 dialog/modal 两个模块。
+  Object.assign(ui, {
+    notice: app.notice, confirmBox: app.confirmBox,
+    openModal: app.openModal, openModalLayer: app.openModalLayer, closeModal: app.closeModal,
+  });
   start();
   context = { state, api, ui, app, deps };
   return app;

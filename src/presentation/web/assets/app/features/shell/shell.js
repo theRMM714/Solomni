@@ -3,11 +3,10 @@
  * 不管：各功能怎么画（只调 app.* 上的入口）；事件吸收与渲染本身（见 features/transcript/）。
  * 联动：由 app/main.js 最后装配，并在所有功能挂好后调用 start()。 */
 
-let doc, state, stores, api, app;
+let doc, state, stores, api, ui, app;
 let registry;
 let eventStream;
 const loadWork = (...a) => app.loadWork(...a);
-const notice = (...a) => app.notice(...a);
 const $ = (sel) => doc.querySelector(sel);
 
 /** 模型下拉的选项：needEmpty = 带「（核心默认）」空项（会话配置用）。 */
@@ -110,11 +109,11 @@ function eventError(err) {
   const msg = String((err && err.message) || err);
   if (msg === lastEventError) return;
   lastEventError = msg;
-  try { notice('界面处理事件出错', msg, 'err'); } catch { /* 弹窗本身出问题就只剩控制台 */ }
+  try { ui.notice('界面处理事件出错', msg, 'err'); } catch { /* 弹窗本身出问题就只剩控制台 */ }
 }
 
 export function mount(root, deps) {
-  ({ doc, state, stores, api, app } = deps);
+  ({ doc, state, stores, api, ui, app } = deps);
   // 登记处一变，所有已打开的分页都跟着同步列表与下拉选项（stores.createRegistryWatch）。
   registry = stores.createRegistryWatch(state, (e) => console.error("登记处视图刷新失败：", e));
   // 传输（取批次、游标、断线重试）在 core/events.js；这里只接三条回调。
@@ -147,5 +146,5 @@ export function start() {
 
   refreshState()
     .then(pollLoop)
-    .catch((err) => notice('初始化失败', err.message, 'err'));
+    .catch((err) => ui.notice('初始化失败', err.message, 'err'));
 }

@@ -4,8 +4,6 @@
  * 联动：由 app/main.js 装配；渲染经 app.renderAll / app.markNeedState 晚绑定，避免与转录模块互相 import。 */
 
 let api, ui, app;
-const confirmBox = (...a) => app.confirmBox(...a);
-const notice = (...a) => app.notice(...a);
 
 /* 本地名 → 动作 id 的映射：动作目录与校验都在核心（systools/tools.yaml），这里只做转写。 */
 const ACT_IDS = { say: 'send_message', task: 'set_task' };
@@ -17,7 +15,7 @@ async function act(action, text) {
   const s = app.activeSession();
   if (!s) return;
   if (app.isBusy(s)) return;
-  if (s.readonly) { notice('历史回放为只读', '点「启用会话」后才能发送消息。', 'info'); return; }
+  if (s.readonly) { ui.notice('历史回放为只读', '点「启用会话」后才能发送消息。', 'info'); return; }
   // 本地事实：我的命令在途（不是服务端运行态）——按钮立刻切「停止」，避免重复提交。
   s.sending = true;
   // 乐观回显：自己的发言立刻可见；服务端权威行到达时自动替换（见 app.absorb）。
@@ -77,7 +75,7 @@ async function applyRewind(s, body) {
     ui.toast('ok', '已回档');
   } catch (err) {
     if (/被外部改动/.test(err.message) &&
-        await confirmBox('覆盖工作区外部改动', err.message + '\n\n确认后会先采纳这些外部改动，再把工作区回档到目标提交；未跟踪文件不受影响。', '仍要回档')) {
+        await ui.confirmBox('覆盖工作区外部改动', err.message + '\n\n确认后会先采纳这些外部改动，再把工作区回档到目标提交；未跟踪文件不受影响。', '仍要回档')) {
       try {
         const r = await api('POST', actionUrl('rewind'), Object.assign({ session_id: s.sid, force: true }, body));
         if (typeof r.head === 'number') s.floor = r.head;
@@ -85,11 +83,11 @@ async function applyRewind(s, body) {
         s.workDirty = true;
         app.renderAll();
         ui.toast('ok', '已确认覆盖并回档');
-      } catch (e2) { notice('操作失败', e2.message, 'err'); }
+      } catch (e2) { ui.notice('操作失败', e2.message, 'err'); }
       return;
     }
     if (/个留档/.test(err.message) &&
-        await confirmBox('删除会作废留档', err.message + '\n\n确认后会连同共享区与各 agent 沙箱一起回到该行；这些留档作废后不可恢复。', '仍要删除')) {
+        await ui.confirmBox('删除会作废留档', err.message + '\n\n确认后会连同共享区与各 agent 沙箱一起回到该行；这些留档作废后不可恢复。', '仍要删除')) {
       try {
         const r = await api('POST', actionUrl('rewind'), Object.assign({ session_id: s.sid, force: true }, body));
         if (typeof r.head === 'number') s.floor = r.head;
@@ -97,10 +95,10 @@ async function applyRewind(s, body) {
         s.workDirty = true;
         app.renderAll();
         ui.toast('ok', '已确认删除');
-      } catch (e2) { notice('操作失败', e2.message, 'err'); }
+      } catch (e2) { ui.notice('操作失败', e2.message, 'err'); }
       return;
     }
-    notice('操作失败', err.message, 'err');
+    ui.notice('操作失败', err.message, 'err');
   }
 }
 
@@ -114,7 +112,7 @@ function withdrawAgree(agent) {
         await api('POST', actionUrl('withdraw'), { session_id: s.sid, agent });
         app.renderAll();
         ui.toast('ok', '已撤回「' + agent + '」的同意');
-      } catch (err) { notice('操作失败', err.message, 'err'); }
+      } catch (err) { ui.notice('操作失败', err.message, 'err'); }
     }],
     ['取消', 'btn btn-ghost', () => {}],
   ]);
@@ -122,7 +120,7 @@ function withdrawAgree(agent) {
 
 async function activateFlow() {
   const s = app.activeSession();
-  if (s && s.workspace_missing) { notice('工作区已不存在', '这条会话绑定的工作区已不可达：恢复目录或删除会话后再启用。', 'err'); return; }
+  if (s && s.workspace_missing) { ui.notice('工作区已不存在', '这条会话绑定的工作区已不可达：恢复目录或删除会话后再启用。', 'err'); return; }
   if (!s || !s.readonly || s.activating) return;
   s.activating = true;
   app.renderAll();
@@ -133,7 +131,7 @@ async function activateFlow() {
     app.renderAll();
     ui.toast('ok', '会话已启用');
   } catch (err) {
-    notice('启用失败', err.message, 'err');
+    ui.notice('启用失败', err.message, 'err');
   } finally {
     s.activating = false;
     app.renderAll();
