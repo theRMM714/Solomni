@@ -133,6 +133,13 @@ pub trait HostProbe: Send + Sync {
 }
 
 /// 目的：必要落点授不上时，交给**工具能力的裁决端口**的全部事实（机制不解释业务语义）。
+#[cfg_attr(
+    not(windows),
+    allow(
+        dead_code,
+        reason = "围栏裁决只在 Windows 有调用点；非 Windows 保留端口形状，调用方无需按平台分叉"
+    )
+)]
 pub struct FenceCase<'a> {
     /// 目的：哪一环授不上、哪个目录、缺什么前提。
     pub blocked: &'a FenceBlocked,
@@ -147,6 +154,13 @@ pub struct FenceCase<'a> {
 }
 
 /// 目的：裁决端口对一次“必要落点授不上”的处置结果——机制只原样转交，不解释业务语义。
+#[cfg_attr(
+    not(windows),
+    allow(
+        dead_code,
+        reason = "围栏裁决只在 Windows 有调用点；非 Windows 保留端口形状，调用方无需按平台分叉"
+    )
+)]
 pub enum FenceVerdict {
     /// 目的：本轮按无围栏执行；`note` 是随回执附上的如实标注。
     Unfenced { note: String },
@@ -157,6 +171,13 @@ pub enum FenceVerdict {
 /// 目的：围栏裁决端口——必要落点授不上时怎么处置，由**业务层**决定（提问、文案、选项都在那里）。
 /// 约束：机制只构造 `FenceCase` 并原样转交结果；没有端口时按 fail-closed 拒绝。
 pub trait FenceGate: Send + Sync {
+    #[cfg_attr(
+        not(windows),
+        allow(
+            dead_code,
+            reason = "围栏裁决只在 Windows 有调用点；非 Windows 保留端口形状，调用方无需按平台分叉"
+        )
+    )]
     fn decide(&self, case: &FenceCase<'_>) -> FenceVerdict;
 }
 

@@ -12,6 +12,13 @@ use crate::kernel::ports::{ask_user, FenceCase, FenceGate, FenceVerdict};
 pub struct ToolFenceGate;
 
 impl FenceGate for ToolFenceGate {
+    #[cfg_attr(
+        not(windows),
+        allow(
+            dead_code,
+            reason = "围栏裁决只在 Windows 有生产调用点；非 Windows 保留同一实现以便测试与跨平台编译"
+        )
+    )]
     fn decide(&self, case: &FenceCase<'_>) -> FenceVerdict {
         let blocked = case.blocked;
         if case.strict {
@@ -89,6 +96,13 @@ fn refusal(blocked: &FenceBlocked, outcome: &AskOutcome) -> String {
 }
 
 /// 目的：shell 严格模式下必要落点授不上：不发起裁决、不提供"无围栏跑一次"，直接失败。
+#[cfg_attr(
+    not(windows),
+    allow(
+        dead_code,
+        reason = "围栏裁决只在 Windows 有生产调用点；非 Windows 保留同一实现以便测试与跨平台编译"
+    )
+)]
 fn strict_refusal(blocked: &FenceBlocked) -> String {
     let mut output = refused_text(blocked);
     output.push('\n');
@@ -97,6 +111,13 @@ fn strict_refusal(blocked: &FenceBlocked) -> String {
 }
 
 /// 目的：无围栏跑一次时回执里的如实标注（模型下一轮看得到"这次没有容器那层强制"）。
+#[cfg_attr(
+    not(windows),
+    allow(
+        dead_code,
+        reason = "围栏裁决只在 Windows 有生产调用点；非 Windows 保留同一实现以便测试与跨平台编译"
+    )
+)]
 fn unfenced_note(blocked: &FenceBlocked) -> String {
     format!(
         "[围栏] 这次调用按你的裁决**无围栏**执行（没有容器那层强制）：{}（{}）授不上——{}",
