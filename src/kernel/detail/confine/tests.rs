@@ -3,6 +3,7 @@
 //! 不管：真实平台围栏——Unix 的 Landlock / seatbelt 是进程级不可逆的，由平台探针在子进程里验收。
 //! 联动：被测项在 `mod.rs` / `job.rs` / `paths.rs` / `texts.rs`；真机探针在 `tests/<平台>/`。
 
+#[cfg(windows)]
 use std::ffi::OsString;
 
 use super::paths::*;

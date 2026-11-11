@@ -176,16 +176,19 @@ impl Capability {
 }
 
 pub use job::{launcher, run_fenced, FenceJob};
+#[cfg(any(windows, test))]
+pub use ledger::Owner;
 pub use ledger::{
-    ledger, reconcile, remove_profile_one, restore_one, revoke_grant, Ledger, LedgerEntry, Owner,
-    ReconcileReport,
+    ledger, reconcile, remove_profile_one, restore_one, revoke_grant, Ledger, LedgerEntry,
 };
 #[cfg(windows)]
-pub use ledger::{release_fence, sweep_orphan_aces};
+pub use ledger::{release_fence, sweep_orphan_aces, ReconcileReport};
 pub use paths::{fence_env, shell_command};
 #[cfg(windows)]
 pub use prep::prepare_fence;
-pub use prep::{clean, sweep_profiles, FencePrep};
+#[cfg(any(windows, test))]
+pub use prep::FencePrep;
+pub use prep::{clean, sweep_profiles};
 
 #[cfg(windows)]
 pub(crate) use paths::{
