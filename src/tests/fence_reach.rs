@@ -70,6 +70,7 @@ fn fence_reach_for_external_harness() {
         &[],
         None,
         None,
+        None,
     );
     assert!(
         a.ok && a.output.contains("PROBE-OK"),
@@ -78,7 +79,15 @@ fn fence_reach_for_external_harness() {
     );
 
     // 2) 绝对路径的程序不被自动放行：模块目录外的可执行文件跑不起来（如实失败，不静默）。
-    let b = runner.run(&fence, &outside_sh.to_string_lossy(), "{}", &[], None, None);
+    let b = runner.run(
+        &fence,
+        &outside_sh.to_string_lossy(),
+        "{}",
+        &[],
+        None,
+        None,
+        None,
+    );
     assert!(
         !b.ok,
         "模块目录外的绝对路径程序不该可达（要放进模块目录，或用 PATH 名）：{}",
@@ -91,6 +100,7 @@ fn fence_reach_for_external_harness() {
         &format!("{} tools/read_outside.py", py),
         "{}",
         &[],
+        None,
         None,
         None,
     );

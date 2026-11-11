@@ -3,11 +3,13 @@
 //! 不管：真实 ACL 的写与撤（Windows 的 confine 探针）、围栏在真机上的行为（`--fence-live` 的 ProcTools 用例）。
 //! 联动：判据写进 docs/kernel/README.md 的「围栏落点：必要与可选」；卡片契约见 docs/session/session-model.md 的「请用户裁决」。
 
+use crate::capabilities::tools::domain::fence::{fence_ask, OPT_FENCE_ABORT, OPT_FENCE_UNFENCED};
+use crate::capabilities::tools::service::fence::ToolFenceGate;
+use crate::kernel::api::{Ask, AskOutcome, FenceBlocked, FencePart};
 use crate::kernel::detail::confine::FencePrep;
-use crate::kernel::domain::fence::{
-    fence_ask, FenceBlocked, FencePart, OPT_FENCE_ABORT, OPT_FENCE_UNFENCED,
-};
+use crate::kernel::ports::{AskUser, FenceCase, FenceGate, FenceVerdict};
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 /// 一个必要落点授不上的现场。
 fn blocked(part: FencePart, path: &str) -> FenceBlocked {
@@ -100,6 +102,137 @@ fn blocked_line_names_the_part_the_dir_why_and_the_fix() {
     // 没有具体目录的一环（容器身份 / 台账）如实说没有，不编一个路径出来。
     let sidless = blocked(FencePart::ContainerIdentity, "");
     assert!(sidless.line().contains("容器身份"), "{}", sidless.line());
+}
+
+/// 目的：记录工具层问过什么、停过什么——裁决卡的选项集与 halt 都是契约。
+struct RecordingAsk {
+    answer: Option<&'static str>,
+    asked: Mutex<Vec<Vec<String>>>,
+    halted: Mutex<Vec<String>>,
+}
+
+impl RecordingAsk {
+    fn new(answer: Option<&'static str>) -> RecordingAsk {
+        RecordingAsk {
+            answer,
+            asked: Mutex::new(Vec::new()),
+            halted: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl AskUser for RecordingAsk {
+    fn ask(&self, ask: &Ask) -> AskOutcome {
+        self.asked
+            .lock()
+            .expect("锁")
+            .push(ask.options.iter().map(|(id, _)| id.clone()).collect());
+        match self.answer {
+            Some(id) => AskOutcome::Chosen(id.to_string()),
+            None => AskOutcome::NoAnswer,
+        }
+    }
+
+    fn halt(&self, why: &str) {
+        self.halted.lock().expect("锁").push(why.to_string());
+    }
+}
+
+fn case<'a>(fact: &'a FenceBlocked, ask: Option<&'a dyn AskUser>) -> FenceCase<'a> {
+    FenceCase {
+        blocked: fact,
+        strict: false,
+        unfenced_possible: true,
+        agent: "a",
+        ask,
+    }
+}
+
+/// 目的：必要落点授不上时，工具层按用户裁决给出"无围栏跑一次"或"不执行"；strict 不给无围栏选项。
+#[test]
+fn tool_fence_gate_decides_unfenced_abort_and_strict() {
+    let fact = blocked(FencePart::Interpreter, "C:/nvm4w/nodejs");
+    let yes = RecordingAsk::new(Some(OPT_FENCE_UNFENCED));
+    match ToolFenceGate.decide(&case(&fact, Some(&yes))) {
+        FenceVerdict::Unfenced { note } => {
+            assert!(note.contains("无围栏"), "回执要如实标注：{}", note);
+        }
+        FenceVerdict::Refused { output } => panic!("选了无围栏却拒绝：{}", output),
+    }
+    assert_eq!(
+        yes.asked.lock().expect("锁").as_slice(),
+        &[vec![
+            OPT_FENCE_UNFENCED.to_string(),
+            OPT_FENCE_ABORT.to_string()
+        ]],
+        "选项 id 是契约"
+    );
+    assert!(yes.halted.lock().expect("锁").is_empty());
+
+    let no = RecordingAsk::new(Some(OPT_FENCE_ABORT));
+    match ToolFenceGate.decide(&case(&fact, Some(&no))) {
+        FenceVerdict::Refused { output } => {
+            assert!(output.contains("没有执行"), "{}", output);
+            assert!(output.contains("怎么补"), "{}", output);
+        }
+        FenceVerdict::Unfenced { .. } => panic!("选了放弃却跑"),
+    }
+
+    let strict = RecordingAsk::new(Some(OPT_FENCE_UNFENCED));
+    let strict_case = FenceCase {
+        blocked: &fact,
+        strict: true,
+        unfenced_possible: true,
+        agent: "a",
+        ask: Some(&strict),
+    };
+    match ToolFenceGate.decide(&strict_case) {
+        FenceVerdict::Refused { output } => {
+            assert!(output.contains("严格模式"), "{}", output);
+            assert!(
+                strict.asked.lock().expect("锁").is_empty(),
+                "严格模式不许问"
+            );
+        }
+        FenceVerdict::Unfenced { .. } => panic!("严格模式不许无围栏跑"),
+    }
+
+    // 构不出可用选项：不发起裁决（不问、不置灰），停会话并拒绝这次调用。
+    let halt = RecordingAsk::new(Some(OPT_FENCE_UNFENCED));
+    let no_option = FenceCase {
+        blocked: &fact,
+        strict: false,
+        unfenced_possible: false,
+        agent: "a",
+        ask: Some(&halt),
+    };
+    match ToolFenceGate.decide(&no_option) {
+        FenceVerdict::Refused { output } => {
+            assert!(output.contains("没有执行"), "{}", output);
+        }
+        FenceVerdict::Unfenced { .. } => panic!("构不出选项绝不许跑"),
+    }
+    assert!(
+        halt.asked.lock().expect("锁").is_empty(),
+        "构不出可用选项时不许发问"
+    );
+    assert_eq!(
+        halt.halted.lock().expect("锁").len(),
+        1,
+        "有前端时停会话 + 落警告"
+    );
+}
+
+/// 目的：没有可回答的前端时 fail-closed（不执行），且不停会话、不静默当作通过。
+#[test]
+fn tool_fence_gate_without_asker_refuses() {
+    let fact = blocked(FencePart::Cwd, "C:/gone/module");
+    match ToolFenceGate.decide(&case(&fact, None)) {
+        FenceVerdict::Refused { output } => {
+            assert!(output.contains("没有执行"), "{}", output);
+        }
+        FenceVerdict::Unfenced { .. } => panic!("没人答绝不许跑"),
+    }
 }
 
 /// 台账清单面在**没有台账**时也如实给一句话（列清单恒退出 0 的判据：判定归调用方）。

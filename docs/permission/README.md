@@ -104,7 +104,7 @@
 
 - 改语义 → 本页 + `REGISTRY_SPEC.md`（settings 的 sandbox 段）+ `docs/session/session-model.md`（meta 的会话级 sandbox）。
 - 改落点判定 → `docs/tools/tools-and-roles.md` 的路径模型 + 平台围栏探针。
-- 改 `FenceSpec` 字段 → 三平台后端与跨平台字面量门禁（`src/kernel/domain/fence.rs`）。
+- 改 `FenceSpec` 字段 → 三平台后端与跨平台字面量门禁（`src/kernel/contracts/fence.rs`）。
 - 改 profile / 工具声明 → `systools/tools.yaml`、`docs/tools/tools-and-roles.md`、Web 配置页与冒烟。
 
 ## 本目录

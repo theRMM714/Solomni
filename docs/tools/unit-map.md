@@ -10,7 +10,8 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/capabilities/tools/api.rs` | 入站能力面：`Tools`（按角色发放工具面、总表与保留名）与 `ToolExec`（执行模块 / 内置 / shell 工具、释放围栏授权）的用例面与公开类型重导出 |
-| `src/capabilities/tools/service/mod.rs` | 工具能力的用例与端口持有者：持工具总表、角色表与名字表（`SystemTools`）及 `SysIo` / `ProcessRunner` / `FenceHost` 三个端口 |
+| `src/capabilities/tools/service/mod.rs` | 工具能力的用例与端口持有者：持工具总表、角色表与名字表（`SystemTools`）及 `SysIo` / `ProcessRunner` / `FenceHost` / `FenceGate` 四个端口 |
+| `src/capabilities/tools/service/fence.rs` | 围栏裁决（`ToolFenceGate`）：必要落点授不上时问用户、按裁决无围栏跑一次或拒绝；回执文案与停会话在这里 |
 | `src/capabilities/tools/ports.rs` | 出站端口：三张表的加载 `SystoolsSource` 与内置文件工具的读写 `SysIo`（含 `FileRead` / `DirEntry` 数据形态） |
 | `src/capabilities/tools/service/systool.rs` | 内置工具的执行编排：解析入参 → 按声明校验 → 沙箱寻址 → 经 `SysIo` 读写盘（规则在 `src/capabilities/tools/domain/systool.rs`） |
 | `src/capabilities/tools/domain/budget.rs` | 工具结果的**单次预算**：所有回执送回模型前统一 head+tail 截断（16k 字符）并给出续读提示；read 的续读 offset、shell 的状态行/末行在尾部保留 |
@@ -19,7 +20,7 @@
 | `src/capabilities/tools/domain/schema.rs` | 工具参数契约：解析、校验与渲染声明在文本层的参数 schema（内置工具在 `systools/tools.yaml`，模块工具在 `module.yaml`） |
 | `src/capabilities/tools/domain/module_tools.rs` | 模块清单 → 工具面：把 `module.yaml` 声明的工具与参数契约转成工具能力认识的形态，并把静态模块工具与已就绪服务操作的参数合并渲染成**一段** |
 | `src/capabilities/tools/domain/roles.rs` | 角色表与工具总表的纯数据形态（`RoleDecl` / `SystemTools`）：按角色组装工具面、装配期自检与动作审计格式化 |
-| `src/capabilities/tools/domain/fence.rs` | 围栏描述符的派生策略（其余中立类型在 `src/kernel/domain/fence.rs`） |
+| `src/capabilities/tools/domain/fence.rs` | 围栏描述符的派生策略与裁决卡材料（`fence_ask` / 选项 id；描述符与落点判据在 `src/kernel/contracts/fence.rs`） |
 | `src/capabilities/tools/domain/shell.rs` | 执行类系统工具 shell 的纯规则：参数 / scope / timeout 解析、命令长度、失败回执的 scope 提示、回执解析（退出码 / 状态 / cwd·耗时） |
 | `src/capabilities/tools/detail/sys_io.rs` | `SysIo` 端口的磁盘实现：纯 Rust 直接读写（严格 UTF-8、非法字节如实标注、写时建父目录） |
 | `src/capabilities/tools/detail/yaml_systools.rs` | `SystoolsSource` 的磁盘实现：读 `systools/tools.yaml`、`roles.yaml` 与 `names.yaml`（缺文件如实报装配错误） |

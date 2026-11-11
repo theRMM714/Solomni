@@ -5,7 +5,7 @@
 //! 联动：能力不足时如实上报（capability），降级而非崩溃——绝不静默假装有围栏。
 
 use crate::kernel::api::FenceSpec;
-use crate::kernel::domain::fence::{FenceBlocked, FencePart};
+use crate::kernel::api::{FenceBlocked, FencePart};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -275,7 +275,7 @@ fn fence_boundary_note(
         "[围栏] 工具进程只可达 {}（网：{}）；{}。",
         reachable_roots(spec),
         net,
-        crate::kernel::domain::fence::FENCE_BOUNDARY_MARK
+        crate::kernel::api::FENCE_BOUNDARY_MARK
     ))
 }
 

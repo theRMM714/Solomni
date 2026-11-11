@@ -576,6 +576,7 @@ fn main() {
                 root.clone(),
             )),
             Arc::new(build_runner),
+            Arc::new(capabilities::tools::service::fence::ToolFenceGate),
             Arc::clone(&fence_host),
             Arc::new(kernel::detail::HostProbeAdapter),
             std::sync::Arc::clone(&log),

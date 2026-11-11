@@ -758,6 +758,7 @@ fn run_shell(
             cancel: Some(cancel),
             path: ctx.runtime_path.as_deref(),
             ask,
+            gate: None,
         };
         ctx.tools.run_shell(&run)
     };

@@ -39,6 +39,7 @@ fn builds_service(
         store,
         Arc::new(crate::capabilities::builds::detail::cache::CacheOnDisk::new(root.to_path_buf())),
         Arc::new(runner),
+        Arc::new(crate::capabilities::tools::service::fence::ToolFenceGate),
         Arc::new(crate::tests::doubles::NoFenceHost),
         Arc::new(crate::kernel::detail::host_probe::HostProbeAdapter),
         Arc::new(crate::kernel::ports::NoopLog),

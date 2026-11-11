@@ -1,29 +1,33 @@
 //! 工具能力的**状态、用例与端口持有者**。
 //!
 //! 状态是 `domain` 的 `SystemTools`（工具总表、角色表与名字表）；出站端口是 `SysIo`（本能力私有）
-//! 与 kernel 共享的 `ProcessRunner` / `FenceHost`——**只有这里持有它们**（R12）。
+//! 与 kernel 共享的 `ProcessRunner` / `FenceHost` / `FenceGate`——**只有这里持有它们**（R12）。
 //! 对外两个面：`Tools`（按角色发放工具面、拿总表）与 `ToolExec`（执行工具、释放围栏授权）。
 //!
 //! 加载机制（`systools/` 三份 yaml）在 `detail/yaml_systools.rs`；本文件不碰文件系统。
 
+pub mod fence;
 pub mod systool;
 
+use self::fence::ToolFenceGate;
 use crate::capabilities::tools::api::{
     Observations, ToolBook, ToolExec, ToolOutcome, ToolSchema, Tools,
 };
 use crate::capabilities::tools::domain::roles::SystemTools;
 use crate::capabilities::tools::ports::{SysIo, SystoolsSource};
-use crate::kernel::ports::{FenceHost, ProcessRunner};
+use crate::kernel::ports::{FenceGate, FenceHost, ProcessRunner};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, RwLock};
 
-/// 工具能力：持三张表与三个端口，按用例答话。
+/// 工具能力：持三张表与四个端口，按用例答话。
 pub struct ToolsService {
     /// **状态**：工具总表与角色表。
     catalog: SystemTools,
     runner: Arc<dyn ProcessRunner>,
     io: Arc<dyn SysIo + Send + Sync>,
     fence: Arc<dyn FenceHost + Send + Sync>,
+    /// **裁决**：必要落点授不上时怎么处置（问用户 / 无围栏跑一次 / 拒绝）；回执文案归工具层。
+    gate: Arc<dyn FenceGate>,
     /// 目的：同一模块工具进程的读写租约（跨 agent）。`parallel` 工具共享读租约，其余取独占写租约。
     module_leases: Mutex<BTreeMap<String, Arc<RwLock<()>>>>,
 }
@@ -41,6 +45,7 @@ impl ToolsService {
             runner,
             io,
             fence,
+            gate: Arc::new(ToolFenceGate),
             module_leases: Mutex::new(BTreeMap::new()),
         })
     }
@@ -81,6 +86,14 @@ impl Tools for ToolsService {
     }
 }
 
+/// 目的：宿主执行端口的回执（只描述跑没跑、输出是什么）转成工具面回执。
+fn host_outcome(out: crate::kernel::api::RunOutcome) -> ToolOutcome {
+    ToolOutcome {
+        ok: out.ok,
+        output: out.output,
+    }
+}
+
 /// 所有工具回执送回模型前都过同一个预算（head+tail + 续读提示）。
 fn within_budget(mut out: ToolOutcome) -> ToolOutcome {
     out.output = crate::capabilities::tools::domain::budget::cap_result(out.output);
@@ -102,16 +115,41 @@ impl ToolExec for ToolsService {
         let lease = self.module_lease(module);
         if parallel {
             let _shared = lease.read().unwrap_or_else(|e| e.into_inner());
-            within_budget(self.runner.run(fence, command, args_json, env, path, ask))
+            within_budget(host_outcome(self.runner.run(
+                fence,
+                command,
+                args_json,
+                env,
+                path,
+                ask,
+                Some(self.gate.as_ref()),
+            )))
         } else {
             let _exclusive = lease.write().unwrap_or_else(|e| e.into_inner());
-            within_budget(self.runner.run(fence, command, args_json, env, path, ask))
+            within_budget(host_outcome(self.runner.run(
+                fence,
+                command,
+                args_json,
+                env,
+                path,
+                ask,
+                Some(self.gate.as_ref()),
+            )))
         }
     }
 
     fn run_shell(&self, run: &crate::kernel::ports::ShellRun<'_>) -> ToolOutcome {
         // 容器授权按会话持有（见 container_name）：调用结束不释放，会话结束/崩溃时统一回收。
-        within_budget(self.runner.run_shell(run))
+        let run = crate::kernel::ports::ShellRun {
+            fence: run.fence,
+            script: run.script,
+            timeout: run.timeout,
+            cancel: run.cancel,
+            path: run.path,
+            ask: run.ask,
+            gate: Some(self.gate.as_ref()),
+        };
+        within_budget(host_outcome(self.runner.run_shell(&run)))
     }
 
     fn run_builtin(

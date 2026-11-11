@@ -181,6 +181,7 @@ pub(crate) fn build_service(root: &Path) -> Result<BuildsService, String> {
         store,
         Arc::new(crate::capabilities::builds::detail::cache::CacheOnDisk::new(root.to_path_buf())),
         runner,
+        Arc::new(crate::capabilities::tools::service::fence::ToolFenceGate),
         Arc::new(crate::kernel::detail::confine::FenceHostAdapter::new(
             root.join(".home"),
         )),

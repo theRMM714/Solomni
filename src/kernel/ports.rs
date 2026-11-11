@@ -18,8 +18,9 @@ impl Log for NoopLog {
     fn error(&self, _at: &str, _msg: &str) {}
 }
 
-use crate::kernel::domain::fence::FenceSpec;
-use crate::kernel::domain::types::{Ask, AskOutcome, ToolOutcome};
+use crate::kernel::contracts::fence::{FenceBlocked, FenceSpec};
+use crate::kernel::contracts::run::RunOutcome;
+use crate::kernel::contracts::types::{Ask, AskOutcome, ToolOutcome};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
@@ -35,9 +36,9 @@ pub trait PathCodec: Send + Sync + std::fmt::Debug {
     fn to_view(&self, host: &Path) -> String;
 }
 
-/// 目的：外部进程回执里那些收尾标记的文案端口——默认实现由进程机制自己提供（代码常量/函数）。
-/// 约束：保留窄端口供测试替身；生产实现 `CodeProcessTexts` 在 `kernel/detail/process.rs`；
-///   围栏拒绝/放行那 5 个方法只在 Windows 的容器围栏那一路用（unix 无使用点，如实放行死代码）。
+/// 目的：外部进程回执里那些**中性机制**的收尾标记文案端口——默认实现由进程机制自己提供（代码常量/函数）。
+/// 约束：保留窄端口供测试替身；生产实现 `CodeProcessTexts` 在 `kernel/detail/process.rs`。
+///   围栏裁决与面向用户的拒绝文案不在这里（属业务层的围栏裁决端口实现，见 `tools/service/fence.rs`）。
 #[allow(dead_code)]
 pub trait ProcessTexts: Send + Sync {
     /// stderr 段的头（工具进程有 stderr 时拼在回执里）。
@@ -48,16 +49,6 @@ pub trait ProcessTexts: Send + Sync {
     fn fence_failed(&self) -> String;
     /// 输出截断的尾部说明（chars = 原字符数，limit = 上限）。
     fn truncated(&self, chars: &str, limit: &str) -> String;
-    /// 必要落点授不上且不执行时的主句（part / path / why / fix 四段）。
-    fn fence_blocked(&self, part: &str, path: &str, why: &str, fix: &str) -> String;
-    /// 用户明确没有放行这次调用。
-    fn denied_by_user(&self) -> String;
-    /// 没人答、按声明默认项收场（option = 按哪个选项办的）。
-    fn no_answerer_defaulted(&self, part: &str, path: &str, option: &str) -> String;
-    /// 没人答、也没声明默认项。
-    fn no_answerer_refused(&self, part: &str, path: &str) -> String;
-    /// 无围栏跑一次时的如实标注（part / path / why）。
-    fn fence_unfenced(&self, part: &str, path: &str, why: &str) -> String;
     /// 目的：shell 输出 head+tail 截断的尾部说明（chars = 原字符数，head / tail = **实际保留**的字符数）。
     fn truncated_middle(&self, chars: &str, head: &str, tail: &str) -> String;
     /// 目的：shell 的退出码回执（None = 被信号结束，拿不到退出码）。
@@ -141,7 +132,35 @@ pub trait HostProbe: Send + Sync {
     }
 }
 
-/// 目的：一次一次性 shell 执行的输入——脚本、按次超时、取消与提问端口。
+/// 目的：必要落点授不上时，交给**工具能力的裁决端口**的全部事实（机制不解释业务语义）。
+pub struct FenceCase<'a> {
+    /// 目的：哪一环授不上、哪个目录、缺什么前提。
+    pub blocked: &'a FenceBlocked,
+    /// 目的：这次执行是否要求围栏真强制（严格模式）。
+    pub strict: bool,
+    /// 目的：无围栏跑这一次**真能不能跑起来**（由调用方读盘后喂进来）。
+    pub unfenced_possible: bool,
+    /// 目的：谁撞上的（agent 实例名，写进裁决信封）。
+    pub agent: &'a str,
+    /// 目的：这一趟的提问端口；`None` = 没有可回答的前端。
+    pub ask: Option<&'a dyn AskUser>,
+}
+
+/// 目的：裁决端口对一次“必要落点授不上”的处置结果——机制只原样转交，不解释业务语义。
+pub enum FenceVerdict {
+    /// 目的：本轮按无围栏执行；`note` 是随回执附上的如实标注。
+    Unfenced { note: String },
+    /// 目的：这次调用不执行；`output` 是给调用方的回执正文。
+    Refused { output: String },
+}
+
+/// 目的：围栏裁决端口——必要落点授不上时怎么处置，由**业务层**决定（提问、文案、选项都在那里）。
+/// 约束：机制只构造 `FenceCase` 并原样转交结果；没有端口时按 fail-closed 拒绝。
+pub trait FenceGate: Send + Sync {
+    fn decide(&self, case: &FenceCase<'_>) -> FenceVerdict;
+}
+
+/// 目的：一次一次性 shell 执行的输入——脚本、按次超时、取消与裁决端口。
 /// 约束：脚本是**本环境 shell 语法**；命令的 stdin 不提供交互，脚本本身经 stdin（Unix）或临时文件（Windows）送达。
 pub struct ShellRun<'a> {
     /// 目的：这次执行的可达范围与网络。
@@ -156,16 +175,20 @@ pub struct ShellRun<'a> {
     pub path: Option<&'a std::ffi::OsStr>,
     /// 目的：这一趟的提问端口（围栏必要落点授不上时经它问用户；None = 没有可回答的前端）。
     pub ask: Option<&'a dyn AskUser>,
+    /// 目的：这一趟的围栏裁决端口（None = 没有裁决能力，机制按 fail-closed 拒绝）。
+    pub gate: Option<&'a dyn FenceGate>,
 }
 
 /// 目的：一次外部进程执行端口——机制（围栏安装、进程拉起、stdin 送参、超时杀树、截断）在适配层。
 /// 参数：`fence` = 这次执行的可达范围与网络；`command` = 模块声明的启动命令；`args_json` = 经 stdin 送进去的参数；
 ///   `env` = 该模块隐私字段的注入项（只经环境变量进进程，**不进命令行**）；
 ///   `path` = 这一趟的运行包 PATH（本机档；`None` = 用围栏白名单里的 PATH）；`ask` = 这一趟的提问端口
-///   （围栏必要落点授不上时经它问用户；`None` = 没有可回答的前端）。
-/// 返回：一次执行的事实回执；成功与否看退出码，细节由适配层如实拼装。
+///   （围栏必要落点授不上时经它问用户；`None` = 没有可回答的前端）；`gate` = 这一趟的围栏裁决端口
+///   （`None` = 没有裁决能力，机制按 fail-closed 拒绝）。
+/// 返回：一次执行的中性结果；成功与否看退出码，细节由适配层如实拼装。
 /// 约束：策略（哪个模块能调哪个工具、命令行映射、可达哪些根）由调用方派生后传入；本端口只做机制。
 pub trait ProcessRunner: Send + Sync {
+    #[allow(clippy::too_many_arguments)]
     fn run(
         &self,
         fence: &FenceSpec,
@@ -174,11 +197,12 @@ pub trait ProcessRunner: Send + Sync {
         env: &[(String, String)],
         path: Option<&std::ffi::OsStr>,
         ask: Option<&dyn AskUser>,
-    ) -> ToolOutcome;
+        gate: Option<&dyn FenceGate>,
+    ) -> RunOutcome;
 
     /// 目的：跑一次一次性 shell——平台 shell、按次超时、取消与 head+tail 截断都在适配层。
     /// 约束：围栏必须真强制（机制装不上就拒绝）；命令的 stdin 不提供交互。
-    fn run_shell(&self, run: &ShellRun<'_>) -> ToolOutcome;
+    fn run_shell(&self, run: &ShellRun<'_>) -> RunOutcome;
 }
 
 /// 目的：一个**长驻**外部进程会话的规格（起常驻服务用）：围栏 + 命令 + 注入项。
