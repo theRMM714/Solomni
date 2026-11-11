@@ -536,9 +536,9 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
     'disabled=' + createBtn.disabled + ' text=' + createBtn.textContent);
   check('busy: 忙碌时按钮带转圈类', String(createBtn.className).indexOf('busy') >= 0, createBtn.className);
   const busyMsg = findByClass(reg.get('#modal-root'), 'modal-msg')[0];
-  check('busy: 说清在等什么（虚拟机要先起 guest）',
+  check('busy: 说清在等什么（虚拟机要先起虚拟机）',
     !!busyMsg && String(busyMsg.textContent).indexOf('正在创建') >= 0
-    && String(busyMsg.textContent).indexOf('guest') >= 0, busyMsg && busyMsg.textContent);
+    && String(busyMsg.textContent).indexOf('虚拟机') >= 0, busyMsg && busyMsg.textContent);
   await pending;
   await sleep(120);
   const createCall = calls.filter((c) => /create_session$/.test(c.url)).pop();

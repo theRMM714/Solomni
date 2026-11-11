@@ -85,17 +85,28 @@
       }
       if (isItem(line)) {
         var ordered = /^\s*\d+\.\s+/.test(line);
+        var start = 1;
+        if (ordered) {
+          var m0 = line.match(/^\s*(\d+)\.\s+/);
+          start = m0 ? parseInt(m0[1], 10) : 1;
+        }
         var items = [];
-        while (i < lines.length && isItem(lines[i])) {
+        while (i < lines.length && isItem(lines[i]) && /^\s*\d+\.\s+/.test(lines[i]) === ordered) {
           var text = lines[i].replace(/^\s*([-*+]|\d+\.)\s+/, '');
           i++;
+          // 同项的续行：空行、下一个标记、标题与引用都算结束。
           while (i < lines.length && !isBlank(lines[i]) && !isItem(lines[i]) && !isFence(lines[i]) && !isHeading(lines[i]) && !isQuote(lines[i])) {
             text += '\n' + lines[i].trim();
             i++;
           }
           items.push('<li>' + inline(text).replace(/\n/g, '<br>') + '</li>');
+          // 松散列表：项与项之间的空行仍属同一份列表，否则每一项都会从 1 重新编号。
+          var j = i;
+          while (j < lines.length && isBlank(lines[j])) j++;
+          if (j > i && j < lines.length && isItem(lines[j]) && /^\s*\d+\.\s+/.test(lines[j]) === ordered) i = j;
         }
-        html += (ordered ? '<ol>' : '<ul>') + items.join('') + (ordered ? '</ol>' : '</ul>');
+        var tag = ordered ? 'ol' : 'ul';
+        html += '<' + tag + (ordered && start !== 1 ? ' start="' + start + '"' : '') + '>' + items.join('') + '</' + tag + '>';
         continue;
       }
       if (isBlank(line)) { i++; continue; }

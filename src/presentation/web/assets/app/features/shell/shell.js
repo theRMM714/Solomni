@@ -37,6 +37,8 @@ async function refreshState() {
   app.renderHistory();
   if (opened.length) app.renderTabs();
   const cur = app.activeSession();
+  // 没有会话也要画主区：空态与「新建工作」入口是首屏唯一的去处。
+  if (!cur) { app.renderStream(true); app.syncComposer(null); }
   if (cur) {
     app.syncTyping(cur); app.syncSendButton(cur); app.syncComposer(cur);
     // 提交信息不塞进每 3 秒的 /api/state：按需、低频刷新（后台 agent 提交也能跟上）。

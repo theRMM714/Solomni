@@ -164,6 +164,10 @@ function renderStream(force) {
       '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg>' +
       '<div class="tip">' + transcriptCopy.emptyTip + '</div>' +
       '<div class="hint">' + transcriptCopy.emptyHint + '</div></div>';
+    const empty = box.firstChild;
+    const cta = ui.btn(transcriptCopy.emptyCta, 'btn btn-primary');
+    cta.onclick = () => app.openWizard();
+    if (empty) empty.appendChild(cta);
     return;
   }
   const full = force === true || boxes.owner !== s.sid || !boxes.done || !boxes.live;

@@ -287,8 +287,8 @@ function syncStatusbar(s) {
   // 工具：先放手动压缩；所有会话都给入口，协作主会话的项置灰并写明原因。
   const toolsChip = ui.statusChip({
     icon: 'gear',
-    text: '工具',
-    label: '工具',
+    text: '工具 · 压缩',
+    label: '工具与压缩',
     title: '压缩上下文（/compact）',
     onClick: () => openToolsMenu(toolsChip, s),
   });

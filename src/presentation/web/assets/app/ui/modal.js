@@ -62,13 +62,16 @@ function openModalLayer(title, build, wide) {
   head.appendChild(h); head.appendChild(close);
   const body = doc.createElement('div'); body.className = 'modal-body';
   const msg = doc.createElement('div'); msg.className = 'modal-msg';
-  panel.appendChild(head); panel.appendChild(body); panel.appendChild(msg);
+  // 操作区固定在弹层底部：正文再长也不把「创建」推到首屏之外。
+  const foot = doc.createElement('div'); foot.className = 'modal-foot';
+  panel.appendChild(head); panel.appendChild(body); panel.appendChild(msg); panel.appendChild(foot);
   overlay.appendChild(panel);
   root.appendChild(overlay);
   layer.unbind = ui.bindDismiss(overlay, panel, closeThis);
   modalLayers.push(layer);
   const ctx = {
     body,
+    foot,
     setMsg: (t, isErr) => { msg.textContent = t || ''; msg.className = isErr ? 'modal-msg err' : 'modal-msg'; },
     close: closeThis,
     // 订阅登记处变化；关层时统一退订。

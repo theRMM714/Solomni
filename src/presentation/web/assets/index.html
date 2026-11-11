@@ -34,6 +34,9 @@
     <!-- 侧栏：新建 + 会话树 + 底部设置；收起时只留图标栏 -->
     <aside id="sidebar" class="sidebar">
       <div class="sidebar-main">
+        <div class="sidebar-head">
+          <button id="btn-drawer-close" class="icon-btn" type="button" aria-label="关闭侧栏"></button>
+        </div>
         <section class="panel">
           <button id="btn-new-work" class="btn btn-primary btn-block">+ 新建工作</button>
         </section>
@@ -41,9 +44,7 @@
         <section class="panel">
           <h2>会话历史</h2>
           <div id="history-list" class="history-list"></div>
-          <p class="panel-note">点条目直接打开会话；编辑 / 删除在行尾铅笔菜单里。</p>
         </section>
-        <p class="sidebar-note">密钥只进登记处，任何界面不显示、不转发。</p>
       </div>
       <div class="sidebar-foot">
         <button id="btn-settings" class="sidebar-action" type="button" title="设置"></button>

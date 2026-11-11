@@ -211,7 +211,6 @@ function sessionNote(s) {
   }
   if (s.run === 'stopped') bits.push('这条会话已停止：不会再被派发或唤醒；启用后按会话状态继续。');
   if (s.run === 'closed') bits.push('这条会话已关闭：终态，不会再被派发或唤醒。');
-  if (s.readonly) bits.push('历史回放为只读：点「启用会话」后才能发送消息。');
   if (!bits.length) return null;
   const d = doc.createElement('div');
   d.className = 'agent-note';

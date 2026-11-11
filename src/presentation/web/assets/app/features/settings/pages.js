@@ -83,7 +83,7 @@ function thinkingTagsEditor(levels) {
   chips.className = 'mod-chips';
   const addRow = doc.createElement('div');
   addRow.className = 'wf-inline';
-  const input = textInput('新档位（如 high、高、xhigh）');
+  const input = textInput('新档位');
   input.className = 'field-input tag-input';
   const add = btn('+ 添加档位', 'mod-add');
   const err = ui.hint('', 'err');
