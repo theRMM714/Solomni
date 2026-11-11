@@ -44,7 +44,7 @@ node run-tests.js --skip-e2e
 
 - 注意：`node dev.js test` 与 `node dev.js fmt`、`node dev.js clippy` **都预期全绿**——T0 九项的步骤、可行状态与环境跳过口径见 [levels.md](levels.md) 的 T0 生成段；`env-skip` 不算通过，没有容差基线（注释契约的存量快照只减不增）。
 - `--strict-env`：必装工具（rustfmt / clippy / cargo-audit / cargo-deny）缺失或取不到 advisory 数据时，这几步记失败而不是 `env-skip`；交叉 target 属可选项，不受影响。CI 的 `quality` job 固定带它，本地开发默认不带（离线机器仍能跑其余项，缺项如实体现在报告里）。
-- 用例默认**并行**跑；排查并发 / 隔离问题时用 `node run-tests.js --serial`。找测试盲区用 `node run-tests.js --coverage`（见下文「覆盖率发现模式」，只报不拦）。
+- 用例默认**并行**跑；排查并发 / 隔离问题时用 `node run-tests.js --serial`。覆盖率是独立门禁：`node run-tests.js --coverage`（见下文「覆盖率门禁（Linux）」，不达标即失败）。
 
 ### 完整本地入口
 
@@ -183,17 +183,19 @@ node run-tests.js --fence-live
 - **Linux 的 ext4 工具链用例按环境判据跳过**：`unshare -r` / `mke2fs` / `debugfs` 不可用（Linux CI 就是这样）时，`packed_guest_image_uses_4k_blocks` 与 `guest_rootfs_restores_privilege_bits_and_ownership` 打印 `[探针]` 并跳过。
 - 跳过 = `env-skip`，不是通过。补装 e2fsprogs 并允许非特权用户命名空间后才真跑。
 
-### 覆盖率发现模式（手动）
+### 覆盖率门禁（Linux）
 
 ```text
 node run-tests.js --coverage
+# 等价于 node tests/coverage.mjs --collect
 ```
 
-- 它**只用来找盲区，不做通过判据、不设阈值**（[TESTING.md](../../TESTING.md) 一：覆盖率高不代表行为契约被验证）。
-- 工具缺失（没装 `cargo-llvm-cov` 或 `llvm-tools-preview`）记 env-skip 并打印安装命令，不算通过。
-- 两个必须记住的局限（`run-tests.js`）：① 平台 `#[cfg]` 在别的平台根本不编译，覆盖率必须**逐平台**看；
-- ② 产品二进制（守门进程、L4 端到端）由本入口单独 `cargo build`、**未插桩**，进程内覆盖率不包含它们。
-- 报告落 `target/coverage/`；未覆盖的生产路径逐条决定补测或记 [tests/gaps.yaml](../../tests/gaps.yaml) 的 `testing.coverage-child-and-platform`。
+- 判据是 `tests/coverage-policy.json` 的三类风险区：产品 80%、平台/进程适配 60%、安全策略 100%。覆盖率是风险下限，不是质量目标（[TESTING.md](../../TESTING.md) 一）。
+- 统计前剔除 `src/tests/**`、`tests/**`、`*tests.rs` 与 `#[cfg(test)]` 到配对右花括号的整段；否则内联测试会把覆盖率抬高。`policy.excludes` 的显式 seam 豁免必须逐条写文件、行段与理由，评估时打印豁免行数。
+- Linux 同时采集测试进程与产品子进程：先 `cargo llvm-cov --workspace --all-targets --no-report`，再用同一份插桩环境 `cargo build --bin solomni`，然后以 `E2E_COVERAGE=1` 跑 L4（优雅停止让子进程写 profile），最后合并 `*.profraw` 出报告。测试失败、E2E 失败或任一桶不达标都非零退出。
+- Windows 不判定行覆盖：Node 的 `SIGINT` 在 Windows 是 `TerminateProcess`，产品子进程来不及写 profile；只靠进程内报告会让产品桶假性不达标。macOS 不在本门禁内，避免为同一结论再付一份 runner。平台专有行为由三平台 `quality` 的真机探针与安全行为矩阵承担，不靠行覆盖替代。
+- 工具缺失（`cargo-llvm-cov` 或 `llvm-tools-preview`）直接失败并打印安装命令，不再记 env-skip；CI 的 `coverage` job 用 `taiki-e/install-action` 固定版本安装。
+- 报告落 `target/coverage/`；未覆盖的生产路径在本次内补测或给出显式 seam，不留缺口条目。
 
 ### 突变测试工作流（手动）
 
@@ -235,17 +237,18 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 - 矩阵 `windows-latest / ubuntu-latest / macos-latest`（`fail-fast: false`，一个平台失败不影响另外两个出结论）。
 - 来自 fork 的 PR 照跑测试，但不发布 `ci-report`（token 只读）。
 
-- 平台相关的 job 是 `quality` 与 `e2e`；`changes` / `docs` / `structure` / `workflow` / `gate` / `publish-report` 是平台无关的 job：
+- 平台相关的 job 是 `quality` 与 `e2e`；`coverage` 固定在 Linux 单平台；`changes` / `docs` / `structure` / `workflow` / `gate` / `publish-report` 是平台无关的 job：
 
 | job | 跑什么 | 对应入口 |
 | --- | --- | --- |
 | `quality` | 平台门禁 + 供应链 + L1 单元 + 平台探针 + 前端冒烟 + 前端类型检查（tsc） + 开发回路 / 变更分流 / 环境引导自检（**跳过 L4 与结构审查**） | `node run-tests.js --fence-live --skip-e2e --skip-audit --strict-env` |
-| `e2e` | L4 端到端（自己构建产品，与 `quality` 并行） | `node tests/ci-e2e.mjs`（CI 专用；本地整跑用 `node run-tests.js --fence-live`） |
+| `e2e` | L4 端到端 HTTP 与浏览器两条（自己构建产品，与 `quality` 并行） | `node tests/ci-e2e.mjs`（CI 专用；本地整跑用 `node run-tests.js --fence-live`） |
+| `coverage` | 覆盖率门禁（Linux，含测试进程与 L4 子进程） | `node tests/coverage.mjs --collect` |
 | `changes` | 判定 `code_changed` / `docs_changed`；从 base 取分类器副本，自测 + `include_str!/include_bytes!` 文档消费自检 | `node tests/ci-changes.mjs`（副本） |
 | `docs` | 有文档变更：文档审查（门户 / 链接 / 根文档路由） | `node run-tests.js --audit=docs` |
 | `structure` | 始终跑：结构审查（代码↔文档结构；文档与真相源比对 + 纯文本检查） | `node run-tests.js --audit=structure` |
 | `workflow` | 始终跑：工作流静态检查（闸门判定自测 + actionlint 阻断 + zizmor 固定 1.32.0 阻断，findings 即失败；9 个只读 checkout 关凭据，2 个发布 job 有行内豁免） | `node tests/ci-gate.mjs --self-test`；`actionlint -no-color`（阻断）；`zizmor@1.32.0 --persona=regular --format=plain .github/workflows`（findings 即失败） |
-| `gate` | 汇总五个 job 的结果（`changes` 的分类 + `docs` / `structure` / `workflow` / `quality` / `e2e`），规则集里唯一代表代码/文档验收的必填检查；不产报告 | `node tests/ci-gate.mjs` |
+| `gate` | 汇总六个 job 的结果（`changes` 的分类 + `docs` / `structure` / `workflow` / `quality` / `coverage` / `e2e`），规则集里唯一代表代码/文档验收的必填检查；不产报告 | `node tests/ci-gate.mjs` |
 | `publish-report` | 汇总三条 lane 的报告并发布 `ci-report` | `tests/ci-merge.mjs` + `tests/ci-publish.mjs` |
 
 - **三路分流**：`changes` 输出两个谓词：
@@ -253,22 +256,22 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 - `code_changed`：至少一个非叙述型文档路径（`docs/presentation/contracts.md` 也算代码——ROUTES 表由 `src/tests/routes.rs` 的 `include_str!` 消费）；
 - `docs_changed`：至少一个文档路径（`*.md`、`docs/**`、`LICENSE`；contracts.md 同时算文档，文档审查也查它的链接）。
 
-| PR | `docs` 文档审查 | `structure` 结构审查 | `workflow` 工作流静态检查 | `quality` / `e2e` 三平台 | `gate` |
-| --- | --- | --- | --- | --- | --- |
-| 纯文档 | 跑 | 跑 | 跑（恒跑） | 跳过（闸门判为合法） | 跑 |
-| 纯代码 | 跳过（闸门判为合法） | 跑 | 跑（恒跑） | 跑 | 跑 |
-| 混合 | 跑 | 跑 | 跑（恒跑） | 跑 | 跑 |
+| PR | `docs` 文档审查 | `structure` 结构审查 | `workflow` 工作流静态检查 | `quality` / `e2e` 三平台 | `coverage` Linux | `gate` |
+| --- | --- | --- | --- | --- | --- | --- |
+| 纯文档 | 跑 | 跑 | 跑（恒跑） | 跳过（闸门判为合法） | 跳过（闸门判为合法） | 跑 |
+| 纯代码 | 跳过（闸门判为合法） | 跑 | 跑（恒跑） | 跑 | 跑 | 跑 |
+| 混合 | 跑 | 跑 | 跑（恒跑） | 跑 | 跑 | 跑 |
 
 - **结构审查始终跑**：代码变更会破坏代码↔文档结构（新增 `src/**/*.rs` 没进 unit-map），文档变更同样会（删 unit-map 一行、删提示词键表一个键、从 `SYSTOOL.md` 删表名）。所以它不是“纯文档检查”，而是两边都要对得上的门禁。
 - 它平台无关，只跑一次，不放进三平台的 `quality`。
 
-- `quality` / `e2e` / `docs` 用 **job 级 `if` 跳过**；`docs` 名字固定，跳过就上报一条同名的 skipped。`structure` / `workflow` 恒跑（除 Draft 与取消外不跳过），所以它们必须 success（`tests/ci-gate.mjs` 的 `allowSkip` 对两者恒为 false）。
+- `quality` / `e2e` / `coverage` / `docs` 用 **job 级 `if` 跳过**；`docs` 名字固定，跳过就上报一条同名的 skipped。`structure` / `workflow` 恒跑（除 Draft 与取消外不跳过），所以它们必须 success（`tests/ci-gate.mjs` 的 `allowSkip` 对两者恒为 false）。
 - `quality` / `e2e` 是矩阵 job，而 `jobs.<job_id>.if` 在**矩阵展开之前**求值（[GitHub 文档](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idif)），被跳过时不会展开成 `（windows-latest）` 等名字，只报一条名字带字面量 `${{ matrix.os }}` 的 skipped。按平台名配置的required context 因此永远停在 pending——纯文档 PR 会卡在「检查全绿/跳过，但不能合并」。所以平台 job 不进规则集。
 - **规则集只要求固定名字的 `gate` 一项**，`docs` / `structure` / `workflow` 也不是 required context，它们的结论经 `gate` 进入合并判定。
 - **不要改成 workflow 级 `paths-ignore`**：workflow 不启动时 required context 根本不会上报，会永远停在 pending。
 
-- `gate`（检查名 `验收闸门`）在非 Draft 的 run 里始终运行，汇总五个 lane（`docs` / `structure` / `workflow` / `quality` / `e2e`）的 `needs.*.result`，按 `changes` 的分类结果判「跳过是否合法」（判定逻辑在 `tests/ci-gate.mjs`，自测 8 个样例；`changes` 只提供分类输入，失败只告警、不单独判失败）：
-- `code_changed=false` 时 `quality` / `e2e` 可以 skipped，`docs_changed=false` 时 `docs` 可以 skipped，`structure` 与 `workflow` 必须 success（`.github/workflows/test.yml`、`tests/ci-gate.mjs`）；其余任何 skipped / failure / cancelled 都判失败。`changes` 自身不参与判定（它只是路由；失败时下游已按全量兜底），所以分类器故障不会单独阻塞合并，但真跑挂了的 job 一定会被闸门拦下。`gate` 不写 `ci-report`，结论只在 PR 检查项里。
+- `gate`（检查名 `验收闸门`）在非 Draft 的 run 里始终运行，汇总六个 lane（`docs` / `structure` / `workflow` / `quality` / `coverage` / `e2e`）的 `needs.*.result`，按 `changes` 的分类结果判「跳过是否合法」（判定逻辑在 `tests/ci-gate.mjs`，自测 8 个样例；`changes` 只提供分类输入，失败只告警、不单独判失败）：
+- `code_changed=false` 时 `quality` / `coverage` / `e2e` 可以 skipped，`docs_changed=false` 时 `docs` 可以 skipped，`structure` 与 `workflow` 必须 success（`.github/workflows/test.yml`、`tests/ci-gate.mjs`）；其余任何 skipped / failure / cancelled 都判失败。`changes` 自身不参与判定（它只是路由；失败时下游已按全量兜底），所以分类器故障不会单独阻塞合并，但真跑挂了的 job 一定会被闸门拦下。`gate` 不写 `ci-report`，结论只在 PR 检查项里。
 
 - `changes` 先跑分类器自测；全量入口的「变更分流自检」步骤也会跑同一个 `--self-test`。分类器**从 base 取副本**（`git show base:tests/ci-changes.mjs`）再执行——PR 改自己的分类脚本不能把自己判成全文档；base 还没有该文件时两路都跑。取不到 diff、空 diff 或未知路径时同样落回全量。
 - 新分类器写 `code_changed` / `docs_changed`；分类字段缺失（例如 base 的分类器还没有该键）时，下游条件按 `!= 'false'` 兜底为全量跑，不会出现启动期全跳过。
@@ -285,7 +288,7 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 
 > **规则集**：`main` 的唯一必填检查是 `验收闸门`（`gate`）。`文档审查` / `结构审查` / `工作流静态检查` / 平台 job 都不是 required context——
 > 它们跑不跑、跳过是否合法，都由 `gate` 按 `changes` 的分类汇总判定（工作流静态检查恒跑，`skipped` 一律不合法）；合并判定只看这一个检查名。
-> **不要**把六个平台 job 或 `变更分流` 设为 required：平台 job 是矩阵 job，纯文档 PR 跳过时不会产出 `（windows-latest）` 这类名字（永远 pending）；
+> **不要**把平台 job 或 `变更分流` 设为 required：平台 job 是矩阵 job，纯文档 PR 跳过时不会产出 `（windows-latest）` 这类名字（永远 pending）；
 > `变更分流` 只是路由 job，卡住不应阻塞合并。
 > 规则集是仓库外的事实（GitHub 设置），本仓由用户在 GitHub 设置里改；核实用只读命令：
 > `gh api repos/<owner>/<repo>/rulesets --jq '.[].id'`，再取对应 id 的 `required_status_checks`。
