@@ -162,6 +162,7 @@ function atRender() {
     return;
   }
   let group = null;
+  /** @type {any} */
   let activeRow = null;
   atState.items.forEach((it, i) => {
     if (it.group !== group) {

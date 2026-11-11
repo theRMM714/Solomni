@@ -31,9 +31,9 @@ const MARKERS = [
   { text: TEXT.ENV_BOOTSTRAP_OK, owner: "tests/env-bootstrap.mjs", meaning: "env.js 的下载 / 续传 / 结构判定 / sha256 闸自检通过；非 Windows 那部分记 [探针]" },
   { text: TEXT.E2E_OK, owner: "tests/cross-platform/e2e/orchestrator.js", meaning: "L4 端到端编排通过（整跑与 ci-e2e 都按它判）" },
   { text: TEXT.E2E_FAILED, owner: "tests/cross-platform/e2e/orchestrator.js", meaning: "L4 端到端编排失败（失败证据在 e2e 日志）" },
-  { text: TEXT.MUTATION_OK, owner: "tests/ci-mutation.mjs", meaning: "突变测试全捕获（手动工作流，不参与验收）" },
-  { text: TEXT.MUTATION_FOUND, owner: "tests/ci-mutation.mjs", meaning: "突变测试有漏网（手动工作流，不参与验收）" },
-  { text: TEXT.GATE_OK, owner: "tests/ci-gate.mjs", meaning: "CI 验收闸门按变更分类核对五个 lane（docs / structure / workflow / quality / e2e）全部通过" },
+  { text: TEXT.MUTATION_OK, owner: "tests/ci-mutation.mjs", meaning: "突变测试全捕获（手动 / 每周工作流，不参与验收）" },
+  { text: TEXT.MUTATION_FOUND, owner: "tests/ci-mutation.mjs", meaning: "突变测试有漏网（手动 / 每周工作流，不参与验收）" },
+  { text: TEXT.GATE_OK, owner: "tests/ci-gate.mjs", meaning: "CI 验收闸门按变更分类核对六个 lane（docs / structure / workflow / quality / coverage / e2e）全部通过" },
 ];
 
 module.exports = { TEXT, MARKERS };

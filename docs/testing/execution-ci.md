@@ -198,17 +198,21 @@ node run-tests.js --coverage
 - 工具缺失（`cargo-llvm-cov` 或 `llvm-tools-preview`）直接失败并打印安装命令，不再记 env-skip；CI 的 `coverage` job 用 `taiki-e/install-action` 固定版本安装。
 - 报告落 `target/coverage/`；未覆盖的生产路径在本次内补测或给出显式 seam，不留缺口条目。
 
-### 突变测试工作流（手动）
+### 突变测试工作流（手动 + 每周一）
 
-- 范围只有两个：`core`（小而精，先跑）与 `capability`（单能力抽查）；**刻意不做 `all`**——全量收益低（平台 `#[cfg]` 在别平台不编译、unviable/等价变异体多）、耗时长，单能力抽查已够用。
+- 范围有三个：`core`（小而精，先跑）、`weekly`（每周一定时审计集）与 `capability`（单能力抽查）；**刻意不做 `all`**——全量收益低（平台 `#[cfg]` 在别平台不编译、unviable/等价变异体多）、耗时长。
 - 范围是 `tests/mutation-scope.json` 里的**文件级**清单（不写变异体名，避免行号漂移后腐烂）。
-- 安全纯逻辑必须在范围内：`src/capabilities/permission/domain/permission.rs` 与 `src/kernel/detail/confine/paths.rs`；安全面的突变存活率目标 **≥90%**，在阶段出口人工审计，不接 CI 门禁（`cargo-mutants` 仍只手动派发）。
+- `weekly` 覆盖安全、底层、虚拟机、workspace 与 `core` 的高价值纯逻辑：安全 `src/capabilities/permission/domain/permission.rs`、`src/kernel/detail/confine/paths.rs`、`src/kernel/detail/confine/ledger.rs`、`src/kernel/detail/unpack.rs`；底层 `src/kernel/domain/path.rs`；虚拟机 `src/capabilities/vm/domain/guest.rs`、`src/capabilities/vm/domain/exec.rs`、`src/capabilities/vm/service.rs`；workspace `src/capabilities/workspace/domain/workstore.rs`、`src/capabilities/workspace/domain/workspace.rs`、`src/capabilities/workspace/service/commit.rs`；以及 `core` 的 `src/capabilities/llm/detail/repair.rs`、`src/capabilities/registry/detail/yaml_settings.rs`、`src/capabilities/slate/service.rs`。
+- 安全纯逻辑必须在范围内（`src/capabilities/permission/domain/permission.rs`、`src/kernel/detail/confine/paths.rs`）；安全面的突变存活率目标 **≥90%**，在阶段出口人工审计，不接 CI 门禁。
+- 定时：`.github/workflows/mutants.yml` 的 `schedule: cron "0 4 * * 1"`（UTC 04:00 = 北京时间周一 12:00）。GitHub 只在**默认分支最新提交**上跑定时；同一提交若已有 `weekly` 结论（`all-caught` 或 `missed`），preflight 读 ci-mutation 分支上一次 weekly 的 meta.json 后跳过；`404`、坏 JSON、`timeout`、`baseline-failed`、`error` 都照常重跑。手动派发永远执行。
+- 单 job 超时 360 分钟（GitHub 上限 6 小时）；手动与定时共用 `ci-mutation-run` 并发组，不取消正在跑的那次。首次跑完记录实际耗时；若接近上限，按安全 / 虚拟机 / workspace 拆 shard，而不是继续加时间。
 
 ```text
 （本地，需自己装 cargo-mutants）
 MUTATION_SCOPE=core node tests/ci-mutation.mjs
+MUTATION_SCOPE=weekly node tests/ci-mutation.mjs
 MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
-（CI 用 .github/workflows/mutants.yml，手动派发）
+（CI 用 .github/workflows/mutants.yml：手动派发，或每周一 12:00 北京时间自动跑 weekly）
 ```
 
 - 入口与门禁共用同一份环境解析（[env.js](../../env.js)）：借用系统 `cargo` 可以，但 `CARGO_HOME` 与临时目录仍钉在项目内。
@@ -216,7 +220,7 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 
 - **开发环境同步**：换机器 / 换人开发时跑 `node setup-dev.js`（`--check` 只读校验）。它统一用**项目内**工具链（`platform/<os>/rustup`、`platform/<os>/cargo`），组件、交叉 target 与项目内工具都装那里——**不写系统 `~/.rustup`、`~/.cargo`**；条目清单见 [dev-tools.js](../../dev-tools.js)。
 - 清单分**必装**（rustfmt / clippy / cargo-audit / cargo-deny：T0 判据本身）与**可选**（交叉 target、llvm-tools-preview / cargo-llvm-cov）：`--check` 只对必装项非零，`--strict` 才要求全齐；缺可选项目不阻断开发，但报告里会如实记 `env-skip`。
-- **前端类型检查依赖**：根 `package.json` / `package-lock.json` 固定 TypeScript；首次或换机后跑 `npm ci --ignore-scripts`（项目内 `node_modules`，不入库）。`frontend-typecheck` 步骤以 `tsconfig.json` 为工程文件运行项目内 TypeScript；缺 `node_modules` 时记 `env-skip`，CI 的 `--strict-env` 下算失败。
+- **前端类型检查依赖**：根 `package.json` / `package-lock.json` 固定 TypeScript 5.9.3（7.0.2 native 的 `include` 通配在 Windows 上会报 TS18003，升级前先验证）；首次或换机后跑 `npm ci --ignore-scripts`（项目内 `node_modules`，不入库）。`frontend-typecheck` 步骤以 `tsconfig.json` 为工程文件运行项目内 TypeScript；缺 `node_modules` 时记 `env-skip`，CI 的 `--strict-env` 下算失败。
 
 - 突变测试的测试命令固定「只跑 `--bin solomni`」并按串行跑（逐条变异单独复现，与门禁的默认并行无关）。`cargo-mutants` 按「工具获取」策略在 CI 预编译装（见 [quality-isolation.md](quality-isolation.md)；一次性临时环境，不改本机）。已知**等价变异体**在仓库根的 `.cargo/mutants.toml` 的 `exclude_re` 里排除（每条都要写明为什么等价，当前 1 条）。
 
@@ -226,10 +230,10 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 - 结果分两处，**各推各的**（`ci-report` 由 `test.yml` 独占，突变不碰它）：
 
 - **`ci-mutation` 滚动分支**（小文本，可 `git show`，无凭据也能读）：
-- `git fetch origin && git show origin/ci-mutation:capability-repair/missed.txt`；键是 `core` 或 `capability-<名字>`，**同一键每次覆盖、只留最近一次**，内容为 `report.json` / `meta.json` / `missed.txt` / `caught.txt` / `timeout.txt` / `unviable.txt` / `outcomes.json`。
+- `git fetch origin && git show origin/ci-mutation:weekly/missed.txt`；键是 `core`、`weekly` 或 `capability-<名字>`，**同一键每次覆盖、只留最近一次**，内容为 `report.json` / `meta.json` / `missed.txt` / `caught.txt` / `timeout.txt` / `unviable.txt` / `outcomes.json`。
 - **Actions 产物 `mutation-report`**（完整现场）：`target/` 下的 `mutation-report.json`、`target/logs/mutation-*.log`、`mutants.out/`；分支只留最近一次，历史看这里。
 
-- 两个范围都只作调查：全捕获 = `MUTATION-OK`，否则 `MUTATION-FOUND`；`capability` 范围按需派发。棘轮基线只在出现「已知容忍」的未捕获时再建。
+- 三个范围都只作调查：全捕获 = `MUTATION-OK`，否则 `MUTATION-FOUND`；`weekly` 由定时触发，`capability` 按需派发。棘轮基线只在出现「已知容忍」的未捕获时再建。
 
 ### CI（GitHub Actions）：跨平台与真机的参考事实来源
 
@@ -408,9 +412,9 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 | `ENV-BOOTSTRAP-OK` | env.js 的下载 / 续传 / 结构判定 / sha256 闸自检通过；非 Windows 那部分记 [探针] | `tests/env-bootstrap.mjs` |
 | `E2E-OK` | L4 端到端编排通过（整跑与 ci-e2e 都按它判） | `tests/cross-platform/e2e/orchestrator.js` |
 | `E2E-FAILED` | L4 端到端编排失败（失败证据在 e2e 日志） | `tests/cross-platform/e2e/orchestrator.js` |
-| `MUTATION-OK` | 突变测试全捕获（手动工作流，不参与验收） | `tests/ci-mutation.mjs` |
-| `MUTATION-FOUND` | 突变测试有漏网（手动工作流，不参与验收） | `tests/ci-mutation.mjs` |
-| `GATE-OK` | CI 验收闸门按变更分类核对五个 lane（docs / structure / workflow / quality / e2e）全部通过 | `tests/ci-gate.mjs` |
+| `MUTATION-OK` | 突变测试全捕获（手动 / 每周工作流，不参与验收） | `tests/ci-mutation.mjs` |
+| `MUTATION-FOUND` | 突变测试有漏网（手动 / 每周工作流，不参与验收） | `tests/ci-mutation.mjs` |
+| `GATE-OK` | CI 验收闸门按变更分类核对六个 lane（docs / structure / workflow / quality / coverage / e2e）全部通过 | `tests/ci-gate.mjs` |
 <!-- END:success-markers -->
 
 - 固定标记不能替代质量门禁，也不能覆盖 `env-skip`、`gap` 或 `quality-fail`。测试入口必须以非零退出码暴露失败（`run-tests.js`）。

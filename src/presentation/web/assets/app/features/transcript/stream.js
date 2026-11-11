@@ -127,9 +127,9 @@ function renderLive(s, full) {
   }
   const groups = [];
   for (const b of live) {
-    if (b.kind === 'msg') groups.push({ msg: b, tools: [] });
+    if (b.kind === 'msg') groups.push({ msg: b, tools: [], ui: null });
     else if (b.kind === 'tool') {
-      if (!groups.length) groups.push({ msg: null, tools: [] });
+      if (!groups.length) groups.push({ msg: null, tools: [], ui: null });
       groups[groups.length - 1].tools.push(b);
     }
   }

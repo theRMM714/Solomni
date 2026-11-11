@@ -1,31 +1,80 @@
-# 突变测试（手动）：只在需要时抽查「测试能不能发现 bug」，不参与验收（见 docs/testing/execution-ci.md）。
-# 只有手动 workflow_dispatch；Linux 单平台——范围是平台无关的纯逻辑，三平台只是 3 倍成本。
+# 突变测试（手动抽查 + 每周一定时）：只在需要时抽查「测试能不能发现 bug」，不参与验收（见 docs/testing/execution-ci.md）。
+# 定时只在默认分支（main）的最新提交上跑；同一提交已有结论就跳过，省 runner 也省时间。
+# 只有 Linux 单平台：范围是平台无关的纯逻辑，三平台只是 3 倍成本。
 # cargo-mutants 用 taiki-e/install-action 装预编译二进制：CI 是一次性临时环境，不改本机。
 name: 突变测试
 
 on:
+  schedule:
+    # 每周一 04:00 UTC = 北京时间 12:00。
+    - cron: "0 4 * * 1"
   workflow_dispatch:
     inputs:
       scope:
-        description: "范围：core（小而精，先跑这个）或 capability（单能力抽查）"
+        description: "范围：weekly（定时审计集）/ core（小而精，先跑这个）/ capability（单能力抽查）"
         type: choice
         options:
+          - weekly
           - core
           - capability
         default: core
       capability:
-        description: "scope=capability 时测哪个能力（可选值见 tests/mutation-scope.json 的 capabilities；scope=core 时忽略）"
+        description: "scope=capability 时测哪个能力（可选值见 tests/mutation-scope.json 的 capabilities；其它范围忽略）"
         type: string
         default: repair
 
 permissions:
   contents: read
 
+# 手动与定时共用一组：不取消正在跑的那次，后来的排队等待。
+concurrency:
+  group: ci-mutation-run
+  cancel-in-progress: false
+
 jobs:
+  preflight:
+    name: 同提交跳过判定
+    # 只有定时需要判定；手动派发永远执行。
+    if: ${{ github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      skip: ${{ steps.check.outputs.skip }}
+    steps:
+      - name: 读 ci-mutation 上一次 weekly 结论
+        id: check
+        env:
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          body="$(curl -fsSL --retry 2 "https://raw.githubusercontent.com/${REPO}/ci-mutation/weekly/meta.json?t=$(date +%s)" || true)"
+          if [ -z "$body" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "[突变] 没有上一次 weekly 报告，照常执行"
+            exit 0
+          fi
+          BODY="$body" SHA="$SHA" node -e '
+            const fs = require("node:fs");
+            let skip = false;
+            try {
+              const m = JSON.parse(process.env.BODY || "{}");
+              skip = m.sha === process.env.SHA && (m.status === "all-caught" || m.status === "missed");
+              console.log("[突变] 上一次 weekly：sha=" + String(m.sha || "").slice(0, 12) + " status=" + String(m.status || ""));
+            } catch (e) {
+              console.log("[突变] 上一次 weekly 报告读不懂，照常执行：" + String(e.message || e));
+            }
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, "skip=" + skip + "\n");
+            console.log("[突变] 同提交跳过=" + skip);
+          '
+
   mutation:
     name: 突变测试
+    needs: preflight
+    if: ${{ always() && !cancelled() && needs.preflight.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    # 单 job 上限 6 小时；weekly 14 个文件比 core 大，先给足，首次跑完再按实测决定是否拆 shard。
+    timeout-minutes: 360
     # 借用 runner 自带 Rust，但缓存/安装落项目内（见 docs/testing/execution-ci.md）。
     env:
       CARGO_HOME: ${{ github.workspace }}/platform/ci/cargo
@@ -67,8 +116,9 @@ jobs:
 
       - name: 跑突变测试
         env:
-          MUTATION_SCOPE: ${{ inputs.scope }}
-          MUTATION_CAPABILITY: ${{ inputs.capability }}
+          # 定时默认 weekly；手动按输入。
+          MUTATION_SCOPE: ${{ github.event_name == 'workflow_dispatch' && inputs.scope || 'weekly' }}
+          MUTATION_CAPABILITY: ${{ github.event_name == 'workflow_dispatch' && inputs.capability || 'repair' }}
         run: node tests/ci-mutation.mjs
 
       # 保存只在 main：手动派发在 main 上跑一次才写缓存；save 失败不挡突变测试结论。
@@ -96,8 +146,9 @@ jobs:
 
   publish:
     name: 发布到 ci-mutation
-    needs: mutation
-    if: ${{ always() && !cancelled() }}
+    needs: [preflight, mutation]
+    # 只有突变步骤实际跑过才发布：同提交跳过时保留上一次 weekly 报告。
+    if: ${{ always() && !cancelled() && needs.mutation.result != 'skipped' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
