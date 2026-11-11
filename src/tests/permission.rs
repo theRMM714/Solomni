@@ -1220,9 +1220,9 @@ fn narrowing_never_widens_profile_reach_scope_or_decision() {
     for base_profile in all_profiles() {
         let base = pset(base_profile);
         for profile in [None].into_iter().chain(all_profiles().map(Some)) {
-            for reach in reach_edits.iter().cloned() {
-                for shared in scope_edits.iter().cloned() {
-                    for decisions in decision_edits.iter().cloned() {
+            for reach in reach_edits.iter() {
+                for shared in scope_edits.iter() {
+                    for decisions in decision_edits.iter() {
                         let layer = PermissionLayer {
                             profile,
                             reach: reach.clone(),
