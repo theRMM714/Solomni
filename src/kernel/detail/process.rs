@@ -5,7 +5,9 @@
 
 use crate::kernel::api::{FenceSpec, RunOutcome};
 use crate::kernel::detail::confine;
-use crate::kernel::ports::{FenceCase, FenceGate, FenceVerdict};
+use crate::kernel::ports::FenceGate;
+#[cfg(windows)]
+use crate::kernel::ports::{FenceCase, FenceVerdict};
 use crate::kernel::ports::{ProcessRunner, ProcessTexts};
 use std::path::PathBuf;
 use std::process::Stdio;
