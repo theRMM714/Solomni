@@ -254,6 +254,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
+      # 前端类型检查用项目内 node_modules（清单与锁文件入库）；不跑第三方安装脚本。
+      - name: 安装前端类型检查依赖（npm ci）
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
       # 仅 CI：预编译装供应链工具（快）。本地开发不引第三方，仍按 run-tests.js 的提示 cargo install 到项目内。
       # 安装用时经 SOLOMNI_CI_PREINSTALL_MS 带进门禁报告（见 docs/testing/execution-ci.md）。
       - name: 记录供应链工具安装起跑

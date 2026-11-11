@@ -20,7 +20,7 @@ const RETRY_MS = 3000;
 export function createEventStream(deps) {
   let since = 0;
   let active = false;
-  const wait = (ms) => new Promise((res) => deps.setTimeout(res, ms));
+  const wait = (ms) => new Promise((res) => deps.setTimeout(() => res(undefined), ms));
 
   async function run() {
     if (active) return;

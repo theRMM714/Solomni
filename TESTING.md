@@ -26,7 +26,7 @@
 
 ## 二、当前状态
 
-- 测试分区：`src/tests/` 与 `capabilities/` 同构（一个能力一个文件，用例多的按域分子模块；`doubles.rs` 端口替身、`builders.rs` 装配脚手架），跨平台集成与 L4 在 `tests/cross-platform/`，平台探针 `tests/<平台>/`，前端冒烟 `src/presentation/web/assets/*.smoke.cjs`（索引见 [docs/testing/README.md](docs/testing/README.md)）。
+- 测试分区：`src/tests/` 与 `capabilities/` 同构（一个能力一个文件，用例多的按域分子模块；`doubles.rs` 端口替身、`builders.rs` 装配脚手架），跨平台集成与 L4 在 `tests/cross-platform/`，平台探针 `tests/<平台>/`，前端冒烟 `src/presentation/web/assets/*.smoke.cjs` 与前端类型检查（`frontend-typecheck` 步骤，根 `tsconfig.json` + `package-lock.json` 固定 TypeScript）（索引见 [docs/testing/README.md](docs/testing/README.md)）。
 - 入口：`node run-tests.js`（`node start.js -test` 是备好环境后的同一入口）；纯叙述型文档改动用 `--docs`；`--coverage`、突变工作流、真机 `--fence-live` 等手动模式见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md)；机器契约 `docs/presentation/contracts.md`（ROUTES 表由 Rust 测试消费）仍走全量。
 - T0 九项已并入同一入口（`run-tests.js`）：步骤、可行状态与环境跳过口径以 [docs/testing/levels.md](docs/testing/levels.md) 的 T0 生成段为准（`env-skip` 不算通过）；查清单用 `node run-tests.js --list`。
 - 缺口账：全局 `tests/gaps.yaml`、跨平台 `tests/cross-platform/gaps.yaml`、平台 `tests/<平台>/gaps.yaml`；条目、数量与状态一律以账本为准（门户不复述，也不保留完成历史），`TEST-REPORT-ACCEPTED` 只看平台与跨平台账（`run-tests.js`）；格式与验收见 [docs/testing/gaps-acceptance.md](docs/testing/gaps-acceptance.md)。

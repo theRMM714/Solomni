@@ -212,6 +212,7 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 
 - **开发环境同步**：换机器 / 换人开发时跑 `node setup-dev.js`（`--check` 只读校验）。它统一用**项目内**工具链（`platform/<os>/rustup`、`platform/<os>/cargo`），组件、交叉 target 与项目内工具都装那里——**不写系统 `~/.rustup`、`~/.cargo`**；条目清单见 [dev-tools.js](../../dev-tools.js)。
 - 清单分**必装**（rustfmt / clippy / cargo-audit / cargo-deny：T0 判据本身）与**可选**（交叉 target、llvm-tools-preview / cargo-llvm-cov）：`--check` 只对必装项非零，`--strict` 才要求全齐；缺可选项目不阻断开发，但报告里会如实记 `env-skip`。
+- **前端类型检查依赖**：根 `package.json` / `package-lock.json` 固定 TypeScript；首次或换机后跑 `npm ci --ignore-scripts`（项目内 `node_modules`，不入库）。`frontend-typecheck` 步骤以 `tsconfig.json` 为工程文件运行项目内 TypeScript；缺 `node_modules` 时记 `env-skip`，CI 的 `--strict-env` 下算失败。
 
 - 突变测试的测试命令固定「只跑 `--bin solomni`」并按串行跑（逐条变异单独复现，与门禁的默认并行无关）。`cargo-mutants` 按「工具获取」策略在 CI 预编译装（见 [quality-isolation.md](quality-isolation.md)；一次性临时环境，不改本机）。已知**等价变异体**在仓库根的 `.cargo/mutants.toml` 的 `exclude_re` 里排除（每条都要写明为什么等价，当前 1 条）。
 
@@ -237,7 +238,7 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 
 | job | 跑什么 | 对应入口 |
 | --- | --- | --- |
-| `quality` | 平台门禁 + 供应链 + L1 单元 + 平台探针 + 前端冒烟 + 开发回路 / 变更分流 / 环境引导自检（**跳过 L4 与结构审查**） | `node run-tests.js --fence-live --skip-e2e --skip-audit --strict-env` |
+| `quality` | 平台门禁 + 供应链 + L1 单元 + 平台探针 + 前端冒烟 + 前端类型检查（tsc） + 开发回路 / 变更分流 / 环境引导自检（**跳过 L4 与结构审查**） | `node run-tests.js --fence-live --skip-e2e --skip-audit --strict-env` |
 | `e2e` | L4 端到端（自己构建产品，与 `quality` 并行） | `node tests/ci-e2e.mjs`（CI 专用；本地整跑用 `node run-tests.js --fence-live`） |
 | `changes` | 判定 `code_changed` / `docs_changed`；从 base 取分类器副本，自测 + `include_str!/include_bytes!` 文档消费自检 | `node tests/ci-changes.mjs`（副本） |
 | `docs` | 有文档变更：文档审查（门户 / 链接 / 根文档路由） | `node run-tests.js --audit=docs` |

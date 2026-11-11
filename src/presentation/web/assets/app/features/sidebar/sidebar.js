@@ -23,6 +23,7 @@ const $ = (sel) => doc.querySelector(sel);
 /// 行尾铅笔菜单：打开 / 编辑配置 / 删除（子会话多一项「打开父会话」，不给删除）。
 function historyMenu(h) {
   const busy = generating(h.name);
+  /** @type {Array<{label?: string, icon?: string, disabled?: boolean, reason?: string, sep?: boolean, danger?: boolean, onClick?: () => void}>} */
   const items = [
     { label: '打开', icon: 'folder', onClick: () => openHistory(h.name) },
     {

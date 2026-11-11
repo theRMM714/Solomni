@@ -27,6 +27,7 @@ function openPermissionMenu(chip, s) {
   const current = s.permission_profile || 'workspace';
   const parent = s.permission_parent || null;
   const parentIdx = parent ? PERMISSION_ORDER.indexOf(parent) : PERMISSION_ORDER.length - 1;
+  /** @type {Array<{label?: string, icon?: string, disabled?: boolean, reason?: string, sep?: boolean, danger?: boolean, onClick?: () => void}>} */
   const items = PERMISSION_ORDER.map((id, i) => {
     const disabled = s.running || (!!parent && i > parentIdx);
     const reason = s.running

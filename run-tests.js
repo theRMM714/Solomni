@@ -50,6 +50,7 @@ const STEP_BUDGET_S = {
   "T0 交叉类型检查（x86_64-apple-darwin）": 600,
   "T0 静态检查（clippy）": 300,
   "L1 单元（--bin solomni）": 300,
+  "前端类型检查（tsc）": 120,
   "环境引导自检": 120,
   "目标 cross-platform": 300,
   "L4 端到端": 600,

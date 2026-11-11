@@ -356,6 +356,31 @@ const STEPS = [
     },
   },
   {
+    id: "frontend-typecheck",
+    name: "前端类型检查（tsc）",
+    deps: [],
+    inputs: ["tsconfig.json", "package.json", "package-lock.json", "src/presentation/web/assets/**/*.js"],
+    run(ctx) {
+      ctx.step.announce("前端类型检查（tsc）");
+      const tsc = path.join(ctx.root, "node_modules", "typescript", "bin", "tsc");
+      if (!fs.existsSync(tsc)) {
+        const s = envSkipResult(ctx, "node_modules 未安装：npm ci --ignore-scripts", "quality-fail");
+        ctx.step.announceDone(s.status === "env-skip" ? "env-skip" : "失败", s.detail);
+        finish(ctx, { step: "前端类型检查（tsc）", status: s.status, detail: s.detail });
+        return;
+      }
+      const r = ctx.proc.sh(process.execPath, [tsc, "-p", "tsconfig.json"]);
+      const ok = r.code === 0;
+      ctx.step.announceDone(ok ? "完成" : "失败", ok ? "零错误" : "存在类型错误");
+      finish(ctx, {
+        step: "前端类型检查（tsc）",
+        status: ok ? "pass" : "quality-fail",
+        detail: ok ? "" : r.out.trim().split(/\r?\n/).slice(0, 20).join(" / "),
+        raw: ok ? null : r.out.slice(-2000),
+      });
+    },
+  },
+  {
     id: "selfcheck/dev-loop",
     name: "开发回路自检",
     deps: [],
@@ -494,6 +519,7 @@ const OUTCOMES = {
   "target/linux": { status: ["pass", "fail", "skip-platform"], envSkip: "非本平台且整目标为空记 skip-platform" },
   "target/macos": { status: ["pass", "fail", "skip-platform"], envSkip: "非本平台且整目标为空记 skip-platform" },
   "frontend-smoke": { status: ["pass", "fail"], envSkip: null },
+  "frontend-typecheck": { status: ["pass", "quality-fail", "env-skip"], envSkip: "node_modules 未安装（--strict-env 下算失败）" },
   "selfcheck/dev-loop": { status: ["pass", "fail"], envSkip: null },
   "selfcheck/pins-tool": { status: ["pass", "fail"], envSkip: null },
   "selfcheck/ci-changes": { status: ["pass", "fail"], envSkip: null },
