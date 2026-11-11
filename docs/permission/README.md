@@ -100,6 +100,14 @@
   - 停止 = 整队作废，等待方按拒绝解开；
   - 卡与回答随会话落盘；重启后不重问已答的。
 
+## 七、安全验收
+
+- 行为矩阵：四档 profile × 七个 reach × 四种 effect × 三种 call scope 的处置逐格穷举（`decision_matrix_is_total_across_profile_effect_scope_and_reach`，`src/tests/permission.rs`）。
+- 代数性质：`Decision` 取严的交换 / 结合 / 幂等 / 吸收，`ReachSet` 求交的交换 / 结合 / 幂等与子集等价，共享区三态的子集蕴含与交集逐路径等价（`decision_and_reach_algebra_hold_for_every_combination`、`shared_scope_intersection_and_subset_agree_on_every_path`）。
+- 收窄不放大：子会话的档位、reach、共享区、decision、拒绝名单与逐工具决定逐维断言（`narrowing_never_widens_profile_reach_scope_or_decision`）。
+- CI 的 `--fence-live` 门禁把安全探针的环境跳过记 `quality-fail`，不许当成通过（`tests/gates/steps.js` 的 `securitySkipsIn`）；`--strict-env` 没带 `--fence-live` 同样失败。
+- 围栏路径的根内判定在规范化失败时拒绝含上级段的路径（`inside_root_rejects_parent_escape_even_when_canonicalize_fails`，`src/kernel/detail/confine/windows/tests.rs`）。
+
 ## 改动本单元时必须同步
 
 - 改语义 → 本页 + `REGISTRY_SPEC.md`（settings 的 sandbox 段）+ `docs/session/session-model.md`（meta 的会话级 sandbox）。

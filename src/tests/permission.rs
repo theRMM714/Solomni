@@ -4,7 +4,7 @@
 //! 平台围栏的真机验收在 tests/<平台>/（T4）。
 
 use crate::capabilities::permission::api::{
-    validate_defaults, validate_entry, CallScope, Decision, DecisionEdit, Effect,
+    hit, normalize, validate_defaults, validate_entry, CallScope, Decision, DecisionEdit, Effect,
     PermissionDefaults, PermissionLayer, PermissionSet, ProfileId, Reach, ReachSet, ScopeMode,
     SharedEdit,
 };
@@ -941,4 +941,364 @@ fn tool_confirmation_rides_the_decision_channel() {
     assert_eq!(cards, 1, "full 之后本轮不再问：{:?}", lines);
     assert_eq!(ran, 2, "两次调用都要执行：{:?}", lines);
     assert!(outs.iter().all(|o| o == "ok"), "{:?}", outs);
+}
+
+fn all_profiles() -> [ProfileId; 4] {
+    [
+        ProfileId::View,
+        ProfileId::Workspace,
+        ProfileId::External,
+        ProfileId::AllReach,
+    ]
+}
+
+fn all_reaches() -> [Reach; 7] {
+    [
+        Reach::Private,
+        Reach::SharedRead,
+        Reach::SharedWrite,
+        Reach::ModuleRead,
+        Reach::ModuleWrite,
+        Reach::HostRead,
+        Reach::Network,
+    ]
+}
+
+fn all_effects() -> [Effect; 4] {
+    [Effect::Read, Effect::Write, Effect::Exec, Effect::None]
+}
+
+fn all_scopes() -> [CallScope; 3] {
+    [CallScope::None, CallScope::Sandbox, CallScope::External]
+}
+
+fn all_decisions() -> [Decision; 3] {
+    [Decision::Deny, Decision::Ask, Decision::Allow]
+}
+
+/// 目的：把 0..128 当 reach 的幂集，用来穷举格性质。
+fn reach_mask(mask: usize) -> ReachSet {
+    ReachSet::from_iter(
+        all_reaches()
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| mask & (1 << i) != 0)
+            .map(|(_, r)| *r),
+    )
+}
+
+fn scope_modes() -> Vec<ScopeMode> {
+    vec![
+        ScopeMode::All,
+        ScopeMode::None,
+        ScopeMode::Paths(paths(&["a"])),
+        ScopeMode::Paths(paths(&["a/b"])),
+        ScopeMode::Paths(paths(&["ab"])),
+        ScopeMode::Paths(paths(&["a", "a/b"])),
+        ScopeMode::Paths(paths(&["."])),
+        ScopeMode::Paths(paths(&["a/b/c"])),
+    ]
+}
+
+/// 安全矩阵：每个 profile × reach × effect × scope 的处置都必须由表决定，逐工具覆盖优先，
+/// 且默认参数不参与决策（调用方传什么都不改变结果）。
+#[test]
+fn decision_matrix_is_total_across_profile_effect_scope_and_reach() {
+    let mut cases = 0usize;
+    for profile in all_profiles() {
+        let spec = profile.spec();
+        for reach in all_reaches() {
+            let mut p = PermissionDefaults {
+                profile,
+                ..Default::default()
+            }
+            .to_permission_set();
+            p.reach = ReachSet::from([reach]);
+            for effect in all_effects() {
+                for scope in all_scopes() {
+                    let want = match effect {
+                        Effect::Read => spec.decisions.read,
+                        Effect::Write => spec.decisions.write,
+                        Effect::Exec if scope == CallScope::External => {
+                            spec.decisions.exec_external
+                        }
+                        Effect::Exec => spec.decisions.exec_sandbox,
+                        Effect::None => Decision::Allow,
+                    };
+                    for default in all_decisions() {
+                        assert_eq!(
+                            p.decision_for("plain", effect, scope, default),
+                            want,
+                            "profile={:?} reach={:?} effect={:?} scope={:?} default={:?}",
+                            profile,
+                            reach,
+                            effect,
+                            scope,
+                            default
+                        );
+                        cases += 1;
+                    }
+                    for override_with in all_decisions() {
+                        p.tools.insert("overridden".to_string(), override_with);
+                        assert_eq!(
+                            p.decision_for("overridden", effect, scope, Decision::Ask),
+                            override_with,
+                            "逐工具覆盖必须优先：profile={:?} effect={:?} scope={:?}",
+                            profile,
+                            effect,
+                            scope
+                        );
+                        p.tools.clear();
+                        cases += 1;
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(cases, 4 * 7 * 4 * 3 * 6, "矩阵必须逐格走到");
+}
+
+/// Decision 的取严是格运算；ReachSet 的求交是幂集上的交。两条都要满足代数性质，
+/// 否则收窄校验会在边界组合上悄悄放宽。
+#[test]
+fn decision_and_reach_algebra_hold_for_every_combination() {
+    for a in all_decisions() {
+        assert_eq!(a.stricter(a), a);
+        assert_eq!(a.stricter(Decision::Deny), Decision::Deny);
+        assert_eq!(a.stricter(Decision::Allow), a);
+        for b in all_decisions() {
+            assert_eq!(a.stricter(b), b.stricter(a), "取严必须可交换");
+            for c in all_decisions() {
+                assert_eq!(
+                    a.stricter(b).stricter(c),
+                    a.stricter(b.stricter(c)),
+                    "取严必须可结合：{:?}/{:?}/{:?}",
+                    a,
+                    b,
+                    c
+                );
+            }
+        }
+    }
+
+    let sets: Vec<ReachSet> = (0..128).map(reach_mask).collect();
+    let full = reach_mask(127);
+    for a in &sets {
+        assert_eq!(a.intersection(a), *a, "求交必须幂等");
+        assert!(ReachSet::empty().is_subset(a));
+        assert!(a.is_subset(&full));
+        for b in &sets {
+            let ab = a.intersection(b);
+            assert_eq!(ab, b.intersection(a), "求交必须可交换");
+            assert!(
+                ab.is_subset(a) && ab.is_subset(b),
+                "交集必须同时是两边的子集"
+            );
+            assert_eq!(a.is_subset(b), ab == *a, "子集等价于交集等于自身");
+        }
+    }
+    for (i, a) in sets.iter().enumerate() {
+        for (j, b) in sets.iter().enumerate() {
+            let c = &sets[(i * 31 + j * 17) % sets.len()];
+            assert_eq!(
+                a.intersection(b).intersection(c),
+                a.intersection(&b.intersection(c)),
+                "求交必须可结合"
+            );
+        }
+    }
+}
+
+/// 共享区三态的语义：子集必须蕴含逐路径的允许关系；交集必须等于两边的逐路径与。
+/// 同时钉住规范化与前缀边界：a 不能命中 ab，点命中整棵。
+#[test]
+fn shared_scope_intersection_and_subset_agree_on_every_path() {
+    let modes = scope_modes();
+    let rels = [
+        "a", "a/b", "a/b/c", "ab", "abc", "a-b", "a/bc", "", ".", "..", "a/../b", "/a",
+    ];
+    for s in &modes {
+        assert!(s.is_subset_of(&ScopeMode::All), "{:?} 应当是全集的子集", s);
+        assert!(ScopeMode::None.is_subset_of(s), "空集应当是任何集合的子集");
+        for parent in &modes {
+            let subset = s.is_subset_of(parent);
+            for rel in rels {
+                if subset {
+                    assert!(
+                        !s.allows(rel) || parent.allows(rel),
+                        "子集关系不成立：{:?} 是 {:?} 的子集，但 {:?} 只被前者允许",
+                        s,
+                        parent,
+                        rel
+                    );
+                }
+            }
+            let both = s.intersect(parent);
+            assert!(both.is_subset_of(s) && both.is_subset_of(parent));
+            for rel in rels {
+                assert_eq!(
+                    both.allows(rel),
+                    s.allows(rel) && parent.allows(rel),
+                    "交集必须等于逐路径与：{:?} 交 {:?} 在 {:?} 上",
+                    s,
+                    parent,
+                    rel
+                );
+            }
+        }
+    }
+
+    assert!(
+        !hit(&paths(&["a"]), "ab"),
+        "前缀必须按路径组件，不能命中 ab"
+    );
+    assert!(hit(&paths(&["a"]), "a/b"), "父目录命中子树");
+    assert!(hit(&paths(&["a/"]), "a/b"), "条目规范化后仍命中");
+    assert!(hit(&paths(&["."]), "任何/路径"));
+    assert!(hit(&paths(&[""]), "任何/路径"));
+    for raw in ["", " a/b ", "a\\b", "/a/b/", ".", ".."] {
+        let once = normalize(raw);
+        assert_eq!(normalize(&once), once, "normalize 必须幂等：{:?}", raw);
+    }
+    for bad in ["", "/a", "C:\\a", "a//b", "a/../b"] {
+        assert!(validate_entry(bad).is_err(), "非法条目必须拒绝：{:?}", bad);
+    }
+    assert!(validate_entry(".").is_ok(), "点表示整棵，合法");
+    assert!(validate_entry("a/b").is_ok());
+}
+
+/// 子会话收窄绝不能放大任何一维：档位、reach、共享区、decision、拒绝名单与逐工具决定。
+/// 成功路径逐维断言，失败路径只允许来自变宽或越界的显式拒绝。
+#[test]
+fn narrowing_never_widens_profile_reach_scope_or_decision() {
+    let scope_edits = [
+        None,
+        Some(ScopeMode::All),
+        Some(ScopeMode::None),
+        Some(ScopeMode::Paths(paths(&["a"]))),
+    ];
+    let decision_edits = [
+        None,
+        Some(DecisionEdit {
+            read: Some(Decision::Allow),
+            write: Some(Decision::Allow),
+            exec_sandbox: Some(Decision::Allow),
+            exec_external: Some(Decision::Allow),
+        }),
+        Some(DecisionEdit {
+            read: Some(Decision::Deny),
+            write: Some(Decision::Deny),
+            exec_sandbox: Some(Decision::Deny),
+            exec_external: Some(Decision::Deny),
+        }),
+        Some(DecisionEdit {
+            read: Some(Decision::Allow),
+            ..Default::default()
+        }),
+        Some(DecisionEdit {
+            exec_external: Some(Decision::Allow),
+            ..Default::default()
+        }),
+    ];
+    let reach_edits = [
+        None,
+        Some(ReachSet::empty()),
+        Some(ReachSet::from([Reach::Private])),
+        Some(ReachSet::from([Reach::SharedRead])),
+        Some(ReachSet::from([
+            Reach::Private,
+            Reach::SharedRead,
+            Reach::SharedWrite,
+            Reach::ModuleRead,
+            Reach::ModuleWrite,
+            Reach::HostRead,
+            Reach::Network,
+        ])),
+    ];
+    let mut accepted = 0usize;
+    let mut rejected = 0usize;
+    for base_profile in all_profiles() {
+        let base = pset(base_profile);
+        for profile in [None].into_iter().chain(all_profiles().map(Some)) {
+            for reach in reach_edits.iter().cloned() {
+                for shared in scope_edits.iter().cloned() {
+                    for decisions in decision_edits.iter().cloned() {
+                        let layer = PermissionLayer {
+                            profile,
+                            reach: reach.clone(),
+                            shared: Some(SharedEdit {
+                                read: shared.clone(),
+                                write: shared.clone(),
+                                deny: paths(&["blocked"]),
+                            }),
+                            decisions: decisions.clone(),
+                            ..Default::default()
+                        };
+                        match base.apply_narrowing(&layer) {
+                            Ok(out) => {
+                                accepted += 1;
+                                assert!(
+                                    out.profile.rank() <= base.profile.rank(),
+                                    "档位只能更低：{:?} -> {:?}",
+                                    base.profile,
+                                    out.profile
+                                );
+                                assert!(out.reach.is_subset(&base.reach), "reach 只能收窄");
+                                assert!(
+                                    out.shared_read.is_subset_of(&base.shared_read),
+                                    "共享区读只能收窄"
+                                );
+                                assert!(
+                                    out.shared_write.is_subset_of(&base.shared_write),
+                                    "共享区写只能收窄"
+                                );
+                                assert!(out.decisions.read <= base.decisions.read);
+                                assert!(out.decisions.write <= base.decisions.write);
+                                assert!(out.decisions.exec_sandbox <= base.decisions.exec_sandbox);
+                                assert!(
+                                    out.decisions.exec_external <= base.decisions.exec_external
+                                );
+                                for d in &base.deny {
+                                    assert!(out.deny.contains(d), "拒绝名单只能追加");
+                                }
+                                assert!(out.deny.contains(&"blocked".to_string()));
+                                assert_eq!(out.tools, base.tools, "子会话不能改逐工具决定");
+                            }
+                            Err(why) => {
+                                rejected += 1;
+                                assert!(!why.trim().is_empty(), "拒绝必须带原因");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(accepted > 0 && rejected > 0, "两个方向都要覆盖");
+
+    let base = pset(ProfileId::Workspace);
+    let root = PermissionLayer {
+        profile: Some(ProfileId::External),
+        shared: Some(SharedEdit {
+            read: Some(ScopeMode::Paths(paths(&["docs"]))),
+            write: Some(ScopeMode::None),
+            deny: paths(&["docs/secret"]),
+        }),
+        tools: std::collections::BTreeMap::from([("a.grep".to_string(), Decision::Ask)]),
+        ..Default::default()
+    };
+    let out = base.apply_root(&root).expect("根会话换档");
+    assert_eq!(out.profile, ProfileId::External);
+    assert_eq!(out.reach, ProfileId::External.spec().reach);
+    assert_eq!(out.shared_read, ScopeMode::Paths(paths(&["docs"])));
+    assert_eq!(out.shared_write, ScopeMode::None);
+    assert!(out.deny.contains(&"docs/secret".to_string()));
+    assert_eq!(out.tools.get("a.grep"), Some(&Decision::Ask));
+
+    let too_wide = PermissionLayer {
+        profile: Some(ProfileId::View),
+        reach: Some(ReachSet::from([Reach::HostRead])),
+        ..Default::default()
+    };
+    assert!(base.apply_root(&too_wide).is_err(), "根 reach 不能超出档位");
 }

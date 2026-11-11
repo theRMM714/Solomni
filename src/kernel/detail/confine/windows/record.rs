@@ -9,7 +9,7 @@ use crate::kernel::api::FenceSpec;
 use std::ffi::c_void;
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::fs::MetadataExt;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use windows_sys::Win32::Foundation::{CloseHandle, LocalFree, FILETIME};
@@ -517,10 +517,17 @@ pub(crate) fn inside_root(path: &Path, root: &Path) -> bool {
     let canon = |p: &Path| {
         std::fs::canonicalize(p)
             .map(|c| crate::kernel::domain::path::native(&c))
-            .unwrap_or_else(|_| p.to_path_buf())
+            .ok()
     };
-    let path_owned = canon(path);
-    let root_owned = canon(root);
+    let (path_owned, root_owned) = match (canon(path), canon(root)) {
+        (Some(p), Some(r)) => (p, r),
+        // 规范化失败时不做词法比较：含上级段的路径无法证明仍在根内，
+        // 按根外处理（否则 root/../escape 会被误判为根内而多存快照）。
+        _ if path.components().any(|c| matches!(c, Component::ParentDir)) => {
+            return false;
+        }
+        _ => (path.to_path_buf(), root.to_path_buf()),
+    };
     let mut left = path_owned.components();
     for want in root_owned.components() {
         let ok = left.next().map(|got| {

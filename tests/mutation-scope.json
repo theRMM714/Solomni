@@ -1,9 +1,11 @@
 {
-  "note": "突变测试范围：只圈高价值纯逻辑（平台/unsafe/真进程实现不入范围）。改这里等于改范围，必须在同一次提交里同步 docs/testing/execution-ci.md。core 是小而精的先跑集；capabilities 是单能力抽查的文件级清单。",
+  "note": "突变测试范围：只圈高价值纯逻辑（平台/unsafe/真进程实现不入范围）。安全纯逻辑（permission 与 confine 的路径判定）必须在范围内；改这里等于改范围，必须在同一次提交里同步 docs/testing/execution-ci.md。core 是小而精的先跑集；capabilities 是单能力抽查的文件级清单。",
   "core": [
     "src/capabilities/llm/detail/repair.rs",
+    "src/capabilities/permission/domain/permission.rs",
     "src/capabilities/registry/detail/yaml_settings.rs",
-    "src/capabilities/slate/service.rs"
+    "src/capabilities/slate/service.rs",
+    "src/kernel/detail/confine/paths.rs"
   ],
   "capabilities": {
     "collab": [
@@ -17,6 +19,9 @@
     ],
     "patch": [
       "src/capabilities/tools/domain/patch.rs"
+    ],
+    "permission": [
+      "src/capabilities/permission/domain/permission.rs"
     ],
     "repair": [
       "src/capabilities/llm/detail/repair.rs"

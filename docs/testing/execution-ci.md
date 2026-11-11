@@ -199,6 +199,7 @@ node run-tests.js --coverage
 
 - 范围只有两个：`core`（小而精，先跑）与 `capability`（单能力抽查）；**刻意不做 `all`**——全量收益低（平台 `#[cfg]` 在别平台不编译、unviable/等价变异体多）、耗时长，单能力抽查已够用。
 - 范围是 `tests/mutation-scope.json` 里的**文件级**清单（不写变异体名，避免行号漂移后腐烂）。
+- 安全纯逻辑必须在范围内：`src/capabilities/permission/domain/permission.rs` 与 `src/kernel/detail/confine/paths.rs`；安全面的突变存活率目标 **≥90%**，在阶段出口人工审计，不接 CI 门禁（`cargo-mutants` 仍只手动派发）。
 
 ```text
 （本地，需自己装 cargo-mutants）

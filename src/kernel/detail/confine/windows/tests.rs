@@ -2236,3 +2236,30 @@ fn failed_write_keeps_preexisting_ace_and_never_says_rollback() {
     free_sid(sid);
     let _ = std::fs::remove_dir_all(&base);
 }
+
+/// 根内判定不能把词法上的上级段当成仍在根内：规范化失败时 root/../escape
+/// 必须按根外处理，否则会为一条越界路径先存原始安全描述符快照。
+#[test]
+fn inside_root_rejects_parent_escape_even_when_canonicalize_fails() {
+    let base = crate::tests::scratch("inside-root");
+    let root = base.join("root");
+    std::fs::create_dir_all(&root).expect("建根目录");
+
+    let missing_inside = root.join("missing").join("child");
+    assert!(
+        inside_root(&missing_inside, &root),
+        "不存在的根内路径仍应按词法判定为根内"
+    );
+
+    let escaped = root.join("..").join("escape");
+    assert!(
+        !inside_root(&escaped, &root),
+        "含上级段的路径不能因为前缀相同就被判为根内"
+    );
+
+    let sibling = base.join("sibling");
+    std::fs::create_dir_all(&sibling).expect("建同级目录");
+    assert!(!inside_root(&sibling, &root), "同级目录不在根内");
+
+    let _ = std::fs::remove_dir_all(&base);
+}

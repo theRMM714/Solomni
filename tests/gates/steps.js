@@ -70,6 +70,11 @@ function envSkipResult(ctx, detail, failStatus) {
     : { status: "env-skip", detail: detail };
 }
 
+/** 安全探针的环境跳过：围栏 / ACL / 容器 / 权限 / 平台强制机制。CI 下这些不许当成通过。 */
+function securitySkipsIn(lines) {
+  return (lines || []).filter((l) => /围栏|ACL|容器|权限|seccomp|Landlock|seatbelt/i.test(l));
+}
+
 const STEPS = [
   {
     id: "build",
@@ -300,13 +305,20 @@ const STEPS = [
       const unitArgs = ["test", "--color", "never", "--bin", "solomni", "--", "--nocapture"].concat(ctx.opts.serial ? ["--test-threads=1"] : []);
       const unit = ctx.proc.sh("cargo", unitArgs);
       const uc = parsers.cargoCounts(unit.out);
-      const unitOk = unit.code === 0 && uc.ignored === 0;
+      const skips = parsers.skipsIn(unit.out);
+      const securitySkips = ctx.opts.fenceLive ? securitySkipsIn(skips) : [];
+      let status = "pass";
+      if (unit.code !== 0 || uc.ignored > 0) status = "fail";
+      else if (securitySkips.length) status = "quality-fail";
+      else if (ctx.opts.strictEnv && !ctx.opts.fenceLive) status = "quality-fail";
       const unitDetail =
         uc.passed + " passed / " + uc.failed + " failed" +
         (uc.ignored ? " / " + uc.ignored + " ignored（#[ignore] 被禁止）" : "") +
+        (securitySkips.length ? " / 安全探针环境跳过 " + securitySkips.length + " 条（CI 不容忍）" : "") +
+        (ctx.opts.strictEnv && !ctx.opts.fenceLive ? " / strict-env 必须同时 --fence-live" : "") +
         (ctx.opts.serial ? "；--serial" : "");
-      ctx.step.announceDone(unitOk ? "完成" : "失败", unitDetail);
-      finish(ctx, { step: "L1 单元（--bin solomni）", status: unitOk ? "pass" : "fail", detail: unitDetail, skips: parsers.skipsIn(unit.out), raw: unitOk ? null : unit.out.slice(-800) });
+      ctx.step.announceDone(status === "pass" ? "完成" : "失败", unitDetail);
+      finish(ctx, { step: "L1 单元（--bin solomni）", status, detail: unitDetail, skips, raw: status === "pass" ? null : unit.out.slice(-1200) });
     },
   },
   ...["cross-platform", "windows", "linux", "macos"].map((t) => ({
@@ -320,21 +332,26 @@ const STEPS = [
       const r = ctx.proc.sh("cargo", tArgs);
       const c = parsers.cargoCounts(r.out);
       const skips = parsers.skipsIn(r.out);
+      const securitySkips = ctx.opts.fenceLive ? securitySkipsIn(skips) : [];
       const isOtherPlatform = t !== "cross-platform" && t !== ctx.osKey;
       let status;
       if (r.code !== 0) status = "fail";
       else if (c.ignored > 0) status = "fail";
       else if (c.resultLines === 0) status = "fail";
       else if (c.passed === 0 && isOtherPlatform) status = "skip-platform";
+      else if (securitySkips.length) status = "quality-fail";
       else status = "pass";
       const counts = c.passed + " passed / " + c.failed + " failed" + (c.ignored ? " / " + c.ignored + " ignored（#[ignore] 被禁止）" : "");
-      ctx.step.announceDone(status === "fail" ? "失败" : status === "skip-platform" ? "本平台不适用" : "完成", counts);
+      const detail = counts + (status === "skip-platform" ? "（本平台不适用）" : "") +
+        (securitySkips.length ? "；安全探针环境跳过 " + securitySkips.length + " 条（CI 不容忍）" : "") +
+        (skips.length ? "；env-skip " + skips.length + " 条" : "");
+      ctx.step.announceDone(status === "fail" || status === "quality-fail" ? "失败" : status === "skip-platform" ? "本平台不适用" : "完成", detail);
       finish(ctx, {
         step: "目标 " + t,
-        status: status,
-        detail: counts + (status === "skip-platform" ? "（本平台不适用）" : "") + (skips.length ? "；env-skip " + skips.length + " 条" : ""),
-        skips: skips,
-        raw: status === "fail" ? r.out.slice(-800) : null,
+        status,
+        detail,
+        skips,
+        raw: status === "fail" || status === "quality-fail" ? r.out.slice(-1200) : null,
       });
     },
   })),
@@ -513,11 +530,11 @@ const OUTCOMES = {
   "cross-check": { status: ["pass", "fail", "env-skip", "skip-platform"], envSkip: "可选：该 target 未安装，或本机缺该平台的 C 工具链 / SDK；CI 原生矩阵才是权威，--strict-env 不强制" },
   duplicates: { status: ["pass", "quality-fail", "env-skip"], envSkip: "cargo-tree 不可用（--strict-env 下算失败）" },
   supply: { status: ["pass", "fail", "env-skip"], envSkip: "cargo-audit / cargo-deny 未安装或取不到 advisory 数据（--strict-env 下算失败）" },
-  unit: { status: ["pass", "fail"], envSkip: null },
-  "target/cross-platform": { status: ["pass", "fail"], envSkip: null },
-  "target/windows": { status: ["pass", "fail", "skip-platform"], envSkip: "非本平台且整目标为空记 skip-platform" },
-  "target/linux": { status: ["pass", "fail", "skip-platform"], envSkip: "非本平台且整目标为空记 skip-platform" },
-  "target/macos": { status: ["pass", "fail", "skip-platform"], envSkip: "非本平台且整目标为空记 skip-platform" },
+  unit: { status: ["pass", "fail", "quality-fail"], envSkip: "安全探针在 --fence-live 下跳过；或 strict-env 没带 --fence-live" },
+  "target/cross-platform": { status: ["pass", "fail", "quality-fail"], envSkip: "安全探针在 --fence-live 下跳过" },
+  "target/windows": { status: ["pass", "fail", "quality-fail", "skip-platform"], envSkip: "非本平台且整目标为空记 skip-platform；安全探针跳过记 quality-fail" },
+  "target/linux": { status: ["pass", "fail", "quality-fail", "skip-platform"], envSkip: "非本平台且整目标为空记 skip-platform；安全探针跳过记 quality-fail" },
+  "target/macos": { status: ["pass", "fail", "quality-fail", "skip-platform"], envSkip: "非本平台且整目标为空记 skip-platform；安全探针跳过记 quality-fail" },
   "frontend-smoke": { status: ["pass", "fail"], envSkip: null },
   "frontend-typecheck": { status: ["pass", "quality-fail", "env-skip"], envSkip: "node_modules 未安装（--strict-env 下算失败）" },
   "selfcheck/dev-loop": { status: ["pass", "fail"], envSkip: null },
