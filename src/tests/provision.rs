@@ -16,9 +16,7 @@ mod service {
     };
     use crate::capabilities::provision::detail::procs::BookProcs;
     use crate::capabilities::provision::domain::*;
-    use crate::capabilities::provision::ports::{
-        Fetcher, GuestImage, HostFs, Installers, Ledger, Procs,
-    };
+    use crate::capabilities::provision::ports::Fetcher;
     use crate::capabilities::provision::service::*;
     use crate::capabilities::provision::service::{
         run as run_pipeline, verify_cached as verify_cached_pinned,
@@ -35,37 +33,27 @@ mod service {
     }
 
     /// 目的：一套真实端口实现的搬运包——测试构造服务时少写几行类型。
-    type Adapters = (
-        Arc<dyn HostFs>,
-        Arc<dyn Ledger>,
-        Arc<dyn Installers>,
-        Arc<dyn GuestImage>,
-        Arc<dyn Procs>,
-        Arc<dyn Fetcher>,
-    );
-
-    /// 目的：测试用的服务构造——端口用真实实现，免得每条用例都写一遍装配。
-    fn adapters(root: &Path) -> Adapters {
+    fn adapters(root: &Path) -> ProvisionDeps {
         let fetch = test_fetch();
-        (
-            Arc::new(RealHost),
-            Arc::new(FileLedger::new(root)),
-            Arc::new(HostInstallers),
-            Arc::new(
+        ProvisionDeps {
+            host: Arc::new(RealHost),
+            ledger: Arc::new(FileLedger::new(root)),
+            installers: Arc::new(HostInstallers),
+            images: Arc::new(
                 crate::capabilities::provision::detail::guest_image::Ext4Images::new(
                     root,
                     Arc::clone(&fetch),
                 ),
             ),
-            Arc::new(BookProcs::new(root)),
+            procs: Arc::new(BookProcs::new(root)),
             fetch,
-        )
+            probe: Arc::new(crate::kernel::detail::host_probe::HostProbeAdapter),
+        }
     }
 
     /// 目的：测试用的服务构造——端口用真实实现，免得每条用例都写一遍装配。
     fn service(root: &Path) -> ProvisionService {
-        let (host, ledger, installers, images, procs, fetch) = adapters(root);
-        ProvisionService::new(root, host, ledger, installers, images, procs, fetch)
+        ProvisionService::new(root, adapters(root))
     }
 
     /// 目的：遮蔽被测的 run，用例不必关心端口参数（真实实现即可）。
@@ -78,14 +66,15 @@ mod service {
         on_line: &mut dyn FnMut(&str),
         vm: Option<&(dyn crate::capabilities::vm::api::Vm + Send + Sync)>,
     ) -> Result<(), String> {
-        let (host, ledger, installers, images, _procs, fetch) = adapters(root);
+        let deps = adapters(root);
         let pipeline = Pipeline {
             root,
-            host: host.as_ref(),
-            ledger: ledger.as_ref(),
-            installers: installers.as_ref(),
-            images: images.as_ref(),
-            fetch: fetch.as_ref(),
+            host: deps.host.as_ref(),
+            ledger: deps.ledger.as_ref(),
+            installers: deps.installers.as_ref(),
+            images: deps.images.as_ref(),
+            fetch: deps.fetch.as_ref(),
+            probe: deps.probe.as_ref(),
             vm,
         };
         run_pipeline(&pipeline, all, links, ids, cancel, on_line)
@@ -1694,8 +1683,15 @@ mod guest {
     #[test]
     fn guest_runtime_refuses_without_vm() {
         let root = crate::tests::scratch("provision-guest-no-vm");
-        let err =
-            install_guest_runtime(&root, &disk_dep(), None, false, &mut |_| {}).expect_err("要拒");
+        let err = install_guest_runtime(
+            &root,
+            &disk_dep(),
+            &crate::kernel::detail::host_probe::HostProbeAdapter,
+            None,
+            false,
+            &mut |_| {},
+        )
+        .expect_err("要拒");
         assert!(err.contains("vm 能力"), "{}", err);
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1705,8 +1701,15 @@ mod guest {
     fn guest_runtime_refuses_without_image() {
         let root = crate::tests::scratch("provision-guest-no-image");
         let vm = crate::tests::doubles::RecordingVm::default();
-        let err = install_guest_runtime(&root, &disk_dep(), Some(&vm), false, &mut |_| {})
-            .expect_err("要拒");
+        let err = install_guest_runtime(
+            &root,
+            &disk_dep(),
+            &crate::kernel::detail::host_probe::HostProbeAdapter,
+            Some(&vm),
+            false,
+            &mut |_| {},
+        )
+        .expect_err("要拒");
         assert!(err.contains("虚拟根不可用"), "{}", err);
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1717,7 +1720,15 @@ mod guest {
         let root = crate::tests::scratch("provision-guest-ok");
         let base = seed_disk_root(&root);
         let vm = crate::tests::doubles::RecordingVm::default();
-        install_guest_runtime(&root, &disk_dep(), Some(&vm), false, &mut |_| {}).expect("编排");
+        install_guest_runtime(
+            &root,
+            &disk_dep(),
+            &crate::kernel::detail::host_probe::HostProbeAdapter,
+            Some(&vm),
+            false,
+            &mut |_| {},
+        )
+        .expect("编排");
         assert!(base.join(".qga-ready").is_file(), "首启标记要落");
         assert!(base.join(".runtimes-ready").is_file(), "运行包标记要落");
         let y = std::fs::read_to_string(base.join("guest.yaml")).expect("yaml");
@@ -1766,8 +1777,15 @@ mod guest {
         let base = seed_disk_root(&root);
         std::fs::write(base.join(".runtimes-ready"), "old\n").expect("marker");
         let vm = crate::tests::doubles::RecordingVm::default();
-        let err = install_guest_runtime(&root, &disk_dep(), Some(&vm), false, &mut |_| {})
-            .expect_err("旧画像要拒");
+        let err = install_guest_runtime(
+            &root,
+            &disk_dep(),
+            &crate::kernel::detail::host_probe::HostProbeAdapter,
+            Some(&vm),
+            false,
+            &mut |_| {},
+        )
+        .expect_err("旧画像要拒");
         assert!(err.contains("不是当前 Windows 基线"), "{}", err);
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1802,9 +1820,14 @@ mod guest {
             ".vm/guest/debian/.runtimes-ready",
         );
         let mut lines: Vec<String> = Vec::new();
-        install_guest_runtime(&root, &d, Some(&vm), true, &mut |l| {
-            lines.push(l.to_string())
-        })
+        install_guest_runtime(
+            &root,
+            &d,
+            &crate::kernel::detail::host_probe::HostProbeAdapter,
+            Some(&vm),
+            true,
+            &mut |l| lines.push(l.to_string()),
+        )
         .expect("编排");
         let runs = vm.runs.lock().expect("锁").clone();
         for want in [
@@ -1881,7 +1904,7 @@ mod guest {
             )],
         );
         let mut sink = |l: &str| eprintln!("[探针] {}", l);
-        install_guest_runtime(&root, &dep, Some(&vm), true, &mut sink)
+        install_guest_runtime(&root, &dep, &probe, Some(&vm), true, &mut sink)
             .expect("真机运行期编排要成功");
         let image = classify_base(&base, &probe).expect("编排后的画像要仍可识别");
         assert!(

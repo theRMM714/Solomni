@@ -8,13 +8,13 @@
 
 ## 入站契约与状态归属
 - 入站面：`api::Builds`（`ensure_many` 一批模块、`build` 单个模块）+ `api::Target`（`Host` / `Guest(虚拟根名)`）+ `api::Built`（模块 / 目标 / 是否跳过 / 输出）。
-- 调用方：`conductor` 在建 / 启用会话前调 `ensure_many` 补编；`diagnostics` 的 `--build` 与体检是 `build` 的薄壳。
+- 调用方：`conductor` 在建 / 启用会话前调 `ensure_many` 补编；`entry::probes` 的 `--build` 与体检是 `build` 的薄壳。
 - 状态归属：构建状态落 `.vm/build-state/<模块>.json`，由本单元读写（`target` + `fingerprint`）；构建缓存卷落 `.vm/build-cache/<虚拟根>.qcow2`，回收归 `storage`。
 - 构建是系统动作，不申请容器身份；围栏、guest 与进程由 `vm` / `kernel` 提供，本单元只给规格。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 - 经 `::api` 用到：`kernel`、`modules`、`packages`、`provision`、`storage`、`vm`、`workspace`
-- 谁在用我：`conductor`（建 / 启用会话前补编）、`diagnostics`（`--build` 与体检）、`main`（组合根装配）
+- 谁在用我：`conductor`（建 / 启用会话前补编）、`entry::probes`（`--build` 与体检）、`main`（组合根装配）
 
 ## 一、两个调用方与跳过判据
 - 创建会话 / 启用历史会话前（自动）：本次名单里的模块，若声明了 `build:` 且 `build-state.target` 不是目标环境（或入口不在场），就先在目标环境编一次；编成继续建 / 启用，编不成则创建或启用失败并如实报原因（不留下半成品、不落构建状态）。

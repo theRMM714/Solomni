@@ -7,6 +7,7 @@ use super::domain::{deps, links, source_url, under, Dep};
 use crate::capabilities::vm::api::{
     classify_base, GuestArch, GuestClients, GuestImage, GuestRun, GuestSpec, SeedDocs, Vm,
 };
+use crate::kernel::ports::HostProbe;
 use std::path::Path;
 use std::time::Duration;
 
@@ -142,21 +143,22 @@ pub(crate) fn node_install_script() -> Result<String, String> {
 }
 
 /// 目的：把虚拟根编到可用——先确保 agent 在场（Windows 首启装、Linux 随镜像打包），随后维护启动装运行包。
-/// 参数：root = 产品根；dep = guest-runtime 清单条目；vm = vm 能力面（None = 组合根没注入，如实拒绝）；
-///   force = 用户显式点名这一条（重跑维护启动，不再被 `.runtimes-ready` 挡住）；on_line = 进度行。
+/// 参数：root = 产品根；dep = guest-runtime 清单条目；probe = 宿主机文件探针（组合根注入）；
+///   vm = vm 能力面（None = 组合根没注入，如实拒绝）；force = 用户显式点名这一条（重跑维护启动，不再被 `.runtimes-ready` 挡住）；
+///   on_line = 进度行。
 /// 约束：同一租约 "provision"，每次启动前先销毁旧的；装完才写标记，失败不写（下次重试）。
 /// 约束：只声明**自证过**的能力——python / node / cc 三者都通才写进画像；失败不写标记（下次重试）。
 pub(crate) fn install_guest_runtime(
     root: &Path,
     dep: &Dep,
+    probe: &dyn HostProbe,
     vm: Option<&(dyn Vm + Send + Sync)>,
     force: bool,
     on_line: &mut dyn FnMut(&str),
 ) -> Result<(), String> {
     let vm = vm.ok_or_else(|| "guest 运行期编排需要 vm 能力（组合根未注入）".to_string())?;
     let base = under(root, &dep.install);
-    let probe = crate::kernel::detail::HostProbeAdapter;
-    let image = classify_base(&base, &probe)
+    let image = classify_base(&base, probe)
         .map_err(|why| format!("虚拟根不可用（{why}）：先跑 solomni --provision --ensure --yes"))?;
     // Node 预装用官方 linux-x86_64 二进制；arm64 guest 暂不伪装成支持。
     if image.arch != GuestArch::Amd64 {

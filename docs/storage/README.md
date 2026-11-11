@@ -18,7 +18,7 @@
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`provision`（还原与补齐状态）、`kernel`（日志端口 `Log`）
-- 谁在用我：`builds`（`ensure_headroom`）、`conductor`（`Ops` 字段）、`presentation`（`/api/storage`）、`src/diagnostics/`（`--storage` / `--gc`）
+- 谁在用我：`builds`（`ensure_headroom`）、`conductor`（`Ops` 字段）、`presentation`（`/api/storage`）、`src/entry/probes/`（`--storage` / `--gc`）
 
 ## 一、策略与语义
 
@@ -65,7 +65,7 @@
 
 - 改策略字段或默认值 → `settings.yaml` 的 `storage` 段与 `REGISTRY_SPEC.md`，同时改 `src/tests/storage.rs`。
 - 改回收候选 / 判据 → 本页「一、策略与语义」与 `src/capabilities/storage/service.rs`；`builds` 的 headroom 调用点要一起看。
-- 改显式动作或还原作业 → 路由表 `docs/presentation/contracts.md` 与 `src/tests/routes.rs`；CLI 入口在 `src/diagnostics/mod.rs`。
+- 改显式动作或还原作业 → 路由表 `docs/presentation/contracts.md` 与 `src/tests/routes.rs`；CLI 入口在 `src/entry/probes/`。
 
 ## 本目录
 

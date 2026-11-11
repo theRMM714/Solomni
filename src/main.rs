@@ -3,7 +3,6 @@
 //! 依赖方向：main → adapters / capabilities / presentation；协调业务不知道后两者存在。
 
 mod capabilities;
-mod diagnostics;
 mod entry;
 mod guard;
 mod kernel;
@@ -16,27 +15,6 @@ use capabilities::registry::api::Registry as _;
 use std::io::{BufRead, IsTerminal, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
-
-/// 目的：补齐面专用的 vm 能力面：只持内部 `none` 共享档（运行期编排只经 QGA，不挂载、不建可写层）。
-/// 约束：与会话 vm 分开装配——`none` 不进用户候选链，避免 `clients` 为空的 guest 被静默当成无共享。
-/// 约束：网页补齐与 `--provision` 都经这里，两处不各装一份。
-pub(crate) fn provision_vm(
-    book: Arc<kernel::detail::procs::ProcessBook>,
-) -> Arc<dyn capabilities::vm::api::Vm + Send + Sync> {
-    provision_vm_with(Arc::new(
-        capabilities::vm::detail::QemuEngine::new().with_book(book),
-    ))
-}
-
-/// 目的：同上，但允许注入引擎替身（回归测试用）；生产入口只用 `provision_vm`。
-pub(crate) fn provision_vm_with(
-    engine: Arc<dyn capabilities::vm::ports::VmEngine + Send + Sync>,
-) -> Arc<dyn capabilities::vm::api::Vm + Send + Sync> {
-    Arc::new(capabilities::vm::service::VmService::new(
-        engine,
-        vec![Arc::new(capabilities::vm::detail::NoneShare::new())],
-    ))
-}
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -61,25 +39,25 @@ fn main() {
     // 隐藏模式：走**产品自己那套**出站链路打一次最小 HTTPS 请求，三态如实回报
     // （ok / no-net / tls-fail|fail）——CI 三平台据此验本构建的 TLS 栈，不需要任何密钥。
     if let Some(i) = args.iter().position(|a| a == "--https-check") {
-        std::process::exit(diagnostics::https_check(&args, i));
+        std::process::exit(entry::probes::https_check(&args, i));
     }
     // 隐藏模式：把归档解到目录（跨平台纯 Rust）——provision 能力用它解归档，不依赖用户装了什么解压工具。
     if let Some(i) = args.iter().position(|a| a == "--unpack") {
-        std::process::exit(diagnostics::unpack_cli(&args, i));
+        std::process::exit(entry::probes::unpack_cli(&args, i));
     }
     // 环境白名单（机器可读）：把运行期交给工具进程的环境逐行交出来——探针据此在**同一个环境**里驱动
     // 守门进程，不另抄一份（抄一份会漂移，也会漏掉只有真实环境才暴露的问题）。
     if let Some(i) = args.iter().position(|a| a == "--print-fence-env") {
-        std::process::exit(diagnostics::print_fence_env(&args, i));
+        std::process::exit(entry::probes::print_fence_env(&args, i));
     }
     // 机制验证（机器可读，探针与测试驱动）：不装围栏、不写任何权限项，只如实报"这次能不能强制住"。
     // 未授权时段的拒绝执行（见 capabilities/tools/detail/proc_tools.rs）就靠这一份结论。
     if let Some(i) = args.iter().position(|a| a == "--fence-verify") {
-        std::process::exit(diagnostics::fence_verify(&args, i));
+        std::process::exit(entry::probes::fence_verify(&args, i));
     }
     // 入站契约（机器可读）：HTTP 路由目录的唯一定义（见 docs/presentation/contracts.md）。
     if args.iter().any(|a| a == "--print-routes") {
-        diagnostics::print_routes();
+        entry::probes::print_routes();
         std::process::exit(0);
     }
     // 启动形态：无参数 = CLI（默认）；-webUI = Web 转录中心。
@@ -105,35 +83,35 @@ fn main() {
         eprintln!("[工具链] {}", w);
     }
     if doctor {
-        std::process::exit(diagnostics::doctor(&root));
+        std::process::exit(entry::probes::doctor(&root));
     }
     // 隐藏模式：依赖补齐的状态（机器可读，只报事实）——缺什么、装到哪、从哪来。
     if args.iter().any(|a| a == "--provision") {
-        std::process::exit(diagnostics::provision(&root, &args));
+        std::process::exit(entry::probes::provision(&root, &args));
     }
     // 维护动作：显式回收一个工作里不再可达的内容对象（默认 dry-run，--yes 才删）。
     if let Some(i) = args
         .iter()
         .position(|a| a == "--work-gc" || a.starts_with("--work-gc="))
     {
-        std::process::exit(diagnostics::work_gc(&root, &args, i));
+        std::process::exit(entry::probes::work_gc(&root, &args, i));
     }
     // 存储空间：报告与回收（隐藏维护入口；Web 设置页是同一份能力的另一种呈现）。
     if args.iter().any(|a| a == "--storage") {
-        std::process::exit(diagnostics::storage(&root));
+        std::process::exit(entry::probes::storage(&root));
     }
     if let Some(i) = args
         .iter()
         .position(|a| a == "--gc" || a.starts_with("--gc="))
     {
-        std::process::exit(diagnostics::gc(&root, &args, i));
+        std::process::exit(entry::probes::gc(&root, &args, i));
     }
     // 隐藏模式：构建一个模块声明的产物（**系统动作**：在目标环境里跑 module.yaml 的 build.command）。
     if let Some(i) = args
         .iter()
         .position(|a| a == "--build" || a.starts_with("--build="))
     {
-        std::process::exit(diagnostics::build(&root, &args, i));
+        std::process::exit(entry::probes::build(&root, &args, i));
     }
     // 隐藏模式：按条处置围栏台账（列清单 / 还原一条 / 撤一条 / 删一个 profile）——比整体收尾更细，
     // 所以排在 --fence-clean 之前；两者共用同一份台账与同一套 ACE 读法（见 docs/kernel/README.md 的「围栏落点：必要与可选」）。
@@ -263,13 +241,8 @@ fn main() {
     // 依赖补齐后的**自动发现**：设置里没登记时，把装到项目内的可运行包直接当登记值（显式登记优先）。
     // 只填内存、不写用户的 settings.yaml；同进程内新装的包要下次启动才生效（Web 的 setup 作业即属此列）。
     let installed =
-        capabilities::provision::api::Provision::status(&capabilities::provision::assemble(
-            &root,
-            Arc::new(capabilities::provision::detail::fetch::HttpFetch::new(
-                15, 7200,
-            )),
-        ))
-        .unwrap_or_default();
+        capabilities::provision::api::Provision::status(&entry::assembly::provision(&root))
+            .unwrap_or_default();
     // 清单里的 probe 是**相对产品根**的写法：这里拼成绝对路径再当登记值用（否则只在 CWD = 产品根时才成立）。
     let picked = |prefix: &str| {
         installed
@@ -557,13 +530,7 @@ fn main() {
     // 依赖补齐面先建出来：Conductor（选虚拟根要读清单）与呈现层（setup 路由）各持同一份。
     // vm 用**补齐面专用**的那份：运行期编排显式点名内部 none，不能拿会话 vm 顶替（那边只有用户档）。
     let provision: Arc<dyn capabilities::provision::api::Provision + Send + Sync> =
-        Arc::new(capabilities::provision::assemble_with_vm(
-            &root,
-            Arc::new(capabilities::provision::detail::fetch::HttpFetch::new(
-                15, 7200,
-            )),
-            provision_vm(Arc::clone(&book)),
-        ));
+        Arc::new(entry::assembly::provision_with_guest_vm(&root));
     // **存储空间**：回收策略来自 settings；构建与呈现层共用同一份。
     // 存储的三个端口各一个适配器：盘点（只读）、回收（锁与删除）、guest 存活（进程台账）。
     let storage_service = Arc::new(capabilities::storage::service::StorageService::new(

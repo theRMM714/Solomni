@@ -1085,7 +1085,7 @@ pub(crate) fn provision_vm_holds_internal_none_share() {
         }
     }
 
-    let vm = crate::provision_vm_with(Arc::new(QemuDouble(FakeEngine::new())));
+    let vm = crate::entry::assembly::provision_vm_with(Arc::new(QemuDouble(FakeEngine::new())));
     let lease = "provision-test";
     let spec = GuestSpec {
         lease: lease.to_string(),

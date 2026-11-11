@@ -1,7 +1,8 @@
 /**
  * 能力内部结构门禁：三条硬判据 + 一条只报不拦的文件粒度回执。
  * 硬判据：① 同能力 service 不得引用本能力 detail 或 kernel::detail；② service 不得直接做 IO；
- *        ③ 同一能力的 service 方法族之间不得成环。豁免与快照在 tests/structure-baseline.json，条目过期即失败。
+ *        ③ 同一能力的 service 方法族之间不得成环；④ 能力内 detail 之外的文件不得引用 kernel::detail。
+ * 豁免与快照在 tests/structure-baseline.json，条目过期即失败。
  * 回执：service / domain / detail / api.rs 超 800 行按行数列出，不改变成败——行数是气味，依赖才是规则；
  *      唯一硬线是新建文件超过 1200 行（新文件没有历史包袱，超线即说明职责没拆）。
  */
@@ -95,6 +96,7 @@ function walk(root) {
 /** 扫描：返回每条判据的实际命中与文件粒度快照，供门禁比对与基线重新生成共用。 */
 function scan(root) {
   const serviceToDetail = new Set();
+  const outsideDetailKernel = new Set();
   const serviceIo = new Set();
   const serviceGraph = {};
   const sizes = {};
@@ -109,6 +111,10 @@ function scan(root) {
     sizes[f] = lines;
     const prod = stripTestModules(raw);
     const cap = f.split("/")[2];
+
+    if (scope !== "detail" && prod.includes("crate::kernel::detail")) {
+      outsideDetailKernel.add(f + " -> crate::kernel::detail");
+    }
 
     if (scope === "service") {
       if (prod.includes("crate::capabilities::" + cap + "::detail")) {
@@ -130,7 +136,7 @@ function scan(root) {
   }
   notes.sort((a, b) => b.lines - a.lines);
   const cycles = tarjanScc(serviceGraph).map((c) => "capabilities/" + c.join(", "));
-  return { serviceToDetail: [...serviceToDetail].sort(), serviceIo: [...serviceIo].sort(), cycles, sizes, notes };
+  return { serviceToDetail: [...serviceToDetail].sort(), outsideDetailKernel: [...outsideDetailKernel].sort(), serviceIo: [...serviceIo].sort(), cycles, sizes, notes };
 }
 
 function sortCycles(list) {
@@ -171,6 +177,7 @@ function internal(root) {
     }
   };
   compare("serviceToDetail", actual.serviceToDetail, base.serviceToDetail || [], "service 不得引用本能力 detail 或 kernel::detail（抽端口，别直连实现）");
+  compare("outsideDetailKernel", actual.outsideDetailKernel, base.outsideDetailKernel || [], "detail 之外的能力文件不得引用 kernel::detail（由组合根注入端口）");
   compare("serviceIo", actual.serviceIo, base.serviceIo || [], "service 不得直接做 IO（fs / Command / 网络）；经端口或 detail");
 
   const got = sortCycles(actual.cycles);

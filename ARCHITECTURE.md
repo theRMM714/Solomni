@@ -12,7 +12,7 @@
 - 对外表述是**三层 + 一块地基库**：**根**（启动程序与组合根）、**呈现层**、**业务层**；`kernel/` 是**地基库，不是层**；测试层横切，不参与运行时分层。依赖箭头只有一种画法（外层指向内层）：
 
 ```text
-根（main.rs + entry/ + diagnostics/ + guard/）
+根（main.rs + entry/ + guard/）
   ├──▶ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）──▶ kernel（地基库）
   └──▶ capabilities / kernel（注入适配器、跑探针与守门模式）
 （根 = 启动 + 组合根 + 机器探针 + 守门进程；各能力的 `detail` 与 kernel 的实现只在这里被 new 出来）
@@ -20,7 +20,7 @@
 
 | 单元 | 干什么 | 禁令 |
 | --- | --- | --- |
-| **根**（`entry/` + `main.rs` + `diagnostics/` + `guard/`） | **启动程序与组合根**：解析根、`new` 出所有适配器并注入、跑启动对账、把入站面交给呈现层；机器可读探针（`--doctor` / `--https-check` / `--print-routes` / `--print-fence-env` / `--fence-verify`）；围栏守门进程与台账处置（`--fence-run`；以及 `--fence-clean` / `--fence-reconcile` / `--fence-ledger` / `--fence-restore` / `--fence-revoke` / `--fence-profile-rm`）；长驻子进程守门进程（`--proc-watchdog`，macOS 的父死子亡） | 它依赖所有人，**任何人都不许依赖它**；除启动、装配、探针与守门外无业务 |
+| **根**（`entry/` + `main.rs` + `guard/`） | **启动程序与组合根**：解析根、`new` 出所有适配器并注入（共用装配在 `src/entry/assembly.rs`）、跑启动对账、把入站面交给呈现层；机器可读探针（`entry/probes/`：`--doctor` / `--https-check` / `--print-routes` / `--print-fence-env` / `--fence-verify`）；围栏守门进程与台账处置（`--fence-run`；以及 `--fence-clean` / `--fence-reconcile` / `--fence-ledger` / `--fence-restore` / `--fence-revoke` / `--fence-profile-rm`）；长驻子进程守门进程（`--proc-watchdog`，macOS 的父死子亡） | 它依赖所有人，**任何人都不许依赖它**；除启动、装配、探针与守门外无业务 |
 | `presentation/{cli,web}/` | **呈现层（交付机制）**：各渠道一个子目录，完全分开——传输（argv/stdout vs HTTP）、路由、纯渲染。**不是业务能力** | 只依赖各能力的 `::api`；**拿不到端口对象，也拿不到 `Core`**；两者互不依赖 |
 | `capabilities/` | **业务层**：按业务功能垂直切分。每个能力有 `api`（入站契约：trait + DTO）/ `service`（本能力的状态与用例）/ `ports`（出站端口，只由定义它的能力持有）/ `domain`（纯逻辑）/ `detail`（只有组合根能构造） | **业务之间只经对方的 `api`**；不反向依赖根 / 呈现层（T0 机器判定，见 §九.7） |
 | `capabilities/conductor/` | **协调业务**：会话中心（在世表、命令队列、运行态）、生成驱动、跨能力用例与跨会话回档编排；与别的能力**平级** | 不读文件、不发网络、不碰 stdin/stdout——机制下沉各能力的 `detail/` |

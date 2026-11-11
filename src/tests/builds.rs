@@ -1,7 +1,7 @@
 //! 目的：构建能力的契约——入口在场即跳过、缺失才编、编完复验、缓存命中与失败如实报。
 //! 管：本机档（宿主围栏）与虚拟机档（guest 里编）的构建用例；三个端口（源指纹、构建状态、缓存卷）的契约；
 //!   夹具模块的跨平台构建脚本。
-//! 不管：CLI 参数解析与退出码（`diagnostics::build` 是薄壳）、模块清单校验（在 `modules.rs`）。
+//! 不管：CLI 参数解析与退出码（`entry::probes::build` 是薄壳）、模块清单校验（在 `modules.rs`）。
 //! 联动：契约见 docs/builds/README.md 与 MODULE_SPEC 的「构建」；端口定义在 `builds/ports.rs`；状态落 `.vm/build-state/<模块>.json`。
 
 use crate::capabilities::builds::api::{Builds, Target};
@@ -32,11 +32,8 @@ fn builds_service(
     BuildsService::new(
         root.to_path_buf(),
         packages,
-        crate::diagnostics::build_vm(root),
-        Arc::new(crate::capabilities::provision::assemble(
-            root,
-            Arc::new(crate::capabilities::provision::detail::fetch::HttpFetch::new(15, 7200)),
-        )),
+        crate::entry::assembly::build_vm(root),
+        Arc::new(crate::entry::assembly::provision(root)),
         Arc::new(crate::capabilities::storage::api::NoStorage),
         store.clone(),
         store,
@@ -304,10 +301,7 @@ fn guest_build_writes_products_back_from_the_local_workspace() {
     let guest = std::env::var("SOLOMNI_VM_GUEST").unwrap_or_else(|_| "debian-13".to_string());
     let repo = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let deps = crate::capabilities::provision::api::Provision::status(
-        &crate::capabilities::provision::assemble(
-            &repo,
-            Arc::new(crate::capabilities::provision::detail::fetch::HttpFetch::new(15, 7200)),
-        ),
+        &crate::entry::assembly::provision(&repo),
     )
     .unwrap_or_default();
     // 引擎与虚拟根不在场就如实跳过（真机验收只在装齐的机器上跑）。

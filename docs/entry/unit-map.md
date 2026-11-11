@@ -8,13 +8,24 @@
 > 分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九；单元划分与文档路由见 [AGENTS.md](../../AGENTS.md)。
 
 > 根（组合根 / 探针 / 守门进程）+ 根共用机制。只有程序入口能用它，**任何能力都不许依赖它**（门禁判定）；
-> 它依赖所有人，**任何人都不许依赖它**。三个入口各司其职，互不借用。
+> 它依赖所有人，**任何人都不许依赖它**。启动、探针、守门三个入口各司其职，互不借用；共用装配只在 `src/entry/assembly.rs`。
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/entry/mod.rs` | 根共用机制的入口（当前只有产品根规范化） |
+| `src/entry/mod.rs` | 根共用机制的入口：注册装配、探针、产品根规范化与启动期工具链 |
+| `src/entry/assembly.rs` | 组合根的共用装配：把产品根变成各能力面；端口选型、适配器构造与依赖顺序只在这里落一次 |
 | `src/entry/root.rs` | 产品根规范化：纯词法拼接与归一化，取不到当前目录才退回 canonicalize |
 | `src/entry/toolchains.rs` | 启动期基础工具链：读 `.tools/toolchains/active.json`，校验目标与相对路径，把项目 bin 前置到 PATH 并设置工具环境；每次启动报告项目内 / 宿主回退（含 Windows 围栏可授权性）/ 缺失；不阻断启动 |
-| `src/main.rs` | 组合根 + argv 分发：隐藏模式 / 探针 → 启动对账与围栏报告（本机能力 / 本次实际）→ 首次引导与启动门（过不了只降级 / 重设 / 退出）→ 装配各能力 → 交给 CLI 或 Web |
-| `src/diagnostics/mod.rs` | 机器可读探针：doctor / provision / https-check / unpack / print-routes / print-fence-env / fence-verify / build |
+| `src/main.rs` | 组合根 + argv 分发：隐藏模式 / 探针 → 启动对账与围栏报告（本机能力 / 本次实际）→ 首次引导与启动门（过不了只降级 / 重设 / 退出）→ 经 `entry::assembly` 装配各能力 → 交给 CLI 或 Web |
+| `src/entry/probes/mod.rs` | 机器可读探针的入口与共用输出：导出各模式，打印回收报告 |
+| `src/entry/probes/build.rs` | 探针：`--build`（模块构建） |
+| `src/entry/probes/doctor.rs` | 探针：`--doctor`（机器可读自检） |
+| `src/entry/probes/fence.rs` | 探针：`--print-fence-env` / `--fence-verify`（围栏环境与机制验证） |
+| `src/entry/probes/gc.rs` | 探针：`--gc`（存储回收） |
+| `src/entry/probes/https.rs` | 探针：`--https-check`（出站 HTTPS） |
+| `src/entry/probes/provision.rs` | 探针：`--provision` / `--ensure` / `--reset` |
+| `src/entry/probes/routes.rs` | 探针：`--print-routes`（HTTP 路由目录） |
+| `src/entry/probes/storage.rs` | 探针：`--storage`（存储报告） |
+| `src/entry/probes/unpack.rs` | 探针：`--unpack`（解归档） |
+| `src/entry/probes/work_gc.rs` | 探针：`--work-gc`（工作区回收） |
 | `src/guard/mod.rs` | 守门模式分发：围栏守门（--fence-run）、进程守门（--proc-watchdog）、围栏台账按条处置 |

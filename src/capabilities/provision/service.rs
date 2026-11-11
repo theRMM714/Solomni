@@ -17,6 +17,7 @@ use crate::capabilities::provision::ports::{
     Fetcher, GuestImage, HostFs, Installers, Ledger, Procs,
 };
 use crate::capabilities::vm::api::Vm;
+use crate::kernel::ports::HostProbe;
 
 /// 目的：一次补齐要用的端口组合——由 `ProvisionService` 借出，后台线程自己持有一份。
 pub(crate) struct Pipeline<'a> {
@@ -26,10 +27,22 @@ pub(crate) struct Pipeline<'a> {
     pub(crate) installers: &'a dyn Installers,
     pub(crate) images: &'a dyn GuestImage,
     pub(crate) fetch: &'a dyn Fetcher,
+    pub(crate) probe: &'a dyn HostProbe,
     pub(crate) vm: Option<&'a (dyn Vm + Send + Sync)>,
 }
 
-/// 目的：依赖补齐的实现——持产品根与六个端口；作业状态与取消旗在本层。
+/// 目的：组合根交给补齐能力的全部出站端口——端口由能力声明，适配器由根在装配时选。
+pub struct ProvisionDeps {
+    pub host: Arc<dyn HostFs>,
+    pub ledger: Arc<dyn Ledger>,
+    pub installers: Arc<dyn Installers>,
+    pub images: Arc<dyn GuestImage>,
+    pub procs: Arc<dyn Procs>,
+    pub fetch: Arc<dyn Fetcher>,
+    pub probe: Arc<dyn HostProbe>,
+}
+
+/// 目的：依赖补齐的实现——持产品根与全部出站端口；作业状态与取消旗在本层。
 pub struct ProvisionService {
     root: PathBuf,
     host: Arc<dyn HostFs>,
@@ -38,6 +51,7 @@ pub struct ProvisionService {
     images: Arc<dyn GuestImage>,
     procs: Arc<dyn Procs>,
     fetch: Arc<dyn Fetcher>,
+    probe: Arc<dyn HostProbe>,
     /// Windows guest 的运行期编排要起 guest；组合根或 --provision 入口注入；只查状态时可为 None。
     vm: Option<Arc<dyn Vm + Send + Sync>>,
     job: Arc<Mutex<JobState>>,
@@ -45,24 +59,17 @@ pub struct ProvisionService {
 }
 
 impl ProvisionService {
-    /// 目的：以产品根与六个端口建一个实现（只查状态、或只装不启动 guest 的条目用；guest-runtime 会被如实拒绝）。
-    pub fn new(
-        root: &Path,
-        host: Arc<dyn HostFs>,
-        ledger: Arc<dyn Ledger>,
-        installers: Arc<dyn Installers>,
-        images: Arc<dyn GuestImage>,
-        procs: Arc<dyn Procs>,
-        fetch: Arc<dyn Fetcher>,
-    ) -> ProvisionService {
+    /// 目的：以产品根与全部出站端口建一个实现（只查状态、或只装不启动 guest 的条目用；guest-runtime 会被如实拒绝）。
+    pub fn new(root: &Path, deps: ProvisionDeps) -> ProvisionService {
         ProvisionService {
             root: root.to_path_buf(),
-            host,
-            ledger,
-            installers,
-            images,
-            procs,
-            fetch,
+            host: deps.host,
+            ledger: deps.ledger,
+            installers: deps.installers,
+            images: deps.images,
+            procs: deps.procs,
+            fetch: deps.fetch,
+            probe: deps.probe,
             vm: None,
             job: Arc::new(Mutex::new(JobState::default())),
             cancel: Arc::new(AtomicBool::new(false)),
@@ -70,20 +77,14 @@ impl ProvisionService {
     }
 
     /// 目的：带 vm 能力面的实现（组合根 / --provision 入口用）；guest-runtime 编排需要它。
-    #[allow(clippy::too_many_arguments)]
     pub fn with_vm(
         root: &Path,
-        host: Arc<dyn HostFs>,
-        ledger: Arc<dyn Ledger>,
-        installers: Arc<dyn Installers>,
-        images: Arc<dyn GuestImage>,
-        procs: Arc<dyn Procs>,
-        fetch: Arc<dyn Fetcher>,
+        deps: ProvisionDeps,
         vm: Arc<dyn Vm + Send + Sync>,
     ) -> ProvisionService {
         ProvisionService {
             vm: Some(vm),
-            ..ProvisionService::new(root, host, ledger, installers, images, procs, fetch)
+            ..ProvisionService::new(root, deps)
         }
     }
 
@@ -95,6 +96,7 @@ impl ProvisionService {
             installers: self.installers.as_ref(),
             images: self.images.as_ref(),
             fetch: self.fetch.as_ref(),
+            probe: self.probe.as_ref(),
             vm: self.vm.as_deref(),
         }
     }
@@ -196,6 +198,7 @@ impl Provision for ProvisionService {
         let job = Arc::clone(&self.job);
         let cancel = Arc::clone(&self.cancel);
         let vm = self.vm.clone();
+        let probe = Arc::clone(&self.probe);
         let fetch = Arc::clone(&self.fetch);
         let host = Arc::clone(&self.host);
         let ledger = Arc::clone(&self.ledger);
@@ -211,6 +214,7 @@ impl Provision for ProvisionService {
                 installers: installers.as_ref(),
                 images: images.as_ref(),
                 fetch: fetch.as_ref(),
+                probe: probe.as_ref(),
                 vm: vm.as_deref(),
             };
             let r = run_ensure(&pipeline, &ids, &cancel, &mut on_line);
@@ -526,6 +530,7 @@ pub(crate) fn run(
                 let r = super::guest::install_guest_runtime(
                     pipeline.root,
                     dep,
+                    pipeline.probe,
                     pipeline.vm,
                     explicit,
                     on_line,

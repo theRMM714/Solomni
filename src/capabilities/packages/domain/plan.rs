@@ -1,7 +1,7 @@
 //! 目的：运行包的选型诊断与执行计划（纯逻辑）：缺包 / 多版本 / 定版 / 冲突，以及按能力选包。
 //! 管：从包库事实派生 `PackagePlan` 与可读诊断；本机档与虚拟机档共用同一套目标选择。
 //! 不管：目录遍历（detail/）、guest 挂载与叠写（vm 能力）、实际工具进程（tools）。
-//! 联动：被 api.rs 重导出；由 conductor / diagnostics / residents 消费。
+//! 联动：被 api.rs 重导出；由 conductor / entry::probes / residents 消费。
 
 use crate::capabilities::modules::api::Module;
 use crate::capabilities::packages::domain::manifest::{
