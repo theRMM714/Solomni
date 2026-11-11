@@ -22,7 +22,7 @@ const $ = (sel) => doc.querySelector(sel);
 function syncComposer(s) {
   const composer = $('#composer');
   if (composer) {
-    if (s && s.readonly) composer.classList.add('hidden');
+    if (!s || s.readonly) composer.classList.add('hidden');
     else composer.classList.remove('hidden');
   }
   renderReadonly(s);

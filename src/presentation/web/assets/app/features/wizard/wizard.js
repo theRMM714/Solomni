@@ -43,9 +43,9 @@ async function openWizard(draft) {
   // 档位那一格：虚拟机档不可用时禁用，并逐项说明缺什么、怎么补（照抄后端事实，不自己编话）。
   const tierField = doc.createElement('div'); tierField.className = 'wf-field';
   const tierLabel = doc.createElement('div'); tierLabel.className = 'wf-label'; tierLabel.textContent = '执行档位';
-  const hostR = ui.radio('本机档（脚本在宿主上跑）', w.tier !== 'vm', 'wf-tier');
+  const hostR = ui.radio('本机档', w.tier !== 'vm', 'wf-tier');
   const vmOk = !!(tiers && tiers.vm_available);
-  const vmR = ui.radio('虚拟机档（脚本在 guest 里跑）', w.tier === 'vm', 'wf-tier', !vmOk);
+  const vmR = ui.radio('虚拟机档', w.tier === 'vm', 'wf-tier', !vmOk);
   hostR.box.addEventListener('change', () => { if (hostR.box.checked) { w.tier = 'host'; syncWizardTier(); } });
   vmR.box.addEventListener('change', () => { if (vmR.box.checked) { w.tier = 'vm'; syncWizardTier(); } });
   const tierGroup = doc.createElement('div'); tierGroup.className = 'form-col';
@@ -319,7 +319,7 @@ function pickWorkspaceDir(onPick) {
       const box = doc.createElement('div'); box.className = 'form-col';
       if (w.mode === 'single') {
         if (w.agents.length) box.appendChild(app.agentCard(w.agents[0], cardHandlers(0)));
-        else box.appendChild(emptyHint('（还没有选 agent：新建临时 agent，或从登记处加入）'));
+        else box.appendChild(emptyHint('（还没有选 agent）'));
         box.appendChild(agentActions(true, w.agents.length > 0));
         return box;
       }
@@ -349,11 +349,12 @@ function pickWorkspaceDir(onPick) {
         return;
       }
       const lab = doc.createElement('div'); lab.className = 'wf-label';
-      lab.textContent = w.mode === 'single'
-        ? 'agent（单 agent：恰好 1 个；模块数不限）'
-        : 'agent 名单（协作：可多个，各自独立沙箱）';
+      lab.textContent = w.mode === 'single' ? 'agent' : 'agent 名单';
       partWrap.appendChild(lab);
       partWrap.appendChild(agentSection());
+      const rule = doc.createElement('div'); rule.className = 'wf-hint';
+      rule.textContent = w.mode === 'single' ? '恰好 1 个；模块数不限。' : '可多个，各自独立沙箱。';
+      partWrap.appendChild(rule);
     }
 
     function renderModels() {
@@ -519,7 +520,8 @@ function pickWorkspaceDir(onPick) {
     actions.appendChild(recBtn);
     actions.appendChild(cancelBtn);
     actions.appendChild(createBtn);
-    c.body.appendChild(actions);
+    // 有 foot 就固定在底部；没有（老调用）仍随正文走。
+    (c.foot || c.body).appendChild(actions);
 
     renderParts(); renderModels(); syncWizardTier(); syncCreateButton();
     // 别的标签页 / 设置在轮询后改了登记处：只换模型提示与创建按钮，不重建名字 / 需求输入框。

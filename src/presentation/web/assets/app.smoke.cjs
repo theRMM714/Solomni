@@ -312,7 +312,7 @@ setTimeout(async () => {
       if (!rewoundApplies) loadErrors.push("回档重置检查：" + JSON.stringify(r));
     } catch (e) { loadErrors.push("回档重置检查失败：" + e.message); }
   }
-  // **只读历史会话**：不渲染输入区，只留「启用会话」；会话说明写明要先启用。
+  // **只读历史会话**：不渲染输入区，只留「启用会话」；只读这句话只出现一次（底部条）。
   let readonlyRule = false;
   if (!loadErrors.length) {
     try {
@@ -328,8 +328,7 @@ setTimeout(async () => {
         sandbox
       );
       const joined = (r.children || []).join('|');
-      readonlyRule = joined.indexOf('只读') >= 0 && joined.indexOf('启用会话') >= 0
-        && String(r.note).indexOf('只读') >= 0 && String(r.note).indexOf('启用会话') >= 0;
+      readonlyRule = joined.indexOf('只读') >= 0 && joined.indexOf('启用会话') >= 0 && r.note === null;
       if (!readonlyRule) loadErrors.push("只读会话检查：" + JSON.stringify(r));
     } catch (e) { loadErrors.push("只读会话检查失败：" + e.message); }
   }
@@ -778,6 +777,7 @@ setTimeout(async () => {
     try {
       const r = vm.runInNewContext(
         "(function () {" +
+          " state.sessions.set('a', { sid: 'a', running: true, running_known: true });" +
           " state.history = [" +
           "   { name: 'p', mode: 'proxy', ts: 1, done: false, run: 'stopped', tier: 'host', parent: null }," +
           "   { name: 'c', mode: 'single', ts: 2, done: false, run: 'closed', tier: 'host', parent: 'p' }," +

@@ -1,6 +1,9 @@
 /* Solomni 组件库：按钮、图标按钮、提示、表单、弹层、菜单、折叠、toast、空态与骨架。
  * 约束：只引用 /tokens.css 的变量；不写字面量颜色或时长（tokens.smoke.cjs 守着）。
  * 联动：页面布局在 /style.css；组件工厂在 app/ui/。 */
+/* 原生控件（单选圆点 / 滚动条 / 自动填充）跟随深色；不写会让未选中的圆点渲染成实心白点。 */
+:root { color-scheme: dark; }
+
 .hidden { display: none !important; }
 
 /* ---- 统一滚动条：跟随主题，不露出系统白条 ---- */
@@ -115,7 +118,8 @@ select.field-input { cursor: pointer; }
 .chk-note { color: var(--color-text-dim); font-size: var(--fs-s); line-height: var(--lh-base); }
 
 /* ---- 主区弹层 ---- */
-.modal-root { display: none; position: absolute; inset: 0; z-index: var(--z-modal); }
+/* 盖住整个视口（含侧栏与顶栏）：弹层是模态的，下面任何东西都不该还能点。 */
+.modal-root { display: none; position: fixed; inset: 0; z-index: var(--z-modal); }
 .modal-root.open { display: flex; }
 .modal-overlay {
   position: absolute; inset: 0; background: var(--color-overlay);
@@ -140,6 +144,10 @@ select.field-input { cursor: pointer; }
 .modal-body { padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-4); overflow-y: auto; max-height: 70vh; }
 .modal-msg { min-height: 1.2em; padding: 0 var(--sp-4) var(--sp-3); font-size: var(--fs-base); color: var(--color-text-dim); }
 .modal-msg.err { color: var(--color-err); }
+/* 操作区：固定在弹层底部，正文再长也不把主行动推到首屏之外。 */
+.modal-foot { flex: none; display: flex; padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--color-border); }
+.modal-foot:empty { display: none; }
+.modal-foot .form-actions { width: 100%; margin: 0; padding: 0; border-top: 0; }
 
 /* ---- 屏幕居中的提示弹窗（自研，顶替原生 alert/confirm） ---- */
 .notice-root { display: none; position: fixed; inset: 0; z-index: var(--z-notice); }
@@ -181,6 +189,9 @@ select.field-input { cursor: pointer; }
   color: var(--color-text); background: var(--color-surface-2); border-color: var(--color-border);
 }
 .status-chip .ui-icon { width: 14px; height: 14px; flex: none; }
+/* 可点的 chip 末尾一个下箭头：不点开也能看出这里能点。 */
+.status-chip .status-chip-caret { width: 12px; height: 12px; opacity: .55; transform: rotate(90deg); }
+.status-chip:hover .status-chip-caret, .status-chip[aria-expanded="true"] .status-chip-caret { opacity: 1; }
 .status-chip-text { font-variant-numeric: tabular-nums; }
 .status-chip-hint { color: var(--color-text-dim); font-size: var(--fs-xs); opacity: .8; }
 .status-chip.warn { color: var(--color-warn); }
@@ -304,7 +315,8 @@ select.field-input { cursor: pointer; }
 /* ---- 空态 / 骨架 / 小徽标 ---- */
 .empty { margin: auto; text-align: center; color: var(--color-text-dim); }
 .empty-logo { display: block; width: var(--fs-xl); height: var(--fs-xl); margin: 0 auto var(--sp-2); color: var(--color-text-dim); }
-.empty .tip { font-size: var(--fs-s); }
+.empty .tip { font-size: var(--fs-l); color: var(--color-text); }
+.empty .btn { margin-top: var(--sp-4); }
 .empty .hint { font-size: var(--fs-s); margin-top: var(--sp-3); color: var(--color-text-dim); opacity: .8; }
 .chip {
   background: var(--color-surface-2); border: 1px solid var(--color-border); color: var(--color-text);
@@ -313,6 +325,12 @@ select.field-input { cursor: pointer; }
 .chip:hover { border-color: var(--color-accent); color: var(--color-accent); }
 
 /* 移动端：状态小卡片贴底（状态栏本身在底部，避免顶出屏幕） */
+@media (hover: none) {
+  .icon-btn { width: 40px; height: 40px; }
+  .status-chip { padding: 6px 10px; }
+  .history-toggle { width: 32px; height: 32px; }
+}
+
 @media (max-width: 899px) {
   .popover {
     left: 8px !important; right: 8px; top: auto !important;

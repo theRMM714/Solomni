@@ -49,6 +49,8 @@ body {
 }
 .sidebar-main { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
 .sidebar-foot { flex: none; border-top: 1px solid var(--color-border); padding-top: 10px; }
+/* 抽屉的关闭按钮只在窄屏出现（桌面侧栏常驻，不需要关）。 */
+.sidebar-head { display: none; }
 .sidebar-action {
   display: flex; align-items: center; gap: 8px; width: 100%;
   padding: 8px 10px; background: none; border: 1px solid transparent;
@@ -66,7 +68,6 @@ body {
 /* ---- 侧栏内容 ---- */
 .panel h2 { font-size: var(--fs-s); color: var(--color-text-dim); margin-bottom: var(--sp-2); }
 .rejected { font-size: var(--fs-s); color: var(--color-err); margin-top: 8px; white-space: pre-line; }
-.sidebar-note { font-size: var(--fs-s); color: var(--color-text-dim); }
 
 /* ---- 会话标签：主 → 子 → 子子，按活跃路径逐层展开 ---- */
 .tabs {
@@ -74,6 +75,8 @@ body {
   padding: 0 var(--sp-4); background: var(--color-bg);
   border-bottom: 1px solid var(--color-border);
 }
+/* 没有打开任何会话时不留一条悬空的分隔线。 */
+.tabs:empty { display: none; }
 .tab-row { display: flex; gap: var(--sp-1); overflow-x: auto; }
 .tab-row.sub { padding-left: var(--sp-3); margin-left: var(--sp-2); border-left: 1px solid var(--color-border); }
 .tab-row.sub .tab { padding: 6px var(--sp-2); font-size: var(--fs-s); }
@@ -116,7 +119,8 @@ body {
 .line.sys::before { display: none; }
 .line.user {
   align-self: center; width: 100%; max-width: var(--w-read);
-  background: var(--color-surface-2); border: 1px solid var(--color-border);
+  /* 用户消息只做浅底、不描边：它不该比 agent 的正文更抢眼。 */
+  background: var(--color-surface); border: none;
   border-radius: var(--r-2); padding: var(--sp-3) var(--sp-4);
   color: var(--color-text);
 }
@@ -353,6 +357,8 @@ body {
     box-shadow: var(--shadow-2);
   }
   .sidebar.open { transform: translateX(0); }
+  .sidebar-head .icon-btn { width: 40px; height: 40px; }
+  .sidebar-head { display: flex; justify-content: flex-end; margin: -6px -6px 0; }
   .sidebar.rail { width: min(84vw, var(--w-sidebar)); padding: 12px; }
   .sidebar.rail .sidebar-main { display: flex; }
   .sidebar.rail .sidebar-foot { display: block; }
@@ -368,12 +374,14 @@ body {
   .composer textarea { min-height: 58px; max-height: 180px; }
   .btn-add { width: 48px; height: 48px; }
   .btn { padding: 11px 18px; }
+  .topbar .icon-btn { width: 40px; height: 40px; }
 }
 
-/* 窄屏：输入框独占一行，动作按钮换到下一行右对齐——否则输入框只剩几十像素。 */
+/* 窄屏也保持一行：上传 / 输入 / 发送。发送键掉到下一行会被误读成浮动按钮。 */
 @media (max-width: 640px) {
-  .composer-inner { flex-wrap: wrap; justify-content: flex-end; }
-  .composer textarea { flex: 1 1 calc(100% - 60px); }
+  .composer-inner { flex-wrap: nowrap; }
+  .composer textarea { flex: 1 1 auto; }
+  .composer .btn { flex: none; }
 }
 
 .wf-field, .form-col { display: flex; flex-direction: column; gap: var(--sp-2); }
@@ -398,7 +406,8 @@ body {
 .wf-field > input.field-input[type="number"] { max-width: 160px; }
 .wf-field > select.field-input { max-width: 360px; }
 .wf-label, .wf-hint { font-size: var(--fs-s); color: var(--color-text-dim); }
-.wf-field > .wf-label { font-size: var(--fs-base); color: var(--color-text); }
+/* 标签比控件小一档、加粗：与说明同色时靠字重分主次，扫读才不糊成一块。 */
+.wf-field > .wf-label { font-size: var(--fs-s); font-weight: 600; color: var(--color-text); }
 .wf-inline { display: flex; gap: var(--sp-2); align-items: center; }
 .wf-inline .field-input { flex: 1 1 auto; min-width: 0; }
 .wf-inline .btn { flex: none; }
@@ -458,14 +467,15 @@ body {
 }
 .settings-foot .btn { flex: none; white-space: nowrap; }
 .settings-foot-hint { flex: 1; text-align: right; font-size: var(--fs-s); color: var(--color-text-dim); }
+/* 窄屏：9 页改成换行的 chip 行（不横滚、不裁切），分组标题占整行。 */
 @media (max-width: 700px) {
   .settings-hub { grid-template-columns: 1fr; gap: 12px; }
   .settings-nav {
-    flex-direction: row; flex-wrap: nowrap; gap: 4px;
-    overflow-x: auto; padding-bottom: 4px;
+    flex-direction: row; flex-wrap: wrap; gap: 4px;
+    overflow-x: visible; padding-bottom: 4px;
   }
-  .settings-nav-item { width: auto; flex: 0 0 auto; white-space: nowrap; border-color: var(--color-border); }
-  .settings-nav-group { display: none; }
+  .settings-nav-item { width: auto; flex: 0 0 auto; white-space: nowrap; border-color: var(--color-border); padding: 8px 10px; }
+  .settings-nav-group { display: block; width: 100%; margin: 6px 0 0; }
 }
 
 /* ---- 登记列表（供应商 / 模型） ---- */
@@ -505,12 +515,12 @@ body {
 
 .history-list { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-s); }
 .history-list:empty::before { content: "（还没有历史会话）"; color: var(--color-text-dim); font-size: var(--fs-s); }
-/* 条目本身不是入口（点了不进会话）：进入走「打开」按钮，改动走「编辑」按钮。 */
+/* 条目本身是入口：点（或 Enter / 空格）直接开会话，行尾铅笔才是改动菜单。 */
 .history-item.bad .hname { color: var(--color-err); font-weight: 600; }
 .history-item.bad .hmode { color: var(--color-err); }
 .history-item {
-  display: flex; align-items: center; gap: 6px; cursor: pointer;
-  background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 6px; padding: 5px 8px;
+  display: flex; align-items: center; gap: 6px; min-height: 44px; cursor: pointer;
+  background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 6px; padding: 6px 8px;
 }
 .history-item:hover { border-color: var(--color-accent); }
 /* 会话树：根行可展开，子行缩进挂在父行下（见 `app/features/sidebar/sidebar.js` 的 renderHistory）。 */
@@ -521,12 +531,10 @@ body {
 }
 .history-toggle .ui-icon { width: 12px; height: 12px; transition: transform var(--dur-fast) var(--ease-out); }
 .history-toggle.open .ui-icon { transform: rotate(90deg); }
-.history-item .icon-btn { width: 24px; height: 24px; }
+.history-item .icon-btn { width: 32px; height: 32px; }
 .history-item .hname { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .history-item .hmode { flex: none; color: var(--color-text-dim); font-size: var(--fs-s); }
 .history-kids { display: flex; flex-direction: column; gap: 4px; margin-left: 14px; padding-left: 6px; border-left: 1px solid var(--color-border); }
-/* 会话历史下方的一句话说明（与侧栏其它说明同款小字） */
-.panel-note { font-size: var(--fs-s); color: var(--color-text-dim); margin-top: 6px; }
 /* 行内动作：图标按钮（回档 / 恢复 / 撤回），hover 或键盘聚焦时浮现。 */
 .line-act {
   margin-left: 6px; width: 24px; height: 24px; vertical-align: middle;
@@ -598,10 +606,12 @@ body {
 /* 没有任何可见内容的行块一律不占位（信封轮、正文还没到的流式块都算）。
    从前只隐藏 .streaming.empty：一块讲完后类名变回 line line，空卡片就又冒出来了。 */
 .line.empty { display: none; }
-.cot { margin: 4px 0 0; font-size: var(--fs-s); color: var(--color-text-dim); }
+/* 思维链是次要信息：与上一段留出间距，正文前再留一点，折叠标签才不会和结论粘在一起。 */
+.cot { margin: var(--sp-2) 0 0; font-size: var(--fs-s); color: var(--color-text-dim); }
 .cot summary { cursor: pointer; color: var(--color-text-dim); font-size: var(--fs-s); }
+.cot + .turn-text { margin-top: var(--sp-2); }
 .cot-body {
-  margin-top: 4px; padding: 6px 8px; white-space: pre-wrap; word-break: break-word;
+  margin-top: 6px; padding: 8px 10px; white-space: pre-wrap; word-break: break-word;
   background: var(--color-surface); border-left: 2px solid var(--color-border); border-radius: 4px;
 }
 /* ---- Markdown 正文 ---- */

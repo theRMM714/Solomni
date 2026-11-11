@@ -61,7 +61,14 @@ function renderHistory() {
       const row = doc.createElement('div');
       row.className = 'history-item' + (h.workspace_missing ? ' bad' : '');
       row.title = h.workspace_missing ? '工作区已不存在：只能查看记录，不能启用' : '点击打开会话';
+      row.setAttribute('role', 'button');
+      row.tabIndex = 0;
       row.onclick = () => openHistory(h.name);
+      row.onkeydown = (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        openHistory(h.name);
+      };
       const kids = by.get(h.name) || [];
       const open = state.treeOpen.has(h.name);
       if (kids.length) {
@@ -83,10 +90,13 @@ function renderHistory() {
       const name = doc.createElement('span');
       name.className = 'hname'; name.textContent = h.name; name.title = h.name;
       const mode = doc.createElement('span'); mode.className = 'hmode';
-      // 运行态是**持久事实**（停止 / 关闭），与"这一刻在不在跑"分开：侧栏据此标出来。
+      // 持久事实（停止 / 关闭）与"这一刻在不在跑"分开：只有确实在跑才标「进行中」，
+      // 否则重启前没结束的旧会话会一直冒充在跑。
+      const live = state.sessions.get(h.name);
+      const running = !!(live && live.running) || !!(state.running && state.running.has(h.name));
       const stateTag = h.run === 'stopped' ? '·已停止'
         : h.run === 'closed' ? '·已关闭'
-          : (h.done ? '' : '·进行中 ');
+          : (running && !h.done ? '·进行中 ' : '');
       mode.textContent = stateTag + h.mode +
         (h.tier === 'vm' && h.tier_ready === false ? '·虚拟机档不可用' : '') +
         (h.workspace_missing ? '·工作区不存在' : '');
@@ -156,6 +166,7 @@ async function openHistory(name) {
     hydrateHistory(existing);
     setActive(name);
     warnIfTierUnavailable(name);
+    if (isNarrow()) closeDrawer();
     return;
   }
   try {
@@ -183,6 +194,8 @@ async function openHistory(name) {
     setActive(name);
     renderAll();
     warnIfTierUnavailable(name);
+    // 窄屏是抽屉：选完会话就收起来，否则正文被挤成一条窄缝。
+    if (isNarrow()) closeDrawer();
   } catch (err) { ui.notice('操作失败', err.message, 'err'); }
 }
 
@@ -313,6 +326,12 @@ function setupSidebar() {
     rail.appendChild(ui.iconButton({ icon: 'clock', label: '会话历史', tip: '会话历史', onClick: expand }));
     rail.appendChild(ui.iconButton({ icon: 'gear', label: '设置', tip: '设置', onClick: () => app.openSettingsHub('generate') }));
     rail.appendChild(ui.iconButton({ icon: 'chevron', label: '展开侧栏', tip: '展开侧栏', onClick: expand }));
+  }
+  const closeBtn = $('#btn-drawer-close');
+  if (closeBtn) {
+    closeBtn.innerHTML = '';
+    closeBtn.appendChild(ui.icon('close'));
+    closeBtn.onclick = closeDrawer;
   }
   const drawer = $('#btn-drawer');
   if (drawer) {

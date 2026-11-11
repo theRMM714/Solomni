@@ -52,7 +52,13 @@ export function createButtons(dom, icons) {
     if (o.icon) b.appendChild(icons.icon(o.icon));
     if (o.text != null) b.appendChild(el('span', 'status-chip-text', o.text));
     if (o.hint != null) b.appendChild(el('span', 'status-chip-hint', o.hint));
-    if (typeof o.onClick === 'function') b.onclick = o.onClick;
+    if (typeof o.onClick === 'function') {
+      // 有动作才给箭头：光看文字不知道 chip 能点开。
+      const caret = icons.icon('chevron');
+      caret.classList.add('status-chip-caret');
+      b.appendChild(caret);
+      b.onclick = o.onClick;
+    }
     return b;
   }
 
