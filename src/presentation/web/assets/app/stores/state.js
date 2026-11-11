@@ -42,7 +42,7 @@ function newSession(v, h) {
   return {
     sid: v.sid, mode: v.mode || 'single', title: (h && h.name) || v.sid, run: v.run || 'active',
     parent: (h && h.parent) || null,
-    lines: [], live: [], pending: v.pending || null, sending: false,
+    lines: [], live: [], pending: v.pending || null, sending: false, answering: false,
     running: false, working: null, running_known: false,
     can_update_task: !!v.can_update_task,
     continue_action: v.continue || null,

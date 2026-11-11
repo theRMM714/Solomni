@@ -30,7 +30,9 @@ function renderGate(s) {
 
 /// 裁决卡：信封 / 消息（标题 / 正文 / 详情）/ 选项——四格都由后端给，前端照画（**扁平**，见契约）。
 function renderCard(p, s) {
-  const busy = !!(s && s.sending);
+  // 卡在等回答时，生成线程正停着等这一答：禁用条件只能是"这一答正在提交"，
+  // 不能是"我的发送命令还在途"——那条命令要等整轮生成结束才返回，拿它置灰会把人锁死。
+  const busy = !!(s && s.answering);
   const msg = p.message || {};
   const el = doc.createElement('div');
   el.className = 'gate-card';
@@ -87,9 +89,9 @@ function renderCard(p, s) {
    回答只有这一条命令（卡片 id + 选项 id），校验属于当时那张卡由后端做。 */
 async function answerCard(card, option, note) {
   const s = app.activeSession();
-  if (!s || s.readonly || s.sending) return;
+  if (!s || s.readonly || s.answering) return;
   if (note) s.lines.push({ cls: 'user', who: '用户', text: note, pending: true });
-  s.sending = true;
+  s.answering = true;
   app.renderStream();
   renderGate(s);
   try {
@@ -101,7 +103,7 @@ async function answerCard(card, option, note) {
     s.lines.push({ cls: 'bad', who: '错误', text: err.message });
     app.renderAll();
   } finally {
-    s.sending = false;
+    s.answering = false;
     app.markNeedState();
     app.renderAll();
   }
