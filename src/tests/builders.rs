@@ -1,6 +1,7 @@
 //! 测试脚手架：造会话 / 造名单 / 内存替身 / 脚本通道（原 `tests/core.rs` 的非测试部分）。
 //! 归属：这些**不属于任何一个能力**——它们是测试装配，谁都可以用（与 `doubles.rs` 同一角色）。
 use super::prelude::*;
+use crate::kernel::api::RunOutcome;
 
 /// 目的：测试里**回答当前那张裁决卡**（卡号从会话的挂起取）：返回这一答产生的事件。
 /// 约束：与呈现层同一条路——带选项 id（+ 附言），由 `collab_answer` 校验与落档。
@@ -313,11 +314,12 @@ impl ProcessRunner for SilentRunner {
         _env: &[(String, String)],
         _path: Option<&std::ffi::OsStr>,
         _ask: Option<&dyn crate::kernel::ports::AskUser>,
-    ) -> ToolOutcome {
+        _gate: Option<&dyn crate::kernel::ports::FenceGate>,
+    ) -> RunOutcome {
         panic!("不应调用工具");
     }
 
-    fn run_shell(&self, _run: &crate::kernel::ports::ShellRun<'_>) -> ToolOutcome {
+    fn run_shell(&self, _run: &crate::kernel::ports::ShellRun<'_>) -> RunOutcome {
         panic!("不应调用 shell");
     }
 }
@@ -363,24 +365,25 @@ impl ProcessRunner for EnvRecordingRunner {
         env: &[(String, String)],
         path: Option<&std::ffi::OsStr>,
         _ask: Option<&dyn crate::kernel::ports::AskUser>,
-    ) -> ToolOutcome {
+        _gate: Option<&dyn crate::kernel::ports::FenceGate>,
+    ) -> RunOutcome {
         self.envs.lock().expect("锁").push(env.to_vec());
         self.paths
             .lock()
             .expect("锁")
             .push(path.map(|p| p.to_os_string()));
-        ToolOutcome {
+        RunOutcome {
             ok: true,
             output: format!("跑完了 {}", args_json),
         }
     }
 
-    fn run_shell(&self, run: &crate::kernel::ports::ShellRun<'_>) -> ToolOutcome {
+    fn run_shell(&self, run: &crate::kernel::ports::ShellRun<'_>) -> RunOutcome {
         self.paths
             .lock()
             .expect("锁")
             .push(run.path.map(|p| p.to_os_string()));
-        ToolOutcome {
+        RunOutcome {
             ok: true,
             output: format!("shell {}", run.script),
         }
@@ -396,27 +399,28 @@ impl ProcessRunner for RecordingRunner {
         _env: &[(String, String)],
         _path: Option<&std::ffi::OsStr>,
         _ask: Option<&dyn crate::kernel::ports::AskUser>,
-    ) -> ToolOutcome {
+        _gate: Option<&dyn crate::kernel::ports::FenceGate>,
+    ) -> RunOutcome {
         // 记下工具进程的工作目录（= 该模块的根）与命令、参数。
         self.calls.lock().expect("锁").push((
             fence.cwd.clone(),
             command.to_string(),
             args_json.to_string(),
         ));
-        ToolOutcome {
+        RunOutcome {
             ok: self.ok,
             output: self.out.clone(),
         }
     }
 
-    fn run_shell(&self, run: &crate::kernel::ports::ShellRun<'_>) -> ToolOutcome {
+    fn run_shell(&self, run: &crate::kernel::ports::ShellRun<'_>) -> RunOutcome {
         // shell 也记进同一份 calls：cwd / "shell" / 脚本；超时与围栏看专门的 ShellRunner。
         self.calls.lock().expect("锁").push((
             run.fence.cwd.clone(),
             "shell".to_string(),
             run.script.to_string(),
         ));
-        ToolOutcome {
+        RunOutcome {
             ok: self.ok,
             output: self.out.clone(),
         }
@@ -468,11 +472,12 @@ impl ProcessRunner for ShellRunner {
         _env: &[(String, String)],
         _path: Option<&std::ffi::OsStr>,
         _ask: Option<&dyn crate::kernel::ports::AskUser>,
-    ) -> ToolOutcome {
+        _gate: Option<&dyn crate::kernel::ports::FenceGate>,
+    ) -> RunOutcome {
         panic!("这个替身只该跑 shell");
     }
 
-    fn run_shell(&self, run: &crate::kernel::ports::ShellRun<'_>) -> ToolOutcome {
+    fn run_shell(&self, run: &crate::kernel::ports::ShellRun<'_>) -> RunOutcome {
         self.calls.lock().expect("锁").push(ShellRecord {
             fence: run.fence.clone(),
             script: run.script.to_string(),
@@ -483,7 +488,7 @@ impl ProcessRunner for ShellRunner {
                 .unwrap_or(false),
             path: run.path.map(|p| p.to_os_string()),
         });
-        ToolOutcome {
+        RunOutcome {
             ok: self.ok,
             output: self.out.clone(),
         }
@@ -521,21 +526,22 @@ impl ProcessRunner for ParallelRunner {
         _env: &[(String, String)],
         _path: Option<&std::ffi::OsStr>,
         _ask: Option<&dyn crate::kernel::ports::AskUser>,
-    ) -> ToolOutcome {
+        _gate: Option<&dyn crate::kernel::ports::FenceGate>,
+    ) -> RunOutcome {
         let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
         self.peak.fetch_max(now, Ordering::SeqCst);
         if self.delay_ms > 0 {
             std::thread::sleep(Duration::from_millis(self.delay_ms));
         }
         self.active.fetch_sub(1, Ordering::SeqCst);
-        ToolOutcome {
+        RunOutcome {
             ok: true,
             output: format!("{} 跑完了 {}", command, args_json),
         }
     }
 
-    fn run_shell(&self, run: &crate::kernel::ports::ShellRun<'_>) -> ToolOutcome {
-        ToolOutcome {
+    fn run_shell(&self, run: &crate::kernel::ports::ShellRun<'_>) -> RunOutcome {
+        RunOutcome {
             ok: true,
             output: format!("shell 跑完了 {}", run.script),
         }
@@ -570,10 +576,11 @@ impl ProcessRunner for AskingRunner {
         _env: &[(String, String)],
         _path: Option<&std::ffi::OsStr>,
         ask: Option<&dyn crate::kernel::ports::AskUser>,
-    ) -> ToolOutcome {
+        _gate: Option<&dyn crate::kernel::ports::FenceGate>,
+    ) -> RunOutcome {
         let Some(ask) = ask else {
             // 没有可回答的前端：没有可点的选项 = 不执行（fail-closed）。
-            return ToolOutcome {
+            return RunOutcome {
                 ok: false,
                 output: "这一趟没有可回答的前端：这次调用没有执行".to_string(),
             };
@@ -586,11 +593,11 @@ impl ProcessRunner for AskingRunner {
             detail: "模块目录（C:/mods/a）授不上：写 DACL 失败（错误码 5）".to_string(),
             options: vec![
                 (
-                    crate::kernel::domain::fence::OPT_FENCE_UNFENCED.to_string(),
+                    crate::capabilities::tools::domain::fence::OPT_FENCE_UNFENCED.to_string(),
                     "本轮无围栏跑一次".to_string(),
                 ),
                 (
-                    crate::kernel::domain::fence::OPT_FENCE_ABORT.to_string(),
+                    crate::capabilities::tools::domain::fence::OPT_FENCE_ABORT.to_string(),
                     "放弃这次调用".to_string(),
                 ),
             ],
@@ -601,7 +608,7 @@ impl ProcessRunner for AskingRunner {
             .expect("锁")
             .push(request.options.iter().map(|(id, _)| id.clone()).collect());
         if ask.ask(&request).decided() != Some(self.allow.as_str()) {
-            return ToolOutcome {
+            return RunOutcome {
                 ok: false,
                 output: "用户没有放行这次调用：它没有执行".to_string(),
             };
@@ -611,14 +618,14 @@ impl ProcessRunner for AskingRunner {
             command.to_string(),
             args_json.to_string(),
         ));
-        ToolOutcome {
+        RunOutcome {
             ok: true,
             output: "按你的裁决无围栏跑了一次".to_string(),
         }
     }
 
-    fn run_shell(&self, _run: &crate::kernel::ports::ShellRun<'_>) -> ToolOutcome {
-        ToolOutcome {
+    fn run_shell(&self, _run: &crate::kernel::ports::ShellRun<'_>) -> RunOutcome {
+        RunOutcome {
             ok: true,
             output: "shell 按你的裁决跑了一次".to_string(),
         }

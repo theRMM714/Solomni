@@ -1,6 +1,6 @@
-# kernel（机制型业务）
+# kernel（地基库）
 
-> 定位：没有领域语义的机制；依赖图最底层。
+> 定位：没有领域语义的机制库；不是层，是依赖图最底层的地基。
 > 效力：规范｜核对：2026-11-09｜依据：`src/kernel/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九，测试规范见 [TESTING.md](../../TESTING.md)。
 
@@ -8,17 +8,17 @@
 
 - 管：运行日志端口、宿主探测端口、**提问端口**（请用户裁决）。
 - 管：生成中作业的取消表。
-- 管：跨业务共享的**事实类型**与路径的对外书写形式。
-- 管：**外部进程执行**——一次性的 `ProcessRunner` 与长驻的 `SessionHost`。
+- 管：跨层共享的**形状**（DTO，在 `contracts`）与路径的对外书写形式。
+- 管：**外部进程执行**——一次性的 `ProcessRunner` 与长驻的 `SessionHost`；围栏裁决经 `FenceGate` 原样转交，机制不解释裁决的业务变体。
 - 管：**长驻子进程的账与回收**（`procs`）。
 - 管：**围栏机制**（`confine`）——可达范围、出站网络、进程树、平台实现与 Windows 授权台账。
-- 不管：**不认识任何能力 / 呈现层 / 入口层**。
-- 不管：不放有领域语义的类型——它不需要知道什么是回合、回复、工具执行。
+- 不管：**不认识任何能力 / 呈现层 / 根**。
+- 不管：不解释共享形状的业务语义——它不需要知道什么是回合、回复、工具执行。
 - 不管：**不决定**可达范围（策略由调用方派生后传入）。
 
 ## 入站契约与状态归属
 
-- 入站面：`api`（`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask` / `AskOutcome` / `FenceSpec` / `DEFAULT_LLM_TIMEOUT_SECS` / `valid_capability` / `slash` / `JobRegistry`）、`ports`（`Log`、`HostProbe`、`ToolHandler`、`AskUser`、`PathCodec`、`ProcessRunner`、`SessionHost`、`ProcessTexts`、`FenceHost`——R12 的例外：全项目共享）、`domain`（事实类型、路径书写、取消表、围栏描述符）、`detail`（`file_log`、`host_probe`、`outbound`、`unpack`、`process`、`procs`、`session`、`confine`）。
+- 入站面：`api`（`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask` / `AskOutcome` / `RunOutcome` / `FenceSpec` / `FencePart` / `FenceBlocked` / `DEFAULT_LLM_TIMEOUT_SECS` / `valid_capability` / `slash` / `JobRegistry`）、`ports`（`Log`、`HostProbe`、`ToolHandler`、`AskUser`、`PathCodec`、`ProcessRunner`、`SessionHost`、`ProcessTexts`、`FenceHost`、`FenceGate`——R12 的例外：全项目共享）、`contracts`（共享形状、围栏描述符、执行回执）、`domain`（路径书写、取消表、沙箱模式）、`detail`（`file_log`、`host_probe`、`outbound`、`unpack`、`process`、`procs`、`session`、`confine`）。
 - `AskUser` 是「需要用户裁决的机制请用户裁决」的**唯一**入口（`src/kernel/ports.rs`），工具执行层与围栏用它。
   - 形状：`ask(问题) -> 选项 id`，**阻塞**。
   - `halt(为什么)` = 停会话 + 落警告；调用方只在有可回答前端时用它，没有前端按 fail-closed 收场。
@@ -32,7 +32,7 @@
 
 ## 一、围栏落点：必要与可选
 
-- 授权（写目录 ACL）只有 Windows 的容器围栏需要：外层进程一次性把「可达范围」逐条授给容器身份，落点清单由 `grant_targets` 给出（叶子 + 直接父目录的只读属性）。**必要 / 可选的判据只有一处**：`src/kernel/domain/fence.rs` 的 `FencePart::necessary`（枚举里 `AuthorizedRead` 与 `Parent` 两条就是可选的）。
+- 授权（写目录 ACL）只有 Windows 的容器围栏需要：外层进程一次性把「可达范围」逐条授给容器身份，落点清单由 `grant_targets` 给出（叶子 + 直接父目录的只读属性）。**必要 / 可选的判据只有一处**：`src/kernel/contracts/fence.rs` 的 `FencePart::necessary`（枚举里 `AuthorizedRead` 与 `Parent` 两条就是可选的）。
 - 必要（缺了这次命令在容器里起不来，或这次执行根本做不了该做的事）：
 
 | 落点 | 缺了会怎样 |
@@ -49,18 +49,18 @@
   - 不存在的落点（没有 `userdata/` 的模块、派生与执行之间的竞态）：跳过，不进结论。
 - 行为（`prepare_fence` → `FencePrep` → `ProcTools`）：
   - **预检失败不写**：解释器根不可授权时 `prepare_fence` 直接给出必要落点缺失，不产生「写一半 / 回滚」的状态；回执只写真身路径。
-  - **必要落点授不上：不许降级**。经统一裁决通道（见 [session-model.md](../session/session-model.md) 的「请用户裁决」）推一条消息：哪一环、哪个目录、缺什么前提、怎么补。
+  - **必要落点授不上：不许降级**。工具层的围栏裁决（`src/capabilities/tools/service/fence.rs` 的 `ToolFenceGate`）经统一裁决通道（见 [session-model.md](../session/session-model.md) 的「请用户裁决」）推一条消息：哪一环、哪个目录、缺什么前提、怎么补。
     - 两条选项：`fence_unfenced_once`（本轮无围栏跑一次——回执与 stderr 都**如实标为无围栏**）/ `fence_abort`（放弃这次调用）。
     - 这一问声明「没人答就当我选了放弃」（`on_unanswered` = `fence_abort`）。
-    - 用户拒绝、没人答、用户按停止：一律**不执行**（fail-closed，`src/kernel/detail/confine/mod.rs`）。
+    - 用户拒绝、没人答、用户按停止：一律**不执行**（fail-closed，`src/capabilities/tools/service/fence.rs`）。
     - 回执把「用户拒绝」与「没人答」分开写清楚。
-  - **构不出可用选项**时**不发起裁决**（契约禁止置灰，`src/kernel/detail/confine/mod.rs`）：有可回答的前端就**停掉这个会话 + 落一条警告**，没有前端只如实拒绝这次调用；停过一次之后不再推卡。
+  - **构不出可用选项**时**不发起裁决**（契约禁止置灰，`src/capabilities/tools/service/fence.rs`）：有可回答的前端就**停掉这个会话 + 落一条警告**，没有前端只如实拒绝这次调用；停过一次之后不再推卡。
   - **可选落点授不上只记事实**：留一条 stderr 脚印，不牵动这次执行。
   - **三类根（仅 Windows）**：① **可信执行基座**——产品内工具链（`.tools/`）与运行包（`runtimes/<包>`）是只读二进制、不携带任何 scope 信息，一次性授给 `ALL APPLICATION PACKAGES`（与系统解释器目录同路），**不进按 reach 的容器身份**；② **受保护数据 / 代码**——私有沙箱、共享区、模块目录、模块 `userdata/`、用户授权只读根，按 reach 授给容器 SID；③ 系统基线（`C:\Windows` 等）。把工具链放进 reach 会让同一份 16k 文件按每个 scope 组合各授一次（本机实测 56s/次），属于类别错误。
   - **容器临时目录先建**（仅 Windows）：`prepare_fence` 在授权前建好 `<私有沙箱>/Packages/<容器名>/AC/Temp`——AppContainer 的 `GetTempPath2` **不读 TMP/TEMP**，编译器这类程序缺了它直接 abort（`Cannot create temporary file`）；目录在 `rw` 之下，递归 ACE 覆盖它，不单列一条授权。`private` 为空时跳过并记一条事实。
   - **未授权档位不是这条路**（仅 Windows）：用户没开 `sandbox.policy.windows.write_acl` 时外层根本不写权限项，容器围栏不装；若策略要求强制则拒绝，否则按无围栏执行并在启动报告标出。Linux / macOS 没有外层授权这一步，围栏照常装。
   - **启动门（组合根）**：默认 CLI 与 `-webUI` 都先判 `require` vs 本次实际，并把「未授权」与「本机能力缺失」分开报；未满足时只能本次降级 / 重设 / 退出（`src/main.rs`）。没有可回答的前端、或 `on_unavailable=refuse` 且不重设 = 退出，不会启动前端。首次启动（没有 `.home/settings.yaml`）在 Windows 先问一次是否授权写 ACL；选否不写盘、进入启动门。`require` + `write_acl=false` 的矛盾配置在加载 / 保存时即拒绝，不会进入门。
-  - **回执文案由进程机制自己的代码返回**：`src/kernel/detail/process.rs` 的 `CodeProcessTexts`（围栏拒绝 / 放行、超时、stderr、截断）；`ProcessTexts` 只是窄端口，生产实现与机制同文件。
+  - **回执文案分两处**：超时、stderr、截断等机制文案由 `src/kernel/detail/process.rs` 的 `CodeProcessTexts` 返回；围栏拒绝 / 放行等业务文案由 `src/capabilities/tools/service/fence.rs` 的 `ToolFenceGate` 生成，kernel 只把裁决结果原样拼进回执。
   - **围栏里失败的统一说明**：工具在围栏里非零退出时，守门进程补一条**不分语言**的话（可达范围 + 范围外被围栏拒绝）；成功不打扰。
 - 平台：只有 Windows 有「外层授权写 ACL」这一步；Linux 的 Landlock 与 macOS 的 seatbelt 在守门进程里自足，那里没有 `prepare_fence`（不是存在但空转）。三个平台各自的强制项与降级条件见「二、工具进程与守门协议」。
 - **启动对账只回收归属明确已死的条目**：`reconcile` 走台账、**不调用** `sweep_orphan_aces` / `sweep_profiles`（那两条无归属、会误伤在跑实例）；孤儿清扫只在用户手动的 `--fence-clean`。台账之外的本程序 profile 会以「只报告、不自动删」列出来（没有归属证明，删了会误伤在跑实例），处置入口同样是 `--fence-clean`。
@@ -79,7 +79,7 @@
   - **围栏由本次权限 reach 派生**（策略在 `src/capabilities/tools/domain/fence.rs`）：`FenceSpec::for_call` 只把 granted 的 private / shared-read / module-read / module-write / host-read / network 放进 rw / ro_tree / ro / net；shared-write 永不进 rw，module-write 只给指定模块自己的 userdata。`for_session` 只作为**会话 base**（提供主机只读根与全局断网事实）再派生按次围栏，不用于撤权。
   - **shell 的一次执行**：`run_shell` 走同一个守门进程；`timeout_secs` 是本次的（不沿用模块工具的 30 秒），到点或取消旗置位都杀整棵树；输出 head+tail（约 4k 开头 + 约 12k 结尾，按完整行取整；单行超长时按字符切），回执末尾另带 cwd 与本次耗时（由工具层在守门进程给出 shell 收尾行后追加；参数拒绝 / 启动失败不追加）；sandbox / external 都 `require_fs + require_net + allow_degraded=false`，装不上拒绝；Windows 的容器身份按 `会话 + agent + 受保护根集合` 派生（同一 reach 的调用复用 SID 与 ACL；不同 scope 根集合不同 → 不同 SID），授权按会话持有、会话改配 / 删除时回收；工具链与运行包是基础工具链基线，不参与按 reach 授权。
   - **VM guest 的 per-call 断网**：guest helper 读策略里的 `net`，false 时在子进程前 `unshare(CLONE_NEWNET)`；失败以 111 fail-closed，不静默降级。helper 同时读 `timeout_secs` 并按它杀树；guest 输出按 `GuestRun.output_limit` 只留开头或开头 + 结尾。
-  - 收尾：stdout / stderr 分别读；模块工具超时 30 秒（`ProcTools::timeout`），shell 用本次 `timeout_secs`；到时连根杀树；输出上限 16000 字符（模块只留开头，shell 开头 + 结尾；shell 的截断按完整行取整，单行超长时按字符切）。超时、截断、围栏失败的文案经 `ProcessTexts` 注入，机制不硬编码。
+  - 收尾：stdout / stderr 分别读；模块工具超时 30 秒（`ProcTools::timeout`），shell 用本次 `timeout_secs`；到时连根杀树；输出上限 16000 字符（模块只留开头，shell 开头 + 结尾；shell 的截断按完整行取整，单行超长时按字符切）。超时、截断、机制失败的文案经 `ProcessTexts` 注入；围栏裁决的文案归工具层，机制不硬编码。
   - 围栏装不上（本机不支持 / 容器起不来）：命中 `require_fs` / `require_net` 且未同意降级时，守门进程以 `FENCE_FAILED` **拒绝执行**；已同意降级才如实降级继续。Linux 的文件系统与网络两项**独立**判定，一项装不上不影响另一项。能力等级已在启动报告里说明。
   - Windows 外层未授权（`sandbox.policy.windows.write_acl=false`）：容器不装；启动门要求强制时只能本次降级 / 重设 / 退出（`src/main.rs`），否则按无围栏执行；全局网络开关不生效于容器，启动报告的「本次实际」已标出。
   - Windows 未授权时段先自检（`confine::verify`）：`EnvUnavailable` = 本机不支持，降级照跑；`Broken` = 自检说机制有效却装不上（我们写错了），**拒绝执行**，不按无围栏跑。
@@ -139,8 +139,8 @@
 
 ## 改动本单元时必须同步
 
-- 共享事实类型（R6）一改，所有使用者同改；路径拼接规则见 `ARCHITECTURE.md` §八（禁止把分隔符写进字符串）。
-- 平台专属代码本地不编译——`FenceSpec` 字面量必须写全字段（跨平台字面量门禁，`src/kernel/domain/fence.rs`）；改围栏 → `tests/<平台>/` 探针。
+- 共享形状（R6）一改，所有使用者同改；路径拼接规则见 `ARCHITECTURE.md` §八（禁止把分隔符写进字符串）。
+- 平台专属代码本地不编译——`FenceSpec` 字面量必须写全字段（跨平台字面量门禁，`src/kernel/contracts/fence.rs`）；改围栏 → `tests/<平台>/` 探针。
 - 围栏的写后核对、回滚与台账在 `src/kernel/detail/confine/windows/`：改落点形状（`GrantTarget`）或台账字段时，`prepare_fence` / `release_fence` / `clean` / `sweep_orphan_aces` 与按条处置（`catalog` / `restore_one` / `revoke_grant` / `remove_profile_one`）要一起改。
 - 改**归属字段**（含会话租约 `Sandbox.session` → `FenceSpec.lease` → `Owner.lease`）或启动对账时，`src/kernel/detail/confine/windows/record.rs` 的 `current_owner` / `owners_state` / `reconcile` / `release_fence` / `clean` 与入口 `--fence-reconcile` 要一起改；启动对账的接线在 `src/main.rs`。
 - ACE 的读法只有一处：`src/kernel/detail/confine/windows/acl.rs` 的 `ace_parts` 按 ACE 头算 SID 偏移（标准 ACE 与回调 ACE 从第 8 字节起，对象 ACE 再加 Flags(4) 与在场的 GUID）。改覆盖的 ACE 类型或身份形状时，写后核对、诊断转储与 `src/kernel/detail/confine/windows/tests.rs` 的对象 ACE 往返探针要一起看。

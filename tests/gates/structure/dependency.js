@@ -51,7 +51,7 @@ function direction(root) {
     // 前端（交付机制）：各渠道一个顶层目录；不是业务能力。
     if (r.startsWith("src/presentation/")) return "presentation";
     // 程序入口层：组合根 + 机器可读探针 + 围栏守门进程 + 入口层共用机制。它依赖所有人，任何人都不许依赖它。
-    if (r === "src/main.rs" || r.startsWith("src/entry/") || r.startsWith("src/diagnostics/") || r.startsWith("src/guard/")) return "entry";
+    if (r === "src/main.rs" || r.startsWith("src/entry/") || r.startsWith("src/guard/")) return "entry";
     if (r.startsWith("src/kernel/")) return "kernel";
     if (r.startsWith("src/capabilities/")) return "capabilities";
     if (r.startsWith("src/tests/")) return "tests";

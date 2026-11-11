@@ -516,7 +516,7 @@ fn call_grant_checks_scope_and_reach() {
 fn tool_layer_ask_rides_the_decision_channel() {
     use crate::capabilities::conductor::api::{ConductorHandle, Ops, Output};
     use crate::capabilities::session::api::SessionEvent;
-    use crate::kernel::domain::fence::{OPT_FENCE_ABORT, OPT_FENCE_UNFENCED};
+    use crate::capabilities::tools::domain::fence::{OPT_FENCE_ABORT, OPT_FENCE_UNFENCED};
     use crate::tests::builders::AskingRunner;
     use crate::tests::doubles::{abs, core_with_runner, decl, gw, module_of};
     use crate::tests::prelude::*;

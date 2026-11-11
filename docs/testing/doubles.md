@@ -164,7 +164,7 @@
 
 - **持有者（R12）**：`ModuleSource` / `ModuleStateStore` 只由 `modules::service.rs` 持有（别的能力经 `modules::api::ModulesOps` 要清单与启停有效值）；`PackageSource` 只由 `packages::service.rs` 持有（别的能力经 `packages::api::Packages` 要运行包库）；`Workdirs` / `WorkStore` 只由 `workspace::service.rs` 持有（别的能力经 `workspace::api::Workspace` 要目录与版本库用例）；`SourceDigest` / `BuildStates` / `BuildCache` 只由 `builds::service.rs` 持有（别的能力经 `builds::api::Builds` 要"确保产物可用"）；`SpaceSurvey` / `SpaceReclaim` / `GuestLiveness` 只由 `storage::service.rs` 持有（别的能力经 `storage::api::Storage` 要空间报告、headroom 与清理）；`Fetcher` / `HostFs` / `Ledger` / `Installers` / `GuestImage` / `Procs` 只由 `provision::service.rs` 持有（别的能力经 `provision::api::Provision` 要状态、装依赖、起取消）。
 
-- `Log`、`PathCodec`、`ProcessTexts`、`ToolHandler`、`HostProbe`、`AskUser`、`ProcessRunner`、`SessionHost` / `Session` 与 `FenceHost` 是**不在某个能力 `ports.rs`** 的端口：它们在 `src/kernel/ports.rs`（机制型业务单元 `kernel`，无领域语义，R12 的例外）。
+- `Log`、`PathCodec`、`ProcessTexts`、`ToolHandler`、`HostProbe`、`AskUser`、`ProcessRunner`、`SessionHost` / `Session` 与 `FenceHost` 是**不在某个能力 `ports.rs`** 的端口：它们在 `src/kernel/ports.rs`（地基库单元 `kernel`，无领域语义，R12 的例外）。
 - 见 [../kernel/unit-map.md](../kernel/unit-map.md)。
 
 - "已验收"指该端口在 `src/tests/` 的契约测试里有成功、失败、空 / 边界与交互记录的断言；真实实现另见 `detail.rs`、`tests/<平台>/` 与 `tests/cross-platform/e2e/`。

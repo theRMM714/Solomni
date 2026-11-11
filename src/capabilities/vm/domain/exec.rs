@@ -1,7 +1,7 @@
 //! 目的：执行档位与执行计划的纯逻辑——档位诊断、计划派生、承载判定与就绪检测。
 //! 管：ExecSpec 的档位诊断、ExecPlan 的装载顺序、本机能否承载虚拟机档。
 //! 不管：包库与选包（packages）、目录遍历与 guest 启动（在 detail/ 与 guest 后端）、会话档案（session）、实际的工具进程执行（tools）。
-//! 联动：契约见 docs/vm/README.md 与 RUNTIME_SPEC.md；ExecSpec 是 kernel 的共享事实；被 conductor 与呈现层经 api.rs 消费。
+//! 联动：契约见 docs/vm/README.md 与 RUNTIME_SPEC.md；ExecSpec 是 kernel 的共享形状；被 conductor 与呈现层经 api.rs 消费。
 
 use crate::capabilities::modules::api::Module;
 use crate::capabilities::packages::api::PlannedPackage;

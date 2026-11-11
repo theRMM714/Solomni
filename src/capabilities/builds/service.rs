@@ -1,6 +1,6 @@
 //! 目的：构建能力的用例实现——按模块声明在目标环境把产物编出来，并复验入口。
 //! 管：本机档（宿主 + 产品围栏）与虚拟机档（guest + 编译包）两条构建路径、构建期能力选包、缓存命中、编完复验。
-//! 不管：源指纹、构建状态与缓存卷的机制（`ports.rs` 定接口，`detail/` 实现）、包库与引擎的机制（`packages` / `vm` / `provision`）、CLI 文案（`diagnostics`）。
+//! 不管：源指纹、构建状态与缓存卷的机制（`ports.rs` 定接口，`detail/` 实现）、包库与引擎的机制（`packages` / `vm` / `provision`）、CLI 文案（`entry::probes`）。
 //! 联动：`ProcessRunner` / `HostProbe` / `Log` 是 kernel 的共享机制；`SourceDigest` / `BuildStates` / `BuildCache` 是本能力的端口，实现只在组合根注入。
 
 use crate::capabilities::builds::api::{Builds, Built, Target};
@@ -16,7 +16,7 @@ use crate::capabilities::vm::api::{
     self as vm, ExecPlan, GuestOs, GuestRun, GuestSpec, MissingEntry, Vm,
 };
 use crate::kernel::api::{FenceSpec, Tier};
-use crate::kernel::ports::{FenceHost, HostProbe, Log, ProcessRunner};
+use crate::kernel::ports::{FenceGate, FenceHost, HostProbe, Log, ProcessRunner};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -32,6 +32,8 @@ pub struct BuildsService {
     states: Arc<dyn BuildStates + Send + Sync>,
     cache: Arc<dyn BuildCache + Send + Sync>,
     runner: Arc<dyn ProcessRunner + Send + Sync>,
+    /// 宿主执行围栏授不上时的裁决（与工具层同一条路）：构建没有可回答的前端，按默认项 fail-closed。
+    gate: Arc<dyn FenceGate + Send + Sync>,
     fence: Arc<dyn FenceHost + Send + Sync>,
     probe: Arc<dyn HostProbe + Send + Sync>,
     log: Arc<dyn Log + Send + Sync>,
@@ -41,7 +43,7 @@ pub struct BuildsService {
 
 impl BuildsService {
     /// 目的：组合根专用——注入包库、虚拟机、补齐、三个本能力端口、执行器与工具链安装根。
-    /// 参数：`root` = 产品根；`packages` / `vm` / `provision` = 各能力的用例面；`digest` / `states` / `cache` = 源指纹、构建状态、缓存卷的适配器；`runner` = 外部进程执行；`probe` = 宿主事实；`log` = 运行日志；`toolchain_roots` = 基础工具链安装根。
+    /// 参数：`root` = 产品根；`packages` / `vm` / `provision` = 各能力的用例面；`digest` / `states` / `cache` = 源指纹、构建状态、缓存卷的适配器；`runner` = 外部进程执行；`gate` = 围栏裁决；`probe` = 宿主事实；`log` = 运行日志；`toolchain_roots` = 基础工具链安装根。
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         root: PathBuf,
@@ -53,6 +55,7 @@ impl BuildsService {
         states: Arc<dyn BuildStates + Send + Sync>,
         cache: Arc<dyn BuildCache + Send + Sync>,
         runner: Arc<dyn ProcessRunner + Send + Sync>,
+        gate: Arc<dyn FenceGate + Send + Sync>,
         fence: Arc<dyn FenceHost + Send + Sync>,
         probe: Arc<dyn HostProbe + Send + Sync>,
         log: Arc<dyn Log + Send + Sync>,
@@ -68,6 +71,7 @@ impl BuildsService {
             states,
             cache,
             runner,
+            gate,
             fence,
             probe,
             log,
@@ -243,9 +247,15 @@ impl BuildsService {
                 module.manifest.id, net
             ),
         );
-        let out = self
-            .runner
-            .run(&fence, &decl.command, "{}", &[], plan.path.as_deref(), None);
+        let out = self.runner.run(
+            &fence,
+            &decl.command,
+            "{}",
+            &[],
+            plan.path.as_deref(),
+            None,
+            Some(self.gate.as_ref()),
+        );
         // 按次收尾：撤 ACE、删按次 profile 与临时目录；失败如实记录（残留由 reconcile 按死归属回收）。
         if let Err(e) = self.fence.release_call(&fence) {
             self.log

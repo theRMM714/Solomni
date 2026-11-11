@@ -9,7 +9,7 @@
 ## 入站契约与状态归属
 - 入站面：`api::Vm`（`guest_start` / `guest_run` / `guest_wait_agent` / `guest_stop` / `guest_leases` / `guest_diagnose`）+ 档位与计划的纯函数（`plan` / `tier_readiness` / `tier_refusal` / `vm_requirements` / `vm_capability` / `capability_refusal` / …）。
 - 出站端口 `VmEngine` / `ShareBackend` 只由 `service.rs` 持有（R12）；`GuestVm` / `GuestChannel` 由引擎在 boot 时交出。
-- `ExecSpec` 是共享事实（在 `kernel`），本能力只读它；包库与选包在 `packages`。
+- `ExecSpec` 是共享形状（在 `kernel`），本能力只读它；包库与选包在 `packages`。
 - 状态归属：虚拟根在项目内 `.vm/guest/<名>`；可写层在 `.vm/overlays/<租约>.qcow2`；构建缓存卷在 `.vm/build-cache/`（归 `builds`）；guest 租约按主会话树。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）

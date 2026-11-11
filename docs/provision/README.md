@@ -22,7 +22,7 @@
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`vm`（`guest-runtime` 的运行期编排要起 guest：`guest_start` / `guest_wait_agent` / `guest_run` / `guest_stop`）；另经 kernel 的机制 `outbound` / `unpack`。
-- 谁在用我：`conductor`（`Ops` 的 `provision` 字段与 `GuestBase` 等类型）、`presentation`（setup 路由）、`src/diagnostics/`（`--provision`）。
+- 谁在用我：`conductor`（`Ops` 的 `provision` 字段与 `GuestBase` 等类型）、`presentation`（setup 路由）、`src/entry/probes/`（`--provision`）。
 
 ## 一、安装方式（清单 `kind`）
 
@@ -110,7 +110,7 @@
 - **进度只有这一条通道**：`seq` + `lines`（留最近 200 行）——不另存「当前步骤」摘要，界面要看当前步骤就取最后一行。
 - **要装什么由后端定**：`status` 的 `pending` 列出还没在场的条目 id；`ensure` 不点名时只补这些（执行核心不跳过在位项，不滤就会把已装的重下一遍、重解一遍），都装好了直接回 `{ok,deps:[]}` 且不起作业。**`--ensure=<kind>` 是组别名**（CLI 与 Web 的「补齐虚拟机依赖」同语义）：只补该 kind 的缺项，全齐时打印 `<kind>：没有缺项，无需补齐` 并退出 0。显式点名 = 逐条失败硬报（不是全量补齐那种「跳过继续」）。
 - 呈现层：**Web 的「补齐虚拟机依赖」弹层**——配置面板与创建向导在虚拟机档不可用、或选中的虚拟根未装齐时给这个动作：先看清单与体积、再确认下载、然后按 `seq` 长轮询进度、最后如实说清生效范围。
-- 无界面时的等价路径：CLI `--provision`（`src/diagnostics/`，隐藏模式，`--ensure[=id,…] --yes` 才真下载）。路由表见 [docs/presentation/contracts.md](../presentation/contracts.md)。
+- 无界面时的等价路径：CLI `--provision`（`src/entry/probes/`，隐藏模式，`--ensure[=id,…] --yes` 才真下载）。路由表见 [docs/presentation/contracts.md](../presentation/contracts.md)。
 
 ## 改动本单元时必须同步
 

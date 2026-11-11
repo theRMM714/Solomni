@@ -1,7 +1,7 @@
 //! 目的：构建能力的入站面——目标环境与"确保产物可用"的唯一契约。
 //! 管：`Target`（本机 / 某个虚拟根）、`Built`（一次确保的结果）、`Builds` 用例 trait 与未接入的 `NoBuilds`。
 //! 不管：怎么选包、怎么装围栏、怎么起 guest（在 `service.rs` 与各能力的 api）。
-//! 联动：`conductor` 在创建会话前调它补编；`diagnostics --build` 是它的薄壳；契约见 docs/builds/README.md。
+//! 联动：`conductor` 在创建会话前调它补编；`--build` 探针（`entry::probes`）是它的薄壳；契约见 docs/builds/README.md。
 
 use crate::capabilities::modules::api::Module;
 

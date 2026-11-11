@@ -26,14 +26,14 @@ fn work_gc_cli_dry_run_then_applies() {
     let keep = content_hash(b"keep");
     assert!(store_path.join("objects").join(&orphan).exists());
 
-    let dry = crate::diagnostics::work_gc(&root, &["--work-gc".to_string(), "w".to_string()], 0);
+    let dry = crate::entry::probes::work_gc(&root, &["--work-gc".to_string(), "w".to_string()], 0);
     assert_eq!(dry, 0);
     assert!(
         store_path.join("objects").join(&orphan).exists(),
         "dry-run 不能删"
     );
 
-    let applied = crate::diagnostics::work_gc(
+    let applied = crate::entry::probes::work_gc(
         &root,
         &[
             "--work-gc".to_string(),
@@ -68,7 +68,7 @@ pub(crate) fn doctor_reports_the_recorded_processes() {
         created: None,
         guard_note: Some("把子进程绑进作业对象失败".to_string()),
     });
-    let doc = crate::diagnostics::doctor_json(&root);
+    let doc = crate::entry::probes::doctor::doctor_json(&root);
     let procs = doc
         .get("processes")
         .and_then(|p| p.as_array())
@@ -142,7 +142,7 @@ fn startup_fence_report_and_doctor_share_the_same_capability() {
         std::sync::Arc::new(crate::kernel::api::SandboxMode::permissive()),
     );
     let root = crate::tests::scratch("fence-report");
-    let doc = crate::diagnostics::doctor_json_with(&root, cap.clone());
+    let doc = crate::entry::probes::doctor::doctor_json_with(&root, cap.clone());
     let fence = doc.get("fence").expect("--doctor 要报围栏事实");
     assert_eq!(
         fence.get("fs").and_then(|v| v.as_bool()),

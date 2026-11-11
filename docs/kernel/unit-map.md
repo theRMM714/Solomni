@@ -1,6 +1,6 @@
 # 单元地图 · kernel
 
-> 定位：kernel（机制型业务）逐文件职责的唯一权威；由 T0 结构审查与磁盘双向比对。
+> 定位：kernel（地基库）逐文件职责的唯一权威；由 T0 结构审查与磁盘双向比对。
 > 效力：契约｜核对：2026-11-04｜依据：`src/kernel/api.rs`
 
 > 本文是 **kernel** 逐文件职责的唯一权威；由 `node run-tests.js` 的 T0 结构审查与磁盘**双向比对**
@@ -12,11 +12,14 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/kernel/mod.rs` | 机制型业务的入口与公开面：`api` / `ports` / `domain` / `detail` 四个子模块的形状声明 |
-| `src/kernel/api.rs` | 机制型业务的对外面：共享事实（`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask` / 默认预算）与纯机制（`slash` 的对外写法、路径写法 `native` / `is_unc` / `unc_parts`、落点身份 `locus_of` / `place_contains` / `is_network_path`、生成中作业的取消表 `JobRegistry`）的重导出 |
-| `src/kernel/ports.rs` | 全项目共享的机制端口：`Log` / `PathCodec` / `ProcessTexts` / `AskUser` / `ToolHandler` / `HostProbe` / `ProcessRunner` / `SessionHost` / `FenceHost` 的 trait 定义与它们的纯数据形态（含 `ShellRun` 与 shell 收尾文案） |
-| `src/kernel/domain/types.rs` | 跨业务共享的事实类型（纯数据）：`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask` / `AskOutcome` 与默认预算、能力名文法 |
-| `src/kernel/domain/fence.rs` | 围栏描述符（`FenceSpec`）与落点判据（`FencePart`/`FenceBlocked`/`fence_ask`）：纯数据 |
+| `src/kernel/mod.rs` | 地基库的入口与公开面：`contracts` / `api` / `ports` / `domain` / `detail` 五个子模块的形状声明 |
+| `src/kernel/api.rs` | 地基库的对外面：共享形状（`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask` / `RunOutcome` / `FenceSpec` / `FencePart` / `FenceBlocked` / 默认预算）与纯机制（`slash` 的对外写法、路径写法 `native` / `is_unc` / `unc_parts`、落点身份 `locus_of` / `place_contains` / `is_network_path`、生成中作业的取消表 `JobRegistry`）的重导出 |
+| `src/kernel/ports.rs` | 全项目共享的机制端口：`Log` / `PathCodec` / `ProcessTexts` / `AskUser` / `ToolHandler` / `HostProbe` / `ProcessRunner` / `SessionHost` / `FenceHost` / `FenceGate` 的 trait 定义与它们的纯数据形态（含 `ShellRun` 的 `gate` 与 shell 收尾文案） |
+| `src/kernel/contracts/mod.rs` | 跨层共享形状的入口：`fence` / `run` / `types` 三个子模块声明 |
+| `src/kernel/contracts/types.rs` | 跨层共享的形状（纯数据）：`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask` / `AskOutcome` 与默认预算、能力名文法 |
+| `src/kernel/contracts/run.rs` | 宿主执行端口的中性回执 `RunOutcome`（跑没跑、输出是什么；不含业务语义） |
+| `src/kernel/contracts/fence.rs` | 围栏描述符（`FenceSpec` / `FenceRunPolicy`）与落点判据（`FencePart` / `FenceBlocked`）：纯数据 |
+| `src/kernel/domain/fence.rs` | 沙箱策略对机制的要求与本次模式（`SandboxRequirements` / `SandboxMode`）、按次租约生成：纯机制 |
 | `src/kernel/domain/path.rs` | 路径的对外书写形式：把路径统一写成 `/` 分隔的字符串（给提示词、回执与 JSON 用）；把 Windows 的 verbatim / UNC 写法还原成普通写法、拆出 UNC 的 server / share，并给出落点身份 `Locus` 的键（纯逻辑） |
 | `src/kernel/domain/jobs.rs` | 生成中作业的取消表（`JobRegistry`）：同一会话每次生成各持一面旗，停止置位全部、摘旗按身份 |
 | `src/kernel/domain/receipt.rs` | host/guest 共用的 shell 回执装配（stdout + `[stderr]` 区 + head+tail 截断（按完整行取整）+ 状态行；词表来自 `ProcessTexts`） |

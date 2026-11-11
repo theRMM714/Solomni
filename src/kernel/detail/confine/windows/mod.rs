@@ -4,8 +4,8 @@
 //! 联动：授权与撤销由外层进程做（见 confine::prepare_fence），守门进程只按同一个名字派生同一个 SID；机制不可用时一律如实降级。
 
 use super::{shell_command, Capability, FencePrep, FenceVerdict, FENCE_FAILED};
+use crate::kernel::api::FencePart;
 use crate::kernel::api::FenceSpec;
-use crate::kernel::domain::fence::FencePart;
 use std::ffi::c_void;
 
 mod acl;

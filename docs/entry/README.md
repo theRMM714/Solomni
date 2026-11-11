@@ -1,14 +1,14 @@
-# entry（入口层）
+# entry（根：启动、组合根与探针）
 
-> 定位：组合根、机器可读探针、围栏守门进程与长驻子进程守门进程。
+> 定位：根——启动程序、组合根、机器可读探针、围栏守门进程与长驻子进程守门进程；依赖图最外层，不是业务层。
 > 效力：规范｜核对：2026-11-04｜依据：`src/main.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
 
-- 管：入口层共用机制——产品根规范化（`src/entry/root.rs`）与启动期基础工具链 PATH（`src/entry/toolchains.rs`）。
-- 管：组合根（`src/main.rs`）——new 出各适配器、装配各能力、跑启动对账、把入站能力面交给 CLI 或 Web。
-- 管：机器可读探针与隐藏模式（`src/diagnostics/mod.rs`）。
+- 管：根共用机制——产品根规范化（`src/entry/root.rs`）与启动期基础工具链 PATH（`src/entry/toolchains.rs`）。
+- 管：组合根（`src/main.rs`）——跑启动对账、把入站能力面交给 CLI 或 Web；适配器与能力面统一在 `src/entry/assembly.rs` 装配。
+- 管：机器可读探针与隐藏模式（`src/entry/probes/`）。
 - 管：两个守门模式（`src/guard/mod.rs`）——围栏 `--fence-run`、长驻子进程 `--proc-watchdog`，以及围栏台账的按条处置。
 - 不管：没有业务语义；依赖补齐的语义在 `provision` 能力，`--provision` 只是它的入口。
 - 不管：任何能力都不许依赖本单元（`run-tests.js` 的依赖方向门禁）。
@@ -80,7 +80,7 @@
 
 ## 改动本单元时必须同步
 
-- 新增端口 / 适配器 → 改 `src/main.rs` 装配；新增探针或隐藏模式 → 同步本页与 [docs/testing/execution-ci.md](../testing/execution-ci.md)。
+- 新增端口 / 适配器 → 改 `src/entry/assembly.rs` 装配；新增探针或隐藏模式 → 同步本页、`docs/entry/unit-map.md` 与 [docs/testing/execution-ci.md](../testing/execution-ci.md)。
 - 路由目录的机器比对在 `src/tests/routes.rs` ↔ [docs/presentation/contracts.md](../presentation/contracts.md)。
 - 启动对账或进程账字段一改 → 同步 [kernel 的「长驻子进程的账与回收」](../kernel/README.md) 与本页的呈现说明。
 - 测试缺口：本单元**不是业务能力**，没有独立的缺口账；缺口记在 `tests/gaps.yaml`；格式见 [docs/testing/gaps-acceptance.md](../testing/gaps-acceptance.md) 的「缺口账」。
