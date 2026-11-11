@@ -18,7 +18,7 @@
 
 ## 入站契约与状态归属
 
-- 入站面：`api`（`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask` / `AskOutcome` / `RunOutcome` / `FenceSpec` / `FencePart` / `FenceBlocked` / `DEFAULT_LLM_TIMEOUT_SECS` / `valid_capability` / `slash` / `JobRegistry`）、`ports`（`Log`、`HostProbe`、`ToolHandler`、`AskUser`、`PathCodec`、`ProcessRunner`、`SessionHost`、`ProcessTexts`、`FenceHost`、`FenceGate`——R12 的例外：全项目共享）、`contracts`（共享形状、围栏描述符、执行回执）、`domain`（路径书写、取消表、沙箱模式）、`detail`（`file_log`、`host_probe`、`outbound`、`unpack`、`process`、`procs`、`session`、`confine`）。
+- 入站面：`api`（`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask` / `AskOutcome` / `RunOutcome` / `FenceSpec` / `FencePart` / `FenceBlocked` / `DEFAULT_LLM_TIMEOUT_SECS` / `valid_capability` / `slash` / `JobRegistry`）、`ports`（`Log`、`HostProbe`、`ToolHandler`、`AskUser`、`PathCodec`、`ProcessRunner`、`SessionHost`、`ProcessTexts`、`FenceHost`、`FenceGate`——R12 的例外：全项目共享）、`contracts`（共享形状、围栏描述符、执行回执）、`domain`（路径书写、取消表、沙箱模式）、`detail`（`file_log`、`host_probe`、`outbound`、`unpack`、`process`、`procs`、`session`、`confine`：门面 + `job` / `ledger` / `paths` / `prep` / `texts`）。
 - `AskUser` 是「需要用户裁决的机制请用户裁决」的**唯一**入口（`src/kernel/ports.rs`），工具执行层与围栏用它。
   - 形状：`ask(问题) -> 选项 id`，**阻塞**。
   - `halt(为什么)` = 停会话 + 落警告；调用方只在有可回答前端时用它，没有前端按 fail-closed 收场。
