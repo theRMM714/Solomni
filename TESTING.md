@@ -10,7 +10,7 @@
 ## 一、测试的目的与硬原则
 
 - 测试要回答的是"当前实现是否满足可观察的行为契约"，不是"测试数量是否很多"或"代码覆盖率是否好看"；覆盖率在这里是风险下限与回归护栏，不是质量目标。
-- 风险下限按代码风险区判，不按测试层：产品代码 80%、平台/进程适配 60%、安全策略 100%（`tests/coverage-policy.json`、`tests/coverage.mjs`）。安全的行为矩阵必须 100%（`src/tests/permission.rs`、`src/kernel/detail/confine/tests.rs`）；OS 强制后端归平台桶，由三平台真机探针（`tests/<平台>/`）与突变审计（`tests/mutation-scope.json`）把关。E2E 不设行覆盖率，旅程清单必须全过（`tests/cross-platform/e2e/browser.cjs`）。
+- 风险下限按代码风险区判，不按测试层：产品代码 80%、平台/进程适配 60%、安全策略 100%；PR 新增 Rust 行 90%、安全变更行 100%（`tests/coverage-policy.json`、`tests/coverage.mjs`）。安全的行为矩阵必须 100%（`src/tests/permission.rs`、`src/kernel/detail/confine/tests.rs`）；OS 强制后端归平台桶，由三平台真机探针（`tests/<平台>/`）与突变审计（`tests/mutation-scope.json`）把关。E2E 不设行覆盖率，旅程清单必须全过（`tests/cross-platform/e2e/browser.cjs`）。
 
 - 测试记录事实：通过、失败、环境跳过、缺口必须分开（`run-tests.js`）。
 - 环境不允许执行不等于通过；必须记录 `env-skip` 与原因（`run-tests.js`）。

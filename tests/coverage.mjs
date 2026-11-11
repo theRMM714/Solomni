@@ -5,6 +5,7 @@
  * 用法：
  *   node tests/coverage.mjs --report target/coverage/coverage.txt [--json target/coverage/summary.json] [--check]
  *   node tests/coverage.mjs --collect [--check]     # 跑测试 + 插桩构建 + e2e + 报告
+ *   node tests/coverage.mjs --report ... --diff-base origin/main   # 加判变更行
  *
  * 为什么要剔除测试代码：内联 #[cfg(test)] 和 src/tests/** 本身就是测试，
  * 把它们算进产品行覆盖率只会让数字好看，不能说明产品行为被测到。
@@ -214,6 +215,79 @@ function print(result) {
   }
 }
 
+/** 变更行：git diff 的新侧行号，只取新增行（删除行没有可执行面）。 */
+function changedLines(base) {
+  const r = spawnSync("git", ["diff", "--unified=0", "--no-color", base + "...HEAD", "--", "*.rs"], {
+    cwd: ROOT, encoding: "utf8", maxBuffer: 16 * 1024 * 1024,
+  });
+  if (r.status !== 0) throw new Error("git diff " + base + "...HEAD 失败：\n" + (r.stderr || r.stdout));
+  const map = new Map();
+  let file = null;
+  let next = 0;
+  for (const line of r.stdout.split(/\r?\n/)) {
+    if (line.startsWith("+++ b/")) { file = line.slice(6); continue; }
+    if (line.startsWith("+++ /dev/null")) { file = null; continue; }
+    const h = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (h) { next = Number(h[1]); continue; }
+    if (!file) continue;
+    if (line.startsWith("+")) {
+      if (!map.has(file)) map.set(file, new Set());
+      map.get(file).add(next);
+      next++;
+    } else if (line.startsWith(" ")) {
+      next++;
+    }
+  }
+  return map;
+}
+
+/** 变更行覆盖：只看新增的 Rust 行；测试代码、seam 与无执行面的行不参与。 */
+export function diffCoverage(files, base, root = ROOT) {
+  const changed = changedLines(base);
+  const exclusions = exclusionMap();
+  const buckets = POLICY.buckets.map((b) => ({ ...b, re: b.globs.map(globToRe), covered: 0, total: 0 }));
+  for (const f of files) {
+    const rel = f.file;
+    if (isTestFile(rel)) continue;
+    const want = changed.get(rel);
+    if (!want || !want.size) continue;
+    const skip = exclusions.get(rel);
+    let mask = null;
+    try {
+      mask = testLineMask(fs.readFileSync(path.join(root, rel), "utf8"));
+    } catch {
+      mask = [];
+    }
+    for (const l of f.lines) {
+      if (!want.has(l.line) || mask[l.line - 1] || (skip && skip.has(l.line))) continue;
+      for (const b of buckets) {
+        if (!b.re.some((re) => re.test(rel))) continue;
+        b.total++;
+        if (l.count > 0) b.covered++;
+      }
+    }
+  }
+  for (const b of buckets) b.pct = b.total ? (100 * b.covered) / b.total : 100;
+  return { base, min: POLICY.changeLineMin || 90, buckets };
+}
+
+function printDiff(diff) {
+  console.log("[变更行] base=" + diff.base + "（新增 Rust 行；无执行面的行不计）");
+  if (!diff.buckets.some((b) => b.total)) {
+    console.log("  SKIP 没有可判定的 Rust 变更行");
+    return;
+  }
+  for (const b of diff.buckets) {
+    const min = b.min === 100 ? 100 : diff.min;
+    const ok = b.pct >= min;
+    console.log(
+      "  " + (ok ? "PASS" : "FAIL") + " " + b.id.padEnd(10) +
+      " " + b.pct.toFixed(2).padStart(6) + "% (min " + min + "%) " +
+      b.covered + "/" + b.total
+    );
+  }
+}
+
 function collect() {
   fs.mkdirSync(OUT_DIR, { recursive: true });
   const env = { ...process.env };
@@ -276,13 +350,18 @@ function collect() {
   const report = spawnSync("cargo", ["llvm-cov", "report", "--text", "--output-path", txt], { cwd: ROOT, env: covEnv, encoding: "utf8" });
   if (report.status !== 0) throw new Error("生成覆盖率报告失败：\n" + ((report.stdout || "") + (report.stderr || "")).slice(-4000));
 
-  const result = evaluate(parseReport(fs.readFileSync(txt, "utf8")));
+  const files = parseReport(fs.readFileSync(txt, "utf8"));
+  const result = evaluate(files);
+  const base = arg("--diff-base") || process.env.COVERAGE_DIFF_BASE || null;
+  if (base && base !== true) result.diff = diffCoverage(files, String(base));
   result.gates = { tests: testFailed ? "fail" : "pass", e2e: e2eFailed ? "fail" : "pass" };
   fs.writeFileSync(path.join(OUT_DIR, "summary.json"), JSON.stringify(result, null, 2));
   print(result);
+  if (result.diff) printDiff(result.diff);
   const thresholdBad = result.buckets.some((b) => b.pct < b.min);
-  if (thresholdBad || testFailed || e2eFailed) {
-    console.log("[覆盖率] 失败：阈值=" + (thresholdBad ? "未达标" : "达标") + "，测试=" + result.gates.tests + "，e2e=" + result.gates.e2e);
+  const diffBad = !!(result.diff && result.diff.buckets.some((b) => b.total && b.pct < (b.min === 100 ? 100 : result.diff.min)));
+  if (thresholdBad || diffBad || testFailed || e2eFailed) {
+    console.log("[覆盖率] 失败：阈值=" + (thresholdBad ? "未达标" : "达标") + "，变更行=" + (diffBad ? "未达标" : "达标") + "，测试=" + result.gates.tests + "，e2e=" + result.gates.e2e);
     return 1;
   }
   console.log("[覆盖率] 通过。报告：target/coverage/coverage.txt；摘要：target/coverage/summary.json");
@@ -292,10 +371,16 @@ function collect() {
 function main() {
   const reportPath = arg("--report");
   if (reportPath) {
-    const result = evaluate(parseReport(fs.readFileSync(String(reportPath), "utf8")));
+    const files = parseReport(fs.readFileSync(String(reportPath), "utf8"));
+    const result = evaluate(files);
+    const base = arg("--diff-base");
+    if (base && base !== true) result.diff = diffCoverage(files, String(base));
     print(result);
+    if (result.diff) printDiff(result.diff);
     if (arg("--json")) fs.writeFileSync(String(arg("--json")), JSON.stringify(result, null, 2));
-    return arg("--check") && result.buckets.some((b) => b.pct < b.min) ? 1 : 0;
+    const bad = result.buckets.some((b) => b.pct < b.min) ||
+      !!(result.diff && result.diff.buckets.some((b) => b.total && b.pct < (b.min === 100 ? 100 : result.diff.min)));
+    return arg("--check") && bad ? 1 : 0;
   }
   return collect();
 }

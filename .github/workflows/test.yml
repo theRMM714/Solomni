@@ -449,6 +449,8 @@ jobs:
           # 只读 job：不写仓库，关闭令牌持久化（zizmor artipacked）。
           persist-credentials: false
           ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/head', github.event.pull_request.number) || github.sha }}
+          # 变更行门禁要拿 PR 基线做 git diff；浅克隆没有基线提交。
+          fetch-depth: 0
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -486,6 +488,9 @@ jobs:
       # 四步：测试进程内 profile → 插桩构建产品 → L4 子进程 profile → 合并报告并按风险区判 80/60/100。
       # 测试或 e2e 失败也判失败；缺工具直接非零，不记 env-skip 冒充通过。
       - name: 采集并判定覆盖率
+        env:
+          # PR 才有基线；main 推送与手动运行只判风险桶。
+          COVERAGE_DIFF_BASE: ${{ github.event.pull_request.base.sha }}
         run: node tests/coverage.mjs --collect
 
       - name: 留产物（覆盖率报告与摘要；无论成败）

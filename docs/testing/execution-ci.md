@@ -190,7 +190,8 @@ node run-tests.js --coverage
 # 等价于 node tests/coverage.mjs --collect
 ```
 
-- 判据是 `tests/coverage-policy.json` 的三类风险区：产品 80%、平台/进程适配 60%、安全策略 100%。覆盖率是风险下限，不是质量目标（[TESTING.md](../../TESTING.md) 一）。
+- 判据是 `tests/coverage-policy.json` 的三类风险区：产品 80%、平台/进程适配 60%、安全策略 100%；PR 另有变更行门禁：新增 Rust 行 90%，安全桶变更行 100%。覆盖率是风险下限，不是质量目标（[TESTING.md](../../TESTING.md) 一）。
+- 变更行用 `git diff <base>...HEAD -- "*.rs"` 的新侧新增行，只判报告里有执行面的行；测试文件、seam 与注释/空行不计。CI 的 `coverage` job 在 PR 上把 `github.event.pull_request.base.sha` 传给 `COVERAGE_DIFF_BASE`，并取全历史；main 推送与手动运行只判风险桶。
 - 统计前剔除 `src/tests/**`、`tests/**`、`*tests.rs` 与 `#[cfg(test)]` 到配对右花括号的整段；否则内联测试会把覆盖率抬高。`policy.excludes` 的显式 seam 豁免必须逐条写文件、行段与理由，评估时打印豁免行数。
 - Linux 同时采集测试进程与产品子进程：先 `cargo llvm-cov --workspace --all-targets --no-report`，再用同一份插桩环境 `cargo build --bin solomni`，然后以 `E2E_COVERAGE=1` 跑 L4（优雅停止让子进程写 profile），最后合并 `*.profraw` 出报告。测试失败、E2E 失败或任一桶不达标都非零退出。
 - Windows 不判定行覆盖：Node 的 `SIGINT` 在 Windows 是 `TerminateProcess`，产品子进程来不及写 profile；只靠进程内报告会让产品桶假性不达标。macOS 不在本门禁内，避免为同一结论再付一份 runner。平台专有行为由三平台 `quality` 的真机探针与安全行为矩阵承担，不靠行覆盖替代。
