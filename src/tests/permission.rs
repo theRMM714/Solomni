@@ -6,7 +6,7 @@
 use crate::capabilities::permission::api::{
     hit, normalize, validate_defaults, validate_entry, CallScope, Decision, DecisionEdit, Effect,
     PermissionDefaults, PermissionLayer, PermissionSet, ProfileId, Reach, ReachSet, ScopeMode,
-    SharedEdit,
+    SessionSandbox, SharedEdit, SharedScope,
 };
 use crate::capabilities::workspace::domain::workspace::Place;
 use crate::tests::doubles::{
@@ -1301,4 +1301,179 @@ fn narrowing_never_widens_profile_reach_scope_or_decision() {
         ..Default::default()
     };
     assert!(base.apply_root(&too_wide).is_err(), "根 reach 不能超出档位");
+}
+/// 校验失败路径、展示文案与 serde 形状都要有确定结论：安全策略不允许"没测到就当不会发生"。
+#[test]
+fn validation_presentation_and_serialization_edges_are_explicit() {
+    assert_eq!(
+        Effect::Exec.default_reach(),
+        ReachSet::from([Reach::Private])
+    );
+    for profile in ProfileId::all() {
+        assert!(!profile.as_str().is_empty(), "档位 id 不能为空");
+        assert!(!profile.label().is_empty(), "档位标签不能为空");
+        assert!(!profile.spec().summary.is_empty(), "档位摘要不能为空");
+    }
+    assert_eq!(ScopeMode::None.listing(), "（无）");
+    assert_eq!(ScopeMode::Paths(Vec::new()).listing(), "（整棵共享区）");
+    assert!(CallScope::None.reach().is_empty());
+
+    assert_eq!(serde_json::to_string(&ScopeMode::All).unwrap(), "\"all\"");
+    assert_eq!(serde_json::to_string(&ScopeMode::None).unwrap(), "\"none\"");
+    assert_eq!(
+        serde_json::to_string(&ScopeMode::Paths(paths(&["a", "b"]))).unwrap(),
+        "[\"a\",\"b\"]"
+    );
+    assert_eq!(
+        serde_json::from_str::<ScopeMode>("\"all\"").unwrap(),
+        ScopeMode::All
+    );
+    assert_eq!(
+        serde_json::from_str::<ScopeMode>("\"none\"").unwrap(),
+        ScopeMode::None
+    );
+    assert_eq!(
+        serde_json::from_str::<ScopeMode>("[\"a\",\"b\"]").unwrap(),
+        ScopeMode::Paths(paths(&["a", "b"]))
+    );
+    let bad = serde_json::from_str::<ScopeMode>("\"other\"")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        bad.contains("all / none / 路径数组"),
+        "未知字符串要如实报形状：{}",
+        bad
+    );
+    for wrong in ["123", "{}", "true"] {
+        let why = serde_json::from_str::<ScopeMode>(wrong)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            why.contains("all / none / 路径数组"),
+            "{} 也要报出期望形状：{}",
+            wrong,
+            why
+        );
+    }
+    let shared: SharedScope = serde_json::from_str("{}").unwrap();
+    assert_eq!(shared.read, ScopeMode::All);
+    assert_eq!(shared.write, ScopeMode::All);
+
+    let mut layer = PermissionLayer::default();
+    layer.tools.insert(" ".to_string(), Decision::Allow);
+    assert!(layer.validate().is_err(), "空工具名必须拒绝");
+    let layer = PermissionLayer {
+        shared: Some(SharedEdit {
+            deny: paths(&["/abs"]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    assert!(layer.validate().is_err(), "绝对路径黑名单必须拒绝");
+
+    let mut defaults = PermissionDefaults::default();
+    defaults.shared.deny = paths(&[".."]);
+    assert!(
+        validate_defaults(&defaults).is_err(),
+        "上级段黑名单必须拒绝"
+    );
+    let mut defaults = PermissionDefaults::default();
+    defaults.tools.insert(" ".to_string(), Decision::Allow);
+    assert!(validate_defaults(&defaults).is_err(), "空工具名必须拒绝");
+    let mut ok_defaults = PermissionDefaults::default();
+    ok_defaults
+        .tools
+        .insert("read".to_string(), Decision::Allow);
+    assert!(validate_defaults(&ok_defaults).is_ok(), "合法工具名要放行");
+
+    let root_bad = SessionSandbox {
+        narrowing: Some(PermissionLayer::default()),
+        ..Default::default()
+    };
+    assert!(root_bad.root_layer().is_err(), "根会话不能带 narrowing");
+    let child_bad = SessionSandbox {
+        ceiling: Some(PermissionLayer::default()),
+        ..Default::default()
+    };
+    assert!(child_bad.child_layer().is_err(), "子会话不能带 ceiling");
+
+    let mut no_reach = pset(ProfileId::View);
+    no_reach.reach = ReachSet::empty();
+    assert!(!no_reach.offers(
+        "read",
+        Effect::Read,
+        &ReachSet::from([Reach::Private]),
+        true
+    ));
+    assert!(no_reach.offers(
+        "noop",
+        Effect::None,
+        &ReachSet::from([Reach::Private]),
+        true
+    ));
+
+    let set = pset(ProfileId::AllReach);
+    let max = ReachSet::from([Reach::Private]);
+    let err = set
+        .grant(&max, Some(&ReachSet::from([Reach::Network])))
+        .unwrap_err();
+    assert!(err.contains("不支持"), "请求超出工具上限要拒绝：{}", err);
+    let err = set
+        .grant(&max, Some(&ReachSet::from([Reach::HostRead])))
+        .unwrap_err();
+    assert!(err.contains("超出") || err.contains("不支持"), "{}", err);
+
+    let too_wide = PermissionLayer {
+        reach: Some(ReachSet::from([Reach::HostRead])),
+        ..Default::default()
+    };
+    assert!(pset(ProfileId::View).apply_root(&too_wide).is_err());
+    let narrower = PermissionLayer {
+        reach: Some(ReachSet::from([Reach::Private])),
+        ..Default::default()
+    };
+    assert_eq!(
+        pset(ProfileId::Workspace)
+            .apply_root(&narrower)
+            .unwrap()
+            .reach,
+        ReachSet::from([Reach::Private])
+    );
+
+    let mut tools = PermissionLayer::default();
+    tools.tools.insert("write".to_string(), Decision::Deny);
+    assert!(
+        pset(ProfileId::Workspace).apply_narrowing(&tools).is_err(),
+        "子会话不能改逐工具决定"
+    );
+    let wider_read = PermissionLayer {
+        shared: Some(SharedEdit {
+            read: Some(ScopeMode::All),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let tight = PermissionSet {
+        shared_read: ScopeMode::Paths(paths(&["a"])),
+        ..pset(ProfileId::Workspace)
+    };
+    assert!(
+        tight.apply_narrowing(&wider_read).is_err(),
+        "父只给 a，子要整棵必须拒绝"
+    );
+    let wider_write = PermissionLayer {
+        shared: Some(SharedEdit {
+            write: Some(ScopeMode::All),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let tight = PermissionSet {
+        shared_write: ScopeMode::Paths(paths(&["a"])),
+        ..pset(ProfileId::Workspace)
+    };
+    assert!(
+        tight.apply_narrowing(&wider_write).is_err(),
+        "父只给 a，子要整棵必须拒绝"
+    );
 }

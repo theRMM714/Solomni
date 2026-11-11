@@ -1123,8 +1123,12 @@ async function approvePlan(name) {
   /* ---------- 父死子亡（L4）：核心被强杀，常驻服务进程必须跟着没 ----------
    * 前面 MCP 场景是**正常停止**服务；这里再起一次，让编排器把核心 SIGKILL 掉，
    * 按服务自己记下的 pid 断言它已消失。放在最后：核心一死，后面没有任何 HTTP 场景还能跑。
+   * 覆盖率运行时跳过：SIGKILL 不跑 atexit，插桩进程的 profile 会整份丢掉；
+   * 这条行为契约仍由普通 e2e 覆盖。
    */
-  {
+  if (process.env.E2E_COVERAGE === '1') {
+    console.log('SKIP 父死子亡（覆盖率运行：强杀会丢 profile；普通 e2e 仍覆盖）');
+  } else {
     const MCP_MODULE = 'mcp-toolbox';
     const MCP_SERVICE = 'toolbox';
     const pidfile = path.join(ROOT, 'modules', 'mcp-toolbox', 'userdata', 'mcp-service.pid');

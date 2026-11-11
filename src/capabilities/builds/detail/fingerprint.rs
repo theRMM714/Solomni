@@ -143,6 +143,11 @@ fn collect_sources(root: &Path, dir: &Path, buf: &mut Vec<u8>) -> Result<(), Str
         if top == "build" || top == "userdata" {
             continue;
         }
+        // 覆盖率插桩会把 .profraw 落在子进程的当前目录（模块根），它不是源文件；
+        // 算进指纹会让"第二次构建命中缓存"在覆盖率运行下失真。
+        if rel.ends_with(".profraw") || rel.ends_with(".profdata") {
+            continue;
+        }
         if path.is_dir() {
             collect_sources(root, &path, buf)?;
             continue;
