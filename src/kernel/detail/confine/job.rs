@@ -26,10 +26,11 @@ pub struct FenceJob {
 
 impl FenceJob {
     pub fn to_json(&self) -> String {
-        let mut fields = match serde_json::to_value(&self.spec) {
-            Ok(serde_json::Value::Object(o)) => o,
-            _ => serde_json::Map::new(),
-        };
+        let mut fields = serde_json::to_value(&self.spec)
+            .expect("FenceSpec 一定序列化为对象")
+            .as_object()
+            .cloned()
+            .expect("FenceSpec 一定序列化为对象");
         fields.insert(
             "prepared".to_string(),
             serde_json::Value::Bool(self.prepared),

@@ -1,4 +1,4 @@
-// 突变测试入口（手动；契约见 docs/testing/execution-ci.md 的「突变测试工作流」）。
+// 突变测试入口（手动抽查 + 每周一定时；契约见 docs/testing/execution-ci.md 的「突变测试工作流」）。
 // 只圈 tests/mutation-scope.json 里的高价值纯逻辑文件；测试命令固定「只跑 bin + 串行」——
 // 串行便于逐条变异单独复现，与门禁的默认并行无关。
 // 本入口只作调查：不写 TEST-REPORT-*，不参与验收。
@@ -18,7 +18,7 @@ const REPORT = path.join(ROOT, "target", "mutation-report.json");
 fs.mkdirSync(LOG_DIR, { recursive: true });
 
 const scope = process.env.MUTATION_SCOPE || "core";
-// 只有 scope=capability 才记能力名：scope=core 时不带，键才是 core（而不是 core-repair）。
+// 只有 scope=capability 才记能力名：其余范围不带，键才是范围本身（而不是 core-repair）。
 const capabilityName = scope === "capability" ? process.env.MUTATION_CAPABILITY || "" : "";
 const timeout = process.env.MUTATION_TIMEOUT_SECS || "60";
 
@@ -31,12 +31,14 @@ const def = JSON.parse(fs.readFileSync(SCOPE_FILE, "utf8"));
 let files;
 if (scope === "core") {
   files = def.core || [];
+} else if (scope === "weekly") {
+  files = def.weekly || [];
 } else if (scope === "capability") {
   if (!capabilityName) die("scope=capability 需要 MUTATION_CAPABILITY（可选：" + Object.keys(def.capabilities || {}).join(" / ") + "）");
   files = (def.capabilities || {})[capabilityName];
   if (!files) die("能力不在 tests/mutation-scope.json 的 capabilities 里：" + capabilityName);
 } else {
-  die("MUTATION_SCOPE 只认 core 或 capability（all 刻意不做，理由见 docs/testing/execution-ci.md 的「突变测试工作流」）");
+  die("MUTATION_SCOPE 只认 core / weekly / capability（all 刻意不做，理由见 docs/testing/execution-ci.md 的「突变测试工作流」）");
 }
 if (!files.length) die("范围为空：" + scope + (capabilityName ? ":" + capabilityName : ""));
 

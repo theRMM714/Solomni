@@ -9,7 +9,8 @@
 
 ## 一、测试的目的与硬原则
 
-- 测试要回答的是"当前实现是否满足可观察的行为契约"，不是"测试数量是否很多"或"代码覆盖率是否好看"。
+- 测试要回答的是"当前实现是否满足可观察的行为契约"，不是"测试数量是否很多"或"代码覆盖率是否好看"；覆盖率在这里是风险下限与回归护栏，不是质量目标。
+- 风险下限按代码风险区判，不按测试层：产品代码 80%、平台/进程适配 60%、安全策略 100%；PR 新增 Rust 行 90%、安全变更行 100%（`tests/coverage-policy.json`、`tests/coverage.mjs`）。安全的行为矩阵必须 100%（`src/tests/permission.rs`、`src/kernel/detail/confine/tests.rs`）；OS 强制后端归平台桶，由三平台真机探针（`tests/<平台>/`）与突变审计（`tests/mutation-scope.json`）把关。E2E 不设行覆盖率，旅程清单必须全过（`tests/cross-platform/e2e/browser.cjs`）。
 
 - 测试记录事实：通过、失败、环境跳过、缺口必须分开（`run-tests.js`）。
 - 环境不允许执行不等于通过；必须记录 `env-skip` 与原因（`run-tests.js`）。
@@ -26,7 +27,7 @@
 
 ## 二、当前状态
 
-- 测试分区：`src/tests/` 与 `capabilities/` 同构（一个能力一个文件，用例多的按域分子模块；`doubles.rs` 端口替身、`builders.rs` 装配脚手架），跨平台集成与 L4 在 `tests/cross-platform/`，平台探针 `tests/<平台>/`，前端冒烟 `src/presentation/web/assets/*.smoke.cjs`（索引见 [docs/testing/README.md](docs/testing/README.md)）。
+- 测试分区：`src/tests/` 与 `capabilities/` 同构（一个能力一个文件，用例多的按域分子模块；`doubles.rs` 端口替身、`builders.rs` 装配脚手架），跨平台集成与 L4 在 `tests/cross-platform/`，平台探针 `tests/<平台>/`，前端冒烟 `src/presentation/web/assets/*.smoke.cjs` 与前端类型检查（`frontend-typecheck` 步骤，根 `tsconfig.json` + `package-lock.json` 固定 TypeScript）（索引见 [docs/testing/README.md](docs/testing/README.md)）。
 - 入口：`node run-tests.js`（`node start.js -test` 是备好环境后的同一入口）；纯叙述型文档改动用 `--docs`；`--coverage`、突变工作流、真机 `--fence-live` 等手动模式见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md)；机器契约 `docs/presentation/contracts.md`（ROUTES 表由 Rust 测试消费）仍走全量。
 - T0 九项已并入同一入口（`run-tests.js`）：步骤、可行状态与环境跳过口径以 [docs/testing/levels.md](docs/testing/levels.md) 的 T0 生成段为准（`env-skip` 不算通过）；查清单用 `node run-tests.js --list`。
 - 缺口账：全局 `tests/gaps.yaml`、跨平台 `tests/cross-platform/gaps.yaml`、平台 `tests/<平台>/gaps.yaml`；条目、数量与状态一律以账本为准（门户不复述，也不保留完成历史），`TEST-REPORT-ACCEPTED` 只看平台与跨平台账（`run-tests.js`）；格式与验收见 [docs/testing/gaps-acceptance.md](docs/testing/gaps-acceptance.md)。

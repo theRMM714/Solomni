@@ -58,10 +58,8 @@ fn command_programs_in(
             || token.starts_with('-')
             || token.starts_with('/')
             || token.starts_with('%')
+            || std::path::Path::new(token).is_absolute()
         {
-            continue;
-        }
-        if std::path::Path::new(token).is_absolute() {
             continue;
         }
         candidates.push(token.to_string());
@@ -139,12 +137,12 @@ pub(crate) fn interpreter_roots_for_exe(exe: &std::path::Path) -> Vec<std::path:
         if let Some(p) = parent {
             dirs.push(install_dir(p));
         }
-        if let Some(real) = real.as_deref() {
-            if real != exe {
-                if let Some(p) = real.parent() {
-                    dirs.push(install_dir(p));
-                }
-            }
+        if let Some(p) = real
+            .as_deref()
+            .filter(|real| *real != exe)
+            .and_then(|real| real.parent())
+        {
+            dirs.push(install_dir(p));
         }
     }
     dirs.sort();
@@ -184,15 +182,15 @@ pub(super) fn install_dir(bin: &std::path::Path) -> std::path::PathBuf {
         .map(|s| s.to_string_lossy().to_lowercase())
         .unwrap_or_default();
     if leaf == "bin" || leaf == "scripts" {
-        if let Some(up) = bin.parent() {
-            // 绝不把「文件系统根」当安装目录：/bin 的父目录就是 /，
-            // 上溯到根等于把整盘放行（macOS 上会直接让围栏形同虚设）。
-            if up.parent().is_some() {
-                return up.to_path_buf();
-            }
+        // 绝不把「文件系统根」当安装目录：/bin 的父目录就是 /，
+        // 上溯到根等于把整盘放行（macOS 上会直接让围栏形同虚设）。
+        match bin.parent() {
+            Some(up) if up.parent().is_some() => up.to_path_buf(),
+            _ => bin.to_path_buf(),
         }
+    } else {
+        bin.to_path_buf()
     }
-    bin.to_path_buf()
 }
 
 /// 目的：node 的「跳过 realpath」开关——主模块看 `-main`，依赖与 ESM 看另一个（两个都要）。

@@ -191,6 +191,7 @@ cargo deny check
 - **三种语言的模块在真进程里真的能用**：真模块（harvest=python / render=node / indexer=C++）按需复制进夹具，CI 里**现场编译 indexer**（编译器版本进日志；构建失败是**硬失败**，不 env-skip），再真跑 harvest.scan → render.report → indexer.build → indexer.query，断言报告按语料逐条列出目录、检索有命中。
 - **MCP 常驻服务**：夹具声明一个 `mcp-toolbox` 服务，先 `control_resident` enable + start，再建只装这一个模块的单 agent 会话——服务操作进模型工具面、经真进程被调用，回执与本地算出的摘要对账（真机演示见 `demo/run-demo-mcp.mjs`）。
 - **父死子亡**：核心被强杀后，常驻服务的进程跟着消失（服务启动时把自己的 pid 记进模块 `userdata/`，SIGKILL 核心后按 pid 断言它已没了）——放在最后一步，核心一死就没有后续场景。
+- **真实浏览器旅程**（`tests/cross-platform/e2e/browser.cjs`）：优先系统 Edge / Chrome，缺失时把 Chromium 下载到 `target/playwright/`；覆盖建会话向导、发送与流式渲染、工具裁决卡提交、设置保存、存储按策略回收、文件上传六条旅程。失败留 `target/e2e-browser/<时间戳>/` 的截图、HTML、控制台与 trace；控制台错误即失败。T5 不设行覆盖率，但旅程清单必须全过。
 - 代拟、回档和会话编辑；
 - **原生工具调用**：先在真二进制上探测（结论写回登记处），再跑一次"一次回复两个调用"，并让假供应商核对**发回去的历史就是协议形状**（一条助手消息带 `tool_calls` + 每条结果一条 `role:"tool"`）。
 - 夹具的 `.home/` 每次清空，免得上次跑出来的形态漏进这次；

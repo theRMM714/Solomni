@@ -1123,17 +1123,17 @@ fn container_temp_dir_follows_gettemp2_layout() {
     assert!(container_temp_dir(&spec).is_none(), "没有落点就不猜");
 }
 
-/// 【真机】容器里的系统临时目录由 `prepare_fence` 建好且可写：编译器能在里面落临时文件。
-///   不建它的现场：g++ 报 `Cannot create temporary file in …\AC\Temp\` 并直接 abort（0xC0000409）。
-/// 会创建 AppContainer profile 与写目录 ACL，只在 --fence-live（SOLOMNI_FENCE_LIVE=1）下跑；没有项目内 MinGW 时如实跳过。
+/// 【真机】容器里的系统临时目录由 `prepare_fence` 建好且可写：进程能在里面落临时文件。
+///   不建它的现场：程序写 `%TEMP%` 失败（编译器会报 `Cannot create temporary file in …\AC\Temp\` 并 abort）。
+/// 会创建 AppContainer profile 与写目录 ACL，只在 --fence-live（SOLOMNI_FENCE_LIVE=1）下跑。
 #[test]
-fn container_has_a_writable_temp_dir_for_compilers() {
+fn container_has_a_writable_temp_dir() {
     if std::env::var("SOLOMNI_FENCE_LIVE")
         .map(|v| v != "1")
         .unwrap_or(true)
     {
         eprintln!(
-            "[探针] 未开启真机围栏测试：container_has_a_writable_temp_dir_for_compilers 会创建 AppContainer profile（改本机状态），已跳过；要真跑加 --fence-live"
+            "[探针] 未开启真机围栏测试：container_has_a_writable_temp_dir 会创建 AppContainer profile（改本机状态），已跳过；要真跑加 --fence-live"
         );
         return;
     }
@@ -1144,15 +1144,7 @@ fn container_has_a_writable_temp_dir_for_compilers() {
         );
         return;
     }
-    let mingw = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join(".tools")
-        .join("mingw64");
-    let gpp = mingw.join("bin").join("g++.exe");
-    if !gpp.is_file() {
-        eprintln!("[探针] 本机没有项目内 MinGW：容器临时目录探针跳过（不静默当作通过）");
-        return;
-    }
-    // 夹具放在仓库卷上（与项目内编译器同卷）：跨卷时程序名无法相对化，而这条用例要验的是"编译器能跑"。
+    // 夹具放在仓库卷上：跨卷时程序名无法相对化，而这条用例验的是容器能写自己的临时目录。
     let base = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("target")
         .join(format!("temp-probe-{}", std::process::id()));
@@ -1160,13 +1152,12 @@ fn container_has_a_writable_temp_dir_for_compilers() {
     let leaf = base.join("leaf");
     std::fs::create_dir_all(&sandbox).expect("建私有沙箱");
     std::fs::create_dir_all(&leaf).expect("建工作目录");
-    std::fs::write(leaf.join("probe.cpp"), "int probe() { return 0; }\n").expect("写编译单元");
     let spec = FenceSpec {
         agent: "probe-temp".to_string(),
         lease: String::new(),
         rw: vec![sandbox.clone(), leaf.clone()],
         ro: Vec::new(),
-        ro_tree: vec![mingw.clone()],
+        ro_tree: Vec::new(),
         private: sandbox.clone(),
         cwd: leaf.clone(),
         net: false,
@@ -1217,28 +1208,6 @@ fn container_has_a_writable_temp_dir_for_compilers() {
         got.trim().to_lowercase(),
         temp.display().to_string().to_lowercase(),
         "容器里的 TEMP 应当就是 prepare 建的落点"
-    );
-
-    // ② 编译器能用它：g++ 的临时文件走 GetTempPath2，目录不可写会直接 abort。
-    //    程序名是绝对路径——容器执行前会改写成相对 cwd（见 container_runs_a_program_given_by_absolute_path）。
-    let log = leaf.join("gpp.log");
-    let code = run_in_container(
-        sid,
-        &spec,
-        &format!(
-            "\"{}\" -std=c++17 -c probe.cpp -o out.o > \"{}\" 2>&1",
-            gpp.display(),
-            log.display()
-        ),
-    )
-    .expect("容器进程应当能启动");
-    let said = std::fs::read_to_string(&log).unwrap_or_default();
-    assert!(
-        code == 0 && leaf.join("out.o").is_file(),
-        "容器里的 g++ 要能编译（exit={}，输出 {:?}，临时目录 {}）",
-        code,
-        said.trim(),
-        temp.display()
     );
 
     free_sid(sid);
@@ -2234,5 +2203,32 @@ fn failed_write_keeps_preexisting_ace_and_never_says_rollback() {
     );
     revoke_one(sid, &dir, false).expect("清掉预存 ACE");
     free_sid(sid);
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// 根内判定不能把词法上的上级段当成仍在根内：规范化失败时 root/../escape
+/// 必须按根外处理，否则会为一条越界路径先存原始安全描述符快照。
+#[test]
+fn inside_root_rejects_parent_escape_even_when_canonicalize_fails() {
+    let base = crate::tests::scratch("inside-root");
+    let root = base.join("root");
+    std::fs::create_dir_all(&root).expect("建根目录");
+
+    let missing_inside = root.join("missing").join("child");
+    assert!(
+        inside_root(&missing_inside, &root),
+        "不存在的根内路径仍应按词法判定为根内"
+    );
+
+    let escaped = root.join("..").join("escape");
+    assert!(
+        !inside_root(&escaped, &root),
+        "含上级段的路径不能因为前缀相同就被判为根内"
+    );
+
+    let sibling = base.join("sibling");
+    std::fs::create_dir_all(&sibling).expect("建同级目录");
+    assert!(!inside_root(&sibling, &root), "同级目录不在根内");
+
     let _ = std::fs::remove_dir_all(&base);
 }

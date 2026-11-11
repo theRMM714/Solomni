@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "note": "覆盖率是风险下限，不是质量目标。桶按代码风险区划分，不按测试层；测试代码与内联 #[cfg(test)] 不计入。安全行为矩阵必须 100%，这里的安全桶只量策略与路径判定这类纯逻辑；OS 强制后端归 platform 桶，另由三平台真机探针与突变审计把关。changeLineMin 是 PR 新增 Rust 行的下限；安全桶的变更行按桶的 min=100 判。",
+  "changeLineMin": 90,
+  "excludes": [
+    {
+      "file": "src/kernel/detail/confine/job.rs",
+      "from": 85,
+      "to": 93,
+      "reason": "守门进程入口：真实安装围栏在子进程里完成，进程内调用会永久限制测试进程；由三平台真机探针在独立进程验收"
+    },
+    {
+      "file": "src/kernel/detail/confine/mod.rs",
+      "from": 75,
+      "to": 76,
+      "reason": "分派到平台后端：Linux Landlock 与 macOS seatbelt 安装不可逆，进程内测试无法调用；由平台探针在子进程验收"
+    }
+  ],
+  "buckets": [
+    {
+      "id": "product",
+      "title": "产品代码（整体）",
+      "min": 80,
+      "globs": [
+        "src/**"
+      ]
+    },
+    {
+      "id": "platform",
+      "title": "平台/进程适配（含安全 OS 后端）",
+      "min": 60,
+      "globs": [
+        "src/main.rs",
+        "src/entry/**",
+        "src/guard/**",
+        "src/kernel/**",
+        "src/presentation/**"
+      ]
+    },
+    {
+      "id": "security",
+      "title": "安全策略与围栏路径判定",
+      "min": 100,
+      "globs": [
+        "src/capabilities/permission/**",
+        "src/kernel/detail/confine/paths.rs",
+        "src/kernel/detail/confine/ledger.rs",
+        "src/kernel/detail/confine/prep.rs",
+        "src/kernel/detail/confine/job.rs",
+        "src/kernel/detail/confine/mod.rs",
+        "src/kernel/detail/confine/texts.rs"
+      ]
+    }
+  ]
+}

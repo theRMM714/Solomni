@@ -3,11 +3,11 @@
  * 不管：产品页面本身；发行版不嵌入（见 build.rs 的 dev 目录规则）。
  * 联动：组件来自 app/ui/，样式来自 tokens.css / ui.css / style.css。 */
 
-import { createDom } from '../core/dom.js';
-import { createIcons, ICONS } from '../ui/icons.js';
-import { createButtons } from '../ui/buttons.js';
-import { createForms } from '../ui/forms.js';
-import { createOverlays } from '../ui/overlays.js';
+import { createDom } from '../app/core/dom.js';
+import { createIcons, ICONS } from '../app/ui/icons.js';
+import { createButtons } from '../app/ui/buttons.js';
+import { createForms } from '../app/ui/forms.js';
+import { createOverlays } from '../app/ui/overlays.js';
 
 const dom = createDom(window);
 const { el } = dom;

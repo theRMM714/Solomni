@@ -1,9 +1,27 @@
 {
-  "note": "突变测试范围：只圈高价值纯逻辑（平台/unsafe/真进程实现不入范围）。改这里等于改范围，必须在同一次提交里同步 docs/testing/execution-ci.md。core 是小而精的先跑集；capabilities 是单能力抽查的文件级清单。",
-  "core": [
+  "note": "突变测试范围：只圈高价值纯逻辑（平台/unsafe/真进程实现不入范围）。安全纯逻辑（permission 与 confine 的路径判定）必须在范围内；改这里等于改范围，必须在同一次提交里同步 docs/testing/execution-ci.md。core 是小而精的先跑集；weekly 是每周一定时审计集（安全 + 底层 + 虚拟机 + workspace + core）；capabilities 是单能力抽查的文件级清单。",
+  "weekly": [
+    "src/capabilities/permission/domain/permission.rs",
+    "src/kernel/detail/confine/paths.rs",
+    "src/kernel/detail/confine/ledger.rs",
+    "src/kernel/detail/unpack.rs",
+    "src/kernel/domain/path.rs",
+    "src/capabilities/vm/domain/guest.rs",
+    "src/capabilities/vm/domain/exec.rs",
+    "src/capabilities/vm/service.rs",
+    "src/capabilities/workspace/domain/workstore.rs",
+    "src/capabilities/workspace/domain/workspace.rs",
+    "src/capabilities/workspace/service/commit.rs",
     "src/capabilities/llm/detail/repair.rs",
     "src/capabilities/registry/detail/yaml_settings.rs",
     "src/capabilities/slate/service.rs"
+  ],
+  "core": [
+    "src/capabilities/llm/detail/repair.rs",
+    "src/capabilities/permission/domain/permission.rs",
+    "src/capabilities/registry/detail/yaml_settings.rs",
+    "src/capabilities/slate/service.rs",
+    "src/kernel/detail/confine/paths.rs"
   ],
   "capabilities": {
     "collab": [
@@ -17,6 +35,9 @@
     ],
     "patch": [
       "src/capabilities/tools/domain/patch.rs"
+    ],
+    "permission": [
+      "src/capabilities/permission/domain/permission.rs"
     ],
     "repair": [
       "src/capabilities/llm/detail/repair.rs"

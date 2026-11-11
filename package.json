@@ -1,0 +1,12 @@
+{
+  "name": "solomni-tooling",
+  "private": true,
+  "description": "前端类型检查与测试工具链（只提交清单与锁文件）",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "playwright": "1.65.0",
+    "typescript": "5.9.3"
+  }
+}

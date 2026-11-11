@@ -13,7 +13,8 @@ const HERE = __dirname;
 const PRODUCT_ROOT = path.dirname(path.dirname(path.dirname(HERE)));
 const FIXTURE = path.join(HERE, "root");
 const PORT_SRV = 3099;
-const BIN = path.join(PRODUCT_ROOT, "target", "debug", process.platform === "win32" ? "solomni.exe" : "solomni");
+// 覆盖率运行可以指向插桩后的产品二进制；默认仍是 L4 的 target/debug。
+const BIN = process.env.SOLOMNI_BIN || path.join(PRODUCT_ROOT, "target", "debug", process.platform === "win32" ? "solomni.exe" : "solomni");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -230,6 +231,16 @@ function stop(child) {
   try { child.kill(); } catch {}
 }
 
+/** 覆盖率收尾：SIGINT 让 web 服务走正常关闭路径（atexit 写 profile），不用 SIGTERM 硬断。 */
+async function stopGraceful(child) {
+  if (!child || child.exitCode !== null) return;
+  try { child.kill("SIGINT"); } catch {}
+  for (let i = 0; i < 50 && child.exitCode === null; i++) await sleep(100);
+  if (child.exitCode === null) {
+    try { child.kill(); } catch {}
+  }
+}
+
 async function main() {
   if (!fs.existsSync(BIN)) {
     console.error("[e2e] 找不到二进制（" + path.relative(PRODUCT_ROOT, BIN) + "）：先 cargo build");
@@ -328,7 +339,9 @@ async function main() {
       console.error("[e2e] 服务端没起来（端口 " + PORT_SRV + "）");
       return 1;
     }
-    const driver = spawn(process.execPath, [path.join(HERE, "driver.js")], {
+    // 浏览器 E2E 复用同一套夹具 / 假供应商 / 端口，只把驱动换成浏览器旅程。
+    const driverFile = process.env.E2E_DRIVER || "driver.js";
+    const driver = spawn(process.execPath, [path.join(HERE, driverFile)], {
       cwd: HERE,
       stdio: "inherit",
       env: Object.assign({}, process.env, {
@@ -360,7 +373,8 @@ async function main() {
     return 0;
   } finally {
     stop(mock);
-    stop(srv);
+    if (process.env.E2E_COVERAGE === "1") await stopGraceful(srv);
+    else stop(srv);
     await sleep(300);
     // 夹具的 .vm 是软链（真机跑才建）：收尾只删链本身，仓库那份不动。
     dropFixtureVm();

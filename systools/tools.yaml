@@ -826,4 +826,5 @@ tools:
       compact_model: { type: string, desc: 压缩用模型 id；空 = 会话同模型 }
       discuss_remind_cap: { type: integer, min: 0, desc: 一轮内最多提醒几次 }
       max_guests: { type: integer, min: 0, desc: 虚拟机档同时最多几台 guest（0 = 不限制） }
+      storage: { type: object, desc: "存储与回收策略（缓存预算、周期回收、保留天数；未提交字段保留现值）" }
       sandbox: { type: object, desc: 全局沙箱策略（整段替换；保存后整体重启） }

@@ -50,6 +50,7 @@ const STEP_BUDGET_S = {
   "T0 交叉类型检查（x86_64-apple-darwin）": 600,
   "T0 静态检查（clippy）": 300,
   "L1 单元（--bin solomni）": 300,
+  "前端类型检查（tsc）": 120,
   "环境引导自检": 120,
   "目标 cross-platform": 300,
   "L4 端到端": 600,
@@ -179,36 +180,27 @@ function runAudit(scope) {
   console.log("[audit] 本次只跑" + what + "：代码门禁、三平台与 L4 未运行；CI 报告统一写 ci-report。");
 }
 
-// ---------- 覆盖率发现模式（手动，不进默认门禁） ----------
+// ---------- 覆盖率门禁（手动） ----------
 
 /**
- * 覆盖率发现模式（node run-tests.js --coverage）：**只用来找盲区，不做通过判据、不设阈值**。
- * 两个已知局限：① 平台 #[cfg] 在别的平台上根本不编译，覆盖率必须逐平台看；
- * ② 产品二进制（守门进程、L4 端到端）由本入口单独 cargo build，未插桩，进程内覆盖率不包含它们。
+ * 覆盖率门禁（node run-tests.js --coverage）：委托 tests/coverage.mjs --collect。
+ * 四步：测试进程内 profile → 插桩构建产品 → L4 子进程 profile → 合并报告，按风险区判 80/60/100。
+ * 只在 Linux 上采集：Windows 的 child.kill('SIGINT') 是 TerminateProcess，产品进程来不及在 atexit
+ * 写出 profile，子进程覆盖率会凭空缺失；三平台的安全行为矩阵与平台探针仍由 quality job 每 PR 跑。
+ * 缺工具直接失败（不再 env-skip），否则门禁会被"没装工具"冒充通过。
  */
 function runCoverage() {
+  if (process.platform !== "linux") {
+    console.log("[覆盖率] 只在 Linux 上采集（子进程 profile 依赖 POSIX 信号正常退出）。");
+    console.log("  Windows / macOS 用 CI 的 coverage-report 产物，或把报告路径交给 node tests/coverage.mjs --report <txt> --check。");
+    process.exit(1);
+  }
   if (!proc.toolAvailable("llvm-cov")) {
-    console.log("[覆盖率] env-skip：未安装 cargo-llvm-cov。");
-    console.log("  装：node setup-dev.js（cargo-llvm-cov + llvm-tools-preview 都落项目内）");
-    process.exit(0);
+    console.log("[覆盖率] 缺少 cargo-llvm-cov（装：node setup-dev.js，或 cargo install --locked --root .tools cargo-llvm-cov）。");
+    process.exit(1);
   }
-  // 缺 llvm-tools-preview 时 cargo-llvm-cov 会就地提示安装（非交互环境下自行往下走然后失败）：
-  // 先问一句，缺就如实 env-skip，不把"没装组件"报成覆盖率失败。
-  const comp = proc.sh("rustup", ["component", "list", "--installed"]);
-  if (comp.code === 0 && !/llvm-tools/.test(comp.out)) {
-    console.log("[覆盖率] env-skip：缺 llvm-tools-preview 组件（装：node setup-dev.js）。");
-    process.exit(0);
-  }
-  const outDir = path.join(ROOT, "target", "coverage");
-  fs.mkdirSync(outDir, { recursive: true });
-  const args = ["llvm-cov", "--workspace", "--all-targets", "--text", "--output-dir", outDir];
-  const r = proc.sh("cargo", args.concat(opts.serial ? ["--", "--test-threads=1"] : []));
-  console.log(r.out.trim().split(/\r?\n/).slice(-40).join("\n"));
-  if (r.code !== 0 && /llvm-tools|component download failed|Proceed\?/i.test(r.out)) {
-    console.log("[覆盖率] env-skip：缺 llvm-tools-preview 组件（装：node setup-dev.js）。");
-    process.exit(0);
-  }
-  console.log("[覆盖率] 报告目录：" + path.relative(ROOT, outDir) + "（未覆盖不等于缺口，看过后决定补测或记 tests/gaps.yaml）");
+  const r = proc.sh(process.execPath, [path.join(ROOT, "tests", "coverage.mjs"), "--collect"], 60 * 60 * 1000);
+  console.log(r.out.trim().split(/\r?\n/).slice(-60).join("\n"));
   process.exit(r.code === 0 ? 0 : 1);
 }
 

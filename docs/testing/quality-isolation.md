@@ -42,7 +42,8 @@
 
 - 质量检查失败按步骤记 `quality-fail` 或 `fail`（映射见 [levels.md](levels.md) 的 T0），不能折算成 `pass`；
 - 工具缺失或环境不允许运行记录为 `env-skip`，不能静默跳过；
-- 工具获取：**第三方只进 CI**——CI 用 `taiki-e/install-action` 预编译装（供应链工具、突变测试的 `cargo-mutants` 都这样）；**本地开发不引第三方**，用 `node setup-dev.js` 把清单（[dev-tools.js](../../dev-tools.js)）里的东西装进**项目内**（`cargo install --locked --root .tools`）；
+- 工具获取：Rust 侧第三方**只进 CI**——CI 用 `taiki-e/install-action` 预编译装（供应链工具、突变测试的 `cargo-mutants` 都这样）；**本地开发不引第三方**，用 `node setup-dev.js` 把清单（[dev-tools.js](../../dev-tools.js)）里的东西装进**项目内**（`cargo install --locked --root .tools`）；
+- 前端工具链是**项目内 npm 依赖**：TypeScript 与 Playwright 固定在根 `package.json` + `package-lock.json`，用 `npm ci --ignore-scripts` 装进 `node_modules`；不装全局、不写用户目录，`node_modules` 不入库。浏览器优先用系统 Edge / Chrome，缺失时由 Playwright 下载到 `target/playwright/`（同样不入库）；CI 缓存这个目录，失败产物 `target/e2e-browser/` 随 job 上传；
 - 尚未建立检查记录为 `gap`；
 - 依赖重复不一定是错误，必须有解释或后续治理记录（`tests/dependency-baseline.json`）；
 - 重复代码检查不得诱导新增抽象。先判断重复是否属于同一职责，再决定合并、保留或记录原因（`run-tests.js`）。

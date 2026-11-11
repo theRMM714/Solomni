@@ -2460,6 +2460,41 @@ fn set_settings_action_accepts_max_guests() {
     assert_eq!(ops.registry.settings().expect("读设置").max_guests, 5);
 }
 
+/// set_settings 是部分更新；前端设置页会提交 storage，动作参数表必须收它（缺了会让任何设置保存都失败）。
+#[test]
+fn set_settings_action_accepts_storage() {
+    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
+    let mut st = ops.registry.settings().expect("读设置");
+    st.sandbox.policy.windows.write_acl = true;
+    ops.registry
+        .set_settings(st)
+        .expect("准备 Windows 合法的沙箱策略");
+    ops.actions
+        .act(ActionCall {
+            id: "set_settings".to_string(),
+            args: serde_json::json!({ "storage": {
+                "periodic_gc": false,
+                "gc_interval_minutes": 30,
+                "cache_cap_gib": 7,
+                "cache_keep_days": 11,
+                "build_volume_gib": 9,
+                "min_free_gib": 3,
+                "log_keep_days": 5
+            } }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .expect("set_settings 应接受 storage");
+    let got = ops.registry.settings().expect("读设置").storage;
+    assert!(!got.periodic_gc);
+    assert_eq!(got.gc_interval_minutes, 30);
+    assert_eq!(got.cache_cap_gib, 7);
+    assert_eq!(got.cache_keep_days, 11);
+    assert_eq!(got.build_volume_gib, 9);
+    assert_eq!(got.min_free_gib, 3);
+    assert_eq!(got.log_keep_days, 5);
+}
+
 /// set_settings 接受压缩保留比例与总结模型；未登记的模型保存即拒绝。
 #[test]
 fn set_settings_action_accepts_compact_options() {

@@ -6,6 +6,7 @@
 #[cfg(windows)]
 use std::ffi::OsString;
 
+use super::ledger::ReconcileReport;
 use super::paths::*;
 use super::texts::*;
 use super::*;
@@ -456,6 +457,57 @@ fn reachable_roots_dedupes_and_collapses() {
     assert!(many.ends_with("等 6 处"), "{}", many);
 }
 
+/// 空范围/空根与平台 shell 启动都要有确定行为：说明不能凭空编路径，shell 不能拼字符串。
+#[test]
+fn boundary_helpers_cover_empty_scope_and_platform_shell() {
+    let empty = FenceSpec {
+        agent: "a".to_string(),
+        lease: String::new(),
+        private: PathBuf::new(),
+        ro_tree: Vec::new(),
+        rw: Vec::new(),
+        cwd: PathBuf::new(),
+        ro: Vec::new(),
+        net: false,
+    };
+    assert_eq!(reachable_roots(&empty), "（无）");
+    note_fence_boundary(&empty, true, false, 1);
+    note_fence_boundary(&empty, false, false, 1);
+
+    #[cfg(not(windows))]
+    {
+        let cmd = shell_command("echo hi");
+        assert_eq!(cmd.get_program(), "sh");
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(args, vec!["-c".to_string(), "echo hi".to_string()]);
+    }
+}
+
+/// 解释器是符号链接时，安装目录要跟到真身所在的一层（只授链接目录会漏掉同目录的库）。
+#[cfg(unix)]
+#[test]
+fn interpreter_roots_follow_symlink_to_the_real_install_dir() {
+    use std::os::unix::fs::symlink;
+    let root = crate::tests::scratch("confine-interpreter-link");
+    let real_bin = root.join("venv").join("bin");
+    std::fs::create_dir_all(&real_bin).expect("建真实解释器目录");
+    let real = real_bin.join("python");
+    std::fs::write(&real, b"#!/bin/sh\n").expect("写真实解释器");
+    let link = root.join("python-link");
+    symlink(&real, &link).expect("建符号链接");
+
+    let dirs = interpreter_roots_for_exe(&link);
+    assert!(
+        dirs.iter().any(|d| d.ends_with("venv")),
+        "要跟到真身的安装目录：{:?}",
+        dirs
+    );
+    std::fs::remove_dir_all(&root).ok();
+}
+
 /// 会话租约进归属身份：同一进程里同名 agent 的两个会话是**两个**归属，释放其中一个不许动另一个。
 #[test]
 fn owner_lease_tells_sessions_apart() {
@@ -469,4 +521,107 @@ fn owner_lease_tells_sessions_apart() {
     assert_eq!(a, a.clone(), "完全相同的归属用于去重/撤销");
     assert_ne!(a, b, "同进程的两个会话是两个归属");
     assert_eq!(b.lease, "s2");
+}
+
+/// 对账摘要必须把"回收了什么 / 跳过了什么 / 失败了什么"都说清楚：这是启动期唯一的安全交代。
+#[test]
+fn reconcile_summary_reports_every_outcome_without_silent_success() {
+    let empty = ReconcileReport::default();
+    assert!(!empty.has_activity(), "全零且无错误时保持安静");
+    assert_eq!(empty.summary(), "没有陈旧授权，无需回收");
+
+    let skipped = ReconcileReport {
+        skipped_unjudgeable: 2,
+        ..Default::default()
+    };
+    assert!(skipped.has_activity());
+    assert!(
+        skipped.summary().contains("2 条无法判定已跳过"),
+        "{}",
+        skipped.summary()
+    );
+
+    let orphan = ReconcileReport {
+        orphan_profiles: vec!["p1".to_string(), "p2".to_string()],
+        ..Default::default()
+    };
+    assert!(orphan.has_activity());
+    assert!(
+        orphan.summary().contains("台账外还有 2 个容器 profile"),
+        "{}",
+        orphan.summary()
+    );
+
+    let note = ReconcileReport {
+        note: "本平台没有台账".to_string(),
+        orphan_profiles: vec!["p1".to_string()],
+        ..Default::default()
+    };
+    assert!(note.summary().starts_with("本平台没有台账"));
+    assert!(note.summary().contains("台账外还有 1 个容器 profile"));
+
+    let reclaimed = ReconcileReport {
+        reclaimed_grants: 3,
+        restored_snapshots: 2,
+        deleted_profiles: 1,
+        kept: 4,
+        ..Default::default()
+    };
+    assert!(reclaimed.has_activity());
+    let text = reclaimed.summary();
+    assert!(text.contains("还原快照 2 处"), "{}", text);
+    assert!(text.contains("撤销授权 3 条"), "{}", text);
+    assert!(text.contains("删除 profile 1 个"), "{}", text);
+    assert!(text.contains("保留 4 条"), "{}", text);
+
+    let reclaimed_skipped = ReconcileReport {
+        reclaimed_grants: 1,
+        skipped_unjudgeable: 5,
+        ..Default::default()
+    };
+    assert!(reclaimed_skipped
+        .summary()
+        .contains("另有 5 条无法判定已跳过"));
+
+    let failed_only = ReconcileReport {
+        errors: vec!["写回被拒".to_string()],
+        ..Default::default()
+    };
+    assert!(failed_only.summary().contains("台账保留供重试"));
+    assert!(
+        !failed_only.summary().contains("另有"),
+        "没有跳过就不编跳过"
+    );
+
+    let failed = ReconcileReport {
+        errors: vec!["写回被拒".to_string(), "路径不在了".to_string()],
+        restored_snapshots: 1,
+        reclaimed_grants: 2,
+        deleted_profiles: 3,
+        skipped_unjudgeable: 4,
+        orphan_profiles: vec!["p".to_string()],
+        ..Default::default()
+    };
+    let text = failed.summary();
+    assert!(
+        text.starts_with("对账未完成：写回被拒；路径不在了"),
+        "{}",
+        text
+    );
+    assert!(text.contains("已还原 1 处"), "{}", text);
+    assert!(text.contains("撤销 2 条"), "{}", text);
+    assert!(text.contains("删 3 个 profile"), "{}", text);
+    assert!(text.contains("另有 4 条无法判定已跳过"), "{}", text);
+    assert!(text.contains("台账外还有 1 个容器 profile"), "{}", text);
+    assert!(failed.has_activity());
+
+    #[cfg(not(windows))]
+    {
+        let home = std::path::Path::new("unused");
+        assert!(reconcile(home).summary().contains("本平台"));
+        assert!(ledger(home).note.contains("本平台"));
+        assert!(restore_one(home, std::path::Path::new("a")).is_err());
+        assert!(revoke_grant(home, "S-1", std::path::Path::new("a")).is_err());
+        assert!(remove_profile_one(home, "p").is_err());
+    }
 }

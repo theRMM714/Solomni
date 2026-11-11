@@ -20,11 +20,12 @@ fs.mkdirSync(LOG_DIR, { recursive: true });
 // 不带就等于把真机 e2e 悄悄降成安全模式（那正是 CI 要给出的结论）。本地请用 node run-tests.js --fence-live。
 const ENV = Object.assign({}, process.env, { SOLOMNI_FENCE_LIVE: "1", SOLOMNI_FENCE_WRITE: "1" });
 
-function run(cmd, args, logName, timeoutMs) {
+function run(cmd, args, logName, timeoutMs, extraEnv) {
   const logFile = path.join(LOG_DIR, logName);
   const fd = fs.openSync(logFile, "w");
   process.stdout.write("    实时日志：" + path.relative(ROOT, logFile) + "\n");
-  const r = spawnSync(cmd, args, { cwd: ROOT, env: ENV, stdio: ["ignore", fd, fd], timeout: timeoutMs || 0 });
+  const env = Object.assign({}, ENV, extraEnv || {});
+  const r = spawnSync(cmd, args, { cwd: ROOT, env, stdio: ["ignore", fd, fd], timeout: timeoutMs || 0 });
   fs.closeSync(fd);
   return { code: r.error ? -1 : r.status, out: fs.readFileSync(logFile, "utf8"), error: r.error ? String(r.error.message) : null };
 }
@@ -38,6 +39,7 @@ function main() {
   let raw = null;
   let ms = 0;
   const envSkips = [];
+  const steps = [];
 
   const buildStart = Date.now();
   // 两道硬上限：构建和编排都不能无限挂；到点由本脚本写 fail 报告并让 artifact 有机会上传。
@@ -59,29 +61,48 @@ function main() {
       status = "gap";
       detail = "cross-platform.e2e.not-in-runner（编排尚未迁入）";
     } else {
-      const start = Date.now();
-      const r = run(process.execPath, [orchestrator], "e2e-orchestrator.log", 25 * 60 * 1000);
-      ms = Date.now() - start;
-      envSkips.push(...probes(r.out));
-      status = r.code === 0 && r.out.includes("E2E-OK") ? "pass" : "fail";
-      // 报告里先放具体的 FAIL 行，再放最后两行（通常是 E2E-FAILED / 围栏回收）；
-      // 否则汇总里只剩"failed=1"，看报告的人还得去翻整份日志。
-      const failLine = r.out.split(/\r?\n/).find((l) => l.startsWith("FAIL "));
-      detail = (r.error ? "超时/起不来：" + r.error + " / " : "") +
-        (failLine ? failLine + " / " : "") +
-        r.out.trim().split(/\r?\n/).slice(-2).join(" / ");
-      if (status === "fail") raw = r.out.slice(-800);
+      // HTTP 驱动与浏览器驱动各起一次编排器：浏览器驱动必须独占夹具与端口，不能串在同一次编排里。
+      const runLeg = (label, logName, driver, timeoutMs) => {
+        const start = Date.now();
+        const r = run(
+          process.execPath,
+          [orchestrator],
+          logName,
+          timeoutMs,
+          driver ? { E2E_DRIVER: driver } : null
+        );
+        const legMs = Date.now() - start;
+        envSkips.push(...probes(r.out));
+        const legOk = r.code === 0 && r.out.includes("E2E-OK");
+        // 报告里先放具体的 FAIL 行，再放最后两行（通常是 E2E-FAILED / 围栏回收）；
+        // 否则汇总里只剩"failed=1"，看报告的人还得去翻整份日志。
+        const failLine = r.out.split(/\r?\n/).find((l) => l.startsWith("FAIL "));
+        const legDetail = (r.error ? "超时/起不来：" + r.error + " / " : "") +
+          (failLine ? failLine + " / " : "") +
+          r.out.trim().split(/\r?\n/).slice(-2).join(" / ");
+        if (!legOk) raw = (raw || "") + "\n" + r.out.slice(-800);
+        return { step: label, status: legOk ? "pass" : "fail", detail: legDetail, ms: legMs };
+      };
+      steps.push(runLeg("L4 端到端", "e2e-orchestrator.log", null, 25 * 60 * 1000));
+      // 浏览器旅程：真实 Chromium（系统 Edge/Chrome 优先，缺了自动下载到 target/playwright）。
+      steps.push(runLeg("L4 浏览器端到端", "e2e-browser-orchestrator.log", "browser.cjs", 15 * 60 * 1000));
+      ms = steps.reduce((n, s) => n + s.ms, 0);
+      status = steps.every((s) => s.status === "pass") ? "pass" : "fail";
+      detail = steps.map((s) => s.step + "=" + s.status).join(" / ");
     }
   }
+
+  // 构建失败或编排未迁入时没有子步骤：补一条，否则 failed 会算成 0。
+  if (!steps.length) steps.push({ step: "L4 端到端", status, detail, ms });
 
   // ms 只量 L4 本体（编排器）：构建是前置，算进来会让"这一步慢不慢"失真；构建耗时单列在 detail 里。
   const report = {
     platform: process.platform,
     arch: process.arch,
     osKey: IS_WIN ? "windows" : process.platform === "darwin" ? "macos" : "linux",
-    steps: [{ step: "L4 端到端", status, detail: detail + "（构建 " + (buildMs / 1000).toFixed(1) + "s）", ms }],
+    steps: steps.map((s) => Object.assign({}, s, { detail: s.detail + "（构建 " + (buildMs / 1000).toFixed(1) + "s）" })),
     envSkips,
-    failed: status === "fail" ? 1 : 0,
+    failed: steps.filter((s) => s.status === "fail").length,
     quality: { failed: 0, steps: [] },
   };
   fs.mkdirSync(path.dirname(REPORT), { recursive: true });
@@ -89,7 +110,7 @@ function main() {
 
   console.log("");
   console.log("=== L4 端到端（" + process.platform + " " + process.arch + "）===");
-  console.log("  " + status.padEnd(13) + " L4 端到端  " + detail);
+  for (const s of steps) console.log("  " + s.status.padEnd(13) + " " + s.step.padEnd(16) + " " + s.detail);
   if (raw) console.log(raw);
   if (status === "fail") {
     console.log("TEST-REPORT-FAIL");

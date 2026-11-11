@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * 验收闸门判定（CI 的 gate job 唯一逻辑；--self-test 覆盖所有分支）。
- * 管：读 CHANGES / CODE_CHANGED / DOCS_CHANGED / DOCS / STRUCTURE / WORKFLOW / QUALITY / E2E 环境变量，
+ * 管：读 CHANGES / CODE_CHANGED / DOCS_CHANGED / DOCS / STRUCTURE / WORKFLOW / QUALITY / E2E / COVERAGE 环境变量，
  *     写 step summary 与 ::error::，给出合并判定；--self-test 用纯输入跑 8 个样例。
  * 不管：跑测试、产报告（run-tests.js / ci-merge.mjs）与规则集本身（仓库外事实，见 docs/testing/execution-ci.md）。
  * 约束：只读环境变量与（可选）GITHUB_STEP_SUMMARY；不联网、不写仓库文件；lane 名必须与 test.yml 的 job 名一一对应。
@@ -17,6 +17,7 @@ const LANES = [
   { key: "structure", name: "结构审查" },
   { key: "workflow", name: "工作流静态检查" },
   { key: "quality", name: "质量与单元" },
+  { key: "coverage", name: "覆盖率门禁" },
   { key: "e2e", name: "端到端" },
 ];
 
@@ -29,7 +30,7 @@ export function decide(input) {
   const env = input || {};
   const allowDocs = env.docsChanged === "false";
   const allowCode = env.codeChanged === "false";
-  const allow = { docs: allowDocs, structure: false, workflow: false, quality: allowCode, e2e: allowCode };
+  const allow = { docs: allowDocs, structure: false, workflow: false, quality: allowCode, coverage: allowCode, e2e: allowCode };
   const lanes = LANES.map((l) => Object.assign({}, l, { result: env[l.key] || "", allowSkip: allow[l.key] }));
   const failed = lanes.filter((l) => l.result !== "success" && !(l.result === "skipped" && l.allowSkip));
   return { changes: env.changes || "", changesOk: env.changes === "success", lanes, failed, ok: failed.length === 0 };
@@ -49,6 +50,7 @@ function main() {
     structure: process.env.STRUCTURE,
     workflow: process.env.WORKFLOW,
     quality: process.env.QUALITY,
+    coverage: process.env.COVERAGE,
     e2e: process.env.E2E,
   });
   if (process.env.GITHUB_STEP_SUMMARY) {
@@ -70,6 +72,7 @@ const full = {
   structure: OK,
   workflow: OK,
   quality: OK,
+  coverage: OK,
   e2e: OK,
 };
 // changes 失败 / 取不到 diff：两个分类字段都是空串，下游两路都跑，跳过一律不合法。
@@ -81,18 +84,19 @@ const changesFailed = {
   structure: OK,
   workflow: OK,
   quality: OK,
+  coverage: OK,
   e2e: OK,
 };
 const CASES = [
   {
     name: "纯文档：docs 跑、平台 job 跳过合法",
-    input: { changes: OK, codeChanged: "false", docsChanged: "true", docs: OK, structure: OK, workflow: OK, quality: "skipped", e2e: "skipped" },
+    input: { changes: OK, codeChanged: "false", docsChanged: "true", docs: OK, structure: OK, workflow: OK, quality: "skipped", coverage: "skipped", e2e: "skipped" },
     ok: true,
     failed: [],
   },
   {
     name: "纯代码：docs 跳过合法、平台 job 必须跑",
-    input: { changes: OK, codeChanged: "true", docsChanged: "false", docs: "skipped", structure: OK, workflow: OK, quality: OK, e2e: OK },
+    input: { changes: OK, codeChanged: "true", docsChanged: "false", docs: "skipped", structure: OK, workflow: OK, quality: OK, coverage: OK, e2e: OK },
     ok: true,
     failed: [],
   },
@@ -103,10 +107,10 @@ const CASES = [
     failed: [],
   },
   {
-    name: "有代码变更时 quality 必须跑（workflow 恒跑，跳过同样拦）",
-    input: Object.assign({}, full, { workflow: "skipped", quality: "skipped" }),
+    name: "有代码变更时 quality / coverage 必须跑（workflow 恒跑，跳过同样拦）",
+    input: Object.assign({}, full, { workflow: "skipped", quality: "skipped", coverage: "skipped" }),
     ok: false,
-    failed: ["workflow", "quality"],
+    failed: ["workflow", "quality", "coverage"],
   },
   {
     name: "structure 恒跑：跳过即失败",
@@ -116,7 +120,7 @@ const CASES = [
   },
   {
     name: "有文档变更时 docs 必须跑：跳过即失败",
-    input: { changes: OK, codeChanged: "false", docsChanged: "true", docs: "skipped", structure: OK, workflow: OK, quality: "skipped", e2e: "skipped" },
+    input: { changes: OK, codeChanged: "false", docsChanged: "true", docs: "skipped", structure: OK, workflow: OK, quality: "skipped", coverage: "skipped", e2e: "skipped" },
     ok: false,
     failed: ["docs"],
   },
@@ -133,9 +137,9 @@ const CASES = [
   },
   {
     name: "cancelled：任何 lane 被判 cancelled 都不算通过",
-    input: { changes: "cancelled", codeChanged: "", docsChanged: "", docs: "cancelled", structure: "cancelled", workflow: "cancelled", quality: "cancelled", e2e: "cancelled" },
+    input: { changes: "cancelled", codeChanged: "", docsChanged: "", docs: "cancelled", structure: "cancelled", workflow: "cancelled", quality: "cancelled", coverage: "cancelled", e2e: "cancelled" },
     ok: false,
-    failed: ["docs", "structure", "workflow", "quality", "e2e"],
+    failed: ["docs", "structure", "workflow", "quality", "coverage", "e2e"],
   },
 ];
 

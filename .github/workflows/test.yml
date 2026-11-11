@@ -8,11 +8,13 @@
 # 真机围栏、TLS 出站）；文档/结构审查在 CI 里跑是为了合并闸门，不是补平台结论。inputs.clean=true 跳过缓存，用于「干净机器」验收。契约见 docs/testing/execution-ci.md。
 #
 # job 结构：平台相关的是 quality（平台门禁 + 单元 + 探针 + 前端冒烟）与 e2e（L4 端到端）；
+# 覆盖率门禁 coverage 只在 Linux 判定（子进程 profile 依赖 POSIX 信号正常退出，Windows 的 TerminateProcess
+# 会丢掉产品进程 atexit 写出的 profile；平台专有代码由三平台 quality 的行为测试覆盖）；
 # 平台无关的是 changes（分流）、docs（文档审查）、structure（结构审查）、workflow（工作流静态检查）、
 # gate（验收闸门）与 publish-report（汇总发布）。
-# 有代码变更 → quality / e2e；有文档变更 → docs；structure / workflow 始终跑（结构代码和文档两边都能破坏；
+# 有代码变更 → quality / coverage / e2e；有文档变更 → docs；structure / workflow 始终跑（结构代码和文档两边都能破坏；
 # workflow 改坏会让必填检查不上报，所以不按变更类型跳过）。
-# gate 汇总五个 job 的结果，是规则集里唯一代表代码/文档验收的必填检查：quality / e2e 是矩阵 job，被 job 级 if 跳过时
+# gate 汇总六个 job 的结果，是规则集里唯一代表代码/文档验收的必填检查：quality / e2e 是矩阵 job，被 job 级 if 跳过时
 # 矩阵不展开，只报一条名字带字面量 ${{ matrix.os }} 的 skipped，永远对不上按平台名配置的 required context。
 # gate 的判定逻辑在 tests/ci-gate.mjs（--self-test 覆盖跳过合法性），本文件只把 needs.*.result 传进去。
 # 报告统一到 ci-report：runs/structure、runs/docs、runs/<os>；gate 只做闸门，不产报告。
@@ -254,6 +256,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
+      # 前端类型检查用项目内 node_modules（清单与锁文件入库）；不跑第三方安装脚本。
+      - name: 安装前端类型检查依赖（npm ci）
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
       # 仅 CI：预编译装供应链工具（快）。本地开发不引第三方，仍按 run-tests.js 的提示 cargo install 到项目内。
       # 安装用时经 SOLOMNI_CI_PREINSTALL_MS 带进门禁报告（见 docs/testing/execution-ci.md）。
       - name: 记录供应链工具安装起跑
@@ -324,7 +330,8 @@ jobs:
     # 有代码变更才跑；文档-only 时跳过。
     if: ${{ always() && !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (needs.changes.result != 'success' || needs.changes.outputs.code_changed != 'false') }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    # HTTP 旅程 + 浏览器旅程各起一次编排器；浏览器缺失时要下载 Chromium，留足墙钟。
+    timeout-minutes: 45
     env:
       CARGO_HOME: ${{ github.workspace }}/platform/ci/cargo
       SOLOMNI_CARGO_HOME: ${{ github.workspace }}/platform/ci/cargo
@@ -349,6 +356,10 @@ jobs:
           rustc --version
           cargo --version
 
+      # 浏览器 E2E 用项目内 playwright（根 package.json + 锁文件）；不跑安装脚本，浏览器由 CLI 单独下载。
+      - name: 安装浏览器 E2E 依赖（npm ci）
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
       - name: 建项目内 CARGO_HOME（缓存要求目录先存在）
         if: ${{ !inputs.clean }}
         shell: bash
@@ -367,8 +378,18 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      # 自己构建产品（不依赖 quality job 的产物，才能和它并行）：构建 + 编排 + 写 e2e-report.json。
-      - name: 跑 L4 端到端
+      # 浏览器二进制单独缓存：按 playwright 锁文件版本取，换版本自动失效。
+      - name: 恢复浏览器缓存（inputs.clean 时跳过）
+        if: ${{ !inputs.clean }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      # 自己构建产品（不依赖 quality job 的产物，才能和它并行）：构建 + HTTP 旅程 + 浏览器旅程 + 写 e2e-report.json。
+      - name: 跑 L4 端到端（HTTP + 浏览器）
         run: node tests/ci-e2e.mjs
 
       # 上传根必须与 quality 一致（都是 target/）：发布端把产物 cp 进 target/ 再找 target/e2e-report.json；
@@ -389,6 +410,7 @@ jobs:
             target/e2e-report.json
             target/test-logs/
             target/e2e-logs/
+            target/e2e-browser/
           if-no-files-found: ignore
 
       # 保存只在 main（同 quality job）：PR 只恢复 main 的缓存，不往缓存池里加同分支私有项。
@@ -402,13 +424,98 @@ jobs:
             target/debug
           key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
 
+      - name: 保存浏览器缓存（仅 main）
+        if: ${{ !inputs.clean && github.ref == 'refs/heads/main' }}
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
+
+  coverage:
+    name: 覆盖率门禁（Linux）
+    needs: changes
+    # 有代码变更才跑；覆盖率要跑单元/平台测试 + 插桩构建 + L4，成本高于 quality，不放进矩阵。
+    if: ${{ always() && !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (needs.changes.result != 'success' || needs.changes.outputs.code_changed != 'false') }}
+    runs-on: ubuntu-latest
+    # 冷机要编译两遍（普通 + 插桩）再跑 L4；给足时间，超时按失败处理。
+    timeout-minutes: 60
+    env:
+      CARGO_HOME: ${{ github.workspace }}/platform/ci/cargo
+      SOLOMNI_CARGO_HOME: ${{ github.workspace }}/platform/ci/cargo
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # 只读 job：不写仓库，关闭令牌持久化（zizmor artipacked）。
+          persist-credentials: false
+          ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/head', github.event.pull_request.number) || github.sha }}
+          # 变更行门禁要拿 PR 基线做 git diff；浅克隆没有基线提交。
+          fetch-depth: 0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "lts/*"
+
+      - name: 准备 Rust（借用 runner 自带工具链）
+        run: |
+          rustc --version
+          cargo --version
+
+      - name: 建项目内 CARGO_HOME（缓存要求目录先存在）
+        if: ${{ !inputs.clean }}
+        shell: bash
+        run: mkdir -p platform/ci/cargo
+
+      # 只缓存依赖：插桩产物带 RUSTFLAGS，跨提交复用会把编译缓存搅乱，不缓存 target/。
+      - name: 恢复依赖缓存（inputs.clean 时跳过）
+        if: ${{ !inputs.clean }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: platform/ci/cargo
+          key: ${{ runner.os }}-coverage-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-coverage-cargo-
+
+      # cargo-llvm-cov 只在 CI 装（本地按 docs/testing/execution-ci.md 的提示装到项目内 .tools）。
+      - name: 安装覆盖率工具
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: cargo-llvm-cov@0.9.1
+
+      - name: 安装 LLVM 覆盖率运行时
+        run: rustup component add llvm-tools-preview
+
+      # 四步：测试进程内 profile → 插桩构建产品 → L4 子进程 profile → 合并报告并按风险区判 80/60/100。
+      # 测试或 e2e 失败也判失败；缺工具直接非零，不记 env-skip 冒充通过。
+      - name: 采集并判定覆盖率
+        env:
+          # PR 才有基线；main 推送与手动运行只判风险桶。
+          COVERAGE_DIFF_BASE: ${{ github.event.pull_request.base.sha }}
+        run: node tests/coverage.mjs --collect
+
+      - name: 留产物（覆盖率报告与摘要；无论成败）
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-report
+          path: target/coverage/
+          if-no-files-found: ignore
+
+      - name: 保存依赖缓存（仅 main）
+        if: ${{ !inputs.clean && github.ref == 'refs/heads/main' }}
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: platform/ci/cargo
+          key: ${{ runner.os }}-coverage-cargo-${{ hashFiles('Cargo.lock') }}
+
   gate:
     name: 验收闸门
-    # 规则集里代表「代码/文档验收可合并」的必填检查：质量与单元 / 端到端是矩阵 job，被 job 级 if 跳过时矩阵不展开，
+    # 规则集里代表「代码/文档验收可合并」的必填检查：quality / e2e 是矩阵 job，被 job 级 if 跳过时矩阵不展开，
     # 只报一条名字带字面量 ${{ matrix.os }} 的 skipped，按平台名配置的 required context 永远不会上报。
     # 这里用固定名字汇总：跳过是否合法按变更分类判，不按「有没有跑」猜；判定逻辑在 tests/ci-gate.mjs（可自测）。
     # always()：依赖失败或被跳过也要给出结论；取消的 job 结果不是 success，同样判失败，不让 skipped 冒充通过。
-    needs: [changes, docs, structure, workflow, quality, e2e]
+    needs: [changes, docs, structure, workflow, quality, coverage, e2e]
     if: ${{ always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -425,7 +532,7 @@ jobs:
         with:
           node-version: "lts/*"
 
-      - name: 按变更类型核对五个 job
+      - name: 按变更类型核对六个 job
         env:
           CHANGES: ${{ needs.changes.result }}
           CODE_CHANGED: ${{ needs.changes.outputs.code_changed }}
@@ -434,6 +541,7 @@ jobs:
           STRUCTURE: ${{ needs.structure.result }}
           WORKFLOW: ${{ needs.workflow.result }}
           QUALITY: ${{ needs.quality.result }}
+          COVERAGE: ${{ needs.coverage.result }}
           E2E: ${{ needs.e2e.result }}
         run: node tests/ci-gate.mjs
 

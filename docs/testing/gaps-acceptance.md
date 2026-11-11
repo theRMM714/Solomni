@@ -53,9 +53,9 @@ tests/
  dev-loop.mjs # 开发回路自检（dev.js 的子命令表与拒绝出口）
  pins-tool.mjs # 依赖哈希工具自检（pins.js 的解析 / 来源推导 / 原地重写；不碰网络）
  env-bootstrap.mjs # 环境引导自检（env.js 的 MinGW / Zig cc 引导、下载 / 结构判定 / sha256 闸；MinGW 仅 Windows、Zig 仅 POSIX 真跑）
- ci-mutation.mjs # 突变测试入口（core / capability 两个范围；范围见 tests/mutation-scope.json）
+ ci-mutation.mjs # 突变测试入口（core / weekly / capability 三个范围；范围见 tests/mutation-scope.json）
  ci-mutation-publish.mjs # 把突变小结发到 ci-mutation 滚动分支（各推各的，不碰 ci-report）
- mutation-scope.json # 突变测试范围（文件级清单；core + 各能力）
+ mutation-scope.json # 突变测试范围（文件级清单；core + weekly + 各能力）
  comment-baseline.json # 注释契约棘轮基线（run-hygiene.js）
  dependency-baseline.json # 依赖方向门禁的基线（跨能力 / 层间）
  structure-baseline.json # 能力内部门禁的基线与大文件回执快照（service 引 detail、service 直接 IO、方法族成环）

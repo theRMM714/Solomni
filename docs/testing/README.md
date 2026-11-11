@@ -11,6 +11,7 @@
 | 替身（Stub / Fake / Mock / Spy / Fixture）语义与端口矩阵 | [doubles.md](doubles.md) |
 | 资源边界、副作用清理、质量门禁与 `allow` 清单 | [quality-isolation.md](quality-isolation.md) |
 | 本地入口、报告读法、成功标记、CI 与报告发布 | [execution-ci.md](execution-ci.md) |
+| 覆盖率门禁的风险区、采集方式与平台边界 | [execution-ci.md](execution-ci.md) 的「覆盖率门禁（Linux）」 |
 | 查门禁 / 步骤 / 标记清单，或只跑需要的几项（`--list` / `--only` / `--changed`） | [execution-ci.md](execution-ci.md) 的「选择性执行」 |
 | 目录与命名、缺口账格式、工作方法与验收清单 | [gaps-acceptance.md](gaps-acceptance.md) |
 | 模块作者要交什么测试证据 | [module-delivery.md](module-delivery.md) |

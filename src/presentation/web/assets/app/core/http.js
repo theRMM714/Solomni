@@ -16,10 +16,10 @@ export function createApi(fetchImpl) {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const err = new Error(data.error || ('HTTP ' + res.status));
-      err.status = res.status;
-      err.data = data;
-      throw err;
+      throw Object.assign(new Error(data.error || ('HTTP ' + res.status)), {
+        status: res.status,
+        data,
+      });
     }
     return data;
   };
