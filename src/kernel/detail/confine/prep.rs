@@ -5,7 +5,9 @@
 
 #[cfg(windows)]
 use super::windows;
-use crate::kernel::api::{FenceBlocked, FencePart, FenceSpec};
+#[cfg(windows)]
+use crate::kernel::api::FenceSpec;
+use crate::kernel::api::{FenceBlocked, FencePart};
 
 /// 目的：扫掉本程序建过的整族容器 profile：台账只记"我们知道写过什么"，而 profile 可能来自没有台账的路径
 ///   （探针、夹具的台账被删、进程被杀）。名字前缀是本程序独有的，所以按它扫。返回扫掉的个数。

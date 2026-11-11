@@ -5,6 +5,7 @@
 
 use crate::kernel::api::FenceSpec;
 use std::ffi::OsString;
+#[cfg(windows)]
 use std::path::{Path, PathBuf};
 use std::process::Command;
 

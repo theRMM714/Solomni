@@ -5,6 +5,7 @@
 
 #[cfg(windows)]
 use super::windows;
+#[cfg(windows)]
 use crate::kernel::api::FenceSpec;
 
 /// 目的：启动期对账——按台账回收"归属明确已死"的陈旧授权；无法判定的报告后跳过（启动与 `--fence-reconcile` 共用）。
