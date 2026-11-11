@@ -482,7 +482,7 @@ pub fn run_fenced(
     match cmd.status() {
         Ok(s) => {
             let code = s.code().unwrap_or(FENCE_FAILED);
-            super::note_fence_boundary(spec, fs_enforced, net_enforced, code);
+            super::texts::note_fence_boundary(spec, fs_enforced, net_enforced, code);
             code
         }
         Err(e) => {
