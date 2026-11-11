@@ -1,6 +1,6 @@
 # 单元地图 · kernel
 
-> 定位：kernel（机制型业务）逐文件职责的唯一权威；由 T0 结构审查与磁盘双向比对。
+> 定位：kernel（地基库）逐文件职责的唯一权威；由 T0 结构审查与磁盘双向比对。
 > 效力：契约｜核对：2026-11-04｜依据：`src/kernel/api.rs`
 
 > 本文是 **kernel** 逐文件职责的唯一权威；由 `node run-tests.js` 的 T0 结构审查与磁盘**双向比对**
@@ -12,10 +12,10 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/kernel/mod.rs` | 机制型业务的入口与公开面：`api` / `ports` / `domain` / `detail` 四个子模块的形状声明 |
-| `src/kernel/api.rs` | 机制型业务的对外面：共享事实（`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask` / 默认预算）与纯机制（`slash` 的对外写法、路径写法 `native` / `is_unc` / `unc_parts`、落点身份 `locus_of` / `place_contains` / `is_network_path`、生成中作业的取消表 `JobRegistry`）的重导出 |
+| `src/kernel/mod.rs` | 地基库的入口与公开面：`api` / `ports` / `domain` / `detail` 四个子模块的形状声明 |
+| `src/kernel/api.rs` | 地基库的对外面：共享形状（`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask` / 默认预算）与纯机制（`slash` 的对外写法、路径写法 `native` / `is_unc` / `unc_parts`、落点身份 `locus_of` / `place_contains` / `is_network_path`、生成中作业的取消表 `JobRegistry`）的重导出 |
 | `src/kernel/ports.rs` | 全项目共享的机制端口：`Log` / `PathCodec` / `ProcessTexts` / `AskUser` / `ToolHandler` / `HostProbe` / `ProcessRunner` / `SessionHost` / `FenceHost` 的 trait 定义与它们的纯数据形态（含 `ShellRun` 与 shell 收尾文案） |
-| `src/kernel/domain/types.rs` | 跨业务共享的事实类型（纯数据）：`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask` / `AskOutcome` 与默认预算、能力名文法 |
+| `src/kernel/domain/types.rs` | 跨层共享的形状（纯数据）：`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask` / `AskOutcome` 与默认预算、能力名文法 |
 | `src/kernel/domain/fence.rs` | 围栏描述符（`FenceSpec`）与落点判据（`FencePart`/`FenceBlocked`/`fence_ask`）：纯数据 |
 | `src/kernel/domain/path.rs` | 路径的对外书写形式：把路径统一写成 `/` 分隔的字符串（给提示词、回执与 JSON 用）；把 Windows 的 verbatim / UNC 写法还原成普通写法、拆出 UNC 的 server / share，并给出落点身份 `Locus` 的键（纯逻辑） |
 | `src/kernel/domain/jobs.rs` | 生成中作业的取消表（`JobRegistry`）：同一会话每次生成各持一面旗，停止置位全部、摘旗按身份 |

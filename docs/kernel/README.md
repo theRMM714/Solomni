@@ -1,6 +1,6 @@
-# kernel（机制型业务）
+# kernel（地基库）
 
-> 定位：没有领域语义的机制；依赖图最底层。
+> 定位：没有领域语义的机制库；不是层，是依赖图最底层的地基。
 > 效力：规范｜核对：2026-11-09｜依据：`src/kernel/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九，测试规范见 [TESTING.md](../../TESTING.md)。
 
@@ -8,17 +8,17 @@
 
 - 管：运行日志端口、宿主探测端口、**提问端口**（请用户裁决）。
 - 管：生成中作业的取消表。
-- 管：跨业务共享的**事实类型**与路径的对外书写形式。
+- 管：跨层共享的**形状**（DTO）与路径的对外书写形式。
 - 管：**外部进程执行**——一次性的 `ProcessRunner` 与长驻的 `SessionHost`。
 - 管：**长驻子进程的账与回收**（`procs`）。
 - 管：**围栏机制**（`confine`）——可达范围、出站网络、进程树、平台实现与 Windows 授权台账。
-- 不管：**不认识任何能力 / 呈现层 / 入口层**。
-- 不管：不放有领域语义的类型——它不需要知道什么是回合、回复、工具执行。
+- 不管：**不认识任何能力 / 呈现层 / 根**。
+- 不管：不解释共享形状的业务语义——它不需要知道什么是回合、回复、工具执行。
 - 不管：**不决定**可达范围（策略由调用方派生后传入）。
 
 ## 入站契约与状态归属
 
-- 入站面：`api`（`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask` / `AskOutcome` / `FenceSpec` / `DEFAULT_LLM_TIMEOUT_SECS` / `valid_capability` / `slash` / `JobRegistry`）、`ports`（`Log`、`HostProbe`、`ToolHandler`、`AskUser`、`PathCodec`、`ProcessRunner`、`SessionHost`、`ProcessTexts`、`FenceHost`——R12 的例外：全项目共享）、`domain`（事实类型、路径书写、取消表、围栏描述符）、`detail`（`file_log`、`host_probe`、`outbound`、`unpack`、`process`、`procs`、`session`、`confine`）。
+- 入站面：`api`（`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask` / `AskOutcome` / `FenceSpec` / `DEFAULT_LLM_TIMEOUT_SECS` / `valid_capability` / `slash` / `JobRegistry`）、`ports`（`Log`、`HostProbe`、`ToolHandler`、`AskUser`、`PathCodec`、`ProcessRunner`、`SessionHost`、`ProcessTexts`、`FenceHost`——R12 的例外：全项目共享）、`domain`（共享形状、路径书写、取消表、围栏描述符）、`detail`（`file_log`、`host_probe`、`outbound`、`unpack`、`process`、`procs`、`session`、`confine`）。
 - `AskUser` 是「需要用户裁决的机制请用户裁决」的**唯一**入口（`src/kernel/ports.rs`），工具执行层与围栏用它。
   - 形状：`ask(问题) -> 选项 id`，**阻塞**。
   - `halt(为什么)` = 停会话 + 落警告；调用方只在有可回答前端时用它，没有前端按 fail-closed 收场。
@@ -139,7 +139,7 @@
 
 ## 改动本单元时必须同步
 
-- 共享事实类型（R6）一改，所有使用者同改；路径拼接规则见 `ARCHITECTURE.md` §八（禁止把分隔符写进字符串）。
+- 共享形状（R6）一改，所有使用者同改；路径拼接规则见 `ARCHITECTURE.md` §八（禁止把分隔符写进字符串）。
 - 平台专属代码本地不编译——`FenceSpec` 字面量必须写全字段（跨平台字面量门禁，`src/kernel/domain/fence.rs`）；改围栏 → `tests/<平台>/` 探针。
 - 围栏的写后核对、回滚与台账在 `src/kernel/detail/confine/windows/`：改落点形状（`GrantTarget`）或台账字段时，`prepare_fence` / `release_fence` / `clean` / `sweep_orphan_aces` 与按条处置（`catalog` / `restore_one` / `revoke_grant` / `remove_profile_one`）要一起改。
 - 改**归属字段**（含会话租约 `Sandbox.session` → `FenceSpec.lease` → `Owner.lease`）或启动对账时，`src/kernel/detail/confine/windows/record.rs` 的 `current_owner` / `owners_state` / `reconcile` / `release_fence` / `clean` 与入口 `--fence-reconcile` 要一起改；启动对账的接线在 `src/main.rs`。

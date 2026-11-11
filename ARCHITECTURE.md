@@ -9,23 +9,27 @@
 
 ## 一、分层与依赖方向
 
-- 依赖箭头只有一种画法（每层只指向它的下层）：
+- 对外表述是**三层 + 一块地基库**：**根**（启动程序与组合根）、**呈现层**、**业务层**；`kernel/` 是**地基库，不是层**；测试层横切，不参与运行时分层。依赖箭头只有一种画法（外层指向内层）：
 
 ```text
-presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）──▶ kernel
-（main = 组合根，装配全部；各能力的 `detail` 与 kernel 的实现只在这里被 new 出来，它们不认识业务编排）
+根（main.rs + entry/ + diagnostics/ + guard/）
+  ├──▶ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）──▶ kernel（地基库）
+  └──▶ capabilities / kernel（注入适配器、跑探针与守门模式）
+（根 = 启动 + 组合根 + 机器探针 + 守门进程；各能力的 `detail` 与 kernel 的实现只在这里被 new 出来）
 ```
 
-| 层 | 干什么 | 禁令 |
+| 单元 | 干什么 | 禁令 |
 | --- | --- | --- |
-| `kernel/` | **机制型业务**：无领域语义、无领域状态的机制（运行日志端口、宿主探测、取消表、跨业务共享的事实类型、路径书写、外部进程执行与长驻子进程账、围栏机制）；形状与别的能力一致（`api` / `ports` / `domain` / `detail`） | **不依赖任何人**；不放有领域语义的类型 |
-| `capabilities/` | **业务能力**：按业务功能垂直切分。每个能力有 `api`（入站契约：trait + DTO）/ `service`（本能力的状态与用例）/ `ports`（出站端口，只由定义它的能力持有）/ `domain`（纯逻辑）/ `detail`（只有组合根能构造） | **业务之间只经对方的 `api`**；不反向依赖 `entry` / `presentation`（T0 机器判定，见 §九.7） |
+| **根**（`entry/` + `main.rs` + `diagnostics/` + `guard/`） | **启动程序与组合根**：解析根、`new` 出所有适配器并注入、跑启动对账、把入站面交给呈现层；机器可读探针（`--doctor` / `--https-check` / `--print-routes` / `--print-fence-env` / `--fence-verify`）；围栏守门进程与台账处置（`--fence-run`；以及 `--fence-clean` / `--fence-reconcile` / `--fence-ledger` / `--fence-restore` / `--fence-revoke` / `--fence-profile-rm`）；长驻子进程守门进程（`--proc-watchdog`，macOS 的父死子亡） | 它依赖所有人，**任何人都不许依赖它**；除启动、装配、探针与守门外无业务 |
+| `presentation/{cli,web}/` | **呈现层（交付机制）**：各渠道一个子目录，完全分开——传输（argv/stdout vs HTTP）、路由、纯渲染。**不是业务能力** | 只依赖各能力的 `::api`；**拿不到端口对象，也拿不到 `Core`**；两者互不依赖 |
+| `capabilities/` | **业务层**：按业务功能垂直切分。每个能力有 `api`（入站契约：trait + DTO）/ `service`（本能力的状态与用例）/ `ports`（出站端口，只由定义它的能力持有）/ `domain`（纯逻辑）/ `detail`（只有组合根能构造） | **业务之间只经对方的 `api`**；不反向依赖根 / 呈现层（T0 机器判定，见 §九.7） |
 | `capabilities/conductor/` | **协调业务**：会话中心（在世表、命令队列、运行态）、生成驱动、跨能力用例与跨会话回档编排；与别的能力**平级** | 不读文件、不发网络、不碰 stdin/stdout——机制下沉各能力的 `detail/` |
-| `presentation/{cli,web}/` | **前端（交付机制）**：各渠道一个子目录，完全分开——传输（argv/stdout vs HTTP）、路由、纯渲染。**不是业务能力** | 只依赖各能力的 `::api`；**拿不到端口对象，也拿不到 `Core`**；两者互不依赖 |
-| `entry/` + `main.rs` + `diagnostics/` + `guard/` | **入口层**：组合根（`main.rs`：`new` 出所有适配器并注入）+ 机器可读探针（`--doctor` / `--https-check` / `--print-routes` / `--print-fence-env` / `--fence-verify`）+ 围栏守门进程与台账处置（`--fence-run`；以及 `--fence-clean` / `--fence-reconcile` / `--fence-ledger` / `--fence-restore` / `--fence-revoke` / `--fence-profile-rm`）+ 长驻子进程守门进程（`--proc-watchdog`，macOS 的父死子亡） | 它依赖所有人，**任何人都不许依赖它**；除装配与探针外无业务 |
+| `kernel/` | **地基库（非层）**：无领域语义、无领域状态的机制（运行日志端口、宿主探测、取消表、跨层共享的形状、路径书写、外部进程执行与长驻子进程账、围栏机制）；形状与别的能力一致（`api` / `ports` / `domain` / `detail`） | **不依赖任何人**；不解释共享形状的业务语义，不构造业务决策与面向用户的文案 |
 
 - 推论：
 
+- **机制不升格为业务**：日志、路径、进程、围栏、平台差异归一化没有领域词、没有用户可见后果，留在 `kernel` 或所属能力的 `detail/`；调用方多不等于业务（判据见 §九.1）。
+- **根不是业务层**：它只做启动、装配、探针与守门；业务用例不得写进 `main.rs` / `entry/`。
 - 「用哪个供应商 / 模型」是**策略**（`registry` 的解析链决定）；「怎么建通道」是**机制**（llm 的 `detail`）。两者不互换。
 - 出站依赖由**各能力定义端口**、**各能力的 `detail` 实现**；入站依赖由**各能力定义 `api`**；`Ops` 只把它们**组装**给呈现层。
 - **能力不定义"前端接口让别人实现"**。
@@ -110,7 +114,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 ## 六、状态与落盘契约
 
 - **每个状态只有一个家**：会话状态归 `session`、构建状态归 `builds`、空间台账归 `storage`；别的单元读写只能经该能力的 `api`，不直接读对方文件（R1 / R4，判据在 `tests/gates/structure/dependency.js`）。
-- **跨能力共享的事实类型放 `kernel`**（R6）；业务自己的入参 / 出参留在本能力 `api`。
+- **跨层共享的形状由 `kernel` 托管**（R6）：`kernel` 只存放与搬运 DTO，不解释业务语义、不构造业务决策与面向用户的文案；业务自己的入参 / 出参留在本能力 `api`。
 - **转录即状态**：会话内容 = 按 `rewind` 标记回放出的活动窗口；内存与落盘不一致时**以流水为准**。
 - **能重建的不落盘**：视图、索引、账本缓存与执行计划是派生物，重启后由真相重建；写盘只写派生不出来的事实。
 - **落盘路径相对根派生**：一律用 `PathBuf` 组件拼接、不写机器绝对路径（R9，例见 `src/capabilities/builds/detail/cache.rs`）；含机器路径的内容不进仓库。
@@ -163,6 +167,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 1. **有自己的用例**：一组有领域词、有**自有协议**、有**用户可见后果**的行为。**它说的概念属于某个参与方 → 就归那个参与方**；不属于任何参与方的概念（名单、任务链）才自成业务。
 2. **能指名 ≥2 个调用方**：不抽出来，这两个（或更多）能力就会各写一遍。**已被证实的重复是最强证据**；**只有一个调用方的编排不抽**，留在它自己的 `service.rs`。
 
+- **机制不因调用方多而升格**：日志、路径、进程、围栏、平台差异归一化这类没有领域词、没有用户可见后果的机制，留在 `kernel` 或所属能力的 `detail/`，不按第 2 条算作业务；第 2 条只用来判断「已有自己用例」的能力是否值得独立。
 - **状态不参与这条判据**——它只在 §九.2 回答「这块状态归谁」。
 
 ### 九.2 状态归属
@@ -179,7 +184,9 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 | --- | --- | --- |
 | **协调型业务** | 跨参与方的编排：有自有协议 + 用户可见后果 + 领域词 API | 独立业务；**可持状态**；向下调参与方 `api`，**参与方不得反向调它**（`conductor`） |
 | **领域型业务** | 说的是自己的数据 / 概念，规则与状态自成一体 | 独立业务；**只持自己的状态**；有 IO 或可替换点才有 `ports.rs` / `service.rs`（`taskchain` 就是没有端口、没有 `service` 的领域型） |
-| **机制型（`kernel`）** | 没有领域语义 | `kernel/`：**领域词测试**——它不需要知道什么是回合 / 回复 / 工具执行；有机制状态与机制端口，只被依赖 |
+| **地基库（`kernel`，非层）** | 没有领域语义 | `kernel/`：托管跨层共享的形状与机制；**领域词测试**——它不需要知道什么是回合 / 回复 / 工具执行；**不解释形状的业务语义、不构造业务决策与文案**；有机制状态与机制端口，只被依赖 |
+
+- 前两类是业务；第三类不是业务，是地基库，不参与「独立业务」计数。
 
 ### 九.4 反例：什么不配切成业务
 
@@ -202,12 +209,12 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 
 | 编号 | 要求 |
 | --- | --- |
-| **R1** | 业务之间**只经对方的 `api` 交流**（trait + DTO）。不准引 `ports` / `domain` / `detail`；不准给别的能力的类型写 `impl`；`::detail` 只有入口层能碰 |
+| **R1** | 业务之间**只经对方的 `api` 交流**（trait + DTO）。不准引 `ports` / `domain` / `detail`；不准给别的能力的类型写 `impl`；`::detail` 只有根能碰 |
 | **R2** | 依赖图**无环**，由 T0 结构审查机器判定 |
 | **R3** | DIP **只画在 IO 或可替换点上**；纯逻辑刻意不抽象 |
 | **R4** | **状态所有权排他**：一块状态只有一个能力写，别人只经 `api` 读改 |
 | **R5** | **并发模型不变式**：单线程命令队列 + 能力间同步调用，**核心状态不加锁** |
-| **R6** | **共享事实类型只属于 `kernel`**，禁止各业务复制 DTO |
+| **R6** | **跨层共享的形状由 `kernel` 托管**，禁止各业务复制 DTO；`kernel` 不解释这些形状的业务语义，也不构造业务决策与面向用户的文案 |
 | **R7** | **不留兼容层**：项目是 GREEN FIELD，**只维护当前唯一实现**——旧实现直接删，不留转发壳或历史说明 <!-- hygiene-ignore --> |
 | **R8** | **文档同步**：改结构必须同一次改 `ARCHITECTURE.md` / `docs/<单元>/unit-map.md` / 相关细则 / `AGENTS.md` 路由表 |
 | **R9** | **跨平台与路径**：一律 `PathBuf` 组件拼接；对外用 `/`；不假设平台 |
@@ -220,12 +227,12 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 
 - `node run-tests.js` 的 T0 结构审查按下列判据机器判定（规则在 `tests/gates/structure/dependency.js` 与 `tests/gates/structure/capability.js`，逐条清单用 `node run-tests.js --list`；豁免清单分别在 `tests/dependency-baseline.json` 与 `tests/structure-baseline.json`）：
 
-- **apiOnly**：跨能力引用必须以 `::api` 结尾；任何非入口层引用别人的 `ports` 都算违规；
+- **apiOnly**：跨能力引用必须以 `::api` 结尾；任何非根引用别人的 `ports` 都算违规；
 - **apiPorts** / **domainPorts**：`api` 与 `domain` 都不引端口；
 - **foreignImpl**：不得给别的能力的类型写 `impl`（`node run-tests.js`）；
 - **coreCycles**：能力节点图无环；
 - **internal**（能力内部）：`service` 不引本能力 `detail` 或 `kernel::detail`；`service` 不直接做 IO（`std::fs` / `Command` / 网络）；同能力的方法族之间不成环；
-- **reverse** / **presentation**：能力不反向依赖入口层或呈现层；
+- **reverse** / **presentation**：能力不反向依赖根或呈现层；
 - **channelCross**：呈现层的两个渠道（`cli` 与 `web`）互不依赖；
 - **unitMap**：各单元的 `unit-map.md` 合起来与磁盘**双向一致**（结构审查）；**文档链接**：代码注释里的 `docs/**.md` 引用由结构审查判，文档之间的 md 链接与根 `*.md` 路由表由**文档审查**判（本地全量入口的「T0 结构审查」步骤跑全部门禁、含文档审查；CI 拆成 `docs` / `structure` 两个 job，`node run-tests.js --audit=docs` / `--audit=structure`）；
 - **commentContract**：全仓 `.rs` 的文件头四槽（目的 / 管 / 不管 / 联动）、`pub` 项的条目槽（目的 / 参数 / 返回 / 错误 / 约束）与行内注释限量；存量（`文件 × 规则` → 计数）记在 `tests/comment-baseline.json`，门禁只减不增：新增与应销账都硬失败（见 §十）。

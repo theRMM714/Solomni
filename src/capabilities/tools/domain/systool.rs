@@ -10,7 +10,7 @@ use crate::capabilities::workspace::api::Sandbox;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// 一次工具执行结果的事实类型：**归 kernel 共享**——内置、模块与核心自有工具同一形状（R6）。
+/// 一次工具执行结果的形状：**归 kernel 共享**——内置、模块与核心自有工具同一形状（R6）。
 pub use crate::kernel::api::ToolOutcome;
 
 pub const READ: &str = "read";

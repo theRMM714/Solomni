@@ -1,12 +1,12 @@
-# entry（入口层）
+# entry（根：启动、组合根与探针）
 
-> 定位：组合根、机器可读探针、围栏守门进程与长驻子进程守门进程。
+> 定位：根——启动程序、组合根、机器可读探针、围栏守门进程与长驻子进程守门进程；依赖图最外层，不是业务层。
 > 效力：规范｜核对：2026-11-04｜依据：`src/main.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
 
-- 管：入口层共用机制——产品根规范化（`src/entry/root.rs`）与启动期基础工具链 PATH（`src/entry/toolchains.rs`）。
+- 管：根共用机制——产品根规范化（`src/entry/root.rs`）与启动期基础工具链 PATH（`src/entry/toolchains.rs`）。
 - 管：组合根（`src/main.rs`）——new 出各适配器、装配各能力、跑启动对账、把入站能力面交给 CLI 或 Web。
 - 管：机器可读探针与隐藏模式（`src/diagnostics/mod.rs`）。
 - 管：两个守门模式（`src/guard/mod.rs`）——围栏 `--fence-run`、长驻子进程 `--proc-watchdog`，以及围栏台账的按条处置。

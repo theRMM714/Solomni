@@ -1,4 +1,4 @@
-//! 目的：跨业务共享的事实类型。
+//! 目的：跨层共享的形状。
 //! 管：只没有领域逻辑的事实——`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask`（请用户裁决的问题）/ 默认预算。
 //! 不管：带领域逻辑的类型（归各自能力）；各业务自造一份 DTO 副本（R6 禁止）。
 //! 联动：由 `src/kernel/api.rs` 重导出；判据见 ARCHITECTURE.md 的「硬要求清单」R6。
@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// 目的：执行档位——本机 = 直接在宿主上跑；虚拟机 = 整台 guest（不信任 AI 时的可选档）。
-/// 约束：事实类型只属于 kernel（R6）——它被登记处与执行计划共享，且不认识任何业务概念。
+/// 约束：共享形状只属于 kernel（R6）——它被登记处与执行计划共享，且不认识任何业务概念。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Tier {
