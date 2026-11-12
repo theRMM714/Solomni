@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "why": "T0 依赖重复门禁的放行记录：每条必须写清为什么不能统一、影响哪个平台、什么条件下删除；没有记录的重复一律 quality-fail。",
+  "allow": [
+    {
+      "crate": "getrandom",
+      "reason": "zip 9.1 起把 getrandom 0.4 变成无条件依赖；非 Windows 分支的 rustls 0.23 只支持 ring 0.17，其 getrandom 仍是 0.2，ring 升级前无法统一。重复只在 Linux / macOS 目标出现，Windows 目标没有。",
+      "revisit": "ring 0.18 / rustls 0.24 发布，或 zip 收回 getrandom 为可选依赖时删除本条"
+    }
+  ]
+}

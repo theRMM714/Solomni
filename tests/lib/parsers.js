@@ -66,6 +66,25 @@ function duplicateCrates(out) {
   return [...names].sort();
 }
 
+/**
+ * 重复依赖治理：放行条目必须写清 crate 与理由（reason 至少 8 字），没有理由的条目不算放行。
+ * 返回未解释的重复、已解释命中、以及本平台没出现的条目——跨平台条目在本机缺席是正常的，只提示不失败。
+ */
+function explainedDuplicates(dups, allow) {
+  const why = new Map();
+  for (const a of allow || []) {
+    if (!a || typeof a.crate !== "string" || typeof a.reason !== "string") continue;
+    const name = a.crate.trim();
+    if (name && a.reason.trim().length >= 8) why.set(name, a.reason.trim());
+  }
+  const list = (dups || []).map(String);
+  return {
+    unexplained: list.filter((d) => !why.has(d)),
+    hit: list.filter((d) => why.has(d)),
+    stale: [...why.keys()].filter((k) => !list.includes(k)).sort(),
+  };
+}
+
 /** 汇总 cargo 的 test result 行：一次运行可能有多条（多目标/多测试）。ignored > 0 由调用方判失败。 */
 function cargoCounts(out) {
   let passed = 0, failed = 0, ignored = 0, resultLines = 0;
@@ -133,6 +152,16 @@ function gateParserSelfTest(root) {
     2,
   );
   eq("duplicateCrates 去重并按名排序", duplicateCrates("serde v1.0.1\nserde v1.0.2\nfoo v0.1.0\n"), ["foo", "serde"]);
+  eq("explainedDuplicates 只放行有理由的条目", explainedDuplicates(["a", "b"], [{ crate: "a", reason: "上游锁在旧版本，等 X 发布" }, { crate: "b", reason: "" }]), {
+    unexplained: ["b"],
+    hit: ["a"],
+    stale: [],
+  });
+  eq("explainedDuplicates 无命中条目只记 stale（跨平台）", explainedDuplicates([], [{ crate: "a", reason: "仅在 Linux 出现" }]), {
+    unexplained: [],
+    hit: [],
+    stale: ["a"],
+  });
   eq(
     "cargoCounts 多目标求和并拿到 ignored",
     cargoCounts(
@@ -178,6 +207,7 @@ module.exports = {
   clippyLints,
   checkWarnings,
   duplicateCrates,
+  explainedDuplicates,
   cargoCounts,
   skipsIn,
   linkValueProblem,
