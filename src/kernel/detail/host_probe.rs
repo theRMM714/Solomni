@@ -1,5 +1,5 @@
 //! 目的：`HostProbe` 端口的机制实现——把本机事实读出来。
-//! 管：读环境变量、查路径存在性、按平台判定虚拟机能力。
+//! 管：读环境变量、查路径存在性、读文件戳（大小与修改时间）、按平台判定虚拟机能力。
 //! 不管：任何写动作（不执行程序、不安装、不改配置）；事实怎么解释（调用方定）。
 //! 联动：端口在 `src/kernel/ports.rs`；由入口层的组合根构造（`src/entry/`）。
 
@@ -33,6 +33,25 @@ pub fn find_exe(name: &str) -> Option<std::path::PathBuf> {
         }
     }
     None
+}
+
+/// 目的：本地文件的最小事实——"还是不是同一份"（大小 + 修改时间），只用于判断要不要重做。
+/// 约束：只描述文件本身，不含内容；读不到就是 IO 错误，由调用方决定文案。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileStamp {
+    /// 字节数。
+    pub len: u64,
+    /// 修改时间；平台读不到时为 `None`。
+    pub modified: Option<std::time::SystemTime>,
+}
+
+/// 目的：读一个本地文件的戳（只读元数据，不打开内容）。
+pub fn file_stamp(path: &Path) -> std::io::Result<FileStamp> {
+    let meta = std::fs::metadata(path)?;
+    Ok(FileStamp {
+        len: meta.len(),
+        modified: meta.modified().ok(),
+    })
 }
 
 /// 目的：`HostProbe` 端口的生产实现——把本机事实读出来。
