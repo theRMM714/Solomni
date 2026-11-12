@@ -1,34 +1,35 @@
-//! 协作会话的「转录即状态」派生：从会话事件流水纯函数地算出当前状态。
-//! 核心只据此判定「当前该走哪一步、断在哪就继续」；不保留任何影子状态。
-//! 只依赖事件里的文本锚点，不依赖任何内存对象，因此可回放、可单测。
+//! 目的：协作会话的「转录即状态」派生——从会话事件流水纯函数地算出当前状态。
+//! 管：CollabState 的字段与 derive 的判定（名单 / 表态 / 关门 / 方案 / 审查 / 裁决卡 / 交付）；工具执行次数计数 tool_runs。
+//! 不管：IO、端口与驱动（在 service/）；事件本身的产生与落盘；任何影子状态。
+//! 联动：被 src/capabilities/collab/service/collab.rs 与 src/capabilities/collab/api.rs 消费；事件与行形状见 docs/session/session-model.md。
 
 use std::collections::BTreeMap;
 
-/// 从事件流水派生出的协作状态。
+/// 目的：从事件流水派生出的协作状态。
 #[derive(Debug, Default, Clone)]
 pub struct CollabState {
-    /// 需求（最后一条 [用户:需求]）。
+    /// 目的：需求（最后一条 [用户:需求]）。
     pub task: Option<String>,
-    /// 代拟名单原文（最后一条 [代拟]）。
+    /// 目的：代拟名单原文（最后一条 [代拟]）。
     pub slate: Option<String>,
     pub slate_confirmed: bool,
-    /// 用户已授权开始。
+    /// 目的：用户已授权开始。
     pub begun: bool,
-    /// 开始即授权小组自裁（yes,allow）。
+    /// 目的：开始即授权小组自裁（yes,allow）。
     pub allow: bool,
-    /// 实际在组名单（agent 实例名；来自会话 meta 的 agents）。
+    /// 目的：实际在组名单（agent 实例名；来自会话 meta 的 agents）。
     pub picked: Vec<String>,
     pub round: usize,
-    /// 留组状态（leave 后为 false）。
+    /// 目的：留组状态（leave 后为 false）。
     pub present: BTreeMap<String, bool>,
-    /// 本轮表态：agree 置 true，[轮次] 与开始会重置。
+    /// 目的：本轮表态：agree 置 true，[轮次] 与开始会重置。
     pub agreed: BTreeMap<String, bool>,
-    /// 讨论已收敛或超限（discussion_done）。
+    /// 目的：讨论已收敛或超限（discussion_done）。
     pub closed: bool,
-    /// 用户在审查关卡点过「同意」（[用户:同意方案]）：方案过关，可以开工。
+    /// 目的：用户在审查关卡点过「同意」（[用户:同意方案]）：方案过关，可以开工。
     pub plan_approved: bool,
     pub plan: Option<String>,
-    /// 核心给出的任务链（从 plan_review 事件派生）。
+    /// 目的：核心给出的任务链（从 plan_review 事件派生）。
     pub chain: crate::capabilities::taskchain::api::TaskChain,
     pub reports: BTreeMap<String, String>,
     pub review_raw: Option<String>,
@@ -42,7 +43,7 @@ pub struct CollabState {
     pub issued_cards: std::collections::BTreeSet<String>,
     /// 目的：已发出的裁决卡数（卡号计数器；重启后从转录续号，卡号因此稳定）。
     pub cards: u64,
-    /// 工具执行次数（回档警告用）。
+    /// 目的：工具执行次数（回档警告用）。
     pub tool_runs: usize,
 }
 
@@ -53,9 +54,9 @@ impl CollabState {
     }
 }
 
-/// 从事件流水派生协作状态：纯函数，可单测；回放可复现。
-/// roster_names = 会话 meta 里的 agent 实例名（顺序即名单，权威来源）；其余状态由转录文本锚点派生。
-/// 人名即发言席：present/agreed/reports/pending_ask 的键都是 agent 名。
+/// 目的：从事件流水派生协作状态：纯函数，可单测；回放可复现。
+///   roster_names = 会话 meta 里的 agent 实例名（顺序即名单，权威来源）；其余状态由转录文本锚点派生。
+///   人名即发言席：present/agreed/reports/pending_ask 的键都是 agent 名。
 pub fn derive(events: &[serde_json::Value], roster_names: &[String]) -> CollabState {
     let mut st = CollabState::default();
     if !roster_names.is_empty() {
@@ -261,7 +262,7 @@ fn upsert_card(st: &mut CollabState, id: String, gate: String, payload: serde_js
     st.open_gates.push((id, gate, payload));
 }
 
-/// 统计事件流水里的工具执行次数：数带 tool 字段的转录行（回档警告用它，行即事实）。
+/// 目的：统计事件流水里的工具执行次数：数带 tool 字段的转录行（回档警告用它，行即事实）。
 pub fn tool_runs(events: &[serde_json::Value]) -> usize {
     let mut n = 0;
     for ev in events {

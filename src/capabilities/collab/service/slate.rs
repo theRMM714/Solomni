@@ -1,5 +1,7 @@
-//! **代拟与确认、恢复与收尾**：提交需求（`set_task` 在 `collab.rs`）、代拟名单与确认（`draft_slate` / `confirm_slate`）、
-//! 开工（`begin`）、断点续跑（`resume`）与终结判定（`is_done`）。
+//! 目的：代拟与确认、恢复与收尾——代拟名单与确认（confirm_slate）、开工（begin）、断点续跑（resume）、撤回应答（withdraw_agree）、按转录重建（restore）与终结判定（is_done）。
+//! 管：上述 CollabSession 方法，及确认后把名单写回会话 meta.agents。
+//! 不管：状态派生（domain/collab_state.rs）；其它关卡与队列（collab.rs）；提示词渲染机制（prompt 能力）。
+//! 联动：CollabSession 的状态机在 collab.rs；文案经 capabilities/prompt 渲染自提示词册。
 
 use super::collab::*;
 use crate::capabilities::collab::service::discussion::Discussion;
@@ -16,7 +18,7 @@ use std::sync::Arc;
 
 use super::pump::*;
 impl CollabSession {
-    /// 委托代拟：核心拟发言名单（**拟名单业务**的用例，与「推荐模型」同一条 `slate` 协议），交用户确认。
+    /// 目的：委托代拟：核心拟发言名单（**拟名单业务**的用例，与「推荐模型」同一条 `slate` 协议），交用户确认。
     pub(crate) fn draft_slate(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
         let roster = self.modules.roster();
         let mut verify = self.core_verify_tools("planner");
@@ -75,7 +77,7 @@ impl CollabSession {
         self.ask_user(Pending::ConfirmSlate, sink);
     }
 
-    /// 回应代拟名单确认（仅 ConfirmSlate 挂起时有效）。
+    /// 目的：回应代拟名单确认（仅 ConfirmSlate 挂起时有效）。
     pub fn confirm_slate(&mut self, ok: bool, sink: &mut dyn FnMut(SessionEvent)) {
         let line = self.view(LineView::user(
             "名单",
@@ -104,7 +106,7 @@ impl CollabSession {
         self.ask_user(Pending::ConfirmBegin, sink);
     }
 
-    /// 确认开始讨论（allow = yes,allow 自裁授权）；开聊并一路泵到暂停或交付。
+    /// 目的：确认开始讨论（allow = yes,allow 自裁授权）；开聊并一路泵到暂停或交付。
     pub fn begin(&mut self, allow: bool, sink: &mut dyn FnMut(SessionEvent)) {
         if self.done || self.disc.is_some() {
             return;
@@ -129,10 +131,8 @@ impl CollabSession {
             timeout_secs: self.settings.app.llm_timeout_secs,
             thinking: None,
         };
-        // 讨论席的"协议"= **机制说明 + 讨论约定**：只说约定不说机制，AI 就不知道自己在什么流程里、
-        // 该干什么。
-        // **能用哪些表态不在这里列**：核心按这一回合的身份注入工具块（engine::MemberTools::tools_block），
-        // 清单与越权校验同源——同一份清单在提示词里再列一遍只会多一个会漂的地方。
+        // 讨论席的"协议" = **机制说明 + 讨论约定**：只说约定不说机制，AI 就不知道自己在什么流程里、该干什么。
+        // **能用哪些表态不在这里列**：核心按这一回合的身份注入工具块（MemberTools::tools_block），清单与越权校验同源。
         let protocol = format!(
             "{}\n{}",
             self.prompts.mechanism("collab", "discussant"),
@@ -156,7 +156,7 @@ impl CollabSession {
 }
 
 impl CollabSession {
-    /// 继续：从断点推进（协作不需要用户发言）。未开始时由用户经裁决门确认，不由继续代劳。
+    /// 目的：继续：从断点推进（协作不需要用户发言）。未开始时由用户经裁决门确认，不由继续代劳。
     pub fn resume(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
         if self.done {
             return;
@@ -194,7 +194,7 @@ impl CollabSession {
         self.notice("[提示] 等待你在裁决门确认名单 / 开始讨论。", sink);
     }
 
-    /// 撤回某 agent 的同意：转录追加一条撤回行（用户可见、也进上下文），并就地复位本轮表态。
+    /// 目的：撤回某 agent 的同意：转录追加一条撤回行（用户可见、也进上下文），并就地复位本轮表态。
     pub fn withdraw_agree(&mut self, agent: &str, sink: &mut dyn FnMut(SessionEvent)) {
         let line = self.view(LineView::user("撤回", agent.to_string()));
         sink(SessionEvent::Transcript(vec![line]));
@@ -338,7 +338,7 @@ impl CollabSession {
         Ok(s)
     }
 
-    /// 会话是否已终结。
+    /// 目的：会话是否已终结。
     pub fn is_done(&self) -> bool {
         self.done
     }

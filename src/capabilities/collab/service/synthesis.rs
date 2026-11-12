@@ -1,8 +1,7 @@
-//! **整理与审查**：核心整理讨论出方案与任务链（`synthesize`）+ 总验收清单与返工判定（`Execution` / `CheckItem`）。
-//!
-//! 载荷都从**工具调用**取（plan / checklist），解析失败如实报错、不猜。
-//!
-//! 状态机在 `discussion`；本文件放整理那一段与验收清单。
+//! 目的：整理与审查——核心整理讨论出方案与任务链（synthesize），以及总验收清单与返工判定（Execution / CheckItem）。
+//! 管：从工具调用（plan / checklist）取载荷并解析；解析失败如实报错、不猜；review / rework_targets / all_pass 的判定。
+//! 不管：讨论状态机（discussion.rs）；任务链的驱动（collab.rs 与 kernel 的链驱动）。
+//! 联动：载荷来自 tools 的工具调用；任务链形状在 src/kernel/chain.rs。
 
 use super::discussion::*;
 use crate::capabilities::llm::api::{Chat, Msg};
@@ -13,9 +12,9 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 
 impl Discussion {
-    /// 全员同意后：核心整理——总结讨论，为每个留下的成员写执行任务提示词。
-    /// 整理：核心 AI 总结讨论并出**任务链**（见 docs/collab/task-chain.md）。
-    /// 产出走 **plan 工具调用**（核心操作不手写 JSON）；没调用或载荷不合法就**如实报错**。
+    /// 目的：全员同意后：核心整理——总结讨论，为每个留下的成员写执行任务提示词。
+    ///   整理：核心 AI 总结讨论并出**任务链**（见 docs/collab/task-chain.md）。
+    ///   产出走 **plan 工具调用**（核心操作不手写 JSON）；没调用或载荷不合法就**如实报错**。
     pub fn synthesize(
         &self,
         core_chat: &mut dyn Chat,
@@ -124,7 +123,7 @@ struct SynthNode {
     deps: Vec<String>,
 }
 
-/// 验收清单条目：核心输出的结构化核对结果。
+/// 目的：验收清单条目：核心输出的结构化核对结果。
 #[derive(Debug, Clone, Deserialize)]
 pub struct CheckItem {
     pub item: String,
@@ -133,23 +132,23 @@ pub struct CheckItem {
     pub evidence: Option<String>,
     #[serde(default)]
     pub reason: Option<String>,
-    /// `status = fail` 时**要返工的节点 id**（核心按链校验；填错/漏填会让核心重填）。
-    /// 为什么是节点 id 而不是人名：链是节点级的，一个 agent 可能负责多个节点（见 task-chain.md 五）。
+    /// 目的：`status = fail` 时**要返工的节点 id**（核心按链校验；填错/漏填会让核心重填）。
+    ///   为什么是节点 id 而不是人名：链是节点级的，一个 agent 可能负责多个节点（见 task-chain.md 五）。
     #[serde(default)]
     pub rework: Option<String>,
 }
 
-/// 执行与验收：成员按任务干活并回报；核心对照回报产出结构化清单。
+/// 目的：执行与验收：成员按任务干活并回报；核心对照回报产出结构化清单。
 pub struct Execution {
     pub reports: BTreeMap<String, String>,
-    /// 验收原始输出（解析失败时如实呈现）。
+    /// 目的：验收原始输出（解析失败时如实呈现）。
     pub checklist_raw: String,
-    /// 结构化清单；空 = 解析失败（all_pass 保守判否）。
+    /// 目的：结构化清单；空 = 解析失败（all_pass 保守判否）。
     pub items: Vec<CheckItem>,
-    /// 执行/验收途中调用失败（超时 / 网络）：非空 = 本轮**中断**，不交付。
-    /// 上层据此如实告知用户；会话保持可继续（用户点「继续」重新推进）。
+    /// 目的：执行/验收途中调用失败（超时 / 网络）：非空 = 本轮**中断**，不交付。
+    ///   上层据此如实告知用户；会话保持可继续（用户点「继续」重新推进）。
     pub error: Option<String>,
-    /// 被用户「停止」：非空 = 本轮**停止**，未收完的回报**不入册**（半截回报进转录会误导验收）。
+    /// 目的：被用户「停止」：非空 = 本轮**停止**，未收完的回报**不入册**（半截回报进转录会误导验收）。
     pub stopped: bool,
     /// 「停止」标志（泵注入）：每次模型调用前与调用中途都看它。
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -175,8 +174,8 @@ impl Execution {
     // 参数是一组必须一路透传的出口（chat / plan / 对照表 / 重填说明 / 提示词册 / 通道 / 核实环境）：
     // 与 review_nodes 同一取舍（见 docs/testing/quality-isolation.md）。
     #[allow(clippy::too_many_arguments)]
-    /// 总验收（一次调用）。`nodes` = "节点 id — 负责人"对照表（模型只能从这里选 `rework`）；
-    /// `retry` = 上一次填错了要它重填的话（核心据此**一直重填**到合法为止，不设次数上限）。
+    /// 目的：总验收（一次调用）。`nodes` = "节点 id — 负责人"对照表（模型只能从这里选 `rework`）；
+    ///   `retry` = 上一次填错了要它重填的话（核心据此**一直重填**到合法为止，不设次数上限）。
     pub fn review(
         &mut self,
         core_chat: &mut dyn Chat,
@@ -251,7 +250,7 @@ impl Execution {
         }
     }
 
-    /// `status = fail` 且填了 `rework` 的节点（按清单顺序去重）：核心据此**只重派这些**。
+    /// 目的：`status = fail` 且填了 `rework` 的节点（按清单顺序去重）：核心据此**只重派这些**。
     pub fn rework_targets(&self) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
         for it in &self.items {
@@ -266,8 +265,8 @@ impl Execution {
         out
     }
 
-    /// 这次判定里的问题（空 = 合法）：fail 必须填 `rework`，且只能是 `known` 里的节点 id。
-    /// 核心据此**要求模型重填**（一直重填，不设上限）——绝不静默丢掉一条判定。
+    /// 目的：这次判定里的问题（空 = 合法）：fail 必须填 `rework`，且只能是 `known` 里的节点 id。
+    ///   核心据此**要求模型重填**（一直重填，不设上限）——绝不静默丢掉一条判定。
     pub fn rework_problems(&self, known: &[String]) -> Vec<String> {
         let mut out = Vec::new();
         for it in &self.items {

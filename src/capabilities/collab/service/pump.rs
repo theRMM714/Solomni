@@ -1,7 +1,7 @@
-//! **讨论泵**：把讨论推进一步（`pump_with`）并装配成员（`assemble_members`）。
-//!
-//! 泵不自己调模型：它把"该问谁、带什么上下文"交回协调业务（见 session-model.md 二）。
-//! 行外送与增量（`emit_new_lines` / `push_delta` / `review_event` / `derive_gate`）也在这里。
+//! 目的：讨论泵——把讨论推进一步（pump_with）并装配成员（assemble_members）。
+//! 管：该问谁与上下文装配；行外送与增量（emit_new_lines / push_delta / review_event / derive_gate）。
+//! 不管：模型调用（泵不自己调模型，把「该问谁、带什么上下文」交回协调业务）；状态机步骤的判定（discussion.rs）。
+//! 联动：由 CollabSession 驱动；约定见 docs/session/session-model.md。
 
 use super::collab::*;
 use crate::capabilities::collab::service::discussion::{Discussion, Member, TurnOut, MAX_ROUNDS};
@@ -13,7 +13,7 @@ use crate::capabilities::session::api::{CheckView, LineView, Pending, SessionEve
 use std::sync::Arc;
 
 impl CollabSession {
-    /// 泵：推进讨论直至暂停（ask）或收敛并走完整理/执行/验收/交付；事件逐条经 sink 外送。
+    /// 目的：泵：推进讨论直至暂停（ask）或收敛并走完整理/执行/验收/交付；事件逐条经 sink 外送。
     pub fn pump_with(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
         if self.done || self.disc.is_none() {
             return;
@@ -30,9 +30,8 @@ impl CollabSession {
                 if self.awaiting_user() {
                     return;
                 }
-                // 逐成员外送：一个成员说完就出它那一行（整轮问完才一次性出会让界面整轮不动）。
-                // 回调里不能借 self（disc 正被可变借用），所以用 Cell/RefCell 暂存，调用后并回会话。
-                // 上一个成员回合失败 / 被停：如实交回（不静默吞掉，也不当发言吸收）。
+                // 逐成员外送：一个成员说完就出它那一行（整轮问完才一次性出会让界面整轮不动）；回调里不能借 self
+                //（disc 正被可变借用），所以用 Cell/RefCell 暂存，调用后并回会话；回合失败 / 被停也在这里如实交回。
                 let outcome = if let Some(err) = self.turn_error.take() {
                     TurnOut::Interrupted(err)
                 } else {
@@ -189,17 +188,14 @@ impl CollabSession {
                 rework: 0,
             });
         }
-        // 等用户的事挂着（请教 / 方案待审 / 节点没过）：**泵不往下推**——唤醒（子会话完成、
-        // 别的客户端动作）也不能替用户点「继续」，否则"暂停"形同虚设：
-        // 本该停下等用户时，节点子会话一完成就会把那些节点又派一遍。重派在**用户那一步**做（见 resume）。
+        // 等用户的事挂着（请教 / 方案待审 / 节点没过）：**泵不往下推**——唤醒（子会话完成、别的客户端动作）
+        // 也不能替用户点「继续」，否则"暂停"形同虚设；重派在**用户那一步**做（见 resume）。
         if self.awaiting_user() {
             sink(crate::capabilities::session::api::idle());
             return;
         }
-        // **阶段驱动**：同一阶段（依赖图里同一层）的节点并发跑，跨阶段串行。
-        // 本阶段跑完 → 核心 AI 做**一次阶段验收**（判这一阶段的产出够不够下一阶段用）；
-        // 通过才解锁下一阶段；没过就暂停交用户——**重派哪些节点由核心的结论决定**
-        // （结论里没通过的才退回待办，同阶段其余节点保持已通过，不整阶段重来）。
+        // **阶段驱动**：同一阶段（依赖图里同一层）的节点并发跑，跨阶段串行；本阶段跑完 → 核心 AI 做**一次阶段验收**。
+        // 通过才解锁下一阶段；没过就暂停交用户——**重派哪些节点由核心的结论决定**（退待办，其余保持已通过）。
         while let Some(stage) = self.chain.as_ref().and_then(|c| c.current_stage()) {
             // 本阶段还有节点在跑 / 待派：让出（核心侧派发）。
             if !self
@@ -441,8 +437,8 @@ impl CollabSession {
         self.done = true;
     }
 
-    /// 从在组名单装配成员（策略在 conductor：该 agent 的模型 > 核心默认；缺了就如实报错）。
-    /// 一个 agent = 一个成员：system 由它全部模块合成，工具 = 各模块外部工具的并集。
+    /// 目的：从在组名单装配成员（策略在 conductor：该 agent 的模型 > 核心默认；缺了就如实报错）。
+    ///   一个 agent = 一个成员：system 由它全部模块合成，工具 = 各模块外部工具的并集。
     pub(crate) fn assemble_members(&self) -> Result<Vec<Member>, String> {
         let prompts = self.prompts.clone();
         let roster = self.modules.roster();
@@ -570,7 +566,7 @@ impl CollabSession {
     }
 }
 
-/// 代拟行里的一项（只给人看）：复用项标出来，组装项带上模块与模型。
+/// 目的：代拟行里的一项（只给人看）：复用项标出来，组装项带上模块与模型。
 pub(crate) fn slate_item(a: &AgentMeta, why: &str) -> String {
     if a.transient {
         format!(
@@ -618,9 +614,9 @@ pub(crate) fn derive_gates(
     out
 }
 
-/// 逐成员外送：把刚定稿的讨论行变成带**会话内稳定 id** 的转录事件交出去。
-/// 为什么要 Cell/RefCell：回调在 `Discussion::step/open` 内部被调用，那时 `self` 正被可变借用，
-/// 碰不到 `self.next_line` 与 `sink`——所以调用前后各并回一次，行只构造一次。
+/// 目的：逐成员外送：把刚定稿的讨论行变成带**会话内稳定 id** 的转录事件交出去。
+///   为什么要 Cell/RefCell：回调在 `Discussion::step/open` 内部被调用，那时 `self` 正被可变借用，
+///   碰不到 `self.next_line` 与 `sink`——所以调用前后各并回一次，行只构造一次。
 pub(crate) fn emit_new_lines(
     lines: &[LineView],
     next_line: &std::cell::Cell<u64>,
@@ -646,7 +642,7 @@ pub(crate) fn emit_new_lines(
     }
 }
 
-/// 发出自上次以来的新转录行（增量），逐行分配会话内稳定 id。
+/// 目的：发出自上次以来的新转录行（增量），逐行分配会话内稳定 id。
 pub(crate) fn push_delta(
     disc: &Discussion,
     emitted: &mut usize,

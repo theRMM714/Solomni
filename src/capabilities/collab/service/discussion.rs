@@ -1,9 +1,7 @@
-//! **讨论状态机**：建组 → 轮转发言 → 表态判定 → 全员同意后交整理（`synthesis`）。
-//! 状态机只认信封动词；发言内容永远是数据，不是指令。
-//! 所有发给模型的文案经 capabilities/prompt 渲染自提示词册；成员拥有自己的会话通道。
-//! 工具循环（联动 envelope::Verb::Tool 与 kernel::ports::ProcessRunner）：策略（放行表、并发调度）在核心，机制在适配层。
-//! 一次回复里的多个原生调用按**声明**调度：声明可并发的只读类并发跑，其余（含写入类）独占并按原序生效；
-//! 结果与工具行一律按原始顺序回填——并发只影响执行，不影响上下文里的顺序。
+//! 目的：讨论状态机——建组、轮转发言、表态判定、全员同意后交整理（synthesis）。
+//! 管：Discussion 的推进步骤与回合处置（Adv / TurnOut / AfterTurn）；成员工具面与并发调度策略；讨论转录行外送。
+//! 不管：模型调用与工具执行机制（在 llm / tools 的端口后）；整理与验收（synthesis.rs）；会话状态机与关卡（collab.rs）；泵的装配（pump.rs）。
+//! 联动：工具循环联动 envelope::Verb::Tool 与 kernel::ports::ProcessRunner；文案经 capabilities/prompt 渲染自提示词册；约定见 docs/session/session-model.md。
 use super::round::*;
 #[cfg(test)]
 use crate::capabilities::llm::api::BoxedChat;
@@ -20,11 +18,11 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 pub const MAX_ROUNDS: usize = 6;
-/// 一轮内对同一个成员最多提醒几次（**内存驱动**用；生产按设置走）。
+/// 目的：一轮内对同一个成员最多提醒几次（**内存驱动**用；生产按设置走）。
 #[cfg(test)]
 pub const MAX_DISCUSS_REMIND: u32 = 3;
 
-/// 一次成员回合之后的处置（核心据此决定，见 docs/session/session-model.md 二）。
+/// 目的：一次成员回合之后的处置（核心据此决定，见 docs/session/session-model.md 二）。
 #[derive(Debug, PartialEq)]
 pub enum AfterTurn {
     /// 已表态：正常往下走。
@@ -35,37 +33,37 @@ pub enum AfterTurn {
     Unanswered,
 }
 
-/// 线上名 → (模块 id, 工具名)：原生协议里没有 module 字段，跨模块同名工具靠它消歧。
+/// 目的：线上名 → (模块 id, 工具名)：原生协议里没有 module 字段，跨模块同名工具靠它消歧。
 pub type WireTools = BTreeMap<String, (Option<String>, String)>;
 
-/// 一次请求要声明的工具表（给供应商的那一份）。
+/// 目的：一次请求要声明的工具表（给供应商的那一份）。
 pub type Decls = Vec<crate::capabilities::llm::api::ToolDecl>;
 
-/// 本成员这次请求的**工具声明面**（原生通道用）：发给供应商的声明 + 线上名回译表 + 可并发的线上名。
+/// 目的：本成员这次请求的**工具声明面**（原生通道用）：发给供应商的声明 + 线上名回译表 + 可并发的线上名。
 #[derive(Default)]
 pub(crate) struct ToolDecls {
     pub(crate) list: Decls,
-    /// 线上名 → (模块 id, 工具名)：原生协议里没有 module 字段，跨模块同名工具靠它消歧。
+    /// 目的：线上名 → (模块 id, 工具名)：原生协议里没有 module 字段，跨模块同名工具靠它消歧。
     pub(crate) wire: WireTools,
 }
 
 pub struct Member {
     pub id: String,
-    /// 会话参数：身份块由它**每回合现渲染**（不给成员存一份渲染好的文本）。
+    /// 目的：会话参数：身份块由它**每回合现渲染**（不给成员存一份渲染好的文本）。
     pub params: crate::capabilities::session::api::SessionParams,
-    /// 该席位的通道形态（登记处派生）：身份块里的调用约定按它渲染。
+    /// 目的：该席位的通道形态（登记处派生）：身份块里的调用约定按它渲染。
     pub mode: crate::capabilities::llm::api::ToolMode,
-    /// 内存通道：**只有测试用**（生产里回合跑在各自的 agent 会话里，见 session-model.md 二之二）。
+    /// 目的：内存通道：**只有测试用**（生产里回合跑在各自的 agent 会话里，见 session-model.md 二之二）。
     #[cfg(test)]
     pub chat: Option<BoxedChat>,
     pub present: bool,
     pub agreed: bool,
-    /// 工具环境；None = 本模块未声明工具（tool 信封按原文收录）。
+    /// 目的：工具环境；None = 本模块未声明工具（tool 信封按原文收录）。
     pub tools: Option<MemberTools>,
 }
 
 impl Member {
-    /// 生产构造：成员不持有通道（驱动权在核心，回合在各自的会话里跑）。
+    /// 目的：生产构造：成员不持有通道（驱动权在核心，回合在各自的会话里跑）。
     pub fn plain(
         id: &str,
         params: crate::capabilities::session::api::SessionParams,
@@ -83,7 +81,7 @@ impl Member {
         }
     }
 
-    /// 测试构造：带内存通道（配合 cfg(test) 的 open/step/member_turn 直接驱动讨论）。
+    /// 目的：测试构造：带内存通道（配合 cfg(test) 的 open/step/member_turn 直接驱动讨论）。
     #[cfg(test)]
     pub fn new(
         id: &str,
@@ -118,41 +116,41 @@ pub enum TurnOut {
 
 pub struct Discussion {
     pub(crate) members: Vec<Member>,
-    /// 讨论转录：**与单 agent 同一行类型**（LineView）——行格式只有一处定义，呈现层也只有一套渲染。
+    /// 目的：讨论转录：**与单 agent 同一行类型**（LineView）——行格式只有一处定义，呈现层也只有一套渲染。
     pub(crate) transcript: Vec<LineView>,
     pub(crate) round: usize,
-    /// 用户对 ask 的回答在此队列：先入先转达。
+    /// 目的：用户对 ask 的回答在此队列：先入先转达。
     pub(crate) pending_user_answers: Vec<String>,
     pub(crate) closed: bool,
-    /// yes,allow：授权小组自裁——ask 不中止轮转，留档待办。
+    /// 目的：yes,allow：授权小组自裁——ask 不中止轮转，留档待办。
     pub(crate) allow_autonomy: bool,
-    /// 提示词册能力面：**不是册子本体**（持有者只有提示词能力一处），这里只按名字取段。
+    /// 目的：提示词册能力面：**不是册子本体**（持有者只有提示词能力一处），这里只按名字取段。
     pub(crate) prompts: Arc<dyn Prompt>,
-    /// 工具总表与角色表的能力面（**表本体在工具能力里**）。
+    /// 目的：工具总表与角色表的能力面（**表本体在工具能力里**）。
     pub(crate) systools: Arc<dyn crate::capabilities::tools::api::Tools>,
-    /// 本次调用的通道参数（流式 + 预算）：**全局设置**，与单 agent 共用同一份。
+    /// 目的：本次调用的通道参数（流式 + 预算）：**全局设置**，与单 agent 共用同一份。
     pub(crate) llm: crate::capabilities::llm::api::LlmOpts,
-    /// 讨论席的**机制说明 + 讨论约定**（开场与轮转都带它）：只说约定不说机制，AI 会空转。
-    /// 能用哪些工具**不在这里**——随回合注入（见 MemberTools::tools_block）。
+    /// 目的：讨论席的**机制说明 + 讨论约定**（开场与轮转都带它）：只说约定不说机制，AI 会空转。
+    ///   能用哪些工具**不在这里**——随回合注入（见 MemberTools::tools_block）。
     pub(crate) protocol: String,
 
-    /// 这一轮对每个成员**提醒过几次**（到顶就记"未回应"放过它）；每轮开始归零。
+    /// 目的：这一轮对每个成员**提醒过几次**（到顶就记"未回应"放过它）；每轮开始归零。
     pub(crate) reminded: std::collections::BTreeMap<String, u32>,
-    /// 上面那份计数属于第几轮（轮次变了就清空）。
+    /// 目的：上面那份计数属于第几轮（轮次变了就清空）。
     pub(crate) remind_round: usize,
-    /// 「停止」标志：由 CollabSession 注入（它从任务登记处拿到）。
-    /// 泵在**每次调用前**与**调用中途**都看它——所以停止能在一个模型调用内收尾，而不是等它跑完。
+    /// 目的：「停止」标志：由 CollabSession 注入（它从任务登记处拿到）。
+    ///   泵在**每次调用前**与**调用中途**都看它——所以停止能在一个模型调用内收尾，而不是等它跑完。
     pub(crate) cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    /// 开场提示词（渲染一次，开场阶段每个成员都用它）——由 start() 设。
+    /// 目的：开场提示词（渲染一次，开场阶段每个成员都用它）——由 start() 设。
     pub(crate) opener: String,
-    /// 轮次推进的游标（可暂停：问到哪了）——见 advance/feed。
+    /// 目的：轮次推进的游标（可暂停：问到哪了）——见 advance/feed。
     pub(crate) cursor: Cursor,
-    /// 本轮到此刻**还没交出去**的行数（轮次标记也算）：一个成员说完就把它那一批交出去。
+    /// 目的：本轮到此刻**还没交出去**的行数（轮次标记也算）：一个成员说完就把它那一批交出去。
     pub(crate) handed: usize,
 }
 
-/// 推进讨论的**一步**：该问谁（或终态）。
-/// 泵只决定"该问谁"，**不自己调模型**——驱动权归核心（见 docs/session/session-model.md 二之二）。
+/// 目的：推进讨论的**一步**：该问谁（或终态）。
+///   泵只决定"该问谁"，**不自己调模型**——驱动权归核心（见 docs/session/session-model.md 二之二）。
 pub enum Adv {
     /// 该问这个成员一回合：身份块 + 本回合提示交给驱动（它取会话、装配、跑模型）。
     /// 身份**每回合现渲染**（由成员的 params + 当前提示词册），不存在谁的会话里。
@@ -167,7 +165,7 @@ pub enum Adv {
     Out(TurnOut),
 }
 
-/// 轮次推进的游标（状态机可暂停：问到哪了）。
+/// 目的：轮次推进的游标（状态机可暂停：问到哪了）。
 pub(crate) enum Cursor {
     /// 开场：问到第 i 个成员（开场不跳过任何人）。
     Opener(usize),
@@ -177,24 +175,24 @@ pub(crate) enum Cursor {
     At(usize),
 }
 
-/// 一个成员回合的结果：两套通道**统一形态**（上层不必再关心是哪条通道）。
+/// 目的：一个成员回合的结果：两套通道**统一形态**（上层不必再关心是哪条通道）。
 pub struct MemberTurn {
-    /// 这一回合的表态；**None = 没表态**（散文 / 空回执 / 越权 / 到顶）。
-    /// 没表态**不投影主会话**：原文只落进它自己的会话；提醒由核心在边界注入。
+    /// 目的：这一回合的表态；**None = 没表态**（散文 / 空回执 / 越权 / 到顶）。
+    ///   没表态**不投影主会话**：原文只落进它自己的会话；提醒由核心在边界注入。
     pub verb: Option<Verb>,
     pub text: String,
     pub degraded: bool,
-    /// 这一轮的输出被供应商按长度截断了（如实标注，不假装完整）。
+    /// 目的：这一轮的输出被供应商按长度截断了（如实标注，不假装完整）。
     pub truncated: bool,
-    /// 这一回合里**核实**留下的行（只读工具调用）。
-    /// 内存通道把它并进讨论转录；核心驱动时由核心逐轮落进**该 agent 自己的会话**。
+    /// 目的：这一回合里**核实**留下的行（只读工具调用）。
+    ///   内存通道把它并进讨论转录；核心驱动时由核心逐轮落进**该 agent 自己的会话**。
     #[cfg(test)]
     pub lines: Vec<LineView>,
 }
 
 impl MemberTurn {
-    /// 一回合的**结论**：表态 / 正文 + 两个如实标记。
-    /// 思维链与核实行不在这里——它们随行落进**各自的会话**（内存测试通道另走它自己的构造点）。
+    /// 目的：一回合的**结论**：表态 / 正文 + 两个如实标记。
+    ///   思维链与核实行不在这里——它们随行落进**各自的会话**（内存测试通道另走它自己的构造点）。
     pub fn verdict(
         verb: Option<Verb>,
         text: String,
@@ -213,8 +211,8 @@ impl MemberTurn {
 }
 
 impl Discussion {
-    /// 内存通道的成员回合（薄包装）：借用本席位自己的 chat/tools，把核实行并进讨论转录。
-    /// 核心驱动那条路直接调 turn_with，把核实行落进该 agent 自己的会话。
+    /// 目的：内存通道的成员回合（薄包装）：借用本席位自己的 chat/tools，把核实行并进讨论转录。
+    ///   核心驱动那条路直接调 turn_with，把核实行落进该 agent 自己的会话。
     #[cfg(test)]
     pub(crate) fn member_turn(
         &mut self,
@@ -247,11 +245,11 @@ impl Discussion {
         Ok(turn)
     }
 
-    /// 一个成员回合（**关联函数**：chat/tools 由调用方给）：**薄适配**——把本席位自己的通道交给
-    /// 单 agent / 节点 / 讨论席**共用的那一条轮循环**（engine::converse_with），装配前把这一回合的
-    /// 工具面（角色表发放）装进工具环境，跑完从末轮取表态。
-    /// 生产里成员回合跑在各自的 agent 会话里（crate::capabilities::session::api::AgentSession::discussion_turn）——两条路同一条循环。
-    /// 允许**先核实**（只读工具），最后用**动词**表态；其余工具一律**如实拒绝**（讨论回合拿不到干活的手段）。
+    /// 目的：一个成员回合（**关联函数**：chat/tools 由调用方给）：**薄适配**——把本席位自己的通道交给
+    ///   单 agent / 节点 / 讨论席**共用的那一条轮循环**（engine::converse_with），装配前把这一回合的
+    ///   工具面（角色表发放）装进工具环境，跑完从末轮取表态。
+    ///   生产里成员回合跑在各自的 agent 会话里（crate::capabilities::session::api::AgentSession::discussion_turn）——两条路同一条循环。
+    ///   允许**先核实**（只读工具），最后用**动词**表态；其余工具一律**如实拒绝**（讨论回合拿不到干活的手段）。
     #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub fn turn_with(
@@ -402,8 +400,8 @@ impl Discussion {
         }
     }
 
-    /// 开始讨论：渲染开场提示词（一次），游标进入开场阶段。
-    /// 与 advance/feed 一起构成可暂停的状态机——**驱动权在核心**（见 session-model.md 二之二）。
+    /// 目的：开始讨论：渲染开场提示词（一次），游标进入开场阶段。
+    ///   与 advance/feed 一起构成可暂停的状态机——**驱动权在核心**（见 session-model.md 二之二）。
     pub fn start(&mut self, task: &str) {
         self.opener = self.prompts.render(
             Segment::DiscussOpener,
@@ -416,38 +414,38 @@ impl Discussion {
         self.cursor = Cursor::Opener(0);
     }
 
-    /// 接上「停止」标志（CollabSession 注入；回档重建后也要重新接）。
+    /// 目的：接上「停止」标志（CollabSession 注入；回档重建后也要重新接）。
     pub fn set_cancel(&mut self, cancel: std::sync::Arc<std::sync::atomic::AtomicBool>) {
         self.cancel = cancel;
     }
 
-    /// 第 i 个成员的 agent 名（核心据此拼出它的会话名）。
+    /// 目的：第 i 个成员的 agent 名（核心据此拼出它的会话名）。
     pub fn member_id(&self, i: usize) -> Option<&str> {
         self.members.get(i).map(|m| m.id.as_str())
     }
 
-    /// 「停止」标志（与核心共享同一个）。
+    /// 目的：「停止」标志（与核心共享同一个）。
     pub fn cancel_flag(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
         std::sync::Arc::clone(&self.cancel)
     }
 
-    /// 开场还没开始过（核心驱动的第一步据此调 start）。
+    /// 目的：开场还没开始过（核心驱动的第一步据此调 start）。
     pub fn not_started(&self) -> bool {
         matches!(self.cursor, Cursor::Fresh) && self.round == 0
     }
 
-    /// 是否已被要求停止。
+    /// 目的：是否已被要求停止。
     pub(crate) fn cancelled(&self) -> bool {
         self.cancel.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// 本轮的调用选项：流式与预算都取全局设置（讨论也走同一份）。
+    /// 目的：本轮的调用选项：流式与预算都取全局设置（讨论也走同一份）。
     pub(crate) fn opts(&self) -> crate::capabilities::llm::api::CompleteOpts<'static> {
         crate::capabilities::llm::api::CompleteOpts::plain(self.llm.stream)
             .with_timeout(self.llm.timeout_secs)
     }
 
-    /// 首轮：聊天约定 + 用户需求（文案经提示词册渲染）。
+    /// 目的：首轮：聊天约定 + 用户需求（文案经提示词册渲染）。
     #[cfg(test)]
     pub fn open(
         &mut self,
@@ -455,9 +453,8 @@ impl Discussion {
         on_lines: &mut LineSink<'_>,
         sink: &mut dyn FnMut(SessionEvent),
     ) -> Result<(), String> {
-        // 状态机驱动：开场也是"问 → 收 → 再问"，判定全在 advance/feed 里
-        //（开场的表态与轮次同一口径：同意 / 离开立刻生效）。
-        // 驱动权将来归核心：把这一圈换成核心的 take/put 序列即可。
+        // 状态机驱动：开场也是"问 → 收 → 再问"，判定全在 advance/feed 里（表态与轮次同一口径）。
+        // 这条内存驱动循环等价于核心的 take/put 序列。
         self.start(task);
         loop {
             match self.advance() {
@@ -483,19 +480,16 @@ impl Discussion {
         }
     }
 
-    /// 推进一轮：把当前转录并入上下文，依次转达给每个在组且未同意的成员。
-    /// 讨论阶段不接工具循环：工具属执行机制，讨论只出主意（最小边界）。
+    /// 目的：推进一轮：把当前转录并入上下文，依次转达给每个在组且未同意的成员。
+    ///   讨论阶段不接工具循环：工具属执行机制，讨论只出主意（最小边界）。
     #[cfg(test)]
     pub fn step(
         &mut self,
         on_lines: &mut LineSink<'_>,
         sink: &mut dyn FnMut(SessionEvent),
     ) -> TurnOut {
-        // 这个循环**必须有前进条件**：没表态时由 after_turn 计数（提醒 → 放过），
-        // 否则假模型瞬间返回会把这里变成紧凑死循环（真烧过 CPU）。
-        // 状态机驱动：本函数只负责"问 → 收 → 再问"，判定全在 advance/feed 里。
-        // 驱动权将来归核心（见 docs/session/session-model.md 二之二）：那时把这一圈换成
-        // 核心的 take/put 序列即可，判定一行不用改。
+        // 这个循环**必须有前进条件**：没表态时由 after_turn 计数（提醒 → 放过），否则假模型瞬间返回会把这里空转。
+        // 状态机驱动：这里只做"问 → 收 → 再问"，判定全在 advance/feed 里（生产等价于核心的 take/put 序列）。
         loop {
             match self.advance() {
                 Adv::Ask { i, identity, turn } => {
@@ -527,8 +521,8 @@ impl Discussion {
         }
     }
 
-    /// 推进讨论的**一步**：只决定"该问谁"（或给出终态）——**不自己调模型**。
-    /// 驱动权归核心（它同时看得到协作会话与各 agent 的会话），见 session-model.md 二之二。
+    /// 目的：推进讨论的**一步**：只决定"该问谁"（或给出终态）——**不自己调模型**。
+    ///   驱动权归核心（它同时看得到协作会话与各 agent 的会话），见 session-model.md 二之二。
     pub fn advance(&mut self) -> Adv {
         if self.closed {
             return Adv::Out(TurnOut::Done);
@@ -608,14 +602,14 @@ impl Discussion {
         }
     }
 
-    /// 这个席位的身份块：**每回合现渲染**（成员的参数 + 当前提示词册 + 登记处给的形态）。
+    /// 目的：这个席位的身份块：**每回合现渲染**（成员的参数 + 当前提示词册 + 登记处给的形态）。
     pub(crate) fn member_identity(&self, i: usize) -> String {
         let m = &self.members[i];
         m.params.identity(&*self.prompts, m.mode)
     }
 
-    /// 收下一个成员回合的结果（状态机的一步）：吸收、外送它那一批行、按动词改状态。
-    /// 返回 Some = 该立刻交回上层（请教用户）；None = 继续问下一个。
+    /// 目的：收下一个成员回合的结果（状态机的一步）：吸收、外送它那一批行、按动词改状态。
+    ///   返回 Some = 该立刻交回上层（请教用户）；None = 继续问下一个。
     pub fn feed(
         &mut self,
         i: usize,
@@ -627,9 +621,8 @@ impl Discussion {
         // 开场与轮次共用这一条收尾路径；区别只在"请教要不要中止"（开场不中止）。
         let opener = matches!(self.cursor, Cursor::Opener(_));
         let id = self.members[i].id.clone();
-        // **没表态**：不投影主会话（原文只在它自己的会话里）、不改它的状态。
-        // 但**照样往后挪一格**——这是安全默认：任何驱动都不会因为"没表态"而卡在同一人身上
-        //（要重问的驱动**根本不调 feed**，见 after_turn 的 Remind 分支）。
+        // **没表态**：不投影主会话、不改它的状态，但**照样往后挪一格**——任何驱动都不会卡在同一人身上。
+        //（要重问的驱动**根本不调 feed**，见 after_turn 的 Remind 分支。）
         let Some(verb) = turn.verb else {
             self.cursor = if opener {
                 Cursor::Opener(i + 1)
@@ -698,8 +691,8 @@ impl Discussion {
         self.transcript.push(v);
     }
 
-    /// 成员一轮之后的处置：**核心只提醒、不强制**（见 docs/session/session-model.md 二）。
-    /// 用户主动中止时计数不再工作（不注入提醒）；每轮开始时提醒次数归零。
+    /// 目的：成员一轮之后的处置：**核心只提醒、不强制**（见 docs/session/session-model.md 二）。
+    ///   用户主动中止时计数不再工作（不注入提醒）；每轮开始时提醒次数归零。
     pub fn after_turn(
         &mut self,
         i: usize,
@@ -728,7 +721,7 @@ impl Discussion {
         AfterTurn::Unanswered
     }
 
-    /// 放过一个没表态的成员：不吸收、只把游标往后挪一格（提醒到顶时用）。
+    /// 目的：放过一个没表态的成员：不吸收、只把游标往后挪一格（提醒到顶时用）。
     pub fn skip(&mut self, i: usize) {
         self.cursor = if matches!(self.cursor, Cursor::Opener(_)) {
             Cursor::Opener(i + 1)
@@ -737,8 +730,8 @@ impl Discussion {
         };
     }
 
-    /// 记一行**系统消息**（提醒/边界这类不是谁说的内容）到主会话转录。
-    /// 见 docs/session/session-model.md 二"系统消息"。
+    /// 目的：记一行**系统消息**（提醒/边界这类不是谁说的内容）到主会话转录。
+    ///   见 docs/session/session-model.md 二"系统消息"。
     pub fn note_system(&mut self, text: &str) {
         self.transcript.push(LineView::system("", text.to_string()));
     }
