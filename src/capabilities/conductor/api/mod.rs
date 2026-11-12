@@ -373,6 +373,7 @@ pub(crate) struct AskReq {
 }
 mod action;
 mod contract_impls;
+mod generation;
 mod handle;
 
 /// 目的：入站能力面：**各能力自己的契约**+ 核心自己的两个 + 事件台。
