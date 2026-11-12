@@ -4,7 +4,7 @@
 > 效力：规范｜核对：2026-11-13｜依据：`docs/workflow/README.md`
 
 ## 适用与判据
-- 选择单 agent 时按本文执行；共同六步、闸门、分支与 PR 规则见 [README.md](README.md)。
+- 选择单 agent 时按本文执行；共同约定（分支、PR、闸门、阶段提交）见 [README.md](README.md)，请求分类与 Git 约束见 [AGENTS.md](../../AGENTS.md)。
 - 一个 agent 承担全部调查、实现、提交、PR 与门禁，不把工作转给未登记的 agent。
 - 违反由 PR 检查与 `node run-tests.js` 判定；agent 不自行 Ready / 合并（`AGENTS.md`）。
 
@@ -33,7 +33,7 @@
    - [ ] PR 正文含方案 / 验收 / 实施清单 / 明确不做
 - 任一项为否：停下修，不要先写代码（`.github/pull_request_template.md`）。
 - 无法创建或访问 PR（无远程、无权限、网络不通）：停下报告，不要先干完再补（`AGENTS.md`）。
-- Draft 期不跑 CI：本机按「三、本机开发回路」迭代；需要他平台结论时手动派发（见 [README.md](README.md) 的 Git 与 CI）。Ready 之后要继续做 WIP，可以转回 Draft。
+- Draft 期不跑 CI：本机按「三、本机开发回路」迭代；需要他平台结论时手动派发（见 [execution-ci.md](../testing/execution-ci.md) 的「CI（GitHub Actions）」）。Ready 之后要继续做 WIP，可以转回 Draft。
 - 决定、证据、CI 结论记录到 PR；PR 是任务进度的唯一落点。
 
 ## 二、实施：阶段提交 + PR 更新
@@ -63,10 +63,8 @@
 6. 用户确认后，Ready 与合并由用户执行；agent 不自行 Ready、不自行合并。PR 标题即主线提交信息，要能独立说明本次任务主题；合并后删任务分支（`AGENTS.md`）。
 
 ## 检查
-- 流程闸门 → 用户确认与 Draft PR 正文（`.github/pull_request_template.md`）。
 - 开工自检 → 分支、空提交、Draft PR 与 PR 正文（`docs/workflow/README.md`）。
 - 本机回路 → `node dev.js test|fmt|clippy` 与 `node run-tests.js`（`docs/testing/execution-ci.md`）。
-- 收口门禁 → `node run-tests.js`（纯文档 `node run-tests.js --docs`）。
 
 ## 路由
 - 流程总入口：[README.md](README.md)
