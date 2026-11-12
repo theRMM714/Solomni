@@ -50,7 +50,7 @@
 
 ## 六、与编程工作流的衔接
 
-- 文档治理按「任务」分类，先方案后实施，流程与闸门沿用 `docs/workflow/README.md`。
+- 文档治理按「任务」分类，先方案后实施，流程与闸门沿用 `docs/workflow/README.md`；按单 / 多 agent 选择读对应细则。
 - 纯文档改动用 `node run-tests.js --docs` 收口，不跑三平台（`docs/testing/execution-ci.md`）。
 - 每阶段一个提交，PR 正文随阶段更新（`docs/workflow/README.md`）。
 

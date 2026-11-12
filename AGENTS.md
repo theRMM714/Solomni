@@ -68,7 +68,9 @@
 5. 收口：代码任务 `node run-tests.js` 全绿；纯叙述型文档任务 `node run-tests.js --docs` 全绿（只代表文档审查 + 结构审查，`docs/presentation/contracts.md` 仍走全量）；`git status` 干净；交用户确认；确认后销账、改最终 PR 正文；用户 Ready/合并。
 6. 本机回路：`node dev.js test|fmt|clippy`（透传 `node dev.js cargo -- <参数>`）；门禁 `node run-tests.js`（纯文档用 `--docs`）；cargo 只经这些入口跑，要在终端直接敲，先按 `env.js` 注入环境（细则见 `docs/testing/execution-ci.md` 的「本机开发回路」）。
 
-开工命令、开工自检、阶段定义、PR 更新节奏与完整流程见 `docs/workflow/README.md`。
+单 / 多 agent 由 agent 或用户选择，不设强制路由；单 agent 见 `docs/workflow/single-agent.md`，多 agent 见 `docs/workflow/multi-agent.md`。两者只改分工，不改六步、闸门、PR 与验收。
+
+开工命令、开工自检、阶段定义与 PR 更新节奏见 `docs/workflow/single-agent.md`；完整流程与单 / 多 agent 选择见 `docs/workflow/README.md`。
 
 ## 七、Git 与 CI
 
@@ -124,7 +126,9 @@
 | 运行包开发或修改 | `RUNTIME_SPEC.md` |
 | providers、models、agents、settings 登记处 | `REGISTRY_SPEC.md` |
 | 任意测试、测试替身、质量门禁、缺口账或测试报告 | `TESTING.md` |
-| 任务流程 / PR / Git | `docs/workflow/README.md` |
+| 任务流程 / PR / Git（单 / 多 agent 选择） | `docs/workflow/README.md` |
+| 单 agent 流程细则 | `docs/workflow/single-agent.md` |
+| 多 agent 流程细则 | `docs/workflow/multi-agent.md` |
 | 用户启动文档审计 / 治理 | `docs/workflow/docs-audit.md` |
 | 文档分层 / 术语 / 引用 | `docs/conventions.md` |
 | 全部单元与横向细则 | `docs/README.md` |

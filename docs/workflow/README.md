@@ -1,10 +1,11 @@
 # 任务与开发流程
 
-> 定位：任务期细则：请求分类补充、六步流程、开工 / 实施 / 收口、PR 与 Git。
-> 效力：规范｜核对：2026-11-04｜依据：`AGENTS.md`
+> 定位：任务流程总入口：单 / 多 agent 两种工作流、共同六步与闸门、分支与 PR 规则。
+> 效力：规范｜核对：2026-11-13｜依据：`AGENTS.md`
 
 ## 适用与判据
-- 所有任务期操作以本文为准；入口是 `AGENTS.md` 的请求分类与任务流程。
+- 所有任务期操作先读本文，再按选定的工作流读 [single-agent.md](single-agent.md) 或 [multi-agent.md](multi-agent.md)。
+- 工作流由 agent 或用户选择，本文不设强制路由判据；两种工作流共用这里的六步、闸门、分支、PR 与验收。
 - 违反由 PR 检查与 `node run-tests.js` 判定；agent 不自行 Ready / 合并（`AGENTS.md`）。
 
 ## 一、请求分类
@@ -17,7 +18,18 @@
 - 用户发言无疑问并明确要求执行某个具体方案时，视为该方案已获批准；有疑问先解答，确认无意义后再执行。
 - 开发中发现不属于当前范围的新问题，不混入本次修改；向用户说明并另行处理。
 
-## 二、六步与闸门
+## 二、工作流选择
+
+- 单 agent：一个 agent 串行完成调查、方案、实施与收口；没有并行协调成本。
+- 多 agent：多个 agent 并行调查或并行实施，由一个 Lead 汇总证据、集成改动并对最终结果负责。
+- 选择由 agent 或用户决定，本文不设适用门槛；下面只列常见考虑，不作为判定条件：
+  - 调查面宽、问题彼此独立时，多 agent 并行取证可以减少串行等待。
+  - 实施可以拆成写范围不相交的分片时，多 agent 可以并行推进。
+  - 任务小、契约未稳定或需要频繁跨范围决策时，单 agent 通常更省协调。
+- 选择结果写进 PR 的「工作流」节；中途切换先改 PR 说明，已完成提交保留。
+- 多 agent 不改变请求分类：咨询 / 审查仍然只调查、不建分支（`AGENTS.md`）。
+
+## 三、共同六步与闸门
 
 ```text
 分类 → 调查 → 方案 → [闸门 1：用户同意]
@@ -32,83 +44,51 @@
 | 分类 | 判断咨询 / 任务 / bug | 咨询到此为止；任务与非低级 bug 进入调查 |
 | 调查 | 读权威文档、用工具取事实、向用户汇报 | 现状证据、影响、候选方案、待拍板问题 |
 | 方案 | 目标、范围（含明确不做）、验收、步骤、风险、文档、CI | 用户同意（闸门 1）；跨单元契约冻结 |
-| 开工 | 分支、空提交、push、Draft PR、方案正文、报 URL | Draft PR 已存在且正文含方案；未满足不得写实现代码 |
-| 实施 | 阶段提交；每次 push 后更新 PR | 阶段代码 + 测试 + 文档已同提交，PR 已更新 |
+| 开工 | 分支、空提交、push、Draft PR、方案正文、报 URL | Draft PR 已存在且正文含方案；未满足不写实现代码 |
+| 实施 | 阶段提交；任务分支每次 push 后更新 PR | 阶段代码 + 测试 + 文档已同提交，PR 已更新 |
 | 收口 | 全量门禁；差异自查 | 全绿、工作树干净、用户确认（闸门 2） |
 | Ready / 合并 | 用户确认后销账、同步文档、改最终 PR 正文 | 用户执行 Ready / 合并；agent 不自行做 |
 
 - 每一步完成后才能进入下一步；闸门不通过就停下报告，不跳步。
-
 - 方案是任务期记录：写进 PR 正文，不写进长期文档；长期文档只在收口时改成当前状态。
 
-## 三、开工：分支 + Draft PR（闸门 1 后的第一个动作）
+## 四、共同分支与 PR
 
-- 顺序不可交换：
+1. 一个任务一个分支：从最新 `main` 切 `task/<简述>`；`main` 有分支保护，不直接提交、不 push（`AGENTS.md`）。
+2. 空提交 + push + Draft PR 是写实现前的固定动作；正文按 [PR 模板](../../.github/pull_request_template.md) 写全。
+3. 一个任务一个 PR；多 agent 的子分支只作集成来源，不单独开 PR、不合并到 `main`（`docs/workflow/multi-agent.md`）。
+4. 每个阶段：代码 + 测试 + 文档同提交；任务分支每次 push 后更新 PR 的清单、阶段记录与测试证据。
+5. Draft 期不跑 CI；本机按所选工作流的回路迭代；Ready 后触发验收（`docs/testing/execution-ci.md`）。
+6. 收口：全量门禁、差异自查、用户确认（闸门 2）；Ready / 合并由用户执行（`AGENTS.md`）。
 
-1. 从最新 `main` 切任务分支：
-   ```sh
-   git fetch origin main
-   git switch -c <分支> origin/main
-   ```
-- 分支名用 `task/<简述>`；`main` 有分支保护，不直接提交、不 push。
-2. 空提交占位：
-   ```sh
-   git commit --allow-empty -m "chore: 开工 <任务>"
-   git push -u origin <分支>
-   ```
-3. 立刻创建 Draft PR：
-   ```sh
-   gh pr create --draft --base main --head <分支>
-   ```
-- 正文按 [.github/pull_request_template.md](../../.github/pull_request_template.md) 写全：目标与范围、明确不做、验收标准、实施清单、风险。
-4. 开工自检（全部为是才允许写实现代码）：
-   - [ ] 分支从最新 `main` 切出并 push
-   - [ ] 空提交已推送
-   - [ ] Draft PR 已创建
-   - [ ] PR 正文含方案 / 验收 / 实施清单 / 明确不做
+## 五、职责边界
 
-- 任一项为否：停下修，不得先写代码（`.github/pull_request_template.md`）。
-5. 无法创建或访问 PR（无远程、无权限、网络不通）：停下报告，不得先把活干完再补（`AGENTS.md`）。
-6. Draft 期不跑 CI：本机按「本机开发回路」迭代；需要他平台结论时手动派发（见 §七）。Ready 之后要继续做 WIP，可以转回 Draft。
-7. 决定、证据、CI 结论都记录到 PR；PR 是任务进度的唯一落点。
-
-## 四、实施：阶段提交 + PR 更新
-
-1. 阶段性小步提交（git commit） = 一个可独立验收的行为 / 契约变化；一个阶段一个提交（用户另有要求时按用户）。
-2. 每个阶段：代码 + 测试 + 文档同一提交 → push → 更新 PR 的实施清单、阶段记录、测试结论、决定与风险。
-3. 阶段结束时 PR 未更新 = 该阶段没有完成；不要等收口再补 PR 正文。
-4. 严格按已批准范围开发，不擅自扩大修改；优先用工具和可观察证据判断。
-5. 遇到阻塞或方案需要实质变化：先改 PR 正文或评论说明事实，再询问用户，不硬做。
-6. 原方案范围内暴露的实现错误可直接修复；证明原方案错误时，回到方案阶段重新确认。
-7. 范围外的问题记进 PR（或缺口账），不混进本次改动。
-8. 本机开发回路：改一层验一层用 `node dev.js test|fmt|clippy`（它用项目内工具链与缓存，见 [execution-ci.md](../testing/execution-ci.md) 的「本机开发回路」）；迭代时按门禁判一次用 `node run-tests.js --skip-e2e`，验收用 `node run-tests.js`；查清单 / 步骤 / 标记用 `node run-tests.js --list`，只跑需要的几项用 `--only=<gate|lane|step>`（任意子集不写报告、不能当验收）；**纯叙述型文档**改动用 `node run-tests.js --docs`（文档审查 + 结构审查，不跑代码 / 三平台 / L4；`docs/presentation/contracts.md` 除外，它走全量）。cargo 只经这些入口跑（透传口 `node dev.js cargo -- <参数>`）；要在终端直接敲，先按 `env.js` 注入环境——`CARGO_HOME`、`RUSTUP_HOME`、`TMPDIR` / `TMP` / `TEMP` 与 `PATH` 的清单见 [execution-ci.md](../testing/execution-ci.md) 的「本机开发回路」；不注入会用 PATH 上的系统工具链并把缓存、临时目录写到项目外（`AGENTS.md` 六）。
-9. 测试与文档跟代码同一次提交：新行为有新用例，改了行为改对应用例；权威文档改成当前状态，不留「实施中」。
-10. 完成修改和适用测试后再提交；提交前检查 `.gitignore` 与 `git status`，不提交无关修改。
-
-## 五、收口
-
-1. 按 `TESTING.md` 运行适用测试和质量检查：代码任务本地 `node run-tests.js` 全绿；纯叙述型文档任务用 `node run-tests.js --docs`，只代表文档审查 + 结构审查通过。失败则继续修复，不得把 `env-skip`、`gap` 或 `blocked` 写成通过。
-2. 差异自查：`git status` 干净、无无关改动、无机器路径与用户信息、PR 只含本任务。
-3. 交用户确认（闸门 2）。
-4. 用户确认后缺口销账：`tests/gaps.yaml` 删已补条目，并按规则同步门户与现状描述；检查权威文档，删掉过期、临时和矛盾的说法。
-5. 把 PR 正文改成最终状态：做了什么 / 未做 / 风险，并写明验收证据（命令、成功标记、CI 的 `sha`）。
-6. 用户确认后，Ready 与合并由用户执行；agent 不自行 Ready、不自行合并。PR 标题即主线提交信息，必须能独立说明本次任务主题；合并后删任务分支（`AGENTS.md`）。
+- 单 agent：全部调查、写范围、分支、PR、门禁由同一个 agent 负责（[single-agent.md](single-agent.md)）。
+- 多 agent：Lead 负责方案、契约、分片、共享文件、集成、PR 与最终门禁；worker 只负责分片与分片自测（[multi-agent.md](multi-agent.md)）。
+- 两种工作流都由用户保留闸门 1、闸门 2 与合并权（`AGENTS.md`）。
 
 ## 六、例外
-- 咨询 / 审查：只出结论，不建分支。
-- 文档审计 / 治理：用户启动时按 [docs-audit.md](docs-audit.md) 执行（检查顺序、修改规则、验收标准），不套用编程任务的实施节奏。
+
+- 咨询 / 审查：只出结论，不建分支；可以用多 agent 并行取证（`AGENTS.md`）。
+- 文档审计 / 治理：用户启动时按 [docs-audit.md](docs-audit.md) 执行，不套用编程任务的实施节奏。
 
 ## 七、Git 与 CI
 
 - 硬规则见 `AGENTS.md` §七：`main` 保护、任务分支、agent 不自行 Ready / 合并。
-- 需要他平台或真机结论时，用 `gh workflow run test.yml --ref <分支>` 手动派发；触发时机、报告读取与 `sha` 比对一律以 [execution-ci.md](../testing/execution-ci.md) 为准。
-- 纯文档 PR 在 Ready 后走 `changes` + `docs` + `structure` + 合并闸门：平台 job 跳过；规则集与合并判定见 [execution-ci.md](../testing/execution-ci.md) 的「规则集」，报告写 `ci-report` 的 `runs/docs` / `runs/structure`；不要把文档审查或结构审查的结果当成三平台验收。
+- 需要他平台或真机结论时，用 `gh workflow run test.yml --ref <分支>` 手动派发；触发时机、报告读取与 `sha` 比对以 [execution-ci.md](../testing/execution-ci.md) 为准。
+- 纯文档 PR 在 Ready 后走 `changes` + `docs` + `structure` + 合并闸门；平台 job 跳过；规则集与合并判定见 [execution-ci.md](../testing/execution-ci.md) 的「规则集」。
 
 ## 检查
+
 - 流程闸门 → 用户确认与 Draft PR 正文（`.github/pull_request_template.md`）。
 - 收口门禁 → `node run-tests.js`（纯文档 `node run-tests.js --docs`）。
+- 文档模板与锚点 → `node run-tests.js --docs`（`docs/templates/index.json`）。
 
 ## 路由
+
+- 单 agent 细则：[single-agent.md](single-agent.md)
+- 多 agent 细则：[multi-agent.md](multi-agent.md)
+- 文档审计：[docs-audit.md](docs-audit.md)
 - 全仓常驻规则：[../../AGENTS.md](../../AGENTS.md)
 - CI 报告细节：[../testing/execution-ci.md](../testing/execution-ci.md)
 - 文档索引：[../README.md](../README.md)
