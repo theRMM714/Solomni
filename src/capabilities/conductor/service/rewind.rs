@@ -620,9 +620,8 @@ pub(crate) fn replay_dialogue(
             rows.extend(lines.iter());
         }
     }
-    // **压缩过**的会话：按最后一条压缩行重建发送视图（见 session-model.md 六）——
-    // `up_to` 之前的行不再进对话，由一份摘要代替（转录本身完整保留，用户照样能查）。
-    // 回档到压缩行之前时它已随转录被截掉，所以「没有它」就是「回到压缩前」。
+    // **压缩过**的会话按最后一条压缩行重建发送视图（见 session-model.md 六）：`up_to` 之前的行由摘要代替，
+    // 转录本身完整保留；回档到压缩行之前时它已随转录被截掉，所以「没有它」就是「回到压缩前」。
     let compacted = crate::capabilities::session::api::last_compaction(events);
     let compacted_upto = compacted.as_ref().map(|(up_to, _, _)| *up_to).unwrap_or(0);
     let compacted_line = compacted.as_ref().map(|(_, _, id)| *id).unwrap_or(0);

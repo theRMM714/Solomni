@@ -1,56 +1,5 @@
 {
   "_comment": "注释契约（ARCHITECTURE.md 十）的存量快照：键是文件，值是「规则 → 计数」。棘轮只减不增：新文件零容忍，老文件同类变多也算新增；变少必须销账。收紧只能往下：node run-hygiene.js --tighten。",
-  "src/capabilities/conductor/api/handle.rs": {
-    "头块：槽外有行或自造槽": 4,
-    "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 2,
-    "条目：首行不是目的": 1
-  },
-  "src/capabilities/conductor/api/mod.rs": {
-    "头块：槽外有行或自造槽": 12,
-    "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 35,
-    "行内：注释串后面必须是代码（不能是空行）": 5,
-    "行内：连续超过 2 行": 1
-  },
-  "src/capabilities/conductor/domain/proxy.rs": {
-    "头块：槽外有行或自造槽": 3,
-    "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 52,
-    "条目：首行不是目的": 42,
-    "行内：注释串后面必须是代码（不能是空行）": 5
-  },
-  "src/capabilities/conductor/mod.rs": {
-    "头块：槽外有行或自造槽": 12,
-    "头块：缺文件头": 1
-  },
-  "src/capabilities/conductor/ports.rs": {
-    "头块：槽外有行或自造槽": 4,
-    "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 1,
-    "条目：首行不是目的": 1
-  },
-  "src/capabilities/conductor/service/flow.rs": {
-    "行内：连续超过 2 行": 1
-  },
-  "src/capabilities/conductor/service/history.rs": {
-    "条目：槽外有行或自造槽": 2
-  },
-  "src/capabilities/conductor/service/mod.rs": {
-    "头块：槽外有行或自造槽": 3,
-    "头块：缺文件头": 1
-  },
-  "src/capabilities/conductor/service/proxy.rs": {
-    "头块：槽外有行或自造槽": 4,
-    "头块：缺文件头": 1,
-    "行内：注释串后面必须是代码（不能是空行）": 1
-  },
-  "src/capabilities/conductor/service/rewind.rs": {
-    "行内：连续超过 2 行": 1
-  },
-  "src/capabilities/conductor/service/turn.rs": {
-    "行内：注释串后面必须是代码（不能是空行）": 1
-  },
   "src/capabilities/llm/api.rs": {
     "头块：槽外有行或自造槽": 9,
     "头块：缺文件头": 1,
@@ -213,19 +162,5 @@
     "条目：槽外有行或自造槽": 2,
     "条目：首行不是目的": 2,
     "行内：注释串后面必须是代码（不能是空行）": 3
-  },
-  "src/capabilities/taskchain/api.rs": {
-    "头块：槽外有行或自造槽": 3,
-    "头块：缺文件头": 1
-  },
-  "src/capabilities/taskchain/domain/chain.rs": {
-    "头块：槽外有行或自造槽": 11,
-    "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 27,
-    "条目：首行不是目的": 21
-  },
-  "src/capabilities/taskchain/mod.rs": {
-    "头块：槽外有行或自造槽": 7,
-    "头块：缺文件头": 1
   }
 }

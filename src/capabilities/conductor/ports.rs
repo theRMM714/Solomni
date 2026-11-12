@@ -1,14 +1,14 @@
-//! 协调业务的**出站端口**：核心代理工具要做的外部动作（清单 / 建会话 / 转达 / 观察 / 生命周期）。
-//!
-//! 工具逻辑（`domain/proxy.rs`、`service/proxy.rs`）只依赖这一面，不认识会话机制；
-//! 生产实现是 `service/proxy.rs` 的 `ProxyBridge`（把调用交给核心线程的 `Conductor::proxy_*`）。
+//! 目的：协调业务的出站端口——核心代理工具要做的外部动作（清单 / 建会话 / 转达 / 观察 / 生命周期）。
+//! 管：ProxyHost trait 的方法契约：catalog / create_session / send / observe / control / messages。
+//! 不管：工具层参数解析与授权校验（domain/proxy.rs、service/proxy.rs）；会话机制与队列（见生产实现）。
+//! 联动：domain/proxy.rs 与 service/proxy.rs 只依赖这一面；ProxyBridge 把调用交给核心线程的 Conductor::proxy_*。
 
 use crate::capabilities::conductor::domain::proxy::{
     Catalog, CatalogScope, ControlAction, ControlState, Created, MessagesPage, NewSession,
     ObserveView, Relayed, Snapshot,
 };
 
-/// 代理工具的宿主：把工具层的动作落到真实会话上。失败一律如实回报（不静默降级）。
+/// 目的：代理工具的宿主——把工具层的动作落到真实会话上。失败一律如实回报（不静默降级）。
 pub trait ProxyHost: Send + Sync {
     /// 只读清单事实（agent / 模块 / 模型）：只含公开信息，不含密钥与真实私有路径。
     fn catalog(&self, scope: CatalogScope) -> Result<Catalog, String>;

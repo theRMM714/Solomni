@@ -1,7 +1,7 @@
-//! 核心代理工具的**执行面**：按声明校验参数 → 判授权 → 查幂等账 → 把动作交给 ProxyHost。
-//!
-//! 工具逻辑只到这里：它不碰会话机制。宿主是 `ProxyBridge`（队列桥：把 ProxyHost 的每个方法
-//! 交给核心线程执行）与 `Conductor` 的 `proxy_*` 方法族；代理会话那一回合挂的是 `ProxyHandler`。
+//! 目的：核心代理工具的执行面——按声明校验参数 → 判授权 → 查幂等账 → 把动作交给 ProxyHost。
+//! 管：工具执行流程与幂等账；真实宿主 ProxyBridge（队列桥）与 Conductor 的 proxy_* 方法族；代理会话那一回合挂 ProxyHandler。
+//! 不管：工具逻辑的纯规则（domain/proxy.rs）；会话机制本身（经 ProxyHost 落到 Conductor）。
+//! 联动：端口见 ports.rs；工具面名单在 systools/tools.yaml，声明解析归 domain/proxy.rs。
 
 use crate::capabilities::conductor::domain::proxy as d;
 use crate::capabilities::conductor::ports::ProxyHost;
@@ -268,7 +268,6 @@ fn json_ok<T: serde::Serialize>(v: &T) -> ToolOutcome {
         Err(e) => deny(format!("回执序列化失败：{}", e)),
     }
 }
-// ---------- 真实宿主：Conductor 的代理方法族 + 队列桥 ----------
 
 use super::{now_ts, validate_work_name, Conductor, Session};
 use crate::capabilities::conductor::api::ConductorHandle;
