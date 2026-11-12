@@ -13,6 +13,8 @@ pub(crate) struct FakeEngine {
     pub boot_delay: Option<std::time::Duration>,
     pub boot_error: Option<String>,
     pub fenced_output: Option<String>,
+    pub fenced_result: Option<crate::kernel::api::ToolOutcome>,
+    pub exec_result: Option<crate::kernel::api::ToolOutcome>,
     // 每次 `boot()` 收到的 `GuestSpec` 快照（含 `mounts`；失败尝试也记——"试过哪个计划"同样是事实）。
     pub specs: Arc<Mutex<Vec<crate::capabilities::vm::domain::guest::GuestSpec>>>,
 }
@@ -54,6 +56,8 @@ impl crate::capabilities::vm::ports::VmEngine for FakeEngine {
                 lease: spec.lease.clone(),
                 calls: self.calls.clone(),
                 fenced_output: self.fenced_output.clone(),
+                fenced_result: self.fenced_result.clone(),
+                exec_result: self.exec_result.clone(),
             },
             lease: spec.lease.clone(),
             calls: self.calls.clone(),
@@ -262,6 +266,10 @@ struct FakeChannel {
     calls: Arc<Mutex<Vec<String>>>,
     /// 目的：围栏执行的预设输出（None = 恒 `fake-guest`）：诊断用例给它一份 helper 形状的 JSON。
     fenced_output: Option<String>,
+    /// 目的：围栏执行的完整预设结果（None = 按 fenced_output 造成功回包）：诊断失败分支用。
+    fenced_result: Option<crate::kernel::api::ToolOutcome>,
+    /// 目的：裸执行的完整预设结果（None = 恒 `fake-guest` 成功）：诊断预检分支用。
+    exec_result: Option<crate::kernel::api::ToolOutcome>,
 }
 
 impl crate::capabilities::vm::ports::GuestChannel for FakeChannel {
@@ -278,10 +286,12 @@ impl crate::capabilities::vm::ports::GuestChannel for FakeChannel {
             .lock()
             .expect("锁")
             .push(format!("run:{}:{}", self.lease, run.command));
-        crate::kernel::api::ToolOutcome {
-            ok: true,
-            output: "fake-guest".to_string(),
-        }
+        self.exec_result
+            .clone()
+            .unwrap_or_else(|| crate::kernel::api::ToolOutcome {
+                ok: true,
+                output: "fake-guest".to_string(),
+            })
     }
 
     fn exec_fenced(
@@ -300,6 +310,9 @@ impl crate::capabilities::vm::ports::GuestChannel for FakeChannel {
             access.ro_tree.join(","),
             access.diagnose
         ));
+        if let Some(result) = &self.fenced_result {
+            return result.clone();
+        }
         let output = self
             .fenced_output
             .clone()

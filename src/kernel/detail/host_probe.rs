@@ -135,3 +135,25 @@ impl HostProbe for HostProbeAdapter {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::file_stamp;
+
+    #[test]
+    fn file_stamp_reads_size_and_time_and_rejects_missing_paths() {
+        let dir = crate::tests::scratch("host-probe-stamp");
+        let path = dir.join("entry.txt");
+        std::fs::write(&path, b"hello").expect("写样例文件");
+
+        let stamp = file_stamp(&path).expect("读文件戳");
+        assert_eq!(stamp.len, 5, "字节数要如实带出");
+        assert!(stamp.modified.is_some(), "本机要能读到修改时间");
+        assert!(
+            file_stamp(&dir.join("missing.txt")).is_err(),
+            "不存在的路径必须报错"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

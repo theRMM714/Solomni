@@ -160,3 +160,97 @@ pub(crate) fn guest_diagnose_uses_read_only_system_access_and_reports_reasons() 
         "非 Linux guest 不该去调通道"
     );
 }
+
+/// 目的：诊断失败按事实分流：超时 / helper 自报错 / 助手不在 / 缺 python3 / 通道不通，各有各的说法。
+#[test]
+pub(crate) fn guest_diagnose_separates_failure_causes() {
+    use crate::capabilities::vm::api::GuestImage;
+    use crate::capabilities::vm::domain::diagnose as diag;
+    use crate::capabilities::vm::service::VmService;
+    use crate::kernel::api::ToolOutcome;
+    use crate::tests::doubles::{FakeEngine, NamedShare};
+    use std::sync::Arc;
+
+    let spec = GuestSpec {
+        lease: "w-fail".to_string(),
+        image: GuestImage::linux("t", std::path::PathBuf::from("/img/root.qcow2"), None, None),
+        mounts: Vec::new(),
+        net: false,
+        engine_path: None,
+        share_path: None,
+        shares: Vec::new(),
+        seed: None,
+        isolated: true,
+        cache_disk: None,
+    };
+    let started = |fenced: Option<ToolOutcome>, probe: Option<ToolOutcome>| {
+        let engine = Arc::new(FakeEngine {
+            fenced_result: fenced,
+            exec_result: probe,
+            ..Default::default()
+        });
+        let vm = VmService::new(engine, vec![Arc::new(NamedShare::new("9p", true))]);
+        vm.guest_start(&spec).expect("替身 guest 要能起来");
+        vm
+    };
+    let fail = |output: &str| ToolOutcome {
+        ok: false,
+        output: output.to_string(),
+    };
+    let say = |output: &str| ToolOutcome {
+        ok: true,
+        output: output.to_string(),
+    };
+
+    let err = started(
+        Some(fail(&format!(
+            "helper 挂了 {}",
+            diag::HELPER_TIMEOUT_MARKER
+        ))),
+        None,
+    )
+    .guest_diagnose("w-fail")
+    .expect_err("超时要拒绝");
+    assert!(err.contains("超时"), "{}", err);
+
+    let err = started(
+        Some(fail(&format!("{}自检失败", diag::HELPER_DIAGNOSE_PREFIX))),
+        None,
+    )
+    .guest_diagnose("w-fail")
+    .expect_err("helper 自报错要拒绝");
+    assert!(err.contains("诊断执行失败"), "{}", err);
+
+    let err = started(Some(fail("没有输出")), Some(say(diag::PROBE_NO_HELPER)))
+        .guest_diagnose("w-fail")
+        .expect_err("助手不在要拒绝");
+    assert!(err.contains("诊断助手不在"), "{}", err);
+
+    let err = started(Some(fail("没有输出")), Some(say(diag::PROBE_NO_PYTHON)))
+        .guest_diagnose("w-fail")
+        .expect_err("缺 python3 要拒绝");
+    assert!(err.contains("缺 python3"), "{}", err);
+
+    let err = started(Some(fail("预检都说在")), Some(say(diag::PROBE_OK)))
+        .guest_diagnose("w-fail")
+        .expect_err("预检正常但诊断失败要拒绝");
+    assert!(err.contains("诊断执行失败"), "{}", err);
+
+    let err = started(Some(fail("没有输出")), Some(fail("")))
+        .guest_diagnose("w-fail")
+        .expect_err("预检没有回应要拒绝");
+    assert!(err.contains("通道不通"), "{}", err);
+    assert!(err.contains("没有回应诊断预检"), "{}", err);
+
+    let err = started(Some(say("不是 JSON")), None)
+        .guest_diagnose("w-fail")
+        .expect_err("输出不含报告要拒绝");
+    assert!(err.contains("诊断助手不在"), "{}", err);
+
+    let command = diag::probe_command();
+    assert!(command.contains(diag::HELPER_PATH), "{}", command);
+    assert!(command.contains("timeout 10"), "{}", command);
+    assert!(command.contains(diag::PROBE_NO_HELPER), "{}", command);
+    assert!(command.contains(diag::PROBE_NO_PYTHON), "{}", command);
+    assert!(command.contains(diag::PROBE_OK), "{}", command);
+}

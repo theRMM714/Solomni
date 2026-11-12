@@ -265,6 +265,16 @@ pub(crate) fn external_workspace_vm_session_boots_with_two_stable_mounts() {
         )),
         "绑定写进根会话 meta（规范化绝对路径）"
     );
+    let binding = core
+        .workspace_binding_of(&meta)
+        .expect("加载复检要过（绑定没被手改）");
+    assert_eq!(
+        binding,
+        Some(crate::kernel::api::native(
+            &external.canonicalize().expect("规范化外部路径")
+        )),
+        "复检返回的绑定根要与 meta 一致"
+    );
     let session = product.join("session").join("wx");
     assert!(session.join(".work-root").is_file(), "布局投影已落盘");
     assert!(!session.join("work").exists(), "外部绑定不建会话内 work/");
@@ -297,6 +307,28 @@ pub(crate) fn workspace_policy_splits_network_roots_by_tier() {
     assert!(err.contains("网络共享的根目录"), "{err}");
     let err = policy(Path::new(r"D:\"), Tier::Vm).expect_err("文件系统根要拒");
     assert!(err.contains("文件系统根目录"), "{err}");
+}
+
+/// 目的：加载复检在这台机器上也能跑：越界拒绝、产品外的目录放行、暂时不可达不挡（不因平台差异漏判）。
+#[test]
+pub(crate) fn workspace_recheck_rejects_bounds_and_allows_unreachable_roots() {
+    use crate::capabilities::conductor::service::workspace_root::{product_root, recheck};
+    use crate::kernel::api::Tier;
+
+    let root = crate::tests::scratch("recheck-cross");
+    let product = root.join("product");
+    let outside = root.join("outside");
+    std::fs::create_dir_all(&product).expect("建产品根");
+    std::fs::create_dir_all(&outside).expect("建外部目录");
+    let probe = crate::kernel::detail::host_probe::HostProbeAdapter;
+    let product = product_root(&product, &probe);
+
+    let err = recheck(&product, Tier::Host, &product, &probe).expect_err("产品根自身要拒");
+    assert!(err.contains("互相包含"), "{}", err);
+    recheck(&outside, Tier::Host, &product, &probe).expect("产品外的目录要放行");
+    recheck(&root.join("gone"), Tier::Host, &product, &probe).expect("暂时不可达不挡");
+
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 /// 目的：加载复检——手改 meta 塞进策略违例的绑定要如实拒绝；只是目录不可达不算违例。

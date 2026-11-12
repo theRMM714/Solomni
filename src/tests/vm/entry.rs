@@ -133,6 +133,63 @@ pub(crate) fn exec_entry_missing_refuses_before_any_tier() {
     // 没有这份事实时照旧成立：入口判据不牵连别的东西。
     exec::plan(&ExecSpec::default(), Vec::new(), &[], false).expect("本机档照旧可成立");
 }
+
+/// 目的：模块入口落进 guest 的本地副本——文件戳不变就复用上次落点，读不到 / 没活 guest / 越界入口都拒绝。
+#[test]
+pub(crate) fn stage_exec_reuses_the_copy_when_the_file_stamp_is_unchanged() {
+    use crate::capabilities::vm::api::{GuestImage, Vm};
+    use crate::capabilities::vm::domain::guest::GuestSpec;
+    use crate::capabilities::vm::service::VmService;
+    use crate::tests::doubles::{FakeEngine, NamedShare};
+    use std::sync::Arc;
+
+    let dir = crate::tests::scratch("stage-exec");
+    let host = dir.join("entry.sh");
+    std::fs::write(&host, b"#!/bin/sh\nexit 0\n").expect("写入口样例");
+    let vm = VmService::new(
+        Arc::new(FakeEngine::new()),
+        vec![Arc::new(NamedShare::new("9p", true))],
+    );
+    let spec = GuestSpec {
+        lease: "w-stage".to_string(),
+        image: GuestImage::linux("t", std::path::PathBuf::from("/img/root.qcow2"), None, None),
+        mounts: Vec::new(),
+        net: false,
+        engine_path: None,
+        share_path: None,
+        shares: Vec::new(),
+        seed: None,
+        isolated: true,
+        cache_disk: None,
+    };
+    vm.guest_start(&spec).expect("替身 guest 要能起来");
+
+    assert!(
+        vm.stage_exec("w-stage", "m", &dir.join("missing.sh"), "entry.sh")
+            .is_err(),
+        "读不到模块入口要拒绝"
+    );
+    let dest = vm
+        .stage_exec("w-stage", "m", &host, "entry.sh")
+        .expect("入口要能落进 guest");
+    assert_eq!(
+        vm.stage_exec("w-stage", "m", &host, "entry.sh")
+            .expect("同一文件戳要复用"),
+        dest,
+        "文件没变就不重复落盘"
+    );
+    assert!(
+        vm.stage_exec("w-stage", "m", &host, "../escape.sh")
+            .is_err(),
+        "越界入口要拒绝"
+    );
+    assert!(
+        vm.stage_exec("no-lease", "m", &host, "entry.sh").is_err(),
+        "没有活 guest 要拒绝"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
 #[test]
 pub(crate) fn package_setup_scripts_apply_prefix_bins_and_system_payloads() {
     use crate::capabilities::packages::api::PlannedPackage;
