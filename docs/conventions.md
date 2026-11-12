@@ -11,7 +11,7 @@
 
 - **根门户**（`README.md`、`AGENTS.md`、`ARCHITECTURE.md` 等）只写「这份文档管什么、要做事时读哪一份」，不复述细则正文。
 - **细则**在 `docs/<单元>/`：每个业务与机制单元一个目录，目录里的 `README.md` 是唯一入口，`unit-map.md` 是逐文件职责（T0 机器比对）。
-- 不属任何单元的横向内容按事项分：测试与质量在 `docs/testing/`，任务流程在 [workflow/README.md](workflow/README.md)，文档约定与术语在本文。
+- 不属任何单元的横向内容按事项分：测试与质量在 `docs/testing/`，任务流程在 [workflow/README.md](workflow/README.md)（单 / 多 agent 细则同目录），文档约定与术语在本文。
 - 只有任务引入新的长期领域且现有文档无法承载时，才建新专项文档；不为单次任务创建无长期价值的文档。
 - 细则之间用相对路径互引；门户用 `docs/<领域>/<文件>.md` 引用细则。同一个事实只有一份权威。
 
@@ -53,6 +53,8 @@
 | 系统工具里执行外部命令、经 kernel 进程机制（守门进程 / guest）跑的那组 | **执行类系统工具**（当前 `shell`） | 终端、shell 工具 |
 | 模块声明的常驻外部服务（MCP / harness 等） | **常驻服务**（能力 `residents`） | 外部服务、后台进程、daemon |
 | 模块声明的隐秘信息（值归产品、只落 `.home/`） | **隐秘字段**（能力 `secrets`） | 密钥（除非确指通道密钥）、凭据、secret |
+| 多 agent 工作流里对用户与最终结果负责的 agent | **Lead**（主控 agent） | 主 agent、协调者 |
+| 多 agent 工作流里只负责一个分片的 agent | **worker**（分片 agent） | 子 agent、执行者 |
 
 ## 四、引用格式
 
@@ -79,5 +81,7 @@
 - 全仓常驻规则：[../AGENTS.md](../AGENTS.md)
 - 文档索引：[README.md](README.md)
 - 任务与开发流程：[workflow/README.md](workflow/README.md)
+- 单 agent 细则：[workflow/single-agent.md](workflow/single-agent.md)
+- 多 agent 细则：[workflow/multi-agent.md](workflow/multi-agent.md)
 - 文档审计 / 治理流程：[workflow/docs-audit.md](workflow/docs-audit.md)
 - 测试细则索引：[testing/README.md](testing/README.md)

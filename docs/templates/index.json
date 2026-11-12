@@ -18,6 +18,8 @@
         "TESTING.md",
         "docs/conventions.md",
         "docs/workflow/README.md",
+        "docs/workflow/single-agent.md",
+        "docs/workflow/multi-agent.md",
         "docs/testing/levels.md",
         "docs/testing/quality-isolation.md",
         "docs/testing/doubles.md",
