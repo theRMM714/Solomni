@@ -61,6 +61,11 @@ rustls-platform-verifier = "0.7"
 # Unix 围栏：进程组与信号（杀整棵树）、Landlock/seatbelt 的系统调用；父死子亡 Linux 用 prctl、macOS 用 kqueue（本程序另起的守门进程盯核心）。
 libc = "0.2"
 
+# 静态检查：clippy 跑 -D warnings 之外，把「模块入口用自命名文件」也钉进工具链，
+# 与 structure/module-files 门禁同判据（门禁报错、此处编译期报错）。
+[lints.clippy]
+mod_module_files = "deny"
+
 [[bin]]
 name = "solomni"
 path = "src/main.rs"
