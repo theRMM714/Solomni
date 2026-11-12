@@ -135,13 +135,11 @@ function testFileSet(root, files) {
   for (const f of files) {
     const text = fs.readFileSync(path.join(root, f), "utf8");
     const { siblings } = testModules(text);
-    // Rust 的子模块目录：`a/b.rs` 的子模块在 `a/b/` 下，`a/b/mod.rs` 的在 `a/b/` 下。
-    const stem = f.replace(/\.rs$/, "");
-    const dir = path.posix.basename(stem) === "mod" ? path.posix.dirname(stem) : stem;
+    // Rust 的子模块：`a/b.rs` 的子模块在 `a/b/` 下。
+    const dir = f.replace(/\.rs$/, "");
     for (const name of siblings) {
-      for (const cand of [dir + "/" + name + ".rs", dir + "/" + name + "/mod.rs"]) {
-        if (fs.existsSync(path.join(root, cand))) out.add(cand);
-      }
+      const cand = dir + "/" + name + ".rs";
+      if (fs.existsSync(path.join(root, cand))) out.add(cand);
     }
   }
   return out;

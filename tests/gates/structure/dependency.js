@@ -70,10 +70,8 @@ function direction(root) {
   for (const abs of rsFiles) {
     const text = fs.readFileSync(abs, "utf8");
     for (const m of text.matchAll(/#\[cfg\(test\)\]\s*mod\s+(\w+)\s*;/g)) {
-      const base = path.basename(abs) === "mod.rs" ? path.dirname(abs) : abs.replace(/\.rs$/, "");
-      for (const cand of [path.join(base, m[1] + ".rs"), path.join(base, m[1], "mod.rs")]) {
-        if (fs.existsSync(cand)) testOnly.add(cand);
-      }
+      const cand = path.join(abs.replace(/\.rs$/, ""), m[1] + ".rs");
+      if (fs.existsSync(cand)) testOnly.add(cand);
     }
   }
 
