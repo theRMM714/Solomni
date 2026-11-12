@@ -32,8 +32,7 @@ fn selfcheck_injection_switch_reports_env_unavailable() {
     };
     // 运行期不该有这个开关（探针自己给守门进程带）。
     assert!(!selfcheck_forced_unavailable(), "运行期不该有这个开关");
-    // 注入后：必须在触到后端之前就返回「本机不允许」，且带得出注入标记
-    // （探针据此把"环境结论"与"我们写错了"分开）。
+    // 注入后：必须在触到后端之前就返回「本机不允许」，且带得出注入标记（探针据此把"环境结论"与"我们写错了"分开）。
     // SAFETY: 只改本用例独占的探针开关，用例内即改即清。
     unsafe {
         std::env::set_var(SELFCHECK_FAIL_FLAG, "1");
