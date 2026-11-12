@@ -94,7 +94,7 @@ fn guest_image_tools() -> bool {
 
 /// 目的：造一个带指定 mode 的普通文件（宿主属主；镜像里的属主由 mke2fs 的假 root 决定）。
 #[cfg(target_os = "linux")]
-fn write_mode(path: &Path, mode: u32) {
+fn write_mode(path: &std::path::Path, mode: u32) {
     use std::os::unix::fs::PermissionsExt;
     fs::write(path, b"#!/bin/sh\n").expect("写文件");
     fs::set_permissions(path, fs::Permissions::from_mode(mode)).expect("设权限");
@@ -102,7 +102,7 @@ fn write_mode(path: &Path, mode: u32) {
 
 /// 目的：读宿主目录树上某个条目的权限位（只比低 12 位；解包后这里应当**丢了**特权位）。
 #[cfg(target_os = "linux")]
-fn mode_of(path: &Path) -> u32 {
+fn mode_of(path: &std::path::Path) -> u32 {
     use std::os::unix::fs::PermissionsExt;
     fs::metadata(path).expect("读属性").permissions().mode() & 0o7777
 }
