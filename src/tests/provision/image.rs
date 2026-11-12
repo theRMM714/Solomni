@@ -3,29 +3,18 @@
 //! 不管：清单与编排（见 `service.rs`）、端口实现（见 `ports.rs`）。
 //! 联动：被测实现是 `capabilities::provision::detail::{guest_image,install,fetch}`。
 
-use super::service::{adapters, dep_of, run, service, sha256_file, test_fetch, verify_cached};
-use crate::capabilities::provision::api::{JobState, Provision};
+use super::service::run;
 use crate::capabilities::provision::detail::fetch::{
-    choose_fastest, download_with_resume, mirror_of, part_path, part_source_marker, HttpFetch,
+    choose_fastest, download_with_resume, mirror_of, part_path, part_source_marker,
 };
 use crate::capabilities::provision::detail::guest_image::*;
-use crate::capabilities::provision::detail::host::RealHost;
-use crate::capabilities::provision::detail::install::HostInstallers;
-use crate::capabilities::provision::detail::ledger::{
-    probe_present, read_ledger, record_installed, FileLedger,
-};
-use crate::capabilities::provision::detail::procs::BookProcs;
+use crate::capabilities::provision::detail::ledger::record_installed;
 use crate::capabilities::provision::domain::*;
-use crate::capabilities::provision::ports::Fetcher;
 use crate::capabilities::provision::service::*;
-use crate::capabilities::provision::service::{
-    run as run_pipeline, verify_cached as verify_cached_pinned,
-};
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 /// 目的：缓存文件名取 URL 末段，去掉查询串。
 #[test]
 fn asset_name_takes_last_path_segment() {

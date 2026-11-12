@@ -3,7 +3,6 @@
 //! 不管：非 Windows 平台的行为（见 tests/linux、tests/macos）。
 //! 联动：机制在 confine/windows/ 各文件；判据见 docs/kernel/README.md 的「围栏落点：必要与可选」。
 
-use super::super::Owner;
 use super::*;
 
 /// 目的：授权应当成立——必要落点全授上，不成立就把结论打出来（它是这一路的判据）。

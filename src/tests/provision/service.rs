@@ -4,9 +4,7 @@
 //! 联动：被测实现是 `capabilities::provision::{service,domain}`。
 
 use crate::capabilities::provision::api::{JobState, Provision};
-use crate::capabilities::provision::detail::fetch::{
-    choose_fastest, download_with_resume, mirror_of, part_path, part_source_marker, HttpFetch,
-};
+use crate::capabilities::provision::detail::fetch::HttpFetch;
 use crate::capabilities::provision::detail::guest_image::*;
 use crate::capabilities::provision::detail::host::RealHost;
 use crate::capabilities::provision::detail::install::HostInstallers;
@@ -23,7 +21,7 @@ use crate::capabilities::provision::service::{
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 /// 目的：测试里用一个真实取数实现（不联网的用例只用它的摘要与路径函数）。
