@@ -39,9 +39,8 @@ pub fn reconcile(home: &Path) -> super::super::super::ReconcileReport {
         rep.note = "没有台账：本程序没在本机写过权限项".to_string();
         return rep;
     }
-    // 归属分类
-    let grant_state: Vec<OwnersState> =
-        rec.grants.iter().map(|g| owners_state(&g.owners)).collect();
+    // 归属分类：机器级授权一律 Keep（不撤 ACE、不还原其快照，计入 kept）；按次条目按归属集合判。
+    let grant_state: Vec<OwnersState> = rec.grants.iter().map(entry_state).collect();
     let profile_state: Vec<OwnersState> = rec
         .profiles
         .iter()

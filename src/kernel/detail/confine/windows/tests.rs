@@ -464,7 +464,8 @@ fn read_only_grants_write_ro_aces_and_revoke_removes_them() {
 /// 【残留探针】授权（叶子读写 + 父目录只读属性）→ 撤权后，叶子与父目录上都不得留有该容器 SID
 /// 的**任何**显式 ACE。真机残留过一条只有 SYNCHRONIZE 的 (OI)(CI) ACE，整棵 tests/ 子树因此
 /// 对受限进程不可读，所以撤净判定不看权限位、只看 SID 在不在场（has_any_ace_for）。
-/// 现有撤权测试只盯叶子；这条把父目录一并盯住——grant_targets 的落点清单变了它会先红。
+/// 父目录上的只读属性是**机器级**授权：授给所有应用程序包（baseline SID），不随会话撤、--fence-clean 才收；
+/// 容器 SID 只该落在叶子上。grant_targets 的落点清单或归属变了它会先红。
 #[test]
 fn revoke_leaves_no_container_ace_on_leaf_parents() {
     if !capability().fs {
@@ -475,6 +476,7 @@ fn revoke_leaves_no_container_ace_on_leaf_parents() {
         return;
     }
     let base = std::env::temp_dir().join(format!("solomni-leftover-probe-{}", std::process::id()));
+    discard(&base);
     let leaf = base.join("leaf");
     std::fs::create_dir_all(&leaf).expect("建探针目录");
     std::fs::write(leaf.join("data.txt"), "x").expect("写探针文件");
@@ -494,13 +496,15 @@ fn revoke_leaves_no_container_ace_on_leaf_parents() {
     // 诊断输出用 [诊断] 前缀：门禁只把 [探针] 当 env-skip，别让这两行把"跳过数"充大。
     eprintln!("[诊断] 授权后父目录 {}", dump_aces(&base));
     eprintln!("[诊断] 授权后叶子 {}", dump_aces(&leaf));
+    let baseline = baseline_sid().expect("派生所有应用程序包 SID");
     assert!(
-        has_any_ace_for(sid, &base),
-        "授权后父目录上该容器 SID 的显式 ACE 应在场"
+        has_ace_for(baseline, &base, RIGHTS_STAT),
+        "授权后父目录上应有授给所有应用程序包的只读属性 ACE（祖先链是机器级授权）"
     );
+    free_sid(baseline);
     assert!(
-        has_ace_for(sid, &base, RIGHTS_STAT),
-        "授权后父目录上应有只读属性 ACE"
+        !has_any_ace_for(sid, &base),
+        "容器 SID 只该落在叶子上：父目录的只读属性不该授给容器"
     );
     assert!(
         has_ace_for(sid, &leaf, RIGHTS_RW),
@@ -512,13 +516,28 @@ fn revoke_leaves_no_container_ace_on_leaf_parents() {
     let on_parent = has_any_ace_for(sid, &base);
     let on_leaf = has_any_ace_for(sid, &leaf);
     free_sid(sid);
-    clean(&home).expect("台账回收应当成功");
-    discard(&base);
     assert!(
         !on_parent,
         "撤权后父目录不得残留该容器 SID 的任何 ACE（残留会把父目录对受限进程藏住）"
     );
     assert!(!on_leaf, "撤权后叶子不得残留该容器 SID 的任何 ACE");
+    // 机器级授权按设计不随会话撤：别的会话还要靠它零写启动。
+    let baseline = baseline_sid().expect("派生所有应用程序包 SID");
+    let machine_kept = has_ace_for(baseline, &base, RIGHTS_STAT);
+    free_sid(baseline);
+    assert!(
+        machine_kept,
+        "撤权不该动祖先链的机器级只读属性 ACE（它跨会话复用，只由整份台账回收）"
+    );
+    clean(&home).expect("台账回收应当成功");
+    let baseline = baseline_sid().expect("派生所有应用程序包 SID");
+    let machine_after_clean = has_ace_for(baseline, &base, RIGHTS_STAT);
+    free_sid(baseline);
+    discard(&base);
+    assert!(
+        !machine_after_clean,
+        "整份台账回收后父目录不该再有该机器级只读属性 ACE"
+    );
 }
 
 /// 【真机往返】对象 ACE（SID 前还带类型 GUID）也进写后核对的账：

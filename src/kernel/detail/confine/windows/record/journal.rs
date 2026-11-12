@@ -82,6 +82,7 @@ pub(crate) fn journal_claim_grant(
         at: now_secs(),
         recursive,
         owners: vec![owner],
+        scope: GrantScope::Call,
     });
     if let Err(e) = save_record(home, rec) {
         rec.grants.retain(|g| !(g.sid == sid && g.path == key));
@@ -186,6 +187,138 @@ pub(crate) fn grant_one_journaled(
             // 这里不再按“有没有该 SID 的 ACE”去撤销——预存的部分 ACE 会被误当成自己写的。
             let mut journal: Option<String> = None;
             if owner_added && let Err(x) = journal_release_grant(home, rec, sid_text, path, owner) {
+                journal = Some(x);
+            }
+            if inside && snap_created && !rec.grants.iter().any(|g| g.path == key) {
+                rec.snapshots.retain(|s| s.path != key);
+                if let Err(x) = save_record(home, rec) {
+                    journal = Some(format!("台账更新失败：{}", x));
+                }
+            }
+            Err(combine(e, journal))
+        }
+    }
+}
+
+/// 目的：把一条**机器级**授权写进台账落盘（授给所有应用程序包，**不记任何进程归属**）。
+/// 返回：true = 本次新建了条目；false = 条目已在台账里（顺带把口径归正为机器级、清掉旧归属）。
+/// 错误：台账落盘失败时返回原因（落盘失败就不得动 ACL）。
+/// 约束：不能复用 journal_claim_grant 塞一个假归属——机器级条目的 owners 必须真的是空。
+pub(crate) fn journal_claim_machine(
+    home: &Path,
+    rec: &mut GrantRecord,
+    sid: &str,
+    path: &Path,
+    rights: u32,
+    recursive: bool,
+) -> Result<bool, String> {
+    let key = path.to_string_lossy().into_owned();
+    if let Some(g) = rec
+        .grants
+        .iter_mut()
+        .find(|g| g.sid == sid && g.path == key)
+    {
+        let same = g.scope == GrantScope::Machine
+            && g.owners.is_empty()
+            && g.rights == rights
+            && g.recursive == recursive;
+        if same {
+            return Ok(false);
+        }
+        // 已在台账里（旧条目可能是按次记的）：口径归正为机器级，归属清空。
+        let before = g.clone();
+        g.scope = GrantScope::Machine;
+        g.owners.clear();
+        g.rights = rights;
+        g.recursive = recursive;
+        if let Err(e) = save_record(home, rec) {
+            // 落盘失败：内存回到调用前的形状，调用方之后的回滚才不会按错口径处理。
+            if let Some(g) = rec
+                .grants
+                .iter_mut()
+                .find(|g| g.sid == sid && g.path == key)
+            {
+                *g = before;
+            }
+            return Err(format!("授权台账落盘失败：{}", e));
+        }
+        return Ok(false);
+    }
+    rec.grants.push(GrantEntry {
+        sid: sid.to_string(),
+        path: key.clone(),
+        rights,
+        at: now_secs(),
+        recursive,
+        owners: Vec::new(),
+        scope: GrantScope::Machine,
+    });
+    if let Err(e) = save_record(home, rec) {
+        rec.grants.retain(|g| !(g.sid == sid && g.path == key));
+        return Err(format!("授权台账落盘失败：{}", e));
+    }
+    Ok(true)
+}
+
+/// 目的：删掉一条**本次新建**的机器级授权条目（写 ACL 失败时回滚用）；已存在的条目不动。
+/// 错误：台账落盘失败时返回原因。
+pub(crate) fn journal_drop_machine(
+    home: &Path,
+    rec: &mut GrantRecord,
+    sid: &str,
+    path: &Path,
+) -> Result<(), String> {
+    let key = path.to_string_lossy().into_owned();
+    if !rec
+        .grants
+        .iter()
+        .any(|g| g.sid == sid && g.path == key && g.scope == GrantScope::Machine)
+    {
+        return Ok(());
+    }
+    rec.grants.retain(|g| !(g.sid == sid && g.path == key));
+    save_record(home, rec).map_err(|e| format!("授权台账落盘失败：{}", e))
+}
+
+/// 目的：按“先落台账、再写 ACL、写后核对、失败回滚”完成一条**机器级**授权（授给所有应用程序包）。
+/// 参数：sid/sid_text 是基线 SID；target 是祖先链落点；root 是产品根。
+/// 错误：台账落盘、写后核对或回滚失败时返回原因。
+/// 返回：true = 真改了 ACL；false = ACE 已够用、只补记了台账（不重复改）。
+/// 约束：与 grant_one_journaled 同一套快照与核对语义，区别只在归属：机器级不记 owner，回滚只撤本次新建的条目。
+pub(crate) fn grant_machine_journaled(
+    home: &Path,
+    rec: &mut GrantRecord,
+    sid: PSID,
+    sid_text: &str,
+    target: &GrantTarget,
+    root: &Path,
+) -> Result<bool, String> {
+    let (path, rights, recursive, inherit) = (
+        target.path.as_path(),
+        target.rights,
+        target.recursive,
+        target.inherit,
+    );
+    let key = path.to_string_lossy().into_owned();
+    let inside = inside_root(path, root);
+    // 根内路径先落原始安全描述符快照（整体还原的依据）；机器级条目跨会话保留，快照跟着台账一起留。
+    let snap_created = if inside {
+        let bytes = sd_bytes(path).map_err(|e| format!("读原始安全描述符失败：{}", e))?;
+        journal_add_snapshot(home, rec, path, bytes)?
+    } else {
+        false
+    };
+    let created = journal_claim_machine(home, rec, sid_text, path, rights, recursive)?;
+    // ACE 已够用（后续会话就走到这里）：不重复改 DACL，台账已记着这条机器级授权。
+    if has_ace_for(sid, path, rights) {
+        return Ok(false);
+    }
+    match grant_verified(sid, path, rights, recursive, inherit) {
+        Ok(()) => Ok(true),
+        Err(e) => {
+            // 写失败 = 这一个字节都没改：这里只撤本次新建的台账条目 / 快照，不按 ACE 反推。
+            let mut journal: Option<String> = None;
+            if created && let Err(x) = journal_drop_machine(home, rec, sid_text, path) {
                 journal = Some(x);
             }
             if inside && snap_created && !rec.grants.iter().any(|g| g.path == key) {

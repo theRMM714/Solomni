@@ -144,9 +144,16 @@ pub fn exit_code(output: &str) -> Option<i32> {
 }
 
 /// 目的：shell 回执末尾的「落点 + 本次耗时」行：模型与回放读同一行。
-/// 约束：形状是稳定的（`[shell] cwd <路径> · 耗时 <秒> 秒`）；解析见 `cwd_elapsed`。
-pub fn cwd_elapsed_line(cwd: &str, secs: u64) -> String {
-    format!("[shell] cwd {} · 耗时 {} 秒", cwd, secs)
+/// 约束：形状是稳定的（`[shell] cwd <路径> · 耗时 <秒> 秒`），前缀与既有字段一字不动；
+///   本机档围栏准备（逐条写 ACL）到一秒时只在行尾追加「（其中围栏准备 <秒> 秒）」，不足一秒不追加；
+///   追加段不参与解析（见 `cwd_elapsed`）。
+pub fn cwd_elapsed_line(cwd: &str, secs: u64, fence_prep_secs: Option<u64>) -> String {
+    let mut line = format!("[shell] cwd {} · 耗时 {} 秒", cwd, secs);
+    // 围栏准备是「耗时」里的一段：首调用写 ACL 常常就是大头，到一秒才值得单独交代。
+    if let Some(prep) = fence_prep_secs.filter(|secs| *secs >= 1) {
+        line.push_str(&format!("（其中围栏准备 {} 秒）", prep));
+    }
+    line
 }
 
 /// 目的：从 shell 回执里取（cwd, 耗时秒数）；没有这一行 = None（本次之前的转录）。
@@ -155,7 +162,8 @@ pub fn cwd_elapsed(output: &str) -> Option<(String, u64)> {
     output.lines().rev().find_map(|line| {
         let rest = line.trim().strip_prefix("[shell] cwd ")?;
         let (cwd, tail) = rest.rsplit_once(" · 耗时 ")?;
-        let secs = tail.strip_suffix(" 秒")?.parse().ok()?;
+        // 尾段可能带「（其中围栏准备 M 秒）」：只取「秒」前的数字，追加段不参与解析。
+        let secs = tail.split(" 秒").next()?.parse().ok()?;
         if cwd.is_empty() {
             return None;
         }
@@ -289,7 +297,8 @@ params:
 
     #[test]
     fn cwd_and_elapsed_line_round_trips_and_is_stable() {
-        let line = cwd_elapsed_line("C:\\work\\a b", 12);
+        let line = cwd_elapsed_line("C:\\work\\a b", 12, None);
+        assert_eq!(line, "[shell] cwd C:\\work\\a b · 耗时 12 秒");
         assert_eq!(
             cwd_elapsed(&format!("[shell] 退出码 0\n{}", line)),
             Some(("C:\\work\\a b".to_string(), 12))
@@ -299,6 +308,26 @@ params:
             cwd_elapsed("[shell] cwd C:\\a · 耗时 3 秒 · 耗时 4 秒"),
             Some(("C:\\a · 耗时 3 秒".to_string(), 4)),
             "路径里出现同样的分隔符时取最后一个"
+        );
+    }
+
+    #[test]
+    fn fence_prep_is_only_named_in_the_tail_line_from_one_second() {
+        // 冻结契约：前缀与既有字段不变；围栏准备不足一秒不追加，到一秒才追加一段。
+        assert_eq!(
+            cwd_elapsed_line("C:\\work", 3, Some(0)),
+            "[shell] cwd C:\\work · 耗时 3 秒",
+            "不足一秒不追加"
+        );
+        let line = cwd_elapsed_line("C:\\work", 239, Some(238));
+        assert_eq!(
+            line,
+            "[shell] cwd C:\\work · 耗时 239 秒（其中围栏准备 238 秒）"
+        );
+        assert_eq!(
+            cwd_elapsed(&format!("[shell] 退出码 0\n{}", line)),
+            Some(("C:\\work".to_string(), 239)),
+            "追加段不参与解析"
         );
     }
 

@@ -91,6 +91,13 @@ pub fn catalog(home: &Path) -> Ledger {
                 notes.push("台账里记着这条授权，盘上已经没有这个 SID 的允许 ACE".to_string());
             }
         }
+        // 机器级授权的口径要说清：它跨会话复用、启动对账不回收，撤它得显式清或按条撤。
+        if grant.scope == GrantScope::Machine {
+            notes.push(
+                "机器级授权：授给所有应用程序包、跨会话复用；启动对账不回收（要撤用 --fence-clean 或按条撤销）"
+                    .to_string(),
+            );
+        }
         entries.push(LedgerEntry {
             kind: "grant",
             sid: grant.sid.clone(),

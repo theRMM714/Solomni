@@ -577,3 +577,171 @@ fn reconcile_skips_entries_without_ownership() {
     clean(&home).expect("收尾回收应当成功");
     discard(&base);
 }
+
+/// 【机器级·纯逻辑】祖先链授权形状：只有 Parent + 只读属性 + 非递归 + 非继承 才算机器级，其它一律按次。
+#[test]
+fn machine_target_is_only_the_ancestor_chain_shape() {
+    let machine = GrantTarget {
+        path: PathBuf::from("C:\\work"),
+        rights: RIGHTS_STAT,
+        recursive: false,
+        inherit: false,
+        part: FencePart::Parent,
+    };
+    assert!(is_machine_target(&machine), "祖先链只读属性是机器级");
+    assert!(
+        !is_machine_target(&GrantTarget {
+            recursive: true,
+            ..machine.clone()
+        }),
+        "递归落点不是祖先链形状"
+    );
+    assert!(
+        !is_machine_target(&GrantTarget {
+            inherit: true,
+            ..machine.clone()
+        }),
+        "继承落点不是祖先链形状"
+    );
+    assert!(
+        !is_machine_target(&GrantTarget {
+            rights: RIGHTS_RO,
+            ..machine.clone()
+        }),
+        "只读内容不是机器级"
+    );
+    assert!(
+        !is_machine_target(&GrantTarget {
+            part: FencePart::Cwd,
+            ..machine
+        }),
+        "非 Parent 落点不是机器级"
+    );
+}
+
+/// 【机器级·台账】授给所有应用程序包的祖先链授权：不记归属、对账一律保留（不撤 ACE、不还原快照）。
+#[test]
+fn machine_grant_has_no_owners_and_survives_reconcile() {
+    let base = std::env::temp_dir().join(format!("solomni-machine-grant-{}", std::process::id()));
+    let target = base.join("target");
+    std::fs::create_dir_all(&target).expect("建探针目录");
+    if !acl_round_trip(&base, "machine") {
+        eprintln!(
+            "[探针] 本机做不了 ACL 完整往返（写→读回→撤）：机器级台账探针跳过（不静默当作通过）"
+        );
+        discard(&base);
+        return;
+    }
+    let home = base.join(".home");
+    let base_sid = match baseline_sid() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "[探针] 取不到「所有应用程序包」基线 SID：机器级台账探针跳过（{}）",
+                e
+            );
+            discard(&base);
+            return;
+        }
+    };
+    let base_text = sid_to_string(base_sid);
+    let grant = GrantTarget {
+        path: target.clone(),
+        rights: RIGHTS_STAT,
+        recursive: false,
+        inherit: false,
+        part: FencePart::Parent,
+    };
+    let mut rec = load_record(&home);
+    grant_machine_journaled(&home, &mut rec, base_sid, &base_text, &grant, &base)
+        .expect("机器级授权应当先落台账、再写并核对");
+    let key = target.to_string_lossy().into_owned();
+    {
+        let rec = load_record(&home);
+        let entry = rec
+            .grants
+            .iter()
+            .find(|g| g.sid == base_text && g.path == key)
+            .expect("台账里要有机器级条目");
+        assert_eq!(entry.scope, GrantScope::Machine, "祖先链授权要记成机器级");
+        assert!(entry.owners.is_empty(), "机器级条目不记任何进程归属");
+        assert_eq!(entry_state(entry), OwnersState::Keep, "机器级一律保留");
+    }
+    // 模拟旧数据/误记归属：即便归属被塞过且那些进程已死，也按口径保留（不靠"空归属"的副作用）。
+    {
+        let mut rec = load_record(&home);
+        for g in rec.grants.iter_mut() {
+            if g.scope == GrantScope::Machine {
+                g.owners = vec![Owner {
+                    pid: 0x7fff_fff0,
+                    start: 1,
+                    lease: "dead-session".to_string(),
+                }];
+            }
+        }
+        save_record(&home, &rec).expect("写回台账");
+    }
+    let rep = reconcile(&home);
+    assert!(rep.errors.is_empty(), "对账不该报错：{:?}", rep.errors);
+    assert_eq!(rep.reclaimed_grants, 0, "机器级授权不得回收");
+    assert_eq!(rep.restored_snapshots, 0, "机器级授权的快照不得还原");
+    assert_eq!(
+        rep.skipped_unjudgeable, 0,
+        "机器级按口径判 Keep，不能落进缺归属/判不了"
+    );
+    assert!(rep.kept >= 1, "机器级授权要计入保留：{:?}", rep);
+    let rec = load_record(&home);
+    assert!(
+        rec.grants
+            .iter()
+            .any(|g| g.sid == base_text && g.scope == GrantScope::Machine),
+        "对账后机器级条目要还在台账里"
+    );
+    assert!(
+        has_ace_for(base_sid, &target, RIGHTS_STAT),
+        "对账不得撤机器级 ACE"
+    );
+    clean(&home).expect("收尾回收应当成功");
+    let rec = load_record(&home);
+    assert!(rec.grants.is_empty(), "收尾后机器级条目也要销账");
+    assert!(rec.snapshots.is_empty(), "收尾后快照也要销账");
+    free_sid(base_sid);
+    discard(&base);
+}
+
+/// 【台账兼容】旧台账没有 scope 字段：读出来必须仍是按次口径（不能默认成机器级、被永久保留）。
+#[test]
+fn ledger_without_scope_field_loads_as_per_call() {
+    let base = std::env::temp_dir().join(format!("solomni-scope-default-{}", std::process::id()));
+    let home = base.join(".home");
+    std::fs::create_dir_all(&home).expect("建台账目录");
+    // 旧格式：GrantEntry 没有 scope 这一位。
+    let legacy = r#"{
+  "profiles": [],
+  "grants": [
+    {
+      "sid": "S-1-15-2-1",
+      "path": "C:/legacy/target",
+      "rights": 128,
+      "at": 1,
+      "recursive": false,
+      "owners": []
+    }
+  ],
+  "snapshots": []
+}"#;
+    std::fs::write(record_path(&home), legacy).expect("写旧台账");
+    let rec = load_record(&home);
+    assert_eq!(rec.grants.len(), 1, "旧台账要能加载");
+    assert_eq!(
+        rec.grants[0].scope,
+        GrantScope::Call,
+        "旧条目缺 scope 时必须按按次处理"
+    );
+    assert_eq!(
+        entry_state(&rec.grants[0]),
+        OwnersState::Unjudgeable,
+        "按次且缺归属仍是跳过，口径没有被悄悄改成机器级"
+    );
+    discard(&base);
+}

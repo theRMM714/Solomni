@@ -20,6 +20,19 @@ pub(crate) struct SnapshotEntry {
     pub(crate) bytes: Vec<u8>,
 }
 
+/// 目的：一条授权的归属口径——按次（随会话/进程）还是机器级（与进程无关、跨会话复用）。
+/// 约束：缺省按次——旧台账没有这一位，读出来必须还是按次口径，不能当机器级保留；机器级条目归属恒为空，
+///   具体怎么撤由 release.rs / reconcile.rs 按口径决定（ACL 怎么读写见 acl.rs）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum GrantScope {
+    /// 目的：按次授权（容器数据边界等）——归属全死就回收。
+    #[default]
+    Call,
+    /// 目的：机器级授权（祖先链只读属性）——授给所有应用程序包，一次写好、启动对账不回收。
+    Machine,
+}
+
 /// 目的：台账里一条授权（授给谁、在哪、哪些权限位）+ 记录时刻 + **归属集合**。
 /// 约束：根内与根外都记这一条——根内另有快照存原始安全描述符；归属集合空才撤 ACE / 还原快照。
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -34,8 +47,12 @@ pub(crate) struct GrantEntry {
     #[serde(default = "recursive_by_default")]
     pub(crate) recursive: bool,
     /// 目的：还需要这条授权的进程（空 = 缺归属，按"无法判定"处理，不主动回收）。
+    ///   机器级授权的归属恒为空——没有哪个进程"还需要"它，它授给所有应用程序包。
     #[serde(default)]
     pub(crate) owners: Vec<Owner>,
+    /// 目的：这条授权按次还是机器级；缺省按次（旧台账没有这一位）。
+    #[serde(default)]
+    pub(crate) scope: GrantScope,
 }
 
 /// 目的：旧台账条目没记 "recursive" 时的缺省（按递归撤，宁可多扫也不留残留）。

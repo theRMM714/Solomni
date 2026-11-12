@@ -1,7 +1,7 @@
 # kernel（地基库）
 
 > 定位：没有领域语义的机制库；不是层，是依赖图最底层的地基。
-> 效力：规范｜核对：2026-11-09｜依据：`src/kernel/api.rs`
+> 效力：规范｜核对：2026-11-13｜依据：`src/kernel/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -56,6 +56,7 @@
     - 回执把「用户拒绝」与「没人答」分开写清楚。
   - **构不出可用选项**时**不发起裁决**（契约禁止置灰，`src/capabilities/tools/service/fence.rs`）：有可回答的前端就**停掉这个会话 + 落一条警告**，没有前端只如实拒绝这次调用；停过一次之后不再推卡。
   - **可选落点授不上只记事实**：留一条 stderr 脚印，不牵动这次执行。
+  - **祖先链只读属性是机器级授权**（仅 Windows）：shell 的 cwd = private 时，PowerShell 逐级解析 cwd 需要每一级祖先的 STAT；这些只读、非递归、非继承的 ACE 授给 `ALL APPLICATION PACKAGES`，与容器 SID、会话都无关。已有 ACE 就直接跳过、不写台账，所以只有首次会话付一次写 ACL 的成本（`src/kernel/detail/confine/windows/acl.rs` 的 `grant_targets`、`src/kernel/detail/confine/windows.rs` 的 `is_machine_target`）。
   - **三类根（仅 Windows）**：① **可信执行基座**——产品内工具链（`.tools/`）与运行包（`runtimes/<包>`）是只读二进制、不携带任何 scope 信息，一次性授给 `ALL APPLICATION PACKAGES`（与系统解释器目录同路），**不进按 reach 的容器身份**；② **受保护数据 / 代码**——私有沙箱、共享区、模块目录、模块 `userdata/`、用户授权只读根，按 reach 授给容器 SID；③ 系统基线（`C:\Windows` 等）。把工具链放进 reach 会让同一份 16k 文件按每个 scope 组合各授一次（本机实测 56s/次），属于类别错误。
   - **容器临时目录先建**（仅 Windows）：`prepare_fence` 在授权前建好 `<私有沙箱>/Packages/<容器名>/AC/Temp`——AppContainer 的 `GetTempPath2` **不读 TMP/TEMP**，编译器这类程序缺了它直接 abort（`Cannot create temporary file`）；目录在 `rw` 之下，递归 ACE 覆盖它，不单列一条授权。`private` 为空时跳过并记一条事实。
   - **未授权档位不是这条路**（仅 Windows）：用户没开 `sandbox.policy.windows.write_acl` 时外层根本不写权限项，容器围栏不装；若策略要求强制则拒绝，否则按无围栏执行并在启动报告标出。Linux / macOS 没有外层授权这一步，围栏照常装。
@@ -63,7 +64,7 @@
   - **回执文案分两处**：超时、stderr、截断等机制文案由 `src/kernel/detail/process.rs` 的 `CodeProcessTexts` 返回；围栏拒绝 / 放行等业务文案由 `src/capabilities/tools/service/fence.rs` 的 `ToolFenceGate` 生成，kernel 只把裁决结果原样拼进回执。
   - **围栏里失败的统一说明**：工具在围栏里非零退出时，守门进程补一条**不分语言**的话（可达范围 + 范围外被围栏拒绝）；成功不打扰。
 - 平台：只有 Windows 有「外层授权写 ACL」这一步；Linux 的 Landlock 与 macOS 的 seatbelt 在守门进程里自足，那里没有 `prepare_fence`（不是存在但空转）。三个平台各自的强制项与降级条件见「二、工具进程与守门协议」。
-- **启动对账只回收归属明确已死的条目**：`reconcile` 走台账、**不调用** `sweep_orphan_aces` / `sweep_profiles`（那两条无归属、会误伤在跑实例）；孤儿清扫只在用户手动的 `--fence-clean`。台账之外的本程序 profile 会以「只报告、不自动删」列出来（没有归属证明，删了会误伤在跑实例），处置入口同样是 `--fence-clean`。
+- **启动对账只回收归属明确已死的条目**：`reconcile` 走台账、**不调用** `sweep_orphan_aces` / `sweep_profiles`（那两条无归属、会误伤在跑实例）；孤儿清扫只在用户手动的 `--fence-clean`。台账里的机器级条目（`scope = machine`、没有归属）按设计也不回收：它们授给所有应用程序包、跨会话复用，撤除走 `--fence-clean` 或按条撤销（`src/kernel/detail/confine/windows/record/liveness.rs` 的 `entry_state`）。台账之外的本程序 profile 会以「只报告、不自动删」列出来（没有归属证明，删了会误伤在跑实例），处置入口同样是 `--fence-clean`。
 - **台账写事务串行**：每条授权 / profile 带**归属**（pid + 进程创建时刻 + 会话租约），台账落在 `.home/fence-grants.json`；写事务用**进程内互斥 + 跨进程文件锁**，两个进程不会同时改同一份台账。
 - **身份按 reach、生命周期按会话**：Windows 的容器身份 = `会话租约 + agent + 受保护根集合（reach 指纹，不含工具链、不含 net）`——同一会话里不同 scope 的调用根集合不同 → 不同 SID（窄调用看不到宽调用的根），同一 reach 的后续调用复用 SID 与 ACL。授权由会话持有：调用结束**不**释放，会话改配 / 删除时由 `release_by_lease` 按会话租约撤 ACE、删 profile；崩溃残留由 `reconcile` 按死归属回收。一次性调用（构建 / 独立模块工具）没有会话，各自唯一租约，跑完走 `release_call`（含 `private/Packages/<名字>` 临时目录）。
 
