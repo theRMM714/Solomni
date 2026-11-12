@@ -3,13 +3,13 @@
 //! 不管：工作区与沙箱（`src/tests/workspace.rs`）、conductor 的编排。
 //! 联动：契约见 docs/vm/README.md 与 RUNTIME_SPEC.md。
 
-mod guestpath;
-mod readiness;
+mod concurrency;
+mod diagnose;
 mod engine;
 mod entry;
-mod guest;
-mod share;
-mod live;
-mod concurrency;
 mod fence;
-mod diagnose;
+mod guest;
+mod guestpath;
+mod live;
+mod readiness;
+mod share;

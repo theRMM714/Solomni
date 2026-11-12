@@ -409,7 +409,6 @@ pub(crate) fn rebuild_restores_the_last_shell_snapshot_from_the_transcript() {
     assert!(live.historical, "派生快照要标历史");
 }
 
-
 /// 目的：回档**按回复原子**：截在一次回复中间时整条回复一起丢，绝不留下"孤儿工具结果"。
 #[test]
 pub(crate) fn rewind_never_splits_a_reply() {

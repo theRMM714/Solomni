@@ -5,12 +5,12 @@
 
 use super::super::doubles::module_of;
 use super::super::{single_work, slow_ops};
+use super::support::spawn;
 use crate::capabilities::conductor::api::SessionEvent;
 use crate::capabilities::conductor::api::{Ops, Output};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use super::support::spawn;
 
 #[test]
 fn generation_pushes_facts_to_the_event_bus_with_sequence_numbers() {

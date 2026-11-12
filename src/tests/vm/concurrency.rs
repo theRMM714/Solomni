@@ -4,9 +4,7 @@
 //! 联动：`src/capabilities/vm/api.rs`。
 
 use super::super::prelude::*;
-use crate::capabilities::vm::domain::guest::{
-    GuestImage, GuestRun, GuestSpec,
-};
+use crate::capabilities::vm::domain::guest::{GuestImage, GuestRun, GuestSpec};
 
 /// 目的：并发准入——到上限拒绝、同一租约重启放行、0 = 不限制。
 #[test]

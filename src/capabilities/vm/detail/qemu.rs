@@ -3,9 +3,7 @@
 //! 不管：共享后端的额外参数（detail/share_ninep.rs）、镜像判定与挂载清单（domain/guest.rs）。
 //! 联动：端口在 ports.rs；由组合根构造、service.rs 持有。
 
-use crate::capabilities::vm::domain::guest::{
-    GuestArch, GuestImage, GuestOs, GuestRun, GuestSpec,
-};
+use crate::capabilities::vm::domain::guest::{GuestArch, GuestImage, GuestOs, GuestRun, GuestSpec};
 use crate::capabilities::vm::ports::{GuestChannel, GuestVm, SharePlan, VmEngine};
 use crate::kernel::detail::process::CodeProcessTexts;
 use crate::kernel::detail::procs::{self, Entry, ProcessBook};
@@ -607,7 +605,6 @@ fn create_overlay(engine_exe: &str, base: &Path, overlay: &Path) -> Result<(), S
 
 /// 目的：在预算内等 QGA 通道；同时盯着 QEMU 进程——它提前退出（例如加速器不可用）就立刻报出来，
 ///   不把"加速器起不来"拖成 30 秒的"等通道超时"。
-
 mod qga;
 mod seed;
 
@@ -616,8 +613,8 @@ use seed::SeedServer;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::qga::*;
+    use super::*;
     use crate::capabilities::vm::domain::guest::{OutputLimit, SeedDocs};
     use crate::kernel::domain::receipt::{shell_receipt, ShellEnd};
     use std::net::TcpStream;

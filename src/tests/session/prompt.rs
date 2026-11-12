@@ -18,8 +18,7 @@ pub(crate) fn env_block_renders_guest_paths_in_vm_tier() {
         host_block
     );
 
-    let guest = test_params("a")
-        .with_guest(Some(crate::capabilities::vm::api::GuestOs::Linux));
+    let guest = test_params("a").with_guest(Some(crate::capabilities::vm::api::GuestOs::Linux));
     let guest_block = env_block(&prompt, &guest);
     assert!(
         guest_block.contains("Linux guest"),

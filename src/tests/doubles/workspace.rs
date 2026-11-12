@@ -158,10 +158,14 @@ impl Workdirs for InMemoryWorkspace {
 pub(crate) struct InMemoryWorkStore {
     pub(crate) files: Mutex<BTreeMap<String, Vec<u8>>>,
     pub(crate) objects: Mutex<BTreeMap<String, Vec<u8>>>,
-    pub(crate) commits: Mutex<BTreeMap<String, crate::capabilities::workspace::domain::workstore::Commit>>,
-    pub(crate) refs: Mutex<BTreeMap<String, crate::capabilities::workspace::domain::workstore::Ref>>,
-    pub(crate) index: Mutex<BTreeMap<String, crate::capabilities::workspace::domain::workstore::Index>>,
-    pub(crate) pending: Mutex<BTreeMap<String, crate::capabilities::workspace::domain::workstore::Pending>>,
+    pub(crate) commits:
+        Mutex<BTreeMap<String, crate::capabilities::workspace::domain::workstore::Commit>>,
+    pub(crate) refs:
+        Mutex<BTreeMap<String, crate::capabilities::workspace::domain::workstore::Ref>>,
+    pub(crate) index:
+        Mutex<BTreeMap<String, crate::capabilities::workspace::domain::workstore::Index>>,
+    pub(crate) pending:
+        Mutex<BTreeMap<String, crate::capabilities::workspace::domain::workstore::Pending>>,
     pub(crate) next_ids: Mutex<BTreeMap<String, u64>>,
     pub(crate) fail: Option<String>,
     pub(crate) fail_times: Mutex<BTreeMap<String, usize>>,

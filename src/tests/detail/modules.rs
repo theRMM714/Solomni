@@ -188,4 +188,3 @@ fn fs_packages_scans_the_dependency_folder_and_reports_each_rejection() {
     );
     let _ = std::fs::remove_dir_all(&root);
 }
-

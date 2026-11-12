@@ -72,9 +72,6 @@ pub(crate) fn run_execution(
     out
 }
 
-
-
-
 /// 目的：虚拟机档选型：基础根 + 不联网（定版留空 = 让库自己决定；多版本时报歧义）。
 pub(crate) fn vm_spec() -> ExecSpec {
     ExecSpec {

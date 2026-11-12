@@ -5,10 +5,8 @@
 
 use super::super::prelude::*;
 use crate::capabilities::vm::api::Vm;
-use crate::capabilities::vm::domain::guest::{
-    classify_base, GuestImage, GuestRun, GuestSpec,
-};
-use crate::capabilities::vm::ports::{ShareBackend};
+use crate::capabilities::vm::domain::guest::{classify_base, GuestImage, GuestRun, GuestSpec};
+use crate::capabilities::vm::ports::ShareBackend;
 
 /// 目的：virtiofs 共享后端只在 QEMU + 声明了 virtiofs 客户端的 guest 上落地（缺客户端就是缺，不假装）。
 #[test]

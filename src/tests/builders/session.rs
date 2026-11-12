@@ -24,7 +24,6 @@ pub(crate) fn roster() -> Vec<String> {
     vec!["甲".to_string(), "乙".to_string()]
 }
 
-
 pub(crate) const TOOL_CALL: &str =
     "{\"type\":\"tool\",\"name\":\"grep\",\"args\":{\"keyword\":\"x\"}}";
 
@@ -101,7 +100,6 @@ pub(crate) fn broken_tool(path: &str) -> String {
         path
     )
 }
-
 
 /// 目的：造一条 agent 名单记录。
 pub(crate) fn agent_meta(name: &str, modules: &[&str], model: Option<&str>) -> AgentMeta {

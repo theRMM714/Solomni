@@ -5,12 +5,12 @@
 
 use super::super::doubles::module_of;
 use super::super::{single_work, slow_ops};
+use super::support::spawn;
 use crate::capabilities::conductor::api::{Ops, Output};
 use crate::kernel::api::Tier;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use super::support::spawn;
 
 #[test]
 fn commands_run_on_the_core_thread_and_changes_are_visible() {

@@ -8,14 +8,14 @@
 use super::prelude::*;
 use crate::kernel::api::RunOutcome;
 
+mod chat;
 mod events;
 mod exec;
-mod chat;
 mod runners;
 mod session;
 
+pub(crate) use chat::*;
 pub(crate) use events::*;
 pub(crate) use exec::*;
-pub(crate) use chat::*;
 pub(crate) use runners::*;
 pub(crate) use session::*;

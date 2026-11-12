@@ -925,4 +925,3 @@ fn http_chat_merges_the_thinking_fragment_into_the_request_body() {
     );
     assert!(body2.contains("\"reasoning_effort\":\"high\""));
 }
-

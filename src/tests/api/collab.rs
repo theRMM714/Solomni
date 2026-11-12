@@ -6,8 +6,8 @@
 use super::super::builders::shown_contains;
 use super::super::doubles::{collab_work, module_of};
 use super::super::gated_ops;
-use crate::capabilities::conductor::api::SessionEvent;
 use crate::capabilities::conductor::api::Output;
+use crate::capabilities::conductor::api::SessionEvent;
 use crate::capabilities::session::api::OPT_BEGIN;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;

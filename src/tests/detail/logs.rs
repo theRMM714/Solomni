@@ -32,4 +32,3 @@ fn file_log_writes_every_level_into_a_timestamped_file_under_logs() {
     );
     let _ = std::fs::remove_dir_all(&root);
 }
-

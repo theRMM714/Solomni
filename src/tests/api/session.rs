@@ -5,11 +5,13 @@
 
 use super::super::doubles::{decl, model_draft, module_of, module_with_runtimes};
 use super::super::{ops_with, single_work, slow_ops};
-use crate::capabilities::conductor::api::{Acted, ActionCall, AgentInstance, Caller, ConfigAgent, SessionEdit, WorkMode, WorkSpec};
+use super::support::spawn;
+use crate::capabilities::conductor::api::{
+    Acted, ActionCall, AgentInstance, Caller, ConfigAgent, SessionEdit, WorkMode, WorkSpec,
+};
 use crate::capabilities::conductor::api::{Ops, Output};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use super::support::spawn;
 
 #[test]
 fn delete_past_an_archive_reports_the_casualties_and_needs_a_confirm() {
@@ -86,11 +88,8 @@ fn provider_usage_is_exposed_in_session_view_and_persisted() {
         "a".to_string(),
         vec!["{\"type\":\"say\",\"text\":\"完成\"}".to_string()],
     );
-    let gateway = super::super::doubles::ScriptGateway::new(member, vec![]).with_usage(TokenUsage::new(
-        900,
-        120,
-        Some(1020),
-    ));
+    let gateway = super::super::doubles::ScriptGateway::new(member, vec![])
+        .with_usage(TokenUsage::new(900, 120, Some(1020)));
     let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
         super::super::doubles::core_with_gateway(vec![module_of("a")], gateway),
     )

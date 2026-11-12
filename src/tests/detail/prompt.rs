@@ -227,4 +227,3 @@ fn yaml_prompts_loads_the_shipped_book_and_reports_missing_or_broken_files() {
 
     let _ = std::fs::remove_dir_all(&root);
 }
-

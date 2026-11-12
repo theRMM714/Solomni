@@ -3,9 +3,7 @@
 //! 不管：全内存用例。
 //! 联动：`SOLOMNI_VM_LIVE` 与 `docs/testing/levels.md`。
 
-use crate::capabilities::vm::domain::guest::{
-    classify_base, GuestMount, GuestRun, GuestSpec,
-};
+use crate::capabilities::vm::domain::guest::{classify_base, GuestMount, GuestRun, GuestSpec};
 use crate::capabilities::vm::ports::{ShareBackend, VmEngine};
 use crate::kernel::ports::HostProbe;
 

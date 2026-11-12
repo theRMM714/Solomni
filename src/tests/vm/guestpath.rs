@@ -4,9 +4,7 @@
 //! 联动：`src/capabilities/vm/detail/path_bridge.rs`。
 
 use super::super::prelude::*;
-use crate::capabilities::vm::domain::guest::{
-    GuestImage, GuestSpec,
-};
+use crate::capabilities::vm::domain::guest::{GuestImage, GuestSpec};
 use crate::capabilities::vm::ports::ShareBackend;
 
 /// 目的：虚拟根名 → 那一格目录的解析——名字是**一段**，路径与越界写法如实拒绝（不猜、不静默当路径）。

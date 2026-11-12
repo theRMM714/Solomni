@@ -21,7 +21,10 @@ pub(crate) fn share_root_of(unc: &std::path::Path) -> Option<std::path::PathBuf>
 /// 目的：把本机盘符路径换成同一个盘符共享（X$）下的 UNC 写法——用来造"产品根的 UNC 别名"。
 /// 返回：共享名不是 <字母>$ 或盘符对不上时为 None（调用方如实跳过这条断言）。
 #[cfg(windows)]
-pub(crate) fn drive_share_alias(unc: &std::path::Path, local: &std::path::Path) -> Option<std::path::PathBuf> {
+pub(crate) fn drive_share_alias(
+    unc: &std::path::Path,
+    local: &std::path::Path,
+) -> Option<std::path::PathBuf> {
     let (_, share, rest) = crate::kernel::api::unc_parts(unc)?;
     if !rest.as_os_str().is_empty() {
         return None;

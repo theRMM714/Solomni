@@ -64,4 +64,3 @@ impl Drop for SeedServer {
         self.stop();
     }
 }
-

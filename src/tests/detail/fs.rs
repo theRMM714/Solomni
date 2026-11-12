@@ -606,4 +606,3 @@ fn fs_history_nests_children_inside_their_parent_dir() {
     assert!(h.load("p--甲--乙").is_err(), "整棵子树随父一起消失");
     let _ = std::fs::remove_dir_all(&root);
 }
-

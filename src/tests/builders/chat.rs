@@ -95,7 +95,6 @@ pub(crate) fn scripted_discussion(scripts: Vec<Vec<String>>, allow: bool) -> Dis
     )
 }
 
-
 pub(crate) struct ReasoningChat;
 
 impl Chat for ReasoningChat {
@@ -201,7 +200,7 @@ impl Chat for AbortChat {
         _opts: CompleteOpts<'_>,
         on: &mut dyn FnMut(Chunk) -> bool,
     ) -> Completion {
-          // 已停止的生成：引擎侧的回调在收到第一片时就返回 false（用户点了「停止」），但**已经收到的内容照样返回**——半截信封正是这么来的（回调的裁决由引擎读，替身不替引擎决定要不要中止：中止与否是**取消标志**的事）。
+        // 已停止的生成：引擎侧的回调在收到第一片时就返回 false（用户点了「停止」），但**已经收到的内容照样返回**——半截信封正是这么来的（回调的裁决由引擎读，替身不替引擎决定要不要中止：中止与否是**取消标志**的事）。
         let _ = on(Chunk::Start);
         let _ = on(Chunk::Text(self.raw.clone()));
         Completion::text(self.raw.clone())

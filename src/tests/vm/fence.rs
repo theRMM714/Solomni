@@ -4,9 +4,7 @@
 //! 联动：`src/kernel/detail/confine` 与 `RUNTIME_SPEC.md`。
 
 use crate::capabilities::vm::api::Vm;
-use crate::capabilities::vm::domain::guest::{
-    GuestImage, GuestRun,
-};
+use crate::capabilities::vm::domain::guest::{GuestImage, GuestRun};
 
 /// 目的：guest 通道没有实现围栏时，必须 fail-closed，不能悄悄按无围栏执行。
 #[test]

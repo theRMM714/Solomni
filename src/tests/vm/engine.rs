@@ -8,7 +8,7 @@ use crate::capabilities::vm::api::Vm;
 use crate::capabilities::vm::domain::guest::{
     classify_base, GuestImage, GuestMount, GuestRun, GuestSpec,
 };
-use crate::capabilities::vm::ports::{VmEngine};
+use crate::capabilities::vm::ports::VmEngine;
 
 /// 目的：QEMU 检测——登记了就用登记的路径，没登记就看 PATH；依赖不预置、不分发。
 #[test]

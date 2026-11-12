@@ -59,7 +59,6 @@ pub(super) struct QemuHandle {
     pub(super) texts: std::sync::Arc<dyn ProcessTexts>,
 }
 
-
 impl QemuHandle {
     /// 目的：优雅收尾——请 guest 自己断电，**等它落盘退出**（超时才杀）；再收种子服务与可写层。
     /// 约束：guest-shutdown 是异步的——不等它，guest 里刚要落盘的元数据（如刚建的 python 符号链接）会丢。
@@ -684,4 +683,3 @@ fn unb64(s: &str) -> Vec<u8> {
     }
     out
 }
-

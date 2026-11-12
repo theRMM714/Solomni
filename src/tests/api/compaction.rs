@@ -5,8 +5,8 @@
 
 use super::super::doubles::{model_draft, module_of};
 use super::super::single_work;
-use crate::capabilities::conductor::api::{ActionCall, Caller, SessionEvent};
 use crate::capabilities::conductor::api::Output;
+use crate::capabilities::conductor::api::{ActionCall, Caller, SessionEvent};
 use std::sync::Arc;
 
 #[test]
@@ -623,11 +623,8 @@ fn auto_compaction_uses_provider_usage_when_it_is_available() {
         ],
     );
     let gateway = super::super::RecordingGateway {
-        inner: super::super::doubles::ScriptGateway::new(member, vec![]).with_usage(TokenUsage::new(
-            18_000,
-            2_000,
-            Some(20_000),
-        )),
+        inner: super::super::doubles::ScriptGateway::new(member, vec![])
+            .with_usage(TokenUsage::new(18_000, 2_000, Some(20_000))),
         seen: Arc::clone(&seen),
     };
     let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(

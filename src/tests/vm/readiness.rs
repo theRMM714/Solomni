@@ -5,9 +5,7 @@
 
 use super::super::prelude::*;
 use crate::capabilities::vm::api::Vm;
-use crate::capabilities::vm::domain::guest::{
-    GuestImage, GuestRun, GuestSpec,
-};
+use crate::capabilities::vm::domain::guest::{GuestImage, GuestRun, GuestSpec};
 
 /// 目的：钉住承载判定这一条事实——界面的"能不能选"与创建/编辑的拒绝走同一把尺子。
 /// 约束：现在的判据是**逐项清单**：缺哪几项、每项怎么补，都要能读出来。

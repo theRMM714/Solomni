@@ -6,10 +6,12 @@
 use super::super::doubles::InMemoryHistory;
 use super::super::doubles::{decl, model_draft, module_of, module_with_runtimes};
 use super::super::{ops_with, single_work};
-use crate::capabilities::conductor::api::{Acted, ActionCall, AgentInstance, Caller, SessionEvent, WorkMode};
+use super::support::spawn;
+use crate::capabilities::conductor::api::{
+    Acted, ActionCall, AgentInstance, Caller, SessionEvent, WorkMode,
+};
 use crate::capabilities::conductor::api::{ConductorHandle, Ops, Output};
 use std::sync::Arc;
-use super::support::spawn;
 
 #[test]
 fn native_model_save_is_gated_by_measurement_but_envelope_is_not() {

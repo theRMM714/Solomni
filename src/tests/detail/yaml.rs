@@ -160,4 +160,3 @@ fn yaml_settings_store_propagates_non_not_found_read_errors() {
         let _ = std::fs::remove_dir_all(&root);
     }
 }
-

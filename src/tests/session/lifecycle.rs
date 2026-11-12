@@ -271,7 +271,6 @@ pub(crate) fn create_work_uses_chosen_tier_and_rejects_unavailable_vm() {
     assert!(core.history_open("v").is_err(), "拒绝就该什么都不留下");
 }
 
-
 #[test]
 pub(crate) fn create_work_validates_user_choices() {
     let mut core = core_with(

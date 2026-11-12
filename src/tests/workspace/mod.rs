@@ -3,12 +3,12 @@
 //! 不管：虚拟机装配（`src/tests/vm`）、conductor 编排。
 //! 联动：`docs/storage/README.md` 与 `ARCHITECTURE.md`。
 
-mod support;
-mod sandbox;
-mod external;
-mod tier;
-mod config;
-mod work;
-mod resolve;
-mod auto;
 mod archive;
+mod auto;
+mod config;
+mod external;
+mod resolve;
+mod sandbox;
+mod support;
+mod tier;
+mod work;

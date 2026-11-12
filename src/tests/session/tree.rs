@@ -338,4 +338,5 @@ pub(crate) fn quick_profile_switch_updates_root_and_children_cannot_widen() {
     let err = core
         .set_permission_profile(&child, ProfileId::AllReach)
         .unwrap_err();
-    assert!(err.contains("更宽"), "{}", err);}
+    assert!(err.contains("更宽"), "{}", err);
+}
