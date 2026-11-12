@@ -9,4 +9,8 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/presentation/cli/mod.rs` | 终端转录中心：argv 解析 → 入站能力面 → 渲染事件流（含 `resident` / `module` / `rewind` / `diagnose` 等子命令）；不做业务判断、不持状态 |
+| `src/presentation/cli/mod.rs` | 终端转录中心入口：argv 解析 → 选命令或会话流；不做业务判断、不持状态 |
+| `src/presentation/cli/commands.rs` | 一次性命令：`module` / `diagnose` / `secret` / `resident` / `work` / `rewind` |
+| `src/presentation/cli/view.rs` | 渲染原语：花名册、菜单、事件流、模型与供应商标签 |
+| `src/presentation/cli/gate.rs` | 交互回合：跟读事件流、裁决卡问答、等安静与动作回显 |
+| `src/presentation/cli/flows.rs` | 会话流：单 agent / 代理 / 协作 / 供应商 / 模型 / 核心设置 |
