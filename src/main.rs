@@ -1,6 +1,7 @@
-//! Solomni 组合根 + 入口。
-//! 组合根职责：创建各适配器实例 → 装配各能力（含协调业务 `conductor`）→ 交给呈现层（CLI 或 Web）。
-//! 依赖方向：main → adapters / capabilities / presentation；协调业务不知道后两者存在。
+//! 目的：Solomni 组合根与进程入口。
+//! 管：启动序列——参数 / 根目录 / 工具链 / 日志 / 授权对账；唯一允许 new 具体适配器并装配各能力（含 conductor）的地方。
+//! 不管：参数表与分派（entry::args）、各适配器与能力的内部实现、装配后的业务行为（在能力与呈现层）。
+//! 联动：装配结果交给呈现层（presentation::cli / presentation::web），conductor 不知道后两者存在；测试构建外露启动门助手（entry::startup）。
 
 mod capabilities;
 mod entry;

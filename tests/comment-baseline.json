@@ -207,14 +207,6 @@
     "条目：槽外有行或自造槽": 2,
     "条目：首行不是目的": 2
   },
-  "src/capabilities/mod.rs": {
-    "头块：槽外有行或自造槽": 9,
-    "头块：缺文件头": 1
-  },
-  "src/capabilities/permission/mod.rs": {
-    "头块：槽外有行或自造槽": 4,
-    "头块：缺文件头": 1
-  },
   "src/capabilities/prompt/api.rs": {
     "头块：槽外有行或自造槽": 8,
     "头块：缺文件头": 1,
@@ -359,22 +351,6 @@
     "行内：连续超过 2 行": 2,
     "行内：注释串后面必须是代码（不能是空行）": 1
   },
-  "src/capabilities/slate/api.rs": {
-    "头块：槽外有行或自造槽": 1,
-    "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 20,
-    "条目：首行不是目的": 20
-  },
-  "src/capabilities/slate/mod.rs": {
-    "头块：槽外有行或自造槽": 12,
-    "头块：缺文件头": 1
-  },
-  "src/capabilities/slate/service.rs": {
-    "头块：槽外有行或自造槽": 4,
-    "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 4,
-    "条目：首行不是目的": 1
-  },
   "src/capabilities/taskchain/api.rs": {
     "头块：槽外有行或自造槽": 3,
     "头块：缺文件头": 1
@@ -489,14 +465,6 @@
   "src/capabilities/workspace/service.rs": {
     "条目：槽外有行或自造槽": 2,
     "条目：首行不是目的": 2
-  },
-  "src/guard/mod.rs": {
-    "条目：槽外有行或自造槽": 2,
-    "条目：首行不是目的": 2
-  },
-  "src/main.rs": {
-    "头块：槽外有行或自造槽": 3,
-    "头块：缺文件头": 1
   },
   "src/presentation/cli/mod.rs": {
     "头块：槽外有行或自造槽": 2,
