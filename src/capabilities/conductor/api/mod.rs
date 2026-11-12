@@ -1,15 +1,8 @@
-//! 入站契约：呈现层（CLI / Web）与核心之间的唯一通道（见 docs/presentation/contracts.md）。
-//!
-//! 形态：**命令 + 事件**。
-//! - 核心常驻自己的执行线程、独占全部状态：呈现层拿不到 `Conductor`，也拿不到任何核心锁。
-//! - 呈现层只持有 `Ops`：四个**按角色切分**的能力接口 + 一个可订阅的事件台。
-//! - 每条命令一次同步回复（std mpsc）：呈现层仍是「调用即拿结果」，不必改写成异步。
-//! - **并发归核心**：停止/取消由 `JobRegistry` 承担，不进命令队列——所以生成期间照样立刻生效；
-//!   呈现层因此不需要知道「生成时核心状态被占用」这类内部事实。
-//! - 事件台由核心独占生产：任何数量的消费者按 `since` 增量取，序号供客户端去重。
-//!
-//! 这里**不出现 HTTP / JSON 封装 / 路由**：那些是呈现层的传输事（见 presentation/routes.rs）。
-//! 事件与读模型（`SessionEvent`、`*View`）是**事实**的线格式，仍归 conductor。
+//! 目的：呈现层（CLI / Web）与核心之间的唯一通道（见 docs/presentation/contracts.md）：命令 + 事件。
+//! 管：`Ops` 的四个按角色切分的能力接口、核心唯一生产的事件台（`EventBus`，消费者按 `since` 增量读），
+//!   以及两端共用的入站读模型（`WorkSpec`、`SessionEdit`、`RuntimeReport`、`*View` 等）。
+//! 不管：HTTP / JSON 封装 / 路由（呈现层的传输事，见 presentation/routes.rs）；核心状态与并发归 service。
+//! 联动：命令经 `ConductorHandle` 在核心自己的线程上执行，回包只带事件台头部序号。
 
 // 登记处的入站契约归登记处自己：这里只用它的面（实现队列代理），不定义。
 use crate::capabilities::conductor::service::Conductor;
@@ -28,10 +21,8 @@ pub use crate::capabilities::llm::api::ProbeOutcome;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
-// ---------- 输出方式与推进结果 ----------
-
 /// 目的：一次生成的输出方式：流式逐片，还是只要最终结果。
-/// 「怎么呈现」是呈现层的决定，所以由调用方显式给出，核心不替它猜。
+///   「怎么呈现」是呈现层的决定，所以由调用方显式给出，核心不替它猜。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Output {
     Stream,
@@ -39,14 +30,12 @@ pub enum Output {
 }
 
 /// 目的：一次会话推进的结果：**只回事件台的头部序号**。
-/// 命令不携带事实——事实只有一条来路（事件台）：想看就按 `since` 订阅，
-/// 谁发起的命令都一样（CLI / Web / 桌面 / 演示脚本）。
+///   命令不携带事实——事实只有一条来路（事件台）：想看就按 `since` 订阅，
+///   谁发起的命令都一样（CLI / Web / 桌面 / 演示脚本）。
 #[derive(Debug, Clone)]
 pub struct Advance {
     pub head: u64,
 }
-
-// ---------- 事件台 ----------
 
 /// 目的：事件台上的一条：全局序号 + 会话 + 事实。
 #[derive(Debug, Clone)]
@@ -61,7 +50,7 @@ const BUS_MAX: usize = 10_000;
 const BUS_KEEP: usize = 5_000;
 
 /// 目的：事件发布台：核心是唯一生产者（`push` 只由本模块调用）；
-/// 任何数量的消费者按 `since` 增量取——多端并用、断线重连都不用额外机制。
+///   任何数量的消费者按 `since` 增量取——多端并用、断线重连都不用额外机制。
 pub struct EventBus {
     inner: Mutex<BusInner>,
 }
@@ -128,9 +117,9 @@ impl EventBus {
     }
 
     /// 目的：取 `since` 之后的事件批 + 当前头部 + **最老还留着的序号**（同一把锁内）。
-    /// 为什么要把 oldest 给客户端：事件台会裁剪（BUS_MAX/BUS_KEEP），`since` 之后那一小段可能
-    /// 已经永久没了。客户端据此**重新对齐**（拉一次历史重放），而不是按 seq 干等——干等的结果
-    /// 是后续批次全部滞留，只有刷新页面才恢复。
+    ///   为什么要把 oldest 给客户端：事件台会裁剪（BUS_MAX/BUS_KEEP），`since` 之后那一小段可能
+    ///   已经永久没了。客户端据此**重新对齐**（拉一次历史重放），而不是按 seq 干等——干等的结果
+    ///   是后续批次全部滞留，只有刷新页面才恢复。
     pub fn snapshot(&self, sid: Option<&str>, since: u64) -> (Vec<EventLine>, u64, u64) {
         let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let lines = g
@@ -159,13 +148,12 @@ impl EventBus {
     }
 
     /// 目的：盘上转录**之外**的实时尾巴 + 事件台当前头部：给「历史和实时一次给全」用（见呈现层的 history.open）。
-    ///
-    /// 只取「**转录在事件台里的最后一个位置之后**」的事实：转录是事件台的**前缀**，
-    /// 它之前/之中的短暂事件（流式增量、开跑那条运行态）已经被盘上的定稿行取代了；
-    /// 把它们也塞进尾巴，前端会先画定稿行、再画一个永远填不上的空"谁正在说"块。
-    /// 判据是**结构化相等**（两边 JSON 出自同一套序列化器，就是同一个值），不是按行 id 猜：
-    /// `notice`/`node_started` 这类行本来就没有 id，按 id 去重正是刷新后整段重复的来源。
-    /// 返回的尾巴按事件台顺序展开，前端因此**只按序 append**，不自己合并两个来源。
+    ///   只取「**转录在事件台里的最后一个位置之后**」的事实：转录是事件台的**前缀**，
+    ///   它之前/之中的短暂事件（流式增量、开跑那条运行态）已经被盘上的定稿行取代了；
+    ///   把它们也塞进尾巴，前端会先画定稿行、再画一个永远填不上的空"谁正在说"块。
+    ///   判据是**结构化相等**（两边 JSON 出自同一套序列化器，就是同一个值），不是按行 id 猜：
+    ///   `notice`/`node_started` 这类行本来就没有 id，按 id 去重正是刷新后整段重复的来源。
+    ///   返回的尾巴按事件台顺序展开，前端因此**只按序 append**，不自己合并两个来源。
     pub fn tail_excluding(
         &self,
         sid: &str,
@@ -208,8 +196,6 @@ impl EventBus {
         (tail, head)
     }
 }
-
-// ---------- 按角色切分的能力接口 ----------
 
 /// 目的：会话能力：创建、推进、回档、编辑、停止。会话界面只需要这一个。
 pub trait SessionOps: Send + Sync {
@@ -291,9 +277,8 @@ pub trait SessionOps: Send + Sync {
 }
 
 /// 目的：核心自己的用例（会话中心之外的那些）：运行报告与核心推荐。
-///
-/// 它们留在 conductor 是因为**只有 conductor 同时拿着**清单、包库、宿主探测与各能力的面——它们是编排
-/// （§2.4 的脚本），没有独立状态，所以不配一个"能力"。清单事实本身归 `modules::api::ModulesOps`。
+///   它们留在 conductor 是因为**只有 conductor 同时拿着**清单、包库、宿主探测与各能力的面——它们是编排
+///   （§2.4 的脚本），没有独立状态，所以不配一个"能力"。清单事实本身归 `modules::api::ModulesOps`。
 pub trait ConductorOps: Send + Sync {
     /// 目的：运行包与档位的运行报告（只报事实）。
     fn runtime_report(&self, tier: Tier) -> Result<RuntimeReport, String>;
@@ -305,7 +290,7 @@ pub trait ConductorOps: Send + Sync {
 }
 
 /// 目的：日志能力：呈现层与 CLI 的埋点入口（**只转发，不做任何判定**）。
-/// 呈现层因此拿不到端口对象、也不依赖 kernel（见 ARCHITECTURE.md §一）。
+///   呈现层因此拿不到端口对象、也不依赖 kernel（见 ARCHITECTURE.md §一）。
 pub trait LogOps: Send + Sync {
     fn info(&self, at: &str, msg: &str);
     // 入口契约发布给前端的三个级别；warn 暂无调用点（呈现层的降级提示走它），先留着这一格。
@@ -313,8 +298,6 @@ pub trait LogOps: Send + Sync {
     fn warn(&self, at: &str, msg: &str);
     fn error(&self, at: &str, msg: &str);
 }
-
-// ---------- 核心手柄（命令通道） ----------
 
 /// 目的：协作在工作线程上要做的事：处置一张**已经出队**的回答（放行类要接着跑泵），或从断点继续。
 ///   为什么要分：回答的**落定**（校验 / 出队 / 记账）在核心线程上做完，长流程的处置才在这里跑；
@@ -377,7 +360,7 @@ mod generation;
 mod handle;
 
 /// 目的：入站能力面：**各能力自己的契约**+ 核心自己的两个 + 事件台。
-/// 克隆廉价；呈现层只依赖它需要的字段，契约测试可以用假实现替换任意一个字段。
+///   克隆廉价；呈现层只依赖它需要的字段，契约测试可以用假实现替换任意一个字段。
 #[derive(Clone)]
 pub struct Ops {
     /// 目的：会话中心（conductor 自己的状态）：会话生命周期、动作分发、文件视图、会话总览。
@@ -425,8 +408,6 @@ impl Ops {
         }
     }
 }
-
-// ---------- 入站词汇（呈现层与核心共用的形状） ----------
 
 // ---------- 动作（声明在 systools/tools.yaml；分发归 conductor） ----------
 /// 目的：一次动作的**调用者身份**——授权判据（动作表 `callers`）的输入。
@@ -503,7 +484,7 @@ pub enum RewindTarget {
 }
 
 /// 目的：动作结果：生成类只回**事件台头部序号**（事实在事件台上，订阅者自己按 since 取）；
-/// 回档 / 改需求给完整重放（那是快照，不是增量事实）；其余给一份结构化结果（如 `{ok:true}`）。
+///   回档 / 改需求给完整重放（那是快照，不是增量事实）；其余给一份结构化结果（如 `{ok:true}`）。
 #[derive(Debug)]
 pub enum Acted {
     Advanced(Advance),
@@ -519,12 +500,11 @@ pub(crate) struct RewindOutcome {
     pub children: Vec<(String, Vec<serde_json::Value>)>,
 }
 
-//
 // 定义在**能力面**：呈现层只认这里，不再经 `conductor::` 根转一手。
 // 队列代理：只把命令交给核心线程（依赖方向见 ARCHITECTURE.md §一）。
 /// 目的：工作形态：单 agent（模块数不限）/ 协作（多 agent 分权协商）/ 代理（决定权整块交给核心）。
-/// 形态只用于校验与界面标签：会话实现只有「单 agent」与「协作」两种——
-/// 代理会话在实现上就是一个单会话（`mode="proxy"`），只是身份换成 `core_proxy` 角色。
+///   形态只用于校验与界面标签：会话实现只有「单 agent」与「协作」两种——
+///   代理会话在实现上就是一个单会话（`mode="proxy"`），只是身份换成 `core_proxy` 角色。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkMode {
     Single,
@@ -534,7 +514,7 @@ pub enum WorkMode {
 }
 
 /// 目的：一次工作里的一个 agent 实例（用户选定，或核心代拟的临时组合）。
-/// agent = 一个 AI 实例 + N 份模块能力 + 一个模型 + 一个沙箱。
+///   agent = 一个 AI 实例 + N 份模块能力 + 一个模型 + 一个沙箱。
 #[derive(Debug, Clone)]
 pub struct AgentInstance {
     pub name: String,
@@ -582,8 +562,8 @@ pub struct WorkSpec {
 }
 
 /// 目的：创建工作后的结果：最终实例名（重名已加尾号）、名单，以及**开场事实**。
-/// 事实由 api 层发布进事件台（核心不持有事件台）；**不上回包**——
-/// 回包只给事件台头部序号，谁要看谁按 `since` 订阅。
+///   事实由 api 层发布进事件台（核心不持有事件台）；**不上回包**——
+///   回包只给事件台头部序号，谁要看谁按 `since` 订阅。
 #[derive(Debug, Clone)]
 pub struct WorkOpened {
     pub sid: SessionId,
@@ -592,7 +572,7 @@ pub struct WorkOpened {
 }
 
 /// 目的：核心推荐的 agent 草案（名字 + 模块 + 模型 + 理由；用户可改，核心不代选）。
-/// reuse = 直接复用登记处已存的 agent（模块与模型都取它自己的，核心不代拟模型）。
+///   reuse = 直接复用登记处已存的 agent（模块与模型都取它自己的，核心不代拟模型）。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct AgentSuggestion {
     pub name: String,
@@ -638,7 +618,7 @@ pub struct RuntimeReport {
     /// 目的：本档位下不能成立的诊断（包选择 + 模块入口）；空 = 没有。
     pub diagnoses: Vec<RuntimeDiagnosis>,
     /// 目的：本机能不能承载**当前档位**（虚拟机档的前置条件；本机档恒为可）。
-    /// 界面据此决定虚拟机档能不能选，并与「开始」/编辑的校验同源（`crate::capabilities::vm::api::tier_readiness`）。
+    ///   界面据此决定虚拟机档能不能选，并与「开始」/编辑的校验同源（`crate::capabilities::vm::api::tier_readiness`）。
     pub tier_ready: bool,
     /// 目的：承载不了时缺什么（空 = 齐了）。
     pub tier_missing: Vec<String>,
@@ -769,7 +749,7 @@ pub struct SessionConfig {
 }
 
 /// 目的：编辑提交（配置界面用）：改模块、模型、档位、定版与网络。
-/// 名字与形态不在这里——会话一旦开过（流水有内容）它们就冻结了。
+///   名字与形态不在这里——会话一旦开过（流水有内容）它们就冻结了。
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionEdit {
@@ -821,18 +801,18 @@ pub struct SessionView {
     /// 目的：子会话的父档位（根为空）；权限快速切换据此禁用更高档。
     pub permission_parent: Option<String>,
     /// 目的：**这条会话此刻在跑吗**（生成中）：界面据此把「发送/继续」换成「停止」并显示占位动画。
-    /// 它是**对账副本**：运行态的唯一真相是推的 `SessionEvent::Working`（短暂、不落盘）；
-    /// 这份快照供界面在"本页对这条会话还没有实时知识"时对齐——刚刷新页面、事件台裁掉一段后
-    /// 重连、别人建的会话（见 docs/session/session-model.md 二之二）。
+    ///   它是**对账副本**：运行态的唯一真相是推的 `SessionEvent::Working`（短暂、不落盘）；
+    ///   这份快照供界面在"本页对这条会话还没有实时知识"时对齐——刚刷新页面、事件台裁掉一段后
+    ///   重连、别人建的会话（见 docs/session/session-model.md 二之二）。
     pub running: bool,
     /// 目的：**这条工作有「本次需求」吗**：前端据此决定要不要渲染「改需求」按钮——
-    /// 没有就**根本不渲染**（不是灰着）。这是领域事实（有没有需求行），不是"模式"。
+    ///   没有就**根本不渲染**（不是灰着）。这是领域事实（有没有需求行），不是"模式"。
     pub can_update_task: bool,
     /// 目的：运行态（`active` / `stopped` / `closed`）：**持久事实**，与短暂的 `running` 分开。
-    /// 界面据此标出"已暂停 / 已关闭"（这类会话不会再被派发或唤醒）。
+    ///   界面据此标出"已暂停 / 已关闭"（这类会话不会再被派发或唤醒）。
     pub run: String,
     /// 目的：当前等用户裁决的**队首那张**（None = 没有）：**快照形态**，与推的 `decision_card` 同源。
-    /// 刷新页面时界面照样画得出那张卡；推的那条只是增量（队列里后面的几张在 waiting 里）。
+    ///   刷新页面时界面照样画得出那张卡；推的那条只是增量（队列里后面的几张在 waiting 里）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pending: Option<serde_json::Value>,
     /// 目的：上下文「继续」按钮（None = 不显示）；前端只按它渲染，不自己判断末条/协作泵。
@@ -878,7 +858,7 @@ pub struct ThinkingOptionView {
 }
 
 /// 目的：会话文件清单视图（前端 @ 菜单与「长路径缩写」用）：相对清单 + 真实根。
-/// 根一律是 slash() 书写形式（/ 分隔、无扩展长度前缀）；拿不到根就给空串（前端原样显示，不猜）。
+///   根一律是 slash() 书写形式（/ 分隔、无扩展长度前缀）；拿不到根就给空串（前端原样显示，不猜）。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct FilesView {
     pub work: Vec<String>,

@@ -1,22 +1,13 @@
-//! 默认的信封修复器：**只做无歧义的修补**（两类，都可机器判定）。
-//!
-//! ①把 JSON 字符串里未转义的裸控制字符转义（\\n / \\r / \\t / \\uXXXX）——
-//!   内容里直接换行/制表符是"看得出想写什么"的错（真实事故里 write 的 content 就是这么写坏的）。
-//! ②信封还差收尾括号时，把**扫描器算出来的那几个字符**补上——真实会话里模型四次失败都是这个形状：
-//!   内容字符串已经写完，只因信封少一个 } 而整轮作废（它还被误导去"分两次写"，白跑两轮）。
-//!
-//! 两条红线：
-//! - 断在**字符串中间**（内容没写完）一律不修：补个引号会让核心拿到半截内容，那是更坏的结果。
-//! - 只补"缺的那几个收尾字符"，不做任何猜测性改写；结果由引擎重新解析成**合法工具信封**才算数
-//!   （解析通过就是"无歧义"的判据）。
-//!
-//! 机制在适配层：任何满足 capabilities::llm::ports::EnvelopeRepair 契约的实现都能整体替换本实现。
+//! 目的：默认的信封修复器——只做可机器判定的无歧义修补。
+//! 管：未转义裸控制字符的转义；缺收尾括号时按扫描器结果补齐；两条红线：断在字符串中间不修、不做猜测性改写。
+//! 不管：信封解析（在 domain/envelope.rs）；回执文案（在 domain/malformed.rs）；工具执行。
+//! 联动：实现 ports::EnvelopeRepair；由 detail/mod.rs 重导出 UnambiguousRepair 供组合根装配；修补结果须重新解析成合法工具信封才算数。
 
 use crate::capabilities::llm::api::RepairOutcome;
 use crate::capabilities::llm::api::{Malformed, Tail};
 use crate::capabilities::llm::ports::EnvelopeRepair;
 
-/// 只做上述两类无歧义修补。
+/// 目的：只做上述两类无歧义修补。
 pub struct UnambiguousRepair;
 
 impl EnvelopeRepair for UnambiguousRepair {

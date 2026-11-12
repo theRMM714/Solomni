@@ -1,8 +1,7 @@
-//! 登记处的**状态与用例**：四份 yaml 的内存形态（`Settings`）只由这里写。
-//!
-//! 端口（持久化）与**别能力的 api 面**（通道探测 / 模型发现 → `llm::api::Llm`）由**组合根**注入；
-//! 本文件不 new 任何适配器、也**不持别人的端口**（R12）。
-//! 对外只经 `registry::api::Registry`：`conductor` 与呈现层拿不到 `settings` 字段。
+//! 目的：登记处的状态与用例——四份 yaml 的内存形态只由这里写。
+//! 管：实现 api::Registry 与 RegistryOps（视图 / 只读事实 / 写三类方法）；注入端口与 llm 能力面；应用模型发现结果。
+//! 不管：yaml 解析与落盘（在 detail/yaml_settings.rs）；DTO 与校验规则（在 domain）；适配器装配（在组合根）。
+//! 联动：组合根 new 时注入 SettingsStore 与 llm::api::Llm；对外只经 registry::api::Registry。
 
 use crate::capabilities::llm::api::{Channel, Llm, ProbeOutcome, ReplayReport, ToolMode};
 use crate::capabilities::modules::api::Roster;
@@ -24,7 +23,7 @@ fn fill_if_empty(target: &mut String, found: Option<String>) {
     }
 }
 
-/// 登记处能力：持四份 yaml 的内存形态，按用例读写、改完即落盘。
+/// 目的：登记处能力：持四份 yaml 的内存形态，按用例读写、改完即落盘。
 pub struct RegistryService {
     /// **状态**：登记处的内存形态。私有——别的能力只经 `Registry` 读。
     settings: Settings,
@@ -53,7 +52,7 @@ impl RegistryService {
         })
     }
 
-    /// 组合根专用：注入端口，并把四份 yaml 读进内存。
+    /// 目的：组合根专用：注入端口，并把四份 yaml 读进内存。
     pub fn new(
         store: Arc<dyn SettingsStore + Send + Sync>,
         llm: Arc<dyn Llm + Send + Sync>,
@@ -103,7 +102,6 @@ impl RegistryService {
 
 impl Registry for RegistryService {
     // ---- 视图 ----
-
     fn provider_views(&self) -> Vec<ProviderView> {
         self.settings.provider_views()
     }
@@ -133,7 +131,6 @@ impl Registry for RegistryService {
     }
 
     // ---- 只读事实 ----
-
     fn resolve(&self, model: &str) -> Result<Channel, String> {
         self.settings.resolve(model)
     }
@@ -183,7 +180,6 @@ impl Registry for RegistryService {
     }
 
     // ---- 写 ----
-
     fn provider_upsert(&mut self, id: &str, base_url: &str, api_key: &str) -> Result<(), String> {
         if id.is_empty() || base_url.is_empty() {
             return Err("id / base_url 不能为空".to_string());

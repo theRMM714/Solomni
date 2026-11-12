@@ -35,9 +35,9 @@ cargo deny check
 - 报告 JSON 是否符合约定；
 - `gaps.yaml` 是否可解析、字段完整；
 - **依赖方向是否仍然成立**：层间不反向、`presentation` 只经入站能力面驱动、业务层内部不成环。
-- 依赖方向门禁的豁免清单在 `tests/dependency-baseline.json`（当前为空 = 零豁免），**条目一旦不再成立即失败**——规则与口径见 [../../ARCHITECTURE.md](../../ARCHITECTURE.md) §九.7。
-- **能力内部**同样机器判定（`service` 不引本能力 `detail` / `kernel::detail`、`service` 不直接做 IO、同能力方法族不成环），豁免在 `tests/structure-baseline.json`，同样是「条目一旦不再成立即失败」。
-- **文件粒度只报不拦**：超过 800 行的实现文件按 `[big]` 回执行数 / 增量 / IO 数 / impl 数 / 文件头目的槽，不改变成败；唯一硬线是**新建**文件超过 1200 行（`node run-tests.js`）。
+- 依赖方向门禁零豁免：层间反向、`presentation` 越界、业务层成环任一命中即失败——规则与口径见 [../../ARCHITECTURE.md](../../ARCHITECTURE.md) §九.7。
+- **能力内部**同样机器判定（`service` 不引本能力 `detail` / `kernel::detail`、`service` 不直接做 IO、同能力方法族不成环），零豁免，实际命中即失败。
+- **文件粒度按角色分档**：软线只回执（实现 800 行、用例 1500 行、支撑 800 行、内联测试 200 行）；硬线是实现文件生产超 1200 或总行超 1500、用例超 2000、支撑超 1200、内联测试超 400 即失败（`tests/gates/structure/size.js`）。
 - 测试是否写入项目外绝对路径或真实用户目录；
 - 测试结束后是否遗留子进程、端口、临时目录、权限或句柄；
 - 是否存在重复测试、重复 Fixture、重复测试替身或无理由的跨层重复断言；
@@ -51,7 +51,7 @@ cargo deny check
 
 - `cargo tree --duplicates` 只检查依赖树中的重复版本，`cargo deny` 的 `bans` 与它同口径但更全面（许可证、禁用、来源）；它们都不等于源码重复检查。`clippy` 也不能替代业务测试。这些检查的职责必须分开记录（`run-tests.js`）。
 
-- 注释契约另按只减不增的存量快照比对（结构审查里的一条；比对工具本身不进 T0，见 [quality-isolation.md](quality-isolation.md) 的「门禁之外」）。
+- 注释契约按格式硬判（结构审查里的一条），实际违规即失败；存量报告与内容 / 语义卫生见 [quality-isolation.md](quality-isolation.md) 的「门禁之外」。
 
 - T0 的步骤清单、可行状态与环境跳过口径以生成段为准（来源 `tests/gates/steps.js` 的 `listModel()`，与 `node run-tests.js --list` 同源；改常量后跑 `node tests/docs-sync.mjs --write`）：
 

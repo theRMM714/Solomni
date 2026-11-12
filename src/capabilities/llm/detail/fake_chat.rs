@@ -1,6 +1,7 @@
-//! 测试专用通道：脚本假模型（无网络、无密钥）。
-//! 只给单元测试与测试替身用；生产组合根不装配它，也不存在"无模型回落演示"。
-//! 它同时是"对话通道"（`api::Chat`）与"通道工厂"（`ports::ChatGateway`）的实现，不做装配决策。
+//! 目的：测试专用的脚本假模型通道（无网络、无密钥）。
+//! 管：按脚本回放的 Chat 与 ChatGateway 实现；记录收到的消息与用量。
+//! 不管：生产装配（组合根不装配）；真实网络、密钥与通道发现。
+//! 联动：只被单元测试与测试替身引用；实现 api::Chat 与 ports::ChatGateway；detail/mod.rs 以 cfg(test) 声明。
 
 use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{
@@ -8,7 +9,7 @@ use crate::capabilities::llm::api::{
 };
 use crate::capabilities::llm::ports::ChatGateway;
 
-/// 脚本假模型：按调用次序回放脚本（最后一个条目重复兜底）；记录调用供测试断言。
+/// 目的：脚本假模型：按调用次序回放脚本（最后一个条目重复兜底）；记录调用供测试断言。
 pub struct FakeChat {
     script: Vec<String>,
     pub calls: Vec<Vec<Msg>>,
@@ -76,7 +77,7 @@ impl Chat for FakeChat {
     }
 }
 
-/// 测试网关：忽略传入的通道，一律发脚本假模型（只用于测试装配）。
+/// 目的：测试网关：忽略传入的通道，一律发脚本假模型（只用于测试装配）。
 pub struct DemoGateway;
 
 impl ChatGateway for DemoGateway {

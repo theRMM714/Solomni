@@ -5,6 +5,8 @@
  */
 "use strict";
 
+const { mask: rustMask } = require("./rust-mask.js");
+
 /** 词法归一：统一分隔符、去掉 \\?\ 扩展前缀、收掉 '.' 与 '..' 段。 */
 function normPath(s) {
   const parts = String(s).replace(/\\/g, "/").replace(/^\/\/\?\//, "").split("/");
@@ -148,6 +150,24 @@ function gateParserSelfTest(root) {
   eq("batchNonAscii 报出非 ASCII 所在行", batchNonAscii(Buffer.from("@echo off\nrem 中文\necho OK\n")), { line: 2, bom: false });
   eq("batchNonAscii 认 UTF-8 BOM", batchNonAscii(Buffer.from([0xef, 0xbb, 0xbf, 0x40])).bom, true);
   eq("batchNonAscii 非 ASCII 在首行时不误算行号", batchNonAscii(Buffer.from("echo 中\n")).line, 1);
+  const rustSource =
+    "// 行注释里的 ureq 不是 IO\n" +
+    'let s = "std::fs";\n' +
+    'let r = r#"ureq "x""#;\n' +
+    "/* 外层 /* 内层 ureq */ 仍在注释 */\n" +
+    "let c = 'a';\n" +
+    "fn f<'t>(x: &'t str) -> &'t str { x }\n";
+  const rustMasked = rustMask(rustSource);
+  eq("rustMask 抹掉行注释与普通/raw 字符串里的记号", /ureq|std::fs/.test(rustMasked), false);
+  eq("rustMask 处理可嵌套块注释且在正确深度收尾", rustMasked.includes("let c ="), true);
+  eq("rustMask 抹掉字符字面量", rustMasked.includes("'a'"), false);
+  eq("rustMask 不把生命周期 't 当字符字面量吞掉后续代码", rustMasked.includes("-> &'t str { x }"), true);
+  eq(
+    "rustMask 保留长度与换行数",
+    [rustMasked.length, (rustMasked.match(/\n/g) || []).length],
+    [rustSource.length, (rustSource.match(/\n/g) || []).length],
+  );
+  eq("rustMask 跳过字符串里的转义引号", rustMask('let s = "a\\"ureq";').includes("ureq"), false);
   return bad;
 }
 

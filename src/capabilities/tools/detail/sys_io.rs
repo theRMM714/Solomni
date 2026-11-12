@@ -1,6 +1,7 @@
-//! 内置文件工具的读写机制（实现 tools 自己的 SysIo 端口）：纯 Rust 直接读写，不经任何外部进程。
-//! 读：按 UTF-8 解码；含非法字节时按替换字符呈现并置 lossy（编码猜测不是本程序的事）。
-//! 写：一律 UTF-8，需要时建父目录，覆盖同名文件。
+//! 目的：内置文件工具的读写机制（实现 tools 自己的 `SysIo` 端口）——纯 Rust 直接读写，不经任何外部进程。
+//! 管：读（按 UTF-8 解码，含非法字节时按替换字符呈现并置 `lossy`）、写（一律 UTF-8，需要时建父目录，覆盖同名文件）与真实落点越界校验。
+//! 不管：编码猜测（不是本程序的事）；参数校验、回执文案与放行（在 `domain`）。
+//! 联动：实现 `ports::SysIo`，由 `main.rs` 构造注入 `service/`。
 
 use crate::capabilities::tools::ports::{DirEntry, FileRead, SysIo};
 use std::io::Read;
@@ -76,7 +77,7 @@ fn real_within(root: &Path, path: &Path) -> Result<(), String> {
 }
 
 pub struct FsSysIo {
-    /// 单次读取的字节上限（超出只读开头部分，如实标注）。
+    /// 目的：单次读取的字节上限（超出只读开头部分，如实标注）。
     pub max_read_bytes: usize,
 }
 

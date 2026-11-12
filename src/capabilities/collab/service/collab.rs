@@ -34,7 +34,7 @@ struct NodeVerdict {
 }
 
 impl CollabSession {
-    /// 本次调用的通道参数（流式 + 预算）：**全局设置**，与单 agent 共用同一份。
+    /// 目的：本次调用的通道参数（流式 + 预算）：**全局设置**，与单 agent 共用同一份。
     pub(crate) fn llm_opts(&self) -> crate::capabilities::llm::api::LlmOpts {
         crate::capabilities::llm::api::LlmOpts {
             stream: self.settings.app.streaming,
@@ -46,8 +46,8 @@ impl CollabSession {
 }
 
 impl CollabSession {
-    /// 成员一轮之后的处置：**策略在 Discussion**（两条驱动共用同一份判定，
-    /// 见 docs/session/session-model.md 二）。用户主动中止时计数不再工作。
+    /// 目的：成员一轮之后的处置：**策略在 Discussion**（两条驱动共用同一份判定，
+    ///   见 docs/session/session-model.md 二）。用户主动中止时计数不再工作。
     pub fn after_member_turn(
         &mut self,
         i: usize,
@@ -63,7 +63,7 @@ impl CollabSession {
         )
     }
 
-    /// 提醒到顶：主会话如实记一行"未回应"（**系统消息**——不是它说的），本轮放过它。
+    /// 目的：提醒到顶：主会话如实记一行"未回应"（**系统消息**——不是它说的），本轮放过它。
     pub fn pass_over(&mut self, i: usize, sink: &mut dyn FnMut(SessionEvent)) {
         let Some(id) = self.member_id(i) else {
             return;
@@ -79,7 +79,7 @@ impl CollabSession {
         }
     }
 
-    /// 注入到该成员会话里的提醒文案（核心在轮次边界注入；用户主动中止时不注入）。
+    /// 目的：注入到该成员会话里的提醒文案（核心在轮次边界注入；用户主动中止时不注入）。
     pub fn reminder_text(&self) -> String {
         self.prompts
             .text(crate::capabilities::prompt::api::Segment::DiscussReminder)
@@ -87,8 +87,8 @@ impl CollabSession {
     }
 }
 
-/// 用户显式授权的主机只读根（`settings.yaml` 的 `sandbox.policy.host_read_roots`）：空 = 一个都不放行。
-/// 与 `Conductor::host_read_roots` 同义——两处都读同一份设置事实（协调业务与协作会话各有一份派生）。
+/// 目的：用户显式授权的主机只读根（`settings.yaml` 的 `sandbox.policy.host_read_roots`）：空 = 一个都不放行。
+///   与 `Conductor::host_read_roots` 同义——两处都读同一份设置事实（协调业务与协作会话各有一份派生）。
 pub(crate) fn read_only_roots(
     app: &crate::capabilities::registry::api::AppSettings,
 ) -> Vec<std::path::PathBuf> {
@@ -103,70 +103,70 @@ pub(crate) fn read_only_roots(
 }
 
 pub struct CollabSession {
-    /// 是否代拟：显式传入（WorkSpec.delegate / meta.delegate），不从名单是否为空推断。
+    /// 目的：是否代拟：显式传入（WorkSpec.delegate / meta.delegate），不从名单是否为空推断。
     pub(crate) delegated: bool,
-    /// 在组名单（agent 实例；代拟确认前为空）。
+    /// 目的：在组名单（agent 实例；代拟确认前为空）。
     pub(crate) roster: Vec<AgentMeta>,
     pub(crate) task: String,
-    /// 代拟拟好的名单（已逐条校验），确认后落到 roster。
+    /// 目的：代拟拟好的名单（已逐条校验），确认后落到 roster。
     pub(crate) slate_picks: Vec<AgentMeta>,
-    /// 登记处快照：agent 的模型解析与核心通道在此进行（策略在 conductor）。
+    /// 目的：登记处快照：agent 的模型解析与核心通道在此进行（策略在 conductor）。
     pub(crate) settings: Settings,
     /// 目的：本会话的裁决队（**与工具级确认共用同一条队**）：排队与校验归它，这里只管各关卡的处置。
     pub(crate) door: Arc<DecisionDoor>,
     pub(crate) allow: bool,
-    /// 已记录在案的执行方案（回档/重启后沿用，未整理则为 None）。
+    /// 目的：已记录在案的执行方案（回档/重启后沿用，未整理则为 None）。
     pub(crate) plan: Option<String>,
-    /// 核心给出的**任务链**（与方案一起出；审查关卡把它交用户看）。
+    /// 目的：核心给出的**任务链**（与方案一起出；审查关卡把它交用户看）。
     pub(crate) chain: Option<crate::capabilities::taskchain::api::TaskChain>,
     pub(crate) disc: Option<Discussion>,
-    /// 回合 id 计数器（整场工作单调递增）：agent 会话的回合标记用它。
+    /// 目的：回合 id 计数器（整场工作单调递增）：agent 会话的回合标记用它。
     pub(crate) turns: u64,
-    /// 上一次成员回合失败的原因：下一次泵推一步时如实交回（TurnOut::Interrupted）。
+    /// 目的：上一次成员回合失败的原因：下一次泵推一步时如实交回（TurnOut::Interrupted）。
     pub(crate) turn_error: Option<String>,
-    /// 泵让出的那一步：该问哪个成员、给它什么上下文。
-    /// 泵**不自己调模型**——由核心取该 agent 的会话跑完再 feed 回来（见 session-model.md 二之二）。
-    /// 泵让出的那一步：成员下标 / 身份块 / 本回合提示（身份每回合现渲染，不存进任何人的消息列表）。
+    /// 目的：泵让出的那一步：该问哪个成员、给它什么上下文。
+    ///   泵**不自己调模型**——由核心取该 agent 的会话跑完再 feed 回来（见 session-model.md 二之二）。
+    ///   泵让出的那一步：成员下标 / 身份块 / 本回合提示（身份每回合现渲染，不存进任何人的消息列表）。
     pub(crate) pending_ask: Option<(usize, String, Vec<crate::capabilities::llm::api::Msg>)>,
-    /// 已发出的转录行数（增量事件用）。
+    /// 目的：已发出的转录行数（增量事件用）。
     pub(crate) emitted: usize,
-    /// 下一条转录行的 id（会话内稳定序号）。
+    /// 目的：下一条转录行的 id（会话内稳定序号）。
     pub(crate) next_line: u64,
-    /// 回复 id 计数器（转录行按它分组；按落盘重建时从转录里的最大值续号）。
+    /// 目的：回复 id 计数器（转录行按它分组；按落盘重建时从转录里的最大值续号）。
     pub(crate) reply_seq: u64,
     pub(crate) core_chat: crate::capabilities::llm::api::BoxedChat,
-    /// 核心通道的工具调用形态（原生才声明工具；信封通道看提示词里的说明）。
+    /// 目的：核心通道的工具调用形态（原生才声明工具；信封通道看提示词里的说明）。
     pub(crate) core_mode: crate::capabilities::llm::api::ToolMode,
-    /// 提示词册能力面：**不是册子本体**（持有者只有提示词能力一处），这里只按名字取段。
+    /// 目的：提示词册能力面：**不是册子本体**（持有者只有提示词能力一处），这里只按名字取段。
     pub(crate) prompts: Arc<dyn Prompt>,
-    /// 工具总表与角色表的能力面（**表本体在工具能力里**，与册子互不依赖）。
+    /// 目的：工具总表与角色表的能力面（**表本体在工具能力里**，与册子互不依赖）。
     pub(crate) systools: Arc<dyn crate::capabilities::tools::api::Tools>,
-    /// llm 用例面（**不持它的端口**，R12）：按通道造句柄、修信封都走它。
+    /// 目的：llm 用例面（**不持它的端口**，R12）：按通道造句柄、修信封都走它。
     pub(crate) llm: Arc<dyn Llm + Send + Sync>,
-    /// 虚拟机档用例面（**不持它的端口**，R12）：运行包库走它。
+    /// 目的：虚拟机档用例面（**不持它的端口**，R12）：运行包库走它。
     pub(crate) vm: Arc<dyn Vm + Send + Sync>,
     /// 目的：模块能力（**不持它的端口**，R12）——清单事实的唯一上游。
     pub(crate) modules: Arc<dyn Modules + Send + Sync>,
-    /// 工具执行面（**不持它的端口**，R12）：跑外部/内置工具都走它。
+    /// 目的：工具执行面（**不持它的端口**，R12）：跑外部/内置工具都走它。
     pub(crate) tools: Arc<dyn ToolExec + Send + Sync>,
-    /// 运行日志（工具循环里"输出被长度截断"这类事实落盘）。
+    /// 目的：运行日志（工具循环里"输出被长度截断"这类事实落盘）。
     pub(crate) log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
-    /// 本会话的执行选型（档位 + 运行包定版）。
+    /// 目的：本会话的执行选型（档位 + 运行包定版）。
     pub(crate) spec: ExecSpec,
     /// 目的：这棵会话树的 **guest 租约**（空 = 本机档）：顶层协作会话用自己的名字，
     ///   proxy 子树用代理根名；成员回合的工具环境按它送进 guest。
     pub(crate) guest_lease: String,
-    /// 本工作的沙箱清单（按 agent 实例名取）。
+    /// 目的：本工作的沙箱清单（按 agent 实例名取）。
     pub(crate) sandboxes: Sandboxes,
     /// 目的：工作区用例面（**不持它的端口**，R12）——写工具落地后按逐路径基线自动提交。
     pub(crate) workspace: Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync>,
     pub(crate) done: bool,
-    /// 「停止」标志：由 ConductorHandle 在派发时把任务登记处的取消标志注入（见 set_cancel）。
+    /// 目的：「停止」标志：由 ConductorHandle 在派发时把任务登记处的取消标志注入（见 set_cancel）。
     pub(crate) cancel: Arc<std::sync::atomic::AtomicBool>,
-    /// 方案是否已过审（审查关卡）：没过审不开工。由转录里的 [用户:同意方案] 派生。
+    /// 目的：方案是否已过审（审查关卡）：没过审不开工。由转录里的 [用户:同意方案] 派生。
     pub(crate) plan_approved: bool,
-    /// 核心 AI 给用户的**建议**（随方案 / 节点验收那一次调用一起产出）：只属于**下一次登记**的那一关，
-    /// 登记时搬进队列里的那一关；用掉就清，别漏到下一关。
+    /// 目的：核心 AI 给用户的**建议**（随方案 / 节点验收那一次调用一起产出）：只属于**下一次登记**的那一关，
+    ///   登记时搬进队列里的那一关；用掉就清，别漏到下一关。
     pub(crate) gate_advice: String,
 }
 
@@ -234,8 +234,8 @@ impl CollabSession {
         })
     }
 
-    /// 用户点「同意」：方案过关，可以开工。
-    /// 记录在**转录**里（重启/回档后按它派生），不是内存里的临时状态。
+    /// 目的：用户点「同意」：方案过关，可以开工。
+    ///   记录在**转录**里（重启/回档后按它派生），不是内存里的临时状态。
     pub fn approve_plan(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
         let line = self.view(LineView::user("同意方案", String::new()));
         sink(SessionEvent::Transcript(vec![line]));
@@ -243,8 +243,8 @@ impl CollabSession {
         self.gate_advice.clear(); // 这一关解除了，建议不再属于任何挂起的事
     }
 
-    /// 接上「停止」：ConductorHandle 在派发时注入任务登记处的取消标志。
-    /// 注入后泵在每次模型调用前与**调用中途**都看它，所以「停止」能在一个调用内收尾。
+    /// 目的：接上「停止」：ConductorHandle 在派发时注入任务登记处的取消标志。
+    ///   注入后泵在每次模型调用前与**调用中途**都看它，所以「停止」能在一个调用内收尾。
     pub fn set_cancel(&mut self, cancel: Arc<std::sync::atomic::AtomicBool>) {
         if let Some(d) = self.disc.as_mut() {
             d.set_cancel(Arc::clone(&cancel));
@@ -252,14 +252,14 @@ impl CollabSession {
         self.cancel = cancel;
     }
 
-    /// 是否已被要求停止。
-    /// 用户是否已**主动中止**（中止时计数不再工作：不注入提醒）。
+    /// 目的：是否已被要求停止。
+    ///   用户是否已**主动中止**（中止时计数不再工作：不注入提醒）。
     pub fn cancelled(&self) -> bool {
         self.cancel.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// 执行 / 验收阶段该不该收尾：**停止（用户的意图）与失败（故障）分开说**。
-    /// 两者都如实收尾并保持会话可继续，但用户看到的话不一样——混成一句会让用户以为出了故障。
+    /// 目的：执行 / 验收阶段该不该收尾：**停止（用户的意图）与失败（故障）分开说**。
+    ///   两者都如实收尾并保持会话可继续，但用户看到的话不一样——混成一句会让用户以为出了故障。
     pub(crate) fn exec_note(&self, exec: &Execution) -> Option<String> {
         if exec.stopped || self.cancelled() {
             return Some(crate::capabilities::session::api::stopped_note());
@@ -269,17 +269,17 @@ impl CollabSession {
             .map(|err| crate::capabilities::session::api::interrupted_note(&err))
     }
 
-    /// 任务链（未整理 = None）。
+    /// 目的：任务链（未整理 = None）。
     pub fn chain(&self) -> Option<&crate::capabilities::taskchain::api::TaskChain> {
         self.chain.as_ref()
     }
 
-    /// 方案是否已过审。
+    /// 目的：方案是否已过审。
     pub fn plan_approved(&self) -> bool {
         self.plan_approved
     }
 
-    /// 记下某个节点跑在哪个子会话里，并把它标成"在跑"。
+    /// 目的：记下某个节点跑在哪个子会话里，并把它标成"在跑"。
     pub fn mark_node_started(&mut self, node: &str, sub: &str) {
         if let Some(chain) = self.chain.as_mut() {
             if let Some(n) = chain.nodes.iter_mut().find(|n| n.id == node) {
@@ -425,7 +425,7 @@ impl CollabSession {
         ))
     }
 
-    /// 记下节点完成（产出先存下来，**验收由核心 AI 判**，见 review_nodes）。
+    /// 目的：记下节点完成（产出先存下来，**验收由核心 AI 判**，见 review_nodes）。
     pub fn mark_node_done(&mut self, node: &str, report: &str) {
         if let Some(chain) = self.chain.as_mut() {
             if let Some(n) = chain.nodes.iter_mut().find(|n| n.id == node) {
@@ -435,7 +435,7 @@ impl CollabSession {
         }
     }
 
-    /// 记下一个节点的验收结论。
+    /// 目的：记下一个节点的验收结论。
     pub fn set_node_acceptance(&mut self, node: &str, ok: bool, note: &str) {
         if let Some(chain) = self.chain.as_mut() {
             if let Some(n) = chain.nodes.iter_mut().find(|n| n.id == node) {
@@ -457,7 +457,7 @@ impl CollabSession {
         }
     }
 
-    /// 裁决的**背景**：交给核心 AI 判"用户的意图明确了吗"用——把现场说清楚，别让它猜。
+    /// 目的：裁决的**背景**：交给核心 AI 判"用户的意图明确了吗"用——把现场说清楚，别让它猜。
     pub(crate) fn decision_brief(&self, p: &Pending) -> String {
         match p {
             Pending::PlanReview => {
@@ -489,29 +489,29 @@ impl CollabSession {
         }
     }
 
-    /// 正在等用户（队列里还有没答的卡）：泵**不再往下推**，直到用户回答或整队作废。
-    /// 判据是队列本身：请教 / 名单确认 / 开工确认 / 方案待审 / 节点没过都排在同一条队上。
+    /// 目的：正在等用户（队列里还有没答的卡）：泵**不再往下推**，直到用户回答或整队作废。
+    ///   判据是队列本身：请教 / 名单确认 / 开工确认 / 方案待审 / 节点没过都排在同一条队上。
     pub fn awaiting_user(&self) -> bool {
         !self.door.is_empty()
     }
 
-    /// 成员回合失败：记下原因，下一次泵推一步时如实交回（不静默吞掉）。
+    /// 目的：成员回合失败：记下原因，下一次泵推一步时如实交回（不静默吞掉）。
     pub fn note_turn_failure(&mut self, err: String) {
         self.turn_error = Some(err);
     }
 
-    /// 当前轮次（写进 agent 会话的回合标记里）。
+    /// 目的：当前轮次（写进 agent 会话的回合标记里）。
     pub fn round(&self) -> usize {
         self.disc.as_ref().map(|d| d.round).unwrap_or(0)
     }
 
-    /// 下一个**回合 id**：整场工作单调递增，写进 agent 会话的回合标记。
+    /// 目的：下一个**回合 id**：整场工作单调递增，写进 agent 会话的回合标记。
     pub fn next_turn_id(&mut self) -> u64 {
         self.turns += 1;
         self.turns
     }
 
-    /// 哪个节点**正跑在这个会话里**（一个 agent 一个会话，可能依次服务多个节点）。
+    /// 目的：哪个节点**正跑在这个会话里**（一个 agent 一个会话，可能依次服务多个节点）。
     pub fn running_node_of(&self, sub: &str) -> Option<String> {
         let chain = self.chain.as_ref()?;
         chain
@@ -527,7 +527,7 @@ impl CollabSession {
             .map(|n| n.id.clone())
     }
 
-    /// 把节点退回待办（验收没过 → 用户点「继续」→ 重派它）。
+    /// 目的：把节点退回待办（验收没过 → 用户点「继续」→ 重派它）。
     pub fn reset_node(&mut self, node: &str) {
         if let Some(chain) = self.chain.as_mut() {
             if let Some(n) = chain.nodes.iter_mut().find(|n| n.id == node) {
@@ -540,12 +540,12 @@ impl CollabSession {
         }
     }
 
-    /// 代拟确认后由 Conductor 补上沙箱清单（名单刚定下来时才有）。
+    /// 目的：代拟确认后由 Conductor 补上沙箱清单（名单刚定下来时才有）。
     pub fn set_sandboxes(&mut self, sandboxes: Sandboxes) {
         self.sandboxes = sandboxes;
     }
 
-    /// 生成一条带 id 的转录行（说话人/动词/种类都在字段里；工具行走带 tool 视图的那条路）。
+    /// 目的：生成一条带 id 的转录行（说话人/动词/种类都在字段里；工具行走带 tool 视图的那条路）。
     pub(crate) fn view(&mut self, mut line: LineView) -> LineView {
         // 协作的讨论行各自成一条回复（协作的模型上下文不是从转录重建的，这个号只用于显示与分组一致）。
         line.id = self.next_line;
@@ -562,7 +562,7 @@ impl CollabSession {
         sink(SessionEvent::Transcript(vec![line]));
     }
 
-    /// 名单里的 agent 名（顺序即名单）。
+    /// 目的：名单里的 agent 名（顺序即名单）。
     pub(crate) fn names(&self) -> Vec<String> {
         self.roster.iter().map(|a| a.name.clone()).collect()
     }
@@ -574,8 +574,8 @@ impl CollabSession {
         crate::capabilities::prompt::api::rewrite(task, None, &roots)
     }
 
-    /// 提交需求（总是第一步）。需求入转录（用户看到的与进上下文的一致）。
-    /// 协作里用户不属任何 agent 的沙箱：@ 引用按 speaker = None 改写（共读同一段文字）。
+    /// 目的：提交需求（总是第一步）。需求入转录（用户看到的与进上下文的一致）。
+    ///   协作里用户不属任何 agent 的沙箱：@ 引用按 speaker = None 改写（共读同一段文字）。
     pub fn set_task(&mut self, task: &str, sink: &mut dyn FnMut(SessionEvent)) {
         // 写法按本会话环境给（虚拟机档 = guest 写法，模块工具直接能用）：翻译器在沙箱清单里。
         let roots = self.sandboxes.ref_roots();

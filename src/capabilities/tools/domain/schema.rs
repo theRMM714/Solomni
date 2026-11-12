@@ -1,34 +1,30 @@
-//! 工具参数契约（**声明在文本层**，代码只解析/校验/渲染）。
-//!
-//! 为什么单独一层：参数 schema 不该埋在 Rust 代码里——它是**模块与产品对模型的承诺**，
-//! 要能像文案一样被看到、被修改、被复核。所以：
-//! - 内置工具的参数声明在 `systools/tools.yaml` 的 `tools`；
-//! - 模块工具的参数声明在 `module.yaml` 的 `tools.<名字>.params`（**可选**：不写就照旧工作）。
-//!
-//! 同一份声明同时驱动两件事：模型侧说明（`render_for_prompt`）与调用校验（`check`），
-//! 所以"缺少 path / limit 不能大于 2000"这类文案不再硬编码在代码里。
+//! 目的：工具参数契约——**声明在文本层**，代码只解析 / 校验 / 渲染。
+//! 管：内置工具的参数声明在 `systools/tools.yaml` 的 `tools`；模块工具的参数声明在 `module.yaml` 的 `tools.<名字>.params`（**可选**：不写就照旧工作）；
+//!   同一份声明同时驱动模型侧说明（`render_for_prompt`）与调用校验（`check`），"缺少 path / limit 不能大于 2000"这类文案不再硬编码在代码里。
+//! 不管：参数 schema 的硬编码——它是**模块与产品对模型的承诺**，要能像文案一样被看到、被修改、被复核。
+//! 联动：由 `detail/yaml_systools.rs` 与模块清单读入，`service/` 使用。
 
 use crate::capabilities::modules::api::{Param, ParamType};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
-/// 一个工具的参数契约。
+/// 目的：一个工具的参数契约。
 #[derive(Debug, Clone, Deserialize)]
 pub struct ToolSchema {
-    /// 给模型看的一句话说明（工具做什么）。
+    /// 目的：给模型看的一句话说明（工具做什么）。
     #[serde(default)]
     pub desc: String,
-    /// 参数表（名字 → 声明）。
-    /// 整个不写 = **不做参数校验**（模块工具没声明 schema 时的情形，保持照旧工作）；
-    /// 写了但为空 = 这个工具不收任何参数。
+    /// 目的：参数表（名字 → 声明）。
+    ///    整个不写 = **不做参数校验**（模块工具没声明 schema 时的情形，保持照旧工作）；
+    ///    写了但为空 = 这个工具不收任何参数。
     #[serde(default)]
     pub params: Option<BTreeMap<String, Param>>,
-    /// 这个工具**可并发执行**（缺省 false = 独占串行）。
-    /// 只该给"只读、无副作用"的工具写：同一回复里的多个可并发调用会真的并发跑；
-    /// 未声明的（含写入类）独占执行，并作为并发批次之间的屏障。
+    /// 目的：这个工具**可并发执行**（缺省 false = 独占串行）。
+    ///    只该给"只读、无副作用"的工具写：同一回复里的多个可并发调用会真的并发跑；
+    ///    未声明的（含写入类）独占执行，并作为并发批次之间的屏障。
     #[serde(default)]
     pub parallel: bool,
-    /// **权限标签**（如 `fs-read` / `fs-write`）：用于说明与“核心先核实”筛选；真正授权看 effect / reach。
+    /// 目的：**权限标签**（如 `fs-read` / `fs-write`）：用于说明与“核心先核实”筛选；真正授权看 effect / reach。
     #[serde(default)]
     pub capability: String,
     /// 目的：这次操作属于哪一类；缺省按 capability 推导。
@@ -76,11 +72,11 @@ impl ToolSchema {
     }
 }
 
-/// 一本书里的全部工具契约（key = 工具名）。内置工具与模块工具都用它。
+/// 目的：一本书里的全部工具契约（key = 工具名）。内置工具与模块工具都用它。
 pub type ToolBook = BTreeMap<String, ToolSchema>;
 
 impl ToolSchema {
-    /// 模型侧的参数说明：每个参数一行，带类型、必填/缺省与说明。
+    /// 目的：模型侧的参数说明：每个参数一行，带类型、必填/缺省与说明。
     pub fn render_for_prompt(&self) -> String {
         self.render_for_prompt_hiding(&[])
     }
@@ -118,8 +114,8 @@ impl ToolSchema {
         lines.join("\n")
     }
 
-    /// JSON Schema 形态（同一声明的第二形态：附加属性一律拒收，与主流一致）。
-    /// 原生工具调用通道由 decl() 取它渲染工具声明；手写信封通道不发它（模型看的是提示词里的参数说明）。
+    /// 目的：JSON Schema 形态（同一声明的第二形态：附加属性一律拒收，与主流一致）。
+    ///    原生工具调用通道由 decl() 取它渲染工具声明；手写信封通道不发它（模型看的是提示词里的参数说明）。
     pub fn to_json_schema(&self) -> serde_json::Value {
         let mut props = serde_json::Map::new();
         let mut required: Vec<serde_json::Value> = Vec::new();
@@ -175,7 +171,7 @@ impl ToolSchema {
         serde_json::Value::Object(root)
     }
 
-    /// 按声明校验一次调用的参数。返回**事实**（哪个参数、哪种不符），文案由调用方套册子。
+    /// 目的：按声明校验一次调用的参数。返回**事实**（哪个参数、哪种不符），文案由调用方套册子。
     pub fn check(&self, args: &serde_json::Value) -> Result<(), ArgFault> {
         let Some(params) = self.declared() else {
             return Ok(());
@@ -236,7 +232,7 @@ impl ToolSchema {
         Ok(())
     }
 
-    /// 原生工具调用用的声明形态：名字 + 一句话说明 + JSON Schema 参数。
+    /// 目的：原生工具调用用的声明形态：名字 + 一句话说明 + JSON Schema 参数。
     pub fn decl(&self, name: &str) -> crate::capabilities::llm::api::ToolDecl {
         crate::capabilities::llm::api::ToolDecl {
             name: name.to_string(),
@@ -245,7 +241,7 @@ impl ToolSchema {
         }
     }
 
-    /// 补上缺省值（不改动已有键）。
+    /// 目的：补上缺省值（不改动已有键）。
     pub fn apply_defaults(&self, args: &mut serde_json::Value) {
         let Some(params) = self.declared() else {
             return;
@@ -308,7 +304,7 @@ pub fn json_schema_lines(schema: &serde_json::Value) -> Vec<String> {
         .collect()
 }
 
-/// 参数不符的**事实**（文案在册子里；本层只说发生了什么）。
+/// 目的：参数不符的**事实**（文案在册子里；本层只说发生了什么）。
 #[derive(Debug, Clone, PartialEq)]
 pub enum ArgFault {
     /// 参数不是对象。

@@ -1,4 +1,7 @@
-//! 工作区的**出站端口**：目录布局与共享区版本库（机制在适配层）。
+//! 目的：工作区的**出站端口**——目录布局与共享区版本库（机制在适配层）。
+//! 管：`Workdirs`（一次工作的 work 目录与各 agent 沙箱）与 `WorkStore`（流式资产原语、内容寻址对象、提交记录、拉取基线）。
+//! 不管：路径拼接与越界判定的纯规则（在 `domain/workspace.rs`）；三方比较与冲突判定（在 `domain/workstore.rs`）；机制（在 `detail/`）。
+//! 联动：两个端口都只由 `service.rs` 持有（R12）；实现见 `detail/fs_workspace.rs` / `detail/fs_workstore.rs`。
 
 use crate::capabilities::workspace::domain::asset::FileVersion;
 use crate::capabilities::workspace::domain::workspace::{WorkFiles, WorkRoots, WorkUsage};
@@ -7,8 +10,8 @@ use std::collections::BTreeMap;
 use std::fs::File;
 use std::path::Path;
 
-/// 工作区**目录布局**端口：一次工作的 work 目录与各 agent 沙箱（机制在适配层）。
-/// 本能力只说"哪次工作、哪些 agent"，不碰路径拼接细节。**只有 `service.rs` 持有它**（R12）。
+/// 目的：工作区**目录布局**端口——一次工作的 work 目录与各 agent 沙箱（机制在适配层）。
+/// 约束：本能力只说"哪次工作、哪些 agent"，不碰路径拼接细节；**只有 `service.rs` 持有它**（R12）。
 pub trait Workdirs {
     /// 目的：把工作区绑定落成布局投影（`Some` = 外部工作区根；`None` = 产品内布局）。
     /// 约束：只写会话目录里的布局文件，不创建 / 不校验外部根，也不碰用户文件。
@@ -35,11 +38,9 @@ pub trait Workdirs {
     fn usage(&self, session: &str, agents: &[String]) -> Result<WorkUsage, String>;
 }
 
-/// 共享区**版本库**的落盘端口：流式资产原语（主副本与沙箱都经它）+ 内容寻址对象 / 提交记录 / 每个 agent 的拉取基线。
-///
-/// 策略不在这一层：三方比较、路径校验、冲突判定都在 `domain::workstore`；本端口只保证
-/// "按给定根与相对路径读写"，并拒绝一切**符号链接逃逸**（相对路径本身干净不等于落点安全）。
-/// **只有 `service.rs` 持有它**（R12）。
+/// 目的：共享区**版本库**的落盘端口——流式资产原语（主副本与沙箱都经它）+ 内容寻址对象 / 提交记录 / 每个 agent 的拉取基线。
+/// 约束：策略不在这一层，三方比较、路径校验、冲突判定都在 `domain::workstore`；本端口只保证"按给定根与相对路径读写"，
+///   并拒绝一切**符号链接逃逸**（相对路径本身干净不等于落点安全）；**只有 `service.rs` 持有它**（R12）。
 pub trait WorkStore: Send + Sync {
     /// 删 root 下的一条干净相对路径（不存在 = 幂等成功）。
     fn remove_under(&self, root: &Path, rel: &str) -> Result<(), String>;

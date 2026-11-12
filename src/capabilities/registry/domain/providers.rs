@@ -1,20 +1,20 @@
-//! 供应商与模型登记处（内存形态）与通道解析。
-//! 供应商 = 端点 + 密钥；模型 = 独立实体（展示名 + 实际模型串 + 所属供应商 + 能力说明）。
-//! 两者分开保存（机制在适配层的两个文件）；密钥只存在于登记处与核心发起的出站调用。
-//! 「模型 → 供应商」的绑定只对本产品可见；模块与会话只持模型 id 引用。
+//! 目的：供应商与模型登记处的内存形态与通道解析。
+//! 管：Provider / ModelEntry / 思考档位 / 沙箱与存储设置 / Settings；resolve、core_channel、effective_channel、tool_mode_for、context_of 与对外视图。
+//! 不管：yaml 持久化（在 detail/yaml_settings.rs）；登记处用例与写路径（在 service.rs）；llm 的协议类型（在 llm/api.rs）。
+//! 联动：被 registry/api.rs 重导出；service.rs 持有并写；llm 通道经 resolve 得到。
 
 use crate::capabilities::llm::api::{Channel, ToolMode};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// 一条供应商通道（端点 + 密钥）。
+/// 目的：一条供应商通道（端点 + 密钥）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Provider {
     pub base_url: String,
     pub api_key: String,
 }
 
-/// 一条可用模型：展示名 + 实际模型串 + 所属供应商 + 能力说明 + 工具调用形态。
+/// 目的：一条可用模型：展示名 + 实际模型串 + 所属供应商 + 能力说明 + 工具调用形态。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelEntry {
     pub name: String,
@@ -22,11 +22,11 @@ pub struct ModelEntry {
     pub provider: String,
     #[serde(default)]
     pub note: String,
-    /// 工具调用形态（缺省 native；原生形态在保存前实测通过才允许落盘，见 REGISTRY_SPEC）。
+    /// 目的：工具调用形态（缺省 native；原生形态在保存前实测通过才允许落盘，见 REGISTRY_SPEC）。
     #[serde(default)]
     pub tools: ToolMode,
-    /// 这个模型的**上下文窗口**（tokens）。缺省给保守值：宁可早压，也别撑爆。
-    /// 自动压缩按它 × 设置的百分比触发（见 docs/session/session-model.md 六）。
+    /// 目的：这个模型的**上下文窗口**（tokens）。缺省给保守值：宁可早压，也别撑爆。
+    ///    自动压缩按它 × 设置的百分比触发（见 docs/session/session-model.md 六）。
     #[serde(default = "default_context_tokens")]
     pub context: u64,
     /// 目的：思考强度：这个模型支持哪些档、每档发什么请求体片段。
@@ -35,8 +35,8 @@ pub struct ModelEntry {
     pub thinking: ThinkingSpec,
 }
 
-/// 上下文窗口的兜底值（模型没声明、或用户登记 0「不填」时，自动压缩按它算）。
-/// 取 128K：宁可早压，也别等供应商直接撑爆上下文。
+/// 目的：上下文窗口的兜底值（模型没声明、或用户登记 0「不填」时，自动压缩按它算）。
+///    取 128K：宁可早压，也别等供应商直接撑爆上下文。
 pub const DEFAULT_CONTEXT_TOKENS: u64 = 128_000;
 
 fn default_context_tokens() -> u64 {
@@ -331,28 +331,28 @@ impl Default for StorageSettings {
     }
 }
 
-/// 基本设置（settings.yaml）：一般 agent 都有的开关。
+/// 目的：基本设置（settings.yaml）：一般 agent 都有的开关。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AppSettings {
-    /// 流式传输：向供应商请求逐片返回。
+    /// 目的：流式传输：向供应商请求逐片返回。
     #[serde(default = "default_true")]
     pub streaming: bool,
-    /// 思维链显示：开启后每条回答下的思维链块才出现（永远默认折叠，点击展开）。
+    /// 目的：思维链显示：开启后每条回答下的思维链块才出现（永远默认折叠，点击展开）。
     #[serde(default = "default_true")]
     pub show_reasoning: bool,
     /// 目的：思考强度目录（全局）：默认 off / low / high / max，用户可追加。
     /// 约束：模型映射只能引用这里的档位；删掉仍被模型引用的档位会被拒绝。
     #[serde(default)]
     pub thinking: ThinkingCatalog,
-    /// 默认执行档位：新建会话未单独选定时用它（本机 = 在宿主上跑；虚拟机 = 整台 guest）。
+    /// 目的：默认执行档位：新建会话未单独选定时用它（本机 = 在宿主上跑；虚拟机 = 整台 guest）。
     #[serde(default)]
     pub tier: crate::kernel::api::Tier,
-    /// 全局沙箱策略与会话默认权限。
+    /// 目的：全局沙箱策略与会话默认权限。
     #[serde(default)]
     pub sandbox: SandboxSettings,
-    /// 虚拟机档用的 QEMU 可执行文件路径（默认空 = 兜底看 PATH，或由 setup 脚本装进项目内）。
-    /// 依赖不预置、不分发；setup 脚本按平台下载进项目内，产品检测与指路。
+    /// 目的：虚拟机档用的 QEMU 可执行文件路径（默认空 = 兜底看 PATH，或由 setup 脚本装进项目内）。
+    ///    依赖不预置、不分发；setup 脚本按平台下载进项目内，产品检测与指路。
     #[serde(default)]
     pub qemu_path: String,
     /// 目的：虚拟机档**共享后端**要用的外部工具路径（如 Linux 上的 virtiofsd；默认空 = 兜底看 PATH）。
@@ -370,13 +370,13 @@ pub struct AppSettings {
     /// 目的：可回收缓存的空间预算与保留策略（见 REGISTRY_SPEC 的 settings.yaml）。
     #[serde(default)]
     pub storage: StorageSettings,
-    /// **单次模型调用的总预算（秒）**，全局通用（讨论、执行、验收、单 agent 都用它）。
-    /// 默认给得比较宽：非流式下供应商要等整段生成完才发响应头，长回复本来就要几十秒；
-    /// 预算用尽 = 中断这一轮并如实告知（用户可以点「继续」重试），不是把会话作废。
+    /// 目的：**单次模型调用的总预算（秒）**，全局通用（讨论、执行、验收、单 agent 都用它）。
+    ///    默认给得比较宽：非流式下供应商要等整段生成完才发响应头，长回复本来就要几十秒；
+    ///    预算用尽 = 中断这一轮并如实告知（用户可以点「继续」重试），不是把会话作废。
     #[serde(default = "default_llm_timeout_secs")]
     pub llm_timeout_secs: u64,
-    /// **上下文用到多少就该压**（占模型窗口的百分比）。到点自动压一次；用户也可以手动 /compact。
-    /// 默认 70：留三成余量给"这一轮还要生成的内容"，免得刚压完又爆。
+    /// 目的：**上下文用到多少就该压**（占模型窗口的百分比）。到点自动压一次；用户也可以手动 /compact。
+    ///    默认 70：留三成余量给"这一轮还要生成的内容"，免得刚压完又爆。
     #[serde(default = "default_compact_percent")]
     pub compact_at_percent: u8,
     /// 目的：压缩时至少保留最近多少内容（占模型窗口的百分比）。
@@ -387,8 +387,8 @@ pub struct AppSettings {
     /// 约束：只在压缩触发时解析，不参与每个回合。
     #[serde(default)]
     pub compact_model: String,
-    /// **一轮内对同一个成员最多提醒几次**（提醒 = 系统注入"你还没用讨论动词表态"）。
-    /// 到顶就放它过去：主会话如实记一行"未回应"，整轮继续（不阻塞）。
+    /// 目的：**一轮内对同一个成员最多提醒几次**（提醒 = 系统注入"你还没用讨论动词表态"）。
+    ///    到顶就放它过去：主会话如实记一行"未回应"，整轮继续（不阻塞）。
     #[serde(default = "default_discuss_remind_cap")]
     pub discuss_remind_cap: u32,
 }
@@ -556,21 +556,21 @@ pub fn validate_sandbox_authorization(p: &SandboxPolicy) -> Result<(), String> {
     Ok(())
 }
 
-/// 登记处（providers.yaml + models.yaml + settings.yaml + agents.yaml 的内存合体）。
+/// 目的：登记处（providers.yaml + models.yaml + settings.yaml + agents.yaml 的内存合体）。
 #[derive(Debug, Default, Clone)]
 pub struct Settings {
     pub providers: BTreeMap<String, Provider>,
     pub models: BTreeMap<String, ModelEntry>,
-    /// 核心 AI 默认模型 id。
+    /// 目的：核心 AI 默认模型 id。
     pub core: Option<String>,
-    /// 基本设置。
+    /// 目的：基本设置。
     pub app: AppSettings,
-    /// 用户配置的具名 agent。
+    /// 目的：用户配置的具名 agent。
     pub agents: crate::capabilities::registry::domain::agents::Agents,
 }
 
 impl Settings {
-    /// 模型 id → 成品通道；模型或供应商缺失 = 报错（不猜测回退）。
+    /// 目的：模型 id → 成品通道；模型或供应商缺失 = 报错（不猜测回退）。
     pub fn resolve(&self, model_id: &str) -> Result<Channel, String> {
         let m = self
             .models
@@ -589,7 +589,7 @@ impl Settings {
         })
     }
 
-    /// 某 agent 的工具调用形态：它自己的模型优先，其次核心默认；两者都没有 = native（缺省形态）。
+    /// 目的：某 agent 的工具调用形态：它自己的模型优先，其次核心默认；两者都没有 = native（缺省形态）。
     pub fn tool_mode_for(&self, model: Option<&str>) -> ToolMode {
         model
             .or(self.core.as_deref())
@@ -701,7 +701,7 @@ impl Settings {
             .unwrap_or(false)
     }
 
-    /// 供应商展示视图（永不携带密钥）。
+    /// 目的：供应商展示视图（永不携带密钥）。
     pub fn provider_views(&self) -> Vec<ProviderView> {
         self.providers
             .iter()
@@ -712,7 +712,7 @@ impl Settings {
             .collect()
     }
 
-    /// 模型展示视图（含「是否核心默认」）。
+    /// 目的：模型展示视图（含「是否核心默认」）。
     pub fn model_views(&self) -> Vec<ModelView> {
         self.models
             .iter()
@@ -734,7 +734,7 @@ impl Settings {
     }
 }
 
-/// 供应商展示视图（不含密钥）。
+/// 目的：供应商展示视图（不含密钥）。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ProviderView {
     pub id: String,
@@ -749,9 +749,9 @@ pub struct ModelView {
     pub api_model: String,
     pub provider: String,
     pub note: String,
-    /// 工具调用形态（envelope / native）——前端据此显示，也让用户知道当前走哪套协议。
+    /// 目的：工具调用形态（envelope / native）——前端据此显示，也让用户知道当前走哪套协议。
     pub tools: ToolMode,
-    /// 上下文窗口（tokens）：自动压缩按它 × 设置里的百分比触发；前端显示并可改。
+    /// 目的：上下文窗口（tokens）：自动压缩按它 × 设置里的百分比触发；前端显示并可改。
     pub context: u64,
     /// 目的：思考强度（默认档 + 档位 → 原始映射值，前端据此回填表单）。
     pub thinking: ModelThinkingView,

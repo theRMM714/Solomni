@@ -80,13 +80,10 @@ impl Conductor {
     }
 
     /// 目的：删除会话（含它的整棵子树）。
-    ///  
-    ///  口径（见 docs/session/session-model.md 七）：
-    ///  - **子会话不允许单独删**：它由核心按节点派生，删父会话会一起删掉；单独删会让父子关系断掉。
-    ///  - **删父带子**：按 `meta.parent` 收集整棵子树，**先子后父**逐个撤围栏授权 → 移出内存 → 收集待删目录；目录删除在收尾层先停 guest 再执行。
-    ///  - **子树里任一节点在生成中就整体拒绝**：不能删到一半留下半个状态。
-    ///  
-    ///  内部的 `session::History::delete`（纯存储）不受影响——系统路径还需要它。
+    /// 约束：口径见 docs/session/session-model.md 七——**子会话不允许单独删**（它由核心按节点派生，删父会话会一起删掉；
+    ///   单独删会让父子关系断掉）；**删父带子**按 meta.parent 收集整棵子树，先子后父逐个撤围栏授权 → 移出内存 → 收集待删目录；
+    ///   目录删除在收尾层先停 guest 再执行；**子树里任一节点在生成中就整体拒绝**，不能删到一半留下半个状态。
+    ///   内部的 session::History::delete（纯存储）不受影响——系统路径还需要它。
     #[cfg(test)]
     pub fn history_delete(&mut self, name: &str) -> Result<bool, String> {
         self.delete_bookkeeping(name)?.run()
@@ -235,11 +232,9 @@ impl Conductor {
                 }
             },
         };
-        super::workspace_root::recheck(
-            &root,
-            tier,
-            &super::workspace_root::product_root(&self.root),
-        )?;
+        let probe = self.probe.as_ref();
+        let product = super::workspace_root::product_root(&self.root, probe);
+        super::workspace_root::recheck(&root, tier, &product, probe)?;
         Ok(Some(root))
     }
 

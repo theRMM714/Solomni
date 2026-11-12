@@ -281,9 +281,8 @@ impl Conductor {
             taken.push(assignee.clone());
             match self.spawn_sub_session(sid, &node) {
                 Ok(child) => {
-                    // 派发文案用册子里的执行提示词模板渲染（objective 是核心 AI 写的那段任务提示词）。
-                    // 上一次的验收结论（没有 = 首轮）：**返工必须知道上次错在哪**，
-                    // 否则它只能把同一件事原样再做一遍。
+                    // 派发文案用册子里的执行提示词模板渲染（objective 是核心 AI 写的那段任务提示词），
+                    // 并附上上一次的验收结论（没有 = 首轮）：**返工必须知道上次错在哪**，否则只会原样重做。
                     let (raw, rework) = self
                         .sessions
                         .get(sid)

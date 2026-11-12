@@ -1,5 +1,7 @@
-//! **回合收发**：把成员的回复喂回状态机（`feed_with`）、取出待问的一步（`take_ask`）、
-//! 把一张已出队的回答落到业务上（`dispose`）以及核心核实工具面与通道参数。
+//! 目的：回合收发——把成员的回复喂回状态机（feed_with）、取出待问的一步（take_ask）、把一张已出队的回答落到业务上（dispose）以及核心的核实工具面与通道参数（systools / disc_cancel / disc_opts）。
+//! 管：成员回合结果进状态机的入口；提问取出与回答落地；核实工具面与通道参数的取用。
+//! 不管：状态机本体（discussion.rs / collab.rs）；模型调用与工具执行机制。
+//! 联动：被 CollabSession 消费；裁决通道见 docs/session/session-model.md 的「请用户裁决：一条通道，消息 + 选项」。
 
 use super::collab::*;
 use crate::capabilities::collab::service::discussion::TurnOut;
@@ -12,8 +14,8 @@ use std::sync::Arc;
 
 use super::pump::*;
 impl CollabSession {
-    /// 核心把某个成员回合的结果**交回来**：吸收、外送、继续泵（驱动权在核心，见 session-model.md 二之二）。
-    /// 调用前核心应把该回合的核实行落进**该 agent 自己的会话**（它们不属于主会话）。
+    /// 目的：核心把某个成员回合的结果**交回来**：吸收、外送、继续泵（驱动权在核心，见 session-model.md 二之二）。
+    ///   调用前核心应把该回合的核实行落进**该 agent 自己的会话**（它们不属于主会话）。
     pub fn feed_with(
         &mut self,
         i: usize,
@@ -46,20 +48,20 @@ impl CollabSession {
         self.pump_with(sink);
     }
 
-    /// 泵让出的那一步（该问谁、给它什么上下文）——由核心取走并驱动。
+    /// 目的：泵让出的那一步（该问谁、给它什么上下文）——由核心取走并驱动。
     pub fn take_ask(&mut self) -> Option<(usize, String, Vec<crate::capabilities::llm::api::Msg>)> {
         self.pending_ask.take()
     }
 
-    /// 第 i 个成员的 agent 名（核心据此拼出它的会话名 <工作>--<agent>）。
+    /// 目的：第 i 个成员的 agent 名（核心据此拼出它的会话名 <工作>--<agent>）。
     pub fn member_id(&self, i: usize) -> Option<String> {
         self.disc.as_ref()?.member_id(i).map(|s| s.to_string())
     }
 
-    /// 核心核实用的小工具环境：**只读**、根是本次工作的共享区。
-    /// 为什么要它：核心操作（出方案 / 节点验收…）也常需要"先看看现场再下结论"，
-    /// 而核心不是 member、手里没有工具环境——没有它，模型一想核实就被判"没调用 X"而整步中断。
-    /// 工具面只发**该角色的只读核实工具**（按声明里的 capability = fs-read 判定），写类一律不发。
+    /// 目的：核心核实用的小工具环境：**只读**、根是本次工作的共享区。
+    ///   为什么要它：核心操作（出方案 / 节点验收…）也常需要"先看看现场再下结论"，
+    ///   而核心不是 member、手里没有工具环境——没有它，模型一想核实就被判"没调用 X"而整步中断。
+    ///   工具面只发**该角色的只读核实工具**（按声明里的 capability = fs-read 判定），写类一律不发。
     pub(crate) fn core_verify_tools(
         &self,
         role: &str,
@@ -127,12 +129,12 @@ impl CollabSession {
         })
     }
 
-    /// 讨论回合的**工具面**（动词 + 只读核实）：核心驱动时交给 turn_with。
+    /// 目的：讨论回合的**工具面**（动词 + 只读核实）：核心驱动时交给 turn_with。
     pub fn systools(&self) -> Arc<dyn crate::capabilities::tools::api::Tools> {
         Arc::clone(&self.systools)
     }
 
-    /// 「停止」标志：与核心共享同一个（停止能在一个模型调用内收尾）。
+    /// 目的：「停止」标志：与核心共享同一个（停止能在一个模型调用内收尾）。
     pub fn disc_cancel(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
         self.disc
             .as_ref()
@@ -140,13 +142,13 @@ impl CollabSession {
             .unwrap_or_else(|| std::sync::Arc::clone(&self.cancel))
     }
 
-    /// 本回合的调用选项（流式 + 预算，取全局设置）。
+    /// 目的：本回合的调用选项（流式 + 预算，取全局设置）。
     pub fn disc_opts(&self) -> crate::capabilities::llm::api::CompleteOpts<'static> {
         crate::capabilities::llm::api::CompleteOpts::plain(self.settings.app.streaming)
             .with_timeout(self.settings.app.llm_timeout_secs)
     }
 
-    /// 开场还没开始过就先开始（核心驱动的第一步）。
+    /// 目的：开场还没开始过就先开始（核心驱动的第一步）。
     pub fn start_if_needed(&mut self) {
         if let Some(d) = self.disc.as_mut() {
             if d.not_started() {
@@ -155,7 +157,7 @@ impl CollabSession {
         }
     }
 
-    /// 回答请教那一关：用户的话进主会话（所有成员下一回合都看得到），接着往下推。
+    /// 目的：回答请教那一关：用户的话进主会话（所有成员下一回合都看得到），接着往下推。
     /// 约束：那一关已由队列出队——这里只管"他的话怎么进业务"，不碰队列。
     pub(crate) fn answer(&mut self, text: &str, sink: &mut dyn FnMut(SessionEvent)) {
         let roots = self.sandboxes.ref_roots();
@@ -303,7 +305,7 @@ impl CollabSession {
         }
     }
 
-    /// 用户的话进**主会话转录**（所有成员的下一回合都看得到）。空话不记。
+    /// 目的：用户的话进**主会话转录**（所有成员的下一回合都看得到）。空话不记。
     pub(crate) fn note_user(&mut self, text: &str, sink: &mut dyn FnMut(SessionEvent)) {
         let text = text.trim();
         if text.is_empty() {

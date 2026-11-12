@@ -1,4 +1,8 @@
-//! 补丁通道、回档后的账本与内置工具的边界（错误如实）
+//! 目的：钉补丁通道、回档后的读账本与内置工具的错误边界。
+//! 管：补丁不 JSON 转义、失败块不写、缺 end 拒绝并报行、回档清读账本、内置 read/list/delete/edit 的错误如实与范围。
+//! 不管：补丁解析实现（capabilities/tools/）。
+//! 联动：src/capabilities/tools/、session 回档。
+
 use super::super::builders::*;
 use super::super::prelude::*;
 #[test]
@@ -231,7 +235,7 @@ pub(crate) fn builtin_read_reports_errors_verbatim() {
     );
 }
 
-/// list：列目录（名字 / 大小，按名字排序）；read 遇到目录**如实引导**到 list，而不是抛 IO 错。
+/// 目的：list：列目录（名字 / 大小，按名字排序）；read 遇到目录**如实引导**到 list，而不是抛 IO 错。
 #[test]
 pub(crate) fn builtin_list_shows_a_directory_and_read_guides_to_it() {
     let io = InMemorySysIo::new();

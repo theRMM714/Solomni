@@ -1,7 +1,7 @@
-//! 信封不合法的**回执文案装配**：按判定出的类别给出对应修法。
-//!
-//! 这是「协议形状 → 文案」的映射，必须认识 `Malformed` / `Tail` 的结构；文案归本模块所有，
-//! 不再从提示词册取模板。
+//! 目的：信封不合法时的回执文案装配——协议形状到修法的映射。
+//! 管：认识 Malformed / Tail 的结构；按类别给出对应修法文案。
+//! 不管：信封解析本身（在 domain/envelope.rs）；文案模板的来源（不从提示词册取）。
+//! 联动：被 api.rs 重导出 malformed_report；conductor 在信封解析失败时用它回执给模型。
 
 use crate::capabilities::llm::domain::envelope::{Malformed, Tail};
 
@@ -43,7 +43,7 @@ fn tail_note(tail: &Tail) -> String {
     }
 }
 
-/// 工具信封不合法的回执：按**判定出的类别**给出对应修法（类别由 envelope 判定）。
+/// 目的：工具信封不合法的回执：按**判定出的类别**给出对应修法（类别由 envelope 判定）。
 pub fn malformed_report(kind: &Malformed) -> String {
     match kind {
         Malformed::Unclosed(tail) => unclosed_report(tail),

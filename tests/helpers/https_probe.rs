@@ -1,9 +1,7 @@
-//! HTTPS/TLS 探针（三个平台目标共用这**一份正文**：各自只在自己的平台上编译，所以只会跑一次）。
-//! 为什么单独有它：TLS 后端是**按平台选的**（Windows = native-tls、unix = rustls），
-//! 而 T3 明令不依赖外网，所以"这条构建的 TLS 栈真能连外网"只能在平台探针（T4）里验。
-//! 四态如实区分（见 docs/testing/levels.md 的探针四态）：连不上外网 = env-skip（附命令行原话）；
-//! **本进程取不到系统 TLS 凭证**（沙箱挡住凭证存储时就是这样，连 curl.exe 都握不了手）= env-skip；
-//! 其余 TLS/HTTP 坏了 = 失败——绝不把"我们链路坏了"说成"环境不允许"；通了 = 通过并报状态码与后端。
+//! 目的：三个平台目标共用一份正文的 HTTPS/TLS 探针，四态如实区分。
+//! 管：经产品链路连公网、取不到系统 TLS 凭证与连不上外网两种 env-skip、其余 TLS/HTTP 坏即失败。
+//! 不管：把「我们链路坏了」说成「环境不允许」。
+//! 联动：docs/testing/levels.md 的探针四态、tests/<平台>/。
 
 use crate::probe::bin;
 use std::process::Command;

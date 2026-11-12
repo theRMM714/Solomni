@@ -1,17 +1,15 @@
 #!/usr/bin/env node
 /**
  * 仓库卫生审查——**不是门禁**：门禁（node run-tests.js 的 T0 结构审查）回答"这次改动有没有把代码弄坏"，
- * 卫生回答"仓库里还欠多少、挂在谁身上"。存量是历史累积，必然存在，所以它只报，不拦；唯一会写文件的入口是 --tighten。
+ * 卫生回答"仓库里还欠多少、挂在谁身上"。存量是历史累积，必然存在，所以它只报，不拦；本工具只读，不写任何文件。
  *
  * 三类：
- * - 格式存量（注释契约，ARCHITECTURE.md 十）：按 文件 × 规则 **计数**，与 tests/comment-baseline.json 比。
- *   棘轮只减不增：新文件零容忍（快照里没有 = 从 0 起算），老文件同类变多也算新增；变少要求销账。
- *   --tighten 只许往下收束：出现新增就拒绝写盘（收紧后连同改动一起提交）。
+ * - 注释契约（ARCHITECTURE.md 十）：按 文件 × 规则报告；门禁另跑同一判定并零容忍。
  * - 内容卫生（只报）：悬挂的缺口 id（已删 id 从 git 历史取）、文档里指向不存在的 src 路径、引用的根文档不存在。
- * - 语义卫生（只报）：全仓 Markdown 正文与源码 / 配置 / 脚本注释里的历史或待办措辞；不建基线、不进 T0，
+ * - 语义卫生（只报）：全仓 Markdown 正文与源码 / 配置 / 脚本注释里的历史或待办措辞；不进 T0，
  *   只把可疑行列出来让人判断。`hygiene-ignore` 可显式跳过确认过的行。
  *
- * 用法：node run-hygiene.js [--by-file] [--dir <模式>]… [--tighten] [--strict]
+ * 用法：node run-hygiene.js [--by-file] [--dir <模式>]… [--strict]
  *                      [--semantic] [--semantic-only] [--strict-semantic]
  *   出口码：默认 0；--strict 有契约 / 内容发现即 1；--strict-semantic 有**高置信**语义发现即 1。
  */
@@ -21,14 +19,13 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 
 const ROOT = __dirname;
-const BASELINE = path.join(ROOT, "tests", "comment-baseline.json");
 const HEADER_SLOTS = ["目的", "管", "不管", "联动"];
 const ITEM_SLOTS = ["目的", "参数", "返回", "错误", "约束"];
 /* 词表只收**叙事性**词（讲来历、显式待办）。领域词不进：`临时 agent`、`后续片段`、`本地遗留`、
  * `暂未暴露` 都是描述当前状态的说法，收进来只会制造误报。 */
 const COMMENT_FORBIDDEN = ["曾经", "原来", "旧版", "旧实现", "改成", "先是", "后来", "以前", "与旧逻辑", "TODO", "FIXME", "待补"];
 /* 语义卫生（只报）的词表：**与上面的门禁词表分开**。上面的词表只作用于 Rust `//` 行内注释，
- * 改动它会动 tests/comment-baseline.json；这里扩的是全仓报告，不建基线、不进 T0。
+ * 它只影响本工具的报告；这里扩的是全仓报告，不建基线、不进 T0。
  * 强词 = 大概率是旧实现 / 旧格式叙述；弱词 = 也可能描述当前操作或当前效果，必须人看。hygiene-ignore */
 const STRONG_WORDS = ["曾经", "旧版", "旧实现", "旧格式", "旧会话", "旧字段", "旧形态", "旧上限", "旧输出", "旧名字", "旧记录", "旧逻辑", "迁移期", "承接原", "已不再"];
 const WEAK_WORDS = ["旧资产", "原来", "改成", "先是", "后来", "以前", "不再有", "TODO", "FIXME", "待补"];
@@ -433,7 +430,7 @@ function semanticReportLines(sem, findings, all) {
   const out = [];
   const strong = findings.filter((f) => f.level === "strong");
   const weak = findings.filter((f) => f.level === "weak");
-  out.push("== 语义卫生（只报，不进 T0、不进棘轮） ==");
+  out.push("== 语义卫生（只报，不进 T0） ==");
   if (sem.degraded) out.push("  [降级] " + sem.degraded);
   const extra = [];
   if (sem.ignored) extra.push("已按 hygiene-ignore 跳过 " + sem.ignored + " 行");
@@ -469,44 +466,6 @@ function toByFileRule(findings) {
     by[f.file][f.rule] = (by[f.file][f.rule] || 0) + 1;
   }
   return by;
-}
-
-/** 棘轮比对（门禁与卫生工具共用这一份判定）：返回 { added, stale }，元素是给人看的字符串（带计数）。
- *  **added** = 现在比快照多——新文件从 0 起算（零容忍），老文件同类变多也不许；门禁硬失败。
- *  **stale** = 现在比快照少——同样硬失败，必须收紧；收紧只能往下（见 --tighten）。 */
-function compareContract(now, baseline) {
-  const added = [];
-  const stale = [];
-  for (const f of Object.keys(now)) {
-    for (const rule of Object.keys(now[f])) {
-      const was = (baseline[f] || {})[rule] || 0;
-      const is = now[f][rule];
-      if (is > was) added.push(f + " :: " + rule + "（" + was + " → " + is + "）");
-    }
-  }
-  for (const f of Object.keys(baseline)) {
-    for (const rule of Object.keys(baseline[f] || {})) {
-      const was = baseline[f][rule];
-      const is = (now[f] || {})[rule] || 0;
-      if (is < was) stale.push(f + " :: " + rule + "（" + was + " → " + is + "）");
-    }
-  }
-  return { added: added, stale: stale };
-}
-
-/** 棘轮语义的自测（T0 调用）：把「新文件零容忍 / 只减不增 / 收束只能往下」钉成可执行的判据。 */
-function ratchetSelfTest() {
-  const bad = [];
-  const eq = (name, got, want) => {
-    if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(name + "：期望 " + JSON.stringify(want) + "，实际 " + JSON.stringify(got));
-  };
-  eq("新文件零容忍", compareContract({ "a.rs": { R: 1 } }, {}).added.length, 1);
-  eq("老文件同类变多 = 新增", compareContract({ "a.rs": { R: 2 } }, { "a.rs": { R: 1 } }).added.length, 1);
-  const flat = compareContract({ "a.rs": { R: 1 } }, { "a.rs": { R: 1 } });
-  eq("持平通过", flat.added.length + flat.stale.length, 0);
-  eq("变少要销账", compareContract({ "a.rs": { R: 1 } }, { "a.rs": { R: 3 } }).stale.length, 1);
-  eq("条目整条消失要销账", compareContract({}, { "a.rs": { R: 1 } }).stale.length, 1);
-  return bad;
 }
 
 /** 注释词法判定的自测（T0 调用）：字符串与散文里的 /* 不算块注释，真块注释要报对行；
@@ -633,13 +592,6 @@ function mdFiles(dir, rootOnly) {
   return out;
 }
 
-function readBaseline() {
-  if (!fs.existsSync(BASELINE)) return null;
-  const raw = JSON.parse(fs.readFileSync(BASELINE, "utf8"));
-  delete raw._comment;
-  return raw;
-}
-
 /** `--dir <模式>`：模式里的 `*` 表示一段任意字符（不含分隔符）；匹配文件路径，边界必须是 `/` 或结尾。
  *  不写正则——模式来自命令行，正则转义最容易在这里出错；按片段顺序比对同样准确。 */
 function dirMatcher(patterns) {
@@ -671,41 +623,16 @@ function main() {
   const semanticAll = argv.includes("--semantic");
   const semanticOnly = argv.includes("--semantic-only");
   const strictSemantic = argv.includes("--strict-semantic");
+  if (argv.includes("--tighten")) {
+    console.error("--tighten 已移除：注释契约零豁免，门禁直接失败，不再写基线。");
+    return 2;
+  }
   const scan = scanCommentContract();
   const inDirs = dirMatcher(dirs);
   const findings = scan.findings.filter((f) => inDirs(f.file));
   const by = toByFileRule(findings);
   const scope = dirs.length ? "（--dir " + dirs.join(" / ") + "）" : "";
-  const baselineAll = readBaseline();
-  const baseline = baselineAll === null
-    ? null
-    : Object.fromEntries(Object.entries(baselineAll).filter(([f]) => inDirs(f)));
   const lines = [];
-
-  if (argv.includes("--tighten")) {
-    /* 收紧只允许全仓一次做完：带 --dir 收紧会把没过滤到的存量从快照里抹掉，那是静默丢账。 */
-    if (dirs.length) {
-      console.log("--tighten 不接受 --dir：收紧是全仓一次的动作，带过滤收紧会丢掉没扫到的存量。");
-      return 2;
-    }
-    /* 收紧是棘轮唯一的下调入口：出现任何「新增」就拒绝写盘——否则先违规再收紧等于把违规洗成存量。 */
-    if (baselineAll) {
-      const { added } = compareContract(by, baselineAll);
-      if (added.length) {
-        console.log("收紧被拒：棘轮只减不增，这次有 " + added.length + " 处新增——先把它们清掉再收紧。");
-        for (const a of added.slice(0, 12)) console.log("  [新增] " + a);
-        if (added.length > 12) console.log("  …（其余省略）");
-        return 2;
-      }
-    }
-    const out = { _comment: "注释契约（ARCHITECTURE.md 十）的存量快照：键是文件，值是「规则 → 计数」。棘轮只减不增：新文件零容忍，老文件同类变多也算新增；变少必须销账。收紧只能往下：node run-hygiene.js --tighten。" };
-    for (const f of Object.keys(by).sort()) out[f] = by[f];
-    fs.writeFileSync(BASELINE, JSON.stringify(out, null, 2) + "\n");
-    lines.push("已收紧快照 tests/comment-baseline.json：" + Object.keys(by).length + " 个文件、"
-      + findings.length + " 处。" + (baselineAll ? "（收紧前 " + Object.keys(baselineAll).length + " 个文件）" : ""));
-    console.log(lines.join("\n"));
-    return 0;
-  }
 
   if (semanticOnly) {
     const sem = semanticFindings();
@@ -721,7 +648,7 @@ function main() {
     cur.files.add(f.file);
     byRule.set(f.rule, cur);
   }
-  lines.push("== 注释契约存量（ARCHITECTURE.md 十）" + scope + " ==");
+  lines.push("== 注释契约（ARCHITECTURE.md 十，门禁零容忍）" + scope + " ==");
   lines.push("合计 " + findings.length + " 处，涉及 " + Object.keys(by).length + " 个文件：");
   for (const [rule, v] of [...byRule.entries()].sort((a, b) => b[1].count - a[1].count)) {
     lines.push("  " + String(v.count).padStart(5) + " 处  " + String(v.files.size).padStart(4) + " 个文件  " + rule);
@@ -735,20 +662,6 @@ function main() {
       lines.push("  " + String(n).padStart(5) + " 处  " + file + "  :: " + Object.keys(by[file]).join("、"));
     }
   }
-  if (baseline === null) {
-    lines.push("");
-    lines.push("还没有快照：跑 node run-hygiene.js --tighten 建一份（门禁拿它当棘轮基线）。");
-  } else {
-    const { added, stale } = compareContract(by, baseline);
-    lines.push("");
-    lines.push("与快照比" + scope + "：新增 " + added.length + " 处（门禁会报）、可销账 " + stale.length + " 处（门禁要求销账）");
-    for (const a of added.slice(0, 12)) lines.push("  [新增] " + a);
-    for (const s of stale.slice(0, 12)) lines.push("  [可销账] " + s);
-    if (added.length + stale.length > 24) lines.push("  …（其余省略）");
-    if (!added.length && !stale.length) lines.push("  快照与现状一致（棘轮已对齐）");
-    else lines.push("  收紧：node run-hygiene.js --tighten" + (dirs.length ? "（收紧必须全仓，别带 --dir）" : ""));
-  }
-
   const content = contentFindings();
   lines.push("");
   lines.push("== 内容卫生（只报，不进 T0） ==");
@@ -767,4 +680,4 @@ function main() {
 }
 
 if (require.main === module) process.exit(main());
-module.exports = { scanCommentContract, compareContract, ratchetSelfTest, commentLexerSelfTest, semanticSelfTest, semanticFindings, semanticHits, deletedGapIds, contentFindings, RULES, LEDGERS };
+module.exports = { scanCommentContract, commentLexerSelfTest, semanticSelfTest, semanticFindings, semanticHits, deletedGapIds, contentFindings, RULES, LEDGERS };

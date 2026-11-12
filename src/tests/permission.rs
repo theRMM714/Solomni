@@ -1,7 +1,7 @@
-//! 权限能力（permission）的用例：四档、reach 求交、共享区三态、落点与提交/拉取作用域。
-//!
-//! 归属：这些用例钉的是**权限规则本身**（T1），以及内置工具/工作区提交两个执行点对它的消费（T1/T2）。
-//! 平台围栏的真机验收在 tests/<平台>/（T4）。
+//! 目的：钉权限规则本身，以及内置工具/工作区提交两个执行点对它的消费。
+//! 管：四档与 reach 求交、共享区三态、沙箱落点、围栏规格、提交/拉取作用域、status/lost/versions 的读权限过滤、根上限与子收窄。
+//! 不管：平台真机验收（tests/<平台>/）。
+//! 联动：src/capabilities/permission/、docs/testing/levels.md。
 
 use crate::capabilities::permission::api::{
     hit, normalize, validate_defaults, validate_entry, CallScope, Decision, DecisionEdit, Effect,

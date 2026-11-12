@@ -1,7 +1,7 @@
-//! HTTP 入站契约的契约测试：路由目录 ↔ 处理器 ↔ 文档 ↔ 前端调用 ↔ 演示脚本，机器比对。
-//! 用**假能力面**（FakeOps）直接调 `web::route`（不经过 socket），逐条路由验成功/错误/空/边界；
-//! 真实传输由 L4 端到端覆盖（真二进制 + 真 HTTP）。
-//! 假能力面顺带证明一件事：「按角色切分」的能力接口真能被替换——新增一种呈现不必认识 `Conductor`。
+//! 目的：机器比对路由目录、处理器、文档、前端调用与演示脚本，并逐路由验行为。
+//! 管：FakeOps 直调 web::route 的成功/错误/空/边界、目录↔处理器↔文档↔前端↔演示脚本一致性、按角色切分可替换。
+//! 不管：真实传输（L4 端到端）。
+//! 联动：web::route、路由目录、docs/、演示脚本、FakeOps。
 
 use crate::capabilities::conductor::api::{
     Acted, ActionCall, ActionOps, ActionView, Advance, Caller, ConductorOps, EventBus, Ops, Output,
@@ -27,7 +27,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 // ---------- 假能力面 ----------
-
 /// 假能力面：不碰核心、不起线程。`fail` 一注入，所有能力一律失败（用来验错误路径）。
 #[derive(Default)]
 struct FakeOps {
@@ -756,7 +755,6 @@ impl ConductorOps for FakeOps {
 }
 
 // ---------- 请求合成与调用 ----------
-
 fn fence() -> FenceInfo {
     FenceInfo {
         fs: true,
@@ -843,7 +841,6 @@ fn sample_body(route: &routes::Route) -> &'static str {
 }
 
 // ---------- 目录 ↔ 处理器 ----------
-
 #[test]
 fn every_catalogued_route_has_a_handler() {
     let ops = fake_ops(None);
@@ -928,7 +925,6 @@ fn catalog_is_free_of_duplicates_and_routes_do_not_overlap() {
 }
 
 // ---------- 目录 ↔ 文档 ----------
-
 #[test]
 fn documented_route_table_matches_the_catalog() {
     // 路由表本体在细则文件里（门户不复述细则正文，见 AGENTS.md「文档分层与同步」）。
@@ -963,7 +959,6 @@ fn documented_route_table_matches_the_catalog() {
 }
 
 // ---------- 目录 ↔ 前端调用 ----------
-
 #[test]
 fn frontend_only_calls_catalogued_paths() {
     // 扫发行版里的全部脚本：前端拆成多少个文件，这条都盯得住。
@@ -1139,7 +1134,6 @@ fn dev_assets_follow_build_profile() {
 }
 
 // ---------- 逐条路由：错误 / 空 / 边界 ----------
-
 #[test]
 fn every_api_route_reports_capability_failure_as_4xx() {
     let ops = fake_ops(Some("假能力面：一律失败"));
@@ -1209,7 +1203,6 @@ fn session_action_boundaries_are_explicit() {
 }
 
 // ---------- 逐条路由：成功形态 ----------
-
 /// 事件台的 `sid` 过滤要**解百分号**：会话名常带中文（`<工作>--<agent>`，节点与讨论都用这个名字），
 /// 不解回来就永远匹配不到任何事件——长轮询只能干等到超时，客户端拿到空批。
 #[test]

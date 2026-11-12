@@ -1,5 +1,7 @@
-//! 测试公共前置：从原 `tests/core.rs` 拆出来的业务测试一律 `use super::prelude::*;`。
-//! 这里只做**重导出**（原 `tests/core.rs` 顶部的 imports 集中一处），不放逻辑。
+//! 目的：集中重导出业务测试的公共前置，保持 `use super::prelude::*`。
+//! 管：公共前置的重导出清单。
+//! 不管：任何逻辑或断言。
+//! 联动：src/tests/mod.rs、tests/doubles。
 
 pub(crate) use super::doubles::*;
 
@@ -67,4 +69,3 @@ pub use std::sync::atomic::{AtomicUsize, Ordering};
 pub use std::sync::{Arc, Mutex};
 
 pub use std::time::Duration;
-// ---------- 信封 ----------

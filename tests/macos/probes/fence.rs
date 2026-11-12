@@ -1,6 +1,7 @@
-//! seatbelt 探针：真机验收本平台的文件系统围栏——允许的根里写得进，根之外读不到。
-//! 驱动方式与运行期完全一致：交给守门进程（本程序 --fence-run）去装围栏。
-//! 排障时打开 SOLOMNI_FENCE_PROFILE=1，让守门进程把完整 profile 打进 stderr。
+//! 目的：seatbelt 探针：真机验收 macOS 文件系统围栏与网络开关。
+//! 管：根内写得进/根外读不到、net 开关、env 不可用与 profile 被拒分开、只读根、共享区与模块目录。
+//! 不管：其它平台。
+//! 联动：src/guard/、守门进程 --fence-run、SOLOMNI_FENCE_PROFILE=1。
 
 use crate::probe::{job_json, run_launcher_env, scratch};
 

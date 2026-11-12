@@ -1,20 +1,19 @@
-//! 会话能力的**用例与端口持有者**：历史落盘端口只在这里（R12）。
-//!
-//! 别的能力要造会话 / 追流水 / 读元信息 / 删会话，走 `api::History`；
-//! 呈现层的列表 / 打开 / 删除走 `api::HistoryOps`（由队列代理实现）。
-//! 装配（new 出适配器）在组合根；这里只收注入的端口。
+//! 目的：会话能力的用例与端口持有者——历史落盘端口只在这里（R12）。
+//! 管：造会话 / 追流水 / 读元信息 / 删会话的用例，以及核心操作回路（`core_operation`）与原生回灌消息。
+//! 不管：文件机制（在 `detail/fs_history.rs`）、状态派生与回档算术（在 `domain/`）、队列代理（在 conductor）。
+//! 联动：别的能力走 `api::History`；呈现层走 `api::HistoryOps`（由队列代理实现）；装配在组合根，这里只收注入的端口。
 
 use crate::capabilities::session::api::{History, HistoryView, SessionMeta};
 use crate::capabilities::session::ports::HistoryStore;
 use std::sync::Arc;
 
-/// 会话能力：持历史落盘端口，按用例答话。
+/// 目的：会话能力：持历史落盘端口，按用例答话。
 pub struct SessionService {
     store: Arc<dyn HistoryStore + Send + Sync>,
 }
 
 impl SessionService {
-    /// 组合根专用。
+    /// 目的：组合根专用。
     pub fn new(store: Arc<dyn HistoryStore + Send + Sync>) -> SessionService {
         SessionService { store }
     }
@@ -54,14 +53,8 @@ impl History for SessionService {
     }
 }
 
-// ---------- 核心操作回路（核心 AI 的一次操作） ----------
-//
-// 原料全是会话自己的东西：只读核实要经 `MemberTools`（工具面 + 观察账本 + 围栏），
-// 事实外送用的是会话的行格式（`SessionEvent` / `LineView` / `ToolCallView`），
-// 正文分片用的是 `stream_piece`。所以它是"在会话的工具面上跑一次核心操作并产出会话行"的用例，
-// 归会话能力；**调用侧的取消/分片包装也只有这一处**（协作会话、核心推荐、单 agent 都走它）。
+// 核心操作回路：在会话的工具面上跑一次核心操作并产出会话行；调用侧的取消 / 分片包装只有这一处。
 // 语义见 docs/tools/tools-and-roles.md（核心操作必须走工具调用 + 只读核实回路）。
-
 /// 原文前 n 个字符（如实报错时带上一点现场；按字符切，不切坏多字节）。
 fn head_chars(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
@@ -113,15 +106,13 @@ pub fn tool_result_body(c: &crate::capabilities::session::api::ToolCallView) -> 
     format!("[工具结果] {}\n{}", c.label(), c.output)
 }
 
-/// 把**一次模型回复**翻译成发给模型的消息——**实时与重建都只走这一处**。
-///
-/// 为什么必须只有一处：转录行与消息列表是同一件事的两份表示，两边各拼一次就会漂移：
-/// 一次回复里有多条原生调用时，实时推的助手消息与重建出来的会不是同一条，
-/// 第二条起还会漏推助手消息（上下文里因此凭空多/少消息）。
-///
-/// 形状按**当前形态**决定，所以形态切换时旧消息会被自动表达成新形状（切回去也能还原——事实留在转录里）：
-/// - 这条回复的调用都带合法原生 id 且当前走原生通道 → assistant(正文 + tool_calls) + 每条调用一条 role=tool；
-/// - 其余（手写信封、原生通道里写坏的调用、切换形态后的旧消息）→ assistant(正文) + 结果当用户消息。
+/// 目的：把**一次模型回复**翻译成发给模型的消息——**实时与重建都只走这一处**。
+///   为什么必须只有一处：转录行与消息列表是同一件事的两份表示，两边各拼一次就会漂移：
+///   一次回复里有多条原生调用时，实时推的助手消息与重建出来的会不是同一条，
+///   第二条起还会漏推助手消息（上下文里因此凭空多/少消息）。
+///   形状按**当前形态**决定，所以形态切换时旧消息会被自动表达成新形状（切回去也能还原——事实留在转录里）：
+///   - 这条回复的调用都带合法原生 id 且当前走原生通道 → assistant(正文 + tool_calls) + 每条调用一条 role=tool；
+///   - 其余（手写信封、原生通道里写坏的调用、切换形态后的旧消息）→ assistant(正文) + 结果当用户消息。
 pub fn reply_msgs(
     mode: crate::capabilities::llm::api::ToolMode,
     raw: &str,
@@ -199,8 +190,7 @@ pub fn core_operation(
     if !decls.is_empty() {
         opts.tools = Some(&decls);
     }
-    // **核实回路**：核心操作也是"先看现场再下结论"。模型想先读/查（很合理的动作）时，
-    // 执行它请求的**只读**工具并把结果回灌，然后再要那一次核心操作调用。
+    // **核实回路**：核心操作也先看现场再下结论——模型想先读 / 查时，执行它请求的**只读**工具并回灌结果，再要核心操作调用。
     // 没有这条，模型一想核实就被判"没调用 X"→整步中断（真机上就是这么卡死的）。
     let mut msgs = msgs.to_vec();
     let mut verify = verify;

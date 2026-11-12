@@ -9,10 +9,9 @@ use crate::capabilities::vm::domain::guest::{
     self as guest, GuestMount, GuestOs, GuestRun, GuestSpec, OutputLimit,
 };
 use crate::capabilities::vm::ports::{GuestVm, ShareBackend, ShareGuard, VmEngine};
-use crate::kernel::api::ToolOutcome;
+use crate::kernel::api::{file_stamp, FileStamp, ToolOutcome};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
 
 /// 目的：一个租约的活体——guest、共享后端与它的凭据、它要同步的挂载清单。
 struct Lease {
@@ -25,8 +24,8 @@ struct Lease {
     packages: Vec<String>,
     /// 这份 guest 是什么 OS：命令路径按它译成 guest 拼法。
     os: GuestOs,
-    /// 模块入口的本地副本（(模块, 入口) → (大小, mtime, guest 落点)）：没变就不重复复制。
-    execs: BTreeMap<(String, String), (u64, Option<SystemTime>, String)>,
+    /// 模块入口的本地副本（(模块, 入口) → (文件戳, guest 落点)）：没变就不重复复制。
+    execs: BTreeMap<(String, String), (FileStamp, String)>,
 }
 
 /// 目的：虚拟机档能力——持 VM 引擎与**已实现的全部共享后端**，按会话租约管理 guest。
@@ -218,16 +217,15 @@ impl Vm for VmService {
                 entry
             ));
         }
-        let meta = std::fs::metadata(host)
-            .map_err(|e| format!("读不到模块入口（{}）：{}", host.display(), e))?;
-        let stamp = (meta.len(), meta.modified().ok());
+        let stamp =
+            file_stamp(host).map_err(|e| format!("读不到模块入口（{}）：{}", host.display(), e))?;
         let Some(entry) = self.guests.lock().ok().and_then(|g| g.get(lease).cloned()) else {
             return Err(format!("这次会话没有活着的 guest（租约 {}）", lease));
         };
         let mut held = entry.lock().unwrap_or_else(|e| e.into_inner());
         let held = &mut *held;
-        if let Some((len, mtime, dest)) = held.execs.get(&(module.to_string(), rel.clone())) {
-            if *len == stamp.0 && *mtime == stamp.1 {
+        if let Some((cached, dest)) = held.execs.get(&(module.to_string(), rel.clone())) {
+            if *cached == stamp {
                 return Ok(dest.clone());
             }
         }
@@ -245,7 +243,7 @@ impl Vm for VmService {
             return Err(format!("把模块入口落进 guest 失败：{}", out.output.trim()));
         }
         held.execs
-            .insert((module.to_string(), rel), (stamp.0, stamp.1, dest.clone()));
+            .insert((module.to_string(), rel), (stamp, dest.clone()));
         Ok(dest)
     }
 
@@ -310,7 +308,6 @@ impl Vm for VmService {
         &self,
         lease: &str,
     ) -> Result<crate::capabilities::vm::api::GuestDiagnosis, String> {
-        use crate::capabilities::vm::detail::guest_helper as helper;
         use crate::capabilities::vm::domain::diagnose as diag;
         let entry = self
             .guests
@@ -356,16 +353,16 @@ impl Vm for VmService {
             return diag::parse_report(&out.output, lease);
         }
         // 超时优先：helper 的机器标记，或宿主外层的等待预算到点。
-        if out.output.contains(helper::HELPER_TIMEOUT_MARKER) || out.output.contains("超时") {
+        if out.output.contains(diag::HELPER_TIMEOUT_MARKER) || out.output.contains("超时") {
             return Err(diag::timed_out());
         }
         // helper 真进了诊断模式、但 Python 侧自己失败（前缀是诊断专用的）：原因在它的原话里。
-        if out.output.contains(helper::HELPER_DIAGNOSE_PREFIX) {
+        if out.output.contains(diag::HELPER_DIAGNOSE_PREFIX) {
             return Err(diag::exec_failed(&first_detail(&out.output)));
         }
         // 失败后的**有界预检**（命令自带 timeout 10）：区分 helper 不在 / 缺 python3 / 通道不通。
         let probe = held.vm.channel().exec(&GuestRun {
-            command: helper::probe_command(),
+            command: diag::probe_command(),
             args_json: "{}".to_string(),
             env: Vec::new(),
             cwd: String::new(),
@@ -373,13 +370,13 @@ impl Vm for VmService {
             output_limit: OutputLimit::Head,
         });
         let said = probe.output.trim().to_string();
-        if said.contains(helper::PROBE_NO_HELPER) {
+        if said.contains(diag::PROBE_NO_HELPER) {
             return Err(diag::helper_unavailable(&first_detail(&said)));
         }
-        if said.contains(helper::PROBE_NO_PYTHON) {
+        if said.contains(diag::PROBE_NO_PYTHON) {
             return Err(diag::python_missing(&first_detail(&said)));
         }
-        if probe.ok && said.contains(helper::PROBE_OK) {
+        if probe.ok && said.contains(diag::PROBE_OK) {
             return Err(diag::exec_failed(&first_detail(&out.output)));
         }
         let detail = first_detail(&said);

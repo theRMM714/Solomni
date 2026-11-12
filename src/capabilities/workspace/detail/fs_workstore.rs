@@ -1,12 +1,8 @@
-//! 共享区**版本库**的落盘实现（实现 workspace 自己的 `WorkStore` 端口）。
-//!
-//! 两类东西：
-//! - **资产原语**：主副本 `work/` 与各 agent 沙箱的流式扫描 / 写入 / 复制；落点必须真实落在给定根之内
-//!   （相对路径本身干净不等于安全：路径中间或末尾的符号链接可能指向根外，一律按真实路径拒）。
-//! - **仓库原语**：内容寻址对象（同指纹只写一次）、提交记录（`commits/<id>.json`，只增不改）、
-//!   head 指针与每个 agent 的拉取基线（`index/<agent>.json`）。
-//!
-//! 纯逻辑（三方比较、路径校验）在 `domain::workstore`；本文件只做机制。
+//! 目的：共享区**版本库**的落盘实现（实现 workspace 自己的 `WorkStore` 端口）。
+//! 管：资产原语（主副本 `work/` 与各 agent 沙箱的流式扫描 / 写入 / 复制，落点必须真实落在给定根之内）
+//!   与仓库原语（内容寻址对象、提交记录 `commits/<id>.json`、head 指针、每 agent 拉取基线 `index/<agent>.json`）。
+//! 不管：三方比较、路径校验等纯逻辑（在 `domain::workstore`）；本文件只做机制。
+//! 联动：由 workspace 的 `service.rs` 经 `WorkStore` 端口持有（R12）；装配在 `main.rs`。
 
 use crate::capabilities::workspace::domain::asset::{AssetScanner, FileVersion, ASSET_CHUNK_BYTES};
 use crate::capabilities::workspace::domain::workstore::{

@@ -1,8 +1,7 @@
-//! Web 转录中心：tiny_http 服务器 + 长轮询增量事件推送。
-//! 只做协议适配（HTTP/长轮询与**入站能力面**之间的转译）；渲染在浏览器（`assets/app/main.js` 起的分层模块）。
-//! 路由由 `presentation/routes.rs` 的目录驱动：匹配不到就 404，目录里有而这里没分支 = 程序缺陷。
-//! 核心状态在核心自己的线程上：这里拿不到它、也拿不到任何核心锁，「停止」直接说给核心听。
-//! 安全底线：只绑 127.0.0.1；密钥永不进任何响应（能力面只给 id）。
+//! 目的：Web 转录中心：tiny_http 服务器 + 长轮询增量事件推送。
+//! 管：HTTP 协议适配（请求分发、静态资源、长轮询与**入站能力面**之间的转译）、服务器生命周期；只绑 127.0.0.1，密钥永不进任何响应（能力面只给 id）。
+//! 不管：渲染（在浏览器 `src/presentation/web/assets/app/main.js` 起的分层模块）；路由目录与匹配（`src/presentation/web/routes.rs`）。
+//! 联动：核心状态在核心自己的线程上——这里拿不到它、也拿不到任何核心锁，「停止」直接说给核心听；请求经 `Ops`（`src/capabilities/*/api.rs`）进入。
 
 use crate::capabilities::conductor::api::{Acted, ActionCall, Caller, SessionEvent, WorkMode};
 use crate::capabilities::conductor::api::{Ops, Output};
@@ -15,31 +14,31 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tiny_http::{Header, Response, Server};
 
-/// 默认监听端口（CLI 的 webui 命令与启动参数共用这一个来源）。
+/// 目的：默认监听端口（CLI 的 webui 命令与启动参数共用这一个来源）。
 pub const DEFAULT_PORT: u16 = 3081;
 
 /// 请求体上限：上传走 base64，按单文件上限的编码体积留一点余量。
 /// 超过就在读入前挡掉，不把整个 body 读进内存。
 const MAX_BODY_BYTES: usize = ((MAX_ASSET_BYTES / 3 + 1) * 4) as usize + 64 * 1024;
 
-/// 本机工具围栏能力（由组合根注入；呈现层如实显示，不假装）。
+/// 目的：本机工具围栏能力（由组合根注入；呈现层如实显示，不假装）。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct FenceInfo {
-    /// 本机能力：这台机器**能不能**强制文件系统围栏。
+    /// 目的：本机能力——这台机器**能不能**强制文件系统围栏。
     pub fs: bool,
-    /// 本机能力：这台机器**能不能**按 `net` 控制出站网络（断/放）。
+    /// 目的：本机能力——这台机器**能不能**按 `net` 控制出站网络（断/放）。
     pub net: bool,
-    /// 本机能力：进程树围栏（未授权时段同样生效）。
+    /// 目的：本机能力——进程树围栏（未授权时段同样生效）。
     pub tree: bool,
-    /// 如实说明（机制名 + 限制）。
+    /// 目的：如实说明（机制名 + 限制）。
     pub note: String,
-    /// **本次实际**生效的文件系统围栏（只有 Windows 未授权时为假：容器围栏要写目录 ACL；Unix 围栏自足）。
+    /// 目的：**本次实际**生效的文件系统围栏（只有 Windows 未授权时为假：容器围栏要写目录 ACL；Unix 围栏自足）。
     pub effective_fs: bool,
-    /// **本次实际**生效的网络控制（只有 Windows 受授权影响）。
+    /// 目的：**本次实际**生效的网络控制（只有 Windows 受授权影响）。
     pub effective_net: bool,
-    /// 用户有没有授权在本机写权限项（只影响 Windows 的容器围栏）。
+    /// 目的：用户有没有授权在本机写权限项（只影响 Windows 的容器围栏）。
     pub write_allowed: bool,
-    /// 用户显式授权的主机只读根个数（`settings.yaml` 的 `sandbox.policy.host_read_roots`）；0 = 一个都没授。
+    /// 目的：用户显式授权的主机只读根个数（`settings.yaml` 的 `sandbox.policy.host_read_roots`）；0 = 一个都没授。
     pub read_only_roots: usize,
     /// 目的：全局策略要求、但本次实际未满足的项（空 = 齐了；未授权与能力缺失都在这里）。
     pub sandbox_missing: Vec<String>,
@@ -50,11 +49,9 @@ pub struct FenceInfo {
 /// 目的：保存全局沙箱策略后要求启动器整体重启的退出码（start.js 认它）。
 pub const RESTART_EXIT_CODE: i32 = 75;
 
-/// 启动转录中心服务器：**可中断**——收到 Ctrl+C / SIGINT 就正常关闭回到 CLI（进程仍在）。
-/// 端口可指定，默认 3081，只绑本机回环。
-///
-/// 处理：进入前安装中断标志（Windows 控制台处理函数 / Unix SIGINT），返回前**恢复默认**，
-/// 所以回到 CLI 提示符后 Ctrl+C 仍按"退出产品"的既有语义生效。
+/// 目的：启动转录中心服务器：**可中断**——收到 Ctrl+C / SIGINT 就正常关闭回到 CLI（进程仍在）。
+/// 参数：`ops` 是入站能力面，`port` 默认 3081，`fence` 是本机围栏能力。
+/// 约束：只绑本机回环；进入前安装中断标志（Windows 控制台处理函数 / Unix SIGINT），返回前**恢复默认**，所以回到 CLI 提示符后 Ctrl+C 仍按"退出产品"的既有语义生效。
 pub fn serve(ops: Ops, port: u16, fence: FenceInfo) -> Result<(), String> {
     let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let guard = interrupt::install(Arc::clone(&stop))?;
@@ -63,8 +60,8 @@ pub fn serve(ops: Ops, port: u16, fence: FenceInfo) -> Result<(), String> {
     r
 }
 
-/// 服务器主循环（可注入中断判据，便于测试）：每次最多等 200ms 就回来看一次标志。
-/// 每个请求仍是一线独立线程——长连接绝不阻塞其它请求（转录中心是多端并用的）。
+/// 目的：服务器主循环（可注入中断判据，便于测试）：每次最多等 200ms 就回来看一次标志。
+/// 约束：每个请求仍是一线独立线程——长连接绝不阻塞其它请求（转录中心是多端并用的）。
 pub(crate) fn serve_until(
     ops: &Ops,
     port: u16,
@@ -257,7 +254,7 @@ fn str_field(v: &serde_json::Value, key: &str) -> String {
 const POLL_WAIT: Duration = Duration::from_secs(20);
 const POLL_TICK: Duration = Duration::from_millis(300);
 
-/// 分发一次请求。**契约测试直接调它**（不经过 socket），逐条路由验成功/错误/空/边界。
+/// 目的：分发一次请求。**契约测试直接调它**（不经过 socket），逐条路由验成功/错误/空/边界。
 pub(crate) fn route(
     ops: &Ops,
     fence: &FenceInfo,
@@ -453,8 +450,7 @@ pub(crate) fn route(
             Err(e) => complaint(400, e),
         },
         // 历史与实时**一次给全**：盘上转录 + 事件台上**它之外**的实时尾巴 + 合流时的头部序号。
-        // 前端因此只有一条带序号的流（只按序 append），不靠自己合并两个来源——
-        // 刷新后整段重复（任务行 / [建议] / yes 各两遍）正是在那个合并里出的。
+        // 前端因此只有一条带序号的流（只按序 append），不自己合并两个来源，避免重复与乱序。
         "history.open" => match ops.history.open(&name) {
             Ok((meta, events)) => {
                 let (live, head) = ops.events.tail_excluding(&name, &events);
@@ -727,7 +723,7 @@ pub(crate) fn route(
     }
 }
 
-/// 请求里的形态标识 → WorkMode：唯一解析处；未知值如实报错（路由据此回 400）。
+/// 目的：请求里的形态标识 → WorkMode：唯一解析处；未知值如实报错（路由据此回 400）。
 pub fn parse_mode(s: &str) -> Result<WorkMode, String> {
     match s {
         "single" => Ok(WorkMode::Single),

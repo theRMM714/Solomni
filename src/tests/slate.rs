@@ -1,7 +1,7 @@
-//! 拟名单业务（`capabilities/slate/`）的用例：**推荐名单**与**代拟名单**共用同一条 `slate` 协议。
-//!
-//! 驱动入口是协调业务的分发面（`Conductor::suggest_models`，前端经那条路由进来）；
-//! 装配与替身来自 `doubles`。协作会话里的代拟路径（`Pending::ConfirmSlate`）见 `tests/collab.rs`。
+//! 目的：钉推荐名单与代拟名单共用同一条 slate 协议的契约。
+//! 管：suggest_models 推荐 agent、单模式保留唯一选择、复用已存 agent 不推模型。
+//! 不管：协作里的代拟确认路径（collab）。
+//! 联动：src/capabilities/slate/、Conductor::suggest_models、tests/doubles。
 
 use super::prelude::*;
 

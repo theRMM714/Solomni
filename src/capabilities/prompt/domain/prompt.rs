@@ -1,13 +1,14 @@
-//! 提示词渲染层：{{key}} 占位替换，纯逻辑。
-//! 册子文本来自 PromptSource（文件机制在适配层）；缺键/缺变量报错，不静默。
-//! 指令文案改 prompts/；运行时回执由产生它的代码返回，不进册子。
+//! 目的：提示词册的内存形态与 {{key}} 占位渲染（纯逻辑）。
+//! 管：render 占位替换；merge_book 合并册子；Segment / CoreTexts 与各角色提示词结构；缺键 / 缺变量报错。
+//! 不管：册子从哪加载（在 prompt/ports.rs 与 detail/yaml_prompts.rs）；`@` 引用改写（在 domain/refs.rs）。
+//! 联动：被 api.rs 重导出 Segment / Vars；service.rs 实现 Prompt 并调用 render / merge_book；提示词文本由 detail/yaml_prompts.rs 提供。
 
 use serde::Deserialize;
 
-/// 渲染时的变量表。
+/// 目的：渲染时的变量表。
 pub type Vars<'a> = &'a [(&'a str, String)];
 
-/// 渲染单段提示词：替换 {{name}}；遇到未提供的变量 = 错误（如实，不静默）。
+/// 目的：渲染单段提示词：替换 {{name}}；遇到未提供的变量 = 错误（如实，不静默）。
 pub fn render(template: &str, vars: Vars) -> Result<String, String> {
     let mut out = String::with_capacity(template.len());
     let bytes = template.as_bytes();
@@ -38,21 +39,19 @@ pub fn render(template: &str, vars: Vars) -> Result<String, String> {
     Ok(out)
 }
 
-/// 装配输入的**内存形态**：**只有提示词文本**（`prompts/`）。
-/// 工具总表与角色表是**另一个能力的东西**（`systools/`，见 `capabilities/tools/`）：
-/// 挂进这里就等于让提示词能力反过来依赖工具能力，两边成环。
-///
-/// **持有者只有本能力**（`service.rs` 一处，R4）。运行时回执与清单行归各产生它们的代码，
-/// 不再从这里共享；这里只有提示词段。
+/// 目的：装配输入的**内存形态**：**只有提示词文本**（`prompts/`）。
+///    工具总表与角色表是**另一个能力的东西**（`systools/`，见 `capabilities/tools/`）：
+///    挂进这里就等于让提示词能力反过来依赖工具能力，两边成环。
+///    **持有者只有本能力**（`service.rs` 一处，R4）。运行时回执与清单行归各产生它们的代码，
+///    不再从这里共享；这里只有提示词段。
 #[derive(Debug, Clone)]
 pub struct Prompts {
-    /// 按名字取的那些段。**布局只有本能力知道**。
+    /// 目的：按名字取的那些段。**布局只有本能力知道**。
     pub(crate) core: CoreTexts,
 }
 
-/// **一段核心提示词的名字**：别的能力按名字取段，不点册子内部结构。
-///
-/// 加/改一段提示词的步骤因此固定成两步：`prompts/` 里加键 → 这里加一个变体（缺了编译不过）。
+/// 目的：**一段核心提示词的名字**：别的能力按名字取段，不点册子内部结构。
+///    加/改一段提示词的步骤因此固定成两步：`prompts/` 里加键 → 这里加一个变体（缺了编译不过）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Segment {
     ChatProtocol,
@@ -91,12 +90,10 @@ pub enum Segment {
     ModuleToolParamsHeader,
 }
 
-/// 把册子的多个文件合并成内存形态：各文件的**顶层键**合并后就是 `core:` 的内容。
-///
-/// **别的能力不按字段路径读册子**：它们按名字取一段（`Prompt::text` / `Prompt::render`）。
-/// 所以"文件怎么分"与"某一段落在结构体的哪一格"都只有本能力知道——改版式不再牵动别的能力。
-///
-/// 三条如实报错（不静默）：**键在两个文件里重复**（拆分时最可能犯的错）、**缺键**、**类型不对**。
+/// 目的：把册子的多个文件合并成内存形态：各文件的**顶层键**合并后就是 `core:` 的内容。
+///    **别的能力不按字段路径读册子**：它们按名字取一段（`Prompt::text` / `Prompt::render`）。
+///    所以"文件怎么分"与"某一段落在结构体的哪一格"都只有本能力知道——改版式不再牵动别的能力。
+///    三条如实报错（不静默）：**键在两个文件里重复**（拆分时最可能犯的错）、**缺键**、**类型不对**。
 pub fn merge_book(docs: &[String]) -> Result<Prompts, String> {
     let mut merged = yaml_serde::Mapping::new();
     for doc in docs {
@@ -163,28 +160,28 @@ pub fn merge_book(docs: &[String]) -> Result<Prompts, String> {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CoreTexts {
-    /// 会话使用类型的**全表**：机制册的校验口径之一（另一处是角色表）。
+    /// 目的：会话使用类型的**全表**：机制册的校验口径之一（另一处是角色表）。
     pub session_kinds: Vec<String>,
-    /// **机制说明册**：每条按（会话使用类型 × 适用角色）分发，见 `mechanisms_for`。
-    /// AI 不知道机制就只会写散文——所以哪一类会话由哪个角色拿哪一段，是**数据**，不是代码分支。
+    /// 目的：**机制说明册**：每条按（会话使用类型 × 适用角色）分发，见 `mechanisms_for`。
+    ///    AI 不知道机制就只会写散文——所以哪一类会话由哪个角色拿哪一段，是**数据**，不是代码分支。
     pub mechanisms: Vec<Mechanism>,
     pub chat_protocol: String,
     pub discuss: DiscussPrompts,
     pub synthesize: SynthPrompts,
     pub execute: ExecutePrompts,
     pub review: ReviewPrompts,
-    /// 节点级验收（任务链：逐节点核对当前目标）。
+    /// 目的：节点级验收（任务链：逐节点核对当前目标）。
     pub node_review: NodeReviewPrompts,
     pub slate: SlatePrompts,
-    /// 判定用户对裁决的回应是否明确到可以开工/放行。
+    /// 目的：判定用户对裁决的回应是否明确到可以开工/放行。
     pub verdict: VerdictPrompts,
-    /// 核心代理（core_proxy）的身份提示词。
+    /// 目的：核心代理（core_proxy）的身份提示词。
     pub proxy: ProxyPrompts,
-    /// 一个 agent 的职责提示词（由它的模块合成为一份能力包）。
+    /// 目的：一个 agent 的职责提示词（由它的模块合成为一份能力包）。
     pub agent: AgentPrompts,
-    /// 工具调用约定：手写信封（envelope 形态）。
+    /// 目的：工具调用约定：手写信封（envelope 形态）。
     pub tool_calling_envelope: String,
-    /// 工具调用约定：原生工具调用（native 形态）；与上一条**互斥**，一个通道只用一套。
+    /// 目的：工具调用约定：原生工具调用（native 形态）；与上一条**互斥**，一个通道只用一套。
     pub tool_calling_native: String,
     /// 目的：工作环境册的**宿主平台全表**（本机档按它匹配与校验）。
     pub env_hosts: Vec<String>,
@@ -192,25 +189,25 @@ pub struct CoreTexts {
     pub env_guests: Vec<String>,
     /// 目的：**工作环境册**——每条按宿主平台或 guest 的 os 分发（见 `env_for`）；变量 work_name / agent / work_root / sandbox_root / module_roots。
     pub envs: Vec<EnvBlock>,
-    /// patch 通道的写法说明（模型侧）；变量：work_root, sandbox_root
+    /// 目的：patch 通道的写法说明（模型侧）；变量：work_root, sandbox_root
     pub patch_guide: String,
-    /// 路径写法的唯一说明；变量：sandbox_root。
+    /// 目的：路径写法的唯一说明；变量：sandbox_root。
     pub path_rules: String,
-    /// 本回合工具说明块的标题；变量：tools。
+    /// 目的：本回合工具说明块的标题；变量：tools。
     pub tools_this_turn: String,
-    /// 压缩回合给模型的指令。
+    /// 目的：压缩回合给模型的指令。
     pub compact_prompt: String,
-    /// 讨论轮次里“上一轮没表态”的提醒。
+    /// 目的：讨论轮次里“上一轮没表态”的提醒。
     pub discuss_reminder: String,
-    /// 模块工具参数段的小标题（module_tool_params 的取值）。
+    /// 目的：模块工具参数段的小标题（module_tool_params 的取值）。
     pub module_tool_params_header: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct DiscussPrompts {
-    /// opener 变量：protocol, task
+    /// 目的：opener 变量：protocol, task
     pub opener: String,
-    /// step 变量：transcript
+    /// 目的：step 变量：transcript
     pub step: String,
     pub autonomy_note: String,
 }
@@ -218,51 +215,51 @@ pub struct DiscussPrompts {
 #[derive(Debug, Clone, Deserialize)]
 pub struct VerdictPrompts {
     pub system: String,
-    /// user 变量：kind, payload, text
+    /// 目的：user 变量：kind, payload, text
     pub user: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SynthPrompts {
     pub system: String,
-    /// user 变量：transcript
+    /// 目的：user 变量：transcript
     pub user: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProxyPrompts {
-    /// 核心代理的身份提示词（能用哪些工具由角色表按回合注入，不在这里列清单）。
+    /// 目的：核心代理的身份提示词（能用哪些工具由角色表按回合注入，不在这里列清单）。
     pub system: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ExecutePrompts {
-    /// user 变量：tasks
+    /// 目的：user 变量：tasks
     pub user: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ReviewPrompts {
     pub system: String,
-    /// user 变量：plan, reports
+    /// 目的：user 变量：plan, reports
     pub user: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct NodeReviewPrompts {
     pub system: String,
-    /// user 变量：nodes
+    /// 目的：user 变量：nodes
     pub user: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SlatePrompts {
     pub system: String,
-    /// user 变量：mode, agents, modules, models, task
+    /// 目的：user 变量：mode, agents, modules, models, task
     pub user: String,
-    /// 形态描述（{{mode}} 的取值）：单 agent。
+    /// 目的：形态描述（{{mode}} 的取值）：单 agent。
     pub mode_single: String,
-    /// 形态描述（{{mode}} 的取值）：协作。
+    /// 目的：形态描述（{{mode}} 的取值）：协作。
     pub mode_collab: String,
 }
 
@@ -276,27 +273,27 @@ pub struct EnvBlock {
     pub text: String,
 }
 
-/// 一条机制说明：**会话使用类型与适用角色同时对上**才注入（见 `CoreTexts::mechanisms_for`）。
+/// 目的：一条机制说明：**会话使用类型与适用角色同时对上**才注入（见 `CoreTexts::mechanisms_for`）。
 #[derive(Debug, Clone, Deserialize)]
 pub struct Mechanism {
-    /// 会话使用类型（必须在 `session_kinds` 里）。
+    /// 目的：会话使用类型（必须在 `session_kinds` 里）。
     pub session: String,
-    /// 适用角色（必须在角色表里存在——悬空引用由装配期 `SystemTools::problems()` 挡下）。
+    /// 目的：适用角色（必须在角色表里存在——悬空引用由装配期 `SystemTools::problems()` 挡下）。
     pub roles: Vec<String>,
     pub text: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AgentPrompts {
-    /// system 变量：agent, chara_block, modules, mechanism, env, tool_calling
+    /// 目的：system 变量：agent, chara_block, modules, mechanism, env, tool_calling
     pub system: String,
     /// 目的：人设块模板；变量 chara（只有人设非空时才渲染并插入 system 的 chara_block）。
     pub chara: String,
 }
 
 impl CoreTexts {
-    /// 按（**会话使用类型**，**角色**）取这个回合的机制说明：只拿**同时**匹配的条目，
-    /// 按册子里的声明顺序拼接（一条都没配 = 空串）。对应关系全部写在 YAML 里，这里只做匹配。
+    /// 目的：按（**会话使用类型**，**角色**）取这个回合的机制说明：只拿**同时**匹配的条目，
+    ///    按册子里的声明顺序拼接（一条都没配 = 空串）。对应关系全部写在 YAML 里，这里只做匹配。
     pub fn mechanisms_for(&self, session: &str, role: &str) -> String {
         self.mechanisms
             .iter()
@@ -319,7 +316,7 @@ impl CoreTexts {
             .join("\n\n")
     }
 
-    /// **按名字取一段原文**：册子的布局只在这里露面（新加一段 = 这里加一支 match）。
+    /// 目的：**按名字取一段原文**：册子的布局只在这里露面（新加一段 = 这里加一支 match）。
     pub fn segment(&self, seg: Segment) -> &str {
         match seg {
             Segment::ChatProtocol => &self.chat_protocol,

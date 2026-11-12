@@ -1,10 +1,8 @@
-//! 工具能力的**状态、用例与端口持有者**。
-//!
-//! 状态是 `domain` 的 `SystemTools`（工具总表、角色表与名字表）；出站端口是 `SysIo`（本能力私有）
-//! 与 kernel 共享的 `ProcessRunner` / `FenceHost` / `FenceGate`——**只有这里持有它们**（R12）。
-//! 对外两个面：`Tools`（按角色发放工具面、拿总表）与 `ToolExec`（执行工具、释放围栏授权）。
-//!
-//! 加载机制（`systools/` 三份 yaml）在 `detail/yaml_systools.rs`；本文件不碰文件系统。
+//! 目的：工具能力的**状态、用例与端口持有者**——按角色发放工具面、执行工具、释放围栏授权。
+//! 管：状态是 `domain` 的 `SystemTools`（工具总表、角色表与名字表）；出站端口是 `SysIo`（本能力私有）
+//!   与 kernel 共享的 `ProcessRunner` / `FenceHost` / `FenceGate`——**只有这里持有它们**（R12）。
+//! 不管：纯规则（在 `domain/`）；`systools/` 三份 yaml 的加载机制在 `detail/yaml_systools.rs`；本文件不碰文件系统。
+//! 联动：对外两个面 `Tools` 与 `ToolExec`（见 `api.rs`）；装配在 `main.rs`。
 
 pub mod fence;
 pub mod systool;
@@ -19,7 +17,7 @@ use crate::kernel::ports::{FenceGate, FenceHost, ProcessRunner};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, RwLock};
 
-/// 工具能力：持三张表与四个端口，按用例答话。
+/// 目的：工具能力——持三张表与四个端口，按用例答话。
 pub struct ToolsService {
     /// **状态**：工具总表与角色表。
     catalog: SystemTools,
@@ -33,7 +31,7 @@ pub struct ToolsService {
 }
 
 impl ToolsService {
-    /// 组合根专用：三张表由加载器读进来，三个端口由组合根 new 出来注入。
+    /// 目的：组合根专用构造——三张表由加载器读进来，三个端口由组合根 `new` 出来注入。
     pub fn new(
         source: &dyn SystoolsSource,
         runner: Arc<dyn ProcessRunner>,

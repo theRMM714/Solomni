@@ -1,9 +1,7 @@
-//! 会话历史落盘：session/<名字>/meta.yaml + transcript.jsonl（实现本能力的 HistoryStore 端口）。
-//! 布局：顶层会话 = session/<名字>/；子会话（meta.parent 非空）= session/<父>/children/<名字>/
-//! —— 位置本身就是归属，删父会话 = 删一个目录。名字即目录名（conductor 已校验）。
-//! 子会话可以再往下嵌套（代理建的子会话里还能有它自己的子会话），所以 children/ 的查找与遍历
-//! 必须是**任意深度**的：整棵 children/ 树都属于同一个顶层 work。
-//! 流水只追加；留档追加一条 rewind 记录，删除 / 恢复整体重写。
+//! 目的：会话历史落盘——`session/<名字>/meta.yaml` + `transcript.jsonl`，实现本能力的 `HistoryStore` 端口。
+//! 管：目录布局（顶层 `session/<名字>/`，子会话嵌在 `children/<名字>/`，任意深度）与文件格式；流水只追加，留档追加一条 rewind 记录，删除 / 恢复整体重写。
+//! 不管：名字校验与队列调度（在 `conductor`）；会话状态派生（在 `domain/`）。
+//! 联动：组合根构造后经 `ports::HistoryStore` 注入 `service.rs`；会话中心经同一端口读列表与元信息。
 
 use crate::capabilities::session::api::{HistoryView, SessionMeta};
 use crate::capabilities::session::ports::HistoryStore;

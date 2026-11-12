@@ -1,7 +1,7 @@
-//! 测试层（T1 单元 + T2 端口与适配器契约）——替身与契约测试同处一层。
-//! 目录与命名见 docs/testing/gaps-acceptance.md，替身语义见 docs/testing/doubles.md，
-//! 层级与判定见 docs/testing/levels.md，端口矩阵见 docs/testing/doubles.md §三。
-//! 硬规矩：不碰真实 `.home/`、真实 `session/`、真实权限或外部网络；只绑本地环回。
+//! 目的：装配测试层（T1 单元 + T2 端口契约）的公共前置与替身。
+//! 管：root_dir、test_guest、scratch、ops_with 等夹具；Chat/Probe 替身；slow_ops 等驱动辅助。
+//! 不管：真实 .home/、真实 session/、真实权限或外网；业务断言归各测试文件。
+//! 联动：docs/testing/gaps-acceptance.md、docs/testing/doubles.md、docs/testing/levels.md。
 
 mod api;
 mod builders;
@@ -72,8 +72,8 @@ pub(crate) fn scratch(name: &str) -> std::path::PathBuf {
     d
 }
 
-/// 起一个内存装配的核心手柄并把能力面拆成 `Ops`（契约测试共用）。
-/// 返回手柄是为了能观察事件台与测试注入；只用能力面的用例可以忽略它。
+/// 目的：起一个内存装配的核心手柄并把能力面拆成 `Ops`（契约测试共用）。
+///   返回手柄是为了能观察事件台与测试注入；只用能力面的用例可以忽略它。
 pub(crate) fn ops_with(
     modules: Vec<crate::capabilities::modules::api::Module>,
     core_script: Vec<&str>,
@@ -143,7 +143,7 @@ pub(crate) fn ops_with_vm(
     (handle, ops)
 }
 
-/// 一次单 agent 工作的规格（契约测试共用）。
+/// 目的：一次单 agent 工作的规格（契约测试共用）。
 pub(crate) fn single_work(
     name: &str,
     modules: &[&str],
@@ -167,8 +167,8 @@ pub(crate) fn single_work(
     }
 }
 
-/// 边流边等停止的通道：把「生成中」变成可观察状态——取消后下一次回调即返回 false。
-/// 上限约 30 秒：只要提前返回，就说明是「停止」生效而不是它自然跑完。
+/// 目的：边流边等停止的通道：把「生成中」变成可观察状态——取消后下一次回调即返回 false。
+///   上限约 30 秒：只要提前返回，就说明是「停止」生效而不是它自然跑完。
 pub(crate) struct SlowChat {
     pub ticks: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
@@ -197,9 +197,9 @@ impl crate::capabilities::llm::api::Chat for SlowChat {
     }
 }
 
-/// 阻塞到被放行的通道：把"生成中"变成**可观察且可控**的状态。
-/// 为什么需要它：协作的泵目前**没有取消检查**（见缺口账），只能靠放行来结束，
-/// 否则测试会一直等到整段讨论跑完。
+/// 目的：阻塞到被放行的通道：把"生成中"变成**可观察且可控**的状态。
+///   为什么需要它：协作的泵目前**没有取消检查**（见缺口账），只能靠放行来结束，
+///   否则测试会一直等到整段讨论跑完。
 pub(crate) struct GatedChat {
     pub started: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     pub release: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -235,13 +235,13 @@ impl crate::capabilities::llm::api::Chat for GatedChat {
     }
 }
 
-/// 一律发"阻塞到放行"通道的网关。
+/// 目的：一律发"阻塞到放行"通道的网关。
 pub(crate) struct GatedGateway {
     pub started: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     pub release: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
-/// 记录每次问询收到的消息，再转发给内层通道。
+/// 目的：记录每次问询收到的消息，再转发给内层通道。
 pub(crate) struct RecordingChat {
     pub inner: crate::capabilities::llm::api::BoxedChat,
     pub seen: std::sync::Arc<std::sync::Mutex<Vec<Vec<String>>>>,
@@ -266,7 +266,7 @@ impl crate::capabilities::llm::api::Chat for RecordingChat {
     }
 }
 
-/// 包一层记录器：把每个成员通道收到的消息记下来（判"发送视图"用）。
+/// 目的：包一层记录器：把每个成员通道收到的消息记下来（判"发送视图"用）。
 pub(crate) struct RecordingGateway {
     pub inner: crate::tests::doubles::ScriptGateway,
     pub seen: std::sync::Arc<std::sync::Mutex<Vec<Vec<String>>>>,
@@ -326,7 +326,7 @@ impl crate::capabilities::llm::ports::ChatGateway for GatedGateway {
     }
 }
 
-/// 装配一个「生成阻塞到放行」的核心（观察"生成期间读接口不排队"）。
+/// 目的：装配一个「生成阻塞到放行」的核心（观察"生成期间读接口不排队"）。
 pub(crate) fn gated_ops(
     modules: Vec<crate::capabilities::modules::api::Module>,
 ) -> (
@@ -349,7 +349,7 @@ pub(crate) fn gated_ops(
     (handle, ops, started, release)
 }
 
-/// 一律发慢通道的网关（可选网关参数：慢通道要自定义时序，`ops_with` 覆盖不了）。
+/// 目的：一律发慢通道的网关（可选网关参数：慢通道要自定义时序，`ops_with` 覆盖不了）。
 pub(crate) struct SlowGateway {
     pub ticks: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
@@ -380,7 +380,7 @@ impl crate::capabilities::llm::ports::ChatGateway for SlowGateway {
     }
 }
 
-/// 装配一个「生成会一直跑到被停止」的核心（观察 is_running / stop / 编辑禁令）。
+/// 目的：装配一个「生成会一直跑到被停止」的核心（观察 is_running / stop / 编辑禁令）。
 pub(crate) fn slow_ops(
     modules: Vec<crate::capabilities::modules::api::Module>,
 ) -> (

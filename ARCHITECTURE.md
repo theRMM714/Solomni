@@ -5,7 +5,7 @@
 
 ## 适用与判据
 - 改代码前必须先读本文；分层判断以本文为准（`ARCHITECTURE.md`）。
-- 违反由 T0 结构审查与 `node run-tests.js` 判定；依赖方向基线在 `tests/dependency-baseline.json`。
+- 违反由 T0 结构审查与 `node run-tests.js` 判定；依赖方向与能力内部判据零豁免。
 
 ## 一、分层与依赖方向
 
@@ -145,7 +145,7 @@
 - 端口的输入、输出、错误、取消、超时、重复调用与资源清理语义是**架构契约**：生产适配器与测试替身遵守同一份。
 - 端口不为了测试暴露生产实现的内部状态；要观察交互就用替身的记录能力或公开行为。
 - 组合根测试用的内存装配（`InMemory*`、`ScriptGateway`、`NoopLog` 等）集中在 `src/tests/doubles/`（按端口族一个文件）；新增替身用能表达职责的名字。
-- **分层与依赖方向由 T0 结构审查机器判定**（豁免清单 `tests/dependency-baseline.json`，当前为空 = 零豁免，条目一旦不再成立即失败）。
+- **分层与依赖方向由 T0 结构审查机器判定**（`tests/gates/structure/dependency.js`、`tests/gates/structure/capability.js`；零豁免：实际违规集合必须为空，任一命中即失败）。
 - 质量门禁（格式、编译、Clippy、依赖重复、测试结构冗余）与业务测试是两类事实，分别记录，互不抵消。
 - 代码冗余检查不改变分层与端口设计，也不以增加 trait、包装层或测试用例为目标。
 
@@ -160,7 +160,7 @@
 ## 九、业务边界与硬要求
 
 > 这一节回答两个问题：**什么该独立成一个业务**，以及**所有业务必须守的硬要求**。
-> 依赖方向由 T0 结构审查按 §九.7 的口径**机器判定**；当前基线为空 = 零豁免。
+> 依赖方向由 T0 结构审查按 §九.7 的口径**机器判定**；零豁免。
 
 ### 九.1 判据（两条同时成立，才配独立成一个业务）
 
@@ -208,7 +208,7 @@
 | 测试支撑 | `src/tests/doubles/**`、`src/tests/builders/**` | 800 行 | 1200 行 |
 | 内联测试块 | 实现文件里的 `#[cfg(test)] mod tests { … }` | 200 行 | 400 行 |
 
-- 没有棘轮、没有历史行数快照：唯一的例外是 `size.js` 的 `EXEMPT`——一个文件一条、写明"为什么它是一件事"；条目不再超线即失败，必须删（当前只有 `src/kernel/detail/confine/windows/record.rs`）。
+- 没有棘轮、没有历史行数快照，也没有 `EXEMPT`：硬线写死在 `tests/gates/structure/size.js`，超线即失败。
 - 软线是气味：超线回执行数、IO 次数与文件头目的槽写不写得下，**不改变成败**；硬线是职责没拆完。
 - 内联测试只许**纯函数与全内存断言**；碰真实进程 / IO / 网络的用例放 `src/tests/`，不在实现文件里长成第二个测试文件。
 - 一个能力的 `api.rs` ≤ **20 个方法**——按「一个调用角色的面」计数；`registry` 是已知的宽面，**它仍是一个能力**（判据是 §九.1，不是方法数）。
@@ -232,27 +232,27 @@
 | **R12** | **端口只有一个持有者**：定义它的那个能力的 `service.rs`；别人只拿 `api` 面。**例外**：`kernel` 的机制端口是全项目共享的机制接口 |
 | **R13** | **跨能力的同形重复不许存在**：要么收进唯一所有者，要么独立成一个业务（见「判据」第 2 条） |
 
-### 九.7 依赖方向门禁与基线
+### 九.7 依赖方向与能力内部判据
 
-- `node run-tests.js` 的 T0 结构审查按下列判据机器判定（规则在 `tests/gates/structure/dependency.js` 与 `tests/gates/structure/capability.js`，逐条清单用 `node run-tests.js --list`；豁免清单分别在 `tests/dependency-baseline.json` 与 `tests/structure-baseline.json`）：
+- `node run-tests.js` 的 T0 结构审查按下列判据机器判定（规则在 `tests/gates/structure/dependency.js` 与 `tests/gates/structure/capability.js`，逐条清单用 `node run-tests.js --list`；零豁免，实际违规集合必须为空）：
 
 - **apiOnly**：跨能力引用必须以 `::api` 结尾；任何非根引用别人的 `ports` 都算违规；
 - **apiPorts** / **domainPorts**：`api` 与 `domain` 都不引端口；
 - **foreignImpl**：不得给别的能力的类型写 `impl`（`node run-tests.js`）；
 - **coreCycles**：能力节点图无环；
-- **internal**（能力内部）：`service` 不引本能力 `detail` 或 `kernel::detail`；`service` 不直接做 IO（`std::fs` / `Command` / 网络）；同能力的方法族之间不成环；覆盖 `api`（含 `api.rs` 与 `api/` 子目录）/ `service` / `domain` / `detail` 四个分区；
-- **fileSize**（文件粒度）：按角色分档判行数（实现 / 测试用例 / 测试支撑）与内联测试块，软线只回执、硬线失败，豁免逐条写明理由（`tests/gates/structure/size.js`）；
+- **internal**（能力内部）：`service` 不引本能力 `detail` 或 `kernel::detail`；`service` 不直接做 IO（`std::fs` / `Command` / 网络 / `canonicalize`）；同能力的方法族之间不成环；覆盖 `api`（含 `api.rs` 与 `api/` 子目录）/ `service` / `domain` / `detail` 四个分区；
+- **fileSize**（文件粒度）：按角色分档判行数（实现 / 测试用例 / 测试支撑）与内联测试块，软线只回执、硬线失败，无 `EXEMPT`（`tests/gates/structure/size.js`）；
 - **reverse** / **presentation**：能力不反向依赖根或呈现层；
 - **channelCross**：呈现层的两个渠道（`cli` 与 `web`）互不依赖；
 - **unitMap**：各单元的 `unit-map.md` 合起来与磁盘**双向一致**（结构审查）；**文档链接**：代码注释里的 `docs/**.md` 引用由结构审查判，文档之间的 md 链接与根 `*.md` 路由表由**文档审查**判（本地全量入口的「T0 结构审查」步骤跑全部门禁、含文档审查；CI 拆成 `docs` / `structure` 两个 job，`node run-tests.js --audit=docs` / `--audit=structure`）；
-- **commentContract**：全仓 `.rs` 的文件头四槽（目的 / 管 / 不管 / 联动）、`pub` 项的条目槽（目的 / 参数 / 返回 / 错误 / 约束）与行内注释限量；存量（`文件 × 规则` → 计数）记在 `tests/comment-baseline.json`，门禁只减不增：新增与应销账都硬失败（见 §十）。
+- **commentContract**：全仓 `.rs` 的文件头四槽（目的 / 管 / 不管 / 联动）、`pub` 项的条目槽（目的 / 参数 / 返回 / 错误 / 约束）与行内注释限量；零存量：任何一处违规都直接失败（见 §十）。
 
-- **当前基线为空（零豁免）**：任一判据不成立即报错；豁免条目一旦不再成立，门禁报「基线豁免已过期」强制销账。
+- **零豁免**：任一判据不成立即报错；不存在基线文件、豁免条目或过期销账流程。
 
 ## 十、注释契约
 
 > 代码注释只描述**当前**情况：这份文件是什么、管什么、不管什么、和谁联动。
-> **格式**由 T0 的 `commentContract` 判据机器判定（棘轮 + 销账，见十.4）；**内容**层面的卫生（悬挂引用这类）另由 `run-hygiene.js` 报，不进 T0。
+> **格式**由 T0 的 `commentContract` 判据机器判定（零豁免，见十.4）；**内容**层面的卫生（悬挂引用这类）另由 `run-hygiene.js` 报，不进 T0。
 
 - 开发历史归 git，待办与路线归 `tests/gaps.yaml`，行为约束归用例——注释里复述它们只会多一份会漂的副本。
 
@@ -274,7 +274,7 @@
 
 ### 十.2 条目（`///`，只强制 `pub` 项）
 
-- `pub` 项（含 `pub(crate)`、含 `pub` 字段）的文档块：**首行必须是 `目的：…`**，之后每一行**必须是已知槽**或缩进续行——槽外不许有行，散文没有地方藏（`tests/comment-baseline.json`）：
+- `pub` 项（含 `pub(crate)`、含 `pub` 字段）的文档块：**首行必须是 `目的：…`**，之后每一行**必须是已知槽**或缩进续行——槽外不许有行，散文没有地方藏（`tests/gates/structure/comments.js`）：
 
 ```rust
 /// 目的：它是什么（一句话）。
@@ -299,19 +299,14 @@
 - 词表只收**叙事性**词：领域词（`临时 agent`、`后续片段`、`本地遗留`、`暂未暴露`）不算——它们描述的是当前状态。
 - 全仓同类措辞由 `run-hygiene.js` 的语义卫生只报（见 `docs/testing/quality-isolation.md`），不进门禁。
 
-### 十.4 强制方式（棘轮 + 销账）
+### 十.4 强制方式（零豁免）
 
-- `commentContract` 对**全仓**都判，存量放在 `tests/comment-baseline.json` 里（键是 `文件 × 规则`，值是**计数**——不记行号，行号会漂）。棘轮**只减不增**，T0 结构审查报两种：
-
-- **新增**：某 `文件 × 规则` 的计数比快照多 → 硬失败。快照里没有的文件从 0 起算，所以**新文件零容忍**（`tests/comment-baseline.json`）；
-- 老文件同类变多同样算新增（不许把新违规藏进老文件的同类存量里）；
-- **应销账**：某计数比快照少（含整条消失）→ 同样硬失败（本仓基线的既有规矩：条目一旦不再成立必须销账，见 §九.7 的依赖基线）（`tests/comment-baseline.json`）。
-
-- 收紧快照：`node run-hygiene.js --tighten`——**卫生工具是唯一会写它的地方**，且**只能往下**：出现任何新增就拒绝写盘（`tests/comment-baseline.json`）（先违规、再收紧等于把违规洗成存量）。门禁只读、不做任何写动作。收紧后连同本次改动一起提交，diff 里就是减少的那些计数。
+- `commentContract` 对**全仓**都判：扫描出的每一处违规都是硬失败，没有存量快照、没有应销账流程，也没有收紧入口（`tests/gates/structure/comments.js`）。
+- 门禁只读、不做任何写动作；格式判定与 `node run-hygiene.js` 的报告共用同一份词法。
 
 ## 检查
 - 分层与依赖方向 → T0 结构审查（`node run-tests.js`）的 apiOnly / apiPorts / domainPorts / foreignImpl / coreCycles / reverse / presentation 判据（`tests/gates/structure/dependency.js`；清单 `node run-tests.js --list`）。
-- 注释契约 → `commentContract` 判据（`tests/gates/structure/comments.js`，存量快照 `tests/comment-baseline.json`，只减不增）。
+- 注释契约 → `commentContract` 判据（`tests/gates/structure/comments.js`，零豁免）。
 - 文档引用与单元地图 → 结构审查的 `unitMap` 与代码注释文档引用（`tests/gates/structure/map.js`）、文档审查的 md 链接与根文档路由（`tests/gates/docs/`）。
 
 ## 路由

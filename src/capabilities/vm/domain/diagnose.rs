@@ -1,7 +1,7 @@
 //! 目的：guest 只读诊断的纯逻辑——把 helper 输出的 JSON 洗成宿主侧结构体，并把失败原因收在一处。
-//! 管：报告结构（键与 helper 输出一一对应）、parse_report 的合法性判定、七类失败文案。
+//! 管：报告结构（键与 helper 输出一一对应）、parse_report 的合法性判定、七类失败文案、助手诊断协议常量与预检命令。
 //! 不管：guest 通道怎么执行（service.rs）、policy 怎么拼（detail/qemu.rs）、脚本正文（detail/guest_helper.rs）。
-//! 联动：api.rs 重导出；service.rs 的 guest_diagnose 用它解析报告并给出原因。
+//! 联动：api.rs 重导出；service.rs 的 guest_diagnose 用它解析报告、识别 helper 标记并给出原因；detail/guest_helper.rs 与通道侧从这里取协议常量。
 
 use serde::{Deserialize, Serialize};
 
@@ -80,6 +80,35 @@ pub struct GuestMeta {
 
 /// 目的：本次诊断给的有界超时（秒）：guest 里采两轮 /proc 快照 + 汇总，正常远低于它。
 pub const DIAGNOSE_TIMEOUT_SECS: u64 = 15;
+
+/// 目的：guest 内助手路径（会话可写层里，随每台 guest 一起重建）；围栏执行与诊断同一条通道共用它。
+/// 约束：字面量只此一处——安装侧（detail/guest_helper.rs）与通道侧都从这里取。
+pub const HELPER_PATH: &str = "/usr/local/sbin/solomni-guest-fence";
+
+/// 目的：超时的机器标记——通道据此产出 `[shell] 超时（N 秒）` 并把标记剥掉（人读文案在 ProcessTexts）。
+pub const HELPER_TIMEOUT_MARKER: &str = "solomni-guest-fence: timeout";
+
+/// 目的：诊断出错时 helper 写到 stderr 的前缀（与围栏的 `solomni-guest-fence: ` 分开，便于宿主分流）。
+pub const HELPER_DIAGNOSE_PREFIX: &str = "solomni-guest-diagnose: ";
+
+/// 目的：诊断失败后的**有界预检**——一条命令区分「helper 不在 / 缺 python3 / 都对」，宿主据此给不同原因。
+/// 约束：命令自带 `timeout 10`（未围栏通道的外层预算很长，不能靠它兜底）；三个标记互斥。
+pub fn probe_command() -> String {
+    format!(
+        "timeout 10 sh -c 'test -x {helper} || {{ echo {no_helper}; exit 3; }}; command -v python3 >/dev/null 2>&1 || {{ echo {no_python}; exit 4; }}; echo {ok}'",
+        helper = HELPER_PATH,
+        no_helper = PROBE_NO_HELPER,
+        no_python = PROBE_NO_PYTHON,
+        ok = PROBE_OK
+    )
+}
+
+/// 目的：预检标记——helper 可执行位不在。
+pub const PROBE_NO_HELPER: &str = "SOLOMNI_DIAG_PROBE=no-helper";
+/// 目的：预检标记——helper 在，但 guest 里没有 python3。
+pub const PROBE_NO_PYTHON: &str = "SOLOMNI_DIAG_PROBE=no-python";
+/// 目的：预检标记——helper 与 python3 都在（失败原因不是这两个）。
+pub const PROBE_OK: &str = "SOLOMNI_DIAG_PROBE=ok";
 
 /// 目的：租约没有活 guest——与 service::run_guest 的同一句事实（调用方一眼看出不是别的问题）。
 pub fn no_live_guest(lease: &str) -> String {

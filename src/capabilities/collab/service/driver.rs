@@ -1,7 +1,7 @@
-//! **回合驱动**：在一条 `AgentSession` 上跑一个回合（单 agent 的话 / 子会话的任务 / 讨论席的发言 / 压缩）。
-//!
-//! 为什么是**自由函数**而不是 `impl AgentSession`：会话类型归会话能力、引擎归协作能力——
-//! 给别人的类型写 `impl` 是另一种互相引入（R1），所以驱动以「会话当参数」的形式写在这里。
+//! 目的：回合驱动——在一条 AgentSession 上跑一个回合（单 agent 的话 / 子会话的任务 / 讨论席的发言 / 压缩）。
+//! 管：say / dispatch_task / discussion_turn / continue_reply / compact_session 五个自由函数，把会话当参数驱动。
+//! 不管：会话类型（归会话能力）与轮循环本体（在 round.rs）；不给别人的类型写 impl（会形成互相引入）。
+//! 联动：依赖 crate::capabilities::session::api::AgentSession 与 round::converse_with；契约见 docs/session/session-model.md。
 
 use super::discussion::*;
 use super::round::*;
@@ -159,8 +159,8 @@ fn maybe_compact(
     }
 }
 
-/// 发言：先把 @ 引用改写成寻址 → 压入用户消息 → 逐轮（文本行 / 工具行）落转录。
-/// 改写在这一处完成，所以转录行与进上下文的消息是同一份文本（转录即内容）。
+/// 目的：发言：先把 @ 引用改写成寻址 → 压入用户消息 → 逐轮（文本行 / 工具行）落转录。
+///   改写在这一处完成，所以转录行与进上下文的消息是同一份文本（转录即内容）。
 pub fn say(
     s: &mut AgentSession,
     text: &str,
@@ -181,8 +181,8 @@ pub fn say(
     rounds_events(s, identity, live, sink);
 }
 
-/// **派发并跑这一回合**：注入任务（`note_task`）后正常问模型。
-/// 节点派发只有这一条语义——CLI 与 Web 各自只是"点火"，不各写一套（见 session-model.md 四之二）。
+/// 目的：**派发并跑这一回合**：注入任务（`note_task`）后正常问模型。
+///   节点派发只有这一条语义——CLI 与 Web 各自只是"点火"，不各写一套（见 session-model.md 四之二）。
 pub fn dispatch_task(
     s: &mut AgentSession,
     text: &str,
@@ -209,10 +209,10 @@ pub fn dispatch_task(
     rounds_events(s, identity, live, sink);
 }
 
-/// 讨论席的一个**成员回合**：与单 agent / 节点**同一条轮循环**（见 TurnRun），
-/// 差别只有三样：身份块、这一回合的工具面（角色表发放）、本回合提示；外加认协作表态（动词）。
-/// 产出落进**本会话**（这是它在这场工作里的经历）：回合标记（系统行）+ 逐轮的权威行；
-/// 返回这一回合的结论（表态 / 正文 / 思维链）交主会话收下（核实行留在它自己的会话里）。
+/// 目的：讨论席的一个**成员回合**：与单 agent / 节点**同一条轮循环**（见 TurnRun），
+///   差别只有三样：身份块、这一回合的工具面（角色表发放）、本回合提示；外加认协作表态（动词）。
+///   产出落进**本会话**（这是它在这场工作里的经历）：回合标记（系统行）+ 逐轮的权威行；
+///   返回这一回合的结论（表态 / 正文 / 思维链）交主会话收下（核实行留在它自己的会话里）。
 #[allow(clippy::too_many_arguments)]
 pub fn discussion_turn(
     s: &mut AgentSession,
@@ -253,7 +253,7 @@ pub fn discussion_turn(
     ))
 }
 
-/// 继续：末条已是用户发言，直接用现有对话问模型（不新增用户消息）。
+/// 目的：继续：末条已是用户发言，直接用现有对话问模型（不新增用户消息）。
 pub fn continue_reply(
     s: &mut AgentSession,
     identity: &str,

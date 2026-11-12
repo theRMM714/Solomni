@@ -1,7 +1,7 @@
-//! **核心手柄**：把 `Conductor` 搬到它自己的执行线程，命令与事件都经这里。
-//!
-//! 队列只占「取 / 交」两步：**长步骤生成在核心线程上跑**（见 docs/presentation/contracts.md）；
-//! 停止 / 取消由 `kernel::api::JobRegistry` 承担、不进队列，所以生成期间照样立刻生效。
+//! 目的：核心手柄——把 Conductor 搬到它自己的执行线程，命令与事件都经这里。
+//! 管：命令队列的「取 / 交」两步与长步骤在核心线程上的执行；事件台的订阅出口；代理会话的工具注入。
+//! 不管：长步骤本身的业务逻辑（在 service）；停止 / 取消（由 kernel::api::JobRegistry 承担、不进队列）。
+//! 联动：呈现层与核心共用 api 的 Ops 契约（docs/presentation/contracts.md）；事件台由核心独占生产。
 
 use super::*;
 use crate::capabilities::conductor::service::Conductor;
@@ -280,8 +280,8 @@ impl ConductorHandle {
         }
     }
 
-    /// 代理会话：把代理工具的成员侧执行面（`ProxyHandler`）装进这一回合的工具环境。
-    /// 执行经队列桥回到核心线程，核心状态的所有权不变。非代理会话、或已装过，什么都不做。
+    /// 目的：代理会话——把代理工具的成员侧执行面（`ProxyHandler`）装进这一回合的工具环境。
+    ///   执行经队列桥回到核心线程，核心状态的所有权不变；非代理会话、或已装过，什么都不做。
     pub(super) fn inject_proxy_handler(
         &self,
         sid: &str,

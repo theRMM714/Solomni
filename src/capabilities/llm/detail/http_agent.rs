@@ -1,13 +1,14 @@
-//! 出站 HTTP 的 llm 侧包装：代理与 TLS 机制在 kernel/outbound（这里只按 llm 的预算构建）。
-//! ureq 3 默认把 4xx/5xx 变成**不带响应体**的 Error；这里关掉（http_status_as_error(false)），
-//! 由 finish_request 统一判状态——这样错误文案里才留得住供应商自己的原话。
+//! 目的：llm 出站 HTTP 的 ureq 代理与 TLS 机制封装。
+//! 管：按预算构建 Agent、TLS 后端选择、错误分类与脱敏、统一判状态（保留供应商原话）。
+//! 不管：请求内容与端点选择（在 endpoint / http_chat）；日志与转录。
+//! 联动：http_stream、model_catalog 复用；entry/probes/https.rs 也用 TLS 后端与错误分类；代理与 TLS 底层在 kernel/outbound。
 
-/// 构建带连接/总超时的代理；TLS 后端按平台显式装配（实现在 kernel/outbound）。
+/// 目的：构建带连接/总超时的代理；TLS 后端按平台显式装配（实现在 kernel/outbound）。
 pub fn agent(connect_secs: u64, total_secs: u64) -> ureq::Agent {
     crate::kernel::detail::outbound::agent(connect_secs, total_secs)
 }
 
-/// 这条构建实际用的 TLS 后端（编译期事实）：探针与自检据此如实报出来，不靠人猜。
+/// 目的：这条构建实际用的 TLS 后端（编译期事实）：探针与自检据此如实报出来，不靠人猜。
 pub fn tls_backend() -> &'static str {
     crate::kernel::detail::outbound::tls_backend()
 }
@@ -17,16 +18,15 @@ pub fn tls_backend() -> &'static str {
 /// 现场：沙箱把工作区外的用户凭证存储挡住时，连 curl.exe 都握不了手；放开沙箱后同一条链路立刻通。
 const SEC_E_NO_CREDENTIALS: i64 = 0x8009_030E_u32 as i64;
 
-/// 出站错误的**性质**分类（只用于如实区分"环境连不上外网"与"我们自己的链路坏了"）：
-/// - 网络类（Io / 域名解析不到 / 连接失败 / 超时）→ `no-net`：环境问题，探针据此 env-skip；
-/// - TLS 错误里**明确是"本进程取不到系统凭证"**那一码 → `env-tls`：这是本机/本进程的环境结论，
-///   不是"我们链路坏了"——但判据必须精确到错误码，其余 TLS 错误照旧算我们的问题；
-/// - 其余 TLS 错误 → 我们链路的问题，探针必须报失败（不许把 TLS 坏掉说成"环境不允许"）；
-/// - 真正认不出的错误由 `_` 收 → `fail`，原始原文照打，绝不因为认不出性质就当成"环境不允许"。
-///
-/// **TLS 家族不止一个变体**：Windows 上 native-tls 的错误走 `NativeTls`（不是通用的 `Tls` 壳），
-/// 只匹配 `Tls` 会让真机上的凭证错误落进 `_` 被报成 `fail`。
-/// 两个变体都按同一份判据（错误原文里的稳定码）分类。
+/// 目的：出站错误的**性质**分类（只用于如实区分"环境连不上外网"与"我们自己的链路坏了"）：
+///    - 网络类（Io / 域名解析不到 / 连接失败 / 超时）→ `no-net`：环境问题，探针据此 env-skip；
+///    - TLS 错误里**明确是"本进程取不到系统凭证"**那一码 → `env-tls`：这是本机/本进程的环境结论，
+///      不是"我们链路坏了"——但判据必须精确到错误码，其余 TLS 错误照旧算我们的问题；
+///    - 其余 TLS 错误 → 我们链路的问题，探针必须报失败（不许把 TLS 坏掉说成"环境不允许"）；
+///    - 真正认不出的错误由 `_` 收 → `fail`，原始原文照打，绝不因为认不出性质就当成"环境不允许"。
+///      **TLS 家族不止一个变体**：Windows 上 native-tls 的错误走 `NativeTls`（不是通用的 `Tls` 壳），
+///      只匹配 `Tls` 会让真机上的凭证错误落进 `_` 被报成 `fail`。
+///      两个变体都按同一份判据（错误原文里的稳定码）分类。
 pub fn classify(e: &ureq::Error) -> &'static str {
     match e {
         ureq::Error::Io(_)
@@ -43,10 +43,10 @@ pub fn classify(e: &ureq::Error) -> &'static str {
     }
 }
 
-/// 错误原文里有没有"取不到系统凭证"这个稳定码（十六进制与**有符号十进制**两种写法都认）。
-/// 有符号那一份必须按 i32 渲染：Windows 把它印成 `-2146893042`，而按 u32 渲染是 `2148074254`——
-/// 两者是同一个码，少认一个就会把环境结论误报成失败。
-/// 只在**已经判定是 TLS 错误**之后才问它——所以这条判据不会把别的失败误判成环境结论。
+/// 目的：错误原文里有没有"取不到系统凭证"这个稳定码（十六进制与**有符号十进制**两种写法都认）。
+///    有符号那一份必须按 i32 渲染：Windows 把它印成 `-2146893042`，而按 u32 渲染是 `2148074254`——
+///    两者是同一个码，少认一个就会把环境结论误报成失败。
+///    只在**已经判定是 TLS 错误**之后才问它——所以这条判据不会把别的失败误判成环境结论。
 pub(crate) fn lacks_system_credentials(text: &str) -> bool {
     let hex = format!("{:08X}", SEC_E_NO_CREDENTIALS as u32);
     let signed = (SEC_E_NO_CREDENTIALS as u32 as i32).to_string();
@@ -54,7 +54,7 @@ pub(crate) fn lacks_system_credentials(text: &str) -> bool {
     upper.contains(&hex) || text.contains(&signed)
 }
 
-/// 出站错误里的密钥一律替换掉再出适配层（红线）。
+/// 目的：出站错误里的密钥一律替换掉再出适配层（红线）。
 pub fn redact(s: String, key: &str) -> String {
     if key.is_empty() {
         s
@@ -63,10 +63,10 @@ pub fn redact(s: String, key: &str) -> String {
     }
 }
 
-/// 一次出站请求的**统一收口**：把"供应商答了但状态不对"与"网络/协议错误"分开，
-/// 并保证错误文案里不含密钥。返回 Err((文案, 可否换下一个候选))。
-/// 为什么自己判状态：ureq 3 默认把 4xx/5xx 变成不带响应体的 Error，
-/// 而我们要把供应商的原话如实回报（探测与失败诊断都靠它）。
+/// 目的：一次出站请求的**统一收口**：把"供应商答了但状态不对"与"网络/协议错误"分开，
+///    并保证错误文案里不含密钥。返回 Err((文案, 可否换下一个候选))。
+///    为什么自己判状态：ureq 3 默认把 4xx/5xx 变成不带响应体的 Error，
+///    而我们要把供应商的原话如实回报（探测与失败诊断都靠它）。
 pub fn finish_request(
     got: Result<ureq::http::Response<ureq::Body>, ureq::Error>,
     key: &str,

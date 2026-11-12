@@ -3,7 +3,7 @@
 //! 不管：围栏与进程账的机制本身（在 `src/kernel/detail/confine` 与 `src/kernel/detail/procs.rs`）；启动形态。
 //! 联动：由工具进程按 `--fence-run` 拉起、由 `procs::watch` 按 `--proc-watchdog` 拉起；`src/main.rs` 负责分发。
 
-/// 守门模式：读回围栏参数与命令，装围栏 → 跑命令 → 以工具退出码收场（失败如实报错，不静默）。
+/// 目的：守门模式——读回围栏参数与命令，装围栏 → 跑命令 → 以工具退出码收场（失败如实报错，不静默）。
 pub fn fence_run(args: &[String], flag: usize) -> i32 {
     let raw_job = args.get(flag + 1).cloned().unwrap_or_default();
     let command = match args.iter().position(|a| a == "--") {
@@ -193,7 +193,8 @@ fn report(done: Result<String, String>) -> i32 {
     }
 }
 
-/// （台账可能不存在：探针、夹具的台账被删、进程被杀）——隐藏模式，用户经文档知道它。
+/// 目的：--fence-clean 的整体收尾——按台账回收陈旧授权（隐藏模式，用户经文档知道它）。
+/// 约束：台账可能不存在（探针、夹具的台账被删、进程被杀）；回收结果如实报告。
 pub fn fence_clean(root: &std::path::Path) -> i32 {
     let home = root.join(".home");
     let mut lines: Vec<String> = Vec::new();

@@ -1,10 +1,10 @@
 //! 目的：`HostProbe` 端口的机制实现——把本机事实读出来。
-//! 管：读环境变量、查路径存在性、按平台判定虚拟机能力。
-//! 不管：任何写动作（不执行程序、不安装、不改配置）；事实怎么解释（调用方定）。
+//! 管：读环境变量、查路径存在性、读文件戳（大小与修改时间）、规范化真实路径、建删一次可写探针、按平台判定虚拟机能力。
+//! 不管：任何业务动作（不执行程序、不安装、不改配置）；事实怎么解释（调用方定）。
 //! 联动：端口在 `src/kernel/ports.rs`；由入口层的组合根构造（`src/entry/`）。
 
-use crate::kernel::ports::HostProbe;
-use std::path::Path;
+use crate::kernel::ports::{HostMetadata, HostProbe};
+use std::path::{Path, PathBuf};
 
 #[cfg(windows)]
 const EXE_SUFFIX: &str = ".exe";
@@ -35,6 +35,25 @@ pub fn find_exe(name: &str) -> Option<std::path::PathBuf> {
     None
 }
 
+/// 目的：本地文件的最小事实——"还是不是同一份"（大小 + 修改时间），只用于判断要不要重做。
+/// 约束：只描述文件本身，不含内容；读不到就是 IO 错误，由调用方决定文案。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileStamp {
+    /// 字节数。
+    len: u64,
+    /// 修改时间；平台读不到时为 `None`。
+    modified: Option<std::time::SystemTime>,
+}
+
+/// 目的：读一个本地文件的戳（只读元数据，不打开内容）。
+pub fn file_stamp(path: &Path) -> std::io::Result<FileStamp> {
+    let meta = std::fs::metadata(path)?;
+    Ok(FileStamp {
+        len: meta.len(),
+        modified: meta.modified().ok(),
+    })
+}
+
 /// 目的：`HostProbe` 端口的生产实现——把本机事实读出来。
 pub struct HostProbeAdapter;
 
@@ -45,6 +64,27 @@ impl HostProbe for HostProbeAdapter {
 
     fn is_dir(&self, path: &Path) -> bool {
         path.is_dir()
+    }
+
+    /// 规范化真实路径（目录联接、映射盘、verbatim 前缀都在这里被解析掉）。
+    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
+        std::fs::canonicalize(path)
+    }
+
+    /// 读路径的元数据事实——只问"在不在、是不是目录"。
+    fn host_metadata(&self, path: &Path) -> std::io::Result<HostMetadata> {
+        let meta = std::fs::metadata(path)?;
+        Ok(HostMetadata {
+            is_dir: meta.is_dir(),
+        })
+    }
+
+    /// 可写探测：在目录下建一个探针文件再删掉（写入失败如实返回错误）。
+    fn probe_writable(&self, dir: &Path) -> std::io::Result<()> {
+        let probe = dir.join(format!(".solomni-write-probe-{}", std::process::id()));
+        std::fs::write(&probe, b"probe")?;
+        let _ = std::fs::remove_file(&probe);
+        Ok(())
     }
 
     /// 可执行位：unix 上"是文件 + 有任一执行位"；Windows 上可执行性由扩展名决定，按"是文件"。
@@ -93,5 +133,27 @@ impl HostProbe for HostProbeAdapter {
             // macOS（11+ 都能起虚拟机）与其它平台：只问事实，不起任何虚拟机。
             cfg!(target_os = "macos")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::file_stamp;
+
+    #[test]
+    fn file_stamp_reads_size_and_time_and_rejects_missing_paths() {
+        let dir = crate::tests::scratch("host-probe-stamp");
+        let path = dir.join("entry.txt");
+        std::fs::write(&path, b"hello").expect("写样例文件");
+
+        let stamp = file_stamp(&path).expect("读文件戳");
+        assert_eq!(stamp.len, 5, "字节数要如实带出");
+        assert!(stamp.modified.is_some(), "本机要能读到修改时间");
+        assert!(
+            file_stamp(&dir.join("missing.txt")).is_err(),
+            "不存在的路径必须报错"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

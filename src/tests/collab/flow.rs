@@ -1,4 +1,8 @@
-//! 端到端流程：整理派发、代拟确认、执行与验收、工具模块
+//! 目的：端到端钉协作五阶段：整理派发、代拟确认、执行与验收、工具模块。
+//! 管：五阶段演示、代拟名单、名册回写重建、讨论逐片外送、工具模块执行、核心操作必须 tool_call、正文 JSON 如实报错。
+//! 不管：单元级讨论/审查细目（discussion.rs、review.rs）。
+//! 联动：src/capabilities/collab/、conductor 创建/继续、tests/doubles。
+
 use super::super::builders::*;
 use super::super::prelude::*;
 #[test]
@@ -187,8 +191,7 @@ pub(crate) fn collab_delegated_roster_written_back_and_rebuilt_from_meta() {
 }
 
 // ---------- 平衡提取器 ----------
-
-/// 讨论回合也要**逐片外送**：Chunk 的内容必须真的外送，否则界面整回合不动。
+/// 目的：讨论回合也要**逐片外送**：Chunk 的内容必须真的外送，否则界面整回合不动。
 #[test]
 pub(crate) fn discussion_turn_streams_deltas_and_never_leaks_the_envelope() {
     let seen = Arc::new(Mutex::new(Vec::new()));
@@ -257,10 +260,8 @@ pub(crate) fn core_collab_tool_modules_run_in_execution() {
         ok: true,
     });
     let mut member = BTreeMap::new();
-    // 脚本按**通道**各自一份（子会话拿的是新的一份）：所以第一项要同时能应付两条路——
-    // 讨论开场收下它（tool 动词在讨论里只落一行），节点执行则真的跑这个工具。
-    // 一个 agent 一个会话：讨论与**节点执行**共用同一条通道，所以脚本按"整场经历"排。
-    // 开场同意（收敛）→ 整理 → 同意方案 → 节点执行时真的跑那个工具。
+    // 脚本按**通道**各自一份：首项要同时应付两条路——讨论开场收下它（tool 动词只落一行），节点执行真跑它。
+    // 一个 agent 一个会话：讨论与节点执行共用通道，脚本按"整场经历"排——同意 → 整理 → 同意方案 → 执行。
     member.insert(
         "a".to_string(),
         vec![
@@ -312,8 +313,7 @@ pub(crate) fn core_collab_tool_modules_run_in_execution() {
     assert_eq!(runner.calls.lock().expect("锁").len(), 1);
 }
 // ---------- 运行包：契约、包库、诊断、执行计划 ----------
-
-/// 核心操作必须走**工具调用**：正文里手写 JSON 不再被接受（正文 JSON 既无 schema 校验也不进工具台账）。
+/// 目的：核心操作必须走**工具调用**：正文里手写 JSON 不再被接受（正文 JSON 既无 schema 校验也不进工具台账）。
 #[test]
 pub(crate) fn core_operations_require_a_tool_call_not_body_json() {
     let systools = test_systools();
@@ -354,9 +354,9 @@ pub(crate) fn core_operations_require_a_tool_call_not_body_json() {
     );
 }
 
-/// **核心操作也要能先核实**：模型先发只读核实（read），核心执行并把结果回灌，
-/// 然后再要那一次核心操作调用（plan）。单次调用会让模型一想核实就被判"没有调用 plan"，
-/// 整步中断。
+/// 目的：**核心操作也要能先核实**：模型先发只读核实（read），核心执行并把结果回灌，
+///   然后再要那一次核心操作调用（plan）。单次调用会让模型一想核实就被判"没有调用 plan"，
+///   整步中断。
 #[test]
 pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
     let io = Arc::new(InMemorySysIo::new());
@@ -436,7 +436,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
     );
 }
 
-/// 正文里手写 JSON 不再被当成核心操作：**如实报错**，不把原文糊成方案。
+/// 目的：正文里手写 JSON 不再被当成核心操作：**如实报错**，不把原文糊成方案。
 #[test]
 pub(crate) fn body_json_is_not_a_core_operation() {
     let mut chat = scripted(vec![
@@ -459,7 +459,7 @@ pub(crate) fn body_json_is_not_a_core_operation() {
     assert!(err.contains("没有调用 plan"), "{}", err);
 }
 
-/// 回报走**工具调用**（不是正文 JSON）：执行席拿得到它，调用它不碰文件、回执带出回报内容。
+/// 目的：回报走**工具调用**（不是正文 JSON）：执行席拿得到它，调用它不碰文件、回执带出回报内容。
 #[test]
 pub(crate) fn executor_reports_through_a_tool_call() {
     // 角色表把 report 发给执行席（越权校验的判据就是它）。
@@ -497,7 +497,7 @@ pub(crate) fn executor_reports_through_a_tool_call() {
     );
 }
 
-/// 返工必须带上**上次没通过的原因**：否则 agent 只能把同一件事原样再做一遍。
+/// 目的：返工必须带上**上次没通过的原因**：否则 agent 只能把同一件事原样再做一遍。
 #[test]
 pub(crate) fn rework_prompt_carries_the_acceptance_note() {
     // 验收没过时，渲染出的提示词要含上次的原因；首轮（没有结论）不出现返工段。

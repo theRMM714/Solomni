@@ -32,7 +32,7 @@
 - T0 九项已并入同一入口（`run-tests.js`）：步骤、可行状态与环境跳过口径以 [docs/testing/levels.md](docs/testing/levels.md) 的 T0 生成段为准（`env-skip` 不算通过）；查清单用 `node run-tests.js --list`。
 - 缺口账：全局 `tests/gaps.yaml`、跨平台 `tests/cross-platform/gaps.yaml`、平台 `tests/<平台>/gaps.yaml`；条目、数量与状态一律以账本为准（门户不复述，也不保留完成历史），`TEST-REPORT-ACCEPTED` 只看平台与跨平台账（`run-tests.js`）；格式与验收见 [docs/testing/gaps-acceptance.md](docs/testing/gaps-acceptance.md)。
 - 判「环境不允许」只看被测试进程自己的令牌与行为，不拿二手字符串特征当判据；Windows 容器与写沙箱的判据、后果与处置见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md) 的「真机入口」。
-- 门禁之外的仓库卫生由 `node run-hygiene.js` 报（注释契约棘轮 + 内容 / 语义卫生；不进 T0、不进 `TEST-REPORT-*`、不改成败），见 [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md) 的「门禁之外」。
+- 门禁之外的仓库卫生由 `node run-hygiene.js` 报（内容 / 语义卫生；注释契约的格式判定已进 T0，见 [ARCHITECTURE.md](ARCHITECTURE.md) §十），见 [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md) 的「门禁之外」。
 - 谁做任务谁补测试：同次提交补用例、跑门禁，收口时同步文档（`AGENTS.md` 六）。
 
 ## 三、要做事时读哪一份

@@ -1,7 +1,7 @@
-//! 拟名单的**用例实现**：请核心报一份名单 → 按登记处与工作区核验 → 按模式收束。
-//!
-//! 它驱动 IO（一次模型调用 + 只读核实回路），所以不在 `domain/`；纯规则（模式收束）在
-//! `domain/proposal.rs`。协议只有这一处：两个调用方（推荐 / 代拟）走同一条 `slate` 工具载荷。
+//! 目的：拟名单的用例实现——请核心报一份名单，按登记处与工作区核验，再按模式收束。
+//! 管：一次模型调用与只读核实回路的驱动；picks 载荷的解析与逐条核验。
+//! 不管：提示词文案（在提示词册）；模式收束的纯规则（domain/proposal.rs）；前置判据提示（归调用方）。
+//! 联动：协议只有这一处——两个调用方（推荐 / 代拟）走同一条 slate 工具载荷；入口 slate::api::propose。
 
 use crate::capabilities::llm::api::Msg;
 use crate::capabilities::prompt::api::Segment;
@@ -10,10 +10,9 @@ use crate::capabilities::session::api::core_operation;
 use crate::capabilities::slate::api::{Mode, Parties, Pick, Proposal, Request};
 use crate::capabilities::slate::domain::proposal::collapse;
 
-/// 拟一份名单：让核心按本次需求提出候选，按登记处与工作区现状核验成**可直接开工**的名单。
-///
-/// 前置判据（登记处有没有模型、核心默认设没设）**不在这里**：那是调用方对用户的提示
-///（怎么修），与名单本身的合法性无关——空登记处会让每个组装项因「模型不存在」被逐条拒收。
+/// 目的：拟一份可直接开工的名单——让核心按需求提候选，再按登记处与工作区现状核验。
+/// 约束：登记处有没有模型、核心默认设没设由调用方提示（怎么修），与名单合法性无关；
+///   空登记处会让每个组装项因「模型不存在」被逐条拒收。
 pub fn propose(parties: &Parties<'_>, req: &mut Request<'_>) -> Result<Proposal, String> {
     // 形态描述文案在提示词册里（代码不硬编码给模型的说明）。
     let mode_text = match req.mode {

@@ -1,7 +1,7 @@
-//! 真实通道：OpenAI 兼容 /chat/completions（可取消的 reqwest 流；见 http_stream）。
-//! 网关只做机制：给啥通道（供应商 + 模型）建啥会话；没有通道是调用方的前置条件失败，
-//! 这里**不回落假模型**。端点补全/回落规则见 endpoint 模块：无版本段先直连，404/405 再试 /v1。
-//! 密钥只在出站调用里使用，永不落提示词/转录/日志；错误信息经脱敏（红线）。
+//! 目的：真实通道——OpenAI 兼容 /chat/completions（可取消的流式请求）。
+//! 管：按通道（供应商 + 模型）建会话；流式分片解析；端点补全与回落；错误脱敏。
+//! 不管：端点候选逻辑（在 endpoint）；代理与 TLS（在 http_agent）；无通道时不回落假模型（前置条件失败）。
+//! 联动：实现 api::Chat 与 ports::ChatGateway；由 detail/mod.rs 重导出 HttpGateway 供组合根装配；流机制在 detail/http_stream.rs。
 
 use super::endpoint::{chat_candidates, memo_get, memo_set, resolve_candidates, Attempt, Memo};
 use crate::capabilities::llm::api::Channel;
@@ -10,8 +10,8 @@ use crate::capabilities::llm::api::{
 };
 use crate::capabilities::llm::ports::ChatGateway;
 
-/// 真实会话通道：拥有通道副本（含密钥；密钥不出适配层）。
-/// resolved = 本会话首次命中的有效端点，后续轮次直接复用，不再重复探测。
+/// 目的：真实会话通道：拥有通道副本（含密钥；密钥不出适配层）。
+///    resolved = 本会话首次命中的有效端点，后续轮次直接复用，不再重复探测。
 pub struct HttpChat {
     pub channel: Channel,
     pub provider_id: String,
@@ -123,8 +123,8 @@ pub(crate) fn attempt_with_tools(
     )
 }
 
-/// 发一段**合成好的 messages**（探针专用）：回放形状探测要发的不是普通消息，
-/// 而是含 tool_calls 与 role=tool 的历史。端点候选、脱敏与重试规则与真实请求完全一致。
+/// 目的：发一段**合成好的 messages**（探针专用）：回放形状探测要发的不是普通消息，
+///    而是含 tool_calls 与 role=tool 的历史。端点候选、脱敏与重试规则与真实请求完全一致。
 pub(crate) fn attempt_raw(
     url: &str,
     key: &str,
@@ -306,14 +306,14 @@ fn attempt_with_cancel(
     }
 }
 
-/// 真实网关：机制 only。通道由调用方解析后传入；这里不制造任何假模型。
+/// 目的：真实网关：机制 only。通道由调用方解析后传入；这里不制造任何假模型。
 pub struct HttpGateway {
     log: std::sync::Arc<dyn crate::kernel::ports::Log + Send + Sync>,
     memo: Memo,
 }
 
 impl HttpGateway {
-    /// 组合根注入日志端口（异常路径落盘）与共享端点记忆。
+    /// 目的：组合根注入日志端口（异常路径落盘）与共享端点记忆。
     pub fn with_log(
         log: std::sync::Arc<dyn crate::kernel::ports::Log + Send + Sync>,
         memo: Memo,

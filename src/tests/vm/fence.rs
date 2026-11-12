@@ -111,7 +111,7 @@ pub(crate) fn guest_helper_is_a_fail_closed_landlock_launcher() {
         script
     );
     // 诊断模式：策略里 diagnose=true 时在 Landlock restrict 之后只采 /proc、打一个 JSON，不 spawn 命令。
-    let helper = crate::capabilities::vm::detail::guest_helper::HELPER_DIAGNOSE_PREFIX;
+    let helper = crate::capabilities::vm::domain::diagnose::HELPER_DIAGNOSE_PREFIX;
     assert!(
         script.contains(helper),
         "诊断出错要用专用前缀（宿主据此区分「助手在、Python 侧失败」）：{}",

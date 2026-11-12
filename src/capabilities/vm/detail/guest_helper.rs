@@ -1,13 +1,10 @@
 //! 目的：Linux guest 内的执行助手——把 host 侧翻好的 per-agent 允许集交给 Landlock，再执行命令。
 //! 管：助手脚本文本、装进 guest、在 boot 后确认它可执行；超时/退出杀整棵进程树、环境白名单与输出由同一份策略驱动。
 //! 不管：策略从哪里来（host 侧 FenceSpec）、guest 通道实现（qemu.rs）。
-//! 联动：qemu.rs 在挂载后调用 install；exec_fenced 用 `HELPER_PATH` 执行。
+//! 联动：qemu.rs 在挂载后调用 install；exec_fenced 用 `HELPER_PATH` 执行；诊断协议常量在 `domain/diagnose.rs`。
 
 use crate::capabilities::vm::domain::guest::GuestRun;
 use crate::capabilities::vm::ports::GuestChannel;
-
-/// 目的：guest 内助手路径（会话可写层里，随每台 guest 一起重建）。
-pub const HELPER_PATH: &str = "/usr/local/sbin/solomni-guest-fence";
 
 /// 目的：助手缺省超时（与本机守门进程的 30 秒同一口径）；每次执行的 timeout_secs 由策略给，缺省用它。
 #[allow(dead_code)]
@@ -16,33 +13,11 @@ pub const HELPER_TIMEOUT_SECS: u64 = 30;
 /// 目的：助手诊断行的统一前缀（围栏装不上 / 起不了进程这类「没执行」的事实）。
 pub const HELPER_DIAG_PREFIX: &str = "solomni-guest-fence: ";
 
-/// 目的：超时的机器标记——通道据此产出 `[shell] 超时（N 秒）` 并把标记剥掉（人读文案在 ProcessTexts）。
-pub const HELPER_TIMEOUT_MARKER: &str = "solomni-guest-fence: timeout";
-
 /// 目的：被信号结束的机器标记——通道据此产出「退出码未知（被信号结束）」并剥掉标记。
 pub const HELPER_SIGNAL_MARKER: &str = "solomni-guest-fence: signal";
 
-/// 目的：诊断出错时 helper 写到 stderr 的前缀（与围栏的 `solomni-guest-fence: ` 分开，便于宿主分流）。
-pub const HELPER_DIAGNOSE_PREFIX: &str = "solomni-guest-diagnose: ";
-
-/// 目的：诊断失败后的**有界预检**——一条命令区分「helper 不在 / 缺 python3 / 都对」，宿主据此给不同原因。
-/// 约束：命令自带 `timeout 10`（未围栏通道的外层预算很长，不能靠它兜底）；三个标记互斥。
-pub fn probe_command() -> String {
-    format!(
-        "timeout 10 sh -c 'test -x {helper} || {{ echo {no_helper}; exit 3; }}; command -v python3 >/dev/null 2>&1 || {{ echo {no_python}; exit 4; }}; echo {ok}'",
-        helper = HELPER_PATH,
-        no_helper = PROBE_NO_HELPER,
-        no_python = PROBE_NO_PYTHON,
-        ok = PROBE_OK
-    )
-}
-
-/// 目的：预检标记——helper 可执行位不在。
-pub const PROBE_NO_HELPER: &str = "SOLOMNI_DIAG_PROBE=no-helper";
-/// 目的：预检标记——helper 在，但 guest 里没有 python3。
-pub const PROBE_NO_PYTHON: &str = "SOLOMNI_DIAG_PROBE=no-python";
-/// 目的：预检标记——helper 与 python3 都在（失败原因不是这两个）。
-pub const PROBE_OK: &str = "SOLOMNI_DIAG_PROBE=ok";
+// 协议常量的唯一定义在 domain/diagnose.rs；这里重导出，维持通道侧与测试的既有取用面。
+pub use crate::capabilities::vm::domain::diagnose::{HELPER_PATH, HELPER_TIMEOUT_MARKER};
 
 /// 目的：助手脚本正文。guest 只需 python3（虚拟根基线已自证）；缺 python3 时执行必然失败，不降级。
 pub const HELPER_SCRIPT: &str = r#"#!/usr/bin/env python3

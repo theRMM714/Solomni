@@ -1,4 +1,7 @@
-//! 入站能力面：**其它能力与呈现层只准用这里**（不许碰 `domain` / `ports`）。
+//! 目的：工作区能力的入站能力面——其它能力与呈现层只准用这里（不许碰 `domain` / `ports`）。
+//! 管：`Workspace` 用例 trait 与它的视图类型（沙箱寻址、文件视图、提交 / 拉取 / 还原 / 状态 / 回收），并重导出领域共享类型。
+//! 不管：用例实现（在 `service/`）；寻址与版本化的纯规则（在 `domain/`）；落盘机制（在 `detail/`）。
+//! 联动：实现见 `service.rs`；`tools` 借 `Place` / `Sandbox` 定位读写落点。
 
 pub use crate::capabilities::workspace::domain::asset::{
     media_hint, FileVersion, MAX_ASSET_BYTES, VERSION_TEXT_LIMIT,
@@ -135,8 +138,8 @@ pub struct CommitFileView {
     pub too_large: bool,
 }
 
-/// 工作区的**用例面**（`service.rs` 实现）：别的能力要工作区目录与版本化，走这里；
-/// 出站端口（`Workdirs` / `WorkStore`）**只由它持有**（R12）。
+/// 目的：工作区的**用例面**（`service.rs` 实现）：别的能力要工作区目录与版本化，走这里。
+/// 约束：出站端口（`Workdirs` / `WorkStore`）**只由它持有**（R12）。
 pub trait Workspace: Send + Sync {
     /// 目的：把根会话的工作区绑定落成布局投影（`Some` = 外部工作区根；`None` = 产品内布局）。
     /// 约束：会话 meta 是绑定的唯一真相；本调用只刷新会话目录里的布局投影，不碰工作区文件。

@@ -1,5 +1,8 @@
-//! 登记处能力测试：供应商 / 模型 / agent / 设置与通道解析。
-//! 归属判据：钉的是**本能力的不变式**；顺手经过别处只是路径，不是归属。
+//! 目的：钉供应商、模型、agent、设置与通道解析的不变式。
+//! 管：设置解析通道、供应商生命周期与密钥不泄、上下文 0 回落 128K、核心默认守卫、目录解析、端点候选回落、探测只回写结论、保留目录名。
+//! 不管：HTTP 入站（routes.rs）。
+//! 联动：src/capabilities/registry/。
+
 use super::builders::*;
 use super::prelude::*;
 
@@ -91,7 +94,7 @@ pub(crate) fn provider_lifecycle_and_key_never_leaks_to_view() {
     assert!(core.registry_mut().provider_remove("p1").unwrap());
 }
 
-/// 模型的上下文窗口：给了就按它存；0 = 用户不填（原样存 0），自动压缩按 128K 兜底。
+/// 目的：模型的上下文窗口：给了就按它存；0 = 用户不填（原样存 0），自动压缩按 128K 兜底。
 #[test]
 pub(crate) fn model_context_zero_means_not_filled_and_falls_back_to_128k() {
     let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]));
@@ -389,7 +392,6 @@ pub(crate) fn endpoint_resolve_candidates_retries_shape_mismatch_and_stops_on_fa
 }
 
 // ---------- 模块清单（内存来源） ----------
-
 #[test]
 pub(crate) fn a_probe_writes_back_only_conclusive_results() {
     use crate::capabilities::conductor::api::ProbeOutcome;
@@ -464,7 +466,7 @@ pub(crate) fn a_probe_writes_back_only_conclusive_results() {
     assert!(core.registry_mut().probe_model_tools("ghost").is_err());
 }
 
-/// 目录保留名校验（名单从 `systools/names.yaml` 注入）：大小写不敏感，普通名字放行。
+/// 目的：目录保留名校验（名单从 `systools/names.yaml` 注入）：大小写不敏感，普通名字放行。
 #[test]
 pub(crate) fn reserved_directory_names_are_rejected_case_insensitively() {
     let reserved = vec!["work".to_string(), "children".to_string()];

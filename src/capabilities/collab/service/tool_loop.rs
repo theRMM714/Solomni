@@ -1,6 +1,7 @@
-//! 成员回合里的**工具循环**：声明面 → 放行判定 → 并发调度 → 执行（内置 / 模块外部）→ 回填。
-//!
-//! 它只认 `MemberTools`（这一回合的工具面与观察账本），策略在这里，机制在 `tools` 的端口后面。
+//! 目的：成员回合里的工具循环——声明面 → 放行判定 → 并发调度 → 执行（内置 / 模块外部）→ 回填。
+//! 管：只认 MemberTools（这一回合的工具面与观察账本）；策略（放行表、并发调度、确认闸）在这里。
+//! 不管：模型调用（在 llm / session 端口后）；工具机制本身（在 tools 的端口后面）。
+//! 联动：执行经 tools 的 ToolExec 端口；回填顺序与转录行形状见 docs/session/session-model.md。
 
 use super::discussion::*;
 use crate::capabilities::llm::api::ToolInvoke;
@@ -9,8 +10,8 @@ use crate::capabilities::session::api::{MemberTools, SessionEvent};
 use crate::capabilities::tools::api::{Observations, ToolSchema};
 use crate::capabilities::workspace::api::ReadFact;
 use crate::kernel::api::ToolOutcome;
-/// 执行一次工具调用：内置优先；外部工具按模块走（模块为空时由 dispatch_external 如实报错）。
-/// 账本经**分支副本**回到本成员（见 run_branch）——串行与并发只有这一条执行路径。
+/// 目的：执行一次工具调用：内置优先；外部工具按模块走（模块为空时由 dispatch_external 如实报错）。
+///   账本经**分支副本**回到本成员（见 run_branch）——串行与并发只有这一条执行路径。
 pub(crate) fn run_one(
     ctx: &mut MemberTools,
     module: Option<&str>,
@@ -27,9 +28,9 @@ pub(crate) fn run_one(
     (label, outcome, read)
 }
 
-/// 一次调用的执行体（**不碰本成员的账本**）：分支各持账本副本，由调用方按原始顺序合并/接管。
-/// 为什么这样：并发批次里多个调用同时跑，而账本是可变状态；只读类调用的结果不依赖账本，
-/// 所以"副本 + 按原序提交"与串行执行的结果完全相同（见 crate::capabilities::tools::api::Observations::absorb）。
+/// 目的：一次调用的执行体（**不碰本成员的账本**）：分支各持账本副本，由调用方按原始顺序合并/接管。
+///   为什么这样：并发批次里多个调用同时跑，而账本是可变状态；只读类调用的结果不依赖账本，
+///   所以"副本 + 按原序提交"与串行执行的结果完全相同（见 crate::capabilities::tools::api::Observations::absorb）。
 pub(crate) fn run_branch(
     ctx: &MemberTools,
     module: Option<&str>,
@@ -148,8 +149,8 @@ pub(crate) fn commit_writes(
     }
 }
 
-/// 这次调用在**本回合的工具面**里吗：内置按角色表发放的 id 清单，外部工具按"这一回合给不给模块工具"
-/// 与模块归属（判据只有这一处——执行侧与"如实说一句越权"都读它）。
+/// 目的：这次调用在**本回合的工具面**里吗：内置按角色表发放的 id 清单，外部工具按"这一回合给不给模块工具"
+///   与模块归属（判据只有这一处——执行侧与"如实说一句越权"都读它）。
 pub(crate) fn face_has(ctx: &MemberTools, module: Option<&str>, name: &str) -> bool {
     // 系统工具册里的名字（含 `compact` 这类只由系统发起的工具）也按工具面校验：
     // 不能因为“没写 module”就落进模块工具的兜底分支。
@@ -176,7 +177,7 @@ fn handler_for<'a>(
     ctx.handlers.iter().find(|h| h.owns(name))
 }
 
-/// 本回合的工具面之外的调用：**如实说一句**（用户可见），执行侧负责不执行（见 run_branch）。
+/// 目的：本回合的工具面之外的调用：**如实说一句**（用户可见），执行侧负责不执行（见 run_branch）。
 pub(crate) fn note_unauthorized(
     ctx: &MemberTools,
     plan: &[(Option<String>, String, String)],
@@ -192,9 +193,9 @@ pub(crate) fn note_unauthorized(
     }
 }
 
-/// 这个工具有没有**声明可并发**（策略在册子/清单里，代码里不写名单）：
-/// 内置工具看 `prompts/shared/tools.yaml` 的 `builtin_tools.<名字>.parallel`，模块工具看 `module.yaml` 的 `tools.<名字>.parallel`。
-/// 未声明 = 独占串行；**没写 module 的外部工具也按独占**（那要等 dispatch 才知道是哪个模块，核心不猜）。
+/// 目的：这个工具有没有**声明可并发**（策略在册子/清单里，代码里不写名单）：
+///   内置工具看 `prompts/shared/tools.yaml` 的 `builtin_tools.<名字>.parallel`，模块工具看 `module.yaml` 的 `tools.<名字>.parallel`。
+///   未声明 = 独占串行；**没写 module 的外部工具也按独占**（那要等 dispatch 才知道是哪个模块，核心不猜）。
 pub(crate) fn is_parallel(ctx: &MemberTools, module: Option<&str>, name: &str) -> bool {
     match module {
         Some(id) => ctx
@@ -213,18 +214,18 @@ pub(crate) fn is_parallel(ctx: &MemberTools, module: Option<&str>, name: &str) -
     }
 }
 
-/// 一次待用户确认的工具调用：工具名 + 所属模块（内置/核心自有为空）+ 参数原文。
+/// 目的：一次待用户确认的工具调用：工具名 + 所属模块（内置/核心自有为空）+ 参数原文。
 pub struct ToolConfirm {
     pub module: Option<String>,
     pub tool: String,
     pub args: String,
 }
 
-/// 确认回调：`(待确认调用, 事件出口) -> 用户选的选项 id`（`allow` / `deny` / `full`）：实现方阻塞等回答。
+/// 目的：确认回调：`(待确认调用, 事件出口) -> 用户选的选项 id`（`allow` / `deny` / `full`）：实现方阻塞等回答。
 pub type ConfirmFn<'a> = &'a mut dyn FnMut(&ToolConfirm, &mut dyn FnMut(SessionEvent)) -> String;
 
-/// 一次生成里的确认通道：allow_turn 一旦置位，本轮（这次生成）剩余 ask 都放行；
-/// confirm 由调用方实现（阻塞等用户回答，给回选项 id）。
+/// 目的：一次生成里的确认通道：allow_turn 一旦置位，本轮（这次生成）剩余 ask 都放行；
+///   confirm 由调用方实现（阻塞等用户回答，给回选项 id）。
 pub struct ConfirmGate<'a> {
     pub allow_turn: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub confirm: ConfirmFn<'a>,
@@ -344,9 +345,9 @@ fn grant_for(
     Ok(CallGrant { reach, decision })
 }
 
-/// 执行一批调用：连续声明可并发的合成一批并发跑，其余各自独占；结果按原始下标返回。
-/// 每次调用先过权限闸门：reach 不够 / scope 越界 / deny 不执行；ask 进统一裁决队；
-/// allow_turn 只对本轮后续 ask 生效。没有可回答前端时 ask 一律拒绝。
+/// 目的：执行一批调用：连续声明可并发的合成一批并发跑，其余各自独占；结果按原始下标返回。
+///   每次调用先过权限闸门：reach 不够 / scope 越界 / deny 不执行；ask 进统一裁决队；
+///   allow_turn 只对本轮后续 ask 生效。没有可回答前端时 ask 一律拒绝。
 pub(crate) fn run_batch(
     ctx: &mut MemberTools,
     plan: &[(Option<String>, String, String)],
@@ -570,9 +571,9 @@ fn adopt_note(report: &crate::capabilities::workspace::api::AdoptReport) -> Stri
     out
 }
 
-/// 本成员这次请求要声明的工具（原生通道用）：内置工具 + 模块工具。
-/// 原生协议里**没有 module 字段**，所以跨模块同名工具靠线上名消歧（{模块}_{工具}，撞名再加序号）；
-/// 返回的映射把线上名翻回（模块, 工具）。模块没声明参数的照旧声明（参数结构交回给工具自己解释）。
+/// 目的：本成员这次请求要声明的工具（原生通道用）：内置工具 + 模块工具。
+///   原生协议里**没有 module 字段**，所以跨模块同名工具靠线上名消歧（{模块}_{工具}，撞名再加序号）；
+///   返回的映射把线上名翻回（模块, 工具）。模块没声明参数的照旧声明（参数结构交回给工具自己解释）。
 pub(crate) fn tool_decls(ctx: &MemberTools) -> ToolDecls {
     let mut decls = ToolDecls::default();
     let mut taken: Vec<String> = Vec::new();
@@ -658,8 +659,8 @@ pub(crate) fn tool_decls(ctx: &MemberTools) -> ToolDecls {
     decls
 }
 
-/// 可用的外部工具清单：逐条列成「模块.工具」，末尾补上内置工具。
-/// 三种失败（模块不存在 / 模块没这个工具 / 缺 module 且模块不唯一）都用它把可选范围说回去。
+/// 目的：可用的外部工具清单：逐条列成「模块.工具」，末尾补上内置工具。
+///   三种失败（模块不存在 / 模块没这个工具 / 缺 module 且模块不唯一）都用它把可选范围说回去。
 pub(crate) fn available_tools(ctx: &MemberTools) -> String {
     let mut list: Vec<String> = Vec::new();
     for (id, mt) in &ctx.modules {
@@ -795,8 +796,8 @@ fn run_shell(
     outcome
 }
 
-/// 外部工具派发：先定模块（信封里的 module；省略时只有唯一模块才兜底），再查该模块的工具表。
-/// 返回（实际使用的模块 id, 执行结果）。不猜：多模块 agent 下省略 module 直接如实报错。
+/// 目的：外部工具派发：先定模块（信封里的 module；省略时只有唯一模块才兜底），再查该模块的工具表。
+///   返回（实际使用的模块 id, 执行结果）。不猜：多模块 agent 下省略 module 直接如实报错。
 pub(crate) fn dispatch_external(
     ctx: &MemberTools,
     inv: &ToolInvoke,

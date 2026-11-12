@@ -1,4 +1,8 @@
-//! 工具面与调度：同名冲突、越权拒绝、事件顺序
+//! 目的：钉工具面同名冲突、越权拒绝与事件顺序。
+//! 管：同名工具跨模块不再冲突、各自根运行、无模块外部工具拒绝、工具事件先于下轮、提及工具不误判、工具循环跑已声明工具、VM 层模块工具进 guest。
+//! 不管：工具面发放细目（face.rs）与内置工具参数（run_loop.rs）。
+//! 联动：src/capabilities/tools/、session 工具面。
+
 use super::super::builders::*;
 use super::super::prelude::*;
 #[test]
@@ -76,7 +80,7 @@ pub(crate) fn same_named_tools_across_modules_are_no_longer_a_conflict() {
     assert_eq!(meta.modules, vec!["a".to_string()], "meta.modules 去重");
 }
 
-/// 两个模块可以声明**同名**工具（信封里的 module 消歧）；每次调用跑在各自模块的目录里。
+/// 目的：两个模块可以声明**同名**工具（信封里的 module 消歧）；每次调用跑在各自模块的目录里。
 #[test]
 pub(crate) fn same_named_tools_in_two_modules_run_in_their_own_root() {
     let runner = Arc::new(RecordingRunner {
@@ -153,7 +157,7 @@ pub(crate) fn same_named_tools_in_two_modules_run_in_their_own_root() {
     );
 }
 
-/// 多模块 agent 下省略 module：核心不猜，如实报错并把可用的「模块.工具」列全。
+/// 目的：多模块 agent 下省略 module：核心不猜，如实报错并把可用的「模块.工具」列全。
 #[test]
 pub(crate) fn external_tool_without_module_is_refused_when_agent_has_many_modules() {
     let runner = Arc::new(RecordingRunner {

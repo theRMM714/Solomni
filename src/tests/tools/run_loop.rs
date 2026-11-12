@@ -1,4 +1,8 @@
-//! 工具循环与内置工具：循环、无调用上限、读写的“读过”证据
+//! 目的：钉工具循环无调用上限，与内置工具「读过」的证据链。
+//! 管：清单参数声明与执行、拒绝未声明/书外工具、无调用上限、search 行号与大小写、直接会话文件工具、原生模式失败行、模块目录写拒绝、edit 范围与整读要求。
+//! 不管：工具面发放（face.rs）。
+//! 联动：src/capabilities/tools/、session 事实与账本。
+
 use super::super::builders::*;
 use super::super::prelude::*;
 #[test]
@@ -382,7 +386,7 @@ pub(crate) fn envelope_mode_native_calls_become_a_failed_tool_line() {
     );
 }
 
-/// 模块目录（含 `userdata/`）对 agent **永久只读**：内置 write 一律拒绝，不落盘。
+/// 目的：模块目录（含 `userdata/`）对 agent **永久只读**：内置 write 一律拒绝，不落盘。
 #[test]
 pub(crate) fn builtin_write_into_module_dir_is_denied() {
     let io = InMemorySysIo::new();

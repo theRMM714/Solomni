@@ -1,18 +1,11 @@
-//! 任务链：协作从讨论走到交付的那张图（**纯数据 + 纯函数**，不做 IO、不碰会话）。
-//!
-//! **为什么独立成一个业务**：它被三个消费者共享——`collab` 驱动它、`session` 的线格式（`PlanReview`）携带它、
-//! 呈现层渲染它——而这套不变式（阶段派生 / 就绪 / 验收判定）**没有任何参与方拥有**；
-//! 它又是**自足**的（`api` 输入 → 自己算得出），所以按 §2.2 ①' 它是**纯领域业务**：
-//! 有 `api` 与不变式，**无端口、无 `service`**（见 ARCHITECTURE.md §九.3）。
-//!
-//! 契约见 docs/collab/task-chain.md：
-//! - 串并混合是**同一张依赖图的形状**，不是两种模式；
-//! - `deps` 全部完成 = 就绪；空 = 立即就绪；
-//! - 环、悬空依赖、重复 id、空目标、未知负责人都是**装配错误**，如实列出，不静默丢节点。
+//! 目的：任务链的纯领域模型——依赖图的数据结构与派生（阶段 / 就绪 / 验收判定）。
+//! 管：TaskNode / TaskChain / Acceptance / NodeStatus 与图算法；装配期自洽检查 problems()；按阶段定名与依赖重映射。
+//! 不管：IO、会话与端口；装配错误的处置（只如实列出，不静默丢节点）。
+//! 联动：api.rs 再导出给三个消费者——collab 驱动、session 线格式（PlanReview）携带、呈现层渲染；契约见 docs/collab/task-chain.md。
 
 use serde::{Deserialize, Serialize};
 
-/// 节点状态。
+/// 目的：节点状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum NodeStatus {
@@ -26,39 +19,39 @@ pub enum NodeStatus {
     Failed,
 }
 
-/// 一个任务节点的验收结论。
+/// 目的：一个任务节点的验收结论。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Acceptance {
     pub ok: bool,
-    /// 为什么（通过或打回都要说清）。
+    /// 目的：为什么（通过或打回都要说清）。
     pub note: String,
 }
 
-/// 一个任务节点。
+/// 目的：一个任务节点。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskNode {
     pub id: String,
     pub title: String,
-    /// 该节点的**目标**（就是它的任务提示词）。用户可改；**改完不作废**——跑完由核心按当前值验收。
+    /// 目的：该节点的**目标**（就是它的任务提示词）。用户可改；**改完不作废**——跑完由核心按当前值验收。
     pub objective: String,
-    /// 负责的 agent 实例名（必须在名单里）。
+    /// 目的：负责的 agent 实例名（必须在名单里）。
     pub assignee: String,
-    /// 依赖：这些节点都完成后本节点才就绪；空 = 立即就绪。
+    /// 目的：依赖——这些节点都完成后本节点才就绪；空 = 立即就绪。
     #[serde(default)]
     pub deps: Vec<String>,
     #[serde(default = "pending")]
     pub status: NodeStatus,
-    /// 它跑在哪个子会话里（未启动 = None）。
+    /// 目的：它跑在哪个子会话里（未启动 = None）。
     #[serde(default)]
     pub sub_session: Option<String>,
-    /// 该节点的**产出**（子会话跑完一轮的最后一条转录行）；未跑完 = None。
+    /// 目的：该节点的**产出**（子会话跑完一轮的最后一条转录行）；未跑完 = None。
     #[serde(default)]
     pub report: Option<String>,
-    /// 验收结论（未验收 = None）。
+    /// 目的：验收结论（未验收 = None）。
     #[serde(default)]
     pub acceptance: Option<Acceptance>,
-    /// 它的"完成"有没有**当场报过**（用户看到的顺序：开工 → 完成 → 阶段通过/返工）。
-    /// 重派后由 reset_node 清掉，所以再完成会再报一次。
+    /// 目的：它的"完成"有没有**当场报过**（用户看到的顺序：开工 → 完成 → 阶段通过/返工）。
+    ///   重派后由 reset_node 清掉，所以再完成会再报一次。
     #[serde(default)]
     pub reported: bool,
 }
@@ -67,7 +60,7 @@ fn pending() -> NodeStatus {
     NodeStatus::Pending
 }
 
-/// 任务链（依赖图）。
+/// 目的：任务链（依赖图）。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskChain {
     #[serde(default)]
@@ -75,9 +68,9 @@ pub struct TaskChain {
 }
 
 impl TaskChain {
-    /// 每个节点的**阶段**（依赖图里的最长路径层数，1 起）：无依赖 = 1，其余 = 依赖里最大的阶段 + 1。
-    /// 这是"阶段"的**唯一判据**（纯图论，不看 id 怎么写）：同阶段互不依赖 → 可并发；跨阶段串行。
-    /// 依赖成环时 problems() 会挡下（这里给环里的节点留 1，不死循环）。
+    /// 目的：每个节点的**阶段**（依赖图里的最长路径层数，1 起）：无依赖 = 1，其余 = 依赖里最大的阶段 + 1。
+    ///   这是"阶段"的**唯一判据**（纯图论，不看 id 怎么写）：同阶段互不依赖 → 可并发；跨阶段串行。
+    ///   依赖成环时 problems() 会挡下（这里给环里的节点留 1，不死循环）。
     pub fn stages(&self) -> Vec<usize> {
         let mut stage: Vec<Option<usize>> = vec![None; self.nodes.len()];
         loop {
@@ -110,9 +103,9 @@ impl TaskChain {
         stage.into_iter().map(|s| s.unwrap_or(1)).collect()
     }
 
-    /// **按阶段定名**：第 s 阶段的第 k 个节点 = n{s}-{k}（s 与 k 都由依赖图派生，k 从 1 起、按链内顺序）。
-    /// 依赖按"旧 id → 新 id"整体重映射：模型给的 id 只用来解析依赖，**落库的 id 由核心派生**
-    /// （与"代码里不出现可由表派生的名单"同一口径）。装配门禁通过之后调用。
+    /// 目的：**按阶段定名**——第 s 阶段的第 k 个节点 = n{s}-{k}（s 与 k 都由依赖图派生，k 从 1 起、按链内顺序）。
+    ///   依赖按"旧 id → 新 id"整体重映射：模型给的 id 只用来解析依赖，**落库的 id 由核心派生**
+    ///   （与"代码里不出现可由表派生的名单"同一口径）。装配门禁通过之后调用。
     pub fn renumber_by_stage(&mut self) {
         let stages = self.stages();
         let mut used: std::collections::BTreeMap<usize, usize> = std::collections::BTreeMap::new();
@@ -139,7 +132,7 @@ impl TaskChain {
         }
     }
 
-    /// 某个阶段的节点（按链内顺序）。
+    /// 目的：某个阶段的节点（按链内顺序）。
     pub fn stage_nodes(&self, stage: usize) -> Vec<&TaskNode> {
         let stages = self.stages();
         self.nodes
@@ -150,7 +143,7 @@ impl TaskChain {
             .collect()
     }
 
-    /// 某个阶段**是否已通过**：该阶段每个节点都 Done 且验收结论为"通过"。
+    /// 目的：某个阶段**是否已通过**——该阶段每个节点都 Done 且验收结论为"通过"。
     pub fn stage_passed(&self, stage: usize) -> bool {
         let nodes = self.stage_nodes(stage);
         !nodes.is_empty()
@@ -159,14 +152,14 @@ impl TaskChain {
             })
     }
 
-    /// **当前阶段**：最小的"还没通过"的阶段；None = 所有阶段都过了（可以总验收）。
+    /// 目的：**当前阶段**——最小的"还没通过"的阶段；None = 所有阶段都过了（可以总验收）。
     pub fn current_stage(&self) -> Option<usize> {
         let stages = self.stages();
         let max = stages.iter().copied().max().unwrap_or(0);
         (1..=max).find(|s| !self.stage_passed(*s))
     }
 
-    /// 这一阶段**跑完了吗**（每个节点都 Done / Failed）——跑完才做阶段验收。
+    /// 目的：这一阶段**跑完了吗**（每个节点都 Done / Failed）——跑完才做阶段验收。
     pub fn stage_settled(&self, stage: usize) -> bool {
         let nodes = self.stage_nodes(stage);
         !nodes.is_empty()
@@ -175,7 +168,7 @@ impl TaskChain {
                 .all(|n| matches!(n.status, NodeStatus::Done | NodeStatus::Failed))
     }
 
-    /// 这一阶段**可以派发**的节点（待办）：同阶段的依赖都在同阶段之前且已通过，所以不必再查依赖。
+    /// 目的：这一阶段**可以派发**的节点（待办）：同阶段的依赖都在同阶段之前且已通过，所以不必再查依赖。
     pub fn stage_ready(&self, stage: usize) -> Vec<&TaskNode> {
         self.stage_nodes(stage)
             .into_iter()
@@ -183,7 +176,7 @@ impl TaskChain {
             .collect()
     }
 
-    /// 全部结束：链非空且每个节点都 Done 或 Failed。消费方同 ready()。
+    /// 目的：全部结束——链非空且每个节点都 Done 或 Failed。消费方同 ready()。
     #[cfg(test)]
     pub fn finished(&self) -> bool {
         !self.nodes.is_empty()
@@ -193,8 +186,8 @@ impl TaskChain {
                 .all(|n| matches!(n.status, NodeStatus::Done | NodeStatus::Failed))
     }
 
-    /// 装配期的自洽检查：**空 = 一切正常**，非空 = 逐条可读的原因。
-    /// 由装配期与测试双重消费（与工具总表/角色表同一套哲学：不靠人看）。
+    /// 目的：装配期的自洽检查——**空 = 一切正常**，非空 = 逐条可读的原因。
+    ///   由装配期与测试双重消费（与工具总表/角色表同一套哲学：不靠人看）。
     pub fn problems(&self, roster: &[String]) -> Vec<String> {
         let mut out = Vec::new();
         if self.nodes.is_empty() {

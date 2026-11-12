@@ -1,30 +1,13 @@
-//! 补丁通道（patch 工具）的纯逻辑：解析一段**自由格式**的改动文本，并在文件内容上应用。
-//! 存在的理由：改文件时不必把大段文本塞进 JSON 字符串——换行/引号/CJK 的转义是真实会话里反复出事的点。
-//!
-//! 格式（标记行 = 行首以 *** 加一个空格开头；一次可写多块，按顺序应用）：
-//!
-//! ```text
-//! *** Add File: <真实绝对路径>
-//! 整份内容（原样）
-//! *** End File
-//! *** Update File: <真实绝对路径>
-//! *** SEARCH
-//! 要替换掉的原文（连续若干行）
-//! *** REPLACE
-//! 换成的新文（可以多行；留空 = 删掉这段）
-//! *** End File
-//! ```
-//!
-//! 规则：
-//! - **每块必须以 *** End File 收尾**：它的后面可以随便写话（不会被当成文件内容）。
-//!   这条是硬的——否则模型在补丁后面补一句"我改完了"就会被写进文件里。
-//! - 第一个标记之前的散行被忽略（模型常先写一句再给补丁）。
-//! - *** 是保留前缀：内容里若必须出现这样的行，请改写它，否则会被当成标记。
-//! - 标记名不区分大小写；只认这五个：Add File / Update File / SEARCH / REPLACE / End File。
-//! - 路径必须是**真实绝对路径**：越界与相对路径由沙箱拒（寻址规则与其它内置工具一致，不在这里判）。
-//! - 匹配按**整行**比较，行尾风格保持原样；找不到 / 多处命中都如实报事实，不做模糊匹配。
+//! 目的：补丁通道（patch 工具）的纯逻辑——解析一段**自由格式**的改动文本，并在文件内容上应用；
+//!   存在的理由：改文件时不必把大段文本塞进 JSON 字符串——换行 / 引号 / CJK 的转义是真实会话里反复出事的点。
+//! 管：标记行 = 行首以 *** 加一个空格开头，一次可写多块并按顺序应用；只认 Add File / Update File / SEARCH / REPLACE /
+//!   End File 五种（名字不区分大小写）；每块必须以 *** End File 收尾（否则模型在补丁后补一句"我改完了"就会被写进文件），
+//!   第一个标记之前的散行忽略；*** 是保留前缀（内容里必须出现这种行时改写它）；匹配按**整行**比较，行尾风格保持原样，
+//!   找不到 / 多处命中都如实报事实，不做模糊匹配。
+//! 不管：路径必须是**真实绝对路径**（越界与相对路径由沙箱拒，寻址规则与其它内置工具一致）；文件读写机制（在 `SysIo` 端口）。
+//! 联动：由 `service/systool.rs` 的 patch 分支调用；纯规则与 `domain/systool.rs` 同行。
 
-/// 一个补丁块。
+/// 目的：一个补丁块。
 #[derive(Debug, Clone, PartialEq)]
 pub enum Block {
     /// 新建或整份写入：路径已存在 = 整份覆盖（需要"本次会话完整读过"的证据，规则与 write 一致）。
@@ -34,7 +17,7 @@ pub enum Block {
 }
 
 impl Block {
-    /// 这一块改的是哪个路径（原样，还没做沙箱寻址）。
+    /// 目的：这一块改的是哪个路径（原样，还没做沙箱寻址）。
     pub fn path(&self) -> &str {
         match self {
             Block::Add { path, .. } | Block::Update { path, .. } => path,
@@ -42,14 +25,14 @@ impl Block {
     }
 }
 
-/// 一处替换：search / replace 都是**整块文本**（换行用 \n，不含行尾风格）。
+/// 目的：一处替换——search / replace 都是**整块文本**（换行用 \n，不含行尾风格）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Edit {
     pub search: String,
     pub replace: String,
 }
 
-/// 解析失败的事实（文案在提示词册）。
+/// 目的：解析失败的事实（文案在提示词册）。
 #[derive(Debug, Clone, PartialEq)]
 pub enum Fault {
     /// 整段文本里一个标记都没有。
@@ -114,7 +97,7 @@ fn marker(line: &str) -> Option<(Marker, String)> {
     Some((m, tail.trim().to_string()))
 }
 
-/// 解析补丁文本。
+/// 目的：解析补丁文本。
 pub fn parse(text: &str) -> Result<Vec<Block>, Fault> {
     // 第一遍：按标记行切段（标记之前的散行忽略）。
     let mut sections: Vec<Section> = Vec::new();
@@ -236,7 +219,7 @@ fn need_path(s: &Section) -> Result<String, Fault> {
     Ok(s.rest.trim().to_string())
 }
 
-/// 一处改动失败的事实（文案在提示词册）。
+/// 目的：一处改动失败的事实（文案在提示词册）。
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditFault {
     /// 原文在这份文件里找不到。
@@ -247,9 +230,9 @@ pub enum EditFault {
     NearMiss { line: usize, actual: String },
 }
 
-/// 在内容上按顺序应用若干处整行替换，返回新内容。
-/// - 按整行比较；行尾风格（\r\n 还是 \n）与原文件一致；末尾有没有换行也保持一致。
-/// - 失败 = （第几处改动，从 1 数起, 事实）；失败时不返回半成品（调用方整体不写盘）。
+/// 目的：在内容上按顺序应用若干处整行替换，返回新内容。
+///    - 按整行比较；行尾风格（\r\n 还是 \n）与原文件一致；末尾有没有换行也保持一致。
+///    - 失败 = （第几处改动，从 1 数起, 事实）；失败时不返回半成品（调用方整体不写盘）。
 pub fn apply_edits(current: &str, edits: &[Edit]) -> Result<String, (usize, EditFault)> {
     let eol = if current.contains("\r\n") {
         "\r\n"

@@ -1,5 +1,7 @@
-//! Landlock 探针：真机验收本平台的文件系统围栏——允许的根里写得进，根之外读不到。
-//! 驱动方式与运行期完全一致：交给守门进程（本程序 --fence-run）去装围栏。
+//! 目的：Landlock 探针：真机验收 Linux 文件系统围栏与网络开关。
+//! 管：根内写得进/根外读不到、env 不可用与坏规则分开、只读根、共享区与模块目录、node 启动读 openssl 配置、net 开关、udp 拒绝保留 unix socket、doctor。
+//! 不管：目录 ACL 授权（产品在真实会话里做）。
+//! 联动：src/guard/、守门进程 --fence-run。
 
 use crate::probe::{
     bin, job_json, job_json_net, job_json_net_policy, job_json_tree, python_command, run_launcher,

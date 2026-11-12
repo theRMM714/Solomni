@@ -2,7 +2,7 @@
  * 结构审查·依赖方向门禁：三条规则 + 归层不许有静默空洞。
  * 规则：① 业务/机制层不得反向依赖 adapters / presentation；② presentation 只经入站能力面（core::api）驱动；
  *       ③ 业务层内部不得成环（按强连通分量判定）。
- * 豁免清单在 tests/dependency-baseline.json；**条目一旦不再成立必须删除**（过期即失败），这是"每拆一个分区就销一次账"的机器判据。
+ * 零豁免：七类违规集合与业务层依赖环必须为空——不读基线文件，没有先记账再治理的静默通道。
  */
 "use strict";
 const fs = require("fs");
@@ -31,15 +31,6 @@ function stripTestModules(text) {
 
 function direction(root) {
   const problems = [];
-  // 依赖方向的现状违规进基线；条目一旦不再成立必须删除（过期即失败）。
-  const depBaselineFile = path.join(root, "tests", "dependency-baseline.json");
-  let depBaseline = null;
-  try {
-    depBaseline = JSON.parse(fs.readFileSync(depBaselineFile, "utf8"));
-  } catch (e) {
-    problems.push("依赖方向：基线不可读或不是合法 JSON：" + rel(root, depBaselineFile) + "（" + e.message + "）");
-  }
-  if (!depBaseline) return problems;
 
   // 归一深度：能力取「层 + 能力 + 子模块」三级——要能区分 ::api（唯一合法入口）与 ::domain / ::ports（内部）。
   const normTarget = (full) => {
@@ -194,34 +185,20 @@ function direction(root) {
   }
   const sortSccs = (list) => list.map((s) => s.slice().sort()).sort((a, b) => a.join(",").localeCompare(b.join(",")));
 
-  // 每条规则比两次：新增 = 失败；基线里已不成立 = 也失败（强制销账）。
-  const compare = (name, actualList, baselineList, hint) => {
-    for (const a of actualList) {
-      if (!baselineList.includes(a)) problems.push("依赖方向：" + hint + "：" + a);
-    }
-    for (const b of baselineList) {
-      if (!actualList.includes(b)) {
-        problems.push("依赖方向：基线豁免已过期，请从 " + rel(root, depBaselineFile) + " 的 " + name + " 删除：" + b);
-      }
-    }
+  // 零豁免：每类违规逐条列出，集合非空即失败。
+  const expectEmpty = (items, hint) => {
+    for (const item of items) problems.push("依赖方向：" + hint + "：" + item);
   };
-  compare("reverse", [...reverse].sort(), depBaseline.reverse || [], "业务层不得反向依赖呈现层或入口层");
-  compare("presentation", [...presentation].sort(), depBaseline.presentation || [], "presentation 只能经各能力的 ::api 驱动");
-  compare("apiOnly", [...apiOnly].sort(), depBaseline.apiOnly || [], "业务之间只能经对方的 ::api（R1）；::domain / ::detail 是实现，跨能力一律不许碰");
-  compare("foreignImpl", [...foreignImpl].sort(), depBaseline.foreignImpl || [], "不得给别的能力的类型写 impl（R1：另一种互相引入）");
-  compare("domainPorts", [...domainPorts].sort(), depBaseline.domainPorts || [], "domain 是纯逻辑：不得引用任何 ports");
-  compare("apiPorts", [...apiPorts].sort(), depBaseline.apiPorts || [], "api 是入站用例面：不得把本能力的 ports 再导出去（R12）");
-  compare("channelCross", [...channelCross].sort(), depBaseline.channelCross || [], "呈现层的两个渠道（cli / web）互不依赖：不得引用对方");
+  expectEmpty([...reverse].sort(), "业务层不得反向依赖呈现层或入口层");
+  expectEmpty([...presentation].sort(), "presentation 只能经各能力的 ::api 驱动");
+  expectEmpty([...apiOnly].sort(), "业务之间只能经对方的 ::api（R1）；::domain / ::detail 是实现，跨能力一律不许碰");
+  expectEmpty([...foreignImpl].sort(), "不得给别的能力的类型写 impl（R1：另一种互相引入）");
+  expectEmpty([...domainPorts].sort(), "domain 是纯逻辑：不得引用任何 ports");
+  expectEmpty([...apiPorts].sort(), "api 是入站用例面：不得把本能力的 ports 再导出去（R12）");
+  expectEmpty([...channelCross].sort(), "呈现层的两个渠道（cli / web）互不依赖：不得引用对方");
 
-  const actualCycles = sortSccs(coreSccs);
-  const baselineCycles = sortSccs(depBaseline.coreCycles || []);
-  const fmtCycles = (l) => (l.length ? l.map((s) => "[" + s.length + "] " + s.join(", ")).join("；") : "（无）");
-  if (JSON.stringify(actualCycles) !== JSON.stringify(baselineCycles)) {
-    problems.push(
-      "依赖方向：业务层内部的环与基线不一致（分区拆出后请同步更新 " + rel(root, depBaselineFile) + " 的 coreCycles）：" +
-      "\n    实际：" + fmtCycles(actualCycles) +
-      "\n    基线：" + fmtCycles(baselineCycles)
-    );
+  for (const scc of sortSccs(coreSccs)) {
+    problems.push("依赖方向：业务层内部出现依赖环（R1：只能经 ::api 单向协作）：" + scc.join(" -> ") + " -> " + scc[0]);
   }
   return problems;
 }

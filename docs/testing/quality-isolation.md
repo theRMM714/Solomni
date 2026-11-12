@@ -45,7 +45,7 @@
 - 工具获取：Rust 侧第三方**只进 CI**——CI 用 `taiki-e/install-action` 预编译装（供应链工具、突变测试的 `cargo-mutants` 都这样）；**本地开发不引第三方**，用 `node setup-dev.js` 把清单（[dev-tools.js](../../dev-tools.js)）里的东西装进**项目内**（`cargo install --locked --root .tools`）；
 - 前端工具链是**项目内 npm 依赖**：TypeScript 与 Playwright 固定在根 `package.json` + `package-lock.json`，用 `npm ci --ignore-scripts` 装进 `node_modules`；不装全局、不写用户目录，`node_modules` 不入库。浏览器优先用系统 Edge / Chrome，缺失时由 Playwright 下载到 `target/playwright/`（同样不入库）；CI 缓存这个目录，失败产物 `target/e2e-browser/` 随 job 上传；
 - 尚未建立检查记录为 `gap`；
-- 依赖重复不一定是错误，必须有解释或后续治理记录（`tests/dependency-baseline.json`）；
+- 依赖重复不一定是错误，必须有解释或后续治理记录（`node run-tests.js` 只报重复版本，不判是否可接受）；
 - 重复代码检查不得诱导新增抽象。先判断重复是否属于同一职责，再决定合并、保留或记录原因（`run-tests.js`）。
 
 - 当前 `node run-tests.js` 已执行 [levels.md](levels.md) 的 T0 全部九项：**步骤、可行状态（含报告里的 `fail` / `quality-fail` / `env-skip`）与环境跳过口径以该文 T0 生成段为准**；`env-skip` 不算通过，没有容差基线（注释契约的存量快照只减不增，见「五、门禁之外」，`run-tests.js`）。
@@ -93,26 +93,25 @@
 
 ## 五、门禁之外：仓库卫生审查
 
-- 门禁回答「这次改动有没有把代码弄坏」——零容忍、每次必过；**仓库卫生**回答「仓库里还欠多少、挂在谁身上」（`node run-hygiene.js`）——存量存在时（还有未收紧的旧违规）它只报，不拦：
+- 门禁回答「这次改动有没有把代码弄坏」——零容忍、每次必过；**仓库卫生**回答「仓库里还欠多少、挂在谁身上」（`node run-hygiene.js`）——它只报，不拦：
 
 ```text
-node run-hygiene.js            # 报现状：注释契约存量 + 与快照的差 + 内容卫生 + 语义卫生摘要
+node run-hygiene.js            # 报现状：注释契约 + 内容卫生 + 语义卫生摘要
 node run-hygiene.js --semantic # 展开语义卫生的全部可疑项（高置信 + 需判断）
 node run-hygiene.js --semantic-only # 只跑语义卫生
-node run-hygiene.js --tighten  # 按现状下调 tests/comment-baseline.json（唯一会写文件的入口；出现新增就拒绝）
 node run-hygiene.js --strict   # 契约 / 内容有发现即非零退出（语义项默认不算）
 node run-hygiene.js --strict-semantic # 高置信语义项有发现即非零（可选自查）
 ```
 
-- **格式存量**（注释契约，见 `ARCHITECTURE.md` 的「注释契约」）：判定与比对只有一处（在这个脚本里）；门禁拿它做**棘轮**——按 `文件 × 规则` 计数，**只减不增**（新文件零容忍、老文件同类变多也算新增），变少则要求销账（`run-hygiene.js`）；收紧是显式动作且只能往下（有新增就拒绝写盘），不让门禁偷偷改数，也不让「先违规再收紧」洗成存量（`run-hygiene.js`）。
+- **注释契约**（见 `ARCHITECTURE.md` 的「注释契约」）：判定只有一处（在这个脚本里）；门禁拿同一份判定逐条硬失败，零豁免（`run-hygiene.js`）。
 - **内容卫生**（只报）：悬挂的缺口 id（已删 id 从 git 历史取）、docs 与根文档里指向不存在的 `src/**.rs`、引用的根文档不存在；
 - 取不到 git 历史时如实写「没跑」，不当作通过。
 - **语义卫生**（只报）：按 `git ls-files` 扫受控文本文件——Markdown 正文（跳过代码围栏）与 Rust / JS / YAML / TOML / shell / 批处理注释里的历史或待办措辞。
 - 强词（`曾经` / `旧实现` / `旧格式` / `旧会话` 等）默认展开，弱词（`改成` / `以前` / `不再有` 等）默认只给数量与样例；`--semantic` 展开全部。<!-- hygiene-ignore -->
 - 它**不建基线、不进 T0、不影响 `--strict`**；确认是当前语义的行加 `hygiene-ignore` 显式跳过。`--strict-semantic` 只对强词生效，给想拿它当自查的人。
-- 词表与 `ARCHITECTURE.md` §十.3 的 `//` 契约词表分开：后者是门禁棘轮，前者是全仓报告。
+- 词表与 `ARCHITECTURE.md` §十.3 的 `//` 契约词表分开：后者是门禁硬判据，前者是全仓报告。
 - **语义卫生的仓库内容不进 T0、不进 `TEST-REPORT-*`**：混进门禁只有两种结局——门禁天天红，或者开始放行，两种都不诚实。
-- 门禁只复用它的注释契约判定做棘轮（结构审查里的一条），并跑它的词法 / 语义扫描自测（测工具，不测仓库内容），见 [levels.md](levels.md) 的 T0。
+- 门禁复用它的注释契约判定做零容忍检查（结构审查里的一条），并跑它的词法 / 语义扫描自测（测工具，不测仓库内容），见 [levels.md](levels.md) 的 T0。
 
 ## 六、产物落点（临时诊断与运行日志）
 

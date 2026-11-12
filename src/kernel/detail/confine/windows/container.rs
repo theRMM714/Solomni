@@ -1,6 +1,6 @@
 //! 目的：Windows 容器围栏的启动面——AppContainer 档案与 SID、UTF-16 转换、system shell、kill-on-close job 对象。
 //! 管：在容器里拉进程这一层（Windows 独有：Linux/macOS 是「先装规则再 exec」）。
-//! 不管：授权与撤销（在 acl.rs / record.rs）、策略（在 confine::prepare_fence）。
+//! 不管：授权与撤销（在 acl.rs / record/）、策略（在 confine::prepare_fence）。
 //! 联动：由 windows/mod.rs 调用；失败如实返回而非假装成功。
 
 use super::FENCE_FAILED;

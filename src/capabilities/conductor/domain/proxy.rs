@@ -1,23 +1,23 @@
-//! 核心代理（core_proxy）工具的纯逻辑：入参解析、授权校验、载荷规整与回执拼装。
-//!
-//! 它不认识会话、不碰任何端口：外部动作一律经 conductor::ports::ProxyHost（见 service/proxy.rs）。
+//! 目的：核心代理（core_proxy）工具的纯逻辑——入参解析、授权校验、载荷规整与回执拼装。
+//! 管：工具 id 与角色面判定、任务级授权校验（`Grant`）、各工具的参数语义校验与规整载荷，
+//!   以及只读清单事实与回执的拼装（`Catalog` / `Snapshot` / `MessagesPage` / `ControlState`）。
+//! 不管：会话读写与外部动作（一律经 `conductor::ports::ProxyHost`，见 service/proxy.rs）；不碰端口、不认识会话。
+//! 联动：service/proxy.rs 的 `ProxyBridge` 把宿主事实填进这些结构，systools/tools.yaml 声明入参形状。
 
 use serde::{Deserialize, Serialize};
-
-// ---------- 工具名（与 systools/tools.yaml 同一份名单） ----------
 
 pub const CATALOG: &str = "catalog_agents";
 pub const CREATE: &str = "create_session";
 pub const SEND: &str = "send_session_message";
 pub const OBSERVE: &str = "observe_session";
 pub const CONTROL: &str = "control_session";
-/// 消息查询：按“最新→更早”倒查子会话的消息（不把整份转录推给代理）。
+/// 目的：消息查询——按“最新→更早”倒查子会话的消息（不把整份转录推给代理）。
 pub const MESSAGES: &str = "read_session_messages";
 
-/// 代理会话里核心的说话人名（只此一处，重建与实时同源）。
+/// 目的：代理会话里核心的说话人名（只此一处，重建与实时同源）。
 pub const SPEAKER: &str = "核心";
 
-/// 这六个 id 就是“代理工具面”（角色表 core_proxy 引用它们）。
+/// 目的：这六个 id 就是“代理工具面”（角色表 core_proxy 引用它们）。
 pub fn is_proxy_tool(name: &str) -> bool {
     name == CATALOG
         || name == CREATE
@@ -27,23 +27,23 @@ pub fn is_proxy_tool(name: &str) -> bool {
         || name == MESSAGES
 }
 
-/// 任务级授权（真实用户授予，机制注入）：本轮只做**全权**——`tools` 用角色表发放的整套
-/// 代理工具面构造，`models`/`sessions` 留空 = 不限制，无有效期。
-/// 核心不得自行授予或扩大；`tools` 仍是硬条件（不在里面 = 越范围）。
-/// 细粒度范围、期限与**撤销**属独立的“会话权限状态”能力，本轮不做
+/// 目的：任务级授权（真实用户授予，机制注入）：本轮只做**全权**——`tools` 用角色表发放的整套
+///   代理工具面构造，`models`/`sessions` 留空 = 不限制，无有效期。
+///   核心不得自行授予或扩大；`tools` 仍是硬条件（不在里面 = 越范围）。
+///   细粒度范围、期限与**撤销**属独立的“会话权限状态”能力，本轮不做
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Grant {
-    /// 允许调用的代理工具 id。
+    /// 目的：允许调用的代理工具 id。
     pub tools: Vec<String>,
-    /// 允许使用的模型（空 = 不限制）。
+    /// 目的：允许使用的模型（空 = 不限制）。
     pub models: Vec<String>,
-    /// 允许操作的会话（空 = 不限制）。
+    /// 目的：允许操作的会话（空 = 不限制）。
     pub sessions: Vec<String>,
-    /// 到期时间（Unix 秒；None = 不过期）。
+    /// 目的：到期时间（Unix 秒；None = 不过期）。
     pub expires_at: Option<i64>,
 }
 
-/// 一次代理调用的上下文：授权、父会话与当前时间。
+/// 目的：一次代理调用的上下文——授权、父会话与当前时间。
 #[derive(Debug, Clone)]
 pub struct ProxyCall {
     pub grant: Option<Grant>,
@@ -51,7 +51,7 @@ pub struct ProxyCall {
     pub now: i64,
 }
 
-/// 授权校验（纯逻辑）：没有授权、越范围、超期、模型或会话不在授权内，都如实拒绝。
+/// 目的：授权校验（纯逻辑）——没有授权、越范围、超期、模型或会话不在授权内，都如实拒绝。
 pub fn authorize(
     call: &ProxyCall,
     tool: &str,
@@ -86,9 +86,7 @@ pub fn authorize(
     Ok(())
 }
 
-// ---------- 枚举 ----------
-
-/// catalog_agents 的 scope。
+/// 目的：catalog_agents 的 scope。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CatalogScope {
     Agents,
@@ -121,7 +119,7 @@ impl CatalogScope {
     }
 }
 
-/// create_session 的形态：与 `WorkMode` 同词（single / collab / proxy）；代理不能往代理里套。
+/// 目的：create_session 的形态——与 `WorkMode` 同词（single / collab / proxy）；代理不能往代理里套。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionMode {
     Single,
@@ -140,7 +138,7 @@ impl SessionMode {
     }
 }
 
-/// send_session_message 的消息种类。
+/// 目的：send_session_message 的消息种类。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MessageKind {
@@ -176,8 +174,8 @@ impl MessageKind {
     }
 }
 
-/// observe_session 要看的那一面。**没有“最新消息”这一面**：正文一律经
-/// read_session_messages 主动倒查（子会话不把整份转录推给代理）。
+/// 目的：observe_session 要看的那一面。**没有“最新消息”这一面**：正文一律经
+///   read_session_messages 主动倒查（子会话不把整份转录推给代理）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObserveView {
     Status,
@@ -201,7 +199,7 @@ impl ObserveView {
     }
 }
 
-/// control_session 的动作。
+/// 目的：control_session 的动作。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ControlAction {
@@ -254,22 +252,20 @@ pub fn relay_reply(
     }
 }
 
-/// 一次控制动作写进目标会话的**可回放记录**文案（机制写，前端照同一条显示）。
-/// 记的是"谁、为什么动了这条会话"——不静默改运行态。
+/// 目的：一次控制动作写进目标会话的**可回放记录**文案（机制写，前端照同一条显示）。
+///   记的是"谁、为什么动了这条会话"——不静默改运行态。
 pub fn control_note(action: ControlAction, reason: &str) -> String {
     // 人经呈现层的控制与核心代理的控制都走这里：不冒充"代理"，只记一条控制事实。
     format!("[控制] {} 这条会话：{}", action.as_str(), reason)
 }
 
-/// 一次转达写进目标会话的**来源记录**文案：说清接下来这条**不是用户原话**，
-/// 而是核心代理转达的——这条记录是它的可回放凭据。
+/// 目的：一次转达写进目标会话的**来源记录**文案：说清接下来这条**不是用户原话**，
+///   而是核心代理转达的——这条记录是它的可回放凭据。
 pub fn relay_note(kind: MessageKind) -> String {
     format!("[代理] 接下来这条由核心代理转达（{}）", kind.as_str())
 }
 
-// ---------- 事实与回执（宿主产出 / 工具回给模型） ----------
-
-/// 只读清单事实：只含公开信息（无密钥、无真实私有路径、无私有工作区内容）。
+/// 目的：只读清单事实——只含公开信息（无密钥、无真实私有路径、无私有工作区内容）。
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct Catalog {
     pub agents: Vec<AgentFact>,
@@ -299,15 +295,15 @@ pub struct ModelFact {
     pub tools: String,
 }
 
-/// 建立一个会话后的稳定引用。
+/// 目的：建立一个会话后的稳定引用。
 #[derive(Debug, Clone, Serialize)]
 pub struct Created {
     pub session: String,
     pub agents: Vec<String>,
 }
 
-/// 一次观察的规范化视图 + 下一游标（`full` 之外的字段可选）。
-/// **不回消息正文**：正文一律经 `read_session_messages` 主动倒查。
+/// 目的：一次观察的规范化视图 + 下一游标（`full` 之外的字段可选）。
+///   **不回消息正文**：正文一律经 `read_session_messages` 主动倒查。
 #[derive(Debug, Clone, Serialize)]
 pub struct Snapshot {
     pub session: String,
@@ -316,19 +312,19 @@ pub struct Snapshot {
     pub pending: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub artifacts: Option<Vec<String>>,
-    /// 该会话的消息总条数（`read_session_messages` 倒查的上界）。
+    /// 目的：该会话的消息总条数（`read_session_messages` 倒查的上界）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message_count: Option<usize>,
-    /// 游标 = 消息条数的字符串形式；下次观察把它当 `since` 传回来即可。
+    /// 目的：游标 = 消息条数的字符串形式；下次观察把它当 `since` 传回来即可。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
-    /// 自 `since` 以来的新增消息条数（给了 `since` 才有；解不出数字就当没给）。
+    /// 目的：自 `since` 以来的新增消息条数（给了 `since` 才有；解不出数字就当没给）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub new_messages: Option<usize>,
 }
 
-/// `read_session_messages` 回给代理的**一页消息**：`from` 是“距最新多少条”（0 = 最新一条），
-/// 消息按**新→旧**排列；`next` 是继续往更早翻的下一 `from`（到底了为 None）。
+/// 目的：`read_session_messages` 回给代理的**一页消息**：`from` 是“距最新多少条”（0 = 最新一条），
+///   消息按**新→旧**排列；`next` 是继续往更早翻的下一 `from`（到底了为 None）。
 #[derive(Debug, Clone, Serialize)]
 pub struct MessagesPage {
     pub session: String,
@@ -337,7 +333,7 @@ pub struct MessagesPage {
     pub next: Option<usize>,
 }
 
-/// 一条消息（转录行的对外形态）：稳定行 id + 结构化身份 + 正文。
+/// 目的：一条消息（转录行的对外形态）——稳定行 id + 结构化身份 + 正文。
 #[derive(Debug, Clone, Serialize)]
 pub struct MessageLine {
     pub id: u64,
@@ -347,7 +343,7 @@ pub struct MessageLine {
     pub text: String,
 }
 
-/// 一次控制之后会话的实际状态（不是“请求已提交”）。
+/// 目的：一次控制之后会话的实际状态（不是“请求已提交”）。
 #[derive(Debug, Clone, Serialize)]
 pub struct ControlState {
     pub session: String,
@@ -355,13 +351,13 @@ pub struct ControlState {
     pub state: String,
 }
 
-/// 建会话的规整载荷（工具层解析完交给宿主；宿主不再解析模型参数）。
+/// 目的：建会话的规整载荷（工具层解析完交给宿主；宿主不再解析模型参数）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewSession {
     pub mode: SessionMode,
     pub agents: Vec<NewAgent>,
-    /// **这个会话的开头 / 本次需求**：single = 它的第一句（点火用的派发），collab = 本次需求。
-    /// 建好就开始——不是"给某个 agent 的任务"（见 `ProxyBridge::create_session`）。
+    /// 目的：**这个会话的开头 / 本次需求**：single = 它的第一句（点火用的派发），collab = 本次需求。
+    ///   建好就开始——不是"给某个 agent 的任务"（见 `ProxyBridge::create_session`）。
     pub task: String,
     pub request_id: String,
     /// 目的：工作名——给了就用它，没给由宿主派生（代理建的子工作按 agent 名派生）。
@@ -370,7 +366,7 @@ pub struct NewSession {
     pub tier: Option<String>,
     /// 目的：虚拟机档的虚拟根名——给了就用它，没给由宿主按父会话定（顶层为空，建好后在会话配置里选）。
     pub guest: Option<String>,
-    /// 父会话：由**机制**从调用上下文填，不从模型参数取（模型不能自选父）。
+    /// 目的：父会话——由**机制**从调用上下文填，不从模型参数取（模型不能自选父）。
     pub parent: Option<String>,
     /// 目的：创建时的权限档位；None = 用设置默认（子会话忽略并继承父 ceiling）。
     pub permission: Option<crate::capabilities::permission::api::ProfileId>,
@@ -382,7 +378,7 @@ pub struct NewSession {
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewAgent {
     pub name: String,
-    /// 临时 agent（不在登记处）：随本次会话落档，不写回 agents.yaml。
+    /// 目的：临时 agent（不在登记处）：随本次会话落档，不写回 agents.yaml。
     pub transient: bool,
     pub modules: Vec<String>,
     pub model: Option<String>,
@@ -390,7 +386,7 @@ pub struct NewAgent {
     pub chara: String,
 }
 
-/// 一条要转达的消息（元信息 + 正文）：正文由工具层从参数取，宿主据此真正投递。
+/// 目的：一条要转达的消息（元信息 + 正文）——正文由工具层从参数取，宿主据此真正投递。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Relayed {
     pub kind: MessageKind,
@@ -400,8 +396,6 @@ pub struct Relayed {
     pub reply: Option<String>,
 }
 
-// ---------- 入参（形状由 systools/tools.yaml 声明驱动；这里做语义校验） ----------
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct CatalogArgs {
     pub scope: String,
@@ -410,7 +404,7 @@ pub struct CatalogArgs {
 #[derive(Debug, Clone, Deserialize)]
 pub struct CreateArgs {
     pub mode: String,
-    /// 每项是对象，形状在 parse_agents 里逐条校验（数组元素形状声明层表达不了）；省略 = 空（代理形态 / 代拟）。
+    /// 目的：每项是对象，形状在 parse_agents 里逐条校验（数组元素形状声明层表达不了）；省略 = 空（代理形态 / 代拟）。
     #[serde(default)]
     pub agents: Vec<serde_json::Value>,
     /// 目的：本次需求 / 单模式的开头——代理必填（建好就开工），用户可省（单模式先建空会话）。
@@ -441,7 +435,7 @@ pub struct SendArgs {
 pub struct ObserveArgs {
     pub session_id: String,
     pub view: String,
-    /// 上次观察的游标（消息条数）；只用来算 `new_messages`，回执仍是幂等快照。
+    /// 目的：上次观察的游标（消息条数）；只用来算 `new_messages`，回执仍是幂等快照。
     #[serde(default)]
     pub since: Option<String>,
 }
@@ -457,10 +451,10 @@ pub struct ControlArgs {
 #[derive(Debug, Clone, Deserialize)]
 pub struct MessagesArgs {
     pub session_id: String,
-    /// 0 = 最新一条；1 = 倒数第二条；省略 = 0。
+    /// 目的：0 = 最新一条；1 = 倒数第二条；省略 = 0。
     #[serde(default)]
     pub from: Option<i64>,
-    /// 本次取几条（1..=50）；省略 = 10。
+    /// 目的：本次取几条（1..=50）；省略 = 10。
     #[serde(default)]
     pub count: Option<i64>,
 }
@@ -474,15 +468,13 @@ struct ParsedAgent {
     chara: String,
 }
 
-// ---------- 语义校验 ----------
-
-/// catalog_agents：scope 只认四个值。
+/// 目的：catalog_agents——scope 只认四个值。
 pub fn catalog_scope(args: &CatalogArgs) -> Result<CatalogScope, String> {
     CatalogScope::parse(args.scope.trim())
 }
 
-/// create_session：把模型给的名字/模块/模型与登记处事实核对后规整成载荷。
-/// 失败一律如实报错——调用方据此拒绝整次调用，不留半成品。
+/// 目的：create_session——把模型给的名字/模块/模型与登记处事实核对后规整成载荷。
+///   失败一律如实报错——调用方据此拒绝整次调用，不留半成品。
 pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSession, String> {
     let mode = SessionMode::parse(args.mode.trim())?;
     if mode == SessionMode::Proxy {
@@ -605,7 +597,7 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
     })
 }
 
-/// send_session_message：目标与种类的语义校验；多目标在这里规整成一张表。
+/// 目的：send_session_message——目标与种类的语义校验；多目标在这里规整成一张表。
 pub fn relay(args: &SendArgs, call: &ProxyCall) -> Result<(Vec<String>, Relayed), String> {
     let targets: Vec<String> = args
         .targets
@@ -639,7 +631,7 @@ pub fn relay(args: &SendArgs, call: &ProxyCall) -> Result<(Vec<String>, Relayed)
     ))
 }
 
-/// observe_session：会话 id、view 与游标的语义校验。
+/// 目的：observe_session——会话 id、view 与游标的语义校验。
 pub fn observe_request(
     args: &ObserveArgs,
 ) -> Result<(String, ObserveView, Option<String>), String> {
@@ -656,7 +648,7 @@ pub fn observe_request(
     Ok((session, view, since))
 }
 
-/// control_session：会话 id、action、reason 与幂等标识的语义校验。
+/// 目的：control_session——会话 id、action、reason 与幂等标识的语义校验。
 pub fn control_request(
     args: &ControlArgs,
 ) -> Result<(String, ControlAction, String, String), String> {
@@ -676,7 +668,7 @@ pub fn control_request(
     Ok((session, action, reason, request_id))
 }
 
-/// read_session_messages：会话 id + 倒查起点/条数的语义校验（`from` 以最新为 0）。
+/// 目的：read_session_messages——会话 id + 倒查起点/条数的语义校验（`from` 以最新为 0）。
 pub fn messages_request(args: &MessagesArgs) -> Result<(String, usize, usize), String> {
     let session = args.session_id.trim().to_string();
     if session.is_empty() {
@@ -693,7 +685,7 @@ pub fn messages_request(args: &MessagesArgs) -> Result<(String, usize, usize), S
     Ok((session, from as usize, count as usize))
 }
 
-/// 清单回执：只回请求的 scope（不给无关字段，也就不会顺手泄漏）。
+/// 目的：清单回执——只回请求的 scope（不给无关字段，也就不会顺手泄漏）。
 pub fn render_catalog(scope: CatalogScope, c: &Catalog) -> Result<String, String> {
     let mut out = serde_json::Map::new();
     if scope.covers_agents() {

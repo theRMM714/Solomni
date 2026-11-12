@@ -1,10 +1,8 @@
-//! 工作区与沙箱的纯数据定义与寻址（机制在适配层）。
-//! 布局：session/<工作名>/work（用户投喂与成品，本工作共享）
-//!       session/<工作名>/<agent实例名>/（该 agent 的私有沙箱）。
-//! 寻址：给 AI 的只有**真实绝对路径**（根目录由适配层给出；拒绝时把允许的根列回去）。
-//! 核心把路径与三个根（共享区 / 私有沙箱 / 成员模块目录）比对来判定可达范围：
-//! 必须是**绝对路径**、组件里不含 . 与 ..、且落在某个允许的根之内；
-//! 越界、相对路径、空段一律拒绝，并把系统工具允许的根列回去（如实报错，不纠正）。
+//! 目的：工作区与沙箱的纯数据定义与寻址（机制在适配层）。
+//! 管：布局（session/<工作名>/work 是用户投喂与成品、本工作共享；session/<工作名>/<agent实例名>/ 是该 agent 的私有沙箱）与可达范围判定：
+//!   必须是**绝对路径**、组件里不含 . 与 ..、且落在某个允许的根之内（共享区 / 私有沙箱 / 成员模块目录）；越界、相对路径、空段一律拒绝，并把允许的根列回去（如实报错，不纠正）。
+//! 不管：路径拼接与目录创建（机制在适配层）；给 AI 的路径由适配层给出**真实绝对路径**。
+//! 联动：可达范围用 `permission` 的 `PermissionSet` / `Reach` 与 `prompt` 的 `RefRoots` 表达，路径组件用 kernel 的 `slash`。
 
 use crate::capabilities::permission::api::{Decision, PermissionSet, Reach};
 use crate::capabilities::prompt::api::RefRoots;
@@ -14,7 +12,7 @@ use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
-/// 投喂文件名净化（策略在 conductor）：只允许单个文件名，挡掉路径分隔符与上级跳转。
+/// 目的：投喂文件名净化（策略在 conductor）：只允许单个文件名，挡掉路径分隔符与上级跳转。
 pub fn safe_file_name(name: &str) -> Result<String, String> {
     let n = name.trim();
     if n.is_empty() {
@@ -29,7 +27,7 @@ pub fn safe_file_name(name: &str) -> Result<String, String> {
     Ok(n.to_string())
 }
 
-/// 寻址落点（用于回执文案与越界提示）。
+/// 目的：寻址落点（用于回执文案与越界提示）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Place {
     /// 本工作共享区。
@@ -40,26 +38,26 @@ pub enum Place {
     Module(String),
 }
 
-/// 一个 agent 实例的沙箱：寻址根 + 它的能力模块目录。
-/// 权限策略在此收口：可达范围只有这三个落点，且模块必须是本 agent 的成员。
+/// 目的：一个 agent 实例的沙箱：寻址根 + 它的能力模块目录。
+///    权限策略在此收口：可达范围只有这三个落点，且模块必须是本 agent 的成员。
 #[derive(Debug, Clone)]
 pub struct Sandbox {
-    /// 工作名（提示词里如实告知在替谁干活）。
+    /// 目的：工作名（提示词里如实告知在替谁干活）。
     pub work_name: String,
     /// 目的：本席所属会话的 id（会话租约；同名 agent 的多个并发会话靠它区分围栏归属）。
     pub session: String,
-    /// 该 agent 的实例名。
+    /// 目的：该 agent 的实例名。
     pub agent: String,
-    /// 本工作共享区（session/<工作名>/work）——**主副本**，agent 会话默认只读。
+    /// 目的：本工作共享区（session/<工作名>/work）——**主副本**，agent 会话默认只读。
     pub shared: PathBuf,
-    /// 本 agent 私有沙箱（session/<工作名>/<agent>）——也是它的工作副本。
+    /// 目的：本 agent 私有沙箱（session/<工作名>/<agent>）——也是它的工作副本。
     pub private: PathBuf,
-    /// 成员模块：模块 id → 模块目录。
+    /// 目的：成员模块：模块 id → 模块目录。
     pub modules: BTreeMap<String, PathBuf>,
     /// 目的：有 <root>/userdata 目录的模块 id（工作区扫描读出的事实；围栏派生据此决定派不派这条）。
     pub modules_with_userdata: std::collections::BTreeSet<String>,
-    /// 本席位的生效权限（reach / decision / 共享区范围）：由 conductor 解析后注入。
-    /// 私有沙箱不受共享区路径范围约束，但仍受 profile 的写决定约束。
+    /// 目的：本席位的生效权限（reach / decision / 共享区范围）：由 conductor 解析后注入。
+    ///    私有沙箱不受共享区路径范围约束，但仍受 profile 的写决定约束。
     pub permissions: PermissionSet,
     /// 目的：这场会话的路径翻译器（虚拟机档 guest ↔ 宿主；本机档 None = 恒等）。
     /// 约束：只用来把模型给的写法译成宿主路径**再校验**；安全判断仍然只有 `resolve` 一处。
@@ -67,8 +65,8 @@ pub struct Sandbox {
 }
 
 impl Sandbox {
-    /// 解析模型给的路径：必须是**绝对路径**、组件里不含 . 与 ..、且落在某个允许的根之内。
-    /// 返回（落点, 归一化后的绝对路径）；拒绝时把允许的真实根目录列全。
+    /// 目的：解析模型给的路径：必须是**绝对路径**、组件里不含 . 与 ..、且落在某个允许的根之内。
+    ///    返回（落点, 归一化后的绝对路径）；拒绝时把允许的真实根目录列全。
     pub fn resolve(&self, raw: &str) -> Result<(Place, PathBuf), String> {
         let spec = raw.trim();
         // 所有拒绝都附上"系统工具允许的根"，模型照着改。
@@ -139,8 +137,8 @@ impl Sandbox {
         }
     }
 
-    /// 该落点这一席能不能写：内置文件工具永远不直接写共享主副本（写入走 work_commit）；
-    /// 私有沙箱不受路径范围约束，但仍要 profile 的写决定允许；模块目录对内置文件工具永久只读。
+    /// 目的：该落点这一席能不能写：内置文件工具永远不直接写共享主副本（写入走 work_commit）；
+    ///    私有沙箱不受路径范围约束，但仍要 profile 的写决定允许；模块目录对内置文件工具永久只读。
     pub fn can_write(&self, place: &Place, _path: &Path) -> bool {
         if self.permissions.decisions.write != Decision::Allow {
             return false;
@@ -152,7 +150,7 @@ impl Sandbox {
         }
     }
 
-    /// 该落点这一席能不能读：共享区按 reach 与路径范围；私有沙箱与模块目录只看 reach 与读决定。
+    /// 目的：该落点这一席能不能读：共享区按 reach 与路径范围；私有沙箱与模块目录只看 reach 与读决定。
     pub fn can_read(&self, place: &Place, path: &Path) -> bool {
         if self.permissions.decisions.read != Decision::Allow {
             return false;
@@ -167,7 +165,7 @@ impl Sandbox {
         }
     }
 
-    /// 写被拒时的如实说明（按落点给不同原因）。
+    /// 目的：写被拒时的如实说明（按落点给不同原因）。
     pub fn write_refusal(&self, place: &Place, path: &Path) -> String {
         if self.permissions.decisions.write != Decision::Allow {
             return format!(
@@ -202,7 +200,7 @@ impl Sandbox {
         }
     }
 
-    /// 读被拒时的如实说明。
+    /// 目的：读被拒时的如实说明。
     pub fn read_refusal(&self, place: &Place, path: &Path) -> String {
         let roots = self.permissions.read_roots_listing();
         let rel = match place {
@@ -216,7 +214,7 @@ impl Sandbox {
         )
     }
 
-    /// 一条绝对路径相对某个根的工作区相对形式（`/` 分隔），供权限条目比对。
+    /// 目的：一条绝对路径相对某个根的工作区相对形式（`/` 分隔），供权限条目比对。
     pub fn rel_to(&self, root: &Path, path: &Path) -> String {
         path.strip_prefix(root)
             .map(slash)
@@ -243,7 +241,7 @@ impl Sandbox {
         }
     }
 
-    /// 系统工具允许的根清单（错误文案里列全，模型照着改）——按本环境的写法给。
+    /// 目的：系统工具允许的根清单（错误文案里列全，模型照着改）——按本环境的写法给。
     pub fn roots_listing(&self) -> String {
         let mut lines = vec![
             format!(
@@ -259,10 +257,10 @@ impl Sandbox {
     }
 }
 
-/// 一次工作内的全部 agent 沙箱（发言席就是 agent，沙箱与 agent 一一对应）。
+/// 目的：一次工作内的全部 agent 沙箱（发言席就是 agent，沙箱与 agent 一一对应）。
 #[derive(Debug, Clone, Default)]
 pub struct Sandboxes {
-    /// 本工作共享区的真实根（@ 改写要它；代拟还没名单时也有）。
+    /// 目的：本工作共享区的真实根（@ 改写要它；代拟还没名单时也有）。
     pub shared: PathBuf,
     /// 目的：本次工作的**会话树根**（`session/<顶层工作名>`）——各 agent 私沙与 `.work` 的父目录。
     /// 约束：布局归工作区能力；虚拟机档据此挂稳定根，不靠 `shared.parent()` 猜（外部绑定时后者不是会话树）。
@@ -274,7 +272,7 @@ pub struct Sandboxes {
 }
 
 impl Sandboxes {
-    /// 某 agent 实例的沙箱；不存在 = 该 agent 没被分配工作区（调用方如实报错）。
+    /// 目的：某 agent 实例的沙箱；不存在 = 该 agent 没被分配工作区（调用方如实报错）。
     pub fn for_agent(&self, agent: &str) -> Option<&Sandbox> {
         self.list.iter().find(|s| s.agent == agent)
     }
@@ -290,52 +288,52 @@ impl Sandboxes {
     }
 }
 
-/// 一次工作的文件清单（给前端的 @ 菜单用）：相对路径，**一律用 / 分隔**，排序稳定。
+/// 目的：一次工作的文件清单（给前端的 @ 菜单用）：相对路径，**一律用 / 分隔**，排序稳定。
 #[derive(Debug, Clone, Default)]
 pub struct WorkFiles {
-    /// work/ 共享区下的文件。
+    /// 目的：work/ 共享区下的文件。
     pub work: Vec<String>,
-    /// agent 实例名 → 其私有沙箱下的文件。
+    /// 目的：agent 实例名 → 其私有沙箱下的文件。
     pub agents: BTreeMap<String, Vec<String>>,
 }
 
-/// 工作区寻址根（由 `Workdirs` 端口如实给出；本能力的 service 据此拼装沙箱）。
+/// 目的：工作区寻址根（由 `Workdirs` 端口如实给出；本能力的 service 据此拼装沙箱）。
 #[derive(Debug, Clone)]
 pub struct WorkRoots {
-    /// 本工作共享区。
+    /// 目的：本工作共享区。
     pub shared: PathBuf,
     /// 目的：本次工作的**会话树根**（`session/<顶层工作名>`）：各 agent 私沙与 `.work` 的父目录。
     /// 约束：会话目录内的布局事实由本能力给出，虚拟机档不再自己从 `shared.parent()` 反推。
     pub session_root: PathBuf,
-    /// agent 实例名 → 私有沙箱目录。
+    /// 目的：agent 实例名 → 私有沙箱目录。
     pub agents: BTreeMap<String, PathBuf>,
-    /// 版本库目录（`session/<工作名>/.work`）：提交记录、内容寻址对象与各 agent 的拉取基线。
+    /// 目的：版本库目录（`session/<工作名>/.work`）：提交记录、内容寻址对象与各 agent 的拉取基线。
     pub store: PathBuf,
 }
 
-/// 一个区的用量：文件数 + 总字节（真实 stat，不是清单条数）。
+/// 目的：一个区的用量：文件数 + 总字节（真实 stat，不是清单条数）。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct AreaUsage {
     pub files: usize,
     pub bytes: u64,
 }
 
-/// 一次工作的**工作区用量**（删除前如实交代）：总数 + 共享区/各 agent 沙箱的分项。
-/// 只数文件（目录不计），字节取文件真实大小。
+/// 目的：一次工作的**工作区用量**（删除前如实交代）：总数 + 共享区/各 agent 沙箱的分项。
+///    只数文件（目录不计），字节取文件真实大小。
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct WorkUsage {
-    /// 全部文件数（共享区 + 各 agent 沙箱）。
+    /// 目的：全部文件数（共享区 + 各 agent 沙箱）。
     pub files: usize,
-    /// 全部总字节。
+    /// 目的：全部总字节。
     pub bytes: u64,
-    /// 共享区 `work/`。
+    /// 目的：共享区 `work/`。
     pub work: AreaUsage,
-    /// agent 实例名 → 它的私有沙箱。
+    /// 目的：agent 实例名 → 它的私有沙箱。
     pub agents: BTreeMap<String, AreaUsage>,
 }
 
 impl WorkUsage {
-    /// 按分项汇总总数（调用方只填分项，避免两处各算一遍）。
+    /// 目的：按分项汇总总数（调用方只填分项，避免两处各算一遍）。
     pub fn total(work: AreaUsage, agents: BTreeMap<String, AreaUsage>) -> WorkUsage {
         let mut files = work.files;
         let mut bytes = work.bytes;

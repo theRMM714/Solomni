@@ -1,5 +1,7 @@
-//! FakeChat / DemoGateway 的独立契约测试（docs/testing/doubles.md 的 Chat 与 ChatGateway 行）。
-//! 两者都是**测试专用**替身：生产不装配，也不存在"没有模型就回落演示"这条路。
+//! 目的：钉测试替身 FakeChat / DemoGateway 对 docs/testing/doubles.md 的契约。
+//! 管：按序回放、空脚本、逐字记录调用、流式 start+chunk、中止两时点、演示网关成员/核心通道。
+//! 不管：生产装配（两者都不装配）。
+//! 联动：docs/testing/doubles.md、tests/doubles。
 
 use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{parse, Verb};
@@ -35,7 +37,6 @@ fn call(chat: &mut dyn Chat, stream: bool) -> (String, Vec<String>) {
 }
 
 // ---------- FakeChat：成功 / 空结果 / 记录 ----------
-
 #[test]
 fn fake_chat_replays_in_order_then_repeats_the_last() {
     let mut chat = FakeChat::new(vec!["一".to_string(), "二".to_string()]);
@@ -71,7 +72,6 @@ fn fake_chat_records_every_call_verbatim() {
 }
 
 // ---------- FakeChat：流式与中止 ----------
-
 #[test]
 fn fake_chat_without_stream_never_calls_back() {
     let mut chat = FakeChat::new(vec!["安静".to_string()]);
@@ -125,7 +125,6 @@ fn fake_chat_abort_at_text_keeps_the_produced_text() {
 }
 
 // ---------- DemoGateway：测试专用 / 两类通道 / 不需要真实供应商 ----------
-
 #[test]
 fn demo_gateway_member_channel_names_the_module_and_replies() {
     let mut chat = DemoGateway.member_channel(&unreachable_channel(), "reviewer");

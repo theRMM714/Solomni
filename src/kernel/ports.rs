@@ -112,11 +112,24 @@ pub struct ToolCtx<'a> {
     pub line: u64,
 }
 
+/// 目的：本机路径的元数据事实——端口只回答"在不在、是不是目录"；读不到是 IO 错误，由调用方决定文案。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HostMetadata {
+    /// 目的：这个路径是目录。
+    pub is_dir: bool,
+}
+
 pub trait HostProbe: Send + Sync {
     /// 这个路径存在且是文件。
     fn is_file(&self, path: &Path) -> bool;
     /// 这个路径存在且是目录。
     fn is_dir(&self, path: &Path) -> bool;
+    /// 把路径规范化成真实路径（目录联接、映射盘、verbatim 前缀都在这里被解析掉）；读不到给 IO 错误。
+    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf>;
+    /// 读一个路径的元数据事实；读不到给 IO 错误。
+    fn host_metadata(&self, path: &Path) -> std::io::Result<HostMetadata>;
+    /// 在这个目录下建删一个探针文件，验证它**真的可写**；建不了给 IO 错误。
+    fn probe_writable(&self, dir: &Path) -> std::io::Result<()>;
     /// 这个路径存在、是文件、且**能直接执行**（unix 看可执行位；别的平台按"是文件"）。
     /// 缺省按 `is_file`——不知道可执行位的适配器照旧可用。
     fn is_executable(&self, path: &Path) -> bool {

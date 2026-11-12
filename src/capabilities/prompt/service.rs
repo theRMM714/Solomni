@@ -1,10 +1,7 @@
-//! 提示词册的**能力面实现与装配入口**。
-//!
-//! 状态就是 `domain` 的 `Prompts`（**纯数据，没有端口**）：装载一次之后只答不问，
-//! 所以这里不再包一层结构体，直接把 `api::Prompt` 挂到它身上——**持有者因此全进程只有一处**
-//! （conductor 的 `Box<dyn Prompt>`），别的能力按名字取段或拿走两块共享记录。
-//!
-//! 加载机制在 `detail/yaml_prompts.rs`；本文件不碰文件系统。
+//! 目的：提示词册的能力面实现与装配入口。
+//! 管：实现 api::Prompt；load 装载一次后只答不问；持有者全进程只有一处。
+//! 不管：文件系统与 yaml 解析（在 detail/yaml_prompts.rs）；渲染细节（在 domain/prompt.rs）。
+//! 联动：状态就是 domain 的 Prompts；组合根调用 load 得到 Arc<dyn Prompt> 交给 conductor。
 
 use crate::capabilities::prompt::api::{Prompt, Segment, Vars};
 use crate::capabilities::prompt::domain::prompt::{render, Prompts};
@@ -31,7 +28,7 @@ impl Prompt for Prompts {
     }
 }
 
-/// 组合根专用：装载册子（缺文件 / 缺键 = 装配错误，如实报错）。
+/// 目的：组合根专用：装载册子（缺文件 / 缺键 = 装配错误，如实报错）。
 pub fn load(source: &dyn PromptSource) -> Result<Arc<dyn Prompt>, String> {
     Ok(Arc::new(source.load()?))
 }

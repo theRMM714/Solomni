@@ -35,7 +35,7 @@ const GATES = [
   { id: "structure/gap-format", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["tests/**/gaps.yaml"], run: (root) => S.ledgers.gapFormat(root) },
   { id: "structure/unit-map", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["docs/**/unit-map.md", "src/**/*.rs"], run: (root) => S.map.unitMap(root) },
   { id: "structure/doc-refs", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["src/**/*.rs", "docs/**/*.md"], run: (root) => S.map.docRefs(root) },
-  { id: "structure/comment-contract", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["src/**/*.rs", "tests/**/*.rs", "tests/comment-baseline.json"], run: (root) => S.comments.contract(root).problems },
+  { id: "structure/comment-contract", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["src/**/*.rs", "tests/**/*.rs"], run: (root) => S.comments.contract(root).problems },
   { id: "structure/comment-hygiene-tests", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["src/**/*.rs", "tests/**/*.rs"], run: (root) => S.comments.hygieneSelfTests(root) },
   { id: "structure/fence-literals", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["src/**/*.rs"], run: (root) => S.platform.fenceLiterals(root) },
   { id: "structure/batch-ascii", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["**/*.cmd", "**/*.bat"], run: (root) => S.platform.batchAscii(root) },
@@ -47,7 +47,7 @@ const GATES = [
   { id: "structure/systools", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["systools/**/*.yaml", "SYSTOOL.md", "docs/tools/tools-and-roles.md"], run: (root) => S.docsTruth.systools(root) },
   { id: "structure/links", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["links.yaml", "dependencies.yaml", "env.js", "src/**/*.rs"], run: (root) => S.ledgers.links(root) },
   { id: "structure/deps-sha256", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["dependencies.yaml"], run: (root) => S.ledgers.depsSha256(root) },
-  { id: "structure/dependency", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["src/**/*.rs", "tests/dependency-baseline.json"], run: (root) => S.dependency.direction(root) },
+  { id: "structure/dependency", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["src/**/*.rs"], run: (root) => S.dependency.direction(root) },
   {
     id: "structure/web-layers",
     lane: "structure",
@@ -77,7 +77,7 @@ const GATES = [
     lane: "structure",
     step: "T0 结构审查",
     kind: "text",
-    inputs: ["src/capabilities/**/*.rs", "tests/structure-baseline.json"],
+    inputs: ["src/capabilities/**/*.rs"],
     run: (root, ctx) => {
       const r = S.capability.internal(root);
       ctx.stats.notes = (ctx.stats.notes || []).concat(r.notes);
