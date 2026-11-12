@@ -304,15 +304,21 @@ pub(crate) fn loaded_binding_is_rechecked_against_the_tier() {
     use crate::kernel::api::Tier;
     use std::path::Path;
 
+    let probe = crate::kernel::detail::HostProbeAdapter;
     let product = super::scratch("conduct-recheck").join("product");
     std::fs::create_dir_all(&product).expect("建产品根");
-    let product = product_root(&product);
-    let err = recheck(Path::new(r"\\server\share\proj"), Tier::Host, &product)
-        .expect_err("本机档的 UNC 绑定要拒");
+    let product = product_root(&product, &probe);
+    let err = recheck(
+        Path::new(r"\\server\share\proj"),
+        Tier::Host,
+        &product,
+        &probe,
+    )
+    .expect_err("本机档的 UNC 绑定要拒");
     assert!(err.contains("本机档不能用网络工作区"), "{err}");
-    let err = recheck(&product, Tier::Host, &product).expect_err("越界绑定要拒");
+    let err = recheck(&product, Tier::Host, &product, &probe).expect_err("越界绑定要拒");
     assert!(err.contains("互相包含"), "{err}");
-    recheck(&product.join("gone"), Tier::Host, &product).expect("不可达不挡开会话");
+    recheck(&product.join("gone"), Tier::Host, &product, &probe).expect("不可达不挡开会话");
 }
 
 /// 目的：先建本机档 + 外部绑定，再切进虚拟机档——起 guest 的挂载计划与直接建虚拟机档一致。

@@ -258,6 +258,8 @@ pub(crate) fn unc_external_workspace_round_trip_on_a_real_share() {
     use crate::kernel::api::{is_network_path, native, Tier};
     use std::path::PathBuf;
 
+    let probe = crate::kernel::detail::HostProbeAdapter;
+
     let unc = match std::env::var("SOLOMNI_UNC_ROOT") {
         Ok(v) if !v.trim().is_empty() => PathBuf::from(v.trim()),
         _ => {
@@ -281,11 +283,12 @@ pub(crate) fn unc_external_workspace_round_trip_on_a_real_share() {
     let root = crate::tests::scratch("ws-unc-host");
     let product = root.join("product");
     std::fs::create_dir_all(&product).expect("建产品根");
-    let product = product_root(&product);
+    let product = product_root(&product, &probe);
 
     // 1) 绑定层：虚拟机档接受 UNC；规范化结果仍是 native UNC（不是相对路径 UNC\server\…）。
     //    resolve 里的写探测会真的在共享上建删一个文件——能过就说明共享可写。
-    let bound = resolve(&external, Tier::Vm, &product).expect("虚拟机档要接受 UNC 外部工作区");
+    let bound =
+        resolve(&external, Tier::Vm, &product, &probe).expect("虚拟机档要接受 UNC 外部工作区");
     assert_eq!(
         bound,
         native(&external.canonicalize().expect("规范化 UNC 根"))
@@ -304,7 +307,8 @@ pub(crate) fn unc_external_workspace_round_trip_on_a_real_share() {
 
     // 2) 本机档：拒绝网络工作区，而且**不触网**（耗时是"没去连共享"的可判定证据）。
     let started = std::time::Instant::now();
-    let err = resolve(&external, Tier::Host, &product).expect_err("本机档必须拒绝网络工作区");
+    let err =
+        resolve(&external, Tier::Host, &product, &probe).expect_err("本机档必须拒绝网络工作区");
     assert!(err.contains("本机档不能用网络工作区"), "{}", err);
     assert!(
         started.elapsed() < std::time::Duration::from_secs(3),
@@ -316,12 +320,13 @@ pub(crate) fn unc_external_workspace_round_trip_on_a_real_share() {
     // 3) 产品根的 UNC 别名：同一物理目录换个写法，文本 starts_with 拦不住，要靠落点身份拒。
     match drive_share_alias(&share_root, &product) {
         Some(alias) => {
-            let err = resolve(&alias, Tier::Vm, &product).expect_err("产品根的 UNC 别名必须拒");
+            let err =
+                resolve(&alias, Tier::Vm, &product, &probe).expect_err("产品根的 UNC 别名必须拒");
             assert!(err.contains("互相包含"), "{}", err);
         }
         None => eprintln!("[探针] SOLOMNI_UNC_ROOT 不是盘符共享的写法：跳过产品根 UNC 别名断言"),
     }
-    let err = resolve(&share_root, Tier::Vm, &product).expect_err("共享根要拒");
+    let err = resolve(&share_root, Tier::Vm, &product, &probe).expect_err("共享根要拒");
     assert!(err.contains("网络共享的根目录"), "{}", err);
 
     // 4) 真实共享上的版本化全链路：布局投影、首绑导入、pull / commit / status / sync。

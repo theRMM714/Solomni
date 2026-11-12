@@ -235,11 +235,9 @@ impl Conductor {
                 }
             },
         };
-        super::workspace_root::recheck(
-            &root,
-            tier,
-            &super::workspace_root::product_root(&self.root),
-        )?;
+        let probe = self.probe.as_ref();
+        let product = super::workspace_root::product_root(&self.root, probe);
+        super::workspace_root::recheck(&root, tier, &product, probe)?;
         Ok(Some(root))
     }
 

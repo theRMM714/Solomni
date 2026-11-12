@@ -1,5 +1,5 @@
 //! 核心层：定义抽象（ports）、编排业务（会话/引擎）、会话中心。
-//! 分层纪律：本文件不出现文件读、ureq、stdin/stdout——机制全在各能力的 `detail` 与 `kernel/detail`，
+//! 分层纪律：本文件不出现文件读、网络请求、stdin/stdout——机制全在各能力的 `detail` 与 `kernel/detail`，
 //! 装配（new 适配器）只发生在 main 组合根。前端只见 Conductor 门面、会话句柄与 SessionEvent 流。
 
 use crate::capabilities::builds::api::Builds;

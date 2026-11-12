@@ -2,14 +2,19 @@
 //! 管：网络路径与档位的匹配（本机档拒绝网络工作区）、根的形态（不能是文件系统根 / UNC 共享根）、虚拟机档要求
 //!   UTF-8、与产品根的互包含（文本 + 落点身份），以及目录与可写性。
 //! 不管：会话 meta 的读写（在 session）；锁（在 workspace 能力）；挂载计划（在 guest_job）。
-//! 联动：创建走 resolve，加载复检走 recheck；两者共用一个 policy，手改 meta 也过不去。
+//! 联动：创建走 resolve，加载复检走 recheck；两者共用一个 policy，手改 meta 也过不去；规范化、元数据与可写探测都走 `HostProbe`。
 
 use crate::kernel::api::Tier;
+use crate::kernel::ports::HostProbe;
 use std::path::{Path, PathBuf};
 
-/// 目的：把产品根规范化成判定用的写法（canonicalize 失败时退回原样）。
-pub(crate) fn product_root(root: &Path) -> PathBuf {
-    crate::kernel::api::native(&root.canonicalize().unwrap_or_else(|_| root.to_path_buf()))
+/// 目的：把产品根规范化成判定用的写法（规范化失败时退回原样）。
+pub(crate) fn product_root(root: &Path, probe: &dyn HostProbe) -> PathBuf {
+    crate::kernel::api::native(
+        &probe
+            .canonicalize(root)
+            .unwrap_or_else(|_| root.to_path_buf()),
+    )
 }
 
 /// 目的：不需要 IO 的那部分策略——绝对路径、档位与网络路径、根的形态、虚拟机档的编码。
@@ -47,35 +52,44 @@ pub(crate) fn policy(path: &Path, tier: Tier) -> Result<(), String> {
 
 /// 目的：创建时的完整校验——策略 → 存在且是目录 → 与产品根互不包含 → 可写。
 /// 返回：规范化后的根（native 写法，绑定与投影都按它存）。
-pub(crate) fn resolve(raw: &Path, tier: Tier, product: &Path) -> Result<PathBuf, String> {
+pub(crate) fn resolve(
+    raw: &Path,
+    tier: Tier,
+    product: &Path,
+    probe: &dyn HostProbe,
+) -> Result<PathBuf, String> {
     policy(raw, tier)?;
     let root = crate::kernel::api::native(
-        &raw.canonicalize()
+        &probe
+            .canonicalize(raw)
             .map_err(|e| format!("工作区不可达：{}（{}）", raw.display(), e))?,
     );
     policy(&root, tier)?;
-    let meta = std::fs::metadata(&root)
+    let meta = probe
+        .host_metadata(&root)
         .map_err(|e| format!("读工作区失败：{}（{}）", root.display(), e))?;
-    if !meta.is_dir() {
+    if !meta.is_dir {
         return Err(format!("工作区不是目录：{}", root.display()));
     }
     check_bounds(&root, product)?;
-    // 写探测：外部目录必须真的可写；探针建在根目录下，随后立即清掉。
-    let probe = root.join(format!(".solomni-write-probe-{}", std::process::id()));
-    let ok = std::fs::write(&probe, b"probe").is_ok();
-    let _ = std::fs::remove_file(&probe);
-    if !ok {
-        return Err(format!("工作区不可写：{}", root.display()));
-    }
+    // 写探测：外部目录必须真的可写；探针由端口在根目录下建删。
+    probe
+        .probe_writable(&root)
+        .map_err(|_| format!("工作区不可写：{}", root.display()))?;
     Ok(root)
 }
 
 /// 目的：加载复检——会话记录里的绑定按 meta 的档位重跑策略。
 /// 约束：目录暂时不可达不算策略违例（会话仍能打开，工作区操作按真实原因报错）；越界、网络路径进本机档、
 ///   共享根、非 UTF-8 都如实拒绝——否则手改 meta 就能绕过创建时的拦截。
-pub(crate) fn recheck(root: &Path, tier: Tier, product: &Path) -> Result<(), String> {
+pub(crate) fn recheck(
+    root: &Path,
+    tier: Tier,
+    product: &Path,
+    probe: &dyn HostProbe,
+) -> Result<(), String> {
     policy(root, tier)?;
-    if std::fs::metadata(root).is_err() {
+    if probe.host_metadata(root).is_err() {
         return Ok(());
     }
     check_bounds(root, product)

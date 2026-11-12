@@ -1,5 +1,5 @@
 //! 目的：宿主探测替身——机器能力与依赖在场与否都可控。
-//! 管：文件/目录/可执行判断、可执行名解析、虚拟化能力、读文本。
+//! 管：文件/目录/可执行判断、可执行名解析、虚拟化能力、读文本、规范化、元数据与可写探测。
 //! 不管：依赖状态（`host.rs`）、真实探测（`src/kernel/detail/`）。
 //! 联动：`src/kernel/ports.rs` 的 `HostProbe`。
 
@@ -20,6 +20,35 @@ impl crate::kernel::ports::HostProbe for FixedProbe {
     }
     fn hypervisor_available(&self) -> bool {
         self.hypervisor
+    }
+    fn canonicalize(&self, path: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+        Ok(path.to_path_buf())
+    }
+    fn host_metadata(
+        &self,
+        path: &std::path::Path,
+    ) -> std::io::Result<crate::kernel::ports::HostMetadata> {
+        let is_dir =
+            self.dirs.iter().any(|p| p == path) || self.guests.iter().any(|g| path.starts_with(g));
+        let is_file = self.files.iter().any(|p| p == path);
+        if is_dir || is_file {
+            Ok(crate::kernel::ports::HostMetadata { is_dir })
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "模型里没有这个路径",
+            ))
+        }
+    }
+    fn probe_writable(&self, dir: &std::path::Path) -> std::io::Result<()> {
+        if self.dirs.iter().any(|p| p == dir) || self.guests.iter().any(|g| dir.starts_with(g)) {
+            Ok(())
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "模型里没有这个目录",
+            ))
+        }
     }
 }
 
@@ -47,6 +76,18 @@ impl crate::kernel::ports::HostProbe for TestHostProbe {
     fn hypervisor_available(&self) -> bool {
         self.hypervisor
             .unwrap_or_else(|| crate::kernel::detail::HostProbeAdapter.hypervisor_available())
+    }
+    fn canonicalize(&self, path: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+        crate::kernel::detail::HostProbeAdapter.canonicalize(path)
+    }
+    fn host_metadata(
+        &self,
+        path: &std::path::Path,
+    ) -> std::io::Result<crate::kernel::ports::HostMetadata> {
+        crate::kernel::detail::HostProbeAdapter.host_metadata(path)
+    }
+    fn probe_writable(&self, dir: &std::path::Path) -> std::io::Result<()> {
+        crate::kernel::detail::HostProbeAdapter.probe_writable(dir)
     }
     fn read_text(&self, path: &std::path::Path) -> Option<String> {
         crate::kernel::detail::HostProbeAdapter.read_text(path)

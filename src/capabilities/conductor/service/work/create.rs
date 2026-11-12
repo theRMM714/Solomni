@@ -103,11 +103,9 @@ impl Conductor {
         let Some(raw) = raw else {
             return Ok(None);
         };
-        let root = super::workspace_root::resolve(
-            raw,
-            tier,
-            &super::workspace_root::product_root(&self.root),
-        )?;
+        let probe = self.probe.as_ref();
+        let product = super::workspace_root::product_root(&self.root, probe);
+        let root = super::workspace_root::resolve(raw, tier, &product, probe)?;
         Ok(Some(crate::capabilities::session::api::WorkspaceBinding {
             root,
         }))
