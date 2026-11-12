@@ -17,9 +17,7 @@ pub const HELPER_DIAG_PREFIX: &str = "solomni-guest-fence: ";
 pub const HELPER_SIGNAL_MARKER: &str = "solomni-guest-fence: signal";
 
 // 协议常量的唯一定义在 domain/diagnose.rs；这里重导出，维持通道侧与测试的既有取用面。
-pub use crate::capabilities::vm::domain::diagnose::{
-    HELPER_DIAGNOSE_PREFIX, HELPER_PATH, HELPER_TIMEOUT_MARKER,
-};
+pub use crate::capabilities::vm::domain::diagnose::{HELPER_PATH, HELPER_TIMEOUT_MARKER};
 
 /// 目的：助手脚本正文。guest 只需 python3（虚拟根基线已自证）；缺 python3 时执行必然失败，不降级。
 pub const HELPER_SCRIPT: &str = r#"#!/usr/bin/env python3

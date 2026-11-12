@@ -19,8 +19,8 @@ use crate::capabilities::modules::api::Roster;
 ///    与 `Registry`（能力面）的分工是**有意的不对称**，不是重复：
 ///    - `Registry` 的写方法取 `&mut self`——只有那样"单写者"才是**编译期事实**（R4/R5）；
 ///    - 本 trait 全取 `&self`——呈现层持有的是可克隆的句柄（多连接共用），队列独占在**线程那一侧**，
-///    不是靠类型系统在调用点表达。
-///    两者因此**不能收成一个 trait**（接收者不同）；收口判据见 ARCHITECTURE.md §九.6 R12。
+///      不是靠类型系统在调用点表达。
+///      两者因此**不能收成一个 trait**（接收者不同）；收口判据见 ARCHITECTURE.md §九.6 R12。
 pub trait RegistryOps: Send + Sync {
     fn providers(&self) -> Result<Vec<ProviderView>, String>;
     fn upsert_provider(&self, id: &str, base_url: &str, api_key: &str) -> Result<(), String>;
@@ -55,10 +55,10 @@ pub trait RegistryOps: Send + Sync {
 /// 目的：登记处能力面：供应商 / 模型 / agent / 基本设置，以及通道上的模型发现与探测。
 ///    两类方法对应两类调用方：
 ///    - **呈现层要的**（`provider_views` / `model_views` / `agent_views` / `app_settings` …）——
-///    它经 `RegistryOps`（本文件）走命令队列进来（见 `conductor/api.rs`）；
+///      它经 `RegistryOps`（本文件）走命令队列进来（见 `conductor/api.rs`）；
 ///    - **其它能力与 conductor 要的只读事实**（`resolve` / `tool_mode` / `context_of` / `snapshot` …）——
-///    谁是登记处的主人就由谁答，调用方不自己维护一份镜像。
-///    实现者是 `service.rs` 的 `RegistryService`（**状态在它里面**，conductor 只持 `Box<dyn Registry>`）。
+///      谁是登记处的主人就由谁答，调用方不自己维护一份镜像。
+///      实现者是 `service.rs` 的 `RegistryService`（**状态在它里面**，conductor 只持 `Box<dyn Registry>`）。
 pub trait Registry: Send + Sync {
     // ---- 视图：给呈现层与别的能力看的登记处（**永不携带密钥**） ----
     /// 供应商视图（不含密钥）。

@@ -36,7 +36,7 @@ pub trait ChatGateway {
 ///    - 只做**不会产生歧义**的修补（例如把字符串里的裸控制字符转义）；改了字段含义就是错。
 ///    - 修不了就 repaired = None，把原因写进 what（上层据此走原路：记一条失败的工具行，让模型重发）。
 ///    - 宁缺毋滥：拿不准就别修——让模型重发一次，好过猜它想写什么。
-///    默认真现在 `detail/repair.rs`（只做控制字符转义）；第三方实现满足本契约即可整体替换。
+///      默认真现在 `detail/repair.rs`（只做控制字符转义）；第三方实现满足本契约即可整体替换。
 pub trait EnvelopeRepair: Send + Sync {
     fn repair(&self, raw: &str, kind: &Malformed) -> RepairOutcome;
 }
