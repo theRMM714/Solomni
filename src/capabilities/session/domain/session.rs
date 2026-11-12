@@ -1,17 +1,16 @@
-//! 单 agent 会话：上下文历史自有，通道来自注入的网关。
-//! 发言席只有 agent：id = agent 实例名，既是说话人标签也是历史回放的依据。
-//! 支持工具循环（联动 engine::converse_with）；转录行带会话内稳定 id（自 0 递增），
-//! 并记录每行对应的历史长度，供回档精确回退。
+//! 目的：单 agent 会话——上下文历史自有，通道来自注入的网关。
+//! 管：发言席（只有 agent，id = agent 实例名）、工具循环、转录行与会话内稳定 id、每行对应的历史长度（供回档精确回退）、压缩点。
+//! 不管：事件词汇与裁决队列（在 `events.rs` / `decisions.rs`）、历史落盘（在 `detail/`）。
+//! 联动：由 engine 驱动（`engine::converse_with`）；回档算术在 `rewind.rs`，历史视图在 `history.rs`。
 
 use crate::capabilities::llm::api::{BoxedChat, Msg};
 use crate::capabilities::session::domain::events::{LineView, SessionEvent, ToolCallView};
 use crate::capabilities::session::domain::tools::MemberTools;
 
-/// 把"保留前 keep 行"对齐到**回复边界**：keep 落在某次回复内部时，退到该回复的第一行之前。
-///
-/// 为什么必须对齐：一次回复的消息是「一条助手消息 + N 条结果」，截在中间会留下孤儿结果
-/// （协议要求结果紧跟发起它的助手消息）。转录的截断与内存历史的截断**必须用同一个函数**，
-/// 否则前端看到的事件流与模型上下文会不一致。
+/// 目的：把"保留前 keep 行"对齐到**回复边界**：keep 落在某次回复内部时，退到该回复的第一行之前。
+///   为什么必须对齐：一次回复的消息是「一条助手消息 + N 条结果」，截在中间会留下孤儿结果
+///   （协议要求结果紧跟发起它的助手消息）。转录的截断与内存历史的截断**必须用同一个函数**，
+///   否则前端看到的事件流与模型上下文会不一致。
 pub fn keep_whole_replies(line_reply: &[u64], keep: usize) -> usize {
     let mut keep = keep.min(line_reply.len());
     if keep > 0 && keep < line_reply.len() {
@@ -28,31 +27,31 @@ pub mod prompt;
 pub use prompt::{SessionParams, TurnRun};
 
 // 提示拼装只被装配侧用到：测试与 `prompt` 能力经由本模块的 `prompt` 子模块取，不在此重导出。
-/// 一个 agent 的会话：模块数不限（形态只在校验与界面标签上区分）。
+/// 目的：一个 agent 的会话：模块数不限（形态只在校验与界面标签上区分）。
 pub struct AgentSession {
-    /// agent 实例名（说话人标签；重建时也按它命名）。
+    /// 目的：agent 实例名（说话人标签；重建时也按它命名）。
     pub(crate) id: String,
     /// 会话参数（派生的前提）：不占对话的位置，每次调用现渲染。
     params: SessionParams,
-    /// **只有对话**：user / assistant / tool（+ 核心注入的系统消息）。
-    /// 身份与环境不在这里——它们由 params 现渲染（见 docs/tools/tools-and-roles.md 二）。
+    /// 目的：**只有对话**：user / assistant / tool（+ 核心注入的系统消息）。
+    ///   身份与环境不在这里——它们由 params 现渲染（见 docs/tools/tools-and-roles.md 二）。
     pub(crate) dialogue: Vec<Msg>,
     pub(crate) chat: BoxedChat,
-    /// 工具环境：内置文件工具按该 agent 的沙箱放行 + 该 agent 模块声明的外部工具。
+    /// 目的：工具环境：内置文件工具按该 agent 的沙箱放行 + 该 agent 模块声明的外部工具。
     pub(crate) tools: Option<MemberTools>,
-    /// 压缩回合的指令（提示词段；构造时取自册子）。
+    /// 目的：压缩回合的指令（提示词段；构造时取自册子）。
     pub(crate) compact_prompt: String,
-    /// 下一条转录行的 id。
+    /// 目的：下一条转录行的 id。
     pub(crate) next_line: u64,
-    /// 每行 id 对应「该行完成时的历史长度」，回档按它截断历史。
+    /// 目的：每行 id 对应「该行完成时的历史长度」，回档按它截断历史。
     pub(crate) marks: Vec<usize>,
-    /// 每行属于哪次模型回复（id 相同 = 同一次回复）。回档**按回复原子**截断靠它：
-    /// 截在一次回复中间会留下"孤儿工具结果"，而协议要求结果紧跟发起它的那条助手消息。
+    /// 目的：每行属于哪次模型回复（id 相同 = 同一次回复）。回档**按回复原子**截断靠它：
+    ///   截在一次回复中间会留下"孤儿工具结果"，而协议要求结果紧跟发起它的那条助手消息。
     pub(crate) line_reply: Vec<u64>,
     /// 目的：每一行对应的**行 id**（与 `marks` / `line_reply` 同长）。
     /// 约束：留档折叠后行 id 会有空洞，压缩切分必须按 id 记账，不能拿行下标冒充 id。
     pub(crate) line_ids: Vec<u64>,
-    /// 正在落行的回复 id（每轮开始时设置；line() 用它，免得每个调用点都传一遍）。
+    /// 目的：正在落行的回复 id（每轮开始时设置；line() 用它，免得每个调用点都传一遍）。
     pub(crate) cur_reply: u64,
     /// 正在落行的**回合 id**（讨论的回合标记用它；单 agent 回合为 0）。
     cur_turn: u64,
@@ -156,25 +155,25 @@ pub fn freshness_view(dialogue: &[Msg], reads: &[(&ReadAt, bool)]) -> Vec<Msg> {
     msgs
 }
 
-/// 摘要消息（发送视图里是 **user 角色**）：`compact` 与重建共用一份口径，实时与回放才逐条相同。
+/// 目的：摘要消息（发送视图里是 **user 角色**）：`compact` 与重建共用一份口径，实时与回放才逐条相同。
 pub fn summary_message(summary: &str) -> Msg {
     Msg::user(format!("[此前内容摘要]\n{}", summary))
 }
 
 impl AgentSession {
-    /// 本会话的**对话**（测试据此断言"用户说过的话，下一回合带上了"）。
-    /// 身份与环境不在里面——它们由 params 现渲染（见 SessionParams::identity）。
+    /// 目的：本会话的**对话**（测试据此断言"用户说过的话，下一回合带上了"）。
+    ///   身份与环境不在里面——它们由 params 现渲染（见 SessionParams::identity）。
     #[cfg(test)]
     pub fn dialogue(&self) -> &[crate::capabilities::llm::api::Msg] {
         &self.dialogue
     }
 
-    /// 会话参数：驱动据此现渲染身份块。
+    /// 目的：会话参数：驱动据此现渲染身份块。
     pub fn params(&self) -> &SessionParams {
         &self.params
     }
 
-    /// @ 改写要用的真实根：由参数派生，不另存一份。写法与工作环境块**同一座桥**（虚拟机档 = guest 写法）。
+    /// 目的：改写要用的真实根：由参数派生，不另存一份。写法与工作环境块**同一座桥**（虚拟机档 = guest 写法）。
     pub(crate) fn roots(&self) -> crate::capabilities::prompt::api::RefRoots {
         self.params.ref_roots()
     }
@@ -269,12 +268,12 @@ impl AgentSession {
         s
     }
 
-    /// 这条会话**正在用**的工具调用形态（身份块里的调用约定按它现渲染）。
+    /// 目的：这条会话**正在用**的工具调用形态（身份块里的调用约定按它现渲染）。
     pub fn tool_mode(&self) -> crate::capabilities::llm::api::ToolMode {
         self.tools.as_ref().map(|t| t.mode).unwrap_or_default()
     }
 
-    /// 改形态：**只改这一格**（登记处派生出来的参数），不重建会话。
+    /// 目的：改形态：**只改这一格**（登记处派生出来的参数），不重建会话。
     pub fn set_tool_mode(&mut self, mode: crate::capabilities::llm::api::ToolMode) {
         if let Some(t) = self.tools.as_mut() {
             t.mode = mode;
@@ -340,9 +339,9 @@ impl AgentSession {
         self.compact_factory = Some(factory);
     }
 
-    /// 注入一条**系统消息**（提醒/边界这类"不是用户说的、也不是模型说的"内容）：
-    /// 上下文里是 system 角色，转录里是系统行。
-    /// 它**不得在界面与记录里长得像用户发的**——身份是核心，界面按系统行样式（见 session-model.md 二）。
+    /// 目的：注入一条**系统消息**（提醒/边界这类"不是用户说的、也不是模型说的"内容）：
+    ///   上下文里是 system 角色，转录里是系统行。
+    ///   它**不得在界面与记录里长得像用户发的**——身份是核心，界面按系统行样式（见 session-model.md 二）。
     pub fn note_system(&mut self, text: &str) -> Vec<SessionEvent> {
         self.dialogue.push(Msg::system(text.to_string()));
         let v = self.line(text.to_string(), "system", "", "", None, None);
@@ -406,10 +405,10 @@ impl AgentSession {
         v
     }
 
-    /// 注入一条**派发任务**（核心给这个 agent 派的活，见 session-model.md 四之二）。
-    /// 界面：**系统行**——说话人是核心，不冒充用户；上下文：**user 角色**——派活是一次"回合"，
-    /// 会话协议要求请求里至少有一条 user 消息（全是 system 的请求会被供应商整条拒收）。
-    /// 两处口径随行落档（`system` + `task`），重建/回放才产得出**同一条**消息。
+    /// 目的：注入一条**派发任务**（核心给这个 agent 派的活，见 session-model.md 四之二）。
+    ///   界面：**系统行**——说话人是核心，不冒充用户；上下文：**user 角色**——派活是一次"回合"，
+    ///   会话协议要求请求里至少有一条 user 消息（全是 system 的请求会被供应商整条拒收）。
+    ///   两处口径随行落档（`system` + `task`），重建/回放才产得出**同一条**消息。
     pub fn note_task(&mut self, text: &str) -> Vec<SessionEvent> {
         self.dialogue.push(Msg::user(text.to_string()));
         // 派发行不属于任何模型回复：给它自己的行号当回复号（与重建规则一致）。
@@ -578,12 +577,12 @@ impl AgentSession {
         Some(self.note_compacted(plan.up_to, summary))
     }
 
-    /// 给接下来的行打上回合 id（节点执行也用整场工作的同一套计数：回档才对得上）。
+    /// 目的：给接下来的行打上回合 id（节点执行也用整场工作的同一套计数：回档才对得上）。
     pub fn set_turn(&mut self, turn_id: u64) {
         self.cur_turn = turn_id;
     }
 
-    /// 回档重建后把行号与**工具行锚**一起推到"全量下一个 id"（永不回退）。
+    /// 目的：回档重建后把行号与**工具行锚**一起推到"全量下一个 id"（永不回退）。
     pub fn set_next_line(&mut self, next: u64) {
         self.next_line = next;
         if let Some(t) = self.tools.as_ref() {
@@ -591,7 +590,7 @@ impl AgentSession {
         }
     }
 
-    /// 生成一条转录行，并记下它完成时的历史长度（回档按 marks 逐行精确回退）与它属于哪次回复。
+    /// 目的：生成一条转录行，并记下它完成时的历史长度（回档按 marks 逐行精确回退）与它属于哪次回复。
     pub(crate) fn line(
         &mut self,
         line: String,
@@ -629,7 +628,7 @@ impl AgentSession {
         v
     }
 
-    /// 末条是否为用户发言（继续能不能直接发请求的判据）。
+    /// 目的：末条是否为用户发言（继续能不能直接发请求的判据）。
     pub fn last_is_user(&self) -> bool {
         matches!(self.dialogue.last().map(|m| m.role.as_str()), Some("user"))
     }
@@ -637,7 +636,7 @@ impl AgentSession {
     /// 目的：**删除模式**的精确回退（不重建，保住通道）。
     /// 参数：`keep_id` = 只保留前 keep_id 行（= 删该行及其后）；0 = 转录清空、对话清空。
     /// 约束：**按回复原子**截断（不留下孤儿工具结果）；`line_reply`、`marks`、`dialogue` 与
-    /// 工具行锚必须同步回退——`keep_whole_replies` 依赖 `line_reply` 与 `marks` 逐行一一对应。
+    ///   工具行锚必须同步回退——`keep_whole_replies` 依赖 `line_reply` 与 `marks` 逐行一一对应。
     pub fn apply_rewind(&mut self, keep_id: u64) {
         // 转录里那段"我完整读过哪些文件"的证据随删除作废（保守，宁肯让模型重读）。
         if let Some(t) = self.tools.as_mut() {
@@ -673,9 +672,9 @@ impl AgentSession {
     }
 }
 
-/// 流式外送规则：信封之前照常外送，一旦累积文本里出现 "{" 就不再外送后续片段
-/// （模型可能在同一轮里先写正文再发 tool 信封——信封绝不能当正文流上屏）。
-/// 返回（本片可外送的部分, 新的累积文本）。纯函数，便于单测。
+/// 目的：流式外送规则：信封之前照常外送，一旦累积文本里出现 "{" 就不再外送后续片段
+///   （模型可能在同一轮里先写正文再发 tool 信封——信封绝不能当正文流上屏）。
+///   返回（本片可外送的部分, 新的累积文本）。纯函数，便于单测。
 pub fn stream_piece(acc: &str, piece: &str) -> (String, String) {
     let send = if acc.contains('{') {
         String::new()
@@ -695,9 +694,9 @@ pub fn delta_visible(kind: &str, text: &str) -> bool {
     kind == "start" || !text.is_empty()
 }
 
-/// 工作名的缺省与唯一化：`base` 去空白；为空用 `fallback`；重名追加 `-2` / `-3`（进程内唯一即可）。
-/// **纯策略**：`exists` 由调用方给——会话存在性归存储，本函数不关心它从哪来。
-/// 归属：命名是**会话自己的策略**（它拥有会话身份），不是前端的便利函数。
+/// 目的：工作名的缺省与唯一化：`base` 去空白；为空用 `fallback`；重名追加 `-2` / `-3`（进程内唯一即可）。
+///   **纯策略**：`exists` 由调用方给——会话存在性归存储，本函数不关心它从哪来。
+///   归属：命名是**会话自己的策略**（它拥有会话身份），不是前端的便利函数。
 pub fn unique_work_name(base: &str, fallback: &str, exists: impl Fn(&str) -> bool) -> String {
     let seed = if base.trim().is_empty() {
         fallback

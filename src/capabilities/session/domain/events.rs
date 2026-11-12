@@ -1,5 +1,7 @@
-//! 呈现侧契约：事件与介入请求。词汇定义在本能力（`api` 导出），前端按此渲染。
-//! 呈现即上下文：转录行与核心记录完全一致。
+//! 目的：呈现侧契约——事件与介入请求的词汇与形状，前端按此渲染；呈现即上下文，转录行与核心记录完全一致。
+//! 管：`SessionEvent` / `LineView` / `ToolCallView` / `DecisionCard` 等类型，以及 `idle` / `working` / `qualify` 等构造。
+//! 不管：会话状态与派生（在 `session.rs`）、裁决排队与等待（在 `decisions.rs`）、前端渲染（在呈现层）。
+//! 联动：由 `session.rs` 与 conductor 产生，经 `api.rs` 导出；契约见 `docs/session/session-model.md`。
 
 /// 目的：裁决卡的信封——谁在问。role = core（核心）/ member（某一席）/ tools（工具层）；name = 具体是谁。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -129,8 +131,8 @@ pub struct DecisionAnswer {
     pub note: String,
 }
 
-/// 会话事件：驱动前端渲染；转录行为增量，前端按序累积。
-/// 预留字段说明：DiscussionDone 的 round/over_cap 供 Web 前端做裁决确认页（CLI 暂不渲染）。
+/// 目的：会话事件：驱动前端渲染；转录行为增量，前端按序累积。
+///   预留字段说明：DiscussionDone 的 round/over_cap 供 Web 前端做裁决确认页（CLI 暂不渲染）。
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub enum SessionEvent {
@@ -206,8 +208,8 @@ pub enum SessionEvent {
     Usage { usage: ContextUsage, line: u64 },
 }
 
-/// 调用失败时的用户可见说明：**如实说原因**，并说清会话没被作废（可以点「继续」重试）。
-/// 为什么统一在这里生成：讨论、执行、验收、单 agent 都要说同一句话，各写一份必然漂移。
+/// 目的：调用失败时的用户可见说明：**如实说原因**，并说清会话没被作废（可以点「继续」重试）。
+///   为什么统一在这里生成：讨论、执行、验收、单 agent 都要说同一句话，各写一份必然漂移。
 pub fn interrupted_note(reason: &str) -> String {
     format!(
         "[中断] {}；本轮已中断，会话保留——点「继续」可重试。",
@@ -215,37 +217,37 @@ pub fn interrupted_note(reason: &str) -> String {
     )
 }
 
-/// 用户点「停止」后的用户可见说明：说清这一轮**停在哪**、会话没被作废、怎么接着走。
-/// 为什么与"失败"分开说：停止是用户的意图，不是故障；两者混为一句话会让用户以为出了问题。
+/// 目的：用户点「停止」后的用户可见说明：说清这一轮**停在哪**、会话没被作废、怎么接着走。
+///   为什么与"失败"分开说：停止是用户的意图，不是故障；两者混为一句话会让用户以为出了问题。
 pub fn stopped_note() -> String {
     "[停止] 已按你的要求停下（被中断的那条发言没有记入转录）；会话保留——点「继续」可接着推进。"
         .to_string()
 }
 
-/// 运行态：**这一刻谁在干活**。它在每个干活的人开始前推一条（带名字），收尾推空闲——
-/// 前端据此显示"正在工作：某某"与「停止」按钮（见 docs/session/session-model.md 二之二）。
-/// 为什么要有它：核心自己的模型调用（整理 / 裁决判定 / 验收）也在干活，不推的话界面显示的
-/// 就一直是上一个成员的名字，用户无法判断会话到底在不在跑。
+/// 目的：运行态：**这一刻谁在干活**。它在每个干活的人开始前推一条（带名字），收尾推空闲——
+///   前端据此显示"正在工作：某某"与「停止」按钮（见 docs/session/session-model.md 二之二）。
+///   为什么要有它：核心自己的模型调用（整理 / 裁决判定 / 验收）也在干活，不推的话界面显示的
+///   就一直是上一个成员的名字，用户无法判断会话到底在不在跑。
 pub fn working(agent: &str) -> SessionEvent {
     SessionEvent::Working {
         agent: Some(agent.to_string()),
     }
 }
 
-/// 收尾 / 空闲 / 等用户（下一棒开始时会再推自己的名字）。
+/// 目的：收尾 / 空闲 / 等用户（下一棒开始时会再推自己的名字）。
 pub fn idle() -> SessionEvent {
     SessionEvent::Working { agent: None }
 }
 
-/// 实时输出通道：调用参数（流式与预算，来自全局设置）+ 中止开关 + 短暂事件出口
-/// （不落盘，仅活动会话实时刷新）。
+/// 目的：实时输出通道：调用参数（流式与预算，来自全局设置）+ 中止开关 + 短暂事件出口
+///   （不落盘，仅活动会话实时刷新）。
 pub struct Live<'a> {
     pub llm: crate::capabilities::llm::api::LlmOpts,
-    /// 用户点「停止」时置位；会话与适配层据此立即中止生成。
+    /// 目的：用户点「停止」时置位；会话与适配层据此立即中止生成。
     pub cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub emit: &'a mut dyn FnMut(SessionEvent),
-    /// 本会话的裁决队（工具级确认这类"等在工作线程上"的关进它）。
-    /// `None` = 这一趟不接工具级确认（照常执行）——测试、讨论席与没有交互前端的生成都走它。
+    /// 目的：本会话的裁决队（工具级确认这类"等在工作线程上"的关进它）。
+    ///   `None` = 这一趟不接工具级确认（照常执行）——测试、讨论席与没有交互前端的生成都走它。
     pub decisions: Option<std::sync::Arc<super::decisions::DecisionDoor>>,
     /// 目的：本会话的**提问端口**（工具执行层与围栏经它请用户裁决）：走同一条裁决队、**阻塞**等回答。
     ///   `None` = 这一趟没有可回答的前端（CLI 非交互、端到端夹具、测试、讨论席）——按 fail-closed 拒绝。
@@ -253,29 +255,29 @@ pub struct Live<'a> {
 }
 
 impl Live<'_> {
-    /// 是否已被要求中止。
+    /// 目的：是否已被要求中止。
     pub fn cancelled(&self) -> bool {
         self.cancel.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
-/// 一次工具调用的转录视图：module 为空串 = 内置工具（read/write）。
+/// 目的：一次工具调用的转录视图：module 为空串 = 内置工具（read/write）。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ToolCallView {
-    /// 发言席（agent 实例名）。
+    /// 目的：发言席（agent 实例名）。
     pub speaker: String,
-    /// 工具所属模块；空串 = 内置工具。
+    /// 目的：工具所属模块；空串 = 内置工具。
     pub module: String,
     pub name: String,
     pub ok: bool,
-    /// 模型给的参数 JSON 原文。
+    /// 目的：模型给的参数 JSON 原文。
     pub args: String,
-    /// 回注给模型的结果原文（转录即内容）。
+    /// 目的：回注给模型的结果原文（转录即内容）。
     pub output: String,
-    /// 供应商给的调用 id：重建时靠它把结果消息与助手消息里的调用对上（手写信封通道为空）。
+    /// 目的：供应商给的调用 id：重建时靠它把结果消息与助手消息里的调用对上（手写信封通道为空）。
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub call_id: String,
-    /// 这次调用属于哪一次模型回复（= 该回复第一行的稳定 id）：重建按它分组，回档按它原子截断。
+    /// 目的：这次调用属于哪一次模型回复（= 该回复第一行的稳定 id）：重建按它分组，回档按它原子截断。
     #[serde(default)]
     pub reply: u64,
     /// 目的：这次调用若是一次 `read`，它读到了哪个工作树的哪几行、当时的整份指纹。
@@ -285,7 +287,7 @@ pub struct ToolCallView {
 }
 
 impl ToolCallView {
-    /// 给人看的标签：有模块就是 模块.工具名，内置工具就是工具名。
+    /// 目的：给人看的标签：有模块就是 模块.工具名，内置工具就是工具名。
     pub fn label(&self) -> String {
         if self.module.is_empty() {
             self.name.clone()
@@ -295,58 +297,58 @@ impl ToolCallView {
     }
 }
 
-/// 一条转录行：id = 会话内稳定序号（自 0 递增，回放可复现）。
-/// 一行 = 一轮模型调用；工具调用另占一行并带上调用视图。
+/// 目的：一条转录行：id = 会话内稳定序号（自 0 递增，回放可复现）。
+///   一行 = 一轮模型调用；工具调用另占一行并带上调用视图。
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct LineView {
     pub id: u64,
-    /// 这一行属于哪次模型回复（同一次回复的所有行同号；值 = 该回复第一行的 id）。
-    /// 重建上下文时靠它把"一条助手消息 + N 条结果"重新拼回去，回档也按它原子截断。
+    /// 目的：这一行属于哪次模型回复（同一次回复的所有行同号；值 = 该回复第一行的 id）。
+    ///   重建上下文时靠它把"一条助手消息 + N 条结果"重新拼回去，回档也按它原子截断。
     #[serde(default)]
     pub reply: u64,
-    /// **正文**：这一行说的内容。**行首标签不在这里**——说话人与动词是结构化字段
-    /// （`speaker` / `verb`），渲染时才拼回 `[谁:动词] 正文`（见 `render`）。
-    /// 为什么分开：呈现层与状态派生读字段，不再从正文里抠标签（见 docs/session/session-model.md 二）。
+    /// 目的：**正文**：这一行说的内容。**行首标签不在这里**——说话人与动词是结构化字段
+    ///   （`speaker` / `verb`），渲染时才拼回 `[谁:动词] 正文`（见 `render`）。
+    ///   为什么分开：呈现层与状态派生读字段，不再从正文里抠标签（见 docs/session/session-model.md 二）。
     pub line: String,
-    /// **说话人**：agent 实例名 / `用户` / 核心自己的标签（`轮次` / `代拟` / `节点`…）；空 = 无标签。
+    /// 目的：**说话人**：agent 实例名 / `用户` / 核心自己的标签（`轮次` / `代拟` / `节点`…）；空 = 无标签。
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub speaker: String,
-    /// **标签的第二段**（`[说话人:动词]` 的那个动词）：say / agree / leave / ask / 需求 / 开始 / 撤回…；空 = 没有。
+    /// 目的：**标签的第二段**（`[说话人:动词]` 的那个动词）：say / agree / leave / ask / 需求 / 开始 / 撤回…；空 = 没有。
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub verb: String,
-    /// **行的种类**：`msg`（模型发言）/ `user`（用户说的）/ `system`（系统注入或核心自己的行）/
-    /// `tool`（工具行，另有 `tool` 视图）/ `round`（讨论的轮次分隔行，正文是轮次号）。
-    /// 呈现、重建与状态派生都读它——不靠匹配行文本。
+    /// 目的：**行的种类**：`msg`（模型发言）/ `user`（用户说的）/ `system`（系统注入或核心自己的行）/
+    ///   `tool`（工具行，另有 `tool` 视图）/ `round`（讨论的轮次分隔行，正文是轮次号）。
+    ///   呈现、重建与状态派生都读它——不靠匹配行文本。
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub kind: String,
-    /// 思维链（若该轮模型给出）；前端永远默认折叠，点击才展开。
+    /// 目的：思维链（若该轮模型给出）；前端永远默认折叠，点击才展开。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<String>,
     /// 目的：本行所属回复的**助手消息原文**（重建上下文用；每条回复只落一份，挂在该回复首行）。
     /// 约束：信封模式下含信封 JSON，原生模式下即可见正文；呈现层只在整轮气泡里展示一次。
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub raw: String,
-    /// 该行是一次工具调用时带上调用视图；普通文本行没有。
+    /// 目的：该行是一次工具调用时带上调用视图；普通文本行没有。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<ToolCallView>,
-    /// 该行是"信封缺失、按发言原文收录"的降级行。
-    /// **结构化信号**：呈现层据此做样式，不靠匹配行文本里的说明文案。
+    /// 目的：该行是"信封缺失、按发言原文收录"的降级行。
+    ///   **结构化信号**：呈现层据此做样式，不靠匹配行文本里的说明文案。
     #[serde(default, skip_serializing_if = "is_false")]
     pub degraded: bool,
-    /// 这一行是**系统消息**（系统注入的提醒/边界这类"不是用户说的、也不是模型说的"内容）。
-    /// **结构化信号**：呈现层据此换样式，不靠匹配文本——否则系统消息在前端与记录里长得像用户发的。
+    /// 目的：这一行是**系统消息**（系统注入的提醒/边界这类"不是用户说的、也不是模型说的"内容）。
+    ///   **结构化信号**：呈现层据此换样式，不靠匹配文本——否则系统消息在前端与记录里长得像用户发的。
     #[serde(default, skip_serializing_if = "is_false")]
     pub system: bool,
-    /// 这一行是**核心派给这个 agent 的任务**（派发行）：界面上是系统行（说话人是核心，不冒充用户），
-    /// 上下文里以 **user 角色**转发——派活是一次"回合"，而会话协议要求请求里至少有一条 user 消息
-    /// （一条 user 都没有的请求会被供应商整条拒收，实测）。
-    /// **结构化信号**：重建/回放据此产出发出去的那**同一条消息**，不靠匹配文本。
-    /// 见 docs/session/session-model.md 二"系统消息"与四之二"节点执行只有一条管道"。
+    /// 目的：这一行是**核心派给这个 agent 的任务**（派发行）：界面上是系统行（说话人是核心，不冒充用户），
+    ///   上下文里以 **user 角色**转发——派活是一次"回合"，而会话协议要求请求里至少有一条 user 消息
+    ///   （一条 user 都没有的请求会被供应商整条拒收，实测）。
+    ///   **结构化信号**：重建/回放据此产出发出去的那**同一条消息**，不靠匹配文本。
+    ///   见 docs/session/session-model.md 二"系统消息"与四之二"节点执行只有一条管道"。
     #[serde(default, skip_serializing_if = "is_false")]
     pub task: bool,
-    /// 这一行属于哪个**回合**（讨论的一次发言回合；0 = 不属任何回合，如需求/用户行）。
-    /// 两边的转录行靠它对齐：回档主会话时，各 agent 会话按同一个回合 id 同步截断
-    /// （见 docs/session/session-model.md 五）。
+    /// 目的：这一行属于哪个**回合**（讨论的一次发言回合；0 = 不属任何回合，如需求/用户行）。
+    ///   两边的转录行靠它对齐：回档主会话时，各 agent 会话按同一个回合 id 同步截断
+    ///   （见 docs/session/session-model.md 五）。
     #[serde(default, skip_serializing_if = "is_zero")]
     pub turn: u64,
     /// 目的：控制行的结构化载荷（如 `compacted` 的 `up_to`）；普通消息行没有。
@@ -356,7 +358,7 @@ pub struct LineView {
 }
 
 impl LineView {
-    /// **模型发言行**：谁说的 + 动词（空 = 该身份没有动词，如单 agent 的正文行）。
+    /// 目的：**模型发言行**：谁说的 + 动词（空 = 该身份没有动词，如单 agent 的正文行）。
     pub fn speech(speaker: &str, verb: &str, line: String) -> LineView {
         LineView {
             speaker: speaker.to_string(),
@@ -367,7 +369,7 @@ impl LineView {
         }
     }
 
-    /// **用户说的行**：第二段是核心给用户行起的标签（需求 / 开始 / 撤回 / 同意方案…），空 = 普通发言。
+    /// 目的：**用户说的行**：第二段是核心给用户行起的标签（需求 / 开始 / 撤回 / 同意方案…），空 = 普通发言。
     pub fn user(verb: &str, line: String) -> LineView {
         LineView {
             speaker: "用户".to_string(),
@@ -378,8 +380,8 @@ impl LineView {
         }
     }
 
-    /// **核心自己的行**：系统注入的提醒/边界（`speaker` 空 = 没有说话人），
-    /// 或核心的分隔/说明行（如"代拟"、"节点"）。正文即所见。
+    /// 目的：**核心自己的行**：系统注入的提醒/边界（`speaker` 空 = 没有说话人），
+    ///   或核心的分隔/说明行（如"代拟"、"节点"）。正文即所见。
     pub fn system(speaker: &str, line: String) -> LineView {
         LineView {
             speaker: speaker.to_string(),
@@ -400,7 +402,7 @@ impl LineView {
         }
     }
 
-    /// **讨论的轮次分隔行**：正文 = 轮次号（结构化，不再从"轮次 2"里抠数字）。
+    /// 目的：**讨论的轮次分隔行**：正文 = 轮次号（结构化，不再从"轮次 2"里抠数字）。
     pub fn round(n: usize) -> LineView {
         LineView {
             speaker: "轮次".to_string(),
@@ -410,8 +412,8 @@ impl LineView {
         }
     }
 
-    /// 渲染成**文本**：`[谁:动词] 正文` / `[谁] 正文` / `[轮次 N]` / 正文。
-    /// 提示词里的转录、回档重建、回放比较都读它——"行怎么变成文本"只有这一处。
+    /// 目的：渲染成**文本**：`[谁:动词] 正文` / `[谁] 正文` / `[轮次 N]` / 正文。
+    ///   提示词里的转录、回档重建、回放比较都读它——"行怎么变成文本"只有这一处。
     pub fn render(&self) -> String {
         if self.kind == "round" {
             return format!("[{} {}]", self.speaker, self.line);
@@ -439,7 +441,7 @@ fn is_false(b: &bool) -> bool {
     !*b
 }
 
-/// 验收条目的呈现视图。
+/// 目的：验收条目的呈现视图。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct CheckView {
     pub item: String,
@@ -478,7 +480,7 @@ pub fn last_compaction(events: &[serde_json::Value]) -> Option<(u64, String, u64
 }
 
 impl SessionEvent {
-    /// 线格式：Web 长轮询与会话历史落盘共用同一形态（转录即内容，落盘即回放）。
+    /// 目的：线格式：Web 长轮询与会话历史落盘共用同一形态（转录即内容，落盘即回放）。
     pub fn to_json(&self) -> serde_json::Value {
         match self {
             SessionEvent::Notice(n) => serde_json::json!({ "type": "notice", "text": n }),
@@ -585,7 +587,7 @@ impl SessionEvent {
     }
 }
 
-/// 用户介入请求：会话暂停，等前端回应。
+/// 目的：用户介入请求：会话暂停，等前端回应。
 #[derive(Debug, Clone)]
 pub enum Pending {
     /// 模块请教用户（yes,allow 自裁模式下不会出现）。

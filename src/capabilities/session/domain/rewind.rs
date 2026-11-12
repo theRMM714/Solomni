@@ -1,11 +1,9 @@
-//! 回档的**行 / 事件算术**：纯函数，不碰 IO，也不碰会话实例。
-//!
-//! **为什么归 session 而不是独立能力**：它们读写的全部状态（转录行、`marks` / `line_reply` /
-//! `next_line`）都归会话所有，它们自己没有状态——不满足「独立状态所有权」这条必要判据。
-//! `Conductor` 里的回档**编排**（撤子会话、截事件流水、重建会话）是门面职责，留在 `conductor`。
-//! 见 ARCHITECTURE.md §六。
+//! 目的：回档的行 / 事件算术——纯函数，不碰 IO，也不碰会话实例。
+//! 管：回合归属、回复边界、行 id 推进、截断与保留（`turn_of_line` / `last_line_within` / `max_reply` / `align_keep` / `truncate_events`）。
+//! 不管：回档编排（撤子会话、截事件流水、重建会话在 `conductor`）；会话状态（在 `session.rs`）。
+//! 联动：`conductor` 的回档用例调用它；它读写的状态（转录行、`marks` / `line_reply` / `next_line`）归会话所有。
 
-/// 主会话第 keep_id 行所属的**回合**（没有 = 0）。
+/// 目的：主会话第 keep_id 行所属的**回合**（没有 = 0）。
 pub fn turn_of_line(events: &[serde_json::Value], keep_id: u64) -> u64 {
     for ev in events {
         if let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) {
@@ -19,7 +17,7 @@ pub fn turn_of_line(events: &[serde_json::Value], keep_id: u64) -> u64 {
     0
 }
 
-/// 最后一个 `turn ≤ keep_turn` 的行的 id（没有 = 0 = 该会话全部截掉）。
+/// 目的：最后一个 `turn ≤ keep_turn` 的行的 id（没有 = 0 = 该会话全部截掉）。
 pub fn last_line_within(events: &[serde_json::Value], keep_turn: u64) -> u64 {
     // 规则：**从第一行超出保留点的行开始全截掉**（turn = 0 的行不属于任何回合，
     // 跟着它前面那一回合走——用户插话、需求这类行因此不会被误删）。
@@ -38,26 +36,26 @@ pub fn last_line_within(events: &[serde_json::Value], keep_turn: u64) -> u64 {
     cut
 }
 
-/// 流水里一条留档标记（只追加；恢复 = 在它之前截断）。
+/// 目的：流水里一条留档标记（只追加；恢复 = 在它之前截断）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArchiveMark {
-    /// 标记的单调 id（呈现与恢复按它定位）。
+    /// 目的：标记的单调 id（呈现与恢复按它定位）。
     pub mark: u64,
-    /// 保留 id < before 的行。
+    /// 目的：保留 id < before 的行。
     pub before: u64,
-    /// 标记之后新行从此起的 id（留档用；删除模式等于 before）。
+    /// 目的：标记之后新行从此起的 id（留档用；删除模式等于 before）。
     pub from: u64,
-    /// 留档前的主副本头（None = 空共享区）。
+    /// 目的：留档前的主副本头（None = 空共享区）。
     pub shared: Option<u64>,
-    /// 留档前各 agent 沙箱的物化点（档案 ref 的同一份）。
+    /// 目的：留档前各 agent 沙箱的物化点（档案 ref 的同一份）。
     pub heads: std::collections::BTreeMap<String, Option<u64>>,
-    /// 给用户看的一句话（折叠区间里最后一条内容行）。
+    /// 目的：给用户看的一句话（折叠区间里最后一条内容行）。
     pub label: String,
 }
 
 impl ArchiveMark {
-    /// 从一条流水事件解析；不是留档记录 = None。
-    /// 当前格式只有留档标记：`before`（保留 id < before）与 `mode: archive`。
+    /// 目的：从一条流水事件解析；不是留档记录 = None。
+    ///   当前格式只有留档标记：`before`（保留 id < before）与 `mode: archive`。
     pub fn from_value(ev: &serde_json::Value) -> Option<ArchiveMark> {
         if ev.get("type").and_then(|t| t.as_str()) != Some("rewind") {
             return None;
@@ -87,7 +85,7 @@ impl ArchiveMark {
     }
 }
 
-/// 流水里全部留档标记（按出现顺序）。恢复 = 在该标记处截断文件，所以更晚的标记随之一并消失。
+/// 目的：流水里全部留档标记（按出现顺序）。恢复 = 在该标记处截断文件，所以更晚的标记随之一并消失。
 pub fn rewind_marks(events: &[serde_json::Value]) -> Vec<ArchiveMark> {
     events.iter().filter_map(ArchiveMark::from_value).collect()
 }
@@ -126,14 +124,14 @@ pub fn archive_label(events: &[serde_json::Value], before: u64, from: u64) -> St
     found.chars().take(40).collect()
 }
 
-/// 一行是否被某个**留档**标记折叠（落在它的 [before, from) 内）。
+/// 目的：一行是否被某个**留档**标记折叠（落在它的 [before, from) 内）。
 pub fn folded(marks: &[ArchiveMark], id: u64) -> bool {
     marks.iter().any(|m| m.before <= id && id < m.from)
 }
 
-/// 应用回档标记后的**活动视图**：
-/// - 留档折叠的行不进内容（模型与界面都看不到；文件里仍在，恢复后回来）；
-/// - 回档标记本身作为结构化事件保留（呈现层据此画留档分界），模型侧会忽略它。
+/// 目的：应用回档标记后的**活动视图**：
+///   - 留档折叠的行不进内容（模型与界面都看不到；文件里仍在，恢复后回来）；
+///   - 回档标记本身作为结构化事件保留（呈现层据此画留档分界），模型侧会忽略它。
 pub fn truncate_events(events: &[serde_json::Value]) -> Vec<serde_json::Value> {
     let marks = rewind_marks(events);
     let mut content: Vec<serde_json::Value> = Vec::new();
@@ -203,7 +201,7 @@ pub fn last_usage(
     })
 }
 
-/// 流水里用过的**最大行 id + 1**：新行从这里续号，绝不复用被折叠行的 id。
+/// 目的：流水里用过的**最大行 id + 1**：新行从这里续号，绝不复用被折叠行的 id。
 pub fn next_line_id(events: &[serde_json::Value]) -> u64 {
     let mut next = 0u64;
     for ev in events {
@@ -218,8 +216,8 @@ pub fn next_line_id(events: &[serde_json::Value]) -> u64 {
     next
 }
 
-/// 只保留「转录行 id < keep」的行（回档 = 删除该行及其后；keep = 0 → 转录清空）。
-/// 一旦某条事件里的行被截掉，其后的事件一并丢弃（事件流是时序的）。
+/// 目的：只保留「转录行 id < keep」的行（回档 = 删除该行及其后；keep = 0 → 转录清空）。
+///   一旦某条事件里的行被截掉，其后的事件一并丢弃（事件流是时序的）。
 pub fn cut_before_line(events: &[serde_json::Value], keep: u64) -> Vec<serde_json::Value> {
     let keep = align_keep(events, keep);
     let mut out = Vec::new();
@@ -259,8 +257,8 @@ pub fn cut_before_line(events: &[serde_json::Value], keep: u64) -> Vec<serde_jso
     out
 }
 
-/// 把"保留 id < keep"对齐到**回复边界**（见 crate::capabilities::session::api::keep_whole_replies）：
-/// keep 落在某次回复内部时退到该回复第一行之前，返回新的 keep（没有这样的行 = u64::MAX，即不截）。
+/// 目的：把"保留 id < keep"对齐到**回复边界**（见 crate::capabilities::session::api::keep_whole_replies）：
+///   keep 落在某次回复内部时退到该回复第一行之前，返回新的 keep（没有这样的行 = u64::MAX，即不截）。
 pub fn align_keep(events: &[serde_json::Value], keep: u64) -> u64 {
     let rows: Vec<&serde_json::Value> = events
         .iter()
@@ -284,8 +282,8 @@ pub fn align_keep(events: &[serde_json::Value], keep: u64) -> u64 {
         .unwrap_or(u64::MAX)
 }
 
-/// 一行属于哪次回复：工具行的号在调用视图里，其余行在 LineView 上。
-/// 号 = 0 视为"没写"（回复号从 1 起），此时用**该行自己的 id**——绝不把相邻行误并成一组。
+/// 目的：一行属于哪次回复：工具行的号在调用视图里，其余行在 LineView 上。
+///   号 = 0 视为"没写"（回复号从 1 起），此时用**该行自己的 id**——绝不把相邻行误并成一组。
 pub fn line_reply_of(l: &serde_json::Value) -> u64 {
     let own = l.get("id").and_then(|i| i.as_u64()).unwrap_or(0);
     let stored = match l.get("tool") {
@@ -295,8 +293,8 @@ pub fn line_reply_of(l: &serde_json::Value) -> u64 {
     stored.filter(|r| *r != 0).unwrap_or(own)
 }
 
-/// 转录流水里用过的最大回复 id：重建时据此续号。
-/// 为什么必须续号：回复 id 是分组依据，重复就会把新回复与旧回复并成一组。
+/// 目的：转录流水里用过的最大回复 id：重建时据此续号。
+///   为什么必须续号：回复 id 是分组依据，重复就会把新回复与旧回复并成一组。
 pub fn max_reply(events: &[serde_json::Value]) -> u64 {
     let mut max = 0u64;
     for ev in events {

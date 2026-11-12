@@ -1,9 +1,12 @@
-//! 会话能力的**出站端口**：历史落盘（机制在适配层）。
+//! 目的：会话能力的出站端口——历史落盘（机制在适配层 `detail/fs_history.rs`）。
+//! 管：`HistoryStore` 的契约：建 / 存元信息 / 追加 / 整体替换 / 列 / 读元信息 / 载入 / 删。
+//! 不管：目录布局与原子写（在适配层）；会话状态派生（在 `domain/`）。
+//! 联动：由 `service.rs` 的 `SessionService` 持有（R12），组合根注入具体实现。
 
 use crate::capabilities::session::domain::history::{HistoryView, SessionMeta};
 
-/// 会话历史端口：一个会话一个目录（meta + 事件流水）。
-/// 流水只追加；留档只在流水追加一条 rewind 记录，删除 / 恢复会整体重写（会话状态 = 按标记回放的活动窗口）。
+/// 目的：会话历史端口：一个会话一个目录（meta + 事件流水）。
+///   流水只追加；留档只在流水追加一条 rewind 记录，删除 / 恢复会整体重写（会话状态 = 按标记回放的活动窗口）。
 pub trait HistoryStore {
     fn create(&self, meta: &SessionMeta) -> Result<(), String>;
     /// 写回会话元信息（配置界面的编辑：会话身份唯一真相在 meta.yaml）。
