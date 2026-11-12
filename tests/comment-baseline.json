@@ -1,3 +1,0 @@
-{
-  "_comment": "注释契约（ARCHITECTURE.md 十）的存量快照：键是文件，值是「规则 → 计数」。棘轮只减不增：新文件零容忍，老文件同类变多也算新增；变少必须销账。收紧只能往下：node run-hygiene.js --tighten。"
-}

@@ -56,7 +56,6 @@ tests/
  ci-mutation.mjs # 突变测试入口（core / weekly / capability 三个范围；范围见 tests/mutation-scope.json）
  ci-mutation-publish.mjs # 把突变小结发到 ci-mutation 滚动分支（各推各的，不碰 ci-report）
  mutation-scope.json # 突变测试范围（文件级清单；core + weekly + 各能力）
- comment-baseline.json # 注释契约棘轮基线（run-hygiene.js）
 ```
 
 - 单元层与 `capabilities/` **同构**：T1 用例按业务分文件——`taskchain.rs` / `prompt.rs` / `registry.rs` / `llm.rs` / `workspace.rs` / `session.rs` / `slate.rs` / `modules.rs` / `packages.rs` / `vm.rs` / `permission.rs` / `residents.rs` / `secrets.rs`，加**协调业务**自己的 `conductor.rs` 与 `conductor/`（`ask_user` / `proxy`）。

@@ -51,7 +51,7 @@ cargo deny check
 
 - `cargo tree --duplicates` 只检查依赖树中的重复版本，`cargo deny` 的 `bans` 与它同口径但更全面（许可证、禁用、来源）；它们都不等于源码重复检查。`clippy` 也不能替代业务测试。这些检查的职责必须分开记录（`run-tests.js`）。
 
-- 注释契约另按只减不增的存量快照比对（结构审查里的一条；比对工具本身不进 T0，见 [quality-isolation.md](quality-isolation.md) 的「门禁之外」）。
+- 注释契约按格式硬判（结构审查里的一条），实际违规即失败；存量报告与内容 / 语义卫生见 [quality-isolation.md](quality-isolation.md) 的「门禁之外」。
 
 - T0 的步骤清单、可行状态与环境跳过口径以生成段为准（来源 `tests/gates/steps.js` 的 `listModel()`，与 `node run-tests.js --list` 同源；改常量后跑 `node tests/docs-sync.mjs --write`）：
 

@@ -42,7 +42,7 @@ node run-tests.js --audit=structure  # 只跑结构审查（CI structure job）
 node run-tests.js --skip-e2e
 ```
 
-- 注意：`node dev.js test` 与 `node dev.js fmt`、`node dev.js clippy` **都预期全绿**——T0 九项的步骤、可行状态与环境跳过口径见 [levels.md](levels.md) 的 T0 生成段；`env-skip` 不算通过，没有容差基线（注释契约的存量快照只减不增）。
+- 注意：`node dev.js test` 与 `node dev.js fmt`、`node dev.js clippy` **都预期全绿**——T0 九项的步骤、可行状态与环境跳过口径见 [levels.md](levels.md) 的 T0 生成段；`env-skip` 不算通过，没有容差基线。
 - `--strict-env`：必装工具（rustfmt / clippy / cargo-audit / cargo-deny）缺失或取不到 advisory 数据时，这几步记失败而不是 `env-skip`；交叉 target 属可选项，不受影响。CI 的 `quality` job 固定带它，本地开发默认不带（离线机器仍能跑其余项，缺项如实体现在报告里）。
 - 用例默认**并行**跑；排查并发 / 隔离问题时用 `node run-tests.js --serial`。覆盖率是独立门禁：`node run-tests.js --coverage`（见下文「覆盖率门禁（Linux）」，不达标即失败）。
 
