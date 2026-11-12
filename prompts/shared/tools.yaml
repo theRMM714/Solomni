@@ -27,6 +27,7 @@ envs:
       你私有的沙箱（**你的工作副本，可写**）：{{sandbox_root}}
       {{module_roots}}
       {{path_rules}}
+      本机 shell 跑 PowerShell：`$?` 只是布尔（上一条命令成功与否）、不是退出码；单条命令的退出码看 `$LASTEXITCODE`（例如 cmd /c exit 3; echo exit=$LASTEXITCODE）。
       **共享区是版本化工作区，你不能直接写它**：要用的内容先 work_pull 拉进沙箱（同一相对路径，文件或文件夹；
       文本、图片、视频与其它二进制都按字节处理，内容流式读写、不整份进上下文；单文件有上限，超限会明确拒绝），在沙箱里改完由核心**自动提交**回共享区（按逐路径基线快进；基线过期时那次写入只留在沙箱，回执会提示先 work_pull 再写）；需要显式补提交时用 work_commit（三方比较，冲突如实报出、不会覆盖别人）。
       冲突不自动合并：先用 work_status / work_versions 看三方（记下主副本提交 id）；文本可人工合并后用 work_resolve take=local head=<id>（预览截断先用 read 读全文），图片 / 视频 / 其它二进制只能选边（take=upstream 取主副本、会先备份本地；take=local 保留本地）。被覆盖的本地版本可用 work_lost 找回。
