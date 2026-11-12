@@ -40,9 +40,9 @@ pub fn find_exe(name: &str) -> Option<std::path::PathBuf> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FileStamp {
     /// 字节数。
-    pub len: u64,
+    len: u64,
     /// 修改时间；平台读不到时为 `None`。
-    pub modified: Option<std::time::SystemTime>,
+    modified: Option<std::time::SystemTime>,
 }
 
 /// 目的：读一个本地文件的戳（只读元数据，不打开内容）。
