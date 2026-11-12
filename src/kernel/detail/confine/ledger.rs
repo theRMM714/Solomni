@@ -1,7 +1,7 @@
 //! 目的：围栏授权台账的跨平台形状与按条回收入口。
 //! 管：Owner / ReconcileReport / Ledger 形状，对账、台账读取、按路径或 SID 精确还原。
-//! 不管：平台 ACL 读写（在 windows/record.rs）、启动流程（在根）。
-//! 联动：启动对账由 `src/main.rs` 与 `src/entry/` 调用；Windows 条目的读写与撤权在 `windows/record.rs`。
+//! 不管：平台 ACL 读写（在 windows/record/）、启动流程（在根）。
+//! 联动：启动对账由 `src/main.rs` 与 `src/entry/` 调用；Windows 条目的读写与撤权在 `windows/record/`。
 
 #[cfg(windows)]
 use super::windows;

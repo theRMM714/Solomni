@@ -1,7 +1,7 @@
 //! 目的：Windows 安全描述符操作——逐路径改 DACL（授予 / 撤销）、解析 ACE 与 SID、展开泛型掩码。
 //! 管：这些本该由内核替调用方算，Windows 上要自己算（windows-sys 未暴露 TreeSetNamedSecurityInfoW，ACE / ACL 结构也要自己认）。
 //! 不管：围栏策略（哪些根、什么权限）——由调用方传入的 FenceSpec 决定。
-//! 联动：授权台账与收尾在 record.rs、容器身份在 container.rs、外层调用在 confine::prepare_fence。
+//! 联动：授权台账与收尾在 record/、容器身份在 container.rs、外层调用在 confine::prepare_fence。
 
 use crate::kernel::api::FenceSpec;
 use std::ffi::c_void;
