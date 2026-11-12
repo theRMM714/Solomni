@@ -41,6 +41,7 @@ pub(crate) fn virtiofs_share_supports_only_qemu_with_virtiofs_client() {
 #[cfg(unix)]
 pub(crate) fn virtiofs_guard_kills_the_daemon_and_removes_the_socket() {
     use crate::capabilities::vm::detail::VirtioFsShare;
+    use crate::capabilities::vm::domain::guest::GuestMount;
     use std::os::unix::fs::PermissionsExt;
     let dir = crate::tests::scratch("vm-virtiofs-stub");
     let stub = dir.join("virtiofsd");
