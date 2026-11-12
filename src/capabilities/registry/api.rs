@@ -1,12 +1,7 @@
-//! 入站能力面：**其它能力、conductor 与呈现层只准用这里**（不许碰 `domain` / `ports`）。
-//!
-//! 两样东西在这里：
-//! - **DTO 的重导出**：登记处的词汇（供应商 / 模型 / agent / 设置）只有一份定义，在 `domain`。
-//! - **`Registry` 能力面**：登记处的状态与用例（`service.rs` 实现它）。`conductor` 只持有
-//!   `Box<dyn Registry>`，看不见它的字段——**四份 yaml 的内存形态只由 `service.rs` 写**。
-//!
-//! 读方法取 `&self`、写方法取 `&mut self`：状态住在 conductor 的执行线程上，靠单线程命令队列
-//! 保证互斥，因此**不额外上锁**（见 ARCHITECTURE.md §一 的并发不变式）。
+//! 目的：registry 能力的入站面——其它能力、conductor 与呈现层只准用这里。
+//! 管：DTO 重导出（供应商 / 模型 / agent / 设置）与 Registry / RegistryOps 能力面（视图 / 只读事实 / 写三类方法）。
+//! 不管：四份 yaml 的内存形态与写路径（在 domain 与 service.rs）；持久化机制（在 ports / detail）。
+//! 联动：conductor 只持 Box<dyn Registry>；实现见 service.rs；消费方是 conductor 与呈现层。
 
 pub use crate::capabilities::registry::domain::agents::{
     check_reserved, listing, model_listing, resolve_picks, unique_instance_name, validate_name,
@@ -20,14 +15,12 @@ pub use crate::capabilities::registry::domain::providers::{
 use crate::capabilities::llm::api::{Channel, ProbeOutcome, ReplayReport, ToolMode};
 use crate::capabilities::modules::api::Roster;
 
-/// 登记处的**队列面**：呈现层经 `ConductorHandle`（核心自己的线程 + 命令队列）调它。
-///
-/// 与 `Registry`（能力面）的分工是**有意的不对称**，不是重复：
-/// - `Registry` 的写方法取 `&mut self`——只有那样"单写者"才是**编译期事实**（R4/R5）；
-/// - 本 trait 全取 `&self`——呈现层持有的是可克隆的句柄（多连接共用），队列独占在**线程那一侧**，
-///   不是靠类型系统在调用点表达。
-///
-/// 两者因此**不能收成一个 trait**（接收者不同）；收口判据见 ARCHITECTURE.md §九.6 R12。
+/// 目的：登记处的**队列面**：呈现层经 `ConductorHandle`（核心自己的线程 + 命令队列）调它。
+///    与 `Registry`（能力面）的分工是**有意的不对称**，不是重复：
+///    - `Registry` 的写方法取 `&mut self`——只有那样"单写者"才是**编译期事实**（R4/R5）；
+///    - 本 trait 全取 `&self`——呈现层持有的是可克隆的句柄（多连接共用），队列独占在**线程那一侧**，
+///    不是靠类型系统在调用点表达。
+///    两者因此**不能收成一个 trait**（接收者不同）；收口判据见 ARCHITECTURE.md §九.6 R12。
 pub trait RegistryOps: Send + Sync {
     fn providers(&self) -> Result<Vec<ProviderView>, String>;
     fn upsert_provider(&self, id: &str, base_url: &str, api_key: &str) -> Result<(), String>;
@@ -59,18 +52,15 @@ pub trait RegistryOps: Send + Sync {
     fn probe_replay_shape(&self, id: &str) -> Result<ReplayReport, String>;
 }
 
-/// 登记处能力面：供应商 / 模型 / agent / 基本设置，以及通道上的模型发现与探测。
-///
-/// 两类方法对应两类调用方：
-/// - **呈现层要的**（`provider_views` / `model_views` / `agent_views` / `app_settings` …）——
-///   它经 `RegistryOps`（本文件）走命令队列进来（见 `conductor/api.rs`）；
-/// - **其它能力与 conductor 要的只读事实**（`resolve` / `tool_mode` / `context_of` / `snapshot` …）——
-///   谁是登记处的主人就由谁答，调用方不自己维护一份镜像。
-///
-/// 实现者是 `service.rs` 的 `RegistryService`（**状态在它里面**，conductor 只持 `Box<dyn Registry>`）。
+/// 目的：登记处能力面：供应商 / 模型 / agent / 基本设置，以及通道上的模型发现与探测。
+///    两类方法对应两类调用方：
+///    - **呈现层要的**（`provider_views` / `model_views` / `agent_views` / `app_settings` …）——
+///    它经 `RegistryOps`（本文件）走命令队列进来（见 `conductor/api.rs`）；
+///    - **其它能力与 conductor 要的只读事实**（`resolve` / `tool_mode` / `context_of` / `snapshot` …）——
+///    谁是登记处的主人就由谁答，调用方不自己维护一份镜像。
+///    实现者是 `service.rs` 的 `RegistryService`（**状态在它里面**，conductor 只持 `Box<dyn Registry>`）。
 pub trait Registry: Send + Sync {
     // ---- 视图：给呈现层与别的能力看的登记处（**永不携带密钥**） ----
-
     /// 供应商视图（不含密钥）。
     fn provider_views(&self) -> Vec<ProviderView>;
     /// 模型视图（含「是否核心默认」与形态）。
@@ -87,7 +77,6 @@ pub trait Registry: Send + Sync {
     fn core_model(&self) -> Option<String>;
 
     // ---- 只读事实：别的能力问「通道怎么发 / 有没有它 / 窗口多大」 ----
-
     /// 模型 id → 成品通道；模型或供应商缺失 = 报错（不猜测回退）。
     fn resolve(&self, model: &str) -> Result<Channel, String>;
     /// 核心 AI 默认通道；未设定或解析失败 = 如实报错（不回落、不猜）。
@@ -121,7 +110,6 @@ pub trait Registry: Send + Sync {
     /// 登记处**快照**：协作会话自持一份（与今日 `settings.clone()` 同义，语义不变）。
     fn snapshot(&self) -> Settings;
     // ---- 写：只有这里改登记处，改完就落盘 ----
-
     /// 新建/更新供应商。更新时 `api_key` 留空 = 保留原密钥（界面从不回显密钥）。
     fn provider_upsert(&mut self, id: &str, base_url: &str, api_key: &str) -> Result<(), String>;
     /// 删除供应商；仍被模型引用时拒绝（不静默级联删除）。

@@ -1,40 +1,39 @@
-//! 端点候选、重试判定与尝试归类（纯逻辑，无 IO）。
-//! 另有进程内共享的「端点记忆」：某个候选一旦连通过就固定用它，不再反复探测；
-//! 固定之后再失败 = 网络/服务问题，如实报错，不再换候选。
-//! 补全规则：已含完整路径 → 原样；末段是版本段（/v1、/v2…）→ 只补后缀；
-//! 其余（没有版本段）→ 先直连，失败再回落 /v1。
+//! 目的：端点候选、重试判定与尝试归类的纯逻辑（无 IO）。
+//! 管：chat / models 候选序列、补全与回落规则、进程内端点记忆、可重试状态判定。
+//! 不管：实际发请求（在 http_chat / model_catalog / http_probe）；协议形状与信封。
+//! 联动：被 http_chat、model_catalog、http_probe 复用；无本能力之外的依赖。
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-/// 端点记忆：key（供应商 base_url + 用途）→ 已验证可用的完整 URL。
+/// 目的：端点记忆：key（供应商 base_url + 用途）→ 已验证可用的完整 URL。
 pub type Memo = Arc<Mutex<HashMap<String, String>>>;
 
 pub fn memo_new() -> Memo {
     Arc::new(Mutex::new(HashMap::new()))
 }
 
-/// 取已固定的端点。
+/// 目的：取已固定的端点。
 pub fn memo_get(memo: &Memo, key: &str) -> Option<String> {
     memo.lock().ok().and_then(|m| m.get(key).cloned())
 }
 
-/// 固定一个已验证可用的端点。
+/// 目的：固定一个已验证可用的端点。
 pub fn memo_set(memo: &Memo, key: &str, url: &str) {
     if let Ok(mut m) = memo.lock() {
         m.insert(key.to_string(), url.to_string());
     }
 }
 
-/// 一次出站尝试的归类：Ok=成功载荷；Retry=可换下一个候选；Fatal=立即报错。
+/// 目的：一次出站尝试的归类：Ok=成功载荷；Retry=可换下一个候选；Fatal=立即报错。
 pub enum Attempt<T> {
     Ok(T),
     Retry(String),
     Fatal(String),
 }
 
-/// 按候选依次尝试：Ok 即返回 (命中端点, 载荷)；Retry 才换下一个（有则回调埋点）；Fatal 立即返回。
-/// 全部 Retry 耗尽 = 返回最后一个错误，不静默。
+/// 目的：按候选依次尝试：Ok 即返回 (命中端点, 载荷)；Retry 才换下一个（有则回调埋点）；Fatal 立即返回。
+///    全部 Retry 耗尽 = 返回最后一个错误，不静默。
 pub fn resolve_candidates<T, F>(
     candidates: &[String],
     mut try_one: F,
@@ -60,17 +59,17 @@ where
     Err(last_err)
 }
 
-/// 对话端点候选：{base}/chat/completions [→ {base}/v1/chat/completions]。
+/// 目的：对话端点候选：{base}/chat/completions [→ {base}/v1/chat/completions]。
 pub fn chat_candidates(base_url: &str) -> Vec<String> {
     candidates(base_url, "chat/completions")
 }
 
-/// 模型清单端点候选：{base}/models [→ {base}/v1/models]。
+/// 目的：模型清单端点候选：{base}/models [→ {base}/v1/models]。
 pub fn models_candidates(base_url: &str) -> Vec<String> {
     candidates(base_url, "models")
 }
 
-/// 换下一个候选的判定：只有 404/405 换；其余 HTTP 状态（含 401/403）立即报，避免无意义重试。
+/// 目的：换下一个候选的判定：只有 404/405 换；其余 HTTP 状态（含 401/403）立即报，避免无意义重试。
 pub fn retryable_status(code: u16) -> bool {
     code == 404 || code == 405
 }

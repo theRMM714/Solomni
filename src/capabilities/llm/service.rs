@@ -1,7 +1,7 @@
-//! 本能力的**用例与端口持有者**：三个出站端口只在这里（R12）——
-//! 通道工厂 / 模型目录 / 信封修复。别的能力要通道、要探测、要发现，走 `api::Llm`。
-//!
-//! 装配（new 出适配器）在组合根；这里只收注入的端口。
+//! 目的：llm 能力的用例与端口持有者。
+//! 管：实现 api::Llm（造通道 / 探测 / 发现 / 修信封）；持有三个出站端口。
+//! 不管：适配器装配（在组合根）；协议类型定义（在 api）；域内纯逻辑（在 domain）。
+//! 联动：组合根 new 时注入适配器；其它能力与 conductor 经 api::Llm 消费（R12）。
 
 use crate::capabilities::llm::api::{
     BoxedChat, Channel, Llm, Malformed, ProbeOutcome, RepairOutcome, ReplayReport,
@@ -9,7 +9,7 @@ use crate::capabilities::llm::api::{
 use crate::capabilities::llm::ports::{ChatGateway, EnvelopeRepair, ModelCatalog};
 use std::sync::Arc;
 
-/// 模型通道能力：持端口，按用例答话。
+/// 目的：模型通道能力：持端口，按用例答话。
 pub struct LlmService {
     gateway: Arc<dyn ChatGateway + Send + Sync>,
     catalog: Arc<dyn ModelCatalog + Send + Sync>,
@@ -17,7 +17,7 @@ pub struct LlmService {
 }
 
 impl LlmService {
-    /// 组合根专用。
+    /// 目的：组合根专用。
     pub fn new(
         gateway: Arc<dyn ChatGateway + Send + Sync>,
         catalog: Arc<dyn ModelCatalog + Send + Sync>,

@@ -1,5 +1,7 @@
-//! 登记处持久化：providers.yaml 与 models.yaml 分开读写（实现登记处自己的 SettingsStore 端口）。
-//! 密钥只落 providers.yaml（unix 下 0600）；drvfs/NTFS 上 chmod 无效属平台限制，如实告知不隐瞒。
+//! 目的：登记处持久化适配器——四份 yaml 的读写（实现 ports::SettingsStore）。
+//! 管：providers / models / settings / agents 四份 yaml 的读写；密钥只落 providers.yaml（unix 下 0600）；平台限制如实告知。
+//! 不管：内存形态与校验（在 domain）；状态与用例（在 service.rs）；通道与模型发现（在 llm）。
+//! 联动：实现 registry/ports.rs 的 SettingsStore，由组合根装配给 service。
 
 use crate::capabilities::registry::api::Agents;
 use crate::capabilities::registry::api::{AppSettings, ModelEntry, Provider, Settings};

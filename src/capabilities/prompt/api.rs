@@ -1,16 +1,12 @@
-//! 入站能力面：**其它能力、conductor 与呈现层只准用这里**（不许碰 `domain` / `ports`）。
-//!
-//! 两样东西在这里：
-//! - **能力面 `Prompt`**：按名字取段（`Segment`），或拿走两块**共享记录**（`tools()` / `refs()`）。
-//!   **册子的布局只有本能力知道**——别的能力不点字段路径。
-//! - **工具文案与引用文案的 DTO**：它们在 tools / workspace / collab 的签名里当家。
-//!
-//! 持有者只有 `service.rs` 一处；组合根装一次，conductor 只持 `Box<dyn Prompt>`。
+//! 目的：prompt 能力的入站面——其它能力、conductor 与呈现层只准用这里。
+//! 管：Prompt 能力面（按名字取段 / 拿起工具与引用两块共享记录）与 Segment / Vars / rewrite / RefRoots 的重导出。
+//! 不管：册子布局与加载（在 domain 与 detail）；渲染实现（在 domain/prompt.rs）。
+//! 联动：持有者只有 service.rs 一处；组合根装一次，conductor 只持 Box<dyn Prompt>；别的能力按名字取段。
 
 pub use crate::capabilities::prompt::domain::prompt::{Segment, Vars};
 pub use crate::capabilities::prompt::domain::refs::{rewrite, RefRoots};
 
-/// 提示词册能力：按名字答"某一段是什么"，并共享两块大记录。
+/// 目的：提示词册能力：按名字答"某一段是什么"，并共享两块大记录。
 pub trait Prompt: Send + Sync {
     /// 按名字取一段**原文**（整段发给模型、或调用方要自己拼时用）。
     fn text(&self, seg: Segment) -> &str;

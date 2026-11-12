@@ -1,6 +1,7 @@
-//! agent：用户配置的具名能力组合（一个 AI 实例 + N 份模块能力 + 一个模型）。
-//! 只是"用户编排选择的存档"，不是能力注册表——能力仍在 modules/ 公地里。
-//! 落盘在 .home/agents.yaml（与 providers/models/settings 同处用户私有区）。
+//! 目的：agent 的存档形态与解析——用户配置的具名能力组合。
+//! 管：Agent / AgentView；名字校验与保留名检查；RosterPick 解析与唯一实例命名；列表文案。
+//! 不管：能力注册表（在 modules/ 公地）；落盘（在 detail/yaml_settings.rs）；登记处用例（在 service.rs）。
+//! 联动：被 registry/api.rs 重导出；service.rs 读写；conductor 按 agent 名取 Roster。
 
 use crate::capabilities::modules::api::Roster;
 use crate::capabilities::registry::domain::providers::ModelEntry;
@@ -8,15 +9,15 @@ use crate::capabilities::session::api::AgentMeta;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// 一个具名 agent。
+/// 目的：一个具名 agent。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Agent {
-    /// 该 agent 的成员模块（能力）。
+    /// 目的：该 agent 的成员模块（能力）。
     pub modules: Vec<String>,
-    /// 默认模型（模型 id）；None = 用核心默认。
+    /// 目的：默认模型（模型 id）；None = 用核心默认。
     #[serde(default)]
     pub model: Option<String>,
-    /// 一句话说明（给用户看）。
+    /// 目的：一句话说明（给用户看）。
     #[serde(default)]
     pub note: String,
     /// 目的：人设 / 身份（给模型看）：进入这个 agent 的身份提示词；可选、可多行。
@@ -24,10 +25,10 @@ pub struct Agent {
     pub chara: String,
 }
 
-/// agent 登记处（agents.yaml 的内存形态）。
+/// 目的：agent 登记处（agents.yaml 的内存形态）。
 pub type Agents = BTreeMap<String, Agent>;
 
-/// 展示视图。
+/// 目的：展示视图。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct AgentView {
     pub name: String,
@@ -37,7 +38,7 @@ pub struct AgentView {
     pub chara: String,
 }
 
-/// agent 名即将成为（session 内）目录名：非空、不含路径分隔符与 Windows 非法字符、不是保留名。
+/// 目的：agent 名即将成为（session 内）目录名：非空、不含路径分隔符与 Windows 非法字符、不是保留名。
 pub fn validate_name(name: &str) -> Result<(), String> {
     let n = name.trim();
     if n.is_empty() {
@@ -64,9 +65,9 @@ pub fn validate_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 目录保留名校验：这些名字由工作区布局固定占用（`session/<工作>/work`、`session/<工作>/children`），
-/// agent 实例名不得占用。名单来自 `systools/names.yaml`，不硬编码在代码里。
-/// 大小写不敏感：Windows 的文件系统本来就不区分。
+/// 目的：目录保留名校验：这些名字由工作区布局固定占用（`session/<工作>/work`、`session/<工作>/children`），
+///    agent 实例名不得占用。名单来自 `systools/names.yaml`，不硬编码在代码里。
+///    大小写不敏感：Windows 的文件系统本来就不区分。
 pub fn check_reserved(name: &str, reserved: &[String]) -> Result<(), String> {
     if reserved.iter().any(|r| r.eq_ignore_ascii_case(name)) {
         return Err(format!(
@@ -92,7 +93,7 @@ fn chara_preview(chara: &str) -> String {
     out
 }
 
-/// 已存 agent 清单（拟名单时给模型看）：名字 / 模块 / 模型 / 人设 / 说明；空登记处如实说明。
+/// 目的：已存 agent 清单（拟名单时给模型看）：名字 / 模块 / 模型 / 人设 / 说明；空登记处如实说明。
 pub fn listing(known: &Agents) -> String {
     if known.is_empty() {
         return "（登记处还没有 agent；这次只能组装新的）".to_string();
@@ -128,7 +129,7 @@ pub fn listing(known: &Agents) -> String {
         .join("\n")
 }
 
-/// 可用模型清单（拟名单时给模型看）：id / 名称 / api_model / 说明。
+/// 目的：可用模型清单（拟名单时给模型看）：id / 名称 / api_model / 说明。
 pub fn model_listing(models: &BTreeMap<String, ModelEntry>) -> String {
     models
         .iter()
@@ -144,7 +145,7 @@ pub fn model_listing(models: &BTreeMap<String, ModelEntry>) -> String {
         .join("\n")
 }
 
-/// 核心拟名单时的一条：复用已存 agent，或组装一个新的（JSON 里二选一；Reuse 在前）。
+/// 目的：核心拟名单时的一条：复用已存 agent，或组装一个新的（JSON 里二选一；Reuse 在前）。
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum RosterPick {
@@ -175,9 +176,9 @@ impl RosterPick {
     }
 }
 
-/// 把核心拟的名单落地成 agent 实例：逐条校验（存在性、模型真实），
-/// 非法条目整条拒收并给出原因（不静默改写）。同一模块可以被多个 agent 共用，同一 agent 内重复只留一份。
-/// 返回（已接受的实例 + 理由, 拒收说明）。
+/// 目的：把核心拟的名单落地成 agent 实例：逐条校验（存在性、模型真实），
+///    非法条目整条拒收并给出原因（不静默改写）。同一模块可以被多个 agent 共用，同一 agent 内重复只留一份。
+///    返回（已接受的实例 + 理由, 拒收说明）。
 pub fn resolve_picks(
     picks: Vec<RosterPick>,
     known: &Agents,
@@ -265,7 +266,7 @@ pub fn resolve_picks(
     (out, rejected)
 }
 
-/// 同一工作内 agent 名去重：重名时依次追加 -2、-3（用户不改名时的兜底）。
+/// 目的：同一工作内 agent 名去重：重名时依次追加 -2、-3（用户不改名时的兜底）。
 pub fn unique_instance_name(base: &str, taken: &[String]) -> String {
     if !taken.iter().any(|t| t == base) {
         return base.to_string();
@@ -279,7 +280,7 @@ pub fn unique_instance_name(base: &str, taken: &[String]) -> String {
         n += 1;
     }
 }
-/// 登记处全部 agent 的视图（空登记处不是错误——调用方据此给引导）。
+/// 目的：登记处全部 agent 的视图（空登记处不是错误——调用方据此给引导）。
 pub fn views(agents: &Agents) -> Vec<AgentView> {
     agents
         .iter()
@@ -293,8 +294,8 @@ pub fn views(agents: &Agents) -> Vec<AgentView> {
         .collect()
 }
 
-/// 按名字取 agent 视图：**不猜、不代选**——名字不在登记处就如实报错，并列出现有的。
-/// 归属：点名是**登记处的查询**（它拥有 agent 身份），不是前端的便利函数。
+/// 目的：按名字取 agent 视图：**不猜、不代选**——名字不在登记处就如实报错，并列出现有的。
+///    归属：点名是**登记处的查询**（它拥有 agent 身份），不是前端的便利函数。
 pub fn pick(agents: &Agents, names: &[String]) -> Result<Vec<AgentView>, String> {
     let all = views(agents);
     if names.is_empty() {

@@ -1,6 +1,7 @@
-//! 模型目录适配器：OpenAI 兼容 GET {base_url}/models（实现 llm 自己的 ModelCatalog 端口）。
-//! 端点补全/回落规则见 endpoint 模块：无版本段先直连，404/405 再试 /v1。
-//! 机制only：密钥只用于出站请求头；错误信息先脱敏再出适配层；响应形状不符即报错，不猜测兜底。
+//! 目的：模型目录适配器——OpenAI 兼容 GET {base_url}/models（实现 ports::ModelCatalog）。
+//! 管：发现模型列表；端点补全与回落；响应形状校验；错误脱敏。
+//! 不管：模型登记与持久化（在 registry）；端点候选逻辑（在 endpoint）。
+//! 联动：实现 ports::ModelCatalog；由 detail/mod.rs 重导出 HttpModelCatalog 供组合根装配；端点规则见 detail/endpoint.rs。
 
 use super::endpoint::{memo_get, memo_set, models_candidates, resolve_candidates, Attempt, Memo};
 use super::http_agent::{finish_request, redact};
@@ -8,14 +9,14 @@ use crate::capabilities::llm::ports::ModelCatalog;
 use crate::kernel::ports::Log;
 use std::sync::Arc;
 
-/// 真实模型目录：ureq 出站，独立超时（比对话短，配置期等待）。
+/// 目的：真实模型目录：ureq 出站，独立超时（比对话短，配置期等待）。
 pub struct HttpModelCatalog {
     log: Arc<dyn Log + Send + Sync>,
     memo: Memo,
 }
 
 impl HttpModelCatalog {
-    /// 组合根注入日志端口（HTTP 失败落盘）与共享端点记忆。
+    /// 目的：组合根注入日志端口（HTTP 失败落盘）与共享端点记忆。
     pub fn with_log(log: Arc<dyn Log + Send + Sync>, memo: Memo) -> HttpModelCatalog {
         HttpModelCatalog { log, memo }
     }
@@ -80,8 +81,8 @@ impl ModelCatalog for HttpModelCatalog {
     }
 }
 
-/// 解析 OpenAI 兼容 /models 响应：取 data[].id，按出现顺序去重。
-/// 形状不符或空列表 = 报错暴露，不静默兜底。
+/// 目的：解析 OpenAI 兼容 /models 响应：取 data[].id，按出现顺序去重。
+///    形状不符或空列表 = 报错暴露，不静默兜底。
 pub fn parse_models(body: &str) -> Result<Vec<String>, String> {
     let v: serde_json::Value =
         serde_json::from_str(body).map_err(|e| format!("响应不是 JSON：{}", e))?;

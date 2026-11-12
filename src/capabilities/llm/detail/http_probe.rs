@@ -1,7 +1,7 @@
-//! 原生工具调用支持探测：发**两条最小请求**对比，把"支不支持"变成事实。
-//! 为什么要两条：不带 tools 的那条先证明通道本身是通的（密钥/端点/模型都对），
-//! 这样"带上 tools 才失败"才能归因到 tools 上——否则 401 之类的错误会被误判成"不支持工具调用"。
-//! 三种结论都如实回报（支持 / 明确不支持 / 无法判定），绝不替用户拍板。
+//! 目的：原生工具调用支持探测——两条最小请求把「支不支持」变成事实。
+//! 管：带 / 不带 tools 的对比请求；三种结论（支持 / 明确不支持 / 无法判定）的归类与回放形状实测。
+//! 不管：通道会话本身（在 http_chat）；探测结果与设置的持久化（在 registry）。
+//! 联动：经 api::Channel 与 detail/endpoint.rs 的候选发请求；结论由 registry/service.rs 的发现用例记账。
 
 use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{
@@ -55,10 +55,10 @@ fn probe_nonce() -> String {
     format!("solomni-{:x}", bits)
 }
 
-/// 一种候选的回放形状：报告里点名的名字 + 该形状要发的 messages 数组。
-/// 第一项固定是**基线**（现在线上真在用的形状），用来先证明通道与"文本回放"是通的；
-/// 后面几项是同一件事（把上一轮的工具调用发回去）的几种可判定写法，一次探测全试一遍。
-/// 工具结果里放的是本次编号（由调用方给出）：回答里带回它 = 真的读到了。
+/// 目的：一种候选的回放形状：报告里点名的名字 + 该形状要发的 messages 数组。
+///    第一项固定是**基线**（现在线上真在用的形状），用来先证明通道与"文本回放"是通的；
+///    后面几项是同一件事（把上一轮的工具调用发回去）的几种可判定写法，一次探测全试一遍。
+///    工具结果里放的是本次编号（由调用方给出）：回答里带回它 = 真的读到了。
 pub fn replay_shapes(nonce: &str) -> Vec<(&'static str, serde_json::Value)> {
     let outcome = serde_json::json!({ "nonce": nonce }).to_string();
     let head = serde_json::json!({
@@ -125,11 +125,10 @@ pub fn replay_shapes(nonce: &str) -> Vec<(&'static str, serde_json::Value)> {
     ]
 }
 
-/// 探测"工具调用历史怎么发回供应商才收"（机制；不写任何登记处）。
-///
-/// 为什么要它：原生通道下核心必须把上一轮的工具调用发回去（assistant 的 tool_calls + 各条 tool 结果），
-/// 这是"回放与实时一致"的载体；但各家兼容实现对这种历史的宽容度不同，
-/// 所以这里把几种可判定的写法都试一遍，如实回报哪种被接受——不猜，也不替用户拍板。
+/// 目的：探测"工具调用历史怎么发回供应商才收"（机制；不写任何登记处）。
+///    为什么要它：原生通道下核心必须把上一轮的工具调用发回去（assistant 的 tool_calls + 各条 tool 结果），
+///    这是"回放与实时一致"的载体；但各家兼容实现对这种历史的宽容度不同，
+///    所以这里把几种可判定的写法都试一遍，如实回报哪种被接受——不猜，也不替用户拍板。
 pub fn probe_replay(
     channel: &Channel,
     log: &std::sync::Arc<dyn Log + Send + Sync>,
@@ -137,7 +136,7 @@ pub fn probe_replay(
     probe_replay_with(channel, log, &probe_nonce())
 }
 
-/// 同上，但本次编号由调用方给定（契约测试要断言"模型真的把编号带回来了"）。
+/// 目的：同上，但本次编号由调用方给定（契约测试要断言"模型真的把编号带回来了"）。
 pub(crate) fn probe_replay_with(
     channel: &Channel,
     log: &std::sync::Arc<dyn Log + Send + Sync>,
@@ -201,7 +200,7 @@ pub(crate) fn probe_replay_with(
     Ok(ReplayReport { shapes })
 }
 
-/// 探测一条通道（机制；策略在 conductor）。
+/// 目的：探测一条通道（机制；策略在 conductor）。
 pub fn probe(
     channel: &Channel,
     log: &std::sync::Arc<dyn Log + Send + Sync>,
