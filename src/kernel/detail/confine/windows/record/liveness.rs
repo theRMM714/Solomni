@@ -4,6 +4,7 @@
 //! 联动：归属字段 Owner 在 confine/ledger.rs；判不了时取保守结论——宁可漏回收，也不误撤在用的授权。
 
 use super::super::super::Owner;
+use super::{GrantEntry, GrantScope};
 use windows_sys::Win32::Foundation::{CloseHandle, FILETIME};
 use windows_sys::Win32::System::Threading::{
     GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -103,6 +104,16 @@ pub(crate) enum OwnersState {
     Reclaim,
     /// 目的：没有归属或判不了——报告后跳过，不主动回收。
     Unjudgeable,
+}
+
+/// 目的：按授权条目得出处置结论——机器级一律保留（与进程死活无关），按次才看归属集合。
+/// 约束：机器级条目 owners 是空的，但这里必须**先按口径判 Keep**，不能靠"空归属 → 判不了"的副作用
+///   碰巧留下来（那样审计时说不清是保留还是判不了）。
+pub(crate) fn entry_state(g: &GrantEntry) -> OwnersState {
+    match g.scope {
+        GrantScope::Machine => OwnersState::Keep,
+        GrantScope::Call => owners_state(&g.owners),
+    }
 }
 
 /// 目的：按归属集合得出处置结论——任一条活则留，全都明确已死则回收，否则判不了。

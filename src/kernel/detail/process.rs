@@ -14,6 +14,24 @@ use std::process::Stdio;
 use std::thread;
 use std::time::{Duration, Instant};
 
+// 围栏准备的耗时经同线程交棒给回执：run_inner 的 Windows 分支写入，调用方读过即清（见 take_fence_prep）。
+// 不走 RunOutcome：端口只陈述成功与输出（kernel/contracts/run.rs）；thread_local! 不产文档，注释用 //。
+thread_local! {
+    static FENCE_PREP: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) };
+}
+
+/// 目的：读走本次 shell 执行的围栏准备耗时（读即清：同一线程的下一趟不会读到这一趟的值）。
+/// 约束：只有 Windows 且真的走到围栏准备时才有值；其它平台 / 未授权写权限 / 参数拒绝都恒为 None。
+pub fn take_fence_prep() -> Option<Duration> {
+    FENCE_PREP.with(|slot| slot.take())
+}
+
+/// 目的：每趟执行开始前把交棒位置清空——上一趟没被取走的值不会漏给这一趟。
+/// 约束：在 `run_inner` 入口调用（各平台都清，成本是一次线程本地写）；不判断有没有围栏准备。
+fn reset_fence_prep() {
+    FENCE_PREP.with(|slot| slot.set(None));
+}
+
 pub struct ProcTools {
     /// 目的：守门进程用的可执行文件（组合根注入当前程序路径）。
     pub exe: PathBuf,
@@ -181,6 +199,8 @@ impl ProcTools {
         gate: Option<&dyn FenceGate>,
         plan: RunPlan<'_>,
     ) -> RunOutcome {
+        // 上一趟的交棒只对那一趟有效：新一趟先清空，这趟没走到围栏准备就保持空（读即清见 take_fence_prep）。
+        reset_fence_prep();
         // Windows：容器围栏要先把「可达范围」授权给容器 SID。
         // **默认不写本机任何权限项**：只有用户显式授权（设置里的 sandbox.policy.windows.write_acl，或环境变量 SOLOMNI_FENCE_WRITE=1）才做。
         #[cfg(windows)]
@@ -189,7 +209,10 @@ impl ProcTools {
             let mut prepared = false;
             let mut note: Option<String> = None;
             if self.write_allowed.load(Ordering::Relaxed) {
+                // 围栏准备单独计时：首调用逐条写 ACL 常常占掉整次耗时的绝大部分，回执要能分辨它（交棒见 take_fence_prep）。
+                let fence_started = Instant::now();
                 let prep = confine::prepare_fence(fence, command, &self.home);
+                FENCE_PREP.with(|slot| slot.set(Some(fence_started.elapsed())));
                 // 可选落点授不上只记事实（不牵动这次执行）：脚印打在 stderr，回执里不打扰模型。
                 for n in &prep.notes {
                     eprintln!("[围栏] {}（可选落点，本次照常执行）", n);

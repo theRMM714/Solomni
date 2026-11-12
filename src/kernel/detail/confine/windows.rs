@@ -185,7 +185,8 @@ pub(crate) fn interpreter_dir_usable(dir: &Path) -> Result<(), String> {
 
 /// 目的：把围栏要用的授权一次性做好（按 (SID, 路径, 权限) 去重，不重复改 ACL），并如实分出
 ///   **必要**落点（授不上就要问用户或拒绝）与**可选**落点（只记事实）。
-/// 约束：每条授权先落台账再动 ACL，写后核对；失败就回滚并如实记进结论（不静默降级）。
+/// 约束：每条授权先落台账再动 ACL，写后核对；失败就回滚并如实记进结论（不静默降级）。归属分两种：
+///   容器数据边界按本次调用记（收尾可精确撤）；祖先链的只读属性是**机器级**——授给所有应用程序包、跨会话复用（见 is_machine_target 与 record 的 GrantScope）。
 pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep {
     // 这一轮真正写下去的授权（用于如实打印足迹）。
     let mut written: Vec<(String, PathBuf, u32)> = Vec::new();
@@ -288,11 +289,32 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
         );
     }
     let todo = grant_targets(spec);
+    // 本轮写下去的机器级授权条数（只用于在"已写权限"行后补一句去向说明）。
+    let mut machine_written = 0usize;
     for target in todo {
         let (path, rights) = (&target.path, target.rights);
         // 落点不存在（例如没有 userdata 的模块，或授权面派生与执行之间有竞态）：跳过这一条，不判整次失败。
         if missing(path) {
             eprintln!("[诊断] 授权落点不存在，跳过（{}）", path.display());
+            continue;
+        }
+        // 祖先链的只读属性是**机器级**授权：授给所有应用程序包（与容器 SID、会话都无关）。
+        // 已有 ACE 就直接跳过——这正是后续会话"零写"的来源；不命中才落台账并写一次。
+        if is_machine_target(&target) {
+            if has_ace_for(base, path, rights) {
+                continue;
+            }
+            match grant_machine_journaled(home, &mut rec, base, &base_text, &target, &root) {
+                Ok(true) => {
+                    machine_written += 1;
+                    written.push((base_text.clone(), target.path.clone(), rights));
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    eprintln!("[围栏] 机器级授权未完成（{}）：{}", path.display(), e);
+                    prep.fail(target.part, target.path.clone(), e);
+                }
+            }
             continue;
         }
         // 工具链 / 运行包是**可信执行基座**：只读、无 scope 信息，授给 baseline 一次即可（之后按实际 ACE 跳过）。
@@ -336,7 +358,24 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
             .collect();
         eprintln!("[围栏] 已写权限 {} 处：{}", written.len(), list.join("；"));
     }
+    if machine_written > 0 {
+        // 机器级授权的去向单独交代：它们不随会话回收，之后每次调用都不必再写。
+        eprintln!(
+            "[围栏] 其中机器级授权 {} 处：授给所有应用程序包（跨会话复用，启动对账不回收）",
+            machine_written
+        );
+    }
     prep
+}
+
+/// 目的：这条落点是不是**机器级**授权——祖先链的只读属性，授给所有应用程序包，跨会话复用。
+/// 约束：只认 grant_targets 给祖先链的唯一形状（part = Parent、只授 RIGHTS_STAT、不递归、不继承）；
+///   解释器基线、可信基座、数据边界等其它落点仍按本次调用归属记台账（不走这里）。
+fn is_machine_target(target: &GrantTarget) -> bool {
+    target.part == FencePart::Parent
+        && target.rights == RIGHTS_STAT
+        && !target.recursive
+        && !target.inherit
 }
 
 /// 目的：本机能不能强制住容器围栏（**不写任何目录 ACL**）：建容器 profile + 派生容器 SID 是容器能起来的全部前提；

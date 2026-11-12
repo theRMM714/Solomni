@@ -740,6 +740,8 @@ fn run_shell(
         };
         slot.start(&call.script, scope, &cwd_view);
     }
+    // 本机档的围栏准备耗时由 ProcessRunner 同线程交棒（见 kernel 的 take_fence_prep）；虚拟机档没有本机 ACL 准备，这里恒为 None。
+    let mut fence_prep_secs: Option<u64> = None;
     let mut outcome = if ctx.tier == crate::kernel::api::Tier::Vm {
         let run = crate::capabilities::vm::api::GuestRun {
             command: call.script.clone(),
@@ -761,7 +763,10 @@ fn run_shell(
             ask,
             gate: None,
         };
-        ctx.tools.run_shell(&run)
+        let outcome = ctx.tools.run_shell(&run);
+        // 同一次执行的值只取一次（读即清）：这里没取到就说明这次没写本机权限项。
+        fence_prep_secs = crate::kernel::api::take_fence_prep().map(|d| d.as_secs());
+        outcome
     };
     // 共享区不承载执行位：相对路径脚本被直接执行（EACCES）时，补一句"用解释器跑"的出路。
     if !outcome.ok
@@ -769,13 +774,14 @@ fn run_shell(
     {
         outcome.output.push_str(&hint);
     }
-    // 回执补「落点 + 本次耗时」：模型据此判断相对路径与耗时，回放也从这一行派生。
+    // 回执补「落点 + 本次耗时」：模型据此判断相对路径与耗时，回放也从这一行派生（围栏准备到一秒才在行尾补一段）。
     // 只对执行层给出 `[shell]` 收尾行的调用追加；参数拒绝 / 起进程失败 / 围栏拒绝没有这一行。
     if api::did_run(&outcome.output) {
         outcome.output.push('\n');
         outcome.output.push_str(&api::cwd_elapsed_line(
             &cwd_view,
             started.elapsed().as_secs(),
+            fence_prep_secs,
         ));
     }
     let external = ctx.sandbox.permissions.decision_for(

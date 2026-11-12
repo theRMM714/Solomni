@@ -1,7 +1,7 @@
 # 工具与角色
 
 > 定位：系统工具、角色（身份）与"谁能用哪些工具"的唯一权威。
-> 效力：规范｜核对：2026-11-06｜依据：`systools/tools.yaml`
+> 效力：规范｜核对：2026-11-13｜依据：`systools/tools.yaml`
 
 ## 适用与判据
 - 声明系统工具、角色工具面与越权校验时以本文为准（`docs/tools/tools-and-roles.md`）。
@@ -127,18 +127,18 @@ roles:
 
 - `systools/tools.yaml` 的 `shell` 是唯一声明 per-call `scope` 的系统工具；它不新建执行机制：host 走 kernel 的 `ProcessRunner`，VM 走 guest helper。
 
-- 参数：`command`（必填）、`scope`（sandbox / external，缺省 sandbox）、`timeout_secs`（缺省 120，最大 600）。cwd 固定私有沙箱；无交互 stdin / TTY；输出上限 16k（约 4k 开头 + 约 12k 结尾，按完整行取整；单行超长时按字符切）；命令上限 8000 字符。
-- **回执形状**（正文与状态行装配见 `src/kernel/domain/receipt.rs`，末行由工具层追加）：正文（stdout；有 stderr 时折成 `[stderr]` 段）/ 空行 / 状态行 / 末行，末行是 `[shell] cwd <本环境写法> · 耗时 <N> 秒`：
+- 参数：`command`（必填）、`scope`（sandbox / external，缺省 sandbox）、`timeout_secs`（缺省 120，最大 600；只约束命令子进程，从启动命令起算——Windows 首次为会话准备围栏（建容器、写 ACL）不计入，可能额外耗时，截止时间在 spawn 之后才起算，见 `src/kernel/detail/process.rs`）。cwd 固定私有沙箱；无交互 stdin / TTY；输出上限 16k（约 4k 开头 + 约 12k 结尾，按完整行取整；单行超长时按字符切）；命令上限 8000 字符。
+- **回执形状**（正文与状态行装配见 `src/kernel/domain/receipt.rs`，末行由工具层追加）：正文（stdout；有 stderr 时折成 `[stderr]` 段）/ 空行 / 状态行 / 末行，末行是 `[shell] cwd <本环境写法> · 耗时 <N> 秒`（围栏准备 ≥1 秒时在末尾追加 `（其中围栏准备 <M> 秒）`；`N` 是整次调用墙钟，含围栏准备）：
   - 状态行四种：`[shell] 退出码 N`、`[shell] 超时（N 秒）：工具进程与它拉起的整棵进程树已被终止`、`[shell] 用户停止：工具进程与它拉起的整棵进程树已被终止`、`[shell] 退出码未知（被信号结束）`。
   - 末行恒为 cwd·耗时、上一行恒为状态行：两条都在 = 这次调用真的跑过；都没有 = 没跑（围栏拒绝 / 无租约 / helper 起不来 / 共享同步失败），此时不补尾行（`src/capabilities/tools/domain/shell.rs` 的 `did_run`）。
   - 截断只作用在正文，尾行永远保留（`src/kernel/domain/receipt.rs`）；开头 / 结尾**按完整行取整**（单行超长时退化为按字符切），标记报的是实际保留字符数。
-  - 退出码是**整条脚本**的退出状态（最后一条命令或显式 exit），不是每条命令的；要看单条命令的退出码写 `cmd; echo exit=$?` 或 `cmd || exit $?`。
+  - 退出码是**整条脚本**的退出状态（最后一条命令或显式 exit），不是每条命令的；要看单条命令的退出码按平台写：POSIX（Linux / macOS 宿主与 VM guest 的 /bin/sh）用 `cmd; echo exit=$?` 或 `cmd || exit $?`；Windows 宿主跑 PowerShell，`$?` 是**布尔**（上一条命令成功与否）不是退出码，退出码看 `$LASTEXITCODE`，写 `cmd /c exit 3; echo exit=$LASTEXITCODE`（原生命令结束时才更新）。
   - 超时与用户停止没有命令退出码（`src/capabilities/tools/domain/shell.rs` 的 `exit_code` 返回 None），只用状态行表达，不伪造 124 / 143。
   - cwd 用本环境写法：本机档 = 宿主路径；虚拟机档 = guest 内路径（路径桥，宿主 `D:\a\b` → `/solomni-host/d/a/b`，见 `src/capabilities/vm/domain/paths.rs`；UNC 外部根在 guest 里是 `/solomni-host/unc/<server>/<share>/…`，模型照此写法给路径即可）。
 - 回放从末行派生：`src/capabilities/session/domain/tools.rs` 的 `last_shell` 取最后一条带命令的 shell 工具行的 cwd 与耗时，标 `historical`。
 - **scope 是本次调用的 reach 请求，profile 才是用户上限**：sandbox 只给 private + 基础 / 项目工具链只读（net=false）；external 在 sandbox 上再加 shared-read / module-read / host-read / network。requested 不是 granted 子集 = 拒绝，不弹卡。
 - profile：view 不发放；workspace sandbox allow、external deny；external sandbox allow、external ask；all_reach sandbox / external allow。sandbox 与 external 都要求围栏真强制（`allow_degraded=false`），装不上拒绝。
-- 围栏：shell 的 `for_call` 另加 `runtime_roots`（项目内基础工具链 + 本 agent 模块运行包根）；这些是**可信执行基座**，Windows 上一次性授给 `ALL APPLICATION PACKAGES`、不参与按次授权。其余可达范围按 `会话 + agent + 根集合` 派生容器身份，授权按会话持有（调用结束不释放，会话改配/删除时回收）；一次性调用（构建/独立模块工具）各自唯一租约、跑完即撤。
+- 围栏：shell 的 `for_call` 另加 `runtime_roots`（项目内基础工具链 + 本 agent 模块运行包根）；这些是**可信执行基座**，Windows 上一次性授给 `ALL APPLICATION PACKAGES`、不参与按次授权。shell 的 cwd = private 时，PowerShell 逐级解析 cwd 还需要祖先链的「读属性」：逐级授 STAT（只读、非递归、非继承），这同样是机器级授权——授给 `ALL APPLICATION PACKAGES`、跨会话复用（对账时不回收），不再每次会话重写（`src/kernel/detail/confine/windows/acl.rs` 的 `grant_targets`）。其余可达范围按 `会话 + agent + 根集合` 派生容器身份，授权按会话持有（调用结束不释放，会话改配/删除时回收）；一次性调用（构建/独立模块工具）各自唯一租约、跑完即撤。
 - 平台：Linux / macOS 用 sh；Windows 用 PowerShell（pwsh 7 优先、5.1 回退；`-File` 临时 .ps1，UTF-8 BOM；脚本先设 `$ErrorActionPreference = 'Stop'`，未处理的 cmdlet 错误中止并以非 0 结束，要容错就在脚本里显式 `-ErrorAction SilentlyContinue` 或 try/catch）；VM Linux guest 用 /bin/sh，helper 按 `timeout_secs` 杀树；host 停止经 QGA 给 helper 发 SIGTERM，立即杀整棵进程树。guest 通道产出与本机同形的正文与状态行：超时 / 信号由 `src/capabilities/vm/detail/guest_helper.rs` 的机器标记（`solomni-guest-fence: timeout` / `solomni-guest-fence: signal`）表达、用户停止按宿主取消旗判定，由通道翻译成状态行；cwd·耗时尾行由工具层在通道返回后统一追加（`src/capabilities/collab/service/tool_loop.rs`）。围栏拒绝（helper 的 `solomni-guest-fence:` 诊断）没有 `[shell]` 收尾行——命令没有执行。
 - 围栏基线：本机 Linux / macOS 的只读运行基线**只对 `/dev/null` 例外给写权**（标准重定向要能丢弃输出，`>/dev/null` / `2>/dev/null` 不能用 EACCES 把脚本带偏）；guest helper 同一口径。其余 `/dev` 节点不放行（`src/kernel/detail/confine/linux.rs` 的 `WRITABLE_BASELINE`、`src/kernel/detail/confine/macos.rs` 的 profile、`src/capabilities/vm/detail/guest_helper.rs` 的基线）。
 - 状态：最近一次 shell 在会话状态栏出 chip（运行中；结束后按 `ShellLive.status` 分退出码 / 超时 / 停止 / 信号 + 耗时），点开看命令、scope、cwd、状态、退出码、耗时与回执预览；数据来自 `SessionView.shell`，不替代转录里的工具行。重建 / 回放的会话按转录派生（`historical`）：cwd 与耗时读回执，起止时间不伪造。

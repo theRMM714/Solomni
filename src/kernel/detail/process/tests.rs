@@ -1030,6 +1030,32 @@ fn real_windows_shell_writes_relative_files_in_its_private_cwd() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// 目的：围栏准备耗时的同线程交棒语义——写后读到、读过即清、每趟入口清空、非 Windows 恒无值。
+/// 约束：直接操作本模块的 thread_local（同线程），不真写本机 ACL。
+#[test]
+fn fence_prep_handoff_is_read_once_and_reset_each_run() {
+    reset_fence_prep();
+    assert!(take_fence_prep().is_none(), "没走过围栏准备就没有值");
+
+    FENCE_PREP.with(|slot| slot.set(Some(Duration::from_secs(7))));
+    assert_eq!(take_fence_prep(), Some(Duration::from_secs(7)));
+    assert!(
+        take_fence_prep().is_none(),
+        "读即清：同一趟的交棒只能被取走一次"
+    );
+
+    // 上一趟留下没取走的值，下一趟入口会清掉（线程池复用同一线程时不能串味）。
+    FENCE_PREP.with(|slot| slot.set(Some(Duration::from_secs(9))));
+    reset_fence_prep();
+    assert!(take_fence_prep().is_none(), "新一趟入口先清空");
+
+    #[cfg(not(windows))]
+    assert!(
+        take_fence_prep().is_none(),
+        "非 Windows 没有围栏准备，恒为空"
+    );
+}
+
 /// 守门进程起不来：如实回执「启动失败」，不 panic、不假装跑过。
 #[test]
 fn missing_launcher_binary_is_reported_honestly() {
