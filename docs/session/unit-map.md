@@ -14,7 +14,8 @@
 | `src/capabilities/session/service.rs` | 用例与端口持有者：历史落盘端口只在这里（R12） |
 | `src/capabilities/session/ports.rs` | 出站端口：`HistoryStore`（会话历史的读写与删除） |
 | `src/capabilities/session/domain/decisions.rs` | 裁决队列：先来后到、队首可见可答、回答校验、整队作废 |
-| `src/capabilities/session/domain/session.rs` | 单 agent 会话：上下文、行 id、回合与回复簿记 |
+| `src/capabilities/session/domain/session.rs` | 单 agent 会话：上下文、行 id、回合与回复簿记、压缩与回档 |
+| `src/capabilities/session/domain/session/prompt.rs` | 系统提示拼装：agent 与角色两条身份入口、模块提示、回合参数、环境块 |
 | `src/capabilities/session/domain/tools.rs` | 成员工具面：本回合可调的工具、观察账本与沙箱；shell 状态槽与按转录派生最近一次 shell（`last_shell`） |
 | `src/capabilities/session/domain/history.rs` | 会话元信息、运行态（`RunState`）与历史视图的内存形态 |
 | `src/capabilities/session/domain/events.rs` | 呈现侧事件与裁决卡信封等线格式词汇（`SessionEvent` / `LineView` 等） |

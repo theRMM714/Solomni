@@ -8,7 +8,7 @@ use super::super::prelude::*;
 /// 目的：工作环境块按会话的环境给路径——虚拟机档给 guest 拼法，并说清是哪种 guest。
 #[test]
 pub(crate) fn env_block_renders_guest_paths_in_vm_tier() {
-    use crate::capabilities::session::domain::session::env_block;
+    use crate::capabilities::session::domain::session::prompt::env_block;
     let prompt = test_prompts();
     let host = test_params("a");
     let host_block = env_block(&prompt, &host);
