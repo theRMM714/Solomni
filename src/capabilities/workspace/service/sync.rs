@@ -8,6 +8,35 @@ use crate::capabilities::workspace::api::{
     AdoptReport, Change, ChangeKind, CommitRequest, HeldChange, PullReport, ReadQuery, SyncReport,
 };
 
+/// 目的：判断沙箱相对路径是不是本工具 Windows AppContainer 的私有存量（容器的包目录：shell 的缓存与临时文件）。
+/// 参数：`rel` 是 `WorkStore::list` 返回的相对路径（`/` 分隔）。
+/// 返回：`AppData/Local/Packages/<容器名>/…` 或 `Packages/<容器名>/…`、且容器名以本工具容器前缀开头时为 true。
+/// 约束：两段目录与容器名前缀都按 ASCII 大小写不敏感比较（Windows 路径不分大小写）；只认沙箱根的顶层这两段目录，
+///   路径中段或更深层出现同名目录不算——`packages/`（NuGet）、`Packages/`（Swift）这类普通包目录照常是候选。
+fn appcontainer_ignored(rel: &str) -> bool {
+    // 权威常量是 `src/kernel/detail/confine/windows.rs` 的 PROFILE_PREFIX；sync.rs 跨平台编译，不能引用
+    // windows 门控模块，这里是重复的字面量：改容器前缀要两处同步。
+    const CONTAINER_PREFIX: &str = "Solomni.Agent.";
+    // 按 / 切段逐个比 ASCII 大小写，不为每条候选路径分配一份小写副本。
+    let mut segments = rel.split('/');
+    let first = segments.next().unwrap_or_default();
+    // 两条形状都要求容器名紧随其后一段：Packages/<容器名>/… 与 AppData/Local/Packages/<容器名>/…。
+    let nested = first.eq_ignore_ascii_case("appdata")
+        && segments
+            .next()
+            .is_some_and(|s| s.eq_ignore_ascii_case("local"))
+        && segments
+            .next()
+            .is_some_and(|s| s.eq_ignore_ascii_case("packages"));
+    if !first.eq_ignore_ascii_case("packages") && !nested {
+        return false;
+    }
+    let container = segments.next();
+    container
+        .and_then(|name| name.get(..CONTAINER_PREFIX.len()))
+        .is_some_and(|head| head.eq_ignore_ascii_case(CONTAINER_PREFIX))
+}
+
 impl WorkspaceService {
     pub(super) fn work_pull(
         &self,
@@ -144,6 +173,9 @@ impl WorkspaceService {
         let mut all: BTreeSet<String> = index.keys().cloned().collect();
         all.extend(tree.keys().cloned());
         all.extend(self.store.list(&sandbox)?);
+        // AppContainer 私有存量不是用户内容：不进候选，也就不进 held / paths / deletes 回执；
+        // 已提交进共享区的历史条目不会被自动删，要清用 work_commit。
+        all.retain(|rel| !appcontainer_ignored(rel));
         let mut paths: Vec<String> = Vec::new();
         let mut deletes: Vec<String> = Vec::new();
         let mut held: Vec<HeldChange> = Vec::new();
@@ -406,5 +438,46 @@ impl WorkspaceService {
             return Ok(SyncReport::default());
         }
         self.work_sync(work, &paths, time)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::appcontainer_ignored;
+
+    /// 目的：本工具容器的两类包目录都命中，容器名前缀与目录名大小写不敏感，容器名之后任意层级都算。
+    #[test]
+    fn appcontainer_private_state_is_ignored() {
+        for rel in [
+            "AppData/Local/Packages/solomni.agent.9de7325960882cac/AC/Microsoft/PowerShell/StartupProfileData-NonInteractive",
+            "AppData/Local/Packages/Solomni.Agent.9de7325960882cac/AC/Temp/x",
+            "Packages/Solomni.Agent.9de7325960882cac/AC/Temp/x",
+            "appdata/LOCAL/packages/SoLoMnI.aGeNt.9DE7325960882CAC/ac/temp/x",
+            "Packages/Solomni.Agent.9de7325960882cac/a/b/c/d/e.txt",
+        ] {
+            assert!(appcontainer_ignored(rel), "该算私有存量：{}", rel);
+        }
+    }
+
+    /// 目的：普通包目录（NuGet 的 packages/、Swift 的 Packages/）与别的应用包不被误伤；
+    ///   只有目录名、没有本工具容器名段的路径也不算。
+    #[test]
+    fn ordinary_sandbox_paths_are_not_ignored() {
+        for rel in [
+            "packages/nuget.config",
+            "Packages/Newtonsoft.Json.13.0.1/lib/net45/x.dll",
+            "AppData/Local/Packages/Contoso.App_8wekyb3d8bbwe/AC/Temp/x",
+            "AppData/Local/Packages/Solomni.AgentX/AC/Temp/x",
+            "notes/Packages/Solomni.Agent.x/a",
+            "AppData/Other/Packages/x",
+            "包/Packages/说明.md",
+            "src/packages/mod.rs",
+            "Packages",
+            "Packages/",
+            "AppData/Local/Packages",
+            "AppData/Local/Packages/",
+        ] {
+            assert!(!appcontainer_ignored(rel), "不该算私有存量：{}", rel);
+        }
     }
 }

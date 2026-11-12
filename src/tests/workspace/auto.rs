@@ -312,3 +312,88 @@ pub(crate) fn adopt_sandbox_holds_stale_changes_until_pulled() {
         Some(b"v4".as_slice())
     );
 }
+
+/// 目的：AppContainer 的私有存量（shell 的缓存与临时文件）不进共享区，也不进 held / deletes 回执；
+///   同一遍扫描里名字带 Packages 的用户内容照常发布，共享区里已有的私有存量不跟着沙箱删除走。
+#[test]
+pub(crate) fn adopt_sandbox_skips_appcontainer_private_state() {
+    use crate::capabilities::workspace::ports::WorkStore;
+
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string(), "b".to_string()])
+        .unwrap();
+    let shared = shared_of(&ws, "w");
+    let sb_a = sandbox_of(&ws, "w", "a");
+    let sb_b = sandbox_of(&ws, "w", "b");
+    let junk = "Packages/Solomni.Agent.9de7325960882cac/AC/Temp/telemetry.uuid";
+    let cache = "AppData/Local/Packages/solomni.agent.9de7325960882cac/AC/Microsoft/PowerShell/StartupProfileData-NonInteractive";
+    let notes = "notes/Packages/list.md";
+
+    // 共享区里已有这类私有存量：修复前的 shell 自动提交把它当沙箱改动发布了。
+    store.write_under(&sb_a, junk, b"v1").unwrap();
+    ws.work_commit_auto("w", "a", "w--a", &commit_req(&[junk], &[], "私有存量", 1))
+        .unwrap()
+        .expect("先放行一次，模拟修复前的发布");
+    assert_eq!(
+        store.read_under(&shared, junk).unwrap().as_deref(),
+        Some(b"v1".as_slice())
+    );
+
+    // b 的沙箱里也有私有存量、自己又没拉过基线：既不进 held，也不会被发布。
+    store.write_under(&sb_b, junk, b"v1").unwrap();
+    let b_adopted = ws.work_adopt_sandbox("w", "b", "w--b", 2, 1).unwrap();
+    assert_eq!(b_adopted.commit, None, "b 没有用户改动");
+    assert!(
+        b_adopted.held.is_empty(),
+        "私有存量不该进 held 回执：{:?}",
+        b_adopted.held
+    );
+
+    // 沙箱里另有两类私有存量（含大小写变体），外加一条名字里带 Packages 的用户内容。
+    store.write_under(&sb_a, cache, b"cache").unwrap();
+    store
+        .write_under(
+            &sb_a,
+            "appdata/local/packages/Solomni.Agent.9de7325960882cac/ac/temp/x.tmp",
+            b"cache",
+        )
+        .unwrap();
+    store.write_under(&sb_a, notes, b"user").unwrap();
+    let adopted = ws.work_adopt_sandbox("w", "a", "w--a", 3, 1).unwrap();
+    assert_eq!(
+        adopted.changed,
+        vec![notes.to_string()],
+        "只有用户内容进共享区"
+    );
+    assert!(
+        adopted.held.is_empty(),
+        "私有存量不该进 held 回执：{:?}",
+        adopted.held
+    );
+    assert_eq!(
+        store.read_under(&shared, cache).unwrap(),
+        None,
+        "私有存量不得进共享区"
+    );
+
+    // a 改了私有存量：共享区里那份不因此变动，也不产生冲突回执。
+    store.write_under(&sb_a, junk, b"v2").unwrap();
+    let modified = ws.work_adopt_sandbox("w", "a", "w--a", 4, 1).unwrap();
+    assert_eq!(modified.commit, None, "私有存量的改动不算沙箱改动");
+    assert!(
+        modified.held.is_empty(),
+        "私有存量不该进 held 回执：{:?}",
+        modified.held
+    );
+
+    // a 删掉私有存量：不生成删除提交，共享区里已有的那份原样留着。
+    store.remove_under(&sb_a, junk).unwrap();
+    let deleted = ws.work_adopt_sandbox("w", "a", "w--a", 5, 1).unwrap();
+    assert_eq!(deleted.commit, None, "私有存量不得产生删除提交");
+    assert!(deleted.changed.is_empty());
+    assert_eq!(
+        store.read_under(&shared, junk).unwrap().as_deref(),
+        Some(b"v1".as_slice()),
+        "共享区里已有的私有存量不跟着沙箱删除走"
+    );
+}
