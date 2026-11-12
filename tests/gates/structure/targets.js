@@ -32,6 +32,9 @@ function reachableFiles(root) {
     if (reachable.has(abs) || !fs.existsSync(abs)) return;
     reachable.add(abs);
     const dir = path.dirname(abs);
+    // 子模块目录：a/b/mod.rs 的子女在 a/b/ 下，a/b.rs 的也在 a/b/ 下；
+    // 但 crate 根（src/main.rs、tests/<目标>/main.rs）的子女在自己目录下，故两种基目录都试。
+    const bases = path.basename(abs) === "mod.rs" ? [dir] : [dir, abs.replace(/\.rs$/, "")];
     const re = /(?:#\[path\s*=\s*"([^"]+)"\]\s*)?(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+([A-Za-z_][A-Za-z0-9_]*)\s*;/g;
     let m;
     while ((m = re.exec(fs.readFileSync(abs, "utf8")))) {
@@ -39,7 +42,7 @@ function reachableFiles(root) {
       if (!mod) continue;
       const cands = m[1]
         ? [path.resolve(dir, m[1])]
-        : [path.join(dir, mod + ".rs"), path.join(dir, mod, "mod.rs")];
+        : bases.flatMap((b) => [path.join(b, mod + ".rs"), path.join(b, mod, "mod.rs")]);
       for (const c of cands) if (fs.existsSync(c)) { walk(c); break; }
     }
   };

@@ -38,8 +38,8 @@ function unitMap(root) {
       if (e.isDirectory()) { collectSrc(p); continue; }
       if (!e.name.endsWith(".rs")) continue;
       const r = rel(root, p);
-      if (r.startsWith("src/tests/")) continue;
-      if (e.name === "mod.rs" && isBarrel(p)) continue;
+      if (r === "src/tests.rs" || r.startsWith("src/tests/")) continue;
+      if (isBarrel(p)) continue;
       if (!seenRows.has(r)) problems.push("src 下的文件没进单元地图：" + r);
     }
   };

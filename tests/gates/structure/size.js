@@ -164,7 +164,7 @@ function walk(root, dir) {
 /** 文件角色：实现 / 测试用例 / 测试支撑。 */
 function roleOf(f, testFiles) {
   if (f.startsWith("src/tests/doubles/") || f.startsWith("src/tests/builders/")) return "support";
-  if (f.startsWith("src/tests/") || testFiles.has(f)) return "test";
+  if (f === "src/tests.rs" || f.startsWith("src/tests/") || testFiles.has(f)) return "test";
   return "impl";
 }
 
