@@ -25,7 +25,7 @@ capabilities/
 ```
 
 - 同一目录里自命名入口与 `mod.rs` 不得并存；本仓只保留自命名入口一种形态（`tests/gates/structure/module-files.js`）。
-- 跨单元引用只走目标单元的入口或 `api`/`ports` 契约，不得用 `#[path]` 绕过模块树（`tests/gates/structure/dependency.js`）。
+- 跨单元引用只走目标单元的入口或 `api`/`ports` 契约（`tests/gates/structure/dependency.js`）；`#[path]` 只用于测试探针共享夹具，且该文件必须能从测试入口追溯（`tests/gates/structure/targets.js`）。
 
 ## 二、格式与静态检查
 
@@ -58,7 +58,7 @@ capabilities/
 
 - 模块布局（不得有 `mod.rs`）→ `structure/module-files`
 - 单元地图与代码注释里的文档引用 → `structure/unit-map`、`structure/doc-refs`
-- 分层依赖方向与 `#[path]` 绕过 → `structure/dependency`
+- 分层依赖方向（谁能依赖谁）→ `structure/dependency`
 - 格式 → `node dev.js fmt`；静态检查 → `node dev.js clippy`
 - 许可证、来源与禁用 → T0 供应链步骤（`deny.toml`）
 
