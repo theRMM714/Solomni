@@ -7,7 +7,7 @@
 
 use crate::capabilities::workspace::api::{
     ChangeKind, CommitReport, LostReport, PullReport, ResolveAction, ResolveEntry, ResolveReport,
-    RestoreLostReport, StatusReport, SyncReport, VersionView, VERSION_TEXT_LIMIT,
+    RestoreLostReport, StatusReport, SyncReport, VERSION_TEXT_LIMIT, VersionView,
 };
 
 pub const PULL: &str = "work_pull";
@@ -253,10 +253,10 @@ pub fn render_versions(v: &VersionView) -> String {
     }
     let mut incomplete: Vec<&str> = Vec::new();
     for (label, item) in [("基线", &v.base), ("主副本", &v.head), ("沙箱", &v.local)] {
-        if let Some(f) = item {
-            if f.truncated || f.too_large {
-                incomplete.push(label);
-            }
+        if let Some(f) = item
+            && (f.truncated || f.too_large)
+        {
+            incomplete.push(label);
         }
     }
     if !incomplete.is_empty() {

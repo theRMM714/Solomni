@@ -34,9 +34,15 @@ fn selfcheck_injection_switch_reports_env_unavailable() {
     assert!(!selfcheck_forced_unavailable(), "运行期不该有这个开关");
     // 注入后：必须在触到后端之前就返回「本机不允许」，且带得出注入标记
     // （探针据此把"环境结论"与"我们写错了"分开）。
-    std::env::set_var(SELFCHECK_FAIL_FLAG, "1");
+    // SAFETY: 只改本用例独占的探针开关，用例内即改即清。
+    unsafe {
+        std::env::set_var(SELFCHECK_FAIL_FLAG, "1");
+    }
     let injected = verify(&spec, "true");
-    std::env::remove_var(SELFCHECK_FAIL_FLAG);
+    // SAFETY: 同上，清掉本用例自己注入的开关。
+    unsafe {
+        std::env::remove_var(SELFCHECK_FAIL_FLAG);
+    }
     match injected {
         FenceVerdict::EnvUnavailable(why) => assert!(
             why.contains(SELFCHECK_FAIL_FLAG),
@@ -579,9 +585,11 @@ fn reconcile_summary_reports_every_outcome_without_silent_success() {
         skipped_unjudgeable: 5,
         ..Default::default()
     };
-    assert!(reclaimed_skipped
-        .summary()
-        .contains("另有 5 条无法判定已跳过"));
+    assert!(
+        reclaimed_skipped
+            .summary()
+            .contains("另有 5 条无法判定已跳过")
+    );
 
     let failed_only = ReconcileReport {
         errors: vec!["写回被拒".to_string()],

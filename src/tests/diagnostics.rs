@@ -7,7 +7,7 @@
 /// 目的：--work-gc 默认 dry-run、--yes 才删；只删不可达对象。
 #[test]
 fn work_gc_cli_dry_run_then_applies() {
-    use crate::capabilities::workspace::api::{content_hash, Workspace};
+    use crate::capabilities::workspace::api::{Workspace, content_hash};
     use crate::capabilities::workspace::detail::fs_workspace::FsWorkspace;
     use crate::capabilities::workspace::detail::fs_workstore::FsWorkStore;
     use crate::capabilities::workspace::ports::WorkStore;

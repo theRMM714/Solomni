@@ -133,13 +133,12 @@ pub fn derive(events: &[serde_json::Value], roster_names: &[String]) -> CollabSt
             }
             // 任务链随"方案待审"事件落档：重启/回档后按它重建，**不重新整理**（省一次模型调用）。
             "plan_review" => {
-                if let Some(chain) = ev.get("chain") {
-                    if let Ok(parsed) = serde_json::from_value::<
+                if let Some(chain) = ev.get("chain")
+                    && let Ok(parsed) = serde_json::from_value::<
                         crate::capabilities::taskchain::api::TaskChain,
                     >(chain.clone())
-                    {
-                        st.chain = parsed;
-                    }
+                {
+                    st.chain = parsed;
                 }
             }
             "report" => {

@@ -36,16 +36,18 @@ pub(crate) fn create_work_persists_and_history_replays() {
         "历史里应有转录事件"
     );
     // 重名（磁盘已存在）被拒
-    assert!(core
-        .create_work(work("工作一", WorkMode::Single, &["a"]))
-        .unwrap_err()
-        .contains("已存在"));
+    assert!(
+        core.create_work(work("工作一", WorkMode::Single, &["a"]))
+            .unwrap_err()
+            .contains("已存在")
+    );
     // 删除会话：内存与磁盘一起删，之后名字可复用
     assert!(core.history_delete("工作一").unwrap());
     assert!(core.history_list().is_empty());
-    assert!(core
-        .create_work(work("工作一", WorkMode::Single, &["a"]))
-        .is_ok());
+    assert!(
+        core.create_work(work("工作一", WorkMode::Single, &["a"]))
+            .is_ok()
+    );
 }
 
 /// 目的：删父带子：整个子树一起消失；子会话不允许单独删（它由核心按节点派生）。
@@ -78,8 +80,8 @@ pub(crate) fn history_delete_cascades_to_children_and_refuses_child_delete() {
 /// 目的：删除 VM 会话时**先停 guest，再删目录**——Windows 上 guest 还占着会话目录里的文件，反过来会 sharing violation。
 #[test]
 pub(crate) fn session_delete_stops_the_guest_before_removing_directories() {
-    use crate::capabilities::conductor::service::guest_job::GuestStop;
     use crate::capabilities::conductor::service::SessionDelete;
+    use crate::capabilities::conductor::service::guest_job::GuestStop;
     use crate::capabilities::vm::api::Vm;
     use crate::capabilities::vm::domain::guest::{GuestRun, GuestSpec};
     use crate::kernel::api::FenceSpec;
@@ -277,22 +279,26 @@ pub(crate) fn create_work_validates_user_choices() {
         vec![module_of("a"), module_of("b")],
         gw(BTreeMap::new(), vec!["[]".into()]),
     );
-    assert!(core
-        .create_work(work("", WorkMode::Single, &["a"]))
-        .unwrap_err()
-        .contains("工作名不能为空"));
-    assert!(core
-        .create_work(work("x", WorkMode::Single, &["ghost"]))
-        .unwrap_err()
-        .contains("无此模块"));
+    assert!(
+        core.create_work(work("", WorkMode::Single, &["a"]))
+            .unwrap_err()
+            .contains("工作名不能为空")
+    );
+    assert!(
+        core.create_work(work("x", WorkMode::Single, &["ghost"]))
+            .unwrap_err()
+            .contains("无此模块")
+    );
     // 模块可以为空：零模块 agent 照样建得出来（只用内建文件工具）。
     let opened = core
         .create_work(work("零模块", WorkMode::Single, &[]))
         .expect("零模块 agent 合法");
     assert_eq!(opened.agents.len(), 1);
-    assert!(core.history_open("零模块").expect("读 meta").0.agents[0]
-        .modules
-        .is_empty());
+    assert!(
+        core.history_open("零模块").expect("读 meta").0.agents[0]
+            .modules
+            .is_empty()
+    );
     let _ = core.history_delete("零模块");
     // 单模式的**组合语义**：点名多个 = 并成一个临时组合（模块去重、保序；模型取核心默认）。
     let two_agents = WorkSpec {
@@ -332,27 +338,32 @@ pub(crate) fn create_work_validates_user_choices() {
     );
     assert!(meta.agents[0].transient, "并出来的是临时 agent");
     let _ = core.history_delete("x");
-    assert!(core
-        .create_work(collab_work("x", &["a"], false, "  "))
-        .unwrap_err()
-        .contains("必须填写本次需求"));
+    assert!(
+        core.create_work(collab_work("x", &["a"], false, "  "))
+            .unwrap_err()
+            .contains("必须填写本次需求")
+    );
     let mut bad_model = work("x", WorkMode::Single, &["a"]);
     bad_model.agents[0].model = Some("ghost".to_string());
-    assert!(core
-        .create_work(bad_model)
-        .unwrap_err()
-        .contains("无此模型"));
+    assert!(
+        core.create_work(bad_model)
+            .unwrap_err()
+            .contains("无此模型")
+    );
     // 建一次成功后重名被拒
-    assert!(core
-        .create_work(work("同名", WorkMode::Single, &["a"]))
-        .is_ok());
-    assert!(core
-        .create_work(work("同名", WorkMode::Single, &["a"]))
-        .unwrap_err()
-        .contains("已存在"));
+    assert!(
+        core.create_work(work("同名", WorkMode::Single, &["a"]))
+            .is_ok()
+    );
+    assert!(
+        core.create_work(work("同名", WorkMode::Single, &["a"]))
+            .unwrap_err()
+            .contains("已存在")
+    );
     // 非法字符（将来要当目录名）
-    assert!(core
-        .create_work(work("a/b", WorkMode::Single, &["a"]))
-        .unwrap_err()
-        .contains("不能包含"));
+    assert!(
+        core.create_work(work("a/b", WorkMode::Single, &["a"]))
+            .unwrap_err()
+            .contains("不能包含")
+    );
 }

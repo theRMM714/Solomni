@@ -249,10 +249,10 @@ pub(crate) fn link_guest_kernel(base: &Path, abi: &str) -> Result<(), String> {
         ("initrd.img", format!("boot/initrd.img-{}", abi)),
     ] {
         let p = base.join(link_name);
-        if let Ok(cur) = fs::read_link(&p) {
-            if cur == Path::new(&target) {
-                continue;
-            }
+        if let Ok(cur) = fs::read_link(&p)
+            && cur == Path::new(&target)
+        {
+            continue;
         }
         // 名字被占着就先清掉（软链 / 普通文件都算）；再无条件建——不看 `exists()`（它跟着目标走，会骗人）。
         if p.symlink_metadata().is_ok() {

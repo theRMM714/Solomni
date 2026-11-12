@@ -476,11 +476,12 @@ impl VmEngine for QemuEngine {
             }
         }
         // 会话 guest 每次都是新的可写层：把 per-agent 围栏助手装进去；装不上这台 guest 就不能用。
-        if spec.isolated && spec.image.os == GuestOs::Linux {
-            if let Err(e) = super::guest_helper::install(&mut handle) {
-                handle.stop();
-                return Err(e);
-            }
+        if spec.isolated
+            && spec.image.os == GuestOs::Linux
+            && let Err(e) = super::guest_helper::install(&mut handle)
+        {
+            handle.stop();
+            return Err(e);
         }
         Ok(Box::new(handle))
     }
@@ -490,11 +491,7 @@ impl VmEngine for QemuEngine {
 fn firmware_dir(exe: &str) -> Option<PathBuf> {
     let bin = Path::new(exe).parent()?;
     let dir = bin.parent()?.join("share").join("qemu");
-    if dir.is_dir() {
-        Some(dir)
-    } else {
-        None
-    }
+    if dir.is_dir() { Some(dir) } else { None }
 }
 
 /// 目的：可写层文件名——租约名可能含路径分隔符或怪字符，这里只留字母数字与 `-_.`。
@@ -608,7 +605,7 @@ fn create_overlay(engine_exe: &str, base: &Path, overlay: &Path) -> Result<(), S
 mod qga;
 mod seed;
 
-use qga::{connect_within, QemuHandle};
+use qga::{QemuHandle, connect_within};
 use seed::SeedServer;
 
 #[cfg(test)]
@@ -616,7 +613,7 @@ mod tests {
     use super::qga::*;
     use super::*;
     use crate::capabilities::vm::domain::guest::{OutputLimit, SeedDocs};
-    use crate::kernel::domain::receipt::{shell_receipt, ShellEnd};
+    use crate::kernel::domain::receipt::{ShellEnd, shell_receipt};
     use std::net::TcpStream;
 
     /// 目的：QGA 通道被 QEMU 重置（chardev 未就绪时连上的那条会被 RST）不是故障——`ping` 要自己重连一次再握手。

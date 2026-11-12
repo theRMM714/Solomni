@@ -136,10 +136,8 @@ pub fn release_fence(spec: &FenceSpec, home: &Path) -> Result<(), String> {
         }
         finalize_grant(&mut rec, &sid_text, key, recursive, &mut errors);
     }
-    if had_record {
-        if let Err(e) = save_record(home, &rec) {
-            errors.push(format!("授权台账更新失败：{}", e));
-        }
+    if had_record && let Err(e) = save_record(home, &rec) {
+        errors.push(format!("授权台账更新失败：{}", e));
     }
     if errors.is_empty() {
         Ok(())
@@ -170,18 +168,16 @@ fn finalize_grant(
         }
         return;
     }
-    if !has_other {
-        if let Some(snap) = snapshot {
-            // 根内：最后一个归属走了，按快照整体还原。
-            match restore_sd(&path, &snap.bytes) {
-                Ok(()) => {
-                    rec.grants.retain(|g| !(g.sid == sid_text && g.path == key));
-                    rec.snapshots.retain(|s| s.path != key);
-                }
-                Err(e) => errors.push(e),
+    if !has_other && let Some(snap) = snapshot {
+        // 根内：最后一个归属走了，按快照整体还原。
+        match restore_sd(&path, &snap.bytes) {
+            Ok(()) => {
+                rec.grants.retain(|g| !(g.sid == sid_text && g.path == key));
+                rec.snapshots.retain(|s| s.path != key);
             }
-            return;
+            Err(e) => errors.push(e),
         }
+        return;
     }
     // 根外（或同路径还有别的 SID）：只精确撤自己这条 ACE。
     match revoke_one_text(sid_text, &path, recursive) {
@@ -253,10 +249,8 @@ pub fn release_by_lease(home: &Path, lease: &str) -> Result<(), String> {
             rec.profiles.retain(|p| p.name != *name);
         }
     }
-    if had_record {
-        if let Err(e) = save_record(home, &rec) {
-            errors.push(format!("授权台账更新失败：{}", e));
-        }
+    if had_record && let Err(e) = save_record(home, &rec) {
+        errors.push(format!("授权台账更新失败：{}", e));
     }
     if errors.is_empty() {
         Ok(())

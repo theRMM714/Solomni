@@ -8,8 +8,8 @@ use super::super::{single_work, slow_ops};
 use super::support::spawn;
 use crate::capabilities::conductor::api::{Ops, Output};
 use crate::kernel::api::Tier;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 #[test]
@@ -32,12 +32,13 @@ fn commands_run_on_the_core_thread_and_changes_are_visible() {
     );
 
     assert_eq!(ops.modules.roster().expect("清单").modules.len(), 1);
-    assert!(ops
-        .core
-        .runtime_report(Tier::Host)
-        .expect("能力报告")
-        .diagnoses
-        .is_empty());
+    assert!(
+        ops.core
+            .runtime_report(Tier::Host)
+            .expect("能力报告")
+            .diagnoses
+            .is_empty()
+    );
     assert!(
         ops.history.list().expect("历史").is_empty(),
         "内存历史初始为空"
@@ -105,10 +106,11 @@ fn reads_are_not_queued_behind_a_long_generation() {
 fn missing_sessions_and_bad_inputs_come_back_as_errors() {
     let handle = spawn(vec![module_of("a")], Vec::new());
     let ops = Ops::from_handle(&handle);
-    assert!(ops
-        .sessions
-        .say("没这个会话", "你好", Output::Final)
-        .is_err());
+    assert!(
+        ops.sessions
+            .say("没这个会话", "你好", Output::Final)
+            .is_err()
+    );
     assert!(ops.sessions.config("没这个会话").is_err());
     assert!(ops.sessions.open_queue("没这个会话").is_err());
     assert!(ops.sessions.files("没这个会话").is_err());
@@ -118,13 +120,14 @@ fn missing_sessions_and_bad_inputs_come_back_as_errors() {
         ops.registry.remove_provider("没这个供应商").is_ok(),
         "删不存在的供应商返回 false，不是错误"
     );
-    assert!(ops
-        .sessions
-        .rewind(
-            "没这个会话",
-            crate::capabilities::conductor::api::RewindTarget::Archive(0)
-        )
-        .is_err());
+    assert!(
+        ops.sessions
+            .rewind(
+                "没这个会话",
+                crate::capabilities::conductor::api::RewindTarget::Archive(0)
+            )
+            .is_err()
+    );
 }
 
 #[test]

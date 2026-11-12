@@ -101,8 +101,8 @@ pub(crate) fn test_host_probe() -> std::sync::Arc<dyn crate::kernel::ports::Host
 }
 
 /// 目的：VM 用例的宿主探测——真实路径事实 + 共享工具在场 + 声明"本机能起虚拟机"（不依赖 runner 的 /dev/kvm）。
-pub(crate) fn vm_capable_host_probe(
-) -> std::sync::Arc<dyn crate::kernel::ports::HostProbe + Send + Sync> {
+pub(crate) fn vm_capable_host_probe()
+-> std::sync::Arc<dyn crate::kernel::ports::HostProbe + Send + Sync> {
     std::sync::Arc::new(TestHostProbe {
         hypervisor: Some(true),
     })

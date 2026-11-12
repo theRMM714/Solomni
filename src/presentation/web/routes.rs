@@ -350,17 +350,19 @@ pub fn url_decode(s: &str) -> String {
 
 /// 目的：目录的 JSON 形态（`--print-routes` 与契约测试共用同一份事实）。
 pub fn catalog_json() -> serde_json::Value {
-    json!(ROUTES
-        .iter()
-        .map(|r| json!({
-            "id": r.id,
-            "method": r.method,
-            "pattern": r.pattern,
-            "capability": r.capability,
-            "request": r.request,
-            "response": r.response,
-            "statuses": r.statuses,
-            "note": r.note,
-        }))
-        .collect::<Vec<_>>())
+    json!(
+        ROUTES
+            .iter()
+            .map(|r| json!({
+                "id": r.id,
+                "method": r.method,
+                "pattern": r.pattern,
+                "capability": r.capability,
+                "request": r.request,
+                "response": r.response,
+                "statuses": r.statuses,
+                "note": r.note,
+            }))
+            .collect::<Vec<_>>()
+    )
 }

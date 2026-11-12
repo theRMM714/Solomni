@@ -48,11 +48,11 @@ impl Conductor {
         parent: Option<&str>,
     ) -> Result<WorkOpened, String> {
         let (prepared, boot) = self.prepare_work(spec, parent)?;
-        if let Some(boot) = boot {
-            if let Err(e) = boot.run() {
-                self.abort_work(prepared);
-                return Err(e);
-            }
+        if let Some(boot) = boot
+            && let Err(e) = boot.run()
+        {
+            self.abort_work(prepared);
+            return Err(e);
         }
         self.commit_work(prepared)
     }

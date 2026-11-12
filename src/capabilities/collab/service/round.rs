@@ -8,7 +8,7 @@ use crate::capabilities::collab::service::tool_loop::*;
 use crate::capabilities::llm::api::{self as envelope, Verb};
 use crate::capabilities::llm::api::{Chat, Chunk, CompleteOpts, Msg};
 use crate::capabilities::session::api::MemberTools;
-use crate::capabilities::session::api::{reply_msgs, LineView, SessionEvent, ToolCallView};
+use crate::capabilities::session::api::{LineView, SessionEvent, ToolCallView, reply_msgs};
 use crate::kernel::api::ToolOutcome;
 
 /// 目的：一次工具调用的产出：调用视图 + 它压进历史的消息。
@@ -287,18 +287,16 @@ pub fn converse_with(
         let truncated = done.truncated();
         let calls = done.calls.clone();
         let raw = done.raw;
-        if truncated {
-            if let Some(t) = tools.as_deref_mut() {
-                t.log.warn(
-                    "engine::converse",
-                    &format!(
-                        "模型输出被长度截断（finish_reason={}）：第 {} 轮，正文 {} 字",
-                        finish,
-                        rounds.len() + 1,
-                        raw.chars().count()
-                    ),
-                );
-            }
+        if truncated && let Some(t) = tools.as_deref_mut() {
+            t.log.warn(
+                "engine::converse",
+                &format!(
+                    "模型输出被长度截断（finish_reason={}）：第 {} 轮，正文 {} 字",
+                    finish,
+                    rounds.len() + 1,
+                    raw.chars().count()
+                ),
+            );
         }
         let mut reply = envelope::parse(&raw);
         // 手写信封不合法时**先**问修复端口：只做无歧义的修补（默认实现只转义字符串里的裸控制字符）；修好并重新解析成
@@ -308,19 +306,17 @@ pub fn converse_with(
             .iter()
             .any(|t| crate::capabilities::tools::api::is_freeform(&t.name));
         let mut repaired: Option<String> = None;
-        if !aborted && !freeform_tool {
-            if let Some(kind) = reply.tools.first().and_then(|t| t.malformed.clone()) {
-                if let Some(ctx) = tools.as_deref_mut() {
-                    let out = ctx.llm.repair(&raw, &kind);
-                    if let Some(text) = out.repaired.as_deref() {
-                        let again = envelope::parse(text);
-                        if !again.tools.is_empty()
-                            && again.tools.iter().all(|t| t.malformed.is_none())
-                        {
-                            reply = again;
-                            repaired = Some(out.what.join("；"));
-                        }
-                    }
+        if !aborted
+            && !freeform_tool
+            && let Some(kind) = reply.tools.first().and_then(|t| t.malformed.clone())
+            && let Some(ctx) = tools.as_deref_mut()
+        {
+            let out = ctx.llm.repair(&raw, &kind);
+            if let Some(text) = out.repaired.as_deref() {
+                let again = envelope::parse(text);
+                if !again.tools.is_empty() && again.tools.iter().all(|t| t.malformed.is_none()) {
+                    reply = again;
+                    repaired = Some(out.what.join("；"));
                 }
             }
         }
@@ -370,156 +366,156 @@ pub fn converse_with(
         if mode == crate::capabilities::llm::api::ToolMode::Envelope
             && !calls.is_empty()
             && reply.tools.is_empty()
+            && let Some(ctx) = tools.as_deref_mut()
         {
-            if let Some(ctx) = tools.as_deref_mut() {
-                let c = &calls[0];
-                ctx.log.warn(
-                    "engine::converse",
-                    &format!(
-                        "信封通道收到原生 tool_calls（{} 个，finish_reason={}）：不执行，落失败工具行",
-                        calls.len(),
-                        finish
-                    ),
-                );
-                let view = ToolCallView {
-                    speaker: speaker.to_string(),
-                    module: String::new(),
-                    name: c.name.clone(),
-                    ok: false,
-                    args: c.args_json.clone(),
-                    output: format!(
-                        "这一回合走**信封通道**，但供应商返回了原生工具调用（name={}，finish_reason={}）；核心没有执行。请把同样的调用写成信封重发：{{\"type\":\"tool\",\"name\":\"...\",\"args\":{{...}}}}。",
-                        c.name, finish
-                    ),
-                    call_id: String::new(),
-                    reply: reply_id,
-                    read: None,
-                };
-                let msgs_of = reply_msgs(mode, &raw, std::slice::from_ref(&view));
-                for m in &msgs_of {
-                    msgs.push(m.clone());
-                }
-                on_tool(&view);
-                push_round!(Round {
-                    reply: reply_id,
-                    text: reply.text.clone(),
-                    reasoning: std::mem::take(&mut reasoning),
-                    text_msgs: vec![msgs_of[0].clone()],
-                    raw: raw.clone(),
-                    tool: Some(ToolRun {
-                        view,
-                        msgs: vec![msgs_of[1].clone()],
-                    }),
-                    finish,
-                    error: None,
-                    verb: None,
-                    degraded: false,
-                });
-                return rounds;
+            let c = &calls[0];
+            ctx.log.warn(
+                "engine::converse",
+                &format!(
+                    "信封通道收到原生 tool_calls（{} 个，finish_reason={}）：不执行，落失败工具行",
+                    calls.len(),
+                    finish
+                ),
+            );
+            let view = ToolCallView {
+                speaker: speaker.to_string(),
+                module: String::new(),
+                name: c.name.clone(),
+                ok: false,
+                args: c.args_json.clone(),
+                output: format!(
+                    "这一回合走**信封通道**，但供应商返回了原生工具调用（name={}，finish_reason={}）；核心没有执行。请把同样的调用写成信封重发：{{\"type\":\"tool\",\"name\":\"...\",\"args\":{{...}}}}。",
+                    c.name, finish
+                ),
+                call_id: String::new(),
+                reply: reply_id,
+                read: None,
+            };
+            let msgs_of = reply_msgs(mode, &raw, std::slice::from_ref(&view));
+            for m in &msgs_of {
+                msgs.push(m.clone());
             }
+            on_tool(&view);
+            push_round!(Round {
+                reply: reply_id,
+                text: reply.text.clone(),
+                reasoning: std::mem::take(&mut reasoning),
+                text_msgs: vec![msgs_of[0].clone()],
+                raw: raw.clone(),
+                tool: Some(ToolRun {
+                    view,
+                    msgs: vec![msgs_of[1].clone()],
+                }),
+                finish,
+                error: None,
+                verb: None,
+                degraded: false,
+            });
+            return rounds;
         }
 
         // ── 原生通道：工具调用来自供应商的结构化槽位（不解析信封）──
-        if mode == crate::capabilities::llm::api::ToolMode::Native {
-            if let Some(ctx) = tools.as_deref_mut() {
-                // ① 有原生调用：逐个执行，各成一条工具行；助手消息如实记下"它调了什么"（回放与下一轮都看得到）
-                if !calls.is_empty() {
-                    // 先定好每个调用落在哪个工具、参数是什么（patch 的正文在 body 参数里，
-                    // 原生协议要求参数是 JSON 对象；转义交给供应商的解码器）。
-                    let plan: Vec<(Option<String>, String, String)> = calls
-                        .iter()
-                        .map(|c| {
-                            let (module, tool) = decls
-                                .wire
-                                .get(&c.name)
-                                .cloned()
-                                .unwrap_or((None, c.name.clone()));
-                            let args = if crate::capabilities::tools::api::is_freeform(&tool) {
-                                serde_json::from_str::<serde_json::Value>(&c.args_json)
-                                    .ok()
-                                    .and_then(|v| {
-                                        v.get("body")
-                                            .and_then(|b| b.as_str())
-                                            .map(|s| s.to_string())
-                                    })
-                                    .unwrap_or_default()
-                            } else {
-                                c.args_json.clone()
-                            };
-                            (module, tool, args)
-                        })
-                        .collect();
-                    // 调度：**连续**声明可并发的调用合成一批并发跑，其余各自独占（写入类因此是批次之间的屏障）。
-                    // 结果按原始下标返回，随后一律按原序回填——并发只影响执行，不影响上下文里的顺序。
-                    note_unauthorized(ctx, &plan, sink);
-                    let done = if user_stopped {
-                        refused_batch(&plan)
-                    } else {
-                        run_batch(ctx, &plan, confirms.as_mut(), ask, cancel.as_ref(), sink)
-                    };
-                    // 先按原序把工具行建好（执行已经做完），再让**唯一那处**构造函数产出这一回复的消息：
-                    // 实时与重建走同一个函数，"重建上下文与实时一致"因此是结构保证的。
-                    let reply_text = reply.text.clone();
-                    let views: Vec<ToolCallView> = calls
-                        .iter()
-                        .enumerate()
-                        .map(|(i, c)| {
-                            let (label, outcome, read) = done[i].clone();
-                            ToolCallView {
-                                speaker: speaker.to_string(),
-                                module: label,
-                                name: plan[i].1.clone(),
-                                ok: outcome.ok,
-                                args: plan[i].2.clone(),
-                                output: outcome.output,
-                                call_id: c.id.clone(),
-                                reply: reply_id,
-                                read,
-                            }
-                        })
-                        .collect();
-                    let msgs_of = reply_msgs(ctx.mode, &reply_text, &views);
-                    for m in &msgs_of {
-                        msgs.push(m.clone());
-                    }
-                    for (i, view) in views.into_iter().enumerate() {
-                        on_tool(&view);
-                        push_round!(Round {
+        if mode == crate::capabilities::llm::api::ToolMode::Native
+            && let Some(ctx) = tools.as_deref_mut()
+        {
+            // ① 有原生调用：逐个执行，各成一条工具行；助手消息如实记下"它调了什么"（回放与下一轮都看得到）
+            if !calls.is_empty() {
+                // 先定好每个调用落在哪个工具、参数是什么（patch 的正文在 body 参数里，
+                // 原生协议要求参数是 JSON 对象；转义交给供应商的解码器）。
+                let plan: Vec<(Option<String>, String, String)> = calls
+                    .iter()
+                    .map(|c| {
+                        let (module, tool) = decls
+                            .wire
+                            .get(&c.name)
+                            .cloned()
+                            .unwrap_or((None, c.name.clone()));
+                        let args = if crate::capabilities::tools::api::is_freeform(&tool) {
+                            serde_json::from_str::<serde_json::Value>(&c.args_json)
+                                .ok()
+                                .and_then(|v| {
+                                    v.get("body")
+                                        .and_then(|b| b.as_str())
+                                        .map(|s| s.to_string())
+                                })
+                                .unwrap_or_default()
+                        } else {
+                            c.args_json.clone()
+                        };
+                        (module, tool, args)
+                    })
+                    .collect();
+                // 调度：**连续**声明可并发的调用合成一批并发跑，其余各自独占（写入类因此是批次之间的屏障）。
+                // 结果按原始下标返回，随后一律按原序回填——并发只影响执行，不影响上下文里的顺序。
+                note_unauthorized(ctx, &plan, sink);
+                let done = if user_stopped {
+                    refused_batch(&plan)
+                } else {
+                    run_batch(ctx, &plan, confirms.as_mut(), ask, cancel.as_ref(), sink)
+                };
+                // 先按原序把工具行建好（执行已经做完），再让**唯一那处**构造函数产出这一回复的消息：
+                // 实时与重建走同一个函数，"重建上下文与实时一致"因此是结构保证的。
+                let reply_text = reply.text.clone();
+                let views: Vec<ToolCallView> = calls
+                    .iter()
+                    .enumerate()
+                    .map(|(i, c)| {
+                        let (label, outcome, read) = done[i].clone();
+                        ToolCallView {
+                            speaker: speaker.to_string(),
+                            module: label,
+                            name: plan[i].1.clone(),
+                            ok: outcome.ok,
+                            args: plan[i].2.clone(),
+                            output: outcome.output,
+                            call_id: c.id.clone(),
                             reply: reply_id,
-                            // 正文只挂在本回复的第一条工具行上（只显示一条，不重复）
-                            text: if i == 0 {
-                                reply_text.clone()
-                            } else {
-                                String::new()
-                            },
-                            reasoning: std::mem::take(&mut reasoning),
-                            text_msgs: if i == 0 {
-                                vec![msgs_of[0].clone()]
-                            } else {
-                                Vec::new()
-                            },
-                            // 助手消息正文 = 这一回复的原文（每条回复只带一份）
-                            raw: if i == 0 {
-                                reply_text.clone()
-                            } else {
-                                String::new()
-                            },
-                            tool: Some(ToolRun {
-                                view,
-                                msgs: vec![msgs_of[i + 1].clone()],
-                            }),
-                            finish: finish.clone(),
-                            error: None,
-                            verb: None,
-                            degraded: false,
-                        });
-                    }
-                    continue;
+                            read,
+                        }
+                    })
+                    .collect();
+                let msgs_of = reply_msgs(ctx.mode, &reply_text, &views);
+                for m in &msgs_of {
+                    msgs.push(m.clone());
                 }
-                // ② 没有原生调用却写了信封：**不执行**（两套形态互斥），但也不静默丢掉意图
-                {
-                    if let Some(inv) = reply.tools.first().cloned() {
-                        let view = ToolCallView {
+                for (i, view) in views.into_iter().enumerate() {
+                    on_tool(&view);
+                    push_round!(Round {
+                        reply: reply_id,
+                        // 正文只挂在本回复的第一条工具行上（只显示一条，不重复）
+                        text: if i == 0 {
+                            reply_text.clone()
+                        } else {
+                            String::new()
+                        },
+                        reasoning: std::mem::take(&mut reasoning),
+                        text_msgs: if i == 0 {
+                            vec![msgs_of[0].clone()]
+                        } else {
+                            Vec::new()
+                        },
+                        // 助手消息正文 = 这一回复的原文（每条回复只带一份）
+                        raw: if i == 0 {
+                            reply_text.clone()
+                        } else {
+                            String::new()
+                        },
+                        tool: Some(ToolRun {
+                            view,
+                            msgs: vec![msgs_of[i + 1].clone()],
+                        }),
+                        finish: finish.clone(),
+                        error: None,
+                        verb: None,
+                        degraded: false,
+                    });
+                }
+                continue;
+            }
+            // ② 没有原生调用却写了信封：**不执行**（两套形态互斥），但也不静默丢掉意图
+            {
+                if let Some(inv) = reply.tools.first().cloned() {
+                    let view = ToolCallView {
                             speaker: speaker.to_string(),
                             module: inv.module.clone().unwrap_or_default(),
                             name: inv.name.clone(),
@@ -530,29 +526,28 @@ pub fn converse_with(
                             reply: reply_id,
                             read: None,
                         };
-                        on_tool(&view);
-                        // 这条没有合法原生 id（模型是手写的信封）：走文本形状，不能发 role=tool。
-                        let msgs_of = reply_msgs(mode, &raw, std::slice::from_ref(&view));
-                        for m in &msgs_of {
-                            msgs.push(m.clone());
-                        }
-                        push_round!(Round {
-                            reply: reply_id,
-                            text: reply.text.clone(),
-                            reasoning,
-                            text_msgs: vec![msgs_of[0].clone()],
-                            raw: raw.clone(),
-                            tool: Some(ToolRun {
-                                view,
-                                msgs: vec![msgs_of[1].clone()],
-                            }),
-                            finish: finish.clone(),
-                            error: None,
-                            verb: None,
-                            degraded: false,
-                        });
-                        continue;
+                    on_tool(&view);
+                    // 这条没有合法原生 id（模型是手写的信封）：走文本形状，不能发 role=tool。
+                    let msgs_of = reply_msgs(mode, &raw, std::slice::from_ref(&view));
+                    for m in &msgs_of {
+                        msgs.push(m.clone());
                     }
+                    push_round!(Round {
+                        reply: reply_id,
+                        text: reply.text.clone(),
+                        reasoning,
+                        text_msgs: vec![msgs_of[0].clone()],
+                        raw: raw.clone(),
+                        tool: Some(ToolRun {
+                            view,
+                            msgs: vec![msgs_of[1].clone()],
+                        }),
+                        finish: finish.clone(),
+                        error: None,
+                        verb: None,
+                        degraded: false,
+                    });
+                    continue;
                 }
             }
         }
@@ -817,10 +812,10 @@ pub fn build_round_lines(
         None => text_line(&mut reasoning, &mut out),
     }
     // 助手消息原文是**回复级事实**：只挂在该回复的首行（有正文时是正文行，纯工具轮是工具行）。
-    if !round.raw.is_empty() {
-        if let Some(first) = out.first_mut() {
-            first.raw = round.raw.clone();
-        }
+    if !round.raw.is_empty()
+        && let Some(first) = out.first_mut()
+    {
+        first.raw = round.raw.clone();
     }
     out
 }

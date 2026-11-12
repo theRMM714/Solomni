@@ -94,5 +94,5 @@ use view::*;
 pub(crate) use flows::eof_stop;
 #[cfg(test)]
 pub(crate) use gate::{
-    create_session_action, pick_agents, pick_option, split_names, waiting_lines, NO_AGENTS,
+    NO_AGENTS, create_session_action, pick_agents, pick_option, split_names, waiting_lines,
 };

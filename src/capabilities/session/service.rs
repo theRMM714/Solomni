@@ -316,7 +316,7 @@ pub fn core_operation(
                     "没有调用 {}（核心操作必须走工具调用）：{}",
                     tool,
                     head_chars(&done.raw, 200)
-                ))
+                ));
             }
         };
         let readonly: Vec<(String, String, String)> = calls

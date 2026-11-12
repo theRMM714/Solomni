@@ -8,7 +8,7 @@
 use crate::capabilities::residents::api::Operation;
 use crate::capabilities::residents::ports::{LaunchSpec, ServiceAdapter, ServiceInstance};
 use crate::kernel::ports::{Session, SessionHost, SessionSpec};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 
 /// 目的：本适配器在 module.yaml 的 `services.<名>.adapter` 里用的 id。

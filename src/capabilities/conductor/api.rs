@@ -172,24 +172,22 @@ impl EventBus {
             .collect();
         let mut start = 0usize;
         for (i, v) in on_bus.iter().enumerate() {
-            if let Ok(k) = serde_json::to_string(v) {
-                if let Some(n) = left.get_mut(&k) {
-                    if *n > 0 {
-                        *n -= 1;
-                        start = i + 1;
-                    }
-                }
+            if let Ok(k) = serde_json::to_string(v)
+                && let Some(n) = left.get_mut(&k)
+                && *n > 0
+            {
+                *n -= 1;
+                start = i + 1;
             }
         }
         let mut tail = Vec::new();
         for v in on_bus.drain(..).skip(start) {
-            if let Ok(k) = serde_json::to_string(&v) {
-                if let Some(n) = left.get_mut(&k) {
-                    if *n > 0 {
-                        *n -= 1;
-                        continue;
-                    }
-                }
+            if let Ok(k) = serde_json::to_string(&v)
+                && let Some(n) = left.get_mut(&k)
+                && *n > 0
+            {
+                *n -= 1;
+                continue;
             }
             tail.push(v);
         }

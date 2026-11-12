@@ -18,11 +18,7 @@ pub(super) fn fence_boundary_note(
         return None;
     }
     let net = if net_enforced {
-        if spec.net {
-            "开"
-        } else {
-            "关"
-        }
+        if spec.net { "开" } else { "关" }
     } else {
         "未生效"
     };

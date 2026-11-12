@@ -5,9 +5,9 @@
 
 use super::builders::{RecordingRunner, SilentRunner};
 use super::doubles::{
-    abs, module_of, FakeCatalog, InMemoryHistory, InMemoryPackages, InMemorySettings,
-    InMemorySysIo, InMemoryWorkStore, InMemoryWorkspace, NoFenceHost, RecordingFence,
-    ScriptGateway, SharedScript, TestPrompts, VecSource,
+    FakeCatalog, InMemoryHistory, InMemoryPackages, InMemorySettings, InMemorySysIo,
+    InMemoryWorkStore, InMemoryWorkspace, NoFenceHost, RecordingFence, ScriptGateway, SharedScript,
+    TestPrompts, VecSource, abs, module_of,
 };
 use crate::capabilities::llm::api::{Channel, Chat, CompleteOpts, Msg};
 use crate::capabilities::llm::ports::{ChatGateway, ModelCatalog};
@@ -132,10 +132,11 @@ fn chat_gateway_double_scripts_member_and_core_channels_separately() {
         model: "m".to_string(),
     };
     let mut c = gw.member_channel(&channel, "a");
-    assert!(c
-        .complete(&[], CompleteOpts::plain(false), &mut |_| true)
-        .raw
-        .contains("甲"));
+    assert!(
+        c.complete(&[], CompleteOpts::plain(false), &mut |_| true)
+            .raw
+            .contains("甲")
+    );
     // 未登记的 agent：脚本替身给一条兜底脚本（不是 panic，也不是空串）。
     let mut c2 = gw.member_channel(&channel, "没登记");
     assert!(
@@ -423,9 +424,10 @@ fn work_store_double_streams_assets_and_rejects_oversize_or_mismatch() {
         hash
     );
     let bad_cross = content_hash(b"different");
-    assert!(s
-        .copy_under_to_under(&root, "clip.bin", &lost, "x", &bad_cross)
-        .is_err());
+    assert!(
+        s.copy_under_to_under(&root, "clip.bin", &lost, "x", &bad_cross)
+            .is_err()
+    );
     assert!(s.scan_under(&lost, "x", None).unwrap().is_none());
 
     let bad = content_hash(b"different");

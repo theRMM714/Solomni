@@ -28,12 +28,13 @@ fn native_model_save_is_gated_by_measurement_but_envelope_is_not() {
             crate::capabilities::llm::api::ToolMode::Envelope,
         ))
         .expect("信封形态不需要实测");
-    assert!(ops
-        .registry
-        .models()
-        .expect("读模型")
-        .iter()
-        .any(|m| m.id == "env-model"));
+    assert!(
+        ops.registry
+            .models()
+            .expect("读模型")
+            .iter()
+            .any(|m| m.id == "env-model")
+    );
     // 原生：替身没有真实供应商，实测不能给出明确结论 → 不保存。
     let err = ops
         .registry
@@ -253,15 +254,16 @@ fn module_tools_are_actions_users_can_run_directly() {
     assert!(err.contains("用户直接调用"), "{}", err);
 
     // 清单里没有的模块工具如实拒绝。
-    assert!(ops
-        .actions
-        .act(ActionCall {
-            id: "module.nope.x".to_string(),
-            args: serde_json::json!({}),
-            caller: Caller::User,
-            out: Output::Final,
-        })
-        .is_err());
+    assert!(
+        ops.actions
+            .act(ActionCall {
+                id: "module.nope.x".to_string(),
+                args: serde_json::json!({}),
+                caller: Caller::User,
+                out: Output::Final,
+            })
+            .is_err()
+    );
 }
 
 #[test]
@@ -302,9 +304,10 @@ fn registry_actions_are_user_only_and_go_through_the_dispatcher() {
     assert!(err.contains("不接受这个调用者"), "{}", err);
     // 目录里对角色也不列出它们。
     let cat = ops.actions.catalog(&role, None).expect("动作目录");
-    assert!(!cat
-        .iter()
-        .any(|a| a.id.starts_with("upsert_") || a.id == "set_settings"));
+    assert!(
+        !cat.iter()
+            .any(|a| a.id.starts_with("upsert_") || a.id == "set_settings")
+    );
 }
 
 #[test]

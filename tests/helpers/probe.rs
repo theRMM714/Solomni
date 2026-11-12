@@ -255,10 +255,10 @@ pub fn verdict_is_env_unavailable(verdict: &str) -> bool {
 ///   平台差异如实处理：Linux / macOS 常见的是 python3，Windows 常见的是 python。
 pub fn python_command(script: &str) -> Option<String> {
     for name in ["python", "python3"] {
-        if let Ok(o) = Command::new(name).arg("-c").arg("print(1)").output() {
-            if o.status.success() {
-                return Some(format!("{} -c \"{}\"", name, script));
-            }
+        if let Ok(o) = Command::new(name).arg("-c").arg("print(1)").output()
+            && o.status.success()
+        {
+            return Some(format!("{} -c \"{}\"", name, script));
         }
     }
     None

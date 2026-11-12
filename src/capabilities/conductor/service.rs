@@ -198,7 +198,7 @@ mod flow;
 pub(crate) mod guest_job;
 mod history;
 pub(crate) mod persist;
-pub(crate) use persist::{persist_events, Persister, SYSTEM_SID_SUGGEST};
+pub(crate) use persist::{Persister, SYSTEM_SID_SUGGEST, persist_events};
 mod suggest;
 #[cfg(test)]
 pub(crate) use history::SessionDelete;
@@ -598,7 +598,7 @@ impl Conductor {
                 return Err(format!(
                     "压缩只支持单 agent 会话（{} 不在世或不是单 agent）",
                     sid
-                ))
+                ));
             }
         };
         // 手动压缩也要读**当前**设置：用户刚把保留比例调低，不该等会话重建才生效。

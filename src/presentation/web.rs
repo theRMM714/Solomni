@@ -127,7 +127,7 @@ mod interrupt {
 
     #[cfg(windows)]
     mod imp {
-        use super::{set, Arc, AtomicBool};
+        use super::{Arc, AtomicBool, set};
         use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;
 
         unsafe extern "system" fn handler(_ctrl: u32) -> i32 {
@@ -157,7 +157,7 @@ mod interrupt {
 
     #[cfg(unix)]
     mod imp {
-        use super::{set, Arc, AtomicBool};
+        use super::{Arc, AtomicBool, set};
 
         extern "C" fn handler(_sig: libc::c_int) {
             set();
@@ -356,12 +356,12 @@ pub(crate) fn route(
                 // 其余给一份结构化结果（{ok:true} / {sid,agents} …）。
                 Ok(Acted::Done(v)) => {
                     // 设置保存后把最新的 storage 策略推给存储面（不重启；下次构建/回收生效）。
-                    if id == "set_settings" {
-                        if let Ok(s) = ops.registry.settings() {
-                            ops.storage.set_policy(
-                                crate::capabilities::storage::api::StoragePolicy::from(&s.storage),
-                            );
-                        }
+                    if id == "set_settings"
+                        && let Ok(s) = ops.registry.settings()
+                    {
+                        ops.storage.set_policy(
+                            crate::capabilities::storage::api::StoragePolicy::from(&s.storage),
+                        );
                     }
                     // 全局沙箱策略变了：先把回包发出去，再整体重启（启动器按退出码拉起）。
                     if v.get("restart").and_then(|b| b.as_bool()) == Some(true) {

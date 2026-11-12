@@ -831,10 +831,12 @@ pub(crate) fn run_state_gates_dispatch_and_survives_stop_close() {
         RunState::Closed
     );
     assert!(bridge.send(&sid, &msg).unwrap_err().contains("已关闭"));
-    assert!(bridge
-        .control(&sid, d::ControlAction::Continue, "想反悔")
-        .unwrap_err()
-        .contains("已关闭"));
+    assert!(
+        bridge
+            .control(&sid, d::ControlAction::Continue, "想反悔")
+            .unwrap_err()
+            .contains("已关闭")
+    );
 
     // 继续：解冻后派发放行（这条没在等门，接着走的是"继续"）。
     let (w2, _) = ops
@@ -1101,11 +1103,12 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
         model: None,
         chara: String::new(),
     }];
-    assert!(ops
-        .sessions
-        .create_work(bad)
-        .unwrap_err()
-        .contains("不接受 agent 名单"));
+    assert!(
+        ops.sessions
+            .create_work(bad)
+            .unwrap_err()
+            .contains("不接受 agent 名单")
+    );
     assert!(
         ops.history.open("w-user-proxy-2").is_err(),
         "拒绝后不留半成品"

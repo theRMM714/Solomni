@@ -61,10 +61,9 @@ pub fn lock_held(path: &Path) -> bool {
         .skip_while(|w| *w != "pid")
         .nth(1)
         .and_then(|s| s.parse::<u32>().ok())
+        && crate::kernel::detail::procs::alive(pid)
     {
-        if crate::kernel::detail::procs::alive(pid) {
-            return true;
-        }
+        return true;
     }
     meta.modified()
         .ok()

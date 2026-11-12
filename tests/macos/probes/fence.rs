@@ -193,8 +193,8 @@ fn verify_separates_env_unavailable_from_a_rejected_profile() {
 #[test]
 fn env_unavailable_degrades_and_still_runs_the_command() {
     use crate::probe::{
-        degraded_by_env, job_json, run_launcher_env, verdict_is_broken, verdict_is_env_unavailable,
-        verify_fence_with, SELFCHECK_FAIL_FLAG,
+        SELFCHECK_FAIL_FLAG, degraded_by_env, job_json, run_launcher_env, verdict_is_broken,
+        verdict_is_env_unavailable, verify_fence_with,
     };
     let dir = scratch("fence-env-unavailable");
     let spec = job_json(std::slice::from_ref(&dir), &dir, false);

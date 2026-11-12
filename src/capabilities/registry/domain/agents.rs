@@ -313,7 +313,7 @@ pub fn pick(agents: &Agents, names: &[String]) -> Result<Vec<AgentView>, String>
                         .map(|a| a.name.as_str())
                         .collect::<Vec<_>>()
                         .join(" · ")
-                ))
+                ));
             }
         }
     }

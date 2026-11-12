@@ -607,10 +607,10 @@ impl Conductor {
         let (spawned, _) = self.spawn_ready_nodes(sid);
         out.extend(spawned);
         // 会话终结后移出中心（前端据 Ended 回收）。
-        if let Some(Session::Collab(c)) = self.sessions.get(sid) {
-            if c.is_done() {
-                self.sessions.remove(sid);
-            }
+        if let Some(Session::Collab(c)) = self.sessions.get(sid)
+            && c.is_done()
+        {
+            self.sessions.remove(sid);
         }
         self.record_events(sid, &mut out);
         Ok(out)

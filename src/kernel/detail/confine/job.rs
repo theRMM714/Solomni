@@ -3,8 +3,8 @@
 //! 不管：围栏怎么装、命令怎么跑——平台差异在 `linux.rs` / `macos.rs` / `windows/` / `other.rs`。
 //! 联动：由 `confine.rs` 门面与根/探针的 `--fence-run` 消费；作业 JSON 的字段与 `contracts/fence.rs` 的 `FenceSpec` 同步。
 
-use super::backend;
 use super::FENCE_FLAG;
+use super::backend;
 use crate::kernel::api::FenceSpec;
 use std::path::{Path, PathBuf};
 use std::process::Command;

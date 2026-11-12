@@ -698,7 +698,7 @@ pub(crate) fn module_and_service_params_share_one_header() {
 
 #[test]
 pub(crate) fn service_ops_are_scoped_to_the_agent_module_face() {
-    use crate::capabilities::session::api::{service_ops_for_modules, ServiceOp};
+    use crate::capabilities::session::api::{ServiceOp, service_ops_for_modules};
     let op = |tool: &str| ServiceOp {
         tool: tool.to_string(),
         service: "svc".to_string(),

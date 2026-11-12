@@ -9,8 +9,8 @@ use super::super::gated_ops;
 use crate::capabilities::conductor::api::Output;
 use crate::capabilities::conductor::api::SessionEvent;
 use crate::capabilities::session::api::OPT_BEGIN;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 #[test]

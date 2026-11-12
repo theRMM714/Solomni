@@ -214,7 +214,7 @@ impl ProcTools {
                     match gate.decide(&case) {
                         FenceVerdict::Unfenced { note: n } => note = Some(n),
                         FenceVerdict::Refused { output } => {
-                            return RunOutcome { ok: false, output }
+                            return RunOutcome { ok: false, output };
                         }
                     }
                 }
@@ -243,13 +243,14 @@ impl ProcTools {
         let home: Option<std::path::PathBuf> = None;
         // 全局沙箱要求：机制不可用且本进程未同意降级时，工具**不执行**。
         // shell 严格模式不看本进程降级：它的围栏要求恒为真，由守门进程按 FENCE_FAILED 拒绝。
-        if !plan.strict && unfenced_note.is_none() {
-            if let Err(why) = self.mode.check(fence, prepared) {
-                return RunOutcome {
-                    ok: false,
-                    output: why,
-                };
-            }
+        if !plan.strict
+            && unfenced_note.is_none()
+            && let Err(why) = self.mode.check(fence, prepared)
+        {
+            return RunOutcome {
+                ok: false,
+                output: why,
+            };
         }
         let policy = if plan.strict {
             crate::kernel::api::FenceRunPolicy {
@@ -300,7 +301,7 @@ impl ProcTools {
                 return RunOutcome {
                     ok: false,
                     output: format!("工具进程启动失败：{}", e),
-                }
+                };
             }
         };
         // stdin 独立线程送参：参数再大也不与 stdout 读取互锁。
@@ -321,12 +322,12 @@ impl ProcTools {
         let mut timed_out = false;
         let mut cancelled = false;
         loop {
-            if let Some(flag) = plan.cancel {
-                if flag.load(std::sync::atomic::Ordering::Relaxed) {
-                    cancelled = true;
-                    kill_tree(&mut child);
-                    break;
-                }
+            if let Some(flag) = plan.cancel
+                && flag.load(std::sync::atomic::Ordering::Relaxed)
+            {
+                cancelled = true;
+                kill_tree(&mut child);
+                break;
             }
             match child.try_wait() {
                 Ok(Some(_)) => break,
@@ -389,7 +390,7 @@ impl ProcTools {
                 return RunOutcome {
                     ok: false,
                     output: e,
-                }
+                };
             }
         };
         let command = format!(

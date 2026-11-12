@@ -34,11 +34,7 @@ fn platform(path: &Path) -> Option<(u64, u64)> {
     let mut total = 0u64;
     let mut total_free = 0u64;
     let ok = unsafe { GetDiskFreeSpaceExW(wide.as_ptr(), &mut free, &mut total, &mut total_free) };
-    if ok == 0 {
-        None
-    } else {
-        Some((total, free))
-    }
+    if ok == 0 { None } else { Some((total, free)) }
 }
 
 #[cfg(not(any(unix, windows)))]

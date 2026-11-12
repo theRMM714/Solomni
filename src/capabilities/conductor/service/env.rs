@@ -218,10 +218,10 @@ impl Conductor {
             return self.permissions_for(meta);
         }
         let child_name = format!("{}--{}", meta.name, agent);
-        if let Ok(child) = self.history.meta(&child_name) {
-            if child.parent.as_deref() == Some(meta.name.as_str()) {
-                return self.permissions_for(&child);
-            }
+        if let Ok(child) = self.history.meta(&child_name)
+            && child.parent.as_deref() == Some(meta.name.as_str())
+        {
+            return self.permissions_for(&child);
         }
         self.permissions_for(meta)
     }

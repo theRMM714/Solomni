@@ -3,7 +3,7 @@
 //! 不管：QEMU 进程本身与共享内存后端（detail/qemu.rs 按 SharePlan.needs_shared_mem 给）。
 //! 联动：实现 ports::ShareBackend；由组合根构造、service.rs 持有；只支持 Rust 版 virtiofsd（--shared-dir / --socket-path）。
 
-use crate::capabilities::vm::domain::guest::{sh_quote, GuestImage, GuestMount};
+use crate::capabilities::vm::domain::guest::{GuestImage, GuestMount, sh_quote};
 use crate::capabilities::vm::ports::{ShareBackend, ShareGuard, SharePlan};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -38,11 +38,7 @@ pub fn find_virtiofsd(registered: Option<&str>) -> Option<PathBuf> {
     match registered.map(str::trim) {
         Some(p) if !p.is_empty() => {
             let path = PathBuf::from(p);
-            if path.is_file() {
-                Some(path)
-            } else {
-                None
-            }
+            if path.is_file() { Some(path) } else { None }
         }
         _ => crate::kernel::detail::host_probe::find_exe(VIRTIOFSD_BIN),
     }

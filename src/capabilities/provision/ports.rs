@@ -15,7 +15,7 @@ pub trait Fetcher: Send + Sync {
 
     /// 目的：把 URL 下到目标文件——选源后带续传；半截文件留作下次断点。
     fn download(&self, url: &str, dest: &Path, on_line: &mut dyn FnMut(&str))
-        -> Result<(), String>;
+    -> Result<(), String>;
 }
 
 /// 目的：宿主文件系统的少数落点操作——编排只表达"建这个目录 / 删这个文件"，具体错误文案在适配层。

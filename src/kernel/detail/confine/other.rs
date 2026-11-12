@@ -3,7 +3,7 @@
 //! 不管：文件系统围栏——绝不假装有。
 //! 联动：能力等级由启动报告如实给出；调用方见 confine.rs。
 
-use super::{shell_command, Capability, FenceVerdict, FENCE_FAILED};
+use super::{Capability, FENCE_FAILED, FenceVerdict, shell_command};
 use crate::kernel::api::FenceSpec;
 
 pub fn capability() -> Capability {

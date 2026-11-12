@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::capabilities::provision::detail::host::{ensure_executable, run_tool, symlink};
-use crate::capabilities::provision::domain::{link, under, Dep};
+use crate::capabilities::provision::domain::{Dep, link, under};
 use crate::capabilities::provision::ports::{Fetcher, GuestImage};
 
 /// 目的：ext4 基线镜像的适配器——下载（内核 / QGA）经 Fetcher，落盘与工具链在本文件。

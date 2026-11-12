@@ -18,11 +18,11 @@ pub fn build(root: &std::path::Path, args: &[String], i: usize) -> i32 {
         return 2;
     }
     let guest = args.iter().find_map(|a| a.strip_prefix("--guest="));
-    if let Some(g) = guest {
-        if g.trim().is_empty() {
-            eprintln!("[构建] --guest 要给虚拟根名（`.vm/guest/<名>`）");
-            return 2;
-        }
+    if let Some(g) = guest
+        && g.trim().is_empty()
+    {
+        eprintln!("[构建] --guest 要给虚拟根名（`.vm/guest/<名>`）");
+        return 2;
     }
     let Some(module) = module_by_id(root, &id) else {
         eprintln!("[构建] 没有模块「{}」（清单被拒收的话见 --doctor）", id);

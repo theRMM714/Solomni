@@ -4,15 +4,16 @@
 //! 联动：`api::Workspace` 的唯一实现在 facade.rs，逐条转发到同级子模块；组合根注入两个端口适配器。
 
 use crate::capabilities::workspace::api::{
-    media_hint, Change, ChangeKind, FileVersion, MAX_ASSET_BYTES, VERSION_TEXT_LIMIT,
+    Change, ChangeKind, FileVersion, MAX_ASSET_BYTES, VERSION_TEXT_LIMIT, media_hint,
 };
-use crate::capabilities::workspace::domain::base::{stale_paths, BaseRef, CommitRefusal};
+use crate::capabilities::workspace::domain::base::{BaseRef, CommitRefusal, stale_paths};
 use crate::capabilities::workspace::domain::freshness::lines_changed;
 use crate::capabilities::workspace::domain::hash::{content_hash, is_content_hash};
 use crate::capabilities::workspace::domain::workstore::{
-    clean_rel, expand_paths, local_take_verdict, lost_rel, needs_backup, plan_commit, pull_verdict,
-    status_of, validate_paths, Commit, CommitAnchor, Conflict, ConflictAt, Index, LocalTakeVerdict,
-    Pending, PendingIndex, PullVerdict, Ref, RefKind, Source, StatusState, Tree, Unchanged,
+    Commit, CommitAnchor, Conflict, ConflictAt, Index, LocalTakeVerdict, Pending, PendingIndex,
+    PullVerdict, Ref, RefKind, Source, StatusState, Tree, Unchanged, clean_rel, expand_paths,
+    local_take_verdict, lost_rel, needs_backup, plan_commit, pull_verdict, status_of,
+    validate_paths,
 };
 use crate::capabilities::workspace::ports::{WorkStore, Workdirs};
 use std::collections::{BTreeMap, BTreeSet};
@@ -365,13 +366,13 @@ impl WorkspaceService {
         commit: &Commit,
         index: Option<&PendingIndex>,
     ) -> Result<(), String> {
-        if let Some(head) = self.store.head(store)? {
-            if head > commit.id {
-                return Err(format!(
-                    "待恢复提交 {} 小于当前 head {}，拒绝倒推共享区",
-                    commit.id, head
-                ));
-            }
+        if let Some(head) = self.store.head(store)?
+            && head > commit.id
+        {
+            return Err(format!(
+                "待恢复提交 {} 小于当前 head {}，拒绝倒推共享区",
+                commit.id, head
+            ));
         }
         for ch in &commit.changes {
             match ch.kind {
@@ -415,10 +416,10 @@ impl WorkspaceService {
         }
         // 指向已删提交的引用一并清掉，免得引用的活集合里留下悬空目标。
         for (name, r) in self.store.list_refs(store)? {
-            if let Some(t) = r.target {
-                if self.store.read_commit(store, t)?.is_none() {
-                    self.store.remove_ref(store, &name)?;
-                }
+            if let Some(t) = r.target
+                && self.store.read_commit(store, t)?.is_none()
+            {
+                self.store.remove_ref(store, &name)?;
             }
         }
         Ok(())

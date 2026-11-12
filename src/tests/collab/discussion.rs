@@ -30,10 +30,11 @@ pub(crate) fn discussion_full_agreement() {
             TurnOut::Stopped => panic!("不该停止"),
         }
     }
-    assert!(d
-        .transcript
-        .iter()
-        .any(|l| l.speaker == "m0" && l.verb == "agree"));
+    assert!(
+        d.transcript
+            .iter()
+            .any(|l| l.speaker == "m0" && l.verb == "agree")
+    );
 }
 
 #[test]

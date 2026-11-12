@@ -7,8 +7,8 @@ use crate::capabilities::builds::api::{Builds, Built, Target};
 use crate::capabilities::builds::ports::{BuildCache, BuildStates, BuiltRecord, SourceDigest};
 use crate::capabilities::modules::api::{BuildDecl, Module};
 use crate::capabilities::packages::api::{
-    build_packages, diagnose_text, plan_host_requests, requests_for, Facts, Library, Packages,
-    PinPolicy, PlannedPackage, Provider,
+    Facts, Library, Packages, PinPolicy, PlannedPackage, Provider, build_packages, diagnose_text,
+    plan_host_requests, requests_for,
 };
 use crate::capabilities::provision::api::Provision;
 use crate::capabilities::storage::api::Storage;
@@ -694,10 +694,10 @@ fn merged_packages<'a>(plans: impl Iterator<Item = &'a GuestPlan>) -> Vec<Planne
 fn product_entries(module: &Module) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for tool in module.manifest.tools.values() {
-        if let Some(entry) = crate::capabilities::modules::api::local_entry(&tool.command) {
-            if !out.iter().any(|x| x == entry) {
-                out.push(entry.to_string());
-            }
+        if let Some(entry) = crate::capabilities::modules::api::local_entry(&tool.command)
+            && !out.iter().any(|x| x == entry)
+        {
+            out.push(entry.to_string());
         }
     }
     out

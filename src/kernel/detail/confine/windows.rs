@@ -3,7 +3,7 @@
 //! 不管：祖先目录不用授**穿过**（容器令牌自带 SeChangeNotifyPrivilege）；例外是 shell 的 cwd = private 时给祖先只读属性（PowerShell 解析 cwd 需要），不递归、不继承、不授内容。
 //! 联动：授权与撤销由外层进程做（见 confine::prepare_fence），守门进程只按同一个名字派生同一个 SID；机制不可用时一律如实降级。
 
-use super::{shell_command, Capability, FencePrep, FenceVerdict, FENCE_FAILED};
+use super::{Capability, FENCE_FAILED, FencePrep, FenceVerdict, shell_command};
 use crate::kernel::api::FencePart;
 use crate::kernel::api::FenceSpec;
 use std::ffi::c_void;
@@ -58,7 +58,8 @@ pub(crate) const RIGHTS_STAT: u32 = 0x0000_0080;
 /// 目的：一次工具执行最多这么多进程（含 shell 与它拉起的子进程）。
 pub(crate) const MAX_PROCESSES: u32 = 32;
 
-extern "system" {
+// SAFETY: 只在 Windows 后端调用 advapi32 的导出函数；参数由本文件的 Dacl 构造保证有效。
+unsafe extern "system" {
     /// 递归给整棵树设 DACL：SDK 头文件在部分版本里标了废弃，但 advapi32 始终导出（本机已实测）。
     fn TreeSetNamedSecurityInfoW(
         object_name: *const u16,
@@ -128,10 +129,10 @@ fn self_check_scratch(sid: PSID, scratch: &Path) -> Result<(), String> {
     if let Err(e) = grant_verified(sid, scratch, RIGHTS_RO, false, false) {
         problems.push(format!("改不动目录 ACL：{}", e));
     }
-    if !bytes.is_empty() {
-        if let Err(e) = restore_sd(scratch, &bytes) {
-            problems.push(format!("自检目录还原失败：{}", e));
-        }
+    if !bytes.is_empty()
+        && let Err(e) = restore_sd(scratch, &bytes)
+    {
+        problems.push(format!("自检目录还原失败：{}", e));
     }
     if let Err(e) = std::fs::remove_dir_all(scratch) {
         problems.push(format!("删自检目录失败：{}", e));
@@ -277,14 +278,14 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
     let sid_text = sid_to_string(sid);
     // 容器临时目录：AppContainer 的 GetTempPath2 指到 %LOCALAPPDATA%\Packages\<容器名>\AC\Temp（不读 TMP/TEMP），
     // 不建它编译器连临时文件都写不了；先建后授权——它在 rw 之下，下面的递归 ACE 会覆盖到它，不必单列授权。
-    if let Some(temp) = container_temp_dir(spec) {
-        if let Err(e) = std::fs::create_dir_all(&temp) {
-            eprintln!(
-                "[围栏] 容器临时目录建不出来（{}）：{}（这次执行里用临时文件的命令会自己报错）",
-                temp.display(),
-                e
-            );
-        }
+    if let Some(temp) = container_temp_dir(spec)
+        && let Err(e) = std::fs::create_dir_all(&temp)
+    {
+        eprintln!(
+            "[围栏] 容器临时目录建不出来（{}）：{}（这次执行里用临时文件的命令会自己报错）",
+            temp.display(),
+            e
+        );
     }
     let todo = grant_targets(spec);
     for target in todo {
@@ -346,10 +347,10 @@ pub fn verify(spec: &FenceSpec, _command: &str) -> FenceVerdict {
     if let Err(e) = ensure_profile(&name) {
         return FenceVerdict::EnvUnavailable(format!("容器 profile 建不起来：{}", e));
     }
-    if spec.net {
-        if let Err(e) = internet_client_sid(true) {
-            return FenceVerdict::Broken(format!("internetClient 能力建不起来：{}", e));
-        }
+    if spec.net
+        && let Err(e) = internet_client_sid(true)
+    {
+        return FenceVerdict::Broken(format!("internetClient 能力建不起来：{}", e));
     }
     match container_sid(&name) {
         Ok(sid) => {

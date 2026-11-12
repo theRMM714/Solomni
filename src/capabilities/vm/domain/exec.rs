@@ -616,7 +616,7 @@ fn guest_requirement(root: &Path, guest: Option<&str>, probe: &dyn HostProbe) ->
                 met: false,
                 detail: why,
                 how: how.to_string(),
-            }
+            };
         }
     };
     if !probe.is_dir(&dir) {

@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::capabilities::provision::domain::{
-    host_target, install_identity, is_toolchain, join_rel, under, Dep, GuestProfile,
+    Dep, GuestProfile, host_target, install_identity, is_toolchain, join_rel, under,
 };
 use crate::capabilities::provision::ports::Ledger;
 
@@ -142,13 +142,13 @@ pub(crate) fn sync_toolchain_active(root: &Path, all: &[Dep]) -> Result<(), Stri
                 dep.id
             ));
         }
-        if let Some(want) = &spec.target {
-            if want != &target {
-                return Err(format!(
-                    "{}：工具链目标不符（清单 {}，当前 {}）",
-                    dep.id, want, target
-                ));
-            }
+        if let Some(want) = &spec.target
+            && want != &target
+        {
+            return Err(format!(
+                "{}：工具链目标不符（清单 {}，当前 {}）",
+                dep.id, want, target
+            ));
         }
         if !profile.contains(&spec.tool) {
             profile.push(spec.tool.clone());

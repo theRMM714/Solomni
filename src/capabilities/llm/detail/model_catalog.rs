@@ -3,7 +3,7 @@
 //! 不管：模型登记与持久化（在 registry）；端点候选逻辑（在 endpoint）。
 //! 联动：实现 ports::ModelCatalog；由 detail.rs 重导出 HttpModelCatalog 供组合根装配；端点规则见 detail/endpoint.rs。
 
-use super::endpoint::{memo_get, memo_set, models_candidates, resolve_candidates, Attempt, Memo};
+use super::endpoint::{Attempt, Memo, memo_get, memo_set, models_candidates, resolve_candidates};
 use super::http_agent::{finish_request, redact};
 use crate::capabilities::llm::ports::ModelCatalog;
 use crate::kernel::ports::Log;
@@ -92,10 +92,11 @@ pub fn parse_models(body: &str) -> Result<Vec<String>, String> {
     })?;
     let mut out: Vec<String> = Vec::new();
     for m in arr {
-        if let Some(id) = m.get("id").and_then(|x| x.as_str()) {
-            if !id.is_empty() && !out.iter().any(|x| x == id) {
-                out.push(id.to_string());
-            }
+        if let Some(id) = m.get("id").and_then(|x| x.as_str())
+            && !id.is_empty()
+            && !out.iter().any(|x| x == id)
+        {
+            out.push(id.to_string());
         }
     }
     if out.is_empty() {

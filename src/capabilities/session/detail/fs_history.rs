@@ -68,10 +68,10 @@ impl FsHistory {
             None
         }
         for e in std::fs::read_dir(&self.dir).ok()?.flatten() {
-            if e.path().is_dir() {
-                if let Some(found) = under(&e.path(), name) {
-                    return Some(found);
-                }
+            if e.path().is_dir()
+                && let Some(found) = under(&e.path(), name)
+            {
+                return Some(found);
             }
         }
         None

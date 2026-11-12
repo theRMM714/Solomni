@@ -5,7 +5,7 @@
 
 #[allow(unused_imports)] // 入站面：其它能力与测试都经这里取类型
 pub use crate::capabilities::permission::domain::permission::{
-    hit, normalize, validate_defaults, validate_entry, validate_layer, CallScope, Decision,
-    DecisionEdit, Decisions, Effect, PermissionDefaults, PermissionLayer, PermissionSet, ProfileId,
-    ProfileSpec, Reach, ReachSet, ScopeMode, SessionSandbox, SharedEdit, SharedScope,
+    CallScope, Decision, DecisionEdit, Decisions, Effect, PermissionDefaults, PermissionLayer,
+    PermissionSet, ProfileId, ProfileSpec, Reach, ReachSet, ScopeMode, SessionSandbox, SharedEdit,
+    SharedScope, hit, normalize, validate_defaults, validate_entry, validate_layer,
 };

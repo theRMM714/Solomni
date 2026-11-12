@@ -172,7 +172,7 @@ impl WorkHandler {
                 return outcome(
                     false,
                     "work_versions 要给出一个文件路径（path）".to_string(),
-                )
+                );
             }
         };
         if let Err(e) = check_readable(&self.permissions, std::slice::from_ref(&path)) {
@@ -204,13 +204,13 @@ impl WorkHandler {
                 return outcome(
                     false,
                     format!("take 只认 upstream 或 local，收到：{}", other),
-                )
+                );
             }
             None => {
                 return outcome(
                     false,
                     "work_resolve 要给出 take（upstream = 取主副本，local = 保留本地）".to_string(),
-                )
+                );
             }
         };
         if let Err(e) = check_readable(&self.permissions, &paths) {
@@ -266,10 +266,10 @@ impl WorkHandler {
                 Err(e) => outcome(false, e),
             };
         }
-        if let Some(p) = &path {
-            if let Err(e) = check_readable(&self.permissions, std::slice::from_ref(p)) {
-                return outcome(false, e);
-            }
+        if let Some(p) = &path
+            && let Err(e) = check_readable(&self.permissions, std::slice::from_ref(p))
+        {
+            return outcome(false, e);
         }
         match self
             .workspace

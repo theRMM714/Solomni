@@ -7,7 +7,7 @@ use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{
     Completion, ProbeOutcome, ReplayReport, ReplayShape, ToolDecl,
 };
-use crate::capabilities::llm::detail::endpoint::{chat_candidates, resolve_candidates, Attempt};
+use crate::capabilities::llm::detail::endpoint::{Attempt, chat_candidates, resolve_candidates};
 use crate::kernel::ports::Log;
 
 /// 探针工具：无参数、只有说明——目的是让模型有东西可调。
@@ -189,13 +189,13 @@ pub(crate) fn probe_replay_with(
         });
     }
     // 基线不通 = 通道本身的问题：后面的结论没有意义，如实报"测不了"，不把它们当"形状被拒"。
-    if let Some(first) = shapes.first() {
-        if !first.accepted {
-            return Err(format!(
-                "通道本身就没打通（连现在线上在用的文本回放形状都失败）：{}",
-                first.detail
-            ));
-        }
+    if let Some(first) = shapes.first()
+        && !first.accepted
+    {
+        return Err(format!(
+            "通道本身就没打通（连现在线上在用的文本回放形状都失败）：{}",
+            first.detail
+        ));
     }
     Ok(ReplayReport { shapes })
 }

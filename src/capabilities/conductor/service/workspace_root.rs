@@ -27,15 +27,14 @@ pub(crate) fn policy(path: &Path, tier: Tier) -> Result<(), String> {
     if tier == Tier::Host && crate::kernel::api::is_network_path(path) {
         return Err(host_network(path));
     }
-    if crate::kernel::api::is_unc(path) {
-        if let Some((_, _, rest)) = crate::kernel::api::unc_parts(path) {
-            if rest.as_os_str().is_empty() {
-                return Err(format!(
-                    "工作区不能是网络共享的根目录：{}（请绑到共享下的具体目录）",
-                    path.display()
-                ));
-            }
-        }
+    if crate::kernel::api::is_unc(path)
+        && let Some((_, _, rest)) = crate::kernel::api::unc_parts(path)
+        && rest.as_os_str().is_empty()
+    {
+        return Err(format!(
+            "工作区不能是网络共享的根目录：{}（请绑到共享下的具体目录）",
+            path.display()
+        ));
     }
     if path.parent().is_none() {
         return Err("工作区不能是文件系统根目录".to_string());

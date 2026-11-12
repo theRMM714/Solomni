@@ -6,7 +6,7 @@
 pub(crate) use super::doubles::*;
 
 pub use crate::capabilities::collab::service::discussion::{
-    Discussion, Member, TurnOut, MAX_ROUNDS,
+    Discussion, MAX_ROUNDS, Member, TurnOut,
 };
 
 pub use crate::capabilities::llm::api::Channel;

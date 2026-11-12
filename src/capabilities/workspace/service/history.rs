@@ -5,8 +5,8 @@
 
 use super::*;
 use crate::capabilities::workspace::api::{
-    media_hint, ChangeKind, ChangeView, CommitDetail, CommitFileView, CommitSummary, StatusEntry,
-    StatusReport, VersionView, WorkLog, WorkLogEntry, VERSION_TEXT_LIMIT,
+    ChangeKind, ChangeView, CommitDetail, CommitFileView, CommitSummary, StatusEntry, StatusReport,
+    VERSION_TEXT_LIMIT, VersionView, WorkLog, WorkLogEntry, media_hint,
 };
 
 impl WorkspaceService {

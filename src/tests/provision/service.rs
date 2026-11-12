@@ -9,7 +9,7 @@ use crate::capabilities::provision::detail::guest_image::*;
 use crate::capabilities::provision::detail::host::RealHost;
 use crate::capabilities::provision::detail::install::HostInstallers;
 use crate::capabilities::provision::detail::ledger::{
-    probe_present, read_ledger, record_installed, FileLedger,
+    FileLedger, probe_present, read_ledger, record_installed,
 };
 use crate::capabilities::provision::detail::procs::BookProcs;
 use crate::capabilities::provision::domain::*;
@@ -624,12 +624,13 @@ fn install_file_uses_probe_name() {
         None,
     )
     .expect("单文件安装");
-    assert!(root
-        .join(".vm")
-        .join("guest")
-        .join("debian")
-        .join("rootfs.qcow2")
-        .is_file());
+    assert!(
+        root.join(".vm")
+            .join("guest")
+            .join("debian")
+            .join("rootfs.qcow2")
+            .is_file()
+    );
     let _ = fs::remove_dir_all(&root);
 }
 

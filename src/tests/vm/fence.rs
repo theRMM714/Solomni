@@ -294,7 +294,7 @@ pub(crate) fn stable_roots_cover_the_work_tree_and_module_tree() {
 /// 约束：同方言与跨方言各验一次（跨方言 = 本机宿主 → 另一侧方言的 guest，走镜像根）。
 #[test]
 pub(crate) fn guest_access_roots_are_all_covered_by_stable_mounts() {
-    use crate::capabilities::vm::api::{mounts_from, ExecPlan, PathBridge};
+    use crate::capabilities::vm::api::{ExecPlan, PathBridge, mounts_from};
     use crate::capabilities::vm::domain::guest::{GuestAccess, GuestOs};
     use crate::capabilities::vm::domain::paths::PathDialect;
     use crate::capabilities::workspace::api::{Sandbox, Sandboxes};

@@ -3,7 +3,7 @@
 //! 不管：真实 ACL 的写与撤（Windows 的 confine 探针）、围栏在真机上的行为（`--fence-live` 的 ProcTools 用例）。
 //! 联动：判据写进 docs/kernel/README.md 的「围栏落点：必要与可选」；卡片契约见 docs/session/session-model.md 的「请用户裁决」。
 
-use crate::capabilities::tools::domain::fence::{fence_ask, OPT_FENCE_ABORT, OPT_FENCE_UNFENCED};
+use crate::capabilities::tools::domain::fence::{OPT_FENCE_ABORT, OPT_FENCE_UNFENCED, fence_ask};
 use crate::capabilities::tools::service::fence::ToolFenceGate;
 use crate::kernel::api::{Ask, AskOutcome, FenceBlocked, FencePart};
 use crate::kernel::detail::confine::FencePrep;

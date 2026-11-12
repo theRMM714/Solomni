@@ -25,7 +25,7 @@ pub(crate) fn entry_candidates_follow_the_shell_resolution_of_the_target() {
 }
 #[test]
 pub(crate) fn build_decl_is_validated_and_survives_the_scan() {
-    use crate::capabilities::modules::api::{check_build, BuildDecl};
+    use crate::capabilities::modules::api::{BuildDecl, check_build};
     let mut m = module_of("idx").manifest;
     assert!(check_build(&m).is_ok(), "没写 build 段是合法的");
     m.build = Some(BuildDecl {
@@ -266,8 +266,9 @@ pub(crate) fn overrides_survive_a_reload() {
 pub(crate) fn ops_exposes_enablement_reads() {
     let (_handle, ops) = crate::tests::ops_with(vec![module_of("a")], vec!["[]"]);
     assert!(ops.modules.module_enabled("a").expect("读模块启用"));
-    assert!(!ops
-        .modules
-        .service_enabled("a", "nope")
-        .expect("读服务启用"));
+    assert!(
+        !ops.modules
+            .service_enabled("a", "nope")
+            .expect("读服务启用")
+    );
 }

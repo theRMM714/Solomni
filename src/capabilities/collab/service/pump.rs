@@ -4,7 +4,7 @@
 //! 联动：由 CollabSession 驱动；约定见 docs/session/session-model.md。
 
 use super::collab::*;
-use crate::capabilities::collab::service::discussion::{Discussion, Member, TurnOut, MAX_ROUNDS};
+use crate::capabilities::collab::service::discussion::{Discussion, MAX_ROUNDS, Member, TurnOut};
 use crate::capabilities::collab::service::synthesis::Execution;
 use crate::capabilities::modules::api::Module;
 use crate::capabilities::session::api::AgentMeta;
@@ -177,10 +177,10 @@ impl CollabSession {
             })
             .unwrap_or_default();
         for (id, text) in freshly {
-            if let Some(c) = self.chain.as_mut() {
-                if let Some(n) = c.nodes.iter_mut().find(|n| n.id == id) {
-                    n.reported = true;
-                }
+            if let Some(c) = self.chain.as_mut()
+                && let Some(n) = c.nodes.iter_mut().find(|n| n.id == id)
+            {
+                n.reported = true;
             }
             sink(SessionEvent::Report {
                 id,

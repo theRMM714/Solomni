@@ -54,10 +54,10 @@ impl SecretsService {
         let mut out = Vec::new();
         if let Some(m) = roster.modules.iter().find(|m| m.manifest.id == module) {
             for (name, decl) in &m.manifest.secrets {
-                if let Some(v) = values.get(&key(module, name)) {
-                    if !v.is_empty() {
-                        out.push((decl.env.clone(), v.clone()));
-                    }
+                if let Some(v) = values.get(&key(module, name))
+                    && !v.is_empty()
+                {
+                    out.push((decl.env.clone(), v.clone()));
                 }
             }
         }

@@ -6,7 +6,7 @@
 use super::super::prelude::*;
 use crate::capabilities::vm::api::Vm;
 use crate::capabilities::vm::domain::guest::{
-    classify_base, GuestImage, GuestMount, GuestRun, GuestSpec,
+    GuestImage, GuestMount, GuestRun, GuestSpec, classify_base,
 };
 use crate::capabilities::vm::ports::VmEngine;
 
@@ -124,18 +124,18 @@ pub(crate) fn entry_check_follows_the_target_shell_rules() {
     );
     // 只有字面那个（unix 的落法）：两种平台都算在场。
     let only_literal = |p: &std::path::Path| p.ends_with("build/indexer");
-    assert!(crate::capabilities::vm::domain::exec::missing_entries_for(
-        &[m.clone()],
-        "linux",
-        &only_literal
-    )
-    .is_empty());
-    assert!(crate::capabilities::vm::domain::exec::missing_entries_for(
-        &[m],
-        "windows",
-        &only_literal
-    )
-    .is_empty());
+    assert!(
+        crate::capabilities::vm::domain::exec::missing_entries_for(
+            &[m.clone()],
+            "linux",
+            &only_literal
+        )
+        .is_empty()
+    );
+    assert!(
+        crate::capabilities::vm::domain::exec::missing_entries_for(&[m], "windows", &only_literal)
+            .is_empty()
+    );
 }
 
 /// 目的：加速器表按平台给；网卡随共享后端需要而变——放行出站给普通网卡，共享隧道给受限网卡，都不要就不给。
@@ -440,7 +440,7 @@ pub(crate) fn provision_vm_holds_internal_none_share() {
 /// 目的：复制后端不产生引擎参数，只在 guest 里建目录；宿主侧 tar 打包/解包真跑通。
 #[test]
 pub(crate) fn copy_share_plans_mkdirs_and_tar_round_trips_on_the_host() {
-    use crate::capabilities::vm::detail::copy::{host_tar, host_untar, CopyShare};
+    use crate::capabilities::vm::detail::copy::{CopyShare, host_tar, host_untar};
     use crate::capabilities::vm::ports::ShareBackend;
     let share = CopyShare::new();
     assert!(share.is_emergency(), "copy 是 emergency 档，空候选不自动选");
@@ -590,7 +590,7 @@ pub(crate) fn vm_service_refuses_unfit_engine_and_share_with_a_reason() {
 /// 目的：复制共享的进 / 出同步真跑一遍——宿主 tar 打包、经通道搬运、guest 端命令、回拷解包。
 #[test]
 pub(crate) fn copy_share_syncs_both_ways_through_the_channel() {
-    use crate::capabilities::vm::detail::copy::{host_tar, CopyShare};
+    use crate::capabilities::vm::detail::copy::{CopyShare, host_tar};
     use crate::capabilities::vm::ports::{GuestChannel, ShareBackend};
 
     struct RecordingChannel {

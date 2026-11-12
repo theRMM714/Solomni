@@ -4,8 +4,8 @@
 //! 联动：service 经 SpaceSurvey 端口消费；路径约定见 detail/paths.rs。
 
 use crate::capabilities::storage::api::{
-    SpaceCategory, SpaceItem, CAT_BUILD, CAT_DOWNLOAD, CAT_GUESTS, CAT_LOGS, CAT_OUTPUTS,
-    CAT_OVERLAYS, CAT_SESSIONS,
+    CAT_BUILD, CAT_DOWNLOAD, CAT_GUESTS, CAT_LOGS, CAT_OUTPUTS, CAT_OVERLAYS, CAT_SESSIONS,
+    SpaceCategory, SpaceItem,
 };
 use crate::capabilities::storage::ports::{SpaceFacts, SpaceSurvey};
 use serde::Deserialize;

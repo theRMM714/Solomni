@@ -298,9 +298,10 @@ fn fs_work_store_streams_assets_and_rejects_oversize_or_mismatch() {
     assert!(s.stat_object(&store, &big).is_err());
 
     assert!(s.scan_object(&store, "nope", None).is_err());
-    assert!(s
-        .copy_object_to_under(&store, "nope", &shared, "x")
-        .is_err());
+    assert!(
+        s.copy_object_to_under(&store, "nope", &shared, "x")
+            .is_err()
+    );
 
     // 临时文件不留在对象目录或目标目录。
     let leftovers = |dir: &std::path::Path| -> Vec<String> {
@@ -372,9 +373,10 @@ fn fs_work_store_copies_between_roots_with_hash_check() {
     assert!(leftovers.is_empty(), "临时文件要清掉：{:?}", leftovers);
 
     // 源缺失。
-    assert!(s
-        .copy_under_to_under(&sandbox, "nope", &lost, "x", &hash)
-        .is_err());
+    assert!(
+        s.copy_under_to_under(&sandbox, "nope", &lost, "x", &hash)
+            .is_err()
+    );
 
     #[cfg(unix)]
     {

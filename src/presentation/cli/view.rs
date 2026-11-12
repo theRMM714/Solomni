@@ -111,7 +111,9 @@ pub(super) fn print_menu(ops: &Ops) {
             model_label(a.model.as_deref())
         );
     }
-    println!("命令：single [agent名…] | collab [agent名…|?] | proxy（决定权整块交给核心） | module [模块id.工具名 [json]]（不经 AI 直接用模块工具） | provider list|add|rm|discover | model list|add|rm | core <模型id> | rewind <会话> archive|delete <行id> | rewind <会话> restore <标记id> | work <会话> log|show|restore <提交号> | resident list|start|stop|enable|disable|call <模块id> <服务名> [操作名] [json] | secret | diagnose <会话> | rescan | webui | exit");
+    println!(
+        "命令：single [agent名…] | collab [agent名…|?] | proxy（决定权整块交给核心） | module [模块id.工具名 [json]]（不经 AI 直接用模块工具） | provider list|add|rm|discover | model list|add|rm | core <模型id> | rewind <会话> archive|delete <行id> | rewind <会话> restore <标记id> | work <会话> log|show|restore <提交号> | resident list|start|stop|enable|disable|call <模块id> <服务名> [操作名] [json] | secret | diagnose <会话> | rescan | webui | exit"
+    );
 }
 
 /// 目的：模型标签（CLI 展示文案；核心默认是登记处的概念，不是提示词）。

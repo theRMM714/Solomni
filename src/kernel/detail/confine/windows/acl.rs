@@ -7,19 +7,19 @@ use crate::kernel::api::FenceSpec;
 use std::ffi::c_void;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use windows_sys::Win32::Foundation::{CloseHandle, LocalFree, HANDLE};
+use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, LocalFree};
 use windows_sys::Win32::Security::Authorization::{
-    ConvertStringSidToSidW, GetNamedSecurityInfoW, SetEntriesInAclW, SetNamedSecurityInfoW,
-    EXPLICIT_ACCESS_W, GRANT_ACCESS, OBJECTS_AND_SID, REVOKE_ACCESS, TRUSTEE_IS_OBJECTS_AND_SID,
-    TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
+    ConvertStringSidToSidW, EXPLICIT_ACCESS_W, GRANT_ACCESS, GetNamedSecurityInfoW,
+    OBJECTS_AND_SID, REVOKE_ACCESS, SetEntriesInAclW, SetNamedSecurityInfoW,
+    TRUSTEE_IS_OBJECTS_AND_SID, TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
 };
 use windows_sys::Win32::Security::{
-    AccessCheck, GetAce, GetAclInformation, GetSecurityDescriptorLength, GetTokenInformation,
-    ImpersonateSelf, RevertToSelf, SecurityImpersonation, SetFileSecurityW, TokenUser,
     ACE_INHERITED_OBJECT_TYPE_PRESENT, ACE_OBJECT_TYPE_PRESENT, ACL, ACL_SIZE_INFORMATION,
-    CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION, GENERIC_MAPPING, GROUP_SECURITY_INFORMATION,
-    OBJECT_INHERIT_ACE, OWNER_SECURITY_INFORMATION, PRIVILEGE_SET, PSECURITY_DESCRIPTOR, PSID, SID,
-    TOKEN_QUERY, TOKEN_USER,
+    AccessCheck, CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION, GENERIC_MAPPING,
+    GROUP_SECURITY_INFORMATION, GetAce, GetAclInformation, GetSecurityDescriptorLength,
+    GetTokenInformation, ImpersonateSelf, OBJECT_INHERIT_ACE, OWNER_SECURITY_INFORMATION,
+    PRIVILEGE_SET, PSECURITY_DESCRIPTOR, PSID, RevertToSelf, SID, SecurityImpersonation,
+    SetFileSecurityW, TOKEN_QUERY, TOKEN_USER, TokenUser,
 };
 use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, GetCurrentThread, OpenProcessToken, OpenThreadToken,
@@ -733,7 +733,7 @@ pub(crate) fn grant_verified(
                 &before_sd,
                 format!("写后读回 DACL 失败：{}", e),
                 recursive,
-            ))
+            ));
         }
     };
     let lost = lost_entries(&permission_entries(&before), &permission_entries(&after));

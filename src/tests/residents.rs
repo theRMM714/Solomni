@@ -7,7 +7,7 @@ use crate::capabilities::modules::api::{Module, ServiceDecl};
 use crate::capabilities::residents::api::{ResidentOps, ServiceState};
 use crate::capabilities::residents::ports::ServiceAdapter;
 use crate::capabilities::residents::service::ResidentsService;
-use crate::tests::doubles::{module_of, test_modules, FakeServiceAdapter, VecSource};
+use crate::tests::doubles::{FakeServiceAdapter, VecSource, module_of, test_modules};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -470,7 +470,7 @@ fn residents_call_requires_a_running_service() {
 /// 目的：常驻服务也按宿主目标取运行包：PATH 与围栏只读根都来自 packages 计划。
 #[test]
 fn resident_service_gets_host_package_path_and_roots() {
-    use crate::tests::doubles::{test_packages, FixedProbe, InMemoryPackages};
+    use crate::tests::doubles::{FixedProbe, InMemoryPackages, test_packages};
     let dir = crate::tests::scratch("resident-host-pkg");
     let bin = dir.join("bin");
     std::fs::create_dir_all(&bin).expect("建 bin");

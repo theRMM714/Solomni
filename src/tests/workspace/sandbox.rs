@@ -81,7 +81,7 @@ pub(crate) fn version_gate_is_per_work() {
 #[test]
 pub(crate) fn work_status_waits_for_the_per_work_gate() {
     use crate::capabilities::workspace::api::Workspace;
-    use std::sync::{mpsc, Arc};
+    use std::sync::{Arc, mpsc};
     use std::time::Duration;
     let ws = Arc::new(
         crate::capabilities::workspace::service::WorkspaceService::new(

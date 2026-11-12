@@ -174,13 +174,13 @@ impl SessionHost for ProcessSessions {
                     "[围栏] 容器围栏未启用（用户没授权在本机写权限）：常驻服务按无围栏执行（要启用：在设置里打开，或写 sandbox.policy.windows.write_acl: true）"
                 );
             }
-            if !prepared {
-                if let Some(outcome) = crate::kernel::detail::process::refuse_when_broken(
+            if !prepared
+                && let Some(outcome) = crate::kernel::detail::process::refuse_when_broken(
                     &*self.texts,
                     crate::kernel::detail::confine::verify(&spec.fence, &spec.command),
-                ) {
-                    return Err(outcome.output);
-                }
+                )
+            {
+                return Err(outcome.output);
             }
             (prepared, Some(self.home.clone()))
         };

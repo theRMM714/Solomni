@@ -4,8 +4,8 @@
 //! 联动：`src/capabilities/vm/domain/diagnose.rs` 与 `src/capabilities/conductor/api/action.rs`。
 
 use super::super::builders::{agent_meta, seed_session, vm_spec};
-use super::super::doubles::module_of;
 use super::super::doubles::InMemoryHistory;
+use super::super::doubles::module_of;
 use super::super::{ops_with, ops_with_vm};
 use crate::capabilities::conductor::api::Output;
 use crate::capabilities::conductor::api::{Acted, ActionCall, Caller};

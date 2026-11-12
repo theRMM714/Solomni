@@ -3,7 +3,7 @@
 //! 不管：进程启停与通道（detail/qemu.rs）、镜像判定与挂载清单（domain/guest.rs）。
 //! 联动：实现 ports::ShareBackend；由组合根构造、service.rs 持有。
 
-use crate::capabilities::vm::domain::guest::{sh_quote, GuestImage, GuestMount};
+use crate::capabilities::vm::domain::guest::{GuestImage, GuestMount, sh_quote};
 use crate::capabilities::vm::ports::{NoShareGuard, ShareBackend, ShareGuard, SharePlan};
 
 /// 目的：9p 共享后端（QEMU 的 virtfs；Linux / macOS 宿主可用，Windows 宿主没有）。

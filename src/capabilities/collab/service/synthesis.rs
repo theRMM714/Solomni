@@ -254,12 +254,12 @@ impl Execution {
     pub fn rework_targets(&self) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
         for it in &self.items {
-            if it.status.eq_ignore_ascii_case("fail") {
-                if let Some(r) = it.rework.as_deref() {
-                    if !r.trim().is_empty() && !out.iter().any(|x| x == r) {
-                        out.push(r.to_string());
-                    }
-                }
+            if it.status.eq_ignore_ascii_case("fail")
+                && let Some(r) = it.rework.as_deref()
+                && !r.trim().is_empty()
+                && !out.iter().any(|x| x == r)
+            {
+                out.push(r.to_string());
             }
         }
         out

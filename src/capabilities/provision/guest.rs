@@ -3,9 +3,9 @@
 //! 不管：清单、下载与作业状态（service.rs）；guest 引擎本身（vm 能力）；运行包库（runtimes/ 与包库扫描）。
 //! 联动：由 service.rs 的 guest-runtime 分支调用；vm 能力经 ::api 注入（组合根或 --provision 入口装配）；契约见 RUNTIME_SPEC.md。
 
-use super::domain::{deps, links, source_url, under, Dep};
+use super::domain::{Dep, deps, links, source_url, under};
 use crate::capabilities::vm::api::{
-    classify_base, GuestArch, GuestClients, GuestImage, GuestRun, GuestSpec, SeedDocs, Vm,
+    GuestArch, GuestClients, GuestImage, GuestRun, GuestSpec, SeedDocs, Vm, classify_base,
 };
 use crate::kernel::ports::HostProbe;
 use std::path::Path;
@@ -255,8 +255,7 @@ pub(crate) fn install_guest_runtime(
         // 镜像里可能残留不完整的 apt lists（首启中途中断过）：整份刷新一遍再装，避免「包明明在却算不可安装」。
         // Linux 磁盘根没有 cloud-init 首启（agent 打包进镜像），网卡没人配：先按 QEMU 用户网络配网（Windows 不需要）。
         let net = if is_windows { "" } else { NET_UP };
-        let py_probe =
-            "mkdir -p /usr/local/bin; command -v python >/dev/null 2>&1 || ln -sf /usr/bin/python3 /usr/local/bin/python; python -V >/dev/null 2>&1";
+        let py_probe = "mkdir -p /usr/local/bin; command -v python >/dev/null 2>&1 || ln -sf /usr/bin/python3 /usr/local/bin/python; python -V >/dev/null 2>&1";
         let mut python_ok = vm.guest_run(&lease, &sh(py_probe)).ok;
         // 索引与安装分两步：各给一条进度行——一步跑几分钟时界面不会停在同一条上。
         on_line("刷新 apt 索引…");

@@ -30,14 +30,14 @@ impl SessionOps for ConductorHandle {
         }
         // 两段：核心准备（毫秒级）→ 起 guest（这一段）→ 提交。核心线程不陪着等 QEMU。
         let (prepared, boot) = self.call(move |core| core.prepare_work(spec, None))?;
-        if let Some(boot) = boot {
-            if let Err(e) = boot.run() {
-                let _ = self.call(move |core| {
-                    core.abort_work(prepared);
-                    Ok(())
-                });
-                return Err(e);
-            }
+        if let Some(boot) = boot
+            && let Err(e) = boot.run()
+        {
+            let _ = self.call(move |core| {
+                core.abort_work(prepared);
+                Ok(())
+            });
+            return Err(e);
         }
         let opened = self.call(move |core| core.commit_work(prepared))?;
         let head = bus.push(&opened.sid, &opened.facts);
@@ -294,13 +294,13 @@ impl RegistryOps for ConductorHandle {
                     return Err(format!(
                         "供应商不支持原生工具调用：{}；模型未保存。",
                         detail
-                    ))
+                    ));
                 }
                 ProbeOutcome::Unknown { detail } => {
                     return Err(format!(
                         "无法判定该通道是否支持原生工具调用：{}；模型未保存，请重试。",
                         detail
-                    ))
+                    ));
                 }
             }
             let (provider, api_model) = (draft.provider.clone(), draft.api_model.clone());

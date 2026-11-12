@@ -134,10 +134,10 @@ impl Conductor {
             let Ok(meta) = self.history.meta(sid) else {
                 continue;
             };
-            if let Ok(Some((lease, _))) = self.guest_scope(&meta) {
-                if !guest_leases.iter().any(|l| l == &lease) {
-                    guest_leases.push(lease);
-                }
+            if let Ok(Some((lease, _))) = self.guest_scope(&meta)
+                && !guest_leases.iter().any(|l| l == &lease)
+            {
+                guest_leases.push(lease);
             }
         }
         let stop = super::guest_job::GuestStop::new(Arc::clone(&self.vm), guest_leases);

@@ -4,9 +4,9 @@
 //! 联动：systools/tools.yaml 的 shell 声明、tools/domain/shell.rs、collab 的 tool_loop。
 use super::super::builders::*;
 use super::super::prelude::*;
-use crate::capabilities::collab::service::tool_loop::{run_batch, ConfirmGate, ToolConfirm};
+use crate::capabilities::collab::service::tool_loop::{ConfirmGate, ToolConfirm, run_batch};
 use crate::capabilities::permission::api::{Effect, PermissionDefaults, ProfileId};
-use crate::capabilities::session::api::{SessionEvent, OPT_TOOL_ALLOW};
+use crate::capabilities::session::api::{OPT_TOOL_ALLOW, SessionEvent};
 use crate::capabilities::tools::api::ToolBook;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 

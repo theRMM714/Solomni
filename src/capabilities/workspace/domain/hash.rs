@@ -171,7 +171,7 @@ fn hex(digest: [u8; 32]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{content_hash, Sha256};
+    use super::{Sha256, content_hash};
 
     /// 标准测试向量：空串 / "abc" / 长于一个分块（跨填充边界）。
     #[test]

@@ -4,7 +4,7 @@
 //! 联动：持有者只有 service.rs 一处；组合根装一次，conductor 只持 Box<dyn Prompt>；别的能力按名字取段。
 
 pub use crate::capabilities::prompt::domain::prompt::{Segment, Vars};
-pub use crate::capabilities::prompt::domain::refs::{rewrite, RefRoots};
+pub use crate::capabilities::prompt::domain::refs::{RefRoots, rewrite};
 
 /// 目的：提示词册能力：按名字答"某一段是什么"，并共享两块大记录。
 pub trait Prompt: Send + Sync {

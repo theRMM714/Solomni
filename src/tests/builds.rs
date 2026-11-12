@@ -135,8 +135,8 @@ const FAILING_BUILD: &str = "echo boom 1>&2 & exit /b 7";
 fn host_build_makes_the_entry_and_hits_the_cache() {
     use crate::kernel::detail::process::ProcTools;
     use crate::kernel::ports::HostProbe;
-    use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
 
     let Some(exe) = crate::tests::doubles::built_exe() else {
         eprintln!("[探针] 未找到已构建的可执行文件，跳过 --build 契约");
@@ -219,8 +219,8 @@ fn host_build_makes_the_entry_and_hits_the_cache() {
 #[test]
 fn host_build_failure_is_honest_and_leaves_no_state() {
     use crate::kernel::detail::process::ProcTools;
-    use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
 
     let Some(exe) = crate::tests::doubles::built_exe() else {
         eprintln!("[探针] 未找到已构建的可执行文件，跳过 --build 失败契约");
@@ -292,8 +292,8 @@ fn host_build_failure_is_honest_and_leaves_no_state() {
 #[test]
 fn guest_build_writes_products_back_from_the_local_workspace() {
     use crate::kernel::detail::process::ProcTools;
-    use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
 
     if std::env::var("SOLOMNI_VM_LIVE").as_deref() != Ok("1") {
         eprintln!("[探针] 未开启虚拟机档构建的真机验收：设 SOLOMNI_VM_LIVE=1 后重跑");
@@ -424,8 +424,8 @@ fn scanned_modules(root: &std::path::Path) -> Vec<Module> {
 fn creating_a_session_builds_the_missing_entry_first() {
     use crate::capabilities::conductor::api::{ConductorHandle, SessionOps, WorkMode};
     use crate::kernel::detail::process::ProcTools;
-    use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
 
     let Some(exe) = crate::tests::doubles::built_exe() else {
         eprintln!("[探针] 未找到已构建的可执行文件，跳过创建前补编用例");
@@ -466,8 +466,8 @@ fn creating_a_session_builds_the_missing_entry_first() {
 fn creating_a_session_reports_the_build_failure_and_creates_nothing() {
     use crate::capabilities::conductor::api::{ConductorHandle, SessionOps, WorkMode};
     use crate::kernel::detail::process::ProcTools;
-    use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
 
     let Some(exe) = crate::tests::doubles::built_exe() else {
         eprintln!("[探针] 未找到已构建的可执行文件，跳过构建失败用例");
@@ -514,8 +514,8 @@ fn creating_a_session_reports_the_build_failure_and_creates_nothing() {
 #[test]
 fn ensure_rebuilds_when_the_target_changed() {
     use crate::kernel::detail::process::ProcTools;
-    use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
 
     let Some(exe) = crate::tests::doubles::built_exe() else {
         eprintln!("[探针] 未找到已构建的可执行文件，跳过目标变化用例");
@@ -568,8 +568,8 @@ fn ensure_rebuilds_when_the_target_changed() {
 fn activating_a_session_ensures_the_target_build() {
     use crate::capabilities::builds::api::{Builds, Built};
     use crate::capabilities::conductor::api::{ConductorHandle, SessionOps, WorkMode};
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct CountingBuilds {
         calls: Arc<AtomicUsize>,

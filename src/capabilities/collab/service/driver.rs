@@ -7,7 +7,7 @@ use super::discussion::*;
 use super::round::*;
 use crate::capabilities::llm::api::{Chunk, Msg};
 use crate::capabilities::session::api::{
-    delta_visible, stream_piece, AgentSession, LineView, Live, SessionEvent, ToolCallView, TurnRun,
+    AgentSession, LineView, Live, SessionEvent, ToolCallView, TurnRun, delta_visible, stream_piece,
 };
 /// 目的：只把被总结的前缀发给模型、只声明 compact 工具，跑一次模型并返回摘要。
 /// 约束：两条通道都认：native 从结构化槽位取，信封通道从正文里的信封取（与讨论回合同口径）。
@@ -192,10 +192,10 @@ pub fn dispatch_task(
 ) {
     let mut task_line = 0u64;
     for e in s.note_task(text) {
-        if let SessionEvent::Transcript(lines) = &e {
-            if let Some(l) = lines.first() {
-                task_line = l.id;
-            }
+        if let SessionEvent::Transcript(lines) = &e
+            && let Some(l) = lines.first()
+        {
+            task_line = l.id;
         }
         sink(e);
     }
@@ -330,22 +330,20 @@ fn run_rounds(
         s.cur_reply = round.reply;
         // 读台账：一条读事实跟着它那条工具结果消息的正文走（发送视图据此判过期）。
         for v in &views {
-            if let Some(c) = v.tool.as_ref() {
-                if let Some(fact) = c.read.clone() {
-                    s.note_read_at(crate::capabilities::session::api::tool_result_body(c), fact);
-                }
+            if let Some(c) = v.tool.as_ref()
+                && let Some(fact) = c.read.clone()
+            {
+                s.note_read_at(crate::capabilities::session::api::tool_result_body(c), fact);
             }
         }
         let has_line = !round.text.trim().is_empty() || !round.reasoning.trim().is_empty();
         let mut it = views.into_iter();
         match &round.tool {
             Some(run) => {
-                if has_line {
-                    if let Some(v) = it.next() {
-                        s.line_reply.push(v.reply);
-                        s.line_ids.push(v.id);
-                        s.marks.push(s.dialogue.len());
-                    }
+                if has_line && let Some(v) = it.next() {
+                    s.line_reply.push(v.reply);
+                    s.line_ids.push(v.id);
+                    s.marks.push(s.dialogue.len());
                 }
                 for m in &round.text_msgs {
                     s.dialogue.push(m.clone());
@@ -471,8 +469,8 @@ fn run(
                        sink: &mut dyn FnMut(SessionEvent)|
      -> String {
         use crate::capabilities::session::api::{
-            qualify, AnswerSlot, Pending, SlotWake, OPT_TOOL_ALLOW, OPT_TOOL_ALLOW_TURN,
-            OPT_TOOL_DENY,
+            AnswerSlot, OPT_TOOL_ALLOW, OPT_TOOL_ALLOW_TURN, OPT_TOOL_DENY, Pending, SlotWake,
+            qualify,
         };
         let Some(door) = decisions.as_ref() else {
             return OPT_TOOL_DENY.to_string();

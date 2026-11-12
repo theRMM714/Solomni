@@ -217,7 +217,7 @@ fn delete(
                 return fail(format!(
                     "删除中断：{} 失败：{}；它前面的已删，后面的未动",
                     p.spec, e
-                ))
+                ));
             }
         }
     }
@@ -245,7 +245,7 @@ fn read(
                 return fail(format!(
                     "这是目录，不是文件：用 list 列它的内容（{}）。",
                     spec
-                ))
+                ));
             }
             Err(_) => return fail(e),
         },
@@ -306,22 +306,21 @@ fn read(
     obs.note_read(path, complete, why, hash);
     // 读取事实：只有"整份原文都读到了"才记——半份内容没法与后续版本按行对齐，
     // 拿它判过期只会误导模型（宁可让它多读一次）。
-    if complete {
-        if let Some(root) = sb.root_of(place) {
-            if let Ok(rel) = path.strip_prefix(root) {
-                obs.note_read_fact(crate::capabilities::workspace::api::ReadFact {
-                    worktree: if matches!(place, Place::Shared) {
-                        String::new()
-                    } else {
-                        sb.work_name.clone()
-                    },
-                    path: crate::kernel::api::slash(rel),
-                    from: offset as u64,
-                    to: to as u64,
-                    blob: crate::capabilities::workspace::api::content_hash(got.text.as_bytes()),
-                });
-            }
-        }
+    if complete
+        && let Some(root) = sb.root_of(place)
+        && let Ok(rel) = path.strip_prefix(root)
+    {
+        obs.note_read_fact(crate::capabilities::workspace::api::ReadFact {
+            worktree: if matches!(place, Place::Shared) {
+                String::new()
+            } else {
+                sb.work_name.clone()
+            },
+            path: crate::kernel::api::slash(rel),
+            from: offset as u64,
+            to: to as u64,
+            blob: crate::capabilities::workspace::api::content_hash(got.text.as_bytes()),
+        });
     }
     let mut out = header(body.join("\n"));
     let tail = if got.cut {

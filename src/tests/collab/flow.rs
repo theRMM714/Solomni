@@ -43,9 +43,11 @@ pub(crate) fn core_collab_demo_runs_full_five_stages() {
         e
     };
     assert!(events.iter().any(|e| matches!(e, SessionEvent::Plan(_))));
-    assert!(events
-        .iter()
-        .any(|e| matches!(e, SessionEvent::Delivery { ok: true, .. })));
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Delivery { ok: true, .. }))
+    );
     // 终结会话已被中心回收（再查询挂起状态应报无此会话）。
     assert!(core.collab_pending(&sid).is_err());
 }
@@ -92,9 +94,11 @@ pub(crate) fn core_collab_delegated_slate_flow() {
         e.extend(answer_card(&mut core, &sid, OPT_PLAN_SAY, "同意开工").unwrap());
         e
     };
-    assert!(events
-        .iter()
-        .any(|e| matches!(e, SessionEvent::Delivery { ok: true, .. })));
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Delivery { ok: true, .. }))
+    );
 }
 
 #[test]
@@ -198,7 +202,7 @@ pub(crate) fn discussion_turn_streams_deltas_and_never_leaks_the_envelope() {
     let mut chat = super::super::RecordingChat {
         // 正文在信封**之前**：正文可以逐片流出去，信封本身绝不能。
         inner: scripted(vec![
-            "我说两句。{\"type\":\"say\",\"text\":\"我说两句\"}".into()
+            "我说两句。{\"type\":\"say\",\"text\":\"我说两句\"}".into(),
         ]),
         seen: Arc::clone(&seen),
     };

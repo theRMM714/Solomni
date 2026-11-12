@@ -4,8 +4,8 @@
 //! 联动：conductor 只持 Box<dyn Registry>；实现见 service.rs；消费方是 conductor 与呈现层。
 
 pub use crate::capabilities::registry::domain::agents::{
-    check_reserved, listing, model_listing, resolve_picks, unique_instance_name, validate_name,
-    AgentView, Agents, RosterPick,
+    AgentView, Agents, RosterPick, check_reserved, listing, model_listing, resolve_picks,
+    unique_instance_name, validate_name,
 };
 pub use crate::capabilities::registry::domain::providers::{
     AppSettings, ModelDraft, ModelEntry, ModelView, Provider, ProviderView, SandboxEnforceLevel,
@@ -106,7 +106,7 @@ pub trait Registry: Send + Sync {
     fn probe_channel_tools(&self, provider: &str, api_model: &str) -> Result<ProbeOutcome, String>;
     /// 目的：按 draft 的供应商 + api_model 实测回放形状（要真实网络；不落盘）。
     fn probe_channel_replay(&self, provider: &str, api_model: &str)
-        -> Result<ReplayReport, String>;
+    -> Result<ReplayReport, String>;
     /// 登记处**快照**：协作会话自持一份（与今日 `settings.clone()` 同义，语义不变）。
     fn snapshot(&self) -> Settings;
     // ---- 写：只有这里改登记处，改完就落盘 ----

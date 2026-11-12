@@ -3,9 +3,9 @@
 //! 不管：围栏描述符与落点判据（在 `src/kernel/contracts/fence.rs`）、卡片形状（在 `src/capabilities/tools/domain/fence.rs`）。
 //! 联动：`ToolsService` 持它并作为 `FenceGate` 传给 `ProcessRunner`；kernel 只原样转交裁决结果。
 
-use crate::capabilities::tools::domain::fence::{fence_ask, OPT_FENCE_UNFENCED};
+use crate::capabilities::tools::domain::fence::{OPT_FENCE_UNFENCED, fence_ask};
 use crate::kernel::api::{AskOutcome, FenceBlocked};
-use crate::kernel::ports::{ask_user, FenceCase, FenceGate, FenceVerdict};
+use crate::kernel::ports::{FenceCase, FenceGate, FenceVerdict, ask_user};
 
 /// 目的：工具层的围栏裁决——把"必要落点授不上"按用户裁决变成"无围栏跑一次"或"不执行"。
 /// 约束：strict 不提供无围栏选项；构不出选项时停会话并拒绝；文案逐字是模型看到的回执契约。

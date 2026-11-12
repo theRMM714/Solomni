@@ -4,7 +4,7 @@
 //! 联动：service 调 plan 得到候选；测试直接钉策略。
 
 use crate::capabilities::storage::api::{
-    SpaceCategory, SpaceReport, StoragePolicy, CAT_BUILD, CAT_DOWNLOAD, CAT_LOGS, CAT_OVERLAYS,
+    CAT_BUILD, CAT_DOWNLOAD, CAT_LOGS, CAT_OVERLAYS, SpaceCategory, SpaceReport, StoragePolicy,
 };
 use std::collections::BTreeSet;
 

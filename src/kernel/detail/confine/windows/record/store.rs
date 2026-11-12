@@ -134,7 +134,7 @@ pub(crate) fn lock_ledger(home: &Path) -> Result<LedgerGuard, String> {
                 return Ok(LedgerGuard {
                     _proc: proc,
                     _file: file,
-                })
+                });
             }
             Err(std::fs::TryLockError::WouldBlock) => {
                 if Instant::now() >= deadline {

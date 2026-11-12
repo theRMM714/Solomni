@@ -5,7 +5,7 @@
 
 use crate::capabilities::llm::api::Msg;
 use crate::capabilities::prompt::api::Segment;
-use crate::capabilities::registry::api::{model_listing, resolve_picks, RosterPick};
+use crate::capabilities::registry::api::{RosterPick, model_listing, resolve_picks};
 use crate::capabilities::session::api::core_operation;
 use crate::capabilities::slate::api::{Mode, Parties, Pick, Proposal, Request};
 use crate::capabilities::slate::domain::proposal::collapse;

@@ -3,13 +3,13 @@
 //! 不管：QEMU 参数与磁盘（qemu.rs）、种子服务（seed.rs）。
 //! 联动：vm/ports.rs 的 GuestChannel 与 GuestVm。
 
-use super::seed::SeedServer;
 use super::UNFENCED_GUEST_RUN_SECS;
+use super::seed::SeedServer;
 use crate::capabilities::vm::domain::guest::{GuestAccess, GuestRun, OutputLimit};
 use crate::capabilities::vm::ports::{GuestChannel, GuestVm};
 use crate::kernel::api::ToolOutcome;
 use crate::kernel::detail::procs::ProcessBook;
-use crate::kernel::domain::receipt::{shell_receipt, ShellEnd};
+use crate::kernel::domain::receipt::{ShellEnd, shell_receipt};
 use crate::kernel::ports::ProcessTexts;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
@@ -27,10 +27,10 @@ pub(super) fn connect_within(
         match TcpStream::connect(("127.0.0.1", port)) {
             Ok(s) => return Ok(s),
             Err(e) => {
-                if let Some(proc) = child.as_deref_mut() {
-                    if let Ok(Some(status)) = proc.try_wait() {
-                        return Err(format!("QEMU 进程已退出（{}）：{}", status, e));
-                    }
+                if let Some(proc) = child.as_deref_mut()
+                    && let Ok(Some(status)) = proc.try_wait()
+                {
+                    return Err(format!("QEMU 进程已退出（{}）：{}", status, e));
                 }
                 if Instant::now() >= deadline {
                     return Err(format!("等 QGA 通道超时（端口 {}）：{}", port, e));
@@ -293,26 +293,25 @@ impl QemuHandle {
         let deadline = Instant::now() + Duration::from_secs(budget);
         let mut cancel_sent = false;
         loop {
-            if !cancel_sent {
-                if let Some(flag) = cancel {
-                    if flag.load(std::sync::atomic::Ordering::Relaxed) {
-                        cancel_sent = true;
-                        // 先给 guest helper 发 SIGTERM：它的事件循环会杀掉子进程组再退出。
-                        let kill = format!("kill -TERM {}", pid);
-                        let _ = self.exec_run(
-                            &GuestRun {
-                                command: kill,
-                                args_json: "{}".to_string(),
-                                env: Vec::new(),
-                                cwd: String::new(),
-                                timeout_secs: 5,
-                                output_limit: OutputLimit::Head,
-                            },
-                            None,
-                            None,
-                        );
-                    }
-                }
+            if !cancel_sent
+                && let Some(flag) = cancel
+                && flag.load(std::sync::atomic::Ordering::Relaxed)
+            {
+                cancel_sent = true;
+                // 先给 guest helper 发 SIGTERM：它的事件循环会杀掉子进程组再退出。
+                let kill = format!("kill -TERM {}", pid);
+                let _ = self.exec_run(
+                    &GuestRun {
+                        command: kill,
+                        args_json: "{}".to_string(),
+                        env: Vec::new(),
+                        cwd: String::new(),
+                        timeout_secs: 5,
+                        output_limit: OutputLimit::Head,
+                    },
+                    None,
+                    None,
+                );
             }
             let v = match self.status_once(pid) {
                 Ok(v) => v,

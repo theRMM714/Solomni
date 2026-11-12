@@ -89,7 +89,7 @@ impl Sandbox {
                     return Err(deny(format!(
                         "路径不是本环境的写法（虚拟机档用 guest 内路径，宿主路径在这里不存在）：{}",
                         spec
-                    )))
+                    )));
                 }
             },
             None => PathBuf::from(spec),

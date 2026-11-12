@@ -40,10 +40,11 @@ pub(crate) fn prompt_env_book_distributes_by_environment() {
         "虚拟机档要说清给的是 guest 内路径：{}",
         guest
     );
-    assert!(p
-        .core
-        .env_for("linux", Some("windows"))
-        .contains("Windows guest"));
+    assert!(
+        p.core
+            .env_for("linux", Some("windows"))
+            .contains("Windows guest")
+    );
     assert!(
         p.core.env_for("linux", Some("nope")).is_empty(),
         "没有的环境不瞎拼（非法值由装载时校验挡住）"
@@ -65,17 +66,19 @@ pub(crate) fn prompt_book_loads_from_yaml() {
         assert!(!m.text.trim().is_empty(), "机制说明不能为空：{}", m.session);
         assert!(!m.roles.is_empty(), "每条机制都要写清适用角色");
     }
-    assert!(p
-        .core
-        .mechanisms_for("single", "solo")
-        .contains("单 agent 工作"));
+    assert!(
+        p.core
+            .mechanisms_for("single", "solo")
+            .contains("单 agent 工作")
+    );
     let collab = p.core.mechanisms_for("collab", "discussant");
     assert!(collab.contains("一个 agent = 一个会话"), "{}", collab);
     assert!(collab.contains("动词"), "{}", collab);
-    assert!(p
-        .core
-        .mechanisms_for("proxy", "core_proxy")
-        .contains("派完活就让出回合"));
+    assert!(
+        p.core
+            .mechanisms_for("proxy", "core_proxy")
+            .contains("派完活就让出回合")
+    );
     assert!(
         p.core
             .mechanisms_for("single", "core_proxy")
@@ -95,7 +98,7 @@ pub(crate) fn prompt_render_keeps_single_braces() {
 // ---------- 登记处解析链与密钥治理 ----------
 #[test]
 pub(crate) fn refs_rewrite_covers_prefixes_speakers_and_punctuation() {
-    use crate::capabilities::prompt::api::{rewrite, RefRoots};
+    use crate::capabilities::prompt::api::{RefRoots, rewrite};
     // 文案由 refs 代码返回：期望值在测试里同样直接构造。
     let foreign = |path: &str, agent: &str| {
         format!(

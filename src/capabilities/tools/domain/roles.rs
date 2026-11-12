@@ -120,13 +120,13 @@ impl SystemTools {
                         "动作 {} 的 callers 里有不认识的身份：{}（只能是角色 id 或 user / user:…）",
                         id, c
                     ));
-                } else if let Some(rd) = self.roles.get(c) {
-                    if !rd.tools.iter().any(|t| t == id) {
-                        out.push(format!(
-                            "动作 {} 的 callers 里有角色 {}，但它的工具面里没有这条动作",
-                            id, c
-                        ));
-                    }
+                } else if let Some(rd) = self.roles.get(c)
+                    && !rd.tools.iter().any(|t| t == id)
+                {
+                    out.push(format!(
+                        "动作 {} 的 callers 里有角色 {}，但它的工具面里没有这条动作",
+                        id, c
+                    ));
                 }
             }
         }

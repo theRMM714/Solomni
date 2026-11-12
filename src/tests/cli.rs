@@ -72,9 +72,11 @@ fn pick_agents_guides_on_empty_registry_and_names_the_unknown() {
         "报错要列出可选项：{}",
         err
     );
-    assert!(cli::pick_agents(&ops, &[])
-        .unwrap_err()
-        .contains("没有点名"));
+    assert!(
+        cli::pick_agents(&ops, &[])
+            .unwrap_err()
+            .contains("没有点名")
+    );
 }
 
 /// 目的：队首之后还在等的那几张要如实列成文本（谁在等、前面还排着几条，一行一张）。

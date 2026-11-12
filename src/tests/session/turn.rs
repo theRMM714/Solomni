@@ -89,9 +89,11 @@ pub(crate) fn core_direct_seeds_system_prompt() {
         }
         _ => panic!("首条应为用户转录行"),
     }
-    assert!(events
-        .iter()
-        .any(|e| matches!(e, SessionEvent::Transcript(l) if l.iter().any(|x| x.speaker == "a"))));
+    assert!(
+        events.iter().any(
+            |e| matches!(e, SessionEvent::Transcript(l) if l.iter().any(|x| x.speaker == "a"))
+        )
+    );
 }
 
 #[test]
@@ -139,7 +141,7 @@ pub(crate) fn single_mode_accepts_multi_module_agent_and_converses() {
 /// 目的：**落盘策略由会话种类定、判定只有一处**：短暂事件任何会话都不留；系统会话（`#` 开头）一条都不留。
 #[test]
 pub(crate) fn persist_policy_is_decided_by_the_session_kind() {
-    use crate::capabilities::conductor::service::persist::{is_system_session, PersistPolicy};
+    use crate::capabilities::conductor::service::persist::{PersistPolicy, is_system_session};
     use crate::capabilities::session::api::SessionEvent;
     let line = SessionEvent::Transcript(vec![crate::capabilities::session::api::LineView::system(
         "",
@@ -294,9 +296,10 @@ pub(crate) fn core_direct_tool_flow_injects_result_into_history() {
         "工具结果必须回注上下文（标签带模块）：{:?}",
         h
     );
-    assert!(h
-        .iter()
-        .any(|m| m.role == "assistant" && m.content.contains("结论成立")));
+    assert!(
+        h.iter()
+            .any(|m| m.role == "assistant" && m.content.contains("结论成立"))
+    );
     assert_eq!(runner.calls.lock().expect("锁").len(), 1);
 }
 

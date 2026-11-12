@@ -10,8 +10,8 @@ use crate::capabilities::registry::api::{Agents, ModelEntry};
 use crate::capabilities::session::api::{AgentMeta, MemberTools, SessionEvent};
 use crate::capabilities::tools::api::Tools;
 use std::collections::BTreeMap;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 pub use crate::capabilities::slate::service::propose;
 

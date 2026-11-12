@@ -5,7 +5,7 @@
 
 use crate::capabilities::permission::api::{CallScope, Decision};
 use crate::capabilities::tools::domain::schema::ToolSchema;
-use crate::capabilities::tools::domain::systool::{arg_fault_text, SHELL};
+use crate::capabilities::tools::domain::systool::{SHELL, arg_fault_text};
 use crate::kernel::api::ToolOutcome;
 use std::time::Duration;
 
@@ -226,9 +226,11 @@ params:
 
     #[test]
     fn rejects_unknown_scope_and_overlong_command() {
-        assert!(parse(&schema(), r#"{"command":"x","scope":"root"}"#)
-            .unwrap_err()
-            .contains("scope 只认"));
+        assert!(
+            parse(&schema(), r#"{"command":"x","scope":"root"}"#)
+                .unwrap_err()
+                .contains("scope 只认")
+        );
         let long = "x".repeat(MAX_COMMAND_CHARS + 1);
         let err = parse(&schema(), &format!(r#"{{"command":"{}"}}"#, long)).unwrap_err();
         assert!(err.contains("命令太长"), "{}", err);
@@ -262,9 +264,11 @@ params:
     #[test]
     fn shared_exec_hint_only_for_relative_entries_denied_by_permissions() {
         let denied = "[stderr]\n/bin/sh: 1: ./deploy.sh: Permission denied\n";
-        assert!(shared_exec_hint("./deploy.sh --yes", denied)
-            .expect("相对路径脚本被拒要提示")
-            .contains("bash ./deploy.sh"));
+        assert!(
+            shared_exec_hint("./deploy.sh --yes", denied)
+                .expect("相对路径脚本被拒要提示")
+                .contains("bash ./deploy.sh")
+        );
         assert!(shared_exec_hint("tools/build deploy", denied).is_some());
         assert_eq!(
             shared_exec_hint("/usr/bin/foo", denied),

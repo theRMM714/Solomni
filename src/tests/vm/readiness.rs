@@ -23,14 +23,16 @@ pub(crate) fn vm_tier_readiness_gates_creation_and_editing() {
     );
     assert!(host.ready(), "本机档没有前置条件");
     assert!(host.requirements.is_empty(), "本机档不该有虚拟机前置清单");
-    assert!(exec::tier_refusal(
-        &crate::tests::root_dir(),
-        &ExecSpec::default(),
-        None,
-        None,
-        probe.as_ref()
-    )
-    .is_none());
+    assert!(
+        exec::tier_refusal(
+            &crate::tests::root_dir(),
+            &ExecSpec::default(),
+            None,
+            None,
+            probe.as_ref()
+        )
+        .is_none()
+    );
 
     // 虚拟机档：guest 本体按**已验证平台**放开（Linux 已验，Windows / macOS 待验），其余项按事实；这里基础根是假的。
     let ghost = ExecSpec {
@@ -127,7 +129,7 @@ pub(crate) fn vm_tier_readiness_gates_creation_and_editing() {
 /// 目的：机器能力与会话选型分开——vm_capability 不问 base；tier_readiness（保存/开始）才要求 base。
 #[test]
 pub(crate) fn vm_capability_is_machine_only_while_session_readiness_needs_base() {
-    use crate::capabilities::vm::api::{vm_capability, VmInputs};
+    use crate::capabilities::vm::api::{VmInputs, vm_capability};
     use crate::tests::doubles::FixedProbe;
     let qemu = std::path::PathBuf::from("/opt/qemu-system-x86_64");
     let mut probe = FixedProbe {

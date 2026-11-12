@@ -7,16 +7,16 @@ pub use crate::capabilities::vm::detail::qemu::create_disk;
 pub use crate::capabilities::vm::domain::diagnose::GuestDiagnosis;
 pub use crate::capabilities::vm::domain::exec::resolve_guest;
 pub use crate::capabilities::vm::domain::exec::{
-    admit_guest, capability_refusal, copy_share_enabled, diagnose_text_for, guest_platform,
-    missing_entries_for, plan, plan_summary, runs_on_target, share_chain, tier_readiness,
-    tier_refusal, vm_capability, vm_requirements, ExecPlan, MissingEntry, VmInputs, VmRequirement,
-    COPY_SHARE_ENV,
-};
-pub use crate::capabilities::vm::domain::guest::{
-    classify_base, mounts_from, package_setup_scripts, GuestImage, GuestRun, GuestSpec,
-    OutputLimit, SeedDocs,
+    COPY_SHARE_ENV, ExecPlan, MissingEntry, VmInputs, VmRequirement, admit_guest,
+    capability_refusal, copy_share_enabled, diagnose_text_for, guest_platform, missing_entries_for,
+    plan, plan_summary, runs_on_target, share_chain, tier_readiness, tier_refusal, vm_capability,
+    vm_requirements,
 };
 pub use crate::capabilities::vm::domain::guest::{GuestArch, GuestClients, GuestOs};
+pub use crate::capabilities::vm::domain::guest::{
+    GuestImage, GuestRun, GuestSpec, OutputLimit, SeedDocs, classify_base, mounts_from,
+    package_setup_scripts,
+};
 pub use crate::capabilities::vm::domain::paths::PathBridge;
 
 /// 目的：虚拟机档的**用例面**（`service.rs` 实现）——guest 生命周期走这里。

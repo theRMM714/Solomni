@@ -3,7 +3,7 @@
 //! 不管：端点候选逻辑（在 endpoint）；代理与 TLS（在 http_agent）；无通道时不回落假模型（前置条件失败）。
 //! 联动：实现 api::Chat 与 ports::ChatGateway；由 detail.rs 重导出 HttpGateway 供组合根装配；流机制在 detail/http_stream.rs。
 
-use super::endpoint::{chat_candidates, memo_get, memo_set, resolve_candidates, Attempt, Memo};
+use super::endpoint::{Attempt, Memo, chat_candidates, memo_get, memo_set, resolve_candidates};
 use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{
     BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg, ProbeOutcome, TokenUsage, ToolDecl,
@@ -64,11 +64,11 @@ fn request_body(
     }
     // 原生工具调用：把工具声明带给供应商（"参数走结构化槽位"的全部秘密就在这一段）。
     // 不声明 tools = 手写信封模式：模型照旧在正文里写信封，核心自己解析。
-    if let Some(tools) = tools {
-        if !tools.is_empty() {
-            body["tools"] = serde_json::Value::Array(tools.iter().map(decl_json).collect());
-            body["tool_choice"] = serde_json::json!("auto");
-        }
+    if let Some(tools) = tools
+        && !tools.is_empty()
+    {
+        body["tools"] = serde_json::Value::Array(tools.iter().map(decl_json).collect());
+        body["tool_choice"] = serde_json::json!("auto");
     }
     // 思考强度：登记处解析好的片段按模型映射原样合并；保留键在登记处已经拒收，这里再挡一次
     //（覆盖 model / messages / stream / tools 会直接把这次请求弄坏）。
@@ -107,11 +107,11 @@ pub(crate) fn attempt_with_tools(
         "stream": false,
         "messages": [{ "role": "user", "content": user }],
     });
-    if let Some(tools) = tools {
-        if !tools.is_empty() {
-            body["tools"] = serde_json::Value::Array(tools.iter().map(decl_json).collect());
-            body["tool_choice"] = serde_json::json!("auto");
-        }
+    if let Some(tools) = tools
+        && !tools.is_empty()
+    {
+        body["tools"] = serde_json::Value::Array(tools.iter().map(decl_json).collect());
+        body["tool_choice"] = serde_json::json!("auto");
     }
     // 探针是一次性诊断，用默认预算（它不参与真实会话的设置）。
     attempt_with_cancel(
@@ -242,20 +242,19 @@ impl Chat for HttpChat {
         let mut outcome = self.exchange(&body, &opts, on);
         // 兼容回退：只在首个 400/422 且错误点名字段时去掉 stream_options 重试一次。
         // 这时还没收到任何数据块（stream_once 在非 2xx 时不回调 on），不会重复正文。
-        if opts.stream {
-            if let Err(e) = &outcome {
-                if stream_options_rejected(e) {
-                    self.log.warn(
-                        "http_chat::stream",
-                        "供应商不接受 stream_options，去掉该参数重试；本次用量将按字符估算",
-                    );
-                    let mut retry = body_value.clone();
-                    if let Some(obj) = retry.as_object_mut() {
-                        obj.remove("stream_options");
-                    }
-                    outcome = self.exchange(&retry.to_string(), &opts, on);
-                }
+        if opts.stream
+            && let Err(e) = &outcome
+            && stream_options_rejected(e)
+        {
+            self.log.warn(
+                "http_chat::stream",
+                "供应商不接受 stream_options，去掉该参数重试；本次用量将按字符估算",
+            );
+            let mut retry = body_value.clone();
+            if let Some(obj) = retry.as_object_mut() {
+                obj.remove("stream_options");
             }
+            outcome = self.exchange(&retry.to_string(), &opts, on);
         }
         match outcome {
             Ok((url, done)) => {

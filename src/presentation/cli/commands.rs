@@ -348,7 +348,9 @@ pub(super) fn work_cmd(ops: &Ops, arg: &str) {
             };
             println!(
                 "把共享区从 head #{} 回滚到提交 #{}（{}）。目标之后的提交仍保留，可再次回滚；各 agent 沙箱未改动。",
-                head, target.id, first_line(&target.message)
+                head,
+                target.id,
+                first_line(&target.message)
             );
             let yes = parts.iter().any(|p| p.eq_ignore_ascii_case("--yes"))
                 || prompt("确认回滚？输入 yes：") == "yes";

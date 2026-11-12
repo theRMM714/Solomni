@@ -16,10 +16,10 @@ use std::sync::Arc;
 
 /// 目的：只在目标为空时用发现值填上（已登记的一律保留）。
 fn fill_if_empty(target: &mut String, found: Option<String>) {
-    if target.trim().is_empty() {
-        if let Some(p) = found {
-            *target = p;
-        }
+    if target.trim().is_empty()
+        && let Some(p) = found
+    {
+        *target = p;
     }
 }
 
@@ -357,10 +357,10 @@ impl Registry for RegistryService {
                     ));
                 }
             }
-            if let Some(d) = &m.thinking.default {
-                if !app.thinking.levels.iter().any(|l| &l.id == d) {
-                    return Err(format!("模型 {} 的默认思考档位 {} 不在新目录里", mid, d));
-                }
+            if let Some(d) = &m.thinking.default
+                && !app.thinking.levels.iter().any(|l| &l.id == d)
+            {
+                return Err(format!("模型 {} 的默认思考档位 {} 不在新目录里", mid, d));
             }
         }
         self.settings.app = app;
@@ -375,13 +375,12 @@ impl Registry for RegistryService {
             ProbeOutcome::Unsupported { .. } => Some(ToolMode::Envelope),
             ProbeOutcome::Unknown { .. } => None,
         };
-        if let Some(mode) = want {
-            if let Some(m) = self.settings.models.get_mut(id) {
-                if m.tools != mode {
-                    m.tools = mode;
-                    self.save("registry::probe_model_tools")?;
-                }
-            }
+        if let Some(mode) = want
+            && let Some(m) = self.settings.models.get_mut(id)
+            && m.tools != mode
+        {
+            m.tools = mode;
+            self.save("registry::probe_model_tools")?;
         }
         Ok(outcome)
     }

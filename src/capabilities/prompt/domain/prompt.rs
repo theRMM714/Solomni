@@ -14,18 +14,20 @@ pub fn render(template: &str, vars: Vars) -> Result<String, String> {
     let bytes = template.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'{' && i + 1 < bytes.len() && bytes[i + 1] == b'{' {
-            if let Some(end_rel) = template[i + 2..].find("}}") {
-                let key = template[i + 2..i + 2 + end_rel].trim();
-                let value = vars
-                    .iter()
-                    .find(|(k, _)| *k == key)
-                    .map(|(_, v)| v.clone())
-                    .ok_or_else(|| format!("提示词变量缺失：{}", key))?;
-                out.push_str(&value);
-                i += 2 + end_rel + 2;
-                continue;
-            }
+        if bytes[i] == b'{'
+            && i + 1 < bytes.len()
+            && bytes[i + 1] == b'{'
+            && let Some(end_rel) = template[i + 2..].find("}}")
+        {
+            let key = template[i + 2..i + 2 + end_rel].trim();
+            let value = vars
+                .iter()
+                .find(|(k, _)| *k == key)
+                .map(|(_, v)| v.clone())
+                .ok_or_else(|| format!("提示词变量缺失：{}", key))?;
+            out.push_str(&value);
+            i += 2 + end_rel + 2;
+            continue;
         }
         // 字面 {{（非占位）按原样保留；JSON 示例中的花括号不受影响（单括号）。
         let ch_len = template[i..]

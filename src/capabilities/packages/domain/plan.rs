@@ -5,7 +5,7 @@
 
 use crate::capabilities::modules::api::Module;
 use crate::capabilities::packages::domain::manifest::{
-    conflicts, Library, PackageManifest, Target, KIND_SYSTEM,
+    KIND_SYSTEM, Library, PackageManifest, Target, conflicts,
 };
 use crate::kernel::api::ExecSpec;
 use serde::Serialize;
@@ -227,31 +227,31 @@ pub fn plan_host_requests(
         if versions.is_empty() {
             // 基础能力：项目内 profile 优先，其次宿主回退（只有围栏能授权才算可用）。
             // 额外能力：仍按包库 → 宿主 PATH 回退。
-            if lib.versions_of(cap).is_empty() {
-                if let Some(id) = base_id_for(cap) {
-                    if let Some((_, version)) = facts.base.iter().find(|(i, _)| i == id) {
-                        providers.insert(
-                            cap.clone(),
-                            Provider::Base {
-                                id: id.to_string(),
-                                version: version.clone(),
-                            },
-                        );
-                        continue;
-                    }
-                    match facts.host_fallback.get(id) {
-                        Some(_) => {
-                            providers.insert(cap.clone(), Provider::Host);
-                        }
-                        None => {
-                            problems.push(Problem::MissingBase {
-                                module: req.module.clone(),
-                                capability: cap.clone(),
-                            });
-                        }
-                    }
+            if lib.versions_of(cap).is_empty()
+                && let Some(id) = base_id_for(cap)
+            {
+                if let Some((_, version)) = facts.base.iter().find(|(i, _)| i == id) {
+                    providers.insert(
+                        cap.clone(),
+                        Provider::Base {
+                            id: id.to_string(),
+                            version: version.clone(),
+                        },
+                    );
                     continue;
                 }
+                match facts.host_fallback.get(id) {
+                    Some(_) => {
+                        providers.insert(cap.clone(), Provider::Host);
+                    }
+                    None => {
+                        problems.push(Problem::MissingBase {
+                            module: req.module.clone(),
+                            capability: cap.clone(),
+                        });
+                    }
+                }
+                continue;
             }
             if has_host_executable(facts.has_exe, cap) {
                 providers.insert(cap.clone(), Provider::Host);
@@ -693,9 +693,5 @@ pub fn diagnose_text(diags: &[Problem]) -> String {
 
 /// 目的：装载顺序：先独立前缀（0），后写进系统路径的包（1）。
 fn rank(kind: &str) -> u8 {
-    if kind == KIND_SYSTEM {
-        1
-    } else {
-        0
-    }
+    if kind == KIND_SYSTEM { 1 } else { 0 }
 }
