@@ -12,6 +12,7 @@ mod conductor;
 mod detail;
 mod diagnostics;
 pub(crate) mod doubles;
+mod entry;
 mod fakes;
 mod fence_reach;
 mod kernel;
