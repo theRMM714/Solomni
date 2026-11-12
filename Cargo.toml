@@ -19,7 +19,9 @@ yaml_serde = "0.10"
 tar = "0.4"
 ruzstd = "0.9"
 flate2 = "1"
-zip = { version = "9.0.3", default-features = false, features = ["deflate"] }
+# zip 收在 9.3.x：9.4 起把 zeroize（derive → syn 2）变必选，会和全仓的 syn 3 撞成重复依赖（T0 依赖重复门禁）。
+# 9.3.0 已含 ZipCloaking 修复（CVE-2026-115905，fixed 9.0.5）与头部一致性/符号链接硬化；上游把 zeroize 收回可选后即可解除上限。
+zip = { version = "~9.3.0", default-features = false, features = ["deflate"] }
 # xz 解码：lzma-rust2 是活跃维护的纯 Rust 实现（lzma-rs 长期停更却要解外来归档）。
 # 只留 std + xz；关掉 optimization（手写汇编/unsafe）与 lzip，生产侧只需解压。
 lzma-rust2 = { version = "0.25", default-features = false, features = ["std", "xz"] }
