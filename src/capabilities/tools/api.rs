@@ -1,4 +1,7 @@
-//! 入站能力面：**其它能力与呈现层只准用这里**（不许碰 `domain` / `ports`）。
+//! 目的：工具能力的入站能力面——其它能力与呈现层只准用这里（不许碰 `domain` / `ports`）。
+//! 管：`Tools`（按角色发放工具面、拿总表、保留名）与 `ToolExec`（执行外部工具 / shell / 内置工具、释放围栏授权）两个 trait，并重导出领域共享类型。
+//! 不管：实现与机制（在 `service/` / `detail/`）；端口定义（在 `ports.rs`）。
+//! 联动：实现见 `service/mod.rs`；`conductor` 等消费方只持 `Arc<dyn Tools>` / `Arc<dyn ToolExec>`。
 
 pub use crate::capabilities::tools::domain::patch::{EditFault, Fault};
 pub use crate::capabilities::tools::domain::roles::{action_audit, RoleTable, SystemTools};
@@ -14,10 +17,9 @@ pub use crate::capabilities::tools::domain::systool::{
     Observations, ToolNotes, ToolOutcome, PATCH, REPORT,
 };
 
-/// 工具总表、角色表与名字表的**能力面**：别的能力只问"这一席能用哪些工具"，**看不见三张表的字段**。
-///
-/// 表本体（`SystemTools`）是纯数据、没有端口；组合根装载一次，`conductor` 只持 `Arc<dyn Tools>`
-/// 并与协作会话共享（见 `service.rs`）。
+/// 目的：工具总表、角色表与名字表的**能力面**：别的能力只问"这一席能用哪些工具"，**看不见三张表的字段**。
+/// 约束：表本体（`SystemTools`）是纯数据、没有端口；组合根装载一次，`conductor` 只持 `Arc<dyn Tools>`
+///   并与协作会话共享（见 `service.rs`）。
 pub trait Tools: Send + Sync {
     /// 按角色组装工具面：角色引用的 id 逐个解析成工具声明（顺序即角色表里的顺序）；
     /// 未知名**如实报错**（悬空引用是装配错误）。
@@ -40,11 +42,10 @@ pub trait Tools: Send + Sync {
     fn problems(&self) -> Vec<String>;
 }
 
-/// 工具能力的**执行面**（`service.rs` 实现）：别的能力要执行工具、要释放围栏授权，走这里；
-/// 出站端口 `SysIo` 由它持有（R12）；`ProcessRunner` / `FenceHost` 是 kernel 共享的机制端口。
-///
-/// 为什么 `SysIo` 的读写不在这里：它只被本能力自己的 domain（内置工具实现）用，
-/// 别人要的是"跑一个工具"，不是"按路径读写文件"。
+/// 目的：工具能力的**执行面**（`service.rs` 实现）：别的能力要执行工具、要释放围栏授权，走这里。
+/// 约束：出站端口 `SysIo` 由它持有（R12）；`ProcessRunner` / `FenceHost` 是 kernel 共享的机制端口。
+///   为什么 `SysIo` 的读写不在这里：它只被本能力自己的 domain（内置工具实现）用，
+///   别人要的是"跑一个工具"，不是"按路径读写文件"。
 pub trait ToolExec: Send + Sync {
     /// 执行一次**外部工具**（模块声明的那种）：围栏安装、守门进程、超时杀树、截断都在端口后面。
     /// 参数：`module` = 所属模块 id（按它取进程租约）；`env` = 该模块隐私字段的注入项（只经环境变量进进程，不进命令行）；

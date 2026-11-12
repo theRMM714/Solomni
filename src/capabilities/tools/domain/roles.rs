@@ -1,10 +1,9 @@
-//! 角色（身份）：**场景绑定的身份**，带提示词与系统工具面。
-//!
-//! 两张授权表 + 一张布局表（见 docs/tools/tools-and-roles.md 与 SYSTOOL.md）：
-//! - `systools/tools.yaml`：工具**是什么**（说明、参数契约、能否并发、能力）；
-//! - `systools/roles.yaml`：这个**身份有什么**（引用的系统工具 id + 提示词）；`names.yaml` 是布局的第三份（agent 实例名不得占用），不是角色授权。
-//!
-//! 代码里**不得**出现"哪个角色能调哪个工具"的判断：只有两个动作——按角色组装工具面、按表校验调用。
+//! 目的：角色（身份）——**场景绑定的身份**，带提示词与系统工具面。
+//! 管：两张授权表 + 一张布局表（见 docs/tools/tools-and-roles.md 与 SYSTOOL.md）：`systools/tools.yaml` 是工具**是什么**
+//!   （说明、参数契约、能否并发、能力）；`systools/roles.yaml` 是这个**身份有什么**（引用的系统工具 id + 提示词）；
+//!   `systools/names.yaml` 是布局的第三份（agent 实例名不得占用），不是角色授权。
+//! 不管：「哪个角色能调哪个工具」的判断——代码里**不得**出现；只有两个动作：按角色组装工具面、按表校验调用。
+//! 联动：表由 `detail/yaml_systools.rs` 读入，`service/` 持有并按角色发放工具面。
 
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -20,41 +19,39 @@ pub fn action_audit(caller: &str, action: &str, ok: bool, detail: &str) -> Strin
     format!("[动作] {} 调 {}：{}", caller, action, tail)
 }
 
-/// 一个角色：引用的系统工具 id + 提示词（提示词与工具面**同处声明**）。
-///
-/// 为什么同处：**信封模式**下该角色能用的信封清单要渲染进提示词——提示词与工具面分开声明必然漂。
+/// 目的：一个角色——引用的系统工具 id + 提示词（提示词与工具面**同处声明**）。
+///    为什么同处：**信封模式**下该角色能用的信封清单要渲染进提示词——提示词与工具面分开声明必然漂。
 #[derive(Debug, Clone, Deserialize)]
 pub struct RoleDecl {
-    /// 提示词在册子里的位置（`prompts/roles/<名字>.yaml`）。
+    /// 目的：提示词在册子里的位置（`prompts/roles/<名字>.yaml`）。
     #[serde(default)]
     pub prompt: String,
-    /// 这个角色能用的**系统工具 id**（模块工具按成员归属自动获得，不在这里）。
+    /// 目的：这个角色能用的**系统工具 id**（模块工具按成员归属自动获得，不在这里）。
     #[serde(default)]
     pub tools: Vec<String>,
-    /// 这个身份**能不能用它自己所属模块的工具**（默认否）。
-    /// 为什么要在表里：讨论席拿不到干活的手段（模块工具一律拒绝），执行席才发。
-    /// 少了这一格，"本回合该不该把模块工具写进提示词"就只能在代码里各判一次，迟早漂。
+    /// 目的：这个身份**能不能用它自己所属模块的工具**（默认否）。
+    ///    为什么要在表里：讨论席拿不到干活的手段（模块工具一律拒绝），执行席才发。
+    ///    少了这一格，"本回合该不该把模块工具写进提示词"就只能在代码里各判一次，迟早漂。
     #[serde(default)]
     pub module_tools: bool,
 }
 
-/// 角色表（key = 角色 id）。
+/// 目的：角色表（key = 角色 id）。
 pub type RoleTable = BTreeMap<String, RoleDecl>;
 
-/// 系统工具与角色（装配期读 `systools/` 得来）。
+/// 目的：系统工具与角色（装配期读 `systools/` 得来）。
 #[derive(Debug, Clone, Default)]
 pub struct SystemTools {
     pub tools: crate::capabilities::tools::api::ToolBook,
     pub roles: RoleTable,
-    /// 目录保留名（`systools/names.yaml`）：`session/<工作>/` 下由布局固定占用的目录名，
-    /// agent 实例名不得占用。名单不硬编码在代码里，布局改了就改表。
+    /// 目的：目录保留名（`systools/names.yaml`）：`session/<工作>/` 下由布局固定占用的目录名，
+    ///    agent 实例名不得占用。名单不硬编码在代码里，布局改了就改表。
     pub reserved_names: Vec<String>,
 }
 
 impl SystemTools {
-    /// 按角色组装工具面：角色引用的 id 逐个解析成工具声明（顺序即角色表里的顺序）。
-    ///
-    /// 未知名一律**如实报错**（不静默跳过）：悬空引用是装配错误，不是运行期可以忽略的小事。
+    /// 目的：按角色组装工具面：角色引用的 id 逐个解析成工具声明（顺序即角色表里的顺序）。
+    ///    未知名一律**如实报错**（不静默跳过）：悬空引用是装配错误，不是运行期可以忽略的小事。
     pub fn tool_face(
         &self,
         role: &str,
@@ -74,8 +71,8 @@ impl SystemTools {
         Ok(out)
     }
 
-    /// 一个角色这一回合的**工具面**（id 清单 + 是否给它自己模块的工具）。
-    /// 单一口径：装配期发放会话面、按回合切面（讨论席说话 / 执行席干活）都读它。
+    /// 目的：一个角色这一回合的**工具面**（id 清单 + 是否给它自己模块的工具）。
+    ///    单一口径：装配期发放会话面、按回合切面（讨论席说话 / 执行席干活）都读它。
     pub fn role_face(&self, role: &str) -> (Vec<String>, bool) {
         let ids = self
             .tool_face(role)
@@ -84,7 +81,7 @@ impl SystemTools {
         (ids, self.allows_module_tools(role))
     }
 
-    /// 这个身份能不能用它自己模块的工具（论据：角色表的 module_tools）。
+    /// 目的：这个身份能不能用它自己模块的工具（论据：角色表的 module_tools）。
     pub fn allows_module_tools(&self, role: &str) -> bool {
         self.roles
             .get(role)

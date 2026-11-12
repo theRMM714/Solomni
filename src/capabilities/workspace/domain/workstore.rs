@@ -1,25 +1,22 @@
-//! 共享区**版本化工作区**的纯逻辑：内容寻址的提交记录、每个 agent 的拉取基线（index）、
-//! 文件级三方比较、路径校验与路径展开。
-//!
-//! 规则（见 PRODUCT.md 的「共享区是版本化工作区」与 docs/workspace 的细则）：
-//! - 共享主副本 `work/` 只在提交时被改写；agent 只写自己的沙箱，pull 把主副本内容拉到沙箱同相对路径；
-//! - 提交的基准是**这个 agent 上次拉取的那一版**（index），不是全局的 merge-base——
-//!   单条共享主线 + 选择性拉取，前者才是它真正看过的版本；
-//! - 两边都改了同一文件且结果不同 = 冲突，整个提交拒绝，不做自动合并。
-//!
-//! 本文件没有 IO，也不加 trait（纯派生逻辑）。
+//! 目的：共享区**版本化工作区**的纯逻辑：内容寻址的提交记录、每个 agent 的拉取基线（index）、文件级三方比较、路径校验与路径展开。
+//! 管：规则（见 PRODUCT.md 的「共享区是版本化工作区」与 docs/workspace 的细则）：共享主副本 `work/` 只在提交时被改写；
+//!   agent 只写自己的沙箱，pull 把主副本内容拉到沙箱同相对路径；提交基准是**这个 agent 上次拉取的那一版**（index），
+//!   不是全局的 merge-base——单条共享主线 + 选择性拉取，前者才是它真正看过的版本；两边都改了同一文件且结果不同 = 冲突，
+//!   整个提交拒绝，不做自动合并。
+//! 不管：IO 与 trait（本文件是纯派生逻辑，不加 trait）。
+//! 联动：`domain/asset.rs` 的 `FileVersion`（内容指纹）与 workspace 能力内部各模块。
 
 use crate::capabilities::workspace::domain::asset::FileVersion;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-/// 每个 agent 的拉取基线：共享区相对路径 → 当时的内容指纹。
+/// 目的：每个 agent 的拉取基线：共享区相对路径 → 当时的内容指纹。
 pub type Index = BTreeMap<String, String>;
-/// 一个提交点的整棵树：共享区相对路径 → 内容指纹。
+/// 目的：一个提交点的整棵树：共享区相对路径 → 内容指纹。
 pub type Tree = BTreeMap<String, String>;
 
-/// 一次改动是新增、修改还是删除。
+/// 目的：一次改动是新增、修改还是删除。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ChangeKind {
@@ -28,18 +25,18 @@ pub enum ChangeKind {
     Delete,
 }
 
-/// 提交记录里的一条改动。
+/// 目的：提交记录里的一条改动。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Change {
     pub path: String,
     pub kind: ChangeKind,
-    /// 新内容的指纹；删除为空串。
+    /// 目的：新内容的指纹；删除为空串。
     #[serde(default)]
     pub hash: String,
 }
 
-/// 提交锚：这个提交点是**哪个会话（agent 实例名）的哪一行**触发的。
-/// **空 agent = 主会话/用户投喂**。回档按它把共享区物化回某一行那一刻。
+/// 目的：提交锚：这个提交点是**哪个会话（agent 实例名）的哪一行**触发的。
+///    **空 agent = 主会话/用户投喂**。回档按它把共享区物化回某一行那一刻。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommitAnchor {
     #[serde(default)]
@@ -69,7 +66,7 @@ pub enum Source {
 
 /// 目的：一个提交点（提交记录 + 该点的整棵树）。
 /// 约束：树按"根 + 增量"落盘——`tree` 只在根提交上是 `Some`，其余提交只记 `changes`，
-/// 读树时沿 `parent` 回到最近的根再生；两种形态都能读，旧提交（带整棵树）天然是根。
+///    读树时沿 `parent` 回到最近的根再生；两种形态都能读，旧提交（带整棵树）天然是根。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Commit {
     pub id: u64,
@@ -77,9 +74,9 @@ pub struct Commit {
     /// 目的：分支分叉点——这条提交线从哪个提交分出来（主线提交 = parent）。
     #[serde(default)]
     pub base: u64,
-    /// 作者：agent 实例名，或 `user`（界面投喂）。
+    /// 目的：作者：agent 实例名，或 `user`（界面投喂）。
     pub author: String,
-    /// 提交所属会话（界面投喂为空串）。
+    /// 目的：提交所属会话（界面投喂为空串）。
     #[serde(default)]
     pub session: String,
     pub time: i64,
@@ -94,7 +91,7 @@ pub struct Commit {
     /// 目的：写下这条提交的来源。
     #[serde(default)]
     pub source: Source,
-    /// 转录行锚（没有锚 = None，按"总在回档点之前"保守处理）。
+    /// 目的：转录行锚（没有锚 = None，按"总在回档点之前"保守处理）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anchor: Option<CommitAnchor>,
 }
@@ -129,7 +126,7 @@ pub struct Ref {
     pub heads: BTreeMap<String, Option<u64>>,
 }
 
-/// 冲突的四种形态（回执要能点名"哪种冲突"，不是笼统一句"冲突"）。
+/// 目的：冲突的四种形态（回执要能点名"哪种冲突"，不是笼统一句"冲突"）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Conflict {
     /// 两边都改了同一文件，结果不同。
@@ -156,14 +153,14 @@ impl Conflict {
     }
 }
 
-/// 冲突要能点名是**哪个路径**的哪种冲突（回执据此让 agent 逐条处理）。
+/// 目的：冲突要能点名是**哪个路径**的哪种冲突（回执据此让 agent 逐条处理）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConflictAt {
     pub path: String,
     pub kind: Conflict,
 }
 
-/// 一条拉取的判定。
+/// 目的：一条拉取的判定。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PullVerdict {
     /// 把主副本这一版写进沙箱，并更新基线。
@@ -180,8 +177,8 @@ pub enum PullVerdict {
     NoChange,
 }
 
-/// 校验一条共享区相对路径：非空、以 `/` 分隔、无空段、无 `.` / `..`、无控制字符、无反斜杠。
-/// 只做路径本身的事；落在哪个根之内由调用方用 `join_rel` 之后再校验。
+/// 目的：校验一条共享区相对路径：非空、以 `/` 分隔、无空段、无 `.` / `..`、无控制字符、无反斜杠。
+///    只做路径本身的事；落在哪个根之内由调用方用 `join_rel` 之后再校验。
 pub fn clean_rel(raw: &str) -> Result<String, String> {
     if raw.is_empty() {
         return Err("路径不能为空".to_string());
@@ -217,7 +214,7 @@ pub fn validate_paths(paths: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// 把一条已校验的相对路径拼到一个根下（一律用路径组件，禁止把分隔符写进字符串再拼）。
+/// 目的：把一条已校验的相对路径拼到一个根下（一律用路径组件，禁止把分隔符写进字符串再拼）。
 pub fn join_rel(root: &Path, rel: &str) -> Result<PathBuf, String> {
     let clean = clean_rel(rel)?;
     let mut p = root.to_path_buf();
@@ -227,8 +224,8 @@ pub fn join_rel(root: &Path, rel: &str) -> Result<PathBuf, String> {
     Ok(p)
 }
 
-/// 把 `paths`（文件或文件夹）展开成具体文件集合：路径本身是文件就取它，
-/// 是文件夹就取该前缀下的全部文件（available 是候选文件全集）。返回（展开后的路径，未命中的请求）。
+/// 目的：把 `paths`（文件或文件夹）展开成具体文件集合：路径本身是文件就取它，
+///    是文件夹就取该前缀下的全部文件（available 是候选文件全集）。返回（展开后的路径，未命中的请求）。
 pub fn expand_paths(paths: &[String], available: &BTreeSet<String>) -> (Vec<String>, Vec<String>) {
     let mut out: BTreeSet<String> = BTreeSet::new();
     let mut missing: Vec<String> = Vec::new();
@@ -288,8 +285,8 @@ pub struct CommitPlan {
     pub unchanged: Vec<(String, Unchanged)>,
 }
 
-/// 文件级三方比较（提交侧）：`locals` = 路径 → 要写的**内容指纹**（`None` = 显式删除）。
-/// Ok(changes) 为空 = 没有可提交的改动，`unchanged` 逐条给出原因；Err = 冲突清单（**整个提交都拒绝**）。
+/// 目的：文件级三方比较（提交侧）：`locals` = 路径 → 要写的**内容指纹**（`None` = 显式删除）。
+///    Ok(changes) 为空 = 没有可提交的改动，`unchanged` 逐条给出原因；Err = 冲突清单（**整个提交都拒绝**）。
 pub fn plan_commit(
     index: &Index,
     tree: &Tree,
@@ -370,7 +367,7 @@ pub fn plan_commit(
     }
 }
 
-/// 文件级三方比较（拉取侧）：给哈希（本地文件的内容指纹），返回该路径该怎么处理。
+/// 目的：文件级三方比较（拉取侧）：给哈希（本地文件的内容指纹），返回该路径该怎么处理。
 pub fn pull_verdict(base: Option<&str>, head: Option<&str>, local: Option<&str>) -> PullVerdict {
     let Some(head) = head else {
         return PullVerdict::Missing;
@@ -703,7 +700,7 @@ pub struct GcReport {
     pub removed_commits: usize,
 }
 
-/// 提交点摘要（work_status 用）。
+/// 目的：提交点摘要（work_status 用）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CommitSummary {
     pub id: u64,
@@ -723,7 +720,7 @@ impl From<&Commit> for CommitSummary {
     }
 }
 
-/// 一条路径在 agent 眼里的状态。
+/// 目的：一条路径在 agent 眼里的状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatusState {
     /// 共享区有，但本 agent 没拉过，沙箱里也没有同名文件。
@@ -762,14 +759,14 @@ impl StatusState {
     }
 }
 
-/// work_status 的逐条结果。
+/// 目的：work_status 的逐条结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusEntry {
     pub path: String,
     pub state: StatusState,
 }
 
-/// 一条路径在"基线 / 上游 / 本地"下的状态（只读展示用，与提交判定分开）。
+/// 目的：一条路径在"基线 / 上游 / 本地"下的状态（只读展示用，与提交判定分开）。
 pub fn status_of(base: Option<&str>, head: Option<&str>, local: Option<&str>) -> StatusState {
     match (base, head) {
         (None, None) => match local {
@@ -813,40 +810,40 @@ pub fn status_of(base: Option<&str>, head: Option<&str>, local: Option<&str>) ->
     }
 }
 
-/// work_pull 的逐条结果（调用方据此渲染回执）。
+/// 目的：work_pull 的逐条结果（调用方据此渲染回执）。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PullReport {
-    /// 拉取后到的主副本提交点。
+    /// 目的：拉取后到的主副本提交点。
     pub commit: u64,
-    /// 写进沙箱并更新基线的路径。
+    /// 目的：写进沙箱并更新基线的路径。
     pub updated: Vec<String>,
-    /// 沙箱里已经是主副本这一版：只更新基线。
+    /// 目的：沙箱里已经是主副本这一版：只更新基线。
     pub already: Vec<String>,
-    /// 什么都没变（上游没动）。
+    /// 目的：什么都没变（上游没动）。
     pub no_change: Vec<String>,
-    /// 沙箱里已有未跟踪 / 无关的同名文件，未覆盖。
+    /// 目的：沙箱里已有未跟踪 / 无关的同名文件，未覆盖。
     pub occupied: Vec<String>,
     /// 目的：本地已改、上游也改了，未覆盖；逐条带冲突类型。
     pub conflicts: Vec<ConflictAt>,
-    /// 主副本里没有这些路径。
+    /// 目的：主副本里没有这些路径。
     pub missing: Vec<String>,
     /// 目的：工作区磁盘内容与 head 不一致（外部改动或删除）；这些路径未拉取，先 `work_sync`。
     pub external: Vec<String>,
 }
 
-/// 一次提交的请求（收口成对象：路径 + 显式删除 + 说明 + 时间）。
+/// 目的：一次提交的请求（收口成对象：路径 + 显式删除 + 说明 + 时间）。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CommitRequest {
     pub paths: Vec<String>,
     pub deletes: Vec<String>,
     pub message: String,
-    /// 提交时间（由调用方给：本能力不持时钟）。
+    /// 目的：提交时间（由调用方给：本能力不持时钟）。
     pub time: i64,
-    /// 提交锚的行号（调用方给：这一席下一条转录行的 id）。
+    /// 目的：提交锚的行号（调用方给：这一席下一条转录行的 id）。
     pub line: u64,
 }
 
-/// work_commit 的结果。
+/// 目的：work_commit 的结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitReport {
     pub id: u64,
@@ -866,11 +863,11 @@ pub struct SyncReport {
     pub missing: Vec<String>,
 }
 
-/// work_status 的结果。
+/// 目的：work_status 的结果。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StatusReport {
     pub head: Option<CommitSummary>,
-    /// 主副本在 head 上的路径清单（有上限；tree_truncated = 如实标注是否截断）。
+    /// 目的：主副本在 head 上的路径清单（有上限；tree_truncated = 如实标注是否截断）。
     pub tree: Vec<String>,
     pub tree_truncated: bool,
     pub entries: Vec<StatusEntry>,
@@ -882,7 +879,7 @@ pub struct StatusReport {
     pub local_only_truncated: bool,
     /// 目的：工作区磁盘与 head 不一致的路径（外部改动 / 删除；先 work_sync）。
     pub external: Vec<String>,
-    /// 最近几条提交（新→旧）。
+    /// 目的：最近几条提交（新→旧）。
     pub recent: Vec<CommitSummary>,
 }
 
@@ -932,7 +929,7 @@ mod tests {
 
     #[test]
     fn commit_rules_cover_add_modify_delete_and_noop() {
-        // 主副本有 f1（h1），本地改成 h2 → modify。
+        // 主副本有 f1（h1），本地是 h2 → modify。
         let plan = plan_commit(
             &index(&[("f1", "h1")]),
             &tree(&[("f1", "h1")]),

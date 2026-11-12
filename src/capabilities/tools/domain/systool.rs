@@ -1,8 +1,7 @@
-//! 核心自带的内置工具：read / write / edit / search。
-//! 策略在 conductor（名字固定、放行、寻址、根内校验、参数校验、改动前的"读过"证据）；回执文案在本文件与调用点；机制在 SysIo 端口（适配层）。
-//! **参数契约不在本文件里**：声明在 systools/tools.yaml 的 tools，本文件只按声明校验、取缺省值与拼回执。
-//! 存在的理由：读盘落盘不经过任何外部进程，编码问题不进本程序——模型自己看内容自己决定。
-//! 路径一律是真实绝对路径（根目录经提示词册如实告知）；模块声明的外部工具与内置工具用同一套路径。
+//! 目的：核心自带内置工具（read / write / edit / patch / delete / list / search）的纯规则——参数校验、取缺省值、拼回执、观察账本。
+//! 管：按 `systools/tools.yaml` 的声明校验参数、取缺省值与拼回执；**参数契约不在本文件里**（声明在工具表，本文件只按声明行事）。
+//! 不管：执行策略（名字固定、放行、寻址、根内校验、改动前的"读过"证据）在 conductor；读写机制在 `SysIo` 端口（适配层）。
+//! 联动：由 `service/systool.rs` 调用；路径一律真实绝对路径（根目录经提示词册如实告知），模块声明的外部工具与内置工具同一套路径。
 
 use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::tools::api::{ArgFault, ToolSchema};
@@ -10,7 +9,7 @@ use crate::capabilities::workspace::api::Sandbox;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// 一次工具执行结果的形状：**归 kernel 共享**——内置、模块与核心自有工具同一形状（R6）。
+/// 目的：一次工具执行结果的形状：**归 kernel 共享**——内置、模块与核心自有工具同一形状（R6）。
 pub use crate::kernel::api::ToolOutcome;
 
 pub const READ: &str = "read";
@@ -23,21 +22,21 @@ pub const SEARCH: &str = "search";
 /// 目的：执行类系统工具——一次性 shell（机制在 kernel 的 ProcessRunner / guest，不在 SysIo）。
 pub const SHELL: &str = "shell";
 
-/// 单次读取回传的字符上限（超出如实截断，并在回执里给出接着读的 offset）。
+/// 目的：单次读取回传的字符上限（超出如实截断，并在回执里给出接着读的 offset）。
 pub const MAX_READ_CHARS: usize = 60_000;
-/// 回执里单行的字符上限（长行截断，避免一行吃掉整个上下文）。
+/// 目的：回执里单行的字符上限（长行截断，避免一行吃掉整个上下文）。
 pub const MAX_READ_LINE_CHARS: usize = 2_000;
-/// 单次 search 回传的命中行数上限（超出如实截断；命中总数照实报）。
+/// 目的：单次 search 回传的命中行数上限（超出如实截断；命中总数照实报）。
 pub const MAX_SEARCH_HITS: usize = 200;
-/// 单条命中行回传的字符上限（长行截断，避免一行吃掉整个上下文）。
+/// 目的：单条命中行回传的字符上限（长行截断，避免一行吃掉整个上下文）。
 pub const MAX_SEARCH_LINE_CHARS: usize = 300;
 
-/// 执行席的**回报**工具：不碰文件，只把"做完了什么"承载成一次工具调用。
-/// 为什么是工具而不是正文 JSON：回报会驱动核心（判节点完成），属于核心操作（见 tools-and-roles.md）。
+/// 目的：执行席的**回报**工具：不碰文件，只把"做完了什么"承载成一次工具调用。
+///    为什么是工具而不是正文 JSON：回报会驱动核心（判节点完成），属于核心操作（见 tools-and-roles.md）。
 pub const REPORT: &str = "submit_report";
 
-/// 内置工具名（保留名）。
-/// 与 systools/tools.yaml 的 tools 是同一份名单，测试「builtin_tool_book_is_the_one_source_of_names_and_paths」锁死两者一致。
+/// 目的：内置工具名（保留名）。
+///    与 systools/tools.yaml 的 tools 是同一份名单，测试「builtin_tool_book_is_the_one_source_of_names_and_paths」锁死两者一致。
 pub fn is_builtin(name: &str) -> bool {
     name == READ
         || name == WRITE
@@ -69,9 +68,9 @@ pub fn names() -> Vec<String> {
     ]
 }
 
-/// patch 在**原生通道**上的声明：参数只有一个 body。
-/// 原生协议要求参数是 JSON 对象，所以补丁正文当字符串值传——转义交给供应商的解码器，
-/// 模型不必自己写转义（这正是原生通道相对手写信封的收益）。
+/// 目的：patch 在**原生通道**上的声明：参数只有一个 body。
+///    原生协议要求参数是 JSON 对象，所以补丁正文当字符串值传——转义交给供应商的解码器，
+///    模型不必自己写转义（这正是原生通道相对手写信封的收益）。
 pub fn patch_decl() -> crate::capabilities::llm::api::ToolDecl {
     crate::capabilities::llm::api::ToolDecl {
         name: PATCH.to_string(),
@@ -89,14 +88,14 @@ pub fn patch_decl() -> crate::capabilities::llm::api::ToolDecl {
     }
 }
 
-/// 自由格式工具：输入不是 JSON 参数，而是**信封之后的那段原样文本**（不必转义）。
-/// 存在的理由：把大段内容塞进 JSON 字符串要转义换行/引号，是真实会话里反复出事的点。
+/// 目的：自由格式工具：输入不是 JSON 参数，而是**信封之后的那段原样文本**（不必转义）。
+///    存在的理由：把大段内容塞进 JSON 字符串要转义换行/引号，是真实会话里反复出事的点。
 pub fn is_freeform(name: &str) -> bool {
     name == PATCH
 }
 
-/// 工具说明块的**素材**（装配期算一次，随回合注入）：patch 语法、模块工具清单、模块工具参数。
-/// 为什么在这里算：它们只与这个 agent 的沙箱与模块有关、与回合无关；而回合执行路径上拿不到提示词册。
+/// 目的：工具说明块的**素材**（装配期算一次，随回合注入）：patch 语法、模块工具清单、模块工具参数。
+///    为什么在这里算：它们只与这个 agent 的沙箱与模块有关、与回合无关；而回合执行路径上拿不到提示词册。
 #[derive(Debug, Clone, Default)]
 pub struct ToolNotes {
     pub patch_guide: String,
@@ -136,10 +135,10 @@ pub fn tool_notes(
     }
 }
 
-/// 观察账本：**本次会话里核心见过哪些文件的什么内容**。
-/// 它存在的唯一理由：整份覆盖（write）会丢掉没读到的内容，所以要求"先完整读过、且读后没被改过"。
-/// 语义边界：账本随会话（AgentSession）保存；回档（rewind）清空——转录里那段读取证据被截掉了，证据随之作废；
-/// 重启后按落盘重建的会话不带账本（从零开始，模型重新读一遍即可）。edit 不需要账本：old_string 本身就是要改的那段原文。
+/// 目的：观察账本：**本次会话里核心见过哪些文件的什么内容**。
+///    它存在的唯一理由：整份覆盖（write）会丢掉没读到的内容，所以要求"先完整读过、且读后没被改过"。
+///    语义边界：账本随会话（AgentSession）保存；回档（rewind）清空——转录里那段读取证据被截掉了，证据随之作废；
+///    重启后按落盘重建的会话不带账本（从零开始，模型重新读一遍即可）。edit 不需要账本：old_string 本身就是要改的那段原文。
 #[derive(Debug, Clone, Default)]
 pub struct Observations {
     seen: BTreeMap<PathBuf, Seen>,
@@ -162,7 +161,7 @@ enum Seen {
 }
 
 impl Observations {
-    /// 回档（删除模式）时清空：转录里那段读取证据已经不存在了。
+    /// 目的：回档（删除模式）时清空：转录里那段读取证据已经不存在了。
     pub fn clear(&mut self) {
         self.seen.clear();
         self.written.clear();
@@ -195,8 +194,8 @@ impl Observations {
         self.removed.insert(path.to_path_buf());
     }
 
-    /// 记一次读取：完整读到 = 记指纹（可覆盖）；不完整 = 记下"只读到一部分"的原因。
-    /// 不完整的读取**不覆盖**已有的完整记录（读到一半不会让已知变成未知）。
+    /// 目的：记一次读取：完整读到 = 记指纹（可覆盖）；不完整 = 记下"只读到一部分"的原因。
+    ///    不完整的读取**不覆盖**已有的完整记录（读到一半不会让已知变成未知）。
     pub(crate) fn note_read(&mut self, path: &Path, complete: bool, why: String, hash: u64) {
         if complete {
             self.seen.insert(path.to_path_buf(), Seen::Known(hash));
@@ -207,15 +206,15 @@ impl Observations {
         }
     }
 
-    /// 记一次写入：文件内容由核心产生，所以核心确切知道它现在是什么。
+    /// 目的：记一次写入：文件内容由核心产生，所以核心确切知道它现在是什么。
     pub(crate) fn note_written(&mut self, path: &Path, hash: u64) {
         self.seen.insert(path.to_path_buf(), Seen::Known(hash));
         self.written.insert(path.to_path_buf());
     }
 
-    /// 合并一个**并发分支**的账本（分支里只跑声明可并发的只读工具）。
-    /// 规则与逐个记账一致：完整读到记为所见、部分读到只补空白（读到一半不会让已知变成未知）。
-    /// 调用方**必须按原始调用顺序**合并——那样并发批次与串行执行的结果完全相同。
+    /// 目的：合并一个**并发分支**的账本（分支里只跑声明可并发的只读工具）。
+    ///    规则与逐个记账一致：完整读到记为所见、部分读到只补空白（读到一半不会让已知变成未知）。
+    ///    调用方**必须按原始调用顺序**合并——那样并发批次与串行执行的结果完全相同。
     pub fn absorb(&mut self, branch: &Observations) {
         for (path, seen) in &branch.seen {
             match seen {
@@ -248,7 +247,7 @@ impl Observations {
     }
 }
 
-/// 内容指纹（FNV-1a 64 位）：只用来判"读过的和现在的是不是同一份"，不做安全用途。
+/// 目的：内容指纹（FNV-1a 64 位）：只用来判"读过的和现在的是不是同一份"，不做安全用途。
 pub(crate) fn fnv1a(s: &str) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in s.as_bytes() {
@@ -258,12 +257,12 @@ pub(crate) fn fnv1a(s: &str) -> u64 {
     h
 }
 
-/// 字节位置对应的行号（从 1 数起）。
+/// 目的：字节位置对应的行号（从 1 数起）。
 pub(crate) fn line_of(s: &str, at: usize) -> usize {
     s[..at].matches('\n').count() + 1
 }
 
-/// 字面匹配的全部命中位置（不重叠）。
+/// 目的：字面匹配的全部命中位置（不重叠）。
 pub(crate) fn find_all(hay: &str, needle: &str) -> Vec<usize> {
     let mut out: Vec<usize> = Vec::new();
     if needle.is_empty() {
@@ -278,7 +277,7 @@ pub(crate) fn find_all(hay: &str, needle: &str) -> Vec<usize> {
     out
 }
 
-/// "是不是只差空白"：按行比较（每行内空白折叠）。命中则给（行号, 该行原文）——模型据此改对缩进。
+/// 目的："是不是只差空白"：按行比较（每行内空白折叠）。命中则给（行号, 该行原文）——模型据此改对缩进。
 pub(crate) fn near_match(hay: &str, old: &str) -> Option<(usize, String)> {
     fn flat(line: &str) -> String {
         line.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -300,7 +299,7 @@ pub(crate) fn near_match(hay: &str, old: &str) -> Option<(usize, String)> {
     None
 }
 
-/// 整份覆盖已存在文件的证据检查：本次会话里**完整读过**它、且读后没被改过（write 与 patch 的 Add 共用）。
+/// 目的：整份覆盖已存在文件的证据检查：本次会话里**完整读过**它、且读后没被改过（write 与 patch 的 Add 共用）。
 pub(crate) fn overwrite_check(
     obs: &Observations,
     spec: &str,
@@ -326,7 +325,7 @@ pub(crate) fn overwrite_check(
     }
 }
 
-/// 整份覆盖已有文件时，内容按原文件的行尾风格写（免得把 CRLF 文件改成 LF）。
+/// 目的：整份覆盖已有文件时，内容按原文件的行尾风格写（免得把 CRLF 文件改成 LF）。
 pub(crate) fn align_eol(content: &str, current: &str) -> String {
     if current.contains("\r\n") {
         content.replace('\n', "\r\n")
@@ -335,12 +334,12 @@ pub(crate) fn align_eol(content: &str, current: &str) -> String {
     }
 }
 
-/// 某一块不成立的回执（整体不写盘，所以措辞要直说这一点）。
+/// 目的：某一块不成立的回执（整体不写盘，所以措辞要直说这一点）。
 pub(crate) fn block_fault(n: usize, why: String) -> String {
     format!("[patch] 第 {} 块不成立，**没有任何文件被写入**：{}", n, why)
 }
 
-/// patch 解析失败的回执（每一类都说清事实）。
+/// 目的：patch 解析失败的回执（每一类都说清事实）。
 pub(crate) fn patch_fault(f: &crate::capabilities::tools::api::Fault) -> String {
     use crate::capabilities::tools::api::Fault as F;
     match f {
@@ -375,7 +374,7 @@ pub(crate) fn patch_fault(f: &crate::capabilities::tools::api::Fault) -> String 
     }
 }
 
-/// 一处改动失败的原因句（外面再套"第 N 块第 k 处"）。
+/// 目的：一处改动失败的原因句（外面再套"第 N 块第 k 处"）。
 pub(crate) fn edit_fault_reason(f: &crate::capabilities::tools::api::EditFault) -> String {
     use crate::capabilities::tools::api::EditFault as E;
     match f {
@@ -397,7 +396,7 @@ pub(crate) fn edit_fault_reason(f: &crate::capabilities::tools::api::EditFault) 
     }
 }
 
-/// 参数不符的回执：说清是哪一条不合（由声明判定），再把工具签名原样发回去。
+/// 目的：参数不符的回执：说清是哪一条不合（由声明判定），再把工具签名原样发回去。
 pub fn arg_fault_text(name: &str, schema: &ToolSchema, fault: &ArgFault) -> String {
     let why = match fault {
         ArgFault::NotObject => "args 必须是一个参数对象".to_string(),
@@ -412,7 +411,7 @@ pub fn arg_fault_text(name: &str, schema: &ToolSchema, fault: &ArgFault) -> Stri
     format!("{}。{}", why, signature)
 }
 
-/// 越权调用：这个席位没有这个工具（角色表决定工具面）——**如实拒绝**，不执行。
+/// 目的：越权调用：这个席位没有这个工具（角色表决定工具面）——**如实拒绝**，不执行。
 pub fn refuse(name: &str) -> ToolOutcome {
     fail(format!(
         "这个席位没有工具 {}：角色表没发给它（越权调用一律不执行）。",
@@ -427,7 +426,7 @@ pub(crate) fn fail(msg: String) -> ToolOutcome {
     }
 }
 
-/// 按字符截断（不劈开 UTF-8）；返回（文本, 是否截断）。
+/// 目的：按字符截断（不劈开 UTF-8）；返回（文本, 是否截断）。
 pub(crate) fn truncate_chars(s: &str, max: usize) -> (String, bool) {
     if s.chars().count() <= max {
         return (s.to_string(), false);

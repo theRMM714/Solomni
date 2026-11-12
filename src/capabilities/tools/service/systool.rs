@@ -1,15 +1,15 @@
-//! 内置工具的**执行编排**：驱动 `SysIo` 读写盘上的文件（read / write / edit / patch / delete / list / search）。
-//!
-//! 纯规则在 `domain/systool.rs`（参数校验、回执文案、观察账本、`ToolOutcome`）——本文件只调用它们；
-//! 因此这里引 `ports`（IO 机制），`domain/` 不引（见 ARCHITECTURE.md §九.3）。
+//! 目的：内置工具的**执行编排**——驱动 `SysIo` 读写盘上的文件（read / write / edit / patch / delete / list / search）。
+//! 管：解析 JSON → 认工具 → 按声明校验参数 → 补缺省 → 寻址 → 调用 `domain` 的纯规则。
+//! 不管：纯规则（参数校验、回执文案、观察账本、`ToolOutcome`）在 `domain/systool.rs`。
+//! 联动：引 `ports` 的 `SysIo` 做 IO；`domain/` 不引 `ports`（见 ARCHITECTURE.md §九.3）。
 
 use crate::capabilities::tools::domain::systool::*;
 use crate::capabilities::tools::ports::SysIo;
 use crate::capabilities::workspace::api::{Place, Sandbox};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-/// 执行一次内置工具调用（args_json = 模型信封里的 args 对象）。
-/// 顺序：解析 JSON → 认工具 → 按声明校验参数 → 补缺省 → 寻址（内置工具一律需要一个 path）。
+/// 目的：执行一次内置工具调用（`args_json` = 模型信封里的 args 对象）。
+/// 约束：顺序是解析 JSON → 认工具 → 按声明校验参数 → 补缺省 → 寻址（内置工具一律需要一个 path）。
 pub fn execute(
     sb: &Sandbox,
     book: &crate::capabilities::tools::api::ToolBook,

@@ -75,7 +75,7 @@ const MAX_LOG_LIMIT: usize = 200;
 /// 一条提交详情里最多列出的改动条数（超出如实标注截断）。
 const MAX_COMMIT_CHANGES: usize = 500;
 
-/// 工作区能力：持四个端口，按用例答话。
+/// 目的：工作区能力——持四个端口，按用例答话。
 pub struct WorkspaceService {
     dirs: Arc<dyn Workdirs + Send + Sync>,
     store: Arc<dyn WorkStore + Send + Sync>,
@@ -87,7 +87,7 @@ pub struct WorkspaceService {
 }
 
 impl WorkspaceService {
-    /// 组合根专用：单文件上限取生产默认值。
+    /// 目的：组合根专用构造——单文件上限取生产默认值。
     pub fn new(
         dirs: Arc<dyn Workdirs + Send + Sync>,
         store: Arc<dyn WorkStore + Send + Sync>,
