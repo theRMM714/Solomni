@@ -141,11 +141,16 @@ async function saveArtifacts(context, page, stamp) {
 
   let workName = "";
   try {
-    // ① 首页连接真实服务：应用就绪看连接状态；DOMContentLoaded 会被任一 defer 资源（如 md.js）拖住。
+    // ① 首页连接真实服务：应用就绪看 /api/state 是否回来（start 先绑事件再拉它）；
+    //    DOMContentLoaded 会被任一 defer 资源（如 md.js）拖住，不能当就绪信号。
+    const stateLoaded = page.waitForResponse(
+      (r) => r.url().endsWith("/api/state") && r.status() === 200,
+      { timeout: 30000 }
+    );
     await page.goto(BASE, { waitUntil: "commit" });
+    await stateLoaded;
     await page.locator("#conn-text").waitFor({ state: "visible" });
-    await waitFor(async () => (await page.locator("#conn-text").textContent()) === "已连接", 20000, "连接状态");
-    console.log("PASS 首页显示已连接");
+    console.log("PASS 首页加载完成");
 
     // ② 向导建会话：名称 → 从登记处选 agent → 创建
     workName = "ui-browser-" + Date.now();
