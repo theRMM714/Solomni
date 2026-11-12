@@ -1,7 +1,7 @@
 //! 目的：授权日志——每条 ACL 改动先记进台账，再动本机权限项。
 //! 管：容器 profile、根外授权摘要、根内文件快照的记账，按 (SID, 路径, 权限) 合并同一条，以及授权写后的核对。
 //! 不管：ACL 的读写与还原（acl.rs），也不管台账文件本身的锁与落盘（store.rs）。
-//! 联动：windows/mod.rs 的 prepare_fence 逐条调用；盘上格式定义在 store.rs。
+//! 联动：windows.rs 的 prepare_fence 逐条调用；盘上格式定义在 store.rs。
 
 use super::super::super::Owner;
 use super::super::*;
@@ -185,10 +185,8 @@ pub(crate) fn grant_one_journaled(
             // 写失败 = 这一个字节都没改：grant_verified 只在**写成功**后负责还原。
             // 这里不再按“有没有该 SID 的 ACE”去撤销——预存的部分 ACE 会被误当成自己写的。
             let mut journal: Option<String> = None;
-            if owner_added {
-                if let Err(x) = journal_release_grant(home, rec, sid_text, path, owner) {
-                    journal = Some(x);
-                }
+            if owner_added && let Err(x) = journal_release_grant(home, rec, sid_text, path, owner) {
+                journal = Some(x);
             }
             if inside && snap_created && !rec.grants.iter().any(|g| g.path == key) {
                 rec.snapshots.retain(|s| s.path != key);

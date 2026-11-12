@@ -4,14 +4,14 @@
 //! 联动：呈现层经 conductor 的队列代理调 `HistoryOps`；别的能力经 `History` 造会话、追流水、读元信息、删会话。
 
 pub use crate::capabilities::session::domain::decisions::{
-    issued_in, AnswerSlot, Answered, DecisionDesk, DecisionDoor, GateTicket, SlotWake,
+    AnswerSlot, Answered, DecisionDesk, DecisionDoor, GateTicket, SlotWake, issued_in,
 };
 pub use crate::capabilities::session::domain::events::{
-    idle, interrupted_note, last_compaction, qualify, stopped_note, working, CheckView,
-    ContextUsage, DecisionCard, DecisionOption, DecisionQueue, DecisionWaiter, LineView, Live,
-    Pending, SessionEvent, ToolCallView, OPT_ASK_REPLY, OPT_BEGIN, OPT_BEGIN_ALLOW,
-    OPT_NODE_REWORK, OPT_NODE_SAY, OPT_PLAN_SAY, OPT_PLAN_START, OPT_SLATE_CANCEL,
-    OPT_SLATE_CONFIRM, OPT_TOOL_ALLOW, OPT_TOOL_ALLOW_TURN, OPT_TOOL_DENY,
+    CheckView, ContextUsage, DecisionCard, DecisionOption, DecisionQueue, DecisionWaiter, LineView,
+    Live, OPT_ASK_REPLY, OPT_BEGIN, OPT_BEGIN_ALLOW, OPT_NODE_REWORK, OPT_NODE_SAY, OPT_PLAN_SAY,
+    OPT_PLAN_START, OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM, OPT_TOOL_ALLOW, OPT_TOOL_ALLOW_TURN,
+    OPT_TOOL_DENY, Pending, SessionEvent, ToolCallView, idle, interrupted_note, last_compaction,
+    qualify, stopped_note, working,
 };
 pub use crate::capabilities::session::domain::history::{
     AgentMeta, Delegation, HistoryView, RunState, SessionMeta, WorkspaceBinding,
@@ -21,12 +21,12 @@ pub use crate::capabilities::session::domain::rewind::{
     next_line_id, rewind_marks, truncate_events, turn_of_line,
 };
 pub use crate::capabilities::session::domain::session::{
-    delta_visible, freshness_view, keep_whole_replies, stream_piece, summary_message,
-    unique_work_name, AgentSession, CompactChatFactory, CompactChatSpec, CompactionPlan, ReadAt,
-    SessionParams, TurnRun,
+    AgentSession, CompactChatFactory, CompactChatSpec, CompactionPlan, ReadAt, SessionParams,
+    TurnRun, delta_visible, freshness_view, keep_whole_replies, stream_piece, summary_message,
+    unique_work_name,
 };
 pub use crate::capabilities::session::domain::tools::{
-    last_shell, service_ops_for_modules, tool_table, MemberTools, ServiceOp, ShellLive, ShellSlot,
+    MemberTools, ServiceOp, ShellLive, ShellSlot, last_shell, service_ops_for_modules, tool_table,
 };
 
 // 核心操作回路 + 原生回灌消息：`service.rs` 实现（它驱动 IO，不是纯派生）。

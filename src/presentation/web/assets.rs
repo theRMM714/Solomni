@@ -1,6 +1,6 @@
 //! 目的：浏览器端资源的嵌入表与按 URL 路径查找。
 //! 管：引入 `build.rs` 生成的 `(路径, MIME, 内容)` 表；按路径精确查找（只命中表里有的文件，不读文件系统）。
-//! 不管：路由匹配与缓存头（`src/presentation/web/routes.rs`、`src/presentation/web/mod.rs`）；哪些文件进表（`build.rs`）。
+//! 不管：路由匹配与缓存头（`src/presentation/web/routes.rs`、`src/presentation/web.rs`）；哪些文件进表（`build.rs`）。
 //! 联动：`GET /` 取 `index.html`，`GET /assets/{*path}` 取其余资源；表由 `build.rs` 扫描
 //!   `src/presentation/web/assets/` 生成。
 

@@ -1,7 +1,7 @@
 //! 目的：终端渲染：花名册、菜单、事件流与模型/供应商标签。
 //! 管：把能力面的事实与事件词汇翻成终端行文。
 //! 不管：命令解析、交互裁决、会话流。
-//! 联动：`cli/mod.rs`、`cli/gate.rs`、`docs/presentation/contracts.md`
+//! 联动：`cli.rs`、`cli/gate.rs`、`docs/presentation/contracts.md`
 
 use super::*;
 
@@ -111,7 +111,9 @@ pub(super) fn print_menu(ops: &Ops) {
             model_label(a.model.as_deref())
         );
     }
-    println!("命令：single [agent名…] | collab [agent名…|?] | proxy（决定权整块交给核心） | module [模块id.工具名 [json]]（不经 AI 直接用模块工具） | provider list|add|rm|discover | model list|add|rm | core <模型id> | rewind <会话> archive|delete <行id> | rewind <会话> restore <标记id> | work <会话> log|show|restore <提交号> | resident list|start|stop|enable|disable|call <模块id> <服务名> [操作名] [json] | secret | diagnose <会话> | rescan | webui | exit");
+    println!(
+        "命令：single [agent名…] | collab [agent名…|?] | proxy（决定权整块交给核心） | module [模块id.工具名 [json]]（不经 AI 直接用模块工具） | provider list|add|rm|discover | model list|add|rm | core <模型id> | rewind <会话> archive|delete <行id> | rewind <会话> restore <标记id> | work <会话> log|show|restore <提交号> | resident list|start|stop|enable|disable|call <模块id> <服务名> [操作名] [json] | secret | diagnose <会话> | rescan | webui | exit"
+    );
 }
 
 /// 目的：模型标签（CLI 展示文案；核心默认是登记处的概念，不是提示词）。

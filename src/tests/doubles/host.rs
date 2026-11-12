@@ -185,8 +185,8 @@ pub(crate) fn work(name: &str, mode: WorkMode, modules: &[&str]) -> WorkSpec {
 }
 
 /// 目的：假依赖补齐面——清单为空、动作不能真跑（conductor 只读它的虚拟根清单；测试不碰网络与下载）。
-pub(crate) fn test_provision(
-) -> Arc<dyn crate::capabilities::provision::api::Provision + Send + Sync> {
+pub(crate) fn test_provision()
+-> Arc<dyn crate::capabilities::provision::api::Provision + Send + Sync> {
     test_provision_with(Vec::new())
 }
 

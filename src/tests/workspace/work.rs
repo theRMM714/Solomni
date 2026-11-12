@@ -9,7 +9,7 @@ use super::support::*;
 /// 目的：过期判定按内容——指纹相同不过期，改到读过的行才过期。
 #[test]
 pub(crate) fn work_stale_reads_judges_by_content_not_by_clock() {
-    use crate::capabilities::workspace::api::{content_hash, ReadQuery};
+    use crate::capabilities::workspace::api::{ReadQuery, content_hash};
     let (ws, _dirs, _store) = work_ws();
     ws.prepare("w", &["a".to_string()]).unwrap();
     let v1 = b"a\nb\nc\n";

@@ -4,7 +4,7 @@
 //! 联动：conductor、其它能力与呈现层都经这里会话；实现见 service.rs；出站端口只由 service 持有（R12）。
 
 pub use crate::capabilities::llm::domain::envelope::{
-    parse, Malformed, Reply, Tail, ToolInvoke, Verb,
+    Malformed, Reply, Tail, ToolInvoke, Verb, parse,
 };
 pub use crate::capabilities::llm::domain::malformed::malformed_report;
 

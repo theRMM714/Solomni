@@ -60,7 +60,7 @@ tests/
 
 - 单元层与 `capabilities/` **同构**：T1 用例按业务分文件——`taskchain.rs` / `prompt.rs` / `registry.rs` / `llm.rs` / `workspace.rs` / `session.rs` / `slate.rs` / `modules.rs` / `packages.rs` / `vm.rs` / `permission.rs` / `residents.rs` / `secrets.rs`，加**协调业务**自己的 `conductor.rs` 与 `conductor/`（`ask_user` / `proxy`）。
 - 用例多的能力按域分目录（`tools/` 与 `collab/` 各五个子模块）；契约测试 `ports.rs` / `fakes.rs` / `detail.rs` / `mcp.rs` / `api.rs` / `cli.rs` / `routes.rs`；横向用例 `diagnostics.rs`（隐藏模式契约）/ `fence_reach.rs`（模块可达范围）。
-- 共享支撑 `doubles/`（端口替身，按端口族一个文件）/ `builders/`（测试装配脚手架，按用途一个文件）/ `prelude.rs`（公共前置重导出）/ `mod.rs`。
+- 共享支撑 `doubles/`（端口替身，按端口族一个文件）/ `builders/`（测试装配脚手架，按用途一个文件）/ `prelude.rs`（公共前置重导出）/ `tests.rs`。
 - 文件粒度（判据 `tests/gates/structure/size.js`）：用例文件 ≤ 2000 行（软线 1500）、支撑文件 ≤ 1200 行（软线 800）；超线就按"用例族 / 端口族"拆子目录，拆分只搬代码，不改用例名与断言。
 - **判据**：用例落到"它钉住的那个不变式"所属的文件；顺手经过别的能力只是路径，不是归属。
 

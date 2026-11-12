@@ -3,7 +3,7 @@
 //! 不管：工具总表与角色表（在 capabilities/tools/detail）；渲染与 `@` 引用改写（在 domain）。
 //! 联动：实现 prompt/ports.rs 的 PromptSource，由组合根装配；加载结果交 service::load。
 
-use crate::capabilities::prompt::domain::prompt::{merge_book, Prompts};
+use crate::capabilities::prompt::domain::prompt::{Prompts, merge_book};
 use crate::capabilities::prompt::ports::PromptSource;
 use std::path::{Path, PathBuf};
 

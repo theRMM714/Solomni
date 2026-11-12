@@ -85,11 +85,12 @@ pub(crate) fn provider_lifecycle_and_key_never_leaks_to_view() {
     core.registry_mut()
         .model_upsert(model_draft("m1", "M", "api-m", "p1", "快", 0))
         .unwrap();
-    assert!(core
-        .registry_mut()
-        .provider_remove("p1")
-        .unwrap_err()
-        .contains("仍被模型引用"));
+    assert!(
+        core.registry_mut()
+            .provider_remove("p1")
+            .unwrap_err()
+            .contains("仍被模型引用")
+    );
     assert!(core.registry_mut().model_remove("m1").unwrap());
     assert!(core.registry_mut().provider_remove("p1").unwrap());
 }
@@ -143,23 +144,26 @@ pub(crate) fn model_guards_core_default_and_discovery_uses_stored_provider() {
         vec!["m-a".to_string(), "m-b".to_string()]
     );
     assert_eq!(catalog.seen.lock().expect("锁")[0], "http://x");
-    assert!(core
-        .registry()
-        .discover_models("ghost")
-        .unwrap_err()
-        .contains("无此供应商"));
+    assert!(
+        core.registry()
+            .discover_models("ghost")
+            .unwrap_err()
+            .contains("无此供应商")
+    );
     // 引用了不存在的供应商 → 拒绝登记
-    assert!(core
-        .registry_mut()
-        .model_upsert(model_draft("bad", "B", "b", "ghost", "", 0))
-        .unwrap_err()
-        .contains("无此供应商"));
+    assert!(
+        core.registry_mut()
+            .model_upsert(model_draft("bad", "B", "b", "ghost", "", 0))
+            .unwrap_err()
+            .contains("无此供应商")
+    );
     // 核心默认模型不可删；换默认后旧的可删
-    assert!(core
-        .registry_mut()
-        .model_remove("m")
-        .unwrap_err()
-        .contains("核心默认模型"));
+    assert!(
+        core.registry_mut()
+            .model_remove("m")
+            .unwrap_err()
+            .contains("核心默认模型")
+    );
     core.registry_mut()
         .model_upsert(model_draft("m2", "M2", "api-m2", "p2", "", 0))
         .unwrap();
@@ -173,9 +177,11 @@ pub(crate) fn agent_crud_and_work_with_agents() {
         vec![module_of("a"), module_of("b")],
         gw(BTreeMap::new(), vec!["[]".into()]),
     );
-    assert!(agent_upsert(&mut core, "", &["a"], "", "")
-        .unwrap_err()
-        .contains("不能为空"));
+    assert!(
+        agent_upsert(&mut core, "", &["a"], "", "")
+            .unwrap_err()
+            .contains("不能为空")
+    );
     // 模块可以为空：零模块 agent 只用内建文件工具，照样合法。
     agent_upsert(&mut core, "零模块", &[], "", "").unwrap();
     assert_eq!(
@@ -189,12 +195,16 @@ pub(crate) fn agent_crud_and_work_with_agents() {
         0
     );
     assert!(core.registry_mut().agent_remove("零模块").unwrap());
-    assert!(agent_upsert(&mut core, "x", &["ghost"], "", "")
-        .unwrap_err()
-        .contains("无此模块"));
-    assert!(agent_upsert(&mut core, "x", &["a"], "nope", "")
-        .unwrap_err()
-        .contains("无此模型"));
+    assert!(
+        agent_upsert(&mut core, "x", &["ghost"], "", "")
+            .unwrap_err()
+            .contains("无此模块")
+    );
+    assert!(
+        agent_upsert(&mut core, "x", &["a"], "nope", "")
+            .unwrap_err()
+            .contains("无此模型")
+    );
     agent_upsert_chara(
         &mut core,
         "调研",
@@ -352,7 +362,7 @@ pub(crate) fn endpoint_candidates_complete_and_fall_back() {
 
 #[test]
 pub(crate) fn endpoint_resolve_candidates_retries_shape_mismatch_and_stops_on_fatal() {
-    use crate::capabilities::llm::detail::endpoint::{resolve_candidates, Attempt};
+    use crate::capabilities::llm::detail::endpoint::{Attempt, resolve_candidates};
     let cands = vec!["a".to_string(), "b".to_string(), "c".to_string()];
 
     // 回归：SPA catch-all 返回 200 HTML（形状不符=Retry）时必须换到下一个候选，而不是立即报错。
@@ -549,7 +559,7 @@ pub(crate) fn thinking_defaults_and_map_shapes_are_resolved() {
 #[test]
 pub(crate) fn thinking_catalog_accepts_arbitrary_tags() {
     use crate::capabilities::registry::domain::providers::{
-        validate_thinking_catalog, ThinkingCatalog, ThinkingLevel,
+        ThinkingCatalog, ThinkingLevel, validate_thinking_catalog,
     };
     let tag = |s: &str| ThinkingLevel { id: s.to_string() };
     let ok = ThinkingCatalog {

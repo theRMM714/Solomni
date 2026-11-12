@@ -19,11 +19,11 @@ impl Conductor {
         spec: &d::NewSession,
     ) -> Result<(d::Created, Vec<SessionEvent>), String> {
         let (prepared, boot) = self.prepare_session(spec)?;
-        if let Some(boot) = boot {
-            if let Err(e) = boot.run() {
-                self.abort_session(prepared);
-                return Err(e);
-            }
+        if let Some(boot) = boot
+            && let Err(e) = boot.run()
+        {
+            self.abort_session(prepared);
+            return Err(e);
         }
         self.commit_session(prepared)
     }

@@ -45,7 +45,7 @@
 - 工具获取：Rust 侧第三方**只进 CI**——CI 用 `taiki-e/install-action` 预编译装（供应链工具、突变测试的 `cargo-mutants` 都这样）；**本地开发不引第三方**，用 `node setup-dev.js` 把清单（[dev-tools.js](../../dev-tools.js)）里的东西装进**项目内**（`cargo install --locked --root .tools`）；
 - 前端工具链是**项目内 npm 依赖**：TypeScript 与 Playwright 固定在根 `package.json` + `package-lock.json`，用 `npm ci --ignore-scripts` 装进 `node_modules`；不装全局、不写用户目录，`node_modules` 不入库。浏览器优先用系统 Edge / Chrome，缺失时由 Playwright 下载到 `target/playwright/`（同样不入库）；CI 缓存这个目录，失败产物 `target/e2e-browser/` 随 job 上传；
 - 尚未建立检查记录为 `gap`；
-- 依赖重复不一定是错误，必须有解释或后续治理记录（`node run-tests.js` 只报重复版本，不判是否可接受）；
+- 依赖重复不一定是错误，但必须有解释与治理记录：重复项只能写进 `tests/dependency-policy.json` 的 `allow`（crate、理由、复核条件三样齐全），未记录的重复即 `quality-fail`（`tests/gates/steps.js` 的 `duplicates` 步骤）；
 - 重复代码检查不得诱导新增抽象。先判断重复是否属于同一职责，再决定合并、保留或记录原因（`run-tests.js`）。
 
 - 当前 `node run-tests.js` 已执行 [levels.md](levels.md) 的 T0 全部九项：**步骤、可行状态（含报告里的 `fail` / `quality-fail` / `env-skip`）与环境跳过口径以该文 T0 生成段为准**；`env-skip` 不算通过，没有容差基线（注释契约的存量快照只减不增，见「五、门禁之外」，`run-tests.js`）。
@@ -59,14 +59,14 @@
 
 | lint | 位置 | 为什么是取舍而不是缺陷 |
 | --- | --- | --- |
-| `too_many_arguments` | `src/capabilities/collab/service/collab.rs` 的 `start`、`src/capabilities/collab/service/slate.rs` 的 `restore`、`src/capabilities/session/domain/session.rs` 的 `new` / `restore`、`src/capabilities/conductor/service/mod.rs` 的 `Conductor::new`、`src/capabilities/conductor/service/guest_job.rs` 的 `new` | 全是**组合根注入的构造函数**：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读 |
+| `too_many_arguments` | `src/capabilities/collab/service/collab.rs` 的 `start`、`src/capabilities/collab/service/slate.rs` 的 `restore`、`src/capabilities/session/domain/session.rs` 的 `new` / `restore`、`src/capabilities/conductor/service.rs` 的 `Conductor::new`、`src/capabilities/conductor/service/guest_job.rs` 的 `new` | 全是**组合根注入的构造函数**：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读 |
 | `too_many_arguments` | `src/capabilities/session/service.rs` 的 `core_operation`、`src/capabilities/collab/service/round.rs` 的 `converse_with`、`src/capabilities/collab/service/discussion.rs` 的 `turn_with`、`src/capabilities/collab/service/synthesis.rs` 的 `Execution::review`、`src/capabilities/collab/service/driver.rs` 的 `discussion_turn`、`src/capabilities/collab/service/collab.rs` 的 `judge_clear` / `review_nodes` | 同一组参数（身份 / 工具面 / 通道 / 消息 / 出口 / 对照表 / 重填说明）：它们必须一路透传，收口成参数对象只是把参数挪个地方（`turn_with` 只服务内存测试通道） |
-| `dead_code` | `src/capabilities/conductor/api/mod.rs` 的 `SessionOps::create_work` / `exists` / `is_running` 与 `LogOps::warn` | **入站契约是发布给前端的接口面**：二进制 crate 里暂时没有生产调用点的接口方法会被 `dead_code` 误报（`is_running` 是运行态的**权威查询**——`SessionView.running` 只是事件台对账副本，最终一致；`warn` 供呈现层降级提示） |
+| `dead_code` | `src/capabilities/conductor/api.rs` 的 `SessionOps::create_work` / `exists` / `is_running` 与 `LogOps::warn` | **入站契约是发布给前端的接口面**：二进制 crate 里暂时没有生产调用点的接口方法会被 `dead_code` 误报（`is_running` 是运行态的**权威查询**——`SessionView.running` 只是事件台对账副本，最终一致；`warn` 供呈现层降级提示） |
 | `dead_code` | `src/capabilities/session/domain/events.rs` 的 `enum SessionEvent` | 事件词汇里的字段**不全在生产路径被读**（例如 `DiscussionDone` 的 `round` / `over_cap` 供呈现层做裁决确认页）；词汇就是线格式，字段随契约保留，删掉会让呈现侧拿不到事实 |
 | `dead_code` | `src/kernel/ports.rs` 的 `FenceCase` / `FenceVerdict` / `FenceGate::decide`，`src/capabilities/tools/service/fence.rs` 的 `ToolFenceGate::decide` / `strict_refusal` / `unfenced_note` | 围栏裁决只在 Windows 生效；非 Windows 保留同一执行端口形状（`ProcessRunner::run` 的 `gate` 参数），调用方才不用处处按平台分叉。这些项在 Windows 生产路径使用，只在非 Windows 的 bin 目标没有调用点，`dead_code` 是误报 |
 | `too_many_arguments` | `src/capabilities/conductor/service/env.rs` 的 `tools_env` / `build_single` | 会话装配把"这一席的工具面 / 这一场单 agent 会话"一次说全（模块 / 沙箱 / 缺包 / 网络 / 形态 / 角色 / 档位）：它们本就串联透传，收口成参数对象只是把参数挪个地方 |
 | `too_many_arguments` | `src/tests/doubles/` 的 `core_with_pkgs_probe` | 测试装配要逐项控制端口（模块 / 通道 / 执行器 / 目录 / 历史 / IO / 包库 / 宿主探测）；收口成参数对象只会把同一批替身挪个位置，读起来更绕 |
-| `large_enum_variant` | `src/capabilities/conductor/service/mod.rs` 的 `enum Session` | 两变体大小差得远，但装箱只换来一次间接寻址，却把"会话本体可直接移动"这个形状改掉 |
+| `large_enum_variant` | `src/capabilities/conductor/service.rs` 的 `enum Session` | 两变体大小差得远，但装箱只换来一次间接寻址，却把"会话本体可直接移动"这个形状改掉 |
 
 - 新增 allow 必须同时更新本表；理由说不清的就不该 allow（`run-tests.js`）。
 

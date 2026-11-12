@@ -140,7 +140,7 @@ node dev.js test|fmt|clippy   # one-layer dev commands; cargo only runs through 
   variables, not the ledger.
 - **No usable model means no session**: register a provider and a model and set the core default first; a missing channel is refused with a precise reason, never replaced by a fake model.
 - Common flags: `--root <dir>` (product root), `--web-port <port>`, `--release`.
-- Commands at the prompt: the menu printed at startup is the full list (`print_menu` in `src/presentation/cli/mod.rs`); the rewind command is `rewind`, while providers / models / the core default model are `provider` / `model` / `core`.
+- Commands at the prompt: the menu printed at startup is the full list (`print_menu` in `src/presentation/cli.rs`); the rewind command is `rewind`, while providers / models / the core default model are `provider` / `model` / `core`.
 
 ### Add a provider and a model
 

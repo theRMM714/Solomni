@@ -35,7 +35,7 @@ pub fn catalog(home: &Path) -> Ledger {
                 return Ledger {
                     note: format!("台账加锁失败：{}", e),
                     entries: Vec::new(),
-                }
+                };
             }
         }
     } else {

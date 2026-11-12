@@ -116,12 +116,11 @@ impl crate::kernel::ports::FenceHost for FenceHostAdapter {
             if let Err(e) = windows::remove_profile_one(&self.home, &name) {
                 errors.push(e);
             }
-            if let Some(dir) = windows::container_package_dir(spec) {
-                if dir.is_dir() {
-                    if let Err(e) = std::fs::remove_dir_all(&dir) {
-                        errors.push(format!("删按次临时目录失败（{}）：{}", dir.display(), e));
-                    }
-                }
+            if let Some(dir) = windows::container_package_dir(spec)
+                && dir.is_dir()
+                && let Err(e) = std::fs::remove_dir_all(&dir)
+            {
+                errors.push(format!("删按次临时目录失败（{}）：{}", dir.display(), e));
             }
             if errors.is_empty() {
                 Ok(())
@@ -175,23 +174,23 @@ impl Capability {
     }
 }
 
-pub use job::{launcher, run_fenced, FenceJob};
+pub use job::{FenceJob, launcher, run_fenced};
 #[cfg(any(windows, test))]
 pub use ledger::Owner;
 pub use ledger::{
-    ledger, reconcile, remove_profile_one, restore_one, revoke_grant, Ledger, LedgerEntry,
+    Ledger, LedgerEntry, ledger, reconcile, remove_profile_one, restore_one, revoke_grant,
 };
 #[cfg(windows)]
-pub use ledger::{release_fence, sweep_orphan_aces, ReconcileReport};
+pub use ledger::{ReconcileReport, release_fence, sweep_orphan_aces};
 pub use paths::{fence_env, shell_command};
-#[cfg(windows)]
-pub use prep::prepare_fence;
 #[cfg(any(windows, test))]
 pub use prep::FencePrep;
+#[cfg(windows)]
+pub use prep::prepare_fence;
 pub use prep::{clean, sweep_profiles};
 
 #[cfg(windows)]
 pub(crate) use paths::{
-    container_program_command, windows_program_separators, NODE_REALPATH_FLAGS,
+    NODE_REALPATH_FLAGS, container_program_command, windows_program_separators,
 };
 pub(crate) use paths::{interpreter_dir_usable, interpreter_dirs, interpreter_roots_for_exe};

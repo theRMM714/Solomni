@@ -6,5 +6,5 @@
 mod fence;
 mod proc_watchdog;
 
-#[path = "../../helpers/https_probe.rs"]
+#[path = "../helpers/https_probe.rs"]
 mod https;

@@ -6,9 +6,8 @@
 use super::collab::*;
 use crate::capabilities::collab::service::discussion::TurnOut;
 use crate::capabilities::session::api::{
-    AgentMeta, LineView, Pending, SessionEvent, OPT_ASK_REPLY, OPT_BEGIN, OPT_BEGIN_ALLOW,
-    OPT_NODE_REWORK, OPT_NODE_SAY, OPT_PLAN_SAY, OPT_PLAN_START, OPT_SLATE_CANCEL,
-    OPT_SLATE_CONFIRM,
+    AgentMeta, LineView, OPT_ASK_REPLY, OPT_BEGIN, OPT_BEGIN_ALLOW, OPT_NODE_REWORK, OPT_NODE_SAY,
+    OPT_PLAN_SAY, OPT_PLAN_START, OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM, Pending, SessionEvent,
 };
 use std::sync::Arc;
 
@@ -150,10 +149,10 @@ impl CollabSession {
 
     /// 目的：开场还没开始过就先开始（核心驱动的第一步）。
     pub fn start_if_needed(&mut self) {
-        if let Some(d) = self.disc.as_mut() {
-            if d.not_started() {
-                d.start(&self.task);
-            }
+        if let Some(d) = self.disc.as_mut()
+            && d.not_started()
+        {
+            d.start(&self.task);
         }
     }
 

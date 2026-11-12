@@ -978,12 +978,14 @@ mod tests {
         )
         .unwrap();
         assert_eq!(plan.changes[0].kind, ChangeKind::Delete);
-        assert!(plan_commit(
-            &index(&[("f1", "h1")]),
-            &tree(&[("f1", "h9")]),
-            &locals(&[("f1", None)])
-        )
-        .is_err());
+        assert!(
+            plan_commit(
+                &index(&[("f1", "h1")]),
+                &tree(&[("f1", "h9")]),
+                &locals(&[("f1", None)])
+            )
+            .is_err()
+        );
         // 上游已删除、本地未改 → 没得提交，原因说“上游已删除”。
         let plan = plan_commit(
             &index(&[("f1", "h1")]),

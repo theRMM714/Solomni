@@ -116,20 +116,20 @@ pub(crate) fn interpreter_roots_for_exe(exe: &std::path::Path) -> Vec<std::path:
         .map(|p| crate::kernel::domain::path::native(&p));
     #[cfg(windows)]
     {
-        if !parent.map(is_reparse_point).unwrap_or(false) {
-            if let Some(p) = parent {
-                dirs.push(install_dir(p));
-            }
+        if !parent.map(is_reparse_point).unwrap_or(false)
+            && let Some(p) = parent
+        {
+            dirs.push(install_dir(p));
         }
-        if let Some(real) = real.as_deref() {
-            if let Some(p) = real.parent() {
-                dirs.push(install_dir(p));
-            }
+        if let Some(real) = real.as_deref()
+            && let Some(p) = real.parent()
+        {
+            dirs.push(install_dir(p));
         }
-        if dirs.is_empty() {
-            if let Some(p) = parent {
-                dirs.push(install_dir(p));
-            }
+        if dirs.is_empty()
+            && let Some(p) = parent
+        {
+            dirs.push(install_dir(p));
         }
     }
     #[cfg(not(windows))]

@@ -4,15 +4,15 @@
 //! 联动：消费方是核心（`src/capabilities/conductor/api/`）与各能力；端口见 `src/kernel/ports.rs`。
 
 pub use crate::kernel::contracts::fence::{
-    FenceBlocked, FencePart, FenceRunPolicy, FenceSpec, FENCE_BOUNDARY_MARK,
+    FENCE_BOUNDARY_MARK, FenceBlocked, FencePart, FenceRunPolicy, FenceSpec,
 };
 pub use crate::kernel::contracts::run::RunOutcome;
 pub use crate::kernel::contracts::types::{
-    valid_capability, Ask, AskOutcome, ExecSpec, SessionId, Tier, ToolOutcome,
-    DEFAULT_LLM_TIMEOUT_SECS,
+    Ask, AskOutcome, DEFAULT_LLM_TIMEOUT_SECS, ExecSpec, SessionId, Tier, ToolOutcome,
+    valid_capability,
 };
-pub use crate::kernel::detail::host_probe::{file_stamp, FileStamp};
+pub use crate::kernel::detail::host_probe::{FileStamp, file_stamp};
 pub use crate::kernel::detail::locus::{is_network_path, locus_of, place_contains};
-pub use crate::kernel::domain::fence::{call_lease, SandboxMode, SandboxRequirements};
+pub use crate::kernel::domain::fence::{SandboxMode, SandboxRequirements, call_lease};
 pub use crate::kernel::domain::jobs::JobRegistry;
 pub use crate::kernel::domain::path::{is_unc, native, slash, unc_parts};

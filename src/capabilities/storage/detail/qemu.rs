@@ -22,11 +22,7 @@ pub fn find(root: &Path) -> Option<PathBuf> {
         "qemu-img"
     };
     let p = root.join(".vm").join("qemu").join("bin").join(name);
-    if p.is_file() {
-        Some(p)
-    } else {
-        None
-    }
+    if p.is_file() { Some(p) } else { None }
 }
 
 /// 目的：读一块 qcow2 的 actual/virtual 与 corrupt；失败给 None。

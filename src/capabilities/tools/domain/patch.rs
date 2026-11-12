@@ -172,16 +172,16 @@ pub fn parse(text: &str) -> Result<Vec<Block>, Fault> {
                         }
                         // 块里出现了别的标记：如实说清（既不猜，也不静默）
                         Marker::Add | Marker::Update => {
-                            return Err(Fault::MissingEnd { line: start })
+                            return Err(Fault::MissingEnd { line: start });
                         }
                         Marker::Replace => {
-                            return Err(Fault::ReplaceWithoutSearch { line: sec.line })
+                            return Err(Fault::ReplaceWithoutSearch { line: sec.line });
                         }
                         Marker::Unknown(name) => {
                             return Err(Fault::UnknownMarker {
                                 line: sec.line,
                                 text: name.clone(),
-                            })
+                            });
                         }
                     }
                 }
@@ -196,7 +196,7 @@ pub fn parse(text: &str) -> Result<Vec<Block>, Fault> {
                 return Err(Fault::UnknownMarker {
                     line: s.line,
                     text: name.clone(),
-                })
+                });
             }
         }
     }
@@ -552,13 +552,15 @@ mod tests {
         )
         .expect("多行 SEARCH");
         assert_eq!(out, "合并\n三\n");
-        assert!(apply_edits(
-            current,
-            &[Edit {
-                search: "二\n一".to_string(),
-                replace: "x".to_string()
-            }]
-        )
-        .is_err());
+        assert!(
+            apply_edits(
+                current,
+                &[Edit {
+                    search: "二\n一".to_string(),
+                    replace: "x".to_string()
+                }]
+            )
+            .is_err()
+        );
     }
 }

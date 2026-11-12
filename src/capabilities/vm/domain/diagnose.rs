@@ -236,7 +236,7 @@ pub fn parse_report(raw: &str, lease: &str) -> Result<GuestDiagnosis, String> {
                 return Err(unparseable(&format!(
                     "输出里没有 JSON 对象（共 {} 字符）",
                     raw.chars().count()
-                )))
+                )));
             }
         }
     };

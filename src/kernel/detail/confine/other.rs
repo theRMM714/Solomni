@@ -1,9 +1,9 @@
 //! 目的：其他平台后端——没有原生围栏机制可用。
 //! 管：如实降级（只保证进程树与超时）。
 //! 不管：文件系统围栏——绝不假装有。
-//! 联动：能力等级由启动报告如实给出；调用方见 confine/mod.rs。
+//! 联动：能力等级由启动报告如实给出；调用方见 confine.rs。
 
-use super::{shell_command, Capability, FenceVerdict, FENCE_FAILED};
+use super::{Capability, FENCE_FAILED, FenceVerdict, shell_command};
 use crate::kernel::api::FenceSpec;
 
 pub fn capability() -> Capability {

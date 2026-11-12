@@ -319,7 +319,7 @@ pub fn check_manifest(m: &PackageManifest) -> Result<(), String> {
             return Err(format!(
                 "kind 只认 {} 与 {}，收到：{}",
                 KIND_PREFIX, KIND_SYSTEM, other
-            ))
+            ));
         }
     }
     for r in &m.requires {

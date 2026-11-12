@@ -412,10 +412,10 @@ fn mentions_tool_type(text: &str) -> bool {
     while let Some(i) = text[from..].find("\"type\"") {
         let at = from + i + 6;
         let rest = text[at..].trim_start();
-        if let Some(rest) = rest.strip_prefix(':') {
-            if rest.trim_start().starts_with("\"tool\"") {
-                return true;
-            }
+        if let Some(rest) = rest.strip_prefix(':')
+            && rest.trim_start().starts_with("\"tool\"")
+        {
+            return true;
         }
         from = at;
         if from >= text.len() {
@@ -434,10 +434,10 @@ fn salvage(text: &str, key: &str) -> String {
         let rest = text[at..].trim_start();
         if let Some(rest) = rest.strip_prefix(':') {
             let rest = rest.trim_start();
-            if let Some(rest) = rest.strip_prefix('"') {
-                if let Some(end) = rest.find('"') {
-                    return rest[..end].to_string();
-                }
+            if let Some(rest) = rest.strip_prefix('"')
+                && let Some(end) = rest.find('"')
+            {
+                return rest[..end].to_string();
             }
         }
         from = at;

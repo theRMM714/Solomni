@@ -143,14 +143,16 @@ fn restore_work_commit_is_non_destructive_and_records_a_notice() {
         .expect("建会话")
         .0
         .sid;
-    assert!(ops
-        .sessions
-        .upload(&sid, "a.txt", b"one", false)
-        .expect("投喂一"));
-    assert!(ops
-        .sessions
-        .upload(&sid, "a.txt", b"two", true)
-        .expect("投喂二"));
+    assert!(
+        ops.sessions
+            .upload(&sid, "a.txt", b"one", false)
+            .expect("投喂一")
+    );
+    assert!(
+        ops.sessions
+            .upload(&sid, "a.txt", b"two", true)
+            .expect("投喂二")
+    );
     let log = ops.sessions.work_log(&sid, 10, None).expect("提交历史");
     let head = log.head.as_ref().expect("有 head").id;
     let older = log
@@ -497,7 +499,7 @@ fn host_session_uses_package_bin_path() {
         crate::tests::doubles::gw(member, vec!["[]".into()]),
         Arc::clone(&runner),
         Arc::new(crate::tests::doubles::FakeCatalog::new(vec![
-            "m".to_string()
+            "m".to_string(),
         ])),
         Arc::new(crate::tests::doubles::InMemoryHistory::new()),
         Arc::new(crate::tests::doubles::InMemorySysIo::new()),

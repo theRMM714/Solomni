@@ -35,7 +35,7 @@ fn locus_raw(path: &Path) -> std::io::Result<Locus> {
     use std::os::windows::fs::OpenOptionsExt;
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Storage::FileSystem::{
-        FileIdInfo, GetFileInformationByHandleEx, FILE_FLAG_BACKUP_SEMANTICS, FILE_ID_INFO,
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_ID_INFO, FileIdInfo, GetFileInformationByHandleEx,
     };
 
     // 目录要 FILE_FLAG_BACKUP_SEMANTICS 才打得开；文件同样可用。

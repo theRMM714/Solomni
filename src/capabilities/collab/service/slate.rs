@@ -236,13 +236,13 @@ impl CollabSession {
         // 全部已发出的转录行（按 id 顺序），连降级标记一起读回（样式靠它，不靠文案）。
         let mut all_lines: Vec<LineView> = Vec::new();
         for ev in events {
-            if ev.get("type").and_then(|t| t.as_str()) == Some("transcript") {
-                if let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) {
-                    for l in lines {
-                        // **按线格式直接读回**：字段与落盘同源（说话人/动词/种类/思维链/工具视图都在）。
-                        if let Ok(v) = serde_json::from_value::<LineView>(l.clone()) {
-                            all_lines.push(v);
-                        }
+            if ev.get("type").and_then(|t| t.as_str()) == Some("transcript")
+                && let Some(lines) = ev.get("lines").and_then(|l| l.as_array())
+            {
+                for l in lines {
+                    // **按线格式直接读回**：字段与落盘同源（说话人/动词/种类/思维链/工具视图都在）。
+                    if let Ok(v) = serde_json::from_value::<LineView>(l.clone()) {
+                        all_lines.push(v);
                     }
                 }
             }

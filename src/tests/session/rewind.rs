@@ -362,9 +362,10 @@ pub(crate) fn rebuilt_context_keeps_tool_result() {
         Some("你好"),
         "重建后沙箱里的成品仍在"
     );
-    assert!(h
-        .iter()
-        .any(|m| m.role == "assistant" && m.content.contains("写完了")));
+    assert!(
+        h.iter()
+            .any(|m| m.role == "assistant" && m.content.contains("写完了"))
+    );
 }
 
 /// 目的：重建会话时 shell 状态栏快照按转录回填（重启 / 启用后不再"没有 chip"）。

@@ -150,7 +150,9 @@ impl FencePart {
             }
             FencePart::Sandbox => "让这次工作的会话目录落在你自己拥有的位置（默认就在工作区里）",
             FencePart::DataBoundary => "让这次工作的目录落在你自己拥有的位置（默认就在工作区里）",
-            FencePart::ContainerIdentity => "确认本机能建 AppContainer profile（受限会话里建不起来）",
+            FencePart::ContainerIdentity => {
+                "确认本机能建 AppContainer profile（受限会话里建不起来）"
+            }
             FencePart::Ledger => "确认产品私有区 .home/ 可写（授权台账要落在那里）",
             FencePart::AuthorizedRead | FencePart::Parent => {
                 "这一次不影响围栏成立；下次想让它可达再补"

@@ -209,10 +209,12 @@ fn yaml_prompts_loads_the_shipped_book_and_reports_missing_or_broken_files() {
     let broken = root.join("broken");
     std::fs::create_dir_all(&broken).expect("造坏目录");
     std::fs::write(broken.join("a.yaml"), "core: [不是映射").expect("造坏册子");
-    assert!(YamlPrompts::new(broken.clone())
-        .load()
-        .unwrap_err()
-        .contains("提示词册非法"));
+    assert!(
+        YamlPrompts::new(broken.clone())
+            .load()
+            .unwrap_err()
+            .contains("提示词册非法")
+    );
 
     // 键在两个文件里重复：**拆分时最可能犯的错**，必须被抓到（否则静默丢一份）。
     std::fs::write(broken.join("a.yaml"), "no_model: \"甲\"").expect("造册子");

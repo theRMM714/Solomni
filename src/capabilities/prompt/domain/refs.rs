@@ -38,33 +38,33 @@ pub fn rewrite(text: &str, speaker: Option<&str>, roots: &RefRoots) -> String {
         let after = &rest[i + 1..];
         // 从 @ 处尝试匹配前缀；成功且根已就绪才改写，否则把 @ 原样留下（不猜）。
         if let Some(body) = after.strip_prefix("work:") {
-            if let Some((path, consumed)) = take_ref(body) {
-                if let Some(full) = full_path(&roots.work, path, roots.path_codec.as_deref()) {
-                    out.push_str(&full);
-                    rest = &body[consumed..];
-                    continue;
-                }
+            if let Some((path, consumed)) = take_ref(body)
+                && let Some(full) = full_path(&roots.work, path, roots.path_codec.as_deref())
+            {
+                out.push_str(&full);
+                rest = &body[consumed..];
+                continue;
             }
-        } else if let Some(body) = after.strip_prefix("sandbox:") {
-            if let Some((agent, rel, consumed)) = take_sandbox_ref(body) {
-                // 自己的沙箱：用真实根；别人的/协作：给册子里的说明（不泄漏真实路径）。
-                let own = match speaker {
-                    Some(me) if me == agent => roots
-                        .private
-                        .as_ref()
-                        .and_then(|p| full_path(p, rel, roots.path_codec.as_deref())),
-                    _ => None,
-                };
-                let rendered = match own {
-                    Some(full) => Some(full),
-                    None if speaker == Some(agent) => None, // 根还没就绪：原样保留，不编路径
-                    None => Some(sandbox_note(agent, rel, speaker)),
-                };
-                if let Some(full) = rendered {
-                    out.push_str(&full);
-                    rest = &body[consumed..];
-                    continue;
-                }
+        } else if let Some(body) = after.strip_prefix("sandbox:")
+            && let Some((agent, rel, consumed)) = take_sandbox_ref(body)
+        {
+            // 自己的沙箱：用真实根；别人的/协作：给册子里的说明（不泄漏真实路径）。
+            let own = match speaker {
+                Some(me) if me == agent => roots
+                    .private
+                    .as_ref()
+                    .and_then(|p| full_path(p, rel, roots.path_codec.as_deref())),
+                _ => None,
+            };
+            let rendered = match own {
+                Some(full) => Some(full),
+                None if speaker == Some(agent) => None, // 根还没就绪：原样保留，不编路径
+                None => Some(sandbox_note(agent, rel, speaker)),
+            };
+            if let Some(full) = rendered {
+                out.push_str(&full);
+                rest = &body[consumed..];
+                continue;
             }
         }
         out.push('@');

@@ -1,7 +1,7 @@
 # 单元地图 · presentation/web
 
 > 定位：presentation/web（本地 HTTP 呈现）逐文件职责的唯一权威；由 T0 结构审查与磁盘双向比对。
-> 效力：契约｜核对：2026-11-10｜依据：`src/presentation/web/mod.rs`
+> 效力：契约｜核对：2026-11-10｜依据：`src/presentation/web.rs`
 
 > 本文是 **presentation/web** 逐文件职责的唯一权威；由 `node run-tests.js` 的 T0 结构审查与磁盘**双向比对**
 > （表里每个路径必须存在；`src/` 下每个 `.rs` 都必须出现在某一张单元地图里）。
@@ -9,7 +9,7 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/presentation/web/mod.rs` | 本地 HTTP 服务（tiny_http，只绑 `127.0.0.1`）与长轮询；按 `ROUTES` 匹配与分发 |
+| `src/presentation/web.rs` | 本地 HTTP 服务（tiny_http，只绑 `127.0.0.1`）与长轮询；按 `ROUTES` 匹配与分发 |
 | `src/presentation/web/routes.rs` | HTTP 路由目录 `ROUTES` 与匹配器（末段 `{*name}` 为尾部通配）：路由的唯一定义，`--print-routes` 输出它的 JSON |
 | `src/presentation/web/assets.rs` | 浏览器端资源的嵌入表（`build.rs` 生成）与按 URL 路径精确查找；不读文件系统 |
 | `build.rs` | 编译期扫描 `src/presentation/web/assets/` 生成嵌入表：按扩展名定 MIME，跳过 `.cjs` / `.mjs` 开发脚本与 `package.json`，未知扩展名让构建失败；`DEV_ONLY_DIRS`（`dev/`）只在 `PROFILE=debug` 时收进表，随 `rerun-if-env-changed=PROFILE` 重跑 |

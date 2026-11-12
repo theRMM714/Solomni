@@ -107,7 +107,7 @@ impl Conductor {
                 return Err(format!(
                     "未知会话形态：{}（只认 single / collab / proxy）",
                     other
-                ))
+                ));
             }
         }
         // 共享 guest 的子会话也可以编辑：写回该 agent 的唯一配置，保存后重新加入同一台 guest。
@@ -210,10 +210,10 @@ impl Conductor {
             .requirements
             .into_iter()
             .find(|r| r.id == "base");
-            if let Some(item) = base_item {
-                if !item.met {
-                    return Err(format!("{}：{}", item.detail, item.how));
-                }
+            if let Some(item) = base_item
+                && !item.met
+            {
+                return Err(format!("{}：{}", item.detail, item.how));
             }
         } else if let Some(why) = crate::capabilities::vm::api::tier_refusal(
             &self.root,

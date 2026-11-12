@@ -4,13 +4,13 @@
 //! 联动：实现见 `service.rs`；`tools` 借 `Place` / `Sandbox` 定位读写落点。
 
 pub use crate::capabilities::workspace::domain::asset::{
-    media_hint, FileVersion, MAX_ASSET_BYTES, VERSION_TEXT_LIMIT,
+    FileVersion, MAX_ASSET_BYTES, VERSION_TEXT_LIMIT, media_hint,
 };
 pub use crate::capabilities::workspace::domain::base::CommitRefusal;
 pub use crate::capabilities::workspace::domain::hash::content_hash;
 pub use crate::capabilities::workspace::domain::readfact::ReadFact;
 pub use crate::capabilities::workspace::domain::workspace::{
-    safe_file_name, AreaUsage, Place, Sandbox, Sandboxes, WorkFiles, WorkRoots, WorkUsage,
+    AreaUsage, Place, Sandbox, Sandboxes, WorkFiles, WorkRoots, WorkUsage, safe_file_name,
 };
 pub use crate::capabilities::workspace::domain::workstore::{
     Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, GcReport, LostEntry,

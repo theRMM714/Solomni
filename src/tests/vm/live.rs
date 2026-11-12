@@ -3,7 +3,7 @@
 //! 不管：全内存用例。
 //! 联动：`SOLOMNI_VM_LIVE` 与 `docs/testing/levels.md`。
 
-use crate::capabilities::vm::domain::guest::{classify_base, GuestMount, GuestRun, GuestSpec};
+use crate::capabilities::vm::domain::guest::{GuestMount, GuestRun, GuestSpec, classify_base};
 use crate::capabilities::vm::ports::{ShareBackend, VmEngine};
 use crate::kernel::ports::HostProbe;
 
@@ -16,7 +16,9 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
     // 虚拟根名（默认 debian）；在场与否由 resolve_guest 解析出的那一格判。
     let guest = std::env::var("SOLOMNI_VM_GUEST").unwrap_or_else(|_| "debian-13".to_string());
     if !live || qemu.trim().is_empty() {
-        eprintln!("[探针] 未开启虚拟机档真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑（虚拟根默认 debian-13，可用 SOLOMNI_VM_GUEST 换）");
+        eprintln!(
+            "[探针] 未开启虚拟机档真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑（虚拟根默认 debian-13，可用 SOLOMNI_VM_GUEST 换）"
+        );
         return;
     }
     let probe = crate::kernel::detail::HostProbeAdapter;
@@ -26,7 +28,10 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
     ) {
         Ok(d) if probe.is_dir(&d) => d,
         _ => {
-            eprintln!("[探针] 本机没有虚拟根「{}」：先 solomni --provision --ensure --yes，或用 SOLOMNI_VM_GUEST 指定", guest);
+            eprintln!(
+                "[探针] 本机没有虚拟根「{}」：先 solomni --provision --ensure --yes，或用 SOLOMNI_VM_GUEST 指定",
+                guest
+            );
             return;
         }
     };
@@ -130,8 +135,8 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
         args_json: "{}".to_string(),
         env: Vec::new(),
         cwd: String::new(),
-            timeout_secs: 30,
-            output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
+        timeout_secs: 30,
+        output_limit: crate::capabilities::vm::domain::guest::OutputLimit::Head,
     };
     let out = guest.channel().exec(&run);
     // 执行物本地化：共享盘不承载执行位——把脚本落进 guest 本地副本，再**直接执行**它（不是 `sh 它`）。
@@ -414,7 +419,9 @@ pub(crate) fn vm_live_cancel_kills_the_guest_process_tree() {
     let qemu = std::env::var("SOLOMNI_VM_QEMU").unwrap_or_default();
     let guest = std::env::var("SOLOMNI_VM_GUEST").unwrap_or_else(|_| "debian-13".to_string());
     if !live || qemu.trim().is_empty() {
-        eprintln!("[探针] 未开启取消的真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑（虚拟根默认 debian-13，可用 SOLOMNI_VM_GUEST 换）");
+        eprintln!(
+            "[探针] 未开启取消的真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑（虚拟根默认 debian-13，可用 SOLOMNI_VM_GUEST 换）"
+        );
         return;
     }
     let probe = crate::kernel::detail::HostProbeAdapter;
@@ -583,7 +590,9 @@ pub(crate) fn vm_live_guest_diagnose_lists_processes() {
     let qemu = std::env::var("SOLOMNI_VM_QEMU").unwrap_or_default();
     let guest = std::env::var("SOLOMNI_VM_GUEST").unwrap_or_else(|_| "debian-13".to_string());
     if !live || qemu.trim().is_empty() {
-        eprintln!("[探针] 未开启 guest 诊断的真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑（虚拟根默认 debian-13，可用 SOLOMNI_VM_GUEST 换）");
+        eprintln!(
+            "[探针] 未开启 guest 诊断的真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑（虚拟根默认 debian-13，可用 SOLOMNI_VM_GUEST 换）"
+        );
         return;
     }
     let probe = crate::kernel::detail::HostProbeAdapter;
@@ -698,8 +707,8 @@ pub(crate) fn vm_live_guest_diagnose_lists_processes() {
 ///   Linux 各起一台验 virtiofs（要 SOLOMNI_VM_VIRTIOFSD）与 9p。
 #[test]
 pub(crate) fn vm_live_external_workspace_round_trip() {
-    use crate::capabilities::vm::api::{mounts_from, ExecPlan};
-    use crate::capabilities::vm::domain::guest::{guest_path, sh_quote, GuestAccess};
+    use crate::capabilities::vm::api::{ExecPlan, mounts_from};
+    use crate::capabilities::vm::domain::guest::{GuestAccess, guest_path, sh_quote};
     use crate::capabilities::workspace::api::{Sandbox, Sandboxes};
     use crate::kernel::api::{FenceSpec, Tier};
     use std::collections::BTreeMap;
@@ -816,10 +825,10 @@ pub(crate) fn vm_live_external_workspace_round_trip() {
         }
         variants.push(("smb", &smb as &dyn ShareBackend, Some(smbd)));
     } else if cfg!(target_os = "linux") {
-        if image.clients.virtio_fs {
-            if let Some(tool) = virtiofsd.clone() {
-                variants.push(("virtiofs", &virtiofs as &dyn ShareBackend, Some(tool)));
-            }
+        if image.clients.virtio_fs
+            && let Some(tool) = virtiofsd.clone()
+        {
+            variants.push(("virtiofs", &virtiofs as &dyn ShareBackend, Some(tool)));
         }
         if image.clients.nine_p {
             variants.push(("9p", &nine as &dyn ShareBackend, None));
@@ -948,7 +957,7 @@ pub(crate) fn vm_live_external_workspace_round_trip() {
 #[test]
 pub(crate) fn vm_live_unc_share_round_trip() {
     use crate::capabilities::vm::domain::guest::{
-        guest_path, sh_quote, GuestMount, GuestRun, OutputLimit,
+        GuestMount, GuestRun, OutputLimit, guest_path, sh_quote,
     };
 
     let live = std::env::var("SOLOMNI_VM_LIVE").as_deref() == Ok("1");

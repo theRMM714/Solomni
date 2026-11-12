@@ -18,7 +18,7 @@ const IO_CALLS = ["std::fs", "std::process::Command", "ureq", "reqwest", "std::n
 /** 端口方法之外的 canonicalize 调用也是直接 IO：`probe.canonicalize` 走端口，`path.canonicalize` 直接碰盘。 */
 const CANONICALIZE = /canonicalize\s*\(/;
 
-/** 能力内的实现分区：api / service / domain / detail；其余（mod.rs、guest.rs 这类）不归这些判据管。 */
+/** 能力内的实现分区：api / service / domain / detail；其余（能力根 X.rs、guest.rs 这类）不归这些判据管。 */
 function scopeOf(f) {
   const parts = f.split("/");
   if (parts[0] !== "src" || parts[1] !== "capabilities" || parts.length < 4) return null;

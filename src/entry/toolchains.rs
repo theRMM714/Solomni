@@ -200,12 +200,11 @@ fn install_root(bin: &Path) -> PathBuf {
         .file_name()
         .map(|s| s.to_string_lossy().to_lowercase())
         .unwrap_or_default();
-    if leaf == "bin" || leaf == "scripts" {
-        if let Some(up) = bin.parent() {
-            if up.parent().is_some() {
-                return up.to_path_buf();
-            }
-        }
+    if (leaf == "bin" || leaf == "scripts")
+        && let Some(up) = bin.parent()
+        && up.parent().is_some()
+    {
+        return up.to_path_buf();
     }
     bin.to_path_buf()
 }
@@ -230,9 +229,12 @@ pub(crate) fn apply(root: &Path) -> Applied {
     let current = std::env::var_os("PATH").unwrap_or_default();
     match compose(root, &raw, &current, target) {
         Ok(c) => {
-            std::env::set_var("PATH", &c.path);
-            for (k, v) in &c.env {
-                std::env::set_var(k, v);
+            // SAFETY: 启动早期、还没起任何线程，环境变量的读写都不存在并发。
+            unsafe {
+                std::env::set_var("PATH", &c.path);
+                for (k, v) in &c.env {
+                    std::env::set_var(k, v);
+                }
             }
             Applied {
                 active: c.active,

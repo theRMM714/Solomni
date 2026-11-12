@@ -103,10 +103,11 @@ pub(super) fn print_card(card: &DecisionCard) {
 
 /// 目的：选中的选项 id：先按序号、再按 id 原文认——两者都是那张卡上**用户看得见**的东西。
 pub(crate) fn pick_option(card: &DecisionCard, ans: &str) -> Option<String> {
-    if let Ok(n) = ans.parse::<usize>() {
-        if n >= 1 && n <= card.options.len() {
-            return Some(card.options[n - 1].id.clone());
-        }
+    if let Ok(n) = ans.parse::<usize>()
+        && n >= 1
+        && n <= card.options.len()
+    {
+        return Some(card.options[n - 1].id.clone());
     }
     card.options
         .iter()
@@ -217,7 +218,7 @@ pub(super) fn act_interactive(
                 std::thread::sleep(std::time::Duration::from_millis(50))
             }
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                return Err("生成线程异常结束".to_string())
+                return Err("生成线程异常结束".to_string());
             }
         }
     }

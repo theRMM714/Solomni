@@ -227,6 +227,9 @@ const MOVE_SIMILARITY = 0.98;
 const MOVE_KEYWORDS = new Set(
   "as break const continue crate dyn else enum extern false fn for if impl in let loop match mod move mut pub ref return self Self static struct super trait true type unsafe use where while async await".split(" ")
 );
+// 机械重排噪声：clippy 的 collapsible_if 把嵌套 if 收成 let-chain（edition 2024 触发的批量改写）时，
+// 语句块的额外花括号与 && 会改变 token 多重集，让纯搬运看起来像新逻辑。这些 token 不携带逻辑差异。
+const MOVE_NOISE = new Set(["{", "}", ";", ",", "&"]);
 
 /** 把注释、字符串、字符字面量抹成空格：保留换行与偏移，花括号配平与分词才不会被内容带偏。 */
 function blankSource(src) {
@@ -371,7 +374,7 @@ function extractFunctions(blanked) {
       name: m[1],
       first: lineOf(m.index),
       last: lineOf(end),
-      bag: bagOf(normTokens(blanked.slice(open, end + 1))),
+      bag: bagOf(normTokens(blanked.slice(open, end + 1)).filter((t) => !MOVE_NOISE.has(t))),
     });
     re.lastIndex = end;
   }

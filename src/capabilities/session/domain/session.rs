@@ -441,10 +441,10 @@ impl AgentSession {
         &mut self,
         mut usage: Option<crate::capabilities::session::api::ContextUsage>,
     ) {
-        if let Some(u) = usage.as_mut() {
-            if self.context_window > 0 {
-                u.window = self.context_window;
-            }
+        if let Some(u) = usage.as_mut()
+            && self.context_window > 0
+        {
+            u.window = self.context_window;
         }
         self.last_usage = usage;
     }
@@ -482,23 +482,23 @@ impl AgentSession {
         let keep = self.compact_keep_percent;
         if keep == 0 || self.context_window == 0 {
             // 只留摘要也必须保护本轮新输入：切在它前面，把它留在尾部。
-            if let Some(id) = protect_from {
-                if let Some(k) = self.line_ids.iter().position(|x| *x == id) {
-                    if k == 0 {
-                        return None;
-                    }
-                    let cut = self.marks[k - 1];
-                    if cut == 0 || cut >= self.dialogue.len() {
-                        return None;
-                    }
-                    if self.compacted_upto > 0 && cut <= 1 {
-                        return None; // 前缀里只剩上一份摘要：再压也不会变小。
-                    }
-                    return Some(CompactionPlan {
-                        up_to: self.line_ids[k],
-                        cut,
-                    });
+            if let Some(id) = protect_from
+                && let Some(k) = self.line_ids.iter().position(|x| *x == id)
+            {
+                if k == 0 {
+                    return None;
                 }
+                let cut = self.marks[k - 1];
+                if cut == 0 || cut >= self.dialogue.len() {
+                    return None;
+                }
+                if self.compacted_upto > 0 && cut <= 1 {
+                    return None; // 前缀里只剩上一份摘要：再压也不会变小。
+                }
+                return Some(CompactionPlan {
+                    up_to: self.line_ids[k],
+                    cut,
+                });
             }
             return Some(full());
         }
@@ -538,10 +538,10 @@ impl AgentSession {
             split -= 1;
         }
         // 本轮新注入的用户行 / 任务行必须原样保留。
-        if let Some(id) = protect_from {
-            if let Some(k) = self.line_ids.iter().position(|x| *x == id) {
-                split = split.min(k);
-            }
+        if let Some(id) = protect_from
+            && let Some(k) = self.line_ids.iter().position(|x| *x == id)
+        {
+            split = split.min(k);
         }
         if split == 0 {
             return None;

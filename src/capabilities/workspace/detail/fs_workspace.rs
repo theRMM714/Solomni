@@ -159,7 +159,7 @@ impl Workdirs for FsWorkspace {
                     std::thread::sleep(std::time::Duration::from_millis(25));
                 }
                 Err(std::fs::TryLockError::Error(e)) => {
-                    return Err(format!("工作区加锁失败：{}", e))
+                    return Err(format!("工作区加锁失败：{}", e));
                 }
             }
         }

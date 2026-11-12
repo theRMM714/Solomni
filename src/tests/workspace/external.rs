@@ -255,7 +255,7 @@ pub(crate) fn unc_external_workspace_round_trip_on_a_real_share() {
     use crate::capabilities::workspace::api::{ChangeKind, Workspace};
     use crate::capabilities::workspace::detail::{FsWorkStore, FsWorkspace};
     use crate::capabilities::workspace::service::WorkspaceService;
-    use crate::kernel::api::{is_network_path, native, Tier};
+    use crate::kernel::api::{Tier, is_network_path, native};
     use std::path::PathBuf;
 
     let probe = crate::kernel::detail::HostProbeAdapter;

@@ -28,7 +28,7 @@ pub(crate) fn guest_names_resolve_to_one_slot_and_paths_are_refused() {
 /// 目的：命令装配按 guest 方言译路径——工作目录与本机路径型环境变量改成 guest 拼法，命令与非路径变量不动。
 #[test]
 pub(crate) fn translate_run_maps_paths_to_the_guest_dialect() {
-    use crate::capabilities::vm::domain::guest::{translate_run, GuestMount, GuestOs, GuestRun};
+    use crate::capabilities::vm::domain::guest::{GuestMount, GuestOs, GuestRun, translate_run};
     // 挂载点用**宿主自己的写法**（宿主路径只能由宿主解析），guest 路径由我们给——断言因此三平台一致。
     let (rt, work) = if cfg!(windows) {
         ("D:\\rt\\py", "D:\\work")
@@ -333,7 +333,7 @@ pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
 #[test]
 pub(crate) fn path_bridge_round_trips_guest_and_host() {
     use crate::capabilities::vm::api::PathBridge;
-    use crate::capabilities::vm::domain::paths::{guest_to_host, PathDialect};
+    use crate::capabilities::vm::domain::paths::{PathDialect, guest_to_host};
     use std::path::Path;
     // POSIX 宿主 + Windows guest：桥按**构造的**宿主平台判，与真实平台无关，所以任何平台都跑——
     // CI 的 POSIX 宿主就靠它；只写进 cfg(unix) 分支会让 Windows 本地漏判（丢根就是这么漏过去的）。
@@ -500,7 +500,7 @@ pub(crate) fn unc_workspace_encodes_into_the_posix_mirror() {
 #[cfg(windows)]
 #[test]
 pub(crate) fn unc_external_workspace_plans_a_guest_mount() {
-    use crate::capabilities::vm::api::{mounts_from, ExecPlan, PathBridge};
+    use crate::capabilities::vm::api::{ExecPlan, PathBridge, mounts_from};
     use crate::capabilities::vm::domain::paths::PathDialect;
     use crate::capabilities::workspace::api::{Sandbox, Sandboxes};
     use crate::kernel::api::{FenceSpec, Tier};
@@ -561,7 +561,7 @@ pub(crate) fn unc_external_workspace_plans_a_guest_mount() {
 #[test]
 pub(crate) fn share_backend_scripts_quote_guest_paths() {
     use crate::capabilities::vm::detail::{copy, share_ninep, share_smb, share_virtiofs};
-    use crate::capabilities::vm::domain::guest::{sh_quote, GuestMount};
+    use crate::capabilities::vm::domain::guest::{GuestMount, sh_quote};
     let quoted_path = "/solomni-host/c/it's here";
     let mounts = [
         GuestMount {

@@ -15,8 +15,9 @@ mod tests;
 // 测试点名的启动门助手：只在测试构建里外露，入口本身走 `entry::startup` 的路径。
 #[cfg(test)]
 pub(crate) use entry::startup::{
-    ask_yes_no, authorize, lower_enforce_to_best_effort, maybe_onboard_windows, missing_parts,
-    run_gate, write_acl_setting, FenceReport, GateOutcome, MissingCause, MissingPart,
+    FenceReport, GateOutcome, MissingCause, MissingPart, ask_yes_no, authorize,
+    lower_enforce_to_best_effort, maybe_onboard_windows, missing_parts, run_gate,
+    write_acl_setting,
 };
 
 use capabilities::registry::api::Registry as _;
@@ -556,7 +557,9 @@ fn main() {
             }
             Ok(capabilities::conductor::api::ProbeOutcome::Unsupported { detail }) => {
                 println!("[探测] 模型 {}：**不支持**原生工具调用（{}）", id, detail);
-                println!("[探测] 已把 models.yaml 的 tools 写成 envelope（手写信封照旧可用，能力没有任何损失）");
+                println!(
+                    "[探测] 已把 models.yaml 的 tools 写成 envelope（手写信封照旧可用，能力没有任何损失）"
+                );
                 std::process::exit(0);
             }
             Ok(capabilities::conductor::api::ProbeOutcome::Unknown { detail }) => {

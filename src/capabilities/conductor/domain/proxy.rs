@@ -61,27 +61,25 @@ pub fn authorize(
     let Some(grant) = call.grant.as_ref() else {
         return Err("没有代理授权：核心不能自行授予权限，需要真实用户先授予任务级授权".to_string());
     };
-    if let Some(at) = grant.expires_at {
-        if call.now > at {
-            return Err(format!("代理授权已过期（有效期到 {}）", at));
-        }
+    if let Some(at) = grant.expires_at
+        && call.now > at
+    {
+        return Err(format!("代理授权已过期（有效期到 {}）", at));
     }
     if !grant.tools.iter().any(|t| t == tool) {
         return Err(format!("代理授权不包含这个工具：{}（越出授权范围）", tool));
     }
-    if !grant.models.is_empty() {
-        if let Some(m) = model {
-            if !grant.models.iter().any(|x| x == m) {
-                return Err(format!("代理授权不覆盖这个模型：{}（越出授权范围）", m));
-            }
-        }
+    if !grant.models.is_empty()
+        && let Some(m) = model
+        && !grant.models.iter().any(|x| x == m)
+    {
+        return Err(format!("代理授权不覆盖这个模型：{}（越出授权范围）", m));
     }
-    if !grant.sessions.is_empty() {
-        if let Some(s) = session {
-            if !grant.sessions.iter().any(|x| x == s) {
-                return Err(format!("代理授权不覆盖这个会话：{}（越出授权范围）", s));
-            }
-        }
+    if !grant.sessions.is_empty()
+        && let Some(s) = session
+        && !grant.sessions.iter().any(|x| x == s)
+    {
+        return Err(format!("代理授权不覆盖这个会话：{}（越出授权范围）", s));
     }
     Ok(())
 }
@@ -500,10 +498,10 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
     let agents = parse_agents(&args.agents)?;
     match mode {
         SessionMode::Single if agents.len() != 1 => {
-            return Err("mode=single 只接受一个 agent".to_string())
+            return Err("mode=single 只接受一个 agent".to_string());
         }
         SessionMode::Collab if agents.len() < 2 => {
-            return Err("mode=collab 至少要两个 agent".to_string())
+            return Err("mode=collab 至少要两个 agent".to_string());
         }
         _ => {}
     }
@@ -538,20 +536,20 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
                     ));
                 }
             }
-            if let Some(m) = &a.model {
-                if !catalog.models.iter().any(|x| x.id == *m) {
-                    return Err(format!(
-                        "agents[{}]：无此模型 {}（在册的模型 id：{}）",
-                        i,
-                        m,
-                        catalog
-                            .models
-                            .iter()
-                            .map(|x| x.id.as_str())
-                            .collect::<Vec<_>>()
-                            .join("、")
-                    ));
-                }
+            if let Some(m) = &a.model
+                && !catalog.models.iter().any(|x| x.id == *m)
+            {
+                return Err(format!(
+                    "agents[{}]：无此模型 {}（在册的模型 id：{}）",
+                    i,
+                    m,
+                    catalog
+                        .models
+                        .iter()
+                        .map(|x| x.id.as_str())
+                        .collect::<Vec<_>>()
+                        .join("、")
+                ));
             }
             (
                 a.name.clone(),
@@ -896,9 +894,11 @@ mod tests {
             "request_id": "r2c"
         }))
         .unwrap();
-        assert!(resolve_new_session(&empty_task, &c)
-            .unwrap_err()
-            .contains("task"));
+        assert!(
+            resolve_new_session(&empty_task, &c)
+                .unwrap_err()
+                .contains("task")
+        );
 
         // 身份项不接受任务字段（任务是会话级的 task）。
         let extra: CreateArgs = serde_json::from_value(serde_json::json!({
@@ -908,9 +908,11 @@ mod tests {
             "request_id": "r2d"
         }))
         .unwrap();
-        assert!(resolve_new_session(&extra, &c)
-            .unwrap_err()
-            .contains("不认识的键"));
+        assert!(
+            resolve_new_session(&extra, &c)
+                .unwrap_err()
+                .contains("不认识的键")
+        );
 
         let dup: CreateArgs = serde_json::from_value(serde_json::json!({
             "mode": "collab",
@@ -924,10 +926,12 @@ mod tests {
         .unwrap();
         let shared = resolve_new_session(&dup, &c).expect("同一模块可被多个 agent 共用");
         assert_eq!(shared.agents.len(), 2);
-        assert!(shared
-            .agents
-            .iter()
-            .all(|a| a.modules == vec!["m1".to_string()]));
+        assert!(
+            shared
+                .agents
+                .iter()
+                .all(|a| a.modules == vec!["m1".to_string()])
+        );
 
         let one: CreateArgs = serde_json::from_value(serde_json::json!({
             "mode": "collab",
@@ -936,9 +940,11 @@ mod tests {
             "request_id": "r4"
         }))
         .unwrap();
-        assert!(resolve_new_session(&one, &c)
-            .unwrap_err()
-            .contains("至少要两个 agent"));
+        assert!(
+            resolve_new_session(&one, &c)
+                .unwrap_err()
+                .contains("至少要两个 agent")
+        );
 
         // 复用登记处的 agent：模块与模型取它自己的，核心不代拟。
         let reuse: CreateArgs = serde_json::from_value(serde_json::json!({
@@ -960,9 +966,11 @@ mod tests {
             "request_id": "r6"
         }))
         .unwrap();
-        assert!(resolve_new_session(&missing, &c)
-            .unwrap_err()
-            .contains("不在登记处"));
+        assert!(
+            resolve_new_session(&missing, &c)
+                .unwrap_err()
+                .contains("不在登记处")
+        );
     }
 
     /// 授权是硬条件：没授权 / 越范围 / 超期 / 模型或会话不在授权内都拒绝。
@@ -973,9 +981,11 @@ mod tests {
             parent: Some("main".to_string()),
             now: 100,
         };
-        assert!(authorize(&base, CREATE, None, None)
-            .unwrap_err()
-            .contains("没有代理授权"));
+        assert!(
+            authorize(&base, CREATE, None, None)
+                .unwrap_err()
+                .contains("没有代理授权")
+        );
 
         let call = ProxyCall {
             grant: Some(Grant {
@@ -984,9 +994,11 @@ mod tests {
             }),
             ..base.clone()
         };
-        assert!(authorize(&call, CREATE, None, None)
-            .unwrap_err()
-            .contains("不包含这个工具"));
+        assert!(
+            authorize(&call, CREATE, None, None)
+                .unwrap_err()
+                .contains("不包含这个工具")
+        );
         assert!(authorize(&call, CATALOG, None, None).is_ok());
 
         let expired = ProxyCall {
@@ -997,9 +1009,11 @@ mod tests {
             }),
             ..base.clone()
         };
-        assert!(authorize(&expired, CATALOG, None, None)
-            .unwrap_err()
-            .contains("已过期"));
+        assert!(
+            authorize(&expired, CATALOG, None, None)
+                .unwrap_err()
+                .contains("已过期")
+        );
 
         let scoped = ProxyCall {
             grant: Some(Grant {
@@ -1010,12 +1024,16 @@ mod tests {
             }),
             ..base.clone()
         };
-        assert!(authorize(&scoped, CREATE, Some("other"), None)
-            .unwrap_err()
-            .contains("不覆盖这个模型"));
-        assert!(authorize(&scoped, CREATE, Some("gpt"), Some("s9"))
-            .unwrap_err()
-            .contains("不覆盖这个会话"));
+        assert!(
+            authorize(&scoped, CREATE, Some("other"), None)
+                .unwrap_err()
+                .contains("不覆盖这个模型")
+        );
+        assert!(
+            authorize(&scoped, CREATE, Some("gpt"), Some("s9"))
+                .unwrap_err()
+                .contains("不覆盖这个会话")
+        );
         assert!(authorize(&scoped, CREATE, Some("gpt"), Some("s1")).is_ok());
     }
 

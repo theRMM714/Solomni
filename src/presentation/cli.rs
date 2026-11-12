@@ -1,7 +1,7 @@
 //! 目的：终端转录中心：解析命令 → 用入站能力面 → 渲染事件流。
 //! 管：命令解析与匹配、菜单与名单渲染、事件流打印、退出或转入 Web 的去向。
 //! 不管：业务决策、业务状态与不变式（都在各能力内部）；不做传输之外的加工。
-//! 联动：能力面来自 `src/capabilities/*/api.rs`；事件词汇与 `src/presentation/web/` 并列共用；模块声明见 `src/presentation/mod.rs`。
+//! 联动：能力面来自 `src/capabilities/*/api.rs`；事件词汇与 `src/presentation/web/` 并列共用；模块声明见 `src/presentation.rs`。
 
 use crate::capabilities::conductor::api::{Acted, ActionCall, Caller};
 use crate::capabilities::conductor::api::{
@@ -94,5 +94,5 @@ use view::*;
 pub(crate) use flows::eof_stop;
 #[cfg(test)]
 pub(crate) use gate::{
-    create_session_action, pick_agents, pick_option, split_names, waiting_lines, NO_AGENTS,
+    NO_AGENTS, create_session_action, pick_agents, pick_option, split_names, waiting_lines,
 };

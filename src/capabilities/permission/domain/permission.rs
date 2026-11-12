@@ -970,11 +970,7 @@ fn narrower(a: &str, b: &str) -> String {
     }
     let ac = a.split('/').count();
     let bc = b.split('/').count();
-    if ac >= bc {
-        a
-    } else {
-        b
-    }
+    if ac >= bc { a } else { b }
 }
 
 /// 目的：校验一条共享区相对路径条目：非空、相对、无上级段与空段；点合法（整棵）。

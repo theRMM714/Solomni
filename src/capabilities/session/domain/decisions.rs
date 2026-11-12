@@ -4,9 +4,9 @@
 //! 不管：问什么（发起方给消息与选项）、回答怎么处置（发起方）、界面怎么画（呈现层）。
 //! 联动：卡片形状与选项 id 在 `crate::capabilities::session::domain::events`；契约见
 //!   docs/session/session-model.md 的「请用户裁决：一条通道，消息 + 选项」；
-//!   由核心持有（`src/capabilities/conductor/service/mod.rs` 的 desk），生成线程与回答口都经它。
+//!   由核心持有（`src/capabilities/conductor/service.rs` 的 desk），生成线程与回答口都经它。
 
-use super::events::{idle, DecisionAnswer, DecisionQueue, DecisionWaiter, Pending, SessionEvent};
+use super::events::{DecisionAnswer, DecisionQueue, DecisionWaiter, Pending, SessionEvent, idle};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Condvar, Mutex};
 
@@ -213,10 +213,10 @@ impl DecisionDoor {
             return Err(format!("这张卡上没有这个选项：{}", option));
         }
         // 附言要求也是这一关的声明（发起方给）：出队**之前**校验——被拒的回答不留痕。
-        if let Some(why) = head.pending.note_requirement(option) {
-            if note.trim().is_empty() {
-                return Err(why);
-            }
+        if let Some(why) = head.pending.note_requirement(option)
+            && note.trim().is_empty()
+        {
+            return Err(why);
         }
         let note = note.trim().to_string();
         let blocking = head.slot.clone();

@@ -7,7 +7,7 @@ use crate::capabilities::provision::detail::fetch::HttpFetch;
 use crate::capabilities::provision::detail::host::RealHost;
 use crate::capabilities::provision::detail::ledger::FileLedger;
 use crate::capabilities::provision::detail::procs::BookProcs;
-use crate::capabilities::provision::domain::{install_identity, Dep};
+use crate::capabilities::provision::domain::{Dep, install_identity};
 use crate::capabilities::provision::ports::{Fetcher, HostFs, Ledger, Procs};
 use std::fs;
 

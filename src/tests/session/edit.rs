@@ -190,22 +190,26 @@ pub(crate) fn edit_session_enforces_the_same_rules_as_creation() {
     core.edit_session("c", edit_of(vec![("x", &["a"], ""), ("y", &["a"], "")]))
         .expect("同一模块可被多个 agent 共用");
     let shared = core.session_config("c").unwrap();
-    assert!(shared
-        .agents
-        .iter()
-        .all(|a| a.modules == vec!["a".to_string()]));
+    assert!(
+        shared
+            .agents
+            .iter()
+            .all(|a| a.modules == vec!["a".to_string()])
+    );
     let mut bad_tier = edit_of(vec![("x", &["a"], "")]);
     bad_tier.tier = "docker".to_string();
-    assert!(core
-        .edit_session("c", bad_tier)
-        .unwrap_err()
-        .contains("未知执行档位"));
+    assert!(
+        core.edit_session("c", bad_tier)
+            .unwrap_err()
+            .contains("未知执行档位")
+    );
     let mut two_agents = edit_of(vec![("x", &["a"], ""), ("y", &["b"], "")]);
     two_agents.tier = "host".to_string();
-    assert!(core
-        .edit_session("w", two_agents)
-        .unwrap_err()
-        .contains("只接受一个 agent"));
+    assert!(
+        core.edit_session("w", two_agents)
+            .unwrap_err()
+            .contains("只接受一个 agent")
+    );
 
     // 虚拟机档选型不成立（同一能力多版本未定版）：编辑与「开始」同一把尺子，如实拒绝。
     let hist2 = Arc::new(InMemoryHistory::new());

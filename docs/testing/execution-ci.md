@@ -62,7 +62,7 @@ node run-tests.js
 6. `T0 静态检查（clippy）`（硬失败）；
 7. `T0 编译告警`（硬失败）；
 8. `T0 交叉类型检查`（各已装 target）（**开发机专属**：`cargo check --target … --all-targets` 兜平台专属 `#[cfg]`（含测试）的类型错误；target 未装或本机缺交叉 C 工具链 = `env-skip`；**CI 上记 `skip-platform` 直接跳过**，因为三平台矩阵各自原生 `--all-targets` 已覆盖）；
-9. `T0 依赖重复（cargo tree）`（硬失败）；
+9. `T0 依赖重复（cargo tree）`（硬失败；重复项必须写进 `tests/dependency-policy.json` 的 `allow`——crate、理由、复核条件三样齐全，未记录即失败）；
 10. `T0 供应链（audit/deny）`（工具缺失或取不到 advisory 数据 = env-skip）；
 11. `L1 单元（--bin solomni）`（默认并行；`--serial` 改为串行，仅诊断用）；
 12. 逐个运行四个测试目标 `cross-platform` / `windows` / `linux` / `macos`（同样默认并行；非本平台且整目标为空的记 `skip-platform`）；

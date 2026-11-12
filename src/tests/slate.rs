@@ -94,8 +94,10 @@ pub(crate) fn suggest_models_reuses_stored_agent_without_suggesting_model() {
         ),
     );
     agent_upsert(&mut empty, "调研", &["a"], "m", "").unwrap();
-    assert!(empty
-        .suggest_models("做个东西", WorkMode::Collab)
-        .unwrap_err()
-        .contains("没有可用结果"));
+    assert!(
+        empty
+            .suggest_models("做个东西", WorkMode::Collab)
+            .unwrap_err()
+            .contains("没有可用结果")
+    );
 }

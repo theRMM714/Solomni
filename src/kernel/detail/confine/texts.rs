@@ -1,7 +1,7 @@
 //! 目的：围栏内失败时给回执的边界说明与可达范围摘要。
 //! 管：把 FenceSpec 的可达根压成一行、只在围栏真强制且工具非零退出时给说明。
 //! 不管：围栏判定、授权与平台差异。
-//! 联动：由 `process.rs` 的回执装配与 `mod.rs` 门面消费；边界标记来自 `contracts/fence.rs`。
+//! 联动：由 `process.rs` 的回执装配与 `confine.rs` 门面消费；边界标记来自 `contracts/fence.rs`。
 
 use crate::kernel::api::FenceSpec;
 use std::path::Path;
@@ -18,11 +18,7 @@ pub(super) fn fence_boundary_note(
         return None;
     }
     let net = if net_enforced {
-        if spec.net {
-            "开"
-        } else {
-            "关"
-        }
+        if spec.net { "开" } else { "关" }
     } else {
         "未生效"
     };

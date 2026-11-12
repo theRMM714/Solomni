@@ -1,7 +1,7 @@
 //! 目的：终端命令：模块、诊断、密钥、常驻、共享区、回档等一次性命令，跑完即回。
 //! 管：命令各自的参数解析、调用能力面与就地打印。
 //! 不管：交互回合（`gate`）、会话流（`flows`）、渲染细节（`view`）。
-//! 联动：`cli/mod.rs` 的命令分发、`view` 的打印原语
+//! 联动：`cli.rs` 的命令分发、`view` 的打印原语
 
 use super::*;
 
@@ -348,7 +348,9 @@ pub(super) fn work_cmd(ops: &Ops, arg: &str) {
             };
             println!(
                 "把共享区从 head #{} 回滚到提交 #{}（{}）。目标之后的提交仍保留，可再次回滚；各 agent 沙箱未改动。",
-                head, target.id, first_line(&target.message)
+                head,
+                target.id,
+                first_line(&target.message)
             );
             let yes = parts.iter().any(|p| p.eq_ignore_ascii_case("--yes"))
                 || prompt("确认回滚？输入 yes：") == "yes";

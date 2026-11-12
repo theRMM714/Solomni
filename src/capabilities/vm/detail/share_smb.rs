@@ -4,7 +4,7 @@
 //! 联动：实现 ports::ShareBackend；由组合根构造、service.rs 持有；helper 是独立仓的预编译产物（见 dependencies.yaml 的 vm.smbd.windows）。
 
 use crate::capabilities::vm::domain::exec::SMBD_BIN;
-use crate::capabilities::vm::domain::guest::{sh_quote, GuestImage, GuestMount};
+use crate::capabilities::vm::domain::guest::{GuestImage, GuestMount, sh_quote};
 use crate::capabilities::vm::ports::{ShareBackend, ShareGuard, SharePlan};
 use crate::kernel::detail::procs::{self, Entry, ProcessBook};
 use std::io::{BufRead, BufReader};
@@ -43,11 +43,7 @@ pub fn find_smbd(registered: Option<&str>) -> Option<PathBuf> {
     match registered.map(str::trim) {
         Some(p) if !p.is_empty() => {
             let path = PathBuf::from(p);
-            if path.is_file() {
-                Some(path)
-            } else {
-                None
-            }
+            if path.is_file() { Some(path) } else { None }
         }
         _ => crate::kernel::detail::host_probe::find_exe(SMBD_BIN),
     }

@@ -4,9 +4,15 @@
 //! 不管：下载与网络、归档的来源与布局（调用方定）。
 //! 联动：入口层的隐藏模式 --unpack 走 extract；依赖补齐走 extract_into（带 strip）。
 
+use lzma_rust2::XzReader;
+#[cfg(test)]
+use lzma_rust2::{XzOptions, XzWriter};
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
+
+/// xz 解码的内存上限（KiB）：外来归档可能声明超大字典来撑爆内存，超限直接报错而不是硬分配。
+const XZ_MEM_LIMIT_KB: u32 = 256 * 1024;
 
 /// 目的：把归档解到目录（按后缀认 tar / tar.gz(tgz) / tar.zst(tzst) / tar.xz(txz) / zip），不剥层。
 /// 返回：成功给 Ok；后缀不认识或解码失败给一句为什么。
@@ -36,35 +42,18 @@ pub fn extract_into(archive: &Path, dest: &Path, strip: usize) -> Result<(), Str
     } else if name.ends_with(".tar") {
         unpack_tar(file, dest, strip)
     } else if name.ends_with(".tar.xz") || name.ends_with(".txz") {
-        // xz 没有现成的 Read 适配：先解到临时 tar，再走同一条 tar 解包路径（解完即删）。
-        let tmp = xz_temp();
-        {
-            let mut file = std::io::BufReader::new(file);
-            let mut out = File::create(&tmp)
-                .map_err(|e| format!("建不了临时文件 {}：{}", tmp.display(), e))?;
-            lzma_rs::xz_decompress(&mut file, &mut out)
-                .map_err(|e| format!("xz 解压失败（{}）：{:?}", archive.display(), e))?;
-        }
-        let r = File::open(&tmp)
-            .map_err(|e| format!("打不开临时文件 {}：{}", tmp.display(), e))
-            .and_then(|f| unpack_tar(f, dest, strip));
-        let _ = fs::remove_file(&tmp);
-        r
+        // xz 解码器就是 Read 适配器：直接当 tar 的输入流，不落中间文件。
+        unpack_tar(
+            XzReader::new_mem_limit(file, true, XZ_MEM_LIMIT_KB),
+            dest,
+            strip,
+        )
     } else {
         Err(format!(
             "不认识的归档后缀：{}（认 .tar / .tar.gz / .tgz / .tar.zst / .tzst / .tar.xz / .txz / .zip）",
             name
         ))
     }
-}
-
-/// 目的：一个唯一的临时 tar 路径（xz 中转用；进程号 + 时间纳秒，避免并发相撞）。
-fn xz_temp() -> PathBuf {
-    let n = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    std::env::temp_dir().join(format!("solomni-xz-{}-{}.tar", std::process::id(), n))
 }
 
 /// 目的：解 tar 本体——**宽容链接**：宿主建不了链接（Windows 没建链特权）就退化成复制；
@@ -451,8 +440,10 @@ mod tests {
         let xz_path = dir.join("x.tar.xz");
         {
             let mut input = std::io::BufReader::new(File::open(&tar_path).expect("开 tar"));
-            let mut out = File::create(&xz_path).expect("建 xz");
-            lzma_rs::xz_compress(&mut input, &mut out).expect("压 xz");
+            let out = File::create(&xz_path).expect("建 xz");
+            let mut enc = XzWriter::new(out, XzOptions::default()).expect("建 xz 写入器");
+            std::io::copy(&mut input, &mut enc).expect("压 xz");
+            enc.finish().expect("收尾");
         }
         let out = dir.join("out");
         extract(&xz_path, &out).expect("解 tar.xz");

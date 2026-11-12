@@ -3,7 +3,7 @@
 //! 不管：哪些该删（domain）、什么时候删（service）、路径约定（paths）。
 //! 联动：service 经 SpaceReclaim 端口消费；删除用的路径与 survey 共用 detail/paths.rs。
 
-use crate::capabilities::storage::api::{LastGc, CAT_BUILD, CAT_DOWNLOAD, CAT_LOGS, CAT_OVERLAYS};
+use crate::capabilities::storage::api::{CAT_BUILD, CAT_DOWNLOAD, CAT_LOGS, CAT_OVERLAYS, LastGc};
 use crate::capabilities::storage::domain::safe_id;
 use crate::capabilities::storage::ports::{ReclaimLease, SpaceReclaim};
 use std::path::{Path, PathBuf};

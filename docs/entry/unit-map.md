@@ -1,7 +1,7 @@
 # 单元地图 · entry
 
 > 定位：根逐文件职责的唯一权威；由 T0 结构审查与磁盘双向比对。
-> 效力：契约｜核对：2026-11-04｜依据：`src/entry/mod.rs`
+> 效力：契约｜核对：2026-11-04｜依据：`src/entry.rs`
 
 > 本文是 **entry** 逐文件职责的唯一权威；由 `node run-tests.js` 的 T0 结构审查与磁盘**双向比对**
 > （表里每个路径必须存在；`src/` 下每个 `.rs` 都必须出现在某一张单元地图里）。
@@ -12,7 +12,7 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/entry/mod.rs` | 根共用机制的入口：注册装配、探针、产品根规范化与启动期工具链 |
+| `src/entry.rs` | 根共用机制的入口：注册装配、探针、产品根规范化与启动期工具链 |
 | `src/entry/args.rs` | 参数表：取根前的守门子进程、隐藏探针与路由目录；取根后的自检、依赖补齐、回收、构建与围栏台账；入口据此决定继续启动还是退出 |
 | `src/entry/assembly.rs` | 组合根的共用装配：把产品根变成各能力面；端口选型、适配器构造与依赖顺序只在这里落一次 |
 | `src/entry/root.rs` | 产品根规范化：纯词法拼接与归一化，取不到当前目录才退回 canonicalize |
@@ -20,7 +20,7 @@
 | `src/entry/startup.rs` | 启动门：围栏能力与授权、缺项报告、Windows 首次引导、围栏核对，以及与 Web 概览共用的 `FenceReport` |
 | `src/entry/web.rs` | Web 通道启动：把围栏事实翻成呈现层结构后交给 `presentation::web::serve` |
 | `src/main.rs` | 组合根：启动形态、产品根规范化、基础工具链 → 启动对账与围栏报告（本机能力 / 本次实际）→ 首次引导与启动门（过不了只降级 / 重设 / 退出）→ 经 `entry::assembly` 装配各能力 → 交给 CLI 或 Web；argv 分派见 `src/entry/args.rs` |
-| `src/entry/probes/mod.rs` | 机器可读探针的入口与共用输出：导出各模式，打印回收报告 |
+| `src/entry/probes.rs` | 机器可读探针的入口与共用输出：导出各模式，打印回收报告 |
 | `src/entry/probes/build.rs` | 探针：`--build`（模块构建） |
 | `src/entry/probes/doctor.rs` | 探针：`--doctor`（机器可读自检） |
 | `src/entry/probes/fence.rs` | 探针：`--print-fence-env` / `--fence-verify`（围栏环境与机制验证） |
@@ -31,4 +31,4 @@
 | `src/entry/probes/storage.rs` | 探针：`--storage`（存储报告） |
 | `src/entry/probes/unpack.rs` | 探针：`--unpack`（解归档） |
 | `src/entry/probes/work_gc.rs` | 探针：`--work-gc`（工作区回收） |
-| `src/guard/mod.rs` | 守门模式分发：围栏守门（--fence-run）、进程守门（--proc-watchdog）、围栏台账按条处置 |
+| `src/guard.rs` | 守门模式分发：围栏守门（--fence-run）、进程守门（--proc-watchdog）、围栏台账按条处置 |

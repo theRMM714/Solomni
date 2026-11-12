@@ -4,13 +4,13 @@
 //! 联动：src/capabilities/permission/、docs/testing/levels.md。
 
 use crate::capabilities::permission::api::{
-    hit, normalize, validate_defaults, validate_entry, CallScope, Decision, DecisionEdit, Effect,
-    PermissionDefaults, PermissionLayer, PermissionSet, ProfileId, Reach, ReachSet, ScopeMode,
-    SessionSandbox, SharedEdit, SharedScope,
+    CallScope, Decision, DecisionEdit, Effect, PermissionDefaults, PermissionLayer, PermissionSet,
+    ProfileId, Reach, ReachSet, ScopeMode, SessionSandbox, SharedEdit, SharedScope, hit, normalize,
+    validate_defaults, validate_entry,
 };
 use crate::capabilities::workspace::domain::workspace::Place;
 use crate::tests::doubles::{
-    abs, test_sandbox, test_workspace, test_workspace_store, InMemoryWorkStore, InMemoryWorkspace,
+    InMemoryWorkStore, InMemoryWorkspace, abs, test_sandbox, test_workspace, test_workspace_store,
 };
 fn paths(v: &[&str]) -> Vec<String> {
     v.iter().map(|s| s.to_string()).collect()
@@ -361,21 +361,23 @@ fn root_ceiling_and_child_narrowing_intersect() {
     assert_eq!(child.decisions.write, Decision::Deny);
 
     // 子不能换更高档，也不能把写范围放宽。
-    assert!(root
-        .apply_narrowing(&PermissionLayer {
+    assert!(
+        root.apply_narrowing(&PermissionLayer {
             profile: Some(ProfileId::AllReach),
             ..Default::default()
         })
-        .is_err());
-    assert!(root
-        .apply_narrowing(&PermissionLayer {
+        .is_err()
+    );
+    assert!(
+        root.apply_narrowing(&PermissionLayer {
             shared: Some(SharedEdit {
                 write: Some(ScopeMode::Paths(paths(&["other"]))),
                 ..Default::default()
             }),
             ..Default::default()
         })
-        .is_err());
+        .is_err()
+    );
 
     // 显式无权限与“不覆盖”必须分开。
     let no_read = root
@@ -700,7 +702,7 @@ fn tool_layer_ask_rides_the_decision_channel() {
 #[test]
 fn decision_door_queues_only_the_head_and_voids_waiters() {
     use crate::capabilities::session::api::{
-        AnswerSlot, Answered, DecisionDoor, Pending, SessionEvent, OPT_BEGIN, OPT_TOOL_ALLOW,
+        AnswerSlot, Answered, DecisionDoor, OPT_BEGIN, OPT_TOOL_ALLOW, Pending, SessionEvent,
     };
     use std::sync::Arc;
 
@@ -774,9 +776,9 @@ fn decision_door_queues_only_the_head_and_voids_waiters() {
 fn tool_confirmation_rides_the_decision_channel() {
     use crate::capabilities::conductor::api::{ConductorHandle, Ops, Output};
     use crate::capabilities::session::api::{
-        SessionEvent, OPT_TOOL_ALLOW, OPT_TOOL_ALLOW_TURN, OPT_TOOL_DENY,
+        OPT_TOOL_ALLOW, OPT_TOOL_ALLOW_TURN, OPT_TOOL_DENY, SessionEvent,
     };
-    use crate::tests::builders::{tool_line_texts, RecordingRunner};
+    use crate::tests::builders::{RecordingRunner, tool_line_texts};
     use crate::tests::doubles::{abs, core_with_runner, decl, gw, module_of};
     use crate::tests::prelude::*;
     use std::sync::{Arc, Mutex};

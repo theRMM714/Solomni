@@ -3,7 +3,7 @@
 //! 不管：端点候选与重试归类（endpoint）、通道构造（http_chat）、会话状态与行落盘（会话能力）。
 //! 联动：http_chat 调它；预算来自 llm::api::CompleteOpts；TLS / 代理由 reqwest 的平台配置。
 
-use super::endpoint::{retryable_status, Attempt};
+use super::endpoint::{Attempt, retryable_status};
 use super::http_agent::redact;
 use crate::capabilities::llm::api::{Chunk, CompleteOpts, Completion, TokenUsage, ToolCall};
 use futures_util::StreamExt;
@@ -272,10 +272,10 @@ fn feed(
         let Some(choice) = v.get("choices").and_then(|c| c.get(0)) else {
             continue;
         };
-        if let Some(f) = choice.get("finish_reason").and_then(|f| f.as_str()) {
-            if !f.is_empty() {
-                state.finish = f.to_string();
-            }
+        if let Some(f) = choice.get("finish_reason").and_then(|f| f.as_str())
+            && !f.is_empty()
+        {
+            state.finish = f.to_string();
         }
         let Some(delta) = choice.get("delta") else {
             continue;
@@ -297,16 +297,16 @@ fn feed(
                     });
                 }
                 let slot = &mut state.calls[idx];
-                if let Some(id) = item.get("id").and_then(|i| i.as_str()) {
-                    if !id.is_empty() {
-                        slot.id = id.to_string();
-                    }
+                if let Some(id) = item.get("id").and_then(|i| i.as_str())
+                    && !id.is_empty()
+                {
+                    slot.id = id.to_string();
                 }
                 if let Some(f) = item.get("function") {
-                    if let Some(n) = f.get("name").and_then(|n| n.as_str()) {
-                        if !n.is_empty() {
-                            slot.name = n.to_string();
-                        }
+                    if let Some(n) = f.get("name").and_then(|n| n.as_str())
+                        && !n.is_empty()
+                    {
+                        slot.name = n.to_string();
                     }
                     if let Some(a) = f.get("arguments").and_then(|a| a.as_str()) {
                         slot.args_json.push_str(a);
@@ -314,20 +314,19 @@ fn feed(
                 }
             }
         }
-        if let Some(t) = delta.get("content").and_then(|c| c.as_str()) {
-            if !t.is_empty() {
-                state.got_any = true;
-                let piece =
-                    if t.len() > state.content.len() && t.starts_with(state.content.as_str()) {
-                        t[state.content.len()..].to_string()
-                    } else {
-                        t.to_string()
-                    };
-                if !piece.is_empty() {
-                    state.content.push_str(&piece);
-                    if !on(Chunk::Text(piece)) {
-                        return Feed::Cancelled;
-                    }
+        if let Some(t) = delta.get("content").and_then(|c| c.as_str())
+            && !t.is_empty()
+        {
+            state.got_any = true;
+            let piece = if t.len() > state.content.len() && t.starts_with(state.content.as_str()) {
+                t[state.content.len()..].to_string()
+            } else {
+                t.to_string()
+            };
+            if !piece.is_empty() {
+                state.content.push_str(&piece);
+                if !on(Chunk::Text(piece)) {
+                    return Feed::Cancelled;
                 }
             }
         }
@@ -335,20 +334,20 @@ fn feed(
             .get("reasoning_content")
             .and_then(|c| c.as_str())
             .or_else(|| delta.get("reasoning").and_then(|c| c.as_str()));
-        if let Some(r) = reasoning {
-            if !r.is_empty() {
-                state.got_any = true;
-                let piece =
-                    if r.len() > state.reasoning.len() && r.starts_with(state.reasoning.as_str()) {
-                        r[state.reasoning.len()..].to_string()
-                    } else {
-                        r.to_string()
-                    };
-                if !piece.is_empty() {
-                    state.reasoning.push_str(&piece);
-                    if !on(Chunk::Reasoning(piece)) {
-                        return Feed::Cancelled;
-                    }
+        if let Some(r) = reasoning
+            && !r.is_empty()
+        {
+            state.got_any = true;
+            let piece =
+                if r.len() > state.reasoning.len() && r.starts_with(state.reasoning.as_str()) {
+                    r[state.reasoning.len()..].to_string()
+                } else {
+                    r.to_string()
+                };
+            if !piece.is_empty() {
+                state.reasoning.push_str(&piece);
+                if !on(Chunk::Reasoning(piece)) {
+                    return Feed::Cancelled;
                 }
             }
         }

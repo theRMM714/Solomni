@@ -1,10 +1,10 @@
 //! 目的：守门进程的入参形状与命令行拼装（由主程序与探针共用）。
 //! 管：FenceSpec 的扁平 JSON、`prepared` / `home` / `policy` 的缺省规则、launcher 与 `run_fenced` 的执行转交。
 //! 不管：围栏怎么装、命令怎么跑——平台差异在 `linux.rs` / `macos.rs` / `windows/` / `other.rs`。
-//! 联动：由 `mod.rs` 门面与根/探针的 `--fence-run` 消费；作业 JSON 的字段与 `contracts/fence.rs` 的 `FenceSpec` 同步。
+//! 联动：由 `confine.rs` 门面与根/探针的 `--fence-run` 消费；作业 JSON 的字段与 `contracts/fence.rs` 的 `FenceSpec` 同步。
 
-use super::backend;
 use super::FENCE_FLAG;
+use super::backend;
 use crate::kernel::api::FenceSpec;
 use std::path::{Path, PathBuf};
 use std::process::Command;

@@ -22,9 +22,10 @@ pub(crate) fn work_resolve_local_marks_merged_result_and_commit_succeeds() {
     ws.work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "a", 2))
         .unwrap();
     store.write_under(&sb_b, "note.md", b"merged").unwrap();
-    assert!(ws
-        .work_commit("w", "b", "w--b", &commit_req(&["note.md"], &[], "b", 3))
-        .is_err());
+    assert!(
+        ws.work_commit("w", "b", "w--b", &commit_req(&["note.md"], &[], "b", 3))
+            .is_err()
+    );
 
     let rep = ws
         .work_resolve("w", "b", &resolve_local_req(&ws, "w", &["note.md"]))
@@ -71,10 +72,11 @@ pub(crate) fn work_resolve_upstream_overwrites_local_and_then_is_clean() {
     );
     let st = ws.work_status("w", "b", &[]).unwrap();
     assert_eq!(st.entries[0].state, StatusState::Clean);
-    assert!(ws
-        .work_commit("w", "b", "w--b", &commit_req(&["note.md"], &[], "noop", 3))
-        .unwrap_err()
-        .contains("没有可提交"));
+    assert!(
+        ws.work_commit("w", "b", "w--b", &commit_req(&["note.md"], &[], "noop", 3))
+            .unwrap_err()
+            .contains("没有可提交")
+    );
 }
 
 /// 目的：上游删文件时，take=upstream 删本地并清基线；take=local 清基线、让本地成为新增。
@@ -241,14 +243,16 @@ pub(crate) fn work_resolve_local_warns_when_local_missing_or_no_base() {
         )
         .unwrap();
     assert_eq!(rep.entries.len(), 2);
-    assert!(rep
-        .warnings
-        .iter()
-        .any(|w| w.path == "note.md" && w.kind == ResolveWarningKind::LocalMissing));
-    assert!(rep
-        .warnings
-        .iter()
-        .any(|w| w.path == "other.md" && w.kind == ResolveWarningKind::NoBase));
+    assert!(
+        rep.warnings
+            .iter()
+            .any(|w| w.path == "note.md" && w.kind == ResolveWarningKind::LocalMissing)
+    );
+    assert!(
+        rep.warnings
+            .iter()
+            .any(|w| w.path == "other.md" && w.kind == ResolveWarningKind::NoBase)
+    );
 }
 
 /// 目的：take=upstream 覆盖前把本地版本备份到 lost/；work_lost 能列出并按当前 hash 恢复。
@@ -401,12 +405,14 @@ pub(crate) fn work_resolve_refuses_empty_and_reports_missing() {
     let (ws, _dirs, _store) = work_ws();
     ws.prepare("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
-    assert!(ws
-        .work_resolve("w", "a", &resolve_local_req(&ws, "w", &[]))
-        .is_err());
-    assert!(ws
-        .work_resolve("w", "a", &resolve_local_req(&ws, "w", &["nope"]))
-        .is_err());
+    assert!(
+        ws.work_resolve("w", "a", &resolve_local_req(&ws, "w", &[]))
+            .is_err()
+    );
+    assert!(
+        ws.work_resolve("w", "a", &resolve_local_req(&ws, "w", &["nope"]))
+            .is_err()
+    );
     let rep = ws
         .work_resolve("w", "a", &resolve_local_req(&ws, "w", &["note.md", "nope"]))
         .unwrap();
@@ -566,12 +572,14 @@ pub(crate) fn work_gc_keeps_index_and_commit_objects_and_removes_the_rest() {
     assert_eq!(dry.unreachable_objects, 1, "g1 只属于被丢弃的提交");
     assert_eq!(dry.removed_objects, 0);
     assert_eq!(dry.ignored_files, 1);
-    assert!(store
-        .read_object(
-            &root,
-            &crate::capabilities::workspace::api::content_hash(b"g1")
-        )
-        .is_ok());
+    assert!(
+        store
+            .read_object(
+                &root,
+                &crate::capabilities::workspace::api::content_hash(b"g1")
+            )
+            .is_ok()
+    );
 
     let applied = ws.work_gc("w", true).unwrap();
     assert!(applied.applied);

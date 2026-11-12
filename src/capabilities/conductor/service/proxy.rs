@@ -6,7 +6,7 @@
 use crate::capabilities::conductor::domain::proxy as d;
 use crate::capabilities::conductor::ports::ProxyHost;
 use crate::capabilities::llm::api::Channel;
-use crate::capabilities::tools::api::{arg_fault_text, ToolBook, ToolOutcome};
+use crate::capabilities::tools::api::{ToolBook, ToolOutcome, arg_fault_text};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -111,10 +111,10 @@ impl ProxyTools {
         // 父会话由机制从调用上下文填，不接受模型自参。
         spec.parent = ctx.parent.clone();
         for a in &spec.agents {
-            if let Some(m) = &a.model {
-                if let Err(e) = d::authorize(ctx, d::CREATE, Some(m), None) {
-                    return deny(e);
-                }
+            if let Some(m) = &a.model
+                && let Err(e) = d::authorize(ctx, d::CREATE, Some(m), None)
+            {
+                return deny(e);
             }
         }
         match self.host.create_session(&spec) {
@@ -269,7 +269,7 @@ fn json_ok<T: serde::Serialize>(v: &T) -> ToolOutcome {
     }
 }
 
-use super::{now_ts, validate_work_name, Conductor, Session};
+use super::{Conductor, Session, now_ts, validate_work_name};
 use crate::capabilities::conductor::api::ConductorHandle;
 use crate::capabilities::session::api::{
     AgentSession, Delegation, RunState, SessionEvent, SessionMeta, SessionParams,
@@ -586,13 +586,13 @@ impl Conductor {
             .bind(name, workspace.as_ref().map(|w| w.root.as_path()))?;
         self.workspace
             .prepare(name, &[PROXY_PRIVATE_DIR.to_string()])?;
-        if workspace.is_some() {
-            if let Err(e) = self.workspace.work_import_root(name, now_ts()) {
-                self.log.warn(
-                    "conductor::create_proxy",
-                    &format!("工作区初始导入失败：{}", e),
-                );
-            }
+        if workspace.is_some()
+            && let Err(e) = self.workspace.work_import_root(name, now_ts())
+        {
+            self.log.warn(
+                "conductor::create_proxy",
+                &format!("工作区初始导入失败：{}", e),
+            );
         }
         let mut session = self.build_proxy_with(&meta, &channel)?;
         let mut events = Vec::new();

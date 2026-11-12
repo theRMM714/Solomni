@@ -1,6 +1,6 @@
 //! 目的：guest initrd 的发行版配方与生成——chroot 脚本、模块合并、产物核对与失败文案。
 //! 管：`GuestFamily` 配方表、initramfs-tools 配置与脚本、模块去重合并、unshare + chroot 执行、失败时的输出尾。
-//! 不管：deb 选型与内核装入（`deb.rs`）、ext4 落盘（`mod.rs`）。
+//! 不管：deb 选型与内核装入（`deb.rs`）、ext4 落盘（`guest_image.rs`）。
 //! 联动：`deb.rs` 的 `ensure_guest_kernel` 与 `install_guest_rootfs` 调 `ensure_guest_initrd`。
 
 use super::*;

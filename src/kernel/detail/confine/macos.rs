@@ -4,7 +4,7 @@
 //! 不管：入站 / 局域网 / 回环的细分策略——本档只按 spec.net 放行出站。
 //! 联动：装不上时如实降级（打印说明后照常执行）；降级原因分「本机 ABI 失效」（环境结论）与「profile 被拒」（写错，探针硬失败）。
 
-use super::{shell_command, Capability, FenceVerdict, FENCE_FAILED};
+use super::{Capability, FENCE_FAILED, FenceVerdict, shell_command};
 use crate::kernel::api::FenceSpec;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
@@ -15,7 +15,8 @@ use std::path::Path;
 ///   探针据此响亮失败；后者才是环境结论，探针如实跳过。
 pub const PROFILE_REJECTED_MARK: &str = "seatbelt profile 被拒绝";
 
-extern "C" {
+// SAFETY: seatbelt 的私有 ABI；调用点先过自检，符号缺失即判定环境不可用。
+unsafe extern "C" {
     fn sandbox_init(profile: *const c_char, flags: u64, errorbuf: *mut *mut c_char) -> c_int;
     fn sandbox_free_error(errorbuf: *mut c_char);
 }

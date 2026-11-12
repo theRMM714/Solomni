@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::capabilities::provision::api::{DepStatus, GuestBase, JobState, ProcInfo, Provision};
 use crate::capabilities::provision::domain::{
-    deps, for_host, install_identity, is_toolchain, links, pinned_sha256, source_url, under, Dep,
+    Dep, deps, for_host, install_identity, is_toolchain, links, pinned_sha256, source_url, under,
 };
 use crate::capabilities::provision::ports::{
     Fetcher, GuestImage, HostFs, Installers, Ledger, Procs,

@@ -3,12 +3,12 @@
 //!   （含游标翻页与 `inputSchema` 原样收下）、tools/call（`content` 各项如实、非文本项标注、`isError`）；
 //!   应答按 id 配对，通知与别的消息如实跳过。
 //! 不管：进程与围栏机制（走注入的 `SessionHost`）；生命周期与租约（在 service）；参数校验（服务是权威）。
-//! 联动：实现 ports::ServiceAdapter；经 `detail/mod.rs` 暴露给组合根。
+//! 联动：实现 ports::ServiceAdapter；经 `detail.rs` 暴露给组合根。
 
 use crate::capabilities::residents::api::Operation;
 use crate::capabilities::residents::ports::{LaunchSpec, ServiceAdapter, ServiceInstance};
 use crate::kernel::ports::{Session, SessionHost, SessionSpec};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 
 /// 目的：本适配器在 module.yaml 的 `services.<名>.adapter` 里用的 id。

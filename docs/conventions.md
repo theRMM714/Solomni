@@ -11,7 +11,7 @@
 
 - **根门户**（`README.md`、`AGENTS.md`、`ARCHITECTURE.md` 等）只写「这份文档管什么、要做事时读哪一份」，不复述细则正文。
 - **细则**在 `docs/<单元>/`：每个业务与机制单元一个目录，目录里的 `README.md` 是唯一入口，`unit-map.md` 是逐文件职责（T0 机器比对）。
-- 不属任何单元的横向内容按事项分：测试与质量在 `docs/testing/`，任务流程在 [workflow/README.md](workflow/README.md)（单 / 多 agent 细则同目录），文档约定与术语在本文。
+- 不属任何单元的横向内容按事项分：测试与质量在 `docs/testing/`，任务流程在 [workflow/README.md](workflow/README.md)（单 / 多 agent 细则同目录），文档约定与术语在本文，Rust 源码规范在 [rust-dev.md](rust-dev.md)。
 - 只有任务引入新的长期领域且现有文档无法承载时，才建新专项文档；不为单次任务创建无长期价值的文档。
 - 细则之间用相对路径互引；门户用 `docs/<领域>/<文件>.md` 引用细则。同一个事实只有一份权威。
 

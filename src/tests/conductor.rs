@@ -599,14 +599,16 @@ pub(crate) fn work_upload_conflict_and_safe_name() {
         core.work_upload(&sid, "x.txt", b"again", true).unwrap(),
         "显式覆盖"
     );
-    assert!(core
-        .work_upload("ghost", "x.txt", b"x", false)
-        .unwrap_err()
-        .contains("无此会话"));
-    assert!(core
-        .work_upload(&sid, "../evil.txt", b"x", false)
-        .unwrap_err()
-        .contains("路径分隔符"));
+    assert!(
+        core.work_upload("ghost", "x.txt", b"x", false)
+            .unwrap_err()
+            .contains("无此会话")
+    );
+    assert!(
+        core.work_upload(&sid, "../evil.txt", b"x", false)
+            .unwrap_err()
+            .contains("路径分隔符")
+    );
 }
 
 /// 目的：回档主会话 → 各 agent 会话按**同一个回合 id** 同步截断（见 session-model.md 五）。

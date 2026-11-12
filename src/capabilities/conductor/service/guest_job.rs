@@ -5,8 +5,8 @@
 //!   契约见 docs/conductor/README.md 的「长步骤」与 docs/vm/README.md 的「并发」。
 
 use crate::capabilities::vm::api::{
-    admit_guest, classify_base, mounts_from, package_setup_scripts, resolve_guest, ExecPlan,
-    GuestDiagnosis, GuestRun, GuestSpec, Vm,
+    ExecPlan, GuestDiagnosis, GuestRun, GuestSpec, Vm, admit_guest, classify_base, mounts_from,
+    package_setup_scripts, resolve_guest,
 };
 use crate::capabilities::workspace::api::Sandboxes;
 use crate::kernel::api::FenceSpec;

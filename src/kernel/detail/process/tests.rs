@@ -12,7 +12,10 @@ use std::path::{Path, PathBuf};
 /// 环境白名单：父进程的无关变量（密钥之类）不进子进程；HOME / TEMP 落在该 agent 的私有沙箱里。
 #[test]
 fn env_whitelist_drops_foreign_vars_and_moves_home_into_the_sandbox() {
-    std::env::set_var("SOLOMNI_PROBE_SECRET", "leak-me");
+    // SAFETY: 只改本用例独占的探针变量，用例内即改即清。
+    unsafe {
+        std::env::set_var("SOLOMNI_PROBE_SECRET", "leak-me");
+    }
     let private = PathBuf::from("demo").join("agent-a");
     let spec = FenceSpec {
         agent: "a".to_string(),
@@ -61,7 +64,10 @@ fn env_whitelist_drops_foreign_vars_and_moves_home_into_the_sandbox() {
         Some("utf-8"),
         "编码统一 UTF-8"
     );
-    std::env::remove_var("SOLOMNI_PROBE_SECRET");
+    // SAFETY: 同上。
+    unsafe {
+        std::env::remove_var("SOLOMNI_PROBE_SECRET");
+    }
 }
 
 /// 回执里的标记文案由进程机制自己的代码返回（它们随 [工具结果] 进模型上下文）。
@@ -192,11 +198,7 @@ fn built_exe() -> Option<PathBuf> {
         "solomni"
     };
     let p = profile_dir.join(name);
-    if p.is_file() {
-        Some(p)
-    } else {
-        None
-    }
+    if p.is_file() { Some(p) } else { None }
 }
 
 /// 本机可用的 python（没有就如实跳过需要解释器的用例）。
@@ -206,10 +208,9 @@ fn python() -> Option<&'static str> {
             .arg("-c")
             .arg("print(1)")
             .output()
+            && o.status.success()
         {
-            if o.status.success() {
-                return Some(name);
-            }
+            return Some(name);
         }
     }
     None
@@ -223,11 +224,7 @@ fn node() -> Option<&'static str> {
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false);
-    if ok {
-        Some("node")
-    } else {
-        None
-    }
+    if ok { Some("node") } else { None }
 }
 
 fn code_texts() -> std::sync::Arc<dyn crate::kernel::ports::ProcessTexts> {
@@ -301,7 +298,9 @@ fn real_tool_process_receives_stdin_json_and_reports_success() {
 #[test]
 fn real_tool_process_does_not_inherit_foreign_env() {
     let Some(exe) = built_exe() else {
-        eprintln!("[探针] 未找到已构建的 solomni 可执行文件（先 cargo build），跳过工具进程环境白名单契约");
+        eprintln!(
+            "[探针] 未找到已构建的 solomni 可执行文件（先 cargo build），跳过工具进程环境白名单契约"
+        );
         return;
     };
     let Some(py) = python() else {
@@ -314,7 +313,10 @@ fn real_tool_process_does_not_inherit_foreign_env() {
         "import os\nprint('LEAK=' + str(os.environ.get('SOLOMNI_PROBE_ENV_LEAK')))\n",
     )
     .expect("写脚本");
-    std::env::set_var("SOLOMNI_PROBE_ENV_LEAK", "leak-me");
+    // SAFETY: 只改本用例独占的探针变量，用例内即改即清。
+    unsafe {
+        std::env::set_var("SOLOMNI_PROBE_ENV_LEAK", "leak-me");
+    }
     let tools = real_runner(exe, &dir, 60);
     let out = tools.run(
         &spec_for(&dir),
@@ -325,7 +327,10 @@ fn real_tool_process_does_not_inherit_foreign_env() {
         None,
         None,
     );
-    std::env::remove_var("SOLOMNI_PROBE_ENV_LEAK");
+    // SAFETY: 同上。
+    unsafe {
+        std::env::remove_var("SOLOMNI_PROBE_ENV_LEAK");
+    }
     assert!(out.ok, "工具应当成功：{}", out.output);
     assert!(
         out.output.contains("LEAK=None"),

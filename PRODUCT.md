@@ -66,7 +66,7 @@
 - agent 实例名不得占用 `work` / `children`（名单在 `systools/names.yaml`）。
 
 - **构建 / 测试 / 跑脚本用 shell**（执行类系统工具）：cwd 固定私有沙箱，默认 `scope=sandbox` 只碰私有沙箱 + 只读基础 / 项目工具链；要读共享区 / 模块目录 / 主机只读根或联网用 `scope=external`，按会话档位 ask / allow；共享区永远只读，模块 userdata 不可写，不注入模块 secrets。
-- **文件读写用内置工具**（`read` / `list` / `write` / `edit` / `patch` / `delete` / `search`；`patch` 用自由格式补丁，大段内容不必塞进 JSON；`delete` 默认只删沙箱里的文件）：核心把占位符替换成**本环境写法的根**（本机档 = 宿主路径，虚拟机档 = guest 路径）；越出这些根（相对路径、`..`）一律拒绝（`src/capabilities/tools/service/mod.rs`），虚拟机档下的 guest 写法在寻址前译回宿主路径再校验。
+- **文件读写用内置工具**（`read` / `list` / `write` / `edit` / `patch` / `delete` / `search`；`patch` 用自由格式补丁，大段内容不必塞进 JSON；`delete` 默认只删沙箱里的文件）：核心把占位符替换成**本环境写法的根**（本机档 = 宿主路径，虚拟机档 = guest 路径）；越出这些根（相对路径、`..`）一律拒绝（`src/capabilities/tools/service.rs`），虚拟机档下的 guest 写法在寻址前译回宿主路径再校验。
 - **一 agent 一格目录**：读不到别人的私有区、也写不进去；产物有归属，返工找得到人。模块目录不被任何 agent 拥有：agent 只有使用权，agent 的文件工具对模块目录（含 `userdata/`）只读，模块数据由模块自己的工具 / 服务进程维护。
 - 跨 agent 流动只有 `work/`、共用模块的调用与进入上下文的转录这些明路。
 - **共享区是版本化工作区**：`work/` 是**主副本**、对 agent 只读；agent 的沙箱就是它的**工作副本**。

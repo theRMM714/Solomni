@@ -13,9 +13,11 @@ pub(super) fn expect_granted(prep: &FencePrep, what: &str) {
 /// 目的：网络能力 SID 只在 `net=true` 时建出来；`net=false` 不授任何 capability（断网）。
 #[test]
 fn internet_client_capability_is_only_built_when_net_is_true() {
-    assert!(container::internet_client_sid(false)
-        .expect("net=false 不该失败")
-        .is_none());
+    assert!(
+        container::internet_client_sid(false)
+            .expect("net=false 不该失败")
+            .is_none()
+    );
     let sid = container::internet_client_sid(true)
         .expect("建 internetClient 能力 SID")
         .expect("net=true 应该有一个能力");
@@ -54,10 +56,10 @@ fn dump_aces(path: &Path) -> String {
 
 /// 目的：探针目录的收尾——删不掉就如实打印，不静默（受限环境里写坏的 DACL 会让删除失败）。
 pub(super) fn discard(base: &Path) {
-    if let Err(e) = std::fs::remove_dir_all(base) {
-        if base.exists() {
-            eprintln!("[诊断] 探针目录未清理（{}）：{}", base.display(), e);
-        }
+    if let Err(e) = std::fs::remove_dir_all(base)
+        && base.exists()
+    {
+        eprintln!("[诊断] 探针目录未清理（{}）：{}", base.display(), e);
     }
 }
 
@@ -201,9 +203,11 @@ fn grant_targets_include_parents_with_stat_only() {
         private: PathBuf::new(),
         ro_tree: Vec::new(),
         rw: vec![dir.clone()],
-        ro: vec![std::env::temp_dir()
-            .join("solomni-grant-targets")
-            .join("shared")],
+        ro: vec![
+            std::env::temp_dir()
+                .join("solomni-grant-targets")
+                .join("shared"),
+        ],
         cwd: module_root.clone(),
         net: false,
     };

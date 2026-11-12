@@ -4,9 +4,9 @@
 //! 不管：三方比较、路径校验等纯逻辑（在 `domain::workstore`）；本文件只做机制。
 //! 联动：由 workspace 的 `service.rs` 经 `WorkStore` 端口持有（R12）；装配在 `main.rs`。
 
-use crate::capabilities::workspace::domain::asset::{AssetScanner, FileVersion, ASSET_CHUNK_BYTES};
+use crate::capabilities::workspace::domain::asset::{ASSET_CHUNK_BYTES, AssetScanner, FileVersion};
 use crate::capabilities::workspace::domain::workstore::{
-    join_rel, Commit, Index, ObjectInfo, Pending, Ref, RefKind,
+    Commit, Index, ObjectInfo, Pending, Ref, RefKind, join_rel,
 };
 use crate::capabilities::workspace::ports::WorkStore;
 use serde::de::DeserializeOwned;
@@ -69,10 +69,10 @@ fn rename_temp(tmp: &Path, path: &Path) -> Result<(), String> {
     // Unix 上 rename 的目录项也要刷一次，才能在掉电后稳定；失败只当尽力而为。
     #[cfg(unix)]
     {
-        if let Some(dir) = path.parent() {
-            if let Ok(dir_file) = File::open(dir) {
-                let _ = dir_file.sync_all();
-            }
+        if let Some(dir) = path.parent()
+            && let Ok(dir_file) = File::open(dir)
+        {
+            let _ = dir_file.sync_all();
         }
     }
     Ok(())
@@ -303,10 +303,10 @@ impl WorkStore for FsWorkStore {
         max_bytes: u64,
     ) -> Result<u64, String> {
         let object = store.join("objects").join(expected_hash);
-        if let Ok(meta) = std::fs::metadata(&object) {
-            if meta.is_file() {
-                return Ok(meta.len());
-            }
+        if let Ok(meta) = std::fs::metadata(&object)
+            && meta.is_file()
+        {
+            return Ok(meta.len());
         }
         let source = safe_path(root, rel)?;
         let mut src =
@@ -581,10 +581,11 @@ impl WorkStore for FsWorkStore {
 
     fn write_object(&self, store: &Path, hash: &str, bytes: &[u8]) -> Result<(), String> {
         let path = store.join("objects").join(hash);
-        if let Ok(meta) = std::fs::metadata(&path) {
-            if meta.is_file() && meta.len() == bytes.len() as u64 {
-                return Ok(());
-            }
+        if let Ok(meta) = std::fs::metadata(&path)
+            && meta.is_file()
+            && meta.len() == bytes.len() as u64
+        {
+            return Ok(());
         }
         write_atomic(&path, bytes)
     }

@@ -1,7 +1,7 @@
 //! 目的：Windows 容器围栏的启动面——AppContainer 档案与 SID、UTF-16 转换、system shell、kill-on-close job 对象。
 //! 管：在容器里拉进程这一层（Windows 独有：Linux/macOS 是「先装规则再 exec」）。
 //! 不管：授权与撤销（在 acl.rs / record/）、策略（在 confine::prepare_fence）。
-//! 联动：由 windows/mod.rs 调用；失败如实返回而非假装成功。
+//! 联动：由 windows.rs 调用；失败如实返回而非假装成功。
 
 use super::FENCE_FAILED;
 use crate::kernel::api::FenceSpec;
@@ -13,22 +13,23 @@ use windows_sys::Win32::Security::Isolation::{
     CreateAppContainerProfile, DeriveAppContainerSidFromAppContainerName,
 };
 use windows_sys::Win32::Security::{
-    CreateWellKnownSid, WinCapabilityInternetClientSid, PSID, SECURITY_CAPABILITIES,
-    SID_AND_ATTRIBUTES,
+    CreateWellKnownSid, PSID, SECURITY_CAPABILITIES, SID_AND_ATTRIBUTES,
+    WinCapabilityInternetClientSid,
 };
 use windows_sys::Win32::System::Console::{
     GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
 };
 use windows_sys::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-    SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_ACTIVE_PROCESS,
-    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_ACTIVE_PROCESS,
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    JobObjectExtendedLimitInformation, SetInformationJobObject,
 };
 use windows_sys::Win32::System::Threading::{
-    CreateProcessW, DeleteProcThreadAttributeList, GetCurrentProcess, GetExitCodeProcess,
-    InitializeProcThreadAttributeList, UpdateProcThreadAttribute, WaitForSingleObject,
-    CREATE_UNICODE_ENVIRONMENT, EXTENDED_STARTUPINFO_PRESENT, INFINITE, PROCESS_INFORMATION,
-    PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, STARTF_USESTDHANDLES, STARTUPINFOEXW,
+    CREATE_UNICODE_ENVIRONMENT, CreateProcessW, DeleteProcThreadAttributeList,
+    EXTENDED_STARTUPINFO_PRESENT, GetCurrentProcess, GetExitCodeProcess, INFINITE,
+    InitializeProcThreadAttributeList, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
+    PROCESS_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOEXW, UpdateProcThreadAttribute,
+    WaitForSingleObject,
 };
 
 /// 文件对象（SetNamedSecurityInfoW / GetNamedSecurityInfoW 的对象类型）。

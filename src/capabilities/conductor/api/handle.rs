@@ -7,9 +7,9 @@ use super::*;
 use crate::capabilities::conductor::service::Conductor;
 pub use crate::capabilities::session::api::SessionEvent;
 use crate::kernel::api::JobRegistry;
-use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::mpsc::{self};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
+use std::sync::mpsc::{self};
 impl ConductorHandle {
     /// 目的：把核心搬到它自己的执行线程：此后所有核心状态只被这一个线程碰。 全部手柄丢弃后线程自然结束（通道断开即退出）。
     pub fn spawn(core: Conductor) -> Result<ConductorHandle, String> {

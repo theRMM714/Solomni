@@ -228,10 +228,9 @@ pub(crate) fn python() -> Option<&'static str> {
             .arg("-c")
             .arg("print(1)")
             .output()
+            && o.status.success()
         {
-            if o.status.success() {
-                return Some(name);
-            }
+            return Some(name);
         }
     }
     None

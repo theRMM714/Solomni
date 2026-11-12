@@ -9,7 +9,7 @@ use crate::capabilities::packages::api as pkgs;
 use crate::capabilities::packages::api::{Facts, Library, PinPolicy, Problem, Target};
 use crate::capabilities::packages::detail::FsPackages;
 use crate::capabilities::packages::domain::manifest::{
-    check_manifest, conflicts, host_platform, is_platform_dir_name, PackageManifest,
+    PackageManifest, check_manifest, conflicts, host_platform, is_platform_dir_name,
 };
 use crate::capabilities::packages::ports::PackageSource;
 use std::collections::BTreeMap;
@@ -156,10 +156,12 @@ pub(crate) fn package_manifest_check_rejects_illegal_forms() {
         check_manifest(&pkg_yaml("id: cc\nversion: 1\nkind: system")).is_err(),
         "system 类必须给 provides_paths"
     );
-    assert!(check_manifest(&pkg_yaml(
-        "id: cc\nversion: 1\nkind: system\nprovides_paths: [usr/include]"
-    ))
-    .is_ok());
+    assert!(
+        check_manifest(&pkg_yaml(
+            "id: cc\nversion: 1\nkind: system\nprovides_paths: [usr/include]"
+        ))
+        .is_ok()
+    );
     assert!(
         check_manifest(&pkg_yaml("id: a\nversion: 1\nprefix: opt/a\nrequires: [a]")).is_err(),
         "requires 不能依赖自己"
@@ -355,28 +357,36 @@ pub(crate) fn exec_vm_tier_reports_missing_ambiguous_and_unavailable() {
     // guest 镜像自带的能力不算缺（镜像里已经有解释器）：诊断空、工具可用、计划成立。
     let guest = vec!["python".to_string()];
     assert!(pkgs::diagnoses(&modules, &empty, &spec, &guest).is_empty());
-    assert!(pkgs::plan_guest(&spec, &modules, &empty, &guest)
-        .unusable
-        .is_empty());
-    assert!(pkgs::plan_guest(&spec, &modules, &empty, &guest)
-        .packages
-        .is_empty());
+    assert!(
+        pkgs::plan_guest(&spec, &modules, &empty, &guest)
+            .unusable
+            .is_empty()
+    );
+    assert!(
+        pkgs::plan_guest(&spec, &modules, &empty, &guest)
+            .packages
+            .is_empty()
+    );
     // 多版本且未定版 = 不替用户选
     let two = Library::build(
         vec![pkg("python", "3.12.4"), pkg("python", "3.11.9")],
         Vec::new(),
     );
-    assert!(pkgs::diagnoses(&modules, &two, &spec, &[])
-        .iter()
-        .any(|d| matches!(d, Problem::Ambiguous { .. })));
+    assert!(
+        pkgs::diagnoses(&modules, &two, &spec, &[])
+            .iter()
+            .any(|d| matches!(d, Problem::Ambiguous { .. }))
+    );
     // 定版指定的版本不在库里 = 如实报
     let bad = ExecSpec {
         pins: BTreeMap::from([("python".to_string(), "9.9".to_string())]),
         ..vm_spec()
     };
-    assert!(pkgs::diagnoses(&modules, &two, &bad, &[])
-        .iter()
-        .any(|d| matches!(d, Problem::UnknownPin { .. })));
+    assert!(
+        pkgs::diagnoses(&modules, &two, &bad, &[])
+            .iter()
+            .any(|d| matches!(d, Problem::UnknownPin { .. }))
+    );
     // 多版本未定版 = 选型不成立：如实拒绝（这是用户要解决的选型问题，不是"缺包"）
     let refused = pkgs::plan_guest(&spec, &modules, &two, &[]);
     assert!(
@@ -397,7 +407,9 @@ pub(crate) fn exec_vm_tier_reports_missing_ambiguous_and_unavailable() {
 pub(crate) fn exec_vm_plan_pins_versions_and_orders_prefix_before_system() {
     let lib = Library::build(
         vec![
-            pkg_yaml("id: cc\nversion: 13.2.0\nkind: system\nprovides_paths: [usr/bin, usr/include]\nrequires: [binutils]"),
+            pkg_yaml(
+                "id: cc\nversion: 13.2.0\nkind: system\nprovides_paths: [usr/bin, usr/include]\nrequires: [binutils]",
+            ),
             pkg_yaml("id: binutils\nversion: 2.42\nprefix: opt/rt/binutils2.42"),
             pkg("python", "3.12.4"),
         ],

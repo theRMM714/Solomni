@@ -203,21 +203,21 @@ impl ToolSchema {
                         return Err(ArgFault::Empty(name.clone()));
                     }
                     if let Some(n) = v.as_f64() {
-                        if let Some(lo) = p.min {
-                            if n < lo {
-                                return Err(ArgFault::TooSmall {
-                                    name: name.clone(),
-                                    min: compact_num(lo),
-                                });
-                            }
+                        if let Some(lo) = p.min
+                            && n < lo
+                        {
+                            return Err(ArgFault::TooSmall {
+                                name: name.clone(),
+                                min: compact_num(lo),
+                            });
                         }
-                        if let Some(hi) = p.max {
-                            if n > hi {
-                                return Err(ArgFault::TooBig {
-                                    name: name.clone(),
-                                    max: compact_num(hi),
-                                });
-                            }
+                        if let Some(hi) = p.max
+                            && n > hi
+                        {
+                            return Err(ArgFault::TooBig {
+                                name: name.clone(),
+                                max: compact_num(hi),
+                            });
                         }
                     }
                 }
@@ -250,10 +250,10 @@ impl ToolSchema {
             return;
         };
         for (name, p) in params {
-            if !obj.contains_key(name) {
-                if let Some(d) = &p.default {
-                    obj.insert(name.clone(), d.clone());
-                }
+            if !obj.contains_key(name)
+                && let Some(d) = &p.default
+            {
+                obj.insert(name.clone(), d.clone());
             }
         }
     }

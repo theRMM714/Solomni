@@ -1,7 +1,7 @@
 //! 目的：台账里路径的归属判定——产品根是哪个目录、一个路径在不在根内。
 //! 管：产品根（.home 的父目录）的推导，以及「根内存原始安全描述符、根外只记 ACE 摘要」的判定。
 //! 不管：路径怎么规范化成文本（conductor 侧）；按判定结果选记账方式的是 journal.rs。
-//! 联动：windows/mod.rs 的 prepare_fence 用 product_root 分组授权。
+//! 联动：windows.rs 的 prepare_fence 用 product_root 分组授权。
 
 use std::path::{Component, Path, PathBuf};
 

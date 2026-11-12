@@ -7,7 +7,7 @@ use crate::capabilities::modules::api::{Module, SecretDecl};
 use crate::capabilities::secrets::api::SecretOps;
 use crate::capabilities::secrets::ports::SecretStore;
 use crate::capabilities::secrets::service::SecretsService;
-use crate::tests::doubles::{module_of, test_modules, InMemorySecretStore, VecSource};
+use crate::tests::doubles::{InMemorySecretStore, VecSource, module_of, test_modules};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 

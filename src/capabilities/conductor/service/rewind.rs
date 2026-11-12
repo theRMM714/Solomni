@@ -553,7 +553,7 @@ impl Conductor {
                 return Err(format!(
                     "未知会话形态：{}（只认 single / collab / proxy）",
                     other
-                ))
+                ));
             }
         };
         // 状态栏的 shell 快照同样按转录派生：重启 / 启用 / 回档重建后不再"失忆"。

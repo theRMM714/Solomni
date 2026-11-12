@@ -230,9 +230,5 @@ pub fn fence_clean(root: &std::path::Path) -> i32 {
             println!("[围栏] 清理完成：{}", line);
         }
     }
-    if failed {
-        1
-    } else {
-        0
-    }
+    if failed { 1 } else { 0 }
 }

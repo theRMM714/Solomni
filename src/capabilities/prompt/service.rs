@@ -4,7 +4,7 @@
 //! 联动：状态就是 domain 的 Prompts；组合根调用 load 得到 Arc<dyn Prompt> 交给 conductor。
 
 use crate::capabilities::prompt::api::{Prompt, Segment, Vars};
-use crate::capabilities::prompt::domain::prompt::{render, Prompts};
+use crate::capabilities::prompt::domain::prompt::{Prompts, render};
 use crate::capabilities::prompt::ports::PromptSource;
 use std::sync::Arc;
 

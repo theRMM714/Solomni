@@ -94,7 +94,7 @@ node dev.js test|fmt|clippy   # 本机开发回路：改一层验一层；cargo 
   用户覆盖走 `.home/settings.yaml` 与环境变量，不改仓库里的台账。
 - **没有可用模型就不建会话**：先登记供应商与模型并设定核心默认；缺了如实拒绝并指明缺什么，不回落假模型。
 - 常用参数：`--root <目录>`（换产品根）、`--web-port <端口>`、`--release`。
-- 终端提示符下的命令：启动时打印的菜单就是全量清单（`src/presentation/cli/mod.rs` 的 `print_menu`）；回档走 `rewind`，供应商 / 模型 / 核心默认模型分别走 `provider` / `model` / `core`。
+- 终端提示符下的命令：启动时打印的菜单就是全量清单（`src/presentation/cli.rs` 的 `print_menu`）；回档走 `rewind`，供应商 / 模型 / 核心默认模型分别走 `provider` / `model` / `core`。
 
 ### 配供应商与模型
 

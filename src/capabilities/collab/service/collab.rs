@@ -281,11 +281,11 @@ impl CollabSession {
 
     /// 目的：记下某个节点跑在哪个子会话里，并把它标成"在跑"。
     pub fn mark_node_started(&mut self, node: &str, sub: &str) {
-        if let Some(chain) = self.chain.as_mut() {
-            if let Some(n) = chain.nodes.iter_mut().find(|n| n.id == node) {
-                n.sub_session = Some(sub.to_string());
-                n.status = crate::capabilities::taskchain::api::NodeStatus::Running;
-            }
+        if let Some(chain) = self.chain.as_mut()
+            && let Some(n) = chain.nodes.iter_mut().find(|n| n.id == node)
+        {
+            n.sub_session = Some(sub.to_string());
+            n.status = crate::capabilities::taskchain::api::NodeStatus::Running;
         }
     }
 
@@ -427,23 +427,23 @@ impl CollabSession {
 
     /// 目的：记下节点完成（产出先存下来，**验收由核心 AI 判**，见 review_nodes）。
     pub fn mark_node_done(&mut self, node: &str, report: &str) {
-        if let Some(chain) = self.chain.as_mut() {
-            if let Some(n) = chain.nodes.iter_mut().find(|n| n.id == node) {
-                n.status = crate::capabilities::taskchain::api::NodeStatus::Done;
-                n.report = Some(report.to_string());
-            }
+        if let Some(chain) = self.chain.as_mut()
+            && let Some(n) = chain.nodes.iter_mut().find(|n| n.id == node)
+        {
+            n.status = crate::capabilities::taskchain::api::NodeStatus::Done;
+            n.report = Some(report.to_string());
         }
     }
 
     /// 目的：记下一个节点的验收结论。
     pub fn set_node_acceptance(&mut self, node: &str, ok: bool, note: &str) {
-        if let Some(chain) = self.chain.as_mut() {
-            if let Some(n) = chain.nodes.iter_mut().find(|n| n.id == node) {
-                n.acceptance = Some(crate::capabilities::taskchain::api::Acceptance {
-                    ok,
-                    note: note.to_string(),
-                });
-            }
+        if let Some(chain) = self.chain.as_mut()
+            && let Some(n) = chain.nodes.iter_mut().find(|n| n.id == node)
+        {
+            n.acceptance = Some(crate::capabilities::taskchain::api::Acceptance {
+                ok,
+                note: note.to_string(),
+            });
         }
     }
 
@@ -529,14 +529,14 @@ impl CollabSession {
 
     /// 目的：把节点退回待办（验收没过 → 用户点「继续」→ 重派它）。
     pub fn reset_node(&mut self, node: &str) {
-        if let Some(chain) = self.chain.as_mut() {
-            if let Some(n) = chain.nodes.iter_mut().find(|n| n.id == node) {
-                n.status = crate::capabilities::taskchain::api::NodeStatus::Pending;
-                n.sub_session = None;
-                n.report = None;
-                n.acceptance = None;
-                n.reported = false; // 重派后"完成"要再报一次
-            }
+        if let Some(chain) = self.chain.as_mut()
+            && let Some(n) = chain.nodes.iter_mut().find(|n| n.id == node)
+        {
+            n.status = crate::capabilities::taskchain::api::NodeStatus::Pending;
+            n.sub_session = None;
+            n.report = None;
+            n.acceptance = None;
+            n.reported = false; // 重派后"完成"要再报一次
         }
     }
 

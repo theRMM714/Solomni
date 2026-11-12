@@ -1,7 +1,7 @@
 //! 目的：默认的信封修复器——只做可机器判定的无歧义修补。
 //! 管：未转义裸控制字符的转义；缺收尾括号时按扫描器结果补齐；两条红线：断在字符串中间不修、不做猜测性改写。
 //! 不管：信封解析（在 domain/envelope.rs）；回执文案（在 domain/malformed.rs）；工具执行。
-//! 联动：实现 ports::EnvelopeRepair；由 detail/mod.rs 重导出 UnambiguousRepair 供组合根装配；修补结果须重新解析成合法工具信封才算数。
+//! 联动：实现 ports::EnvelopeRepair；由 detail.rs 重导出 UnambiguousRepair 供组合根装配；修补结果须重新解析成合法工具信封才算数。
 
 use crate::capabilities::llm::api::RepairOutcome;
 use crate::capabilities::llm::api::{Malformed, Tail};
@@ -218,19 +218,25 @@ mod tests {
         // 断在字符串中间 = 内容没写完：补引号会让核心拿到半截内容 → 一律不修
         let cut =
             "{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"a\",\"content\":\"写了一半";
-        assert!(UnambiguousRepair
-            .repair(cut, &Malformed::Unclosed(tail("}\"}", true)))
-            .repaired
-            .is_none());
-        assert!(UnambiguousRepair
-            .repair(cut, &raw_control(Some(tail("}", true))))
-            .repaired
-            .is_none());
+        assert!(
+            UnambiguousRepair
+                .repair(cut, &Malformed::Unclosed(tail("}\"}", true)))
+                .repaired
+                .is_none()
+        );
+        assert!(
+            UnambiguousRepair
+                .repair(cut, &raw_control(Some(tail("}", true))))
+                .repaired
+                .is_none()
+        );
         // 本来就不缺收尾字符：没什么可补
-        assert!(UnambiguousRepair
-            .repair("{\"a\":1}", &Malformed::Unclosed(Tail::default()))
-            .repaired
-            .is_none());
+        assert!(
+            UnambiguousRepair
+                .repair("{\"a\":1}", &Malformed::Unclosed(Tail::default()))
+                .repaired
+                .is_none()
+        );
     }
 
     #[test]
@@ -256,10 +262,12 @@ mod tests {
             );
         }
         // 声明是控制字符、实际却找不到（诊断与实际不符）：如实说没修
-        assert!(UnambiguousRepair
-            .repair("{\"a\":1}", &raw_control(None))
-            .repaired
-            .is_none());
+        assert!(
+            UnambiguousRepair
+                .repair("{\"a\":1}", &raw_control(None))
+                .repaired
+                .is_none()
+        );
     }
 
     #[test]

@@ -4,8 +4,8 @@
 //! 联动：src/guard/、守门进程 --fence-run。
 
 use crate::probe::{
-    bin, job_json, job_json_net, job_json_net_policy, job_json_tree, python_command, run_launcher,
-    run_launcher_env, scratch, FENCE_FAILED, SELFCHECK_FAIL_FLAG,
+    FENCE_FAILED, SELFCHECK_FAIL_FLAG, bin, job_json, job_json_net, job_json_net_policy,
+    job_json_tree, python_command, run_launcher, run_launcher_env, scratch,
 };
 
 /// 与 src/kernel/detail/confine/linux.rs 的 RULES_REJECTED_MARK 一致（集成测试看不到 crate 内部）。
@@ -122,8 +122,8 @@ fn verify_separates_env_unavailable_from_broken_rules() {
 #[test]
 fn env_unavailable_degrades_and_still_runs_the_command() {
     use crate::probe::{
-        degraded_by_env, job_json, run_launcher_env, verdict_is_broken, verdict_is_env_unavailable,
-        verify_fence_with, SELFCHECK_FAIL_FLAG,
+        SELFCHECK_FAIL_FLAG, degraded_by_env, job_json, run_launcher_env, verdict_is_broken,
+        verdict_is_env_unavailable, verify_fence_with,
     };
     let dir = scratch("fence-env-unavailable");
     let spec = job_json(std::slice::from_ref(&dir), &dir, false);

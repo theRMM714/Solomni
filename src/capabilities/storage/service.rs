@@ -5,9 +5,9 @@
 
 use crate::capabilities::provision::api::Provision;
 use crate::capabilities::storage::api::{
-    CleanKind, CleanOutcome, CleanRequest, GcAction, GcReport, JobState, LastGc, SpaceCategory,
-    SpaceItem, SpaceReport, Storage, StoragePolicy, CAT_BUILD, CAT_DOWNLOAD, CAT_LOGS,
-    CAT_OVERLAYS,
+    CAT_BUILD, CAT_DOWNLOAD, CAT_LOGS, CAT_OVERLAYS, CleanKind, CleanOutcome, CleanRequest,
+    GcAction, GcReport, JobState, LastGc, SpaceCategory, SpaceItem, SpaceReport, Storage,
+    StoragePolicy,
 };
 use crate::capabilities::storage::domain::{self, safe_id};
 use crate::capabilities::storage::ports::{GuestLiveness, SpaceReclaim, SpaceSurvey};
@@ -370,10 +370,10 @@ impl Storage for StorageService {
             CleanKind::Overlays => {
                 let live = self.guests.any_running();
                 for item in items_of(&before.categories, CAT_OVERLAYS) {
-                    if let Some(want) = req.id.as_deref() {
-                        if want != item.id {
-                            continue;
-                        }
+                    if let Some(want) = req.id.as_deref()
+                        && want != item.id
+                    {
+                        continue;
                     }
                     if live {
                         continue;

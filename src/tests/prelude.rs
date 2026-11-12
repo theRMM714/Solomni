@@ -1,12 +1,12 @@
 //! 目的：集中重导出业务测试的公共前置，保持 `use super::prelude::*`。
 //! 管：公共前置的重导出清单。
 //! 不管：任何逻辑或断言。
-//! 联动：src/tests/mod.rs、tests/doubles。
+//! 联动：src/tests.rs、tests/doubles。
 
 pub(crate) use super::doubles::*;
 
 pub use crate::capabilities::collab::service::discussion::{
-    Discussion, Member, TurnOut, MAX_ROUNDS,
+    Discussion, MAX_ROUNDS, Member, TurnOut,
 };
 
 pub use crate::capabilities::llm::api::Channel;

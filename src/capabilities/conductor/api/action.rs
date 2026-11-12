@@ -6,7 +6,7 @@
 use super::*;
 use crate::capabilities::conductor::domain::proxy as d;
 use crate::capabilities::registry::api::{AppSettings, RegistryOps, StorageSettings};
-use crate::capabilities::tools::api::{arg_fault_text, ToolSchema};
+use crate::capabilities::tools::api::{ToolSchema, arg_fault_text};
 use crate::capabilities::workspace::api::MAX_ASSET_BYTES;
 
 /// 极简 base64 解码（上传动作的参数是 base64；标准字母表，容忍换行与缺失填充）。
@@ -96,14 +96,14 @@ impl ConductorHandle {
             let spec = spec.clone();
             move |core| core.prepare_session(&spec)
         })?;
-        if let Some(boot) = boot {
-            if let Err(e) = boot.run() {
-                let _ = self.call(move |core| {
-                    core.abort_session(prepared);
-                    Ok(())
-                });
-                return Err(e);
-            }
+        if let Some(boot) = boot
+            && let Err(e) = boot.run()
+        {
+            let _ = self.call(move |core| {
+                core.abort_session(prepared);
+                Ok(())
+            });
+            return Err(e);
         }
         let (created, facts) = self.call(move |core| core.commit_session(prepared))?;
         self.publish(&created.session, facts);
@@ -336,10 +336,10 @@ impl ConductorHandle {
         let roster = self.call(|core| Ok(core.scan()))?;
         for m in &roster.modules {
             let prefix = format!("{}.", m.manifest.id);
-            if let Some(tool) = rest.strip_prefix(&prefix) {
-                if let Some(decl) = m.manifest.tools.get(tool) {
-                    return Ok((m.clone(), tool.to_string(), decl.clone()));
-                }
+            if let Some(tool) = rest.strip_prefix(&prefix)
+                && let Some(decl) = m.manifest.tools.get(tool)
+            {
+                return Ok((m.clone(), tool.to_string(), decl.clone()));
             }
         }
         Err(format!(
@@ -358,10 +358,10 @@ impl ConductorHandle {
                 continue;
             };
             for name in m.manifest.services.keys() {
-                if let Some(op) = after_m.strip_prefix(&format!("{}.", name)) {
-                    if !op.is_empty() {
-                        return Ok(Some((m.manifest.id.clone(), name.clone(), op.to_string())));
-                    }
+                if let Some(op) = after_m.strip_prefix(&format!("{}.", name))
+                    && !op.is_empty()
+                {
+                    return Ok(Some((m.manifest.id.clone(), name.clone(), op.to_string())));
                 }
             }
         }
@@ -401,11 +401,11 @@ impl ConductorHandle {
             o.remove("workspace")
                 .and_then(|v| v.as_str().map(|s| s.to_string()))
         });
-        if let Some(schema) = decl.schema() {
-            if let Err(fault) = schema.check(&module_args) {
-                let full = format!("module.{}.{}", module.manifest.id, tool);
-                return Err(arg_fault_text(&full, &schema, &fault));
-            }
+        if let Some(schema) = decl.schema()
+            && let Err(fault) = schema.check(&module_args)
+        {
+            let full = format!("module.{}.{}", module.manifest.id, tool);
+            return Err(arg_fault_text(&full, &schema, &fault));
         }
         let work = work.map(std::path::PathBuf::from);
         let mut fence = crate::kernel::api::FenceSpec::standalone(
@@ -456,14 +456,14 @@ impl ConductorHandle {
         // 模块工具动作（动态，来自清单）先于静态表分派。
         if id.starts_with("module.") {
             // 静态模块工具优先（保持既有语义）；不是静态工具时，看它是不是已启动常驻服务的操作。
-            if self.module_action(id).is_err() {
-                if let Some((module, service, op)) = self.service_action(id)? {
-                    self.authorize_module(caller)?;
-                    let receipt = self.residents.call(&module, &service, &op, args)?;
-                    return Ok(Acted::Done(
-                        serde_json::json!({ "ok": receipt.ok, "output": receipt.output }),
-                    ));
-                }
+            if self.module_action(id).is_err()
+                && let Some((module, service, op)) = self.service_action(id)?
+            {
+                self.authorize_module(caller)?;
+                let receipt = self.residents.call(&module, &service, &op, args)?;
+                return Ok(Acted::Done(
+                    serde_json::json!({ "ok": receipt.ok, "output": receipt.output }),
+                ));
             }
             return self.run_module_action(caller, id, args);
         }
@@ -899,59 +899,59 @@ impl ActionOps for ConductorHandle {
         }
         // 模块工具动作（动态，来自清单）：模块声明的每个工具都是一条动作，人可直接跑。
         // 会话里的模块工具由成员循环执行——那是同一个声明、同一个执行面的另一个适配器。
-        if matches!(caller, Caller::User) {
-            if let Ok(roster) = self.call(|core| Ok(core.scan())) {
-                let missing = self.unavailable_modules();
-                for m in &roster.modules {
-                    for (tool, decl) in &m.manifest.tools {
-                        let mut params: Vec<ActionParamView> = match decl.schema() {
-                            Some(schema) => schema
-                                .params
-                                .iter()
-                                .flatten()
-                                .map(|(name, p)| ActionParamView {
-                                    name: name.clone(),
-                                    ty: p.ty.name().to_string(),
-                                    required: p.required,
-                                    desc: p.desc.clone(),
-                                })
-                                .collect(),
-                            None => Vec::new(),
-                        };
-                        params.push(ActionParamView {
-                            name: "workspace".to_string(),
-                            ty: "string".to_string(),
-                            required: false,
-                            desc: "工作目录（绝对路径）；省略 = 模块自己的 userdata/".to_string(),
-                        });
-                        let (available, reason) = match missing.get(&m.manifest.id) {
-                            Some(caps) => (false, format!("缺运行能力：{}", caps.join("、"))),
-                            None => (true, String::new()),
-                        };
-                        out.push(ActionView {
-                            id: format!("module.{}.{}", m.manifest.id, tool),
-                            desc: decl.desc.clone(),
-                            params,
-                            available,
-                            reason,
-                        });
-                    }
+        if matches!(caller, Caller::User)
+            && let Ok(roster) = self.call(|core| Ok(core.scan()))
+        {
+            let missing = self.unavailable_modules();
+            for m in &roster.modules {
+                for (tool, decl) in &m.manifest.tools {
+                    let mut params: Vec<ActionParamView> = match decl.schema() {
+                        Some(schema) => schema
+                            .params
+                            .iter()
+                            .flatten()
+                            .map(|(name, p)| ActionParamView {
+                                name: name.clone(),
+                                ty: p.ty.name().to_string(),
+                                required: p.required,
+                                desc: p.desc.clone(),
+                            })
+                            .collect(),
+                        None => Vec::new(),
+                    };
+                    params.push(ActionParamView {
+                        name: "workspace".to_string(),
+                        ty: "string".to_string(),
+                        required: false,
+                        desc: "工作目录（绝对路径）；省略 = 模块自己的 userdata/".to_string(),
+                    });
+                    let (available, reason) = match missing.get(&m.manifest.id) {
+                        Some(caps) => (false, format!("缺运行能力：{}", caps.join("、"))),
+                        None => (true, String::new()),
+                    };
+                    out.push(ActionView {
+                        id: format!("module.{}.{}", m.manifest.id, tool),
+                        desc: decl.desc.clone(),
+                        params,
+                        available,
+                        reason,
+                    });
                 }
-                // 已就绪常驻服务的操作：也是一条动态模块动作（id = module.<模块>.<服务>.<操作>）。
-                // 未启动的服务不出现（操作是跑起来才发现的）；呈现层因此不必另建一份清单。
-                for view in self.residents.services().unwrap_or_default() {
-                    if view.state != crate::capabilities::residents::api::ServiceState::Ready {
-                        continue;
-                    }
-                    for op in &view.operations {
-                        out.push(ActionView {
-                            id: format!("module.{}.{}.{}", view.module, view.name, op.name),
-                            desc: op.description.clone(),
-                            params: Vec::new(),
-                            available: true,
-                            reason: String::new(),
-                        });
-                    }
+            }
+            // 已就绪常驻服务的操作：也是一条动态模块动作（id = module.<模块>.<服务>.<操作>）。
+            // 未启动的服务不出现（操作是跑起来才发现的）；呈现层因此不必另建一份清单。
+            for view in self.residents.services().unwrap_or_default() {
+                if view.state != crate::capabilities::residents::api::ServiceState::Ready {
+                    continue;
+                }
+                for op in &view.operations {
+                    out.push(ActionView {
+                        id: format!("module.{}.{}.{}", view.module, view.name, op.name),
+                        desc: op.description.clone(),
+                        params: Vec::new(),
+                        available: true,
+                        reason: String::new(),
+                    });
                 }
             }
         }

@@ -4,8 +4,8 @@
 //! 联动：src/guard/、docs/testing/levels.md。
 
 use crate::probe::{
-    bin, job_json, kill_like_runtime, python_command, run_launcher, scratch, spawn_fenced, wait,
-    FENCE_FAILED,
+    FENCE_FAILED, bin, job_json, kill_like_runtime, python_command, run_launcher, scratch,
+    spawn_fenced, wait,
 };
 use std::process::Command;
 use std::time::{Duration, Instant};

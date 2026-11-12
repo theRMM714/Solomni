@@ -1,6 +1,6 @@
 //! 目的：编译期把 `src/presentation/web/assets/` 生成为浏览器端资源的嵌入表。
 //! 管：递归扫描资源目录；按扩展名定 MIME；生成 `OUT_DIR/web_assets.rs`（按 URL 路径排序的 `(路径, MIME, 内容)` 表）。
-//! 不管：HTTP 分发与缓存头（`src/presentation/web/assets.rs`、`src/presentation/web/mod.rs`）；
+//! 不管：HTTP 分发与缓存头（`src/presentation/web/assets.rs`、`src/presentation/web.rs`）；
 //!   node 侧开发文件（`.cjs` / `.mjs` 冒烟脚本与 `package.json` 只给 node 用，不进发行版）。
 //! 联动：`src/presentation/web/assets.rs` 用 `include!` 引入生成表；路由 `GET /assets/{*path}` 见
 //!   `src/presentation/web/routes.rs`；未知扩展名直接让构建失败，防止资源被静默漏掉。

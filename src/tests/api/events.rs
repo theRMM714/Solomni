@@ -8,8 +8,8 @@ use super::super::{single_work, slow_ops};
 use super::support::spawn;
 use crate::capabilities::conductor::api::SessionEvent;
 use crate::capabilities::conductor::api::{Ops, Output};
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 #[test]

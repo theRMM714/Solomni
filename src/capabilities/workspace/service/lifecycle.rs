@@ -421,10 +421,10 @@ impl WorkspaceService {
             return Err(format!("没有档案 {}（可能已恢复）", mark));
         };
         let target = reference.target;
-        if let Some(id) = target {
-            if self.store.read_commit(&store, id)?.is_none() {
-                return Err(format!("档案 {} 指向的提交 {} 不在了", mark, id));
-            }
+        if let Some(id) = target
+            && self.store.read_commit(&store, id)?.is_none()
+        {
+            return Err(format!("档案 {} 指向的提交 {} 不在了", mark, id));
         }
         let tree = match target {
             Some(id) => Self::tree_of(self.store.as_ref(), &store, id)?,
@@ -461,10 +461,10 @@ impl WorkspaceService {
         let (shared, store) = self.work_roots(work)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;
-        if let Some(id) = commit {
-            if self.store.read_commit(&store, id)?.is_none() {
-                return Err(format!("没有提交点 {}", id));
-            }
+        if let Some(id) = commit
+            && self.store.read_commit(&store, id)?.is_none()
+        {
+            return Err(format!("没有提交点 {}", id));
         }
         let conflicts = self.external_materialize_conflicts(work, &shared, &store, commit)?;
         if !conflicts.is_empty() {
@@ -488,10 +488,10 @@ impl WorkspaceService {
         let (shared, store) = self.work_roots(work)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;
-        if let Some(id) = keep {
-            if self.store.read_commit(&store, id)?.is_none() {
-                return Err(format!("没有提交点 {}", id));
-            }
+        if let Some(id) = keep
+            && self.store.read_commit(&store, id)?.is_none()
+        {
+            return Err(format!("没有提交点 {}", id));
         }
         let conflicts = self.external_materialize_conflicts(work, &shared, &store, keep)?;
         if !conflicts.is_empty() {

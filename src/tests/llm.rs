@@ -126,9 +126,10 @@ pub(crate) fn malformed_tool_envelope_becomes_a_failed_tool_line() {
     );
     // 历史：assistant(原文) + [工具结果]（含册子文案）→ 模型下一轮能自己改
     let h = core.single_history(&sid).unwrap();
-    assert!(h
-        .iter()
-        .any(|m| m.role == "assistant" && m.content == broken));
+    assert!(
+        h.iter()
+            .any(|m| m.role == "assistant" && m.content == broken)
+    );
     assert!(
         h.iter().any(|m| m.role == "user"
             && m.content.contains("[工具结果] write")
@@ -218,17 +219,18 @@ pub(crate) fn a_malformed_envelope_is_repaired_when_the_fix_is_unambiguous() {
         ],
         Arc::clone(&runner),
     );
-    assert!(m
-        .tools
-        .as_ref()
-        .expect("工具环境")
-        .llm
-        .repair(
-            "x",
-            &crate::capabilities::llm::api::Malformed::Syntax("x".into())
-        )
-        .repaired
-        .is_none());
+    assert!(
+        m.tools
+            .as_ref()
+            .expect("工具环境")
+            .llm
+            .repair(
+                "x",
+                &crate::capabilities::llm::api::Malformed::Syntax("x".into())
+            )
+            .repaired
+            .is_none()
+    );
     let exec = run_execution(std::slice::from_mut(&mut m), "任务", &prompts);
     let trace = exec.traces.get("m0").expect("工具行");
     assert!(!trace[0].ok, "不修时如实记失败：{}", trace[0].output);
@@ -308,9 +310,11 @@ pub(crate) fn a_malformed_envelope_is_repaired_when_the_fix_is_unambiguous() {
 #[test]
 pub(crate) fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix() {
     // 类别是可判定的确切事实：模型据此能直接改对，而不是被笼统告知"JSON 不合法"。
-    use crate::capabilities::llm::api::{parse, Malformed};
+    use crate::capabilities::llm::api::{Malformed, parse};
     // ① 字符串里直接换行（真实事故：write 的 content 里裸换行 → 整段 JSON 非法）
-    let r = parse("{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"a\",\"content\":\"第一行\n第二行\"}}");
+    let r = parse(
+        "{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"a\",\"content\":\"第一行\n第二行\"}}",
+    );
     match r
         .tools
         .first()
@@ -499,13 +503,15 @@ pub(crate) fn envelope_tool_parses_name_and_args() {
     let blank_mod = crate::capabilities::llm::api::parse(
         "{\"type\":\"tool\",\"module\":\"  \",\"name\":\"read_txt\",\"args\":{}}",
     );
-    assert!(blank_mod
-        .tools
-        .first()
-        .cloned()
-        .expect("应有调用申请")
-        .module
-        .is_none());
+    assert!(
+        blank_mod
+            .tools
+            .first()
+            .cloned()
+            .expect("应有调用申请")
+            .module
+            .is_none()
+    );
     // name 缺失 = 工具信封但不合法 → **独立的 malformed 信号**（不再按原文发言收录）。
     let bad = crate::capabilities::llm::api::parse("{\"type\":\"tool\",\"args\":{}}");
     assert_eq!(

@@ -230,11 +230,11 @@ impl InMemoryWorkStore {
             return Err(m.clone());
         }
         let mut counts = self.fail_times.lock().expect("锁");
-        if let Some(n) = counts.get_mut(method) {
-            if *n > 0 {
-                *n -= 1;
-                return Err(format!("注入失败：{}", method));
-            }
+        if let Some(n) = counts.get_mut(method)
+            && *n > 0
+        {
+            *n -= 1;
+            return Err(format!("注入失败：{}", method));
         }
         Ok(())
     }
@@ -242,11 +242,12 @@ impl InMemoryWorkStore {
     /// 目的：按方法 + 键子串注入失败；不匹配的调用不受影响。
     fn enter_key(&self, method: &str, key: &str) -> Result<(), String> {
         let mut map = self.fail_on.lock().expect("锁");
-        if let Some((needle, left)) = map.get_mut(method) {
-            if *left > 0 && key.contains(needle.as_str()) {
-                *left -= 1;
-                return Err(format!("注入失败：{}（{}）", method, key));
-            }
+        if let Some((needle, left)) = map.get_mut(method)
+            && *left > 0
+            && key.contains(needle.as_str())
+        {
+            *left -= 1;
+            return Err(format!("注入失败：{}（{}）", method, key));
         }
         Ok(())
     }

@@ -13,8 +13,8 @@ use crate::capabilities::provision::domain::*;
 use crate::capabilities::provision::service::*;
 use std::collections::BTreeMap;
 use std::fs;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 /// 目的：缓存文件名取 URL 末段，去掉查询串。
 #[test]
 fn asset_name_takes_last_path_segment() {

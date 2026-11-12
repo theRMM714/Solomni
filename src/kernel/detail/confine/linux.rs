@@ -6,7 +6,7 @@
 //! 不管：虚拟机档网络——由 QEMU 网卡决定。
 //! 联动：机制不可用时（老内核、规则被内核拒、seccomp 不可用）如实降级并打印说明；能力等级在启动报告里已如实告知。
 
-use super::{shell_command, Capability, FenceVerdict, FENCE_FAILED};
+use super::{Capability, FENCE_FAILED, FenceVerdict, shell_command};
 use crate::kernel::api::FenceSpec;
 use std::ffi::CString;
 use std::os::raw::c_int;
@@ -412,11 +412,10 @@ pub fn capability() -> Capability {
             abi.unwrap_or(-1)
         ),
         (false, true) => {
-            "Linux：本机 Landlock 不产生实际约束——文件系统围栏如实降级；seccomp 断网可用".to_string()
+            "Linux：本机 Landlock 不产生实际约束——文件系统围栏如实降级；seccomp 断网可用"
+                .to_string()
         }
-        (false, false) => {
-            "Linux：本机文件系统围栏与断网机制都不可用——只有进程树围栏".to_string()
-        }
+        (false, false) => "Linux：本机文件系统围栏与断网机制都不可用——只有进程树围栏".to_string(),
     };
     Capability {
         fs,

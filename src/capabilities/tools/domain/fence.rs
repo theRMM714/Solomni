@@ -23,14 +23,12 @@ impl FenceSpec {
         if reach.contains(Reach::Private) {
             rw.push(sb.private.clone());
         }
-        if reach.contains(Reach::ModuleWrite) {
-            if let Some(id) = module {
-                if sb.modules_with_userdata.contains(id) {
-                    if let Some(root) = sb.modules.get(id) {
-                        rw.push(root.join("userdata"));
-                    }
-                }
-            }
+        if reach.contains(Reach::ModuleWrite)
+            && let Some(id) = module
+            && sb.modules_with_userdata.contains(id)
+            && let Some(root) = sb.modules.get(id)
+        {
+            rw.push(root.join("userdata"));
         }
         if reach.contains(Reach::SharedRead) {
             ro_tree.push(sb.shared.clone());

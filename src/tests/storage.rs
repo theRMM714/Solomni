@@ -143,10 +143,12 @@ fn report_and_gc_delete_the_oldest_volume_in_a_scratch_root() {
     let r = svc.report().unwrap();
     let build = r.categories.iter().find(|c| c.id == "build-cache").unwrap();
     assert_eq!(build.items.len(), 2);
-    assert!(build
-        .items
-        .iter()
-        .any(|i| i.modules == vec!["m".to_string()]));
+    assert!(
+        build
+            .items
+            .iter()
+            .any(|i| i.modules == vec!["m".to_string()])
+    );
     let plan = svc.gc(false).unwrap();
     assert!(!plan.applied);
     assert!(plan.actions.iter().any(|a| a.id == "old"));

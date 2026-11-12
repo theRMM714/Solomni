@@ -26,6 +26,18 @@ function crossEnvLimited(target, out) {
   return /unrecognized command-line option '-arch'/.test(out) || /-mmacosx-version-min/.test(out) || /error occurred in cc-rs/.test(out);
 }
 
+/** 依赖重复治理记录：tests/dependency-policy.json；读不动就是治理链断了，门禁要红而不是静默放行。 */
+function duplicatePolicy(root) {
+  const file = path.join(root, "tests", "dependency-policy.json");
+  let raw;
+  try {
+    raw = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (e) {
+    return { error: "读不到依赖重复治理记录 tests/dependency-policy.json：" + e.message, allow: [] };
+  }
+  return { error: null, allow: Array.isArray(raw.allow) ? raw.allow : [] };
+}
+
 /** 供应链门禁：已知 CVE（cargo audit）与许可证/禁用/来源策略（cargo deny）；工具缺失 = env-skip。 */
 function supplyChainCheck(ctx) {
   const wanted = [
@@ -259,7 +271,7 @@ const STEPS = [
     id: "duplicates",
     name: "T0 依赖重复（cargo tree）",
     deps: [],
-    inputs: ["Cargo.toml", "Cargo.lock"],
+    inputs: ["Cargo.toml", "Cargo.lock", "tests/dependency-policy.json"],
     run(ctx) {
       ctx.step.announce("T0 依赖重复（cargo tree）");
       if (!ctx.proc.toolAvailable("tree")) {
@@ -269,13 +281,19 @@ const STEPS = [
         return;
       }
       const r = ctx.proc.sh("cargo", ["tree", "--duplicates", "--color", "never"]);
-      const dups = parsers.duplicateCrates(r.out);
-      const ok = r.code === 0 && !dups.length;
-      ctx.step.announceDone(ok ? "完成" : "失败", ok ? "无重复" : dups.length + " 个重复 crate");
+      const policy = duplicatePolicy(ctx.root);
+      const cls = parsers.explainedDuplicates(parsers.duplicateCrates(r.out), policy.allow);
+      const ok = r.code === 0 && !policy.error && !cls.unexplained.length;
+      let detail = "";
+      if (policy.error) detail = policy.error;
+      else if (!ok) detail = "重复依赖未解释（写进 tests/dependency-policy.json 的 allow 才能放行）：" + cls.unexplained.join("、");
+      else if (cls.hit.length) detail = "允许的重复（理由见 tests/dependency-policy.json）：" + cls.hit.join("、");
+      if (ok && cls.stale.length) detail += (detail ? "；" : "") + "本平台未出现（跨平台条目）：" + cls.stale.join("、");
+      ctx.step.announceDone(ok ? "完成" : "失败", ok ? (cls.hit.length ? "允许 " + cls.hit.length + " 个重复" : "无重复") : policy.error ? "治理记录读不动" : cls.unexplained.length + " 个重复未解释");
       finish(ctx, {
         step: "T0 依赖重复（cargo tree）",
         status: ok ? "pass" : "quality-fail",
-        detail: ok ? "" : "重复依赖（要有解释或治理记录）：" + dups.join("、"),
+        detail,
         raw: ok ? null : r.out.slice(-1200),
       });
     },

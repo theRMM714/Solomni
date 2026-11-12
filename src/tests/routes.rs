@@ -23,8 +23,8 @@ use crate::presentation::web::{self, FenceInfo};
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 // ---------- 假能力面 ----------
 /// 假能力面：不碰核心、不起线程。`fail` 一注入，所有能力一律失败（用来验错误路径）。

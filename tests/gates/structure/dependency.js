@@ -40,12 +40,12 @@ function direction(root) {
   };
   const LAYER_OF = (r) => {
     // 前端（交付机制）：各渠道一个顶层目录；不是业务能力。
-    if (r.startsWith("src/presentation/")) return "presentation";
+    if (r === "src/presentation.rs" || r.startsWith("src/presentation/")) return "presentation";
     // 程序入口层：组合根 + 机器可读探针 + 围栏守门进程 + 入口层共用机制。它依赖所有人，任何人都不许依赖它。
-    if (r === "src/main.rs" || r.startsWith("src/entry/") || r.startsWith("src/guard/")) return "entry";
-    if (r.startsWith("src/kernel/")) return "kernel";
-    if (r.startsWith("src/capabilities/")) return "capabilities";
-    if (r.startsWith("src/tests/")) return "tests";
+    if (r === "src/main.rs" || r === "src/entry.rs" || r === "src/guard.rs" || r.startsWith("src/entry/") || r.startsWith("src/guard/")) return "entry";
+    if (r === "src/kernel.rs" || r.startsWith("src/kernel/")) return "kernel";
+    if (r === "src/capabilities.rs" || r.startsWith("src/capabilities/")) return "capabilities";
+    if (r === "src/tests.rs" || r.startsWith("src/tests/")) return "tests";
     if (r === "src/main.rs") return "main";
     return null;
   };
@@ -70,10 +70,8 @@ function direction(root) {
   for (const abs of rsFiles) {
     const text = fs.readFileSync(abs, "utf8");
     for (const m of text.matchAll(/#\[cfg\(test\)\]\s*mod\s+(\w+)\s*;/g)) {
-      const base = path.basename(abs) === "mod.rs" ? path.dirname(abs) : abs.replace(/\.rs$/, "");
-      for (const cand of [path.join(base, m[1] + ".rs"), path.join(base, m[1], "mod.rs")]) {
-        if (fs.existsSync(cand)) testOnly.add(cand);
-      }
+      const cand = path.join(abs.replace(/\.rs$/, ""), m[1] + ".rs");
+      if (fs.existsSync(cand)) testOnly.add(cand);
     }
   }
 

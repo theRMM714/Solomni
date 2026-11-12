@@ -4,8 +4,8 @@
 //! 联动：docs/testing/doubles.md、tests/doubles。
 
 use crate::capabilities::llm::api::Channel;
-use crate::capabilities::llm::api::{parse, Verb};
 use crate::capabilities::llm::api::{Chat, Chunk, CompleteOpts, Msg};
+use crate::capabilities::llm::api::{Verb, parse};
 use crate::capabilities::llm::detail::fake_chat::{DemoGateway, FakeChat};
 use crate::capabilities::llm::ports::ChatGateway;
 

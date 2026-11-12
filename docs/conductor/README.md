@@ -1,7 +1,7 @@
 # conductor（协调业务）
 
 > 定位：跨参与方的状态与编排——会话中心、生成驱动与 `Ops` 的组装。
-> 效力：规范｜核对：2026-11-04｜依据：`src/capabilities/conductor/api/mod.rs`
+> 效力：规范｜核对：2026-11-04｜依据：`src/capabilities/conductor/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -12,7 +12,7 @@
 - 管：跨能力用例与跨会话回档编排。
 - 管：把各能力的能力接口组装成呈现层唯一入口 `Ops`。
 - 运行态分两层：**短暂**的「这一刻谁在干活」（`SessionEvent::Working`，不落盘）与**持久**的「还该不该被驱动」（`meta.run`：`active` / `stopped` / `closed`，派发前过 `dispatch_gate`）。
-- 不管：不读文件（`std::fs`）、不发网络（ureq）、不碰 stdin/stdout——机制一律下沉各能力的 `detail/`（见 `src/capabilities/conductor/service/mod.rs`）；不持任何别人的端口（R12）；不替用户选人、选形态。
+- 不管：不读文件（`std::fs`）、不发网络（ureq）、不碰 stdin/stdout——机制一律下沉各能力的 `detail/`（见 `src/capabilities/conductor/service.rs`）；不持任何别人的端口（R12）；不替用户选人、选形态。
 
 ## 入站契约与状态归属
 

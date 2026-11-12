@@ -3,7 +3,7 @@
 //! 不管：进程的启停与命令通道（detail/ 的引擎与通道）、引擎参数（detail/ 的适配器）。
 //! 联动：被 service.rs 与 detail/ 消费；契约见 docs/vm/README.md 与 RUNTIME_SPEC.md。
 
-use crate::capabilities::packages::api::{PlannedPackage, KIND_SYSTEM};
+use crate::capabilities::packages::api::{KIND_SYSTEM, PlannedPackage};
 use crate::capabilities::vm::domain::exec::ExecPlan;
 use crate::capabilities::vm::domain::paths::{PathBridge, PathDialect};
 use crate::kernel::api::FenceSpec;
@@ -435,7 +435,7 @@ pub fn classify_base(base: &Path, probe: &dyn HostProbe) -> Result<GuestImage, S
             return Err(format!(
                 "guest.yaml 里的 arch 不认识：{}（认 amd64 / arm64）",
                 other
-            ))
+            ));
         }
     };
     let agent = match manifest.as_ref().and_then(|m| m.agent.as_deref()) {
@@ -445,7 +445,7 @@ pub fn classify_base(base: &Path, probe: &dyn HostProbe) -> Result<GuestImage, S
             return Err(format!(
                 "guest.yaml 里的 agent 不认识：{}（当前只认 qga）",
                 other
-            ))
+            ));
         }
     };
     let clients = match manifest.as_ref().and_then(|m| m.clients.as_deref()) {
@@ -465,7 +465,7 @@ pub fn classify_base(base: &Path, probe: &dyn HostProbe) -> Result<GuestImage, S
                         return Err(format!(
                             "guest.yaml 里的共享客户端不认识：{}（认 9p / virtiofs / cifs）",
                             other
-                        ))
+                        ));
                     }
                 }
             }

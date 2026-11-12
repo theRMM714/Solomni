@@ -74,10 +74,10 @@ impl Conductor {
                 // guest 启动已在调用方线程完成；这里只把它的句柄丢掉。
                 drop(boot);
                 if let Err(e) = self.ensure_session(&sid) {
-                    if let Some(l) = &lease {
-                        if !self.running.contains(&sid) {
-                            self.vm.guest_stop(l);
-                        }
+                    if let Some(l) = &lease
+                        && !self.running.contains(&sid)
+                    {
+                        self.vm.guest_stop(l);
                     }
                     return Err(e);
                 }

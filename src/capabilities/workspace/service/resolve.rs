@@ -68,22 +68,22 @@ impl WorkspaceService {
                 missing.join("、")
             ));
         }
-        if matches!(req.take, ResolveTake::Local) {
-            if let Some(current) = head_id {
-                match req.expect_head {
-                    Some(expected) if expected == current => {}
-                    Some(expected) => {
-                        return Err(format!(
-                            "主副本已从提交 {} 变为 {}：你查看后主副本又前进了，不能把旧合并结果登记到新版本。先重新 work_versions 看三方、把新版合进沙箱，再带 head={} 调 work_resolve。",
-                            expected, current, current
-                        ))
-                    }
-                    None => {
-                        return Err(format!(
-                            "take=local 要带 head=<主副本提交 id>（先 work_status 或 work_versions 取，当前是 {}）；主副本在你查看之后可能已变化，resolve 不能替你猜。",
-                            current
-                        ))
-                    }
+        if matches!(req.take, ResolveTake::Local)
+            && let Some(current) = head_id
+        {
+            match req.expect_head {
+                Some(expected) if expected == current => {}
+                Some(expected) => {
+                    return Err(format!(
+                        "主副本已从提交 {} 变为 {}：你查看后主副本又前进了，不能把旧合并结果登记到新版本。先重新 work_versions 看三方、把新版合进沙箱，再带 head={} 调 work_resolve。",
+                        expected, current, current
+                    ));
+                }
+                None => {
+                    return Err(format!(
+                        "take=local 要带 head=<主副本提交 id>（先 work_status 或 work_versions 取，当前是 {}）；主副本在你查看之后可能已变化，resolve 不能替你猜。",
+                        current
+                    ));
                 }
             }
         }
@@ -237,13 +237,11 @@ impl WorkspaceService {
                 done, rel, e
             ));
         }
-        if changed {
-            if let Err(e) = self.store.write_index(&store, agent, &index) {
-                return Err(format!(
-                    "解决已完成，但基线写入失败：{}；重试 work_pull 或 work_resolve 会补上基线。",
-                    e
-                ));
-            }
+        if changed && let Err(e) = self.store.write_index(&store, agent, &index) {
+            return Err(format!(
+                "解决已完成，但基线写入失败：{}；重试 work_pull 或 work_resolve 会补上基线。",
+                e
+            ));
         }
         Ok(ResolveReport {
             take: req.take,

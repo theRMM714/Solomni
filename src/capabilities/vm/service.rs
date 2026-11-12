@@ -9,7 +9,7 @@ use crate::capabilities::vm::domain::guest::{
     self as guest, GuestMount, GuestOs, GuestRun, GuestSpec, OutputLimit,
 };
 use crate::capabilities::vm::ports::{GuestVm, ShareBackend, ShareGuard, VmEngine};
-use crate::kernel::api::{file_stamp, FileStamp, ToolOutcome};
+use crate::kernel::api::{FileStamp, ToolOutcome, file_stamp};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -224,10 +224,10 @@ impl Vm for VmService {
         };
         let mut held = entry.lock().unwrap_or_else(|e| e.into_inner());
         let held = &mut *held;
-        if let Some((cached, dest)) = held.execs.get(&(module.to_string(), rel.clone())) {
-            if *cached == stamp {
-                return Ok(dest.clone());
-            }
+        if let Some((cached, dest)) = held.execs.get(&(module.to_string(), rel.clone()))
+            && *cached == stamp
+        {
+            return Ok(dest.clone());
         }
         let dest = guest::staged_entry_path(module, &rel);
         let src = guest::guest_path(host, held.os, &held.mounts);

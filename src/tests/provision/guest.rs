@@ -275,7 +275,9 @@ fn provision_linux_runtime_proves_runtimes_live() {
         .map(|p| p.is_file())
         .unwrap_or(false);
     if !probe.is_dir(&base) || !qemu_ok {
-        eprintln!("[探针] 虚拟根或 QEMU 不在场：先 solomni --provision --ensure=vm.qemu.linux,vm.guest.linux --yes");
+        eprintln!(
+            "[探针] 虚拟根或 QEMU 不在场：先 solomni --provision --ensure=vm.qemu.linux,vm.guest.linux --yes"
+        );
         return;
     }
     // 同一个虚拟根不能被两台 guest 同时写：真机用例之间串行（见 doubles::live_guest_lock）。

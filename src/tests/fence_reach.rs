@@ -10,8 +10,8 @@ fn fence_reach_for_external_harness() {
     use crate::kernel::detail::confine;
     use crate::kernel::detail::process::ProcTools;
     use crate::kernel::ports::ProcessRunner;
-    use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
 
     let Some(exe) = crate::tests::doubles::built_exe() else {
         eprintln!("[探针] 未找到已构建的可执行文件，跳过围栏可达范围契约");

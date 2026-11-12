@@ -154,7 +154,7 @@ fn model_tool_face_exposes_started_service_ops() {
     use crate::capabilities::residents::service::ResidentsService;
     use crate::capabilities::session::api::ServiceOp;
     use crate::tests::doubles::{
-        member_with_service_tools, module_of, test_modules, FakeServiceAdapter, VecSource,
+        FakeServiceAdapter, VecSource, member_with_service_tools, module_of, test_modules,
     };
     use std::collections::BTreeMap;
 
@@ -347,7 +347,7 @@ fn residents_mcp_service_end_to_end() {
     use crate::capabilities::residents::api::ResidentOps;
     use crate::capabilities::residents::service::ResidentsService;
     use crate::kernel::detail::ProcessSessions;
-    use crate::tests::doubles::{built_exe, module_of, python, test_modules, VecSource};
+    use crate::tests::doubles::{VecSource, built_exe, module_of, python, test_modules};
     use std::collections::BTreeMap;
 
     let (Some(exe), Some(py)) = (built_exe(), python()) else {
