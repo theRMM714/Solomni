@@ -5,7 +5,6 @@
   ],
   "outsideDetailKernel": [],
   "serviceIo": [
-    "src/capabilities/conductor/service/mod.rs -> ureq",
     "src/capabilities/conductor/service/workspace_root.rs -> std::fs",
     "src/capabilities/vm/service.rs -> std::fs"
   ],

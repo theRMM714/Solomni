@@ -3,6 +3,8 @@
  * 硬判据：① 同能力 service 不得引用本能力 detail 或 kernel::detail；② service 不得直接做 IO；
  *        ③ 同一能力的 service 方法族之间不得成环；④ 能力内 detail 之外的文件不得引用 kernel::detail。
  * 覆盖 api / service / domain / detail 四个分区（api 含 api.rs 与 api/ 子目录）。
+ * 判据只看生产代码：先剔 #[cfg(test)] 模块，再用 tests/lib/rust-mask.js 抹掉注释与字面量，
+ *   避免文档注释里提到 ureq / std::fs 就被算成 IO 调用。
  * 豁免在 tests/structure-baseline.json，条目过期即失败。
  */
 "use strict";
@@ -10,6 +12,7 @@ const fs = require("fs");
 const path = require("path");
 const { rel } = require("../../lib/fsutil.js");
 const { stripTestModules } = require("./dependency.js");
+const { mask } = require("../../lib/rust-mask.js");
 
 const IO_CALLS = ["std::fs", "std::process::Command", "ureq", "reqwest", "std::net"];
 
@@ -84,7 +87,7 @@ function scan(root) {
     const scope = scopeOf(f);
     if (!scope) continue;
     const raw = fs.readFileSync(path.join(root, f), "utf8");
-    const prod = stripTestModules(raw);
+    const prod = mask(stripTestModules(raw));
     const cap = f.split("/")[2];
 
     if (scope !== "detail" && prod.includes("crate::kernel::detail")) {
