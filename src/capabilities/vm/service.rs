@@ -308,7 +308,6 @@ impl Vm for VmService {
         &self,
         lease: &str,
     ) -> Result<crate::capabilities::vm::api::GuestDiagnosis, String> {
-        use crate::capabilities::vm::detail::guest_helper as helper;
         use crate::capabilities::vm::domain::diagnose as diag;
         let entry = self
             .guests
@@ -354,16 +353,16 @@ impl Vm for VmService {
             return diag::parse_report(&out.output, lease);
         }
         // 超时优先：helper 的机器标记，或宿主外层的等待预算到点。
-        if out.output.contains(helper::HELPER_TIMEOUT_MARKER) || out.output.contains("超时") {
+        if out.output.contains(diag::HELPER_TIMEOUT_MARKER) || out.output.contains("超时") {
             return Err(diag::timed_out());
         }
         // helper 真进了诊断模式、但 Python 侧自己失败（前缀是诊断专用的）：原因在它的原话里。
-        if out.output.contains(helper::HELPER_DIAGNOSE_PREFIX) {
+        if out.output.contains(diag::HELPER_DIAGNOSE_PREFIX) {
             return Err(diag::exec_failed(&first_detail(&out.output)));
         }
         // 失败后的**有界预检**（命令自带 timeout 10）：区分 helper 不在 / 缺 python3 / 通道不通。
         let probe = held.vm.channel().exec(&GuestRun {
-            command: helper::probe_command(),
+            command: diag::probe_command(),
             args_json: "{}".to_string(),
             env: Vec::new(),
             cwd: String::new(),
@@ -371,13 +370,13 @@ impl Vm for VmService {
             output_limit: OutputLimit::Head,
         });
         let said = probe.output.trim().to_string();
-        if said.contains(helper::PROBE_NO_HELPER) {
+        if said.contains(diag::PROBE_NO_HELPER) {
             return Err(diag::helper_unavailable(&first_detail(&said)));
         }
-        if said.contains(helper::PROBE_NO_PYTHON) {
+        if said.contains(diag::PROBE_NO_PYTHON) {
             return Err(diag::python_missing(&first_detail(&said)));
         }
-        if probe.ok && said.contains(helper::PROBE_OK) {
+        if probe.ok && said.contains(diag::PROBE_OK) {
             return Err(diag::exec_failed(&first_detail(&out.output)));
         }
         let detail = first_detail(&said);
