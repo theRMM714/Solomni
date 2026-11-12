@@ -5,8 +5,7 @@
 
 use super::*;
 
-/// 目的：**订阅事件台**：把 `from` 之后属于这条会话的批次渲染出来，返回新的游标。 命令回包只给头部序号——事实一条不落都在事件台上，CLI 与 Web 前端读的是同一份。
-
+/// 目的：**订阅事件台**：把 `from` 之后属于这条会话的批次渲染出来，返回新的游标；命令回包只给头部序号——事实一条不落都在事件台上，CLI 与 Web 前端读的是同一份。
 pub(super) fn drain(ops: &Ops, sid: &str, from: u64) -> u64 {
     let (lines, head, _oldest) = ops.events.snapshot(Some(sid), from);
     for l in &lines {
