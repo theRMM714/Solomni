@@ -1,7 +1,0 @@
-{
-  "_comment": "能力内部结构门禁的豁免清单（判据见 tests/gates/structure/capability.js）；文件粒度与内联测试的判据在 tests/gates/structure/size.js，那里用逐条写理由的 EXEMPT，不用快照。条目存在 = 该判据还有一处豁免；条目一旦不再成立，门禁报「基线豁免已过期」强制销账。",
-  "serviceToDetail": [],
-  "outsideDetailKernel": [],
-  "serviceIo": [],
-  "siblingCycles": []
-}

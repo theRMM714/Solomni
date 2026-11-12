@@ -77,7 +77,7 @@ const GATES = [
     lane: "structure",
     step: "T0 结构审查",
     kind: "text",
-    inputs: ["src/capabilities/**/*.rs", "tests/structure-baseline.json"],
+    inputs: ["src/capabilities/**/*.rs"],
     run: (root, ctx) => {
       const r = S.capability.internal(root);
       ctx.stats.notes = (ctx.stats.notes || []).concat(r.notes);

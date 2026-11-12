@@ -5,7 +5,7 @@
  * 覆盖 api / service / domain / detail 四个分区（api 含 api.rs 与 api/ 子目录）。
  * 判据只看生产代码：先剔 #[cfg(test)] 模块，再用 tests/lib/rust-mask.js 抹掉注释与字面量，
  *   避免文档注释里提到 ureq / std::fs 就被算成 IO 调用。
- * 豁免在 tests/structure-baseline.json，条目过期即失败。
+ * 零豁免：实际命中即失败，没有基线文件可销账。
  */
 "use strict";
 const fs = require("fs");
@@ -15,6 +15,8 @@ const { stripTestModules } = require("./dependency.js");
 const { mask } = require("../../lib/rust-mask.js");
 
 const IO_CALLS = ["std::fs", "std::process::Command", "ureq", "reqwest", "std::net"];
+/** 端口方法之外的 canonicalize 调用也是直接 IO：`probe.canonicalize` 走端口，`path.canonicalize` 直接碰盘。 */
+const CANONICALIZE = /canonicalize\s*\(/;
 
 /** 能力内的实现分区：api / service / domain / detail；其余（mod.rs、guest.rs 这类）不归这些判据管。 */
 function scopeOf(f) {
@@ -102,6 +104,8 @@ function scan(root) {
       for (const call of IO_CALLS) {
         if (prod.includes(call)) serviceIo.add(f + " -> " + call);
       }
+      const withoutPort = prod.replace(/\b(?:self\s*\.\s*)?probe\s*\.\s*canonicalize\s*\(/g, "");
+      if (CANONICALIZE.test(withoutPort)) serviceIo.add(f + " -> Path::canonicalize");
       const node = "capabilities/" + cap + "/service/" + f.split("/").pop();
       serviceGraph[node] = siblingEdges(f, prod);
     }
@@ -110,42 +114,16 @@ function scan(root) {
   return { serviceToDetail: [...serviceToDetail].sort(), outsideDetailKernel: [...outsideDetailKernel].sort(), serviceIo: [...serviceIo].sort(), cycles };
 }
 
-function sortCycles(list) {
-  return list.map((s) => s.slice().sort()).sort((a, b) => a.join(",").localeCompare(b.join(",")));
-}
-
 function internal(root) {
-  const baselineFile = path.join(root, "tests", "structure-baseline.json");
-  const problems = [];
-  let base = null;
-  try {
-    base = JSON.parse(fs.readFileSync(baselineFile, "utf8"));
-  } catch (e) {
-    return { problems: ["能力内部：基线不可读或不是合法 JSON：" + rel(root, baselineFile) + "（" + e.message + "）"], notes: [] };
-  }
   const actual = scan(root);
-
-  const compare = (name, actualList, baselineList, hint) => {
-    for (const a of actualList) if (!baselineList.includes(a)) problems.push("能力内部：" + hint + "：" + a);
-    for (const b of baselineList) {
-      if (!actualList.includes(b)) {
-        problems.push("能力内部：基线豁免已过期，请从 " + rel(root, baselineFile) + " 的 " + name + " 删除：" + b);
-      }
-    }
+  const problems = [];
+  const fail = (hint, list) => {
+    for (const a of list) problems.push("能力内部：" + hint + "：" + a);
   };
-  compare("serviceToDetail", actual.serviceToDetail, base.serviceToDetail || [], "service 不得引用本能力 detail 或 kernel::detail（抽端口，别直连实现）");
-  compare("outsideDetailKernel", actual.outsideDetailKernel, base.outsideDetailKernel || [], "detail 之外的能力文件不得引用 kernel::detail（由组合根注入端口）");
-  compare("serviceIo", actual.serviceIo, base.serviceIo || [], "service 不得直接做 IO（fs / Command / 网络）；经端口或 detail");
-
-  const got = sortCycles(actual.cycles);
-  const want = sortCycles(base.siblingCycles || []);
-  if (JSON.stringify(got) !== JSON.stringify(want)) {
-    problems.push(
-      "能力内部：同能力方法族之间的环与基线不一致（拆完后同步更新 " + rel(root, baselineFile) + " 的 siblingCycles）：" +
-      "\n    实际：" + (got.length ? got.map((s) => "[" + s.length + "] " + s.join(", ")).join("；") : "（无）") +
-      "\n    基线：" + (want.length ? want.map((s) => "[" + s.length + "] " + s.join(", ")).join("；") : "（无）")
-    );
-  }
+  fail("service 不得引用本能力 detail 或 kernel::detail（抽端口，别直连实现）", actual.serviceToDetail);
+  fail("detail 之外的能力文件不得引用 kernel::detail（由组合根注入端口）", actual.outsideDetailKernel);
+  fail("service 不得直接做 IO（fs / Command / 网络 / canonicalize）；经端口或 detail", actual.serviceIo);
+  for (const c of actual.cycles) problems.push("能力内部：同能力 service 方法族成环：" + c);
   return { problems, notes: [] };
 }
 

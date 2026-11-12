@@ -57,8 +57,6 @@ tests/
  ci-mutation-publish.mjs # 把突变小结发到 ci-mutation 滚动分支（各推各的，不碰 ci-report）
  mutation-scope.json # 突变测试范围（文件级清单；core + weekly + 各能力）
  comment-baseline.json # 注释契约棘轮基线（run-hygiene.js）
- dependency-baseline.json # 依赖方向门禁的基线（跨能力 / 层间）
- structure-baseline.json # 能力内部门禁的基线与大文件回执快照（service 引 detail、service 直接 IO、方法族成环）
 ```
 
 - 单元层与 `capabilities/` **同构**：T1 用例按业务分文件——`taskchain.rs` / `prompt.rs` / `registry.rs` / `llm.rs` / `workspace.rs` / `session.rs` / `slate.rs` / `modules.rs` / `packages.rs` / `vm.rs` / `permission.rs` / `residents.rs` / `secrets.rs`，加**协调业务**自己的 `conductor.rs` 与 `conductor/`（`ask_user` / `proxy`）。
