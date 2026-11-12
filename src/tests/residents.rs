@@ -1,7 +1,7 @@
 //! 目的：常驻服务的契约用例——注册表、生命周期、租约与假适配器。
 //! 管：发现 / 启动 / 调用 / 停止 / 回收，未知适配器与禁用的拒收，未启动即调用。
 //! 不管：真实协议与进程（随 MCP/ACP 适配器接入）；模块声明与启停有效值（modules 的用例）。
-//! 联动：能力见 src/capabilities/residents/；替身见 src/tests/doubles.rs。
+//! 联动：能力见 src/capabilities/residents/；替身见 src/tests/doubles/。
 
 use crate::capabilities::modules::api::{Module, ServiceDecl};
 use crate::capabilities::residents::api::{ResidentOps, ServiceState};

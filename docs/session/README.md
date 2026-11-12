@@ -23,7 +23,7 @@
 
 ## 改动本单元时必须同步
 
-- 行与事件词汇（`src/capabilities/session/domain/events.rs`、`LineView` 字段）一改 → `collab` 的状态派生、`conductor` 的视图、`cli` / `web` 渲染、`src/tests/session.rs` 全跟。
+- 行与事件词汇（`src/capabilities/session/domain/events.rs`、`LineView` 字段）一改 → `collab` 的状态派生、`conductor` 的视图、`cli` / `web` 渲染、`src/tests/session/` 全跟。
 
 ## 本目录
 

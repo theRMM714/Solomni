@@ -1,6 +1,6 @@
 //! 目的：kernel 共享机制的契约测试——路径写法（native / UNC）与落点身份。
 //! 管：本机制的不变式（verbatim 还原、UNC 拆分、落点身份与物理包含、网络判定）。
-//! 不管：工作区绑定策略（`src/tests/workspace.rs`）与虚拟机档挂载（`src/tests/vm.rs`）。
+//! 不管：工作区绑定策略（`src/tests/workspace/`）与虚拟机档挂载（`src/tests/vm/`）。
 //! 联动：职责与契约见 docs/kernel/unit-map.md 与 ARCHITECTURE.md。
 
 #[cfg(windows)]

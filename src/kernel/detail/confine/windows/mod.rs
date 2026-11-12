@@ -15,6 +15,8 @@ pub(crate) use acl::*;
 pub(crate) use container::*;
 pub(crate) use record::*;
 #[cfg(test)]
+mod ledger_tests;
+#[cfg(test)]
 mod tests;
 use std::path::{Path, PathBuf};
 use windows_sys::Win32::Security::{ACL, PSID};

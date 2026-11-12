@@ -76,7 +76,11 @@ cargo deny check
 
 ### T1：单元测试
 
-- 位置：实现模块内部的 `#[cfg(test)] mod tests`，以及 `src/tests/` 下**按业务分文件**的全内存装配用例（一个能力一个文件，见 [gaps-acceptance.md](gaps-acceptance.md) 的目录与命名）。同一目录里还有真实适配器契约（`detail.rs` / `mcp.rs`）与入口 / 围栏契约用例（`diagnostics.rs` / `fence_reach.rs`）：前者按 T2 判定，后者按真实进程边界判定。
+- 位置：`src/tests/` 下**按业务分文件**的全内存装配用例（一个能力一个文件，用例多的按域分子目录，见 [gaps-acceptance.md](gaps-acceptance.md) 的目录与命名），以及实现文件内部的 `#[cfg(test)] mod tests`。同一目录里还有真实适配器契约（`detail/` / `mcp.rs`）与入口 / 围栏契约用例（`diagnostics.rs` / `fence_reach.rs`）：前者按 T2 判定，后者按真实进程边界判定。
+
+- 内联测试的准入（判据 `tests/gates/structure/size.js`）：只钉**纯函数与状态转换**，只做**全内存断言**，不碰真实进程 / 文件系统 / 网络；单块 ≤ 200 行（软）/ 400 行（硬）。碰真实边界的用例一律写进 `src/tests/`，否则实现文件会长成第二个测试文件、而门禁数不到它。实现文件的实现按生产行计数，正是为了让"测试搬出去"成为首选解法。
+
+- 内联测试块超 400 行时不要机械挪动：改成 `#[cfg(test)] mod tests;` 指向同目录的 `tests.rs`（模块体直接写进该文件，不包 `mod tests { }`），用例名与数量保持不变。
 
 - 验证：
 
@@ -89,7 +93,7 @@ cargo deny check
 - 回档按回复**原子**（截在一次回复中间时整条回复一起丢，不留孤儿工具结果）；留档折叠 `[before, from)` 且新行从全量最大 id 续号、删除真的重写文件、恢复删掉该标记及其后（见 [docs/session/session-model.md](../session/session-model.md) 的「回档：三种模式 + 工作级标记」）；
 - 回档成功后事件台推 `rewound` 并推进重置水印；`history.open` 的 live 不取水印前批次（刷新/多端不会把旧消息拼回）；
 - 连续删除回档不 panic，`line_reply` / `marks` / 工具行锚一起回退；
-- 工具并发**按声明**调度（`parallel`：系统工具在册子、模块工具在 `module.yaml`）：连续的可并发调用真的并发（记录型替身断言"同时在跑"的峰值），未声明的一律串行、写入类是批次之间的屏障（`src/tests/builders.rs`）。
+- 工具并发**按声明**调度（`parallel`：系统工具在册子、模块工具在 `module.yaml`）：连续的可并发调用真的并发（记录型替身断言"同时在跑"的峰值），未声明的一律串行、写入类是批次之间的屏障（`src/tests/builders/`）。
 - 工具行与结果**一律按原始调用顺序**回填，观察账本按原序合并（并发批次与串行结果相同）（`src/capabilities/session/domain/session.rs`）；
 - 系统工具的行为与边界：读取区间与分页、精确替换（唯一命中 / 只差空白）、**自由格式补丁的解析与原子应用**（缺 `*** End File`、SEARCH 找不到 / 多处命中、CRLF 保持、任何一块失败即整体不写盘）。
 - 单个实现的边界与错误行为；
@@ -98,7 +102,7 @@ cargo deny check
 - 硬规矩：
 
 - 默认不碰真实网络、真实用户文件、特权权限或常驻服务；真实进程只出现在 T2 的适配器契约与入口 / 围栏契约用例里；
-- IO、网络、进程、时间、随机数等可替换点必须注入替身（`src/tests/doubles.rs`）；
+- IO、网络、进程、时间、随机数等可替换点必须注入替身（`src/tests/doubles/`）；
 - 每个重要失败分支必须有明确断言（`src/tests/ports.rs`）；
 - 不用"返回非空""没有 panic"代替对行为的断言；
 - 需要观察交互时，断言记录型 Spy/Fake 的可观察记录，不暴露生产实现内部状态。

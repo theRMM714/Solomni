@@ -128,7 +128,7 @@
 - 开发 / 应急 copy：进程启动时设 `SOLOMNI_VM_SHARE=copy`，该进程的 VM 会话强制走 copy（QGA 复制），日志打警告；它不在用户链、不进用户界面；只在开发 / 运维细则里出现，普通进程不装配它。
 
 ## 改动本单元时必须同步
-- `RUNTIME_SPEC.md` → 包契约；`docs/builds/README.md` → 构建；本能力的用例测试在 `src/tests/vm.rs`。
+- `RUNTIME_SPEC.md` → 包契约；`docs/builds/README.md` → 构建；本能力的用例测试在 `src/tests/vm/`。
 - 改虚拟根构造或运行期编排 → `docs/provision/README.md`；改 `GuestSpec.seed` / `guest_wait_agent` 要同时改那里的编排。
 - 新增端口或替身 → `docs/testing/doubles.md` 的端口矩阵。
 - `REGISTRY_SPEC.md` → `max_guests` 等设置字段；`docs/tools/tools-and-roles.md` → 路径模型与系统工具寻址。

@@ -34,8 +34,8 @@
 
 ## 改动本单元时必须同步
 
-- 请求体形状是**真实会话与探针共用的唯一定义**（`src/capabilities/llm/detail/http_chat.rs`）；改协议 → `src/tests/llm.rs`、`src/tests/detail.rs`、`src/tests/fakes.rs`；信封不合法的修法由 `src/capabilities/llm/domain/malformed.rs` 代码返回。思考片段也走这一处：改合并规则要同步 `src/tests/detail.rs` 的请求体断言与 `REGISTRY_SPEC.md` 的 `thinking` 段。流式请求体的 `stream_options.include_usage` 属于这条协议形状；供应商拒收时的回退在 `HttpChat::complete`，由 `src/tests/detail.rs` 钉住「只重试一次、第二次不含该参数」。
-- 流式读、停止与分层超时在 `src/capabilities/llm/detail/http_stream.rs`；改这里要同步 `src/tests/detail.rs` 的静默 / keepalive / 取消用例，以及 `docs/session/session-model.md` 的停止与超时语义。
+- 请求体形状是**真实会话与探针共用的唯一定义**（`src/capabilities/llm/detail/http_chat.rs`）；改协议 → `src/tests/llm.rs`、`src/tests/detail/http.rs`、`src/tests/fakes.rs`；信封不合法的修法由 `src/capabilities/llm/domain/malformed.rs` 代码返回。思考片段也走这一处：改合并规则要同步 `src/tests/detail/http.rs` 的请求体断言与 `REGISTRY_SPEC.md` 的 `thinking` 段。流式请求体的 `stream_options.include_usage` 属于这条协议形状；供应商拒收时的回退在 `HttpChat::complete`，由 `src/tests/detail/http.rs` 钉住「只重试一次、第二次不含该参数」。
+- 流式读、停止与分层超时在 `src/capabilities/llm/detail/http_stream.rs`；改这里要同步 `src/tests/detail/http.rs` 的静默 / keepalive / 取消用例，以及 `docs/session/session-model.md` 的停止与超时语义。
 
 ## 本目录
 

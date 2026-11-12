@@ -25,7 +25,7 @@
 ## 改动本单元时必须同步
 
 - `module.yaml` 契约 → [MODULE_SPEC.md](../../MODULE_SPEC.md)；`Param` / `ParamType` 被 `tools` 的 `ToolSchema` 消费。
-- 清单扫描 / 校验用例：`src/tests/modules.rs`；扫描适配器的契约在 `src/tests/detail.rs`。
+- 清单扫描 / 校验用例：`src/tests/modules.rs`；扫描适配器的契约在 `src/tests/detail/modules.rs`。
 - 端口矩阵（`ModuleSource`）→ [docs/testing/doubles.md](../testing/doubles.md) 三。
 
 ## 本目录

@@ -1,10 +1,9 @@
 /**
- * 能力内部结构门禁：三条硬判据 + 一条只报不拦的文件粒度回执。
+ * 能力内部结构门禁：四条硬判据。文件粒度（行数、内联测试）由 structure/size.js 一处判，这里不管。
  * 硬判据：① 同能力 service 不得引用本能力 detail 或 kernel::detail；② service 不得直接做 IO；
  *        ③ 同一能力的 service 方法族之间不得成环；④ 能力内 detail 之外的文件不得引用 kernel::detail。
- * 豁免与快照在 tests/structure-baseline.json，条目过期即失败。
- * 回执：service / domain / detail / api.rs 超 800 行按行数列出，不改变成败——行数是气味，依赖才是规则；
- *      唯一硬线是新建文件超过 1200 行（新文件没有历史包袱，超线即说明职责没拆）。
+ * 覆盖 api / service / domain / detail 四个分区（api 含 api.rs 与 api/ 子目录）。
+ * 豁免在 tests/structure-baseline.json，条目过期即失败。
  */
 "use strict";
 const fs = require("fs");
@@ -13,35 +12,17 @@ const { rel } = require("../../lib/fsutil.js");
 const { stripTestModules } = require("./dependency.js");
 
 const IO_CALLS = ["std::fs", "std::process::Command", "ureq", "reqwest", "std::net"];
-const SOFT_LIMIT = 800;
-const HARD_LIMIT = 1200;
-const HEADER_BUDGET = 120;
 
 /** 能力内的实现分区：api / service / domain / detail；其余（mod.rs、guest.rs 这类）不归这些判据管。 */
 function scopeOf(f) {
   const parts = f.split("/");
   if (parts[0] !== "src" || parts[1] !== "capabilities" || parts.length < 4) return null;
   const rest = parts.slice(3).join("/");
-  if (rest === "api.rs") return "api";
+  if (rest === "api.rs" || rest.startsWith("api/")) return "api";
   for (const name of ["service", "domain", "detail"]) {
     if (rest === name + ".rs" || rest.startsWith(name + "/")) return name;
   }
   return null;
-}
-
-/** 文件头的 //! 段落：超过预算说明"这个文件一句话说不清自己是什么"。 */
-function headerSlot(text) {
-  const lines = text.split(/\r?\n/);
-  let body = "";
-  for (const line of lines.slice(0, 40)) {
-    if (!line.startsWith("//!")) {
-      if (body) break;
-      continue;
-    }
-    body += line.replace(/^\/\/!\s?/, "");
-  }
-  if (!body) return "缺";
-  return body.replace(/\s+/g, "").length > HEADER_BUDGET ? "写不下" : "能";
 }
 
 /** 同能力 service 下的方法族：它引用的兄弟模块（只看生产代码边）。 */
@@ -99,16 +80,10 @@ function scan(root) {
   const outsideDetailKernel = new Set();
   const serviceIo = new Set();
   const serviceGraph = {};
-  const sizes = {};
-  const notes = [];
   for (const f of walk(root)) {
     const scope = scopeOf(f);
     if (!scope) continue;
     const raw = fs.readFileSync(path.join(root, f), "utf8");
-    const rawLines = raw.split(/\r?\n/);
-    if (rawLines[rawLines.length - 1] === "") rawLines.pop();
-    const lines = rawLines.length;
-    sizes[f] = lines;
     const prod = stripTestModules(raw);
     const cap = f.split("/")[2];
 
@@ -127,16 +102,9 @@ function scan(root) {
       const node = "capabilities/" + cap + "/service/" + f.split("/").pop();
       serviceGraph[node] = siblingEdges(f, prod);
     }
-
-    if (lines > SOFT_LIMIT) {
-      const io = IO_CALLS.reduce((n, c) => n + prod.split(c).length - 1, 0);
-      const impl = (prod.match(/^impl\b/gm) || []).length;
-      notes.push({ file: f, lines, io, impl, header: headerSlot(raw) });
-    }
   }
-  notes.sort((a, b) => b.lines - a.lines);
   const cycles = tarjanScc(serviceGraph).map((c) => "capabilities/" + c.join(", "));
-  return { serviceToDetail: [...serviceToDetail].sort(), outsideDetailKernel: [...outsideDetailKernel].sort(), serviceIo: [...serviceIo].sort(), cycles, sizes, notes };
+  return { serviceToDetail: [...serviceToDetail].sort(), outsideDetailKernel: [...outsideDetailKernel].sort(), serviceIo: [...serviceIo].sort(), cycles };
 }
 
 function sortCycles(list) {
@@ -153,20 +121,6 @@ function internal(root) {
     return { problems: ["能力内部：基线不可读或不是合法 JSON：" + rel(root, baselineFile) + "（" + e.message + "）"], notes: [] };
   }
   const actual = scan(root);
-  const notes = actual.notes.map((n) => {
-    const known = base.bigFiles && typeof base.bigFiles[n.file] === "number" ? base.bigFiles[n.file] : null;
-    const delta = known === null ? "新" : n.lines - known;
-    const deltaText = delta === "新" ? "新文件" : delta > 0 ? "+" + delta : String(delta);
-    return "[big] " + n.file + "  " + n.lines + " 行 (" + deltaText + ")  io=" + n.io + " impl=" + n.impl + "  目的槽=" + n.header;
-  });
-
-  // 新建文件超过硬线：只有"基线里没有这个文件"才算新建——存量永不为行数失败。
-  for (const n of actual.notes) {
-    const known = base.bigFiles && typeof base.bigFiles[n.file] === "number";
-    if (!known && n.lines > HARD_LIMIT) {
-      problems.push("文件粒度：新建文件超过 " + HARD_LIMIT + " 行（先拆职责，不要为过线机械拆文件）：" + n.file + "（" + n.lines + " 行）");
-    }
-  }
 
   const compare = (name, actualList, baselineList, hint) => {
     for (const a of actualList) if (!baselineList.includes(a)) problems.push("能力内部：" + hint + "：" + a);
@@ -189,7 +143,7 @@ function internal(root) {
       "\n    基线：" + (want.length ? want.map((s) => "[" + s.length + "] " + s.join(", ")).join("；") : "（无）")
     );
   }
-  return { problems, notes };
+  return { problems, notes: [] };
 }
 
-module.exports = { internal, scan, LIMITS: { SOFT_LIMIT, HARD_LIMIT } };
+module.exports = { internal, scan };

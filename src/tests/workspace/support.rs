@@ -1,7 +1,7 @@
 //! 目的：本族测试的装配辅助。
 //! 管：工作区夹具、请求构造、路径取用。
 //! 不管：任何断言。
-//! 联动：`src/tests/builders.rs`。
+//! 联动：`src/tests/builders/`。
 
 use super::super::prelude::*;
 

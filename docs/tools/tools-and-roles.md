@@ -6,13 +6,13 @@
 ## 适用与判据
 - 声明系统工具、角色工具面与越权校验时以本文为准（`docs/tools/tools-and-roles.md`）。
 - 模块工具在各自 `module.yaml` 声明（`MODULE_SPEC.md`），本文只管系统工具。
-- 违反由 T0 结构审查与 `src/tests/detail.rs` 的悬空引用用例判定。
+- 违反由 T0 结构审查与 `src/tests/detail/` 的悬空引用用例判定。
 
 ## 一、两张授权表与字段
 
 - 工具**是什么**在 `systools/tools.yaml`；这个**身份有什么**在 `systools/roles.yaml`。
 - 授权只有这两张表；`systools/names.yaml` 是布局的第三份（`session/<工作>/` 的保留目录名），不是工具或角色授权。
-- 代码里**不得**出现"哪个角色能调哪个工具"的判断：只有两个动作——**按角色组装工具面**、**按表校验调用**（`src/tests/detail.rs`）。
+- 代码里**不得**出现"哪个角色能调哪个工具"的判断：只有两个动作——**按角色组装工具面**、**按表校验调用**（`src/tests/detail/`）。
 
 ```yaml
 tools:
@@ -98,8 +98,8 @@ roles:
 
 - **原生模式与信封模式走同一个校验点**；两者**互斥但等价**——等价性一破，回放就与实时不一致。
 - 越权调用 → **如实拒绝 + 落工具行**（用户要能看到"它越权了"）。
-- **悬空引用**（角色引用总表里不存在的 id）→ **装配期 `SystemTools::problems()` 硬失败**（`src/tests/detail.rs` 锁死）。这是两张表不漂的机制保证。
-- `--audit=structure` 只比文件与文档结构，不解析这两张表；改角色表 / 工具表要跑全量入口（或至少 `src/tests/detail.rs` 的用例）。
+- **悬空引用**（角色引用总表里不存在的 id）→ **装配期 `SystemTools::problems()` 硬失败**（`src/tests/detail/` 锁死）。这是两张表不漂的机制保证。
+- `--audit=structure` 只比文件与文档结构，不解析这两张表；改角色表 / 工具表要跑全量入口（或至少 `src/tests/detail/` 的用例）。
 
 ## 四、动作与分发（唯一一处）
 
@@ -281,8 +281,8 @@ prompts/
 - 模块作者仍应把工具写成**只碰自己工作区**的样子；围栏是兜底，不是许可。
 
 ## 检查
-- 两张表一致性 → `src/tests/detail.rs`（`SystemTools::problems()`）。
-- 工具面与越权 → `src/tests/tools/` 与 `src/tests/api.rs`。
+- 两张表一致性 → `src/tests/detail/`（`SystemTools::problems()`）。
+- 工具面与越权 → `src/tests/tools/` 与 `src/tests/api/`。
 
 ## 路由
 - 系统工具门户：[../../SYSTOOL.md](../../SYSTOOL.md)

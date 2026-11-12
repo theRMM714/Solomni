@@ -95,7 +95,7 @@ TaskNode { id, title, objective, assignee, deps, status, sub_session, acceptance
 
 ## 检查
 - 任务链调度 → `src/tests/taskchain.rs`（串 / 并 / 混合 / 环拒绝 / 悬空依赖）。
-- 子会话与回档 → `src/tests/session.rs` 与 L4 端到端（`node run-tests.js`）。
+- 子会话与回档 → `src/tests/session/` 与 L4 端到端（`node run-tests.js`）。
 
 ## 路由
 - 会话模型：[../session/session-model.md](../session/session-model.md)
