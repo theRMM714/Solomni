@@ -142,7 +142,7 @@
 - 共享形状（R6）一改，所有使用者同改；路径拼接规则见 `ARCHITECTURE.md` §八（禁止把分隔符写进字符串）。
 - 平台专属代码本地不编译——`FenceSpec` 字面量必须写全字段（跨平台字面量门禁，`src/kernel/contracts/fence.rs`）；改围栏 → `tests/<平台>/` 探针。
 - 围栏的写后核对、回滚与台账在 `src/kernel/detail/confine/windows/`：改落点形状（`GrantTarget`）或台账字段时，`prepare_fence` / `release_fence` / `clean` / `sweep_orphan_aces` 与按条处置（`catalog` / `restore_one` / `revoke_grant` / `remove_profile_one`）要一起改。
-- 改**归属字段**（含会话租约 `Sandbox.session` → `FenceSpec.lease` → `Owner.lease`）或启动对账时，`src/kernel/detail/confine/windows/record.rs` 的 `current_owner` / `owners_state` / `reconcile` / `release_fence` / `clean` 与入口 `--fence-reconcile` 要一起改；启动对账的接线在 `src/main.rs`。
+- 改**归属字段**（含会话租约 `Sandbox.session` → `FenceSpec.lease` → `Owner.lease`）或启动对账时，`src/kernel/detail/confine/windows/record/liveness.rs` 的 `current_owner` / `owners_state`、`src/kernel/detail/confine/windows/record/reconcile.rs` 的 `reconcile` 与 `src/kernel/detail/confine/windows/record/release.rs` 的 `release_fence` / `clean` 要一起改；启动对账的接线在 `src/main.rs`。
 - ACE 的读法只有一处：`src/kernel/detail/confine/windows/acl.rs` 的 `ace_parts` 按 ACE 头算 SID 偏移（标准 ACE 与回调 ACE 从第 8 字节起，对象 ACE 再加 Flags(4) 与在场的 GUID）。改覆盖的 ACE 类型或身份形状时，写后核对、诊断转储与 `src/kernel/detail/confine/windows/tests.rs` 的对象 ACE 往返探针要一起看。
 - 容器里**列目录**的判据：同一个授权叶子上，cmd 的 `dir` 与 PowerShell 的 `Get-ChildItem` 会被拒；cmd 的 `for` 枚举与 python 的 `os.listdir` / `os.scandir` 正常。所以「列自己的产物」用 `for` 枚举钉住（`src/kernel/detail/confine/windows/tests.rs` 的 `container_roundtrip_sees_leaf_but_not_parent_content` 第四步），`dir` 不是可依赖的列举手段。
 - **解释器按真身授权**：命令名经目录重解析点（符号链接 / 联接）进来时，Windows 只授**真身**的安装根（`src/kernel/detail/confine/windows/container.rs`）——链接对象自身的 DACL 不参与跟随（真机：链接没有 AAPP 也能跑 exe）；文件本身是链接、父目录是实目录时两边都留。预检与执行共用 `interpreter_roots_for_exe`。

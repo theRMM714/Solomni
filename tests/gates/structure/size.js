@@ -18,10 +18,7 @@ const LIMITS = {
 };
 
 /** 逐条豁免：只给"一个不变量、拆开就要跨文件共享同一套状态"的文件；不再超线时必须删掉条目。 */
-const EXEMPT = {
-  "src/kernel/detail/confine/windows/record.rs":
-    "Windows 围栏的授权台账：一条授权的建立、写前快照、写后核对、按条撤销与启动对账共用同一份盘上格式与内存状态，拆开就要把这些规则复制成多份",
-};
+const EXEMPT = {};
 
 const HEADER_BUDGET = 120;
 
