@@ -4,7 +4,6 @@
 //! 联动：`src/capabilities/collab/service/` 的 `converse_with` 与 `src/capabilities/vm/api.rs`。
 
 use super::*;
-use super::super::prelude::*;
 
 /// 目的：测试用的"逐成员跑一遍"：内部走**共享的 converse_with**（工具循环本身仍在生产里， 只是执行阶段的入口从平铺的 Execution::run 换成了链驱动）。
 pub(crate) struct ExecLike {

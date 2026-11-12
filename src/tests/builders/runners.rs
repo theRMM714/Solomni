@@ -4,7 +4,6 @@
 //! 联动：`src/kernel/ports.rs` 的 `ProcessRunner`。
 
 use super::*;
-use super::super::prelude::*;
 
 /// 目的：守护 runner：任何调用即失败（守护不该用工具的路径）。
 pub(crate) struct SilentRunner;

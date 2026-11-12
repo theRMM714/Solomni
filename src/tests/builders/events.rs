@@ -4,7 +4,6 @@
 //! 联动：`src/capabilities/conductor/api.rs` 的 `SessionEvent` 与呈现层的 `LineView`。
 
 use super::*;
-use super::super::prelude::*;
 
 /// 目的：测试里**回答当前那张裁决卡**（卡号从会话的挂起取）：返回这一答产生的事件。
 /// 约束：与呈现层同一条路——带选项 id（+ 附言），由 `collab_answer` 校验与落档。

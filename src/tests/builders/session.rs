@@ -4,7 +4,6 @@
 //! 联动：`src/capabilities/conductor/api.rs` 与 `src/capabilities/modules/api.rs`。
 
 use super::*;
-use super::super::prelude::*;
 
 pub(crate) fn chain_node(id: &str, deps: &[&str]) -> crate::capabilities::taskchain::api::TaskNode {
     crate::capabilities::taskchain::api::TaskNode {

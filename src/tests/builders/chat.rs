@@ -4,7 +4,6 @@
 //! 联动：`src/capabilities/llm/ports.rs` 的 `ChatGateway` 与 `Chat`。
 
 use super::*;
-use super::super::prelude::*;
 
 /// 目的：记录调用参数、并能按脚本失败的通道替身。 用来钉两件机器可判的事实：**流式与预算来自全局设置**、**调用失败 = 中断而不是发言**。
 pub(crate) struct OptsChat {
