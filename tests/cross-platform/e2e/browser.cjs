@@ -141,8 +141,8 @@ async function saveArtifacts(context, page, stamp) {
 
   let workName = "";
   try {
-    // ① 首页连接真实服务
-    await page.goto(BASE, { waitUntil: "domcontentloaded" });
+    // ① 首页连接真实服务：应用就绪看连接状态；DOMContentLoaded 会被任一 defer 资源（如 md.js）拖住。
+    await page.goto(BASE, { waitUntil: "commit" });
     await page.locator("#conn-text").waitFor({ state: "visible" });
     await waitFor(async () => (await page.locator("#conn-text").textContent()) === "已连接", 20000, "连接状态");
     console.log("PASS 首页显示已连接");
