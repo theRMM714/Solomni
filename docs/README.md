@@ -47,8 +47,8 @@
 
 | 要找什么 | 读哪一份 |
 | --- | --- |
-| 任务流程总入口（单 / 多 agent 选择、共同约定、闸门） | [workflow/README.md](workflow/README.md) |
-| 单 agent：开工、实施、本机回路、收口 | [workflow/single-agent.md](workflow/single-agent.md) |
+| 任务流程总入口（单 / 多 agent 选择、共同约定、开工、闸门） | [workflow/README.md](workflow/README.md) |
+| 单 agent：实施、本机回路、收口 | [workflow/single-agent.md](workflow/single-agent.md) |
 | 多 agent：开工、派发、worktree、逐片 squash 集成、收口 | [workflow/multi-agent.md](workflow/multi-agent.md) |
 | 用户启动文档审计 / 治理（检查、修改、验收） | [workflow/docs-audit.md](workflow/docs-audit.md) |
 | 文档分层、同步表、术语、引用格式 | [conventions.md](conventions.md) |

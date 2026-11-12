@@ -5,7 +5,7 @@
 
 ## 适用与判据
 
-- 选择多 agent 时按本文执行；共同约定（分支、PR、闸门、阶段提交）见 [README.md](README.md)。
+- 选择多 agent 时按本文执行；共同约定与开工步骤（分支、Draft PR、闸门、阶段提交）见 [README.md](README.md)。
 - 咨询 / 审查仍只调查、不建分支；实施仍走同一套门禁，多 agent 不改变请求分类与验收。
 - 一个任务只有一个 Lead、一个任务分支、一个 Draft PR；worker 只对分片负责。
 - 调查型并行不建分支与 worktree；实施型并行按下面的分片、worktree 与逐片集成执行。
@@ -19,9 +19,9 @@
   - 调查型：只读取证，不写文件、不建 worktree 与子分支；Lead 列问题清单与每个 worker 的范围。
   - 实施型：分片写范围不相交，Lead 预建 worktree 与子分支，worker 在 worktree 内开发。
 
-## 二、开工：分支、Draft PR 与分片
+## 二、开工：分片、契约与 worktree
 
-- 按 [single-agent.md](single-agent.md) 的「一、开工」建任务分支 `task/<简述>`、空提交与 Draft PR。
+- 按 [README.md](README.md) 的「三、开工：分支 + Draft PR」建任务分支 `task/<简述>`、空提交与 Draft PR。
 - PR 实施清单写分片表：分片、owner、写范围、子分支、依赖；没有任务板时以这张表为准。
 - 冻结跨分片契约（API、端口、数据模型、错误文案、盘上格式）；worker 改契约前先报 Lead。
 - Lead 预建子分支与 worktree，一个分片一个：
@@ -122,17 +122,7 @@
 ## 八、完整示例：task/export-csv
 
 - 分片：A 核心导出（`src/capabilities/export/`）；B CLI 接入，依赖 A；C 文档，依赖 A。
-- Lead 开工（复用 single-agent）：
-
-  ```sh
-  git fetch origin main
-  git switch -c task/export-csv origin/main
-  git commit --allow-empty -m "chore: 开工 导出 CSV"
-  git push -u origin task/export-csv
-  gh pr create --draft --base main --head task/export-csv
-  ```
-
-- 建 A 的 worktree 并派发：
+- Lead 按 [README.md](README.md) 的开工步骤建 `task/export-csv` 分支与 Draft PR，然后建 A 的 worktree 并派发：
 
   ```sh
   git worktree add .worktrees/a -b task/export-csv/a task/export-csv
