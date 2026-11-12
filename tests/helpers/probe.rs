@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-/// 目的：围栏装不上时的退出码（与 src/kernel/detail/confine/mod.rs 的 FENCE_FAILED 一致）。
+/// 目的：围栏装不上时的退出码（与 src/kernel/detail/confine.rs 的 FENCE_FAILED 一致）。
 pub const FENCE_FAILED: i32 = 111;
 /// 目的："本环境不允许容器围栏"的标记（与 confine::windows::ENV_BLOCKED_MARK 一致）。
 pub const ENV_BLOCKED_MARK: &str = "容器围栏不可用（本环境不允许";
@@ -203,7 +203,7 @@ pub fn env_blocks_container(err: &str) -> bool {
     err.contains(ENV_BLOCKED_MARK)
 }
 
-/// 目的：测试专用的自检注入开关（与 src/kernel/detail/confine/mod.rs 的 SELFCHECK_FAIL_FLAG 一致）。
+/// 目的：测试专用的自检注入开关（与 src/kernel/detail/confine.rs 的 SELFCHECK_FAIL_FLAG 一致）。
 ///   打开它 = 让机制验证确定性地报「本机不允许」，用来覆盖那条正常 runner 上碰不到的分支。
 pub const SELFCHECK_FAIL_FLAG: &str = "SOLOMNI_FENCE_SELFCHECK_FAIL";
 
@@ -235,7 +235,7 @@ pub fn verify_fence_with(spec: &str, command: &str, extra: &[(&str, &str)]) -> S
 }
 
 /// 目的：守门进程（`--fence-run`）按「本机不允许」执行时的降级标记。
-///   与 src/kernel/detail/confine/linux.rs / macos.rs / windows/mod.rs 的原文一致——探针据此断言"确实降级了"。
+///   与 src/kernel/detail/confine/linux.rs / macos.rs / windows.rs 的原文一致——探针据此断言"确实降级了"。
 pub fn degraded_by_env(err: &str) -> bool {
     err.contains("文件系统围栏未生效") || err.contains("容器围栏不可用")
 }

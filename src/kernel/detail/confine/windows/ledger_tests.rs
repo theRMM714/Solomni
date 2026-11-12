@@ -1,7 +1,7 @@
 //! 目的：Windows 围栏台账的真机契约——快照先落盘、写后核对、按条处置、启动对账与孤儿回收。
 //! 管：需要真改 ACL 的台账一族用例；本机做不了往返预检就如实跳过。
 //! 不管：容器身份与容器内往返（见 `tests.rs`）、非 Windows 平台（见 tests/linux、tests/macos）。
-//! 联动：机制在 confine/windows/mod.rs 与 ledger.rs；夹具复用 `tests` 模块的探针助手。
+//! 联动：机制在 confine/windows.rs 与 ledger.rs；夹具复用 `tests` 模块的探针助手。
 
 use super::super::Owner;
 use super::tests::{acl_round_trip, discard, expect_granted};

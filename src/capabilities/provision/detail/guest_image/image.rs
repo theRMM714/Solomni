@@ -1,6 +1,6 @@
 //! 目的：ext4 镜像的属性回填与调试工具——debugfs 封装、目录清单、属主 / 特权位恢复、目录占用与清理。
 //! 管：`GuestAttr` 与回填、`debugfs` 命令拼装与引号、目录占用统计、保留清单之外的清理。
-//! 不管：镜像怎么装出来（`mod.rs`）、内核与 initrd（`deb.rs` / `initrd.rs`）。
+//! 不管：镜像怎么装出来（`guest_image.rs`）、内核与 initrd（`deb.rs` / `initrd.rs`）。
 //! 联动：`install_guest_rootfs` 与 `pack_guest_base` 用本模块做属性回填与中间产物清理。
 
 use super::*;

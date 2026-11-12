@@ -1,7 +1,7 @@
 //! 目的：真实通道——OpenAI 兼容 /chat/completions（可取消的流式请求）。
 //! 管：按通道（供应商 + 模型）建会话；流式分片解析；端点补全与回落；错误脱敏。
 //! 不管：端点候选逻辑（在 endpoint）；代理与 TLS（在 http_agent）；无通道时不回落假模型（前置条件失败）。
-//! 联动：实现 api::Chat 与 ports::ChatGateway；由 detail/mod.rs 重导出 HttpGateway 供组合根装配；流机制在 detail/http_stream.rs。
+//! 联动：实现 api::Chat 与 ports::ChatGateway；由 detail.rs 重导出 HttpGateway 供组合根装配；流机制在 detail/http_stream.rs。
 
 use super::endpoint::{chat_candidates, memo_get, memo_set, resolve_candidates, Attempt, Memo};
 use crate::capabilities::llm::api::Channel;

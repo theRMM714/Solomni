@@ -20,7 +20,7 @@ const BIN = path.join(ROOT, "target", PROFILE, EXE);
 const log = (m) => console.log("[start] " + m);
 const die = (m) => { console.error("[start] " + m); process.exit(1); };
 
-// 与 src/presentation/web/mod.rs 的 RESTART_EXIT_CODE 同源：全局沙箱策略保存后整体重启。
+// 与 src/presentation/web.rs 的 RESTART_EXIT_CODE 同源：全局沙箱策略保存后整体重启。
 const RESTART_EXIT_CODE = 75;
 
 function binLocked(p) {

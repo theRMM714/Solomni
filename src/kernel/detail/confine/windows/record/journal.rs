@@ -1,7 +1,7 @@
 //! 目的：授权日志——每条 ACL 改动先记进台账，再动本机权限项。
 //! 管：容器 profile、根外授权摘要、根内文件快照的记账，按 (SID, 路径, 权限) 合并同一条，以及授权写后的核对。
 //! 不管：ACL 的读写与还原（acl.rs），也不管台账文件本身的锁与落盘（store.rs）。
-//! 联动：windows/mod.rs 的 prepare_fence 逐条调用；盘上格式定义在 store.rs。
+//! 联动：windows.rs 的 prepare_fence 逐条调用；盘上格式定义在 store.rs。
 
 use super::super::super::Owner;
 use super::super::*;

@@ -1,7 +1,7 @@
 //! 目的：confine 的单元测试：JSON 形状、解释器解析、程序名改写、边界说明与归属身份。
 //! 管：不触真实围栏的纯函数行为与注入开关语义。
 //! 不管：真实平台围栏——Unix 的 Landlock / seatbelt 是进程级不可逆的，由平台探针在子进程里验收。
-//! 联动：被测项在 `mod.rs` / `job.rs` / `paths.rs` / `texts.rs`；真机探针在 `tests/<平台>/`。
+//! 联动：被测项在 `confine.rs` / `job.rs` / `paths.rs` / `texts.rs`；真机探针在 `tests/<平台>/`。
 
 #[cfg(windows)]
 use std::ffi::OsString;

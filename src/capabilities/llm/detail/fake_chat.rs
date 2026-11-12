@@ -1,7 +1,7 @@
 //! 目的：测试专用的脚本假模型通道（无网络、无密钥）。
 //! 管：按脚本回放的 Chat 与 ChatGateway 实现；记录收到的消息与用量。
 //! 不管：生产装配（组合根不装配）；真实网络、密钥与通道发现。
-//! 联动：只被单元测试与测试替身引用；实现 api::Chat 与 ports::ChatGateway；detail/mod.rs 以 cfg(test) 声明。
+//! 联动：只被单元测试与测试替身引用；实现 api::Chat 与 ports::ChatGateway；detail.rs 以 cfg(test) 声明。
 
 use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{

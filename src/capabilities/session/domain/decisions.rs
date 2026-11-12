@@ -4,7 +4,7 @@
 //! 不管：问什么（发起方给消息与选项）、回答怎么处置（发起方）、界面怎么画（呈现层）。
 //! 联动：卡片形状与选项 id 在 `crate::capabilities::session::domain::events`；契约见
 //!   docs/session/session-model.md 的「请用户裁决：一条通道，消息 + 选项」；
-//!   由核心持有（`src/capabilities/conductor/service/mod.rs` 的 desk），生成线程与回答口都经它。
+//!   由核心持有（`src/capabilities/conductor/service.rs` 的 desk），生成线程与回答口都经它。
 
 use super::events::{idle, DecisionAnswer, DecisionQueue, DecisionWaiter, Pending, SessionEvent};
 use std::collections::{HashMap, VecDeque};

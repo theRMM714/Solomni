@@ -10,7 +10,7 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/capabilities/tools/api.rs` | 入站能力面：`Tools`（按角色发放工具面、总表与保留名）与 `ToolExec`（执行模块 / 内置 / shell 工具、释放围栏授权）的用例面与公开类型重导出 |
-| `src/capabilities/tools/service/mod.rs` | 工具能力的用例与端口持有者：持工具总表、角色表与名字表（`SystemTools`）及 `SysIo` / `ProcessRunner` / `FenceHost` / `FenceGate` 四个端口 |
+| `src/capabilities/tools/service.rs` | 工具能力的用例与端口持有者：持工具总表、角色表与名字表（`SystemTools`）及 `SysIo` / `ProcessRunner` / `FenceHost` / `FenceGate` 四个端口 |
 | `src/capabilities/tools/service/fence.rs` | 围栏裁决（`ToolFenceGate`）：必要落点授不上时问用户、按裁决无围栏跑一次或拒绝；回执文案与停会话在这里 |
 | `src/capabilities/tools/ports.rs` | 出站端口：三张表的加载 `SystoolsSource` 与内置文件工具的读写 `SysIo`（含 `FileRead` / `DirEntry` 数据形态） |
 | `src/capabilities/tools/service/systool.rs` | 内置工具的执行编排：解析入参 → 按声明校验 → 沙箱寻址 → 经 `SysIo` 读写盘（规则在 `src/capabilities/tools/domain/systool.rs`） |

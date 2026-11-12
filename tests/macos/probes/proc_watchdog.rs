@@ -1,7 +1,7 @@
 //! 目的：长驻子进程"父死子亡"的 macOS 探针（L3）。
 //! 管：按真实命令行驱动 `--proc-watchdog`：核心没了收掉子进程组、核心早没了也收、子进程早没了不动核心。
 //! 不管：Linux 的 `PR_SET_PDEATHSIG` 与 Windows 的作业对象（各自由本平台验收）；围栏机制。
-//! 联动：运行期由 `procs::watch` 拉起（`src/kernel/detail/procs.rs`）；分发在 `src/main.rs` / `src/guard/mod.rs`。
+//! 联动：运行期由 `procs::watch` 拉起（`src/kernel/detail/procs.rs`）；分发在 `src/main.rs` / `src/guard.rs`。
 
 use crate::probe::bin;
 use std::process::{Child, Command, ExitStatus, Stdio};

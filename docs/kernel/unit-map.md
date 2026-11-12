@@ -12,10 +12,10 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/kernel/mod.rs` | 地基库的入口与公开面：`contracts` / `api` / `ports` / `domain` / `detail` 五个子模块的形状声明 |
+| `src/kernel.rs` | 地基库的入口与公开面：`contracts` / `api` / `ports` / `domain` / `detail` 五个子模块的形状声明 |
 | `src/kernel/api.rs` | 地基库的对外面：共享形状（`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask` / `RunOutcome` / `FenceSpec` / `FencePart` / `FenceBlocked` / 默认预算）与纯机制（`slash` 的对外写法、路径写法 `native` / `is_unc` / `unc_parts`、落点身份 `locus_of` / `place_contains` / `is_network_path`、生成中作业的取消表 `JobRegistry`）的重导出 |
 | `src/kernel/ports.rs` | 全项目共享的机制端口：`Log` / `PathCodec` / `ProcessTexts` / `AskUser` / `ToolHandler` / `HostProbe` / `ProcessRunner` / `SessionHost` / `FenceHost` / `FenceGate` 的 trait 定义与它们的纯数据形态（含 `ShellRun` 的 `gate` 与 shell 收尾文案） |
-| `src/kernel/contracts/mod.rs` | 跨层共享形状的入口：`fence` / `run` / `types` 三个子模块声明 |
+| `src/kernel/contracts.rs` | 跨层共享形状的入口：`fence` / `run` / `types` 三个子模块声明 |
 | `src/kernel/contracts/types.rs` | 跨层共享的形状（纯数据）：`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask` / `AskOutcome` 与默认预算、能力名文法 |
 | `src/kernel/contracts/run.rs` | 宿主执行端口的中性回执 `RunOutcome`（跑没跑、输出是什么；不含业务语义） |
 | `src/kernel/contracts/fence.rs` | 围栏描述符（`FenceSpec` / `FenceRunPolicy`）与落点判据（`FencePart` / `FenceBlocked`）：纯数据 |
@@ -33,7 +33,7 @@
 | `src/kernel/detail/procs/tests.rs` | 进程账与回收的契约用例：登记/注销、存活探测、父死子亡的分平台接线（`#[cfg(test)] mod tests;` 指向） |
 | `src/kernel/detail/procs.rs` | 长驻子进程的账（`.home/processes.json`）与回收：父死子亡的接线（`attach`：Linux 内核信号 / macOS 守门进程 / Windows 作业对象）、身份（Unix 命令行标记 / Windows 创建时间）、存活探测、终止、启动对账；登记虚拟机档的 QEMU、共享 helper 与常驻服务守门进程 |
 | `src/kernel/detail/session.rs` | 长驻外部进程机制（守门进程长跑、按行收发、关闭杀树、父死子亡、进程账登记与注销、Windows 容器预授权），实现 `SessionHost`；常驻服务的守门进程经它拉起 |
-| `src/kernel/detail/confine/mod.rs` | 围栏机制门面：平台后端选择与重导出；本机能力与本次实际（`effective_paths`）的判据、自检（`verify`）与 `FenceHost` 释放 |
+| `src/kernel/detail/confine.rs` | 围栏机制门面：平台后端选择与重导出；本机能力与本次实际（`effective_paths`）的判据、自检（`verify`）与 `FenceHost` 释放 |
 | `src/kernel/detail/confine/job.rs` | 守门进程的围栏作业：`FenceJob` 的 JSON 形态、启动命令（`launcher`）与执行转交（`run_fenced`）；策略由调用方传入 |
 | `src/kernel/detail/confine/ledger.rs` | 围栏授权台账与启动对账：`Owner` / `Ledger`、`reconcile`、恢复与撤销（`restore_one` / `revoke_grant` / `release_fence`）、孤儿清扫与按条处置 |
 | `src/kernel/detail/confine/paths.rs` | 围栏的路径与环境工具：解释器安装根与 `PATH` 解析、可执行位与重解析点、node 真身基线、程序名改写、`shell_command` 与 `fence_env` |
@@ -43,11 +43,11 @@
 | `src/kernel/detail/confine/linux.rs` | Linux 围栏后端：Landlock 强制可达范围（`spec.rw` 读写、运行基线只读、其余拒绝），seccomp 在 `net=false` 时拒绝非本地 socket；机制不可用时如实降级 |
 | `src/kernel/detail/confine/macos.rs` | macOS 围栏后端：生成 seatbelt profile（默认拒绝，再逐条放行运行基线与 `spec.rw`；按 `net` 放行 `network-outbound` / 拒绝）交 `sandbox_init` 装上，装不上如实降级 |
 | `src/kernel/detail/confine/other.rs` | 其他平台后端：如实降级——只保证超时与整棵进程树终止，绝不作有文件系统围栏的假装 |
-| `src/kernel/detail/confine/windows/` | Windows 围栏后端目录：入口与策略派发在 `mod.rs`，DACL 授权在 `acl.rs`、授权台账与撤权在 `record/`、容器身份与作业对象在 `container.rs`、真机探针在 `tests.rs` |
-| `src/kernel/detail/confine/windows/mod.rs` | Windows 围栏后端入口：按 agent 派生 AppContainer SID、逐条授权可达范围，再用 `STARTUPINFOEX` 在容器与作业对象里起工具（`net` 决定是否授 internetClient） |
+| `src/kernel/detail/confine/windows/` | Windows 围栏后端目录：入口与策略派发在 `windows.rs`，DACL 授权在 `acl.rs`、授权台账与撤权在 `record/`、容器身份与作业对象在 `container.rs`、真机探针在 `tests.rs` |
+| `src/kernel/detail/confine/windows.rs` | Windows 围栏后端入口：按 agent 派生 AppContainer SID、逐条授权可达范围，再用 `STARTUPINFOEX` 在容器与作业对象里起工具（`net` 决定是否授 internetClient） |
 | `src/kernel/detail/confine/windows/acl.rs` | Windows 安全描述符操作：逐路径改 DACL（授予 / 撤销）、解析 ACE 与 SID、展开泛型掩码、`AccessCheck` 判写 DACL 权限 |
 | `src/kernel/detail/confine/windows/ledger_tests.rs` | 台账一族真机用例：快照先落盘、写后核对、按条处置、启动对账与孤儿回收（`#[cfg(test)] mod ledger_tests;` 指向） |
-| `src/kernel/detail/confine/windows/record/mod.rs` | Windows 授权台账的入口：`store` / `liveness` / `journal` / `sweep` / `release` / `catalog` / `reconcile` / `paths` / `sid` 九个职责的子模块声明，并向 Windows 后端入口 `mod.rs` 重导出同一个调用面 |
+| `src/kernel/detail/confine/windows/record.rs` | Windows 授权台账的入口：`store` / `liveness` / `journal` / `sweep` / `release` / `catalog` / `reconcile` / `paths` / `sid` 九个职责的子模块声明，并向 Windows 后端入口 `windows.rs` 重导出同一个调用面 |
 | `src/kernel/detail/confine/windows/record/store.rs` | 台账的盘上格式与互斥：`GrantRecord` / `SnapshotEntry` / `GrantEntry` / `ProfileEntry`、单一锁文件与进程内 `LEDGER_MUTEX`、锁内 `load_record` / `save_record` 与备份轮转 |
 | `src/kernel/detail/confine/windows/record/liveness.rs` | 归属者的活性：`current_owner`、进程创建时间与存活探测（`Liveness` / `OwnersState` / `owners_state` / `owner_liveness`） |
 | `src/kernel/detail/confine/windows/record/journal.rs` | 授权的建立：写前快照与按条记账（`journal_add_profile` / `journal_claim_grant` / `journal_release_grant` / `journal_add_snapshot` / `grant_one_journaled` / `combine`） |

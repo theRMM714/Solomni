@@ -12,5 +12,5 @@
 | `src/capabilities/secrets/api.rs` | 统一管理 API（`SecretOps`）与视图；未注入时的空实现 `NoSecrets` |
 | `src/capabilities/secrets/ports.rs` | 存储端口（`SecretStore`） |
 | `src/capabilities/secrets/service.rs` | 值缓存与按模块解析 / 脱敏（实现 `SecretOps`） |
-| `src/capabilities/secrets/detail/mod.rs` | 机制实现入口（只有组合根能构造） |
+| `src/capabilities/secrets/detail.rs` | 机制实现入口（只有组合根能构造） |
 | `src/capabilities/secrets/detail/yaml_secrets.rs` | `.home` 目录下的 `secrets.yaml` 文件存储（实现 `SecretStore`；unix 下 0600） |

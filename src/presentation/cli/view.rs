@@ -1,7 +1,7 @@
 //! 目的：终端渲染：花名册、菜单、事件流与模型/供应商标签。
 //! 管：把能力面的事实与事件词汇翻成终端行文。
 //! 不管：命令解析、交互裁决、会话流。
-//! 联动：`cli/mod.rs`、`cli/gate.rs`、`docs/presentation/contracts.md`
+//! 联动：`cli.rs`、`cli/gate.rs`、`docs/presentation/contracts.md`
 
 use super::*;
 

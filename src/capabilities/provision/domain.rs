@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// 清单与台账在构建期嵌进二进制：分发的二进制不依赖仓库里的文件，读到的仍是同一份真相。
-const DEPS_YAML: &str = include_str!("../../../../dependencies.yaml");
-const LINKS_YAML: &str = include_str!("../../../../links.yaml");
+const DEPS_YAML: &str = include_str!("../../../dependencies.yaml");
+const LINKS_YAML: &str = include_str!("../../../links.yaml");
 
 #[derive(Debug, Clone, Deserialize)]
 struct DepsFile {

@@ -1,6 +1,6 @@
 //! 目的：guest 基础根里 deb 与内核 / agent 的选型、解包与落位。
 //! 管：分区定位、版本比较、包名挑选、ar 解包、ABI 判定、通用内核与 qemu-guest-agent 的装入、vmlinuz / initrd.img 软链。
-//! 不管：initrd 怎么生成（`initrd.rs`）、ext4 落盘与属性（`mod.rs` / `image.rs`）。
+//! 不管：initrd 怎么生成（`initrd.rs`）、ext4 落盘与属性（`guest_image.rs` / `image.rs`）。
 //! 联动：`install_guest_rootfs` 按 内核 → initrd → agent 的顺序调用本模块。
 
 use super::*;

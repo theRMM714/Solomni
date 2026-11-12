@@ -11,8 +11,8 @@
 
 | 东西 | 定义在 | 形态 |
 | --- | --- | --- |
-| 能力接口 | **各能力自己的 `api.rs`** | `Ops` 里的面：`SessionOps` / `ConductorOps` / `ActionOps` / `LogOps` 在 `src/capabilities/conductor/api/mod.rs`（会话中心、核心自己的用例与**动作目录 / 分发**），`RegistryOps` 在 `src/capabilities/registry/api.rs`，`HistoryOps` 在 `src/capabilities/session/api.rs`，`ModulesOps` 在 `src/capabilities/modules/api.rs`，`ResidentOps` / `SecretOps` / `Provision` 各在 `src/capabilities/<能力>/api.rs`。**全 `&self`、可替换成假实现**；实现都是 `src/capabilities/conductor/api/contract_impls.rs` 里 `ConductorHandle` 的队列代理（`impl` 在核心线程上执行）|
-| 事件台 | `src/capabilities/conductor/api/mod.rs` | `EventBus`：核心独占生产，任意数量的消费者按序号增量取 |
+| 能力接口 | **各能力自己的 `api.rs`** | `Ops` 里的面：`SessionOps` / `ConductorOps` / `ActionOps` / `LogOps` 在 `src/capabilities/conductor/api.rs`（会话中心、核心自己的用例与**动作目录 / 分发**），`RegistryOps` 在 `src/capabilities/registry/api.rs`，`HistoryOps` 在 `src/capabilities/session/api.rs`，`ModulesOps` 在 `src/capabilities/modules/api.rs`，`ResidentOps` / `SecretOps` / `Provision` 各在 `src/capabilities/<能力>/api.rs`。**全 `&self`、可替换成假实现**；实现都是 `src/capabilities/conductor/api/contract_impls.rs` 里 `ConductorHandle` 的队列代理（`impl` 在核心线程上执行）|
+| 事件台 | `src/capabilities/conductor/api.rs` | `EventBus`：核心独占生产，任意数量的消费者按序号增量取 |
 
 规则：
 
@@ -85,7 +85,7 @@
 已被盘上定稿行取代，跟下去只会画出一个填不上的空块。
 ## 二、HTTP 路由目录（机器可读）
 
-`src/presentation/web/routes.rs` 的 `ROUTES` 是路由的**唯一定义**：`src/presentation/web/mod.rs` 的匹配与分发都由它驱动
+`src/presentation/web/routes.rs` 的 `ROUTES` 是路由的**唯一定义**：`src/presentation/web.rs` 的匹配与分发都由它驱动
 （匹配由目录做、分支按 `id`），所以「代码里有路由但目录里没有」在结构上不可能发生。
 `solomni --print-routes` 输出它的 JSON（含能力、请求/响应形状、状态码与说明）。
 
@@ -93,7 +93,7 @@
 
 静态资源只有两条路由：`/` 给 `index.html`，`/assets/{*path}` 给其余文件。文件来自编译期嵌入表（`build.rs` 扫描 `src/presentation/web/assets/`，`.cjs` / `.mjs` 开发脚本不进表；未知扩展名让构建失败），
 请求只查这张表、不读文件系统，表外路径一律 404（`src/presentation/web/assets.rs`）。增删前端文件**不改路由**。
-静态资源一律 `Cache-Control: no-store`：改了前端**刷新即生效**，不需要硬刷新（`src/presentation/web/mod.rs` 的 `static_head`）。
+静态资源一律 `Cache-Control: no-store`：改了前端**刷新即生效**，不需要硬刷新（`src/presentation/web.rs` 的 `static_head`）。
 
 <!-- ROUTES:BEGIN -->
 | 方法 | 路径 | 能力 | 请求 | 响应 | 状态码 |

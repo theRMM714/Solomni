@@ -2,7 +2,7 @@
 //! 管：台账三段（容器 profile / 根外授权摘要 / 根内文件快照）的单一格式，单锁文件 + 进程内互斥，
 //!   一次事务的 load→mutate→save，以及备份与保留份数。
 //! 不管：某条授权该不该建立或撤销（journal.rs / release.rs 按归属与活性决定），也不管 ACL 怎么读写（acl.rs）。
-//! 联动：windows/mod.rs 的 prepare_fence 与守门进程都经 lock_ledger 拿事务；内存视图 Ledger/LedgerEntry 在 confine/ledger.rs。
+//! 联动：windows.rs 的 prepare_fence 与守门进程都经 lock_ledger 拿事务；内存视图 Ledger/LedgerEntry 在 confine/ledger.rs。
 
 use super::super::super::Owner;
 use std::path::{Path, PathBuf};

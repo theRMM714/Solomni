@@ -131,6 +131,7 @@
 | 多 agent 流程细则 | `docs/workflow/multi-agent.md` |
 | 用户启动文档审计 / 治理 | `docs/workflow/docs-audit.md` |
 | 文档分层 / 术语 / 引用 | `docs/conventions.md` |
+| Rust 源码布局 / 格式 / 静态检查 / unsafe / 依赖 | `docs/rust-dev.md` |
 | 全部单元与横向细则 | `docs/README.md` |
 
 新增根 `*.md` 必须进本表；临时工作清单按 `tests/gates/docs/root-router.js` 的白名单处理。

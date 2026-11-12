@@ -445,7 +445,7 @@ pub(crate) fn revoke_one(sid: PSID, path: &Path, recursive: bool) -> Result<(), 
     Ok(())
 }
 
-/// 目的：命令里解释器的安装目录：共用实现在 confine/mod.rs（Windows 的目录 ACL 与 macOS 的 seatbelt 同一套语义）。
+/// 目的：命令里解释器的安装目录：共用实现在 confine.rs（Windows 的目录 ACL 与 macOS 的 seatbelt 同一套语义）。
 pub(crate) fn interpreter_dirs(command: &str) -> Vec<PathBuf> {
     super::super::interpreter_dirs(command)
 }

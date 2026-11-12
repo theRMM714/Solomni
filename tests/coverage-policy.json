@@ -10,7 +10,7 @@
       "reason": "守门进程入口：真实安装围栏在子进程里完成，进程内调用会永久限制测试进程；由三平台真机探针在独立进程验收"
     },
     {
-      "file": "src/kernel/detail/confine/mod.rs",
+      "file": "src/kernel/detail/confine.rs",
       "from": 75,
       "to": 76,
       "reason": "分派到平台后端：Linux Landlock 与 macOS seatbelt 安装不可逆，进程内测试无法调用；由平台探针在子进程验收"
@@ -47,7 +47,7 @@
         "src/kernel/detail/confine/ledger.rs",
         "src/kernel/detail/confine/prep.rs",
         "src/kernel/detail/confine/job.rs",
-        "src/kernel/detail/confine/mod.rs",
+        "src/kernel/detail/confine.rs",
         "src/kernel/detail/confine/texts.rs"
       ]
     }

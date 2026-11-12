@@ -1,7 +1,7 @@
 //! 目的：模型目录适配器——OpenAI 兼容 GET {base_url}/models（实现 ports::ModelCatalog）。
 //! 管：发现模型列表；端点补全与回落；响应形状校验；错误脱敏。
 //! 不管：模型登记与持久化（在 registry）；端点候选逻辑（在 endpoint）。
-//! 联动：实现 ports::ModelCatalog；由 detail/mod.rs 重导出 HttpModelCatalog 供组合根装配；端点规则见 detail/endpoint.rs。
+//! 联动：实现 ports::ModelCatalog；由 detail.rs 重导出 HttpModelCatalog 供组合根装配；端点规则见 detail/endpoint.rs。
 
 use super::endpoint::{memo_get, memo_set, models_candidates, resolve_candidates, Attempt, Memo};
 use super::http_agent::{finish_request, redact};

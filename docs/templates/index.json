@@ -29,7 +29,8 @@
         "docs/collab/task-chain.md",
         "docs/session/session-model.md",
         "docs/tools/tools-and-roles.md",
-        "docs/workflow/docs-audit.md"
+        "docs/workflow/docs-audit.md",
+        "docs/rust-dev.md"
       ]
     },
     "reference": {

@@ -1,7 +1,7 @@
 //! 目的：按台账收尾——把这次执行写下的授权撤掉，把根内文件的安全描述符还原。
 //! 管：逐条精确撤权、整份台账的收尾、按会话租约释放与按条释放。
 //! 不管：孤儿 profile 与残留 ACE 的清扫（sweep.rs），也不管按条人工处置的清单（catalog.rs）。
-//! 联动：撤销经 acl.rs 的 revoke_one / restore_sd；盘上格式与锁在 store.rs；入口是 --fence-clean 与 confine/mod.rs 的 release_by_lease。
+//! 联动：撤销经 acl.rs 的 revoke_one / restore_sd；盘上格式与锁在 store.rs；入口是 --fence-clean 与 confine.rs 的 release_by_lease。
 
 use super::super::*;
 use crate::kernel::api::FenceSpec;

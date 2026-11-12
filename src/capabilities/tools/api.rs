@@ -1,7 +1,7 @@
 //! 目的：工具能力的入站能力面——其它能力与呈现层只准用这里（不许碰 `domain` / `ports`）。
 //! 管：`Tools`（按角色发放工具面、拿总表、保留名）与 `ToolExec`（执行外部工具 / shell / 内置工具、释放围栏授权）两个 trait，并重导出领域共享类型。
 //! 不管：实现与机制（在 `service/` / `detail/`）；端口定义（在 `ports.rs`）。
-//! 联动：实现见 `service/mod.rs`；`conductor` 等消费方只持 `Arc<dyn Tools>` / `Arc<dyn ToolExec>`。
+//! 联动：实现见 `service.rs`；`conductor` 等消费方只持 `Arc<dyn Tools>` / `Arc<dyn ToolExec>`。
 
 pub use crate::capabilities::tools::domain::patch::{EditFault, Fault};
 pub use crate::capabilities::tools::domain::roles::{action_audit, RoleTable, SystemTools};

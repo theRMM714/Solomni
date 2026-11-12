@@ -9,7 +9,7 @@
 - 管：根共用机制——产品根规范化（`src/entry/root.rs`）与启动期基础工具链 PATH（`src/entry/toolchains.rs`）。
 - 管：组合根（`src/main.rs`）——跑启动对账、把入站能力面交给 CLI 或 Web；适配器与能力面统一在 `src/entry/assembly.rs` 装配。
 - 管：机器可读探针与隐藏模式（`src/entry/probes/`）。
-- 管：两个守门模式（`src/guard/mod.rs`）——围栏 `--fence-run`、长驻子进程 `--proc-watchdog`，以及围栏台账的按条处置。
+- 管：两个守门模式（`src/guard.rs`）——围栏 `--fence-run`、长驻子进程 `--proc-watchdog`，以及围栏台账的按条处置。
 - 不管：没有业务语义；依赖补齐的语义在 `provision` 能力，`--provision` 只是它的入口。
 - 不管：任何能力都不许依赖本单元（`run-tests.js` 的依赖方向门禁）。
 
