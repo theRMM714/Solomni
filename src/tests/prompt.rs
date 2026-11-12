@@ -1,5 +1,8 @@
-//! 提示词能力测试：册子装载 / 渲染 / `@` 改写。
-//! 归属判据：钉的是**本能力的不变式**；顺手经过别处只是路径，不是归属。
+//! 目的：钉提示词册装载、渲染与 @ 改写的契约。
+//! 管：渲染占位替换与拒绝缺失、册按环境分发、yaml 装载、单花括号保留、ref 改写前缀/说话人/标点、会话路径方言、@ 根、补丁指南示例、用户 @ 引用。
+//! 不管：讨论发言与协作状态（collab）。
+//! 联动：src/capabilities/prompt/、session 路径方言。
+
 use super::builders::*;
 use super::prelude::*;
 
@@ -90,7 +93,6 @@ pub(crate) fn prompt_render_keeps_single_braces() {
 }
 
 // ---------- 登记处解析链与密钥治理 ----------
-
 #[test]
 pub(crate) fn refs_rewrite_covers_prefixes_speakers_and_punctuation() {
     use crate::capabilities::prompt::api::{rewrite, RefRoots};

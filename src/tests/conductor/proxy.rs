@@ -1,5 +1,8 @@
-//! 核心代理工具（core_proxy）的契约测试：声明、授权、幂等、部分成功与游标。
-//! 动作经 conductor::ports::ProxyHost：单元测试用 FakeProxyHost，生产宿主是 service/proxy.rs 的 ProxyBridge。
+//! 目的：钉 core_proxy 六工具的声明、授权、幂等、部分成功与游标契约。
+//! 管：六工具声明与授权、无授权不达宿主、授权范围过期与边界、create_session 幂等、send 部分成功、observe 无正文、分页、control 幂等、声明形态、真实 bridge。
+//! 不管：HTTP 路由（routes.rs）与讨论发言规则。
+//! 联动：conductor::ports::ProxyHost、FakeProxyHost、service/proxy.rs。
+
 use super::super::prelude::*;
 
 use crate::capabilities::conductor::domain::proxy as d;
@@ -431,7 +434,7 @@ pub(crate) fn declaration_shape_is_enforced_before_semantics() {
     );
 }
 /// 目的：真实宿主（队列桥）：catalog 读登记处、observe 不回正文、messages 倒查到真实转录；
-/// 目标不存在 / 未实现的一律如实报错，不假装成功。
+///   目标不存在 / 未实现的一律如实报错，不假装成功。
 #[test]
 pub(crate) fn the_real_bridge_reads_catalog_and_session_messages() {
     use crate::capabilities::conductor::ports::ProxyHost;
@@ -636,7 +639,7 @@ pub(crate) fn the_proxy_handler_owns_and_runs_proxy_tools() {
     assert!(out.output.contains("agents"), "{}", out.output);
 }
 /// 目的：代理会话跑一轮真实生成：模型请求 `catalog_agents` → 经 handler / 队列桥在核心线程执行 →
-/// 工具行落进它自己的转录。这条钉住“代理会话就是普通成员会话 + 派发去特例”的整条链。
+///   工具行落进它自己的转录。这条钉住“代理会话就是普通成员会话 + 派发去特例”的整条链。
 #[test]
 pub(crate) fn the_proxy_session_runs_a_turn_through_the_generic_loop() {
     use crate::capabilities::conductor::api::Output;
@@ -971,7 +974,7 @@ pub(crate) fn the_real_bridge_creates_a_multi_agent_child_work() {
 }
 
 /// 目的：代理会话的身份是**角色提示词**（core_proxy）+ 环境 + 调用约定，不是普通 agent 身份；
-/// 反过来，普通 agent 会话也不会沾上代理角色的话。
+///   反过来，普通 agent 会话也不会沾上代理角色的话。
 #[test]
 pub(crate) fn the_proxy_identity_is_the_role_prompt() {
     use crate::capabilities::modules::api::ModuleManifest;
@@ -1044,7 +1047,7 @@ pub(crate) fn the_proxy_identity_is_the_role_prompt() {
 }
 
 /// 目的：用户入口的第三人形态：`create_work(WorkMode::Proxy)` 建出**代理会话**——
-/// 没有名单、带全权委托、运行态正常；名单 / 需求与形态不符时整条拒绝、不留半成品。
+///   没有名单、带全权委托、运行态正常；名单 / 需求与形态不符时整条拒绝、不留半成品。
 #[test]
 pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
     let (handle, ops) = super::super::ops_with(vec![], vec![]);

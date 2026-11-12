@@ -1,6 +1,7 @@
-//! CLI 前端（`cli`）的测试：**传输侧**的输入解析与点名包装。
-//! **业务规则不在这里**：点名归 `registry`、命名与「生成中禁改」归 `session`/`conductor`、
-//! 组合语义归 `conductor::create_session`、动作分发归 `ActionOps::act`——它们的测试在 `tests/api.rs`。
+//! 目的：钉 CLI 前端（传输侧）的输入解析与点名包装契约。
+//! 管：动作 id 两种写法、会话创建走动作表、逗号与空白分名、空登记处点名引导、等待清单逐行、EOF 停卡。
+//! 不管：业务规则：点名归 registry、命名与生成中禁改归 session/conductor、组合语义与动作分发。
+//! 联动：`ActionOps::act`、`conductor::create_session`、src/tests/api/ 的对应测试。
 
 use super::doubles::module_of;
 use super::ops_with;

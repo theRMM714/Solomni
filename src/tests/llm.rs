@@ -1,5 +1,8 @@
-//! llm 能力测试：信封解析与修复、协议形态、模型目录与端点回落。
-//! 归属判据：钉的是**本能力的不变式**；顺手经过别处只是路径，不是归属。
+//! 目的：钉 llm 能力的信封解析/修复与模型目录、端点回落。
+//! 管：干净/降级/包裹 JSON 解析、文本可缺、配平提取、坏信封修复与分类、工具解析、流式在信封括号停止、抑制分片、目录与端点候选。
+//! 不管：前端路由（routes.rs）。
+//! 联动：src/capabilities/llm/。
+
 use super::builders::*;
 use super::prelude::*;
 
@@ -51,7 +54,6 @@ pub(crate) fn envelope_text_may_be_omitted() {
 }
 
 // ---------- 提示词渲染层 ----------
-
 #[test]
 pub(crate) fn extract_balanced_object() {
     // 核心操作改走工具调用之后，正文 JSON 的提取只剩"信封"这一处用途（对象形态）。
@@ -61,7 +63,6 @@ pub(crate) fn extract_balanced_object() {
 }
 
 // ---------- 工具执行器 ----------
-
 #[test]
 pub(crate) fn malformed_tool_envelope_becomes_a_failed_tool_line() {
     // 真实案例：模型想调 write，但信封 JSON 非法（结尾多个 ]）——
@@ -821,8 +822,8 @@ pub(crate) fn a_freeform_envelope_is_never_repaired() {
     assert_eq!(io.get(&["w", "m0", "out.md"]), None, "绝不落盘");
 }
 
-/// 手写信封通道的**批量调用**：一封 calls 数组里的多个调用各成一条工具行，结果按原序回填，
-/// 且与原生通道一样「重建出来必须与实时逐条一致」（手写信封不涉及 role=tool）。
+/// 目的：手写信封通道的**批量调用**：一封 calls 数组里的多个调用各成一条工具行，结果按原序回填，
+///   且与原生通道一样「重建出来必须与实时逐条一致」（手写信封不涉及 role=tool）。
 #[test]
 pub(crate) fn envelope_multi_call_runs_every_call_and_rebuilds_identically() {
     let hist = Arc::new(InMemoryHistory::new());
@@ -919,7 +920,7 @@ pub(crate) fn envelope_multi_call_runs_every_call_and_rebuilds_identically() {
     );
 }
 
-/// 两种信封形态**互斥**：一封里既有 name 又有 calls = 字段不合法 → 记一条失败工具行、一个工具都不执行。
+/// 目的：两种信封形态**互斥**：一封里既有 name 又有 calls = 字段不合法 → 记一条失败工具行、一个工具都不执行。
 #[test]
 pub(crate) fn envelope_rejects_mixing_the_single_and_calls_shapes() {
     let io = Arc::new(InMemorySysIo::new());
@@ -956,5 +957,3 @@ pub(crate) fn envelope_rejects_mixing_the_single_and_calls_shapes() {
         "一个工具都不执行（绝不落盘）"
     );
 }
-
-// ---------- 原生多调用的回放一致性（实时 vs 重建） ----------

@@ -1,9 +1,13 @@
-//! 工具面发放、原生通道与并发：本回合工具面、声明式并发与写入屏障
+//! 目的：钉本回合工具面、原生通道与并发（含写入屏障）的契约。
+//! 管：模式变更无需重建会话、仅本回合工具、原生多结构化调用、拒绝手写信封、并行读保序、写调用屏障、模块工具声明式并发、租约排他与并行读。
+//! 不管：内置工具参数契约（run_loop.rs）。
+//! 联动：src/capabilities/tools/、llm 信封。
+
 use super::super::builders::*;
 use super::super::prelude::*;
-/// **改形态不必重建会话**：会话里存的是**参数**（`SessionParams`），身份块每次调用现渲染。
-/// 判据：同一个会话（没被重建）在建好之后，把登记处里的形态探测成 native——
-/// 下一回合的请求已经换了一套调用约定，而对话（此前说过的话）一条没丢。
+/// 目的：**改形态不必重建会话**：会话里存的是**参数**（`SessionParams`），身份块每次调用现渲染。
+///   判据：同一个会话（没被重建）在建好之后，把登记处里的形态探测成 native——
+///   下一回合的请求已经换了一套调用约定，而对话（此前说过的话）一条没丢。
 #[test]
 pub(crate) fn tool_mode_change_needs_no_session_rebuild() {
     let hist = Arc::new(InMemoryHistory::new());
@@ -57,8 +61,8 @@ pub(crate) fn tool_mode_change_needs_no_session_rebuild() {
     );
 }
 
-/// **总表不进提示词**：模型只看到"这一回合能用的工具"那一块；没拿到的不出现——
-/// 提示词块与原生声明槽用的是**同一份 allowed**（两处一起收口，不然就是列了必然被拒的）。
+/// 目的：**总表不进提示词**：模型只看到"这一回合能用的工具"那一块；没拿到的不出现——
+///   提示词块与原生声明槽用的是**同一份 allowed**（两处一起收口，不然就是列了必然被拒的）。
 #[test]
 pub(crate) fn only_this_turns_tools_are_advertised() {
     let io = Arc::new(InMemorySysIo::new());
@@ -260,8 +264,8 @@ pub(crate) fn native_mode_refuses_a_hand_written_envelope() {
     assert_eq!(io.get(&["demo", "work", "out.md"]), None, "绝不落盘");
 }
 
-/// 声明可并发的读取**真的并发**，且结果一律按**原始调用顺序**回填。
-/// 第一个文件故意慢：它会**后完成**，但结果仍必须排在前面（上下文里不许乱序）。
+/// 目的：声明可并发的读取**真的并发**，且结果一律按**原始调用顺序**回填。
+///   第一个文件故意慢：它会**后完成**，但结果仍必须排在前面（上下文里不许乱序）。
 #[test]
 pub(crate) fn declared_parallel_reads_overlap_and_results_keep_the_call_order() {
     use crate::capabilities::llm::api::ToolCall;
@@ -307,7 +311,7 @@ pub(crate) fn declared_parallel_reads_overlap_and_results_keep_the_call_order() 
     );
 }
 
-/// 写入类独占执行：它是并发批次之间的**屏障**，并且能看到并发批次**合并后**的账本。
+/// 目的：写入类独占执行：它是并发批次之间的**屏障**，并且能看到并发批次**合并后**的账本。
 #[test]
 pub(crate) fn a_writing_call_is_a_barrier_and_sees_the_merged_ledger() {
     use crate::capabilities::llm::api::ToolCall;
@@ -353,7 +357,7 @@ pub(crate) fn a_writing_call_is_a_barrier_and_sees_the_merged_ledger() {
     );
 }
 
-/// 模块工具的可并发性是**模块作者在 module.yaml 里的声明**：声明了才并发，没声明一律串行。
+/// 目的：模块工具的可并发性是**模块作者在 module.yaml 里的声明**：声明了才并发，没声明一律串行。
 #[test]
 pub(crate) fn module_tools_are_concurrent_only_when_declared() {
     use crate::capabilities::llm::api::ToolCall;
@@ -551,8 +555,8 @@ pub(crate) fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
         notes(&e3)
     );
 }
-/// 共享区版本化的六个工具：executor / solo 发到，讨论席与核心角色不发；
-/// 声明在工具总表里（角色表的悬空引用由装配期 `SystemTools::problems()` 与 `src/tests/detail/` 锁死）。
+/// 目的：共享区版本化的六个工具：executor / solo 发到，讨论席与核心角色不发；
+///   声明在工具总表里（角色表的悬空引用由装配期 `SystemTools::problems()` 与 `src/tests/detail/` 锁死）。
 #[test]
 pub(crate) fn work_versioning_tools_are_granted_to_the_working_roles_only() {
     use crate::capabilities::tools::api::Tools;

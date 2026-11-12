@@ -1,4 +1,8 @@
-//! 讨论泵与发言规则：表态、退场、自裁、提醒与回合上限
+//! 目的：钉讨论泵与发言规则：表态、退场、自裁、提醒与回合上限。
+//! 管：成员先核实再发言、按角色表校验工具面、拿不到模块工具、逐轮定稿与回档同口径、无信封原文不算表态。
+//! 不管：协作状态派生/回档（state.rs）与端到端五阶段（flow.rs）。
+//! 联动：src/capabilities/collab/、docs/session/session-model.md、tests/doubles。
+
 use super::super::builders::*;
 use super::super::prelude::*;
 #[test]
@@ -101,7 +105,7 @@ pub(crate) fn discussion_round_cap_enforced() {
     assert!(d.round > MAX_ROUNDS);
 }
 
-/// 讨论回合能**先核实再发言**：只读工具真跑（核实行带工具视图），随后照常表态。
+/// 目的：讨论回合能**先核实再发言**：只读工具真跑（核实行带工具视图），随后照常表态。
 #[test]
 pub(crate) fn discussion_member_can_inspect_before_speaking() {
     let mut member = BTreeMap::new();
@@ -150,7 +154,7 @@ pub(crate) fn discussion_member_can_inspect_before_speaking() {
     );
 }
 
-/// 讨论回合**按角色表校验**：面里没有的内置工具（write）被如实拒绝，不当表态吸收。
+/// 目的：讨论回合**按角色表校验**：面里没有的内置工具（write）被如实拒绝，不当表态吸收。
 #[test]
 pub(crate) fn discussion_member_cannot_call_a_builtin_outside_its_role_face() {
     let mut member = BTreeMap::new();
@@ -188,7 +192,7 @@ pub(crate) fn discussion_member_cannot_call_a_builtin_outside_its_role_face() {
     );
 }
 
-/// 讨论回合**拿不到干活的手段**：模块工具被如实拒绝，且不当表态吸收。
+/// 目的：讨论回合**拿不到干活的手段**：模块工具被如实拒绝，且不当表态吸收。
 #[test]
 pub(crate) fn discussion_member_cannot_use_module_tools() {
     let mut member = BTreeMap::new();
@@ -225,9 +229,9 @@ pub(crate) fn discussion_member_cannot_use_module_tools() {
     );
 }
 
-/// 讨论席的一回合：**逐轮定稿**（核实行与发言行各是各的一条落档事件，不是攒到回合末一条），
-/// 并且**实时落的行与回档重建出的对话同口径**——重启后子会话的上下文不歪
-/// （回档按行截断历史，靠的就是这两边一致；见 docs/session/session-model.md 二之二、五）。
+/// 目的：讨论席的一回合：**逐轮定稿**（核实行与发言行各是各的一条落档事件，不是攒到回合末一条），
+///   并且**实时落的行与回档重建出的对话同口径**——重启后子会话的上下文不歪
+///   （回档按行截断历史，靠的就是这两边一致；见 docs/session/session-model.md 二之二、五）。
 #[test]
 pub(crate) fn discussion_member_turn_finalizes_by_round_and_rebuilds_the_same_dialogue() {
     let mut member = BTreeMap::new();
@@ -314,8 +318,8 @@ pub(crate) fn discussion_member_turn_finalizes_by_round_and_rebuilds_the_same_di
     );
 }
 
-/// **没写信封的原文不算表态**：不投影主会话；提醒到顶才留一行**系统消息**"未回应"。
-/// 判据是结构化的（system / degraded 字段），呈现层不靠匹配文案。
+/// 目的：**没写信封的原文不算表态**：不投影主会话；提醒到顶才留一行**系统消息**"未回应"。
+///   判据是结构化的（system / degraded 字段），呈现层不靠匹配文案。
 #[test]
 pub(crate) fn prose_without_an_envelope_is_not_a_statement() {
     let members = vec![Member::new(
@@ -377,5 +381,3 @@ pub(crate) fn prose_without_an_envelope_is_not_a_statement() {
         "非系统/非降级行不写这些字段"
     );
 }
-
-// ---------- 执行/验收 ----------

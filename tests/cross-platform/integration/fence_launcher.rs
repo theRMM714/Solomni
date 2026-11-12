@@ -1,4 +1,7 @@
-//! 守门进程协议与环境白名单（跨平台）：退出码如实回传、围栏装不上如实报错、超时连根杀掉整棵树。
+//! 目的：钉跨平台守门进程的退出码、围栏失败与超时杀树契约。
+//! 管：围栏失败如实报、退出码回传、超时杀整棵进程树、verify 三种判定。
+//! 不管：平台围栏机制本身（tests/<平台>/）。
+//! 联动：src/guard/、docs/testing/levels.md。
 
 use crate::probe::{
     bin, job_json, kill_like_runtime, python_command, run_launcher, scratch, spawn_fenced, wait,

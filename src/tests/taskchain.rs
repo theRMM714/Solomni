@@ -1,9 +1,12 @@
-//! **任务链**（纯领域业务）测试：纯数据与纯图算法。
-//! 归属判据：钉的是**这个业务的不变式**（阶段派生 / 就绪 / 验收判定）；顺手经过别处只是路径，不是归属。
+//! 目的：钉任务链的纯数据与纯图算法不变式。
+//! 管：阶段沿依赖图铺开、id 由阶段派生、环/坏引用拒绝、完成需全部节点结算。
+//! 不管：派发与执行（collab）。
+//! 联动：src/capabilities/taskchain/。
+
 use super::builders::*;
 
-/// 串：链式依赖按序就绪——前一环没完成，后一环不开始。
-/// **阶段**由依赖图派生（最长路径分层）：串行链一个节点一阶段；并 + 混合的两条并行同阶段、汇合点下一阶段。
+/// 目的：串：链式依赖按序就绪——前一环没完成，后一环不开始。
+///   **阶段**由依赖图派生（最长路径分层）：串行链一个节点一阶段；并 + 混合的两条并行同阶段、汇合点下一阶段。
 #[test]
 pub(crate) fn chain_stages_lay_out_along_the_dependency_graph() {
     let serial = crate::capabilities::taskchain::api::TaskChain {
@@ -46,7 +49,7 @@ pub(crate) fn chain_stages_lay_out_along_the_dependency_graph() {
     assert_eq!(parallel.stage_ready(2).len(), 1, "阶段二才轮到 c");
 }
 
-/// 序号**由核心按阶段派生**：n1-1 / n1-2（同阶段并行）→ n2-1（下一阶段），依赖整体重映射。
+/// 目的：序号**由核心按阶段派生**：n1-1 / n1-2（同阶段并行）→ n2-1（下一阶段），依赖整体重映射。
 #[test]
 pub(crate) fn chain_ids_are_derived_from_stages() {
     let mut chain = crate::capabilities::taskchain::api::TaskChain {
@@ -64,7 +67,7 @@ pub(crate) fn chain_ids_are_derived_from_stages() {
     assert!(!chain.stage_passed(1), "还没验收就不算通过");
 }
 
-/// 装配期自洽：环、悬空依赖、重复 id、空目标、未知负责人——逐条如实列出。
+/// 目的：装配期自洽：环、悬空依赖、重复 id、空目标、未知负责人——逐条如实列出。
 #[test]
 pub(crate) fn chain_problems_reject_cycles_and_bad_refs() {
     use crate::capabilities::taskchain::api::TaskChain;
@@ -100,7 +103,7 @@ pub(crate) fn chain_problems_reject_cycles_and_bad_refs() {
     assert!(!TaskChain::default().problems(&roster()).is_empty());
 }
 
-/// 结束判定：链非空、且每个节点都落定（Done / Failed）——空链不算结束。
+/// 目的：结束判定：链非空、且每个节点都落定（Done / Failed）——空链不算结束。
 #[test]
 pub(crate) fn chain_finished_needs_every_node_settled() {
     use crate::capabilities::taskchain::api::{NodeStatus, TaskChain};

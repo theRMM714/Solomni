@@ -1,7 +1,7 @@
-//! 端口替身契约（docs/testing/doubles.md 的逐端口验收）。
-//! 每个端口都验同一组语义：成功、失败传播、空/边界、交互记录、重复调用；
-//! 真实适配器的对应边界在 adapters.rs，进程与 HTTP 的真实路径在 tests/cross-platform/。
-//! 替身统一复用 super::doubles 的 `InMemory*` / `Fake*` / `Recording*`——契约测试不另造一份。
+//! 目的：逐端口验收 docs/testing/doubles.md 的替身语义。
+//! 管：成功、失败传播、空/边界、交互记录、重复调用；Chat/ChatGateway/Settings/ModelCatalog/ModuleSource/Package/Workspace/WorkStore 等替身。
+//! 不管：真实适配器（adapters.rs）与进程/HTTP 真实路径。
+//! 联动：docs/testing/doubles.md、tests/doubles、adapters.rs。
 
 use super::builders::{RecordingRunner, SilentRunner};
 use super::doubles::{
@@ -76,7 +76,6 @@ fn meta(name: &str) -> SessionMeta {
 }
 
 // ---------- Chat / ChatGateway ----------
-
 /// SharedScript 是**明确的非流式替身**：即便 stream = true 也不回调（矩阵里已如实登记）。
 /// 它验的是端口的最小语义：按序回放、末条重复兜底、空队列 = 空串。
 #[test]
@@ -161,7 +160,6 @@ fn chat_gateway_double_scripts_member_and_core_channels_separately() {
 }
 
 // ---------- SettingsStore ----------
-
 #[test]
 fn settings_store_double_roundtrips_and_propagates_failure() {
     let store = InMemorySettings::new();
@@ -188,7 +186,6 @@ fn settings_store_double_roundtrips_and_propagates_failure() {
 }
 
 // ---------- ModelCatalog ----------
-
 #[test]
 fn model_catalog_double_lists_records_and_propagates_failure() {
     let c = FakeCatalog::new(vec!["m1".to_string(), "m2".to_string()]);
@@ -227,7 +224,6 @@ fn model_catalog_double_lists_records_and_propagates_failure() {
 }
 
 // ---------- ModuleSource ----------
-
 #[test]
 fn module_source_double_scans_a_pure_function_of_the_given_list() {
     let src = VecSource(vec![module_of("a"), module_of("b")]);
@@ -246,7 +242,6 @@ fn module_source_double_scans_a_pure_function_of_the_given_list() {
 }
 
 // ---------- PackageSource ----------
-
 #[test]
 fn package_source_double_builds_a_library_and_reports_its_dir() {
     let empty = InMemoryPackages::empty();
@@ -264,7 +259,6 @@ fn package_source_double_builds_a_library_and_reports_its_dir() {
 }
 
 // ---------- Workspace ----------
-
 #[test]
 fn workspace_double_prepares_writes_lists_and_propagates_failure() {
     let ws = InMemoryWorkspace::new();
@@ -295,7 +289,6 @@ fn workspace_double_prepares_writes_lists_and_propagates_failure() {
 }
 
 // ---------- WorkStore ----------
-
 /// 版本库端口替身的契约：文件原语、空仓库、对象/提交/基线往返、失败传播。
 #[test]
 fn work_store_double_round_trips_files_commits_index_and_objects() {
@@ -461,7 +454,6 @@ fn work_store_double_streams_assets_and_rejects_oversize_or_mismatch() {
 }
 
 // ---------- SysIo ----------
-
 #[test]
 fn sys_io_double_reads_writes_and_propagates_failure() {
     let io = InMemorySysIo::new();
@@ -491,7 +483,6 @@ fn sys_io_double_reads_writes_and_propagates_failure() {
 }
 
 // ---------- HistoryStore ----------
-
 #[test]
 fn history_store_double_roundtrips_lists_deletes_and_propagates_failure() {
     let h = InMemoryHistory::new();
@@ -535,7 +526,6 @@ fn history_store_double_roundtrips_lists_deletes_and_propagates_failure() {
 }
 
 // ---------- PromptSource ----------
-
 #[test]
 fn prompt_source_double_loads_the_builtin_book_and_propagates_failure() {
     let p = TestPrompts::ok().load().expect("内置提示词册必须合法");
@@ -555,7 +545,6 @@ fn prompt_source_double_loads_the_builtin_book_and_propagates_failure() {
 }
 
 // ---------- ProcessRunner ----------
-
 #[test]
 fn tool_runner_double_records_the_call_site_and_reports_failure_honestly() {
     let fence = spec();
@@ -595,7 +584,6 @@ fn silent_runner_double_fails_loudly_on_any_call() {
 }
 
 // ---------- FenceHost ----------
-
 #[test]
 fn fence_host_doubles_release_record_and_propagate_failure() {
     let s = spec();
@@ -620,7 +608,6 @@ fn fence_host_doubles_release_record_and_propagate_failure() {
 }
 
 // ---------- Log ----------
-
 #[test]
 fn noop_log_is_silent_and_shareable_across_threads() {
     NoopLog.info("at", "m");
@@ -634,7 +621,6 @@ fn noop_log_is_silent_and_shareable_across_threads() {
 }
 
 // ---------- HostProbe ----------
-
 /// 真实适配器：路径事实按真实文件系统回答（scratch 里真建一个目录与一个文件）。
 #[test]
 fn host_probe_adapter_reports_real_path_facts_and_absent_exes() {

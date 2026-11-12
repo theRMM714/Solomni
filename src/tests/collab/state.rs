@@ -1,4 +1,8 @@
-//! 协作状态派生、回档与改需求、核心操作的外送
+//! 目的：钉协作状态派生、回档、改需求与核心操作外送。
+//! 管：derive 与 withdraw、rewind 从转录重建、update_task 不回溯、核心操作流式上屏、讨论调用取全局流式与预算、失败中断、链随 plan_review 派生、原生工具名映射、同意粘性。
+//! 不管：讨论发言规则（discussion.rs）。
+//! 联动：src/capabilities/collab/、session 转录与回档、tests/doubles。
+
 use super::super::builders::*;
 use super::super::prelude::*;
 #[test]
@@ -105,9 +109,8 @@ pub(crate) fn collab_update_task_rewrites_the_requirement_without_rewinding() {
 
 #[test]
 pub(crate) fn core_operation_streams_its_text_to_the_facts_outlet() {
-    // 核心操作的正文也**逐片上屏**（与成员、单 agent 同一条规则，见 session::api::core_operation）：
-    // 替身只发一片正文，出口必须收到 start（用于重置本轮流）；正文以 { 开头 = 信封，整片被抑制，
-    // 因此**不该再推一条空 text delta**（空片段不刷事件流）。
+    // 核心操作正文也**逐片上屏**（与成员、单 agent 同规则，见 session::api::core_operation）：替身只发一片正文，
+    // 出口必须收到 start（重置本轮流）；正文以 { 开头 = 信封、整片被抑制，因此**不该再推空 text delta**。
     let raw = "{\"type\":\"tool\",\"name\":\"slate\",\"args\":{\"picks\":[{\"name\":\"甲\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"}]}}";
     let core = core_with_gateway(
         vec![module_of("a")],
@@ -137,7 +140,7 @@ pub(crate) fn core_operation_streams_its_text_to_the_facts_outlet() {
     );
 }
 
-/// 讨论的调用参数**必须来自全局设置**（写死非流式会让协作卡住）。
+/// 目的：讨论的调用参数**必须来自全局设置**（写死非流式会让协作卡住）。
 #[test]
 pub(crate) fn discussion_calls_carry_the_global_streaming_and_budget() {
     let llm = crate::capabilities::llm::api::LlmOpts {
@@ -162,7 +165,7 @@ pub(crate) fn discussion_calls_carry_the_global_streaming_and_budget() {
     assert_eq!(got[1], (true, 123), "轮次调用同样：{:?}", got);
 }
 
-/// 调用失败：如实中断，**绝不把失败当发言吸收**（错误文本一旦进转录，"轮到谁"就歪了）。
+/// 目的：调用失败：如实中断，**绝不把失败当发言吸收**（错误文本一旦进转录，"轮到谁"就歪了）。
 #[test]
 pub(crate) fn discussion_call_failure_interrupts_without_absorbing_a_line() {
     let (mut d, _seen) = opts_discussion(
@@ -201,7 +204,7 @@ pub(crate) fn discussion_call_failure_interrupts_without_absorbing_a_line() {
     assert!(!d.closed, "中断后讨论保持可继续（用户点「继续」重试）");
 }
 
-/// 链随 plan_review 事件派生：按转录重建时**不重新整理**（省一次模型调用）。
+/// 目的：链随 plan_review 事件派生：按转录重建时**不重新整理**（省一次模型调用）。
 #[test]
 pub(crate) fn collab_state_derives_the_task_chain_from_plan_review() {
     let events = vec![
@@ -223,8 +226,7 @@ pub(crate) fn collab_state_derives_the_task_chain_from_plan_review() {
 }
 
 // ---------- 任务链（依赖图） ----------
-
-/// 原生通道：供应商的结构化槽位 → 讨论动词；不认识的工具名 = 不认识（调用点据此**如实拒绝**）。
+/// 目的：原生通道：供应商的结构化槽位 → 讨论动词；不认识的工具名 = 不认识（调用点据此**如实拒绝**）。
 #[test]
 pub(crate) fn native_tool_names_map_to_discussion_verbs() {
     use crate::capabilities::collab::service::round::{arg_text, verb_of};
@@ -242,7 +244,7 @@ pub(crate) fn native_tool_names_map_to_discussion_verbs() {
     assert_eq!(arg_text("不是 JSON"), "");
 }
 
-/// 同意是**粘住**的：发过 agree 的人不再被追问（每轮重置等于每轮把所有人问一遍）。
+/// 目的：同意是**粘住**的：发过 agree 的人不再被追问（每轮重置等于每轮把所有人问一遍）。
 #[test]
 pub(crate) fn agreement_is_sticky_so_agreed_members_are_not_asked_again() {
     let mut d = scripted_discussion(

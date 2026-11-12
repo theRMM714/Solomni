@@ -1,6 +1,7 @@
-//! AppContainer 探针：容器真起来了、允许范围之外读不到也写不进，`net` 决定是否授 internetClient（断网/放行）。
-//! 这些断言不需要写目录 ACL（ACL 授权由产品在真实会话里做），但要**建一个 AppContainer profile**——
-//! 那是改本机状态的动作，所以默认不跑：必须显式开启（node run-tests.js --fence-live 会把它传进来）。
+//! 目的：AppContainer 探针：容器真起来、范围外读不到写不进、net 决定是否授 internetClient。
+//! 管：容器起与 stdio 直通、根外读写拒、共享区不可达、net 开关、loopback 不开、真实路径 skip、verify 三态。
+//! 不管：目录 ACL 授权（产品做）；默认不跑，需 --fence-live。
+//! 联动：src/guard/、node run-tests.js --fence-live。
 
 use crate::probe::{
     env_blocks_container, job_json, job_json_net, run_launcher, runtime_env, scratch,

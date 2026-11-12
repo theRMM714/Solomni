@@ -1,4 +1,8 @@
-//! 整理、审查关卡、节点验收与返工：清单校验与重派
+//! 目的：钉整理、审查关卡、节点验收与返工的清单校验契约。
+//! 管：过审按就绪节点派子会话、同 agent 串行、返工 id 校验、阶段验收重填、总验收指名返工、失败暂停后继续、计划审批暂停。
+//! 不管：讨论泵（discussion.rs）与状态派生（state.rs）。
+//! 联动：src/capabilities/collab/、taskchain、docs/collab/task-chain.md、tests/doubles。
+
 use super::super::builders::*;
 use super::super::prelude::*;
 #[test]
@@ -84,7 +88,6 @@ pub(crate) fn review_parse_failure_is_conservative_fail() {
 }
 
 // ---------- Conductor 门面：会话中心（内存组合根） ----------
-
 #[test]
 pub(crate) fn mode_vocabulary_is_single_or_collab_only() {
     // web 与 conductor 的形态词汇只有 single / collab / proxy；其它一律不认。
@@ -143,7 +146,7 @@ pub(crate) fn mode_vocabulary_is_single_or_collab_only() {
     assert!(err.contains("未知会话形态"), "{}", err);
 }
 
-/// 方案过审后：就绪节点各建一个**子会话**（普通单 agent 会话，沙箱锚在父会话上）。
+/// 目的：方案过审后：就绪节点各建一个**子会话**（普通单 agent 会话，沙箱锚在父会话上）。
 #[test]
 pub(crate) fn approved_plan_spawns_a_sub_session_per_ready_node() {
     let mut member = BTreeMap::new();
@@ -211,7 +214,7 @@ pub(crate) fn approved_plan_spawns_a_sub_session_per_ready_node() {
     assert_eq!(cmeta.agents[0].name, "a");
 }
 
-/// 同一个 agent 的多个节点**串行**（一个会话一次只能跑一轮）；不同 agent 照旧并发。
+/// 目的：同一个 agent 的多个节点**串行**（一个会话一次只能跑一轮）；不同 agent 照旧并发。
 #[test]
 pub(crate) fn same_agent_nodes_serialize_but_different_agents_run_together() {
     let mut member = BTreeMap::new();
@@ -258,8 +261,8 @@ pub(crate) fn same_agent_nodes_serialize_but_different_agents_run_together() {
     );
 }
 
-/// 返工定向的**字段契约**：fail 必须指名节点 id（核心只把那些节点退回待办重派）；
-/// 表里没有的 id / 漏填 = 这次判定用不了 → 核心据此要求重填，不静默丢掉一条判定。
+/// 目的：返工定向的**字段契约**：fail 必须指名节点 id（核心只把那些节点退回待办重派）；
+///   表里没有的 id / 漏填 = 这次判定用不了 → 核心据此要求重填，不静默丢掉一条判定。
 #[test]
 pub(crate) fn checklist_rework_is_a_validated_node_id() {
     let known = vec!["n1-1".to_string(), "n2-1".to_string()];
@@ -294,7 +297,7 @@ pub(crate) fn checklist_rework_is_a_validated_node_id() {
     assert!(exec.all_pass());
 }
 
-/// 阶段验收的 id 填错**不改系统状态**：核心被要求重填，重填对了才照常推进（不设次数上限）。
+/// 目的：阶段验收的 id 填错**不改系统状态**：核心被要求重填，重填对了才照常推进（不设次数上限）。
 #[test]
 pub(crate) fn stage_review_refills_until_the_ids_are_valid() {
     let mut member = BTreeMap::new();
@@ -337,8 +340,8 @@ pub(crate) fn stage_review_refills_until_the_ids_are_valid() {
     );
 }
 
-/// 总验收没过 → **核心指名要返工的节点**（rework 字段）：只退这些、暂停交用户；
-/// 点「继续」只重派它们，重验通过才交付（不整条链重来）。
+/// 目的：总验收没过 → **核心指名要返工的节点**（rework 字段）：只退这些、暂停交用户；
+///   点「继续」只重派它们，重验通过才交付（不整条链重来）。
 #[test]
 pub(crate) fn total_review_rework_names_the_nodes_and_only_they_are_redispatched() {
     let mut member = BTreeMap::new();
@@ -461,7 +464,7 @@ pub(crate) fn total_review_rework_names_the_nodes_and_only_they_are_redispatched
     );
 }
 
-/// 节点验收没过 → **暂停并交用户**；点「继续」重派该节点，验过才交付。
+/// 目的：节点验收没过 → **暂停并交用户**；点「继续」重派该节点，验过才交付。
 #[test]
 pub(crate) fn failed_node_acceptance_pauses_then_continue_redispatches() {
     let mut member = BTreeMap::new();
@@ -521,7 +524,7 @@ pub(crate) fn failed_node_acceptance_pauses_then_continue_redispatches() {
     );
 }
 
-/// 审查关卡：整理完**不自动开工**——停在待审，点「同意」才推进（见 docs/collab/task-chain.md）。
+/// 目的：审查关卡：整理完**不自动开工**——停在待审，点「同意」才推进（见 docs/collab/task-chain.md）。
 #[test]
 pub(crate) fn collab_pauses_for_plan_review_until_the_user_approves() {
     let mut member = BTreeMap::new();

@@ -1,5 +1,8 @@
-//! 核心（应用服务）测试：跨能力编排——核心推荐、核心操作载荷、会话中心与生成驱动。
-//! 归属判据：钉的是**应用服务的不变式**（会话中心与编排）；其余按能力落各自的文件。
+//! 目的：钉应用服务（会话中心与跨能力编排）的不变式。
+//! 管：VM 会话与外部 VM、双稳定挂载、工作区策略分层、绑定复核、宿主↔VM 编辑、删除保外部工作区、失败引导清理、思维链随工具行落档。
+//! 不管：各能力内部规则（按能力落各自文件）。
+//! 联动：src/capabilities/conductor/、tests/doubles、平台探针。
+
 mod ask_user;
 mod proxy;
 use super::builders::*;
@@ -464,8 +467,8 @@ pub(crate) fn vm_tool_paths_follow_provisioned_packages_without_restart() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// **工具轮的思维链随该轮的工具行落档**：流式结束后仍可查看（不再"流式完就丢"）。
-/// 行由**唯一那处**构造函数产出（单 agent 与讨论席共用），所以这里直接问它。
+/// 目的：**工具轮的思维链随该轮的工具行落档**：流式结束后仍可查看（不再"流式完就丢"）。
+///   行由**唯一那处**构造函数产出（单 agent 与讨论席共用），所以这里直接问它。
 #[test]
 pub(crate) fn tool_round_reasoning_lands_on_the_tool_line() {
     let tool = crate::capabilities::session::api::ToolCallView {
@@ -511,8 +514,8 @@ pub(crate) fn tool_round_reasoning_lands_on_the_tool_line() {
     );
 }
 
-/// 裁决的**建议由核心 AI 给**（随 plan 那一次调用一起产出，不额外花调用）：
-/// 它出现在推的 Decision 事件里（前端卡片上的"建议"就是它）。
+/// 目的：裁决的**建议由核心 AI 给**（随 plan 那一次调用一起产出，不额外花调用）：
+///   它出现在推的 Decision 事件里（前端卡片上的"建议"就是它）。
 #[test]
 pub(crate) fn plan_review_carries_the_core_advice() {
     let mut member = BTreeMap::new();
@@ -574,7 +577,7 @@ pub(crate) fn work_upload_conflict_and_safe_name() {
         .contains("路径分隔符"));
 }
 
-/// 回档主会话 → 各 agent 会话按**同一个回合 id** 同步截断（见 session-model.md 五）。
+/// 目的：回档主会话 → 各 agent 会话按**同一个回合 id** 同步截断（见 session-model.md 五）。
 #[test]
 pub(crate) fn rewinding_the_main_session_truncates_agent_sessions_by_turn() {
     // 从事件里读转录行（id / 文本 / 回合 id）。
@@ -908,8 +911,8 @@ pub(crate) fn tool_envelope_after_prose_runs_and_json_never_shows() {
     );
 }
 
-/// 一次回复里的**多个**原生调用：实时历史与重建历史必须逐条一致（含 tool_calls 与 tool_call_id）。
-/// 钉住这一条：实时与重建都要**每条调用各推一条回执**，不能实时只推第一条、重建却每条都推。
+/// 目的：一次回复里的**多个**原生调用：实时历史与重建历史必须逐条一致（含 tool_calls 与 tool_call_id）。
+///   钉住这一条：实时与重建都要**每条调用各推一条回执**，不能实时只推第一条、重建却每条都推。
 #[test]
 pub(crate) fn native_multi_call_rebuilds_identically_to_live() {
     use crate::capabilities::llm::api::ToolCall;
