@@ -1,7 +1,7 @@
 //! 目的：隐秘字段的契约用例——声明视图、置值 / 清值、按模块解析、脱敏。
 //! 管：声明与配置状态、值只落存储、解析只给本模块、脱敏替换已知值、未声明字段拒收、已有值读回。
 //! 不管：文件落盘的真实实现（在 detail/yaml_secrets.rs，随后续真实消费点补契约）；实际注入子进程。
-//! 联动：能力见 src/capabilities/secrets/；替身见 src/tests/doubles.rs。
+//! 联动：能力见 src/capabilities/secrets/；替身见 src/tests/doubles/。
 
 use crate::capabilities::modules::api::{Module, SecretDecl};
 use crate::capabilities::secrets::api::SecretOps;

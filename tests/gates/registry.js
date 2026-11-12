@@ -19,6 +19,7 @@ const S = {
   dependency: require("./structure/dependency.js"),
   capability: require("./structure/capability.js"),
   webLayers: require("./structure/webLayers.js"),
+  size: require("./structure/size.js"),
 };
 const D = {
   portals: require("./docs/portals.js"),
@@ -55,6 +56,18 @@ const GATES = [
     inputs: ["src/presentation/web/assets/**/*.js", "src/presentation/web/assets/index.html"],
     run: (root, ctx) => {
       const r = S.webLayers.webLayers(root);
+      ctx.stats.notes = (ctx.stats.notes || []).concat(r.notes);
+      return r.problems;
+    },
+  },
+  {
+    id: "structure/file-size",
+    lane: "structure",
+    step: "T0 结构审查",
+    kind: "text",
+    inputs: ["src/**/*.rs"],
+    run: (root, ctx) => {
+      const r = S.size.fileSize(root);
       ctx.stats.notes = (ctx.stats.notes || []).concat(r.notes);
       return r.problems;
     },
@@ -100,6 +113,7 @@ const LANE_ORDER = {
     "structure/deps-sha256",
     "structure/dependency",
     "structure/web-layers",
+    "structure/file-size",
     "structure/capability-internal",
   ],
 };

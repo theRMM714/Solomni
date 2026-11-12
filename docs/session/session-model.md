@@ -5,7 +5,7 @@
 
 ## 适用与判据
 - 会话形态、回合、派发、回档与压缩以本文为准（`docs/session/session-model.md`）。
-- 违反由 `src/tests/session.rs` 与 L4 端到端判定。
+- 违反由 `src/tests/session/` 与 L4 端到端判定。
 
 ## 一、形态
 - **执行席按 agent 一会话**（含同 agent 串行）、**讨论回合开工具循环**（能只读核实、拿不到模块工具）、**讨论由核心驱动**（泵只决定"该问谁"，成员回合在它自己的会话里跑，核实行与回合标记都落进那个会话；主会话只留"谁说了什么"）。
@@ -427,9 +427,9 @@ session/<工作名>/
 - 协作流程的产品视角：见 [PRODUCT.md](../../PRODUCT.md)
 
 ## 检查
-- 会话与回档 → `src/tests/session.rs`。
+- 会话与回档 → `src/tests/session/`。
 - 回合与并发 → `src/tests/collab/` 与 `src/tests/conductor.rs`。
-- 压缩 → `src/tests/session.rs` 的压缩用例。
+- 压缩 → `src/tests/api/compaction.rs`。
 
 ## 路由
 - 任务链与审查关卡：[../collab/task-chain.md](../collab/task-chain.md)

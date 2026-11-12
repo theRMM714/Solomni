@@ -134,13 +134,14 @@ function runAudit(scope) {
   step.announce(label);
   const audit = gates.runLane(ROOT, scope === "docs" ? "docs" : scope === "structure" ? "structure" : "all");
   const ms = step.elapsed();
+  const notes = audit.notes || [];
   const detail = audit.problems.length
     ? audit.problems.join("；")
     : scope === "docs"
       ? "文档检查通过"
-      : audit.targets.length + " 个目标 / " + audit.testFiles + " 个测试文件";
+      : audit.targets.length + " 个目标 / " + audit.testFiles + " 个测试文件" + (notes.length ? " / " + notes.length + " 个文件超行数软线" : "");
   step.announceDone(audit.problems.length ? "失败" : "完成", audit.problems.length ? audit.problems.length + " 条问题" : detail);
-  step.push({ step: label, status: audit.problems.length ? "quality-fail" : "pass", detail, ms, slow: false });
+  step.push({ step: label, status: audit.problems.length ? "quality-fail" : "pass", detail, ms, slow: false, notes });
 
   const qualityFailed = step.steps.filter((s) => s.status === "quality-fail");
   reportLib.write(
@@ -167,6 +168,10 @@ function runAudit(scope) {
   console.log("=== 测试汇总（" + what + "，报告见 target/test-report.json）===");
   for (const s of step.steps) {
     console.log("  " + s.status.padEnd(13) + " " + s.step.padEnd(24) + " " + (s.detail || "") + (s.ms ? "  [" + (s.ms / 1000).toFixed(1) + "s]" : ""));
+  }
+  if (notes.length) {
+    console.log("  [big] 行数不是失败条件：新增独立职责优先拆子模块或抽端口，仅为数字拆文件会更乱。");
+    for (const n of notes) console.log("  " + n);
   }
   if (qualityFailed.length) {
     for (const s of qualityFailed) {

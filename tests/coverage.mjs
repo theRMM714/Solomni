@@ -215,7 +215,253 @@ function print(result) {
   }
 }
 
-/** 变更行：git diff 的新侧行号，只取新增行（删除行没有可执行面）。 */
+/**
+ * 搬运行识别：纯搬运（换文件、换路径限定、rustfmt 重排）不是新代码，不该被变更行门禁审判——
+ * 它没有引入新逻辑，覆盖率也不会因为搬一次家就变。
+ * 两层判据：函数级（fn 体抹掉注释与字符串、去掉路径限定后 token 相似度 ≥0.98 → 整函数算搬运）
+ * 与行键兜底（归一化后逐字相同的行；给被改写了外壳的入口分派用）。
+ * 兜底只从本次 PR 触及文件的基线版本里取行，且每个基线行只抵一次，避免一行抵掉无限新行。
+ */
+const MOVE_KEY_MIN = 12;
+const MOVE_SIMILARITY = 0.98;
+const MOVE_KEYWORDS = new Set(
+  "as break const continue crate dyn else enum extern false fn for if impl in let loop match mod move mut pub ref return self Self static struct super trait true type unsafe use where while async await".split(" ")
+);
+
+/** 把注释、字符串、字符字面量抹成空格：保留换行与偏移，花括号配平与分词才不会被内容带偏。 */
+function blankSource(src) {
+  const out = src.split("");
+  const n = src.length;
+  const blank = (from, to) => {
+    for (let k = from; k < to && k < n; k++) if (out[k] !== "\n") out[k] = " ";
+  };
+  let i = 0;
+  while (i < n) {
+    const c = src[i];
+    if (c === "/" && src[i + 1] === "/") {
+      let j = i;
+      while (j < n && src[j] !== "\n") j++;
+      blank(i, j);
+      i = j;
+      continue;
+    }
+    if (c === "/" && src[i + 1] === "*") {
+      let j = i + 2;
+      while (j < n && !(src[j] === "*" && src[j + 1] === "/")) j++;
+      j = Math.min(n, j + 2);
+      blank(i, j);
+      i = j;
+      continue;
+    }
+    if (c === "r" && !/[A-Za-z0-9_]/.test(src[i - 1] || "") && /^r#*"/.test(src.slice(i, i + 8))) {
+      const hashes = src.slice(i + 1).match(/^#*/)[0];
+      const close = '"' + hashes;
+      const found = src.indexOf(close, i + 2 + hashes.length);
+      const j = found < 0 ? n : found + close.length;
+      blank(i, j);
+      i = j;
+      continue;
+    }
+    if (c === '"') {
+      let j = i + 1;
+      while (j < n && src[j] !== '"') {
+        if (src[j] === "\\") j++;
+        j++;
+      }
+      j = Math.min(n, j + 1);
+      blank(i, j);
+      i = j;
+      continue;
+    }
+    if (c === "'") {
+      const m = src.slice(i).match(/^'(\\.|[^'\\\n])'/);
+      if (m) {
+        blank(i, i + m[0].length);
+        i += m[0].length;
+        continue;
+      }
+    }
+    i++;
+  }
+  return out.join("");
+}
+
+/** 归一化分词：丢掉路径限定（a::b::f 只剩 f）、Rust 关键字与 return，只留结构。 */
+function normTokens(text) {
+  const stripped = text.replace(/(?:[A-Za-z_][A-Za-z0-9_]*)::/g, "");
+  const words = stripped.match(/[A-Za-z_][A-Za-z0-9_]*|\d+(?:\.\d+)?|[^\sA-Za-z0-9_]/g) || [];
+  return words.filter((w) => !MOVE_KEYWORDS.has(w));
+}
+
+function bagOf(tokens) {
+  const bag = new Map();
+  for (const t of tokens) bag.set(t, (bag.get(t) || 0) + 1);
+  return bag;
+}
+
+/** Dice 系数：两份 token 多重集的重合度，0..1。 */
+function dice(a, b) {
+  let inter = 0;
+  let totalA = 0;
+  let totalB = 0;
+  for (const [k, v] of a) {
+    totalA += v;
+    inter += Math.min(v, b.get(k) || 0);
+  }
+  for (const v of b.values()) totalB += v;
+  const all = totalA + totalB;
+  return all ? (2 * inter) / all : 1;
+}
+
+/** 抽出所有带体的函数：名字、起止行号、归一化 token。 */
+function extractFunctions(blanked) {
+  const lines = blanked.split(/\r?\n/);
+  const starts = [];
+  let off = 0;
+  for (const l of lines) {
+    starts.push(off);
+    off += l.length + 1;
+  }
+  const lineOf = (at) => {
+    let lo = 0;
+    let hi = starts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (starts[mid] <= at) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo + 1;
+  };
+  const out = [];
+  const re = /\bfn\s+([A-Za-z_][A-Za-z0-9_]*)/g;
+  let m;
+  while ((m = re.exec(blanked))) {
+    let i = re.lastIndex;
+    let depth = 0;
+    let open = -1;
+    let bodyless = false;
+    while (i < blanked.length) {
+      const c = blanked[i];
+      if (c === "(") depth++;
+      else if (c === ")") depth--;
+      else if (c === "{" && depth === 0) {
+        open = i;
+        break;
+      } else if (c === ";" && depth === 0) {
+        bodyless = true;
+        break;
+      }
+      i++;
+    }
+    if (bodyless || open < 0) continue;
+    let d = 0;
+    let end = -1;
+    for (let j = open; j < blanked.length; j++) {
+      if (blanked[j] === "{") d++;
+      else if (blanked[j] === "}") {
+        d--;
+        if (d === 0) {
+          end = j;
+          break;
+        }
+      }
+    }
+    if (end < 0) continue;
+    out.push({
+      name: m[1],
+      first: lineOf(m.index),
+      last: lineOf(end),
+      bag: bagOf(normTokens(blanked.slice(open, end + 1))),
+    });
+    re.lastIndex = end;
+  }
+  return out;
+}
+
+/** 行键：归一化后拼接；太短的行（只有一个花括号、else 之类）不参与兜底，免得满屏误判。 */
+function lineKey(text) {
+  const key = normTokens(text).join("");
+  return key.length >= MOVE_KEY_MIN ? key : null;
+}
+
+/** 本次 PR 触及的 Rust 文件与它们在基线的旧路径（重命名与修改给旧路径，新增没有）。 */
+function changedPairs(base) {
+  const r = spawnSync("git", ["diff", "--name-status", "-M", base + "...HEAD", "--", "*.rs"], {
+    cwd: ROOT, encoding: "utf8", maxBuffer: 16 * 1024 * 1024,
+  });
+  if (r.status !== 0) throw new Error("git diff --name-status " + base + "...HEAD 失败：\n" + (r.stderr || r.stdout));
+  const pairs = [];
+  for (const line of r.stdout.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const parts = line.split("\t");
+    const st = parts[0][0];
+    if (st === "R" || st === "C") pairs.push({ old: parts[1], new: parts[2] });
+    else if (st === "M" || st === "T") pairs.push({ old: parts[1], new: parts[1] });
+    else if (st === "A") pairs.push({ old: null, new: parts[1] });
+  }
+  return pairs;
+}
+
+function baseSource(base, file) {
+  const r = spawnSync("git", ["show", base + ":" + file], { cwd: ROOT, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
+  return r.status === 0 ? r.stdout : null;
+}
+
+/** 变更行里哪些是纯搬运：Map<文件, Set<行号>>。 */
+function movedLines(base, wanted, root = ROOT) {
+  const pairs = changedPairs(base).filter((p) => p.new && wanted.has(p.new));
+  const baseByName = new Map();
+  const keysLeft = new Map();
+  for (const p of pairs) {
+    const src = p.old ? baseSource(base, p.old) : null;
+    if (src == null) continue;
+    const blanked = blankSource(src);
+    for (const f of extractFunctions(blanked)) {
+      if (!baseByName.has(f.name)) baseByName.set(f.name, []);
+      baseByName.get(f.name).push(f);
+    }
+    for (const line of blanked.split(/\r?\n/)) {
+      const key = lineKey(line);
+      if (key) keysLeft.set(key, (keysLeft.get(key) || 0) + 1);
+    }
+  }
+  const moved = new Map();
+  const mark = (file, from, to) => {
+    if (!moved.has(file)) moved.set(file, new Set());
+    const set = moved.get(file);
+    for (let l = from; l <= to; l++) set.add(l);
+  };
+  for (const p of pairs) {
+    let src;
+    try {
+      src = fs.readFileSync(path.join(root, p.new), "utf8");
+    } catch {
+      continue;
+    }
+    const blanked = blankSource(src);
+    for (const f of extractFunctions(blanked)) {
+      let best = 0;
+      for (const c of baseByName.get(f.name) || []) {
+        best = Math.max(best, dice(f.bag, c.bag));
+        if (best >= 1) break;
+      }
+      if (best >= MOVE_SIMILARITY) mark(p.new, f.first, f.last);
+    }
+    const lines = blanked.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      const key = lineKey(lines[i]);
+      if (!key) continue;
+      const left = keysLeft.get(key) || 0;
+      if (!left) continue;
+      keysLeft.set(key, left - 1);
+      mark(p.new, i + 1, i + 1);
+    }
+  }
+  return moved;
+}
+
+/**
+ * 变更行：git diff 的新侧行号，只取新增行（删除行没有可执行面）。 */
 function changedLines(base) {
   const r = spawnSync("git", ["diff", "--unified=0", "--no-color", base + "...HEAD", "--", "*.rs"], {
     cwd: ROOT, encoding: "utf8", maxBuffer: 16 * 1024 * 1024,
@@ -244,14 +490,17 @@ function changedLines(base) {
 /** 变更行覆盖：只看新增的 Rust 行；测试代码、seam 与无执行面的行不参与。 */
 export function diffCoverage(files, base, root = ROOT) {
   const changed = changedLines(base);
+  const wanted = new Set([...changed.keys()].filter((f) => !isTestFile(f)));
+  const moved = movedLines(base, wanted, root);
   const exclusions = exclusionMap();
-  const buckets = POLICY.buckets.map((b) => ({ ...b, re: b.globs.map(globToRe), covered: 0, total: 0 }));
+  const buckets = POLICY.buckets.map((b) => ({ ...b, re: b.globs.map(globToRe), covered: 0, total: 0, moved: 0 }));
   for (const f of files) {
     const rel = f.file;
     if (isTestFile(rel)) continue;
     const want = changed.get(rel);
     if (!want || !want.size) continue;
     const skip = exclusions.get(rel);
+    const here = moved.get(rel);
     let mask = null;
     try {
       mask = testLineMask(fs.readFileSync(path.join(root, rel), "utf8"));
@@ -262,13 +511,17 @@ export function diffCoverage(files, base, root = ROOT) {
       if (!want.has(l.line) || mask[l.line - 1] || (skip && skip.has(l.line))) continue;
       for (const b of buckets) {
         if (!b.re.some((re) => re.test(rel))) continue;
+        if (here && here.has(l.line)) {
+          b.moved++;
+          continue;
+        }
         b.total++;
         if (l.count > 0) b.covered++;
       }
     }
   }
   for (const b of buckets) b.pct = b.total ? (100 * b.covered) / b.total : 100;
-  return { base, min: POLICY.changeLineMin || 90, buckets };
+  return { base, min: POLICY.changeLineMin || 90, moved: buckets.reduce((n, b) => n + b.moved, 0), buckets };
 }
 
 function printDiff(diff) {
@@ -280,12 +533,14 @@ function printDiff(diff) {
   for (const b of diff.buckets) {
     const min = b.min === 100 ? 100 : diff.min;
     const ok = b.pct >= min;
+    const moved = b.moved ? "；纯搬运 " + b.moved + " 行不计" : "";
     console.log(
       "  " + (ok ? "PASS" : "FAIL") + " " + b.id.padEnd(10) +
       " " + b.pct.toFixed(2).padStart(6) + "% (min " + min + "%) " +
-      b.covered + "/" + b.total
+      b.covered + "/" + b.total + moved
     );
   }
+  if (diff.moved) console.log("  其中 " + diff.moved + " 行是纯搬运（换文件、换路径限定或重排），未计入分母");
 }
 
 function collect() {

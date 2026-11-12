@@ -1,6 +1,6 @@
 //! 目的：packages 能力的用例测试——包契约、包库、目标筛选、选包计划与诊断。
 //! 管：清单校验、版本/去重、冲突预检、平台分包、计划顺序与诊断说法。
-//! 不管：guest 挂载与叠写（`src/tests/vm.rs`）、构建编排（`src/tests/diagnostics.rs`）。
+//! 不管：guest 挂载与叠写（`src/tests/vm/`）、构建编排（`src/tests/diagnostics.rs`）。
 //! 联动：契约见 RUNTIME_SPEC.md；被测实现见 `src/capabilities/packages/`。
 
 use super::builders::*;

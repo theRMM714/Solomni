@@ -13,10 +13,13 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/entry/mod.rs` | 根共用机制的入口：注册装配、探针、产品根规范化与启动期工具链 |
+| `src/entry/args.rs` | 参数表：取根前的守门子进程、隐藏探针与路由目录；取根后的自检、依赖补齐、回收、构建与围栏台账；入口据此决定继续启动还是退出 |
 | `src/entry/assembly.rs` | 组合根的共用装配：把产品根变成各能力面；端口选型、适配器构造与依赖顺序只在这里落一次 |
 | `src/entry/root.rs` | 产品根规范化：纯词法拼接与归一化，取不到当前目录才退回 canonicalize |
 | `src/entry/toolchains.rs` | 启动期基础工具链：读 `.tools/toolchains/active.json`，校验目标与相对路径，把项目 bin 前置到 PATH 并设置工具环境；每次启动报告项目内 / 宿主回退（含 Windows 围栏可授权性）/ 缺失；不阻断启动 |
-| `src/main.rs` | 组合根 + argv 分发：隐藏模式 / 探针 → 启动对账与围栏报告（本机能力 / 本次实际）→ 首次引导与启动门（过不了只降级 / 重设 / 退出）→ 经 `entry::assembly` 装配各能力 → 交给 CLI 或 Web |
+| `src/entry/startup.rs` | 启动门：围栏能力与授权、缺项报告、Windows 首次引导、围栏核对，以及与 Web 概览共用的 `FenceReport` |
+| `src/entry/web.rs` | Web 通道启动：把围栏事实翻成呈现层结构后交给 `presentation::web::serve` |
+| `src/main.rs` | 组合根：启动形态、产品根规范化、基础工具链 → 启动对账与围栏报告（本机能力 / 本次实际）→ 首次引导与启动门（过不了只降级 / 重设 / 退出）→ 经 `entry::assembly` 装配各能力 → 交给 CLI 或 Web；argv 分派见 `src/entry/args.rs` |
 | `src/entry/probes/mod.rs` | 机器可读探针的入口与共用输出：导出各模式，打印回收报告 |
 | `src/entry/probes/build.rs` | 探针：`--build`（模块构建） |
 | `src/entry/probes/doctor.rs` | 探针：`--doctor`（机器可读自检） |

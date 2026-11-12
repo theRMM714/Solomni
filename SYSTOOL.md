@@ -12,7 +12,7 @@
 | 这个**身份有什么**：引用的系统工具 id + 提示词 + 是否给模块工具 | `systools/roles.yaml` |
 | 工作区布局**固定占用的目录名**（agent 实例名不得占用） | `systools/names.yaml` |
 | 已确认但尚未实施的系统工具与验收条件，**不限角色**（非当前工具表、非测试缺口账） | [systool_gaps.yaml](systool_gaps.yaml) |
-| 角色引用了表里不存在的 id 为什么硬失败、工具与角色的名单为什么在代码里没有第二份 | 装配期 `SystemTools::problems()`，由 `src/tests/detail.rs` 锁死 |
+| 角色引用了表里不存在的 id 为什么硬失败、工具与角色的名单为什么在代码里没有第二份 | 装配期 `SystemTools::problems()`，由 `src/tests/detail/prompt.rs` 锁死 |
 
 ## 读哪一份
 
@@ -42,4 +42,4 @@
 - `systools/roles.yaml` → 改角色：同次同步 `prompts/roles/<角色>`（提示词与工具面同处声明，分开必然漂）
 - `systools/names.yaml` → 加 / 改保留目录名：同次同步落盘布局文档 [docs/session/session-model.md](docs/session/session-model.md)
 - `docs/tools/tools-and-roles.md` → 改路径模型 / 围栏口径：同次同步 [ARCHITECTURE.md](ARCHITECTURE.md)
-- `src/tests/detail.rs` → 悬空引用由装配期 `SystemTools::problems()` 挡下，改表后保持它锁死
+- `src/tests/detail/prompt.rs` → 悬空引用由装配期 `SystemTools::problems()` 挡下，改表后保持它锁死

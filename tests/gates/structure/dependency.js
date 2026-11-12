@@ -74,6 +74,18 @@ function direction(root) {
   };
   collectRs(path.join(root, "src"));
 
+  // 测试专属模块：`#[cfg(test)] mod tests;` 指的兄弟文件是测试代码，不是生产依赖边。
+  const testOnly = new Set();
+  for (const abs of rsFiles) {
+    const text = fs.readFileSync(abs, "utf8");
+    for (const m of text.matchAll(/#\[cfg\(test\)\]\s*mod\s+(\w+)\s*;/g)) {
+      const base = path.basename(abs) === "mod.rs" ? path.dirname(abs) : abs.replace(/\.rs$/, "");
+      for (const cand of [path.join(base, m[1] + ".rs"), path.join(base, m[1], "mod.rs")]) {
+        if (fs.existsSync(cand)) testOnly.add(cand);
+      }
+    }
+  }
+
   const reverse = new Set();
   const presentation = new Set();
   const apiOnly = new Set();
@@ -91,6 +103,7 @@ function direction(root) {
       continue;
     }
     if (layer === "tests" || layer === "main") continue;
+    if (testOnly.has(abs)) continue;
     const text = stripTestModules(fs.readFileSync(abs, "utf8"));
     for (const m of text.matchAll(/crate::([a-z_][a-z0-9_]*(?:::[a-z_][a-z0-9_]*)*)/g)) {
       const t = normTarget(m[1]);

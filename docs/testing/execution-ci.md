@@ -168,17 +168,17 @@ node run-tests.js --fence-live
 
 - 虚拟机档真机用例默认跳过，设 `SOLOMNI_VM_LIVE=1` 才真跑（按需再给 `SOLOMNI_VM_QEMU` / `SOLOMNI_VM_GUEST`，虚拟根默认 `debian-13`）：
 
-- `src/tests/vm.rs`：guest 起停、并发可写层；**取消与超时**用不依赖共享后端的 `vm_live_cancel_kills_the_guest_process_tree`（`NoneShare` + guest 内 `/tmp` 围栏；取消回执含「用户停止」且 15 秒内返回、无残留 `sleep`；`timeout_secs` 到点回执含 helper 的「工具进程超时」）。取消路径的 helper stderr 可能被 QGA 丢掉（时有时无），以无孤儿 + 快速返回证明处理器生效；
-- `src/tests/vm.rs` 的**guest 诊断**探针 `vm_live_guest_diagnose_lists_processes`（`NoneShare`，不需要共享后端）：guest 里起忙进程后诊断要列出该 pid 与 CPU / 内存 / 负载 / 挂载；停 guest 后如实报没有活 guest；
-- `src/tests/vm.rs` 的**外部工作区往返**探针 `vm_live_external_workspace_round_trip`：绑定产品根之外的目录后，guest 内能读写该工作区、越界被拒、会话树里的私沙仍可用；Windows 需要 `SOLOMNI_VM_SMBD`（Windows 侧已真机通过：WHPX + SMB，另有 e2e 外部工作区场景），Linux 需要 KVM + `SOLOMNI_VM_VIRTIOFSD` 跑 virtiofs 变体、不设它跑 9p 变体，两个变体各跑一次；
+- `src/tests/vm/`：guest 起停、并发可写层；**取消与超时**用不依赖共享后端的 `vm_live_cancel_kills_the_guest_process_tree`（`NoneShare` + guest 内 `/tmp` 围栏；取消回执含「用户停止」且 15 秒内返回、无残留 `sleep`；`timeout_secs` 到点回执含 helper 的「工具进程超时」）。取消路径的 helper stderr 可能被 QGA 丢掉（时有时无），以无孤儿 + 快速返回证明处理器生效；
+- `src/tests/vm/` 的**guest 诊断**探针 `vm_live_guest_diagnose_lists_processes`（`NoneShare`，不需要共享后端）：guest 里起忙进程后诊断要列出该 pid 与 CPU / 内存 / 负载 / 挂载；停 guest 后如实报没有活 guest；
+- `src/tests/vm/` 的**外部工作区往返**探针 `vm_live_external_workspace_round_trip`：绑定产品根之外的目录后，guest 内能读写该工作区、越界被拒、会话树里的私沙仍可用；Windows 需要 `SOLOMNI_VM_SMBD`（Windows 侧已真机通过：WHPX + SMB，另有 e2e 外部工作区场景），Linux 需要 KVM + `SOLOMNI_VM_VIRTIOFSD` 跑 virtiofs 变体、不设它跑 9p 变体，两个变体各跑一次；
 - `src/tests/builds.rs`：本机构建、缓存、失败与创建前补编（guest 内构建在 `SOLOMNI_VM_LIVE=1` 时真跑）；
 - `src/capabilities/provision/guest.rs`：Linux 运行期编排；
 - `src/capabilities/provision/service.rs`：guest-rootfs 属性真机用例（`guest_rootfs_pipeline_keeps_source_attrs_on_the_real_image`，用 `.vm/cache/rootfs.ext4`）；
 - `tests/cross-platform/e2e/`：vm 会话场景。
-- `src/tests/workspace.rs` 的**UNC 外部工作区往返**探针 `unc_external_workspace_round_trip_on_a_real_share`：设 `SOLOMNI_UNC_ROOT` 指向一个可写 UNC 目录（如 `\\localhost\D$\AIproject\target\unc`）才真跑——虚拟机档绑定落成 native UNC、本机档拒绝且不触网、产品根 UNC 别名按落点身份拒、共享根拒、首绑导入与 pull / commit / status / sync、删会话不删外部；CI 没有 UNC，缺省打印 `[探针]`。
+- `src/tests/workspace/` 的**UNC 外部工作区往返**探针 `unc_external_workspace_round_trip_on_a_real_share`：设 `SOLOMNI_UNC_ROOT` 指向一个可写 UNC 目录（如 `\\localhost\D$\AIproject\target\unc`）才真跑——虚拟机档绑定落成 native UNC、本机档拒绝且不触网、产品根 UNC 别名按落点身份拒、共享根拒、首绑导入与 pull / commit / status / sync、删会话不删外部；CI 没有 UNC，缺省打印 `[探针]`。
 
-- `src/tests/vm.rs` 的**UNC 共享根往返**探针 `vm_live_unc_share_round_trip`：只 Windows；设 `SOLOMNI_VM_LIVE=1`、`SOLOMNI_VM_QEMU`、`SOLOMNI_VM_SMBD`、`SOLOMNI_UNC_ROOT` 才真跑——helper 以 UNC 目录为共享根（没有 :ro）起服务，guest 经 CIFS 枚举 / 建目录 / 写 / 改名 / 删除，每个结果都要落到宿主那个 UNC 目录里；CI 没有 UNC 与虚拟根，缺省打印 `[探针]`。
-- 未开启时用例打印行首 `[探针]`，入口按 `env-skip` 记进报告，不算通过。CI **不设** `SOLOMNI_VM_LIVE`：真机证据只能在有 KVM / WHPX 的机器上手工产出（`node dev.js cargo -- test --bin solomni -- vm_live_external_workspace_round_trip`，探针在 `src/tests/vm.rs`），报告里如实记 env-skip。
+- `src/tests/vm/` 的**UNC 共享根往返**探针 `vm_live_unc_share_round_trip`：只 Windows；设 `SOLOMNI_VM_LIVE=1`、`SOLOMNI_VM_QEMU`、`SOLOMNI_VM_SMBD`、`SOLOMNI_UNC_ROOT` 才真跑——helper 以 UNC 目录为共享根（没有 :ro）起服务，guest 经 CIFS 枚举 / 建目录 / 写 / 改名 / 删除，每个结果都要落到宿主那个 UNC 目录里；CI 没有 UNC 与虚拟根，缺省打印 `[探针]`。
+- 未开启时用例打印行首 `[探针]`，入口按 `env-skip` 记进报告，不算通过。CI **不设** `SOLOMNI_VM_LIVE`：真机证据只能在有 KVM / WHPX 的机器上手工产出（`node dev.js cargo -- test --bin solomni -- vm_live_external_workspace_round_trip`，探针在 `src/tests/vm/`），报告里如实记 env-skip。
 
 - **Linux 的 ext4 工具链用例按环境判据跳过**：`unshare -r` / `mke2fs` / `debugfs` 不可用（Linux CI 就是这样）时，`packed_guest_image_uses_4k_blocks` 与 `guest_rootfs_restores_privilege_bits_and_ownership` 打印 `[探针]` 并跳过。
 - 跳过 = `env-skip`，不是通过。补装 e2fsprogs 并允许非特权用户命名空间后才真跑。
@@ -191,7 +191,7 @@ node run-tests.js --coverage
 ```
 
 - 判据是 `tests/coverage-policy.json` 的三类风险区：产品 80%、平台/进程适配 60%、安全策略 100%；PR 另有变更行门禁：新增 Rust 行 90%，安全桶变更行 100%。覆盖率是风险下限，不是质量目标（[TESTING.md](../../TESTING.md) 一）。
-- 变更行用 `git diff <base>...HEAD -- "*.rs"` 的新侧新增行，只判报告里有执行面的行；测试文件、seam 与注释/空行不计。CI 的 `coverage` job 在 PR 上把 `github.event.pull_request.base.sha` 传给 `COVERAGE_DIFF_BASE`，并取全历史；main 推送与手动运行只判风险桶。
+- 变更行用 `git diff <base>...HEAD -- "*.rs"` 的新侧新增行，只判报告里有执行面的行；测试文件、seam 与注释/空行不计。纯搬运（换文件、换路径限定、rustfmt 重排）另作识别，不计入分母：整函数在抹掉注释与字符串、去掉路径限定后 token 相似度 ≥0.98 判为搬运，其余行再按「归一化后逐字相同、且本次 PR 触及文件的基线版本里出现过」兜底（每个基线行只抵一次）；回执打印不计的行数（`tests/coverage.mjs` 的 `movedLines`）。搬运行不是新逻辑，但新写的行照旧要覆盖——兜底只认基线里已有同形内容的行。CI 的 `coverage` job 在 PR 上把 `github.event.pull_request.base.sha` 传给 `COVERAGE_DIFF_BASE`，并取全历史；main 推送与手动运行只判风险桶。
 - 统计前剔除 `src/tests/**`、`tests/**`、`*tests.rs` 与 `#[cfg(test)]` 到配对右花括号的整段；否则内联测试会把覆盖率抬高。`policy.excludes` 的显式 seam 豁免必须逐条写文件、行段与理由，评估时打印豁免行数。
 - Linux 同时采集测试进程与产品子进程：先 `cargo llvm-cov --workspace --all-targets --no-report`，再用同一份插桩环境 `cargo build --bin solomni`，然后以 `E2E_COVERAGE=1` 跑 L4（优雅停止让子进程写 profile），最后合并 `*.profraw` 出报告。测试失败、E2E 失败或任一桶不达标都非零退出。
 - Windows 不判定行覆盖：Node 的 `SIGINT` 在 Windows 是 `TerminateProcess`，产品子进程来不及写 profile；只靠进程内报告会让产品桶假性不达标。macOS 不在本门禁内，避免为同一结论再付一份 runner。平台专有行为由三平台 `quality` 的真机探针与安全行为矩阵承担，不靠行覆盖替代。

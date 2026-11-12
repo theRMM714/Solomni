@@ -1,7 +1,7 @@
 //! 目的：MCP stdio 适配器的契约用例——握手、翻页发现、调用、错误与通知处理。
 //! 管：initialize → notifications/initialized → tools/list（翻页）→ tools/call；应答按 id 配对；isError 与 error 如实报错。
 //! 不管：进程与围栏机制（在 kernel 的 SessionHost 实现里）；真实服务的端到端另有用例。
-//! 联动：适配器见 src/capabilities/residents/detail/mcp.rs；替身见 src/tests/doubles.rs。
+//! 联动：适配器见 src/capabilities/residents/detail/mcp.rs；替身见 src/tests/doubles/。
 
 use crate::capabilities::collab::service::tool_loop::CallGrant;
 use crate::capabilities::permission::api::{Decision, Reach, ReachSet};

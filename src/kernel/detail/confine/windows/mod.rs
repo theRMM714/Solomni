@@ -7,6 +7,7 @@ use super::{shell_command, Capability, FencePrep, FenceVerdict, FENCE_FAILED};
 use crate::kernel::api::FencePart;
 use crate::kernel::api::FenceSpec;
 use std::ffi::c_void;
+use std::sync::OnceLock;
 
 mod acl;
 mod container;
@@ -14,6 +15,8 @@ mod record;
 pub(crate) use acl::*;
 pub(crate) use container::*;
 pub(crate) use record::*;
+#[cfg(test)]
+mod ledger_tests;
 #[cfg(test)]
 mod tests;
 use std::path::{Path, PathBuf};
@@ -77,7 +80,13 @@ pub(crate) const TREE_SEC_INFO_SET: u32 = 1;
 /// 目的：ProgressInvokeNever（不回调进度）。
 pub(crate) const PROGRESS_INVOKE_NEVER: u32 = 1;
 
+/// 目的：本机能力（首次调用真探一次，之后复用——探一次要写目录 ACL，并行用例各探一次会互相踩）。
 pub fn capability() -> Capability {
+    static PROBED: OnceLock<Capability> = OnceLock::new();
+    PROBED.get_or_init(probe).clone()
+}
+
+fn probe() -> Capability {
     match self_check() {
         Ok(()) => Capability {
             fs: true,

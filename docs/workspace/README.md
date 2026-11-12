@@ -50,7 +50,7 @@
 
 ## 改动本单元时必须同步
 
-- 用例测试在 `src/tests/workspace.rs`；运行包与执行档位的契约不在本单元（见 [docs/vm/README.md](../vm/README.md)）。
+- 用例测试在 `src/tests/workspace/`；运行包与执行档位的契约不在本单元（见 [docs/vm/README.md](../vm/README.md)）。
 
 ## 本目录
 

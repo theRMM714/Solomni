@@ -29,6 +29,8 @@
 | `src/kernel/detail/outbound.rs` | 出站 HTTPS 的共享机制：唯一一处 TLS 后端装配与通用 ureq 代理 |
 | `src/kernel/detail/unpack.rs` | 归档解包机制：tar / tar.gz / tar.zst / tar.xz / zip 解到目录，支持 strip 与宽容链接，并还原归档里的权限位（可执行位） |
 | `src/kernel/detail/process.rs` | 外部进程执行机制（守门进程、stdin 送参、隐秘字段 env 注入、超时/取消杀树、head/head+tail 截断、一次性 shell 的平台投递），实现 `ProcessRunner` |
+| `src/kernel/detail/process/tests.rs` | 进程适配器的真实契约用例：真起进程、真收输出、真判退出码与平台分支（`#[cfg(test)] mod tests;` 指向） |
+| `src/kernel/detail/procs/tests.rs` | 进程账与回收的契约用例：登记/注销、存活探测、父死子亡的分平台接线（`#[cfg(test)] mod tests;` 指向） |
 | `src/kernel/detail/procs.rs` | 长驻子进程的账（`.home/processes.json`）与回收：父死子亡的接线（`attach`：Linux 内核信号 / macOS 守门进程 / Windows 作业对象）、身份（Unix 命令行标记 / Windows 创建时间）、存活探测、终止、启动对账；登记虚拟机档的 QEMU、共享 helper 与常驻服务守门进程 |
 | `src/kernel/detail/session.rs` | 长驻外部进程机制（守门进程长跑、按行收发、关闭杀树、父死子亡、进程账登记与注销、Windows 容器预授权），实现 `SessionHost`；常驻服务的守门进程经它拉起 |
 | `src/kernel/detail/confine/mod.rs` | 围栏机制门面：平台后端选择与重导出；本机能力与本次实际（`effective_paths`）的判据、自检（`verify`）与 `FenceHost` 释放 |
@@ -44,6 +46,7 @@
 | `src/kernel/detail/confine/windows/` | Windows 围栏后端目录：入口与策略派发在 `mod.rs`，DACL 授权在 `acl.rs`、授权台账与撤权在 `record.rs`、容器身份与作业对象在 `container.rs`、真机探针在 `tests.rs` |
 | `src/kernel/detail/confine/windows/mod.rs` | Windows 围栏后端入口：按 agent 派生 AppContainer SID、逐条授权可达范围，再用 `STARTUPINFOEX` 在容器与作业对象里起工具（`net` 决定是否授 internetClient） |
 | `src/kernel/detail/confine/windows/acl.rs` | Windows 安全描述符操作：逐路径改 DACL（授予 / 撤销）、解析 ACE 与 SID、展开泛型掩码、`AccessCheck` 判写 DACL 权限 |
+| `src/kernel/detail/confine/windows/ledger_tests.rs` | 台账一族真机用例：快照先落盘、写后核对、按条处置、启动对账与孤儿回收（`#[cfg(test)] mod ledger_tests;` 指向） |
 | `src/kernel/detail/confine/windows/record.rs` | 围栏授权台账与撤销：快照、根外授权摘要与容器 profile 的落盘、精确撤销、孤儿清扫与按条处置 |
 | `src/kernel/detail/confine/windows/container.rs` | Windows 容器围栏的启动面：AppContainer 档案与 SID、`net` 对应的 internetClient 能力、UTF-16 转换、system shell 与 kill-on-close 作业对象 |
 | `src/kernel/detail/confine/windows/tests.rs` | Windows 围栏的真机探针：AppContainer 授权、容器往返、ACL 台账与撤权（需改本机权限项的用例，`--fence-live` 才跑） |

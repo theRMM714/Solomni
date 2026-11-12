@@ -34,7 +34,7 @@
 
 ## 改动本单元时必须同步
 
-- 动 `Ops`（增删方法、事件、视图字段）必须同时改 `cli`、`web`、`src/tests/api.rs`、`docs/presentation/contracts.md`（路由表由 `src/tests/routes.rs` 机器比对）；跨会话回档的编排与 `session` 的纯行算术要一起改（见 [docs/session/session-model.md](../session/session-model.md) 的「回档：三种模式 + 工作级标记」）。
+- 动 `Ops`（增删方法、事件、视图字段）必须同时改 `cli`、`web`、`src/tests/api/`、`docs/presentation/contracts.md`（路由表由 `src/tests/routes.rs` 机器比对）；跨会话回档的编排与 `session` 的纯行算术要一起改（见 [docs/session/session-model.md](../session/session-model.md) 的「回档：三种模式 + 工作级标记」）。
 
 ## 本目录
 

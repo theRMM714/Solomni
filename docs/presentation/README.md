@@ -30,7 +30,7 @@
 ## 改动本单元时必须同步
 
 - 增删路由 → 五处同改：`src/presentation/web/routes.rs` 的 `ROUTES`、前端调用点、[contracts.md](contracts.md) 的 ROUTES 段、`src/tests/routes.rs`（机器比对）与 `demo/*.mjs` 的调用点。
-- 入站契约（`Ops` 的方法与事件）一改 → 两个渠道的渲染、`src/tests/api.rs`、[contracts.md](contracts.md)。
+- 入站契约（`Ops` 的方法与事件）一改 → 两个渠道的渲染、`src/tests/api/`、[contracts.md](contracts.md)。
 
 ## 本目录
 
