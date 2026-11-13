@@ -669,8 +669,12 @@ fn main() {
         // CLI 里输入 web 可直接转入 Web，无需重启进程（能力面可克隆，两份呈现共用同一个核心）。
         // 在 Web 里按 Ctrl+C = **回到 CLI**（web::serve 收到中断就正常返回）；在 CLI 提示符下再按 = 退出。
         loop {
-            match presentation::cli::run(ops.clone(), presentation::web::DEFAULT_PORT, flags.plain)
-            {
+            match presentation::cli::run(
+                ops.clone(),
+                presentation::web::DEFAULT_PORT,
+                flags.plain,
+                !flags.no_anim,
+            ) {
                 presentation::cli::CliExit::Exit => break,
                 presentation::cli::CliExit::Web(port) => {
                     entry::web::serve_web(ops.clone(), port, &fence_report);

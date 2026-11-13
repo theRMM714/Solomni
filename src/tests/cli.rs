@@ -248,6 +248,16 @@ fn width_wraps_without_breaking_wide_chars() {
     assert_eq!(cli::wrap("", 10), vec![""]);
 }
 
+/// 生成态帧：允许动画时轮转，`--no-anim` 时始终同一帧。
+#[test]
+fn spinner_rotates_only_when_animation_is_on() {
+    assert_eq!(cli::spin_frames(0, true), "⠋");
+    assert_eq!(cli::spin_frames(1, true), "⠙");
+    assert_eq!(cli::spin_frames(10, true), "⠋", "十帧一轮");
+    assert_eq!(cli::spin_frames(0, false), "⠿");
+    assert_eq!(cli::spin_frames(7, false), "⠿", "静止帧不随 tick 变");
+}
+
 /// 旗语解析：两种写法等价、布尔不带值、`--` 之后全当位置参数、写错给最近建议。
 #[test]
 fn argv_accepts_both_spellings_and_reports_typos() {
@@ -255,10 +265,10 @@ fn argv_accepts_both_spellings_and_reports_typos() {
         let argv: Vec<String> = args.iter().map(|s| s.to_string()).collect();
         cli::argv::parse(&argv)
     };
-    let flags = parse(&["--root", "work", "--port=3082", "--web"]).expect("合法旗语");
+    let flags = parse(&["--root", "work", "--port=3082", "--web", "--no-anim"]).expect("合法旗语");
     assert_eq!(flags.root.as_deref(), Some("work"));
     assert_eq!(flags.port, Some(3082));
-    assert!(flags.web && !flags.plain);
+    assert!(flags.web && flags.no_anim && !flags.plain);
 
     let flags = parse(&["--plain", "--root=elsewhere"]).expect("=值写法");
     assert!(flags.plain);

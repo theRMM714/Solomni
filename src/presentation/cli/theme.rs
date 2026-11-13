@@ -31,26 +31,105 @@ pub(super) enum Ink {
 impl Level {
     /// 目的：按环境判定档位：`--plain` 与 `NO_COLOR` 一律无色，`TERM=dumb` 同样无色。
     pub(super) fn detect(plain: bool) -> Level {
-        if plain || env::var_os("NO_COLOR").is_some() {
-            return Level::None;
+        pick(
+            plain,
+            env::var_os("NO_COLOR").is_some(),
+            &env::var("TERM").unwrap_or_default(),
+            &env::var("COLORTERM").unwrap_or_default(),
+            env::var_os("WT_SESSION").is_some(),
+            env::var_os("WEZTERM_PANE").is_some(),
+            env::var_os("TERM_PROGRAM").is_some(),
+        )
+    }
+}
+
+/// 目的：档位判定的纯函数版本：只吃事实，不读环境（启动页与降级测试共用同一套判据）。
+fn pick(
+    plain: bool,
+    no_color: bool,
+    term: &str,
+    colorterm: &str,
+    wt_session: bool,
+    wezterm: bool,
+    term_program: bool,
+) -> Level {
+    if plain || no_color || term == "dumb" {
+        return Level::None;
+    }
+    let truecolor = colorterm.eq_ignore_ascii_case("truecolor")
+        || colorterm.eq_ignore_ascii_case("24bit")
+        || term.contains("truecolor")
+        || term.contains("direct");
+    if truecolor || wt_session || wezterm {
+        return Level::True;
+    }
+    if term.contains("256color") || term_program {
+        return Level::Ansi256;
+    }
+    Level::Ansi16
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn level_picks_one_tier_from_facts() {
+        assert_eq!(
+            pick(true, false, "xterm-256color", "", false, false, false),
+            Level::None
+        );
+        assert_eq!(
+            pick(false, true, "xterm-256color", "", false, false, false),
+            Level::None
+        );
+        assert_eq!(
+            pick(false, false, "dumb", "", false, false, false),
+            Level::None
+        );
+        assert_eq!(
+            pick(
+                false,
+                false,
+                "xterm-256color",
+                "truecolor",
+                false,
+                false,
+                false
+            ),
+            Level::True
+        );
+        assert_eq!(
+            pick(false, false, "xterm-256color", "", true, false, false),
+            Level::True
+        );
+        assert_eq!(
+            pick(false, false, "xterm-256color", "", false, false, false),
+            Level::Ansi256
+        );
+        assert_eq!(
+            pick(false, false, "xterm", "", false, false, false),
+            Level::Ansi16
+        );
+    }
+
+    #[test]
+    fn only_paint_escapes_are_sgr() {
+        for level in [Level::True, Level::Ansi256, Level::Ansi16, Level::None] {
+            let paint = Paint::new(level);
+            let text = paint.paint(Ink::Ice, "冰青") + &paint.bold(Ink::Fg, "加粗");
+            for esc in text.split('\x1b').skip(1) {
+                let tail = esc.split('m').next().unwrap_or("");
+                assert!(tail.starts_with('['), "转义只允许 SGR：{tail}");
+                assert!(
+                    tail[1..].chars().all(|c| c.is_ascii_digit() || c == ';'),
+                    "SGR 参数只允许数字与分号：{tail}"
+                );
+            }
+            if level == Level::None {
+                assert_eq!(text, "冰青加粗");
+            }
         }
-        let term = env::var("TERM").unwrap_or_default();
-        if term == "dumb" {
-            return Level::None;
-        }
-        let colorterm = env::var("COLORTERM").unwrap_or_default();
-        let truecolor = colorterm.eq_ignore_ascii_case("truecolor")
-            || colorterm.eq_ignore_ascii_case("24bit")
-            || term.contains("truecolor")
-            || term.contains("direct");
-        if truecolor || env::var_os("WT_SESSION").is_some() || env::var_os("WEZTERM_PANE").is_some()
-        {
-            return Level::True;
-        }
-        if term.contains("256color") || env::var_os("TERM_PROGRAM").is_some() {
-            return Level::Ansi256;
-        }
-        Level::Ansi16
     }
 }
 

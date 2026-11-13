@@ -8,6 +8,7 @@
 
 - 管：终端转录中心——argv → 入站能力面 → 渲染事件流；`split_names` 与空登记处的引导文案是它自己的传输侧的事。
 - 管：终端呈现本身——TTY 与档位判定、raw mode 的开关与恢复、冰青字标启动页、固定输入框（行编辑、历史、宽字符宽度）与状态行。交互模式只画这些；非 TTY（管道）保持逐行输入与原样输出，脚本口径不变。
+- 管：五档降级——真彩 / 256 / 16 色档自动取色，`NO_COLOR` 或 `--plain` 无色，`TERM=dumb` 把画框与状态字形退回 ASCII（`+-|` 与 `v/x/*/>`），`--no-anim` 让生成态停在静态帧；启动页如实打印当前档位。
 - 管：交互模式的转录渲染——角色行与正文缩进、工具行（标签 + 参数摘要 + 成败）、验收清单与交付结论、裁决卡边框、生成态 spinner 与耗时、上下文用量写回状态行；同一批 `SessionEvent` 在非 TTY 下仍走原样文本。
 - 管：共享区提交历史与回滚入口——`work <会话>` 看 head + 最近提交，`work <会话> log [条数]` 列提交，`work <会话> show <提交号>` 看详情，`work <会话> restore <提交号> [--yes]` 走统一的 `restore_work_commit` 动作（非破坏性；交互模式要求输入 yes，`--yes` 仅用于显式脚本）。
 - 管：虚拟机档会话的只读诊断入口——`diagnose <会话>` 造一次 `guest_diagnose` 动作（`caller = user`），把动作返回的结构化 JSON（guest 进程表 / CPU 汇总 / 内存 / 负载 / 挂载）原样打印；与 `work` / `resident` / `module` 同类，不做业务判断。
@@ -16,8 +17,8 @@
 ## 入站契约与状态归属
 
 - 入站面：只依赖**入站能力面**（各能力的 `::api`）；`conductor` 的 `Ops` 是它与核心之间的唯一通道。
-- 入口：`src/main.rs` 调 `presentation::cli::run(ops, presentation::web::DEFAULT_PORT, plain)`；`web [端口]` 子命令把控制权交给 Web 渠道（同一份 `Ops`）。
-- 旗语：`--root <dir>`、`--web`、`--port <n>`、`--plain`、`-h/--help`、`-v/--version` 由 `argv.rs` 统一解析（`--x v` 与 `--x=v` 等价；未知旗语给编辑距离建议）；命令手册、Tab 补全与未知命令建议都由 `catalog.rs` 的同一张命令表生成。
+- 入口：`src/main.rs` 调 `presentation::cli::run(ops, presentation::web::DEFAULT_PORT, plain, anim)`；`web [端口]` 子命令把控制权交给 Web 渠道（同一份 `Ops`）。
+- 旗语：`--root <dir>`、`--web`、`--port <n>`、`--plain`、`--no-anim`、`-h/--help`、`-v/--version` 由 `argv.rs` 统一解析（`--x v` 与 `--x=v` 等价；未知旗语给编辑距离建议）；命令手册、Tab 补全与未知命令建议都由 `catalog.rs` 的同一张命令表生成。
 - 状态归属：不持状态、不落盘；会话与业务状态都在核心，本层只读 `Ops` 回报。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）

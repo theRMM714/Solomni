@@ -17,9 +17,9 @@ pub enum CliExit {
 }
 
 /// 目的：转录中心主循环：交互模式用固定输入框，非交互模式保持逐行输入（输出不变）。
-/// 参数：`web_default_port` 是会话内 `web` 命令不带端口时的默认值；`plain` 为真则强制纯文本。
-pub fn run(ops: Ops, web_default_port: u16, plain: bool) -> CliExit {
-    let interactive = term::init(plain);
+/// 参数：`web_default_port` 是会话内 `web` 命令不带端口时的默认值；`plain` 为真则强制纯文本；`anim` 为假则生成态不轮流刷帧。
+pub fn run(ops: Ops, web_default_port: u16, plain: bool, anim: bool) -> CliExit {
+    let interactive = term::init(plain, anim);
     term::set_completer(catalog::complete);
     if interactive {
         term::banner(&startup_tagline(), &startup_facts(&ops));
@@ -145,7 +145,8 @@ use view::*;
 pub(crate) use flows::eof_stop;
 #[cfg(test)]
 pub(crate) use gate::{
-    NO_AGENTS, create_session_action, pick_agents, pick_option, split_names, waiting_lines,
+    NO_AGENTS, create_session_action, pick_agents, pick_option, spin_frames, split_names,
+    waiting_lines,
 };
 #[cfg(test)]
 pub(crate) use input::{Editor, Key, Step, clear_history};

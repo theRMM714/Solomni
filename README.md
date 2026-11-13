@@ -93,7 +93,7 @@ node dev.js test|fmt|clippy   # 本机开发回路：改一层验一层；cargo 
   校验值由 `node pins.js update` 按上游校验源生成（不手抄）；`node pins.js check` 只读比对，CI 的 `pins-check` 每周检查一次，不写文件、不开 PR。
   用户覆盖走 `.home/settings.yaml` 与环境变量，不改仓库里的台账。
 - **没有可用模型就不建会话**：先登记供应商与模型并设定核心默认；缺了如实拒绝并指明缺什么，不回落假模型。
-- 常用参数：`--root <目录>`（换产品根）、`--web`（直接进 Web 界面）、`--port <端口>`、`--plain`（无色纯文本）、`--release`；`--help` 看旗语与命令手册（`--help --all` 展开隐藏项）。
+- 常用参数：`--root <目录>`（换产品根）、`--web`（直接进 Web 界面）、`--port <端口>`、`--plain`（无色纯文本）、`--no-anim`（生成态不刷帧）、`--release`；`--help` 看旗语与命令手册（`--help --all` 展开隐藏项）。
 - 终端提示符下的命令：输入 `help`（或 `/help`）得到全量清单与旗语规范（`src/presentation/cli/catalog.rs` 的命令表；非交互模式启动时也会打印）；回档走 `rewind`，供应商 / 模型 / 核心默认模型分别走 `provider` / `model` / `core`。
 
 ### 配供应商与模型

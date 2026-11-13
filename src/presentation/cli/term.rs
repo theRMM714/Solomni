@@ -40,18 +40,24 @@ struct Ui {
     tty: bool,
     cols: usize,
     status: String,
+    ascii: bool,
+    anim: bool,
 }
 
 /// 目的：初始化终端会话；返回是否交互（否 = 老式逐行输入，输出保持机器可解析）。
-pub(super) fn init(plain: bool) -> bool {
+/// 参数：`plain` 强制纯文本；`anim` 为假时生成态只画静态帧。
+pub(super) fn init(plain: bool, anim: bool) -> bool {
     let tty = !plain && io::stdout().is_terminal() && io::stdin().is_terminal();
     let paint = Paint::new(Level::detect(plain || !tty));
+    let ascii = std::env::var("TERM").map(|t| t == "dumb").unwrap_or(false);
     UI.with(|cell| {
         *cell.borrow_mut() = Some(Ui {
             paint,
             tty,
             cols: term_cols(),
             status: String::new(),
+            ascii,
+            anim,
         });
     });
     if tty {
@@ -99,7 +105,7 @@ pub(super) fn bold(ink: Ink, text: &str) -> String {
 
 /// 目的：往转录区打一行（不留在固定帧里，随输出滚上去）。
 pub(super) fn line(text: &str) {
-    println!("{}", text);
+    emit(text);
 }
 
 /// 目的：登记 Tab 补全的候选来源：命令表由 `cli.rs` 注入，终端层不认识任何命令。
@@ -117,13 +123,63 @@ pub(super) fn cols() -> usize {
     current().2
 }
 
+/// 目的：终端是不是 `TERM=dumb`：是则所有画框字形退回 ASCII。
+fn ascii() -> bool {
+    UI.with(|cell| cell.borrow().as_ref().map(|ui| ui.ascii).unwrap_or(false))
+}
+
+/// 目的：生成态是否允许动画（`--no-anim` 与降级时为假，spinner 停在静态帧）。
+pub(super) fn anim() -> bool {
+    UI.with(|cell| cell.borrow().as_ref().map(|ui| ui.anim).unwrap_or(false))
+}
+
+/// 目的：把画框与状态字形退回纯 ASCII：`TERM=dumb` 下整屏仍然可读。
+fn fold(text: &str) -> String {
+    text.chars()
+        .map(|c| match c {
+            '╭' | '╮' | '╰' | '╯' | '┌' | '┐' | '└' | '┘' => '+',
+            '─' | '━' => '-',
+            '│' | '┃' => '|',
+            '●' | '◆' | '◈' => '*',
+            '✓' => 'v',
+            '✗' | '✘' => 'x',
+            '›' => '>',
+            '↑' => '^',
+            '↓' => 'v',
+            '→' => '>',
+            '←' => '<',
+            '⏺' => 'o',
+            '·' => '-',
+            '█' => '#',
+            '⠋' | '⠙' | '⠹' | '⠸' | '⠼' | '⠴' | '⠦' | '⠧' | '⠇' | '⠏' | '⠿' => {
+                '|'
+            }
+            _ => c,
+        })
+        .collect()
+}
+
+/// 目的：按当前终端能力写出一行：`TERM=dumb` 时先折成 ASCII。
+fn emit(text: &str) {
+    if ascii() {
+        println!("{}", fold(text));
+    } else {
+        println!("{}", text);
+    }
+}
+
 /// 目的：一行原地位刷新的活状态（生成中的 spinner 与耗时）：不占转录区，事件落地前由调用方清掉。
 pub(super) fn live(text: &str) {
     let (paint, tty, cols) = current();
     if !tty {
         return;
     }
-    let body = paint.paint(Ink::Dim, &width::cut(text, cols.saturating_sub(1)));
+    let text = if ascii() {
+        fold(text)
+    } else {
+        text.to_string()
+    };
+    let body = paint.paint(Ink::Dim, &width::cut(&text, cols.saturating_sub(1)));
     let mut out = io::stdout();
     let _ = write!(out, "\r\x1b[2K{}", body);
     let _ = out.flush();
@@ -156,32 +212,38 @@ fn install_panic_restore() {
 /// 目的：启动页：冰青字标 + 副行 + 事实行，一次性打进转录区（之后不再重绘）。
 pub(super) fn banner(tagline: &str, facts: &[String]) {
     let (paint, tty, cols) = current();
-    let mut out = io::stdout();
-    let _ = writeln!(out);
-    if tty && cols >= 46 {
+    let dumb = ascii();
+    println!();
+    if tty && dumb {
+        emit(&paint.bold(Ink::Ice, "SOLOMNI"));
+    } else if tty && cols >= 46 {
         for (row, art) in WORDMARK.iter().enumerate() {
-            let _ = writeln!(out, "{}", paint.rgb(theme::wordmark_rgb(row), art));
+            emit(&paint.rgb(theme::wordmark_rgb(row), art));
         }
     } else if tty {
-        let _ = writeln!(out, "{}", paint.bold(Ink::Ice, "SOLOMNI"));
+        emit(&paint.bold(Ink::Ice, "SOLOMNI"));
     }
-    let _ = writeln!(out, "{}", paint.paint(Ink::Dim, tagline));
+    emit(&paint.paint(Ink::Dim, tagline));
     if !facts.is_empty() {
         let sep = paint.paint(Ink::Line, "  ·  ");
-        let _ = writeln!(out, "{}", facts.join(&sep));
+        emit(&facts.join(&sep));
     }
     if tty {
-        let note = match paint.level() {
-            Level::True => None,
-            Level::Ansi256 => Some("配色：256 色档（真彩终端会显示冰青渐变）"),
-            Level::Ansi16 => Some("配色：16 色档（真彩终端会显示冰青渐变）"),
-            Level::None => Some("配色：无色档（NO_COLOR 或 --plain 时如此）"),
+        let note = if dumb {
+            Some("配色：ASCII 档（TERM=dumb：无颜色、无画框字符）")
+        } else {
+            match paint.level() {
+                Level::True => None,
+                Level::Ansi256 => Some("配色：256 色档（真彩终端会显示冰青渐变）"),
+                Level::Ansi16 => Some("配色：16 色档（真彩终端会显示冰青渐变）"),
+                Level::None => Some("配色：无色档（NO_COLOR 或 --plain 时如此）"),
+            }
         };
         if let Some(note) = note {
-            let _ = writeln!(out, "{}", paint.paint(Ink::Dim, note));
+            emit(&paint.paint(Ink::Dim, note));
         }
     }
-    let _ = writeln!(out);
+    println!();
 }
 
 /// 目的：读一行输入；交互模式下用固定输入框，非交互模式保持逐行回退（机器可解析）。
@@ -252,7 +314,7 @@ fn tty_ask(paint: &Paint, cols: usize, label: &str, status: &str) -> Option<Stri
             paint.paint(Ink::Ice, "›"),
             paint.paint(Ink::Fg, text)
         );
-        println!("{}", echo);
+        emit(&echo);
     }
     answer
 }
@@ -297,6 +359,7 @@ struct Frame<'a> {
     cols: usize,
     label: &'a str,
     status: &'a str,
+    ascii: bool,
     drawn: bool,
 }
 
@@ -307,8 +370,14 @@ impl<'a> Frame<'a> {
             cols,
             label,
             status,
+            ascii: ascii(),
             drawn: false,
         }
+    }
+
+    fn write_line(&self, out: &mut impl Write, line: String) {
+        let line = if self.ascii { fold(&line) } else { line };
+        let _ = writeln!(out, "{}", line);
     }
 
     fn erase(&mut self, out: &mut impl Write) {
@@ -340,31 +409,33 @@ impl<'a> Frame<'a> {
         let area = total.saturating_sub(6);
         let text = width::cut(&editor.line(), area);
         let padn = area.saturating_sub(width::cols(&text));
-        let _ = writeln!(out, "{}", top);
-        let _ = writeln!(
+        self.write_line(out, top);
+        self.write_line(
             out,
-            "{} {}{}{}{}",
-            paint.paint(Ink::Line, "│"),
-            paint.paint(Ink::Ice, "› "),
-            paint.paint(Ink::Fg, &text),
-            " ".repeat(padn),
-            paint.paint(Ink::Line, " │")
+            format!(
+                "{} {}{}{}{}",
+                paint.paint(Ink::Line, "│"),
+                paint.paint(Ink::Ice, "› "),
+                paint.paint(Ink::Fg, &text),
+                " ".repeat(padn),
+                paint.paint(Ink::Line, " │")
+            ),
         );
-        let _ = writeln!(
+        self.write_line(
             out,
-            "{}{}",
-            paint.paint(Ink::Line, "╰"),
-            paint.paint(
-                Ink::Line,
-                &format!("{}╯", "─".repeat(total.saturating_sub(2)))
-            )
+            format!(
+                "{}{}",
+                paint.paint(Ink::Line, "╰"),
+                paint.paint(
+                    Ink::Line,
+                    &format!("{}╯", "─".repeat(total.saturating_sub(2)))
+                )
+            ),
         );
-        let _ = writeln!(out, "{}", paint.paint(Ink::Dim, &width::cut(HINT, total)));
-        let _ = write!(
-            out,
-            "{}",
-            paint.paint(Ink::Dim, &width::cut(self.status, total))
-        );
+        self.write_line(out, paint.paint(Ink::Dim, &width::cut(HINT, total)));
+        let status = paint.paint(Ink::Dim, &width::cut(self.status, total));
+        let status = if self.ascii { fold(&status) } else { status };
+        let _ = write!(out, "{}", status);
         let _ = out.flush();
         self.drawn = true;
         let head = width::cols(&editor.head()).min(area);
@@ -407,6 +478,37 @@ mod tests {
         assert!(lines[3].contains("Enter 发送"), "快捷键提示行");
         assert!(width::cols(lines[3]) <= total);
         assert!(lines[4].contains("就绪"), "状态行跟着输入框走");
+    }
+
+    #[test]
+    fn ascii_fold_replaces_box_and_status_glyphs() {
+        let folded = fold("╭─╮│✓✗●·›⏺");
+        assert_eq!(folded, "+-+|vx*->o");
+        assert!(folded.is_ascii());
+    }
+
+    #[test]
+    fn ascii_frame_stays_ascii() {
+        let paint = Paint::new(Level::None);
+        let mut frame = Frame {
+            paint: &paint,
+            cols: 40,
+            label: "转录中心",
+            status: "● 就绪 · 模型 deepseek-flash",
+            ascii: true,
+            drawn: false,
+        };
+        let editor = Editor::new();
+        let mut buf: Vec<u8> = Vec::new();
+        frame.show(&mut buf, &editor);
+        let text = String::from_utf8(buf).expect("utf8");
+        for glyph in ["╭", "─", "│", "›", "●", "·", "↑", "↓"] {
+            assert!(!text.contains(glyph), "TERM=dumb 下不出现画框字形：{glyph}");
+        }
+        let lines: Vec<&str> = text.split('\n').take(5).collect();
+        assert_eq!(lines.len(), 5);
+        assert!(lines[0].starts_with("+-"), "上边框退回 +-");
+        assert!(lines[1].contains("> "), "输入提示退回 >");
     }
 
     #[test]

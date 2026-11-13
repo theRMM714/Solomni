@@ -165,8 +165,21 @@ fn card_row(inner: usize, text: &str, dim: bool) {
     }
 }
 
-/// 目的：生成态的轮子（10 帧，tick 100ms 与 mock 一致；--no-anim 尚未接线时仍按此绘制）。
+/// 目的：生成态的轮子（10 帧，tick 100ms）；`--no-anim` 与降级时停在静态帧。
 const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+fn spin(tick: usize) -> &'static str {
+    spin_frames(tick, term::anim())
+}
+
+/// 目的：按「是否允许动画」取帧：允许时轮转 10 帧，不允许时固定静态帧（测试与降级共用）。
+pub(crate) fn spin_frames(tick: usize, anim: bool) -> &'static str {
+    if anim {
+        SPINNER[tick % SPINNER.len()]
+    } else {
+        "⠿"
+    }
+}
 
 /// 目的：选中的选项 id：先按序号、再按 id 原文认——两者都是那张卡上**用户看得见**的东西。
 pub(crate) fn pick_option(card: &DecisionCard, ans: &str) -> Option<String> {
@@ -253,7 +266,7 @@ pub(super) fn wait_quiet(ops: &Ops, sid: &str, cursor: &mut u64) {
             tick += 1;
             term::live(&format!(
                 "{} 收尾中 · {}s",
-                SPINNER[tick % SPINNER.len()],
+                spin(tick),
                 started.elapsed().as_secs()
             ));
         }
@@ -310,7 +323,7 @@ pub(super) fn act_interactive(
                     let who = working.clone().unwrap_or_else(|| "生成中".to_string());
                     term::live(&format!(
                         "{} {} · {}s · Esc 只在问卡时可行",
-                        SPINNER[tick % SPINNER.len()],
+                        spin(tick),
                         who,
                         started.elapsed().as_secs()
                     ));

@@ -43,6 +43,13 @@ pub(crate) const FLAGS: &[Flag] = &[
         hidden: false,
     },
     Flag {
+        long: "--no-anim",
+        short: None,
+        value: None,
+        desc: "生成态只画静态帧，不轮流刷 spinner（录屏、慢终端）",
+        hidden: false,
+    },
+    Flag {
         long: "--help",
         short: Some("-h"),
         value: None,
@@ -84,6 +91,7 @@ pub(crate) struct Flags {
     pub(crate) web: bool,
     pub(crate) port: Option<u16>,
     pub(crate) plain: bool,
+    pub(crate) no_anim: bool,
     pub(crate) help: bool,
     pub(crate) version: bool,
     pub(crate) all: bool,
@@ -134,6 +142,10 @@ pub(crate) fn parse(args: &[String]) -> Result<Flags, String> {
             "--plain" => {
                 no_value(&inline, name)?;
                 flags.plain = true;
+            }
+            "--no-anim" => {
+                no_value(&inline, name)?;
+                flags.no_anim = true;
             }
             "--help" | "-h" => {
                 no_value(&inline, name)?;

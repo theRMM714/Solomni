@@ -139,7 +139,7 @@ node dev.js test|fmt|clippy   # one-layer dev commands; cargo only runs through 
   CI job reports drift without writing files or opening PRs. User overrides go through `.home/settings.yaml` and environment
   variables, not the ledger.
 - **No usable model means no session**: register a provider and a model and set the core default first; a missing channel is refused with a precise reason, never replaced by a fake model.
-- Common flags: `--root <dir>` (product root), `--web` (go straight to the web UI), `--port <port>`, `--plain` (no color, plain text), `--release`; `--help` shows the flags and the command manual (`--help --all` expands hidden entries).
+- Common flags: `--root <dir>` (product root), `--web` (go straight to the web UI), `--port <port>`, `--plain` (no color, plain text), `--no-anim` (static frames instead of a spinner), `--release`; `--help` shows the flags and the command manual (`--help --all` expands hidden entries).
 - Commands at the prompt: `help` (or `/help`) shows the full list and the flag rules (`catalog.rs` in `src/presentation/cli`, also printed at startup in non-interactive mode); the rewind command is `rewind`, while providers / models / the core default model are `provider` / `model` / `core`.
 
 ### Add a provider and a model
