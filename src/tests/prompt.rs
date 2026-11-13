@@ -464,3 +464,43 @@ pub(crate) fn user_at_reference_is_rewritten_in_transcript_and_history() {
         h
     );
 }
+
+/// 目的：环境块的路径渲染对两种编码器都对——本机档交给视图盘编码器（视图写法），其余交给会话桥（guest 拼法）。
+/// 约束：不读全局视图盘：视图分支由显式注入的编码器验，否则并行用例会随本进程的分盘状态抖动。
+#[test]
+pub(crate) fn env_path_follows_the_injected_codec() {
+    use crate::capabilities::session::domain::session::prompt::env_path;
+    use crate::capabilities::vm::api::PathBridge;
+    use crate::capabilities::vm::domain::paths::PathDialect;
+    use crate::kernel::ports::PathCodec;
+
+    #[derive(Debug)]
+    struct Fixed;
+    impl PathCodec for Fixed {
+        fn to_host(&self, raw: &str) -> Option<std::path::PathBuf> {
+            Some(std::path::PathBuf::from(raw))
+        }
+        fn to_view(&self, _host: &std::path::Path) -> String {
+            "view:fixed".to_string()
+        }
+    }
+
+    let host = std::path::Path::new("w").join("a");
+    // 故意用跨方言的桥：让 None 分支的 guest 拼法与宿主拼法不同，断言才不是同义反复。
+    let dialect = if cfg!(windows) {
+        PathDialect::Posix
+    } else {
+        PathDialect::Windows
+    };
+    let bridge = PathBridge::new(std::env::consts::OS, dialect);
+    assert_eq!(
+        env_path(Some(&Fixed), &bridge, &host),
+        "view:fixed",
+        "给了编码器就按视图写法渲染"
+    );
+    assert_eq!(
+        env_path(None, &bridge, &host),
+        crate::kernel::api::slash(std::path::Path::new(&bridge.to_guest(&host))),
+        "没有编码器就交给会话桥（本机档恒等、虚拟机档 guest 拼法）"
+    );
+}

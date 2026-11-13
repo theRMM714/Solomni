@@ -39,17 +39,17 @@ fn early_exit(flags: &presentation::cli::argv::Flags) -> Option<i32> {
 }
 
 /// 目的：视图盘开关（`SOLOMNI_VIEW_DRIVE=0` 关闭；未设、空值或其它值都开）。
-/// 约束：这是排障用的逃生口——关掉后路径写法与旧版一致，围栏仍按宿主真实路径授权。
+/// 约束：这是排障用的逃生口——关掉后路径写法与旧版一致，围栏仍按宿主真实路径授权；
+///   只有 Windows 会真分配盘符，非 Windows 构建里这个开关没有读者。
+#[cfg(windows)]
 fn view_drive_enabled(raw: Option<&str>) -> bool {
     !raw.is_some_and(|v| v.trim() == "0")
 }
 
 /// 目的：分配本实例的视图盘。返回「真的分配了」——真才在退出时释放。
-/// 约束：非 Windows / 逃生口关闭 / 分配失败都返回 false（失败只打一行 `[围栏]`，启动照旧用宿主真实路径）。
+/// 约束：逃生口关闭 / 分配失败都返回 false（失败只打一行 `[围栏]`，启动照旧用宿主真实路径）。
+#[cfg(windows)]
 fn view_drive_begin(root: &Path, home: &Path) -> bool {
-    if !cfg!(windows) {
-        return false;
-    }
     if !view_drive_enabled(std::env::var("SOLOMNI_VIEW_DRIVE").ok().as_deref()) {
         return false;
     }
@@ -62,14 +62,32 @@ fn view_drive_begin(root: &Path, home: &Path) -> bool {
     }
 }
 
+/// 目的：非 Windows 没有视图盘：不分配，调用方照旧按宿主真实路径跑（逃生口也无从生效）。
+#[cfg(not(windows))]
+fn view_drive_begin(_root: &Path, _home: &Path) -> bool {
+    false
+}
+
 /// 目的：只清扫视图盘的崩溃残留（不分配盘符）：维护命令与早退路径用它，别让残留映射一直占字母。
-/// 约束：非 Windows 直接跳过；扫不到东西也算成功——内核只把撤不掉的映射打一行 `[视图盘]`，不影响退出码。
+/// 约束：扫不到东西也算成功——内核只把撤不掉的映射打一行 `[视图盘]`，不影响退出码。
+#[cfg(windows)]
 fn view_drive_sweep(home: &Path) {
-    if !cfg!(windows) {
-        return;
-    }
     kernel::api::sweep_view_drive(home);
 }
+
+/// 目的：非 Windows 没有视图盘可清扫。
+#[cfg(not(windows))]
+fn view_drive_sweep(_home: &Path) {}
+
+/// 目的：退出时注销本进程的视图盘登记（最后一个使用者才真撤映射）。
+#[cfg(windows)]
+fn view_drive_release(home: &Path) {
+    kernel::api::release_view_drive(home);
+}
+
+/// 目的：非 Windows 没有视图盘可释放。
+#[cfg(not(windows))]
+fn view_drive_release(_home: &Path) {}
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -698,7 +716,7 @@ fn main() {
         Err(e) => {
             eprintln!("[装配失败] {}", e);
             if view_drive {
-                kernel::api::release_view_drive(&home);
+                view_drive_release(&home);
             }
             std::process::exit(1);
         }
@@ -743,7 +761,7 @@ fn main() {
     }
     // 正常退出：注销本 pid 的视图盘登记，没有存活 pid 才真撤映射。崩溃 / 被强杀的残留由下次启动清扫。
     if view_drive {
-        kernel::api::release_view_drive(&home);
+        view_drive_release(&home);
     }
 }
 
@@ -771,6 +789,7 @@ mod prelude_tests {
         assert_eq!(early_exit(&Flags::default()), None, "普通启动继续装配");
     }
 
+    #[cfg(windows)]
     #[test]
     fn view_drive_switch_only_off_for_zero() {
         assert!(view_drive_enabled(None), "默认开");
@@ -778,5 +797,20 @@ mod prelude_tests {
         assert!(view_drive_enabled(Some("")), "空值按未设置处理");
         assert!(!view_drive_enabled(Some("0")), "0 是排障逃生口");
         assert!(!view_drive_enabled(Some(" 0 ")), "两侧空白也认");
+    }
+
+    /// 目的：非 Windows 构建里视图盘三个钩子都是空操作——不分配、不清扫、不释放，路径编解码器恒 None。
+    /// 约束：只在这条平台分叉存在时才有意义，Windows 上有盘符副作用，不能拿同一用例钉它。
+    #[cfg(not(windows))]
+    #[test]
+    fn view_drive_hooks_are_noops_off_windows() {
+        let home = std::env::temp_dir().join("solomni-view-drive-noop");
+        assert!(!view_drive_begin(&home, &home), "非 Windows 不分配盘符");
+        view_drive_sweep(&home);
+        view_drive_release(&home);
+        assert!(
+            kernel::api::view_codec().is_none(),
+            "没有视图盘就没有编码器"
+        );
     }
 }
