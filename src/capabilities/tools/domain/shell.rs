@@ -427,7 +427,12 @@ params:
         assert_eq!(f.status.as_deref(), Some("exit"));
         assert!(!f.truncated);
         // 围栏准备不足一秒不给回放看（与回执行同一口径）。
-        let quick = facts("C:\\work", Duration::from_millis(400), Some(Duration::from_millis(400)), "ok");
+        let quick = facts(
+            "C:\\work",
+            Duration::from_millis(400),
+            Some(Duration::from_millis(400)),
+            "ok",
+        );
         assert_eq!(quick.elapsed_secs(), 0);
         assert_eq!(quick.fence_prep_secs(), None);
         assert_eq!(quick.exit_code, None, "没有收尾行就没有退出码");
@@ -437,7 +442,9 @@ params:
     #[test]
     fn truncated_recognises_both_truncation_markers() {
         assert!(truncated("[结果截断] 本次回执共 16048 字符"));
-        assert!(truncated("  [截断] 输出共 20000 字符；保留开头 4000 与结尾 12000 字符"));
+        assert!(truncated(
+            "  [截断] 输出共 20000 字符；保留开头 4000 与结尾 12000 字符"
+        ));
         assert!(!truncated("[shell] 退出码 0"));
         assert!(!truncated("结果截断但不是行首标记"));
     }

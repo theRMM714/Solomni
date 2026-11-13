@@ -463,6 +463,62 @@ pub(crate) fn body_json_is_not_a_core_operation() {
     assert!(err.contains("没有调用 plan"), "{}", err);
 }
 
+/// 目的：原生通道替身：不管消息，只回结构化槽位里的调用（正文为空）。
+struct StructuredCallChat {
+    calls: Vec<crate::capabilities::llm::api::ToolCall>,
+}
+
+impl crate::capabilities::llm::api::Chat for StructuredCallChat {
+    fn complete(
+        &mut self,
+        _m: &[crate::capabilities::llm::api::Msg],
+        _o: crate::capabilities::llm::api::CompleteOpts<'_>,
+        _on: &mut dyn FnMut(crate::capabilities::llm::api::Chunk) -> bool,
+    ) -> crate::capabilities::llm::api::Completion {
+        let mut done = crate::capabilities::llm::api::Completion::text("");
+        done.calls = self.calls.clone();
+        done
+    }
+}
+
+/// 目的：原生通道把调用放在**结构化槽位**（不是正文）时，核心操作照样从槽位取载荷，并推这一轮的事实。
+#[test]
+pub(crate) fn core_operation_takes_a_native_structured_call() {
+    let mut chat = StructuredCallChat {
+        calls: vec![crate::capabilities::llm::api::ToolCall {
+            id: "call-1".to_string(),
+            name: "plan".to_string(),
+            args_json: "{\"plan\":\"方案\",\"nodes\":[]}".to_string(),
+        }],
+    };
+    let rows = Arc::new(Mutex::new(Vec::new()));
+    let seen = Arc::clone(&rows);
+    let out = crate::capabilities::session::api::core_operation(
+        &*test_tools_svc(),
+        "planner",
+        "plan",
+        crate::capabilities::llm::api::ToolMode::Native,
+        &mut chat,
+        &[crate::capabilities::llm::api::Msg::user("出方案")],
+        crate::capabilities::llm::api::CompleteOpts::plain(false),
+        None,
+        None,
+        &mut |e: crate::capabilities::session::api::SessionEvent| {
+            seen.lock().expect("锁").push(e);
+        },
+    )
+    .expect("原生槽位要能交出方案");
+    assert_eq!(out["plan"], "方案");
+    let rows = rows.lock().expect("锁");
+    assert!(
+        rows.iter().any(|e| matches!(
+            e,
+            crate::capabilities::session::api::SessionEvent::Transcript(_)
+        )),
+        "这一轮的事实要推出去"
+    );
+}
+
 /// 目的：回报走**工具调用**（不是正文 JSON）：执行席拿得到它，调用它不碰文件、回执带出回报内容。
 #[test]
 pub(crate) fn executor_reports_through_a_tool_call() {
