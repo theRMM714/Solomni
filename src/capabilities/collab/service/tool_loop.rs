@@ -753,7 +753,7 @@ pub(crate) fn run_shell(
         slot.start(&call.script, scope, &cwd_view);
     }
     // 本机档的围栏准备耗时由 ProcessRunner 同线程交棒（见 kernel 的 take_fence_prep）；虚拟机档没有本机 ACL 准备，这里恒为 None。
-    let mut fence_prep: Option<std::time::Duration> = None;
+    let mut fence_prep: Option<crate::kernel::api::FenceTiming> = None;
     let mut outcome = if ctx.tier == crate::kernel::api::Tier::Vm {
         let run = crate::capabilities::vm::api::GuestRun {
             command: call.script.clone(),
@@ -795,7 +795,7 @@ pub(crate) fn run_shell(
         outcome.output.push_str(&api::cwd_elapsed_line(
             &cwd_view,
             elapsed.as_secs(),
-            fence_prep.map(|d| d.as_secs()),
+            fence_prep.as_ref().map(|timing| timing.as_secs()),
         ));
     }
     let external = ctx.sandbox.permissions.decision_for(
@@ -806,7 +806,14 @@ pub(crate) fn run_shell(
     );
     let outcome = api::with_scope_hint(outcome, call.scope, external);
     // 事实只从这一次执行产出：实况槽与会话回放读同一份，呈现层不再解析回执。
-    let facts = ran.then(|| api::shell_facts(&cwd_view, elapsed, fence_prep, &outcome.output));
+    let facts = ran.then(|| {
+        api::shell_facts(
+            &cwd_view,
+            elapsed,
+            fence_prep.map(|timing| timing.total),
+            &outcome.output,
+        )
+    });
     if let Some(slot) = &slot {
         slot.finish(facts.as_ref(), outcome.ok, &outcome.output);
     }
