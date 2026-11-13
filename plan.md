@@ -7,10 +7,10 @@
 
 | 顺序 | PR | 分支 | 内容 | 状态 |
 | --- | --- | --- | --- | --- |
-| 1 | #78 | `task/shell-facts-receipt` | shell 回执结构化事实落盘（`ShellFacts`），回放与实况同源 | Ready，CI 修复后重跑 |
+| 1 | #78 | `task/shell-facts-receipt` | shell 回执结构化事实落盘（`ShellFacts`），回放与实况同源 | Ready，CI 全绿，待合并 |
 | 2 | #79 | `task/fence-prep-timing` | 围栏准备分根计时、进度提示、台账锁收窄、可信基座授权归位 | Draft |
 | 3 | #80 | `task/portable-setup` | 便携启动：PATH shim、`--setup` 维护旗、首次授权后围栏预授与启动对账 | Draft |
-| 4 | #81 | `task/plan-and-flow` | 本文件 | Draft |
+| 4 | #81 | `task/plan-and-flow` | 本文件 | Draft，文档门禁已过，可随时合并 |
 
 合并顺序固定为 #78 → #79 → #80（#81 可随时）。#79 / #80 都改 `docs/kernel/README.md`、`docs/permission/README.md`，先合并者在 main 上定稿，后者 merge 前 rebase 解冲突。
 
