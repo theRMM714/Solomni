@@ -156,9 +156,9 @@ pub fn last_shell(events: &[serde_json::Value]) -> Option<ShellLive> {
                 continue;
             }
             // 新转录带结构化事实：直接用，不再解析回执；旧转录缺这段才回落解析（两态同值）。
-            let facts = tool.get("shell").and_then(|f| {
-                serde_json::from_value::<ShellFacts>(f.clone()).ok()
-            });
+            let facts = tool
+                .get("shell")
+                .and_then(|f| serde_json::from_value::<ShellFacts>(f.clone()).ok());
             let (cwd, elapsed_secs, fence_prep_secs, exit_code, status) = match facts {
                 Some(facts) => (
                     facts.cwd.clone(),
@@ -526,15 +526,18 @@ mod tests {
 
     #[test]
     fn last_shell_falls_back_per_row_when_new_and_old_rows_are_mixed() {
-        let events = vec![transcript(json!([
-            {"id": 0, "tool": {"name": "shell", "module": "", "ok": true,
-             "args": r#"{"command":"first"}"#,
-             "output": "[shell] 退出码 0\n[shell] cwd /old · 耗时 3 秒"}}
-        ])), transcript(json!([
-            {"id": 1, "tool": {"name": "shell", "module": "", "ok": true,
-             "args": r#"{"command":"second"}"#, "output": "[shell] 退出码 0",
-             "shell": {"cwd": "/new", "elapsed_ms": 9_000, "exit_code": 0, "status": "exit"}}}
-        ]))];
+        let events = vec![
+            transcript(json!([
+                {"id": 0, "tool": {"name": "shell", "module": "", "ok": true,
+                 "args": r#"{"command":"first"}"#,
+                 "output": "[shell] 退出码 0\n[shell] cwd /old · 耗时 3 秒"}}
+            ])),
+            transcript(json!([
+                {"id": 1, "tool": {"name": "shell", "module": "", "ok": true,
+                 "args": r#"{"command":"second"}"#, "output": "[shell] 退出码 0",
+                 "shell": {"cwd": "/new", "elapsed_ms": 9_000, "exit_code": 0, "status": "exit"}}}
+            ])),
+        ];
         let live = last_shell(&events).expect("最近一次");
         assert_eq!(live.command, "second");
         assert_eq!(live.cwd, "/new");

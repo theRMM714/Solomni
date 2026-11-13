@@ -385,7 +385,11 @@ fn vm_shell_receipt_uses_the_environment_path_form() {
         cwd
     );
     let facts = done[0].3.as_ref().expect("要带结构化事实");
-    assert_eq!(facts.cwd, bridge.to_view(&mt.sandbox.private), "事实也用 guest 写法");
+    assert_eq!(
+        facts.cwd,
+        bridge.to_view(&mt.sandbox.private),
+        "事实也用 guest 写法"
+    );
     assert_eq!(facts.fence_prep_ms, None);
     assert_eq!(facts.status.as_deref(), Some("exit"));
     assert!(!facts.truncated);
@@ -499,4 +503,205 @@ pub(crate) fn shell_batch_adopts_sandbox_changes_into_the_shared_area() {
         done[0].1.output
     );
     let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 目的：私有沙箱为空（cwd 没有落点）时如实拒绝，不落进程、不发明事实。
+#[test]
+pub(crate) fn shell_without_a_private_sandbox_refuses_without_running() {
+    let runner = Arc::new(ShellRunner::new("ok", true));
+    let mut mt = member(Arc::clone(&runner));
+    mt.sandbox.private = std::path::PathBuf::new();
+    let cancel = AtomicBool::new(false);
+    let mut sink = |_: SessionEvent| {};
+    let done = run_batch(
+        &mut mt,
+        &shell_plan(r#"{"command":"echo hi","timeout_secs":5}"#),
+        None,
+        None,
+        &cancel,
+        &mut sink,
+    );
+    assert!(!done[0].1.ok);
+    assert!(
+        done[0].1.output.contains("没有私有沙箱"),
+        "{}",
+        done[0].1.output
+    );
+    assert!(
+        runner.calls.lock().expect("锁").is_empty(),
+        "没有落点就不该起进程"
+    );
+    assert!(done[0].3.is_none(), "没执行就不带结构化事实");
+}
+
+/// 目的：虚拟机档没有 guest 租约时如实拒绝，不落进程、不发明事实。
+#[test]
+pub(crate) fn vm_shell_without_a_guest_lease_refuses_without_running() {
+    let runner = Arc::new(ShellRunner::new("host", true));
+    let mut mt = member(Arc::clone(&runner));
+    mt.tier = crate::kernel::api::Tier::Vm;
+    assert!(mt.guest_lease.is_empty(), "替身默认没有租约");
+    let vm = Arc::new(crate::tests::doubles::RecordingVm::default());
+    mt.vm = vm.clone();
+    let cancel = AtomicBool::new(false);
+    let mut sink = |_: SessionEvent| {};
+    let done = run_batch(
+        &mut mt,
+        &shell_plan(r#"{"command":"echo guest","timeout_secs":5}"#),
+        None,
+        None,
+        &cancel,
+        &mut sink,
+    );
+    assert!(!done[0].1.ok);
+    assert!(
+        done[0].1.output.contains("没有 guest 租约"),
+        "{}",
+        done[0].1.output
+    );
+    assert!(
+        runner.calls.lock().expect("锁").is_empty(),
+        "VM 档也不该走宿主 runner"
+    );
+    assert!(
+        vm.fenced_runs.lock().expect("锁").is_empty(),
+        "没有租约就不该派进 guest"
+    );
+    assert!(done[0].3.is_none(), "没执行就不带结构化事实");
+}
+
+/// 目的：仅可查看档拒绝执行类工具（deny 不弹卡、不落进程）。
+#[test]
+pub(crate) fn view_profile_denies_shell_without_asking_or_running() {
+    let runner = Arc::new(ShellRunner::new("ok", true));
+    let mut mt = with_profile(member(Arc::clone(&runner)), ProfileId::View);
+    let cancel = AtomicBool::new(false);
+    let mut sink = |_: SessionEvent| {};
+    let done = run_batch(
+        &mut mt,
+        &shell_plan(r#"{"command":"echo hi","timeout_secs":5}"#),
+        None,
+        None,
+        &cancel,
+        &mut sink,
+    );
+    assert!(!done[0].1.ok);
+    assert!(
+        done[0].1.output.contains("不允许这次调用"),
+        "{}",
+        done[0].1.output
+    );
+    assert!(
+        runner.calls.lock().expect("锁").is_empty(),
+        "deny 不该落进程"
+    );
+    assert!(done[0].3.is_none(), "没执行就不带结构化事实");
+}
+
+/// 目的：external 档需要用户确认，但没有可回答的前端时按拒绝处理。
+#[test]
+pub(crate) fn ask_without_a_confirming_frontend_is_refused() {
+    let runner = Arc::new(ShellRunner::new("ok", true));
+    let mut mt = with_profile(member(Arc::clone(&runner)), ProfileId::External);
+    let cancel = AtomicBool::new(false);
+    let mut sink = |_: SessionEvent| {};
+    let done = run_batch(
+        &mut mt,
+        &shell_plan(r#"{"command":"cat ../work/x","scope":"external"}"#),
+        None,
+        None,
+        &cancel,
+        &mut sink,
+    );
+    assert!(!done[0].1.ok);
+    assert!(
+        done[0].1.output.contains("需要用户确认"),
+        "{}",
+        done[0].1.output
+    );
+    assert!(
+        runner.calls.lock().expect("锁").is_empty(),
+        "没有前端就不该落进程"
+    );
+    assert!(done[0].3.is_none(), "没执行就不带结构化事实");
+}
+
+/// 目的：闸门已解析过参数，执行入口的单点防御仍要如实拒绝坏参数（不起进程、不发明事实）。
+#[test]
+pub(crate) fn shell_entry_refuses_unparsable_args() {
+    use crate::capabilities::collab::service::tool_loop::{CallGrant, run_shell};
+    use crate::capabilities::permission::api::{Decision, Reach, ReachSet};
+    let runner = Arc::new(ShellRunner::new("ok", true));
+    let mt = member(Arc::clone(&runner));
+    let grant = CallGrant {
+        reach: ReachSet::from([Reach::Private]),
+        decision: Decision::Allow,
+    };
+    let cancel = AtomicBool::new(false);
+    let (out, facts) = run_shell(&mt, "shell", "不是 JSON", None, &grant, &cancel);
+    assert!(!out.ok);
+    assert!(out.output.contains("参数不是合法 JSON"), "{}", out.output);
+    assert!(
+        runner.calls.lock().expect("锁").is_empty(),
+        "参数坏就不该起进程"
+    );
+    assert!(facts.is_none(), "没执行就不带结构化事实");
+}
+
+/// 目的：装配缺了 shell 声明时，执行入口如实说"工具不可用"，不起进程。
+#[test]
+pub(crate) fn shell_entry_refuses_when_the_declaration_is_missing() {
+    use crate::capabilities::collab::service::tool_loop::{CallGrant, run_shell};
+    use crate::capabilities::permission::api::{Decision, Reach, ReachSet};
+    let runner = Arc::new(ShellRunner::new("ok", true));
+    let mut mt = member(Arc::clone(&runner));
+    mt.builtin_tools.remove("shell");
+    let grant = CallGrant {
+        reach: ReachSet::from([Reach::Private]),
+        decision: Decision::Allow,
+    };
+    let cancel = AtomicBool::new(false);
+    let (out, facts) = run_shell(
+        &mt,
+        "shell",
+        r#"{"command":"echo hi"}"#,
+        None,
+        &grant,
+        &cancel,
+    );
+    assert!(!out.ok);
+    assert!(
+        runner.calls.lock().expect("锁").is_empty(),
+        "没有声明就不该起进程"
+    );
+    assert!(facts.is_none(), "没执行就不带结构化事实");
+}
+
+/// 目的：闸门认不出这次调用（未知工具）时如实拒绝，不起进程。
+#[test]
+pub(crate) fn unknown_tool_is_refused_before_running() {
+    let runner = Arc::new(ShellRunner::new("ok", true));
+    let mut mt = member(Arc::clone(&runner));
+    // 没有模块可归属：未知工具在闸门就判死（有模块时那属于派发消歧，走另一条路）。
+    mt.modules.clear();
+    let cancel = AtomicBool::new(false);
+    let mut sink = |_: SessionEvent| {};
+    let done = run_batch(
+        &mut mt,
+        &[(None, "no-such-tool".to_string(), "{}".to_string())],
+        None,
+        None,
+        &cancel,
+        &mut sink,
+    );
+    assert!(!done[0].1.ok);
+    assert!(
+        done[0].1.output.contains("未知工具"),
+        "{}",
+        done[0].1.output
+    );
+    assert!(
+        runner.calls.lock().expect("锁").is_empty(),
+        "未知工具不该落进程"
+    );
 }

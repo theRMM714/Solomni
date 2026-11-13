@@ -10,6 +10,19 @@ use crate::capabilities::session::api::{MemberTools, SessionEvent};
 use crate::capabilities::tools::api::{Observations, ShellFacts, ToolSchema};
 use crate::capabilities::workspace::api::ReadFact;
 use crate::kernel::api::ToolOutcome;
+
+/// 目的：一次调用的结果形态（标签，结果，读事实，shell 结构化事实），只为把签名读短。
+pub(crate) type CallDone = (String, ToolOutcome, Option<ReadFact>, Option<ShellFacts>);
+
+/// 目的：分支执行体的结果形态，在 CallDone 前多带一份观察账本副本（并发批次按原序合并）。
+pub(crate) type BranchDone = (
+    String,
+    ToolOutcome,
+    Observations,
+    Option<ReadFact>,
+    Option<ShellFacts>,
+);
+
 /// 目的：执行一次工具调用：内置优先；外部工具按模块走（模块为空时由 dispatch_external 如实报错）。
 ///   账本经**分支副本**回到本成员（见 run_branch）——串行与并发只有这一条执行路径。
 pub(crate) fn run_one(
@@ -20,7 +33,7 @@ pub(crate) fn run_one(
     ask: Option<&dyn crate::kernel::ports::AskUser>,
     grant: &CallGrant,
     cancel: &std::sync::atomic::AtomicBool,
-) -> (String, ToolOutcome, Option<ReadFact>, Option<ShellFacts>) {
+) -> CallDone {
     let (label, outcome, branch, read, shell) =
         run_branch(ctx, module, name, args_json, ask, grant, cancel);
     // 串行：分支的副本就是"这次调用之后"的账本，直接接管（与逐个记账等价）。
@@ -39,13 +52,7 @@ pub(crate) fn run_branch(
     ask: Option<&dyn crate::kernel::ports::AskUser>,
     grant: &CallGrant,
     cancel: &std::sync::atomic::AtomicBool,
-) -> (
-    String,
-    ToolOutcome,
-    crate::capabilities::tools::api::Observations,
-    Option<ReadFact>,
-    Option<ShellFacts>,
-) {
+) -> BranchDone {
     let mut branch = ctx.observations.clone();
     // 这一趟若是一次完整的 read：它读到了哪几行、当时的指纹（挂到工具行上，发送视图据此判过期）。
     let mut read: Option<ReadFact> = None;
@@ -357,9 +364,8 @@ pub(crate) fn run_batch(
     ask: Option<&dyn crate::kernel::ports::AskUser>,
     cancel: &std::sync::atomic::AtomicBool,
     sink: &mut dyn FnMut(SessionEvent),
-) -> Vec<(String, ToolOutcome, Option<ReadFact>, Option<ShellFacts>)> {
-    let mut done: Vec<Option<(String, ToolOutcome, Option<ReadFact>, Option<ShellFacts>)>> =
-        (0..plan.len()).map(|_| None).collect();
+) -> Vec<CallDone> {
+    let mut done: Vec<Option<CallDone>> = (0..plan.len()).map(|_| None).collect();
     let grants: Vec<Result<CallGrant, String>> = plan
         .iter()
         .map(|(module, tool, args)| grant_for(ctx, module.as_deref(), tool, args))
@@ -443,13 +449,7 @@ pub(crate) fn run_batch(
                 j += 1;
             }
             let ctx_ref: &MemberTools = ctx;
-            let batch: Vec<(
-                String,
-                ToolOutcome,
-                crate::capabilities::tools::api::Observations,
-                Option<ReadFact>,
-                Option<ShellFacts>,
-            )> = std::thread::scope(|s| {
+            let batch: Vec<BranchDone> = std::thread::scope(|s| {
                 let handles: Vec<_> = plan[i..j]
                     .iter()
                     .enumerate()
@@ -517,7 +517,7 @@ pub(crate) fn run_batch(
 fn adopt_sandbox(
     ctx: &MemberTools,
     plan: &[(Option<String>, String, String)],
-    done: &mut [Option<(String, ToolOutcome, Option<ReadFact>, Option<ShellFacts>)>],
+    done: &mut [Option<CallDone>],
 ) {
     let Some(ws) = ctx.workspace.as_ref() else {
         return;
@@ -687,7 +687,7 @@ pub(crate) fn deny(ctx: &MemberTools, why: String) -> ToolOutcome {
 
 /// 目的：执行一次 shell：按 scope 派生围栏，host 走 ProcessRunner，VM 走 guest；回执补 scope 提示。
 /// 约束：requested 已在 grant_for 里校验；这里只按 granted 派生围栏，不自动升级 scope。
-fn run_shell(
+pub(crate) fn run_shell(
     ctx: &MemberTools,
     name: &str,
     args_json: &str,
