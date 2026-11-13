@@ -137,3 +137,106 @@ fn eof_answers_a_pending_card_by_stopping_instead_of_hanging() {
     );
     assert!(!ops.sessions.is_running(sid), "EOF 收场后这条会话不再在跑");
 }
+/// 行编辑：插入、左移、再插入与退格都按光标位置生效。
+#[test]
+fn editor_edits_around_the_cursor() {
+    cli::clear_history();
+    let mut ed = cli::Editor::new();
+    for c in "abc".chars() {
+        assert_eq!(ed.key(cli::Key::Char(c)), cli::Step::Edit);
+    }
+    ed.key(cli::Key::Left);
+    ed.key(cli::Key::Char('X'));
+    assert_eq!(ed.line(), "abXc", "插入落在光标处");
+    ed.key(cli::Key::Backspace);
+    assert_eq!(ed.line(), "abc");
+    ed.key(cli::Key::Home);
+    ed.key(cli::Key::Delete);
+    assert_eq!(ed.line(), "bc", "Delete 删光标右边那格");
+    assert_eq!(ed.head(), "", "光标在行首");
+}
+
+/// 粘贴：换行折成空格，不打断单行输入框。
+#[test]
+fn editor_folds_pasted_newlines() {
+    cli::clear_history();
+    let mut ed = cli::Editor::new();
+    ed.key(cli::Key::Paste("第一行\n第二行".to_string()));
+    assert_eq!(ed.line(), "第一行 第二行");
+}
+
+/// 提交：回车提交并记历史，上翻能取回；连续重复不重复入栈。
+#[test]
+fn editor_submit_remembers_history() {
+    cli::clear_history();
+    let mut ed = cli::Editor::new();
+    for c in "写法".chars() {
+        ed.key(cli::Key::Char(c));
+    }
+    assert_eq!(ed.key(cli::Key::Enter), cli::Step::Submit);
+    assert_eq!(ed.commit(), "写法");
+    assert_eq!(ed.line(), "", "提交后输入框清空");
+
+    let mut again = cli::Editor::new();
+    again.key(cli::Key::Up);
+    assert_eq!(again.line(), "写法", "上翻取回上一行");
+
+    let mut dup = cli::Editor::new();
+    for c in "写法".chars() {
+        dup.key(cli::Key::Char(c));
+    }
+    dup.key(cli::Key::Enter);
+    dup.commit();
+    let mut walk = cli::Editor::new();
+    walk.key(cli::Key::Up);
+    assert_eq!(walk.line(), "写法");
+    walk.key(cli::Key::Up);
+    assert_eq!(walk.line(), "写法", "同一条不重复入栈");
+}
+
+/// 历史下翻回到空行；Esc 清空输入不提交；Ctrl+U 清行；Ctrl+C 收摊。
+#[test]
+fn editor_history_down_and_cancel_keys() {
+    cli::clear_history();
+    let mut ed = cli::Editor::new();
+    for c in "alpha".chars() {
+        ed.key(cli::Key::Char(c));
+    }
+    ed.key(cli::Key::Enter);
+    ed.commit();
+    for c in "beta".chars() {
+        ed.key(cli::Key::Char(c));
+    }
+    ed.key(cli::Key::Enter);
+    ed.commit();
+
+    let mut walk = cli::Editor::new();
+    walk.key(cli::Key::Up);
+    assert_eq!(walk.line(), "beta");
+    walk.key(cli::Key::Up);
+    assert_eq!(walk.line(), "alpha");
+    walk.key(cli::Key::Down);
+    assert_eq!(walk.line(), "beta");
+    walk.key(cli::Key::Down);
+    assert_eq!(walk.line(), "", "越过最新一条回到空行");
+
+    let mut ed = cli::Editor::new();
+    ed.key(cli::Key::Char('x'));
+    assert_eq!(ed.key(cli::Key::Escape), cli::Step::Cancel);
+    ed.clear();
+    assert_eq!(ed.line(), "");
+    ed.key(cli::Key::Char('y'));
+    assert_eq!(ed.key(cli::Key::KillLine), cli::Step::Edit);
+    assert_eq!(ed.line(), "");
+    assert_eq!(ed.key(cli::Key::Interrupt), cli::Step::Quit);
+}
+
+/// 列宽：中日韩字符占 2 格，截断不劈开宽字符并留省略号。
+#[test]
+fn width_counts_cjk_as_two_and_cuts_whole() {
+    assert_eq!(cli::cols("abc"), 3);
+    assert_eq!(cli::cols("中a"), 3);
+    assert_eq!(cli::cols("中文"), 4);
+    assert_eq!(cli::cut("中文abc", 5), "中文…");
+    assert_eq!(cli::cut("abc", 10), "abc", "没超宽就不加省略号");
+}

@@ -5,6 +5,55 @@
 
 use super::*;
 
+/// 目的：启动页副行：终端转录中心、版本与根路径。
+pub(super) fn startup_tagline() -> String {
+    let root = std::env::current_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_default();
+    format!("终端转录中心 · v{} · {}", env!("CARGO_PKG_VERSION"), root)
+}
+
+/// 目的：启动页事实行：agent 数、模块数、档位与核心默认模型各一格。
+pub(super) fn startup_facts(ops: &Ops) -> Vec<String> {
+    let agents = ops.registry.agents().map(|a| a.len()).unwrap_or(0);
+    let modules = ops.modules.roster().map(|r| r.modules.len()).unwrap_or(0);
+    let tier = ops
+        .registry
+        .settings()
+        .map(|s| s.tier.as_str())
+        .unwrap_or("host");
+    let model = ops.registry.core_model().ok().flatten();
+    vec![
+        fact("agent", &agents.to_string()),
+        fact("模块", &modules.to_string()),
+        fact("档位", tier),
+        fact("模型", model.as_deref().unwrap_or("（未设定）")),
+    ]
+}
+
+/// 目的：状态行：就绪、核心默认模型与档位。
+pub(super) fn startup_status(ops: &Ops) -> String {
+    let model = ops.registry.core_model().ok().flatten();
+    let tier = ops
+        .registry
+        .settings()
+        .map(|s| s.tier.as_str())
+        .unwrap_or("host");
+    format!(
+        "● 就绪 · 模型 {} · 档位 {}",
+        model.as_deref().unwrap_or("（未设定）"),
+        tier
+    )
+}
+
+fn fact(label: &str, value: &str) -> String {
+    format!(
+        "{} {}",
+        term::ink(theme::Ink::Dim, label),
+        term::bold(theme::Ink::Fg2, value)
+    )
+}
+
 pub(super) fn print_roster(ops: &Ops) {
     let roster = match ops.modules.roster() {
         Ok(r) => r,

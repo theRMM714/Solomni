@@ -1,6 +1,6 @@
 //! 目的：终端转录中心：解析命令 → 用入站能力面 → 渲染事件流。
-//! 管：命令解析与匹配、菜单与名单渲染、事件流打印、退出或转入 Web 的去向。
-//! 不管：业务决策、业务状态与不变式（都在各能力内部）；不做传输之外的加工。
+//! 管：命令分发、启动页事实、退出或转入 Web 的去向。
+//! 不管：业务决策与状态（都在各能力内部）；终端 I/O 与配色（`cli/term.rs`、`cli/theme.rs`）。
 //! 联动：能力面来自 `src/capabilities/*/api.rs`；事件词汇与 `src/presentation/web/` 并列共用；模块声明见 `src/presentation.rs`。
 
 use crate::capabilities::conductor::api::{Acted, ActionCall, Caller};
@@ -9,7 +9,6 @@ use crate::capabilities::conductor::api::{
 };
 use crate::capabilities::conductor::api::{Ops, Output};
 use crate::capabilities::registry::api::{ModelView, ProviderView};
-use std::io::Write;
 
 /// 目的：离开转录中心时的去向：退出，或转入 Web 转录中心（端口）。
 pub enum CliExit {
@@ -17,18 +16,31 @@ pub enum CliExit {
     Web(u16),
 }
 
+/// 目的：转录中心主循环：交互模式用固定输入框，非交互模式保持逐行输入（输出不变）。
 pub fn run(ops: Ops, web_default_port: u16) -> CliExit {
-    println!("Solomni 核心编排者（转录中心）");
+    let interactive = term::init(false);
+    if interactive {
+        term::banner(&startup_tagline(), &startup_facts(&ops));
+    } else {
+        println!("Solomni 核心编排者（转录中心）");
+    }
     print_roster(&ops);
+    if interactive {
+        term::line(&term::ink(
+            theme::Ink::Dim,
+            "输入 help 看全量命令 · webui 转 Web 界面 · exit 退出",
+        ));
+    }
+    term::status(&startup_status(&ops));
 
     loop {
-        print_menu(&ops);
-        print!("> ");
-        std::io::stdout().flush().ok();
-        let mut line = String::new();
-        if std::io::stdin().read_line(&mut line).unwrap_or(0) == 0 {
-            break;
+        if !interactive {
+            print_menu(&ops);
         }
+        let label = if interactive { "转录中心" } else { ">" };
+        let Some(line) = term::ask(label) else {
+            break;
+        };
         let line = line.trim().to_string();
         let mut parts = line.splitn(2, ' ');
         let cmd = parts.next().unwrap_or("").to_ascii_lowercase();
@@ -53,6 +65,7 @@ pub fn run(ops: Ops, web_default_port: u16) -> CliExit {
             // 只读诊断一条虚拟机档会话的 guest（进程 / CPU / 内存 / 负载 / 挂载）。
             "diagnose" => diagnose_cmd(&ops, &arg),
             "rescan" => print_roster(&ops),
+            "help" | "/help" | "?" => print_menu(&ops),
             // 转入 Web 转录中心：接受 webui / -webUI（启动参数也这么写），可选端口。
             "webui" | "-webui" | "web" | "-web" => {
                 let port = arg.parse::<u16>().unwrap_or(web_default_port);
@@ -60,10 +73,13 @@ pub fn run(ops: Ops, web_default_port: u16) -> CliExit {
             }
             "exit" => break,
             "" => continue,
-            _ => println!("[提示] 未知命令 {}（Web 界面用 webui；退出用 exit）", cmd),
+            _ => term::line(&format!(
+                "[提示] 未知命令 {}（Web 界面用 webui；退出用 exit）",
+                cmd
+            )),
         }
     }
-    println!("再见。");
+    term::line("再见。");
     CliExit::Exit
 }
 
@@ -77,12 +93,14 @@ pub(crate) fn module_action_id(arg: &str) -> String {
     }
 }
 
-/// 直接用模块工具（不经 AI）：`module` 列清单，`module <模块id>.<工具名> [json 参数]` 跑一次。
-/// 清单来自核心的动作目录（`module.<模块id>.<工具名>`），所以与 Web 看到的是同一份事实。
 mod commands;
 mod flows;
 mod gate;
+mod input;
+mod term;
+mod theme;
 mod view;
+mod width;
 
 use commands::*;
 use flows::*;
@@ -96,3 +114,7 @@ pub(crate) use flows::eof_stop;
 pub(crate) use gate::{
     NO_AGENTS, create_session_action, pick_agents, pick_option, split_names, waiting_lines,
 };
+#[cfg(test)]
+pub(crate) use input::{Editor, Key, Step, clear_history};
+#[cfg(test)]
+pub(crate) use width::{cols, cut};
