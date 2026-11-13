@@ -522,6 +522,7 @@ pub(crate) fn unc_external_workspace_plans_a_guest_mount() {
             modules_with_userdata: Default::default(),
             permissions: Default::default(),
             path_codec: None,
+            shared_grant: crate::capabilities::session::api::WorkspaceGrant::Session,
         }],
         codec: None,
     };
