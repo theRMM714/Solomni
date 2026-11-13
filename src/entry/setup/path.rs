@@ -95,6 +95,7 @@ pub(crate) fn backup_path(home: &Path) -> PathBuf {
     home.join(BACKUP_FILE)
 }
 
+#[cfg(windows)]
 fn now_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -109,6 +110,7 @@ fn read_backup(home: &Path) -> Option<PathBackup> {
 }
 
 /// 目的：把「第一次改之前」的原串落盘（已有备份就不覆盖——undo 永远回到最初那一段）。
+#[cfg(windows)]
 fn write_backup(home: &Path, value: &PathValue, bin: &str) -> Result<(), String> {
     let path = backup_path(home);
     if path.exists() {
