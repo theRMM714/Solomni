@@ -14,6 +14,24 @@
       "from": 75,
       "to": 76,
       "reason": "分派到平台后端：Linux Landlock 与 macOS seatbelt 安装不可逆，进程内测试无法调用；由平台探针在子进程验收"
+    },
+    {
+      "file": "src/main.rs",
+      "from": 68,
+      "to": 71,
+      "reason": "启动期分派 --setup：只有真实启动路径会走到，测试进程里调用会 exit；由端到端与 --setup 真机冒烟验收"
+    },
+    {
+      "file": "src/main.rs",
+      "from": 293,
+      "to": 294,
+      "reason": "首次授权后的机器级预授钩子：只在交互式首次启动执行；由 --setup=fence 真机冒烟验收"
+    },
+    {
+      "file": "src/main.rs",
+      "from": 327,
+      "to": 330,
+      "reason": "启动期只读对账钩子：只在真实启动执行；由 --setup=status 真机冒烟验收"
     }
   ],
   "buckets": [
