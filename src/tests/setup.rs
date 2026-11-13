@@ -282,6 +282,8 @@ fn posix_modes_print_guidance_and_report_fence_unsupported() {
     }
     assert!(crate::entry::setup::fence_hint(&root), "非 Windows 无缺项");
     let home = root.join(".home");
+    // 首次授权那一趟在非 Windows 也走一次：如实收尾、不打印、不阻断。
+    crate::entry::setup::ensure_after_authorize(&root);
     let err =
         crate::entry::setup::fence::ensure(&root, &home).expect_err("非 Windows 无机器级预授");
     assert!(err.contains("本平台"), "{err}");
