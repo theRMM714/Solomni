@@ -83,7 +83,7 @@ pub(crate) fn waiting_lines(waiting: &[DecisionWaiter]) -> Vec<String> {
 /// 目的：把还在等的那几张如实打出来（**只有队首能答**）。
 pub(super) fn print_waiting(waiting: &[DecisionWaiter]) {
     for line in waiting_lines(waiting) {
-        println!("{}", line);
+        term::say(&line);
     }
 }
 
@@ -93,15 +93,18 @@ pub(super) fn print_card(card: &DecisionCard) {
         print_card_rich(card);
         return;
     }
-    println!("[裁决] {}（{}）", card.message.title, card.envelope.name);
+    term::say(&format!(
+        "[裁决] {}（{}）",
+        card.message.title, card.envelope.name
+    ));
     if !card.message.body.trim().is_empty() {
-        println!("  {}", card.message.body);
+        term::say(&format!("  {}", card.message.body));
     }
     if !card.message.detail.trim().is_empty() {
-        println!("  {}", card.message.detail);
+        term::say(&format!("  {}", card.message.detail));
     }
     for (i, o) in card.options.iter().enumerate() {
-        println!("  {}) {}（{}）", i + 1, o.label, o.id);
+        term::say(&format!("  {}) {}（{}）", i + 1, o.label, o.id));
     }
 }
 
@@ -111,40 +114,37 @@ fn print_card_rich(card: &DecisionCard) {
     let title = format!("◈ {}（{}）", card.message.title, card.envelope.name);
     let title = width::cut(&title, cols.saturating_sub(3));
     let fill = cols.saturating_sub(width::cols(&title) + 3);
-    println!(
-        "{}",
-        term::ink(
-            theme::Ink::Amber,
-            &format!("╭─ {} {}", title, "─".repeat(fill))
-        )
-    );
+    term::say(&term::ink(
+        theme::Ink::Amber,
+        &format!("╭─ {} {}", title, "─".repeat(fill)),
+    ));
     if !card.message.body.trim().is_empty() {
         card_row(inner, card.message.body.trim(), false);
     }
     if !card.message.detail.trim().is_empty() {
         card_row(inner, card.message.detail.trim(), true);
     }
-    println!(
-        "{}",
-        term::ink(theme::Ink::Amber, &format!("├{}┤", "─".repeat(cols - 2)))
-    );
+    term::say(&term::ink(
+        theme::Ink::Amber,
+        &format!("├{}┤", "─".repeat(cols - 2)),
+    ));
     for (i, o) in card.options.iter().enumerate() {
         let lead = format!("{}. {}", i + 1, o.label);
         let id = format!("· {}", o.id);
         let gap = inner.saturating_sub(width::cols(&lead) + width::cols(&id) + 1);
-        println!(
+        term::say(&format!(
             "{} {}{}{} {}",
             term::ink(theme::Ink::Amber, "│"),
             term::bold(theme::Ink::Fg2, &lead),
             " ".repeat(gap.max(1)),
             term::ink(theme::Ink::Dim, &id),
             term::ink(theme::Ink::Amber, "│")
-        );
+        ));
     }
-    println!(
-        "{}",
-        term::ink(theme::Ink::Amber, &format!("╰{}╯", "─".repeat(cols - 2)))
-    );
+    term::say(&term::ink(
+        theme::Ink::Amber,
+        &format!("╰{}╯", "─".repeat(cols - 2)),
+    ));
 }
 
 fn card_row(inner: usize, text: &str, dim: bool) {
@@ -155,13 +155,13 @@ fn card_row(inner: usize, text: &str, dim: bool) {
         } else {
             part
         };
-        println!(
+        term::say(&format!(
             "{} {}{} {}",
             term::ink(theme::Ink::Amber, "│"),
             body,
             " ".repeat(pad),
             term::ink(theme::Ink::Amber, "│")
-        );
+        ));
     }
 }
 
@@ -202,7 +202,7 @@ pub(super) fn answer_gates(ops: &Ops, sid: &str, cursor: &mut u64) {
             Ok(Some(q)) => q,
             Ok(None) => return,
             Err(e) => {
-                println!("[提示] 取裁决卡失败：{}", e);
+                term::say(&format!("[提示] 取裁决卡失败：{}", e));
                 return;
             }
         };
@@ -221,7 +221,7 @@ pub(super) fn answer_gates(ops: &Ops, sid: &str, cursor: &mut u64) {
             return;
         }
         let Some(option) = pick_option(card, ans) else {
-            println!("  这张卡上没有这一项，请按上面的序号或 id 作答。");
+            term::say("  这张卡上没有这一项，请按上面的序号或 id 作答。");
             continue;
         };
         let note = prompt("附言（可空；请教那一关必填）>");
@@ -236,7 +236,7 @@ pub(super) fn answer_gates(ops: &Ops, sid: &str, cursor: &mut u64) {
                 wait_quiet(ops, sid, cursor);
             }
             Err(e) => {
-                println!("[错误] {}", e);
+                term::say(&format!("[错误] {}", e));
                 return;
             }
         }
@@ -369,10 +369,10 @@ pub(super) fn pick_guest(
         [one] => Some(one.guest.clone()),
         many if many.len() > 1 => {
             let names: Vec<&str> = many.iter().map(|g| g.guest.as_str()).collect();
-            println!(
+            term::say(&format!(
                 "[提示] 本机有多个虚拟根可选（{}）：这里先用第一个",
                 names.join("、")
-            );
+            ));
             Some(names[0].to_string())
         }
         _ => None,
@@ -437,5 +437,215 @@ pub(crate) fn create_session_action(
             .map(|s| s.to_string())
             .ok_or_else(|| "建会话回包缺 sid".to_string()),
         _ => Err("建会话该给结构化结果".to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::capabilities::session::api::Pending;
+    use crate::kernel::api::Ask;
+
+    /// 目的：用生产那一条派生造卡（工具层那一类：三段话与选项原样来自发起方）。
+    fn card(title: &str, body: &str, detail: &str, options: &[(&str, &str)]) -> DecisionCard {
+        Pending::ToolAsk(Box::new(Ask {
+            role: "tools".to_string(),
+            name: "甲".to_string(),
+            title: title.to_string(),
+            body: body.to_string(),
+            detail: detail.to_string(),
+            options: options
+                .iter()
+                .map(|(id, label)| (id.to_string(), label.to_string()))
+                .collect(),
+            on_unanswered: None,
+        }))
+        .card("card-1", "")
+    }
+
+    /// 目的：非 TTY 逐行原样：标题 / 正文 / 详情 / 选项各一行，空段不占行。
+    #[test]
+    fn card_without_tty_prints_four_plain_sections() {
+        term::test_ui(false, 80, false, false, theme::Level::None);
+        let (_, lines) = term::capture(|| {
+            print_card(&card(
+                "是否继续？",
+                "正文一行",
+                "详情一行",
+                &[("begin", "开始"), ("stop", "停止")],
+            ));
+            print_card(&card("只有标题", "  ", "", &[]));
+        });
+        term::reset_ui();
+        assert_eq!(
+            lines,
+            vec![
+                "[裁决] 是否继续？（甲）",
+                "  正文一行",
+                "  详情一行",
+                "  1) 开始（begin）",
+                "  2) 停止（stop）",
+                "[裁决] 只有标题（甲）",
+            ]
+        );
+    }
+
+    /// 目的：TTY 富渲染：画框 / 正文折行 / 选项行齐全，超长标题补省略号、超长选项 id 不截。
+    #[test]
+    fn card_with_tty_draws_frame_and_wraps() {
+        term::test_ui(true, 80, false, true, theme::Level::True);
+        let long_title = "很长".repeat(60);
+        let long_body = "正文".repeat(50);
+        let long_id = "x".repeat(70);
+        let (_, lines) = term::capture(|| {
+            print_card(&card(
+                &long_title,
+                &long_body,
+                "详情",
+                &[("begin", "开始"), (long_id.as_str(), "停止")],
+            ))
+        });
+        term::reset_ui();
+        assert!(
+            lines[0].contains("╭─") && lines[0].contains('…'),
+            "标题行：{:?}",
+            lines[0]
+        );
+        assert_eq!(
+            lines.iter().filter(|l| l.contains('├')).count(),
+            1,
+            "一条分隔线"
+        );
+        assert!(lines.last().expect("底线").contains('╰'), "要有底线");
+        let body: Vec<&String> = lines.iter().filter(|l| l.contains("正文")).collect();
+        assert!(body.len() > 1, "正文要折行：{:?}", lines);
+        assert!(body.iter().all(|l| l.contains('│')), "折行仍带边框");
+        assert!(lines.iter().any(|l| l.contains("1. 开始")), "选项行");
+        assert!(
+            lines.iter().any(|l| l.contains(&format!("· {long_id}"))),
+            "超长选项 id 原样"
+        );
+    }
+
+    /// 目的：列宽按 40..96 夹住：窄终端不下探、宽终端不铺满，正文行补到同一列宽。
+    #[test]
+    fn card_with_tty_clamps_columns() {
+        for (given, want) in [(10usize, 40usize), (200, 96)] {
+            term::test_ui(true, given, false, false, theme::Level::None);
+            let long_id = "y".repeat(80);
+            let (_, lines) = term::capture(|| {
+                print_card(&card(
+                    "标题",
+                    &"正文".repeat(40),
+                    "",
+                    &[(long_id.as_str(), "是")],
+                ))
+            });
+            term::reset_ui();
+            let sep = lines.iter().find(|l| l.contains('├')).expect("要有分隔线");
+            assert_eq!(width::cols(sep), want, "分隔线按夹住的列宽：{:?}", sep);
+            let bottom = lines.last().expect("底线");
+            assert_eq!(width::cols(bottom), want, "底线同宽：{:?}", bottom);
+            let body = lines.iter().find(|l| l.contains("正文")).expect("正文");
+            assert_eq!(width::cols(body), want, "正文行补到列宽：{:?}", body);
+            assert!(
+                lines.iter().any(|l| l.contains(&long_id)),
+                "超长选项 id 照样打出来"
+            );
+        }
+    }
+
+    /// 目的：排队的那几张逐行打印（先一条头，再一张一行）。
+    #[test]
+    fn print_waiting_prints_one_line_per_waiter() {
+        term::test_ui(false, 80, false, false, theme::Level::None);
+        let ask = Pending::Ask {
+            member: "甲".to_string(),
+            question: "选哪个？".to_string(),
+        };
+        let waiting = vec![ask.waiter("d2", ""), Pending::ConfirmBegin.waiter("d3", "")];
+        let (_, lines) = term::capture(|| print_waiting(&waiting));
+        term::reset_ui();
+        assert_eq!(lines, waiting_lines(&waiting));
+        assert!(lines[0].contains("排着 2 张"), "先一条头：{:?}", lines);
+        assert_eq!(lines.len(), 3, "头 + 每张一行");
+    }
+
+    /// 目的：没有生成在跑时，事件台连着三拍不再长就自己返回（tty 下顺带刷收尾活状态行）。
+    #[test]
+    fn wait_quiet_returns_after_three_quiet_ticks() {
+        let (_handle, ops) = crate::tests::ops_with(vec![], vec![]);
+        term::test_ui(true, 80, false, false, theme::Level::None);
+        let started = std::time::Instant::now();
+        let mut cursor = 0;
+        wait_quiet(&ops, "没有这个会话", &mut cursor);
+        term::reset_ui();
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "要自己收尾返回"
+        );
+        assert_eq!(cursor, ops.events.head(), "游标推到头部");
+    }
+
+    /// 目的：动作在工作线程上跑，回包（这里是最快的错）原样交回调用方；tty 下主线程刷活状态行。
+    #[test]
+    fn act_interactive_returns_worker_result() {
+        let (_handle, ops) = crate::tests::ops_with(vec![], vec![]);
+        term::test_ui(true, 80, false, false, theme::Level::None);
+        let mut cursor = 0;
+        let started = std::time::Instant::now();
+        let r = act_interactive(
+            &ops,
+            "没有这个会话",
+            CliAction::Say("你好".to_string()),
+            &mut cursor,
+            Output::Final,
+        );
+        term::reset_ui();
+        assert!(r.is_err(), "未知会话要如实报错：{:?}", r);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "工作线程快速返回"
+        );
+    }
+
+    /// 目的：取不到裁决队（会话不存在）时如实提示后返回——这一步不碰输入。
+    #[test]
+    fn answer_gates_reports_unopenable_queue() {
+        let (_handle, ops) = crate::tests::ops_with(vec![], vec![]);
+        term::test_ui(false, 80, false, false, theme::Level::None);
+        let mut cursor = 0;
+        let (_, lines) = term::capture(|| answer_gates(&ops, "没有这个会话", &mut cursor));
+        term::reset_ui();
+        assert_eq!(lines.len(), 1, "{:?}", lines);
+        assert!(
+            lines[0].contains("取裁决卡失败") && lines[0].contains("没有这个会话"),
+            "{:?}",
+            lines
+        );
+    }
+
+    /// 目的：本机有多个装齐的虚拟根时先取第一个并如实说明；只一个就自动用，一个都没就绪交调用方说明。
+    #[test]
+    fn pick_guest_names_the_options_and_takes_the_first() {
+        let guest = |name: &str, ready: bool| crate::capabilities::provision::api::GuestBase {
+            guest: name.to_string(),
+            label: name.to_string(),
+            os: "linux".to_string(),
+            arch: "x86_64".to_string(),
+            runtimes: Vec::new(),
+            ready,
+            missing: Vec::new(),
+            install: String::new(),
+        };
+        term::test_ui(false, 80, false, false, theme::Level::None);
+        let (picked, lines) = term::capture(|| {
+            pick_guest(&[guest("甲", true), guest("乙", false), guest("丙", true)])
+        });
+        assert_eq!(picked.as_deref(), Some("甲"), "先用第一个");
+        assert!(lines[0].contains("甲、丙"), "要列出可选的那些");
+        assert_eq!(pick_guest(&[guest("甲", true)]).as_deref(), Some("甲"));
+        assert_eq!(pick_guest(&[guest("甲", false)]), None, "一个都没就绪");
+        term::reset_ui();
     }
 }

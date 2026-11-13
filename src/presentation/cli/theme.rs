@@ -131,6 +131,115 @@ mod tests {
             }
         }
     }
+
+    /// 九个 token 在三个有色档位各出各的 SGR；无色档原样返回且不带转义。
+    #[test]
+    fn every_ink_paints_at_every_level() {
+        let inks = [
+            Ink::Fg,
+            Ink::Fg2,
+            Ink::Dim,
+            Ink::Line,
+            Ink::Ice,
+            Ink::Ice2,
+            Ink::Green,
+            Ink::Amber,
+            Ink::Red,
+        ];
+        let none = Paint::new(Level::None);
+        for ink in inks {
+            let true_color = Paint::new(Level::True).paint(ink, "字");
+            assert!(true_color.contains("38;2;"), "真彩写 24 位：{true_color:?}");
+            let ansi256 = Paint::new(Level::Ansi256).paint(ink, "字");
+            assert!(
+                ansi256.contains("38;5;") && !ansi256.contains("38;2;"),
+                "256 色档走调色板：{ansi256:?}"
+            );
+            assert!(ansi256.ends_with("\x1b[0m"), "上色后还原：{ansi256:?}");
+            let ansi16 = Paint::new(Level::Ansi16).paint(ink, "字");
+            assert!(!ansi16.contains("38;"), "16 色档只用基本色号：{ansi16:?}");
+            assert_eq!(none.paint(ink, "字"), "字", "无色档原样返回");
+        }
+    }
+
+    /// 加粗在有色档位带 `1;` 属性；重置串与档位读取按当前档位给。
+    #[test]
+    fn bold_adds_the_attribute_then_restores() {
+        assert!(
+            Paint::new(Level::True)
+                .bold(Ink::Ice, "t")
+                .contains("1;38;2;")
+        );
+        assert!(
+            Paint::new(Level::Ansi256)
+                .bold(Ink::Ice, "t")
+                .contains("1;38;5;")
+        );
+        assert!(
+            Paint::new(Level::Ansi16)
+                .bold(Ink::Ice, "t")
+                .contains("1;96m")
+        );
+        assert_eq!(Paint::new(Level::None).bold(Ink::Ice, "t"), "t");
+        assert_eq!(Paint::new(Level::None).reset(), "");
+        assert_eq!(Paint::new(Level::True).reset(), "\x1b[0m");
+        assert_eq!(Paint::new(Level::Ansi16).level(), Level::Ansi16);
+    }
+
+    /// 256 色立方：三通道各量化到 0..=5，两端落在立方首尾格。
+    #[test]
+    fn cube_maps_channels_to_the_six_level_cube() {
+        assert_eq!(cube((0, 0, 0)), 16);
+        assert_eq!(cube((255, 255, 255)), 231);
+        assert_eq!(cube((255, 0, 0)), 196);
+        let paint = Paint::new(Level::Ansi256);
+        assert!(paint.rgb((0, 0, 0), "x").contains("38;5;16"));
+        assert!(paint.rgb((255, 255, 255), "x").contains("38;5;231"));
+    }
+
+    /// 按 24 位取色：真彩原样写，256 色降到立方格，16 色按亮度分亮青 / 青。
+    #[test]
+    fn rgb_degrades_by_level() {
+        assert_eq!(Paint::new(Level::None).rgb((255, 255, 255), "x"), "x");
+        assert!(
+            Paint::new(Level::True)
+                .rgb((255, 255, 255), "x")
+                .starts_with("\x1b[38;2;255;255;255m")
+        );
+        assert!(
+            Paint::new(Level::Ansi256)
+                .rgb((255, 255, 255), "x")
+                .contains("38;5;231")
+        );
+        assert!(
+            Paint::new(Level::Ansi16)
+                .rgb((255, 255, 255), "x")
+                .contains("\x1b[96m")
+        );
+        assert!(
+            Paint::new(Level::Ansi16)
+                .rgb((0, 0, 0), "x")
+                .contains("\x1b[36m")
+        );
+    }
+
+    /// 字标渐变共七档且逐行压深，越界行号停在最后一档。
+    #[test]
+    fn wordmark_has_seven_graduated_rows() {
+        let rows: Vec<(u8, u8, u8)> = (0..7).map(wordmark_rgb).collect();
+        assert_eq!(rows[0], (0xC9, 0xFF, 0xFB), "首行近白");
+        for pair in rows.windows(2) {
+            assert!(pair[0] > pair[1], "逐行压深：{pair:?}");
+        }
+        assert_eq!(wordmark_rgb(7), rows[6], "越界停在最后一档");
+        assert_eq!(wordmark_rgb(usize::MAX), rows[6]);
+    }
+
+    /// `--plain` 一票否决：只读环境变量也能钉住无色档。
+    #[test]
+    fn plain_forces_the_colorless_level() {
+        assert_eq!(Level::detect(true), Level::None);
+    }
 }
 
 impl Ink {

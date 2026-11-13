@@ -25,6 +25,19 @@ use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// 目的：装配核心之前就能回答的旗语：`--help` 与 `--version` 就地输出并给出退出码。
+fn early_exit(flags: &presentation::cli::argv::Flags) -> Option<i32> {
+    if flags.help {
+        print!("{}", presentation::cli::catalog::help_text(flags.all));
+        return Some(0);
+    }
+    if flags.version {
+        println!("{}", presentation::cli::catalog::version_text());
+        return Some(0);
+    }
+    None
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     // 参数表与分派在 entry::args：入口只决定"继续启动"还是"就此退出"。
@@ -39,13 +52,8 @@ fn main() {
             std::process::exit(2);
         }
     };
-    if flags.help {
-        print!("{}", presentation::cli::catalog::help_text(flags.all));
-        return;
-    }
-    if flags.version {
-        println!("{}", presentation::cli::catalog::version_text());
-        return;
+    if let Some(code) = early_exit(&flags) {
+        std::process::exit(code);
     }
     // 启动形态：无参数 = CLI（默认）；--web = Web 转录中心。
     let web = flags.web;
@@ -681,5 +689,30 @@ fn main() {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod prelude_tests {
+    use super::*;
+    use presentation::cli::argv::Flags;
+
+    #[test]
+    fn help_and_version_exit_before_assembly() {
+        let mut flags = Flags {
+            help: true,
+            ..Flags::default()
+        };
+        assert_eq!(early_exit(&flags), Some(0));
+        flags.all = true;
+        assert_eq!(early_exit(&flags), Some(0));
+
+        let version = Flags {
+            version: true,
+            ..Flags::default()
+        };
+        assert_eq!(early_exit(&version), Some(0));
+
+        assert_eq!(early_exit(&Flags::default()), None, "普通启动继续装配");
     }
 }

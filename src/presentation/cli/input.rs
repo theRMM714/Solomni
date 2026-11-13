@@ -232,3 +232,143 @@ impl Editor {
 pub(crate) fn clear_history() {
     HISTORY.with(|h| h.borrow_mut().clear());
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn type_line(ed: &mut Editor, text: &str) {
+        for c in text.chars() {
+            ed.key(Key::Char(c));
+        }
+    }
+
+    /// 历史只留最近一百条；上下翻到头都停住，越过最新一条回到空行。
+    #[test]
+    fn history_keeps_the_latest_hundred_lines() {
+        clear_history();
+        let mut ed = Editor::new();
+        for i in 0..101 {
+            type_line(&mut ed, &format!("l{i}"));
+            ed.commit();
+        }
+        assert_eq!(
+            super::HISTORY.with(|h| h.borrow().len()),
+            100,
+            "超出的一百条丢掉最旧"
+        );
+        ed.key(Key::Up);
+        assert_eq!(ed.line(), "l100", "从最新一条开始");
+        ed.key(Key::Up);
+        assert_eq!(ed.line(), "l99");
+        for _ in 0..150 {
+            ed.key(Key::Up);
+        }
+        assert_eq!(ed.line(), "l1", "最旧就到第二条");
+        ed.key(Key::Up);
+        assert_eq!(ed.line(), "l1", "到头再上翻不动");
+        ed.key(Key::Down);
+        assert_eq!(ed.line(), "l2");
+        for _ in 0..100 {
+            ed.key(Key::Down);
+        }
+        assert_eq!(ed.line(), "", "翻过最新一条是空行");
+    }
+
+    /// 没上翻过时 Down 不动；紧挨着的重复行只记一次。
+    #[test]
+    fn down_without_a_selection_and_duplicate_lines_are_no_ops() {
+        clear_history();
+        let mut ed = Editor::new();
+        ed.key(Key::Down);
+        assert_eq!(ed.line(), "", "没有历史游标时 Down 不动");
+        for line in ["alpha", "alpha", "beta"] {
+            type_line(&mut ed, line);
+            ed.commit();
+        }
+        assert_eq!(
+            super::HISTORY.with(|h| h.borrow().len()),
+            2,
+            "重复行只记一次"
+        );
+        ed.key(Key::Up);
+        assert_eq!(ed.line(), "beta");
+        ed.key(Key::Up);
+        assert_eq!(ed.line(), "alpha");
+    }
+
+    /// 光标移动与删除在行首行尾都停住，不 panic 也不越过边界。
+    #[test]
+    fn cursor_moves_stop_at_the_line_edges() {
+        clear_history();
+        let mut ed = Editor::new();
+        assert_eq!(ed.key(Key::Left), Step::Edit);
+        assert_eq!(ed.key(Key::Backspace), Step::Edit);
+        assert_eq!(ed.key(Key::Delete), Step::Edit, "空行 Delete 不 panic");
+        assert_eq!(ed.key(Key::Right), Step::Edit, "空行右移不动");
+        assert_eq!(ed.line(), "");
+        type_line(&mut ed, "abc");
+        ed.key(Key::Home);
+        assert_eq!(ed.head(), "", "Home 回到行首");
+        ed.key(Key::Delete);
+        assert_eq!(ed.line(), "bc", "Delete 删光标处的字符");
+        ed.key(Key::End);
+        assert_eq!(ed.head(), "bc", "End 到行尾");
+        ed.key(Key::Right);
+        assert_eq!(ed.head(), "bc", "行尾再右移不动");
+        ed.key(Key::Left);
+        assert_eq!(ed.head(), "b");
+        ed.key(Key::Backspace);
+        assert_eq!(ed.line(), "c", "Backspace 删光标前的字符");
+        ed.key(Key::Home);
+        ed.key(Key::Backspace);
+        assert_eq!(ed.line(), "c", "行首退格不动");
+    }
+
+    /// 粘贴把换行折成空格，并在光标处插入中文。
+    #[test]
+    fn paste_folds_newlines_and_inserts_at_the_cursor() {
+        clear_history();
+        let mut ed = Editor::new();
+        type_line(&mut ed, "尾");
+        ed.key(Key::Home);
+        assert_eq!(ed.key(Key::Paste("中文\r\n第二行".to_string())), Step::Edit);
+        assert_eq!(ed.line(), "中文  第二行尾");
+    }
+
+    /// 控制键各自映射到动作；空白行原样返回且不记历史。
+    #[test]
+    fn control_keys_map_to_steps_and_blank_lines_stay_out_of_history() {
+        clear_history();
+        let mut ed = Editor::new();
+        type_line(&mut ed, "abc");
+        assert_eq!(ed.key(Key::Tab), Step::Edit);
+        assert_eq!(ed.line(), "abc", "Tab 不改行");
+        assert_eq!(ed.key(Key::Enter), Step::Submit);
+        assert_eq!(ed.key(Key::Escape), Step::Cancel);
+        assert_eq!(ed.key(Key::Interrupt), Step::Quit);
+        assert_eq!(ed.key(Key::KillLine), Step::Edit);
+        assert_eq!(ed.line(), "", "KillLine 清空整行");
+        type_line(&mut ed, "   ");
+        assert_eq!(ed.commit(), "   ", "空白行原样返回");
+        ed.key(Key::Up);
+        assert_eq!(ed.line(), "", "空白行不进历史");
+    }
+
+    /// 补全：唯一候选补全并留空格，多候选只补公共前缀且不倒退。
+    #[test]
+    fn completion_takes_the_only_candidate_or_the_common_prefix() {
+        clear_history();
+        let mut ed = Editor::new();
+        type_line(&mut ed, "si");
+        let cands = vec!["single".to_string(), "sincere".to_string()];
+        assert_eq!(ed.complete(&cands), 2, "多候选返回个数");
+        assert_eq!(ed.line(), "sin", "补到公共前缀");
+        assert_eq!(ed.complete(&cands), 2);
+        assert_eq!(ed.line(), "sin", "公共前缀不再变长就不动");
+        assert_eq!(ed.complete(&["help".to_string()]), 1);
+        assert_eq!(ed.line(), "help ", "唯一候选补全并留一个空格");
+        assert_eq!(ed.complete(&[]), 0, "没有候选不动");
+        assert_eq!(ed.line(), "help ");
+    }
+}

@@ -152,3 +152,42 @@ pub(crate) use gate::{
 pub(crate) use input::{Editor, Key, Step, clear_history};
 #[cfg(test)]
 pub(crate) use width::{cols, cut, wrap};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::presentation::cli::term;
+    use std::io::IsTerminal;
+
+    #[test]
+    fn help_cmd_prints_manual_branches() {
+        let (_, lines) = term::capture(|| help_cmd(""));
+        assert!(lines.iter().any(|l| l.contains("命令")), "无参数给全量手册");
+
+        let (_, lines) = term::capture(|| help_cmd("--all"));
+        assert!(
+            lines.iter().any(|l| l.contains("--probe-tools")),
+            "--all 展开内部旗语"
+        );
+
+        let (_, lines) = term::capture(|| help_cmd("single"));
+        assert!(lines.iter().any(|l| l.contains("single")));
+
+        let (_, lines) = term::capture(|| help_cmd("singel"));
+        assert!(lines.iter().any(|l| l.contains("你是不是想查 single")));
+
+        let (_, lines) = term::capture(|| help_cmd("zzzz"));
+        assert!(lines.iter().any(|l| l.contains("没有命令 zzzz")));
+    }
+
+    #[test]
+    fn repl_runs_to_completion_when_stdin_is_closed() {
+        if std::io::stdin().is_terminal() {
+            return;
+        }
+        let (handle, ops) = crate::tests::ops_with(vec![], vec![]);
+        let exit = run(ops, 49181, true, false);
+        assert!(matches!(exit, CliExit::Exit));
+        drop(handle);
+    }
+}

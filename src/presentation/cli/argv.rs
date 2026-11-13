@@ -289,3 +289,125 @@ fn distance(a: &str, b: &str) -> usize {
     }
     prev[b.len()]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run(args: &[&str]) -> Result<Flags, String> {
+        let argv: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+        super::parse(&argv)
+    }
+
+    /// 单个 `-` 与 `--` 之后的内容都进位置参数；`--x=` 的空值按空串收下。
+    #[test]
+    fn positionals_and_empty_values_are_collected() {
+        let flags = run(&["-", "--", "--web", "-v"]).expect("合法");
+        assert!(!flags.web && !flags.version, "-- 之后不再解析旗语");
+        assert_eq!(flags.positionals, vec!["-", "--web", "-v"]);
+
+        let flags = run(&["--root=", "x"]).expect("空值合法");
+        assert_eq!(flags.root.as_deref(), Some(""), "空串也是一个值");
+        assert_eq!(flags.positionals, vec!["x"]);
+    }
+
+    /// 端口只收 1..=65535 的整数：非数字与越界都报错，两种写法等价。
+    #[test]
+    fn port_must_be_a_u16() {
+        assert_eq!(run(&["--port=3081"]).expect("合法端口").port, Some(3081));
+        assert_eq!(run(&["--port", "3082"]).expect("空格写法").port, Some(3082));
+        let err = run(&["--port=abc"]).expect_err("非数字要报错");
+        assert!(err.contains("1-65535") && err.contains("abc"), "{err}");
+        let err = run(&["--port=70000"]).expect_err("越界要报错");
+        assert!(err.contains("70000"), "{err}");
+        let err = run(&["--port="]).expect_err("空值要报错");
+        assert!(err.contains("旗语 --port"), "{err}");
+    }
+
+    /// 布尔开关不带值：写了 `=值` 就报错；重复写同一个开关没有副作用。
+    #[test]
+    fn boolean_flags_take_no_value_and_repeat_safely() {
+        let flags = run(&["--web", "--web", "--plain", "--plain", "--no-anim"]).expect("合法");
+        assert!(flags.web && flags.plain && flags.no_anim);
+        let err = run(&["--plain=1"]).expect_err("布尔旗不带值");
+        assert!(err.contains("不带值"), "{err}");
+        assert!(run(&["-h"]).expect("短旗").help);
+        assert!(run(&["-v"]).expect("短旗").version);
+        assert!(run(&["--version"]).expect("长旗").version);
+        assert!(run(&["--help", "--all"]).expect("展开内部旗语").all);
+        assert!(!run(&["--all"]).expect("单独出现无副作用").help);
+    }
+
+    /// 缺值：后面没有值、或紧跟另一个旗语，都报错，不把旗语当值。
+    #[test]
+    fn value_flags_report_missing_values() {
+        let err = run(&["--root"]).expect_err("缺值");
+        assert!(err.contains("需要一个值"), "{err}");
+        let err = run(&["--root", "-x"]).expect_err("下一个是旗语，不能当值");
+        assert!(err.contains("需要一个值"), "{err}");
+        assert_eq!(
+            run(&["--root", "work"]).expect("空格写法").root.as_deref(),
+            Some("work")
+        );
+        assert_eq!(
+            run(&["--root=work"]).expect("= 写法").root.as_deref(),
+            Some("work")
+        );
+    }
+
+    /// 未知旗语：编辑距离 ≤2 给最近的一条建议（短旗也算），否则只说看手册。
+    #[test]
+    fn unknown_flags_suggest_or_just_point_at_help() {
+        let err = run(&["--por", "1"]).expect_err("拼错");
+        assert!(err.contains("你是不是想用 --port"), "{err}");
+        let err = run(&["--h"]).expect_err("短旗也算候选");
+        assert!(err.contains("你是不是想用 -h"), "{err}");
+        let err = run(&["--zzzzzz"]).expect_err("差太远");
+        assert!(
+            err.contains("未知旗语 --zzzzzz") && !err.contains("你是不是想用"),
+            "{err}"
+        );
+    }
+
+    /// 内部协议旗语原样透传：解析器不再往下列，整段 argv 留给入口自己扫。
+    #[test]
+    fn internal_flags_pass_through_untouched() {
+        let flags = run(&["--probe-tools", "--model", "x"]).expect("透传");
+        assert_eq!(flags.positionals, vec!["--probe-tools", "--model", "x"]);
+        let flags = run(&["--web", "--fence-verify", "--json"]).expect("--fence-* 也透传");
+        assert!(flags.web, "前面的旗语照常解析");
+        assert_eq!(flags.positionals, vec!["--fence-verify", "--json"]);
+    }
+
+    /// 旗语表：默认只列用户可见的那些，`all` 时连内部协议一起列。
+    #[test]
+    fn flag_rows_lists_visible_and_internal_flags() {
+        let visible = flag_rows(false);
+        assert_eq!(visible.len(), FLAGS.iter().filter(|f| !f.hidden).count());
+        assert!(visible.iter().any(|r| r.starts_with("  --root <dir>")));
+        assert!(visible.iter().any(|r| r.starts_with("  --web ")));
+        assert!(visible.iter().any(|r| r.starts_with("  -h, --help ")));
+        assert!(!visible.iter().any(|r| r.contains("--probe-tools")));
+        let all = flag_rows(true);
+        assert!(all.iter().any(|r| r.contains("--probe-tools")));
+        assert!(all.iter().any(|r| r.contains("内部协议")));
+        assert!(all.len() > visible.len());
+    }
+
+    /// 旗语行：占位符不足 24 列按空格补齐，超过就隔两个空格接说明。
+    #[test]
+    fn row_pads_short_specs_and_separates_long_ones() {
+        let short = row("--web", "说明");
+        assert!(short.starts_with("  --web "), "{short}");
+        assert_eq!(
+            crate::presentation::cli::width::cols(&short),
+            2 + 24 + 4,
+            "短占位符补到 24 列再接说明"
+        );
+        let long = row("--a-very-long-flag <value>", "说明");
+        assert!(
+            long.starts_with("  --a-very-long-flag <value>  说明"),
+            "{long}"
+        );
+    }
+}

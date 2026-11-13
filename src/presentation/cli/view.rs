@@ -58,14 +58,14 @@ pub(super) fn print_roster(ops: &Ops) {
     let roster = match ops.modules.roster() {
         Ok(r) => r,
         Err(e) => {
-            println!("[错误] {}", e);
+            term::say(&format!("[错误] {}", e));
             return;
         }
     };
     let tier = match ops.registry.settings() {
         Ok(s) => s.tier,
         Err(e) => {
-            println!("[错误] {}", e);
+            term::say(&format!("[错误] {}", e));
             return;
         }
     };
@@ -73,11 +73,11 @@ pub(super) fn print_roster(ops: &Ops) {
     let report = match ops.core.runtime_report(tier) {
         Ok(r) => r,
         Err(e) => {
-            println!("[错误] {}", e);
+            term::say(&format!("[错误] {}", e));
             return;
         }
     };
-    println!(
+    term::say(&format!(
         "[发现] {}",
         if roster.modules.is_empty() {
             "（无模块）".to_string()
@@ -89,15 +89,19 @@ pub(super) fn print_roster(ops: &Ops) {
                 .collect::<Vec<_>>()
                 .join(" · ")
         }
-    );
+    ));
     for m in &roster.modules {
-        println!("  {:<14} {}", m.manifest.id, first_line(&m.manifest.brief));
+        term::say(&format!(
+            "  {:<14} {}",
+            m.manifest.id,
+            first_line(&m.manifest.brief)
+        ));
     }
     for r in &report.rejected {
-        println!("[拒收] {}", r);
+        term::say(&format!("[拒收] {}", r));
     }
     for (id, caps) in &report.declared {
-        println!("  {:<14} 运行能力 {}", id, caps.join("、"));
+        term::say(&format!("  {:<14} 运行能力 {}", id, caps.join("、")));
     }
     if !report.available.is_empty() {
         let lib = report
@@ -106,14 +110,14 @@ pub(super) fn print_roster(ops: &Ops) {
             .map(|(id, vs)| format!("{} {}", id, vs.join("/")))
             .collect::<Vec<_>>()
             .join(" · ");
-        println!("[运行包] 档位 {}；包库：{}", report.tier, lib);
+        term::say(&format!("[运行包] 档位 {}；包库：{}", report.tier, lib));
     }
     for (id, caps) in &report.missing {
-        println!(
+        term::say(&format!(
             "[缺运行包] 模块 {} 需要 {}；把包放进依赖文件夹 runtimes/（契约见 RUNTIME_SPEC.md）",
             id,
             caps.join("、")
-        );
+        ));
     }
     // 虚拟机档的诊断：缺包之外（多版本未定版 / 定版不存在 / 路径冲突）会挡住「开始」，在这里如实说明。
     let hard: Vec<crate::capabilities::conductor::api::RuntimeDiagnosis> = report
@@ -130,13 +134,13 @@ pub(super) fn print_roster(ops: &Ops) {
         .cloned()
         .collect();
     if !hard.is_empty() {
-        println!(
+        term::say(&format!(
             "[档位诊断] {}（虚拟机档要先解决这些才能开始会话）",
             crate::capabilities::conductor::api::diagnose_text(&hard)
-        );
+        ));
     }
     for r in &report.rejected_packages {
-        println!("[运行包拒收] {}", r);
+        term::say(&format!("[运行包拒收] {}", r));
     }
 }
 
@@ -144,23 +148,23 @@ pub(super) fn print_menu(ops: &Ops) {
     let agents = match ops.registry.agents() {
         Ok(a) => a,
         Err(e) => {
-            println!("[错误] {}", e);
+            term::say(&format!("[错误] {}", e));
             return;
         }
     };
-    println!("\n可唤起 agent（发言席只有 agent；模块是它的能力包）：");
+    term::say("\n可唤起 agent（发言席只有 agent；模块是它的能力包）：");
     if agents.is_empty() {
-        println!("  （登记处还没有 agent：到 Web 界面「设置 → agent 管理」建一个）");
+        term::say("  （登记处还没有 agent：到 Web 界面「设置 → agent 管理」建一个）");
     }
     for a in &agents {
-        println!(
+        term::say(&format!(
             "  {:<14} {} · 模型 {}",
             a.name,
             a.modules.join(" + "),
             model_label(a.model.as_deref())
-        );
+        ));
     }
-    println!("{}", super::catalog::menu_text());
+    term::say(&super::catalog::menu_text());
 }
 
 /// 目的：模型标签（CLI 展示文案；核心默认是登记处的概念，不是提示词）。
@@ -209,48 +213,46 @@ fn head(glyph: &str, ink: theme::Ink, name: &str, verb: &str) -> String {
 fn render_rich(events: &[SessionEvent]) {
     for e in events {
         match e {
-            SessionEvent::Notice(n) => {
-                println!(
-                    "{} {}",
-                    term::ink(theme::Ink::Dim, "·"),
-                    term::ink(theme::Ink::Dim, n)
-                )
-            }
+            SessionEvent::Notice(n) => term::say(&format!(
+                "{} {}",
+                term::ink(theme::Ink::Dim, "·"),
+                term::ink(theme::Ink::Dim, n)
+            )),
             SessionEvent::Transcript(lines) => render_lines(lines),
             SessionEvent::Working { agent } => {
                 if let Some(a) = agent {
-                    println!(
+                    term::say(&format!(
                         "{} {}",
                         term::ink(theme::Ink::Ice2, "●"),
                         term::ink(theme::Ink::Dim, &format!("{} 开始干活，稍等", a))
-                    );
+                    ));
                 }
             }
             SessionEvent::Plan(p) => {
-                println!("{}", head("▸", theme::Ink::Ice2, "整理", ""));
+                term::say(&head("▸", theme::Ink::Ice2, "整理", ""));
                 for row in p.lines() {
-                    println!("  {}", row);
+                    term::say(&format!("  {}", row));
                 }
             }
             SessionEvent::PlanReview { plan, chain } => {
-                println!("{}", head("◈", theme::Ink::Amber, "待审", "同意之后才开工"));
+                term::say(&head("◈", theme::Ink::Amber, "待审", "同意之后才开工"));
                 for row in plan.lines() {
-                    println!("  {}", row);
+                    term::say(&format!("  {}", row));
                 }
                 for n in &chain.nodes {
-                    println!(
+                    term::say(&format!(
                         "  {} {} {}",
                         term::ink(theme::Ink::Dim, &format!("[{}]", n.id)),
                         term::bold(theme::Ink::Fg2, &n.title),
                         term::ink(theme::Ink::Dim, &format!("→ {}", n.assignee))
-                    );
+                    ));
                 }
             }
             SessionEvent::NodeStarted {
                 node,
                 sid,
                 assignee,
-            } => println!(
+            } => term::say(&format!(
                 "{} {} {}",
                 term::ink(theme::Ink::Ice2, "→"),
                 term::bold(theme::Ink::Fg2, &format!("节点 {}", node)),
@@ -258,37 +260,37 @@ fn render_rich(events: &[SessionEvent]) {
                     theme::Ink::Dim,
                     &format!("子会话 {} · 负责人 {}", sid, assignee)
                 )
-            ),
+            )),
             SessionEvent::Report { id, text, rework } => {
                 let verb = if *rework > 0 {
                     format!("返工第 {} 轮", rework)
                 } else {
                     String::new()
                 };
-                println!("{}", head("◆", theme::Ink::Ice2, id, &verb));
+                term::say(&head("◆", theme::Ink::Ice2, id, &verb));
                 for row in text.lines() {
-                    println!("  {}", row);
+                    term::say(&format!("  {}", row));
                 }
             }
             SessionEvent::Review { items, raw } => {
-                println!("{}", head("◈", theme::Ink::Ice2, "验收", ""));
+                term::say(&head("◈", theme::Ink::Ice2, "验收", ""));
                 if items.is_empty() {
-                    println!(
+                    term::say(&format!(
                         "  {}",
                         term::ink(theme::Ink::Dim, "（清单解析失败，原文如下）")
-                    );
+                    ));
                     for row in raw.lines() {
-                        println!("  {}", term::ink(theme::Ink::Dim, row));
+                        term::say(&format!("  {}", term::ink(theme::Ink::Dim, row)));
                     }
                 }
                 for i in items {
                     let (glyph, ink) = check_mark(&i.status);
-                    println!(
+                    term::say(&format!(
                         "  {} {} {}",
                         term::ink(ink, glyph),
                         i.item,
                         term::ink(theme::Ink::Dim, &i.note)
-                    );
+                    ));
                 }
             }
             SessionEvent::Delivery { ok, over_rework } => {
@@ -299,9 +301,13 @@ fn render_rich(events: &[SessionEvent]) {
                 } else {
                     ("✗", theme::Ink::Red, "未能通过，详见上面的验收清单。")
                 };
-                println!("{} {}", term::ink(ink, glyph), term::ink(ink, text));
+                term::say(&format!(
+                    "{} {}",
+                    term::ink(ink, glyph),
+                    term::ink(ink, text)
+                ));
             }
-            SessionEvent::DecisionCard { card, .. } => println!(
+            SessionEvent::DecisionCard { card, .. } => term::say(&format!(
                 "{} {} {}",
                 term::ink(theme::Ink::Amber, "◈"),
                 term::bold(theme::Ink::Amber, &card.message.title),
@@ -309,16 +315,16 @@ fn render_rich(events: &[SessionEvent]) {
                     theme::Ink::Dim,
                     &format!("（{} 在等你作答）", card.envelope.name)
                 )
-            ),
-            SessionEvent::DecisionAnswer(a) => println!(
+            )),
+            SessionEvent::DecisionAnswer(a) => term::say(&format!(
                 "{} {}",
                 term::ink(theme::Ink::Dim, "·"),
                 term::ink(
                     theme::Ink::Dim,
                     &format!("{} 答了 {}：选了 {}", a.by, a.card, a.option)
                 )
-            ),
-            SessionEvent::DecisionVoid { cards, reason } => println!(
+            )),
+            SessionEvent::DecisionVoid { cards, reason } => term::say(&format!(
                 "{} {}",
                 term::ink(theme::Ink::Dim, "·"),
                 term::ink(
@@ -330,7 +336,7 @@ fn render_rich(events: &[SessionEvent]) {
                         reason
                     )
                 )
-            ),
+            )),
             SessionEvent::Usage { usage, .. } => term::status(&format!(
                 "● 上下文 {}/{}（{}）",
                 tokens(usage.total_tokens),
@@ -366,16 +372,16 @@ fn render_lines(lines: &[crate::capabilities::session::api::LineView]) {
                 .and_then(|p| p.get("up_to"))
                 .and_then(|u| u.as_u64())
                 .unwrap_or(0);
-            println!(
+            term::say(&format!(
                 "{} {}",
                 term::ink(theme::Ink::Dim, "[压缩]"),
                 term::ink(
                     theme::Ink::Dim,
                     &format!("第 {} 行之前已压成摘要；此后原样保留（仍可查看）：", up_to)
                 )
-            );
+            ));
             for row in l.line.lines() {
-                println!("  {}", term::ink(theme::Ink::Dim, row));
+                term::say(&format!("  {}", term::ink(theme::Ink::Dim, row)));
             }
             continue;
         }
@@ -386,40 +392,40 @@ fn render_lines(lines: &[crate::capabilities::session::api::LineView]) {
             continue;
         }
         if l.kind == "user" || l.speaker == "用户" {
-            println!(
+            term::say(&format!(
                 "{} {}",
                 term::ink(theme::Ink::Ice, "›"),
                 term::bold(theme::Ink::Ice, &l.line)
-            );
+            ));
             continue;
         }
         if l.kind == "round" {
-            println!(
+            term::say(&format!(
                 "{} {}",
                 term::ink(theme::Ink::Line, "────"),
                 term::ink(theme::Ink::Dim, &l.line)
-            );
+            ));
             continue;
         }
         if l.system || l.kind == "system" {
             for row in l.line.lines() {
-                println!(
+                term::say(&format!(
                     "{} {}",
                     term::ink(theme::Ink::Dim, "·"),
                     term::ink(theme::Ink::Dim, row)
-                );
+                ));
             }
             continue;
         }
         if l.speaker.is_empty() {
             for row in l.line.lines() {
-                println!("  {}", row);
+                term::say(&format!("  {}", row));
             }
             continue;
         }
-        println!("{}", head("◆", theme::Ink::Ice2, &l.speaker, &l.verb));
+        term::say(&head("◆", theme::Ink::Ice2, &l.speaker, &l.verb));
         for row in l.line.lines() {
-            println!("  {}", row);
+            term::say(&format!("  {}", row));
         }
     }
 }
@@ -432,14 +438,14 @@ fn print_tool(t: &crate::capabilities::session::api::ToolCallView) {
     };
     let label = t.label();
     let pad = 18usize.saturating_sub(width::cols(&label));
-    println!(
+    term::say(&format!(
         "{} {}{} {} {}",
         term::ink(theme::Ink::Ice2, "⏺"),
         term::bold(theme::Ink::Fg2, &label),
         " ".repeat(pad),
         term::ink(theme::Ink::Dim, &arg_preview(&t.args)),
         term::ink(ink, glyph)
-    );
+    ));
 }
 
 fn arg_preview(args: &str) -> String {
@@ -461,9 +467,9 @@ fn tokens(n: u64) -> String {
 pub(super) fn render_plain(events: &[SessionEvent]) {
     for e in events {
         match e {
-            SessionEvent::Notice(n) => println!("{}", n),
+            SessionEvent::Notice(n) => term::say(n),
             SessionEvent::Transcript(lines) => {
-                println!("---- 转录 ----");
+                term::say("---- 转录 ----");
                 for l in lines {
                     if l.kind == "compacted" {
                         let up_to = l
@@ -472,15 +478,15 @@ pub(super) fn render_plain(events: &[SessionEvent]) {
                             .and_then(|p| p.get("up_to"))
                             .and_then(|u| u.as_u64())
                             .unwrap_or(0);
-                        println!(
+                        term::say(&format!(
                             "[压缩] 第 {} 行之前已压成摘要；此后原样保留（仍可查看）：\n{}",
                             up_to, l.line
-                        );
+                        ));
                         continue;
                     }
                     // 系统消息（提醒/"未回应"这类**不是谁说的**内容）标出来，别和用户/发言混在一起。
                     let mark = if l.system { "[系统] " } else { "" };
-                    println!("{}{}", mark, l.line);
+                    term::say(&format!("{}{}", mark, l.line));
                 }
             }
             SessionEvent::DiscussionDone { .. } => {}
@@ -488,67 +494,69 @@ pub(super) fn render_plain(events: &[SessionEvent]) {
                 node,
                 sid,
                 assignee,
-            } => {
-                println!(
-                    "[派发] 节点 {} → 子会话 {}（负责人 {}）",
-                    node, sid, assignee
-                )
-            }
-            SessionEvent::Plan(p) => println!("[整理] \n{}", p),
+            } => term::say(&format!(
+                "[派发] 节点 {} → 子会话 {}（负责人 {}）",
+                node, sid, assignee
+            )),
+            SessionEvent::Plan(p) => term::say(&format!("[整理] \n{}", p)),
             SessionEvent::PlanReview { plan, chain } => {
-                println!("[待审] 方案如下，点「同意」才开工：\n{}", plan);
+                term::say(&format!("[待审] 方案如下，点「同意」才开工：\n{}", plan));
                 for n in &chain.nodes {
-                    println!(
+                    term::say(&format!(
                         "  - {}（{}）负责人 {} 依赖 {:?}",
                         n.id, n.title, n.assignee, n.deps
-                    );
+                    ));
                 }
             }
             SessionEvent::Report { id, text, rework } => {
                 if *rework > 0 {
-                    println!("[执行·返工{}] [{}] {}", rework, id, text);
+                    term::say(&format!("[执行·返工{}] [{}] {}", rework, id, text));
                 } else {
-                    println!("[执行] [{}] {}", id, text);
+                    term::say(&format!("[执行] [{}] {}", id, text));
                 }
             }
             SessionEvent::Review { items, raw } => {
-                println!("[验收]");
+                term::say("[验收]");
                 if items.is_empty() {
-                    println!("（清单解析失败，原文如下）\n{}", raw);
+                    term::say(&format!("（清单解析失败，原文如下）\n{}", raw));
                 }
                 for i in items {
-                    println!("  [{}] {} {}", i.status.to_uppercase(), i.item, i.note);
+                    term::say(&format!(
+                        "  [{}] {} {}",
+                        i.status.to_uppercase(),
+                        i.item,
+                        i.note
+                    ));
                 }
             }
             SessionEvent::Delivery { ok, over_rework } => {
                 if *ok {
-                    println!("[交付] 全部通过，交付用户。");
+                    term::say("[交付] 全部通过，交付用户。");
                 } else if *over_rework {
-                    println!("[裁决] 返工超限仍未通过，交用户裁决。");
+                    term::say("[裁决] 返工超限仍未通过，交用户裁决。");
                 } else {
-                    println!("[交付] 未能通过。");
+                    term::say("[交付] 未能通过。");
                 }
             }
             SessionEvent::Ended => {}
             // **裁决卡**：界面只认这四个字段（信封 / 消息 / 选项），不认识业务含义。
             // 交互模式下随后由 `answer_gates` 把它整张打出来并就地作答；这里只提一句，不重复整张。
-            SessionEvent::DecisionCard { card, .. } => {
-                println!(
-                    "[裁决] 有一张卡在等你：{}（{}）——按提示作答",
-                    card.message.title, card.envelope.name
-                )
-            }
+            SessionEvent::DecisionCard { card, .. } => term::say(&format!(
+                "[裁决] 有一张卡在等你：{}（{}）——按提示作答",
+                card.message.title, card.envelope.name
+            )),
             // 一次回答的记录（谁答的、选了哪个 id）：如实打出来，便于对账。
-            SessionEvent::DecisionAnswer(a) => {
-                println!("[裁决] {} 答了 {}：选了 {}", a.by, a.card, a.option)
-            }
+            SessionEvent::DecisionAnswer(a) => term::say(&format!(
+                "[裁决] {} 答了 {}：选了 {}",
+                a.by, a.card, a.option
+            )),
             // 整队作废（停止 / 关闭）：如实说清作废了哪几张、为什么——等待方按"拒绝"解开。
-            SessionEvent::DecisionVoid { cards, reason } => println!(
+            SessionEvent::DecisionVoid { cards, reason } => term::say(&format!(
                 "[裁决] 作废 {} 张没答的卡（{}）：{}",
                 cards.len(),
                 cards.join("、"),
                 reason
-            ),
+            )),
             // 流式增量与工具调用实时事件都是短暂事件，终端不在流中渲染（最终行会到）。
             // 短暂事件（流式增量 / 运行态 / 工具调用）：Web 前端用来做实时渲染，CLI 不逐条打。
             SessionEvent::Delta { .. }
@@ -560,3 +568,6 @@ pub(super) fn render_plain(events: &[SessionEvent]) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

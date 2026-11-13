@@ -278,3 +278,108 @@ fn distance(a: &str, b: &str) -> usize {
     }
     prev[b.len()]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 菜单一行：七个分组按固定顺序连接，组内命令名按表内顺序排。
+    #[test]
+    fn menu_lists_groups_in_order() {
+        let menu = menu_text();
+        assert!(menu.ends_with("（help 看用法与旗语；help <命令> 看单条；Tab 补全）"));
+        let body = menu
+            .strip_prefix("命令：")
+            .and_then(|rest| rest.split("（help").next())
+            .expect("菜单以「命令：」开头");
+        let groups: Vec<&str> = body.split(" · ").collect();
+        assert_eq!(groups.len(), GROUPS.len(), "一个分组一段：{groups:?}");
+        assert_eq!(groups[0], "single/collab/proxy");
+        assert_eq!(groups[1], "rewind/work/diagnose");
+        assert_eq!(groups[6], "help/version/exit");
+        let listed: usize = groups.iter().map(|g| g.split('/').count()).sum();
+        assert_eq!(listed, COMMANDS.len(), "每条命令都进菜单");
+    }
+
+    /// 手册：用法、旗语段、按分组的命令表与语法规则齐全；超宽用法折到第二行。
+    #[test]
+    fn help_renders_groups_and_flag_sections() {
+        let help = help_text(false);
+        assert!(help.starts_with("Solomni —— 终端转录中心\n\n用法："));
+        assert!(help.contains("全局旗语\n"));
+        for group in GROUPS {
+            assert!(help.contains(&format!("  {group}\n")), "分组标题：{group}");
+        }
+        assert!(help.contains("    single <agent名…>  "), "短用法单行排版");
+        assert!(help.contains("    proxy "), "无参数命令只写名字");
+        assert!(help.contains("（别名 /help / ?）"), "别名接在说明后面");
+        assert!(
+            help.contains(
+                "    rewind <会话> archive|delete <行id> | restore <标记id>\n      回档：留档、删除或恢复到某条标记\n"
+            ),
+            "超宽用法折到第二行"
+        );
+        assert!(help.contains("语法规则"));
+        assert!(!help.contains("--probe-tools"), "内部旗语默认不列");
+        let all = help_text(true);
+        assert!(all.contains("--probe-tools") && all.contains("内部协议"));
+        assert!(all.contains("  --root <dir>"), "可见旗语两档都在");
+    }
+
+    /// 单条说明：用法、说明、分组都来自同一张表；没有别名就不写这一段。
+    #[test]
+    fn detail_reports_usage_group_and_aliases() {
+        let single = detail("single").expect("已知命令");
+        assert!(
+            single.starts_with("single <agent名…>  发起单 agent 会话"),
+            "{single}"
+        );
+        assert!(single.ends_with("\n  会话"), "末尾是分组：{single}");
+        assert!(!single.contains("别名"));
+        let proxy = detail(" proxy ").expect("首尾空白不算错");
+        assert!(proxy.starts_with("proxy  决定权"), "{proxy}");
+        let help = detail("/help").expect("前导斜杠与别名都认");
+        assert!(help.starts_with("help [命令|--all]  "), "{help}");
+        assert!(help.contains("；别名 /help / ?"), "{help}");
+        assert_eq!(detail("?"), Some(help), "别名单独用也给同一条");
+        assert!(detail("nope").is_none(), "未知命令没有说明");
+    }
+
+    /// 补全：命令名与别名都算候选，去重后按字典序给出，无匹配就是空。
+    #[test]
+    fn complete_filters_by_prefix() {
+        let all = complete("");
+        assert_eq!(all.len(), COMMANDS.len() + 2, "help 的两个别名各算一条");
+        assert!(all.contains(&"/help".to_string()) && all.contains(&"?".to_string()));
+        let mut sorted = all.clone();
+        sorted.sort();
+        assert_eq!(all, sorted, "候选按字典序");
+        assert_eq!(complete("he"), vec!["help".to_string()]);
+        assert_eq!(complete("zzz"), Vec::<String>::new());
+        assert!(complete("s").contains(&"single".to_string()));
+        assert!(complete("s").len() > 1, "多候选原样给出");
+    }
+
+    /// 建议：编辑距离 ≤2 时给最近的一条，命令名与别名都算候选。
+    #[test]
+    fn suggest_only_within_two_edits() {
+        assert_eq!(suggest("singel"), Some("single"));
+        assert_eq!(suggest("porxy"), Some("proxy"));
+        assert_eq!(suggest("/hep"), Some("/help"), "别名也算候选");
+        assert_eq!(suggest("?"), Some("?"), "精确命中给自身");
+        assert_eq!(suggest("zzzzzz"), None);
+    }
+
+    /// 版本行：包版本 + 当前构建档位。
+    #[test]
+    fn version_text_names_package_and_build() {
+        let text = version_text();
+        assert!(text.contains(env!("CARGO_PKG_VERSION")), "{text}");
+        let build = if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        };
+        assert!(text.contains(build), "{text}");
+    }
+}

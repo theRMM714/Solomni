@@ -20,3 +20,4 @@
 | `src/presentation/cli/input.rs` | 输入框的行编辑：缓冲区、光标、历史；按键语义到编辑动作的映射 |
 | `src/presentation/cli/theme.rs` | 档位判定（真彩 / 256 / 16 / 无色）与冰青语义 token 上色 |
 | `src/presentation/cli/width.rs` | 显示宽度：东亚宽字符 2 格、按列截断不劈开宽字符 |
+| `src/presentation/cli/view/tests.rs` | 终端渲染的用例与替身：startup/roster/menu/富与纯转录/工具行的逐行断言（`#[cfg(test)] mod tests;` 指向） |
