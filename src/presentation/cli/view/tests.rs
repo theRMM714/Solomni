@@ -51,6 +51,7 @@ fn tool(module: &str, ok: bool, args: &str) -> ToolCallView {
         call_id: "c1".into(),
         reply: 1,
         read: None,
+        shell: None,
     }
 }
 fn check(item: &str, status: &str) -> CheckView {

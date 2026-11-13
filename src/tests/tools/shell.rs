@@ -77,6 +77,10 @@ pub(crate) fn sandbox_shell_only_gets_the_private_sandbox_and_runtime_roots() {
     assert!(live.finished_at.is_some(), "跑完要写结束时间");
     assert_eq!(live.ok, Some(true));
     assert!(live.output.contains("ok"), "回执预览要进快照");
+    assert!(
+        done[0].3.is_none(),
+        "替身回执没有 [shell] 收尾行 = 不算真跑过，事实不发明"
+    );
 }
 
 /// 目的：shell 回执末尾带 cwd 与本次耗时（模型与回放共用同一行）。
@@ -97,9 +101,12 @@ fn shell_receipt_carries_cwd_and_elapsed_after_a_real_run() {
     );
     let out = &done[0].1;
     assert!(out.ok, "{}", out.output);
-    let (cwd, _) =
+    let (cwd, secs) =
         crate::capabilities::tools::api::cwd_elapsed(&out.output).expect("回执要有落点与耗时");
     assert_eq!(cwd, mt.sandbox.private.display().to_string());
+    let facts = done[0].3.as_ref().expect("要带结构化事实");
+    assert_eq!(facts.cwd, cwd, "事实与回执行同一个落点");
+    assert_eq!(facts.elapsed_secs(), secs, "事实与回执行同一次计时");
 }
 
 /// 目的：workspace 档拒绝 external 且不弹卡、不落进程。
@@ -332,6 +339,11 @@ fn vm_timeout_receipt_gets_cwd_and_elapsed_trailer() {
     let live = slot.get().expect("状态栏快照");
     assert_eq!(live.status.as_deref(), Some("timeout"));
     assert_eq!(live.exit_code, None);
+    let facts = done[0].3.as_ref().expect("超时也要带结构化事实");
+    assert_eq!(facts.status.as_deref(), Some("timeout"));
+    assert_eq!(facts.exit_code, None, "超时没有命令退出码");
+    assert_eq!(facts.fence_prep_ms, None, "虚拟机档没有本机围栏准备");
+    assert_eq!(live.elapsed_secs, Some(facts.elapsed_secs()));
 }
 
 /// 目的：虚拟机档回执的 cwd 用本环境（guest）写法，不再露宿主写法。
@@ -372,6 +384,11 @@ fn vm_shell_receipt_uses_the_environment_path_form() {
         "虚拟机档回执的 cwd 不能是宿主写法：{}",
         cwd
     );
+    let facts = done[0].3.as_ref().expect("要带结构化事实");
+    assert_eq!(facts.cwd, bridge.to_view(&mt.sandbox.private), "事实也用 guest 写法");
+    assert_eq!(facts.fence_prep_ms, None);
+    assert_eq!(facts.status.as_deref(), Some("exit"));
+    assert!(!facts.truncated);
 }
 
 /// 目的：基础工具链根只进宿主成员工具面。

@@ -101,7 +101,7 @@
 | GET | `/` | 静态资源 | — | `index.html` | 200 |
 | GET | `/assets/{*path}` | 静态资源 | — | 编译期嵌入表里的文件 | 200, 404 |
 | GET | `/api/events` | 事件台（`EventBus`） | 查询 `sid` / `since` | `{lines:[{seq,sid,events}],head,oldest}` | 200 |
-| GET | `/api/state` | `ModulesOps::roster / module_enabled / service_enabled` + `SessionOps::session_views` + `RegistryOps` + `HistoryOps::list` | — | `{modules,services,rejected,fence,providers,models,core,agents,settings,sessions,history}`（`modules[].runtimes` 是模块声明的运行能力，创建向导据此预判虚拟根够不够；`modules[].enabled` 与 `modules[].services[].enabled` 是**有效启停**；`services` 是常驻服务的**运行态** `{module,name,adapter,state,reason,operations}`；`sessions[].pending` 是**当前那张裁决卡**的快照，与推的 `decision_card` 同一份；`sessions[].context` 是最近一次模型调用的上下文用量，只对 `Session::Single`（single / proxy / agent 子会话）存在；`sessions[].shell` 是最近一次 shell 的运行状态，没跑过就是 null） | 200, 400 |
+| GET | `/api/state` | `ModulesOps::roster / module_enabled / service_enabled` + `SessionOps::session_views` + `RegistryOps` + `HistoryOps::list` | — | `{modules,services,rejected,fence,providers,models,core,agents,settings,sessions,history}`（`modules[].runtimes` 是模块声明的运行能力，创建向导据此预判虚拟根够不够；`modules[].enabled` 与 `modules[].services[].enabled` 是**有效启停**；`services` 是常驻服务的**运行态** `{module,name,adapter,state,reason,operations}`；`sessions[].pending` 是**当前那张裁决卡**的快照，与推的 `decision_card` 同一份；`sessions[].context` 是最近一次模型调用的上下文用量，只对 `Session::Single`（single / proxy / agent 子会话）存在；`sessions[].shell` 是最近一次 shell 的运行状态（新转录读工具行的结构化事实，旧转录回落解析回执），没跑过就是 null） | 200, 400 |
 | GET | `/api/actions` | `ActionOps::catalog` | 查询 `sid` | `{actions:[{id,desc,params,available,reason}]}` | 200, 400 |
 | POST | `/api/actions/{id}` | `ActionOps::act` | `{…按动作声明}` | `{head}` / `{events}`（重放快照） / `{ok,…}` | 200, 400 |
 | GET | `/api/sessions/{sid}/config` | `SessionOps::config` | — | `{config}` | 200, 400 |
@@ -111,7 +111,7 @@
 | GET | `/api/dirs` | 宿主目录浏览 | 查询 `path`（可选；省略 = 用户主目录） | `{path,parent,roots:[盘符],dirs:[{name,path}]}` | 200, 400 |
 | GET | `/api/settings` | `RegistryOps::settings` | — | `{settings}` | 200, 400 |
 | GET | `/api/history` | `HistoryOps::list` | — | `{sessions}` | 200, 400 |
-| GET | `/api/history/{name}` | `HistoryOps::open` | — | `{meta,events,live,head,shell}`（`shell` 从转录派生：回放/重建后的状态栏快照） | 200, 404 |
+| GET | `/api/history/{name}` | `HistoryOps::open` | — | `{meta,events,live,head,shell}`（`shell` 从转录派生：回放/重建后的状态栏快照；优先读工具行的结构化事实，旧转录回落解析回执） | 200, 404 |
 | POST | `/api/history/{name}/delete` | `HistoryOps::delete` | — | `{ok}` | 200, 400 |
 | GET | `/api/tiers` | `ConductorOps::tier_choices` | — | `{tiers:{default,vm_available,vm_unavailable_reason,vm_requirements,guests,available}}` | 200, 400 |
 | GET | `/api/processes` | `Provision::processes` | — | `{procs:[{pid,alive,purpose,owner,since,orphanRisk,guardNote}]}` | 200, 400 |
