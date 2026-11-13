@@ -13,7 +13,7 @@ pub use crate::kernel::contracts::types::{
 };
 pub use crate::kernel::detail::host_probe::{FileStamp, file_stamp};
 pub use crate::kernel::detail::locus::{is_network_path, locus_of, place_contains};
-pub use crate::kernel::detail::process::take_fence_prep;
+pub use crate::kernel::detail::process::{FenceTiming, take_fence_prep};
 pub use crate::kernel::domain::fence::{SandboxMode, SandboxRequirements, call_lease};
 pub use crate::kernel::domain::jobs::JobRegistry;
 pub use crate::kernel::domain::path::{is_unc, native, slash, unc_parts};
