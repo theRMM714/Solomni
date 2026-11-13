@@ -7,7 +7,7 @@
 use crate::capabilities::permission::api::{Decision, PermissionSet, Reach};
 use crate::capabilities::prompt::api::RefRoots;
 use crate::kernel::api::slash;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -38,6 +38,45 @@ pub enum Place {
     Module(String),
 }
 
+/// 目的：外部工作区的围栏授权粒度——决定容器里的 shell / 模块工具能不能读共享区，以及写 ACL 的频率。
+/// 约束：**只影响围栏与共享区读范围**，不改变文件归属；`Workspace` 的机器级 ACE 常驻用户目录，撤销走显式命令。
+///   它是跨 `session`（meta 落盘）与 `workspace`（沙箱投影）共享的形状，家住工作区能力面。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceGrant {
+    /// 不向容器授共享区：容器里的 shell / 模块工具读不到（内置文件工具同样按权限层拒绝，如实告知）。
+    None,
+    /// 仅本次会话（缺省）：按次调用授给本会话的容器 SID，会话结束递归撤——首次付 O(子树)，每会话都付。
+    #[default]
+    Session,
+    /// 该工作区一次性：机器级只读授给 `ALL APPLICATION PACKAGES` + `(OI)(CI)`，之后所有会话零写。
+    /// 代价：本机任意 AppContainer 应用都能读这个目录；撤销走 `--fence-revoke <path>`。
+    Workspace,
+}
+
+impl WorkspaceGrant {
+    /// 目的：解析创建参数（`none` / `session` / `workspace`）；不认识的值如实拒绝，不静默落默认。
+    pub fn parse(raw: &str) -> Result<Self, String> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "none" => Ok(WorkspaceGrant::None),
+            "session" => Ok(WorkspaceGrant::Session),
+            "workspace" => Ok(WorkspaceGrant::Workspace),
+            other => Err(format!(
+                "未知的工作区授权粒度：{other}（可用 none / session / workspace）"
+            )),
+        }
+    }
+
+    /// 目的：落盘与人读的稳定写法（与 serde 的 snake_case 同名）。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WorkspaceGrant::None => "none",
+            WorkspaceGrant::Session => "session",
+            WorkspaceGrant::Workspace => "workspace",
+        }
+    }
+}
+
 /// 目的：一个 agent 实例的沙箱：寻址根 + 它的能力模块目录。
 ///    权限策略在此收口：可达范围只有这三个落点，且模块必须是本 agent 的成员。
 #[derive(Debug, Clone)]
@@ -65,7 +104,7 @@ pub struct Sandbox {
     /// 目的：外部工作区（共享区主副本根）的围栏授权粒度——会话绑定上的落盘事实在这里的投影。
     /// 约束：只影响**围栏派生**：`Session` 逐次调用授给容器 SID；`Workspace` 走机器级一次性只读；
     ///   `None` 由上层把共享区读范围收紧，围栏不派生（见 `FenceSpec::for_call`）。
-    pub shared_grant: crate::capabilities::session::api::WorkspaceGrant,
+    pub shared_grant: WorkspaceGrant,
 }
 
 impl Sandbox {

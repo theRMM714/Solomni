@@ -770,10 +770,17 @@ fn fence() -> FenceInfo {
     }
 }
 
+/// 目的：契约测试固定用的 `.home`（临时目录），别读真实产品目录里的成本样本。
+fn home() -> std::path::PathBuf {
+    let p = std::env::temp_dir().join(format!("solomni-routes-home-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&p);
+    p
+}
+
 fn call(ops: &Ops, method: &str, url: &str, body: &str) -> (u16, String) {
     let log: Arc<dyn crate::capabilities::conductor::api::LogOps + Send + Sync> =
         Arc::new(super::doubles::NoopLogOps);
-    let (code, _headers, text) = web::route(ops, &fence(), &log, method, url, body);
+    let (code, _headers, text) = web::route(ops, &fence(), &log, method, url, body, &home());
     (code, text)
 }
 
@@ -1048,7 +1055,7 @@ fn assets_are_served_only_from_the_embedded_table() {
     let ops = fake_ops(None);
     let log: Arc<dyn crate::capabilities::conductor::api::LogOps + Send + Sync> =
         Arc::new(super::doubles::NoopLogOps);
-    let get = |url: &str| web::route(&ops, &fence(), &log, "GET", url, "");
+    let get = |url: &str| web::route(&ops, &fence(), &log, "GET", url, "", &home());
 
     assert!(
         web::assets::ASSETS
@@ -1142,6 +1149,7 @@ fn every_api_route_reports_capability_failure_as_4xx() {
             || route.id == "events"
             || route.id == "setup.job"
             || route.id == "dirs"
+            || route.id == "workspace-cost"
         {
             continue; // 静态资源不碰能力；取消是即发即忘，不读状态
         }
@@ -1229,6 +1237,13 @@ fn events_sid_filter_decodes_percent_escapes() {
 fn success_shapes_are_pinned_per_route() {
     let ops = fake_ops(None);
     ops.events.seed_for_test("w1");
+    // 成本路由要一个真实存在的小目录（空目录也给 200，这里用带子目录的夹具盯计数）。
+    let cost_root =
+        std::env::temp_dir().join(format!("solomni-routes-cost-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&cost_root);
+    std::fs::create_dir_all(cost_root.join("sub")).expect("建成本夹具");
+    std::fs::write(cost_root.join("a.txt"), b"a").expect("写成本夹具");
+    let cost_url = format!("/api/workspace-cost?path={}", cost_root.display());
     let cases: Vec<(&str, &str, &str, u16, &str)> = vec![
         ("GET", "/", "", 200, "<!DOCTYPE"),
         ("GET", "/assets/style.css", "", 200, "--"),
@@ -1239,6 +1254,7 @@ fn success_shapes_are_pinned_per_route() {
         ("GET", "/assets/app/ui/index.js", "", 200, "createUi"),
         ("GET", "/api/events?sid=&since=0", "", 200, "\"head\""),
         ("GET", "/api/dirs?path=.", "", 200, "\"path\""),
+        ("GET", &cost_url, "", 200, "\"estimated_ms\""),
         ("GET", "/api/state", "", 200, "\"modules\""),
         (
             "POST",
@@ -1347,6 +1363,7 @@ fn success_shapes_are_pinned_per_route() {
             );
         }
     }
+    let _ = std::fs::remove_dir_all(&cost_root);
     // 每条目录里的路由都要有一条成功用例盯着（按形状比，不按具体参数值）。
     for route in ROUTES {
         let covered = cases
@@ -1358,6 +1375,40 @@ fn success_shapes_are_pinned_per_route() {
             route.method, route.pattern
         );
     }
+}
+
+/// 成本预估路由：计数口径、缺省速率来源与坏路径的 400 都钉住。
+#[test]
+fn workspace_cost_route_counts_and_rejects_bad_paths() {
+    let ops = fake_ops(None);
+    let root = std::env::temp_dir().join(format!("solomni-routes-cost2-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("sub")).expect("建夹具");
+    std::fs::write(root.join("a.txt"), b"aa").expect("写夹具");
+    std::fs::write(root.join("b.txt"), b"bbb").expect("写夹具");
+    let url = format!("/api/workspace-cost?path={}", root.display());
+    let (code, text) = call(&ops, "GET", &url, "");
+    assert_eq!(code, 200, "{}", text);
+    let v: serde_json::Value = serde_json::from_str(&text).expect("JSON");
+    assert_eq!(v["files"], json!(2), "{}", text);
+    assert_eq!(v["dirs"], json!(1), "{}", text);
+    assert_eq!(v["objects"], json!(3), "文件 2 + 子目录 1：{}", text);
+    assert_eq!(v["bytes"], json!(5), "{}", text);
+    assert_eq!(v["truncated"], json!(false), "{}", text);
+    assert_eq!(v["sample"], json!("default"), "{}", text);
+    assert!(v["estimated_ms"].is_u64(), "{}", text);
+    for bad in [
+        "/api/workspace-cost".to_string(),
+        "/api/workspace-cost?path=".to_string(),
+        "/api/workspace-cost?path=relative".to_string(),
+        format!("/api/workspace-cost?path={}", root.join("nope").display()),
+        format!("/api/workspace-cost?path={}", root.join("a.txt").display()),
+    ] {
+        let (code, text) = call(&ops, "GET", &bad, "");
+        assert_eq!(code, 400, "{} 该回 400：{}", bad, text);
+        assert!(text.contains("error"), "{}", text);
+    }
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 /// 补齐入口的**取舍在后端**：status 给出 pending（只列没在场的），ensure 不点名时按它起作业。
@@ -1409,7 +1460,7 @@ fn web_serve_returns_when_interrupted() {
         s2.store(true, Ordering::SeqCst);
     });
     let started = Instant::now();
-    let r = web::serve_until(&ops, 0, &fence(), &stop);
+    let r = web::serve_until(&ops, 0, &fence(), &home(), &stop);
     assert!(r.is_ok(), "{:?}", r);
     assert!(
         started.elapsed() < Duration::from_secs(10),

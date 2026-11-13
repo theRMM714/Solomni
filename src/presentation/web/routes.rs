@@ -132,6 +132,16 @@ pub const ROUTES: &[Route] = &[
         note: "建会话时选工作区目录用；只在本机 Web 上提供目录列表，不读写文件内容",
     },
     Route {
+        id: "workspace-cost",
+        method: "GET",
+        pattern: "/api/workspace-cost",
+        capability: "工作区成本预估（有界计数 + 本卷速率）",
+        request: "查询 path（必填，外部工作区的绝对路径）",
+        response: "{path,files,dirs,objects,bytes,truncated,volume,ms_per_object,estimated_ms,estimated_ms_min,estimated_ms_max,sample}",
+        statuses: &[200, 400],
+        note: "只读预估，不写 ACL：250 ms / 5 万条目内计数，超限标 truncated（数字是下界）",
+    },
+    Route {
         id: "settings.get",
         method: "GET",
         pattern: "/api/settings",

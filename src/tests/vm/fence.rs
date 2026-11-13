@@ -180,6 +180,7 @@ pub(crate) fn vm_service_runs_fenced_and_records_packages() {
         Some(vec!["python@3.12".to_string()])
     );
     let fence = FenceSpec {
+        machine_ro_tree: Vec::new(),
         agent: "a".to_string(),
         lease: "w--a".to_string(),
         rw: vec![std::path::PathBuf::from("/work/a")],
@@ -341,6 +342,7 @@ pub(crate) fn guest_access_roots_are_all_covered_by_stable_mounts() {
         };
         // boot fence 照 guest_job 的造法：稳定根进 rw，host_read_roots 为空。
         let boot = FenceSpec {
+            machine_ro_tree: Vec::new(),
             agent: String::new(),
             lease: "w".to_string(),
             rw,
@@ -370,6 +372,7 @@ pub(crate) fn guest_access_roots_are_all_covered_by_stable_mounts() {
         );
         // 一次 shell 调用的围栏：私沙可写、共享区与模块只读（与 FenceSpec::for_call 同形）。
         let per_call = FenceSpec {
+            machine_ro_tree: Vec::new(),
             agent: "a".to_string(),
             lease: "w".to_string(),
             rw: vec![private.clone()],
@@ -483,6 +486,7 @@ pub(crate) fn guest_access_carries_the_per_call_net_flag() {
     use std::path::PathBuf;
 
     let base = FenceSpec {
+        machine_ro_tree: Vec::new(),
         agent: "a".to_string(),
         lease: "w".to_string(),
         rw: Vec::new(),

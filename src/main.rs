@@ -741,6 +741,7 @@ fn main() {
             ops,
             flags.port.unwrap_or(presentation::web::DEFAULT_PORT),
             &fence_report,
+            &home,
         );
     } else {
         // CLI 里输入 web 可直接转入 Web，无需重启进程（能力面可克隆，两份呈现共用同一个核心）。
@@ -754,7 +755,7 @@ fn main() {
             ) {
                 presentation::cli::CliExit::Exit => break,
                 presentation::cli::CliExit::Web(port) => {
-                    entry::web::serve_web(ops.clone(), port, &fence_report);
+                    entry::web::serve_web(ops.clone(), port, &fence_report, &home);
                 }
             }
         }

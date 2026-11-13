@@ -771,6 +771,7 @@ pub(crate) fn vm_live_external_workspace_round_trip() {
     crate::capabilities::conductor::service::guest_job::check_stable_roots(&sandboxes, &bridge)
         .expect("外部布局的稳定根要能起 guest");
     let boot = FenceSpec {
+        machine_ro_tree: Vec::new(),
         agent: String::new(),
         lease: "vm-live-ext".to_string(),
         rw,
@@ -882,6 +883,7 @@ pub(crate) fn vm_live_external_workspace_round_trip() {
         );
         // 2) fenced：私沙可写（围栏只给私沙 rw，共享区在 ro_tree）。
         let per_call = FenceSpec {
+            machine_ro_tree: Vec::new(),
             agent: "a".to_string(),
             lease: lease.clone(),
             rw: vec![private.clone()],

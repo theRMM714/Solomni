@@ -31,7 +31,7 @@ async function openWizard(draft) {
   const resumed = !!(draft && draft.__wizardDraft);
   // 两种形态共用一份 agent 卡片列表：single 恰好 0/1 个；collab 可多个。
   const w = resumed ? draft : {
-    mode: 'single', agents: [], task: '', tier: 'host', guest: '', permission: 'workspace', __wizardDraft: true,
+    mode: 'single', agents: [], task: '', tier: 'host', guest: '', permission: 'workspace', workspace_grant: 'session', __wizardDraft: true,
   };
   if (!Array.isArray(w.agents)) w.agents = [];
   // 名称与需求是**弹层里**输入框的现值（在本作用域之外）：由弹层装好后把取值钩子挂上来。
@@ -174,12 +174,18 @@ function pickWorkspaceDir(onPick) {
     // 可手填：选择器只列本机盘符，网络共享（UNC）要自己写——虚拟机档接受，本机档由后端如实拒绝。
     const workspaceIn = textInput('默认（会话内 work/）；也可填绝对路径或 UNC：\\\\server\\share\\目录');
     if (w.workspace) workspaceIn.value = w.workspace;
-    // 手填也算草稿：重开时带回来的是最后填的写法。
-    workspaceIn.addEventListener('input', () => { w.workspace = workspaceIn.value; });
+    // 手填也算草稿：重开时带回来的是最后填的写法；路径一变就重估一次授权成本（防抖，旧响应按令牌丢弃）。
+    workspaceIn.addEventListener('input', () => { w.workspace = workspaceIn.value; scheduleCost(); });
     const wsPick = btn('选择目录', 'btn btn-ghost');
     const wsDefault = btn('默认', 'btn btn-ghost');
-    wsPick.onclick = () => pickWorkspaceDir((p) => { workspaceIn.value = p; w.workspace = p; });
-    wsDefault.onclick = () => { workspaceIn.value = ''; w.workspace = ''; };
+    wsPick.onclick = () => pickWorkspaceDir((p) => {
+      workspaceIn.value = p; w.workspace = p;
+      clearTimeout(costTimer); fetchCost();
+    });
+    wsDefault.onclick = () => {
+      workspaceIn.value = ''; w.workspace = '';
+      clearTimeout(costTimer); fetchCost();
+    };
     const workspaceRow = doc.createElement('div');
     workspaceRow.style.display = 'flex';
     workspaceRow.style.gap = '8px';
@@ -188,6 +194,100 @@ function pickWorkspaceDir(onPick) {
     workspaceRow.appendChild(wsDefault);
     const workspaceWrap = doc.createElement('div');
     workspaceWrap.appendChild(workspaceRow);
+    // 外部工作区才有「授权粒度」与等待成本：没选目录时整块收起，提交体也不带（缺省 = 会话内 work/）。
+    const grantBox = doc.createElement('div');
+    grantBox.className = 'form-col hidden';
+    const grantLabel = doc.createElement('div');
+    grantLabel.className = 'wf-label';
+    grantLabel.textContent = '外部工作区授权粒度';
+    grantBox.appendChild(grantLabel);
+    [
+      { id: 'none', copy: wizardCopy.workspaceGrant.none },
+      { id: 'session', copy: wizardCopy.workspaceGrant.session },
+      { id: 'workspace', copy: wizardCopy.workspaceGrant.workspace },
+    ].forEach((o) => {
+      const r = ui.radio(o.copy.label, (w.workspace_grant || 'session') === o.id, 'wf-grant', false, o.copy.note);
+      r.box.addEventListener('change', () => { if (r.box.checked) w.workspace_grant = o.id; });
+      grantBox.appendChild(r.wrap);
+    });
+    grantBox.appendChild(ui.hint(wizardCopy.workspaceGrant.lead));
+    // 假的 DOM 只有 appendChild：先放成本提示再放单选块（视觉顺序不变）。
+    const costHint = ui.hint('');
+    costHint.classList.add('hidden');
+    workspaceWrap.appendChild(costHint);
+    workspaceWrap.appendChild(grantBox);
+    // 成本提示：按目录估第一次按会话授权的等待（后端按对象数采样）；估不出只是提示，不挡创建。
+    let costTimer = 0;
+    let costSeq = 0;
+    const costState = { path: '', kind: 'idle', data: null, err: '' };
+    function hasExternal() { return workspaceIn.value.trim() !== ''; }
+    function costSecs(ms) { return Math.max(1, Math.round(Number(ms) / 1000)); }
+    function costRange(d) {
+      const lo = Number(d.estimated_ms_min);
+      const hi = Number(d.estimated_ms_max);
+      if (Number.isFinite(lo) && Number.isFinite(hi) && (lo > 0 || hi > 0)) {
+        const a = costSecs(lo);
+        const b = Math.max(a, costSecs(hi));
+        return a === b ? a + ' 秒' : a + '–' + b + ' 秒';
+      }
+      const one = Number(d.estimated_ms);
+      return Number.isFinite(one) && one > 0 ? costSecs(one) + ' 秒' : '';
+    }
+    function costCounts(d) {
+      const at = d.truncated ? '至少 ' : '';
+      return at + (Number(d.files) || 0) + ' 个文件、' + at + (Number(d.dirs) || 0) + ' 个目录';
+    }
+    function costText() {
+      if (!hasExternal()) return '';
+      if (costState.kind === 'loading') return wizardCopy.workspaceGrant.costLoading;
+      if (costState.kind === 'err') return wizardCopy.workspaceGrant.costFail + '（' + costState.err + '）';
+      if (costState.kind !== 'ok') return '';
+      const d = costState.data || {};
+      const range = costRange(d);
+      if (!range) return costCounts(d) + '；' + wizardCopy.workspaceGrant.costNoNumbers;
+      return costCounts(d) + '；首次按工作区授权约 ' + range + '（一次性）';
+    }
+    function syncGrantCost() {
+      const external = hasExternal();
+      grantBox.className = 'form-col' + (external ? '' : ' hidden');
+      const text = costText();
+      costHint.textContent = text;
+      costHint.className = 'cfg-hint' + (external && text ? '' : ' hidden');
+    }
+    function fetchCost() {
+      const p = workspaceIn.value.trim();
+      if (!p) {
+        costSeq += 1;
+        costState.path = ''; costState.kind = 'idle'; costState.data = null; costState.err = '';
+        syncGrantCost();
+        return;
+      }
+      if (p === costState.path && (costState.kind === 'loading' || costState.kind === 'ok')) {
+        syncGrantCost();
+        return;
+      }
+      const seq = ++costSeq;
+      costState.path = p; costState.kind = 'loading'; costState.data = null; costState.err = '';
+      syncGrantCost();
+      api('GET', '/api/workspace-cost?path=' + encodeURIComponent(p))
+        .then((r) => {
+          if (seq !== costSeq || workspaceIn.value.trim() !== p) return;
+          costState.data = r || {}; costState.kind = 'ok';
+          syncGrantCost();
+        })
+        .catch((e) => {
+          if (seq !== costSeq || workspaceIn.value.trim() !== p) return;
+          costState.err = (e && e.message) || '请求失败';
+          costState.kind = 'err';
+          syncGrantCost();
+        });
+    }
+    function scheduleCost() {
+      clearTimeout(costTimer);
+      costTimer = setTimeout(fetchCost, 400);
+    }
+    syncGrantCost();
+    if (hasExternal()) fetchCost();
     const modeSel = selectInput([
       { value: 'single', label: '单 agent（1 个或多个模块）' },
       { value: 'collab', label: '协作（多个 agent）' },
@@ -457,7 +557,11 @@ function pickWorkspaceDir(onPick) {
       if (w.mode === 'proxy') {
         // 代理：没有名单、没有需求——选这个形态就是授予全权（档位由上面的选择显式落盘）。
         const proxyBody = { name, mode: 'proxy', agents: [], tier: w.tier, guest: w.tier === 'vm' ? vmGuest : null, permission: w.permission || 'all_reach' };
-        if (workspaceIn.value.trim()) proxyBody.workspace = workspaceIn.value.trim();
+        const proxyWs = workspaceIn.value.trim();
+        if (proxyWs) {
+          proxyBody.workspace = proxyWs;
+          proxyBody.workspace_grant = w.workspace_grant || 'session';
+        }
         await submit(proxyBody);
         return;
       }
@@ -489,7 +593,11 @@ function pickWorkspaceDir(onPick) {
       const names = agents.map((a) => a.name);
       const dup = names.filter((n, i) => names.indexOf(n) !== i)[0];
       const body = { name, mode: w.mode, agents, tier: w.tier, permission: w.permission || 'workspace' };
-      if (workspaceIn.value.trim()) body.workspace = workspaceIn.value.trim();
+      const bodyWs = workspaceIn.value.trim();
+      if (bodyWs) {
+        body.workspace = bodyWs;
+        body.workspace_grant = w.workspace_grant || 'session';
+      }
       if (w.tier === 'vm') body.guest = vmGuest;
       if (task) body.task = task;
       if (dup) {

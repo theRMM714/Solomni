@@ -126,6 +126,7 @@ impl GuestBoot {
             rw.dedup();
         }
         let fence = FenceSpec {
+            machine_ro_tree: Vec::new(),
             agent: String::new(),
             lease: lease.clone(),
             rw,

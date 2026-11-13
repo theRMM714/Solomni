@@ -3,8 +3,10 @@
 //! 不管：端口定义（在 `ports.rs`）；纯规则（在 `domain/`）；装配（在入口层组合根）。
 //! 联动：由 `main.rs` 构造并作为 `Workdirs` / `WorkStore` 端口注入 `service.rs`。
 
+pub mod estimate;
 pub mod fs_workspace;
 pub mod fs_workstore;
+pub mod grant_job;
 
 pub use fs_workspace::FsWorkspace;
 pub use fs_workstore::FsWorkStore;

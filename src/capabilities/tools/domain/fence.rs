@@ -3,10 +3,33 @@
 //! 不管：描述符自身的形状（在 kernel::contracts::fence）、裁决与回执文案（在 service/fence.rs）、平台机制（在 kernel::detail::confine）。
 //! 联动：经 tools::api 给成员循环与协调业务用；kernel 不反向依赖本模块。
 
-use crate::capabilities::permission::api::{Reach, ReachSet};
+use crate::capabilities::permission::api::{Decision, Reach, ReachSet, ScopeMode};
 use crate::capabilities::workspace::api::Sandbox;
+use crate::capabilities::workspace::api::WorkspaceGrant;
 use crate::kernel::api::{Ask, FenceBlocked, FenceSpec};
 use std::path::{Path, PathBuf};
+
+/// 目的：把共享区按会话的**工作区授权粒度**派生成围栏落点（三态）。
+/// 约束：这次调用没有 shared-read reach、读决定不是 Allow、或共享区范围是"显式无权限"时**完全不派生**；
+///   白名单范围（Paths）仍要挂根——允许的子树要能读，具体能读哪棵仍由权限集在工具层判。
+fn push_shared(
+    sb: &Sandbox,
+    reach: &ReachSet,
+    ro_tree: &mut Vec<PathBuf>,
+    machine_ro_tree: &mut Vec<PathBuf>,
+) {
+    if !reach.contains(Reach::SharedRead)
+        || sb.permissions.decisions.read != Decision::Allow
+        || matches!(sb.permissions.shared_read, ScopeMode::None)
+    {
+        return;
+    }
+    match sb.shared_grant {
+        WorkspaceGrant::Session => ro_tree.push(sb.shared.clone()),
+        WorkspaceGrant::Workspace => machine_ro_tree.push(sb.shared.clone()),
+        WorkspaceGrant::None => {}
+    }
+}
 
 impl FenceSpec {
     /// 目的：为**一次调用**派生围栏；base 是同一会话的 for_session 结果（提供主机只读根与全局断网事实）。
@@ -19,6 +42,7 @@ impl FenceSpec {
     ) -> FenceSpec {
         let mut rw: Vec<PathBuf> = Vec::new();
         let mut ro_tree: Vec<PathBuf> = Vec::new();
+        let mut machine_ro_tree: Vec<PathBuf> = Vec::new();
         let mut ro: Vec<PathBuf> = Vec::new();
         if reach.contains(Reach::Private) {
             rw.push(sb.private.clone());
@@ -30,9 +54,7 @@ impl FenceSpec {
         {
             rw.push(root.join("userdata"));
         }
-        if reach.contains(Reach::SharedRead) {
-            ro_tree.push(sb.shared.clone());
-        }
+        push_shared(sb, reach, &mut ro_tree, &mut machine_ro_tree);
         if reach.contains(Reach::ModuleRead) {
             ro_tree.extend(sb.modules.values().cloned());
         }
@@ -45,12 +67,15 @@ impl FenceSpec {
         ro.dedup();
         ro_tree.sort();
         ro_tree.dedup();
+        machine_ro_tree.sort();
+        machine_ro_tree.dedup();
         FenceSpec {
             agent: sb.agent.clone(),
             lease: sb.session.clone(),
             rw,
             ro: { ro },
             ro_tree,
+            machine_ro_tree,
             private: sb.private.clone(),
             cwd: PathBuf::new(),
             net: reach.contains(Reach::Network) && base.net,
@@ -62,6 +87,7 @@ impl FenceSpec {
         let reach = &sb.permissions.reach;
         let mut rw: Vec<PathBuf> = Vec::new();
         let mut ro_tree: Vec<PathBuf> = Vec::new();
+        let mut machine_ro_tree: Vec<PathBuf> = Vec::new();
         let mut ro: Vec<PathBuf> = Vec::new();
         if reach.contains(Reach::Private) {
             rw.push(sb.private.clone());
@@ -73,9 +99,7 @@ impl FenceSpec {
                 }
             }
         }
-        if reach.contains(Reach::SharedRead) {
-            ro_tree.push(sb.shared.clone());
-        }
+        push_shared(sb, reach, &mut ro_tree, &mut machine_ro_tree);
         if reach.contains(Reach::ModuleRead) {
             ro_tree.extend(sb.modules.values().cloned());
         }
@@ -88,12 +112,15 @@ impl FenceSpec {
         ro.dedup();
         ro_tree.sort();
         ro_tree.dedup();
+        machine_ro_tree.sort();
+        machine_ro_tree.dedup();
         FenceSpec {
             agent: sb.agent.clone(),
             lease: sb.session.clone(),
             rw,
             ro: { ro },
             ro_tree,
+            machine_ro_tree,
             private: sb.private.clone(),
             cwd: PathBuf::new(),
             net: global_net && reach.contains(Reach::Network),
@@ -128,6 +155,7 @@ impl FenceSpec {
             rw,
             ro: Vec::new(),
             ro_tree: vec![module_root.to_path_buf()],
+            machine_ro_tree: Vec::new(),
             private,
             cwd: module_root.to_path_buf(),
             net: false,

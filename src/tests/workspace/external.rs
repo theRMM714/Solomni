@@ -244,6 +244,82 @@ pub(crate) fn conductor_records_external_workspace_and_rejects_overlap() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// 目的：授权粒度是**生效权限**的一部分——`none` 时共享区读、写整个拿掉；`session` / `workspace` 保持原样。
+/// 约束：权限链只看 meta 自己（parent 为空），所以同一份已建 meta 换绑定即可测三种取值。
+#[test]
+pub(crate) fn workspace_grant_none_strips_shared_reach() {
+    use crate::capabilities::permission::api::{Reach, ScopeMode};
+    use crate::capabilities::session::api::{WorkspaceBinding, WorkspaceGrant};
+    use crate::capabilities::workspace::detail::FsWorkspace;
+    let root = crate::tests::scratch("ws-grant-none");
+    let product = root.join("product");
+    let external = root.join("outside");
+    std::fs::create_dir_all(&product).expect("建产品根");
+    std::fs::create_dir_all(&external).expect("建外部目录");
+    let mut core = core_with_workdirs(
+        product.clone(),
+        vec![module_of("a")],
+        gw(BTreeMap::new(), vec![]),
+        Arc::new(FsWorkspace::new(product.join("session"))),
+    );
+    let mut spec = work("wg", WorkMode::Single, &["a"]);
+    spec.workspace = Some(external.clone());
+    let sid = core.create_work(spec).expect("外部工作区可建").sid;
+    let (meta, _) = core.history_open(&sid).expect("会话");
+    assert_eq!(
+        core.workspace_grant(&meta).expect("授权粒度"),
+        WorkspaceGrant::Session,
+        "没有绑定粒度就是缺省的逐会话"
+    );
+    let before = core.permissions_for(&meta).expect("算权限");
+    assert!(
+        before.reach.contains(Reach::SharedRead),
+        "缺省会话可读共享区"
+    );
+    assert_ne!(before.shared_read, ScopeMode::None, "读范围缺省不是 none");
+    assert_ne!(before.shared_write, ScopeMode::None, "写范围缺省不是 none");
+    // workspace 粒度：ACE 常驻机器级，权限层不动。
+    let mut resident = meta.clone();
+    resident.workspace = Some(WorkspaceBinding {
+        root: external.clone(),
+        grant: WorkspaceGrant::Workspace,
+    });
+    assert_eq!(
+        core.workspace_grant(&resident).expect("授权粒度"),
+        WorkspaceGrant::Workspace
+    );
+    let same = core.permissions_for(&resident).expect("算权限");
+    assert!(
+        same.reach.contains(Reach::SharedRead),
+        "workspace 粒度仍可读共享区"
+    );
+    assert_eq!(same.shared_read, before.shared_read, "读范围不变");
+    assert_eq!(same.shared_write, before.shared_write, "写范围不变");
+    // none：读、写都收紧为 none，reach 里也不再声称共享区，别的 reach 不受影响。
+    let mut none = meta.clone();
+    none.workspace = Some(WorkspaceBinding {
+        root: external.clone(),
+        grant: WorkspaceGrant::None,
+    });
+    assert_eq!(
+        core.workspace_grant(&none).expect("授权粒度"),
+        WorkspaceGrant::None
+    );
+    let stripped = core.permissions_for(&none).expect("算权限");
+    assert_eq!(stripped.shared_read, ScopeMode::None, "读范围清空");
+    assert_eq!(stripped.shared_write, ScopeMode::None, "写范围清空");
+    assert!(
+        !stripped.reach.contains(Reach::SharedRead),
+        "reach 不再声称可读"
+    );
+    assert!(
+        !stripped.reach.contains(Reach::SharedWrite),
+        "reach 不再声称可写"
+    );
+    assert!(stripped.reach.contains(Reach::Private), "私有沙箱不受影响");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// 目的：真机验收（默认跳过）：UNC 外部工作区的全链路——虚拟机档绑定落成 native UNC、写探测真的落在共享上、
 ///   首绑导入 / pull / commit / status / sync 都走真实共享、删会话不删外部；产品根的 UNC 别名必须按落点身份拒。
 /// 约束：只在 SOLOMNI_UNC_ROOT 指向一个可写的 UNC 目录时执行（如 \\\\localhost\D$\\\\AIproject\\target\\unc）；

@@ -109,6 +109,7 @@
 | GET | `/api/sessions/{sid}/work` | `SessionOps::work_log` | 查询 `limit` / `before` | `{head,commits:[{id,parent,author,session,time,message,changes,on_head}],total,truncated}` | 200, 404 |
 | GET | `/api/sessions/{sid}/work/{commit}` | `SessionOps::work_commit_view / work_commit_file` | 查询 `path`（可选） | `{id,parent,author,session,time,message,changes,changes_truncated}` / `{path,hash,size,media_type,text,truncated,too_large}` | 200, 404 |
 | GET | `/api/dirs` | 宿主目录浏览 | 查询 `path`（可选；省略 = 用户主目录） | `{path,parent,roots:[盘符],dirs:[{name,path}]}` | 200, 400 |
+| GET | `/api/workspace-cost` | 工作区成本预估（有界计数 + 本卷速率） | 查询 `path`（外部工作区的绝对路径） | `{path,files,dirs,objects,bytes,truncated,volume,ms_per_object,estimated_ms,estimated_ms_min,estimated_ms_max,sample}`（`truncated` 时计数与耗时都是下界） | 200, 400 |
 | GET | `/api/settings` | `RegistryOps::settings` | — | `{settings}` | 200, 400 |
 | GET | `/api/history` | `HistoryOps::list` | — | `{sessions}` | 200, 400 |
 | GET | `/api/history/{name}` | `HistoryOps::open` | — | `{meta,events,live,head,shell}`（`shell` 从转录派生：回放/重建后的状态栏快照；优先读工具行的结构化事实，旧转录回落解析回执） | 200, 404 |

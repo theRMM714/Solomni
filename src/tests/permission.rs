@@ -159,6 +159,52 @@ fn fence_spec_scopes_module_dirs_and_userdata() {
     assert!(!call.net, "workspace 没有 network reach");
 }
 
+/// 共享区授权粒度三态：会话级走按次只读、工作区级走机器级一次性只读、无权限完全不授。
+#[test]
+fn shared_grant_routes_to_session_machine_or_nothing() {
+    use crate::capabilities::session::api::WorkspaceGrant;
+    use crate::kernel::api::FenceSpec;
+
+    let mut sb = test_sandbox("a1", &[]);
+    sb.permissions = pset(ProfileId::Workspace);
+    let reach = ReachSet::from([Reach::Private, Reach::SharedRead]);
+    let base = FenceSpec::for_session(&sb, &[], false);
+
+    sb.shared_grant = WorkspaceGrant::Session;
+    let call = FenceSpec::for_call(&sb, &reach, None, &base);
+    assert!(call.ro_tree.contains(&sb.shared), "会话级按次授共享区只读");
+    assert!(!call.machine_ro_tree.contains(&sb.shared));
+
+    sb.shared_grant = WorkspaceGrant::Workspace;
+    let call = FenceSpec::for_call(&sb, &reach, None, &base);
+    assert!(
+        !call.ro_tree.contains(&sb.shared),
+        "工作区级不给容器 SID 逐次授权"
+    );
+    assert!(
+        call.machine_ro_tree.contains(&sb.shared),
+        "工作区级走机器级一次性只读"
+    );
+
+    sb.shared_grant = WorkspaceGrant::None;
+    let call = FenceSpec::for_call(&sb, &reach, None, &base);
+    assert!(
+        !call.ro_tree.contains(&sb.shared) && !call.machine_ro_tree.contains(&sb.shared),
+        "无权限时完全不授共享区"
+    );
+
+    // 显式关掉共享区读（ScopeMode::None）：三态之外再收一层，围栏里连根都不挂。
+    sb.shared_grant = WorkspaceGrant::Workspace;
+    sb.permissions.shared_read = ScopeMode::None;
+    let call = FenceSpec::for_call(&sb, &reach, None, &base);
+    assert!(!call.ro_tree.contains(&sb.shared) && !call.machine_ro_tree.contains(&sb.shared));
+
+    // 路径白名单仍挂根：能读哪一棵由工具层按相对路径再判，围栏不因白名单掐掉整根。
+    sb.permissions.shared_read = ScopeMode::Paths(paths(&["docs"]));
+    let call = FenceSpec::for_call(&sb, &reach, None, &base);
+    assert!(call.machine_ro_tree.contains(&sb.shared));
+}
+
 /// 提交与拉取的作用域判定（工作区工具消费的那一份纯函数）：越界整条拒绝，不带半次提交。
 #[test]
 fn work_commit_and_pull_are_scoped() {

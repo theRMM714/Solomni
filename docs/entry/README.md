@@ -31,7 +31,7 @@
 - 根解析后、装配核心前先分派**便携维护**（`--setup=<mode>`，`src/entry/setup.rs`）：`path` 生成 `bin/solomni.cmd` 并把产品根的 `bin` 追加进用户 PATH，`unset` / `undo` 摘除或按备份还原，`status` 打印 JSON（缺省模式），`fence` 做围栏机器级预授，`all` = path + fence。这些模式不读登记处、不打印启动报告，因此 `status` 的 JSON 不会被污染。`--setup=path` 写出的 `bin/solomni.cmd` 把 `--root` 固定到**安装根**（shim 自身所在目录的上一级），所以经 shim 调用时产品根不再取决于当前目录；直接运行 `solomni.exe` 且未给 `--root` 时，根仍按上一条取当前目录。
 - 建成核心、进主循环之前分配**视图盘**（仅 Windows）：产品根映射成本实例独占的盘符并登记当前 pid，shell 这类 cwd == 私有沙箱的调用里，容器 cwd 与模型看到的路径用视图写法（模块工具沿用宿主 cwd，不参与视图盘收敛），宿主真实路径由路径码翻译；正常退出释放映射，崩溃残留由下次启动清扫。**只有真正跑会话/服务/工具的主流程才分配**——`--setup`、维护旗与探针都是早退路径（`std::process::exit` 不走 Drop），分配了必然泄漏盘符，它们只调用「只清扫不分配」的入口。`SOLOMNI_VIEW_DRIVE=0` 是排障用的逃生口（关闭后行为与旧版一致）；分配失败只打一行 `[围栏]` 回退真实路径，不阻断启动。
 - 根解析后立即应用**基础工具链**：读 `.tools/toolchains/active.json`（由 provision 的 `kind: toolchain` 写入），把项目内 `bin` 前置到 PATH；目标不符 / 路径不安全 / bin 不在场只报告，不阻断启动。**每次启动**都打印基础 profile 的项目内 / 宿主回退（Windows 探围栏能否授权）/ 缺失与补全指令；之后 `--doctor`、`--build`、会话工具与常驻服务都看这份生效 PATH。
-- `--doctor`、`--provision`、`--build`、围栏台账系列（`--fence-reconcile` / `--fence-ledger` / `--fence-restore` / `--fence-revoke` / `--fence-profile-rm` / `--fence-clean`）只需要产品根，不装配核心。
+- `--doctor`、`--provision`、`--build`、围栏台账系列（`--fence-reconcile` / `--fence-ledger` / `--fence-restore` / `--fence-revoke <路径>` / `--fence-revoke <SID> <路径>` / `--fence-profile-rm` / `--fence-clean`）只需要产品根，不装配核心；单参数撤该外部工作区的机器级条目，双参数保留旧的按 SID+路径语义，其它 arity 打用法退 2。
 - 装配期失败一律打印 `[装配失败]` 并以 1 退出（`src/main.rs`）：登记处四份 yaml 读不了、提示词册缺文件 / 缺键、工具总表与角色表不自洽、模块清单装配失败、隐秘字段加载失败、核心执行线程起不来；日志文件起不来只降级到 stderr（进程继续）。
 - **启动对账**在会话开工前跑两份：围栏授权台账（`confine::reconcile`）与长驻子进程账（`ProcessBook::reconcile`，`.home/processes.json`）。
   - 围栏台账只回收归属明确已死的授权。
