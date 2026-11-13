@@ -9,6 +9,8 @@
 //!   每个进程启动时分配（同 root 复用字母、登记自己的 pid），退出时注销；启动清扫死 pid、
 //!   目标不存在或不匹配的条目，让残留的盘符映射不会越积越多。盘符映射是登录会话级的
 //!   （同用户的所有进程都看得见），因此守门进程只调 attach_view_drive 读记录、校验映射，不重复登记 pid。
+// 只在 Windows 上有实现：非 Windows 构建里本模块为空，沙箱要的 `view_codec` 由 `kernel::api` 给恒等桩。
+#![cfg(windows)]
 
 use crate::kernel::contracts::fence::FenceSpec;
 use crate::kernel::ports::PathCodec;
@@ -383,7 +385,6 @@ fn relative_under(root: &Path, path: &Path) -> Option<PathBuf> {
     Some(out)
 }
 
-#[cfg(windows)]
 mod imp {
     use super::*;
     use std::os::windows::ffi::OsStrExt;
@@ -652,30 +653,13 @@ mod imp {
     }
 }
 
-#[cfg(not(windows))]
-mod imp {
-    use super::*;
-
-    pub(super) fn ensure(_root: &Path, _home: &Path) -> Result<ViewDrive, String> {
-        Err("视图盘只在 Windows 上可用".to_string())
-    }
-
-    pub(super) fn attach(_home: &Path) -> Option<ViewDrive> {
-        None
-    }
-
-    pub(super) fn release(_home: &Path) {}
-
-    pub(super) fn sweep(_home: &Path) {}
-}
-
 /// 目的：只清扫视图盘记录、不分配盘符：摘死 pid 与目标不存在的条目、撤孤儿映射、落盘。
-/// 约束：不登记本进程、不改 active；非 Windows 无操作。
+/// 约束：不登记本进程、不改 active。
 pub fn sweep_view_drive(home: &Path) {
     imp::sweep(home)
 }
 
-/// 目的：分配（或复用）产品根的视图盘并设为进程级 active；非 Windows 返回不可用原因。
+/// 目的：分配（或复用）产品根的视图盘并设为进程级 active。
 pub fn ensure_view_drive(root: &Path, home: &Path) -> Result<ViewDrive, String> {
     imp::ensure(root, home)
 }
@@ -702,7 +686,6 @@ mod tests {
         }
     }
 
-    #[cfg(windows)]
     #[test]
     fn view_paths_round_trip_and_respect_the_root() {
         let drive = ViewDrive {

@@ -1950,7 +1950,8 @@ fn view_drive_puts_the_container_cwd_on_the_mapped_letter() {
 
     let expected = view.view_of(&private).expect("私有区应当在视图盘里");
     eprintln!(
-        "[探针] 容器内 cwd = {:?}，期望视图写法 = {:?}",
+        // 成功诊断不用 [探针] 前缀：门禁把它当 env-skip，真正的跳过行才带这个前缀。
+        "[视图盘] 容器内 cwd = {:?}，期望视图写法 = {:?}",
         cwd_text.trim(),
         expected.display()
     );

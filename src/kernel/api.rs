@@ -16,11 +16,19 @@ pub use crate::kernel::detail::locus::{is_network_path, locus_of, place_contains
 pub use crate::kernel::detail::process::{FenceTiming, take_fence_prep};
 // 视图盘是内核对外契约的一部分：装配层与守门进程按需取用，bin crate 内暂时不会每个都调用到。
 // 对未用到的重导出显式放行，不把它们从出口删掉——出口少一个，契约就悄悄漂了。
+#[cfg(windows)]
 #[allow(unused_imports)]
 pub use crate::kernel::detail::view_drive::{
     ViewDrive, active_view, attach_view_drive, ensure_view_drive, host_of, release_view_drive,
     sweep_view_drive, view_codec, view_of,
 };
+
+/// 目的：非 Windows 的路径编解码出口——没有视图盘，路径怎么写就怎么用（恒等）。
+/// 约束：只有 `view_codec` 被其它平台共用（沙箱与环境块渲染），盘符生命周期只归 Windows。
+#[cfg(not(windows))]
+pub fn view_codec() -> Option<std::sync::Arc<dyn crate::kernel::ports::PathCodec>> {
+    None
+}
 pub use crate::kernel::domain::fence::{SandboxMode, SandboxRequirements, call_lease};
 pub use crate::kernel::domain::jobs::JobRegistry;
 pub use crate::kernel::domain::path::{is_unc, native, slash, unc_parts};
