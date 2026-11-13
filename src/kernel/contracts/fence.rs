@@ -57,6 +57,11 @@ pub struct FenceSpec {
     ///   与 `ro` 分开的理由：Windows 上用户授权的 `ro` 不递归，而模块目录必须递归可读。
     #[serde(default)]
     pub ro_tree: Vec<PathBuf>,
+    /// 目的：机器级一次性只读落点——授给系统基线组（不是本席容器身份），可继承、跨会话复用，
+    ///   本次调用一般零写；用于外部工作区这类不该每个会话重付写 ACL 代价的目录。
+    /// 约束：只给只读位；unix 与虚拟机档没有 ACL，按 `ro_tree` 同等的只读挂载兑现。
+    #[serde(default)]
+    pub machine_ro_tree: Vec<PathBuf>,
     /// 目的：该 agent 私有沙箱——工具进程 HOME / TEMP 的落点（空 = 退回 cwd）。
     #[serde(default)]
     pub private: PathBuf,

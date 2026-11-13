@@ -628,6 +628,7 @@ impl Conductor {
             .get(PROXY_PRIVATE_DIR)
             .cloned()
             .ok_or_else(|| "代理会话没有私有沙箱路径".to_string())?;
+        let shared_grant = self.workspace_grant(meta)?;
         let sb = Sandbox {
             work_name: meta.name.clone(),
             session: meta.name.clone(),
@@ -640,7 +641,7 @@ impl Conductor {
             // 代理发言席自己住在宿主上（文件工具也跑在宿主），不需要 guest 翻译；
             // 但视图盘打开时仍要同一个视图写法，否则环境块渲染视图路径、寻址却按宿主根判越界。
             path_codec: crate::kernel::api::view_codec(),
-            shared_grant: crate::capabilities::session::api::WorkspaceGrant::Session,
+            shared_grant,
         };
         let tool_mode = self.registry.tool_mode(None);
         let chat = self.llm.core_channel(channel);

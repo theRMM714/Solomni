@@ -3,7 +3,9 @@
 //! 不管：祖先目录不用授**穿过**（容器令牌自带 SeChangeNotifyPrivilege）；例外是 shell 的 cwd = private 时给祖先只读属性（PowerShell 解析 cwd 需要），不递归、不继承、不授内容。
 //! 联动：授权与撤销由外层进程做（见 confine::prepare_fence），守门进程只按同一个名字派生同一个 SID；机制不可用时一律如实降级。
 
-use super::{Capability, FENCE_FAILED, FencePrep, FenceStep, FenceVerdict, shell_command};
+use super::{
+    Capability, FENCE_FAILED, FencePrep, FenceStep, FenceVerdict, MachineGrantReport, shell_command,
+};
 use crate::kernel::api::FencePart;
 use crate::kernel::api::FenceSpec;
 use std::ffi::c_void;
@@ -191,12 +193,14 @@ const STEP_INTERPRETER: &str = "解释器目录";
 const STEP_ANCESTOR: &str = "祖先链";
 const STEP_ROOT: &str = "受保护根";
 const STEP_BASE: &str = "可信基座";
+const STEP_MACHINE_RO: &str = "工作区一次性只读";
 
 // 首次真写 ACL 前的 stderr 提示：同进程每类只提示一次（之后静默；纯命中不提示）。
 static PROMPT_INTERPRETER: std::sync::Once = std::sync::Once::new();
 static PROMPT_ANCESTOR: std::sync::Once = std::sync::Once::new();
 static PROMPT_ROOT: std::sync::Once = std::sync::Once::new();
 static PROMPT_BASE: std::sync::Once = std::sync::Once::new();
+static PROMPT_MACHINE_RO: std::sync::Once = std::sync::Once::new();
 
 /// 目的：真写前提示一次「这一类落点第一次要写、可能要几十秒」——用户在等待时看得到原因。
 fn prompt_first_write(once: &std::sync::Once, label: &str) {
@@ -421,6 +425,43 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
                 // 按这一环的**必要性**分流：必要落点授不上要问用户（不许降级），可选落点只记事实。
                 eprintln!("[围栏] 授权未完成：{}", e);
                 prep.fail(target.part, target.path.clone(), e);
+            }
+        }
+    }
+    // 机器级一次性只读落点（外部工作区等）：授给基线组、可继承、跨会话复用，内容真的可达；
+    // 已有可继承 ACE 就零写——这是「每个会话不再重付一次」的来源。
+    for dir in spec.machine_ro_tree.iter().cloned() {
+        if missing(&dir) {
+            eprintln!("[诊断] 授权落点不存在，跳过（{}）", dir.display());
+            continue;
+        }
+        if has_inheritable_ace_for(base, &dir, RIGHTS_RO) {
+            continue;
+        }
+        let target = GrantTarget {
+            path: dir.clone(),
+            rights: RIGHTS_RO,
+            recursive: true,
+            inherit: true,
+            part: FencePart::AuthorizedRead,
+        };
+        prompt_first_write(&PROMPT_MACHINE_RO, STEP_MACHINE_RO);
+        let started = Instant::now();
+        match grant_machine_journaled(home, base, &base_text, &target, &root) {
+            Ok(true) => {
+                machine_written += 1;
+                push_step(&mut prep, STEP_MACHINE_RO, started);
+                written.push((base_text.clone(), dir, RIGHTS_RO));
+            }
+            Ok(false) => {}
+            Err(e) => {
+                // 外部工作区是可选落点：这次读不到不该连坐整次执行，只记事实。
+                eprintln!(
+                    "[围栏] 工作区一次性只读授权未完成（{}）：{}",
+                    dir.display(),
+                    e
+                );
+                prep.fail(FencePart::AuthorizedRead, dir, e);
             }
         }
     }

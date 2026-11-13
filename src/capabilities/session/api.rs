@@ -14,7 +14,7 @@ pub use crate::capabilities::session::domain::events::{
     qualify, stopped_note, working,
 };
 pub use crate::capabilities::session::domain::history::{
-    AgentMeta, Delegation, HistoryView, RunState, SessionMeta, WorkspaceBinding, WorkspaceGrant,
+    AgentMeta, Delegation, HistoryView, RunState, SessionMeta, WorkspaceBinding,
 };
 pub use crate::capabilities::session::domain::rewind::{
     align_keep, archive_label, cut_before_line, last_line_within, last_usage, max_reply,
@@ -28,6 +28,8 @@ pub use crate::capabilities::session::domain::session::{
 pub use crate::capabilities::session::domain::tools::{
     MemberTools, ServiceOp, ShellLive, ShellSlot, last_shell, service_ops_for_modules, tool_table,
 };
+/// 目的：工作区授权粒度的形状归工作区能力面，这里重导出，调用方不必跨能力拼路径。
+pub use crate::capabilities::workspace::api::WorkspaceGrant;
 
 // 核心操作回路 + 原生回灌消息：`service.rs` 实现（它驱动 IO，不是纯派生）。
 pub use crate::capabilities::session::service::{core_operation, reply_msgs, tool_result_body};

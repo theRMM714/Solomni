@@ -7,6 +7,7 @@ pub(crate) fn serve_web(
     ops: crate::capabilities::conductor::api::Ops,
     port: u16,
     report: &crate::entry::startup::FenceReport,
+    home: &std::path::Path,
 ) {
     // 与启动报告同一份事实：能力取本机，实际取授权后的路径级围栏。
     let fence = crate::presentation::web::FenceInfo {
@@ -30,7 +31,7 @@ pub(crate) fn serve_web(
             .collect(),
         sandbox_degraded: report.sandbox_mode.degraded(),
     };
-    if let Err(e) = crate::presentation::web::serve(ops, port, fence) {
+    if let Err(e) = crate::presentation::web::serve(ops, port, fence, home) {
         eprintln!("[Web 服务异常] {}", e);
         std::process::exit(1);
     }

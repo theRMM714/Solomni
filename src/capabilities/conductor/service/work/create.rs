@@ -6,6 +6,16 @@
 
 use super::*;
 
+/// 目的：这次创建要不要在宿主上付一次性的机器级只读授权。
+/// 约束：只有本机档写宿主 ACL；虚拟机档的隔离是挂载边界（`machine_ro_tree` 以只读挂载兑现），不写宿主 ACL。
+fn pays_host_grant(meta: &SessionMeta) -> bool {
+    let once = meta
+        .workspace
+        .as_ref()
+        .is_some_and(|b| b.grant == crate::capabilities::workspace::api::WorkspaceGrant::Workspace);
+    once && meta.exec.tier == crate::kernel::api::Tier::Host
+}
+
 impl Conductor {
     /// 目的：工作名的缺省与唯一化（命名策略在 `session`；这里只提供"存在吗"）。
     pub fn unique_work_name(&self, base: &str, fallback: &str) -> String {
@@ -533,6 +543,15 @@ impl Conductor {
         }
         self.sessions.insert(name.clone(), session);
         self.record_events(&name, &mut events);
+        // 只有本机档 + workspace 粒度才付机器级只读授权（一次性成本）：会话已经落盘，甩到后台慢慢付，创建本身保持毫秒级。
+        if pays_host_grant(&meta)
+            && let Some(binding) = meta.workspace.as_ref()
+        {
+            crate::capabilities::workspace::api::ensure_in_background(
+                &self.root.join(".home"),
+                &binding.root,
+            );
+        }
         // 事实（开场转录 + 提示）随结果交出：核心不持有事件台，发布是 api 层的职责。
         Ok(WorkOpened {
             sid: name,
@@ -623,5 +642,54 @@ impl Conductor {
             sandboxes.clone(),
             restart,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn meta(
+        tier: crate::kernel::api::Tier,
+        grant: crate::capabilities::workspace::api::WorkspaceGrant,
+    ) -> SessionMeta {
+        SessionMeta {
+            name: "w".to_string(),
+            mode: "single".to_string(),
+            delegate: false,
+            modules: Vec::new(),
+            task: None,
+            ts: 0,
+            agents: Vec::new(),
+            exec: crate::kernel::api::ExecSpec {
+                tier,
+                ..Default::default()
+            },
+            workspace: Some(crate::capabilities::session::api::WorkspaceBinding {
+                root: std::path::PathBuf::from("C:\\ws"),
+                grant,
+            }),
+            sandbox: Default::default(),
+            thinking: None,
+            parent: None,
+            node: None,
+            delegation: None,
+            context_freshness: false,
+            run: Default::default(),
+        }
+    }
+
+    /// 目的：workspace 粒度只有本机档付宿主的机器级授权；虚拟机档与其它粒度都不付。
+    #[test]
+    fn host_grant_is_paid_only_by_the_host_tier_with_workspace_grant() {
+        use crate::capabilities::workspace::api::WorkspaceGrant;
+        use crate::kernel::api::Tier;
+        assert!(pays_host_grant(&meta(
+            Tier::Host,
+            WorkspaceGrant::Workspace
+        )));
+        assert!(!pays_host_grant(&meta(Tier::Vm, WorkspaceGrant::Workspace)));
+        assert!(!pays_host_grant(&meta(Tier::Host, WorkspaceGrant::Session)));
+        assert!(!pays_host_grant(&meta(Tier::Host, WorkspaceGrant::None)));
     }
 }

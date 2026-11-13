@@ -61,4 +61,7 @@
 | `src/kernel/detail/confine/windows/record/paths.rs` | 台账与围栏的路径判据：产品根（`product_root`）与根内包含（`inside_root`） |
 | `src/kernel/detail/confine/windows/record/sid.rs` | SID 的文本与二进制互转（`sid_to_string` / `sid_from_string`） |
 | `src/kernel/detail/confine/windows/container.rs` | Windows 容器围栏的启动面：AppContainer 档案与 SID、`net` 对应的 internetClient 能力、UTF-16 转换、system shell 与 kill-on-close 作业对象 |
-| `src/kernel/detail/confine/windows/tests.rs` | Windows 围栏的真机探针：AppContainer 授权、容器往返、ACL 台账与撤权（需改本机权限项的用例，`--fence-live` 才跑） |
+| `src/kernel/detail/confine/windows/tests.rs` | Windows 围栏真机探针的父模块：共享夹具（`expect_granted` / `dump_aces` / `acl_round_trip` / `discard` / `container_diag` / `node_runs`）与 `container` / `grant` / `workspace` 三个用例族子模块声明 |
+| `src/kernel/detail/confine/windows/tests/container.rs` | 容器内真机往返用例族：叶子读得到写得到、父目录内容列不到、模块只读、绝对路径程序、按次临时目录与并发隔离 |
+| `src/kernel/detail/confine/windows/tests/grant.rs` | 围栏授权用例族：落点清单与 STAT 祖先、权限位覆盖、写后核对、台账归属与撤销、失败回滚 |
+| `src/kernel/detail/confine/windows/tests/workspace.rs` | 视图盘与外部工作区用例族：容器 cwd 落在映射盘符、机器级一次性只读首写与复用、显式 ensure 与撤权 |

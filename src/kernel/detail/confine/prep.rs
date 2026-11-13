@@ -71,6 +71,20 @@ impl FencePrep {
     }
 }
 
+/// 目的：一次**显式**机器级只读授权的结论（外部工作区绑定之类动作回报成本用）。
+/// 约束：written 为 0 表示只命中已有 ACE（复用）、这次没付写 ACL 的代价；ms 只算这一次动作的墙钟。
+// 契约出口：装配层（绑定工作区的向导/命令）消费它；bin 内暂时还没有调用点，不因此删出口。
+#[allow(dead_code)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MachineGrantReport {
+    /// 目的：这次真写了 ACL 的落点数（0 = 已就绪）。
+    pub written: usize,
+    /// 目的：已有够用 ACE、这次没写 ACL 的落点数。
+    pub reused: usize,
+    /// 目的：这次动作的墙钟耗时（毫秒，含读 DACL 与台账）。
+    pub ms: u64,
+}
+
 /// 目的：外层进程调用：把围栏要用的授权一次性做好（写目录 ACL），并按落点的必要性如实收尾。
 ///   跳过条件看**实际 ACE**而不是内存台账，所以权限收窄并撤权后能正确重授。
 ///   只有 Windows 的容器围栏需要这一步——Linux 的 Landlock 与 macOS 的 seatbelt 在守门进程里自足，
@@ -109,6 +123,50 @@ pub fn machine_ensure(
     _out: &mut dyn FnMut(&str),
 ) -> Result<(), String> {
     Err("本平台没有机器级 ACL 预授（已登记缺口）".to_string())
+}
+
+/// 目的：给一个外部工作区授**机器级一次性只读**（授基线组、可继承、跨会话复用）：绑定工作区时先付一次成本。
+///   Windows 之外没有 ACL 这一步：如实返回零报告（只读挂载语义由平台后端兑现）。
+#[cfg(windows)]
+// 契约出口：装配层在绑定工作区时调用，bin 内暂时还没有调用点。
+#[allow(dead_code)]
+pub fn ensure_workspace_grant(
+    home: &std::path::Path,
+    root: &std::path::Path,
+) -> Result<MachineGrantReport, String> {
+    windows::ensure_workspace_grant(home, root)
+}
+
+#[cfg(not(windows))]
+// 契约出口：装配层在绑定工作区时调用；其它平台没有 ACL 步骤，如实返回零报告。
+#[allow(dead_code)]
+pub fn ensure_workspace_grant(
+    _home: &std::path::Path,
+    _root: &std::path::Path,
+) -> Result<MachineGrantReport, String> {
+    Ok(MachineGrantReport::default())
+}
+
+/// 目的：撤掉某个外部工作区的**机器级只读**授权（盘上 ACE + 台账条目）：解除绑定/收回共享时用。
+///   显式动作 O(子树)，会慢；返回销掉的台账条目数。Windows 之外没有 ACL 可撤，如实返回 0。
+#[cfg(windows)]
+// 契约出口：装配层在解除绑定/收回共享时调用，bin 内暂时还没有调用点。
+#[allow(dead_code)]
+pub fn revoke_machine_grants(
+    home: &std::path::Path,
+    path: &std::path::Path,
+) -> Result<usize, String> {
+    windows::revoke_machine_grants(home, path)
+}
+
+#[cfg(not(windows))]
+// 契约出口：装配层在解除绑定时调用；其它平台没有 ACL 可撤，如实返回 0。
+#[allow(dead_code)]
+pub fn revoke_machine_grants(
+    _home: &std::path::Path,
+    _path: &std::path::Path,
+) -> Result<usize, String> {
+    Ok(0)
 }
 
 /// 目的：精确回收：按台账撤掉我们写过的权限项、删掉我们建过的容器 profile（`--fence-clean` 用）。

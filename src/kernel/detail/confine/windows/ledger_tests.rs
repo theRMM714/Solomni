@@ -35,6 +35,7 @@ fn journal_records_snapshot_and_grant_before_touching_acl() {
         "动 ACL 之前台账里就要有原始安全描述符"
     );
     let spec = FenceSpec {
+        machine_ro_tree: Vec::new(),
         agent: "probe-journal".to_string(),
         lease: String::new(),
         private: PathBuf::new(),
@@ -71,6 +72,7 @@ fn write_then_restore_keeps_the_original_ace_set() {
     let before = acl_entries(&target).expect("读写入前 ACE 集合");
     let bytes = sd_bytes(&target).expect("存原始安全描述符");
     let spec = FenceSpec {
+        machine_ro_tree: Vec::new(),
         agent: "probe-multiset".to_string(),
         lease: String::new(),
         private: PathBuf::new(),
@@ -117,6 +119,7 @@ fn missing_grant_target_is_skipped_and_not_journaled() {
     }
     let absent = base.join("missing");
     let spec = FenceSpec {
+        machine_ro_tree: Vec::new(),
         agent: "probe-skip".to_string(),
         lease: String::new(),
         private: PathBuf::new(),
@@ -189,6 +192,7 @@ fn journal_failure_blocks_the_acl_write() {
     let home = base.join("home-as-file");
     std::fs::write(&home, b"not a dir").expect("写占位文件");
     let spec = FenceSpec {
+        machine_ro_tree: Vec::new(),
         agent: "probe-journal-gate".to_string(),
         lease: String::new(),
         private: PathBuf::new(),
@@ -236,6 +240,7 @@ fn ledger_catalog_and_per_item_disposal_keep_the_rest_untouched() {
     }
     let home = base.join(".home");
     let spec = FenceSpec {
+        machine_ro_tree: Vec::new(),
         agent: "probe-grant".to_string(),
         lease: String::new(),
         private: PathBuf::new(),
@@ -407,6 +412,7 @@ fn reconcile_reclaims_dead_owners_and_keeps_live_ones() {
     }
     let home = base.join(".home");
     let spec_live = FenceSpec {
+        machine_ro_tree: Vec::new(),
         agent: "probe-reconcile-live".to_string(),
         lease: String::new(),
         private: PathBuf::new(),
@@ -417,6 +423,7 @@ fn reconcile_reclaims_dead_owners_and_keeps_live_ones() {
         net: false,
     };
     let spec_stale = FenceSpec {
+        machine_ro_tree: Vec::new(),
         agent: "probe-reconcile-stale".to_string(),
         lease: String::new(),
         private: PathBuf::new(),
@@ -487,6 +494,7 @@ fn reconcile_reports_ledger_less_profiles_without_deleting_them() {
     let home = base.join(".home");
     std::fs::create_dir_all(&home).expect("建台账目录");
     let spec = FenceSpec {
+        machine_ro_tree: Vec::new(),
         agent: "probe-reconcile-orphan".to_string(),
         lease: "call-orphan".to_string(),
         private: PathBuf::new(),
@@ -534,6 +542,7 @@ fn reconcile_skips_entries_without_ownership() {
     }
     let home = base.join(".home");
     let spec = FenceSpec {
+        machine_ro_tree: Vec::new(),
         agent: "probe-reconcile-skip".to_string(),
         lease: String::new(),
         private: PathBuf::new(),

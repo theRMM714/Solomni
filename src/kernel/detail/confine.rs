@@ -189,7 +189,10 @@ pub use prep::FencePrep;
 pub use prep::FenceStep;
 #[cfg(windows)]
 pub use prep::prepare_fence;
-pub use prep::{clean, machine_ensure, machine_missing, sweep_profiles};
+pub use prep::{
+    MachineGrantReport, clean, ensure_workspace_grant, machine_ensure, machine_missing,
+    revoke_machine_grants, sweep_profiles,
+};
 
 #[cfg(windows)]
 pub(crate) use paths::{

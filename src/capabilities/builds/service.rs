@@ -231,6 +231,7 @@ impl BuildsService {
         // 构建也是一次调用：按次 lease → Windows 上独立容器身份，跑完自己的 profile/ACE 自己收。
         let agent = format!("build:{}", module.manifest.id);
         let fence = FenceSpec {
+            machine_ro_tree: Vec::new(),
             agent: agent.clone(),
             lease: crate::kernel::api::call_lease(&agent),
             rw: vec![module.root.clone(), place.state],
@@ -368,6 +369,7 @@ impl BuildsService {
         rw.sort();
         rw.dedup();
         let fence = FenceSpec {
+            machine_ro_tree: Vec::new(),
             agent: "build".to_string(),
             lease: lease.clone(),
             rw,

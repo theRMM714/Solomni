@@ -4,3 +4,20 @@
 # src/kernel/detail/confine/windows/tests.rs 的 grants_are_written_when_the_environment_allows_it
 # 与 revoke_removes_the_container_ace_from_the_given_roots 在 windows-latest 上真跑
 # （写了真 ACE、撤权后 ACE 消失）。环境性跳过以 [探针] 进报告的 envSkips，不可能伪装成验过。
+
+- id: fence.external-workspace-zero-cost
+  scope: windows
+  level: T4
+  why: |
+    外部工作区在 AppContainer 下靠 ro_tree 逐会话传播写 DACL：每个新会话第一次访问都要遍历整棵子树
+    重写继承 ACE（O(对象数)），会话结束再递归撤销；代价随外部根大小线性增长，没有与目录大小无关的
+    路径型边界或 broker 等价物。向导的 workspace_grant=workspace 只是把这一次性成本提前成机器级授权
+    （授给 ALL APPLICATION PACKAGES、ACE 常驻），并没有消除首次遍历写 ACL。
+  how: |
+    1) 短期（已实现）：向导三态选择 + GET /api/workspace-cost 预估，让用户按目录规模选 workspace 粒度，
+       把每会话等待换成一次性机器级授权；
+    2) 彻底零成本：改用 path 型边界（不写 DACL 的路径级过滤）或引入 broker 代读，外部根不再按对象数授权。
+  accept: |
+    同一外部根（≥1 万对象）第二会话首次 shell 的围栏准备 ≤100 ms 且不写 DACL；
+    删除会话不再递归撤外部根的 ACE；契约用例覆盖「已授权 → 零写」「撤权后不可达」。
+  blocked_by: 需要 path 型边界或 broker 设计（当前只有 ro_tree + 写 DACL 的机制）

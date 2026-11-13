@@ -895,6 +895,20 @@ impl PermissionSet {
         Ok(out)
     }
 
+    /// 目的：把共享区读写整个拿掉——外部工作区授权为 `none` 时，这条会话的内置文件工具与 shell 都读不到共享区。
+    /// 约束：只动这一份生效权限，不改档位与别的 reach；共享区路径范围一并置 `None`，免得清单还声称可读。
+    pub fn without_shared(mut self) -> PermissionSet {
+        let kept = self
+            .reach
+            .to_vec()
+            .into_iter()
+            .filter(|r| !matches!(r, Reach::SharedRead | Reach::SharedWrite));
+        self.reach = kept.collect();
+        self.shared_read = ScopeMode::None;
+        self.shared_write = ScopeMode::None;
+        self
+    }
+
     /// 目的：并上全局硬黑名单。
     pub fn with_hard_deny(mut self, deny: &[String]) -> PermissionSet {
         append_deny(&mut self.deny, deny);

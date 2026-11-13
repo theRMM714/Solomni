@@ -390,6 +390,7 @@ pub(crate) fn guest_access_translates_the_fence_into_guest_paths() {
         },
     ];
     let fence = FenceSpec {
+        machine_ro_tree: Vec::new(),
         agent: "a".to_string(),
         lease: "w--a".to_string(),
         rw: vec![std::path::PathBuf::from("/work/a")],
@@ -533,6 +534,7 @@ pub(crate) fn unc_external_workspace_plans_a_guest_mount() {
         crate::capabilities::conductor::service::guest_job::stable_roots(&sandboxes);
     assert!(rw.contains(&shared), "UNC 外部根要单独进稳定根：{:?}", rw);
     let boot = FenceSpec {
+        machine_ro_tree: Vec::new(),
         agent: String::new(),
         lease: "unc".to_string(),
         rw,

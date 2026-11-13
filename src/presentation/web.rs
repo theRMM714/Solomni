@@ -52,10 +52,10 @@ pub const RESTART_EXIT_CODE: i32 = 75;
 /// 目的：启动转录中心服务器：**可中断**——收到 Ctrl+C / SIGINT 就正常关闭回到 CLI（进程仍在）。
 /// 参数：`ops` 是入站能力面，`port` 默认 3081，`fence` 是本机围栏能力。
 /// 约束：只绑本机回环；进入前安装中断标志（Windows 控制台处理函数 / Unix SIGINT），返回前**恢复默认**，所以回到 CLI 提示符后 Ctrl+C 仍按"退出产品"的既有语义生效。
-pub fn serve(ops: Ops, port: u16, fence: FenceInfo) -> Result<(), String> {
+pub fn serve(ops: Ops, port: u16, fence: FenceInfo, home: &std::path::Path) -> Result<(), String> {
     let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let guard = interrupt::install(Arc::clone(&stop))?;
-    let r = serve_until(&ops, port, &fence, &stop);
+    let r = serve_until(&ops, port, &fence, home, &stop);
     drop(guard);
     r
 }
@@ -66,6 +66,7 @@ pub(crate) fn serve_until(
     ops: &Ops,
     port: u16,
     fence: &FenceInfo,
+    home: &std::path::Path,
     stop: &std::sync::atomic::AtomicBool,
 ) -> Result<(), String> {
     // 日志经**入站能力面**（ops.log）取——呈现层不持有端口对象。
@@ -84,6 +85,7 @@ pub(crate) fn serve_until(
         let ops = ops.clone();
         let fence = Arc::clone(&fence);
         let log = Arc::clone(&log);
+        let home = home.to_path_buf();
         std::thread::spawn(move || {
             let mut request = request;
             let url = request.url().to_string();
@@ -96,7 +98,7 @@ pub(crate) fn serve_until(
             let reply = if !read_ok || body.len() > MAX_BODY_BYTES {
                 complaint(400, "请求体过大或不是 UTF-8")
             } else {
-                route(&ops, &fence, &log, &method, &url, &body)
+                route(&ops, &fence, &log, &method, &url, &body, &home)
             };
             let (code, headers, text) = reply;
             let mut response = Response::from_string(text).with_status_code(code);
@@ -262,6 +264,7 @@ pub(crate) fn route(
     method: &str,
     url: &str,
     body: &str,
+    home: &std::path::Path,
 ) -> Reply {
     // 匹配交给路由目录；`id` 是分发键，所以代码与目录不会各写一份路径规则。
     let Some(m) = routes::matches(method, url) else {
@@ -535,6 +538,25 @@ pub(crate) fn route(
                 "roots": roots,
                 "dirs": dirs.into_iter().map(|(name, path)| json!({"name": name, "path": path})).collect::<Vec<_>>()
             }))
+        }
+        // ---- 外部工作区：一次性授权的成本预估（只读计数，不写 ACL） ----
+        "workspace-cost" => {
+            let q = url.split('?').nth(1).unwrap_or("");
+            let Some(raw) = q
+                .split('&')
+                .find_map(|kv| kv.strip_prefix("path="))
+                .map(routes::url_decode)
+                .filter(|s| !s.is_empty())
+            else {
+                return complaint(400, "缺少 path 查询参数（外部工作区的绝对路径）");
+            };
+            match crate::capabilities::workspace::api::estimate_workspace_cost(
+                std::path::Path::new(&raw),
+                home,
+            ) {
+                Ok(cost) => ok_json(json!(cost)),
+                Err(e) => complaint(400, e),
+            }
         }
         "tiers" => match ops.core.tier_choices() {
             Ok(v) => ok_json(json!({ "tiers": v })),

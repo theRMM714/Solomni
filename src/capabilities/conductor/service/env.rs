@@ -139,6 +139,8 @@ impl Conductor {
         // 虚拟机档给 guest↔宿主翻译器：system 工具跑在宿主侧，但收模型给的 guest 写法；
         // **同一份**也交给 @ 改写（挂载点、命令装配与用户引用用同一座桥，三处不会各给一种写法）。
         let path_codec = self.path_codec_of(&meta.exec);
+        // 外部工作区的授权粒度：只影响围栏派生（共享区是否要每会话重授），不改权限面。
+        let shared_grant = self.workspace_grant(meta)?;
         let mut list: Vec<crate::capabilities::workspace::api::Sandbox> = Vec::new();
         for a in &meta.agents {
             let private = roots
@@ -166,7 +168,7 @@ impl Conductor {
                 modules_with_userdata,
                 permissions: self.permission_for_agent(meta, &a.name)?,
                 path_codec: path_codec.clone(),
-                shared_grant: crate::capabilities::session::api::WorkspaceGrant::Session,
+                shared_grant,
             });
         }
         Ok(crate::capabilities::workspace::api::Sandboxes {
@@ -206,7 +208,35 @@ impl Conductor {
                 out = out.apply_narrowing(layer)?;
             }
         }
-        Ok(out.with_hard_deny(&self.registry.app().sandbox.policy.deny))
+        let out = out.with_hard_deny(&self.registry.app().sandbox.policy.deny);
+        // 外部工作区授权为 none：共享区读、写都收紧为 none，内置读工具与 shell 拿到的是同一份事实。
+        if Self::workspace_grant_in(&chain)
+            == crate::capabilities::session::api::WorkspaceGrant::None
+        {
+            return Ok(out.without_shared());
+        }
+        Ok(out)
+    }
+
+    /// 目的：这条会话生效的外部工作区授权粒度：沿权限链找最近一份绑定（创建时只写在根），
+    ///   没有绑定就是 `session` 缺省。
+    pub(crate) fn workspace_grant(
+        &self,
+        meta: &SessionMeta,
+    ) -> Result<crate::capabilities::session::api::WorkspaceGrant, String> {
+        let chain = self.permission_chain(meta)?;
+        Ok(Self::workspace_grant_in(&chain))
+    }
+
+    /// 授权粒度的取法只有这一处：链上最近一份绑定说了算。
+    fn workspace_grant_in(
+        chain: &[SessionMeta],
+    ) -> crate::capabilities::session::api::WorkspaceGrant {
+        chain
+            .iter()
+            .rev()
+            .find_map(|m| m.workspace.as_ref().map(|b| b.grant))
+            .unwrap_or(crate::capabilities::session::api::WorkspaceGrant::Session)
     }
 
     /// 目的：某个 agent 的生效权限：协作主会话里的发言席优先取它自己的子会话 narrowing。

@@ -435,6 +435,7 @@ pub(crate) fn module_lease_serializes_exclusive_calls_but_allows_parallel_reader
             Arc::new(NoFenceHost),
         );
         let fence = FenceSpec {
+            machine_ro_tree: Vec::new(),
             agent: "a".to_string(),
             lease: "w".to_string(),
             rw: Vec::new(),
