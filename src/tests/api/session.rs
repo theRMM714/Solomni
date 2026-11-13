@@ -274,6 +274,7 @@ fn single_mode_merges_multiple_agents_into_one_transient() {
             tier: crate::kernel::api::Tier::Host,
             guest: None,
             workspace: None,
+            workspace_grant: None,
         })
         .expect("建工作");
     assert_eq!(
@@ -706,4 +707,38 @@ fn thinking_view_uses_the_common_default_and_hides_unmapped_levels() {
         !cfg.thinking.options.iter().any(|o| o.id == "max"),
         "没映射的档不列出来"
     );
+}
+
+#[test]
+fn workspace_grant_parses_defaults_and_requires_a_workspace() {
+    use crate::capabilities::session::api::{WorkspaceBinding, WorkspaceGrant};
+    assert_eq!(WorkspaceGrant::parse("none").unwrap(), WorkspaceGrant::None);
+    assert_eq!(
+        WorkspaceGrant::parse(" Session ").unwrap(),
+        WorkspaceGrant::Session
+    );
+    assert_eq!(
+        WorkspaceGrant::parse("workspace").unwrap(),
+        WorkspaceGrant::Workspace
+    );
+    assert!(
+        WorkspaceGrant::parse("always")
+            .unwrap_err()
+            .contains("none / session / workspace"),
+        "不认识的值如实拒绝，不静默落默认"
+    );
+    // 旧 meta 没有 grant 字段：按缺省读回（= 逐会话授/撤），解析不失败。
+    let old: WorkspaceBinding = serde_json::from_str(r#"{"root":"D:\\ws"}"#).unwrap();
+    assert_eq!(old.grant, WorkspaceGrant::Session);
+    assert_eq!(
+        serde_json::to_value(&old).unwrap()["grant"],
+        serde_json::json!("session"),
+        "落盘写法与 serde 的 snake_case 同名"
+    );
+    // 没有外部工作区却给了非缺省粒度：拒绝，而不是静默忽略。
+    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
+    let mut spec = single_work("w-grant", &["a"]);
+    spec.workspace_grant = Some(WorkspaceGrant::Workspace);
+    let err = ops.sessions.create_work(spec).expect_err("该拒绝");
+    assert!(err.contains("工作区授权粒度无意义"), "{}", err);
 }

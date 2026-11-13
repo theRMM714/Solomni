@@ -64,13 +64,54 @@ pub struct SessionMeta {
     pub run: RunState,
 }
 
-/// 目的：根会话绑定到产品目录之外的共享区主副本时记录的工作区根（绝对路径）。
+/// 目的：根会话绑定到产品目录之外的共享区主副本时记录的工作区根（绝对路径）与围栏授权粒度。
 /// 约束：子会话不写这个字段（沿 `parent` 链继承工作根的绑定）；会话建好后不再改。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkspaceBinding {
     /// 目的：规范化后的绝对路径（创建时校验；之后只读）。
     pub root: std::path::PathBuf,
+    /// 目的：外部工作区在围栏里的授权粒度（创建时由人选；缺省 = 今天的行为：逐会话授/撤）。
+    #[serde(default)]
+    pub grant: WorkspaceGrant,
+}
+
+/// 目的：外部工作区的围栏授权粒度——决定容器里的 shell / 模块工具能不能读共享区，以及写 ACL 的频率。
+/// 约束：**只影响围栏与共享区读范围**，不改变文件归属；`Workspace` 的机器级 ACE 常驻用户目录，撤销走显式命令。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceGrant {
+    /// 不向容器授共享区：容器里的 shell / 模块工具读不到（内置文件工具同样按权限层拒绝，如实告知）。
+    None,
+    /// 仅本次会话（缺省）：按次调用授给本会话的容器 SID，会话结束递归撤——首次付 O(子树)，每会话都付。
+    #[default]
+    Session,
+    /// 该工作区一次性：机器级只读授给 `ALL APPLICATION PACKAGES` + `(OI)(CI)`，之后所有会话零写。
+    /// 代价：本机任意 AppContainer 应用都能读这个目录；撤销走 `--fence-revoke <path>`。
+    Workspace,
+}
+
+impl WorkspaceGrant {
+    /// 目的：解析创建参数（`none` / `session` / `workspace`）；不认识的值如实拒绝，不静默落默认。
+    pub fn parse(raw: &str) -> Result<Self, String> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "none" => Ok(WorkspaceGrant::None),
+            "session" => Ok(WorkspaceGrant::Session),
+            "workspace" => Ok(WorkspaceGrant::Workspace),
+            other => Err(format!(
+                "未知的工作区授权粒度：{other}（可用 none / session / workspace）"
+            )),
+        }
+    }
+
+    /// 目的：落盘与人读的稳定写法（与 serde 的 snake_case 同名）。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WorkspaceGrant::None => "none",
+            WorkspaceGrant::Session => "session",
+            WorkspaceGrant::Workspace => "workspace",
+        }
+    }
 }
 
 /// 目的：会话运行态（**持久**事实，落在 meta.yaml）：派发与唤醒都要先过它。

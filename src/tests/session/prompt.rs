@@ -111,6 +111,7 @@ pub(crate) fn agent_chara_enters_identity_only_when_set() {
             tier: Tier::Host,
             guest: None,
             workspace: None,
+            workspace_grant: None,
         })
         .unwrap()
         .sid;

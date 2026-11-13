@@ -90,17 +90,23 @@ impl Conductor {
     fn resolve_workspace_binding(
         &self,
         raw: Option<&std::path::Path>,
+        grant: Option<crate::capabilities::session::api::WorkspaceGrant>,
         tier: crate::kernel::api::Tier,
         parent: Option<&str>,
     ) -> Result<Option<crate::capabilities::session::api::WorkspaceBinding>, String> {
         if let Some(p) = parent {
-            if raw.is_some() {
-                return Err("子会话不能自选工作区：沿父会话继承".to_string());
+            if raw.is_some() || grant.is_some() {
+                return Err("子会话不能自选工作区或授权粒度：沿父会话继承".to_string());
             }
             let top = self.work_root(p)?;
             return Ok(self.history.meta(&top)?.workspace);
         }
         let Some(raw) = raw else {
+            if grant
+                .is_some_and(|g| g != crate::capabilities::session::api::WorkspaceGrant::Session)
+            {
+                return Err("没有指定外部工作区时，工作区授权粒度无意义".to_string());
+            }
             return Ok(None);
         };
         let probe = self.probe.as_ref();
@@ -108,6 +114,7 @@ impl Conductor {
         let root = super::workspace_root::resolve(raw, tier, &product, probe)?;
         Ok(Some(crate::capabilities::session::api::WorkspaceBinding {
             root,
+            grant: grant.unwrap_or_default(),
         }))
     }
 
@@ -126,8 +133,12 @@ impl Conductor {
         {
             return Err(format!("工作名已存在：{}", spec.name));
         }
-        let workspace =
-            self.resolve_workspace_binding(spec.workspace.as_deref(), spec.tier, parent)?;
+        let workspace = self.resolve_workspace_binding(
+            spec.workspace.as_deref(),
+            spec.workspace_grant,
+            spec.tier,
+            parent,
+        )?;
         // **代理形态**（第三人形态）：没有名单、没有需求——用户选这一形态就是**授予全权**。
         // 它不是一个 agent 工作，装配与其余形态没有共同点，所以在这里就地分岔、不往下走。
         if spec.mode == WorkMode::Proxy {

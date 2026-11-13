@@ -557,6 +557,8 @@ pub struct WorkSpec {
     /// 目的：外部工作区根（已规范化的绝对路径）；None = 产品内 `session/<名>/work`。
     /// 约束：只有顶层会话能指定；子会话沿父链继承同一个根。
     pub workspace: Option<std::path::PathBuf>,
+    /// 目的：外部工作区的围栏授权粒度（仅顶层且给了 workspace 时有效；缺省 = 逐会话授/撤）。
+    pub workspace_grant: Option<crate::capabilities::session::api::WorkspaceGrant>,
 }
 
 /// 目的：创建工作后的结果：最终实例名（重名已加尾号）、名单，以及**开场事实**。

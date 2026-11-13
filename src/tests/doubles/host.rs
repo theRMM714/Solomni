@@ -181,6 +181,7 @@ pub(crate) fn work(name: &str, mode: WorkMode, modules: &[&str]) -> WorkSpec {
         tier: crate::kernel::api::Tier::Host,
         guest: None,
         workspace: None,
+        workspace_grant: None,
     }
 }
 
