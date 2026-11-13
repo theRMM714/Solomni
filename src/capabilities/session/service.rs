@@ -257,6 +257,7 @@ pub fn core_operation(
                     call_id: c.id.clone(),
                     reply: 0,
                     read: None,
+                    shell: None,
                 },
                 &done.raw,
                 &done.reasoning,
@@ -284,6 +285,7 @@ pub fn core_operation(
                     call_id: String::new(),
                     reply: 0,
                     read: None,
+                    shell: None,
                 },
                 &done.raw,
                 &done.reasoning,
@@ -356,6 +358,7 @@ pub fn core_operation(
                 call_id,
                 reply: 0,
                 read: None,
+                shell: None,
             };
             // 核心"先核实"这一步也如实推出去（用户看得到它在读什么、查什么）。
             for row in core_rows(&view.name, view.clone(), &done.raw, "", "") {

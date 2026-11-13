@@ -7,6 +7,7 @@ use crate::capabilities::permission::api::{CallScope, Decision};
 use crate::capabilities::tools::domain::schema::ToolSchema;
 use crate::capabilities::tools::domain::systool::{SHELL, arg_fault_text};
 use crate::kernel::api::ToolOutcome;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 /// 目的：单条 shell 命令的字符上限；超过就要求模型先把脚本写进沙箱再执行（命令不拼进命令行）。
@@ -199,6 +200,72 @@ pub fn did_run(output: &str) -> bool {
         .lines()
         .any(|l| l.trim_start().starts_with("[shell] "))
 }
+/// 目的：一次 shell 调用的结构化事实——落点 / 耗时 / 围栏准备 / 退出码 / 状态 / 是否截断；
+///   实况卡片、会话回放与测试读同一份，不再各自解析回执文本。旧转录没有这份字段，回放才回落解析。
+/// 约束：六个字段都能缺省（旧转录反序列化不失败）；时间单位统一毫秒；status 词表同 ShellStatus。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShellFacts {
+    /// 目的：本次执行的落点（呈现写法，不是机器路径）。
+    #[serde(default)]
+    pub cwd: String,
+    /// 目的：本次执行的总耗时（毫秒），含围栏准备。
+    #[serde(default)]
+    pub elapsed_ms: u64,
+    /// 目的：本机档围栏准备耗时（毫秒）：逐条写 ACL 常常是首调用的大头；虚拟机档为 None。
+    #[serde(default)]
+    pub fence_prep_ms: Option<u64>,
+    /// 目的：退出码；超时 / 停止 / 拿不到时为 None。
+    #[serde(default)]
+    pub exit_code: Option<i32>,
+    /// 目的：状态行分类（exit / timeout / stopped / signal）；没有状态行时为 None。
+    #[serde(default)]
+    pub status: Option<String>,
+    /// 目的：这次回执是否被 head+tail 截断过（模型只看到开头与结尾）。
+    #[serde(default)]
+    pub truncated: bool,
+}
+
+impl ShellFacts {
+    /// 目的：只认秒的呈现与状态栏用的整秒耗时。
+    pub fn elapsed_secs(&self) -> u64 {
+        self.elapsed_ms / 1000
+    }
+
+    /// 目的：围栏准备到一秒才单独交代（与回执行「不足一秒不追加」同一口径）。
+    pub fn fence_prep_secs(&self) -> Option<u64> {
+        self.fence_prep_ms
+            .filter(|ms| *ms >= 1000)
+            .map(|ms| ms / 1000)
+    }
+}
+
+/// 目的：把执行层已经算好的计时与回执整理成一份结构化事实（耗时不在文本里再解析一遍）。
+/// 参数：cwd = 呈现落点；elapsed = 本次墙钟耗时；fence_prep = 同线程交棒来的围栏准备耗时（虚拟机档为 None）；
+///   output = 执行层回执（退出码 / 状态 / 截断从这个回执的标记行取）。
+pub fn facts(
+    cwd: &str,
+    elapsed: Duration,
+    fence_prep: Option<Duration>,
+    output: &str,
+) -> ShellFacts {
+    ShellFacts {
+        cwd: cwd.to_string(),
+        elapsed_ms: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
+        fence_prep_ms: fence_prep.map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
+        exit_code: exit_code(output),
+        status: status(output).map(|s| s.as_str().to_string()),
+        truncated: truncated(output),
+    }
+}
+
+/// 目的：这条回执是否被截断——截断器的标记行独占一行且写在被保留的开头之后。
+/// 约束：只认本仓两个截断器的标记（工具预算的「[结果截断]」与 guest 截断的「[截断] 输出共」）。
+pub fn truncated(output: &str) -> bool {
+    output.lines().any(|line| {
+        let line = line.trim_start();
+        line.starts_with("[结果截断]") || line.starts_with("[截断] 输出共 ")
+    })
+}
 
 #[cfg(test)]
 mod tests {
@@ -337,6 +404,62 @@ params:
         assert!(did_run("[shell] 超时（5 秒）"));
         assert!(!did_run("[围栏] 这次调用没有执行"));
         assert!(!did_run("工具进程启动失败：找不到"));
+    }
+
+    #[test]
+    fn facts_carries_the_measured_timing_and_the_receipt_markers() {
+        let output = format!(
+            "[shell] 退出码 0\n{}",
+            cwd_elapsed_line("C:\\work", 331, Some(327))
+        );
+        let f = facts(
+            "C:\\work",
+            Duration::from_millis(331_400),
+            Some(Duration::from_millis(327_000)),
+            &output,
+        );
+        assert_eq!(f.cwd, "C:\\work");
+        assert_eq!(f.elapsed_ms, 331_400);
+        assert_eq!(f.fence_prep_ms, Some(327_000));
+        assert_eq!(f.elapsed_secs(), 331);
+        assert_eq!(f.fence_prep_secs(), Some(327));
+        assert_eq!(f.exit_code, Some(0));
+        assert_eq!(f.status.as_deref(), Some("exit"));
+        assert!(!f.truncated);
+        // 围栏准备不足一秒不给回放看（与回执行同一口径）。
+        let quick = facts("C:\\work", Duration::from_millis(400), Some(Duration::from_millis(400)), "ok");
+        assert_eq!(quick.elapsed_secs(), 0);
+        assert_eq!(quick.fence_prep_secs(), None);
+        assert_eq!(quick.exit_code, None, "没有收尾行就没有退出码");
+        assert_eq!(quick.status, None);
+    }
+
+    #[test]
+    fn truncated_recognises_both_truncation_markers() {
+        assert!(truncated("[结果截断] 本次回执共 16048 字符"));
+        assert!(truncated("  [截断] 输出共 20000 字符；保留开头 4000 与结尾 12000 字符"));
+        assert!(!truncated("[shell] 退出码 0"));
+        assert!(!truncated("结果截断但不是行首标记"));
+    }
+
+    #[test]
+    fn facts_round_trips_through_json_and_tolerates_old_rows() {
+        let f = facts(
+            "/w/a",
+            Duration::from_millis(7_900),
+            None,
+            "[shell] 退出码 0\n[shell] cwd /w/a · 耗时 7 秒",
+        );
+        let json = serde_json::to_value(&f).expect("可序列化");
+        assert_eq!(
+            serde_json::from_value::<ShellFacts>(json).expect("可反序列化"),
+            f
+        );
+        // 旧转录没有这份字段：缺省反序列化不失败，字段全是零值。
+        let old: ShellFacts = serde_json::from_value(serde_json::json!({})).expect("旧行要能读");
+        assert_eq!(old, ShellFacts::default());
+        assert_eq!(old.elapsed_secs(), 0);
+        assert_eq!(old.fence_prep_secs(), None);
     }
 
     #[test]

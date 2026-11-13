@@ -125,6 +125,7 @@ fn refused_batch(
     String,
     ToolOutcome,
     Option<crate::capabilities::workspace::api::ReadFact>,
+    Option<crate::capabilities::tools::api::ShellFacts>,
 )> {
     plan.iter()
         .map(|(module, _, _)| {
@@ -134,6 +135,7 @@ fn refused_batch(
                     ok: false,
                     output: "用户已停止：这一轮的工具调用**没有执行**。".to_string(),
                 },
+                None,
                 None,
             )
         })
@@ -390,6 +392,7 @@ pub fn converse_with(
                 call_id: String::new(),
                 reply: reply_id,
                 read: None,
+                shell: None,
             };
             let msgs_of = reply_msgs(mode, &raw, std::slice::from_ref(&view));
             for m in &msgs_of {
@@ -460,7 +463,7 @@ pub fn converse_with(
                     .iter()
                     .enumerate()
                     .map(|(i, c)| {
-                        let (label, outcome, read) = done[i].clone();
+                        let (label, outcome, read, shell) = done[i].clone();
                         ToolCallView {
                             speaker: speaker.to_string(),
                             module: label,
@@ -471,6 +474,7 @@ pub fn converse_with(
                             call_id: c.id.clone(),
                             reply: reply_id,
                             read,
+                            shell,
                         }
                     })
                     .collect();
@@ -525,6 +529,7 @@ pub fn converse_with(
                             call_id: String::new(),
                             reply: reply_id,
                             read: None,
+                            shell: None,
                         };
                     on_tool(&view);
                     // 这条没有合法原生 id（模型是手写的信封）：走文本形状，不能发 role=tool。
@@ -577,6 +582,7 @@ pub fn converse_with(
                     call_id: String::new(),
                     reply: reply_id,
                     read: None,
+                    shell: None,
                 };
                 on_tool(&view);
                 let msgs_of = reply_msgs(mode, &raw, std::slice::from_ref(&view));
@@ -649,7 +655,7 @@ pub fn converse_with(
                     .iter()
                     .enumerate()
                     .map(|(i, (_module, tool, _args))| {
-                        let (label, outcome, read) = done[i].clone();
+                        let (label, outcome, read, shell) = done[i].clone();
                         let outcome = annotate(outcome);
                         ToolCallView {
                             speaker: speaker.to_string(),
@@ -661,6 +667,7 @@ pub fn converse_with(
                             call_id: String::new(),
                             reply: reply_id,
                             read,
+                            shell,
                         }
                     })
                     .collect();

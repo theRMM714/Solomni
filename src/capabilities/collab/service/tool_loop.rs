@@ -7,7 +7,7 @@ use super::discussion::*;
 use crate::capabilities::llm::api::ToolInvoke;
 use crate::capabilities::permission::api::{CallScope, Decision, Effect, Reach, ReachSet};
 use crate::capabilities::session::api::{MemberTools, SessionEvent};
-use crate::capabilities::tools::api::{Observations, ToolSchema};
+use crate::capabilities::tools::api::{Observations, ShellFacts, ToolSchema};
 use crate::capabilities::workspace::api::ReadFact;
 use crate::kernel::api::ToolOutcome;
 /// 目的：执行一次工具调用：内置优先；外部工具按模块走（模块为空时由 dispatch_external 如实报错）。
@@ -20,12 +20,12 @@ pub(crate) fn run_one(
     ask: Option<&dyn crate::kernel::ports::AskUser>,
     grant: &CallGrant,
     cancel: &std::sync::atomic::AtomicBool,
-) -> (String, ToolOutcome, Option<ReadFact>) {
-    let (label, outcome, branch, read) =
+) -> (String, ToolOutcome, Option<ReadFact>, Option<ShellFacts>) {
+    let (label, outcome, branch, read, shell) =
         run_branch(ctx, module, name, args_json, ask, grant, cancel);
     // 串行：分支的副本就是"这次调用之后"的账本，直接接管（与逐个记账等价）。
     ctx.observations = branch;
-    (label, outcome, read)
+    (label, outcome, read, shell)
 }
 
 /// 目的：一次调用的执行体（**不碰本成员的账本**）：分支各持账本副本，由调用方按原始顺序合并/接管。
@@ -44,10 +44,13 @@ pub(crate) fn run_branch(
     ToolOutcome,
     crate::capabilities::tools::api::Observations,
     Option<ReadFact>,
+    Option<ShellFacts>,
 ) {
     let mut branch = ctx.observations.clone();
     // 这一趟若是一次完整的 read：它读到了哪几行、当时的指纹（挂到工具行上，发送视图据此判过期）。
     let mut read: Option<ReadFact> = None;
+    // 这一趟若是一次 shell：执行层当场算好的结构化事实（耗时 / 围栏准备 / 退出码 / 状态 / 截断）。
+    let mut shell: Option<ShellFacts> = None;
     let (label, outcome) = if !face_has(ctx, module, name) {
         // **按这一回合的工具面校验**：不在面里的调用一律如实拒绝（不静默执行、也不当表态）。
         (String::new(), crate::capabilities::tools::api::refuse(name))
@@ -64,10 +67,9 @@ pub(crate) fn run_branch(
         read = branch.take_reads().into_iter().next();
         (String::new(), outcome)
     } else if crate::capabilities::tools::api::is_exec(name) {
-        (
-            String::new(),
-            run_shell(ctx, name, args_json, ask, grant, cancel),
-        )
+        let (outcome, facts) = run_shell(ctx, name, args_json, ask, grant, cancel);
+        shell = facts;
+        (String::new(), outcome)
     } else if let Some(h) = handler_for(ctx, name) {
         // 核心自有工具：与内置、模块走**同一条派发路径**，不是循环里的特例。
         let tctx = crate::kernel::ports::ToolCtx {
@@ -87,7 +89,7 @@ pub(crate) fn run_branch(
         };
         dispatch_external(ctx, &inv, ask, grant)
     };
-    (label, outcome, branch, read)
+    (label, outcome, branch, read, shell)
 }
 
 /// 目的：写工具落地后**自动提交**——路径取自这次调用真正写过的文件（观察账本的分支副本，见 Observations::take_written）。
@@ -355,8 +357,8 @@ pub(crate) fn run_batch(
     ask: Option<&dyn crate::kernel::ports::AskUser>,
     cancel: &std::sync::atomic::AtomicBool,
     sink: &mut dyn FnMut(SessionEvent),
-) -> Vec<(String, ToolOutcome, Option<ReadFact>)> {
-    let mut done: Vec<Option<(String, ToolOutcome, Option<ReadFact>)>> =
+) -> Vec<(String, ToolOutcome, Option<ReadFact>, Option<ShellFacts>)> {
+    let mut done: Vec<Option<(String, ToolOutcome, Option<ReadFact>, Option<ShellFacts>)>> =
         (0..plan.len()).map(|_| None).collect();
     let grants: Vec<Result<CallGrant, String>> = plan
         .iter()
@@ -369,7 +371,7 @@ pub(crate) fn run_batch(
         let grant = match &grants[i] {
             Ok(g) => g.clone(),
             Err(why) => {
-                done[i] = Some((label, deny(ctx, why.clone()), None));
+                done[i] = Some((label, deny(ctx, why.clone()), None, None));
                 i += 1;
                 continue;
             }
@@ -379,7 +381,7 @@ pub(crate) fn run_batch(
                 "当前档位「{}」不允许这次调用。",
                 ctx.sandbox.permissions.profile.label()
             );
-            done[i] = Some((label, deny(ctx, why), None));
+            done[i] = Some((label, deny(ctx, why), None, None));
             i += 1;
             continue;
         }
@@ -404,7 +406,7 @@ pub(crate) fn run_batch(
             let Some(gate) = confirms.as_deref_mut() else {
                 let why = "这次调用需要用户确认，但当前没有可回答的前端；按拒绝处理，未执行。"
                     .to_string();
-                done[i] = Some((label, deny(ctx, why), None));
+                done[i] = Some((label, deny(ctx, why), None, None));
                 i += 1;
                 continue;
             };
@@ -427,7 +429,7 @@ pub(crate) fn run_batch(
                 let why =
                     "用户没有放行这次工具调用：它没有执行。请换一种做法，或请用户调整会话权限。"
                         .to_string();
-                (label, deny(ctx, why), None)
+                (label, deny(ctx, why), None, None)
             });
             i += 1;
             continue;
@@ -446,6 +448,7 @@ pub(crate) fn run_batch(
                 ToolOutcome,
                 crate::capabilities::tools::api::Observations,
                 Option<ReadFact>,
+                Option<ShellFacts>,
             )> = std::thread::scope(|s| {
                 let handles: Vec<_> = plan[i..j]
                     .iter()
@@ -465,9 +468,9 @@ pub(crate) fn run_batch(
                     .map(|h| h.join().unwrap_or_else(|e| std::panic::resume_unwind(e)))
                     .collect()
             });
-            for (k, (label, outcome, branch, read)) in batch.into_iter().enumerate() {
+            for (k, (label, outcome, branch, read, shell)) in batch.into_iter().enumerate() {
                 ctx.observations.absorb(&branch);
-                done[i + k] = Some((label, outcome, read));
+                done[i + k] = Some((label, outcome, read, shell));
             }
             i = j;
         } else {
@@ -486,7 +489,7 @@ pub(crate) fn run_batch(
     adopt_sandbox(ctx, plan, &mut done);
     // 每一次调用都留一条**同形状的审计记录**（与呈现层的动作记录同一处格式化）：可查、可对账。
     for ((module, tool, _args), slot) in plan.iter().zip(done.iter()) {
-        if let Some((_label, outcome, _read)) = slot {
+        if let Some((_label, outcome, _read, _shell)) = slot {
             let name = match module {
                 Some(m) => format!("{}.{}", m, tool),
                 None => tool.clone(),
@@ -514,7 +517,7 @@ pub(crate) fn run_batch(
 fn adopt_sandbox(
     ctx: &MemberTools,
     plan: &[(Option<String>, String, String)],
-    done: &mut [Option<(String, ToolOutcome, Option<ReadFact>)>],
+    done: &mut [Option<(String, ToolOutcome, Option<ReadFact>, Option<ShellFacts>)>],
 ) {
     let Some(ws) = ctx.workspace.as_ref() else {
         return;
@@ -528,7 +531,7 @@ fn adopt_sandbox(
         if module.is_none() && !crate::capabilities::tools::api::is_exec(tool) {
             continue;
         }
-        if matches!(&done[i], Some((_, o, _)) if o.ok) {
+        if matches!(&done[i], Some((_, o, _, _)) if o.ok) {
             last = Some(i);
         }
     }
@@ -550,7 +553,7 @@ fn adopt_sandbox(
         Ok(report) => adopt_note(&report),
         Err(e) => format!("\n\n[沙箱改动未提交] 共享区没有更新：{}", e),
     };
-    if let Some((_, outcome, _)) = &mut done[i] {
+    if let Some((_, outcome, _, _)) = &mut done[i] {
         outcome.output.push_str(&note);
     }
 }
@@ -691,25 +694,31 @@ fn run_shell(
     ask: Option<&dyn crate::kernel::ports::AskUser>,
     grant: &CallGrant,
     cancel: &std::sync::atomic::AtomicBool,
-) -> ToolOutcome {
+) -> (ToolOutcome, Option<ShellFacts>) {
     use crate::capabilities::tools::api;
     let Some(schema) = ctx.builtin_tools.get(name) else {
-        return api::refuse(name);
+        return (api::refuse(name), None);
     };
     let call = match api::parse_shell(schema, args_json) {
         Ok(c) => c,
         Err(e) => {
-            return ToolOutcome {
-                ok: false,
-                output: e,
-            };
+            return (
+                ToolOutcome {
+                    ok: false,
+                    output: e,
+                },
+                None,
+            );
         }
     };
     if ctx.sandbox.private.as_os_str().is_empty() {
-        return ToolOutcome {
-            ok: false,
-            output: "shell 没有私有沙箱（cwd 为空），这次调用没有执行。".to_string(),
-        };
+        return (
+            ToolOutcome {
+                ok: false,
+                output: "shell 没有私有沙箱（cwd 为空），这次调用没有执行。".to_string(),
+            },
+            None,
+        );
     }
     let mut fence =
         crate::kernel::api::FenceSpec::for_call(&ctx.sandbox, &grant.reach, None, &ctx.fence)
@@ -720,10 +729,13 @@ fn run_shell(
     // 容器身份按"会话 + agent + 受保护根集合"派生（见 container_name）：scope 不同 → 根集合不同 → 不同 SID；
     // 同一 reach 的后续调用复用 SID 与 ACL。生命周期归会话，调用结束不释放。
     if ctx.tier == crate::kernel::api::Tier::Vm && ctx.guest_lease.is_empty() {
-        return ToolOutcome {
-            ok: false,
-            output: "这条虚拟机档会话没有 guest 租约，shell 没有执行。".to_string(),
-        };
+        return (
+            ToolOutcome {
+                ok: false,
+                output: "这条虚拟机档会话没有 guest 租约，shell 没有执行。".to_string(),
+            },
+            None,
+        );
     }
     let started = std::time::Instant::now();
     // cwd 用**本环境写法**：本机档是宿主路径，虚拟机档是 guest 内路径（与文件工具、提示词同一座路径桥）。
@@ -741,7 +753,7 @@ fn run_shell(
         slot.start(&call.script, scope, &cwd_view);
     }
     // 本机档的围栏准备耗时由 ProcessRunner 同线程交棒（见 kernel 的 take_fence_prep）；虚拟机档没有本机 ACL 准备，这里恒为 None。
-    let mut fence_prep_secs: Option<u64> = None;
+    let mut fence_prep: Option<std::time::Duration> = None;
     let mut outcome = if ctx.tier == crate::kernel::api::Tier::Vm {
         let run = crate::capabilities::vm::api::GuestRun {
             command: call.script.clone(),
@@ -765,7 +777,7 @@ fn run_shell(
         };
         let outcome = ctx.tools.run_shell(&run);
         // 同一次执行的值只取一次（读即清）：这里没取到就说明这次没写本机权限项。
-        fence_prep_secs = crate::kernel::api::take_fence_prep().map(|d| d.as_secs());
+        fence_prep = crate::kernel::api::take_fence_prep();
         outcome
     };
     // 共享区不承载执行位：相对路径脚本被直接执行（EACCES）时，补一句"用解释器跑"的出路。
@@ -774,14 +786,16 @@ fn run_shell(
     {
         outcome.output.push_str(&hint);
     }
-    // 回执补「落点 + 本次耗时」：模型据此判断相对路径与耗时，回放也从这一行派生（围栏准备到一秒才在行尾补一段）。
-    // 只对执行层给出 `[shell]` 收尾行的调用追加；参数拒绝 / 起进程失败 / 围栏拒绝没有这一行。
-    if api::did_run(&outcome.output) {
+    // 回执补「落点 + 本次耗时」：模型据此判断相对路径与耗时（围栏准备到一秒才在行尾补一段）。
+    // 只对执行层给出 `[shell]` 收尾行的调用追加；耗时只取一次：回执行与结构化事实同源（不让两处各测一次）。
+    let elapsed = started.elapsed();
+    let ran = api::did_run(&outcome.output);
+    if ran {
         outcome.output.push('\n');
         outcome.output.push_str(&api::cwd_elapsed_line(
             &cwd_view,
-            started.elapsed().as_secs(),
-            fence_prep_secs,
+            elapsed.as_secs(),
+            fence_prep.map(|d| d.as_secs()),
         ));
     }
     let external = ctx.sandbox.permissions.decision_for(
@@ -791,15 +805,12 @@ fn run_shell(
         Decision::Allow,
     );
     let outcome = api::with_scope_hint(outcome, call.scope, external);
+    // 事实只从这一次执行产出：实况槽与会话回放读同一份，呈现层不再解析回执。
+    let facts = ran.then(|| api::shell_facts(&cwd_view, elapsed, fence_prep, &outcome.output));
     if let Some(slot) = &slot {
-        slot.finish(
-            outcome.ok,
-            api::exit_code(&outcome.output),
-            api::shell_status(&outcome.output).map(|s| s.as_str()),
-            &outcome.output,
-        );
+        slot.finish(facts.as_ref(), outcome.ok, &outcome.output);
     }
-    outcome
+    (outcome, facts)
 }
 
 /// 目的：外部工具派发：先定模块（信封里的 module；省略时只有唯一模块才兜底），再查该模块的工具表。

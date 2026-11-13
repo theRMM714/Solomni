@@ -410,6 +410,55 @@ pub(crate) fn rebuild_restores_the_last_shell_snapshot_from_the_transcript() {
     assert!(live.historical, "派生快照要标历史");
 }
 
+/// 目的：新转录里 shell 带着结构化事实（回执被截断、没有尾行）时，重建读事实而不是解析文本。
+#[test]
+pub(crate) fn rebuild_prefers_the_structured_shell_facts_over_the_receipt() {
+    let hist = Arc::new(InMemoryHistory::new());
+    let io = Arc::new(InMemorySysIo::new());
+    let mut core = core_with_all(
+        vec![module_of("a")],
+        gw(BTreeMap::new(), vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::clone(&io),
+    );
+    let sid = core
+        .create_work(work("w", WorkMode::Single, &["a"]))
+        .unwrap()
+        .sid;
+    hist.append(
+        &sid,
+        &[serde_json::json!({
+            "type": "transcript",
+            "lines": [{
+                "id": 0,
+                "tool": {
+                    "speaker": "a", "module": "", "name": "shell", "ok": true,
+                    "args": "{\"command\":\"npm test\",\"scope\":\"sandbox\"}",
+                    "output": "ok（回执被截断，没有尾行）",
+                    "shell": {
+                        "cwd": "/w/b", "elapsed_ms": 331_400,
+                        "fence_prep_ms": 327_000, "exit_code": 0,
+                        "status": "exit", "truncated": true
+                    }
+                }
+            }]
+        })],
+    )
+    .unwrap();
+    let (meta, events) = core.history_open(&sid).unwrap();
+    drop(core.rebuild_session(&meta, &events).expect("按转录重建"));
+    let live = core.shell_view(&sid).expect("重建后状态栏要有 shell 快照");
+    assert_eq!(live.command, "npm test");
+    assert_eq!(live.cwd, "/w/b", "读事实，不回落到解析");
+    assert_eq!(live.elapsed_secs, Some(331));
+    assert_eq!(live.fence_prep_secs, Some(327));
+    assert_eq!(live.exit_code, Some(0));
+    assert_eq!(live.status.as_deref(), Some("exit"));
+    assert!(live.historical);
+}
+
 /// 目的：回档**按回复原子**：截在一次回复中间时整条回复一起丢，绝不留下"孤儿工具结果"。
 #[test]
 pub(crate) fn rewind_never_splits_a_reply() {

@@ -513,6 +513,7 @@ pub(crate) fn tool_round_reasoning_lands_on_the_tool_line() {
         call_id: String::new(),
         reply: 0,
         read: None,
+        shell: None,
     };
     let round = crate::capabilities::collab::service::round::Round {
         reply: 1,
