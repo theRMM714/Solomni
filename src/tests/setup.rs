@@ -26,12 +26,14 @@ impl FakeUserPath {
         }
     }
 
+    #[cfg(windows)]
     fn failing(why: &str) -> Self {
         let fake = Self::new("", false);
         *fake.value.lock().expect("锁") = Err(why.to_string());
         fake
     }
 
+    #[cfg(windows)]
     fn text(&self) -> String {
         self.writes
             .lock()
@@ -45,6 +47,7 @@ impl FakeUserPath {
         self.writes.lock().expect("锁").len()
     }
 
+    #[cfg(windows)]
     fn broadcast_count(&self) -> usize {
         *self.broadcasts.lock().expect("锁")
     }
