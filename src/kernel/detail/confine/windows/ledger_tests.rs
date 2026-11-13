@@ -10,6 +10,7 @@ use super::*;
 /// 【台账契约】写前先落盘：快照与授权摘要都要能在 ACL 改动前读回；收尾按快照整体还原。
 #[test]
 fn journal_records_snapshot_and_grant_before_touching_acl() {
+    let _fence = crate::tests::fence_acl_guard();
     let base = std::env::temp_dir().join(format!("solomni-journal-probe-{}", std::process::id()));
     let target = base.join("target");
     std::fs::create_dir_all(&target).expect("建探针目录");
@@ -56,6 +57,7 @@ fn journal_records_snapshot_and_grant_before_touching_acl() {
 /// 【写后核对】写下前先记 ACE 集合；写入并还原后，原有 ACE 集合必须与之前一致。
 #[test]
 fn write_then_restore_keeps_the_original_ace_set() {
+    let _fence = crate::tests::fence_acl_guard();
     let base = std::env::temp_dir().join(format!("solomni-multiset-probe-{}", std::process::id()));
     let target = base.join("target");
     std::fs::create_dir_all(&target).expect("建探针目录");
@@ -104,6 +106,7 @@ fn write_then_restore_keeps_the_original_ace_set() {
 /// 【缺落点跳过】路径不存在的落点只跳过、不判整次失败：存在的照常授权，台账里不留不存在的那条。
 #[test]
 fn missing_grant_target_is_skipped_and_not_journaled() {
+    let _fence = crate::tests::fence_acl_guard();
     let base = std::env::temp_dir().join(format!("solomni-skip-probe-{}", std::process::id()));
     let target = base.join("target");
     std::fs::create_dir_all(&target).expect("建探针目录");
@@ -146,6 +149,7 @@ fn missing_grant_target_is_skipped_and_not_journaled() {
 /// 【孤儿回收】没有台账、也没有 profile 时，按显式包 SID 也要能连树撤掉残留。
 #[test]
 fn sweep_reclaims_orphan_package_ace_without_a_ledger() {
+    let _fence = crate::tests::fence_acl_guard();
     let base = std::env::temp_dir().join(format!("solomni-sweep-probe-{}", std::process::id()));
     let target = base.join("target");
     std::fs::create_dir_all(&target).expect("建探针目录");
@@ -172,6 +176,7 @@ fn sweep_reclaims_orphan_package_ace_without_a_ledger() {
 /// 【先落盘】台账落不了盘时绝不动 ACL：写被台账门禁挡住，目标目录不留任何我们的 ACE。
 #[test]
 fn journal_failure_blocks_the_acl_write() {
+    let _fence = crate::tests::fence_acl_guard();
     let base = std::env::temp_dir().join(format!("solomni-journal-gate-{}", std::process::id()));
     let target = base.join("target");
     std::fs::create_dir_all(&target).expect("建探针目录");
@@ -212,6 +217,7 @@ fn journal_failure_blocks_the_acl_write() {
 /// 其余条目与整份 DACL 不受影响；台账外的根外残留也能按 SID + 路径撤掉并如实标注它不在台账里。
 #[test]
 fn ledger_catalog_and_per_item_disposal_keep_the_rest_untouched() {
+    let _fence = crate::tests::fence_acl_guard();
     // 独立临时目录名：另一个用例（第 280 行起）也以 solomni-grant-probe-<pid> 为根，
     // 并行跑会共享同一份台账，必须错开（否则台账条数被对方写脏）。
     let base = std::env::temp_dir().join(format!("solomni-grant-catalog-{}", std::process::id()));
@@ -345,6 +351,7 @@ fn ledger_catalog_and_per_item_disposal_keep_the_rest_untouched() {
 /// PID 复用（同一 pid、创建时刻对不上）必须判死——否则旧进程的残留永远回收不掉。
 #[test]
 fn owner_state_distinguishes_live_dead_and_unjudgeable() {
+    let _fence = crate::tests::fence_acl_guard();
     let me = current_owner();
     if me.start == 0 {
         eprintln!("[探针] 本机读不到进程创建时刻：归属判定用例跳过（不静默当作通过）");
@@ -385,6 +392,7 @@ fn owner_state_distinguishes_live_dead_and_unjudgeable() {
 /// 【启动对账】归属明确已死的陈旧授权必须被回收（ACE 消失、台账销账）；活归属一个字都不动。
 #[test]
 fn reconcile_reclaims_dead_owners_and_keeps_live_ones() {
+    let _fence = crate::tests::fence_acl_guard();
     let base = std::env::temp_dir().join(format!("solomni-reconcile-{}", std::process::id()));
     let live = base.join("live");
     let stale = base.join("stale");
@@ -464,6 +472,7 @@ fn reconcile_reclaims_dead_owners_and_keeps_live_ones() {
 /// 【启动对账】台账外的按次 profile：只报告，不自动删（没有归属证明，删了会误伤在跑实例）。
 #[test]
 fn reconcile_reports_ledger_less_profiles_without_deleting_them() {
+    let _fence = crate::tests::fence_acl_guard();
     if std::env::var("SOLOMNI_FENCE_LIVE")
         .map(|v| v != "1")
         .unwrap_or(true)
@@ -512,6 +521,7 @@ fn reconcile_reports_ledger_less_profiles_without_deleting_them() {
 /// 【启动对账】缺归属/判不了的条目：如实报告并跳过，一条都不回收。
 #[test]
 fn reconcile_skips_entries_without_ownership() {
+    let _fence = crate::tests::fence_acl_guard();
     let base = std::env::temp_dir().join(format!("solomni-reconcile-skip-{}", std::process::id()));
     let target = base.join("target");
     std::fs::create_dir_all(&target).expect("建探针目录");
@@ -564,6 +574,7 @@ fn reconcile_skips_entries_without_ownership() {
 /// 【机器级·纯逻辑】祖先链授权形状：只有 Parent + 只读属性 + 非递归 + 非继承 才算机器级，其它一律按次。
 #[test]
 fn machine_target_is_only_the_ancestor_chain_shape() {
+    let _fence = crate::tests::fence_acl_guard();
     let machine = GrantTarget {
         path: PathBuf::from("C:\\work"),
         rights: RIGHTS_STAT,
@@ -605,6 +616,7 @@ fn machine_target_is_only_the_ancestor_chain_shape() {
 /// 【机器级·台账】授给所有应用程序包的祖先链授权：不记归属、对账一律保留（不撤 ACE、不还原快照）。
 #[test]
 fn machine_grant_has_no_owners_and_survives_reconcile() {
+    let _fence = crate::tests::fence_acl_guard();
     let base = std::env::temp_dir().join(format!("solomni-machine-grant-{}", std::process::id()));
     let target = base.join("target");
     std::fs::create_dir_all(&target).expect("建探针目录");
@@ -694,6 +706,7 @@ fn machine_grant_has_no_owners_and_survives_reconcile() {
 /// 【台账兼容】旧台账没有 scope 字段：读出来必须仍是按次口径（不能默认成机器级、被永久保留）。
 #[test]
 fn ledger_without_scope_field_loads_as_per_call() {
+    let _fence = crate::tests::fence_acl_guard();
     let base = std::env::temp_dir().join(format!("solomni-scope-default-{}", std::process::id()));
     let home = base.join(".home");
     std::fs::create_dir_all(&home).expect("建台账目录");

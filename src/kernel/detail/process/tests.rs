@@ -567,6 +567,8 @@ impl crate::kernel::ports::AskUser for RecordingAsk {
 #[cfg(windows)]
 #[test]
 fn unwritable_interpreter_dir_never_silently_runs_unfenced() {
+    #[cfg(windows)]
+    let _fence = crate::tests::fence_acl_guard();
     use crate::capabilities::tools::domain::fence::{OPT_FENCE_ABORT, OPT_FENCE_UNFENCED};
     use crate::capabilities::tools::service::fence::ToolFenceGate;
     use crate::kernel::api::FencePart;
@@ -911,6 +913,8 @@ fn generated_shell_script_fails_on_unhandled_powershell_errors() {
 #[cfg(windows)]
 #[test]
 fn real_shell_uses_powershell_utf8_exit_code_and_cleans_its_script() {
+    #[cfg(windows)]
+    let _fence = crate::tests::fence_acl_guard();
     if !fence_live() {
         eprintln!("[探针] 未开启真机围栏测试（会写本机 ACL）：跳过 Windows shell 契约");
         return;
@@ -984,6 +988,8 @@ fn real_shell_uses_powershell_utf8_exit_code_and_cleans_its_script() {
 #[cfg(windows)]
 #[test]
 fn real_windows_shell_writes_relative_files_in_its_private_cwd() {
+    #[cfg(windows)]
+    let _fence = crate::tests::fence_acl_guard();
     if !fence_live() {
         eprintln!("[探针] 未开启真机围栏测试（会写本机 ACL）：跳过 Windows shell cwd 契约");
         return;

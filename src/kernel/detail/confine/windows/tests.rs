@@ -13,6 +13,7 @@ pub(super) fn expect_granted(prep: &FencePrep, what: &str) {
 /// 目的：网络能力 SID 只在 `net=true` 时建出来；`net=false` 不授任何 capability（断网）。
 #[test]
 fn internet_client_capability_is_only_built_when_net_is_true() {
+    let _fence = crate::tests::fence_acl_guard();
     assert!(
         container::internet_client_sid(false)
             .expect("net=false 不该失败")
@@ -101,6 +102,7 @@ pub(super) fn acl_round_trip(base: &Path, tag: &str) -> bool {
 /// 换会话、换 agent、换 reach（根集合）都是不同身份；`net` 不进指纹（它是令牌能力，不改变 ACL 可见性）。
 #[test]
 fn container_profile_follows_the_session_and_reach() {
+    let _fence = crate::tests::fence_acl_guard();
     let a = FenceSpec {
         agent: "甲".to_string(),
         lease: "w".to_string(),
@@ -143,6 +145,7 @@ fn container_profile_follows_the_session_and_reach() {
 /// 清扫只认自己的前缀：别人的容器 profile 一个都不许动。
 #[test]
 fn profile_sweep_only_matches_our_prefix() {
+    let _fence = crate::tests::fence_acl_guard();
     assert!(
         is_our_profile("solomni.agent.0123456789abcdef"),
         "Windows 会把包目录名转小写"
@@ -157,6 +160,7 @@ fn profile_sweep_only_matches_our_prefix() {
 /// 整条挡掉（解释器目录就是这样：容器里连解释器都读不到）；通用位与展开后的具体位要等价看待。
 #[test]
 fn existing_ace_must_cover_the_rights_we_need() {
+    let _fence = crate::tests::fence_acl_guard();
     assert!(
         // 0x0010_0000 = SYNCHRONIZE
         !rights_covered(0x0010_0000, RIGHTS_RO),
@@ -190,6 +194,7 @@ fn existing_ace_must_cover_the_rights_we_need() {
 /// （真机 CI 上抓到的 `WinError 5 Access is denied: 'D:\\'`）。这里钉住落点清单，不必真改 ACL。
 #[test]
 fn grant_targets_include_parents_with_stat_only() {
+    let _fence = crate::tests::fence_acl_guard();
     let dir = std::env::temp_dir()
         .join("solomni-grant-targets")
         .join("work");
@@ -266,6 +271,7 @@ fn grant_targets_include_parents_with_stat_only() {
 /// 目的：shell 的 cwd = private 时，PowerShell 逐级解析 cwd 所需的祖先也要有只读属性（仅 STAT、不递归）。
 #[test]
 fn shell_cwd_gets_every_ancestor_stat_only() {
+    let _fence = crate::tests::fence_acl_guard();
     let private = std::env::temp_dir()
         .join("solomni-grant-targets")
         .join("a")
@@ -297,6 +303,7 @@ fn shell_cwd_gets_every_ancestor_stat_only() {
 /// 只读**子树**（模块目录对 agent 只读）与工作目录：都给 `RIGHTS_RO` 递归，写权只能来自 `rw`。
 #[test]
 fn grant_targets_keep_module_read_only_and_cwd_read_only() {
+    let _fence = crate::tests::fence_acl_guard();
     let base = std::env::temp_dir().join("solomni-grant-targets");
     let module = base.join("modules").join("m0");
     let userdata = module.join("userdata");
@@ -339,6 +346,7 @@ fn grant_targets_keep_module_read_only_and_cwd_read_only() {
 /// 先在自有 base 里做完整往返预检；本机做不了就如实打印并跳过（不静默当作通过）。
 #[test]
 fn grants_are_written_when_the_environment_allows_it() {
+    let _fence = crate::tests::fence_acl_guard();
     let base = std::env::temp_dir().join(format!("solomni-grant-probe-{}", std::process::id()));
     let target = base.join("target");
     std::fs::create_dir_all(&target).expect("建探针目录");
@@ -381,6 +389,7 @@ fn grants_are_written_when_the_environment_allows_it() {
 /// 分根计时只在**真写 ACL** 时产生步骤：第一次有、第二次纯命中为空；标签只用固定词表、不带用户路径。
 #[test]
 fn fence_steps_only_cover_real_acl_writes() {
+    let _fence = crate::tests::fence_acl_guard();
     let base = std::env::temp_dir().join(format!("solomni-steps-{}", std::process::id()));
     let target = base.join("target");
     std::fs::create_dir_all(&target).expect("建探针目录");
@@ -441,6 +450,7 @@ fn fence_steps_only_cover_real_acl_writes() {
 /// 可信执行基座是**机器级**授权：台账 scope=machine、归属为空；第二次准备不再写它（跨会话复用）。
 #[test]
 fn trusted_base_grants_are_machine_scope() {
+    let _fence = crate::tests::fence_acl_guard();
     let base = std::env::temp_dir().join(format!("solomni-base-scope-{}", std::process::id()));
     let tool = base.join(".tools").join("toolchain");
     let private = base.join("private");
@@ -496,6 +506,7 @@ fn trusted_base_grants_are_machine_scope() {
 /// 与上一条一样先做完整往返预检（本机受限沙箱会如实跳过）。
 #[test]
 fn revoke_removes_the_container_ace_from_the_given_roots() {
+    let _fence = crate::tests::fence_acl_guard();
     let base = std::env::temp_dir().join(format!("solomni-revoke-probe-{}", std::process::id()));
     let target = base.join("target");
     std::fs::create_dir_all(&target).expect("建探针目录");
@@ -535,6 +546,7 @@ fn revoke_removes_the_container_ace_from_the_given_roots() {
 /// 与读写授权分开断言——只读档的价值就在于"读得到、写不进"。
 #[test]
 fn read_only_grants_write_ro_aces_and_revoke_removes_them() {
+    let _fence = crate::tests::fence_acl_guard();
     let base = std::env::temp_dir().join(format!("solomni-ro-probe-{}", std::process::id()));
     let target = base.join("target");
     let ro = base.join("ro-target");
@@ -582,6 +594,7 @@ fn read_only_grants_write_ro_aces_and_revoke_removes_them() {
 /// 容器 SID 只该落在叶子上。grant_targets 的落点清单或归属变了它会先红。
 #[test]
 fn revoke_leaves_no_container_ace_on_leaf_parents() {
+    let _fence = crate::tests::fence_acl_guard();
     if !capability().fs {
         eprintln!(
             "[探针] 本机不允许改目录 ACL（{}）：残留探针跳过（不静默当作通过）",
@@ -662,6 +675,7 @@ fn revoke_leaves_no_container_ace_on_leaf_parents() {
 /// 会改本机状态（写临时文件的 DACL），按测试约定只在 --fence-live 下跑；做不了往返预检就如实跳过。
 #[test]
 fn object_ace_is_covered_by_the_write_then_equal_check() {
+    let _fence = crate::tests::fence_acl_guard();
     if std::env::var("SOLOMNI_FENCE_LIVE")
         .map(|v| v != "1")
         .unwrap_or(true)
@@ -772,6 +786,7 @@ fn container_diag(sid: PSID, spec: &FenceSpec, leaf: &Path) -> String {
 /// 授权落点写得进、父目录内容列不到；做不到就响亮失败（那才是口径破了，不是环境不允许）。
 #[test]
 fn container_roundtrip_sees_leaf_but_not_parent_content() {
+    let _fence = crate::tests::fence_acl_guard();
     if std::env::var("SOLOMNI_FENCE_LIVE")
         .map(|v| v != "1")
         .unwrap_or(true)
@@ -901,6 +916,7 @@ fn container_roundtrip_sees_leaf_but_not_parent_content() {
 /// 会创建 AppContainer profile（改本机状态），只在 --fence-live（SOLOMNI_FENCE_LIVE=1）下跑。
 #[test]
 fn container_roundtrip_keeps_module_read_only_and_peer_unreachable() {
+    let _fence = crate::tests::fence_acl_guard();
     if std::env::var("SOLOMNI_FENCE_LIVE")
         .map(|v| v != "1")
         .unwrap_or(true)
@@ -1012,6 +1028,7 @@ fn node_runs() -> bool {
 /// 会创建 AppContainer profile（改本机状态），只在 --fence-live（SOLOMNI_FENCE_LIVE=1）下跑；本机没有 node 时如实跳过。
 #[test]
 fn container_runs_a_node_module_tool_with_realpath_skipped() {
+    let _fence = crate::tests::fence_acl_guard();
     if std::env::var("SOLOMNI_FENCE_LIVE")
         .map(|v| v != "1")
         .unwrap_or(true)
@@ -1147,6 +1164,7 @@ fn container_runs_a_node_module_tool_with_realpath_skipped() {
 /// 会创建 AppContainer profile 与写目录 ACL，只在 --fence-live（SOLOMNI_FENCE_LIVE=1）下跑。
 #[test]
 fn container_runs_a_program_given_by_absolute_path() {
+    let _fence = crate::tests::fence_acl_guard();
     if std::env::var("SOLOMNI_FENCE_LIVE")
         .map(|v| v != "1")
         .unwrap_or(true)
@@ -1231,6 +1249,7 @@ fn container_runs_a_program_given_by_absolute_path() {
 /// 约束：私有沙箱为空时退回工作目录；两者都空就没有落点（返回 `None`，不猜）。
 #[test]
 fn container_temp_dir_follows_gettemp2_layout() {
+    let _fence = crate::tests::fence_acl_guard();
     let mut spec = FenceSpec {
         agent: "probe-temp".to_string(),
         lease: String::new(),
@@ -1266,6 +1285,7 @@ fn container_temp_dir_follows_gettemp2_layout() {
 /// 会创建 AppContainer profile 与写目录 ACL，只在 --fence-live（SOLOMNI_FENCE_LIVE=1）下跑。
 #[test]
 fn container_has_a_writable_temp_dir() {
+    let _fence = crate::tests::fence_acl_guard();
     if std::env::var("SOLOMNI_FENCE_LIVE")
         .map(|v| v != "1")
         .unwrap_or(true)
@@ -1360,6 +1380,7 @@ fn container_has_a_writable_temp_dir() {
 /// 「去继承、全显式」能不能成立全看这里。探针只打印事实、不预设结论；本机不允许改 ACL 时如实跳过。
 #[test]
 fn acl_write_flavours_are_probed_for_scope_and_readability() {
+    let _fence = crate::tests::fence_acl_guard();
     if !capability().fs {
         eprintln!(
             "[探针] 本机不允许改目录 ACL（{}）：ACL 写法探针跳过（不静默当作通过）",
@@ -1464,6 +1485,7 @@ fn acl_write_flavours_are_probed_for_scope_and_readability() {
 ///   收尾按台账撤权、删 profile 与临时目录。
 #[test]
 fn concurrent_calls_of_one_agent_are_isolated_and_released_independently() {
+    let _fence = crate::tests::fence_acl_guard();
     if std::env::var("SOLOMNI_FENCE_LIVE")
         .map(|v| v != "1")
         .unwrap_or(true)
@@ -1619,6 +1641,7 @@ fn concurrent_calls_of_one_agent_are_isolated_and_released_independently() {
 /// 收尾要把自己的 ACE、profile 与按次临时目录都带走，不留孤儿。
 #[test]
 fn one_shot_release_only_removes_its_own_grant_and_profile() {
+    let _fence = crate::tests::fence_acl_guard();
     use crate::kernel::ports::FenceHost;
     let base = std::env::temp_dir().join(format!("solomni-release-owner-{}", std::process::id()));
     let target = base.join("target");
@@ -1707,6 +1730,7 @@ fn one_shot_release_only_removes_its_own_grant_and_profile() {
 ///   当前用户却有 WRITE_DAC）。
 #[test]
 fn can_write_dacl_accepts_a_directory_we_own() {
+    let _fence = crate::tests::fence_acl_guard();
     let dir = crate::tests::scratch("can-write-dacl");
     std::fs::create_dir_all(&dir).expect("建目录");
     assert!(
@@ -1719,6 +1743,7 @@ fn can_write_dacl_accepts_a_directory_we_own() {
 /// 目的：写都没成功时不许报“回滚失败”，也不许动预存的 ACE（真机上它就是链接上那条 SYNCHRONIZE）。
 #[test]
 fn failed_write_keeps_preexisting_ace_and_never_says_rollback() {
+    let _fence = crate::tests::fence_acl_guard();
     let base = crate::tests::scratch("grant-failure-rollback");
     let dir = base.join("mod");
     let home = base.join(".home");
@@ -1775,6 +1800,7 @@ fn failed_write_keeps_preexisting_ace_and_never_says_rollback() {
 /// 必须按根外处理，否则会为一条越界路径先存原始安全描述符快照。
 #[test]
 fn inside_root_rejects_parent_escape_even_when_canonicalize_fails() {
+    let _fence = crate::tests::fence_acl_guard();
     let base = crate::tests::scratch("inside-root");
     let root = base.join("root");
     std::fs::create_dir_all(&root).expect("建根目录");
