@@ -89,6 +89,10 @@ pub(super) fn print_waiting(waiting: &[DecisionWaiter]) {
 
 /// 目的：把一张裁决卡按它的四个字段打出来（信封 / 消息 / 选项）：CLI 不认识业务含义，只认这几格。
 pub(super) fn print_card(card: &DecisionCard) {
+    if term::tty() {
+        print_card_rich(card);
+        return;
+    }
     println!("[裁决] {}（{}）", card.message.title, card.envelope.name);
     if !card.message.body.trim().is_empty() {
         println!("  {}", card.message.body);
@@ -100,6 +104,69 @@ pub(super) fn print_card(card: &DecisionCard) {
         println!("  {}) {}（{}）", i + 1, o.label, o.id);
     }
 }
+
+fn print_card_rich(card: &DecisionCard) {
+    let cols = term::cols().clamp(40, 96);
+    let inner = cols.saturating_sub(4);
+    let title = format!("◈ {}（{}）", card.message.title, card.envelope.name);
+    let title = width::cut(&title, cols.saturating_sub(3));
+    let fill = cols.saturating_sub(width::cols(&title) + 3);
+    println!(
+        "{}",
+        term::ink(
+            theme::Ink::Amber,
+            &format!("╭─ {} {}", title, "─".repeat(fill))
+        )
+    );
+    if !card.message.body.trim().is_empty() {
+        card_row(inner, card.message.body.trim(), false);
+    }
+    if !card.message.detail.trim().is_empty() {
+        card_row(inner, card.message.detail.trim(), true);
+    }
+    println!(
+        "{}",
+        term::ink(theme::Ink::Amber, &format!("├{}┤", "─".repeat(cols - 2)))
+    );
+    for (i, o) in card.options.iter().enumerate() {
+        let lead = format!("{}. {}", i + 1, o.label);
+        let id = format!("· {}", o.id);
+        let gap = inner.saturating_sub(width::cols(&lead) + width::cols(&id) + 1);
+        println!(
+            "{} {}{}{} {}",
+            term::ink(theme::Ink::Amber, "│"),
+            term::bold(theme::Ink::Fg2, &lead),
+            " ".repeat(gap.max(1)),
+            term::ink(theme::Ink::Dim, &id),
+            term::ink(theme::Ink::Amber, "│")
+        );
+    }
+    println!(
+        "{}",
+        term::ink(theme::Ink::Amber, &format!("╰{}╯", "─".repeat(cols - 2)))
+    );
+}
+
+fn card_row(inner: usize, text: &str, dim: bool) {
+    for part in width::wrap(text, inner) {
+        let pad = inner.saturating_sub(width::cols(&part));
+        let body = if dim {
+            term::ink(theme::Ink::Dim, &part)
+        } else {
+            part
+        };
+        println!(
+            "{} {}{} {}",
+            term::ink(theme::Ink::Amber, "│"),
+            body,
+            " ".repeat(pad),
+            term::ink(theme::Ink::Amber, "│")
+        );
+    }
+}
+
+/// 目的：生成态的轮子（10 帧，tick 100ms 与 mock 一致；--no-anim 尚未接线时仍按此绘制）。
+const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 /// 目的：选中的选项 id：先按序号、再按 id 原文认——两者都是那张卡上**用户看得见**的东西。
 pub(crate) fn pick_option(card: &DecisionCard, ans: &str) -> Option<String> {
@@ -167,18 +234,29 @@ pub(super) fn answer_gates(ops: &Ops, sid: &str, cursor: &mut u64) {
 pub(super) fn wait_quiet(ops: &Ops, sid: &str, cursor: &mut u64) {
     let mut last = u64::MAX;
     let mut quiet = 0u32;
+    let started = std::time::Instant::now();
+    let mut tick = 0usize;
     loop {
         *cursor = drain(ops, sid, *cursor);
         let head = ops.events.head();
         if !ops.sessions.is_running(sid) && head == last {
             quiet += 1;
             if quiet >= 3 {
+                term::live_clear();
                 return;
             }
         } else {
             quiet = 0;
         }
         last = head;
+        if term::tty() {
+            tick += 1;
+            term::live(&format!(
+                "{} 收尾中 · {}s",
+                SPINNER[tick % SPINNER.len()],
+                started.elapsed().as_secs()
+            ));
+        }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
 }
@@ -197,11 +275,19 @@ pub(super) fn act_interactive(
         let r = gen_ops.actions.act(action.call(&gen_sid, out));
         let _ = tx.send(r);
     });
+    let started = std::time::Instant::now();
+    let mut working: Option<String> = None;
+    let mut tick = 0usize;
     loop {
         let (lines, head, _oldest) = ops.events.snapshot(Some(sid), *cursor);
         // 这一批里出现了裁决卡就就地作答（工具级确认发生在生成中，不能等这一次生成收尾）。
         let mut carded = false;
         for l in &lines {
+            for ev in &l.events {
+                if let SessionEvent::Working { agent } = ev {
+                    working = agent.clone();
+                }
+            }
             render(&l.events);
             carded |= l
                 .events
@@ -210,14 +296,29 @@ pub(super) fn act_interactive(
         }
         *cursor = head;
         if carded {
+            term::live_clear();
             answer_gates(ops, sid, cursor);
         }
         match rx.try_recv() {
-            Ok(r) => return r,
+            Ok(r) => {
+                term::live_clear();
+                return r;
+            }
             Err(std::sync::mpsc::TryRecvError::Empty) => {
+                if term::tty() {
+                    tick += 1;
+                    let who = working.clone().unwrap_or_else(|| "生成中".to_string());
+                    term::live(&format!(
+                        "{} {} · {}s · Esc 只在问卡时可行",
+                        SPINNER[tick % SPINNER.len()],
+                        who,
+                        started.elapsed().as_secs()
+                    ));
+                }
                 std::thread::sleep(std::time::Duration::from_millis(50))
             }
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                term::live_clear();
                 return Err("生成线程异常结束".to_string());
             }
         }

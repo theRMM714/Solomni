@@ -66,3 +66,33 @@ pub(crate) fn cut(s: &str, max: usize) -> String {
     out.push('…');
     out
 }
+/// 目的：按列折行（不切断宽字符）；空行原样保留，供对话框正文排版。
+pub(crate) fn wrap(text: &str, max: usize) -> Vec<String> {
+    let max = max.max(1);
+    let mut out = Vec::new();
+    for raw in text.lines() {
+        if raw.is_empty() {
+            out.push(String::new());
+            continue;
+        }
+        let mut row = String::new();
+        let mut used = 0;
+        for c in raw.chars() {
+            let cw = width(c);
+            if used + cw > max && !row.is_empty() {
+                out.push(row);
+                row = String::new();
+                used = 0;
+            }
+            row.push(c);
+            used += cw;
+        }
+        if !row.is_empty() {
+            out.push(row);
+        }
+    }
+    if out.is_empty() {
+        out.push(String::new());
+    }
+    out
+}

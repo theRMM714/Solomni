@@ -99,6 +99,39 @@ pub(super) fn line(text: &str) {
     println!("{}", text);
 }
 
+/// 目的：是否交互终端：只有交互模式才用富渲染与活状态行，非 TTY 保持逐行原样。
+pub(super) fn tty() -> bool {
+    current().1
+}
+
+/// 目的：当前终端列数（对话框与折行按它排版）；读不到时按 80 列。
+pub(super) fn cols() -> usize {
+    current().2
+}
+
+/// 目的：一行原地位刷新的活状态（生成中的 spinner 与耗时）：不占转录区，事件落地前由调用方清掉。
+pub(super) fn live(text: &str) {
+    let (paint, tty, cols) = current();
+    if !tty {
+        return;
+    }
+    let body = paint.paint(Ink::Dim, &width::cut(text, cols.saturating_sub(1)));
+    let mut out = io::stdout();
+    let _ = write!(out, "\r\x1b[2K{}", body);
+    let _ = out.flush();
+}
+
+/// 目的：清掉活状态行（事件要落到转录区之前调用；没有活状态行时无害）。
+pub(super) fn live_clear() {
+    let (_, tty, _) = current();
+    if !tty {
+        return;
+    }
+    let mut out = io::stdout();
+    let _ = write!(out, "\r\x1b[2K");
+    let _ = out.flush();
+}
+
 fn install_panic_restore() {
     use std::sync::Once;
     static ONCE: Once = Once::new();
@@ -134,7 +167,7 @@ pub(super) fn banner(tagline: &str, facts: &[String]) {
             Level::True => None,
             Level::Ansi256 => Some("配色：256 色档（真彩终端会显示冰青渐变）"),
             Level::Ansi16 => Some("配色：16 色档（真彩终端会显示冰青渐变）"),
-            Level::None => Some("配色：无色档（NO_COLOR 或非交互输出时如此）"),
+            Level::None => Some("配色：无色档（NO_COLOR 或 --plain 时如此）"),
         };
         if let Some(note) = note {
             let _ = writeln!(out, "{}", paint.paint(Ink::Dim, note));

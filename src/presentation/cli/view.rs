@@ -189,7 +189,278 @@ pub(super) fn model_line(m: &ModelView, core: Option<&str>) -> String {
     )
 }
 
+/// 目的：事件渲染入口：交互终端走富渲染，非 TTY 走原样文本（脚本口径逐字不变）。
 pub(super) fn render(events: &[SessionEvent]) {
+    if term::tty() {
+        term::live_clear();
+        render_rich(events);
+    } else {
+        render_plain(events);
+    }
+}
+
+fn head(glyph: &str, ink: theme::Ink, name: &str, verb: &str) -> String {
+    let mut out = format!("{} {}", term::ink(ink, glyph), term::bold(ink, name));
+    if !verb.is_empty() {
+        out.push(' ');
+        out.push_str(&term::ink(theme::Ink::Dim, verb));
+    }
+    out
+}
+
+fn render_rich(events: &[SessionEvent]) {
+    for e in events {
+        match e {
+            SessionEvent::Notice(n) => {
+                println!(
+                    "{} {}",
+                    term::ink(theme::Ink::Dim, "·"),
+                    term::ink(theme::Ink::Dim, n)
+                )
+            }
+            SessionEvent::Transcript(lines) => render_lines(lines),
+            SessionEvent::Working { agent } => {
+                if let Some(a) = agent {
+                    println!(
+                        "{} {}",
+                        term::ink(theme::Ink::Ice2, "●"),
+                        term::ink(theme::Ink::Dim, &format!("{} 开始干活，稍等", a))
+                    );
+                }
+            }
+            SessionEvent::Plan(p) => {
+                println!("{}", head("▸", theme::Ink::Ice2, "整理", ""));
+                for row in p.lines() {
+                    println!("  {}", row);
+                }
+            }
+            SessionEvent::PlanReview { plan, chain } => {
+                println!("{}", head("◈", theme::Ink::Amber, "待审", "同意之后才开工"));
+                for row in plan.lines() {
+                    println!("  {}", row);
+                }
+                for n in &chain.nodes {
+                    println!(
+                        "  {} {} {}",
+                        term::ink(theme::Ink::Dim, &format!("[{}]", n.id)),
+                        term::bold(theme::Ink::Fg2, &n.title),
+                        term::ink(theme::Ink::Dim, &format!("→ {}", n.assignee))
+                    );
+                }
+            }
+            SessionEvent::NodeStarted {
+                node,
+                sid,
+                assignee,
+            } => println!(
+                "{} {} {}",
+                term::ink(theme::Ink::Ice2, "→"),
+                term::bold(theme::Ink::Fg2, &format!("节点 {}", node)),
+                term::ink(
+                    theme::Ink::Dim,
+                    &format!("子会话 {} · 负责人 {}", sid, assignee)
+                )
+            ),
+            SessionEvent::Report { id, text, rework } => {
+                let verb = if *rework > 0 {
+                    format!("返工第 {} 轮", rework)
+                } else {
+                    String::new()
+                };
+                println!("{}", head("◆", theme::Ink::Ice2, id, &verb));
+                for row in text.lines() {
+                    println!("  {}", row);
+                }
+            }
+            SessionEvent::Review { items, raw } => {
+                println!("{}", head("◈", theme::Ink::Ice2, "验收", ""));
+                if items.is_empty() {
+                    println!(
+                        "  {}",
+                        term::ink(theme::Ink::Dim, "（清单解析失败，原文如下）")
+                    );
+                    for row in raw.lines() {
+                        println!("  {}", term::ink(theme::Ink::Dim, row));
+                    }
+                }
+                for i in items {
+                    let (glyph, ink) = check_mark(&i.status);
+                    println!(
+                        "  {} {} {}",
+                        term::ink(ink, glyph),
+                        i.item,
+                        term::ink(theme::Ink::Dim, &i.note)
+                    );
+                }
+            }
+            SessionEvent::Delivery { ok, over_rework } => {
+                let (glyph, ink, text) = if *ok {
+                    ("✓", theme::Ink::Green, "全部通过，交付用户。")
+                } else if *over_rework {
+                    ("◈", theme::Ink::Amber, "返工超限仍未通过，交用户裁决。")
+                } else {
+                    ("✗", theme::Ink::Red, "未能通过，详见上面的验收清单。")
+                };
+                println!("{} {}", term::ink(ink, glyph), term::ink(ink, text));
+            }
+            SessionEvent::DecisionCard { card, .. } => println!(
+                "{} {} {}",
+                term::ink(theme::Ink::Amber, "◈"),
+                term::bold(theme::Ink::Amber, &card.message.title),
+                term::ink(
+                    theme::Ink::Dim,
+                    &format!("（{} 在等你作答）", card.envelope.name)
+                )
+            ),
+            SessionEvent::DecisionAnswer(a) => println!(
+                "{} {}",
+                term::ink(theme::Ink::Dim, "·"),
+                term::ink(
+                    theme::Ink::Dim,
+                    &format!("{} 答了 {}：选了 {}", a.by, a.card, a.option)
+                )
+            ),
+            SessionEvent::DecisionVoid { cards, reason } => println!(
+                "{} {}",
+                term::ink(theme::Ink::Dim, "·"),
+                term::ink(
+                    theme::Ink::Dim,
+                    &format!(
+                        "作废 {} 张没答的卡（{}）：{}",
+                        cards.len(),
+                        cards.join("、"),
+                        reason
+                    )
+                )
+            ),
+            SessionEvent::Usage { usage, .. } => term::status(&format!(
+                "● 上下文 {}/{}（{}）",
+                tokens(usage.total_tokens),
+                tokens(usage.window),
+                if usage.exact { "实计" } else { "估算" }
+            )),
+            // 短暂事件（流式增量 / 工具调用）进的是同一份事件的实时副本：转录行随后就到，这里不重复打。
+            SessionEvent::Delta { .. } | SessionEvent::ToolCall(_) => {}
+            SessionEvent::DiscussionDone { .. }
+            | SessionEvent::Ended
+            | SessionEvent::Rewound { .. } => {}
+        }
+    }
+}
+
+fn check_mark(status: &str) -> (&'static str, theme::Ink) {
+    let s = status.to_ascii_lowercase();
+    if s.contains("pass") || s.contains("ok") || s.contains("done") || s.contains("通过") {
+        ("✓", theme::Ink::Green)
+    } else if s.contains("fail") || s.contains("未通过") || s.contains("错误") {
+        ("✗", theme::Ink::Red)
+    } else {
+        ("·", theme::Ink::Dim)
+    }
+}
+
+fn render_lines(lines: &[crate::capabilities::session::api::LineView]) {
+    for l in lines {
+        if l.kind == "compacted" {
+            let up_to = l
+                .payload
+                .as_ref()
+                .and_then(|p| p.get("up_to"))
+                .and_then(|u| u.as_u64())
+                .unwrap_or(0);
+            println!(
+                "{} {}",
+                term::ink(theme::Ink::Dim, "[压缩]"),
+                term::ink(
+                    theme::Ink::Dim,
+                    &format!("第 {} 行之前已压成摘要；此后原样保留（仍可查看）：", up_to)
+                )
+            );
+            for row in l.line.lines() {
+                println!("  {}", term::ink(theme::Ink::Dim, row));
+            }
+            continue;
+        }
+        if l.kind == "tool" {
+            if let Some(t) = &l.tool {
+                print_tool(t);
+            }
+            continue;
+        }
+        if l.kind == "user" || l.speaker == "用户" {
+            println!(
+                "{} {}",
+                term::ink(theme::Ink::Ice, "›"),
+                term::bold(theme::Ink::Ice, &l.line)
+            );
+            continue;
+        }
+        if l.kind == "round" {
+            println!(
+                "{} {}",
+                term::ink(theme::Ink::Line, "────"),
+                term::ink(theme::Ink::Dim, &l.line)
+            );
+            continue;
+        }
+        if l.system || l.kind == "system" {
+            for row in l.line.lines() {
+                println!(
+                    "{} {}",
+                    term::ink(theme::Ink::Dim, "·"),
+                    term::ink(theme::Ink::Dim, row)
+                );
+            }
+            continue;
+        }
+        if l.speaker.is_empty() {
+            for row in l.line.lines() {
+                println!("  {}", row);
+            }
+            continue;
+        }
+        println!("{}", head("◆", theme::Ink::Ice2, &l.speaker, &l.verb));
+        for row in l.line.lines() {
+            println!("  {}", row);
+        }
+    }
+}
+
+fn print_tool(t: &crate::capabilities::session::api::ToolCallView) {
+    let (glyph, ink) = if t.ok {
+        ("✓", theme::Ink::Green)
+    } else {
+        ("✗", theme::Ink::Red)
+    };
+    let label = t.label();
+    let pad = 18usize.saturating_sub(width::cols(&label));
+    println!(
+        "{} {}{} {} {}",
+        term::ink(theme::Ink::Ice2, "⏺"),
+        term::bold(theme::Ink::Fg2, &label),
+        " ".repeat(pad),
+        term::ink(theme::Ink::Dim, &arg_preview(&t.args)),
+        term::ink(ink, glyph)
+    );
+}
+
+fn arg_preview(args: &str) -> String {
+    let one: String = args.split_whitespace().collect::<Vec<_>>().join(" ");
+    if one.is_empty() {
+        return String::new();
+    }
+    width::cut(&one, 64)
+}
+
+fn tokens(n: u64) -> String {
+    if n >= 10_000 {
+        format!("{:.1}k", n as f64 / 1000.0)
+    } else {
+        n.to_string()
+    }
+}
+
+pub(super) fn render_plain(events: &[SessionEvent]) {
     for e in events {
         match e {
             SessionEvent::Notice(n) => println!("{}", n),

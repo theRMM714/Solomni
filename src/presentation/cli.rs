@@ -24,11 +24,13 @@ pub fn run(ops: Ops, web_default_port: u16) -> CliExit {
     } else {
         println!("Solomni 核心编排者（转录中心）");
     }
-    print_roster(&ops);
+    if !interactive {
+        print_roster(&ops);
+    }
     if interactive {
         term::line(&term::ink(
             theme::Ink::Dim,
-            "输入 help 看全量命令 · webui 转 Web 界面 · exit 退出",
+            "输入 help 看全量命令与模块清单 · webui 转 Web 界面 · exit 退出",
         ));
     }
     term::status(&startup_status(&ops));
@@ -117,4 +119,4 @@ pub(crate) use gate::{
 #[cfg(test)]
 pub(crate) use input::{Editor, Key, Step, clear_history};
 #[cfg(test)]
-pub(crate) use width::{cols, cut};
+pub(crate) use width::{cols, cut, wrap};

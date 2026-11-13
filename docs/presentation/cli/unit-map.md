@@ -11,7 +11,7 @@
 | --- | --- |
 | `src/presentation/cli.rs` | 终端转录中心入口：启动页 → 命令分发 → 会话流；不做业务判断、不持状态 |
 | `src/presentation/cli/commands.rs` | 一次性命令：`module` / `diagnose` / `secret` / `resident` / `work` / `rewind` |
-| `src/presentation/cli/view.rs` | 渲染原语：启动页事实行、状态行、花名册、菜单、事件流、模型与供应商标签 |
+| `src/presentation/cli/view.rs` | 渲染原语：启动页事实行、状态行、花名册、菜单；交互模式富渲染（角色行、工具行、验收/交付、上下文用量），非 TTY 保持原样文本 |
 | `src/presentation/cli/gate.rs` | 交互回合：跟读事件流、裁决卡问答、等安静与动作回显 |
 | `src/presentation/cli/flows.rs` | 会话流：单 agent / 代理 / 协作 / 供应商 / 模型 / 核心设置 |
 | `src/presentation/cli/term.rs` | 终端 I/O：TTY 判定、raw mode 开关、启动页字标、固定输入框的绘制与擦除、事件到按键的翻译、非交互回退 |

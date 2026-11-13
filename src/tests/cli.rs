@@ -240,3 +240,10 @@ fn width_counts_cjk_as_two_and_cuts_whole() {
     assert_eq!(cli::cut("中文abc", 5), "中文…");
     assert_eq!(cli::cut("abc", 10), "abc", "没超宽就不加省略号");
 }
+/// 折行：按列折、不劈开宽字符；空行保留（裁决卡正文与详情共用）。
+#[test]
+fn width_wraps_without_breaking_wide_chars() {
+    assert_eq!(cli::wrap("中文中文abc", 7), vec!["中文中", "文abc"]);
+    assert_eq!(cli::wrap("a\n\nb", 4), vec!["a", "", "b"]);
+    assert_eq!(cli::wrap("", 10), vec![""]);
+}

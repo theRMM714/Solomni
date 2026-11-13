@@ -23,6 +23,9 @@ pub(super) enum Ink {
     Line,
     Ice,
     Ice2,
+    Green,
+    Amber,
+    Red,
 }
 
 impl Level {
@@ -60,6 +63,9 @@ impl Ink {
             Ink::Line => (0x2A, 0x38, 0x3E),
             Ink::Ice => (0x7F, 0xE7, 0xE0),
             Ink::Ice2 => (0x4F, 0xC9, 0xC6),
+            Ink::Green => (0x86, 0xE7, 0xB4),
+            Ink::Amber => (0xFF, 0xD0, 0x8A),
+            Ink::Red => (0xFF, 0x90, 0x90),
         }
     }
 
@@ -71,6 +77,9 @@ impl Ink {
             Ink::Line => 237,
             Ink::Ice => 116,
             Ink::Ice2 => 80,
+            Ink::Green => 121,
+            Ink::Amber => 222,
+            Ink::Red => 210,
         }
     }
 
@@ -79,6 +88,9 @@ impl Ink {
             Ink::Fg | Ink::Fg2 => 97,
             Ink::Dim | Ink::Line => 90,
             Ink::Ice | Ink::Ice2 => 96,
+            Ink::Green => 92,
+            Ink::Amber => 93,
+            Ink::Red => 91,
         }
     }
 }
