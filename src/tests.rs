@@ -73,6 +73,16 @@ pub(crate) fn scratch(name: &str) -> std::path::PathBuf {
     d
 }
 
+/// 目的：真机围栏用例的**串行闸**。写/还原目录 DACL 是本机全局副作用——可继承 ACE 会触发
+///   整树继承传播，快照还原会改写同一祖先下别的用例正在用的目录；并发跑会互相打断
+///   （实测：一个用例还原祖先快照时，另一个正在跑的容器打不开自己的上级目录）。
+/// 约束：只给 `#[cfg(windows)]` 的用例用；持锁期间可以起线程（锁不在子线程里重复取）。
+#[cfg(windows)]
+pub(crate) fn fence_acl_guard() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// 目的：起一个内存装配的核心手柄并把能力面拆成 `Ops`（契约测试共用）。
 ///   返回手柄是为了能观察事件台与测试注入；只用能力面的用例可以忽略它。
 pub(crate) fn ops_with(
