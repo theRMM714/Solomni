@@ -183,8 +183,10 @@ pub use ledger::{
 #[cfg(windows)]
 pub use ledger::{ReconcileReport, release_fence, sweep_orphan_aces};
 pub use paths::{fence_env, shell_command};
+// 一次围栏准备里真写 ACL 的分步耗时条目：Windows 产生，回执交棒跨平台读。
 #[cfg(any(windows, test))]
 pub use prep::FencePrep;
+pub use prep::FenceStep;
 #[cfg(windows)]
 pub use prep::prepare_fence;
 pub use prep::{clean, sweep_profiles};

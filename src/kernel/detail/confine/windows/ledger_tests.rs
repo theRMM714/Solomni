@@ -243,7 +243,6 @@ fn ledger_catalog_and_per_item_disposal_keep_the_rest_untouched() {
     let sid_text = sid_to_string(sid);
     let owner = current_owner();
     // 一条根内授权（走快照）+ 一条根外授权（走摘要）：都经“先落台账、再写 ACL、写后核对”那条路。
-    let mut rec = load_record(&home);
     let inside_target = GrantTarget {
         path: inside.clone(),
         rights: RIGHTS_RW,
@@ -251,16 +250,8 @@ fn ledger_catalog_and_per_item_disposal_keep_the_rest_untouched() {
         inherit: false,
         part: FencePart::DataBoundary,
     };
-    grant_one_journaled(
-        &home,
-        &mut rec,
-        sid,
-        &sid_text,
-        &inside_target,
-        &base,
-        owner.clone(),
-    )
-    .expect("根内授权应当成功");
+    grant_one_journaled(&home, sid, &sid_text, &inside_target, &base, owner.clone())
+        .expect("根内授权应当成功");
     let outside_target = GrantTarget {
         path: outside.clone(),
         rights: RIGHTS_RO,
@@ -268,16 +259,8 @@ fn ledger_catalog_and_per_item_disposal_keep_the_rest_untouched() {
         inherit: false,
         part: FencePart::Interpreter,
     };
-    grant_one_journaled(
-        &home,
-        &mut rec,
-        sid,
-        &sid_text,
-        &outside_target,
-        &base,
-        owner.clone(),
-    )
-    .expect("根外授权应当成功");
+    grant_one_journaled(&home, sid, &sid_text, &outside_target, &base, owner.clone())
+        .expect("根外授权应当成功");
     free_sid(sid);
     // 清单：两条都看得见，都如实标成“现在还在”，且与盘上的 ACE 对得上。
     let view = catalog(&home);
@@ -652,8 +635,7 @@ fn machine_grant_has_no_owners_and_survives_reconcile() {
         inherit: false,
         part: FencePart::Parent,
     };
-    let mut rec = load_record(&home);
-    grant_machine_journaled(&home, &mut rec, base_sid, &base_text, &grant, &base)
+    grant_machine_journaled(&home, base_sid, &base_text, &grant, &base)
         .expect("机器级授权应当先落台账、再写并核对");
     let key = target.to_string_lossy().into_owned();
     {

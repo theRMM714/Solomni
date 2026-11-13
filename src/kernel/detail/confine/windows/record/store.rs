@@ -169,6 +169,17 @@ pub(crate) fn lock_ledger(home: &Path) -> Result<LedgerGuard, String> {
     }
 }
 
+/// 目的：一次台账写事务：**只**把「读—改—写」罩在锁里，返回即释放——慢的 ACL 写不占锁。
+/// 约束：闭包内可以调 journal 的落盘函数（它们自己 save）；不要在这里做 acl_scan / grant_verified 这类慢操作。
+pub(crate) fn with_ledger<T>(
+    home: &Path,
+    f: impl FnOnce(&mut GrantRecord) -> Result<T, String>,
+) -> Result<T, String> {
+    let _lock = lock_ledger(home)?;
+    let mut rec = load_record(home);
+    f(&mut rec)
+}
+
 pub(crate) fn load_record(home: &Path) -> GrantRecord {
     std::fs::read_to_string(record_path(home))
         .ok()

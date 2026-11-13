@@ -3,11 +3,12 @@
 //! 不管：祖先目录不用授**穿过**（容器令牌自带 SeChangeNotifyPrivilege）；例外是 shell 的 cwd = private 时给祖先只读属性（PowerShell 解析 cwd 需要），不递归、不继承、不授内容。
 //! 联动：授权与撤销由外层进程做（见 confine::prepare_fence），守门进程只按同一个名字派生同一个 SID；机制不可用时一律如实降级。
 
-use super::{Capability, FENCE_FAILED, FencePrep, FenceVerdict, shell_command};
+use super::{Capability, FENCE_FAILED, FencePrep, FenceStep, FenceVerdict, shell_command};
 use crate::kernel::api::FencePart;
 use crate::kernel::api::FenceSpec;
 use std::ffi::c_void;
 use std::sync::OnceLock;
+use std::time::Instant;
 
 mod acl;
 mod container;
@@ -183,34 +184,84 @@ pub(crate) fn interpreter_dir_usable(dir: &Path) -> Result<(), String> {
     }
 }
 
+/// 目的：分步计时的脱敏标签（固定词表；不写用户绝对路径）。
+const STEP_INTERPRETER: &str = "解释器目录";
+const STEP_ANCESTOR: &str = "祖先链";
+const STEP_ROOT: &str = "受保护根";
+const STEP_BASE: &str = "可信基座";
+
+// 首次真写 ACL 前的 stderr 提示：同进程每类只提示一次（之后静默；纯命中不提示）。
+static PROMPT_INTERPRETER: std::sync::Once = std::sync::Once::new();
+static PROMPT_ANCESTOR: std::sync::Once = std::sync::Once::new();
+static PROMPT_ROOT: std::sync::Once = std::sync::Once::new();
+static PROMPT_BASE: std::sync::Once = std::sync::Once::new();
+
+/// 目的：真写前提示一次「这一类落点第一次要写、可能要几十秒」——用户在等待时看得到原因。
+fn prompt_first_write(once: &std::sync::Once, label: &str) {
+    once.call_once(|| eprintln!("[围栏] 首次为{}补权限（可能要几十秒）…", label));
+}
+
+/// 目的：记下这一步真写 ACL 的耗时（只在真的改了 DACL 时产生步骤；命中已有 ACE 为零步骤）。
+fn push_step(prep: &mut FencePrep, label: &str, started: Instant) {
+    prep.steps.push(FenceStep {
+        label: label.to_string(),
+        ms: started.elapsed().as_millis() as u64,
+    });
+}
+
+/// 目的：首次真写后的一条汇总（只报 ≥1 秒的类别；纯命中 / 总耗时 <1 秒保持安静）。
+/// 约束：最多一行；类别固定词表，不含用户路径。
+fn print_slow_summary(prep: &FencePrep) {
+    let mut order: Vec<&str> = Vec::new();
+    let mut totals: std::collections::BTreeMap<&str, u64> = std::collections::BTreeMap::new();
+    for s in &prep.steps {
+        let label = s.label.as_str();
+        if !totals.contains_key(label) {
+            order.push(label);
+        }
+        *totals.entry(label).or_insert(0) += s.ms;
+    }
+    let slow: Vec<String> = order
+        .into_iter()
+        .filter_map(|label| {
+            let ms = totals.get(label).copied().unwrap_or(0);
+            (ms >= 1000).then(|| format!("{} {} 秒", label, ms / 1000))
+        })
+        .collect();
+    if !slow.is_empty() {
+        eprintln!("[围栏] 写权限完成：{}", slow.join("、"));
+    }
+}
+
 /// 目的：把围栏要用的授权一次性做好（按 (SID, 路径, 权限) 去重，不重复改 ACL），并如实分出
 ///   **必要**落点（授不上就要问用户或拒绝）与**可选**落点（只记事实）。
-/// 约束：每条授权先落台账再动 ACL，写后核对；失败就回滚并如实记进结论（不静默降级）。归属分两种：
-///   容器数据边界按本次调用记（收尾可精确撤）；祖先链的只读属性是**机器级**——授给所有应用程序包、跨会话复用（见 is_machine_target 与 record 的 GrantScope）。
+/// 约束：每条授权先落台账再动 ACL，写后核对；失败就回滚并如实记进结论（不静默降级）。归属分三种：
+///   容器数据边界按本次调用记（收尾可精确撤）；祖先链的只读属性、可信执行基座是**机器级**——授给所有应用程序包、
+///   跨会话复用（见 is_machine_target / is_trusted_base 与 record 的 GrantScope）。
+///   台账锁只罩「读—改—写」（record/store.rs 的 with_ledger）：慢的 ACL 写在锁外，并发调用不互相排队。
 pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep {
     // 这一轮真正写下去的授权（用于如实打印足迹）。
     let mut written: Vec<(String, PathBuf, u32)> = Vec::new();
     let mut prep = FencePrep::default();
     // 产品根 = .home 的父目录：根内路径存原始安全描述符收尾还原，根外只记 ACE 摘要精确撤销。
     let root = product_root(home);
-    // 台账写事务要串行：同进程的并发工具调用 + 多实例都会各写一次。
-    let _lock = match lock_ledger(home) {
-        Ok(l) => l,
-        Err(e) => {
-            eprintln!("[围栏] 授权台账落盘失败：{}", e);
-            prep.fail(FencePart::Ledger, PathBuf::new(), e);
-            return prep;
-        }
-    };
+    // 台账事务只罩「读—改—写」：先确认台账拿得到（拿不到就整次如实收尾），之后每条授权各自加锁，
+    // 慢的 ACL 写不占锁——同进程并发调用不会因某一条 193 秒的整树重算互相排队。
+    if let Err(e) = with_ledger(home, |_| Ok::<(), String>(())) {
+        eprintln!("[围栏] 授权台账落盘失败：{}", e);
+        prep.fail(FencePart::Ledger, PathBuf::new(), e);
+        return prep;
+    }
     // 容器数据授权带本次会话的租约：同名 agent 的多个并发会话各持一份，释放时互不影响。
     let mut container_owner = current_owner();
     container_owner.lease = spec.lease.clone();
-    // 解释器基线与容器 profile 不属于任何会话（全应用包共享组 / 一个 agent 一个 profile）：进程级归属。
+    // 解释器基线不属于任何会话（全应用包共享组）：进程级归属。
     let base_owner = current_owner();
-    let mut rec = load_record(home);
     let container = container_name(spec);
-    if let Err(e) = journal_add_profile(home, &mut rec, &container, container_owner.clone()) {
-        // 台账落不下就不能动本机权限项（这一环是必要的）：如实收尾，让调用方去问用户。
+    // profile 名先有主：这条落不下就不能动本机权限项。
+    if let Err(e) = with_ledger(home, |rec| {
+        journal_add_profile(home, rec, &container, container_owner.clone())
+    }) {
         eprintln!("[围栏] 授权台账落盘失败：{}", e);
         prep.fail(FencePart::Ledger, PathBuf::new(), e);
         return prep;
@@ -249,16 +300,13 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
             inherit: true,
             part: FencePart::Interpreter,
         };
-        match grant_one_journaled(
-            home,
-            &mut rec,
-            base,
-            &base_text,
-            &target,
-            &root,
-            base_owner.clone(),
-        ) {
-            Ok(true) => written.push((base_text.clone(), dir, RIGHTS_RO)),
+        prompt_first_write(&PROMPT_INTERPRETER, STEP_INTERPRETER);
+        let started = Instant::now();
+        match grant_one_journaled(home, base, &base_text, &target, &root, base_owner.clone()) {
+            Ok(true) => {
+                push_step(&mut prep, STEP_INTERPRETER, started);
+                written.push((base_text.clone(), dir, RIGHTS_RO));
+            }
             Ok(false) => {}
             Err(e) => {
                 eprintln!("[围栏] 解释器目录授权未完成（{}）：{}", dir.display(), e);
@@ -289,7 +337,7 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
         );
     }
     let todo = grant_targets(spec);
-    // 本轮写下去的机器级授权条数（只用于在"已写权限"行后补一句去向说明）。
+    // 本轮写下去的机器级授权条数（祖先链 + 可信基座；只用于在"已写权限"行后补一句去向说明）。
     let mut machine_written = 0usize;
     for target in todo {
         let (path, rights) = (&target.path, target.rights);
@@ -304,9 +352,12 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
             if has_ace_for(base, path, rights) {
                 continue;
             }
-            match grant_machine_journaled(home, &mut rec, base, &base_text, &target, &root) {
+            prompt_first_write(&PROMPT_ANCESTOR, STEP_ANCESTOR);
+            let started = Instant::now();
+            match grant_machine_journaled(home, base, &base_text, &target, &root) {
                 Ok(true) => {
                     machine_written += 1;
+                    push_step(&mut prep, STEP_ANCESTOR, started);
                     written.push((base_text.clone(), target.path.clone(), rights));
                 }
                 Ok(false) => {}
@@ -317,29 +368,46 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
             }
             continue;
         }
-        // 工具链 / 运行包是**可信执行基座**：只读、无 scope 信息，授给 baseline 一次即可（之后按实际 ACE 跳过）。
-        // 其余落点才授给本次调用的容器 SID（数据边界的可见性按 reach 收窄）。
+        // 工具链 / 运行包是**可信执行基座**：只读、无 scope 信息，与祖先链同属机器级授权
+        // （授给所有应用程序包、台账 scope=machine），跨会话复用、启动对账不回收。
         let to_base = rights == RIGHTS_RO && is_trusted_base(path, &root);
-        if to_base && has_ace_for(base, path, rights) {
+        if to_base {
+            if !has_ace_for(base, path, rights) {
+                prompt_first_write(&PROMPT_BASE, STEP_BASE);
+            }
+            let started = Instant::now();
+            match grant_machine_journaled(home, base, &base_text, &target, &root) {
+                Ok(true) => {
+                    machine_written += 1;
+                    push_step(&mut prep, STEP_BASE, started);
+                    written.push((base_text.clone(), target.path.clone(), rights));
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    eprintln!("[围栏] 可信基座授权未完成（{}）：{}", path.display(), e);
+                    prep.fail(target.part, target.path.clone(), e);
+                }
+            }
             continue;
         }
-        let (grant_sid, grant_text, grant_owner) = if to_base {
-            (base, &base_text, base_owner.clone())
-        } else {
-            (sid, &sid_text, container_owner.clone())
-        };
-        // 归属总要补记（同名 agent 的另一个会话靠它保住这条授权）；改不改 ACL 由 grant_one_journaled
-        // 按**实际 ACE** 判断——权限收窄并撤权后，下一次 prepare 必须能把仍需要的授权补回来。
+        // 其余落点授给本次调用的容器 SID（按 reach 收窄）；归属总要补记（同名 agent 的另一个会话靠它保住这条授权）。
+        // 改不改 ACL 由 grant_one_journaled 按**实际 ACE** 判断：权限收窄并撤权后，下一次 prepare 必须能把仍需要的授权补回来。
+        if !has_ace_for(sid, path, rights) {
+            prompt_first_write(&PROMPT_ROOT, STEP_ROOT);
+        }
+        let started = Instant::now();
         match grant_one_journaled(
             home,
-            &mut rec,
-            grant_sid,
-            grant_text,
+            sid,
+            &sid_text,
             &target,
             &root,
-            grant_owner,
+            container_owner.clone(),
         ) {
-            Ok(true) => written.push((grant_text.clone(), target.path.clone(), rights)),
+            Ok(true) => {
+                push_step(&mut prep, STEP_ROOT, started);
+                written.push((sid_text.clone(), target.path.clone(), rights));
+            }
             Ok(false) => {}
             Err(e) => {
                 // 按这一环的**必要性**分流：必要落点授不上要问用户（不许降级），可选落点只记事实。
@@ -365,12 +433,13 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
             machine_written
         );
     }
+    print_slow_summary(&prep);
     prep
 }
 
 /// 目的：这条落点是不是**机器级**授权——祖先链的只读属性，授给所有应用程序包，跨会话复用。
 /// 约束：只认 grant_targets 给祖先链的唯一形状（part = Parent、只授 RIGHTS_STAT、不递归、不继承）；
-///   解释器基线、可信基座、数据边界等其它落点仍按本次调用归属记台账（不走这里）。
+///   可信基座也走机器级归属（在 grant_targets 循环里按 is_trusted_base 判），解释器基线、数据边界仍按本次调用归属。
 fn is_machine_target(target: &GrantTarget) -> bool {
     target.part == FencePart::Parent
         && target.rights == RIGHTS_STAT
