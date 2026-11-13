@@ -30,6 +30,7 @@ mod residents;
 mod routes;
 mod secrets;
 mod session;
+mod setup;
 mod slate;
 mod startup;
 mod storage;

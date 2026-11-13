@@ -286,3 +286,26 @@ pub trait FenceHost: Send + Sync {
         Ok(())
     }
 }
+
+/// 目的：用户级 PATH 的一段值：原文 + 注册表类型（REG_EXPAND_SZ 时原文里的 %VAR% 要原样保留）。
+// 本批只落地了 Windows 适配器（detail/user_path.rs），非 Windows 构建上如实放行死代码。
+#[cfg_attr(not(windows), allow(dead_code))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PathValue {
+    pub text: String,
+    /// 目的：写回时是否用 REG_EXPAND_SZ（读进来是什么类型就写回什么类型）。
+    pub expand: bool,
+}
+
+/// 目的：**用户级 PATH** 的读写端口（便携 PATH 维护用它；测试用替身，不碰真实 HKCU）。
+/// 约束：只碰用户级（HKCU）；系统级 PATH 不在本端口范围内；写后由本端口尽力广播环境变更。
+// 本批只落地了 Windows 适配器（detail/user_path.rs），非 Windows 构建上如实放行死代码。
+#[cfg_attr(not(windows), allow(dead_code))]
+pub trait UserPath: Send + Sync {
+    /// 目的：读用户 PATH；值不存在按空串返回（不是错误）。
+    fn read(&self) -> Result<PathValue, String>;
+    /// 目的：按原类型写回用户 PATH。
+    fn write(&self, value: &PathValue) -> Result<(), String>;
+    /// 目的：尽量让已在跑的资源管理器/终端重新读环境（失败不致命：新进程本来就会读新值）。
+    fn broadcast(&self) -> Result<(), String>;
+}

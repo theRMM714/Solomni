@@ -406,7 +406,13 @@ pub(crate) fn grant_machine_journaled(
 ) -> Result<bool, String> {
     let claim = claim_machine(home, sid_text, target, root)?;
     // ACE 已够用（后续会话就走到这里）：不重复改 DACL，台账已记着这条机器级授权。
-    if has_ace_for(sid, &target.path, target.rights) {
+    // 要继承的落点必须已有**可继承**的 ACE：每会话祖先链留下的不可继承 ACE 传不到子目录，不算够用。
+    let enough = if target.inherit {
+        has_inheritable_ace_for(sid, &target.path, target.rights)
+    } else {
+        has_ace_for(sid, &target.path, target.rights)
+    };
+    if enough {
         return Ok(false);
     }
     match grant_verified(

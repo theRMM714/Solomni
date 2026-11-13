@@ -7,6 +7,7 @@ pub mod args;
 pub mod assembly;
 pub mod probes;
 pub mod root;
+pub mod setup;
 pub mod startup;
 pub mod toolchains;
 pub mod web;

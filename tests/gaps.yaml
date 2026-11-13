@@ -79,3 +79,21 @@
     构建口味与 CI 一致且有记录；README 的安装与运行一章只描述真实存在的两条路径。
   blocked_by: |
     本期不做（用户决定：仍在开发阶段）。发行链路与口味统一需要新建 CI 工作流与打包脚本，另立任务。
+
+- id: portable-setup.posix
+  scope: global
+  level: T3
+  why: |
+    `--setup=path` 本批只在 Windows 上改用户 PATH（HKCU\Environment）并生成 `bin/solomni.cmd`；
+    POSIX 上只打印「把 <产品根>/bin 加进 shell 的 PATH」的指引，不写 shim、不改 shell rc，
+    因此 Linux / macOS 用户仍需手工配置便携入口。
+  how: |
+    1) 生成 POSIX shim（`bin/solomni`，固定 `--root <规范化绝对根>`，带可执行位）；
+    2) 按 shell 探测写 rc 片段（bash / zsh / fish 分别处理：写前备份、分段去重、可 undo），
+       或只打印一段可复制的 export 指引并让用户确认；
+    3) 状态与退出码与 Windows 对齐（path / unset / undo / status）；
+    4) 补 T3 用例：rc 片段幂等、备份还原、非交互 shell 不误报。
+  accept: |
+    非 Windows 上 `--setup=path` 能生成可执行的 `bin/solomni` 并按用户确认写入或提示 rc；
+    `--setup=status` 如实报告 shim 与 PATH 事实；`unset` / `undo` 幂等且可还原。
+  blocked_by: 本批范围决定（POSIX 只打印指引，见 PR #80 的「明确不做」）

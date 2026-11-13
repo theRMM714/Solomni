@@ -1061,6 +1061,12 @@ pub(crate) fn has_any_ace_for(sid: PSID, path: &Path) -> bool {
 ///   基线因此被整条跳过，容器里连解释器都读不到（工具报 python is not recognized）。
 /// 约束：只看标准允许 ACE（对象 ACE 是给子对象的，不构成"本对象上已经够用"）。
 pub(crate) fn has_ace_for(sid: PSID, path: &Path, rights: u32) -> bool {
+    has_matching_ace(sid, path, rights, true)
+}
+
+/// 目的：ACE 匹配的公共判定：标准允许 ACE、不是只对子对象生效、权限位覆盖得住；
+///   `inherited_ok=false` 时只认对象自己带的 ACE（从祖先继承来的不算）。
+fn has_matching_ace(sid: PSID, path: &Path, rights: u32, inherited_ok: bool) -> bool {
     let want = sid_to_string(sid);
     if !is_sid_text(&want) {
         return false;
@@ -1070,6 +1076,7 @@ pub(crate) fn has_ace_for(sid: PSID, path: &Path, rights: u32) -> bool {
             scan.entries.iter().any(|v| {
                 v.ace_type == ACCESS_ALLOWED_ACE_TYPE
                     && v.flags & INHERIT_ONLY_ACE == 0
+                    && (inherited_ok || v.flags & INHERITED_ACE == 0)
                     && rights_covered(v.mask, rights)
                     && v.sid == want
             })
@@ -1077,9 +1084,55 @@ pub(crate) fn has_ace_for(sid: PSID, path: &Path, rights: u32) -> bool {
         .unwrap_or(false)
 }
 
+/// 目的：该对象上是不是**自己带着**给这个 SID 的允许 ACE（不含从祖先继承来的），且权限位覆盖得住。
+///   用途：验证「我们写过 / 我们撤掉了」这类归属判断——继承来的 ACE 属于祖先那条授权，不是本对象可撤的那条；
+///   产品根一旦有机器级 `(OI)(CI)` 授权，子目录的继承 ACE 会让「已撤干净」的断言假失败。
+#[cfg(test)]
+pub(crate) fn has_explicit_ace_for(sid: PSID, path: &Path, rights: u32) -> bool {
+    has_matching_ace(sid, path, rights, false)
+}
+
+/// 目的：该对象上是不是已经有给这个 SID、**会向下继承**的允许 ACE，且权限位覆盖得住。
+///   用途：机器级的「根上写一次 (OI)(CI)」这一步——每会话祖先链写的那条不可继承 STAT ACE 不算数，
+///   它不会传给根下的子目录，子目录仍需逐条写；只有带 (OI)/(CI) 的那条才让后续检查全部命中。
+/// 约束：只看标准允许 ACE（对象 ACE 是给子对象的，不属于本对象上的可继承授权）。
+pub(crate) fn has_inheritable_ace_for(sid: PSID, path: &Path, rights: u32) -> bool {
+    let want = sid_to_string(sid);
+    if !is_sid_text(&want) {
+        return false;
+    }
+    acl_scan(path)
+        .map(|scan| {
+            scan.entries.iter().any(|v| {
+                v.ace_type == ACCESS_ALLOWED_ACE_TYPE
+                    && inheritable_flags_ok(v.flags)
+                    && rights_covered(v.mask, rights)
+                    && v.sid == want
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// 目的：一条 ACE 的继承位是否足够覆盖「根下既有与新建子项」：必须同时带 (OI) 与 (CI)，且不是只对子对象生效。
+///   写侧（`write_ace` 的 inherit 分支）总是两条都设；只带一条的旧 ACE 不算就绪，否则 O(1) 会静默不成立。
+fn inheritable_flags_ok(flags: u8) -> bool {
+    let both = (OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE) as u8;
+    flags & INHERIT_ONLY_ACE == 0 && flags & both == both
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 目的：继承位判据必须同时带 (OI) 与 (CI)：只带一条的旧 ACE 不构成「根下既有与新建子项都继承得到」。
+    #[test]
+    fn inheritable_flags_require_both_directions() {
+        let both = (OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE) as u8;
+        assert!(inheritable_flags_ok(both));
+        assert!(!inheritable_flags_ok(OBJECT_INHERIT_ACE as u8));
+        assert!(!inheritable_flags_ok(CONTAINER_INHERIT_ACE as u8));
+        assert!(!inheritable_flags_ok(both | INHERIT_ONLY_ACE));
+    }
 
     /// 造一条 ACE 的原始字节：头 + 掩码 +（对象 ACE 才有）Flags 与在场 GUID + 尾部（SID 那一段）。
     /// 参数：guids 是后面接几个 GUID（0/1/2），object_flags 决定解析时"哪几个在场"。

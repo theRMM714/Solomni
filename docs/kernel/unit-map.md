@@ -1,7 +1,7 @@
 # 单元地图 · kernel
 
 > 定位：kernel（地基库）逐文件职责的唯一权威；由 T0 结构审查与磁盘双向比对。
-> 效力：契约｜核对：2026-11-04｜依据：`src/kernel/api.rs`
+> 效力：契约｜核对：2026-11-13｜依据：`src/kernel/api.rs`
 
 > 本文是 **kernel** 逐文件职责的唯一权威；由 `node run-tests.js` 的 T0 结构审查与磁盘**双向比对**
 > （表里每个路径必须存在；`src/` 下每个 `.rs` 都必须出现在某一张单元地图里）。
@@ -14,7 +14,7 @@
 | --- | --- |
 | `src/kernel.rs` | 地基库的入口与公开面：`contracts` / `api` / `ports` / `domain` / `detail` 五个子模块的形状声明 |
 | `src/kernel/api.rs` | 地基库的对外面：共享形状（`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask` / `RunOutcome` / `FenceSpec` / `FencePart` / `FenceBlocked` / 默认预算）与纯机制（`slash` 的对外写法、路径写法 `native` / `is_unc` / `unc_parts`、落点身份 `locus_of` / `place_contains` / `is_network_path`、生成中作业的取消表 `JobRegistry`）的重导出 |
-| `src/kernel/ports.rs` | 全项目共享的机制端口：`Log` / `PathCodec` / `ProcessTexts` / `AskUser` / `ToolHandler` / `HostProbe` / `ProcessRunner` / `SessionHost` / `FenceHost` / `FenceGate` 的 trait 定义与它们的纯数据形态（含 `ShellRun` 的 `gate` 与 shell 收尾文案） |
+| `src/kernel/ports.rs` | 全项目共享的机制端口：`Log` / `PathCodec` / `ProcessTexts` / `AskUser` / `ToolHandler` / `HostProbe` / `ProcessRunner` / `SessionHost` / `FenceHost` / `FenceGate` / `UserPath` 的 trait 定义与它们的纯数据形态（含 `ShellRun` 的 `gate` 与 shell 收尾文案、用户 PATH 的 `PathValue`） |
 | `src/kernel/contracts.rs` | 跨层共享形状的入口：`fence` / `run` / `types` 三个子模块声明 |
 | `src/kernel/contracts/types.rs` | 跨层共享的形状（纯数据）：`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask` / `AskOutcome` 与默认预算、能力名文法 |
 | `src/kernel/contracts/run.rs` | 宿主执行端口的中性回执 `RunOutcome`（跑没跑、输出是什么；不含业务语义） |
@@ -27,6 +27,7 @@
 | `src/kernel/detail/host_probe.rs` | `HostProbe` 端口的机制实现：查环境变量与 `PATH` 里的可执行文件、路径存在性，并按平台判定虚拟机能力 |
 | `src/kernel/detail/locus.rs` | 落点身份：按（卷 + 文件 id）判同一物理对象与物理包含，并判网络路径（UNC 与映射到网络的盘符）；文本比较拦不住的别名靠它 |
 | `src/kernel/detail/outbound.rs` | 出站 HTTPS 的共享机制：唯一一处 TLS 后端装配与通用 ureq 代理 |
+| `src/kernel/detail/user_path.rs` | `UserPath` 端口的 Windows 实现：读写 `HKCU\Environment` 的 `Path`，保留 `REG_SZ` / `REG_EXPAND_SZ` 类型；写后向桌面广播 `WM_SETTINGCHANGE`（仅 Windows） |
 | `src/kernel/detail/unpack.rs` | 归档解包机制：tar / tar.gz / tar.zst / tar.xz / zip 解到目录，支持 strip 与宽容链接，并还原归档里的权限位（可执行位） |
 | `src/kernel/detail/process.rs` | 外部进程执行机制（守门进程、stdin 送参、隐秘字段 env 注入、超时/取消杀树、head/head+tail 截断、一次性 shell 的平台投递），实现 `ProcessRunner` |
 | `src/kernel/detail/process/tests.rs` | 进程适配器的真实契约用例：真起进程、真收输出、真判退出码与平台分支（`#[cfg(test)] mod tests;` 指向） |
@@ -37,20 +38,21 @@
 | `src/kernel/detail/confine/job.rs` | 守门进程的围栏作业：`FenceJob` 的 JSON 形态、启动命令（`launcher`）与执行转交（`run_fenced`）；策略由调用方传入 |
 | `src/kernel/detail/confine/ledger.rs` | 围栏授权台账与启动对账：`Owner` / `Ledger`、`reconcile`、恢复与撤销（`restore_one` / `revoke_grant` / `release_fence`）、孤儿清扫与按条处置 |
 | `src/kernel/detail/confine/paths.rs` | 围栏的路径与环境工具：解释器安装根与 `PATH` 解析、可执行位与重解析点、node 真身基线、程序名改写、`shell_command` 与 `fence_env` |
-| `src/kernel/detail/confine/prep.rs` | 围栏准备与清理：`FencePrep`、`prepare_fence`、`clean` 与容器 profile 清扫（`sweep_profiles`） |
+| `src/kernel/detail/confine/prep.rs` | 围栏准备与清理：`FencePrep`、`prepare_fence`、`clean`、容器 profile 清扫（`sweep_profiles`）与机器级一次性预授的门面（`machine_missing` / `machine_ensure`） |
 | `src/kernel/detail/confine/texts.rs` | 围栏边界说明：可达范围摘要（`reachable_roots`）与面向调用方的边界注记（`fence_boundary_note`） |
 | `src/kernel/detail/confine/tests.rs` | 围栏机制的单元测试：环境注入、安装目录上溯、Windows 程序名改写、作业 JSON、解释器解析、node realpath、边界说明与租约归属 |
 | `src/kernel/detail/confine/linux.rs` | Linux 围栏后端：Landlock 强制可达范围（`spec.rw` 读写、运行基线只读、其余拒绝），seccomp 在 `net=false` 时拒绝非本地 socket；机制不可用时如实降级 |
 | `src/kernel/detail/confine/macos.rs` | macOS 围栏后端：生成 seatbelt profile（默认拒绝，再逐条放行运行基线与 `spec.rw`；按 `net` 放行 `network-outbound` / 拒绝）交 `sandbox_init` 装上，装不上如实降级 |
 | `src/kernel/detail/confine/other.rs` | 其他平台后端：如实降级——只保证超时与整棵进程树终止，绝不作有文件系统围栏的假装 |
-| `src/kernel/detail/confine/windows/` | Windows 围栏后端目录：入口与策略派发在 `windows.rs`，DACL 授权在 `acl.rs`、授权台账与撤权在 `record/`、容器身份与作业对象在 `container.rs`、真机探针在 `tests.rs` |
+| `src/kernel/detail/confine/windows/` | Windows 围栏后端目录：入口与策略派发在 `windows.rs`，DACL 授权在 `acl.rs`、机器级一次性预授在 `machine.rs`、授权台账与撤权在 `record/`、容器身份与作业对象在 `container.rs`、真机探针在 `tests.rs` |
 | `src/kernel/detail/confine/windows.rs` | Windows 围栏后端入口：按 agent 派生 AppContainer SID、逐条授权可达范围，再用 `STARTUPINFOEX` 在容器与作业对象里起工具（`net` 决定是否授 internetClient） |
+| `src/kernel/detail/confine/windows/machine.rs` | Windows 机器级一次性预授：落点清单（祖先链 STAT、产品根 STAT + 可继承、`.tools` / `runtimes` 递归只读）、只读缺项与幂等执行，逐条计时 |
 | `src/kernel/detail/confine/windows/acl.rs` | Windows 安全描述符操作：逐路径改 DACL（授予 / 撤销）、解析 ACE 与 SID、展开泛型掩码、`AccessCheck` 判写 DACL 权限 |
 | `src/kernel/detail/confine/windows/ledger_tests.rs` | 台账一族真机用例：快照先落盘、写后核对、按条处置、启动对账与孤儿回收（`#[cfg(test)] mod ledger_tests;` 指向） |
 | `src/kernel/detail/confine/windows/record.rs` | Windows 授权台账的入口：`store` / `liveness` / `journal` / `sweep` / `release` / `catalog` / `reconcile` / `paths` / `sid` 九个职责的子模块声明，并向 Windows 后端入口 `windows.rs` 重导出同一个调用面 |
 | `src/kernel/detail/confine/windows/record/store.rs` | 台账的盘上格式与互斥：`GrantRecord` / `SnapshotEntry` / `GrantEntry` / `ProfileEntry`、单一锁文件与进程内 `LEDGER_MUTEX`、锁内 `load_record` / `save_record` 与备份轮转 |
 | `src/kernel/detail/confine/windows/record/liveness.rs` | 归属者的活性：`current_owner`、进程创建时间与存活探测（`Liveness` / `OwnersState` / `owners_state` / `owner_liveness`） |
-| `src/kernel/detail/confine/windows/record/journal.rs` | 授权的建立：写前快照与按条记账（`journal_add_profile` / `journal_claim_grant` / `journal_release_grant` / `journal_add_snapshot` / `grant_one_journaled` / `combine`） |
+| `src/kernel/detail/confine/windows/record/journal.rs` | 授权的建立：写前快照与按条记账（`journal_add_profile` / `journal_claim_grant` / `journal_release_grant` / `journal_add_snapshot` / `grant_one_journaled` / `journal_claim_machine` / `grant_machine_journaled` / `combine`） |
 | `src/kernel/detail/confine/windows/record/sweep.rs` | 清扫：容器 profile 与孤儿 ACE（`record_profile` / `sweep_profiles` / `delete_profile` / `sweep_orphan_aces` / `sweep_dir_down`） |
 | `src/kernel/detail/confine/windows/record/release.rs` | 撤销与释放：按条撤销（`revoke_one_text`）、围栏释放（`release_fence` / `release_by_lease`）、租约收尾（`finalize_grant`）与清理（`clean`） |
 | `src/kernel/detail/confine/windows/record/catalog.rs` | 按条处置的读写面：`acl_facts` / `catalog` / `restore_one` / `revoke_grant` / `remove_profile_one` |

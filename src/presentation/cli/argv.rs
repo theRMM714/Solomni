@@ -50,6 +50,13 @@ pub(crate) const FLAGS: &[Flag] = &[
         hidden: false,
     },
     Flag {
+        long: "--setup",
+        short: None,
+        value: Some("mode"),
+        desc: "便携维护：PATH 或围栏预授（path/unset/undo/status/fence/all，省略=status）",
+        hidden: false,
+    },
+    Flag {
         long: "--help",
         short: Some("-h"),
         value: None,
@@ -95,6 +102,8 @@ pub(crate) struct Flags {
     pub(crate) help: bool,
     pub(crate) version: bool,
     pub(crate) all: bool,
+    /// 目的：`--setup=<模式>` 的取值：便携维护（PATH shim / 围栏机器级预授），省略值等于 `status`。
+    pub(crate) setup: Option<String>,
     pub(crate) positionals: Vec<String>,
 }
 
@@ -134,6 +143,25 @@ pub(crate) fn parse(args: &[String]) -> Result<Flags, String> {
                     Some(raw.parse::<u16>().map_err(|_| {
                         format!("旗语 --port 要一个 1-65535 的整数，收到「{}」", raw)
                     })?);
+            }
+            // 维护旗：只吃 `=值` 或紧跟的已知模式名（不吃 `--root` 这类旗语）；省略值 = status。
+            "--setup" => {
+                let mode =
+                    match inline {
+                        Some(v) if v.is_empty() => return Err(
+                            "旗语 --setup= 要一个模式：path / unset / undo / status / fence / all"
+                                .to_string(),
+                        ),
+                        Some(v) => v,
+                        None => match args.get(i + 1).map(String::as_str) {
+                            Some(v @ ("path" | "unset" | "undo" | "status" | "fence" | "all")) => {
+                                i += 1;
+                                v.to_string()
+                            }
+                            _ => "status".to_string(),
+                        },
+                    };
+                flags.setup = Some(mode);
             }
             "--web" => {
                 no_value(&inline, name)?;
@@ -379,6 +407,32 @@ mod tests {
         assert_eq!(flags.positionals, vec!["--fence-verify", "--json"]);
     }
 
+    /// 维护旗：`--setup=path` 取值、单独出现 = status、紧跟已知模式名也收、空值报错。
+    #[test]
+    fn setup_flag_takes_mode_or_defaults_to_status() {
+        assert_eq!(
+            run(&["--setup=path"]).expect("取值").setup.as_deref(),
+            Some("path")
+        );
+        assert_eq!(
+            run(&["--setup"]).expect("省略值").setup.as_deref(),
+            Some("status")
+        );
+        assert_eq!(
+            run(&["--setup", "fence"])
+                .expect("空格写法")
+                .setup
+                .as_deref(),
+            Some("fence")
+        );
+        // 未知模式留给分派去报（解析层不猜），根旗语照常解析。
+        let flags = run(&["--setup", "--root", "work"]).expect("不吃旗语当值");
+        assert_eq!(flags.setup.as_deref(), Some("status"));
+        assert_eq!(flags.root.as_deref(), Some("work"));
+        let err = run(&["--setup="]).expect_err("空值要报错");
+        assert!(err.contains("--setup="), "{err}");
+    }
+
     /// 旗语表：默认只列用户可见的那些，`all` 时连内部协议一起列。
     #[test]
     fn flag_rows_lists_visible_and_internal_flags() {
@@ -387,6 +441,7 @@ mod tests {
         assert!(visible.iter().any(|r| r.starts_with("  --root <dir>")));
         assert!(visible.iter().any(|r| r.starts_with("  --web ")));
         assert!(visible.iter().any(|r| r.starts_with("  -h, --help ")));
+        assert!(visible.iter().any(|r| r.starts_with("  --setup <mode>")));
         assert!(!visible.iter().any(|r| r.contains("--probe-tools")));
         let all = flag_rows(true);
         assert!(all.iter().any(|r| r.contains("--probe-tools")));
