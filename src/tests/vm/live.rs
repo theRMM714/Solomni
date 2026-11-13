@@ -761,6 +761,7 @@ pub(crate) fn vm_live_external_workspace_round_trip() {
             modules_with_userdata: Default::default(),
             permissions: Default::default(),
             path_codec: None,
+            shared_grant: crate::capabilities::session::api::WorkspaceGrant::Session,
         }],
         codec: None,
     };

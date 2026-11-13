@@ -62,6 +62,10 @@ pub struct Sandbox {
     /// 目的：这场会话的路径翻译器（虚拟机档 guest ↔ 宿主；本机档 None = 恒等）。
     /// 约束：只用来把模型给的写法译成宿主路径**再校验**；安全判断仍然只有 `resolve` 一处。
     pub path_codec: Option<std::sync::Arc<dyn crate::kernel::ports::PathCodec>>,
+    /// 目的：外部工作区（共享区主副本根）的围栏授权粒度——会话绑定上的落盘事实在这里的投影。
+    /// 约束：只影响**围栏派生**：`Session` 逐次调用授给容器 SID；`Workspace` 走机器级一次性只读；
+    ///   `None` 由上层把共享区读范围收紧，围栏不派生（见 `FenceSpec::for_call`）。
+    pub shared_grant: crate::capabilities::session::api::WorkspaceGrant,
 }
 
 impl Sandbox {

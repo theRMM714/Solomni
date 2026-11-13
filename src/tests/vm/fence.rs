@@ -227,6 +227,7 @@ pub(crate) fn stable_roots_cover_the_work_tree_and_module_tree() {
         modules_with_userdata: Default::default(),
         permissions: Default::default(),
         path_codec: None,
+        shared_grant: crate::capabilities::session::api::WorkspaceGrant::Session,
     };
     // 内部布局：shared = <会话树>/work，已隐含在会话树根下，不重复挂。
     let session_root = PathBuf::from("/session/w");
@@ -321,6 +322,7 @@ pub(crate) fn guest_access_roots_are_all_covered_by_stable_mounts() {
             modules_with_userdata: Default::default(),
             permissions: Default::default(),
             path_codec: None,
+            shared_grant: crate::capabilities::session::api::WorkspaceGrant::Session,
         }],
         codec: None,
     };

@@ -166,6 +166,7 @@ impl Conductor {
                 modules_with_userdata,
                 permissions: self.permission_for_agent(meta, &a.name)?,
                 path_codec: path_codec.clone(),
+                shared_grant: crate::capabilities::session::api::WorkspaceGrant::Session,
             });
         }
         Ok(crate::capabilities::workspace::api::Sandboxes {
