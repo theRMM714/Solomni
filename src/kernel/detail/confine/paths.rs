@@ -11,6 +11,8 @@ use std::process::Command;
 
 #[cfg(windows)]
 use super::windows;
+#[cfg(windows)]
+use crate::kernel::detail::view_drive::ViewDrive;
 
 /// 目的：命令里可能出现的外部程序：按 PATH 解析出真实路径（解析不出的跳过，不猜）。
 ///   它们的**安装目录**必须放行（只读+执行），否则受限进程连解释器都起不来——Windows 的目录 ACL 与 macOS 的 seatbelt 都靠它。
@@ -287,6 +289,28 @@ pub(crate) fn container_program_command(command: &str, cwd: &Path) -> String {
     };
     let text = rel.to_string_lossy().into_owned();
     let quoted = if text.contains(' ') {
+        format!("\"{}\"", text)
+    } else {
+        text
+    };
+    format!("{}{}", quoted, rest)
+}
+
+/// 目的：命令的程序名若在产品根内，改写成视图盘写法——容器用视图 cwd，程序路径也必须落在视图域内。
+/// 参数：command = 模块声明的启动命令；view = 本次生效的视图盘。
+/// 约束：只改首 token；根外路径、相对路径与裸名原样返回（语义与 container_program_command 一致）。
+#[cfg(windows)]
+pub(crate) fn view_program_command(command: &str, view: &ViewDrive) -> String {
+    let (head, rest) = split_program(command);
+    let bare = head.trim_matches('"');
+    if bare.is_empty() || !Path::new(bare).is_absolute() {
+        return command.to_string();
+    }
+    let Some(viewed) = view.view_of(Path::new(bare)) else {
+        return command.to_string();
+    };
+    let text = viewed.to_string_lossy().into_owned();
+    let quoted = if head.starts_with('"') || text.contains(' ') {
         format!("\"{}\"", text)
     } else {
         text

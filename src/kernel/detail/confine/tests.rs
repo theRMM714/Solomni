@@ -158,6 +158,33 @@ fn container_program_command_rewrites_only_path_shaped_programs() {
     }
 }
 
+/// 视图盘生效时程序名在产品根内也要译成盘符写法：容器 cwd 是视图路径，程序若仍是宿主的绝对路径，
+/// 容器里既不在 cwd 内、又会被 AppContainer 按绝对路径拒掉。
+#[cfg(windows)]
+#[test]
+fn view_program_command_translates_programs_inside_the_root() {
+    use crate::kernel::detail::view_drive::ViewDrive;
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let view = ViewDrive::for_test("Z:", &root);
+    let prog = root.join(".tools").join("python").join("python.exe");
+    assert_eq!(
+        view_program_command(&format!("{} -V", prog.display()), &view),
+        r"Z:\.tools\python\python.exe -V"
+    );
+    // 带空格的程序名保留引号。
+    let spaced = root.join("Program Files").join("x.exe");
+    assert_eq!(
+        view_program_command(&format!("\"{}\" /c", spaced.display()), &view),
+        r#""Z:\Program Files\x.exe" /c"#
+    );
+    // 根外、裸名、相对路径原样。
+    let outside = PathBuf::from(r"C:\Windows\System32\cmd.exe");
+    let cmd = format!("{} /C echo", outside.display());
+    assert_eq!(view_program_command(&cmd, &view), cmd);
+    assert_eq!(view_program_command("pwsh -NoLogo", &view), "pwsh -NoLogo");
+    assert_eq!(view_program_command("./x.exe", &view), "./x.exe");
+}
+
 /// 守门进程的入参是**扁平** JSON：FenceSpec 的字段同层再加一个 prepared；
 /// 缺字段一律报错（不默认成"有授权"——那会把容器送进一个读不到东西的环境）。
 #[test]

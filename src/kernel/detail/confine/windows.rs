@@ -316,8 +316,8 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
             }
         }
     }
-    // **祖先链不用授穿过**：令牌自带 SeChangeNotifyPrivilege；给祖先授穿过要改写巨型目录 DACL（真机 ~90 s/条），
-    // shell 例外只补 RIGHTS_STAT（见 grant_targets）；base 在下面的数据边界循环里还要用，循环后再释放。
+    // **祖先链不用授穿过**：令牌自带 SeChangeNotifyPrivilege；给祖先授穿过要改写巨型目录 DACL（真机 ~90 s/条）。
+    // shell 例外只补 RIGHTS_STAT；视图盘生效时这条链止于产品根（见 grant_targets 的 root 参数）；base 在数据边界循环里还要用。
     let sid = match container_sid(&container) {
         Ok(sid) => sid,
         Err(e) => {
@@ -338,7 +338,13 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
             e
         );
     }
-    let todo = grant_targets(spec);
+    // 视图盘只对 shell 这类 cwd == 私有沙箱的调用生效：祖先链只补到产品根（含）一级，根外一级都不写（那 193 秒）。
+    // 模块工具的 cwd 是模块根，不走视图盘；它本来就不算深叶（deep 只对 cwd == private 成立），只补一条直接父目录 STAT。
+    let shell_view = crate::kernel::detail::view_drive::active_shell_view(spec).is_some();
+    let plan_root = shell_view.then_some(root.as_path());
+    // shell 的 cwd == private：读写叶子已经覆盖 cwd，视图生效时不再重复加一条只读 cwd 叶子。
+    let cwd_leaf = !shell_view;
+    let todo = grant_targets(spec, plan_root, cwd_leaf);
     // 本轮写下去的机器级授权条数（祖先链 + 可信基座；只用于在"已写权限"行后补一句去向说明）。
     let mut machine_written = 0usize;
     for target in todo {
@@ -494,6 +500,11 @@ pub fn run_fenced(
         }
         eprintln!("[围栏] 外层未授权本机写入：容器围栏不可用，按如实降级继续执行");
         return run_unfenced(spec, command);
+    }
+    // 守门进程：挂现成视图盘（读记录 + 校验映射；不分配、不登记 pid），容器 cwd 才会写成盘符路径。
+    // 已在本进程生效时是幂等的：只是重设同一个 active 视图。
+    if let Some(h) = home {
+        let _ = crate::kernel::detail::view_drive::attach_view_drive(h);
     }
     let name = container_name(spec);
     // 容器身份先立起来（profile 是容器能读到系统目录的前提）。

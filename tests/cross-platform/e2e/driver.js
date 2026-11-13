@@ -113,6 +113,24 @@ const dir = (name) => path.join(ROOT, 'session', name);
 const samePath = (a, b) =>
   path.resolve(String(a || '')).toLowerCase().replace(/\\/g, '/') ===
   path.resolve(String(b || '')).toLowerCase().replace(/\\/g, '/');
+/** 回执里 shell 自己打的落脚点那一行（视图写法与真实路径都可能是它）。 */
+function pwdLine(text) {
+  const m = String(text || '').match(/^PWD=(.+?)[ \t]*$/m);
+  return m ? m[1] : '';
+}
+/** 判这行 PWD 与真实私有沙箱同落点：允许宿主真实路径，也允许「任意盘符字母 + 视图写法」。
+ *  视图盘盘符按实例分配（并发时不确定），所以只判 `session/<工作>/<agent>` 之后的后缀，不硬编码盘符。 */
+function sameSandboxCwd(shown, hostPrivate) {
+  const raw = String(shown || '').trim();
+  if (!raw) return false;
+  if (samePath(raw, hostPrivate)) return true;
+  const view = raw.replace(/\\/g, '/').toLowerCase();
+  if (!/^[a-z]:\//.test(view)) return false;
+  const host = path.resolve(String(hostPrivate)).replace(/\\/g, '/').toLowerCase();
+  const cut = host.lastIndexOf('/session/');
+  const suffix = cut >= 0 ? host.slice(cut) : '/' + path.basename(host);
+  return view.endsWith(suffix);
+}
 /** 假供应商那一侧看到的最后一条请求（它记下了消息形状）：原生通道的协议形状只能在这里验。 */
 async function mockSeen() {
   try {
@@ -302,15 +320,17 @@ async function lines(sid) {
       '非零退出如实回执退出码',
       JSON.stringify(shells[1] || {}).slice(0, 300)
     );
+    const shellCwd = pwdLine((shells[0] || {}).output);
+    const shellPrivate = path.join(dir(nameShell), '执行手');
     assert(
-      String((shells[0] || {}).output || '').includes('PWD='),
-      'shell 回执要能看见它落脚的 cwd',
-      JSON.stringify(shells[0] || {}).slice(0, 800)
+      sameSandboxCwd(shellCwd, shellPrivate),
+      'shell 回执的 cwd 是私有沙箱（宿主真实路径或视图写法，盘符按实例分配）',
+      shellCwd + ' vs ' + shellPrivate + ' / ' + JSON.stringify(shells[0] || {}).slice(0, 800)
     );
     const shellFile = path.join(dir(nameShell), '执行手', 'shell-ok.txt');
     assert(
       fs.existsSync(shellFile) && fs.readFileSync(shellFile, 'utf8').includes('SHELL-OK-中文'),
-      'shell cwd 是私有沙箱且真的写进去了',
+      'shell 在 cwd 里写的文件，宿主能在真实私有沙箱读到（视图写法翻译正确）',
       shellFile + ' / ' + JSON.stringify(shells[0] || {}).slice(0, 1200)
     );
   }

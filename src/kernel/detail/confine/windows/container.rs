@@ -246,9 +246,20 @@ pub(crate) fn internet_client_sid(enabled: bool) -> Result<Option<Vec<u8>>, Stri
 pub(crate) fn run_in_container(sid: PSID, spec: &FenceSpec, command: &str) -> Result<i32, String> {
     // 环境块显式给（见 fence_env）：子进程拿到的就是白名单本身，不靠"守门进程恰好继承了什么"。
     let env = super::super::fence_env(spec, command);
+    // 视图盘只给 cwd == 私有沙箱的调用（shell）用：映射根一级即可，根外祖先链不必再授 ACE，程序名也译视图写法。
+    // 模块工具 cwd 是模块根，沿用宿主 cwd 与宿主程序名——译成视图写法会把相对程序名算成跨卷绝对路径。
+    let view = crate::kernel::detail::view_drive::active_shell_view(spec);
+    let cwd = view
+        .as_ref()
+        .and_then(|v| v.view_of(&spec.cwd))
+        .unwrap_or_else(|| spec.cwd.clone());
     // 程序名改写成相对 cwd 的路径：AppContainer 里绝对路径的程序会被拒（真机：同一文件用绝对路径报
     // Access denied，用 `..\` 相对路径正常）。裸名不碰——交给 cmd 按容器里的 PATH 解析。
-    let command = &super::super::container_program_command(command, &spec.cwd);
+    let command = match &view {
+        Some(v) => super::super::view_program_command(command, v),
+        None => command.to_string(),
+    };
+    let command = &super::super::container_program_command(&command, &cwd);
     let mut block: Vec<u16> = Vec::new();
     for (k, v) in env {
         block.extend(k.encode_wide());
@@ -320,7 +331,7 @@ pub(crate) fn run_in_container(sid: PSID, spec: &FenceSpec, command: &str) -> Re
         .chain(std::iter::once(0))
         .collect();
     let app = wide(&shell_exe);
-    let cwd = wide(&spec.cwd);
+    let cwd = wide(&cwd);
     let mut pi: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
     let created = unsafe {
         CreateProcessW(

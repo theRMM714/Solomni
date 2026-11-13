@@ -13,6 +13,7 @@ pub mod procs;
 pub mod session;
 pub mod unpack;
 pub mod user_path;
+pub mod view_drive;
 
 pub use file_log::FileLog;
 pub use host_probe::HostProbeAdapter;

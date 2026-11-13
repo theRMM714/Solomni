@@ -72,7 +72,7 @@
   - external：在 sandbox 之上加 shared-read / module-read / host-read / network；external 档 ask、all_reach 档 allow；共享区 / 模块目录仍只读，module-write 不声明，模块 secrets 不注入。
   - sandbox 与 external 都要求围栏真强制（`allow_degraded=false`），装不上就拒绝；命令被围栏拒绝时回执提示 external，**不自动升级**。
   - Windows 上容器身份 = `会话租约 + agent + 受保护根集合`（reach 指纹，不含工具链、不含 net）：同一会话里不同 scope 的调用根集合不同 → 不同 SID（按次收窄因此真实成立）；同一 reach 的后续调用复用 SID 与 ACL。授权**按会话持有**，会话改配 / 删除时撤销；一次性调用（构建 / 独立模块工具）各自唯一租约、跑完即撤。
-  - **工具链与运行包不是 reach**：`.tools/` 与 `runtimes/<包>` 是可信执行基座（只读、无秘密、本来就要执行），一次性授给 `ALL APPLICATION PACKAGES`、按机器级归属记台账（`scope=machine`、无归属，跨会话复用、启动对账不回收），不参与按 reach 的容器身份与按次授权；共享区 / 模块目录 / 用户只读根才按 reach 收窄。祖先链的只读 STAT 同属机器级授权（授给所有应用程序包、跨会话复用、启动对账不回收），也不属于 reach。**机器级一次性预授**（`--setup=fence`，或首次授权成功后自动一次）把产品根 STAT + `(OI)(CI)`、祖先链 STAT、`.tools/` 与 `runtimes/` 递归只读一次写掉；之后每个新会话只剩按 reach 的容器 SID 授权，不再重复写这批 ACE。
+  - **工具链与运行包不是 reach**：`.tools/` 与 `runtimes/<包>` 是可信执行基座（只读、无秘密、本来就要执行），一次性授给 `ALL APPLICATION PACKAGES`、按机器级归属记台账（`scope=machine`、无归属，跨会话复用、启动对账不回收），不参与按 reach 的容器身份与按次授权；共享区 / 模块目录 / 用户只读根才按 reach 收窄。产品根上的一条 `(OI)(CI)` 只读属性同属机器级授权（授给所有应用程序包、跨会话复用、启动对账不回收），也不属于 reach：容器 cwd 走视图盘写法（产品根映射成实例独占的盘符），产品根之外的祖先不授。**机器级一次性预授**（`--setup=fence`，或首次授权成功后自动一次）把产品根 `(OI)(CI)` 只读属性、`.tools/` 与 `runtimes/` 递归只读一次写掉；之后每个新会话只剩按 reach 的容器 SID 授权，不再重复写这批 ACE。
 
 ## 四、围栏派生
 
