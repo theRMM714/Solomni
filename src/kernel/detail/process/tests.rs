@@ -999,7 +999,8 @@ fn real_windows_shell_writes_relative_files_in_its_private_cwd() {
     spec.private = dir.clone();
     let out = tools.run_shell(&crate::kernel::ports::ShellRun {
         fence: &spec,
-        script: "Set-Content -Path shell-ok.txt -Value 'CWD-OK' -Encoding utf8; Write-Output (Get-Location)",
+        // 先如实交出三处「当前在哪」：定位（provider）、脚本根、进程 cwd——失败时据此判定是谁没到位。
+        script: "Write-Output (\"loc=\" + (Get-Location).Path + \" | root=\" + $PSScriptRoot + \" | cur=\" + [Environment]::CurrentDirectory); Set-Content -Path shell-ok.txt -Value 'CWD-OK' -Encoding utf8; Write-Output (Get-Location)",
         timeout: Duration::from_secs(30),
         cancel: None,
         path: None,

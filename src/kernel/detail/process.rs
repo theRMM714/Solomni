@@ -509,7 +509,20 @@ impl ProcTools {
 /// 目的：Windows PowerShell 5.1 在容器里自动加载内核模块会带非终止错误；先按 Continue 载入常用模块，
 ///   再开 Stop（否则 Stop 会把加载错误变终止，Set-Location 之类就成了「命令不存在」）。
 #[cfg(windows)]
-const PS_PRELUDE: &str = "try { Import-Module Microsoft.PowerShell.Management, Microsoft.PowerShell.Utility -ErrorAction SilentlyContinue } catch { }\n$ErrorActionPreference = 'Stop'\ntry { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }\n$OutputEncoding = [System.Text.Encoding]::UTF8\ntry { Set-Location -LiteralPath $PSScriptRoot -ErrorAction Stop } catch { }\n";
+const PS_PRELUDE: &str = concat!(
+    "try { Import-Module Microsoft.PowerShell.Management, Microsoft.PowerShell.Utility -ErrorAction SilentlyContinue } catch { }\n",
+    "$ErrorActionPreference = 'Stop'\n",
+    "try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }\n",
+    "$OutputEncoding = [System.Text.Encoding]::UTF8\n",
+    // 当前定位必须落在脚本所在目录（即工具进程的工作目录）：切不过去就如实报到 stderr——否则相对路径
+    // 会静默落到继承来的别处，看起来只是「写不进去」。
+    "try { Set-Location -LiteralPath $PSScriptRoot -ErrorAction Stop }\n",
+    "catch {\n",
+    "    if ((Get-Location).Path -ne $PSScriptRoot) {\n",
+    "        [Console]::Error.WriteLine((\"[shell] 当前定位没能切到工作目录（{0}）：{1}\" -f $PSScriptRoot, $_.Exception.Message))\n",
+    "    }\n",
+    "}\n",
+);
 #[cfg(windows)]
 const PS_TAIL: &str = "\nif ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE }\n";
 
