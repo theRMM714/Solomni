@@ -124,7 +124,7 @@
 - `sandbox.defaults` 是会话权限的全局默认；会话级权限层写在 `meta.yaml` 的 `sandbox.ceiling` / `sandbox.narrowing`；`sandbox.policy.deny` 是硬底线，会话只能追加黑名单，不能清空；profile 与工具声明只决定「能到哪、要不要问」，不能突破 policy 的 network / host_read_roots / deny / 强制等级上限。
 - 权限语义只有一份权威：`docs/permission/README.md`。
 - 网络是全局开关（`sandbox.policy.network`）：会话工具、直接模块工具、常驻服务、模块构建共用；provisioning 首启与核心模型出站不受它影响。
-- 启动门：默认 CLI 与 `-webUI` 都先过环境检查；`sandbox.policy` 的要求没满足时，只能本次无围栏（不落盘）/ 重新设置 / 退出（`settings.yaml` 的 `on_unavailable`），不会起 CLI 或 Web；没有可回答的前端、或 `refuse` 且不重设 = 退出。
+- 启动门：默认 CLI 与 `--web` 都先过环境检查；`sandbox.policy` 的要求没满足时，只能本次无围栏（不落盘）/ 重新设置 / 退出（`settings.yaml` 的 `on_unavailable`），不会起 CLI 或 Web；没有可回答的前端、或 `refuse` 且不重设 = 退出。
 - 首次启动（`.home/` 下还没有 `settings.yaml`）在 Windows 上先问一次是否授权 `windows.write_acl`：选是就写盘并以退出码 75 整体重启；选否不写任何设置，直接进入启动门；这样默认不写本机权限项，又不会让首次启动停在"不可用"状态。
 - 重设只修能修的那一项：Windows 未授权 → 写 `write_acl: true`；本机能力缺失 → 明确询问是否把 `enforce` 四项降为 `best_effort`（持久接受无强制），默认否。
 - Windows 配置一致性：`require` 文件系统 / 网络围栏 + `windows.write_acl: false` 是非法组合——保存时直接拒绝；已存在的 `settings.yaml` 加载时报 `settings.yaml 配置非法`；首启没有文件不拦（交给引导）；要无围栏请把对应 `enforce` 降为 `best_effort`。

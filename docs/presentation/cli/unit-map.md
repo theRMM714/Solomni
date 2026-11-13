@@ -1,7 +1,7 @@
 # 单元地图 · presentation/cli
 
 > 定位：presentation/cli（终端呈现）逐文件职责的唯一权威；由 T0 结构审查与磁盘双向比对。
-> 效力：契约｜核对：2026-11-06｜依据：`src/presentation/cli.rs`
+> 效力：契约｜核对：2026-11-13｜依据：`src/presentation/cli.rs`
 
 > 本文是 **presentation/cli** 逐文件职责的唯一权威；由 `node run-tests.js` 的 T0 结构审查与磁盘**双向比对**
 > （表里每个路径必须存在；`src/` 下每个 `.rs` 都必须出现在某一张单元地图里）。
@@ -11,7 +11,9 @@
 | --- | --- |
 | `src/presentation/cli.rs` | 终端转录中心入口：启动页 → 命令分发 → 会话流；不做业务判断、不持状态 |
 | `src/presentation/cli/commands.rs` | 一次性命令：`module` / `diagnose` / `secret` / `resident` / `work` / `rewind` |
-| `src/presentation/cli/view.rs` | 渲染原语：启动页事实行、状态行、花名册、菜单；交互模式富渲染（角色行、工具行、验收/交付、上下文用量），非 TTY 保持原样文本 |
+| `src/presentation/cli/view.rs` | 渲染原语：启动页事实行、状态行、花名册、菜单（取自命令目录）；交互模式富渲染（角色行、工具行、验收/交付、上下文用量），非 TTY 保持原样文本 |
+| `src/presentation/cli/catalog.rs` | 命令目录：命令名/参数/别名/说明的单一口径，生成手册、菜单、Tab 补全与未知命令建议 |
+| `src/presentation/cli/argv.rs` | 全局旗语的唯一解析器：`--x v` 与 `--x=v` 等价、内部协议旗语原样透传、未知旗语给编辑距离建议 |
 | `src/presentation/cli/gate.rs` | 交互回合：跟读事件流、裁决卡问答、等安静与动作回显 |
 | `src/presentation/cli/flows.rs` | 会话流：单 agent / 代理 / 协作 / 供应商 / 模型 / 核心设置 |
 | `src/presentation/cli/term.rs` | 终端 I/O：TTY 判定、raw mode 开关、启动页字标、固定输入框的绘制与擦除、事件到按键的翻译、非交互回退 |

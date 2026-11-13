@@ -49,7 +49,7 @@ Solomni is an **agent runtime environment (AgentOS) that runs on your own machin
 <!-- END:platform-status-en -->
 - **Registry**: four YAML files for providers / models / agents / settings, all under `.home/`, managed from the UI; channel keys live only in the local registry and in the core's outbound calls
   (boundaries in [REGISTRY_SPEC.md](REGISTRY_SPEC.md)).
-- **Two interfaces**: the terminal transcript center (default) and the local web UI (`-webUI`, binds `127.0.0.1` only, port 3081 by default). The web session page has a status bar for context usage and shared-area commits.
+- **Two interfaces**: the terminal transcript center (default) and the local web UI (`--web`, binds `127.0.0.1` only, port 3081 by default). The web session page has a status bar for context usage and shared-area commits.
 - **One decision channel**: core gates, tool-level confirmation and questions raised by the tool layer use the same card (message + options); it blocks, the option id is the contract,
   and cards and answers are persisted with the session. Behaviour in [PRODUCT.md](PRODUCT.md) and [docs/session/session-model.md](docs/session/session-model.md).
 
@@ -64,7 +64,7 @@ the **runtime environment** (just running the product) and the **dev environment
 
 ```bash
 node start.js            # any platform; on Windows also start.bat, on macOS / Linux also ./start.sh
-node start.js -webUI     # go straight to the local web UI (127.0.0.1:3081)
+node start.js --web     # go straight to the local web UI (127.0.0.1:3081)
 node start.js --provision --ensure=toolchain --yes # after the build: add runtime prerequisites (Python / Node / C-C++); the kind group alias fills only what is missing and touches no network when nothing is
 node start.js --provision                # optional: read-only vm tier status (JSON: QEMU / guest image / agent and runtimes)
 node start.js --provision --ensure --yes # optional (Linux / Windows): install QEMU and a Debian guest into the project's .vm/ (--yes confirms the download)
@@ -76,7 +76,7 @@ node start.js --provision --ensure --yes # optional (Linux / Windows): install Q
 
 - **First start**: without `.home/settings.yaml`, Windows first asks whether to authorize the container fence
   (directory ACLs); choosing no writes nothing and enters the startup gate (unfenced this run / reconfigure / exit).
-  `-webUI` does not bypass that gate. Runtime prerequisites (Python / Node / C-C++) are not installed by the
+  `--web` does not bypass that gate. Runtime prerequisites (Python / Node / C-C++) are not installed by the
   launcher: the product fills them in via `node start.js --provision --ensure=toolchain --yes` (the group alias fills
   only what is missing), and `start.js` just points to it.
 - Toolchain and caches stay **inside the project**: a Rust that can **actually build** is **borrowed read-only**
@@ -139,8 +139,8 @@ node dev.js test|fmt|clippy   # one-layer dev commands; cargo only runs through 
   CI job reports drift without writing files or opening PRs. User overrides go through `.home/settings.yaml` and environment
   variables, not the ledger.
 - **No usable model means no session**: register a provider and a model and set the core default first; a missing channel is refused with a precise reason, never replaced by a fake model.
-- Common flags: `--root <dir>` (product root), `--web-port <port>`, `--release`.
-- Commands at the prompt: the menu printed at startup is the full list (`print_menu` in `src/presentation/cli.rs`); the rewind command is `rewind`, while providers / models / the core default model are `provider` / `model` / `core`.
+- Common flags: `--root <dir>` (product root), `--web` (go straight to the web UI), `--port <port>`, `--plain` (no color, plain text), `--release`; `--help` shows the flags and the command manual (`--help --all` expands hidden entries).
+- Commands at the prompt: `help` (or `/help`) shows the full list and the flag rules (`catalog.rs` in `src/presentation/cli`, also printed at startup in non-interactive mode); the rewind command is `rewind`, while providers / models / the core default model are `provider` / `model` / `core`.
 
 ### Add a provider and a model
 
@@ -179,7 +179,7 @@ on Linux and Windows `solomni --provision --ensure --yes` runs one guest self-ch
 runs the flow on the built-in demo channel just to look successful.
 
 ```bash
-node start.js -webUI
+node start.js --web
 node demo/run-demo.mjs         # composite: one agent holding three modules (python / node / C++)
 node demo/run-demo-collab.mjs  # collaboration: three agents with separate powers, end to end
 node demo/run-demo-mcp.mjs     # MCP: one agent holding only mcp-toolbox, starts the resident service and calls it

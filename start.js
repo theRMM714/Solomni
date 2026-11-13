@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * Solomni 启动器：环境就绪 -> 构建 -> 运行（默认 CLI；-webUI 进 Web）。业务逻辑不在这里。
+ * Solomni 启动器：环境就绪 -> 构建 -> 运行（默认 CLI；--web 进 Web）。业务逻辑不在这里。
  * 环境（工具链在哪、环境怎么拼、缺了怎么装）全部交给 env.js —— 本文件只做编排。
- * 跨平台：node start.js [-webUI] [--release] [--root <dir>] [--web-port <port>]；-test 转测试入口。
+ * 跨平台：node start.js [--web] [--port <port>] [--release] [--root <dir>]；-test 转测试入口。
  */
 "use strict";
 const { spawnSync } = require("child_process");
@@ -53,9 +53,9 @@ function run(cargoEnv) {
   // 只把构建档位参数留给启动器自己。
   const pass = process.argv.slice(2).filter((a) => a !== "--release");
   const argv = [BIN, "."].concat(pass);
-  log(process.argv.includes("-webUI")
+  log(process.argv.includes("--web")
     ? "starting Web UI (default 127.0.0.1:3081, open http://127.0.0.1:3081)"
-    : "starting CLI (type webui at the prompt for the Web UI, or start with -webUI)");
+    : "starting CLI (type web at the prompt for the Web UI, or start with --web)");
   const r = spawnSync(argv[0], argv.slice(1), { cwd: ROOT, stdio: "inherit", env: cargoEnv });
   if (r.error) die("run failed: " + r.error.message);
   return r.status === null ? 1 : r.status;

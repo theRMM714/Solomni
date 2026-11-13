@@ -24,12 +24,15 @@ const WORDMARK: [&str; 7] = [
     " ███   ███  █████  ███  █   █ █   █ █████",
 ];
 
-const HINT: &str = "Enter 发送 · Esc 清空 · Ctrl+U 清行 · ↑↓ 历史 · Ctrl+C 退出";
+const HINT: &str = "Enter 发送 · Tab 补全 · Esc 清空 · Ctrl+U 清行 · ↑↓ 历史 · Ctrl+C 退出";
 
 const FRAME_LINES: u16 = 5;
 
+type Completer = fn(&str) -> Vec<String>;
+
 thread_local! {
     static UI: RefCell<Option<Ui>> = const { RefCell::new(None) };
+    static COMPLETER: RefCell<Option<Completer>> = const { RefCell::new(None) };
 }
 
 struct Ui {
@@ -97,6 +100,11 @@ pub(super) fn bold(ink: Ink, text: &str) -> String {
 /// 目的：往转录区打一行（不留在固定帧里，随输出滚上去）。
 pub(super) fn line(text: &str) {
     println!("{}", text);
+}
+
+/// 目的：登记 Tab 补全的候选来源：命令表由 `cli.rs` 注入，终端层不认识任何命令。
+pub(super) fn set_completer(f: Completer) {
+    COMPLETER.with(|cell| *cell.borrow_mut() = Some(f));
 }
 
 /// 目的：是否交互终端：只有交互模式才用富渲染与活状态行，非 TTY 保持逐行原样。
@@ -211,6 +219,10 @@ fn tty_ask(paint: &Paint, cols: usize, label: &str, status: &str) -> Option<Stri
         };
         let step = match ev {
             Event::Key(key) if key.kind != KeyEventKind::Release => match translate(key) {
+                Some(Key::Tab) => {
+                    complete(&mut editor);
+                    Step::Edit
+                }
                 Some(key) => editor.key(key),
                 None => Step::Edit,
             },
@@ -245,6 +257,18 @@ fn tty_ask(paint: &Paint, cols: usize, label: &str, status: &str) -> Option<Stri
     answer
 }
 
+fn complete(editor: &mut Editor) {
+    let line = editor.line();
+    if line.contains(' ') {
+        return;
+    }
+    let cands = COMPLETER.with(|cell| match &*cell.borrow() {
+        Some(f) => f(&line),
+        None => Vec::new(),
+    });
+    editor.complete(&cands);
+}
+
 fn translate(key: KeyEvent) -> Option<Key> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     match key.code {
@@ -262,6 +286,7 @@ fn translate(key: KeyEvent) -> Option<Key> {
         KeyCode::Up => Some(Key::Up),
         KeyCode::Down => Some(Key::Down),
         KeyCode::Enter => Some(Key::Enter),
+        KeyCode::Tab => Some(Key::Tab),
         KeyCode::Esc => Some(Key::Escape),
         _ => None,
     }

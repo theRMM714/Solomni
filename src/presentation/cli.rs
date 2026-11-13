@@ -17,8 +17,10 @@ pub enum CliExit {
 }
 
 /// 目的：转录中心主循环：交互模式用固定输入框，非交互模式保持逐行输入（输出不变）。
-pub fn run(ops: Ops, web_default_port: u16) -> CliExit {
-    let interactive = term::init(false);
+/// 参数：`web_default_port` 是会话内 `web` 命令不带端口时的默认值；`plain` 为真则强制纯文本。
+pub fn run(ops: Ops, web_default_port: u16, plain: bool) -> CliExit {
+    let interactive = term::init(plain);
+    term::set_completer(catalog::complete);
     if interactive {
         term::banner(&startup_tagline(), &startup_facts(&ops));
     } else {
@@ -30,7 +32,7 @@ pub fn run(ops: Ops, web_default_port: u16) -> CliExit {
     if interactive {
         term::line(&term::ink(
             theme::Ink::Dim,
-            "输入 help 看全量命令与模块清单 · webui 转 Web 界面 · exit 退出",
+            "输入 help 看命令手册与旗语规范 · web 转 Web 界面 · exit 退出",
         ));
     }
     term::status(&startup_status(&ops));
@@ -67,22 +69,49 @@ pub fn run(ops: Ops, web_default_port: u16) -> CliExit {
             // 只读诊断一条虚拟机档会话的 guest（进程 / CPU / 内存 / 负载 / 挂载）。
             "diagnose" => diagnose_cmd(&ops, &arg),
             "rescan" => print_roster(&ops),
-            "help" | "/help" | "?" => print_menu(&ops),
-            // 转入 Web 转录中心：接受 webui / -webUI（启动参数也这么写），可选端口。
-            "webui" | "-webui" | "web" | "-web" => {
+            "help" | "/help" | "?" => help_cmd(&arg),
+            "version" => term::line(&catalog::version_text()),
+            // 转入 Web 转录中心（唯一入口：启动参数用 --web，会话内用 web）。
+            "web" => {
                 let port = arg.parse::<u16>().unwrap_or(web_default_port);
                 return CliExit::Web(port);
             }
             "exit" => break,
             "" => continue,
-            _ => term::line(&format!(
-                "[提示] 未知命令 {}（Web 界面用 webui；退出用 exit）",
-                cmd
-            )),
+            _ => match catalog::suggest(&cmd) {
+                Some(near) => term::line(&format!(
+                    "[提示] 未知命令 {}；你是不是想用 {}？（help 看全部命令）",
+                    cmd, near
+                )),
+                None => term::line(&format!(
+                    "[提示] 未知命令 {}（help 看全部命令；转 Web 用 web；退出用 exit）",
+                    cmd
+                )),
+            },
         }
     }
     term::line("再见。");
     CliExit::Exit
+}
+
+/// 目的：打印手册：无参数给全量，`--all` 连内部旗语一起列，带命令名只讲那一条。
+fn help_cmd(arg: &str) {
+    let arg = arg.trim();
+    if arg.is_empty() {
+        term::line(&catalog::help_text(false));
+    } else if arg == "--all" || arg == "-a" {
+        term::line(&catalog::help_text(true));
+    } else {
+        match catalog::detail(arg) {
+            Some(text) => term::line(&text),
+            None => match catalog::suggest(arg) {
+                Some(near) => {
+                    term::line(&format!("[提示] 没有命令 {}；你是不是想查 {}？", arg, near))
+                }
+                None => term::line(&format!("[提示] 没有命令 {}；help 看全部命令", arg)),
+            },
+        }
+    }
 }
 
 /// 目的：把用户写的模块工具名规整成动作 id——`<模块id>.<工具名>` 与完整的 `module.<模块id>.<工具名>` 都收。
@@ -95,6 +124,8 @@ pub(crate) fn module_action_id(arg: &str) -> String {
     }
 }
 
+pub(crate) mod argv;
+pub(crate) mod catalog;
 mod commands;
 mod flows;
 mod gate;

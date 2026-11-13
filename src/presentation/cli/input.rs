@@ -19,6 +19,7 @@ pub(crate) enum Key {
     Up,
     Down,
     Enter,
+    Tab,
     Escape,
     KillLine,
     Interrupt,
@@ -182,6 +183,7 @@ impl Editor {
                 Step::Edit
             }
             Key::Enter => Step::Submit,
+            Key::Tab => Step::Edit,
             Key::Escape => Step::Cancel,
             Key::KillLine => {
                 self.clear();
@@ -189,6 +191,34 @@ impl Editor {
             }
             Key::Interrupt => Step::Quit,
         }
+    }
+
+    /// 目的：按补全候选改这一行：唯一候选补全并留一个空格，多候选先补公共前缀。
+    /// 参数：`cands` 是已按输入筛过的候选（命令名与别名）。
+    /// 返回：候选个数（调用方据此决定要不要进一步提示）。
+    pub(crate) fn complete(&mut self, cands: &[String]) -> usize {
+        if cands.is_empty() {
+            return 0;
+        }
+        if cands.len() == 1 {
+            let mut line = cands[0].clone();
+            line.push(' ');
+            self.set(&line);
+            return 1;
+        }
+        let mut common = cands[0].clone();
+        for next in &cands[1..] {
+            let keep = common
+                .chars()
+                .zip(next.chars())
+                .take_while(|(a, b)| a == b)
+                .count();
+            common = common.chars().take(keep).collect();
+        }
+        if common.chars().count() > self.text.len() {
+            self.set(&common);
+        }
+        cands.len()
     }
 
     fn set(&mut self, line: &str) {

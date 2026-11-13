@@ -247,3 +247,79 @@ fn width_wraps_without_breaking_wide_chars() {
     assert_eq!(cli::wrap("a\n\nb", 4), vec!["a", "", "b"]);
     assert_eq!(cli::wrap("", 10), vec![""]);
 }
+
+/// 旗语解析：两种写法等价、布尔不带值、`--` 之后全当位置参数、写错给最近建议。
+#[test]
+fn argv_accepts_both_spellings_and_reports_typos() {
+    let parse = |args: &[&str]| {
+        let argv: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        cli::argv::parse(&argv)
+    };
+    let flags = parse(&["--root", "work", "--port=3082", "--web"]).expect("合法旗语");
+    assert_eq!(flags.root.as_deref(), Some("work"));
+    assert_eq!(flags.port, Some(3082));
+    assert!(flags.web && !flags.plain);
+
+    let flags = parse(&["--plain", "--root=elsewhere"]).expect("=值写法");
+    assert!(flags.plain);
+    assert_eq!(flags.root.as_deref(), Some("elsewhere"));
+
+    let flags = parse(&["--help", "--all"]).expect("--all 修饰 --help");
+    assert!(flags.help && flags.all, "--help --all 连内部旗语一起列");
+
+    let err = parse(&["--por", "1"]).expect_err("拼错要报错");
+    assert!(err.contains("你是不是想用 --port"), "给最近建议：{err}");
+    let err = parse(&["--web=1"]).expect_err("布尔旗不带值");
+    assert!(err.contains("不带值"), "{err}");
+    let err = parse(&["--root"]).expect_err("缺值要报错");
+    assert!(err.contains("需要一个值"), "{err}");
+
+    let flags = parse(&["--", "--web"]).expect("-- 之后都是位置参数");
+    assert!(!flags.web);
+    assert_eq!(flags.positionals, vec!["--web"]);
+}
+
+/// 命令表是唯一来源：手册、单条说明、补全与未知命令建议都由它生成。
+#[test]
+fn catalog_drives_help_completion_and_suggestions() {
+    let help = cli::catalog::help_text(false);
+    assert!(
+        help.contains("全局旗语") && help.contains("语法规则"),
+        "{help}"
+    );
+    assert!(help.contains("single"), "命令表在手册里");
+    assert!(!help.contains("--probe-tools"), "内部旗语默认不列");
+    assert!(cli::catalog::help_text(true).contains("--probe-tools"));
+
+    let single = cli::catalog::detail("single").expect("单条说明");
+    assert!(single.contains("<agent名…>"), "{single}");
+    assert!(cli::catalog::detail("/help").is_some(), "别名也认");
+    assert!(cli::catalog::detail("nope").is_none());
+
+    assert_eq!(cli::catalog::complete("he"), vec!["help"]);
+    assert!(cli::catalog::complete("").contains(&"web".to_string()));
+    assert_eq!(cli::catalog::suggest("singel"), Some("single"));
+    assert_eq!(cli::catalog::suggest("zzz"), None);
+}
+
+/// Tab 补全：唯一候选补全并留空格，多候选先补公共前缀，无候选不动输入。
+#[test]
+fn editor_tab_completion_takes_unique_and_common_prefix() {
+    let mut ed = cli::Editor::new();
+    for c in "he".chars() {
+        ed.key(cli::Key::Char(c));
+    }
+    assert_eq!(ed.complete(&["help".to_string()]), 1);
+    assert_eq!(ed.line(), "help ");
+
+    let mut ed = cli::Editor::new();
+    for c in "si".chars() {
+        ed.key(cli::Key::Char(c));
+    }
+    ed.complete(&["single".to_string(), "sincere".to_string()]);
+    assert_eq!(ed.line(), "sin");
+
+    let before = ed.line();
+    ed.complete(&[]);
+    assert_eq!(ed.line(), before, "没有候选就不动输入");
+}

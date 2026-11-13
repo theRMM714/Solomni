@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tiny_http::{Header, Response, Server};
 
-/// 目的：默认监听端口（CLI 的 webui 命令与启动参数共用这一个来源）。
+/// 目的：默认监听端口（CLI 的 web 命令与启动参数共用这一个来源）。
 pub const DEFAULT_PORT: u16 = 3081;
 
 /// 请求体上限：上传走 base64，按单文件上限的编码体积留一点余量。

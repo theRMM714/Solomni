@@ -1,7 +1,7 @@
 # cli（终端转录中心）
 
 > 定位：argv → 入站能力面 → 渲染事件流。
-> 效力：规范｜核对：2026-11-06｜依据：`src/presentation/cli.rs`
+> 效力：规范｜核对：2026-11-13｜依据：`src/presentation/cli.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [ARCHITECTURE.md](../../../ARCHITECTURE.md) §一，业务边界判据见 §九，测试规范见 [TESTING.md](../../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -16,7 +16,8 @@
 ## 入站契约与状态归属
 
 - 入站面：只依赖**入站能力面**（各能力的 `::api`）；`conductor` 的 `Ops` 是它与核心之间的唯一通道。
-- 入口：`src/main.rs` 调 `presentation::cli::run(ops, presentation::web::DEFAULT_PORT)`；`webui` 子命令把控制权交给 Web 渠道（同一份 `Ops`）。
+- 入口：`src/main.rs` 调 `presentation::cli::run(ops, presentation::web::DEFAULT_PORT, plain)`；`web [端口]` 子命令把控制权交给 Web 渠道（同一份 `Ops`）。
+- 旗语：`--root <dir>`、`--web`、`--port <n>`、`--plain`、`-h/--help`、`-v/--version` 由 `argv.rs` 统一解析（`--x v` 与 `--x=v` 等价；未知旗语给编辑距离建议）；命令手册、Tab 补全与未知命令建议都由 `catalog.rs` 的同一张命令表生成。
 - 状态归属：不持状态、不落盘；会话与业务状态都在核心，本层只读 `Ops` 回报。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
