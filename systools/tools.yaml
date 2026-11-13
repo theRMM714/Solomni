@@ -306,6 +306,12 @@ tools:
       workspace:
         type: string
         desc: 仅人经呈现层可用：共享区主副本绑定的外部工作区根（已存在的绝对目录）；省略 = 会话内 work/。子会话继承父会话，不接受自选
+      workspace_grant:
+        type: string
+        desc: |-
+          仅人经呈现层可用（只与 workspace 同用）：外部工作区的围栏授权粒度。
+          none = 容器里的 shell / 模块工具读不到共享区；session = 本次会话授一次、结束撤（缺省）；
+          workspace = 该工作区一次性机器级只读授权，之后所有会话零写（ACE 常驻，撤销走 --fence-revoke）。
       permission:
         type: string
         desc: 创建时的权限档位：view / workspace / external / all_reach（仅人经呈现层；代理子会话继承父 ceiling）

@@ -735,6 +735,7 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
                 parent: Some("w-notify".to_string()),
                 permission: None,
                 workspace: None,
+                workspace_grant: None,
             };
             Ok(core.create_session(&spec)?.0.session)
         })
@@ -1063,6 +1064,7 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
         tier: Tier::Host,
         guest: None,
         workspace: None,
+        workspace_grant: None,
     };
     let (opened, _head) = ops.sessions.create_work(spec.clone()).expect("建代理会话");
     assert!(opened.agents.is_empty(), "代理会话没有名单");
@@ -1158,6 +1160,7 @@ pub(crate) fn proxy_session_exposes_context_usage() {
         tier: Tier::Host,
         guest: None,
         workspace: None,
+        workspace_grant: None,
     };
     let sid = ops.sessions.create_work(spec).expect("建代理会话").0.sid;
     ops.sessions
@@ -1300,6 +1303,7 @@ pub(crate) fn the_proxy_created_child_publishes_its_opening_facts() {
         parent: Some(proxy),
         permission: None,
         workspace: None,
+        workspace_grant: None,
     };
     let created = bridge.create_session(&spec).expect("建协作子工作");
     // 开场事实与"这句是核心代理转达的"来源记录都应当**已经在事件台上**，而不是只在盘上
@@ -1366,6 +1370,7 @@ pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
             tier: Tier::Host,
             guest: None,
             workspace: None,
+            workspace_grant: None,
         })
         .expect("建协作工作（代拟）");
     let child = work.sid.clone();
@@ -1441,6 +1446,7 @@ pub(crate) fn ai_created_child_inherits_the_proxy_environment() {
                     parent: Some(proxy),
                     permission: None,
                     workspace: None,
+                    workspace_grant: None,
                 };
                 Ok(core.create_session(&spec)?.0.session)
             }

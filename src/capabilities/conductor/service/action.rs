@@ -140,6 +140,13 @@ impl Conductor {
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(std::path::PathBuf::from),
+            workspace_grant: spec
+                .workspace_grant
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(crate::capabilities::session::api::WorkspaceGrant::parse)
+                .transpose()?,
         };
         // 有父 = 子工作（`create_work_inner` 直接给 parent）；没有父 = 顶层会话，走同一个入口包装。
         let prepared = match parent.as_deref() {

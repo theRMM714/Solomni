@@ -518,6 +518,7 @@ pub(crate) fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
             tier: crate::kernel::api::Tier::Host,
             guest: None,
             workspace: None,
+            workspace_grant: None,
         })
         .expect("建会话")
         .sid;

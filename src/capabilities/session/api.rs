@@ -14,7 +14,7 @@ pub use crate::capabilities::session::domain::events::{
     qualify, stopped_note, working,
 };
 pub use crate::capabilities::session::domain::history::{
-    AgentMeta, Delegation, HistoryView, RunState, SessionMeta, WorkspaceBinding,
+    AgentMeta, Delegation, HistoryView, RunState, SessionMeta, WorkspaceBinding, WorkspaceGrant,
 };
 pub use crate::capabilities::session::domain::rewind::{
     align_keep, archive_label, cut_before_line, last_line_within, last_usage, max_reply,

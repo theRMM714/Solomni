@@ -1132,6 +1132,7 @@ fn creating_a_proxy_without_core_default_is_refused() {
         tier: Tier::Host,
         guest: None,
         workspace: None,
+        workspace_grant: None,
     };
     let err = core
         .create_work(spec)
