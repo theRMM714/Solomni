@@ -483,10 +483,15 @@ fn rw_part(spec: &FenceSpec, path: &Path) -> FencePart {
 ///   以为整条链都不存在，一路向上建到盘卷根，撞出 `WinError 5 Access is denied: 'D:\'`
 ///   （真机 CI 上抓到的：Python 的 `os.makedirs(parent, exist_ok=True)`）。
 ///   只授"读属性"、**不递归、不继承**：容器能判断存在性，但读不到内容、列不了目录。
-///   只到**直接父目录**为止（不是整条祖先链）：再往上就是产品根之外，而 stat 到直接父目录已足够让
-///   "父目录在不在"这个判断成立。给祖先链授"穿过"要改写 `C:\` 这种巨型目录的 DACL
-///   （顺整棵树重算继承，真机 ~90 s/条），这里授的是产品内的小目录，各一条 ACE。
-pub(crate) fn grant_targets(spec: &FenceSpec) -> Vec<GrantTarget> {
+///   参数 root：视图盘生效时给产品根，祖先链只补到产品根（含）为止；产品根之外一级都不写——
+///   cwd 走视图写法后，容器只需要映射根这一级的读属性。根外祖先缺 RA 的代价由视图盘消除，
+///   而不是靠改写 `D:\AIproject` 这种巨型目录的 DACL（顺整棵树重算继承，真机 193 s/条）。
+///   参数 cwd_leaf：false 表示 cwd 已被读写叶子覆盖（视图生效且 cwd == private），不再重复加只读叶子。
+pub(crate) fn grant_targets(
+    spec: &FenceSpec,
+    root: Option<&Path>,
+    cwd_leaf: bool,
+) -> Vec<GrantTarget> {
     let mut todo: Vec<GrantTarget> = Vec::new();
     let mut leaves: Vec<GrantTarget> = Vec::new();
     let leaf = |path: &Path, rights: u32, recursive: bool, part: FencePart| GrantTarget {
@@ -516,7 +521,7 @@ pub(crate) fn grant_targets(spec: &FenceSpec) -> Vec<GrantTarget> {
     }
     // 工作目录（模块根）：工具进程要能在里面起（读 + 执行），但**不因此获得写**。
     // 已授权可写的模块同时也在 rw 里，那一条（更早入列）给的写权才是准的。
-    if !spec.cwd.as_os_str().is_empty() {
+    if cwd_leaf && !spec.cwd.as_os_str().is_empty() {
         leaves.push(leaf(&spec.cwd, RIGHTS_RO, true, FencePart::Cwd));
     }
     // 父目录：只读属性、不递归、不继承（带 (OI)(CI) 的 ACE 会传播，撤权断链就污染整棵子树）；shell 的 cwd = private 时
@@ -527,6 +532,13 @@ pub(crate) fn grant_targets(spec: &FenceSpec) -> Vec<GrantTarget> {
         let deep_leaf = deep && (one.path == spec.cwd || one.path == spec.private);
         let mut parent = one.path.parent();
         while let Some(p) = parent {
+            // 视图盘生效时根外祖先不写：已经越过产品根就停，不能碰 D:\AIproject 这类巨型目录的 DACL。
+            if deep_leaf
+                && let Some(root) = root
+                && !(p == root || p.starts_with(root))
+            {
+                break;
+            }
             // 盘根不写：ACL 写盘根会触发整盘继承重算（真机很慢），而盘根的读属性默认已对容器可用。
             if deep_leaf && p.parent().is_none() {
                 break;
@@ -541,6 +553,10 @@ pub(crate) fn grant_targets(spec: &FenceSpec) -> Vec<GrantTarget> {
                 });
             }
             if !deep_leaf {
+                break;
+            }
+            // 产品根本身也补（它就是映射根），到此为止：根外一级都不写。
+            if root.is_some_and(|root| p == root) {
                 break;
             }
             parent = p.parent();

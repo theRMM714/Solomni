@@ -200,17 +200,31 @@ impl SessionParams {
     }
 
     /// 目的：@ 改写要用的根——共享区 + 本席私有沙箱 + 本会话的路径翻译器。
-    /// 约束：与工作环境块用同一个 `PathBridge::for_session`——提示词里给模型看的写法与转录里落下的写法必然是同一套。
+    /// 约束：与工作环境块同一套渲染——虚拟机档用 `PathBridge::for_session`，本机档用视图盘的路径码；
+    ///   视图盘没开时给恒等桥（宿主写法，与旧行为一致），@ 根始终带翻译器。
     pub(crate) fn ref_roots(&self) -> crate::capabilities::prompt::api::RefRoots {
+        let path_codec: Option<std::sync::Arc<dyn crate::kernel::ports::PathCodec>> = match self
+            .guest
+        {
+            Some(g) => Some(std::sync::Arc::new(
+                crate::capabilities::vm::api::PathBridge::for_session(
+                    std::env::consts::OS,
+                    Some(g.dialect()),
+                ),
+            )),
+            None => crate::kernel::api::view_codec().or_else(|| {
+                Some(
+                    std::sync::Arc::new(crate::capabilities::vm::api::PathBridge::for_session(
+                        std::env::consts::OS,
+                        None,
+                    )) as std::sync::Arc<dyn crate::kernel::ports::PathCodec>,
+                )
+            }),
+        };
         crate::capabilities::prompt::api::RefRoots {
             work: self.shared.clone(),
             private: Some(self.private.clone()),
-            path_codec: Some(std::sync::Arc::new(
-                crate::capabilities::vm::api::PathBridge::for_session(
-                    std::env::consts::OS,
-                    self.guest.map(|g| g.dialect()),
-                ),
-            )),
+            path_codec,
         }
     }
 
@@ -252,24 +266,33 @@ pub fn env_block(
     p: &SessionParams,
 ) -> String {
     use crate::capabilities::prompt::api::Segment;
-    // 路径按**这场会话的环境**渲染：本机档 = 宿主拼法；虚拟机档 = guest 拼法（与挂载、命令装配同一座桥）。
+    // 路径按**这场会话的环境**渲染：本机档 = 视图盘打开时的视图写法（宿主路径由路径码翻译），否则宿主拼法；
+    // 虚拟机档 = guest 拼法（与挂载、命令装配同一座桥）。
+    let view = if p.guest.is_none() {
+        crate::kernel::api::view_codec()
+    } else {
+        None
+    };
     let bridge = crate::capabilities::vm::api::PathBridge::for_session(
         std::env::consts::OS,
         p.guest.map(|g| g.dialect()),
     );
-    let in_guest = |path: &std::path::Path| -> String {
-        crate::kernel::api::slash(std::path::Path::new(&bridge.to_guest(path)))
+    let in_env = |path: &std::path::Path| -> String {
+        match view.as_deref() {
+            Some(codec) => crate::kernel::api::slash(std::path::Path::new(&codec.to_view(path))),
+            None => crate::kernel::api::slash(std::path::Path::new(&bridge.to_guest(path))),
+        }
     };
     let module_roots = if p.module_dirs.is_empty() {
         "（你没有成员模块目录）".to_string()
     } else {
         p.module_dirs
             .iter()
-            .map(|(id, root)| format!("- {}：{}", id, in_guest(root)))
+            .map(|(id, root)| format!("- {}：{}", id, in_env(root)))
             .collect::<Vec<_>>()
             .join("\n")
     };
-    let sandbox_root = in_guest(&p.private);
+    let sandbox_root = in_env(&p.private);
     // 路径写法只有一处（册子里的 path_rules）：它自己也要用真实根渲染出例子，再插进环境块。
     let path_rules = prompt.render(
         Segment::PathRules,
@@ -282,7 +305,7 @@ pub fn env_block(
         &[
             ("work_name", p.work_name.clone()),
             ("agent", p.agent.clone()),
-            ("work_root", in_guest(&p.shared)),
+            ("work_root", in_env(&p.shared)),
             ("sandbox_root", sandbox_root),
             ("module_roots", module_roots),
             ("path_rules", path_rules),

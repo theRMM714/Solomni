@@ -18,28 +18,13 @@ pub(crate) struct MachineStep {
 }
 
 /// 目的：机器级授权的全部落点。
-///   祖先链（产品根之上）：只授读属性、不递归不继承——每会话的 deep 祖先链会查它，授一次就够。
 ///   产品根：读属性 + (OI)(CI) 继承——根下已有与将来新建的目录/文件都自动带这条 ACE，
 ///     于是每会话的祖先链、模块父目录等 STAT 检查全部命中，不再写 DACL。
 ///   可信基座（.tools / runtimes）：递归只读，授给共享包组；新装进这两个目录的文件也继承。
-/// 约束：盘根不写（写盘根 = 整盘继承重算，真机灾难）。
+/// 约束：产品根之外的祖先链一级都不写（视图盘把产品根映射成盘符，容器只认映射根这一级）；
+///   盘根更不写（写盘根 = 整盘继承重算，真机灾难）。
 pub(crate) fn machine_plan(root: &Path) -> Vec<MachineStep> {
     let mut out = Vec::new();
-    let mut parent = root.parent();
-    while let Some(anc) = parent {
-        // 盘卷根不写：那是整盘继承重算，且默认就对容器可读。
-        if anc.parent().is_none() {
-            break;
-        }
-        out.push(MachineStep {
-            label: "根祖先读属性",
-            path: anc.to_path_buf(),
-            rights: RIGHTS_STAT,
-            recursive: false,
-            inherit: false,
-        });
-        parent = anc.parent();
-    }
     out.push(MachineStep {
         label: "产品根读属性（继承）",
         path: root.to_path_buf(),
@@ -183,20 +168,20 @@ pub(crate) fn machine_ensure(
 mod tests {
     use super::*;
 
-    /// 目的：落点清单覆盖祖先链（不写盘根）+ 产品根继承 + 可信基座；形状与 prepare_fence 的消费方式一致。
+    /// 目的：落点清单只覆盖产品根继承 + 可信基座；产品根之外的祖先链一级都不写（视图盘负责）。
     #[test]
-    fn plan_covers_ancestors_root_and_trusted_bases() {
+    fn plan_covers_root_and_trusted_bases_only() {
         let base = std::env::temp_dir().join("solomni-machine-plan");
         let root = base.join("product");
         let plan = machine_plan(&root);
         let root_step = plan.iter().find(|s| s.path == root).expect("有产品根落点");
         assert_eq!(root_step.rights, RIGHTS_STAT);
         assert!(root_step.inherit && !root_step.recursive);
-        // 祖先链至少包含 base（root 的父目录），且都不在盘卷根上。
+        // 根外祖先不出现：root 的上级目录（含 base）一条都不在清单里。
         assert!(
             plan.iter()
-                .any(|s| s.path == base && s.rights == RIGHTS_STAT)
+                .all(|s| s.path == root || s.path.starts_with(&root))
         );
-        assert!(plan.iter().all(|s| s.path.parent().is_some()));
+        assert!(!plan.iter().any(|s| s.path == base));
     }
 }

@@ -1,6 +1,6 @@
 //! 目的：用户输入里的 @ 引用改写成 agent 能用的**绝对路径**（纯逻辑，无 IO）。
 //! 管：两种引用前缀的识别与改写——@work:<相对路径> 取共享区、@sandbox:<agent>/<相对路径> 取自己的私有沙箱；
-//!   写法是**会话所在环境**的（虚拟机档经路径翻译器给 guest 写法，模块工具在 guest 里直接能用；本机档恒等），
+//!   写法是**会话所在环境**的（虚拟机档经路径翻译器给 guest 写法；本机档在视图盘打开时给视图写法，否则恒等），
 //!   输出统一 / 分隔（JSON 里反斜杠是转义符）。
 //! 不管：越界与权限判定（在 workspace 的寻址）、提示词本体（同目录的 `prompt.rs`）、谁在什么时候调用。
 //! 联动：根与翻译器由会话侧给（`RefRoots`）；说明文案归本模块代码所有；契约见
@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// 目的：@ 改写需要的真实根与它的写法——work = 本工作共享区；private = 发言席自己的私有沙箱（协作时 None）。
-/// 约束：写法由 `path_codec` 定（虚拟机档把宿主路径渲染成 guest 写法，与工作环境块同一座桥；None = 恒等）。
+/// 约束：写法由 `path_codec` 定（虚拟机档把宿主路径渲染成 guest 写法；本机档在视图盘打开时渲染成视图写法；None = 恒等）。
 #[derive(Debug, Clone, Default)]
 pub struct RefRoots {
     pub work: PathBuf,
@@ -74,7 +74,7 @@ pub fn rewrite(text: &str, speaker: Option<&str>, roots: &RefRoots) -> String {
 }
 
 /// 真实根 + 相对路径：用 Path 组件拼；有翻译器就按**会话所在环境**的写法渲染（虚拟机档 = guest 写法），
-/// 没有就恒等（本机档）。根为空（还没准备好）→ None。
+/// 没有就恒等（本机档、且视图盘没开）。根为空（还没准备好）→ None。
 fn full_path(root: &Path, rel: &str, codec: Option<&dyn PathCodec>) -> Option<String> {
     if root.as_os_str().is_empty() {
         return None;

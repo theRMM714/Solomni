@@ -193,6 +193,10 @@ pub use prep::{clean, machine_ensure, machine_missing, sweep_profiles};
 
 #[cfg(windows)]
 pub(crate) use paths::{
-    NODE_REALPATH_FLAGS, container_program_command, windows_program_separators,
+    NODE_REALPATH_FLAGS, container_program_command, view_program_command,
+    windows_program_separators,
 };
 pub(crate) use paths::{interpreter_dir_usable, interpreter_dirs, interpreter_roots_for_exe};
+// 视图盘记录清扫要判 pid 活性：复用台账的进程存在性判定。
+#[cfg(windows)]
+pub(crate) use windows::process_alive;

@@ -22,7 +22,7 @@ pub(crate) use entry::startup::{
 
 use capabilities::registry::api::Registry as _;
 use std::io::IsTerminal;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// 目的：装配核心之前就能回答的旗语：`--help` 与 `--version` 就地输出并给出退出码。
@@ -36,6 +36,39 @@ fn early_exit(flags: &presentation::cli::argv::Flags) -> Option<i32> {
         return Some(0);
     }
     None
+}
+
+/// 目的：视图盘开关（`SOLOMNI_VIEW_DRIVE=0` 关闭；未设、空值或其它值都开）。
+/// 约束：这是排障用的逃生口——关掉后路径写法与旧版一致，围栏仍按宿主真实路径授权。
+fn view_drive_enabled(raw: Option<&str>) -> bool {
+    !raw.is_some_and(|v| v.trim() == "0")
+}
+
+/// 目的：分配本实例的视图盘。返回「真的分配了」——真才在退出时释放。
+/// 约束：非 Windows / 逃生口关闭 / 分配失败都返回 false（失败只打一行 `[围栏]`，启动照旧用宿主真实路径）。
+fn view_drive_begin(root: &Path, home: &Path) -> bool {
+    if !cfg!(windows) {
+        return false;
+    }
+    if !view_drive_enabled(std::env::var("SOLOMNI_VIEW_DRIVE").ok().as_deref()) {
+        return false;
+    }
+    match kernel::api::ensure_view_drive(root, home) {
+        Ok(_) => true,
+        Err(e) => {
+            eprintln!("[围栏] 视图盘不可用：{}；回退真实路径", e);
+            false
+        }
+    }
+}
+
+/// 目的：只清扫视图盘的崩溃残留（不分配盘符）：维护命令与早退路径用它，别让残留映射一直占字母。
+/// 约束：非 Windows 直接跳过；扫不到东西也算成功——内核只把撤不掉的映射打一行 `[视图盘]`，不影响退出码。
+fn view_drive_sweep(home: &Path) {
+    if !cfg!(windows) {
+        return;
+    }
+    kernel::api::sweep_view_drive(home);
 }
 
 fn main() {
@@ -66,7 +99,9 @@ fn main() {
     let (root, root_note) = entry::root::resolve_root(&raw_root);
     let home = root.join(".home");
     // `--setup` 维护旗：产品根解析后立刻分派——早于工具链与启动对账，status 的 JSON 才不被别的行污染。
+    // 维护命令不跑会话，也就不需要视图盘：只清扫上一次崩溃/强杀留下的盘符映射，不分配新的。
     if let Some(mode) = flags.setup.as_deref() {
+        view_drive_sweep(&home);
         std::process::exit(entry::setup::run(&root, mode));
     }
     // 基础工具链：只写项目内 .tools；先应用 PATH，再跑诊断 / 构建 / 会话，模块工具与 build 因此都优先项目版本。
@@ -654,11 +689,17 @@ fn main() {
         }
     }
 
+    // 视图盘唯一的分配点：维护旗、探针与启动期早退都已返回；`std::process::exit` 不走 Drop，早分配必然泄漏盘符。
+    // 细节与逃生口见 `view_drive_begin` 的目的/约束。
+    let view_drive = view_drive_begin(&root, &home);
     // 核心搬到它自己的执行线程：此后呈现层只持有**入站能力面**——拿不到 Conductor，也拿不到任何核心锁。
     let handle = match capabilities::conductor::api::ConductorHandle::spawn(conductor) {
         Ok(h) => h,
         Err(e) => {
             eprintln!("[装配失败] {}", e);
+            if view_drive {
+                kernel::api::release_view_drive(&home);
+            }
             std::process::exit(1);
         }
     };
@@ -700,6 +741,10 @@ fn main() {
             }
         }
     }
+    // 正常退出：注销本 pid 的视图盘登记，没有存活 pid 才真撤映射。崩溃 / 被强杀的残留由下次启动清扫。
+    if view_drive {
+        kernel::api::release_view_drive(&home);
+    }
 }
 
 #[cfg(test)]
@@ -724,5 +769,14 @@ mod prelude_tests {
         assert_eq!(early_exit(&version), Some(0));
 
         assert_eq!(early_exit(&Flags::default()), None, "普通启动继续装配");
+    }
+
+    #[test]
+    fn view_drive_switch_only_off_for_zero() {
+        assert!(view_drive_enabled(None), "默认开");
+        assert!(view_drive_enabled(Some("1")));
+        assert!(view_drive_enabled(Some("")), "空值按未设置处理");
+        assert!(!view_drive_enabled(Some("0")), "0 是排障逃生口");
+        assert!(!view_drive_enabled(Some(" 0 ")), "两侧空白也认");
     }
 }

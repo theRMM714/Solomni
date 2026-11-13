@@ -38,6 +38,24 @@ fn process_start(pid: u32) -> Option<u64> {
     }
 }
 
+/// 目的：判一个 pid 现在还在不在（视图盘记录清扫用）。
+/// 约束：判不了时取保守结论——拒绝访问按还在处理，宁可留下映射条目，也不误撤别人正在用的盘符。
+pub(crate) fn process_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if h.is_null() {
+            const ERROR_ACCESS_DENIED: i32 = 5;
+            let err = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+            return err == ERROR_ACCESS_DENIED;
+        }
+        CloseHandle(h);
+        true
+    }
+}
+
 /// 目的：当前进程的归属（pid + 创建时刻，租约留空）——写台账时记进条目。
 pub(crate) fn current_owner() -> Owner {
     let pid = std::process::id();
