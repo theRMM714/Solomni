@@ -12,7 +12,10 @@ pub mod process;
 pub mod procs;
 pub mod session;
 pub mod unpack;
+pub mod user_path;
 
 pub use file_log::FileLog;
 pub use host_probe::HostProbeAdapter;
 pub use session::ProcessSessions;
+#[cfg(windows)]
+pub use user_path::WindowsUserPath;

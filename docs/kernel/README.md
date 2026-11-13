@@ -18,7 +18,7 @@
 
 ## 入站契约与状态归属
 
-- 入站面：`api`（`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask` / `AskOutcome` / `RunOutcome` / `FenceSpec` / `FencePart` / `FenceBlocked` / `DEFAULT_LLM_TIMEOUT_SECS` / `valid_capability` / `slash` / `JobRegistry`）、`ports`（`Log`、`HostProbe`、`ToolHandler`、`AskUser`、`PathCodec`、`ProcessRunner`、`SessionHost`、`ProcessTexts`、`FenceHost`、`FenceGate`——R12 的例外：全项目共享）、`contracts`（共享形状、围栏描述符、执行回执）、`domain`（路径书写、取消表、沙箱模式）、`detail`（`file_log`、`host_probe`、`outbound`、`unpack`、`process`、`procs`、`session`、`confine`：门面 + `job` / `ledger` / `paths` / `prep` / `texts`）。
+- 入站面：`api`（`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask` / `AskOutcome` / `RunOutcome` / `FenceSpec` / `FencePart` / `FenceBlocked` / `DEFAULT_LLM_TIMEOUT_SECS` / `valid_capability` / `slash` / `JobRegistry`）、`ports`（`Log`、`HostProbe`、`ToolHandler`、`AskUser`、`PathCodec`、`ProcessRunner`、`SessionHost`、`ProcessTexts`、`FenceHost`、`FenceGate`、`UserPath`——R12 的例外：全项目共享）、`contracts`（共享形状、围栏描述符、执行回执）、`domain`（路径书写、取消表、沙箱模式）、`detail`（`file_log`、`host_probe`、`outbound`、`unpack`、`user_path`、`process`、`procs`、`session`、`confine`：门面 + `job` / `ledger` / `paths` / `prep` / `texts`）。
 - `AskUser` 是「需要用户裁决的机制请用户裁决」的**唯一**入口（`src/kernel/ports.rs`），工具执行层与围栏用它。
   - 形状：`ask(问题) -> 选项 id`，**阻塞**。
   - `halt(为什么)` = 停会话 + 落警告；调用方只在有可回答前端时用它，没有前端按 fail-closed 收场。
@@ -57,10 +57,11 @@
   - **构不出可用选项**时**不发起裁决**（契约禁止置灰，`src/capabilities/tools/service/fence.rs`）：有可回答的前端就**停掉这个会话 + 落一条警告**，没有前端只如实拒绝这次调用；停过一次之后不再推卡。
   - **可选落点授不上只记事实**：留一条 stderr 脚印，不牵动这次执行。
   - **祖先链只读属性是机器级授权**（仅 Windows）：shell 的 cwd = private 时，PowerShell 逐级解析 cwd 需要每一级祖先的 STAT；这些只读、非递归、非继承的 ACE 授给 `ALL APPLICATION PACKAGES`，与容器 SID、会话都无关。已有 ACE 就直接跳过、不写台账，所以只有首次会话付一次写 ACL 的成本（`src/kernel/detail/confine/windows/acl.rs` 的 `grant_targets`、`src/kernel/detail/confine/windows.rs` 的 `is_machine_target`）。
+  - **机器级一次性预授（仅 Windows）**：`--setup=fence`（或首次授权成功后自动一次）把三类落点一次写掉——产品根及其祖先链的 STAT（祖先非继承；根上 `(OI)(CI)` 覆盖根下全部既有与新建子项）、`.tools/` 与 `runtimes/` 的递归只读。之后 `prepare_fence` 对这些落点全部命中已有 ACE、零写入；机器级条目不随会话回收，撤除走 `--fence-clean` 或按条撤销。入口 `src/kernel/detail/confine/windows/machine.rs`（`machine_plan` / `machine_missing` / `machine_ensure`），门面在 `src/kernel/detail/confine/prep.rs`。
   - **三类根（仅 Windows）**：① **可信执行基座**——产品内工具链（`.tools/`）与运行包（`runtimes/<包>`）是只读二进制、不携带任何 scope 信息，一次性授给 `ALL APPLICATION PACKAGES`（与系统解释器目录同路），按**机器级**归属记台账（`scope=machine`、无归属，启动对账不回收、跨会话复用），**不进按 reach 的容器身份**；② **受保护数据 / 代码**——私有沙箱、共享区、模块目录、模块 `userdata/`、用户授权只读根，按 reach 授给容器 SID；③ 系统基线（`C:\Windows` 等）。把工具链放进 reach 会让同一份 16k 文件按每个 scope 组合各授一次（本机实测 56s/次），属于类别错误。
   - **容器临时目录先建**（仅 Windows）：`prepare_fence` 在授权前建好 `<私有沙箱>/Packages/<容器名>/AC/Temp`——AppContainer 的 `GetTempPath2` **不读 TMP/TEMP**，编译器这类程序缺了它直接 abort（`Cannot create temporary file`）；目录在 `rw` 之下，递归 ACE 覆盖它，不单列一条授权。`private` 为空时跳过并记一条事实。
   - **未授权档位不是这条路**（仅 Windows）：用户没开 `sandbox.policy.windows.write_acl` 时外层根本不写权限项，容器围栏不装；若策略要求强制则拒绝，否则按无围栏执行并在启动报告标出。Linux / macOS 没有外层授权这一步，围栏照常装。
-  - **启动门（组合根）**：默认 CLI 与 `--web` 都先判 `require` vs 本次实际，并把「未授权」与「本机能力缺失」分开报；未满足时只能本次降级 / 重设 / 退出（`src/main.rs`）。没有可回答的前端、或 `on_unavailable=refuse` 且不重设 = 退出，不会启动前端。首次启动（没有 `.home/settings.yaml`）在 Windows 先问一次是否授权写 ACL；选否不写盘、进入启动门。`require` + `write_acl=false` 的矛盾配置在加载 / 保存时即拒绝，不会进入门。
+  - **启动门（组合根）**：默认 CLI 与 `--web` 都先判 `require` vs 本次实际，并把「未授权」与「本机能力缺失」分开报；未满足时只能本次降级 / 重设 / 退出（`src/main.rs`）。没有可回答的前端、或 `on_unavailable=refuse` 且不重设 = 退出，不会启动前端。首次启动（没有 `.home/settings.yaml`）在 Windows 先问一次是否授权写 ACL；选否不写盘、进入启动门。授权后立刻跑机器级预授；后续启动只做 O(深度) 只读对账，缺项只提示 `--setup=fence`，不阻断。`require` + `write_acl=false` 的矛盾配置在加载 / 保存时即拒绝，不会进入门。
   - **回执文案分两处**：超时、stderr、截断等机制文案由 `src/kernel/detail/process.rs` 的 `CodeProcessTexts` 返回；围栏拒绝 / 放行等业务文案由 `src/capabilities/tools/service/fence.rs` 的 `ToolFenceGate` 生成，kernel 只把裁决结果原样拼进回执。
   - **围栏里失败的统一说明**：工具在围栏里非零退出时，守门进程补一条**不分语言**的话（可达范围 + 范围外被围栏拒绝）；成功不打扰。
 - 平台：只有 Windows 有「外层授权写 ACL」这一步；Linux 的 Landlock 与 macOS 的 seatbelt 在守门进程里自足，那里没有 `prepare_fence`（不是存在但空转）。三个平台各自的强制项与降级条件见「二、工具进程与守门协议」。

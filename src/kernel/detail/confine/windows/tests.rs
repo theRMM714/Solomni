@@ -612,7 +612,7 @@ fn revoke_leaves_no_container_ace_on_leaf_parents() {
     eprintln!("[诊断] 授权后叶子 {}", dump_aces(&leaf));
     let baseline = baseline_sid().expect("派生所有应用程序包 SID");
     assert!(
-        has_ace_for(baseline, &base, RIGHTS_STAT),
+        has_explicit_ace_for(baseline, &base, RIGHTS_STAT),
         "授权后父目录上应有授给所有应用程序包的只读属性 ACE（祖先链是机器级授权）"
     );
     free_sid(baseline);
@@ -637,7 +637,7 @@ fn revoke_leaves_no_container_ace_on_leaf_parents() {
     assert!(!on_leaf, "撤权后叶子不得残留该容器 SID 的任何 ACE");
     // 机器级授权按设计不随会话撤：别的会话还要靠它零写启动。
     let baseline = baseline_sid().expect("派生所有应用程序包 SID");
-    let machine_kept = has_ace_for(baseline, &base, RIGHTS_STAT);
+    let machine_kept = has_explicit_ace_for(baseline, &base, RIGHTS_STAT);
     free_sid(baseline);
     assert!(
         machine_kept,
@@ -645,12 +645,14 @@ fn revoke_leaves_no_container_ace_on_leaf_parents() {
     );
     clean(&home).expect("台账回收应当成功");
     let baseline = baseline_sid().expect("派生所有应用程序包 SID");
-    let machine_after_clean = has_ace_for(baseline, &base, RIGHTS_STAT);
+    let machine_after_clean = has_explicit_ace_for(baseline, &base, RIGHTS_STAT);
     free_sid(baseline);
     discard(&base);
+    // 只看对象自己带的 ACE：产品根有机器级 `(OI)(CI)` 授权时，父目录会从祖先继承到一条 AAPP STAT，
+    // 那是祖先授权的投影、不归这份台账撤（夹具的 TMP 在仓库内时正是这种情形）。
     assert!(
         !machine_after_clean,
-        "整份台账回收后父目录不该再有该机器级只读属性 ACE"
+        "整份台账回收后父目录不该再有自己写的机器级只读属性 ACE"
     );
 }
 

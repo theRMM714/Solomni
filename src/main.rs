@@ -65,6 +65,10 @@ fn main() {
     // 产品根规范化成**干净的绝对路径**：提示词里给 AI 的、以及各适配器给出的根都是它。
     let (root, root_note) = entry::root::resolve_root(&raw_root);
     let home = root.join(".home");
+    // `--setup` 维护旗：产品根解析后立刻分派——早于工具链与启动对账，status 的 JSON 才不被别的行污染。
+    if let Some(mode) = flags.setup.as_deref() {
+        std::process::exit(entry::setup::run(&root, mode));
+    }
     // 基础工具链：只写项目内 .tools；先应用 PATH，再跑诊断 / 构建 / 会话，模块工具与 build 因此都优先项目版本。
     let toolchains = entry::toolchains::apply(&root);
     // 这些是人读的启动事实；--doctor / --provision 的 stdout 是机器可读 JSON，所以走 stderr。
@@ -286,6 +290,8 @@ fn main() {
                     println!(
                         "[沙箱] 已写入 .home/settings.yaml；启动器会把本进程整体重启（直接运行二进制时请重新启动）。"
                     );
+                    // 首次授权那一趟顺手把机器级预授做掉：之后的会话不必再重写这批 ACL。
+                    entry::setup::ensure_after_authorize(&root);
                     std::process::exit(presentation::web::RESTART_EXIT_CODE);
                 }
                 Ok(false) => {}
@@ -317,6 +323,10 @@ fn main() {
                 entry::startup::GateOutcome::Exit(code) => std::process::exit(code),
             }
         }
+    }
+    // 启动只读对账：机器级预授缺项时只提示（不静默慢写、不阻断）；首次授权那一趟已当场补过。
+    if cfg!(windows) && authorized {
+        entry::setup::fence_hint(&root);
     }
     if sandbox_mode.degraded() {
         println!("[沙箱] 本进程已降级：缺失的强制项按如实降级执行；重启后重新评估");

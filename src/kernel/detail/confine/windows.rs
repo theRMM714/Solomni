@@ -12,9 +12,11 @@ use std::time::Instant;
 
 mod acl;
 mod container;
+mod machine;
 mod record;
 pub(crate) use acl::*;
 pub(crate) use container::*;
+pub(crate) use machine::*;
 pub(crate) use record::*;
 #[cfg(test)]
 mod ledger_tests;

@@ -80,6 +80,37 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &std::path::Path) ->
     windows::prepare_fence(spec, command, home)
 }
 
+/// 目的：一次性的**机器级**预授还缺哪些落点（空 = 已就绪）。只读、O(深度 + 2)，启动对账用。
+///   Windows 之外没有「机器级 ACL」这一步，如实返回未支持而不是假称就绪。
+#[cfg(windows)]
+pub fn machine_missing(root: &std::path::Path) -> Result<Vec<String>, String> {
+    windows::machine_missing(root)
+}
+
+#[cfg(not(windows))]
+pub fn machine_missing(_root: &std::path::Path) -> Result<Vec<String>, String> {
+    Err("本平台没有机器级 ACL 预授（已登记缺口）".to_string())
+}
+
+/// 目的：把机器级落点一次性授好（幂等；每条进度交给 `out`）。`--setup=fence` 与首次启动授权共用。
+#[cfg(windows)]
+pub fn machine_ensure(
+    root: &std::path::Path,
+    home: &std::path::Path,
+    out: &mut dyn FnMut(&str),
+) -> Result<(), String> {
+    windows::machine_ensure(root, home, out)
+}
+
+#[cfg(not(windows))]
+pub fn machine_ensure(
+    _root: &std::path::Path,
+    _home: &std::path::Path,
+    _out: &mut dyn FnMut(&str),
+) -> Result<(), String> {
+    Err("本平台没有机器级 ACL 预授（已登记缺口）".to_string())
+}
+
 /// 目的：精确回收：按台账撤掉我们写过的权限项、删掉我们建过的容器 profile（`--fence-clean` 用）。
 pub fn clean(home: &std::path::Path) -> Result<String, String> {
     #[cfg(windows)]
