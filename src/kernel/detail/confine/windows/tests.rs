@@ -378,6 +378,120 @@ fn grants_are_written_when_the_environment_allows_it() {
     discard(&base);
 }
 
+/// 分根计时只在**真写 ACL** 时产生步骤：第一次有、第二次纯命中为空；标签只用固定词表、不带用户路径。
+#[test]
+fn fence_steps_only_cover_real_acl_writes() {
+    let base = std::env::temp_dir().join(format!("solomni-steps-{}", std::process::id()));
+    let target = base.join("target");
+    std::fs::create_dir_all(&target).expect("建探针目录");
+    if !acl_round_trip(&base, "steps") {
+        eprintln!(
+            "[探针] 本机做不了 ACL 完整往返（写→读回→撤）：分步计时探针跳过（不静默当作通过）"
+        );
+        discard(&base);
+        return;
+    }
+    let spec = FenceSpec {
+        agent: "probe-steps".to_string(),
+        lease: String::new(),
+        private: PathBuf::new(),
+        ro_tree: Vec::new(),
+        rw: vec![target.clone()],
+        cwd: target.clone(),
+        ro: Vec::new(),
+        net: false,
+    };
+    let home = base.join(".home");
+    let first = prepare_fence(&spec, "cmd", &home);
+    expect_granted(&first, "授权应当成功");
+    assert!(
+        !first.steps.is_empty(),
+        "第一次真写 ACL 要有分步计时：{:?}",
+        first.steps
+    );
+    for step in &first.steps {
+        assert!(
+            [STEP_INTERPRETER, STEP_ANCESTOR, STEP_ROOT, STEP_BASE].contains(&step.label.as_str()),
+            "步骤标签只用固定词表：{}",
+            step.label
+        );
+        assert!(
+            !step.label.contains('\\') && !step.label.contains('/') && !step.label.contains(":\\"),
+            "步骤标签不得带用户路径：{}",
+            step.label
+        );
+    }
+    assert!(
+        first.steps.iter().any(|s| s.label == STEP_ROOT),
+        "根内数据边界要记成受保护根：{:?}",
+        first.steps
+    );
+    // 第二次：ACE 已够用 → 零步骤（纯命中不吵）。
+    let second = prepare_fence(&spec, "cmd", &home);
+    expect_granted(&second, "第二次准备应当成功");
+    assert!(
+        second.steps.is_empty(),
+        "纯命中不应产生步骤：{:?}",
+        second.steps
+    );
+    clean(&home).expect("回收应当成功");
+    discard(&base);
+}
+
+/// 可信执行基座是**机器级**授权：台账 scope=machine、归属为空；第二次准备不再写它（跨会话复用）。
+#[test]
+fn trusted_base_grants_are_machine_scope() {
+    let base = std::env::temp_dir().join(format!("solomni-base-scope-{}", std::process::id()));
+    let tool = base.join(".tools").join("toolchain");
+    let private = base.join("private");
+    std::fs::create_dir_all(&tool).expect("建可信基座目录");
+    std::fs::create_dir_all(&private).expect("建私有沙箱");
+    if !acl_round_trip(&base, "base-scope") {
+        eprintln!(
+            "[探针] 本机做不了 ACL 完整往返（写→读回→撤）：可信基座归属探针跳过（不静默当作通过）"
+        );
+        discard(&base);
+        return;
+    }
+    let spec = FenceSpec {
+        agent: "probe-base".to_string(),
+        lease: String::new(),
+        private: private.clone(),
+        ro_tree: vec![tool.clone()],
+        rw: vec![private.clone()],
+        cwd: private,
+        ro: Vec::new(),
+        net: false,
+    };
+    let home = base.join(".home");
+    let first = prepare_fence(&spec, "cmd", &home);
+    expect_granted(&first, "授权应当成功");
+    {
+        let rec = load_record(&home);
+        let entry = rec
+            .grants
+            .iter()
+            .find(|g| Path::new(&g.path) == tool)
+            .expect("可信基座要进台账");
+        assert_eq!(
+            entry.scope,
+            GrantScope::Machine,
+            "可信基座要记成机器级（授给所有应用程序包）"
+        );
+        assert!(entry.owners.is_empty(), "机器级条目不记任何进程归属");
+        assert!(entry.recursive, "可信基座是递归只读授权");
+    }
+    let second = prepare_fence(&spec, "cmd", &home);
+    expect_granted(&second, "第二次准备应当成功");
+    assert!(
+        !second.steps.iter().any(|s| s.label == STEP_BASE),
+        "第二次纯命中不该再写可信基座：{:?}",
+        second.steps
+    );
+    clean(&home).expect("回收应当成功");
+    discard(&base);
+}
+
 /// 撤销的真效果：授权 → 撤权 → 目标目录上不再有该容器 SID 的 ACE。
 /// 与上一条一样先做完整往返预检（本机受限沙箱会如实跳过）。
 #[test]
@@ -1623,7 +1737,6 @@ fn failed_write_keeps_preexisting_ace_and_never_says_rollback() {
         }
     }
     let _reset = Reset;
-    let mut rec = GrantRecord::default();
     let target = GrantTarget {
         path: dir.clone(),
         rights: RIGHTS_RO,
@@ -1633,7 +1746,6 @@ fn failed_write_keeps_preexisting_ace_and_never_says_rollback() {
     };
     let err = grant_one_journaled(
         &home,
-        &mut rec,
         sid,
         &sid_to_string(sid),
         &target,

@@ -17,12 +17,29 @@ use std::time::{Duration, Instant};
 // 围栏准备的耗时经同线程交棒给回执：run_inner 的 Windows 分支写入，调用方读过即清（见 take_fence_prep）。
 // 不走 RunOutcome：端口只陈述成功与输出（kernel/contracts/run.rs）；thread_local! 不产文档，注释用 //。
 thread_local! {
-    static FENCE_PREP: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) };
+    static FENCE_PREP: std::cell::Cell<Option<FenceTiming>> = const { std::cell::Cell::new(None) };
+}
+
+/// 目的：一次围栏准备的耗时交棒：总耗时 + 真写 ACL 的分步明细（每条授权一条；纯命中时为空）。
+/// 约束：分步明细只用于解释「时间花在哪」，不改回执行文——回执仍只读总秒数（`as_secs`）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FenceTiming {
+    /// 目的：整段 prepare_fence 的墙钟耗时（回执的「其中围栏准备 N 秒」用它）。
+    pub total: Duration,
+    /// 目的：真写 ACL 的步骤（解释器目录 / 祖先链 / 受保护根 / 可信基座），纯命中为空。
+    pub steps: Vec<confine::FenceStep>,
+}
+
+impl FenceTiming {
+    /// 目的：回执口径的总秒数（与改动前的 Option<Duration> 同义：回执行文与解析口径不变）。
+    pub fn as_secs(&self) -> u64 {
+        self.total.as_secs()
+    }
 }
 
 /// 目的：读走本次 shell 执行的围栏准备耗时（读即清：同一线程的下一趟不会读到这一趟的值）。
 /// 约束：只有 Windows 且真的走到围栏准备时才有值；其它平台 / 未授权写权限 / 参数拒绝都恒为 None。
-pub fn take_fence_prep() -> Option<Duration> {
+pub fn take_fence_prep() -> Option<FenceTiming> {
     FENCE_PREP.with(|slot| slot.take())
 }
 
@@ -212,7 +229,13 @@ impl ProcTools {
                 // 围栏准备单独计时：首调用逐条写 ACL 常常占掉整次耗时的绝大部分，回执要能分辨它（交棒见 take_fence_prep）。
                 let fence_started = Instant::now();
                 let prep = confine::prepare_fence(fence, command, &self.home);
-                FENCE_PREP.with(|slot| slot.set(Some(fence_started.elapsed())));
+                let steps = prep.steps.clone();
+                FENCE_PREP.with(|slot| {
+                    slot.set(Some(FenceTiming {
+                        total: fence_started.elapsed(),
+                        steps,
+                    }))
+                });
                 // 可选落点授不上只记事实（不牵动这次执行）：脚印打在 stderr，回执里不打扰模型。
                 for n in &prep.notes {
                     eprintln!("[围栏] {}（可选落点，本次照常执行）", n);

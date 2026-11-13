@@ -1037,15 +1037,25 @@ fn fence_prep_handoff_is_read_once_and_reset_each_run() {
     reset_fence_prep();
     assert!(take_fence_prep().is_none(), "没走过围栏准备就没有值");
 
-    FENCE_PREP.with(|slot| slot.set(Some(Duration::from_secs(7))));
-    assert_eq!(take_fence_prep(), Some(Duration::from_secs(7)));
+    let seven = FenceTiming {
+        total: Duration::from_secs(7),
+        steps: Vec::new(),
+    };
+    FENCE_PREP.with(|slot| slot.set(Some(seven.clone())));
+    assert_eq!(take_fence_prep(), Some(seven.clone()));
+    assert_eq!(seven.as_secs(), 7, "回执口径仍是总秒数");
     assert!(
         take_fence_prep().is_none(),
         "读即清：同一趟的交棒只能被取走一次"
     );
 
     // 上一趟留下没取走的值，下一趟入口会清掉（线程池复用同一线程时不能串味）。
-    FENCE_PREP.with(|slot| slot.set(Some(Duration::from_secs(9))));
+    FENCE_PREP.with(|slot| {
+        slot.set(Some(FenceTiming {
+            total: Duration::from_secs(9),
+            steps: Vec::new(),
+        }))
+    });
     reset_fence_prep();
     assert!(take_fence_prep().is_none(), "新一趟入口先清空");
 

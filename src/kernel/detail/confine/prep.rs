@@ -23,6 +23,17 @@ pub fn sweep_profiles() -> Result<usize, String> {
     }
 }
 
+/// 目的：一次围栏准备里**真写了 ACL** 的一个步骤：脱敏标签 + 耗时（毫秒）。
+/// 约束：标签只用固定词表（解释器目录 / 祖先链 / 受保护根 / 可信基座），不写用户绝对路径；
+///   纯命中已有 ACE、跳过不写的落点不产生步骤。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FenceStep {
+    /// 目的：步骤类别（固定词表，见 `windows.rs` 的 STEP_* 常量）。
+    pub label: String,
+    /// 目的：这一步真写 ACL 的墙钟耗时（毫秒）。
+    pub ms: u64,
+}
+
 /// 目的：一次围栏授权的结论：**必要**落点是否全部授上 + 其余授不上落点的事实。
 /// 约束：必要落点授不上时调用方**不许降级**（问用户或按 fail-closed 拒绝，见 docs/kernel/README.md 的「围栏落点：必要与可选」）；
 ///   可选落点授不上只进 `notes`，不牵动这次执行。
@@ -34,6 +45,8 @@ pub struct FencePrep {
     pub blocked: Option<FenceBlocked>,
     /// 目的：其余授不上落点的事实（可选落点只在这里记一条）。
     pub notes: Vec<String>,
+    /// 目的：这次真写 ACL 的分步耗时（纯命中 / 没写时为空，回执与 stderr 只用它判断"钱花在哪"）。
+    pub steps: Vec<FenceStep>,
 }
 
 impl FencePrep {
