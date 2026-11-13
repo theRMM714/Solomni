@@ -125,6 +125,8 @@ pub(crate) fn ensure_after_authorize(root: &Path) {
     }
 }
 
-/// 目的：Windows 之外没有机器级预授，这一趟无事可做。
+/// 目的：Windows 之外没有机器级预授，这一趟无事可做（如实收尾，缺口见 tests/gaps.yaml）。
 #[cfg(not(windows))]
-pub(crate) fn ensure_after_authorize(_root: &Path) {}
+pub(crate) fn ensure_after_authorize(root: &Path) {
+    let _ = fence::ensure(root, &root.join(".home"));
+}
