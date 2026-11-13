@@ -104,8 +104,8 @@ pub(crate) fn machine_ensure(
     if root.parent().is_none() {
         return Err("产品根是盘卷根：拒绝在盘根写继承 ACE（改用产品目录作根）".to_string());
     }
-    let _lock = lock_ledger(home)?;
-    let mut rec = load_record(home);
+    // 台账锁只罩「读—改—写」事务（见 record/store.rs 的 with_ledger）：逐条授权各自开事务，
+    // 不把整段 ensure 罩在一把锁里，否则并发首启会在慢 ACL 写期间互相等到 60 秒锁上限。
     let base = baseline_sid()?;
     let base_text = sid_to_string(base);
     let mut errors: Vec<String> = Vec::new();
@@ -138,7 +138,7 @@ pub(crate) fn machine_ensure(
             inherit: step.inherit,
             part: FencePart::Parent,
         };
-        match grant_machine_journaled(home, &mut rec, base, &base_text, &target, root) {
+        match grant_machine_journaled(home, base, &base_text, &target, root) {
             Ok(true) => {
                 written += 1;
                 out(&format!(
