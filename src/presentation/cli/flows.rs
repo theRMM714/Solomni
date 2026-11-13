@@ -295,14 +295,7 @@ pub(crate) fn eof_stop(ops: &Ops, sid: &str) -> bool {
 
 /// 目的：读一行输入；**读到尽头（EOF）给 `None`**——"用户不在键盘前"与"用户先不答"是两件事。
 pub(super) fn prompt_opt(text: &str) -> Option<String> {
-    print!("{} ", text);
-    std::io::stdout().flush().ok();
-    let mut s = String::new();
-    match std::io::stdin().read_line(&mut s) {
-        Ok(0) => None,
-        Ok(_) => Some(s.trim().to_string()),
-        Err(_) => None,
-    }
+    term::ask(text)
 }
 
 pub(super) fn prompt(text: &str) -> String {

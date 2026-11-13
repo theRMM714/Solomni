@@ -28,6 +28,9 @@ lzma-rust2 = { version = "0.25", default-features = false, features = ["std", "x
 # LLM 出站流：可取消的 HTTP 读 + 分层超时。只用 current-thread runtime，不把核心改成 async。
 futures-util = "0.3"
 tokio = { version = "1", features = ["rt", "time", "macros"] }
+# 终端呈现层：raw mode、按键事件与光标控制必须走跨平台实现（手写平台后端会撞 docs/rust-dev.md 的 unsafe 围栏）。
+# 关掉默认特性：默认特性能拉进 strum_macros → syn 2，与全仓 syn 3 撞成重复依赖（T0 依赖重复门禁）。
+crossterm = { version = "0.29", default-features = false, features = ["events", "bracketed-paste", "windows"] }
 
 # 测试要压出 tar.xz 再解回来，压缩器只在测试构建里启用（生产二进制不带编码器）。
 [dev-dependencies]

@@ -26,7 +26,8 @@
 ## 一、组合根（`src/main.rs`）
 
 - 先处理**不需要装配核心**的模式：`--proc-watchdog`、`--fence-run`、`--https-check`、`--unpack`、`--print-fence-env`、`--fence-verify`、`--print-routes`。
-- 再解析产品根：`--root <路径>`，缺省 `.`；相对路径与当前目录做纯词法拼接，取不到当前目录才退回 `canonicalize`（Windows 上剥掉 `\\?\` 前缀）。
+- 再解析全局旗语（`src/presentation/cli/argv.rs`）：`--root <路径>` / `--web` / `--port <n>` / `--plain` / `--no-anim` / `-h, --help` / `-v, --version`；写错直接报错退出 2，`--help` 与 `--version` 不装配核心。
+- 产品根：`--root <路径>`，缺省 `.`；相对路径与当前目录做纯词法拼接，取不到当前目录才退回 `canonicalize`（Windows 上剥掉 `\\?\` 前缀）。
 - 根解析后立即应用**基础工具链**：读 `.tools/toolchains/active.json`（由 provision 的 `kind: toolchain` 写入），把项目内 `bin` 前置到 PATH；目标不符 / 路径不安全 / bin 不在场只报告，不阻断启动。**每次启动**都打印基础 profile 的项目内 / 宿主回退（Windows 探围栏能否授权）/ 缺失与补全指令；之后 `--doctor`、`--build`、会话工具与常驻服务都看这份生效 PATH。
 - `--doctor`、`--provision`、`--build`、围栏台账系列（`--fence-reconcile` / `--fence-ledger` / `--fence-restore` / `--fence-revoke` / `--fence-profile-rm` / `--fence-clean`）只需要产品根，不装配核心。
 - 装配期失败一律打印 `[装配失败]` 并以 1 退出（`src/main.rs`）：登记处四份 yaml 读不了、提示词册缺文件 / 缺键、工具总表与角色表不自洽、模块清单装配失败、隐秘字段加载失败、核心执行线程起不来；日志文件起不来只降级到 stderr（进程继续）。
@@ -34,7 +35,7 @@
   - 围栏台账只回收归属明确已死的授权。
   - 进程账清掉已不在的登记，并按**能证明的身份**收掉上次留下的孤儿：Unix 看命令行标记，Windows 看进程创建时间；认不出身份的只报不动手（不误杀别人的进程）。机制见 [kernel 的「长驻子进程的账与回收」](../kernel/README.md)。
 - **围栏写权限**：`SOLOMNI_FENCE_WRITE=1/0` 优先，否则读设置里的 `sandbox.policy.windows.write_acl`；这一份值在**预检前**只读一次，预检、启动报告与工具进程共用（Linux / macOS 的围栏在守门进程里自足）。启动报告把「本机能力」与「本次实际」分开打印：Unix 的「本次实际」等于本机能力；Windows 未授权时 fs/net 为假（容器围栏不装），进程树仍生效。
-- **启动门**：解析 argv 只决定形态；默认 CLI 与 `-webUI` 都必须先过工具链 / 构建 / 设置 / 围栏预检（`src/main.rs`）。围栏要求没满足时只能本次降级 / 重设 / 退出（`src/main.rs`）；没有可回答的前端、或 `on_unavailable=refuse` 且不重设 = 退出，不会起 CLI 或 Web。`-webUI` 不是绕过，门通过后才会 `serve_web`。
+- **启动门**：解析 argv 只决定形态；默认 CLI 与 `--web` 都必须先过工具链 / 构建 / 设置 / 围栏预检（`src/main.rs`）。围栏要求没满足时只能本次降级 / 重设 / 退出（`src/main.rs`）；没有可回答的前端、或 `on_unavailable=refuse` 且不重设 = 退出，不会起 CLI 或 Web。`--web` 不是绕过，门通过后才会 `serve_web`。
 - **首次启动**（没有 `.home/settings.yaml`）：Windows 上先问一次是否授权写 ACL；选是写盘并以退出码 75 整体重启，选否不写盘、进入启动门。重设只修能修的那一项：未授权写授权；本机能力缺失则明确问是否把 `enforce` 降为 `best_effort`。
 - **配置一致性**：Windows 上 `require` 文件系统 / 网络围栏 + `write_acl: false` 保存时拒绝、已存在的 `settings.yaml` 加载时报 `配置非法`；首启没有文件不拦（交给引导）。
 - **全局沙箱策略**：`sandbox.policy` 是进程级启动事实；保存后整体重启。默认 `require`，机制不可用时启动门按 `on_unavailable` 询问本进程降级（不落盘）、重设或退出；`SOLOMNI_SANDBOX_DEGRADED=1/0` 只供测试 / CI 注入。

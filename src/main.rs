@@ -25,18 +25,41 @@ use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// 目的：装配核心之前就能回答的旗语：`--help` 与 `--version` 就地输出并给出退出码。
+fn early_exit(flags: &presentation::cli::argv::Flags) -> Option<i32> {
+    if flags.help {
+        print!("{}", presentation::cli::catalog::help_text(flags.all));
+        return Some(0);
+    }
+    if flags.version {
+        println!("{}", presentation::cli::catalog::version_text());
+        return Some(0);
+    }
+    None
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     // 参数表与分派在 entry::args：入口只决定"继续启动"还是"就此退出"。
     if let Some(code) = entry::args::before_root(&args) {
         std::process::exit(code);
     }
-    // 启动形态：无参数 = CLI（默认）；-webUI = Web 转录中心。
-    let web = args.iter().any(|a| a == "-webUI");
-    let raw_root = args
-        .iter()
-        .position(|a| a == "--root")
-        .and_then(|i| args.get(i + 1))
+    // 旗语只有一个解析器：写错就报错并给最近建议，不带着错误参数继续启动。
+    let flags = match presentation::cli::argv::parse(&args[1..]) {
+        Ok(flags) => flags,
+        Err(e) => {
+            eprintln!("[错误] {}", e);
+            std::process::exit(2);
+        }
+    };
+    if let Some(code) = early_exit(&flags) {
+        std::process::exit(code);
+    }
+    // 启动形态：无参数 = CLI（默认）；--web = Web 转录中心。
+    let web = flags.web;
+    let raw_root = flags
+        .root
+        .as_ref()
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
     // 产品根规范化成**干净的绝对路径**：提示词里给 AI 的、以及各适配器给出的根都是它。
@@ -621,14 +644,6 @@ fn main() {
         }
     }
 
-    let port_flag = |args: &[String]| {
-        args.iter()
-            .position(|a| a == "--web-port")
-            .and_then(|i| args.get(i + 1))
-            .and_then(|v| v.parse::<u16>().ok())
-            .unwrap_or(presentation::web::DEFAULT_PORT)
-    };
-
     // 核心搬到它自己的执行线程：此后呈现层只持有**入站能力面**——拿不到 Conductor，也拿不到任何核心锁。
     let handle = match capabilities::conductor::api::ConductorHandle::spawn(conductor) {
         Ok(h) => h,
@@ -653,17 +668,51 @@ fn main() {
     // 工具级确认要有地方被作答：网页有裁决卡，CLI 在生成中就地按选项答——两边都接上了。
     handle.allow_tool_cards();
     if web {
-        entry::web::serve_web(ops, port_flag(&args), &fence_report);
+        entry::web::serve_web(
+            ops,
+            flags.port.unwrap_or(presentation::web::DEFAULT_PORT),
+            &fence_report,
+        );
     } else {
-        // CLI 里输入 webui 可直接转入 Web，无需重启进程（能力面可克隆，两份呈现共用同一个核心）。
+        // CLI 里输入 web 可直接转入 Web，无需重启进程（能力面可克隆，两份呈现共用同一个核心）。
         // 在 Web 里按 Ctrl+C = **回到 CLI**（web::serve 收到中断就正常返回）；在 CLI 提示符下再按 = 退出。
         loop {
-            match presentation::cli::run(ops.clone(), presentation::web::DEFAULT_PORT) {
+            match presentation::cli::run(
+                ops.clone(),
+                presentation::web::DEFAULT_PORT,
+                flags.plain,
+                !flags.no_anim,
+            ) {
                 presentation::cli::CliExit::Exit => break,
                 presentation::cli::CliExit::Web(port) => {
                     entry::web::serve_web(ops.clone(), port, &fence_report);
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod prelude_tests {
+    use super::*;
+    use presentation::cli::argv::Flags;
+
+    #[test]
+    fn help_and_version_exit_before_assembly() {
+        let mut flags = Flags {
+            help: true,
+            ..Flags::default()
+        };
+        assert_eq!(early_exit(&flags), Some(0));
+        flags.all = true;
+        assert_eq!(early_exit(&flags), Some(0));
+
+        let version = Flags {
+            version: true,
+            ..Flags::default()
+        };
+        assert_eq!(early_exit(&version), Some(0));
+
+        assert_eq!(early_exit(&Flags::default()), None, "普通启动继续装配");
     }
 }

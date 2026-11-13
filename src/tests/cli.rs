@@ -137,3 +137,199 @@ fn eof_answers_a_pending_card_by_stopping_instead_of_hanging() {
     );
     assert!(!ops.sessions.is_running(sid), "EOF 收场后这条会话不再在跑");
 }
+/// 行编辑：插入、左移、再插入与退格都按光标位置生效。
+#[test]
+fn editor_edits_around_the_cursor() {
+    cli::clear_history();
+    let mut ed = cli::Editor::new();
+    for c in "abc".chars() {
+        assert_eq!(ed.key(cli::Key::Char(c)), cli::Step::Edit);
+    }
+    ed.key(cli::Key::Left);
+    ed.key(cli::Key::Char('X'));
+    assert_eq!(ed.line(), "abXc", "插入落在光标处");
+    ed.key(cli::Key::Backspace);
+    assert_eq!(ed.line(), "abc");
+    ed.key(cli::Key::Home);
+    ed.key(cli::Key::Delete);
+    assert_eq!(ed.line(), "bc", "Delete 删光标右边那格");
+    assert_eq!(ed.head(), "", "光标在行首");
+}
+
+/// 粘贴：换行折成空格，不打断单行输入框。
+#[test]
+fn editor_folds_pasted_newlines() {
+    cli::clear_history();
+    let mut ed = cli::Editor::new();
+    ed.key(cli::Key::Paste("第一行\n第二行".to_string()));
+    assert_eq!(ed.line(), "第一行 第二行");
+}
+
+/// 提交：回车提交并记历史，上翻能取回；连续重复不重复入栈。
+#[test]
+fn editor_submit_remembers_history() {
+    cli::clear_history();
+    let mut ed = cli::Editor::new();
+    for c in "写法".chars() {
+        ed.key(cli::Key::Char(c));
+    }
+    assert_eq!(ed.key(cli::Key::Enter), cli::Step::Submit);
+    assert_eq!(ed.commit(), "写法");
+    assert_eq!(ed.line(), "", "提交后输入框清空");
+
+    let mut again = cli::Editor::new();
+    again.key(cli::Key::Up);
+    assert_eq!(again.line(), "写法", "上翻取回上一行");
+
+    let mut dup = cli::Editor::new();
+    for c in "写法".chars() {
+        dup.key(cli::Key::Char(c));
+    }
+    dup.key(cli::Key::Enter);
+    dup.commit();
+    let mut walk = cli::Editor::new();
+    walk.key(cli::Key::Up);
+    assert_eq!(walk.line(), "写法");
+    walk.key(cli::Key::Up);
+    assert_eq!(walk.line(), "写法", "同一条不重复入栈");
+}
+
+/// 历史下翻回到空行；Esc 清空输入不提交；Ctrl+U 清行；Ctrl+C 收摊。
+#[test]
+fn editor_history_down_and_cancel_keys() {
+    cli::clear_history();
+    let mut ed = cli::Editor::new();
+    for c in "alpha".chars() {
+        ed.key(cli::Key::Char(c));
+    }
+    ed.key(cli::Key::Enter);
+    ed.commit();
+    for c in "beta".chars() {
+        ed.key(cli::Key::Char(c));
+    }
+    ed.key(cli::Key::Enter);
+    ed.commit();
+
+    let mut walk = cli::Editor::new();
+    walk.key(cli::Key::Up);
+    assert_eq!(walk.line(), "beta");
+    walk.key(cli::Key::Up);
+    assert_eq!(walk.line(), "alpha");
+    walk.key(cli::Key::Down);
+    assert_eq!(walk.line(), "beta");
+    walk.key(cli::Key::Down);
+    assert_eq!(walk.line(), "", "越过最新一条回到空行");
+
+    let mut ed = cli::Editor::new();
+    ed.key(cli::Key::Char('x'));
+    assert_eq!(ed.key(cli::Key::Escape), cli::Step::Cancel);
+    ed.clear();
+    assert_eq!(ed.line(), "");
+    ed.key(cli::Key::Char('y'));
+    assert_eq!(ed.key(cli::Key::KillLine), cli::Step::Edit);
+    assert_eq!(ed.line(), "");
+    assert_eq!(ed.key(cli::Key::Interrupt), cli::Step::Quit);
+}
+
+/// 列宽：中日韩字符占 2 格，截断不劈开宽字符并留省略号。
+#[test]
+fn width_counts_cjk_as_two_and_cuts_whole() {
+    assert_eq!(cli::cols("abc"), 3);
+    assert_eq!(cli::cols("中a"), 3);
+    assert_eq!(cli::cols("中文"), 4);
+    assert_eq!(cli::cut("中文abc", 5), "中文…");
+    assert_eq!(cli::cut("abc", 10), "abc", "没超宽就不加省略号");
+}
+/// 折行：按列折、不劈开宽字符；空行保留（裁决卡正文与详情共用）。
+#[test]
+fn width_wraps_without_breaking_wide_chars() {
+    assert_eq!(cli::wrap("中文中文abc", 7), vec!["中文中", "文abc"]);
+    assert_eq!(cli::wrap("a\n\nb", 4), vec!["a", "", "b"]);
+    assert_eq!(cli::wrap("", 10), vec![""]);
+}
+
+/// 生成态帧：允许动画时轮转，`--no-anim` 时始终同一帧。
+#[test]
+fn spinner_rotates_only_when_animation_is_on() {
+    assert_eq!(cli::spin_frames(0, true), "⠋");
+    assert_eq!(cli::spin_frames(1, true), "⠙");
+    assert_eq!(cli::spin_frames(10, true), "⠋", "十帧一轮");
+    assert_eq!(cli::spin_frames(0, false), "⠿");
+    assert_eq!(cli::spin_frames(7, false), "⠿", "静止帧不随 tick 变");
+}
+
+/// 旗语解析：两种写法等价、布尔不带值、`--` 之后全当位置参数、写错给最近建议。
+#[test]
+fn argv_accepts_both_spellings_and_reports_typos() {
+    let parse = |args: &[&str]| {
+        let argv: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        cli::argv::parse(&argv)
+    };
+    let flags = parse(&["--root", "work", "--port=3082", "--web", "--no-anim"]).expect("合法旗语");
+    assert_eq!(flags.root.as_deref(), Some("work"));
+    assert_eq!(flags.port, Some(3082));
+    assert!(flags.web && flags.no_anim && !flags.plain);
+
+    let flags = parse(&["--plain", "--root=elsewhere"]).expect("=值写法");
+    assert!(flags.plain);
+    assert_eq!(flags.root.as_deref(), Some("elsewhere"));
+
+    let flags = parse(&["--help", "--all"]).expect("--all 修饰 --help");
+    assert!(flags.help && flags.all, "--help --all 连内部旗语一起列");
+
+    let err = parse(&["--por", "1"]).expect_err("拼错要报错");
+    assert!(err.contains("你是不是想用 --port"), "给最近建议：{err}");
+    let err = parse(&["--web=1"]).expect_err("布尔旗不带值");
+    assert!(err.contains("不带值"), "{err}");
+    let err = parse(&["--root"]).expect_err("缺值要报错");
+    assert!(err.contains("需要一个值"), "{err}");
+
+    let flags = parse(&["--", "--web"]).expect("-- 之后都是位置参数");
+    assert!(!flags.web);
+    assert_eq!(flags.positionals, vec!["--web"]);
+}
+
+/// 命令表是唯一来源：手册、单条说明、补全与未知命令建议都由它生成。
+#[test]
+fn catalog_drives_help_completion_and_suggestions() {
+    let help = cli::catalog::help_text(false);
+    assert!(
+        help.contains("全局旗语") && help.contains("语法规则"),
+        "{help}"
+    );
+    assert!(help.contains("single"), "命令表在手册里");
+    assert!(!help.contains("--probe-tools"), "内部旗语默认不列");
+    assert!(cli::catalog::help_text(true).contains("--probe-tools"));
+
+    let single = cli::catalog::detail("single").expect("单条说明");
+    assert!(single.contains("<agent名…>"), "{single}");
+    assert!(cli::catalog::detail("/help").is_some(), "别名也认");
+    assert!(cli::catalog::detail("nope").is_none());
+
+    assert_eq!(cli::catalog::complete("he"), vec!["help"]);
+    assert!(cli::catalog::complete("").contains(&"web".to_string()));
+    assert_eq!(cli::catalog::suggest("singel"), Some("single"));
+    assert_eq!(cli::catalog::suggest("zzz"), None);
+}
+
+/// Tab 补全：唯一候选补全并留空格，多候选先补公共前缀，无候选不动输入。
+#[test]
+fn editor_tab_completion_takes_unique_and_common_prefix() {
+    let mut ed = cli::Editor::new();
+    for c in "he".chars() {
+        ed.key(cli::Key::Char(c));
+    }
+    assert_eq!(ed.complete(&["help".to_string()]), 1);
+    assert_eq!(ed.line(), "help ");
+
+    let mut ed = cli::Editor::new();
+    for c in "si".chars() {
+        ed.key(cli::Key::Char(c));
+    }
+    ed.complete(&["single".to_string(), "sincere".to_string()]);
+    assert_eq!(ed.line(), "sin");
+
+    let before = ed.line();
+    ed.complete(&[]);
+    assert_eq!(ed.line(), before, "没有候选就不动输入");
+}

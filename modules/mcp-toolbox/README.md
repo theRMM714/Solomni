@@ -48,7 +48,7 @@ resident start  mcp-toolbox toolbox
 
 ## 演示与回归
 
-- 真机演示（真实模型）：`node demo/run-demo-mcp.mjs`（先起 `node start.js -webUI`）。
+- 真机演示（真实模型）：`node demo/run-demo-mcp.mjs`（先起 `node start.js --web`）。
 - 确定性回归：`tests/cross-platform/e2e/` 的 `mcp` 场景用脚本模型 + 真进程跑同一条链路，进 CI。
 
 ## 手工验证

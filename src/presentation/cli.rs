@@ -1,6 +1,6 @@
 //! 目的：终端转录中心：解析命令 → 用入站能力面 → 渲染事件流。
-//! 管：命令解析与匹配、菜单与名单渲染、事件流打印、退出或转入 Web 的去向。
-//! 不管：业务决策、业务状态与不变式（都在各能力内部）；不做传输之外的加工。
+//! 管：命令分发、启动页事实、退出或转入 Web 的去向。
+//! 不管：业务决策与状态（都在各能力内部）；终端 I/O 与配色（`cli/term.rs`、`cli/theme.rs`）。
 //! 联动：能力面来自 `src/capabilities/*/api.rs`；事件词汇与 `src/presentation/web/` 并列共用；模块声明见 `src/presentation.rs`。
 
 use crate::capabilities::conductor::api::{Acted, ActionCall, Caller};
@@ -9,7 +9,6 @@ use crate::capabilities::conductor::api::{
 };
 use crate::capabilities::conductor::api::{Ops, Output};
 use crate::capabilities::registry::api::{ModelView, ProviderView};
-use std::io::Write;
 
 /// 目的：离开转录中心时的去向：退出，或转入 Web 转录中心（端口）。
 pub enum CliExit {
@@ -17,18 +16,35 @@ pub enum CliExit {
     Web(u16),
 }
 
-pub fn run(ops: Ops, web_default_port: u16) -> CliExit {
-    println!("Solomni 核心编排者（转录中心）");
-    print_roster(&ops);
+/// 目的：转录中心主循环：交互模式用固定输入框，非交互模式保持逐行输入（输出不变）。
+/// 参数：`web_default_port` 是会话内 `web` 命令不带端口时的默认值；`plain` 为真则强制纯文本；`anim` 为假则生成态不轮流刷帧。
+pub fn run(ops: Ops, web_default_port: u16, plain: bool, anim: bool) -> CliExit {
+    let interactive = term::init(plain, anim);
+    term::set_completer(catalog::complete);
+    if interactive {
+        term::banner(&startup_tagline(), &startup_facts(&ops));
+    } else {
+        println!("Solomni 核心编排者（转录中心）");
+    }
+    if !interactive {
+        print_roster(&ops);
+    }
+    if interactive {
+        term::line(&term::ink(
+            theme::Ink::Dim,
+            "输入 help 看命令手册与旗语规范 · web 转 Web 界面 · exit 退出",
+        ));
+    }
+    term::status(&startup_status(&ops));
 
     loop {
-        print_menu(&ops);
-        print!("> ");
-        std::io::stdout().flush().ok();
-        let mut line = String::new();
-        if std::io::stdin().read_line(&mut line).unwrap_or(0) == 0 {
-            break;
+        if !interactive {
+            print_menu(&ops);
         }
+        let label = if interactive { "转录中心" } else { ">" };
+        let Some(line) = term::ask(label) else {
+            break;
+        };
         let line = line.trim().to_string();
         let mut parts = line.splitn(2, ' ');
         let cmd = parts.next().unwrap_or("").to_ascii_lowercase();
@@ -53,18 +69,49 @@ pub fn run(ops: Ops, web_default_port: u16) -> CliExit {
             // 只读诊断一条虚拟机档会话的 guest（进程 / CPU / 内存 / 负载 / 挂载）。
             "diagnose" => diagnose_cmd(&ops, &arg),
             "rescan" => print_roster(&ops),
-            // 转入 Web 转录中心：接受 webui / -webUI（启动参数也这么写），可选端口。
-            "webui" | "-webui" | "web" | "-web" => {
+            "help" | "/help" | "?" => help_cmd(&arg),
+            "version" => term::line(&catalog::version_text()),
+            // 转入 Web 转录中心（唯一入口：启动参数用 --web，会话内用 web）。
+            "web" => {
                 let port = arg.parse::<u16>().unwrap_or(web_default_port);
                 return CliExit::Web(port);
             }
             "exit" => break,
             "" => continue,
-            _ => println!("[提示] 未知命令 {}（Web 界面用 webui；退出用 exit）", cmd),
+            _ => match catalog::suggest(&cmd) {
+                Some(near) => term::line(&format!(
+                    "[提示] 未知命令 {}；你是不是想用 {}？（help 看全部命令）",
+                    cmd, near
+                )),
+                None => term::line(&format!(
+                    "[提示] 未知命令 {}（help 看全部命令；转 Web 用 web；退出用 exit）",
+                    cmd
+                )),
+            },
         }
     }
-    println!("再见。");
+    term::line("再见。");
     CliExit::Exit
+}
+
+/// 目的：打印手册：无参数给全量，`--all` 连内部旗语一起列，带命令名只讲那一条。
+fn help_cmd(arg: &str) {
+    let arg = arg.trim();
+    if arg.is_empty() {
+        term::line(&catalog::help_text(false));
+    } else if arg == "--all" || arg == "-a" {
+        term::line(&catalog::help_text(true));
+    } else {
+        match catalog::detail(arg) {
+            Some(text) => term::line(&text),
+            None => match catalog::suggest(arg) {
+                Some(near) => {
+                    term::line(&format!("[提示] 没有命令 {}；你是不是想查 {}？", arg, near))
+                }
+                None => term::line(&format!("[提示] 没有命令 {}；help 看全部命令", arg)),
+            },
+        }
+    }
 }
 
 /// 目的：把用户写的模块工具名规整成动作 id——`<模块id>.<工具名>` 与完整的 `module.<模块id>.<工具名>` 都收。
@@ -77,12 +124,16 @@ pub(crate) fn module_action_id(arg: &str) -> String {
     }
 }
 
-/// 直接用模块工具（不经 AI）：`module` 列清单，`module <模块id>.<工具名> [json 参数]` 跑一次。
-/// 清单来自核心的动作目录（`module.<模块id>.<工具名>`），所以与 Web 看到的是同一份事实。
+pub(crate) mod argv;
+pub(crate) mod catalog;
 mod commands;
 mod flows;
 mod gate;
+mod input;
+mod term;
+mod theme;
 mod view;
+mod width;
 
 use commands::*;
 use flows::*;
@@ -94,5 +145,49 @@ use view::*;
 pub(crate) use flows::eof_stop;
 #[cfg(test)]
 pub(crate) use gate::{
-    NO_AGENTS, create_session_action, pick_agents, pick_option, split_names, waiting_lines,
+    NO_AGENTS, create_session_action, pick_agents, pick_option, spin_frames, split_names,
+    waiting_lines,
 };
+#[cfg(test)]
+pub(crate) use input::{Editor, Key, Step, clear_history};
+#[cfg(test)]
+pub(crate) use width::{cols, cut, wrap};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::presentation::cli::term;
+    use std::io::IsTerminal;
+
+    #[test]
+    fn help_cmd_prints_manual_branches() {
+        let (_, lines) = term::capture(|| help_cmd(""));
+        assert!(lines.iter().any(|l| l.contains("命令")), "无参数给全量手册");
+
+        let (_, lines) = term::capture(|| help_cmd("--all"));
+        assert!(
+            lines.iter().any(|l| l.contains("--probe-tools")),
+            "--all 展开内部旗语"
+        );
+
+        let (_, lines) = term::capture(|| help_cmd("single"));
+        assert!(lines.iter().any(|l| l.contains("single")));
+
+        let (_, lines) = term::capture(|| help_cmd("singel"));
+        assert!(lines.iter().any(|l| l.contains("你是不是想查 single")));
+
+        let (_, lines) = term::capture(|| help_cmd("zzzz"));
+        assert!(lines.iter().any(|l| l.contains("没有命令 zzzz")));
+    }
+
+    #[test]
+    fn repl_runs_to_completion_when_stdin_is_closed() {
+        if std::io::stdin().is_terminal() {
+            return;
+        }
+        let (handle, ops) = crate::tests::ops_with(vec![], vec![]);
+        let exit = run(ops, 49181, true, false);
+        assert!(matches!(exit, CliExit::Exit));
+        drop(handle);
+    }
+}

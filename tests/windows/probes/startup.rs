@@ -1,4 +1,4 @@
-//! 目的：启动门探针——未授权且没有可回答的前端时，`-webUI` 也必须退出，不能先监听端口。
+//! 目的：启动门探针——未授权且没有可回答的前端时，`--web` 也必须退出，不能先监听端口。
 //! 管：起被测二进制、喂空 stdin、检查退出码与端口未开。
 //! 不管：围栏机制本身与 ACL 写入；门在装配前退出，不碰本机权限，只在 target/ 下落日志。
 //! 联动：`src/main.rs` 的 `run_gate`；语义见 `docs/kernel/README.md`。
@@ -9,8 +9,8 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 #[test]
-fn webui_does_not_start_without_fence_authorization() {
-    let root = scratch("startup-gate-webui");
+fn web_does_not_start_without_fence_authorization() {
+    let root = scratch("startup-gate-web");
     let port = TcpListener::bind(("127.0.0.1", 0))
         .expect("占一个回环端口")
         .local_addr()
@@ -18,7 +18,7 @@ fn webui_does_not_start_without_fence_authorization() {
         .port();
     let port_text = port.to_string();
     let out = Command::new(bin())
-        .args(["-webUI", "--web-port", &port_text, "--root"])
+        .args(["--web", "--port", &port_text, "--root"])
         .arg(&root)
         .env_remove("SOLOMNI_SANDBOX_DEGRADED")
         .env("SOLOMNI_FENCE_WRITE", "0")

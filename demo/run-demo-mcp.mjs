@@ -4,7 +4,7 @@
 // （算 SHA-256、取 UUID 与当前时间、写入并取回便签）→ 从落盘转录逐条对账，而不是信它的自我陈述。
 //
 // 用法：
-//   1) 先起产品：node start.js -webUI            （默认网页端口 3081）
+//   1) 先起产品：node start.js --web            （默认网页端口 3081）
 //   2) 另开一个终端：node demo/run-demo-mcp.mjs
 // 环境变量：
 //   SOLOMNI_DEMO_BASE   转录中心地址（默认 http://127.0.0.1:3081）
@@ -117,7 +117,7 @@ function taskText() {
 
 async function main() {
   if (!(await waitReady())) {
-    console.error("转录中心没起来：" + BASE + "（先跑 node start.js -webUI）");
+    console.error("转录中心没起来：" + BASE + "（先跑 node start.js --web）");
     return 1;
   }
   const pre = await api("GET", "/api/state");

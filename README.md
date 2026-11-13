@@ -42,7 +42,7 @@ Solomni 是一个**跑在自己机器上的 agent 运行环境（AgentOS）**：
 > 已真机验收：Linux、Windows；未验：macOS（缺口见 `tests/macos/gaps.yaml`）。
 <!-- END:platform-status -->
 - **登记处**：供应商 / 模型 / agent / 设置四份 YAML，全在 `.home/`，由界面管理；通道密钥只在本机登记处与核心的出站调用里（边界见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)）。
-- **两种交互面**：终端转录中心（默认）与本地网页（`-webUI`，只绑 `127.0.0.1`，默认 3081）；网页会话页的状态栏显示上下文用量与共享区提交。
+- **两种交互面**：终端转录中心（默认）与本地网页（`--web`，只绑 `127.0.0.1`，默认 3081）；网页会话页的状态栏显示上下文用量与共享区提交。
 - **一条裁决通道**：核心关卡、工具级确认与工具执行层的问题都用同一张「消息 + 选项」卡；必须阻塞，选项 id 是契约，卡片与回答随会话落盘。行为见 [PRODUCT.md](PRODUCT.md) 与 [docs/session/session-model.md](docs/session/session-model.md)。
 
 ## 安装与运行
@@ -53,7 +53,7 @@ Solomni 是一个**跑在自己机器上的 agent 运行环境（AgentOS）**：
 
 ```bash
 node start.js            # 任意平台；Windows 也可双击 start.bat，macOS / Linux 也可 ./start.sh
-node start.js -webUI     # 直接进本地网页（127.0.0.1:3081）
+node start.js --web      # 直接进本地网页（127.0.0.1:3081）
 node start.js --provision --ensure=toolchain --yes # 构建后补运行前提（Python / Node / C-C++）：kind 组别名只补缺项，一条不缺时打印「没有缺项，无需补齐」且不联网
 node start.js --provision                # 可选：虚拟机档只读状态（JSON：QEMU / guest 镜像 / agent 与运行包）
 node start.js --provision --ensure --yes # 可选（Linux / Windows）：把 QEMU 与 Debian guest 装进项目内 .vm/（下载前要 --yes）
@@ -63,7 +63,7 @@ node start.js --provision --ensure --yes # 可选（Linux / Windows）：把 QEM
 > 下文虚拟机 / 存储示例里的 `solomni` 指构建出的 `target/<profile>/solomni`；源码树里等价入口是 `node start.js ...`。
 
 - **首次启动**：没有 `.home/settings.yaml` 时，Windows 会先问一次是否授权容器围栏（写目录 ACL）；
-  选是就写盘并整体重启；选否不写设置、进入启动门（本次无围栏 / 重设 / 退出）。`-webUI` 也要先过这关，
+  选是就写盘并整体重启；选否不写设置、进入启动门（本次无围栏 / 重设 / 退出）。`--web` 也要先过这关，
   不会“带参数就直接开网页”。运行前提（Python / Node / C-C++）不在启动器里装：由产品
   `node start.js --provision --ensure=toolchain --yes` 按清单补（组别名只补缺项），`start.js` 只指路。
 - 工具链与缓存收敛在**项目内**：检测到**真能构建**的 Rust 才**只读借用**（借用前编译一个空程序探测：Windows 上 msvc host 缺 `link.exe`、例如没装 VS C++ 时不算可用），缓存与产物仍落 `platform/<os>/`；没有或有问题的才先征求同意装进项目内（Windows 装 GNU，自带链接器，不需要 Visual Studio），不动系统；Linux / macOS 的 C 工具链同口径：宿主 `cc` 能构建就直接用，缺了才征得同意把 Zig cc 装进 `.tools/toolchains`（macOS 缺 CLT 时直接给前置，不假装 Zig 能替代 SDK）。**无交互终端时不做安装**，打印手动步骤后退出。`node env.js` 给出 host、构建结论、C 工具链来源与借不借用。
@@ -93,8 +93,8 @@ node dev.js test|fmt|clippy   # 本机开发回路：改一层验一层；cargo 
   校验值由 `node pins.js update` 按上游校验源生成（不手抄）；`node pins.js check` 只读比对，CI 的 `pins-check` 每周检查一次，不写文件、不开 PR。
   用户覆盖走 `.home/settings.yaml` 与环境变量，不改仓库里的台账。
 - **没有可用模型就不建会话**：先登记供应商与模型并设定核心默认；缺了如实拒绝并指明缺什么，不回落假模型。
-- 常用参数：`--root <目录>`（换产品根）、`--web-port <端口>`、`--release`。
-- 终端提示符下的命令：启动时打印的菜单就是全量清单（`src/presentation/cli.rs` 的 `print_menu`）；回档走 `rewind`，供应商 / 模型 / 核心默认模型分别走 `provider` / `model` / `core`。
+- 常用参数：`--root <目录>`（换产品根）、`--web`（直接进 Web 界面）、`--port <端口>`、`--plain`（无色纯文本）、`--no-anim`（生成态不刷帧）、`--release`；`--help` 看旗语与命令手册（`--help --all` 展开隐藏项）。
+- 终端提示符下的命令：输入 `help`（或 `/help`）得到全量清单与旗语规范（`src/presentation/cli/catalog.rs` 的命令表；非交互模式启动时也会打印）；回档走 `rewind`，供应商 / 模型 / 核心默认模型分别走 `provider` / `model` / `core`。
 
 ### 配供应商与模型
 
@@ -128,7 +128,7 @@ tools:                       # 可选：模块工具表
 **条件不齐就打印 `DEMO-SKIPPED` 与怎么补、以退出码 2 收场：不跑，也不用内置演示通道凑一遍。**
 
 ```bash
-node start.js -webUI
+node start.js --web
 node demo/run-demo.mjs         # 组合式：一个 agent 装三个模块（python / node / C++）
 node demo/run-demo-collab.mjs  # 小组协作：三个 agent 各持一份能力协商，走完整条流程
 node demo/run-demo-mcp.mjs     # MCP：单 agent 只装 mcp-toolbox，拉起常驻服务并真调它的操作

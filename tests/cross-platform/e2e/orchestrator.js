@@ -325,7 +325,7 @@ async function main() {
   // 同时把围栏写入关掉：安全模式本来就不写本机权限项，宿主解释器因此按"无围栏"跑；
   // 真机围栏验收（--fence-live）才保留写入，并要求项目内工具链。
   const fenceWrite = process.env.SOLOMNI_FENCE_LIVE === "1" ? "1" : "0";
-  const srv = spawn(BIN, ["-webUI", "--web-port", String(PORT_SRV), "--root", FIXTURE], {
+  const srv = spawn(BIN, ["--web", "--port", String(PORT_SRV), "--root", FIXTURE], {
     cwd: PRODUCT_ROOT,
     stdio: "inherit",
     env: Object.assign({}, process.env, {
