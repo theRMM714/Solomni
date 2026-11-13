@@ -33,7 +33,6 @@ impl FakeUserPath {
         fake
     }
 
-    #[cfg(windows)]
     fn text(&self) -> String {
         self.writes
             .lock()
@@ -208,4 +207,85 @@ fn shim_renders_root_and_passes_args() {
     assert!(present && current);
     let (_, changed) = crate::entry::setup::shim::ensure(&root).expect("再生成");
     assert!(!changed, "内容相同不重写");
+}
+
+/// 目的：--setup 分派：未知模式算用法错；status 只输出可解析的 JSON，不改任何状态。
+#[test]
+fn run_rejects_unknown_mode_and_status_is_json() {
+    let root = crate::tests::scratch("setup-dispatch");
+    assert_eq!(crate::entry::setup::run(&root, "bogus"), 2);
+    assert_eq!(crate::entry::setup::run(&root, "status"), 0);
+}
+
+/// 目的：状态 JSON 只描述可观察事实：平台、根、PATH 段与围栏缺项都在，且结构稳定。
+#[test]
+fn status_json_reports_platform_root_and_fence() {
+    let root = crate::tests::scratch("setup-status");
+    let text = crate::entry::setup::status_json(&root).expect("状态要读得到");
+    let v: serde_json::Value = serde_json::from_str(&text).expect("stdout 必须是 JSON");
+    assert_eq!(v["platform"], std::env::consts::OS);
+    assert_eq!(v["root"], root.display().to_string());
+    assert!(
+        v["path"]["bin"]
+            .as_str()
+            .expect("bin 字段")
+            .ends_with("bin")
+    );
+    assert!(v["fence"]["ready"].is_boolean());
+}
+
+/// 目的：unset 只摘我们那段且幂等；undo 按备份还原原串与原类型——两条都与平台无关（端口注入）。
+#[test]
+fn unset_and_undo_are_driven_by_the_port() {
+    let root = crate::tests::scratch("setup-unset-undo");
+    let home = root.join(".home");
+    let bin = p::bin_text(&root);
+    let port = FakeUserPath::new(&format!("C:\\Windows;{};C:\\Other", bin), true);
+
+    let line = p::do_unset(&port, &root).expect("摘除");
+    assert!(line.contains("摘掉"), "{line}");
+    assert_eq!(port.text(), "C:\\Windows;C:\\Other");
+    assert!(p::do_unset(&port, &root).expect("再摘").contains("未含"));
+    assert_eq!(port.write_count(), 1, "第二次没写");
+
+    std::fs::create_dir_all(&home).expect("建私有区");
+    let backup = p::PathBackup {
+        v: 1,
+        original: "C:\\Windows".to_string(),
+        expand: false,
+        bin: bin.clone(),
+        at: 42,
+    };
+    std::fs::write(
+        p::backup_path(&home),
+        serde_json::to_string(&backup).expect("序列化"),
+    )
+    .expect("写备份");
+
+    let line = p::do_undo(&port, &home).expect("还原");
+    assert!(line.contains("还原"), "{line}");
+    assert_eq!(port.text(), "C:\\Windows");
+    assert!(!p::backup_path(&home).exists(), "还原后备份删除");
+}
+
+/// 目的：POSIX 上维护命令只打印指引、退出码 0，不碰真实用户状态；机器级预授如实报未支持。
+#[cfg(not(windows))]
+#[test]
+fn posix_modes_print_guidance_and_report_fence_unsupported() {
+    let root = crate::tests::scratch("setup-posix");
+    for mode in ["path", "unset", "undo", "fence", "all"] {
+        assert_eq!(
+            crate::entry::setup::run(&root, mode),
+            0,
+            "POSIX 的 {mode} 只打印指引"
+        );
+    }
+    assert!(crate::entry::setup::fence_hint(&root), "非 Windows 无缺项");
+    let home = root.join(".home");
+    let err =
+        crate::entry::setup::fence::ensure(&root, &home).expect_err("非 Windows 无机器级预授");
+    assert!(err.contains("本平台"), "{err}");
+    let err =
+        crate::kernel::detail::confine::machine_missing(&root).expect_err("非 Windows 无预授");
+    assert!(err.contains("本平台"), "{err}");
 }

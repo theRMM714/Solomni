@@ -87,10 +87,8 @@ pub(crate) fn status_json(root: &Path) -> Result<String, String> {
 
 /// 目的：启动期只读对账：机器级预授缺项时打一条提示（不静默慢写、不阻断启动）。
 /// 返回：true = 已就绪；false = 有缺项（调用方只提示一次）。
+#[cfg(windows)]
 pub(crate) fn fence_hint(root: &Path) -> bool {
-    if !cfg!(windows) {
-        return true;
-    }
     match fence::missing(root) {
         Ok(missing) if missing.is_empty() => true,
         Ok(missing) => {
@@ -108,18 +106,25 @@ pub(crate) fn fence_hint(root: &Path) -> bool {
     }
 }
 
+/// 目的：Windows 之外没有「机器级 ACL」这一步，如实返回已就绪（缺口见 tests/gaps.yaml）。
+#[cfg(not(windows))]
+pub(crate) fn fence_hint(_root: &Path) -> bool {
+    true
+}
+
 /// 目的：首次授权写盘后的那一趟：把机器级落点一次授好并显示进度（失败只告警，不拦重启）。
+#[cfg(windows)]
 pub(crate) fn ensure_after_authorize(root: &Path) {
-    if !cfg!(windows) {
-        return;
-    }
     let home = root.join(".home");
     println!("[便携] 首次授权：预授围栏的机器级授权（只需一次，之后新会话不再重写这批 ACL）");
-    let r = fence::ensure(root, &home);
-    if let Err(e) = r {
+    if let Err(e) = fence::ensure(root, &home) {
         eprintln!(
             "[便携] 机器级预授未完成：{}（稍后可用 solomni --setup=fence 重跑）",
             e
         );
     }
 }
+
+/// 目的：Windows 之外没有机器级预授，这一趟无事可做。
+#[cfg(not(windows))]
+pub(crate) fn ensure_after_authorize(_root: &Path) {}
