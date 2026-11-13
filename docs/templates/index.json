@@ -84,6 +84,10 @@
     {
       "path": "docs/templates/**",
       "reason": "模板自身"
+    },
+    {
+      "path": "plan.md",
+      "reason": "进行中的计划与合并流程：随 PR 队列更新，不承载规则"
     }
   ],
   "enforce": [

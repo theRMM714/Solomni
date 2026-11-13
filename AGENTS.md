@@ -107,6 +107,7 @@
 | --- | --- |
 | 项目概括和快速开始 | `README.md` |
 | 项目概括和快速开始（English） | `README_EN.md` |
+| 当前计划与合并流程 | `plan.md` |
 | 架构、分层、业务边界判据（§九）、硬要求（R1–R13）、日志、提示词或落盘 | `ARCHITECTURE.md` |
 | 产品行为、运行流程与用户旅程 | `PRODUCT.md` |
 | 项目方向、承诺与判据 | `PHILOSOPHY.md` |
