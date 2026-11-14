@@ -16,6 +16,20 @@ fn pays_host_grant(meta: &SessionMeta) -> bool {
     once && meta.exec.tier == crate::kernel::api::Tier::Host
 }
 
+/// 目的：workspace 粒度的一次性机器级只读授权——只有本机档付；会话已落盘，甩到后台，创建保持毫秒级。
+/// 约束：虚拟机档是挂载边界，宿主不写 ACL；`root` 是产品根（授权状态落在它的 `.home` 下）。
+fn pay_workspace_grant(root: &std::path::Path, meta: &SessionMeta) {
+    if !pays_host_grant(meta) {
+        return;
+    }
+    if let Some(binding) = meta.workspace.as_ref() {
+        crate::capabilities::workspace::api::ensure_in_background(
+            &root.join(".home"),
+            &binding.root,
+        );
+    }
+}
+
 impl Conductor {
     /// 目的：工作名的缺省与唯一化（命名策略在 `session`；这里只提供"存在吗"）。
     pub fn unique_work_name(&self, base: &str, fallback: &str) -> String {
@@ -544,14 +558,7 @@ impl Conductor {
         self.sessions.insert(name.clone(), session);
         self.record_events(&name, &mut events);
         // 只有本机档 + workspace 粒度才付机器级只读授权（一次性成本）：会话已经落盘，甩到后台慢慢付，创建本身保持毫秒级。
-        if pays_host_grant(&meta)
-            && let Some(binding) = meta.workspace.as_ref()
-        {
-            crate::capabilities::workspace::api::ensure_in_background(
-                &self.root.join(".home"),
-                &binding.root,
-            );
-        }
+        pay_workspace_grant(&self.root, &meta);
         // 事实（开场转录 + 提示）随结果交出：核心不持有事件台，发布是 api 层的职责。
         Ok(WorkOpened {
             sid: name,
@@ -691,5 +698,55 @@ mod tests {
         assert!(!pays_host_grant(&meta(Tier::Vm, WorkspaceGrant::Workspace)));
         assert!(!pays_host_grant(&meta(Tier::Host, WorkspaceGrant::Session)));
         assert!(!pays_host_grant(&meta(Tier::Host, WorkspaceGrant::None)));
+    }
+
+    /// 目的：只有该付的那一种会把授权甩到后台，并把状态写进产品根的 `.home`；其它组合不留痕迹。
+    /// 约束：只在非 Windows 跑（内核桩返回零报告，不写真实 ACL）。
+    #[cfg(not(windows))]
+    #[test]
+    fn workspace_grant_is_paid_in_the_background_under_the_product_home() {
+        use crate::capabilities::workspace::api::WorkspaceGrant;
+        use crate::kernel::api::Tier;
+        let base = std::env::temp_dir().join(format!(
+            "solomni-pay-grant-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let root = base.join("product");
+        let ws = base.join("ws");
+        std::fs::create_dir_all(&root).expect("建产品根");
+        std::fs::create_dir_all(&ws).expect("建工作区");
+        std::fs::write(ws.join("a.txt"), b"a").expect("写一个对象");
+        // 不付的两种：虚拟机档（挂载边界）、没有外部工作区。
+        pay_workspace_grant(&root, &meta(Tier::Vm, WorkspaceGrant::Workspace));
+        let mut detached = meta(Tier::Host, WorkspaceGrant::Workspace);
+        detached.workspace = None;
+        pay_workspace_grant(&root, &detached);
+        assert!(!root.join(".home").exists(), "不该付的组合不留痕迹");
+        // 该付的一种：状态文件由后台线程写出来（内核桩：0 写、0 复用）。
+        let mut pay = meta(Tier::Host, WorkspaceGrant::Workspace);
+        pay.workspace.as_mut().expect("有绑定").root = ws.clone();
+        pay_workspace_grant(&root, &pay);
+        let state = root.join(".home").join("workspace-grants.json");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !state.is_file() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(state.is_file(), "后台授权要写状态：{}", state.display());
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&state).expect("读状态")).expect("JSON");
+        let key = ws
+            .canonicalize()
+            .expect("规范化工作区")
+            .display()
+            .to_string();
+        assert_eq!(
+            v["roots"][key.as_str()]["mode"],
+            serde_json::json!("workspace")
+        );
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

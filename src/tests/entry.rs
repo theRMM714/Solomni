@@ -135,4 +135,15 @@ fn fence_revoke_splits_arity_without_crossing_meanings() {
         Some(2),
         "零参数：只给两行用法"
     );
+    // 结果呈现的三个分支：撤到条数、内核失败（前者 0，后者 1）；0 条已在上面的真路径里走到。
+    assert_eq!(
+        crate::guard::revoke_machine_report(Ok(2), root.path()),
+        0,
+        "撤到条数：成功退 0"
+    );
+    assert_eq!(
+        crate::guard::revoke_machine_report(Err("授不上".to_string()), root.path()),
+        1,
+        "撤不动：失败退 1"
+    );
 }

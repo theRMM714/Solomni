@@ -728,3 +728,24 @@ pub(crate) fn sandboxes_lookup_is_by_agent() {
     assert!(boxes.for_agent("甲").is_some(), "按 agent 实例名取沙箱");
     assert!(boxes.for_agent("a").is_none(), "沙箱不再按模块 id 反查");
 }
+
+/// 目的：授权粒度的落盘写法与解析互逆；不认识的值如实拒绝，不静默落缺省。
+#[test]
+pub(crate) fn workspace_grant_names_round_trip() {
+    use crate::capabilities::session::api::WorkspaceGrant;
+    for grant in [
+        WorkspaceGrant::None,
+        WorkspaceGrant::Session,
+        WorkspaceGrant::Workspace,
+    ] {
+        let name = grant.as_str();
+        assert_eq!(
+            WorkspaceGrant::parse(name).expect("自己写出的名字要能读回"),
+            grant,
+            "{}",
+            name
+        );
+    }
+    let err = WorkspaceGrant::parse("sometimes").expect_err("非法粒度要拒绝");
+    assert!(err.contains("未知的工作区授权粒度"), "{}", err);
+}

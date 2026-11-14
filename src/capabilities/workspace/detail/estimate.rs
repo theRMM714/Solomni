@@ -118,14 +118,20 @@ pub fn estimate_workspace_cost(root: &Path, home: &Path) -> Result<WorkspaceCost
 /// 目的：把一次真实机器级授权的（对象数, 耗时）记进本卷样本，并刷新加权速率。
 /// 约束：尽力而为——写失败不影响授权本身；非 Windows（识别不出卷）静默跳过。
 pub fn record_grant_cost(home: &Path, root: &Path, objects: u64, ms: u64) {
-    if objects == 0 {
-        return;
-    }
     let Some(volume) = volume_of(root) else {
         return;
     };
+    record_grant_cost_for_volume(home, &volume, root, objects, ms);
+}
+
+/// 目的：把一次样本记进**指定卷**的账本；卷的识别与记账分开，非 Windows 也能测记账本身。
+/// 约束：`objects == 0` 是"没数成"，直接跳过——0 对象算出的速率会污染预估。
+fn record_grant_cost_for_volume(home: &Path, volume: &str, root: &Path, objects: u64, ms: u64) {
+    if objects == 0 {
+        return;
+    }
     let mut book = load_costs(home);
-    let entry = book.volumes.entry(volume).or_default();
+    let entry = book.volumes.entry(volume.to_string()).or_default();
     entry.samples.push(CostSample {
         at: now_unix(),
         path: root.display().to_string(),
@@ -223,6 +229,7 @@ fn save_costs(home: &Path, book: &CostBook) {
 
 /// 目的：判网络共享（UNC / VerbatimUNC）——围栏对 UNC 工作区没有机器级只读语义，直接拒绝。
 /// 约束：按路径前缀判定，不能先 canonicalize（扩展路径 `\\?\C:\` 会被误判成 UNC）。
+#[cfg(windows)]
 fn is_network_share(path: &Path) -> bool {
     use std::path::{Component, Prefix};
     matches!(
@@ -230,6 +237,12 @@ fn is_network_share(path: &Path) -> bool {
         Some(Component::Prefix(p))
             if matches!(p.kind(), Prefix::UNC(..) | Prefix::VerbatimUNC(..))
     )
+}
+
+/// 目的：非 Windows 没有盘符/UNC 这套路径前缀，网络共享判据不适用——恒不是（预算照常走本地计数）。
+#[cfg(not(windows))]
+fn is_network_share(_path: &Path) -> bool {
+    false
 }
 
 /// 目的：速率按卷分组——Windows 取盘符前缀（D:），其它平台没有这个维度。
@@ -362,6 +375,147 @@ mod tests {
         for vol in book.volumes.values() {
             assert_eq!(vol.samples.len(), MAX_SAMPLES);
         }
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// 目的：造一个一次性的成本簿目录（不经 product 根）。
+    fn cost_home(tag: &str) -> std::path::PathBuf {
+        let home = std::env::temp_dir().join(format!(
+            "solomni-cost-book-{}-{}-{}",
+            tag,
+            std::process::id(),
+            now_unix()
+        ));
+        let _ = std::fs::remove_dir_all(&home);
+        home
+    }
+
+    #[test]
+    fn volume_keyed_samples_refresh_the_rate_without_a_windows_drive() {
+        let home = cost_home("volume");
+        let root = Path::new("C:\\ws");
+        record_grant_cost_for_volume(&home, "C:", root, 100, 100);
+        record_grant_cost_for_volume(&home, "C:", root, 100, 300);
+        record_grant_cost_for_volume(&home, "C:", root, 0, 99);
+        let text = std::fs::read_to_string(home.join(COSTS_FILE)).expect("记账会写成本文件");
+        let book: CostBook = serde_json::from_str(&text).expect("形状");
+        let entry = book.volumes.get("C:").expect("按卷记账");
+        assert_eq!(entry.samples.len(), 2, "0 对象不记样本");
+        assert!(
+            (entry.ms_per_object - 2.0).abs() < f64::EPSILON,
+            "按对象数加权：{}",
+            entry.ms_per_object
+        );
+        assert!(entry.at > 0, "最近样本时间戳要落盘");
+        #[cfg(not(windows))]
+        {
+            // 非 Windows 识别不出卷：静默跳过，不留下空账本。
+            let bare = cost_home("bare");
+            record_grant_cost(&bare, root, 10, 10);
+            assert!(!bare.join(COSTS_FILE).is_file(), "没有卷就不记账");
+            let _ = std::fs::remove_dir_all(&bare);
+        }
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn volume_samples_keep_only_the_most_recent_ones() {
+        let home = cost_home("cap");
+        let root = Path::new("D:\\ws");
+        for i in 0..(MAX_SAMPLES as u64 + 3) {
+            record_grant_cost_for_volume(&home, "D:", root, 10, i);
+        }
+        let book: CostBook = serde_json::from_str(
+            &std::fs::read_to_string(home.join(COSTS_FILE)).expect("成本文件"),
+        )
+        .expect("形状");
+        let entry = book.volumes.get("D:").expect("按卷记账");
+        assert_eq!(entry.samples.len(), MAX_SAMPLES);
+        assert_eq!(
+            entry.samples.first().map(|s| s.ms),
+            Some(3),
+            "超过上限从最旧的丢"
+        );
+        assert_eq!(
+            entry.samples.last().map(|s| s.ms),
+            Some(MAX_SAMPLES as u64 + 2),
+            "最近一条留着"
+        );
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn corrupt_cost_file_reads_as_an_empty_book() {
+        let home = cost_home("corrupt");
+        std::fs::create_dir_all(&home).expect("建成本簿目录");
+        std::fs::write(home.join(COSTS_FILE), b"{ \"volumes\": ").expect("写坏样本");
+        assert!(
+            load_costs(&home).volumes.is_empty(),
+            "坏账本当空账，预估不能因它失败"
+        );
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn rate_for_prefers_the_measured_sample_of_the_same_volume() {
+        let mut book = CostBook::default();
+        book.volumes.insert(
+            "C:".to_string(),
+            VolumeCost {
+                ms_per_object: 2.0,
+                samples: Vec::new(),
+                at: 0,
+            },
+        );
+        assert_eq!(rate_for(&book, Some("C:")), (2.0, "measured"));
+        assert_eq!(
+            rate_for(&book, Some("D:")),
+            (DEFAULT_MS_PER_OBJECT, "default"),
+            "没有本卷样本用缺省"
+        );
+        book.volumes.insert(
+            "Z:".to_string(),
+            VolumeCost {
+                ms_per_object: 0.0,
+                samples: Vec::new(),
+                at: 0,
+            },
+        );
+        assert_eq!(
+            rate_for(&book, Some("Z:")),
+            (DEFAULT_MS_PER_OBJECT, "default"),
+            "0 速率当没样本"
+        );
+        assert_eq!(
+            rate_for(&book, None),
+            (DEFAULT_MS_PER_OBJECT, "default"),
+            "没有卷维度"
+        );
+    }
+
+    /// 目的：读不开的目录必须降级成 truncated 或如实报错，不能假装数完了。
+    /// 约束：只在不以 root 权限跑的机器上有效（root 无视权限位时跳过断言）。
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_dirs_degrade_instead_of_failing_the_estimate() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = fixture("perm");
+        let home = cost_home("perm");
+        let sub = root.join("sub");
+        std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o000)).expect("锁子目录");
+        if std::fs::read_dir(&sub).is_err() {
+            let (_, _, _, truncated) =
+                walk(&root, MAX_ENTRIES, BUDGET).expect("子目录读不开不算失败");
+            assert!(truncated, "读不开的子目录要标 truncated");
+        }
+        std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o755)).expect("还原子目录");
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o000)).expect("锁根");
+        if std::fs::read_dir(&root).is_err() {
+            let err = estimate_workspace_cost(&root, &home).expect_err("根读不开要报错");
+            assert!(err.contains("读目录失败"), "{}", err);
+        }
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o755)).expect("还原根");
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&home);
     }
