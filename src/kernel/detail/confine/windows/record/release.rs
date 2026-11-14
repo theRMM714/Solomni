@@ -357,20 +357,19 @@ pub fn release_by_lease(home: &Path, lease: &str) -> Result<(), String> {
         let _lock = lock_ledger(home)?;
         let mut rec = load_record(home);
         let plans = plan_release(&mut rec, &owner, None);
-        // profile 与授权同生命周期：这个会话的归属走了就删 profile（删不掉如实记错）。
-        let mut names: Vec<String> = rec
-            .profiles
-            .iter()
-            .filter(|p| p.owners.iter().any(|o| o == &owner))
-            .map(|p| p.name.clone())
-            .collect();
-        names.sort();
-        names.dedup();
-        for name in &names {
-            if let Some(p) = rec.profiles.iter_mut().find(|p| p.name == *name) {
-                p.owners.retain(|o| o != &owner);
+        // profile 与授权同生命周期：这个会话的归属走了、且没有别的归属，才删 profile。
+        let mut names: Vec<String> = Vec::new();
+        for p in rec.profiles.iter_mut() {
+            if !p.owners.iter().any(|o| o == &owner) {
+                continue;
+            }
+            p.owners.retain(|o| o != &owner);
+            if p.owners.is_empty() {
+                names.push(p.name.clone());
             }
         }
+        names.sort();
+        names.dedup();
         if had_record {
             save_record(home, &rec).map_err(|e| format!("授权台账更新失败：{}", e))?;
         }
