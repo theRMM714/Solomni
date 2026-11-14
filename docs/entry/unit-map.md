@@ -17,7 +17,7 @@
 | `src/entry/setup.rs` | 便携维护入口（`--setup`）：产品根解析后立刻分派，不装配核心；PATH shim 与围栏机器级预授的状态、执行，首次授权后的自动 ensure 与后续启动的只读提示 |
 | `src/entry/setup/path.rs` | 用户 PATH 的读取、追加、摘除与还原：分段纯函数（去重、引号 / 尾斜杠 / 大小写不敏感）、备份 `.home/setup-path.json`、保留 `REG_SZ` / `REG_EXPAND_SZ` 类型、写后广播环境变化 |
 | `src/entry/setup/shim.rs` | Windows 便携入口 `bin/solomni.cmd` 的生成与核对：固定 `--root <绝对根>`、参数透传、内容相同不重写（仅 Windows） |
-| `src/entry/setup/fence.rs` | 围栏机器级预授的入口：`--setup=fence` 的分步进度与退出码、预授成功后退役旧的全应用包机器级授权、status 的缺项清单、首次授权后的自动 ensure（非 Windows 如实说本平台不写 ACL） |
+| `src/entry/setup/fence.rs` | 围栏机器级预授的入口：`--setup=fence` 的分步进度与退出码、预授成功后退役旧的全应用包机器级授权、`--setup=fence-calibrate` 的合成树标定与成本样本回写、status 的缺项清单、首次授权后的自动 ensure（非 Windows 如实说本平台不写 ACL） |
 | `src/entry/assembly.rs` | 组合根的共用装配：把产品根变成各能力面；端口选型、适配器构造与依赖顺序只在这里落一次 |
 | `src/entry/root.rs` | 产品根规范化：纯词法拼接与归一化，取不到当前目录才退回 canonicalize |
 | `src/entry/toolchains.rs` | 启动期基础工具链：读 `.tools/toolchains/active.json`，校验目标与相对路径，把项目 bin 前置到 PATH 并设置工具环境；每次启动报告项目内 / 宿主回退（含 Windows 围栏可授权性）/ 缺失；不阻断启动 |

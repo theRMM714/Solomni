@@ -197,6 +197,8 @@ pub use prep::{
     MachineGrantReport, clean_all, ensure_workspace_grant, machine_ensure, machine_missing,
     revoke_machine_grants, sweep_profiles,
 };
+#[cfg(windows)]
+pub(crate) use prep::{calibrate_machine_grant, remove_calibration_tree};
 
 #[cfg(windows)]
 pub(crate) use paths::{

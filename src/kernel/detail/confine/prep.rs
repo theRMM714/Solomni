@@ -180,6 +180,28 @@ pub fn revoke_machine_grants(
     Ok(0)
 }
 
+/// 目的：`--setup=fence-calibrate` 的合成树标定（仅 Windows）：建树、真写一次机器级只读 ACL、计时、撤权。
+pub(crate) struct CalibrationReport {
+    pub(crate) path: std::path::PathBuf,
+    pub(crate) objects: u64,
+    pub(crate) ms: u64,
+}
+
+#[cfg(windows)]
+pub(crate) fn calibrate_machine_grant(home: &std::path::Path) -> Result<CalibrationReport, String> {
+    let c = windows::calibrate_machine_grant(home)?;
+    Ok(CalibrationReport {
+        path: c.path,
+        objects: c.objects,
+        ms: c.ms,
+    })
+}
+
+#[cfg(windows)]
+pub(crate) fn remove_calibration_tree(path: &std::path::Path) -> Result<(), String> {
+    windows::remove_calibration_tree(path)
+}
+
 /// 目的：默认回收：按台账撤掉按次 / 会话权限项与容器 profile，保留机器级授权（测试与常规收尾用）。
 #[cfg(test)]
 pub fn clean(home: &std::path::Path) -> Result<String, String> {
