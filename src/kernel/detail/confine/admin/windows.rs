@@ -4,7 +4,7 @@
 //! 联动：由 `src/kernel/detail/confine/admin.rs` 按平台选中。
 
 use super::super::ledger::{Ledger, ReconcileReport};
-use super::super::prep::MachineGrantReport;
+use super::super::prep::{CalibrationReport, MachineGrantReport};
 use super::super::windows;
 use crate::kernel::api::FenceSpec;
 use std::path::Path;
@@ -17,7 +17,7 @@ pub(super) fn release_by_lease(home: &Path, lease: &str) -> Result<(), String> {
 /// 目的：一次性调用的三步收尾各记错、合并返回。
 pub(super) fn release_call(spec: &FenceSpec, home: &Path) -> Result<(), String> {
     let mut errors: Vec<String> = Vec::new();
-    if let Err(e) = super::super::release_fence(spec, home) {
+    if let Err(e) = windows::release_fence(spec, home) {
         errors.push(e);
     }
     let name = windows::container_name(spec);
@@ -67,11 +67,6 @@ pub(super) fn remove_profile_one(home: &Path, name: &str) -> Result<String, Stri
     windows::remove_profile_one(home, name)
 }
 
-/// 目的：撤销一次调用的围栏授权。
-pub(super) fn release_fence(spec: &FenceSpec, home: &Path) -> Result<(), String> {
-    windows::release_fence(spec, home)
-}
-
 /// 目的：清扫本程序建过的整族容器 profile。
 pub(super) fn sweep_profiles() -> Result<usize, String> {
     windows::sweep_profiles()
@@ -115,4 +110,19 @@ pub(super) fn revoke_machine_grants(home: &Path, path: &Path) -> Result<usize, S
 /// 目的：全量回收。
 pub(super) fn clean_all(home: &Path) -> Result<String, String> {
     windows::clean_all(home)
+}
+
+/// 目的：建树、真写一次机器级只读 ACL、计时、撤权。
+pub(super) fn calibrate_machine_grant(home: &Path) -> Result<CalibrationReport, String> {
+    let c = windows::calibrate_machine_grant(home)?;
+    Ok(CalibrationReport {
+        path: c.path,
+        objects: c.objects,
+        ms: c.ms,
+    })
+}
+
+/// 目的：删掉标定用的合成树。
+pub(super) fn remove_calibration_tree(path: &Path) -> Result<(), String> {
+    windows::remove_calibration_tree(path)
 }
