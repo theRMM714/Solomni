@@ -1,0 +1,43 @@
+[e2e] 仓库没有项目内工具链（.tools/toolchains/active.json）：按宿主 PATH 跑
+[e2e] 夹具解释器：python → C:\hostedtoolcache\windows\Python\3.12.10\x64\python.exe
+[e2e] 真模块已复制进夹具：harvest / render / indexer
+[e2e] 试编译器：D:\a\Solomni\Solomni\.tools\mingw64\bin\g++.exe
+[e2e] 试编译器失败：D:\a\Solomni\Solomni\.tools\mingw64\bin\g++.exe（spawnSync D:\a\Solomni\Solomni\.tools\mingw64\bin\g++.exe ENOENT）
+[e2e] 试编译器：g++
+g++ (x86_64-posix-seh-rev1, Built by MinGW-Builds project) 15.2.0
+Copyright (C) 2025 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+[e2e] indexer 就绪：modules\indexer\build\indexer.exe（3063219 字节）
+MOCK-UP 8557
+[工具链] 项目内未安装：python、node、cc；补全：node start.js --provision --ensure=toolchain --yes
+[工具链] 宿主回退 python → C:\hostedtoolcache\windows\Python\3.12.10\x64\python.exe（围栏可用）
+[工具链] 宿主回退 node → C:\hostedtoolcache\windows\node\26.13.1\x64\node.exe（围栏可用）
+[工具链] 宿主回退 cc → C:\mingw64\bin\gcc.exe（围栏可用）
+[围栏] Windows：AppContainer（文件系统可达范围；net 决定是否授 internetClient）与 Job Object（进程树）都由内核强制
+[围栏] 本机能力：文件系统=可用 断网=可用 进程树=可用（Windows：AppContainer（文件系统可达范围；net 决定是否授 internetClient）与 Job Object（进程树）都由内核强制）
+[围栏] 本次实际：文件系统=可用 断网=可用 进程树=可用；容器授权=已授权；只读根=0 个（容器围栏按本机能力装，写入的权限项逐条记台账）
+[便携] 围栏机器级授权还缺 2 处（产品根读属性（继承）（D:\a\Solomni\Solomni\tests\cross-platform\e2e\root）；运行包只读（递归）（D:\a\Solomni\Solomni\tests\cross-platform\e2e\root\runtimes））：跑一次 solomni --setup=fence 可免掉新会话的重复 ACL 写
+[沙箱] 本进程已降级：缺失的强制项按如实降级执行；重启后重新评估
+Solomni 转录中心：http://127.0.0.1:3099（只监听本机）
+PASS 登记假供应商
+PASS 登记模型 m1
+PASS 登记模型 m2
+PASS 设核心默认 m1
+PASS 登记 agent 单兵
+PASS 登记 agent 双子
+[browser] 使用系统浏览器：msedge
+[browser] browser.version = 156.0.4314.58
+PASS 首页加载完成
+PASS 向导创建会话：ui-browser-1794678235069（ui-browser-1794678235069）
+PASS 发送消息并收到回复
+PASS 设置 write 需确认
+PASS 裁决卡提交后继续生成
+PASS 设置保存
+PASS 存储回收（当前没有到策略条件的项，给出明确提示）
+PASS 浏览器上传文件到 work/
+PASS 浏览器控制台无错误
+BROWSER-E2E-OK
+E2E-OK
+[e2e] 围栏回收（退出码 0）：[围栏] 清理完成：没有台账：本程序没在本机写过权限项 | [围栏] 清理完成：产品根内没有台账外的孤儿授权 | [围栏] 清理完成：扫掉 0 个本程序建过的容器 profile | [工具链] 项目内未安装：python、node、cc；补全：node start.js --provision --ensure=toolchain --yes | [工具链] 宿主回退 python → C:\hostedtoolcache\windows\Python\3.12.10\x64\python.exe（围栏可用） | [工具链] 宿主回退 node → C:\hostedtoolcache\windows\node\26.13.1\x64\node.exe（围栏可用） | [工具链] 宿主回退 cc → C:\mingw64\bin\gcc.exe（围栏可用）
