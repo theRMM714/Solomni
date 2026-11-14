@@ -1,9 +1,9 @@
 # Windows 平台的缺口账（当前状态：条目存在 = 这条测试还没有；补上就删条目）。
 #
-# 当前为空：授权与撤权的真效果都已在真机验收——
-# src/kernel/detail/confine/windows/tests.rs 的 grants_are_written_when_the_environment_allows_it
-# 与 revoke_removes_the_container_ace_from_the_given_roots 在 windows-latest 上真跑
-# （写了真 ACE、撤权后 ACE 消失）。环境性跳过以 [探针] 进报告的 envSkips，不可能伪装成验过。
+# 授权与撤权的真效果已在真机验收——src/kernel/detail/confine/windows/tests.rs 的
+# grants_are_written_when_the_environment_allows_it 与 revoke_removes_the_container_ace_from_the_given_roots
+# 在 windows-latest 上真跑（写了真 ACE、撤权后 ACE 消失）。环境性跳过以 [探针] 进报告的 envSkips，
+# 不可能伪装成验过。下面列出的是**还没有**的那几条。
 
 - id: fence.external-workspace-zero-cost
   scope: windows
@@ -12,7 +12,7 @@
     外部工作区在 AppContainer 下靠 ro_tree 逐会话传播写 DACL：每个新会话第一次访问都要遍历整棵子树
     重写继承 ACE（O(对象数)），会话结束再递归撤销；代价随外部根大小线性增长，没有与目录大小无关的
     路径型边界或 broker 等价物。向导的 workspace_grant=workspace 只是把这一次性成本提前成机器级授权
-    （授给 ALL APPLICATION PACKAGES、ACE 常驻），并没有消除首次遍历写 ACL。
+    （授给本产品能力 SID、ACE 常驻），并没有消除首次遍历写 ACL。
   how: |
     1) 短期（已实现）：向导三态选择 + GET /api/workspace-cost 预估，让用户按目录规模选 workspace 粒度，
        把每会话等待换成一次性机器级授权；

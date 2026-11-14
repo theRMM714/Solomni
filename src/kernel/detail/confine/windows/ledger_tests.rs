@@ -4,7 +4,7 @@
 //! 联动：机制在 confine/windows.rs 与 ledger.rs；夹具复用 `tests` 模块的探针助手。
 
 use super::super::Owner;
-use super::tests::{acl_round_trip, discard, expect_granted};
+use super::tests::{acl_round_trip, discard, expect_granted, product_sid};
 use super::*;
 
 /// 【台账契约】写前先落盘：快照与授权摘要都要能在 ACL 改动前读回；收尾按快照整体还原。
@@ -622,7 +622,7 @@ fn machine_target_is_only_the_ancestor_chain_shape() {
     );
 }
 
-/// 【机器级·台账】授给所有应用程序包的祖先链授权：不记归属、对账一律保留（不撤 ACE、不还原快照）。
+/// 【机器级·台账】授给本产品能力 SID 的祖先链授权：不记归属、对账一律保留（不撤 ACE、不还原快照）。
 #[test]
 fn machine_grant_has_no_owners_and_survives_reconcile() {
     let _fence = crate::tests::fence_acl_guard();
@@ -637,13 +637,10 @@ fn machine_grant_has_no_owners_and_survives_reconcile() {
         return;
     }
     let home = base.join(".home");
-    let base_sid = match baseline_sid() {
+    let base_sid = match product_sid() {
         Ok(s) => s,
         Err(e) => {
-            eprintln!(
-                "[探针] 取不到「所有应用程序包」基线 SID：机器级台账探针跳过（{}）",
-                e
-            );
+            eprintln!("[探针] 派生不出本产品能力 SID：机器级台账探针跳过（{}）", e);
             discard(&base);
             return;
         }

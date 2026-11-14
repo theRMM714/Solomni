@@ -163,7 +163,7 @@ fn is_reparse_point(path: &std::path::Path) -> bool {
 }
 
 /// 目的：这个解释器安装目录在**平台围栏**下能不能放行（只读探测，不写权限项）。
-///   Windows：已有足够的 ALL APPLICATION PACKAGES ACE，或目录属主是当前用户（能写 DACL）；
+///   Windows：已有足够的只读基线 ACE（本产品能力 SID，或系统目录自带的全应用包），或目录属主是当前用户（能写 DACL）；
 ///   其它平台：围栏只读放行，目录存在即可。
 pub(crate) fn interpreter_dir_usable(dir: &std::path::Path) -> Result<(), String> {
     #[cfg(windows)]

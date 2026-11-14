@@ -94,7 +94,7 @@ pub fn catalog(home: &Path) -> Ledger {
         // 机器级授权的口径要说清：它跨会话复用、启动对账不回收，撤它得显式清或按条撤。
         if grant.scope == GrantScope::Machine {
             notes.push(
-                "机器级授权：授给所有应用程序包、跨会话复用；启动对账不回收（要撤用 --fence-clean 或按条撤销）"
+                "机器级授权：授给本产品能力 SID、跨会话复用；启动对账不回收（要撤用 --fence-clean 或按条撤销）"
                     .to_string(),
             );
         }

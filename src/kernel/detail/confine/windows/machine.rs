@@ -1,6 +1,7 @@
-//! 目的：机器级一次性授权——把「每次新会话都要重写」的祖先链只读属性与可信基座只读授权一次授给
-//!   所有应用程序包（ALL APPLICATION PACKAGES），后续围栏准备就只剩 O(深度) 的 ACE 读。
-//! 管：落点清单（祖先链 / 产品根 / .tools / runtimes）、只读判定、逐条授权与分步计时、失败如实上报，
+//! 目的：机器级一次性授权——把「每次新会话都要重写」的产品根只读属性与可信基座只读授权一次授给
+//!   本产品的能力 SID（S-1-15-3-*，见 container::CAPABILITY_NAME），后续围栏准备就只剩 O(深度) 的 ACE 读。
+//!   不授给 ALL APPLICATION PACKAGES：那会把读权限下放给本机所有 AppContainer 应用。
+//! 管：落点清单（产品根 / .tools / runtimes）、只读判定、逐条授权与分步计时、失败如实上报，
 //!   以及外部工作区的显式一次性只读授权/撤权（ensure_workspace_grant / revoke_machine_grants）。
 //! 不管：每会话的容器数据授权（windows.rs 的 prepare_fence）、ACE 读写（acl.rs）、台账（record/）。
 //! 联动：entry::setup::fence 与启动首次授权共用 machine_ensure；状态查询与 --setup=status 共用 machine_missing。
@@ -21,7 +22,7 @@ pub(crate) struct MachineStep {
 /// 目的：机器级授权的全部落点。
 ///   产品根：读属性 + (OI)(CI) 继承——根下已有与将来新建的目录/文件都自动带这条 ACE，
 ///     于是每会话的祖先链、模块父目录等 STAT 检查全部命中，不再写 DACL。
-///   可信基座（.tools / runtimes）：递归只读，授给共享包组；新装进这两个目录的文件也继承。
+///   可信基座（.tools / runtimes）：递归只读，授给本产品能力 SID；新装进这两个目录的文件也继承。
 /// 约束：产品根之外的祖先链一级都不写（视图盘把产品根映射成盘符，容器只认映射根这一级）；
 ///   盘根更不写（写盘根 = 整盘继承重算，真机灾难）。
 pub(crate) fn machine_plan(root: &Path) -> Vec<MachineStep> {
@@ -65,7 +66,8 @@ fn step_ready(base: PSID, step: &MachineStep) -> bool {
 /// 目的：还有哪些机器级落点没授上（空 = 已就绪）。只读：每条一次 DACL 读，O(深度 + 2)。
 /// 返回：缺失落点的人话描述（给 --setup=status 与启动对账用）。
 pub(crate) fn machine_missing(root: &Path) -> Result<Vec<String>, String> {
-    let base = baseline_sid()?;
+    let owned = product_capability_sid()?;
+    let base = owned.as_ptr() as PSID;
     let mut missing = Vec::new();
     for step in machine_plan(root) {
         if !step.path.exists() {
@@ -75,7 +77,6 @@ pub(crate) fn machine_missing(root: &Path) -> Result<Vec<String>, String> {
             missing.push(format!("{}（{}）", step.label, step.path.display()));
         }
     }
-    free_sid(base);
     Ok(missing)
 }
 
@@ -92,7 +93,8 @@ pub(crate) fn machine_ensure(
     }
     // 台账锁只罩「读—改—写」事务（见 record/store.rs 的 with_ledger）：逐条授权各自开事务，
     // 不把整段 ensure 罩在一把锁里，否则并发首启会在慢 ACL 写期间互相等到 60 秒锁上限。
-    let base = baseline_sid()?;
+    let owned = product_capability_sid()?;
+    let base = owned.as_ptr() as PSID;
     let base_text = sid_to_string(base);
     let mut errors: Vec<String> = Vec::new();
     let mut written = 0usize;
@@ -152,7 +154,6 @@ pub(crate) fn machine_ensure(
             }
         }
     }
-    free_sid(base);
     out(&format!(
         "机器级授权：本次新写 {} 条，共 {} 个落点",
         written,
@@ -168,7 +169,7 @@ pub(crate) fn machine_ensure(
 // 契约出口：prep.rs 的 ensure_workspace_grant 转发它；装配层接上调用点之前显式放行。
 #[allow(dead_code)]
 /// 目的：给一个外部工作区授**机器级一次性只读**（外部工作区绑定等显式动作先付一次成本）。
-///   授给基线组、递归、可继承——之后每会话的围栏准备只剩一次 DACL 读，不再重付整树成本。
+///   授给本产品能力 SID、递归、可继承——之后每会话的围栏准备只剩一次 DACL 读，不再重付整树成本。
 /// 参数：home = 产品私有区（台账）；root = 工作区目录。
 /// 返回：本次是否真写了 ACL（written / reused）与动作耗时。
 /// 错误：盘卷根、目录不存在、台账或 ACL 写失败都如实返回（台账先落、失败不静默）。
@@ -182,7 +183,8 @@ pub(crate) fn ensure_workspace_grant(
     if !root.is_dir() {
         return Err(format!("工作区目录不存在：{}", root.display()));
     }
-    let base = baseline_sid()?;
+    let owned = product_capability_sid()?;
+    let base = owned.as_ptr() as PSID;
     let base_text = sid_to_string(base);
     let started = Instant::now();
     let target = GrantTarget {
@@ -194,7 +196,6 @@ pub(crate) fn ensure_workspace_grant(
     };
     let product = product_root(home);
     let result = grant_machine_journaled(home, base, &base_text, &target, &product);
-    free_sid(base);
     match result {
         Ok(true) => Ok(MachineGrantReport {
             written: 1,
@@ -232,18 +233,17 @@ pub(crate) fn revoke_machine_grants(home: &Path, path: &Path) -> Result<usize, S
     if !recorded {
         return Ok(0);
     }
-    let base = baseline_sid()?;
+    let owned = product_capability_sid()?;
+    let base = owned.as_ptr() as PSID;
     if has_any_ace_for(base, path) {
         eprintln!(
             "[围栏] 正在撤销机器级只读授权（递归子树，可能要几十秒）：{}",
             path.display()
         );
         if let Err(e) = revoke_one(base, path, true) {
-            free_sid(base);
             return Err(format!("撤销未完成（{}）：{}", path.display(), e));
         }
     }
-    free_sid(base);
     // 台账只删「机器级 + 同一路径」的条目：路径逐分量比、大小写不敏感（台账里存的是历史字符串）。
     let _lock = lock_ledger(home)?;
     let mut rec = load_record(home);

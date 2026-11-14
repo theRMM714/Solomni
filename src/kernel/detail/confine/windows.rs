@@ -160,17 +160,29 @@ fn missing(path: &Path) -> bool {
     )
 }
 
+/// 目的：解释器目录上是不是已经有够用的只读基线 ACE——**两个主体都认**：
+///   本产品写的用能力 SID；系统目录（System32 等）自带的是 ALL APPLICATION PACKAGES，那不是我们写的、
+///   也改不动，但它确实让容器读得到解释器，所以同样算放行。
+/// 约束：只读探测，不写任何 DACL。
+fn interpreter_baseline_present(dir: &Path) -> Result<bool, String> {
+    let product = product_capability_sid().map_err(|e| format!("派生产品能力 SID 失败：{}", e))?;
+    if has_ace_for(product.as_ptr() as PSID, dir, RIGHTS_RO) {
+        return Ok(true);
+    }
+    let aapp = system_baseline_sid().map_err(|e| format!("派生共享包 SID 失败：{}", e))?;
+    let has = has_ace_for(aapp, dir, RIGHTS_RO);
+    free_sid(aapp);
+    Ok(has)
+}
+
 /// 目的：解释器安装目录在 Windows 容器围栏下能不能放行。
-///   已有足够的 ALL APPLICATION PACKAGES ACE 就不用写；否则只有属主是当前用户（能写 DACL）才算可用。
+///   已有足够的基线 ACE（能力 SID 或系统自带的全应用包）就不用写；否则只有属主是当前用户（能写 DACL）才算可用。
 /// 约束：只读探测；真正的递归授权仍由 prepare_fence 做，失败信息以那里为准。
 pub(crate) fn interpreter_dir_usable(dir: &Path) -> Result<(), String> {
     if !dir.is_dir() {
         return Err(format!("目录不在场（{}）", dir.display()));
     }
-    let base = baseline_sid().map_err(|e| format!("派生共享包 SID 失败：{}", e))?;
-    let has = has_ace_for(base, dir, RIGHTS_RO);
-    free_sid(base);
-    if has {
+    if interpreter_baseline_present(dir)? {
         return Ok(());
     }
     match owner_is_current_user(dir) {
@@ -181,7 +193,7 @@ pub(crate) fn interpreter_dir_usable(dir: &Path) -> Result<(), String> {
     match can_write_dacl(dir) {
         Ok(true) => Ok(()),
         Ok(false) => Err(
-            "目录属主不是当前用户，当前用户也没有写 DACL 的权限；写 DACL 需要管理员，或预先把该目录授给「所有应用程序包」"
+            "目录属主不是当前用户，当前用户也没有写 DACL 的权限；写 DACL 需要管理员，或预先把该目录授给本产品的能力 SID"
                 .to_string(),
         ),
         Err(e) => Err(format!("判定写 DACL 权限失败：{}", e)),
@@ -242,7 +254,7 @@ fn print_slow_summary(prep: &FencePrep) {
 /// 目的：把围栏要用的授权一次性做好（按 (SID, 路径, 权限) 去重，不重复改 ACL），并如实分出
 ///   **必要**落点（授不上就要问用户或拒绝）与**可选**落点（只记事实）。
 /// 约束：每条授权先落台账再动 ACL，写后核对；失败就回滚并如实记进结论（不静默降级）。归属分三种：
-///   容器数据边界按本次调用记（收尾可精确撤）；祖先链的只读属性、可信执行基座是**机器级**——授给所有应用程序包、
+///   容器数据边界按本次调用记（收尾可精确撤）；祖先链的只读属性、可信执行基座是**机器级**——授给本产品能力 SID、
 ///   跨会话复用（见 is_machine_target / is_trusted_base 与 record 的 GrantScope）。
 ///   台账锁只罩「读—改—写」（record/store.rs 的 with_ledger）：慢的 ACL 写在锁外，并发调用不互相排队。
 pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep {
@@ -272,14 +284,15 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
         prep.fail(FencePart::Ledger, PathBuf::new(), e);
         return prep;
     }
-    // 基线都授给 ALL APPLICATION PACKAGES（与 agent 无关）：已有**够用**的 ACE 就跳过，第一次之后不再重走整棵树。
-    let base = match baseline_sid() {
+    // 基线都授给本产品的能力 SID（与 agent 无关）：已有**够用**的 ACE 就跳过，第一次之后不再重走整棵树。
+    let base_owned = match product_capability_sid() {
         Ok(sid) => sid,
         Err(e) => {
             prep.fail(FencePart::Interpreter, PathBuf::new(), e);
             return prep;
         }
     };
+    let base = base_owned.as_ptr() as PSID;
     let base_text = sid_to_string(base);
     let interpreters = interpreter_dirs(command);
     // 基线一：解释器安装目录（只读+执行）——**必要**：拿不到它，容器里连解释器都起不来。
@@ -289,8 +302,8 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
             continue;
         }
         // 基线的 ACE 可能**早已存在**（系统目录上常有全应用包的允许项）：那不是我们写的，记进台账会让收尾
-        // 去撤系统目录（拒绝访问）。已存在就跳过，不记归属、也不改 DACL。
-        if has_ace_for(base, &dir, RIGHTS_RO) {
+        // 去撤系统目录（拒绝访问）。已存在就跳过，不记归属、也不改 DACL。两个主体都认（见 interpreter_baseline_present）。
+        if interpreter_baseline_present(&dir).unwrap_or(false) {
             continue;
         }
         // 预检即终局：这一条授权写不进去时，连尝试都不做——不产生"写一半/回滚"的状态。
@@ -358,7 +371,7 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
             eprintln!("[诊断] 授权落点不存在，跳过（{}）", path.display());
             continue;
         }
-        // 祖先链的只读属性是**机器级**授权：授给所有应用程序包（与容器 SID、会话都无关）。
+        // 祖先链的只读属性是**机器级**授权：授给本产品能力 SID（与容器 SID、会话都无关）。
         // 已有 ACE 就直接跳过——这正是后续会话"零写"的来源；不命中才落台账并写一次。
         if is_machine_target(&target) {
             if has_ace_for(base, path, rights) {
@@ -381,7 +394,7 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
             continue;
         }
         // 工具链 / 运行包是**可信执行基座**：只读、无 scope 信息，与祖先链同属机器级授权
-        // （授给所有应用程序包、台账 scope=machine），跨会话复用、启动对账不回收。
+        // （授给本产品能力 SID、台账 scope=machine），跨会话复用、启动对账不回收。
         let to_base = rights == RIGHTS_RO && is_trusted_base(path, &root);
         if to_base {
             if !has_ace_for(base, path, rights) {
@@ -428,7 +441,7 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
             }
         }
     }
-    // 机器级一次性只读落点（外部工作区等）：授给基线组、可继承、跨会话复用，内容真的可达；
+    // 机器级一次性只读落点（外部工作区等）：授给本产品能力 SID、可继承、跨会话复用，内容真的可达；
     // 已有可继承 ACE 就零写——这是「每个会话不再重付一次」的来源。
     for dir in spec.machine_ro_tree.iter().cloned() {
         if missing(&dir) {
@@ -466,7 +479,6 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
         }
     }
     free_sid(sid);
-    free_sid(base);
     if !written.is_empty() {
         // 如实打印足迹：用户看得见到底动了哪些目录、授给了谁。
         let list: Vec<String> = written
@@ -478,7 +490,7 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
     if machine_written > 0 {
         // 机器级授权的去向单独交代：它们不随会话回收，之后每次调用都不必再写。
         eprintln!(
-            "[围栏] 其中机器级授权 {} 处：授给所有应用程序包（跨会话复用，启动对账不回收）",
+            "[围栏] 其中机器级授权 {} 处：授给本产品能力 SID（跨会话复用，启动对账不回收）",
             machine_written
         );
     }
@@ -486,7 +498,7 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
     prep
 }
 
-/// 目的：这条落点是不是**机器级**授权——祖先链的只读属性，授给所有应用程序包，跨会话复用。
+/// 目的：这条落点是不是**机器级**授权——祖先链的只读属性，授给本产品能力 SID，跨会话复用。
 /// 约束：只认 grant_targets 给祖先链的唯一形状（part = Parent、只授 RIGHTS_STAT、不递归、不继承）；
 ///   可信基座也走机器级归属（在 grant_targets 循环里按 is_trusted_base 判），解释器基线、数据边界仍按本次调用归属。
 fn is_machine_target(target: &GrantTarget) -> bool {

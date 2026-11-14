@@ -525,7 +525,7 @@ pub(crate) fn grant_targets(
         leaves.push(leaf(&spec.cwd, RIGHTS_RO, true, FencePart::Cwd));
     }
     // 父目录：只读属性、不递归、不继承（带 (OI)(CI) 的 ACE 会传播，撤权断链就污染整棵子树）；shell 的 cwd = private 时
-    // 要逐级补祖先的 FILE_READ_ATTRIBUTES，这条链是机器级授权（授给所有应用程序包、跨会话复用、对账不回收）。
+    // 要逐级补祖先的 FILE_READ_ATTRIBUTES，这条链是机器级授权（授给本产品能力 SID、跨会话复用、对账不回收）。
     let deep = !spec.private.as_os_str().is_empty() && spec.cwd == spec.private;
     for one in &leaves {
         // 只有 shell 的 cwd/private 这个叶子需要祖先属性；运行包根等只给直接父目录。
@@ -573,10 +573,11 @@ pub(crate) fn is_trusted_base(path: &Path, product_root: &Path) -> bool {
     under(&product_root.join(".tools")) || under(&product_root.join("runtimes"))
 }
 
-/// 目的：只读运行基线的授权对象：ALL APPLICATION PACKAGES（S-1-15-2-1）。
-///   我们的容器令牌本来就带这个组，所以「解释器与系统只读区」这类基线只授一次、与 agent 身份无关；
-///   每 agent 一个的容器 SID 只用来圈**数据边界**（会话目录、模块目录）。
-pub(crate) fn baseline_sid() -> Result<PSID, String> {
+/// 目的：**系统自带**只读基线的主体：ALL APPLICATION PACKAGES（S-1-15-2-1）。
+///   只用来**认**系统目录（System32 等）上本来就有的那条 ACE——不是我们写的、也改不动，但它确实让容器读得到解释器。
+///   我们自己写的机器级授权一律用能力 SID（container::product_capability_sid），不用这个组：
+///   授给它等于把读权限下放给本机所有 AppContainer 应用。调用方负责 free_sid。
+pub(crate) fn system_baseline_sid() -> Result<PSID, String> {
     let s: Vec<u16> = std::ffi::OsStr::new("S-1-15-2-1")
         .encode_wide()
         .chain(std::iter::once(0))
@@ -858,19 +859,25 @@ pub(crate) fn restore_sd(path: &Path, bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-/// 目的：列出对象上显式（非继承）的包 SID 允许 ACE，供台账外孤儿授权的回收。
-/// 返回：SID 字符串，形如 S-1-15-2-*；排除 ALL APPLICATION PACKAGES 与 ALL RESTRICTED 两个基线。
+/// 目的：列出对象上显式（非继承）的、**本产品可能写下**的允许 ACE，供台账外孤儿授权的回收。
+/// 返回：SID 字符串——每 agent 的容器 SID（S-1-15-2-*，排除 ALL APPLICATION PACKAGES 与 ALL RESTRICTED
+///   两个系统基线），以及本产品的能力 SID（S-1-15-3-*，只认自己派生出的那一个，不碰别的软件写的能力 ACE）。
 /// 错误：读不到对象 DACL 时返回原因。
 pub(crate) fn orphan_package_aces(path: &Path) -> Result<Vec<String>, String> {
+    let product = product_capability_sid()
+        .ok()
+        .map(|sid| sid_to_string(sid.as_ptr() as PSID));
     Ok(acl_scan(path)?
         .entries
         .into_iter()
         .filter(|v| {
-            v.ace_type == ACCESS_ALLOWED_ACE_TYPE
-                && v.flags & INHERITED_ACE == 0
-                && v.sid.starts_with("S-1-15-2-")
-                && v.sid != "S-1-15-2-1"
-                && v.sid != "S-1-15-2-2"
+            if v.ace_type != ACCESS_ALLOWED_ACE_TYPE || v.flags & INHERITED_ACE != 0 {
+                return false;
+            }
+            if product.as_deref() == Some(v.sid.as_str()) {
+                return true;
+            }
+            v.sid.starts_with("S-1-15-2-") && v.sid != "S-1-15-2-1" && v.sid != "S-1-15-2-2"
         })
         .map(|v| v.sid)
         .collect())

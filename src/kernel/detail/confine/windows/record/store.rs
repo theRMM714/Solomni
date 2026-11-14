@@ -29,7 +29,7 @@ pub(crate) enum GrantScope {
     /// 目的：按次授权（容器数据边界等）——归属全死就回收。
     #[default]
     Call,
-    /// 目的：机器级授权（祖先链只读属性）——授给所有应用程序包，一次写好、启动对账不回收。
+    /// 目的：机器级授权（祖先链只读属性）——授给本产品能力 SID，一次写好、启动对账不回收。
     Machine,
 }
 
@@ -47,7 +47,7 @@ pub(crate) struct GrantEntry {
     #[serde(default = "recursive_by_default")]
     pub(crate) recursive: bool,
     /// 目的：还需要这条授权的进程（空 = 缺归属，按"无法判定"处理，不主动回收）。
-    ///   机器级授权的归属恒为空——没有哪个进程"还需要"它，它授给所有应用程序包。
+    ///   机器级授权的归属恒为空——没有哪个进程"还需要"它，它授给本产品能力 SID。
     #[serde(default)]
     pub(crate) owners: Vec<Owner>,
     /// 目的：这条授权按次还是机器级；缺省按次（旧台账没有这一位）。

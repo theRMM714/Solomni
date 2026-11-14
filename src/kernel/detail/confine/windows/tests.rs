@@ -17,6 +17,12 @@ mod grant;
 #[cfg(test)]
 mod workspace;
 
+/// 目的：本产品能力 SID 的**可释放**形式——用例沿用 free_sid 收尾，不必各自持有派生出的字节缓冲。
+pub(super) fn product_sid() -> Result<PSID, String> {
+    let owned = product_capability_sid()?;
+    sid_from_string(&sid_to_string(owned.as_ptr() as PSID))
+}
+
 /// 把对象 DACL 里的 ACE 逐条转储成可读文本（残留调查用：原始权限位 + 继承标志 + SID + 对象 GUID）。
 /// 走 acl_scan：**偏移与认不出的条数都由它一处给出**，诊断不会另抄一套读法而看不出对象 ACE。
 fn dump_aces(path: &Path) -> String {
