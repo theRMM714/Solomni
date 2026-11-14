@@ -130,7 +130,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Flags, String> {
             Some((name, value)) => (name, Some(value.to_string())),
             None => (arg.as_str(), None),
         };
-        if OPAQUE.contains(&name) || name.starts_with("--fence-") {
+        if OPAQUE.contains(&name) {
             // 内部协议模式自己解析整段 argv，这里不再往下列。
             flags.positionals.extend(args[i..].iter().cloned());
             return Ok(flags);
@@ -188,6 +188,9 @@ pub(crate) fn parse(args: &[String]) -> Result<Flags, String> {
                 no_value(&inline, name)?;
                 flags.version = true;
             }
+            // 台账维护旗：由 guard 从原始 argv 分派；这里只吃下旗语本身，后面的 `--root` 仍照常解析。
+            "--fence-clean" | "--fence-reconcile" | "--fence-ledger" | "--fence-restore"
+            | "--fence-revoke" | "--fence-profile-rm" => {}
             other => return Err(unknown(other)),
         }
         i += 1;
@@ -431,6 +434,15 @@ mod tests {
         assert_eq!(flags.root.as_deref(), Some("work"));
         let err = run(&["--setup="]).expect_err("空值要报错");
         assert!(err.contains("--setup="), "{err}");
+    }
+
+    /// 台账维护旗不是 opaque 协议：后面的 `--root` 要照常解析（端到端收尾用 `--fence-clean --root <夹具>`）。
+    #[test]
+    fn fence_maintenance_flags_keep_parsing_root() {
+        let flags = run(&["--fence-clean", "--root", "fixture"]).expect("合法");
+        assert_eq!(flags.root.as_deref(), Some("fixture"));
+        let flags = run(&["--fence-reconcile", "--root=fixture"]).expect("合法");
+        assert_eq!(flags.root.as_deref(), Some("fixture"));
     }
 
     /// 旗语表：默认只列用户可见的那些，`all` 时连内部协议一起列。
