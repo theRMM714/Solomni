@@ -1,0 +1,7 @@
+PASS posix-bootstraps-zig-when-host-cc-missing
+PASS posix-no-tty-does-not-download-and-points-at-c-toolchain
+PASS posix-half-installed-zig-is-reinstalled
+PASS posix-sha-mismatch-keeps-archive-and-refuses
+PASS posix-no-download-when-host-cc-builds
+POSIX-ENV-BOOTSTRAP-OK
+ENV-BOOTSTRAP-OK
