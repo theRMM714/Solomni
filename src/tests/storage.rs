@@ -358,4 +358,11 @@ fn host_disk_space_is_readable() {
             .expect("statvfs 应可读");
     assert!(total > 0, "总量应为正");
     assert!(free <= total, "可用量不应超过总量");
+    assert!(
+        crate::capabilities::storage::detail::space::total_free(std::path::Path::new(
+            "/definitely-not-a-real-volume"
+        ))
+        .is_none(),
+        "取不到卷就给 None"
+    );
 }
