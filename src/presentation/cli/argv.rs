@@ -191,6 +191,8 @@ pub(crate) fn parse(args: &[String]) -> Result<Flags, String> {
             // 台账维护旗：由 guard 从原始 argv 分派；这里只吃下旗语本身，后面的 `--root` 仍照常解析。
             "--fence-clean" | "--fence-reconcile" | "--fence-ledger" | "--fence-restore"
             | "--fence-revoke" | "--fence-profile-rm" => {}
+            // 台账清单的可读版修饰符：由 guard 扫描原始 argv，解析层只吃下。
+            "--human" => {}
             other => return Err(unknown(other)),
         }
         i += 1;
@@ -443,6 +445,10 @@ mod tests {
         assert_eq!(flags.root.as_deref(), Some("fixture"));
         let flags = run(&["--fence-reconcile", "--root=fixture"]).expect("合法");
         assert_eq!(flags.root.as_deref(), Some("fixture"));
+        assert!(
+            run(&["--fence-ledger", "--human"]).is_ok(),
+            "可读版修饰符要能解析"
+        );
     }
 
     /// 旗语表：默认只列用户可见的那些，`all` 时连内部协议一起列。
