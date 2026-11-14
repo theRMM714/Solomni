@@ -145,13 +145,6 @@ impl ProcTools {
         self.mode = mode;
         self
     }
-
-    /// 目的：强制 shell 用哪个 PowerShell（Windows 真机验 5.1 回退）；None = 自动。
-    #[cfg(test)]
-    pub fn with_powershell(mut self, program: Option<&'static str>) -> ProcTools {
-        self.shell_ps = program;
-        self
-    }
 }
 
 impl ProcessRunner for ProcTools {
@@ -206,13 +199,11 @@ struct PrepareCtx<'a> {
 }
 
 /// 目的：平台后端对「是否已准备围栏」的裁决：继续执行，或由裁决端口 / 机制错误直接收场。
-enum Prepared {
-    Ready {
-        prepared: bool,
-        unfenced_note: Option<String>,
-        home: Option<std::path::PathBuf>,
-    },
-    Stop(RunOutcome),
+struct Prepared {
+    stop: Option<RunOutcome>,
+    prepared: bool,
+    unfenced_note: Option<String>,
+    home: Option<std::path::PathBuf>,
 }
 
 impl ProcTools {
@@ -234,21 +225,22 @@ impl ProcTools {
         reset_fence_prep();
         // 平台后端决定要不要先准备围栏：Windows 的容器围栏要先把可达范围授权给容器 SID；
         // 其余平台没有这一步，直接返回「未准备、无家目录」。
-        let (prepared, unfenced_note, home) = match platform::prepare(PrepareCtx {
+        let Prepared {
+            stop,
+            prepared,
+            unfenced_note,
+            home,
+        } = platform::prepare(PrepareCtx {
             tools: self,
             fence,
             command,
             ask,
             gate,
             strict: plan.strict,
-        }) {
-            Prepared::Stop(outcome) => return outcome,
-            Prepared::Ready {
-                prepared,
-                unfenced_note,
-                home,
-            } => (prepared, unfenced_note, home),
-        };
+        });
+        if let Some(outcome) = stop {
+            return outcome;
+        }
         // 全局沙箱要求：机制不可用且本进程未同意降级时，工具**不执行**。
         // shell 严格模式不看本进程降级：它的围栏要求恒为真，由守门进程按 FENCE_FAILED 拒绝。
         if !plan.strict

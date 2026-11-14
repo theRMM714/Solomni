@@ -7,8 +7,18 @@ use super::*;
 use crate::kernel::ports::ShellRun;
 
 /// 目的：非 Windows 没有容器围栏，直接返回「未准备、无家目录」。
-pub(super) fn prepare(_ctx: PrepareCtx<'_>) -> Prepared {
-    Prepared::Ready {
+pub(super) fn prepare(ctx: PrepareCtx<'_>) -> Prepared {
+    // 非 Windows 没有容器围栏准备：这些字段只在 Windows 后端被读，显式忽略以免被误读成漏用。
+    let _ = (
+        ctx.tools,
+        ctx.fence,
+        ctx.command,
+        ctx.ask,
+        ctx.gate,
+        ctx.strict,
+    );
+    Prepared {
+        stop: None,
         prepared: false,
         unfenced_note: None,
         home: None,

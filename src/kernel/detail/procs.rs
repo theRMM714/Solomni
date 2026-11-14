@@ -18,12 +18,10 @@ mod unix;
 #[cfg(not(windows))]
 use unix as platform;
 
-/// 目的：对账时对一条登记的身份结论——是我们就收，不是就销账，认不出就只报。
-enum Ownership {
-    Ours,
-    Foreign,
-    Gone,
-    Unknown,
+/// 目的：对账时对一条登记的身份结论——是我们就收，认不出就只报，其余销账。
+struct Ownership {
+    ours: bool,
+    keep_alive: bool,
 }
 
 /// 目的：macOS 的长驻子进程守门模式（内部协议）：`--proc-watchdog <核心 pid> <子进程 pid>`。
@@ -133,22 +131,21 @@ impl ProcessBook {
                 self.forget(entry.pid);
                 continue;
             }
-            match platform::ownership(&entry) {
-                Ownership::Ours => {
-                    if terminate(entry.pid).is_ok() {
-                        report.killed += 1;
-                        self.forget(entry.pid);
-                    } else {
-                        report.alive.push(entry);
-                    }
-                }
-                // 身份对不上或对账前一瞬退掉了：账上的条目作废。
-                Ownership::Foreign | Ownership::Gone => {
-                    report.dropped += 1;
+            let ownership = platform::ownership(&entry);
+            if ownership.ours {
+                if terminate(entry.pid).is_ok() {
+                    report.killed += 1;
                     self.forget(entry.pid);
+                } else {
+                    report.alive.push(entry);
                 }
+            } else if ownership.keep_alive {
                 // 认不出（账上没有身份）：只报不动手——宁可不收，也不误杀别人的进程。
-                Ownership::Unknown => report.alive.push(entry),
+                report.alive.push(entry);
+            } else {
+                // 身份对不上或对账前一瞬退掉了：账上的条目作废。
+                report.dropped += 1;
+                self.forget(entry.pid);
             }
         }
         report
