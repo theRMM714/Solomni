@@ -304,52 +304,6 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
     let base = base_owned.as_ptr() as PSID;
     let base_text = sid_to_string(base);
     let interpreters = interpreter_dirs(command);
-    // 解释器装在用户目录下（nvm / scoop / pyenv）时，祖先链也要有 FILE_READ_ATTRIBUTES：容器要逐级判 PATH 项是否存在。
-    // 机器级（授给本产品能力 SID、跨会话复用），逐级只写一级；盘根不写，已够用（含系统自带 AAPP）就跳过。
-    let aapp = system_baseline_sid().ok();
-    let mut ancestor_seen: std::collections::HashSet<std::path::PathBuf> =
-        std::collections::HashSet::new();
-    for dir in &interpreters {
-        let mut parent = dir.parent();
-        while let Some(p) = parent {
-            if p.parent().is_none() {
-                break; // 盘根不写（整盘继承重算）
-            }
-            if !ancestor_seen.insert(p.to_path_buf()) {
-                parent = p.parent();
-                continue;
-            }
-            let covered = has_ace_for(base, p, RIGHTS_STAT)
-                || aapp
-                    .map(|s| has_ace_for(s, p, RIGHTS_STAT))
-                    .unwrap_or(false);
-            if !covered {
-                let target = GrantTarget {
-                    path: p.to_path_buf(),
-                    rights: RIGHTS_STAT,
-                    recursive: false,
-                    inherit: false,
-                    part: FencePart::Parent,
-                };
-                if missing(p) {
-                    parent = p.parent();
-                    continue;
-                }
-                match grant_machine_journaled(home, base, &base_text, &target, &root) {
-                    Ok(_) => {}
-                    Err(e) => eprintln!(
-                        "[围栏] 解释器祖先目录只读属性未完成（{}）：{}",
-                        p.display(),
-                        e
-                    ),
-                }
-            }
-            parent = p.parent();
-        }
-    }
-    if let Some(s) = aapp {
-        free_sid(s);
-    }
     // 基线一：解释器安装目录（只读+执行）——**必要**：拿不到它，容器里连解释器都起不来。
     for dir in interpreters.iter().cloned() {
         if missing(&dir) {
