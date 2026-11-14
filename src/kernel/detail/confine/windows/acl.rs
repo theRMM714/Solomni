@@ -1078,6 +1078,28 @@ pub(crate) fn has_any_ace_for(sid: PSID, path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// 目的：该对象上是不是**自己带着**给这个 SID 的允许 ACE（不含从祖先继承来的），不看权限位。
+///   用途：撤权与退役的残留核对——继承来的那条属于祖先的授权，不是本对象撤得掉的那条
+///   （产品根有机器级 `(OI)(CI)` 授权时，根下每个目录都继承到一条同主体的投影）；
+///   不看权限位是因为真机残留过只有 SYNCHRONIZE 的 ACE，那也算没撤干净。
+/// 约束：只看标准允许 ACE（对象 ACE 是给子对象的，不属于"本对象上的残留"）。
+pub(crate) fn has_explicit_any_ace_for(sid: PSID, path: &Path) -> bool {
+    let want = sid_to_string(sid);
+    if !is_sid_text(&want) {
+        return false;
+    }
+    acl_scan(path)
+        .map(|scan| {
+            scan.entries.iter().any(|v| {
+                v.ace_type == ACCESS_ALLOWED_ACE_TYPE
+                    && v.flags & INHERIT_ONLY_ACE == 0
+                    && v.flags & INHERITED_ACE == 0
+                    && v.sid == want
+            })
+        })
+        .unwrap_or(false)
+}
+
 /// 目的：该对象上是不是已经有给这个 SID 的允许 ACE，**且权限位覆盖得住**。
 ///   用途：基线授权只以递归方式写过一次，所以根上已有"够用"的 ACE 就跳过整棵树——否则每来一个 agent 都要重走几万文件。
 ///   只看"有没有该 SID 的 ACE"不够：解释器目录会继承只有 SYNCHRONIZE 的 ALL APPLICATION PACKAGES ACE，
