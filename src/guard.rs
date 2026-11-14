@@ -91,22 +91,10 @@ pub fn fence_grant(args: &[String], root: &std::path::Path) -> Option<i32> {
                 let path = std::path::Path::new(&raw)
                     .canonicalize()
                     .unwrap_or_else(|_| std::path::PathBuf::from(&raw));
-                return Some(
-                    match crate::kernel::api::revoke_machine_grants(&home, &path) {
-                        Ok(0) => {
-                            println!("[围栏] 没有机器级授权记录：{}", path.display());
-                            0
-                        }
-                        Ok(n) => {
-                            println!("[围栏] 撤销 {} 条机器级授权：{}", n, path.display());
-                            0
-                        }
-                        Err(e) => {
-                            eprintln!("[围栏] 撤销未完成：{}", e);
-                            1
-                        }
-                    },
-                );
+                return Some(revoke_machine_report(
+                    crate::kernel::api::revoke_machine_grants(&home, &path),
+                    &path,
+                ));
             }
             (Some(sid), Some(path)) => {
                 return Some(report(confine::revoke_grant(
@@ -230,6 +218,25 @@ fn report(done: Result<String, String>) -> i32 {
         }
         Err(e) => {
             eprintln!("[围栏] {}", e);
+            1
+        }
+    }
+}
+
+/// 目的：单参 `--fence-revoke` 的结果呈现：撤到几条、没记录、失败，各有各的话（0 = 成功，1 = 失败）。
+/// 约束：没记录也算成功（幂等）；失败必须如实进 stderr 并给非零。
+pub(crate) fn revoke_machine_report(done: Result<usize, String>, path: &std::path::Path) -> i32 {
+    match done {
+        Ok(0) => {
+            println!("[围栏] 没有机器级授权记录：{}", path.display());
+            0
+        }
+        Ok(n) => {
+            println!("[围栏] 撤销 {} 条机器级授权：{}", n, path.display());
+            0
+        }
+        Err(e) => {
+            eprintln!("[围栏] 撤销未完成：{}", e);
             1
         }
     }

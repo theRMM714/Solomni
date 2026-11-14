@@ -548,8 +548,7 @@ function printDiff(diff) {
   for (const b of diff.buckets) {
     if (!b.total || b.pct >= (b.min === 100 ? 100 : diff.min) || !b.gaps.length) continue;
     console.log("  [" + b.id + "] 变更行里没被执行到的行（" + b.gaps.length + (b.gaps.length >= 400 ? "+" : "") + "）：");
-    for (const g of b.gaps.slice(0, 80)) console.log("    " + g);
-    if (b.gaps.length > 80) console.log("    …");
+    for (const g of b.gaps) console.log("    " + g);
   }
 }
 
