@@ -322,7 +322,7 @@ pub(crate) fn workspace_grant_none_strips_shared_reach() {
 
 /// 目的：真机验收（默认跳过）：UNC 外部工作区的全链路——虚拟机档绑定落成 native UNC、写探测真的落在共享上、
 ///   首绑导入 / pull / commit / status / sync 都走真实共享、删会话不删外部；产品根的 UNC 别名必须按落点身份拒。
-/// 约束：只在 SOLOMNI_UNC_ROOT 指向一个可写的 UNC 目录时执行（如 \\\\localhost\D$\\\\AIproject\\target\\unc）；
+/// 约束：只在 SOLOMNI_UNC_ROOT 指向一个可写的 UNC 目录时执行（如 \\\\localhost\D$\\\\writable\\\\dir）；
 ///   CI 没有 UNC，缺省打印 [探针] 如实跳过；用例自己在 UNC 根下建子目录并在结束时清掉。
 #[cfg(windows)]
 #[test]
@@ -340,7 +340,7 @@ pub(crate) fn unc_external_workspace_round_trip_on_a_real_share() {
         Ok(v) if !v.trim().is_empty() => PathBuf::from(v.trim()),
         _ => {
             eprintln!(
-                r"[探针] 未开启 UNC 外部工作区真机验收：把 SOLOMNI_UNC_ROOT 指向可写 UNC 目录后重跑（如 \\\\localhost\D$\\\\AIproject\\target\\unc）"
+                r"[探针] 未开启 UNC 外部工作区真机验收：把 SOLOMNI_UNC_ROOT 指向可写 UNC 目录后重跑（如 \\\\localhost\D$\\\\writable\\\\dir）"
             );
             return;
         }
