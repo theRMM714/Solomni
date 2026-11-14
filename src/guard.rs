@@ -248,7 +248,7 @@ pub fn fence_clean(root: &std::path::Path) -> i32 {
     let home = root.join(".home");
     let mut lines: Vec<String> = Vec::new();
     let mut failed = false;
-    match crate::kernel::detail::confine::clean(&home) {
+    match crate::kernel::detail::confine::clean_all(&home) {
         Ok(msg) => lines.push(msg),
         Err(e) => {
             lines.push(format!("台账回收未完成：{}", e));

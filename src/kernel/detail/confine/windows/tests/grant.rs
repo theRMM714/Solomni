@@ -613,7 +613,7 @@ fn revoke_leaves_no_container_ace_on_leaf_parents() {
         machine_kept,
         "撤权不该动祖先链的机器级只读属性 ACE（它跨会话复用，只由整份台账回收）"
     );
-    clean(&home).expect("台账回收应当成功");
+    clean_all(&home).expect("全量台账回收应当成功");
     let baseline = product_sid().expect("派生本产品能力 SID");
     let machine_after_clean = has_explicit_ace_for(baseline, &base, RIGHTS_STAT);
     free_sid(baseline);
@@ -622,7 +622,7 @@ fn revoke_leaves_no_container_ace_on_leaf_parents() {
     // 那是祖先授权的投影、不归这份台账撤（夹具的 TMP 在仓库内时正是这种情形）。
     assert!(
         !machine_after_clean,
-        "整份台账回收后父目录不该再有自己写的机器级只读属性 ACE"
+        "全量台账回收后父目录不该再有自己写的机器级只读属性 ACE"
     );
 }
 
@@ -1035,5 +1035,71 @@ fn legacy_aapp_machine_grants_retire_only_after_capability_is_in_place() {
     free_sid(aapp);
     free_sid(cap);
     clean(&home).expect("台账回收应当成功");
+    discard(&base);
+}
+
+/// 目的：默认收尾保留 `scope=machine`（测试每轮不重写祖先 ACE）；显式全量收尾才动机器级。
+///   带机器级授权的路径不能按快照整体还原，否则会把机器级 ACE 一起抹掉——这条用例同时钉住该分支。
+#[test]
+fn clean_keeps_machine_scope_unless_full_cleanup_is_requested() {
+    let _fence = crate::tests::fence_acl_guard();
+    let base = std::env::temp_dir().join(format!("solomni-clean-scope-{}", std::process::id()));
+    let target = base.join("target");
+    std::fs::create_dir_all(&target).expect("建探针目录");
+    if !acl_round_trip(&base, "clean-scope") {
+        eprintln!(
+            "[探针] 本机做不了 ACL 完整往返（写→读回→撤）：clean 口径探针跳过（不静默当作通过）"
+        );
+        discard(&base);
+        return;
+    }
+    let spec = FenceSpec {
+        machine_ro_tree: Vec::new(),
+        agent: "probe-clean".to_string(),
+        lease: String::new(),
+        private: PathBuf::new(),
+        ro_tree: Vec::new(),
+        rw: vec![target.clone()],
+        cwd: target.clone(),
+        ro: Vec::new(),
+        net: false,
+    };
+    let home = base.join(".home");
+    expect_granted(&prepare_fence(&spec, "cmd", &home), "授权应当成功");
+    let cap = product_sid().expect("派生本产品能力 SID");
+    assert!(
+        has_ace_for(cap, &base, RIGHTS_STAT),
+        "前置：祖先目录上有一条机器级只读属性 ACE"
+    );
+    let msg = clean(&home).expect("默认回收应当成功");
+    assert!(
+        msg.contains("保留 1 条机器级授权"),
+        "默认收尾要如实报保留数：{}",
+        msg
+    );
+    assert!(
+        has_ace_for(cap, &base, RIGHTS_STAT),
+        "默认收尾不得撤机器级 ACE"
+    );
+    let rec = load_record(&home);
+    assert!(
+        rec.grants
+            .iter()
+            .any(|g| g.scope == GrantScope::Machine && Path::new(&g.path) == base),
+        "台账要保留机器级条目（下次会话复用）"
+    );
+    assert!(
+        !rec.grants
+            .iter()
+            .any(|g| g.scope != GrantScope::Machine && Path::new(&g.path) == target),
+        "按次 / 会话条目要销账"
+    );
+    clean_all(&home).expect("全量回收应当成功");
+    assert!(
+        !has_ace_for(cap, &base, RIGHTS_STAT),
+        "全量收尾要撤机器级 ACE"
+    );
+    assert!(load_record(&home).is_empty(), "全量收尾后台账应当清空");
+    free_sid(cap);
     discard(&base);
 }
