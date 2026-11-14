@@ -1,8 +1,9 @@
 //! 目的：挂载仅 Windows 可跑的探针。
-//! 管：container 子模块。
+//! 管：container / capability / ledger / startup / https 子模块。
 //! 不管：其它平台。
 //! 联动：tests/windows/。
 
+mod capability;
 mod container;
 mod ledger;
 mod startup;

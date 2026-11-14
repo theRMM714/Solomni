@@ -13,8 +13,8 @@ use windows_sys::Win32::Security::Isolation::{
     CreateAppContainerProfile, DeriveAppContainerSidFromAppContainerName,
 };
 use windows_sys::Win32::Security::{
-    CreateWellKnownSid, PSID, SECURITY_CAPABILITIES, SID_AND_ATTRIBUTES,
-    WinCapabilityInternetClientSid,
+    CreateWellKnownSid, DeriveCapabilitySidsFromName, GetLengthSid, PSID, SECURITY_CAPABILITIES,
+    SID_AND_ATTRIBUTES, WinCapabilityInternetClientSid,
 };
 use windows_sys::Win32::System::Console::{
     GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
@@ -106,6 +106,7 @@ pub const PROFILE_ENV_BLOCKED_MARK: &str = "拒绝访问：本环境不允许建
 /// 目的：建（或复用）容器 profile：**必须有 profile** —— 没有 profile 的派生 SID 拿不到
 ///   ALL APPLICATION PACKAGES 组，连系统目录里的 cmd.exe 都打不开（实测会报"找不到文件"）。
 ///   已存在 = 成功（同一个名字派生出的 SID 与 profile 一致，所以外层用 Derive 预授权 ACL 也有效）。
+/// 约束：profile 侧也要声明产品能力，与令牌侧（run_in_container）用同一个名字。
 pub(crate) fn ensure_profile(name: &str) -> Result<(), String> {
     let n: Vec<u16> = std::ffi::OsStr::new(name)
         .encode_wide()
@@ -115,16 +116,14 @@ pub(crate) fn ensure_profile(name: &str) -> Result<(), String> {
         .encode_wide()
         .chain(std::iter::once(0))
         .collect();
+    let capability = product_capability_sid()?;
+    let attr = SID_AND_ATTRIBUTES {
+        Sid: capability.as_ptr() as PSID,
+        Attributes: SE_GROUP_ENABLED,
+    };
     let mut sid: PSID = std::ptr::null_mut();
     let hr = unsafe {
-        CreateAppContainerProfile(
-            n.as_ptr(),
-            n.as_ptr(),
-            d.as_ptr(),
-            std::ptr::null(),
-            0,
-            &mut sid,
-        )
+        CreateAppContainerProfile(n.as_ptr(), n.as_ptr(), d.as_ptr(), &attr, 1, &mut sid)
     };
     // S_OK = 0；E_ALREADY_EXISTS（0x800700B7）= 已有同 profile，照用。
     const E_ALREADY_EXISTS: i32 = 0x8007_00B7u32 as i32;
@@ -219,6 +218,51 @@ const SE_GROUP_ENABLED: u32 = 0x0000_0004;
 /// 目的：SID 缓冲上限（winnt.h 的 SECURITY_MAX_SID_SIZE；能力 SID 也在上限内）。
 const MAX_SID_BYTES: u32 = 68;
 
+/// 目的：本产品机器级只读授权的能力名——派生成 S-1-15-3-*，只授给声明了它的容器。
+///   不用 ALL APPLICATION PACKAGES（S-1-15-2-1）：那会把读权限下放给本机所有 AppContainer 应用。
+///   真机探针（tests/windows/probes/capability.rs）已确证：声明了它的容器读得到只授给该能力的文件，
+///   不声明的读不到，且两者都写得了自己的工作目录（差异只能归因于能力）。
+pub(crate) const CAPABILITY_NAME: &str = "solomni.fence.baseline";
+
+/// 目的：派生本产品的能力 SID（存储自持，调用方不必 LocalFree）。
+/// 约束：profile 声明与令牌声明必须用同一个名字，否则 ACE 认不上。
+pub(crate) fn product_capability_sid() -> Result<Vec<u8>, String> {
+    let name: Vec<u16> = std::ffi::OsStr::new(CAPABILITY_NAME)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut groups: *mut PSID = std::ptr::null_mut();
+    let mut group_count = 0u32;
+    let mut caps: *mut PSID = std::ptr::null_mut();
+    let mut cap_count = 0u32;
+    let ok = unsafe {
+        DeriveCapabilitySidsFromName(
+            name.as_ptr(),
+            &mut groups,
+            &mut group_count,
+            &mut caps,
+            &mut cap_count,
+        )
+    };
+    if ok == 0 || caps.is_null() || cap_count == 0 {
+        return Err(format!(
+            "派生产品能力 SID 失败（{}，count={}）",
+            CAPABILITY_NAME, cap_count
+        ));
+    }
+    let first = unsafe { *caps };
+    let len = unsafe { GetLengthSid(first) } as usize;
+    let mut owned = vec![0u8; len];
+    unsafe { std::ptr::copy_nonoverlapping(first as *const u8, owned.as_mut_ptr(), len) };
+    unsafe {
+        LocalFree(caps as *mut c_void);
+        if !groups.is_null() {
+            LocalFree(groups as *mut c_void);
+        }
+    }
+    Ok(owned)
+}
+
 /// 目的：按 `net` 准备容器的网络能力：`true` 只授 `internetClient`（公网出站），`false` 不授（断网）。
 ///   不授 `privateNetworkClientServer`，也不做 loopback 豁免；返回的 SID 存储必须活到 `CreateProcessW` 返回。
 pub(crate) fn internet_client_sid(enabled: bool) -> Result<Option<Vec<u8>>, String> {
@@ -268,21 +312,24 @@ pub(crate) fn run_in_container(sid: PSID, spec: &FenceSpec, command: &str) -> Re
         block.push(0);
     }
     block.push(0);
-    // 网络：net=true 只授 internetClient（公网出站）；net=false 不授任何 capability（断网）。
-    // 不授 privateNetworkClientServer，也不做 loopback 豁免——边界见 FenceSpec::net 的文档。
+    // 能力数组：产品能力恒在（机器级只读 ACE 授给它，不是授给本机所有 AppContainer 应用）。
+    // net=true 再加 internetClient（只公网出站，不授 privateNetworkClientServer、不做 loopback 豁免）；net=false 断网。
+    let product = product_capability_sid()?;
     let network_sid = internet_client_sid(spec.net)?;
-    let mut network_attr = network_sid.as_ref().map(|sid| SID_AND_ATTRIBUTES {
-        Sid: sid.as_ptr() as PSID,
+    let mut attrs: Vec<SID_AND_ATTRIBUTES> = vec![SID_AND_ATTRIBUTES {
+        Sid: product.as_ptr() as PSID,
         Attributes: SE_GROUP_ENABLED,
-    });
-    let capability_count = if network_attr.is_some() { 1 } else { 0 };
-    let capabilities = network_attr
-        .as_mut()
-        .map_or(std::ptr::null_mut(), |attr| attr as *mut SID_AND_ATTRIBUTES);
+    }];
+    if let Some(sid) = network_sid.as_ref() {
+        attrs.push(SID_AND_ATTRIBUTES {
+            Sid: sid.as_ptr() as PSID,
+            Attributes: SE_GROUP_ENABLED,
+        });
+    }
     let mut caps = SECURITY_CAPABILITIES {
         AppContainerSid: sid,
-        Capabilities: capabilities,
-        CapabilityCount: capability_count,
+        Capabilities: attrs.as_mut_ptr(),
+        CapabilityCount: attrs.len() as u32,
         Reserved: 0,
     };
     let mut size: usize = 0;

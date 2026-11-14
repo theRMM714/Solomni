@@ -49,8 +49,8 @@ pub enum WorkspaceGrant {
     /// 仅本次会话（缺省）：按次调用授给本会话的容器 SID，会话结束递归撤——首次付 O(子树)，每会话都付。
     #[default]
     Session,
-    /// 该工作区一次性：机器级只读授给 `ALL APPLICATION PACKAGES` + `(OI)(CI)`，之后所有会话零写。
-    /// 代价：本机任意 AppContainer 应用都能读这个目录；撤销走 `--fence-revoke <path>`。
+    /// 该工作区一次性：机器级只读授给本产品能力 SID + `(OI)(CI)`，之后所有会话零写。
+    /// 代价：本产品任何会话的容器都能读这个目录（不限本会话）；撤销走 `--fence-revoke <path>`。
     Workspace,
 }
 

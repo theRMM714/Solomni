@@ -439,7 +439,7 @@ fn trusted_base_grants_are_machine_scope() {
         assert_eq!(
             entry.scope,
             GrantScope::Machine,
-            "可信基座要记成机器级（授给所有应用程序包）"
+            "可信基座要记成机器级（授给本产品能力 SID）"
         );
         assert!(entry.owners.is_empty(), "机器级条目不记任何进程归属");
         assert!(entry.recursive, "可信基座是递归只读授权");
@@ -546,7 +546,7 @@ fn read_only_grants_write_ro_aces_and_revoke_removes_them() {
 /// 【残留探针】授权（叶子读写 + 父目录只读属性）→ 撤权后，叶子与父目录上都不得留有该容器 SID
 /// 的**任何**显式 ACE。真机残留过一条只有 SYNCHRONIZE 的 (OI)(CI) ACE，整棵 tests/ 子树因此
 /// 对受限进程不可读，所以撤净判定不看权限位、只看 SID 在不在场（has_any_ace_for）。
-/// 父目录上的只读属性是**机器级**授权：授给所有应用程序包（baseline SID），不随会话撤、--fence-clean 才收；
+/// 父目录上的只读属性是**机器级**授权：授给本产品能力 SID，不随会话撤、--fence-clean 才收；
 /// 容器 SID 只该落在叶子上。grant_targets 的落点清单或归属变了它会先红。
 #[test]
 fn revoke_leaves_no_container_ace_on_leaf_parents() {
@@ -580,10 +580,10 @@ fn revoke_leaves_no_container_ace_on_leaf_parents() {
     // 诊断输出用 [诊断] 前缀：门禁只把 [探针] 当 env-skip，别让这两行把"跳过数"充大。
     eprintln!("[诊断] 授权后父目录 {}", dump_aces(&base));
     eprintln!("[诊断] 授权后叶子 {}", dump_aces(&leaf));
-    let baseline = baseline_sid().expect("派生所有应用程序包 SID");
+    let baseline = product_sid().expect("派生本产品能力 SID");
     assert!(
         has_explicit_ace_for(baseline, &base, RIGHTS_STAT),
-        "授权后父目录上应有授给所有应用程序包的只读属性 ACE（祖先链是机器级授权）"
+        "授权后父目录上应有授给本产品能力 SID 的只读属性 ACE（祖先链是机器级授权）"
     );
     free_sid(baseline);
     assert!(
@@ -606,7 +606,7 @@ fn revoke_leaves_no_container_ace_on_leaf_parents() {
     );
     assert!(!on_leaf, "撤权后叶子不得残留该容器 SID 的任何 ACE");
     // 机器级授权按设计不随会话撤：别的会话还要靠它零写启动。
-    let baseline = baseline_sid().expect("派生所有应用程序包 SID");
+    let baseline = product_sid().expect("派生本产品能力 SID");
     let machine_kept = has_explicit_ace_for(baseline, &base, RIGHTS_STAT);
     free_sid(baseline);
     assert!(
@@ -614,11 +614,11 @@ fn revoke_leaves_no_container_ace_on_leaf_parents() {
         "撤权不该动祖先链的机器级只读属性 ACE（它跨会话复用，只由整份台账回收）"
     );
     clean(&home).expect("台账回收应当成功");
-    let baseline = baseline_sid().expect("派生所有应用程序包 SID");
+    let baseline = product_sid().expect("派生本产品能力 SID");
     let machine_after_clean = has_explicit_ace_for(baseline, &base, RIGHTS_STAT);
     free_sid(baseline);
     discard(&base);
-    // 只看对象自己带的 ACE：产品根有机器级 `(OI)(CI)` 授权时，父目录会从祖先继承到一条 AAPP STAT，
+    // 只看对象自己带的 ACE：产品根有机器级 `(OI)(CI)` 授权时，父目录会从祖先继承到一条同主体的 STAT，
     // 那是祖先授权的投影、不归这份台账撤（夹具的 TMP 在仓库内时正是这种情形）。
     assert!(
         !machine_after_clean,
@@ -850,7 +850,7 @@ fn failed_write_keeps_preexisting_ace_and_never_says_rollback() {
     let home = base.join(".home");
     std::fs::create_dir_all(&dir).expect("建目录");
     std::fs::create_dir_all(&home).expect("建台账目录");
-    let sid = baseline_sid().expect("基线 SID");
+    let sid = product_sid().expect("派生本产品能力 SID");
     // 预存一条**不够用**的 ACE（真机上就是链接上那条只有 SYNCHRONIZE 的项）。
     const SYNCHRONIZE: u32 = 0x0010_0000;
     grant_one(sid, &dir, SYNCHRONIZE, false, false).expect("预存 ACE");

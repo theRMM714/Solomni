@@ -129,7 +129,7 @@ fn view_drive_puts_the_container_cwd_on_the_mapped_letter() {
     );
 }
 
-/// 【真机】外部工作区的机器级一次性只读：首写一次（授基线组、可继承），之后的准备零写；台账记机器级、无归属。
+/// 【真机】外部工作区的机器级一次性只读：首写一次（授本产品能力 SID、可继承），之后的准备零写；台账记机器级、无归属。
 #[test]
 fn machine_ro_tree_is_granted_once_and_reused_after() {
     let _fence = crate::tests::fence_acl_guard();
@@ -167,10 +167,10 @@ fn machine_ro_tree_is_granted_once_and_reused_after() {
         "首次要让工作区可读，必须真写一次 ACL：{:?}",
         first.steps
     );
-    let base_sid = baseline_sid().expect("取基线组 SID");
+    let base_sid = product_sid().expect("派生本产品能力 SID");
     assert!(
         has_inheritable_ace_for(base_sid, &workspace, RIGHTS_RO),
-        "工作区上要有可继承的基线组只读 ACE"
+        "工作区上要有可继承的本产品能力 SID 只读 ACE"
     );
     free_sid(base_sid);
     {
@@ -231,10 +231,10 @@ fn ensure_workspace_grant_is_explicit_and_revocable() {
         1,
         "撤权要销掉那一条台账条目"
     );
-    let base_sid = baseline_sid().expect("取基线组 SID");
+    let base_sid = product_sid().expect("派生本产品能力 SID");
     assert!(
         !has_inheritable_ace_for(base_sid, &workspace, RIGHTS_RO),
-        "撤权后工作区上不该再有基线组只读 ACE"
+        "撤权后工作区上不该再有本产品能力 SID 的只读 ACE"
     );
     free_sid(base_sid);
     let rec = load_record(&home);

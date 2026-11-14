@@ -93,8 +93,9 @@ pub(crate) fn delete_profile(name: &str) -> bool {
 /// 目的：孤儿授权清扫——在产品根内找台账之外、我们写过的显式 ACE 并连树撤掉。
 /// 约束：台账是精确回收的依据，但账会断（夹具/临时 home 被删、进程被杀、写入后没来得及记账），
 ///   断了账不代表没有残留。反向兜底两条：本程序建过的容器 profile 名派生 SID；以及任何显式、
-///   非继承、SID 形如 S-1-15-2-* 的允许 ACE（排除 ALL APPLICATION PACKAGES 与 ALL RESTRICTED
-///   两个基线）——profile 已删或从没建过的残留也能回收。自产品根向下在**最上层**命中处连树撤掉
+///   非继承的允许 ACE，其 SID 形如 S-1-15-2-*（排除 ALL APPLICATION PACKAGES 与 ALL RESTRICTED
+///   两个基线）或是本产品的能力 SID（S-1-15-3-*，只认自己派生的那一个）——profile 已删或从没建过
+///   的残留也能回收。自产品根向下在**最上层**命中处连树撤掉
 ///   （授权只会以某个目录为根整树写下去）。只扫产品根内：根外落点（解释器目录、根外只读根）仍
 ///   只由台账管。**必须在 sweep_profiles 之前调用**：profile 删了就派生不出 SID 了。
 pub fn sweep_orphan_aces(root: &Path) -> Result<usize, String> {
