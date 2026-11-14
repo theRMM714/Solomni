@@ -1,0 +1,4 @@
+PASS posix-no-download-when-host-cc-builds
+PASS macos-missing-clt-reports-prerequisite
+POSIX-ENV-BOOTSTRAP-OK
+ENV-BOOTSTRAP-OK
