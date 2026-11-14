@@ -29,7 +29,7 @@ capabilities/
 
 ## 二、格式与静态检查
 
-- 格式以 `cargo fmt --check` 为准，不手工对齐；改格式只跑 `node dev.js fmt`（`dev.js`）。
+- 格式以 `cargo fmt --check` 为准，不手工对齐；写格式跑 `node dev.js cargo -- fmt --all`（`node dev.js fmt` 只做 `--check`，报告偏差、不改文件）。
 - 静态检查以 `node dev.js clippy` 为准，`-D warnings` 下零告警；不得用 `#[allow]` 掩盖告警，确需放宽的逐条登记在 `Cargo.toml` 的 lints 段（`Cargo.toml`）。
 - edition 固定为 2024；工具链版本与 `rust-version` 同步升级（`Cargo.toml`）。
 

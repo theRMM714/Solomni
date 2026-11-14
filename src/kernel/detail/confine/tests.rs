@@ -332,34 +332,47 @@ fn interpreter_dirs_resolves_programs_but_not_data_files() {
     );
 }
 
-/// 目的：命令经目录重解析点（符号链接 / 联接）进来时，Windows 只授**真身**安装根；
-///   链接对象自身的 DACL 不参与跟随（真机：链接没有 AAPP 也能跑 exe）。
+/// 目的：命令经目录重解析点（符号链接 / 联接）进来时，链接与真身安装根都授——
+///   容器按 PATH 搜索要穿过链接本身（链接对象的 DACL 参与解析），真身保证兄弟文件可读。
 #[cfg(windows)]
 #[test]
-fn interpreter_roots_skip_a_reparse_point_parent_and_use_the_real_root() {
+fn interpreter_roots_cover_both_the_junction_and_the_real_root() {
     let root = crate::tests::scratch("interpreter-reparse");
     let real = root.join("real");
+    let mid = root.join("mid");
     let link = root.join("nodejs");
     std::fs::create_dir_all(&real).expect("建真身目录");
     std::fs::write(real.join("node.exe"), b"stub").expect("放假 node");
-    let made = std::process::Command::new("cmd")
-        .args(["/C", "mklink", "/J"])
-        .arg(&link)
-        .arg(&real)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-    if !made {
+    let mklink = |from: &std::path::Path, to: &std::path::Path| {
+        std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(from)
+            .arg(to)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    };
+    if !mklink(&mid, &real) || !mklink(&link, &mid) {
         eprintln!("[探针] 本机建不出目录联接（env-skip）：跳过重解析点授权口径");
+        let _ = std::fs::remove_dir(&link);
+        let _ = std::fs::remove_dir(&mid);
         let _ = std::fs::remove_dir_all(&root);
         return;
     }
-    assert_eq!(
-        interpreter_roots_for_exe(&link.join("node.exe")),
-        vec![real.clone()],
-        "只授真身安装根，不授链接父目录"
+    let roots = interpreter_roots_for_exe(&link.join("node.exe"));
+    assert!(
+        roots.contains(&link),
+        "第一层链接要授（PATH 搜索要穿过它）：{:?}",
+        roots
     );
+    assert!(
+        roots.contains(&mid),
+        "中间链接也要授（逐层穿过）：{:?}",
+        roots
+    );
+    assert!(roots.contains(&real), "真身安装根也要授：{:?}", roots);
     let _ = std::fs::remove_dir(&link);
+    let _ = std::fs::remove_dir(&mid);
     let _ = std::fs::remove_dir_all(&root);
 }
 

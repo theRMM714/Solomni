@@ -38,7 +38,7 @@
 | `src/kernel/detail/confine.rs` | 围栏机制门面：平台后端选择与重导出；本机能力与本次实际（`effective_paths`）的判据、自检（`verify`）与 `FenceHost` 释放 |
 | `src/kernel/detail/confine/job.rs` | 守门进程的围栏作业：`FenceJob` 的 JSON 形态、启动命令（`launcher`）与执行转交（`run_fenced`）；策略由调用方传入 |
 | `src/kernel/detail/confine/ledger.rs` | 围栏授权台账与启动对账：`Owner` / `Ledger`、`reconcile`、恢复与撤销（`restore_one` / `revoke_grant` / `release_fence`）、孤儿清扫与按条处置 |
-| `src/kernel/detail/confine/paths.rs` | 围栏的路径与环境工具：解释器安装根与 `PATH` 解析、可执行位与重解析点、node 真身基线、程序名改写、`shell_command` 与 `fence_env` |
+| `src/kernel/detail/confine/paths.rs` | 围栏的路径与环境工具：解释器安装根与 `PATH` 解析（链接与真身都授权）、可执行位、node 真身基线、程序名改写、`shell_command` 与 `fence_env` |
 | `src/kernel/detail/confine/prep.rs` | 围栏准备与清理：`FencePrep`、`prepare_fence`、`clean`、容器 profile 清扫（`sweep_profiles`）与机器级一次性预授的门面（`machine_missing` / `machine_ensure` / `retire_legacy_machine_grants`） |
 | `src/kernel/detail/confine/texts.rs` | 围栏边界说明：可达范围摘要（`reachable_roots`）与面向调用方的边界注记（`fence_boundary_note`） |
 | `src/kernel/detail/confine/tests.rs` | 围栏机制的单元测试：环境注入、安装目录上溯、Windows 程序名改写、作业 JSON、解释器解析、node realpath、边界说明与租约归属 |

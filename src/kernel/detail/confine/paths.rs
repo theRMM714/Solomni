@@ -106,10 +106,61 @@ pub(super) fn interpreter_dirs_in(
     dirs
 }
 
-/// 目的：解释器程序 → 要授权的安装根（Windows 按真身；Unix 链接与真身都留）。
-/// 约束：父目录是重解析点时，**链接对象自身的 DACL 不参与跟随**（真机：链接没有 AAPP 也能跑 exe），
-///   只授真身；文件本身是链接、父目录是实目录时两边都留（运行期兄弟文件可能在链接旁）。
-///   真身取不到又确实是重解析点：退回链接父目录，让授权按真实失败如实报，而不是静默不给。
+/// 目的：路径解析途中遇到的所有**目录**重解析点（符号链接 / 联接），从外到内。
+/// 用途：容器按 PATH 搜索要逐层穿过这些链接，每一层的链接对象自身 DACL 都要放行；
+///   只授最初那层与最终真身会漏掉中间的联接（真机：nvm 的 `.nodejs` → `.link\nodejs` → 版本目录）。
+/// 约束：只读解析，不写任何 ACL；超过 32 层视为环，停止。
+#[cfg(windows)]
+fn reparse_links(path: &std::path::Path) -> Vec<std::path::PathBuf> {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+    let mut out: Vec<std::path::PathBuf> = Vec::new();
+    let mut rest = path.to_path_buf();
+    let mut prefix = std::path::PathBuf::new();
+    let mut hops = 0usize;
+    while !rest.as_os_str().is_empty() {
+        let mut comps = rest.components();
+        let Some(first) = comps.next() else {
+            break;
+        };
+        let tail = comps.as_path().to_path_buf();
+        prefix.push(first.as_os_str());
+        let reparse = std::fs::symlink_metadata(&prefix)
+            .map(|m| m.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
+            .unwrap_or(false);
+        if !reparse {
+            rest = tail;
+            continue;
+        }
+        if std::fs::metadata(&prefix)
+            .map(|m| m.is_dir())
+            .unwrap_or(false)
+        {
+            out.push(prefix.clone());
+        }
+        let Ok(target) = std::fs::read_link(&prefix) else {
+            break;
+        };
+        let base = if target.is_absolute() {
+            target
+        } else {
+            prefix.parent().map(|p| p.join(&target)).unwrap_or(target)
+        };
+        rest = base.join(&tail);
+        prefix.clear();
+        hops += 1;
+        if hops > 32 {
+            break;
+        }
+    }
+    out
+}
+
+/// 目的：解释器程序 → 要授权的安装根（链接与真身都授）。
+/// 约束：目录重解析点（符号链接 / 联接）的**链接对象自身 DACL 参与路径解析**——容器按 PATH 搜索时
+///   要穿过链接本身；只授真身会在「PATH 项是 junction」时解析失败（真机：cmd 搜索不到解释器）。
+///   链接保证 PATH 搜索能穿过，真身保证里面的兄弟文件与运行期依赖可读；真身取不到时至少留链接父目录，
+///   让授权按真实失败如实报，而不是静默不给。
 pub(crate) fn interpreter_roots_for_exe(exe: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut dirs: Vec<std::path::PathBuf> = Vec::new();
     let parent = exe.parent();
@@ -117,49 +168,20 @@ pub(crate) fn interpreter_roots_for_exe(exe: &std::path::Path) -> Vec<std::path:
         .ok()
         .map(|p| crate::kernel::domain::path::native(&p));
     #[cfg(windows)]
-    {
-        if !parent.map(is_reparse_point).unwrap_or(false)
-            && let Some(p) = parent
-        {
-            dirs.push(install_dir(p));
-        }
-        if let Some(real) = real.as_deref()
-            && let Some(p) = real.parent()
-        {
-            dirs.push(install_dir(p));
-        }
-        if dirs.is_empty()
-            && let Some(p) = parent
-        {
-            dirs.push(install_dir(p));
-        }
+    dirs.extend(reparse_links(exe));
+    if let Some(p) = parent {
+        dirs.push(install_dir(p));
     }
-    #[cfg(not(windows))]
+    if let Some(parent) = real
+        .as_deref()
+        .filter(|real| *real != exe)
+        .and_then(|real| real.parent())
     {
-        if let Some(p) = parent {
-            dirs.push(install_dir(p));
-        }
-        if let Some(p) = real
-            .as_deref()
-            .filter(|real| *real != exe)
-            .and_then(|real| real.parent())
-        {
-            dirs.push(install_dir(p));
-        }
+        dirs.push(install_dir(parent));
     }
     dirs.sort();
     dirs.dedup();
     dirs.into_iter().filter(|d| d.is_dir()).collect()
-}
-
-/// 目的：路径本身是不是重解析点（符号链接 / 联接）。
-#[cfg(windows)]
-fn is_reparse_point(path: &std::path::Path) -> bool {
-    use std::os::windows::fs::MetadataExt;
-    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
-    std::fs::symlink_metadata(path)
-        .map(|m| m.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
-        .unwrap_or(false)
 }
 
 /// 目的：这个解释器安装目录在**平台围栏**下能不能放行（只读探测，不写权限项）。
