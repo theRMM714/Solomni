@@ -4,7 +4,7 @@
 //! 联动：由 `ledger.rs` / `prep.rs` / `confine.rs` 调用。
 
 use super::ledger::{Ledger, ReconcileReport};
-use super::prep::MachineGrantReport;
+use super::prep::{CalibrationReport, MachineGrantReport};
 use crate::kernel::api::FenceSpec;
 use std::path::Path;
 
@@ -57,11 +57,6 @@ pub(super) fn remove_profile_one(home: &Path, name: &str) -> Result<String, Stri
     backend::remove_profile_one(home, name)
 }
 
-/// 目的：撤销一次调用的围栏授权。
-pub(super) fn release_fence(spec: &FenceSpec, home: &Path) -> Result<(), String> {
-    backend::release_fence(spec, home)
-}
-
 /// 目的：清扫本程序建过的整族容器 profile。
 pub(super) fn sweep_profiles() -> Result<usize, String> {
     backend::sweep_profiles()
@@ -105,4 +100,14 @@ pub(super) fn revoke_machine_grants(home: &Path, path: &Path) -> Result<usize, S
 /// 目的：全量回收（连机器级授权一起撤）。
 pub(super) fn clean_all(home: &Path) -> Result<String, String> {
     backend::clean_all(home)
+}
+
+/// 目的：`--setup=fence-calibrate` 的合成树标定。
+pub(crate) fn calibrate_machine_grant(home: &Path) -> Result<CalibrationReport, String> {
+    backend::calibrate_machine_grant(home)
+}
+
+/// 目的：删掉标定用的合成树。
+pub(crate) fn remove_calibration_tree(path: &Path) -> Result<(), String> {
+    backend::remove_calibration_tree(path)
 }

@@ -138,11 +138,14 @@ pub use job::{FenceJob, launcher, run_fenced};
 #[cfg(any(windows, test))]
 pub use ledger::Owner;
 pub use ledger::{
-    Ledger, LedgerEntry, ReconcileReport, ledger, reconcile, release_fence, remove_profile_one,
-    restore_one, revoke_grant, sweep_orphan_aces,
+    Ledger, LedgerEntry, ledger, reconcile, remove_profile_one, restore_one, revoke_grant,
+    sweep_orphan_aces,
 };
 pub use paths::{fence_env, shell_command};
+#[cfg(all(windows, test))]
+pub(crate) use windows::release_fence;
 // 一次围栏准备里真写 ACL 的分步耗时条目：Windows 产生，回执交棒跨平台读。
+pub(crate) use admin::{calibrate_machine_grant, remove_calibration_tree};
 #[cfg(any(windows, test))]
 pub use prep::FencePrep;
 pub use prep::FenceStep;
@@ -154,8 +157,6 @@ pub use prep::{
     MachineGrantReport, clean_all, ensure_workspace_grant, machine_ensure, machine_missing,
     retire_legacy_machine_grants, revoke_machine_grants, sweep_profiles,
 };
-#[cfg(windows)]
-pub(crate) use prep::{calibrate_machine_grant, remove_calibration_tree};
 
 #[cfg(windows)]
 pub(crate) use paths::{

@@ -4,14 +4,15 @@
 //! 联动：入口是 --fence-reconcile（src/main.rs）；落盘与锁在 store.rs，判活在 liveness.rs。
 
 use super::super::*;
+use crate::kernel::detail::confine::ledger::ReconcileReport;
 use std::path::{Path, PathBuf};
 
 /// 目的：启动期对账——按台账回收"归属明确已死"的陈旧授权；无法判定的报告后跳过。
 /// 约束：不问用户；只回收归属明确已死的条目（活着的不动）；失败保留台账供下次重试。
 ///   **不做**孤儿清扫（sweep_orphan_aces / sweep_profiles）——那两条无归属，会误伤在跑实例，只归手动 --fence-clean；
 ///   但会**报告**台账之外的按次 profile（按次调用后数量随调用增长），处置入口仍是手动。
-pub fn reconcile(home: &Path) -> super::super::super::ReconcileReport {
-    let mut rep = super::super::super::ReconcileReport::default();
+pub fn reconcile(home: &Path) -> ReconcileReport {
+    let mut rep = ReconcileReport::default();
     let _lock = match lock_ledger(home) {
         Ok(l) => l,
         Err(e) => {

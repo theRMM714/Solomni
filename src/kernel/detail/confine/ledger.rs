@@ -3,8 +3,6 @@
 //! 不管：平台 ACL 读写（在 windows/record/）、启动流程（在根）。
 //! 联动：启动对账由 `src/main.rs` 与 `src/entry/` 调用；Windows 条目的读写与撤权在 `windows/record/`。
 
-use crate::kernel::api::FenceSpec;
-
 /// 目的：启动期对账——按台账回收"归属明确已死"的陈旧授权；无法判定的报告后跳过（启动与 `--fence-reconcile` 共用）。
 /// 约束：只有 Windows 写本机权限项；其它平台没有台账，如实返回空报告。
 pub fn reconcile(home: &std::path::Path) -> ReconcileReport {
@@ -194,9 +192,4 @@ pub fn revoke_grant(
 /// 错误：删除被拒时如实返回；失败时台账不改动。
 pub fn remove_profile_one(home: &std::path::Path, name: &str) -> Result<String, String> {
     super::admin::remove_profile_one(home, name)
-}
-
-/// 目的：撤销一次调用的围栏授权（Windows 的按次释放用；其它平台没有持久授权这一步）。
-pub fn release_fence(spec: &FenceSpec, home: &std::path::Path) -> Result<(), String> {
-    super::admin::release_fence(spec, home)
 }

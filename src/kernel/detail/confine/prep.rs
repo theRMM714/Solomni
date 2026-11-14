@@ -11,8 +11,6 @@ mod windows;
 pub use windows::clean;
 #[cfg(windows)]
 pub use windows::prepare_fence;
-#[cfg(windows)]
-pub(crate) use windows::{calibrate_machine_grant, remove_calibration_tree};
 
 /// 目的：扫掉本程序建过的整族容器 profile：台账只记"我们知道写过什么"，而 profile 可能来自没有台账的路径
 ///   （探针、夹具的台账被删、进程被杀）。名字前缀是本程序独有的，所以按它扫。返回扫掉的个数。
@@ -66,6 +64,16 @@ impl FencePrep {
         }
         self.notes.push(fact.line());
     }
+}
+
+/// 目的：`--setup=fence-calibrate` 的合成树标定结果。
+pub(crate) struct CalibrationReport {
+    /// 目的：标定用的合成树根（用后清理）。
+    pub(crate) path: std::path::PathBuf,
+    /// 目的：真写 ACL 的对象数。
+    pub(crate) objects: u64,
+    /// 目的：整段标定的墙钟耗时（毫秒）。
+    pub(crate) ms: u64,
 }
 
 /// 目的：一次**显式**机器级只读授权的结论（外部工作区绑定之类动作回报成本用）。

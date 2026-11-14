@@ -4,7 +4,7 @@
 //! 联动：由 `src/kernel/detail/confine/admin.rs` 在非 Windows 目标选中。
 
 use super::super::ledger::{Ledger, ReconcileReport};
-use super::super::prep::MachineGrantReport;
+use super::super::prep::{CalibrationReport, MachineGrantReport};
 use crate::kernel::api::FenceSpec;
 use std::path::Path;
 
@@ -54,11 +54,6 @@ pub(super) fn remove_profile_one(_home: &Path, _name: &str) -> Result<String, St
     Err("本平台没有容器 profile".to_string())
 }
 
-/// 目的：非 Windows 没有持久授权可释放。
-pub(super) fn release_fence(_spec: &FenceSpec, _home: &Path) -> Result<(), String> {
-    Ok(())
-}
-
 /// 目的：非 Windows 没有容器 profile 可扫。
 pub(super) fn sweep_profiles() -> Result<usize, String> {
     Ok(0)
@@ -102,4 +97,14 @@ pub(super) fn revoke_machine_grants(_home: &Path, _path: &Path) -> Result<usize,
 /// 目的：非 Windows 围栏不留权限项，无需清理。
 pub(super) fn clean_all(_home: &Path) -> Result<String, String> {
     Ok("本平台的围栏不留权限项，无需清理".to_string())
+}
+
+/// 目的：非 Windows 没有机器级 ACL 标定。
+pub(super) fn calibrate_machine_grant(_home: &Path) -> Result<CalibrationReport, String> {
+    Err("本平台没有机器级 ACL 标定（已登记缺口）".to_string())
+}
+
+/// 目的：非 Windows 没有标定树可删。
+pub(super) fn remove_calibration_tree(_path: &Path) -> Result<(), String> {
+    Ok(())
 }
