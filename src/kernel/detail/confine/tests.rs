@@ -11,6 +11,54 @@ use super::paths::*;
 use super::texts::*;
 use super::*;
 
+#[test]
+fn effective_paths_follows_platform_acl_step() {
+    let cap = Capability {
+        fs: true,
+        net: true,
+        tree: true,
+        note: String::new(),
+    };
+    assert_eq!(cap.effective_paths(true), (true, true));
+    #[cfg(windows)]
+    assert_eq!(cap.effective_paths(false), (false, false));
+    #[cfg(not(windows))]
+    assert_eq!(cap.effective_paths(false), (true, true));
+}
+
+/// 目的：没有 ACL 台账的平台，管理动作全部如实降级（不假装成功、不写本机）。
+#[cfg(not(windows))]
+#[test]
+fn admin_actions_degrade_without_acl_support() {
+    let root = crate::tests::scratch("confine-admin-nonwindows");
+    let home = root.join(".home");
+    let _ = std::fs::create_dir_all(&home);
+
+    assert!(super::reconcile(&home).note.contains("不留权限项"));
+    assert!(super::ledger(&home).entries.is_empty());
+    assert!(super::restore_one(&home, &root).is_err());
+    assert!(super::revoke_grant(&home, "S-1-0-0", &root).is_err());
+    assert!(super::remove_profile_one(&home, "x").is_err());
+    assert_eq!(super::sweep_orphan_aces(&root).unwrap(), 0);
+    assert!(super::machine_missing(&root).is_err());
+    assert!(super::machine_ensure(&root, &home, &mut |_| {}).is_err());
+    super::retire_legacy_machine_grants(&home, &mut |_| {}).unwrap();
+    assert!(super::calibrate_machine_grant(&home).is_err());
+    super::remove_calibration_tree(&root).unwrap();
+    assert_eq!(
+        super::ensure_workspace_grant(&home, &root).unwrap(),
+        super::MachineGrantReport::default()
+    );
+    assert_eq!(super::revoke_machine_grants(&home, &root).unwrap(), 0);
+    assert_eq!(
+        super::clean_all(&home).unwrap(),
+        "本平台的围栏不留权限项，无需清理"
+    );
+    assert_eq!(super::sweep_profiles().unwrap(), 0);
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// 测试专用注入开关：打开它，机制验证必须确定性地报「本机不允许」。
 /// 这是覆盖 EnvUnavailable 那一路的唯一确定性手段——三平台探针都靠它。
 ///

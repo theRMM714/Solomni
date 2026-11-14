@@ -17,6 +17,11 @@ pub fn capability() -> Capability {
 
 /// 目的：本平台**没有**文件系统围栏机制可装：这是环境结论（"本平台没接入"），不是我们写错了，
 ///   所以恒为 EnvUnavailable——未授权时段据此如实降级照跑，而不是拒绝执行。
+/// 目的：本次实际生效的路径级围栏——没有外层写 ACL 这一步，授权值不参与判据。
+pub fn effective_paths(fs: bool, net: bool, _write_allowed: bool) -> (bool, bool) {
+    (fs, net)
+}
+
 pub fn verify(_spec: &FenceSpec, _command: &str) -> FenceVerdict {
     FenceVerdict::EnvUnavailable("本平台没有接入文件系统围栏（只有超时与整棵树终止）".to_string())
 }

@@ -480,3 +480,18 @@ fn missing_settings_file_still_loads_defaults_for_first_run() {
     assert!(!loaded.app.sandbox.policy.windows.write_acl);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// 目的：没有外层 ACL 授权的平台，启动报告把授权标为「不适用」，并说明围栏在守门进程里自足。
+#[cfg(not(windows))]
+#[test]
+fn fence_auth_labels_are_not_applicable_off_windows() {
+    assert_eq!(
+        crate::entry::startup::fence_auth_label(false),
+        "不适用",
+        "不能把 Unix 显示成未授权"
+    );
+    assert!(
+        crate::entry::startup::fence_auth_note(false).contains("本平台"),
+        "说明要指向本平台的机制"
+    );
+}

@@ -12,7 +12,7 @@
     {
       "file": "src/kernel/detail/confine.rs",
       "from": 75,
-      "to": 76,
+      "to": 77,
       "reason": "分派到平台后端：Linux Landlock 与 macOS seatbelt 安装不可逆，进程内测试无法调用；由平台探针在子进程验收"
     },
     {

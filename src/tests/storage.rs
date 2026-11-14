@@ -348,3 +348,14 @@ fn guests_are_absent_without_a_process_ledger() {
     assert!(!ProcessGuests::new(&root).any_running());
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// 目的：宿主磁盘总量 / 可用量的平台后端真能读出数字（Linux/macOS 用 statvfs）。
+#[cfg(unix)]
+#[test]
+fn host_disk_space_is_readable() {
+    let (total, free) =
+        crate::capabilities::storage::detail::space::total_free(std::path::Path::new("/"))
+            .expect("statvfs 应可读");
+    assert!(total > 0, "总量应为正");
+    assert!(free <= total, "可用量不应超过总量");
+}
