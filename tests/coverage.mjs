@@ -496,7 +496,7 @@ export function diffCoverage(files, base, root = ROOT) {
   const wanted = new Set([...changed.keys()].filter((f) => !isTestFile(f)));
   const moved = movedLines(base, wanted, root);
   const exclusions = exclusionMap();
-  const buckets = POLICY.buckets.map((b) => ({ ...b, re: b.globs.map(globToRe), covered: 0, total: 0, moved: 0 }));
+  const buckets = POLICY.buckets.map((b) => ({ ...b, re: b.globs.map(globToRe), covered: 0, total: 0, moved: 0, gaps: [] }));
   for (const f of files) {
     const rel = f.file;
     if (isTestFile(rel)) continue;
@@ -520,6 +520,7 @@ export function diffCoverage(files, base, root = ROOT) {
         }
         b.total++;
         if (l.count > 0) b.covered++;
+        else if (l.count === 0 && b.gaps.length < 400) b.gaps.push(rel + ":" + l.line);
       }
     }
   }
@@ -544,6 +545,12 @@ function printDiff(diff) {
     );
   }
   if (diff.moved) console.log("  其中 " + diff.moved + " 行是纯搬运（换文件、换路径限定或重排），未计入分母");
+  for (const b of diff.buckets) {
+    if (!b.total || b.pct >= (b.min === 100 ? 100 : diff.min) || !b.gaps.length) continue;
+    console.log("  [" + b.id + "] 变更行里没被执行到的行（" + b.gaps.length + (b.gaps.length >= 400 ? "+" : "") + "）：");
+    for (const g of b.gaps.slice(0, 80)) console.log("    " + g);
+    if (b.gaps.length > 80) console.log("    …");
+  }
 }
 
 function collect() {
