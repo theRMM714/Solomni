@@ -187,12 +187,14 @@ pub use paths::{fence_env, shell_command};
 #[cfg(any(windows, test))]
 pub use prep::FencePrep;
 pub use prep::FenceStep;
+#[cfg(test)]
+pub use prep::clean;
 #[cfg(windows)]
 pub use prep::prepare_fence;
 #[cfg(windows)]
 pub use prep::retire_legacy_machine_grants;
 pub use prep::{
-    MachineGrantReport, clean, ensure_workspace_grant, machine_ensure, machine_missing,
+    MachineGrantReport, clean_all, ensure_workspace_grant, machine_ensure, machine_missing,
     revoke_machine_grants, sweep_profiles,
 };
 

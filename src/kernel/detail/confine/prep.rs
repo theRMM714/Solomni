@@ -180,11 +180,25 @@ pub fn revoke_machine_grants(
     Ok(0)
 }
 
-/// 目的：精确回收：按台账撤掉我们写过的权限项、删掉我们建过的容器 profile（`--fence-clean` 用）。
+/// 目的：默认回收：按台账撤掉按次 / 会话权限项与容器 profile，保留机器级授权（测试与常规收尾用）。
+#[cfg(test)]
 pub fn clean(home: &std::path::Path) -> Result<String, String> {
     #[cfg(windows)]
     {
         windows::clean(home)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = home;
+        Ok("本平台的围栏不留权限项，无需清理".to_string())
+    }
+}
+
+/// 目的：全量回收：连机器级授权一起撤（`--fence-clean` 用）。
+pub fn clean_all(home: &std::path::Path) -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        windows::clean_all(home)
     }
     #[cfg(not(windows))]
     {

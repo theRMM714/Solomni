@@ -17,31 +17,70 @@ pub(crate) fn revoke_one_text(sid_text: &str, path: &Path, recursive: bool) -> R
     r
 }
 
-/// 目的：精确回收——按台账把我们写过的 ACE 逐条撤掉，并删掉我们建过的容器 profile。
-/// 返回：给用户看的一句话（清理了几条、删了几个 profile）。
+/// 目的：默认收尾——按台账撤掉**按次 / 会话**授权、删掉我们建过的容器 profile。
+///   机器级（`scope=machine`）是跨会话复用的状态，默认保留：测试每轮调用不会反复重写祖先 ACE
+///   （真机实测一次祖先链重算约 138 秒），机器级条目由 `--fence-clean` 的全量入口显式撤。
+/// 返回：给用户看的一句话（清理了几条、删了几个 profile、保留了多少机器级授权）。
+#[cfg(test)]
 pub fn clean(home: &Path) -> Result<String, String> {
-    let _lock = lock_ledger(home)?;
-    let rec = load_record(home);
+    clean_impl(home, false)
+}
+
+/// 目的：全量收尾——连 `scope=machine` 一起撤（`--fence-clean` 用；用户显式要求时才动机器级 ACL）。
+pub fn clean_all(home: &Path) -> Result<String, String> {
+    clean_impl(home, true)
+}
+
+fn clean_impl(home: &Path, include_machine: bool) -> Result<String, String> {
+    // 锁只罩台账读取；慢的 ACL 还原 / 撤销与删 profile 全在锁外。
+    let rec = {
+        let _lock = lock_ledger(home)?;
+        load_record(home)
+    };
     if rec.is_empty() {
         return Ok("没有台账：本程序没在本机写过权限项".to_string());
     }
+    // 保留机器级条目时，带机器级授权的路径不能按快照整体还原（那会把机器级 ACE 一起抹掉）；
+    // 这些路径上的按次 / 会话 ACE 改走逐条精确撤销，快照留给机器级条目显式撤除时用。
+    let machine_paths: std::collections::HashSet<&str> = if include_machine {
+        std::collections::HashSet::new()
+    } else {
+        rec.grants
+            .iter()
+            .filter(|g| g.scope == GrantScope::Machine)
+            .map(|g| g.path.as_str())
+            .collect()
+    };
     let mut errors: Vec<String> = Vec::new();
     let mut restored = 0usize;
+    let mut restored_paths: Vec<String> = Vec::new();
     // 根内路径整体还原原始安全描述符：被写坏的 DACL 只有这一条路能修回来。
     for snap in &rec.snapshots {
+        if machine_paths.contains(snap.path.as_str()) {
+            continue;
+        }
         let p = PathBuf::from(&snap.path);
         if std::fs::symlink_metadata(&p).is_err() {
             continue;
         }
         match restore_sd(&p, &snap.bytes) {
-            Ok(()) => restored += 1,
+            Ok(()) => {
+                restored += 1;
+                restored_paths.push(snap.path.clone());
+            }
             Err(e) => errors.push(e),
         }
     }
     let mut removed = 0usize;
+    let mut revoked: Vec<(String, String)> = Vec::new();
     for grant in &rec.grants {
-        // 根内路径已由上面的快照整体还原，这里不再逐条撤（重复撤一个不存在的 ACE 没有意义）。
-        if rec.snapshots.iter().any(|s| s.path == grant.path) {
+        if grant.scope == GrantScope::Machine && !include_machine {
+            continue;
+        }
+        // 没有机器级占用的路径已由快照整体还原，这里不再逐条撤（重复撤一个不存在的 ACE 没有意义）。
+        if !machine_paths.contains(grant.path.as_str())
+            && rec.snapshots.iter().any(|s| s.path == grant.path)
+        {
             continue;
         }
         let sid = match sid_from_string(&grant.sid) {
@@ -54,13 +93,17 @@ pub fn clean(home: &Path) -> Result<String, String> {
         let p = PathBuf::from(&grant.path);
         if std::fs::symlink_metadata(&p).is_ok() {
             match revoke_one(sid, &p, true) {
-                Ok(()) => removed += 1,
+                Ok(()) => {
+                    removed += 1;
+                    revoked.push((grant.sid.clone(), grant.path.clone()));
+                }
                 Err(e) => errors.push(e),
             }
         }
         free_sid(sid);
     }
     let mut deleted = 0usize;
+    let mut deleted_names: Vec<String> = Vec::new();
     for prof in &rec.profiles {
         let n: Vec<u16> = std::ffi::OsStr::new(&prof.name)
             .encode_wide()
@@ -69,6 +112,7 @@ pub fn clean(home: &Path) -> Result<String, String> {
         let hr = unsafe { DeleteAppContainerProfile(n.as_ptr()) };
         if hr >= 0 {
             deleted += 1;
+            deleted_names.push(prof.name.clone());
         }
     }
     if !errors.is_empty() {
@@ -81,16 +125,59 @@ pub fn clean(home: &Path) -> Result<String, String> {
             deleted
         ));
     }
-    // 全部清干净了才删台账；删不掉本身就是没收干净，如实报错。
-    match std::fs::remove_file(record_path(home)) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(format!("权限项已清干净，但删除授权台账失败：{}", e)),
+    // 清干净了才改台账：锁内按本次成功清单销账，删不掉本身就是没收干净，如实报错。
+    let kept = {
+        let _lock = lock_ledger(home)?;
+        let mut rec = load_record(home);
+        rec.grants.retain(|g| {
+            if g.scope == GrantScope::Machine && !include_machine {
+                return true; // 机器级默认保留
+            }
+            // 快照整体还原已经覆盖这条路径上的全部 ACE（有机器级占用的路径不会进 restored_paths）。
+            if restored_paths.contains(&g.path) {
+                return false;
+            }
+            !revoked
+                .iter()
+                .any(|(sid, path)| g.sid == *sid && g.path == *path)
+        });
+        // 先销授权再判快照：全量收尾把机器级条目撤掉后，它占着的快照也要一起销。
+        for path in &restored_paths {
+            if !rec
+                .grants
+                .iter()
+                .any(|g| g.path == *path && g.scope == GrantScope::Machine)
+            {
+                rec.snapshots.retain(|s| s.path != *path);
+            }
+        }
+        rec.profiles.retain(|p| !deleted_names.contains(&p.name));
+        if rec.is_empty() {
+            match std::fs::remove_file(record_path(home)) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(format!("权限项已清干净，但删除授权台账失败：{}", e)),
+            }
+            0
+        } else {
+            save_record(home, &rec).map_err(|e| format!("授权台账更新失败：{}", e))?;
+            rec.grants
+                .iter()
+                .filter(|g| g.scope == GrantScope::Machine)
+                .count()
+        }
+    };
+    if include_machine {
+        Ok(format!(
+            "已还原 {} 处原始权限、撤销 {} 条授权、删除 {} 个容器 profile",
+            restored, removed, deleted
+        ))
+    } else {
+        Ok(format!(
+            "已还原 {} 处原始权限、撤销 {} 条按次 / 会话授权、删除 {} 个容器 profile；保留 {} 条机器级授权（用 --fence-clean 全量回收）",
+            restored, removed, deleted, kept
+        ))
     }
-    Ok(format!(
-        "已还原 {} 处原始权限、撤销 {} 条授权、删除 {} 个容器 profile",
-        restored, removed, deleted
-    ))
 }
 
 /// 目的：撤销一次会话的授权（会话删除时经 FenceHost 端口调用）。

@@ -15,7 +15,7 @@
 - 网络：只绑定本地环回，测试后关闭监听；
 - 进程：记录子进程，超时和失败路径也要杀整棵树；
 - 权限：默认不写真实 ACL、profile 或系统策略；真机探针只能在显式 `--fence-live` 下执行（`run-tests.js`）；
-- 写了就必须撤回：真机测试收尾要按台账撤掉自己写下的 ACE、还原根内路径的原始安全描述符、删掉自己建过的容器 profile（`src/kernel/detail/confine/`）（端到端收尾调 `--fence-clean`，`confine` 的 ACL 契约测试调 `confine::clean`），并把回收结果如实打印——不许留下没人管的痕迹。
+- 写了就必须撤回：真机测试收尾要按台账撤掉自己写下的 ACE、还原根内路径的原始安全描述符、删掉自己建过的容器 profile（`src/kernel/detail/confine/`）（端到端收尾调 `--fence-clean`，它走全量的 `confine::clean_all`；`confine` 的 ACL 契约测试调 `confine::clean`），并把回收结果如实打印——不许留下没人管的痕迹。例外只有机器级（`scope=machine`）授权：它是跨会话复用的产品级只读状态，`clean` 默认保留、测试之间复用，避免每次重写祖先 ACE（真机实测约 138 秒/次）；需要连它一起收干净时用 `--fence-clean` / `clean_all`。
 - 写 ACL 前先把记录落盘，写后核对（我们的 ACE 在不在、原有 ACE 集合有没有变少），失败就回滚；**不许用 `let _ =` 吞掉清理失败**，清不掉就返回错误；
 - 临时目录：ACL 测试与探针不在共享临时根上授父目录 ACE——在自有 base 下再套一层 `target/`，父目录就是自有 base，home 也落在 base 内，收尾删整个 base；
 - 配置：不得读取真实 `.home/`，不得覆盖用户设置；

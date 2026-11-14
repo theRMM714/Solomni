@@ -701,10 +701,10 @@ fn machine_grant_has_no_owners_and_survives_reconcile() {
         has_ace_for(base_sid, &target, RIGHTS_STAT),
         "对账不得撤机器级 ACE"
     );
-    clean(&home).expect("收尾回收应当成功");
+    clean_all(&home).expect("全量收尾回收应当成功");
     let rec = load_record(&home);
-    assert!(rec.grants.is_empty(), "收尾后机器级条目也要销账");
-    assert!(rec.snapshots.is_empty(), "收尾后快照也要销账");
+    assert!(rec.grants.is_empty(), "全量收尾后机器级条目也要销账");
+    assert!(rec.snapshots.is_empty(), "全量收尾后快照也要销账");
     free_sid(base_sid);
     discard(&base);
 }
