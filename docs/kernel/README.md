@@ -72,7 +72,7 @@
 - **台账写事务串行**：每条授权 / profile 带**归属**（pid + 进程创建时刻 + 会话租约），台账落在 `.home/fence-grants.json`；写事务用**进程内互斥 + 跨进程文件锁**，两个进程不会同时改同一份台账。
 - **锁只罩台账读—改—写**：`with_ledger` 在锁内 `load` → 记账 → `save`，返回即释放；慢的 ACL 写（`grant_verified` / `TreeSetNamedSecurityInfoW`）、`acl_scan`、`has_ace_for` 都在锁外。同进程的并发工具调用不因某一条整树重算互相排队，跨进程锁的持有时间与 ACL 写时长解耦（`src/kernel/detail/confine/windows/record/store.rs`、`src/kernel/detail/confine/windows/record/journal.rs`）。
 - **围栏准备分步计时与进度**（仅 Windows）：`prepare_fence` 只对**真写** ACL 的落点记一步（标签固定词表：解释器目录 / 祖先链 / 受保护根 / 可信基座，不含用户路径），首次真写前 stderr 提示一次「首次为…补权限（可能要几十秒）」，完成后一条汇总（只报 ≥1 秒的类别；纯命中 / 总耗时 <1 秒保持安静）；回执的「其中围栏准备 N 秒」仍来自总耗时，格式与解析口径不变（`src/kernel/detail/confine/prep.rs` 的 `FenceStep` / `FencePrep.steps`、`src/kernel/detail/process.rs` 的 `FenceTiming`）。
-- **身份按 reach、生命周期按会话**：Windows 的容器身份 = `会话租约 + agent + 受保护根集合（reach 指纹，不含工具链、不含 net）`——同一会话里不同 scope 的调用根集合不同 → 不同 SID（窄调用看不到宽调用的根），同一 reach 的后续调用复用 SID 与 ACL。授权由会话持有：调用结束**不**释放，会话改配 / 删除时由 `release_by_lease` 按会话租约撤 ACE、删 profile；崩溃残留由 `reconcile` 按死归属回收。一次性调用（构建 / 独立模块工具）没有会话，各自唯一租约，跑完走 `release_call`（含 `private/Packages/<名字>` 临时目录）。
+- **身份按 reach、生命周期按会话**：Windows 的容器身份 = `会话租约 + agent + 受保护根集合（reach 指纹，不含工具链、不含 net）`——同一会话里不同 scope 的调用根集合不同 → 不同 SID（窄调用看不到宽调用的根），同一 reach 的后续调用复用 SID 与 ACL。授权由会话持有：调用结束**不**释放，会话改配 / 删除时由 `release_by_lease` 按会话租约撤 ACE、删 profile；删除会话先停 guest、再删目录，然后把按租约撤权甩到后台（先删目录让根内授权走「路径不在 → 只销账」快分支）；进程退出导致后台线程被杀时，残留由 `reconcile` 按死归属回收。一次性调用（构建 / 独立模块工具）没有会话，各自唯一租约，跑完走 `release_call`（含 `private/Packages/<名字>` 临时目录）。
 
 ## 二、工具进程与守门协议
 

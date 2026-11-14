@@ -201,7 +201,7 @@ pub(crate) mod persist;
 pub(crate) use persist::{Persister, SYSTEM_SID_SUGGEST, persist_events};
 mod suggest;
 #[cfg(test)]
-pub(crate) use history::SessionDelete;
+pub(crate) use history::{ReleaseByLease, SessionDelete};
 pub mod proxy;
 mod rewind;
 #[cfg(test)]

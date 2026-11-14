@@ -55,7 +55,7 @@
 | `src/kernel/detail/confine/windows/record/liveness.rs` | 归属者的活性：`current_owner`、进程创建时间与存活探测（`Liveness` / `OwnersState` / `owners_state` / `owner_liveness`） |
 | `src/kernel/detail/confine/windows/record/journal.rs` | 授权的建立：写前快照与按条记账（`journal_add_profile` / `journal_claim_grant` / `journal_release_grant` / `journal_add_snapshot` / `grant_one_journaled` / `journal_claim_machine` / `grant_machine_journaled` / `combine`） |
 | `src/kernel/detail/confine/windows/record/sweep.rs` | 清扫：容器 profile 与孤儿 ACE（`record_profile` / `sweep_profiles` / `delete_profile` / `sweep_orphan_aces` / `sweep_dir_down`） |
-| `src/kernel/detail/confine/windows/record/release.rs` | 撤销与释放：按条撤销（`revoke_one_text`）、围栏释放（`release_fence` / `release_by_lease`）、租约收尾（`finalize_grant`）与清理（`clean`） |
+| `src/kernel/detail/confine/windows/record/release.rs` | 撤销与释放：按条撤销（`revoke_one_text`）、围栏释放（`release_fence` / `release_by_lease`，锁内摘归属、锁外撤 ACL 的两阶段）、默认清理（`clean`，保留机器级）与全量清理（`clean_all`） |
 | `src/kernel/detail/confine/windows/record/catalog.rs` | 按条处置的读写面：`acl_facts` / `catalog` / `restore_one` / `revoke_grant` / `remove_profile_one` |
 | `src/kernel/detail/confine/windows/record/reconcile.rs` | 启动对账：`reconcile` 按归属与活性收掉上一轮运行留下的授权、快照与容器 profile |
 | `src/kernel/detail/confine/windows/record/paths.rs` | 台账与围栏的路径判据：产品根（`product_root`）与根内包含（`inside_root`） |

@@ -166,6 +166,155 @@ pub(crate) fn session_delete_stops_the_guest_before_removing_directories() {
     assert!(store.load("w").is_err(), "停完 guest 后再删目录");
 }
 
+/// 目的：删除收尾里的围栏撤权**不占调用方等待路径**：目录先删完，再在后台线程按租约撤权。
+///   回调被闸门挡住时 `run()` 仍要立刻返回；回调里能看到会话已经删掉（先删目录的快分支前提）。
+#[test]
+pub(crate) fn session_delete_releases_fences_in_background_after_directories() {
+    use crate::capabilities::conductor::service::SessionDelete;
+    use crate::capabilities::conductor::service::guest_job::GuestStop;
+    use crate::capabilities::vm::api::Vm;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+
+    let store = Arc::new(InMemoryHistory::new());
+    seed_session(
+        &store,
+        "w",
+        "single",
+        vec![agent_meta("a", &[], None)],
+        ExecSpec::default(),
+    );
+    let hist = test_history_of(Arc::clone(&store));
+    let vm: Arc<dyn Vm + Send + Sync> = Arc::new(crate::tests::doubles::RecordingVm::default());
+    let gone = Arc::new(AtomicBool::new(false));
+    let started = Arc::new(AtomicBool::new(false));
+    let done = Arc::new(AtomicBool::new(false));
+    let (gate_tx, gate_rx) = mpsc::channel::<()>();
+    let gate_rx = Arc::new(Mutex::new(gate_rx));
+    let release: crate::capabilities::conductor::service::ReleaseByLease = {
+        let gone = Arc::clone(&gone);
+        let started = Arc::clone(&started);
+        let done = Arc::clone(&done);
+        let hist = Arc::clone(&hist);
+        Arc::new(move |_lease: &str| {
+            gone.store(hist.load("w").is_err(), Ordering::SeqCst);
+            started.store(true, Ordering::SeqCst);
+            let _ = gate_rx.lock().expect("锁").recv();
+            done.store(true, Ordering::SeqCst);
+            Ok(())
+        })
+    };
+    let delete = SessionDelete::for_test_with_fences(
+        GuestStop::new(vm, Vec::new()),
+        hist,
+        vec!["w".to_string()],
+        "w".to_string(),
+        vec!["lease-w".to_string()],
+        release,
+        Arc::new(crate::kernel::ports::NoopLog),
+    );
+    let before = Instant::now();
+    assert!(delete.run().expect("删除收尾"), "会话目录该删掉");
+    assert!(
+        before.elapsed() < Duration::from_secs(2),
+        "撤权在后台：调用方不该等它"
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !started.load(Ordering::SeqCst) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(started.load(Ordering::SeqCst), "后台撤权要真的开始");
+    assert!(
+        gone.load(Ordering::SeqCst),
+        "撤权必须发生在目录删除之后（路径不在 → 只销账的快分支）"
+    );
+    gate_tx.send(()).expect("放行后台撤权");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !done.load(Ordering::SeqCst) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(done.load(Ordering::SeqCst), "后台撤权要跑完");
+}
+
+/// 目的：删目录失败时撤权仍然执行（错误如实返回，不能把待办丢掉）。
+#[test]
+pub(crate) fn session_delete_releases_fences_even_when_directory_delete_fails() {
+    use crate::capabilities::conductor::service::SessionDelete;
+    use crate::capabilities::conductor::service::guest_job::GuestStop;
+    use crate::capabilities::session::api::History;
+    use crate::capabilities::session::domain::history::HistoryView;
+    use crate::capabilities::vm::api::Vm;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::{Duration, Instant};
+
+    struct FailingDelete {
+        inner: Arc<dyn History + Send + Sync>,
+    }
+    impl History for FailingDelete {
+        fn create(&self, meta: &SessionMeta) -> Result<(), String> {
+            self.inner.create(meta)
+        }
+        fn save_meta(&self, meta: &SessionMeta) -> Result<(), String> {
+            self.inner.save_meta(meta)
+        }
+        fn append(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String> {
+            self.inner.append(name, events)
+        }
+        fn replace(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String> {
+            self.inner.replace(name, events)
+        }
+        fn list(&self) -> Result<Vec<HistoryView>, String> {
+            self.inner.list()
+        }
+        fn meta(&self, name: &str) -> Result<SessionMeta, String> {
+            self.inner.meta(name)
+        }
+        fn load(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {
+            self.inner.load(name)
+        }
+        fn delete(&self, _name: &str) -> Result<bool, String> {
+            Err("目录被占用".to_string())
+        }
+    }
+
+    let store = Arc::new(InMemoryHistory::new());
+    seed_session(
+        &store,
+        "w",
+        "single",
+        vec![agent_meta("a", &[], None)],
+        ExecSpec::default(),
+    );
+    let inner = test_history_of(Arc::clone(&store));
+    let hist: Arc<dyn History + Send + Sync> = Arc::new(FailingDelete { inner });
+    let vm: Arc<dyn Vm + Send + Sync> = Arc::new(crate::tests::doubles::RecordingVm::default());
+    let called = Arc::new(AtomicBool::new(false));
+    let release: crate::capabilities::conductor::service::ReleaseByLease = {
+        let called = Arc::clone(&called);
+        Arc::new(move |_lease: &str| {
+            called.store(true, Ordering::SeqCst);
+            Ok(())
+        })
+    };
+    let delete = SessionDelete::for_test_with_fences(
+        GuestStop::new(vm, Vec::new()),
+        hist,
+        vec!["w".to_string()],
+        "w".to_string(),
+        vec!["lease-w".to_string()],
+        release,
+        Arc::new(crate::kernel::ports::NoopLog),
+    );
+    let err = delete.run().expect_err("目录删不掉要如实报错");
+    assert!(err.contains("占用"), "{}", err);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !called.load(Ordering::SeqCst) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(called.load(Ordering::SeqCst), "删目录失败也不能漏掉撤权");
+}
+
 /// 目的：工作根沿父链走到顶：代理 → 多 agent 子会话 → 它的节点子会话，第三层也锚在**顶层**那一个 work/ 上。
 #[test]
 pub(crate) fn work_root_walks_to_the_top_across_nested_sub_sessions() {

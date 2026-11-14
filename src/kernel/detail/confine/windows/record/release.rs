@@ -180,8 +180,135 @@ fn clean_impl(home: &Path, include_machine: bool) -> Result<String, String> {
     }
 }
 
+/// 锁外要执行的收尾动作：锁内只摘归属、收集变空条目，慢的 ACL 与删 profile 全在锁外。
+struct PlannedFinalize {
+    sid: String,
+    key: String,
+    recursive: bool,
+    /// 同一路径上还有别的 SID 的授权：只能精确撤自己这条，不能按快照整体还原。
+    has_other: bool,
+    /// 根内路径的原始安全描述符（快照）；有别的 SID 时不用。
+    snapshot: Option<Vec<u8>>,
+}
+
+/// 目的：锁内摘归属 + 收集变空条目；不做任何 ACL 写、不删 profile（那些在锁外）。
+/// 参数：sid = Some 时只动该 SID 的条目（强制释放）；None 时只动带此归属的条目（按租约释放）。
+fn plan_release(
+    rec: &mut GrantRecord,
+    owner: &super::super::super::Owner,
+    sid: Option<&str>,
+) -> Vec<PlannedFinalize> {
+    let mut picked: Vec<(String, String, bool)> = Vec::new();
+    for g in rec.grants.iter_mut() {
+        let selected = match sid {
+            Some(want) => g.sid == want,
+            None => g.owners.iter().any(|o| o == owner),
+        };
+        if !selected {
+            continue;
+        }
+        // 先把本次归属撤掉；还有别的归属（活的、或判不了的）就留着给它用。
+        g.owners.retain(|o| o != owner);
+        if g.owners.is_empty() && !picked.iter().any(|(s, p, _)| *s == g.sid && *p == g.path) {
+            picked.push((g.sid.clone(), g.path.clone(), g.recursive));
+        }
+    }
+    picked
+        .into_iter()
+        .map(|(sid_text, key, recursive)| {
+            let has_other = rec
+                .grants
+                .iter()
+                .any(|g| g.path == key && g.sid != sid_text);
+            let snapshot = if has_other {
+                None
+            } else {
+                rec.snapshots
+                    .iter()
+                    .find(|s| s.path == key)
+                    .map(|s| s.bytes.clone())
+            };
+            PlannedFinalize {
+                sid: sid_text,
+                key,
+                recursive,
+                has_other,
+                snapshot,
+            }
+        })
+        .collect()
+}
+
+/// 目的：锁外执行收尾：路径不在了就只销账；否则按快照整体还原（根内、无别的 SID）或精确撤自己的 ACE。
+/// 返回：与 plans 一一对应的成功位；失败原因写进 errors，条目保留供下次重试。
+fn execute_release(plans: &[PlannedFinalize], errors: &mut Vec<String>) -> Vec<bool> {
+    plans
+        .iter()
+        .map(|p| {
+            let path = PathBuf::from(&p.key);
+            if std::fs::symlink_metadata(&path).is_err() {
+                return true;
+            }
+            if !p.has_other
+                && let Some(bytes) = &p.snapshot
+            {
+                return match restore_sd(&path, bytes) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        errors.push(e);
+                        false
+                    }
+                };
+            }
+            match revoke_one_text(&p.sid, &path, p.recursive) {
+                Ok(()) => true,
+                Err(e) => {
+                    errors.push(e);
+                    false
+                }
+            }
+        })
+        .collect()
+}
+
+/// 目的：锁内按本次成功清单销账（复检仍无归属才删，避免误删并发新授的条目）。
+/// 参数：had_record = 释放前台账是否存在；不存在就别凭空造一份。
+fn commit_release(
+    home: &Path,
+    plans: &[PlannedFinalize],
+    ok: &[bool],
+    profiles: &[(String, bool)],
+    had_record: bool,
+) -> Result<(), String> {
+    let _lock = lock_ledger(home)?;
+    let mut rec = load_record(home);
+    for (p, done) in plans.iter().zip(ok) {
+        if !done {
+            continue;
+        }
+        rec.grants
+            .retain(|g| !(g.sid == p.sid && g.path == p.key && g.owners.is_empty()));
+        if !p.has_other && !rec.grants.iter().any(|g| g.path == p.key) {
+            rec.snapshots.retain(|s| s.path != p.key);
+        }
+    }
+    for (name, done) in profiles {
+        if *done {
+            rec.profiles
+                .retain(|p| !(p.name == *name && p.owners.is_empty()));
+        }
+    }
+    if rec.is_empty() {
+        rec.drop_if_empty(home);
+    } else if had_record {
+        save_record(home, &rec).map_err(|e| format!("授权台账更新失败：{}", e))?;
+    }
+    Ok(())
+}
+
 /// 目的：撤销一次会话的授权（会话删除时经 FenceHost 端口调用）。
 /// 参数：spec 是该会话各席的围栏范围；home 是产品私有区（台账落点，也是产品根的锚）。
+/// 约束：两阶段——锁内摘归属并落盘，锁外做 ACL，再锁内复检销账；慢的整树重算不占台账锁。
 /// 错误：撤权、还原或台账更新失败时如实返回；失败条目留在台账里，供下次重试。
 pub fn release_fence(spec: &FenceSpec, home: &Path) -> Result<(), String> {
     let sid = container_sid(&container_name(spec))?;
@@ -190,41 +317,20 @@ pub fn release_fence(spec: &FenceSpec, home: &Path) -> Result<(), String> {
     // 只撤**这个会话**的归属：同名 agent 的另一个会话持有另一份 lease，不能被一起撤掉。
     let mut owner = current_owner();
     owner.lease = spec.lease.clone();
-    let _lock = lock_ledger(home)?;
-    // 没有台账就别凭空造一份：释放只在“确实写过授权”时才动台账文件。
     let had_record = record_path(home).exists();
-    let mut rec = load_record(home);
-    // 要撤的全从台账派生：这个 SID 记过的每条 (SID, 路径)。没记过的一律不动——
-    // 同名 agent 的另一个实例可能正用着同一条授权，凭 spec 反推落点会把它误撤。
-    let mut keys: Vec<String> = rec
-        .grants
-        .iter()
-        .filter(|g| g.sid == sid_text)
-        .map(|g| g.path.clone())
-        .collect();
-    keys.sort();
-    keys.dedup();
-    let mut errors: Vec<String> = Vec::new();
-    for key in &keys {
-        // 先把本次归属从这条授权里撤掉；还有别的归属（活的、或判不了的）就留着给它用。
-        let (empty, recursive) = match rec
-            .grants
-            .iter_mut()
-            .find(|g| g.sid == sid_text && g.path == *key)
-        {
-            Some(g) => {
-                g.owners.retain(|o| *o != owner);
-                (g.owners.is_empty(), g.recursive)
-            }
-            None => continue,
-        };
-        if !empty {
-            continue;
+    let plans = {
+        let _lock = lock_ledger(home)?;
+        let mut rec = load_record(home);
+        let plans = plan_release(&mut rec, &owner, Some(&sid_text));
+        if had_record {
+            save_record(home, &rec).map_err(|e| format!("授权台账更新失败：{}", e))?;
         }
-        finalize_grant(&mut rec, &sid_text, key, recursive, &mut errors);
-    }
-    if had_record && let Err(e) = save_record(home, &rec) {
-        errors.push(format!("授权台账更新失败：{}", e));
+        plans
+    };
+    let mut errors: Vec<String> = Vec::new();
+    let ok = execute_release(&plans, &mut errors);
+    if let Err(e) = commit_release(home, &plans, &ok, &[], had_record) {
+        errors.push(e);
     }
     if errors.is_empty() {
         Ok(())
@@ -233,111 +339,58 @@ pub fn release_fence(spec: &FenceSpec, home: &Path) -> Result<(), String> {
     }
 }
 
-/// 目的：一条授权没有归属了——按快照还原（产品根内）或精确撤掉自己的 ACE（根外 / 同路径还有别的 SID）。
-fn finalize_grant(
-    rec: &mut GrantRecord,
-    sid_text: &str,
-    key: &str,
-    recursive: bool,
-    errors: &mut Vec<String>,
-) {
-    let path = PathBuf::from(key);
-    let has_other = rec
-        .grants
-        .iter()
-        .any(|g| g.sid != sid_text && g.path == key);
-    let snapshot = rec.snapshots.iter().find(|s| s.path == key).cloned();
-    if std::fs::symlink_metadata(&path).is_err() {
-        // 路径不在了：ACE 跟着没了，销账即可。
-        rec.grants.retain(|g| !(g.sid == sid_text && g.path == key));
-        if !has_other {
-            rec.snapshots.retain(|s| s.path != key);
-        }
-        return;
-    }
-    if !has_other && let Some(snap) = snapshot {
-        // 根内：最后一个归属走了，按快照整体还原。
-        match restore_sd(&path, &snap.bytes) {
-            Ok(()) => {
-                rec.grants.retain(|g| !(g.sid == sid_text && g.path == key));
-                rec.snapshots.retain(|s| s.path != key);
-            }
-            Err(e) => errors.push(e),
-        }
-        return;
-    }
-    // 根外（或同路径还有别的 SID）：只精确撤自己这条 ACE。
-    match revoke_one_text(sid_text, &path, recursive) {
-        Ok(()) => {
-            rec.grants.retain(|g| !(g.sid == sid_text && g.path == key));
-        }
-        Err(e) => errors.push(e),
-    }
-}
-
 /// 目的：按**会话租约**撤销本进程为该会话写下的全部授权与 profile（会话改配 / 删除时调用）。
 /// 约束：只撤"当前进程 + 该租约"的归属；同会话的其它进程、其它会话与工具链 baseline 都不受影响。
+///   两阶段：锁内摘归属 / 收集变空的 profile，锁外做 ACL / 删 profile，再锁内复检销账。
 pub fn release_by_lease(home: &Path, lease: &str) -> Result<(), String> {
     if lease.trim().is_empty() {
         return Err("按会话释放需要一个租约（空租约不留归属）".to_string());
     }
     let me = current_owner();
-    let matches =
-        |o: &super::super::super::Owner| o.pid == me.pid && o.start == me.start && o.lease == lease;
-    let _lock = lock_ledger(home)?;
+    let owner = super::super::super::Owner {
+        pid: me.pid,
+        start: me.start,
+        lease: lease.to_string(),
+    };
     let had_record = record_path(home).exists();
-    let mut rec = load_record(home);
-    let mut keys: Vec<(String, String)> = rec
-        .grants
-        .iter()
-        .filter(|g| g.owners.iter().any(matches))
-        .map(|g| (g.sid.clone(), g.path.clone()))
-        .collect();
-    keys.sort();
-    keys.dedup();
+    let (plans, names) = {
+        let _lock = lock_ledger(home)?;
+        let mut rec = load_record(home);
+        let plans = plan_release(&mut rec, &owner, None);
+        // profile 与授权同生命周期：这个会话的归属走了就删 profile（删不掉如实记错）。
+        let mut names: Vec<String> = rec
+            .profiles
+            .iter()
+            .filter(|p| p.owners.iter().any(|o| o == &owner))
+            .map(|p| p.name.clone())
+            .collect();
+        names.sort();
+        names.dedup();
+        for name in &names {
+            if let Some(p) = rec.profiles.iter_mut().find(|p| p.name == *name) {
+                p.owners.retain(|o| o != &owner);
+            }
+        }
+        if had_record {
+            save_record(home, &rec).map_err(|e| format!("授权台账更新失败：{}", e))?;
+        }
+        (plans, names)
+    };
     let mut errors: Vec<String> = Vec::new();
-    for (sid_text, key) in &keys {
-        let (empty, recursive) = match rec
-            .grants
-            .iter_mut()
-            .find(|g| g.sid == *sid_text && g.path == *key)
-        {
-            Some(g) => {
-                g.owners
-                    .retain(|o| !(o.pid == me.pid && o.start == me.start && o.lease == lease));
-                (g.owners.is_empty(), g.recursive)
+    let ok = execute_release(&plans, &mut errors);
+    // profile 删除也在锁外：删不掉就保留条目，下次重试。
+    let profiles: Vec<(String, bool)> = names
+        .into_iter()
+        .map(|name| {
+            let done = delete_profile(&name);
+            if !done {
+                errors.push(format!("删除容器 profile 失败：{}", name));
             }
-            None => continue,
-        };
-        if !empty {
-            continue;
-        }
-        finalize_grant(&mut rec, sid_text, key, recursive, &mut errors);
-    }
-    // profile 与授权同生命周期：这个会话的归属走了就删 profile（删不掉如实记错）。
-    let mut names: Vec<String> = rec
-        .profiles
-        .iter()
-        .filter(|p| p.owners.iter().any(matches))
-        .map(|p| p.name.clone())
+            (name, done)
+        })
         .collect();
-    names.sort();
-    names.dedup();
-    for name in &names {
-        let empty = match rec.profiles.iter_mut().find(|p| p.name == *name) {
-            Some(p) => {
-                p.owners
-                    .retain(|o| !(o.pid == me.pid && o.start == me.start && o.lease == lease));
-                p.owners.is_empty()
-            }
-            None => continue,
-        };
-        if empty && delete_profile(name) {
-            rec.profiles.retain(|p| p.name != *name);
-        }
-    }
-    if had_record && let Err(e) = save_record(home, &rec) {
-        errors.push(format!("授权台账更新失败：{}", e));
+    if let Err(e) = commit_release(home, &plans, &ok, &profiles, had_record) {
+        errors.push(e);
     }
     if errors.is_empty() {
         Ok(())
