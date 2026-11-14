@@ -1,7 +1,7 @@
 # Rust 开发规范
 
 > 定位：Rust 源码的模块布局、格式与静态检查、unsafe 边界、依赖与测试入口的唯一规范。
-> 效力：规范｜核对：2026-11-13｜依据：`Cargo.toml`
+> 效力：规范｜核对：2026-11-14｜依据：`Cargo.toml`
 
 ## 适用与判据
 - 写或改 `.rs`、`Cargo.toml`、`deny.toml` 与模块目录结构时以本文为准；违反由 `node run-tests.js` 的结构审查、`node dev.js fmt` 与 `node dev.js clippy` 判定。
@@ -67,4 +67,4 @@ capabilities/
 - 架构、分层与硬要求：[../ARCHITECTURE.md](../ARCHITECTURE.md)
 - 测试与质量：[testing/README.md](testing/README.md)
 - 文档约定与术语：[conventions.md](conventions.md)
-- 任务流程：[workflow/README.md](workflow/README.md)
+- 任务流程（受理、开工、闸门）：[../AGENTS.md](../AGENTS.md) 的「六、请求受理」

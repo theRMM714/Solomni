@@ -221,12 +221,12 @@ platforms (see [TESTING.md](TESTING.md)).
 | Manage providers / models / agents / settings (and key boundaries) | [REGISTRY_SPEC.md](REGISTRY_SPEC.md) |
 | Change code (layers, ports, logging, prompts, on-disk contracts) | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Write tests and acceptance (levels, doubles, gates, gaps, CI) | [TESTING.md](TESTING.md) |
-| Development workflow (single / multi-agent), PR and gates | [docs/workflow/README.md](docs/workflow/README.md) |
+| Request intake, kickoff, PR and gates (single / multi-agent) | [AGENTS.md](AGENTS.md) under "Request intake" |
 | Documentation layers, terminology and references | [docs/conventions.md](docs/conventions.md) |
 | Full unit and cross-cutting index | [docs/README.md](docs/README.md) |
 | Repository rules and document routing | [AGENTS.md](AGENTS.md) |
 
-> **Two layers**: the repository root holds **portals** (positioning + references), `docs/` holds the **details**
+> **Two layers**: the repository root holds **portals** (positioning + references; `AGENTS.md` also carries always-on rules and the request-intake flow), `docs/` holds the **details**
 > — every fact has exactly one authority. Full routing is in [AGENTS.md](AGENTS.md) under "Document routing".
 
 Apache License 2.0 · see [LICENSE](LICENSE)

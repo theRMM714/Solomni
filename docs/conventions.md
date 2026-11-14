@@ -1,7 +1,7 @@
 # 文档与术语约定
 
 > 定位：文档分层、同步、术语与引用格式的唯一细则。
-> 效力：规范｜核对：2026-11-04｜依据：`AGENTS.md`
+> 效力：规范｜核对：2026-11-14｜依据：`AGENTS.md`
 
 ## 适用与判据
 - 写或改文档、定术语、写引用时以本文为准（`docs/conventions.md`）。
@@ -9,9 +9,9 @@
 
 ## 一、两层文档
 
-- **根门户**（`README.md`、`AGENTS.md`、`ARCHITECTURE.md` 等）只写「这份文档管什么、要做事时读哪一份」，不复述细则正文。
+- **根门户**（`README.md`、`ARCHITECTURE.md` 等）只写「这份文档管什么、要做事时读哪一份」，不复述细则正文；例外是 `AGENTS.md`，它承载始终生效的约束与任务受理流程，本身即权威。
 - **细则**在 `docs/<单元>/`：每个业务与机制单元一个目录，目录里的 `README.md` 是唯一入口，`unit-map.md` 是逐文件职责（T0 机器比对）。
-- 不属任何单元的横向内容按事项分：测试与质量在 `docs/testing/`，任务流程在 [workflow/README.md](workflow/README.md)（单 / 多 agent 细则同目录），文档约定与术语在本文，Rust 源码规范在 [rust-dev.md](rust-dev.md)。
+- 不属任何单元的横向内容按事项分：测试与质量在 `docs/testing/`，任务受理与开工在 [../AGENTS.md](../AGENTS.md) 的「六、请求受理」，单 / 多 agent 与文档审计细则在 `workflow/` 目录，文档约定与术语在本文，Rust 源码规范在 [rust-dev.md](rust-dev.md)。
 - 只有任务引入新的长期领域且现有文档无法承载时，才建新专项文档；不为单次任务创建无长期价值的文档。
 - 细则之间用相对路径互引；门户用 `docs/<领域>/<文件>.md` 引用细则。同一个事实只有一份权威。
 
@@ -80,7 +80,7 @@
 ## 路由
 - 全仓常驻规则：[../AGENTS.md](../AGENTS.md)
 - 文档索引：[README.md](README.md)
-- 任务与开发流程：[workflow/README.md](workflow/README.md)
+- 任务受理与开工：[../AGENTS.md](../AGENTS.md) 的「六、请求受理」
 - 单 agent 细则：[workflow/single-agent.md](workflow/single-agent.md)
 - 多 agent 细则：[workflow/multi-agent.md](workflow/multi-agent.md)
 - 文档审计 / 治理流程：[workflow/docs-audit.md](workflow/docs-audit.md)

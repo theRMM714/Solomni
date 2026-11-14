@@ -166,12 +166,12 @@ C++ 模块的产物不入库：创建会话前会按 `module.yaml` 的 `build:` 
 | 管理供应商 / 模型 / agent / 设置（含密钥边界） | [REGISTRY_SPEC.md](REGISTRY_SPEC.md) |
 | 改代码（分层、端口、日志、提示词、落盘契约） | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | 写测试与验收（层级、替身、门禁、缺口账、CI） | [TESTING.md](TESTING.md) |
-| 看开发流程（单 / 多 agent）、PR 与闸门 | [docs/workflow/README.md](docs/workflow/README.md) |
+| 看任务受理、开工、PR 与闸门（单 / 多 agent） | [AGENTS.md](AGENTS.md) 的「六、请求受理」 |
 | 看文档分层、术语与引用约定 | [docs/conventions.md](docs/conventions.md) |
 | 看全部单元与横向细则 | [docs/README.md](docs/README.md) |
 | 仓库协作规则与文档路由 | [AGENTS.md](AGENTS.md) |
 
-> **两层结构**：仓库根是**门户**（定位 + 引用），`docs/` 是**细则**——同一事实只有一份权威。
+> **两层结构**：仓库根是**门户**（定位 + 引用；`AGENTS.md` 另承载始终生效的规则与任务受理流程），`docs/` 是**细则**——同一事实只有一份权威。
 > 完整路由见 [AGENTS.md](AGENTS.md) 的「文档路由」。
 
 Apache License 2.0 · 见 [LICENSE](LICENSE)
