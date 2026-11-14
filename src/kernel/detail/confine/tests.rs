@@ -458,6 +458,12 @@ fn interpreter_roots_skip_a_dangling_reparse_parent() {
     assert!(roots.is_empty(), "真身取不到时不授链接：{:?}", roots);
     let absent = interpreter_roots_for_exe(&root.join("absent").join("node.exe"));
     assert!(absent.is_empty(), "不存在的父目录不授权：{:?}", absent);
+    let bare = interpreter_roots_for_exe(std::path::Path::new("node.exe"));
+    assert!(
+        bare.is_empty(),
+        "没有父目录且解析不到真身时清单为空：{:?}",
+        bare
+    );
     let _ = std::fs::remove_dir(&link);
     let _ = std::fs::remove_dir_all(&root);
 }
