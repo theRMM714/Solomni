@@ -387,13 +387,17 @@ fn canonical_path_var_resolves_junctions_to_real_dirs() {
         let _ = std::fs::remove_dir_all(&root);
         return;
     }
-    let input = std::env::join_paths([
-        link.as_os_str(),
-        missing.as_os_str(),
-        std::ffi::OsStr::new("relative"),
-    ])
-    .expect("拼 PATH");
-    let got = canonical_path_var(&input);
+    let file = root.join("file.txt");
+    std::fs::write(&file, b"x").expect("写普通文件");
+    // PATH 里带外层引号的手写项很常见；`join_paths` 不接受引号，这里手工拼。
+    let input = [
+        format!("\"{}\"", link.display()),
+        missing.display().to_string(),
+        "relative".to_string(),
+        file.display().to_string(),
+    ]
+    .join(";");
+    let got = canonical_path_var(std::ffi::OsStr::new(&input));
     let entries: Vec<std::path::PathBuf> = std::env::split_paths(&got).collect();
     assert!(entries.contains(&real), "链接项要换成真身：{:?}", entries);
     assert!(
@@ -413,6 +417,47 @@ fn canonical_path_var_resolves_junctions_to_real_dirs() {
         "相对项原样保留：{:?}",
         entries
     );
+    assert!(
+        entries.contains(&file),
+        "不是目录的项原样保留：{:?}",
+        entries
+    );
+    let _ = std::fs::remove_dir(&link);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 目的：PATH 里有 `join_paths` 接不了的项（这里是孤立代理项）时，整体原样交回，不丢项。
+#[cfg(windows)]
+#[test]
+fn canonical_path_var_keeps_the_original_when_path_cannot_be_joined() {
+    use std::os::windows::ffi::OsStringExt;
+    let input = std::ffi::OsString::from_wide(&[0xD800]);
+    assert_eq!(canonical_path_var(&input), input);
+}
+
+/// 目的：父目录是重解析点但真身取不到（悬空联接 / 不存在的目录）时不授链接，清单为空。
+#[cfg(windows)]
+#[test]
+fn interpreter_roots_skip_a_dangling_reparse_parent() {
+    let root = crate::tests::scratch("interpreter-dangling");
+    let missing = root.join("missing");
+    let link = root.join("link");
+    let made = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(&link)
+        .arg(&missing)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if !made {
+        eprintln!("[探针] 本机建不出目录联接（env-skip）：跳过悬空重解析点口径");
+        let _ = std::fs::remove_dir_all(&root);
+        return;
+    }
+    let roots = interpreter_roots_for_exe(&link.join("node.exe"));
+    assert!(roots.is_empty(), "真身取不到时不授链接：{:?}", roots);
+    let absent = interpreter_roots_for_exe(&root.join("absent").join("node.exe"));
+    assert!(absent.is_empty(), "不存在的父目录不授权：{:?}", absent);
     let _ = std::fs::remove_dir(&link);
     let _ = std::fs::remove_dir_all(&root);
 }
