@@ -1,7 +1,7 @@
 # 文档索引
 
 > 定位：`docs/` 的细则索引：每个业务与机制单元一个目录（`README.md` 是入口、`unit-map.md` 是逐文件职责），根门户是 `AGENTS.md`。
-> 效力：索引｜核对：2026-11-04
+> 效力：索引｜核对：2026-11-14
 
 ## 单元
 
@@ -47,7 +47,7 @@
 
 | 要找什么 | 读哪一份 |
 | --- | --- |
-| 任务流程总入口（单 / 多 agent 选择、共同约定、开工、闸门） | [workflow/README.md](workflow/README.md) |
+| 任务受理、开工与共同约定（单 / 多 agent 选择、闸门） | [AGENTS.md](../AGENTS.md) 的「六、请求受理」 |
 | 单 agent：实施、本机回路、收口 | [workflow/single-agent.md](workflow/single-agent.md) |
 | 多 agent：开工、派发、worktree、逐片 squash 集成、收口 | [workflow/multi-agent.md](workflow/multi-agent.md) |
 | 用户启动文档审计 / 治理（检查、修改、验收） | [workflow/docs-audit.md](workflow/docs-audit.md) |

@@ -1,11 +1,11 @@
 # 多 agent 工作流
 
 > 定位：多个 agent 并行调查或实施：Lead 开工、派发、逐片集成与收口细则。
-> 效力：规范｜核对：2026-11-13｜依据：`docs/workflow/README.md`
+> 效力：规范｜核对：2026-11-14｜依据：`AGENTS.md`
 
 ## 适用与判据
 
-- 选择多 agent 时按本文执行；共同约定与开工步骤（分支、Draft PR、闸门、阶段提交）见 [README.md](README.md)。
+- 选择多 agent 时按本文执行；共同约定与开工步骤（分支、Draft PR、闸门、阶段提交）见 [AGENTS.md](../../AGENTS.md) 的「六、请求受理」。
 - 咨询 / 审查仍只调查、不建分支；实施仍走同一套门禁，多 agent 不改变请求分类与验收。
 - 一个任务只有一个 Lead、一个任务分支、一个 Draft PR；worker 只对分片负责。
 - 调查型并行不建分支与 worktree；实施型并行按下面的分片、worktree 与逐片集成执行。
@@ -21,7 +21,7 @@
 
 ## 二、开工：分片、契约与 worktree
 
-- 按 [README.md](README.md) 的「三、开工：分支 + Draft PR」建任务分支 `task/<简述>`、空提交与 Draft PR。
+- 按 [AGENTS.md](../../AGENTS.md) 的「六、请求受理」建任务分支 `task/<简述>`、空提交与 Draft PR。
 - PR 实施清单写分片表：分片、owner、写范围、子分支、依赖；没有任务板时以这张表为准。
 - 冻结跨分片契约（API、端口、数据模型、错误文案、盘上格式）；worker 改契约前先报 Lead。
 - Lead 预建子分支与 worktree，一个分片一个：
@@ -122,7 +122,7 @@
 ## 八、完整示例：task/export-csv
 
 - 分片：A 核心导出（`src/capabilities/export/`）；B CLI 接入，依赖 A；C 文档，依赖 A。
-- Lead 按 [README.md](README.md) 的开工步骤建 `task/export-csv` 分支与 Draft PR，然后建 A 的 worktree 并派发：
+- Lead 按 [AGENTS.md](../../AGENTS.md) 的「六、请求受理」建 `task/export-csv` 分支与 Draft PR，然后建 A 的 worktree 并派发：
 
   ```sh
   git worktree add .worktrees/a -b task/export-csv/a task/export-csv
@@ -166,7 +166,7 @@
 
 ## 路由
 
-- 流程总入口：[README.md](README.md)
+- 流程与开工规则：[../../AGENTS.md](../../AGENTS.md) 的「六、请求受理」
 - 单 agent 工作流：[single-agent.md](single-agent.md)
 - 文档审计：[docs-audit.md](docs-audit.md)
 - 全仓常驻规则：[../../AGENTS.md](../../AGENTS.md)

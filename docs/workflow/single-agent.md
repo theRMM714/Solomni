@@ -1,10 +1,10 @@
 # 单 agent 工作流
 
 > 定位：一个 agent 串行完成任务：阶段实施、本机回路与收口细则。
-> 效力：规范｜核对：2026-11-13｜依据：`docs/workflow/README.md`
+> 效力：规范｜核对：2026-11-14｜依据：`AGENTS.md`
 
 ## 适用与判据
-- 选择单 agent 时按本文执行；共同约定与开工步骤（分支、Draft PR、闸门、阶段提交）见 [README.md](README.md)，请求分类与 Git 约束见 [AGENTS.md](../../AGENTS.md)。
+- 选择单 agent 时按本文执行；共同约定、开工步骤（分支、Draft PR、闸门、阶段提交）与请求分类见 [AGENTS.md](../../AGENTS.md) 的「六、请求受理」。
 - 一个 agent 承担全部调查、实现、提交、PR 与门禁，不把工作转给未登记的 agent。
 - 违反由 PR 检查与 `node run-tests.js` 判定；agent 不自行 Ready / 合并（`AGENTS.md`）。
 
@@ -35,11 +35,11 @@
 6. 用户确认后，Ready 与合并由用户执行；agent 不自行 Ready、不自行合并。PR 标题即主线提交信息，要能独立说明本次任务主题；合并后删任务分支（`AGENTS.md`）。
 
 ## 检查
-- 开工自检 → [README.md](README.md) 的「三、开工：分支 + Draft PR」与 PR 正文（`.github/pull_request_template.md`）。
+- 开工自检 → [AGENTS.md](../../AGENTS.md) 的「六、请求受理」与 PR 正文（`.github/pull_request_template.md`）。
 - 本机回路 → `node dev.js test|fmt|clippy` 与 `node run-tests.js`（`docs/testing/execution-ci.md`）。
 
 ## 路由
-- 流程总入口：[README.md](README.md)
+- 任务受理与开工：[../../AGENTS.md](../../AGENTS.md) 的「六、请求受理」
 - 多 agent 工作流：[multi-agent.md](multi-agent.md)
 - 文档审计：[docs-audit.md](docs-audit.md)
 - 全仓常驻规则：[../../AGENTS.md](../../AGENTS.md)

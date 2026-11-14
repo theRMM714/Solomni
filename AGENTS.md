@@ -37,7 +37,7 @@
 - 任意行为与实现必须通过 `TESTING.md` 规定的适用测试；不可测试的行为记为设计或测试缺口。
 - 注释只描述当前功能、约束和联动模块；文件头与行内注释按 `ARCHITECTURE.md` 的「注释契约」写（格式由 T0 判，内容卫生另报）。
 - 长期文档只写当前状态，不写过程、旧实现复盘或变更历史；历史归 Git、PR、issue、CI。<!-- hygiene-ignore -->
-- 根门户只做路由，细则在 `docs/`；一个事实只有一处权威。改文档必须同次同步相关门户、引用与机器比对段，细则见 `docs/conventions.md`。
+- 根门户只做路由，细则在 `docs/`；`AGENTS.md` 例外：承载始终生效的约束与任务受理流程。一个事实只有一处权威。改文档必须同次同步相关门户、引用与机器比对段，细则见 `docs/conventions.md`。
 - 术语以 `docs/conventions.md` 为唯一口径；常用：agent、模块、单元、能力、共享区、转录。
 - 引用用仓库相对路径 + 文件/标题，不写深层节号；不生产没有约束、行为或使用价值的文档。
 
@@ -60,9 +60,27 @@
 ## 六、请求受理
 
 1. 分类：按 §五判断请求类型；咨询或审查直接取证回答，不建分支。
-2. 选择工作流：读 `docs/workflow/README.md`，按任务初选单 / 多 agent；执行中可切换，切换写进 PR。
-3. 调查与方案：先取证汇报现状、影响、候选方案与待拍板问题；再给目标、范围（明确不做）、验收、步骤、风险、文档与 CI；用户同意后开工。
-4. 实施与收口：按选定工作流实施；收口跑全量门禁与差异自查，用户确认后由用户 Ready 与合并。
+2. 选择工作流：单 agent 由一个 agent 串行完成调查、方案、实施与收口；多 agent 由多个 agent 并行，一个 Lead 汇总、集成并对最终结果负责。按任务初选，执行中可切换，切换写进 PR；选定后读 `docs/workflow/single-agent.md` 或 `docs/workflow/multi-agent.md`。
+3. 调查与方案：先取证汇报现状、影响、候选方案与待拍板问题；再给目标、范围（明确不做）、验收、步骤、风险、文档与 CI；用户同意后开工（闸门 1）。
+4. 开工：先建任务分支与 Draft PR，再写实现代码，顺序固定。
+   ```sh
+   git fetch origin main
+   git switch -c task/<简述> origin/main
+   git commit --allow-empty -m "chore: 开工 <任务>"
+   git push -u origin <分支>
+   gh pr create --draft --base main --head <分支>
+   ```
+   - PR 正文按 `.github/pull_request_template.md` 写全：目标与范围、明确不做、验收标准、实施清单、风险，以及「工作流」节。
+   - 开工自检全为是才写实现代码：分支从最新 `main` 切出并 push；空提交已推送；Draft PR 已创建；PR 正文含方案 / 验收 / 实施清单 / 明确不做。
+   - 无法创建或访问 PR（无远程、无权限、网络不通）：停下报告，不先干完再补。
+5. 实施与收口：按选中工作流实施；一个阶段一个提交（代码、测试与文档同提交），每次 push 更新 PR 的实施清单、阶段记录与验收证据；收口跑全量门禁与差异自查，用户确认（闸门 2）后由用户 Ready 与合并。
+
+### 共同约定
+
+- 一个任务 = 一个任务分支 + 一个 Draft PR；子分支只作集成来源，不单独开 PR，集成完成后删 worktree 与子分支。
+- PR 是任务进度的唯一落点：决定、证据与 CI 结论记在 PR 正文或评论。
+- Draft 期不跑 CI；需要他平台结论时手动派发（`docs/testing/execution-ci.md`）。
+- 用户要求文档审计 / 治理时按 `docs/workflow/docs-audit.md` 执行，不套用编程任务的实施节奏。
 
 ## 七、Git 与 CI
 
@@ -118,7 +136,7 @@
 | 运行包开发或修改 | `RUNTIME_SPEC.md` |
 | providers、models、agents、settings 登记处 | `REGISTRY_SPEC.md` |
 | 任意测试、测试替身、质量门禁、缺口账或测试报告 | `TESTING.md` |
-| 任务流程 / PR / Git（单 / 多 agent 选择） | `docs/workflow/README.md` |
+| 任务受理 / 开工 / 共同约定（单 / 多 agent 选择） | 本文「六、请求受理」 |
 | 单 agent 流程细则 | `docs/workflow/single-agent.md` |
 | 多 agent 流程细则 | `docs/workflow/multi-agent.md` |
 | 用户启动文档审计 / 治理 | `docs/workflow/docs-audit.md` |
