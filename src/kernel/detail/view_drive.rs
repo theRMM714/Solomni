@@ -688,25 +688,27 @@ mod tests {
 
     #[test]
     fn view_paths_round_trip_and_respect_the_root() {
+        // 用运行期临时目录构造产品根：源码里不写任何机器绝对路径。
+        let root = std::env::temp_dir().join("solomni-view-root");
         let drive = ViewDrive {
             letter: "Z:".to_string(),
-            root: PathBuf::from(r"D:\AIproject\Solomni"),
+            root: root.clone(),
         };
-        let host = PathBuf::from(r"D:\AIproject\Solomni\session\test\test");
+        let host = root.join("session").join("test").join("test");
         let view = drive.view_of(&host).expect("根下路径要能译成视图写法");
         assert_eq!(view, PathBuf::from(r"Z:\session\test\test"));
         assert_eq!(drive.host_of(&view), Some(host.clone()));
         assert!(drive.is_view(&view));
         assert!(!drive.is_view(&host));
         // 根外、相对路径都不译。
-        assert!(drive.view_of(Path::new(r"D:\AIproject\other")).is_none());
+        assert!(drive.view_of(&root.with_file_name("other")).is_none());
         assert!(drive.view_of(Path::new("session")).is_none());
         // 产品根本身 = 盘符根。
         assert_eq!(drive.view_of(drive.root()), Some(PathBuf::from(r"Z:\")));
         // 别的盘符不是这个视图。
         assert!(drive.host_of(Path::new(r"Y:\x")).is_none());
         // 大小写不敏感。
-        let upper = PathBuf::from(r"D:\AIPROJECT\SOLOMNI\a");
+        let upper = PathBuf::from(root.to_string_lossy().to_uppercase()).join("a");
         assert_eq!(drive.view_of(&upper), Some(PathBuf::from(r"Z:\a")));
     }
 

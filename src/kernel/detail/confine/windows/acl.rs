@@ -485,7 +485,7 @@ fn rw_part(spec: &FenceSpec, path: &Path) -> FencePart {
 ///   只授"读属性"、**不递归、不继承**：容器能判断存在性，但读不到内容、列不了目录。
 ///   参数 root：视图盘生效时给产品根，祖先链只补到产品根（含）为止；产品根之外一级都不写——
 ///   cwd 走视图写法后，容器只需要映射根这一级的读属性。根外祖先缺 RA 的代价由视图盘消除，
-///   而不是靠改写 `D:\AIproject` 这种巨型目录的 DACL（顺整棵树重算继承，真机 193 s/条）。
+///   而不是靠改写盘根下的大型目录的 DACL（顺整棵树重算继承，真机 193 s/条）。
 ///   参数 cwd_leaf：false 表示 cwd 已被读写叶子覆盖（视图生效且 cwd == private），不再重复加只读叶子。
 pub(crate) fn grant_targets(
     spec: &FenceSpec,
@@ -532,7 +532,7 @@ pub(crate) fn grant_targets(
         let deep_leaf = deep && (one.path == spec.cwd || one.path == spec.private);
         let mut parent = one.path.parent();
         while let Some(p) = parent {
-            // 视图盘生效时根外祖先不写：已经越过产品根就停，不能碰 D:\AIproject 这类巨型目录的 DACL。
+            // 视图盘生效时根外祖先不写：已经越过产品根就停，不能碰盘根下大型目录的 DACL。
             if deep_leaf
                 && let Some(root) = root
                 && !(p == root || p.starts_with(root))

@@ -132,8 +132,8 @@ pub(crate) fn path_bridge_maps_host_paths_into_the_guest() {
     {
         let b = PathBridge::new("windows", PathDialect::Posix);
         assert_eq!(
-            b.to_guest(std::path::Path::new("D:\\AIproject\\Solomni\\work")),
-            "/solomni-host/d/AIproject/Solomni/work",
+            b.to_guest(std::path::Path::new("D:\\work")),
+            "/solomni-host/d/work",
             "Windows 宿主编进 POSIX 镜像根"
         );
     }
