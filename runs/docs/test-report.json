@@ -1,0 +1,32 @@
+{
+  "mode": "docs",
+  "platform": "linux",
+  "arch": "x64",
+  "osKey": "linux",
+  "profile": "debug",
+  "fenceLive": false,
+  "doctor": null,
+  "steps": [
+    {
+      "step": "T0 文档审查",
+      "status": "pass",
+      "detail": "文档检查通过",
+      "ms": 84,
+      "slow": false
+    }
+  ],
+  "envSkips": [],
+  "quality": {
+    "failed": 0,
+    "steps": []
+  },
+  "globalGaps": [],
+  "gaps": [],
+  "timeouts": [],
+  "failed": 0,
+  "toolchain": {
+    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "cargo": "cargo 1.99.1 (5f94df478 2026-08-27)",
+    "git": "git version 2.56.1"
+  }
+}
