@@ -159,6 +159,11 @@ pub fn run_fenced(
 
 /// 目的：装围栏并**如实分类**结果：自检不过 = 本机环境结论（降级照跑）；自检过了还装不上 = 我们写错了。
 ///   探针早就按这两类分别处理（前者如实跳过、后者响亮失败），运行期在未授权时段也照这一份结论走。
+/// 目的：本次实际生效的路径级围栏——没有外层写 ACL 这一步，授权值不参与判据。
+pub fn effective_paths(fs: bool, net: bool, _write_allowed: bool) -> (bool, bool) {
+    (fs, net)
+}
+
 pub fn verify(spec: &FenceSpec, command: &str) -> FenceVerdict {
     if !seatbelt_confines() {
         return FenceVerdict::EnvUnavailable(

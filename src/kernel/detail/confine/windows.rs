@@ -511,6 +511,15 @@ fn is_machine_target(target: &GrantTarget) -> bool {
 /// 目的：本机能不能强制住容器围栏（**不写任何目录 ACL**）：建容器 profile + 派生容器 SID 是容器能起来的全部前提；
 ///   `net=true` 还要能建出 internetClient 能力 SID（建不出就是我们写错了，不静默按断网/无围栏跑）。
 ///   三态：profile 建不起来（环境拒绝建）= 环境结论；profile 建得起来却派生不出 SID / 能力 = 我们的步骤写错了。
+/// 目的：本次实际生效的路径级围栏——Windows 的容器围栏依赖外层写 ACL 的授权。
+pub fn effective_paths(fs: bool, net: bool, write_allowed: bool) -> (bool, bool) {
+    if write_allowed {
+        (fs, net)
+    } else {
+        (false, false)
+    }
+}
+
 pub fn verify(spec: &FenceSpec, _command: &str) -> FenceVerdict {
     let name = container_name(spec);
     if let Err(e) = ensure_profile(&name) {

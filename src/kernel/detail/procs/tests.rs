@@ -394,6 +394,13 @@ fn assign_rejects_a_handle_without_the_rights() {
     let _ = child.wait();
 }
 
+/// 目的：没有 macOS 守门进程模式的平台，真被调起时如实报错（退出码 2）。
+#[test]
+fn watchdog_serve_reports_unsupported_off_macos() {
+    #[cfg(not(target_os = "macos"))]
+    assert_eq!(super::watchdog_serve(0, 0), 2);
+}
+
 /// 目的：这个 pid 是不是已经没了（僵尸也算没了：它已经退出，只是还没被收尸）。
 #[cfg(target_os = "linux")]
 fn is_dead(pid: u32) -> bool {

@@ -463,6 +463,52 @@ fn make_file_link(target: &std::path::Path, link: &std::path::Path) -> bool {
 }
 
 #[test]
+fn fs_meta_primitives_follow_platform_file_mode_rules() {
+    let root = scratch("fs-meta");
+    let file = root.join("tool");
+    std::fs::write(&file, b"#!/bin/sh\n").expect("写文件");
+
+    crate::kernel::api::make_executable_checked(&file).expect("加执行位");
+    assert!(crate::kernel::detail::fs_meta::is_executable(&file));
+    crate::kernel::api::ensure_executable(&file);
+    crate::kernel::api::make_executable(&file);
+    crate::kernel::api::restrict_private_file(&file).expect("收紧私密权限");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&file)
+                .expect("元数据")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+    let meta = std::fs::metadata(&file).expect("元数据");
+    assert!(crate::kernel::api::file_footprint(&meta) > 0);
+    crate::kernel::api::sync_dir(&root);
+
+    let script = root.join("script");
+    crate::kernel::api::write_executable(&script, "#!/bin/sh\n").expect("写可执行脚本");
+    assert!(script.is_file());
+    #[cfg(unix)]
+    assert!(crate::kernel::detail::fs_meta::is_executable(&script));
+
+    let link = root.join("link");
+    let linked = crate::kernel::api::symlink("tool", &link);
+    #[cfg(unix)]
+    {
+        linked.expect("建软链");
+        assert!(crate::kernel::api::is_link(&link));
+    }
+    #[cfg(not(unix))]
+    assert!(linked.is_err());
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
 fn fs_sys_io_reads_utf8_flags_lossy_and_truncation_and_creates_parents() {
     let root = scratch("fs-sysio");
     let f = root.join("deep").join("note.txt");

@@ -126,11 +126,7 @@ impl Capability {
     ///   只有有「外层写 ACL」这一步的平台依赖授权；其余平台的围栏在守门进程里自足。
     ///   进程树围栏不受授权影响，调用方直接用 `Capability::tree`。
     pub fn effective_paths(&self, write_allowed: bool) -> (bool, bool) {
-        if crate::kernel::api::HAS_EXTERNAL_ACL_STEP && !write_allowed {
-            (false, false)
-        } else {
-            (self.fs, self.net)
-        }
+        backend::effective_paths(self.fs, self.net, write_allowed)
     }
 }
 

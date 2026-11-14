@@ -174,3 +174,12 @@ fn startup_fence_report_and_doctor_share_the_same_capability() {
     }
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// 目的：没有 ACL 台账的平台，`--fence-clean` 逐项如实降级并成功收尾。
+#[cfg(not(windows))]
+#[test]
+fn fence_clean_reports_and_succeeds_without_acl_support() {
+    let root = crate::tests::scratch("guard-fence-clean");
+    assert_eq!(crate::guard::fence_clean(&root), 0);
+    let _ = std::fs::remove_dir_all(&root);
+}
