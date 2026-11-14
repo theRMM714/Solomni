@@ -471,6 +471,10 @@ fn fs_meta_primitives_follow_platform_file_mode_rules() {
     crate::kernel::api::make_executable_checked(&file).expect("加执行位");
     assert!(crate::kernel::detail::fs_meta::is_executable(&file));
     crate::kernel::api::ensure_executable(&file);
+    crate::kernel::api::ensure_executable(&root.join("missing"));
+    let dir = root.join("dir");
+    std::fs::create_dir_all(&dir).expect("建目录");
+    crate::kernel::api::ensure_executable(&dir);
     crate::kernel::api::make_executable(&file);
     crate::kernel::api::restrict_private_file(&file).expect("收紧私密权限");
     #[cfg(unix)]
