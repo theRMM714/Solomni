@@ -106,11 +106,11 @@ impl TierReadiness {
 
 /// 目的：虚拟机监视器不可用时该怎么提示（各平台如实说各自的前置条件）。
 pub fn hypervisor_hint() -> &'static str {
-    if cfg!(windows) {
+    if crate::kernel::api::IS_WINDOWS {
         "本机虚拟机监视器不可用（要启用「虚拟机平台」组件）"
-    } else if cfg!(target_os = "linux") {
+    } else if crate::kernel::api::IS_LINUX {
         "本机虚拟机监视器不可用（要有 /dev/kvm）"
-    } else if cfg!(target_os = "macos") {
+    } else if crate::kernel::api::IS_MACOS {
         "本机虚拟机监视器不可用（需要 macOS 11 及以上）"
     } else {
         "本平台没有接入虚拟机档"
@@ -216,11 +216,11 @@ pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
 
 /// 本机虚拟机监视器的类型（如实说清是哪一种，不笼统说"虚拟化可用"）。
 fn hypervisor_kind() -> &'static str {
-    if cfg!(windows) {
+    if crate::kernel::api::IS_WINDOWS {
         "Windows 虚拟机平台"
-    } else if cfg!(target_os = "linux") {
+    } else if crate::kernel::api::IS_LINUX {
         "Linux KVM（/dev/kvm）"
-    } else if cfg!(target_os = "macos") {
+    } else if crate::kernel::api::IS_MACOS {
         "macOS 虚拟化框架"
     } else {
         "未知"
@@ -537,11 +537,11 @@ fn share_how(share: &str) -> String {
 
 /// 虚拟机监视器不可用时的解决指引（各平台说各自的办法）。
 fn hypervisor_how() -> &'static str {
-    if cfg!(windows) {
+    if crate::kernel::api::IS_WINDOWS {
         "启用「虚拟机平台」组件（设置 → 应用 → 可选功能；或管理员 PowerShell 执行 dism /online /enable-feature /featurename:VirtualMachinePlatform /all），然后重启"
-    } else if cfg!(target_os = "linux") {
+    } else if crate::kernel::api::IS_LINUX {
         "确认 CPU 虚拟化已在 BIOS/UEFI 打开，且宿主内核提供 /dev/kvm（ls -l /dev/kvm 确认；容器里通常要 --device /dev/kvm）"
-    } else if cfg!(target_os = "macos") {
+    } else if crate::kernel::api::IS_MACOS {
         "升级到 macOS 11 及以上（本机不需要额外安装）"
     } else {
         "本平台未接入虚拟机档"

@@ -15,9 +15,13 @@
 | `src/entry.rs` | 根共用机制的入口：注册装配、探针、产品根规范化与启动期工具链 |
 | `src/entry/args.rs` | 参数表：取根前的守门子进程、隐藏探针与路由目录；取根后的自检、依赖补齐、回收、构建与围栏台账；入口据此决定继续启动还是退出 |
 | `src/entry/setup.rs` | 便携维护入口（`--setup`）：产品根解析后立刻分派，不装配核心；PATH shim 与围栏机器级预授的状态、执行，首次授权后的自动 ensure 与后续启动的只读提示 |
-| `src/entry/setup/path.rs` | 用户 PATH 的读取、追加、摘除与还原：分段纯函数（去重、引号 / 尾斜杠 / 大小写不敏感）、备份 `.home/setup-path.json`、保留 `REG_SZ` / `REG_EXPAND_SZ` 类型、写后广播环境变化 |
-| `src/entry/setup/shim.rs` | Windows 便携入口 `bin/solomni.cmd` 的生成与核对：固定 `--root <绝对根>`、参数透传、内容相同不重写（仅 Windows） |
-| `src/entry/setup/fence.rs` | 围栏机器级预授的入口：`--setup=fence` 的分步进度与退出码、预授成功后退役旧的全应用包机器级授权、`--setup=fence-calibrate` 的合成树标定与成本样本回写、status 的缺项清单、首次授权后的自动 ensure（非 Windows 如实说本平台不写 ACL） |
+| `src/entry/setup/path.rs` | 用户 PATH 的读取、追加、摘除与还原（门面）：状态段、备份落点与命令分派；平台实现在 `src/entry/setup/path/windows.rs` / `src/entry/setup/path/other.rs`，纯规则在 `src/entry/setup/path/rules.rs` |
+| `src/entry/setup/path/windows.rs` | `path` 的 Windows 后端：写用户 PATH、备份原串、按备份还原与三个命令入口 |
+| `src/entry/setup/path/other.rs` | `path` 的非 Windows 后端：不自动改 PATH，只打印指引 |
+| `src/entry/setup/path/rules.rs` | PATH 分段规则与可移植的 unset / undo 逻辑（Windows 命令与跨平台单测共用） |
+| `src/entry/setup/shim.rs` | 便携入口模块门面：只有 Windows 有实现（`src/entry/setup/shim/windows.rs`），其余平台为空模块 |
+| `src/entry/setup/shim/windows.rs` | 便携入口 `bin/solomni.cmd` 的生成与核对：固定 `--root <绝对根>`、参数透传、内容相同不重写 |
+| `src/entry/setup/fence.rs` | 围栏机器级预授的入口：`--setup=fence` 的分步进度与退出码、预授成功后退役旧的全应用包机器级授权、`--setup=fence-calibrate` 的合成树标定与成本样本回写、status 的缺项清单、首次授权后的自动 ensure；无 ACL 的平台由平台事实如实降级 |
 | `src/entry/assembly.rs` | 组合根的共用装配：把产品根变成各能力面；端口选型、适配器构造与依赖顺序只在这里落一次 |
 | `src/entry/root.rs` | 产品根规范化：纯词法拼接与归一化，取不到当前目录才退回 canonicalize |
 | `src/entry/toolchains.rs` | 启动期基础工具链：读 `.tools/toolchains/active.json`，校验目标与相对路径，把项目 bin 前置到 PATH 并设置工具环境；每次启动报告项目内 / 宿主回退（含 Windows 围栏可授权性）/ 缺失；不阻断启动 |

@@ -7,6 +7,7 @@ use crate::capabilities::conductor::api::{Acted, ActionCall, Caller, SessionEven
 use crate::capabilities::conductor::api::{Ops, Output};
 use crate::capabilities::workspace::api::MAX_ASSET_BYTES;
 pub(crate) mod assets;
+mod host_fs;
 pub mod routes;
 use serde_json::json;
 use std::io::Read;
@@ -497,16 +498,8 @@ pub(crate) fn route(
                         let p = e.path();
                         let name = e.file_name().to_string_lossy().to_string();
                         // 目录选择器不列隐藏 / 系统目录（$RECYCLE.BIN、System Volume Information 等）。
-                        #[cfg(windows)]
-                        {
-                            use std::os::windows::fs::MetadataExt;
-                            if let Ok(m) = e.metadata() {
-                                const HIDDEN: u32 = 0x2;
-                                const SYSTEM: u32 = 0x4;
-                                if m.file_attributes() & (HIDDEN | SYSTEM) != 0 {
-                                    continue;
-                                }
-                            }
+                        if host_fs::is_hidden_or_system(&e) {
+                            continue;
                         }
                         if p.is_dir() {
                             dirs.push((name, p.display().to_string()));
@@ -518,20 +511,7 @@ pub(crate) fn route(
             dirs.sort_by(|a, b| a.0.cmp(&b.0));
             let parent = dir.parent().map(|p| p.display().to_string());
             // 盘符根（Windows）/ 文件系统根（Unix）：只靠“上一级”到不了别的盘。
-            let mut roots: Vec<String> = Vec::new();
-            #[cfg(windows)]
-            {
-                for b in b'A'..=b'Z' {
-                    let p = format!("{}:\\", b as char);
-                    if std::path::Path::new(&p).is_dir() {
-                        roots.push(p);
-                    }
-                }
-            }
-            #[cfg(not(windows))]
-            {
-                roots.push("/".to_string());
-            }
+            let roots = host_fs::volume_roots();
             ok_json(json!({
                 "path": dir.display().to_string(),
                 "parent": parent,

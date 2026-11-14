@@ -34,12 +34,12 @@ pub fn classify(e: &ureq::Error) -> &'static str {
         | ureq::Error::ConnectionFailed
         | ureq::Error::Timeout(_) => "no-net",
         ureq::Error::Tls(_) if lacks_system_credentials(&e.to_string()) => "env-tls",
-        #[cfg(windows)]
-        ureq::Error::NativeTls(_) if lacks_system_credentials(&e.to_string()) => "env-tls",
         ureq::Error::Tls(_) => "tls-fail",
-        #[cfg(windows)]
-        ureq::Error::NativeTls(_) => "tls-fail",
-        _ => "fail",
+        _ => crate::capabilities::llm::detail::tls_error::classify_native(
+            e,
+            lacks_system_credentials(&e.to_string()),
+        )
+        .unwrap_or("fail"),
     }
 }
 

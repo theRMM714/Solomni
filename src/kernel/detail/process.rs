@@ -5,14 +5,22 @@
 
 use crate::kernel::api::{FenceSpec, RunOutcome};
 use crate::kernel::detail::confine;
-use crate::kernel::ports::FenceGate;
-#[cfg(windows)]
-use crate::kernel::ports::{FenceCase, FenceVerdict};
-use crate::kernel::ports::{ProcessRunner, ProcessTexts};
+use crate::kernel::ports::{FenceGate, ProcessRunner, ProcessTexts};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::thread;
 use std::time::{Duration, Instant};
+
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+use windows as platform;
+#[cfg(windows)]
+pub(crate) use windows::refuse_when_broken;
+#[cfg(not(windows))]
+mod unix;
+#[cfg(not(windows))]
+use unix as platform;
 
 // 围栏准备的耗时经同线程交棒给回执：run_inner 的 Windows 分支写入，调用方读过即清（见 take_fence_prep）。
 // 不走 RunOutcome：端口只陈述成功与输出（kernel/contracts/run.rs）；thread_local! 不产文档，注释用 //。
@@ -53,14 +61,11 @@ pub struct ProcTools {
     /// 目的：守门进程用的可执行文件（组合根注入当前程序路径）。
     pub exe: PathBuf,
     /// 目的：产品私有区（`.home/`）：围栏授权台账落在这里，供 `--fence-clean` 精确回收。
-    ///   只有 Windows 的容器围栏需要写目录 ACL，所以下面这三项只在本平台存在。
-    #[cfg(windows)]
+    ///   只有 Windows 的容器围栏需要写目录 ACL；其余平台保留字段但不参与。
     pub home: PathBuf,
     /// 目的：是否允许在本机写权限（由组合根按设置与 `SOLOMNI_FENCE_WRITE` 注入；默认否）。
-    #[cfg(windows)]
     pub write_allowed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// 目的：「未授权」的提示只出一次，不刷屏。
-    #[cfg(windows)]
     pub disclosed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// 目的：工具回执里那些收尾标记的文案（生产用本文件的 `CodeProcessTexts`；它们随 [工具结果] 进模型上下文）。
     ///   **共享一份**（调用方给出的 `Arc`）：这里不再各存一份深拷贝。
@@ -72,7 +77,6 @@ pub struct ProcTools {
     /// 目的：全局沙箱要求与本进程是否已同意降级。
     pub mode: std::sync::Arc<crate::kernel::api::SandboxMode>,
     /// 目的：强制使用的 PowerShell 程序（pwsh / powershell）；None = 自动检测。Windows 专用。
-    #[cfg(windows)]
     pub shell_ps: Option<&'static str>,
 }
 
@@ -123,22 +127,15 @@ impl ProcTools {
         home: PathBuf,
         write_allowed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> ProcTools {
-        // 其它平台没有容器围栏这一步：家目录与写权限开关不参与装配，显式忽略以免被误读成漏用。
-        #[cfg(not(windows))]
-        let _ = (&home, &write_allowed);
         ProcTools {
             exe,
-            #[cfg(windows)]
             home,
-            #[cfg(windows)]
             write_allowed,
-            #[cfg(windows)]
             disclosed: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             texts,
             timeout: Duration::from_secs(30),
             max_output_chars: 16_000,
             mode: std::sync::Arc::new(crate::kernel::api::SandboxMode::permissive()),
-            #[cfg(windows)]
             shell_ps: None,
         }
     }
@@ -150,7 +147,7 @@ impl ProcTools {
     }
 
     /// 目的：强制 shell 用哪个 PowerShell（Windows 真机验 5.1 回退）；None = 自动。
-    #[cfg(all(windows, test))]
+    #[cfg(test)]
     pub fn with_powershell(mut self, program: Option<&'static str>) -> ProcTools {
         self.shell_ps = program;
         self
@@ -158,8 +155,6 @@ impl ProcTools {
 }
 
 impl ProcessRunner for ProcTools {
-    // 提问与裁决端口只在 Windows 的容器围栏那一路用；unix 侧没有 prepare_fence，参数如实闲置。
-    #[cfg_attr(not(windows), allow(unused_variables))]
     fn run(
         &self,
         fence: &FenceSpec,
@@ -200,11 +195,30 @@ struct RunPlan<'a> {
     cancel: Option<&'a std::sync::atomic::AtomicBool>,
 }
 
+/// 目的：一次执行交给平台后端的上下文——围栏准备与进程收尾只看这些事实。
+struct PrepareCtx<'a> {
+    tools: &'a ProcTools,
+    fence: &'a FenceSpec,
+    command: &'a str,
+    ask: Option<&'a dyn crate::kernel::ports::AskUser>,
+    gate: Option<&'a dyn FenceGate>,
+    strict: bool,
+}
+
+/// 目的：平台后端对「是否已准备围栏」的裁决：继续执行，或由裁决端口 / 机制错误直接收场。
+enum Prepared {
+    Ready {
+        prepared: bool,
+        unfenced_note: Option<String>,
+        home: Option<std::path::PathBuf>,
+    },
+    Stop(RunOutcome),
+}
+
 impl ProcTools {
     /// 目的：一次进程执行的公共体（准备围栏、拉起守门进程、送 stdin、等待/取消/超时、拼回执）。
     /// 参数：`plan` 区分模块工具与 shell；strict = 围栏必须真强制，由裁决端口按该事实处理。
     #[allow(clippy::too_many_arguments)]
-    #[cfg_attr(not(windows), allow(unused_variables))]
     fn run_inner(
         &self,
         fence: &FenceSpec,
@@ -218,75 +232,23 @@ impl ProcTools {
     ) -> RunOutcome {
         // 上一趟的交棒只对那一趟有效：新一趟先清空，这趟没走到围栏准备就保持空（读即清见 take_fence_prep）。
         reset_fence_prep();
-        // Windows：容器围栏要先把「可达范围」授权给容器 SID。
-        // **默认不写本机任何权限项**：只有用户显式授权（设置里的 sandbox.policy.windows.write_acl，或环境变量 SOLOMNI_FENCE_WRITE=1）才做。
-        #[cfg(windows)]
-        let (prepared, unfenced_note) = {
-            use std::sync::atomic::Ordering;
-            let mut prepared = false;
-            let mut note: Option<String> = None;
-            if self.write_allowed.load(Ordering::Relaxed) {
-                // 围栏准备单独计时：首调用逐条写 ACL 常常占掉整次耗时的绝大部分，回执要能分辨它（交棒见 take_fence_prep）。
-                let fence_started = Instant::now();
-                let prep = confine::prepare_fence(fence, command, &self.home);
-                let steps = prep.steps.clone();
-                FENCE_PREP.with(|slot| {
-                    slot.set(Some(FenceTiming {
-                        total: fence_started.elapsed(),
-                        steps,
-                    }))
-                });
-                // 可选落点授不上只记事实（不牵动这次执行）：脚印打在 stderr，回执里不打扰模型。
-                for n in &prep.notes {
-                    eprintln!("[围栏] {}（可选落点，本次照常执行）", n);
-                }
-                // 必要落点授不上：机制只把事实交给裁决端口；没有端口就按 fail-closed 拒绝。
-                if prep.ok() {
-                    prepared = true;
-                } else if let Some(blocked) = &prep.blocked {
-                    let Some(gate) = gate else {
-                        return RunOutcome {
-                            ok: false,
-                            output: self.texts.fence_failed(),
-                        };
-                    };
-                    let case = FenceCase {
-                        blocked,
-                        strict: plan.strict,
-                        unfenced_possible: !fence.cwd.as_os_str().is_empty() && fence.cwd.is_dir(),
-                        agent: &fence.agent,
-                        ask,
-                    };
-                    match gate.decide(&case) {
-                        FenceVerdict::Unfenced { note: n } => note = Some(n),
-                        FenceVerdict::Refused { output } => {
-                            return RunOutcome { ok: false, output };
-                        }
-                    }
-                }
-            } else if !self.disclosed.swap(true, Ordering::Relaxed) {
-                eprintln!(
-                    "[围栏] 容器围栏未启用（用户没授权在本机写权限）：外部工具按无围栏执行（能力等级见启动报告）。要启用：在设置里打开，或在 .home/settings.yaml 写 sandbox.policy.windows.write_acl: true"
-                );
-            }
-            if !prepared && note.is_none() {
-                // 未授权时段先问机制：环境不允许就如实降级，我们写错了就拒绝执行（见 refuse_when_broken）。
-                if let Some(outcome) =
-                    refuse_when_broken(&*self.texts, confine::verify(fence, command))
-                {
-                    return outcome;
-                }
-            }
-            (prepared, note)
+        // 平台后端决定要不要先准备围栏：Windows 的容器围栏要先把可达范围授权给容器 SID；
+        // 其余平台没有这一步，直接返回「未准备、无家目录」。
+        let (prepared, unfenced_note, home) = match platform::prepare(PrepareCtx {
+            tools: self,
+            fence,
+            command,
+            ask,
+            gate,
+            strict: plan.strict,
+        }) {
+            Prepared::Stop(outcome) => return outcome,
+            Prepared::Ready {
+                prepared,
+                unfenced_note,
+                home,
+            } => (prepared, unfenced_note, home),
         };
-        // 其它平台没有容器围栏，也就没有"要先授权"这一步。
-        #[cfg(not(windows))]
-        let (prepared, unfenced_note): (bool, Option<String>) = (false, None);
-        // 容器 profile 的台账落点：只有 Windows 的守门进程会写它（外层不知道 profile 建成了没有）。
-        #[cfg(windows)]
-        let home = Some(self.home.clone());
-        #[cfg(not(windows))]
-        let home: Option<std::path::PathBuf> = None;
         // 全局沙箱要求：机制不可用且本进程未同意降级时，工具**不执行**。
         // shell 严格模式不看本进程降级：它的围栏要求恒为真，由守门进程按 FENCE_FAILED 拒绝。
         if !plan.strict
@@ -336,11 +298,7 @@ impl ProcTools {
             cmd.env(k, v);
         }
         // 独立进程组：Unix 上超时/停止能杀整棵树；Windows 侧由守门进程的 Job Object 兜住。
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            cmd.process_group(0);
-        }
+        platform::configure_spawn(&mut cmd);
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
@@ -407,65 +365,8 @@ impl ProcTools {
 
     /// 目的：本机 shell 的启动方式：Windows 用 PowerShell（-File 临时脚本），其它平台用 sh（脚本走 stdin）。
     /// 约束：脚本是数据，不拼进命令行；Windows 的临时脚本落在 shell 的 cwd（私有沙箱）里，跑完删掉。
-    #[cfg(not(windows))]
     fn run_shell_impl(&self, run: &crate::kernel::ports::ShellRun<'_>) -> RunOutcome {
-        // 外层守门进程本身就是 sh -c：这里再起一个 sh 读 stdin，脚本不会与命令的 stdin 抢同一条流。
-        let command = "sh -c \"$(cat)\"";
-        self.run_inner(
-            run.fence,
-            command,
-            run.script,
-            &[],
-            run.path,
-            run.ask,
-            run.gate,
-            RunPlan {
-                timeout: run.timeout,
-                strict: true,
-                shell: true,
-                cancel: run.cancel,
-            },
-        )
-    }
-
-    #[cfg(windows)]
-    fn run_shell_impl(&self, run: &crate::kernel::ports::ShellRun<'_>) -> RunOutcome {
-        let (name, file) = match self.shell_script_file(run) {
-            Ok(v) => v,
-            Err(e) => {
-                return RunOutcome {
-                    ok: false,
-                    output: e,
-                };
-            }
-        };
-        let command = format!(
-            "{} -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {}",
-            self.powershell_program(),
-            name
-        );
-        // shell 的脚本不在命令行里，解释器基线看不到 node：Windows 容器里 node 需要跳过 realpath。
-        let env = vec![(
-            "NODE_OPTIONS".to_string(),
-            confine::NODE_REALPATH_FLAGS.to_string(),
-        )];
-        let out = self.run_inner(
-            run.fence,
-            &command,
-            "",
-            &env,
-            run.path,
-            run.ask,
-            run.gate,
-            RunPlan {
-                timeout: run.timeout,
-                strict: true,
-                shell: true,
-                cancel: run.cancel,
-            },
-        );
-        let _ = std::fs::remove_file(&file);
-        out
+        platform::run_shell(self, run)
     }
 
     /// 目的：拼 shell 回执：正文分区 + 截断 + 退出码 / 超时 / 用户停止 / 围栏失败。
@@ -506,129 +407,9 @@ impl ProcTools {
     }
 }
 
-/// 目的：Windows PowerShell 5.1 在容器里自动加载内核模块会带非终止错误；先按 Continue 载入常用模块，
-///   再开 Stop（否则 Stop 会把加载错误变终止，Set-Location 之类就成了「命令不存在」）。
-#[cfg(windows)]
-const PS_PRELUDE: &str = concat!(
-    "try { Import-Module Microsoft.PowerShell.Management, Microsoft.PowerShell.Utility -ErrorAction SilentlyContinue } catch { }\n",
-    "$ErrorActionPreference = 'Stop'\n",
-    "try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }\n",
-    "$OutputEncoding = [System.Text.Encoding]::UTF8\n",
-    // 当前定位必须落在脚本所在目录（即工具进程的工作目录）：切不过去就如实报到 stderr——否则相对路径
-    // 会静默落到继承来的别处，看起来只是「写不进去」。
-    "try { Set-Location -LiteralPath $PSScriptRoot -ErrorAction Stop }\n",
-    "catch {\n",
-    "    if ((Get-Location).Path -ne $PSScriptRoot) {\n",
-    "        [Console]::Error.WriteLine((\"[shell] 当前定位没能切到工作目录（{0}）：{1}\" -f $PSScriptRoot, $_.Exception.Message))\n",
-    "    }\n",
-    "}\n",
-);
-#[cfg(windows)]
-const PS_TAIL: &str = "\nif ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE }\n";
-
-#[cfg(windows)]
-impl ProcTools {
-    /// 目的：这次 shell 用哪个 PowerShell：显式覆盖优先，否则 pwsh 7 优先、powershell 5.1 回退。
-    fn powershell_program(&self) -> &'static str {
-        if let Some(program) = self.shell_ps {
-            return program;
-        }
-        if crate::kernel::detail::host_probe::find_exe("pwsh").is_some() {
-            "pwsh"
-        } else {
-            "powershell"
-        }
-    }
-}
-
-#[cfg(windows)]
-impl ProcTools {
-    /// 目的：把 shell 脚本写进 cwd 下的临时 .ps1（UTF-8 BOM + 错误即止 / 输出编码前导 + 退出码尾巴）；返回相对名与全路径。
-    /// 约束：create_new 防跟随同名符号链接；名字由本进程生成，不含模型内容。
-    fn shell_script_file(
-        &self,
-        run: &crate::kernel::ports::ShellRun<'_>,
-    ) -> Result<(String, PathBuf), String> {
-        let dir = if !run.fence.cwd.as_os_str().is_empty() {
-            run.fence.cwd.clone()
-        } else {
-            run.fence.private.clone()
-        };
-        if dir.as_os_str().is_empty() {
-            return Err("shell 没有可写的私有沙箱（cwd 为空）".to_string());
-        }
-        let pid = std::process::id();
-        for n in 0..100u32 {
-            let name = format!(".solomni-shell-{}-{}.ps1", pid, n);
-            let path = dir.join(&name);
-            match std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&path)
-            {
-                Ok(mut f) => {
-                    use std::io::Write;
-                    // 未处理错误由包装器收成 exit 1：不依赖宿主进程对"未捕获终止错误"的收场路径
-                    // （Windows PowerShell 5.1 在容器里那条路会卡住），stderr 仍原样交给模型。
-                    let body = format!(
-                        "{}try {{\n{}\n}} catch {{\n    [Console]::Error.WriteLine(($_ | Out-String))\n    exit 1\n}}\n{}",
-                        PS_PRELUDE, run.script, PS_TAIL
-                    );
-                    let mut bytes = vec![0xEF, 0xBB, 0xBF];
-                    bytes.extend_from_slice(body.as_bytes());
-                    if let Err(e) = f.write_all(&bytes) {
-                        let _ = std::fs::remove_file(&path);
-                        return Err(format!("写 shell 临时脚本失败：{}", e));
-                    }
-                    return Ok((name, path));
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(e) => return Err(format!("建 shell 临时脚本失败：{}", e)),
-            }
-        }
-        Err("建 shell 临时脚本失败：名字用完了".to_string())
-    }
-}
-
-/// 目的：未授权时段遇到机制自检结论时的放行规矩——**只有本机装不上能降级**；
-///   自检已确认机制有效却仍装不上 = 我们写错了（按无围栏跑等于用户以为有围栏、实际什么都没有），
-///   所以拒绝执行（命令不落进程），回执用提示词册里的固定说法。
-#[cfg(windows)]
-pub(crate) fn refuse_when_broken(
-    texts: &dyn ProcessTexts,
-    verdict: confine::FenceVerdict,
-) -> Option<RunOutcome> {
-    match verdict {
-        confine::FenceVerdict::Broken(why) => {
-            eprintln!(
-                "[围栏] 容器围栏机制装不上（{}）：本次拒绝执行，不按无围栏跑",
-                why
-            );
-            Some(RunOutcome {
-                ok: false,
-                output: texts.fence_failed(),
-            })
-        }
-        confine::FenceVerdict::Enforced | confine::FenceVerdict::EnvUnavailable(_) => None,
-    }
-}
-
 /// 目的：杀掉整棵进程树——工具进程 fork 出来的子孙一并收掉（不留孤儿）。
 pub(crate) fn kill_tree(child: &mut std::process::Child) {
-    #[cfg(unix)]
-    {
-        // 负 pid = 整个进程组（守门进程是组长，组员含 shell 与工具本身）。
-        unsafe {
-            libc::kill(-(child.id() as i32), libc::SIGKILL);
-        }
-        let _ = child.wait();
-    }
-    #[cfg(not(unix))]
-    {
-        // Windows：守门进程一死，它 Job Object 里的整棵树随之消亡（KILL_ON_JOB_CLOSE）。
-        let _ = child.kill();
-        let _ = child.wait();
-    }
+    platform::kill_tree(child);
 }
 
 fn read_to_string(r: &mut impl std::io::Read) -> String {

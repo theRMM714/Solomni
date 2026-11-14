@@ -38,33 +38,13 @@ impl HostFs for RealHost {
     }
 
     fn make_executable(&self, path: &Path) {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if let Ok(meta) = fs::metadata(path) {
-                let mode = meta.permissions().mode();
-                let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode | 0o111));
-            }
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = path;
-        }
+        crate::kernel::api::make_executable(path);
     }
 }
 
-/// 目的：建软链（只 Unix 有；Windows 上如实报不支持）。
-#[cfg(unix)]
+/// 目的：建软链（平台机制由 kernel 的 `fs_meta` 后端提供；Windows 如实报不支持）。
 pub(crate) fn symlink(target: &str, link: &Path) -> std::io::Result<()> {
-    std::os::unix::fs::symlink(target, link)
-}
-
-#[cfg(not(unix))]
-pub(crate) fn symlink(_target: &str, _link: &Path) -> std::io::Result<()> {
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "本平台不支持软链",
-    ))
+    crate::kernel::api::symlink(target, link)
 }
 
 /// 目的：跑一个外部工具并判成功；失败给一句人话。
@@ -80,35 +60,11 @@ pub(crate) fn run_tool(cmd: &mut std::process::Command, name: &str) -> Result<()
 
 /// 目的：写一个可执行脚本并给执行位（unix 0755；别的平台只写文件）。
 pub(crate) fn write_exe(path: &Path, body: &str) -> Result<(), String> {
-    fs::write(path, body).map_err(|e| format!("写 {} 失败：{}", path.display(), e))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o755))
-            .map_err(|e| format!("给 {} 执行位失败：{}", path.display(), e))?;
-    }
-    Ok(())
+    crate::kernel::api::write_executable(path, body)
+        .map_err(|e| format!("写 {} 失败：{}", path.display(), e))
 }
 
-/// 目的：给已落盘的可执行文件补齐可执行位（解归档丢过权限位的安装靠它自愈）；不是文件就什么都不做。
+/// 目的：给已落盘的可执行文件补齐执行位（解归档丢过权限位的安装靠它自愈）；不是文件就什么都不做。
 pub(crate) fn ensure_executable(path: &Path) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let Ok(meta) = fs::metadata(path) else {
-            return;
-        };
-        if !meta.is_file() {
-            return;
-        }
-        let mode = meta.permissions().mode() & 0o7777;
-        if mode & 0o111 != 0 {
-            return;
-        }
-        let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode | 0o555));
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = path;
-    }
+    crate::kernel::api::ensure_executable(path);
 }

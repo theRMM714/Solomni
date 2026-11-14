@@ -78,20 +78,7 @@ impl PathBridge {
 /// 约束：非 UTF-8 在 `to_string_lossy` 下会丢字节，lossy 比较会把两条不同的路径判成同一条——两边都是
 ///   合法 UTF-8 才比，否则给 false（宁可往返不成立，也不给一条假的"可表示"）。
 fn same_host_path(a: &Path, b: &Path) -> bool {
-    if a == b {
-        return true;
-    }
-    #[cfg(windows)]
-    {
-        match (a.to_str(), b.to_str()) {
-            (Some(x), Some(y)) => x.eq_ignore_ascii_case(y),
-            _ => false,
-        }
-    }
-    #[cfg(not(windows))]
-    {
-        false
-    }
+    crate::kernel::api::host_path_eq(a, b)
 }
 
 /// 目的：Windows 宿主路径编进 POSIX guest——盘符小写当第一段、UNC 编成保留段

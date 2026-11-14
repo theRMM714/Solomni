@@ -24,6 +24,7 @@ mod other;
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 use other as backend;
 
+mod admin;
 mod job;
 mod ledger;
 mod paths;
@@ -92,47 +93,13 @@ impl FenceHostAdapter {
 impl crate::kernel::ports::FenceHost for FenceHostAdapter {
     /// 目的：按会话租约撤销本进程为该会话写下的全部授权与 profile（会话改配 / 删除时调用）。
     fn release_by_lease(&self, lease: &str) -> Result<(), String> {
-        #[cfg(windows)]
-        {
-            windows::release_by_lease(&self.home, lease)
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = lease;
-            Ok(())
-        }
+        admin::release_by_lease(&self.home, lease)
     }
 
     /// 目的：一次**一次性调用**的收尾——撤它自己的 ACE、删它的按次 profile、删 `private/Packages/<名字>` 空壳。
     /// 约束：三步各自记错、合并返回；profile 删不掉时临时目录仍要尽力清（它只是宿主侧的空壳）。
     fn release_call(&self, spec: &FenceSpec) -> Result<(), String> {
-        #[cfg(windows)]
-        {
-            let mut errors: Vec<String> = Vec::new();
-            if let Err(e) = release_fence(spec, &self.home) {
-                errors.push(e);
-            }
-            let name = windows::container_name(spec);
-            if let Err(e) = windows::remove_profile_one(&self.home, &name) {
-                errors.push(e);
-            }
-            if let Some(dir) = windows::container_package_dir(spec)
-                && dir.is_dir()
-                && let Err(e) = std::fs::remove_dir_all(&dir)
-            {
-                errors.push(format!("删按次临时目录失败（{}）：{}", dir.display(), e));
-            }
-            if errors.is_empty() {
-                Ok(())
-            } else {
-                Err(errors.join("；"))
-            }
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = (spec, &self.home);
-            Ok(())
-        }
+        admin::release_call(spec, &self.home)
     }
 }
 
@@ -156,21 +123,14 @@ pub fn capability() -> Capability {
 
 impl Capability {
     /// 目的：本次实际生效的路径级围栏（文件系统, 断网）——本机能力 × 授权。
-    ///   只有 Windows 的容器围栏依赖外层写目录 ACL；Linux / macOS 的 Landlock / seatbelt 在守门进程里自足。
+    ///   只有有「外层写 ACL」这一步的平台依赖授权；其余平台的围栏在守门进程里自足。
     ///   进程树围栏不受授权影响，调用方直接用 `Capability::tree`。
-    #[cfg(windows)]
     pub fn effective_paths(&self, write_allowed: bool) -> (bool, bool) {
-        if write_allowed {
-            (self.fs, self.net)
-        } else {
+        if crate::kernel::api::HAS_EXTERNAL_ACL_STEP && !write_allowed {
             (false, false)
+        } else {
+            (self.fs, self.net)
         }
-    }
-
-    /// 目的：同上（非 Windows：没有外层授权这一步，授权值不参与判据）。
-    #[cfg(not(windows))]
-    pub fn effective_paths(&self, _write_allowed: bool) -> (bool, bool) {
-        (self.fs, self.net)
     }
 }
 
@@ -178,10 +138,9 @@ pub use job::{FenceJob, launcher, run_fenced};
 #[cfg(any(windows, test))]
 pub use ledger::Owner;
 pub use ledger::{
-    Ledger, LedgerEntry, ledger, reconcile, remove_profile_one, restore_one, revoke_grant,
+    Ledger, LedgerEntry, ReconcileReport, ledger, reconcile, release_fence, remove_profile_one,
+    restore_one, revoke_grant, sweep_orphan_aces,
 };
-#[cfg(windows)]
-pub use ledger::{ReconcileReport, release_fence, sweep_orphan_aces};
 pub use paths::{fence_env, shell_command};
 // 一次围栏准备里真写 ACL 的分步耗时条目：Windows 产生，回执交棒跨平台读。
 #[cfg(any(windows, test))]
@@ -191,11 +150,9 @@ pub use prep::FenceStep;
 pub use prep::clean;
 #[cfg(windows)]
 pub use prep::prepare_fence;
-#[cfg(windows)]
-pub use prep::retire_legacy_machine_grants;
 pub use prep::{
     MachineGrantReport, clean_all, ensure_workspace_grant, machine_ensure, machine_missing,
-    revoke_machine_grants, sweep_profiles,
+    retire_legacy_machine_grants, revoke_machine_grants, sweep_profiles,
 };
 #[cfg(windows)]
 pub(crate) use prep::{calibrate_machine_grant, remove_calibration_tree};

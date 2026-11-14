@@ -5,22 +5,18 @@
 
 use std::time::Duration;
 
-/// 目的：本平台该用的 TLS 配置——Windows 必须显式 native-tls（ureq 3 不会自动选中），其余平台给 None（用 rustls 默认）。
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+use windows as backend;
+#[cfg(not(windows))]
+mod unix;
+#[cfg(not(windows))]
+use unix as backend;
+
+/// 目的：本平台该用的 TLS 配置（平台后端决定；没有额外配置时给 None）。
 pub fn tls_config() -> Option<ureq::tls::TlsConfig> {
-    #[cfg(windows)]
-    {
-        Some(
-            ureq::tls::TlsConfig::builder()
-                .provider(ureq::tls::TlsProvider::NativeTls)
-                // native-tls 的 PlatformVerifier = 系统证书库。
-                .root_certs(ureq::tls::RootCerts::PlatformVerifier)
-                .build(),
-        )
-    }
-    #[cfg(not(windows))]
-    {
-        None
-    }
+    backend::tls_config()
 }
 
 /// 目的：构建带连接 / 总超时的通用代理。
@@ -38,9 +34,5 @@ pub fn agent(connect_secs: u64, total_secs: u64) -> ureq::Agent {
 
 /// 目的：这条构建实际用的 TLS 后端（编译期事实）：探针与自检据此如实报出来，不靠人猜。
 pub fn tls_backend() -> &'static str {
-    if cfg!(windows) {
-        "native-tls"
-    } else {
-        "rustls"
-    }
+    backend::tls_backend()
 }

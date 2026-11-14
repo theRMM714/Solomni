@@ -72,7 +72,7 @@ fn reconcile_reclaims_a_leftover_child_it_can_identify() {
     // 否则并行跑用例时会把活着的自己的进程当认不出的死条目丢掉；等不到就当场红并说清卡在哪一步。
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {
-        let line = cmdline(pid).unwrap_or_default();
+        let line = super::unix::cmdline(pid).unwrap_or_default();
         // exec 之后 argv 是 `sleep 30`（有的 sh 会先 fork 再 exec：那时是 `sh -c sleep 30`）。
         if line.ends_with("sleep 30") {
             break;
@@ -387,7 +387,7 @@ fn assign_rejects_a_handle_without_the_rights() {
     let pid = child.id();
     let h = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
     assert!(!h.is_null(), "拿得到只带查询权的句柄");
-    let r = assign(h);
+    let r = super::windows::assign(h);
     unsafe { CloseHandle(h) };
     assert!(r.is_err(), "权不够的句柄不该绑得进去：{:?}", r);
     let _ = terminate(pid);

@@ -43,7 +43,7 @@ pub(crate) fn missing_parts(
     cap: &crate::kernel::detail::confine::Capability,
     authorized: bool,
 ) -> Vec<MissingPart> {
-    let paths_ok = !cfg!(windows) || authorized;
+    let paths_ok = !crate::kernel::api::HAS_EXTERNAL_ACL_STEP || authorized;
     let mut out = Vec::new();
     if requirements.filesystem {
         if !cap.fs {
@@ -173,7 +173,7 @@ pub(crate) fn maybe_onboard_windows<R: BufRead, W: Write>(
         .iter()
         .any(|p| p.cause == MissingCause::Unauthorized);
     let has_unsupported = missing.iter().any(|p| p.cause == MissingCause::Unsupported);
-    if !cfg!(windows)
+    if !crate::kernel::api::HAS_EXTERNAL_ACL_STEP
         || !needs_authorization
         || has_unsupported
         || settings_exists
@@ -340,34 +340,24 @@ impl FenceReport {
 
 /// 目的：本次授权状态的人类可读标签——Unix 没有外层写 ACL 这一步，不能显示成"未授权"。
 pub(crate) fn fence_auth_label(write_allowed: bool) -> &'static str {
-    #[cfg(windows)]
-    {
-        if write_allowed {
-            "已授权"
-        } else {
-            "未授权"
-        }
+    if !crate::kernel::api::HAS_EXTERNAL_ACL_STEP {
+        return "不适用";
     }
-    #[cfg(not(windows))]
-    {
-        let _ = write_allowed;
-        "不适用"
+    if write_allowed {
+        "已授权"
+    } else {
+        "未授权"
     }
 }
 
 /// 目的：本次授权影响的说明——只讲 Windows 的目录 ACL，避免让 Unix 读者以为还有一步授权没做。
 pub(crate) fn fence_auth_note(write_allowed: bool) -> &'static str {
-    #[cfg(windows)]
-    {
-        if write_allowed {
-            "容器围栏按本机能力装，写入的权限项逐条记台账"
-        } else {
-            "不写本机任何权限项，容器围栏不装，只放行进程树、资源上限与环境白名单；要启用：设置里打开，或 .home/settings.yaml 写 sandbox.policy.windows.write_acl: true"
-        }
+    if !crate::kernel::api::HAS_EXTERNAL_ACL_STEP {
+        return "sandbox.policy.windows.write_acl 只影响 Windows 的目录 ACL；本平台围栏在守门进程里自足，与授权无关";
     }
-    #[cfg(not(windows))]
-    {
-        let _ = write_allowed;
-        "sandbox.policy.windows.write_acl 只影响 Windows 的目录 ACL；本平台围栏在守门进程里自足，与授权无关"
+    if write_allowed {
+        "容器围栏按本机能力装，写入的权限项逐条记台账"
+    } else {
+        "不写本机任何权限项，容器围栏不装，只放行进程树、资源上限与环境白名单；要启用：设置里打开，或 .home/settings.yaml 写 sandbox.policy.windows.write_acl: true"
     }
 }

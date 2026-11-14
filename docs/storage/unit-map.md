@@ -16,7 +16,10 @@
 | `src/capabilities/storage/detail/guests.rs` | `ProcessGuests`：从进程台账判断有没有 guest 在跑 |
 | `src/capabilities/storage/detail/paths.rs` | 可回收物的落点与占用判定（删除与扫描共用同一套路径） |
 | `src/capabilities/storage/detail/scan.rs` | 目录大小、修改时间、目录项枚举 |
-| `src/capabilities/storage/detail/qemu.rs` | qemu-img info / convert |
-| `src/capabilities/storage/detail/space.rs` | 宿主磁盘总量 / 可用量 |
+| `src/capabilities/storage/detail/qemu.rs` | qemu-img info / convert（可执行文件名按平台事实 `EXE_SUFFIX`） |
+| `src/capabilities/storage/detail/space.rs` | 宿主磁盘总量 / 可用量（门面）：按平台选中 `src/capabilities/storage/detail/space/{unix,windows,other}.rs` |
+| `src/capabilities/storage/detail/space/unix.rs` | `space` 的 Unix 后端：`statvfs` |
+| `src/capabilities/storage/detail/space/windows.rs` | `space` 的 Windows 后端：`GetDiskFreeSpaceExW` |
+| `src/capabilities/storage/detail/space/other.rs` | `space` 的兜底后端：如实返回 None |
 | `src/capabilities/storage/detail/lock.rs` | 跨进程回收锁 |
 | `src/capabilities/storage/detail/state.rs` | `.vm/storage.json` 上次回收摘要 |

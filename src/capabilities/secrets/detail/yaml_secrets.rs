@@ -26,17 +26,13 @@ impl YamlSecrets {
         YamlSecrets { path }
     }
 
-    /// 目的：写盘：建目录 → 写 → unix 下 0600。
+    /// 目的：写盘：建目录 → 写 → 收紧为私密文件（Unix 0600，其余平台空操作）。
     fn write(path: &Path, text: &str) -> Result<(), String> {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| format!("建隐秘字段目录失败：{}", e))?;
         }
         std::fs::write(path, text).map_err(|e| e.to_string())?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
-        }
+        let _ = crate::kernel::api::restrict_private_file(path);
         Ok(())
     }
 }

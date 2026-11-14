@@ -101,7 +101,7 @@ impl SandboxMode {
     /// 目的：执行前检查——要求强制但机制（或 Windows 的本机授权）不可用时拒绝；已同意降级则放行。
     /// 约束：`spec.net=true` 时不需要“网络围栏”来拦出站；只有要求断网时才检查。
     pub fn check(&self, spec: &FenceSpec, prepared: bool) -> Result<(), String> {
-        let paths_effective = !cfg!(windows) || prepared;
+        let paths_effective = !crate::kernel::api::HAS_EXTERNAL_ACL_STEP || prepared;
         let mut missing: Vec<&'static str> = Vec::new();
         if self.requirements.filesystem && (!self.filesystem_ok || !paths_effective) {
             missing.push("文件系统围栏");

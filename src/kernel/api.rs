@@ -11,8 +11,13 @@ pub use crate::kernel::contracts::types::{
     Ask, AskOutcome, DEFAULT_LLM_TIMEOUT_SECS, ExecSpec, SessionId, Tier, ToolOutcome,
     valid_capability,
 };
+pub use crate::kernel::detail::fs_meta::{
+    ensure_executable, file_footprint, is_link, make_executable, make_executable_checked,
+    restrict_private_file, symlink, sync_dir, write_executable,
+};
 pub use crate::kernel::detail::host_probe::{FileStamp, file_stamp};
 pub use crate::kernel::detail::locus::{is_network_path, locus_of, place_contains};
+pub(crate) use crate::kernel::detail::process::kill_tree;
 pub use crate::kernel::detail::process::{FenceTiming, take_fence_prep};
 // 外部工作区的机器级一次性只读授权/撤权：装配层在绑定与解绑时调用（契约出口，消费点由装配层接）。
 // 暂未接上时显式放行未用导入，不把出口从契约里删掉。
@@ -26,15 +31,16 @@ pub use crate::kernel::detail::confine::{
 #[allow(unused_imports)]
 pub use crate::kernel::detail::view_drive::{
     ViewDrive, active_view, attach_view_drive, ensure_view_drive, host_of, release_view_drive,
-    sweep_view_drive, view_codec, view_of,
+    sweep_view_drive, view_of,
 };
-
-/// 目的：非 Windows 的路径编解码出口——没有视图盘，路径怎么写就怎么用（恒等）。
-/// 约束：只有 `view_codec` 被其它平台共用（沙箱与环境块渲染），盘符生命周期只归 Windows。
-#[cfg(not(windows))]
-pub fn view_codec() -> Option<std::sync::Arc<dyn crate::kernel::ports::PathCodec>> {
-    None
-}
+pub use crate::kernel::detail::view_drive_lifecycle::{
+    begin as view_drive_begin, codec as view_codec, release as view_drive_release,
+    sweep as view_drive_sweep,
+};
 pub use crate::kernel::domain::fence::{SandboxMode, SandboxRequirements, call_lease};
 pub use crate::kernel::domain::jobs::JobRegistry;
 pub use crate::kernel::domain::path::{is_unc, native, slash, unc_parts};
+pub use crate::kernel::domain::platform::{
+    EXE_SUFFIX, HAS_EXTERNAL_ACL_STEP, HOST_ARCH, IS_LINUX, IS_MACOS, IS_WINDOWS, host_path_eq,
+    is_network_share, volume_key,
+};

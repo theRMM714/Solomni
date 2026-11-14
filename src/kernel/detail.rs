@@ -5,6 +5,7 @@
 
 pub mod confine;
 pub mod file_log;
+pub mod fs_meta;
 pub mod host_probe;
 pub mod locus;
 pub mod outbound;
@@ -14,6 +15,7 @@ pub mod session;
 pub mod unpack;
 pub mod user_path;
 pub mod view_drive;
+pub mod view_drive_lifecycle;
 
 pub use file_log::FileLog;
 pub use host_probe::HostProbeAdapter;
