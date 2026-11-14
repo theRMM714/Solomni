@@ -1,0 +1,28 @@
+   Compiling solomni v0.1.0 (D:\a\Solomni\Solomni)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.74s
+     Running tests\windows\main.rs (target\debug\deps\windows-3519d3165856b8dd.exe)
+
+running 14 tests
+[诊断] 能力名 solomni.fence.baseline → S-1-15-3-1024-2951083820-3801417277-1959969226-3077295246-350581633-2893898559-3475184837-4612892
+[诊断] with容器写工作目录：exit=0 拿到 "alive"；work 条目 ["alive-with.txt"]
+[诊断] without容器写工作目录：exit=0 拿到 "alive"；work 条目 ["alive-with.txt", "alive-without.txt"]
+[诊断] 带能力容器读能力专属文件：exit=0 拿到 "CAPABILITY-ONLY-SECRET"
+[诊断] 能力 SID 正反对照成立：带能力读得到、不带能力读不到（exit=1）
+test probes::capability::capability_sid_is_grantable_and_not_blanket ... ok
+test probes::container::container_cannot_read_outside_its_roots ... ok
+test probes::container::container_cannot_write_outside_its_roots ... ok
+test probes::container::env_unavailable_degrades_and_still_runs_the_command ... ok
+test probes::container::container_starts_and_passes_stdio_through ... ok
+test probes::container::container_keeps_the_shared_area_out_of_reach ... ok
+test probes::container::node_commands_carry_the_realpath_skip_in_the_runtime_env ... ok
+[HTTPS] ok 200 native-tls https://example.com/
+test probes::https::https_reaches_a_public_endpoint_through_the_product_chain ... ok
+test probes::ledger::fence_reconcile_reclaims_dead_owners_and_reports_unjudgeable ... ok
+test probes::container::container_network_follows_the_net_flag ... ok
+test probes::ledger::ledger_listing_and_per_item_commands_are_machine_readable_and_honest ... ok
+test probes::container::verify_separates_env_unavailable_from_broken_container_steps ... ok
+test probes::startup::web_does_not_start_without_fence_authorization ... ok
+test probes::container::internet_client_does_not_open_loopback ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.60s
+
