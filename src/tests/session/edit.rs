@@ -300,6 +300,18 @@ pub(crate) fn deleting_a_session_releases_its_fence_lease() {
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     );
     assert!(core.history_delete("w").unwrap(), "会话目录该被删掉");
+    // 撤权在删完目录后于后台执行：等它落地再断言，别把异步当成没做。
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline
+        && !fence
+            .lease_releases
+            .lock()
+            .expect("锁")
+            .iter()
+            .any(|l| l == "w")
+    {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
     assert!(
         fence
             .lease_releases

@@ -5,8 +5,67 @@
 //!   本方法族只碰 history / log / sessions / vm 这几个字段。
 use super::*;
 
-/// 目的：删除会话的收尾——**先停 guest，再删会话目录**。
+/// 目的：按租约撤围栏授权的回调——由核心把 `ToolExec::release_by_lease` 包成闭包注入，测试可直接换成记录型替身。
+pub(crate) type ReleaseByLease = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
+
+/// 目的：删除收尾里的围栏撤权段：租约清单 + 撤销回调 + 失败日志。
+/// 约束：在调用方线程上**只起线程**；真正撤权在后台跑，进程退出时线程被杀留下的无归属条目由启动对账回收。
+pub(crate) struct FenceRelease {
+    leases: Vec<String>,
+    release: ReleaseByLease,
+    log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
+}
+
+impl FenceRelease {
+    /// 目的：起后台线程按租约逐个撤权；线程起不来就同步兜底，不能把撤权丢掉。
+    pub(crate) fn spawn(self) {
+        if self.leases.is_empty() {
+            return;
+        }
+        let leases = self.leases;
+        let release = Arc::clone(&self.release);
+        let log = Arc::clone(&self.log);
+        let worker = {
+            let leases = leases.clone();
+            let release = Arc::clone(&release);
+            let log = Arc::clone(&log);
+            move || {
+                for lease in leases {
+                    if let Err(e) = release(&lease) {
+                        log.warn(
+                            "conductor::release_fences",
+                            &format!("按会话撤销围栏授权未完成（{}）：{}", lease, e),
+                        );
+                    }
+                }
+            }
+        };
+        match std::thread::Builder::new()
+            .name("fence-release".to_string())
+            .spawn(worker)
+        {
+            Ok(_) => {}
+            Err(e) => {
+                log.warn(
+                    "conductor::release_fences",
+                    &format!("后台撤权线程起不来，改为同步撤权：{}", e),
+                );
+                for lease in &leases {
+                    if let Err(e) = release(lease) {
+                        log.warn(
+                            "conductor::release_fences",
+                            &format!("按会话撤销围栏授权未完成（{}）：{}", lease, e),
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// 目的：删除会话的收尾——**先停 guest，再删会话目录，最后把撤权甩到后台**。
 /// 约束：在调用方线程上执行；Windows 上 guest / 共享进程可能还占着会话目录里的文件，顺序反过来会 sharing violation。
+///   先删目录让产品根内的授权自动走「路径不在 → 只销账」快分支；外部根的递归撤权不占用户等待路径。
 pub(crate) struct SessionDelete {
     stop: super::guest_job::GuestStop,
     history: Arc<dyn History + Send + Sync>,
@@ -14,6 +73,8 @@ pub(crate) struct SessionDelete {
     dirs: Vec<String>,
     /// 调用方要的“目标会话是否真的删掉了”。
     target: String,
+    /// 围栏撤权段；没有租约或测试替身不需要时为 None。
+    fences: Option<FenceRelease>,
 }
 
 impl SessionDelete {
@@ -29,6 +90,31 @@ impl SessionDelete {
             history,
             dirs,
             target,
+            fences: None,
+        }
+    }
+
+    /// 目的：测试用构造：带一个可观察的撤权回调，钉住「后台执行、目录已删、失败也撤」三条契约。
+    #[cfg(test)]
+    pub(crate) fn for_test_with_fences(
+        stop: super::guest_job::GuestStop,
+        history: Arc<dyn History + Send + Sync>,
+        dirs: Vec<String>,
+        target: String,
+        leases: Vec<String>,
+        release: ReleaseByLease,
+        log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
+    ) -> SessionDelete {
+        SessionDelete {
+            stop,
+            history,
+            dirs,
+            target,
+            fences: Some(FenceRelease {
+                leases,
+                release,
+                log,
+            }),
         }
     }
 
@@ -38,16 +124,28 @@ impl SessionDelete {
             history,
             dirs,
             target,
+            fences,
         } = self;
         stop.run();
-        let mut deleted = false;
+        let mut result = Ok(false);
         for sid in dirs {
-            let ok = history.delete(&sid)?;
-            if sid == target {
-                deleted = ok;
+            match history.delete(&sid) {
+                Ok(ok) => {
+                    if sid == target {
+                        result = Ok(ok);
+                    }
+                }
+                Err(e) => {
+                    // 保留原有的逐目录早退：删到一半失败就停，但撤权仍要执行。
+                    result = Err(e);
+                    break;
+                }
             }
         }
-        Ok(deleted)
+        if let Some(fences) = fences {
+            fences.spawn();
+        }
+        result
     }
 }
 
@@ -81,16 +179,16 @@ impl Conductor {
 
     /// 目的：删除会话（含它的整棵子树）。
     /// 约束：口径见 docs/session/session-model.md 七——**子会话不允许单独删**（它由核心按节点派生，删父会话会一起删掉；
-    ///   单独删会让父子关系断掉）；**删父带子**按 meta.parent 收集整棵子树，先子后父逐个撤围栏授权 → 移出内存 → 收集待删目录；
-    ///   目录删除在收尾层先停 guest 再执行；**子树里任一节点在生成中就整体拒绝**，不能删到一半留下半个状态。
+    ///   单独删会让父子关系断掉）；**删父带子**按 meta.parent 收集整棵子树，移出内存 → 收集待删目录；
+    ///   目录删除在收尾层先停 guest 再执行，删完目录后在后台按租约撤围栏授权；**子树里任一节点在生成中就整体拒绝**，不能删到一半留下半个状态。
     ///   内部的 session::History::delete（纯存储）不受影响——系统路径还需要它。
     #[cfg(test)]
     pub fn history_delete(&mut self, name: &str) -> Result<bool, String> {
         self.delete_bookkeeping(name)?.run()
     }
 
-    /// 目的：删除的核心动作（毫秒级）：撤授权、回收常驻服务、移出内存、收集待删目录——**不停 guest、不删目录**。
-    /// 返回：调用方线程要执行的收尾（先停 guest，再删目录）。
+    /// 目的：删除的核心动作（毫秒级）：回收常驻服务、移出内存、收集待删目录——**不停 guest、不删目录**。
+    /// 返回：调用方线程要执行的收尾（先停 guest，再删目录，最后后台按租约撤权）。
     pub(crate) fn delete_bookkeeping(&mut self, name: &str) -> Result<SessionDelete, String> {
         // 不是落盘会话（或已不存在）：只清内存，目录交给收尾层如实回 false。
         let Ok((meta, _)) = self.history.load(name) else {
@@ -100,6 +198,7 @@ impl Conductor {
                 history: Arc::clone(&self.history),
                 dirs: vec![name.to_string()],
                 target: name.to_string(),
+                fences: None,
             });
         };
         // 子会话由核心管理，不允许用户单独删。
@@ -115,10 +214,8 @@ impl Conductor {
                 return Err(Self::running_refusal(sid));
             }
         }
-        // 围栏授权按会话租约持有：会话删除时按租约撤掉（调用结束不释放）。常驻服务租约同一时机回收。
-        for sid in &subtree {
-            self.release_fences(sid);
-        }
+        // 围栏授权按会话租约持有：撤权放到收尾层、删完目录之后在后台做（不占核心线程与用户等待路径）。
+        // 常驻服务租约仍在核心线程回收（毫秒级）。
         for sid in &subtree {
             if let Err(e) = self.residents.reap(sid) {
                 self.log.warn(
@@ -147,13 +244,21 @@ impl Conductor {
             self.forget_desk(sid);
         }
         // 目录按后序删：先子后父；父目录被删时，落在它内部的子会话目录一起消失。
-        // 真正删除在 `SessionDelete::run`（先停 guest，再删目录）。
+        // 真正删除在 `SessionDelete::run`（先停 guest，再删目录，最后后台撤权）。
         let dirs: Vec<String> = subtree.iter().rev().cloned().collect();
+        let tools = Arc::clone(&self.tools);
+        let release: ReleaseByLease = Arc::new(move |lease: &str| tools.release_by_lease(lease));
+        let fences = FenceRelease {
+            leases: subtree.clone(),
+            release,
+            log: Arc::clone(&self.log),
+        };
         Ok(SessionDelete {
             stop,
             history: Arc::clone(&self.history),
             dirs,
             target: name.to_string(),
+            fences: Some(fences),
         })
     }
 
