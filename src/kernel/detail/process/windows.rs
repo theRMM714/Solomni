@@ -6,8 +6,29 @@
 use super::*;
 use crate::kernel::ports::{FenceCase, FenceVerdict, ShellRun};
 use std::path::PathBuf;
-use std::sync::atomic::Ordering;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
+
+/// 目的：Windows 侧需要随工具执行器一起持有的状态。
+pub(super) struct State {
+    home: PathBuf,
+    write_allowed: Arc<AtomicBool>,
+    disclosed: Arc<AtomicBool>,
+    shell_ps: Option<&'static str>,
+}
+
+impl State {
+    /// 目的：保存组合根注入的产品私有区与写权限开关。
+    pub(super) fn new(home: PathBuf, write_allowed: Arc<AtomicBool>) -> State {
+        State {
+            home,
+            write_allowed,
+            disclosed: Arc::new(AtomicBool::new(false)),
+            shell_ps: None,
+        }
+    }
+}
 
 /// 目的：Windows 的围栏准备——用户授权写 ACL 时先授权，未授权时只提示一次并自检机制。
 pub(super) fn prepare(ctx: PrepareCtx<'_>) -> Prepared {
@@ -15,10 +36,10 @@ pub(super) fn prepare(ctx: PrepareCtx<'_>) -> Prepared {
     let fence = ctx.fence;
     let mut prepared = false;
     let mut note: Option<String> = None;
-    if tools.write_allowed.load(Ordering::Relaxed) {
+    if tools.platform.write_allowed.load(Ordering::Relaxed) {
         // 围栏准备单独计时：首调用逐条写 ACL 常常占掉整次耗时的绝大部分，回执要能分辨它。
         let fence_started = Instant::now();
-        let prep = confine::prepare_fence(fence, ctx.command, &tools.home);
+        let prep = confine::prepare_fence(fence, ctx.command, &tools.platform.home);
         let steps = prep.steps.clone();
         super::FENCE_PREP.with(|slot| {
             slot.set(Some(FenceTiming {
@@ -64,7 +85,7 @@ pub(super) fn prepare(ctx: PrepareCtx<'_>) -> Prepared {
                 }
             }
         }
-    } else if !tools.disclosed.swap(true, Ordering::Relaxed) {
+    } else if !tools.platform.disclosed.swap(true, Ordering::Relaxed) {
         eprintln!(
             "[围栏] 容器围栏未启用（用户没授权在本机写权限）：外部工具按无围栏执行（能力等级见启动报告）。要启用：在设置里打开，或在 .home/settings.yaml 写 sandbox.policy.windows.write_acl: true"
         );
@@ -85,7 +106,7 @@ pub(super) fn prepare(ctx: PrepareCtx<'_>) -> Prepared {
         stop: None,
         prepared,
         unfenced_note: note,
-        home: Some(tools.home.clone()),
+        home: Some(tools.platform.home.clone()),
     }
 }
 
@@ -93,7 +114,7 @@ impl ProcTools {
     /// 目的：强制 shell 用哪个 PowerShell（Windows 真机验 5.1 回退）；None = 自动。
     #[cfg(test)]
     pub(super) fn with_powershell(mut self, program: Option<&'static str>) -> ProcTools {
-        self.shell_ps = program;
+        self.platform.shell_ps = program;
         self
     }
 }
@@ -185,7 +206,7 @@ impl ProcTools {
 
 /// 目的：这次 shell 用哪个 PowerShell：显式覆盖优先，否则 pwsh 7 优先、powershell 5.1 回退。
 fn resolve_powershell(tools: &ProcTools) -> &'static str {
-    if let Some(program) = tools.shell_ps {
+    if let Some(program) = tools.platform.shell_ps {
         return program;
     }
     if crate::kernel::detail::host_probe::find_exe("pwsh").is_some() {

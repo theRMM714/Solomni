@@ -60,13 +60,6 @@ fn reset_fence_prep() {
 pub struct ProcTools {
     /// 目的：守门进程用的可执行文件（组合根注入当前程序路径）。
     pub exe: PathBuf,
-    /// 目的：产品私有区（`.home/`）：围栏授权台账落在这里，供 `--fence-clean` 精确回收。
-    ///   只有 Windows 的容器围栏需要写目录 ACL；其余平台保留字段但不参与。
-    pub home: PathBuf,
-    /// 目的：是否允许在本机写权限（由组合根按设置与 `SOLOMNI_FENCE_WRITE` 注入；默认否）。
-    pub write_allowed: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    /// 目的：「未授权」的提示只出一次，不刷屏。
-    pub disclosed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// 目的：工具回执里那些收尾标记的文案（生产用本文件的 `CodeProcessTexts`；它们随 [工具结果] 进模型上下文）。
     ///   **共享一份**（调用方给出的 `Arc`）：这里不再各存一份深拷贝。
     pub texts: std::sync::Arc<dyn ProcessTexts>,
@@ -76,8 +69,8 @@ pub struct ProcTools {
     pub max_output_chars: usize,
     /// 目的：全局沙箱要求与本进程是否已同意降级。
     pub mode: std::sync::Arc<crate::kernel::api::SandboxMode>,
-    /// 目的：强制使用的 PowerShell 程序（pwsh / powershell）；None = 自动检测。Windows 专用。
-    pub shell_ps: Option<&'static str>,
+    /// 目的：平台侧状态——Windows 持有私有区、写权限开关与 PowerShell 覆盖；其余平台为空。
+    platform: platform::State,
 }
 
 /// 目的：进程机制自己的收尾文案（不再经提示词册；它们随 [工具结果] 进模型上下文）。
@@ -129,14 +122,11 @@ impl ProcTools {
     ) -> ProcTools {
         ProcTools {
             exe,
-            home,
-            write_allowed,
-            disclosed: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             texts,
             timeout: Duration::from_secs(30),
             max_output_chars: 16_000,
             mode: std::sync::Arc::new(crate::kernel::api::SandboxMode::permissive()),
-            shell_ps: None,
+            platform: platform::State::new(home, write_allowed),
         }
     }
 
