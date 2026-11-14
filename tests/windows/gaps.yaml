@@ -21,3 +21,17 @@
     同一外部根（≥1 万对象）第二会话首次 shell 的围栏准备 ≤100 ms 且不写 DACL；
     删除会话不再递归撤外部根的 ACE；契约用例覆盖「已授权 → 零写」「撤权后不可达」。
   blocked_by: 需要 path 型边界或 broker 设计（当前只有 ro_tree + 写 DACL 的机制）
+
+- id: vm.ninep-share-boundary-unverified-on-windows
+  scope: windows
+  level: T4
+  why: |
+    Windows 宿主的生产共享档是 SMB（外部 smbd.exe helper）；9p 共享只在 Linux / macOS 宿主提供。
+    `src/tests/vm/share_boundary.rs` 的 9p 只读边界探针在 Windows 上因此只能如实 env-skip，
+    本机无法给出 `readonly=on` 的真机结论。
+  how: |
+    在 Linux / macOS 宿主上用 QEMU 9p 起 guest，跑 `src/tests/vm/share_boundary.rs` 的
+    `ninep_read_only_share_rejects_guest_writes`（设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU）。
+  accept: |
+    只读 9p 挂载在 guest 里写入失败且宿主目录不出现新文件；可写挂载的写入实时落回宿主。
+  blocked_by: 需要非 Windows 宿主 + QEMU 9p（Windows 宿主没有这条生产路径）
