@@ -35,7 +35,7 @@ pub(crate) fn doctor_json_with(
             .map(|d| root.join(&d.probe).to_string_lossy().into_owned())
     };
     let qemu = installed_at("vm.qemu.");
-    let share_tool = installed_at(if cfg!(windows) {
+    let share_tool = installed_at(if crate::kernel::api::IS_WINDOWS {
         "vm.smbd."
     } else {
         "vm.virtiofsd."

@@ -20,26 +20,60 @@
 | `src/kernel/contracts/run.rs` | 宿主执行端口的中性回执 `RunOutcome`（跑没跑、输出是什么；不含业务语义） |
 | `src/kernel/contracts/fence.rs` | 围栏描述符（`FenceSpec` / `FenceRunPolicy`）与落点判据（`FencePart` / `FenceBlocked`）：纯数据 |
 | `src/kernel/domain/fence.rs` | 沙箱策略对机制的要求与本次模式（`SandboxRequirements` / `SandboxMode`）、按次租约生成：纯机制 |
-| `src/kernel/domain/path.rs` | 路径的对外书写形式：把路径统一写成 `/` 分隔的字符串（给提示词、回执与 JSON 用）；把 Windows 的 verbatim / UNC 写法还原成普通写法、拆出 UNC 的 server / share，并给出落点身份 `Locus` 的键（纯逻辑） |
+| `src/kernel/domain/path.rs` | 路径的对外书写形式（门面）：把路径统一写成 `/` 分隔的字符串；拆出 UNC 的 server / share，并给出落点身份 `Locus` 的键；平台实现在 `src/kernel/domain/path/windows.rs` / `src/kernel/domain/path/unix.rs` |
+| `src/kernel/domain/path/windows.rs` | `path` 的 Windows 后端：把 `\\?\` / `\\?\UNC\` 扩展前缀还原成普通写法 |
+| `src/kernel/domain/path/unix.rs` | `path` 的非 Windows 后端：没有扩展前缀，原样返回 |
+| `src/kernel/domain/platform.rs` | 平台事实：可执行文件后缀、PATH 列表分隔符、宿主路径大小写语义、Windows 授权事实、宿主 OS / 架构与卷键 / UNC 纯判断 |
 | `src/kernel/domain/jobs.rs` | 生成中作业的取消表（`JobRegistry`）：同一会话每次生成各持一面旗，停止置位全部、摘旗按身份 |
 | `src/kernel/domain/receipt.rs` | host/guest 共用的 shell 回执装配（stdout + `[stderr]` 区 + head+tail 截断（按完整行取整）+ 状态行；词表来自 `ProcessTexts`） |
 | `src/kernel/detail/file_log.rs` | `Log` 端口的文件实现：每次运行在 `logs/` 下按时间戳建文件并逐行追加（写经 `Mutex` 串行） |
-| `src/kernel/detail/host_probe.rs` | `HostProbe` 端口的机制实现：查环境变量与 `PATH` 里的可执行文件、路径存在性，并按平台判定虚拟机能力 |
-| `src/kernel/detail/locus.rs` | 落点身份：按（卷 + 文件 id）判同一物理对象与物理包含，并判网络路径（UNC 与映射到网络的盘符）；文本比较拦不住的别名靠它 |
-| `src/kernel/detail/outbound.rs` | 出站 HTTPS 的共享机制：唯一一处 TLS 后端装配与通用 ureq 代理 |
-| `src/kernel/detail/user_path.rs` | `UserPath` 端口的 Windows 实现：读写 `HKCU\Environment` 的 `Path`，保留 `REG_SZ` / `REG_EXPAND_SZ` 类型；写后向桌面广播 `WM_SETTINGCHANGE`（仅 Windows） |
-| `src/kernel/detail/unpack.rs` | 归档解包机制：tar / tar.gz / tar.zst / tar.xz / zip 解到目录，支持 strip 与宽容链接，并还原归档里的权限位（可执行位） |
-| `src/kernel/detail/process.rs` | 外部进程执行机制（守门进程、stdin 送参、隐秘字段 env 注入、超时/取消杀树、head/head+tail 截断、一次性 shell 的平台投递），实现 `ProcessRunner` |
+| `src/kernel/detail/host_probe.rs` | `HostProbe` 端口的机制实现（门面）：查环境变量与 `PATH` 里的可执行文件、路径存在性；可执行位与虚拟化事实在 `src/kernel/detail/host_probe/{windows,linux,macos,other}.rs` |
+| `src/kernel/detail/host_probe/windows.rs` | `HostProbe` 的 Windows 虚拟化事实：系统目录有 `WinHvPlatform.dll` |
+| `src/kernel/detail/host_probe/linux.rs` | `HostProbe` 的 Linux 虚拟化事实：`/dev/kvm` 存在 |
+| `src/kernel/detail/host_probe/macos.rs` | `HostProbe` 的 macOS 虚拟化事实：恒可用 |
+| `src/kernel/detail/host_probe/other.rs` | `HostProbe` 的兜底虚拟化事实：如实不可用 |
+| `src/kernel/detail/fs_meta.rs` | 宿主文件元数据原语（门面）：可执行位、软链、私密权限、占用估算、链接判定、目录刷新与可执行脚本；按平台选中 `src/kernel/detail/fs_meta/{windows,unix,other}.rs` |
+| `src/kernel/detail/fs_meta/windows.rs` | `fs_meta` 的 Windows 后端：可执行性按文件、权限位空操作、重解析点判定、占用按长度 |
+| `src/kernel/detail/fs_meta/unix.rs` | `fs_meta` 的 Unix 后端：模式位、软链、0600、块占用、0755 脚本 |
+| `src/kernel/detail/fs_meta/other.rs` | `fs_meta` 的兜底后端：没有模式位与软链，如实降级 |
+| `src/kernel/detail/locus.rs` | 落点身份（门面）：按卷 + 文件 id 判同一物理对象与物理包含；平台实现在 `src/kernel/detail/locus/windows.rs` / `src/kernel/detail/locus/unix.rs` |
+| `src/kernel/detail/locus/windows.rs` | `locus` 的 Windows 后端：卷序列号 + 文件 id、UNC 与映射盘判定 |
+| `src/kernel/detail/locus/unix.rs` | `locus` 的非 Windows 后端：设备号 + inode、网络路径恒 false |
+| `src/kernel/detail/outbound.rs` | 出站 HTTPS 的共享机制（门面）：通用 ureq 代理；TLS 后端装配在 `src/kernel/detail/outbound/windows.rs` / `src/kernel/detail/outbound/unix.rs` |
+| `src/kernel/detail/outbound/windows.rs` | `outbound` 的 Windows 后端：native-tls + 系统证书库 |
+| `src/kernel/detail/outbound/unix.rs` | `outbound` 的非 Windows 后端：rustls 默认配置 |
+| `src/kernel/detail/user_path.rs` | `UserPath` 端口的门面：Windows 实现在 `src/kernel/detail/user_path/windows.rs`，其余平台为空模块 |
+| `src/kernel/detail/user_path/windows.rs` | `UserPath` 的 Windows 实现：读写 `HKCU\Environment` 的 `Path`，保留 `REG_SZ` / `REG_EXPAND_SZ` 类型并广播 `WM_SETTINGCHANGE` |
+| `src/kernel/detail/unpack.rs` | 归档解包机制（门面）：tar / tar.gz / tar.zst / tar.xz / zip 解到目录，支持 strip 与宽容链接；权限位与软链在 `src/kernel/detail/unpack/{windows,unix}.rs` |
+| `src/kernel/detail/unpack/windows.rs` | `unpack` 的 Windows 后端：不设 Unix 权限位；软链按目录 / 文件分开建 |
+| `src/kernel/detail/unpack/unix.rs` | `unpack` 的非 Windows 后端：还原归档权限位与 Unix 软链 |
+| `src/kernel/detail/process.rs` | 外部进程执行机制（门面）：守门进程、stdin 送参、隐秘字段 env 注入、超时/取消杀树、截断与一次性 shell；平台实现在 `src/kernel/detail/process/{windows,unix}.rs` |
+| `src/kernel/detail/process/windows.rs` | `process` 的 Windows 后端：容器围栏准备、Job Object 收树与 PowerShell shell |
+| `src/kernel/detail/process/unix.rs` | `process` 的非 Windows 后端：进程组收树与 `sh -c` shell |
 | `src/kernel/detail/process/tests.rs` | 进程适配器的真实契约用例：真起进程、真收输出、真判退出码与平台分支（`#[cfg(test)] mod tests;` 指向） |
 | `src/kernel/detail/procs/tests.rs` | 进程账与回收的契约用例：登记/注销、存活探测、父死子亡的分平台接线（`#[cfg(test)] mod tests;` 指向） |
-| `src/kernel/detail/procs.rs` | 长驻子进程的账（`.home/processes.json`）与回收：父死子亡的接线（`attach`：Linux 内核信号 / macOS 守门进程 / Windows 作业对象）、身份（Unix 命令行标记 / Windows 创建时间）、存活探测、终止、启动对账；登记虚拟机档的 QEMU、共享 helper 与常驻服务守门进程 |
-| `src/kernel/detail/session.rs` | 长驻外部进程机制（守门进程长跑、按行收发、关闭杀树、父死子亡、进程账登记与注销、Windows 容器预授权），实现 `SessionHost`；常驻服务的守门进程经它拉起 |
-| `src/kernel/detail/view_drive.rs` | Windows 专属（整文件 `#![cfg(windows)]`，非 Windows 构建里模块为空）：产品根映射成实例独占盘符（`ensure_view_drive` / `attach_view_drive` / `active_view`）、宿主与视图路径互译（`view_of` / `host_of` / `view_codec` 供路径码）、按 pid 登记与退出释放（`release_view_drive`）及残留清扫；非 Windows 的 `kernel::api::view_codec` 是恒等的 `None` 桩 |
+| `src/kernel/detail/procs.rs` | 长驻子进程的账（`.home/processes.json`）与回收（门面）：登记、对账与回收流程；平台实现在 `src/kernel/detail/procs/windows.rs` / `src/kernel/detail/procs/unix.rs` |
+| `src/kernel/detail/procs/windows.rs` | `procs` 的 Windows 后端：作业对象、创建时间身份、存活探测与 `taskkill` |
+| `src/kernel/detail/procs/unix.rs` | `procs` 的非 Windows 后端：进程组、PDEATHSIG、macOS 守门进程、命令行身份与信号终止 |
+| `src/kernel/detail/session.rs` | 长驻外部进程机制（门面）：守门进程长跑、按行收发、关闭杀树、进程账登记与注销；平台围栏准备在 `src/kernel/detail/session/{windows,unix}.rs`，实现 `SessionHost` |
+| `src/kernel/detail/session/windows.rs` | `session` 的 Windows 后端：常驻服务拉起前的容器围栏准备 |
+| `src/kernel/detail/session/unix.rs` | `session` 的非 Windows 后端：没有容器围栏准备 |
+| `src/kernel/detail/view_drive.rs` | 视图盘模块门面：只有 Windows 有实现（`src/kernel/detail/view_drive/windows.rs`），其余平台为空模块 |
+| `src/kernel/detail/view_drive/windows.rs` | 视图盘的 Windows 实现：产品根映射成实例独占盘符、宿主与视图路径互译、按 pid 登记与退出释放及残留清扫 |
+| `src/kernel/detail/view_drive_lifecycle.rs` | 视图盘生命周期门面：分配、清扫、释放与路径编解码；按平台选中 `src/kernel/detail/view_drive_lifecycle/{windows,unix}.rs` |
+| `src/kernel/detail/view_drive_lifecycle/windows.rs` | 视图盘生命周期的 Windows 后端：逃生口、真分配与释放 |
+| `src/kernel/detail/view_drive_lifecycle/unix.rs` | 视图盘生命周期的非 Windows 后端：不分配、编解码恒 `None` |
 | `src/kernel/detail/confine.rs` | 围栏机制门面：平台后端选择与重导出；本机能力与本次实际（`effective_paths`）的判据、自检（`verify`）与 `FenceHost` 释放 |
 | `src/kernel/detail/confine/job.rs` | 守门进程的围栏作业：`FenceJob` 的 JSON 形态、启动命令（`launcher`）与执行转交（`run_fenced`）；策略由调用方传入 |
-| `src/kernel/detail/confine/ledger.rs` | 围栏授权台账与启动对账：`Owner` / `Ledger`、`reconcile`、恢复与撤销（`restore_one` / `revoke_grant` / `release_fence`）、孤儿清扫与按条处置 |
-| `src/kernel/detail/confine/paths.rs` | 围栏的路径与环境工具：解释器安装根与 `PATH` 解析（容器 PATH 先换真身，再只授真身目录）、可执行位、node 真身基线、程序名改写、`shell_command` 与 `fence_env` |
-| `src/kernel/detail/confine/prep.rs` | 围栏准备与清理：`FencePrep`、`prepare_fence`、`clean`、容器 profile 清扫（`sweep_profiles`）与机器级一次性预授的门面（`machine_missing` / `machine_ensure` / `retire_legacy_machine_grants`） |
+| `src/kernel/detail/confine/admin.rs` | 围栏台账与管理动作的平台分派：授权释放、对账、按条处置、机器级预授与清理 |
+| `src/kernel/detail/confine/admin/windows.rs` | `admin` 的 Windows 后端：把动作转交给 `src/kernel/detail/confine/windows/` 的真实实现 |
+| `src/kernel/detail/confine/admin/other.rs` | `admin` 的非 Windows 后端：空报告、零计数与如实降级 |
+| `src/kernel/detail/confine/ledger.rs` | 围栏授权台账的形状与公开入口：`Owner` / `Ledger` / `ReconcileReport`；平台动作经 `admin.rs` 分派 |
+| `src/kernel/detail/confine/paths.rs` | 围栏的路径与环境工具（门面）：PATH / PATHEXT 解析、安装目录上溯、`shell_command` 与 `fence_env`；平台分支在 `src/kernel/detail/confine/paths/{windows,unix}.rs` |
+| `src/kernel/detail/confine/paths/windows.rs` | `paths` 的 Windows 后端：真身解析、重解析点判定、node 开关、程序名改写与 `cmd` shell |
+| `src/kernel/detail/confine/paths/unix.rs` | `paths` 的非 Windows 后端：执行位、链接与 `sh` shell |
+| `src/kernel/detail/confine/prep.rs` | 围栏准备与清理（门面）：`FencePrep` / `FenceStep`、机器级预授与清理；Windows 实现在 `src/kernel/detail/confine/prep/windows.rs` |
+| `src/kernel/detail/confine/prep/windows.rs` | `prep` 的 Windows 后端：围栏授权准备、机器级标定与按次回收 |
 | `src/kernel/detail/confine/texts.rs` | 围栏边界说明：可达范围摘要（`reachable_roots`）与面向调用方的边界注记（`fence_boundary_note`） |
 | `src/kernel/detail/confine/tests.rs` | 围栏机制的单元测试：环境注入、安装目录上溯、Windows 程序名改写、作业 JSON、解释器解析、node realpath、边界说明与租约归属 |
 | `src/kernel/detail/confine/linux.rs` | Linux 围栏后端：Landlock 强制可达范围（`spec.rw` 读写、运行基线只读、其余拒绝），seccomp 在 `net=false` 时拒绝非本地 socket；机制不可用时如实降级 |

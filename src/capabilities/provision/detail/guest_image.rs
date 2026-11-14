@@ -136,13 +136,10 @@ pub(crate) fn install_guest_rootfs(
     sanitize_guest_base(&base)?;
     ensure_guest_initrd(&base, &abi, family, on_line)?;
     link_guest_kernel(&base, &abi)?;
-    #[cfg(unix)]
-    {
-        let py3 = base.join("usr").join("bin").join("python3");
-        let py = base.join("usr").join("bin").join("python");
-        if py3.is_file() && !py.exists() {
-            let _ = std::os::unix::fs::symlink("python3", &py);
-        }
+    let py3 = base.join("usr").join("bin").join("python3");
+    let py = base.join("usr").join("bin").join("python");
+    if py3.is_file() && !py.exists() {
+        let _ = symlink("python3", &py);
     }
     // 画像：虚拟根对世界的自我介绍（列表显示名与 os 从这里读）；运行能力由运行期编排另写。
     let yaml = base.join("guest.yaml");

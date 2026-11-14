@@ -16,11 +16,7 @@ pub struct DiskInfo {
 
 /// 目的：项目内便携 QEMU 的 qemu-img；不在场给 None（调用方退回文件长度）。
 pub fn find(root: &Path) -> Option<PathBuf> {
-    let name = if cfg!(windows) {
-        "qemu-img.exe"
-    } else {
-        "qemu-img"
-    };
+    let name = format!("qemu-img{}", crate::kernel::api::EXE_SUFFIX);
     let p = root.join(".vm").join("qemu").join("bin").join(name);
     if p.is_file() { Some(p) } else { None }
 }

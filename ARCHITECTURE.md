@@ -155,7 +155,7 @@
 - **对外**（提示词、工具参数、回执、API）一律用 `/` 书写形式（Windows 反斜杠在 JSON 字符串里是非法转义）；由 `kernel::path::slash` 统一给出。
 - 编码：读严格 UTF-8、非法字节如实标注（**不猜编码**）；写一律 UTF-8；为工具子进程强制 UTF-8 环境（`src/capabilities/tools/detail/sys_io.rs`）。
 - 不假设平台：不写死盘符；模块工具的命令由模块作者声明，系统 `shell` 按平台选 sh / PowerShell。
-- 围栏按平台给不同机制（`detail/confine/` 一个平台一个文件）；某平台没有接入的部分**就是没有**——文档与界面照实说。
+- 平台差异按机制分后端：门面 `<机制>.rs` 零平台分支，实现落在 `<机制>/{windows,linux,macos,unix,other}.rs` 或平台目录（`src/kernel/detail/process.rs`、`src/kernel/detail/confine/`）；共享常量与纯事实只在 `src/kernel/domain/platform.rs`。cfg 的位置由 `structure/cfg-boundaries` 零豁免判定（[docs/rust-dev.md](docs/rust-dev.md) §三）。某平台没有接入的部分**就是没有**——文档与界面照实说。
 
 ## 九、业务边界与硬要求
 

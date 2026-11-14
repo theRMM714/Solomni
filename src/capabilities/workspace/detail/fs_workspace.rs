@@ -56,20 +56,7 @@ fn collect_files(root: &Path, out: &mut Vec<String>, prefix: &str) {
 /// 目的：路径本身是不是链接 / 联接（不跟随）。用量统计只数它本身，不递归进去。
 ///   跟随会重复计数（链接与真身各算一次），自指链接还会成环；`symlink_metadata` 只看链接本身。
 fn is_link(path: &Path) -> bool {
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
-        std::fs::symlink_metadata(path)
-            .map(|m| m.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
-            .unwrap_or(false)
-    }
-    #[cfg(not(windows))]
-    {
-        std::fs::symlink_metadata(path)
-            .map(|m| m.file_type().is_symlink())
-            .unwrap_or(false)
-    }
+    crate::kernel::api::is_link(path)
 }
 
 /// 递归累加一个区的文件数与字节（目录不计；链接按一个文件计、不跟随；单个文件 stat 失败按 0 计，不因此挡下整次统计）。

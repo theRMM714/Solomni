@@ -66,14 +66,9 @@ fn rename_temp(tmp: &Path, path: &Path) -> Result<(), String> {
         let _ = std::fs::remove_file(tmp);
         return Err(format!("替换文件失败（{}）：{}", path.display(), e));
     }
-    // Unix 上 rename 的目录项也要刷一次，才能在掉电后稳定；失败只当尽力而为。
-    #[cfg(unix)]
-    {
-        if let Some(dir) = path.parent()
-            && let Ok(dir_file) = File::open(dir)
-        {
-            let _ = dir_file.sync_all();
-        }
+    // Unix 上 rename 的目录项也要刷一次，才能在掉电后稳定；其它平台由 fs_meta 后端空操作。
+    if let Some(dir) = path.parent() {
+        crate::kernel::api::sync_dir(dir);
     }
     Ok(())
 }

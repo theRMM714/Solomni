@@ -11,6 +11,15 @@ use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
 
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+use windows as platform;
+#[cfg(not(windows))]
+mod unix;
+#[cfg(not(windows))]
+use unix as platform;
+
 /// xz 解码的内存上限（KiB）：外来归档可能声明超大字典来撑爆内存，超限直接报错而不是硬分配。
 const XZ_MEM_LIMIT_KB: u32 = 256 * 1024;
 
@@ -86,21 +95,14 @@ fn unpack_tar<R: Read>(reader: R, dest: &Path, strip: usize) -> Result<(), Strin
                 .map_err(|x| format!("建目录 {}：{}", parent.display(), x))?;
         }
         if kind == tar::EntryType::Regular || kind == tar::EntryType::Continuous {
-            // 权限位要在拷贝**之前**从头上取（拷贝会把 entry 用掉）；非 unix 上不取也不设。
-            #[cfg(unix)]
-            let mode = e.header().mode().ok();
+            // 权限位要在拷贝**之前**从头上取（拷贝会把 entry 用掉）。
+            let mode = platform::tar_mode(e.header());
             {
                 let mut f = write_file(&out)?;
                 io::copy(&mut e, &mut f).map_err(|x| format!("写 {}：{}", out.display(), x))?;
             }
             // 还原权限位（可执行位就在这里）：不还的话，归档里解出来的程序一律 0644，跑不起来。
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                if let Some(m) = mode {
-                    let _ = fs::set_permissions(&out, fs::Permissions::from_mode(m & 0o7777));
-                }
-            }
+            platform::apply_mode(&out, mode);
             continue;
         }
         if kind == tar::EntryType::Symlink {
@@ -198,13 +200,7 @@ fn unpack_zip(archive: &Path, dest: &Path, strip: usize) -> Result<(), String> {
         }
         let mut f = write_file(&out)?;
         io::copy(&mut e, &mut f).map_err(|x| format!("写 {}：{}", out.display(), x))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if let Some(mode) = e.unix_mode() {
-                let _ = fs::set_permissions(&out, fs::Permissions::from_mode(mode));
-            }
-        }
+        platform::apply_mode(&out, platform::zip_mode(&e));
     }
     Ok(())
 }
@@ -232,24 +228,7 @@ fn write_file(out: &Path) -> Result<File, String> {
 
 /// 目的：先试真链接；成不了就交给"复制"兜底（返回 false 表示要记账后补）。
 fn try_symlink(target: &Path, tgt_abs: &Path, out: &Path) -> bool {
-    #[cfg(unix)]
-    {
-        if std::os::unix::fs::symlink(target, out).is_ok() {
-            return true;
-        }
-    }
-    #[cfg(windows)]
-    {
-        let r = if tgt_abs.is_dir() {
-            std::os::windows::fs::symlink_dir(target, out)
-        } else {
-            std::os::windows::fs::symlink_file(target, out)
-        };
-        if r.is_ok() {
-            return true;
-        }
-    }
-    copy_if_exists(tgt_abs, out)
+    platform::try_symlink(target, tgt_abs, out)
 }
 
 fn copy_if_exists(src: &Path, dst: &Path) -> bool {

@@ -10,8 +10,11 @@ use std::path::Path;
 /// 目的：--setup=fence 命令入口：逐条打印进度，成功 0 / 失败 1。
 /// 约束：预授成功后顺带退役旧的全应用包机器级授权（能力 SID 已就位才撤，不留读不到的窗口）；
 ///   首次授权后的自动那一趟只走 ensure，不做这件慢清理。
-#[cfg(windows)]
 pub(crate) fn command(root: &Path) -> i32 {
+    if !crate::kernel::api::HAS_EXTERNAL_ACL_STEP {
+        println!("[便携] 本平台没有机器级 ACL 预授（已登记缺口）：围栏的权限模型不写 ACL");
+        return 0;
+    }
     let home = root.join(".home");
     println!("[便携] 围栏机器级预授：只需成功一次；之后新会话不再重写这批 ACL");
     if let Err(e) = ensure(root, &home) {
@@ -32,8 +35,11 @@ pub(crate) fn command(root: &Path) -> i32 {
 
 /// 目的：--setup=fence-calibrate 命令入口：自建合成树真写一次机器级只读 ACL，测完后把本卷速率写进成本簿。
 /// 约束：只动私有区里的自建目录；用后清理（撤权由 kernel 完成，这里只删树）。
-#[cfg(windows)]
 pub(crate) fn calibrate_command(root: &Path) -> i32 {
+    if !crate::kernel::api::HAS_EXTERNAL_ACL_STEP {
+        eprintln!("[便携] 本平台没有机器级 ACL 标定（已登记缺口）：围栏的权限模型不写 ACL");
+        return 1;
+    }
     let home = root.join(".home");
     println!("[便携] 围栏授权成本标定：自建合成树，真写一次机器级只读 ACL（用后清理）");
     match crate::kernel::detail::confine::calibrate_machine_grant(&home) {
@@ -63,13 +69,6 @@ pub(crate) fn calibrate_command(root: &Path) -> i32 {
     }
 }
 
-#[cfg(not(windows))]
-pub(crate) fn calibrate_command(_root: &Path) -> i32 {
-    eprintln!("[便携] 本平台没有机器级 ACL 标定（已登记缺口）：围栏的权限模型不写 ACL");
-    1
-}
-
-#[cfg(windows)]
 pub(crate) fn ensure(root: &Path, home: &Path) -> Result<(), String> {
     crate::kernel::detail::confine::machine_ensure(root, home, &mut |line| {
         println!("[便携] {}", line)
@@ -77,23 +76,6 @@ pub(crate) fn ensure(root: &Path, home: &Path) -> Result<(), String> {
 }
 
 /// 目的：还缺哪些机器级落点（只读；空 = 已就绪）。
-#[cfg(windows)]
-pub(crate) fn missing(root: &Path) -> Result<Vec<String>, String> {
-    crate::kernel::detail::confine::machine_missing(root)
-}
-
-#[cfg(not(windows))]
-pub(crate) fn command(_root: &Path) -> i32 {
-    println!("[便携] 本平台没有机器级 ACL 预授（已登记缺口）：围栏的权限模型不写 ACL");
-    0
-}
-
-#[cfg(not(windows))]
-pub(crate) fn ensure(root: &Path, home: &Path) -> Result<(), String> {
-    crate::kernel::detail::confine::machine_ensure(root, home, &mut |_line| {})
-}
-
-#[cfg(not(windows))]
 pub(crate) fn missing(root: &Path) -> Result<Vec<String>, String> {
     crate::kernel::detail::confine::machine_missing(root)
 }

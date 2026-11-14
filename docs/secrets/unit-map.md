@@ -13,4 +13,4 @@
 | `src/capabilities/secrets/ports.rs` | 存储端口（`SecretStore`） |
 | `src/capabilities/secrets/service.rs` | 值缓存与按模块解析 / 脱敏（实现 `SecretOps`） |
 | `src/capabilities/secrets/detail.rs` | 机制实现入口（只有组合根能构造） |
-| `src/capabilities/secrets/detail/yaml_secrets.rs` | `.home` 目录下的 `secrets.yaml` 文件存储（实现 `SecretStore`；unix 下 0600） |
+| `src/capabilities/secrets/detail/yaml_secrets.rs` | `.home` 目录下的 `secrets.yaml` 文件存储（实现 `SecretStore`；私密权限经 `fs_meta::restrict_private_file`） |

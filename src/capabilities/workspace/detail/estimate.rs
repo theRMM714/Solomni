@@ -229,41 +229,14 @@ fn save_costs(home: &Path, book: &CostBook) {
 
 /// 目的：判网络共享（UNC / VerbatimUNC）——围栏对 UNC 工作区没有机器级只读语义，直接拒绝。
 /// 约束：按路径前缀判定，不能先 canonicalize（扩展路径 `\\?\C:\` 会被误判成 UNC）。
-#[cfg(windows)]
 fn is_network_share(path: &Path) -> bool {
-    use std::path::{Component, Prefix};
-    matches!(
-        path.components().next(),
-        Some(Component::Prefix(p))
-            if matches!(p.kind(), Prefix::UNC(..) | Prefix::VerbatimUNC(..))
-    )
-}
-
-/// 目的：非 Windows 没有盘符/UNC 这套路径前缀，网络共享判据不适用——恒不是（预算照常走本地计数）。
-#[cfg(not(windows))]
-fn is_network_share(_path: &Path) -> bool {
-    false
+    crate::kernel::api::is_network_share(path)
 }
 
 /// 目的：速率按卷分组——Windows 取盘符前缀（D:），其它平台没有这个维度。
 /// 约束：canonicalize 之后的扩展写法（\\?\D:\）要归一成 D:，否则同一个卷会记成两个键。
 fn volume_of(path: &Path) -> Option<String> {
-    #[cfg(windows)]
-    {
-        use std::path::Component;
-        match path.components().next() {
-            Some(Component::Prefix(p)) => match p.kind() {
-                std::path::Prefix::VerbatimDisk(d) => Some(format!("{}:", d as char)),
-                _ => Some(p.as_os_str().to_string_lossy().into_owned()),
-            },
-            _ => None,
-        }
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = path;
-        None
-    }
+    crate::kernel::api::volume_key(path)
 }
 
 /// 目的：样本时间戳（unix 秒）；只用于成本文件的"最近样本"排序与人工排查。

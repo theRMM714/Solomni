@@ -3,13 +3,26 @@
 //! 不管：任何业务动作（不执行程序、不安装、不改配置）；事实怎么解释（调用方定）。
 //! 联动：端口在 `src/kernel/ports.rs`；由入口层的组合根构造（`src/entry/`）。
 
+use crate::kernel::domain::platform::{EXE_SUFFIX, PATH_LIST_SEPARATOR};
 use crate::kernel::ports::{HostMetadata, HostProbe};
 use std::path::{Path, PathBuf};
 
 #[cfg(windows)]
-const EXE_SUFFIX: &str = ".exe";
-#[cfg(not(windows))]
-const EXE_SUFFIX: &str = "";
+mod windows;
+#[cfg(windows)]
+use windows as hypervisor;
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "linux")]
+use linux as hypervisor;
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(target_os = "macos")]
+use macos as hypervisor;
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+mod other;
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+use other as hypervisor;
 
 /// 目的：在 PATH 里找一个可执行文件，返回**真实路径**（找不到就是没有，不去别处翻）。
 /// 参数：`name` 是不带目录的可执行文件名；扩展名按 `PATHEXT` 展开（Windows 不设时用平台后缀）。
@@ -18,7 +31,7 @@ pub fn find_exe(name: &str) -> Option<std::path::PathBuf> {
     let path_var = std::env::var_os("PATH")?;
     let exts: Vec<String> = std::env::var("PATHEXT")
         .map(|v| {
-            v.split(';')
+            v.split(PATH_LIST_SEPARATOR)
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string())
                 .collect()
@@ -89,21 +102,7 @@ impl HostProbe for HostProbeAdapter {
 
     /// 可执行位：unix 上"是文件 + 有任一执行位"；Windows 上可执行性由扩展名决定，按"是文件"。
     fn is_executable(&self, path: &Path) -> bool {
-        let Ok(meta) = std::fs::metadata(path) else {
-            return false;
-        };
-        if !meta.is_file() {
-            return false;
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            meta.permissions().mode() & 0o111 != 0
-        }
-        #[cfg(not(unix))]
-        {
-            true
-        }
+        super::fs_meta::is_executable(path)
     }
 
     /// 在 PATH 里找可执行文件（只问事实，不执行它）。
@@ -118,21 +117,7 @@ impl HostProbe for HostProbeAdapter {
 
     /// 虚拟机监视器在场吗（只问事实，不起任何虚拟机）。
     fn hypervisor_available(&self) -> bool {
-        if cfg!(windows) {
-            std::env::var_os("SystemRoot")
-                .map(|root| {
-                    Path::new(&root)
-                        .join("System32")
-                        .join("WinHvPlatform.dll")
-                        .is_file()
-                })
-                .unwrap_or(false)
-        } else if cfg!(target_os = "linux") {
-            Path::new("/dev/kvm").exists()
-        } else {
-            // macOS（11+ 都能起虚拟机）与其它平台：只问事实，不起任何虚拟机。
-            cfg!(target_os = "macos")
-        }
+        hypervisor::available()
     }
 }
 

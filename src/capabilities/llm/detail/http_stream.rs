@@ -30,19 +30,10 @@ fn client() -> Result<reqwest::Client, String> {
         .connect_timeout(CONNECT_TIMEOUT)
         // 与旧 ureq 通道一致：只走 HTTP/1.1，避免供应商在 h2 下缓冲 SSE。
         .http1_only();
-    #[cfg(not(windows))]
-    let builder = builder.use_preconfigured_tls(tls_config()?);
+    let builder = crate::capabilities::llm::detail::http_tls::configure(builder)?;
     builder
         .build()
         .map_err(|e| format!("建立 HTTP 客户端失败：{}", e))
-}
-
-/// 非 Windows：rustls + ring 提供者 + 系统证书验证器（与 ureq 的证书口径一致）。
-#[cfg(not(windows))]
-fn tls_config() -> Result<rustls::ClientConfig, String> {
-    use rustls_platform_verifier::ConfigVerifierExt;
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    rustls::ClientConfig::with_platform_verifier().map_err(|e| format!("TLS 配置失败：{}", e))
 }
 
 fn budget(secs: u64) -> Duration {

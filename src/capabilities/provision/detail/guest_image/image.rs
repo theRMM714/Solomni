@@ -232,15 +232,7 @@ pub(crate) fn dir_bytes(dir: &Path) -> Result<u64, String> {
 ///   比 len() 更接近 ext4 真正要分配的空间。
 /// 约束：非 Unix 拿不到块数，退回文件长度；打包本身只在 Linux 上真跑。
 pub(crate) fn file_footprint(meta: &fs::Metadata) -> u64 {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        meta.blocks() * 512
-    }
-    #[cfg(not(unix))]
-    {
-        meta.len()
-    }
+    crate::kernel::api::file_footprint(meta)
 }
 
 /// 目的：只留下 `keep` 里那几个名字，其余全删（虚拟根目录的收口）。

@@ -10,6 +10,9 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/presentation/web.rs` | 本地 HTTP 服务（tiny_http，只绑 `127.0.0.1`）与长轮询；按 `ROUTES` 匹配与分发 |
+| `src/presentation/web/host_fs.rs` | 目录选择器的宿主事实门面：隐藏项过滤与卷根清单 |
+| `src/presentation/web/host_fs/windows.rs` | `host_fs` 的 Windows 后端：隐藏 / 系统属性与 A:–Z: 盘符根 |
+| `src/presentation/web/host_fs/unix.rs` | `host_fs` 的非 Windows 后端：不过滤隐藏项，根只有 `/` |
 | `src/presentation/web/routes.rs` | HTTP 路由目录 `ROUTES` 与匹配器（末段 `{*name}` 为尾部通配）：路由的唯一定义，`--print-routes` 输出它的 JSON |
 | `src/presentation/web/assets.rs` | 浏览器端资源的嵌入表（`build.rs` 生成）与按 URL 路径精确查找；不读文件系统 |
 | `build.rs` | 编译期扫描 `src/presentation/web/assets/` 生成嵌入表：按扩展名定 MIME，跳过 `.cjs` / `.mjs` 开发脚本与 `package.json`，未知扩展名让构建失败；`DEV_ONLY_DIRS`（`dev/`）只在 `PROFILE=debug` 时收进表，随 `rerun-if-env-changed=PROFILE` 重跑 |

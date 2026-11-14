@@ -3,33 +3,18 @@
 //! 不管：平台 ACL 读写（在 windows/record/）、启动流程（在根）。
 //! 联动：启动对账由 `src/main.rs` 与 `src/entry/` 调用；Windows 条目的读写与撤权在 `windows/record/`。
 
-#[cfg(windows)]
-use super::windows;
-#[cfg(windows)]
 use crate::kernel::api::FenceSpec;
 
 /// 目的：启动期对账——按台账回收"归属明确已死"的陈旧授权；无法判定的报告后跳过（启动与 `--fence-reconcile` 共用）。
 /// 约束：只有 Windows 写本机权限项；其它平台没有台账，如实返回空报告。
 pub fn reconcile(home: &std::path::Path) -> ReconcileReport {
-    #[cfg(windows)]
-    {
-        windows::reconcile(home)
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = home;
-        ReconcileReport {
-            note: "本平台的围栏不留权限项，没有台账可对账".to_string(),
-            ..Default::default()
-        }
-    }
+    super::admin::reconcile(home)
 }
 
 /// 目的：孤儿授权清扫：按容器 SID 族在产品根内撤掉台账之外的残留 ACE（--fence-clean 用）。
 ///   只有 Windows 写本机 ACL，其它平台没有这一步（而不是"存在但空转"）。
-#[cfg(windows)]
 pub fn sweep_orphan_aces(root: &std::path::Path) -> Result<usize, String> {
-    windows::sweep_orphan_aces(root)
+    super::admin::sweep_orphan_aces(root)
 }
 
 /// 目的：台账条目的归属——哪个进程还需要这条授权（pid + 进程创建时刻，防 PID 复用）。
@@ -186,32 +171,13 @@ pub struct Ledger {
 /// 目的：台账现值（清单 + "当前实际 ACE 与台账对不对得上"的差异）。
 /// 约束：只有 Windows 写本机权限项，所以台账只在 Windows 上有内容；其它平台如实说"本平台不留权限项"。
 pub fn ledger(home: &std::path::Path) -> Ledger {
-    #[cfg(windows)]
-    {
-        windows::catalog(home)
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = home;
-        Ledger {
-            note: "本平台的围栏不留权限项，没有台账".to_string(),
-            entries: Vec::new(),
-        }
-    }
+    super::admin::ledger(home)
 }
 
 /// 目的：按路径**只还原一条**快照（其余条目与整份 DACL 不受影响）。
 /// 错误：台账里没有该路径、路径不在了、写回被拒都如实返回；失败时台账不改（供重试）。
 pub fn restore_one(home: &std::path::Path, path: &std::path::Path) -> Result<String, String> {
-    #[cfg(windows)]
-    {
-        windows::restore_one(home, path)
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = (home, path);
-        Err("本平台的围栏不留权限项，没有可还原的快照".to_string())
-    }
+    super::admin::restore_one(home, path)
 }
 
 /// 目的：按 **SID + 路径**只撤一条授权（其余条目不受影响）；**不在台账里也照撤**（台账外残留走这条）。
@@ -221,34 +187,16 @@ pub fn revoke_grant(
     sid: &str,
     path: &std::path::Path,
 ) -> Result<String, String> {
-    #[cfg(windows)]
-    {
-        windows::revoke_grant(home, sid, path)
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = (home, sid, path);
-        Err("本平台的围栏不留权限项，没有可撤销的授权".to_string())
-    }
+    super::admin::revoke_grant(home, sid, path)
 }
 
 /// 目的：按名**只删一个**容器 profile（连该容器的存储一起删）。
 /// 错误：删除被拒时如实返回；失败时台账不改动。
 pub fn remove_profile_one(home: &std::path::Path, name: &str) -> Result<String, String> {
-    #[cfg(windows)]
-    {
-        windows::remove_profile_one(home, name)
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = (home, name);
-        Err("本平台没有容器 profile".to_string())
-    }
+    super::admin::remove_profile_one(home, name)
 }
 
 /// 目的：撤销一次调用的围栏授权（Windows 的按次释放用；其它平台没有持久授权这一步）。
-/// 约束：只在 Windows 编译——非 Windows 没有任何调用方，留着就是死代码。
-#[cfg(windows)]
 pub fn release_fence(spec: &FenceSpec, home: &std::path::Path) -> Result<(), String> {
-    windows::release_fence(spec, home)
+    super::admin::release_fence(spec, home)
 }

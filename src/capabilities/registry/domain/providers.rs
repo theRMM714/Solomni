@@ -537,8 +537,7 @@ pub fn validate_sandbox_settings(s: &SandboxSettings) -> Result<(), String> {
 /// 目的：Windows 上 `require` 文件系统/网络围栏与“不授权写 ACL”互斥——这组配置永远满足不了。
 /// 约束：只在 Windows 上判定；Linux / macOS 的围栏在守门进程里自足，`write_acl` 不参与。
 pub fn validate_sandbox_authorization(p: &SandboxPolicy) -> Result<(), String> {
-    #[cfg(windows)]
-    {
+    if crate::kernel::api::HAS_EXTERNAL_ACL_STEP {
         let fs_required = p.enforce.filesystem == SandboxEnforceLevel::Require;
         let net_required = p.enforce.network == SandboxEnforceLevel::Require && !p.network;
         if (fs_required || net_required) && !p.windows.write_acl {
@@ -548,10 +547,6 @@ pub fn validate_sandbox_authorization(p: &SandboxPolicy) -> Result<(), String> {
                     .to_string(),
             );
         }
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = p;
     }
     Ok(())
 }

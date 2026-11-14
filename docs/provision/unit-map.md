@@ -19,7 +19,7 @@
 | `src/capabilities/provision/guest.rs` | 虚拟根的运行期编排（`guest-runtime`）：Windows 走 cloud-init 种子首启装 agent、Linux 跳过首启；维护启动经 QGA 装 python3、C-C++ 与固定版本 Node，逐个自证后落 `.qga-ready` / `.runtimes-ready` 并改写 `guest.yaml` 的 `clients` / `runtimes` |
 | `src/capabilities/provision/detail.rs` | 适配器入口：登记六个实现模块 |
 | `src/capabilities/provision/detail/fetch.rs` | `HttpFetch`：ureq 取文本、sha256、选源测速与断点续传 |
-| `src/capabilities/provision/detail/host.rs` | `RealHost`：存在性、建目录、原子写、删除、执行位；以及 `symlink` / `run_tool` / `write_exe` 等宿主原语 |
+| `src/capabilities/provision/detail/host.rs` | `RealHost`：存在性、建目录、原子写、删除、执行位；以及 `symlink` / `run_tool` / `write_exe` 等宿主原语（平台文件原语经 `kernel::api` 的 `fs_meta`） |
 | `src/capabilities/provision/detail/ledger.rs` | `FileLedger`：`.vm/state/deps.json` 读写、探针在场判定、装好登记与清旧、`active.json` 的工具链登记 |
 | `src/capabilities/provision/detail/install.rs` | `HostInstallers`：归档解包、单文件复制、AppImage 自解包、Zig 包装脚本、guest 磁盘与 `guest.yaml` 画像 |
 | `src/capabilities/provision/detail/guest_image.rs` | `Ext4Images` 适配器：`install_guest_rootfs` 的多步构造（镜像 tar → rootfs 目录 → 内核 → initrd → agent → ext4）、基线打包、`guest.yaml` 画像补全 |
