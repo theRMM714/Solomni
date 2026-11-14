@@ -5,12 +5,26 @@
 
 use super::*;
 use crate::kernel::ports::ShellRun;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+
+/// 目的：非 Windows 没有需要随工具执行器一起保存的平台状态。
+pub(super) struct State;
+
+impl State {
+    /// 目的：非 Windows 不保存私有区与写权限开关。
+    pub(super) fn new(_home: PathBuf, _write_allowed: Arc<AtomicBool>) -> State {
+        State
+    }
+}
 
 /// 目的：非 Windows 没有容器围栏，直接返回「未准备、无家目录」。
 pub(super) fn prepare(ctx: PrepareCtx<'_>) -> Prepared {
     // 非 Windows 没有容器围栏准备：这些字段只在 Windows 后端被读，显式忽略以免被误读成漏用。
     let _ = (
         ctx.tools,
+        &ctx.tools.platform,
         ctx.fence,
         ctx.command,
         ctx.ask,
