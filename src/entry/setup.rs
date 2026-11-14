@@ -131,3 +131,13 @@ pub(crate) fn ensure_after_authorize(root: &Path) {
 pub(crate) fn ensure_after_authorize(root: &Path) {
     let _ = fence::ensure(root, &root.join(".home"));
 }
+
+#[cfg(test)]
+mod tests {
+    /// 目的：非 Windows 上 `fence-calibrate` 如实报不可用（不静默成功）。
+    #[cfg(not(windows))]
+    #[test]
+    fn fence_calibrate_reports_unavailable_off_windows() {
+        assert_eq!(fence::calibrate_command(Path::new(".")), 1);
+    }
+}

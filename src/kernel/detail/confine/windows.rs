@@ -175,6 +175,15 @@ fn interpreter_baseline_present(dir: &Path) -> Result<bool, String> {
     Ok(has)
 }
 
+/// 目的：目录本身是重解析点（符号链接 / 联接）——只授链接对象，**不递归**进目标（目标另有真身那条）。
+fn is_reparse_dir(path: &Path) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+    std::fs::symlink_metadata(path)
+        .map(|m| m.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
+        .unwrap_or(false)
+}
+
 /// 目的：解释器安装目录在 Windows 容器围栏下能不能放行。
 ///   已有足够的基线 ACE（能力 SID 或系统自带的全应用包）就不用写；否则只有属主是当前用户（能写 DACL）才算可用。
 /// 约束：只读探测；真正的递归授权仍由 prepare_fence 做，失败信息以那里为准。
@@ -296,7 +305,8 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
     let base_text = sid_to_string(base);
     let interpreters = interpreter_dirs(command);
     // 解释器装在用户目录下（nvm / scoop / pyenv）时，祖先链也要有 FILE_READ_ATTRIBUTES：容器要逐级判 PATH 项是否存在。
-    // 机器级（授给本产品能力 SID、跨会话复用），逐级只写一级；盘根不写，已够用就跳过。
+    // 机器级（授给本产品能力 SID、跨会话复用），逐级只写一级；盘根不写，已够用（含系统自带 AAPP）就跳过。
+    let aapp = system_baseline_sid().ok();
     let mut ancestor_seen: std::collections::HashSet<std::path::PathBuf> =
         std::collections::HashSet::new();
     for dir in &interpreters {
@@ -309,7 +319,11 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
                 parent = p.parent();
                 continue;
             }
-            if !has_ace_for(base, p, RIGHTS_STAT) {
+            let covered = has_ace_for(base, p, RIGHTS_STAT)
+                || aapp
+                    .map(|s| has_ace_for(s, p, RIGHTS_STAT))
+                    .unwrap_or(false);
+            if !covered {
                 let target = GrantTarget {
                     path: p.to_path_buf(),
                     rights: RIGHTS_STAT,
@@ -333,6 +347,9 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
             parent = p.parent();
         }
     }
+    if let Some(s) = aapp {
+        free_sid(s);
+    }
     // 基线一：解释器安装目录（只读+执行）——**必要**：拿不到它，容器里连解释器都起不来。
     for dir in interpreters.iter().cloned() {
         if missing(&dir) {
@@ -350,11 +367,14 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
             prep.fail(FencePart::Interpreter, dir, why);
             continue;
         }
+        // 链接对象只授它自己的 DACL（非递归、不继承）；递归只对真身做一次——否则同一棵树会被
+        // 链接与真身各扫一遍（CI 的 node / python 安装目录有上万对象，首写因此从秒级涨到分钟级）。
+        let link = is_reparse_dir(&dir);
         let target = GrantTarget {
             path: dir.clone(),
             rights: RIGHTS_RO,
-            recursive: true,
-            inherit: true,
+            recursive: !link,
+            inherit: !link,
             part: FencePart::Interpreter,
         };
         prompt_first_write(&PROMPT_INTERPRETER, STEP_INTERPRETER);
