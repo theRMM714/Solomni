@@ -62,6 +62,11 @@ pub(crate) fn history_delete_cascades_to_children_and_refuses_child_delete() {
         Arc::clone(&hist),
         Arc::new(InMemorySysIo::new()),
     );
+    // 不存在的会话：只清内存并如实回 false（非落盘会话没有围栏收尾段）。
+    assert!(
+        !core.history_delete("does-not-exist").unwrap(),
+        "不存在的会话要回 false"
+    );
     let parent = core
         .create_work(collab_work("p", &["a"], false, "需求"))
         .unwrap()
@@ -313,6 +318,97 @@ pub(crate) fn session_delete_releases_fences_even_when_directory_delete_fails() 
         std::thread::sleep(Duration::from_millis(5));
     }
     assert!(called.load(Ordering::SeqCst), "删目录失败也不能漏掉撤权");
+}
+
+/// 目的：没有租约时不起后台撤权线程（空清单直接返回）。
+#[test]
+pub(crate) fn session_delete_with_no_fence_leases_skips_release() {
+    use crate::capabilities::conductor::service::SessionDelete;
+    use crate::capabilities::conductor::service::guest_job::GuestStop;
+    use crate::capabilities::vm::api::Vm;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let store = Arc::new(InMemoryHistory::new());
+    seed_session(
+        &store,
+        "w",
+        "single",
+        vec![agent_meta("a", &[], None)],
+        ExecSpec::default(),
+    );
+    let hist = test_history_of(Arc::clone(&store));
+    let vm: Arc<dyn Vm + Send + Sync> = Arc::new(crate::tests::doubles::RecordingVm::default());
+    let called = Arc::new(AtomicBool::new(false));
+    let release: crate::capabilities::conductor::service::ReleaseByLease = {
+        let called = Arc::clone(&called);
+        Arc::new(move |_lease: &str| {
+            called.store(true, Ordering::SeqCst);
+            Ok(())
+        })
+    };
+    let delete = SessionDelete::for_test_with_fences(
+        GuestStop::new(vm, Vec::new()),
+        hist,
+        vec!["w".to_string()],
+        "w".to_string(),
+        Vec::new(),
+        release,
+        Arc::new(crate::kernel::ports::NoopLog),
+    );
+    assert!(delete.run().expect("删除收尾"), "会话目录该删掉");
+    assert!(!called.load(Ordering::SeqCst), "没有租约就不该调用撤权");
+}
+
+/// 目的：后台撤权失败要如实记日志（失败条目留在台账，下次重试）。
+#[test]
+pub(crate) fn session_delete_logs_background_release_failures() {
+    use crate::capabilities::conductor::service::SessionDelete;
+    use crate::capabilities::conductor::service::guest_job::GuestStop;
+    use crate::capabilities::vm::api::Vm;
+    use std::time::{Duration, Instant};
+
+    let store = Arc::new(InMemoryHistory::new());
+    seed_session(
+        &store,
+        "w",
+        "single",
+        vec![agent_meta("a", &[], None)],
+        ExecSpec::default(),
+    );
+    let hist = test_history_of(Arc::clone(&store));
+    let vm: Arc<dyn Vm + Send + Sync> = Arc::new(crate::tests::doubles::RecordingVm::default());
+    let called = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let release: crate::capabilities::conductor::service::ReleaseByLease = {
+        let called = Arc::clone(&called);
+        Arc::new(move |_lease: &str| {
+            called.store(true, std::sync::atomic::Ordering::SeqCst);
+            Err("模拟撤权失败".to_string())
+        })
+    };
+    let log = Arc::new(crate::tests::doubles::RecordingLog::new());
+    let log_dyn: Arc<dyn crate::kernel::ports::Log + Send + Sync> = log.clone();
+    let delete = SessionDelete::for_test_with_fences(
+        GuestStop::new(vm, Vec::new()),
+        hist,
+        vec!["w".to_string()],
+        "w".to_string(),
+        vec!["lease-w".to_string()],
+        release,
+        log_dyn,
+    );
+    assert!(delete.run().expect("删除收尾"), "会话目录该删掉");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !log.has("模拟撤权失败") && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(
+        called.load(std::sync::atomic::Ordering::SeqCst),
+        "后台撤权要真的执行"
+    );
+    assert!(
+        log.has("模拟撤权失败"),
+        "撤权失败要进日志（位置 conductor::release_fences）"
+    );
 }
 
 /// 目的：工作根沿父链走到顶：代理 → 多 agent 子会话 → 它的节点子会话，第三层也锚在**顶层**那一个 work/ 上。

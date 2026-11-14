@@ -187,7 +187,7 @@ pub use paths::{fence_env, shell_command};
 #[cfg(any(windows, test))]
 pub use prep::FencePrep;
 pub use prep::FenceStep;
-#[cfg(test)]
+#[cfg(all(test, windows))]
 pub use prep::clean;
 #[cfg(windows)]
 pub use prep::prepare_fence;

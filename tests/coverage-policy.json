@@ -50,6 +50,12 @@
       "from": 763,
       "to": 765,
       "reason": "正常退出的视图盘释放：main 组合根不在测试里执行；由生命周期冒烟验收"
+    },
+    {
+      "file": "src/capabilities/conductor/service/history.rs",
+      "from": 48,
+      "to": 59,
+      "reason": "后台撤权线程创建失败时的同步兜底：线程创建失败是环境性防御分支，测试进程无法稳定构造；成功路径与撤权失败日志都有用例覆盖"
     }
   ],
   "buckets": [
