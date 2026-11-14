@@ -44,6 +44,7 @@ pub(crate) fn run(root: &Path, mode: &str) -> i32 {
             }
         },
         "fence" => fence::command(root),
+        "fence-calibrate" => fence::calibrate_command(root),
         "all" => {
             let a = path::command(root);
             let b = fence::command(root);
@@ -51,7 +52,7 @@ pub(crate) fn run(root: &Path, mode: &str) -> i32 {
         }
         other => {
             eprintln!(
-                "[错误] 未知的 --setup 值「{}」；可用：path / unset / undo / status / fence / all（省略值 = status）",
+                "[错误] 未知的 --setup 值「{}」；可用：path / unset / undo / status / fence / fence-calibrate / all（省略值 = status）",
                 other
             );
             2

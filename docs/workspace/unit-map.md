@@ -27,5 +27,5 @@
 | `src/capabilities/workspace/domain/workstore.rs` | 版本化工作区纯逻辑：内容寻址、提交记录、拉取基线、文件级三方比较、三方版本预览、冲突解决判定（含 take=local 守卫 / 备份判定）与路径校验 |
 | `src/capabilities/workspace/detail/fs_workspace.rs` | `Workdirs` 的落盘实现：`session/<工作名>/` 下的 `work/` 与各 agent 沙箱；外部工作区绑定投影 `.work-root` 与共享区根解析；跨会话写锁按落点身份做键；用量统计带 2 秒内存缓存且不跟随目录链接 |
 | `src/capabilities/workspace/detail/fs_workstore.rs` | `WorkStore` 的落盘实现：流式扫描 / 写入 / 复制（含跨根备份复制）、原子写、跨进程锁、版本库对象与对象枚举 / 删除、提交记录、基线、待恢复事务与提交号计数器 |
-| `src/capabilities/workspace/detail/estimate.rs` | 外部工作区成本预估：有界计数（250 ms / 5 万条目，超限标 `truncated`，数字是下界）、按卷速率样本（`.home/fence-costs.json`，扩展前缀与盘符写法归一到同一个卷键）与按取整点值算的乐观 / 保守区间 |
+| `src/capabilities/workspace/detail/estimate.rs` | 外部工作区成本预估：有界计数（250 ms / 5 万条目，超限标 `truncated`，数字是下界）、按卷速率样本（`.home/fence-costs.json`，扩展前缀与盘符写法归一到同一个卷键；真实授权与 `--setup=fence-calibrate` 的合成树样本都走 `record_grant_cost`）与按取整点值算的乐观 / 保守区间 |
 | `src/capabilities/workspace/detail/grant_job.rs` | 外部工作区的后台一次性授权：按规范化根去重、进程内串行、成功后把授权时数到的对象数与耗时写 `.home/workspace-grants.json`（失败只记 `last_error`、保留上次成功数字），失败不阻断会话创建 |

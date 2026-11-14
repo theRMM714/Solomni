@@ -10,6 +10,77 @@
 use super::*;
 use std::time::Instant;
 
+/// 目的：合成树的形状——50 个目录 × 40 个文件 = 2050 个对象，足够让整树写 ACL 的耗时稳定。
+const CALIBRATION_DIRS: usize = 50;
+const CALIBRATION_FILES_PER_DIR: usize = 40;
+/// 目的：合成树的对象总数（写 ACL 的单价乘数）。
+pub(crate) const CALIBRATION_OBJECTS: u64 =
+    (CALIBRATION_DIRS + CALIBRATION_DIRS * CALIBRATION_FILES_PER_DIR) as u64;
+
+/// 目的：一次合成树标定的结果；`path` 留给调用方记完成本样本后清理。
+pub(crate) struct Calibration {
+    pub(crate) path: PathBuf,
+    pub(crate) objects: u64,
+    pub(crate) ms: u64,
+}
+
+/// 目的：建合成树（只在私有区自建目录），返回对象数。
+fn build_calibration_tree(tree: &Path) -> Result<u64, String> {
+    std::fs::create_dir_all(tree).map_err(|e| format!("建标定目录失败：{}", e))?;
+    for d in 0..CALIBRATION_DIRS {
+        let dir = tree.join(format!("d{}", d));
+        std::fs::create_dir_all(&dir).map_err(|e| format!("建标定子目录失败：{}", e))?;
+        for f in 0..CALIBRATION_FILES_PER_DIR {
+            std::fs::write(dir.join(format!("f{}", f)), b"x")
+                .map_err(|e| format!("建标定文件失败：{}", e))?;
+        }
+    }
+    Ok(CALIBRATION_OBJECTS)
+}
+
+/// 目的：`--setup=fence-calibrate`：在私有区建合成树、真写一次递归机器级只读 ACE 并计时，再递归撤权。
+/// 约束：只动自建目录；测量包含写后核对（与真实授权同一条路）。树与样本由调用方处理。
+pub(crate) fn calibrate_machine_grant(home: &Path) -> Result<Calibration, String> {
+    let tree = home.join(format!("fence-calibrate-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tree);
+    let objects = build_calibration_tree(&tree)?;
+    let owned = match product_capability_sid() {
+        Ok(owned) => owned,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&tree);
+            return Err(format!("派生本产品能力 SID 失败：{}", e));
+        }
+    };
+    let sid = owned.as_ptr() as PSID;
+    let started = Instant::now();
+    let granted = grant_verified(sid, &tree, RIGHTS_RO, true, true);
+    let ms = started.elapsed().as_millis() as u64;
+    let revoked = if granted.is_ok() {
+        revoke_one(sid, &tree, true)
+    } else {
+        Ok(())
+    };
+    if let Err(e) = granted {
+        let _ = std::fs::remove_dir_all(&tree);
+        return Err(format!("标定授权失败：{}", e));
+    }
+    if let Err(e) = revoked {
+        let _ = std::fs::remove_dir_all(&tree);
+        return Err(format!("标定撤权失败：{}", e));
+    }
+    Ok(Calibration {
+        path: tree,
+        objects,
+        ms,
+    })
+}
+
+/// 目的：记完成本样本后删掉合成树（ACE 已撤；普通删除即可）。
+pub(crate) fn remove_calibration_tree(path: &Path) -> Result<(), String> {
+    std::fs::remove_dir_all(path)
+        .map_err(|e| format!("删除标定目录失败（{}）：{}", path.display(), e))
+}
+
 /// 目的：一个机器级落点：路径 + 权限位 + 递归/继承 + 给用户看的这一环叫什么。
 /// 约束：形状与 GrantTarget 对齐；RIGHTS_STAT 只授读属性（容器判存在性），RIGHTS_RO 递归只读（工具链与运行包）。
 pub(crate) struct MachineStep {
@@ -486,5 +557,18 @@ mod tests {
         assert_eq!(got.len(), 2, "只认机器级的全应用包条目：{:?}", shape);
         assert_eq!(Path::new(&got[0].path), base, "浅路径先撤：{:?}", shape);
         assert_eq!(Path::new(&got[1].path), deep);
+    }
+
+    /// 目的：合成树形状稳定（对象数固定）且用后能删干净；ACL 标定本身由 `--setup=fence-calibrate` 真跑验证。
+    #[test]
+    fn calibration_tree_has_a_stable_object_count_and_cleans_up() {
+        let base =
+            std::env::temp_dir().join(format!("solomni-calibrate-tree-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let objects = build_calibration_tree(&base).expect("建合成树");
+        assert_eq!(objects, CALIBRATION_OBJECTS);
+        assert!(base.join("d0").join("f0").is_file(), "合成树要真的有文件");
+        remove_calibration_tree(&base).expect("清理合成树");
+        assert!(!base.exists(), "合成树用后不得留痕");
     }
 }
