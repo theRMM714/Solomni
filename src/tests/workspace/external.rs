@@ -749,3 +749,67 @@ pub(crate) fn workspace_grant_names_round_trip() {
     let err = WorkspaceGrant::parse("sometimes").expect_err("非法粒度要拒绝");
     assert!(err.contains("未知的工作区授权粒度"), "{}", err);
 }
+
+/// 目的：用量缓存命中不重复遍历；超过 TTL 后重算（写路径不做逐写失效）。
+#[test]
+pub(crate) fn usage_cache_hits_within_ttl_and_recomputes_after() {
+    use crate::capabilities::workspace::detail::FsWorkspace;
+    use crate::capabilities::workspace::ports::Workdirs;
+    let root = crate::tests::scratch("ws-usage-cache");
+    let sessions = root.join("session");
+    let ws = FsWorkspace::new(sessions.clone()).with_usage_ttl(std::time::Duration::from_secs(2));
+    ws.prepare("w", &["a".to_string()]).expect("准备");
+    let first = ws.usage("w", &["a".to_string()]).expect("用量");
+    assert_eq!(first.work.files, 0, "空共享区");
+    std::fs::write(sessions.join("w").join("work").join("x.txt"), b"hello").expect("写共享区文件");
+    let cached = ws.usage("w", &["a".to_string()]).expect("用量");
+    assert_eq!(cached.work.files, 0, "TTL 内应复用缓存");
+    std::thread::sleep(std::time::Duration::from_millis(2100));
+    let fresh = ws.usage("w", &["a".to_string()]).expect("用量");
+    assert_eq!(fresh.work.files, 1, "过期后必须重算");
+    assert_eq!(fresh.work.bytes, 5);
+}
+
+/// 目的：用量统计不跟随目录链接 / 联接——否则链接与真身各算一次，自指链接还会成环。
+#[test]
+pub(crate) fn usage_does_not_follow_directory_links() {
+    use crate::capabilities::workspace::detail::FsWorkspace;
+    use crate::capabilities::workspace::ports::Workdirs;
+    let root = crate::tests::scratch("ws-usage-link");
+    let sessions = root.join("session");
+    let outside = root.join("outside");
+    std::fs::create_dir_all(&outside).expect("建外部目录");
+    std::fs::write(outside.join("secret.txt"), b"payload").expect("写外部文件");
+    let ws = FsWorkspace::new(sessions.clone());
+    ws.prepare("w", &["a".to_string()]).expect("准备");
+    let link = sessions.join("w").join("work").join("link");
+    if !make_dir_link(&outside, &link) {
+        eprintln!("[探针] 本机建不出目录链接：跳过用量不跟随链接的断言");
+        return;
+    }
+    let usage = ws.usage("w", &["a".to_string()]).expect("用量");
+    assert_eq!(usage.work.files, 1, "链接本身按一个文件计，不跟随进真身");
+}
+
+#[cfg(windows)]
+fn make_dir_link(target: &std::path::Path, link: &std::path::Path) -> bool {
+    std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(link)
+        .arg(target)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+#[cfg(unix)]
+fn make_dir_link(target: &std::path::Path, link: &std::path::Path) -> bool {
+    std::os::unix::fs::symlink(target, link).is_ok()
+}
+
+#[cfg(not(any(unix, windows)))]
+fn make_dir_link(_target: &std::path::Path, _link: &std::path::Path) -> bool {
+    false
+}

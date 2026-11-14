@@ -5,11 +5,17 @@
 
 use crate::capabilities::workspace::api::{AreaUsage, WorkFiles, WorkRoots, WorkUsage};
 use crate::capabilities::workspace::ports::Workdirs;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 /// 每个根最多列这么多条（超出即截断；@ 菜单不需要无限长，也避免大目录拖慢前端）。
 const MAX_LISTED: usize = 300;
+
+/// 用量结果的内存缓存时长：前端在 `@` 菜单与删除确认里取用量，短时间重复取不必重走整棵树。
+/// 写路径不做逐写失效——陈旧上界就是这个 TTL。
+const USAGE_TTL: Duration = Duration::from_secs(2);
 
 /// 工作区绑定的布局投影文件名（相对会话目录）：内容 = 外部工作区根的绝对路径。
 /// 它只是布局适配层的投影，权威在会话 meta 的 `workspace` 段。
@@ -47,14 +53,38 @@ fn collect_files(root: &Path, out: &mut Vec<String>, prefix: &str) {
     }
 }
 
-/// 递归累加一个区的文件数与字节（目录不计；单个文件 stat 失败按 0 计，不因此挡下整次统计）。
+/// 目的：路径本身是不是链接 / 联接（不跟随）。用量统计只数它本身，不递归进去。
+///   跟随会重复计数（链接与真身各算一次），自指链接还会成环；`symlink_metadata` 只看链接本身。
+fn is_link(path: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+        std::fs::symlink_metadata(path)
+            .map(|m| m.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
+            .unwrap_or(false)
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::symlink_metadata(path)
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false)
+    }
+}
+
+/// 递归累加一个区的文件数与字节（目录不计；链接按一个文件计、不跟随；单个文件 stat 失败按 0 计，不因此挡下整次统计）。
 fn collect_usage(root: &Path, files: &mut usize, bytes: &mut u64) {
     let Ok(entries) = std::fs::read_dir(root) else {
         return;
     };
     for e in entries.flatten() {
         let p = e.path();
-        if p.is_dir() {
+        if is_link(&p) {
+            *files += 1;
+            *bytes += std::fs::symlink_metadata(&p).map(|m| m.len()).unwrap_or(0);
+            continue;
+        }
+        if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
             collect_usage(&p, files, bytes);
         } else {
             *files += 1;
@@ -73,11 +103,26 @@ fn area_usage(root: &Path) -> AreaUsage {
 pub struct FsWorkspace {
     /// 会话根（产品根下的 session/）。
     sessions: PathBuf,
+    /// 用量缓存：session + agents → (取数时刻, 结果)。只读路径，过 TTL 重算。
+    usage: Mutex<HashMap<String, (Instant, WorkUsage)>>,
+    /// 缓存时长（测试可缩短；产品固定 `USAGE_TTL`）。
+    usage_ttl: Duration,
 }
 
 impl FsWorkspace {
     pub fn new(sessions: PathBuf) -> FsWorkspace {
-        FsWorkspace { sessions }
+        FsWorkspace {
+            sessions,
+            usage: Mutex::new(HashMap::new()),
+            usage_ttl: USAGE_TTL,
+        }
+    }
+
+    /// 目的：测试专用：缩短用量缓存时长，避免用例为了过期等满 2 秒。
+    #[cfg(test)]
+    pub(crate) fn with_usage_ttl(mut self, ttl: Duration) -> FsWorkspace {
+        self.usage_ttl = ttl;
+        self
     }
 
     fn session_dir(&self, session: &str) -> PathBuf {
@@ -257,12 +302,22 @@ impl Workdirs for FsWorkspace {
     }
 
     fn usage(&self, session: &str, agents: &[String]) -> Result<WorkUsage, String> {
+        // 同一会话 + 同一 agent 清单在 TTL 内复用结果；前端可能同时开 `@` 菜单与删除确认。
+        let key = format!("{}\u{0}{}", session, agents.join("\u{0}"));
+        let cache = || self.usage.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((at, value)) = cache().get(&key)
+            && at.elapsed() < self.usage_ttl
+        {
+            return Ok(value.clone());
+        }
         let dir = self.session_dir(session);
         let work = area_usage(&self.shared_root(session)?);
         let mut map = BTreeMap::new();
         for a in agents {
             map.insert(a.clone(), area_usage(&dir.join(a)));
         }
-        Ok(WorkUsage::total(work, map))
+        let usage = WorkUsage::total(work, map);
+        cache().insert(key, (Instant::now(), usage.clone()));
+        Ok(usage)
     }
 }
