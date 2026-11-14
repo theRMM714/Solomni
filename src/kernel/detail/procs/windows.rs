@@ -133,9 +133,21 @@ pub(super) fn terminate(pid: u32) -> Result<(), String> {
 /// 目的：对账的身份结论——创建时间对得上才是我们的；账上没有创建时间就只报不动手。
 pub(super) fn ownership(entry: &Entry) -> Ownership {
     match (entry.created, created(entry.pid)) {
-        (Some(expected), Some(actual)) if expected == actual => Ownership::Ours,
-        (Some(_), Some(_)) => Ownership::Foreign,
-        (Some(_), None) => Ownership::Gone,
-        (None, _) => Ownership::Unknown,
+        (Some(expected), Some(actual)) if expected == actual => Ownership {
+            ours: true,
+            keep_alive: false,
+        },
+        (Some(_), Some(_)) => Ownership {
+            ours: false,
+            keep_alive: false,
+        },
+        (Some(_), None) => Ownership {
+            ours: false,
+            keep_alive: false,
+        },
+        (None, _) => Ownership {
+            ours: false,
+            keep_alive: true,
+        },
     }
 }

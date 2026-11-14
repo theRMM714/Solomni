@@ -249,8 +249,14 @@ pub(super) fn terminate(pid: u32) -> Result<(), String> {
 /// 目的：对账的身份结论——命令行里带我们的标记才是我们的；读不到或没有标记就算别人的。
 pub(super) fn ownership(entry: &Entry) -> Ownership {
     match cmdline(entry.pid) {
-        Some(line) if !entry.marker.is_empty() && line.contains(&entry.marker) => Ownership::Ours,
-        _ => Ownership::Foreign,
+        Some(line) if !entry.marker.is_empty() && line.contains(&entry.marker) => Ownership {
+            ours: true,
+            keep_alive: false,
+        },
+        _ => Ownership {
+            ours: false,
+            keep_alive: false,
+        },
     }
 }
 

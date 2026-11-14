@@ -35,10 +35,15 @@ pub(super) fn prepare(ctx: PrepareCtx<'_>) -> Prepared {
             prepared = true;
         } else if let Some(blocked) = &prep.blocked {
             let Some(gate) = ctx.gate else {
-                return Prepared::Stop(RunOutcome {
-                    ok: false,
-                    output: tools.texts.fence_failed(),
-                });
+                return Prepared {
+                    stop: Some(RunOutcome {
+                        ok: false,
+                        output: tools.texts.fence_failed(),
+                    }),
+                    prepared: false,
+                    unfenced_note: None,
+                    home: None,
+                };
             };
             let case = FenceCase {
                 blocked,
@@ -50,7 +55,12 @@ pub(super) fn prepare(ctx: PrepareCtx<'_>) -> Prepared {
             match gate.decide(&case) {
                 FenceVerdict::Unfenced { note: n } => note = Some(n),
                 FenceVerdict::Refused { output } => {
-                    return Prepared::Stop(RunOutcome { ok: false, output });
+                    return Prepared {
+                        stop: Some(RunOutcome { ok: false, output }),
+                        prepared: false,
+                        unfenced_note: None,
+                        home: None,
+                    };
                 }
             }
         }
@@ -64,12 +74,27 @@ pub(super) fn prepare(ctx: PrepareCtx<'_>) -> Prepared {
         && let Some(outcome) =
             refuse_when_broken(&*tools.texts, confine::verify(fence, ctx.command))
     {
-        return Prepared::Stop(outcome);
+        return Prepared {
+            stop: Some(outcome),
+            prepared: false,
+            unfenced_note: None,
+            home: None,
+        };
     }
-    Prepared::Ready {
+    Prepared {
+        stop: None,
         prepared,
         unfenced_note: note,
         home: Some(tools.home.clone()),
+    }
+}
+
+impl ProcTools {
+    /// 目的：强制 shell 用哪个 PowerShell（Windows 真机验 5.1 回退）；None = 自动。
+    #[cfg(test)]
+    pub(super) fn with_powershell(mut self, program: Option<&'static str>) -> ProcTools {
+        self.shell_ps = program;
+        self
     }
 }
 
