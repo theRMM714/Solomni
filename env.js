@@ -737,12 +737,25 @@ async function pickFastest(urls) {
   return urls[best];
 }
 
+/**
+ * 目的：能读 zip 的 tar 实现——Windows 自带的 bsdtar 有确定路径，不靠 PATH 顺序。
+ * 为什么：Git Bash 会把 GNU tar 排在 PATH 前面，它读不了 zip；同一个完好的归档会被判成结构不对而删掉。
+ * 返回：可执行文件路径；本机没有这种实现时 null（调用方只按大小判，不删可能完好的文件）。
+ */
+function zipTar() {
+  if (!IS_WIN) return "tar";
+  const bsdtar = path.join(process.env.SystemRoot || "C:/Windows", "System32", "tar.exe");
+  return fs.existsSync(bsdtar) ? bsdtar : null;
+}
+
 function zipLooksValid(zipPath) {
   // 三态：true = 完整且内含 dlltool；"partial" = 像没下完，留着续传；false = 内容坏，删掉。
   const st = fs.statSync(zipPath);
   if (st.size < 10485760) return "partial";
-  const t = spawnSync("tar", ["-tf", zipPath], { encoding: "utf8" });
-  if (t.error && t.error.code === "ENOENT") return true; // 没有 tar：只按大小判，不删可能完好的文件
+  const tar = zipTar();
+  if (!tar) return true; // 没有能读 zip 的实现：只按大小判，不删可能完好的文件
+  const t = spawnSync(tar, ["-tf", zipPath], { encoding: "utf8" });
+  if (t.error) return true;
   if (t.status !== 0) return false;
   return /bin[\\/]dlltool\.exe/i.test(t.stdout || "");
 }
@@ -818,8 +831,9 @@ async function installWinlibs() {
   }
   verifyWinlibsHash(zip);
   log("extracting (takes a minute)...");
-  const tar = spawnSync("tar", ["-xf", zip, "-C", TOOLS], { stdio: "ignore" });
-  if (tar.status !== 0) runPS("Expand-Archive -Force '" + zip + "' -DestinationPath '" + TOOLS + "'");
+  const tar = zipTar();
+  const extracted = tar ? spawnSync(tar, ["-xf", zip, "-C", TOOLS], { stdio: "ignore" }) : { status: 1 };
+  if (extracted.status !== 0) runPS("Expand-Archive -Force '" + zip + "' -DestinationPath '" + TOOLS + "'");
   fs.rmSync(zip, { force: true });
   if (!fs.existsSync(path.join(WINLIBS_BIN, "dlltool.exe"))) die("extracted, but dlltool.exe is not in .tools/mingw64/bin - inspect the .tools directory.");
   log("portable MinGW ready: " + WINLIBS_BIN);
