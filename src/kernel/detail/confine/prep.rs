@@ -125,6 +125,17 @@ pub fn machine_ensure(
     Err("本平台没有机器级 ACL 预授（已登记缺口）".to_string())
 }
 
+/// 目的：退役台账里旧的全应用包**机器级**授权（`--setup=fence` 顺带做的一次性外部状态清理）。
+///   先授后撤：能力 SID 的 ACE 没覆盖那条权限位就保留；系统目录自带的 ACE 不在台账里，一条都不碰。
+///   与 prepare_fence 同理，这一步只在 Windows 存在（其它平台没有 ACL 可撤）。
+#[cfg(windows)]
+pub fn retire_legacy_machine_grants(
+    home: &std::path::Path,
+    out: &mut dyn FnMut(&str),
+) -> Result<(), String> {
+    windows::retire_legacy_machine_grants(home, out)
+}
+
 /// 目的：给一个外部工作区授**机器级一次性只读**（授本产品能力 SID、可继承、跨会话复用）：绑定工作区时先付一次成本。
 ///   Windows 之外没有 ACL 这一步：如实返回零报告（只读挂载语义由平台后端兑现）。
 #[cfg(windows)]

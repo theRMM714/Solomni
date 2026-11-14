@@ -924,3 +924,116 @@ fn inside_root_rejects_parent_escape_even_when_canonicalize_fails() {
 
     let _ = std::fs::remove_dir_all(&base);
 }
+
+/// 【真机退役】旧的全应用包机器级授权：**能力 SID 的 ACE 覆盖得住才撤**，覆盖不住就保留。
+/// 产品根与它的子目录各有一条旧授权、能力 SID 的读属性已就位 → 旧主体撤净、台账销账；
+/// 另一条只授了全应用包只读、能力 SID 那边只有读属性（覆盖不住只读）→ ACE 与台账条目都保留。
+/// 会改本机 ACL（临时目录），按测试约定只在 --fence-live 下跑。
+#[test]
+fn legacy_aapp_machine_grants_retire_only_after_capability_is_in_place() {
+    let _fence = crate::tests::fence_acl_guard();
+    if std::env::var("SOLOMNI_FENCE_LIVE")
+        .map(|v| v != "1")
+        .unwrap_or(true)
+    {
+        eprintln!(
+            "[探针] 未开启真机围栏测试：legacy_aapp_machine_grants_retire_only_after_capability_is_in_place 会改本机 ACL（临时目录），已跳过；要真跑加 --fence-live"
+        );
+        return;
+    }
+    let base = crate::tests::scratch("retire-aapp");
+    discard(&base);
+    let root = base.join("product");
+    let sub = root.join("sub");
+    let ro_only = base.join("ro-only");
+    std::fs::create_dir_all(&sub).expect("建产品根与子目录");
+    std::fs::create_dir_all(&ro_only).expect("建只读落点");
+    if !acl_round_trip(&base, "retire-aapp") {
+        eprintln!(
+            "[探针] 本机做不了 ACL 完整往返（写→读回→撤）：旧授权退役探针跳过（不静默当作通过）"
+        );
+        discard(&base);
+        return;
+    }
+    let home = root.join(".home");
+    let aapp = system_baseline_sid().expect("取全应用包 SID");
+    let aapp_text = sid_to_string(aapp);
+    let cap = product_sid().expect("派生本产品能力 SID");
+    let cap_text = sid_to_string(cap);
+    let target = |path: &Path, rights: u32| GrantTarget {
+        path: path.to_path_buf(),
+        rights,
+        recursive: false,
+        inherit: true,
+        part: FencePart::Parent,
+    };
+    // 造旧状态用「落台账 + 真写」两半，不走 grant_machine_journaled：夹具的 TMP 在仓库内时，
+    // 探针目录会从真实产品根继承到一条同主体的 ACE，那条路的「已够用就跳过」会让这里根本没有自己的 ACE 可断言。
+    let legacy = |path: &Path, rights: u32| {
+        claim_machine(&home, &aapp_text, &target(path, rights), &root).expect("旧授权先落台账");
+        grant_verified(aapp, path, rights, false, true).expect("写旧的全应用包 ACE");
+    };
+    legacy(&root, RIGHTS_STAT);
+    legacy(&sub, RIGHTS_STAT);
+    legacy(&ro_only, RIGHTS_RO);
+    // 接替者只到产品根，且只有读属性：覆盖得住根与子目录那两条，覆盖不住只读那条。
+    claim_machine(&home, &cap_text, &target(&root, RIGHTS_STAT), &root).expect("能力授权先落台账");
+    grant_verified(cap, &root, RIGHTS_STAT, false, true).expect("写能力 SID 的 ACE");
+    assert!(
+        has_explicit_ace_for(aapp, &root, RIGHTS_STAT),
+        "前置：产品根上旧 ACE 在场"
+    );
+    assert!(
+        !has_ace_for(cap, &ro_only, RIGHTS_RO),
+        "前置：只读落点上能力 SID 覆盖不住只读位"
+    );
+    let mut lines: Vec<String> = Vec::new();
+    retire_legacy_machine_grants(&home, &mut |line| lines.push(line.to_string()))
+        .expect("退役应当成功");
+    eprintln!("[诊断] 产品根退役后 {}", dump_aces(&root));
+    // 只看对象自己带着的 ACE：从真实产品根继承来的投影属于祖先那条授权，不归这一条撤。
+    assert!(
+        !has_explicit_any_ace_for(aapp, &root),
+        "有接替者时旧主体必须撤净（哪怕只留一位）"
+    );
+    assert!(
+        !has_explicit_any_ace_for(aapp, &sub),
+        "子目录那条旧授权也要撤净"
+    );
+    assert!(
+        has_explicit_ace_for(cap, &root, RIGHTS_STAT),
+        "能力 SID 的 ACE 必须还在——先授后撤，不留读不到的窗口"
+    );
+    assert!(
+        has_explicit_ace_for(aapp, &ro_only, RIGHTS_RO),
+        "没有接替者的那条必须保留（解释器目录与根外祖先正是这种情形）"
+    );
+    let rec = load_record(&home);
+    let recorded = |sid: &str, path: &Path| {
+        rec.grants
+            .iter()
+            .any(|g| g.sid == sid && Path::new(&g.path) == path)
+    };
+    assert!(!recorded(&aapp_text, &root), "撤掉的那条要销账");
+    assert!(!recorded(&aapp_text, &sub), "子目录那条也要销账");
+    assert!(
+        recorded(&aapp_text, &ro_only),
+        "保留的那条台账也要留着（重跑或显式撤都靠它）"
+    );
+    assert!(
+        recorded(&cap_text, &root),
+        "同路径上能力 SID 的条目不受影响"
+    );
+    let summary = lines.last().expect("要有汇总行");
+    assert!(
+        summary.contains("退役 2 条") && summary.contains("保留 1 条"),
+        "汇总要如实报撤了几条、留了几条：{}",
+        summary
+    );
+    // 收尾：保留的那条也撤掉，台账整份回收，不在本机留痕。
+    revoke_one(aapp, &ro_only, false).expect("清掉只读落点的探针 ACE");
+    free_sid(aapp);
+    free_sid(cap);
+    clean(&home).expect("台账回收应当成功");
+    discard(&base);
+}

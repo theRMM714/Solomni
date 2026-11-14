@@ -2,7 +2,8 @@
 //!   本产品的能力 SID（S-1-15-3-*，见 container::CAPABILITY_NAME），后续围栏准备就只剩 O(深度) 的 ACE 读。
 //!   不授给 ALL APPLICATION PACKAGES：那会把读权限下放给本机所有 AppContainer 应用。
 //! 管：落点清单（产品根 / .tools / runtimes）、只读判定、逐条授权与分步计时、失败如实上报，
-//!   以及外部工作区的显式一次性只读授权/撤权（ensure_workspace_grant / revoke_machine_grants）。
+//!   外部工作区的显式一次性只读授权/撤权（ensure_workspace_grant / revoke_machine_grants），
+//!   以及旧全应用包机器级授权的退役（retire_legacy_machine_grants）。
 //! 不管：每会话的容器数据授权（windows.rs 的 prepare_fence）、ACE 读写（acl.rs）、台账（record/）。
 //! 联动：entry::setup::fence 与启动首次授权共用 machine_ensure；状态查询与 --setup=status 共用 machine_missing。
 
@@ -266,6 +267,140 @@ pub(crate) fn revoke_machine_grants(home: &Path, path: &Path) -> Result<usize, S
     Ok(removed)
 }
 
+/// 目的：台账里该退役的旧条目——**机器级 + ALL APPLICATION PACKAGES**，浅路径在前。
+/// 约束：按次条目（解释器基线等）不在这里动，它们随会话收尾回收；系统目录自带的 AAPP ACE 不进台账，
+///   所以这份清单天然不含系统目录。浅路径先撤：父目录那条可继承 ACE 一撤，子目录的继承副本由系统一并收走，
+///   子条目就只销账、不再各写一次整树 ACL。
+fn retire_candidates(rec: &GrantRecord, aapp_text: &str) -> Vec<GrantEntry> {
+    let mut out: Vec<GrantEntry> = rec
+        .grants
+        .iter()
+        .filter(|g| g.scope == GrantScope::Machine && g.sid == aapp_text)
+        .cloned()
+        .collect();
+    out.sort_by_key(|g| Path::new(&g.path).components().count());
+    out
+}
+
+/// 目的：把旧的全应用包机器级授权退役（`--setup=fence` 顺带做的一次性外部状态清理）。
+///   本产品现在只授能力 SID；旧条目留着，读权限就仍下放给本机所有 AppContainer 应用。
+/// 约束：**先授后撤**——同一路径上能力 SID 的 ACE 没覆盖这条的权限位（继承来的也算）就保留，
+///   不留读不到的窗口；解释器目录与产品根之外的祖先链因此都留着。只动台账里我们自己发过的机器级条目，
+///   系统目录自带的 ACE 一条都不碰；盘卷根不动。逐条开台账事务（锁只罩读—改—写），慢的整树撤权在锁外。
+///   撤与撤后核对都只看对象**自己带着**的 ACE：从祖先继承来的投影属于祖先那条授权，不在这一条里撤。
+/// 参数：out = 每条一行进度（含耗时与保留原因）。
+/// 错误：任一条撤不掉或销账失败就如实报（其余继续），条目保留，重跑可再撤。
+pub(crate) fn retire_legacy_machine_grants(
+    home: &Path,
+    out: &mut dyn FnMut(&str),
+) -> Result<(), String> {
+    // 主体字符串取自唯一的派生处（acl.rs 的 system_baseline_sid），不在这里另抄一份字面量。
+    let aapp_text = {
+        let sid = system_baseline_sid()?;
+        let text = sid_to_string(sid);
+        free_sid(sid);
+        text
+    };
+    let owned = product_capability_sid()?;
+    let cap = owned.as_ptr() as PSID;
+    let candidates = with_ledger(home, |rec| Ok(retire_candidates(rec, &aapp_text)))?;
+    if candidates.is_empty() {
+        out("旧的全应用包机器级授权：台账里没有，无需退役");
+        return Ok(());
+    }
+    // 真有候选才取可释放的 SID：此后不再有提前返回的分支，收尾一定 free。
+    let aapp = system_baseline_sid()?;
+    let mut retired = 0usize;
+    let mut kept = 0usize;
+    let mut errors: Vec<String> = Vec::new();
+    for entry in &candidates {
+        let path = PathBuf::from(&entry.path);
+        let shown = path.display().to_string();
+        if path.parent().is_none() {
+            kept += 1;
+            out(&format!("{}：盘卷根，保留（不在盘根动 ACL）", shown));
+            continue;
+        }
+        // 路径已不在场：没有 ACE 可撤，只销账（与 release.rs 的同名分支同一口径）。
+        let gone = std::fs::symlink_metadata(&path).is_err();
+        if !gone && !has_ace_for(cap, &path, entry.rights) {
+            kept += 1;
+            out(&format!(
+                "{}：能力 SID 的 ACE 还没覆盖这条权限位，保留（先授后撤）",
+                shown
+            ));
+            continue;
+        }
+        let started = Instant::now();
+        // 只看**自己带着**的那条：从祖先继承来的投影属于祖先那条授权，撤不掉也不该在这里撤。
+        if !gone && has_explicit_any_ace_for(aapp, &path) {
+            out(&format!(
+                "{}：正在撤旧的全应用包授权（递归子树，可能要几十秒）",
+                shown
+            ));
+            if let Err(e) = revoke_one(aapp, &path, entry.recursive) {
+                kept += 1;
+                errors.push(format!("{}：{}", shown, e));
+                out(&format!("{}：撤销失败，保留这条：{}", shown, e));
+                continue;
+            }
+            // 撤后核对：哪怕只留一位也算没撤干净（真机残留过只有 SYNCHRONIZE 的 (OI)(CI) ACE）。
+            if has_explicit_any_ace_for(aapp, &path) {
+                kept += 1;
+                errors.push(format!("{}：撤后仍有残留 ACE", shown));
+                out(&format!("{}：撤后仍有残留 ACE，保留这条", shown));
+                continue;
+            }
+        }
+        if let Err(e) = drop_machine_entry(home, &entry.sid, &path) {
+            errors.push(format!("{}：{}", shown, e));
+            out(&format!("{}：ACE 已不在，但销账失败：{}", shown, e));
+            continue;
+        }
+        retired += 1;
+        out(&format!(
+            "{}：已退役（{} ms）{}",
+            shown,
+            started.elapsed().as_millis(),
+            if gone {
+                "；路径已不在场，只销账"
+            } else {
+                ""
+            }
+        ));
+    }
+    free_sid(aapp);
+    out(&format!(
+        "旧全应用包机器级授权：本次退役 {} 条，保留 {} 条（保留的可用 --fence-revoke <SID> <路径> 显式撤）",
+        retired, kept
+    ));
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("；"))
+    }
+}
+
+/// 目的：销掉一条机器级授权条目（锁内一次读—改—写）；该路径再没有任何授权引用时快照一并销。
+/// 约束：只删「机器级 + 同 SID + 同路径」这一条，同路径上别的主体（能力 SID、容器 SID）不动。
+fn drop_machine_entry(home: &Path, sid_text: &str, path: &Path) -> Result<(), String> {
+    with_ledger(home, |rec| {
+        let key = path.to_string_lossy().into_owned();
+        let before = rec.grants.len();
+        rec.grants
+            .retain(|g| !(g.scope == GrantScope::Machine && g.sid == sid_text && g.path == key));
+        if rec.grants.len() == before {
+            return Ok(());
+        }
+        if !rec.grants.iter().any(|g| g.path == key) {
+            rec.snapshots.retain(|s| s.path != key);
+        }
+        save_record(home, rec).map_err(|e| format!("台账更新失败：{}", e))?;
+        rec.drop_if_empty(home);
+        Ok(())
+    })
+}
+
 /// 目的：台账里记的路径字符串与目标路径是不是同一个（能规范化就按规范化路径比，逐分量、大小写不敏感）。
 #[allow(dead_code)]
 fn same_path(recorded: &str, target: &Path) -> bool {
@@ -316,5 +451,40 @@ mod tests {
                 .all(|s| s.path == root || s.path.starts_with(&root))
         );
         assert!(!plan.iter().any(|s| s.path == base));
+    }
+
+    /// 目的：退役清单只认「机器级 + 全应用包」，且浅路径在前（父目录先撤，子目录的继承副本跟着消失）。
+    #[test]
+    fn retire_candidates_take_only_machine_scope_aapp_shallow_first() {
+        let base = std::env::temp_dir().join("solomni-retire");
+        let deep = base.join("product").join("modules");
+        let entry = |sid: &str, path: &Path, scope: GrantScope| GrantEntry {
+            sid: sid.to_string(),
+            path: path.to_string_lossy().into_owned(),
+            rights: RIGHTS_STAT,
+            at: 0,
+            recursive: false,
+            owners: Vec::new(),
+            scope,
+        };
+        let mut rec = GrantRecord::default();
+        rec.grants
+            .push(entry("S-1-15-2-1", &deep, GrantScope::Machine));
+        // 同路径上本产品能力 SID 的那条不是退役对象（它是接替者）。
+        rec.grants
+            .push(entry("S-1-15-3-1", &base, GrantScope::Machine));
+        rec.grants
+            .push(entry("S-1-15-2-1", &base, GrantScope::Machine));
+        // 按次条目随会话收尾回收，不在这里动。
+        rec.grants
+            .push(entry("S-1-15-2-1", &deep, GrantScope::Call));
+        let got = retire_candidates(&rec, "S-1-15-2-1");
+        let shape: Vec<(&str, &str, GrantScope)> = got
+            .iter()
+            .map(|g| (g.sid.as_str(), g.path.as_str(), g.scope))
+            .collect();
+        assert_eq!(got.len(), 2, "只认机器级的全应用包条目：{:?}", shape);
+        assert_eq!(Path::new(&got[0].path), base, "浅路径先撤：{:?}", shape);
+        assert_eq!(Path::new(&got[1].path), deep);
     }
 }
