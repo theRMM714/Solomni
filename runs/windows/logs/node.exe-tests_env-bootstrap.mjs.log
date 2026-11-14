@@ -1,0 +1,11 @@
+PASS full-download-then-verify-and-extract
+PASS resume-uses-the-recorded-source-and-ranges
+PASS partial-without-source-restarts-from-scratch
+PASS structurally-broken-archive-is-deleted-and-reported
+PASS sha-mismatch-keeps-the-file-and-names-both-values
+PASS accept-switch-is-the-only-way-past-a-mismatch
+PASS server-that-ignores-ranges-keeps-the-partial
+PASS borrowed-toolchain-that-cannot-build-is-not-used
+PASS half-installed-project-toolchain-is-reported
+PASS connection-dropped-midway-keeps-the-partial
+ENV-BOOTSTRAP-OK
