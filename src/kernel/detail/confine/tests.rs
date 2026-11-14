@@ -332,11 +332,11 @@ fn interpreter_dirs_resolves_programs_but_not_data_files() {
     );
 }
 
-/// 目的：命令经目录重解析点（符号链接 / 联接）进来时，链接与真身安装根都授——
-///   容器按 PATH 搜索要穿过链接本身（链接对象的 DACL 参与解析），真身保证兄弟文件可读。
+/// 目的：命令经目录重解析点（符号链接 / 联接）进来时，只授**真身**安装根——
+///   容器 PATH 里的链接项已在进容器前换写成真身（`canonical_path_var`），链接对象不再需要 DACL。
 #[cfg(windows)]
 #[test]
-fn interpreter_roots_cover_both_the_junction_and_the_real_root() {
+fn interpreter_roots_follow_a_reparse_point_to_the_real_root() {
     let root = crate::tests::scratch("interpreter-reparse");
     let real = root.join("real");
     let mid = root.join("mid");
@@ -360,19 +360,60 @@ fn interpreter_roots_cover_both_the_junction_and_the_real_root() {
         return;
     }
     let roots = interpreter_roots_for_exe(&link.join("node.exe"));
-    assert!(
-        roots.contains(&link),
-        "第一层链接要授（PATH 搜索要穿过它）：{:?}",
-        roots
-    );
-    assert!(
-        roots.contains(&mid),
-        "中间链接也要授（逐层穿过）：{:?}",
-        roots
-    );
-    assert!(roots.contains(&real), "真身安装根也要授：{:?}", roots);
+    assert_eq!(roots, vec![real.clone()], "只授真身安装根：{:?}", roots);
     let _ = std::fs::remove_dir(&link);
     let _ = std::fs::remove_dir(&mid);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 目的：容器 PATH 里的绝对链接项换成真身，取不到真身的项与相对项原样保留。
+#[cfg(windows)]
+#[test]
+fn canonical_path_var_resolves_junctions_to_real_dirs() {
+    let root = crate::tests::scratch("path-canon");
+    let real = root.join("real");
+    let link = root.join("nodejs");
+    let missing = root.join("missing");
+    std::fs::create_dir_all(&real).expect("建真身目录");
+    let made = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(&link)
+        .arg(&real)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if !made {
+        eprintln!("[探针] 本机建不出目录联接（env-skip）：跳过 PATH 真身化口径");
+        let _ = std::fs::remove_dir_all(&root);
+        return;
+    }
+    let input = std::env::join_paths([
+        link.as_os_str(),
+        missing.as_os_str(),
+        std::ffi::OsStr::new("relative"),
+    ])
+    .expect("拼 PATH");
+    let got = canonical_path_var(&input);
+    let entries: Vec<std::path::PathBuf> = std::env::split_paths(&got).collect();
+    assert!(entries.contains(&real), "链接项要换成真身：{:?}", entries);
+    assert!(
+        !entries.iter().any(|p| p == &link),
+        "链接原路径不再出现：{:?}",
+        entries
+    );
+    assert!(
+        entries.contains(&missing),
+        "取不到真身的项原样保留：{:?}",
+        entries
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|p| p == std::path::Path::new("relative")),
+        "相对项原样保留：{:?}",
+        entries
+    );
+    let _ = std::fs::remove_dir(&link);
     let _ = std::fs::remove_dir_all(&root);
 }
 
