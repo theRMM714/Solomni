@@ -1,9 +1,8 @@
 //! 目的：核心代理（core_proxy）工具的纯逻辑——入参解析、授权校验、载荷规整与回执拼装。
 //! 管：工具 id 与角色面判定、任务级授权校验（`Grant`）、各工具的参数语义校验与规整载荷，
 //!   以及只读清单事实与回执的拼装（`Catalog` / `Snapshot` / `MessagesPage` / `ControlState`）。
-//! 不管：会话读写与外部动作（一律经 `conductor::ports::ProxyHost`，见 service/proxy.rs）；不碰端口、不认识会话。
-//! 联动：service/proxy.rs 的 `ProxyBridge` 把宿主事实填进这些结构，systools/tools.yaml 声明入参形状。
-
+//! 不管：会话读写与外部动作（一律经 `proxy::ports::ProxyHost`，见 service/proxy.rs）；不碰端口、不认识会话。
+//! 联动：`service/proxy.rs` 的执行器把宿主事实填进这些结构，`conductor` 的队列桥提供宿主，systools/tools.yaml 声明入参形状。
 use serde::{Deserialize, Serialize};
 
 pub const CATALOG: &str = "catalog_agents";

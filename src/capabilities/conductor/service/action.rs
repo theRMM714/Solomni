@@ -1,11 +1,11 @@
 //! 目的：动作的核心实现——建会话（人经呈现层与核心代理共用的唯一一条）。
 //! 管：把规整后的建会话载荷变成一个真正的会话（名字 / 档位 / 名单的规整）。
 //! 不管：会话装配本身（`work.rs` 的 `create_work_inner`）；生成怎么跑（在句柄的生成里）。
-//! 联动：载荷形状见 `conductor/domain/proxy.rs`；声明与 callers 在 `systools/tools.yaml`。
+//! 联动：载荷形状见 `proxy/domain/proxy.rs`；声明与 callers 在 `systools/tools.yaml`。
 
 use super::guest_job::GuestBoot;
 use super::*;
-use crate::capabilities::conductor::domain::proxy as d;
+use crate::capabilities::proxy::api as d;
 use crate::kernel::api::Tier;
 
 impl Conductor {

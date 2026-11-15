@@ -124,8 +124,8 @@ function direction(root) {
       ) {
         apiOnly.add(f + " -> " + t);
       }
-      // api.rs 是入站用例面：不得把能力端口再导出去。
-      if (f.endsWith("/api.rs") && t.startsWith("crate::capabilities::") && t.endsWith("::ports")) apiPorts.add(f + " -> " + t);
+      // api.rs 是入站用例面：不得把**别人的**能力端口再导出去；定义方交出自己的回调端口（host 实现它，见 ARCHITECTURE §二）是唯一例外。
+      if (f.endsWith("/api.rs") && t.startsWith("crate::capabilities::") && t.endsWith("::ports") && t.split("::")[2] !== f.split("/")[2]) apiPorts.add(f + " -> " + t);
       // ::detail 是实现：跨能力引用一律不许，只有入口层的组合根能构造它。
       if (layer !== "entry" && t.startsWith("crate::capabilities::") && t.endsWith("::detail") && t.split("::")[2] !== f.split("/")[2]) {
         apiOnly.add(f + " -> " + t);
@@ -192,7 +192,7 @@ function direction(root) {
   expectEmpty([...apiOnly].sort(), "业务之间只能经对方的 ::api（R1）；::domain / ::detail 是实现，跨能力一律不许碰");
   expectEmpty([...foreignImpl].sort(), "不得给别的能力的类型写 impl（R1：另一种互相引入）");
   expectEmpty([...domainPorts].sort(), "domain 是纯逻辑：不得引用任何 ports");
-  expectEmpty([...apiPorts].sort(), "api 是入站用例面：不得把本能力的 ports 再导出去（R12）");
+  expectEmpty([...apiPorts].sort(), "api 是入站用例面：不得把别人的能力 ports 再导出去（R12）");
   expectEmpty([...channelCross].sort(), "呈现层的两个渠道（cli / web）互不依赖：不得引用对方");
 
   for (const scc of sortSccs(coreSccs)) {

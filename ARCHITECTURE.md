@@ -13,7 +13,7 @@
 
 ```text
 根（main.rs + entry/ + guard/）
-  ├──▶ presentation/{cli,web} ──▶ capabilities（含编配型业务 conductor）──▶ kernel（地基库）
+  ├──▶ presentation/{cli,web} ──▶ capabilities（含编配型业务 conductor、工具面入口 proxy）──▶ kernel（地基库）
   └──▶ capabilities / kernel（注入适配器、跑探针与守门模式）
 （根 = 启动 + 组合根 + 机器探针 + 守门进程；各能力的 `detail` 与 kernel 的实现只在这里被 new 出来）
 ```
@@ -24,6 +24,7 @@
 | `presentation/{cli,web}/` | **呈现层（交付机制）**：各渠道一个子目录，完全分开——传输（argv/stdout vs HTTP）、路由、纯渲染。**不是业务能力** | 只依赖各能力的 `::api`；**拿不到端口对象，也拿不到 `Core`**；两者互不依赖 |
 | `capabilities/` | **业务层**：按业务功能垂直切分。每个能力有 `api`（入站契约：trait + DTO）/ `service`（本能力的状态与用例）/ `ports`（出站端口，只由定义它的能力持有）/ `domain`（纯逻辑）/ `detail`（只有组合根能构造） | **业务之间只经对方的 `api`**；不反向依赖根 / 呈现层（T0 机器判定，见 §九.7） |
 | `capabilities/conductor/` | **编配型业务**（按 §九.1 路径 B + C 成立）：会话中心（在世表、命令队列、运行态）、生成驱动、跨能力用例与跨会话回档编排；与别的能力**平级** | **必须薄**：只做毫秒级状态变换与派发，长步骤（起停 guest、生成、压缩）在调用方或工作线程（§九.3）；不读文件、不发网络、不碰 stdin/stdout |
+| `capabilities/proxy/` | **模型工具面的入口**（按 §九.1 路径 C 成立）：`core_proxy` 六个工具的声明解读、授权校验、参数规整与执行，动作跨 `session` / `workspace` / `tools` / `permission` 多个参与方，无法归属其中任一方 | **必须薄**：只做参数与授权的毫秒级判定；外部动作一律经端口 `ProxyHost` 交回核心线程，宿主实现是 `conductor` 的队列桥（`src/capabilities/proxy/api.rs`） |
 | `kernel/` | **地基库（非层）**：无领域语义、无领域状态的机制（运行日志端口、宿主探测、取消表、跨层共享的形状、路径书写、外部进程执行与长驻子进程账、围栏机制）；形状与别的能力一致（`api` / `ports` / `domain` / `detail`） | **不依赖任何人**；不解释共享形状的业务语义，不构造业务决策与面向用户的文案 |
 
 - 推论：
@@ -82,7 +83,7 @@
 | `ToolHandler` | **一类工具的执行者**（按名字认领）：内置、模块与核心自有工具因此走**同一条派发路径** | 各能力注入（工具能力管内置与模块；conductor 注入代理工具那个） |
 | `AskUser` | **请用户裁决的提问端口**：需要用户裁决的机制（工具执行层、围栏）推一条问题并**阻塞**等一个选项 id——走会话的**统一裁决通道**（不是第二条） | 会话侧实现（conductor 的 `SessionAsk`：卡片进那一条队、`answer_card` 作答；构不出可用选项时停会话 + 落警告） |
 
-- 端口只有一个持有者：**定义它的那个能力的 `service.rs`**（R12）。**例外**：`kernel` 的机制端口（`Log` / `HostProbe` / `ToolHandler` / `AskUser` / `ProcessRunner` / `FenceHost` / `PathCodec` / `ProcessTexts` / `SessionHost`）全项目共享。
+- 端口只有一个持有者：**定义它的那个能力的 `service.rs`**（R12）。**例外一**：`kernel` 的机制端口（`Log` / `HostProbe` / `ToolHandler` / `AskUser` / `ProcessRunner` / `FenceHost` / `PathCodec` / `ProcessTexts` / `SessionHost`）全项目共享。**例外二（回调端口）**：业务为了不反向依赖调用方，可把「要调用方做的事」声明成端口、由**调用方实现**，经定义方的 `api.rs` 交出——`ProxyHost` 定义在 `src/capabilities/proxy/ports.rs`，`conductor` 的 `ProxyBridge` 实现它。
 - 新增端口前先问一句：**这是 IO 或可替换点吗**？不是就别加 trait。
 
 ## 三、单元地图与入站契约
@@ -203,7 +204,7 @@
 - **纯逻辑 / 派生**（解析器、状态派生、提示词渲染）→ 所属业务的 `domain/`，**不加 trait**；
 - **纯交付**（HTTP 路由、终端渲染）→ `presentation/{cli,web}/`，**不是能力**；
 - **只服务单一调用方的脚本 / 编排** → 它自己的 `service.rs`；
-- **代理方法族（`core_proxy`）** → 不按路径 A 升格：没有自有落盘真相（幂等账在内存，授予读会话 `meta.delegation`，转录与工作区分别归 `session` / `workspace`），唯一调用方是编配业务自己；直接拆还会成环——代理工具的执行面必须回核心线程改核心状态（`ProxyBridge` → `ConductorHandle::call`），而编配业务又要调它建代理会话（`src/capabilities/conductor/ports.rs` 的 `ProxyHost` 与 `src/capabilities/conductor/service/proxy.rs`）；
+- **代理方法族（`core_proxy`）** → 按 §九.1 路径 C 独立成 `proxy` 业务：调用方是**模型工具面**，动作跨 `session` / `workspace` / `tools` / `permission`，无法归属其中任一方；它没有自有落盘真相（幂等账在内存，授予读会话 `meta.delegation`，转录与工作区分别归 `session` / `workspace`）；执行面要回核心线程改核心状态，因此 `conductor` 只实现端口 `ProxyHost` 的队列桥，依赖仍是单向 `conductor` → `proxy` 的 `api`（`src/capabilities/proxy/api.rs`）；
 - **聚合面（字段袋）** → 不是业务：把多个能力的面塞进一个 `Ops` 式对象交给呈现层，等于让每个屏幕都拿到整袋契约，长成契约层的上帝对象。面按**调用角色**拆（`api.rs` ≤ 20 个方法，§九.5；口径见 `docs/presentation/contracts.md` 的「能力接口」表）；
 - **把别人的入站用例搬过来**（动作挂架 / 万能分发器）→ 概念属于谁就回谁：模块动作回 `modules`、登记处与设置回 `registry`、授权回 `permission`（R1 / R13）。编配业务只说「先做这个、再做那个」，不替别人实现做同一件事的第二条路；
 - **DTO 中转站**（把两个能力的类型拼一起的适配业务）→ 新的水平层，禁止（`node run-tests.js` 的 T0 结构审查）。
@@ -240,7 +241,7 @@
 | **R9** | **跨平台与路径**：一律 `PathBuf` 组件拼接；对外用 `/`；不假设平台 |
 | **R10** | **测试跟着业务分区走**：`capabilities/<名称>/` ↔ `src/tests/<名称>.rs`（用例多的按域分成子目录，一域一个文件），单文件 ≤ 2000 行；实现文件里的内联测试只留给纯函数与全内存断言（准入见 `docs/testing/levels.md` 的 T1） |
 | **R11** | **测试入口 = 生产入口**：禁止 `#[cfg(test)]` 专用语义入口 |
-| **R12** | **端口只有一个持有者**：定义它的那个能力的 `service.rs`；别人只拿 `api` 面。**例外**：`kernel` 的机制端口是全项目共享的机制接口 |
+| **R12** | **端口只有一个持有者**：定义它的那个能力的 `service.rs`；别人只拿 `api` 面。**例外**：`kernel` 的机制端口是全项目共享的机制接口；**回调端口**由调用方实现、经定义方的 `api` 交出（`src/capabilities/proxy/ports.rs`） |
 | **R13** | **跨能力的同形重复不许存在**：要么收进唯一所有者，要么独立成一个业务（见「判据」第 2 条） |
 
 ### 九.7 依赖方向与能力内部判据
@@ -248,7 +249,7 @@
 - `node run-tests.js` 的 T0 结构审查按下列判据机器判定（规则在 `tests/gates/structure/dependency.js` 与 `tests/gates/structure/capability.js`，逐条清单用 `node run-tests.js --list`；零豁免，实际违规集合必须为空）：
 
 - **apiOnly**：跨能力引用必须以 `::api` 结尾；任何非根引用别人的 `ports` 都算违规；
-- **apiPorts** / **domainPorts**：`api` 与 `domain` 都不引端口；
+- **apiPorts** / **domainPorts**：`api` 与 `domain` 都不引**别人的**端口；定义方交出自己的回调端口（`src/capabilities/proxy/api.rs` 转出 `ports::ProxyHost`）是唯一例外；
 - **foreignImpl**：不得给别的能力的类型写 `impl`（`node run-tests.js`）；
 - **coreCycles**：能力节点图无环；
 - **internal**（能力内部）：`service` 不引本能力 `detail` 或 `kernel::detail`；`service` 不直接做 IO（`std::fs` / `Command` / 网络 / `canonicalize`）；同能力的方法族之间不成环；覆盖 `api`（含 `api.rs` 与 `api/` 子目录）/ `service` / `domain` / `detail` 四个分区；

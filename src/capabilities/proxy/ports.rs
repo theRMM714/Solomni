@@ -1,9 +1,9 @@
-//! 目的：协调业务的出站端口——核心代理工具要做的外部动作（清单 / 建会话 / 转达 / 观察 / 生命周期）。
+//! 目的：proxy 能力的回调端口——代理工具要做的外部动作（清单 / 建会话 / 转达 / 观察 / 生命周期），由调用方实现。
 //! 管：ProxyHost trait 的方法契约：catalog / create_session / send / observe / control / messages。
-//! 不管：工具层参数解析与授权校验（domain/proxy.rs、service/proxy.rs）；会话机制与队列（见生产实现）。
-//! 联动：domain/proxy.rs 与 service/proxy.rs 只依赖这一面；ProxyBridge 把调用交给核心线程的 Conductor::proxy_*。
+//! 不管：工具层参数解析与授权校验（domain/proxy.rs、service/proxy.rs）；会话机制与队列（见宿主实现）。
+//! 联动：domain 与 service 只依赖这一面；宿主实现是 `conductor` 的队列桥 `ProxyBridge`，装配在组合根。
 
-use crate::capabilities::conductor::domain::proxy::{
+use crate::capabilities::proxy::domain::proxy::{
     Catalog, CatalogScope, ControlAction, ControlState, Created, MessagesPage, NewSession,
     ObserveView, Relayed, Snapshot,
 };

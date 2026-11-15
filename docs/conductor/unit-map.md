@@ -46,8 +46,6 @@
 | `src/capabilities/conductor/service/history.rs` | 历史列出 / 打开 / 删除、事件收编与增量落盘手柄；会话加载时按 meta 的档位复检外部工作区绑定 |
 | `src/capabilities/conductor/service/guest_job.rs` | 起停 guest 的两段式：核心准备参数（`GuestBoot` / `GuestStop`），调用方线程执行 |
 | `src/capabilities/conductor/service/ask_user.rs` | 工具层提问端口的会话侧实现：推一条问题并阻塞等一个选项 id |
-| `src/capabilities/conductor/ports.rs` | 出站端口：核心代理工具要做的外部动作（`ProxyHost`） |
-| `src/capabilities/conductor/domain/proxy.rs` | 核心代理工具的纯逻辑：入参解析、授权校验、载荷规整与回执拼装 |
-| `src/capabilities/conductor/service/proxy.rs` | 代理工具执行面与队列桥 `ProxyBridge`（把动作交给核心线程） |
+| `src/capabilities/conductor/service/proxy.rs` | 核心侧代理适配：`proxy_*` 用例与 `ProxyBridge`（把 `proxy` 的端口调用丢回核心线程），工具执行面在 `proxy` 能力 |
 | `src/capabilities/conductor/service/work_tools.rs` | 共享区六个核心自有工具（`work_pull` / `work_commit` / `work_status` / `work_versions` / `work_resolve` / `work_lost`）的成员侧执行者 |
 | `src/capabilities/conductor/domain/work.rs` | 六个核心自有工具的纯逻辑：工具名、入参解析、回执拼装与三方版本 / 解决结果渲染 |

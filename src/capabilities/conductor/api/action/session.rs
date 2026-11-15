@@ -4,7 +4,7 @@
 //! 联动：动作表声明与 callers 在 `systools/tools.yaml`；被调能力面是 `TurnOps` / `LifecycleOps` / `WorkOps`。
 
 use super::*;
-use crate::capabilities::conductor::domain::proxy as d;
+use crate::capabilities::proxy::api as d;
 use crate::capabilities::workspace::api::{MAX_ASSET_BYTES, base64_decode};
 
 impl ConductorHandle {

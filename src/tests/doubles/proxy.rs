@@ -1,13 +1,13 @@
 //! 目的：核心代理工具的宿主替身——只按用例给的答案回答，并记下每次动作。
 //! 管：目录、建会话、转发、观察、控制与各自的失败注入。
 //! 不管：真实宿主（`src/capabilities/conductor/detail/`）。
-//! 联动：`src/capabilities/conductor/ports.rs` 的 `ProxyHost`。
+//! 联动：`src/capabilities/proxy/ports.rs` 的 `ProxyHost`。
 
 use super::*;
 
-use crate::capabilities::conductor::domain::proxy as dproxy;
+use crate::capabilities::proxy::api as dproxy;
 
-use crate::capabilities::conductor::ports::ProxyHost;
+use crate::capabilities::proxy::api::ProxyHost;
 
 /// 目的：代理工具的宿主替身：只按用例给的答案回答，并把每次动作记进日志（用户可见的“未授权 = 根本没碰宿主”就靠这份日志钉住）。
 pub(crate) struct FakeProxyHost {
