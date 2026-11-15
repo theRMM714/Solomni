@@ -36,6 +36,8 @@ pub fn propose(parties: &Parties<'_>, req: &mut Request<'_>) -> Result<Proposal,
         ],
     );
     // 核心操作走工具调用：名单由 slate 工具承载（推荐与代拟共用的那一条协议）。
+    // 核实回路是**一次性**入口：先取出来再交出去，免得从 `&mut Request` 里再借一层（端口对象不协变）。
+    let verify = req.verify.take();
     let payload = core_operation(
         parties.tools,
         "planner",
@@ -48,7 +50,7 @@ pub fn propose(parties: &Parties<'_>, req: &mut Request<'_>) -> Result<Proposal,
         ],
         req.opts.clone(),
         req.cancel,
-        req.verify.as_deref_mut(),
+        verify,
         req.sink,
     )?;
     // 载荷里就是名单**数组**本身（工具参数 picks 的值）。

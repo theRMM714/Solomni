@@ -169,7 +169,7 @@ pub fn core_operation(
     msgs: &[crate::capabilities::llm::api::Msg],
     opts: crate::capabilities::llm::api::CompleteOpts<'static>,
     cancel: Option<&std::sync::Arc<std::sync::atomic::AtomicBool>>,
-    verify: Option<&mut crate::capabilities::session::api::MemberTools>,
+    verify: Option<&mut dyn crate::capabilities::session::api::CoreVerify>,
     // 核心这一轮的**事实出口**（推；落盘与否由会话模块决定）。
     sink: &mut dyn FnMut(crate::capabilities::session::api::SessionEvent),
 ) -> Result<serde_json::Value, String> {
@@ -323,14 +323,7 @@ pub fn core_operation(
         };
         let readonly: Vec<(String, String, String)> = calls
             .into_iter()
-            .filter(|(_, n, _)| {
-                face_ids.iter().any(|f| f == n)
-                    && ctx
-                        .builtin_tools
-                        .get(n)
-                        .map(|s| s.capability == "fs-read")
-                        .unwrap_or(false)
-            })
+            .filter(|(_, n, _)| face_ids.iter().any(|f| f == n) && ctx.is_readonly(n))
             .collect();
         if readonly.is_empty() {
             return Err(format!(
@@ -341,13 +334,7 @@ pub fn core_operation(
         }
         let mut views: Vec<crate::capabilities::session::api::ToolCallView> = Vec::new();
         for (call_id, name, args) in readonly {
-            let out = ctx.tools.run_builtin(
-                &ctx.sandbox,
-                &ctx.builtin_tools,
-                &mut ctx.observations,
-                &name,
-                &args,
-            );
+            let out = ctx.run_readonly(&name, &args);
             let view = crate::capabilities::session::api::ToolCallView {
                 speaker: "核心".to_string(),
                 module: String::new(),

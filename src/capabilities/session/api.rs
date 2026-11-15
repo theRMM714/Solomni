@@ -26,7 +26,8 @@ pub use crate::capabilities::session::domain::session::{
     unique_work_name,
 };
 pub use crate::capabilities::session::domain::tools::{
-    MemberTools, ServiceOp, ShellLive, ShellSlot, last_shell, service_ops_for_modules, tool_table,
+    CoreVerify, MemberTools, ServiceOp, ShellLive, ShellSlot, ToolFace, last_shell,
+    service_ops_for_modules, tool_table,
 };
 /// 目的：工作区授权粒度的形状归工作区能力面，这里重导出，调用方不必跨能力拼路径。
 pub use crate::capabilities::workspace::api::WorkspaceGrant;

@@ -92,7 +92,7 @@ pub(crate) fn only_this_turns_tools_are_advertised() {
         );
     }
     // 声明槽与 allowed 同一份判据：只拿到 read 时声明也只有 read。
-    m.tools.as_mut().expect("工具环境").allowed = vec!["read".to_string()];
+    m.tools.as_mut().expect("工具环境").face.allowed = vec!["read".to_string()];
     let _ = run_execution(std::slice::from_mut(&mut m), "任务", &prompts);
     let decls = declared.lock().expect("锁");
     let names: Vec<&str> = decls[1].iter().map(|(n, _)| n.as_str()).collect();
@@ -386,7 +386,7 @@ pub(crate) fn module_tools_are_concurrent_only_when_declared() {
             Arc::new(Mutex::new(Vec::new())),
         );
         let t = m.tools.as_mut().expect("工具环境");
-        let mt = t.modules.get_mut("m0").expect("模块");
+        let mt = t.face.modules.get_mut("m0").expect("模块");
         mt.commands
             .insert("grep".to_string(), "python tools/grep.py".to_string());
         if parallel {

@@ -1,5 +1,5 @@
 //! 目的：会话的成员工具面——一个成员这一回合能调什么（内置工具 + 自己模块的外部工具）。
-//! 管：`MemberTools`（观察账本 + sandbox 根）、按模块汇总的工具表（`tool_table` / `service_ops_for_modules`）与 shell 现场视图。
+//! 管：`MemberTools`（工具面 + 观察账本 + sandbox 根）、只含值的 `ToolFace`、核实用例的端口 `CoreVerify`、按模块汇总的工具表（`tool_table` / `service_ops_for_modules`）与 shell 现场视图。
 //! 不管：工具总表与角色定义（在 tools 能力）；工具执行（在 `capabilities::tools`）。
 //! 联动：由 `session.rs` 装配进会话；执行经 `crate::capabilities::tools::api::ToolExec`。
 
@@ -235,28 +235,20 @@ pub struct ServiceOp {
     pub parameters: Option<serde_json::Value>,
 }
 
-/// 目的：成员的工具执行环境：来自 module.yaml（按模块分组的放行表）+ 注入的执行端口 + 本成员的沙箱。
-pub struct MemberTools {
+/// 目的：成员工具面里**只有值**的那一半：来自 module.yaml（按模块分组的放行表）+ 本成员的沙箱与身份。
+///   无端口、无锁、无共享状态——只读工具面的函数收它，装配与执行仍走 `MemberTools`。
+#[derive(Debug, Clone)]
+pub struct ToolFace {
     /// 目的：这条通道的工具调用形态：envelope = 手写信封（任何供应商都能用）；native = 供应商结构化槽位。
     ///   **两套互斥**：native 就不解析信封、正文里的信封也不执行（但如实记失败行）。
     pub mode: crate::capabilities::llm::api::ToolMode,
     /// 目的：模块 id → 该模块的（目录, 工具表）；内置 read/write 不走这里。
     pub modules: BTreeMap<String, ModuleTools>,
-    /// 目的：本次会话的观察账本（哪些文件完整读过 / 由核心写过）：改动前的证据（见 crate::capabilities::tools::api::Observations）。
-    pub observations: crate::capabilities::tools::api::Observations,
-    /// 目的：llm 用例面（**不持它的端口**，R12）：手写信封不合法时问它能不能按无歧义的写法修好。
-    pub llm: Arc<dyn crate::capabilities::llm::api::Llm + Send + Sync>,
-    /// 目的：运行日志：模型输出被长度截断这类"看不见的事实"要落盘，供事后确定问题。
-    pub log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
-    /// 目的：工具执行面（**不持它的端口**，R12）：跑外部/内置工具都走它。
-    pub tools: Arc<dyn ToolExec + Send + Sync>,
     /// 目的：本会话的执行档位——工具执行者据此决定在本机跑还是送进 guest。
     pub tier: crate::kernel::api::Tier,
     /// 目的：虚拟机档要用的 **guest 租约**（空 = 本机档 / 没有 guest）：共享 guest 时它是作用域根工作名
     ///   （proxy 树 = 代理根名）；主机围栏仍用 `fence.lease`（子会话名）。
     pub guest_lease: String,
-    /// 目的：虚拟机档的 guest 用例面（**不持它的端口**，R12）：guest 执行走它。
-    pub vm: Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync>,
     /// 目的：本成员的沙箱：内置文件工具的寻址与越界依据（权限收口在 conductor）。
     pub sandbox: crate::capabilities::workspace::api::Sandbox,
     /// 目的：工具说明块的标题模板（来自提示词段 `tools_this_turn`；变量 `{{tools}}`）。
@@ -276,14 +268,6 @@ pub struct MemberTools {
     /// 目的：shell 的只读工具链根：项目内基础 profile + 该 agent 模块的运行包根。
     /// 约束：只进 shell 的 per-call 围栏；模块工具的放行仍走它自己的命令解释器基线。
     pub runtime_roots: Vec<PathBuf>,
-    /// 目的：这个会话最近一次 shell 的实时状态（状态栏卡片）；没有 shell 的席位为 None。
-    pub shell_live: Option<Arc<ShellSlot>>,
-    /// 目的：**回复 id 计数器**：一次模型回复一个号，跨重启单调（重建时按转录里的最大值续号）。
-    ///   转录行靠它分组（哪几行属于同一次回复），会话靠它按回复原子回档。
-    pub reply_seq: u64,
-    /// 目的：**当前行锚**：值 = 下一条转录行的 id。会话每生成一行就推进它；工具执行者（如 work_commit）
-    ///   据此把共享区提交点钉到那一行，回档才能按行精确物化共享区。
-    pub line: Arc<std::sync::atomic::AtomicU64>,
     /// 目的：这个席位**可以调的系统工具 id**（由角色表发放：讨论席 = discussant；执行席按身份 = solo / executor）。
     ///   存在的理由：把"谁能用哪些工具"变成**校验**，而不是提示词里的一句话。
     pub allowed: Vec<String>,
@@ -293,16 +277,78 @@ pub struct MemberTools {
     pub with_modules: bool,
     /// 目的：工具说明块的素材（patch 语法 / 模块工具 / 模块工具参数）：装配期算一次，随回合注入。
     pub notes: crate::capabilities::tools::api::ToolNotes,
-    /// 目的：**核心自有工具**的执行者（按名字认领）：内置与模块之外的第三类不再是特例——
-    ///   循环只问“这一回合的工具面里有没有它、谁认领它”（见 `kernel::ports::ToolHandler`）。
-    ///   空 = 这一席没有这类工具（讨论席与普通执行席都是空）。
-    pub handlers: Vec<Arc<dyn crate::kernel::ports::ToolHandler>>,
+}
+
+/// 目的：成员的工具执行环境：工具面（值）+ 注入的执行端口 + 本成员的活状态。
+pub struct MemberTools {
+    /// 目的：工具面（值部分）：这一回合的工具面与身份（见 `ToolFace`）。
+    pub face: ToolFace,
+    /// 目的：llm 用例面（**不持它的端口**，R12）：手写信封不合法时问它能不能按无歧义的写法修好。
+    pub llm: Arc<dyn crate::capabilities::llm::api::Llm + Send + Sync>,
+    /// 目的：运行日志：模型输出被长度截断这类"看不见的事实"要落盘，供事后确定问题。
+    pub log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
+    /// 目的：工具执行面（**不持它的端口**，R12）：跑外部/内置工具都走它。
+    pub tools: Arc<dyn ToolExec + Send + Sync>,
+    /// 目的：虚拟机档的 guest 用例面（**不持它的端口**，R12）：guest 执行走它。
+    pub vm: Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync>,
     /// 目的：常驻服务的统一管理面——模块的 `services` 操作经它调用（**不持它的端口**，R12）。
     pub residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
     /// 目的：工作区用例面——写工具落地后按**逐路径基线**自动提交（**不持它的端口**，R12）。
     /// 约束：None = 这一席没有工作区（核心核实用途、部分测试装配）；有工作区的席位必须给 Some，
     ///   否则写入只落在沙箱、共享区永远不动（静默漏提交）。
     pub workspace: Option<Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync>>,
+    /// 目的：本次会话的观察账本（哪些文件完整读过 / 由核心写过）：改动前的证据（见 crate::capabilities::tools::api::Observations）。
+    pub observations: crate::capabilities::tools::api::Observations,
+    /// 目的：这个会话最近一次 shell 的实时状态（状态栏卡片）；没有 shell 的席位为 None。
+    pub shell_live: Option<Arc<ShellSlot>>,
+    /// 目的：**回复 id 计数器**：一次模型回复一个号，跨重启单调（重建时按转录里的最大值续号）。
+    ///   转录行靠它分组（哪几行属于同一次回复），会话靠它按回复原子回档。
+    pub reply_seq: u64,
+    /// 目的：**当前行锚**：值 = 下一条转录行的 id。会话每生成一行就推进它；工具执行者（如 work_commit）
+    ///   据此把共享区提交点钉到那一行，回档才能按行精确物化共享区。
+    pub line: Arc<std::sync::atomic::AtomicU64>,
+    /// 目的：**核心自有工具**的执行者（按名字认领）：内置与模块之外的第三类不再是特例——
+    ///   循环只问“这一回合的工具面里有没有它、谁认领它”（见 `kernel::ports::ToolHandler`）。
+    ///   空 = 这一席没有这类工具（讨论席与普通执行席都是空）。
+    pub handlers: Vec<Arc<dyn crate::kernel::ports::ToolHandler>>,
+}
+
+/// 目的：核心操作回路里「先核实」的那半个环境——判定一个名字是不是只读核实工具、把它跑一次。
+///   契约只收自己的用法（R16：api 面不收活对象）：调用方递 `&mut MemberTools` 的实现，
+///   `session::api::core_operation` 与 `slate::api::Request` 的公共签名里只出现这一个端口。
+pub trait CoreVerify {
+    /// 目的：这个名字是不是本席可用的只读核实工具（内置工具表里能力为 `fs-read`）。
+    fn is_readonly(&self, name: &str) -> bool;
+    /// 目的：跑一次只读核实工具，回执行回执（读到的东西进本席观察账本）。
+    fn run_readonly(
+        &mut self,
+        name: &str,
+        args: &str,
+    ) -> crate::capabilities::tools::api::ToolOutcome;
+}
+
+impl CoreVerify for MemberTools {
+    fn is_readonly(&self, name: &str) -> bool {
+        self.face
+            .builtin_tools
+            .get(name)
+            .map(|s| s.capability == "fs-read")
+            .unwrap_or(false)
+    }
+
+    fn run_readonly(
+        &mut self,
+        name: &str,
+        args: &str,
+    ) -> crate::capabilities::tools::api::ToolOutcome {
+        self.tools.run_builtin(
+            &self.face.sandbox,
+            &self.face.builtin_tools,
+            &mut self.observations,
+            name,
+            args,
+        )
+    }
 }
 
 impl MemberTools {
@@ -320,13 +366,13 @@ impl MemberTools {
     pub(crate) fn tools_block(&self, ids: &[String], with_modules: bool) -> String {
         // 原生通道的工具面由**声明槽**下发（名字 / 说明 / JSON Schema），这里不再重复文字清单：
         // 只保留声明表达不了的内容（patch 的自由格式写法）。信封通道仍由这段文字承载全部工具说明。
-        let native = self.mode == crate::capabilities::llm::api::ToolMode::Native;
+        let native = self.face.mode == crate::capabilities::llm::api::ToolMode::Native;
         let mut parts: Vec<String> = Vec::new();
         if !native {
             for id in ids {
-                if let Some(schema) = self.builtin_tools.get(id) {
+                if let Some(schema) = self.face.builtin_tools.get(id) {
                     // 环境参数只属于人经呈现层：核心代理的 create_session 工具面不列 tier / guest。
-                    let text = if self.role == "core_proxy" && id == "create_session" {
+                    let text = if self.face.role == "core_proxy" && id == "create_session" {
                         schema.render_for_prompt_hiding(&["tier", "guest"])
                     } else {
                         schema.render_for_prompt()
@@ -340,16 +386,18 @@ impl MemberTools {
             .iter()
             .any(|i| i == crate::capabilities::tools::api::PATCH)
         {
-            parts.push(self.notes.patch_guide.clone());
+            parts.push(self.face.notes.patch_guide.clone());
         }
         if with_modules && !native {
-            parts.push(self.notes.module_tools.clone());
-            parts.push(self.notes.module_tool_params.clone());
+            parts.push(self.face.notes.module_tools.clone());
+            parts.push(self.face.notes.module_tool_params.clone());
         }
         if parts.is_empty() {
             return String::new();
         }
-        self.tools_this_turn.replace("{{tools}}", &parts.join("\n"))
+        self.face
+            .tools_this_turn
+            .replace("{{tools}}", &parts.join("\n"))
     }
 }
 

@@ -616,7 +616,7 @@ pub(crate) fn builtin_tool_book_is_the_one_source_of_names_and_paths() {
 
     // 原生通道：工具面由**声明槽**下发，文字清单不再重复；只保留 patch 的自由格式写法。
     let mut native_tools = m.tools.take().expect("工具环境");
-    native_tools.mode = crate::capabilities::llm::api::ToolMode::Native;
+    native_tools.face.mode = crate::capabilities::llm::api::ToolMode::Native;
     m.tools = Some(native_tools);
     let native_block = m
         .tools

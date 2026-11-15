@@ -291,10 +291,10 @@ impl ConductorHandle {
         let Some(tools) = session.tools.as_mut() else {
             return Ok(());
         };
-        if !tools.handlers.is_empty() || !tools.allowed.iter().any(|t| dp::is_proxy_tool(t)) {
+        if !tools.handlers.is_empty() || !tools.face.allowed.iter().any(|t| dp::is_proxy_tool(t)) {
             return Ok(());
         }
-        let face = tools.allowed.clone();
+        let face = tools.face.allowed.clone();
         let granted = {
             let sid = sid.to_string();
             self.call(move |core| Ok(core.history_open(&sid)?.0.delegation.map(|d| d.granted_at)))?

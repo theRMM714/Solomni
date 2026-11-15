@@ -20,7 +20,7 @@ pub fn compact_turn(
     let decl = s
         .tools
         .as_ref()
-        .and_then(|t| t.builtin_tools.get("compact"))
+        .and_then(|t| t.face.builtin_tools.get("compact"))
         .map(|t| t.decl("compact"));
     let mut spec = s.compact_chat()?;
     let thinking = if spec.is_some() { None } else { s.thinking() };
@@ -432,7 +432,7 @@ fn send_view(s: &AgentSession) -> Vec<crate::capabilities::llm::api::Msg> {
     if queries.is_empty() {
         return msgs;
     }
-    let Ok(stale) = ws.work_stale_reads(&tools.sandbox.work_name, &queries) else {
+    let Ok(stale) = ws.work_stale_reads(&tools.face.sandbox.work_name, &queries) else {
         return msgs;
     };
     let judged: Vec<(&crate::capabilities::session::api::ReadAt, bool)> =
@@ -457,8 +457,8 @@ fn run(
     // 装进这一回合的环境（声明与执行都读它），跑完还原。
     let saved = match spec.face.as_ref().zip(s.tools.as_mut()) {
         Some(((ids, with_modules), t)) => Some((
-            std::mem::replace(&mut t.allowed, ids.clone()),
-            std::mem::replace(&mut t.with_modules, *with_modules),
+            std::mem::replace(&mut t.face.allowed, ids.clone()),
+            std::mem::replace(&mut t.face.with_modules, *with_modules),
         )),
         None => None,
     };
@@ -577,8 +577,8 @@ fn run(
         )
     };
     if let (Some(t), Some((allowed, with_modules))) = (s.tools.as_mut(), saved) {
-        t.allowed = allowed;
-        t.with_modules = with_modules;
+        t.face.allowed = allowed;
+        t.face.with_modules = with_modules;
     }
     rounds
 }

@@ -68,7 +68,7 @@ impl Discussion {
             &msgs,
             self.opts(),
             Some(&self.cancel),
-            verify,
+            verify.map(|v| v as &mut dyn crate::capabilities::session::api::CoreVerify),
             sink,
         )?;
         if self.cancelled() {
@@ -227,7 +227,7 @@ impl Execution {
             &msgs,
             opts,
             Some(&self.cancel),
-            verify,
+            verify.map(|v| v as &mut dyn crate::capabilities::session::api::CoreVerify),
             sink,
         );
         if self.cancelled() {

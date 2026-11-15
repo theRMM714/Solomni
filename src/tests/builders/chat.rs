@@ -335,36 +335,38 @@ pub(crate) fn native_member(
     );
     let sb = test_sandbox(id, &[]);
     m.tools = Some(MemberTools {
-        mode: crate::capabilities::llm::api::ToolMode::Native,
-        role: "solo".to_string(),
-        modules,
-        observations: crate::capabilities::tools::api::Observations::default(),
+        face: crate::capabilities::session::api::ToolFace {
+            mode: crate::capabilities::llm::api::ToolMode::Native,
+            role: "solo".to_string(),
+            modules,
+            tier: crate::kernel::api::Tier::Host,
+            guest_lease: String::new(),
+            sandbox: sb.clone(),
+            tools_this_turn: test_prompts()
+                .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
+                .to_string(),
+            builtin_tools: test_systools().tools,
+            unavailable: BTreeMap::new(),
+            fence: crate::kernel::api::FenceSpec::for_session(&sb, &[], false),
+            module_env: Default::default(),
+            runtime_path: None,
+            runtime_roots: Vec::new(),
+            // 测试替身按"执行席"发放全部内置工具（角色表的越权校验另有专门用例）。
+            allowed: crate::capabilities::tools::api::names(),
+            with_modules: true,
+            notes: crate::tests::doubles::test_notes(&sb, &[]),
+        },
         llm: test_llm_demo(),
         log: Arc::new(crate::kernel::ports::NoopLog),
         tools: test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),
-        tier: crate::kernel::api::Tier::Host,
-        guest_lease: String::new(),
         vm: test_vm(),
-        sandbox: sb.clone(),
-        tools_this_turn: test_prompts()
-            .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
-            .to_string(),
-        builtin_tools: test_systools().tools,
-        unavailable: BTreeMap::new(),
-        fence: crate::kernel::api::FenceSpec::for_session(&sb, &[], false),
-        module_env: Default::default(),
-        runtime_path: None,
-        runtime_roots: Vec::new(),
-        shell_live: None,
         residents: Arc::new(crate::capabilities::residents::api::NoResidents),
         // 这些用例只跑工具面：写工具落地后不自动提交（没有工作区）。
         workspace: None,
+        observations: crate::capabilities::tools::api::Observations::default(),
+        shell_live: None,
         reply_seq: 0,
         line: Default::default(),
-        // 测试替身按"执行席"发放全部内置工具（角色表的越权校验另有专门用例）。
-        allowed: crate::capabilities::tools::api::names(),
-        with_modules: true,
-        notes: crate::tests::doubles::test_notes(&sb, &[]),
         handlers: Vec::new(),
     });
     m

@@ -189,7 +189,7 @@ fn model_tool_face_exposes_started_service_ops() {
         },
     );
 
-    let decls = tool_decls(&ctx);
+    let decls = tool_decls(&ctx.face);
     let echo_decl = decls
         .list
         .iter()
@@ -214,7 +214,7 @@ fn model_tool_face_exposes_started_service_ops() {
         Some(&(Some("m0".to_string()), "svc.echo".to_string())),
         "线上名要能译回（模块, 服务.操作）"
     );
-    let listed = available_tools(&ctx);
+    let listed = available_tools(&ctx.face);
     assert!(
         listed.contains("m0.svc.echo"),
         "可用清单要含服务操作：{}",

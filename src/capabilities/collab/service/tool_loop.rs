@@ -6,7 +6,7 @@
 use super::discussion::*;
 use crate::capabilities::llm::api::ToolInvoke;
 use crate::capabilities::permission::api::{CallScope, Decision, Effect, Reach, ReachSet};
-use crate::capabilities::session::api::{MemberTools, SessionEvent};
+use crate::capabilities::session::api::{MemberTools, SessionEvent, ToolFace};
 use crate::capabilities::tools::api::{Observations, ShellFacts, ToolSchema};
 use crate::capabilities::workspace::api::ReadFact;
 use crate::kernel::api::ToolOutcome;
@@ -63,8 +63,8 @@ pub(crate) fn run_branch(
         (String::new(), crate::capabilities::tools::api::refuse(name))
     } else if crate::capabilities::tools::api::is_builtin(name) {
         let mut outcome = ctx.tools.run_builtin(
-            &ctx.sandbox,
-            &ctx.builtin_tools,
+            &ctx.face.sandbox,
+            &ctx.face.builtin_tools,
             &mut branch,
             name,
             args_json,
@@ -80,8 +80,8 @@ pub(crate) fn run_branch(
     } else if let Some(h) = handler_for(ctx, name) {
         // 核心自有工具：与内置、模块走**同一条派发路径**，不是循环里的特例。
         let tctx = crate::kernel::ports::ToolCtx {
-            work: &ctx.sandbox.work_name,
-            agent: &ctx.sandbox.agent,
+            work: &ctx.face.sandbox.work_name,
+            agent: &ctx.face.sandbox.agent,
             line: ctx.line.load(std::sync::atomic::Ordering::Relaxed),
         };
         (String::new(), h.run(&tctx, name, args_json))
@@ -116,7 +116,7 @@ pub(crate) fn commit_writes(
         return;
     };
     let rel = |abs: &std::path::PathBuf| -> Option<String> {
-        abs.strip_prefix(&ctx.sandbox.private)
+        abs.strip_prefix(&ctx.face.sandbox.private)
             .ok()
             .map(crate::kernel::api::slash)
     };
@@ -146,9 +146,9 @@ pub(crate) fn commit_writes(
         line: ctx.line.load(std::sync::atomic::Ordering::Relaxed),
     };
     if let Err(e) = ws.work_commit_auto(
-        &ctx.sandbox.work_name,
-        &ctx.sandbox.agent,
-        &ctx.sandbox.session,
+        &ctx.face.sandbox.work_name,
+        &ctx.face.sandbox.agent,
+        &ctx.face.sandbox.session,
         &req,
     ) {
         outcome.output.push_str(&format!(
@@ -165,15 +165,18 @@ pub(crate) fn face_has(ctx: &MemberTools, module: Option<&str>, name: &str) -> b
     // 不能因为“没写 module”就落进模块工具的兜底分支。
     if crate::capabilities::tools::api::is_builtin(name)
         || crate::capabilities::tools::api::is_exec(name)
-        || ctx.builtin_tools.contains_key(name)
+        || ctx.face.builtin_tools.contains_key(name)
     {
-        ctx.allowed.iter().any(|t| t == name)
+        ctx.face.allowed.iter().any(|t| t == name)
     } else if handler_for(ctx, name).is_some() {
         // 核心自有工具与内置**同口径**：名字在这一回合的工具面里，就是放行。
-        ctx.allowed.iter().any(|t| t == name)
+        ctx.face.allowed.iter().any(|t| t == name)
     } else {
         // 没写 module 不算越权：那是"派发时消歧"的事，由 dispatch_external 如实说清（多模块下不猜）。
-        ctx.with_modules && module.map(|m| ctx.modules.contains_key(m)).unwrap_or(true)
+        ctx.face.with_modules
+            && module
+                .map(|m| ctx.face.modules.contains_key(m))
+                .unwrap_or(true)
     }
 }
 
@@ -205,16 +208,16 @@ pub(crate) fn note_unauthorized(
 /// 目的：这个工具有没有**声明可并发**（策略在册子/清单里，代码里不写名单）：
 ///   内置工具看 `prompts/shared/tools.yaml` 的 `builtin_tools.<名字>.parallel`，模块工具看 `module.yaml` 的 `tools.<名字>.parallel`。
 ///   未声明 = 独占串行；**没写 module 的外部工具也按独占**（那要等 dispatch 才知道是哪个模块，核心不猜）。
-pub(crate) fn is_parallel(ctx: &MemberTools, module: Option<&str>, name: &str) -> bool {
+pub(crate) fn is_parallel(face: &ToolFace, module: Option<&str>, name: &str) -> bool {
     match module {
-        Some(id) => ctx
+        Some(id) => face
             .modules
             .get(id)
             .map(|m| m.parallel.contains(name))
             .unwrap_or(false),
         None => {
             crate::capabilities::tools::api::is_builtin(name)
-                && ctx
+                && face
                     .builtin_tools
                     .get(name)
                     .map(|s| s.parallel)
@@ -274,14 +277,14 @@ fn schema_for(ctx: &MemberTools, module: Option<&str>, tool: &str) -> Option<Too
         || crate::capabilities::tools::api::is_exec(tool)
         || handler_for(ctx, tool).is_some()
     {
-        return ctx.builtin_tools.get(tool).cloned();
+        return ctx.face.builtin_tools.get(tool).cloned();
     }
     let id = match module {
         Some(m) => m,
-        None if ctx.modules.len() == 1 => ctx.modules.keys().next()?.as_str(),
+        None if ctx.face.modules.len() == 1 => ctx.face.modules.keys().next()?.as_str(),
         None => return None,
     };
-    let mt = ctx.modules.get(id)?;
+    let mt = ctx.face.modules.get(id)?;
     if mt.commands.contains_key(tool) || mt.services.contains_key(tool) {
         Some(module_schema())
     } else {
@@ -299,7 +302,7 @@ fn grant_for(
     let schema = match schema_for(ctx, module, tool) {
         Some(s) => s,
         // 模块工具的名字/归属由 dispatch 如实说清（没指明模块、没有这个模块、模块没声明这个工具）。
-        None if !ctx.modules.is_empty() => module_schema(),
+        None if !ctx.face.modules.is_empty() => module_schema(),
         None => return Err(format!("未知工具：{}", tool)),
     };
     let effect = schema.effect();
@@ -326,6 +329,7 @@ fn grant_for(
         None
     };
     let reach = ctx
+        .face
         .sandbox
         .permissions
         .grant(&schema.max_reach(), requested.as_ref())?;
@@ -337,8 +341,8 @@ fn grant_for(
         None
     } else {
         module.map(|m| m.to_string()).or_else(|| {
-            if ctx.modules.len() == 1 {
-                ctx.modules.keys().next().cloned()
+            if ctx.face.modules.len() == 1 {
+                ctx.face.modules.keys().next().cloned()
             } else {
                 None
             }
@@ -348,7 +352,8 @@ fn grant_for(
         .map(|m| format!("{}.{}", m, tool))
         .unwrap_or_else(|| tool.to_string());
     let decision =
-        ctx.sandbox
+        ctx.face
+            .sandbox
             .permissions
             .decision_for(&qualified, effect, scope, schema.decision());
     Ok(CallGrant { reach, decision })
@@ -377,7 +382,7 @@ pub(crate) fn run_batch(
         let grant = match &grants[i] {
             Ok(g) => g.clone(),
             Err(why) => {
-                done[i] = Some((label, deny(ctx, why.clone()), None, None));
+                done[i] = Some((label, deny(&ctx.face, why.clone()), None, None));
                 i += 1;
                 continue;
             }
@@ -385,9 +390,9 @@ pub(crate) fn run_batch(
         if grant.decision.is_deny() {
             let why = format!(
                 "当前档位「{}」不允许这次调用。",
-                ctx.sandbox.permissions.profile.label()
+                ctx.face.sandbox.permissions.profile.label()
             );
-            done[i] = Some((label, deny(ctx, why), None, None));
+            done[i] = Some((label, deny(&ctx.face, why), None, None));
             i += 1;
             continue;
         }
@@ -412,7 +417,7 @@ pub(crate) fn run_batch(
             let Some(gate) = confirms.as_deref_mut() else {
                 let why = "这次调用需要用户确认，但当前没有可回答的前端；按拒绝处理，未执行。"
                     .to_string();
-                done[i] = Some((label, deny(ctx, why), None, None));
+                done[i] = Some((label, deny(&ctx.face, why), None, None));
                 i += 1;
                 continue;
             };
@@ -435,15 +440,15 @@ pub(crate) fn run_batch(
                 let why =
                     "用户没有放行这次工具调用：它没有执行。请换一种做法，或请用户调整会话权限。"
                         .to_string();
-                (label, deny(ctx, why), None, None)
+                (label, deny(&ctx.face, why), None, None)
             });
             i += 1;
             continue;
         }
-        if is_parallel(ctx, module.as_deref(), tool) {
+        if is_parallel(&ctx.face, module.as_deref(), tool) {
             let mut j = i;
             while j < plan.len()
-                && is_parallel(ctx, plan[j].0.as_deref(), &plan[j].1)
+                && is_parallel(&ctx.face, plan[j].0.as_deref(), &plan[j].1)
                 && matches!(&grants[j], Ok(g) if g.decision == Decision::Allow)
             {
                 j += 1;
@@ -497,7 +502,7 @@ pub(crate) fn run_batch(
             ctx.log.info(
                 "action",
                 &crate::capabilities::tools::api::action_audit(
-                    &ctx.role,
+                    &ctx.face.role,
                     &name,
                     outcome.ok,
                     &outcome.output,
@@ -522,7 +527,7 @@ fn adopt_sandbox(
     let Some(ws) = ctx.workspace.as_ref() else {
         return;
     };
-    if ctx.sandbox.work_name.is_empty() {
+    if ctx.face.sandbox.work_name.is_empty() {
         return;
     }
     // 最后一个跑成的不透明工具：回执挂它的结果后面（下一次生成能看到的通道）。
@@ -544,9 +549,9 @@ fn adopt_sandbox(
         .unwrap_or(0);
     let line = ctx.line.load(std::sync::atomic::Ordering::Relaxed);
     let note = match ws.work_adopt_sandbox(
-        &ctx.sandbox.work_name,
-        &ctx.sandbox.agent,
-        &ctx.sandbox.session,
+        &ctx.face.sandbox.work_name,
+        &ctx.face.sandbox.agent,
+        &ctx.face.sandbox.session,
         time,
         line,
     ) {
@@ -577,13 +582,13 @@ fn adopt_note(report: &crate::capabilities::workspace::api::AdoptReport) -> Stri
 /// 目的：本成员这次请求要声明的工具（原生通道用）：内置工具 + 模块工具。
 ///   原生协议里**没有 module 字段**，所以跨模块同名工具靠线上名消歧（{模块}_{工具}，撞名再加序号）；
 ///   返回的映射把线上名翻回（模块, 工具）。模块没声明参数的照旧声明（参数结构交回给工具自己解释）。
-pub(crate) fn tool_decls(ctx: &MemberTools) -> ToolDecls {
+pub(crate) fn tool_decls(face: &ToolFace) -> ToolDecls {
     let mut decls = ToolDecls::default();
     let mut taken: Vec<String> = Vec::new();
     // **只声明这个席位拿到的工具**（判据与执行时校验同一份 allowed）：声明了却调不动没有意义，
     // 模型会照着声明去调，被拒一次就白烧一轮（见 docs/tools/tools-and-roles.md 二）。
-    for (name, schema) in &ctx.builtin_tools {
-        if !ctx.allowed.iter().any(|t| t == name) {
+    for (name, schema) in &face.builtin_tools {
+        if !face.allowed.iter().any(|t| t == name) {
             continue;
         }
         // patch 是自由格式：它的声明单独写（参数是 body 字符串，不是 JSON 信封的 args）
@@ -594,7 +599,7 @@ pub(crate) fn tool_decls(ctx: &MemberTools) -> ToolDecls {
         taken.push(name.clone());
         decls.wire.insert(name.clone(), (None, name.clone()));
     }
-    if ctx
+    if face
         .allowed
         .iter()
         .any(|t| t == crate::capabilities::tools::api::PATCH)
@@ -608,7 +613,7 @@ pub(crate) fn tool_decls(ctx: &MemberTools) -> ToolDecls {
         decls.list.push(patch);
     }
     // 模块工具按**成员归属**发放（不是角色属性）：拿不到模块工具的身份（讨论席）不声明它们。
-    for (id, mt) in ctx.modules.iter().filter(|_| ctx.with_modules) {
+    for (id, mt) in face.modules.iter().filter(|_| face.with_modules) {
         for tool in mt.commands.keys() {
             let mut wire_name = format!("{}_{}", id, tool);
             let mut n = 2;
@@ -664,9 +669,9 @@ pub(crate) fn tool_decls(ctx: &MemberTools) -> ToolDecls {
 
 /// 目的：可用的外部工具清单：逐条列成「模块.工具」，末尾补上内置工具。
 ///   三种失败（模块不存在 / 模块没这个工具 / 缺 module 且模块不唯一）都用它把可选范围说回去。
-pub(crate) fn available_tools(ctx: &MemberTools) -> String {
+pub(crate) fn available_tools(face: &ToolFace) -> String {
     let mut list: Vec<String> = Vec::new();
-    for (id, mt) in &ctx.modules {
+    for (id, mt) in &face.modules {
         for name in mt.commands.keys() {
             list.push(format!("{}.{}", id, name));
         }
@@ -678,10 +683,10 @@ pub(crate) fn available_tools(ctx: &MemberTools) -> String {
     list.join("、")
 }
 
-pub(crate) fn deny(ctx: &MemberTools, why: String) -> ToolOutcome {
+pub(crate) fn deny(face: &ToolFace, why: String) -> ToolOutcome {
     ToolOutcome {
         ok: false,
-        output: format!("{}。可用：{}", why, available_tools(ctx)),
+        output: format!("{}。可用：{}", why, available_tools(face)),
     }
 }
 
@@ -696,7 +701,7 @@ pub(crate) fn run_shell(
     cancel: &std::sync::atomic::AtomicBool,
 ) -> (ToolOutcome, Option<ShellFacts>) {
     use crate::capabilities::tools::api;
-    let Some(schema) = ctx.builtin_tools.get(name) else {
+    let Some(schema) = ctx.face.builtin_tools.get(name) else {
         return (api::refuse(name), None);
     };
     let call = match api::parse_shell(schema, args_json) {
@@ -711,7 +716,7 @@ pub(crate) fn run_shell(
             );
         }
     };
-    if ctx.sandbox.private.as_os_str().is_empty() {
+    if ctx.face.sandbox.private.as_os_str().is_empty() {
         return (
             ToolOutcome {
                 ok: false,
@@ -720,15 +725,19 @@ pub(crate) fn run_shell(
             None,
         );
     }
-    let mut fence =
-        crate::kernel::api::FenceSpec::for_call(&ctx.sandbox, &grant.reach, None, &ctx.fence)
-            .at(&ctx.sandbox.private);
-    fence.ro_tree.extend(ctx.runtime_roots.iter().cloned());
+    let mut fence = crate::kernel::api::FenceSpec::for_call(
+        &ctx.face.sandbox,
+        &grant.reach,
+        None,
+        &ctx.face.fence,
+    )
+    .at(&ctx.face.sandbox.private);
+    fence.ro_tree.extend(ctx.face.runtime_roots.iter().cloned());
     fence.ro_tree.sort();
     fence.ro_tree.dedup();
     // 容器身份按"会话 + agent + 受保护根集合"派生（见 container_name）：scope 不同 → 根集合不同 → 不同 SID；
     // 同一 reach 的后续调用复用 SID 与 ACL。生命周期归会话，调用结束不释放。
-    if ctx.tier == crate::kernel::api::Tier::Vm && ctx.guest_lease.is_empty() {
+    if ctx.face.tier == crate::kernel::api::Tier::Vm && ctx.face.guest_lease.is_empty() {
         return (
             ToolOutcome {
                 ok: false,
@@ -739,9 +748,9 @@ pub(crate) fn run_shell(
     }
     let started = std::time::Instant::now();
     // cwd 用**本环境写法**：本机档是宿主路径，虚拟机档是 guest 内路径（与文件工具、提示词同一座路径桥）。
-    let cwd_view = match ctx.sandbox.path_codec.as_ref() {
-        Some(codec) => codec.to_view(&ctx.sandbox.private),
-        None => ctx.sandbox.private.display().to_string(),
+    let cwd_view = match ctx.face.sandbox.path_codec.as_ref() {
+        Some(codec) => codec.to_view(&ctx.face.sandbox.private),
+        None => ctx.face.sandbox.private.display().to_string(),
     };
     let slot = ctx.shell_live.clone();
     if let Some(slot) = &slot {
@@ -754,24 +763,24 @@ pub(crate) fn run_shell(
     }
     // 本机档的围栏准备耗时由 ProcessRunner 同线程交棒（见 kernel 的 take_fence_prep）；虚拟机档没有本机 ACL 准备，这里恒为 None。
     let mut fence_prep: Option<crate::kernel::api::FenceTiming> = None;
-    let mut outcome = if ctx.tier == crate::kernel::api::Tier::Vm {
+    let mut outcome = if ctx.face.tier == crate::kernel::api::Tier::Vm {
         let run = crate::capabilities::vm::api::GuestRun {
             command: call.script.clone(),
             args_json: String::new(),
             env: Vec::new(),
-            cwd: ctx.sandbox.private.display().to_string(),
+            cwd: ctx.face.sandbox.private.display().to_string(),
             timeout_secs: call.timeout.as_secs(),
             output_limit: crate::capabilities::vm::api::OutputLimit::Shell,
         };
         ctx.vm
-            .guest_run_fenced_cancellable(&ctx.guest_lease, &run, &fence, Some(cancel))
+            .guest_run_fenced_cancellable(&ctx.face.guest_lease, &run, &fence, Some(cancel))
     } else {
         let run = crate::kernel::ports::ShellRun {
             fence: &fence,
             script: &call.script,
             timeout: call.timeout,
             cancel: Some(cancel),
-            path: ctx.runtime_path.as_deref(),
+            path: ctx.face.runtime_path.as_deref(),
             ask,
             gate: None,
         };
@@ -798,7 +807,7 @@ pub(crate) fn run_shell(
             fence_prep.as_ref().map(|timing| timing.as_secs()),
         ));
     }
-    let external = ctx.sandbox.permissions.decision_for(
+    let external = ctx.face.sandbox.permissions.decision_for(
         name,
         Effect::Exec,
         CallScope::External,
@@ -830,27 +839,29 @@ pub(crate) fn dispatch_external(
 ) -> (String, ToolOutcome) {
     let module = match inv.module.as_deref() {
         Some(m) => m.to_string(),
-        None if ctx.modules.len() == 1 => ctx.modules.keys().next().cloned().unwrap_or_default(),
+        None if ctx.face.modules.len() == 1 => {
+            ctx.face.modules.keys().next().cloned().unwrap_or_default()
+        }
         None => {
             let why = format!(
                 "工具 {} 没有指明所属模块（本 agent 有多个模块，核心不替你猜），请在信封里写 module",
                 inv.name
             );
-            return (String::new(), deny(ctx, why));
+            return (String::new(), deny(&ctx.face, why));
         }
     };
-    let Some(mt) = ctx.modules.get(&module) else {
+    let Some(mt) = ctx.face.modules.get(&module) else {
         let why = format!("本 agent 没有模块 {}", module);
-        return (module.clone(), deny(ctx, why));
+        return (module.clone(), deny(&ctx.face, why));
     };
     // 运行包未就绪（本档位下该模块的工具不执行）：如实报缺哪个能力，让模型换工具或告诉用户。
-    if let Some(caps) = ctx.unavailable.get(&module) {
+    if let Some(caps) = ctx.face.unavailable.get(&module) {
         let why = format!(
             "模块 {} 的运行包 {} 未装载，本会话不执行它的工具；请如实告知用户，并改用其它可用工具。",
             module,
             caps.join("、")
         );
-        return (module.clone(), deny(ctx, why));
+        return (module.clone(), deny(&ctx.face, why));
     }
     // 常驻服务的操作：不走外部命令，转给常驻服务能力（服务进程已在它自己的围栏里跑着）。
     if let Some(op) = mt.services.get(&inv.name) {
@@ -858,7 +869,7 @@ pub(crate) fn dispatch_external(
             Ok(a) => a,
             Err(e) => {
                 let why = format!("参数不是合法 JSON：{}", e);
-                return (module.clone(), deny(ctx, why));
+                return (module.clone(), deny(&ctx.face, why));
             }
         };
         let outcome = match ctx.residents.call(&module, &op.service, &op.op, &args) {
@@ -885,16 +896,17 @@ pub(crate) fn dispatch_external(
                             let why = crate::capabilities::tools::api::arg_fault_text(
                                 &full, book, &fault,
                             );
-                            return (module.clone(), deny(ctx, why));
+                            return (module.clone(), deny(&ctx.face, why));
                         }
                     }
                     Err(e) => {
                         let why = format!("参数不是合法 JSON：{}", e);
-                        return (module.clone(), deny(ctx, why));
+                        return (module.clone(), deny(&ctx.face, why));
                     }
                 }
             }
             let env = ctx
+                .face
                 .module_env
                 .get(&module)
                 .map(|v| v.as_slice())
@@ -902,18 +914,18 @@ pub(crate) fn dispatch_external(
             // 每次调用按生效 reach 派生围栏：sh 与模块工具同一把尺子，不再用会话并集围栏执行。
             // 容器身份 = 会话 + agent + 受保护根集合（见 container_name）；租约就是会话 id，调用结束不释放。
             let fence = crate::kernel::api::FenceSpec::for_call(
-                &ctx.sandbox,
+                &ctx.face.sandbox,
                 &grant.reach,
                 Some(&module),
-                &ctx.fence,
+                &ctx.face.fence,
             )
             .at(&mt.root);
-            let outcome = if ctx.tier == crate::kernel::api::Tier::Vm {
+            let outcome = if ctx.face.tier == crate::kernel::api::Tier::Vm {
                 // 虚拟机档：命令送进这个会话的 guest；per-call 断网由 guest helper 落实。
-                if ctx.guest_lease.is_empty() {
+                if ctx.face.guest_lease.is_empty() {
                     return (
                         module,
-                        deny(ctx, "这条虚拟机档会话没有 guest 租约".to_string()),
+                        deny(&ctx.face, "这条虚拟机档会话没有 guest 租约".to_string()),
                     );
                 }
                 // 共享盘不承载执行位：模块声明的相对入口先落进 guest 本地副本，再把首 token 换成它
@@ -922,7 +934,7 @@ pub(crate) fn dispatch_external(
                 let dispatched = match crate::capabilities::modules::api::local_entry(declared) {
                     Some(entry) => {
                         match ctx.vm.stage_exec(
-                            &ctx.guest_lease,
+                            &ctx.face.guest_lease,
                             &module,
                             &mt.root.join(entry),
                             entry,
@@ -930,13 +942,13 @@ pub(crate) fn dispatch_external(
                             Ok(staged) => {
                                 format!("{}{}", staged, &declared[entry.len()..])
                             }
-                            Err(why) => return (module, deny(ctx, why)),
+                            Err(why) => return (module, deny(&ctx.face, why)),
                         }
                     }
                     None => declared.to_string(),
                 };
                 ctx.vm.guest_run_fenced(
-                    &ctx.guest_lease,
+                    &ctx.face.guest_lease,
                     &crate::capabilities::vm::api::GuestRun {
                         command: dispatched,
                         args_json: inv.args_json.clone(),
@@ -954,7 +966,7 @@ pub(crate) fn dispatch_external(
                     command,
                     &inv.args_json,
                     env,
-                    ctx.runtime_path.as_deref(),
+                    ctx.face.runtime_path.as_deref(),
                     mt.parallel.contains(&inv.name),
                     ask,
                 )
@@ -963,7 +975,7 @@ pub(crate) fn dispatch_external(
         }
         None => {
             let why = format!("模块 {} 未声明工具 {}", module, inv.name);
-            (module.clone(), deny(ctx, why))
+            (module.clone(), deny(&ctx.face, why))
         }
     }
 }

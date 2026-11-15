@@ -94,6 +94,7 @@ pub(crate) fn module_tool_params_are_declared_in_the_manifest_and_enforced_by_co
     m.tools
         .as_mut()
         .expect("工具环境")
+        .face
         .modules
         .get_mut("m0")
         .expect("模块")
@@ -133,6 +134,7 @@ pub(crate) fn module_tool_params_are_declared_in_the_manifest_and_enforced_by_co
     m2.tools
         .as_mut()
         .expect("工具环境")
+        .face
         .modules
         .get_mut("m0")
         .expect("模块")

@@ -38,7 +38,9 @@ impl CollabSession {
                 tool_mode: self.core_mode,
                 opts: CompleteOpts::plain(false),
                 cancel: None,
-                verify: verify.as_mut(),
+                verify: verify
+                    .as_mut()
+                    .map(|v| v as &mut dyn crate::capabilities::session::api::CoreVerify),
                 sink,
             },
         );
