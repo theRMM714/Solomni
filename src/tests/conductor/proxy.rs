@@ -680,7 +680,7 @@ pub(crate) fn the_proxy_session_rebuilds_from_disk() {
         .call(move |core| core.rebuild_session(&meta, &events))
         .expect("重建代理会话");
     match session {
-        crate::capabilities::conductor::service::Session::Single(s) => {
+        crate::capabilities::turn::api::Session::Single(s) => {
             let tools = s.tools.as_ref().expect("有工具环境");
             assert!(
                 tools.allowed.iter().any(|t| t == d::CATALOG),
@@ -1459,8 +1459,8 @@ pub(crate) fn ai_created_child_inherits_the_proxy_environment() {
 /// 目的：代理档位显式落盘、配置可见；私有沙箱是真实目录，不再 private=shared。
 #[test]
 pub(crate) fn proxy_profile_is_explicit_and_uses_a_real_private_sandbox() {
-    use crate::capabilities::conductor::service::Session;
     use crate::capabilities::permission::api::ProfileId;
+    use crate::capabilities::turn::api::Session;
     let (handle, ops) = super::super::ops_with(vec![], vec!["好"]);
     let sid = handle
         .call(|core| {

@@ -8,7 +8,7 @@
 > 分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九；单元划分与文档路由见 [AGENTS.md](../../AGENTS.md)。
 
 > 它与别的能力**平级**：只经各能力的 `api` 编排，**不持任何别人的端口**（R12）。
-> 它拥有的是**没有任何参与方拥有**的那部分不变式：会话在世表、命令队列、运行态与跨会话编排。
+> 它拥有的是**没有任何参与方拥有**的那部分不变式：命令队列、工作形态与跨会话编排；会话在世表、运行态、占名表与裁决队句柄在 `turn`。
 
 | 文件 | 职责 |
 | --- | --- |
@@ -25,7 +25,7 @@
 | `src/capabilities/conductor/api/generation/compact.rs` | 手动压缩：让模型自己压，队列只占「取 / 交」，压不动如实说 |
 | `src/capabilities/conductor/api/generation/collab.rs` | 协作泵：开始讨论 / 回答 / 继续，与主线程握手（`AskReq` / `MemberTurn`），事件边产边送 |
 | `src/capabilities/conductor/api/contract_impls.rs` | 各能力入站契约的队列代理：每个方法克隆入参 → 进命令队列 → 取回结果（呈现层因此只持 `Ops`，拿不到 `Conductor`） |
-| `src/capabilities/conductor/service.rs` | 会话中心：会话在世表、命令队列、运行态与派发闸（`dispatch_gate`） |
+| `src/capabilities/conductor/service.rs` | 会话中心：命令队列、派发闸（`dispatch_gate`）与会话装配的入口；状态容器在 turn（`src/capabilities/turn/service/state.rs`） |
 | `src/capabilities/conductor/service/action.rs` | 动作的核心实现：把规整后的建会话载荷变成一条会话 |
 | `src/capabilities/conductor/service/work.rs` | 工作方法族入口：建工作的两段结果、改配准备结果、模块声明的能力表、运行包重建判据 |
 | `src/capabilities/conductor/service/work/report.rs` | 运行包报告与档位视图：模块声明的能力、包库可用版本、缺失清单、平台与库、计划与权限视图 |

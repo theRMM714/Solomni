@@ -5,6 +5,7 @@
 //!   本方法族只碰 probe / packages / modules / root 这四个字段。
 
 use super::*;
+use std::collections::BTreeMap;
 
 impl Conductor {
     /// 目的：运行能力报告：模块声明的能力、包库里的可用版本、缺失清单与虚拟机档诊断。

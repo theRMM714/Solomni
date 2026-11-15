@@ -14,6 +14,7 @@ mod views;
 use super::guest_job::{EditGuest, GuestBoot};
 use super::*;
 use crate::capabilities::packages::api as pkgs;
+use std::collections::BTreeMap;
 
 /// 目的：一次创建的准备结果——"已经建完"或"待提交"（后者等调用方线程把 guest 起起来）。
 pub(crate) enum PreparedWork {

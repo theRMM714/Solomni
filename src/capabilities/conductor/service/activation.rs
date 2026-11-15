@@ -2,23 +2,23 @@
 //! 管：跨重启续跑与回档的前提（状态全部派生）、激活的三步（构建请求 / 准备 / 提交）。
 //! 不管：回合怎么跑（turn.rs / flow.rs）、协作动作（flow.rs）。
 //! 联动：turn / flow 在推进前经 ensure_session 取活动会话。
-//!   本方法族只碰 history / sessions / registry / vm 这几个字段。
+//!   本方法族只碰 history / turn / registry / vm 这四个字段。
 
 use super::*;
 
 impl Conductor {
     /// 目的：历史会话转为活动会话（跨重启续跑/回档的前提）：按转录重建，状态全部派生。
     pub(crate) fn ensure_session(&mut self, sid: &str) -> Result<(), String> {
-        if self.sessions.contains_key(sid) {
+        if self.turn.holds(sid) {
             return Ok(());
         }
         // 会话对象在工作线程上（生成中）：**不能**从盘上再建一份（会变成两个实例）。
-        if self.running.contains(sid) {
+        if self.turn.is_running(sid) {
             return Err(Self::running_refusal(sid));
         }
         let (meta, events) = self.history_open(sid)?;
         let rebuilt = self.rebuild_session(&meta, &events)?;
-        self.sessions.insert(sid.to_string(), rebuilt);
+        self.turn.put(sid, rebuilt);
         Ok(())
     }
 
@@ -45,7 +45,7 @@ impl Conductor {
         if meta.run == RunState::Closed {
             return Err(format!("会话 {} 已关闭：终态，不能再启用", sid));
         }
-        if self.running.contains(sid) {
+        if self.turn.is_running(sid) {
             return Ok(super::PreparedActivation::Running(Box::new(
                 self.session_view(sid)?,
             )));
@@ -75,7 +75,7 @@ impl Conductor {
                 drop(boot);
                 if let Err(e) = self.ensure_session(&sid) {
                     if let Some(l) = &lease
-                        && !self.running.contains(&sid)
+                        && !self.turn.is_running(&sid)
                     {
                         self.vm.guest_stop(l);
                     }

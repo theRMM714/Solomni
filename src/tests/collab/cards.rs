@@ -235,7 +235,7 @@ pub(crate) fn cards_and_answers_survive_a_rebuild() {
     // 重启 / 回档走同一条重建路：按**转录**重建，卡与选项都要回来（卡号稳定）。
     let (meta, events) = core.history_open("w").unwrap();
     let rebuilt_session = core.rebuild_session(&meta, &events).expect("按转录重建");
-    let crate::capabilities::conductor::service::Session::Collab(c) = rebuilt_session else {
+    let crate::capabilities::turn::api::Session::Collab(c) = rebuilt_session else {
         panic!("重建出来的还该是协作会话");
     };
     let rebuilt = c.door.queue().expect("重建后卡还在").card;
@@ -452,7 +452,7 @@ pub(crate) fn a_second_gate_queues_behind_the_first() {
     // **整队重建**（重启走这条路）：还没答之前重建，队首与后面还在等的那张都在、顺序不乱。
     let (meta, events) = core.history_open("w").unwrap();
     let rebuilt = core.rebuild_session(&meta, &events).expect("按转录重建");
-    let crate::capabilities::conductor::service::Session::Collab(c) = rebuilt else {
+    let crate::capabilities::turn::api::Session::Collab(c) = rebuilt else {
         panic!("重建出来的还该是协作会话");
     };
     let q = c.door.queue().expect("重建后队首还在");
@@ -476,7 +476,7 @@ pub(crate) fn a_second_gate_queues_behind_the_first() {
     // **重建整队**（重启 / 回档走同一条路）：按转录重建出来的是**整条队**，不只是最后一张，顺序不乱。
     let (meta, events) = core.history_open("w").unwrap();
     let rebuilt = core.rebuild_session(&meta, &events).expect("按转录重建");
-    let crate::capabilities::conductor::service::Session::Collab(c) = rebuilt else {
+    let crate::capabilities::turn::api::Session::Collab(c) = rebuilt else {
         panic!("重建出来的还该是协作会话");
     };
     let q = c.door.queue().expect("重建后队首还在");
@@ -571,9 +571,7 @@ pub(crate) fn stopping_voids_the_whole_queue_and_persists_it() {
             move |core| {
                 let s = core.rebuild_session(&meta, &events)?;
                 match s {
-                    crate::capabilities::conductor::service::Session::Collab(c) => {
-                        Ok(c.door.queue())
-                    }
+                    crate::capabilities::turn::api::Session::Collab(c) => Ok(c.door.queue()),
                     _ => Err("重建出来的还该是协作会话".to_string()),
                 }
             }

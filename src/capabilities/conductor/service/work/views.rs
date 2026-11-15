@@ -2,9 +2,10 @@
 //! 管：会话视图与存在性、继续判据、文件视图、上传、日志、提交视图与回滚恢复。
 //! 不管：会话怎么建（`create.rs`）、配置怎么改（`config.rs`）、提交本身（workspace）。
 //! 联动：api 层的会话与文件接口直接转发到这里。
-//!   本方法族只碰 workspace / sessions / history / running 这四个字段。
+//!   本方法族只碰 workspace / turn / history 这三个字段。
 
 use super::*;
+use std::collections::BTreeMap;
 
 impl Conductor {
     /// 目的：上下文「继续」是否该出现——判据只在后端（前端不按末条/模式猜）。
@@ -23,7 +24,7 @@ impl Conductor {
         match mode {
             "single" => {
                 let user_last =
-                    matches!(self.sessions.get(sid), Some(Session::Single(s)) if s.last_is_user());
+                    matches!(self.turn.session(sid), Some(Session::Single(s)) if s.last_is_user());
                 if user_last {
                     Some(ContinueView {
                         kind: "turn".to_string(),
@@ -56,14 +57,14 @@ impl Conductor {
         // 在表里的会话 + **正在生成的会话**（后者对象在工作线程上，但它确实存在、也确实在跑）。
         // 漏掉它们会让界面以为会话不见了。
         let running: Vec<(String, bool)> = self
-            .running
-            .iter()
+            .turn
+            .running_iter()
             .map(|sid| (sid.clone(), false))
             .collect();
         let running_now: std::collections::BTreeSet<String> =
-            self.running.iter().cloned().collect();
+            self.turn.running_iter().cloned().collect();
         let listed: Vec<(String, bool)> = self
-            .sessions
+            .turn
             .iter()
             .map(|(sid, s)| {
                 let done = match s {
@@ -99,19 +100,19 @@ impl Conductor {
                 );
                 // 「改需求」能力位：有本次需求行才给。在表里看会话种类；不在表里（生成中/未打开）
                 // 看落盘 meta 的形态（那是名单与形态的单一真相）。
-                let can_update_task = match self.sessions.get(&sid) {
+                let can_update_task = match self.turn.session(&sid) {
                     Some(Session::Collab(_)) => true,
                     Some(Session::Single(_)) => false,
                     None => mode == "collab",
                 };
                 // 待裁决：**判据只有队本身**（核心各关卡与工具级确认排在同一条队上）——
                 // 正在生成的会话（对象在工作线程手里）照样取得到；推的卡片事件与它是同一份。
-                let pending = self.desk.peek(&sid).and_then(|d| d.json());
+                let pending = self.turn.desk().peek(&sid).and_then(|d| d.json());
                 let running = running_now.contains(&sid);
                 let continue_action =
                     self.continue_action(&sid, running, &mode, &run, pending.is_some());
                 // 只有持续对话的会话才有单一上下文；协作主会话由核心按次组上下文，不伪造数字。
-                let context = match self.sessions.get(&sid) {
+                let context = match self.turn.session(&sid) {
                     Some(Session::Single(s)) => s.context_usage(),
                     _ => None,
                 };
@@ -188,7 +189,7 @@ impl Conductor {
     }
 
     pub fn session_exists(&self, name: &str) -> bool {
-        self.sessions.contains_key(name)
+        self.turn.holds(name)
     }
 }
 
@@ -204,7 +205,7 @@ impl Conductor {
     ) -> Result<bool, String> {
         // 策略在 conductor：先净化文件名，再交给工作区端口（机制只看已净化的名字）。
         let name = crate::capabilities::workspace::api::safe_file_name(name)?;
-        if !self.sessions.contains_key(sid) && self.history.load(sid).is_err() {
+        if !self.turn.holds(sid) && self.history.load(sid).is_err() {
             return Err(format!("无此会话：{}", sid));
         }
         // 先恢复未完成的版本库事务，再做同名文件判定：否则 pending 里的文件会被当成不存在。
@@ -215,7 +216,7 @@ impl Conductor {
         }
         // 用户投喂 = 一次**权威提交**（作者 user）：共享区只有提交这一条写路径。
         // 锚到主会话当时的下一条行号，回档才能把这次投喂算进某个转录点。
-        let line = match self.sessions.get(sid) {
+        let line = match self.turn.session(sid) {
             Some(Session::Single(s)) => s.next_line,
             Some(Session::Collab(c)) => c.next_line,
             None => 0,
@@ -308,7 +309,11 @@ impl Conductor {
     ) -> Result<(Option<u64>, Vec<SessionEvent>), String> {
         let work = self.work_root(sid)?;
         let tree = self.subtree_of(&work);
-        if let Some(running) = self.running.iter().find(|s| tree.iter().any(|x| x == *s)) {
+        if let Some(running) = self
+            .turn
+            .running_iter()
+            .find(|s| tree.iter().any(|x| x == *s))
+        {
             return Err(Self::running_refusal(running));
         }
         let current = self.workspace.work_head(&work)?.unwrap_or(0);

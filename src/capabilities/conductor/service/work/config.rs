@@ -2,7 +2,7 @@
 //! 管：配置视图、改配准备（新 meta 与子树上浮）、提交落盘、围栏撤权、权限档写入、配置记录。
 //! 不管：建工作与 guest 启动（`create.rs`）、报告与档位（`report.rs`）。
 //! 联动：api 层的配置接口与 `work_tools` 经这里调用；落盘走 history 与 workspace。
-//!   本方法族只碰 probe / history / sessions / log 这四个字段。
+//!   本方法族只碰 probe / history / turn / log 这四个字段。
 
 use super::*;
 
@@ -94,7 +94,7 @@ impl Conductor {
             sid.to_string()
         };
         for s in self.subtree_of(&guard) {
-            if self.running.contains(&s) {
+            if self.turn.is_running(&s) {
                 return Err(Self::running_refusal(&s));
             }
         }
@@ -359,7 +359,7 @@ impl Conductor {
         let (meta, _) = self.history_open(sid)?;
         let guard = self.work_root(sid).unwrap_or_else(|_| sid.to_string());
         for s in self.subtree_of(&guard) {
-            if self.running.contains(&s) {
+            if self.turn.is_running(&s) {
                 return Err(Self::running_refusal(&s));
             }
         }
@@ -396,7 +396,7 @@ impl Conductor {
             self.release_fences(s);
         }
         for s in changed {
-            self.sessions.remove(&s);
+            self.turn.take(&s);
         }
         Ok(())
     }
@@ -420,9 +420,9 @@ impl Conductor {
         }
         self.record_config(&sid, &new_meta);
         // 内存里那份是按旧配置装的：丢掉主会话与整棵子树，下一次访问按新配置从转录重建。
-        self.sessions.remove(&sid);
+        self.turn.take(&sid);
         for child in &new_children {
-            self.sessions.remove(&child.name);
+            self.turn.take(&child.name);
         }
         Ok(())
     }

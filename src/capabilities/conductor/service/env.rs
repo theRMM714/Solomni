@@ -5,6 +5,7 @@
 //!   本方法族只碰 registry / history / systools / workspace 这几个字段。
 use super::*;
 use crate::capabilities::packages::api as pkgs;
+use std::collections::BTreeMap;
 
 impl Conductor {
     /// 目的：这台会话的**共享 guest 作用域**——(guest 租约, 该租约对应的会话 meta)。

@@ -2,7 +2,7 @@
 //! 管：`llm_opts` / `llm_opts_for`、思考片段与思考档视图、`set_thinking`、`set_context_freshness`。
 //! 不管：通道本身（llm 能力）、会话配置落盘（`config.rs`）。
 //! 联动：turn / flow 每次调用模型前取参数；api 层的设置接口改思考档。
-//!   本方法族只碰 registry / history / running / sessions 这四个字段。
+//!   本方法族只碰 registry / history / turn 这三个字段。
 
 use super::*;
 
@@ -158,7 +158,7 @@ impl Conductor {
         let level = level.trim();
         let root = self.work_root(sid)?;
         for s in self.subtree_of(&root) {
-            if self.running.contains(&s) {
+            if self.turn.is_running(&s) {
                 return Err(Self::running_refusal(&s));
             }
         }
@@ -198,7 +198,7 @@ impl Conductor {
         self.record_config(&root, &meta);
         // 内存里的会话按旧参数装着：整棵丢掉，下一次访问按新档位从转录重建。
         for s in self.subtree_of(&root) {
-            self.sessions.remove(&s);
+            self.turn.take(&s);
         }
         Ok(())
     }
@@ -209,7 +209,7 @@ impl Conductor {
     pub(crate) fn set_context_freshness(&mut self, sid: &str, on: bool) -> Result<(), String> {
         let root = self.work_root(sid)?;
         for s in self.subtree_of(&root) {
-            if self.running.contains(&s) {
+            if self.turn.is_running(&s) {
                 return Err(Self::running_refusal(&s));
             }
         }
@@ -221,7 +221,7 @@ impl Conductor {
         self.history.save_meta(&meta)?;
         self.record_config(&root, &meta);
         for s in self.subtree_of(&root) {
-            self.sessions.remove(&s);
+            self.turn.take(&s);
         }
         Ok(())
     }

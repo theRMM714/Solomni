@@ -2,7 +2,7 @@
 //! 管：前置判据（登记处有没有模型、核心默认设没设）、队列分发与行解析。
 //! 不管：名单的业务规则（slate 能力）、协作链推进（flow.rs）。
 //! 联动：api 层的推荐接口经这里调用。
-//!   本方法族只碰 registry / history / running / sessions 这几个字段。
+//!   本方法族只碰 registry / history / turn 这三个字段。
 
 use super::*;
 
