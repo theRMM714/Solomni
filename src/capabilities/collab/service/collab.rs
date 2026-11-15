@@ -1,6 +1,6 @@
 //! 目的：协作会话状态机——建组、讨论、整理（出任务链）、审查关卡、链驱动、节点验收、总验收。
 //! 管：会话对象的字段（名单 / 讨论 / 链 / **本会话的裁决队句柄**）与各关卡的登记、处置、快照形态。
-//! 不管：队列本身的排队与校验（在 `crate::capabilities::session::api::DecisionDoor`，与工具级确认共用）、
+//! 不管：队列本身的排队与校验（在 `crate::capabilities::session::api::Gates`，与工具级确认共用）、
 //!   讨论推进（`discussion.rs`）、泵的每一步（`pump.rs`）、回合收发与回答（`turn_io.rs`）、
 //!   代拟名单与按转录重建（`slate.rs`）；它不碰会话表，也不写别人的会话。
 //! 联动：契约见 docs/session/session-model.md 的「请用户裁决：一条通道，消息 + 选项」与
@@ -14,7 +14,7 @@ use crate::capabilities::modules::api::Modules;
 use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::registry::api::Settings;
 use crate::capabilities::session::api::AgentMeta;
-use crate::capabilities::session::api::{DecisionDoor, LineView, Pending, SessionEvent};
+use crate::capabilities::session::api::{Gates, LineView, Pending, SessionEvent};
 use crate::capabilities::tools::api::ToolExec;
 use crate::capabilities::vm::api::Vm;
 use crate::capabilities::workspace::api::Sandboxes;
@@ -112,8 +112,8 @@ pub struct CollabSession {
     pub(crate) slate_picks: Vec<AgentMeta>,
     /// 目的：登记处快照：agent 的模型解析与核心通道在此进行（策略在 conductor）。
     pub(crate) settings: Settings,
-    /// 目的：本会话的裁决队（**与工具级确认共用同一条队**）：排队与校验归它，这里只管各关卡的处置。
-    pub(crate) door: Arc<DecisionDoor>,
+    /// 目的：本会话的裁决通道（**与工具级确认共用同一条队**）：排队与校验归它，这里只管各关卡的处置。
+    pub(crate) door: Arc<dyn Gates>,
     pub(crate) allow: bool,
     /// 目的：已记录在案的执行方案（回档/重启后沿用，未整理则为 None）。
     pub(crate) plan: Option<String>,
@@ -193,7 +193,7 @@ impl CollabSession {
         // 工作区用例面：写工具落地后自动提交（基线过期时如实拒绝，不降级）。
         workspace: Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync>,
         // 本会话的裁决队（核心按会话 id 给；与工具级确认共用同一条）。
-        door: Arc<DecisionDoor>,
+        door: Arc<dyn Gates>,
     ) -> Result<CollabSession, String> {
         let core_chat = llm.core_channel(&core_channel);
         let core_mode = settings.tool_mode_for(None);
@@ -451,7 +451,7 @@ impl CollabSession {
     /// 约束：卡号与排队归队列（会话内唯一、跨重启稳定）；一次只有队首那张对用户可见 / 可答。
     pub(crate) fn ask_user(&mut self, p: Pending, sink: &mut dyn FnMut(SessionEvent)) {
         let advice = std::mem::take(&mut self.gate_advice);
-        let (_id, evs) = self.door.push(None, p, &advice, None);
+        let (_id, evs) = self.door.raise(None, p, &advice);
         for e in evs {
             sink(e);
         }

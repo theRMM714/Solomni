@@ -469,36 +469,28 @@ fn run(
                        sink: &mut dyn FnMut(SessionEvent)|
      -> String {
         use crate::capabilities::session::api::{
-            AnswerSlot, OPT_TOOL_ALLOW, OPT_TOOL_ALLOW_TURN, OPT_TOOL_DENY, Pending, SlotWake,
-            qualify,
+            OPT_TOOL_ALLOW, OPT_TOOL_ALLOW_TURN, OPT_TOOL_DENY, Pending, SlotWake, qualify,
         };
         let Some(door) = decisions.as_ref() else {
             return OPT_TOOL_DENY.to_string();
         };
         let name = qualify(req.module.as_deref(), &req.tool);
-        // 待确认落一条系统行（可回放），再进队并推卡片——**先登记再推**：
-        // 否则用户手快会答在一张还没进队的卡上，答案丢掉、生成干等。
+        // 待确认落一条系统行（可回放），再进队并推卡片——端口负责**先登记再推**、
+        // 不设超时地等（回答由核心写进这一格；整队作废（停止）= 拒绝）。
         sink(SessionEvent::Notice(format!(
             "[待确认] 工具 {} 需要用户放行。",
             name
         )));
-        let slot = AnswerSlot::new();
-        let (_, evs) = door.push(
-            None,
+        let wake = door.ask(
             Pending::ToolApproval {
                 agent: agent.clone(),
                 module: req.module.clone(),
                 tool: req.tool.clone(),
                 args: req.args.clone(),
             },
-            "",
-            Some(std::sync::Arc::clone(&slot)),
+            sink,
         );
-        for e in evs {
-            sink(e);
-        }
-        // 等用户按卡上的选项作答（**不设超时**）：回答由核心写进这一格；整队作废（停止）= 拒绝。
-        let answer = match slot.wait() {
+        let answer = match wake {
             SlotWake::Answer(id) => id,
             _ => OPT_TOOL_DENY.to_string(),
         };

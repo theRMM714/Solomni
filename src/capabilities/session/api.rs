@@ -4,7 +4,7 @@
 //! 联动：呈现层经 conductor 的队列代理调 `HistoryOps`；别的能力经 `History` 造会话、追流水、读元信息、删会话。
 
 pub use crate::capabilities::session::domain::decisions::{
-    AnswerSlot, Answered, DecisionDesk, DecisionDoor, GateTicket, SlotWake, issued_in,
+    Answered, Decisions, GateTicket, Gates, SlotWake, decisions, issued_in,
 };
 pub use crate::capabilities::session::domain::events::{
     CheckView, ContextUsage, DecisionCard, DecisionOption, DecisionQueue, DecisionWaiter, LineView,

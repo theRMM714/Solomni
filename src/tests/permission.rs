@@ -748,7 +748,7 @@ fn tool_layer_ask_rides_the_decision_channel() {
 #[test]
 fn decision_door_queues_only_the_head_and_voids_waiters() {
     use crate::capabilities::session::api::{
-        AnswerSlot, Answered, DecisionDoor, OPT_BEGIN, OPT_TOOL_ALLOW, Pending, SessionEvent,
+        Answered, OPT_BEGIN, OPT_TOOL_ALLOW, Pending, SessionEvent, decisions,
     };
     use std::sync::Arc;
 
@@ -758,24 +758,25 @@ fn decision_door_queues_only_the_head_and_voids_waiters() {
         tool: "grep".to_string(),
         args: "{}".to_string(),
     };
-    let door = Arc::new(DecisionDoor::default());
+    let door = decisions().gate("t", 0);
     assert!(door.is_empty(), "没进队 = 没在等");
 
     // 工具级确认（等在工作线程上）：进队 → 等 → 回答唤醒。
-    let slot = AnswerSlot::new();
-    let (id, evs) = door.push(None, tool(), "", Some(Arc::clone(&slot)));
+    let h = {
+        let door = Arc::clone(&door);
+        std::thread::spawn(move || {
+            let mut evs = Vec::new();
+            let wake = door.ask(tool(), &mut |e| evs.push(e));
+            (wake, evs)
+        })
+    };
+    let mut spins = 0;
+    while door.is_empty() && spins < 500 {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        spins += 1;
+    }
+    let (id, _, _) = door.head().expect("卡片先进队");
     assert_eq!(id, "d1");
-    assert!(
-        evs.iter()
-            .any(|e| matches!(e, SessionEvent::DecisionCard { .. })),
-        "进队要推一张卡"
-    );
-    assert!(
-        !evs.iter()
-            .any(|e| matches!(e, SessionEvent::Working { .. })),
-        "等在工作线程上的那一关不推空闲（生成还在跑）"
-    );
-    let h = std::thread::spawn(move || slot.wait());
     // 旧卡号 / 卡上没有的选项都答不动它（校验属于当时那张卡），而且不留痕。
     assert!(door.answer("d404", OPT_TOOL_ALLOW, "").is_err(), "旧卡不行");
     assert!(door.answer(&id, OPT_BEGIN, "").is_err(), "别关的选项不行");
@@ -789,22 +790,43 @@ fn decision_door_queues_only_the_head_and_voids_waiters() {
         ),
         Answered::Gate(..) => panic!("工具卡不该走核心关卡那条路"),
     }
+    let (wake, evs) = h.join().expect("线程");
     assert_eq!(
-        h.join().expect("线程"),
+        wake,
         crate::capabilities::session::api::SlotWake::Answer(OPT_TOOL_ALLOW.to_string()),
         "回答要唤醒等待方"
+    );
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, SessionEvent::DecisionCard { .. })),
+        "进队要推一张卡"
+    );
+    assert!(
+        !evs.iter()
+            .any(|e| matches!(e, SessionEvent::Working { .. })),
+        "等在工作线程上的那一关不推空闲（生成还在跑）"
     );
     assert!(door.is_empty(), "答完不再挂着");
 
     // 队列：先来后到——排在后面的那几张还不能答（它的答案会被"卡号不是队首"挡下）。
-    door.push(None, Pending::ConfirmBegin, "", None);
-    let slot2 = AnswerSlot::new();
-    let (second, _) = door.push(None, tool(), "", Some(Arc::clone(&slot2)));
+    door.raise(None, Pending::ConfirmBegin, "");
+    let h2 = {
+        let door = Arc::clone(&door);
+        std::thread::spawn(move || door.ask(tool(), &mut |_| {}))
+    };
+    let mut spins = 0;
+    while door.queue().map(|q| q.waiting.len()) != Some(1) && spins < 500 {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        spins += 1;
+    }
+    let second = door
+        .queue()
+        .and_then(|q| q.waiting.first().map(|w| w.id.clone()))
+        .expect("两张卡都在队里");
     assert!(
         door.answer(&second, OPT_TOOL_ALLOW, "").is_err(),
         "只有队首可答"
     );
-    let h2 = std::thread::spawn(move || slot2.wait());
     // 整队作废（停止 / 关闭 = 拒绝）：排队的卡一律作废，等待方解开、按拒绝收场。
     assert_eq!(door.void(), vec!["d2".to_string(), "d3".to_string()]);
     assert_eq!(

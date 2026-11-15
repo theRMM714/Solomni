@@ -534,7 +534,7 @@ impl Conductor {
         option: &str,
         note: &str,
     ) -> Result<(Answered, Vec<SessionEvent>), String> {
-        let Some(door) = self.desk.peek(sid) else {
+        let Some(door) = self.desk.peek_gate(sid) else {
             return Err("[裁决] 现在没有等你定的事。".to_string());
         };
         let answered = door.answer(card, option, note)?;
@@ -579,7 +579,7 @@ impl Conductor {
         if !self.running.contains(sid) {
             self.ensure_session(sid)?;
         }
-        Ok(self.desk.peek(sid).and_then(|d| d.queue()))
+        Ok(self.desk.peek_gate(sid).and_then(|d| d.queue()))
     }
 
     /// 这一步的收尾：名单刚落档就写回 meta + 建沙箱，链就绪就派节点，终结后移出中心。
@@ -718,7 +718,7 @@ impl Conductor {
         }
         Ok(self
             .desk
-            .peek(sid)
+            .peek_gate(sid)
             .and_then(|d| d.head())
             .map(|(_, p, _)| p))
     }

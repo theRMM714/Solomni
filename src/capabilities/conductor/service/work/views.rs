@@ -106,7 +106,7 @@ impl Conductor {
                 };
                 // 待裁决：**判据只有队本身**（核心各关卡与工具级确认排在同一条队上）——
                 // 正在生成的会话（对象在工作线程手里）照样取得到；推的卡片事件与它是同一份。
-                let pending = self.desk.peek(&sid).and_then(|d| d.json());
+                let pending = self.desk.peek_gate(&sid).and_then(|d| d.json());
                 let running = running_now.contains(&sid);
                 let continue_action =
                     self.continue_action(&sid, running, &mode, &run, pending.is_some());

@@ -136,10 +136,10 @@ impl ConductorHandle {
     }
 
     /// 目的：这个会话的**工具层提问端口**：一张卡的登记 + 外送/落盘 + 停会话，全走同一个会话的那条道。
-    /// 参数：`door` = 该会话的裁决队（与核心各关卡共用）；`bus` / `persister` = 卡的外送与落盘。
+    /// 参数：`door` = 该会话的裁决通道（与核心各关卡共用）；`bus` / `persister` = 卡的外送与落盘。
     pub(super) fn session_ask(
         &self,
-        door: &Arc<crate::capabilities::session::api::DecisionDoor>,
+        door: &Arc<dyn crate::capabilities::session::api::Gates>,
         sid: &str,
         bus: Arc<EventBus>,
         persister: crate::capabilities::conductor::service::Persister,
@@ -166,7 +166,7 @@ impl ConductorHandle {
     pub(super) fn decisions_of(
         &self,
         sid: &str,
-    ) -> Result<Option<Arc<crate::capabilities::session::api::DecisionDoor>>, String> {
+    ) -> Result<Option<Arc<dyn crate::capabilities::session::api::Gates>>, String> {
         if !self.interactive.load(std::sync::atomic::Ordering::Relaxed) {
             return Ok(None);
         }
