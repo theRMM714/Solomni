@@ -1,5 +1,5 @@
-//! 目的：kernel 共享机制的契约测试——路径写法（native / UNC）与落点身份。
-//! 管：本机制的不变式（verbatim 还原、UNC 拆分、落点身份与物理包含、网络判定）。
+//! 目的：kernel 共享机制的契约测试——命令队列、路径写法（native / UNC）与落点身份。
+//! 管：本机制的不变式（命令按提交顺序执行且一条 panic 不带走核心、verbatim 还原、UNC 拆分、落点身份与物理包含、网络判定）。
 //! 不管：工作区绑定策略（`src/tests/workspace/`）与虚拟机档挂载（`src/tests/vm/`）。
 //! 联动：职责与契约见 docs/kernel/unit-map.md 与 ARCHITECTURE.md。
 
@@ -91,4 +91,49 @@ pub(crate) fn network_paths_are_recognised_on_windows() {
     assert!(is_network_path(Path::new(r"//server/share")));
     assert!(!is_network_path(Path::new(r"C:\proj")));
     assert!(!is_network_path(&super::scratch("kernel-network")));
+}
+
+/// 目的：命令按提交顺序逐条执行，状态只被工作线程碰（克隆句柄看到同一份状态）。
+#[test]
+pub(crate) fn actor_commands_run_in_order_on_one_shared_state() {
+    use crate::kernel::api::Actor;
+    use crate::kernel::ports::NoopLog;
+    use std::sync::Arc;
+    let actor = Actor::spawn(
+        "t-actor-order",
+        "test::actor",
+        Arc::new(NoopLog),
+        Vec::<u32>::new(),
+    )
+    .expect("线程要起得来");
+    let second = actor.clone();
+    for _ in 0..8 {
+        actor
+            .call(|state| {
+                state.push(1);
+                Ok(())
+            })
+            .expect("命令要有回包");
+    }
+    let seen = second.call(|state| Ok(state.len())).expect("要能读末态");
+    assert_eq!(seen, 8, "八条命令都执行了，且没有并发覆盖");
+}
+
+/// 目的：一条命令 panic 不带走核心：后续命令照常执行。
+#[test]
+pub(crate) fn actor_survives_a_panicking_command() {
+    use crate::kernel::api::Actor;
+    use crate::kernel::ports::NoopLog;
+    use std::sync::Arc;
+    let actor = Actor::spawn("t-actor-panic", "test::actor", Arc::new(NoopLog), 0u32)
+        .expect("线程要起得来");
+    let failed = actor.call(|_state| -> Result<(), String> { panic!("这条命令炸了") });
+    assert!(failed.is_err(), "panic 的命令拿不到回包，调用方要看到失败");
+    actor
+        .call(|state| {
+            *state += 1;
+            Ok(())
+        })
+        .expect("核心接住 panic 后仍要继续服务");
+    assert_eq!(actor.call(|state| Ok(*state)).expect("要能读末态"), 1);
 }

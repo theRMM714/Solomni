@@ -53,6 +53,9 @@ modules/*/build/
 # ---- Node 工具链（前端类型检查；只提交清单与锁文件）----
 /node_modules/
 
+# ---- 字面量路径残渣（工具把 %SystemDrive% 这类变量当目录名建出来的空壳，不入库）----
+/%SystemDrive%/
+
 # ---- IDE / 编辑器 ----
 .idea/
 *.iml
