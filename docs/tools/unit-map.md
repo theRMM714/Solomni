@@ -9,7 +9,7 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/capabilities/tools/api.rs` | 入站能力面：`Tools`（按角色发放工具面、总表与保留名）与 `ToolExec`（执行模块 / 内置 / shell 工具、释放围栏授权）的用例面与公开类型重导出 |
+| `src/capabilities/tools/api.rs` | 入站能力面：`Tools`（按角色发放工具面、总表与保留名）、`ToolExec`（执行模块 / 内置 / shell 工具、释放围栏授权）与 `CommandBook`（产品命令面）的用例面与公开类型重导出 |
 | `src/capabilities/tools/service.rs` | 工具能力的用例与端口持有者：持工具总表、角色表与名字表（`SystemTools`）及 `SysIo` / `ProcessRunner` / `FenceHost` / `FenceGate` 四个端口 |
 | `src/capabilities/tools/service/fence.rs` | 围栏裁决（`ToolFenceGate`）：必要落点授不上时问用户、按裁决无围栏跑一次或拒绝；回执文案与停会话在这里 |
 | `src/capabilities/tools/ports.rs` | 出站端口：三张表的加载 `SystoolsSource` 与内置文件工具的读写 `SysIo`（含 `FileRead` / `DirEntry` 数据形态） |
@@ -19,6 +19,7 @@
 | `src/capabilities/tools/domain/patch.rs` | 补丁通道（patch 工具）的纯逻辑：解析自由格式的改动文本并在文件内容上按整行应用 |
 | `src/capabilities/tools/domain/schema.rs` | 工具参数契约：解析、校验与渲染声明在文本层的参数 schema（内置工具在 `systools/tools.yaml`，模块工具在 `module.yaml`） |
 | `src/capabilities/tools/domain/module_tools.rs` | 模块清单 → 工具面：把 `module.yaml` 声明的工具与参数契约转成工具能力认识的形态，并把静态模块工具与已就绪服务操作的参数合并渲染成**一段** |
+| `src/capabilities/tools/domain/commands.rs` | 产品命令面的纯数据形态（`Command` / `CommandBook` / `Phase`）：解析与自检 `systools/commands.yaml`，供手册、补全、未知命令建议与启动相解析共用；只管声明，不管执行 |
 | `src/capabilities/tools/domain/roles.rs` | 角色表与工具总表的纯数据形态（`RoleDecl` / `SystemTools`）：按角色组装工具面、装配期自检与动作审计格式化 |
 | `src/capabilities/tools/domain/fence.rs` | 围栏描述符的派生策略与裁决卡材料（`fence_ask` / 选项 id；描述符与落点判据在 `src/kernel/contracts/fence.rs`） |
 | `src/capabilities/tools/domain/shell.rs` | 执行类系统工具 shell 的纯规则：参数 / scope / timeout 解析、命令长度、失败回执的 scope 提示、回执解析（退出码 / 状态 / cwd·耗时） |

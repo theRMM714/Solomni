@@ -298,6 +298,10 @@ fn catalog_drives_help_completion_and_suggestions() {
         "{help}"
     );
     assert!(help.contains("single"), "命令表在手册里");
+    assert!(
+        help.contains("启动命令") && help.contains("--doctor"),
+        "启动命令进手册"
+    );
     assert!(!help.contains("--probe-tools"), "内部旗语默认不列");
     assert!(cli::catalog::help_text(true).contains("--probe-tools"));
 
@@ -308,7 +312,7 @@ fn catalog_drives_help_completion_and_suggestions() {
 
     assert_eq!(cli::catalog::complete("he"), vec!["help"]);
     assert!(cli::catalog::complete("").contains(&"web".to_string()));
-    assert_eq!(cli::catalog::suggest("singel"), Some("single"));
+    assert_eq!(cli::catalog::suggest("singel"), Some("single".to_string()));
     assert_eq!(cli::catalog::suggest("zzz"), None);
 }
 

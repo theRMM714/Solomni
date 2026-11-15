@@ -73,6 +73,7 @@ pub(crate) const FLAGS: &[Flag] = &[
 ];
 
 /// 目的：内部协议旗语——只给测试、探针与守门子进程用，不进取值解析，原样留给入口扫描。
+/// 约束：产品命令（`--doctor` / `--gc` 等）不在这里：它们声明在 `systools/commands.yaml`，由表识别。
 const OPAQUE: &[&str] = &[
     "--proc-watchdog",
     "--fence-run",
@@ -81,12 +82,6 @@ const OPAQUE: &[&str] = &[
     "--print-fence-env",
     "--fence-verify",
     "--print-routes",
-    "--doctor",
-    "--provision",
-    "--work-gc",
-    "--storage",
-    "--gc",
-    "--build",
     "--probe-tools",
     "--probe-replay",
 ];
@@ -105,6 +100,12 @@ pub(crate) struct Flags {
     /// 目的：`--setup=<模式>` 的取值：便携维护（PATH shim / 围栏机器级预授），省略值等于 `status`。
     pub(crate) setup: Option<String>,
     pub(crate) positionals: Vec<String>,
+    /// 目的：命中的启动相命令（`systools/commands.yaml` 里的 `phase: boot` 条目）的规范名，如 `gc`。
+    pub(crate) command: Option<String>,
+    /// 目的：这条启动命令自己的参数（含它自己的旗语），原样不动——类型与校验归命令自己。
+    pub(crate) operands: Vec<String>,
+    /// 目的：`solomni <启动命令> --help` 要看的那条命令（规范名）。
+    pub(crate) help_topic: Option<String>,
 }
 
 /// 目的：解析 argv（不含程序名）：短旗、长旗、`=值` 与 `--` 分隔都收。
@@ -130,6 +131,18 @@ pub(crate) fn parse(args: &[String]) -> Result<Flags, String> {
             Some((name, value)) => (name, Some(value.to_string())),
             None => (arg.as_str(), None),
         };
+        if let Some(cmd) = boot_command(name) {
+            // 启动相命令：整段原样交给它，只记下名字与「它自己的参数」；命令后面写 --help 就是要它自己的手册。
+            flags.positionals.extend(args[i..].iter().cloned());
+            let mut rest: Vec<String> = inline.into_iter().collect();
+            rest.extend(args[i + 1..].iter().cloned());
+            if rest.iter().any(|a| a == "--help" || a == "-h") {
+                flags.help_topic = Some(cmd.name.clone());
+            }
+            flags.command = Some(cmd.name.clone());
+            flags.operands = rest;
+            return Ok(flags);
+        }
         if OPAQUE.contains(&name) {
             // 内部协议模式自己解析整段 argv，这里不再往下列。
             flags.positionals.extend(args[i..].iter().cloned());
@@ -225,15 +238,6 @@ pub(crate) fn flag_rows(all: bool) -> Vec<String> {
                 "--probe-replay <model>",
                 "重放一次探测请求，看供应商接受哪种回放形状",
             ),
-            ("--doctor", "自检：这台机器能承载哪些测试"),
-            ("--provision", "依赖补齐状态与执行"),
-            (
-                "--work-gc <id>",
-                "显式回收一个不再可达的内容对象（默认 dry-run）",
-            ),
-            ("--storage", "存储空间报告与回收"),
-            ("--gc <id>", "回收一个内容对象（默认 dry-run）"),
-            ("--build <模块id>", "在目标环境里构建一个模块声明的产物"),
         ] {
             rows.push(row(spec, desc));
         }
@@ -252,6 +256,13 @@ fn row(spec: &str, desc: &str) -> String {
     }
     out.push_str(desc);
     out
+}
+
+/// 目的：这条长旗是不是一个**启动相命令**（声明在 `systools/commands.yaml`）：是就返回它的声明。
+fn boot_command(name: &str) -> Option<&'static crate::capabilities::tools::api::Command> {
+    let book = crate::capabilities::tools::api::CommandBook::builtin().ok()?;
+    book.find(name)
+        .filter(|c| c.phase == crate::capabilities::tools::api::Phase::Boot)
 }
 
 /// 目的：解析失败时的「未知旗语」文案：编辑距离 ≤2 就给最近的那条建议。
