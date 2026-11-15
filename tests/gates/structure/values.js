@@ -1,7 +1,7 @@
 /**
  * 结构审查·值边界门禁：跨能力只传值与端口，不传活对象（R15 / R16）。
  * 判据：① api*.rs 的公共函数与 trait 方法，参数里不得有 &mut（&mut self 与流式回调 &mut dyn FnMut 除外）——硬判；
- *       ② api*.rs 的值（pub struct）带内部可变（Mutex / RwLock / RefCell / Cell / UnsafeCell / Atomic），或字段是可变借用 / 闭包；
+ *       ② api*.rs 的值（pub struct）与它经 pub use 转出的同能力结构带内部可变（Mutex / RwLock / RefCell / Cell / UnsafeCell / Atomic），或字段是具名状态的可变借用 / 闭包（借端口 `&mut dyn Trait` 不算：那是把端口借进来）；
  *       ③ 跨能力的同形结构（字段名与类型全同）——②③ 只进 notes，等 conductor 消失后转硬。
  */
 "use strict";
@@ -11,6 +11,8 @@ const path = require("path");
 const MUTABLE = /(Mutex<|RwLock<|RefCell<|Cell<|UnsafeCell<|Atomic(Usize|U64|U32|I64|Bool|U8))/;
 const BORROW_OBJ = /(&'?\w*\s*mut\s|dyn Fn\b|Box<dyn Fn)/;
 const STREAM_CB = /&'?\w*\s*mut dyn FnMut/;
+// 端口借用（`&mut dyn Trait`）：R16 允许——借进来的是端口，不是别人的活对象；闭包不在此列。
+const PORT_BORROW = /&'?\w*\s*mut\s+(?:\(\s*)?dyn\s+[A-Z][A-Za-z0-9_]*/;
 
 const rsFilesOf = (dir) => {
   const out = [];
@@ -56,6 +58,31 @@ function structIndex(files) {
     }
   }
   return index;
+}
+
+/** api 面 `pub use` 转出的类型名：它们是跨能力可见的契约面，和 api 里直接声明的一样受判。 */
+function reexported(lines) {
+  const out = [];
+  // `pub use` 可能跨多行（花括号折行），先拼成一条语句再取名字。
+  const stmts = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^pub use\s+/.test(lines[i])) continue;
+    let stmt = lines[i];
+    for (let j = i + 1; j < lines.length && !/;\s*$/.test(stmt); j++) stmt += lines[j];
+    stmts.push(stmt);
+  }
+  for (const stmt of stmts) {
+    const m = stmt.match(/^pub use\s+([\s\S]+);\s*$/);
+    if (!m) continue;
+    const brace = m[1].match(/\{([^}]*)\}/);
+    const names = brace ? brace[1].split(",") : [m[1]];
+    for (const raw of names) {
+      const nm = raw.trim().replace(/\s+as\s+.*$/, "");
+      const last = nm.split("::").pop();
+      if (/^[A-Z][A-Za-z0-9_]*$/.test(last)) out.push(last);
+    }
+  }
+  return out;
 }
 
 /** 顺着字段类型找内部可变，返回命中的「类型.字段」；只走唯一命名的类型，避免同名歧义。 */
@@ -104,28 +131,55 @@ function values(root) {
   const notes = [];
   const mutable = [];
   const borrows = [];
-  const apiStructs = [];
+  const reported = new Set();
+  // 一个跨能力可见的结构：字段带锁 / 带可变借用 / 顺着字段可达锁，都算活对象。
+  const judge = (cap, name, fields, at) => {
+    const key = cap + "::" + name;
+    if (reported.has(key)) return;
+    const locked = fields.filter((f) => MUTABLE.test(f.ty));
+    const borrowed = fields.filter(
+      (f) => BORROW_OBJ.test(f.ty) && !(PORT_BORROW.test(f.ty) && !/dyn\s+Fn/.test(f.ty)),
+    );
+    if (locked.length) mutable.push(name + "（" + at + "，字段 " + locked.map((f) => f.name).join("、") + "）");
+    if (borrowed.length) borrows.push(name + "（" + at + "，字段 " + borrowed.map((f) => f.name).join("、") + "）");
+    if (locked.length || borrowed.length) {
+      reported.add(key);
+      return;
+    }
+    for (const f of fields) {
+      for (const n of f.ty.match(/\b[A-Z][A-Za-z0-9_]*\b/g) || []) {
+        const hit = reachMutable(index, n, 4, new Set([name]));
+        if (hit) {
+          mutable.push(name + "（" + at + "，经 " + n + " 到 " + hit + "）");
+          reported.add(key);
+          return;
+        }
+      }
+    }
+  };
+  // 定义位置：只用于回执里指路（同一个名字在能力内唯一才判）。
+  const defAt = (defs, name) => {
+    const file = defs[0].file;
+    const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].match(new RegExp("^pub struct " + name + "\\b"))) return rel(root, file) + ":" + (i + 1);
+    }
+    return rel(root, file);
+  };
   for (const file of api) {
     problems.push(...borrowedProblems(root, file));
     const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
     for (let i = 0; i < lines.length; i++) {
       const m = lines[i].match(/^pub struct ([A-Za-z_][A-Za-z0-9_]*)/);
       if (!m) continue;
-      const fields = fieldsOf(lines, i);
-      const at = rel(root, file) + ":" + (i + 1);
-      apiStructs.push({ cap: capOf(file), name: m[1], fields });
-      const locked = fields.filter((f) => MUTABLE.test(f.ty));
-      if (locked.length) mutable.push(m[1] + "（" + at + "，字段 " + locked.map((f) => f.name).join("、") + "）");
-      const borrowed = fields.filter((f) => BORROW_OBJ.test(f.ty));
-      if (borrowed.length) borrows.push(m[1] + "（" + at + "，字段 " + borrowed.map((f) => f.name).join("、") + "）");
-      if (locked.length || borrowed.length) continue;
-      for (const f of fields) {
-        for (const n of f.ty.match(/\b[A-Z][A-Za-z0-9_]*\b/g) || []) {
-          const hit = reachMutable(index, n, 4, new Set([m[1]]));
-          if (hit) { mutable.push(m[1] + "（" + at + "，经 " + n + " 到 " + hit + "）"); break; }
-        }
-        if (mutable.length && mutable[mutable.length - 1].startsWith(m[1] + "（")) break;
-      }
+      judge(capOf(file), m[1], fieldsOf(lines, i), rel(root, file) + ":" + (i + 1));
+    }
+    for (const name of reexported(lines)) {
+      const defs = index.get(name);
+      if (!defs || defs.length !== 1) continue;
+      const cap = capOf(file);
+      if (capOf(defs[0].file) !== cap) continue;
+      judge(cap, name, defs[0].fields, defAt(defs, name) + "（经 " + rel(root, file) + " 转出）");
     }
   }
   if (mutable.length) notes.push("值边界：api 的值带内部可变或可达内部可变，跨能力传递时它就是活对象（R16 迁移清单）：" + mutable.join("、"));

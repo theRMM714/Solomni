@@ -24,8 +24,8 @@ fn with_profile(mut mt: MemberTools, profile: ProfileId) -> MemberTools {
         profile,
         ..Default::default()
     };
-    mt.sandbox.permissions = defaults.to_permission_set();
-    mt.fence = crate::kernel::api::FenceSpec::for_session(&mt.sandbox, &[], false);
+    mt.face.sandbox.permissions = defaults.to_permission_set();
+    mt.face.fence = crate::kernel::api::FenceSpec::for_session(&mt.face.sandbox, &[], false);
     mt
 }
 
@@ -34,7 +34,7 @@ fn with_profile(mut mt: MemberTools, profile: ProfileId) -> MemberTools {
 pub(crate) fn sandbox_shell_only_gets_the_private_sandbox_and_runtime_roots() {
     let runner = Arc::new(ShellRunner::new("ok", true));
     let mut mt = member(Arc::clone(&runner));
-    mt.runtime_roots = vec![abs(&["tc"])];
+    mt.face.runtime_roots = vec![abs(&["tc"])];
     let slot = Arc::new(crate::capabilities::session::api::ShellSlot::default());
     mt.shell_live = Some(Arc::clone(&slot));
     let cancel = AtomicBool::new(false);
@@ -55,17 +55,20 @@ pub(crate) fn sandbox_shell_only_gets_the_private_sandbox_and_runtime_roots() {
     assert_eq!(one.timeout, Duration::from_secs(5));
     assert_eq!(
         (one.fence.agent.as_str(), one.fence.lease.as_str()),
-        (mt.sandbox.agent.as_str(), mt.sandbox.session.as_str()),
+        (
+            mt.face.sandbox.agent.as_str(),
+            mt.face.sandbox.session.as_str()
+        ),
         "容器身份 = 会话 + agent + 可达集合（不再按次重派）"
     );
-    assert_eq!(one.fence.cwd, mt.sandbox.private, "cwd 固定私有沙箱");
-    assert_eq!(one.fence.rw, vec![mt.sandbox.private.clone()]);
+    assert_eq!(one.fence.cwd, mt.face.sandbox.private, "cwd 固定私有沙箱");
+    assert_eq!(one.fence.rw, vec![mt.face.sandbox.private.clone()]);
     assert!(
         one.fence.ro_tree.contains(&abs(&["tc"])),
         "运行根要只读放行"
     );
     assert!(
-        !one.fence.ro_tree.contains(&mt.sandbox.shared),
+        !one.fence.ro_tree.contains(&mt.face.sandbox.shared),
         "不碰共享区"
     );
     assert!(!one.fence.net, "sandbox 不联网");
@@ -103,7 +106,7 @@ fn shell_receipt_carries_cwd_and_elapsed_after_a_real_run() {
     assert!(out.ok, "{}", out.output);
     let (cwd, secs) =
         crate::capabilities::tools::api::cwd_elapsed(&out.output).expect("回执要有落点与耗时");
-    assert_eq!(cwd, mt.sandbox.private.display().to_string());
+    assert_eq!(cwd, mt.face.sandbox.private.display().to_string());
     let facts = done[0].3.as_ref().expect("要带结构化事实");
     assert_eq!(facts.cwd, cwd, "事实与回执行同一个落点");
     assert_eq!(facts.elapsed_secs(), secs, "事实与回执行同一次计时");
@@ -147,8 +150,11 @@ pub(crate) fn external_profile_asks_and_all_reach_does_not() {
     let runner = Arc::new(ShellRunner::new("ok", true));
     let mut mt = with_profile(member(Arc::clone(&runner)), ProfileId::External);
     let host = abs(&["host-read"]);
-    mt.fence =
-        crate::kernel::api::FenceSpec::for_session(&mt.sandbox, std::slice::from_ref(&host), true);
+    mt.face.fence = crate::kernel::api::FenceSpec::for_session(
+        &mt.face.sandbox,
+        std::slice::from_ref(&host),
+        true,
+    );
     let cancel = AtomicBool::new(false);
     let asked = Arc::new(AtomicUsize::new(0));
     let marked = Arc::clone(&asked);
@@ -177,11 +183,14 @@ pub(crate) fn external_profile_asks_and_all_reach_does_not() {
     let one = &calls[0];
     assert_eq!(
         (one.fence.agent.as_str(), one.fence.lease.as_str()),
-        (mt.sandbox.agent.as_str(), mt.sandbox.session.as_str()),
+        (
+            mt.face.sandbox.agent.as_str(),
+            mt.face.sandbox.session.as_str()
+        ),
         "external 与 sandbox 共用会话身份，根集合不同才分 SID"
     );
     assert!(
-        one.fence.ro_tree.contains(&mt.sandbox.shared),
+        one.fence.ro_tree.contains(&mt.face.sandbox.shared),
         "共享区只读可达"
     );
     assert!(one.fence.ro.contains(&host), "主机只读根可达");
@@ -191,7 +200,7 @@ pub(crate) fn external_profile_asks_and_all_reach_does_not() {
     drop(calls);
     let runner2 = Arc::new(ShellRunner::new("ok", true));
     let mut all = with_profile(member(Arc::clone(&runner2)), ProfileId::AllReach);
-    all.fence = crate::kernel::api::FenceSpec::for_session(&all.sandbox, &[], false);
+    all.face.fence = crate::kernel::api::FenceSpec::for_session(&all.face.sandbox, &[], false);
     let mut sink2 = |_: SessionEvent| {};
     let done2 = run_batch(
         &mut all,
@@ -261,8 +270,8 @@ pub(crate) fn view_does_not_offer_shell_but_workspace_does() {
 pub(crate) fn guest_shell_goes_through_the_guest_helper_with_per_call_timeout() {
     let runner = Arc::new(ShellRunner::new("host", true));
     let mut mt = member(Arc::clone(&runner));
-    mt.tier = crate::kernel::api::Tier::Vm;
-    mt.guest_lease = "lease".to_string();
+    mt.face.tier = crate::kernel::api::Tier::Vm;
+    mt.face.guest_lease = "lease".to_string();
     let vm = Arc::new(crate::tests::doubles::RecordingVm::default());
     mt.vm = vm.clone();
     let cancel = AtomicBool::new(false);
@@ -296,8 +305,8 @@ pub(crate) fn guest_shell_goes_through_the_guest_helper_with_per_call_timeout() 
 fn vm_timeout_receipt_gets_cwd_and_elapsed_trailer() {
     let runner = Arc::new(ShellRunner::new("host", true));
     let mut mt = member(Arc::clone(&runner));
-    mt.tier = crate::kernel::api::Tier::Vm;
-    mt.guest_lease = "lease".to_string();
+    mt.face.tier = crate::kernel::api::Tier::Vm;
+    mt.face.guest_lease = "lease".to_string();
     let slot = Arc::new(crate::capabilities::session::api::ShellSlot::default());
     mt.shell_live = Some(Arc::clone(&slot));
     let vm = Arc::new(crate::tests::doubles::RecordingVm::default());
@@ -325,7 +334,7 @@ fn vm_timeout_receipt_gets_cwd_and_elapsed_trailer() {
     );
     let (cwd, secs) = crate::capabilities::tools::api::cwd_elapsed(&out.output)
         .expect("超时回执也要有落点与耗时");
-    assert_eq!(cwd, mt.sandbox.private.display().to_string());
+    assert_eq!(cwd, mt.face.sandbox.private.display().to_string());
     assert_eq!(secs, 0, "刚跑完的耗时按墙钟秒");
     assert_eq!(
         crate::capabilities::tools::api::exit_code(&out.output),
@@ -355,9 +364,9 @@ fn vm_shell_receipt_uses_the_environment_path_form() {
     let bridge = Arc::new(PathBridge::new("windows", PathDialect::Posix));
     let runner = Arc::new(ShellRunner::new("host", true));
     let mut mt = member(Arc::clone(&runner));
-    mt.tier = crate::kernel::api::Tier::Vm;
-    mt.guest_lease = "lease".to_string();
-    mt.sandbox.path_codec = Some(bridge.clone());
+    mt.face.tier = crate::kernel::api::Tier::Vm;
+    mt.face.guest_lease = "lease".to_string();
+    mt.face.sandbox.path_codec = Some(bridge.clone());
     let vm = Arc::new(crate::tests::doubles::RecordingVm::default());
     *vm.fenced_result.lock().expect("锁") = Some(ToolOutcome {
         ok: true,
@@ -378,7 +387,7 @@ fn vm_shell_receipt_uses_the_environment_path_form() {
     assert!(out.ok, "{}", out.output);
     let (cwd, _) =
         crate::capabilities::tools::api::cwd_elapsed(&out.output).expect("回执要有落点与耗时");
-    assert_eq!(cwd, bridge.to_view(&mt.sandbox.private));
+    assert_eq!(cwd, bridge.to_view(&mt.face.sandbox.private));
     assert!(
         !cwd.contains("\\"),
         "虚拟机档回执的 cwd 不能是宿主写法：{}",
@@ -387,7 +396,7 @@ fn vm_shell_receipt_uses_the_environment_path_form() {
     let facts = done[0].3.as_ref().expect("要带结构化事实");
     assert_eq!(
         facts.cwd,
-        bridge.to_view(&mt.sandbox.private),
+        bridge.to_view(&mt.face.sandbox.private),
         "事实也用 guest 写法"
     );
     assert_eq!(facts.fence_prep_ms, None);
@@ -414,7 +423,7 @@ pub(crate) fn conductor_base_roots_are_only_put_on_host_member_tools() {
         &plan,
     );
     assert!(
-        host.runtime_roots.contains(&abs(&["base"])),
+        host.face.runtime_roots.contains(&abs(&["base"])),
         "基础工具链根要进宿主 shell 的只读根"
     );
     let vm = core.tools_env(
@@ -429,7 +438,7 @@ pub(crate) fn conductor_base_roots_are_only_put_on_host_member_tools() {
         &plan,
     );
     assert!(
-        !vm.runtime_roots.contains(&abs(&["base"])),
+        !vm.face.runtime_roots.contains(&abs(&["base"])),
         "宿主基础工具链根不能进 guest 围栏"
     );
 }
@@ -456,11 +465,11 @@ pub(crate) fn shell_batch_adopts_sandbox_changes_into_the_shared_area() {
 
     let runner = Arc::new(ShellRunner::new("ok", true));
     let mut mt = member(Arc::clone(&runner));
-    mt.sandbox.work_name = "w".to_string();
-    mt.sandbox.agent = "a".to_string();
-    mt.sandbox.session = "w--a".to_string();
-    mt.sandbox.private = sandbox.clone();
-    mt.sandbox.shared = shared.clone();
+    mt.face.sandbox.work_name = "w".to_string();
+    mt.face.sandbox.agent = "a".to_string();
+    mt.face.sandbox.session = "w--a".to_string();
+    mt.face.sandbox.private = sandbox.clone();
+    mt.face.sandbox.shared = shared.clone();
     let ws_dyn: Arc<dyn Workspace + Send + Sync> = ws.clone();
     mt.workspace = Some(ws_dyn);
 
@@ -510,7 +519,7 @@ pub(crate) fn shell_batch_adopts_sandbox_changes_into_the_shared_area() {
 pub(crate) fn shell_without_a_private_sandbox_refuses_without_running() {
     let runner = Arc::new(ShellRunner::new("ok", true));
     let mut mt = member(Arc::clone(&runner));
-    mt.sandbox.private = std::path::PathBuf::new();
+    mt.face.sandbox.private = std::path::PathBuf::new();
     let cancel = AtomicBool::new(false);
     let mut sink = |_: SessionEvent| {};
     let done = run_batch(
@@ -539,8 +548,8 @@ pub(crate) fn shell_without_a_private_sandbox_refuses_without_running() {
 pub(crate) fn vm_shell_without_a_guest_lease_refuses_without_running() {
     let runner = Arc::new(ShellRunner::new("host", true));
     let mut mt = member(Arc::clone(&runner));
-    mt.tier = crate::kernel::api::Tier::Vm;
-    assert!(mt.guest_lease.is_empty(), "替身默认没有租约");
+    mt.face.tier = crate::kernel::api::Tier::Vm;
+    assert!(mt.face.guest_lease.is_empty(), "替身默认没有租约");
     let vm = Arc::new(crate::tests::doubles::RecordingVm::default());
     mt.vm = vm.clone();
     let cancel = AtomicBool::new(false);
@@ -655,7 +664,7 @@ pub(crate) fn shell_entry_refuses_when_the_declaration_is_missing() {
     use crate::capabilities::permission::api::{Decision, Reach, ReachSet};
     let runner = Arc::new(ShellRunner::new("ok", true));
     let mut mt = member(Arc::clone(&runner));
-    mt.builtin_tools.remove("shell");
+    mt.face.builtin_tools.remove("shell");
     let grant = CallGrant {
         reach: ReachSet::from([Reach::Private]),
         decision: Decision::Allow,
@@ -683,7 +692,7 @@ pub(crate) fn unknown_tool_is_refused_before_running() {
     let runner = Arc::new(ShellRunner::new("ok", true));
     let mut mt = member(Arc::clone(&runner));
     // 没有模块可归属：未知工具在闸门就判死（有模块时那属于派发消歧，走另一条路）。
-    mt.modules.clear();
+    mt.face.modules.clear();
     let cancel = AtomicBool::new(false);
     let mut sink = |_: SessionEvent| {};
     let done = run_batch(

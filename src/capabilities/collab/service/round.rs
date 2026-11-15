@@ -174,7 +174,7 @@ pub fn converse_with(
     // 身份 + 本回合工具 + 对话 + 本回合提示：**唯一的装配点**。
     // 工具面取自这一席位（执行席的表现 + 它自己模块的工具）；讨论席的动词面也在这里（见 crate::capabilities::session::api::TurnRun）。
     let (ids, with_modules) = match tools.as_ref() {
-        Some(ctx) => (ctx.allowed.clone(), ctx.with_modules),
+        Some(ctx) => (ctx.face.allowed.clone(), ctx.face.with_modules),
         None => (Vec::new(), false),
     };
     let mut msgs = assemble(
@@ -217,11 +217,11 @@ pub fn converse_with(
         };
         // 形态与工具声明面：由本成员的通道形态决定（envelope = 不声明，走手写信封；native = 声明本成员的工具）
         let (mode, decls) = match tools.as_deref_mut() {
-            Some(ctx) if ctx.mode == crate::capabilities::llm::api::ToolMode::Native => {
-                let mode = ctx.mode;
-                (mode, tool_decls(ctx))
+            Some(ctx) if ctx.face.mode == crate::capabilities::llm::api::ToolMode::Native => {
+                let mode = ctx.face.mode;
+                (mode, tool_decls(&ctx.face))
             }
-            Some(ctx) => (ctx.mode, ToolDecls::default()),
+            Some(ctx) => (ctx.face.mode, ToolDecls::default()),
             None => (
                 crate::capabilities::llm::api::ToolMode::Envelope,
                 ToolDecls::default(),
@@ -478,7 +478,7 @@ pub fn converse_with(
                         }
                     })
                     .collect();
-                let msgs_of = reply_msgs(ctx.mode, &reply_text, &views);
+                let msgs_of = reply_msgs(ctx.face.mode, &reply_text, &views);
                 for m in &msgs_of {
                     msgs.push(m.clone());
                 }

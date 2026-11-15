@@ -414,8 +414,8 @@ pub(crate) fn module_tools_go_into_the_guest_on_vm_tier() {
     let vm = Arc::new(crate::tests::doubles::RecordingVm::default());
     {
         let tools = m.tools.as_mut().expect("这一席有工具环境");
-        tools.tier = crate::kernel::api::Tier::Vm;
-        tools.guest_lease = "w".to_string();
+        tools.face.tier = crate::kernel::api::Tier::Vm;
+        tools.face.guest_lease = "w".to_string();
         tools.vm = vm.clone();
     }
     let prompts = test_prompts();

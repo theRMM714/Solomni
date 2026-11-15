@@ -255,9 +255,26 @@ pub(crate) fn member_with_service_tools(
         },
     );
     crate::capabilities::session::api::MemberTools {
-        mode: crate::capabilities::llm::api::ToolMode::Envelope,
-        modules,
-        observations: Default::default(),
+        face: crate::capabilities::session::api::ToolFace {
+            mode: crate::capabilities::llm::api::ToolMode::Envelope,
+            modules,
+            tier: crate::kernel::api::Tier::Host,
+            guest_lease: String::new(),
+            sandbox: sb.clone(),
+            tools_this_turn: test_prompts()
+                .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
+                .to_string(),
+            builtin_tools: test_systools().tools,
+            unavailable: BTreeMap::new(),
+            fence: crate::kernel::api::FenceSpec::for_session(&sb, &[], false),
+            module_env: Default::default(),
+            runtime_path: None,
+            runtime_roots: Vec::new(),
+            allowed: crate::capabilities::tools::api::names(),
+            role: "solo".to_string(),
+            with_modules: true,
+            notes: Default::default(),
+        },
         llm: test_llm_demo(),
         log: Arc::new(crate::kernel::ports::NoopLog),
         tools: test_tools_svc_with(
@@ -265,30 +282,15 @@ pub(crate) fn member_with_service_tools(
             Arc::new(InMemorySysIo::new()),
             Arc::new(NoFenceHost),
         ),
-        tier: crate::kernel::api::Tier::Host,
-        guest_lease: String::new(),
         vm: test_vm(),
-        sandbox: sb.clone(),
-        tools_this_turn: test_prompts()
-            .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
-            .to_string(),
-        builtin_tools: test_systools().tools,
-        unavailable: BTreeMap::new(),
-        fence: crate::kernel::api::FenceSpec::for_session(&sb, &[], false),
-        module_env: Default::default(),
-        runtime_path: None,
-        runtime_roots: Vec::new(),
-        shell_live: None,
-        reply_seq: 0,
-        line: Default::default(),
-        allowed: crate::capabilities::tools::api::names(),
-        role: "solo".to_string(),
-        with_modules: true,
-        notes: Default::default(),
-        handlers: Vec::new(),
         residents,
         // 工具面用例不接工作区：写工具落地后不自动提交。
         workspace: None,
+        observations: Default::default(),
+        shell_live: None,
+        reply_seq: 0,
+        line: Default::default(),
+        handlers: Vec::new(),
     }
 }
 

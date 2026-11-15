@@ -368,35 +368,37 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
     io.seed(&["demo", "work", "note.txt"], "现场：一切正常\n");
     let sb = test_sandbox("核心", &[]);
     let mut verify = MemberTools {
-        mode: crate::capabilities::llm::api::ToolMode::Envelope,
-        role: "orchestrator".to_string(),
-        modules: BTreeMap::new(),
-        observations: crate::capabilities::tools::api::Observations::default(),
+        face: crate::capabilities::session::api::ToolFace {
+            mode: crate::capabilities::llm::api::ToolMode::Envelope,
+            role: "orchestrator".to_string(),
+            modules: BTreeMap::new(),
+            tier: crate::kernel::api::Tier::Host,
+            guest_lease: String::new(),
+            sandbox: sb.clone(),
+            tools_this_turn: test_prompts()
+                .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
+                .to_string(),
+            builtin_tools: test_systools().tools,
+            unavailable: BTreeMap::new(),
+            fence: crate::kernel::api::FenceSpec::for_session(&sb, &[], false),
+            module_env: Default::default(),
+            runtime_path: None,
+            runtime_roots: Vec::new(),
+            allowed: vec!["read".to_string(), "plan".to_string()],
+            with_modules: false,
+            notes: crate::capabilities::tools::api::ToolNotes::default(),
+        },
         llm: test_llm_demo(),
         log: Arc::new(crate::kernel::ports::NoopLog),
         tools: test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),
-        tier: crate::kernel::api::Tier::Host,
-        guest_lease: String::new(),
         vm: test_vm(),
-        sandbox: sb.clone(),
-        tools_this_turn: test_prompts()
-            .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
-            .to_string(),
-        builtin_tools: test_systools().tools,
-        unavailable: BTreeMap::new(),
-        fence: crate::kernel::api::FenceSpec::for_session(&sb, &[], false),
-        module_env: Default::default(),
-        runtime_path: None,
-        runtime_roots: Vec::new(),
-        shell_live: None,
         residents: Arc::new(crate::capabilities::residents::api::NoResidents),
         // 核实工具面只读：没有共享区提交这回事。
         workspace: None,
+        observations: crate::capabilities::tools::api::Observations::default(),
+        shell_live: None,
         reply_seq: 0,
         line: Default::default(),
-        allowed: vec!["read".to_string(), "plan".to_string()],
-        with_modules: false,
-        notes: crate::capabilities::tools::api::ToolNotes::default(),
         handlers: Vec::new(),
     };
     // 第一轮：先核实（read）；第二轮：交出 plan。
@@ -421,7 +423,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         &[crate::capabilities::llm::api::Msg::user("出方案")],
         crate::capabilities::llm::api::CompleteOpts::plain(false),
         None,
-        Some(&mut verify),
+        Some(&mut verify as &mut dyn crate::capabilities::session::api::CoreVerify),
         &mut |_e: crate::capabilities::session::api::SessionEvent| {},
     )
     .expect("核实之后要能交出方案");

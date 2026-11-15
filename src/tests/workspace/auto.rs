@@ -94,7 +94,7 @@ pub(crate) fn write_tools_publish_to_shared_area_and_report_stale_bases() {
     let mut m = member_with_tools("m0", Vec::new(), Arc::new(SilentRunner));
     {
         let t = m.tools.as_mut().expect("成员工具面");
-        t.sandbox = sb;
+        t.face.sandbox = sb;
         t.workspace = Some(ws.clone());
         // 锚点 = 这次工具调用那一行（回档据此退掉这次写入）。
         t.line.store(7, std::sync::atomic::Ordering::Relaxed);

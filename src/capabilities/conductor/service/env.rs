@@ -344,70 +344,75 @@ impl Conductor {
                 format!("{}\n{}", notes.module_tools, module_tool_lines.join("\n"));
         }
         crate::capabilities::session::api::MemberTools {
-            mode,
-            modules: table,
-            observations: crate::capabilities::tools::api::Observations::default(),
+            face: crate::capabilities::session::api::ToolFace {
+                mode,
+                modules: table,
+                tier,
+                guest_lease,
+                sandbox: sb.clone(),
+                tools_this_turn: self
+                    .prompt
+                    .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
+                    .to_string(),
+                builtin_tools: self.systools.book(),
+
+                unavailable,
+                // 围栏：可达范围 + 断网 + 环境白名单的落点，全部由该 agent 的沙箱派生（机制在 adapters）；
+                // 只读根来自用户显式授权（`sandbox.policy.host_read_roots`）与本机运行包的包根。
+                fence: {
+                    let mut fence = crate::kernel::api::FenceSpec::for_session(
+                        sb,
+                        &self.host_read_roots(),
+                        net,
+                    );
+                    fence.ro_tree.extend(host_plan.roots.iter().cloned());
+                    fence.ro_tree.sort();
+                    fence.ro_tree.dedup();
+                    fence
+                },
+                // 各模块隐私字段的注入项：装配期按模块解析一次，起工具进程时只走环境（解析失败 = 该模块没有可用值）。
+                module_env: modules
+                    .iter()
+                    .map(|m| {
+                        (
+                            m.manifest.id.clone(),
+                            self.secrets.resolve(&m.manifest.id).unwrap_or_default(),
+                        )
+                    })
+                    .collect(),
+                runtime_path: host_plan.path.clone(),
+                runtime_roots: {
+                    // 基础工具链根只在宿主档放行：VM 的工具链由 guest 的只读挂载提供，宿主路径在 guest 里不存在。
+                    let mut roots = if tier == crate::kernel::api::Tier::Host {
+                        self.base_roots.clone()
+                    } else {
+                        Vec::new()
+                    };
+                    roots.extend(host_plan.roots.iter().cloned());
+                    roots.sort();
+                    roots.dedup();
+                    roots
+                },
+                // 这一席的系统工具面**由角色表发放**（越权校验的唯一判据）：给什么写什么，代码里不留第二份名单。
+                allowed,
+                role: role.to_string(),
+                // 能不能用自己模块的工具由角色表发放；说明块素材在装配期算好（服务操作已在上面并进来）。
+                with_modules,
+                notes,
+            },
             llm: Arc::clone(&self.llm),
             log: Arc::clone(&self.log),
             tools: Arc::clone(&self.tools),
-            tier,
-            guest_lease,
             vm: Arc::clone(&self.vm),
-            sandbox: sb.clone(),
-            tools_this_turn: self
-                .prompt
-                .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
-                .to_string(),
-            builtin_tools: self.systools.book(),
-
-            unavailable,
-            // 围栏：可达范围 + 断网 + 环境白名单的落点，全部由该 agent 的沙箱派生（机制在 adapters）；
-            // 只读根来自用户显式授权（`sandbox.policy.host_read_roots`）与本机运行包的包根。
-            fence: {
-                let mut fence =
-                    crate::kernel::api::FenceSpec::for_session(sb, &self.host_read_roots(), net);
-                fence.ro_tree.extend(host_plan.roots.iter().cloned());
-                fence.ro_tree.sort();
-                fence.ro_tree.dedup();
-                fence
-            },
-            // 各模块隐私字段的注入项：装配期按模块解析一次，起工具进程时只走环境（解析失败 = 该模块没有可用值）。
-            module_env: modules
-                .iter()
-                .map(|m| {
-                    (
-                        m.manifest.id.clone(),
-                        self.secrets.resolve(&m.manifest.id).unwrap_or_default(),
-                    )
-                })
-                .collect(),
-            runtime_path: host_plan.path.clone(),
-            shell_live: Some(self.shell_slot(&sb.session)),
+            // 常驻服务的统一管理面：模块的 services 操作经它调用。
+            residents: Arc::clone(&self.residents),
             workspace: Some(Arc::clone(&self.workspace)),
-            runtime_roots: {
-                // 基础工具链根只在宿主档放行：VM 的工具链由 guest 的只读挂载提供，宿主路径在 guest 里不存在。
-                let mut roots = if tier == crate::kernel::api::Tier::Host {
-                    self.base_roots.clone()
-                } else {
-                    Vec::new()
-                };
-                roots.extend(host_plan.roots.iter().cloned());
-                roots.sort();
-                roots.dedup();
-                roots
-            },
+            observations: crate::capabilities::tools::api::Observations::default(),
+            shell_live: Some(self.shell_slot(&sb.session)),
             // 从零开始；按落盘转录重建时由调用方按转录里的最大值续号（见 rebuild_session）。
             reply_seq: 0,
             line: Default::default(),
-            // 这一席的系统工具面**由角色表发放**（越权校验的唯一判据）：给什么写什么，代码里不留第二份名单。
-            allowed,
-            role: role.to_string(),
-            // 能不能用自己模块的工具由角色表发放；说明块素材在装配期算好（服务操作已在上面并进来）。
-            with_modules,
-            notes,
             handlers,
-            // 常驻服务的统一管理面：模块的 services 操作经它调用。
-            residents: Arc::clone(&self.residents),
         }
     }
 

@@ -332,7 +332,7 @@ impl CollabSession {
             &msgs,
             opts,
             Some(cancel),
-            verify,
+            verify.map(|v| v as &mut dyn crate::capabilities::session::api::CoreVerify),
             sink,
         )?;
         let clear = payload
@@ -406,7 +406,7 @@ impl CollabSession {
             &msgs,
             opts,
             Some(cancel),
-            verify,
+            verify.map(|v| v as &mut dyn crate::capabilities::session::api::CoreVerify),
             sink,
         )?;
         let parsed: Vec<NodeVerdict> = payload

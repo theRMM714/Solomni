@@ -523,41 +523,43 @@ impl CollabSession {
                     .unwrap_or_default()
             };
             member.tools = Some(MemberTools {
-                mode,
-                role: "discussant".to_string(),
-                // 模块 id → 该模块的（目录, 工具表）：多模块 agent 靠信封里的 module 消歧。
-                modules: crate::capabilities::session::api::tool_table(&modules),
-                observations: crate::capabilities::tools::api::Observations::default(),
+                face: crate::capabilities::session::api::ToolFace {
+                    mode,
+                    role: "discussant".to_string(),
+                    // 模块 id → 该模块的（目录, 工具表）：多模块 agent 靠信封里的 module 消歧。
+                    modules: crate::capabilities::session::api::tool_table(&modules),
+                    tier: self.spec.tier,
+                    guest_lease: self.guest_lease.clone(),
+                    sandbox,
+                    tools_this_turn: prompts
+                        .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
+                        .to_string(),
+                    builtin_tools: self.systools.book(),
+                    // 讨论席拿不到模块工具（with_modules = false），因此不需要包选择诊断；
+                    // 执行席的缺包判据在 conductor（与成员循环同一把尺子）。
+                    unavailable: std::collections::BTreeMap::new(),
+                    fence,
+                    // 讨论席不干活、拿不到模块工具，也就没有工具进程的注入项。
+                    module_env: Default::default(),
+                    runtime_path: None,
+                    runtime_roots: Vec::new(),
+                    // 讨论席的系统工具面由角色表发放，再按权限档位过滤。
+                    allowed,
+                    // 讨论席不干活：拿不到自己模块的工具（角色表的 module_tools）。
+                    with_modules: self.systools.allows_module_tools("discussant"),
+                    notes: tool_notes,
+                },
                 llm: Arc::clone(&self.llm),
                 log: Arc::clone(&self.log),
                 tools: Arc::clone(&self.tools),
-                tier: self.spec.tier,
-                guest_lease: self.guest_lease.clone(),
                 vm: Arc::clone(&self.vm),
-                sandbox,
-                tools_this_turn: prompts
-                    .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
-                    .to_string(),
-                builtin_tools: self.systools.book(),
-                reply_seq: self.reply_seq,
-                line: Default::default(),
-                // 讨论席拿不到模块工具（with_modules = false），因此不需要包选择诊断；
-                // 执行席的缺包判据在 conductor（与成员循环同一把尺子）。
-                unavailable: std::collections::BTreeMap::new(),
-                fence,
-                // 讨论席不干活、拿不到模块工具，也就没有工具进程的注入项。
-                module_env: Default::default(),
-                runtime_path: None,
-                runtime_roots: Vec::new(),
-                shell_live: None,
                 residents: Arc::new(crate::capabilities::residents::api::NoResidents),
                 // 讨论席也有沙箱与写工具：写后照样自动提交（基线过期时如实拒绝）。
                 workspace: Some(Arc::clone(&self.workspace)),
-                // 讨论席的系统工具面由角色表发放，再按权限档位过滤。
-                allowed,
-                // 讨论席不干活：拿不到自己模块的工具（角色表的 module_tools）。
-                with_modules: self.systools.allows_module_tools("discussant"),
-                notes: tool_notes,
+                observations: crate::capabilities::tools::api::Observations::default(),
+                shell_live: None,
+                reply_seq: self.reply_seq,
+                line: Default::default(),
                 handlers: Vec::new(),
             });
             members.push(member);

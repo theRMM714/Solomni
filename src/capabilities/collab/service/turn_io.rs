@@ -89,41 +89,43 @@ impl CollabSession {
             })
             .unwrap_or_default();
         Some(crate::capabilities::session::api::MemberTools {
-            mode: self.core_mode,
-            role: role.to_string(),
-            modules: std::collections::BTreeMap::new(),
-            observations: crate::capabilities::tools::api::Observations::default(),
+            face: crate::capabilities::session::api::ToolFace {
+                mode: self.core_mode,
+                role: role.to_string(),
+                modules: std::collections::BTreeMap::new(),
+                tier: crate::kernel::api::Tier::Host,
+                guest_lease: String::new(),
+                sandbox: sb.clone(),
+                tools_this_turn: self
+                    .prompts
+                    .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
+                    .to_string(),
+                builtin_tools: self.systools.book(),
+                unavailable: std::collections::BTreeMap::new(),
+                fence: crate::kernel::api::FenceSpec::for_session(
+                    &sb,
+                    &[],
+                    self.settings.app.sandbox.policy.network,
+                ),
+                // 核心核实用的是只读内置工具，没有模块工具进程，也就没有注入项。
+                module_env: Default::default(),
+                runtime_path: None,
+                runtime_roots: Vec::new(),
+                allowed,
+                with_modules: false,
+                notes: crate::capabilities::tools::api::ToolNotes::default(),
+            },
             llm: Arc::clone(&self.llm),
             log: Arc::clone(&self.log),
             tools: Arc::clone(&self.tools),
-            tier: crate::kernel::api::Tier::Host,
-            guest_lease: String::new(),
             vm: Arc::clone(&self.vm),
-            sandbox: sb.clone(),
-            tools_this_turn: self
-                .prompts
-                .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
-                .to_string(),
-            builtin_tools: self.systools.book(),
-            unavailable: std::collections::BTreeMap::new(),
-            fence: crate::kernel::api::FenceSpec::for_session(
-                &sb,
-                &[],
-                self.settings.app.sandbox.policy.network,
-            ),
-            // 核心核实用的是只读内置工具，没有模块工具进程，也就没有注入项。
-            module_env: Default::default(),
+            residents: Arc::new(crate::capabilities::residents::api::NoResidents),
             // 核心核实的工具面只读：没有共享区提交这回事。
             workspace: None,
-            runtime_path: None,
-            runtime_roots: Vec::new(),
+            observations: crate::capabilities::tools::api::Observations::default(),
             shell_live: None,
-            residents: Arc::new(crate::capabilities::residents::api::NoResidents),
             reply_seq: 0,
             line: Default::default(),
-            allowed,
-            with_modules: false,
-            notes: crate::capabilities::tools::api::ToolNotes::default(),
             handlers: Vec::new(),
         })
     }

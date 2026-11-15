@@ -684,11 +684,11 @@ pub(crate) fn the_proxy_session_rebuilds_from_disk() {
         crate::capabilities::conductor::service::Session::Single(s) => {
             let tools = s.tools.as_ref().expect("有工具环境");
             assert!(
-                tools.allowed.iter().any(|t| t == d::CATALOG),
+                tools.face.allowed.iter().any(|t| t == d::CATALOG),
                 "重建后仍是 core_proxy 面：{:?}",
-                tools.allowed
+                tools.face.allowed
             );
-            assert!(!tools.with_modules);
+            assert!(!tools.face.with_modules);
         }
         _ => panic!("代理会话该重建为单会话形态"),
     }
@@ -1491,7 +1491,7 @@ pub(crate) fn proxy_profile_is_explicit_and_uses_a_real_private_sandbox() {
         .expect("重建");
     match session {
         Session::Single(s) => {
-            let sb = &s.tools.as_ref().expect("工具环境").sandbox;
+            let sb = &s.tools.as_ref().expect("工具环境").face.sandbox;
             assert_ne!(sb.private, sb.shared, "代理必须有真实私有沙箱");
             assert!(
                 sb.private.ends_with(".proxy"),

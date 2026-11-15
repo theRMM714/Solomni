@@ -218,7 +218,7 @@
 - **只服务单一调用方的脚本 / 编排** → 它自己的 `service.rs`；
 - **代理方法族（`core_proxy`）** → 留在 `conductor`，不升格：没有自有落盘真相（幂等账在内存，授予读会话 `meta.delegation`，转录与工作区分别归 `session` / `workspace`），§九.1 第 2 条也不成立——唯一调用方是 `conductor` 自己；升格还会成环，代理工具的执行面必须回到核心线程改核心状态（`ProxyBridge` → `ConductorHandle::call`），而 `conductor` 又要调它建代理会话（判据见 `src/capabilities/conductor/ports.rs` 的 `ProxyHost` 与 `src/capabilities/conductor/service/proxy.rs`）；
 - **DTO 中转站**（把两个能力的类型拼一起的适配业务）→ 新的水平层，禁止（`node run-tests.js` 的 T0 结构审查）。
-- **把环境包当参数传**：把端口、状态与值拼成一个结构递给别的能力，等于传活对象；改成只传值 + 少量窄端口（`src/capabilities/session/domain/tools.rs`、R16）。
+- **把环境包当参数传**：把端口、状态与值拼成一个结构递给别的能力，等于传活对象；改成只传值 + 少量窄端口（`src/capabilities/session/domain/tools.rs`、R16）：该文件里的 `ToolFace` 是抽出来的值面，端口与活状态仍留在 `MemberTools`；核实用例只借一个窄端口 `CoreVerify`，不把 `MemberTools` 写进 api 签名。
 
 ### 九.5 粒度上限
 
@@ -266,7 +266,7 @@
 - **apiPorts** / **domainPorts**：`api` 与 `domain` 都不引端口；
 - **foreignImpl**：不得给别的能力的类型写 `impl`（`node run-tests.js`）；
 - **coreCycles**：能力节点图无环；
-- **values**：api 面的公共签名不得有 `&mut` 参数（`&mut self` 与流式回调除外），值带内部可变、值里塞可变借用、跨能力同形结构只回执（`tests/gates/structure/values.js`）；
+- **values**：api 面的公共签名不得有 `&mut` 参数（`&mut self` 与流式回调除外），api 面声明或转出的值带内部可变、值里塞具名状态的可变借用或闭包（借端口 `&mut dyn Trait` 不算）、跨能力同形结构只回执（`tests/gates/structure/values.js`）；
 - **layers**：能力必须在 `layers.yaml` 归层，依赖边只能指向**严格更低层**（向上与同层都失败），层号从 1 起连续（`tests/gates/structure/layers.js`）；
 - **internal**（能力内部）：`service` 不引本能力 `detail` 或 `kernel::detail`；`service` 不直接做 IO（`std::fs` / `Command` / 网络 / `canonicalize`）；同能力的方法族之间不成环；覆盖 `api`（含 `api.rs` 与 `api/` 子目录）/ `service` / `domain` / `detail` 四个分区；
 - **fileSize**（文件粒度）：按角色分档判行数（实现 / 测试用例 / 测试支撑）与内联测试块，软线只回执、硬线失败，无 `EXEMPT`（`tests/gates/structure/size.js`）；

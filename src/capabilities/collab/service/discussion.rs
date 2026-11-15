@@ -272,8 +272,8 @@ impl Discussion {
         // 这一回合的工具面装进工具环境（声明与执行都读它）；跑完还原——只是借来跑一个回合。
         let saved = tools.as_deref_mut().map(|t| {
             (
-                std::mem::replace(&mut t.allowed, face),
-                std::mem::replace(&mut t.with_modules, with_modules),
+                std::mem::replace(&mut t.face.allowed, face),
+                std::mem::replace(&mut t.face.with_modules, with_modules),
             )
         });
         let llm = crate::capabilities::llm::api::LlmOpts {
@@ -348,8 +348,8 @@ impl Discussion {
             true,
         );
         if let (Some(t), Some((allowed, with_modules))) = (tools, saved) {
-            t.allowed = allowed;
-            t.with_modules = with_modules;
+            t.face.allowed = allowed;
+            t.face.with_modules = with_modules;
         }
         if cancel.load(std::sync::atomic::Ordering::Relaxed) {
             return Err("已停止".to_string());
