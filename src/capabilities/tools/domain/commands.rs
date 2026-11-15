@@ -47,6 +47,9 @@ pub struct Command {
     /// 目的：这条命令有写操作，需要 `--yes` 才算数（缺省只预览或只报状态）。
     #[serde(default)]
     pub confirm: bool,
+    /// 目的：`--json` 时的机器回执字段（给手册用；回执本身由呈现层排版）。
+    #[serde(default)]
+    pub json: Option<String>,
     #[serde(default)]
     pub flags: Vec<CommandFlag>,
 }

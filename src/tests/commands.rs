@@ -27,6 +27,9 @@ const INTERNAL: &[&str] = &[
     "--probe-replay",
 ];
 
+/// 跨命令修饰旗语（不是某条命令自己的旗语，故不写进命令表）。
+const MODIFIERS: &[&str] = &["--json"];
+
 fn book() -> &'static CommandBook {
     CommandBook::builtin().expect("命令表可解析")
 }
@@ -118,7 +121,9 @@ fn boot_commands_match_boot_dispatch() {
         .collect();
     for flag in flags_in(BOOT) {
         assert!(
-            declared.contains(&flag) || INTERNAL.contains(&flag.as_str()),
+            declared.contains(&flag)
+                || INTERNAL.contains(&flag.as_str())
+                || MODIFIERS.contains(&flag.as_str()),
             "启动相用了没声明的旗语 {}（命令自己的旗语要在命令表里写）",
             flag
         );
@@ -156,4 +161,122 @@ fn core_commands_match_cli_dispatch() {
     }
     assert!(catalog::suggest("singel").as_deref() == Some("single"));
     assert!(catalog::suggest("porxy").as_deref() == Some("proxy"));
+}
+/// 机器回执：启动命令的说明里要写清 --json 会得到什么字段，且 --json 能被解析器认出来。
+#[test]
+fn boot_commands_declare_json_receipt() {
+    let book = book();
+    for cmd in book.phase(Phase::Boot) {
+        let json = cmd.json.as_deref().unwrap_or("");
+        assert!(
+            !json.trim().is_empty(),
+            "启动命令 {} 没写 --json 的字段说明",
+            cmd.name
+        );
+        let detail = catalog::detail(&format!("--{}", cmd.name)).expect("启动命令有自己的说明");
+        assert!(detail.contains("等价 JSON"), "{}", detail);
+        assert!(detail.contains(json), "说明里的字段要与表一致：{}", detail);
+    }
+}
+
+/// 解析器：--json 无论写在命令前还是命令后都置位，且不吞掉命令与操作数。
+#[test]
+fn json_flag_parses_on_both_sides() {
+    let before = crate::presentation::cli::argv::parse(&["--json".to_string(), "--gc".to_string()])
+        .expect("--json --gc 可解析");
+    assert!(before.json);
+    assert_eq!(before.command.as_deref(), Some("gc"));
+    let after = crate::presentation::cli::argv::parse(&["--gc".to_string(), "--json".to_string()])
+        .expect("--gc --json 可解析");
+    assert_eq!(after.command.as_deref(), Some("gc"));
+    assert!(
+        after.operands.iter().any(|o| o == "--json"),
+        "命令后的 --json 要留在操作数里给启动相：{:?}",
+        after.operands
+    );
+}
+/// 覆盖：人能经呈现层用的动作，要么在呈现层有入口，要么在下面登记豁免。
+///
+/// 口径：`systools/tools.yaml` 的 `callers` 里写了 `user` 的工具算「人的动作面」；豁免表只放
+/// 只能由角色在会话里调用的工具面（文件工具与判定回报），它们没有、也不该有人的入口。
+/// 新增动作时忘了给呈现层入口，这条会红——把 id 加进豁免表前先想清楚人到底怎么用它。
+#[test]
+fn user_actions_have_a_presentation_entry_or_are_exempt() {
+    /// 工具面：只给会话里的角色用，人不直接调。
+    const TOOL_FACE: &[&str] = &[
+        "read",
+        "write",
+        "edit",
+        "patch",
+        "delete",
+        "list",
+        "search",
+        "node_verdict",
+        "checklist",
+        "verdict",
+        "slate",
+        "submit_report",
+        "catalog_agents",
+        "send_session_message",
+        "observe_session",
+        "read_session_messages",
+    ];
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let systools =
+        std::fs::read_to_string(root.join("systools").join("tools.yaml")).expect("工具表要读得到");
+    let mut user_tools: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for line in systools.lines() {
+        if let Some(rest) = line.strip_prefix("  ")
+            && !rest.starts_with(' ')
+            && let Some(name) = rest.strip_suffix(':')
+        {
+            current = name.trim().to_string();
+            continue;
+        }
+        if let Some(rest) = line.trim_start().strip_prefix("callers:")
+            && !current.is_empty()
+            && rest
+                .trim()
+                .trim_start_matches('[')
+                .split(',')
+                .any(|c| c.trim() == "user")
+        {
+            user_tools.push(current.clone());
+        }
+    }
+    assert!(!user_tools.is_empty(), "工具表里应当有人能用的动作");
+
+    let mut blob = String::new();
+    let mut stack = vec![root.join("src").join("presentation")];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).expect("呈现层目录要读得到") {
+            let path = entry.expect("目录项可读").path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if matches!(
+                path.extension().and_then(|e| e.to_str()),
+                Some("rs" | "js" | "html")
+            ) {
+                blob.push_str(&std::fs::read_to_string(&path).unwrap_or_default());
+            }
+        }
+    }
+
+    let mut missing: Vec<&str> = Vec::new();
+    for tool in &user_tools {
+        if TOOL_FACE.contains(&tool.as_str()) {
+            continue;
+        }
+        let quoted = format!("\"{}\"", tool);
+        let single = format!("'{}'", tool);
+        if !blob.contains(&quoted) && !blob.contains(&single) {
+            missing.push(tool.as_str());
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "这些动作人能用，但呈现层没有入口，也没登记豁免：{:?}",
+        missing
+    );
 }

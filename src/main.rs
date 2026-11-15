@@ -117,6 +117,7 @@ fn main() {
             command,
             &flags.operands,
             &system,
+            flags.json,
         ));
     }
     // 内部协议旗语（守门子进程、探针）：不属于命令面，仍在入口按字面量认。

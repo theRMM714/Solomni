@@ -124,6 +124,12 @@ pub(crate) fn detail(raw: &str) -> Option<String> {
     if cmd.phase == Phase::Boot {
         out.push_str("  退出码：0 成功；1 执行失败；2 用法或确认门槛不对\n");
     }
+    if let Some(json) = &cmd.json {
+        out.push_str(&format!(
+            "  等价 JSON：加 --json 得到这次调用的机器回执 {}\n",
+            json
+        ));
+    }
     Some(out)
 }
 
