@@ -1,0 +1,25 @@
+# 能力分层表：唯一权威。数字越小越底层，能力只能依赖严格更低层（ARCHITECTURE.md §九.1）。
+# 层号由现有依赖的最长路径算出——这是当前代码能做到的最小可行层数；每消灭一批跨层边就重算并收紧。
+# 门禁：tests/gates/structure/layers.js（T0 结构审查）。新增能力必须先在这里归层，否则失败。
+kernel: 0
+llm: 1
+modules: 1
+permission: 1
+prompt: 1
+taskchain: 1
+packages: 2
+secrets: 2
+workspace: 2
+residents: 3
+tools: 3
+vm: 3
+provision: 4
+session: 4
+registry: 5
+slate: 6
+storage: 6
+builds: 7
+collab: 7
+system: 8
+# 待解散：只出不进的单元（出边 21 / 入边 0），排在最高层是它的真实位置。它消失时删掉本行。
+conductor: 9
