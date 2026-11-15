@@ -11,7 +11,7 @@
 - 管：一席的环境——`api::member` 派生围栏、模块变量、运行时可执行文件与工具链根；`api::guest_lease` 判有没有 guest 租约。
 - 不管：事实取得——`SessionMeta` / `WorkRoots` / `Roster` / `PackagePlan` / `AppSettings` 都由调用方先取好，本单元无端口、无 IO。
 - 不管：落盘与进程——不写文件、不启停 guest、不碰围栏授权台账（`tools` 的 `release_by_lease`）。
-- 不管：机制侧怎么用——把围栏写进进程、把模块变量塞进环境由 `conductor` 的 `tools_env` 装配。
+- 不管：机制侧怎么用——围栏与模块变量由 `turn` 的装配构件（`src/capabilities/turn/service/assemble.rs`）按本单元派生的事实装进工具面。
 
 ## 入站契约与状态归属
 

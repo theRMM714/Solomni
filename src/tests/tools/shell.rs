@@ -398,35 +398,50 @@ fn vm_shell_receipt_uses_the_environment_path_form() {
 /// 目的：基础工具链根只进宿主成员工具面。
 #[test]
 pub(crate) fn conductor_base_roots_are_only_put_on_host_member_tools() {
+    let base_roots = vec![abs(&["base"])];
     let core = core_with(Vec::new(), gw(BTreeMap::new(), vec!["[]".into()]))
-        .with_base_roots(vec![abs(&["base"])]);
+        .with_base_roots(base_roots.clone());
     let sb = test_sandbox("a", &[]);
     let plan = crate::capabilities::packages::api::PackagePlan::default();
-    let host = core.tools_env(
-        &[],
-        &sb,
-        BTreeMap::new(),
-        false,
-        crate::capabilities::llm::api::ToolMode::Envelope,
-        "solo",
-        crate::kernel::api::Tier::Host,
-        String::new(),
-        &plan,
+    let host = crate::capabilities::turn::api::member_tools(
+        &core.session_deps(),
+        &crate::capabilities::turn::api::MemberSpec {
+            modules: &[],
+            sandbox: &sb,
+            unavailable: BTreeMap::new(),
+            net: false,
+            mode: crate::capabilities::llm::api::ToolMode::Envelope,
+            role: "solo",
+            tier: crate::kernel::api::Tier::Host,
+            guest_lease: String::new(),
+            plan: &plan,
+            base_roots: &base_roots,
+            host_read_roots: Vec::new(),
+            shell: core.shell_slot(&sb.session),
+            handlers: &|_| Vec::new(),
+        },
     );
     assert!(
         host.runtime_roots.contains(&abs(&["base"])),
         "基础工具链根要进宿主 shell 的只读根"
     );
-    let vm = core.tools_env(
-        &[],
-        &sb,
-        BTreeMap::new(),
-        false,
-        crate::capabilities::llm::api::ToolMode::Envelope,
-        "solo",
-        crate::kernel::api::Tier::Vm,
-        "guest".to_string(),
-        &plan,
+    let vm = crate::capabilities::turn::api::member_tools(
+        &core.session_deps(),
+        &crate::capabilities::turn::api::MemberSpec {
+            modules: &[],
+            sandbox: &sb,
+            unavailable: BTreeMap::new(),
+            net: false,
+            mode: crate::capabilities::llm::api::ToolMode::Envelope,
+            role: "solo",
+            tier: crate::kernel::api::Tier::Vm,
+            guest_lease: "guest".to_string(),
+            plan: &plan,
+            base_roots: &base_roots,
+            host_read_roots: Vec::new(),
+            shell: core.shell_slot(&sb.session),
+            handlers: &|_| Vec::new(),
+        },
     );
     assert!(
         !vm.runtime_roots.contains(&abs(&["base"])),

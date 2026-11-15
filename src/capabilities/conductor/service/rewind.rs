@@ -487,16 +487,23 @@ impl Conductor {
                 } else {
                     crate::capabilities::packages::api::PackagePlan::default()
                 };
-                let mut tools = self.tools_env(
-                    &modules,
-                    &sb,
-                    unavailable,
-                    self.network_allowed(),
-                    mode,
-                    &role,
-                    meta.exec.tier,
-                    self.guest_lease_for(meta)?,
-                    &host_plan,
+                let mut tools = crate::capabilities::turn::api::member_tools(
+                    &self.session_deps(),
+                    &crate::capabilities::turn::api::MemberSpec {
+                        modules: &modules,
+                        sandbox: &sb,
+                        unavailable,
+                        net: self.network_allowed(),
+                        mode,
+                        role: &role,
+                        tier: meta.exec.tier,
+                        guest_lease: self.guest_lease_for(meta)?,
+                        plan: &host_plan,
+                        base_roots: &self.base_roots,
+                        host_read_roots: self.host_read_roots(),
+                        shell: self.shell_slot(&sb.session),
+                        handlers: &|allowed| self.work_handlers(&sb, allowed),
+                    },
                 );
                 // 回复 id 跨重启单调：从转录里的最大值续号，否则新回复会与旧回复并成一组。
                 tools.reply_seq = crate::capabilities::session::api::max_reply(events);

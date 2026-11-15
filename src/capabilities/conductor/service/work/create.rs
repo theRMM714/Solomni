@@ -503,17 +503,30 @@ impl Conductor {
                 } else {
                     pkgs::PackagePlan::default()
                 };
-                let (mut s, opened) = self.build_single(
-                    a,
-                    &chosen,
-                    channel,
-                    &sb,
-                    unavailable,
-                    self.network_allowed(),
-                    meta.exec.tier,
-                    guest,
-                    self.guest_lease_for(&meta)?,
-                    &host_plan,
+                let (mut s, opened) = crate::capabilities::turn::api::single_session(
+                    &self.session_deps(),
+                    &crate::capabilities::turn::api::SingleSpec {
+                        agent: a,
+                        member: crate::capabilities::turn::api::MemberSpec {
+                            modules: &chosen,
+                            sandbox: &sb,
+                            unavailable,
+                            net: self.network_allowed(),
+                            mode: self.registry.tool_mode(a.model.as_deref()),
+                            role: "solo",
+                            tier: meta.exec.tier,
+                            guest_lease: self.guest_lease_for(&meta)?,
+                            plan: &host_plan,
+                            base_roots: &self.base_roots,
+                            host_read_roots: self.host_read_roots(),
+                            shell: self.shell_slot(&sb.session),
+                            handlers: &|allowed| self.work_handlers(&sb, allowed),
+                        },
+                        channel,
+                        guest,
+                        context: self.context_budget(a.model.as_deref()),
+                        core_model: self.registry.core_model(),
+                    },
                 );
                 // 过期清理是**落盘事实**：装配时按 meta 装回开关，默认关。
                 s.set_context_freshness(meta.context_freshness);

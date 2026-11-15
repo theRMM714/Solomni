@@ -9,7 +9,7 @@
 | --- | --- |
 | `conductor`（协调业务） | [README.md](conductor/README.md)、[unit-map.md](conductor/unit-map.md) |
 | `env`（环境事实） | [README.md](env/README.md)、[unit-map.md](env/unit-map.md) |
-| `turn`（会话在世状态） | [README.md](turn/README.md)、[unit-map.md](turn/unit-map.md) |
+| `turn`（会话在世状态 + 会话装配构件） | [README.md](turn/README.md)、[unit-map.md](turn/unit-map.md) |
 | `lifecycle`（会话历史生命周期） | [README.md](lifecycle/README.md)、[unit-map.md](lifecycle/unit-map.md) |
 | `proxy`（模型工具面业务） | [README.md](proxy/README.md)、[unit-map.md](proxy/unit-map.md) |
 | `collab`（协作会话） | [README.md](collab/README.md)、[unit-map.md](collab/unit-map.md)、[task-chain.md](collab/task-chain.md) |

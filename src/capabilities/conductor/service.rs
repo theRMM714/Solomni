@@ -278,6 +278,22 @@ impl Conductor {
         self.turn.shell_slot(sid)
     }
 
+    /// 目的：一席会话装配要的十个能力面——`turn` 的装配构件按它取用，不碰端口。
+    pub(crate) fn session_deps(&self) -> crate::capabilities::turn::api::SessionDeps {
+        crate::capabilities::turn::api::SessionDeps {
+            llm: Arc::clone(&self.llm),
+            log: Arc::clone(&self.log),
+            prompt: Arc::clone(&self.prompt),
+            systools: Arc::clone(&self.systools),
+            tools: Arc::clone(&self.tools),
+            vm: Arc::clone(&self.vm),
+            residents: Arc::clone(&self.residents),
+            workspace: Arc::clone(&self.workspace),
+            secrets: Arc::clone(&self.secrets),
+            compact: self.compact.clone(),
+        }
+    }
+
     /// 目的：读会话最近一次 shell 的快照；没有运行过就是 None（状态栏据此决定要不要出 chip）。
     pub(crate) fn shell_view(
         &self,
