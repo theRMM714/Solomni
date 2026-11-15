@@ -30,9 +30,6 @@
 | `src/capabilities/conductor/service/compact.rs` | 压缩通道工厂：全局设置指向的压缩模型解析与更新 |
 | `src/capabilities/conductor/service/flow.rs` | 协作流水线推进与协作动作：链推进、节点派发、协作步编排、裁决卡动作与改需求；取放、子会话派生与树序走 turn |
 | `src/capabilities/conductor/service/rewind.rs` | 跨会话回档编排：按同一回合 id 收窗整棵子树、折叠子会话、告知副作用；按转录重建归 turn（`src/capabilities/turn/service/rebuild.rs`） |
-| `src/capabilities/conductor/service/env.rs` | 诊断准备与提醒上限；权限链 / 沙箱 / 围栏 / 租约 / 预算一律走 turn（`src/capabilities/turn/service/facts.rs`） |
 | `src/capabilities/conductor/service/history.rs` | 历史列出 / 打开 / 删除的转发与装配（收尾类型来自 `lifecycle`）、事件收编与增量落盘手柄；树序、绑定复检与裁决队句柄在 turn |
 | `src/capabilities/conductor/service/ask_user.rs` | 工具层提问端口的会话侧实现：推一条问题并阻塞等一个选项 id |
 | `src/capabilities/conductor/service/proxy.rs` | 核心侧代理适配：`proxy_*` 用例与 `ProxyBridge`（把 `proxy` 的端口调用丢回核心线程），工具执行面在 `proxy` 能力；代理会话装配在 turn（`src/capabilities/turn/service/proxy.rs`） |
-| `src/capabilities/conductor/service/work_tools.rs` | 共享区六个核心自有工具（`work_pull` / `work_commit` / `work_status` / `work_versions` / `work_resolve` / `work_lost`）的成员侧执行者，以及由 turn 以闭包注入的 work 处理器工厂 `handlers` |
-| `src/capabilities/conductor/domain/work.rs` | 六个核心自有工具的纯逻辑：工具名、入参解析、回执拼装与三方版本 / 解决结果渲染 |

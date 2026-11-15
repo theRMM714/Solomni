@@ -418,7 +418,6 @@ pub(crate) fn conductor_base_roots_are_only_put_on_host_member_tools() {
             base_roots: &base_roots,
             host_read_roots: Vec::new(),
             shell: core.turn.shell_slot(&sb.session),
-            handlers: &|_| Vec::new(),
         },
     );
     assert!(
@@ -440,7 +439,6 @@ pub(crate) fn conductor_base_roots_are_only_put_on_host_member_tools() {
             base_roots: &base_roots,
             host_read_roots: Vec::new(),
             shell: core.turn.shell_slot(&sb.session),
-            handlers: &|_| Vec::new(),
         },
     );
     assert!(

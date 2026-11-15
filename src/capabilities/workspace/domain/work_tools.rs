@@ -1,13 +1,14 @@
-//! 目的：共享区版本化工作区六个核心自有工具（`work_pull` / `work_commit` / `work_status` /
-//!   `work_versions` / `work_resolve` / `work_lost`）的纯逻辑——工具名、入参解析与回执拼装。
+//! 目的：共享区工作工具（`work_pull` / `work_commit` / `work_sync` / `work_status` / `work_versions` /
+//!   `work_resolve` / `work_lost`）的纯逻辑——工具名、入参解析与回执拼装。
 //! 管：工具名常量与 `is_work_tool`、取参（`str_list` / `str_arg`）、各工具回执的拼装。
-//! 不管：真正的拉取 / 提交 / 状态 / 三方视图 / 解决 / 备份恢复（走 `conductor::service::work_tools`
-//!   → `workspace::api::Workspace`）；冲突、状态与备份判定（在 `workspace`）。
-//! 联动：由本能力的 `service/` 调用；工具名与 `systools/tools.yaml` 同一份名单。
+//! 不管：真正的拉取 / 提交 / 状态 / 三方视图 / 解决 / 备份恢复（走本能力的 `service/work_tools`）；
+//!   冲突、状态与备份判定（在 `domain::workstore`），落盘（在 `detail/`）。
+//! 联动：由 `service/work_tools.rs` 调用；工具名与 `systools/tools.yaml` 同一份名单。
 
-use crate::capabilities::workspace::api::{
+use super::asset::VERSION_TEXT_LIMIT;
+use super::workstore::{
     ChangeKind, CommitReport, LostReport, PullReport, ResolveAction, ResolveEntry, ResolveReport,
-    RestoreLostReport, StatusReport, SyncReport, VERSION_TEXT_LIMIT, VersionView,
+    RestoreLostReport, StatusReport, SyncReport, VersionView,
 };
 
 pub const PULL: &str = "work_pull";

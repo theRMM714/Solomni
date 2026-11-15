@@ -13,7 +13,7 @@
 
 ## 入站契约与状态归属
 
-- 入站契约：`src/capabilities/provision/api.rs` 的 `Provision`（`status` / `guest_bases` / `job` / `start` / `cancel`）。
+- 入站契约：`src/capabilities/provision/api.rs` 的 `Provision`（`status` / `guest_bases` / `job` / `start` / `cancel` / `tool_path`）。
 - DTO：`DepStatus` / `GuestBase` / `JobState`；`NoProvision` 是未接入的默认实现（如实失败，不假装可用）。
 - **虚拟根清单**：`guest_bases` 把清单里带 `guest:` 的条目按虚拟根名归并（`ready` = 这一根的各条都按当前清单装好），一个虚拟根可由多条条目共同装；conductor 的创建向导与会话配置按它渲染下拉。
 - **虚拟根名**是 guest 的身份，按「发行版-大版本」取（`debian-13`），不按宿主平台取：两个宿主装的是同一个 Debian 13，目录同叫 `.vm/guest/debian-13`，布局差异由 `guest.yaml` 与镜像类型表达。
@@ -100,7 +100,7 @@
 
 ## 七、补齐后的生效方式
 
-- 主程序**每次判据取用时**自动采用项目内补齐的可执行文件（`qemu_path` / `virtiofsd_path` / `smbd_path` 未登记时；显式登记优先，取到的是拼接产品根后的绝对路径）——装完即生效，不需要重启进程。
+- 主程序**每次判据取用时**自动采用项目内补齐的可执行文件（`Provision::tool_path`：登记值优先，没登记就按台账里在位的补齐条目给产品根下的绝对路径，`src/capabilities/provision/api.rs`）——装完即生效，不需要重启进程。
 - 共享后端全部在装配期持有，哪一档在起 guest 那一刻按候选挑（见 [docs/vm/README.md](../vm/README.md) 的「多平台组合」）。
 - 补齐面与会话面是**两份 vm 能力面**：补齐面只持内部 `none`（运行期编排只经 QGA，不挂载），会话面只持用户档；`none` 不进用户候选链——否则 `clients` 为空的 guest 会被静默当成无共享启动。
 

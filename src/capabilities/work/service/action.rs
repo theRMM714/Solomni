@@ -266,7 +266,7 @@ impl Work {
             self.log
                 .warn("work::create_proxy", &format!("工作区初始导入失败：{}", e));
         }
-        let mut session = turn.build_proxy_with(&meta, &channel, registry, &*self.handlers)?;
+        let mut session = turn.build_proxy_with(&meta, &channel, registry)?;
         let mut events = Vec::new();
         // 授予事实既是 meta 的 `delegation`（可重建），也留一条**可回放记录**：
         // 打开这条会话的人应当看得见"决定权是整块交出去的"，而不是只能去读 meta。

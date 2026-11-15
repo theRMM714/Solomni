@@ -23,11 +23,11 @@
 | **根**（`entry/` + `main.rs` + `guard/`） | **启动程序与组合根**：解析根、`new` 出所有适配器并注入（共用装配在 `src/entry/assembly.rs`）、跑启动对账、把入站面交给呈现层；机器可读探针（`entry/probes/`：`--doctor` / `--https-check` / `--print-routes` / `--print-fence-env` / `--fence-verify`）；围栏守门进程与台账处置（`--fence-run`；以及 `--fence-clean` / `--fence-reconcile` / `--fence-ledger` / `--fence-restore` / `--fence-revoke` / `--fence-profile-rm`）；长驻子进程守门进程（`--proc-watchdog`，macOS 的父死子亡） | 它依赖所有人，**任何人都不许依赖它**；除启动、装配、探针与守门外无业务 |
 | `presentation/{cli,web}/` | **呈现层（交付机制）**：各渠道一个子目录，完全分开——传输（argv/stdout vs HTTP）、路由、纯渲染。**不是业务能力** | 只依赖各能力的 `::api`；**拿不到端口对象，也拿不到 `Core`**；两者互不依赖 |
 | `capabilities/` | **业务层**：按业务功能垂直切分。每个能力有 `api`（入站契约：trait + DTO）/ `service`（本能力的状态与用例）/ `ports`（出站端口，只由定义它的能力持有）/ `domain`（纯逻辑）/ `detail`（只有组合根能构造） | **业务之间只经对方的 `api`**；不反向依赖根 / 呈现层（T0 机器判定，见 §九.7） |
-| `capabilities/conductor/` | **编配型业务**（按 §九.1 路径 B + C 成立）：会话中心（在世表、命令队列、运行态）、生成驱动、跨能力用例与跨会话回档编排；与别的能力**平级** | **必须薄**：只做毫秒级状态变换与派发，长步骤（起停 guest、生成、压缩）在调用方或工作线程（§九.3）；不读文件、不发网络、不碰 stdin/stdout |
+| `capabilities/conductor/` | **编配型业务**（按 §九.1 路径 B + C 成立）：会话中心（命令队列与派发闸）、生成驱动、跨能力用例与跨会话回档编排；与别的能力**平级** | **必须薄**：只做毫秒级状态变换与派发，长步骤（起停 guest、生成、压缩）在调用方或工作线程（§九.3）；不读文件、不发网络、不碰 stdin/stdout |
 | `capabilities/work/` | **工作形态的入口**（按 §九.1 路径 C 成立）：把「要一份工作」翻译成会话配置——形态（single / collab / proxy）、名单、模型档、思考强度、权限档与虚拟根；建工作、建会话、启用与激活、改配、会话 / 文件视图、运行包报告与档位、guest 启停的两段准备都在这里，这些决定跨 `workspace` / `vm` / `session` / `modules` / `registry` 多个参与方，无法归属其中任一方 | **必须薄**：核心只做毫秒级的状态变换（校验、占名、出计划、落盘、装配），等外部世界的活（起停 guest）在调用方线程（§九.3）；不持会话本体（`turn`）、不持登记处、不读文件、不发网络；`src/capabilities/work/api.rs` 是唯一入站面，`conductor` 只按队列转发 |
 | `capabilities/env/` | **环境事实的唯一派生者**（按 §九.1 路径 A 成立）：权限面、沙箱清单、一席的围栏 / 进程环境 / 工具链根与 guest 租约，全部从调用方交来的事实算出；纯派生，**无状态、无端口、无 IO** | **不得取事实、不得落盘、不得启停 guest**；不引 `conductor` / `collab` / `turn` / `proxy`（`src/capabilities/env/api.rs` 是唯一入站面） |
 | `capabilities/proxy/` | **模型工具面的入口**（按 §九.1 路径 C 成立）：`core_proxy` 六个工具的声明解读、授权校验、参数规整与执行，动作跨 `session` / `workspace` / `tools` / `permission` 多个参与方，无法归属其中任一方 | **必须薄**：只做参数与授权的毫秒级判定；外部动作一律经端口 `ProxyHost` 交回核心线程，宿主实现是 `conductor` 的队列桥（`src/capabilities/proxy/api.rs`） |
-| `capabilities/turn/` | **会话本体 + 一席会话装配构件**（会话本体按 §九.2 状态归属归本单元、写点唯一；装配构件按 §九.1 路径 A 成立）：`Turn` 持五张内存表（在世表 / 运行态 / 占名表 / 裁决队句柄 / shell 槽）与各能力面；按调用方交来的事实（模块 / 沙箱 / 权限面 / 缺包 / 租约）装出一席工具面与会话对象、按转录从落盘重建、管树序与裁决队、派生子会话，纯规则在 `domain/` | **不得读文件、不得起 guest、不碰 stdin/stdout**；生成驱动与跨能力用例不在此（`src/capabilities/turn/api.rs` 是唯一入站面） |
+| `capabilities/turn/` | **会话本体 + 一席会话装配构件**（会话本体按 §九.2 状态归属归本单元、写点唯一；装配构件按 §九.1 路径 A 成立）：`Turn` 持五张内存表（在世表 / 运行态 / 占名表 / 裁决队句柄 / shell 槽）与各能力面；按调用方交来的事实（模块 / 沙箱 / 权限面 / 缺包 / 租约）装出一席工具面（含成员侧工作工具处理器，按放行名单经 `workspace::api::work_handlers` 现取）与会话对象、按转录从落盘重建、管树序与裁决队、派生子会话，纯规则在 `domain/` | **不得读文件、不得起 guest、不碰 stdin/stdout**；生成驱动与跨能力用例不在此（`src/capabilities/turn/api.rs` 是唯一入站面） |
 | `kernel/` | **地基库（非层）**：无领域语义、无领域状态的机制（运行日志端口、宿主探测、取消表、跨层共享的形状、路径书写、外部进程执行与长驻子进程账、围栏机制）；形状与别的能力一致（`api` / `ports` / `domain` / `detail`） | **不依赖任何人**；不解释共享形状的业务语义，不构造业务决策与面向用户的文案 |
 
 - 推论：
@@ -83,7 +83,7 @@
 | `SecretStore` | 模块隐秘字段的落盘（`.home/` 的 `secrets.yaml`；值不进提示词、转录与日志） | `secrets/detail::YamlSecrets` |
 | `FenceHost` | 围栏授权的释放：`release_by_lease` 按会话租约撤 ACE/删 profile（会话改配、删除），`release_call` 服务一次性调用（撤 ACE、删 profile 与临时目录）；**kernel 共享机制端口** | `confine::FenceHostAdapter`（本平台无该机制时为空操作） |
 | `Log` / `HostProbe` / `PathCodec` / `ProcessTexts` | 运行日志（三级）/ 宿主能力探测（**只问事实**：路径存在性、PATH 上的可执行文件、本机虚拟化能力）/ 模型侧路径 ↔ 宿主路径的翻译 / 外部进程回执的收尾文案 | `FileLog` / `HostProbeAdapter` / `vm` 的路径桥 / `kernel::detail::process::CodeProcessTexts`（测试 `NoopLog` / `FixedProbe`） |
-| `ToolHandler` | **一类工具的执行者**（按名字认领）：内置、模块与核心自有工具因此走**同一条派发路径** | 各能力注入（工具能力管内置与模块；conductor 注入代理工具那个） |
+| `ToolHandler` | **一类工具的执行者**（按名字认领）：内置、模块与核心自有工具因此走**同一条派发路径** | 各能力注入（工具能力管内置与模块；`workspace` 管共享区工作工具；`proxy` 管代理工具），装配时由 `turn` 按放行名单现取 |
 | `AskUser` | **请用户裁决的提问端口**：需要用户裁决的机制（工具执行层、围栏）推一条问题并**阻塞**等一个选项 id——走会话的**统一裁决通道**（不是第二条） | 会话侧实现（conductor 的 `SessionAsk`：卡片进那一条队、`answer_card` 作答；构不出可用选项时停会话 + 落警告） |
 
 - 端口只有一个持有者：**定义它的那个能力的 `service.rs`**（R12）。**例外一**：`kernel` 的机制端口（`Log` / `HostProbe` / `ToolHandler` / `AskUser` / `ProcessRunner` / `FenceHost` / `PathCodec` / `ProcessTexts` / `SessionHost`）全项目共享。**例外二（回调端口）**：业务为了不反向依赖调用方，可把「要调用方做的事」声明成端口、由**调用方实现**，经定义方的 `api.rs` 交出——`ProxyHost` 定义在 `src/capabilities/proxy/ports.rs`，`conductor` 的 `ProxyBridge` 实现它。

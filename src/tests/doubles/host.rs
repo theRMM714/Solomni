@@ -195,10 +195,21 @@ pub(crate) fn test_provision()
 pub(crate) fn test_provision_with(
     deps: Vec<crate::capabilities::provision::api::DepStatus>,
 ) -> Arc<dyn crate::capabilities::provision::api::Provision + Send + Sync> {
-    struct FixedProvision(Vec<crate::capabilities::provision::api::DepStatus>);
+    test_provision_at(None, deps)
+}
+
+/// 目的：同上，但把产品根交给替身——登记为空时按"根 + 台账 probe"现算绝对路径（验"装完即用"）。
+pub(crate) fn test_provision_at(
+    root: Option<std::path::PathBuf>,
+    deps: Vec<crate::capabilities::provision::api::DepStatus>,
+) -> Arc<dyn crate::capabilities::provision::api::Provision + Send + Sync> {
+    struct FixedProvision {
+        deps: Vec<crate::capabilities::provision::api::DepStatus>,
+        root: Option<std::path::PathBuf>,
+    }
     impl crate::capabilities::provision::api::Provision for FixedProvision {
         fn status(&self) -> Result<Vec<crate::capabilities::provision::api::DepStatus>, String> {
-            Ok(self.0.clone())
+            Ok(self.deps.clone())
         }
         fn guest_bases(
             &self,
@@ -224,8 +235,24 @@ pub(crate) fn test_provision_with(
         fn ensure_spec(&self, _spec: &str, _on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
             Err("测试不跑补齐".to_string())
         }
+        fn tool_path(
+            &self,
+            tool: crate::capabilities::provision::api::HostTool,
+            registered: &str,
+        ) -> Option<String> {
+            let registered = registered.trim();
+            if !registered.is_empty() {
+                return Some(registered.to_string());
+            }
+            let prefix = tool.id_prefix();
+            let root = self.root.as_ref()?;
+            self.deps
+                .iter()
+                .find(|d| d.present && d.id.starts_with(prefix))
+                .map(|d| root.join(&d.probe).to_string_lossy().into_owned())
+        }
     }
-    Arc::new(FixedProvision(deps))
+    Arc::new(FixedProvision { deps, root })
 }
 
 /// 目的：一条"已装在项目内"的依赖（`probe` 是相对产品根的写法，与清单同构）。

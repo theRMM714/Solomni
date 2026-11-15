@@ -4,5 +4,4 @@
 //! 联动：核心代理工具的端口 `ProxyHost` 归 `proxy` 能力（本能力只实现它，见 service/proxy.rs 的队列桥），装配在 main 组合根。
 
 pub mod api;
-pub mod domain;
 pub mod service;

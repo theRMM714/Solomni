@@ -220,9 +220,7 @@ pub(crate) fn root_edit_keeps_child_narrowing_and_child_cannot_widen() {
         .sid;
     let child = {
         let (turn, registry, probe) = core.turn_parts();
-        turn.spawn_agent_session(&parent, "a", registry, probe, &|w, sb, allowed| {
-            crate::capabilities::conductor::service::work_tools::handlers(w, sb, allowed)
-        })
+        turn.spawn_agent_session(&parent, "a", registry, probe)
     }
     .unwrap();
     let with = |mut e: SessionEdit, p: PermissionLayer| {
@@ -330,9 +328,7 @@ pub(crate) fn quick_profile_switch_updates_root_and_children_cannot_widen() {
         .sid;
     let child = {
         let (turn, registry, probe) = core.turn_parts();
-        turn.spawn_agent_session(&parent, "a", registry, probe, &|w, sb, allowed| {
-            crate::capabilities::conductor::service::work_tools::handlers(w, sb, allowed)
-        })
+        turn.spawn_agent_session(&parent, "a", registry, probe)
     }
     .unwrap();
     core.set_permission_profile(&parent, ProfileId::View)

@@ -92,13 +92,11 @@ pub struct Conductor {
 
 pub(crate) mod ask_user;
 mod compact;
-mod env;
 mod flow;
 mod history;
 pub mod proxy;
 mod rewind;
 mod turn;
-pub(crate) mod work_tools;
 
 impl Conductor {
     /// 组合根专用：main 负责创建适配器并注入；conductor 不自建任何具体实现。
@@ -142,8 +140,7 @@ impl Conductor {
             Arc::clone(&log),
             compact.clone(),
         );
-        // 工作形态用例与核心共享同一批能力面；`handlers` 是核心自己的装配件，
-        // 注入给它以免两个能力互相引用（能力之间只能经对方的 api）。
+        // 工作形态用例与核心共享同一批能力面；工具面装配（含工作工具处理器）在会话本体内部完成。
         let work = Work::new(
             root.clone(),
             Arc::clone(&history),
@@ -158,7 +155,6 @@ impl Conductor {
             Arc::clone(&tools),
             Arc::clone(&log),
             Arc::clone(&probe),
-            Box::new(crate::capabilities::conductor::service::work_tools::handlers),
         );
         let c = Conductor {
             registry,

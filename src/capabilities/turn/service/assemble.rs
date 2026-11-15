@@ -1,10 +1,11 @@
 //! 目的：一席会话的装配构件——把各能力的能力面与已取事实装成成员工具面与单 agent 会话对象，
 //!   并把历史会话按落盘重建为活动会话（`ensure_session`）。
 //! 管：`SessionDeps`（装配要的十个能力面）、`MemberSpec` / `SingleSpec`（这一席 / 这一场的事实）、
-//!   `member_tools`（工具面 + 围栏 + 处理器）、`single_session`（单 agent 会话对象）、
+//!   `member_tools`（工具面 + 围栏 + 工作工具处理器）、`single_session`（单 agent 会话对象）、
 //!   `ensure_session`（在世表里没有就按落盘重建一份）。
-//! 不管：事实从哪来（`facts.rs` / `plan.rs` / `tree.rs` 现取）、落盘、生成驱动。
-//! 联动：`conductor` 经 `turn::api` 取用；纯规则在 `turn::domain::assemble`；围栏派生在 `env` 能力。
+//! 不管：事实从哪来（`facts.rs` / `plan.rs` / `tree.rs` 现取）、落盘、生成驱动、工作工具的执行。
+//! 联动：`conductor` 经 `turn::api` 取用；纯规则在 `turn::domain::assemble`；围栏派生在 `env` 能力；
+//!   成员侧工作工具处理器按放行名单现取 `workspace::api::work_handlers`。
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -25,7 +26,7 @@ use crate::capabilities::turn::domain::assemble::{face_tools, service_ops_of, se
 use crate::capabilities::vm::api::{GuestOs, Vm};
 use crate::capabilities::workspace::api::{Sandbox, Workspace};
 use crate::kernel::api::Tier;
-use crate::kernel::ports::{HostProbe, Log, ToolHandler};
+use crate::kernel::ports::{HostProbe, Log};
 
 /// 目的：装配要的十个能力面——组合根注入一次，装配期只按面取用（不碰端口）。
 pub struct SessionDeps {
@@ -42,18 +43,8 @@ pub struct SessionDeps {
     pub compact: Arc<dyn CompactChatFactory>,
 }
 
-/// 目的：核心自有工具的处理器集合（`MemberSpec.handlers` 的返回形状）。
-pub type ToolHandlers = Vec<Arc<dyn ToolHandler>>;
-
-/// 目的：核心自有工具的注入源——按「本回合放行的工具 id」现算处理器，实现留在 `conductor`。
-/// 参数：工作区面、该 agent 的沙箱、本回合放行的工具 id。
-/// 返回：这些名字里由核心认领的处理器。
-/// 约束：注入方不得在闭包里回引 `turn` 的状态；本单元只调一次、不缓存。
-pub type HandlerSource<'a> =
-    dyn Fn(&Arc<dyn Workspace + Send + Sync>, &Sandbox, &[String]) -> ToolHandlers + 'a;
-
 /// 目的：一席工具面要用的事实——模块、沙箱、缺包、网络、形态、角色、档位、租约与装配落点。
-/// 约束：`handlers` 由调用方给（核心自有工具留在 `conductor`）：装配只问"谁认领这些名字"。
+/// 约束：事实全部只读借用；成员侧工作工具处理器由 `member_tools` 按放行名单与本席沙箱现取。
 pub struct MemberSpec<'a> {
     // 这一席声明的模块（模块工具与隐私注入项按它算）。
     pub modules: &'a [Module],
@@ -79,8 +70,6 @@ pub struct MemberSpec<'a> {
     pub host_read_roots: Vec<PathBuf>,
     // 本会话的 shell 状态槽（同一会话共享一份）。
     pub shell: Arc<ShellSlot>,
-    // 核心自有工具的处理器：只在这些名字被发放时才装。
-    pub handlers: &'a dyn Fn(&[String]) -> ToolHandlers,
 }
 
 /// 目的：一场单 agent 会话要用的事实。
@@ -109,7 +98,9 @@ pub fn member_tools(deps: &SessionDeps, spec: &MemberSpec<'_>) -> MemberTools {
         .map(|f| f.into_iter().map(|(id, _)| id.to_string()).collect())
         .unwrap_or_default();
     let allowed = face_tools(role_face, &book, &spec.sandbox.permissions);
-    let handlers = (spec.handlers)(&allowed);
+    // 成员侧工作工具：按本回合放行的名字现取（只认 work_*，其余名字不归它管）。
+    let handlers =
+        crate::capabilities::workspace::api::work_handlers(&deps.workspace, spec.sandbox, &allowed);
     // 工具面：静态模块工具 + **已就绪**常驻服务的操作（操作是服务跑起来才发现的，按模块现填）。
     let with_modules = deps.systools.allows_module_tools(spec.role)
         && !spec.sandbox.permissions.decisions.exec_sandbox.is_deny();
@@ -236,7 +227,7 @@ pub fn single_session(
 
 impl crate::capabilities::turn::service::session::Turn {
     /// 目的：历史会话转为活动会话（跨重启续跑 / 回档的前提）：按转录重建，状态全部派生。
-    /// 参数：`sid` = 会话 id；`registry` = 登记处；`probe` = 宿主能力探测；`handlers` = 核心自有工具处理器注入。
+    /// 参数：`sid` = 会话 id；`registry` = 登记处；`probe` = 宿主能力探测。
     /// 错误：会话不在盘上、重建失败时原样报错（文案由重建路径给出）。
     /// 约束：会话对象正被工作线程拿着时**不能**从盘上再建一份（会变成两个实例）——如实报"正在生成中"。
     pub(crate) fn ensure_session(
@@ -244,7 +235,6 @@ impl crate::capabilities::turn::service::session::Turn {
         sid: &str,
         registry: &dyn Registry,
         probe: &dyn HostProbe,
-        handlers: &HandlerSource<'_>,
     ) -> Result<(), String> {
         if self.holds(sid) {
             return Ok(());
@@ -254,7 +244,7 @@ impl crate::capabilities::turn::service::session::Turn {
             return Err(crate::capabilities::turn::service::session::Turn::running_refusal(sid));
         }
         let (meta, events) = crate::capabilities::lifecycle::api::open(&*self.history, sid)?;
-        let rebuilt = self.rebuild_session(&meta, &events, registry, probe, handlers)?;
+        let rebuilt = self.rebuild_session(&meta, &events, registry, probe)?;
         self.put(sid, rebuilt);
         Ok(())
     }

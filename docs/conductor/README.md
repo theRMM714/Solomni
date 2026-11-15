@@ -10,6 +10,7 @@
 - 管：工作用例的队列代理——建工作、改配、启用、视图与运行报告的实现与状态在 `work`（[../work/README.md](../work/README.md)），本业务只按队列做「准备 → 调用方线程跑慢活 → 提交」的两段调度，并在 `WorkOps` 上转发。
 - 管：生成驱动——**长步骤一律 own-and-return**（见 `src/capabilities/work/service/guest_job.rs` 与「一、长步骤的边界」）：生成、协作泵、压缩、起 / 停 guest 都不在队列里跑，队列只占「取 / 交」两步；建会话 / 启用历史会话 / 改配 / 删会话的 guest 启停在调用方线程上。
 - 管：跨能力用例与跨会话回档编排。
+- 不管：诊断准备在 `work`（`prepare_guest_diagnose`，`src/capabilities/work/service/guest_job.rs`）；会话提醒上限直接读登记处（`registry.app().discuss_remind_cap`），本业务不另存常量。
 - 管：把各能力的能力接口组装成呈现层唯一入口 `Ops`。
 - 运行态分两层：**短暂**的「这一刻谁在干活」（`SessionEvent::Working`，不落盘）与**持久**的「还该不该被驱动」（`meta.run`：`active` / `stopped` / `closed`，派发前过 `dispatch_gate`）。
 - 不管：不读文件（`std::fs`）、不发网络（ureq）、不碰 stdin/stdout——机制一律下沉各能力的 `detail/`（见 `src/capabilities/conductor/service.rs`）；不持任何别人的端口（R12）；不替用户选人、选形态。
@@ -17,7 +18,7 @@
 ## 入站契约与状态归属
 
 - 入站面：`api::WorkOps`（工作用例的队列代理：实现在 `work`）、`api::TurnOps`（驱动回合与停止）、`api::LifecycleOps`（启用、回档与在世表视图）、`api::LogOps`（埋点门面）、`Ops`（组装后交给呈现层）、`ConductorHandle`（自持线程 + 命令队列 + 事件台）与队列代理。按调用角色分面，呈现层取自己那块屏幕要用的面（`docs/presentation/contracts.md`）。
-- 状态归属：工作形态不持状态——`Work` 只有注入的端口与处理器钩子，会话本体与登记处按方法参数传入（`src/capabilities/work/service.rs`）；会话在世表、运行态、占名表、裁决队句柄与 shell 状态槽由 `turn` 的 `Turn` 承载（`src/capabilities/turn/service/session.rs`，内部状态容器是 `TurnState`），conductor 只经 `self.turn.*` 读写；命令队列仍归 conductor 自己。
+- 状态归属：工作形态不持状态——`Work` 只有注入的端口，会话本体与登记处按方法参数传入（`src/capabilities/work/service.rs`）；会话在世表、运行态、占名表、裁决队句柄与 shell 状态槽由 `turn` 的 `Turn` 承载（`src/capabilities/turn/service/session.rs`，内部状态容器是 `TurnState`），conductor 只经 `self.turn.*` 读写；命令队列仍归 conductor 自己。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 

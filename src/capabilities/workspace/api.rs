@@ -1,5 +1,6 @@
 //! 目的：工作区能力的入站能力面——其它能力与呈现层只准用这里（不许碰 `domain` / `ports`）。
-//! 管：`Workspace` 用例 trait 与它的视图类型（沙箱寻址、文件视图、提交 / 拉取 / 还原 / 状态 / 回收），并重导出领域共享类型。
+//! 管：`Workspace` 用例 trait 与它的视图类型（沙箱寻址、文件视图、提交 / 拉取 / 还原 / 状态 / 回收）、领域共享类型
+//!   与成员侧工作工具处理器（`WorkHandler` / `work_handlers`）。
 //! 不管：用例实现（在 `service/`）；寻址与版本化的纯规则（在 `domain/`）；落盘机制（在 `detail/`）。
 //! 联动：实现见 `service.rs`；`tools` 借 `Place` / `Sandbox` 定位读写落点。
 
@@ -29,6 +30,9 @@ pub use crate::capabilities::workspace::domain::workstore::{
 pub use crate::capabilities::workspace::service::roots::{
     product_root, recheck_root, resolve_root, root_policy,
 };
+#[allow(unused_imports)]
+// 入站面：成员侧工作工具处理器由 `turn` 装配工具面时按 allowed 现取
+pub use crate::capabilities::workspace::service::work_tools::{WorkHandler, work_handlers};
 
 /// 目的：一条待判定的读取（一次 `read` 读到的行区间 + 当时的整份指纹）。
 #[derive(Debug, Clone, PartialEq, Eq)]

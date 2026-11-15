@@ -21,7 +21,7 @@
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`session`（`SessionMeta` / `AgentMeta` / `WorkspaceGrant`）、`workspace`（`Sandbox` / `Sandboxes` / `WorkRoots`）、`modules`（`Roster`）、`packages`（`PackagePlan`）、`permission`（`PermissionSet` / `PermissionLayer`）、`registry`（`AppSettings`）、`kernel`（`FenceSpec` / `Tier`、`ports::PathCodec`）
-- 谁在用我：`conductor`（`src/capabilities/conductor/service/env.rs` 的同名方法）、`src/tests/env.rs`
+- 谁在用我：`turn`（`src/capabilities/turn/service/facts.rs` 的四个派生调用、`src/capabilities/turn/service/assemble.rs` 的一席环境）、`src/tests/env.rs`
 
 ## 一、事实进、结果出
 
@@ -31,7 +31,7 @@
 
 ## 改动本单元时必须同步
 
-- `src/capabilities/conductor/service/env.rs` → 五个同名方法是唯一的取事实与转调处：事实从哪来变了必须同改，签名对外保持不变。
+- `src/capabilities/turn/service/facts.rs` → 取事实与转调都在这里（`guest_lease` / `sandboxes` / `permissions` / `workspace_grant`；一席环境在 `src/capabilities/turn/service/assemble.rs`）：事实从哪来变了必须同改，`env` 的入站签名保持不变。
 - `src/capabilities/env/api.rs` → 新增入站项要同步 [`unit-map.md`](unit-map.md) 与本页「入站契约」。
 - `src/tests/env.rs` → 五条用例钉住权限链、共享区、租约、一席环境与模块挂载：改派生规则必须同改断言。
 

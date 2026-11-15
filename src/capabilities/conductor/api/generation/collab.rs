@@ -18,9 +18,7 @@ impl ConductorHandle {
             let sid = sid.to_string();
             move |core| {
                 let (turn, registry, probe) = core.turn_parts();
-                turn.take_collab(&sid, registry, probe, &|w, sb, allowed| {
-                    crate::capabilities::conductor::service::work_tools::handlers(w, sb, allowed)
-                })
+                turn.take_collab(&sid, registry, probe)
             }
         }) {
             Ok(s) => s,
@@ -39,7 +37,9 @@ impl ConductorHandle {
         })?;
         // 提醒上限由设置来（用户可调，见 session-model.md 二）：起线程前问一次核心。
         // 调用次数**没有上限**：模型继续核实就继续跑，直到它给出表态（或用户点停止）。
-        let remind_cap = self.call(|core| Ok(core.discuss_remind_cap())).unwrap_or(3);
+        let remind_cap = self
+            .call(|core| Ok(core.registry.app().discuss_remind_cap))
+            .unwrap_or(3);
         let handle = self.clone();
         // 握手通道：泵 → 主线程（要一个成员回合）；主线程 → 泵（回合结果）。
         let (ask_tx, ask_rx) = std::sync::mpsc::channel::<AskReq>();

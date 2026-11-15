@@ -236,15 +236,7 @@ pub(crate) fn cards_and_answers_survive_a_rebuild() {
     let (meta, events) = core.history_open("w").unwrap();
     let rebuilt_session = core
         .turn
-        .rebuild_session(
-            &meta,
-            &events,
-            core.registry(),
-            core.probe(),
-            &|w, sb, allowed| {
-                crate::capabilities::conductor::service::work_tools::handlers(w, sb, allowed)
-            },
-        )
+        .rebuild_session(&meta, &events, core.registry(), core.probe())
         .expect("按转录重建");
     let crate::capabilities::turn::api::Session::Collab(c) = rebuilt_session else {
         panic!("重建出来的还该是协作会话");
@@ -464,15 +456,7 @@ pub(crate) fn a_second_gate_queues_behind_the_first() {
     let (meta, events) = core.history_open("w").unwrap();
     let rebuilt = core
         .turn
-        .rebuild_session(
-            &meta,
-            &events,
-            core.registry(),
-            core.probe(),
-            &|w, sb, allowed| {
-                crate::capabilities::conductor::service::work_tools::handlers(w, sb, allowed)
-            },
-        )
+        .rebuild_session(&meta, &events, core.registry(), core.probe())
         .expect("按转录重建");
     let crate::capabilities::turn::api::Session::Collab(c) = rebuilt else {
         panic!("重建出来的还该是协作会话");
@@ -499,15 +483,7 @@ pub(crate) fn a_second_gate_queues_behind_the_first() {
     let (meta, events) = core.history_open("w").unwrap();
     let rebuilt = core
         .turn
-        .rebuild_session(
-            &meta,
-            &events,
-            core.registry(),
-            core.probe(),
-            &|w, sb, allowed| {
-                crate::capabilities::conductor::service::work_tools::handlers(w, sb, allowed)
-            },
-        )
+        .rebuild_session(&meta, &events, core.registry(), core.probe())
         .expect("按转录重建");
     let crate::capabilities::turn::api::Session::Collab(c) = rebuilt else {
         panic!("重建出来的还该是协作会话");
@@ -602,17 +578,9 @@ pub(crate) fn stopping_voids_the_whole_queue_and_persists_it() {
             let meta = meta.clone();
             let events = events.clone();
             move |core| {
-                let s = core.turn.rebuild_session(
-                    &meta,
-                    &events,
-                    core.registry(),
-                    core.probe(),
-                    &|w, sb, allowed| {
-                        crate::capabilities::conductor::service::work_tools::handlers(
-                            w, sb, allowed,
-                        )
-                    },
-                )?;
+                let s = core
+                    .turn
+                    .rebuild_session(&meta, &events, core.registry(), core.probe())?;
                 match s {
                     crate::capabilities::turn::api::Session::Collab(c) => Ok(c.door.queue()),
                     _ => Err("重建出来的还该是协作会话".to_string()),

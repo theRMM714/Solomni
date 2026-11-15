@@ -8,7 +8,7 @@
 pub use crate::capabilities::turn::domain::assemble::{face_tools, service_ops_of, serviced_tools};
 pub use crate::capabilities::turn::domain::session::{flat_modules, session_started};
 pub use crate::capabilities::turn::service::assemble::{
-    HandlerSource, MemberSpec, SingleSpec, ToolHandlers, member_tools, single_session,
+    MemberSpec, SingleSpec, member_tools, single_session,
 };
 pub use crate::capabilities::turn::service::proxy::PROXY_PRIVATE_DIR;
 #[allow(unused_imports)] // 入站面：转录回放的纯函数由单元测试直接调用（与真实重建同一份实现）

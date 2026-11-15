@@ -717,3 +717,19 @@ pub(crate) fn work_commits_store_roots_and_deltas_but_read_full_tree() {
         vec!["a.md".to_string(), "b.md".to_string(), "c.md".to_string()]
     );
 }
+
+/// 目的：成员侧工作工具处理器按放行名单现取——没有 work_* 就空表，有就装一个、且只认 work_*。
+#[test]
+pub(crate) fn work_handlers_follow_the_allowed_names() {
+    use crate::capabilities::workspace::api::work_handlers;
+    let (ws, _dirs, _store) = work_ws();
+    let sb = test_sandbox("a", &[]);
+
+    let none = work_handlers(&ws, &sb, &["read".to_string()]);
+    assert!(none.is_empty(), "没有 work_* 就不该装处理器");
+
+    let one = work_handlers(&ws, &sb, &["work_commit".to_string()]);
+    assert_eq!(one.len(), 1, "装了 work_* 就只装这一个");
+    assert!(one[0].owns("work_commit"));
+    assert!(!one[0].owns("read"));
+}

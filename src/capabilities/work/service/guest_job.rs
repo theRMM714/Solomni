@@ -3,6 +3,7 @@
 //! 不管：会话建/改/删的校验与落盘（`create.rs` / `config.rs`）、guest 进程本身（vm 能力）。
 //! 联动：由 `Work::guest_boot` / `conductor` 的删除收尾产出，句柄层在调用方线程上 `run()`。
 
+use crate::capabilities::turn::api::Turn;
 use crate::capabilities::vm::api::{
     ExecPlan, GuestDiagnosis, GuestRun, GuestSpec, Vm, admit_guest, classify_base, mounts_from,
     package_setup_scripts, resolve_guest,
@@ -12,6 +13,8 @@ use crate::kernel::api::FenceSpec;
 use crate::kernel::ports::{HostProbe, Log};
 use std::path::PathBuf;
 use std::sync::Arc;
+
+use super::Work;
 
 /// 目的：一次 guest 启动的全部参数（核心准备好，调用方线程执行）。
 /// 约束：字段全部是拥有所有权的数据或 `Arc`——它要跨线程，不能借用核心状态。
@@ -336,5 +339,30 @@ impl GuestDiagnose {
     /// 目的：执行诊断；失败如实返回原因（租约没有活 guest / 非 Linux / 通道不通等）。
     pub fn run(self) -> Result<GuestDiagnosis, String> {
         self.vm.guest_diagnose(&self.lease)
+    }
+}
+
+impl Work {
+    /// 目的：一次 guest 只读诊断的准备（毫秒级）：定位这条会话的 guest 租约。
+    /// 参数：`turn` = 会话本体（按 meta 取租约）；`sid` = 会话 id。
+    /// 返回：带 vm 面与租约的诊断句柄，交给调用方线程 `run`。
+    /// 错误：本机档没有 guest；代理父会话自己没有 guest；这条会话没有可诊断的 guest。
+    /// 约束：只查档位与租约，不进 guest、不落盘。
+    pub(crate) fn prepare_guest_diagnose(
+        &self,
+        turn: &Turn,
+        sid: &str,
+    ) -> Result<GuestDiagnose, String> {
+        let meta = self.history.meta(sid)?;
+        if meta.exec.tier != crate::kernel::api::Tier::Vm {
+            return Err("这条会话是本机档，没有 guest 可诊断".to_string());
+        }
+        match turn.guest_scope(&meta)? {
+            Some((lease, _)) => Ok(GuestDiagnose::new(Arc::clone(&self.vm), lease)),
+            None if meta.mode == "proxy" && meta.parent.is_none() => {
+                Err("代理父会话本身没有 guest，请对它下面某个工作诊断".to_string())
+            }
+            None => Err("这条会话没有可诊断的 guest".to_string()),
+        }
     }
 }

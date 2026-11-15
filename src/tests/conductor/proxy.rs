@@ -678,15 +678,8 @@ pub(crate) fn the_proxy_session_rebuilds_from_disk() {
     assert_eq!(meta.mode, "proxy");
     let session = handle
         .call(move |core| {
-            core.turn.rebuild_session(
-                &meta,
-                &events,
-                core.registry(),
-                core.probe(),
-                &|w, sb, allowed| {
-                    crate::capabilities::conductor::service::work_tools::handlers(w, sb, allowed)
-                },
-            )
+            core.turn
+                .rebuild_session(&meta, &events, core.registry(), core.probe())
         })
         .expect("重建代理会话");
     match session {
@@ -1503,15 +1496,8 @@ pub(crate) fn proxy_profile_is_explicit_and_uses_a_real_private_sandbox() {
     assert_eq!(cfg.permission.label, "仅可查看");
     let session = handle
         .call(move |core| {
-            core.turn.rebuild_session(
-                &meta,
-                &events,
-                core.registry(),
-                core.probe(),
-                &|w, sb, allowed| {
-                    crate::capabilities::conductor::service::work_tools::handlers(w, sb, allowed)
-                },
-            )
+            core.turn
+                .rebuild_session(&meta, &events, core.registry(), core.probe())
         })
         .expect("重建");
     match session {

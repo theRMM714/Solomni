@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::capabilities::provision::api::{DepStatus, GuestBase, JobState, ProcInfo, Provision};
+use crate::capabilities::provision::api::{
+    DepStatus, GuestBase, HostTool, JobState, ProcInfo, Provision,
+};
 use crate::capabilities::provision::domain::{
     Dep, deps, for_host, install_identity, is_toolchain, links, pinned_sha256, source_url, under,
 };
@@ -270,6 +272,20 @@ impl Provision for ProvisionService {
 
     fn ensure(&self, ids: &[String], on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
         ProvisionService::ensure(self, ids, on_line)
+    }
+
+    /// 约束：登记值 trim 后非空即原样采用；否则取台账里在场且 id 以工具前缀开头的第一条（probe 相对产品根）。
+    fn tool_path(&self, tool: HostTool, registered: &str) -> Option<String> {
+        let registered = registered.trim();
+        if !registered.is_empty() {
+            return Some(registered.to_string());
+        }
+        let prefix = tool.id_prefix();
+        self.status()
+            .ok()?
+            .iter()
+            .find(|d| d.present && d.id.starts_with(prefix))
+            .map(|d| self.root.join(&d.probe).to_string_lossy().into_owned())
     }
 
     fn ensure_spec(&self, spec: &str, on_line: &mut dyn FnMut(&str)) -> Result<(), String> {

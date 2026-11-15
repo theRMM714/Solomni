@@ -12,10 +12,10 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/capabilities/provision.rs` | 能力入口：模块与公开面（`ProvisionService`），以及组合根用的装配工厂 `assemble` / `assemble_with_vm` |
-| `src/capabilities/provision/api.rs` | 入站契约：`Provision` trait + `DepStatus`（含 `stale`：探针在场但装的不是当前清单那版）/ `JobState` DTO + `NoProvision` |
+| `src/capabilities/provision/api.rs` | 入站契约：`Provision` trait + `DepStatus`（含 `stale`：探针在场但装的不是当前清单那版）/ `JobState` DTO + `NoProvision`、`HostTool`（宿主外部工具种类）与 `tool_path`（登记值优先、台账里在位的条目兜底） |
 | `src/capabilities/provision/domain.rs` | 清单语义：`dependencies.yaml` / `links.yaml` 解析、按本机筛选、安装身份、pin 与 guest 画像 `GuestProfile` |
 | `src/capabilities/provision/ports.rs` | 出站端口：`Fetcher`（取数）/ `HostFs`（宿主落点）/ `Ledger`（台账与在场判定）/ `Installers`（按 kind 落盘）/ `GuestImage`（rootfs 镜像构造）/ `Procs`（进程台账） |
-| `src/capabilities/provision/service.rs` | 编排：状态与台账快照、依赖选择（`split_ensure_spec` / `pending_of_kinds`）、每条的装 / 验 / 记、作业与取消；只经端口触达 IO |
+| `src/capabilities/provision/service.rs` | 编排：状态与台账快照、依赖选择（`split_ensure_spec` / `pending_of_kinds`）、每条的装 / 验 / 记、作业与取消、宿主工具路径 `tool_path`；只经端口触达 IO |
 | `src/capabilities/provision/guest.rs` | 虚拟根的运行期编排（`guest-runtime`）：Windows 走 cloud-init 种子首启装 agent、Linux 跳过首启；维护启动经 QGA 装 python3、C-C++ 与固定版本 Node，逐个自证后落 `.qga-ready` / `.runtimes-ready` 并改写 `guest.yaml` 的 `clients` / `runtimes` |
 | `src/capabilities/provision/detail.rs` | 适配器入口：登记六个实现模块 |
 | `src/capabilities/provision/detail/fetch.rs` | `HttpFetch`：ureq 取文本、sha256、选源测速与断点续传 |

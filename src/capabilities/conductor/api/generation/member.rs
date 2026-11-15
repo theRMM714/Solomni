@@ -19,17 +19,7 @@ impl ConductorHandle {
             self.call(move |core| {
                 if core.history_open(&name).is_err() {
                     let (turn, registry, probe) = core.turn_parts();
-                    turn.spawn_agent_session(
-                        &parent,
-                        &agent,
-                        registry,
-                        probe,
-                        &|w, sb, allowed| {
-                            crate::capabilities::conductor::service::work_tools::handlers(
-                                w, sb, allowed,
-                            )
-                        },
-                    )?;
+                    turn.spawn_agent_session(&parent, &agent, registry, probe)?;
                 }
                 Ok(())
             })?;

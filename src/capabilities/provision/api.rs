@@ -5,6 +5,30 @@
 
 use serde::Serialize;
 
+/// 目的：宿主上的外部工具种类——工作形态装配命令行时要的那几个。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostTool {
+    /// 目的：虚拟机监控程序（guest 的宿主进程）。
+    Qemu,
+    /// 目的：共享目录守护进程（非 Windows）。
+    Virtiofsd,
+    /// 目的：共享目录的 SMB helper（Windows）。
+    Smbd,
+}
+
+impl HostTool {
+    /// 目的：本机清单里这一类工具的依赖 id 前缀（`vm.qemu.` / `vm.virtiofsd.` / `vm.smbd.`）。
+    /// 返回：用来在台账里认「这一类装了哪一条」的前缀。
+    /// 约束：与依赖清单的 id 命名一致，改命名要同次改这里。
+    pub fn id_prefix(self) -> &'static str {
+        match self {
+            HostTool::Qemu => "vm.qemu.",
+            HostTool::Virtiofsd => "vm.virtiofsd.",
+            HostTool::Smbd => "vm.smbd.",
+        }
+    }
+}
+
 /// 目的：一条长驻子进程（`--doctor` 与界面"现在在跑什么"）：它是产品亲手起的，还是上次留下的。
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -98,6 +122,11 @@ pub trait Provision: Send + Sync {
     fn ensure(&self, ids: &[String], on_line: &mut dyn FnMut(&str)) -> Result<(), String>;
     /// 目的：按 kind 组别名或 id 列表补齐（启动相命令的 `--ensure=<spec>` 写法）。
     fn ensure_spec(&self, spec: &str, on_line: &mut dyn FnMut(&str)) -> Result<(), String>;
+    /// 目的：一个宿主外部工具的实际路径（登记值优先、装了兜底）。
+    /// 参数：`tool` = 工具种类；`registered` = 设置里登记的值（空串 = 没登记）。
+    /// 返回：绝对路径；没有则 `None`。
+    /// 约束：每次现算——补齐装完即生效，不需要重启。
+    fn tool_path(&self, tool: HostTool, registered: &str) -> Option<String>;
 }
 
 /// 目的：未接入的补齐面——组合根未注入时的默认值；调用如实失败，不假装可用。
@@ -128,5 +157,10 @@ impl Provision for NoProvision {
     }
     fn ensure_spec(&self, _spec: &str, _on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
         Err("依赖补齐未接入".to_string())
+    }
+    /// 约束：未接入时没有台账可查，只有登记值这一层生效（装了兜底如实给 `None`）。
+    fn tool_path(&self, _tool: HostTool, registered: &str) -> Option<String> {
+        let registered = registered.trim();
+        (!registered.is_empty()).then(|| registered.to_string())
     }
 }

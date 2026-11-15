@@ -1,6 +1,6 @@
 //! 目的：工作区能力的 service 门面——`WorkspaceService` 的字段与构造、端口持有、以及各用例族共用的底座原语。
 //! 管：`Workdirs` / `WorkStore` 两个端口只在这里（R12）；gate、tree_of、pin_head、restore_impl、materialize、settle、提交号预留与待恢复事务。
-//! 不管：具体用例（commit / sync / history / resolve / lifecycle 各子模块）、`Workspace` 的 trait 转发（facade）、落盘实现（detail）。
+//! 不管：具体用例（commit / sync / history / resolve / lifecycle / work_tools 各子模块）、`Workspace` 的 trait 转发（facade）、落盘实现（detail）。
 //! 联动：`api::Workspace` 的唯一实现在 facade.rs，逐条转发到同级子模块；组合根注入两个端口适配器。
 
 use crate::capabilities::workspace::api::{
@@ -27,6 +27,7 @@ mod lifecycle;
 mod resolve;
 pub(crate) mod roots;
 mod sync;
+pub(crate) mod work_tools;
 
 /// 首次导入外部工作区的文件数 / 字节上限（超出只导入可导入的部分，不拖垮建会话）。
 const MAX_IMPORT_FILES: usize = 2000;

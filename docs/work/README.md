@@ -17,21 +17,21 @@
 - 管：拟名单入口 `suggest_models`（前置判据、队列分发、行解析；名单的业务规则在 `slate`）。
 - 管：纯规则与宿主工具取法——`mode_str` / `validate_work_name` / `dedup_modules` / `merge_into_one`（`src/capabilities/work/domain.rs`）、`qemu_path` / `virtiofsd_path` / `smbd_path` / `share_tool_path`（`src/capabilities/work/service/host.rs`）。
 - 不管：会话本体与运行态——在世表、运行态、占名表、裁决队句柄与 shell 槽在 `turn` 的 `Turn`（`src/capabilities/turn/service/state.rs`）；本单元只经方法参数 `turn` 读写。
-- 不管：命令队列、事件台、生成驱动、协作链推进与跨会话回档编排（`conductor`）；转录落盘归 `session`（`session::api::record_events`），工具面处理器也不实现，由 `conductor` 装配时作为钩子注入。
+- 不管：命令队列、事件台、生成驱动、协作链推进与跨会话回档编排（`conductor`）；转录落盘归 `session`（`session::api::record_events`），工具面处理器也不实现——成员侧工作工具处理器由 `turn` 装配时按放行名单向 `workspace` 现取。
 - 不管：guest 进程（`vm`）、工作区文件与提交（`workspace`）、包库与模块清单（`packages` / `modules`）、依赖补齐（`provision`）、登记处与探针（`registry` / `HostProbe`）——一律走各自 `api`，本单元不持它们的端口（R12；`Work` 的字段表见 `src/capabilities/work/service.rs`）。
 
 ## 入站契约与状态归属
 
 - 入站面：`api::Work`（本能力唯一入口）、`api::WorkSpec` / `api::SessionEdit`（入站决定）、`api::AgentInstance` / `api::ConfigAgent`（名单项）、读模型 `api::SessionConfig` / `api::SessionView` / `api::FilesView` / `api::RuntimeReport` / `api::TierChoices` / `api::ThinkingView` / `api::ContinueView` / `api::PermissionView`。
 - 跨到调用方线程的入站项：`api::GuestBoot` / `api::GuestStop` / `api::GuestDiagnose`（`run()` 在调用方线程执行）、两段中间形状 `api::PreparedActivation` / `api::ReadyActivation`。
-- 状态归属：**不持业务状态**。`Work` 只有注入的端口、产品根、基础工具链根与处理器钩子；会话本体经 `turn`、登记处经 `registry` 按方法参数传入——同一个核心既有只读调用也有 `registry_mut` 写路径，把登记处存进字段会逼出内部可变性。
+- 状态归属：**不持业务状态**。`Work` 只有注入的端口、产品根与基础工具链根；会话本体经 `turn`、登记处经 `registry` 按方法参数传入——同一个核心既有只读调用也有 `registry_mut` 写路径，把登记处存进字段会逼出内部可变性。
 - 只在核心线程存在的中间形状：`PreparedWork` / `PendingWork` / `PreparedEdit`（`pub(crate)`，`api` 不导出）——它们是「准备完、还没提交」的交接物，提交或撤销后即丢弃。
 - 落盘写点不在本单元：`record_events` 转调 `session` 的 `record_events`（失败如实变成一条 `SessionEvent::Notice`）；历史列表与打开转调 `lifecycle` 的 `list` / `open`。
 - 依赖方向单向：只允许 `conductor → work`；本单元源码不得出现 `capabilities::conductor`（依赖自检见本页「改动本单元时必须同步」）。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`collab`（`CollabSession`）、`kernel`（`api` 的 `SessionId` / `Tier` / `FenceSpec` / `ExecSpec` / `now_ts` 与 `ports` 的 `HostProbe` / `Log`）、`lifecycle`（`list` / `open`）、`llm`（`Channel` / `Llm`）、`modules`（`Module` / `Modules` / `Roster`）、`packages`（`Packages` / 计划与选型诊断）、`permission`（`ProfileId` / `Reach` / `Decision` / `PermissionLayer` / `ProfileSpec` / `ScopeMode`）、`prompt`（`Prompt`）、`provision`（`Provision` / `GuestBase`）、`proxy`（`NewSession` / `Created`：建会话的入站载荷）、`registry`（`Registry` / `AgentView`）、`session`（`AgentMeta` / `History` / `RunState` / `SessionEvent` / `SessionMeta` / `WorkspaceGrant`）、`slate`（`propose`）、`tools`（`Tools` / `ToolExec`）、`turn`（`Turn` / `Session` / `ToolHandlers` / `HandlerSource`）、`vm`（`Vm` / `tier_readiness` / `VmRequirement` / 虚拟根解析）、`workspace`（`Workspace` / `Sandbox` / `Sandboxes` / `WorkUsage`）
+- 经 `::api` 用到：`collab`（`CollabSession`）、`kernel`（`api` 的 `SessionId` / `Tier` / `FenceSpec` / `ExecSpec` / `now_ts` 与 `ports` 的 `HostProbe` / `Log`）、`lifecycle`（`list` / `open`）、`llm`（`Channel` / `Llm`）、`modules`（`Module` / `Modules` / `Roster`）、`packages`（`Packages` / 计划与选型诊断）、`permission`（`ProfileId` / `Reach` / `Decision` / `PermissionLayer` / `ProfileSpec` / `ScopeMode`）、`prompt`（`Prompt`）、`provision`（`Provision` / `GuestBase`）、`proxy`（`NewSession` / `Created`：建会话的入站载荷）、`registry`（`Registry` / `AgentView`）、`session`（`AgentMeta` / `History` / `RunState` / `SessionEvent` / `SessionMeta` / `WorkspaceGrant`）、`slate`（`propose`）、`tools`（`Tools` / `ToolExec`）、`turn`（`Turn` / `Session`）、`vm`（`Vm` / `tier_readiness` / `VmRequirement` / 虚拟根解析）、`workspace`（`Workspace` / `Sandbox` / `Sandboxes` / `WorkUsage`）
 - 谁在用我：`conductor`（`WorkOps` 转发与句柄层的两段调用）、`cli` / `web`（`WorkSpec` 与各类视图类型，数据仍经 `Ops` 取）、`src/tests/*`（建工作、改配、激活、guest、视图的用例）
 
 ## 一、两段式：核心只做毫秒级
@@ -55,10 +55,10 @@
 ## 改动本单元时必须同步
 
 - `src/capabilities/work/api.rs` → 新增入站项要同步 [`unit-map.md`](unit-map.md) 与本页「入站契约」；改 `SessionConfig` / `SessionView` / `FilesView` 字段会连带改 `cli` / `web` 的渲染与 `src/tests/routes.rs` 的契约矩阵。
-- `src/capabilities/work/service.rs` → 改 `Work::new` 的端口或钩子会连带改 `src/capabilities/conductor/service.rs` 的装配（`Work::new(…, Box::new(work_tools::handlers))`；转录落盘在 `session::api` 一侧）；改 `PreparedWork` / `PendingWork` / `PreparedEdit` 会连带改 `create.rs` / `config.rs` 与 `src/capabilities/work/service/action.rs` 的同步入口。
+- `src/capabilities/work/service.rs` → 改 `Work::new` 的端口会连带改 `src/capabilities/conductor/service.rs` 的装配；转录落盘在 `session::api` 一侧；改 `PreparedWork` / `PendingWork` / `PreparedEdit` 会连带改 `create.rs` / `config.rs` 与 `src/capabilities/work/service/action.rs` 的同步入口。
 - `src/capabilities/conductor/api/contract_impls.rs` → `WorkOps` 的每个方法都转发到这里的同名方法，方法改名或改参数必须两处同改（呈现层只认 `WorkOps`，不认这里）。
 - `src/capabilities/conductor/service.rs` → `Conductor` 的 `work` 字段是唯一持有者，调用形态是 `self.work.xxx(&mut self.turn, &*self.registry, …)`；`turn` 与 `registry` 按参数传入，不做字段。
-- `src/capabilities/turn/api.rs` → 本单元用 `Turn` / `Session` / `ToolHandlers` / `HandlerSource`；`ToolHandlers` 未从 `turn::api` 导出时本单元的处理器钩子无法具名。
+- `src/capabilities/turn/api.rs` → 本单元用 `Turn` / `Session`；装配入口的签名变化会连带改 `src/capabilities/work/service/activation.rs` 与 `src/capabilities/work/service/action.rs`。
 - `src/capabilities/work/domain.rs` → 工作名规则与 `systools/names.yaml` 的保留名同源；改文案会连带改 `src/tests/*` 里断言错误文案的用例。
 - 依赖自检：`grep -r "capabilities::conductor" src/capabilities/work` 必须为 0 命中（本单元不得回引 `conductor`）。
 - 测试：`src/tests/session/edit.rs` / `src/tests/session/vm.rs` / `src/tests/vm/*.rs` / `src/tests/workspace/tier.rs` 覆盖建工作、改配、激活与 guest 两段；纯规则用例在 `src/capabilities/work/service/create.rs` 与 `src/tests/turn.rs` 就近登记。

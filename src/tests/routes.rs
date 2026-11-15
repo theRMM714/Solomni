@@ -168,6 +168,14 @@ impl crate::capabilities::provision::api::Provision for FakeProvision {
     fn ensure_spec(&self, _spec: &str, _on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
         self.guard()
     }
+    fn tool_path(
+        &self,
+        _tool: crate::capabilities::provision::api::HostTool,
+        registered: &str,
+    ) -> Option<String> {
+        let registered = registered.trim();
+        (!registered.is_empty()).then(|| registered.to_string())
+    }
 }
 
 fn fake_ops(fail: Option<&str>) -> Ops {

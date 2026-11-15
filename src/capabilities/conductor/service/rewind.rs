@@ -223,13 +223,9 @@ impl Conductor {
         next: u64,
     ) -> Result<Vec<serde_json::Value>, String> {
         let active = crate::capabilities::session::api::truncate_events(raw);
-        let mut rebuilt = self.turn.rebuild_session(
-            meta,
-            &active,
-            self.registry(),
-            self.probe(),
-            &|w, sb, a| work_tools::handlers(w, sb, a),
-        )?;
+        let mut rebuilt =
+            self.turn
+                .rebuild_session(meta, &active, self.registry(), self.probe())?;
         match &mut rebuilt {
             Session::Single(s) => s.next_line = next,
             Session::Collab(c) => c.next_line = next,

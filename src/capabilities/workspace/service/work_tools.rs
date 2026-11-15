@@ -1,19 +1,23 @@
-//! 目的：共享区版本化工作区的**成员侧执行者**——把六个 work_* 调用接到 workspace 能力面上。
+//! 目的：共享区工作工具的**成员侧执行者**——把七个 work_* 调用接到本能力的用例面上。
 //! 管：成员工具调用的参数解析、路径权限收口与回执转交。
-//! 不管：版本库写入、冲突与备份判定（在 workspace）；工具声明（`systools/tools.yaml`）。
-//! 联动：在会话工作线程上执行；成员循环只认"谁认领这个名字"；版本库写入由 workspace 的
-//!   service 串行化（它持版本库端口）。
+//! 不管：版本库写入、冲突与备份判定（在 `domain/` 与 `detail/`）；工具声明（`systools/tools.yaml`）。
+//! 联动：在会话工作线程上执行；`turn` 装配工具面时按 allowed 现取本文件的 `work_handlers`；
+//!   版本库写入由本能力的 `service` 串行化（它持版本库端口）。
 
-use crate::capabilities::conductor::domain::work as dw;
 use crate::capabilities::permission::api::{Decision, PermissionSet, Reach};
-use crate::capabilities::workspace::api::{
-    CommitRequest, ResolveRequest, ResolveTake, Sandbox, Workspace,
+use crate::capabilities::workspace::api::Workspace;
+use crate::capabilities::workspace::domain::work_tools as dw;
+use crate::capabilities::workspace::domain::workspace::Sandbox;
+use crate::capabilities::workspace::domain::workstore::{
+    CommitRequest, ResolveRequest, ResolveTake,
 };
 use crate::kernel::api::ToolOutcome;
 use crate::kernel::api::now_ts;
 use crate::kernel::ports::ToolHandler;
 use std::sync::Arc;
 
+/// 目的：一席的共享区工作工具执行者——放行名单里有 `work_*` 时由 `work_handlers` 装出。
+/// 约束：权限在这里收口（读 / 写各过一遍），越界整次拒绝，不静默放过。
 pub struct WorkHandler {
     workspace: Arc<dyn Workspace + Send + Sync>,
     /// 顶层工作名（共享区与版本库的归属）。
@@ -73,8 +77,8 @@ pub(crate) fn check_writable(
 /// 参数：workspace —— 版本库与共享区端口；sb —— 这一席的沙箱（顶层工作名、实例名、生效权限）；
 ///   allowed —— 这一席允许调用的工具名。
 /// 返回：成员侧工具处理者；allowed 里没有 work_* 时为空。
-/// 约束：会话装配（turn 的会话本体）经闭包拿到它，本函数不读任何会话状态。
-pub(crate) fn handlers(
+/// 约束：装配方在装工具面时现调一次；每次现算、不缓存，也不读任何会话状态。
+pub fn work_handlers(
     workspace: &Arc<dyn Workspace + Send + Sync>,
     sb: &Sandbox,
     allowed: &[String],
@@ -91,6 +95,9 @@ pub(crate) fn handlers(
 }
 
 impl WorkHandler {
+    /// 目的：装一个执行者：本席的归属、实例名与生效权限一次定下。
+    /// 参数：`workspace` = 版本库与共享区端口；`work` = 顶层工作名；`agent` = 这一席的 agent 实例名；
+    ///   `permissions` = 这一席的生效权限。
     pub fn new(
         workspace: Arc<dyn Workspace + Send + Sync>,
         work: &str,

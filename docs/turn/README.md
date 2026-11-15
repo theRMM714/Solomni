@@ -18,12 +18,12 @@
 - 管：装配要的事实——沙箱集合、权限链与权限面、共享区授权、guest 作用域与租约、配置归属、上下文预算（`sandboxes` / `permissions_for` / `workspace_grant` / `guest_scope` / `guest_lease_for` / `config_owner_of` / `context_budget` / `refresh_context_budget`）。
 - 管：执行计划与外部工作区根——`host_plan_for` / `plan_for_spec` / `plan_for_meta_with` / `unavailable_modules` / `guest_os_of` / `path_codec_of` / `network_allowed` / `host_read_roots`。
 - 不管：命令队列、派发闸的调用时机、跨会话回档编排、协作链推进与生成驱动（`conductor`）；会话与转录怎么落盘（`session`）；裁决队的语义（`session` 的 `DecisionDesk`）与 shell 快照的形状（`session` 的 `ShellSlot` / `ShellLive`）。
-- 不管：登记处与探针——`registry: &dyn Registry` / `probe: &dyn HostProbe` 按需传参、不存字段（`conductor` 要 `registry_mut`，共享会逼出 `RefCell`）；工作区核心自有工具的处理器（`work_tools`）也由调用方以闭包注入，本单元不认识它们的行为。
+- 不管：登记处与探针——`registry: &dyn Registry` / `probe: &dyn HostProbe` 按需传参、不存字段（`conductor` 要 `registry_mut`，共享会逼出 `RefCell`）；成员侧工作工具处理器（`work_handlers`）由装配处按放行名单向 `workspace` 现取，本单元不认识它们的行为。
 
 ## 入站契约与状态归属
 
 - 入站面：`api::Turn`（会话本体：五张表的访问器 + 取放协议 + 装配与重建 + 树序与事实）、`api::TurnState` / `api::Session`（状态容器与两种会话变体）；别的业务与测试只经 `api` 取用（R1）。
-- 装配入站面：`api::MemberSpec` / `api::SingleSpec`（一次装配的全部事实）、`api::member_tools` / `api::single_session`（两条装配入口）、`api::HandlerSource`（处理器注入的闭包类型），以及三条纯规则 `api::face_tools` / `api::service_ops_of` / `api::serviced_tools`。
+- 装配入站面：`api::MemberSpec` / `api::SingleSpec`（一次装配的全部事实）、`api::member_tools` / `api::single_session`（两条装配入口），以及三条纯规则 `api::face_tools` / `api::service_ops_of` / `api::serviced_tools`。
 - 树与事实入站面：`api::flat_modules` / `api::session_started`（纯规则）、`api::PROXY_PRIVATE_DIR`（代理会话的私有目录名）、`api::replay_dialogue`（转录回放，测试与重建同一份实现）。
 - 装配件的状态归属：产物归调用方——`member_tools` 返回的 `MemberTools` 与会话对象都不进五张表；本单元只在装 `MemberTools` 时向调用方的 shell 槽取一次 `Arc<ShellSlot>`。
 - 状态归属：**持全部运行期内存态**——五张表都在 `TurnState` 里，由 `Turn` 独占持有；不落盘，`shell_slots` 的 `Mutex` 只在取 / 写那一刻持有。
@@ -52,7 +52,7 @@
 - 重建一整条路：`ensure_session` = 在表里就返回、生成中就拒、否则按 `history` 的 meta 与转录走 `rebuild_session` 再装回表；三种形态各走各的装配，未知形态的文案逐字保留。
 - 取放协议：取走先过派发闸与「不是单 agent 模式」判定，交回时按父会话与节点把提示写进事件交回给调用方，子会话结束还会给代理父会话留一条提醒（同样以事件返回）。
 - 三条纯规则可单测：`face_tools` 按 `PermissionSet::offers` 裁剪角色脸，总表里没有的 id 照发；`service_ops_of` 只收 `ServiceState::Ready` 的操作并按服务名点操作名命名；`serviced_tools` 把操作塞进模块工具表并返回模块行与参数行。
-- 处理器注入：work 等工具处理器由调用方的闭包按「本回合允许的工具 id」生成，本单元不认识它们的行为。
+- 处理器现取：成员侧工作工具处理器由 `member_tools` 按「本回合允许的工具 id」调 `workspace::api::work_handlers` 装出，本单元不认识它们的行为。
 
 ## 改动本单元时必须同步
 

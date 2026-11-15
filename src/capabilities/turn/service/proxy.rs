@@ -9,7 +9,7 @@ use crate::capabilities::llm::api::Channel;
 use crate::capabilities::proxy::api as d;
 use crate::capabilities::registry::api::Registry;
 use crate::capabilities::session::api::{AgentSession, SessionMeta, SessionParams};
-use crate::capabilities::turn::api::{HandlerSource, MemberSpec, member_tools};
+use crate::capabilities::turn::api::{MemberSpec, member_tools};
 use crate::capabilities::workspace::api::Sandbox;
 
 use crate::capabilities::turn::service::session::Turn;
@@ -23,10 +23,9 @@ impl Turn {
         &self,
         meta: &SessionMeta,
         registry: &dyn Registry,
-        handlers: &HandlerSource<'_>,
     ) -> Result<AgentSession, String> {
         let channel = registry.core_channel()?;
-        self.build_proxy_with(meta, &channel, registry, handlers)
+        self.build_proxy_with(meta, &channel, registry)
     }
 
     pub(crate) fn build_proxy_with(
@@ -34,7 +33,6 @@ impl Turn {
         meta: &SessionMeta,
         channel: &Channel,
         registry: &dyn Registry,
-        handlers: &HandlerSource<'_>,
     ) -> Result<AgentSession, String> {
         self.workspace
             .prepare(&meta.name, &[PROXY_PRIVATE_DIR.to_string()])?;
@@ -82,7 +80,6 @@ impl Turn {
                 base_roots: &self.base_roots,
                 host_read_roots: self.host_read_roots(registry),
                 shell: self.shell_slot(&sb.session),
-                handlers: &|allowed| handlers(&self.workspace, &sb, allowed),
             },
         );
         let mut s = AgentSession::new(

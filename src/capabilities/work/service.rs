@@ -1,8 +1,8 @@
 //! 目的：work 的核心层——`Work` 门面、方法族分区与跨分区共用的判据。
-//! 管：注入的端口与处理器钩子、建造入口 `new`、只读访问器（清单扫描 / 保留名 / 虚拟根 / 落盘），
+//! 管：注入的端口、建造入口 `new`、只读访问器（清单扫描 / 保留名 / 虚拟根 / 落盘），
 //!   建工作与改配的中间形状（`PreparedWork` / `PendingWork` / `PreparedEdit`）与运行包重建判据。
 //! 不管：端口怎么实现（各能力 detail）、事件台与命令队列（`conductor`）、会话本体（`turn`）。
-//! 联动：`api` 是唯一出口；`conductor` 装配时把核心自有工具的处理器作为钩子注入，落盘策略走 `session`。
+//! 联动：`api` 是唯一出口；`conductor` 经它驱动用例，会话装配与工作工具处理器都向 `turn` 要，落盘策略走 `session`。
 
 mod action;
 mod activation;
@@ -28,7 +28,7 @@ use crate::capabilities::session::api::{
     AgentMeta, History, HistoryView, RunState, SessionEvent, SessionMeta,
 };
 use crate::capabilities::tools::api::{ToolExec, Tools};
-use crate::capabilities::turn::api::{Session, ToolHandlers, Turn};
+use crate::capabilities::turn::api::{Session, Turn};
 use crate::capabilities::vm::api::Vm;
 use crate::capabilities::work::api::{
     AgentInstance, AgentSuggestion, ConfigAgent, ContinueView, FilesAgentRootView, FilesAgentView,
@@ -38,7 +38,7 @@ use crate::capabilities::work::api::{
 use crate::capabilities::work::domain::{
     dedup_modules, merge_into_one, mode_str, validate_work_name,
 };
-use crate::capabilities::workspace::api::{Sandbox, Sandboxes, Workspace};
+use crate::capabilities::workspace::api::{Sandboxes, Workspace};
 use crate::kernel::ports::{HostProbe, Log};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -46,10 +46,6 @@ use std::sync::Arc;
 
 use crate::capabilities::work::service::guest_job::{EditGuest, GuestBoot, GuestStop};
 
-/// 目的：核心自有工具的处理器注入点——实现留在 `conductor`，本能力只按放行的工具 id 问"谁认领"。
-type Handlers = Box<
-    dyn Fn(&Arc<dyn Workspace + Send + Sync>, &Sandbox, &[String]) -> ToolHandlers + Send + Sync,
->;
 /// 目的：一次创建的准备结果——"已经建完"或"待提交"（后者等调用方线程把 guest 起起来）。
 pub(crate) enum PreparedWork {
     /// 已经建完（代理形态：没有 guest 可等）。
@@ -102,7 +98,7 @@ pub(crate) struct PreparedEdit {
     pub(crate) new_children: Vec<SessionMeta>,
 }
 
-/// 目的：工作用例的入口：持有注入的端口与核心自有工具的处理器钩子，方法族按用例分区。
+/// 目的：工作用例的入口：持有注入的端口，方法族按用例分区。
 ///  只持"真用到"的依赖，不持业务状态：会话本体经方法参数 `turn` 传入，登记处经 `registry` 传入。
 pub struct Work {
     /// 产品根：虚拟根这类"装在项目内"的东西按它解析成绝对路径（`vm::resolve_guest`）。
@@ -133,13 +129,11 @@ pub struct Work {
     probe: Arc<dyn HostProbe + Send + Sync>,
     /// 项目内基础工具链的只读安装根（python / node / cc）：会话装配时按它放行。
     base_roots: Vec<PathBuf>,
-    /// 核心自有工具的处理器（`conductor` 注入）：装配工具面时按放行的 id 现算。
-    handlers: Handlers,
 }
 
 impl Work {
-    /// 目的：装配入口：只收端口与处理器钩子；工作形态的业务状态一个都不留。
-    /// 参数：`root` = 产品根；其余为各能力的入站面；`handlers` 为实现留在 `conductor` 的钩子。
+    /// 目的：装配入口：只收端口；工作形态的业务状态一个都不留。
+    /// 参数：`root` = 产品根；其余为各能力的入站面。
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         root: PathBuf,
@@ -155,7 +149,6 @@ impl Work {
         tools: Arc<dyn ToolExec + Send + Sync>,
         log: Arc<dyn Log + Send + Sync>,
         probe: Arc<dyn HostProbe + Send + Sync>,
-        handlers: Handlers,
     ) -> Work {
         Work {
             root,
@@ -172,7 +165,6 @@ impl Work {
             log,
             probe,
             base_roots: Vec::new(),
-            handlers,
         }
     }
 

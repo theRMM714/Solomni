@@ -460,7 +460,11 @@ pub(crate) fn vm_tool_paths_follow_provisioned_packages_without_restart() {
         .join("qemu-system-x86_64");
     std::fs::create_dir_all(exe.parent().expect("父目录")).expect("建目录");
     std::fs::write(&exe, b"stub").expect("写占位可执行文件");
-    let provision = test_provision_with(vec![installed_dep("vm.qemu.linux", probe)]);
+    // 替身带上产品根：登记为空时它按"根 + 台账 probe"给绝对路径，与真实补齐面同一条判据。
+    let provision = test_provision_at(
+        Some(root.clone()),
+        vec![installed_dep("vm.qemu.linux", probe)],
+    );
 
     // 没登记：按项目内补齐的那一个判 → 这一项成立，且文案说清是按哪条路找到的。
     let core = conductor_rooted(
@@ -1089,10 +1093,7 @@ pub(crate) fn read_facts_rebuild_identically_to_live() {
     core.set_context_freshness(&sid, true).expect("开开关");
     {
         let (turn, registry, probe) = core.turn_parts();
-        turn.ensure_session(&sid, registry, probe, &|w, sb, allowed| {
-            crate::capabilities::conductor::service::work_tools::handlers(w, sb, allowed)
-        })
-        .expect("重建");
+        turn.ensure_session(&sid, registry, probe).expect("重建");
     }
     let rebuilt = core.single_reads(&sid).expect("重建后的单 agent 会话");
     assert_eq!(rebuilt, live, "回放的读事实必须与实时逐条一致");

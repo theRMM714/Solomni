@@ -12,7 +12,7 @@ use crate::capabilities::registry::api::Registry;
 use crate::capabilities::session::api::{
     AgentSession, DecisionDoor, RunState, SessionEvent, SessionMeta,
 };
-use crate::capabilities::turn::api::{HandlerSource, Session};
+use crate::capabilities::turn::api::Session;
 use crate::kernel::ports::HostProbe;
 
 use crate::capabilities::turn::service::session::Turn;
@@ -52,13 +52,12 @@ impl Turn {
 
     /// 目的：把协作会话**交给工作线程**（核心表里留"生成中"）。
     ///  会话还没装进内存时先从落盘重建：协作的"继续"可能先于"打开"到达。
-    /// 参数：`sid` = 会话 id；`registry` = 登记处；`probe` = 宿主能力探测；`handlers` = 核心自有工具处理器注入。
+    /// 参数：`sid` = 会话 id；`registry` = 登记处；`probe` = 宿主能力探测。
     pub(crate) fn take_collab(
         &mut self,
         sid: &str,
         registry: &dyn Registry,
         probe: &dyn HostProbe,
-        handlers: &HandlerSource<'_>,
     ) -> Result<CollabSession, String> {
         // 同上：运行态闸门是第一道，先于"取出来"。
         self.dispatch_gate(sid)?;
@@ -66,7 +65,7 @@ impl Turn {
             return Err(Turn::running_refusal(sid));
         }
         if !self.holds(sid) {
-            self.ensure_session(sid, registry, probe, handlers)?;
+            self.ensure_session(sid, registry, probe)?;
         }
         match self.take_session(sid) {
             Some(Session::Collab(c)) => {
@@ -210,14 +209,13 @@ impl Turn {
 
     /// 目的：为一个 agent 建它的会话（名单确认时建）：节点执行与讨论回合**共用同一个**会话。
     ///  复用"按 meta 重建"的整条装配路径——子会话与用户建的会话**没有第二种实现**。
-    /// 参数：`parent` = 父会话名；`agent` = 名单里的 agent 名；`registry` / `probe` / `handlers` 同 `take_collab`。
+    /// 参数：`parent` = 父会话名；`agent` = 名单里的 agent 名；`registry` / `probe` 同 `take_collab`。
     pub(crate) fn spawn_agent_session(
         &mut self,
         parent: &str,
         agent: &str,
         registry: &dyn Registry,
         probe: &dyn HostProbe,
-        handlers: &HandlerSource<'_>,
     ) -> Result<String, String> {
         let (pmeta, _) = self.history.load(parent)?;
         let a = pmeta
@@ -257,7 +255,7 @@ impl Turn {
         self.workspace
             .prepare(&work, std::slice::from_ref(&a.name))?;
         self.history.create(&meta)?;
-        self.ensure_session(&child, registry, probe, handlers)?;
+        self.ensure_session(&child, registry, probe)?;
         Ok(child)
     }
 
@@ -268,7 +266,6 @@ impl Turn {
         node: &str,
         registry: &dyn Registry,
         probe: &dyn HostProbe,
-        handlers: &HandlerSource<'_>,
     ) -> Result<String, String> {
         let (_pmeta, _) = self.history.load(parent)?;
         let assignee = {
@@ -284,7 +281,7 @@ impl Turn {
         };
         // 节点的会话**就是它负责人的 agent 会话**（一个 agent 一个会话，讨论与执行不分家）。
         // 节点本身不再记在 meta 里——哪个节点正跑在这个会话里，由链的 sub_session 认。
-        self.spawn_agent_session(parent, &assignee, registry, probe, handlers)
+        self.spawn_agent_session(parent, &assignee, registry, probe)
     }
 
     /// 目的：代理模式：一个子会话停下了 → 往**代理会话**写一条通知行（只写这一条，不转发子会话转录）。

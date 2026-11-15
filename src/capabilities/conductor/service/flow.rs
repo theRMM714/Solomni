@@ -83,9 +83,7 @@ impl Conductor {
             let child = format!("{}--{}", sid, agent);
             if self.history.load(&child).is_err() {
                 let (turn, registry, probe) = self.turn_parts();
-                turn.spawn_agent_session(sid, &agent, registry, probe, &|w, sb, allowed| {
-                    work_tools::handlers(w, sb, allowed)
-                })?;
+                turn.spawn_agent_session(sid, &agent, registry, probe)?;
             }
             // ③ 跑这一回合：**与单 agent 同一条轮循环**（身份块 + 本回合工具面 + 对话 + 本回合提示 + 表态）。
             // 工具面由角色表发放（讨论席 = 动词 + 只读核实）；产出逐轮落进**它自己的会话**。
@@ -283,9 +281,7 @@ impl Conductor {
             taken.push(assignee.clone());
             let spawned = {
                 let (turn, registry, probe) = self.turn_parts();
-                turn.spawn_sub_session(sid, &node, registry, probe, &|w, sb, allowed| {
-                    work_tools::handlers(w, sb, allowed)
-                })
+                turn.spawn_sub_session(sid, &node, registry, probe)
             };
             match spawned {
                 Ok(child) => {
@@ -432,9 +428,7 @@ impl Conductor {
         if !self.turn.is_running(sid) {
             // 装配要 `&mut` 会话本体，同时读登记处与宿主探测：拆开借。
             let (turn, registry, probe) = self.turn_parts();
-            turn.ensure_session(sid, registry, probe, &|w, sb, allowed| {
-                work_tools::handlers(w, sb, allowed)
-            })?;
+            turn.ensure_session(sid, registry, probe)?;
         }
         Ok(self.turn.desk().peek(sid).and_then(|d| d.queue()))
     }
@@ -499,9 +493,7 @@ impl Conductor {
         }
         // 装配要 `&mut` 会话本体，同时读登记处与宿主探测：拆开借。
         let (turn, registry, probe) = self.turn_parts();
-        turn.ensure_session(sid, registry, probe, &|w, sb, allowed| {
-            work_tools::handlers(w, sb, allowed)
-        })?;
+        turn.ensure_session(sid, registry, probe)?;
 
         // @ 引用按本会话沙箱改写（与首次提交需求同一口径）。
         let text = match self.turn.session(sid) {
@@ -559,9 +551,7 @@ impl Conductor {
     pub fn withdraw_agree(&mut self, sid: &str, agent: &str) -> Result<Vec<SessionEvent>, String> {
         // 装配要 `&mut` 会话本体，同时读登记处与宿主探测：拆开借。
         let (turn, registry, probe) = self.turn_parts();
-        turn.ensure_session(sid, registry, probe, &|w, sb, allowed| {
-            work_tools::handlers(w, sb, allowed)
-        })?;
+        turn.ensure_session(sid, registry, probe)?;
         let mut events = Vec::new();
 
         match self.turn.session_mut(sid) {

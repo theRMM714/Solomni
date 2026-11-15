@@ -548,7 +548,6 @@ impl Work {
                             base_roots: &self.base_roots,
                             host_read_roots: turn.host_read_roots(registry),
                             shell: turn.shell_slot(&sb.session),
-                            handlers: &|allowed| (self.handlers)(&self.workspace, &sb, allowed),
                         },
                         channel,
                         guest,

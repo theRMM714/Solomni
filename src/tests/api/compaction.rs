@@ -767,10 +767,8 @@ fn compaction_survives_a_restart_and_rewinds_back_through_the_point() {
     // ② 回档跨越压缩点：会话在表里且压缩点 > 目标 → `rewind` 走重建，摘要不再生效。
     {
         let (turn, registry, probe) = core.turn_parts();
-        turn.ensure_session(&sid, registry, probe, &|w, sb, allowed| {
-            crate::capabilities::conductor::service::work_tools::handlers(w, sb, allowed)
-        })
-        .expect("把重建结果装回表里");
+        turn.ensure_session(&sid, registry, probe)
+            .expect("把重建结果装回表里");
     }
     core.rewind(
         &sid,

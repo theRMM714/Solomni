@@ -403,15 +403,7 @@ pub(crate) fn rebuild_restores_the_last_shell_snapshot_from_the_transcript() {
     let (meta, events) = core.history_open(&sid).unwrap();
     drop(
         core.turn
-            .rebuild_session(
-                &meta,
-                &events,
-                core.registry(),
-                core.probe(),
-                &|w, sb, allowed| {
-                    crate::capabilities::conductor::service::work_tools::handlers(w, sb, allowed)
-                },
-            )
+            .rebuild_session(&meta, &events, core.registry(), core.probe())
             .expect("按转录重建"),
     );
     let live = core
@@ -465,15 +457,7 @@ pub(crate) fn rebuild_prefers_the_structured_shell_facts_over_the_receipt() {
     let (meta, events) = core.history_open(&sid).unwrap();
     drop(
         core.turn
-            .rebuild_session(
-                &meta,
-                &events,
-                core.registry(),
-                core.probe(),
-                &|w, sb, allowed| {
-                    crate::capabilities::conductor::service::work_tools::handlers(w, sb, allowed)
-                },
-            )
+            .rebuild_session(&meta, &events, core.registry(), core.probe())
             .expect("按转录重建"),
     );
     let live = core

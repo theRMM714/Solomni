@@ -11,7 +11,7 @@ use crate::capabilities::modules::api::Module;
 use crate::capabilities::prompt::api::Segment;
 use crate::capabilities::registry::api::Registry;
 use crate::capabilities::session::api::{SessionMeta, SessionParams};
-use crate::capabilities::turn::api::{HandlerSource, MemberSpec, Session, member_tools};
+use crate::capabilities::turn::api::{MemberSpec, Session, member_tools};
 use crate::kernel::ports::HostProbe;
 
 use crate::capabilities::turn::service::session::Turn;
@@ -20,14 +20,13 @@ use crate::kernel::api::now_ts;
 impl Turn {
     /// 目的：按会话元信息 + 转录事件重建会话对象（通道是机制，按记录的选择重新装配）。
     /// 参数：`meta` = 会话元信息；`events` = 该会话的转录事件；`registry` = 登记处；
-    ///   `probe` = 宿主能力探测；`handlers` = 核心自有工具的处理器注入。
+    ///   `probe` = 宿主能力探测。
     pub(crate) fn rebuild_session(
         &self,
         meta: &SessionMeta,
         events: &[serde_json::Value],
         registry: &dyn Registry,
         probe: &dyn HostProbe,
-        handlers: &HandlerSource<'_>,
     ) -> Result<Session, String> {
         let roster = self.modules.roster();
         // 打开 / 重建时按 meta 刷新布局投影（会话目录可能被复制或迁移；meta 是权威）。
@@ -135,7 +134,6 @@ impl Turn {
                         base_roots: &self.base_roots,
                         host_read_roots: self.host_read_roots(registry),
                         shell: self.shell_slot(&sb.session),
-                        handlers: &|allowed| handlers(&self.workspace, &sb, allowed),
                     },
                 );
                 // 回复 id 跨重启单调：从转录里的最大值续号，否则新回复会与旧回复并成一组。
@@ -168,7 +166,7 @@ impl Turn {
             }
             // 代理会话：没有 agent（核心自己说话）；外壳由 build_proxy 装配，回放与单 agent 共用同一件。
             "proxy" => {
-                let mut s = self.build_proxy(meta, registry, handlers)?;
+                let mut s = self.build_proxy(meta, registry)?;
                 let (history, marks, line_reply, line_ids, compacted_upto, compacted_line) =
                     replay_dialogue(events, s.tool_mode());
                 s.dialogue = history;

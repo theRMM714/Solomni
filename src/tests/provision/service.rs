@@ -908,6 +908,37 @@ fn status_reads_real_filesystem() {
     let _ = fs::remove_dir_all(&root);
 }
 
+/// 目的：宿主工具路径先认登记值（去空白后原样），没登记就按台账里在位的补齐条目给绝对路径。
+#[test]
+fn tool_path_prefers_the_registered_value_then_the_ledger() {
+    use crate::capabilities::provision::api::HostTool;
+    let root = crate::tests::scratch("provision-tool-path");
+    let svc = service(&root);
+    assert_eq!(
+        svc.tool_path(HostTool::Qemu, "  C:/vm/qemu.exe  "),
+        Some("C:/vm/qemu.exe".to_string()),
+        "登记值非空就原样采用，不看台账"
+    );
+    assert_eq!(
+        svc.tool_path(HostTool::Qemu, "   "),
+        None,
+        "没登记且台账里没有在位条目 → 没有路径"
+    );
+
+    // 造一条在位的补齐条目：路径是产品根下的 probe。
+    let all = deps().expect("清单");
+    let host = for_host(&all, std::env::consts::OS, std::env::consts::ARCH);
+    if let Some(dep) = host.iter().find(|d| d.id.starts_with("vm.qemu.")) {
+        let probe = under(&root, &dep.probe);
+        fs::create_dir_all(probe.parent().expect("probe 有父目录")).expect("建目录");
+        fs::write(&probe, b"x").expect("写 probe");
+        record_installed(&root, dep).expect("台账");
+        let want = root.join(&dep.probe).to_string_lossy().into_owned();
+        assert_eq!(svc.tool_path(HostTool::Qemu, ""), Some(want));
+    }
+    let _ = fs::remove_dir_all(&root);
+}
+
 /// 目的：补齐内核——缓存命中时只解包不下载，装完按 probe 校验（不依赖网络）。
 #[test]
 fn install_core_uses_cache_and_checks_probe() {

@@ -13,6 +13,7 @@
 | `src/capabilities/workspace/service.rs` | 门面与底座：`Workdirs` / `WorkStore` 只在这里（R12）；`WorkspaceService` 的构造、实例级 gate、树回溯、恢复事务、提交号预留、待恢复事务与外部工作区冲突核校 |
 | `src/capabilities/workspace/service/commit.rs` | 提交族：`commit_locked` 的三方核校与对象落盘、agent 基线记录、归档点、树铺设、归档清理、自动提交与用户提交 |
 | `src/capabilities/workspace/service/sync.rs` | 同步族：pull、沙箱采纳、过期读取、双向同步、导入根、跟踪同步 |
+| `src/capabilities/workspace/service/work_tools.rs` | 成员侧共享区工作工具：七个 `work_*` 调用的参数解析、路径权限收口与回执转交，工作工具处理器工厂 `work_handlers` 与 `WorkHandler` |
 | `src/capabilities/workspace/service/history.rs` | 历史族：状态盘点、日志、单次提交视图、单文件差异、版本列表 |
 | `src/capabilities/workspace/service/roots.rs` | 外部工作区根的判定：按档位判网络路径 / 共享根 / 文件系统根 / UTF-8 与产品根的互包含（文本 + 落点身份），创建走 `resolve_root`、加载复检走 `recheck_root`、产品根规范化走 `product_root`、无 IO 部分走 `root_policy` |
 | `src/capabilities/workspace/service/resolve.rs` | 冲突解决族：`ResolvePlan`、拒绝对话渲染、`work_resolve` 的选边、备份与未合并守卫 |
@@ -27,6 +28,7 @@
 | `src/capabilities/workspace/domain/readfact.rs` | 读取事实 `ReadFact`：哪个工作树、哪个路径、读到哪几行、当时的整份指纹（随工具行落盘，过期由它派生） |
 | `src/capabilities/workspace/domain/upload.rs` | 上传载荷的纯解码：标准字母表 base64，跳过空白与 `=`，容忍缺失填充 |
 | `src/capabilities/workspace/domain/workstore.rs` | 版本化工作区纯逻辑：内容寻址、提交记录、拉取基线、文件级三方比较、三方版本预览、冲突解决判定（含 take=local 守卫 / 备份判定）与路径校验 |
+| `src/capabilities/workspace/domain/work_tools.rs` | 共享区工作工具的纯逻辑：工具名常量与 `is_work_tool`、入参解析、回执拼装与三方版本 / 解决结果渲染 |
 | `src/capabilities/workspace/detail/fs_workspace.rs` | `Workdirs` 的落盘实现：`session/<工作名>/` 下的 `work/` 与各 agent 沙箱；外部工作区绑定投影 `.work-root` 与共享区根解析；跨会话写锁按落点身份做键；用量统计带 2 秒内存缓存且不跟随目录链接 |
 | `src/capabilities/workspace/detail/fs_workstore.rs` | `WorkStore` 的落盘实现：流式扫描 / 写入 / 复制（含跨根备份复制）、原子写、跨进程锁、版本库对象与对象枚举 / 删除、提交记录、基线、待恢复事务与提交号计数器；目录刷新经 `fs_meta::sync_dir` |
 | `src/capabilities/workspace/detail/estimate.rs` | 外部工作区成本预估：有界计数（250 ms / 5 万条目，超限标 `truncated`，数字是下界）、按卷速率样本（`.home/fence-costs.json`，卷键经 kernel 平台事实归一；真实授权与 `--setup/fence-calibrate` 的合成树样本都走 `record_grant_cost`）与按取整点值算的乐观 / 保守区间 |

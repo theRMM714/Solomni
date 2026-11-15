@@ -351,7 +351,8 @@ impl ConductorHandle {
             // 只读诊断：准备（定位租约）在核心线程，采样（guest 里两轮 /proc）在调用方线程。
             "guest_diagnose" => {
                 let sid = s("session_id");
-                let job = self.call(move |core| core.prepare_guest_diagnose(&sid))?;
+                let job: crate::capabilities::work::api::GuestDiagnose =
+                    self.call(move |core| core.work.prepare_guest_diagnose(&core.turn, &sid))?;
                 let report = job.run()?;
                 let value = serde_json::to_value(&report)
                     .map_err(|e| format!("诊断结果序列化失败：{}", e))?;

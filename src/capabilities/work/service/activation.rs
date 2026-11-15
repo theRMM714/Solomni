@@ -62,9 +62,7 @@ impl Work {
                 // guest 启动已在调用方线程完成；这里只把它的句柄丢掉。
                 drop(boot);
                 let probe = self.probe.as_ref();
-                let rebuilt = turn.ensure_session(&sid, registry, probe, &|w, sb, allowed| {
-                    (self.handlers)(w, sb, allowed)
-                });
+                let rebuilt = turn.ensure_session(&sid, registry, probe);
                 if let Err(e) = rebuilt {
                     if let Some(l) = &lease
                         && !turn.is_running(&sid)

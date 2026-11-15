@@ -1,8 +1,8 @@
 //! 目的：环境事实的派生规则——把调用方已取好的事实算成权限面、沙箱清单、围栏、进程环境、工具链根与 guest 租约。
 //! 管：`member`（一席的围栏 / 运行路径 / 工具链根 / 模块注入项）、`sandboxes`（每个 agent 的沙箱）、
 //!   `permissions`（权限链）、`workspace_grant`（共享区授权粒度）、`guest_lease`（共享 guest 租约）。
-//! 不管：取事实（history / workspace / registry / 清单在 `conductor`）、落盘、启停 guest 与工具进程。
-//! 联动：`conductor/service/env.rs` 的同名方法只取事实后转调这里；行为与错误文案必须逐字一致。
+//! 不管：取事实（history / workspace / registry / 清单在 `turn`）、落盘、启停 guest 与工具进程。
+//! 联动：`turn/service/facts.rs` 与 `turn/service/assemble.rs` 取好事实后转调这里；行为与错误文案必须逐字一致。
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
