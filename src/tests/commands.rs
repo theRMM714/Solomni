@@ -179,9 +179,9 @@ fn boot_commands_declare_json_receipt() {
     }
 }
 
-/// 解析器：--json 无论写在命令前还是命令后都置位，且不吞掉命令与操作数。
+/// 解析器：全局旗语与顺序无关——写在启动命令前面或后面效果一样，命令自己的旗语仍留在操作数里。
 #[test]
-fn json_flag_parses_on_both_sides() {
+fn global_flags_work_on_both_sides_of_a_boot_command() {
     let before = crate::presentation::cli::argv::parse(&["--json".to_string(), "--gc".to_string()])
         .expect("--json --gc 可解析");
     assert!(before.json);
@@ -189,11 +189,44 @@ fn json_flag_parses_on_both_sides() {
     let after = crate::presentation::cli::argv::parse(&["--gc".to_string(), "--json".to_string()])
         .expect("--gc --json 可解析");
     assert_eq!(after.command.as_deref(), Some("gc"));
+    assert!(after.json, "命令后的 --json 同样置位");
     assert!(
-        after.operands.iter().any(|o| o == "--json"),
-        "命令后的 --json 要留在操作数里给启动相：{:?}",
+        after.operands.is_empty(),
+        "全局旗语不进操作数：{:?}",
         after.operands
     );
+
+    // 平台用例就是这样调的：命令在前、根旗在后，根必须真的被解析到（否则医生自检跑在错误的根上）。
+    let rooted = crate::presentation::cli::argv::parse(&[
+        "--doctor".to_string(),
+        "--root".to_string(),
+        "fixture".to_string(),
+    ])
+    .expect("--doctor --root fixture 可解析");
+    assert_eq!(rooted.command.as_deref(), Some("doctor"));
+    assert_eq!(rooted.root.as_deref(), Some("fixture"));
+    assert!(rooted.operands.is_empty(), "{:?}", rooted.operands);
+
+    // 命令自己的旗语与裸词按原顺序留给启动相。
+    let gc = crate::presentation::cli::argv::parse(&[
+        "--gc".to_string(),
+        "--category=logs".to_string(),
+        "--json".to_string(),
+        "--yes".to_string(),
+    ])
+    .expect("--gc --category=logs 可解析");
+    assert!(gc.json);
+    assert_eq!(
+        gc.operands,
+        vec!["--category=logs".to_string(), "--yes".to_string()],
+        "命令自己的旗语要原样留在操作数里"
+    );
+
+    // 命令后面的 --help 是这条命令自己的手册。
+    let topic = crate::presentation::cli::argv::parse(&["--gc".to_string(), "--help".to_string()])
+        .expect("--gc --help 可解析");
+    assert_eq!(topic.help_topic.as_deref(), Some("gc"));
+    assert!(!topic.help);
 }
 /// 覆盖：人能经呈现层用的动作，要么在呈现层有入口，要么在下面登记豁免。
 ///

@@ -57,6 +57,7 @@ pub(crate) fn help_text(all: bool) -> String {
     out.push_str("  3 布尔旗不带值；关掉一个开关用对应的 --no-xxx，不写 --xxx=false。\n");
     out.push_str("  4 `--` 之后全部当位置参数（参数里有空格或连字符时用）。\n");
     out.push_str("  5 未知旗语直接报错，编辑距离 ≤2 时给最近的一条建议。\n");
+    out.push_str("  6 全局旗语写在启动命令前或后都算；命令自己的旗语按顺序接在它后面。\n");
     out
 }
 

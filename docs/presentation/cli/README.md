@@ -20,7 +20,7 @@
 
 - 入站面：只依赖**入站能力面**（各能力的 `::api`）；`conductor` 的 `Ops` 是它与核心之间的唯一通道。
 - 入口：`src/main.rs` 调 `presentation::cli::run(ops, presentation::web::DEFAULT_PORT, plain, anim)`；`web [端口]` 子命令把控制权交给 Web 渠道（同一份 `Ops`）。
-- 旗语：`--root <dir>`、`--web`、`--port <n>`、`--plain`、`--no-anim`、`--json`、`-h/--help`、`-v/--version` 由 `argv.rs` 统一解析（`--x v` 与 `--x=v` 等价；未知旗语给编辑距离建议）；命令手册、Tab 补全与未知命令建议都由 `systools/commands.yaml` 这一张表生成——表经 tools 能力的 `CommandBook` 编译进二进制（`include_str!`，无产品根也能 `--help`），`catalog.rs` 只做排版。新增或改命令 = 改这张表（名字、别名、分组、`phase`、写法、一句话说明、确认门槛、命令自己的旗语），分派仍留在 `src/presentation/cli/boot.rs`（启动相，经 `system` 能力执行）与 `src/presentation/cli.rs`（转录相），两侧与表的同步由 `src/tests/commands.rs` 门禁锁死。
+- 旗语：`--root <dir>`、`--web`、`--port <n>`、`--plain`、`--no-anim`、`--json`、`-h/--help`、`-v/--version` 由 `argv.rs` 统一解析（`--x v` 与 `--x=v` 等价；未知旗语给编辑距离建议）；全局旗语与启动命令的先后无关（`--doctor --root <dir>` 与 `--root <dir> --doctor` 等价），命令自己的旗语按原顺序留在操作数里交给 `boot.rs`；命令手册、Tab 补全与未知命令建议都由 `systools/commands.yaml` 这一张表生成——表经 tools 能力的 `CommandBook` 编译进二进制（`include_str!`，无产品根也能 `--help`），`catalog.rs` 只做排版。新增或改命令 = 改这张表（名字、别名、分组、`phase`、写法、一句话说明、确认门槛、命令自己的旗语），分派仍留在 `src/presentation/cli/boot.rs`（启动相，经 `system` 能力执行）与 `src/presentation/cli.rs`（转录相），两侧与表的同步由 `src/tests/commands.rs` 门禁锁死。
 - 状态归属：不持状态、不落盘；会话与业务状态都在核心，本层只读 `Ops` 回报。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）

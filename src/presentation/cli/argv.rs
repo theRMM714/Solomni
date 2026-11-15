@@ -120,14 +120,21 @@ pub(crate) struct Flags {
 /// 目的：解析 argv（不含程序名）：短旗、长旗、`=值` 与 `--` 分隔都收。
 /// 参数：`args` 是程序名之后的参数表。
 /// 返回：解析好的旗语；旗语写错时给一句人话（含最近建议）。
+/// 约束：全局旗语与顺序无关——`--doctor --root X` 与 `--root X --doctor` 等价；
+///   认出启动命令之后，认不出的旗语与裸词都按顺序进 `operands`，由那条命令自己解释。
 pub(crate) fn parse(args: &[String]) -> Result<Flags, String> {
     let mut flags = Flags::default();
     let mut i = 0;
     let mut only_positional = false;
+    // 已认出的启动相命令：此后只有全局旗语还在这里解析。
+    let mut boot: Option<String> = None;
     while i < args.len() {
         let arg = &args[i];
         if only_positional || !arg.starts_with('-') || arg == "-" {
-            flags.positionals.push(arg.clone());
+            match boot {
+                Some(_) => flags.operands.push(arg.clone()),
+                None => flags.positionals.push(arg.clone()),
+            }
             i += 1;
             continue;
         }
@@ -140,22 +147,28 @@ pub(crate) fn parse(args: &[String]) -> Result<Flags, String> {
             Some((name, value)) => (name, Some(value.to_string())),
             None => (arg.as_str(), None),
         };
-        if let Some(cmd) = boot_command(name) {
-            // 启动相命令：整段原样交给它，只记下名字与「它自己的参数」；命令后面写 --help 就是要它自己的手册。
-            flags.positionals.extend(args[i..].iter().cloned());
-            let mut rest: Vec<String> = inline.into_iter().collect();
-            rest.extend(args[i + 1..].iter().cloned());
-            if rest.iter().any(|a| a == "--help" || a == "-h") {
-                flags.help_topic = Some(cmd.name.clone());
+        if boot.is_none() {
+            if let Some(cmd) = boot_command(name) {
+                // 启动相命令：记下名字，剩下的继续按全局旗语解析——命令放在前面不影响 --root 这类旗语；
+                // 认不出的旗语留给命令自己（--reset / --category …），类型与校验归启动相。
+                boot = Some(cmd.name.clone());
+                flags.command = boot.clone();
+                // `--help --gc` 也要给这条命令自己的手册。
+                if flags.help {
+                    flags.help = false;
+                    flags.help_topic = boot.clone();
+                }
+                if let Some(value) = inline {
+                    flags.operands.push(value);
+                }
+                i += 1;
+                continue;
             }
-            flags.command = Some(cmd.name.clone());
-            flags.operands = rest;
-            return Ok(flags);
-        }
-        if OPAQUE.contains(&name) {
-            // 内部协议模式自己解析整段 argv，这里不再往下列。
-            flags.positionals.extend(args[i..].iter().cloned());
-            return Ok(flags);
+            if OPAQUE.contains(&name) {
+                // 内部协议模式自己解析整段 argv，这里不再往下列。
+                flags.positionals.extend(args[i..].iter().cloned());
+                return Ok(flags);
+            }
         }
         match name {
             "--root" => flags.root = Some(take(inline, args, &mut i, name)?),
@@ -203,7 +216,11 @@ pub(crate) fn parse(args: &[String]) -> Result<Flags, String> {
             }
             "--help" | "-h" => {
                 no_value(&inline, name)?;
-                flags.help = true;
+                match &boot {
+                    // `solomni --gc --help`：要的是那条命令自己的手册。
+                    Some(cmd) => flags.help_topic = Some(cmd.clone()),
+                    None => flags.help = true,
+                }
             }
             // `--all` 只修饰 `--help`：展开隐藏旗语，单独出现时无副作用。
             "--all" => {
@@ -219,7 +236,11 @@ pub(crate) fn parse(args: &[String]) -> Result<Flags, String> {
             | "--fence-revoke" | "--fence-profile-rm" => {}
             // 台账清单的可读版修饰符：由 guard 扫描原始 argv，解析层只吃下。
             "--human" => {}
-            other => return Err(unknown(other)),
+            // 命令自己的旗语（`--reset` / `--category` …）：原样按顺序交给启动相，这里不猜它的取值。
+            other => match &boot {
+                Some(_) => flags.operands.push(arg.clone()),
+                None => return Err(unknown(other)),
+            },
         }
         i += 1;
     }
