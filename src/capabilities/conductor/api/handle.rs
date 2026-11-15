@@ -1,15 +1,13 @@
 //! 目的：核心手柄——把 Conductor 搬到它自己的执行线程，命令与事件都经这里。
-//! 管：命令队列的「取 / 交」两步与长步骤在核心线程上的执行；事件台的订阅出口；代理会话的工具注入。
-//! 不管：长步骤本身的业务逻辑（在 service）；停止 / 取消（由 kernel::api::JobRegistry 承担、不进队列）。
+//! 管：命令的提交与长步骤在核心线程上的执行；事件台的订阅出口；代理会话的工具注入。
+//! 不管：队列与线程本身（在 `src/kernel/domain/actor.rs`）；长步骤的业务逻辑（在 service）；停止 / 取消（由 kernel::api::JobRegistry 承担、不进队列）。
 //! 联动：呈现层与核心共用 api 的 Ops 契约（docs/presentation/contracts.md）；事件台由核心独占生产。
 
 use super::*;
 use crate::capabilities::conductor::service::Conductor;
 pub use crate::capabilities::session::api::SessionEvent;
 use crate::kernel::api::JobRegistry;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
-use std::sync::mpsc::{self};
 impl ConductorHandle {
     /// 目的：把核心搬到它自己的执行线程：此后所有核心状态只被这一个线程碰。 全部手柄丢弃后线程自然结束（通道断开即退出）。
     pub fn spawn(core: Conductor) -> Result<ConductorHandle, String> {
@@ -17,15 +15,21 @@ impl ConductorHandle {
         let jobs = JobRegistry::new();
         let interactive = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let bus = EventBus::new();
-        let (tx, rx) = mpsc::channel::<Job>();
         let book = core.systools_book();
         let tools = core.tools_handle();
         let residents = core.residents_handle();
         let secrets = core.secrets_handle();
         let modules = core.modules_handle();
         let builds = core.builds_handle();
+        // 队列与线程是纯机制：起线程、逐条执行、接住 panic 都在 kernel 的壳里。
+        let actor = crate::kernel::api::Actor::spawn(
+            "solomni-core",
+            "conductor::api",
+            Arc::clone(&worker_log),
+            core,
+        )?;
         let handle = ConductorHandle {
-            tx,
+            actor,
             jobs,
             interactive,
             bus,
@@ -38,23 +42,6 @@ impl ConductorHandle {
             builds,
             booting: Arc::new(std::sync::Mutex::new(std::collections::BTreeSet::new())),
         };
-        // 注意：工作线程**绝不能**捕获取手柄（那会持有一个 Sender，通道永不闭合、线程永不退出）。
-        std::thread::Builder::new()
-            .name("solomni-core".to_string())
-            .spawn(move || {
-                let mut core = core;
-                while let Ok(job) = rx.recv() {
-                    // 一条命令 panic 不该带走整个核心：接住并继续（回包通道随闭包销毁，调用方会看到「无回应」）。
-                    if catch_unwind(AssertUnwindSafe(|| job(&mut core))).is_err() {
-                        worker_log.error(
-                            "conductor::api",
-                            "核心命令 panic：已接住，核心继续服务（请查上面的 panic 现场）",
-                        );
-                    }
-                }
-                worker_log.info("conductor::api", "核心线程退出：全部手柄已释放");
-            })
-            .map_err(|e| format!("启动核心线程失败：{}", e))?;
         Ok(handle)
     }
 
@@ -64,15 +51,7 @@ impl ConductorHandle {
         T: Send + 'static,
         F: FnOnce(&mut Conductor) -> Result<T, String> + Send + 'static,
     {
-        let (tx, rx) = mpsc::channel();
-        let job: Job = Box::new(move |core: &mut Conductor| {
-            let _ = tx.send(f(core));
-        });
-        self.tx
-            .send(job)
-            .map_err(|_| "核心已停止：无法发送命令".to_string())?;
-        rx.recv()
-            .map_err(|_| "核心无回应：命令执行中发生 panic，或核心线程已停止".to_string())?
+        self.actor.call(f)
     }
 
     /// 目的：创建会话前的补编——本次名单里的模块若在目标环境没有入口、且声明了 `build:`，先在这里编好。

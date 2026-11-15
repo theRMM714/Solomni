@@ -18,7 +18,6 @@ use std::collections::BTreeMap;
 // 入站契约返回的词汇：能力接口的返回类型在这里有一份**正式名字**。
 // 呈现层只认这里，不直接碰 ports / providers 的内部路径。
 pub use crate::capabilities::llm::api::ProbeOutcome;
-use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
 /// 目的：一次生成的输出方式：流式逐片，还是只要最终结果。
@@ -306,13 +305,11 @@ pub(crate) enum CollabWork {
     Resume,
 }
 
-/// 目的：一次命令：在核心自己的线程上执行（因此核心状态不需要任何锁）。
-type Job = Box<dyn FnOnce(&mut Conductor) + Send>;
-
 /// 目的：核心手柄：呈现层用它发命令。克隆廉价（内部只是通道 + 两个共享句柄）。
 #[derive(Clone)]
 pub struct ConductorHandle {
-    tx: Sender<Job>,
+    /// 目的：命令队列：核心状态只在它自己那条线程上被执行（机制壳在 `src/kernel/domain/actor.rs`）。
+    actor: crate::kernel::api::Actor<Conductor>,
     jobs: Arc<JobRegistry>,
     /// 目的：有没有"能作答"的交互前端（Web 在服务时打开）：打开才把工具级确认接进裁决队。
     /// 纯终端同步生成不打开，避免生成线程空等一个没人回答的问题。
