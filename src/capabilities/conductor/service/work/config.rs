@@ -49,7 +49,7 @@ impl Conductor {
             tier: tier.as_str().to_string(),
             tier_locked: meta.parent.is_some(),
             guest: meta.exec.guest.clone(),
-            guests: self.guest_bases()?,
+            guests: self.provision.guest_bases()?,
             net: self.network_allowed(),
             permission: self.permission_view(&meta)?,
             thinking: self
@@ -128,8 +128,8 @@ impl Conductor {
             }
         }
         // 校验：模块与模型真实存在；同一模块可以跨 agent 共用（各自独立沙箱与工具面）。
-        let roster = self.scan();
-        let reserved = self.reserved_names();
+        let roster = self.modules.roster();
+        let reserved = self.systools.reserved_names();
         let mut metas: Vec<AgentMeta> = Vec::new();
         if let Some(p) = &edit.permission {
             crate::capabilities::permission::api::validate_layer(p)?;

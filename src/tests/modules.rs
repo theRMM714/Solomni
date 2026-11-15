@@ -120,7 +120,7 @@ pub(crate) fn roster_lists_modules() {
         vec![module_of("a"), module_of("b")],
         gw(BTreeMap::new(), vec!["[]".into()]),
     );
-    let r = core.scan();
+    let r = core.modules_handle().roster();
     let ids: Vec<_> = r.modules.iter().map(|m| m.manifest.id.clone()).collect();
     assert_eq!(ids, vec!["a", "b"]);
 }

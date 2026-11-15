@@ -15,7 +15,7 @@ impl ConductorHandle {
         let jobs = JobRegistry::new();
         let interactive = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let bus = EventBus::new();
-        let book = core.systools_book();
+        let book = core.systools_handle().book();
         let tools = core.tools_handle();
         let residents = core.residents_handle();
         let secrets = core.secrets_handle();
@@ -121,7 +121,7 @@ impl ConductorHandle {
         door: &Arc<dyn crate::capabilities::session::api::Gates>,
         sid: &str,
         bus: Arc<EventBus>,
-        persister: crate::capabilities::conductor::service::Persister,
+        persister: crate::capabilities::session::api::Persister,
     ) -> Arc<dyn crate::kernel::ports::AskUser> {
         let owner = sid.to_string();
         let emit: Box<dyn Fn(SessionEvent) + Send + Sync> = Box::new(move |ev: SessionEvent| {

@@ -346,8 +346,8 @@ impl RegistryOps for ConductorHandle {
         // 模块存在性按**清单**校验：清单归 workspace，登记处只认事实，所以清单由这里取一份给它。
         // 目录保留名（systools/names.yaml）也在这里收口：登记处不认识工作区布局，名单由 conductor 注入。
         self.call(move |core| {
-            let roster = core.scan();
-            let reserved = core.reserved_names();
+            let roster = core.modules_handle().roster();
+            let reserved = core.systools_handle().reserved_names();
             crate::capabilities::registry::api::check_reserved(&name, &reserved)?;
             core.registry_mut()
                 .agent_upsert(&name, &modules, &model, &note, &chara, &roster)
@@ -402,7 +402,7 @@ impl crate::capabilities::session::api::HistoryOps for ConductorHandle {
 
 impl crate::capabilities::modules::api::ModulesOps for ConductorHandle {
     fn roster(&self) -> Result<Roster, String> {
-        self.call(|core| Ok(core.scan()))
+        self.call(|core| Ok(core.modules_handle().roster()))
     }
     fn module_enabled(&self, id: &str) -> Result<bool, String> {
         let id = id.to_string();
@@ -429,10 +429,8 @@ impl ConductorOps for ConductorHandle {
         // 核心的行**照推**（推是底层收发消息的统一定律，一次推荐也不例外），推到系统会话：
         // 它不在任何会话表里，前端因此不会为它建标签页；落盘策略是 Drop（只推不留）。
         if !rows.is_empty() {
-            self.bus.push(
-                crate::capabilities::conductor::service::SYSTEM_SID_SUGGEST,
-                &rows,
-            );
+            self.bus
+                .push(crate::capabilities::session::api::SYSTEM_SID_SUGGEST, &rows);
         }
         Ok(agents)
     }
