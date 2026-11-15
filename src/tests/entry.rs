@@ -1,7 +1,7 @@
-//! 目的：进程入口的两段分派（取根前 / 取根后）——隐藏探针自带参数失败路径，不碰真实的用户根。
+//! 目的：进程入口的两段分派（取根前 / 取根后）——只处理内部协议旗语，不碰真实的用户根。
 //! 管：`before_root` / `after_root` 的分支走向与退出码。
-//! 不管：探针自身的事实输出与平台差异（在 `src/entry/probes/`）；参数表之外的启动装配（在 `src/main.rs`）。
-//! 联动：`src/main.rs` 的两处调用点；参数表与分支顺序在 `src/entry/args.rs`。
+//! 不管：产品命令（启动相在 `src/presentation/cli/boot.rs`，转录相在 `src/presentation/cli.rs`）；探针自身的事实输出（在各能力）。
+//! 联动：`src/main.rs` 的调用点；参数表与分支顺序在 `src/entry/args.rs`。
 
 use crate::entry::args::{after_root, before_root};
 use crate::kernel::detail::confine::FENCE_FAILED;
@@ -70,25 +70,25 @@ fn print_routes_is_a_successful_one_shot() {
     assert_eq!(before_root(&argv(&["--print-routes"])), Some(0));
 }
 
-/// 目的：取根后的维护探针在空根上给出结论就退出，不需要先装好任何东西。
+/// 目的：产品命令不再由入口执行——取根后的分派只认内部协议，维护命令走启动相。
+/// 约束：旧旗语原样写在这个文件里也不该被入口接走，否则会出现两处执行者。
 #[test]
-fn probes_after_root_answer_on_a_bare_root() {
+fn product_commands_are_not_dispatched_by_the_entry() {
     let root = TempRoot::new("probe");
-    assert_eq!(
-        after_root(root.path(), &argv(&["--work-gc"])),
-        Some(2),
-        "--work-gc 缺工作名：给用法就退出，不去扫码"
-    );
-    assert_eq!(
-        after_root(root.path(), &argv(&["--storage"])),
-        Some(0),
-        "空根也能报存储空间（只读事实）"
-    );
-    assert_eq!(
-        after_root(root.path(), &argv(&["--gc"])),
-        Some(0),
-        "默认 dry-run：没有候选也如实说没有"
-    );
+    for flag in [
+        "--work-gc",
+        "--storage",
+        "--gc",
+        "--doctor",
+        "--provision",
+        "--build",
+    ] {
+        assert_eq!(
+            after_root(root.path(), &argv(&[flag])),
+            None,
+            "{flag} 该由启动相执行，入口不该截住"
+        );
+    }
 }
 
 /// 目的：`--fence-revoke` 只有一套解析、两种 arity——单参数撤机器级条目，双参数走旧的 SID+路径语义。

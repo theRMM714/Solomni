@@ -1,7 +1,7 @@
 # cli（终端转录中心）
 
 > 定位：argv → 入站能力面 → 渲染事件流。
-> 效力：规范｜核对：2026-11-13｜依据：`src/presentation/cli.rs`
+> 效力：规范｜核对：2026-11-15｜依据：`src/presentation/cli.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [ARCHITECTURE.md](../../../ARCHITECTURE.md) §一，业务边界判据见 §九，测试规范见 [TESTING.md](../../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -12,18 +12,19 @@
 - 管：交互模式的转录渲染——角色行与正文缩进、工具行（标签 + 参数摘要 + 成败）、验收清单与交付结论、裁决卡边框、生成态 spinner 与耗时、上下文用量写回状态行；同一批 `SessionEvent` 在非 TTY 下仍走原样文本。
 - 管：共享区提交历史与回滚入口——`work <会话>` 看 head + 最近提交，`work <会话> log [条数]` 列提交，`work <会话> show <提交号>` 看详情，`work <会话> restore <提交号> [--yes]` 走统一的 `restore_work_commit` 动作（非破坏性；交互模式要求输入 yes，`--yes` 仅用于显式脚本）。
 - 管：虚拟机档会话的只读诊断入口——`diagnose <会话>` 造一次 `guest_diagnose` 动作（`caller = user`），把动作返回的结构化 JSON（guest 进程表 / CPU 汇总 / 内存 / 负载 / 挂载）原样打印；与 `work` / `resident` / `module` 同类，不做业务判断。
-- 不管：不做业务判断、不持状态、不落盘；**永不接触端口对象，也拿不到 `Core` 本身**（`src/presentation/cli.rs`）。
+- 管：启动相命令的最后一公里——`--doctor` / `--provision` / `--gc` / `--storage` / `--work-gc` / `--build` 的操作数与回执排版（`src/presentation/cli/boot.rs`）；执行与确认门槛在 `system` 能力（见 [docs/system](../../system/README.md)）。
+- 不管：不做业务判断、不持状态、不落盘；**永不接触端口对象，也拿不到 `Core` 本身**（`src/presentation/cli.rs`）；启动相命令的语义也不在这里——`boot.rs` 只把参数翻成能力调用。
 
 ## 入站契约与状态归属
 
 - 入站面：只依赖**入站能力面**（各能力的 `::api`）；`conductor` 的 `Ops` 是它与核心之间的唯一通道。
 - 入口：`src/main.rs` 调 `presentation::cli::run(ops, presentation::web::DEFAULT_PORT, plain, anim)`；`web [端口]` 子命令把控制权交给 Web 渠道（同一份 `Ops`）。
-- 旗语：`--root <dir>`、`--web`、`--port <n>`、`--plain`、`--no-anim`、`-h/--help`、`-v/--version` 由 `argv.rs` 统一解析（`--x v` 与 `--x=v` 等价；未知旗语给编辑距离建议）；命令手册、Tab 补全与未知命令建议都由 `systools/commands.yaml` 这一张表生成——表经 tools 能力的 `CommandBook` 编译进二进制（`include_str!`，无产品根也能 `--help`），`catalog.rs` 只做排版。新增或改命令 = 改这张表（名字、别名、分组、`phase`、写法、一句话说明、确认门槛、命令自己的旗语），分派仍留在 `src/entry/args.rs`（启动相）与 `src/presentation/cli.rs`（转录相），两侧与表的同步由 `src/tests/commands.rs` 门禁锁死。
+- 旗语：`--root <dir>`、`--web`、`--port <n>`、`--plain`、`--no-anim`、`-h/--help`、`-v/--version` 由 `argv.rs` 统一解析（`--x v` 与 `--x=v` 等价；未知旗语给编辑距离建议）；命令手册、Tab 补全与未知命令建议都由 `systools/commands.yaml` 这一张表生成——表经 tools 能力的 `CommandBook` 编译进二进制（`include_str!`，无产品根也能 `--help`），`catalog.rs` 只做排版。新增或改命令 = 改这张表（名字、别名、分组、`phase`、写法、一句话说明、确认门槛、命令自己的旗语），分派仍留在 `src/presentation/cli/boot.rs`（启动相，经 `system` 能力执行）与 `src/presentation/cli.rs`（转录相），两侧与表的同步由 `src/tests/commands.rs` 门禁锁死。
 - 状态归属：不持状态、不落盘；会话与业务状态都在核心，本层只读 `Ops` 回报。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`conductor`、`modules`（经 `Ops` 字段）、`registry`、`vm`
+- 经 `::api` 用到：`conductor`、`modules`（经 `Ops` 字段）、`registry`、`system`（启动相命令）、`vm`
 - 谁在用我：（无）
 
 ## 改动本单元时必须同步

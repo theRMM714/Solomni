@@ -162,6 +162,12 @@ impl crate::capabilities::provision::api::Provision for FakeProvision {
     fn reset_guest(&self, _guest: &str, _on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
         self.guard()
     }
+    fn ensure(&self, _ids: &[String], _on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
+        self.guard()
+    }
+    fn ensure_spec(&self, _spec: &str, _on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
+        self.guard()
+    }
 }
 
 fn fake_ops(fail: Option<&str>) -> Ops {

@@ -1,33 +1,28 @@
-//! 目的：机器可读的自检事实（隐藏模式 --doctor）。
-//! 管：平台、围栏、外部解释器、工具链、进程台账、虚拟机档前置与存储盘面的事实汇总。
-//! 不管：围栏机制本身（在 kernel）、进程身份（在 kernel::detail::procs）、能力内部规则。
-//! 联动：由 main 在 --doctor 分支调用；装配在 entry::assembly；用例读同一份事实。
+//! 目的：自检事实本体——平台、围栏、外部解释器、工具链、进程台账、虚拟机档前置与存储盘面拼成一份 JSON。
+//! 管：只读事实的汇总与字段形状（`--doctor` 与用例读同一份）。
+//! 不管：围栏机制（kernel）、进程身份（kernel::detail::procs）、各能力内部规则。
+//! 联动：由 SystemService::doctor 调用；字段口径见 docs/system/README.md。
 
-use crate::capabilities::storage::api::Storage as _;
+use std::path::Path;
 
-/// 目的：自检本机事实（平台 + 围栏能力 + 外部解释器）。只报事实，不猜、不改任何东西（围栏自检那个临时目录除外）。
-/// 参数：root = 产品根——虚拟机档要按它读"项目内已装了什么"（与会话判据同一份来源，不另编一套）。
-pub fn doctor(root: &std::path::Path) -> i32 {
-    println!("{}", doctor_json(root));
-    0
-}
+use serde_json::Value;
 
-/// 目的：自检的事实本体（`--doctor` 打印它；用例也读它——不必抓 stdout）。
-pub fn doctor_json(root: &std::path::Path) -> serde_json::Value {
-    doctor_json_with(root, crate::kernel::detail::confine::capability())
-}
+use crate::capabilities::packages::api::BaseFacts;
+use crate::capabilities::provision::api::Provision;
+use crate::capabilities::storage::api::Storage;
+use crate::capabilities::system::api::{FenceFacts, toolchain_json};
 
-/// 目的：自检事实本体；本机能力由调用方传入——生产取一次 `capability()`，用例复用同一份值，
-///   不必再触发一次围栏自检（Windows 的自检会写临时目录 ACL）。
-pub(crate) fn doctor_json_with(
-    root: &std::path::Path,
-    cap: crate::kernel::detail::confine::Capability,
-) -> serde_json::Value {
-    // 虚拟机档的逐项前置（**只读事实**）：项目内补齐过就按那一份问，否则按 PATH 问（与核心同一把尺子）。
-    let installed = crate::capabilities::provision::api::Provision::status(
-        &crate::entry::assembly::provision(root),
-    )
-    .unwrap_or_default();
+/// 目的：自检事实本体。
+/// 参数：root = 产品根；provision / storage = 已装配的用例面；facts = 工具链事实；fence = 本机围栏能力。
+pub(crate) fn build(
+    root: &Path,
+    provision: &dyn Provision,
+    storage: &dyn Storage,
+    facts: &BaseFacts,
+    fence: FenceFacts,
+) -> Value {
+    // 虚拟机档的逐项前置（只读事实）：项目内补齐过就按那一份问，否则按 PATH 问（与核心同一把尺子）。
+    let installed = provision.status().unwrap_or_default();
     let installed_at = |prefix: &str| {
         installed
             .iter()
@@ -46,9 +41,9 @@ pub(crate) fn doctor_json_with(
             share_tool: share_tool.as_deref(),
             probe: &crate::kernel::detail::HostProbeAdapter,
         });
-    // 长驻子进程：账本里还活着的那几条（`--doctor` 只报事实，不动手收）。
+    // 长驻子进程：账本里还活着的那几条（自检只报事实，不动手收）。
     let book = crate::kernel::detail::procs::ProcessBook::open(&root.join(".home"));
-    let procs: Vec<serde_json::Value> = book
+    let procs: Vec<Value> = book
         .list()
         .into_iter()
         .map(|e| {
@@ -63,17 +58,16 @@ pub(crate) fn doctor_json_with(
             })
         })
         .collect();
-    let base = crate::entry::toolchains::base_facts(root);
-    let doc = serde_json::json!({
+    serde_json::json!({
         "platform": std::env::consts::OS,
         "arch": std::env::consts::ARCH,
-        "fence": { "fs": cap.fs, "net": cap.net, "tree": cap.tree, "note": cap.note },
+        "fence": { "fs": fence.fs, "net": fence.net, "tree": fence.tree, "note": fence.note },
         "externals": {
             "python": crate::kernel::detail::host_probe::find_exe("python").map(|p| p.to_string_lossy().into_owned()),
             "node": crate::kernel::detail::host_probe::find_exe("node").map(|p| p.to_string_lossy().into_owned()),
             "curl": crate::kernel::detail::host_probe::find_exe("curl").map(|p| p.to_string_lossy().into_owned()),
         },
-        "toolchains": crate::entry::toolchains::json(&base),
+        "toolchains": toolchain_json(facts),
         "processes": procs,
         "vm_tier": {
             "available": vm.iter().all(|r| r.met),
@@ -81,7 +75,7 @@ pub(crate) fn doctor_json_with(
                 "id": r.id, "met": r.met, "detail": r.detail, "how": r.how,
             })).collect::<Vec<_>>(),
         },
-        "storage": match crate::entry::assembly::storage_from_settings(root).report() {
+        "storage": match storage.report() {
             Ok(s) => serde_json::json!({
                 "managed_bytes": s.managed_bytes,
                 "cap_bytes": s.cap_bytes,
@@ -94,6 +88,5 @@ pub(crate) fn doctor_json_with(
             }),
             Err(e) => serde_json::json!({ "error": e }),
         },
-    });
-    doc
+    })
 }

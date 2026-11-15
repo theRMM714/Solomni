@@ -1,12 +1,13 @@
 //! 目的：组合根的共用装配——把产品根变成能力面，供启动程序、探针与用例复用。
 //! 管：各能力的端口选型、适配器构造与依赖顺序；同一份能力面只在这里装一次。
-//! 不管：业务用例、参数解析、回执打印（在 main / entry::probes）；任何业务语义。
-//! 联动：消费者是 `src/main.rs`、`src/entry/probes/*` 与测试；契约见 ARCHITECTURE.md 的「根」。
+//! 不管：业务用例、参数解析、回执打印（在 main / presentation/cli/boot.rs）；任何业务语义。
+//! 联动：消费者是 `src/main.rs`、`src/presentation/cli/boot.rs` 与测试；契约见 ARCHITECTURE.md 的「根」。
 
 use std::path::Path;
 use std::sync::Arc;
 
 use crate::capabilities::builds::service::BuildsService;
+use crate::capabilities::packages::api::BaseFacts;
 use crate::capabilities::provision::api::Provision;
 use crate::capabilities::provision::detail::fetch::HttpFetch;
 use crate::capabilities::provision::detail::guest_image::Ext4Images;
@@ -18,6 +19,7 @@ use crate::capabilities::provision::ports::Fetcher;
 use crate::capabilities::provision::service::{ProvisionDeps, ProvisionService};
 use crate::capabilities::storage::api::StoragePolicy;
 use crate::capabilities::storage::service::StorageService;
+use crate::capabilities::system::service::{SystemDeps, SystemService};
 use crate::capabilities::vm::api::Vm;
 
 /// 目的：一次性取数适配器——补齐与探针共用同一组超时（连接 15s，整体 7200s）。
@@ -108,12 +110,6 @@ pub(crate) fn storage(
     )
 }
 
-/// 目的：探针用的存储能力面——按产品根现场装补齐（含供给 vm）与存储策略。
-pub(crate) fn storage_from_settings(root: &Path) -> StorageService {
-    let provision: Arc<dyn Provision + Send + Sync> = Arc::new(provision_with_guest_vm(root));
-    storage(root, provision, storage_policy(root))
-}
-
 /// 目的：虚拟机档构建用的 vm 能力面：**只持挂载式**共享档（virtiofs / 9p / smb）。
 /// 约束：模块目录是读写挂进去的，产物才能落回宿主那份——构建只持挂载式用户档；
 ///   `copy` 是开发/应急通道，不装配；`none` 只给供给编排。
@@ -189,4 +185,62 @@ pub(crate) fn build_service(root: &Path) -> Result<BuildsService, String> {
         Arc::new(crate::kernel::ports::NoopLog),
         crate::entry::toolchains::active_roots(root),
     ))
+}
+/// 目的：启动相命令用的系统维护能力面——存储 / 补齐 / 构建 / 工作区 / 模块与工具链事实按产品根现场装。
+/// 约束：只在这里装一次；能力自己不构造别的能力的适配器（依赖由本函数注入）。
+pub(crate) fn system(root: &Path, base: &BaseFacts) -> Result<SystemService, String> {
+    let provision: Arc<dyn Provision + Send + Sync> = Arc::new(provision_with_guest_vm(root));
+    let storage: Arc<dyn crate::capabilities::storage::api::Storage + Send + Sync> =
+        Arc::new(storage(root, Arc::clone(&provision), storage_policy(root)));
+    let builds: Arc<dyn crate::capabilities::builds::api::Builds + Send + Sync> =
+        Arc::new(build_service(root)?);
+    let workspace: Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync> = Arc::new(
+        crate::capabilities::workspace::service::WorkspaceService::new(
+            Arc::new(
+                crate::capabilities::workspace::detail::fs_workspace::FsWorkspace::new(
+                    root.join("session"),
+                ),
+            ),
+            Arc::new(crate::capabilities::workspace::detail::fs_workstore::FsWorkStore::new()),
+        ),
+    );
+    let modules: Arc<dyn crate::capabilities::modules::api::Modules + Send + Sync> = Arc::new(
+        crate::capabilities::modules::service::ModulesService::new(
+            Arc::new(crate::capabilities::modules::detail::FsModules::new(
+                root.join("modules"),
+                crate::capabilities::tools::api::names(),
+            )),
+            Arc::new(crate::capabilities::modules::detail::YamlModuleState::new(
+                root.join(".home").join("modules.yaml"),
+            )),
+        )
+        .map_err(|e| format!("模块能力装配失败：{}", e))?,
+    );
+    // 目的：宿主事实端口在这里接上——自检里要直读宿主的那几项由 detail 实现，service 只认端口。
+    let facts: Arc<dyn crate::capabilities::system::api::Facts + Send + Sync> =
+        Arc::new(crate::capabilities::system::detail::HostFacts);
+    Ok(SystemService::with_facts(
+        SystemDeps {
+            root: root.to_path_buf(),
+            storage,
+            provision,
+            builds,
+            workspace,
+            modules,
+            toolchains: base.clone(),
+            net: network_allowed(root),
+        },
+        facts,
+    ))
+}
+
+/// 目的：构建期的全局网络开关（与主程序同一份 settings.yaml；读不到 / 非法按拒绝）。
+fn network_allowed(root: &Path) -> bool {
+    std::fs::read_to_string(root.join(".home").join("settings.yaml"))
+        .ok()
+        .and_then(|t| {
+            yaml_serde::from_str::<crate::capabilities::registry::api::AppSettings>(&t).ok()
+        })
+        .map(|a| a.sandbox.policy.network)
+        .unwrap_or(false)
 }

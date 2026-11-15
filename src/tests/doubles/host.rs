@@ -218,6 +218,12 @@ pub(crate) fn test_provision_with(
         fn reset_guest(&self, _guest: &str, _on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
             Err("测试不跑虚拟根还原".to_string())
         }
+        fn ensure(&self, _ids: &[String], _on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
+            Err("测试不跑补齐".to_string())
+        }
+        fn ensure_spec(&self, _spec: &str, _on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
+            Err("测试不跑补齐".to_string())
+        }
     }
     Arc::new(FixedProvision(deps))
 }

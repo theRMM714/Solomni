@@ -97,13 +97,29 @@ fn main() {
     // 这些是人读的启动事实；--doctor / --provision 的 stdout 是机器可读 JSON，所以走 stderr。
     // 基础 profile 缺失时**每次启动**都报：项目内 / 宿主回退 / 宿主也没有，并给补全命令。
     let base = entry::toolchains::base_facts(&root);
-    for line in entry::toolchains::report_lines(&base) {
+    for line in capabilities::system::api::toolchain_lines(&base) {
         eprintln!("[工具链] {}", line);
     }
     for w in &toolchains.warnings {
         eprintln!("[工具链] {}", w);
     }
 
+    // 启动相命令（--doctor / --gc / --provision …）：命令表说有哪些、system 能力执行，拿到码就退。
+    if let Some(command) = flags.command.as_deref() {
+        let system = match entry::assembly::system(&root, &base) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[装配失败] {}", e);
+                std::process::exit(1);
+            }
+        };
+        std::process::exit(presentation::cli::boot::run(
+            command,
+            &flags.operands,
+            &system,
+        ));
+    }
+    // 内部协议旗语（守门子进程、探针）：不属于命令面，仍在入口按字面量认。
     if let Some(code) = entry::args::after_root(&root, &args) {
         std::process::exit(code);
     }
@@ -697,7 +713,7 @@ fn main() {
     ops.storage = Arc::clone(&storage);
     storage_service.start_auto();
     // 基础工具链事实：Web 端横幅与 CLI 启动报告读同一份。
-    ops.toolchains = entry::toolchains::json(&base);
+    ops.toolchains = capabilities::system::api::toolchain_json(&base);
 
     // 启动拉起：把所有**已启用**的常驻服务拉起来（进程级租约，不属于任何会话）。
     for line in residents_boot.start_enabled() {

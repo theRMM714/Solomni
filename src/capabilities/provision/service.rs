@@ -267,6 +267,14 @@ impl Provision for ProvisionService {
         on_line(&format!("按清单重建 {}（{} 条依赖）", guest, ids.len()));
         self.ensure(&ids, on_line)
     }
+
+    fn ensure(&self, ids: &[String], on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
+        ProvisionService::ensure(self, ids, on_line)
+    }
+
+    fn ensure_spec(&self, spec: &str, on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
+        ProvisionService::ensure_spec(self, spec, on_line)
+    }
 }
 
 impl ProvisionService {

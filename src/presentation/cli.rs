@@ -125,6 +125,7 @@ pub(crate) fn module_action_id(arg: &str) -> String {
 }
 
 pub(crate) mod argv;
+pub(crate) mod boot;
 pub(crate) mod catalog;
 mod commands;
 mod flows;
