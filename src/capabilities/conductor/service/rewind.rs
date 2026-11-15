@@ -60,7 +60,7 @@ impl Conductor {
         if force {
             // 用户已确认覆盖：先把受管路径的外部改动采纳成提交，随后的回档就不会再撞上“被外部改动”。
             self.workspace
-                .work_sync_tracked(&work, crate::capabilities::conductor::service::now_ts())?;
+                .work_sync_tracked(&work, crate::kernel::api::now_ts())?;
         }
         let (mut active, children) = match target {
             RewindTarget::Archive(line) => {

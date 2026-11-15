@@ -15,7 +15,8 @@ use crate::capabilities::session::api::{
 use crate::capabilities::turn::api::{HandlerSource, Session};
 use crate::kernel::ports::HostProbe;
 
-use crate::capabilities::turn::service::session::{Turn, now_ts};
+use crate::capabilities::turn::service::session::Turn;
+use crate::kernel::api::now_ts;
 
 /// 目的：一笔交回的**落点**：叫醒谁、替谁落盘。
 /// 约束：`turn` 不落盘——要写进代理父会话的那条通知行原样交回，由调用方在同一处落。

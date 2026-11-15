@@ -7,10 +7,11 @@
 use crate::capabilities::proxy::api as d;
 use crate::capabilities::proxy::api::ProxyHost;
 
-use super::{Conductor, Session, now_ts, validate_work_name};
+use super::{Conductor, Session, validate_work_name};
 use crate::capabilities::conductor::api::ConductorHandle;
 use crate::capabilities::session::api::{Delegation, RunState, SessionEvent, SessionMeta};
 use crate::kernel::api::ExecSpec;
+use crate::kernel::api::now_ts;
 
 fn tool_mode_str(m: crate::capabilities::llm::api::ToolMode) -> String {
     match m {

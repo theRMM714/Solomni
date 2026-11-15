@@ -15,12 +15,12 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/capabilities/turn.rs` | 能力入口与公开面 |
-| `src/capabilities/turn/api.rs` | 入站契约：`Turn` / `TurnState` / `Session`、装配构件（`MemberSpec` / `SingleSpec` / `ToolHandlers` / `member_tools` / `single_session`）、树序与身份、装配要的事实、执行计划、代理会话私有目录名、转录回放与三条纯规则的重导出 |
+| `src/capabilities/turn/api.rs` | 入站契约：`Turn` / `TurnState` / `Session`、装配构件（`MemberSpec` / `SingleSpec` / `HandlerSource` / `member_tools` / `single_session`）、树序与身份、装配要的事实、执行计划、代理会话私有目录名、转录回放与三条纯规则的重导出 |
 | `src/capabilities/turn/domain.rs` | domain 分区入口：纯规则模块 |
 | `src/capabilities/turn/domain/assemble.rs` | 纯装配规则：工具面按权限裁剪（`face_tools`）、已就绪服务操作归并（`service_ops_of`）、操作写进模块工具表并给出提示词行（`serviced_tools`）；无端口、无 IO |
 | `src/capabilities/turn/domain/session.rs` | 纯会话规则：多个 agent 的模块保序去重（`flat_modules`）、流水里是否已有内容（`session_started`）；无端口、无 IO |
 | `src/capabilities/turn/service.rs` | 服务层入口：会话本体、取放协议、树序、事实、计划、重建、代理装配与装配构件九个模块 |
-| `src/capabilities/turn/service/session.rs` | 会话本体 `Turn`：字段（五张表 + 各能力面 + 产品根 + 基础工具链根）、构造与后置注入、`session_deps` / `compact_factory`、`running_refusal` 文案、`now_ts`，以及 `TurnState` 的同名访问器转发 |
+| `src/capabilities/turn/service/session.rs` | 会话本体 `Turn`：字段（五张表 + 各能力面 + 产品根 + 基础工具链根）、构造与后置注入、`session_deps` / `compact_factory`、`running_refusal` 文案，以及 `TurnState` 的同名访问器转发 |
 | `src/capabilities/turn/service/state.rs` | 状态容器：五张内存表与全部访问器；`Session` 枚举本体 |
 | `src/capabilities/turn/service/protocol.rs` | 取放协议与会话派生：`take_single` / `take_collab` / `take_collab_raw` / `put_single` / `put_single_recorded` / `put_collab` / `abort_running`、裁决队作废（`void_gates_of` / `void_gates_in_subtree`）、节点提示（`node_note` / `mark_node_done`）、`spawn_agent_session` / `spawn_sub_session`、给代理父会话的提醒（`notify_proxy_of_child`，只返回事件不落盘） |
 | `src/capabilities/turn/service/assemble.rs` | 一席装配构件与会话启用：`MemberSpec` / `SingleSpec`、`member_tools`（工具面 + 围栏 + 处理器）、`single_session`（单 agent 会话对象）、`ensure_session`（不在表里按转录重建再装回） |

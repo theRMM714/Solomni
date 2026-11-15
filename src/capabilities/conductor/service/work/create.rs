@@ -5,6 +5,7 @@
 //!   本方法族只碰 history / registry / workspace / vm 这四个字段。
 
 use super::*;
+use crate::kernel::api::now_ts;
 use std::collections::BTreeMap;
 
 /// 目的：这次创建要不要在宿主上付一次性的机器级只读授权。

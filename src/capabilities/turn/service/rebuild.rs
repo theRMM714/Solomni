@@ -14,7 +14,8 @@ use crate::capabilities::session::api::{SessionMeta, SessionParams};
 use crate::capabilities::turn::api::{HandlerSource, MemberSpec, Session, member_tools};
 use crate::kernel::ports::HostProbe;
 
-use crate::capabilities::turn::service::session::{Turn, now_ts};
+use crate::capabilities::turn::service::session::Turn;
+use crate::kernel::api::now_ts;
 
 impl Turn {
     /// 目的：按会话元信息 + 转录事件重建会话对象（通道是机制，按记录的选择重新装配）。

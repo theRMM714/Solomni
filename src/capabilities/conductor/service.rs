@@ -484,12 +484,6 @@ fn mode_str(mode: WorkMode) -> &'static str {
     }
 }
 
-/// 当前时间戳（秒）。
-/// 约束：实现只有一份，在 `kernel::domain::clock`；这里只保留本能力内的短名。
-fn now_ts() -> i64 {
-    crate::kernel::api::now_ts()
-}
-
 /// 工作名即将来的落盘目录名：非空、不含路径分隔符与 Windows 非法字符、不是保留名。
 fn validate_work_name(name: &str) -> Result<(), String> {
     let n = name.trim();

@@ -1,6 +1,6 @@
 //! 目的：会话本体的**形状**——`Turn` 持五张内存表 + 一席装配要的能力面，是"会话在世"这件事的唯一持有者。
 //! 管：`Turn` 的字段与构造（`new`）、对五张表的同名转发访问器、`session_deps` / `compact_factory` 两个装配注入、
-//!   `running_refusal`（生成中拒绝的统一文案）与本文件的 `now_ts`。
+//!   `running_refusal`（生成中拒绝的统一文案）。
 //! 不管：会话怎么装配与重建（`assemble.rs` / `rebuild.rs`）、取事实（`facts.rs` / `plan.rs` / `tree.rs`）、
 //!   落盘与生成驱动（仍在 `conductor`）。
 //! 联动：`conductor` 持一整个 `Turn` 并直连它的方法；单元地图见 docs/turn/unit-map.md。
@@ -225,11 +225,4 @@ impl Turn {
     pub fn shell_view(&self, sid: &str) -> Option<ShellLive> {
         self.state.shell_view(sid)
     }
-}
-
-/// 目的：取当前时间戳（秒），供会话元数据与工作区导入打点用。
-/// 返回：Unix 纪元起的秒数；取不到时回退 0。
-/// 约束：实现只有一份，在 `kernel::domain::clock`；这里只保留本能力内的短名。
-pub(crate) fn now_ts() -> i64 {
-    crate::kernel::api::now_ts()
 }

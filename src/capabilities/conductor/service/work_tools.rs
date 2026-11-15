@@ -4,13 +4,13 @@
 //! 联动：在会话工作线程上执行；成员循环只认"谁认领这个名字"；版本库写入由 workspace 的
 //!   service 串行化（它持版本库端口）。
 
-use super::now_ts;
 use crate::capabilities::conductor::domain::work as dw;
 use crate::capabilities::permission::api::{Decision, PermissionSet, Reach};
 use crate::capabilities::workspace::api::{
     CommitRequest, ResolveRequest, ResolveTake, Sandbox, Workspace,
 };
 use crate::kernel::api::ToolOutcome;
+use crate::kernel::api::now_ts;
 use crate::kernel::ports::ToolHandler;
 use std::sync::Arc;
 

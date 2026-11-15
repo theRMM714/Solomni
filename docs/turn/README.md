@@ -23,7 +23,7 @@
 ## 入站契约与状态归属
 
 - 入站面：`api::Turn`（会话本体：五张表的访问器 + 取放协议 + 装配与重建 + 树序与事实）、`api::TurnState` / `api::Session`（状态容器与两种会话变体）；别的业务与测试只经 `api` 取用（R1）。
-- 装配入站面：`api::MemberSpec` / `api::SingleSpec`（一次装配的全部事实）、`api::member_tools` / `api::single_session`（两条装配入口）、`api::ToolHandlers` / `api::HandlerSource`（处理器注入的返回集合与闭包类型），以及三条纯规则 `api::face_tools` / `api::service_ops_of` / `api::serviced_tools`。
+- 装配入站面：`api::MemberSpec` / `api::SingleSpec`（一次装配的全部事实）、`api::member_tools` / `api::single_session`（两条装配入口）、`api::HandlerSource`（处理器注入的闭包类型），以及三条纯规则 `api::face_tools` / `api::service_ops_of` / `api::serviced_tools`。
 - 树与事实入站面：`api::flat_modules` / `api::session_started`（纯规则）、`api::PROXY_PRIVATE_DIR`（代理会话的私有目录名）、`api::replay_dialogue`（转录回放，测试与重建同一份实现）。
 - 装配件的状态归属：产物归调用方——`member_tools` 返回的 `MemberTools` 与会话对象都不进五张表；本单元只在装 `MemberTools` 时向调用方的 shell 槽取一次 `Arc<ShellSlot>`。
 - 状态归属：**持全部运行期内存态**——五张表都在 `TurnState` 里，由 `Turn` 独占持有；不落盘，`shell_slots` 的 `Mutex` 只在取 / 写那一刻持有。

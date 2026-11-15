@@ -7,6 +7,7 @@
 use super::*;
 
 use crate::capabilities::turn::api::session_started;
+use crate::kernel::api::now_ts;
 
 impl Conductor {
     /// 目的：配置视图：把「能改什么、现在是什么、缺什么」如实给出（每次读取都重扫模块清单与包库）。
