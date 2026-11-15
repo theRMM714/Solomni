@@ -25,15 +25,8 @@ impl Conductor {
         } else {
             self.history.meta(&root)?
         };
-        // proxy：父会话没有 guest；整棵代理树的子工作共用顶层那一台（租约 = 代理根名）。
-        if top.mode == "proxy" {
-            if meta.parent.is_none() {
-                return Ok(None);
-            }
-            return Ok(Some((top.name.clone(), top)));
-        }
-        // 单 agent / 协作：整棵树共用顶层工作那台 guest。
-        Ok(Some((top.name.clone(), top)))
+        // proxy 父会话没有 guest；其余（单 agent / 协作 / 代理子工作）共用顶层那台的租约。
+        Ok(crate::capabilities::env::api::guest_lease(meta, &top).map(|lease| (lease, top)))
     }
 
     /// 目的：这台会话的工具执行要用的 guest 租约（空 = 本机档 / 没有 guest）。
@@ -139,45 +132,21 @@ impl Conductor {
         let roots = self.workspace.roots(&work, &names)?;
         // 虚拟机档给 guest↔宿主翻译器：system 工具跑在宿主侧，但收模型给的 guest 写法；
         // **同一份**也交给 @ 改写（挂载点、命令装配与用户引用用同一座桥，三处不会各给一种写法）。
-        let path_codec = self.path_codec_of(&meta.exec);
+        let codec = self.path_codec_of(&meta.exec);
         // 外部工作区的授权粒度：只影响围栏派生（共享区是否要每会话重授），不改权限面。
-        let shared_grant = self.workspace_grant(meta)?;
-        let mut list: Vec<crate::capabilities::workspace::api::Sandbox> = Vec::new();
-        for a in &meta.agents {
-            let private = roots
-                .agents
-                .get(&a.name)
-                .cloned()
-                .ok_or_else(|| format!("工作区没有给出 agent {} 的沙箱路径", a.name))?;
-            let mut modules = BTreeMap::new();
-            let mut modules_with_userdata = std::collections::BTreeSet::new();
-            for id in &a.modules {
-                if let Some(m) = roster.modules.iter().find(|m| &m.manifest.id == id) {
-                    modules.insert(id.clone(), m.root.clone());
-                    if m.has_userdata {
-                        modules_with_userdata.insert(id.clone());
-                    }
-                }
-            }
-            list.push(crate::capabilities::workspace::api::Sandbox {
-                work_name: work.clone(),
-                session: meta.name.clone(),
-                agent: a.name.clone(),
-                shared: roots.shared.clone(),
-                private,
-                modules,
-                modules_with_userdata,
-                permissions: self.permission_for_agent(meta, &a.name)?,
-                path_codec: path_codec.clone(),
-                shared_grant,
-            });
-        }
-        Ok(crate::capabilities::workspace::api::Sandboxes {
-            shared: roots.shared,
-            session_root: roots.session_root,
-            list,
-            codec: path_codec,
-        })
+        let grant = self.workspace_grant(meta)?;
+        crate::capabilities::env::api::sandboxes(
+            &crate::capabilities::env::api::SandboxesFacts {
+                work: &work,
+                session: &meta.name,
+                agents: &meta.agents,
+                roots: &roots,
+                roster,
+                codec,
+                grant,
+            },
+            &|agent| self.permission_for_agent(meta, agent),
+        )
     }
 
     /// 目的：一条会话的权限链——根在前，自己最后（沿 parent 走到顶）。
@@ -199,24 +168,7 @@ impl Conductor {
         meta: &SessionMeta,
     ) -> Result<crate::capabilities::permission::api::PermissionSet, String> {
         let chain = self.permission_chain(meta)?;
-        let root = chain.first().ok_or_else(|| "会话权限链为空".to_string())?;
-        let mut out = self.registry.app().sandbox.defaults.to_permission_set();
-        if let Some(layer) = root.sandbox.root_layer()? {
-            out = out.apply_root(layer)?;
-        }
-        for child in chain.iter().skip(1) {
-            if let Some(layer) = child.sandbox.child_layer()? {
-                out = out.apply_narrowing(layer)?;
-            }
-        }
-        let out = out.with_hard_deny(&self.registry.app().sandbox.policy.deny);
-        // 外部工作区授权为 none：共享区读、写都收紧为 none，内置读工具与 shell 拿到的是同一份事实。
-        if Self::workspace_grant_in(&chain)
-            == crate::capabilities::session::api::WorkspaceGrant::None
-        {
-            return Ok(out.without_shared());
-        }
-        Ok(out)
+        crate::capabilities::env::api::permissions(&chain, self.registry.app())
     }
 
     /// 目的：这条会话生效的外部工作区授权粒度：沿权限链找最近一份绑定（创建时只写在根），
@@ -226,18 +178,7 @@ impl Conductor {
         meta: &SessionMeta,
     ) -> Result<crate::capabilities::session::api::WorkspaceGrant, String> {
         let chain = self.permission_chain(meta)?;
-        Ok(Self::workspace_grant_in(&chain))
-    }
-
-    /// 授权粒度的取法只有这一处：链上最近一份绑定说了算。
-    fn workspace_grant_in(
-        chain: &[SessionMeta],
-    ) -> crate::capabilities::session::api::WorkspaceGrant {
-        chain
-            .iter()
-            .rev()
-            .find_map(|m| m.workspace.as_ref().map(|b| b.grant))
-            .unwrap_or(crate::capabilities::session::api::WorkspaceGrant::Session)
+        Ok(crate::capabilities::env::api::workspace_grant(&chain))
     }
 
     /// 目的：某个 agent 的生效权限：协作主会话里的发言席优先取它自己的子会话 narrowing。
@@ -344,6 +285,26 @@ impl Conductor {
             notes.module_tools =
                 format!("{}\n{}", notes.module_tools, module_tool_lines.join("\n"));
         }
+        // 各模块隐私字段的注入项：装配期按模块解析一次，起工具进程时只走环境（解析失败 = 该模块没有可用值）。
+        let module_vars: BTreeMap<String, Vec<(String, String)>> = modules
+            .iter()
+            .map(|m| {
+                (
+                    m.manifest.id.clone(),
+                    self.secrets.resolve(&m.manifest.id).unwrap_or_default(),
+                )
+            })
+            .collect();
+        let member =
+            crate::capabilities::env::api::member(&crate::capabilities::env::api::MemberFacts {
+                sandbox: sb,
+                host_read_roots: &self.host_read_roots(),
+                net,
+                tier,
+                base_roots: &self.base_roots,
+                plan: host_plan,
+                module_vars: &module_vars,
+            });
         crate::capabilities::session::api::MemberTools {
             mode,
             modules: table,
@@ -364,39 +325,13 @@ impl Conductor {
             unavailable,
             // 围栏：可达范围 + 断网 + 环境白名单的落点，全部由该 agent 的沙箱派生（机制在 adapters）；
             // 只读根来自用户显式授权（`sandbox.policy.host_read_roots`）与本机运行包的包根。
-            fence: {
-                let mut fence =
-                    crate::kernel::api::FenceSpec::for_session(sb, &self.host_read_roots(), net);
-                fence.ro_tree.extend(host_plan.roots.iter().cloned());
-                fence.ro_tree.sort();
-                fence.ro_tree.dedup();
-                fence
-            },
-            // 各模块隐私字段的注入项：装配期按模块解析一次，起工具进程时只走环境（解析失败 = 该模块没有可用值）。
-            module_env: modules
-                .iter()
-                .map(|m| {
-                    (
-                        m.manifest.id.clone(),
-                        self.secrets.resolve(&m.manifest.id).unwrap_or_default(),
-                    )
-                })
-                .collect(),
-            runtime_path: host_plan.path.clone(),
+            fence: member.fence,
+            module_env: member.module_env,
+            runtime_path: member.runtime_path,
             shell_live: Some(self.shell_slot(&sb.session)),
             workspace: Some(Arc::clone(&self.workspace)),
-            runtime_roots: {
-                // 基础工具链根只在宿主档放行：VM 的工具链由 guest 的只读挂载提供，宿主路径在 guest 里不存在。
-                let mut roots = if tier == crate::kernel::api::Tier::Host {
-                    self.base_roots.clone()
-                } else {
-                    Vec::new()
-                };
-                roots.extend(host_plan.roots.iter().cloned());
-                roots.sort();
-                roots.dedup();
-                roots
-            },
+            // 基础工具链根只在宿主档放行：VM 的工具链由 guest 的只读挂载提供，宿主路径在 guest 里不存在。
+            runtime_roots: member.runtime_roots,
             // 从零开始；按落盘转录重建时由调用方按转录里的最大值续号（见 rebuild_session）。
             reply_seq: 0,
             line: Default::default(),
