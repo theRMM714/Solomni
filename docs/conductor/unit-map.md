@@ -39,7 +39,7 @@
 | `src/capabilities/conductor/service/compact.rs` | 压缩通道工厂：全局设置指向的压缩模型解析与更新 |
 | `src/capabilities/conductor/service/flow.rs` | 协作流水线推进与协作动作：链推进、节点派发与子会话、协作步（`take_*` / `put_*`）、裁决卡动作与改需求 |
 | `src/capabilities/conductor/service/rewind.rs` | 跨会话回档编排：按同一回合 id 收窗整棵子树 |
-| `src/capabilities/conductor/service/env.rs` | 装配材料：成员通道、沙箱清单、工具环境、单 agent 会话构造（纯派生，不落盘） |
+| `src/capabilities/conductor/service/env.rs` | 装配材料：取事实后转调 `env` 派生沙箱清单 / 权限面 / 围栏 / 进程环境与租约；成员通道、工具面与单 agent 会话构造（纯派生，不落盘） |
 | `src/capabilities/conductor/service/history.rs` | 历史列出 / 打开 / 删除、事件收编与增量落盘手柄；会话加载时按 meta 的档位复检外部工作区绑定 |
 | `src/capabilities/conductor/service/guest_job.rs` | 起停 guest 的两段式：核心准备参数（`GuestBoot` / `GuestStop`），调用方线程执行 |
 | `src/capabilities/conductor/service/ask_user.rs` | 工具层提问端口的会话侧实现：推一条问题并阻塞等一个选项 id |

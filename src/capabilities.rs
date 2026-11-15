@@ -6,6 +6,7 @@
 pub mod builds;
 pub mod collab;
 pub mod conductor;
+pub mod env;
 pub mod llm;
 pub mod modules;
 pub mod packages;
