@@ -3,6 +3,7 @@
 //! 不管：纯规则本身（在 domain）；落盘与求交的调用方（registry / session / conductor）。
 //! 联动：workspace、tools、conductor 都经这里消费权限。
 
+pub use crate::capabilities::permission::domain::action::authorize_action;
 #[allow(unused_imports)] // 入站面：其它能力与测试都经这里取类型
 pub use crate::capabilities::permission::domain::permission::{
     CallScope, Decision, DecisionEdit, Decisions, Effect, PermissionDefaults, PermissionLayer,

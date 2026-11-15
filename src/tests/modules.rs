@@ -272,3 +272,64 @@ pub(crate) fn ops_exposes_enablement_reads() {
             .expect("读服务启用")
     );
 }
+
+/// 目的：模块 id 与服务名含 `.` 时按清单逐段匹配，未命中给固定文案。
+#[test]
+pub(crate) fn module_action_ids_resolve_by_longest_declared_prefix() {
+    use crate::capabilities::modules::api::{
+        Roster, ServiceDecl, ToolDecl, module_tool, service_op,
+    };
+    let mut m = module_of("a.b");
+    m.manifest.tools.insert(
+        "read.txt".to_string(),
+        ToolDecl {
+            command: "python tools/read.py".to_string(),
+            desc: String::new(),
+            params: None,
+            parallel: false,
+        },
+    );
+    m.manifest.services.insert(
+        "svc.one".to_string(),
+        ServiceDecl {
+            adapter: "stdio".to_string(),
+            command: "python svc.py".to_string(),
+            desc: String::new(),
+            enabled: true,
+            options: Default::default(),
+        },
+    );
+    let roster = Roster {
+        modules: vec![m],
+        rejected: Vec::new(),
+    };
+    let (hit, tool, decl) =
+        module_tool(&roster, "module.a.b.read.txt").expect("模块 id 含 . 也能命中");
+    assert_eq!(hit.manifest.id, "a.b");
+    assert_eq!(tool, "read.txt");
+    assert_eq!(decl.command, "python tools/read.py");
+    assert_eq!(
+        service_op(&roster, "module.a.b.svc.one.restart"),
+        Some((
+            "a.b".to_string(),
+            "svc.one".to_string(),
+            "restart".to_string()
+        )),
+        "服务名含 . 时逐段匹配"
+    );
+    assert_eq!(
+        service_op(&roster, "module.a.b.svc.one"),
+        None,
+        "操作名不能为空"
+    );
+    assert_eq!(
+        service_op(&roster, "module.a.b.read.txt"),
+        None,
+        "静态工具不是常驻服务的操作"
+    );
+    let err = module_tool(&roster, "module.a.b.nope").unwrap_err();
+    assert_eq!(
+        err,
+        "清单里没有这个模块工具：module.a.b.nope（动作 id 形如 module.<模块id>.<工具名>）"
+    );
+}

@@ -3,13 +3,16 @@
 //! 不管：四份 yaml 的内存形态与写路径（在 domain 与 service.rs）；持久化机制（在 ports / detail）。
 //! 联动：conductor 只持 Box<dyn Registry>；实现见 service.rs；消费方是 conductor 与呈现层。
 
+pub use crate::capabilities::registry::domain::action::{apply_settings, model_draft, probe_view};
 pub use crate::capabilities::registry::domain::agents::{
     AgentView, Agents, RosterPick, check_reserved, listing, model_listing, resolve_picks,
     unique_instance_name, validate_name,
 };
+#[allow(unused_imports)] // 入站面：测试经这里取思考强度类型
+pub use crate::capabilities::registry::domain::providers::ThinkingSpec;
 pub use crate::capabilities::registry::domain::providers::{
     AppSettings, ModelDraft, ModelEntry, ModelView, Provider, ProviderView, SandboxEnforceLevel,
-    SandboxUnavailable, Settings, StorageSettings, ThinkingSpec,
+    SandboxUnavailable, Settings, StorageSettings,
 };
 
 use crate::capabilities::llm::api::{Channel, ProbeOutcome, ReplayReport, ToolMode};

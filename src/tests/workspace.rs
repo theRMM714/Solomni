@@ -11,4 +11,5 @@ mod resolve;
 mod sandbox;
 mod support;
 mod tier;
+mod upload;
 mod work;

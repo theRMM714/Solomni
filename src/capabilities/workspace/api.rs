@@ -13,6 +13,7 @@ pub use crate::capabilities::workspace::domain::asset::{
 pub use crate::capabilities::workspace::domain::base::CommitRefusal;
 pub use crate::capabilities::workspace::domain::hash::content_hash;
 pub use crate::capabilities::workspace::domain::readfact::ReadFact;
+pub use crate::capabilities::workspace::domain::upload::base64_decode;
 pub use crate::capabilities::workspace::domain::workspace::{
     AreaUsage, Place, Sandbox, Sandboxes, WorkFiles, WorkRoots, WorkUsage, WorkspaceGrant,
     safe_file_name,

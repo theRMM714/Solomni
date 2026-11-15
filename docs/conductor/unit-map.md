@@ -1,7 +1,7 @@
 # 单元地图 · conductor
 
 > 定位：conductor（协调业务）逐文件职责的唯一权威；由 T0 结构审查与磁盘双向比对。
-> 效力：契约｜核对：2026-11-09｜依据：`src/capabilities/conductor/api.rs`
+> 效力：契约｜核对：2026-11-15｜依据：`src/capabilities/conductor/api.rs`
 
 > 本文是 **conductor** 逐文件职责的唯一权威；由 `node run-tests.js` 的 T0 结构审查与磁盘**双向比对**
 > （表里每个路径必须存在；`src/` 下每个 `.rs` 都必须出现在某一张单元地图里）。
@@ -14,7 +14,10 @@
 | --- | --- |
 | `src/capabilities/conductor.rs` | 能力入口与公开面 |
 | `src/capabilities/conductor/api.rs` | 入站契约：`WorkOps` / `TurnOps` / `LifecycleOps` / `ActionOps` / `LogOps`、`Ops` 组装面与事件台（`EventBus`） |
-| `src/capabilities/conductor/api/action.rs` | 动作分发：参数校验 → 按 `callers` 授权 → 执行 → 审计（各只有一处） |
+| `src/capabilities/conductor/api/action.rs` | 动作分发入口：`ActionOps` 的 `catalog` / `act`、按 `callers` 授权、`execute_action` 按动作归属三分派与审计；执行体在 `api/action/` 三份 |
+| `src/capabilities/conductor/api/action/session.rs` | 会话 / 工作动作的执行面：建会话、发消息、裁决、回档、改配置、上传与模块启停（参数搬运 + 入队） |
+| `src/capabilities/conductor/api/action/module.rs` | 模块工具与常驻服务操作的执行面：`execute_module_action` 分派、取清单、授权、围栏执行与回包 |
+| `src/capabilities/conductor/api/action/registry.rs` | 登记处动作适配：调 registry 的纯解析（`apply_settings` / `model_draft` / `probe_view`）后入队 |
 | `src/capabilities/conductor/api/handle.rs` | 核心手柄：自持线程 + 命令队列 + 事件台，线程边界上的短命令（补编、回档收尾、guest 启动、启用会话）；`stop` 不进队列 |
 | `src/capabilities/conductor/api/generation.rs` | 生成的点火器：节点执行、继续、代理回合、协作推进、裁决处置各起一条脱离调用方的线程 |
 | `src/capabilities/conductor/api/generation/single.rs` | 单 agent 与节点的生成循环：核心只占「取 / 交」两步，生成在工作线程上跑，逐轮外送并落盘 |
@@ -44,7 +47,6 @@
 | `src/capabilities/conductor/service/guest_job.rs` | 起停 guest 的两段式：核心准备参数（`GuestBoot` / `GuestStop`），调用方线程执行 |
 | `src/capabilities/conductor/service/ask_user.rs` | 工具层提问端口的会话侧实现：推一条问题并阻塞等一个选项 id |
 | `src/capabilities/conductor/ports.rs` | 出站端口：核心代理工具要做的外部动作（`ProxyHost`） |
-| `src/capabilities/conductor/domain/action.rs` | 动作回包的纯逻辑：探测结论 → 响应 JSON |
 | `src/capabilities/conductor/domain/proxy.rs` | 核心代理工具的纯逻辑：入参解析、授权校验、载荷规整与回执拼装 |
 | `src/capabilities/conductor/service/proxy.rs` | 代理工具执行面与队列桥 `ProxyBridge`（把动作交给核心线程） |
 | `src/capabilities/conductor/service/work_tools.rs` | 共享区六个核心自有工具（`work_pull` / `work_commit` / `work_status` / `work_versions` / `work_resolve` / `work_lost`）的成员侧执行者 |

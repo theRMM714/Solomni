@@ -1521,3 +1521,29 @@ fn validation_presentation_and_serialization_edges_are_explicit() {
         "父只给 a，子要整棵必须拒绝"
     );
 }
+
+/// 目的：授权判据只认动作声明里的身份；拒绝时点明动作与身份。
+#[test]
+pub(crate) fn authorize_action_accepts_declared_callers_and_rejects_others() {
+    use crate::capabilities::permission::api::authorize_action;
+    let callers = vec!["user".to_string(), "role:lead".to_string()];
+    assert_eq!(
+        authorize_action(&callers, "user", "create_session"),
+        Ok(()),
+        "声明里的身份放行"
+    );
+    assert_eq!(
+        authorize_action(&callers, "role:lead", "create_session"),
+        Ok(()),
+        "第二个身份同样放行"
+    );
+    let err = authorize_action(&callers, "role:other", "create_session").unwrap_err();
+    assert_eq!(
+        err,
+        "动作 create_session 不接受这个调用者：role:other（越出授权范围）"
+    );
+    assert!(
+        authorize_action(&[] as &[String], "user", "x").is_err(),
+        "空清单 = 谁都不放行"
+    );
+}

@@ -656,3 +656,152 @@ pub(crate) fn thinking_registration_rejects_unknown_levels_defaults_and_reserved
     let err = core.registry_mut().set_app_settings(app).unwrap_err();
     assert!(err.contains("仍被模型 m 使用"), "删档要拒：{}", err);
 }
+
+/// 目的：设置的部分更新——未提交字段保留现值，sandbox 整段替换。
+#[test]
+pub(crate) fn apply_settings_keeps_unsubmitted_fields_and_replaces_whole_sections() {
+    use crate::capabilities::registry::api::{AppSettings, apply_settings};
+    let current: AppSettings = serde_json::from_value(serde_json::json!({
+        "streaming": true,
+        "show_reasoning": true,
+        "compact_model": "keep-me",
+        "max_guests": 3,
+        "sandbox": {"policy": {"network": true, "deny": ["secret"]}},
+    }))
+    .expect("设置能解析");
+    let merged = apply_settings(
+        &current,
+        &serde_json::json!({
+            "show_reasoning": false,
+            "max_guests": 5,
+            "sandbox": {"policy": {"network": false}},
+        }),
+    )
+    .expect("部分更新成立");
+    assert!(!merged.show_reasoning, "提交了的开关按新值");
+    assert_eq!(merged.max_guests, 5, "提交了的数字按新值");
+    assert!(merged.streaming, "未提交的开关保留现值");
+    assert_eq!(merged.compact_model, "keep-me", "未提交的文本保留现值");
+    assert!(!merged.sandbox.policy.network, "sandbox 取提交的段");
+    assert!(
+        merged.sandbox.policy.deny.is_empty(),
+        "sandbox 整段替换：未提交的段内字段回默认"
+    );
+}
+
+/// 目的：三段结构只要非法就整份拒绝，并点名是哪一段。
+#[test]
+pub(crate) fn apply_settings_rejects_malformed_sections_by_name() {
+    use crate::capabilities::registry::api::{AppSettings, apply_settings};
+    let current: AppSettings = serde_json::from_value(serde_json::json!({})).expect("设置能解析");
+    let err = apply_settings(
+        &current,
+        &serde_json::json!({"sandbox": {"policy": {"nope": 1}}}),
+    )
+    .unwrap_err();
+    assert!(err.starts_with("settings.sandbox 配置非法："), "{}", err);
+    let err = apply_settings(
+        &current,
+        &serde_json::json!({"thinking": {"levels": "bad"}}),
+    )
+    .unwrap_err();
+    assert!(err.starts_with("settings.thinking 配置非法："), "{}", err);
+    let err = apply_settings(
+        &current,
+        &serde_json::json!({"storage": {"cache_cap_gib": "big"}}),
+    )
+    .unwrap_err();
+    assert!(err.starts_with("settings.storage 配置非法："), "{}", err);
+}
+
+/// 目的：编辑模型时省略的 thinking / tools 从原模型继承，新建时回默认。
+#[test]
+pub(crate) fn model_draft_inherits_thinking_and_tools_only_when_omitted() {
+    use crate::capabilities::llm::api::ToolMode;
+    use crate::capabilities::registry::api::{ModelView, ThinkingSpec, model_draft as draft_of};
+    use crate::capabilities::registry::domain::providers::ModelThinkingView;
+    let prev = ModelView {
+        id: "m".to_string(),
+        name: "M".to_string(),
+        api_model: "m".to_string(),
+        provider: "p".to_string(),
+        note: String::new(),
+        tools: ToolMode::Envelope,
+        context: 32_000,
+        thinking: ModelThinkingView {
+            default: Some("high".to_string()),
+            levels: BTreeMap::from([(
+                "high".to_string(),
+                serde_json::json!({"reasoning_effort": "high"}),
+            )]),
+        },
+        is_core: false,
+    };
+    let args = serde_json::json!({"id": "m", "name": "M2", "api_model": "m", "provider": "p"});
+    let draft = draft_of(&args, Some(&prev)).expect("省略可选段成立");
+    assert_eq!(draft.tools, ToolMode::Envelope, "工具形态从原模型继承");
+    assert_eq!(
+        draft.thinking,
+        ThinkingSpec {
+            default: Some("high".to_string()),
+            levels: BTreeMap::from([(
+                "high".to_string(),
+                serde_json::json!({"reasoning_effort": "high"}),
+            )]),
+        },
+        "思考强度从原模型继承"
+    );
+    let fresh = draft_of(&args, None).expect("新建成立");
+    assert_eq!(fresh.tools, ToolMode::Native, "新建缺省走原生");
+    assert!(fresh.thinking.is_empty(), "新建没有思考强度");
+}
+
+/// 目的：思考强度与工具形态的非法值按固定文案拒绝。
+#[test]
+pub(crate) fn model_draft_rejects_bad_thinking_and_tools_verbatim() {
+    use crate::capabilities::registry::api::model_draft as draft_of;
+    let err = draft_of(&serde_json::json!({"thinking": {"unknown": 1}}), None).unwrap_err();
+    assert!(err.starts_with("思考强度非法："), "{}", err);
+    let err = draft_of(&serde_json::json!({"tools": "xml"}), None).unwrap_err();
+    assert!(
+        err.starts_with("工具调用方式只认 native / envelope："),
+        "{}",
+        err
+    );
+    assert!(
+        draft_of(&serde_json::json!({"tools": "envelope"}), None).is_ok(),
+        "envelope 是合法形态"
+    );
+}
+
+/// 目的：探测结论原样翻译成响应，三种取值都不解释。
+#[test]
+pub(crate) fn probe_view_reports_every_verdict_verbatim() {
+    use crate::capabilities::llm::api::{ProbeOutcome, ToolMode};
+    use crate::capabilities::registry::api::probe_view;
+    let supported = probe_view(
+        &ProbeOutcome::Supported {
+            detail: "返回了工具调用".to_string(),
+        },
+        Some(ToolMode::Native),
+    );
+    assert_eq!(supported["ok"], serde_json::json!(true));
+    assert_eq!(supported["outcome"], serde_json::json!("supported"));
+    assert_eq!(supported["detail"], serde_json::json!("返回了工具调用"));
+    assert_eq!(supported["mode"], serde_json::json!("native"));
+    let unsupported = probe_view(
+        &ProbeOutcome::Unsupported {
+            detail: "拒了".to_string(),
+        },
+        None,
+    );
+    assert_eq!(unsupported["outcome"], serde_json::json!("unsupported"));
+    assert_eq!(unsupported["mode"], serde_json::json!(null));
+    let unknown = probe_view(
+        &ProbeOutcome::Unknown {
+            detail: "没调".to_string(),
+        },
+        None,
+    );
+    assert_eq!(unknown["outcome"], serde_json::json!("unknown"));
+}
