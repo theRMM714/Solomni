@@ -236,7 +236,7 @@ impl Conductor {
         let names: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
         let files = self.workspace.files(sid, &names)?;
         let usage = self.workspace.usage(sid, &names)?;
-        let roster = self.scan();
+        let roster = self.modules.roster();
         let sandboxes = self.sandboxes(&meta, &roster)?;
         let mut agents: Vec<FilesAgentView> = Vec::new();
         let mut agent_roots: Vec<FilesAgentRootView> = Vec::new();

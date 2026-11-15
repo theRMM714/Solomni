@@ -1,5 +1,5 @@
 //! 目的：会话能力的入站面——其它能力与呈现层只准用这里（不许碰 `domain` / `ports`）。
-//! 管：重导出会话事实（元信息与视图、回档算术、工具面、裁决队列、事件词汇）与核心操作回路；定义 `History` / `HistoryOps` 两个面。
+//! 管：重导出会话事实（元信息与视图、回档算术、工具面、裁决队列、事件词汇、落盘策略）与核心操作回路；定义 `History` / `HistoryOps` 两个面。
 //! 不管：`domain` / `ports` 的内部实现；`HistoryOps` 的队列代理实现（在 `conductor`）。
 //! 联动：呈现层经 conductor 的队列代理调 `HistoryOps`；别的能力经 `History` 造会话、追流水、读元信息、删会话。
 
@@ -15,6 +15,10 @@ pub use crate::capabilities::session::domain::events::{
 };
 pub use crate::capabilities::session::domain::history::{
     AgentMeta, Delegation, HistoryView, RunState, SessionMeta, WorkspaceBinding,
+};
+#[allow(unused_imports)]
+pub use crate::capabilities::session::domain::persist::{
+    PersistPolicy, SYSTEM_SID_SUGGEST, is_system_session, persist_policy_for,
 };
 pub use crate::capabilities::session::domain::rewind::{
     align_keep, archive_label, cut_before_line, last_line_within, last_usage, max_reply,
@@ -33,7 +37,10 @@ pub use crate::capabilities::session::domain::tools::{
 pub use crate::capabilities::workspace::api::WorkspaceGrant;
 
 // 核心操作回路 + 原生回灌消息：`service.rs` 实现（它驱动 IO，不是纯派生）。
-pub use crate::capabilities::session::service::{core_operation, reply_msgs, tool_result_body};
+#[allow(unused_imports)]
+pub use crate::capabilities::session::service::{
+    Persister, core_operation, persist_events, record_events, reply_msgs, tool_result_body,
+};
 
 /// 目的：落盘会话的**队列面**：呈现层经 conductor 的队列代理调它（列表 / 打开 / 删除）。
 ///   "在世会话 × 历史的并集"（`SessionView`）**不在本面里**：那要同时认识会话中心与历史，

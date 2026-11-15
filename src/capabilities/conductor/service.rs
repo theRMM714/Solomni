@@ -28,7 +28,6 @@ use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::registry::api::Registry;
 use crate::capabilities::session::api::{AgentMeta, HistoryView, RunState, SessionMeta};
 use crate::capabilities::tools::api::{ToolExec, Tools};
-use crate::kernel::ports::Log;
 use compact::{CompactChoice, CompactRuntime};
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
@@ -91,7 +90,7 @@ pub(crate) enum Prepared {
         task: Option<String>,
         llm: crate::capabilities::llm::api::LlmOpts,
         /// 增量落盘手柄：逐轮外送的同时就落盘（中途刷新页面因此看得到已产生的部分）。
-        persister: Persister,
+        persister: crate::capabilities::session::api::Persister,
     },
     /// 不用跑模型：直接把这批事件回给调用方（例如"末条是 AI 发言"）。
     Immediate(Vec<SessionEvent>),
@@ -176,8 +175,6 @@ mod env;
 mod flow;
 pub(crate) mod guest_job;
 mod history;
-pub(crate) mod persist;
-pub(crate) use persist::{Persister, SYSTEM_SID_SUGGEST, persist_events};
 mod suggest;
 #[cfg(test)]
 pub(crate) use history::{ReleaseByLease, SessionDelete};
@@ -291,14 +288,6 @@ impl Conductor {
         self.turn.shell_view(sid)
     }
 
-    /// 目的：本机可选的虚拟根清单（会话配置与创建向导用）。
-    /// 约束：清单事实来自依赖补齐能力；补齐面没接入时如实返回空表（界面据此说"没有可选虚拟根"）。
-    pub(crate) fn guest_bases(
-        &self,
-    ) -> Result<Vec<crate::capabilities::provision::api::GuestBase>, String> {
-        self.provision.guest_bases()
-    }
-
     /// 目的：模块的**有效**启用（用户覆盖 ?? 作者默认）。
     pub fn module_enabled(&self, id: &str) -> bool {
         self.modules.module_enabled(id)
@@ -363,14 +352,9 @@ impl Conductor {
         Ok(out)
     }
 
-    /// 目的：目录保留名（`systools/names.yaml`）：agent 实例名不得占用（与工作区布局同源）。
-    pub(crate) fn reserved_names(&self) -> Vec<String> {
-        self.systools.reserved_names()
-    }
-
-    /// 目的：工具总表的声明书（代理执行者在队列桥那一侧校验参数/拼回执要用）。
-    pub(crate) fn systools_book(&self) -> crate::capabilities::tools::api::ToolBook {
-        self.systools.book()
+    /// 目的：工具总表面（手柄与核心共享同一份）：代理执行者在队列桥那一侧校验参数、拼回执要用。
+    pub(crate) fn systools_handle(&self) -> Arc<dyn crate::capabilities::tools::api::Tools> {
+        Arc::clone(&self.systools)
     }
 
     /// 生成期间"会话不在表里"的三种进入点共用这一句（错误文案要一致，别处不再各写一份）。

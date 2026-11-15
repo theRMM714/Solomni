@@ -432,12 +432,12 @@ impl Conductor {
 
     /// 目的：事件落盘；失败如实告知（追加一条警告事件），不静默丢历史。
     pub(crate) fn record_events(&self, sid: &str, events: &mut Vec<SessionEvent>) {
-        if events.is_empty() {
-            return;
-        }
-        if let Some(warn) = persist_events(self.history.as_ref(), self.log.as_ref(), sid, events) {
-            events.push(SessionEvent::Notice(warn));
-        }
+        crate::capabilities::session::api::record_events(
+            self.history.as_ref(),
+            self.log.as_ref(),
+            sid,
+            events,
+        );
     }
 
     /// 目的：把一条内容类系统提示记成**转录行**（有 id、可回档/折叠）；返回要外送的事件。
@@ -454,11 +454,11 @@ impl Conductor {
     }
 
     /// 目的：增量落盘手柄：交给工作线程，按"一次模型调用"的粒度落盘（见 `Persister`）。
-    pub(crate) fn persister(&self, sid: &str) -> Persister {
-        Persister {
-            history: Arc::clone(&self.history),
-            log: Arc::clone(&self.log),
-            sid: sid.to_string(),
-        }
+    pub(crate) fn persister(&self, sid: &str) -> crate::capabilities::session::api::Persister {
+        crate::capabilities::session::api::Persister::new(
+            Arc::clone(&self.history),
+            Arc::clone(&self.log),
+            sid,
+        )
     }
 }

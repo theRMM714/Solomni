@@ -479,11 +479,6 @@ impl Conductor {
     pub(crate) fn abort_running(&mut self, sid: &str) {
         self.turn.unmark_running(sid);
     }
-
-    /// 目的：清单即事实：每次调用重扫（策略在 conductor，机制在 ModuleSource）。
-    pub fn scan(&self) -> crate::capabilities::modules::api::Roster {
-        self.modules.roster()
-    }
 }
 
 impl Conductor {
@@ -596,7 +591,7 @@ impl Conductor {
             meta.agents = roster.clone();
             meta.modules = super::flat_modules(&roster);
             self.history.create(&meta)?;
-            let module_roster = self.scan();
+            let module_roster = self.modules.roster();
             let sandboxes = self.sandboxes(&meta, &module_roster)?;
             if let Some(Session::Collab(c)) = self.turn.session_mut(sid) {
                 c.set_sandboxes(sandboxes);

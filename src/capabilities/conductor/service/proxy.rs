@@ -340,7 +340,8 @@ impl Conductor {
             Vec::new()
         };
         let modules = if scope.covers_modules() {
-            self.scan()
+            self.modules
+                .roster()
                 .modules
                 .iter()
                 .map(|m| d::ModuleFact {

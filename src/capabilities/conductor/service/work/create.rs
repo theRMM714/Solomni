@@ -206,8 +206,8 @@ impl Conductor {
         if spec.mode == WorkMode::Single && spec.agents.len() > 1 {
             spec.agents = vec![merge_into_one(&spec.agents, &spec.name)];
         }
-        let roster = self.scan();
-        let reserved = self.reserved_names();
+        let roster = self.modules.roster();
+        let reserved = self.systools.reserved_names();
         // 校验 agent：名字合法、模块与模型真实存在；模块可跨 agent 共用（各自独立沙箱与工具面）
         for a in &spec.agents {
             crate::capabilities::registry::api::validate_name(&a.name)?;
@@ -469,7 +469,7 @@ impl Conductor {
             core_channel,
             discard,
         } = *pending;
-        let roster = self.scan();
+        let roster = self.modules.roster();
 
         let (session, mut events) = match mode {
             // 代理形态在函数开头就建好返回了：它没有 agent 名单，不走这条装配路。
@@ -602,7 +602,7 @@ impl Conductor {
         if scope_meta.agents.is_empty() && scope_meta.delegate {
             return Ok(None);
         }
-        let roster = self.scan();
+        let roster = self.modules.roster();
         // 共享 guest 的装配按整棵树算：proxy 根自己没有名单，子工作的 agent / 模块 / 包都要进来。
         let tree = self.tree_meta(&scope_meta, None)?;
         let plan = self.plan_for_meta_with(&tree, &roster)?;

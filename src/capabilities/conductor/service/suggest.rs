@@ -18,7 +18,7 @@ impl Conductor {
             return Err("登记处还没有任何模型，请先到「模型登记」添加".to_string());
         }
         let channel = self.registry.core_channel()?;
-        let roster = self.scan();
+        let roster = self.modules.roster();
         let mut chat = self.llm.core_channel(&channel);
         // 登记处事实：**自持一份快照**（拟名单只读；一次用户动作、代价可忽略，
         // 与协作会话自持一份同义——写面是 `Box<dyn Registry>`，不可能共享出去）。

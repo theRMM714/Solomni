@@ -135,7 +135,7 @@ pub(crate) fn agent_upsert_chara(
     note: &str,
     chara: &str,
 ) -> Result<(), String> {
-    let roster = core.scan();
+    let roster = core.modules_handle().roster();
     let modules: Vec<String> = modules.iter().map(|m| m.to_string()).collect();
     core.registry_mut()
         .agent_upsert(name, &modules, model, note, chara, &roster)
