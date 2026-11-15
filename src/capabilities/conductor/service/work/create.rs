@@ -5,6 +5,9 @@
 //!   本方法族只碰 history / registry / workspace / vm 这四个字段。
 
 use super::*;
+use crate::capabilities::session::api::{
+    flat_modules, guest_lease_for, guest_scope, subtree_of, tree_meta, work_root,
+};
 
 /// 目的：这次创建要不要在宿主上付一次性的机器级只读授权。
 /// 约束：只有本机档写宿主 ACL；虚拟机档的隔离是挂载边界（`machine_ro_tree` 以只读挂载兑现），不写宿主 ACL。
@@ -51,7 +54,7 @@ impl Conductor {
     /// 顶层会话名可以重复（落点是自己的目录），但共用同一个 work/ 时同名 agent 会撞同一个沙箱。
     fn subtree_agent_names(&self, root: &str) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
-        for sid in self.subtree_of(root) {
+        for sid in subtree_of(self.history.as_ref(), root) {
             if let Ok(m) = self.history.meta(&sid) {
                 for a in &m.agents {
                     if !out.iter().any(|x| x == &a.name) {
@@ -122,7 +125,7 @@ impl Conductor {
             if raw.is_some() || grant.is_some() {
                 return Err("子会话不能自选工作区或授权粒度：沿父会话继承".to_string());
             }
-            let top = self.work_root(p)?;
+            let top = work_root(self.history.as_ref(), p)?;
             return Ok(self.history.meta(&top)?.workspace);
         }
         let Some(raw) = raw else {
@@ -241,7 +244,7 @@ impl Conductor {
         }
         // 工作根：顶层会话就是自己；子会话沿父链走到顶（整棵树只有一个 work/）。
         let root = match parent {
-            Some(p) => self.work_root(p)?,
+            Some(p) => work_root(self.history.as_ref(), p)?,
             None => spec.name.clone(),
         };
         // 实例名在**整棵子树**里唯一：共用同一个 work/ 时同名 agent 会撞同一个沙箱目录。
@@ -398,10 +401,9 @@ impl Conductor {
             && !(meta.delegate && meta.agents.is_empty())
         {
             // 共享 guest：按整棵树装配（proxy 子工作都进代理根那一台），租约取作用域根。
-            let (lease, scope_meta) = self
-                .guest_scope(&meta)?
+            let (lease, scope_meta) = guest_scope(self.history.as_ref(), &meta)?
                 .ok_or_else(|| "虚拟机档会话没有解析出 guest 作用域".to_string())?;
-            let tree = self.tree_meta(&scope_meta, Some(&meta))?;
+            let tree = tree_meta(self.history.as_ref(), &scope_meta, Some(&meta))?;
             let tree_plan = self.plan_for_meta_with(&tree, &roster)?;
             let tree_sandboxes = self.sandboxes(&tree, &roster)?;
             // 运行包不做动态加载：新子会话的包已被这台 guest 装载就直接加入；
@@ -415,8 +417,7 @@ impl Conductor {
             let have = self.vm.guest_packages(&lease);
             let restart = needs_guest_packages_rebuild(active, &want, have.as_deref());
             if restart {
-                let running = self
-                    .subtree_of(&scope_meta.name)
+                let running = subtree_of(self.history.as_ref(), &scope_meta.name)
                     .into_iter()
                     .find(|s| self.turn.is_running(s));
                 if let Some(s) = running {
@@ -511,7 +512,7 @@ impl Conductor {
                     self.network_allowed(),
                     meta.exec.tier,
                     guest,
-                    self.guest_lease_for(&meta)?,
+                    guest_lease_for(self.history.as_ref(), &meta)?,
                     &host_plan,
                 );
                 // 过期清理是**落盘事实**：装配时按 meta 装回开关，默认关。
@@ -535,7 +536,7 @@ impl Conductor {
                     Arc::clone(&self.tools),
                     Arc::clone(&self.log),
                     meta.exec.clone(),
-                    self.guest_lease_for(&meta)?,
+                    guest_lease_for(self.history.as_ref(), &meta)?,
                     metas.clone(),
                     delegate,
                     sandboxes.clone(),
@@ -592,7 +593,7 @@ impl Conductor {
         if meta.run == RunState::Closed {
             return Err(format!("会话 {} 已关闭：终态，不能再启用", sid));
         }
-        let Some((lease, scope_meta)) = self.guest_scope(&meta)? else {
+        let Some((lease, scope_meta)) = guest_scope(self.history.as_ref(), &meta)? else {
             return Ok(None);
         };
         if self.vm.guest_leases().iter().any(|l| l == &lease) {
@@ -604,7 +605,7 @@ impl Conductor {
         }
         let roster = self.modules.roster();
         // 共享 guest 的装配按整棵树算：proxy 根自己没有名单，子工作的 agent / 模块 / 包都要进来。
-        let tree = self.tree_meta(&scope_meta, None)?;
+        let tree = tree_meta(self.history.as_ref(), &scope_meta, None)?;
         let plan = self.plan_for_meta_with(&tree, &roster)?;
         let sandboxes = self.sandboxes(&tree, &roster)?;
         Ok(Some(

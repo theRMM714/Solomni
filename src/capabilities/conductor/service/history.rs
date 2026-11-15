@@ -4,6 +4,7 @@
 //! 联动：所有方法族的事件都经 record_events 落盘。
 //!   本方法族只碰 history / log / sessions / vm 这几个字段。
 use super::*;
+use crate::capabilities::session::api::{guest_scope, subtree_of, tree_order, work_root};
 
 /// 目的：按租约撤围栏授权的回调——由核心把 `ToolExec::release_by_lease` 包成闭包注入，测试可直接换成记录型替身。
 pub(crate) type ReleaseByLease = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
@@ -208,7 +209,7 @@ impl Conductor {
                 name, parent
             ));
         }
-        let subtree = self.subtree_of(name);
+        let subtree = subtree_of(self.history.as_ref(), name);
         for sid in &subtree {
             if self.turn.is_running(sid) {
                 return Err(Self::running_refusal(sid));
@@ -231,7 +232,7 @@ impl Conductor {
             let Ok(meta) = self.history.meta(sid) else {
                 continue;
             };
-            if let Ok(Some((lease, _))) = self.guest_scope(&meta)
+            if let Ok(Some((lease, _))) = guest_scope(self.history.as_ref(), &meta)
                 && !guest_leases.iter().any(|l| l == &lease)
             {
                 guest_leases.push(lease);
@@ -262,60 +263,6 @@ impl Conductor {
         })
     }
 
-    /// 目的：一个会话的整棵子树（含它自己，父在前、子在后）：父子关系以 `meta.parent` 为唯一判据。
-    pub(crate) fn subtree_of(&self, name: &str) -> Vec<String> {
-        let list = self.history_list();
-        let mut out = vec![name.to_string()];
-        let mut i = 0;
-        while i < out.len() {
-            let cur = out[i].clone();
-            for h in &list {
-                if h.parent.as_deref() == Some(cur.as_str()) && !out.iter().any(|x| x == &h.name) {
-                    out.push(h.name.clone());
-                }
-            }
-            i += 1;
-        }
-        out
-    }
-
-    /// 目的：这个会话的**使用类型**（机制册的第一把钥匙）：按落盘形态派生，重建后是同一份。
-    ///  协作派生的成员 / 节点会话算 **collab**（它属于那场协作），其余单 agent 会话算 single，代理算 proxy。
-    pub(crate) fn session_kind_of(
-        &self,
-        meta: &crate::capabilities::session::api::SessionMeta,
-    ) -> Result<String, String> {
-        match meta.mode.as_str() {
-            "proxy" => Ok("proxy".to_string()),
-            "collab" => Ok("collab".to_string()),
-            _ => match meta.parent.as_deref() {
-                Some(p) => match self.history.meta(p) {
-                    Ok(pm) if pm.mode == "collab" => Ok("collab".to_string()),
-                    _ => Ok("single".to_string()),
-                },
-                None => Ok("single".to_string()),
-            },
-        }
-    }
-
-    /// 目的：这一席的**角色**（机制册的第二把钥匙，也是工具面与提示词的角色名）。
-    ///  与实时建立同一把尺子：协作的成员 / 节点 = executor；代理 = core_proxy；其余单 agent 工作 = solo。
-    pub(crate) fn role_of(
-        &self,
-        meta: &crate::capabilities::session::api::SessionMeta,
-    ) -> Result<String, String> {
-        if meta.mode == "proxy" {
-            return Ok("core_proxy".to_string());
-        }
-        match meta.parent.as_deref() {
-            Some(p) => match self.history.meta(p) {
-                Ok(pm) if pm.mode == "collab" => Ok("executor".to_string()),
-                _ => Ok("solo".to_string()),
-            },
-            None => Ok("solo".to_string()),
-        }
-    }
-
     /// 目的：一个会话沿父链继承的工作区根（仅外部绑定；`None` = 产品内布局）。
     /// 约束：与 `work_root_of` 同一走向：自己带绑定就用它，否则看工作根的 meta。
     ///   取到根后按它所在会话的档位复检（见 workspace_root）——meta 是磁盘上的文本，手改也要过同一套策略。
@@ -328,7 +275,7 @@ impl Conductor {
             None => match &meta.parent {
                 None => return Ok(None),
                 Some(p) => {
-                    let top = self.work_root(p)?;
+                    let top = work_root(self.history.as_ref(), p)?;
                     let top_meta = self.history.meta(&top)?;
                     match top_meta.workspace {
                         Some(binding) => (binding.root, top_meta.exec.tier),
@@ -343,15 +290,6 @@ impl Conductor {
         Ok(Some(root))
     }
 
-    /// 目的：一个会话的**工作根**，从它自己的 meta 起算：`meta` 可能**还没落盘**
-    ///  （建工作区发生在落盘之前），所以有父就上溯、没有父就是它自己。
-    pub(crate) fn work_root_of(&self, meta: &SessionMeta) -> Result<String, String> {
-        match &meta.parent {
-            None => Ok(meta.name.clone()),
-            Some(p) => self.work_root(p),
-        }
-    }
-
     /// 目的：把整棵子树（含自己）的运行态落成同一个值：**停止**先整棵冻上，**继续**再整棵解开。
     ///  停止时顺序不能反——先冻态再取消生成，被停会话收尾写的那条"这一轮结束"才会被闸门拒掉。
     pub(crate) fn set_subtree_run(
@@ -359,7 +297,7 @@ impl Conductor {
         name: &str,
         run: crate::capabilities::session::api::RunState,
     ) -> Result<Vec<String>, String> {
-        let tree = self.subtree_of(name);
+        let tree = subtree_of(self.history.as_ref(), name);
         for sid in &tree {
             let mut meta = self.history.meta(sid)?;
             if meta.run != run {
@@ -375,7 +313,7 @@ impl Conductor {
     pub(crate) fn resume_subtree(&self, name: &str) -> Result<bool, String> {
         use crate::capabilities::session::api::RunState;
         let mut any = false;
-        for sid in self.subtree_of(name) {
+        for sid in subtree_of(self.history.as_ref(), name) {
             let mut meta = self.history.meta(&sid)?;
             match meta.run {
                 RunState::Closed => {
@@ -390,21 +328,6 @@ impl Conductor {
             }
         }
         Ok(any)
-    }
-
-    /// 目的：一个会话的**工作根**（顶层会话名）：沿 `meta.parent` 一路走到顶。
-    ///  整棵树不论嵌套多少层只有一个 `work/`——共享区与 agent 沙箱都锚在它上面。
-    pub(crate) fn work_root(&self, name: &str) -> Result<String, String> {
-        let mut cur = self.history.meta(name)?;
-        let mut guard = 0usize;
-        while let Some(p) = cur.parent.clone() {
-            guard += 1;
-            if guard > 64 {
-                return Err(format!("会话父子关系成环：{}", name));
-            }
-            cur = self.history.meta(&p)?;
-        }
-        Ok(cur.name)
     }
 
     /// 目的：**运行态闸门**：派发 / 唤醒前过它，停止与关闭都拒绝。

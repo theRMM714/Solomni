@@ -5,6 +5,7 @@
 //!   本方法族只碰 workspace / sessions / history / running 这四个字段。
 
 use super::*;
+use crate::capabilities::session::api::{subtree_of, work_root};
 
 impl Conductor {
     /// 目的：上下文「继续」是否该出现——判据只在后端（前端不按末条/模式猜）。
@@ -139,7 +140,7 @@ impl Conductor {
                     };
                 let shell = self.shell_view(&sid);
                 // 过期内容替换是**工作根**的会话级事实：子会话与工作根共享同一个开关。
-                let context_freshness = match self.work_root(&sid) {
+                let context_freshness = match work_root(self.history.as_ref(), &sid) {
                     Ok(root) => self
                         .history
                         .meta(&root)
@@ -147,7 +148,7 @@ impl Conductor {
                         .unwrap_or(false),
                     Err(_) => false,
                 };
-                let thinking = match self.work_root(&sid) {
+                let thinking = match work_root(self.history.as_ref(), &sid) {
                     Ok(root) => thinking_cache
                         .entry(root.clone())
                         .or_insert_with(|| self.thinking_view_for_root(&root))
@@ -208,7 +209,7 @@ impl Conductor {
             return Err(format!("无此会话：{}", sid));
         }
         // 先恢复未完成的版本库事务，再做同名文件判定：否则 pending 里的文件会被当成不存在。
-        let work = self.work_root(sid).unwrap_or_else(|_| sid.to_string());
+        let work = work_root(self.history.as_ref(), sid).unwrap_or_else(|_| sid.to_string());
         self.workspace.work_recover(&work)?;
         if self.workspace.work_has(&work, &name) && !overwrite {
             return Ok(false);
@@ -271,7 +272,7 @@ impl Conductor {
         limit: usize,
         before: Option<u64>,
     ) -> Result<crate::capabilities::workspace::api::WorkLog, String> {
-        let work = self.work_root(sid)?;
+        let work = work_root(self.history.as_ref(), sid)?;
         self.workspace.work_log(&work, limit, before)
     }
 
@@ -281,7 +282,7 @@ impl Conductor {
         sid: &str,
         commit: u64,
     ) -> Result<crate::capabilities::workspace::api::CommitDetail, String> {
-        let work = self.work_root(sid)?;
+        let work = work_root(self.history.as_ref(), sid)?;
         self.workspace.work_commit_view(&work, commit)
     }
 
@@ -292,7 +293,7 @@ impl Conductor {
         commit: u64,
         path: &str,
     ) -> Result<crate::capabilities::workspace::api::CommitFileView, String> {
-        let work = self.work_root(sid)?;
+        let work = work_root(self.history.as_ref(), sid)?;
         self.workspace.work_commit_file(&work, commit, path)
     }
 
@@ -306,8 +307,8 @@ impl Conductor {
         expect_head: u64,
         force: bool,
     ) -> Result<(Option<u64>, Vec<SessionEvent>), String> {
-        let work = self.work_root(sid)?;
-        let tree = self.subtree_of(&work);
+        let work = work_root(self.history.as_ref(), sid)?;
+        let tree = subtree_of(self.history.as_ref(), &work);
         if let Some(running) = self
             .turn
             .running_iter()

@@ -1,6 +1,6 @@
-//! 目的：环境事实的派生规则——把调用方已取好的事实算成权限面、沙箱清单、围栏、进程环境、工具链根与 guest 租约。
+//! 目的：环境事实的派生规则——把调用方已取好的事实算成权限面、沙箱清单、围栏、进程环境与工具链根。
 //! 管：`member`（一席的围栏 / 运行路径 / 工具链根 / 模块注入项）、`sandboxes`（每个 agent 的沙箱）、
-//!   `permissions`（权限链）、`workspace_grant`（共享区授权粒度）、`guest_lease`（共享 guest 租约）。
+//!   `permissions`（权限链）、`workspace_grant`（共享区授权粒度）。
 //! 不管：取事实（history / workspace / registry / 清单在 `conductor`）、落盘、启停 guest 与工具进程。
 //! 联动：`conductor/service/env.rs` 取好事实后转调这里；行为与错误文案必须逐字一致。
 
@@ -164,16 +164,4 @@ pub fn workspace_grant(chain: &[SessionMeta]) -> WorkspaceGrant {
         .rev()
         .find_map(|m| m.workspace.as_ref().map(|b| b.grant))
         .unwrap_or(WorkspaceGrant::Session)
-}
-
-/// 目的：这条会话的共享 guest 租约；空 = 本机档，或代理父会话自己没有 guest。
-/// 约束：一个主会话树一台 guest；proxy 父会话没有 guest，它的每个子工作临时各占一台。
-pub fn guest_lease(meta: &SessionMeta, top: &SessionMeta) -> Option<String> {
-    if top.exec.tier != Tier::Vm {
-        return None;
-    }
-    if top.mode == "proxy" && meta.parent.is_none() {
-        return None;
-    }
-    Some(top.name.clone())
 }

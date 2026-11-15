@@ -5,40 +5,9 @@
 //!   本方法族只碰 registry / history / systools / workspace 这几个字段。
 use super::*;
 use crate::capabilities::packages::api as pkgs;
+use crate::capabilities::session::api::work_root_of;
 
 impl Conductor {
-    /// 目的：这台会话的**共享 guest 作用域**——(guest 租约, 该租约对应的会话 meta)。
-    /// 约束：一个主会话树一台 guest；proxy 父会话没有 guest，它的每个子工作临时各占一台。
-    ///   host 档 / proxy 父会话 = None；其余 = (租约, 作用域根 meta)。
-    pub(crate) fn guest_scope(
-        &self,
-        meta: &SessionMeta,
-    ) -> Result<Option<(String, SessionMeta)>, String> {
-        if meta.exec.tier != crate::kernel::api::Tier::Vm {
-            return Ok(None);
-        }
-        // 顶层工作名：子会话沿 parent 走到顶（整棵树只有一个 work/）。
-        let root = self.work_root_of(meta)?;
-        let top = if root == meta.name {
-            meta.clone()
-        } else {
-            self.history.meta(&root)?
-        };
-        // 租约判据（proxy 父会话自己没有 guest，子工作共用代理根那台）在 env。
-        match crate::capabilities::env::api::guest_lease(meta, &top) {
-            Some(lease) => Ok(Some((lease, top))),
-            None => Ok(None),
-        }
-    }
-
-    /// 目的：这台会话的工具执行要用的 guest 租约（空 = 本机档 / 没有 guest）。
-    pub(crate) fn guest_lease_for(&self, meta: &SessionMeta) -> Result<String, String> {
-        Ok(self
-            .guest_scope(meta)?
-            .map(|(lease, _)| lease)
-            .unwrap_or_default())
-    }
-
     /// 目的：一次 guest 只读诊断的准备（毫秒级）：定位这条会话的 guest 租约。
     /// 约束：本机档没有 guest；代理父会话自己没有 guest，要诊断它下面的某个工作。
     pub(crate) fn prepare_guest_diagnose(
@@ -49,7 +18,7 @@ impl Conductor {
         if meta.exec.tier != crate::kernel::api::Tier::Vm {
             return Err("这条会话是本机档，没有 guest 可诊断".to_string());
         }
-        match self.guest_scope(&meta)? {
+        match crate::capabilities::session::api::guest_scope(self.history.as_ref(), &meta)? {
             Some((lease, _)) => Ok(super::guest_job::GuestDiagnose::new(
                 Arc::clone(&self.vm),
                 lease,
@@ -59,65 +28,6 @@ impl Conductor {
             }
             None => Err("这条会话没有可诊断的 guest".to_string()),
         }
-    }
-
-    /// 目的：一个 agent 的配置归属哪份名单：协作成员会话的名单在主会话，
-    ///   proxy 子工作（父是代理）或顶层会话自己就是名单所有者；嵌套协作继续向上找。
-    /// 约束：同一 agent 全树只有一份配置——子会话编辑写回这里，不留两份会漂的 meta。
-    pub(crate) fn config_owner_of(&self, meta: &SessionMeta) -> Result<SessionMeta, String> {
-        let mut owner = meta.clone();
-        while let Some(p) = owner.parent.clone() {
-            let pm = self.history.meta(&p)?;
-            if pm.mode == "collab" {
-                owner = pm;
-            } else {
-                break;
-            }
-        }
-        Ok(owner)
-    }
-
-    /// 目的：一台共享 guest 的**树级装配 meta**——把作用域根与其整棵子树的 agent 并成一份。
-    /// 约束：同一 agent 名只留一份（后代覆盖祖先，便于子会话编辑后按新值装配）；exec / 形态 / 工作名取作用域根。
-    ///   extra 用于"还没落盘"的待建子会话（建工作与改配的准备段要它）。
-    pub(crate) fn tree_meta(
-        &self,
-        root: &SessionMeta,
-        extra: Option<&SessionMeta>,
-    ) -> Result<SessionMeta, String> {
-        let extras: Vec<&SessionMeta> = extra.into_iter().collect();
-        self.tree_meta_with(root, &extras)
-    }
-
-    /// 目的：同上，但是可带多份尚未落盘的 meta（改配时主会话与子树的新值要一起参与装配）。
-    pub(crate) fn tree_meta_with(
-        &self,
-        root: &SessionMeta,
-        extra: &[&SessionMeta],
-    ) -> Result<SessionMeta, String> {
-        let mut agents: BTreeMap<String, crate::capabilities::session::api::AgentMeta> =
-            BTreeMap::new();
-        let mut push = |m: &SessionMeta| {
-            for a in &m.agents {
-                agents.insert(a.name.clone(), a.clone());
-            }
-        };
-        push(root);
-        for sid in self.subtree_of(&root.name) {
-            if sid == root.name {
-                continue;
-            }
-            if let Ok(m) = self.history.meta(&sid) {
-                push(&m);
-            }
-        }
-        for m in extra {
-            push(m);
-        }
-        let mut out = root.clone();
-        out.agents = agents.into_values().collect();
-        out.modules = super::flat_modules(&out.agents);
-        Ok(out)
     }
 
     /// 目的：组装本次工作的沙箱清单：工作根来自 Workspace 端口，模块目录来自清单。
@@ -130,7 +40,7 @@ impl Conductor {
     ) -> Result<crate::capabilities::workspace::api::Sandboxes, String> {
         let names: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
         // 沙箱锚在**顶层工作**上：整棵树不论嵌套多少层只有一个 work/（见 Conductor::work_root）。
-        let work = self.work_root_of(meta)?;
+        let work = work_root_of(self.history.as_ref(), meta)?;
         let roots = self.workspace.roots(&work, &names)?;
         // 虚拟机档给 guest↔宿主翻译器：system 工具跑在宿主侧，但收模型给的 guest 写法；
         // **同一份**也交给 @ 改写（挂载点、命令装配与用户引用用同一座桥，三处不会各给一种写法）。

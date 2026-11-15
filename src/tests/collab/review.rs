@@ -206,7 +206,8 @@ pub(crate) fn approved_plan_spawns_a_sub_session_per_ready_node() {
     );
     assert_eq!(cmeta.mode, "single");
     assert_eq!(
-        core.work_root(child).expect("工作根"),
+        crate::capabilities::session::api::work_root(core.history_handle().as_ref(), child)
+            .expect("工作根"),
         sid,
         "沙箱锚在顶层工作上（整棵树共用一个 work/）"
     );

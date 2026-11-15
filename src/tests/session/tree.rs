@@ -340,3 +340,43 @@ pub(crate) fn quick_profile_switch_updates_root_and_children_cannot_widen() {
         .unwrap_err();
     assert!(err.contains("更宽"), "{}", err);
 }
+
+/// 目的：guest 租约按档位与代理根派生：虚拟机档的子树共用顶层租约，代理根自己没有 guest。
+#[test]
+pub(crate) fn guest_lease_follows_the_tier_and_the_proxy_root() {
+    use crate::capabilities::session::api::guest_lease;
+    use crate::kernel::api::{ExecSpec, Tier};
+    let meta = |name: &str, parent: Option<&str>, tier: Tier, mode: &str| SessionMeta {
+        context_freshness: false,
+        name: name.to_string(),
+        mode: mode.to_string(),
+        delegate: false,
+        modules: Vec::new(),
+        task: None,
+        ts: 1,
+        agents: Vec::new(),
+        exec: ExecSpec {
+            tier,
+            ..Default::default()
+        },
+        sandbox: Default::default(),
+        parent: parent.map(|p| p.to_string()),
+        node: None,
+        delegation: None,
+        thinking: None,
+        run: RunState::Active,
+        workspace: None,
+    };
+    let proxy = meta("proxy-root", None, Tier::Vm, "proxy");
+    assert_eq!(guest_lease(&proxy, &proxy), None, "代理根自己没有 guest");
+    let child = meta("proxy-root--a", Some("proxy-root"), Tier::Vm, "collab");
+    assert_eq!(
+        guest_lease(&child, &proxy),
+        Some("proxy-root".to_string()),
+        "子工作共用代理根那一台"
+    );
+    let solo = meta("solo", None, Tier::Vm, "solo");
+    assert_eq!(guest_lease(&solo, &solo), Some("solo".to_string()));
+    let host = meta("host", None, Tier::Host, "solo");
+    assert_eq!(guest_lease(&host, &host), None, "本机档没有 guest");
+}

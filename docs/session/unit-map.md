@@ -12,6 +12,7 @@
 | `src/capabilities/session/detail/fs_history.rs` | `HistoryStore` 的落盘实现：`meta.yaml` + `transcript.jsonl`；子会话落在父会话的 `children/` 下 |
 | `src/capabilities/session/api.rs` | 入站能力面：`HistoryOps` / `History` 与会话事实、事件词汇的重导出 |
 | `src/capabilities/session/service.rs` | 用例与端口持有者：历史落盘端口只在这里（R12）；增量落盘手柄 `Persister` 与事件收编 `record_events` |
+| `src/capabilities/session/service/tree.rs` | 会话树派生：子树、工作根、配置归属、树级装配 meta、guest 作用域与租约、树序与扁平模块 |
 | `src/capabilities/session/ports.rs` | 出站端口：`HistoryStore`（会话历史的读写与删除） |
 | `src/capabilities/session/domain/decisions.rs` | 裁决队列：先来后到、队首可见可答、回答校验、整队作废；对外只出窄端口 `Decisions`（会话表）与 `Gates`（一个会话的通道），队列结构与等待格不出单元 |
 | `src/capabilities/session/domain/session.rs` | 单 agent 会话：上下文、行 id、回合与回复簿记、压缩与回档 |

@@ -579,7 +579,10 @@ pub(crate) fn the_real_bridge_creates_a_child_work() {
     let root = handle
         .call({
             let c = child.clone();
-            move |core| core.work_root(&c)
+            move |core| {
+                let history = core.history_handle();
+                crate::capabilities::session::api::work_root(history.as_ref(), &c)
+            }
         })
         .expect("工作根");
     assert_eq!(root, parent_sid, "子工作与父会话共用同一个 work/");
@@ -955,7 +958,10 @@ pub(crate) fn the_real_bridge_creates_a_multi_agent_child_work() {
     let root = handle
         .call({
             let c = child.clone();
-            move |core| core.work_root(&c)
+            move |core| {
+                let history = core.history_handle();
+                crate::capabilities::session::api::work_root(history.as_ref(), &c)
+            }
         })
         .expect("工作根");
     assert_eq!(root, parent.sid, "子工作与父会话共用同一个 work/");

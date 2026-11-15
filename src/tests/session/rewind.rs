@@ -542,7 +542,7 @@ pub(crate) fn history_list_is_ordered_as_a_tree() {
         }
     };
     // 顶层 A(10) 比 B(5) 新；A 下两个子会话（甲=9 比 乙=8 新）。
-    let got = crate::capabilities::conductor::service::tree_order(vec![
+    let got = crate::capabilities::session::api::tree_order(vec![
         hv("A", None, 10),
         hv("B", None, 5),
         hv("A--甲", Some("A"), 9),

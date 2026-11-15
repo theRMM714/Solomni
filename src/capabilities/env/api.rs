@@ -5,6 +5,5 @@
 
 #[allow(unused_imports)] // 入站面：事实类型给调用方标注与测试取用
 pub use crate::capabilities::env::domain::env::{
-    MemberEnv, MemberFacts, SandboxesFacts, guest_lease, member, permissions, sandboxes,
-    workspace_grant,
+    MemberEnv, MemberFacts, SandboxesFacts, member, permissions, sandboxes, workspace_grant,
 };
