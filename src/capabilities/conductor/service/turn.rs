@@ -11,7 +11,7 @@ impl Conductor {
     ///  变了 → 只改会话参数里的那一格并给用户一句通知（身份块下次调用就按新约定渲染）；没变 → 什么都不做。
     ///  这样"用户改了登记处就重新查、没改就不管"，同时身份块里的约定与实际协议始终一致。
     pub(crate) fn refresh_tool_mode(&mut self, sid: &str) -> Result<Option<String>, String> {
-        let a = match self.sessions.get(sid) {
+        let a = match self.turn.session(sid) {
             Some(Session::Single(_)) => {
                 let (meta, _) = self.history.load(sid)?;
                 match meta.agents.first().cloned() {
@@ -26,7 +26,7 @@ impl Conductor {
             .channel(a.model.as_deref())
             .map_err(|e| format!("agent {} 没有可用模型通道：{}", a.name, e))?;
         let want = self.registry.tool_mode(a.model.as_deref());
-        let cur = match self.sessions.get(sid) {
+        let cur = match self.turn.session(sid) {
             Some(Session::Single(s)) => s.tool_mode(),
             // 还没装进内存的会话：交给 ensure_session 按当前形态建，这里不动
             _ => want,
@@ -36,7 +36,7 @@ impl Conductor {
         }
         // **只改这一格**：形态是登记处派生出来的参数，没必要把整个会话从盘上重建一遍
         //（身份块每次调用现渲染，改完这一格下一回合就生效）。
-        if let Some(Session::Single(s)) = self.sessions.get_mut(sid) {
+        if let Some(Session::Single(s)) = self.turn.session_mut(sid) {
             s.set_tool_mode(want);
         }
         Ok(Some(match want {
@@ -60,7 +60,7 @@ impl Conductor {
     ) -> Result<Prepared, String> {
         // 还没装进内存的会话先从落盘重建（"继续"可能先于"打开"到达；真没这个会话仍然报无此会话）。
         self.ensure_session(sid)?;
-        if matches!(self.sessions.get(sid), Some(Session::Collab(_))) {
+        if matches!(self.turn.session(sid), Some(Session::Collab(_))) {
             return Ok(Prepared::NotSingle);
         }
         let mut prefix: Vec<SessionEvent> = Vec::new();
@@ -69,7 +69,7 @@ impl Conductor {
         }
         if text.is_none() {
             let last_is_user =
-                matches!(self.sessions.get(sid), Some(Session::Single(s)) if s.last_is_user());
+                matches!(self.turn.session(sid), Some(Session::Single(s)) if s.last_is_user());
             if !last_is_user {
                 prefix.push(SessionEvent::Notice(NEED_USER.to_string()));
                 return Ok(Prepared::Immediate(prefix));
@@ -78,7 +78,7 @@ impl Conductor {
         // 思考强度按**工作根**解析（子会话共享）；模型没登记该档会在这里如实报错。
         let llm = self.llm_opts_for(sid, want_stream)?;
         // 身份块**现渲染**（形态刚在上一步对齐过，所以这里读到的就是本回合的形态）。
-        let identity = match self.sessions.get(sid) {
+        let identity = match self.turn.session(sid) {
             Some(Session::Single(s)) => s.params().identity(&*self.prompt, s.tool_mode()),
             _ => return Ok(Prepared::NotSingle),
         };
@@ -107,7 +107,7 @@ impl Conductor {
         objective: &str,
     ) -> Result<Prepared, String> {
         self.ensure_session(child)?;
-        if matches!(self.sessions.get(child), Some(Session::Collab(_))) {
+        if matches!(self.turn.session(child), Some(Session::Collab(_))) {
             return Ok(Prepared::NotSingle);
         }
         // 节点的生成跟随设置里的流式开关；思考强度按工作根解析（子会话共享）。
@@ -186,7 +186,7 @@ impl Conductor {
     ) -> Result<Vec<SessionEvent>, String> {
         self.ensure_session(sid)?;
         let mut events = {
-            let s = self.sessions.get_mut(sid).ok_or("无此活动会话")?;
+            let s = self.turn.session_mut(sid).ok_or("无此活动会话")?;
             match s {
                 Session::Single(s) => {
                     if s.last_is_user() {

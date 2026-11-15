@@ -34,7 +34,7 @@ impl Conductor {
     /// 目的：工作名的缺省与唯一化（命名策略在 `session`；这里只提供"存在吗"）。
     pub fn unique_work_name(&self, base: &str, fallback: &str) -> String {
         crate::capabilities::session::api::unique_work_name(base, fallback, |n| {
-            self.sessions.contains_key(n) || self.history.load(n).is_ok()
+            self.turn.holds(n) || self.history.load(n).is_ok()
         })
     }
 }
@@ -151,9 +151,9 @@ impl Conductor {
         parent: Option<&str>,
     ) -> Result<(PreparedWork, Option<GuestBoot>), String> {
         validate_work_name(&spec.name)?;
-        if self.sessions.contains_key(&spec.name)
+        if self.turn.holds(&spec.name)
             || self.history.load(&spec.name).is_ok()
-            || self.starting.contains(&spec.name)
+            || self.turn.is_starting(&spec.name)
         {
             return Err(format!("工作名已存在：{}", spec.name));
         }
@@ -386,7 +386,7 @@ impl Conductor {
         );
 
         // 占名：准备与提交之间隔着一次 guest 启动，同名并发创建不能都通过上面那道检查。
-        self.starting.insert(name.clone());
+        self.turn.mark_starting(name.clone());
         // 子会话与父会话共用同一个 session/ 目录：只对顶层会话记得"失败要撤掉空目录"。
         let discard = if parent.is_none() {
             Some((name.clone(), agent_names.clone()))
@@ -418,7 +418,7 @@ impl Conductor {
                 let running = self
                     .subtree_of(&scope_meta.name)
                     .into_iter()
-                    .find(|s| self.running.contains(s));
+                    .find(|s| self.turn.is_running(s));
                 if let Some(s) = running {
                     return Err(format!(
                         "子会话引入了这台 guest 还没装载的运行包：先停掉正在生成的 {}，再重建共享 guest",
@@ -548,14 +548,14 @@ impl Conductor {
             }
         };
         // 会话身份落盘：失败即失败（名字即目录，这是承诺，不假装已保存）。
-        self.starting.remove(&name);
+        self.turn.unmark_starting(&name);
         if let Err(e) = self.history.create(&meta) {
             if let Some((session, agents)) = discard {
                 let _ = self.workspace.discard(&session, &agents);
             }
             return Err(e);
         }
-        self.sessions.insert(name.clone(), session);
+        self.turn.put(name.clone(), session);
         self.record_events(&name, &mut events);
         // 只有本机档 + workspace 粒度才付机器级只读授权（一次性成本）：会话已经落盘，甩到后台慢慢付，创建本身保持毫秒级。
         pay_workspace_grant(&self.root, &meta);
@@ -570,7 +570,7 @@ impl Conductor {
     /// 目的：创建失败（guest 起不来 / 落盘失败）时撤销准备段占下的东西：名字占位 + 这次建出来的空工作区目录。
     pub(crate) fn abort_work(&mut self, prepared: PreparedWork) {
         if let PreparedWork::Pending(p) = prepared {
-            self.starting.remove(&p.name);
+            self.turn.unmark_starting(&p.name);
             if let Some((session, agents)) = p.discard {
                 let _ = self.workspace.discard(&session, &agents);
             }

@@ -192,7 +192,7 @@ impl Conductor {
     pub(crate) fn delete_bookkeeping(&mut self, name: &str) -> Result<SessionDelete, String> {
         // 不是落盘会话（或已不存在）：只清内存，目录交给收尾层如实回 false。
         let Ok((meta, _)) = self.history.load(name) else {
-            self.sessions.remove(name);
+            self.turn.take(name);
             return Ok(SessionDelete {
                 stop: super::guest_job::GuestStop::new(Arc::clone(&self.vm), Vec::new()),
                 history: Arc::clone(&self.history),
@@ -210,7 +210,7 @@ impl Conductor {
         }
         let subtree = self.subtree_of(name);
         for sid in &subtree {
-            if self.running.contains(sid) {
+            if self.turn.is_running(sid) {
                 return Err(Self::running_refusal(sid));
             }
         }
@@ -239,7 +239,7 @@ impl Conductor {
         }
         let stop = super::guest_job::GuestStop::new(Arc::clone(&self.vm), guest_leases);
         for sid in &subtree {
-            self.sessions.remove(sid);
+            self.turn.take(sid);
             // 会话没了，它的裁决队随会话一起消失（等待方与转录都不复存在）。
             self.forget_desk(sid);
         }
@@ -445,7 +445,7 @@ impl Conductor {
     ///   这时如实退回瞬时提示（界面照样看得见，只是不可回档）。
     pub(crate) fn notice_row(&mut self, sid: &str, text: &str) -> Vec<SessionEvent> {
         let mut out = Vec::new();
-        match self.sessions.get_mut(sid) {
+        match self.turn.session_mut(sid) {
             Some(Session::Single(s)) => out.extend(s.note_notice(text)),
             Some(Session::Collab(c)) => c.notice(text, &mut |e| out.push(e)),
             None => out.push(SessionEvent::Notice(text.to_string())),

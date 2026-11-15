@@ -94,7 +94,7 @@ impl Conductor {
             sid.to_string()
         };
         for s in self.subtree_of(&guard) {
-            if self.running.contains(&s) {
+            if self.turn.is_running(&s) {
                 return Err(Self::running_refusal(&s));
             }
         }
@@ -359,7 +359,7 @@ impl Conductor {
         let (meta, _) = self.history_open(sid)?;
         let guard = self.work_root(sid).unwrap_or_else(|_| sid.to_string());
         for s in self.subtree_of(&guard) {
-            if self.running.contains(&s) {
+            if self.turn.is_running(&s) {
                 return Err(Self::running_refusal(&s));
             }
         }
@@ -396,7 +396,7 @@ impl Conductor {
             self.release_fences(s);
         }
         for s in changed {
-            self.sessions.remove(&s);
+            self.turn.take(&s);
         }
         Ok(())
     }
@@ -420,9 +420,9 @@ impl Conductor {
         }
         self.record_config(&sid, &new_meta);
         // 内存里那份是按旧配置装的：丢掉主会话与整棵子树，下一次访问按新配置从转录重建。
-        self.sessions.remove(&sid);
+        self.turn.take(&sid);
         for child in &new_children {
-            self.sessions.remove(&child.name);
+            self.turn.take(&child.name);
         }
         Ok(())
     }

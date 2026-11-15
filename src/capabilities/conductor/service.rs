@@ -28,20 +28,10 @@ use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::registry::api::Registry;
 use crate::capabilities::session::api::{AgentMeta, HistoryView, RunState, SessionMeta};
 use crate::capabilities::tools::api::{ToolExec, Tools};
-use crate::kernel::api::SessionId;
 use crate::kernel::ports::Log;
 use compact::{CompactChoice, CompactRuntime};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
-
-/// 目的：会话实例：单 agent 会话或协作会话（本体自带端口，可跨线程移动）。
-///  两变体大小差得远（协作会话带整份讨论状态），装箱只换来一次间接寻址、
-///  却把"会话本体可直接移动"这个形状改掉——有意不装箱（见 docs/testing/quality-isolation.md 的 allow 清单）。
-#[allow(clippy::large_enum_variant)]
-pub enum Session {
-    Single(crate::capabilities::session::api::AgentSession),
-    Collab(CollabSession),
-}
 
 /// 目的：模块列表保序去重（一个 agent 内重复只留一份；跨 agent 的重叠是合法的共用）。
 pub(crate) fn dedup_modules(list: &[String]) -> Vec<String> {
@@ -166,29 +156,17 @@ pub struct Conductor {
     /// 项目内基础工具链的只读安装根（python / node / cc）：shell 的 sandbox 与 external 都放行它们。
     /// 来源是组合根读到的 active.json；不按 agent 的模块重复注入。
     base_roots: Vec<std::path::PathBuf>,
-    /// 目的：会话 → shell 实时状态槽（状态栏卡片用）；工具循环写、SessionView 读。
-    shell_slots: std::sync::Mutex<
-        std::collections::BTreeMap<String, Arc<crate::capabilities::session::api::ShellSlot>>,
-    >,
     /// 提示词册能力：**册子本体在它里面**（只有一处），conductor 只按名字取段。
     /// 用 `Arc`：协作会话要与核心**共享**这一份（逐处克隆整本册子是白费）。
     prompt: Arc<dyn Prompt>,
     /// 工具总表与角色表的能力面（授权两张表；名字表由组合根另取）：**表本体在工具能力里**，与册子互不依赖。
     systools: Arc<dyn Tools>,
-    sessions: HashMap<SessionId, Session>,
-    /// **裁决队**（按会话 id 取）：核心各关卡与工具级确认共用同一条队（见 docs/session/session-model.md）。
-    /// 它跨线程：生成线程等在工作线程上，回答与快照在核心线程上——同一份句柄、同一把锁。
-    /// 拿的是**端口**（`session::api::Decisions`）而不是队结构：队列本体与校验留在会话单元里（R16）。
-    desk: Arc<dyn crate::capabilities::session::api::Decisions>,
-    /// 正在生成的会话：对象被工作线程**取走**了，核心表里暂时没有它。
-    /// 为什么取出而不是就地生成：生成要跑几十秒到几分钟，占着唯一的命令队列会让
-    /// 读接口（历史列表、状态）与其它会话的命令全排在它后面——界面因此"假死"。
-    /// 这一态只表示"不在表里是因为在生成"，不是"不存在"。
-    running: std::collections::BTreeSet<SessionId>,
-    /// 正在准备中的会话名（创建分两段：核心先占名与预备，慢的那一段在调用方线程上跑）。
-    /// 有了它，同名并发创建就不会都通过"名字不存在"那道检查而互相覆盖。
-    starting: std::collections::BTreeSet<String>,
+    /// 回合状态：在世会话表、运行态与创建占位、裁决队、每会话的 shell 活进程槽（在 `turn`）。
+    turn: crate::capabilities::turn::api::TurnState,
 }
+
+/// 目的：在世会话形态（`turn` 的状态类型），本能力各用例只经它放取会话。
+pub(crate) use crate::capabilities::turn::api::Session;
 
 mod action;
 mod activation;
@@ -256,13 +234,9 @@ impl Conductor {
             residents,
             secrets,
             base_roots: Vec::new(),
-            shell_slots: std::sync::Mutex::new(std::collections::BTreeMap::new()),
             prompt,
             systools,
-            sessions: HashMap::new(),
-            desk: crate::capabilities::session::api::decisions(),
-            running: std::collections::BTreeSet::new(),
-            starting: std::collections::BTreeSet::new(),
+            turn: crate::capabilities::turn::api::TurnState::new(),
         };
         c.sync_compact_choice();
         c
@@ -306,12 +280,7 @@ impl Conductor {
         &self,
         sid: &str,
     ) -> Arc<crate::capabilities::session::api::ShellSlot> {
-        let mut map = self.shell_slots.lock().unwrap_or_else(|e| e.into_inner());
-        Arc::clone(
-            map.entry(sid.to_string()).or_insert_with(|| {
-                Arc::new(crate::capabilities::session::api::ShellSlot::default())
-            }),
-        )
+        self.turn.shell_slot(sid)
     }
 
     /// 目的：读会话最近一次 shell 的快照；没有运行过就是 None（状态栏据此决定要不要出 chip）。
@@ -319,11 +288,7 @@ impl Conductor {
         &self,
         sid: &str,
     ) -> Option<crate::capabilities::session::api::ShellLive> {
-        self.shell_slots
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(sid)
-            .and_then(|s| s.get())
+        self.turn.shell_view(sid)
     }
 
     /// 目的：本机可选的虚拟根清单（会话配置与创建向导用）。
@@ -421,17 +386,17 @@ impl Conductor {
     ) -> Result<crate::capabilities::session::api::AgentSession, String> {
         // 运行态闸门：暂停 / 关闭的会话不启动任何生成（唤醒与派发都从这里过）。
         self.dispatch_gate(sid)?;
-        if self.running.contains(sid) {
+        if self.turn.is_running(sid) {
             return Err(Self::running_refusal(sid));
         }
-        match self.sessions.remove(sid) {
+        match self.turn.take(sid) {
             Some(Session::Single(s)) => {
-                self.running.insert(sid.to_string());
+                self.turn.mark_running(sid.to_string());
                 Ok(s)
             }
             Some(other) => {
                 // 不是单 agent：原样放回，交给协作那条路（B-1 只搬单 agent）。
-                self.sessions.insert(sid.to_string(), other);
+                self.turn.put(sid.to_string(), other);
                 Err("该会话不是单 agent 模式".to_string())
             }
             None => Err("无此会话".to_string()),
@@ -443,19 +408,19 @@ impl Conductor {
     pub(crate) fn take_collab(&mut self, sid: &str) -> Result<CollabSession, String> {
         // 同上：运行态闸门是第一道，先于"取出来"。
         self.dispatch_gate(sid)?;
-        if self.running.contains(sid) {
+        if self.turn.is_running(sid) {
             return Err(Self::running_refusal(sid));
         }
-        if !self.sessions.contains_key(sid) {
+        if !self.turn.holds(sid) {
             self.ensure_session(sid)?;
         }
-        match self.sessions.remove(sid) {
+        match self.turn.take(sid) {
             Some(Session::Collab(c)) => {
-                self.running.insert(sid.to_string());
+                self.turn.mark_running(sid.to_string());
                 Ok(c)
             }
             Some(other) => {
-                self.sessions.insert(sid.to_string(), other);
+                self.turn.put(sid.to_string(), other);
                 Err("该会话不是协作模式".to_string())
             }
             None => Err("无此会话".to_string()),
@@ -471,7 +436,7 @@ impl Conductor {
             _ => return Vec::new(),
         };
         // 判据是**队本身**（核心各关卡与工具级确认排在同一条队上）；没有队 = 本来就没挂着卡。
-        let Some(door) = self.desk.peek_gate(sid) else {
+        let Some(door) = self.turn.desk().peek_gate(sid) else {
             return Vec::new();
         };
         let cards = door.void();
@@ -487,7 +452,7 @@ impl Conductor {
     /// 目的：取这个会话的**裁决队**（核心各关卡与工具级确认共用同一条）。
     /// 约束：新队按转录里已发出的卡号续号——卡号会话内唯一、跨重启稳定（已答过的不重问）。
     pub(crate) fn desk_of(&self, sid: &str) -> Arc<dyn crate::capabilities::session::api::Gates> {
-        if let Some(d) = self.desk.peek_gate(sid) {
+        if let Some(d) = self.turn.desk().peek_gate(sid) {
             return d;
         }
         let issued = self
@@ -495,17 +460,17 @@ impl Conductor {
             .load(sid)
             .map(|(_, ev)| crate::capabilities::session::api::issued_in(&ev))
             .unwrap_or(0);
-        self.desk.gate(sid, issued)
+        self.turn.desk().gate(sid, issued)
     }
 
     /// 目的：会话没了，它的裁决队随会话一起消失（等待方与转录都不复存在）。
     pub(crate) fn forget_desk(&self, sid: &str) {
-        self.desk.forget_gate(sid);
+        self.turn.desk().forget_gate(sid);
     }
 
     /// 目的：这些会话里是否有任何一个的回合还攥在生成线程手里（核心里"生成中"）。
     pub(crate) fn running_any(&self, ids: &[String]) -> bool {
-        ids.iter().any(|s| self.running.contains(s))
+        ids.iter().any(|s| self.turn.is_running(s))
     }
 
     /// 目的：把 root 及其整棵子树里等用户裁决的队**一律作废**（停止 = 拒绝），按会话给出作废事件。
@@ -529,8 +494,8 @@ impl Conductor {
         sid: &str,
         c: CollabSession,
     ) -> (Vec<SessionEvent>, Vec<(String, String, String)>) {
-        self.running.remove(sid);
-        self.sessions.insert(sid.to_string(), Session::Collab(c));
+        self.turn.unmark_running(sid);
+        self.turn.put(sid.to_string(), Session::Collab(c));
         // 交回时这段工作已被停 / 已关闭：队列里没答的卡**一律作废**（生成期间对象在别人手里，只能在这里补）。
         let mut voided = self.void_gates_of(sid);
         let (spawned, todo) = self.spawn_ready_nodes(sid);
@@ -579,7 +544,7 @@ impl Conductor {
 
     /// 标记节点完成（记下它的产出），供父会话做总验收。
     fn mark_node_done(&mut self, sid: &str, node: &str, note: &str) {
-        if let Some(Session::Collab(c)) = self.sessions.get_mut(sid) {
+        if let Some(Session::Collab(c)) = self.turn.session_mut(sid) {
             c.mark_node_done(node, note);
         }
     }
@@ -590,7 +555,7 @@ impl Conductor {
     pub fn compact_plan(&mut self, sid: &str) -> Result<String, String> {
         // 会话不在世或不是单 agent：**报错**，不给出"空身份块"这种假计划
         // （压缩只对单 agent 会话成立；协作会话由各成员会话按阈值自己压）。
-        let model = match self.sessions.get(sid) {
+        let model = match self.turn.session(sid) {
             Some(Session::Single(s)) => s.model_id().map(str::to_string),
             _ => {
                 return Err(format!(
@@ -601,7 +566,7 @@ impl Conductor {
         };
         // 手动压缩也要读**当前**设置：用户刚把保留比例调低，不该等会话重建才生效。
         let (window, percent, keep) = self.context_budget(model.as_deref());
-        let Some(Session::Single(s)) = self.sessions.get_mut(sid) else {
+        let Some(Session::Single(s)) = self.turn.session_mut(sid) else {
             return Err(format!(
                 "压缩只支持单 agent 会话（{} 不在世或不是单 agent）",
                 sid
@@ -632,11 +597,11 @@ impl Conductor {
         let Some(parent) = parent else {
             return 0;
         };
-        let tid = match self.sessions.get_mut(&parent) {
+        let tid = match self.turn.session_mut(&parent) {
             Some(Session::Collab(c)) => c.next_turn_id(),
             _ => 0,
         };
-        if let Some(Session::Single(s)) = self.sessions.get_mut(child) {
+        if let Some(Session::Single(s)) = self.turn.session_mut(child) {
             s.set_turn(tid);
         }
         tid
@@ -649,7 +614,7 @@ impl Conductor {
 #[cfg(test)]
 impl Conductor {
     pub fn single_history(&self, sid: &str) -> Option<Vec<Msg>> {
-        match self.sessions.get(sid) {
+        match self.turn.session(sid) {
             Some(Session::Single(s)) => Some(s.dialogue().to_vec()),
             _ => None,
         }
@@ -660,7 +625,7 @@ impl Conductor {
         &self,
         sid: &str,
     ) -> Option<Vec<crate::capabilities::session::api::ReadAt>> {
-        match self.sessions.get(sid) {
+        match self.turn.session(sid) {
             Some(Session::Single(s)) => Some(s.reads().to_vec()),
             _ => None,
         }
@@ -677,7 +642,7 @@ impl Conductor {
 
     /// 目的：该会话此刻的**身份块**（按当前提示词册与形态现渲染）：测试用它断言"它被告诉了什么"。
     pub fn single_identity(&self, sid: &str) -> Option<String> {
-        match self.sessions.get(sid) {
+        match self.turn.session(sid) {
             Some(Session::Single(s)) => Some(s.params().identity(&*self.prompt, s.tool_mode())),
             _ => None,
         }
