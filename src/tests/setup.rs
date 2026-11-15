@@ -304,3 +304,163 @@ fn posix_modes_print_guidance_and_report_fence_unsupported() {
         crate::kernel::detail::confine::machine_missing(&root).expect_err("非 Windows 无预授");
     assert!(err.contains("本平台"), "{err}");
 }
+
+/// 目的：模式词的两种写法成对——命令面与 JSON 回执里的 id 再 parse 回来还是同一个模式。
+#[test]
+fn setup_modes_round_trip_through_their_ids() {
+    for mode in [
+        SetupMode::Path,
+        SetupMode::Unset,
+        SetupMode::Undo,
+        SetupMode::Status,
+        SetupMode::Fence,
+        SetupMode::FenceCalibrate,
+        SetupMode::All,
+    ] {
+        assert_eq!(
+            SetupMode::parse(mode.id()),
+            Some(mode),
+            "{} 要认回来",
+            mode.id()
+        );
+    }
+    // 省略模式词等于 status；认不出的词不猜。
+    assert_eq!(SetupMode::parse("  "), Some(SetupMode::Status));
+    assert_eq!(SetupMode::parse("bogus"), None);
+    for id in SetupMode::list().split(" / ") {
+        assert!(SetupMode::parse(id).is_some(), "清单里的 {} 必须能认", id);
+    }
+}
+
+/// 目的：启动期的围栏对账——两个档位（有/没有 ACL 一步）与三种结果（就绪、缺项、对账失败）都说对话。
+#[test]
+fn portable_fence_report_covers_every_branch() {
+    use crate::capabilities::system::api::Fault;
+    use crate::entry::portable::{ensure_grants, fence_report};
+
+    /// 目的：便携维护端口的替身：缺项与预授结果由字段决定，收到的进度行全记录。
+    struct FakeHost {
+        missing: Result<Vec<String>, String>,
+        grant: Result<(), String>,
+    }
+
+    impl SetupOps for FakeHost {
+        fn apply(
+            &self,
+            _mode: SetupMode,
+            _on_line: &mut dyn FnMut(&str),
+        ) -> Result<serde_json::Value, Fault> {
+            Err(Fault::failed("用例不写"))
+        }
+
+        fn fence_missing(&self) -> Result<Vec<String>, String> {
+            self.missing.clone()
+        }
+
+        fn fence_ensure(&self, on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
+            on_line("已预授");
+            self.grant.clone()
+        }
+    }
+
+    /// 目的：取出口收到的行（拷一份，免得借用与写入撞车）。
+    fn said(cell: &Mutex<Vec<String>>) -> Vec<String> {
+        cell.lock().expect("锁").clone()
+    }
+
+    fn host(missing: Result<Vec<String>, String>, grant: Result<(), String>) -> FakeHost {
+        FakeHost { missing, grant }
+    }
+
+    let hints: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    let warns: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    let say = |l: &str| hints.lock().expect("锁").push(l.to_string());
+    let warn = |l: &str| warns.lock().expect("锁").push(l.to_string());
+
+    // 没有 ACL 一步的平台：不对账、也不提示。
+    let plain = host(Err("本平台没有 ACL 一步".to_string()), Ok(()));
+    assert!(fence_report(&plain, false, &say, &warn));
+    assert!(said(&hints).is_empty(), "不该有提示");
+    assert!(said(&warns).is_empty());
+
+    // 就绪：什么都不说。
+    let ready = host(Ok(Vec::new()), Ok(()));
+    assert!(fence_report(&ready, true, &say, &warn));
+    assert!(said(&hints).is_empty());
+
+    // 缺项：一条提示，点名还缺几处、缺什么，并给出补的写法。
+    let partial = host(
+        Ok(vec!["产品根读属性".to_string(), "工具链落点".to_string()]),
+        Ok(()),
+    );
+    assert!(!fence_report(&partial, true, &say, &warn));
+    let hint = said(&hints).last().cloned().expect("有提示");
+    assert!(
+        hint.contains("还缺 2 处") && hint.contains("工具链落点") && hint.contains("--setup=fence"),
+        "{hint}"
+    );
+
+    // 对账本身失败：只告警，按已就绪放行（不拦启动）。
+    let broken = host(Err("注册表读不到".to_string()), Ok(()));
+    assert!(fence_report(&broken, true, &say, &warn));
+    let warning = said(&warns).last().cloned().expect("有告警");
+    assert!(warning.contains("注册表读不到"), "{warning}");
+
+    // 首次授权后的预授：没有 ACL 一步时静默走一趟（不声明、不打进度）。
+    let quiet_out: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    let quiet_say = |l: &str| quiet_out.lock().expect("锁").push(l.to_string());
+    let quiet = host(Ok(Vec::new()), Err("不会走到".to_string()));
+    ensure_grants(&quiet, false, &quiet_say, &warn);
+    assert!(said(&quiet_out).is_empty(), "非 ACL 平台不声明也不打进度");
+
+    // 有 ACL 一步：先声明一次，再把进度逐条交出来。
+    let granted_out: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    let granted_say = |l: &str| granted_out.lock().expect("锁").push(l.to_string());
+    let granted = host(Ok(Vec::new()), Ok(()));
+    ensure_grants(&granted, true, &granted_say, &warn);
+    let lines = said(&granted_out);
+    assert!(lines.iter().any(|l| l.contains("首次授权")), "{lines:?}");
+    assert!(
+        lines.iter().any(|l| l.contains("[便携] 已预授")),
+        "{lines:?}"
+    );
+
+    // 预授失败：告警一句并给出重跑写法，不拦重启。
+    let failed_warns: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    let failed_warn = |l: &str| failed_warns.lock().expect("锁").push(l.to_string());
+    let failed = host(Ok(Vec::new()), Err("没有管理员权限".to_string()));
+    ensure_grants(&failed, true, &granted_say, &failed_warn);
+    let text = said(&failed_warns).join("\n");
+    assert!(
+        text.contains("没有管理员权限") && text.contains("--setup=fence"),
+        "{text}"
+    );
+}
+
+/// 目的：启动期的两个钩子对着真实端口走一趟：没有 ACL 一步的平台静默放行，端口自身如实报不可用。
+/// 约束：有 ACL 一步的平台（Windows）由 --setup=fence 真机冒烟与三平台探针验收，这里只钉只读那一半。
+#[test]
+fn portable_hooks_pass_quietly_without_an_acl_step() {
+    let root = std::env::temp_dir().join(format!("solomni-portable-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("建根");
+
+    // 只读对账：非 Windows 一律按已就绪放行（没有要预授的落点），不打印任何东西。
+    let ready = crate::entry::portable::fence_hint(&root);
+    if !crate::kernel::api::HAS_EXTERNAL_ACL_STEP {
+        assert!(ready, "无 ACL 一步的平台不该提示缺项");
+    }
+
+    // 授权后那一趟：非 Windows 静默走一趟（结果被吞掉），不报错、也不写用户环境。
+    crate::entry::portable::ensure_after_authorize(&root);
+
+    // 端口自身不静默成功：非 Windows 上没有机器级落点，如实报不可用。
+    if !crate::kernel::api::HAS_EXTERNAL_ACL_STEP {
+        let err = SetupHost::new(&root)
+            .fence_missing()
+            .expect_err("非 Windows 没有机器级落点");
+        assert!(err.contains("本平台"), "{err}");
+    }
+
+    let _ = std::fs::remove_dir_all(&root);
+}

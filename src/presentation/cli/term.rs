@@ -35,6 +35,8 @@ thread_local! {
     static COMPLETER: RefCell<Option<Completer>> = const { RefCell::new(None) };
     #[cfg(test)]
     static CAPTURE: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
+    #[cfg(test)]
+    static FEED: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
 }
 
 struct Ui {
@@ -193,6 +195,26 @@ pub(super) fn capture<T>(f: impl FnOnce() -> T) -> (T, Vec<String>) {
     (value, lines)
 }
 
+/// 目的：仅测试：按脚本喂输入行，ask 按顺序取走（取完之后回退到真实 stdin 的 EOF）。
+#[cfg(test)]
+pub(super) fn feed(lines: &[&str]) {
+    FEED.with(|cell| {
+        *cell.borrow_mut() = Some(lines.iter().map(|s| s.to_string()).collect());
+    });
+}
+
+#[cfg(test)]
+fn feed_next() -> Option<String> {
+    FEED.with(|cell| {
+        let mut queue = cell.borrow_mut();
+        let queue = queue.as_mut()?;
+        if queue.is_empty() {
+            return None;
+        }
+        Some(queue.remove(0))
+    })
+}
+
 /// 目的：仅测试：装一套确定的终端能力，免得断言随运行环境漂移。
 #[cfg(test)]
 pub(super) fn test_ui(tty: bool, cols: usize, ascii: bool, anim: bool, level: Level) {
@@ -299,7 +321,12 @@ pub(super) fn banner(tagline: &str, facts: &[String]) {
 }
 
 /// 目的：读一行输入；交互模式下用固定输入框，非交互模式保持逐行回退（机器可解析）。
+/// 约束：用例可以用 feed 脚本化喂输入（先于 stdin），主循环的分发因此能被真跑一遍。
 pub(super) fn ask(label: &str) -> Option<String> {
+    #[cfg(test)]
+    if let Some(line) = feed_next() {
+        return Some(line);
+    }
     let (paint, tty, cols) = current();
     if !tty {
         return plain_ask(label);

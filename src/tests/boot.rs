@@ -48,6 +48,14 @@ impl Default for Fake {
 }
 
 impl Fake {
+    /// 目的：让指定方法失败的同款替身——别的模块（转录中心那条路径）不必知道字段布局。
+    pub(crate) fn failing(what: &'static str) -> Self {
+        Fake {
+            fault: Some(what),
+            ..Fake::default()
+        }
+    }
+
     fn maybe<T>(&self, who: &str, ok: T) -> Result<T, Fault> {
         match self.fault {
             Some(f) if f == who => Err(Fault::failed(format!("{} 失败", who))),
@@ -600,4 +608,75 @@ fn writes_are_confirmed_in_place_and_refused_while_sessions_run() {
         0
     );
     assert_eq!(asked(&read_only), 0);
+}
+
+/// 目的：命令行入口的「没有人可问」：不认领任何人，也从不点头（缺 --yes 就照旧只预览）。
+#[test]
+fn never_ask_claims_nobody_and_never_agrees() {
+    let mut ask = boot::NeverAsk;
+    assert!(!boot::Ask::anyone(&ask));
+    assert!(!boot::Ask::confirm(&mut ask, "确认？[y/N]"));
+}
+
+/// 目的：确认问话要点出这次动的是什么——存储类别、工作名、虚拟根、依赖补齐各说各的。
+#[test]
+fn confirm_questions_name_the_target() {
+    /// 目的：记下问话、回答固定不点头的「人」。
+    struct Recorder(std::cell::RefCell<Vec<String>>);
+
+    impl boot::Ask for Recorder {
+        fn anyone(&self) -> bool {
+            true
+        }
+
+        fn confirm(&mut self, question: &str) -> bool {
+            self.0.borrow_mut().push(question.to_string());
+            false
+        }
+    }
+
+    let fake = Fake::default();
+    let ask = |command: &str, operands: &[String]| -> String {
+        let mut rec = Recorder(std::cell::RefCell::new(Vec::new()));
+        assert_eq!(
+            boot::run_asked(command, operands, &fake, true, &mut rec, true),
+            0,
+            "摇头只预览，退出码不再算错"
+        );
+        let asked = rec.0.borrow();
+        assert_eq!(asked.len(), 1, "写操作问一次");
+        asked[0].clone()
+    };
+
+    assert!(ask("gc", &ops(&["--category=logs"])).contains("存储类别 logs"));
+    assert!(ask("gc", &[]).contains("按策略回收存储"));
+    assert!(ask("work-gc", &ops(&["dev"])).contains("工作 dev"));
+    assert!(ask("work-gc", &[]).contains("确认回收？"));
+    assert!(ask("provision", &ops(&["--reset", "dev"])).contains("虚拟根 dev"));
+    assert!(ask("provision", &ops(&["--ensure"])).contains("下载并补齐依赖"));
+}
+
+/// 目的：`--setup status` 的三行排版两档都成型——字段齐时照实说，缺字段按「没有」说。
+#[test]
+fn setup_report_lines_read_every_field() {
+    let full = json!({
+        "platform": "windows",
+        "root": "D:/root",
+        "path": { "bin": "D:/root/bin", "has_bin": true, "shim_present": true, "shim_current": true },
+        "fence": { "supported": true, "ready": true, "missing": [], "error": null },
+    });
+    let lines = boot::setup_lines(&full);
+    assert_eq!(lines.len(), 3);
+    assert!(lines[0].contains("windows") && lines[0].contains("D:/root"));
+    assert!(lines[1].contains("D:/root/bin") && lines[1].contains("shim：在"));
+    assert!(lines[1].contains("shim 最新：是"));
+    assert!(lines[2].contains("已就绪") && lines[2].contains("缺 0 处"));
+
+    let missing = json!({
+        "path": { "shim_present": false },
+        "fence": { "ready": false, "missing": ["产品根读属性", "工具链落点"] },
+    });
+    let lines = boot::setup_lines(&missing);
+    assert!(lines[1].contains("目录在：否") && lines[1].contains("shim：没写"));
+    assert!(lines[2].contains("未就绪") && lines[2].contains("缺 2 处"));
 }

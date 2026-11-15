@@ -17,39 +17,45 @@
     },
     {
       "file": "src/main.rs",
-      "from": 119,
-      "to": 122,
-      "reason": "启动期分派 --setup（含维护命令的视图盘清扫）：只有真实启动路径会走到，测试进程里调用会 exit；由端到端与 --setup 真机冒烟验收"
+      "from": 102,
+      "to": 117,
+      "reason": "启动相命令的分派（含维护命令不分配视图盘）：拿到退出码就结束进程，测试进程里调用会 exit；命令面的每条命令由 src/tests/boot.rs 对着真能力验收，这条只负责接到进程出口，由 --doctor / --gc 真机冒烟验收"
     },
     {
       "file": "src/main.rs",
-      "from": 347,
-      "to": 347,
+      "from": 330,
+      "to": 330,
       "reason": "首次授权后的机器级预授钩子：只在交互式首次启动执行；由 --setup=fence 真机冒烟验收"
     },
     {
       "file": "src/main.rs",
-      "from": 382,
-      "to": 382,
+      "from": 365,
+      "to": 365,
       "reason": "启动期只读对账钩子：只在真实启动执行；由 --setup=status 真机冒烟验收"
     },
     {
       "file": "src/main.rs",
-      "from": 712,
-      "to": 712,
+      "from": 714,
+      "to": 714,
       "reason": "视图盘唯一分配点：main 组合根不在测试里执行，分配盘符会改本机状态；由真机探针与生命周期冒烟验收"
     },
     {
       "file": "src/main.rs",
       "from": 718,
-      "to": 720,
+      "to": 724,
       "reason": "核心线程起不来时的视图盘释放：只在真实启动的失败分支执行；由生命周期冒烟验收"
     },
     {
       "file": "src/main.rs",
-      "from": 763,
-      "to": 765,
+      "from": 766,
+      "to": 769,
       "reason": "正常退出的视图盘释放：main 组合根不在测试里执行；由生命周期冒烟验收"
+    },
+    {
+      "file": "src/capabilities/system/detail/setup/fence.rs",
+      "from": 14,
+      "to": 37,
+      "reason": "Windows 专有的机器级 ACL 真写（预授与成本标定）：非 Windows 在上面的护栏就返回，守卫之后的路径在 Linux 覆盖率作业里永远执行不到；由 --setup=fence / --setup=fence-calibrate 真机冒烟与三平台探针验收"
     },
     {
       "file": "src/capabilities/conductor/service/history.rs",

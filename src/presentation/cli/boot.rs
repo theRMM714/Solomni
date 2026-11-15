@@ -106,10 +106,10 @@ fn question(command: &str, args: &Args) -> String {
             Some(w) => format!("确认回收工作 {} 里不可达的对象？[y/N]", w),
             None => "确认回收？[y/N]".to_string(),
         },
-        _ => match (args.reset.as_deref(), args.ensure.as_deref()) {
-            (Some(guest), _) => format!("确认还原虚拟根 {}？会删掉它里面的状态并重建 [y/N]", guest),
-            (_, Some(_)) => "确认从网络下载并补齐依赖？[y/N]".to_string(),
-            _ => "确认执行？（会写项目内数据）[y/N]".to_string(),
+        // 会要求确认的写命令只有 gc / work-gc / provision，而 provision 的写只来自 --reset 或 --ensure。
+        _ => match args.reset.as_deref() {
+            Some(guest) => format!("确认还原虚拟根 {}？会删掉它里面的状态并重建 [y/N]", guest),
+            None => "确认从网络下载并补齐依赖？[y/N]".to_string(),
         },
     }
 }
@@ -388,6 +388,13 @@ fn setup(system: &dyn System, args: &Args, json: bool) -> i32 {
 
 /// 目的：`setup status` 的人读排版——平台与根、PATH 入口、围栏预授缺项，只从回执里取。
 fn print_setup(v: &Value) {
+    for line in setup_lines(v) {
+        println!("{}", line);
+    }
+}
+
+/// 目的：`setup status` 的三行回执（人读）：只从回执里取，缺字段按「没有」显示。
+pub(crate) fn setup_lines(v: &Value) -> Vec<String> {
     let text = |a: &str, b: &str| -> String {
         v.get(a)
             .and_then(|x| x.get(b))
@@ -401,47 +408,39 @@ fn print_setup(v: &Value) {
             .and_then(|x| x.as_bool())
             .unwrap_or(false)
     };
-    println!(
-        "[便携] 平台：{}  根：{}",
-        v.get("platform")
-            .and_then(|x| x.as_str())
-            .unwrap_or_default(),
-        v.get("root").and_then(|x| x.as_str()).unwrap_or_default()
-    );
-    println!(
-        "[便携] PATH 入口：{}（目录在：{}；shim：{}；shim 最新：{}）",
-        text("path", "bin"),
-        if flag("path", "has_bin") {
-            "是"
+    let ord = |yes: bool, yes_text: &str, no_text: &str| -> String {
+        if yes {
+            yes_text.to_string()
         } else {
-            "否"
-        },
-        if flag("path", "shim_present") {
-            "在"
-        } else {
-            "没写"
-        },
-        if flag("path", "shim_current") {
-            "是"
-        } else {
-            "否"
+            no_text.to_string()
         }
-    );
+    };
     let missing = v
         .get("fence")
         .and_then(|f| f.get("missing"))
         .and_then(|m| m.as_array())
-        .map(|a| a.len())
-        .unwrap_or(0);
-    println!(
-        "[便携] 围栏预授：{}（缺 {} 处）",
-        if flag("fence", "ready") {
-            "已就绪"
-        } else {
-            "未就绪"
-        },
-        missing
-    );
+        .map_or(0, |a| a.len());
+    vec![
+        format!(
+            "[便携] 平台：{}  根：{}",
+            v.get("platform")
+                .and_then(|x| x.as_str())
+                .unwrap_or_default(),
+            v.get("root").and_then(|x| x.as_str()).unwrap_or_default()
+        ),
+        format!(
+            "[便携] PATH 入口：{}（目录在：{}；shim：{}；shim 最新：{}）",
+            text("path", "bin"),
+            ord(flag("path", "has_bin"), "是", "否"),
+            ord(flag("path", "shim_present"), "在", "没写"),
+            ord(flag("path", "shim_current"), "是", "否")
+        ),
+        format!(
+            "[便携] 围栏预授：{}（缺 {} 处）",
+            ord(flag("fence", "ready"), "已就绪", "未就绪"),
+            missing
+        ),
+    ]
 }
 
 /// 目的：`--build`：在宿主或某个虚拟根里跑模块声明的构建。
