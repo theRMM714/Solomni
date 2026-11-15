@@ -38,6 +38,7 @@
   - 事实为否（建不了）时不进 `rw`；`standalone` 的缺省工作目录退回模块根。
   - `prepare_fence` 跳过不存在的落点，不判整次失败。
 - 新增 / 修改系统工具 → 改 `systools/tools.yaml` 与（需要时）`systools/roles.yaml`；尚未实现的方向记在 `systool_gaps.yaml`（仓库根；不替代测试缺口账）。
+- 新增 / 修改产品命令（命令名、别名、分组、写法、确认门槛、命令自己的旗语）→ 改 `systools/commands.yaml`；执行分派仍写在入口与终端层，表与分派的同步由 `src/tests/commands.rs` 锁死。
 
 ## 本目录
 

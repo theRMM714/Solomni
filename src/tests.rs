@@ -8,6 +8,7 @@ mod builders;
 mod builds;
 mod cli;
 mod collab;
+mod commands;
 mod conductor;
 mod detail;
 mod diagnostics;

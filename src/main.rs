@@ -25,8 +25,14 @@ use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-/// 目的：装配核心之前就能回答的旗语：`--help` 与 `--version` 就地输出并给出退出码。
+/// 目的：装配核心之前就能回答的旗语：`--help`（含 `<命令> --help`）、`--version` 就地输出并给出退出码。
 fn early_exit(flags: &presentation::cli::argv::Flags) -> Option<i32> {
+    if let Some(topic) = &flags.help_topic {
+        let text = presentation::cli::catalog::detail(topic)
+            .unwrap_or_else(|| presentation::cli::catalog::help_text(flags.all));
+        print!("{}", text);
+        return Some(0);
+    }
     if flags.help {
         print!("{}", presentation::cli::catalog::help_text(flags.all));
         return Some(0);
