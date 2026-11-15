@@ -32,10 +32,6 @@ impl SetupHost {
 
 impl SetupOps for SetupHost {
     fn apply(&self, mode: SetupMode, on_line: &mut dyn FnMut(&str)) -> Result<Value, Fault> {
-        // 状态是只读的：回执是状态视图本身（键值），排版在呈现层，这里不出进度行。
-        if mode == SetupMode::Status {
-            return status_value(&self.root).map_err(Fault::failed);
-        }
         let mut lines: Vec<String> = Vec::new();
         {
             // 进度既进回执又当场交出：预授一条一条写 ACL 时人要看得见进度。
@@ -44,6 +40,8 @@ impl SetupOps for SetupHost {
                 on_line(line);
             };
             match mode {
+                // 状态是只读的：回执是状态视图本身（键值），排版在呈现层，这里不出进度行。
+                SetupMode::Status => return status_value(&self.root).map_err(Fault::failed),
                 SetupMode::Path => sink(&path::path_line(&self.root).map_err(Fault::failed)?),
                 SetupMode::Unset => sink(&path::unset_line(&self.root).map_err(Fault::failed)?),
                 SetupMode::Undo => sink(&path::undo_line(&self.root).map_err(Fault::failed)?),
@@ -55,7 +53,6 @@ impl SetupOps for SetupHost {
                     sink(&path::path_line(&self.root).map_err(Fault::failed)?);
                     fence::grant(&self.root, &mut sink).map_err(Fault::failed)?;
                 }
-                SetupMode::Status => unreachable!("状态在上面已返回"),
             }
         }
         Ok(json!({ "mode": mode.id(), "lines": lines }))
@@ -73,7 +70,18 @@ impl SetupOps for SetupHost {
 /// 目的：状态视图：平台、根、PATH/shim 事实、机器级预授缺项。只读，不改任何状态。
 fn status_value(root: &Path) -> Result<Value, String> {
     let path = path::info(root);
-    let fence = match fence::missing(root) {
+    let fence = fence_view(fence::missing(root));
+    Ok(json!({
+        "platform": std::env::consts::OS,
+        "root": root.display().to_string(),
+        "path": path,
+        "fence": fence,
+    }))
+}
+
+/// 目的：把围栏缺项折成状态视图里的 fence 字段；本平台没有 ACL 一步时如实标 supported=false 并带原因。
+fn fence_view(missing: Result<Vec<String>, String>) -> Value {
+    match missing {
         Ok(missing) => json!({
             "supported": true,
             "ready": missing.is_empty(),
@@ -86,17 +94,28 @@ fn status_value(root: &Path) -> Result<Value, String> {
             "missing": Vec::<String>::new(),
             "error": e,
         }),
-    };
-    Ok(json!({
-        "platform": std::env::consts::OS,
-        "root": root.display().to_string(),
-        "path": path,
-        "fence": fence,
-    }))
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    /// 目的：状态视图里的围栏字段两档都成型——有 ACL 一步的平台给缺项清单，没有的如实标不可用并带原因。
+    #[test]
+    fn fence_view_covers_both_platforms() {
+        use super::*;
+        let ready = fence_view(Ok(Vec::new()));
+        assert_eq!(ready["supported"], json!(true));
+        assert_eq!(ready["ready"], json!(true));
+        assert_eq!(ready["error"], Value::Null);
+        let partial = fence_view(Ok(vec!["产品根读属性".to_string()]));
+        assert_eq!(partial["ready"], json!(false));
+        assert_eq!(partial["missing"], json!(["产品根读属性"]));
+        let unsupported = fence_view(Err("本平台没有 ACL 一步".to_string()));
+        assert_eq!(unsupported["supported"], json!(false));
+        assert_eq!(unsupported["missing"], json!([]));
+        assert_eq!(unsupported["error"], json!("本平台没有 ACL 一步"));
+    }
+
     /// 目的：非 Windows 上围栏标定如实报不可用（不静默成功），并覆盖模式分派。
     #[cfg(not(windows))]
     #[test]

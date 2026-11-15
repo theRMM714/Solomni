@@ -102,6 +102,33 @@ async function launchBrowser() {
   return b;
 }
 
+// 首页打开一次：等应用自己发出 /api/state。浏览器的子资源队列偶尔会把某条静态资源
+// 排到几十秒之后（请求根本没写出去，服务端也看不到），ES 模块图就停在那条上，
+// main.js 不执行，应用永远不会发 /api/state。这种等待与服务端无关，整页重载一次即可恢复。
+async function openAppOnce(page) {
+  const stateLoaded = page.waitForResponse(
+    (r) => r.url().endsWith("/api/state") && r.status() === 200,
+    { timeout: 30000 }
+  );
+  // goto 先失败时这条等待会成为悬空 promise，先挂兜底免得变成未处理的 rejection。
+  stateLoaded.catch(() => {});
+  await page.goto(BASE, { waitUntil: "commit" });
+  await stateLoaded;
+}
+
+// 只重试一次，且只在「整页打开了但 /api/state 一直没回来」时；第二次仍不成就把异常抛给外层判失败，
+// 不掩盖真的起不来（服务端拒绝、脚本报错都会让第二次同样失败）。
+async function openApp(page) {
+  try {
+    await openAppOnce(page);
+    return;
+  } catch (e) {
+    const first = String((e && e.message) || e).split("\n")[0];
+    console.log("[browser] 首页第一次没就绪（" + first + "），整页重载重试一次");
+  }
+  await openAppOnce(page);
+}
+
 async function saveArtifacts(context, page, stamp) {
   const dir = path.join(ARTIFACT_ROOT, stamp);
   fs.mkdirSync(dir, { recursive: true });
@@ -143,12 +170,7 @@ async function saveArtifacts(context, page, stamp) {
   try {
     // ① 首页连接真实服务：应用就绪看 /api/state 是否回来（start 先绑事件再拉它）；
     //    DOMContentLoaded 会被任一 defer 资源（如 md.js）拖住，不能当就绪信号。
-    const stateLoaded = page.waitForResponse(
-      (r) => r.url().endsWith("/api/state") && r.status() === 200,
-      { timeout: 30000 }
-    );
-    await page.goto(BASE, { waitUntil: "commit" });
-    await stateLoaded;
+    await openApp(page);
     await page.locator("#conn-text").waitFor({ state: "visible" });
     console.log("PASS 首页加载完成");
 

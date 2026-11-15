@@ -174,11 +174,12 @@ impl boot::Ask for TerminalAsk {
 }
 
 /// 目的：有没有会话此刻在生成：写操作（回收 / 还原 / 补齐）在有会话在跑时只给预览。
+/// 约束：读不到会话清单按「没在跑」处理——宁可多跑一次确认问话，也不让维护命令卡在只读上。
 fn sessions_running(ops: &Ops) -> bool {
-    match ops.sessions.session_views(&[]) {
-        Ok(views) => views.iter().any(|v| v.running),
-        Err(_) => false,
-    }
+    ops.sessions
+        .session_views(&[])
+        .map(|views| views.iter().any(|v| v.running))
+        .unwrap_or(false)
 }
 
 /// 目的：打印手册：无参数给全量，`--all` 连内部旗语一起列，带命令名只讲那一条。
@@ -319,6 +320,66 @@ mod tests {
         let (code, lines) = term::capture(|| run_boot(&ops, &system, setup, "bogus"));
         assert_eq!(code, 2);
         assert!(lines.iter().any(|l| l.contains("[退出码 2]")), "{lines:?}");
+
+        // 非门槛类的失败也要有解释（退出码 1）：同一句兜底文案。
+        let failing = crate::tests::boot::Fake::failing("storage");
+        let storage = catalog::boot("--storage").expect("命令表里有 --storage");
+        let (code, lines) = term::capture(|| run_boot(&ops, &failing, storage, ""));
+        assert_eq!(code, 1);
+        assert!(lines.iter().any(|l| l.contains("[退出码 1]")), "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("执行失败")), "{lines:?}");
         drop(handle);
+    }
+
+    /// 目的：提示符里直接敲启动相旗语也走同一条执行路径——跑完回提示符，转录中心不退出。
+    /// 约束：写操作就地一问；摇头只算预览（退出码归零），点头才真的带上确认。
+    #[test]
+    fn repl_runs_boot_commands_from_the_prompt() {
+        let (handle, ops) = crate::tests::ops_with(vec![], vec![]);
+        let system = crate::tests::boot::Fake::default();
+        term::feed(&["--setup bogus", "--gc", "n", "--gc", "y", "exit"]);
+        let (exit, lines) = term::capture(|| run(ops, 49181, true, false, &system));
+        assert!(matches!(exit, CliExit::Exit), "exit 之后才离开转录中心");
+        assert!(
+            lines.iter().any(|l| l.contains("[退出码 2]")),
+            "用法不对要配一句解释：{lines:?}"
+        );
+        assert!(
+            !lines.iter().any(|l| l.contains("[退出码 0]")),
+            "成功不留退出码：{lines:?}"
+        );
+
+        // 问话没人答（输入到尽头）：按没点头算，不该把维护命令一直吊在确认上。
+        let (handle2, ops2) = crate::tests::ops_with(vec![], vec![]);
+        term::feed(&["--gc"]);
+        let (exit, _) = term::capture(|| run(ops2, 49181, true, false, &system));
+        assert!(matches!(exit, CliExit::Exit));
+        drop(handle2);
+        drop(handle);
+    }
+
+    /// 目的：转录中心的确认只认明确的 yes——n / 空 / 读不到输入都算没点头。
+    #[test]
+    fn terminal_ask_only_takes_an_explicit_yes() {
+        for (answer, expect) in [
+            ("y", true),
+            ("yes", true),
+            ("是", true),
+            ("n", false),
+            ("", false),
+        ] {
+            term::feed(&[answer]);
+            let mut ask = TerminalAsk;
+            assert!(boot::Ask::anyone(&ask), "转录中心里有人可问");
+            assert_eq!(
+                boot::Ask::confirm(&mut ask, "确认？[y/N]"),
+                expect,
+                "回答 {answer:?}"
+            );
+        }
+        // 输入到尽头（没人答）：同样不算点头。
+        term::feed(&[]);
+        let mut ask = TerminalAsk;
+        assert!(!boot::Ask::confirm(&mut ask, "确认？[y/N]"));
     }
 }
