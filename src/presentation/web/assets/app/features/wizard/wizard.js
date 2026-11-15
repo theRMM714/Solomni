@@ -657,7 +657,8 @@ async function startSession(body) {
   // 开场事实不随回包走：它们已经在事件台上，长轮询会照 seq 补进来。
   setActive(sid);
   renderAll();
-  await refreshState(); // 会话历史随建随现
+  // 会话历史随建随现，但不拿它当关弹层的门槛：派一次就够，慢或失败只让侧栏晚一点刷出来。
+  refreshState().catch(() => {});
   return s;
 }
 

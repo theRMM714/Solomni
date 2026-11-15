@@ -23,9 +23,22 @@ function modelOptions(current, needEmpty) {
 
 function onRegistryChange(fn) { return registry.on(fn); }
 
-/** 拉一次 /api/state：快照投影进状态（app/stores/state.js），再补新会话的盘上转录并重画。 */
+/** 状态刷新等多久：超过就当这次失败，让调用方如实报错、下一次照常重来。 */
+const STATE_TIMEOUT_MS = 10000;
+/** 刷新队列的尾巴：每次都接在上一次后面，慢一次压不出成片并发。 */
+let stateQueue = Promise.resolve();
+
+/** 串行化的状态刷新：排在队尾，谁调用谁拿到**自己这次**的结果或异常。 */
 async function refreshState() {
-  const s = await api('GET', '/api/state');
+  const run = stateQueue.then(refreshSnapshot, refreshSnapshot);
+  // 队列本身不留异常（否则一次失败会拖住后面每一轮）；异常照常交给这次的调用方。
+  stateQueue = run.catch(() => {});
+  return run;
+}
+
+/** 拉一次 /api/state：快照投影进状态（app/stores/state.js），再补新会话的盘上转录并重画。 */
+async function refreshSnapshot() {
+  const s = await api('GET', '/api/state', null, { timeoutMs: STATE_TIMEOUT_MS });
   const opened = stores.projectSnapshot(state, s);
   // 盘上转录是新会话的前缀：补上它，之后的实时事件按 seq 接上。
   for (const cur of opened) app.hydrateHistory(cur);

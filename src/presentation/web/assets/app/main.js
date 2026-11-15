@@ -53,7 +53,11 @@ export function boot(g) {
   const doc = g.document;
   const fetchImpl = (url, init) => g.fetch(url, init);
   const state = stateStore.createState();
-  const api = createApi(fetchImpl);
+  // 定时器也由宿主给：超时中止走的就是这里，冒烟沙箱才能换成桩。
+  const api = createApi(fetchImpl, {
+    setTimeout: (fn, ms) => g.setTimeout(fn, ms),
+    clearTimeout: (t) => g.clearTimeout(t),
+  });
   const ui = createUi(g);
   const app = {};
   const deps = {
