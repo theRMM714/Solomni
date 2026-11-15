@@ -19,6 +19,7 @@ const S = {
   docsTruth: require("./structure/docsTruth.js"),
   dependency: require("./structure/dependency.js"),
   layers: require("./structure/layers.js"),
+  values: require("./structure/values.js"),
   capability: require("./structure/capability.js"),
   webLayers: require("./structure/webLayers.js"),
   size: require("./structure/size.js"),
@@ -60,6 +61,18 @@ const GATES = [
     inputs: ["layers.yaml", "src/capabilities/**/*.rs"],
     run: (root, ctx) => {
       const r = S.layers.layers(root);
+      ctx.stats.notes = (ctx.stats.notes || []).concat(r.notes);
+      return r.problems;
+    },
+  },
+  {
+    id: "structure/values",
+    lane: "structure",
+    step: "T0 结构审查",
+    kind: "text",
+    inputs: ["src/capabilities/**/*.rs"],
+    run: (root, ctx) => {
+      const r = S.values.values(root);
       ctx.stats.notes = (ctx.stats.notes || []).concat(r.notes);
       return r.problems;
     },
@@ -131,6 +144,7 @@ const LANE_ORDER = {
     "structure/deps-sha256",
     "structure/dependency",
     "structure/layers",
+    "structure/values",
     "structure/module-files",
     "structure/web-layers",
     "structure/file-size",
