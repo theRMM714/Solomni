@@ -8,6 +8,7 @@
 | 要找什么 | 读哪一份 |
 | --- | --- |
 | `conductor`（协调业务） | [README.md](conductor/README.md)、[unit-map.md](conductor/unit-map.md) |
+| `lifecycle`（会话历史生命周期） | [README.md](lifecycle/README.md)、[unit-map.md](lifecycle/unit-map.md) |
 | `proxy`（模型工具面业务） | [README.md](proxy/README.md)、[unit-map.md](proxy/unit-map.md) |
 | `collab`（协作会话） | [README.md](collab/README.md)、[unit-map.md](collab/unit-map.md)、[task-chain.md](collab/task-chain.md) |
 | `session`（会话） | [README.md](session/README.md)、[unit-map.md](session/unit-map.md)、[session-model.md](session/session-model.md) |

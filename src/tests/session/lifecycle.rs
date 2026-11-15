@@ -85,8 +85,8 @@ pub(crate) fn history_delete_cascades_to_children_and_refuses_child_delete() {
 /// 目的：删除 VM 会话时**先停 guest，再删目录**——Windows 上 guest 还占着会话目录里的文件，反过来会 sharing violation。
 #[test]
 pub(crate) fn session_delete_stops_the_guest_before_removing_directories() {
-    use crate::capabilities::conductor::service::SessionDelete;
     use crate::capabilities::conductor::service::guest_job::GuestStop;
+    use crate::capabilities::lifecycle::api::SessionDelete;
     use crate::capabilities::vm::api::Vm;
     use crate::capabilities::vm::domain::guest::{GuestRun, GuestSpec};
     use crate::kernel::api::FenceSpec;
@@ -158,7 +158,9 @@ pub(crate) fn session_delete_stops_the_guest_before_removing_directories() {
         saw_directory: Arc::clone(&saw),
     });
     let delete = SessionDelete::for_test(
-        GuestStop::new(vm, vec!["w".to_string()]),
+        Some(Box::new(move || {
+            GuestStop::new(vm, vec!["w".to_string()]).run()
+        })),
         hist,
         vec!["w".to_string()],
         "w".to_string(),
@@ -175,8 +177,8 @@ pub(crate) fn session_delete_stops_the_guest_before_removing_directories() {
 ///   回调被闸门挡住时 `run()` 仍要立刻返回；回调里能看到会话已经删掉（先删目录的快分支前提）。
 #[test]
 pub(crate) fn session_delete_releases_fences_in_background_after_directories() {
-    use crate::capabilities::conductor::service::SessionDelete;
     use crate::capabilities::conductor::service::guest_job::GuestStop;
+    use crate::capabilities::lifecycle::api::SessionDelete;
     use crate::capabilities::vm::api::Vm;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc;
@@ -197,7 +199,7 @@ pub(crate) fn session_delete_releases_fences_in_background_after_directories() {
     let done = Arc::new(AtomicBool::new(false));
     let (gate_tx, gate_rx) = mpsc::channel::<()>();
     let gate_rx = Arc::new(Mutex::new(gate_rx));
-    let release: crate::capabilities::conductor::service::ReleaseByLease = {
+    let release: crate::capabilities::lifecycle::api::ReleaseByLease = {
         let gone = Arc::clone(&gone);
         let started = Arc::clone(&started);
         let done = Arc::clone(&done);
@@ -211,7 +213,7 @@ pub(crate) fn session_delete_releases_fences_in_background_after_directories() {
         })
     };
     let delete = SessionDelete::for_test_with_fences(
-        GuestStop::new(vm, Vec::new()),
+        Some(Box::new(move || GuestStop::new(vm, Vec::new()).run())),
         hist,
         vec!["w".to_string()],
         "w".to_string(),
@@ -245,8 +247,8 @@ pub(crate) fn session_delete_releases_fences_in_background_after_directories() {
 /// 目的：删目录失败时撤权仍然执行（错误如实返回，不能把待办丢掉）。
 #[test]
 pub(crate) fn session_delete_releases_fences_even_when_directory_delete_fails() {
-    use crate::capabilities::conductor::service::SessionDelete;
     use crate::capabilities::conductor::service::guest_job::GuestStop;
+    use crate::capabilities::lifecycle::api::SessionDelete;
     use crate::capabilities::session::api::History;
     use crate::capabilities::session::domain::history::HistoryView;
     use crate::capabilities::vm::api::Vm;
@@ -295,7 +297,7 @@ pub(crate) fn session_delete_releases_fences_even_when_directory_delete_fails() 
     let hist: Arc<dyn History + Send + Sync> = Arc::new(FailingDelete { inner });
     let vm: Arc<dyn Vm + Send + Sync> = Arc::new(crate::tests::doubles::RecordingVm::default());
     let called = Arc::new(AtomicBool::new(false));
-    let release: crate::capabilities::conductor::service::ReleaseByLease = {
+    let release: crate::capabilities::lifecycle::api::ReleaseByLease = {
         let called = Arc::clone(&called);
         Arc::new(move |_lease: &str| {
             called.store(true, Ordering::SeqCst);
@@ -303,7 +305,7 @@ pub(crate) fn session_delete_releases_fences_even_when_directory_delete_fails() 
         })
     };
     let delete = SessionDelete::for_test_with_fences(
-        GuestStop::new(vm, Vec::new()),
+        Some(Box::new(move || GuestStop::new(vm, Vec::new()).run())),
         hist,
         vec!["w".to_string()],
         "w".to_string(),
@@ -323,8 +325,8 @@ pub(crate) fn session_delete_releases_fences_even_when_directory_delete_fails() 
 /// 目的：没有租约时不起后台撤权线程（空清单直接返回）。
 #[test]
 pub(crate) fn session_delete_with_no_fence_leases_skips_release() {
-    use crate::capabilities::conductor::service::SessionDelete;
     use crate::capabilities::conductor::service::guest_job::GuestStop;
+    use crate::capabilities::lifecycle::api::SessionDelete;
     use crate::capabilities::vm::api::Vm;
     use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -339,7 +341,7 @@ pub(crate) fn session_delete_with_no_fence_leases_skips_release() {
     let hist = test_history_of(Arc::clone(&store));
     let vm: Arc<dyn Vm + Send + Sync> = Arc::new(crate::tests::doubles::RecordingVm::default());
     let called = Arc::new(AtomicBool::new(false));
-    let release: crate::capabilities::conductor::service::ReleaseByLease = {
+    let release: crate::capabilities::lifecycle::api::ReleaseByLease = {
         let called = Arc::clone(&called);
         Arc::new(move |_lease: &str| {
             called.store(true, Ordering::SeqCst);
@@ -347,7 +349,7 @@ pub(crate) fn session_delete_with_no_fence_leases_skips_release() {
         })
     };
     let delete = SessionDelete::for_test_with_fences(
-        GuestStop::new(vm, Vec::new()),
+        Some(Box::new(move || GuestStop::new(vm, Vec::new()).run())),
         hist,
         vec!["w".to_string()],
         "w".to_string(),
@@ -362,8 +364,8 @@ pub(crate) fn session_delete_with_no_fence_leases_skips_release() {
 /// 目的：后台撤权失败要如实记日志（失败条目留在台账，下次重试）。
 #[test]
 pub(crate) fn session_delete_logs_background_release_failures() {
-    use crate::capabilities::conductor::service::SessionDelete;
     use crate::capabilities::conductor::service::guest_job::GuestStop;
+    use crate::capabilities::lifecycle::api::SessionDelete;
     use crate::capabilities::vm::api::Vm;
     use std::time::{Duration, Instant};
 
@@ -378,7 +380,7 @@ pub(crate) fn session_delete_logs_background_release_failures() {
     let hist = test_history_of(Arc::clone(&store));
     let vm: Arc<dyn Vm + Send + Sync> = Arc::new(crate::tests::doubles::RecordingVm::default());
     let called = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let release: crate::capabilities::conductor::service::ReleaseByLease = {
+    let release: crate::capabilities::lifecycle::api::ReleaseByLease = {
         let called = Arc::clone(&called);
         Arc::new(move |_lease: &str| {
             called.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -388,7 +390,7 @@ pub(crate) fn session_delete_logs_background_release_failures() {
     let log = Arc::new(crate::tests::doubles::RecordingLog::new());
     let log_dyn: Arc<dyn crate::kernel::ports::Log + Send + Sync> = log.clone();
     let delete = SessionDelete::for_test_with_fences(
-        GuestStop::new(vm, Vec::new()),
+        Some(Box::new(move || GuestStop::new(vm, Vec::new()).run())),
         hist,
         vec!["w".to_string()],
         "w".to_string(),
@@ -407,7 +409,7 @@ pub(crate) fn session_delete_logs_background_release_failures() {
     );
     assert!(
         log.has("模拟撤权失败"),
-        "撤权失败要进日志（位置 conductor::release_fences）"
+        "撤权失败要进日志（位置 lifecycle::release_fences）"
     );
 }
 
