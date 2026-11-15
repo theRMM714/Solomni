@@ -31,6 +31,7 @@
 - 命令名、旗语与确认门槛的唯一声明是 `systools/commands.yaml`；`src/presentation/cli/boot.rs` 只把操作数翻成 `api::System` 的一次调用并排版回执。
 - 确认门槛由能力判，不靠命令行拦：`ensure` / `reset` 缺 `confirm` 报 `Fault::usage`；`gc` 无类别时缺省 dry-run（返回 0 并给预览），带类别时缺 `--yes` 由呈现层按预览退出 2——与迁移前的旗语行为逐条一致。
 - 退出码口径：0 成功 / 1 执行失败 / 2 用法或确认门槛不对，由 `Fault` 的两个构造器区分。
+- 状态视图：`setup status` 的回执是平台 / 根 / PATH 入口 / 围栏缺项的键值块，呈现层不带 `--json` 时排成三行（`[便携]` 前缀），带 `--json` 时原样打这份 JSON。
 - 机器回执：呈现层加 `--json` 时只输出一段 JSON，字段逐命令写在 `systools/commands.yaml` 的 `json`（本单元给的是值，排版与“加法”在 `boot.rs`）；失败时 stderr 一行 `{"error","code","domain"}`，退出码与人工模式一致。
 
 ## 二、自检报告

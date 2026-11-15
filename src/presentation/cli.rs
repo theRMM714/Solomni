@@ -311,6 +311,14 @@ mod tests {
         let (code, lines) = term::capture(|| run_boot(&ops, &system, doctor, "--nope"));
         assert_eq!(code, 2);
         assert!(lines.iter().any(|l| l.contains("[退出码 2]")), "{lines:?}");
+
+        // 便携维护：状态模式跑得通（回执自己排版），未知模式仍退 2 并给一句解释。
+        let setup = catalog::boot("--setup").expect("命令表里有 --setup");
+        let (code, _) = term::capture(|| run_boot(&ops, &system, setup, "status"));
+        assert_eq!(code, 0);
+        let (code, lines) = term::capture(|| run_boot(&ops, &system, setup, "bogus"));
+        assert_eq!(code, 2);
+        assert!(lines.iter().any(|l| l.contains("[退出码 2]")), "{lines:?}");
         drop(handle);
     }
 }
