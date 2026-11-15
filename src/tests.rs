@@ -4,6 +4,7 @@
 //! 联动：docs/testing/gaps-acceptance.md、docs/testing/doubles.md、docs/testing/levels.md。
 
 mod api;
+mod boot;
 mod builders;
 mod builds;
 mod cli;

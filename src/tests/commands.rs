@@ -227,6 +227,21 @@ fn global_flags_work_on_both_sides_of_a_boot_command() {
         .expect("--gc --help 可解析");
     assert_eq!(topic.help_topic.as_deref(), Some("gc"));
     assert!(!topic.help);
+
+    // 命令放在 --help 后面一样算这条命令的手册（--help 先被看见）。
+    let leading =
+        crate::presentation::cli::argv::parse(&["--help".to_string(), "--gc".to_string()])
+            .expect("--help --gc 可解析");
+    assert_eq!(leading.command.as_deref(), Some("gc"));
+    assert_eq!(leading.help_topic.as_deref(), Some("gc"));
+    assert!(!leading.help);
+
+    // 启动相之后的裸词也是它自己的操作数（工作名 / 模块 id）。
+    let bare = crate::presentation::cli::argv::parse(&["--work-gc".to_string(), "dev".to_string()])
+        .expect("--work-gc dev 可解析");
+    assert_eq!(bare.command.as_deref(), Some("work-gc"));
+    assert_eq!(bare.operands, vec!["dev".to_string()]);
+    assert!(bare.positionals.is_empty(), "启动相之后不该再进位置参数");
 }
 /// 覆盖：人能经呈现层用的动作，要么在呈现层有入口，要么在下面登记豁免。
 ///
