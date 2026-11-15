@@ -36,7 +36,7 @@
 | 3 | `residents`、`tools`、`vm` | 0–2 |
 | 4 | `provision`、`session` | 0–3 |
 | 5 | `registry` | 0–4 |
-| 6 | `slate`、`storage` | 0–5 |
+| 6 | `env`、`slate`、`storage` | 0–5 |
 | 7 | `builds`、`collab` | 0–6 |
 | 8 | `system` | 0–7 |
 | 9 | `conductor` | 0–8 |

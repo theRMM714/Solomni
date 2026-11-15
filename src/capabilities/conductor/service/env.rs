@@ -24,15 +24,11 @@ impl Conductor {
         } else {
             self.history.meta(&root)?
         };
-        // proxy：父会话没有 guest；整棵代理树的子工作共用顶层那一台（租约 = 代理根名）。
-        if top.mode == "proxy" {
-            if meta.parent.is_none() {
-                return Ok(None);
-            }
-            return Ok(Some((top.name.clone(), top)));
+        // 租约判据（proxy 父会话自己没有 guest，子工作共用代理根那台）在 env。
+        match crate::capabilities::env::api::guest_lease(meta, &top) {
+            Some(lease) => Ok(Some((lease, top))),
+            None => Ok(None),
         }
-        // 单 agent / 协作：整棵树共用顶层工作那台 guest。
-        Ok(Some((top.name.clone(), top)))
     }
 
     /// 目的：这台会话的工具执行要用的 guest 租约（空 = 本机档 / 没有 guest）。
@@ -141,42 +137,19 @@ impl Conductor {
         let path_codec = self.path_codec_of(&meta.exec);
         // 外部工作区的授权粒度：只影响围栏派生（共享区是否要每会话重授），不改权限面。
         let shared_grant = self.workspace_grant(meta)?;
-        let mut list: Vec<crate::capabilities::workspace::api::Sandbox> = Vec::new();
-        for a in &meta.agents {
-            let private = roots
-                .agents
-                .get(&a.name)
-                .cloned()
-                .ok_or_else(|| format!("工作区没有给出 agent {} 的沙箱路径", a.name))?;
-            let mut modules = BTreeMap::new();
-            let mut modules_with_userdata = std::collections::BTreeSet::new();
-            for id in &a.modules {
-                if let Some(m) = roster.modules.iter().find(|m| &m.manifest.id == id) {
-                    modules.insert(id.clone(), m.root.clone());
-                    if m.has_userdata {
-                        modules_with_userdata.insert(id.clone());
-                    }
-                }
-            }
-            list.push(crate::capabilities::workspace::api::Sandbox {
-                work_name: work.clone(),
-                session: meta.name.clone(),
-                agent: a.name.clone(),
-                shared: roots.shared.clone(),
-                private,
-                modules,
-                modules_with_userdata,
-                permissions: self.permission_for_agent(meta, &a.name)?,
-                path_codec: path_codec.clone(),
-                shared_grant,
-            });
-        }
-        Ok(crate::capabilities::workspace::api::Sandboxes {
-            shared: roots.shared,
-            session_root: roots.session_root,
-            list,
-            codec: path_codec,
-        })
+        // 逐席组装的规则在 env：模块目录只对使用它的 agent 可达，私有根缺一份就如实报缺哪个 agent。
+        crate::capabilities::env::api::sandboxes(
+            &crate::capabilities::env::api::SandboxesFacts {
+                work: &work,
+                session: &meta.name,
+                agents: &meta.agents,
+                roots: &roots,
+                roster,
+                codec: path_codec,
+                grant: shared_grant,
+            },
+            &|agent| self.permission_for_agent(meta, agent),
+        )
     }
 
     /// 目的：一条会话的权限链——根在前，自己最后（沿 parent 走到顶）。
@@ -198,24 +171,9 @@ impl Conductor {
         meta: &SessionMeta,
     ) -> Result<crate::capabilities::permission::api::PermissionSet, String> {
         let chain = self.permission_chain(meta)?;
-        let root = chain.first().ok_or_else(|| "会话权限链为空".to_string())?;
-        let mut out = self.registry.app().sandbox.defaults.to_permission_set();
-        if let Some(layer) = root.sandbox.root_layer()? {
-            out = out.apply_root(layer)?;
-        }
-        for child in chain.iter().skip(1) {
-            if let Some(layer) = child.sandbox.child_layer()? {
-                out = out.apply_narrowing(layer)?;
-            }
-        }
-        let out = out.with_hard_deny(&self.registry.app().sandbox.policy.deny);
-        // 外部工作区授权为 none：共享区读、写都收紧为 none，内置读工具与 shell 拿到的是同一份事实。
-        if Self::workspace_grant_in(&chain)
-            == crate::capabilities::session::api::WorkspaceGrant::None
-        {
-            return Ok(out.without_shared());
-        }
-        Ok(out)
+        // 合成规则（默认 → 根 ceiling → 每层 narrowing → 硬黑名单 → 无共享区授权就收紧）在 env。
+        let app = self.registry.app();
+        crate::capabilities::env::api::permissions(&chain, app)
     }
 
     /// 目的：这条会话生效的外部工作区授权粒度：沿权限链找最近一份绑定（创建时只写在根），
@@ -225,18 +183,7 @@ impl Conductor {
         meta: &SessionMeta,
     ) -> Result<crate::capabilities::session::api::WorkspaceGrant, String> {
         let chain = self.permission_chain(meta)?;
-        Ok(Self::workspace_grant_in(&chain))
-    }
-
-    /// 授权粒度的取法只有这一处：链上最近一份绑定说了算。
-    fn workspace_grant_in(
-        chain: &[SessionMeta],
-    ) -> crate::capabilities::session::api::WorkspaceGrant {
-        chain
-            .iter()
-            .rev()
-            .find_map(|m| m.workspace.as_ref().map(|b| b.grant))
-            .unwrap_or(crate::capabilities::session::api::WorkspaceGrant::Session)
+        Ok(crate::capabilities::env::api::workspace_grant(&chain))
     }
 
     /// 目的：某个 agent 的生效权限：协作主会话里的发言席优先取它自己的子会话 narrowing。
@@ -343,6 +290,28 @@ impl Conductor {
             notes.module_tools =
                 format!("{}\n{}", notes.module_tools, module_tool_lines.join("\n"));
         }
+        // 各模块隐私字段的注入项：装配期按模块解析一次，起工具进程时只走环境（解析失败 = 该模块没有可用值）。
+        let module_vars: BTreeMap<String, Vec<(String, String)>> = modules
+            .iter()
+            .map(|m| {
+                (
+                    m.manifest.id.clone(),
+                    self.secrets.resolve(&m.manifest.id).unwrap_or_default(),
+                )
+            })
+            .collect();
+        // 一席的工具环境事实（围栏 / 运行路径 / 工具链根 / 模块注入项）由 env 一处派生：
+        // 只读根 = 用户显式授权 + 本机运行包包根；工具链基础根只在宿主档放行。
+        let menv =
+            crate::capabilities::env::api::member(&crate::capabilities::env::api::MemberFacts {
+                sandbox: sb,
+                host_read_roots: &self.host_read_roots(),
+                net,
+                tier,
+                base_roots: &self.base_roots,
+                plan: host_plan,
+                module_vars: &module_vars,
+            });
         crate::capabilities::session::api::MemberTools {
             face: crate::capabilities::session::api::ToolFace {
                 mode,
@@ -357,42 +326,11 @@ impl Conductor {
                 builtin_tools: self.systools.book(),
 
                 unavailable,
-                // 围栏：可达范围 + 断网 + 环境白名单的落点，全部由该 agent 的沙箱派生（机制在 adapters）；
-                // 只读根来自用户显式授权（`sandbox.policy.host_read_roots`）与本机运行包的包根。
-                fence: {
-                    let mut fence = crate::kernel::api::FenceSpec::for_session(
-                        sb,
-                        &self.host_read_roots(),
-                        net,
-                    );
-                    fence.ro_tree.extend(host_plan.roots.iter().cloned());
-                    fence.ro_tree.sort();
-                    fence.ro_tree.dedup();
-                    fence
-                },
-                // 各模块隐私字段的注入项：装配期按模块解析一次，起工具进程时只走环境（解析失败 = 该模块没有可用值）。
-                module_env: modules
-                    .iter()
-                    .map(|m| {
-                        (
-                            m.manifest.id.clone(),
-                            self.secrets.resolve(&m.manifest.id).unwrap_or_default(),
-                        )
-                    })
-                    .collect(),
-                runtime_path: host_plan.path.clone(),
-                runtime_roots: {
-                    // 基础工具链根只在宿主档放行：VM 的工具链由 guest 的只读挂载提供，宿主路径在 guest 里不存在。
-                    let mut roots = if tier == crate::kernel::api::Tier::Host {
-                        self.base_roots.clone()
-                    } else {
-                        Vec::new()
-                    };
-                    roots.extend(host_plan.roots.iter().cloned());
-                    roots.sort();
-                    roots.dedup();
-                    roots
-                },
+                // 围栏、模块注入项、运行路径与工具链根都由 env 从事实派生（本文件不给第二份）。
+                fence: menv.fence,
+                module_env: menv.module_env,
+                runtime_path: menv.runtime_path,
+                runtime_roots: menv.runtime_roots,
                 // 这一席的系统工具面**由角色表发放**（越权校验的唯一判据）：给什么写什么，代码里不留第二份名单。
                 allowed,
                 role: role.to_string(),

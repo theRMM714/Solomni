@@ -16,6 +16,7 @@ vm: 3
 provision: 4
 session: 4
 registry: 5
+env: 6
 slate: 6
 storage: 6
 builds: 7

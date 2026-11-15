@@ -20,6 +20,7 @@
 | `vm`（虚拟机档） | [README.md](vm/README.md)、[unit-map.md](vm/unit-map.md) |
 | `workspace`（工作区） | [README.md](workspace/README.md)、[unit-map.md](workspace/unit-map.md) |
 | `provision`（依赖补齐） | [README.md](provision/README.md)、[unit-map.md](provision/unit-map.md) |
+| `env`（环境事实） | [README.md](env/README.md)、[unit-map.md](env/unit-map.md) |
 | `storage`（存储空间） | [README.md](storage/README.md)、[unit-map.md](storage/unit-map.md) |
 | `system`（系统维护与自检） | [README.md](system/README.md)、[unit-map.md](system/unit-map.md) |
 | `prompt`（提示词册） | [README.md](prompt/README.md)、[unit-map.md](prompt/unit-map.md)、[prompts.md](prompt/prompts.md) |
