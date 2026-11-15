@@ -108,7 +108,7 @@ fn waiting_list_is_built_line_by_line() {
 /// 约束：停止不套用发起方声明的默认项；等待方被解开、会话随后不再被派发。
 #[test]
 fn eof_answers_a_pending_card_by_stopping_instead_of_hanging() {
-    use crate::capabilities::session::api::{AnswerSlot, Pending, SlotWake};
+    use crate::capabilities::session::api::{Pending, SlotWake};
 
     let (handle, ops) = ops_with(vec![module_of("a")], Vec::new());
     let sid = "cli-eof-1";
@@ -121,13 +121,17 @@ fn eof_answers_a_pending_card_by_stopping_instead_of_hanging() {
             .call(move |core| Ok(core.desk_of(&s)))
             .expect("取这个会话的裁决队")
     };
-    // 造一个"工作线程正等答"的现场：卡片带等待格进队，等待格被那个线程等着。
-    let slot = AnswerSlot::new();
-    door.push(None, Pending::ConfirmBegin, "", Some(Arc::clone(&slot)));
+    // 造一个"工作线程正等答"的现场：线程在裁决通道上挂卡并阻塞等，主线程等卡进队。
     let waiter = {
-        let slot = Arc::clone(&slot);
-        std::thread::spawn(move || slot.wait())
+        let door = Arc::clone(&door);
+        std::thread::spawn(move || door.ask(Pending::ConfirmBegin, &mut |_| {}))
     };
+    let mut spins = 0;
+    while door.is_empty() && spins < 500 {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        spins += 1;
+    }
+    assert!(!door.is_empty(), "卡片要先进队，再按停止");
     // 输入到尽头：按停止收场，等待方被解开（而不是永远挂着）。
     cli::eof_stop(&ops, sid);
     assert_eq!(

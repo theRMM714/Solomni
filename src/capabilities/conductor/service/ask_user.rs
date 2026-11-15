@@ -5,9 +5,7 @@
 //!   「请用户裁决」；队列本体在 `capabilities/session/domain/decisions.rs`，本实现由核心在生成线程上现造。
 
 use crate::capabilities::conductor::api::{ConductorHandle, SessionOps};
-use crate::capabilities::session::api::{
-    AnswerSlot, DecisionDoor, Pending, SessionEvent, SlotWake,
-};
+use crate::capabilities::session::api::{Gates, Pending, SessionEvent, SlotWake};
 use crate::kernel::api::{Ask, AskOutcome};
 use crate::kernel::ports::AskUser;
 use std::sync::{Arc, Mutex};
@@ -16,8 +14,8 @@ use std::sync::{Arc, Mutex};
 /// 约束：构不出可用选项（空选项集）时**不发起裁决**，改为停掉这个会话 + 落一条警告（契约禁止置灰）；
 ///   停过一次之后不再推卡——会话已停下，再推一张没人能做主的卡只会让人困惑。
 pub struct SessionAsk {
-    /// 这个会话的裁决队（与核心各关卡、工具级确认**共用同一条**）。
-    door: Arc<DecisionDoor>,
+    /// 这个会话的裁决通道（与核心各关卡、工具级确认**共用同一条**）。
+    door: Arc<dyn Gates>,
     /// 这个会话的 id（停会话与落警告都指它）。
     sid: String,
     /// 卡片外送与落盘（与这一回合其余事件同一条路）。
@@ -32,7 +30,7 @@ impl SessionAsk {
     /// 目的：装配一个会话的提问端口（核心在生成线程上按该会话的裁决队与事件出口现造）。
     /// 参数：`emit` = 卡片的外送 + 落盘；`handle` = 停会话用的核心手柄。
     pub fn new(
-        door: Arc<DecisionDoor>,
+        door: Arc<dyn Gates>,
         sid: &str,
         emit: Box<dyn Fn(SessionEvent) + Send + Sync>,
         handle: ConductorHandle,
@@ -77,19 +75,14 @@ impl AskUser for SessionAsk {
             }
             None => None,
         };
-        // **先登记再推卡**：否则用户手快会答在一张还没进队的卡上，答案丢掉、发起方干等。
-        let slot = AnswerSlot::new();
-        let (_, events) = self.door.push(
-            None,
-            Pending::ToolAsk(Box::new(ask.clone())),
-            "",
-            Some(Arc::clone(&slot)),
-        );
-        for e in events {
-            (self.emit)(e);
-        }
-        // 不设超时：回答、用户按停止（整队作废 = 拒绝）、会话被删 / 重建都会解开这一格。
-        match slot.wait() {
+        // 端口负责"先登记再推卡、外送卡片、不设超时地等"：回答、用户按停止（整队作废 = 拒绝）、
+        // 会话被删 / 重建都会解开这一格。
+        let wake = self
+            .door
+            .ask(Pending::ToolAsk(Box::new(ask.clone())), &mut |e| {
+                (self.emit)(e)
+            });
+        match wake {
             SlotWake::Answer(id) => AskOutcome::Chosen(id),
             // 停止是用户的动作（= 拒绝）：**不套用默认项**，否则"按停止"会被吞成放行。
             SlotWake::Stopped => AskOutcome::Stopped,

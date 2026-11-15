@@ -39,7 +39,7 @@ fn session_case() -> (ConductorHandle, Ops, String) {
 fn door_of(
     handle: &ConductorHandle,
     sid: &str,
-) -> Arc<crate::capabilities::session::api::DecisionDoor> {
+) -> Arc<dyn crate::capabilities::session::api::Gates> {
     let s = sid.to_string();
     handle
         .call(move |core| Ok(core.desk_of(&s)))

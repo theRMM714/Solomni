@@ -248,7 +248,7 @@ pub struct Live<'a> {
     pub emit: &'a mut dyn FnMut(SessionEvent),
     /// 目的：本会话的裁决队（工具级确认这类"等在工作线程上"的关进它）。
     ///   `None` = 这一趟不接工具级确认（照常执行）——测试、讨论席与没有交互前端的生成都走它。
-    pub decisions: Option<std::sync::Arc<super::decisions::DecisionDoor>>,
+    pub decisions: Option<std::sync::Arc<dyn super::decisions::Gates>>,
     /// 目的：本会话的**提问端口**（工具执行层与围栏经它请用户裁决）：走同一条裁决队、**阻塞**等回答。
     ///   `None` = 这一趟没有可回答的前端（CLI 非交互、端到端夹具、测试、讨论席）——按 fail-closed 拒绝。
     pub ask: Option<std::sync::Arc<dyn crate::kernel::ports::AskUser>>,

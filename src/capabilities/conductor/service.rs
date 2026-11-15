@@ -178,7 +178,8 @@ pub struct Conductor {
     sessions: HashMap<SessionId, Session>,
     /// **裁决队**（按会话 id 取）：核心各关卡与工具级确认共用同一条队（见 docs/session/session-model.md）。
     /// 它跨线程：生成线程等在工作线程上，回答与快照在核心线程上——同一份句柄、同一把锁。
-    desk: Arc<crate::capabilities::session::api::DecisionDesk>,
+    /// 拿的是**端口**（`session::api::Decisions`）而不是队结构：队列本体与校验留在会话单元里（R16）。
+    desk: Arc<dyn crate::capabilities::session::api::Decisions>,
     /// 正在生成的会话：对象被工作线程**取走**了，核心表里暂时没有它。
     /// 为什么取出而不是就地生成：生成要跑几十秒到几分钟，占着唯一的命令队列会让
     /// 读接口（历史列表、状态）与其它会话的命令全排在它后面——界面因此"假死"。
@@ -259,7 +260,7 @@ impl Conductor {
             prompt,
             systools,
             sessions: HashMap::new(),
-            desk: crate::capabilities::session::api::DecisionDesk::new(),
+            desk: crate::capabilities::session::api::decisions(),
             running: std::collections::BTreeSet::new(),
             starting: std::collections::BTreeSet::new(),
         };
@@ -470,7 +471,7 @@ impl Conductor {
             _ => return Vec::new(),
         };
         // 判据是**队本身**（核心各关卡与工具级确认排在同一条队上）；没有队 = 本来就没挂着卡。
-        let Some(door) = self.desk.peek(sid) else {
+        let Some(door) = self.desk.peek_gate(sid) else {
             return Vec::new();
         };
         let cards = door.void();
@@ -485,11 +486,8 @@ impl Conductor {
 
     /// 目的：取这个会话的**裁决队**（核心各关卡与工具级确认共用同一条）。
     /// 约束：新队按转录里已发出的卡号续号——卡号会话内唯一、跨重启稳定（已答过的不重问）。
-    pub(crate) fn desk_of(
-        &self,
-        sid: &str,
-    ) -> Arc<crate::capabilities::session::api::DecisionDoor> {
-        if let Some(d) = self.desk.peek(sid) {
+    pub(crate) fn desk_of(&self, sid: &str) -> Arc<dyn crate::capabilities::session::api::Gates> {
+        if let Some(d) = self.desk.peek_gate(sid) {
             return d;
         }
         let issued = self
@@ -497,12 +495,12 @@ impl Conductor {
             .load(sid)
             .map(|(_, ev)| crate::capabilities::session::api::issued_in(&ev))
             .unwrap_or(0);
-        self.desk.session(sid, issued)
+        self.desk.gate(sid, issued)
     }
 
     /// 目的：会话没了，它的裁决队随会话一起消失（等待方与转录都不复存在）。
     pub(crate) fn forget_desk(&self, sid: &str) {
-        self.desk.forget(sid);
+        self.desk.forget_gate(sid);
     }
 
     /// 目的：这些会话里是否有任何一个的回合还攥在生成线程手里（核心里"生成中"）。

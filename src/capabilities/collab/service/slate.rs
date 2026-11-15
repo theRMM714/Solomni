@@ -10,7 +10,7 @@ use crate::capabilities::modules::api::Modules;
 use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::registry::api::Settings;
 use crate::capabilities::session::api::SessionMeta;
-use crate::capabilities::session::api::{DecisionDoor, LineView, Pending, SessionEvent};
+use crate::capabilities::session::api::{Gates, LineView, Pending, SessionEvent};
 use crate::capabilities::tools::api::ToolExec;
 use crate::capabilities::vm::api::Vm;
 use crate::capabilities::workspace::api::Sandboxes;
@@ -231,7 +231,7 @@ impl CollabSession {
         // 工作区用例面：写工具落地后自动提交（基线过期时如实拒绝，不降级）。
         workspace: Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync>,
         // 本会话的裁决队（核心按会话 id 与转录里已发出的卡号给）：重建出来的整队进它。
-        door: Arc<DecisionDoor>,
+        door: Arc<dyn Gates>,
     ) -> Result<CollabSession, String> {
         let names: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
         let st = crate::capabilities::collab::domain::collab_state::derive(events, &names);
@@ -335,7 +335,7 @@ impl CollabSession {
         // 或被停会话整队作废时，按状态续新卡号接着问（已答过的不重问，见 session-model.md「请用户裁决」）。
         for (id, p, advice) in derive_gates(&st) {
             // 没人回答的那张沿用它自己的卡号；状态派生出来的那一关还没有卡号，由队列续号。
-            s.door.push(id.as_deref(), p, &advice, None);
+            s.door.raise(id.as_deref(), p, &advice);
         }
         Ok(s)
     }
