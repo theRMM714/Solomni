@@ -46,7 +46,7 @@ impl Conductor {
         target: RewindTarget,
         force: bool,
     ) -> Result<RewindOutcome, String> {
-        if self.running.contains(sid) {
+        if self.turn.is_running(sid) {
             return Err(Self::running_refusal(sid));
         }
         let (meta, raw) = self.history.load(sid)?;
@@ -153,13 +153,13 @@ impl Conductor {
                     .map_err(|e| format!("删除落盘失败：{}", e))?;
                 // 删除的算子是"截掉尾部"：单 agent 且压缩点没被切到时**就地精确回退**（不重建，
                 // 保住通道与运行态）；否则按转录重建（协作与跨压缩点都得重建）。
-                let precise = match self.sessions.get(sid) {
+                let precise = match self.turn.session(sid) {
                     // 压缩记录行被截在保留点之后才就地回退；截到它本身或更早必须重建。
                     Some(Session::Single(s)) => s.compacted_line == 0 || before > s.compacted_line,
                     _ => false,
                 };
                 let active = if precise {
-                    if let Some(Session::Single(s)) = self.sessions.get_mut(sid) {
+                    if let Some(Session::Single(s)) = self.turn.session_mut(sid) {
                         s.apply_rewind(before);
                         // 截掉的尾部里的 usage 事件也随 kept 过滤；状态栏不能继续显示旧数字。
                         s.set_last_usage(crate::capabilities::session::api::last_usage(&kept));
@@ -227,7 +227,7 @@ impl Conductor {
             Session::Single(s) => s.next_line = next,
             Session::Collab(c) => c.next_line = next,
         }
-        self.sessions.insert(sid.to_string(), rebuilt);
+        self.turn.put(sid.to_string(), rebuilt);
         Ok(active)
     }
 
@@ -275,7 +275,7 @@ impl Conductor {
                 .first()
                 .map(|a| a.name.clone())
                 .unwrap_or_default();
-            if self.running.contains(&kid) {
+            if self.turn.is_running(&kid) {
                 if !agent.is_empty() {
                     keeps.insert(agent, u64::MAX);
                 }
@@ -342,7 +342,7 @@ impl Conductor {
                 .first()
                 .map(|a| a.name.clone())
                 .unwrap_or_default();
-            if self.running.contains(&kid) {
+            if self.turn.is_running(&kid) {
                 if !agent.is_empty() {
                     keeps.insert(agent, u64::MAX);
                 }
@@ -370,7 +370,7 @@ impl Conductor {
         let mut rewound: Vec<(String, Vec<serde_json::Value>)> = Vec::new();
         for kid in kids {
             let (meta, raw) = self.history.load(&kid)?;
-            if self.running.contains(&kid) {
+            if self.turn.is_running(&kid) {
                 continue;
             }
             let Some(idx) = raw.iter().position(|ev| {

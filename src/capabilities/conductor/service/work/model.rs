@@ -158,7 +158,7 @@ impl Conductor {
         let level = level.trim();
         let root = self.work_root(sid)?;
         for s in self.subtree_of(&root) {
-            if self.running.contains(&s) {
+            if self.turn.is_running(&s) {
                 return Err(Self::running_refusal(&s));
             }
         }
@@ -198,7 +198,7 @@ impl Conductor {
         self.record_config(&root, &meta);
         // 内存里的会话按旧参数装着：整棵丢掉，下一次访问按新档位从转录重建。
         for s in self.subtree_of(&root) {
-            self.sessions.remove(&s);
+            self.turn.take(&s);
         }
         Ok(())
     }
@@ -209,7 +209,7 @@ impl Conductor {
     pub(crate) fn set_context_freshness(&mut self, sid: &str, on: bool) -> Result<(), String> {
         let root = self.work_root(sid)?;
         for s in self.subtree_of(&root) {
-            if self.running.contains(&s) {
+            if self.turn.is_running(&s) {
                 return Err(Self::running_refusal(&s));
             }
         }
@@ -221,7 +221,7 @@ impl Conductor {
         self.history.save_meta(&meta)?;
         self.record_config(&root, &meta);
         for s in self.subtree_of(&root) {
-            self.sessions.remove(&s);
+            self.turn.take(&s);
         }
         Ok(())
     }

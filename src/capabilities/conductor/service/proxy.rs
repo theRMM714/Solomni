@@ -488,7 +488,7 @@ impl Conductor {
             d::ControlAction::Close => {
                 // 「关闭已完成或已停止的会话」：子树里还有在生成的就整条拒绝。
                 for s in self.subtree_of(sid) {
-                    if self.running.contains(&s) {
+                    if self.turn.is_running(&s) {
                         return Err(Self::running_refusal(&s));
                     }
                 }
@@ -536,7 +536,7 @@ impl Conductor {
         workspace: Option<crate::capabilities::session::api::WorkspaceBinding>,
     ) -> Result<(String, Vec<SessionEvent>), String> {
         validate_work_name(name)?;
-        if self.sessions.contains_key(name) || self.history.load(name).is_ok() {
+        if self.turn.holds(name) || self.history.load(name).is_ok() {
             return Err(format!("工作名已存在：{}", name));
         }
         let exec = ExecSpec {
@@ -601,8 +601,7 @@ impl Conductor {
         events
             .extend(session.note_notice("[授予] 用户选定了代理形态——决定权整块交给核心（全权）。"));
         self.history.create(&meta)?;
-        self.sessions
-            .insert(name.to_string(), Session::Single(session));
+        self.turn.put(name.to_string(), Session::Single(session));
         self.record_events(name, &mut events);
         Ok((name.to_string(), events))
     }
