@@ -18,6 +18,7 @@ const S = {
   selftest: require("./structure/selftest.js"),
   docsTruth: require("./structure/docsTruth.js"),
   dependency: require("./structure/dependency.js"),
+  layers: require("./structure/layers.js"),
   capability: require("./structure/capability.js"),
   webLayers: require("./structure/webLayers.js"),
   size: require("./structure/size.js"),
@@ -51,6 +52,18 @@ const GATES = [
   { id: "structure/links", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["links.yaml", "dependencies.yaml", "env.js", "src/**/*.rs"], run: (root) => S.ledgers.links(root) },
   { id: "structure/deps-sha256", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["dependencies.yaml"], run: (root) => S.ledgers.depsSha256(root) },
   { id: "structure/dependency", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["src/**/*.rs"], run: (root) => S.dependency.direction(root) },
+  {
+    id: "structure/layers",
+    lane: "structure",
+    step: "T0 结构审查",
+    kind: "text",
+    inputs: ["layers.yaml", "src/capabilities/**/*.rs"],
+    run: (root, ctx) => {
+      const r = S.layers.layers(root);
+      ctx.stats.notes = (ctx.stats.notes || []).concat(r.notes);
+      return r.problems;
+    },
+  },
   { id: "structure/module-files", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["src/**/*.rs", "tests/**/*.rs"], run: (root) => S.moduleFiles.layout(root) },
   {
     id: "structure/web-layers",
@@ -117,6 +130,7 @@ const LANE_ORDER = {
     "structure/links",
     "structure/deps-sha256",
     "structure/dependency",
+    "structure/layers",
     "structure/module-files",
     "structure/web-layers",
     "structure/file-size",
