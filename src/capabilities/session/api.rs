@@ -41,6 +41,12 @@ pub use crate::capabilities::workspace::api::WorkspaceGrant;
 pub use crate::capabilities::session::service::{
     Persister, core_operation, persist_events, record_events, reply_msgs, tool_result_body,
 };
+// 会话树派生：父子关系、工作根、配置归属、树级装配 meta 与 guest 作用域（只读 `History`）。
+#[allow(unused_imports)]
+pub use crate::capabilities::session::service::tree::{
+    config_owner_of, flat_modules, guest_lease, guest_lease_for, guest_scope, role_of,
+    session_kind_of, subtree_of, tree_meta, tree_meta_with, tree_order, work_root, work_root_of,
+};
 
 /// 目的：落盘会话的**队列面**：呈现层经 conductor 的队列代理调它（列表 / 打开 / 删除）。
 ///   "在世会话 × 历史的并集"（`SessionView`）**不在本面里**：那要同时认识会话中心与历史，

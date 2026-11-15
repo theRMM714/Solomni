@@ -8,6 +8,8 @@ use crate::capabilities::session::domain::persist::persist_policy_for;
 use crate::capabilities::session::ports::HistoryStore;
 use std::sync::Arc;
 
+pub(crate) mod tree;
+
 /// 目的：会话能力：持历史落盘端口，按用例答话。
 pub struct SessionService {
     store: Arc<dyn HistoryStore + Send + Sync>,

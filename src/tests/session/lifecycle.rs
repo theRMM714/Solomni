@@ -429,9 +429,11 @@ pub(crate) fn work_root_walks_to_the_top_across_nested_sub_sessions() {
         .sid;
     let mid = core.spawn_agent_session(&top, "a").unwrap();
     let low = core.spawn_agent_session(&mid, "a").unwrap();
-    assert_eq!(core.work_root(&top).unwrap(), top);
-    assert_eq!(core.work_root(&mid).unwrap(), top, "第二层锚在顶");
-    assert_eq!(core.work_root(&low).unwrap(), top, "第三层也锚在顶");
+    let history = core.history_handle();
+    let root_of = |sid: &str| crate::capabilities::session::api::work_root(history.as_ref(), sid);
+    assert_eq!(root_of(&top).unwrap(), top);
+    assert_eq!(root_of(&mid).unwrap(), top, "第二层锚在顶");
+    assert_eq!(root_of(&low).unwrap(), top, "第三层也锚在顶");
 }
 
 /// 目的：身份块里的机制说明按（**会话使用类型** × **角色**）取：对得上的拿，对不上的不拿。

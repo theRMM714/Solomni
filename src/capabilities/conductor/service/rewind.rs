@@ -5,6 +5,9 @@
 //!   本方法族只碰 history / workspace / running / sessions 这几个字段。
 use super::*;
 use crate::capabilities::conductor::api::RewindOutcome;
+use crate::capabilities::session::api::{
+    guest_lease_for, role_of, session_kind_of, subtree_of, work_root, work_root_of,
+};
 
 /// 目的：子会话回档结果——`agent 名 → 该会话的保留行` + `子会话 → 回档后的活动视图`。
 pub(crate) type RewindChildren = (
@@ -56,7 +59,7 @@ impl Conductor {
         let before_tools = crate::capabilities::collab::api::tool_runs(
             &crate::capabilities::session::api::truncate_events(&raw),
         );
-        let work = self.work_root(sid)?;
+        let work = work_root(self.history.as_ref(), sid)?;
         if force {
             // 用户已确认覆盖：先把受管路径的外部改动采纳成提交，随后的回档就不会再撞上“被外部改动”。
             self.workspace
@@ -265,7 +268,10 @@ impl Conductor {
     /// 返回：`agent 名 → 保留行`（供共享区对齐）+ `(子会话, 保留行, 新行起点)`。
     /// 约束：在跑的会话给 `u64::MAX`（共享区保住它的提交）；它的折叠由收尾路径自己落盘。
     fn archive_children_plan(&mut self, sid: &str, keep_turn: u64) -> Result<ChildFolds, String> {
-        let kids: Vec<String> = self.subtree_of(sid).into_iter().skip(1).collect();
+        let kids: Vec<String> = subtree_of(self.history.as_ref(), sid)
+            .into_iter()
+            .skip(1)
+            .collect();
         let mut keeps = std::collections::BTreeMap::new();
         let mut folds = Vec::new();
         for kid in kids {
@@ -296,7 +302,7 @@ impl Conductor {
     fn archive_agents(&mut self, sid: &str, meta: &SessionMeta) -> Result<Vec<String>, String> {
         let mut out: std::collections::BTreeSet<String> =
             meta.agents.iter().map(|a| a.name.clone()).collect();
-        for kid in self.subtree_of(sid).into_iter().skip(1) {
+        for kid in subtree_of(self.history.as_ref(), sid).into_iter().skip(1) {
             let (km, _) = self.history.load(&kid)?;
             if let Some(a) = km.agents.first() {
                 out.insert(a.name.clone());
@@ -332,7 +338,10 @@ impl Conductor {
 
     /// 目的：按回合边界截断整棵子树的会话（删除模式），返回共享区对齐用的保留行。
     fn cut_children(&mut self, sid: &str, keep_turn: u64) -> Result<RewindChildren, String> {
-        let kids: Vec<String> = self.subtree_of(sid).into_iter().skip(1).collect();
+        let kids: Vec<String> = subtree_of(self.history.as_ref(), sid)
+            .into_iter()
+            .skip(1)
+            .collect();
         let mut keeps = std::collections::BTreeMap::new();
         let mut rewound: Vec<(String, Vec<serde_json::Value>)> = Vec::new();
         for kid in kids {
@@ -366,7 +375,10 @@ impl Conductor {
 
     /// 目的：在同一个 mark 处展开整棵子树的转录（恢复模式）。
     fn unfold_children(&mut self, sid: &str, mark: u64) -> Result<RewindChildren, String> {
-        let kids: Vec<String> = self.subtree_of(sid).into_iter().skip(1).collect();
+        let kids: Vec<String> = subtree_of(self.history.as_ref(), sid)
+            .into_iter()
+            .skip(1)
+            .collect();
         let mut rewound: Vec<(String, Vec<serde_json::Value>)> = Vec::new();
         for kid in kids {
             let (meta, raw) = self.history.load(&kid)?;
@@ -398,7 +410,7 @@ impl Conductor {
     ) -> Result<Session, String> {
         let roster = self.modules.roster();
         // 打开 / 重建时按 meta 刷新布局投影（会话目录可能被复制或迁移；meta 是权威）。
-        let work = self.work_root_of(meta)?;
+        let work = work_root_of(self.history.as_ref(), meta)?;
         let binding = self.workspace_binding_of(meta)?;
         self.workspace.bind(&work, binding.as_deref())?;
         if binding.is_some() {
@@ -427,7 +439,7 @@ impl Conductor {
                 meta,
                 events,
                 sandboxes,
-                self.guest_lease_for(meta)?,
+                guest_lease_for(self.history.as_ref(), meta)?,
                 Arc::clone(&self.workspace),
                 // 重建出来的整队进**同一条队**（按转录里已发出的卡号续号，已答过的不重问）。
                 self.desk_of(&meta.name),
@@ -466,8 +478,8 @@ impl Conductor {
                     &a.name,
                     &sb,
                     &modules,
-                    &self.session_kind_of(meta)?,
-                    &self.role_of(meta)?,
+                    &session_kind_of(self.history.as_ref(), meta)?,
+                    &role_of(self.history.as_ref(), meta)?,
                 )
                 .with_chara(a.chara.clone())
                 .with_guest(self.guest_os_of(&meta.exec));
@@ -477,7 +489,7 @@ impl Conductor {
                 let unavailable = self.unavailable_modules(&meta.exec, &modules);
                 // 身份与角色**同一把尺子**（重建与实时不能各写一份，见 Conductor::role_of）：
                 // 协作派生的成员 / 节点 = executor（拿得到回报工具）；其余单 agent 工作 = solo。
-                let role = self.role_of(meta)?;
+                let role = role_of(self.history.as_ref(), meta)?;
                 let host_plan = if meta.exec.tier == crate::kernel::api::Tier::Host {
                     self.host_plan_for(
                         &meta.exec,
@@ -495,7 +507,7 @@ impl Conductor {
                     mode,
                     &role,
                     meta.exec.tier,
-                    self.guest_lease_for(meta)?,
+                    guest_lease_for(self.history.as_ref(), meta)?,
                     &host_plan,
                 );
                 // 回复 id 跨重启单调：从转录里的最大值续号，否则新回复会与旧回复并成一组。

@@ -5,6 +5,7 @@
 //!   本方法族只碰 sessions / history / running / desk 这几个字段。
 
 use super::*;
+use crate::capabilities::session::api::{flat_modules, work_root};
 
 impl Conductor {
     /// 目的：**同步**跑一个节点的子会话（CLI 与测试走这条；Web 生产路径由 ConductorHandle 起工作线程）。
@@ -369,7 +370,7 @@ impl Conductor {
             workspace: None,
         };
         // 沙箱锚在**顶层工作**上：该 agent 的目录在共享区那一层已经建好。
-        let work = self.work_root(parent)?;
+        let work = work_root(self.history.as_ref(), parent)?;
         self.workspace
             .prepare(&work, std::slice::from_ref(&a.name))?;
         self.history.create(&meta)?;
@@ -589,7 +590,7 @@ impl Conductor {
             self.workspace.prepare(sid, &names)?;
             let (mut meta, _) = self.history.load(sid)?;
             meta.agents = roster.clone();
-            meta.modules = super::flat_modules(&roster);
+            meta.modules = flat_modules(&roster);
             self.history.create(&meta)?;
             let module_roster = self.modules.roster();
             let sandboxes = self.sandboxes(&meta, &module_roster)?;

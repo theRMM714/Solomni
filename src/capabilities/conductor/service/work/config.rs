@@ -5,6 +5,9 @@
 //!   本方法族只碰 probe / history / sessions / log 这四个字段。
 
 use super::*;
+use crate::capabilities::session::api::{
+    config_owner_of, flat_modules, guest_scope, subtree_of, tree_meta, tree_meta_with, work_root,
+};
 
 impl Conductor {
     /// 目的：配置视图：把「能改什么、现在是什么、缺什么」如实给出（每次读取都重扫模块清单与包库）。
@@ -52,8 +55,9 @@ impl Conductor {
             guests: self.provision.guest_bases()?,
             net: self.network_allowed(),
             permission: self.permission_view(&meta)?,
-            thinking: self
-                .thinking_view_for_root(&self.work_root(sid).unwrap_or_else(|_| sid.to_string())),
+            thinking: self.thinking_view_for_root(
+                &work_root(self.history.as_ref(), sid).unwrap_or_else(|_| sid.to_string()),
+            ),
             pins: meta.exec.pins.clone(),
             runtime: self.runtime_report_for(&meta.exec),
             runtimes_dir: crate::kernel::api::slash(&self.packages.runtimes_dir()),
@@ -89,11 +93,11 @@ impl Conductor {
         // 改配要重建整棵子树的档位/guest 关联：任一在跑都拒绝（先停再改）。
         // 权限是根级动作：切档要求整棵 work tree 空闲，避免子会话用旧快照继续跑。
         let guard = if edit.permission.is_some() {
-            self.work_root(sid).unwrap_or_else(|_| sid.to_string())
+            work_root(self.history.as_ref(), sid).unwrap_or_else(|_| sid.to_string())
         } else {
             sid.to_string()
         };
-        for s in self.subtree_of(&guard) {
+        for s in subtree_of(self.history.as_ref(), &guard) {
             if self.turn.is_running(&s) {
                 return Err(Self::running_refusal(&s));
             }
@@ -112,10 +116,10 @@ impl Conductor {
         }
         // 共享 guest 的子会话也可以编辑：写回该 agent 的唯一配置，保存后重新加入同一台 guest。
         // 旧 guest / 旧树的装配在下面与编辑后的树比对，只有装配真的变了才重建。
-        let owner = self.config_owner_of(&meta)?;
-        let old_scope = self.guest_scope(&meta)?;
+        let owner = config_owner_of(self.history.as_ref(), &meta)?;
+        let old_scope = guest_scope(self.history.as_ref(), &meta)?;
         let old_tree = match &old_scope {
-            Some((_, root)) => Some(self.tree_meta(root, None)?),
+            Some((_, root)) => Some(tree_meta(self.history.as_ref(), root, None)?),
             None => None,
         };
         if session_started(&events) {
@@ -275,7 +279,7 @@ impl Conductor {
             new_owner.modules = flat_modules(&new_owner.agents);
             new_children.push(new_owner);
         } else {
-            for child in self.subtree_of(sid) {
+            for child in subtree_of(self.history.as_ref(), sid) {
                 if child == sid {
                     continue;
                 }
@@ -294,12 +298,11 @@ impl Conductor {
         let is_vm = new_meta.exec.tier == crate::kernel::api::Tier::Vm;
         // 共享 guest 的装配按整棵树算：把这次的新值覆盖到作用域根的子树上，再出计划与沙箱。
         let (lease, tree, tree_plan) = if is_vm {
-            let (lease, scope_meta) = self
-                .guest_scope(&new_meta)?
+            let (lease, scope_meta) = guest_scope(self.history.as_ref(), &new_meta)?
                 .ok_or_else(|| "虚拟机档会话没有解析出 guest 作用域".to_string())?;
             let mut extras: Vec<&SessionMeta> = vec![&new_meta];
             extras.extend(new_children.iter());
-            let tree = self.tree_meta_with(&scope_meta, &extras)?;
+            let tree = tree_meta_with(self.history.as_ref(), &scope_meta, &extras)?;
             let plan = self.plan_for_meta_with(&tree, &roster)?;
             self.log.info(
                 "conductor::edit_session",
@@ -357,8 +360,8 @@ impl Conductor {
         profile: crate::capabilities::permission::api::ProfileId,
     ) -> Result<(), String> {
         let (meta, _) = self.history_open(sid)?;
-        let guard = self.work_root(sid).unwrap_or_else(|_| sid.to_string());
-        for s in self.subtree_of(&guard) {
+        let guard = work_root(self.history.as_ref(), sid).unwrap_or_else(|_| sid.to_string());
+        for s in subtree_of(self.history.as_ref(), &guard) {
             if self.turn.is_running(&s) {
                 return Err(Self::running_refusal(&s));
             }
@@ -389,7 +392,7 @@ impl Conductor {
             new_meta.sandbox.narrowing = Some(layer);
             new_meta.sandbox.ceiling = None;
         }
-        let changed = self.subtree_of(sid);
+        let changed = subtree_of(self.history.as_ref(), sid);
         self.history.save_meta(&new_meta)?;
         self.record_config(sid, &new_meta);
         for s in &changed {

@@ -8,14 +8,14 @@
 
 - 管：权限面——`api::permissions` 先套根会话 ceiling、再逐层 narrowing，最后并上全局硬黑名单；共享区授权为 `None` 时收掉共享读写的 reach。
 - 管：沙箱清单——`api::sandboxes` 按 agent 名单组装，每席只挂自己的模块目录，缺沙箱路径就地报错。
-- 管：一席的环境——`api::member` 派生围栏、模块变量、运行时可执行文件与工具链根；`api::guest_lease` 判有没有 guest 租约。
+- 管：一席的环境——`api::member` 派生围栏、模块变量、运行时可执行文件与工具链根。
 - 不管：事实取得——`SessionMeta` / `WorkRoots` / `Roster` / `PackagePlan` / `AppSettings` 都由调用方先取好，本单元无端口、无 IO。
 - 不管：落盘与进程——不写文件、不启停 guest、不碰围栏授权台账（`tools` 的 `release_by_lease`）。
 - 不管：机制侧怎么用——围栏与模块变量由调用方装进工具面（`src/capabilities/conductor/service/env.rs` 的 `build_single`）。
 
 ## 入站契约与状态归属
 
-- 入站面：`api::member` / `api::sandboxes` / `api::permissions` / `api::workspace_grant` / `api::guest_lease`，以及事实结构 `api::MemberFacts` / `api::MemberEnv` / `api::SandboxesFacts`；别的业务与测试只经 `api` 取用（R1）。
+- 入站面：`api::member` / `api::sandboxes` / `api::permissions` / `api::workspace_grant`，以及事实结构 `api::MemberFacts` / `api::MemberEnv` / `api::SandboxesFacts`；别的业务与测试只经 `api` 取用（R1）。
 - 状态归属：**不持任何状态**——历史、工作区根、模块名册、包计划与 registry 设置都是入参；派生结果随调用返回，本单元没有字段、没有缓存、没有后台任务。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）

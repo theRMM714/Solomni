@@ -15,7 +15,7 @@ use crate::capabilities::provision::api::Provision;
 use crate::capabilities::session::api::History;
 #[cfg(test)]
 pub(crate) use crate::capabilities::session::api::Live;
-use crate::capabilities::session::api::{Answered, GateTicket, SessionEvent};
+use crate::capabilities::session::api::{Answered, GateTicket, SessionEvent, subtree_of};
 use crate::capabilities::vm::api::Vm;
 use crate::capabilities::workspace::api::Workspace;
 
@@ -38,19 +38,6 @@ pub(crate) fn dedup_modules(list: &[String]) -> Vec<String> {
     for m in list {
         if !out.contains(m) {
             out.push(m.clone());
-        }
-    }
-    out
-}
-
-/// 目的：整张名单的扁平模块清单（保序去重）：同一模块被多个 agent 共用时只出现一次。
-pub(crate) fn flat_modules(agents: &[AgentMeta]) -> Vec<String> {
-    let mut out = Vec::new();
-    for a in agents {
-        for m in &a.modules {
-            if !out.contains(m) {
-                out.push(m.clone());
-            }
         }
     }
     out
@@ -298,6 +285,11 @@ impl Conductor {
         self.modules.service_enabled(module, service)
     }
 
+    /// 目的：取历史落盘端口的句柄（与 `log_handle` 同形态），给 api 层与测试调会话树派生。
+    pub(crate) fn history_handle(&self) -> Arc<dyn History + Send + Sync> {
+        Arc::clone(&self.history)
+    }
+
     /// 目的：模块能力面（手柄与核心共享同一份；启停写面经它）。
     pub(crate) fn modules_handle(&self) -> Arc<dyn Modules + Send + Sync> {
         Arc::clone(&self.modules)
@@ -461,7 +453,7 @@ impl Conductor {
     /// 约束：会话此刻被生成线程拿在手里时它不在表里——那一份由 put_collab 交回时按运行态作废。
     pub(crate) fn void_gates_in_subtree(&mut self, root: &str) -> Vec<(String, Vec<SessionEvent>)> {
         let mut out = Vec::new();
-        for sid in self.subtree_of(root) {
+        for sid in subtree_of(self.history.as_ref(), root) {
             let evs = self.void_gates_of(&sid);
             if !evs.is_empty() {
                 out.push((sid, evs));
@@ -635,39 +627,6 @@ impl Conductor {
 
 /// 继续被拦下时的提醒（单 agent 会话：该轮到用户发言）。
 const NEED_USER: &str = "最后一条是 AI 发言：部分供应商不允许连续 AI 发言；请先发言再继续。";
-
-/// 目的：会话列表按**树序**排：顶层保持后端给的时间倒序，每个会话后面**紧跟**它的子会话
-///  （子会话内部同样按时间倒序），深度优先。
-///  为什么必须在后端做：顺序与缩进是同一件事的两面——前端各排各的，就会出现子会话排在父会话上面。
-pub(crate) fn tree_order(list: Vec<HistoryView>) -> Vec<HistoryView> {
-    let mut kids: std::collections::BTreeMap<String, Vec<HistoryView>> =
-        std::collections::BTreeMap::new();
-    let mut roots: Vec<HistoryView> = Vec::new();
-    for h in list {
-        match h.parent.clone() {
-            Some(p) => kids.entry(p).or_default().push(h),
-            None => roots.push(h),
-        }
-    }
-    let mut out: Vec<HistoryView> = Vec::new();
-    for r in roots {
-        let mut stack = vec![r];
-        while let Some(cur) = stack.pop() {
-            let mut mine = kids.remove(&cur.name).unwrap_or_default();
-            mine.sort_by_key(|h| std::cmp::Reverse(h.ts));
-            // 逆序压栈 → 弹出时按时间倒序（与顶层同一口径）。
-            for k in mine.into_iter().rev() {
-                stack.push(k);
-            }
-            out.push(cur);
-        }
-    }
-    // 父会话已不在（被删）的子会话：如实列在最后，不能凭空消失。
-    for (_, v) in kids {
-        out.extend(v);
-    }
-    out
-}
 
 /// 会话是否「已经开过」（流水里有内容）：agent 名单与形态据此冻结。配置记录与回档记录不算内容。
 fn session_started(events: &[serde_json::Value]) -> bool {

@@ -271,6 +271,7 @@ fn json_ok<T: serde::Serialize>(v: &T) -> ToolOutcome {
 
 use super::{Conductor, Session, now_ts, validate_work_name};
 use crate::capabilities::conductor::api::ConductorHandle;
+use crate::capabilities::session::api::subtree_of;
 use crate::capabilities::session::api::{
     AgentSession, Delegation, RunState, SessionEvent, SessionMeta, SessionParams,
 };
@@ -488,7 +489,7 @@ impl Conductor {
             }
             d::ControlAction::Close => {
                 // 「关闭已完成或已停止的会话」：子树里还有在生成的就整条拒绝。
-                for s in self.subtree_of(sid) {
+                for s in subtree_of(self.history.as_ref(), sid) {
                     if self.turn.is_running(&s) {
                         return Err(Self::running_refusal(&s));
                     }

@@ -187,7 +187,13 @@ impl ConductorHandle {
     /// 约束：等待期间**不占核心队列**——收尾要靠核心交回会话；30 秒仍未收尾 = 拒绝，文件与转录都还没动。
     fn settle_tree(&self, root: &str) -> Result<Vec<String>, String> {
         let root_owned = root.to_string();
-        let tree: Vec<String> = self.call(move |core| Ok(core.subtree_of(&root_owned)))?;
+        let tree: Vec<String> = self.call(move |core| {
+            let history = core.history_handle();
+            Ok(crate::capabilities::session::api::subtree_of(
+                history.as_ref(),
+                &root_owned,
+            ))
+        })?;
         if !tree.iter().any(|s| self.jobs.is_running(s)) {
             return Ok(Vec::new());
         }
@@ -224,7 +230,13 @@ impl ConductorHandle {
     /// 目的：**级联停止**：把 root 及其整棵子树（按 `meta.parent`）里正在生成的会话都停下来。 返回实际停下的会话 id——不假装“停止了一个本来就没在跑的会话”。 代理核心的 `stop` 走这条：主会话停 = 所有相关工作一起停（用户看得见的那一下）。
     pub(crate) fn stop_tree(&self, root: &str) -> Result<Vec<String>, String> {
         let root_owned = root.to_string();
-        let tree = self.call(move |core| Ok(core.subtree_of(&root_owned)))?;
+        let tree = self.call(move |core| {
+            let history = core.history_handle();
+            Ok(crate::capabilities::session::api::subtree_of(
+                history.as_ref(),
+                &root_owned,
+            ))
+        })?;
         let mut stopped = Vec::new();
         for sid in tree {
             // 在等的工具确认由「停止 = 整队作废」解开（见 SessionOps::stop），这里只管取消生成。

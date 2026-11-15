@@ -4,7 +4,7 @@
 //! 联动：`src/capabilities/env/domain/env.rs`；`conductor/service/env.rs` 取事实后转调。
 
 use crate::capabilities::env::api::{
-    MemberFacts, SandboxesFacts, guest_lease, member, permissions, sandboxes, workspace_grant,
+    MemberFacts, SandboxesFacts, member, permissions, sandboxes, workspace_grant,
 };
 use crate::capabilities::modules::api::Roster;
 use crate::capabilities::packages::api::PackagePlan;
@@ -114,18 +114,6 @@ fn a_workspace_grant_of_none_closes_the_shared_root() {
     assert!(!out.reach.contains(Reach::SharedWrite));
     assert!(!out.read_ok("notes/a.md"));
     assert!(!out.write_ok("notes/a.md"));
-}
-
-#[test]
-fn proxy_parent_session_has_no_guest_and_its_children_share_the_root_lease() {
-    let proxy = meta("proxy-root", None, Tier::Vm, "proxy");
-    assert_eq!(guest_lease(&proxy, &proxy), None);
-    let child = meta("proxy-root--a", Some("proxy-root"), Tier::Vm, "collab");
-    assert_eq!(guest_lease(&child, &proxy), Some("proxy-root".to_string()));
-    let solo = meta("solo", None, Tier::Vm, "solo");
-    assert_eq!(guest_lease(&solo, &solo), Some("solo".to_string()));
-    let host = meta("host", None, Tier::Host, "solo");
-    assert_eq!(guest_lease(&host, &host), None);
 }
 
 #[test]
