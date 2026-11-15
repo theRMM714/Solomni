@@ -32,6 +32,13 @@
 - **连接状态只看事件流的取用**：客户端把"取事件失败"（服务没起来 / 连接断了）与"事件应用/渲染出错"分开——
   后者不是断线，如实报错并留在日志里；两类都要落到日志，不能只亮状态点
   （传输层 `src/presentation/web/assets/app/core/events.js` 把两类分别交给 `onConn` / `onError`）。
+- **客户端请求有界**：`api()` 的一次调用可以带 `timeoutMs`（`src/presentation/web/assets/app/core/http.js`）——
+  到点用 `AbortSignal` 中止并抛带 `timeout: true` / `status: 0` 的 `Error`；不带就不设上限
+  （建会话、补编、上传都是长动作，按固定秒数掐会误杀）。**装饰性的状态读取必须给上限**
+  （`STATE_TIMEOUT_MS = 10000`，`src/presentation/web/assets/app/features/shell/shell.js`），
+  且**不许拿它当某个动作的完成门槛**：关弹层、收卡片只看它自己那条命令的回包，
+  状态刷新慢或失败只让侧栏晚一点刷出来（`src/presentation/web/assets/app/features/wizard/wizard.js`）。
+  理由：请求排在浏览器队列里时既不回也不报错，界面就永远停在「正在创建」，用户既等不到结果也看不到失败。
 - **并发归核心**：`stop` 直接置位核心内部的取消标志，**不进命令队列**，所以生成期间照样立刻生效；
   呈现层不需要知道「生成时核心状态被占用」这类内部事实。
 - **生成不占命令队列**（单 agent 与协作的长步骤都是）：命令队列只做**状态变更**与**派发**——生成时先把会话对象

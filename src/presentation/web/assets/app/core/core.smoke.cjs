@@ -26,6 +26,21 @@ async function apiCases() {
   try { await api("GET", "/nojson"); check(false, "非 JSON 错误也要抛"); } catch (e) {
     check(e.message === "HTTP 502" && e.status === 502, "无 JSON 时文案退回 HTTP 码");
   }
+  // 有界等待：不设上限时一概不问定时器；给了上限就到点中止，抛 timeout / status 0。
+  const timers = { set: 0, cleared: 0 };
+  const bounded = createApi(async (url) => {
+    if (url === "/slow") return new Promise(() => {}); // 永远不回（模拟请求排在浏览器队列里）
+    return { ok: true, json: async () => ({ ok: true }) };
+  }, {
+    setTimeout: (fn) => { timers.set += 1; fn(); return 1; },
+    clearTimeout: () => { timers.cleared += 1; },
+  });
+  await bounded("GET", "/a");
+  check(timers.set === 0, "没给 timeoutMs 时不设上限（长动作照样等）");
+  try { await bounded("GET", "/slow", null, { timeoutMs: 50 }); check(false, "超时必须抛"); } catch (e) {
+    check(e.timeout === true && e.status === 0 && e.message.includes("GET /slow"), "超时抛 timeout / status 0 / 带方法与地址");
+  }
+  check(timers.set === 1 && timers.cleared === 1, "到点用完就撤定时器");
 }
 
 async function streamCases() {
