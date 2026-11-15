@@ -186,6 +186,16 @@ pub(crate) fn build_service(root: &Path) -> Result<BuildsService, String> {
         crate::entry::toolchains::active_roots(root),
     ))
 }
+/// 目的：系统维护能力面的端口：组合根里已经装好的同一份实例，启动相命令直接复用。
+/// 约束：一处进程只要一套存储 / 补齐 / 构建——另装一套会让后台作业与日志互相看不见。
+pub(crate) struct SystemPorts {
+    pub storage: Arc<dyn crate::capabilities::storage::api::Storage + Send + Sync>,
+    pub provision: Arc<dyn Provision + Send + Sync>,
+    pub builds: Arc<dyn crate::capabilities::builds::api::Builds + Send + Sync>,
+    pub workspace: Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync>,
+    pub modules: Arc<dyn crate::capabilities::modules::api::Modules + Send + Sync>,
+}
+
 /// 目的：启动相命令用的系统维护能力面——存储 / 补齐 / 构建 / 工作区 / 模块与工具链事实按产品根现场装。
 /// 约束：只在这里装一次；能力自己不构造别的能力的适配器（依赖由本函数注入）。
 pub(crate) fn system(root: &Path, base: &BaseFacts) -> Result<SystemService, String> {
@@ -216,17 +226,36 @@ pub(crate) fn system(root: &Path, base: &BaseFacts) -> Result<SystemService, Str
         )
         .map_err(|e| format!("模块能力装配失败：{}", e))?,
     );
+    system_with(
+        root,
+        base,
+        SystemPorts {
+            storage,
+            provision,
+            builds,
+            workspace,
+            modules,
+        },
+    )
+}
+
+/// 目的：用调用方已经装好的端口拼出系统维护能力面（主程序复用同一份存储 / 补齐 / 构建 / 工作区 / 模块）。
+pub(crate) fn system_with(
+    root: &Path,
+    base: &BaseFacts,
+    ports: SystemPorts,
+) -> Result<SystemService, String> {
     // 目的：宿主事实端口在这里接上——自检里要直读宿主的那几项由 detail 实现，service 只认端口。
     let facts: Arc<dyn crate::capabilities::system::api::Facts + Send + Sync> =
         Arc::new(crate::capabilities::system::detail::HostFacts);
     Ok(SystemService::with_facts(
         SystemDeps {
             root: root.to_path_buf(),
-            storage,
-            provision,
-            builds,
-            workspace,
-            modules,
+            storage: ports.storage,
+            provision: ports.provision,
+            builds: ports.builds,
+            workspace: ports.workspace,
+            modules: ports.modules,
             toolchains: base.clone(),
             net: network_allowed(root),
         },

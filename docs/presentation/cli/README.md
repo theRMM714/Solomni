@@ -13,14 +13,15 @@
 - 管：共享区提交历史与回滚入口——`work <会话>` 看 head + 最近提交，`work <会话> log [条数]` 列提交，`work <会话> show <提交号>` 看详情，`work <会话> restore <提交号> [--yes]` 走统一的 `restore_work_commit` 动作（非破坏性；交互模式要求输入 yes，`--yes` 仅用于显式脚本）。
 - 管：虚拟机档会话的只读诊断入口——`diagnose <会话>` 造一次 `guest_diagnose` 动作（`caller = user`），把动作返回的结构化 JSON（guest 进程表 / CPU 汇总 / 内存 / 负载 / 挂载）原样打印；与 `work` / `resident` / `module` 同类，不做业务判断。
 - 管：启动相命令的最后一公里——`--doctor` / `--provision` / `--gc` / `--storage` / `--work-gc` / `--build` 的操作数与回执排版（`src/presentation/cli/boot.rs`）；执行与确认门槛在 `system` 能力（见 [docs/system](../../system/README.md)）。
+- 管：启动相命令的**第二个入口**——同一条命令在终端转录中心的提示符里也能跑（`--doctor`、`--gc<空格>--category=logs`），跑完回提示符、不退出进程；缺 `--yes` 时就地一问（先给预览再问），有会话在跑时写操作只给预览、不执行；`--json` 与 `--root` 在这里没有意义（前者提示后忽略，后者报错、退出码 2）——歧义判据见 `src/presentation/cli.rs` 的 `run_boot`。
 - 管：机器回执——`--json` 让启动相命令只输出一段 JSON（字段逐命令写在 `systools/commands.yaml` 的 `json`，`solomni <命令> --help` 里给出同一份说明）；失败时 stderr 是一行 `{"error","code","domain"}`，退出码不变。
 - 不管：不做业务判断、不持状态、不落盘；**永不接触端口对象，也拿不到 `Core` 本身**（`src/presentation/cli.rs`）；启动相命令的语义也不在这里——`boot.rs` 只把参数翻成能力调用。
 
 ## 入站契约与状态归属
 
 - 入站面：只依赖**入站能力面**（各能力的 `::api`）；`conductor` 的 `Ops` 是它与核心之间的唯一通道。
-- 入口：`src/main.rs` 调 `presentation::cli::run(ops, presentation::web::DEFAULT_PORT, plain, anim)`；`web [端口]` 子命令把控制权交给 Web 渠道（同一份 `Ops`）。
-- 旗语：`--root <dir>`、`--web`、`--port <n>`、`--plain`、`--no-anim`、`--json`、`-h/--help`、`-v/--version` 由 `argv.rs` 统一解析（`--x v` 与 `--x=v` 等价；未知旗语给编辑距离建议）；全局旗语与启动命令的先后无关（`--doctor --root <dir>` 与 `--root <dir> --doctor` 等价），命令自己的旗语按原顺序留在操作数里交给 `boot.rs`；命令手册、Tab 补全与未知命令建议都由 `systools/commands.yaml` 这一张表生成——表经 tools 能力的 `CommandBook` 编译进二进制（`include_str!`，无产品根也能 `--help`），`catalog.rs` 只做排版。新增或改命令 = 改这张表（名字、别名、分组、`phase`、写法、一句话说明、确认门槛、命令自己的旗语），分派仍留在 `src/presentation/cli/boot.rs`（启动相，经 `system` 能力执行）与 `src/presentation/cli.rs`（转录相），两侧与表的同步由 `src/tests/commands.rs` 门禁锁死。
+- 入口：`src/main.rs` 调 `presentation::cli::run(ops, presentation::web::DEFAULT_PORT, plain, anim, system)`；`web [端口]` 子命令把控制权交给 Web 渠道（同一份 `Ops`）。`system` 由组合根注入，与启动相共用同一份 provision / storage 端口——两套实例会互相看不见对方的清理作业。
+- 旗语：`--root <dir>`、`--web`、`--port <n>`、`--plain`、`--no-anim`、`--json`、`-h/--help`、`-v/--version` 由 `argv.rs` 统一解析（`--x v` 与 `--x=v` 等价；未知旗语给编辑距离建议）；全局旗语与启动命令的先后无关（`--doctor --root <dir>` 与 `--root <dir> --doctor` 等价），命令自己的旗语按原顺序留在操作数里交给 `boot.rs`；命令手册、Tab 补全与未知命令建议都由 `systools/commands.yaml` 这一张表生成——表经 tools 能力的 `CommandBook` 编译进二进制（`include_str!`，无产品根也能 `--help`），`catalog.rs` 只做排版；补全与建议覆盖两相（启动相给 `--名字` 写法，与提示符里的写法一致）。新增或改命令 = 改这张表（名字、别名、分组、`phase`、写法、一句话说明、确认门槛、命令自己的旗语），分派仍留在 `src/presentation/cli/boot.rs`（启动相，经 `system` 能力执行）与 `src/presentation/cli.rs`（转录相），两侧与表的同步由 `src/tests/commands.rs` 门禁锁死。
 - 状态归属：不持状态、不落盘；会话与业务状态都在核心，本层只读 `Ops` 回报。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）

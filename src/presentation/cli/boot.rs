@@ -1,7 +1,7 @@
-//! 目的：启动相命令的执行——把 `flags.command` 与它的操作数翻成系统维护能力的一次调用，并打回执、给退出码。
-//! 管：操作数解析（--yes / --reset / --ensure / --category / --guest / --module 与裸词）、回执排版（人读或 --json）、退出码。
-//! 不管：命令有哪些（在 systools/commands.yaml）、业务规则与确认语义（在 system 能力）、装配（在 entry::assembly）。
-//! 联动：main 在工具链就位后调用；能力面由 entry::assembly::system 注入；两端一致性由 src/tests/commands.rs 锁死。
+//! 目的：启动相命令的执行——把一次调用（命令名 + 操作数）翻成系统维护能力的一次调用，并打回执、给退出码。
+//! 管：操作数解析（--yes / --reset / --ensure / --category / --guest / --module 与裸词）、写操作的就地确认、回执排版（人读或 --json）、退出码。
+//! 不管：命令有哪些（在 systools/commands.yaml）、业务规则与确认门槛的判据（在 system 能力）、装配（在 entry::assembly）。
+//! 联动：命令行由 main 调 `run`（没人可问，缺 --yes 只预览）；转录中心由 presentation::cli 调 `run_asked` 并接管确认；两端一致性由 src/tests/commands.rs 锁死。
 
 use serde_json::json;
 
@@ -10,10 +10,48 @@ use crate::capabilities::system::api::{
     BuildRequest, EnsureRequest, Fault, GcRequest, ResetRequest, System, WorkGcRequest,
 };
 
+/// 目的：写操作要人点头时，由谁来问——命令行上没人可问，转录中心里就地一问。
+/// 约定：返回 false 表示没有明确点头（空输入、No、读不到输入都算没点头）。
+pub(crate) trait Ask {
+    /// 目的：这次调用背后有没有可问的人。
+    /// 约束：没有时**不能问、也不能改写退出码**——命令行上「缺 --yes 只预览（退出码 2）」是既有契约。
+    fn anyone(&self) -> bool;
+    /// 参数：`question` 是一句包含后果与写法的问话（结尾的 [y/N] 由实现自己排版）。
+    fn confirm(&mut self, question: &str) -> bool;
+}
+
+/// 目的：命令行入口的确认——没有交互对象，一律不点头（缺 --yes 就照旧只预览，退出码 2）。
+pub(crate) struct NeverAsk;
+
+impl Ask for NeverAsk {
+    fn anyone(&self) -> bool {
+        false
+    }
+
+    fn confirm(&mut self, _question: &str) -> bool {
+        false
+    }
+}
+
 /// 目的：一次启动相命令的入口——回执已经打完，只差退出码。
 /// 参数：`json` 为真时回执改成一行 JSON（字段见 `systools/commands.yaml` 的 `json`）。
+/// 约束：命令行上没人可问，写操作缺 `--yes` 就只给预览（行为与只有命令行入口时一致）。
 pub(crate) fn run(command: &str, operands: &[String], system: &dyn System, json: bool) -> i32 {
-    let args = match Args::parse(operands) {
+    run_asked(command, operands, system, json, &mut NeverAsk, true)
+}
+
+/// 目的：一次启动相命令的完整入口——解析、确认、执行、回执。
+/// 参数：`ask` 用来就地确认写操作；`writes` 为假表示此刻不该写（有会话在跑），只给预览。
+/// 返回：0 成功；1 执行失败；2 用法或确认门槛不对。
+pub(crate) fn run_asked(
+    command: &str,
+    operands: &[String],
+    system: &dyn System,
+    json: bool,
+    ask: &mut dyn Ask,
+    writes: bool,
+) -> i32 {
+    let mut args = match Args::parse(operands) {
         Ok(a) => a,
         Err(e) => {
             eprintln!("{}", e);
@@ -21,6 +59,63 @@ pub(crate) fn run(command: &str, operands: &[String], system: &dyn System, json:
         }
     };
     let json = json || args.json;
+    if needs_confirm(command, &args) {
+        if !writes {
+            // 有会话在跑：写操作会让它的工作目录跟着变，只给预览。
+            eprintln!(
+                "[提示] 有会话正在跑：{} 这次只给预览，等它跑完再来",
+                command
+            );
+            args.yes = false;
+            return run_once(command, system, &args, json);
+        }
+        if !args.yes {
+            if !ask.anyone() {
+                // 命令行：没人可问，照旧跑一遍不带确认的版本（只预览 / 只报门槛）。
+                return run_once(command, system, &args, json);
+            }
+            // 先跑一遍不带确认的版本：预览 / dry-run / 门槛提示就是这一遍的输出。
+            let _ = run_once(command, system, &args, json);
+            if !ask.confirm(&question(command, &args)) {
+                eprintln!("[提示] 已取消，没有执行（命令行里用 --yes 直接确认）");
+                return 0;
+            }
+            args.yes = true;
+        }
+    }
+    run_once(command, system, &args, json)
+}
+
+/// 目的：这条命令这次会不会写（写了才要确认）。
+fn needs_confirm(command: &str, args: &Args) -> bool {
+    match command {
+        "provision" => args.reset.is_some() || args.ensure.is_some(),
+        "gc" | "work-gc" => true,
+        _ => false,
+    }
+}
+
+/// 目的：确认问话——说清要动什么，不重复回执里已经打过的细节。
+fn question(command: &str, args: &Args) -> String {
+    match command {
+        "gc" => match args.category.as_deref() {
+            Some(c) => format!("确认清理存储类别 {}？[y/N]", c),
+            None => "确认按策略回收存储？[y/N]".to_string(),
+        },
+        "work-gc" => match args.words.first() {
+            Some(w) => format!("确认回收工作 {} 里不可达的对象？[y/N]", w),
+            None => "确认回收？[y/N]".to_string(),
+        },
+        _ => match (args.reset.as_deref(), args.ensure.as_deref()) {
+            (Some(guest), _) => format!("确认还原虚拟根 {}？会删掉它里面的状态并重建 [y/N]", guest),
+            (_, Some(_)) => "确认从网络下载并补齐依赖？[y/N]".to_string(),
+            _ => "确认执行？（会写项目内数据）[y/N]".to_string(),
+        },
+    }
+}
+
+/// 目的：按命令名分派到各命令的执行（已解析好操作数，确认与否已定）。
+fn run_once(command: &str, system: &dyn System, args: &Args, json: bool) -> i32 {
     match command {
         "doctor" => {
             println!("{}", pretty(&system.doctor()));
@@ -33,10 +128,10 @@ pub(crate) fn run(command: &str, operands: &[String], system: &dyn System, json:
             }
             Err(f) => fail("[存储]", f, json),
         },
-        "provision" => provision(system, &args, json),
-        "gc" => gc(system, &args, json),
-        "work-gc" => work_gc(system, &args, json),
-        "build" => build(system, &args, json),
+        "provision" => provision(system, args, json),
+        "gc" => gc(system, args, json),
+        "work-gc" => work_gc(system, args, json),
+        "build" => build(system, args, json),
         other => {
             eprintln!("这个启动命令还没有执行入口：{}", other);
             1
