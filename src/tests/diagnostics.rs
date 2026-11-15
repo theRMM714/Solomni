@@ -27,7 +27,7 @@ fn work_gc_cli_dry_run_then_applies() {
     assert!(store_path.join("objects").join(&orphan).exists());
 
     let system = crate::entry::assembly::system(&root, &Default::default()).expect("装系统能力");
-    let dry = crate::presentation::cli::boot::run("work-gc", &["w".to_string()], &system);
+    let dry = crate::presentation::cli::boot::run("work-gc", &["w".to_string()], &system, false);
     assert_eq!(dry, 0);
     assert!(
         store_path.join("objects").join(&orphan).exists(),
@@ -38,6 +38,7 @@ fn work_gc_cli_dry_run_then_applies() {
         "work-gc",
         &["w".to_string(), "--yes".to_string()],
         &system,
+        false,
     );
     assert_eq!(applied, 0);
     assert!(

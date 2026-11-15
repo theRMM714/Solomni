@@ -101,13 +101,13 @@ roles:
 - **悬空引用**（角色引用总表里不存在的 id）→ **装配期 `SystemTools::problems()` 硬失败**（`src/tests/detail/` 锁死）。这是两张表不漂的机制保证。
 - `--audit=structure` 只比文件与文档结构，不解析这两张表；改角色表 / 工具表要跑全量入口（或至少 `src/tests/detail/` 的用例）。
 
-## 四、动作与分发（唯一一处）
+## 四、动作与分发（一张表，两条执行路径）
 
-- **动作表是授权与执行的唯一真相**：每条动作声明参数契约与 `callers`；分发只有一处（`conductor` 的 `ActionOps`）——**参数按声明校验 → 按 `callers` 授权 → 执行 → 审计**。
+- **动作表是参数契约与授权的唯一真相**：每条动作声明参数契约与 `callers`，校验按声明做、授权按 `callers` 判——这两步只有一套规则，不随调用方变。**执行**有两条实现，各在自己的能力里：呈现侧（人）走 `conductor` 的 `ActionOps::act`（`src/capabilities/conductor/api/action.rs`，校验 → 授权 → 执行 → 审计四步在一处），模型代理侧走 `ProxyTools::call`（`src/capabilities/conductor/service/proxy.rs`，同样是查表 → 校验 → 授权 → 交宿主，另有幂等账）。两条路径共用同一张表与同一份授权规则，但**不共用同一段执行代码**——把它们写成一处需要呈现层与模型回环互相依赖，会成环。
 
 - **两个适配器**：模型侧（`ToolHandler`，按名字认领）与呈现侧（`POST /api/actions/{id}`、`GET /api/actions` 动作目录）都只负责造一次 `ActionCall`（动作 id + 参数 + 调用者身份）并各按自己的媒介呈现结果——模型侧拿文本回执，呈现侧拿结构化结果。**同一份声明，两种呈现。**
 - **读取与视图不进动作表**：会话列表 / 配置 / 文件清单 / 历史是读接口，事实仍只有**事件台**一条来路。
-- **人经呈现层调用**（`caller = user`）与**模型经工具调用**（`caller = 角色 id`）走同一次校验、同一处授权、同一条审计；适配器不各自校验、也不各自判权。
+- **人经呈现层调用**（`caller = user`）与**模型经工具调用**（`caller = 角色 id`）用同一份参数声明与同一套授权判据；审计各自入账（呈现侧进运行日志，模型侧进可回放的转录工具行）。适配器不各自校验、也不各自判权。
 - **登记处动作只给 user**：供应商 / 密钥 / 模型 / agent / 设置的写面（`upsert_provider` / `remove_provider` / `discover_models` / `upsert_model` / `remove_model` / `set_core_model` / `probe_model_tools` / `probe_replay_shape` / `upsert_agent` / `remove_agent` / `set_settings`）的 `callers` 只有 `user`——产品级资源默认不开放给任何角色；`api_key` 只进登记处，不进动作目录、不进审计。读（`GET /api/settings`、`/api/state`）仍是独立读接口。
 - **工作区回滚动作也只给 user**：`restore_work_commit`（`session_id` / `commit` / `expect_head`）——非破坏性物化共享区，目标之后的提交仍保留；同一工作子树里有会话在生成时拒绝；成功后由核心落一条可回放的 `notice` 行。
 - 提交历史 / 详情 / 文件预览是**只读视图**（`SessionOps::work_log` / `work_commit_view` / `work_commit_file`），不进动作表。

@@ -110,11 +110,13 @@ commands:
     group: 维护
     phase: boot
     brief: 自检：这台机器能承载哪些能力与测试（JSON）
+    json: '{"platform","arch","fence","externals","toolchains","processes","vmTier","storage"}'
 
   - name: provision
     group: 维护
     phase: boot
     brief: 依赖补齐状态与执行（不带写旗语只报状态）
+    json: '状态 {"platform","arch","missing","deps"}；补齐 {"ensured":true,"lines"}；还原 {"applied","freedBytes","actions"}'
     confirm: true
     flags:
       - name: "--reset"
@@ -129,6 +131,7 @@ commands:
     phase: boot
     usage: "<工作名>"
     brief: 显式回收一个不再可达的内容对象（默认 dry-run）
+    json: '{"objects","bytes","reachableObjects","unreachableObjects","applied"}'
     confirm: true
     flags:
       - name: "--yes"
@@ -138,12 +141,14 @@ commands:
     group: 维护
     phase: boot
     brief: 存储空间报告（JSON）
+    json: '{"managedBytes","categories","lastGc"}'
 
   - name: gc
     group: 维护
     phase: boot
     usage: "[类别]"
     brief: 回收内容对象与构建缓存（默认 dry-run）
+    json: '{"applied","freedBytes","actions","skipped"}；后台作业起来时 {"job"}'
     confirm: true
     flags:
       - name: "--yes"
@@ -163,6 +168,7 @@ commands:
     phase: boot
     usage: "<模块id>"
     brief: 在目标环境里构建一个模块声明的产物
+    json: '{"module","target","skipped","output"}'
     flags:
       - name: "--guest"
         value: "<guest>"

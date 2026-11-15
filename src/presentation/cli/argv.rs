@@ -50,6 +50,13 @@ pub(crate) const FLAGS: &[Flag] = &[
         hidden: false,
     },
     Flag {
+        long: "--json",
+        short: None,
+        value: None,
+        desc: "机器可读回执：启动命令的输出改成 JSON（字段见 solomni <命令> --help）",
+        hidden: false,
+    },
+    Flag {
         long: "--setup",
         short: None,
         value: Some("mode"),
@@ -94,6 +101,8 @@ pub(crate) struct Flags {
     pub(crate) port: Option<u16>,
     pub(crate) plain: bool,
     pub(crate) no_anim: bool,
+    /// 目的：机器可读回执（启动命令按 JSON 输出）。
+    pub(crate) json: bool,
     pub(crate) help: bool,
     pub(crate) version: bool,
     pub(crate) all: bool,
@@ -187,6 +196,10 @@ pub(crate) fn parse(args: &[String]) -> Result<Flags, String> {
             "--no-anim" => {
                 no_value(&inline, name)?;
                 flags.no_anim = true;
+            }
+            "--json" => {
+                no_value(&inline, name)?;
+                flags.json = true;
             }
             "--help" | "-h" => {
                 no_value(&inline, name)?;

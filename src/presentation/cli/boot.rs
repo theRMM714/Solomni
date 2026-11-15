@@ -1,7 +1,9 @@
 //! 目的：启动相命令的执行——把 `flags.command` 与它的操作数翻成系统维护能力的一次调用，并打回执、给退出码。
-//! 管：操作数解析（--yes / --reset / --ensure / --category / --guest / --module 与裸词）、回执排版、退出码。
+//! 管：操作数解析（--yes / --reset / --ensure / --category / --guest / --module 与裸词）、回执排版（人读或 --json）、退出码。
 //! 不管：命令有哪些（在 systools/commands.yaml）、业务规则与确认语义（在 system 能力）、装配（在 entry::assembly）。
 //! 联动：main 在工具链就位后调用；能力面由 entry::assembly::system 注入；两端一致性由 src/tests/commands.rs 锁死。
+
+use serde_json::json;
 
 use crate::capabilities::storage::api::{CleanOutcome, GcReport, JobState};
 use crate::capabilities::system::api::{
@@ -9,7 +11,8 @@ use crate::capabilities::system::api::{
 };
 
 /// 目的：一次启动相命令的入口——回执已经打完，只差退出码。
-pub(crate) fn run(command: &str, operands: &[String], system: &dyn System) -> i32 {
+/// 参数：`json` 为真时回执改成一行 JSON（字段见 `systools/commands.yaml` 的 `json`）。
+pub(crate) fn run(command: &str, operands: &[String], system: &dyn System, json: bool) -> i32 {
     let args = match Args::parse(operands) {
         Ok(a) => a,
         Err(e) => {
@@ -17,6 +20,7 @@ pub(crate) fn run(command: &str, operands: &[String], system: &dyn System) -> i3
             return 2;
         }
     };
+    let json = json || args.json;
     match command {
         "doctor" => {
             println!("{}", pretty(&system.doctor()));
@@ -27,12 +31,12 @@ pub(crate) fn run(command: &str, operands: &[String], system: &dyn System) -> i3
                 println!("{}", pretty(&v));
                 0
             }
-            Err(f) => fail("[存储]", f),
+            Err(f) => fail("[存储]", f, json),
         },
-        "provision" => provision(system, &args),
-        "gc" => gc(system, &args),
-        "work-gc" => work_gc(system, &args),
-        "build" => build(system, &args),
+        "provision" => provision(system, &args, json),
+        "gc" => gc(system, &args, json),
+        "work-gc" => work_gc(system, &args, json),
+        "build" => build(system, &args, json),
         other => {
             eprintln!("这个启动命令还没有执行入口：{}", other);
             1
@@ -41,19 +45,29 @@ pub(crate) fn run(command: &str, operands: &[String], system: &dyn System) -> i3
 }
 
 /// 目的：`--provision`：带 --reset 就还原虚拟根，带 --ensure 就补齐，都没有就报状态。
-fn provision(system: &dyn System, args: &Args) -> i32 {
+fn provision(system: &dyn System, args: &Args, json: bool) -> i32 {
     if let Some(guest) = args.reset.clone() {
         let req = ResetRequest {
-            guest,
+            guest: guest.clone(),
             confirm: args.yes,
         };
-        let mut on_line = |line: &str| eprintln!("[依赖补齐] {}", line);
+        let mut lines: Vec<String> = Vec::new();
+        let mut on_line = |line: &str| {
+            lines.push(line.to_string());
+            if !json {
+                eprintln!("[依赖补齐] {}", line);
+            }
+        };
         return match system.reset(req, &mut on_line) {
             Ok(report) => {
-                print_gc(&report);
+                if json {
+                    println!("{}", pretty(&json!({ "guest": guest, "report": report })));
+                } else {
+                    print_gc(&report);
+                }
                 0
             }
-            Err(f) => fail("[依赖补齐]", f),
+            Err(f) => fail("[依赖补齐]", f, json),
         };
     }
     if let Some(spec) = args.ensure.clone() {
@@ -61,13 +75,23 @@ fn provision(system: &dyn System, args: &Args) -> i32 {
             spec: if spec.is_empty() { None } else { Some(spec) },
             confirm: args.yes,
         };
-        let mut on_line = |line: &str| println!("[依赖补齐] {}", line);
+        let mut lines: Vec<String> = Vec::new();
+        let mut on_line = |line: &str| {
+            lines.push(line.to_string());
+            if !json {
+                println!("[依赖补齐] {}", line);
+            }
+        };
         return match system.ensure(req, &mut on_line) {
             Ok(()) => {
-                println!("[依赖补齐] 完成");
+                if json {
+                    println!("{}", pretty(&json!({ "ensured": true, "lines": lines })));
+                } else {
+                    println!("[依赖补齐] 完成");
+                }
                 0
             }
-            Err(f) => fail("[依赖补齐]", f),
+            Err(f) => fail("[依赖补齐]", f, json),
         };
     }
     match system.provision() {
@@ -75,14 +99,14 @@ fn provision(system: &dyn System, args: &Args) -> i32 {
             println!("{}", pretty(&v));
             0
         }
-        Err(f) => fail("[依赖检查]", f),
+        Err(f) => fail("[依赖检查]", f, json),
     }
 }
 
 /// 目的：`--gc`：给了类别就清那一类，否则按策略回收；缺 --yes 时只预览（退出码 2）。
-fn gc(system: &dyn System, args: &Args) -> i32 {
+fn gc(system: &dyn System, args: &Args, json: bool) -> i32 {
     if let Some(cat) = args.category.clone().filter(|_| !args.yes) {
-        return gc_preview(system, &cat);
+        return gc_preview(system, &cat, json);
     }
     let req = GcRequest {
         kind: args.category.clone(),
@@ -92,64 +116,84 @@ fn gc(system: &dyn System, args: &Args) -> i32 {
     };
     match system.gc(req) {
         Ok(CleanOutcome::Report(report)) => {
-            print_gc(&report);
+            if json {
+                println!(
+                    "{}",
+                    pretty(&serde_json::to_value(&report).unwrap_or_default())
+                );
+            } else {
+                print_gc(&report);
+            }
             0
         }
-        Ok(CleanOutcome::Started(state)) => wait_job(system, state),
-        Err(f) => fail("[存储]", f),
+        Ok(CleanOutcome::Started(state)) => wait_job(system, state, json),
+        Err(f) => fail("[存储]", f, json),
     }
 }
 
 /// 目的：带类别但不带 --yes 时的预览——只报这一类现在有多少，缺省退出码 2 表示「还差一次确认」。
-fn gc_preview(system: &dyn System, category: &str) -> i32 {
-    println!("[存储] 预览模式：确认后加 --yes 才会清理 {}", category);
+fn gc_preview(system: &dyn System, category: &str, json: bool) -> i32 {
     let report = match system.storage() {
         Ok(v) => v,
-        Err(f) => return fail("[存储]", f),
+        Err(f) => return fail("[存储]", f, json),
     };
     let hit = report
         .get("categories")
         .and_then(|c| c.as_array())
         .and_then(|list| {
-            list.iter().find(|c| {
-                let id = c.get("id").and_then(|v| v.as_str()).unwrap_or_default();
-                id == category || (category == "guest-bases" && id == category)
-            })
+            list.iter()
+                .find(|c| c.get("id").and_then(|v| v.as_str()) == Some(category))
         });
-    match hit {
-        Some(c) => {
-            println!(
-                "[存储] {}：{} 字节 / {} 项",
-                c.get("label").and_then(|v| v.as_str()).unwrap_or(category),
-                c.get("bytes").and_then(|v| v.as_u64()).unwrap_or(0),
-                c.get("items")
-                    .and_then(|v| v.as_array())
-                    .map(|a| a.len())
-                    .unwrap_or(0)
-            );
-            2
-        }
-        None => 2,
+    if json {
+        let body = json!({
+            "preview": true,
+            "category": category,
+            "report": hit.cloned().unwrap_or(serde_json::Value::Null),
+        });
+        println!("{}", pretty(&body));
+        return 2;
     }
+    println!("[存储] 预览模式：确认后加 --yes 才会清理 {}", category);
+    if let Some(c) = hit {
+        println!(
+            "[存储] {}：{} 字节 / {} 项",
+            c.get("label").and_then(|v| v.as_str()).unwrap_or(category),
+            c.get("bytes").and_then(|v| v.as_u64()).unwrap_or(0),
+            c.get("items")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0)
+        );
+    }
+    2
 }
 
 /// 目的：后台作业起来后等它跑完（CLI 没有旁路事件通道，只能轮询状态快照）。
-fn wait_job(system: &dyn System, mut state: JobState) -> i32 {
+fn wait_job(system: &dyn System, mut state: JobState, json: bool) -> i32 {
     let mut shown = 0usize;
     loop {
-        for line in state.lines.iter().skip(shown) {
-            println!("[存储] {}", line);
+        if !json {
+            for line in state.lines.iter().skip(shown) {
+                println!("[存储] {}", line);
+            }
         }
         shown = shown.max(state.lines.len());
         if !state.running {
             break;
         }
-        if let Some(e) = state.error.clone() {
-            eprintln!("[存储] {}", e);
-            return 1;
+        if state.error.is_some() {
+            break;
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
         state = system.job();
+    }
+    if json {
+        println!(
+            "{}",
+            pretty(
+                &json!({ "job": { "running": state.running, "lines": state.lines, "error": state.error } })
+            )
+        );
     }
     match state.error {
         Some(e) => {
@@ -161,7 +205,7 @@ fn wait_job(system: &dyn System, mut state: JobState) -> i32 {
 }
 
 /// 目的：`--work-gc`：回收一个工作里不再可达的内容对象（缺 --yes 只预览）。
-fn work_gc(system: &dyn System, args: &Args) -> i32 {
+fn work_gc(system: &dyn System, args: &Args, json: bool) -> i32 {
     let Some(work) = args.words.first().cloned() else {
         eprintln!("用法：solomni --work-gc <工作名> [--yes]");
         return 2;
@@ -172,32 +216,49 @@ fn work_gc(system: &dyn System, args: &Args) -> i32 {
     };
     match system.work_gc(req) {
         Ok(r) => {
-            println!(
-                "[回收] 对象 {} 个 / {} 字节；可达 {} / {}；不可达 {} / {}；杂项 {} 个",
-                r.objects,
-                r.bytes,
-                r.reachable_objects,
-                r.reachable_bytes,
-                r.unreachable_objects,
-                r.unreachable_bytes,
-                r.ignored_files
-            );
-            if r.applied {
-                println!(
-                    "[回收] 已删除 {} 个 / {} 字节；清理杂项 {} 个",
-                    r.removed_objects, r.removed_bytes, r.removed_ignored
-                );
+            if json {
+                let body = json!({
+                    "objects": r.objects,
+                    "bytes": r.bytes,
+                    "reachableObjects": r.reachable_objects,
+                    "reachableBytes": r.reachable_bytes,
+                    "unreachableObjects": r.unreachable_objects,
+                    "unreachableBytes": r.unreachable_bytes,
+                    "ignoredFiles": r.ignored_files,
+                    "applied": r.applied,
+                    "removedObjects": r.removed_objects,
+                    "removedBytes": r.removed_bytes,
+                    "removedIgnored": r.removed_ignored,
+                });
+                println!("{}", pretty(&body));
             } else {
-                println!("[回收] 未删除（dry-run）；确认后加 --yes");
+                println!(
+                    "[回收] 对象 {} 个 / {} 字节；可达 {} / {}；不可达 {} / {}；杂项 {} 个",
+                    r.objects,
+                    r.bytes,
+                    r.reachable_objects,
+                    r.reachable_bytes,
+                    r.unreachable_objects,
+                    r.unreachable_bytes,
+                    r.ignored_files
+                );
+                if r.applied {
+                    println!(
+                        "[回收] 已删除 {} 个 / {} 字节；清理杂项 {} 个",
+                        r.removed_objects, r.removed_bytes, r.removed_ignored
+                    );
+                } else {
+                    println!("[回收] 未删除（dry-run）；确认后加 --yes");
+                }
             }
             0
         }
-        Err(f) => fail("[回收]", f),
+        Err(f) => fail("[回收]", f, json),
     }
 }
 
 /// 目的：`--build`：在宿主或某个虚拟根里跑模块声明的构建。
-fn build(system: &dyn System, args: &Args) -> i32 {
+fn build(system: &dyn System, args: &Args, json: bool) -> i32 {
     let Some(module) = args.words.first().cloned() else {
         eprintln!("用法：solomni --build <模块 id> [--guest <虚拟根>]");
         return 2;
@@ -211,6 +272,18 @@ fn build(system: &dyn System, args: &Args) -> i32 {
         guest: args.guest.clone(),
     };
     match system.build(req) {
+        Ok(b) if json => {
+            println!(
+                "{}",
+                pretty(&json!({
+                    "module": b.module,
+                    "target": b.target,
+                    "skipped": b.skipped,
+                    "output": b.output,
+                }))
+            );
+            0
+        }
         Ok(b) if b.skipped => {
             println!("[构建] {} 在目标 {} 上已是最新，跳过", module, b.target);
             0
@@ -220,12 +293,19 @@ fn build(system: &dyn System, args: &Args) -> i32 {
             println!("[构建] {} 构建完成（目标 {}）", module, b.target);
             0
         }
-        Err(f) => fail("[构建]", f),
+        Err(f) => fail("[构建]", f, json),
     }
 }
 
-/// 目的：一次失败的收尾——打一行带域前缀的话，按失败自己的码退出。
-fn fail(prefix: &str, fault: Fault) -> i32 {
+/// 目的：一次失败的收尾——打一行带域前缀的话，按失败自己的码退出；`--json` 时改成一行 JSON。
+fn fail(prefix: &str, fault: Fault, json: bool) -> i32 {
+    if json {
+        eprintln!(
+            "{}",
+            pretty(&json!({ "error": fault.message, "code": fault.code, "domain": prefix }))
+        );
+        return fault.code;
+    }
     eprintln!("{} {}", prefix, fault.message);
     fault.code
 }
@@ -262,10 +342,12 @@ pub(crate) fn print_gc(r: &GcReport) {
     println!("[存储] 释放 {} 字节；仍超限={}", r.freed_bytes, r.over_cap);
 }
 
-/// 目的：启动相命令的操作数——跨命令修饰（--yes）与命令自己的旗语分开收。
+/// 目的：启动相命令的操作数——跨命令修饰（--yes / --json）与命令自己的旗语分开收。
 #[derive(Debug, Default)]
 struct Args {
     yes: bool,
+    /// 目的：机器回执（写在命令后面也算：`solomni --gc --json`）。
+    json: bool,
     reset: Option<String>,
     ensure: Option<String>,
     category: Option<String>,
@@ -299,6 +381,7 @@ impl Args {
             };
             match name {
                 "--yes" => args.yes = true,
+                "--json" => args.json = true,
                 "--reset" => args.reset = take(&mut i),
                 "--ensure" => args.ensure = Some(take(&mut i).unwrap_or_default()),
                 "--category" => args.category = take(&mut i),
