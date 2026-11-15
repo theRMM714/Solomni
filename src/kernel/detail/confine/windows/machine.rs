@@ -5,7 +5,7 @@
 //!   外部工作区的显式一次性只读授权/撤权（ensure_workspace_grant / revoke_machine_grants），
 //!   以及旧全应用包机器级授权的退役（retire_legacy_machine_grants）。
 //! 不管：每会话的容器数据授权（windows.rs 的 prepare_fence）、ACE 读写（acl.rs）、台账（record/）。
-//! 联动：entry::setup::fence 与启动首次授权共用 machine_ensure；状态查询与 --setup=status 共用 machine_missing。
+//! 联动：system 能力的便携维护（detail/setup/fence.rs）与启动首次授权共用 machine_ensure；状态查询与 --setup=status 共用 machine_missing。
 
 use super::*;
 use std::time::Instant;

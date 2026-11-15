@@ -26,10 +26,10 @@
 ## 一、组合根（`src/main.rs`）
 
 - 先处理**不需要装配核心**的模式：`--proc-watchdog`、`--fence-run`、`--https-check`、`--unpack`、`--print-fence-env`、`--fence-verify`、`--print-routes`。
-- 再解析全局旗语（`src/presentation/cli/argv.rs`）：`--root <路径>` / `--web` / `--port <n>` / `--plain` / `--no-anim` / `--setup <mode>` / `-h, --help` / `-v, --version`；写错直接报错退出 2，`--help` 与 `--version` 不装配核心。
+- 再解析全局旗语（`src/presentation/cli/argv.rs`）：`--root <路径>` / `--web` / `--port <n>` / `--plain` / `--no-anim` / `-h, --help` / `-v, --version`；写错直接报错退出 2，`--help` 与 `--version` 不装配核心。`--setup [模式]` 不在这里——它是启动相命令，与其它维护命令一样由命令表识别、由启动相执行。
 - 产品根：`--root <路径>`，缺省 `.`；相对路径与当前目录做纯词法拼接，取不到当前目录才退回 `canonicalize`（Windows 上剥掉 `\\?\` 前缀）。
-- 根解析后、装配核心前先分派**便携维护**（`--setup=<mode>`，`src/entry/setup.rs`）：`path` 生成 `bin/solomni.cmd` 并把产品根的 `bin` 追加进用户 PATH，`unset` / `undo` 摘除或按备份还原，`status` 打印 JSON（缺省模式），`fence` 做围栏机器级预授并退役旧的全应用包机器级授权，`fence-calibrate` 用自建合成树标定本卷授权速率并写 `.home/fence-costs.json`（仅 Windows；非 Windows 如实报不可用），`all` = path + fence。这些模式不读登记处、不打印启动报告，因此 `status` 的 JSON 不会被污染。`--setup=path` 写出的 `bin/solomni.cmd` 把 `--root` 固定到**安装根**（shim 自身所在目录的上一级），所以经 shim 调用时产品根不再取决于当前目录；直接运行 `solomni.exe` 且未给 `--root` 时，根仍按上一条取当前目录。
-- 建成核心、进主循环之前分配**视图盘**（仅 Windows）：产品根映射成本实例独占的盘符并登记当前 pid，shell 这类 cwd == 私有沙箱的调用里，容器 cwd 与模型看到的路径用视图写法（模块工具沿用宿主 cwd，不参与视图盘收敛），宿主真实路径由路径码翻译；正常退出释放映射，崩溃残留由下次启动清扫。**只有真正跑会话/服务/工具的主流程才分配**——`--setup`、维护旗与探针都是早退路径（`std::process::exit` 不走 Drop），分配了必然泄漏盘符，它们只调用「只清扫不分配」的入口。`SOLOMNI_VIEW_DRIVE=0` 是排障用的逃生口（关闭后行为与旧版一致）；分配失败只打一行 `[围栏]` 回退真实路径，不阻断启动。
+- **便携维护**（`--setup [模式]`）是启动相命令，命令行与转录中心提示符两条入口一个实现：工具链就位后由 `src/presentation/cli/boot.rs` 把模式名翻成 `SetupMode` 交 `system` 能力，写入实现（注册表、shim、ACL）在 `src/capabilities/system/detail/setup.rs`，启动期的只读对账在 `src/entry/portable.rs`（只经 `SetupOps` 端口取缺项与预授，见 [docs/system](../system/README.md)）。模式：`path` 生成 `bin/solomni.cmd` 并把产品根的 `bin` 追加进用户 PATH，`unset` / `undo` 摘除或按备份还原，`status` 打印 JSON（缺省模式），`fence` 做围栏机器级预授并退役旧的全应用包机器级授权，`fence-calibrate` 用自建合成树标定本卷授权速率并写 `.home/fence-costs.json`（仅 Windows；非 Windows 如实报不可用），`all` = path + fence。这些模式不读登记处；启动期的工具链报告与围栏提示都走 stderr，所以 `--setup status --json` 的 stdout 仍是一段干净的 JSON。`--setup=path` 写出的 `bin/solomni.cmd` 把 `--root` 固定到**安装根**（shim 自身所在目录的上一级），所以经 shim 调用时产品根不再取决于当前目录；直接运行 `solomni.exe` 且未给 `--root` 时，根仍按上一条取当前目录。
+- 建成核心、进主循环之前分配**视图盘**（仅 Windows）：产品根映射成本实例独占的盘符并登记当前 pid，shell 这类 cwd == 私有沙箱的调用里，容器 cwd 与模型看到的路径用视图写法（模块工具沿用宿主 cwd，不参与视图盘收敛），宿主真实路径由路径码翻译；正常退出释放映射，崩溃残留由下次启动清扫。**只有真正跑会话/服务/工具的主流程才分配**——启动相命令、维护旗与探针都是早退路径（`std::process::exit` 不走 Drop），分配了必然泄漏盘符，它们只调用「只清扫不分配」的入口。`SOLOMNI_VIEW_DRIVE=0` 是排障用的逃生口（关闭后行为与旧版一致）；分配失败只打一行 `[围栏]` 回退真实路径，不阻断启动。
 - 根解析后立即应用**基础工具链**：读 `.tools/toolchains/active.json`（由 provision 的 `kind: toolchain` 写入），把项目内 `bin` 前置到 PATH；目标不符 / 路径不安全 / bin 不在场只报告，不阻断启动。**每次启动**都打印基础 profile 的项目内 / 宿主回退（Windows 探围栏能否授权）/ 缺失与补全指令；之后 `--doctor`、`--build`、会话工具与常驻服务都看这份生效 PATH。
 - 产品维护命令不由入口分派：工具链就位后，`flags.command` 交给启动相（`src/presentation/cli/boot.rs`，经 `system` 能力执行）。围栏台账系列（`--fence-reconcile` / `--fence-ledger` / `--fence-restore` / `--fence-revoke <路径>` / `--fence-revoke <SID> <路径>` / `--fence-profile-rm` / `--fence-clean`）仍留在入口：只需要产品根，不装配核心；单参数撤该外部工作区的机器级条目，双参数保留旧的按 SID+路径语义，其它 arity 打用法退 2。
 - 装配期失败一律打印 `[装配失败]` 并以 1 退出（`src/main.rs`）：登记处四份 yaml 读不了、提示词册缺文件 / 缺键、工具总表与角色表不自洽、模块清单装配失败、隐秘字段加载失败、核心执行线程起不来；日志文件起不来只降级到 stderr（进程继续）。
@@ -56,7 +56,6 @@
 | `--print-routes` | HTTP 路由目录的唯一定义（见 [contracts.md](../presentation/contracts.md)） | JSON；0 |
 | `--print-fence-env <FenceJob JSON> -- <命令>` | 逐行输出运行期给工具进程的环境白名单 | `KEY=VALUE`；0，围栏参数非法 111 |
 | `--fence-verify <FenceJob JSON> -- <命令>` | 只做机制验证，不装围栏、不写权限项 | `enforced` / `env-unavailable …` / `broken …`；0，参数非法 111 |
-| `--setup=<mode>` | 便携维护：`path` / `unset` / `undo` 改用户 PATH 与 `bin/solomni.cmd`，`fence` 做围栏机器级预授并退役旧的全应用包机器级授权，`fence-calibrate` 标定本卷授权速率，`all` = path + fence，`status` 只读报告（省略值 = `status`） | `status` 为 JSON；0；未知模式 2 |
 | `--probe-tools <模型 id>` | 实测一条通道是否支持原生工具调用，把**确定**结论写回 `models.yaml` | 三态文本；0 / 1 失败 / 2 用法错 |
 | `--probe-replay <模型 id>` | 只报回放形状的事实，不改登记处 | 逐形状文本；0 / 1 失败 / 2 用法错 |
 
@@ -80,7 +79,7 @@
 
 ## 改动本单元时必须同步
 
-- 便携维护（`--setup`）的行为一改 → 同步本页、`docs/entry/unit-map.md`、[docs/permission/README.md](../permission/README.md) 与 `tests/gaps.yaml` 的平台缺口。
+- 便携维护（`--setup`）的行为一改 → 同步 `docs/system/`（实现在 system 能力）、本页的启动期对账说明（`src/entry/portable.rs`）、[docs/permission/README.md](../permission/README.md) 与 `tests/gaps.yaml` 的平台缺口。
 - 新增端口 / 适配器 → 改 `src/entry/assembly.rs` 装配；新增探针或隐藏模式 → 同步本页、`docs/entry/unit-map.md` 与 [docs/testing/execution-ci.md](../testing/execution-ci.md)。
 - 新增或改产品命令 → 改 `systools/commands.yaml`；执行分派在 `src/presentation/cli/boot.rs`（启动相，经 `system` 能力）与 `src/presentation/cli.rs`（转录相），一致性由 `src/tests/commands.rs` 锁死。
 - 路由目录的机器比对在 `src/tests/routes.rs` ↔ [docs/presentation/contracts.md](../presentation/contracts.md)。

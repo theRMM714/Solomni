@@ -82,6 +82,71 @@ pub struct BuildRequest {
     pub guest: Option<String>,
 }
 
+/// 目的：便携维护（`--setup`）的模式——PATH shim 的写/摘/还原、只读状态、围栏机器级预授与标定。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetupMode {
+    /// 把 `<root>/bin` 追加进用户 PATH（并写好 shim）。
+    Path,
+    /// 把 `<root>/bin` 从用户 PATH 里摘掉。
+    Unset,
+    /// 按备份还原用户 PATH（原串与原类型）。
+    Undo,
+    /// 只读状态（缺省模式）。
+    Status,
+    /// 围栏机器级一次性预授。
+    Fence,
+    /// 围栏授权成本的标定样本。
+    FenceCalibrate,
+    /// 先改 PATH 再预授。
+    All,
+}
+
+impl SetupMode {
+    /// 目的：把命令行上的一个模式词翻成模式；空词等于 `status`。
+    /// 返回：认不出的词给 None（调用方按用法错处理，不猜）。
+    pub fn parse(raw: &str) -> Option<SetupMode> {
+        Some(match raw.trim() {
+            "" | "status" => SetupMode::Status,
+            "path" => SetupMode::Path,
+            "unset" => SetupMode::Unset,
+            "undo" => SetupMode::Undo,
+            "fence" => SetupMode::Fence,
+            "fence-calibrate" => SetupMode::FenceCalibrate,
+            "all" => SetupMode::All,
+            _ => return None,
+        })
+    }
+
+    /// 目的：模式在命令面与 JSON 回执里的写法（与 `parse` 成对）。
+    pub fn id(self) -> &'static str {
+        match self {
+            SetupMode::Path => "path",
+            SetupMode::Unset => "unset",
+            SetupMode::Undo => "undo",
+            SetupMode::Status => "status",
+            SetupMode::Fence => "fence",
+            SetupMode::FenceCalibrate => "fence-calibrate",
+            SetupMode::All => "all",
+        }
+    }
+
+    /// 目的：可用模式的一行清单（用法错时给人看，与 `parse` 同一处口径）。
+    pub fn list() -> &'static str {
+        "path / unset / undo / status / fence / fence-calibrate / all"
+    }
+}
+
+/// 目的：便携维护的端口——路径与围栏两件事的实现都在 detail，用例面只说做什么。
+/// 约束：进度行经 `on_line` 交出，由呈现层决定前缀与排版；返回的 JSON 是机器回执。
+pub trait SetupOps: Send + Sync {
+    /// 目的：执行一个模式：`Status` 只读，其余按语义写用户 PATH / 写机器级 ACL。
+    fn apply(&self, mode: SetupMode, on_line: &mut dyn FnMut(&str)) -> Result<Value, Fault>;
+    /// 目的：还缺哪些机器级落点（只读；空 = 已就绪）。
+    fn fence_missing(&self) -> Result<Vec<String>, String>;
+    /// 目的：把机器级落点一次授好（首次授权后那一趟与 `Fence` 模式共用）。
+    fn fence_ensure(&self, on_line: &mut dyn FnMut(&str)) -> Result<(), String>;
+}
+
 /// 目的：一次系统维护调用的失败——文案 + 退出码（用法/门槛不对 = 2，执行失败 = 1）。
 /// 约束：呈现层只打印 `message` 并按 `code` 退出；不再自己猜该给几。
 #[derive(Debug, Clone)]
@@ -134,6 +199,8 @@ pub trait System: Send + Sync {
     fn build(&self, req: BuildRequest) -> Result<Built, Fault>;
     /// 目的：清理作业的状态快照（回收起了后台作业时，CLI 靠它等结束）。
     fn job(&self) -> JobState;
+    /// 目的：便携维护（`--setup`）：PATH 与围栏机器级预授；`Status` 返回状态 JSON。
+    fn setup(&self, mode: SetupMode, on_line: &mut dyn FnMut(&str)) -> Result<Value, Fault>;
 }
 
 /// 目的：启动报告的工具链事实（项目内 / 缺失 / 宿主回退是否可用）。

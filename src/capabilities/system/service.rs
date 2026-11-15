@@ -16,8 +16,8 @@ use crate::capabilities::storage::api::{
     CleanKind, CleanOutcome, CleanRequest, GcReport, JobState, Storage,
 };
 use crate::capabilities::system::api::{
-    BuildRequest, EnsureRequest, Facts, Fault, FenceFacts, GcRequest, ResetRequest, System,
-    WorkGcRequest,
+    BuildRequest, EnsureRequest, Facts, Fault, FenceFacts, GcRequest, ResetRequest, SetupMode,
+    SetupOps, System, WorkGcRequest,
 };
 use crate::capabilities::workspace::api::{GcReport as WorkspaceGc, Workspace, safe_file_name};
 
@@ -41,12 +41,18 @@ pub struct SystemService {
     deps: SystemDeps,
     /// 目的：直读宿主的那几项事实——能力不碰探针，只经这个端口取。
     facts: Arc<dyn Facts>,
+    /// 目的：便携维护（用户 PATH 与围栏机器级预授）——写注册表与 ACL 的实现在 detail。
+    setup: Arc<dyn SetupOps>,
 }
 
 impl SystemService {
-    /// 目的：按组合根注入的依赖与宿主事实端口装一次（端口实现由能力入口装配）。
-    pub fn with_facts(deps: SystemDeps, facts: Arc<dyn Facts>) -> SystemService {
-        SystemService { deps, facts }
+    /// 目的：按组合根注入的依赖、宿主事实端口与便携维护端口装一次（实现由能力入口装配）。
+    pub fn with_facts(
+        deps: SystemDeps,
+        facts: Arc<dyn Facts>,
+        setup: Arc<dyn SetupOps>,
+    ) -> SystemService {
+        SystemService { deps, facts, setup }
     }
 
     /// 目的：按调用方给的本机围栏事实出自检（用例注入合成值，免得再触发一次围栏自检）。
@@ -194,5 +200,9 @@ impl System for SystemService {
 
     fn job(&self) -> JobState {
         self.deps.storage.job()
+    }
+
+    fn setup(&self, mode: SetupMode, on_line: &mut dyn FnMut(&str)) -> Result<Value, Fault> {
+        self.setup.apply(mode, on_line)
     }
 }

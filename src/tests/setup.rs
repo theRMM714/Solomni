@@ -1,9 +1,15 @@
 //! 目的：便携维护（--setup）的单元测试：PATH 分段纯函数、端口替身驱动的 path/unset/undo、shim 与状态 JSON。
 //! 管：分段去重与幂等、备份与还原、端口错误透传、shim 渲染、状态字段。
 //! 不管：注册表与广播的真实行为（归 kernel 的 UserPath 适配器）；真实用户 PATH 与用户目录不被触碰。
-//! 联动：被测面 src/entry/setup.rs 与 setup/path.rs、setup/shim.rs；端口契约见 src/kernel/ports.rs 的 UserPath。
+//! 联动：被测面 src/capabilities/system/detail/setup/ 下的 mod.rs、path.rs、shim.rs、fence.rs；端口契约见 src/kernel/ports.rs 的 UserPath。
 
-use crate::entry::setup::path as p;
+use crate::capabilities::system::api::{SetupMode, SetupOps};
+use crate::capabilities::system::detail::setup::SetupHost;
+#[cfg(not(windows))]
+use crate::capabilities::system::detail::setup::fence;
+use crate::capabilities::system::detail::setup::path as p;
+#[cfg(windows)]
+use crate::capabilities::system::detail::setup::shim;
 use crate::kernel::ports::{PathValue, UserPath};
 use std::sync::Mutex;
 
@@ -155,10 +161,7 @@ fn path_unset_undo_roundtrip() {
     assert!(line.contains("REG_EXPAND_SZ"), "{line}");
     assert_eq!(port.text(), format!("C:\\Windows;C:\\Other;{}", bin));
     assert_eq!(port.broadcast_count(), 1);
-    assert!(
-        crate::entry::setup::shim::shim_path(&root).exists(),
-        "shim 已落盘"
-    );
+    assert!(shim::shim_path(&root).exists(), "shim 已落盘");
     let backup = std::fs::read_to_string(p::backup_path(&home)).expect("有备份");
     assert!(backup.contains("C:\\\\Windows;C:\\\\Other"), "{backup}");
 
@@ -197,32 +200,41 @@ fn path_reports_port_read_failure() {
 fn shim_renders_root_and_passes_args() {
     let root = crate::tests::scratch("setup-shim");
     let exe = root.join("solomni.exe");
-    let text = crate::entry::setup::shim::render(&exe, &root);
+    let text = shim::render(&exe, &root);
     assert!(text.contains("--root"), "{text}");
     assert!(text.contains("%*"), "{text}");
     assert!(text.contains(&root.display().to_string()), "{text}");
-    let (_, changed) = crate::entry::setup::shim::ensure(&root).expect("生成 shim");
+    let (_, changed) = shim::ensure(&root).expect("生成 shim");
     assert!(changed);
-    let (present, current) = crate::entry::setup::shim::inspect(&root);
+    let (present, current) = shim::inspect(&root);
     assert!(present && current);
-    let (_, changed) = crate::entry::setup::shim::ensure(&root).expect("再生成");
+    let (_, changed) = shim::ensure(&root).expect("再生成");
     assert!(!changed, "内容相同不重写");
 }
 
-/// 目的：--setup 分派：未知模式算用法错；status 只输出可解析的 JSON，不改任何状态。
+/// 目的：模式名只认表里那几条，省略值等于状态；状态只读，不改任何状态。
 #[test]
-fn run_rejects_unknown_mode_and_status_is_json() {
+fn unknown_mode_is_refused_and_omitted_mode_means_status() {
     let root = crate::tests::scratch("setup-dispatch");
-    assert_eq!(crate::entry::setup::run(&root, "bogus"), 2);
-    assert_eq!(crate::entry::setup::run(&root, "status"), 0);
+    assert!(SetupMode::parse("bogus").is_none());
+    assert_eq!(SetupMode::parse(""), Some(SetupMode::Status));
+    assert_eq!(
+        SetupMode::parse("fence-calibrate"),
+        Some(SetupMode::FenceCalibrate)
+    );
+    let value = SetupHost::new(&root)
+        .apply(SetupMode::Status, &mut |_| {})
+        .expect("状态要读得到");
+    assert_eq!(value["platform"], std::env::consts::OS);
 }
 
-/// 目的：状态 JSON 只描述可观察事实：平台、根、PATH 段与围栏缺项都在，且结构稳定。
+/// 目的：状态只描述可观察事实：平台、根、PATH 段与围栏缺项都在，且结构稳定。
 #[test]
-fn status_json_reports_platform_root_and_fence() {
+fn status_reports_platform_root_and_fence() {
     let root = crate::tests::scratch("setup-status");
-    let text = crate::entry::setup::status_json(&root).expect("状态要读得到");
-    let v: serde_json::Value = serde_json::from_str(&text).expect("stdout 必须是 JSON");
+    let v = SetupHost::new(&root)
+        .apply(SetupMode::Status, &mut |_| {})
+        .expect("状态要读得到");
     assert_eq!(v["platform"], std::env::consts::OS);
     assert_eq!(v["root"], root.display().to_string());
     assert!(
@@ -273,19 +285,20 @@ fn unset_and_undo_are_driven_by_the_port() {
 #[test]
 fn posix_modes_print_guidance_and_report_fence_unsupported() {
     let root = crate::tests::scratch("setup-posix");
+    let host = SetupHost::new(&root);
     for mode in ["path", "unset", "undo", "fence", "all"] {
-        assert_eq!(
-            crate::entry::setup::run(&root, mode),
-            0,
-            "POSIX 的 {mode} 只打印指引"
-        );
+        let mode = SetupMode::parse(mode).expect("表里的模式");
+        host.apply(mode, &mut |_| {})
+            .unwrap_or_else(|e| panic!("POSIX 的 {:?} 只打印指引：{}", mode, e.message));
     }
-    assert!(crate::entry::setup::fence_hint(&root), "非 Windows 无缺项");
+    assert!(
+        crate::entry::portable::fence_hint(&root),
+        "非 Windows 无缺项"
+    );
     let home = root.join(".home");
     // 首次授权那一趟在非 Windows 也走一次：如实收尾、不打印、不阻断。
-    crate::entry::setup::ensure_after_authorize(&root);
-    let err =
-        crate::entry::setup::fence::ensure(&root, &home).expect_err("非 Windows 无机器级预授");
+    crate::entry::portable::ensure_after_authorize(&root);
+    let err = fence::ensure(&root, &home, &mut |_| {}).expect_err("非 Windows 无机器级预授");
     assert!(err.contains("本平台"), "{err}");
     let err =
         crate::kernel::detail::confine::machine_missing(&root).expect_err("非 Windows 无预授");

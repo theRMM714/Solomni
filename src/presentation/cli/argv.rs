@@ -106,8 +106,6 @@ pub(crate) struct Flags {
     pub(crate) help: bool,
     pub(crate) version: bool,
     pub(crate) all: bool,
-    /// 目的：`--setup=<模式>` 的取值：便携维护（PATH shim / 围栏机器级预授），省略值等于 `status`。
-    pub(crate) setup: Option<String>,
     pub(crate) positionals: Vec<String>,
     /// 目的：命中的启动相命令（`systools/commands.yaml` 里的 `phase: boot` 条目）的规范名，如 `gc`。
     pub(crate) command: Option<String>,
@@ -178,25 +176,6 @@ pub(crate) fn parse(args: &[String]) -> Result<Flags, String> {
                     Some(raw.parse::<u16>().map_err(|_| {
                         format!("旗语 --port 要一个 1-65535 的整数，收到「{}」", raw)
                     })?);
-            }
-            // 维护旗：只吃 `=值` 或紧跟的已知模式名（不吃 `--root` 这类旗语）；省略值 = status。
-            "--setup" => {
-                let mode =
-                    match inline {
-                        Some(v) if v.is_empty() => return Err(
-                            "旗语 --setup= 要一个模式：path / unset / undo / status / fence / all"
-                                .to_string(),
-                        ),
-                        Some(v) => v,
-                        None => match args.get(i + 1).map(String::as_str) {
-                            Some(v @ ("path" | "unset" | "undo" | "status" | "fence" | "all")) => {
-                                i += 1;
-                                v.to_string()
-                            }
-                            _ => "status".to_string(),
-                        },
-                    };
-                flags.setup = Some(mode);
             }
             "--web" => {
                 no_value(&inline, name)?;
@@ -457,30 +436,22 @@ mod tests {
         assert_eq!(flags.positionals, vec!["--fence-verify", "--json"]);
     }
 
-    /// 维护旗：`--setup=path` 取值、单独出现 = status、紧跟已知模式名也收、空值报错。
+    /// 便携维护是命令表里的一条启动命令：写法照命令面走，模式名进它自己的操作数。
     #[test]
-    fn setup_flag_takes_mode_or_defaults_to_status() {
-        assert_eq!(
-            run(&["--setup=path"]).expect("取值").setup.as_deref(),
-            Some("path")
-        );
-        assert_eq!(
-            run(&["--setup"]).expect("省略值").setup.as_deref(),
-            Some("status")
-        );
-        assert_eq!(
-            run(&["--setup", "fence"])
-                .expect("空格写法")
-                .setup
-                .as_deref(),
-            Some("fence")
-        );
-        // 未知模式留给分派去报（解析层不猜），根旗语照常解析。
-        let flags = run(&["--setup", "--root", "work"]).expect("不吃旗语当值");
-        assert_eq!(flags.setup.as_deref(), Some("status"));
+    fn setup_is_a_boot_command_with_its_mode_as_an_operand() {
+        let flags = run(&["--setup=path"]).expect("等号写法");
+        assert_eq!(flags.command.as_deref(), Some("setup"));
+        assert_eq!(flags.operands, vec!["path"]);
+        let flags = run(&["--setup", "fence"]).expect("空格写法");
+        assert_eq!(flags.command.as_deref(), Some("setup"));
+        assert_eq!(flags.operands, vec!["fence"]);
+        let flags = run(&["--setup", "--root", "work"]).expect("省略值 = 状态");
+        assert_eq!(flags.command.as_deref(), Some("setup"));
+        assert!(flags.operands.is_empty(), "{:?}", flags.operands);
         assert_eq!(flags.root.as_deref(), Some("work"));
-        let err = run(&["--setup="]).expect_err("空值要报错");
-        assert!(err.contains("--setup="), "{err}");
+        let flags = run(&["--setup"]).expect("裸写法");
+        assert_eq!(flags.command.as_deref(), Some("setup"));
+        assert!(flags.operands.is_empty());
     }
 
     /// 台账维护旗不是 opaque 协议：后面的 `--root` 要照常解析（端到端收尾用 `--fence-clean --root <夹具>`）。

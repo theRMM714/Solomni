@@ -16,7 +16,7 @@ use crate::capabilities::workspace::api::GcReport as WorkspaceGc;
 use crate::presentation::cli::boot;
 
 /// 目的：合成一份系统维护面——每条命令要的分支由字段决定，用例不碰磁盘也不起进程。
-/// 外露：转录中心那条路径（`presentation::cli::run_boot`）也用它，免得再写一份替身。
+/// 约束：转录中心那条路径（`presentation::cli::run_boot`）也用它，免得再写一份替身。
 pub(crate) struct Fake {
     /// 目的：让哪条方法失败（"gc" / "work_gc" / "build" / "ensure" / "reset" / "storage" / "provision"）。
     fault: Option<&'static str>,
@@ -135,6 +135,17 @@ impl System for Fake {
     }
     fn job(&self) -> JobState {
         self.job.clone()
+    }
+    fn setup(
+        &self,
+        mode: crate::capabilities::system::api::SetupMode,
+        on_line: &mut dyn FnMut(&str),
+    ) -> Result<Value, Fault> {
+        if self.fault == Some("setup") {
+            return Err(Fault::failed("便携维护失败"));
+        }
+        on_line(&format!("{} 完成", mode.id()));
+        Ok(json!({ "mode": mode.id(), "path": { "bin": "bin", "has_bin": true } }))
     }
 }
 

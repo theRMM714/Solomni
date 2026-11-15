@@ -7,11 +7,11 @@ use serde_json::json;
 
 use crate::capabilities::storage::api::{CleanOutcome, GcReport, JobState};
 use crate::capabilities::system::api::{
-    BuildRequest, EnsureRequest, Fault, GcRequest, ResetRequest, System, WorkGcRequest,
+    BuildRequest, EnsureRequest, Fault, GcRequest, ResetRequest, SetupMode, System, WorkGcRequest,
 };
 
 /// 目的：写操作要人点头时，由谁来问——命令行上没人可问，转录中心里就地一问。
-/// 约定：返回 false 表示没有明确点头（空输入、No、读不到输入都算没点头）。
+/// 约束：返回 false 表示没有明确点头（空输入、No、读不到输入都算没点头）。
 pub(crate) trait Ask {
     /// 目的：这次调用背后有没有可问的人。
     /// 约束：没有时**不能问、也不能改写退出码**——命令行上「缺 --yes 只预览（退出码 2）」是既有契约。
@@ -132,6 +132,7 @@ fn run_once(command: &str, system: &dyn System, args: &Args, json: bool) -> i32 
         "gc" => gc(system, args, json),
         "work-gc" => work_gc(system, args, json),
         "build" => build(system, args, json),
+        "setup" => setup(system, args, json),
         other => {
             eprintln!("这个启动命令还没有执行入口：{}", other);
             1
@@ -349,6 +350,37 @@ fn work_gc(system: &dyn System, args: &Args, json: bool) -> i32 {
             0
         }
         Err(f) => fail("[回收]", f, json),
+    }
+}
+
+/// 目的：`setup`：便携维护（PATH shim 与围栏机器级预授）——省略模式就只报状态。
+/// 约束：状态是只读回执，人读与 `--json` 打同一份 JSON；写入类模式的进度行带 `[便携]` 前缀。
+fn setup(system: &dyn System, args: &Args, json: bool) -> i32 {
+    let raw = args.words.first().cloned().unwrap_or_default();
+    let Some(mode) = SetupMode::parse(&raw) else {
+        return fail(
+            "[便携]",
+            Fault::usage(format!(
+                "未知的 setup 模式「{}」；可用：{}",
+                raw,
+                SetupMode::list()
+            )),
+            json,
+        );
+    };
+    let mut on_line = |line: &str| {
+        if !json {
+            println!("[便携] {}", line);
+        }
+    };
+    match system.setup(mode, &mut on_line) {
+        Ok(v) => {
+            if json || mode == SetupMode::Status {
+                println!("{}", pretty(&v));
+            }
+            0
+        }
+        Err(f) => fail("[便携]", f, json),
     }
 }
 

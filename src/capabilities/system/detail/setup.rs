@@ -1,0 +1,112 @@
+//! 目的：便携维护（`--setup`）的实现——PATH shim 与用户 PATH、围栏机器级一次性预授与标定、只读状态。
+//! 管：模式分派、状态视图（JSON）、围栏缺项对账；PATH 分段与 shim 内容在 path.rs / shim.rs，ACL 机制在 kernel 的 confine。
+//! 不管：命令语法、回执前缀与退出码（在 presentation/cli/boot.rs）；模式名与服务语义的对应（在 api 的 SetupMode）。
+//! 联动：SystemService 经 SetupOps 端口调用；entry 的启动对账用 fence_missing / fence_ensure。
+
+pub(crate) mod fence;
+pub(crate) mod path;
+pub(crate) mod shim;
+
+use std::path::{Path, PathBuf};
+
+use serde_json::{Value, json};
+
+use crate::capabilities::system::api::{Fault, SetupMode, SetupOps};
+
+/// 目的：便携维护的实现——只持有产品根，所有落点都从它推出（`bin` 与 `.home`）。
+pub(crate) struct SetupHost {
+    root: PathBuf,
+}
+
+impl SetupHost {
+    pub(crate) fn new(root: &Path) -> SetupHost {
+        SetupHost {
+            root: root.to_path_buf(),
+        }
+    }
+
+    fn home(&self) -> PathBuf {
+        self.root.join(".home")
+    }
+}
+
+impl SetupOps for SetupHost {
+    fn apply(&self, mode: SetupMode, on_line: &mut dyn FnMut(&str)) -> Result<Value, Fault> {
+        // 状态是只读的，回执本身就是人读的那份 JSON——不加进度行。
+        if mode == SetupMode::Status {
+            return status_value(&self.root).map_err(Fault::failed);
+        }
+        let mut lines: Vec<String> = Vec::new();
+        {
+            // 进度既进回执又当场交出：预授一条一条写 ACL 时人要看得见进度。
+            let mut sink = |line: &str| {
+                lines.push(line.to_string());
+                on_line(line);
+            };
+            match mode {
+                SetupMode::Path => sink(&path::path_line(&self.root).map_err(Fault::failed)?),
+                SetupMode::Unset => sink(&path::unset_line(&self.root).map_err(Fault::failed)?),
+                SetupMode::Undo => sink(&path::undo_line(&self.root).map_err(Fault::failed)?),
+                SetupMode::Fence => fence::grant(&self.root, &mut sink).map_err(Fault::failed)?,
+                SetupMode::FenceCalibrate => {
+                    fence::calibrate(&self.root, &mut sink).map_err(Fault::failed)?
+                }
+                SetupMode::All => {
+                    sink(&path::path_line(&self.root).map_err(Fault::failed)?);
+                    fence::grant(&self.root, &mut sink).map_err(Fault::failed)?;
+                }
+                SetupMode::Status => unreachable!("状态在上面已返回"),
+            }
+        }
+        Ok(json!({ "mode": mode.id(), "lines": lines }))
+    }
+
+    fn fence_missing(&self) -> Result<Vec<String>, String> {
+        fence::missing(&self.root)
+    }
+
+    fn fence_ensure(&self, on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
+        fence::ensure(&self.root, &self.home(), on_line)
+    }
+}
+
+/// 目的：状态视图：平台、根、PATH/shim 事实、机器级预授缺项。只读，不改任何状态。
+fn status_value(root: &Path) -> Result<Value, String> {
+    let path = path::info(root);
+    let fence = match fence::missing(root) {
+        Ok(missing) => json!({
+            "supported": true,
+            "ready": missing.is_empty(),
+            "missing": missing,
+            "error": Value::Null,
+        }),
+        Err(e) => json!({
+            "supported": false,
+            "ready": false,
+            "missing": Vec::<String>::new(),
+            "error": e,
+        }),
+    };
+    Ok(json!({
+        "platform": std::env::consts::OS,
+        "root": root.display().to_string(),
+        "path": path,
+        "fence": fence,
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    /// 目的：非 Windows 上围栏标定如实报不可用（不静默成功），并覆盖模式分派。
+    #[cfg(not(windows))]
+    #[test]
+    fn fence_calibrate_reports_unavailable_off_windows() {
+        use super::*;
+        let root = std::path::Path::new(".");
+        let err = SetupHost::new(root)
+            .apply(SetupMode::FenceCalibrate, &mut |_| {})
+            .expect_err("非 Windows 无标定");
+        assert_eq!(err.code, 1);
+        assert!(err.message.contains("本平台"), "{}", err.message);
+    }
+}

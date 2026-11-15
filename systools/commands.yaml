@@ -173,3 +173,10 @@ commands:
       - name: "--guest"
         value: "<guest>"
         desc: 指定目标虚拟机档
+
+  - name: setup
+    group: 维护
+    phase: boot
+    usage: "[path|unset|undo|status|fence|fence-calibrate|all]"
+    brief: 便携 PATH 与围栏预授（省略值 = status）
+    json: '状态 {"platform","root","path","fence"}；写入类模式 {"mode","lines"}'

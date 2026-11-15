@@ -12,7 +12,7 @@
 - 管：交互模式的转录渲染——角色行与正文缩进、工具行（标签 + 参数摘要 + 成败）、验收清单与交付结论、裁决卡边框、生成态 spinner 与耗时、上下文用量写回状态行；同一批 `SessionEvent` 在非 TTY 下仍走原样文本。
 - 管：共享区提交历史与回滚入口——`work <会话>` 看 head + 最近提交，`work <会话> log [条数]` 列提交，`work <会话> show <提交号>` 看详情，`work <会话> restore <提交号> [--yes]` 走统一的 `restore_work_commit` 动作（非破坏性；交互模式要求输入 yes，`--yes` 仅用于显式脚本）。
 - 管：虚拟机档会话的只读诊断入口——`diagnose <会话>` 造一次 `guest_diagnose` 动作（`caller = user`），把动作返回的结构化 JSON（guest 进程表 / CPU 汇总 / 内存 / 负载 / 挂载）原样打印；与 `work` / `resident` / `module` 同类，不做业务判断。
-- 管：启动相命令的最后一公里——`--doctor` / `--provision` / `--gc` / `--storage` / `--work-gc` / `--build` 的操作数与回执排版（`src/presentation/cli/boot.rs`）；执行与确认门槛在 `system` 能力（见 [docs/system](../../system/README.md)）。
+- 管：启动相命令的最后一公里——`--doctor` / `--provision` / `--gc` / `--storage` / `--work-gc` / `--build` / `--setup` 的操作数与回执排版（`src/presentation/cli/boot.rs`）；执行与确认门槛在 `system` 能力（见 [docs/system](../../system/README.md)）。`--setup` 的写入成果（`bin` shim、用户 PATH、围栏机器级预授）要新开终端才生效。
 - 管：启动相命令的**第二个入口**——同一条命令在终端转录中心的提示符里也能跑（`--doctor`、`--gc<空格>--category=logs`），跑完回提示符、不退出进程；缺 `--yes` 时就地一问（先给预览再问），有会话在跑时写操作只给预览、不执行；`--json` 与 `--root` 在这里没有意义（前者提示后忽略，后者报错、退出码 2）——歧义判据见 `src/presentation/cli.rs` 的 `run_boot`。
 - 管：机器回执——`--json` 让启动相命令只输出一段 JSON（字段逐命令写在 `systools/commands.yaml` 的 `json`，`solomni <命令> --help` 里给出同一份说明）；失败时 stderr 是一行 `{"error","code","domain"}`，退出码不变。
 - 不管：不做业务判断、不持状态、不落盘；**永不接触端口对象，也拿不到 `Core` 本身**（`src/presentation/cli.rs`）；启动相命令的语义也不在这里——`boot.rs` 只把参数翻成能力调用。
