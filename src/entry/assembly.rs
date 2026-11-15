@@ -248,6 +248,10 @@ pub(crate) fn system_with(
     // 目的：宿主事实端口在这里接上——自检里要直读宿主的那几项由 detail 实现，service 只认端口。
     let facts: Arc<dyn crate::capabilities::system::api::Facts + Send + Sync> =
         Arc::new(crate::capabilities::system::detail::HostFacts);
+    // 目的：便携维护端口——用户 PATH 与围栏机器级预授的写入实现都在 detail，service 只认端口。
+    let setup: Arc<dyn crate::capabilities::system::api::SetupOps + Send + Sync> = Arc::new(
+        crate::capabilities::system::detail::setup::SetupHost::new(root),
+    );
     Ok(SystemService::with_facts(
         SystemDeps {
             root: root.to_path_buf(),
@@ -260,6 +264,7 @@ pub(crate) fn system_with(
             net: network_allowed(root),
         },
         facts,
+        setup,
     ))
 }
 

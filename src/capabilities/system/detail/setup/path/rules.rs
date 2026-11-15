@@ -1,7 +1,7 @@
 //! 目的：PATH 分段规则与可移植的 unset / undo 逻辑——Windows 命令与跨平台单测共用。
 //! 管：规范化、去重追加、摘除、备份读写与还原。
 //! 不管：注册表读写（端口）、命令入口与平台指引（在门面与平台后端）。
-//! 联动：由 `src/entry/setup/path.rs` 在 Windows 或测试构建中选中。
+//! 联动：由 `setup/path.rs` 在 Windows 或测试构建中选中。
 
 use crate::kernel::ports::{PathValue, UserPath};
 use std::path::Path;

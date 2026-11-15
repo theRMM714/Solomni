@@ -65,8 +65,8 @@ fn table_is_self_consistent() {
     assert!(book.problems().is_empty(), "{:?}", book.problems());
     assert_eq!(
         book.phase(Phase::Boot).len(),
-        6,
-        "启动相六条：doctor/provision/work-gc/storage/gc/build"
+        7,
+        "启动相七条：doctor/provision/work-gc/storage/gc/build/setup"
     );
     assert_eq!(book.phase(Phase::Core).len(), 17, "转录相十七条");
     assert_eq!(book.groups(Phase::Boot), vec!["维护"]);

@@ -1,7 +1,7 @@
 //! 目的：便携 PATH 的那一段：把 <root>/bin 追加进用户 PATH，并支持摘除（unset）与按备份还原（undo）。
 //! 管：状态事实、备份落点、命令入口；平台实现分到 `path/windows.rs` / `path/other.rs`。
 //! 不管：注册表怎么读写（kernel 的 UserPath 端口）、shim 内容（shim.rs）。
-//! 联动：entry::setup::run 分派；测试用替身端口，不碰真实 HKCU。
+//! 联动：setup 的模式分派（`super`）；测试用替身端口，不碰真实 HKCU。
 
 use std::path::{Path, PathBuf};
 
@@ -44,6 +44,6 @@ pub(crate) fn backup_path(home: &Path) -> PathBuf {
     home.join(BACKUP_FILE)
 }
 
-pub(crate) use platform::{command, info, undo_command, unset_command};
+pub(crate) use platform::{info, path_line, undo_line, unset_line};
 #[cfg(all(windows, test))]
 pub(crate) use windows::do_path;

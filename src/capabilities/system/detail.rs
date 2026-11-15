@@ -1,9 +1,10 @@
-//! 目的：系统维护与自检能力的探针适配——自检里要直读宿主的那几项。
-//! 管：doctor 的事实汇总与围栏能力取值。
+//! 目的：系统维护与自检能力的机制实现——自检里要直读宿主的那几项，以及便携维护（PATH / 围栏预授）。
+//! 管：doctor 的事实汇总、围栏能力取值、`--setup` 的落点与读写。
 //! 不管：用例编排与确认门槛（在 service）；各能力的内部规则。
-//! 联动：只被 SystemService 调用；事实来源见 kernel 与各能力 api。
+//! 联动：只被 SystemService（与入口的启动对账）调用；事实来源见 kernel 与各能力 api。
 
 pub(crate) mod doctor;
+pub(crate) mod setup;
 
 use serde_json::Value;
 

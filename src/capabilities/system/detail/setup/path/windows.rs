@@ -1,7 +1,7 @@
 //! 目的：`path` 的 Windows 后端——写用户 PATH、备份原串、按备份还原。
 //! 管：shim 确保、PATH 追加、状态读取与三个命令入口。
 //! 不管：分段规则与可移植的 unset / undo（在 `path/rules.rs`）；注册表读写（端口）。
-//! 联动：由 `src/entry/setup/path.rs` 按平台选中。
+//! 联动：由 `setup/path.rs` 按平台选中。
 
 use super::*;
 use crate::kernel::ports::{PathValue, UserPath};
@@ -37,7 +37,7 @@ fn write_backup(home: &Path, value: &PathValue, bin: &str) -> Result<(), String>
 
 /// 目的：--setup=path 的核心（端口注入，便于测试）：确保 shim，再把 bin 追加进用户 PATH。
 pub(crate) fn do_path(port: &dyn UserPath, home: &Path, root: &Path) -> Result<String, String> {
-    let (shim, changed) = crate::entry::setup::shim::ensure(root)?;
+    let (shim, changed) = crate::capabilities::system::detail::setup::shim::ensure(root)?;
     let bin = bin_text(root);
     let current = port.read()?;
     if contains(&current.text, &bin) {
@@ -71,7 +71,8 @@ pub(crate) fn do_path(port: &dyn UserPath, home: &Path, root: &Path) -> Result<S
 /// 目的：状态段（只读）。
 pub(crate) fn info(root: &Path) -> PathInfo {
     let bin = bin_text(root);
-    let (shim_present, shim_current) = crate::entry::setup::shim::inspect(root);
+    let (shim_present, shim_current) =
+        crate::capabilities::system::detail::setup::shim::inspect(root);
     let port = crate::kernel::detail::WindowsUserPath::new();
     let (supported, has_bin) = match port.read() {
         Ok(value) => (true, contains(&value.text, &bin)),
@@ -81,7 +82,7 @@ pub(crate) fn info(root: &Path) -> PathInfo {
         supported,
         bin,
         has_bin,
-        shim: crate::entry::setup::shim::shim_path(root)
+        shim: crate::capabilities::system::detail::setup::shim::shim_path(root)
             .display()
             .to_string(),
         shim_present,
@@ -90,47 +91,20 @@ pub(crate) fn info(root: &Path) -> PathInfo {
     }
 }
 
-/// 目的：--setup=path 命令入口。
-pub(crate) fn command(root: &Path) -> i32 {
+/// 目的：path 模式的一句话结果（失败带上下文，交给呈现层排版）。
+pub(crate) fn path_line(root: &Path) -> Result<String, String> {
     let port = crate::kernel::detail::WindowsUserPath::new();
-    match do_path(&port, &root.join(".home"), root) {
-        Ok(line) => {
-            println!("[便携] {}", line);
-            0
-        }
-        Err(e) => {
-            eprintln!("[便携] 改用户 PATH 失败：{}", e);
-            1
-        }
-    }
+    do_path(&port, &root.join(".home"), root).map_err(|e| format!("改用户 PATH 失败：{}", e))
 }
 
-/// 目的：--setup=unset 命令入口。
-pub(crate) fn unset_command(root: &Path) -> i32 {
+/// 目的：unset 模式的一句话结果。
+pub(crate) fn unset_line(root: &Path) -> Result<String, String> {
     let port = crate::kernel::detail::WindowsUserPath::new();
-    match do_unset(&port, root) {
-        Ok(line) => {
-            println!("[便携] {}", line);
-            0
-        }
-        Err(e) => {
-            eprintln!("[便携] 摘 PATH 失败：{}", e);
-            1
-        }
-    }
+    do_unset(&port, root).map_err(|e| format!("摘 PATH 失败：{}", e))
 }
 
-/// 目的：--setup=undo 命令入口。
-pub(crate) fn undo_command(root: &Path) -> i32 {
+/// 目的：undo 模式的一句话结果。
+pub(crate) fn undo_line(root: &Path) -> Result<String, String> {
     let port = crate::kernel::detail::WindowsUserPath::new();
-    match do_undo(&port, &root.join(".home")) {
-        Ok(line) => {
-            println!("[便携] {}", line);
-            0
-        }
-        Err(e) => {
-            eprintln!("[便携] 还原 PATH 失败：{}", e);
-            1
-        }
-    }
+    do_undo(&port, &root.join(".home")).map_err(|e| format!("还原 PATH 失败：{}", e))
 }

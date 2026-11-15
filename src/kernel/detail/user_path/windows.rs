@@ -1,7 +1,7 @@
 //! 目的：用户级 PATH 的真实实现——读写 HKCU\Environment 的 `Path`，并广播 WM_SETTINGCHANGE。
 //! 管：注册表类型（REG_SZ / REG_EXPAND_SZ）的原样保持、UTF-16 编解码与一次尽力广播。
-//! 不管：PATH 该不该改、怎么分段去重（在 entry::setup::path 的纯函数里）；测试不碰真实 HKCU（替身实现 UserPath）。
-//! 联动：entry::setup::path 只依赖端口；本文件是端口在 Windows 上的唯一实现。
+//! 不管：PATH 该不该改、怎么分段去重（在 system 能力便携维护的 path 纯函数里）；测试不碰真实 HKCU（替身实现 UserPath）。
+//! 联动：system 能力的便携维护只依赖端口；本文件是端口在 Windows 上的唯一实现。
 
 use crate::kernel::ports::{PathValue, UserPath};
 use std::os::windows::ffi::OsStrExt;
