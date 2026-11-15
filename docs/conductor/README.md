@@ -7,8 +7,8 @@
 ## 管什么 / 不管什么
 
 - 管：会话中心——命令队列与派发闸；会话在世表、运行态、占名表与裁决队由 `turn` 的 `Turn` 承载，本业务只经 `self.turn.*` 读写。
-- 管：**工作形态**（single / collab / **proxy**）——proxy 没有名单，会话实现上是一条单会话、身份换成 `core_proxy`，用户选它就是授予全权。
-- 管：生成驱动——**长步骤一律 own-and-return**（见 `src/capabilities/conductor/service/guest_job.rs` 与「一、长步骤的边界」）：生成、协作泵、压缩、起 / 停 guest 都不在队列里跑，队列只占「取 / 交」两步；建会话 / 启用历史会话 / 改配 / 删会话的 guest 启停在调用方线程上。
+- 管：工作用例的队列代理——建工作、改配、启用、视图与运行报告的实现与状态在 `work`（[../work/README.md](../work/README.md)），本业务只按队列做「准备 → 调用方线程跑慢活 → 提交」的两段调度，并在 `WorkOps` 上转发。
+- 管：生成驱动——**长步骤一律 own-and-return**（见 `src/capabilities/work/service/guest_job.rs` 与「一、长步骤的边界」）：生成、协作泵、压缩、起 / 停 guest 都不在队列里跑，队列只占「取 / 交」两步；建会话 / 启用历史会话 / 改配 / 删会话的 guest 启停在调用方线程上。
 - 管：跨能力用例与跨会话回档编排。
 - 管：把各能力的能力接口组装成呈现层唯一入口 `Ops`。
 - 运行态分两层：**短暂**的「这一刻谁在干活」（`SessionEvent::Working`，不落盘）与**持久**的「还该不该被驱动」（`meta.run`：`active` / `stopped` / `closed`，派发前过 `dispatch_gate`）。
@@ -16,19 +16,19 @@
 
 ## 入站契约与状态归属
 
-- 入站面：`api::WorkOps`（建工作与环境装配）、`api::TurnOps`（驱动回合与停止）、`api::LifecycleOps`（启用、回档与在世表视图）、`api::LogOps`（埋点门面）、`Ops`（组装后交给呈现层）、`ConductorHandle`（自持线程 + 命令队列 + 事件台）与队列代理。按调用角色分面，呈现层取自己那块屏幕要用的面（`docs/presentation/contracts.md`）。
-- 状态归属：会话在世表、运行态、占名表、裁决队句柄与 shell 状态槽由 `turn` 的 `Turn` 承载（`src/capabilities/turn/service/session.rs`，内部状态容器是 `TurnState`），conductor 只经 `self.turn.*` 读写；命令队列仍归 conductor 自己。
+- 入站面：`api::WorkOps`（工作用例的队列代理：实现在 `work`）、`api::TurnOps`（驱动回合与停止）、`api::LifecycleOps`（启用、回档与在世表视图）、`api::LogOps`（埋点门面）、`Ops`（组装后交给呈现层）、`ConductorHandle`（自持线程 + 命令队列 + 事件台）与队列代理。按调用角色分面，呈现层取自己那块屏幕要用的面（`docs/presentation/contracts.md`）。
+- 状态归属：工作形态不持状态——`Work` 只有注入的端口与处理器钩子，会话本体与登记处按方法参数传入（`src/capabilities/work/service.rs`）；会话在世表、运行态、占名表、裁决队句柄与 shell 状态槽由 `turn` 的 `Turn` 承载（`src/capabilities/turn/service/session.rs`，内部状态容器是 `TurnState`），conductor 只经 `self.turn.*` 读写；命令队列仍归 conductor 自己。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`collab`、`kernel`、`llm`、`modules`、`permission`、`prompt`、`provision`、`registry`、`residents`、`secrets`、`session`、`slate`、`taskchain`、`tools`、`turn`、`vm`、`workspace`
+- 经 `::api` 用到：`collab`、`kernel`、`llm`、`modules`、`permission`、`prompt`、`provision`、`registry`、`residents`、`secrets`、`session`、`slate`、`taskchain`、`tools`、`turn`、`vm`、`work`、`workspace`
 - 谁在用我：`cli`、`web`
 
 ## 一、长步骤的边界
 
 - 核心线程**只做毫秒级的状态变换**；凡是等外部世界的步骤都要 own-and-return（取走对象 → 在工作线程或调用方线程上跑 → 结果作为事件回来）。
 - 生成 / 协作泵 / 压缩 / 节点：句柄自己的工作线程（`solomni-gen` / `solomni-collab` / `solomni-compact` / `solomni-node` …）。
-- 起 / 停 guest：分两段——`prepare_*`（核心：校验、占名、出计划、建工作区）与 `commit_*`（核心：落盘、装配会话、开场事实），中间那段（`src/capabilities/conductor/service/guest_job.rs` 的 `GuestBoot` / `GuestStop`）在调用方线程上跑；起一台虚拟机会话时核心照常应答，别的会话、状态查询、配置读取都不排队，失败则在提交前撤销（占名与空工作区目录都不留）。
+- 起 / 停 guest：分两段——`prepare_*`（核心：校验、占名、出计划、建工作区）与 `commit_*`（核心：落盘、装配会话、开场事实），中间那段（`src/capabilities/work/service/guest_job.rs` 的 `GuestBoot` / `GuestStop`）在调用方线程上跑；起一台虚拟机会话时核心照常应答，别的会话、状态查询、配置读取都不排队，失败则在提交前撤销（占名与空工作区目录都不留）。
 - 启用历史会话：`activate_session` 同样两段——核心读元信息 / 判 closed / 准备 guest，调用方线程起 guest，核心提交（重建会话、解冻整棵子树）；启用本身不跑模型，失败不留「已解冻 / 已装进内存」的半成品。
 - 删除会话：核心做完撤授权 / 回收常驻服务 / 移出内存并收集待删目录（毫秒级）；guest 销毁与目录删除交给调用方线程按序执行——先停 guest，再删目录（Windows 上 guest 可能还占着目录里的文件）。
 

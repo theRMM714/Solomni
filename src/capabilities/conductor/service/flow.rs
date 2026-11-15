@@ -91,7 +91,9 @@ impl Conductor {
             // 工具面由角色表发放（讨论席 = 动词 + 只读核实）；产出逐轮落进**它自己的会话**。
             let mut s = self.turn.take_single(&child)?;
             // 思考强度是**工作根**的会话级事实：成员回合也按它解析（成员模型各自映射）。
-            let thinking = self.thinking_fragment_for(&child)?;
+            let thinking = self
+                .work
+                .thinking_fragment_for(&self.turn, &*self.registry, &child)?;
             s.set_thinking(thinking.clone());
             let round = match self.turn.session(sid) {
                 Some(Session::Collab(c)) => c.round(),
@@ -133,7 +135,7 @@ impl Conductor {
                     } else {
                         crate::capabilities::session::api::interrupted_note(&err)
                     };
-                    out.extend(self.notice_row(sid, &note));
+                    out.extend(self.turn.notice_row(sid, &note));
                     break;
                 }
             };
@@ -182,7 +184,7 @@ impl Conductor {
             // 安全网：提醒/重问必须有终点（计数有上限，这里再兜一层，防实现走偏时空转）。
             guard += 1;
             if guard > 500 {
-                out.extend(self.notice_row(
+                out.extend(self.turn.notice_row(
                     sid,
                     "[警告] 讨论推进次数异常（已到安全上限），已停下等用户处理",
                 ));
@@ -327,16 +329,13 @@ impl Conductor {
                     });
                     todo.push((node, child, objective));
                 }
-                Err(e) => out
-                    .extend(self.notice_row(sid, &format!("[错误] 节点 {} 派发失败：{}", node, e))),
+                Err(e) => out.extend(
+                    self.turn
+                        .notice_row(sid, &format!("[错误] 节点 {} 派发失败：{}", node, e)),
+                ),
             }
         }
         (out, todo)
-    }
-
-    /// 目的：清单即事实：每次调用重扫（策略在 conductor，机制在 ModuleSource）。
-    pub fn scan(&self) -> crate::capabilities::modules::api::Roster {
-        self.modules.roster()
     }
 }
 
@@ -454,7 +453,7 @@ impl Conductor {
             meta.agents = roster.clone();
             meta.modules = crate::capabilities::turn::api::flat_modules(&roster);
             self.history.create(&meta)?;
-            let module_roster = self.scan();
+            let module_roster = self.work.scan();
             let sandboxes =
                 self.turn
                     .sandboxes(&meta, &module_roster, self.registry(), self.probe())?;

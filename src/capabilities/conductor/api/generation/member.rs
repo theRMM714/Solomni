@@ -42,7 +42,10 @@ impl ConductorHandle {
         // 思考强度是**工作根**的会话级事实：成员回合也按它解析（成员模型各自映射）。
         let thinking = self.call({
             let name = child.clone();
-            move |core| core.thinking_fragment_for(&name)
+            move |core| {
+                core.work
+                    .thinking_fragment_for(&core.turn, &*core.registry, &name)
+            }
         })?;
         // 这一回合的调用参数（流式 + 预算）：与单 agent 共用同一份全局设置。
         let llm = crate::capabilities::llm::api::LlmOpts {

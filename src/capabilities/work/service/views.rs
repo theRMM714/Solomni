@@ -1,18 +1,18 @@
 //! 目的：会话中心与工作文件的视图——在世会话 × 历史的并集、继续判据、文件视图 / 上传 / 日志 / 提交与恢复。
 //! 管：会话视图与存在性、继续判据、文件视图、上传、日志、提交视图与回滚恢复。
 //! 不管：会话怎么建（`create.rs`）、配置怎么改（`config.rs`）、提交本身（workspace）。
-//! 联动：api 层的会话与文件接口直接转发到这里。
-//!   本方法族只碰 workspace / turn / history 这三个字段。
+//! 联动：`conductor` 的会话与文件接口直接转发到这里。
 
 use super::*;
 use crate::kernel::api::now_ts;
 use std::collections::BTreeMap;
 
-impl Conductor {
+impl Work {
     /// 目的：上下文「继续」是否该出现——判据只在后端（前端不按末条/模式猜）。
     /// 约束：正在跑、已关闭、代理、或没有真实断点时不出现；协作有挂起卡时由卡承担，不给继续。
     fn continue_action(
         &self,
+        turn: &Turn,
         sid: &str,
         running: bool,
         mode: &str,
@@ -25,7 +25,7 @@ impl Conductor {
         match mode {
             "single" => {
                 let user_last =
-                    matches!(self.turn.session(sid), Some(Session::Single(s)) if s.last_is_user());
+                    matches!(turn.session(sid), Some(Session::Single(s)) if s.last_is_user());
                 if user_last {
                     Some(ContinueView {
                         kind: "turn".to_string(),
@@ -46,26 +46,35 @@ impl Conductor {
     }
 
     /// 目的：一条会话的权威视图（启用回包 / 正在生成时附着用）：状态、运行态与上下文继续。
-    pub(crate) fn session_view(&self, sid: &str) -> Result<SessionView, String> {
-        self.session_views(&self.history_list())
+    pub(crate) fn session_view(
+        &self,
+        turn: &Turn,
+        registry: &dyn Registry,
+        sid: &str,
+    ) -> Result<SessionView, String> {
+        let history = crate::capabilities::lifecycle::api::list(&*self.history, &*self.log);
+        self.session_views(turn, registry, &history)
             .into_iter()
             .find(|v| v.sid == sid)
             .ok_or_else(|| format!("无此会话：{}", sid))
     }
 
     /// 目的：会话列表视图（进行中的工作）。形态取落盘 meta（单一真相，不在内存里留影子状态）。
-    pub fn session_views(&self, history: &[HistoryView]) -> Vec<SessionView> {
+    pub fn session_views(
+        &self,
+        turn: &Turn,
+        registry: &dyn Registry,
+        history: &[HistoryView],
+    ) -> Vec<SessionView> {
         // 在表里的会话 + **正在生成的会话**（后者对象在工作线程上，但它确实存在、也确实在跑）。
         // 漏掉它们会让界面以为会话不见了。
-        let running: Vec<(String, bool)> = self
-            .turn
+        let running: Vec<(String, bool)> = turn
             .running_iter()
             .map(|sid| (sid.clone(), false))
             .collect();
         let running_now: std::collections::BTreeSet<String> =
-            self.turn.running_iter().cloned().collect();
-        let listed: Vec<(String, bool)> = self
-            .turn
+            turn.running_iter().cloned().collect();
+        let listed: Vec<(String, bool)> = turn
             .iter()
             .map(|(sid, s)| {
                 let done = match s {
@@ -90,8 +99,8 @@ impl Conductor {
                     .to_string();
                 // 记的档位来自落盘 meta（权威）：环境变了也要如实提示——**不拦打开**（记录是用户的）。
                 let exec = entry.map(|h| h.exec.clone()).unwrap_or_default();
-                let qemu = self.qemu_path();
-                let share_tool = self.share_tool_path();
+                let qemu = self.qemu_path(registry);
+                let share_tool = self.share_tool_path(registry);
                 let readiness = crate::capabilities::vm::api::tier_readiness(
                     &self.root,
                     &exec,
@@ -101,19 +110,19 @@ impl Conductor {
                 );
                 // 「改需求」能力位：有本次需求行才给。在表里看会话种类；不在表里（生成中/未打开）
                 // 看落盘 meta 的形态（那是名单与形态的单一真相）。
-                let can_update_task = match self.turn.session(&sid) {
+                let can_update_task = match turn.session(&sid) {
                     Some(Session::Collab(_)) => true,
                     Some(Session::Single(_)) => false,
                     None => mode == "collab",
                 };
                 // 待裁决：**判据只有队本身**（核心各关卡与工具级确认排在同一条队上）——
                 // 正在生成的会话（对象在工作线程手里）照样取得到；推的卡片事件与它是同一份。
-                let pending = self.turn.desk().peek(&sid).and_then(|d| d.json());
+                let pending = turn.desk().peek(&sid).and_then(|d| d.json());
                 let running = running_now.contains(&sid);
                 let continue_action =
-                    self.continue_action(&sid, running, &mode, &run, pending.is_some());
+                    self.continue_action(turn, &sid, running, &mode, &run, pending.is_some());
                 // 只有持续对话的会话才有单一上下文；协作主会话由核心按次组上下文，不伪造数字。
-                let context = match self.turn.session(&sid) {
+                let context = match turn.session(&sid) {
                     Some(Session::Single(s)) => s.context_usage(),
                     _ => None,
                 };
@@ -122,13 +131,12 @@ impl Conductor {
                         Ok(m) => {
                             let parent = m.parent.as_ref().and_then(|p| {
                                 self.history.meta(p).ok().and_then(|pm| {
-                                    self.turn
-                                        .permissions_for(&pm, self.registry())
+                                    turn.permissions_for(&pm, registry)
                                         .ok()
                                         .map(|ep| ep.profile.as_str().to_string())
                                 })
                             });
-                            match self.turn.permissions_for(&m, self.registry()) {
+                            match turn.permissions_for(&m, registry) {
                                 Ok(p) => (
                                     p.profile.as_str().to_string(),
                                     p.profile.label().to_string(),
@@ -140,9 +148,9 @@ impl Conductor {
                         }
                         Err(_) => (String::new(), String::new(), false, None),
                     };
-                let shell = self.turn.shell_view(&sid);
+                let shell = turn.shell_view(&sid);
                 // 过期内容替换是**工作根**的会话级事实：子会话与工作根共享同一个开关。
-                let context_freshness = match self.turn.work_root(&sid) {
+                let context_freshness = match turn.work_root(&sid) {
                     Ok(root) => self
                         .history
                         .meta(&root)
@@ -150,10 +158,10 @@ impl Conductor {
                         .unwrap_or(false),
                     Err(_) => false,
                 };
-                let thinking = match self.turn.work_root(&sid) {
+                let thinking = match turn.work_root(&sid) {
                     Ok(root) => thinking_cache
                         .entry(root.clone())
-                        .or_insert_with(|| self.thinking_view_for_root(&root))
+                        .or_insert_with(|| self.thinking_view_for_root(turn, registry, &root))
                         .clone(),
                     Err(_) => ThinkingView {
                         level: None,
@@ -190,16 +198,17 @@ impl Conductor {
             .collect()
     }
 
-    pub fn session_exists(&self, name: &str) -> bool {
-        self.turn.holds(name)
+    pub fn session_exists(&self, turn: &Turn, name: &str) -> bool {
+        turn.holds(name)
     }
 }
 
-impl Conductor {
+impl Work {
     /// 目的：界面投喂：把文件写进本次工作的 work/。
     ///  返回 Ok(false) = 同名文件已存在且未选择覆盖（交前端让用户决定：覆盖/改名/取消）。
     pub fn work_upload(
         &mut self,
+        turn: &mut Turn,
         sid: &str,
         name: &str,
         bytes: &[u8],
@@ -207,18 +216,18 @@ impl Conductor {
     ) -> Result<bool, String> {
         // 策略在 conductor：先净化文件名，再交给工作区端口（机制只看已净化的名字）。
         let name = crate::capabilities::workspace::api::safe_file_name(name)?;
-        if !self.turn.holds(sid) && self.history.load(sid).is_err() {
+        if !turn.holds(sid) && self.history.load(sid).is_err() {
             return Err(format!("无此会话：{}", sid));
         }
         // 先恢复未完成的版本库事务，再做同名文件判定：否则 pending 里的文件会被当成不存在。
-        let work = self.turn.work_root(sid).unwrap_or_else(|_| sid.to_string());
+        let work = turn.work_root(sid).unwrap_or_else(|_| sid.to_string());
         self.workspace.work_recover(&work)?;
         if self.workspace.work_has(&work, &name) && !overwrite {
             return Ok(false);
         }
         // 用户投喂 = 一次**权威提交**（作者 user）：共享区只有提交这一条写路径。
         // 锚到主会话当时的下一条行号，回档才能把这次投喂算进某个转录点。
-        let line = match self.turn.session(sid) {
+        let line = match turn.session(sid) {
             Some(Session::Single(s)) => s.next_line,
             Some(Session::Collab(c)) => c.next_line,
             None => 0,
@@ -231,7 +240,12 @@ impl Conductor {
     /// 目的：本工作可引用的文件清单 + 真实根（前端 @ 菜单与「长路径缩写」用）。
     ///  名单取自会话 meta（活动会话与历史会话都以 meta.agents 为权威）；列目录的机制在 Workspace 端口，
     ///  根取自沙箱（与文件清单同源）：agents 与 roots.agents 同序同名。
-    pub fn files_view(&self, sid: &str) -> Result<FilesView, String> {
+    pub fn files_view(
+        &self,
+        turn: &Turn,
+        registry: &dyn Registry,
+        sid: &str,
+    ) -> Result<FilesView, String> {
         let (meta, _) = self
             .history
             .load(sid)
@@ -240,9 +254,7 @@ impl Conductor {
         let files = self.workspace.files(sid, &names)?;
         let usage = self.workspace.usage(sid, &names)?;
         let roster = self.scan();
-        let sandboxes = self
-            .turn
-            .sandboxes(&meta, &roster, self.registry(), self.probe())?;
+        let sandboxes = turn.sandboxes(&meta, &roster, registry, self.probe())?;
         let mut agents: Vec<FilesAgentView> = Vec::new();
         let mut agent_roots: Vec<FilesAgentRootView> = Vec::new();
         for a in &meta.agents {
@@ -272,32 +284,35 @@ impl Conductor {
     /// 目的：提交历史（只读）：工作根从会话的 meta 上溯；列表与当前 head 一起给。
     pub fn work_log(
         &self,
+        turn: &Turn,
         sid: &str,
         limit: usize,
         before: Option<u64>,
     ) -> Result<crate::capabilities::workspace::api::WorkLog, String> {
-        let work = self.turn.work_root(sid)?;
+        let work = turn.work_root(sid)?;
         self.workspace.work_log(&work, limit, before)
     }
 
     /// 目的：一条提交的详情（只读）。
     pub fn work_commit_view(
         &self,
+        turn: &Turn,
         sid: &str,
         commit: u64,
     ) -> Result<crate::capabilities::workspace::api::CommitDetail, String> {
-        let work = self.turn.work_root(sid)?;
+        let work = turn.work_root(sid)?;
         self.workspace.work_commit_view(&work, commit)
     }
 
     /// 目的：一条提交里某个文件的内容预览（只读）。
     pub fn work_commit_file(
         &self,
+        turn: &Turn,
         sid: &str,
         commit: u64,
         path: &str,
     ) -> Result<crate::capabilities::workspace::api::CommitFileView, String> {
-        let work = self.turn.work_root(sid)?;
+        let work = turn.work_root(sid)?;
         self.workspace.work_commit_file(&work, commit, path)
     }
 
@@ -306,18 +321,15 @@ impl Conductor {
     /// 返回：回滚后的 head + 要外送的 notice 事件（已落盘）。
     pub(crate) fn restore_work_commit(
         &mut self,
+        turn: &mut Turn,
         sid: &str,
         commit: u64,
         expect_head: u64,
         force: bool,
     ) -> Result<(Option<u64>, Vec<SessionEvent>), String> {
-        let work = self.turn.work_root(sid)?;
-        let tree = self.turn.subtree_of(&work);
-        if let Some(running) = self
-            .turn
-            .running_iter()
-            .find(|s| tree.iter().any(|x| x == *s))
-        {
+        let work = turn.work_root(sid)?;
+        let tree = turn.subtree_of(&work);
+        if let Some(running) = turn.running_iter().find(|s| tree.iter().any(|x| x == *s)) {
             return Err(crate::capabilities::turn::api::Turn::running_refusal(
                 running,
             ));
@@ -345,7 +357,7 @@ impl Conductor {
             "[工作区回滚] 共享区已从{}回滚到提交 #{}（{}：{}）。目标之后的提交仍保留在历史里，可再次回滚；各 agent 沙箱未改动，后续拉取可能遇到冲突。",
             before, commit, target.author, target.message
         );
-        let mut events = self.notice_row(sid, &text);
+        let mut events = turn.notice_row(sid, &text);
         self.record_events(sid, &mut events);
         Ok((after, events))
     }

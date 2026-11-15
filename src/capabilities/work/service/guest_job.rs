@@ -1,8 +1,7 @@
-//! 目的：一段"要等 guest"的活（起 / 停），**在调用方线程上跑**——核心只负责准备参数与提交结果。
-//! 管：起 guest 前的并发准入与规格装配、起之后的运行包软链；停 guest 的租约清单。
-//! 不管：会话建/改/删的校验与落盘（在 work.rs / history.rs 的 prepare、commit 两段里）。
-//! 联动：由 `Conductor::guest_boot` / `delete_bookkeeping` 产出，`api` 层的句柄在调用方线程上 `run()`；
-//!   契约见 docs/conductor/README.md 的「长步骤」与 docs/vm/README.md 的「并发」。
+//! 目的：一段「要等 guest」的活（起 / 停 / 诊断），在调用方线程上跑——核心只负责准备参数与提交结果。
+//! 管：起 guest 前的并发准入与规格装配、起之后的运行包软链；停 guest 的租约清单；虚拟根的稳定根校验。
+//! 不管：会话建/改/删的校验与落盘（`create.rs` / `config.rs`）、guest 进程本身（vm 能力）。
+//! 联动：由 `Work::guest_boot` / `conductor` 的删除收尾产出，句柄层在调用方线程上 `run()`。
 
 use crate::capabilities::vm::api::{
     ExecPlan, GuestDiagnosis, GuestRun, GuestSpec, Vm, admit_guest, classify_base, mounts_from,
@@ -178,7 +177,7 @@ impl GuestBoot {
             );
             if !out.ok {
                 log.warn(
-                    "conductor::guest_boot",
+                    "work::guest_boot",
                     &format!("运行包的 PATH 软链没建上：{}", out.output),
                 );
             }
@@ -191,7 +190,7 @@ impl GuestBoot {
 ///   与模块根（含 userdata）。
 /// 约束：这里只给"可见范围"，不表达某个 agent 的权限；per-agent 允许集由当次 GuestAccess 决定。
 ///   内部布局下 shared 在会话树内，不重复挂；外部绑定下两者互不包含（绑定校验保证），各挂一条。
-pub(crate) fn stable_roots(sandboxes: &Sandboxes) -> (Vec<PathBuf>, Vec<PathBuf>) {
+pub fn stable_roots(sandboxes: &Sandboxes) -> (Vec<PathBuf>, Vec<PathBuf>) {
     let mut rw: Vec<PathBuf> = Vec::new();
     if !sandboxes.session_root.as_os_str().is_empty() {
         rw.push(sandboxes.session_root.clone());
@@ -228,7 +227,7 @@ pub(crate) fn stable_roots(sandboxes: &Sandboxes) -> (Vec<PathBuf>, Vec<PathBuf>
 /// 目的：起 guest 前校验稳定挂载——每个 agent 私沙都在会话树根下，且每个稳定根都能经路径桥往返。
 /// 约束：能往返的根才能挂（UNC 有单射编码，Windows 虚拟机档因此支持网络工作区）；卷 GUID 与非 UTF-8
 ///   表示不了，这里显式拒绝——不让它变成"guest 起来了、每次工具调用一条 fail-closed 诊断"。
-pub(crate) fn check_stable_roots(
+pub fn check_stable_roots(
     sandboxes: &Sandboxes,
     bridge: &crate::capabilities::vm::api::PathBridge,
 ) -> Result<(), String> {

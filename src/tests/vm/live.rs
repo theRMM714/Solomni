@@ -766,9 +766,8 @@ pub(crate) fn vm_live_external_workspace_round_trip() {
         codec: None,
     };
     let bridge = image.bridge();
-    let (rw, ro_tree) =
-        crate::capabilities::conductor::service::guest_job::stable_roots(&sandboxes);
-    crate::capabilities::conductor::service::guest_job::check_stable_roots(&sandboxes, &bridge)
+    let (rw, ro_tree) = crate::capabilities::work::api::stable_roots(&sandboxes);
+    crate::capabilities::work::api::check_stable_roots(&sandboxes, &bridge)
         .expect("外部布局的稳定根要能起 guest");
     let boot = FenceSpec {
         machine_ro_tree: Vec::new(),

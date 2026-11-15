@@ -18,7 +18,7 @@
 - 管：装配要的事实——沙箱集合、权限链与权限面、共享区授权、guest 作用域与租约、配置归属、上下文预算（`sandboxes` / `permissions_for` / `workspace_grant` / `guest_scope` / `guest_lease_for` / `config_owner_of` / `context_budget` / `refresh_context_budget`）。
 - 管：执行计划与外部工作区根——`host_plan_for` / `plan_for_spec` / `plan_for_meta_with` / `unavailable_modules` / `guest_os_of` / `path_codec_of` / `network_allowed` / `host_read_roots`。
 - 不管：命令队列、派发闸的调用时机、跨会话回档编排、协作链推进与生成驱动（`conductor`）；会话与转录怎么落盘（`session`）；裁决队的语义（`session` 的 `DecisionDesk`）与 shell 快照的形状（`session` 的 `ShellSlot` / `ShellLive`）。
-- 不管：登记处与探针——`registry: &dyn Registry` / `probe: &dyn HostProbe` 按需传参、不存字段（`conductor` 要 `registry_mut`，共享会逼出 `RefCell`）；work 处理器也由调用方以闭包注入，本单元不认识它们的行为。
+- 不管：登记处与探针——`registry: &dyn Registry` / `probe: &dyn HostProbe` 按需传参、不存字段（`conductor` 要 `registry_mut`，共享会逼出 `RefCell`）；工作区核心自有工具的处理器（`work_tools`）也由调用方以闭包注入，本单元不认识它们的行为。
 
 ## 入站契约与状态归属
 
@@ -57,8 +57,8 @@
 ## 改动本单元时必须同步
 
 - `src/capabilities/turn/api.rs` → 新增入站项要同步 [`unit-map.md`](unit-map.md) 与本页「入站契约」。
-- `src/capabilities/conductor/service.rs` → `Conductor` 的 `turn` 字段是唯一持有者（类型是 `api::Turn`，不再自带会话段方法）；改 `Turn` 的方法签名会连带改 `conductor/service/` 下的调用方（`activation` / `flow` / `history` / `proxy` / `rewind` / `turn` / `work/config` / `work/create` / `work/model` / `work/views`）与 `api/generation/*`。
-- `src/capabilities/turn/service/assemble.rs` → 改 `MemberSpec` / `SingleSpec` 字段会连带改 `conductor` 的三个装配调用点（`rebuild_session` / `build_proxy` / `work/create`）。
+- `src/capabilities/conductor/service.rs` → `Conductor` 的 `turn` 字段是唯一持有者（类型是 `api::Turn`，不再自带会话段方法）；改 `Turn` 的方法签名会连带改 `conductor/service/` 下的调用方（`flow` / `history` / `proxy` / `rewind` / `turn`）、`api/generation/*` 与 `work/service/` 的调用方（`activation` / `config` / `create` / `model` / `views`）。
+- `src/capabilities/turn/service/assemble.rs` → 改 `MemberSpec` / `SingleSpec` 字段会连带改三个装配调用点（`conductor` 的 `rebuild_session` / `build_proxy` 与 `src/capabilities/work/service/create.rs`）。
 - `src/capabilities/workspace/api.rs` → 外部工作区根的判据（`root_policy` / `resolve_root` / `recheck_root` / `product_root`）在 `workspace`；改文案会连带改本单元的加载复检与 `conductor` 的建工作两条路径。
 - 依赖自检：`grep -r "capabilities::conductor" src/capabilities/turn` 必须为 0 命中（本单元不得回引 `conductor`）。
 - `src/tests/turn.rs` → 状态容器的三条用例（运行标记按 id 收放、占名与在世表互不影响、shell 槽按会话共享）与两条纯规则用例（权限裁剪按工具决策、服务操作只出就绪项）。

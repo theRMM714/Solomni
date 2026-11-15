@@ -21,7 +21,7 @@ impl ConductorHandle {
         // 核心线程不陪着等编译器；编不成如实拒绝，不进入准备段（什么都不留下）。
         let (tier, guest) = self.call({
             let spec = spec.clone();
-            move |core| core.resolve_env(&spec)
+            move |core| core.work.resolve_env(&*core.registry, &spec)
         })?;
         let mut ids: Vec<String> = Vec::new();
         for a in &spec.agents {
@@ -36,18 +36,24 @@ impl ConductorHandle {
         // 在这一段（调用方线程）上跑——核心线程因此不被占住，别的请求照常响应。
         let (prepared, boot) = self.call({
             let spec = spec.clone();
-            move |core| core.prepare_session(&spec)
+            move |core| {
+                core.work
+                    .prepare_session(&mut core.turn, &*core.registry, &spec)
+            }
         })?;
         if let Some(boot) = boot
             && let Err(e) = boot.run()
         {
             let _ = self.call(move |core| {
-                core.abort_session(prepared);
+                core.work.abort_session(&mut core.turn, prepared);
                 Ok(())
             });
             return Err(e);
         }
-        let (created, facts) = self.call(move |core| core.commit_session(prepared))?;
+        let (created, facts) = self.call(move |core| {
+            core.work
+                .commit_session(&mut core.turn, &*core.registry, prepared)
+        })?;
         self.publish(&created.session, facts);
         // 有父 = 核心代理建的子工作：**建好就开工**（single 以 task 为第一句；collab 开始讨论）。
         if spec.parent.is_some() {
@@ -105,7 +111,7 @@ impl ConductorHandle {
                 Caller::Role { .. } => {
                     let resumed = self.call({
                         let s = sid.to_string();
-                        move |core| core.resume_subtree(&s)
+                        move |core| core.work.resume_subtree(&core.turn, &s)
                     })?;
                     if resumed {
                         let mode = self.call({
@@ -391,19 +397,28 @@ impl ConductorHandle {
                 let sid = s("session_id");
                 let profile =
                     crate::capabilities::permission::api::ProfileId::parse(&s("profile"))?;
-                self.call(move |core| core.set_permission_profile(&sid, profile))?;
+                self.call(move |core| {
+                    core.work
+                        .set_permission_profile(&mut core.turn, &*core.registry, &sid, profile)
+                })?;
                 Ok(Acted::Done(serde_json::json!({ "ok": true })))
             }
             "set_thinking" => {
                 let sid = s("session_id");
                 let level = s("level");
-                self.call(move |core| core.set_thinking(&sid, &level))?;
+                self.call(move |core| {
+                    core.work
+                        .set_thinking(&mut core.turn, &*core.registry, &sid, &level)
+                })?;
                 Ok(Acted::Done(serde_json::json!({ "ok": true })))
             }
             "set_context_freshness" => {
                 let sid = s("session_id");
                 let on = args.get("on").and_then(|v| v.as_bool()).unwrap_or(false);
-                self.call(move |core| core.set_context_freshness(&sid, on))?;
+                self.call(move |core| {
+                    core.work
+                        .set_context_freshness(&mut core.turn, &*core.registry, &sid, on)
+                })?;
                 Ok(Acted::Done(serde_json::json!({ "ok": true })))
             }
             "edit_session" => {
@@ -453,7 +468,13 @@ impl ConductorHandle {
                 let force = args.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
                 let target = sid.clone();
                 let (after, events) = self.call(move |core| {
-                    core.restore_work_commit(&target, commit, expect_head, force)
+                    core.work.restore_work_commit(
+                        &mut core.turn,
+                        &target,
+                        commit,
+                        expect_head,
+                        force,
+                    )
                 })?;
                 self.bus.push(&sid, &events);
                 Ok(Acted::Done(

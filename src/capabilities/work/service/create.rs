@@ -1,8 +1,7 @@
 //! 目的：建工作的两段与 guest 启动——占名、备工作区、装通道、起 guest、失败撤销。
-//! 管：工作名唯一化、准备段、提交段、guest 启动装配、撤销。
+//! 管：工作名唯一化、准备段、提交段、通道与工作区绑定解析、子树已用名。
 //! 不管：配置改配（`config.rs`）、报告（`report.rs`）、guest 进程本身（vm 能力）。
-//! 联动：句柄层按两段调用；vm / workspace / packages 的接口在这里被组合。
-//!   本方法族只碰 history / registry / workspace / vm 这四个字段。
+//! 联动：`conductor` 的句柄层按两段调用；vm / workspace / packages 的接口在这里被组合。
 
 use super::*;
 use crate::kernel::api::now_ts;
@@ -32,28 +31,33 @@ fn pay_workspace_grant(root: &std::path::Path, meta: &SessionMeta) {
     }
 }
 
-impl Conductor {
+impl Work {
     /// 目的：工作名的缺省与唯一化（命名策略在 `session`；这里只提供"存在吗"）。
-    pub fn unique_work_name(&self, base: &str, fallback: &str) -> String {
+    pub fn unique_work_name(&self, turn: &Turn, base: &str, fallback: &str) -> String {
         crate::capabilities::session::api::unique_work_name(base, fallback, |n| {
-            self.turn.holds(n) || self.history.load(n).is_ok()
+            turn.holds(n) || self.history.load(n).is_ok()
         })
     }
 }
 
-impl Conductor {
+impl Work {
     /// 目的：测试与内部编排用的同步入口（准备 → 起 guest → 提交，全在当前线程）。
     /// 约束：生产走句柄的两段（`prepare_work` / `commit_work`），核心线程不陪着等 QEMU。
     #[cfg(test)]
-    pub fn create_work(&mut self, spec: WorkSpec) -> Result<WorkOpened, String> {
-        self.create_work_inner(spec, None)
+    pub fn create_work(
+        &mut self,
+        turn: &mut Turn,
+        registry: &dyn Registry,
+        spec: WorkSpec,
+    ) -> Result<WorkOpened, String> {
+        self.create_work_inner(turn, registry, spec, None)
     }
 
     /// 这棵子树里已经用过的 agent 实例名（实例名就是沙箱目录名，必须**全树唯一**）。
     /// 顶层会话名可以重复（落点是自己的目录），但共用同一个 work/ 时同名 agent 会撞同一个沙箱。
-    fn subtree_agent_names(&self, root: &str) -> Vec<String> {
+    fn subtree_agent_names(&self, turn: &Turn, root: &str) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
-        for sid in self.turn.subtree_of(root) {
+        for sid in turn.subtree_of(root) {
             if let Ok(m) = self.history.meta(&sid) {
                 for a in &m.agents {
                     if !out.iter().any(|x| x == &a.name) {
@@ -70,17 +74,19 @@ impl Conductor {
     #[cfg(test)]
     pub(crate) fn create_work_inner(
         &mut self,
+        turn: &mut Turn,
+        registry: &dyn Registry,
         spec: WorkSpec,
         parent: Option<&str>,
     ) -> Result<WorkOpened, String> {
-        let (prepared, boot) = self.prepare_work(spec, parent)?;
+        let (prepared, boot) = self.prepare_work(turn, registry, spec, parent)?;
         if let Some(boot) = boot
             && let Err(e) = boot.run()
         {
-            self.abort_work(prepared);
+            self.abort_work(turn, prepared);
             return Err(e);
         }
-        self.commit_work(prepared)
+        self.commit_work(turn, registry, prepared)
     }
 
     /// 目的：把名单里每个 agent 的通道解析成**确定值**（核心默认或显式模型），失败带具体原因。
@@ -88,20 +94,20 @@ impl Conductor {
     ///   协作还要求核心自己的通道（编排 / 整理 / 验收都走它）。
     fn resolve_channels(
         &self,
+        registry: &dyn Registry,
         metas: &[AgentMeta],
         mode: WorkMode,
     ) -> Result<(BTreeMap<String, Channel>, Option<Channel>), String> {
         let mut channels = BTreeMap::new();
         for a in metas {
-            let c = self
-                .registry
+            let c = registry
                 .channel(a.model.as_deref())
                 .map_err(|e| format!("agent {} 没有可用模型通道：{}", a.name, e))?;
             channels.insert(a.name.clone(), c);
         }
         let core = if mode == WorkMode::Collab {
             Some(
-                self.registry
+                registry
                     .core_channel()
                     .map_err(|e| format!("核心没有可用模型通道：{}", e))?,
             )
@@ -115,6 +121,7 @@ impl Conductor {
     ///   子会话沿父链继承同一个根，不接受自选。
     fn resolve_workspace_binding(
         &self,
+        turn: &Turn,
         raw: Option<&std::path::Path>,
         grant: Option<crate::capabilities::session::api::WorkspaceGrant>,
         tier: crate::kernel::api::Tier,
@@ -124,7 +131,7 @@ impl Conductor {
             if raw.is_some() || grant.is_some() {
                 return Err("子会话不能自选工作区或授权粒度：沿父会话继承".to_string());
             }
-            let top = self.turn.work_root(p)?;
+            let top = turn.work_root(p)?;
             return Ok(self.history.meta(&top)?.workspace);
         }
         let Some(raw) = raw else {
@@ -149,17 +156,20 @@ impl Conductor {
     /// 错误：形态、名字、档位、名单、模型通道或选型不成立时如实拒绝，什么都不留下。
     pub(crate) fn prepare_work(
         &mut self,
+        turn: &mut Turn,
+        registry: &dyn Registry,
         spec: WorkSpec,
         parent: Option<&str>,
     ) -> Result<(PreparedWork, Option<GuestBoot>), String> {
         validate_work_name(&spec.name)?;
-        if self.turn.holds(&spec.name)
+        if turn.holds(&spec.name)
             || self.history.load(&spec.name).is_ok()
-            || self.turn.is_starting(&spec.name)
+            || turn.is_starting(&spec.name)
         {
             return Err(format!("工作名已存在：{}", spec.name));
         }
         let workspace = self.resolve_workspace_binding(
+            turn,
             spec.workspace.as_deref(),
             spec.workspace_grant,
             spec.tier,
@@ -177,10 +187,12 @@ impl Conductor {
                 return Err("子工作不能建成代理形态：代理不能往里套代理".to_string());
             }
             // 代理会话跑在核心默认模型上：没有它就不建（工作区都还没有，失败什么都不留）。
-            self.registry
+            registry
                 .core_channel()
                 .map_err(|e| format!("代理会话没有可用模型通道：{}", e))?;
             let (sid, facts) = self.create_proxy_with_facts(
+                turn,
+                registry,
                 &spec.name,
                 now_ts(),
                 spec.tier,
@@ -220,10 +232,10 @@ impl Conductor {
                 }
             }
             if let Some(mid) = &a.model {
-                if !self.registry.has_model(mid) {
+                if !registry.has_model(mid) {
                     return Err(format!("无此模型：{}", mid));
                 }
-                self.registry.resolve(mid)?;
+                registry.resolve(mid)?;
             }
         }
         // 形态约束（模块可以为空，上面只校验真实存在与归属不冲突）
@@ -243,12 +255,12 @@ impl Conductor {
         }
         // 工作根：顶层会话就是自己；子会话沿父链走到顶（整棵树只有一个 work/）。
         let root = match parent {
-            Some(p) => self.turn.work_root(p)?,
+            Some(p) => turn.work_root(p)?,
             None => spec.name.clone(),
         };
         // 实例名在**整棵子树**里唯一：共用同一个 work/ 时同名 agent 会撞同一个沙箱目录。
         // 重名 → 尾号（用户不改名时的兜底），绝不重名。顶层根还不存在时子树名单为空。
-        let mut taken: Vec<String> = self.subtree_agent_names(&root);
+        let mut taken: Vec<String> = self.subtree_agent_names(turn, &root);
         let mut metas: Vec<AgentMeta> = Vec::new();
         for a in &spec.agents {
             let name = crate::capabilities::registry::api::unique_instance_name(&a.name, &taken);
@@ -263,7 +275,7 @@ impl Conductor {
         }
         // **模型通道前置判据**：合并后的名单里每个 agent 都要有确定通道；协作还要求核心通道。
         // 放在建工作区 / 起 guest 之前——失败就不留下任何半成品。
-        let (channels, core_channel) = self.resolve_channels(&metas, spec.mode)?;
+        let (channels, core_channel) = self.resolve_channels(registry, &metas, spec.mode)?;
         // 模块扁平清单（展示用；顺序按 agent 名单展开，同一模块被多个 agent 共用时只留一份）
         let module_ids = crate::capabilities::turn::api::flat_modules(&metas);
         // 代拟：给了 agent 就不再代拟（名单已经有了，不让核心盖掉用户的选择）。
@@ -321,8 +333,8 @@ impl Conductor {
         if let Some(why) = crate::capabilities::vm::api::tier_refusal(
             &self.root,
             &meta.exec,
-            self.qemu_path().as_deref(),
-            self.share_tool_path().as_deref(),
+            self.qemu_path(registry).as_deref(),
+            self.share_tool_path(registry).as_deref(),
             self.probe.as_ref(),
         ) {
             return Err(why);
@@ -335,15 +347,11 @@ impl Conductor {
         if workspace.is_some() {
             // 首次绑定：把工作区现有文件导入成初始提交，agent 立刻就能 pull；失败不挡建会话。
             if let Err(e) = self.workspace.work_import_root(&root, now_ts()) {
-                self.log.warn(
-                    "conductor::create_work",
-                    &format!("工作区初始导入失败：{}", e),
-                );
+                self.log
+                    .warn("work::create_work", &format!("工作区初始导入失败：{}", e));
             }
         }
-        let sandboxes = self
-            .turn
-            .sandboxes(&meta, &roster, self.registry(), self.probe())?;
+        let sandboxes = turn.sandboxes(&meta, &roster, registry, self.probe())?;
         // 扫描事实如实埋点：本会话用到的模块里，哪些声明的运行包不在包库（缺包同样会在下面按计划拒绝，文件与 guest 声明都看）。
         // 虚拟机档缺包在「开始」前就拒绝；这里的警告只补一条扫描事实。本机档由宿主计划在工具执行时如实拒绝。
         let session_modules: Vec<Module> = roster
@@ -353,7 +361,7 @@ impl Conductor {
             .cloned()
             .collect();
         if meta.exec.tier == crate::kernel::api::Tier::Vm {
-            let guest_runtimes = self.turn.guest_runtimes_of(&meta.exec, self.probe());
+            let guest_runtimes = turn.guest_runtimes_of(&meta.exec, self.probe());
             for (id, caps) in pkgs::absent(&session_modules, &self.packages.library()) {
                 let caps: Vec<String> = caps
                     .into_iter()
@@ -363,15 +371,14 @@ impl Conductor {
                     continue;
                 }
                 self.log.warn(
-                    "conductor::create_work",
+                    "work::create_work",
                     &format!("模块 {} 声明的运行包不在包库：{}", id, caps.join("、")),
                 );
             }
         }
         // 执行选型完整性（「开始」即冻结）：选型不成立或**缺包**都如实拒绝（没有工具，用户完不成工作）。
         // 入口**按目标环境**判：虚拟机档按 guest 的 os 解析名字，跨平台还看文件形式（宿主编的产物跑不了）。
-        let guest = self
-            .turn
+        let guest = turn
             .guest_os_of(&meta.exec, self.probe())
             .map(|g| g.as_str());
         let target_os = guest.unwrap_or(std::env::consts::OS);
@@ -381,21 +388,21 @@ impl Conductor {
                     && (target_os == std::env::consts::OS
                         || crate::capabilities::vm::api::runs_on_target(p, target_os))
             });
-        let plan = self.turn.plan_for_spec(
+        let plan = turn.plan_for_spec(
             &meta.exec,
             &session_modules,
             &missing,
             meta.exec.guest.as_deref(),
             self.probe(),
-            self.registry(),
+            registry,
         )?;
         self.log.info(
-            "conductor::create_work",
+            "work::create_work",
             &crate::capabilities::vm::api::plan_summary(&plan),
         );
 
         // 占名：准备与提交之间隔着一次 guest 启动，同名并发创建不能都通过上面那道检查。
-        self.turn.mark_starting(&name);
+        turn.mark_starting(&name);
         // 子会话与父会话共用同一个 session/ 目录：只对顶层会话记得"失败要撤掉空目录"。
         let discard = if parent.is_none() {
             Some((name.clone(), agent_names.clone()))
@@ -407,17 +414,12 @@ impl Conductor {
             && !(meta.delegate && meta.agents.is_empty())
         {
             // 共享 guest：按整棵树装配（proxy 子工作都进代理根那一台），租约取作用域根。
-            let (lease, scope_meta) = self
-                .turn
+            let (lease, scope_meta) = turn
                 .guest_scope(&meta)?
                 .ok_or_else(|| "虚拟机档会话没有解析出 guest 作用域".to_string())?;
-            let tree = self.turn.tree_meta(&scope_meta, Some(&meta))?;
-            let tree_plan =
-                self.turn
-                    .plan_for_meta_with(&tree, &roster, self.probe(), self.registry())?;
-            let tree_sandboxes =
-                self.turn
-                    .sandboxes(&tree, &roster, self.registry(), self.probe())?;
+            let tree = turn.tree_meta(&scope_meta, Some(&meta))?;
+            let tree_plan = turn.plan_for_meta_with(&tree, &roster, self.probe(), registry)?;
+            let tree_sandboxes = turn.sandboxes(&tree, &roster, registry, self.probe())?;
             // 运行包不做动态加载：新子会话的包已被这台 guest 装载就直接加入；
             // 引入新包时要等树空闲后按聚合后的 meta 重建这台共享 guest。
             let want: Vec<String> = tree_plan
@@ -429,11 +431,10 @@ impl Conductor {
             let have = self.vm.guest_packages(&lease);
             let restart = needs_guest_packages_rebuild(active, &want, have.as_deref());
             if restart {
-                let running = self
-                    .turn
+                let running = turn
                     .subtree_of(&scope_meta.name)
                     .into_iter()
-                    .find(|s| self.turn.is_running(s));
+                    .find(|s| turn.is_running(s));
                 if let Some(s) = running {
                     return Err(format!(
                         "子会话引入了这台 guest 还没装载的运行包：先停掉正在生成的 {}，再重建共享 guest",
@@ -441,7 +442,15 @@ impl Conductor {
                     ));
                 }
             }
-            Some(self.guest_boot(&tree, &tree_plan, &tree_sandboxes, restart, &lease))
+            Some(self.guest_boot(
+                turn,
+                registry,
+                &tree,
+                &tree_plan,
+                &tree_sandboxes,
+                restart,
+                &lease,
+            ))
         } else {
             None
         };
@@ -465,7 +474,12 @@ impl Conductor {
 
     /// 目的：创建的第二段（核心，毫秒级）——装配会话对象、落盘身份、开场事实。
     /// 约束：guest 已经起好了（或本机档不需要）；落盘失败要撤掉占名与刚建的空工作区目录。
-    pub(crate) fn commit_work(&mut self, prepared: PreparedWork) -> Result<WorkOpened, String> {
+    pub(crate) fn commit_work(
+        &mut self,
+        turn: &mut Turn,
+        registry: &dyn Registry,
+        prepared: PreparedWork,
+    ) -> Result<WorkOpened, String> {
         let pending = match prepared {
             // 代理形态在准备段里就建完了：这里原样交回。
             PreparedWork::Ready(opened) => return Ok(opened),
@@ -510,47 +524,36 @@ impl Conductor {
                 let channel = channels
                     .remove(&a.name)
                     .ok_or_else(|| format!("缺少 agent {} 的模型通道", a.name))?;
-                let unavailable = self
-                    .turn
-                    .unavailable_modules(&meta.exec, &chosen, self.probe());
-                let guest = self.turn.guest_os_of(&meta.exec, self.probe());
+                let unavailable = turn.unavailable_modules(&meta.exec, &chosen, self.probe());
+                let guest = turn.guest_os_of(&meta.exec, self.probe());
                 let host_plan = if meta.exec.tier == crate::kernel::api::Tier::Host {
-                    self.turn.host_plan_for(
-                        &meta.exec,
-                        &chosen,
-                        pkgs::PinPolicy::Require,
-                        self.probe(),
-                    )
+                    turn.host_plan_for(&meta.exec, &chosen, pkgs::PinPolicy::Require, self.probe())
                 } else {
                     pkgs::PackagePlan::default()
                 };
                 let (mut s, opened) = crate::capabilities::turn::api::single_session(
-                    &self.turn.session_deps(),
+                    &turn.session_deps(),
                     &crate::capabilities::turn::api::SingleSpec {
                         agent: a,
                         member: crate::capabilities::turn::api::MemberSpec {
                             modules: &chosen,
                             sandbox: &sb,
                             unavailable,
-                            net: self.turn.network_allowed(self.registry()),
-                            mode: self.registry.tool_mode(a.model.as_deref()),
+                            net: turn.network_allowed(registry),
+                            mode: registry.tool_mode(a.model.as_deref()),
                             role: "solo",
                             tier: meta.exec.tier,
-                            guest_lease: self.turn.guest_lease_for(&meta)?,
+                            guest_lease: turn.guest_lease_for(&meta)?,
                             plan: &host_plan,
                             base_roots: &self.base_roots,
-                            host_read_roots: self.turn.host_read_roots(self.registry()),
-                            shell: self.turn.shell_slot(&sb.session),
-                            handlers: &|allowed| {
-                                work_tools::handlers(&self.workspace, &sb, allowed)
-                            },
+                            host_read_roots: turn.host_read_roots(registry),
+                            shell: turn.shell_slot(&sb.session),
+                            handlers: &|allowed| (self.handlers)(&self.workspace, &sb, allowed),
                         },
                         channel,
                         guest,
-                        context: self
-                            .turn
-                            .context_budget(a.model.as_deref(), self.registry()),
-                        core_model: self.registry.core_model(),
+                        context: turn.context_budget(a.model.as_deref(), registry),
+                        core_model: registry.core_model(),
                     },
                 );
                 // 过期清理是**落盘事实**：装配时按 meta 装回开关，默认关。
@@ -560,21 +563,21 @@ impl Conductor {
             WorkMode::Collab => {
                 let task = task.as_deref().unwrap_or("").trim().to_string();
                 // 裁决队按会话 id 取：核心各关卡与这一席的工具级确认共用同一条队。
-                let door = self.turn.desk_of(&name);
+                let door = turn.desk_of(&name);
                 let core_channel =
                     core_channel.ok_or_else(|| "协作会话缺少核心模型通道".to_string())?;
                 let mut cs = CollabSession::start(
                     Arc::clone(&self.llm),
                     Arc::clone(&self.vm),
                     Arc::clone(&self.modules),
-                    self.registry.snapshot(),
+                    registry.snapshot(),
                     core_channel,
                     Arc::clone(&self.prompt),
                     Arc::clone(&self.systools),
                     Arc::clone(&self.tools),
                     Arc::clone(&self.log),
                     meta.exec.clone(),
-                    self.turn.guest_lease_for(&meta)?,
+                    turn.guest_lease_for(&meta)?,
                     metas.clone(),
                     delegate,
                     sandboxes.clone(),
@@ -587,14 +590,14 @@ impl Conductor {
             }
         };
         // 会话身份落盘：失败即失败（名字即目录，这是承诺，不假装已保存）。
-        self.turn.unmark_starting(&name);
+        turn.unmark_starting(&name);
         if let Err(e) = self.history.create(&meta) {
             if let Some((session, agents)) = discard {
                 let _ = self.workspace.discard(&session, &agents);
             }
             return Err(e);
         }
-        self.turn.put(&name, session);
+        turn.put(&name, session);
         self.record_events(&name, &mut events);
         // 只有本机档 + workspace 粒度才付机器级只读授权（一次性成本）：会话已经落盘，甩到后台慢慢付，创建本身保持毫秒级。
         pay_workspace_grant(&self.root, &meta);
@@ -604,94 +607,6 @@ impl Conductor {
             agents: agent_names,
             facts: events,
         })
-    }
-
-    /// 目的：创建失败（guest 起不来 / 落盘失败）时撤销准备段占下的东西：名字占位 + 这次建出来的空工作区目录。
-    pub(crate) fn abort_work(&mut self, prepared: PreparedWork) {
-        if let PreparedWork::Pending(p) = prepared {
-            self.turn.unmark_starting(&p.name);
-            if let Some((session, agents)) = p.discard {
-                let _ = self.workspace.discard(&session, &agents);
-            }
-        }
-    }
-
-    /// 目的：把"停 guest"这一段打包成交给调用方线程的活（销毁要等它落盘，秒级）。
-    pub(crate) fn guest_stop(&self, lease: &str) -> super::guest_job::GuestStop {
-        super::guest_job::GuestStop::new(Arc::clone(&self.vm), vec![lease.to_string()])
-    }
-
-    /// 目的：按一条会话的现状准备"确保 guest"那一段（启用、发言、成员回合共用）。
-    /// 返回：None = 本机档 / proxy 父会话 / 已有活 guest / 代拟名单还没确认；有 = 要在调用方线程跑。
-    pub(crate) fn prepare_guest_boot(
-        &self,
-        sid: &str,
-    ) -> Result<Option<super::guest_job::GuestBoot>, String> {
-        let meta = self.history.meta(sid)?;
-        if meta.run == RunState::Closed {
-            return Err(format!("会话 {} 已关闭：终态，不能再启用", sid));
-        }
-        let Some((lease, scope_meta)) = self.turn.guest_scope(&meta)? else {
-            return Ok(None);
-        };
-        if self.vm.guest_leases().iter().any(|l| l == &lease) {
-            return Ok(None);
-        }
-        // 代拟名单还没确认：沙箱/模块都还不知道，等第一次真正生成前再起（见 guest_scope / spawn）。
-        if scope_meta.agents.is_empty() && scope_meta.delegate {
-            return Ok(None);
-        }
-        let roster = self.scan();
-        // 共享 guest 的装配按整棵树算：proxy 根自己没有名单，子工作的 agent / 模块 / 包都要进来。
-        let tree = self.turn.tree_meta(&scope_meta, None)?;
-        let plan = self
-            .turn
-            .plan_for_meta_with(&tree, &roster, self.probe(), self.registry())?;
-        let sandboxes = self
-            .turn
-            .sandboxes(&tree, &roster, self.registry(), self.probe())?;
-        Ok(Some(
-            self.guest_boot(&tree, &plan, &sandboxes, false, &lease),
-        ))
-    }
-
-    /// 目的：把"起 guest"这一段打包成交给调用方线程的活——核心只准备参数，不在这里拉起。
-    pub(crate) fn guest_boot(
-        &self,
-        _meta: &SessionMeta,
-        plan: &crate::capabilities::vm::api::ExecPlan,
-        sandboxes: &crate::capabilities::workspace::api::Sandboxes,
-        restart: bool,
-        lease: &str,
-    ) -> GuestBoot {
-        let share_tool = self.share_tool_path();
-        // 开发/应急开关打开时，本进程的 VM 会话强制走 copy（不追加成回退链）；
-        // 普通进程没有这个开关，share_chain 只给用户档。
-        let shares = if crate::capabilities::vm::api::copy_share_enabled() {
-            vec!["copy"]
-        } else {
-            crate::capabilities::vm::api::share_chain(
-                std::env::consts::OS,
-                share_tool.as_deref(),
-                self.probe.as_ref(),
-            )
-        };
-        GuestBoot::new(
-            Arc::clone(&self.vm),
-            self.root.clone(),
-            Arc::clone(&self.probe),
-            Arc::clone(&self.log),
-            self.registry.app().max_guests,
-            self.turn.host_read_roots(self.registry()),
-            self.qemu_path(),
-            share_tool,
-            shares,
-            lease.to_string(),
-            self.turn.network_allowed(self.registry()),
-            plan.clone(),
-            sandboxes.clone(),
-            restart,
-        )
     }
 }
 

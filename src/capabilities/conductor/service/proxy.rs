@@ -7,11 +7,9 @@
 use crate::capabilities::proxy::api as d;
 use crate::capabilities::proxy::api::ProxyHost;
 
-use super::{Conductor, Session, validate_work_name};
+use super::Conductor;
 use crate::capabilities::conductor::api::ConductorHandle;
-use crate::capabilities::session::api::{Delegation, RunState, SessionEvent, SessionMeta};
-use crate::kernel::api::ExecSpec;
-use crate::kernel::api::now_ts;
+use crate::capabilities::session::api::{RunState, SessionEvent};
 
 fn tool_mode_str(m: crate::capabilities::llm::api::ToolMode) -> String {
     match m {
@@ -48,7 +46,7 @@ impl Conductor {
 
     /// 产物索引：共享区与各 agent 沙箱里的**相对路径**（不泄漏真实私有路径）。
     fn proxy_artifacts(&self, sid: &str) -> Result<Vec<String>, String> {
-        let files = self.files_view(sid)?;
+        let files = self.work.files_view(&self.turn, &*self.registry, sid)?;
         let mut out: Vec<String> = files.work.iter().map(|p| format!("work/{}", p)).collect();
         for a in &files.agents {
             for p in &a.files {
@@ -76,7 +74,8 @@ impl Conductor {
             Vec::new()
         };
         let modules = if scope.covers_modules() {
-            self.scan()
+            self.work
+                .scan()
                 .modules
                 .iter()
                 .map(|m| d::ModuleFact {
@@ -120,7 +119,11 @@ impl Conductor {
             .meta(sid)
             .map_err(|_| format!("无此会话：{}", sid))?;
         let list = self.history_list();
-        let sv = self.session_views(&list).into_iter().find(|v| v.sid == sid);
+        let sv = self
+            .work
+            .session_views(&self.turn, &*self.registry, &list)
+            .into_iter()
+            .find(|v| v.sid == sid);
         let state = match meta.run {
             RunState::Active => match &sv {
                 Some(v) if v.running => "running",
@@ -247,106 +250,18 @@ impl Conductor {
     ///  测试便捷入口：只要引用（产品入口经 `create_work(WorkMode::Proxy)`）。
     #[cfg(test)]
     pub fn create_proxy(&mut self, name: &str, granted_at: i64) -> Result<String, String> {
-        self.create_proxy_with_facts(
-            name,
-            granted_at,
-            crate::kernel::api::Tier::Host,
-            None,
-            crate::capabilities::permission::api::ProfileId::AllReach,
-            None,
-        )
-        .map(|(sid, _)| sid)
-    }
-
-    /// 目的：建代理会话的真身：返回（会话引用, **开场事实**）——事实交给 api 层发布到事件台
-    ///  （核心不持有事件台；与 `create_work` 同一条口径）。
-    ///  `tier` 是用户在向导里选的档位：它既是这条会话自己的工作区档位，也是它**建子工作时的默认档位**
-    ///  （`proxy_create` 取 `pmeta.exec.tier`）。承载不了就如实拒绝，不偷偷降级。
-    pub(crate) fn create_proxy_with_facts(
-        &mut self,
-        name: &str,
-        granted_at: i64,
-        tier: crate::kernel::api::Tier,
-        guest: Option<&str>,
-        profile: crate::capabilities::permission::api::ProfileId,
-        workspace: Option<crate::capabilities::session::api::WorkspaceBinding>,
-    ) -> Result<(String, Vec<SessionEvent>), String> {
-        validate_work_name(name)?;
-        if self.turn.holds(name) || self.history.load(name).is_ok() {
-            return Err(format!("工作名已存在：{}", name));
-        }
-        let exec = ExecSpec {
-            tier,
-            guest: guest
-                .map(|g| g.trim().to_string())
-                .filter(|g| !g.is_empty()),
-            ..ExecSpec::default()
-        };
-        // 与其余形态同一把尺子：虚拟机档的承载不成立就不建（用户环境问题，不是选型问题）。
-        if let Some(why) = crate::capabilities::vm::api::tier_refusal(
-            &self.root,
-            &exec,
-            self.qemu_path().as_deref(),
-            self.share_tool_path().as_deref(),
-            self.probe.as_ref(),
-        ) {
-            return Err(why);
-        }
-        // 先解析核心通道：没有模型就不建（工作区都还没有，失败什么都不留）。
-        let channel = self.registry.core_channel()?;
-        let meta = SessionMeta {
-            context_freshness: false,
-            name: name.to_string(),
-            mode: "proxy".to_string(),
-            delegate: false,
-            modules: Vec::new(),
-            task: None,
-            ts: now_ts(),
-            agents: Vec::new(),
-            exec,
-            sandbox: crate::capabilities::permission::api::SessionSandbox {
-                ceiling: Some(crate::capabilities::permission::api::PermissionLayer {
-                    profile: Some(profile),
-                    ..Default::default()
-                }),
-                narrowing: None,
-            },
-            parent: None,
-            node: None,
-            delegation: Some(Delegation { granted_at }),
-            thinking: None,
-            workspace: workspace.clone(),
-            run: RunState::Active,
-        };
-        self.workspace
-            .bind(name, workspace.as_ref().map(|w| w.root.as_path()))?;
-        self.workspace.prepare(
-            name,
-            &[crate::capabilities::turn::api::PROXY_PRIVATE_DIR.to_string()],
-        )?;
-        if workspace.is_some()
-            && let Err(e) = self.workspace.work_import_root(name, now_ts())
-        {
-            self.log.warn(
-                "conductor::create_proxy",
-                &format!("工作区初始导入失败：{}", e),
-            );
-        }
-        let mut session = self.turn.build_proxy_with(
-            &meta,
-            &channel,
-            self.registry(),
-            &crate::capabilities::conductor::service::work_tools::handlers,
-        )?;
-        let mut events = Vec::new();
-        // 授予事实既是 meta 的 `delegation`（可重建），也留一条**可回放记录**：
-        // 打开这条会话的人应当看得见"决定权是整块交出去的"，而不是只能去读 meta。
-        events
-            .extend(session.note_notice("[授予] 用户选定了代理形态——决定权整块交给核心（全权）。"));
-        self.history.create(&meta)?;
-        self.turn.put(name, Session::Single(session));
-        self.record_events(name, &mut events);
-        Ok((name.to_string(), events))
+        self.work
+            .create_proxy_with_facts(
+                &mut self.turn,
+                &*self.registry,
+                name,
+                granted_at,
+                crate::kernel::api::Tier::Host,
+                None,
+                crate::capabilities::permission::api::ProfileId::AllReach,
+                None,
+            )
+            .map(|(sid, _)| sid)
     }
 }
 

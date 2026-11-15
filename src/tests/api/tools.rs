@@ -7,10 +7,9 @@ use super::super::doubles::InMemoryHistory;
 use super::super::doubles::{decl, model_draft, module_of, module_with_runtimes};
 use super::super::{ops_with, single_work};
 use super::support::spawn;
-use crate::capabilities::conductor::api::{
-    Acted, ActionCall, AgentInstance, Caller, SessionEvent, WorkMode,
-};
+use crate::capabilities::conductor::api::{Acted, ActionCall, Caller, SessionEvent};
 use crate::capabilities::conductor::api::{ConductorHandle, Ops, Output};
+use crate::capabilities::work::api::{AgentInstance, WorkMode};
 use std::sync::Arc;
 
 #[test]
@@ -97,10 +96,9 @@ fn suggest_models_pushes_on_a_system_session_and_leaves_no_trace() {
         .suggest_models("做个东西", WorkMode::Collab)
         .expect("核心推荐");
     assert_eq!(agents.len(), 1, "回包只给名单（渲染那一步的契约不变）");
-    let (batches, _head, _oldest) = handle.events().snapshot(
-        Some(crate::capabilities::conductor::service::SYSTEM_SID_SUGGEST),
-        0,
-    );
+    let (batches, _head, _oldest) = handle
+        .events()
+        .snapshot(Some(crate::capabilities::work::api::SYSTEM_SID_SUGGEST), 0);
     assert!(
         !batches.is_empty(),
         "核心这一趟的行必须推出来（系统会话也是推的落脚点）"
@@ -115,7 +113,7 @@ fn suggest_models_pushes_on_a_system_session_and_leaves_no_trace() {
             .session_views(&[])
             .expect("会话视图")
             .iter()
-            .any(|v| v.sid == crate::capabilities::conductor::service::SYSTEM_SID_SUGGEST),
+            .any(|v| v.sid == crate::capabilities::work::api::SYSTEM_SID_SUGGEST),
         "系统会话不进会话列表（前端因此不会为它建标签页）"
     );
 }

@@ -84,7 +84,7 @@ impl ActionOps for ConductorHandle {
         // 模块工具动作（动态，来自清单）：模块声明的每个工具都是一条动作，人可直接跑。
         // 会话里的模块工具由成员循环执行——那是同一个声明、同一个执行面的另一个适配器。
         if matches!(caller, Caller::User)
-            && let Ok(roster) = self.call(|core| Ok(core.scan()))
+            && let Ok(roster) = self.call(|core| Ok(core.work.scan()))
         {
             let missing = self.unavailable_modules();
             for m in &roster.modules {

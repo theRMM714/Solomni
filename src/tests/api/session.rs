@@ -6,10 +6,9 @@
 use super::super::doubles::{decl, model_draft, module_of, module_with_runtimes};
 use super::super::{ops_with, single_work, slow_ops};
 use super::support::spawn;
-use crate::capabilities::conductor::api::{
-    Acted, ActionCall, AgentInstance, Caller, ConfigAgent, SessionEdit, WorkMode, WorkSpec,
-};
+use crate::capabilities::conductor::api::{Acted, ActionCall, Caller};
 use crate::capabilities::conductor::api::{Ops, Output};
+use crate::capabilities::work::api::{AgentInstance, ConfigAgent, SessionEdit, WorkMode, WorkSpec};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 

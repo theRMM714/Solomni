@@ -528,10 +528,9 @@ pub(crate) fn unc_external_workspace_plans_a_guest_mount() {
         codec: None,
     };
     let bridge = PathBridge::new("windows", PathDialect::Posix);
-    crate::capabilities::conductor::service::guest_job::check_stable_roots(&sandboxes, &bridge)
+    crate::capabilities::work::api::check_stable_roots(&sandboxes, &bridge)
         .expect("UNC 外部工作区要能起 guest");
-    let (rw, ro_tree) =
-        crate::capabilities::conductor::service::guest_job::stable_roots(&sandboxes);
+    let (rw, ro_tree) = crate::capabilities::work::api::stable_roots(&sandboxes);
     assert!(rw.contains(&shared), "UNC 外部根要单独进稳定根：{:?}", rw);
     let boot = FenceSpec {
         machine_ro_tree: Vec::new(),

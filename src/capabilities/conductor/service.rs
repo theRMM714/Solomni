@@ -4,11 +4,7 @@
 //! 联动：api 层经 ConductorHandle 把命令与事件交给这里；代理宿主动作经 `proxy::api::ProxyHost`（本能力的 `ProxyBridge` 实现）。
 
 use crate::capabilities::builds::api::Builds;
-use crate::capabilities::conductor::api::{
-    AgentInstance, AgentSuggestion, ConfigAgent, ContinueView, FilesAgentRootView, FilesAgentView,
-    FilesRootsView, FilesView, RewindTarget, RuntimeReport, SessionConfig, SessionEdit,
-    SessionView, ThinkingOptionView, ThinkingView, TierChoices, WorkMode, WorkOpened, WorkSpec,
-};
+use crate::capabilities::conductor::api::RewindTarget;
 use crate::capabilities::llm::api::Llm;
 use crate::capabilities::packages::api::Packages;
 use crate::capabilities::provision::api::Provision;
@@ -17,53 +13,21 @@ use crate::capabilities::session::api::History;
 pub(crate) use crate::capabilities::session::api::Live;
 use crate::capabilities::session::api::{Answered, GateTicket, SessionEvent};
 use crate::capabilities::vm::api::Vm;
+use crate::capabilities::work::api::Work;
 use crate::capabilities::workspace::api::Workspace;
 
 use crate::capabilities::collab::api::AfterTurn;
-use crate::capabilities::collab::api::CollabSession;
 use crate::capabilities::llm::api::Channel;
 #[cfg(test)]
 use crate::capabilities::llm::api::Msg;
-use crate::capabilities::modules::api::{Module, Modules};
+use crate::capabilities::modules::api::Modules;
 use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::registry::api::Registry;
-use crate::capabilities::session::api::{AgentMeta, HistoryView, RunState, SessionMeta};
+use crate::capabilities::session::api::{AgentMeta, HistoryView, SessionMeta};
 use crate::capabilities::tools::api::{ToolExec, Tools};
 use crate::capabilities::turn::api::Session;
-use crate::kernel::ports::Log;
 use compact::{CompactChoice, CompactRuntime};
 use std::sync::{Arc, RwLock};
-
-/// 目的：模块列表保序去重（一个 agent 内重复只留一份；跨 agent 的重叠是合法的共用）。
-pub(crate) fn dedup_modules(list: &[String]) -> Vec<String> {
-    let mut out: Vec<String> = Vec::with_capacity(list.len());
-    for m in list {
-        if !out.contains(m) {
-            out.push(m.clone());
-        }
-    }
-    out
-}
-
-/// 单模式的组合语义：多个 agent 的模块并成一个**临时组合**实例（去重、保序；模型取核心默认）。
-/// 人设取空：多份人设无法诚实合并，由用户在会话配置里补。
-fn merge_into_one(picked: &[AgentInstance], name: &str) -> AgentInstance {
-    let mut merged: Vec<String> = Vec::new();
-    for a in picked {
-        for id in &a.modules {
-            if !merged.contains(id) {
-                merged.push(id.clone());
-            }
-        }
-    }
-    AgentInstance {
-        name: name.to_string(),
-        transient: true,
-        modules: merged,
-        model: None,
-        chara: String::new(),
-    }
-}
 
 /// 目的：一次单 agent 生成的**准备结果**（核心线程上只算到这里，模型调用在工作线程上）。
 pub(crate) enum Prepared {
@@ -79,7 +43,7 @@ pub(crate) enum Prepared {
         task: Option<String>,
         llm: crate::capabilities::llm::api::LlmOpts,
         /// 增量落盘手柄：逐轮外送的同时就落盘（中途刷新页面因此看得到已产生的部分）。
-        persister: Persister,
+        persister: crate::capabilities::session::api::Persister,
     },
     /// 不用跑模型：直接把这批事件回给调用方（例如"末条是 AI 发言"）。
     Immediate(Vec<SessionEvent>),
@@ -87,49 +51,22 @@ pub(crate) enum Prepared {
     NotSingle,
 }
 
-/// 目的：一次"启用会话"的两段——核心只判断与准备（可选的一段 guest 启动），慢的那一段在调用方线程上跑。
-/// 约束：两个变体都装箱——SessionView / GuestBoot 都比指针大得多，装箱让两个分支体量一致。
-pub(crate) enum PreparedActivation {
-    /// 会话正在生成：附着即可，不重建、不重启 guest。
-    Running(Box<SessionView>),
-    /// 可以启用：可选 guest 启动；提交时重建会话并解冻整棵子树。
-    Ready(Box<ReadyActivation>),
-}
-
-/// 目的：可启用会话的准备结果（装箱后仍要能逐个取字段）。
-pub(crate) struct ReadyActivation {
-    /// 目的：要启用的会话 id。
-    pub(crate) sid: String,
-    /// 目的：这一趟要跑的 guest 启动（没有 = 本机档）。
-    pub(crate) boot: Option<crate::capabilities::conductor::service::guest_job::GuestBoot>,
-    /// 目的：本次启动要占的租约（提交失败时据此收掉刚拉起的 guest）。
-    pub(crate) lease: Option<String>,
-}
-
 /// 目的：**应用服务**：持有注入的端口、能力面与会话中心；前端拿不到它（只拿 `conductor::api::Ops`）。
 ///  组合根在 `ConductorHandle::spawn` 里把它**移进核心自己的执行线程**——此后状态只被那一个线程碰，
 ///  所以这里不加任何锁（并发不变式见 ARCHITECTURE.md §一）。
 pub struct Conductor {
-    /// 产品根：虚拟根这类"装在项目内"的东西按它解析成绝对路径（`vm::resolve_guest`）。
-    root: std::path::PathBuf,
-    /// 登记处能力：**四份 yaml 的状态在它里面**，conductor 只按 `Registry` 调用（看不见它的字段）。
-    registry: Box<dyn Registry>,
+    /// 目的：登记处能力——**四份 yaml 的状态在它里面**，conductor 只按 `Registry` 调用（看不见它的字段）。
+    pub(crate) registry: Box<dyn Registry>,
     /// 会话历史直连面（**不持它的端口**，R12）：造/读/写/删会话都走它。
     history: Arc<dyn History + Send + Sync>,
     /// 工作区用例面（**不持它的端口**，R12）：工作区目录与版本化走它。
     workspace: Arc<dyn Workspace + Send + Sync>,
     /// 虚拟机档用例面（**不持它的端口**，R12）：guest 生命周期与档位就绪检测走它。
     vm: Arc<dyn Vm + Send + Sync>,
-    /// 运行包能力（**不持它的端口**，R12）：包库、选型诊断与计划走它。
-    packages: Arc<dyn Packages + Send + Sync>,
-    /// 依赖补齐面（**不持它的端口**，R12）：虚拟根清单与装没装齐从它读。
-    provision: Arc<dyn Provision + Send + Sync>,
     /// 目的：模块能力（**不持它的端口**，R12）——模块清单事实的唯一上游。
     modules: Arc<dyn Modules + Send + Sync>,
     /// 目的：构建能力面（**不持它的端口**，R12）——创建会话前补编声明了 `build:` 的模块。
     builds: Arc<dyn Builds + Send + Sync>,
-    /// llm 用例面：按解析出来的通道造收发句柄 + 信封的无歧义修复（通道的**解析**在登记处能力）。
-    llm: Arc<dyn Llm + Send + Sync>,
     /// 压缩通道工厂：全局设置只在这里对账；会话在压缩触发时现取（不刷新会话）。
     compact: Arc<CompactRuntime>,
     /// 工具执行面（**不持它的端口**，R12）：跑外部/内置工具、释放围栏授权都走它。
@@ -141,9 +78,9 @@ pub struct Conductor {
     residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
     /// 隐秘字段的统一管理面：工具 / 服务起进程时按它解析注入项并脱敏。
     secrets: Arc<dyn crate::capabilities::secrets::api::SecretOps + Send + Sync>,
-    /// 项目内基础工具链的只读安装根（python / node / cc）：shell 的 sandbox 与 external 都放行它们。
-    /// 来源是组合根读到的 active.json；不按 agent 的模块重复注入。
-    base_roots: Vec<std::path::PathBuf>,
+    /// 目的：工作形态用例——建工作 / 配置 / 视图 / 报告 / 激活 / 动作都在这个能力里，核心只经它调用。
+    ///   与 `turn` 同为**核心持有的唯一实例**（不共享、不加锁）。
+    pub(crate) work: Work,
     /// 提示词册能力：**册子本体在它里面**（只有一处），conductor 只按名字取段。
     /// 用 `Arc`：协作会话要与核心**共享**这一份（逐处克隆整本册子是白费）。
     prompt: Arc<dyn Prompt>,
@@ -153,23 +90,14 @@ pub struct Conductor {
     pub(crate) turn: crate::capabilities::turn::api::Turn,
 }
 
-mod action;
-mod activation;
 pub(crate) mod ask_user;
 mod compact;
 mod env;
 mod flow;
-pub(crate) mod guest_job;
 mod history;
-pub(crate) mod persist;
-pub(crate) use persist::{Persister, SYSTEM_SID_SUGGEST, persist_events};
 pub mod proxy;
 mod rewind;
-mod suggest;
 mod turn;
-mod work;
-#[cfg(test)]
-pub(crate) use work::needs_guest_packages_rebuild;
 pub(crate) mod work_tools;
 
 impl Conductor {
@@ -214,27 +142,41 @@ impl Conductor {
             Arc::clone(&log),
             compact.clone(),
         );
+        // 工作形态用例与核心共享同一批能力面；`handlers` 是核心自己的装配件，
+        // 注入给它以免两个能力互相引用（能力之间只能经对方的 api）。
+        let work = Work::new(
+            root.clone(),
+            Arc::clone(&history),
+            Arc::clone(&workspace),
+            Arc::clone(&vm),
+            Arc::clone(&packages),
+            Arc::clone(&modules),
+            Arc::clone(&provision),
+            Arc::clone(&llm),
+            Arc::clone(&prompt),
+            Arc::clone(&systools),
+            Arc::clone(&tools),
+            Arc::clone(&log),
+            Arc::clone(&probe),
+            Box::new(crate::capabilities::conductor::service::work_tools::handlers),
+        );
         let c = Conductor {
-            root,
             registry,
             history,
             workspace,
             vm,
-            packages,
-            provision,
             modules,
             builds,
-            llm,
             compact,
             tools,
             log,
             probe,
             residents,
             secrets,
-            base_roots: Vec::new(),
             prompt,
             systools,
             turn,
+            work,
         };
         c.sync_compact_choice();
         c
@@ -263,8 +205,8 @@ impl Conductor {
     /// 目的：注入项目内基础工具链的只读安装根；组合根读到 active.json 后调用。
     /// 约束：核心与会话本体各留一份（工具链根既是会话装配的输入，也是核心自己起 shell 的依据），同一处注入保持一致。
     pub fn with_base_roots(mut self, roots: Vec<std::path::PathBuf>) -> Conductor {
-        self.turn.set_base_roots(roots.clone());
-        self.base_roots = roots;
+        self.work.set_base_roots(roots.clone());
+        self.turn.set_base_roots(roots);
         self
     }
 
@@ -284,14 +226,6 @@ impl Conductor {
         &dyn crate::kernel::ports::HostProbe,
     ) {
         (&mut self.turn, self.registry.as_ref(), self.probe.as_ref())
-    }
-
-    /// 目的：本机可选的虚拟根清单（会话配置与创建向导用）。
-    /// 约束：清单事实来自依赖补齐能力；补齐面没接入时如实返回空表（界面据此说"没有可选虚拟根"）。
-    pub(crate) fn guest_bases(
-        &self,
-    ) -> Result<Vec<crate::capabilities::provision::api::GuestBase>, String> {
-        self.provision.guest_bases()
     }
 
     /// 目的：模块的**有效**启用（用户覆盖 ?? 作者默认）。
@@ -356,11 +290,6 @@ impl Conductor {
         let out = f(self.registry.as_mut())?;
         self.sync_compact_choice();
         Ok(out)
-    }
-
-    /// 目的：目录保留名（`systools/names.yaml`）：agent 实例名不得占用（与工作区布局同源）。
-    pub(crate) fn reserved_names(&self) -> Vec<String> {
-        self.systools.reserved_names()
     }
 
     /// 目的：工具总表的声明书（代理执行者在队列桥那一侧校验参数/拼回执要用）。
@@ -433,6 +362,197 @@ impl Conductor {
     // ---- 会话历史 ----
 }
 
+// 测试同步入口：跨段的活儿（准备 → 起 guest → 提交）在这里一次跑完，测试不必在两段之间等 QEMU。
+// 生产面没有这些方法：它们只是把测试对工作能力的调用转给 `self.work`，不参与任何生产路径。
+#[cfg(test)]
+impl Conductor {
+    /// 目的：测试用同步建工作（生产走句柄的两段 `prepare_work` / `commit_work`）。
+    pub fn create_work(
+        &mut self,
+        spec: crate::capabilities::work::api::WorkSpec,
+    ) -> Result<crate::capabilities::work::api::WorkOpened, String> {
+        self.work.create_work(&mut self.turn, &*self.registry, spec)
+    }
+
+    /// 目的：测试用同步建会话（人经呈现层与核心代理共用的那一条的同步形态）。
+    pub fn create_session(
+        &mut self,
+        spec: &crate::capabilities::proxy::api::NewSession,
+    ) -> Result<
+        (
+            crate::capabilities::proxy::api::Created,
+            Vec<crate::capabilities::session::api::SessionEvent>,
+        ),
+        String,
+    > {
+        self.work
+            .create_session(&mut self.turn, &*self.registry, spec)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    /// 目的：测试用同步建代理工作（生产走句柄的 `create_proxy`）。
+    pub fn create_proxy_with_facts(
+        &mut self,
+        name: &str,
+        granted_at: i64,
+        tier: crate::kernel::api::Tier,
+        guest: Option<&str>,
+        profile: crate::capabilities::permission::api::ProfileId,
+        workspace: Option<crate::capabilities::session::api::WorkspaceBinding>,
+    ) -> Result<(String, Vec<crate::capabilities::session::api::SessionEvent>), String> {
+        self.work.create_proxy_with_facts(
+            &mut self.turn,
+            &*self.registry,
+            name,
+            granted_at,
+            tier,
+            guest,
+            profile,
+            workspace,
+        )
+    }
+
+    /// 目的：测试用同步改权限档（生产走 `registry_write` 的那条命令）。
+    pub fn set_permission_profile(
+        &mut self,
+        sid: &str,
+        profile: crate::capabilities::permission::api::ProfileId,
+    ) -> Result<(), String> {
+        self.work
+            .set_permission_profile(&mut self.turn, &*self.registry, sid, profile)
+    }
+
+    /// 目的：测试用同步改配（生产走句柄的两段 `prepare_edit` / `commit_edit`）。
+    pub fn edit_session(
+        &mut self,
+        sid: &str,
+        edit: crate::capabilities::work::api::SessionEdit,
+    ) -> Result<(), String> {
+        self.work
+            .edit_session(&mut self.turn, &*self.registry, sid, edit)
+    }
+
+    /// 目的：测试用改配的第一段（校验 + 出计划）。
+    pub fn prepare_edit(
+        &mut self,
+        sid: &str,
+        edit: crate::capabilities::work::api::SessionEdit,
+    ) -> Result<
+        (
+            crate::capabilities::work::api::PreparedEdit,
+            Option<crate::capabilities::work::api::EditGuest>,
+        ),
+        String,
+    > {
+        self.work
+            .prepare_edit(&mut self.turn, &*self.registry, sid, edit)
+    }
+
+    /// 目的：测试用改配的第二段（写回 + 丢掉内存会话）。
+    pub fn commit_edit(
+        &mut self,
+        prepared: crate::capabilities::work::api::PreparedEdit,
+    ) -> Result<(), String> {
+        self.work
+            .commit_edit(&mut self.turn, &*self.registry, prepared)
+    }
+
+    /// 目的：测试用启用的第一段（判是否已在跑 + 准备 guest）。
+    pub fn prepare_activation(
+        &self,
+        sid: &str,
+    ) -> Result<crate::capabilities::work::api::PreparedActivation, String> {
+        self.work
+            .prepare_activation(&self.turn, &*self.registry, sid)
+    }
+
+    /// 目的：测试用启用的第二段（重建 + 解冻整棵子树）。
+    pub fn commit_activation(
+        &mut self,
+        prepared: crate::capabilities::work::api::PreparedActivation,
+    ) -> Result<crate::capabilities::work::api::SessionView, String> {
+        self.work
+            .commit_activation(&mut self.turn, &*self.registry, prepared)
+    }
+
+    /// 目的：测试读档位可选项（与某条会话无关的机器能力）。
+    pub fn tier_choices(&self) -> crate::capabilities::work::api::TierChoices {
+        self.work.tier_choices(&*self.registry)
+    }
+
+    /// 目的：测试用投喂文件到本次工作的 work/。
+    pub fn work_upload(
+        &mut self,
+        sid: &str,
+        name: &str,
+        bytes: &[u8],
+        overwrite: bool,
+    ) -> Result<bool, String> {
+        self.work
+            .work_upload(&mut self.turn, sid, name, bytes, overwrite)
+    }
+
+    /// 目的：测试用切换上下文新鲜度。
+    pub fn set_context_freshness(&mut self, sid: &str, on: bool) -> Result<(), String> {
+        self.work
+            .set_context_freshness(&mut self.turn, &*self.registry, sid, on)
+    }
+
+    /// 目的：测试读会话配置视图。
+    pub fn session_config(
+        &self,
+        sid: &str,
+    ) -> Result<crate::capabilities::work::api::SessionConfig, String> {
+        self.work.session_config(&self.turn, &*self.registry, sid)
+    }
+
+    /// 目的：测试判会话是否在世（按名字）。
+    pub fn session_exists(&self, name: &str) -> bool {
+        self.work.session_exists(&self.turn, name)
+    }
+
+    /// 目的：测试读一次生成要用的调用参数。
+    pub fn llm_opts(&self, want_stream: bool) -> crate::capabilities::llm::api::LlmOpts {
+        self.work.llm_opts(&*self.registry, want_stream)
+    }
+
+    /// 目的：测试读文件视图。
+    pub fn files_view(
+        &self,
+        sid: &str,
+    ) -> Result<crate::capabilities::work::api::FilesView, String> {
+        self.work.files_view(&self.turn, &*self.registry, sid)
+    }
+
+    /// 目的：测试读运行能力报告。
+    pub fn runtime_report(
+        &self,
+        tier: crate::kernel::api::Tier,
+    ) -> crate::capabilities::work::api::RuntimeReport {
+        self.work.runtime_report(&self.turn, &*self.registry, tier)
+    }
+
+    /// 目的：测试读模块名册。
+    pub fn scan(&self) -> crate::capabilities::modules::api::Roster {
+        self.work.scan()
+    }
+
+    /// 目的：测试读模型建议（按任务挑 agent 的候选）。
+    pub fn suggest_models(
+        &self,
+        task: &str,
+        mode: crate::capabilities::work::api::WorkMode,
+    ) -> Result<
+        (
+            Vec<crate::capabilities::work::api::AgentSuggestion>,
+            Vec<crate::capabilities::session::api::SessionEvent>,
+        ),
+        String,
+    > {
+        self.work.suggest_models(&*self.registry, task, mode)
+    }
+}
+
 // 测试访问器：验证职责提示词已种入历史首条（回归：会话曾丢失 system 提示词）。
 #[cfg(test)]
 impl Conductor {
@@ -474,39 +594,3 @@ impl Conductor {
 
 /// 继续被拦下时的提醒（单 agent 会话：该轮到用户发言）。
 const NEED_USER: &str = "最后一条是 AI 发言：部分供应商不允许连续 AI 发言；请先发言再继续。";
-
-/// 工作形态 → 会话元信息里的标识。
-fn mode_str(mode: WorkMode) -> &'static str {
-    match mode {
-        WorkMode::Single => "single",
-        WorkMode::Collab => "collab",
-        WorkMode::Proxy => "proxy",
-    }
-}
-
-/// 工作名即将来的落盘目录名：非空、不含路径分隔符与 Windows 非法字符、不是保留名。
-fn validate_work_name(name: &str) -> Result<(), String> {
-    let n = name.trim();
-    if n.is_empty() {
-        return Err("工作名不能为空".to_string());
-    }
-    if name != n {
-        return Err("工作名首尾不能有空白".to_string());
-    }
-    if n == "." || n == ".." {
-        return Err("工作名非法".to_string());
-    }
-    const BAD: [char; 9] = ['\\', '/', ':', '*', '?', '"', '<', '>', '|'];
-    if n.chars().any(|c| BAD.contains(&c) || c.is_control()) {
-        return Err("工作名不能包含 \\ / : * ? \" < > | 或控制字符".to_string());
-    }
-    let upper = n.to_ascii_uppercase();
-    let reserved_device = ["CON", "PRN", "AUX", "NUL"].contains(&upper.as_str())
-        || (upper.len() == 4
-            && (upper.starts_with("COM") || upper.starts_with("LPT"))
-            && upper.as_bytes()[3].is_ascii_digit());
-    if reserved_device {
-        return Err("工作名是系统保留名".to_string());
-    }
-    Ok(())
-}

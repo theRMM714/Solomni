@@ -1,5 +1,5 @@
 //! 目的：核心侧的少量事实取用——一次 guest 只读诊断的准备、讨论提醒次数上限。
-//! 管：从 history / registry 取事实后转调 `env` 与 `guest_job` 能力。
+//! 管：从 history / registry 取事实后转调 `env` 与 `work` 能力。
 //! 不管：会话装配要的沙箱 / 权限 / 预算 / 树级 meta（归 `turn` 的会话本体）、会话怎么落盘（history.rs）、
 //!   协作链怎么推进（flow.rs）、建工作的两段（work/create.rs）。
 //! 联动：诊断与讨论提醒经这里；装配类事实一律走 `self.turn.*`。
@@ -11,13 +11,13 @@ impl Conductor {
     pub(crate) fn prepare_guest_diagnose(
         &self,
         sid: &str,
-    ) -> Result<super::guest_job::GuestDiagnose, String> {
+    ) -> Result<crate::capabilities::work::api::GuestDiagnose, String> {
         let meta = self.history.meta(sid)?;
         if meta.exec.tier != crate::kernel::api::Tier::Vm {
             return Err("这条会话是本机档，没有 guest 可诊断".to_string());
         }
         match self.turn.guest_scope(&meta)? {
-            Some((lease, _)) => Ok(super::guest_job::GuestDiagnose::new(
+            Some((lease, _)) => Ok(crate::capabilities::work::api::GuestDiagnose::new(
                 Arc::clone(&self.vm),
                 lease,
             )),

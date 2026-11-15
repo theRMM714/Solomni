@@ -91,10 +91,10 @@ pub(crate) fn history_delete_cascades_to_children_and_refuses_child_delete() {
 /// 目的：删除 VM 会话时**先停 guest，再删目录**——Windows 上 guest 还占着会话目录里的文件，反过来会 sharing violation。
 #[test]
 pub(crate) fn session_delete_stops_the_guest_before_removing_directories() {
-    use crate::capabilities::conductor::service::guest_job::GuestStop;
     use crate::capabilities::lifecycle::api::SessionDelete;
     use crate::capabilities::vm::api::Vm;
     use crate::capabilities::vm::domain::guest::{GuestRun, GuestSpec};
+    use crate::capabilities::work::api::GuestStop;
     use crate::kernel::api::FenceSpec;
 
     struct StopVm {
@@ -183,9 +183,9 @@ pub(crate) fn session_delete_stops_the_guest_before_removing_directories() {
 ///   回调被闸门挡住时 `run()` 仍要立刻返回；回调里能看到会话已经删掉（先删目录的快分支前提）。
 #[test]
 pub(crate) fn session_delete_releases_fences_in_background_after_directories() {
-    use crate::capabilities::conductor::service::guest_job::GuestStop;
     use crate::capabilities::lifecycle::api::SessionDelete;
     use crate::capabilities::vm::api::Vm;
+    use crate::capabilities::work::api::GuestStop;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
@@ -253,11 +253,11 @@ pub(crate) fn session_delete_releases_fences_in_background_after_directories() {
 /// 目的：删目录失败时撤权仍然执行（错误如实返回，不能把待办丢掉）。
 #[test]
 pub(crate) fn session_delete_releases_fences_even_when_directory_delete_fails() {
-    use crate::capabilities::conductor::service::guest_job::GuestStop;
     use crate::capabilities::lifecycle::api::SessionDelete;
     use crate::capabilities::session::api::History;
     use crate::capabilities::session::domain::history::HistoryView;
     use crate::capabilities::vm::api::Vm;
+    use crate::capabilities::work::api::GuestStop;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::{Duration, Instant};
 
@@ -331,9 +331,9 @@ pub(crate) fn session_delete_releases_fences_even_when_directory_delete_fails() 
 /// 目的：没有租约时不起后台撤权线程（空清单直接返回）。
 #[test]
 pub(crate) fn session_delete_with_no_fence_leases_skips_release() {
-    use crate::capabilities::conductor::service::guest_job::GuestStop;
     use crate::capabilities::lifecycle::api::SessionDelete;
     use crate::capabilities::vm::api::Vm;
+    use crate::capabilities::work::api::GuestStop;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     let store = Arc::new(InMemoryHistory::new());
@@ -370,9 +370,9 @@ pub(crate) fn session_delete_with_no_fence_leases_skips_release() {
 /// 目的：后台撤权失败要如实记日志（失败条目留在台账，下次重试）。
 #[test]
 pub(crate) fn session_delete_logs_background_release_failures() {
-    use crate::capabilities::conductor::service::guest_job::GuestStop;
     use crate::capabilities::lifecycle::api::SessionDelete;
     use crate::capabilities::vm::api::Vm;
+    use crate::capabilities::work::api::GuestStop;
     use std::time::{Duration, Instant};
 
     let store = Arc::new(InMemoryHistory::new());

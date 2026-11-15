@@ -4,10 +4,7 @@
 //! 联动：`cli/view.rs`、`cli/term.rs`、`cli/theme.rs`、`docs/presentation/cli/unit-map.md`
 
 use super::*;
-use crate::capabilities::conductor::api::{
-    AgentSuggestion, ConductorHandle, FilesView, RuntimeDiagnosis, RuntimeReport, SessionConfig,
-    SessionEdit, TierChoices, WorkMode, WorkOpened, WorkOps, WorkSpec,
-};
+use crate::capabilities::conductor::api::{ConductorHandle, WorkOps};
 use crate::capabilities::llm::api::{ProbeOutcome, ReplayReport};
 use crate::capabilities::modules::api::{ModulesOps, Roster};
 use crate::capabilities::packages::api::Problem;
@@ -18,6 +15,10 @@ use crate::capabilities::session::domain::events::{
     DecisionAnswer, DecisionEnvelope, DecisionMessage,
 };
 use crate::capabilities::taskchain::api::{NodeStatus, TaskChain, TaskNode};
+use crate::capabilities::work::api::{
+    AgentSuggestion, FilesView, RuntimeDiagnosis, RuntimeReport, SessionConfig, SessionEdit,
+    TierChoices, WorkMode, WorkOpened, WorkSpec,
+};
 use crate::capabilities::workspace::api::{CommitDetail, CommitFileView, WorkLog};
 use crate::tests::doubles::{
     InMemorySettings, core_with_settings_modules, module_of, module_with_runtimes,

@@ -1,7 +1,7 @@
 //! 目的：会话的**在世表协议**——取出 / 交回 / 运行态闸门 / 裁决队作废 / 派生子会话。
 //! 管：`take_single` / `take_collab` / `take_collab_raw`（交给工作线程）、`put_single` / `put_single_recorded` /
 //!   `put_collab` / `abort_running`（交回与崩溃）、`void_gates_of` / `void_gates_in_subtree` / `desk_of` /
-//!   `forget_desk`（裁决队）、`spawn_agent_session` / `spawn_sub_session`（派生）、`node_note` / `mark_node_done`（节点产出）。
+//!   `forget_desk`（裁决队）、`spawn_agent_session` / `spawn_sub_session`（派生）、`node_note` / `mark_node_done`（节点产出）、`notice_row`（内容类提示记行）。
 //! 不管：事件怎么落盘（交回时把要落的事件交给调用方）、协作链怎么推进（`conductor` 的 `flow`）、生成驱动。
 //! 联动：`conductor` 的生成驱动与流水线经 `turn::api` 取用；装配与重建见 `assemble.rs` / `rebuild.rs`。
 
@@ -374,5 +374,18 @@ impl Turn {
     ///  只解除"生成中"，下次访问按落盘转录重建——绝不把会话卡在"生成中"。
     pub(crate) fn abort_running(&mut self, sid: &str) {
         self.unmark_running(sid);
+    }
+
+    /// 目的：把一条内容类系统提示记成**转录行**（有 id、可回档/折叠）；返回要外送的事件。
+    /// 约束：只在会话对象在核心表里时分配行 id；生成中的会话被取走、没有计数器可分配，
+    ///   这时如实退回瞬时提示（界面照样看得见，只是不可回档）。
+    pub(crate) fn notice_row(&mut self, sid: &str, text: &str) -> Vec<SessionEvent> {
+        let mut out = Vec::new();
+        match self.session_mut(sid) {
+            Some(Session::Single(s)) => out.extend(s.note_notice(text)),
+            Some(Session::Collab(c)) => c.notice(text, &mut |e| out.push(e)),
+            None => out.push(SessionEvent::Notice(text.to_string())),
+        }
+        out
     }
 }

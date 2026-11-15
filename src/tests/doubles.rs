@@ -6,7 +6,7 @@
 #![allow(dead_code)]
 
 use super::builders::SilentRunner;
-use crate::capabilities::conductor::api::{AgentInstance, SessionEvent, WorkMode, WorkSpec};
+use crate::capabilities::conductor::api::SessionEvent;
 use crate::capabilities::conductor::service::Conductor;
 use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg};
@@ -26,6 +26,7 @@ use crate::capabilities::session::api::{HistoryView, SessionMeta};
 use crate::capabilities::session::ports::HistoryStore;
 use crate::capabilities::tools::ports::SystoolsSource;
 use crate::capabilities::tools::ports::{FileRead, SysIo};
+use crate::capabilities::work::api::{AgentInstance, WorkMode, WorkSpec};
 use crate::capabilities::workspace::domain::asset::{AssetScanner, FileVersion};
 use crate::capabilities::workspace::ports::{WorkStore, Workdirs};
 use crate::kernel::api::Tier;

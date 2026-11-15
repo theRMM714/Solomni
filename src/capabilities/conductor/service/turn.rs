@@ -79,7 +79,9 @@ impl Conductor {
             }
         }
         // 思考强度按**工作根**解析（子会话共享）；模型没登记该档会在这里如实报错。
-        let llm = self.llm_opts_for(sid, want_stream)?;
+        let llm = self
+            .work
+            .llm_opts_for(&self.turn, &*self.registry, sid, want_stream)?;
         // 身份块**现渲染**（形态刚在上一步对齐过，所以这里读到的就是本回合的形态）。
         let identity = match self.turn.session(sid) {
             Some(Session::Single(s)) => s.params().identity(&*self.prompt, s.tool_mode()),
@@ -118,7 +120,9 @@ impl Conductor {
             return Ok(Prepared::NotSingle);
         }
         // 节点的生成跟随设置里的流式开关；思考强度按工作根解析（子会话共享）。
-        let llm = self.llm_opts_for(child, true)?;
+        let llm = self
+            .work
+            .llm_opts_for(&self.turn, &*self.registry, child, true)?;
         let mut prefix: Vec<SessionEvent> = Vec::new();
         if let Some(n) = self.refresh_tool_mode(child)? {
             prefix.push(SessionEvent::Notice(n));

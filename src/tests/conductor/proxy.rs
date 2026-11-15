@@ -1069,7 +1069,7 @@ pub(crate) fn the_proxy_identity_is_the_role_prompt() {
 #[test]
 pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
     let (handle, ops) = super::super::ops_with(vec![], vec![]);
-    let spec = crate::capabilities::conductor::api::WorkSpec {
+    let spec = crate::capabilities::work::api::WorkSpec {
         name: "w-user-proxy".to_string(),
         mode: WorkMode::Proxy,
         agents: Vec::new(),
@@ -1113,7 +1113,7 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
     // 与形态不符的载荷：整条拒绝，不留半成品。
     let mut bad = spec.clone();
     bad.name = "w-user-proxy-2".to_string();
-    bad.agents = vec![crate::capabilities::conductor::api::AgentInstance {
+    bad.agents = vec![crate::capabilities::work::api::AgentInstance {
         name: "a".to_string(),
         transient: true,
         modules: vec!["m1".to_string()],
@@ -1165,7 +1165,7 @@ pub(crate) fn proxy_session_exposes_context_usage() {
     ))
     .expect("起核心线程");
     let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
-    let spec = crate::capabilities::conductor::api::WorkSpec {
+    let spec = crate::capabilities::work::api::WorkSpec {
         name: "w-proxy-ctx".to_string(),
         mode: WorkMode::Proxy,
         agents: Vec::new(),
@@ -1375,7 +1375,7 @@ pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
     );
     let (work, _) = ops
         .work
-        .create_work(crate::capabilities::conductor::api::WorkSpec {
+        .create_work(crate::capabilities::work::api::WorkSpec {
             name: "w-gate".to_string(),
             mode: WorkMode::Collab,
             agents: Vec::new(),

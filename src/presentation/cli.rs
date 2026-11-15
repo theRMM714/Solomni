@@ -4,13 +4,12 @@
 //! 联动：能力面来自 `src/capabilities/*/api.rs`；事件词汇与 `src/presentation/web/` 并列共用；模块声明见 `src/presentation.rs`。
 
 use crate::capabilities::conductor::api::{Acted, ActionCall, Caller};
-use crate::capabilities::conductor::api::{
-    AgentInstance, DecisionCard, DecisionWaiter, SessionEvent, Tier,
-};
+use crate::capabilities::conductor::api::{DecisionCard, DecisionWaiter, SessionEvent, Tier};
 use crate::capabilities::conductor::api::{Ops, Output};
 use crate::capabilities::registry::api::{ModelView, ProviderView};
 use crate::capabilities::system::api::System;
 use crate::capabilities::tools::api::Command;
+use crate::capabilities::work::api::AgentInstance;
 
 /// 目的：离开转录中心时的去向：退出，或转入 Web 转录中心（端口）。
 pub enum CliExit {

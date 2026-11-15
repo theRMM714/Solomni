@@ -24,6 +24,7 @@
 | `presentation/{cli,web}/` | **呈现层（交付机制）**：各渠道一个子目录，完全分开——传输（argv/stdout vs HTTP）、路由、纯渲染。**不是业务能力** | 只依赖各能力的 `::api`；**拿不到端口对象，也拿不到 `Core`**；两者互不依赖 |
 | `capabilities/` | **业务层**：按业务功能垂直切分。每个能力有 `api`（入站契约：trait + DTO）/ `service`（本能力的状态与用例）/ `ports`（出站端口，只由定义它的能力持有）/ `domain`（纯逻辑）/ `detail`（只有组合根能构造） | **业务之间只经对方的 `api`**；不反向依赖根 / 呈现层（T0 机器判定，见 §九.7） |
 | `capabilities/conductor/` | **编配型业务**（按 §九.1 路径 B + C 成立）：会话中心（在世表、命令队列、运行态）、生成驱动、跨能力用例与跨会话回档编排；与别的能力**平级** | **必须薄**：只做毫秒级状态变换与派发，长步骤（起停 guest、生成、压缩）在调用方或工作线程（§九.3）；不读文件、不发网络、不碰 stdin/stdout |
+| `capabilities/work/` | **工作形态的入口**（按 §九.1 路径 C 成立）：把「要一份工作」翻译成会话配置——形态（single / collab / proxy）、名单、模型档、思考强度、权限档与虚拟根；建工作、建会话、启用与激活、改配、会话 / 文件视图、运行包报告与档位、guest 启停的两段准备都在这里，这些决定跨 `workspace` / `vm` / `session` / `modules` / `registry` 多个参与方，无法归属其中任一方 | **必须薄**：核心只做毫秒级的状态变换（校验、占名、出计划、落盘、装配），等外部世界的活（起停 guest）在调用方线程（§九.3）；不持会话本体（`turn`）、不持登记处、不读文件、不发网络；`src/capabilities/work/api.rs` 是唯一入站面，`conductor` 只按队列转发 |
 | `capabilities/env/` | **环境事实的唯一派生者**（按 §九.1 路径 A 成立）：权限面、沙箱清单、一席的围栏 / 进程环境 / 工具链根与 guest 租约，全部从调用方交来的事实算出；纯派生，**无状态、无端口、无 IO** | **不得取事实、不得落盘、不得启停 guest**；不引 `conductor` / `collab` / `turn` / `proxy`（`src/capabilities/env/api.rs` 是唯一入站面） |
 | `capabilities/proxy/` | **模型工具面的入口**（按 §九.1 路径 C 成立）：`core_proxy` 六个工具的声明解读、授权校验、参数规整与执行，动作跨 `session` / `workspace` / `tools` / `permission` 多个参与方，无法归属其中任一方 | **必须薄**：只做参数与授权的毫秒级判定；外部动作一律经端口 `ProxyHost` 交回核心线程，宿主实现是 `conductor` 的队列桥（`src/capabilities/proxy/api.rs`） |
 | `capabilities/turn/` | **会话本体 + 一席会话装配构件**（会话本体按 §九.2 状态归属归本单元、写点唯一；装配构件按 §九.1 路径 A 成立）：`Turn` 持五张内存表（在世表 / 运行态 / 占名表 / 裁决队句柄 / shell 槽）与各能力面；按调用方交来的事实（模块 / 沙箱 / 权限面 / 缺包 / 租约）装出一席工具面与会话对象、按转录从落盘重建、管树序与裁决队、派生子会话，纯规则在 `domain/` | **不得读文件、不得起 guest、不碰 stdin/stdout**；生成驱动与跨能力用例不在此（`src/capabilities/turn/api.rs` 是唯一入站面） |
@@ -92,7 +93,7 @@
 
 - 这两块是查阅型细则，各只有一份：
 
-- 逐个文件讲某个单元（`capabilities/` 含 `conductor/`、`kernel/`、`entry/`、`presentation/`）各干什么：各单元自己的 `docs/<单元>/unit-map.md`（单元划分与完整路由见 [AGENTS.md](AGENTS.md)「文档路由」）。
+- 逐个文件讲某个单元（`capabilities/` 含 `conductor/`、`work/`、`kernel/`、`entry/`、`presentation/`）各干什么：各单元自己的 `docs/<单元>/unit-map.md`（单元划分与完整路由见 [AGENTS.md](AGENTS.md)「文档路由」）。
 - 呈现层入站契约与机器可读的 HTTP 路由目录：[docs/presentation/contracts.md](docs/presentation/contracts.md)
 - （**路由表由 `src/tests/routes.rs` 直接读本文比对**，对不上就是测试失败）。
 - 系统工具总表、角色表与"谁能用哪些工具"：[docs/tools/tools-and-roles.md](docs/tools/tools-and-roles.md)
@@ -194,7 +195,7 @@
 
 | 类型 | 判据 | 归属与形态 |
 | --- | --- | --- |
-| **编配型业务** | 按 §九.1 路径 B / C 成立：有自有协议 + 用户可见后果 + 领域词 API，且写得出不可归属证明 | 独立业务；**可持状态**；向下调参与方 `api`，**参与方不得反向调它**；**必须薄**：只做毫秒级状态变换与派发，长步骤（起停 guest、生成、压缩、物化文件）在调用方线程或工作线程（`src/capabilities/conductor/service/work/create.rs` 的两段式 `prepare_work` / `commit_work` 是范例） |
+| **编配型业务** | 按 §九.1 路径 B / C 成立：有自有协议 + 用户可见后果 + 领域词 API，且写得出不可归属证明 | 独立业务；**可持状态**；向下调参与方 `api`，**参与方不得反向调它**；**必须薄**：只做毫秒级状态变换与派发，长步骤（起停 guest、生成、压缩、物化文件）在调用方线程或工作线程（`src/capabilities/work/service/create.rs` 的两段式 `prepare_work` / `commit_work` 是范例） |
 | **领域型业务** | 说的是自己的数据 / 概念，规则与状态自成一体 | 独立业务；**只持自己的状态**；有 IO 或可替换点才有 `ports.rs` / `service.rs`（`taskchain` 就是没有端口、没有 `service` 的领域型） |
 | **地基库（`kernel`，非层）** | 没有领域语义 | `kernel/`：托管跨层共享的形状与机制；**领域词测试**——它不需要知道什么是回合 / 回复 / 工具执行；**不解释形状的业务语义、不构造业务决策与文案**；有机制状态与机制端口，只被依赖 |
 

@@ -32,7 +32,7 @@ impl ConductorHandle {
     /// 约束：与成员循环读同一把尺子（`packages::api::plan_host` 的 `unusable`，宿主目标）——本机档按宿主目标选包，
     ///   不因"没装包"拒绝本机解释器就能跑的工具；缺包 = 不执行，不静默降级。
     pub(super) fn unavailable_modules(&self) -> BTreeMap<String, Vec<String>> {
-        self.call(|core| Ok(core.unavailable_modules_now()))
+        self.call(|core| Ok(core.work.unavailable_modules_now(&core.turn)))
             .unwrap_or_default()
     }
 
@@ -59,7 +59,7 @@ impl ConductorHandle {
         ),
         String,
     > {
-        let roster = self.call(|core| Ok(core.scan()))?;
+        let roster = self.call(|core| Ok(core.work.scan()))?;
         crate::capabilities::modules::api::module_tool(&roster, id)
     }
 
@@ -69,7 +69,7 @@ impl ConductorHandle {
         &self,
         id: &str,
     ) -> Result<Option<(String, String, String)>, String> {
-        let roster = self.call(|core| Ok(core.scan()))?;
+        let roster = self.call(|core| Ok(core.work.scan()))?;
         Ok(crate::capabilities::modules::api::service_op(&roster, id))
     }
 

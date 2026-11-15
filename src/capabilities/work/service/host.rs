@@ -1,45 +1,48 @@
 //! 目的：宿主侧外部工具的取法——QEMU / virtiofsd / smbd 的路径与共享档工具选择。
 //! 管：登记值优先、装好的兜底、按平台选共享工具。
-//! 不管：guest 怎么起（`create.rs` / vm 能力）、依赖怎么装（provision）、
-//!   网络开关与主机只读根（归 turn 的会话本体，见 `turn/service/plan.rs`）。
+//! 不管：guest 怎么起（`create.rs` / vm 能力）、依赖怎么装（provision）。
 //! 联动：建工作与 guest 启动装配命令行时读这里。
-//!   本方法族只碰 registry / root / provision 这三个字段。
 
 use super::*;
 
-impl Conductor {
+impl Work {
     /// 目的：本机实际要用的 QEMU 可执行文件：设置里登记了就用它，没登记就采用依赖补齐装进项目内的那一个。
     /// 约束：**每次判据取用时现算**（不是启动时定一次）——补齐作业装完即生效，不需要重启进程；
     ///   显式登记永远优先，这里不改用户的 `settings.yaml`。
-    pub(crate) fn qemu_path(&self) -> Option<String> {
-        self.registered_or_installed("qemu_path", "vm.qemu.")
+    pub(crate) fn qemu_path(&self, registry: &dyn Registry) -> Option<String> {
+        self.registered_or_installed(registry, "qemu_path", "vm.qemu.")
     }
 
     /// 目的：同 `qemu_path`，virtiofs 守护进程。
-    pub(crate) fn virtiofsd_path(&self) -> Option<String> {
-        self.registered_or_installed("virtiofsd_path", "vm.virtiofsd.")
+    pub(crate) fn virtiofsd_path(&self, registry: &dyn Registry) -> Option<String> {
+        self.registered_or_installed(registry, "virtiofsd_path", "vm.virtiofsd.")
     }
 
     /// 目的：同 `qemu_path`，SMB helper。
-    pub(crate) fn smbd_path(&self) -> Option<String> {
-        self.registered_or_installed("smbd_path", "vm.smbd.")
+    pub(crate) fn smbd_path(&self, registry: &dyn Registry) -> Option<String> {
+        self.registered_or_installed(registry, "smbd_path", "vm.smbd.")
     }
 
     /// 目的：本平台共享档要用的外部工具路径（Windows = smbd；其余 = virtiofsd）；都不在场给 None。
     /// 约束：组合选择与就绪检测共用这一份，避免"说要验 A、实际跑 B"。
-    pub(crate) fn share_tool_path(&self) -> Option<String> {
+    pub(crate) fn share_tool_path(&self, registry: &dyn Registry) -> Option<String> {
         if crate::kernel::api::IS_WINDOWS {
-            self.smbd_path()
+            self.smbd_path(registry)
         } else {
-            self.virtiofsd_path()
+            self.virtiofsd_path(registry)
         }
     }
 
     /// 目的：一个外部工具路径的**唯一**取法：设置里登记优先，空了就用补齐面报的"已装在项目内"的那个。
     /// 参数：which = 设置字段名（只用于说明）；prefix = 清单 id 前缀（`vm.qemu.` 这类，按平台后缀区分）。
     /// 约束：每次现算——补完立刻能被判据看见，也就没有"装完还得重启"这一步。
-    fn registered_or_installed(&self, which: &str, prefix: &str) -> Option<String> {
-        let app = self.registry.app();
+    fn registered_or_installed(
+        &self,
+        registry: &dyn Registry,
+        which: &str,
+        prefix: &str,
+    ) -> Option<String> {
+        let app = registry.app();
         let registered = match which {
             "virtiofsd_path" => app.virtiofsd_path.trim(),
             "smbd_path" => app.smbd_path.trim(),

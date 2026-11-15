@@ -1,5 +1,5 @@
 //! 目的：历史与落盘——历史列出 / 打开 / 删除、事件收编（record_events）与增量落盘手柄。
-//! 管：什么时候写、写什么（落盘机制在 session 的 HistoryStore 端口后面）。
+//! 管：什么时候写（落盘策略与警告形状在 `session` 的 `record_events`，写盘机制在它的 `HistoryStore` 端口后面）。
 //! 不管：会话对象怎么建（flow.rs 与 work/create.rs）、视图怎么渲染（work/views.rs）。
 //! 联动：会话树与运行态判据在会话本体（turn 能力）里，这里只按需取用。
 //!   本方法族只碰 history / log / turn / vm 这四个字段。
@@ -86,7 +86,7 @@ impl Conductor {
         }
         let vm = Arc::clone(&self.vm);
         let stop: Option<Box<dyn FnOnce() + Send>> = Some(Box::new(move || {
-            super::guest_job::GuestStop::new(vm, guest_leases).run()
+            crate::capabilities::work::api::GuestStop::new(vm, guest_leases).run()
         }));
         for sid in &subtree {
             self.turn.take_session(sid);
@@ -126,57 +126,23 @@ impl Conductor {
         Ok(tree)
     }
 
-    /// 目的：解除整棵子树的「已停止」（停止的逆操作）；返回是否确实解除了至少一个。
-    ///  子树里只要有**已关闭**的就整条拒绝——关闭是终态，不能被「继续」拉回来。
-    pub(crate) fn resume_subtree(&self, name: &str) -> Result<bool, String> {
-        use crate::capabilities::session::api::RunState;
-        let mut any = false;
-        for sid in self.turn.subtree_of(name) {
-            let mut meta = self.history.meta(&sid)?;
-            match meta.run {
-                RunState::Closed => {
-                    return Err(format!("会话 {} 已关闭：终态，不能再继续", sid));
-                }
-                RunState::Stopped => {
-                    meta.run = RunState::Active;
-                    self.history.save_meta(&meta)?;
-                    any = true;
-                }
-                RunState::Active => {}
-            }
-        }
-        Ok(any)
-    }
-
     /// 目的：事件落盘；失败如实告知（追加一条警告事件），不静默丢历史。
+    /// 约束：留档策略与警告形状归 `session`（`record_events` 只有一处实现），这里只交端口。
     pub(crate) fn record_events(&self, sid: &str, events: &mut Vec<SessionEvent>) {
-        if events.is_empty() {
-            return;
-        }
-        if let Some(warn) = persist_events(self.history.as_ref(), self.log.as_ref(), sid, events) {
-            events.push(SessionEvent::Notice(warn));
-        }
-    }
-
-    /// 目的：把一条内容类系统提示记成**转录行**（有 id、可回档/折叠）；返回要外送的事件。
-    /// 约束：只在会话对象在核心表里时分配行 id；生成中的会话被取走、没有计数器可分配，
-    ///   这时如实退回瞬时提示（界面照样看得见，只是不可回档）。
-    pub(crate) fn notice_row(&mut self, sid: &str, text: &str) -> Vec<SessionEvent> {
-        let mut out = Vec::new();
-        match self.turn.session_mut(sid) {
-            Some(Session::Single(s)) => out.extend(s.note_notice(text)),
-            Some(Session::Collab(c)) => c.notice(text, &mut |e| out.push(e)),
-            None => out.push(SessionEvent::Notice(text.to_string())),
-        }
-        out
+        crate::capabilities::session::api::record_events(
+            self.history.as_ref(),
+            self.log.as_ref(),
+            sid,
+            events,
+        );
     }
 
     /// 目的：增量落盘手柄：交给工作线程，按"一次模型调用"的粒度落盘（见 `Persister`）。
-    pub(crate) fn persister(&self, sid: &str) -> Persister {
-        Persister {
-            history: Arc::clone(&self.history),
-            log: Arc::clone(&self.log),
-            sid: sid.to_string(),
-        }
+    pub(crate) fn persister(&self, sid: &str) -> crate::capabilities::session::api::Persister {
+        crate::capabilities::session::api::Persister::new(
+            Arc::clone(&self.history),
+            Arc::clone(&self.log),
+            sid,
+        )
     }
 }

@@ -227,11 +227,9 @@ pub(crate) fn runtime_report_is_tier_aware() {
     assert!(
         matches!(
             host.diagnoses.as_slice(),
-            [
-                crate::capabilities::conductor::api::RuntimeDiagnosis::Package(
-                    crate::capabilities::packages::api::Problem::Missing { .. }
-                )
-            ]
+            [crate::capabilities::work::api::RuntimeDiagnosis::Package(
+                crate::capabilities::packages::api::Problem::Missing { .. }
+            )]
         ),
         "本机档缺能力也要如实诊断：{:?}",
         host.diagnoses
