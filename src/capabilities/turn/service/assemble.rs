@@ -1,7 +1,9 @@
-//! 目的：一席会话的装配构件——把各能力的能力面与已取事实装成成员工具面与单 agent 会话对象。
+//! 目的：一席会话的装配构件——把各能力的能力面与已取事实装成成员工具面与单 agent 会话对象，
+//!   并把历史会话按落盘重建为活动会话（`ensure_session`）。
 //! 管：`SessionDeps`（装配要的十个能力面）、`MemberSpec` / `SingleSpec`（这一席 / 这一场的事实）、
-//!   `member_tools`（工具面 + 围栏 + 处理器）、`single_session`（单 agent 会话对象）。
-//! 不管：取事实（沙箱 / 权限面 / 缺包 / guest 租约在调用方 `conductor`）、落盘、生成驱动。
+//!   `member_tools`（工具面 + 围栏 + 处理器）、`single_session`（单 agent 会话对象）、
+//!   `ensure_session`（在世表里没有就按落盘重建一份）。
+//! 不管：事实从哪来（`facts.rs` / `plan.rs` / `tree.rs` 现取）、落盘、生成驱动。
 //! 联动：`conductor` 经 `turn::api` 取用；纯规则在 `turn::domain::assemble`；围栏派生在 `env` 能力。
 
 use std::collections::BTreeMap;
@@ -12,6 +14,7 @@ use crate::capabilities::llm::api::{Channel, Llm, ToolMode};
 use crate::capabilities::modules::api::Module;
 use crate::capabilities::packages::api::PackagePlan;
 use crate::capabilities::prompt::api::{Prompt, Segment};
+use crate::capabilities::registry::api::Registry;
 use crate::capabilities::residents::api::ResidentOps;
 use crate::capabilities::secrets::api::SecretOps;
 use crate::capabilities::session::api::{
@@ -22,7 +25,7 @@ use crate::capabilities::turn::domain::assemble::{face_tools, service_ops_of, se
 use crate::capabilities::vm::api::{GuestOs, Vm};
 use crate::capabilities::workspace::api::{Sandbox, Workspace};
 use crate::kernel::api::Tier;
-use crate::kernel::ports::{Log, ToolHandler};
+use crate::kernel::ports::{HostProbe, Log, ToolHandler};
 
 /// 目的：装配要的十个能力面——组合根注入一次，装配期只按面取用（不碰端口）。
 pub struct SessionDeps {
@@ -41,6 +44,13 @@ pub struct SessionDeps {
 
 /// 目的：核心自有工具的处理器集合（`MemberSpec.handlers` 的返回形状）。
 pub type ToolHandlers = Vec<Arc<dyn ToolHandler>>;
+
+/// 目的：核心自有工具的注入源——按「本回合放行的工具 id」现算处理器，实现留在 `conductor`。
+/// 参数：工作区面、该 agent 的沙箱、本回合放行的工具 id。
+/// 返回：这些名字里由核心认领的处理器。
+/// 约束：注入方不得在闭包里回引 `turn` 的状态；本单元只调一次、不缓存。
+pub type HandlerSource<'a> =
+    dyn Fn(&Arc<dyn Workspace + Send + Sync>, &Sandbox, &[String]) -> ToolHandlers + 'a;
 
 /// 目的：一席工具面要用的事实——模块、沙箱、缺包、网络、形态、角色、档位、租约与装配落点。
 /// 约束：`handlers` 由调用方给（核心自有工具留在 `conductor`）：装配只问"谁认领这些名字"。
@@ -222,4 +232,30 @@ pub fn single_session(
     s.set_model(a.model.clone().or_else(|| spec.core_model.clone()));
     s.set_compact_factory(Arc::clone(&deps.compact));
     (s, Vec::new())
+}
+
+impl crate::capabilities::turn::service::session::Turn {
+    /// 目的：历史会话转为活动会话（跨重启续跑 / 回档的前提）：按转录重建，状态全部派生。
+    /// 参数：`sid` = 会话 id；`registry` = 登记处；`probe` = 宿主能力探测；`handlers` = 核心自有工具处理器注入。
+    /// 错误：会话不在盘上、重建失败时原样报错（文案由重建路径给出）。
+    /// 约束：会话对象正被工作线程拿着时**不能**从盘上再建一份（会变成两个实例）——如实报"正在生成中"。
+    pub(crate) fn ensure_session(
+        &mut self,
+        sid: &str,
+        registry: &dyn Registry,
+        probe: &dyn HostProbe,
+        handlers: &HandlerSource<'_>,
+    ) -> Result<(), String> {
+        if self.holds(sid) {
+            return Ok(());
+        }
+        // 会话对象在工作线程上（生成中）：**不能**从盘上再建一份（会变成两个实例）。
+        if self.is_running(sid) {
+            return Err(crate::capabilities::turn::service::session::Turn::running_refusal(sid));
+        }
+        let (meta, events) = crate::capabilities::lifecycle::api::open(&*self.history, sid)?;
+        let rebuilt = self.rebuild_session(&meta, &events, registry, probe, handlers)?;
+        self.put(sid, rebuilt);
+        Ok(())
+    }
 }

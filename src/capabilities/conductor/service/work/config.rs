@@ -6,6 +6,8 @@
 
 use super::*;
 
+use crate::capabilities::turn::api::session_started;
+
 impl Conductor {
     /// 目的：配置视图：把「能改什么、现在是什么、缺什么」如实给出（每次读取都重扫模块清单与包库）。
     pub fn session_config(&self, sid: &str) -> Result<SessionConfig, String> {
@@ -50,10 +52,11 @@ impl Conductor {
             tier_locked: meta.parent.is_some(),
             guest: meta.exec.guest.clone(),
             guests: self.guest_bases()?,
-            net: self.network_allowed(),
+            net: self.turn.network_allowed(self.registry()),
             permission: self.permission_view(&meta)?,
-            thinking: self
-                .thinking_view_for_root(&self.work_root(sid).unwrap_or_else(|_| sid.to_string())),
+            thinking: self.thinking_view_for_root(
+                &self.turn.work_root(sid).unwrap_or_else(|_| sid.to_string()),
+            ),
             pins: meta.exec.pins.clone(),
             runtime: self.runtime_report_for(&meta.exec),
             runtimes_dir: crate::kernel::api::slash(&self.packages.runtimes_dir()),
@@ -89,13 +92,13 @@ impl Conductor {
         // 改配要重建整棵子树的档位/guest 关联：任一在跑都拒绝（先停再改）。
         // 权限是根级动作：切档要求整棵 work tree 空闲，避免子会话用旧快照继续跑。
         let guard = if edit.permission.is_some() {
-            self.work_root(sid).unwrap_or_else(|_| sid.to_string())
+            self.turn.work_root(sid).unwrap_or_else(|_| sid.to_string())
         } else {
             sid.to_string()
         };
-        for s in self.subtree_of(&guard) {
+        for s in self.turn.subtree_of(&guard) {
             if self.turn.is_running(&s) {
-                return Err(Self::running_refusal(&s));
+                return Err(crate::capabilities::turn::api::Turn::running_refusal(&s));
             }
         }
         let (meta, events) = self.history_open(sid)?;
@@ -112,10 +115,10 @@ impl Conductor {
         }
         // 共享 guest 的子会话也可以编辑：写回该 agent 的唯一配置，保存后重新加入同一台 guest。
         // 旧 guest / 旧树的装配在下面与编辑后的树比对，只有装配真的变了才重建。
-        let owner = self.config_owner_of(&meta)?;
-        let old_scope = self.guest_scope(&meta)?;
+        let owner = self.turn.config_owner_of(&meta)?;
+        let old_scope = self.turn.guest_scope(&meta)?;
         let old_tree = match &old_scope {
-            Some((_, root)) => Some(self.tree_meta(root, None)?),
+            Some((_, root)) => Some(self.turn.tree_meta(root, None)?),
             None => None,
         };
         if session_started(&events) {
@@ -224,7 +227,7 @@ impl Conductor {
         ) {
             return Err(why);
         }
-        let module_ids = flat_modules(&metas);
+        let module_ids = crate::capabilities::turn::api::flat_modules(&metas);
         let session_modules: Vec<Module> = roster
             .modules
             .iter()
@@ -233,7 +236,10 @@ impl Conductor {
             .collect();
         // 入口按**目标环境**判：虚拟机档在 guest 里跑（guest 的 os），本机档在宿主；
         // 跨平台时还要看文件形式——宿主编出来的产物（如 Windows 的 .exe）在 linux guest 里跑不了。
-        let guest = self.guest_os_of(&spec).map(|g| g.as_str());
+        let guest = self
+            .turn
+            .guest_os_of(&spec, self.probe())
+            .map(|g| g.as_str());
         let target_os = guest.unwrap_or(std::env::consts::OS);
         let missing: Vec<crate::capabilities::vm::api::MissingEntry> =
             crate::capabilities::vm::api::missing_entries_for(&session_modules, target_os, &|p| {
@@ -241,16 +247,25 @@ impl Conductor {
                     && (target_os == std::env::consts::OS
                         || crate::capabilities::vm::api::runs_on_target(p, target_os))
             });
-        self.plan_for_spec(&spec, &session_modules, &missing, spec.guest.as_deref())?;
+        self.turn.plan_for_spec(
+            &spec,
+            &session_modules,
+            &missing,
+            spec.guest.as_deref(),
+            self.probe(),
+            self.registry(),
+        )?;
 
         let mut new_meta = meta.clone();
-        new_meta.modules = flat_modules(&metas);
+        new_meta.modules = crate::capabilities::turn::api::flat_modules(&metas);
         new_meta.agents = metas.clone();
         new_meta.exec = spec.clone();
         if let Some(p) = &edit.permission {
             if meta.parent.is_none() {
                 // 根：只更新 ceiling；子会话的 narrowing 原样保留，出计划/装配时再求交。
-                self.permissions_for(&meta)?.apply_root(p)?;
+                self.turn
+                    .permissions_for(&meta, self.registry())?
+                    .apply_root(p)?;
                 new_meta.sandbox.ceiling = Some(p.clone());
                 new_meta.sandbox.narrowing = None;
             } else {
@@ -258,7 +273,9 @@ impl Conductor {
                 let parent = self
                     .history
                     .meta(meta.parent.as_deref().unwrap_or_default())?;
-                self.permissions_for(&parent)?.apply_narrowing(p)?;
+                self.turn
+                    .permissions_for(&parent, self.registry())?
+                    .apply_narrowing(p)?;
                 new_meta.sandbox.narrowing = Some(p.clone());
                 new_meta.sandbox.ceiling = None;
             }
@@ -272,10 +289,10 @@ impl Conductor {
                     *slot = a.clone();
                 }
             }
-            new_owner.modules = flat_modules(&new_owner.agents);
+            new_owner.modules = crate::capabilities::turn::api::flat_modules(&new_owner.agents);
             new_children.push(new_owner);
         } else {
-            for child in self.subtree_of(sid) {
+            for child in self.turn.subtree_of(sid) {
                 if child == sid {
                     continue;
                 }
@@ -286,7 +303,7 @@ impl Conductor {
                         *ca = na.clone();
                     }
                 }
-                cm.modules = flat_modules(&cm.agents);
+                cm.modules = crate::capabilities::turn::api::flat_modules(&cm.agents);
                 new_children.push(cm);
             }
         }
@@ -295,12 +312,15 @@ impl Conductor {
         // 共享 guest 的装配按整棵树算：把这次的新值覆盖到作用域根的子树上，再出计划与沙箱。
         let (lease, tree, tree_plan) = if is_vm {
             let (lease, scope_meta) = self
+                .turn
                 .guest_scope(&new_meta)?
                 .ok_or_else(|| "虚拟机档会话没有解析出 guest 作用域".to_string())?;
             let mut extras: Vec<&SessionMeta> = vec![&new_meta];
             extras.extend(new_children.iter());
-            let tree = self.tree_meta_with(&scope_meta, &extras)?;
-            let plan = self.plan_for_meta_with(&tree, &roster)?;
+            let tree = self.turn.tree_meta_with(&scope_meta, &extras)?;
+            let plan =
+                self.turn
+                    .plan_for_meta_with(&tree, &roster, self.probe(), self.registry())?;
             self.log.info(
                 "conductor::edit_session",
                 &format!(
@@ -322,7 +342,9 @@ impl Conductor {
         let job = if needs_guest {
             let tree = tree.as_ref().expect("is_vm 已准备 tree");
             let tree_plan = tree_plan.as_ref().expect("is_vm 已准备 plan");
-            let sandboxes = self.sandboxes(tree, &roster)?;
+            let sandboxes = self
+                .turn
+                .sandboxes(tree, &roster, self.registry(), self.probe())?;
             Some(EditGuest::Boot(Box::new(self.guest_boot(
                 tree,
                 tree_plan,
@@ -357,10 +379,10 @@ impl Conductor {
         profile: crate::capabilities::permission::api::ProfileId,
     ) -> Result<(), String> {
         let (meta, _) = self.history_open(sid)?;
-        let guard = self.work_root(sid).unwrap_or_else(|_| sid.to_string());
-        for s in self.subtree_of(&guard) {
+        let guard = self.turn.work_root(sid).unwrap_or_else(|_| sid.to_string());
+        for s in self.turn.subtree_of(&guard) {
             if self.turn.is_running(&s) {
-                return Err(Self::running_refusal(&s));
+                return Err(crate::capabilities::turn::api::Turn::running_refusal(&s));
             }
         }
         let mut layer = if meta.parent.is_none() {
@@ -374,12 +396,16 @@ impl Conductor {
         layer.decisions = None;
         layer.tools.clear();
         if meta.parent.is_none() {
-            self.permissions_for(&meta)?.apply_root(&layer)?;
+            self.turn
+                .permissions_for(&meta, self.registry())?
+                .apply_root(&layer)?;
         } else {
             let parent = self
                 .history
                 .meta(meta.parent.as_deref().unwrap_or_default())?;
-            self.permissions_for(&parent)?.apply_narrowing(&layer)?;
+            self.turn
+                .permissions_for(&parent, self.registry())?
+                .apply_narrowing(&layer)?;
         }
         let mut new_meta = meta.clone();
         if meta.parent.is_none() {
@@ -389,14 +415,14 @@ impl Conductor {
             new_meta.sandbox.narrowing = Some(layer);
             new_meta.sandbox.ceiling = None;
         }
-        let changed = self.subtree_of(sid);
+        let changed = self.turn.subtree_of(sid);
         self.history.save_meta(&new_meta)?;
         self.record_config(sid, &new_meta);
         for s in &changed {
             self.release_fences(s);
         }
         for s in changed {
-            self.turn.take(&s);
+            self.turn.take_session(&s);
         }
         Ok(())
     }
@@ -420,9 +446,9 @@ impl Conductor {
         }
         self.record_config(&sid, &new_meta);
         // 内存里那份是按旧配置装的：丢掉主会话与整棵子树，下一次访问按新配置从转录重建。
-        self.turn.take(&sid);
+        self.turn.take_session(&sid);
         for child in &new_children {
-            self.turn.take(&child.name);
+            self.turn.take_session(&child.name);
         }
         Ok(())
     }
@@ -446,12 +472,12 @@ impl Conductor {
             "mode": meta.mode,
             "tier": meta.exec.tier.as_str(),
             "guest": meta.exec.guest,
-            "net": self.network_allowed(),
+            "net": self.turn.network_allowed(self.registry()),
             "pins": meta.exec.pins,
             "thinking": meta.thinking,
             "context_freshness": meta.context_freshness,
             "permission": serde_json::to_value(&meta.sandbox).unwrap_or(serde_json::Value::Null),
-            "permission_effective": self.permissions_for(meta).ok().map(|p| serde_json::json!({
+            "permission_effective": self.turn.permissions_for(meta, self.registry()).ok().map(|p| serde_json::json!({
                 "profile": p.profile,
                 "reach": p.reach,
                 "decisions": p.decisions,

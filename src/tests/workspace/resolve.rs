@@ -684,7 +684,10 @@ pub(crate) fn agent_sandboxes_from_a_work_are_read_only_for_the_shared_area() {
         .sid;
     let meta = core.history_open(&sid).unwrap().0;
     let roster = core.scan();
-    let sandboxes = core.sandboxes(&meta, &roster).unwrap();
+    let sandboxes = core
+        .turn
+        .sandboxes(&meta, &roster, core.registry(), core.probe())
+        .unwrap();
     let sb = sandboxes.list.first().expect("至少一个 agent 沙箱");
     let (place, path) = sb.resolve(&p(&["w", "work", "x.txt"])).unwrap();
     assert!(

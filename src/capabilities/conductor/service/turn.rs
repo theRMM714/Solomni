@@ -59,7 +59,10 @@ impl Conductor {
         want_stream: bool,
     ) -> Result<Prepared, String> {
         // 还没装进内存的会话先从落盘重建（"继续"可能先于"打开"到达；真没这个会话仍然报无此会话）。
-        self.ensure_session(sid)?;
+        let (turn, registry, probe) = self.turn_parts();
+        turn.ensure_session(sid, registry, probe, &|w, sb, allowed| {
+            work_tools::handlers(w, sb, allowed)
+        })?;
         if matches!(self.turn.session(sid), Some(Session::Collab(_))) {
             return Ok(Prepared::NotSingle);
         }
@@ -82,8 +85,9 @@ impl Conductor {
             Some(Session::Single(s)) => s.params().identity(&*self.prompt, s.tool_mode()),
             _ => return Ok(Prepared::NotSingle),
         };
-        let mut session = self.take_single(sid)?;
-        self.refresh_context_budget(&mut session);
+        let mut session = self.turn.take_single(sid)?;
+        self.turn
+            .refresh_context_budget(&mut session, self.registry());
         session.set_thinking(llm.thinking.clone());
         let persister = self.persister(sid);
         Ok(Prepared::Run {
@@ -106,7 +110,10 @@ impl Conductor {
         child: &str,
         objective: &str,
     ) -> Result<Prepared, String> {
-        self.ensure_session(child)?;
+        let (turn, registry, probe) = self.turn_parts();
+        turn.ensure_session(child, registry, probe, &|w, sb, allowed| {
+            work_tools::handlers(w, sb, allowed)
+        })?;
         if matches!(self.turn.session(child), Some(Session::Collab(_))) {
             return Ok(Prepared::NotSingle);
         }
@@ -116,8 +123,9 @@ impl Conductor {
         if let Some(n) = self.refresh_tool_mode(child)? {
             prefix.push(SessionEvent::Notice(n));
         }
-        let mut session = self.take_single(child)?;
-        self.refresh_context_budget(&mut session);
+        let mut session = self.turn.take_single(child)?;
+        self.turn
+            .refresh_context_budget(&mut session, self.registry());
         session.set_thinking(llm.thinking.clone());
         let identity = session
             .params()
@@ -167,7 +175,9 @@ impl Conductor {
                 if live.cancelled() {
                     self.log.warn("conductor::single_say", "生成被用户中止");
                 }
-                self.put_single_recorded(sid, session, &events);
+                self.turn.put_single_recorded(sid, session);
+                let mut recorded = events.clone();
+                self.record_events(sid, &mut recorded);
                 Ok(events)
             }
         }
@@ -184,7 +194,10 @@ impl Conductor {
         sid: &str,
         live: &mut Live,
     ) -> Result<Vec<SessionEvent>, String> {
-        self.ensure_session(sid)?;
+        let (turn, registry, probe) = self.turn_parts();
+        turn.ensure_session(sid, registry, probe, &|w, sb, allowed| {
+            work_tools::handlers(w, sb, allowed)
+        })?;
         let mut events = {
             let s = self.turn.session_mut(sid).ok_or("无此活动会话")?;
             match s {

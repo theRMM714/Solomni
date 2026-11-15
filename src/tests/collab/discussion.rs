@@ -304,14 +304,14 @@ pub(crate) fn discussion_member_turn_finalizes_by_round_and_rebuilds_the_same_di
             .map(|m| format!("{}:{}", m.role, m.content))
             .collect::<Vec<_>>()
     };
-    let live = core.take_single(&child).expect("会话在表里");
+    let live = core.turn.take_single(&child).expect("会话在表里");
     let live_msgs = shown(&live);
     // 丢掉会话本体 + 撤下"生成中"：这一步之后的取用只能**按落盘转录重建**（崩溃/重启同一条路）。
     drop(live);
-    core.abort_running(&child);
+    core.turn.abort_running(&child);
     core.prepare_single(&child, None, false)
         .expect("按落盘转录重建（ensure_session 这条路）");
-    let rebuilt = core.take_single(&child).expect("取回重建出来的会话");
+    let rebuilt = core.turn.take_single(&child).expect("取回重建出来的会话");
     assert_eq!(
         shown(&rebuilt),
         live_msgs,

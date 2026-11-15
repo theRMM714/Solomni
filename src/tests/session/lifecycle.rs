@@ -71,7 +71,13 @@ pub(crate) fn history_delete_cascades_to_children_and_refuses_child_delete() {
         .create_work(collab_work("p", &["a"], false, "需求"))
         .unwrap()
         .sid;
-    let child = core.spawn_agent_session(&parent, "a").unwrap();
+    let child = {
+        let (turn, registry, probe) = core.turn_parts();
+        turn.spawn_agent_session(&parent, "a", registry, probe, &|w, sb, allowed| {
+            crate::capabilities::conductor::service::work_tools::handlers(w, sb, allowed)
+        })
+    }
+    .unwrap();
     // 子会话不允许单独删，理由要明确，且拒绝后它仍在。
     let err = core.history_delete(&child).unwrap_err();
     assert!(err.contains("子会话"), "{}", err);
@@ -429,11 +435,23 @@ pub(crate) fn work_root_walks_to_the_top_across_nested_sub_sessions() {
         .create_work(collab_work("p", &["a"], false, "需求"))
         .unwrap()
         .sid;
-    let mid = core.spawn_agent_session(&top, "a").unwrap();
-    let low = core.spawn_agent_session(&mid, "a").unwrap();
-    assert_eq!(core.work_root(&top).unwrap(), top);
-    assert_eq!(core.work_root(&mid).unwrap(), top, "第二层锚在顶");
-    assert_eq!(core.work_root(&low).unwrap(), top, "第三层也锚在顶");
+    let mid = {
+        let (turn, registry, probe) = core.turn_parts();
+        turn.spawn_agent_session(&top, "a", registry, probe, &|w, sb, allowed| {
+            crate::capabilities::conductor::service::work_tools::handlers(w, sb, allowed)
+        })
+    }
+    .unwrap();
+    let low = {
+        let (turn, registry, probe) = core.turn_parts();
+        turn.spawn_agent_session(&mid, "a", registry, probe, &|w, sb, allowed| {
+            crate::capabilities::conductor::service::work_tools::handlers(w, sb, allowed)
+        })
+    }
+    .unwrap();
+    assert_eq!(core.turn.work_root(&top).unwrap(), top);
+    assert_eq!(core.turn.work_root(&mid).unwrap(), top, "第二层锚在顶");
+    assert_eq!(core.turn.work_root(&low).unwrap(), top, "第三层也锚在顶");
 }
 
 /// 目的：身份块里的机制说明按（**会话使用类型** × **角色**）取：对得上的拿，对不上的不拿。
@@ -485,8 +503,15 @@ pub(crate) fn history_delete_refuses_when_any_node_in_the_subtree_is_running() {
         .create_work(collab_work("p", &["a"], false, "需求"))
         .unwrap()
         .sid;
-    let child = core.spawn_agent_session(&parent, "a").unwrap();
-    core.take_single(&child)
+    let child = {
+        let (turn, registry, probe) = core.turn_parts();
+        turn.spawn_agent_session(&parent, "a", registry, probe, &|w, sb, allowed| {
+            crate::capabilities::conductor::service::work_tools::handlers(w, sb, allowed)
+        })
+    }
+    .unwrap();
+    core.turn
+        .take_single(&child)
         .expect("把子会话交给工作线程（标记生成中）");
     let err = core.history_delete(&parent).unwrap_err();
     assert!(err.contains("正在生成"), "{}", err);

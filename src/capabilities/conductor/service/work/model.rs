@@ -38,7 +38,7 @@ impl Conductor {
         &self,
         sid: &str,
     ) -> Result<Option<std::sync::Arc<serde_json::Value>>, String> {
-        let root = self.work_root(sid)?;
+        let root = self.turn.work_root(sid)?;
         let level = self.history.meta(&root)?.thinking;
         let model = self
             .history
@@ -61,7 +61,7 @@ impl Conductor {
                 out.push(m);
             }
         };
-        for sid in self.subtree_of(root) {
+        for sid in self.turn.subtree_of(root) {
             let Ok(meta) = self.history.meta(&sid) else {
                 continue;
             };
@@ -156,10 +156,10 @@ impl Conductor {
     /// 约束：整棵 work tree 有会话在生成时拒绝；档位不在目录里、或任一相关模型没登记该档 = 拒绝并列出原因。
     pub(crate) fn set_thinking(&mut self, sid: &str, level: &str) -> Result<(), String> {
         let level = level.trim();
-        let root = self.work_root(sid)?;
-        for s in self.subtree_of(&root) {
+        let root = self.turn.work_root(sid)?;
+        for s in self.turn.subtree_of(&root) {
             if self.turn.is_running(&s) {
-                return Err(Self::running_refusal(&s));
+                return Err(crate::capabilities::turn::api::Turn::running_refusal(&s));
             }
         }
         if !level.is_empty() {
@@ -197,8 +197,8 @@ impl Conductor {
         self.history.save_meta(&meta)?;
         self.record_config(&root, &meta);
         // 内存里的会话按旧参数装着：整棵丢掉，下一次访问按新档位从转录重建。
-        for s in self.subtree_of(&root) {
-            self.turn.take(&s);
+        for s in self.turn.subtree_of(&root) {
+            self.turn.take_session(&s);
         }
         Ok(())
     }
@@ -207,10 +207,10 @@ impl Conductor {
     /// 约束：整棵 work tree 有会话在生成时拒绝（发送视图在回合内不换）；切换后丢掉内存里的会话，
     ///   下一次访问按新开关从转录重建（开关是落盘事实，回放与实时必须同一条请求）。
     pub(crate) fn set_context_freshness(&mut self, sid: &str, on: bool) -> Result<(), String> {
-        let root = self.work_root(sid)?;
-        for s in self.subtree_of(&root) {
+        let root = self.turn.work_root(sid)?;
+        for s in self.turn.subtree_of(&root) {
             if self.turn.is_running(&s) {
-                return Err(Self::running_refusal(&s));
+                return Err(crate::capabilities::turn::api::Turn::running_refusal(&s));
             }
         }
         let mut meta = self.history.meta(&root)?;
@@ -220,8 +220,8 @@ impl Conductor {
         meta.context_freshness = on;
         self.history.save_meta(&meta)?;
         self.record_config(&root, &meta);
-        for s in self.subtree_of(&root) {
-            self.turn.take(&s);
+        for s in self.turn.subtree_of(&root) {
+            self.turn.take_session(&s);
         }
         Ok(())
     }

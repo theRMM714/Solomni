@@ -1,22 +1,15 @@
 //! 目的：核心侧代理适配——`Conductor` 的 `proxy_*` 用例，以及把端口调用丢回核心线程的队列桥 `ProxyBridge`。
 //! 管：代理会话的清单 / 建会话 / 转达 / 观察 / 生命周期 / 消息倒查六个用例，与 `ProxyHost` 的生产实现。
-//! 不管：代理工具的声明解析、授权与执行（在 `proxy` 能力）；会话机制本身（在 `session` 与 `work`）。
+//! 不管：代理工具的声明解析、授权与执行（在 `proxy` 能力）；代理会话对象怎么装配（归 `turn` 的会话本体，
+//!   见 `turn/service/proxy.rs`）；会话机制本身（在 `session` 与 `work`）。
 //! 联动：工具执行面在 `proxy` 能力（`proxy::api`）；端口契约归 `proxy::ports`，装配在组合根。
 
-use crate::capabilities::llm::api::Channel;
 use crate::capabilities::proxy::api as d;
 use crate::capabilities::proxy::api::ProxyHost;
-use std::collections::BTreeMap;
-
-/// 目的：代理会话自己的私有沙箱目录名（与 work/、children/ 同级，写进保留名表）。
-pub(crate) const PROXY_PRIVATE_DIR: &str = ".proxy";
 
 use super::{Conductor, Session, now_ts, validate_work_name};
 use crate::capabilities::conductor::api::ConductorHandle;
-use crate::capabilities::session::api::{
-    AgentSession, Delegation, RunState, SessionEvent, SessionMeta, SessionParams,
-};
-use crate::capabilities::workspace::api::Sandbox;
+use crate::capabilities::session::api::{Delegation, RunState, SessionEvent, SessionMeta};
 use crate::kernel::api::ExecSpec;
 
 fn tool_mode_str(m: crate::capabilities::llm::api::ToolMode) -> String {
@@ -229,9 +222,9 @@ impl Conductor {
             }
             d::ControlAction::Close => {
                 // 「关闭已完成或已停止的会话」：子树里还有在生成的就整条拒绝。
-                for s in self.subtree_of(sid) {
+                for s in self.turn.subtree_of(sid) {
                     if self.turn.is_running(&s) {
-                        return Err(Self::running_refusal(&s));
+                        return Err(crate::capabilities::turn::api::Turn::running_refusal(&s));
                     }
                 }
                 if meta.run != RunState::Closed {
@@ -326,8 +319,10 @@ impl Conductor {
         };
         self.workspace
             .bind(name, workspace.as_ref().map(|w| w.root.as_path()))?;
-        self.workspace
-            .prepare(name, &[PROXY_PRIVATE_DIR.to_string()])?;
+        self.workspace.prepare(
+            name,
+            &[crate::capabilities::turn::api::PROXY_PRIVATE_DIR.to_string()],
+        )?;
         if workspace.is_some()
             && let Err(e) = self.workspace.work_import_root(name, now_ts())
         {
@@ -336,7 +331,12 @@ impl Conductor {
                 &format!("工作区初始导入失败：{}", e),
             );
         }
-        let mut session = self.build_proxy_with(&meta, &channel)?;
+        let mut session = self.turn.build_proxy_with(
+            &meta,
+            &channel,
+            self.registry(),
+            &crate::capabilities::conductor::service::work_tools::handlers,
+        )?;
         let mut events = Vec::new();
         // 授予事实既是 meta 的 `delegation`（可重建），也留一条**可回放记录**：
         // 打开这条会话的人应当看得见"决定权是整块交出去的"，而不是只能去读 meta。
@@ -346,83 +346,6 @@ impl Conductor {
         self.turn.put(name, Session::Single(session));
         self.record_events(name, &mut events);
         Ok((name.to_string(), events))
-    }
-
-    /// 目的：装配一个代理会话对象（创建与重建**共用同一处**，两处不各拼一遍）。
-    pub(crate) fn build_proxy(&self, meta: &SessionMeta) -> Result<AgentSession, String> {
-        let channel = self.registry.core_channel()?;
-        self.build_proxy_with(meta, &channel)
-    }
-
-    fn build_proxy_with(
-        &self,
-        meta: &SessionMeta,
-        channel: &Channel,
-    ) -> Result<AgentSession, String> {
-        self.workspace
-            .prepare(&meta.name, &[PROXY_PRIVATE_DIR.to_string()])?;
-        let roots = self
-            .workspace
-            .roots(&meta.name, &[PROXY_PRIVATE_DIR.to_string()])?;
-        let private = roots
-            .agents
-            .get(PROXY_PRIVATE_DIR)
-            .cloned()
-            .ok_or_else(|| "代理会话没有私有沙箱路径".to_string())?;
-        let shared_grant = self.workspace_grant(meta)?;
-        let sb = Sandbox {
-            work_name: meta.name.clone(),
-            session: meta.name.clone(),
-            agent: d::SPEAKER.to_string(),
-            shared: roots.shared.clone(),
-            private,
-            modules: BTreeMap::new(),
-            modules_with_userdata: std::collections::BTreeSet::new(),
-            permissions: self.permissions_for(meta)?,
-            // 代理发言席自己住在宿主上（文件工具也跑在宿主），不需要 guest 翻译；
-            // 但视图盘打开时仍要同一个视图写法，否则环境块渲染视图路径、寻址却按宿主根判越界。
-            path_codec: crate::kernel::api::view_codec(),
-            shared_grant,
-        };
-        let tool_mode = self.registry.tool_mode(None);
-        let chat = self.llm.core_channel(channel);
-        // 身份是**角色提示词**（core_proxy），不是某个 agent 的模块能力包：
-        // 机制 / 环境 / 调用约定仍与 agent 身份同一份口径（见 workspace 的 render_system）。
-        let mut params = SessionParams::from_workspace(d::SPEAKER, &sb, &[], "proxy", "core_proxy");
-        params.role_system = Some(crate::capabilities::prompt::api::Segment::ProxySystem);
-        let tools = crate::capabilities::turn::api::member_tools(
-            &self.session_deps(),
-            &crate::capabilities::turn::api::MemberSpec {
-                modules: &[],
-                sandbox: &sb,
-                unavailable: BTreeMap::new(),
-                net: self.network_allowed(),
-                mode: tool_mode,
-                role: "core_proxy",
-                tier: crate::kernel::api::Tier::Host,
-                guest_lease: String::new(),
-                plan: &crate::capabilities::packages::api::PackagePlan::default(),
-                base_roots: &self.base_roots,
-                host_read_roots: self.host_read_roots(),
-                shell: self.shell_slot(&sb.session),
-                handlers: &|allowed| self.work_handlers(&sb, allowed),
-            },
-        );
-        let mut s = AgentSession::new(
-            d::SPEAKER,
-            params,
-            chat,
-            Some(tools),
-            self.prompt
-                .text(crate::capabilities::prompt::api::Segment::CompactPrompt)
-                .to_string(),
-        );
-        let (window, percent, keep_percent) = self.context_budget(None);
-        s.set_context_budget(window, percent, keep_percent);
-        s.set_context_freshness(meta.context_freshness);
-        s.set_model(self.registry.core_model());
-        s.set_compact_factory(self.compact_factory());
-        Ok(s)
     }
 }
 
@@ -474,7 +397,7 @@ impl ProxyHost for ProxyBridge {
         // 不给模型一个"发出去了其实没跑"的假回执）。
         let mode = handle.call({
             let t = target.clone();
-            move |core| core.dispatch_target(&t)
+            move |core| core.turn.dispatch_target(&t)
         })?;
         // 先记来源：这条不是用户原话这个事实要进目标会话的可回放记录（正文不伪装成用户发言）。
         handle.record_notice(&target, SessionEvent::Notice(d::relay_note(msg.kind)));

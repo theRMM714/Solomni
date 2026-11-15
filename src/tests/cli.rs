@@ -118,7 +118,7 @@ fn eof_answers_a_pending_card_by_stopping_instead_of_hanging() {
     let door = {
         let s = sid.to_string();
         handle
-            .call(move |core| Ok(core.desk_of(&s)))
+            .call(move |core| Ok(core.turn.desk_of(&s)))
             .expect("取这个会话的裁决队")
     };
     // 造一个"工作线程正等答"的现场：卡片带等待格进队，等待格被那个线程等着。

@@ -160,8 +160,8 @@ pub(crate) fn continue_hint_is_derived_from_the_session_state() {
 /// 约束：同一段转录加一条 notice，重建出的对话条数与角色序列与不加时完全一致。
 #[test]
 pub(crate) fn notice_lines_stay_out_of_the_model_dialogue() {
-    use crate::capabilities::conductor::service::replay_dialogue;
     use crate::capabilities::llm::api::ToolMode;
+    use crate::capabilities::turn::api::replay_dialogue;
     let events = |with_notice: bool| {
         let mut lines =
             vec![serde_json::json!({"id": 0, "kind": "user", "speaker": "用户", "line": "问一"})];
@@ -218,7 +218,13 @@ pub(crate) fn root_edit_keeps_child_narrowing_and_child_cannot_widen() {
         .create_work(collab_work("p", &["a"], false, "需求"))
         .unwrap()
         .sid;
-    let child = core.spawn_agent_session(&parent, "a").unwrap();
+    let child = {
+        let (turn, registry, probe) = core.turn_parts();
+        turn.spawn_agent_session(&parent, "a", registry, probe, &|w, sb, allowed| {
+            crate::capabilities::conductor::service::work_tools::handlers(w, sb, allowed)
+        })
+    }
+    .unwrap();
     let with = |mut e: SessionEdit, p: PermissionLayer| {
         e.permission = Some(p);
         e
@@ -322,7 +328,13 @@ pub(crate) fn quick_profile_switch_updates_root_and_children_cannot_widen() {
         .create_work(collab_work("p", &["a"], false, "需求"))
         .unwrap()
         .sid;
-    let child = core.spawn_agent_session(&parent, "a").unwrap();
+    let child = {
+        let (turn, registry, probe) = core.turn_parts();
+        turn.spawn_agent_session(&parent, "a", registry, probe, &|w, sb, allowed| {
+            crate::capabilities::conductor::service::work_tools::handlers(w, sb, allowed)
+        })
+    }
+    .unwrap();
     core.set_permission_profile(&parent, ProfileId::View)
         .expect("根快速切档");
     let (pm, _) = core.history_open(&parent).unwrap();

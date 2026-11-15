@@ -1,27 +1,12 @@
 //! 目的：会话的启用与激活两段——历史会话按转录重建为活动会话、构建请求、准备与提交激活。
 //! 管：跨重启续跑与回档的前提（状态全部派生）、激活的三步（构建请求 / 准备 / 提交）。
 //! 不管：回合怎么跑（turn.rs / flow.rs）、协作动作（flow.rs）。
-//! 联动：turn / flow 在推进前经 ensure_session 取活动会话。
+//! 联动：turn 能力在推进前用会话本体的 `ensure_session` 取活动会话；本文件只剩激活三段（构建请求 / 准备 / 提交）。
 //!   本方法族只碰 history / turn / registry / vm 这四个字段。
 
 use super::*;
 
 impl Conductor {
-    /// 目的：历史会话转为活动会话（跨重启续跑/回档的前提）：按转录重建，状态全部派生。
-    pub(crate) fn ensure_session(&mut self, sid: &str) -> Result<(), String> {
-        if self.turn.holds(sid) {
-            return Ok(());
-        }
-        // 会话对象在工作线程上（生成中）：**不能**从盘上再建一份（会变成两个实例）。
-        if self.turn.is_running(sid) {
-            return Err(Self::running_refusal(sid));
-        }
-        let (meta, events) = self.history_open(sid)?;
-        let rebuilt = self.rebuild_session(&meta, &events)?;
-        self.turn.put(sid, rebuilt);
-        Ok(())
-    }
-
     /// 目的：启用前补编所需的目标与模块清单（只读事实；构建在调用方线程上跑）。
     pub(crate) fn activation_build_request(
         &self,
@@ -73,7 +58,14 @@ impl Conductor {
                 let super::ReadyActivation { sid, boot, lease } = *ready;
                 // guest 启动已在调用方线程完成；这里只把它的句柄丢掉。
                 drop(boot);
-                if let Err(e) = self.ensure_session(&sid) {
+                let rebuilt = {
+                    // 装配要 `&mut` 会话本体，同时读登记处与宿主探测：拆开借。
+                    let (turn, registry, probe) = self.turn_parts();
+                    turn.ensure_session(&sid, registry, probe, &|w, sb, allowed| {
+                        work_tools::handlers(w, sb, allowed)
+                    })
+                };
+                if let Err(e) = rebuilt {
                     if let Some(l) = &lease
                         && !self.turn.is_running(&sid)
                     {

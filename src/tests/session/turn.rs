@@ -393,7 +393,9 @@ pub(crate) fn node_task_is_a_system_line_but_a_user_message() {
         msgs.iter().map(|m| m.role.clone()).collect::<Vec<_>>()
     );
     // 重建 = 实时：重启后从落盘流水重建，最后这条还得是同一条 user 消息。
-    core.put_single_recorded(&sid, *session, &events);
+    core.turn.put_single_recorded(&sid, *session);
+    let mut recorded = events.clone();
+    core.record_events(&sid, &mut recorded);
     drop(core);
     let mut core2 = core_with_all(
         vec![module_of("a")],

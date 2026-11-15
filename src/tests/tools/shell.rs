@@ -404,7 +404,7 @@ pub(crate) fn conductor_base_roots_are_only_put_on_host_member_tools() {
     let sb = test_sandbox("a", &[]);
     let plan = crate::capabilities::packages::api::PackagePlan::default();
     let host = crate::capabilities::turn::api::member_tools(
-        &core.session_deps(),
+        &core.turn.session_deps(),
         &crate::capabilities::turn::api::MemberSpec {
             modules: &[],
             sandbox: &sb,
@@ -417,7 +417,7 @@ pub(crate) fn conductor_base_roots_are_only_put_on_host_member_tools() {
             plan: &plan,
             base_roots: &base_roots,
             host_read_roots: Vec::new(),
-            shell: core.shell_slot(&sb.session),
+            shell: core.turn.shell_slot(&sb.session),
             handlers: &|_| Vec::new(),
         },
     );
@@ -426,7 +426,7 @@ pub(crate) fn conductor_base_roots_are_only_put_on_host_member_tools() {
         "基础工具链根要进宿主 shell 的只读根"
     );
     let vm = crate::capabilities::turn::api::member_tools(
-        &core.session_deps(),
+        &core.turn.session_deps(),
         &crate::capabilities::turn::api::MemberSpec {
             modules: &[],
             sandbox: &sb,
@@ -439,7 +439,7 @@ pub(crate) fn conductor_base_roots_are_only_put_on_host_member_tools() {
             plan: &plan,
             base_roots: &base_roots,
             host_read_roots: Vec::new(),
-            shell: core.shell_slot(&sb.session),
+            shell: core.turn.shell_slot(&sb.session),
             handlers: &|_| Vec::new(),
         },
     );

@@ -37,6 +37,7 @@ pub use crate::kernel::detail::view_drive_lifecycle::{
     begin as view_drive_begin, codec as view_codec, release as view_drive_release,
     sweep as view_drive_sweep,
 };
+pub use crate::kernel::domain::clock::now_ts;
 pub use crate::kernel::domain::fence::{SandboxMode, SandboxRequirements, call_lease};
 pub use crate::kernel::domain::jobs::JobRegistry;
 pub use crate::kernel::domain::path::{is_unc, native, slash, unc_parts};

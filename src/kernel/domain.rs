@@ -3,6 +3,7 @@
 //! 不管：IO（在 `detail/`）；端口的定义（在 `ports`）；跨层共享的形状（在 `contracts/`）；任何领域语义。
 //! 联动：由 `src/kernel/api.rs` 重导出给各能力。
 
+pub mod clock;
 pub mod fence;
 pub mod jobs;
 pub mod path;

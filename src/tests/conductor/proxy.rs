@@ -579,7 +579,7 @@ pub(crate) fn the_real_bridge_creates_a_child_work() {
     let root = handle
         .call({
             let c = child.clone();
-            move |core| core.work_root(&c)
+            move |core| core.turn.work_root(&c)
         })
         .expect("工作根");
     assert_eq!(root, parent_sid, "子工作与父会话共用同一个 work/");
@@ -677,7 +677,17 @@ pub(crate) fn the_proxy_session_rebuilds_from_disk() {
     let (meta, events) = ops.history.open(&sid).expect("落盘");
     assert_eq!(meta.mode, "proxy");
     let session = handle
-        .call(move |core| core.rebuild_session(&meta, &events))
+        .call(move |core| {
+            core.turn.rebuild_session(
+                &meta,
+                &events,
+                core.registry(),
+                core.probe(),
+                &|w, sb, allowed| {
+                    crate::capabilities::conductor::service::work_tools::handlers(w, sb, allowed)
+                },
+            )
+        })
         .expect("重建代理会话");
     match session {
         crate::capabilities::turn::api::Session::Single(s) => {
@@ -742,7 +752,13 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
     let notified = handle
         .call({
             let c = child.clone();
-            move |core| Ok(core.notify_proxy_of_child(&c))
+            move |core| {
+                let Some((parent, mut evs)) = core.turn.notify_proxy_of_child(&c) else {
+                    return Ok(None);
+                };
+                core.record_events(&parent, &mut evs);
+                Ok(Some(parent))
+            }
         })
         .expect("通知");
     assert_eq!(notified.as_deref(), Some(proxy.as_str()));
@@ -801,7 +817,7 @@ pub(crate) fn run_state_gates_dispatch_and_survives_stop_close() {
     assert!(bridge.send(&sid, &msg).unwrap_err().contains("已停止"));
     let taken = handle.call({
         let s = sid.clone();
-        move |core| core.take_single(&s).map(|_| ())
+        move |core| core.turn.take_single(&s).map(|_| ())
     });
     assert!(
         taken.unwrap_err().contains("已停止"),
@@ -954,7 +970,7 @@ pub(crate) fn the_real_bridge_creates_a_multi_agent_child_work() {
     let root = handle
         .call({
             let c = child.clone();
-            move |core| core.work_root(&c)
+            move |core| core.turn.work_root(&c)
         })
         .expect("工作根");
     assert_eq!(root, parent.sid, "子工作与父会话共用同一个 work/");
@@ -1486,7 +1502,17 @@ pub(crate) fn proxy_profile_is_explicit_and_uses_a_real_private_sandbox() {
     assert_eq!(cfg.permission.profile, ProfileId::View);
     assert_eq!(cfg.permission.label, "仅可查看");
     let session = handle
-        .call(move |core| core.rebuild_session(&meta, &events))
+        .call(move |core| {
+            core.turn.rebuild_session(
+                &meta,
+                &events,
+                core.registry(),
+                core.probe(),
+                &|w, sb, allowed| {
+                    crate::capabilities::conductor::service::work_tools::handlers(w, sb, allowed)
+                },
+            )
+        })
         .expect("重建");
     match session {
         Session::Single(s) => {

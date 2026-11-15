@@ -121,12 +121,13 @@ impl Conductor {
                         Ok(m) => {
                             let parent = m.parent.as_ref().and_then(|p| {
                                 self.history.meta(p).ok().and_then(|pm| {
-                                    self.permissions_for(&pm)
+                                    self.turn
+                                        .permissions_for(&pm, self.registry())
                                         .ok()
                                         .map(|ep| ep.profile.as_str().to_string())
                                 })
                             });
-                            match self.permissions_for(&m) {
+                            match self.turn.permissions_for(&m, self.registry()) {
                                 Ok(p) => (
                                     p.profile.as_str().to_string(),
                                     p.profile.label().to_string(),
@@ -138,9 +139,9 @@ impl Conductor {
                         }
                         Err(_) => (String::new(), String::new(), false, None),
                     };
-                let shell = self.shell_view(&sid);
+                let shell = self.turn.shell_view(&sid);
                 // 过期内容替换是**工作根**的会话级事实：子会话与工作根共享同一个开关。
-                let context_freshness = match self.work_root(&sid) {
+                let context_freshness = match self.turn.work_root(&sid) {
                     Ok(root) => self
                         .history
                         .meta(&root)
@@ -148,7 +149,7 @@ impl Conductor {
                         .unwrap_or(false),
                     Err(_) => false,
                 };
-                let thinking = match self.work_root(&sid) {
+                let thinking = match self.turn.work_root(&sid) {
                     Ok(root) => thinking_cache
                         .entry(root.clone())
                         .or_insert_with(|| self.thinking_view_for_root(&root))
@@ -209,7 +210,7 @@ impl Conductor {
             return Err(format!("无此会话：{}", sid));
         }
         // 先恢复未完成的版本库事务，再做同名文件判定：否则 pending 里的文件会被当成不存在。
-        let work = self.work_root(sid).unwrap_or_else(|_| sid.to_string());
+        let work = self.turn.work_root(sid).unwrap_or_else(|_| sid.to_string());
         self.workspace.work_recover(&work)?;
         if self.workspace.work_has(&work, &name) && !overwrite {
             return Ok(false);
@@ -238,7 +239,9 @@ impl Conductor {
         let files = self.workspace.files(sid, &names)?;
         let usage = self.workspace.usage(sid, &names)?;
         let roster = self.scan();
-        let sandboxes = self.sandboxes(&meta, &roster)?;
+        let sandboxes = self
+            .turn
+            .sandboxes(&meta, &roster, self.registry(), self.probe())?;
         let mut agents: Vec<FilesAgentView> = Vec::new();
         let mut agent_roots: Vec<FilesAgentRootView> = Vec::new();
         for a in &meta.agents {
@@ -272,7 +275,7 @@ impl Conductor {
         limit: usize,
         before: Option<u64>,
     ) -> Result<crate::capabilities::workspace::api::WorkLog, String> {
-        let work = self.work_root(sid)?;
+        let work = self.turn.work_root(sid)?;
         self.workspace.work_log(&work, limit, before)
     }
 
@@ -282,7 +285,7 @@ impl Conductor {
         sid: &str,
         commit: u64,
     ) -> Result<crate::capabilities::workspace::api::CommitDetail, String> {
-        let work = self.work_root(sid)?;
+        let work = self.turn.work_root(sid)?;
         self.workspace.work_commit_view(&work, commit)
     }
 
@@ -293,7 +296,7 @@ impl Conductor {
         commit: u64,
         path: &str,
     ) -> Result<crate::capabilities::workspace::api::CommitFileView, String> {
-        let work = self.work_root(sid)?;
+        let work = self.turn.work_root(sid)?;
         self.workspace.work_commit_file(&work, commit, path)
     }
 
@@ -307,14 +310,16 @@ impl Conductor {
         expect_head: u64,
         force: bool,
     ) -> Result<(Option<u64>, Vec<SessionEvent>), String> {
-        let work = self.work_root(sid)?;
-        let tree = self.subtree_of(&work);
+        let work = self.turn.work_root(sid)?;
+        let tree = self.turn.subtree_of(&work);
         if let Some(running) = self
             .turn
             .running_iter()
             .find(|s| tree.iter().any(|x| x == *s))
         {
-            return Err(Self::running_refusal(running));
+            return Err(crate::capabilities::turn::api::Turn::running_refusal(
+                running,
+            ));
         }
         let current = self.workspace.work_head(&work)?.unwrap_or(0);
         if current != expect_head {

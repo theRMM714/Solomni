@@ -24,6 +24,11 @@ pub use crate::capabilities::workspace::domain::workstore::{
     ResolveTake, ResolveWarning, ResolveWarningKind, RestoreLostReport, StatusEntry, StatusReport,
     SyncReport, VersionView,
 };
+#[allow(unused_imports)]
+// 入站面：档位的无 IO 判据由单元测试直接验（生产走 `resolve_root` / `recheck_root`）
+pub use crate::capabilities::workspace::service::roots::{
+    product_root, recheck_root, resolve_root, root_policy,
+};
 
 /// 目的：一条待判定的读取（一次 `read` 读到的行区间 + 当时的整份指纹）。
 #[derive(Debug, Clone, PartialEq, Eq)]

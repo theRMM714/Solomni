@@ -263,7 +263,8 @@ pub(crate) fn external_workspace_vm_session_boots_with_two_stable_mounts() {
         "绑定写进根会话 meta（规范化绝对路径）"
     );
     let binding = core
-        .workspace_binding_of(&meta)
+        .turn
+        .workspace_binding_of(&meta, core.probe())
         .expect("加载复检要过（绑定没被手改）");
     assert_eq!(
         binding,
@@ -284,14 +285,14 @@ pub(crate) fn external_workspace_vm_session_boots_with_two_stable_mounts() {
 #[cfg(windows)]
 #[test]
 pub(crate) fn workspace_policy_splits_network_roots_by_tier() {
-    use crate::capabilities::conductor::service::workspace_root::policy;
+    use crate::capabilities::workspace::api::root_policy;
     use crate::kernel::api::Tier;
     use std::path::Path;
     use std::time::{Duration, Instant};
 
     let unreachable = Path::new(r"\\192.0.2.1\share\proj");
     let started = Instant::now();
-    let err = policy(unreachable, Tier::Host).expect_err("本机档必须拒绝网络工作区");
+    let err = root_policy(unreachable, Tier::Host).expect_err("本机档必须拒绝网络工作区");
     assert!(err.contains("本机档不能用网络工作区"), "{err}");
     assert!(
         started.elapsed() < Duration::from_secs(3),
@@ -299,17 +300,17 @@ pub(crate) fn workspace_policy_splits_network_roots_by_tier() {
         started.elapsed()
     );
 
-    policy(Path::new(r"\\server\share\proj"), Tier::Vm).expect("虚拟机档接受 UNC");
-    let err = policy(Path::new(r"\\server\share"), Tier::Vm).expect_err("共享根要拒");
+    root_policy(Path::new(r"\\server\share\proj"), Tier::Vm).expect("虚拟机档接受 UNC");
+    let err = root_policy(Path::new(r"\\server\share"), Tier::Vm).expect_err("共享根要拒");
     assert!(err.contains("网络共享的根目录"), "{err}");
-    let err = policy(Path::new(r"D:\"), Tier::Vm).expect_err("文件系统根要拒");
+    let err = root_policy(Path::new(r"D:\"), Tier::Vm).expect_err("文件系统根要拒");
     assert!(err.contains("文件系统根目录"), "{err}");
 }
 
 /// 目的：加载复检在这台机器上也能跑：越界拒绝、产品外的目录放行、暂时不可达不挡（不因平台差异漏判）。
 #[test]
 pub(crate) fn workspace_recheck_rejects_bounds_and_allows_unreachable_roots() {
-    use crate::capabilities::conductor::service::workspace_root::{product_root, recheck};
+    use crate::capabilities::workspace::api::{product_root, recheck_root};
     use crate::kernel::api::Tier;
 
     let root = crate::tests::scratch("recheck-cross");
@@ -320,10 +321,10 @@ pub(crate) fn workspace_recheck_rejects_bounds_and_allows_unreachable_roots() {
     let probe = crate::kernel::detail::host_probe::HostProbeAdapter;
     let product = product_root(&product, &probe);
 
-    let err = recheck(&product, Tier::Host, &product, &probe).expect_err("产品根自身要拒");
+    let err = recheck_root(&product, Tier::Host, &product, &probe).expect_err("产品根自身要拒");
     assert!(err.contains("互相包含"), "{}", err);
-    recheck(&outside, Tier::Host, &product, &probe).expect("产品外的目录要放行");
-    recheck(&root.join("gone"), Tier::Host, &product, &probe).expect("暂时不可达不挡");
+    recheck_root(&outside, Tier::Host, &product, &probe).expect("产品外的目录要放行");
+    recheck_root(&root.join("gone"), Tier::Host, &product, &probe).expect("暂时不可达不挡");
 
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -332,7 +333,7 @@ pub(crate) fn workspace_recheck_rejects_bounds_and_allows_unreachable_roots() {
 #[cfg(windows)]
 #[test]
 pub(crate) fn loaded_binding_is_rechecked_against_the_tier() {
-    use crate::capabilities::conductor::service::workspace_root::{product_root, recheck};
+    use crate::capabilities::workspace::api::{product_root, recheck_root};
     use crate::kernel::api::Tier;
     use std::path::Path;
 
@@ -340,7 +341,7 @@ pub(crate) fn loaded_binding_is_rechecked_against_the_tier() {
     let product = super::scratch("conduct-recheck").join("product");
     std::fs::create_dir_all(&product).expect("建产品根");
     let product = product_root(&product, &probe);
-    let err = recheck(
+    let err = recheck_root(
         Path::new(r"\\server\share\proj"),
         Tier::Host,
         &product,
@@ -348,9 +349,9 @@ pub(crate) fn loaded_binding_is_rechecked_against_the_tier() {
     )
     .expect_err("本机档的 UNC 绑定要拒");
     assert!(err.contains("本机档不能用网络工作区"), "{err}");
-    let err = recheck(&product, Tier::Host, &product, &probe).expect_err("越界绑定要拒");
+    let err = recheck_root(&product, Tier::Host, &product, &probe).expect_err("越界绑定要拒");
     assert!(err.contains("互相包含"), "{err}");
-    recheck(&product.join("gone"), Tier::Host, &product, &probe).expect("不可达不挡开会话");
+    recheck_root(&product.join("gone"), Tier::Host, &product, &probe).expect("不可达不挡开会话");
 }
 
 /// 目的：先建本机档 + 外部绑定，再切进虚拟机档——起 guest 的挂载计划与直接建虚拟机档一致。
@@ -1086,7 +1087,13 @@ pub(crate) fn read_facts_rebuild_identically_to_live() {
 
     // 开关打开会丢掉内存会话：下一次访问按转录重建（回放必须与实时同一份台账）。
     core.set_context_freshness(&sid, true).expect("开开关");
-    core.ensure_session(&sid).expect("重建");
+    {
+        let (turn, registry, probe) = core.turn_parts();
+        turn.ensure_session(&sid, registry, probe, &|w, sb, allowed| {
+            crate::capabilities::conductor::service::work_tools::handlers(w, sb, allowed)
+        })
+        .expect("重建");
+    }
     let rebuilt = core.single_reads(&sid).expect("重建后的单 agent 会话");
     assert_eq!(rebuilt, live, "回放的读事实必须与实时逐条一致");
 }

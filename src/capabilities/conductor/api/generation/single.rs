@@ -166,14 +166,20 @@ impl ConductorHandle {
                 self.call({
                     let sid = sid.to_string();
                     move |core| {
-                        core.abort_running(&sid);
+                        core.turn.abort_running(&sid);
                         Ok(())
                     }
                 })?;
                 // 崩了也要**叫醒父会话**：代理在"派完就等"之后，没有这条通知就会一直睡着。
                 if let Some(proxy) = self.call({
                     let sid = sid.to_string();
-                    move |core| Ok(core.notify_proxy_of_child(&sid))
+                    move |core| {
+                        let Some((parent, mut evs)) = core.turn.notify_proxy_of_child(&sid) else {
+                            return Ok(None);
+                        };
+                        core.record_events(&parent, &mut evs);
+                        Ok(Some(parent))
+                    }
                 })? {
                     self.spawn_detached_proxy(&proxy);
                 }
@@ -184,7 +190,13 @@ impl ConductorHandle {
         // 回包只给头部序号——想看的端自己按 since 订阅，不在命令里捎带事实。交回核心只做"重新插入"：转录也已逐轮增量落盘。
         let parent = self.call({
             let sid = sid.to_string();
-            move |core| Ok(core.put_single(&sid, session))
+            move |core| {
+                let back = core.turn.put_single(&sid, session);
+                if let Some((parent, mut evs)) = back.notice {
+                    core.record_events(&parent, &mut evs);
+                }
+                Ok(back.parent)
+            }
         })?;
         // 这是**子会话**完成：叫醒父会话推进任务链（脱离本次调用，不等它跑完）。
         if let Some(parent) = parent {

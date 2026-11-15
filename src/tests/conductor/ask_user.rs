@@ -42,7 +42,7 @@ fn door_of(
 ) -> Arc<crate::capabilities::session::api::DecisionDoor> {
     let s = sid.to_string();
     handle
-        .call(move |core| Ok(core.desk_of(&s)))
+        .call(move |core| Ok(core.turn.desk_of(&s)))
         .expect("取这个会话的裁决队")
 }
 

@@ -22,6 +22,7 @@ use crate::capabilities::workspace::api::Workspace;
 use crate::capabilities::collab::api::AfterTurn;
 use crate::capabilities::collab::api::CollabSession;
 use crate::capabilities::llm::api::Channel;
+#[cfg(test)]
 use crate::capabilities::llm::api::Msg;
 use crate::capabilities::modules::api::{Module, Modules};
 use crate::capabilities::prompt::api::{Prompt, Segment};
@@ -39,19 +40,6 @@ pub(crate) fn dedup_modules(list: &[String]) -> Vec<String> {
     for m in list {
         if !out.contains(m) {
             out.push(m.clone());
-        }
-    }
-    out
-}
-
-/// 目的：整张名单的扁平模块清单（保序去重）：同一模块被多个 agent 共用时只出现一次。
-pub(crate) fn flat_modules(agents: &[AgentMeta]) -> Vec<String> {
-    let mut out = Vec::new();
-    for a in agents {
-        for m in &a.modules {
-            if !out.contains(m) {
-                out.push(m.clone());
-            }
         }
     }
     out
@@ -161,8 +149,8 @@ pub struct Conductor {
     prompt: Arc<dyn Prompt>,
     /// 工具总表与角色表的能力面（授权两张表；名字表由组合根另取）：**表本体在工具能力里**，与册子互不依赖。
     systools: Arc<dyn Tools>,
-    /// 目的：会话在世表与运行态（`turn` 的唯一持有者），这里只经它的访问器读写。
-    turn: crate::capabilities::turn::api::TurnState,
+    /// 目的：会话本体（在世表、装配、从落盘重建、树与裁决队）——`turn` 能力的唯一持有者；conductor 只经它读写会话。
+    pub(crate) turn: crate::capabilities::turn::api::Turn,
 }
 
 mod action;
@@ -178,14 +166,12 @@ pub(crate) use persist::{Persister, SYSTEM_SID_SUGGEST, persist_events};
 pub mod proxy;
 mod rewind;
 mod suggest;
-#[cfg(test)]
-pub(crate) use rewind::replay_dialogue;
 mod turn;
 mod work;
 #[cfg(test)]
 pub(crate) use work::needs_guest_packages_rebuild;
 pub(crate) mod work_tools;
-pub(crate) mod workspace_root;
+
 impl Conductor {
     /// 组合根专用：main 负责创建适配器并注入；conductor 不自建任何具体实现。
     // 组合根注入的构造函数：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读。
@@ -211,6 +197,23 @@ impl Conductor {
         secrets: Arc<dyn crate::capabilities::secrets::api::SecretOps + Send + Sync>,
     ) -> Conductor {
         let compact = Arc::new(CompactRuntime::new(Arc::clone(&llm)));
+        // 会话本体与核心共享同一批能力面与压缩选择；产品根两边各留一份（会话重建要它认虚拟根）。
+        let turn = crate::capabilities::turn::api::Turn::new(
+            root.clone(),
+            Arc::clone(&history),
+            Arc::clone(&workspace),
+            Arc::clone(&vm),
+            Arc::clone(&packages),
+            Arc::clone(&modules),
+            Arc::clone(&residents),
+            Arc::clone(&secrets),
+            Arc::clone(&tools),
+            Arc::clone(&systools),
+            Arc::clone(&prompt),
+            Arc::clone(&llm),
+            Arc::clone(&log),
+            compact.clone(),
+        );
         let c = Conductor {
             root,
             registry,
@@ -231,7 +234,7 @@ impl Conductor {
             base_roots: Vec::new(),
             prompt,
             systools,
-            turn: crate::capabilities::turn::api::TurnState::new(),
+            turn,
         };
         c.sync_compact_choice();
         c
@@ -257,49 +260,30 @@ impl Conductor {
         self.compact.set(choice);
     }
 
-    /// 目的：注入给新会话 / 重建会话的压缩通道工厂。
-    pub(crate) fn compact_factory(
-        &self,
-    ) -> Arc<dyn crate::capabilities::session::api::CompactChatFactory> {
-        self.compact.clone()
-    }
-
     /// 目的：注入项目内基础工具链的只读安装根；组合根读到 active.json 后调用。
+    /// 约束：核心与会话本体各留一份（工具链根既是会话装配的输入，也是核心自己起 shell 的依据），同一处注入保持一致。
     pub fn with_base_roots(mut self, roots: Vec<std::path::PathBuf>) -> Conductor {
+        self.turn.set_base_roots(roots.clone());
         self.base_roots = roots;
         self
     }
 
-    /// 目的：取（必要时创建）一个会话的 shell 实时状态槽；成员工具面与状态栏共用同一份。
-    pub(crate) fn shell_slot(
-        &self,
-        sid: &str,
-    ) -> Arc<crate::capabilities::session::api::ShellSlot> {
-        self.turn.shell_slot(sid)
+    /// 目的：宿主能力探测面（会话重建要它认虚拟根与可执行文件）。
+    pub(crate) fn probe(&self) -> &dyn crate::kernel::ports::HostProbe {
+        self.probe.as_ref()
     }
 
-    /// 目的：一席会话装配要的十个能力面——`turn` 的装配构件按它取用，不碰端口。
-    pub(crate) fn session_deps(&self) -> crate::capabilities::turn::api::SessionDeps {
-        crate::capabilities::turn::api::SessionDeps {
-            llm: Arc::clone(&self.llm),
-            log: Arc::clone(&self.log),
-            prompt: Arc::clone(&self.prompt),
-            systools: Arc::clone(&self.systools),
-            tools: Arc::clone(&self.tools),
-            vm: Arc::clone(&self.vm),
-            residents: Arc::clone(&self.residents),
-            workspace: Arc::clone(&self.workspace),
-            secrets: Arc::clone(&self.secrets),
-            compact: self.compact.clone(),
-        }
-    }
-
-    /// 目的：读会话最近一次 shell 的快照；没有运行过就是 None（状态栏据此决定要不要出 chip）。
-    pub(crate) fn shell_view(
-        &self,
-        sid: &str,
-    ) -> Option<crate::capabilities::session::api::ShellLive> {
-        self.turn.shell_view(sid)
+    /// 目的：把会话本体与它按需取用的两个事实面**拆开借**：会话装配途中要 `&mut` 自己，
+    ///   同时读登记处与宿主探测（两者不是会话的字段——`registry_mut` 要 `&mut`，共享会逼出内部可变性）。
+    /// 返回：会话本体、登记处、宿主探测。
+    pub(crate) fn turn_parts(
+        &mut self,
+    ) -> (
+        &mut crate::capabilities::turn::api::Turn,
+        &dyn Registry,
+        &dyn crate::kernel::ports::HostProbe,
+    ) {
+        (&mut self.turn, self.registry.as_ref(), self.probe.as_ref())
     }
 
     /// 目的：本机可选的虚拟根清单（会话配置与创建向导用）。
@@ -384,185 +368,6 @@ impl Conductor {
         self.systools.book()
     }
 
-    /// 生成期间"会话不在表里"的三种进入点共用这一句（错误文案要一致，别处不再各写一份）。
-    fn running_refusal(sid: &str) -> String {
-        format!("会话 {} 正在生成中：先「停止」或等它结束，再做这一步", sid)
-    }
-
-    /// 目的：把单 agent 会话**交给工作线程**（核心表里留"生成中"）。
-    ///  取出的窗口内，核心队列是空的——读接口与其它会话的命令因此照常。
-    pub(crate) fn take_single(
-        &mut self,
-        sid: &str,
-    ) -> Result<crate::capabilities::session::api::AgentSession, String> {
-        // 运行态闸门：暂停 / 关闭的会话不启动任何生成（唤醒与派发都从这里过）。
-        self.dispatch_gate(sid)?;
-        if self.turn.is_running(sid) {
-            return Err(Self::running_refusal(sid));
-        }
-        match self.turn.take(sid) {
-            Some(Session::Single(s)) => {
-                self.turn.mark_running(sid);
-                Ok(s)
-            }
-            Some(other) => {
-                // 不是单 agent：原样放回，交给协作那条路（B-1 只搬单 agent）。
-                self.turn.put(sid, other);
-                Err("该会话不是单 agent 模式".to_string())
-            }
-            None => Err("无此会话".to_string()),
-        }
-    }
-
-    /// 目的：把协作会话**交给工作线程**（核心表里留"生成中"）。
-    ///  会话还没装进内存时先从落盘重建：协作的"继续"可能先于"打开"到达。
-    pub(crate) fn take_collab(&mut self, sid: &str) -> Result<CollabSession, String> {
-        // 同上：运行态闸门是第一道，先于"取出来"。
-        self.dispatch_gate(sid)?;
-        if self.turn.is_running(sid) {
-            return Err(Self::running_refusal(sid));
-        }
-        if !self.turn.holds(sid) {
-            self.ensure_session(sid)?;
-        }
-        match self.turn.take(sid) {
-            Some(Session::Collab(c)) => {
-                self.turn.mark_running(sid);
-                Ok(c)
-            }
-            Some(other) => {
-                self.turn.put(sid, other);
-                Err("该会话不是协作模式".to_string())
-            }
-            None => Err("无此会话".to_string()),
-        }
-    }
-
-    /// 目的：这一段工作已被停 / 已关闭时，把它的裁决队**整队作废**（等待方按「停止 = 拒绝」解开）。
-    /// 返回：要外送 / 落盘的作废事件（本来就没挂着卡 = 空）。判据是落盘的运行态（meta.run），不是内存猜测。
-    pub(crate) fn void_gates_of(&mut self, sid: &str) -> Vec<SessionEvent> {
-        let reason = match self.history.meta(sid).map(|m| m.run) {
-            Ok(RunState::Stopped) => "用户按了停止：这一队裁决一律作废（停止 = 拒绝）",
-            Ok(RunState::Closed) => "会话已关闭：这一队裁决一律作废",
-            _ => return Vec::new(),
-        };
-        // 判据是**队本身**（核心各关卡与工具级确认排在同一条队上）；没有队 = 本来就没挂着卡。
-        let Some(door) = self.turn.desk().peek(sid) else {
-            return Vec::new();
-        };
-        let cards = door.void();
-        if cards.is_empty() {
-            return Vec::new();
-        }
-        vec![SessionEvent::DecisionVoid {
-            cards,
-            reason: reason.to_string(),
-        }]
-    }
-
-    /// 目的：取这个会话的**裁决队**（核心各关卡与工具级确认共用同一条）。
-    /// 约束：新队按转录里已发出的卡号续号——卡号会话内唯一、跨重启稳定（已答过的不重问）。
-    pub(crate) fn desk_of(
-        &self,
-        sid: &str,
-    ) -> Arc<crate::capabilities::session::api::DecisionDoor> {
-        if let Some(d) = self.turn.desk().peek(sid) {
-            return d;
-        }
-        let issued = self
-            .history
-            .load(sid)
-            .map(|(_, ev)| crate::capabilities::session::api::issued_in(&ev))
-            .unwrap_or(0);
-        self.turn.desk().session(sid, issued)
-    }
-
-    /// 目的：会话没了，它的裁决队随会话一起消失（等待方与转录都不复存在）。
-    pub(crate) fn forget_desk(&self, sid: &str) {
-        self.turn.desk().forget(sid);
-    }
-
-    /// 目的：这些会话里是否有任何一个的回合还攥在生成线程手里（核心里"生成中"）。
-    pub(crate) fn running_any(&self, ids: &[String]) -> bool {
-        self.turn.any_running(ids)
-    }
-
-    /// 目的：把 root 及其整棵子树里等用户裁决的队**一律作废**（停止 = 拒绝），按会话给出作废事件。
-    /// 约束：会话此刻被生成线程拿在手里时它不在表里——那一份由 put_collab 交回时按运行态作废。
-    pub(crate) fn void_gates_in_subtree(&mut self, root: &str) -> Vec<(String, Vec<SessionEvent>)> {
-        let mut out = Vec::new();
-        for sid in self.subtree_of(root) {
-            let evs = self.void_gates_of(&sid);
-            if !evs.is_empty() {
-                out.push((sid, evs));
-            }
-        }
-        out
-    }
-
-    /// 目的：协作生成结束**交回**：重新插入 + 解除"生成中"，并**为就绪节点派发子会话**。
-    ///  转录已由工作线程按"一次模型调用"的粒度增量落盘（见 `Persister`），这里不重复落。
-    ///  返回值：派发产生的事件（调用方负责入台）。
-    pub(crate) fn put_collab(
-        &mut self,
-        sid: &str,
-        c: CollabSession,
-    ) -> (Vec<SessionEvent>, Vec<(String, String, String)>) {
-        self.turn.unmark_running(sid);
-        self.turn.put(sid, Session::Collab(c));
-        // 交回时这段工作已被停 / 已关闭：队列里没答的卡**一律作废**（生成期间对象在别人手里，只能在这里补）。
-        let mut voided = self.void_gates_of(sid);
-        let (spawned, todo) = self.spawn_ready_nodes(sid);
-        voided.extend(spawned);
-        (voided, todo)
-    }
-
-    /// 方案过审后：链里**就绪且还没有子会话**的节点各建一个子会话，并如实外送。
-    /// 为什么在这里：会话表只有核心能碰（泵不建会话）；派发是核心的职责。
-    /// 子会话的产出 = 它**用 submit_report 工具交的回报**（核心操作走工具调用，不认正文里的 JSON）。
-    /// 没交回报就退回"最后一条转录行"（如实取到的东西），仍取不到就说"没有产出"。
-    fn node_note(&self, child: &str) -> String {
-        let evs = match self.history.load(child) {
-            Ok((_, evs)) => evs,
-            Err(_) => Vec::new(),
-        };
-        let mut lines: Vec<String> = Vec::new();
-        let mut reported: Option<String> = None;
-        for ev in &evs {
-            let Some(ls) = ev.get("lines").and_then(|l| l.as_array()) else {
-                continue;
-            };
-            for l in ls {
-                if let Some(t) = l.get("line").and_then(|x| x.as_str()) {
-                    lines.push(t.to_string());
-                }
-                let Some(tool) = l.get("tool") else { continue };
-                let name = tool.get("name").and_then(|x| x.as_str()).unwrap_or("");
-                if name != crate::capabilities::tools::api::REPORT {
-                    continue;
-                }
-                let out = tool
-                    .get("output")
-                    .and_then(|x| x.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                if !out.trim().is_empty() {
-                    reported = Some(out);
-                }
-            }
-        }
-        reported
-            .or_else(|| lines.last().cloned())
-            .unwrap_or_else(|| "（该节点没有产出）".to_string())
-    }
-
-    /// 标记节点完成（记下它的产出），供父会话做总验收。
-    fn mark_node_done(&mut self, sid: &str, node: &str, note: &str) {
-        if let Some(Session::Collab(c)) = self.turn.session_mut(sid) {
-            c.mark_node_done(node, note);
-        }
-    }
-
     /// 目的：给压缩回合准备身份块；切分与模型调用都在工作线程上（界面不被阻塞）。
     /// 返回：本回合的身份块。
     /// 错误：会话不在世或不是单 agent 时如实报错。
@@ -579,7 +384,7 @@ impl Conductor {
             }
         };
         // 手动压缩也要读**当前**设置：用户刚把保留比例调低，不该等会话重建才生效。
-        let (window, percent, keep) = self.context_budget(model.as_deref());
+        let (window, percent, keep) = self.turn.context_budget(model.as_deref(), self.registry());
         let Some(Session::Single(s)) = self.turn.session_mut(sid) else {
             return Err(format!(
                 "压缩只支持单 agent 会话（{} 不在世或不是单 agent）",
@@ -593,9 +398,13 @@ impl Conductor {
     /// 目的：往某个会话注入一条**系统消息**（讨论的提醒走这条；见 session-model.md 二"系统消息"）。
     ///  返回要外送/落盘的事件。
     pub fn note_system(&mut self, sid: &str, text: &str) -> Result<Vec<SessionEvent>, String> {
-        let mut s = self.take_single(sid)?;
+        let mut s = self.turn.take_single(sid)?;
         let events = s.note_system(text);
-        self.put_single(sid, s);
+        // 会话本体不落盘：它把「要通知父会话」的事实交回来，落盘仍由核心做。
+        let back = self.turn.put_single(sid, s);
+        if let Some((parent, mut evs)) = back.notice {
+            self.record_events(&parent, &mut evs);
+        }
         self.persister(sid).persist(&events);
         Ok(events)
     }
@@ -666,22 +475,6 @@ impl Conductor {
 /// 继续被拦下时的提醒（单 agent 会话：该轮到用户发言）。
 const NEED_USER: &str = "最后一条是 AI 发言：部分供应商不允许连续 AI 发言；请先发言再继续。";
 
-/// 会话是否「已经开过」（流水里有内容）：agent 名单与形态据此冻结。配置记录与回档记录不算内容。
-fn session_started(events: &[serde_json::Value]) -> bool {
-    events
-        .iter()
-        .any(|ev| match ev.get("type").and_then(|t| t.as_str()) {
-            Some("config") | Some("rewind") => false,
-            Some("transcript") => ev
-                .get("lines")
-                .and_then(|l| l.as_array())
-                .map(|l| !l.is_empty())
-                .unwrap_or(false),
-            Some(_) => true,
-            None => false,
-        })
-}
-
 /// 工作形态 → 会话元信息里的标识。
 fn mode_str(mode: WorkMode) -> &'static str {
     match mode {
@@ -692,11 +485,9 @@ fn mode_str(mode: WorkMode) -> &'static str {
 }
 
 /// 当前时间戳（秒）。
+/// 约束：实现只有一份，在 `kernel::domain::clock`；这里只保留本能力内的短名。
 fn now_ts() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
+    crate::kernel::api::now_ts()
 }
 
 /// 工作名即将来的落盘目录名：非空、不含路径分隔符与 Windows 非法字符、不是保留名。

@@ -98,7 +98,7 @@ impl ConductorHandle {
             },
         };
         let roster = self.modules.roster();
-        let net = self.call(|core| Ok(core.network_allowed()))?;
+        let net = self.call(|core| Ok(core.turn.network_allowed(core.registry())))?;
         // 一批一起交给构建能力：虚拟机档只起一台 guest、一块缓存卷，不按模块反复起停。
         let modules: Vec<&crate::capabilities::modules::api::Module> = ids
             .iter()
@@ -171,7 +171,7 @@ impl ConductorHandle {
             return Ok(None);
         }
         let sid = sid.to_string();
-        self.call(move |core| Ok(core.desk_of(&sid))).map(Some)
+        self.call(move |core| Ok(core.turn.desk_of(&sid))).map(Some)
     }
 
     /// 目的：本核心的事件台（多端订阅）。
@@ -208,7 +208,7 @@ impl ConductorHandle {
     /// 约束：等待期间**不占核心队列**——收尾要靠核心交回会话；30 秒仍未收尾 = 拒绝，文件与转录都还没动。
     fn settle_tree(&self, root: &str) -> Result<Vec<String>, String> {
         let root_owned = root.to_string();
-        let tree: Vec<String> = self.call(move |core| Ok(core.subtree_of(&root_owned)))?;
+        let tree: Vec<String> = self.call(move |core| Ok(core.turn.subtree_of(&root_owned)))?;
         if !tree.iter().any(|s| self.jobs.is_running(s)) {
             return Ok(Vec::new());
         }
@@ -219,7 +219,7 @@ impl ConductorHandle {
         loop {
             let jobs_busy = tree.iter().any(|s| self.jobs.is_running(s));
             let ids = tree.clone();
-            let core_busy = self.call(move |core| Ok(core.running_any(&ids)))?;
+            let core_busy = self.call(move |core| Ok(core.turn.running_any(&ids)))?;
             if !jobs_busy && !core_busy {
                 return Ok(stopped);
             }
@@ -245,7 +245,7 @@ impl ConductorHandle {
     /// 目的：**级联停止**：把 root 及其整棵子树（按 `meta.parent`）里正在生成的会话都停下来。 返回实际停下的会话 id——不假装“停止了一个本来就没在跑的会话”。 代理核心的 `stop` 走这条：主会话停 = 所有相关工作一起停（用户看得见的那一下）。
     pub(crate) fn stop_tree(&self, root: &str) -> Result<Vec<String>, String> {
         let root_owned = root.to_string();
-        let tree = self.call(move |core| Ok(core.subtree_of(&root_owned)))?;
+        let tree = self.call(move |core| Ok(core.turn.subtree_of(&root_owned)))?;
         let mut stopped = Vec::new();
         for sid in tree {
             // 在等的工具确认由「停止 = 整队作废」解开（见 TurnOps::stop），这里只管取消生成。
@@ -260,7 +260,8 @@ impl ConductorHandle {
     /// 约束：作废是会话的事实——与回答同一条路（落进转录），重启后按它重建，作废过的卡不再挂起。
     pub(crate) fn void_gates(&self, root: &str) {
         let root_owned = root.to_string();
-        let Ok(voids) = self.call(move |core| Ok(core.void_gates_in_subtree(&root_owned))) else {
+        let Ok(voids) = self.call(move |core| Ok(core.turn.void_gates_in_subtree(&root_owned)))
+        else {
             return;
         };
         for (sid, events) in voids {

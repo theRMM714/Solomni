@@ -16,7 +16,7 @@ impl ConductorHandle {
         })?;
         let session = self.call({
             let sid = sid.to_string();
-            move |core| core.take_single(&sid)
+            move |core| core.turn.take_single(&sid)
         })?;
         let joined = std::thread::Builder::new()
             .name("solomni-compact".to_string())
@@ -34,7 +34,7 @@ impl ConductorHandle {
                 self.call({
                     let sid = sid.to_string();
                     move |core| {
-                        core.abort_running(&sid);
+                        core.turn.abort_running(&sid);
                         Ok(())
                     }
                 })?;
@@ -47,7 +47,10 @@ impl ConductorHandle {
                 self.call({
                     let sid = sid.to_string();
                     move |core| {
-                        core.put_single(&sid, s);
+                        let back = core.turn.put_single(&sid, s);
+                        if let Some((parent, mut evs)) = back.notice {
+                            core.record_events(&parent, &mut evs);
+                        }
                         Ok(())
                     }
                 })?;
@@ -63,7 +66,10 @@ impl ConductorHandle {
             self.call({
                 let sid = sid.to_string();
                 move |core| {
-                    core.put_single(&sid, s);
+                    let back = core.turn.put_single(&sid, s);
+                    if let Some((parent, mut evs)) = back.notice {
+                        core.record_events(&parent, &mut evs);
+                    }
                     Ok(())
                 }
             })?;
@@ -86,7 +92,10 @@ impl ConductorHandle {
             let sid = sid.to_string();
             let events = events.clone();
             move |core| {
-                core.put_single(&sid, s);
+                let back = core.turn.put_single(&sid, s);
+                if let Some((parent, mut evs)) = back.notice {
+                    core.record_events(&parent, &mut evs);
+                }
                 core.persister(&sid).persist(&events);
                 Ok(())
             }

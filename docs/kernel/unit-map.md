@@ -19,6 +19,7 @@
 | `src/kernel/contracts/types.rs` | 跨层共享的形状（纯数据）：`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask` / `AskOutcome` 与默认预算、能力名文法 |
 | `src/kernel/contracts/run.rs` | 宿主执行端口的中性回执 `RunOutcome`（跑没跑、输出是什么；不含业务语义） |
 | `src/kernel/contracts/fence.rs` | 围栏描述符（`FenceSpec` / `FenceRunPolicy`）与落点判据（`FencePart` / `FenceBlocked`）：纯数据 |
+| `src/kernel/domain/clock.rs` | 时间的单一来源：Unix 纪元秒（`now_ts`）；时区、格式化与展示不在内核 |
 | `src/kernel/domain/fence.rs` | 沙箱策略对机制的要求与本次模式（`SandboxRequirements` / `SandboxMode`）、按次租约生成：纯机制 |
 | `src/kernel/domain/path.rs` | 路径的对外书写形式（门面）：把路径统一写成 `/` 分隔的字符串；拆出 UNC 的 server / share，并给出落点身份 `Locus` 的键；平台实现在 `src/kernel/domain/path/windows.rs` / `src/kernel/domain/path/unix.rs` |
 | `src/kernel/domain/path/windows.rs` | `path` 的 Windows 后端：把 `\\?\` / `\\?\UNC\` 扩展前缀还原成普通写法 |

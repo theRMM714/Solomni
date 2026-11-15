@@ -16,7 +16,12 @@ impl ConductorHandle {
         let cancel = jobs.register(sid);
         let session = match self.call({
             let sid = sid.to_string();
-            move |core| core.take_collab(&sid)
+            move |core| {
+                let (turn, registry, probe) = core.turn_parts();
+                turn.take_collab(&sid, registry, probe, &|w, sb, allowed| {
+                    crate::capabilities::conductor::service::work_tools::handlers(w, sb, allowed)
+                })
+            }
         }) {
             Ok(s) => s,
             Err(e) => {
@@ -204,7 +209,7 @@ impl ConductorHandle {
                 self.call({
                     let sid = sid.to_string();
                     move |core| {
-                        core.abort_running(&sid);
+                        core.turn.abort_running(&sid);
                         Ok(())
                     }
                 })?;
@@ -214,12 +219,23 @@ impl ConductorHandle {
         // 交回核心：重新插入 + **为就绪节点派发子会话**（返回派发事件与待起生成的节点）。
         let (spawned, todo) = self.call({
             let sid = sid.to_string();
-            move |core| Ok(core.put_collab(&sid, c))
+            move |core| {
+                let mut spawned = core.turn.put_collab(&sid, c);
+                let (mut more, todo) = core.spawn_ready_nodes(&sid);
+                spawned.append(&mut more);
+                Ok((spawned, todo))
+            }
         })?;
         // 协作会话停下 / 交付时也通知代理父（顶层协作没有代理父：返回 None，什么都不做）。
         if let Some(proxy) = self.call({
             let sid = sid.to_string();
-            move |core| Ok(core.notify_proxy_of_child(&sid))
+            move |core| {
+                let Some((parent, mut evs)) = core.turn.notify_proxy_of_child(&sid) else {
+                    return Ok(None);
+                };
+                core.record_events(&parent, &mut evs);
+                Ok(Some(parent))
+            }
         })? {
             self.spawn_detached_proxy(&proxy);
         }

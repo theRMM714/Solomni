@@ -18,7 +18,18 @@ impl ConductorHandle {
             let (parent, agent, name) = (sid.to_string(), req.agent.clone(), child.clone());
             self.call(move |core| {
                 if core.history_open(&name).is_err() {
-                    core.spawn_agent_session(&parent, &agent)?;
+                    let (turn, registry, probe) = core.turn_parts();
+                    turn.spawn_agent_session(
+                        &parent,
+                        &agent,
+                        registry,
+                        probe,
+                        &|w, sb, allowed| {
+                            crate::capabilities::conductor::service::work_tools::handlers(
+                                w, sb, allowed,
+                            )
+                        },
+                    )?;
                 }
                 Ok(())
             })?;
@@ -26,7 +37,7 @@ impl ConductorHandle {
         self.ensure_guest(&child)?;
         let session = self.call({
             let name = child.clone();
-            move |core| core.take_single(&name)
+            move |core| core.turn.take_single(&name)
         })?;
         // 思考强度是**工作根**的会话级事实：成员回合也按它解析（成员模型各自映射）。
         let thinking = self.call({
@@ -105,7 +116,7 @@ impl ConductorHandle {
                 self.call({
                     let name = child.clone();
                     move |core| {
-                        core.abort_running(&name);
+                        core.turn.abort_running(&name);
                         Ok(())
                     }
                 })?;
@@ -126,7 +137,10 @@ impl ConductorHandle {
                 self.call({
                     let name = child.clone();
                     move |core| {
-                        core.put_single(&name, s);
+                        let back = core.turn.put_single(&name, s);
+                        if let Some((parent, mut evs)) = back.notice {
+                            core.record_events(&parent, &mut evs);
+                        }
                         Ok(())
                     }
                 })?;
@@ -152,7 +166,10 @@ impl ConductorHandle {
         self.call({
             let name = child.clone();
             move |core| {
-                core.put_single(&name, s);
+                let back = core.turn.put_single(&name, s);
+                if let Some((parent, mut evs)) = back.notice {
+                    core.record_events(&parent, &mut evs);
+                }
                 Ok(())
             }
         })?;

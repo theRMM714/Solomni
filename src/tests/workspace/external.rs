@@ -267,11 +267,14 @@ pub(crate) fn workspace_grant_none_strips_shared_reach() {
     let sid = core.create_work(spec).expect("外部工作区可建").sid;
     let (meta, _) = core.history_open(&sid).expect("会话");
     assert_eq!(
-        core.workspace_grant(&meta).expect("授权粒度"),
+        core.turn.workspace_grant(&meta).expect("授权粒度"),
         WorkspaceGrant::Session,
         "没有绑定粒度就是缺省的逐会话"
     );
-    let before = core.permissions_for(&meta).expect("算权限");
+    let before = core
+        .turn
+        .permissions_for(&meta, core.registry())
+        .expect("算权限");
     assert!(
         before.reach.contains(Reach::SharedRead),
         "缺省会话可读共享区"
@@ -285,10 +288,13 @@ pub(crate) fn workspace_grant_none_strips_shared_reach() {
         grant: WorkspaceGrant::Workspace,
     });
     assert_eq!(
-        core.workspace_grant(&resident).expect("授权粒度"),
+        core.turn.workspace_grant(&resident).expect("授权粒度"),
         WorkspaceGrant::Workspace
     );
-    let same = core.permissions_for(&resident).expect("算权限");
+    let same = core
+        .turn
+        .permissions_for(&resident, core.registry())
+        .expect("算权限");
     assert!(
         same.reach.contains(Reach::SharedRead),
         "workspace 粒度仍可读共享区"
@@ -302,10 +308,13 @@ pub(crate) fn workspace_grant_none_strips_shared_reach() {
         grant: WorkspaceGrant::None,
     });
     assert_eq!(
-        core.workspace_grant(&none).expect("授权粒度"),
+        core.turn.workspace_grant(&none).expect("授权粒度"),
         WorkspaceGrant::None
     );
-    let stripped = core.permissions_for(&none).expect("算权限");
+    let stripped = core
+        .turn
+        .permissions_for(&none, core.registry())
+        .expect("算权限");
     assert_eq!(stripped.shared_read, ScopeMode::None, "读范围清空");
     assert_eq!(stripped.shared_write, ScopeMode::None, "写范围清空");
     assert!(
@@ -327,8 +336,8 @@ pub(crate) fn workspace_grant_none_strips_shared_reach() {
 #[cfg(windows)]
 #[test]
 pub(crate) fn unc_external_workspace_round_trip_on_a_real_share() {
-    use crate::capabilities::conductor::service::workspace_root::{product_root, resolve};
     use crate::capabilities::workspace::api::{ChangeKind, Workspace};
+    use crate::capabilities::workspace::api::{product_root, resolve_root as resolve};
     use crate::capabilities::workspace::detail::{FsWorkStore, FsWorkspace};
     use crate::capabilities::workspace::service::WorkspaceService;
     use crate::kernel::api::{Tier, is_network_path, native};

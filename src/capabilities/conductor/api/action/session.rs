@@ -57,7 +57,7 @@ impl ConductorHandle {
             );
             let mode = self.call({
                 let c = created.session.clone();
-                move |core| core.dispatch_target(&c)
+                move |core| core.turn.dispatch_target(&c)
             })?;
             if mode == "collab" {
                 self.start_child_collab(&created.session);

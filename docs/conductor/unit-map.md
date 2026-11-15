@@ -8,7 +8,7 @@
 > 分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九；单元划分与文档路由见 [AGENTS.md](../../AGENTS.md)。
 
 > 它与别的能力**平级**：只经各能力的 `api` 编排，**不持任何别人的端口**（R12）。
-> 它拥有的是**没有任何参与方拥有**的那部分不变式：命令队列、工作形态与跨会话编排；会话在世表、运行态、占名表与裁决队句柄在 `turn`。
+> 它拥有的是**没有任何参与方拥有**的那部分不变式：命令队列、工作形态与跨会话编排；会话本体（在世表、运行态、占名表、裁决队、装配与重建、树序）在 `turn`。
 
 | 文件 | 职责 |
 | --- | --- |
@@ -25,27 +25,26 @@
 | `src/capabilities/conductor/api/generation/compact.rs` | 手动压缩：让模型自己压，队列只占「取 / 交」，压不动如实说 |
 | `src/capabilities/conductor/api/generation/collab.rs` | 协作泵：开始讨论 / 回答 / 继续，与主线程握手（`AskReq` / `MemberTurn`），事件边产边送 |
 | `src/capabilities/conductor/api/contract_impls.rs` | 各能力入站契约的队列代理：每个方法克隆入参 → 进命令队列 → 取回结果（呈现层因此只持 `Ops`，拿不到 `Conductor`） |
-| `src/capabilities/conductor/service.rs` | 会话中心：命令队列、派发闸（`dispatch_gate`）与会话装配的入口；状态容器在 turn（`src/capabilities/turn/service/state.rs`） |
+| `src/capabilities/conductor/service.rs` | 会话中心：命令队列、跨会话编排与会话装配的入口；`Conductor` 只持一个 `turn::api::Turn`，五张表、取放协议、装配与重建、树序都在 turn（`src/capabilities/turn/service/session.rs`） |
 | `src/capabilities/conductor/service/action.rs` | 动作的核心实现：把规整后的建会话载荷变成一条会话 |
 | `src/capabilities/conductor/service/work.rs` | 工作方法族入口：建工作的两段结果、改配准备结果、模块声明的能力表、运行包重建判据 |
-| `src/capabilities/conductor/service/work/report.rs` | 运行包报告与档位视图：模块声明的能力、包库可用版本、缺失清单、平台与库、计划与权限视图 |
-| `src/capabilities/conductor/service/work/config.rs` | 会话配置读写：配置视图、改配两段、权限档提交、围栏撤权、配置记录落盘 |
-| `src/capabilities/conductor/service/work/model.rs` | 调用参数与思考档：流式与预算取值、思考片段、树上可用思考档、按根设置 |
-| `src/capabilities/conductor/service/work/host.rs` | 宿主工具与网络开关：QEMU / virtiofsd / smbd 路径、宿主只读根；共享工具选择用 kernel 平台事实 `IS_WINDOWS` |
-| `src/capabilities/conductor/service/work/views.rs` | 会话与文件视图：在世会话 × 历史的并集、继续判据、文件视图 / 上传 / 日志 / 提交恢复 |
-| `src/capabilities/conductor/service/work/create.rs` | 建工作两段与 guest 启动：占名、备工作区、装通道、起 guest、失败撤销 |
-| `src/capabilities/conductor/service/workspace_root.rs` | 外部工作区根的策略：按档位判网络路径 / 共享根 / 文件系统根 / UTF-8 与产品根的互包含（文本 + 落点身份），并做目录与可写探测；创建走 `resolve`，加载复检走 `recheck` |
-| `src/capabilities/conductor/service/turn.rs` | 单 agent 的回合收发：工具形态刷新、生成前准备、节点派发准备、同步生成入口、继续 |
+| `src/capabilities/conductor/service/work/report.rs` | 运行包报告与档位视图：模块声明的能力、包库可用版本、缺失清单与权限视图；平台、库与计划的计算转调 turn（`src/capabilities/turn/service/plan.rs`） |
+| `src/capabilities/conductor/service/work/config.rs` | 会话配置读写：配置视图、改配两段、权限档提交、围栏撤权、配置记录落盘；树序、沙箱与计划取 turn 的事实 |
+| `src/capabilities/conductor/service/work/model.rs` | 调用参数与思考档：流式与预算取值、思考片段、树上可用思考档、按根设置；子树与工作根取 turn 的树序 |
+| `src/capabilities/conductor/service/work/host.rs` | 宿主工具：QEMU / virtiofsd / smbd 路径与共享工具选择（kernel 平台事实 `IS_WINDOWS`）；网络开关与主机只读根在 turn（`src/capabilities/turn/service/plan.rs`） |
+| `src/capabilities/conductor/service/work/views.rs` | 会话与文件视图：在世会话 × 历史的并集、继续判据、文件视图 / 上传 / 日志 / 提交恢复；沙箱与树序取 turn 的事实 |
+| `src/capabilities/conductor/service/work/create.rs` | 建工作两段与 guest 启动：占名、备工作区、装通道、起 guest、失败撤销；外部工作区根策略与复检走 workspace（`src/capabilities/workspace/service/roots.rs`） |
+| `src/capabilities/conductor/service/turn.rs` | 单 agent 的回合收发：工具形态刷新、生成前准备、节点派发准备、同步生成入口、继续；取放与重建走 turn |
 | `src/capabilities/conductor/service/suggest.rs` | 拟名单入口：按本次需求推荐 agent 名单（队列分发与行解析） |
-| `src/capabilities/conductor/service/activation.rs` | 会话启用与激活两段：按转录重建为活动会话、构建请求、准备与提交 |
+| `src/capabilities/conductor/service/activation.rs` | 会话启用与激活两段：构建请求、准备与提交；按转录重建为活动会话走 turn 的 `ensure_session` |
 | `src/capabilities/conductor/service/persist.rs` | 落盘策略与增量落盘手柄：哪种会话留档、哪些事件算定稿、失败怎么报 |
 | `src/capabilities/conductor/service/compact.rs` | 压缩通道工厂：全局设置指向的压缩模型解析与更新 |
-| `src/capabilities/conductor/service/flow.rs` | 协作流水线推进与协作动作：链推进、节点派发与子会话、协作步（`take_*` / `put_*`）、裁决卡动作与改需求 |
-| `src/capabilities/conductor/service/rewind.rs` | 跨会话回档编排：按同一回合 id 收窗整棵子树 |
-| `src/capabilities/conductor/service/env.rs` | 取事实（权限链 / 沙箱 / 围栏 / 租约）+ 会话装配转调 `turn` |
-| `src/capabilities/conductor/service/history.rs` | 历史列出 / 打开 / 删除的转发与装配（收尾类型来自 `lifecycle`）、事件收编与增量落盘手柄；会话加载时按 meta 的档位复检外部工作区绑定 |
+| `src/capabilities/conductor/service/flow.rs` | 协作流水线推进与协作动作：链推进、节点派发、协作步编排、裁决卡动作与改需求；取放、子会话派生与树序走 turn |
+| `src/capabilities/conductor/service/rewind.rs` | 跨会话回档编排：按同一回合 id 收窗整棵子树、折叠子会话、告知副作用；按转录重建归 turn（`src/capabilities/turn/service/rebuild.rs`） |
+| `src/capabilities/conductor/service/env.rs` | 诊断准备与提醒上限；权限链 / 沙箱 / 围栏 / 租约 / 预算一律走 turn（`src/capabilities/turn/service/facts.rs`） |
+| `src/capabilities/conductor/service/history.rs` | 历史列出 / 打开 / 删除的转发与装配（收尾类型来自 `lifecycle`）、事件收编与增量落盘手柄；树序、绑定复检与裁决队句柄在 turn |
 | `src/capabilities/conductor/service/guest_job.rs` | 起停 guest 的两段式：核心准备参数（`GuestBoot` / `GuestStop`），调用方线程执行 |
 | `src/capabilities/conductor/service/ask_user.rs` | 工具层提问端口的会话侧实现：推一条问题并阻塞等一个选项 id |
-| `src/capabilities/conductor/service/proxy.rs` | 核心侧代理适配：`proxy_*` 用例与 `ProxyBridge`（把 `proxy` 的端口调用丢回核心线程），工具执行面在 `proxy` 能力 |
-| `src/capabilities/conductor/service/work_tools.rs` | 共享区六个核心自有工具（`work_pull` / `work_commit` / `work_status` / `work_versions` / `work_resolve` / `work_lost`）的成员侧执行者 |
+| `src/capabilities/conductor/service/proxy.rs` | 核心侧代理适配：`proxy_*` 用例与 `ProxyBridge`（把 `proxy` 的端口调用丢回核心线程），工具执行面在 `proxy` 能力；代理会话装配在 turn（`src/capabilities/turn/service/proxy.rs`） |
+| `src/capabilities/conductor/service/work_tools.rs` | 共享区六个核心自有工具（`work_pull` / `work_commit` / `work_status` / `work_versions` / `work_resolve` / `work_lost`）的成员侧执行者，以及由 turn 以闭包注入的 work 处理器工厂 `handlers` |
 | `src/capabilities/conductor/domain/work.rs` | 六个核心自有工具的纯逻辑：工具名、入参解析、回执拼装与三方版本 / 解决结果渲染 |

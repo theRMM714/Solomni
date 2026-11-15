@@ -248,11 +248,9 @@ pub fn terminate(pid: u32) -> Result<(), String> {
 }
 
 /// 目的：当前时间（unix 秒），给登记表用。
+/// 约束：实现只有一份，在 `domain::clock`；这里只为既有调用点保留 `u64` 口径。
 pub fn now_ts() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+    crate::kernel::domain::clock::now_ts() as u64
 }
 
 #[cfg(test)]

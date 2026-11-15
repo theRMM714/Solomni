@@ -91,7 +91,7 @@ pub(crate) fn child_sessions_share_the_main_guest_and_follow_its_tier() {
     );
     let child_meta = hist.meta("w--a").expect("读子会话");
     assert_eq!(
-        core.guest_lease_for(&child_meta).expect("取租约"),
+        core.turn.guest_lease_for(&child_meta).expect("取租约"),
         "w",
         "子会话共用主会话树的 guest"
     );
@@ -157,12 +157,13 @@ pub(crate) fn proxy_children_share_the_proxy_tree_guest() {
     );
     let child_meta = hist.meta("p--a").expect("读子工作");
     assert_eq!(
-        core.guest_lease_for(&child_meta).expect("取租约"),
+        core.turn.guest_lease_for(&child_meta).expect("取租约"),
         "p",
         "proxy 子工作要加入代理根那一台 guest"
     );
     assert_eq!(
-        core.guest_lease_for(&hist.meta("p").expect("代理根"))
+        core.turn
+            .guest_lease_for(&hist.meta("p").expect("代理根"))
             .expect("代理根租约"),
         "",
         "代理根自己没有 guest；由子工作按同一租约拉起"

@@ -14,6 +14,7 @@
 | `src/capabilities/workspace/service/commit.rs` | 提交族：`commit_locked` 的三方核校与对象落盘、agent 基线记录、归档点、树铺设、归档清理、自动提交与用户提交 |
 | `src/capabilities/workspace/service/sync.rs` | 同步族：pull、沙箱采纳、过期读取、双向同步、导入根、跟踪同步 |
 | `src/capabilities/workspace/service/history.rs` | 历史族：状态盘点、日志、单次提交视图、单文件差异、版本列表 |
+| `src/capabilities/workspace/service/roots.rs` | 外部工作区根的判定：按档位判网络路径 / 共享根 / 文件系统根 / UTF-8 与产品根的互包含（文本 + 落点身份），创建走 `resolve_root`、加载复检走 `recheck_root`、产品根规范化走 `product_root`、无 IO 部分走 `root_policy` |
 | `src/capabilities/workspace/service/resolve.rs` | 冲突解决族：`ResolvePlan`、拒绝对话渲染、`work_resolve` 的选边、备份与未合并守卫 |
 | `src/capabilities/workspace/service/lifecycle.rs` | 生命周期族：丢失文件、恢复、回收、回滚、归档、删除、归档恢复、还原点、提交后丢弃 |
 | `src/capabilities/workspace/service/facade.rs` | `Workspace` 的唯一 trait 实现：七个基础用例直接委托 `Workdirs`，其余方法逐条转发到同级子模块（Rust 不允许 trait impl 分块） |

@@ -25,6 +25,7 @@ mod facade;
 mod history;
 mod lifecycle;
 mod resolve;
+pub(crate) mod roots;
 mod sync;
 
 /// 首次导入外部工作区的文件数 / 字节上限（超出只导入可导入的部分，不拖垮建会话）。

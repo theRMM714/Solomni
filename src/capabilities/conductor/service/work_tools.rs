@@ -7,7 +7,9 @@
 use super::now_ts;
 use crate::capabilities::conductor::domain::work as dw;
 use crate::capabilities::permission::api::{Decision, PermissionSet, Reach};
-use crate::capabilities::workspace::api::{CommitRequest, ResolveRequest, ResolveTake, Workspace};
+use crate::capabilities::workspace::api::{
+    CommitRequest, ResolveRequest, ResolveTake, Sandbox, Workspace,
+};
 use crate::kernel::api::ToolOutcome;
 use crate::kernel::ports::ToolHandler;
 use std::sync::Arc;
@@ -65,6 +67,27 @@ pub(crate) fn check_writable(
         }
     }
     Ok(())
+}
+
+/// 目的：按这一席的沙箱装出成员侧的工具面：只有允许清单里有 work_* 工具时才装。
+/// 参数：workspace —— 版本库与共享区端口；sb —— 这一席的沙箱（顶层工作名、实例名、生效权限）；
+///   allowed —— 这一席允许调用的工具名。
+/// 返回：成员侧工具处理者；allowed 里没有 work_* 时为空。
+/// 约束：会话装配（turn 的会话本体）经闭包拿到它，本函数不读任何会话状态。
+pub(crate) fn handlers(
+    workspace: &Arc<dyn Workspace + Send + Sync>,
+    sb: &Sandbox,
+    allowed: &[String],
+) -> Vec<Arc<dyn ToolHandler>> {
+    if !allowed.iter().any(|t| dw::is_work_tool(t)) {
+        return Vec::new();
+    }
+    vec![Arc::new(WorkHandler::new(
+        Arc::clone(workspace),
+        &sb.work_name,
+        &sb.agent,
+        sb.permissions.clone(),
+    ))]
 }
 
 impl WorkHandler {

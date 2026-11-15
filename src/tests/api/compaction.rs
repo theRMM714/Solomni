@@ -494,26 +494,26 @@ fn compaction_model_is_global_and_resolved_at_trigger() {
     core.registry_mut().set_app_settings(st).expect("写设置");
     core.sync_compact_choice();
 
-    let session = core.take_single(&sid).expect("取会话");
+    let session = core.turn.take_single(&sid).expect("取会话");
     let spec = session
         .compact_chat()
         .expect("读压缩通道")
         .expect("独立总结模型");
     assert_eq!(spec.model, "m2");
     assert_eq!(spec.window, 32_000);
-    core.put_single(&sid, session);
+    core.turn.put_single(&sid, session);
 
     // 与会话同模型：复用会话通道（None）。
     let mut st = core.registry().app_settings();
     st.compact_model = "m".to_string();
     core.registry_mut().set_app_settings(st).expect("写设置");
     core.sync_compact_choice();
-    let session = core.take_single(&sid).expect("取会话");
+    let session = core.turn.take_single(&sid).expect("取会话");
     assert!(
         session.compact_chat().expect("读压缩通道").is_none(),
         "同模型不该另建通道"
     );
-    core.put_single(&sid, session);
+    core.turn.put_single(&sid, session);
 
     // 未登记模型：保存即拒绝。
     let mut st = core.registry().app_settings();
@@ -735,9 +735,9 @@ fn compaction_survives_a_restart_and_rewinds_back_through_the_point() {
 
     // ① 重建（重启：会话不在内存里 → 按落盘转录重建）：摘要替代被压的行，之后的行照常。
     // `prepare_single` 把会话交给工作线程，重建出来的对象就在它返回的这一轮里。
-    let live = core.take_single(&sid).expect("会话在表里");
+    let live = core.turn.take_single(&sid).expect("会话在表里");
     drop(live);
-    core.abort_running(&sid);
+    core.turn.abort_running(&sid);
     let rebuilt = match core.prepare_single(&sid, None, false) {
         Ok(crate::capabilities::conductor::service::Prepared::Run { session, .. }) => session,
         Ok(_) => panic!("重建后该是可直接跑的一轮"),
@@ -762,16 +762,22 @@ fn compaction_survives_a_restart_and_rewinds_back_through_the_point() {
         "重建也要恢复压缩记录行（回档分流靠它）"
     );
     drop(rebuilt);
-    core.abort_running(&sid);
+    core.turn.abort_running(&sid);
 
     // ② 回档跨越压缩点：会话在表里且压缩点 > 目标 → `rewind` 走重建，摘要不再生效。
-    core.ensure_session(&sid).expect("把重建结果装回表里");
+    {
+        let (turn, registry, probe) = core.turn_parts();
+        turn.ensure_session(&sid, registry, probe, &|w, sb, allowed| {
+            crate::capabilities::conductor::service::work_tools::handlers(w, sb, allowed)
+        })
+        .expect("把重建结果装回表里");
+    }
     core.rewind(
         &sid,
         crate::capabilities::conductor::api::RewindTarget::Delete(next),
     )
     .expect("回档到压缩点之前");
-    let back = core.take_single(&sid).expect("取回回档后的会话");
+    let back = core.turn.take_single(&sid).expect("取回回档后的会话");
     let shown_back = shown(back.dialogue());
     assert!(
         !shown_back.iter().any(|c| c.contains("此前内容摘要")),
