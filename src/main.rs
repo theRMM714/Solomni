@@ -591,6 +591,25 @@ fn main() {
             std::sync::Arc::clone(&log),
             base_roots.clone(),
         ));
+    // **系统维护面**：启动相命令（`--doctor` / `--gc` / `--provision` …）在转录中心里也跑同一条执行路径——
+    // 复用这里已经装好的端口：存储的后台作业状态在实例里，另装一套会让两边互相看不见。
+    let system = match entry::assembly::system_with(
+        &root,
+        &base,
+        entry::assembly::SystemPorts {
+            storage: Arc::clone(&storage),
+            provision: Arc::clone(&provision),
+            builds: Arc::clone(&builds),
+            workspace: Arc::clone(&workspace),
+            modules: Arc::clone(&modules),
+        },
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[装配失败] {}", e);
+            std::process::exit(1);
+        }
+    };
     // 启动时要按有效启停拉起常驻服务：留一份手柄（进程级租约，不属于任何会话）。
     let residents_boot = Arc::clone(&residents);
     let mut conductor = capabilities::conductor::service::Conductor::new(
@@ -739,6 +758,7 @@ fn main() {
                 presentation::web::DEFAULT_PORT,
                 flags.plain,
                 !flags.no_anim,
+                &system,
             ) {
                 presentation::cli::CliExit::Exit => break,
                 presentation::cli::CliExit::Web(port) => {

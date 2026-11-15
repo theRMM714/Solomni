@@ -9,6 +9,8 @@ use crate::capabilities::conductor::api::{
 };
 use crate::capabilities::conductor::api::{Ops, Output};
 use crate::capabilities::registry::api::{ModelView, ProviderView};
+use crate::capabilities::system::api::System;
+use crate::capabilities::tools::api::Command;
 
 /// 目的：离开转录中心时的去向：退出，或转入 Web 转录中心（端口）。
 pub enum CliExit {
@@ -17,8 +19,15 @@ pub enum CliExit {
 }
 
 /// 目的：转录中心主循环：交互模式用固定输入框，非交互模式保持逐行输入（输出不变）。
-/// 参数：`web_default_port` 是会话内 `web` 命令不带端口时的默认值；`plain` 为真则强制纯文本；`anim` 为假则生成态不轮流刷帧。
-pub fn run(ops: Ops, web_default_port: u16, plain: bool, anim: bool) -> CliExit {
+/// 参数：`web_default_port` 是会话内 `web` 命令不带端口时的默认值；`plain` 为真则强制纯文本；`anim` 为假则生成态不轮流刷帧；
+///   `system` 是启动相命令的执行面（与命令行共用同一份系统维护能力，见 `run_boot`）。
+pub fn run(
+    ops: Ops,
+    web_default_port: u16,
+    plain: bool,
+    anim: bool,
+    system: &dyn System,
+) -> CliExit {
     let interactive = term::init(plain, anim);
     term::set_completer(catalog::complete);
     if interactive {
@@ -49,6 +58,11 @@ pub fn run(ops: Ops, web_default_port: u16, plain: bool, anim: bool) -> CliExit 
         let mut parts = line.splitn(2, ' ');
         let cmd = parts.next().unwrap_or("").to_ascii_lowercase();
         let arg = parts.next().unwrap_or("").trim().to_string();
+        // 启动相命令（命令表里 `phase: boot` 的那些）：与命令行同一个执行入口，跑完回提示符。
+        if let Some(command) = catalog::boot(&cmd) {
+            run_boot(&ops, system, command, &arg);
+            continue;
+        }
         match cmd.as_str() {
             "single" => single_flow(&ops, &arg),
             "collab" => collab_flow(&ops, &arg),
@@ -92,6 +106,79 @@ pub fn run(ops: Ops, web_default_port: u16, plain: bool, anim: bool) -> CliExit 
     }
     term::line("再见。");
     CliExit::Exit
+}
+
+/// 目的：转录中心里跑一条启动相命令（`--doctor` / `--gc` / `--provision` …）：与命令行同一条执行路径。
+/// 参数：`command` 来自命令表，`tail` 是命令名之后的原文（与命令名之间只按空格切，不再做语法）。
+/// 返回：这条命令的退出码——转录中心不因它退出。
+/// 约束：转录中心里 `--json` 没有意义（终端要人读），`--root` 只能在启动时给（这个进程的根已定）。
+pub(crate) fn run_boot(ops: &Ops, system: &dyn System, command: &Command, tail: &str) -> i32 {
+    let mut operands: Vec<String> = Vec::new();
+    for word in tail.split_whitespace() {
+        let name = word.split_once('=').map_or(word, |(n, _)| n);
+        match name {
+            "--json" => {
+                term::line(&term::ink(
+                    theme::Ink::Dim,
+                    "[提示] 转录中心里 --json 没有意义（那是给脚本的回执），这次忽略",
+                ));
+                continue;
+            }
+            "--root" => {
+                term::line(&term::ink(
+                    theme::Ink::Dim,
+                    "[提示] --root 只能在启动时给（这个进程的根目录已经定了）",
+                ));
+                return 2;
+            }
+            _ => operands.push(word.to_string()),
+        }
+    }
+    let writes = !sessions_running(ops);
+    let mut ask = TerminalAsk;
+    let code = boot::run_asked(&command.name, &operands, system, false, &mut ask, writes);
+    if code != 0 {
+        term::line(&term::ink(
+            theme::Ink::Dim,
+            &format!("[退出码 {}] {}", code, exit_hint(code)),
+        ));
+    }
+    code
+}
+
+/// 目的：退出码的一句话解释（转录中心里没有人会去看退出码表）。
+fn exit_hint(code: i32) -> &'static str {
+    match code {
+        2 => "用法不对或还差一次确认（help <命令> 看写法）",
+        _ => "执行失败（上面是原因）",
+    }
+}
+
+/// 目的：转录中心里的确认：以提示符就地问，只有明确的 yes 才算点头（读不到输入算没点头）。
+struct TerminalAsk;
+
+impl boot::Ask for TerminalAsk {
+    fn anyone(&self) -> bool {
+        true
+    }
+
+    fn confirm(&mut self, question: &str) -> bool {
+        match term::ask(question) {
+            Some(line) => matches!(
+                line.trim().to_ascii_lowercase().as_str(),
+                "y" | "yes" | "是"
+            ),
+            None => false,
+        }
+    }
+}
+
+/// 目的：有没有会话此刻在生成：写操作（回收 / 还原 / 补齐）在有会话在跑时只给预览。
+fn sessions_running(ops: &Ops) -> bool {
+    match ops.sessions.session_views(&[]) {
+        Ok(views) => views.iter().any(|v| v.running),
+        Err(_) => false,
+    }
 }
 
 /// 目的：打印手册：无参数给全量，`--all` 连内部旗语一起列，带命令名只讲那一条。
@@ -187,8 +274,43 @@ mod tests {
             return;
         }
         let (handle, ops) = crate::tests::ops_with(vec![], vec![]);
-        let exit = run(ops, 49181, true, false);
+        let system = crate::tests::boot::Fake::default();
+        let exit = run(ops, 49181, true, false, &system);
         assert!(matches!(exit, CliExit::Exit));
+        drop(handle);
+    }
+
+    /// 目的：转录中心里能跑启动相命令——同一条执行路径、同一个退出码，跑完只留一行提示。
+    #[test]
+    fn boot_commands_run_from_the_transcript_centre() {
+        let (handle, ops) = crate::tests::ops_with(vec![], vec![]);
+        let system = crate::tests::boot::Fake::default();
+        let doctor = catalog::boot("--doctor").expect("命令表里有 --doctor");
+        assert!(catalog::boot("single").is_none(), "转录相命令不走启动相");
+
+        let (code, _) = term::capture(|| run_boot(&ops, &system, doctor, ""));
+        assert_eq!(code, 0, "自检只读，成功");
+
+        // --json 在终端没有意义：提示一句、照常执行，不塞一份 JSON 进转录区。
+        let (code, lines) = term::capture(|| run_boot(&ops, &system, doctor, "--json"));
+        assert_eq!(code, 0);
+        assert!(
+            lines.iter().any(|l| l.contains("--json 没有意义")),
+            "{lines:?}"
+        );
+
+        // --root 只能在启动时给：直接拒绝，退出码 2。
+        let (code, lines) = term::capture(|| run_boot(&ops, &system, doctor, "--root work"));
+        assert_eq!(code, 2);
+        assert!(
+            lines.iter().any(|l| l.contains("--root 只能在启动时给")),
+            "{lines:?}"
+        );
+
+        // 用法不对时，退出码要配一句解释，而不是只丢一个数字。
+        let (code, lines) = term::capture(|| run_boot(&ops, &system, doctor, "--nope"));
+        assert_eq!(code, 2);
+        assert!(lines.iter().any(|l| l.contains("[退出码 2]")), "{lines:?}");
         drop(handle);
     }
 }

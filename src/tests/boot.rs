@@ -16,7 +16,8 @@ use crate::capabilities::workspace::api::GcReport as WorkspaceGc;
 use crate::presentation::cli::boot;
 
 /// 目的：合成一份系统维护面——每条命令要的分支由字段决定，用例不碰磁盘也不起进程。
-struct Fake {
+/// 外露：转录中心那条路径（`presentation::cli::run_boot`）也用它，免得再写一份替身。
+pub(crate) struct Fake {
     /// 目的：让哪条方法失败（"gc" / "work_gc" / "build" / "ensure" / "reset" / "storage" / "provision"）。
     fault: Option<&'static str>,
     /// 目的：gc 的返回形状；None = 同步报告。
@@ -498,4 +499,67 @@ fn toolchain_facts_render_for_both_audiences() {
     // 一条都没有时只报「未安装」与「宿主也没有」。
     let empty = toolchain_lines(&BaseFacts::default());
     assert!(empty.iter().any(|l| l.contains("宿主 PATH 也没有")));
+}
+
+/// 目的：写操作的就地确认：转录中心里问一句，命令行上没人可问（照旧只预览）。
+/// 约束：有会话在跑时不许写——连问都不问，只给预览（存储在实例里，另一套实例看不到它的作业）。
+#[test]
+fn writes_are_confirmed_in_place_and_refused_while_sessions_run() {
+    /// 目的：按剧本作答的「人」：记下被问了几次，回答固定。
+    struct Scripted {
+        answer: bool,
+        asked: std::cell::RefCell<Vec<String>>,
+    }
+
+    impl boot::Ask for Scripted {
+        fn anyone(&self) -> bool {
+            true
+        }
+
+        fn confirm(&mut self, question: &str) -> bool {
+            self.asked.borrow_mut().push(question.to_string());
+            self.answer
+        }
+    }
+
+    let fake = Fake::default();
+    let asked = |ask: &Scripted| ask.asked.borrow().len();
+
+    // 点头：问一次，然后真的执行（--yes 由确认补上）。
+    let mut yes = Scripted {
+        answer: true,
+        asked: std::cell::RefCell::new(Vec::new()),
+    };
+    assert_eq!(boot::run_asked("gc", &[], &fake, false, &mut yes, true), 0);
+    assert_eq!(asked(&yes), 1, "写操作要先问一句");
+
+    // 摇头：只预览，退出码不再算错（人已经明确作答）。
+    let mut no = Scripted {
+        answer: false,
+        asked: std::cell::RefCell::new(Vec::new()),
+    };
+    assert_eq!(boot::run_asked("gc", &[], &fake, false, &mut no, true), 0);
+    assert_eq!(asked(&no), 1);
+
+    // 有会话在跑：不问、不写，只给预览。
+    let mut idle = Scripted {
+        answer: true,
+        asked: std::cell::RefCell::new(Vec::new()),
+    };
+    assert_eq!(
+        boot::run_asked("gc", &[], &fake, false, &mut idle, false),
+        0
+    );
+    assert_eq!(asked(&idle), 0, "不许写的时候连问都不问");
+
+    // 只读命令不问。
+    let mut read_only = Scripted {
+        answer: false,
+        asked: std::cell::RefCell::new(Vec::new()),
+    };
+    assert_eq!(
+        boot::run_asked("doctor", &[], &fake, false, &mut read_only, true),
+        0
+    );
+    assert_eq!(asked(&read_only), 0);
 }
