@@ -195,44 +195,17 @@ impl EventBus {
     }
 }
 
-/// 目的：会话能力：创建、推进、回档、编辑、停止。会话界面只需要这一个。
-pub trait SessionOps: Send + Sync {
+/// 目的：工作面：建工作、改配置、投喂与查看文件、读提交历史、运行包报告与推荐。
+///   管：一次工作自身的状态与只读视图；不管推进回合（`TurnOps`）与生命周期（`LifecycleOps`）。
+///   联动：建工作后由呈现层点火首轮（`TurnOps::say`）；改配置的长步骤（停旧 guest、起新）在调用方线程跑。
+pub trait WorkOps: Send + Sync {
     /// 目的：建工作——回包是（会话与名单）+ **事件台头部**，开场事实只进事件台（命令不携带事实）。
     /// 约束：呈现侧建会话统一走动作表（`create_session`）；这一格保留给契约测试与其它调用方，
     /// 二进制 crate 里没有调用点会被 dead_code 误报（见 docs/testing/quality-isolation.md 的 allow 清单）。
     #[allow(dead_code)]
     fn create_work(&self, spec: WorkSpec) -> Result<(WorkOpened, u64), String>;
-    /// 目的：单 agent 会话里说一句（生成可被 `stop` 中止）。
-    fn say(&self, sid: &str, text: &str, out: Output) -> Result<Advance, String>;
-    /// 目的：启用一条历史会话：从盘上重建、确保 guest、解冻整棵子树；**不产生模型调用**。
-    fn activate(&self, sid: &str) -> Result<SessionView, String>;
-    /// 目的：继续一次会话：被停止过就先解冻整棵子树再接着走；协作从断点推进，单 agent / 代理补一轮「继续」。
-    fn continue_flow(&self, sid: &str, out: Output) -> Result<Advance, String>;
-    /// 目的：协作会话：写下本次需求（起点那一关）；其余推进一律走"回答一张卡"。
-    fn set_task(&self, sid: &str, text: &str) -> Result<Advance, String>;
-    /// 目的：**回答一张裁决卡**（唯一的回答口）：带卡片 id + 选项 id（+ 附言）。
-    /// 约束：校验选项 id 属于**当时那张卡**的选项集（防旧卡的答案放行新请求）；不合就如实拒绝。
-    /// 与「停止」同一条直路：这一答先落定（出队 + 记一条回答），处置再脱离调用方跑。
-    fn answer_card(
-        &self,
-        sid: &str,
-        card: &str,
-        option: &str,
-        note: &str,
-    ) -> Result<Advance, String>;
-    /// 目的：当前挂着的那一队裁决（None = 没有等你定的事）：队首卡按选项渲染，后面还在等的几张如实列出。
-    /// 约束：判据只有这一处——推的事件与快照的 pending 都从它派生（见 docs/session/session-model.md）。
-    fn open_queue(&self, sid: &str) -> Result<Option<DecisionQueue>, String>;
-    fn withdraw_agree(&self, sid: &str, agent: &str) -> Result<Advance, String>;
-    /// 目的：回档：返回重放后的完整事件流（已是线格式，供前端整体重建）。
-    /// 生产入口（动作表 / CLI）走 `ConductorHandle::rewind_with_reset`；这一格保留给
-    /// 契约测试与其它调用方，同时确保回档的同步收尾只有一条实现。
-    #[allow(dead_code)]
-    fn rewind(&self, sid: &str, target: RewindTarget) -> Result<Vec<serde_json::Value>, String>;
-    /// 目的：压缩这个会话的上下文（AI 自己压；压不动如实说）。
-    fn compact(&self, sid: &str) -> Result<Advance, String>;
-    /// 目的：改需求：同样返回完整重放。
-    fn update_task(&self, sid: &str, text: &str) -> Result<Vec<serde_json::Value>, String>;
+    /// 目的：工作名的缺省与唯一化（命名策略归 `session`）：`base` 去空白、为空用 `fallback`、重名加尾号。
+    fn unique_work_name(&self, base: &str, fallback: &str) -> Result<String, String>;
     fn config(&self, sid: &str) -> Result<SessionConfig, String>;
     fn edit(&self, sid: &str, edit: SessionEdit) -> Result<(), String>;
     /// 目的：投喂文件进本次工作的 work/；返回 false = 同名已存在（由用户决定覆盖或改名）。
@@ -258,26 +231,6 @@ pub trait SessionOps: Send + Sync {
         commit: u64,
         path: &str,
     ) -> Result<crate::capabilities::workspace::api::CommitFileView, String>;
-    // 入站契约是**发布给前端的接口面**：二进制 crate 里暂时没有调用点的接口方法会被 dead_code 误报
-    // （见 docs/testing/quality-isolation.md 的 allow 清单）。
-    #[allow(dead_code)]
-    fn exists(&self, sid: &str) -> Result<bool, String>;
-    /// 目的：工作名的缺省与唯一化（命名策略归 `session`）：`base` 去空白、为空用 `fallback`、重名加尾号。
-    fn unique_work_name(&self, base: &str, fallback: &str) -> Result<String, String>;
-    /// 目的：停止——把整棵子树落成 `stopped`（拦住后续派发与唤醒）并中断正在跑的生成。
-    /// 返回：**实际停下的会话**（空 = 本来就没在跑）；「继续」（`continue_flow`）是它的逆操作。
-    fn stop(&self, sid: &str) -> Vec<String>;
-    #[allow(dead_code)]
-    fn is_running(&self, sid: &str) -> bool;
-    /// 目的：**在世会话 × 历史的并集**（界面上的会话列表）：只有会话中心同时知道两边，所以归这里。
-    /// 落盘历史的列表 / 打开 / 删除归 `session::api::HistoryOps`。
-    fn session_views(&self, history: &[HistoryView]) -> Result<Vec<SessionView>, String>;
-}
-
-/// 目的：核心自己的用例（会话中心之外的那些）：运行报告与核心推荐。
-///   它们留在 conductor 是因为**只有 conductor 同时拿着**清单、包库、宿主探测与各能力的面——它们是编排
-///   （§2.4 的脚本），没有独立状态，所以不配一个"能力"。清单事实本身归 `modules::api::ModulesOps`。
-pub trait ConductorOps: Send + Sync {
     /// 目的：运行包与档位的运行报告（只报事实）。
     fn runtime_report(&self, tier: Tier) -> Result<RuntimeReport, String>;
     /// 目的：新建工作时的**档位选择**（默认档 + 虚拟机档可用性与逐项前置）。
@@ -285,6 +238,59 @@ pub trait ConductorOps: Send + Sync {
     fn tier_choices(&self) -> Result<TierChoices, String>;
     /// 目的：核心按任务推荐的 agent 草案（带理由；用户可改）。
     fn suggest_models(&self, task: &str, mode: WorkMode) -> Result<Vec<AgentSuggestion>, String>;
+}
+
+/// 目的：回合面：推进一次生成、回答裁决卡、停止与压缩。
+///   管：在跑的这一次生成与等你的那一队裁决；不管工作怎么建（`WorkOps`）、会话留不留（`LifecycleOps`）。
+pub trait TurnOps: Send + Sync {
+    /// 目的：单 agent 会话里说一句（生成可被 `stop` 中止）。
+    fn say(&self, sid: &str, text: &str, out: Output) -> Result<Advance, String>;
+    /// 目的：继续一次会话：被停止过就先解冻整棵子树再接着走；协作从断点推进，单 agent / 代理补一轮「继续」。
+    fn continue_flow(&self, sid: &str, out: Output) -> Result<Advance, String>;
+    /// 目的：协作会话：写下本次需求（起点那一关）；其余推进一律走"回答一张卡"。
+    fn set_task(&self, sid: &str, text: &str) -> Result<Advance, String>;
+    /// 目的：**回答一张裁决卡**（唯一的回答口）：带卡片 id + 选项 id（+ 附言）。
+    /// 约束：校验选项 id 属于**当时那张卡**的选项集（防旧卡的答案放行新请求）；不合就如实拒绝。
+    /// 与「停止」同一条直路：这一答先落定（出队 + 记一条回答），处置再脱离调用方跑。
+    fn answer_card(
+        &self,
+        sid: &str,
+        card: &str,
+        option: &str,
+        note: &str,
+    ) -> Result<Advance, String>;
+    /// 目的：当前挂着的那一队裁决（None = 没有等你定的事）：队首卡按选项渲染，后面还在等的几张如实列出。
+    /// 约束：判据只有这一处——推的事件与快照的 pending 都从它派生（见 docs/session/session-model.md）。
+    fn open_queue(&self, sid: &str) -> Result<Option<DecisionQueue>, String>;
+    fn withdraw_agree(&self, sid: &str, agent: &str) -> Result<Advance, String>;
+    /// 目的：改需求：同样返回完整重放。
+    fn update_task(&self, sid: &str, text: &str) -> Result<Vec<serde_json::Value>, String>;
+    /// 目的：压缩这个会话的上下文（AI 自己压；压不动如实说）。
+    fn compact(&self, sid: &str) -> Result<Advance, String>;
+    /// 目的：停止——把整棵子树落成 `stopped`（拦住后续派发与唤醒）并中断正在跑的生成。
+    /// 返回：**实际停下的会话**（空 = 本来就没在跑）；「继续」（`continue_flow`）是它的逆操作。
+    fn stop(&self, sid: &str) -> Vec<String>;
+    #[allow(dead_code)]
+    fn is_running(&self, sid: &str) -> bool;
+}
+
+/// 目的：生命周期面：启用一条历史会话、回档、查存在、会话总览。
+///   管：会话在盘上的留与回、以及"界面上该列出哪些"；不管这一回合怎么跑（`TurnOps`）。
+pub trait LifecycleOps: Send + Sync {
+    /// 目的：启用一条历史会话：从盘上重建、确保 guest、解冻整棵子树；**不产生模型调用**。
+    fn activate(&self, sid: &str) -> Result<SessionView, String>;
+    /// 目的：回档：返回重放后的完整事件流（已是线格式，供前端整体重建）。
+    /// 生产入口（动作表 / CLI）走 `ConductorHandle::rewind_with_reset`；这一格保留给
+    /// 契约测试与其它调用方，同时确保回档的同步收尾只有一条实现。
+    #[allow(dead_code)]
+    fn rewind(&self, sid: &str, target: RewindTarget) -> Result<Vec<serde_json::Value>, String>;
+    // 入站契约是**发布给前端的接口面**：二进制 crate 里暂时没有调用点的接口方法会被 dead_code 误报
+    // （见 docs/testing/quality-isolation.md 的 allow 清单）。
+    #[allow(dead_code)]
+    fn exists(&self, sid: &str) -> Result<bool, String>;
+    /// 目的：**在世会话 × 历史的并集**（界面上的会话列表）：只有会话中心同时知道两边，所以归这里。
+    /// 落盘历史的列表 / 打开 / 删除归 `session::api::HistoryOps`。
+    fn session_views(&self, history: &[HistoryView]) -> Result<Vec<SessionView>, String>;
 }
 
 /// 目的：日志能力：呈现层与 CLI 的埋点入口（**只转发，不做任何判定**）。
@@ -357,14 +363,16 @@ mod contract_impls;
 mod generation;
 mod handle;
 
-/// 目的：入站能力面：**各能力自己的契约**+ 核心自己的两个 + 事件台。
+/// 目的：入站能力面：**各能力自己的契约** + 三个自己人的面 + 事件台。
 ///   克隆廉价；呈现层只依赖它需要的字段，契约测试可以用假实现替换任意一个字段。
 #[derive(Clone)]
 pub struct Ops {
-    /// 目的：会话中心（conductor 自己的状态）：会话生命周期、动作分发、文件视图、会话总览。
-    pub sessions: Arc<dyn SessionOps + Send + Sync>,
-    /// 目的：核心自己的用例：运行报告与核心推荐。
-    pub core: Arc<dyn ConductorOps + Send + Sync>,
+    /// 目的：工作面（`WorkOps`）：建工作、改配置、文件与提交历史、运行包报告与推荐。
+    pub work: Arc<dyn WorkOps + Send + Sync>,
+    /// 目的：回合面（`TurnOps`）：推进生成、回答裁决卡、停止、压缩。
+    pub turn: Arc<dyn TurnOps + Send + Sync>,
+    /// 目的：生命周期面（`LifecycleOps`）：启用、回档、查存在、会话总览。
+    pub lifecycle: Arc<dyn LifecycleOps + Send + Sync>,
     pub registry: Arc<dyn crate::capabilities::registry::api::RegistryOps + Send + Sync>,
     pub history: Arc<dyn crate::capabilities::session::api::HistoryOps + Send + Sync>,
     /// 目的：模块公地的只读面（清单事实的上游是 `modules`）。
@@ -390,8 +398,9 @@ impl Ops {
     /// 目的：组合根用：把同一个核心手柄按角色拆开（同一个执行线程、同一个事件台）。
     pub fn from_handle(h: &ConductorHandle) -> Ops {
         Ops {
-            sessions: Arc::new(h.clone()),
-            core: Arc::new(h.clone()),
+            work: Arc::new(h.clone()),
+            turn: Arc::new(h.clone()),
+            lifecycle: Arc::new(h.clone()),
             registry: Arc::new(h.clone()),
             history: Arc::new(h.clone()),
             modules: Arc::new(h.clone()),

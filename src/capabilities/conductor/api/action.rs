@@ -150,13 +150,13 @@ impl ConductorHandle {
         let state = match action {
             d::ControlAction::Stop => {
                 // 走会话能力的停止：冻结整棵子树 + 级联中断在跑的生成（回执给实际停下的会话数）。
-                let stopped = SessionOps::stop(self, sid);
+                let stopped = TurnOps::stop(self, sid);
                 format!("stopped:{}", stopped.len())
             }
             d::ControlAction::Continue => match caller {
                 // 人经呈现层：接着走的那一轮按常规生成跑完（与历史行为一致）。
                 Caller::User => {
-                    let _ = SessionOps::continue_flow(self, sid, Output::Final)?;
+                    let _ = TurnOps::continue_flow(self, sid, Output::Final)?;
                     "active".to_string()
                 }
                 // 核心代理：解冻后**脱离调用方点火**——它不等子会话跑完，靠 observe / messages 回头看。
@@ -491,9 +491,9 @@ impl ConductorHandle {
                 // 整段输入恰好是 `/compact`：命令走动作，不把命令本身发给模型。
                 // 服务端收口，Web 旧缓存 / CLI 直接输入也能触发。
                 if s("text").trim() == "/compact" {
-                    return SessionOps::compact(self, &s("session_id")).map(Acted::Advanced);
+                    return TurnOps::compact(self, &s("session_id")).map(Acted::Advanced);
                 }
-                SessionOps::say(self, &s("session_id"), &s("text"), out).map(Acted::Advanced)
+                TurnOps::say(self, &s("session_id"), &s("text"), out).map(Acted::Advanced)
             }
             "set_module_enabled" => {
                 let id = s("module");
@@ -549,7 +549,7 @@ impl ConductorHandle {
                 }
             }
             "activate_session" => {
-                let view = SessionOps::activate(self, &s("session_id"))?;
+                let view = LifecycleOps::activate(self, &s("session_id"))?;
                 Ok(Acted::Done(serde_json::json!({
                     "ok": true,
                     "session": view,
@@ -599,7 +599,7 @@ impl ConductorHandle {
             "update_task" => self
                 .update_task(&s("session_id"), &s("text"))
                 .map(Acted::Replayed),
-            "compact" => SessionOps::compact(self, &s("session_id")).map(Acted::Advanced),
+            "compact" => TurnOps::compact(self, &s("session_id")).map(Acted::Advanced),
             "set_permission_profile" => {
                 let sid = s("session_id");
                 let profile =

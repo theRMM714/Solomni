@@ -36,7 +36,7 @@ pub use crate::capabilities::session::service::{core_operation, reply_msgs, tool
 
 /// 目的：落盘会话的**队列面**：呈现层经 conductor 的队列代理调它（列表 / 打开 / 删除）。
 ///   "在世会话 × 历史的并集"（`SessionView`）**不在本面里**：那要同时认识会话中心与历史，
-///   归会话中心（`conductor::api::SessionOps::session_views`）。
+///   归会话中心（`conductor::api::LifecycleOps::session_views`）。
 pub trait HistoryOps: Send + Sync {
     fn list(&self) -> Result<Vec<HistoryView>, String>;
     fn open(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String>;

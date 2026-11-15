@@ -19,7 +19,7 @@ fn generation_pushes_facts_to_the_event_bus_with_sequence_numbers() {
     let bus = handle.events();
     // 建工作：回包给（会话 + 名单 + 事件台头部），开场事实**只**进事件台。
     let (opened, base) = ops
-        .sessions
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话");
     assert!(base > 0, "开场事实也进事件台");
@@ -29,7 +29,7 @@ fn generation_pushes_facts_to_the_event_bus_with_sequence_numbers() {
     );
 
     let adv = ops
-        .sessions
+        .turn
         .say(&opened.sid, "你好", Output::Final)
         .expect("说一句");
     // 命令回包只给**事件台头部序号**：事实只有一条来路，不再随回包返回。
@@ -61,10 +61,10 @@ fn history_merge_is_the_transcript_plus_the_bus_tail_without_repeats() {
     );
     let ops = Ops::from_handle(&handle);
     let (opened, _base) = ops
-        .sessions
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话");
-    ops.sessions
+    ops.turn
         .say(&opened.sid, "你好", Output::Final)
         .expect("说一句");
     let (_meta, transcript) = ops.history.open(&opened.sid).expect("读转录");
@@ -108,21 +108,17 @@ fn rewind_pushes_a_reset_fact_and_history_merge_ignores_superseded_batches() {
     let handle = spawn(vec![module_of("a")], Vec::new());
     let ops = Ops::from_handle(&handle);
     let sid = ops
-        .sessions
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
         .0
         .sid;
-    ops.sessions
-        .say(&sid, "问一", Output::Final)
-        .expect("说一句");
-    ops.sessions
-        .say(&sid, "问二", Output::Final)
-        .expect("再说一句");
+    ops.turn.say(&sid, "问一", Output::Final).expect("说一句");
+    ops.turn.say(&sid, "问二", Output::Final).expect("再说一句");
 
     // ① 删除到第 0 行：盘上转录清空；事件台必须给一条 rewound（活动视图为空）。
     let replayed = ops
-        .sessions
+        .lifecycle
         .rewind(
             &sid,
             crate::capabilities::conductor::api::RewindTarget::Delete(0),
@@ -155,7 +151,7 @@ fn rewind_pushes_a_reset_fact_and_history_merge_ignores_superseded_batches() {
     );
 
     // ③ 回档后还能继续；新事件按水印之后的窗口接上，旧内容仍不回来。
-    ops.sessions
+    ops.turn
         .say(&sid, "新问", Output::Final)
         .expect("回档后还能说");
     let (_meta, transcript2) = ops.history.open(&sid).expect("读新转录");
@@ -169,16 +165,16 @@ fn rewind_pushes_a_reset_fact_and_history_merge_ignores_superseded_batches() {
 
     // ④ 留档同样不能被旧批次污染：折叠后的活动视图只有标记，没有正文行。
     let sid2 = ops
-        .sessions
+        .work
         .create_work(single_work("w2", &["a"]))
         .expect("建第二个会话")
         .0
         .sid;
-    ops.sessions
+    ops.turn
         .say(&sid2, "留档问", Output::Final)
         .expect("说一句");
     let archived = ops
-        .sessions
+        .lifecycle
         .rewind(
             &sid2,
             crate::capabilities::conductor::api::RewindTarget::Archive(0),
@@ -207,16 +203,16 @@ fn stop_takes_effect_while_generation_is_still_running() {
     // 慢通道与装配在 contract_tests 里共用（intent 的「生成中不许改」测试用的是同一个）。
     let (_handle, ops, ticks) = slow_ops(vec![module_of("a")]);
     let sid = ops
-        .sessions
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
         .0
         .sid;
 
     let worker = {
-        let sessions = Arc::clone(&ops.sessions);
+        let turn = Arc::clone(&ops.turn);
         let sid = sid.clone();
-        std::thread::spawn(move || sessions.say(&sid, "慢慢来", Output::Stream))
+        std::thread::spawn(move || turn.say(&sid, "慢慢来", Output::Stream))
     };
     // 生成要真的**进入模型调用**才算"在跑"：is_running 在派发时就为真，此刻 worker 还没走到通道；
     // 若这一窗口里就 stop，on(Start) 会被取消挡下、ticks 恒为 0——等 ticks 才是"可停止"的确定状态。
@@ -225,10 +221,10 @@ fn stop_takes_effect_while_generation_is_still_running() {
         assert!(Instant::now() < deadline, "生成没有进入模型调用");
         std::thread::sleep(Duration::from_millis(5));
     }
-    assert!(ops.sessions.is_running(&sid), "进入模型调用时必须标记在跑");
+    assert!(ops.turn.is_running(&sid), "进入模型调用时必须标记在跑");
 
     let stopped = Instant::now();
-    assert!(!ops.sessions.stop(&sid).is_empty(), "在跑就该停得掉");
+    assert!(!ops.turn.stop(&sid).is_empty(), "在跑就该停得掉");
     let out = worker.join().expect("生成线程");
     assert!(out.is_ok(), "停止是正常收尾，不是错误：{:?}", out.err());
     assert!(
@@ -236,7 +232,7 @@ fn stop_takes_effect_while_generation_is_still_running() {
         "停止后要立刻收尾，不能等它跑完（{:?}）",
         stopped.elapsed()
     );
-    assert!(!ops.sessions.is_running(&sid), "收尾后不再标记在跑");
+    assert!(!ops.turn.is_running(&sid), "收尾后不再标记在跑");
     assert!(ticks.load(Ordering::Relaxed) > 0, "通道确实被调用过");
     // 停止要留下可回档的内容行；原始瞬时 Notice 不得落盘（否则刷新后不可删）。
     let (_meta, events) = ops.history.open(&sid).expect("读停止后的转录");
@@ -264,7 +260,7 @@ fn stop_takes_effect_while_generation_is_still_running() {
         events
     );
     assert!(
-        ops.sessions.stop("没这个会话").is_empty(),
+        ops.turn.stop("没这个会话").is_empty(),
         "停一个没在跑的会话 = 空"
     );
 }
@@ -274,15 +270,15 @@ fn archive_stops_a_running_turn_before_rewinding() {
     use crate::capabilities::conductor::api::RewindTarget;
     let (_handle, ops, ticks) = slow_ops(vec![module_of("a")]);
     let sid = ops
-        .sessions
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
         .0
         .sid;
     let worker = {
-        let sessions = Arc::clone(&ops.sessions);
+        let turn = Arc::clone(&ops.turn);
         let sid = sid.clone();
-        std::thread::spawn(move || sessions.say(&sid, "慢慢来", Output::Stream))
+        std::thread::spawn(move || turn.say(&sid, "慢慢来", Output::Stream))
     };
     let deadline = Instant::now() + Duration::from_secs(10);
     while ticks.load(Ordering::Relaxed) == 0 {
@@ -291,12 +287,12 @@ fn archive_stops_a_running_turn_before_rewinding() {
     }
     // 在跑的时候留档：先停、再动文件，不能回"正在生成"的拒绝。
     let view = ops
-        .sessions
+        .lifecycle
         .rewind(&sid, RewindTarget::Archive(0))
         .expect("留档要把在跑的回合停下来");
     let out = worker.join().expect("被停的回合也要正常收尾");
     assert!(out.is_ok(), "停止是正常收尾：{:?}", out.err());
-    assert!(!ops.sessions.is_running(&sid), "收尾后不再标记在跑");
+    assert!(!ops.turn.is_running(&sid), "收尾后不再标记在跑");
     assert!(
         view.iter()
             .any(|v| v.get("type").and_then(|t| t.as_str()) == Some("rewind")),

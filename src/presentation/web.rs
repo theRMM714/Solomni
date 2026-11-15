@@ -384,12 +384,12 @@ pub(crate) fn route(
         }
 
         // 配置视图（会话界面之外）：能改什么、现在是什么、缺什么，一次性如实给出。
-        "session.config" => match ops.sessions.config(&sid) {
+        "session.config" => match ops.work.config(&sid) {
             Ok(config) => ok_json(json!({ "config": config })),
             Err(e) => complaint(400, e),
         },
         // 会话文件清单 + 真实根（前端 @ 菜单与长路径缩写）。
-        "session.files" => match ops.sessions.files(&sid) {
+        "session.files" => match ops.work.files(&sid) {
             Ok(v) => ok_json(
                 json!({ "work": v.work, "agents": v.agents, "roots": v.roots, "usage": v.usage }),
             ),
@@ -412,7 +412,7 @@ pub(crate) fn route(
                     _ => {}
                 }
             }
-            match ops.sessions.work_log(&sid, limit, before) {
+            match ops.work.work_log(&sid, limit, before) {
                 Ok(v) => ok_json(json!(v)),
                 Err(e) => complaint(404, e),
             }
@@ -432,11 +432,11 @@ pub(crate) fn route(
                 .map(routes::url_decode)
                 .filter(|p| !p.is_empty());
             match path {
-                Some(path) => match ops.sessions.work_commit_file(&sid, commit, &path) {
+                Some(path) => match ops.work.work_commit_file(&sid, commit, &path) {
                     Ok(v) => ok_json(json!(v)),
                     Err(e) => complaint(404, e),
                 },
-                None => match ops.sessions.work_commit_view(&sid, commit) {
+                None => match ops.work.work_commit_view(&sid, commit) {
                     Ok(v) => ok_json(json!(v)),
                     Err(e) => complaint(404, e),
                 },
@@ -538,7 +538,7 @@ pub(crate) fn route(
                 Err(e) => complaint(400, e),
             }
         }
-        "tiers" => match ops.core.tier_choices() {
+        "tiers" => match ops.work.tier_choices() {
             Ok(v) => ok_json(json!({ "tiers": v })),
             Err(e) => complaint(400, e),
         },
@@ -714,7 +714,7 @@ pub(crate) fn route(
                 Ok(m) => m,
                 Err(e) => return complaint(400, e),
             };
-            match ops.core.suggest_models(&task, mode) {
+            match ops.work.suggest_models(&task, mode) {
                 Ok(agents) => ok_json(json!({ "ok": true, "agents": agents })),
                 Err(e) => complaint(400, e),
             }
@@ -746,7 +746,7 @@ fn state_json(ops: &Ops, fence: &FenceInfo) -> Result<serde_json::Value, String>
     let history = ops.history.list()?;
     // 会话快照带上"当前等用户裁决的那张卡"：它由核心的裁决队给（与推的 decision_card 同一份事实）。
     let sessions: Vec<serde_json::Value> = ops
-        .sessions
+        .lifecycle
         .session_views(&history)?
         .into_iter()
         .map(|v| serde_json::to_value(&v).unwrap_or_else(|_| json!({})))

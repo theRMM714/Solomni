@@ -458,7 +458,7 @@ pub(crate) fn the_real_bridge_reads_catalog_and_session_messages() {
     };
     let (handle, ops) = super::super::ops_with(vec![module], vec![]);
     let (opened, _head) = ops
-        .sessions
+        .work
         .create_work(super::super::single_work("w-real", &["m1"]))
         .expect("建工作");
     let sid = opened.sid.clone();
@@ -553,7 +553,7 @@ pub(crate) fn the_real_bridge_creates_a_child_work() {
     };
     let (handle, ops) = super::super::ops_with(vec![module], vec![]);
     let (parent, _head) = ops
-        .sessions
+        .work
         .create_work(super::super::single_work("w-parent", &["m1"]))
         .expect("建父工作");
     let parent_sid = parent.sid.clone();
@@ -654,9 +654,7 @@ pub(crate) fn the_proxy_session_runs_a_turn_through_the_generic_loop() {
     let sid = handle
         .call(|core| core.create_proxy("w-proxy", 7))
         .expect("建代理会话");
-    ops.sessions
-        .say(&sid, "开始", Output::Final)
-        .expect("跑一轮");
+    ops.turn.say(&sid, "开始", Output::Final).expect("跑一轮");
 
     let (meta, events) = ops.history.open(&sid).expect("打开代理会话");
     assert_eq!(meta.mode, "proxy");
@@ -777,7 +775,7 @@ pub(crate) fn run_state_gates_dispatch_and_survives_stop_close() {
     };
     let (handle, ops) = super::super::ops_with(vec![module], vec![]);
     let (work, _) = ops
-        .sessions
+        .work
         .create_work(super::super::single_work("w-run", &["m1"]))
         .expect("建工作");
     let sid = work.sid.clone();
@@ -841,7 +839,7 @@ pub(crate) fn run_state_gates_dispatch_and_survives_stop_close() {
 
     // 继续：解冻后派发放行（这条没在等门，接着走的是"继续"）。
     let (w2, _) = ops
-        .sessions
+        .work
         .create_work(super::super::single_work("w-run-2", &["m1"]))
         .expect("建工作");
     let sid2 = w2.sid.clone();
@@ -882,7 +880,7 @@ pub(crate) fn relay_records_its_source_on_the_target() {
     };
     let (handle, ops) = super::super::ops_with(vec![module], vec![]);
     let (work, _) = ops
-        .sessions
+        .work
         .create_work(super::super::single_work("w-relay", &["m1"]))
         .expect("建工作");
     let sid = work.sid.clone();
@@ -927,7 +925,7 @@ pub(crate) fn the_real_bridge_creates_a_multi_agent_child_work() {
     };
     let (handle, ops) = super::super::ops_with(vec![module("m1"), module("m2")], vec![]);
     let (parent, _) = ops
-        .sessions
+        .work
         .create_work(super::super::single_work("w-parent-multi", &["m1"]))
         .expect("建父工作");
     let bridge: Arc<dyn ProxyHost + Send + Sync> = Arc::new(ProxyBridge::new(handle.clone()));
@@ -1027,7 +1025,7 @@ pub(crate) fn the_proxy_identity_is_the_role_prompt() {
 
     // 普通 agent 会话：环境与调用约定同一份口径，但不含代理角色的话。
     let (work, _) = ops
-        .sessions
+        .work
         .create_work(super::super::single_work("w-role-plain", &["m1"]))
         .expect("建工作");
     let plain = handle
@@ -1066,7 +1064,7 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
         workspace: None,
         workspace_grant: None,
     };
-    let (opened, _head) = ops.sessions.create_work(spec.clone()).expect("建代理会话");
+    let (opened, _head) = ops.work.create_work(spec.clone()).expect("建代理会话");
     assert!(opened.agents.is_empty(), "代理会话没有名单");
     let (meta, _) = ops.history.open(&opened.sid).expect("落盘");
     assert_eq!(meta.mode, "proxy");
@@ -1084,7 +1082,7 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
     assert!(identity.contains("你是核心代理"), "{}", identity);
     // 读模型：形态与运行态都如实给出（前端据此渲染代理会话、标出暂停 / 关闭）。
     let views = ops
-        .sessions
+        .lifecycle
         .session_views(&ops.history.list().expect("列表"))
         .expect("视图");
     let v = views
@@ -1106,7 +1104,7 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
         chara: String::new(),
     }];
     assert!(
-        ops.sessions
+        ops.work
             .create_work(bad)
             .unwrap_err()
             .contains("不接受 agent 名单")
@@ -1120,7 +1118,7 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
     let mut vm = spec;
     vm.name = "w-user-proxy-vm".to_string();
     vm.tier = Tier::Vm;
-    match ops.sessions.create_work(vm) {
+    match ops.work.create_work(vm) {
         Ok((o, _)) => {
             let (m, _) = ops.history.open(&o.sid).expect("落盘");
             assert_eq!(m.exec.tier, Tier::Vm, "用户选的档位要落盘（子工作继承它）");
@@ -1162,8 +1160,8 @@ pub(crate) fn proxy_session_exposes_context_usage() {
         workspace: None,
         workspace_grant: None,
     };
-    let sid = ops.sessions.create_work(spec).expect("建代理会话").0.sid;
-    ops.sessions
+    let sid = ops.work.create_work(spec).expect("建代理会话").0.sid;
+    ops.turn
         .say(
             &sid,
             "开始",
@@ -1171,7 +1169,7 @@ pub(crate) fn proxy_session_exposes_context_usage() {
         )
         .expect("代理一轮");
     let views = ops
-        .sessions
+        .lifecycle
         .session_views(&ops.history.list().expect("列表"))
         .expect("视图");
     let view = views
@@ -1208,7 +1206,7 @@ pub(crate) fn observe_reports_new_messages_since_the_last_cursor() {
     };
     let (handle, ops) = super::super::ops_with(vec![module], vec![]);
     let (work, _) = ops
-        .sessions
+        .work
         .create_work(super::super::single_work("w-cursor", &["m1"]))
         .expect("建工作");
     let sid = work.sid.clone();
@@ -1359,7 +1357,7 @@ pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
         ],
     );
     let (work, _) = ops
-        .sessions
+        .work
         .create_work(crate::capabilities::conductor::api::WorkSpec {
             name: "w-gate".to_string(),
             mode: WorkMode::Collab,
@@ -1375,7 +1373,7 @@ pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
         .expect("建协作工作（代拟）");
     let child = work.sid.clone();
     let card = ops
-        .sessions
+        .turn
         .open_queue(&child)
         .expect("取卡")
         .expect("挂着一张卡")
@@ -1401,7 +1399,7 @@ pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
     let want = vec![OPT_BEGIN.to_string(), OPT_BEGIN_ALLOW.to_string()];
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
-        let now = ops.sessions.open_queue(&child).expect("取卡");
+        let now = ops.turn.open_queue(&child).expect("取卡");
         let ids: Vec<String> = now
             .iter()
             .flat_map(|q| q.card.options.iter().map(|o| o.id.clone()))
@@ -1483,7 +1481,7 @@ pub(crate) fn proxy_profile_is_explicit_and_uses_a_real_private_sandbox() {
         "代理档位要显式落盘"
     );
     assert!(meta.sandbox.narrowing.is_none());
-    let cfg = ops.sessions.config(&sid).expect("配置视图");
+    let cfg = ops.work.config(&sid).expect("配置视图");
     assert_eq!(cfg.permission.profile, ProfileId::View);
     assert_eq!(cfg.permission.label, "仅可查看");
     let session = handle
@@ -1521,7 +1519,7 @@ pub(crate) fn proxy_profile_can_be_quick_switched() {
         Some(ProfileId::View)
     );
     assert_eq!(
-        ops.sessions.config(&sid).unwrap().permission.profile,
+        ops.work.config(&sid).unwrap().permission.profile,
         ProfileId::View
     );
 }

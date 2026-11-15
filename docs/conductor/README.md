@@ -16,7 +16,7 @@
 
 ## 入站契约与状态归属
 
-- 入站面：`api::SessionOps`（会话中心）、`api::ConductorOps`（协调用例）、`api::LogOps`（埋点门面）、`Ops`（组装后交给呈现层）、`ConductorHandle`（自持线程 + 命令队列 + 事件台）与队列代理。
+- 入站面：`api::WorkOps`（建工作与环境装配）、`api::TurnOps`（驱动回合与停止）、`api::LifecycleOps`（启用、回档与在世表视图）、`api::LogOps`（埋点门面）、`Ops`（组装后交给呈现层）、`ConductorHandle`（自持线程 + 命令队列 + 事件台）与队列代理。按调用角色分面，呈现层取自己那块屏幕要用的面（`docs/presentation/contracts.md`）。
 - 状态归属：会话在世表、命令队列、运行态——只有它写。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）

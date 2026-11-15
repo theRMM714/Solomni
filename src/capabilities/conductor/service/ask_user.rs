@@ -4,7 +4,7 @@
 //! 联动：走的是**同一条通道**（同一条队、同一张卡、同一条回答命令），契约见 docs/session/session-model.md 的
 //!   「请用户裁决」；队列本体在 `capabilities/session/domain/decisions.rs`，本实现由核心在生成线程上现造。
 
-use crate::capabilities::conductor::api::{ConductorHandle, SessionOps};
+use crate::capabilities::conductor::api::{ConductorHandle, TurnOps};
 use crate::capabilities::session::api::{
     AnswerSlot, DecisionDoor, Pending, SessionEvent, SlotWake,
 };

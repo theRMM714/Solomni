@@ -198,7 +198,7 @@ pub(crate) fn pick_option(card: &DecisionCard, ans: &str) -> Option<String> {
 /// 目的：裁决门：**按卡片上的选项作答**（回答回的是选项 id + 附言，不是自由文本）。 不点不继续：空输入 = 先不答（会话仍在等）。
 pub(super) fn answer_gates(ops: &Ops, sid: &str, cursor: &mut u64) {
     loop {
-        let queue = match ops.sessions.open_queue(sid) {
+        let queue = match ops.turn.open_queue(sid) {
             Ok(Some(q)) => q,
             Ok(None) => return,
             Err(e) => {
@@ -252,7 +252,7 @@ pub(super) fn wait_quiet(ops: &Ops, sid: &str, cursor: &mut u64) {
     loop {
         *cursor = drain(ops, sid, *cursor);
         let head = ops.events.head();
-        if !ops.sessions.is_running(sid) && head == last {
+        if !ops.turn.is_running(sid) && head == last {
             quiet += 1;
             if quiet >= 3 {
                 term::live_clear();
@@ -413,7 +413,7 @@ pub(crate) fn create_session_action(
     // 多个就如实说清有哪些（CLI 不代人挑），一个都没装就交给后端给"怎么补"。
     if tier == Tier::Vm {
         // 读不到清单（比如补齐面没接入）时不给 guest：交给后端按同一份清单如实拒绝。
-        if let Ok(t) = ops.core.tier_choices() {
+        if let Ok(t) = ops.work.tier_choices() {
             match pick_guest(&t.guests) {
                 Some(g) => args["guest"] = serde_json::json!(g),
                 None => {

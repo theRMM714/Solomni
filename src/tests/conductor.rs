@@ -115,12 +115,12 @@ pub(crate) fn creating_a_vm_session_does_not_block_the_core() {
     spec.guest = Some(guest.clone());
     let creator = {
         let ops = ops.clone();
-        std::thread::spawn(move || ops.sessions.create_work(spec))
+        std::thread::spawn(move || ops.work.create_work(spec))
     };
     // 让 boot 真的开始，再问核心一件小事：它必须立刻回，而不是等 400ms。
     std::thread::sleep(std::time::Duration::from_millis(80));
     let t0 = std::time::Instant::now();
-    let answered = ops.core.tier_choices();
+    let answered = ops.work.tier_choices();
     let waited = t0.elapsed();
     let created = creator.join().expect("线程没崩").expect("建会话");
     assert!(answered.is_ok(), "核心要能应答");
@@ -159,10 +159,7 @@ pub(crate) fn a_failed_guest_boot_leaves_no_session_behind() {
     let mut spec = work("w-boot-fail", WorkMode::Single, &["a"]);
     spec.tier = Tier::Vm;
     spec.guest = Some(guest);
-    let err = ops
-        .sessions
-        .create_work(spec)
-        .expect_err("起不来要如实拒绝");
+    let err = ops.work.create_work(spec).expect_err("起不来要如实拒绝");
     assert!(err.contains("起不来"), "{}", err);
     assert!(ops.history.open("w-boot-fail").is_err(), "会话记录不该留下");
     assert!(
@@ -172,7 +169,7 @@ pub(crate) fn a_failed_guest_boot_leaves_no_session_behind() {
     // 占名也要撤掉：同名重试能通过（而不是被"工作名已存在"挡住）。
     let mut again = work("w-boot-fail", WorkMode::Single, &["a"]);
     again.tier = Tier::Host;
-    ops.sessions
+    ops.work
         .create_work(again)
         .expect("同一名字在本机档上应该建得起来（失败那次没占住名字）");
 }

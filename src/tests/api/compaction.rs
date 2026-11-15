@@ -38,12 +38,12 @@ fn compacting_replaces_the_send_view_with_one_rolling_summary() {
     st.sandbox.policy.windows.write_acl = true;
     ops.registry.set_settings(st).expect("写设置");
     let sid = ops
-        .sessions
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
         .0
         .sid;
-    ops.sessions
+    ops.turn
         .say(
             &sid,
             "先做第一件事",
@@ -51,7 +51,7 @@ fn compacting_replaces_the_send_view_with_one_rolling_summary() {
         )
         .expect("说一句");
 
-    let first = ops.sessions.compact(&sid).expect("第一次压缩");
+    let first = ops.turn.compact(&sid).expect("第一次压缩");
     let (b1, head1, _o1) = handle.events().snapshot(Some(&sid), 0);
     let s1: Vec<&SessionEvent> = b1.iter().flat_map(|l| l.events.iter()).collect();
     assert!(
@@ -61,7 +61,7 @@ fn compacting_replaces_the_send_view_with_one_rolling_summary() {
         "第一次压缩该如实落一条压缩记录行（头部 {}）",
         first.head
     );
-    let second = ops.sessions.compact(&sid).expect("第二次压缩");
+    let second = ops.turn.compact(&sid).expect("第二次压缩");
     let (b2, _head2, _o2) = handle.events().snapshot(Some(&sid), head1);
     let s2: Vec<&SessionEvent> = b2.iter().flat_map(|l| l.events.iter()).collect();
     assert!(
@@ -84,7 +84,7 @@ fn compacting_replaces_the_send_view_with_one_rolling_summary() {
     );
 
     // 再走一轮：发送视图里**只剩一份摘要**（第二次那份），上一份已被取代。
-    ops.sessions
+    ops.turn
         .say(
             &sid,
             "继续",
@@ -134,19 +134,19 @@ fn auto_compaction_kicks_in_when_the_history_exceeds_the_budget() {
     st.sandbox.policy.windows.write_acl = true;
     ops.registry.set_settings(st).expect("写设置");
     let sid = ops
-        .sessions
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
         .0
         .sid;
-    ops.sessions
+    ops.turn
         .say(
             &sid,
             "先做第一件事",
             crate::capabilities::conductor::api::Output::Final,
         )
         .expect("第一轮");
-    ops.sessions
+    ops.turn
         .say(
             &sid,
             "接着做",
@@ -201,19 +201,19 @@ fn compaction_keeps_the_recent_tail_and_the_new_user_line() {
     st.sandbox.policy.windows.write_acl = true;
     ops.registry.set_settings(st).expect("写设置");
     let sid = ops
-        .sessions
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
         .0
         .sid;
-    ops.sessions
+    ops.turn
         .say(
             &sid,
             "第一句话",
             crate::capabilities::conductor::api::Output::Final,
         )
         .expect("第一轮");
-    ops.sessions
+    ops.turn
         .say(
             &sid,
             "第二句话",
@@ -262,19 +262,19 @@ fn manual_compaction_reports_when_there_is_nothing_to_compact() {
     st.sandbox.policy.windows.write_acl = true;
     ops.registry.set_settings(st).expect("写设置");
     let sid = ops
-        .sessions
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
         .0
         .sid;
-    ops.sessions
+    ops.turn
         .say(
             &sid,
             "你好",
             crate::capabilities::conductor::api::Output::Final,
         )
         .expect("第一轮");
-    ops.sessions.compact(&sid).expect("手动压缩");
+    ops.turn.compact(&sid).expect("手动压缩");
     let (batches, _, _) = handle.events().snapshot(Some(&sid), 0);
     let events: Vec<&SessionEvent> = batches.iter().flat_map(|b| b.events.iter()).collect();
     assert!(
@@ -318,12 +318,12 @@ fn slash_compact_message_runs_the_command_instead_of_the_model() {
     st.sandbox.policy.windows.write_acl = true;
     ops.registry.set_settings(st).expect("写设置");
     let sid = ops
-        .sessions
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
         .0
         .sid;
-    ops.sessions
+    ops.turn
         .say(
             &sid,
             "先说一句",
@@ -385,12 +385,12 @@ fn compact_action_takes_only_session_id() {
     st.sandbox.policy.windows.write_acl = true;
     ops.registry.set_settings(st).expect("写设置");
     let sid = ops
-        .sessions
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
         .0
         .sid;
-    ops.sessions
+    ops.turn
         .say(
             &sid,
             "先说一句",
@@ -440,12 +440,12 @@ fn lowering_keep_percent_applies_to_live_manual_compaction() {
     st.sandbox.policy.windows.write_acl = true;
     ops.registry.set_settings(st).expect("写设置");
     let sid = ops
-        .sessions
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
         .0
         .sid;
-    ops.sessions
+    ops.turn
         .say(
             &sid,
             "先说一句",
@@ -558,19 +558,19 @@ fn deleting_the_compaction_line_restores_the_full_send_view() {
     st.sandbox.policy.windows.write_acl = true;
     ops.registry.set_settings(st).expect("写设置");
     let sid = ops
-        .sessions
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
         .0
         .sid;
-    ops.sessions
+    ops.turn
         .say(
             &sid,
             "先说一句",
             crate::capabilities::conductor::api::Output::Final,
         )
         .expect("第一轮");
-    ops.sessions.compact(&sid).expect("手动压缩");
+    ops.turn.compact(&sid).expect("手动压缩");
     let (batches, _, _) = handle.events().snapshot(Some(&sid), 0);
     let marker = batches
         .iter()
@@ -582,13 +582,13 @@ fn deleting_the_compaction_line_restores_the_full_send_view() {
             _ => None,
         })
         .expect("压缩记录行");
-    ops.sessions
+    ops.lifecycle
         .rewind(
             &sid,
             crate::capabilities::conductor::api::RewindTarget::Delete(marker),
         )
         .expect("删除压缩记录行");
-    ops.sessions
+    ops.turn
         .say(
             &sid,
             "继续",
@@ -638,19 +638,19 @@ fn auto_compaction_uses_provider_usage_when_it_is_available() {
     st.sandbox.policy.windows.write_acl = true;
     ops.registry.set_settings(st).expect("写设置");
     let sid = ops
-        .sessions
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
         .0
         .sid;
-    ops.sessions
+    ops.turn
         .say(
             &sid,
             "第一句",
             crate::capabilities::conductor::api::Output::Final,
         )
         .expect("第一轮");
-    ops.sessions
+    ops.turn
         .say(
             &sid,
             "第二句",

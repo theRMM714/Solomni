@@ -112,7 +112,7 @@ fn eof_answers_a_pending_card_by_stopping_instead_of_hanging() {
 
     let (handle, ops) = ops_with(vec![module_of("a")], Vec::new());
     let sid = "cli-eof-1";
-    ops.sessions
+    ops.work
         .create_work(work(sid, WorkMode::Single, &["a"]))
         .expect("建会话");
     let door = {
@@ -135,7 +135,7 @@ fn eof_answers_a_pending_card_by_stopping_instead_of_hanging() {
         SlotWake::Stopped,
         "EOF = 停止（拒绝），不是“没人答”"
     );
-    assert!(!ops.sessions.is_running(sid), "EOF 收场后这条会话不再在跑");
+    assert!(!ops.turn.is_running(sid), "EOF 收场后这条会话不再在跑");
 }
 /// 行编辑：插入、左移、再插入与退格都按光标位置生效。
 #[test]

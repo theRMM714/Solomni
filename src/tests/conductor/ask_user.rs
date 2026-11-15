@@ -27,7 +27,7 @@ fn session_case() -> (ConductorHandle, Ops, String) {
     handle.allow_tool_cards();
     let ops = Ops::from_handle(&handle);
     let sid = ops
-        .sessions
+        .work
         .create_work(work("w", WorkMode::Single, &["a"]))
         .expect("建会话")
         .0
@@ -94,7 +94,7 @@ fn ask_pushes_a_card_and_blocks_until_the_answer_command_answers_it() {
     };
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     let queued = loop {
-        if let Ok(Some(q)) = ops.sessions.open_queue(&sid) {
+        if let Ok(Some(q)) = ops.turn.open_queue(&sid) {
             break q;
         }
         assert!(std::time::Instant::now() < deadline, "卡要进这条会话的队");
@@ -107,7 +107,7 @@ fn ask_pushes_a_card_and_blocks_until_the_answer_command_answers_it() {
         "详情要写清缺什么前提：{}",
         queued.card.message.detail
     );
-    ops.sessions
+    ops.turn
         .answer_card(&sid, &queued.card.id, OPT_FENCE_UNFENCED, "")
         .expect("按选项作答");
     while outcome.lock().expect("锁").is_none() {
@@ -163,7 +163,7 @@ fn no_options_means_halt_instead_of_asking() {
     drop(pushed);
     // 会话被停：之后的派发被拒（用户「继续」才解冻——那之前不再往下走）。
     assert!(
-        ops.sessions.say(&sid, "再来", Output::Final).is_err(),
+        ops.turn.say(&sid, "再来", Output::Final).is_err(),
         "停下的会话不再派发"
     );
     // 停过一次之后不再推卡：会话已停，再推一张没人能做主的卡只会让人困惑。

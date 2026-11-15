@@ -605,7 +605,7 @@ fn tool_layer_ask_rides_the_decision_channel() {
         }
         let ops = Ops::from_handle(&handle);
         let sid = ops
-            .sessions
+            .work
             .create_work(work("w", WorkMode::Single, &["a"]))
             .expect("建会话")
             .0
@@ -618,7 +618,7 @@ fn tool_layer_ask_rides_the_decision_channel() {
                 // 等卡进队：按墙钟上限等；固定迭代数在并行负载下会提前耗尽（不是卡没来）。
                 let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
                 loop {
-                    if let Ok(Some(q)) = ops.sessions.open_queue(&sid) {
+                    if let Ok(Some(q)) = ops.turn.open_queue(&sid) {
                         assert_eq!(
                             q.card.envelope.role, "tools",
                             "谁在问：工具层（与工具级确认同一信封）"
@@ -632,11 +632,11 @@ fn tool_layer_ask_rides_the_decision_channel() {
                         );
                         if stop {
                             // 停止 = 拒绝：整队作废，等待方解开、按拒绝收场。
-                            let _ = ops.sessions.stop(&sid);
+                            let _ = ops.turn.stop(&sid);
                             return true;
                         }
                         // 回答走**唯一那条命令**（卡号 + 选项 id），处置归发起方。
-                        ops.sessions
+                        ops.turn
                             .answer_card(&sid, &q.card.id, answer.as_deref().unwrap_or(""), "")
                             .expect("按选项作答");
                         return true;
@@ -648,9 +648,7 @@ fn tool_layer_ask_rides_the_decision_channel() {
                 }
             })
         };
-        ops.sessions
-            .say(&sid, "干活", Output::Final)
-            .expect("跑一回合");
+        ops.turn.say(&sid, "干活", Output::Final).expect("跑一回合");
         let reached = answerer.join().expect("作答线程");
         let (batches, _head, _oldest) = handle.events().snapshot(Some(&sid), 0);
         let events: Vec<SessionEvent> = batches.into_iter().flat_map(|l| l.events).collect();
@@ -864,13 +862,13 @@ fn tool_confirmation_rides_the_decision_channel() {
         handle.allow_tool_cards();
         let ops = Ops::from_handle(&handle);
         let sid = ops
-            .sessions
+            .work
             .create_work(work("w", WorkMode::Single, &["a"]))
             .expect("建会话")
             .0
             .sid;
         // 粒度与问谁走**同一条设置路**（逐 agent 覆盖写回 meta，与界面里改配置同一条命令）。
-        ops.sessions
+        ops.work
             .edit(
                 &sid,
                 SessionEdit {
@@ -898,7 +896,7 @@ fn tool_confirmation_rides_the_decision_channel() {
                 // 等卡进队：按墙钟上限等；固定迭代数在并行负载下会提前耗尽（不是卡没来）。
                 let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
                 loop {
-                    if let Ok(Some(q)) = ops.sessions.open_queue(&sid) {
+                    if let Ok(Some(q)) = ops.turn.open_queue(&sid) {
                         assert_eq!(
                             q.card
                                 .options
@@ -914,7 +912,7 @@ fn tool_confirmation_rides_the_decision_channel() {
                         );
                         assert_eq!(q.card.envelope.role, "tools", "谁在问：工具层");
                         // 回答走**唯一那条命令**（卡号 + 选项 id）。
-                        ops.sessions
+                        ops.turn
                             .answer_card(&sid, &q.card.id, &answer, "")
                             .expect("按选项作答");
                         return true;
@@ -926,12 +924,10 @@ fn tool_confirmation_rides_the_decision_channel() {
                 }
             })
         };
-        ops.sessions
-            .say(&sid, "干活", Output::Final)
-            .expect("跑一回合");
+        ops.turn.say(&sid, "干活", Output::Final).expect("跑一回合");
         assert!(answerer.join().expect("作答线程"), "工具卡要进队并等回答");
         assert!(
-            ops.sessions.open_queue(&sid).expect("取卡").is_none(),
+            ops.turn.open_queue(&sid).expect("取卡").is_none(),
             "答完不再挂着"
         );
         let (batches, _head, _oldest) = handle.events().snapshot(Some(&sid), 0);

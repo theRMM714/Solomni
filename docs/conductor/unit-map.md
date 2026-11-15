@@ -13,7 +13,7 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/capabilities/conductor.rs` | 能力入口与公开面 |
-| `src/capabilities/conductor/api.rs` | 入站契约：`SessionOps` / `ConductorOps` / `ActionOps` / `LogOps`、`Ops` 组装面与事件台（`EventBus`） |
+| `src/capabilities/conductor/api.rs` | 入站契约：`WorkOps` / `TurnOps` / `LifecycleOps` / `ActionOps` / `LogOps`、`Ops` 组装面与事件台（`EventBus`） |
 | `src/capabilities/conductor/api/action.rs` | 动作分发：参数校验 → 按 `callers` 授权 → 执行 → 审计（各只有一处） |
 | `src/capabilities/conductor/api/handle.rs` | 核心手柄：自持线程 + 命令队列 + 事件台，线程边界上的短命令（补编、回档收尾、guest 启动、启用会话）；`stop` 不进队列 |
 | `src/capabilities/conductor/api/generation.rs` | 生成的点火器：节点执行、继续、代理回合、协作推进、裁决处置各起一条脱离调用方的线程 |

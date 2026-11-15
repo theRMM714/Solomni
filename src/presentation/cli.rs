@@ -176,7 +176,7 @@ impl boot::Ask for TerminalAsk {
 /// 目的：有没有会话此刻在生成：写操作（回收 / 还原 / 补齐）在有会话在跑时只给预览。
 /// 约束：读不到会话清单按「没在跑」处理——宁可多跑一次确认问话，也不让维护命令卡在只读上。
 fn sessions_running(ops: &Ops) -> bool {
-    ops.sessions
+    ops.lifecycle
         .session_views(&[])
         .map(|views| views.iter().any(|v| v.running))
         .unwrap_or(false)

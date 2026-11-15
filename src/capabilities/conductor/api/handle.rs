@@ -179,7 +179,7 @@ impl ConductorHandle {
         Arc::clone(&self.bus)
     }
 
-    /// 目的：回档并推重置快照（`SessionOps` 与动作表共用这一条收尾）。
+    /// 目的：回档并推重置快照（`LifecycleOps::rewind` 与动作表共用这一条收尾）。
     /// 约束：回档会改写盘上转录，事件台必须同时收到 `rewound` 才能让刷新/多端重置；两个入口各写一份，迟早一处漏推。
     pub(crate) fn rewind_with_reset(
         &self,
@@ -248,7 +248,7 @@ impl ConductorHandle {
         let tree = self.call(move |core| Ok(core.subtree_of(&root_owned)))?;
         let mut stopped = Vec::new();
         for sid in tree {
-            // 在等的工具确认由「停止 = 整队作废」解开（见 SessionOps::stop），这里只管取消生成。
+            // 在等的工具确认由「停止 = 整队作废」解开（见 TurnOps::stop），这里只管取消生成。
             if self.jobs.stop(&sid) {
                 stopped.push(sid);
             }

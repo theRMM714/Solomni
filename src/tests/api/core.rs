@@ -33,7 +33,7 @@ fn commands_run_on_the_core_thread_and_changes_are_visible() {
 
     assert_eq!(ops.modules.roster().expect("清单").modules.len(), 1);
     assert!(
-        ops.core
+        ops.work
             .runtime_report(Tier::Host)
             .expect("能力报告")
             .diagnoses
@@ -49,15 +49,15 @@ fn commands_run_on_the_core_thread_and_changes_are_visible() {
 fn reads_are_not_queued_behind_a_long_generation() {
     let (_handle, ops, ticks) = slow_ops(vec![module_of("a")]);
     let sid = ops
-        .sessions
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
         .0
         .sid;
     let worker = {
-        let sessions = Arc::clone(&ops.sessions);
+        let turn = Arc::clone(&ops.turn);
         let sid = sid.clone();
-        std::thread::spawn(move || sessions.say(&sid, "慢慢来", Output::Stream))
+        std::thread::spawn(move || turn.say(&sid, "慢慢来", Output::Stream))
     };
     // 等生成真的开始（通道已经在吐片）。
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -71,7 +71,7 @@ fn reads_are_not_queued_behind_a_long_generation() {
     let read = t0.elapsed();
     let t1 = Instant::now();
     let views = ops
-        .sessions
+        .lifecycle
         .session_views(&history)
         .expect("生成期间读会话视图");
     let view = t1.elapsed();
@@ -94,11 +94,11 @@ fn reads_are_not_queued_behind_a_long_generation() {
     // 关键判据：读完成时生成**必须还在跑**。若读被排在生成后面，它只会在生成结束后返回，
     // 那时这里就是 false——这条断言让"读没排队"这件事不必靠时间阈值单独成立。
     assert!(
-        ops.sessions.is_running(&sid),
+        ops.turn.is_running(&sid),
         "读完成时生成必须仍在进行（否则读是被排队到生成结束才返回的）"
     );
 
-    ops.sessions.stop(&sid);
+    ops.turn.stop(&sid);
     let _ = worker.join().expect("生成线程");
 }
 
@@ -106,22 +106,18 @@ fn reads_are_not_queued_behind_a_long_generation() {
 fn missing_sessions_and_bad_inputs_come_back_as_errors() {
     let handle = spawn(vec![module_of("a")], Vec::new());
     let ops = Ops::from_handle(&handle);
-    assert!(
-        ops.sessions
-            .say("没这个会话", "你好", Output::Final)
-            .is_err()
-    );
-    assert!(ops.sessions.config("没这个会话").is_err());
-    assert!(ops.sessions.open_queue("没这个会话").is_err());
-    assert!(ops.sessions.files("没这个会话").is_err());
-    assert!(!ops.sessions.exists("没这个会话").expect("查存在"));
+    assert!(ops.turn.say("没这个会话", "你好", Output::Final).is_err());
+    assert!(ops.work.config("没这个会话").is_err());
+    assert!(ops.turn.open_queue("没这个会话").is_err());
+    assert!(ops.work.files("没这个会话").is_err());
+    assert!(!ops.lifecycle.exists("没这个会话").expect("查存在"));
     assert!(ops.history.open("没这个会话").is_err());
     assert!(
         ops.registry.remove_provider("没这个供应商").is_ok(),
         "删不存在的供应商返回 false，不是错误"
     );
     assert!(
-        ops.sessions
+        ops.lifecycle
             .rewind(
                 "没这个会话",
                 crate::capabilities::conductor::api::RewindTarget::Archive(0)

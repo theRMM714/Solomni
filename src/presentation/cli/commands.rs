@@ -262,7 +262,7 @@ pub(super) fn work_cmd(ops: &Ops, arg: &str) {
             .get(2)
             .and_then(|s| s.parse::<usize>().ok())
             .unwrap_or(20);
-        let log = match ops.sessions.work_log(sid, limit, None) {
+        let log = match ops.work.work_log(sid, limit, None) {
             Ok(l) => l,
             Err(e) => {
                 println!("[错误] {}", e);
@@ -303,7 +303,7 @@ pub(super) fn work_cmd(ops: &Ops, arg: &str) {
         }
     };
     match verb.as_str() {
-        "show" => match ops.sessions.work_commit_view(sid, id) {
+        "show" => match ops.work.work_commit_view(sid, id) {
             Ok(c) => {
                 println!(
                     "提交 #{}（{}，{}）：{}",
@@ -331,7 +331,7 @@ pub(super) fn work_cmd(ops: &Ops, arg: &str) {
             Err(e) => println!("[错误] {}", e),
         },
         "restore" => {
-            let log = match ops.sessions.work_log(sid, 1, None) {
+            let log = match ops.work.work_log(sid, 1, None) {
                 Ok(l) => l,
                 Err(e) => {
                     println!("[错误] {}", e);
@@ -339,7 +339,7 @@ pub(super) fn work_cmd(ops: &Ops, arg: &str) {
                 }
             };
             let head = log.head.as_ref().map(|h| h.id).unwrap_or(0);
-            let target = match ops.sessions.work_commit_view(sid, id) {
+            let target = match ops.work.work_commit_view(sid, id) {
                 Ok(c) => c,
                 Err(e) => {
                     println!("[错误] {}", e);

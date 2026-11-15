@@ -93,7 +93,7 @@ fn suggest_models_pushes_on_a_system_session_and_leaves_no_trace() {
     );
     let ops = Ops::from_handle(&handle);
     let agents = ops
-        .core
+        .work
         .suggest_models("做个东西", WorkMode::Collab)
         .expect("核心推荐");
     assert_eq!(agents.len(), 1, "回包只给名单（渲染那一步的契约不变）");
@@ -111,7 +111,7 @@ fn suggest_models_pushes_on_a_system_session_and_leaves_no_trace() {
         "系统会话只推不留：推荐没有工作区，不该落盘"
     );
     assert!(
-        !ops.sessions
+        !ops.lifecycle
             .session_views(&[])
             .expect("会话视图")
             .iter()
@@ -147,7 +147,7 @@ fn pick_agents_names_the_unknown_and_lists_the_rest() {
 fn act_dispatches_to_the_two_result_shapes() {
     let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
     let sid = ops
-        .sessions
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
         .0

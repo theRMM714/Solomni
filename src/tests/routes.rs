@@ -4,8 +4,8 @@
 //! 联动：web::route、路由目录、docs/、演示脚本、FakeOps。
 
 use crate::capabilities::conductor::api::{
-    Acted, ActionCall, ActionOps, ActionView, Advance, Caller, ConductorOps, EventBus, Ops, Output,
-    SessionOps,
+    Acted, ActionCall, ActionOps, ActionView, Advance, Caller, EventBus, LifecycleOps, Ops, Output,
+    TurnOps, WorkOps,
 };
 use crate::capabilities::conductor::api::{
     AgentSuggestion, ConfigAgent, DecisionQueue, FilesAgentView, FilesRootsView, FilesView,
@@ -173,10 +173,11 @@ impl crate::capabilities::provision::api::Provision for FakeProvision {
 fn fake_ops(fail: Option<&str>) -> Ops {
     let f = Arc::new(FakeOps::new(fail));
     Ops {
-        sessions: f.clone(),
+        work: f.clone(),
+        turn: f.clone(),
+        lifecycle: f.clone(),
         registry: f.clone(),
         history: f.clone(),
-        core: f.clone(),
         modules: f.clone(),
         actions: f.clone(),
         events: EventBus::new(),
@@ -243,7 +244,7 @@ fn meta(name: &str) -> SessionMeta {
     }
 }
 
-impl SessionOps for FakeOps {
+impl WorkOps for FakeOps {
     fn create_work(&self, _spec: WorkSpec) -> Result<(WorkOpened, u64), String> {
         self.guard()?;
         Ok((
@@ -257,95 +258,10 @@ impl SessionOps for FakeOps {
             7,
         ))
     }
-    fn say(&self, _sid: &str, _text: &str, _out: Output) -> Result<Advance, String> {
-        // 命令回包只给事件台头部序号：事实由长轮询按 since 订阅。
-        self.guard()?;
-        Ok(Advance { head: 7 })
+    fn unique_work_name(&self, _base: &str, fallback: &str) -> Result<String, String> {
+        Ok(fallback.to_string())
     }
-    fn activate(&self, _sid: &str) -> Result<SessionView, String> {
-        self.guard()?;
-        Ok(SessionView {
-            sid: "w1".to_string(),
-            mode: "single".to_string(),
-            done: false,
-            tier: "host".to_string(),
-            tier_ready: true,
-            tier_missing: Vec::new(),
-            permission_profile: "workspace".to_string(),
-            permission_label: "工作区内修改".to_string(),
-            context_freshness: false,
-            thinking: crate::capabilities::conductor::api::ThinkingView {
-                level: None,
-                default_level: None,
-                label: "未设置".to_string(),
-                options: Vec::new(),
-                note: String::new(),
-            },
-            permission_narrowed: false,
-            permission_parent: None,
-            running: false,
-            can_update_task: false,
-            run: "active".to_string(),
-            pending: None,
-            continue_action: None,
-            context: None,
-            shell: None,
-            workspace: None,
-            workspace_missing: false,
-        })
-    }
-    fn continue_flow(&self, _sid: &str, _out: Output) -> Result<Advance, String> {
-        self.guard()?;
-        Ok(Advance { head: 8 })
-    }
-    fn set_task(&self, _sid: &str, _text: &str) -> Result<Advance, String> {
-        self.guard()?;
-        Ok(Advance { head: 9 })
-    }
-    fn answer_card(
-        &self,
-        _sid: &str,
-        _card: &str,
-        _option: &str,
-        _note: &str,
-    ) -> Result<Advance, String> {
-        self.guard()?;
-        Ok(Advance { head: 10 })
-    }
-    /// 假卡：路由契约测试只盯形状——封套 / 消息 / 选项都在（队列里只有它一张）。
-    fn open_queue(&self, sid: &str) -> Result<Option<DecisionQueue>, String> {
-        self.guard()?;
-        Ok(Some(DecisionQueue {
-            card: serde_json::from_value(json!({
-                "id": format!("d1-{}", sid),
-                "envelope": { "role": "core", "name": "核心" },
-                "message": { "title": "要不要继续？", "body": "假能力面", "detail": "" },
-                "options": [{ "id": "go", "label": "继续" }],
-            }))
-            .expect("假卡形状"),
-            waiting: Vec::new(),
-        }))
-    }
-    fn withdraw_agree(&self, _sid: &str, _agent: &str) -> Result<Advance, String> {
-        self.guard()?;
-        Ok(Advance { head: 10 })
-    }
-    fn compact(&self, _sid: &str) -> Result<crate::capabilities::conductor::api::Advance, String> {
-        self.guard()?;
-        Ok(crate::capabilities::conductor::api::Advance { head: 0 })
-    }
-    fn rewind(
-        &self,
-        _sid: &str,
-        _target: crate::capabilities::conductor::api::RewindTarget,
-    ) -> Result<Vec<serde_json::Value>, String> {
-        self.guard()?;
-        Ok(vec![json!({ "type": "line", "line": "重放" })])
-    }
-    fn update_task(&self, _sid: &str, _text: &str) -> Result<Vec<serde_json::Value>, String> {
-        self.guard()?;
-        Ok(vec![json!({ "type": "line", "line": "重放" })])
-    }
+
     fn config(&self, _sid: &str) -> Result<SessionConfig, String> {
         self.guard()?;
         Ok(SessionConfig {
@@ -503,13 +419,79 @@ impl SessionOps for FakeOps {
             too_large: false,
         })
     }
-    fn unique_work_name(&self, _base: &str, fallback: &str) -> Result<String, String> {
-        Ok(fallback.to_string())
-    }
-
-    fn exists(&self, _sid: &str) -> Result<bool, String> {
+    fn runtime_report(&self, _tier: Tier) -> Result<RuntimeReport, String> {
         self.guard()?;
-        Ok(true)
+        Ok(report())
+    }
+    fn tier_choices(&self) -> Result<TierChoices, String> {
+        self.guard()?;
+        Ok(TierChoices {
+            default: "host".to_string(),
+            vm_available: false,
+            vm_unavailable_reason: "guest 本体尚未接入".to_string(),
+            vm_requirements: Vec::new(),
+            guests: Vec::new(),
+            available: BTreeMap::new(),
+        })
+    }
+    fn suggest_models(&self, _task: &str, _mode: WorkMode) -> Result<Vec<AgentSuggestion>, String> {
+        self.guard()?;
+        Ok(vec![AgentSuggestion {
+            name: "甲".to_string(),
+            modules: vec!["m".to_string()],
+            model: "m1".to_string(),
+            why: "因为".to_string(),
+            reuse: false,
+            chara: String::new(),
+        }])
+    }
+}
+
+impl TurnOps for FakeOps {
+    fn say(&self, _sid: &str, _text: &str, _out: Output) -> Result<Advance, String> {
+        // 命令回包只给事件台头部序号：事实由长轮询按 since 订阅。
+        self.guard()?;
+        Ok(Advance { head: 7 })
+    }
+    fn continue_flow(&self, _sid: &str, _out: Output) -> Result<Advance, String> {
+        self.guard()?;
+        Ok(Advance { head: 8 })
+    }
+    fn set_task(&self, _sid: &str, _text: &str) -> Result<Advance, String> {
+        self.guard()?;
+        Ok(Advance { head: 9 })
+    }
+    fn update_task(&self, _sid: &str, _text: &str) -> Result<Vec<serde_json::Value>, String> {
+        self.guard()?;
+        Ok(vec![json!({ "type": "line", "line": "重放" })])
+    }
+    fn answer_card(
+        &self,
+        _sid: &str,
+        _card: &str,
+        _option: &str,
+        _note: &str,
+    ) -> Result<Advance, String> {
+        self.guard()?;
+        Ok(Advance { head: 10 })
+    }
+    /// 假卡：路由契约测试只盯形状——封套 / 消息 / 选项都在（队列里只有它一张）。
+    fn open_queue(&self, sid: &str) -> Result<Option<DecisionQueue>, String> {
+        self.guard()?;
+        Ok(Some(DecisionQueue {
+            card: serde_json::from_value(json!({
+                "id": format!("d1-{}", sid),
+                "envelope": { "role": "core", "name": "核心" },
+                "message": { "title": "要不要继续？", "body": "假能力面", "detail": "" },
+                "options": [{ "id": "go", "label": "继续" }],
+            }))
+            .expect("假卡形状"),
+            waiting: Vec::new(),
+        }))
+    }
+    fn withdraw_agree(&self, _sid: &str, _agent: &str) -> Result<Advance, String> {
+        self.guard()?;
+        Ok(Advance { head: 10 })
     }
     fn stop(&self, _sid: &str) -> Vec<String> {
         self.running.swap(false, Ordering::Relaxed);
@@ -519,6 +501,57 @@ impl SessionOps for FakeOps {
         self.running.load(Ordering::Relaxed)
     }
 
+    fn compact(&self, _sid: &str) -> Result<crate::capabilities::conductor::api::Advance, String> {
+        self.guard()?;
+        Ok(crate::capabilities::conductor::api::Advance { head: 0 })
+    }
+}
+
+impl LifecycleOps for FakeOps {
+    fn activate(&self, _sid: &str) -> Result<SessionView, String> {
+        self.guard()?;
+        Ok(SessionView {
+            sid: "w1".to_string(),
+            mode: "single".to_string(),
+            done: false,
+            tier: "host".to_string(),
+            tier_ready: true,
+            tier_missing: Vec::new(),
+            permission_profile: "workspace".to_string(),
+            permission_label: "工作区内修改".to_string(),
+            context_freshness: false,
+            thinking: crate::capabilities::conductor::api::ThinkingView {
+                level: None,
+                default_level: None,
+                label: "未设置".to_string(),
+                options: Vec::new(),
+                note: String::new(),
+            },
+            permission_narrowed: false,
+            permission_parent: None,
+            running: false,
+            can_update_task: false,
+            run: "active".to_string(),
+            pending: None,
+            continue_action: None,
+            context: None,
+            shell: None,
+            workspace: None,
+            workspace_missing: false,
+        })
+    }
+    fn rewind(
+        &self,
+        _sid: &str,
+        _target: crate::capabilities::conductor::api::RewindTarget,
+    ) -> Result<Vec<serde_json::Value>, String> {
+        self.guard()?;
+        Ok(vec![json!({ "type": "line", "line": "重放" })])
+    }
+    fn exists(&self, _sid: &str) -> Result<bool, String> {
+        self.guard()?;
+        Ok(true)
+    }
     fn session_views(&self, history: &[HistoryView]) -> Result<Vec<SessionView>, String> {
         self.guard()?;
         Ok(history
@@ -728,35 +761,6 @@ impl ModulesOps for FakeOps {
     fn service_enabled(&self, _module: &str, _service: &str) -> Result<bool, String> {
         self.guard()?;
         Ok(false)
-    }
-}
-
-impl ConductorOps for FakeOps {
-    fn runtime_report(&self, _tier: Tier) -> Result<RuntimeReport, String> {
-        self.guard()?;
-        Ok(report())
-    }
-    fn tier_choices(&self) -> Result<TierChoices, String> {
-        self.guard()?;
-        Ok(TierChoices {
-            default: "host".to_string(),
-            vm_available: false,
-            vm_unavailable_reason: "guest 本体尚未接入".to_string(),
-            vm_requirements: Vec::new(),
-            guests: Vec::new(),
-            available: BTreeMap::new(),
-        })
-    }
-    fn suggest_models(&self, _task: &str, _mode: WorkMode) -> Result<Vec<AgentSuggestion>, String> {
-        self.guard()?;
-        Ok(vec![AgentSuggestion {
-            name: "甲".to_string(),
-            modules: vec!["m".to_string()],
-            model: "m1".to_string(),
-            why: "因为".to_string(),
-            reuse: false,
-            chara: String::new(),
-        }])
     }
 }
 

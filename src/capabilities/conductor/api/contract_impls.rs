@@ -13,7 +13,7 @@ use crate::capabilities::session::api::{HistoryView, RunState, SessionMeta};
 pub use crate::kernel::api::Tier;
 use std::sync::Arc;
 
-impl SessionOps for ConductorHandle {
+impl WorkOps for ConductorHandle {
     fn create_work(&self, spec: WorkSpec) -> Result<(WorkOpened, u64), String> {
         let bus = Arc::clone(&self.bus);
         // 先补编：名单里声明了 `build:` 的模块若在目标环境还没有入口，就在这一段（调用方线程）编好。
@@ -44,12 +44,98 @@ impl SessionOps for ConductorHandle {
         Ok((opened, head))
     }
 
-    fn say(&self, sid: &str, text: &str, out: Output) -> Result<Advance, String> {
-        self.single_generation(sid, Some(text.to_string()), out)
+    fn unique_work_name(&self, base: &str, fallback: &str) -> Result<String, String> {
+        let (base, fallback) = (base.to_string(), fallback.to_string());
+        self.call(move |core| Ok(core.unique_work_name(&base, &fallback)))
     }
 
-    fn activate(&self, sid: &str) -> Result<SessionView, String> {
-        self.activate_session(sid)
+    fn config(&self, sid: &str) -> Result<SessionConfig, String> {
+        let sid = sid.to_string();
+        self.call(move |core| core.session_config(&sid))
+    }
+
+    fn edit(&self, sid: &str, edit: SessionEdit) -> Result<(), String> {
+        // 两段：核心校验 + 出计划；停旧 guest / 起新的要等（秒级到分钟级），在这一段上跑。
+        let (prepared, job) = self.call({
+            let sid = sid.to_string();
+            let edit = edit.clone();
+            move |core| core.prepare_edit(&sid, edit)
+        })?;
+        if let Some(job) = job {
+            // 失败什么都不改：meta 还没落盘。
+            job.run()?;
+        }
+        self.call(move |core| core.commit_edit(prepared))
+    }
+
+    fn upload(&self, sid: &str, name: &str, bytes: &[u8], overwrite: bool) -> Result<bool, String> {
+        let sid = sid.to_string();
+        let name = name.to_string();
+        let bytes = bytes.to_vec();
+        self.call(move |core| core.work_upload(&sid, &name, &bytes, overwrite))
+    }
+
+    fn files(&self, sid: &str) -> Result<FilesView, String> {
+        let sid = sid.to_string();
+        self.call(move |core| core.files_view(&sid))
+    }
+
+    fn work_log(
+        &self,
+        sid: &str,
+        limit: usize,
+        before: Option<u64>,
+    ) -> Result<crate::capabilities::workspace::api::WorkLog, String> {
+        let sid = sid.to_string();
+        self.call(move |core| core.work_log(&sid, limit, before))
+    }
+
+    fn work_commit_view(
+        &self,
+        sid: &str,
+        commit: u64,
+    ) -> Result<crate::capabilities::workspace::api::CommitDetail, String> {
+        let sid = sid.to_string();
+        self.call(move |core| core.work_commit_view(&sid, commit))
+    }
+
+    fn work_commit_file(
+        &self,
+        sid: &str,
+        commit: u64,
+        path: &str,
+    ) -> Result<crate::capabilities::workspace::api::CommitFileView, String> {
+        let sid = sid.to_string();
+        let path = path.to_string();
+        self.call(move |core| core.work_commit_file(&sid, commit, &path))
+    }
+
+    fn runtime_report(&self, tier: Tier) -> Result<RuntimeReport, String> {
+        self.call(move |core| Ok(core.runtime_report(tier)))
+    }
+
+    fn tier_choices(&self) -> Result<TierChoices, String> {
+        self.call(|core| Ok(core.tier_choices()))
+    }
+
+    fn suggest_models(&self, task: &str, mode: WorkMode) -> Result<Vec<AgentSuggestion>, String> {
+        let task = task.to_string();
+        let (agents, rows) = self.call(move |core| core.suggest_models(&task, mode))?;
+        // 核心的行**照推**（推是底层收发消息的统一定律，一次推荐也不例外），推到系统会话：
+        // 它不在任何会话表里，前端因此不会为它建标签页；落盘策略是 Drop（只推不留）。
+        if !rows.is_empty() {
+            self.bus.push(
+                crate::capabilities::conductor::service::SYSTEM_SID_SUGGEST,
+                &rows,
+            );
+        }
+        Ok(agents)
+    }
+}
+
+impl TurnOps for ConductorHandle {
+    fn say(&self, sid: &str, text: &str, out: Output) -> Result<Advance, String> {
+        self.single_generation(sid, Some(text.to_string()), out)
     }
 
     fn continue_flow(&self, sid: &str, out: Output) -> Result<Advance, String> {
@@ -146,14 +232,6 @@ impl SessionOps for ConductorHandle {
         })
     }
 
-    fn compact(&self, sid: &str) -> Result<Advance, String> {
-        ConductorHandle::compact(self, sid)
-    }
-
-    fn rewind(&self, sid: &str, target: RewindTarget) -> Result<Vec<serde_json::Value>, String> {
-        Ok(self.rewind_with_reset(sid, target, false)?.main)
-    }
-
     fn update_task(&self, sid: &str, text: &str) -> Result<Vec<serde_json::Value>, String> {
         let sid = sid.to_string();
         let text = text.to_string();
@@ -167,75 +245,8 @@ impl SessionOps for ConductorHandle {
         Ok(outcome.main)
     }
 
-    fn config(&self, sid: &str) -> Result<SessionConfig, String> {
-        let sid = sid.to_string();
-        self.call(move |core| core.session_config(&sid))
-    }
-
-    fn edit(&self, sid: &str, edit: SessionEdit) -> Result<(), String> {
-        // 两段：核心校验 + 出计划；停旧 guest / 起新的要等（秒级到分钟级），在这一段上跑。
-        let (prepared, job) = self.call({
-            let sid = sid.to_string();
-            let edit = edit.clone();
-            move |core| core.prepare_edit(&sid, edit)
-        })?;
-        if let Some(job) = job {
-            // 失败什么都不改：meta 还没落盘。
-            job.run()?;
-        }
-        self.call(move |core| core.commit_edit(prepared))
-    }
-
-    fn upload(&self, sid: &str, name: &str, bytes: &[u8], overwrite: bool) -> Result<bool, String> {
-        let sid = sid.to_string();
-        let name = name.to_string();
-        let bytes = bytes.to_vec();
-        self.call(move |core| core.work_upload(&sid, &name, &bytes, overwrite))
-    }
-
-    fn files(&self, sid: &str) -> Result<FilesView, String> {
-        let sid = sid.to_string();
-        self.call(move |core| core.files_view(&sid))
-    }
-
-    fn work_log(
-        &self,
-        sid: &str,
-        limit: usize,
-        before: Option<u64>,
-    ) -> Result<crate::capabilities::workspace::api::WorkLog, String> {
-        let sid = sid.to_string();
-        self.call(move |core| core.work_log(&sid, limit, before))
-    }
-
-    fn work_commit_view(
-        &self,
-        sid: &str,
-        commit: u64,
-    ) -> Result<crate::capabilities::workspace::api::CommitDetail, String> {
-        let sid = sid.to_string();
-        self.call(move |core| core.work_commit_view(&sid, commit))
-    }
-
-    fn work_commit_file(
-        &self,
-        sid: &str,
-        commit: u64,
-        path: &str,
-    ) -> Result<crate::capabilities::workspace::api::CommitFileView, String> {
-        let sid = sid.to_string();
-        let path = path.to_string();
-        self.call(move |core| core.work_commit_file(&sid, commit, &path))
-    }
-
-    fn exists(&self, sid: &str) -> Result<bool, String> {
-        let sid = sid.to_string();
-        self.call(move |core| Ok(core.session_exists(&sid)))
-    }
-
-    fn unique_work_name(&self, base: &str, fallback: &str) -> Result<String, String> {
-        let (base, fallback) = (base.to_string(), fallback.to_string());
-        self.call(move |core| Ok(core.unique_work_name(&base, &fallback)))
+    fn compact(&self, sid: &str) -> Result<Advance, String> {
+        ConductorHandle::compact(self, sid)
     }
 
     /// 停止 = **把整棵子树落成「已停止」**（拦住之后的一切派发与唤醒），再取消正在跑的生成；
@@ -252,6 +263,21 @@ impl SessionOps for ConductorHandle {
 
     fn is_running(&self, sid: &str) -> bool {
         self.jobs.is_running(sid)
+    }
+}
+
+impl LifecycleOps for ConductorHandle {
+    fn activate(&self, sid: &str) -> Result<SessionView, String> {
+        self.activate_session(sid)
+    }
+
+    fn rewind(&self, sid: &str, target: RewindTarget) -> Result<Vec<serde_json::Value>, String> {
+        Ok(self.rewind_with_reset(sid, target, false)?.main)
+    }
+
+    fn exists(&self, sid: &str) -> Result<bool, String> {
+        let sid = sid.to_string();
+        self.call(move |core| Ok(core.session_exists(&sid)))
     }
 
     fn session_views(&self, history: &[HistoryView]) -> Result<Vec<SessionView>, String> {
@@ -412,29 +438,6 @@ impl crate::capabilities::modules::api::ModulesOps for ConductorHandle {
         let module = module.to_string();
         let service = service.to_string();
         self.call(move |core| Ok(core.service_enabled(&module, &service)))
-    }
-}
-
-impl ConductorOps for ConductorHandle {
-    fn runtime_report(&self, tier: Tier) -> Result<RuntimeReport, String> {
-        self.call(move |core| Ok(core.runtime_report(tier)))
-    }
-
-    fn tier_choices(&self) -> Result<TierChoices, String> {
-        self.call(|core| Ok(core.tier_choices()))
-    }
-    fn suggest_models(&self, task: &str, mode: WorkMode) -> Result<Vec<AgentSuggestion>, String> {
-        let task = task.to_string();
-        let (agents, rows) = self.call(move |core| core.suggest_models(&task, mode))?;
-        // 核心的行**照推**（推是底层收发消息的统一定律，一次推荐也不例外），推到系统会话：
-        // 它不在任何会话表里，前端因此不会为它建标签页；落盘策略是 Drop（只推不留）。
-        if !rows.is_empty() {
-            self.bus.push(
-                crate::capabilities::conductor::service::SYSTEM_SID_SUGGEST,
-                &rows,
-            );
-        }
-        Ok(agents)
     }
 }
 

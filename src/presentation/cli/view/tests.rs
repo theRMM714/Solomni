@@ -1,12 +1,12 @@
 //! 目的：终端渲染的用例与替身：启动页、花名册、菜单、事件词汇的逐行断言。
-//! 管：造核心/模块/登记处替身与事件夹具，并用 `term::capture` 断言行文。
+//! 管：造工作面/模块/登记处替身与事件夹具，并用 `term::capture` 断言行文。
 //! 不管：生产渲染实现、交互流程与命令解析。
 //! 联动：`cli/view.rs`、`cli/term.rs`、`cli/theme.rs`、`docs/presentation/cli/unit-map.md`
 
 use super::*;
 use crate::capabilities::conductor::api::{
-    AgentSuggestion, ConductorHandle, ConductorOps, RuntimeDiagnosis, RuntimeReport, TierChoices,
-    WorkMode,
+    AgentSuggestion, ConductorHandle, FilesView, RuntimeDiagnosis, RuntimeReport, SessionConfig,
+    SessionEdit, TierChoices, WorkMode, WorkOpened, WorkOps, WorkSpec,
 };
 use crate::capabilities::llm::api::{ProbeOutcome, ReplayReport};
 use crate::capabilities::modules::api::{ModulesOps, Roster};
@@ -18,6 +18,7 @@ use crate::capabilities::session::domain::events::{
     DecisionAnswer, DecisionEnvelope, DecisionMessage,
 };
 use crate::capabilities::taskchain::api::{NodeStatus, TaskChain, TaskNode};
+use crate::capabilities::workspace::api::{CommitDetail, CommitFileView, WorkLog};
 use crate::tests::doubles::{
     InMemorySettings, core_with_settings_modules, module_of, module_with_runtimes,
 };
@@ -245,9 +246,37 @@ fn vocabulary() -> Vec<SessionEvent> {
         },
     ]
 }
-/// 目的：核心替身：运行报告由用例指定（覆盖报告各分区与报告失败）。
-struct FakeCore(Result<RuntimeReport, String>);
-impl ConductorOps for FakeCore {
+/// 目的：工作面替身：运行报告由用例指定（覆盖报告各分区与报告失败）。
+/// 约束：这些用例只碰运行报告与档位，其余工作面一格都不到——真调到了就当场炸，别静默放过。
+struct FakeWork(Result<RuntimeReport, String>);
+impl WorkOps for FakeWork {
+    fn create_work(&self, _: WorkSpec) -> Result<(WorkOpened, u64), String> {
+        unimplemented!("工作面替身不建工作")
+    }
+    fn unique_work_name(&self, _: &str, _: &str) -> Result<String, String> {
+        unimplemented!("工作面替身不取名")
+    }
+    fn config(&self, _: &str) -> Result<SessionConfig, String> {
+        unimplemented!("工作面替身不读配置")
+    }
+    fn edit(&self, _: &str, _: SessionEdit) -> Result<(), String> {
+        unimplemented!("工作面替身不改配置")
+    }
+    fn upload(&self, _: &str, _: &str, _: &[u8], _: bool) -> Result<bool, String> {
+        unimplemented!("工作面替身不投喂文件")
+    }
+    fn files(&self, _: &str) -> Result<FilesView, String> {
+        unimplemented!("工作面替身不列文件")
+    }
+    fn work_log(&self, _: &str, _: usize, _: Option<u64>) -> Result<WorkLog, String> {
+        unimplemented!("工作面替身不读提交历史")
+    }
+    fn work_commit_view(&self, _: &str, _: u64) -> Result<CommitDetail, String> {
+        unimplemented!("工作面替身不读提交详情")
+    }
+    fn work_commit_file(&self, _: &str, _: u64, _: &str) -> Result<CommitFileView, String> {
+        unimplemented!("工作面替身不读提交文件")
+    }
     fn runtime_report(&self, _: Tier) -> Result<RuntimeReport, String> {
         self.0.clone()
     }
@@ -356,7 +385,7 @@ fn print_roster_covers_discovery_and_report_sections() {
     assert!(has(&lines, "a 的能力") && has(&lines, "运行能力 qemu"));
     let (_h, mut ops) = ops_with(vec![module_of("a")], Vec::new());
     ui(false);
-    ops.core = Arc::new(FakeCore(Ok(report())));
+    ops.work = Arc::new(FakeWork(Ok(report())));
     let rows = said(|| print_roster(&ops));
     let needles = concat!(
         "[拒收] 坏的清单|",
@@ -380,7 +409,7 @@ fn print_roster_and_menu_report_read_errors() {
     ops.modules = Arc::new(BrokenModules);
     assert!(has(&said(|| print_roster(&ops)), "[错误] 模块坏了"));
     let (_h, mut ops) = ops_with(vec![module_of("a")], Vec::new());
-    ops.core = Arc::new(FakeCore(Err("报告坏了".into())));
+    ops.work = Arc::new(FakeWork(Err("报告坏了".into())));
     assert!(has(&said(|| print_roster(&ops)), "[错误] 报告坏了"));
     let (_h, mut ops) = ops_with(vec![module_of("a")], Vec::new());
     ops.registry = Arc::new(BrokenRegistry);

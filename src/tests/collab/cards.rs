@@ -284,7 +284,7 @@ pub(crate) fn snapshot_pending_is_the_same_fact_as_the_pushed_card() {
         workspace: None,
         workspace_grant: None,
     };
-    let opened = ops.sessions.create_work(spec).expect("建协作工作");
+    let opened = ops.work.create_work(spec).expect("建协作工作");
     let sid = opened.0.sid.clone();
     let pushed: Vec<serde_json::Value> = ops
         .events
@@ -297,7 +297,7 @@ pub(crate) fn snapshot_pending_is_the_same_fact_as_the_pushed_card() {
     assert_eq!(pushed.len(), 1, "开场该推一张卡：{:?}", pushed);
     let history = ops.history.list().expect("列历史");
     let view = ops
-        .sessions
+        .lifecycle
         .session_views(&history)
         .expect("会话视图")
         .into_iter()
@@ -506,15 +506,15 @@ pub(crate) fn stopping_voids_the_whole_queue_and_persists_it() {
         workspace: None,
         workspace_grant: None,
     };
-    let opened = ops.sessions.create_work(spec).expect("建协作工作");
+    let opened = ops.work.create_work(spec).expect("建协作工作");
     let sid = opened.0.sid.clone();
-    ops.sessions
+    ops.turn
         .set_task(&sid, "第二个需求")
         .expect("再写一次需求（第二个发起方）");
     // 快照也带队列形态：刷新页面照样看得到「前面还排着几条」。
     let history = ops.history.list().expect("列历史");
     let view = ops
-        .sessions
+        .lifecycle
         .session_views(&history)
         .expect("会话视图")
         .into_iter()
@@ -530,9 +530,9 @@ pub(crate) fn stopping_voids_the_whole_queue_and_persists_it() {
         snap
     );
     // 用户按停止：整队作废。
-    ops.sessions.stop(&sid);
+    ops.turn.stop(&sid);
     assert!(
-        ops.sessions.open_queue(&sid).expect("取卡").is_none(),
+        ops.turn.open_queue(&sid).expect("取卡").is_none(),
         "作废之后没有挂起的卡（等待方解开，不是永远挂着）"
     );
     let on_bus: Vec<serde_json::Value> = ops
@@ -588,11 +588,11 @@ pub(crate) fn stopping_voids_the_whole_queue_and_persists_it() {
         q.card.options
     );
     // 「继续」：那一关还挂在状态上，续一张**新卡**接着问（停止 = 拒绝，不是放行）。
-    ops.sessions
+    ops.turn
         .continue_flow(&sid, crate::capabilities::conductor::api::Output::Final)
         .expect("停止之后必须能继续");
     let again = ops
-        .sessions
+        .turn
         .open_queue(&sid)
         .expect("取卡")
         .expect("续一张新卡接着问");

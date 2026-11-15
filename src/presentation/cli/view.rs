@@ -70,7 +70,7 @@ pub(super) fn print_roster(ops: &Ops) {
         }
     };
     // 运行能力报告与模块清单同源：按默认执行档位如实报（缺包不是崩溃，工具按档位不可用）。
-    let report = match ops.core.runtime_report(tier) {
+    let report = match ops.work.runtime_report(tier) {
         Ok(r) => r,
         Err(e) => {
             term::say(&format!("[错误] {}", e));

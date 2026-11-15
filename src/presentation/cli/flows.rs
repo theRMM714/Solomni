@@ -30,7 +30,7 @@ pub(super) fn single_flow(ops: &Ops, arg: &str) {
             }
         }
     };
-    let work_name = match ops.sessions.unique_work_name("single", "single") {
+    let work_name = match ops.work.unique_work_name("single", "single") {
         Ok(n) => n,
         Err(e) => {
             println!("[错误] {}", e);
@@ -78,7 +78,7 @@ pub(super) fn single_flow(ops: &Ops, arg: &str) {
 
 /// 目的：把决定权整块交给核心：**没有名单**（核心自己挑人、建子工作），接着就是跟它对话。 选这一形态本身就是**授予全权**（`WorkMode::Proxy` → `meta.delegation`）。
 pub(super) fn proxy_flow(ops: &Ops) {
-    let work_name = match ops.sessions.unique_work_name("proxy", "proxy") {
+    let work_name = match ops.work.unique_work_name("proxy", "proxy") {
         Ok(n) => n,
         Err(e) => {
             println!("[错误] {}", e);
@@ -138,7 +138,7 @@ pub(super) fn collab_flow(ops: &Ops, arg: &str) {
             }
         }
     };
-    let work_name = match ops.sessions.unique_work_name("collab", "collab") {
+    let work_name = match ops.work.unique_work_name("collab", "collab") {
         Ok(n) => n,
         Err(e) => {
             println!("[错误] {}", e);
@@ -290,7 +290,7 @@ pub(super) fn core_flow(ops: &Ops, arg: &str) {
 /// 约束：停止 = 拒绝（整队作废）；不套用发起方声明的默认项——那会把"没人答"变成放行。
 pub(crate) fn eof_stop(ops: &Ops, sid: &str) -> bool {
     println!("[提示] 输入已到尽头：挂着的裁决按「停止 = 拒绝」收场，这一趟不继续。");
-    !ops.sessions.stop(sid).is_empty()
+    !ops.turn.stop(sid).is_empty()
 }
 
 /// 目的：读一行输入；**读到尽头（EOF）给 `None`**——"用户不在键盘前"与"用户先不答"是两件事。
