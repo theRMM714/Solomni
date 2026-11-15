@@ -3,7 +3,7 @@
 //! 不管：命令有哪些（在 systools/commands.yaml）、业务规则与确认门槛的判据（在 system 能力）、装配（在 entry::assembly）。
 //! 联动：命令行由 main 调 `run`（没人可问，缺 --yes 只预览）；转录中心由 presentation::cli 调 `run_asked` 并接管确认；两端一致性由 src/tests/commands.rs 锁死。
 
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::capabilities::storage::api::{CleanOutcome, GcReport, JobState};
 use crate::capabilities::system::api::{
@@ -375,13 +375,73 @@ fn setup(system: &dyn System, args: &Args, json: bool) -> i32 {
     };
     match system.setup(mode, &mut on_line) {
         Ok(v) => {
-            if json || mode == SetupMode::Status {
+            if json {
                 println!("{}", pretty(&v));
+            } else if mode == SetupMode::Status {
+                print_setup(&v);
             }
             0
         }
         Err(f) => fail("[便携]", f, json),
     }
+}
+
+/// 目的：`setup status` 的人读排版——平台与根、PATH 入口、围栏预授缺项，只从回执里取。
+fn print_setup(v: &Value) {
+    let text = |a: &str, b: &str| -> String {
+        v.get(a)
+            .and_then(|x| x.get(b))
+            .and_then(|x| x.as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    let flag = |a: &str, b: &str| -> bool {
+        v.get(a)
+            .and_then(|x| x.get(b))
+            .and_then(|x| x.as_bool())
+            .unwrap_or(false)
+    };
+    println!(
+        "[便携] 平台：{}  根：{}",
+        v.get("platform")
+            .and_then(|x| x.as_str())
+            .unwrap_or_default(),
+        v.get("root").and_then(|x| x.as_str()).unwrap_or_default()
+    );
+    println!(
+        "[便携] PATH 入口：{}（目录在：{}；shim：{}；shim 最新：{}）",
+        text("path", "bin"),
+        if flag("path", "has_bin") {
+            "是"
+        } else {
+            "否"
+        },
+        if flag("path", "shim_present") {
+            "在"
+        } else {
+            "没写"
+        },
+        if flag("path", "shim_current") {
+            "是"
+        } else {
+            "否"
+        }
+    );
+    let missing = v
+        .get("fence")
+        .and_then(|f| f.get("missing"))
+        .and_then(|m| m.as_array())
+        .map(|a| a.len())
+        .unwrap_or(0);
+    println!(
+        "[便携] 围栏预授：{}（缺 {} 处）",
+        if flag("fence", "ready") {
+            "已就绪"
+        } else {
+            "未就绪"
+        },
+        missing
+    );
 }
 
 /// 目的：`--build`：在宿主或某个虚拟根里跑模块声明的构建。

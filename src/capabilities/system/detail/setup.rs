@@ -32,7 +32,7 @@ impl SetupHost {
 
 impl SetupOps for SetupHost {
     fn apply(&self, mode: SetupMode, on_line: &mut dyn FnMut(&str)) -> Result<Value, Fault> {
-        // 状态是只读的，回执本身就是人读的那份 JSON——不加进度行。
+        // 状态是只读的：回执是状态视图本身（键值），排版在呈现层，这里不出进度行。
         if mode == SetupMode::Status {
             return status_value(&self.root).map_err(Fault::failed);
         }

@@ -145,7 +145,14 @@ impl System for Fake {
             return Err(Fault::failed("便携维护失败"));
         }
         on_line(&format!("{} 完成", mode.id()));
-        Ok(json!({ "mode": mode.id(), "path": { "bin": "bin", "has_bin": true } }))
+        Ok(json!({
+            "platform": "test",
+            "root": "/tmp",
+            "mode": mode.id(),
+            "lines": [format!("{} 完成", mode.id())],
+            "path": { "bin": "bin", "has_bin": true, "shim_present": false, "shim_current": false },
+            "fence": { "supported": true, "ready": false, "missing": ["产品根读属性"], "error": null },
+        }))
     }
 }
 
@@ -227,6 +234,24 @@ fn gc_reports_or_starts_a_job() {
     };
     assert_eq!(boot::run("gc", &ops(&["--yes"]), &failed, false), 1);
     assert_eq!(boot::run("gc", &ops(&["--yes"]), &failed, true), 1);
+}
+
+/// 目的：便携维护的三条分支——省略模式只报状态、写模式交给能力、未知模式退 2、能力失败按自己的码退。
+#[test]
+fn setup_reports_status_and_refuses_unknown_modes() {
+    let fake = Fake::default();
+    for json in [false, true] {
+        assert_eq!(boot::run("setup", &[], &fake, json), 0);
+        assert_eq!(boot::run("setup", &ops(&["status"]), &fake, json), 0);
+        assert_eq!(boot::run("setup", &ops(&["path"]), &fake, json), 0);
+        assert_eq!(boot::run("setup", &ops(&["bogus"]), &fake, json), 2);
+    }
+    let broken = Fake {
+        fault: Some("setup"),
+        ..Fake::default()
+    };
+    assert_eq!(boot::run("setup", &ops(&["path"]), &broken, false), 1);
+    assert_eq!(boot::run("setup", &ops(&["path"]), &broken, true), 1);
 }
 
 #[test]
@@ -447,6 +472,8 @@ fn real_assembly_serves_every_boot_command() {
         );
         assert_eq!(boot::run("work-gc", &[], &service, json), 2);
         assert_eq!(boot::run("build", &[], &service, json), 2);
+        assert_eq!(boot::run("setup", &ops(&["status"]), &service, json), 0);
+        assert_eq!(boot::run("setup", &ops(&["bogus"]), &service, json), 2);
     }
     boot::print_gc(&GcReport::default());
     boot::print_gc(&GcReport {
