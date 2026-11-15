@@ -4,7 +4,8 @@
 //! 联动：被测实现见 src/entry/toolchains.rs；启动期调用见 src/main.rs。
 
 use crate::capabilities::packages::api::{BaseFacts, HostFallback};
-use crate::entry::toolchains::{active_roots, compose, report_lines, target};
+use crate::capabilities::system::api::toolchain_lines;
+use crate::entry::toolchains::{active_roots, compose, target};
 
 type ToolSpec<'a> = (&'a str, &'a str, &'a [&'a str], &'a [(&'a str, &'a str)]);
 
@@ -132,7 +133,7 @@ pub(crate) fn report_lines_name_project_missing_host_fallback_and_gap() {
         active: Vec::new(),
         fallback,
     };
-    let text = report_lines(&base).join("\n");
+    let text = toolchain_lines(&base).join("\n");
     assert!(text.contains("项目内未安装：python、node、cc"), "{}", text);
     assert!(
         text.contains("宿主回退 python") && text.contains("围栏可用"),
@@ -146,7 +147,7 @@ pub(crate) fn report_lines_name_project_missing_host_fallback_and_gap() {
     );
     assert!(text.contains("宿主回退 cc：宿主 PATH 也没有"), "{}", text);
     assert!(
-        text.contains("node start.js --provision --ensure=toolchain --yes"),
+        text.contains("solomni --provision --ensure=toolchain --yes"),
         "{}",
         text
     );

@@ -18,6 +18,7 @@ pub mod secrets;
 pub mod session;
 pub mod slate;
 pub mod storage;
+pub mod system;
 pub mod taskchain;
 pub mod tools;
 pub mod vm;

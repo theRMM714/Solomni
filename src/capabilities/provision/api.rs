@@ -94,6 +94,10 @@ pub trait Provision: Send + Sync {
     /// 错误：不是清单构造的虚拟根、有活跃 guest、删除或重装失败。
     /// 约束：不备份旧目录；失败后可能只剩半成品，下一次还原会从干净目录重来。
     fn reset_guest(&self, guest: &str, on_line: &mut dyn FnMut(&str)) -> Result<(), String>;
+    /// 目的：同步补齐（按 id 列表；空 = 本机全部），进度逐行回调。
+    fn ensure(&self, ids: &[String], on_line: &mut dyn FnMut(&str)) -> Result<(), String>;
+    /// 目的：按 kind 组别名或 id 列表补齐（启动相命令的 `--ensure=<spec>` 写法）。
+    fn ensure_spec(&self, spec: &str, on_line: &mut dyn FnMut(&str)) -> Result<(), String>;
 }
 
 /// 目的：未接入的补齐面——组合根未注入时的默认值；调用如实失败，不假装可用。
@@ -117,6 +121,12 @@ impl Provision for NoProvision {
     }
     fn cancel(&self) {}
     fn reset_guest(&self, _guest: &str, _on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
+        Err("依赖补齐未接入".to_string())
+    }
+    fn ensure(&self, _ids: &[String], _on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
+        Err("依赖补齐未接入".to_string())
+    }
+    fn ensure_spec(&self, _spec: &str, _on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
         Err("依赖补齐未接入".to_string())
     }
 }

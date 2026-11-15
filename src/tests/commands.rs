@@ -1,12 +1,14 @@
 //! 目的：命令面门禁——`systools/commands.yaml` 是唯一声明，且与两处分派实现（启动相、转录相）逐条对齐。
 //! 管：表自身自洽、手册覆盖全部启动命令、入口与 CLI 都认得表里的每一条命令（双向，含反向的孤儿旗语）。
 //! 不管：手册排版（`src/tests/cli.rs`）与命令行为（各业务测试）。
-//! 联动：`systools/commands.yaml`、`src/entry/args.rs`、`src/presentation/cli.rs`。
+//! 联动：`systools/commands.yaml`、`src/presentation/cli/boot.rs`、`src/presentation/cli.rs`、`src/entry/args.rs`。
 
 use crate::capabilities::tools::api::{CommandBook, Phase};
 use crate::presentation::cli::catalog;
 
-/// 入口的分派实现（启动相命令的落点）。
+/// 启动相的分派实现（启动命令与它们的旗语落在这里）。
+const BOOT: &str = include_str!("../presentation/cli/boot.rs");
+/// 入口的内部协议分派（这里不许再出现产品命令）。
 const ENTRY_ARGS: &str = include_str!("../entry/args.rs");
 /// 转录中心的分派实现（转录相命令的落点）。
 const CLI: &str = include_str!("../presentation/cli.rs");
@@ -97,25 +99,39 @@ fn help_lists_every_boot_command() {
     );
 }
 
-/// 双向对齐：表里的启动命令入口认得，入口里的产品旗语表里也有（内部协议除外）。
+/// 双向对齐：表里的启动命令启动相认得，启动相用的每个旗语表里也声明了。
 #[test]
-fn boot_commands_match_entry_dispatch() {
+fn boot_commands_match_boot_dispatch() {
     let book = book();
     for cmd in book.phase(Phase::Boot) {
-        let literal = format!("\"--{}\"", cmd.name);
+        let literal = format!("\"{}\"", cmd.name);
         assert!(
-            ENTRY_ARGS.contains(&literal),
-            "启动命令 --{} 在 entry/args.rs 里没有分派",
+            BOOT.contains(&literal),
+            "启动命令 {} 在 presentation/cli/boot.rs 里没有执行入口",
             cmd.name
         );
     }
-    for flag in flags_in(ENTRY_ARGS) {
-        if INTERNAL.contains(&flag.as_str()) || flag.starts_with("--fence-") {
-            continue;
-        }
+    let declared: Vec<String> = book
+        .phase(Phase::Boot)
+        .iter()
+        .flat_map(|c| c.flags.iter().map(|f| f.name.clone()))
+        .collect();
+    for flag in flags_in(BOOT) {
         assert!(
-            book.find(&flag).is_some(),
-            "入口里的产品旗语 {} 没进命令表（要么进表，要么归内部协议）",
+            declared.contains(&flag) || INTERNAL.contains(&flag.as_str()),
+            "启动相用了没声明的旗语 {}（命令自己的旗语要在命令表里写）",
+            flag
+        );
+    }
+}
+
+/// 入口只剩内部协议：产品命令与产品旗语都不许再出现在 src/entry/args.rs。
+#[test]
+fn entry_keeps_only_internal_protocol() {
+    for flag in flags_in(ENTRY_ARGS) {
+        assert!(
+            INTERNAL.contains(&flag.as_str()) || flag.starts_with("--fence-"),
+            "src/entry/args.rs 里还留着产品旗语 {}（产品命令归启动相）",
             flag
         );
     }

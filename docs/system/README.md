@@ -1,0 +1,56 @@
+# system（系统维护与自检）
+
+> 定位：系统维护与自检——把「这台机器能承载什么、占了多少钱、缺什么、怎么清」做成一份可执行的结论，供启动相命令与 Web 共用。
+> 效力：规范｜核对：2026-11-15｜依据：`src/capabilities/system/api.rs`
+> 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九，测试规范见 [TESTING.md](../../TESTING.md)。
+
+## 管什么 / 不管什么
+
+- 管：自检报告——平台与架构、围栏事实、外部可执行、基础工具链、进程账、虚拟机档逐条要求、存储概览。
+- 管：存储报告的对外形状与回收命令的语义分派（有类别按类别、无类别整体回收）。
+- 管：依赖补齐的状态查询、补齐执行与虚拟根还原的确认门槛。
+- 管：工作区回收与模块构建在维护视角下的前置校验（名字合法、工作存在、模块存在、目标与出网开关）。
+- 不管：回收与补齐的实现（归 `storage` / `provision`）、构建编排（归 `builds`）、工作区对象图（归 `workspace`）、模块清单（归 `modules`）、工具链条目解析（归 `src/entry/toolchains.rs`）。
+- 不管：命令名、别名、分组与手册排版（归 `systools/commands.yaml` 与 `src/presentation/cli/catalog.rs`）；也不解析 argv（归 `src/presentation/cli/boot.rs`）。
+
+## 入站契约与状态归属
+
+- 入站面：`api::System` 的九个方法（自检 / 存储 / 回收 / 补齐状态 / 补齐 / 还原 / 工作区回收 / 构建 / 作业进度）与 `api::Fault`——`code` 是退出码，`message` 是给人看的一句话，呈现层只打印它、按 `code` 退出。
+- 出站端口：`storage` / `provision` / `builds` / `workspace` / `modules` 的 `::api`，加上装配期注入的基础工具链事实与出网开关，全部经 `SystemDeps` 注入。
+- 状态归属：本单元不持有状态；自检是只读快照，回收 / 补齐 / 构建的状态归各自的 owner（`storage` 的作业与上次回收摘要、`provision` 的补齐进度、`builds` 的构建状态）。
+
+## 依赖图位置（由源码的 `::api` 引用推导）
+
+- 经 `::api` 用到：`builds`、`kernel`、`modules`、`packages`、`provision`、`storage`、`workspace`
+- 谁在用我：`presentation`（启动相命令）、`entry`（装配）
+
+## 一、命令面与执行面的分工
+
+- 命令名、旗语与确认门槛的唯一声明是 `systools/commands.yaml`；`src/presentation/cli/boot.rs` 只把操作数翻成 `api::System` 的一次调用并排版回执。
+- 确认门槛由能力判，不靠命令行拦：`ensure` / `reset` 缺 `confirm` 报 `Fault::usage`；`gc` 无类别时缺省 dry-run（返回 0 并给预览），带类别时缺 `--yes` 由呈现层按预览退出 2——与迁移前的旗语行为逐条一致。
+- 退出码口径：0 成功 / 1 执行失败 / 2 用法或确认门槛不对，由 `Fault` 的两个构造器区分。
+
+## 二、自检报告
+
+- `doctor` 只读：围栏事实、外部可执行（python / node / curl）、基础工具链投影、进程账、虚拟机档逐条要求、存储概览。
+- `doctor_with(fence)` 让调用方注入围栏事实：启动期复用同一次能力探测，自检与启动报告不会各问一遍（用例见 `src/tests/diagnostics.rs`）。
+- 报告是机器可读契约：字段名与取值由 `src/tests/diagnostics.rs` 直接断言。
+
+## 三、写操作的只有三条路
+
+- `ensure`（下载并写进项目内）、`reset`（删虚拟根内状态后重建）、`gc`（删缓存与内容对象）——三条都要求 `confirm`，缺了如实报用法错，不静默降级成只读。
+- `reset` 成功后顺带清该虚拟根的构建缓存；清缓存失败不影响还原结论。
+
+## 改动本单元时必须同步
+
+- `src/presentation/cli/boot.rs` → 新增或改启动相命令时同步操作数解析、回执与退出码。
+- `systools/commands.yaml` → 命令名、分组、旗语与确认门槛的声明；表与两处分派的一致性由 `src/tests/commands.rs` 锁死。
+- `src/entry/assembly.rs` → `SystemDeps` 的装配；新增端口注入只在这里落一次。
+- `docs/entry/README.md` → 组合根不再执行产品命令；启动相清单以本页与命令表为准。
+- 测试缺口：本单元是业务能力，缺口记在 `tests/gaps.yaml`；格式见 [docs/testing/gaps-acceptance.md](../testing/gaps-acceptance.md) 的「缺口账」。
+
+## 本目录
+
+| 文件 | 内容 |
+| --- | --- |
+| [`unit-map.md`](unit-map.md) | 逐文件职责（T0 与磁盘双向比对） |

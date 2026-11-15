@@ -9,7 +9,7 @@ use std::ffi::{OsStr, OsString};
 use std::path::{Component, Path, PathBuf};
 
 /// 目的：基础 profile 的工具 id——与清单 dependencies.yaml 的 toolchain 条目同一组（active.json 缺失时仍能报出缺哪几个）。
-pub(crate) const PROFILE: [&str; 3] = ["python", "node", "cc"];
+pub(crate) const PROFILE: [&str; 3] = crate::capabilities::system::api::TOOLCHAIN_PROFILE;
 
 /// 目的：当前宿主的目标名（与 dependencies.yaml 的 `toolchain.target`、安装布局同一套写法）。
 pub(crate) fn target() -> Option<&'static str> {
@@ -325,70 +325,4 @@ pub(crate) fn base_facts(root: &Path) -> BaseFacts {
         }
     }
     BaseFacts { active, fallback }
-}
-
-/// 目的：每次启动都要打印的基础工具链报告：项目内 / 缺失 / 宿主回退是否可用。
-pub(crate) fn report_lines(base: &BaseFacts) -> Vec<String> {
-    let installed: BTreeSet<&str> = base.active.iter().map(|(id, _)| id.as_str()).collect();
-    let mut lines = Vec::new();
-    if !base.active.is_empty() {
-        let list: Vec<String> = base
-            .active
-            .iter()
-            .map(|(id, version)| format!("{} {}", id, version))
-            .collect();
-        lines.push(format!("项目内：{}", list.join("、")));
-    }
-    let missing: Vec<&str> = PROFILE
-        .iter()
-        .copied()
-        .filter(|id| !installed.contains(id))
-        .collect();
-    if !missing.is_empty() {
-        lines.push(format!(
-            "项目内未安装：{}；补全：node start.js --provision --ensure=toolchain --yes",
-            missing.join("、")
-        ));
-        for id in missing {
-            match base.fallback.get(id) {
-                Some(f) if f.fenced => lines.push(format!(
-                    "宿主回退 {} → {}（围栏可用）",
-                    id,
-                    f.path.display()
-                )),
-                Some(f) => lines.push(format!(
-                    "宿主回退 {} → {}（围栏不可授权：{}；工具调用会问是否本次无围栏跑）",
-                    id,
-                    f.path.display(),
-                    f.why
-                )),
-                None => lines.push(format!("宿主回退 {}：宿主 PATH 也没有", id)),
-            }
-        }
-    }
-    lines
-}
-
-/// 目的：基础工具链的机器可读快照（--doctor、/api/state 与 Web 横幅共用同一份）。
-pub(crate) fn json(base: &BaseFacts) -> serde_json::Value {
-    let installed: BTreeSet<&str> = base.active.iter().map(|(id, _)| id.as_str()).collect();
-    let missing: Vec<&str> = PROFILE
-        .iter()
-        .copied()
-        .filter(|id| !installed.contains(id))
-        .collect();
-    serde_json::json!({
-        "profile": PROFILE,
-        "active": base.active.iter().map(|(id, version)| serde_json::json!({
-            "id": id,
-            "version": version,
-        })).collect::<Vec<_>>(),
-        "missing": missing,
-        "fallback": base.fallback.iter().map(|(id, f)| (id.clone(), serde_json::json!({
-            "path": f.path.to_string_lossy(),
-            "fenced": f.fenced,
-            "why": f.why,
-        }))).collect::<BTreeMap<_, _>>(),
-        "lines": report_lines(base),
-    })
 }

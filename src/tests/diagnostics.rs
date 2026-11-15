@@ -1,7 +1,7 @@
-//! 目的：入口层的可观察契约——隐藏模式（自检 / 探针）与启动报告的围栏判据。
+//! 目的：系统维护命令与启动报告的可观察契约——启动相命令的退出码、自检事实与围栏口径。
 //! 管：构建的产品路径（查模块 / 查构建期能力 / 缓存 / 跑命令 / 入口复验 / 状态落盘）、
 //!   `--doctor` 的事实本体、启动报告与 `--doctor` 共用同一份本机能力与本次实际。
-//! 不管：CLI 参数解析（在 main.rs）、模块清单校验（在 `modules.rs`）、围栏机制本身（在 kernel）。
+//! 不管：命令表与旗语解析（在 systools/commands.yaml 与 presentation/cli）、模块清单校验、围栏机制本身。
 //! 联动：模块契约见 MODULE_SPEC 的「构建」；状态落 `.vm/build-state/<模块>.json`。
 
 /// 目的：--work-gc 默认 dry-run、--yes 才删；只删不可达对象。
@@ -26,21 +26,18 @@ fn work_gc_cli_dry_run_then_applies() {
     let keep = content_hash(b"keep");
     assert!(store_path.join("objects").join(&orphan).exists());
 
-    let dry = crate::entry::probes::work_gc(&root, &["--work-gc".to_string(), "w".to_string()], 0);
+    let system = crate::entry::assembly::system(&root, &Default::default()).expect("装系统能力");
+    let dry = crate::presentation::cli::boot::run("work-gc", &["w".to_string()], &system);
     assert_eq!(dry, 0);
     assert!(
         store_path.join("objects").join(&orphan).exists(),
         "dry-run 不能删"
     );
 
-    let applied = crate::entry::probes::work_gc(
-        &root,
-        &[
-            "--work-gc".to_string(),
-            "w".to_string(),
-            "--yes".to_string(),
-        ],
-        0,
+    let applied = crate::presentation::cli::boot::run(
+        "work-gc",
+        &["w".to_string(), "--yes".to_string()],
+        &system,
     );
     assert_eq!(applied, 0);
     assert!(
@@ -68,7 +65,8 @@ pub(crate) fn doctor_reports_the_recorded_processes() {
         created: None,
         guard_note: Some("把子进程绑进作业对象失败".to_string()),
     });
-    let doc = crate::entry::probes::doctor::doctor_json(&root);
+    let system = crate::entry::assembly::system(&root, &Default::default()).expect("装系统能力");
+    let doc = crate::capabilities::system::api::System::doctor(&system);
     let procs = doc
         .get("processes")
         .and_then(|p| p.as_array())
@@ -142,7 +140,13 @@ fn startup_fence_report_and_doctor_share_the_same_capability() {
         std::sync::Arc::new(crate::kernel::api::SandboxMode::permissive()),
     );
     let root = crate::tests::scratch("fence-report");
-    let doc = crate::entry::probes::doctor::doctor_json_with(&root, cap.clone());
+    let system = crate::entry::assembly::system(&root, &Default::default()).expect("装系统能力");
+    let doc = system.doctor_with(crate::capabilities::system::api::FenceFacts {
+        fs: cap.fs,
+        net: cap.net,
+        tree: cap.tree,
+        note: cap.note.clone(),
+    });
     let fence = doc.get("fence").expect("--doctor 要报围栏事实");
     assert_eq!(
         fence.get("fs").and_then(|v| v.as_bool()),

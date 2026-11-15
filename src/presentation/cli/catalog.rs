@@ -121,6 +121,9 @@ pub(crate) fn detail(raw: &str) -> Option<String> {
     if cmd.confirm {
         out.push_str("  确认：有写操作，需 --yes 才算数（缺省只预览或只报状态）\n");
     }
+    if cmd.phase == Phase::Boot {
+        out.push_str("  退出码：0 成功；1 执行失败；2 用法或确认门槛不对\n");
+    }
     Some(out)
 }
 
