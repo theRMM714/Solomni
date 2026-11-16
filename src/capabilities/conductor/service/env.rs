@@ -43,7 +43,11 @@ impl Conductor {
         let roots = self.workspace.roots(&work, &names)?;
         // 虚拟机档给 guest↔宿主翻译器：system 工具跑在宿主侧，但收模型给的 guest 写法；
         // **同一份**也交给 @ 改写（挂载点、命令装配与用户引用用同一座桥，三处不会各给一种写法）。
-        let path_codec = self.path_codec_of(&meta.exec);
+        let path_codec = crate::capabilities::vm::api::path_codec_of(
+            &self.root,
+            self.probe.as_ref(),
+            &meta.exec,
+        );
         // 外部工作区的授权粒度：只影响围栏派生（共享区是否要每会话重授），不改权限面。
         let shared_grant = self.workspace_grant(meta)?;
         // 逐席组装的规则在 env：模块目录只对使用它的 agent 可达，私有根缺一份就如实报缺哪个 agent。
@@ -144,7 +148,7 @@ impl Conductor {
             guest_lease,
             plan: host_plan,
             base_roots: &self.base_roots,
-            host_read_roots: self.host_read_roots(),
+            host_read_roots: crate::capabilities::env::api::host_read_roots(self.registry.app()),
             shell: self.turn.shell_slot(&sb.session),
         };
         crate::capabilities::turn::api::member_tools(&self.turn.session_deps(), &spec)
@@ -212,7 +216,9 @@ impl Conductor {
                 guest_lease,
                 plan: host_plan,
                 base_roots: &self.base_roots,
-                host_read_roots: self.host_read_roots(),
+                host_read_roots: crate::capabilities::env::api::host_read_roots(
+                    self.registry.app(),
+                ),
                 shell: self.turn.shell_slot(&sb.session),
             },
             channel,

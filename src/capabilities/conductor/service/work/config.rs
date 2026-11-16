@@ -53,7 +53,7 @@ impl Conductor {
             tier_locked: meta.parent.is_some(),
             guest: meta.exec.guest.clone(),
             guests: self.provision.guest_bases()?,
-            net: self.network_allowed(),
+            net: crate::capabilities::env::api::network_allowed(self.registry.app()),
             permission: self.permission_view(&meta)?,
             thinking: self.thinking_view_for_root(
                 &work_root(self.history.as_ref(), sid).unwrap_or_else(|_| sid.to_string()),
@@ -237,7 +237,9 @@ impl Conductor {
             .collect();
         // 入口按**目标环境**判：虚拟机档在 guest 里跑（guest 的 os），本机档在宿主；
         // 跨平台时还要看文件形式——宿主编出来的产物（如 Windows 的 .exe）在 linux guest 里跑不了。
-        let guest = self.guest_os_of(&spec).map(|g| g.as_str());
+        let guest =
+            crate::capabilities::vm::api::guest_os_of(&self.root, self.probe.as_ref(), &spec)
+                .map(|g| g.as_str());
         let target_os = guest.unwrap_or(std::env::consts::OS);
         let missing: Vec<crate::capabilities::vm::api::MissingEntry> =
             crate::capabilities::vm::api::missing_entries_for(&session_modules, target_os, &|p| {
@@ -245,7 +247,16 @@ impl Conductor {
                     && (target_os == std::env::consts::OS
                         || crate::capabilities::vm::api::runs_on_target(p, target_os))
             });
-        self.plan_for_spec(&spec, &session_modules, &missing, spec.guest.as_deref())?;
+        crate::capabilities::vm::api::plan_for_spec(
+            &self.root,
+            self.probe.as_ref(),
+            &self.packages.library(),
+            &spec,
+            &session_modules,
+            &missing,
+            spec.guest.as_deref(),
+            crate::capabilities::env::api::network_allowed(self.registry.app()),
+        )?;
 
         let mut new_meta = meta.clone();
         new_meta.modules = flat_modules(&metas);
@@ -449,7 +460,7 @@ impl Conductor {
             "mode": meta.mode,
             "tier": meta.exec.tier.as_str(),
             "guest": meta.exec.guest,
-            "net": self.network_allowed(),
+            "net": crate::capabilities::env::api::network_allowed(self.registry.app()),
             "pins": meta.exec.pins,
             "thinking": meta.thinking,
             "context_freshness": meta.context_freshness,

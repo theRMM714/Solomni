@@ -4,6 +4,8 @@
 //! 不管：纯逻辑（domain/）、运行包库与选包（packages）；适配器（detail/）由组合根构造。
 //! 联动：端口在 ports.rs；被 api::Vm 的调用方消费。
 
+pub mod plan;
+
 use crate::capabilities::vm::api::Vm;
 use crate::capabilities::vm::domain::guest::{
     self as guest, GuestMount, GuestOs, GuestRun, GuestSpec, OutputLimit,

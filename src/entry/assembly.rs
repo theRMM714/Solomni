@@ -275,6 +275,6 @@ fn network_allowed(root: &Path) -> bool {
         .and_then(|t| {
             yaml_serde::from_str::<crate::capabilities::registry::api::AppSettings>(&t).ok()
         })
-        .map(|a| a.sandbox.policy.network)
+        .map(|a| crate::capabilities::env::api::network_allowed(&a))
         .unwrap_or(false)
 }
