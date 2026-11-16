@@ -25,7 +25,7 @@ pub use crate::capabilities::registry::api::{ModelDraft, ModelEntry, Provider, S
 
 pub use crate::capabilities::session::api::{AgentMeta, RunState, SessionMeta};
 
-pub use crate::capabilities::session::api::MemberTools;
+pub use crate::capabilities::session::domain::tools::MemberTools;
 pub use crate::capabilities::session::domain::tools::ModuleTools;
 
 pub use crate::capabilities::session::ports::HistoryStore;

@@ -301,6 +301,14 @@ impl AgentSession {
         self.model.as_deref()
     }
 
+    /// 目的：按落盘转录续上回复 id（回放已有回复后，新回复不能与旧回复并成一组）。
+    ///   约束：只有重建路径要它；没有工具面的会话（核心压缩）无回复号可续，因此是空操作。
+    pub fn set_reply_seq(&mut self, seq: u64) {
+        if let Some(t) = self.tools.as_mut() {
+            t.reply_seq = seq;
+        }
+    }
+
     /// 目的：过期内容自动清理的开关（用户在界面上控制成本；落盘在 meta）。
     pub fn set_context_freshness(&mut self, on: bool) {
         self.context_freshness = on;

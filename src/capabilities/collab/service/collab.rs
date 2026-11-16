@@ -18,7 +18,6 @@ use crate::capabilities::session::api::{Gates, LineView, Pending, SessionEvent};
 use crate::capabilities::tools::api::ToolExec;
 use crate::capabilities::vm::api::Vm;
 use crate::capabilities::workspace::api::Sandboxes;
-use crate::kernel::api::ExecSpec;
 use std::sync::Arc;
 
 /// 节点验收的结论：逐节点 (node, ok, note)。
@@ -118,7 +117,6 @@ pub struct CollabSession {
     /// 目的：下一条转录行的 id（会话内稳定序号）。
     pub(crate) next_line: u64,
     /// 目的：回复 id 计数器（转录行按它分组；按落盘重建时从转录里的最大值续号）。
-    pub(crate) reply_seq: u64,
     pub(crate) core_chat: crate::capabilities::llm::api::BoxedChat,
     /// 目的：核心通道的工具调用形态（原生才声明工具；信封通道看提示词里的说明）。
     pub(crate) core_mode: crate::capabilities::llm::api::ToolMode,
@@ -136,15 +134,8 @@ pub struct CollabSession {
     pub(crate) tools: Arc<dyn ToolExec + Send + Sync>,
     /// 目的：运行日志（工具循环里"输出被长度截断"这类事实落盘）。
     pub(crate) log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
-    /// 目的：本会话的执行选型（档位 + 运行包定版）。
-    pub(crate) spec: ExecSpec,
-    /// 目的：这棵会话树的 **guest 租约**（空 = 本机档）：顶层协作会话用自己的名字，
-    ///   proxy 子树用代理根名；成员回合的工具环境按它送进 guest。
-    pub(crate) guest_lease: String,
     /// 目的：本工作的沙箱清单（按 agent 实例名取）。
     pub(crate) sandboxes: Sandboxes,
-    /// 目的：工作区用例面（**不持它的端口**，R12）——写工具落地后按逐路径基线自动提交。
-    pub(crate) workspace: Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync>,
     pub(crate) done: bool,
     /// 目的：「停止」标志：由 Handle 在派发时把任务登记处的取消标志注入（见 set_cancel）。
     pub(crate) cancel: Arc<std::sync::atomic::AtomicBool>,
@@ -170,13 +161,9 @@ impl CollabSession {
         systools: Arc<dyn crate::capabilities::tools::api::Tools>,
         tools: Arc<dyn ToolExec + Send + Sync>,
         log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
-        spec: ExecSpec,
-        guest_lease: String,
         roster: Vec<AgentMeta>,
         delegated: bool,
         sandboxes: Sandboxes,
-        // 工作区用例面：写工具落地后自动提交（基线过期时如实拒绝，不降级）。
-        workspace: Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync>,
         // 本会话的裁决队（核心按会话 id 给；与工具级确认共用同一条）。
         door: Arc<dyn Gates>,
     ) -> Result<CollabSession, String> {
@@ -199,7 +186,6 @@ impl CollabSession {
             pending_ask: None,
             emitted: 0,
             next_line: 0,
-            reply_seq: 0,
             core_chat,
             prompts,
             systools,
@@ -208,10 +194,7 @@ impl CollabSession {
             modules,
             tools,
             log,
-            spec,
-            guest_lease,
             sandboxes,
-            workspace,
             done: false,
             cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             plan_approved: false,
@@ -286,7 +269,7 @@ impl CollabSession {
         opts: crate::capabilities::llm::api::CompleteOpts<'static>,
         mode: crate::capabilities::llm::api::ToolMode,
         core_chat: &mut dyn Chat,
-        verify: Option<&mut crate::capabilities::session::api::MemberTools>,
+        verify: Option<&mut (dyn crate::capabilities::session::api::CoreVerify + 'static)>,
         kind: &str,
         payload: &str,
         text: &str,
@@ -317,7 +300,7 @@ impl CollabSession {
             &msgs,
             opts,
             Some(cancel),
-            verify.map(|v| v as &mut dyn crate::capabilities::session::api::CoreVerify),
+            verify,
             sink,
         )?;
         let clear = payload
@@ -346,7 +329,7 @@ impl CollabSession {
         opts: crate::capabilities::llm::api::CompleteOpts<'static>,
         mode: crate::capabilities::llm::api::ToolMode,
         core_chat: &mut dyn Chat,
-        verify: Option<&mut crate::capabilities::session::api::MemberTools>,
+        verify: Option<&mut (dyn crate::capabilities::session::api::CoreVerify + 'static)>,
         // 上一次填错了要它重填的话（核心据此**一直重填**到合法，不设次数上限）。
         retry: Option<&str>,
         // 核心这一轮的行推给谁。
@@ -391,7 +374,7 @@ impl CollabSession {
             &msgs,
             opts,
             Some(cancel),
-            verify.map(|v| v as &mut dyn crate::capabilities::session::api::CoreVerify),
+            verify,
             sink,
         )?;
         let parsed: Vec<NodeVerdict> = payload

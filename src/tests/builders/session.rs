@@ -27,12 +27,18 @@ pub(crate) fn roster() -> Vec<String> {
 pub(crate) const TOOL_CALL: &str =
     "{\"type\":\"tool\",\"name\":\"grep\",\"args\":{\"keyword\":\"x\"}}";
 
+/// 目的：带工具环境的测试席位：生产里工具面归会话（`AgentSession`），测试里跟成员放在一起，便于逐席改 face、通道与执行服务。
+pub(crate) struct WithTools {
+    pub member: Member,
+    pub tools: Option<MemberTools>,
+}
+
 /// 目的：带工具环境的成员：模块 m0 声明 grep → python tools/grep.py（cwd = 该模块目录）。
 pub(crate) fn member_with_tools(
     id: &str,
     script: Vec<String>,
     runner: Arc<impl ProcessRunner + 'static>,
-) -> Member {
+) -> WithTools {
     let mut commands = BTreeMap::new();
     commands.insert("grep".to_string(), "python tools/grep.py".to_string());
     let mut modules = BTreeMap::new();
@@ -46,53 +52,59 @@ pub(crate) fn member_with_tools(
             services: BTreeMap::new(),
         },
     );
-    let mut m = Member::new(
+    let m = Member::new(
         id,
         crate::tests::doubles::test_params(id),
         crate::capabilities::llm::api::ToolMode::Envelope,
         scripted(script),
     );
     // 该路径走模块声明的外部命令（grep）：空沙箱 + 内存 IO，内置工具不参与。
-    m.tools = Some(MemberTools {
-        face: crate::capabilities::session::api::ToolFace {
-            mode: crate::capabilities::llm::api::ToolMode::Envelope,
-            role: "solo".to_string(),
-            modules,
-            tier: crate::kernel::api::Tier::Host,
-            guest_lease: String::new(),
-            sandbox: test_sandbox("m0", &[]),
-            tools_this_turn: test_prompts()
-                .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
-                .to_string(),
-            builtin_tools: test_systools().tools,
-            unavailable: BTreeMap::new(),
-            fence: crate::kernel::api::FenceSpec::for_session(&test_sandbox("m0", &[]), &[], false),
-            module_env: Default::default(),
-            runtime_path: None,
-            runtime_roots: Vec::new(),
-            // 测试替身按"执行席"发放全部内置工具（角色表的越权校验另有专门用例）。
-            allowed: crate::capabilities::tools::api::names(),
-            with_modules: true,
-            notes: crate::tests::doubles::test_notes(&test_sandbox("m0", &[]), &[]),
-        },
-        llm: test_llm_demo(),
-        log: Arc::new(crate::kernel::ports::NoopLog),
-        tools: test_tools_svc_with(
-            runner,
-            Arc::new(InMemorySysIo::new()),
-            Arc::new(NoFenceHost),
-        ),
-        vm: test_vm(),
-        residents: Arc::new(crate::capabilities::residents::api::NoResidents),
-        // 这些用例只跑工具面：写工具落地后不自动提交（没有工作区）。
-        workspace: None,
-        observations: crate::capabilities::tools::api::Observations::default(),
-        shell_live: None,
-        reply_seq: 0,
-        line: Default::default(),
-        handlers: Vec::new(),
-    });
-    m
+    WithTools {
+        member: m,
+        tools: Some(MemberTools {
+            face: crate::capabilities::session::api::ToolFace {
+                mode: crate::capabilities::llm::api::ToolMode::Envelope,
+                role: "solo".to_string(),
+                modules,
+                tier: crate::kernel::api::Tier::Host,
+                guest_lease: String::new(),
+                sandbox: test_sandbox("m0", &[]),
+                tools_this_turn: test_prompts()
+                    .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
+                    .to_string(),
+                builtin_tools: test_systools().tools,
+                unavailable: BTreeMap::new(),
+                fence: crate::kernel::api::FenceSpec::for_session(
+                    &test_sandbox("m0", &[]),
+                    &[],
+                    false,
+                ),
+                module_env: Default::default(),
+                runtime_path: None,
+                runtime_roots: Vec::new(),
+                // 测试替身按"执行席"发放全部内置工具（角色表的越权校验另有专门用例）。
+                allowed: crate::capabilities::tools::api::names(),
+                with_modules: true,
+                notes: crate::tests::doubles::test_notes(&test_sandbox("m0", &[]), &[]),
+            },
+            llm: test_llm_demo(),
+            log: Arc::new(crate::kernel::ports::NoopLog),
+            tools: test_tools_svc_with(
+                runner,
+                Arc::new(InMemorySysIo::new()),
+                Arc::new(NoFenceHost),
+            ),
+            vm: test_vm(),
+            residents: Arc::new(crate::capabilities::residents::api::NoResidents),
+            // 这些用例只跑工具面：写工具落地后不自动提交（没有工作区）。
+            workspace: None,
+            observations: crate::capabilities::tools::api::Observations::default(),
+            shell_live: None,
+            reply_seq: 0,
+            line: Default::default(),
+            handlers: Vec::new(),
+        }),
+    }
 }
 
 /// 目的：真实的坏信封：结尾多了一个 ]（括号不配对）。路径用真实绝对路径（模型写对了路径、写坏了信封）。 坏的形状照真案例：args 先闭合、多一个 ]、外层才闭合（整段不是合法 JSON）。

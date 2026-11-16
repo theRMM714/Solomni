@@ -1,5 +1,5 @@
 //! 目的：会话能力的入站面——其它能力与呈现层只准用这里（不许碰 `domain` / `ports`）。
-//! 管：重导出会话事实（元信息与视图、回档算术、工具面、裁决队列、事件词汇、落盘策略）与核心操作回路；定义 `History` / `HistoryOps` 两个面。
+//! 管：重导出会话事实（元信息与视图、回档算术、工具面、裁决队列、事件词汇、落盘策略）、会话装配（参数对象与整场入口）、核心核实环境与核心操作回路；定义 `History` / `HistoryOps` 两个面。
 //! 不管：`domain` / `ports` 的内部实现；`HistoryOps` 的队列代理实现（在 `runtime`）。
 //! 联动：呈现层经 runtime 的队列代理调 `HistoryOps`；别的能力经 `History` 造会话、追流水、读元信息、删会话。
 
@@ -30,9 +30,19 @@ pub use crate::capabilities::session::domain::session::{
     unique_work_name,
 };
 pub use crate::capabilities::session::domain::tools::{
-    CoreVerify, MemberTools, ModuleTools, ServiceOp, ShellLive, ShellSlot, ToolFace, last_shell,
+    CoreVerify, ModuleTools, ServiceOp, ShellLive, ShellSlot, ToolFace, last_shell,
     service_ops_for_modules, tool_table,
 };
+// 会话装配：参数对象与三个整场入口（加上只取工具面值的 `member_face`）。
+// `MemberTools`（工具面的活对象）**不经这里转出**：跨能力只传值结构（R16）。
+#[cfg(test)]
+pub use crate::capabilities::session::service::assemble::member_face;
+pub use crate::capabilities::session::service::assemble::{
+    MemberEnvParts, MemberSpec, ProxySpec, RebuildSpec, SessionPorts, SingleSpec, proxy_session,
+    rebuild_single, single_session,
+};
+// 核心核实环境：`collab` 的各关卡按角色装配只读核实工具，装配逻辑留在本能力。
+pub use crate::capabilities::session::service::verify::{VerifySpec, verify_tools};
 /// 目的：工作区授权粒度的形状归工作区能力面，这里重导出，调用方不必跨能力拼路径。
 pub use crate::capabilities::workspace::api::WorkspaceGrant;
 

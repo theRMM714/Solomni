@@ -6,7 +6,6 @@
 use super::discussion::*;
 use crate::capabilities::llm::api::{Chat, Msg};
 use crate::capabilities::prompt::api::{Prompt, Segment};
-use crate::capabilities::session::api::MemberTools;
 use crate::capabilities::session::api::SessionEvent;
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -19,7 +18,7 @@ impl Discussion {
         &self,
         core_chat: &mut dyn Chat,
         mode: crate::capabilities::llm::api::ToolMode,
-        verify: Option<&mut MemberTools>,
+        verify: Option<&mut (dyn crate::capabilities::session::api::CoreVerify + 'static)>,
         // 核心这一轮的行（工具行 + 思维链 + 正文）推给谁：落不落由那个会话模块定。
         sink: &mut dyn FnMut(SessionEvent),
     ) -> Result<
@@ -68,7 +67,7 @@ impl Discussion {
             &msgs,
             self.opts(),
             Some(&self.cancel),
-            verify.map(|v| v as &mut dyn crate::capabilities::session::api::CoreVerify),
+            verify,
             sink,
         )?;
         if self.cancelled() {
@@ -186,7 +185,7 @@ impl Execution {
         systools: &dyn crate::capabilities::tools::api::Tools,
         llm: crate::capabilities::llm::api::LlmOpts,
         mode: crate::capabilities::llm::api::ToolMode,
-        verify: Option<&mut MemberTools>,
+        verify: Option<&mut (dyn crate::capabilities::session::api::CoreVerify + 'static)>,
         // 核心这一轮的行推给谁（总验收也要能看到它在核对什么）。
         sink: &mut dyn FnMut(SessionEvent),
     ) {
@@ -227,7 +226,7 @@ impl Execution {
             &msgs,
             opts,
             Some(&self.cancel),
-            verify.map(|v| v as &mut dyn crate::capabilities::session::api::CoreVerify),
+            verify,
             sink,
         );
         if self.cancelled() {

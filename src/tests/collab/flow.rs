@@ -218,15 +218,12 @@ pub(crate) fn discussion_turn_streams_deltas_and_never_leaks_the_envelope() {
     let mut events: Vec<crate::capabilities::session::api::SessionEvent> = Vec::new();
     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let _ = crate::capabilities::collab::service::discussion::Discussion::turn_with(
-        &*test_tools_svc(),
-        "discussant",
         &cancel,
         crate::capabilities::llm::api::CompleteOpts::plain(true), // 开流式
         "a",
         "（测试）身份",
         &[],
         &mut chat,
-        None,
         vec![crate::capabilities::llm::api::Msg::user("说说")],
         &mut |e| events.push(e),
     )

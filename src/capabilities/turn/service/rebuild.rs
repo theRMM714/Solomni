@@ -98,8 +98,6 @@ impl Turn {
                 meta,
                 events,
                 sandboxes,
-                guest_lease_for(self.history.as_ref(), meta)?,
-                Arc::clone(&self.workspace),
                 // 重建出来的整队进**同一条队**（按转录里已发出的卡号续号，已答过的不重问）。
                 Arc::clone(&desk),
             )?),
@@ -143,7 +141,6 @@ impl Turn {
                 .with_guest(crate::capabilities::vm::api::guest_os_of(
                     &self.root, probe, &meta.exec,
                 ));
-                let chat = self.llm.member_channel(&channel, &a.name);
                 let (history, marks, line_reply, line_ids, compacted_upto, compacted_line) =
                     replay_dialogue(events, mode);
                 let unavailable = crate::capabilities::vm::api::unavailable_modules(
@@ -169,47 +166,51 @@ impl Turn {
                 } else {
                     crate::capabilities::packages::api::PackagePlan::default()
                 };
-                let mut tools = self.member_tools(
-                    registry,
-                    &modules,
-                    &sb,
+                // 工具环境事实（围栏 / 注入项 / 运行路径 / 工具链根）由这里经 `env` 派生后按值拷进 `session`。
+                let member = crate::capabilities::session::api::MemberSpec {
+                    modules: &modules,
+                    sandbox: &sb,
                     unavailable,
-                    crate::capabilities::env::api::network_allowed(registry.app()),
                     mode,
-                    &role,
-                    meta.exec.tier,
-                    guest_lease_for(self.history.as_ref(), meta)?,
-                    &host_plan,
-                );
+                    // 身份与角色**同一把尺子**（重建与实时不能各写一份，见 Core::role_of）。
+                    role: &role,
+                    tier: meta.exec.tier,
+                    guest_lease: guest_lease_for(self.history.as_ref(), meta)?,
+                    shell: self.shell_slot(&sb.session),
+                    env: self.member_env(
+                        registry,
+                        &modules,
+                        &sb,
+                        crate::capabilities::env::api::network_allowed(registry.app()),
+                        meta.exec.tier,
+                        &host_plan,
+                    ),
+                };
+                // 重建也要恢复上下文预算与最近一次用量：否则重启后自动压缩与状态栏都失忆。
+                let (window, percent, keep_percent) =
+                    self.context_budget(registry, a.model.as_deref());
                 // 回复 id 跨重启单调：从转录里的最大值续号，否则新回复会与旧回复并成一组。
-                tools.reply_seq = crate::capabilities::session::api::max_reply(events);
-                let mut s = crate::capabilities::session::api::AgentSession::restore(
-                    &a.name,
+                let spec = crate::capabilities::session::api::RebuildSpec {
                     params,
-                    history,
+                    member,
+                    channel,
+                    dialogue: history,
                     marks,
                     line_reply,
                     line_ids,
                     compacted_upto,
                     compacted_line,
-                    chat,
-                    Some(tools),
-                    self.prompt
-                        .text(crate::capabilities::prompt::api::Segment::CompactPrompt)
-                        .to_string(),
-                );
-                // 重建也要恢复上下文预算与最近一次用量：否则重启后自动压缩与状态栏都失忆。
-                let (window, percent, keep_percent) =
-                    self.context_budget(registry, a.model.as_deref());
-                s.set_context_budget(window, percent, keep_percent);
-                s.set_model(a.model.clone().or_else(|| registry.core_model()));
-                s.set_compact_factory(self.compact_factory());
-                s.set_context_freshness(meta.context_freshness);
-                for (body, fact) in replay_reads(events) {
-                    s.note_read_at(body, fact);
-                }
-                s.set_last_usage(crate::capabilities::session::api::last_usage(events));
-                Session::Single(s)
+                    reply_seq: crate::capabilities::session::api::max_reply(events),
+                    context: (window, percent, keep_percent),
+                    model: a.model.clone().or_else(|| registry.core_model()),
+                    freshness: meta.context_freshness,
+                    reads: replay_reads(events),
+                    usage: crate::capabilities::session::api::last_usage(events),
+                };
+                Session::Single(crate::capabilities::session::api::rebuild_single(
+                    &self.session_ports(),
+                    spec,
+                ))
             }
             // 代理会话：没有 agent（核心自己说话）；外壳由 build_proxy 装配，回放与单 agent 共用同一件。
             "proxy" => {
@@ -223,9 +224,7 @@ impl Turn {
                 s.compacted_upto = compacted_upto;
                 s.compacted_line = compacted_line;
                 s.next_line = s.marks.len() as u64;
-                if let Some(t) = s.tools.as_mut() {
-                    t.reply_seq = crate::capabilities::session::api::max_reply(events);
-                }
+                s.set_reply_seq(crate::capabilities::session::api::max_reply(events));
                 s.set_context_freshness(meta.context_freshness);
                 for (body, fact) in replay_reads(events) {
                     s.note_read_at(body, fact);
@@ -505,37 +504,40 @@ impl Turn {
             shared_grant,
         };
         let tool_mode = registry.tool_mode(None);
-        let chat = self.llm.core_channel(channel);
         // 身份是**角色提示词**（core_proxy），不是某个 agent 的模块能力包：
         // 机制 / 环境 / 调用约定仍与 agent 身份同一份口径（见 workspace 的 render_system）。
         let mut params = SessionParams::from_workspace(SPEAKER, &sb, &[], "proxy", "core_proxy");
         params.role_system = Some(crate::capabilities::prompt::api::Segment::ProxySystem);
-        let tools = self.member_tools(
-            registry,
-            &[],
-            &sb,
-            BTreeMap::new(),
-            crate::capabilities::env::api::network_allowed(registry.app()),
-            tool_mode,
-            "core_proxy",
-            crate::kernel::api::Tier::Host,
-            String::new(),
-            &crate::capabilities::packages::api::PackagePlan::default(),
-        );
-        let mut s = AgentSession::new(
-            SPEAKER,
-            params,
-            chat,
-            Some(tools),
-            self.prompt
-                .text(crate::capabilities::prompt::api::Segment::CompactPrompt)
-                .to_string(),
-        );
+        let member = crate::capabilities::session::api::MemberSpec {
+            modules: &[],
+            sandbox: &sb,
+            unavailable: BTreeMap::new(),
+            mode: tool_mode,
+            role: "core_proxy",
+            tier: crate::kernel::api::Tier::Host,
+            guest_lease: String::new(),
+            shell: self.shell_slot(&sb.session),
+            env: self.member_env(
+                registry,
+                &[],
+                &sb,
+                crate::capabilities::env::api::network_allowed(registry.app()),
+                crate::kernel::api::Tier::Host,
+                &crate::capabilities::packages::api::PackagePlan::default(),
+            ),
+        };
         let (window, percent, keep_percent) = self.context_budget(registry, None);
-        s.set_context_budget(window, percent, keep_percent);
-        s.set_context_freshness(meta.context_freshness);
-        s.set_model(registry.core_model());
-        s.set_compact_factory(self.compact_factory());
-        Ok(s)
+        let spec = crate::capabilities::session::api::ProxySpec {
+            params,
+            member,
+            channel: channel.clone(),
+            context: (window, percent, keep_percent),
+            model: registry.core_model(),
+            freshness: meta.context_freshness,
+        };
+        Ok(crate::capabilities::session::api::proxy_session(
+            &self.session_ports(),
+            spec,
+        ))
     }
 }

@@ -13,8 +13,40 @@ pub(crate) struct ExecLike {
     pub raws: BTreeMap<String, Vec<String>>,
 }
 
-pub(crate) fn run_execution(
-    members: &mut [crate::capabilities::collab::service::discussion::Member],
+/// 目的：执行入口的席位：成员本身（不带工具面）或测试席位（成员 + 工具环境）。
+pub(crate) trait Seat {
+    fn parts_mut(
+        &mut self,
+    ) -> (
+        &mut crate::capabilities::collab::service::discussion::Member,
+        Option<&mut MemberTools>,
+    );
+}
+
+impl Seat for crate::capabilities::collab::service::discussion::Member {
+    fn parts_mut(
+        &mut self,
+    ) -> (
+        &mut crate::capabilities::collab::service::discussion::Member,
+        Option<&mut MemberTools>,
+    ) {
+        (self, None)
+    }
+}
+
+impl Seat for WithTools {
+    fn parts_mut(
+        &mut self,
+    ) -> (
+        &mut crate::capabilities::collab::service::discussion::Member,
+        Option<&mut MemberTools>,
+    ) {
+        (&mut self.member, self.tools.as_mut())
+    }
+}
+
+pub(crate) fn run_execution<S: Seat>(
+    members: &mut [S],
     tasks: &str,
     prompt: &dyn Prompt,
 ) -> ExecLike {
@@ -24,11 +56,12 @@ pub(crate) fn run_execution(
         raws: BTreeMap::new(),
     };
     for m in members.iter_mut() {
-        if !m.present {
+        let (member, tools) = m.parts_mut();
+        if !member.present {
             continue;
         }
-        let identity = m.params.identity(prompt, m.mode);
-        let id = m.id.clone();
+        let identity = member.params.identity(prompt, member.mode);
+        let id = member.id.clone();
         let user = prompt.render(
             Segment::ExecuteUser,
             &[("tasks", tasks.to_string()), ("rework", String::new())],
@@ -38,8 +71,8 @@ pub(crate) fn run_execution(
         let mut sink = |_e: crate::capabilities::session::api::SessionEvent| {};
         let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let rounds = crate::capabilities::session::service::engine::round::converse_with(
-            m.chat.as_mut().expect("测试通道").as_mut(),
-            m.tools.as_mut(),
+            member.chat.as_mut().expect("测试通道").as_mut(),
+            tools,
             &identity,
             vec![crate::capabilities::llm::api::Msg::user(user)],
             Default::default(),

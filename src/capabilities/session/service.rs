@@ -1,5 +1,5 @@
 //! 目的：会话能力的用例与端口持有者——历史落盘端口只在这里（R12）。
-//! 管：造会话 / 追流水 / 读元信息 / 删会话的用例，以及核心操作回路（`core_operation`）与原生回灌消息。
+//! 管：造会话 / 追流水 / 读元信息 / 删会话的用例，会话装配（`assemble`）、核实环境（`verify`），以及核心操作回路（`core_operation`）与原生回灌消息。
 //! 不管：文件机制（在 `detail/fs_history.rs`）、状态派生与回档算术（在 `domain/`）、队列代理（在 runtime）。
 //! 联动：别的能力走 `api::History`；呈现层走 `api::HistoryOps`（由队列代理实现）；装配在组合根，这里只收注入的端口。
 
@@ -8,8 +8,10 @@ use crate::capabilities::session::domain::persist::persist_policy_for;
 use crate::capabilities::session::ports::HistoryStore;
 use std::sync::Arc;
 
+pub mod assemble;
 pub mod engine;
 pub(crate) mod tree;
+pub mod verify;
 
 /// 目的：会话能力：持历史落盘端口，按用例答话。
 pub struct SessionService {
@@ -173,7 +175,7 @@ pub fn core_operation(
     msgs: &[crate::capabilities::llm::api::Msg],
     opts: crate::capabilities::llm::api::CompleteOpts<'static>,
     cancel: Option<&std::sync::Arc<std::sync::atomic::AtomicBool>>,
-    verify: Option<&mut dyn crate::capabilities::session::api::CoreVerify>,
+    verify: Option<&mut (dyn crate::capabilities::session::api::CoreVerify + 'static)>,
     // 核心这一轮的**事实出口**（推；落盘与否由会话模块决定）。
     sink: &mut dyn FnMut(crate::capabilities::session::api::SessionEvent),
 ) -> Result<serde_json::Value, String> {

@@ -384,7 +384,7 @@ pub(crate) fn a_writing_call_is_a_barrier_and_sees_the_merged_ledger() {
 pub(crate) fn module_tools_are_concurrent_only_when_declared() {
     use crate::capabilities::llm::api::ToolCall;
     /// 原生形态 + 模块 m0 声明外部工具 grep（线上名 m0_grep）；parallel 决定它是否可并发。
-    fn grep_member(runner: Arc<dyn ProcessRunner>, parallel: bool) -> Member {
+    fn grep_member(runner: Arc<dyn ProcessRunner>, parallel: bool) -> WithTools {
         let steps = vec![
             NativeStep::Calls(vec![
                 ToolCall {

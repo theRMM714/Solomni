@@ -6,7 +6,8 @@
 use super::decls::ToolDecls;
 use crate::capabilities::llm::api::ToolInvoke;
 use crate::capabilities::permission::api::{CallScope, Decision, Effect, Reach, ReachSet};
-use crate::capabilities::session::api::{MemberTools, SessionEvent, ToolFace};
+use crate::capabilities::session::api::{SessionEvent, ToolFace};
+use crate::capabilities::session::domain::tools::MemberTools;
 use crate::capabilities::tools::api::{Observations, ShellFacts, ToolSchema};
 use crate::capabilities::workspace::api::ReadFact;
 use crate::kernel::api::ToolOutcome;

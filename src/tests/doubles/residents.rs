@@ -241,7 +241,7 @@ pub(crate) fn member_with_service_tools(
     module: &str,
     residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
     op: crate::capabilities::session::api::ServiceOp,
-) -> crate::capabilities::session::api::MemberTools {
+) -> crate::capabilities::session::domain::tools::MemberTools {
     let sb = test_sandbox(module, &[]);
     let mut modules = BTreeMap::new();
     modules.insert(
@@ -254,7 +254,7 @@ pub(crate) fn member_with_service_tools(
             services: [(op.tool.clone(), op)].into_iter().collect(),
         },
     );
-    crate::capabilities::session::api::MemberTools {
+    crate::capabilities::session::domain::tools::MemberTools {
         face: crate::capabilities::session::api::ToolFace {
             mode: crate::capabilities::llm::api::ToolMode::Envelope,
             modules,

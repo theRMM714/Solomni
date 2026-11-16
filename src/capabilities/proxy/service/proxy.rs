@@ -265,7 +265,7 @@ fn json_ok<T: serde::Serialize>(v: &T) -> ToolOutcome {
 }
 
 /// 目的：代理工具的**成员侧执行者**：把 `core_proxy` 会话那一回合里的代理工具调用接到 `ProxyTools` 上。
-///  装配进代理会话的 `MemberTools.handlers` 之后，代理会话就是一个**普通成员会话**——
+///  装配进代理会话的工具处理器列表之后，代理会话就是一个**普通成员会话**——
 ///  `converse_with` / 转录 / 回档 / 压缩 / 停止全部复用，循环里没有任何“代理专用”分支。
 ///  执行经队列桥回核心线程（`ProxyHost`），核心状态的所有权不变。
 pub struct ProxyHandler {

@@ -331,7 +331,7 @@ session/<工作名>/
 
 - 实现位置：`src/capabilities/lifecycle/service/rewind.rs`（第 9 层的 `lifecycle` 单元，见 [docs/lifecycle/README.md](../lifecycle/README.md)）；本节的判据与顺序以那里为准。
 
-- **按行精确物化共享区**：每个提交记录带 `(agent, line)` 锚（用户投喂锚在主会话当时的行号，agent 提交锚在它自己会话的行号）。回档时按"各会话的保留行"逐个提交比对，取最后一个"所有锚都还没越过保留行"的提交点再物化；删除额外丢弃不再可达的提交并把各 agent 的基线对齐到该点，恢复一条不删（离开的线钉进 `refs/live`）。行锚由每席的 `MemberTools.line` 随转录推进：显式 `work_commit` 经 `ToolCtx` 拿到它，写工具落地后的自动提交与批次末的沙箱采纳都读同一处（采纳的提交记 `source=external`、作者仍是该 agent，所以留档同样能把它退掉）。
+- **按行精确物化共享区**：每个提交记录带 `(agent, line)` 锚（用户投喂锚在主会话当时的行号，agent 提交锚在它自己会话的行号）。回档时按"各会话的保留行"逐个提交比对，取最后一个"所有锚都还没越过保留行"的提交点再物化；删除额外丢弃不再可达的提交并把各 agent 的基线对齐到该点，恢复一条不删（离开的线钉进 `refs/live`）。行锚由每席的 `MemberTools.line` 随转录推进（成员工具面由 `src/capabilities/session/service/assemble.rs` 装配，`line` 随会话持有）：显式 `work_commit` 经 `ToolCtx` 拿到它，写工具落地后的自动提交与批次末的沙箱采纳都读同一处（采纳的提交记 `source=external`、作者仍是该 agent，所以留档同样能把它退掉）。
 
 - 被折叠 / 被截断的行不进发送视图，也不进压缩摘要的输入；`truncate_events` 是"活动窗口"的唯一算术，界面按 `rewind` 事件画折叠分界（见「上下文压缩」）。
 

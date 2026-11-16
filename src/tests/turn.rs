@@ -50,8 +50,8 @@ fn shell_slot_is_shared_per_session_and_absent_before_use() {
 #[test]
 fn face_tools_filters_denied_tools_and_keeps_undeclared_ones() {
     use crate::capabilities::permission::api::{PermissionDefaults, ProfileId};
+    use crate::capabilities::session::domain::assemble::face_tools;
     use crate::capabilities::tools::api::{ToolBook, ToolSchema};
-    use crate::capabilities::turn::domain::assemble::face_tools;
 
     let schema = |capability: &str| ToolSchema {
         desc: String::new(),
@@ -88,7 +88,7 @@ fn face_tools_filters_denied_tools_and_keeps_undeclared_ones() {
 #[test]
 fn service_ops_take_only_ready_services_and_qualify_names() {
     use crate::capabilities::residents::api::{Operation, ServiceState, ServiceView};
-    use crate::capabilities::turn::domain::assemble::service_ops_of;
+    use crate::capabilities::session::domain::assemble::service_ops_of;
 
     let op = |name: &str| Operation {
         name: name.to_string(),
@@ -119,7 +119,7 @@ fn service_ops_take_only_ready_services_and_qualify_names() {
 #[test]
 fn serviced_tools_merge_ops_into_table_and_render_lines() {
     use crate::capabilities::session::api::{ModuleTools, ServiceOp};
-    use crate::capabilities::turn::domain::assemble::serviced_tools;
+    use crate::capabilities::session::domain::assemble::serviced_tools;
 
     let mut table = std::collections::BTreeMap::new();
     table.insert(

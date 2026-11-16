@@ -9,7 +9,6 @@ use crate::capabilities::llm::api::Verb;
 #[cfg(test)]
 use crate::capabilities::llm::api::{Chat, Chunk};
 use crate::capabilities::prompt::api::{Prompt, Segment};
-use crate::capabilities::session::api::MemberTools;
 #[cfg(test)]
 use crate::capabilities::session::api::ToolCallView;
 use crate::capabilities::session::api::{LineSink, MemberTurn, verb_tag};
@@ -45,8 +44,6 @@ pub struct Member {
     pub chat: Option<BoxedChat>,
     pub present: bool,
     pub agreed: bool,
-    /// 目的：工具环境；None = 本模块未声明工具（tool 信封按原文收录）。
-    pub tools: Option<MemberTools>,
 }
 
 impl Member {
@@ -62,7 +59,6 @@ impl Member {
             mode,
             present: true,
             agreed: false,
-            tools: None,
             #[cfg(test)]
             chat: None,
         }
@@ -82,7 +78,6 @@ impl Member {
             mode,
             present: true,
             agreed: false,
-            tools: None,
             chat: Some(chat),
         }
     }
@@ -118,7 +113,7 @@ pub struct Discussion {
     /// 目的：本次调用的通道参数（流式 + 预算）：**全局设置**，与单 agent 共用同一份。
     pub(crate) llm: crate::capabilities::llm::api::LlmOpts,
     /// 目的：讨论席的**机制说明 + 讨论约定**（开场与轮转都带它）：只说约定不说机制，AI 会空转。
-    ///   能用哪些工具**不在这里**——随回合注入（见 MemberTools::tools_block）。
+    ///   能用哪些工具**不在这里**——随回合注入（见会话工具面的 tools_block）。
     pub(crate) protocol: String,
 
     /// 目的：这一轮对每个成员**提醒过几次**（到顶就记"未回应"放过它）；每轮开始归零。
@@ -176,19 +171,14 @@ impl Discussion {
         let opts = self.opts();
         let speaker = self.members[i].id.clone();
         let turn = {
-            let m = &mut self.members[i];
-            let Member { chat, tools, .. } = m;
-            let chat = chat.as_mut().expect("测试通道");
+            let chat = self.members[i].chat.as_mut().expect("测试通道");
             Self::turn_with(
-                &*self.systools,
-                "discussant",
                 &self.cancel,
                 opts,
                 &speaker,
                 identity,
                 &[],
                 chat.as_mut(),
-                tools.as_mut(),
                 turn,
                 sink,
             )?
@@ -197,16 +187,14 @@ impl Discussion {
         Ok(turn)
     }
 
-    /// 目的：一个成员回合（**关联函数**：chat/tools 由调用方给）：**薄适配**——把本席位自己的通道交给
-    ///   单 agent / 节点 / 讨论席**共用的那一条轮循环**（engine::converse_with），装配前把这一回合的
-    ///   工具面（角色表发放）装进工具环境，跑完从末轮取表态。
-    ///   生产里成员回合跑在各自的 agent 会话里（crate::capabilities::session::api::AgentSession::discussion_turn）——两条路同一条循环。
+    /// 目的：一个成员回合（**关联函数**：只借用调用方的通道）：**薄适配**——把本席位自己的通道交给
+    ///   单 agent / 节点 / 讨论席**共用的那一条轮循环**（engine::converse_with），跑完从末轮取表态。
+    ///   生产里成员回合跑在各自的 agent 会话里（crate::capabilities::session::api::AgentSession::discussion_turn）——两条路同一条循环；
+    ///   工具面属会话（本函数不装、也不还原）。
     ///   允许**先核实**（只读工具），最后用**动词**表态；其余工具一律**如实拒绝**（讨论回合拿不到干活的手段）。
     #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub fn turn_with(
-        systools: &dyn crate::capabilities::tools::api::Tools,
-        role: &str,
         cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
         opts: crate::capabilities::llm::api::CompleteOpts<'static>,
         speaker: &str,
@@ -215,19 +203,9 @@ impl Discussion {
         // 该 agent **会话自己的对话**：用户进它会话说的话，下一回合它带着（不分家的核心承诺）。
         dialogue: &[Msg],
         chat: &mut dyn Chat,
-        mut tools: Option<&mut MemberTools>,
         turn: Vec<Msg>,
         sink: &mut dyn FnMut(SessionEvent),
     ) -> Result<MemberTurn, String> {
-        // 工具面**由角色表发放**（动词 + 只读核实工具）：表是唯一真相，代码里不另写一份名单。
-        let (face, with_modules) = systools.role_face(role);
-        // 这一回合的工具面装进工具环境（声明与执行都读它）；跑完还原——只是借来跑一个回合。
-        let saved = tools.as_deref_mut().map(|t| {
-            (
-                std::mem::replace(&mut t.face.allowed, face),
-                std::mem::replace(&mut t.face.with_modules, with_modules),
-            )
-        });
         let llm = crate::capabilities::llm::api::LlmOpts {
             stream: opts.stream,
             timeout_secs: opts.timeout_secs,
@@ -282,7 +260,7 @@ impl Discussion {
         let mut discard = |_e: SessionEvent| {};
         let rounds = converse_with(
             chat,
-            tools.as_deref_mut(),
+            None,
             identity,
             dialogue.to_vec(),
             llm,
@@ -299,10 +277,6 @@ impl Discussion {
             &turn,
             true,
         );
-        if let (Some(t), Some((allowed, with_modules))) = (tools, saved) {
-            t.face.allowed = allowed;
-            t.face.with_modules = with_modules;
-        }
         if cancel.load(std::sync::atomic::Ordering::Relaxed) {
             return Err("已停止".to_string());
         }

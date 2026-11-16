@@ -21,29 +21,30 @@ impl CollabSession {
     /// 目的：委托代拟：核心拟发言名单（**拟名单业务**的用例，与「推荐模型」同一条 `slate` 协议），交用户确认。
     pub(crate) fn draft_slate(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
         let roster = self.modules.roster();
-        let mut verify = self.core_verify_tools("planner");
         sink(crate::capabilities::session::api::working("核心"));
-        let proposal = crate::capabilities::slate::api::propose(
-            &crate::capabilities::slate::api::Parties {
-                prompt: &*self.prompts,
-                tools: &*self.systools,
-                roster: &roster,
-                agents: &self.settings.agents,
-                models: &self.settings.models,
-            },
-            &mut crate::capabilities::slate::api::Request {
-                task: &self.task,
-                mode: crate::capabilities::slate::api::Mode::Collab,
-                chat: self.core_chat.as_mut(),
-                tool_mode: self.core_mode,
-                opts: CompleteOpts::plain(false),
-                verify: verify
-                    .as_mut()
-                    .map(|v| v as &mut dyn crate::capabilities::session::api::CoreVerify),
-            },
-            None,
-            sink,
-        );
+        let proposal = {
+            let mut verify_box = self.verify_env("planner");
+            let verify = verify_box.as_deref_mut();
+            crate::capabilities::slate::api::propose(
+                &crate::capabilities::slate::api::Parties {
+                    prompt: &*self.prompts,
+                    tools: &*self.systools,
+                    roster: &roster,
+                    agents: &self.settings.agents,
+                    models: &self.settings.models,
+                },
+                &mut crate::capabilities::slate::api::Request {
+                    task: &self.task,
+                    mode: crate::capabilities::slate::api::Mode::Collab,
+                    chat: self.core_chat.as_mut(),
+                    tool_mode: self.core_mode,
+                    opts: CompleteOpts::plain(false),
+                    verify,
+                },
+                None,
+                sink,
+            )
+        };
         // 核心这一次调用结束了：交回"谁在干活"——下一棒（泵的下一步 / 等用户）会再推。
         sink(crate::capabilities::session::api::idle());
         let Ok(proposal) = proposal else {
@@ -134,7 +135,7 @@ impl CollabSession {
             thinking: None,
         };
         // 讨论席的"协议" = **机制说明 + 讨论约定**：只说约定不说机制，AI 就不知道自己在什么流程里、该干什么。
-        // **能用哪些表态不在这里列**：核心按这一回合的身份注入工具块（MemberTools::tools_block），清单与越权校验同源。
+        // **能用哪些表态不在这里列**：核心按这一回合的身份注入工具块（会话工具面的 tools_block），清单与越权校验同源。
         let protocol = format!(
             "{}\n{}",
             self.prompts.mechanism("collab", "discussant"),
@@ -227,9 +228,6 @@ impl CollabSession {
         meta: &SessionMeta,
         events: &[serde_json::Value],
         sandboxes: Sandboxes,
-        guest_lease: String,
-        // 工作区用例面：写工具落地后自动提交（基线过期时如实拒绝，不降级）。
-        workspace: Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync>,
         // 本会话的裁决队（核心按会话 id 与转录里已发出的卡号给）：重建出来的整队进它。
         door: Arc<dyn Gates>,
     ) -> Result<CollabSession, String> {
@@ -276,7 +274,6 @@ impl CollabSession {
             pending_ask: None,
             emitted: 0,
             next_line: total,
-            reply_seq: crate::capabilities::session::api::max_reply(events),
             core_chat,
             core_mode,
             prompts: prompts.clone(),
@@ -285,10 +282,7 @@ impl CollabSession {
             vm,
             tools,
             log,
-            spec: meta.exec.clone(),
-            guest_lease,
             sandboxes,
-            workspace,
             done: st.ended,
             cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             plan_approved: st.plan_approved,

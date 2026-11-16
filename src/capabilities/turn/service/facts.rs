@@ -1,19 +1,24 @@
-//! 目的：turn 侧取「一席事实」的地方——沙箱清单、权限链与生效权限、外部工作区授权粒度、工具面事实、上下文预算，都从这里从端口读齐。
+//! 目的：turn 侧取「一席事实」的地方——沙箱清单、权限链与生效权限、外部工作区授权粒度、工具环境事实（含 `env::api::member`）、上下文预算，都从这里从端口读齐。
 //! 管：`sandboxes` / `permission_chain` / `permissions_for` / `workspace_grant` / `permission_for_agent` 的取数与派生，
-//!   `member_tools` 的入参收口，`context_budget` 的窗口与阈值。
-//! 不管：装配规则（`service/assemble.rs`）、登记处里有什么（`registry`）、会话怎么落盘（`service/admit.rs`）。
+//!   `member_env` 的入参收口与逐字段拷贝、`member_face` 的薄入口、`build_single` 的整场装配，`context_budget` 的窗口与阈值。
+//! 不管：装配规则（在 `session::service::assemble`）、登记处里有什么（`registry`）、会话怎么落盘（`service/admit.rs`）。
 //! 联动：`runtime/service/env.rs` 的薄入口转调这里；`service/rebuild.rs` 重建会话时也取这里的事实。
 
 use std::collections::BTreeMap;
 
+use crate::capabilities::llm::api::Channel;
+#[cfg(test)]
 use crate::capabilities::llm::api::ToolMode;
 use crate::capabilities::modules::api::{Module, Roster};
 use crate::capabilities::packages::api::PackagePlan;
 use crate::capabilities::permission::api::PermissionSet;
 use crate::capabilities::registry::api::Registry;
-use crate::capabilities::session::api::{MemberTools, SessionMeta, WorkspaceGrant, work_root_of};
-use crate::capabilities::turn::service::assemble::MemberSpec;
+use crate::capabilities::session::api::{
+    AgentMeta, AgentSession, MemberSpec, SessionEvent, SessionMeta, SingleSpec, WorkspaceGrant,
+    work_root_of,
+};
 use crate::capabilities::turn::service::session::Turn;
+use crate::capabilities::vm::api::GuestOs;
 use crate::capabilities::workspace::api::{Sandbox, Sandboxes};
 use crate::kernel::api::Tier;
 use crate::kernel::ports::HostProbe;
@@ -105,12 +110,51 @@ impl Turn {
         self.permissions_for(registry, meta)
     }
 
-    /// 目的：一席工具面的原件：模块 / 沙箱 / 缺包 / 网络 / 形态 / 角色 / 档位与工具链根一并交给装配。
-    /// 参数：`registry` = 登记处（工具模式与宿主可读根）；`host_plan` = 本席的包计划。
-    // 会话装配把"这一席的工具面"一次说全（模块 / 沙箱 / 缺包 / 网络 / 形态 / 角色 / 档位）。
-    // 这是有意的设计取舍（见 docs/testing/quality-isolation.md 的 allow 清单），不是没修。
+    /// 目的：一席的工具环境事实：模块注入项 + 宿主可读根 / 网络 / 档位 / 包计划，交给 `env` 派生后**逐字段拷成值结构**。
+    /// 参数：`registry` = 登记处（宿主可读根）；`host_plan` = 本席的包计划。
+    /// 约束：`env` 的调用留在这里——`session` 是第 4 层，拿不到 `env`；它只收 `MemberEnvParts` 这个值。
+    pub(crate) fn member_env(
+        &self,
+        registry: &dyn Registry,
+        modules: &[Module],
+        sb: &Sandbox,
+        net: bool,
+        tier: Tier,
+        host_plan: &PackagePlan,
+    ) -> crate::capabilities::session::api::MemberEnvParts {
+        let module_vars: BTreeMap<String, Vec<(String, String)>> = modules
+            .iter()
+            .map(|m| {
+                (
+                    m.manifest.id.clone(),
+                    self.secrets.resolve(&m.manifest.id).unwrap_or_default(),
+                )
+            })
+            .collect();
+        let host_read_roots = crate::capabilities::env::api::host_read_roots(registry.app());
+        let menv =
+            crate::capabilities::env::api::member(&crate::capabilities::env::api::MemberFacts {
+                sandbox: sb,
+                host_read_roots: &host_read_roots,
+                net,
+                tier,
+                base_roots: &self.base_roots,
+                plan: host_plan,
+                module_vars: &module_vars,
+            });
+        crate::capabilities::session::api::MemberEnvParts {
+            fence: menv.fence,
+            module_env: menv.module_env,
+            runtime_path: menv.runtime_path,
+            runtime_roots: menv.runtime_roots,
+        }
+    }
+
+    /// 目的：一席的**工具面值**（围栏 / 工具链根 / 发放名单）薄入口：给不建会话、只看围栏的调用方与测试。
+    /// 约束：只回值结构，工具面（活对象）不出 `session`。
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn member_tools(
+    pub(crate) fn member_face(
         &self,
         registry: &dyn Registry,
         modules: &[Module],
@@ -123,23 +167,61 @@ impl Turn {
         tier: Tier,
         guest_lease: String,
         host_plan: &PackagePlan,
-    ) -> MemberTools {
-        // 事实在这里取齐，装配规则在 turn（同一能力内，装配入口在 assemble.rs）。
-        let spec = MemberSpec {
+    ) -> crate::capabilities::session::api::ToolFace {
+        let spec = crate::capabilities::session::api::MemberSpec {
             modules,
             sandbox: sb,
             unavailable,
-            net,
             mode,
             role,
             tier,
             guest_lease,
-            plan: host_plan,
-            base_roots: &self.base_roots,
-            host_read_roots: crate::capabilities::env::api::host_read_roots(registry.app()),
             shell: self.shell_slot(&sb.session),
+            env: self.member_env(registry, modules, sb, net, tier, host_plan),
         };
-        crate::capabilities::turn::api::member_tools(&self.session_deps(), &spec)
+        crate::capabilities::session::api::member_face(&self.session_ports(), &spec)
+    }
+
+    /// 目的：单 agent 会话的整场装配——取本席事实（含 `env` 派生）、解析形态与预算，交给 `session` 装配。
+    /// 约束：不插入会话中心；插入与落盘由调用方（`work` 的提交段）统一做。
+    // 会话装配把这一场单 agent 会话一次说全；收口成参数对象只是把参数挪个地方。
+    // 这是有意的设计取舍（见 docs/testing/quality-isolation.md 的 allow 清单），不是没修。
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_single(
+        &self,
+        registry: &dyn Registry,
+        a: &AgentMeta,
+        modules: &[Module],
+        channel: Channel,
+        sb: &Sandbox,
+        unavailable: BTreeMap<String, Vec<String>>,
+        net: bool,
+        tier: Tier,
+        guest: Option<GuestOs>,
+        guest_lease: String,
+        host_plan: &PackagePlan,
+    ) -> (AgentSession, Vec<SessionEvent>) {
+        // 形态按登记处解析；通道已在前置判据里解析成功，这里不再有"没有通道"的分支。
+        let spec = SingleSpec {
+            agent: a,
+            member: MemberSpec {
+                modules,
+                sandbox: sb,
+                unavailable,
+                mode: registry.tool_mode(a.model.as_deref()),
+                // 单 agent 工作：用户自己开的那场对话（不是任务链的节点）——身份是 solo。
+                role: "solo",
+                tier,
+                guest_lease,
+                shell: self.shell_slot(&sb.session),
+                env: self.member_env(registry, modules, sb, net, tier, host_plan),
+            },
+            channel,
+            guest,
+            context: self.context_budget(registry, a.model.as_deref()),
+            core_model: registry.core_model(),
+        };
+        crate::capabilities::session::api::single_session(&self.session_ports(), &spec)
     }
 
     /// 目的：本会话的上下文预算：窗口按模型现算（缺省用核心默认），阈值与保留百分比来自全局设置。

@@ -592,12 +592,9 @@ impl Work {
                     Arc::clone(&self.systools),
                     Arc::clone(&self.tools),
                     Arc::clone(&self.log),
-                    meta.exec.clone(),
-                    guest_lease_for(self.history.as_ref(), &meta)?,
                     metas.clone(),
                     delegate,
                     sandboxes.clone(),
-                    Arc::clone(&self.workspace),
                     door,
                 )?;
                 let mut out = Vec::new();
