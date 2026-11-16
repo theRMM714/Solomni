@@ -8,7 +8,7 @@
 > 分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九；单元划分与文档路由见 [AGENTS.md](../../AGENTS.md)。
 
 > 它是**核心代理工具的唯一落点**：六工具的载荷与回执、授权判据、幂等账与成员侧执行者都只在这里实现。
-> 它**不持落盘状态、不持会话**：幂等账只在内存，真实动作经 `ProxyHost` 由 `conductor` 的 `ProxyBridge` 落回核心线程。
+> 它**不持落盘状态、不持会话**：幂等账只在内存，真实动作经 `ProxyHost` 由 `runtime` 的 `ProxyBridge` 落回核心线程。
 
 | 文件 | 职责 |
 | --- | --- |

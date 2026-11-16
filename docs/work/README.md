@@ -14,21 +14,21 @@
 - 管：**运行报告**——包库可用版本、缺失清单、档位视图（`RuntimeReport` / `TierChoices`）与权限视图（`PermissionView`）。
 - 管：**guest 生命周期**——`GuestBoot` / `EditGuest` / `GuestDiagnose` 的起停诊断两段式（单次销毁的 `GuestStop` 归 `vm`），以及稳定根的判据（`stable_roots` / `check_stable_roots`）。
 - 管：**建议与激活**——`suggest_models` 按需求拟名单、`activation_build_request` / `prepare_activation` / `commit_activation` 启用历史会话的两段。
-- 不管：命令队列与生成驱动——谁在什么时候取走会话、生成完怎么放回，由 `conductor` 决定（本单元只提供用例方法）。
+- 不管：命令队列与生成驱动——谁在什么时候取走会话、生成完怎么放回，由 `runtime` 决定（本单元只提供用例方法）。
 - 不管：会话本体、在世表与运行态（`turn`）、落盘与转录（`session`）、沙箱与工作区机制（`workspace`）、虚拟机实现与计划派生（`vm`）。
 - 不管：登记处与探针本体——`&dyn Registry` / `&dyn HostProbe` 由调用方按次传入，`Work` 不持有它们（R12）。
 
 ## 入站契约与状态归属
 
-- 入站面：`api` 的 DTO（`WorkSpec` / `WorkOpened` / `SessionConfig` / `SessionEdit` / `SessionView` / `ContinueView` / `FilesView` / `RuntimeReport` / `TierChoices` / `PermissionView` / `ThinkingView` / `AgentSuggestion` / `ConfigAgent` / `AgentInstance` / `WorkMode`）与 guest 三类（`GuestBoot` / `GuestStop` / `EditGuest` / `GuestDiagnose`）；`conductor` 的 `SessionOps` / `ConductorOps` 签名直接用这些类型。
+- 入站面：`api` 的 DTO（`WorkSpec` / `WorkOpened` / `SessionConfig` / `SessionEdit` / `SessionView` / `ContinueView` / `FilesView` / `RuntimeReport` / `TierChoices` / `PermissionView` / `ThinkingView` / `AgentSuggestion` / `ConfigAgent` / `AgentInstance` / `WorkMode`）与 guest 三类（`GuestBoot` / `GuestStop` / `EditGuest` / `GuestDiagnose`）；`work` 自己的 `WorkOps`、`turn` 的 `TurnOps` 与 `runtime` 的 `RuntimeOps` 签名直接用这些类型。
 - 状态归属：`Work` 只持能力面（`root` / `history` / `workspace` / `vm` / `packages` / `provision` / `modules` / `llm` / `tools` / `prompt` / `systools` / `log`），**不自持会话状态**：会话在世表、运行态与裁决队都在 `turn`，经形参 `&Turn` / `&mut Turn` 读写；`registry` / `probe` 同样按次传入。
 - 两段式的中间产物（`PreparedWork` / `PendingWork` / `PreparedEdit` / `PreparedActivation`）只在本能力内流转，不在 `api` 出现。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`collab`、`env`、`llm`、`modules`、`packages`、`permission`、`prompt`、`provision`、`registry`、`session`、`slate`、`tools`、`turn`、`vm`、`workspace`；`kernel` 的 `Tier` / `SessionId` / `Log` / `HostProbe` / `ExecSpec`。
-- 谁在用我：`conductor`（`SessionOps` / `ConductorOps` 的薄转发与 `Ops` 组装）、`presentation`（视图类型与 `diagnose_text`）。
-- **不引用 `conductor`**：依赖只向下（`layers.yaml` 的 `work: 9`、`conductor: 10`）。
+- 谁在用我：`runtime`（`WorkOps` / `TurnOps` / `RuntimeOps` 的薄转发与 `Faces` 装配）、`presentation`（视图类型与 `diagnose_text`）。
+- **不引用 `runtime`**：依赖只向下（`layers.yaml` 的 `work: 9`、`runtime: 10`）。
 
 ## 一、两段式：准备与提交
 
@@ -38,9 +38,9 @@
 
 ## 改动本单元时必须同步
 
-- `src/capabilities/work/api.rs` 的 DTO → `conductor` 的 `api.rs` 签名、`src/presentation/` 的视图消费方、`src/tests/routes.rs` 的路由表都要一起改。
-- `src/capabilities/work/service/views.rs` → `SessionView` 的继续判据与文件视图是行为契约：改判据必须同改 `src/tests/api/session.rs`、`src/tests/routes.rs`、`src/tests/conductor/proxy.rs` 的断言。
-- `src/capabilities/work/service/create.rs` → 建工作的顺序、日志 key 与失败撤销是行为契约：改一处必须同改 `src/tests/conductor.rs`、`src/tests/api/compaction.rs`、`src/tests/session/lifecycle.rs`、`src/tests/vm/fence.rs` 的断言。
+- `src/capabilities/work/api.rs` 的 DTO → `runtime` 的 `api.rs` 签名、`src/presentation/` 的视图消费方、`src/tests/routes.rs` 的路由表都要一起改。
+- `src/capabilities/work/service/views.rs` → `SessionView` 的继续判据与文件视图是行为契约：改判据必须同改 `src/tests/api/session.rs`、`src/tests/routes.rs`、`src/tests/runtime/proxy.rs` 的断言。
+- `src/capabilities/work/service/create.rs` → 建工作的顺序、日志 key 与失败撤销是行为契约：改一处必须同改 `src/tests/runtime.rs`、`src/tests/api/compaction.rs`、`src/tests/session/lifecycle.rs`、`src/tests/vm/fence.rs` 的断言。
 - `src/capabilities/work/service/guest_job.rs` → 稳定根判据与 guest 规格是行为契约：改一处必须同改 `src/tests/vm/fence.rs`、`src/tests/vm/guestpath.rs`、`src/tests/vm/live.rs` 的断言。
 - `src/capabilities/work/domain.rs` → 工作名校验与自由函数（`dedup_modules` / `merge_into_one` / `mode_str` / `session_started`）是纯逻辑，`src/tests/work.rs` 钉住其中两条。
 - `src/capabilities/turn/service/assemble.rs` 的 `Turn::build_single` → 本单元 `commit_work` 的唯一装配入口：改签名必须同改这里、`src/capabilities/turn/unit-map` 的对应行与 `Turn` 的用例。

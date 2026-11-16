@@ -7,7 +7,7 @@
 
 | 要找什么 | 读哪一份 |
 | --- | --- |
-| `conductor`（应用编排） | [README.md](conductor/README.md)、[unit-map.md](conductor/unit-map.md) |
+| `runtime`（顶层编排） | [README.md](runtime/README.md)、[unit-map.md](runtime/unit-map.md) |
 | `work`（工作用例） | [README.md](work/README.md)、[unit-map.md](work/unit-map.md) |
 | `lifecycle`（会话历史生命周期） | [README.md](lifecycle/README.md)、[unit-map.md](lifecycle/unit-map.md) |
 | `proxy`（核心代理工具） | [README.md](proxy/README.md)、[unit-map.md](proxy/unit-map.md) |

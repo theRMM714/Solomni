@@ -2,8 +2,8 @@
 //! 管：`member`（一席的围栏 / 运行路径 / 工具链根 / 模块注入项）、`sandboxes`（每个 agent 的沙箱）、
 //!   `permissions`（权限链）、`workspace_grant`（共享区授权粒度）、`network_allowed` 与
 //!   `host_read_roots`（全局策略派生的网络开关与主机只读根）。
-//! 不管：取事实（history / workspace / registry / 清单在 `conductor`）、落盘、启停 guest 与工具进程。
-//! 联动：`conductor/service/env.rs` 取好事实后转调这里；行为与错误文案必须逐字一致。
+//! 不管：取事实（history / workspace / registry / 清单在 `runtime`）、落盘、启停 guest 与工具进程。
+//! 联动：`runtime/service/env.rs` 取好事实后转调这里；行为与错误文案必须逐字一致。
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;

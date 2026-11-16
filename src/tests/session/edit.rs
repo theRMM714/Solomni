@@ -280,7 +280,7 @@ pub(crate) fn deleting_a_session_releases_its_fence_lease() {
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
-    let mut core = Conductor::new(
+    let mut core = Core::new(
         crate::tests::root_dir(),
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history_of(Arc::clone(&hist)),

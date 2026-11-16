@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
-/// 目的：投喂文件名净化（策略在 conductor）：只允许单个文件名，挡掉路径分隔符与上级跳转。
+/// 目的：投喂文件名净化（策略在 runtime）：只允许单个文件名，挡掉路径分隔符与上级跳转。
 pub fn safe_file_name(name: &str) -> Result<String, String> {
     let n = name.trim();
     if n.is_empty() {
@@ -95,7 +95,7 @@ pub struct Sandbox {
     pub modules: BTreeMap<String, PathBuf>,
     /// 目的：有 <root>/userdata 目录的模块 id（工作区扫描读出的事实；围栏派生据此决定派不派这条）。
     pub modules_with_userdata: std::collections::BTreeSet<String>,
-    /// 目的：本席位的生效权限（reach / decision / 共享区范围）：由 conductor 解析后注入。
+    /// 目的：本席位的生效权限（reach / decision / 共享区范围）：由 runtime 解析后注入。
     ///    私有沙箱不受共享区路径范围约束，但仍受 profile 的写决定约束。
     pub permissions: PermissionSet,
     /// 目的：这场会话的路径翻译器（虚拟机档 guest ↔ 宿主；本机档 None = 恒等）。

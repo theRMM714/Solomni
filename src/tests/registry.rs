@@ -76,7 +76,7 @@ pub(crate) fn provider_lifecycle_and_key_never_leaks_to_view() {
         .provider_upsert("p1", "http://x", "sk-密钥XYZ")
         .unwrap();
     for v in core.registry().provider_views() {
-        // 展示文案由呈现层拼（conductor 不再提供 CLI 行），"密钥永不出现"这条红线两处都要成立。
+        // 展示文案由呈现层拼（runtime 不再提供 CLI 行），"密钥永不出现"这条红线两处都要成立。
         let shown = format!("{}  {}", v.id, v.base_url);
         assert!(!shown.contains("sk-密钥XYZ"), "视图出现密钥：{}", shown);
         assert!(!format!("{:?}", v).contains("sk-密钥XYZ"));
@@ -105,7 +105,7 @@ pub(crate) fn model_context_zero_means_not_filled_and_falls_back_to_128k() {
     core.registry_mut()
         .model_upsert(model_draft("m", "M", "api-m", "p1", "", 64_000))
         .unwrap();
-    let stored = |c: &crate::capabilities::conductor::service::Conductor| {
+    let stored = |c: &crate::capabilities::runtime::service::Core| {
         c.registry()
             .model_views()
             .iter()
@@ -406,8 +406,8 @@ pub(crate) fn endpoint_resolve_candidates_retries_shape_mismatch_and_stops_on_fa
 // ---------- 模块清单（内存来源） ----------
 #[test]
 pub(crate) fn a_probe_writes_back_only_conclusive_results() {
-    use crate::capabilities::conductor::api::ProbeOutcome;
     use crate::capabilities::llm::api::ToolMode;
+    use crate::capabilities::runtime::api::ProbeOutcome;
     let fresh = |outcome: ProbeOutcome| {
         let mut core = core_with_gateway(
             vec![],
@@ -423,7 +423,7 @@ pub(crate) fn a_probe_writes_back_only_conclusive_results() {
             .expect("登记模型");
         core
     };
-    let mode_of = |core: &Conductor| {
+    let mode_of = |core: &Core| {
         core.registry()
             .model_views()
             .iter()

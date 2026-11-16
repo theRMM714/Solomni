@@ -81,7 +81,7 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
-    let mut core = Conductor::new(
+    let mut core = Core::new(
         crate::tests::root_dir(),
         registry_service(InMemorySettings::with_tier(Tier::Vm), Arc::clone(&llm)),
         test_history(),
@@ -135,7 +135,7 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
         Arc::clone(&gateway2),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
-    let mut core2 = Conductor::new(
+    let mut core2 = Core::new(
         crate::tests::root_dir(),
         registry_service(InMemorySettings::new(), Arc::clone(&llm2)),
         test_history(),
@@ -301,7 +301,7 @@ pub(crate) fn module_without_runtime_is_denied_with_reason() {
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
-    let mut core = Conductor::new(
+    let mut core = Core::new(
         crate::tests::root_dir(),
         registry_service(InMemorySettings::with_tier(Tier::Host), Arc::clone(&llm)),
         test_history_of(Arc::clone(&hist)),

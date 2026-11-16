@@ -2,7 +2,7 @@
 //! 管：网络路径与档位的匹配（本机档拒绝网络工作区）、根的形态（不能是文件系统根 / UNC 共享根）、虚拟机档要求
 //!   UTF-8、与产品根的互包含（文本 + 落点身份），以及目录与可写性。
 //! 不管：会话 meta 的读写（在 session）；锁（在 workspace 能力）；挂载计划（在 guest_job）。
-//! 联动：`conductor` 建会话走 `resolve`、加载复检走 `recheck`（都经 `workspace::api`）；两者共用一个 `policy`，手改 meta
+//! 联动：`runtime` 建会话走 `resolve`、加载复检走 `recheck`（都经 `workspace::api`）；两者共用一个 `policy`，手改 meta
 //!   也过不去；规范化、元数据与可写探测都走 `HostProbe`。
 
 use crate::kernel::api::Tier;

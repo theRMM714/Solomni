@@ -1,25 +1,26 @@
 //! 目的：钉应用服务（会话中心与跨能力编排）的不变式。
 //! 管：VM 会话与外部 VM、双稳定挂载、工作区策略分层、绑定复核、宿主↔VM 编辑、删除保外部工作区、失败引导清理、思维链随工具行落档。
 //! 不管：各能力内部规则（按能力落各自文件）。
-//! 联动：src/capabilities/conductor/、tests/doubles、平台探针。
+//! 联动：src/capabilities/runtime/、tests/doubles、平台探针。
 
 mod ask_user;
 mod proxy;
 use super::builders::*;
 use super::prelude::*;
+use crate::presentation::faces::Faces;
 
 /// 造一台"根在给定目录、补齐面报给定清单"的核心（只为验外部工具路径的取法）。
-fn conductor_rooted(
+fn runtime_rooted(
     root: &std::path::Path,
     settings: InMemorySettings,
     provision: Arc<dyn crate::capabilities::provision::api::Provision + Send + Sync>,
-) -> Conductor {
+) -> Core {
     let gateway: Arc<dyn ChatGateway + Send + Sync> = Arc::new(gw(BTreeMap::new(), vec![]));
     let llm = test_llm(
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
-    Conductor::new(
+    Core::new(
         root.to_path_buf(),
         registry_service(settings, Arc::clone(&llm)),
         test_history(),
@@ -47,17 +48,17 @@ fn conductor_rooted(
 /// 目的：造一台"能起虚拟机会话"的核心：探针按用例声明作答，VM 引擎可控（慢 / 失败）。
 /// 约束：与它的两条用例同一道门——本平台 guest 后端尚未真机验收时没有调用方。
 #[cfg(not(target_os = "macos"))]
-fn conductor_for_vm(
+fn runtime_for_vm(
     probe: Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>,
     engine: crate::tests::doubles::FakeEngine,
     modules: Vec<Module>,
-) -> Conductor {
+) -> Core {
     let gateway: Arc<dyn ChatGateway + Send + Sync> = Arc::new(gw(BTreeMap::new(), vec![]));
     let llm = test_llm(
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
-    Conductor::new(
+    Core::new(
         crate::tests::root_dir(),
         registry_service(InMemorySettings::with_tier(Tier::Vm), Arc::clone(&llm)),
         test_history(),
@@ -98,7 +99,7 @@ fn vm_capable_probe(
 #[cfg(not(target_os = "macos"))]
 #[test]
 pub(crate) fn creating_a_vm_session_does_not_block_the_core() {
-    use crate::capabilities::conductor::api::ConductorHandle;
+    use crate::capabilities::runtime::api::Handle;
     use crate::tests::doubles::FakeEngine;
     const BOOT: std::time::Duration = std::time::Duration::from_millis(400);
     let guest = crate::tests::test_guest("core-free");
@@ -107,20 +108,20 @@ pub(crate) fn creating_a_vm_session_does_not_block_the_core() {
         boot_delay: Some(BOOT),
         ..Default::default()
     };
-    let core = conductor_for_vm(probe, engine.clone(), vec![module_of("a")]);
-    let handle = ConductorHandle::spawn(core).expect("起核心");
-    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let core = runtime_for_vm(probe, engine.clone(), vec![module_of("a")]);
+    let handle = Handle::spawn(core).expect("起核心");
+    let faces = Faces::from_handle(&handle);
     let mut spec = work("w-core-free", WorkMode::Single, &["a"]);
     spec.tier = Tier::Vm;
     spec.guest = Some(guest.clone());
     let creator = {
-        let ops = ops.clone();
-        std::thread::spawn(move || ops.sessions.create_work(spec))
+        let faces = faces.clone();
+        std::thread::spawn(move || faces.work.create_work(spec))
     };
     // 让 boot 真的开始，再问核心一件小事：它必须立刻回，而不是等 400ms。
     std::thread::sleep(std::time::Duration::from_millis(80));
     let t0 = std::time::Instant::now();
-    let answered = ops.core.tier_choices();
+    let answered = faces.work.tier_choices();
     let waited = t0.elapsed();
     let created = creator.join().expect("线程没崩").expect("建会话");
     assert!(answered.is_ok(), "核心要能应答");
@@ -145,7 +146,7 @@ pub(crate) fn creating_a_vm_session_does_not_block_the_core() {
 #[cfg(not(target_os = "macos"))]
 #[test]
 pub(crate) fn a_failed_guest_boot_leaves_no_session_behind() {
-    use crate::capabilities::conductor::api::ConductorHandle;
+    use crate::capabilities::runtime::api::Handle;
     use crate::tests::doubles::FakeEngine;
     let guest = crate::tests::test_guest("boot-fail");
     let probe = vm_capable_probe(&guest);
@@ -153,26 +154,27 @@ pub(crate) fn a_failed_guest_boot_leaves_no_session_behind() {
         boot_error: Some("起不来（测试注入）".to_string()),
         ..Default::default()
     };
-    let core = conductor_for_vm(probe, engine, vec![module_of("a")]);
-    let handle = ConductorHandle::spawn(core).expect("起核心");
-    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let core = runtime_for_vm(probe, engine, vec![module_of("a")]);
+    let handle = Handle::spawn(core).expect("起核心");
+    let faces = Faces::from_handle(&handle);
     let mut spec = work("w-boot-fail", WorkMode::Single, &["a"]);
     spec.tier = Tier::Vm;
     spec.guest = Some(guest);
-    let err = ops
-        .sessions
-        .create_work(spec)
-        .expect_err("起不来要如实拒绝");
+    let err = faces.work.create_work(spec).expect_err("起不来要如实拒绝");
     assert!(err.contains("起不来"), "{}", err);
-    assert!(ops.history.open("w-boot-fail").is_err(), "会话记录不该留下");
     assert!(
-        ops.history.list().expect("历史").is_empty(),
+        faces.history.open("w-boot-fail").is_err(),
+        "会话记录不该留下"
+    );
+    assert!(
+        faces.history.list().expect("历史").is_empty(),
         "历史里不该留下这条会话"
     );
     // 占名也要撤掉：同名重试能通过（而不是被"工作名已存在"挡住）。
     let mut again = work("w-boot-fail", WorkMode::Single, &["a"]);
     again.tier = Tier::Host;
-    ops.sessions
+    faces
+        .work
         .create_work(again)
         .expect("同一名字在本机档上应该建得起来（失败那次没占住名字）");
 }
@@ -183,7 +185,7 @@ pub(crate) fn a_failed_guest_boot_leaves_no_session_behind() {
 fn core_for_external_vm(
     tag: &str,
     engine: FakeEngine,
-) -> (Conductor, std::path::PathBuf, std::path::PathBuf, String) {
+) -> (Core, std::path::PathBuf, std::path::PathBuf, String) {
     use crate::capabilities::workspace::detail::FsWorkspace;
     let root = crate::tests::scratch(tag);
     let product = root.join("product");
@@ -472,7 +474,7 @@ pub(crate) fn vm_tool_paths_follow_provisioned_packages_without_restart() {
         test_provision_with_root(vec![installed_dep("vm.qemu.linux", probe)], Some(&root));
 
     // 没登记：按项目内补齐的那一个判 → 这一项成立，且文案说清是按哪条路找到的。
-    let core = conductor_rooted(
+    let core = runtime_rooted(
         &root,
         InMemorySettings::with_tier(Tier::Host),
         Arc::clone(&provision),
@@ -491,7 +493,7 @@ pub(crate) fn vm_tool_paths_follow_provisioned_packages_without_restart() {
     );
 
     // 显式登记优先：登记了一个不在场的路径 → 这一项不成立（不去偷偷用项目内那份）。
-    let registered = conductor_rooted(
+    let registered = runtime_rooted(
         &root,
         InMemorySettings::with_qemu_path("no/such/qemu"),
         Arc::clone(&provision),
@@ -896,7 +898,7 @@ pub(crate) fn prose_then_tool_envelope_keeps_prose_line_and_rebuilds_identically
         live_h
     );
 
-    // 「重启」：同一份落盘历史交给新的 Conductor，重建后必须与实时历史逐条一致。
+    // 「重启」：同一份落盘历史交给新的 Core，重建后必须与实时历史逐条一致。
     drop(core);
     let mut core2 = core_with_all(
         vec![module_of("a")],

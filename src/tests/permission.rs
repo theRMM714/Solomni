@@ -9,6 +9,7 @@ use crate::capabilities::permission::api::{
     validate_defaults, validate_entry,
 };
 use crate::capabilities::workspace::domain::workspace::Place;
+use crate::presentation::faces::Faces;
 use crate::tests::doubles::{
     InMemoryWorkStore, InMemoryWorkspace, abs, test_sandbox, test_workspace, test_workspace_store,
 };
@@ -562,7 +563,7 @@ fn call_grant_checks_scope_and_reach() {
 /// 外加没有可回答的前端那一路（fail-closed：不执行）。
 #[test]
 fn tool_layer_ask_rides_the_decision_channel() {
-    use crate::capabilities::conductor::api::{ConductorHandle, Ops, Output};
+    use crate::capabilities::runtime::api::{Handle, Output};
     use crate::capabilities::session::api::SessionEvent;
     use crate::capabilities::tools::domain::fence::{OPT_FENCE_ABORT, OPT_FENCE_UNFENCED};
     use crate::tests::builders::AskingRunner;
@@ -593,7 +594,7 @@ fn tool_layer_ask_rides_the_decision_channel() {
         a.manifest
             .tools
             .insert("grep".to_string(), decl("python tools/grep.py"));
-        let handle = ConductorHandle::spawn(core_with_runner(
+        let handle = Handle::spawn(core_with_runner(
             vec![a],
             gw(member, vec!["[]".into()]),
             Arc::clone(&runner),
@@ -603,22 +604,22 @@ fn tool_layer_ask_rides_the_decision_channel() {
         if allow_cards {
             handle.allow_tool_cards();
         }
-        let ops = Ops::from_handle(&handle);
-        let sid = ops
-            .sessions
+        let faces = Faces::from_handle(&handle);
+        let sid = faces
+            .work
             .create_work(work("w", WorkMode::Single, &["a"]))
             .expect("建会话")
             .0
             .sid;
         let answerer = {
-            let ops = ops.clone();
+            let faces = faces.clone();
             let sid = sid.clone();
             let answer = answer.map(|s| s.to_string());
             std::thread::spawn(move || {
                 // 等卡进队：按墙钟上限等；固定迭代数在并行负载下会提前耗尽（不是卡没来）。
                 let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
                 loop {
-                    if let Ok(Some(q)) = ops.sessions.open_queue(&sid) {
+                    if let Ok(Some(q)) = faces.turn.open_queue(&sid) {
                         assert_eq!(
                             q.card.envelope.role, "tools",
                             "谁在问：工具层（与工具级确认同一信封）"
@@ -632,11 +633,12 @@ fn tool_layer_ask_rides_the_decision_channel() {
                         );
                         if stop {
                             // 停止 = 拒绝：整队作废，等待方解开、按拒绝收场。
-                            let _ = ops.sessions.stop(&sid);
+                            let _ = faces.runtime.stop(&sid);
                             return true;
                         }
                         // 回答走**唯一那条命令**（卡号 + 选项 id），处置归发起方。
-                        ops.sessions
+                        faces
+                            .turn
                             .answer_card(&sid, &q.card.id, answer.as_deref().unwrap_or(""), "")
                             .expect("按选项作答");
                         return true;
@@ -648,7 +650,8 @@ fn tool_layer_ask_rides_the_decision_channel() {
                 }
             })
         };
-        ops.sessions
+        faces
+            .turn
             .say(&sid, "干活", Output::Final)
             .expect("跑一回合");
         let reached = answerer.join().expect("作答线程");
@@ -675,7 +678,7 @@ fn tool_layer_ask_rides_the_decision_channel() {
         );
         // 卡与回答都落盘（会话的事实）：重启后按转录重建时，已答过的不重问。
         if allow_cards && !stop {
-            let (_, saved) = ops.history.open(&sid).expect("读转录");
+            let (_, saved) = faces.history.open(&sid).expect("读转录");
             let kinds: Vec<String> = saved
                 .iter()
                 .filter_map(|ev| {
@@ -842,7 +845,7 @@ fn decision_door_queues_only_the_head_and_voids_waiters() {
 /// 三态都走一遍（放行 / 拒绝 / 本轮不再问），并核对卡与回答**落盘**（重启后不重问的那份事实）。
 #[test]
 fn tool_confirmation_rides_the_decision_channel() {
-    use crate::capabilities::conductor::api::{ConductorHandle, Ops, Output};
+    use crate::capabilities::runtime::api::{Handle, Output};
     use crate::capabilities::session::api::{
         OPT_TOOL_ALLOW, OPT_TOOL_ALLOW_TURN, OPT_TOOL_DENY, SessionEvent,
     };
@@ -876,7 +879,7 @@ fn tool_confirmation_rides_the_decision_channel() {
         a.manifest
             .tools
             .insert("grep".to_string(), decl("python tools/grep.py"));
-        let handle = ConductorHandle::spawn(core_with_runner(
+        let handle = Handle::spawn(core_with_runner(
             vec![a],
             gw(member, vec!["[]".into()]),
             Arc::clone(&runner),
@@ -884,15 +887,16 @@ fn tool_confirmation_rides_the_decision_channel() {
         .expect("起核心线程");
         // 有交互前端在服务：工具级确认接进裁决队（纯终端同步生成不接，避免空等）。
         handle.allow_tool_cards();
-        let ops = Ops::from_handle(&handle);
-        let sid = ops
-            .sessions
+        let faces = Faces::from_handle(&handle);
+        let sid = faces
+            .work
             .create_work(work("w", WorkMode::Single, &["a"]))
             .expect("建会话")
             .0
             .sid;
         // 粒度与问谁走**同一条设置路**（逐 agent 覆盖写回 meta，与界面里改配置同一条命令）。
-        ops.sessions
+        faces
+            .work
             .edit(
                 &sid,
                 SessionEdit {
@@ -913,14 +917,14 @@ fn tool_confirmation_rides_the_decision_channel() {
             )
             .expect("把这一席的粒度设成 ask");
         let answerer = {
-            let ops = ops.clone();
+            let faces = faces.clone();
             let sid = sid.clone();
             let answer = answer.to_string();
             std::thread::spawn(move || {
                 // 等卡进队：按墙钟上限等；固定迭代数在并行负载下会提前耗尽（不是卡没来）。
                 let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
                 loop {
-                    if let Ok(Some(q)) = ops.sessions.open_queue(&sid) {
+                    if let Ok(Some(q)) = faces.turn.open_queue(&sid) {
                         assert_eq!(
                             q.card
                                 .options
@@ -936,7 +940,8 @@ fn tool_confirmation_rides_the_decision_channel() {
                         );
                         assert_eq!(q.card.envelope.role, "tools", "谁在问：工具层");
                         // 回答走**唯一那条命令**（卡号 + 选项 id）。
-                        ops.sessions
+                        faces
+                            .turn
                             .answer_card(&sid, &q.card.id, &answer, "")
                             .expect("按选项作答");
                         return true;
@@ -948,12 +953,13 @@ fn tool_confirmation_rides_the_decision_channel() {
                 }
             })
         };
-        ops.sessions
+        faces
+            .turn
             .say(&sid, "干活", Output::Final)
             .expect("跑一回合");
         assert!(answerer.join().expect("作答线程"), "工具卡要进队并等回答");
         assert!(
-            ops.sessions.open_queue(&sid).expect("取卡").is_none(),
+            faces.turn.open_queue(&sid).expect("取卡").is_none(),
             "答完不再挂着"
         );
         let (batches, _head, _oldest) = handle.events().snapshot(Some(&sid), 0);
@@ -971,7 +977,7 @@ fn tool_confirmation_rides_the_decision_channel() {
             .collect();
         let ran = runner.calls.lock().expect("锁").len();
         // 卡与回答都落盘（会话的事实）：重启后不重问已答的。
-        let (_, saved) = ops.history.open(&sid).expect("读转录");
+        let (_, saved) = faces.history.open(&sid).expect("读转录");
         let kinds: Vec<String> = saved
             .iter()
             .filter_map(|ev| {

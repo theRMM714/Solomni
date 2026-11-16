@@ -4,7 +4,7 @@
 //! 联动：`src/main.rs` 与 `entry/startup.rs`（`FenceReport`）、`presentation/web`。
 
 pub(crate) fn serve_web(
-    ops: crate::capabilities::conductor::api::Ops,
+    faces: crate::presentation::faces::Faces,
     port: u16,
     report: &crate::entry::startup::FenceReport,
     home: &std::path::Path,
@@ -18,7 +18,7 @@ pub(crate) fn serve_web(
         effective_fs: report.fs,
         effective_net: report.net,
         write_allowed: report.write_allowed,
-        read_only_roots: ops
+        read_only_roots: faces
             .registry
             .settings()
             .map(|s| s.sandbox.policy.host_read_roots.len())
@@ -31,7 +31,7 @@ pub(crate) fn serve_web(
             .collect(),
         sandbox_degraded: report.sandbox_mode.degraded(),
     };
-    if let Err(e) = crate::presentation::web::serve(ops, port, fence, home) {
+    if let Err(e) = crate::presentation::web::serve(faces, port, fence, home) {
         eprintln!("[Web 服务异常] {}", e);
         std::process::exit(1);
     }

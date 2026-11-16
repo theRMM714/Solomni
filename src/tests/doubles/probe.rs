@@ -110,7 +110,7 @@ pub(crate) fn vm_capable_host_probe()
 
 /// 目的：日志能力替身：什么都不做（呈现层的埋点不参与任何判定）。
 pub(crate) struct NoopLogOps;
-impl crate::capabilities::conductor::api::LogOps for NoopLogOps {
+impl crate::capabilities::runtime::api::LogOps for NoopLogOps {
     fn info(&self, _at: &str, _msg: &str) {}
     fn warn(&self, _at: &str, _msg: &str) {}
     fn error(&self, _at: &str, _msg: &str) {}

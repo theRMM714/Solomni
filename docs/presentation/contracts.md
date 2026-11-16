@@ -11,13 +11,14 @@
 
 | 东西 | 定义在 | 形态 |
 | --- | --- | --- |
-| 能力接口 | **各能力自己的 `api.rs`** | `Ops` 里的面：`SessionOps` / `ConductorOps` / `ActionOps` / `LogOps` 在 `src/capabilities/conductor/api.rs`（会话中心、核心自己的用例与**动作目录 / 分发**），`RegistryOps` 在 `src/capabilities/registry/api.rs`，`HistoryOps` 在 `src/capabilities/session/api.rs`，`ModulesOps` 在 `src/capabilities/modules/api.rs`，`ResidentOps` / `SecretOps` / `Provision` 各在 `src/capabilities/<能力>/api.rs`。**全 `&self`、可替换成假实现**；实现都是 `src/capabilities/conductor/api/contract_impls.rs` 里 `ConductorHandle` 的队列代理（`impl` 在核心线程上执行）|
+| 能力接口 | **各能力自己的 `api.rs`** | `Faces` 的字段：`WorkOps` 在 `src/capabilities/work/api.rs`（工作用例与核心推荐）、`TurnOps` 在 `src/capabilities/turn/api.rs`（回合推进）、`RuntimeOps` / `ActionOps` / `LogOps` 在 `src/capabilities/runtime/api.rs`（启用 / 改需求 / 回档 / 停止、动作目录与分发、埋点门面），`RegistryOps` 在 `src/capabilities/registry/api.rs`，`HistoryOps` 在 `src/capabilities/session/api.rs`，`ModulesOps` 在 `src/capabilities/modules/api.rs`，`ResidentOps` / `SecretOps` / `Provision` 各在 `src/capabilities/<能力>/api.rs`。**全 `&self`、可替换成假实现**；实现都是 `src/capabilities/runtime/service/contracts.rs` 里 `Handle` 的队列代理（`impl` 在核心线程上执行）|
 | 事件台 | `src/capabilities/turn/api.rs` | `EventBus`：核心独占生产，任意数量的消费者按序号增量取 |
 
 规则：
 
 - **命令**：呈现层调能力接口 → 核心在自己的线程上执行 → 同步回包（`Advance`：**事件台头部序号**）。
   命令**不携带事实**——事实只有一条来路（事件台）；回包里的 `head` 只是"我现在说到哪了"。
+- **按屏幕取面**：`Faces`（`src/presentation/faces.rs`）是根装配出的面袋，每个字段是一个入站契约或一个根填的值（`provision` / `storage` / `toolchains`）；呈现层按屏幕取自己需要的面，不再有一个 13 字段的桶，也没有「会话中心」这种横跨三个单元的接口。
 - **动作只有一条路**：`GET /api/actions` 是**动作目录**（这个调用者此刻能做什么，含可用性），`POST /api/actions/{id}` 是**唯一分发**；
   参数按动作表（`systools/tools.yaml`）校验 → 按 `callers` 授权 → 执行 → 审计，各只有一处。
   模型侧经 `ToolHandler` 走**同一份声明与同一处授权**——两个适配器，两种呈现，事实同源。
@@ -108,20 +109,20 @@
 | GET | `/` | 静态资源 | — | `index.html` | 200 |
 | GET | `/assets/{*path}` | 静态资源 | — | 编译期嵌入表里的文件 | 200, 404 |
 | GET | `/api/events` | 事件台（`EventBus`） | 查询 `sid` / `since` | `{lines:[{seq,sid,events}],head,oldest}` | 200 |
-| GET | `/api/state` | `ModulesOps::roster / module_enabled / service_enabled` + `SessionOps::session_views` + `RegistryOps` + `HistoryOps::list` | — | `{modules,services,rejected,fence,providers,models,core,agents,settings,sessions,history}`（`modules[].runtimes` 是模块声明的运行能力，创建向导据此预判虚拟根够不够；`modules[].enabled` 与 `modules[].services[].enabled` 是**有效启停**；`services` 是常驻服务的**运行态** `{module,name,adapter,state,reason,operations}`；`sessions[].pending` 是**当前那张裁决卡**的快照，与推的 `decision_card` 同一份；`sessions[].context` 是最近一次模型调用的上下文用量，只对 `Session::Single`（single / proxy / agent 子会话）存在；`sessions[].shell` 是最近一次 shell 的运行状态（新转录读工具行的结构化事实，旧转录回落解析回执），没跑过就是 null） | 200, 400 |
+| GET | `/api/state` | `ModulesOps::roster / module_enabled / service_enabled` + `WorkOps::session_views` + `RegistryOps` + `HistoryOps::list` | — | `{modules,services,rejected,fence,providers,models,core,agents,settings,sessions,history}`（`modules[].runtimes` 是模块声明的运行能力，创建向导据此预判虚拟根够不够；`modules[].enabled` 与 `modules[].services[].enabled` 是**有效启停**；`services` 是常驻服务的**运行态** `{module,name,adapter,state,reason,operations}`；`sessions[].pending` 是**当前那张裁决卡**的快照，与推的 `decision_card` 同一份；`sessions[].context` 是最近一次模型调用的上下文用量，只对 `Session::Single`（single / proxy / agent 子会话）存在；`sessions[].shell` 是最近一次 shell 的运行状态（新转录读工具行的结构化事实，旧转录回落解析回执），没跑过就是 null） | 200, 400 |
 | GET | `/api/actions` | `ActionOps::catalog` | 查询 `sid` | `{actions:[{id,desc,params,available,reason}]}` | 200, 400 |
 | POST | `/api/actions/{id}` | `ActionOps::act` | `{…按动作声明}` | `{head}` / `{events}`（重放快照） / `{ok,…}` | 200, 400 |
-| GET | `/api/sessions/{sid}/config` | `SessionOps::config` | — | `{config}` | 200, 400 |
-| GET | `/api/sessions/{sid}/files` | `SessionOps::files` | — | `{work,agents,roots,usage}` | 200, 404 |
-| GET | `/api/sessions/{sid}/work` | `SessionOps::work_log` | 查询 `limit` / `before` | `{head,commits:[{id,parent,author,session,time,message,changes,on_head}],total,truncated}` | 200, 404 |
-| GET | `/api/sessions/{sid}/work/{commit}` | `SessionOps::work_commit_view / work_commit_file` | 查询 `path`（可选） | `{id,parent,author,session,time,message,changes,changes_truncated}` / `{path,hash,size,media_type,text,truncated,too_large}` | 200, 404 |
+| GET | `/api/sessions/{sid}/config` | `WorkOps::config` | — | `{config}` | 200, 400 |
+| GET | `/api/sessions/{sid}/files` | `WorkOps::files` | — | `{work,agents,roots,usage}` | 200, 404 |
+| GET | `/api/sessions/{sid}/work` | `WorkOps::work_log` | 查询 `limit` / `before` | `{head,commits:[{id,parent,author,session,time,message,changes,on_head}],total,truncated}` | 200, 404 |
+| GET | `/api/sessions/{sid}/work/{commit}` | `WorkOps::work_commit_view / work_commit_file` | 查询 `path`（可选） | `{id,parent,author,session,time,message,changes,changes_truncated}` / `{path,hash,size,media_type,text,truncated,too_large}` | 200, 404 |
 | GET | `/api/dirs` | 宿主目录浏览 | 查询 `path`（可选；省略 = 用户主目录） | `{path,parent,roots:[盘符],dirs:[{name,path}]}` | 200, 400 |
 | GET | `/api/workspace-cost` | 工作区成本预估（有界计数 + 本卷速率） | 查询 `path`（外部工作区的绝对路径） | `{path,files,dirs,objects,bytes,truncated,volume,ms_per_object,estimated_ms,estimated_ms_min,estimated_ms_max,sample}`（`truncated` 时计数与耗时都是下界） | 200, 400 |
 | GET | `/api/settings` | `RegistryOps::settings` | — | `{settings}` | 200, 400 |
 | GET | `/api/history` | `HistoryOps::list` | — | `{sessions}` | 200, 400 |
 | GET | `/api/history/{name}` | `HistoryOps::open` | — | `{meta,events,live,head,shell}`（`shell` 从转录派生：回放/重建后的状态栏快照；优先读工具行的结构化事实，旧转录回落解析回执） | 200, 404 |
 | POST | `/api/history/{name}/delete` | `HistoryOps::delete` | — | `{ok}` | 200, 400 |
-| GET | `/api/tiers` | `ConductorOps::tier_choices` | — | `{tiers:{default,vm_available,vm_unavailable_reason,vm_requirements,guests,available}}` | 200, 400 |
+| GET | `/api/tiers` | `WorkOps::tier_choices` | — | `{tiers:{default,vm_available,vm_unavailable_reason,vm_requirements,guests,available}}` | 200, 400 |
 | GET | `/api/processes` | `Provision::processes` | — | `{procs:[{pid,alive,purpose,owner,since,orphanRisk,guardNote}]}` | 200, 400 |
 | GET | `/api/setup/status` | `Provision::status + job` | 查询 `since` / `wait` | `{deps:[{id,guest,present,install,probe,source,url,size_mb,note}],job:{running,seq,lines,error},missing,pending:[id]}` | 200, 400 |
 | POST | `/api/setup/ensure` | `Provision::status + start` | `{deps?:[id],confirm?:bool}`（不点名 = 只补现在缺的） | `{preview:[{id,url,size_mb,present}]}` / `{ok,deps}`（都装好了 → `{ok,deps:[]}`） | 200, 400 |
@@ -129,6 +130,6 @@
 | GET | `/api/storage` | `Storage::report` | — | `{report:{generatedAt,managedBytes,capBytes,categories,policy,job}}` | 200, 400 |
 | POST | `/api/storage/gc` | `Storage::gc` | `{apply?:bool}` | `{ok,report:{actions,skipped,freedBytes,overCap}}` | 200, 400 |
 | POST | `/api/storage/clean` | `Storage::clean` | `{kind,id?,module?,confirm:bool}` | `{ok,result}`（report 或 started 作业） | 200, 400 |
-| POST | `/api/suggest-models` | `ConductorOps::suggest_models` | `{task,mode}` | `{ok,agents}` | 200, 400 |
+| POST | `/api/suggest-models` | `WorkOps::suggest_models` | `{task,mode}` | `{ok,agents}` | 200, 400 |
 <!-- ROUTES:END -->
 

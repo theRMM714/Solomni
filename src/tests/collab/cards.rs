@@ -263,7 +263,7 @@ pub(crate) fn cards_and_answers_survive_a_rebuild() {
         .turn
         .rebuild_session(&meta, &events, core.registry.as_ref(), core.probe.as_ref())
         .expect("按转录重建");
-    let crate::capabilities::conductor::service::Session::Collab(c) = rebuilt_session else {
+    let crate::capabilities::runtime::service::Session::Collab(c) = rebuilt_session else {
         panic!("重建出来的还该是协作会话");
     };
     let rebuilt = c.door.queue().expect("重建后卡还在").card;
@@ -293,7 +293,7 @@ pub(crate) fn cards_and_answers_survive_a_rebuild() {
 /// 目的：快照里的 pending 与推来的那张卡是**同一个事实**（刷新页面照样画得出那张卡）。
 #[test]
 pub(crate) fn snapshot_pending_is_the_same_fact_as_the_pushed_card() {
-    let (handle, ops) = ops_with(vec![module_of("a")], Vec::new());
+    let (handle, faces) = ops_with(vec![module_of("a")], Vec::new());
     let spec = crate::capabilities::work::api::WorkSpec {
         name: "w-card".to_string(),
         mode: WorkMode::Collab,
@@ -312,9 +312,9 @@ pub(crate) fn snapshot_pending_is_the_same_fact_as_the_pushed_card() {
         workspace: None,
         workspace_grant: None,
     };
-    let opened = ops.sessions.create_work(spec).expect("建协作工作");
+    let opened = faces.work.create_work(spec).expect("建协作工作");
     let sid = opened.0.sid.clone();
-    let pushed: Vec<serde_json::Value> = ops
+    let pushed: Vec<serde_json::Value> = faces
         .events
         .snapshot(Some(&sid), 0)
         .0
@@ -323,9 +323,9 @@ pub(crate) fn snapshot_pending_is_the_same_fact_as_the_pushed_card() {
         .filter(|e| e.get("type").and_then(|t| t.as_str()) == Some("decision_card"))
         .collect();
     assert_eq!(pushed.len(), 1, "开场该推一张卡：{:?}", pushed);
-    let history = ops.history.list().expect("列历史");
-    let view = ops
-        .sessions
+    let history = faces.history.list().expect("列历史");
+    let view = faces
+        .work
         .session_views(&history)
         .expect("会话视图")
         .into_iter()
@@ -508,7 +508,7 @@ pub(crate) fn a_second_gate_queues_behind_the_first() {
         .turn
         .rebuild_session(&meta, &events, core.registry.as_ref(), core.probe.as_ref())
         .expect("按转录重建");
-    let crate::capabilities::conductor::service::Session::Collab(c) = rebuilt else {
+    let crate::capabilities::runtime::service::Session::Collab(c) = rebuilt else {
         panic!("重建出来的还该是协作会话");
     };
     let q = c.door.queue().expect("重建后队首还在");
@@ -546,7 +546,7 @@ pub(crate) fn a_second_gate_queues_behind_the_first() {
         .turn
         .rebuild_session(&meta, &events, core.registry.as_ref(), core.probe.as_ref())
         .expect("按转录重建");
-    let crate::capabilities::conductor::service::Session::Collab(c) = rebuilt else {
+    let crate::capabilities::runtime::service::Session::Collab(c) = rebuilt else {
         panic!("重建出来的还该是协作会话");
     };
     let q = c.door.queue().expect("重建后队首还在");
@@ -557,7 +557,7 @@ pub(crate) fn a_second_gate_queues_behind_the_first() {
 /// 目的：停会话**整队作废**（停止 = 拒绝）：等待方解开、作废落盘、重建后不复活、继续时续新卡。
 #[test]
 pub(crate) fn stopping_voids_the_whole_queue_and_persists_it() {
-    let (handle, ops) = ops_with(vec![module_of("a")], Vec::new());
+    let (handle, faces) = ops_with(vec![module_of("a")], Vec::new());
     let spec = crate::capabilities::work::api::WorkSpec {
         name: "w-void".to_string(),
         mode: WorkMode::Collab,
@@ -576,15 +576,16 @@ pub(crate) fn stopping_voids_the_whole_queue_and_persists_it() {
         workspace: None,
         workspace_grant: None,
     };
-    let opened = ops.sessions.create_work(spec).expect("建协作工作");
+    let opened = faces.work.create_work(spec).expect("建协作工作");
     let sid = opened.0.sid.clone();
-    ops.sessions
+    faces
+        .turn
         .set_task(&sid, "第二个需求")
         .expect("再写一次需求（第二个发起方）");
     // 快照也带队列形态：刷新页面照样看得到「前面还排着几条」。
-    let history = ops.history.list().expect("列历史");
-    let view = ops
-        .sessions
+    let history = faces.history.list().expect("列历史");
+    let view = faces
+        .work
         .session_views(&history)
         .expect("会话视图")
         .into_iter()
@@ -600,12 +601,12 @@ pub(crate) fn stopping_voids_the_whole_queue_and_persists_it() {
         snap
     );
     // 用户按停止：整队作废。
-    ops.sessions.stop(&sid);
+    faces.runtime.stop(&sid);
     assert!(
-        ops.sessions.open_queue(&sid).expect("取卡").is_none(),
+        faces.turn.open_queue(&sid).expect("取卡").is_none(),
         "作废之后没有挂起的卡（等待方解开，不是永远挂着）"
     );
-    let on_bus: Vec<serde_json::Value> = ops
+    let on_bus: Vec<serde_json::Value> = faces
         .events
         .snapshot(Some(&sid), 0)
         .0
@@ -633,7 +634,7 @@ pub(crate) fn stopping_voids_the_whole_queue_and_persists_it() {
     );
     // 作废落盘之后：按转录重建（重启 / 回档走同一条路）**作废过的卡不复活**——
     // 那一关还挂在状态上，所以重建出来的是**续的新卡号**（d3），不是 d1 / d2。
-    let (meta, events) = ops.history.open(&sid).expect("读转录");
+    let (meta, events) = faces.history.open(&sid).expect("读转录");
     let q = handle
         .call({
             let meta = meta.clone();
@@ -646,9 +647,7 @@ pub(crate) fn stopping_voids_the_whole_queue_and_persists_it() {
                     core.probe.as_ref(),
                 )?;
                 match s {
-                    crate::capabilities::conductor::service::Session::Collab(c) => {
-                        Ok(c.door.queue())
-                    }
+                    crate::capabilities::runtime::service::Session::Collab(c) => Ok(c.door.queue()),
                     _ => Err("重建出来的还该是协作会话".to_string()),
                 }
             }
@@ -663,11 +662,12 @@ pub(crate) fn stopping_voids_the_whole_queue_and_persists_it() {
         q.card.options
     );
     // 「继续」：那一关还挂在状态上，续一张**新卡**接着问（停止 = 拒绝，不是放行）。
-    ops.sessions
-        .continue_flow(&sid, crate::capabilities::conductor::api::Output::Final)
+    faces
+        .turn
+        .continue_flow(&sid, crate::capabilities::runtime::api::Output::Final)
         .expect("停止之后必须能继续");
-    let again = ops
-        .sessions
+    let again = faces
+        .turn
         .open_queue(&sid)
         .expect("取卡")
         .expect("续一张新卡接着问");

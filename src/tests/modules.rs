@@ -264,10 +264,11 @@ pub(crate) fn overrides_survive_a_reload() {
 
 #[test]
 pub(crate) fn ops_exposes_enablement_reads() {
-    let (_handle, ops) = crate::tests::ops_with(vec![module_of("a")], vec!["[]"]);
-    assert!(ops.modules.module_enabled("a").expect("读模块启用"));
+    let (_handle, faces) = crate::tests::ops_with(vec![module_of("a")], vec!["[]"]);
+    assert!(faces.modules.module_enabled("a").expect("读模块启用"));
     assert!(
-        !ops.modules
+        !faces
+            .modules
             .service_enabled("a", "nope")
             .expect("读服务启用")
     );

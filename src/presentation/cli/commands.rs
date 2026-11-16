@@ -4,9 +4,10 @@
 //! 联动：`cli.rs` 的命令分发、`view` 的打印原语
 
 use super::*;
+use crate::presentation::faces::Faces;
 
-pub(super) fn module_cmd(ops: &Ops, arg: &str) {
-    let catalog = match ops.actions.catalog(&Caller::User, None) {
+pub(super) fn module_cmd(faces: &Faces, arg: &str) {
+    let catalog = match faces.actions.catalog(&Caller::User, None) {
         Ok(c) => c,
         Err(e) => {
             println!("[错误] {}", e);
@@ -20,7 +21,7 @@ pub(super) fn module_cmd(ops: &Ops, arg: &str) {
     let arg = arg.trim();
     if arg.is_empty() || arg == "list" {
         // 按**模块**分组：声明的 tools / services 就是它的独立入口；只写 system 的模块如实标注。
-        match ops.modules.roster() {
+        match faces.modules.roster() {
             Ok(roster) => {
                 for m in &roster.modules {
                     let prefix = format!("module.{}.", m.manifest.id);
@@ -75,7 +76,7 @@ pub(super) fn module_cmd(ops: &Ops, arg: &str) {
             }
         }
     };
-    match ops.actions.act(ActionCall {
+    match faces.actions.act(ActionCall {
         id: module_action_id(id),
         args,
         caller: Caller::User,
@@ -94,13 +95,13 @@ pub(super) fn module_cmd(ops: &Ops, arg: &str) {
 }
 
 /// 目的：只读诊断一条虚拟机档会话的 guest：输出结构化 JSON（进程 / CPU / 内存 / 负载 / 挂载）。
-pub(super) fn diagnose_cmd(ops: &Ops, arg: &str) {
+pub(super) fn diagnose_cmd(faces: &Faces, arg: &str) {
     let sid = arg.trim();
     if sid.is_empty() {
         println!("用法：diagnose <会话>");
         return;
     }
-    match ops.actions.act(ActionCall {
+    match faces.actions.act(ActionCall {
         id: "guest_diagnose".to_string(),
         args: serde_json::json!({ "session_id": sid }),
         caller: Caller::User,
@@ -117,8 +118,8 @@ pub(super) fn diagnose_cmd(ops: &Ops, arg: &str) {
 
 /// 目的：命令行回档：给共享区与整棵子树都对齐到同一个点。 留档 = 标记 + 折叠（可恢复）；删除 = 真的截掉；恢复 = 删掉该标记及其后（不可恢复）。
 /// 目的：列出模块声明的隐秘字段（是否已配置）；置值随设置面接入。
-pub(super) fn secret_cmd(ops: &Ops) {
-    match ops.secrets.declared() {
+pub(super) fn secret_cmd(faces: &Faces) {
+    match faces.secrets.declared() {
         Ok(list) if list.is_empty() => println!("（没有声明任何隐秘字段）"),
         Ok(list) => {
             for s in &list {
@@ -141,10 +142,10 @@ pub(super) fn secret_cmd(ops: &Ops) {
 }
 
 /// 目的：常驻服务面板——列服务与状态，启停 / 开关，调用已启动服务的操作（都走统一动作面）。
-pub(super) fn resident_cmd(ops: &Ops, arg: &str) {
+pub(super) fn resident_cmd(faces: &Faces, arg: &str) {
     let parts: Vec<&str> = arg.split_whitespace().collect();
     match parts.first().map(|s| s.to_ascii_lowercase()).as_deref() {
-        None | Some("list") => resident_list(ops),
+        None | Some("list") => resident_list(faces),
         Some(v @ ("start" | "stop" | "enable" | "disable")) => {
             let (Some(module), Some(name)) = (parts.get(1), parts.get(2)) else {
                 println!("[用法] resident start|stop|enable|disable <模块id> <服务名> [租约]");
@@ -152,7 +153,7 @@ pub(super) fn resident_cmd(ops: &Ops, arg: &str) {
             };
             let lease = parts.get(3).copied().unwrap_or("");
             act_and_print(
-                ops,
+                faces,
                 ActionCall {
                     id: "control_resident".to_string(),
                     args: serde_json::json!({ "module": module, "name": name, "action": v, "lease": lease }),
@@ -161,7 +162,7 @@ pub(super) fn resident_cmd(ops: &Ops, arg: &str) {
                 },
             );
             // 启停之后顺手刷新清单：状态是用户最想看的。
-            resident_list(ops);
+            resident_list(faces);
         }
         Some("call") => {
             let (Some(module), Some(service), Some(op)) =
@@ -183,7 +184,7 @@ pub(super) fn resident_cmd(ops: &Ops, arg: &str) {
                 }
             };
             act_and_print(
-                ops,
+                faces,
                 ActionCall {
                     id: format!("module.{}.{}.{}", module, service, op),
                     args,
@@ -200,8 +201,8 @@ pub(super) fn resident_cmd(ops: &Ops, arg: &str) {
 }
 
 /// 目的：列出常驻服务（模块 / 服务 / 适配器 / 状态；失败态带如实原因）。
-pub(super) fn resident_list(ops: &Ops) {
-    match ops.residents.services() {
+pub(super) fn resident_list(faces: &Faces) {
+    match faces.residents.services() {
         Ok(list) if list.is_empty() => println!("（没有声明任何常驻服务）"),
         Ok(list) => {
             for s in &list {
@@ -224,8 +225,8 @@ pub(super) fn resident_list(ops: &Ops) {
 }
 
 /// 目的：把一次动作的结果按 CLI 习惯打出来（发现的操作 / 回执 / 完成 / 错误）。
-pub(super) fn act_and_print(ops: &Ops, call: ActionCall) {
-    match ops.actions.act(call) {
+pub(super) fn act_and_print(faces: &Faces, call: ActionCall) {
+    match faces.actions.act(call) {
         Ok(Acted::Done(v)) => {
             if let Some(list) = v.get("operations").and_then(|o| o.as_array()) {
                 let names: Vec<&str> = list.iter().filter_map(|x| x.as_str()).collect();
@@ -247,7 +248,7 @@ pub(super) fn act_and_print(ops: &Ops, call: ActionCall) {
 }
 
 /// 目的：共享区提交历史：`work <会话> [log [条数] | show <提交号> | restore <提交号> [--yes]]`。 回滚是非破坏性的：目标之后的提交仍保留，可再次回滚；只改共享区主副本，不动 agent 沙箱。
-pub(super) fn work_cmd(ops: &Ops, arg: &str) {
+pub(super) fn work_cmd(faces: &Faces, arg: &str) {
     let parts: Vec<&str> = arg.split_whitespace().collect();
     let Some(sid) = parts.first().copied() else {
         println!("[用法] work <会话> [log [条数] | show <提交号> | restore <提交号> [--yes]]");
@@ -262,7 +263,7 @@ pub(super) fn work_cmd(ops: &Ops, arg: &str) {
             .get(2)
             .and_then(|s| s.parse::<usize>().ok())
             .unwrap_or(20);
-        let log = match ops.sessions.work_log(sid, limit, None) {
+        let log = match faces.work.work_log(sid, limit, None) {
             Ok(l) => l,
             Err(e) => {
                 println!("[错误] {}", e);
@@ -303,7 +304,7 @@ pub(super) fn work_cmd(ops: &Ops, arg: &str) {
         }
     };
     match verb.as_str() {
-        "show" => match ops.sessions.work_commit_view(sid, id) {
+        "show" => match faces.work.work_commit_view(sid, id) {
             Ok(c) => {
                 println!(
                     "提交 #{}（{}，{}）：{}",
@@ -331,7 +332,7 @@ pub(super) fn work_cmd(ops: &Ops, arg: &str) {
             Err(e) => println!("[错误] {}", e),
         },
         "restore" => {
-            let log = match ops.sessions.work_log(sid, 1, None) {
+            let log = match faces.work.work_log(sid, 1, None) {
                 Ok(l) => l,
                 Err(e) => {
                     println!("[错误] {}", e);
@@ -339,7 +340,7 @@ pub(super) fn work_cmd(ops: &Ops, arg: &str) {
                 }
             };
             let head = log.head.as_ref().map(|h| h.id).unwrap_or(0);
-            let target = match ops.sessions.work_commit_view(sid, id) {
+            let target = match faces.work.work_commit_view(sid, id) {
                 Ok(c) => c,
                 Err(e) => {
                     println!("[错误] {}", e);
@@ -358,7 +359,7 @@ pub(super) fn work_cmd(ops: &Ops, arg: &str) {
                 println!("[取消] 没有回滚");
                 return;
             }
-            match ops.actions.act(ActionCall {
+            match faces.actions.act(ActionCall {
                 id: "restore_work_commit".to_string(),
                 args: serde_json::json!({
                     "session_id": sid,
@@ -396,7 +397,7 @@ pub(super) fn time_label(ts: i64) -> String {
     }
 }
 
-pub(super) fn rewind_cmd(ops: &Ops, arg: &str) {
+pub(super) fn rewind_cmd(faces: &Faces, arg: &str) {
     let parts: Vec<&str> = arg.split_whitespace().collect();
     let usage = "[用法] rewind <会话> archive|delete <行id>  或  rewind <会话> restore <标记id>";
     if parts.len() < 3 {
@@ -419,7 +420,7 @@ pub(super) fn rewind_cmd(ops: &Ops, arg: &str) {
         }
     };
     // 回档也走动作表：同一份声明与同一处授权（CLI 只把参数装好）。
-    match ops.actions.act(ActionCall {
+    match faces.actions.act(ActionCall {
         id: "rewind".to_string(),
         args: serde_json::json!({ "session_id": sid, "mode": mode, "id": num }),
         caller: Caller::User,

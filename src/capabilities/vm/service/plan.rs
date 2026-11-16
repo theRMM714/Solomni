@@ -3,7 +3,7 @@
 //! 管：`guest_image_of` / `guest_platform_of` / `guest_os_of` / `path_codec_of` / `guest_runtimes_of` /
 //!   `library_for` / `host_plan_for` / `plan_for_spec` / `unavailable_modules`——全部纯派生，事实由调用方显式传入。
 //! 不管：取事实（根、宿主探针、包库、模块清单由调用方给）、选包实现（`packages` 能力）、guest 生命周期（`service.rs`）。
-//! 联动：被 `conductor` 的建工作 / 改配 / 视图 / 重建会话消费；经 `vm::api` 导出。
+//! 联动：被 `runtime` 的建工作 / 改配 / 视图 / 重建会话消费；经 `vm::api` 导出。
 
 use std::collections::BTreeMap;
 use std::path::Path;

@@ -101,10 +101,11 @@ function direction(root) {
       if (layer === "presentation" && t.startsWith("crate::presentation::")) {
         const own = f.startsWith("src/presentation/cli/") ? "cli" : f.startsWith("src/presentation/web/") ? "web" : null;
         const other = t.split("::")[2];
-        if (own && other && own !== other) channelCross.add(f + " -> " + t);
+        // 只判两个渠道之间：同一层根级的共享模块（如面袋 `faces`）不在此列。
+        if (own && (other === "cli" || other === "web") && own !== other) channelCross.add(f + " -> " + t);
       }
       if ((FORBIDDEN[layer] || []).includes(targetLayer)) reverse.add(f + " -> " + t);
-      // 呈现层只认入站能力面：某个能力的 ::api（协调业务 conductor 也不例外）。
+      // 呈现层只认入站能力面：某个能力的 ::api（顶层编排 runtime 也不例外）。
       const presOk = t.startsWith("crate::capabilities::") && t.endsWith("::api");
       if (layer === "presentation" && !presOk && targetLayer !== "presentation") presentation.add(f + " -> " + t);
       // 业务之间只经对方的 api 交流（R1）；跨能力引用 ::ports / ::domain / ::detail 一律不许。

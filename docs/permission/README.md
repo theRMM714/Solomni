@@ -19,7 +19,7 @@
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：无（纯领域，不自持端口）
-- 谁在用我：`registry`（全局默认与硬黑名单）、`session`（meta 的 ceiling / narrowing）、`workspace`（落点判定）、`conductor`（解析与装配）、`tools`（工具声明与围栏派生）
+- 谁在用我：`registry`（全局默认与硬黑名单）、`session`（meta 的 ceiling / narrowing）、`workspace`（落点判定）、`runtime`（解析与装配）、`tools`（工具声明与围栏派生）
 
 ## 一、三个维度
 

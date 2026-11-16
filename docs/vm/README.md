@@ -15,7 +15,7 @@
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 - 经 `::api` 用到：`kernel`、`modules`
-- 谁在用我：`cli`、`collab`、`conductor`、`session`（成员工具面带本能力的 guest 面）、`provision`（`guest-runtime` 的运行期编排要起 guest）、入口层（`--doctor`）
+- 谁在用我：`cli`、`collab`、`runtime`、`session`（成员工具面带本能力的 guest 面）、`provision`（`guest-runtime` 的运行期编排要起 guest）、入口层（`--doctor`）
 
 ## 一、适配器与组合
 - 引擎：`QemuEngine`（唯一引擎）。
@@ -88,7 +88,7 @@
 - 每个 QEMU 与共享进程起时记账（`.home/` 的 `processes.json`，`src/kernel/detail/procs.rs`：用途 + 归属 + 标记），销毁时注销。
 - 共享守护进程（`virtiofsd` / SMB helper）由对应共享后端按租约起停：起时进同一份进程账并绑父死子亡，释放时清理（`virtiofsd` 按进程组）。
 - 父死子亡：核心被强杀也不留孤儿攥着镜像；三平台机制见 `docs/kernel/README.md` 的「长驻子进程的账与回收」。
-- 起停本身不在核心线程上跑（两段式见 `docs/conductor/README.md` 的「长步骤的边界」）。
+- 起停本身不在核心线程上跑（两段式见 `docs/runtime/README.md` 的「长步骤的边界」）。
 - 执行路径上 guest 表锁只用来取租约，`exec` 在该租约自己的锁下跑：跨租约并行、同一租约串行；工作区版本库的写闸同理按工作分。
 
 ## 六、依赖、虚拟根与运行期自证

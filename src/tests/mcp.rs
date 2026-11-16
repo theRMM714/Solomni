@@ -42,11 +42,11 @@ fn mcp_handshake_lists_tools_calls_and_reports_errors() {
         host.clone() as Arc<dyn SessionHost + Send + Sync>,
         Arc::new(crate::kernel::ports::NoopLog),
     );
-    let (mut instance, ops) = adapter.start(&launch()).expect("握手并发现工具");
-    let names: Vec<&str> = ops.iter().map(|o| o.name.as_str()).collect();
+    let (mut instance, faces) = adapter.start(&launch()).expect("握手并发现工具");
+    let names: Vec<&str> = faces.iter().map(|o| o.name.as_str()).collect();
     assert_eq!(names, vec!["echo", "add"], "游标翻页要收全工具");
     assert_eq!(
-        ops[0]
+        faces[0]
             .parameters
             .as_ref()
             .and_then(|s| s.get("required"))
@@ -54,7 +54,7 @@ fn mcp_handshake_lists_tools_calls_and_reports_errors() {
             .map(|a| a.len()),
         Some(1),
         "inputSchema 要原样收进参数契约：{:?}",
-        ops[0].parameters
+        faces[0].parameters
     );
     let sent = host.sent.lock().expect("锁").clone();
     assert!(sent[0].contains("\"initialize\""), "先握手：{}", sent[0]);
@@ -118,16 +118,19 @@ fn mcp_adapter_talks_to_a_real_stdio_server() {
     spec.command = format!("{} tests/fixtures/mcp_echo.py", py);
     spec.fence = FenceSpec::standalone(&root, None, false);
 
-    let (mut instance, ops) = adapter.start(&spec).expect("真实服务要握手成功");
+    let (mut instance, faces) = adapter.start(&spec).expect("真实服务要握手成功");
     assert!(
-        ops.iter().any(|o| o.name == "echo"),
+        faces.iter().any(|o| o.name == "echo"),
         "要发现 echo：{:?}",
-        ops.iter().map(|o| o.name.clone()).collect::<Vec<_>>()
+        faces.iter().map(|o| o.name.clone()).collect::<Vec<_>>()
     );
     assert!(
-        ops.iter().all(|o| o.parameters.is_some()),
+        faces.iter().all(|o| o.parameters.is_some()),
         "真实服务的 inputSchema 要原样收下：{:?}",
-        ops.iter().map(|o| o.parameters.clone()).collect::<Vec<_>>()
+        faces
+            .iter()
+            .map(|o| o.parameters.clone())
+            .collect::<Vec<_>>()
     );
     let out = instance.call("echo", &json!({ "ping": 1 })).expect("调用");
     assert!(out.contains("ping"), "回显应含参数：{}", out);
@@ -175,8 +178,8 @@ fn model_tool_face_exposes_started_service_ops() {
         test_modules(Arc::new(VecSource(vec![m]))),
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     ));
-    let ops = residents.start("m0", "svc", "").expect("启动服务");
-    let op_name = ops[0].name.clone();
+    let faces = residents.start("m0", "svc", "").expect("启动服务");
+    let op_name = faces[0].name.clone();
     let ctx = member_with_service_tools(
         "m0",
         Arc::clone(&residents),
@@ -185,7 +188,7 @@ fn model_tool_face_exposes_started_service_ops() {
             service: "svc".to_string(),
             op: op_name.clone(),
             description: "回显".to_string(),
-            parameters: ops[0].parameters.clone(),
+            parameters: faces[0].parameters.clone(),
         },
     );
 
@@ -264,8 +267,8 @@ fn mcp_refreshes_operations_on_list_changed() {
         host.clone() as Arc<dyn SessionHost + Send + Sync>,
         Arc::new(crate::kernel::ports::NoopLog),
     );
-    let (mut instance, ops) = adapter.start(&launch()).expect("握手");
-    assert_eq!(ops.len(), 1);
+    let (mut instance, faces) = adapter.start(&launch()).expect("握手");
+    assert_eq!(faces.len(), 1);
 
     let out = instance.call("echo", &json!({})).expect("调用");
     assert_eq!(out, "ok");
@@ -292,8 +295,8 @@ fn mcp_adopts_the_server_protocol_version() {
         host.clone() as Arc<dyn SessionHost + Send + Sync>,
         log.clone(),
     );
-    let (mut instance, ops) = adapter.start(&launch()).expect("版本不同也要继续");
-    assert!(ops.is_empty());
+    let (mut instance, faces) = adapter.start(&launch()).expect("版本不同也要继续");
+    assert!(faces.is_empty());
     assert!(log.has("2025-06-18"), "服务回选的版本要如实记进日志");
     instance.stop();
 }
@@ -385,13 +388,13 @@ fn residents_mcp_service_end_to_end() {
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     ));
 
-    let ops = residents.start("m1", "echo", "s1").expect("启动 MCP 服务");
+    let faces = residents.start("m1", "echo", "s1").expect("启动 MCP 服务");
     assert!(
-        ops.iter().any(|o| o.name == "echo"),
+        faces.iter().any(|o| o.name == "echo"),
         "要发现服务提供的 echo 操作"
     );
     assert!(
-        ops.iter().all(|o| o.parameters.is_some()),
+        faces.iter().all(|o| o.parameters.is_some()),
         "服务给的 inputSchema 要原样进操作契约"
     );
     let receipt = residents

@@ -1,7 +1,7 @@
 //! 目的：历史与删除收尾——历史列出 / 打开 / 删除，以及"先停 guest、再删目录、最后后台撤权"的收尾对象。
 //! 管：什么时候删、删什么顺序（落盘机制在 session 的 HistoryStore 端口后面）。
-//! 不管：事件收编与增量落盘（conductor 的 record_events / Persister）；会话对象怎么建（session 的 domain）。
-//! 联动：conductor 的删除入口只做回执移交；`Turn` 由调用方按形参传入，本单元不持第二份。
+//! 不管：事件收编与增量落盘（runtime 的 record_events / Persister）；会话对象怎么建（session 的 domain）。
+//! 联动：runtime 的删除入口只做回执移交；`Turn` 由调用方按形参传入，本单元不持第二份。
 use super::*;
 
 /// 目的：按租约撤围栏授权的回调——由核心把 `ToolExec::release_by_lease` 包成闭包注入，测试可直接换成记录型替身。

@@ -1,7 +1,7 @@
-//! 目的：压缩通道工厂——全局设置指向的压缩模型在这里解析，会话触发压缩时现取。
-//! 管：`CompactChoice`（同模型 / 指定模型 / 不可用）与 `CompactRuntime` 的构建与更新。
+//! 目的：压缩通道工厂：全局设置指向的压缩模型在这里解析，会话触发压缩时现取。
+//! 管：CompactChoice（同模型 / 指定模型 / 不可用）与 CompactRuntime 的构建与更新。
 //! 不管：压缩本身（session 能力）、全局设置怎么读（registry）。
-//! 联动：Conductor 持一份 `CompactRuntime`，设置变更时更新选择；会话经 `CompactChatFactory` 取通道。
+//! 联动：Core 持一份 CompactRuntime，设置变更时更新选择；会话经 CompactChatFactory 取通道。
 
 use super::*;
 
@@ -20,7 +20,7 @@ pub(super) enum CompactChoice {
     Unavailable(String),
 }
 
-/// 目的：压缩通道工厂：设置 / 模型 / 供应商变更时由 conductor 更新选择，会话在触发时读。
+/// 目的：压缩通道工厂：设置 / 模型 / 供应商变更时由 runtime 更新选择，会话在触发时读。
 pub(super) struct CompactRuntime {
     llm: Arc<dyn Llm + Send + Sync>,
     choice: RwLock<CompactChoice>,

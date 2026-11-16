@@ -4,9 +4,9 @@
 //! 联动：`src/tests/builders/` 与 `src/tests/doubles/`。
 
 use super::super::ops_with;
-use crate::capabilities::conductor::api::ConductorHandle;
 use crate::capabilities::modules::api::Module;
+use crate::capabilities::runtime::api::Handle;
 
-pub(crate) fn spawn(modules: Vec<Module>, core_script: Vec<&str>) -> ConductorHandle {
+pub(crate) fn spawn(modules: Vec<Module>, core_script: Vec<&str>) -> Handle {
     ops_with(modules, core_script).0
 }

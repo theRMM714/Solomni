@@ -1,7 +1,7 @@
 //! 目的：跨会话回档编排——主会话回到某一行（含该行），各 agent 子会话按同一个回合 id 同步截断，然后把新行与元信息写回。
 //! 管：留档 / 删除 / 还原三模式的顺序（先停稳整棵子树、再动文件、最后写标记）、子会话折叠、副作用告知（工具执行次数）。
 //! 不管：纯行与事件算术（session 的 domain/rewind.rs）、落盘机制（session 的 HistoryStore 端口）。
-//! 联动：conductor 的回档入口与改需求经这里；`Turn` / `RebuildDeps` 都是方法形参、不是字段。
+//! 联动：runtime 的回档入口与改需求经这里；`Turn` / `RebuildDeps` 都是方法形参、不是字段。
 
 use super::*;
 use crate::capabilities::lifecycle::api::{RebuildDeps, RewindOutcome, RewindTarget};

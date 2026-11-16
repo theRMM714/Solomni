@@ -19,7 +19,7 @@
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`kernel`、`prompt`
-- 谁在用我：`collab`、`conductor`、`registry`、`session`、`slate`、`tools`
+- 谁在用我：`collab`、`runtime`、`registry`、`session`、`slate`、`tools`
 
 ## 一、token 用量与流式回退
 

@@ -15,7 +15,7 @@
 
 ## 入站契约与状态归属
 
-- 入站面：本单元不对外提供能力 API；`src/main.rs` 装配核心后只把 `Ops` 与入站能力面交给呈现层。
+- 入站面：本单元不对外提供能力 API；`src/main.rs` 装配核心后把面袋 `presentation::faces::Faces` 交给呈现层。
 - 状态归属：本单元不持有业务状态；启动期读写的围栏台账与进程账分别归 `kernel` 的 `confine` 与 `procs`。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
@@ -42,7 +42,7 @@
 - **配置一致性**：Windows 上 `require` 文件系统 / 网络围栏 + `write_acl: false` 保存时拒绝、已存在的 `settings.yaml` 加载时报 `配置非法`；首启没有文件不拦（交给引导）。
 - **全局沙箱策略**：`sandbox.policy` 是进程级启动事实；保存后整体重启。默认 `require`，机制不可用时启动门按 `on_unavailable` 询问本进程降级（不落盘）、重设或退出；`SOLOMNI_SANDBOX_DEGRADED=1/0` 只供测试 / CI 注入。
 - **常驻服务**按有效启停拉起（`ResidentOps::start_enabled`，进程级租约，不属于任何会话）。
-- **核心**搬到自己的执行线程（`ConductorHandle::spawn`）；呈现层只拿 `Ops` 与入站能力面。
+- **核心**搬到自己的执行线程（`Handle::spawn`）；呈现层只拿 `Faces`。
 - `--probe-tools` / `--probe-replay` 在核心装配后执行：前者把**确定**结论写回 `models.yaml`，后者只报事实、不改登记处。
 
 ## 二、内部协议与探针

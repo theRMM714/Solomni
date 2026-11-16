@@ -18,7 +18,7 @@
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`provision`（还原与补齐状态）、`kernel`（日志端口 `Log`）
-- 谁在用我：`builds`（`ensure_headroom`）、`conductor`（`Ops` 字段）、`presentation`（`/api/storage`）、`system`（`--storage` / `--gc`）
+- 谁在用我：`builds`（`ensure_headroom`）、`runtime`（`Faces` 的 `storage` 字段）、`presentation`（`/api/storage`）、`system`（`--storage` / `--gc`）
 
 ## 一、策略与语义
 

@@ -1,8 +1,8 @@
 //! 目的：回合状态——会话在核心线程里的在世表、运行态与创建占位、裁决队、每会话的 shell 活进程槽。
 //! 管：`Session` 两种在世形态（单 agent / 协作）的在世表；运行态与创建占位的标记；每会话的裁决通道；
 //!   每会话的 shell 活进程槽（同一会话的多次 shell 调用共用一份活进程）。
-//! 不管：会话本体（`session` / `collab`）、生成驱动、落盘；谁在什么时候放取会话由 `conductor` 的用例决定。
-//! 联动：`conductor` 经 `api` 读写；裁决通道来自 `session::api`，shell 槽是 `session::api::ShellSlot`。
+//! 不管：会话本体（`session` / `collab`）、生成驱动、落盘；谁在什么时候放取会话由 `runtime` 的用例决定。
+//! 联动：`runtime` 经 `api` 读写；裁决通道来自 `session::api`，shell 槽是 `session::api::ShellSlot`。
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};

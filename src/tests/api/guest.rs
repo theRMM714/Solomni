@@ -1,14 +1,14 @@
 //! 目的：guest 诊断动作——只给人，报告原样带出，缺 guest 如实拒绝。
 //! 管：目录可见性、报告字段映射、缺 lease 的错误。
 //! 不管：虚拟机档实现（`src/tests/vm/`）、动作分发（`tools.rs`）。
-//! 联动：`src/capabilities/vm/domain/diagnose.rs` 与 `src/capabilities/conductor/api/action.rs`。
+//! 联动：`src/capabilities/vm/domain/diagnose.rs` 与 `src/capabilities/runtime/api/action.rs`。
 
 use super::super::builders::{agent_meta, seed_session, vm_spec};
 use super::super::doubles::InMemoryHistory;
 use super::super::doubles::module_of;
 use super::super::{ops_with, ops_with_vm};
-use crate::capabilities::conductor::api::Output;
-use crate::capabilities::conductor::api::{Acted, ActionCall, Caller};
+use crate::capabilities::runtime::api::Output;
+use crate::capabilities::runtime::api::{Acted, ActionCall, Caller};
 use std::sync::Arc;
 
 struct DiagnosingVm {
@@ -132,8 +132,11 @@ fn sample_diagnosis(lease: &str) -> crate::capabilities::vm::api::GuestDiagnosis
 
 #[test]
 fn guest_diagnose_is_user_only_in_the_catalog() {
-    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
-    let cat = ops.actions.catalog(&Caller::User, None).expect("动作目录");
+    let (_h, faces) = ops_with(vec![module_of("a")], Vec::new());
+    let cat = faces
+        .actions
+        .catalog(&Caller::User, None)
+        .expect("动作目录");
     let entry = cat
         .iter()
         .find(|a| a.id == "guest_diagnose")
@@ -156,12 +159,12 @@ fn guest_diagnose_is_user_only_in_the_catalog() {
         work: "w".to_string(),
         agent: "a".to_string(),
     };
-    let cat = ops.actions.catalog(&role, None).expect("动作目录");
+    let cat = faces.actions.catalog(&role, None).expect("动作目录");
     assert!(
         !cat.iter().any(|a| a.id == "guest_diagnose"),
         "角色面不该列出诊断动作"
     );
-    let err = ops
+    let err = faces
         .actions
         .act(ActionCall {
             id: "guest_diagnose".to_string(),
@@ -194,9 +197,9 @@ fn guest_diagnose_returns_the_guest_report_and_names_missing_guests() {
     let vm: Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync> = Arc::new(DiagnosingVm {
         report: sample_diagnosis("vmw"),
     });
-    let (_h, ops) = ops_with_vm(vec![module_of("a")], Arc::clone(&hist), vm);
+    let (_h, faces) = ops_with_vm(vec![module_of("a")], Arc::clone(&hist), vm);
 
-    match ops
+    match faces
         .actions
         .act(ActionCall {
             id: "guest_diagnose".to_string(),
@@ -229,7 +232,7 @@ fn guest_diagnose_returns_the_guest_report_and_names_missing_guests() {
     }
 
     // 本机档：没有 guest 可诊断。
-    let err = ops
+    let err = faces
         .actions
         .act(ActionCall {
             id: "guest_diagnose".to_string(),
@@ -241,7 +244,7 @@ fn guest_diagnose_returns_the_guest_report_and_names_missing_guests() {
     assert!(err.contains("本机档"), "{}", err);
 
     // 代理父会话：自己没有 guest，要指向子工作。
-    let err = ops
+    let err = faces
         .actions
         .act(ActionCall {
             id: "guest_diagnose".to_string(),

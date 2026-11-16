@@ -7,6 +7,7 @@ use crate::capabilities::modules::api::{Module, SecretDecl};
 use crate::capabilities::secrets::api::SecretOps;
 use crate::capabilities::secrets::ports::SecretStore;
 use crate::capabilities::secrets::service::SecretsService;
+use crate::presentation::faces::Faces;
 use crate::tests::doubles::{InMemorySecretStore, VecSource, module_of, test_modules};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -96,7 +97,7 @@ fn secrets_load_existing_values() {
 /// 一次性模块工具进程也注入该模块的隐秘字段（与常驻服务同一把尺子）。
 #[test]
 fn module_tool_process_gets_module_secrets() {
-    use crate::capabilities::conductor::api::{ActionCall, Caller, ConductorHandle, Ops, Output};
+    use crate::capabilities::runtime::api::{ActionCall, Caller, Handle, Output};
     use crate::kernel::ports::ProcessRunner;
     use crate::tests::builders::EnvRecordingRunner;
     use crate::tests::doubles::{core_with_services, decl, gw};
@@ -117,7 +118,7 @@ fn module_tool_process_gets_module_secrets() {
         .expect("secrets"),
     );
     secrets.set("m1", "token", "s3cr3t").expect("置值");
-    let handle = ConductorHandle::spawn(core_with_services(
+    let handle = Handle::spawn(core_with_services(
         modules,
         gw(BTreeMap::new(), Vec::new()),
         Arc::clone(&runner) as Arc<dyn ProcessRunner>,
@@ -125,9 +126,10 @@ fn module_tool_process_gets_module_secrets() {
         Arc::clone(&secrets) as Arc<dyn SecretOps + Send + Sync>,
     ))
     .expect("起核心线程");
-    let ops: Ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let faces: Faces = crate::presentation::faces::Faces::from_handle(&handle);
 
-    ops.actions
+    faces
+        .actions
         .act(ActionCall {
             id: "module.m1.echo".to_string(),
             args: serde_json::json!({}),
@@ -147,7 +149,7 @@ fn module_tool_process_gets_module_secrets() {
 /// 设置面动作：`set_secret` / `clear_secret` 走统一动作面（只给 user；值不回显）。
 #[test]
 fn secret_actions_set_and_clear() {
-    use crate::capabilities::conductor::api::{ActionCall, Caller, ConductorHandle, Ops, Output};
+    use crate::capabilities::runtime::api::{ActionCall, Caller, Handle, Output};
     use crate::tests::doubles::{core_with_services, gw};
 
     let modules = vec![module_with_secret("m1", "token", "TOKEN")];
@@ -162,7 +164,7 @@ fn secret_actions_set_and_clear() {
     );
     let residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync> =
         Arc::new(crate::capabilities::residents::api::NoResidents);
-    let handle = ConductorHandle::spawn(core_with_services(
+    let handle = Handle::spawn(core_with_services(
         modules,
         gw(BTreeMap::new(), Vec::new()),
         Arc::new(crate::tests::builders::SilentRunner),
@@ -170,7 +172,7 @@ fn secret_actions_set_and_clear() {
         Arc::clone(&secrets) as Arc<dyn SecretOps + Send + Sync>,
     ))
     .expect("起核心线程");
-    let ops: Ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let faces: Faces = crate::presentation::faces::Faces::from_handle(&handle);
     let call = |id: &str, args: serde_json::Value| ActionCall {
         id: id.to_string(),
         args,
@@ -178,7 +180,8 @@ fn secret_actions_set_and_clear() {
         out: Output::Final,
     };
 
-    ops.actions
+    faces
+        .actions
         .act(call(
             "set_secret",
             serde_json::json!({ "module": "m1", "name": "token", "value": "v1" }),
@@ -188,7 +191,8 @@ fn secret_actions_set_and_clear() {
         secrets.resolve("m1").expect("解析"),
         vec![("TOKEN".to_string(), "v1".to_string())]
     );
-    ops.actions
+    faces
+        .actions
         .act(call(
             "clear_secret",
             serde_json::json!({ "module": "m1", "name": "token" }),

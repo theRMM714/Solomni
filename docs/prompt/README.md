@@ -20,7 +20,7 @@
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`kernel`
-- 谁在用我：`collab`、`conductor`、`llm`、`modules`、`registry`、`session`、`slate`、`tools`、`workspace`
+- 谁在用我：`collab`、`runtime`、`llm`、`modules`、`registry`、`session`、`slate`、`tools`、`workspace`
 
 ## 改动本单元时必须同步
 

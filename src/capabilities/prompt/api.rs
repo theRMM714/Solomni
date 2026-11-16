@@ -1,7 +1,7 @@
-//! 目的：prompt 能力的入站面——其它能力、conductor 与呈现层只准用这里。
+//! 目的：prompt 能力的入站面——其它能力、runtime 与呈现层只准用这里。
 //! 管：Prompt 能力面（按名字取段 / 拿起工具与引用两块共享记录）与 Segment / Vars / rewrite / RefRoots 的重导出。
 //! 不管：册子布局与加载（在 domain 与 detail）；渲染实现（在 domain/prompt.rs）。
-//! 联动：持有者只有 service.rs 一处；组合根装一次，conductor 只持 Box<dyn Prompt>；别的能力按名字取段。
+//! 联动：持有者只有 service.rs 一处；组合根装一次，runtime 只持 Box<dyn Prompt>；别的能力按名字取段。
 
 pub use crate::capabilities::prompt::domain::prompt::{Segment, Vars};
 pub use crate::capabilities::prompt::domain::refs::{RefRoots, rewrite};

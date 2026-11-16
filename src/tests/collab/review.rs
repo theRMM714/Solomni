@@ -87,10 +87,10 @@ pub(crate) fn review_parse_failure_is_conservative_fail() {
     assert!(!exec.all_pass(), "解析失败必须保守判否");
 }
 
-// ---------- Conductor 门面：会话中心（内存组合根） ----------
+// ---------- Core 门面：会话中心（内存组合根） ----------
 #[test]
 pub(crate) fn mode_vocabulary_is_single_or_collab_only() {
-    // web 与 conductor 的形态词汇只有 single / collab / proxy；其它一律不认。
+    // web 与 runtime 的形态词汇只有 single / collab / proxy；其它一律不认。
     use crate::presentation::web::parse_mode;
     assert!(matches!(parse_mode("single"), Ok(WorkMode::Single)));
     assert!(matches!(parse_mode("collab"), Ok(WorkMode::Collab)));

@@ -305,7 +305,7 @@ function collectDocs() {
       const a = path.join(abs, e.name);
       const r = rel ? rel + "/" + e.name : e.name;
       if (e.isDirectory()) {
-        const always = e.name === "target" || e.name === ".git" || e.name === "node_modules";
+        const always = e.name === "target" || e.name === ".git" || e.name === "node_modules" || e.name === ".shots";
         const rootData = rel === "" && SKIP_DIRS.has(e.name);
         if (!always && !rootData) walk(a, r);
       } else if (e.name.endsWith(".md")) out.push(r);

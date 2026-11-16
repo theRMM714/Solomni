@@ -7,7 +7,7 @@
 ## 管什么 / 不管什么
 
 - 管：会话状态与簿记（行 / 回合 / 回复）、成员工具面与工具表、历史视图与元信息、回档的纯行算术、呈现侧事件契约（`SessionEvent` / `LineView`）、核心操作回路（声明工具面 → 跑一次模型 → 取载荷 → 只读核实）。
-- 不管：不编排跨会话（`conductor`）、不决定讨论流程（`collab`）、不实现工具机制（`tools`）。
+- 不管：不编排跨会话（`runtime`）、不决定讨论流程（`collab`）、不实现工具机制（`tools`）。
 
 ## 入站契约与状态归属
 
@@ -19,11 +19,11 @@
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`kernel`、`llm`、`modules`、`permission`、`prompt`、`residents`、`taskchain`、`tools`、`vm`、`workspace`
-- 谁在用我：`collab`、`conductor`、`registry`、`slate`
+- 谁在用我：`collab`、`runtime`、`registry`、`slate`
 
 ## 改动本单元时必须同步
 
-- 行与事件词汇（`src/capabilities/session/domain/events.rs`、`LineView` 字段）一改 → `collab` 的状态派生、`conductor` 的视图、`cli` / `web` 渲染、`src/tests/session/` 全跟。
+- 行与事件词汇（`src/capabilities/session/domain/events.rs`、`LineView` 字段）一改 → `collab` 的状态派生、`runtime` 的视图、`cli` / `web` 渲染、`src/tests/session/` 全跟。
 
 ## 本目录
 

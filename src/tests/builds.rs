@@ -422,8 +422,8 @@ fn scanned_modules(root: &std::path::Path) -> Vec<Module> {
 
 #[test]
 fn creating_a_session_builds_the_missing_entry_first() {
-    use crate::capabilities::conductor::api::{ConductorHandle, SessionOps};
-    use crate::capabilities::work::api::WorkMode;
+    use crate::capabilities::runtime::api::Handle;
+    use crate::capabilities::work::api::{WorkMode, WorkOps};
 
     use crate::kernel::detail::process::ProcTools;
     use std::sync::Arc;
@@ -445,7 +445,7 @@ fn creating_a_session_builds_the_missing_entry_first() {
     );
     let builds = builds_service(&root, runner);
     let core = crate::tests::doubles::core_with_builds(scanned_modules(&root), Arc::new(builds));
-    let handle = ConductorHandle::spawn(core).expect("起核心");
+    let handle = Handle::spawn(core).expect("起核心");
     // 创建：入口不在场、模块声明了 build → 先补编，再建会话。
     let spec = crate::tests::doubles::work("w", WorkMode::Single, &["hello"]);
     let (opened, _) = handle.create_work(spec).expect("补编后要能建会话");
@@ -466,8 +466,8 @@ fn creating_a_session_builds_the_missing_entry_first() {
 
 #[test]
 fn creating_a_session_reports_the_build_failure_and_creates_nothing() {
-    use crate::capabilities::conductor::api::{ConductorHandle, SessionOps};
-    use crate::capabilities::work::api::WorkMode;
+    use crate::capabilities::runtime::api::Handle;
+    use crate::capabilities::work::api::{WorkMode, WorkOps};
 
     use crate::kernel::detail::process::ProcTools;
     use std::sync::Arc;
@@ -496,7 +496,7 @@ fn creating_a_session_reports_the_build_failure_and_creates_nothing() {
     );
     let builds = builds_service(&root, runner);
     let core = crate::tests::doubles::core_with_builds(scanned_modules(&root), Arc::new(builds));
-    let handle = ConductorHandle::spawn(core).expect("起核心");
+    let handle = Handle::spawn(core).expect("起核心");
     let spec = crate::tests::doubles::work("w", WorkMode::Single, &["bad"]);
     let err = handle.create_work(spec).expect_err("构建失败要拒绝创建");
     assert!(
@@ -571,8 +571,8 @@ fn ensure_rebuilds_when_the_target_changed() {
 #[test]
 fn activating_a_session_ensures_the_target_build() {
     use crate::capabilities::builds::api::{Builds, Built};
-    use crate::capabilities::conductor::api::{ConductorHandle, SessionOps};
-    use crate::capabilities::work::api::WorkMode;
+    use crate::capabilities::runtime::api::{Handle, RuntimeOps};
+    use crate::capabilities::work::api::{WorkMode, WorkOps};
 
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -619,7 +619,7 @@ fn activating_a_session_ensures_the_target_build() {
     let builds = Arc::new(CountingBuilds {
         calls: Arc::clone(&calls),
     });
-    let handle = ConductorHandle::spawn(crate::tests::doubles::core_with_builds(
+    let handle = Handle::spawn(crate::tests::doubles::core_with_builds(
         scanned_modules(&root),
         builds,
     ))

@@ -3,13 +3,14 @@
 //! 不管：业务决策与状态（都在各能力内部）；终端 I/O 与配色（`cli/term.rs`、`cli/theme.rs`）。
 //! 联动：能力面来自 `src/capabilities/*/api.rs`；事件词汇与 `src/presentation/web/` 并列共用；模块声明见 `src/presentation.rs`。
 
-use crate::capabilities::conductor::api::{Acted, ActionCall, Caller};
-use crate::capabilities::conductor::api::{DecisionCard, DecisionWaiter, SessionEvent, Tier};
-use crate::capabilities::conductor::api::{Ops, Output};
 use crate::capabilities::registry::api::{ModelView, ProviderView};
+use crate::capabilities::runtime::api::Output;
+use crate::capabilities::runtime::api::{Acted, ActionCall, Caller};
+use crate::capabilities::runtime::api::{DecisionCard, DecisionWaiter, SessionEvent, Tier};
 use crate::capabilities::system::api::System;
 use crate::capabilities::tools::api::Command;
 use crate::capabilities::work::api::AgentInstance;
+use crate::presentation::faces::Faces;
 
 /// 目的：离开转录中心时的去向：退出，或转入 Web 转录中心（端口）。
 pub enum CliExit {
@@ -21,7 +22,7 @@ pub enum CliExit {
 /// 参数：`web_default_port` 是会话内 `web` 命令不带端口时的默认值；`plain` 为真则强制纯文本；`anim` 为假则生成态不轮流刷帧；
 ///   `system` 是启动相命令的执行面（与命令行共用同一份系统维护能力，见 `run_boot`）。
 pub fn run(
-    ops: Ops,
+    faces: Faces,
     web_default_port: u16,
     plain: bool,
     anim: bool,
@@ -30,12 +31,12 @@ pub fn run(
     let interactive = term::init(plain, anim);
     term::set_completer(catalog::complete);
     if interactive {
-        term::banner(&startup_tagline(), &startup_facts(&ops));
+        term::banner(&startup_tagline(), &startup_facts(&faces));
     } else {
         println!("Solomni 核心编排者（转录中心）");
     }
     if !interactive {
-        print_roster(&ops);
+        print_roster(&faces);
     }
     if interactive {
         term::line(&term::ink(
@@ -43,11 +44,11 @@ pub fn run(
             "输入 help 看命令手册与旗语规范 · web 转 Web 界面 · exit 退出",
         ));
     }
-    term::status(&startup_status(&ops));
+    term::status(&startup_status(&faces));
 
     loop {
         if !interactive {
-            print_menu(&ops);
+            print_menu(&faces);
         }
         let label = if interactive { "转录中心" } else { ">" };
         let Some(line) = term::ask(label) else {
@@ -59,29 +60,29 @@ pub fn run(
         let arg = parts.next().unwrap_or("").trim().to_string();
         // 启动相命令（命令表里 `phase: boot` 的那些）：与命令行同一个执行入口，跑完回提示符。
         if let Some(command) = catalog::boot(&cmd) {
-            run_boot(&ops, system, command, &arg);
+            run_boot(&faces, system, command, &arg);
             continue;
         }
         match cmd.as_str() {
-            "single" => single_flow(&ops, &arg),
-            "collab" => collab_flow(&ops, &arg),
-            "proxy" => proxy_flow(&ops),
-            "provider" => provider_flow(&ops, &arg),
-            "model" => model_flow(&ops, &arg),
-            "core" => core_flow(&ops, &arg),
+            "single" => single_flow(&faces, &arg),
+            "collab" => collab_flow(&faces, &arg),
+            "proxy" => proxy_flow(&faces),
+            "provider" => provider_flow(&faces, &arg),
+            "model" => model_flow(&faces, &arg),
+            "core" => core_flow(&faces, &arg),
             // 回档：留档（标记+折叠，可恢复）/ 删除（真的截掉）/ 恢复（删掉该标记及其后）。
-            "rewind" => rewind_cmd(&ops, &arg),
+            "rewind" => rewind_cmd(&faces, &arg),
             // 共享区提交历史：看 head / 列提交 / 看详情 / 非破坏性回滚。
-            "work" => work_cmd(&ops, &arg),
+            "work" => work_cmd(&faces, &arg),
             // 常驻服务：列清单 / 启停开关 / 调用操作（都走统一动作面）。
-            "resident" => resident_cmd(&ops, &arg),
+            "resident" => resident_cmd(&faces, &arg),
             // 隐秘字段：列声明（置值随设置面接入）。
-            "secret" => secret_cmd(&ops),
+            "secret" => secret_cmd(&faces),
             // 直接用模块工具（不经 AI）：清单与动作 id 都来自核心的动作目录。
-            "module" => module_cmd(&ops, &arg),
+            "module" => module_cmd(&faces, &arg),
             // 只读诊断一条虚拟机档会话的 guest（进程 / CPU / 内存 / 负载 / 挂载）。
-            "diagnose" => diagnose_cmd(&ops, &arg),
-            "rescan" => print_roster(&ops),
+            "diagnose" => diagnose_cmd(&faces, &arg),
+            "rescan" => print_roster(&faces),
             "help" | "/help" | "?" => help_cmd(&arg),
             "version" => term::line(&catalog::version_text()),
             // 转入 Web 转录中心（唯一入口：启动参数用 --web，会话内用 web）。
@@ -111,7 +112,7 @@ pub fn run(
 /// 参数：`command` 来自命令表，`tail` 是命令名之后的原文（与命令名之间只按空格切，不再做语法）。
 /// 返回：这条命令的退出码——转录中心不因它退出。
 /// 约束：转录中心里 `--json` 没有意义（终端要人读），`--root` 只能在启动时给（这个进程的根已定）。
-pub(crate) fn run_boot(ops: &Ops, system: &dyn System, command: &Command, tail: &str) -> i32 {
+pub(crate) fn run_boot(faces: &Faces, system: &dyn System, command: &Command, tail: &str) -> i32 {
     let mut operands: Vec<String> = Vec::new();
     for word in tail.split_whitespace() {
         let name = word.split_once('=').map_or(word, |(n, _)| n);
@@ -133,7 +134,7 @@ pub(crate) fn run_boot(ops: &Ops, system: &dyn System, command: &Command, tail: 
             _ => operands.push(word.to_string()),
         }
     }
-    let writes = !sessions_running(ops);
+    let writes = !sessions_running(faces);
     let mut ask = TerminalAsk;
     let code = boot::run_asked(&command.name, &operands, system, false, &mut ask, writes);
     if code != 0 {
@@ -174,8 +175,9 @@ impl boot::Ask for TerminalAsk {
 
 /// 目的：有没有会话此刻在生成：写操作（回收 / 还原 / 补齐）在有会话在跑时只给预览。
 /// 约束：读不到会话清单按「没在跑」处理——宁可多跑一次确认问话，也不让维护命令卡在只读上。
-fn sessions_running(ops: &Ops) -> bool {
-    ops.sessions
+fn sessions_running(faces: &Faces) -> bool {
+    faces
+        .work
         .session_views(&[])
         .map(|views| views.iter().any(|v| v.running))
         .unwrap_or(false)
@@ -273,9 +275,9 @@ mod tests {
         if std::io::stdin().is_terminal() {
             return;
         }
-        let (handle, ops) = crate::tests::ops_with(vec![], vec![]);
+        let (handle, faces) = crate::tests::ops_with(vec![], vec![]);
         let system = crate::tests::boot::Fake::default();
-        let exit = run(ops, 49181, true, false, &system);
+        let exit = run(faces, 49181, true, false, &system);
         assert!(matches!(exit, CliExit::Exit));
         drop(handle);
     }
@@ -283,16 +285,16 @@ mod tests {
     /// 目的：转录中心里能跑启动相命令——同一条执行路径、同一个退出码，跑完只留一行提示。
     #[test]
     fn boot_commands_run_from_the_transcript_centre() {
-        let (handle, ops) = crate::tests::ops_with(vec![], vec![]);
+        let (handle, faces) = crate::tests::ops_with(vec![], vec![]);
         let system = crate::tests::boot::Fake::default();
         let doctor = catalog::boot("--doctor").expect("命令表里有 --doctor");
         assert!(catalog::boot("single").is_none(), "转录相命令不走启动相");
 
-        let (code, _) = term::capture(|| run_boot(&ops, &system, doctor, ""));
+        let (code, _) = term::capture(|| run_boot(&faces, &system, doctor, ""));
         assert_eq!(code, 0, "自检只读，成功");
 
         // --json 在终端没有意义：提示一句、照常执行，不塞一份 JSON 进转录区。
-        let (code, lines) = term::capture(|| run_boot(&ops, &system, doctor, "--json"));
+        let (code, lines) = term::capture(|| run_boot(&faces, &system, doctor, "--json"));
         assert_eq!(code, 0);
         assert!(
             lines.iter().any(|l| l.contains("--json 没有意义")),
@@ -300,7 +302,7 @@ mod tests {
         );
 
         // --root 只能在启动时给：直接拒绝，退出码 2。
-        let (code, lines) = term::capture(|| run_boot(&ops, &system, doctor, "--root work"));
+        let (code, lines) = term::capture(|| run_boot(&faces, &system, doctor, "--root work"));
         assert_eq!(code, 2);
         assert!(
             lines.iter().any(|l| l.contains("--root 只能在启动时给")),
@@ -308,22 +310,22 @@ mod tests {
         );
 
         // 用法不对时，退出码要配一句解释，而不是只丢一个数字。
-        let (code, lines) = term::capture(|| run_boot(&ops, &system, doctor, "--nope"));
+        let (code, lines) = term::capture(|| run_boot(&faces, &system, doctor, "--nope"));
         assert_eq!(code, 2);
         assert!(lines.iter().any(|l| l.contains("[退出码 2]")), "{lines:?}");
 
         // 便携维护：状态模式跑得通（回执自己排版），未知模式仍退 2 并给一句解释。
         let setup = catalog::boot("--setup").expect("命令表里有 --setup");
-        let (code, _) = term::capture(|| run_boot(&ops, &system, setup, "status"));
+        let (code, _) = term::capture(|| run_boot(&faces, &system, setup, "status"));
         assert_eq!(code, 0);
-        let (code, lines) = term::capture(|| run_boot(&ops, &system, setup, "bogus"));
+        let (code, lines) = term::capture(|| run_boot(&faces, &system, setup, "bogus"));
         assert_eq!(code, 2);
         assert!(lines.iter().any(|l| l.contains("[退出码 2]")), "{lines:?}");
 
         // 非门槛类的失败也要有解释（退出码 1）：同一句兜底文案。
         let failing = crate::tests::boot::Fake::failing("storage");
         let storage = catalog::boot("--storage").expect("命令表里有 --storage");
-        let (code, lines) = term::capture(|| run_boot(&ops, &failing, storage, ""));
+        let (code, lines) = term::capture(|| run_boot(&faces, &failing, storage, ""));
         assert_eq!(code, 1);
         assert!(lines.iter().any(|l| l.contains("[退出码 1]")), "{lines:?}");
         assert!(lines.iter().any(|l| l.contains("执行失败")), "{lines:?}");
@@ -334,10 +336,10 @@ mod tests {
     /// 约束：写操作就地一问；摇头只算预览（退出码归零），点头才真的带上确认。
     #[test]
     fn repl_runs_boot_commands_from_the_prompt() {
-        let (handle, ops) = crate::tests::ops_with(vec![], vec![]);
+        let (handle, faces) = crate::tests::ops_with(vec![], vec![]);
         let system = crate::tests::boot::Fake::default();
         term::feed(&["--setup bogus", "--gc", "n", "--gc", "y", "exit"]);
-        let (exit, lines) = term::capture(|| run(ops, 49181, true, false, &system));
+        let (exit, lines) = term::capture(|| run(faces, 49181, true, false, &system));
         assert!(matches!(exit, CliExit::Exit), "exit 之后才离开转录中心");
         assert!(
             lines.iter().any(|l| l.contains("[退出码 2]")),

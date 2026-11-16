@@ -215,7 +215,7 @@ impl Work {
         bytes: &[u8],
         overwrite: bool,
     ) -> Result<bool, String> {
-        // 策略在 conductor：先净化文件名，再交给工作区端口（机制只看已净化的名字）。
+        // 策略在 runtime：先净化文件名，再交给工作区端口（机制只看已净化的名字）。
         let name = crate::capabilities::workspace::api::safe_file_name(name)?;
         if !turn.holds(sid) && self.history.load(sid).is_err() {
             return Err(format!("无此会话：{}", sid));

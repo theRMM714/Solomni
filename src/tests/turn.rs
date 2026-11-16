@@ -1,7 +1,7 @@
 //! 目的：`turn` 的回合状态用例——运行态、创建占位与 shell 槽的边界。
 //! 管：在世表放取的可见性、运行态与创建占位互不干扰、shell 槽按会话共用一份。
-//! 不管：会话本体与生成驱动（见 `src/tests/conductor.rs`）。
-//! 联动：`src/capabilities/turn/service/state.rs`、`src/capabilities/conductor/service.rs`。
+//! 不管：会话本体与生成驱动（见 `src/tests/runtime.rs`）。
+//! 联动：`src/capabilities/turn/service/state.rs`、`src/capabilities/runtime/service.rs`。
 
 use super::prelude::*;
 use crate::capabilities::turn::api::TurnState;
@@ -103,12 +103,12 @@ fn service_ops_take_only_ready_services_and_qualify_names() {
         operations: vec![op("run")],
         reason: String::new(),
     };
-    let ops = service_ops_of(&[
+    let faces = service_ops_of(&[
         view("svc", ServiceState::Ready),
         view("off", ServiceState::Stopped),
     ]);
-    assert_eq!(ops.len(), 1, "没启动的服务没有可发现的操作");
-    let got = &ops["m"];
+    assert_eq!(faces.len(), 1, "没启动的服务没有可发现的操作");
+    let got = &faces["m"];
     assert_eq!(got.len(), 1);
     assert_eq!(got[0].tool, "svc.run");
     assert_eq!(got[0].service, "svc");

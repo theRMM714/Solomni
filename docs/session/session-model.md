@@ -147,7 +147,7 @@ session/<工作名>/
 
 - "这一刻在不在跑"是短暂事件（`Working`）；**"这段工作还该不该继续被驱动"是持久事实**，落在 `meta.yaml` 的 `run` 段（`active` / `stopped` / `closed`，缺省 `active`）：
 
-- **`stopped`**：已停止。此后的**派发与唤醒一律被拒**（"取会话去生成"那道闸 `Conductor::dispatch_gate` 两者都拦）；正在跑的那次会被**级联停掉**。用户点「启用」把它解冻回 `active`——启用是显式的恢复动作，只恢复会话（含虚拟机 guest），**不产生模型调用**。
+- **`stopped`**：已停止。此后的**派发与唤醒一律被拒**（"取会话去生成"那道闸 `Core::dispatch_gate` 两者都拦）；正在跑的那次会被**级联停掉**。用户点「启用」把它解冻回 `active`——启用是显式的恢复动作，只恢复会话（含虚拟机 guest），**不产生模型调用**。
 - 真正"接着走"由上下文继续负责（见下）：单 agent 上一轮被打断时给「继续上一轮」，协作泵没走完时给「恢复协作」；没有断点就不显示。
 - **`closed`**：终态。不能再被派发、唤醒或继续；关闭时整棵子树里还有在生成的就整条拒绝（先停），不留半个状态。
 - 判据只有一处（`SessionMeta::dispatch_refusal`）：转达、观察、控制与叫醒都问它，不各写一份。
@@ -430,7 +430,7 @@ session/<工作名>/
 
 ## 检查
 - 会话与回档 → `src/tests/session/`。
-- 回合与并发 → `src/tests/collab/` 与 `src/tests/conductor.rs`。
+- 回合与并发 → `src/tests/collab/` 与 `src/tests/runtime.rs`。
 - 压缩 → `src/tests/api/compaction.rs`。
 
 ## 路由

@@ -1,7 +1,7 @@
 //! 目的：lifecycle 的入站面：回档目标与结果、重建要的两个能力面，以及删除收尾对象与撤权回调。
 //! 管：类型的定义与文档（值的唯一家）。
 //! 不管：怎么回档、怎么删（在 service 里）；呈现层的 JSON 封装。
-//! 联动：conductor 与测试都从这里取类型；`SessionDelete::run()` 在调用方线程上跑。
+//! 联动：runtime 与测试都从这里取类型；`SessionDelete::run()` 在调用方线程上跑。
 
 use crate::capabilities::registry::api::Registry;
 use crate::kernel::ports::HostProbe;
@@ -33,7 +33,7 @@ pub(crate) struct RewindOutcome {
     pub children: Vec<(String, Vec<serde_json::Value>)>,
 }
 
-// 类型定义在 service 里（删除收尾对象要拿能力面），对外经这里取：conductor 与测试只认这个面。
+// 类型定义在 service 里（删除收尾对象要拿能力面），对外经这里取：runtime 与测试只认这个面。
 pub(crate) use crate::capabilities::lifecycle::service::Lifecycle;
 /// 目的：删除收尾对象与撤权回调——生产路径由 `delete_bookkeeping` 返回（不按名字取），测试直接构造。
 #[cfg(test)]

@@ -17,11 +17,11 @@
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`llm`、`modules`、`prompt`、`registry`、`session`、`tools`
-- 谁在用我：`collab`、`conductor`
+- 谁在用我：`collab`、`runtime`
 
 ## 改动本单元时必须同步
 
-- 收束规则一改 → `src/tests/slate.rs` 与两个调用方（`conductor` 的一次性推荐、`collab` 的代拟）的用例。
+- 收束规则一改 → `src/tests/slate.rs` 与两个调用方（`runtime` 的一次性推荐、`collab` 的代拟）的用例。
 
 ## 本目录
 

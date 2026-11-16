@@ -22,13 +22,13 @@
 - `AskUser` 是「需要用户裁决的机制请用户裁决」的**唯一**入口（`src/kernel/ports.rs`），工具执行层与围栏用它。
   - 形状：`ask(问题) -> 选项 id`，**阻塞**。
   - `halt(为什么)` = 停会话 + 落警告；调用方只在有可回答前端时用它，没有前端按 fail-closed 收场。
-  - 实现在会话侧（`conductor` 的 `SessionAsk`），走会话的**统一裁决通道**——见 [docs/session/session-model.md](../session/session-model.md) 的「请用户裁决」。
+  - 实现在会话侧（`runtime` 的 `SessionAsk`），走会话的**统一裁决通道**——见 [docs/session/session-model.md](../session/session-model.md) 的「请用户裁决」。
 - 状态归属：取消表、围栏台账与进程账都在本单元机制侧维护，业务状态不在此。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：（无——依赖图最底层或纯领域）
-- 谁在用我：`collab`、`conductor`、`llm`、`modules`、`prompt`、`registry`、`residents`、`session`、`tools`、`vm`、`workspace`
+- 谁在用我：`collab`、`runtime`、`llm`、`modules`、`prompt`、`registry`、`residents`、`session`、`tools`、`vm`、`workspace`
 
 ## 一、围栏落点：必要与可选
 

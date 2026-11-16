@@ -47,7 +47,7 @@
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`kernel`、`permission`、`prompt`
-- 谁在用我：`collab`、`conductor`、`provision`（`guest-runtime` 的沙箱清单）、`session`、`tools`、`turn`（一席工具面装配时取 `work_handlers`）
+- 谁在用我：`collab`、`runtime`、`provision`（`guest-runtime` 的沙箱清单）、`session`、`tools`、`turn`（一席工具面装配时取 `work_handlers`）
 
 ## 改动本单元时必须同步
 

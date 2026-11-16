@@ -1,7 +1,7 @@
 //! 目的：work 能力的方法族入口——`Work` 的门面（字段、构造）与跨子模块共用的形状与判据。
 //! 管：`Work` 的字段与构造、建工作的两段结果、改配的准备结果、模块声明的能力表、运行包重建判据。
 //! 不管：报告与档位（`report.rs`）、配置读写（`config.rs`）、调用参数（`model.rs`）、宿主工具路径（`host.rs`）、视图（`views.rs`）、建工作与 guest 启动（`create.rs`）、启用与拟名单（`activation.rs` / `suggest.rs`）、guest 任务本身（`guest_job.rs`）。
-//! 联动：conductor 与呈现层经这里的方法名调用；各子模块 impl 同一个 `Work`。
+//! 联动：runtime 与呈现层经这里的方法名调用；各子模块 impl 同一个 `Work`。
 //!   `Turn` / `Registry` / `HostProbe` 都是方法形参、不是字段：本能力不持第二份 `Turn`。
 
 mod activation;
@@ -46,9 +46,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 /// 目的：**工作与会话配置的用例面**：建工作 / 改配 / 视图 / 报告 / guest 起停都经它。
-///  与 `Conductor` 分开：这里只管"一场工作怎么被建立、改配、看、报"，
-///  不看命令队列、不看协作链推进、不看回档——那些留在 conductor（层 10）。
-///  组合根在 `Conductor::new` 里造一份，与 conductor 共享同一批能力面。
+///  与 `Core` 分开：这里只管"一场工作怎么被建立、改配、看、报"，
+///  不看命令队列、不看协作链推进、不看回档——那些留在 runtime（层 10）。
+///  组合根在 `Core::new` 里造一份，与 runtime 共享同一批能力面。
 pub struct Work {
     /// 产品根：虚拟根这类"装在项目内"的东西按它解析成绝对路径（`vm::resolve_guest`）。
     root: PathBuf,
@@ -76,7 +76,7 @@ pub struct Work {
 }
 
 impl Work {
-    /// 组合根专用：与 `Conductor` 共享同一批能力面（不新建任何实现）。
+    /// 组合根专用：与 `Core` 共享同一批能力面（不新建任何实现）。
     // 组合根注入的构造函数：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读。
     // 这是有意的设计取舍（见 docs/testing/quality-isolation.md 的 allow 清单），不是没修。
     #[allow(clippy::too_many_arguments)]

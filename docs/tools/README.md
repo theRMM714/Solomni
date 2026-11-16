@@ -12,7 +12,7 @@
 - 管：模块工具进程的执行编排；拉起与围栏机制是 kernel 共享的 `ProcessRunner` / `confine`。
 - 管：围栏可达范围的派生（`src/capabilities/tools/domain/fence.rs` 的 `for_call` / `for_session` / `standalone`）。
 - 不管：不放领域语义（角色是系统的身份，不是业务概念）；不选模型；不碰会话流水。
-- 不管：不决定用户授权的主机只读根（`sandbox.policy.host_read_roots`）——由调用方（`conductor` / `collab`）叠加。
+- 不管：不决定用户授权的主机只读根（`sandbox.policy.host_read_roots`）——由调用方（`runtime` / `collab`）叠加。
 
 ## 入站契约与状态归属
 
@@ -25,7 +25,7 @@
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`kernel`、`llm`、`modules`、`prompt`、`workspace`
-- 谁在用我：`collab`、`conductor`、`session`、`slate`
+- 谁在用我：`collab`、`runtime`、`session`、`slate`
 
 ## 改动本单元时必须同步
 

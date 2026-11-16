@@ -4,10 +4,12 @@
 //! 联动：`cli/view.rs`、`cli/term.rs`、`cli/theme.rs`、`docs/presentation/cli/unit-map.md`
 
 use super::*;
-use crate::capabilities::conductor::api::{ConductorHandle, ConductorOps};
+use crate::capabilities::runtime::api::Handle;
 use crate::capabilities::work::api::{
-    AgentSuggestion, RuntimeDiagnosis, RuntimeReport, TierChoices, WorkMode,
+    AgentSuggestion, FilesView, RuntimeDiagnosis, RuntimeReport, SessionConfig, SessionEdit,
+    SessionView, TierChoices, WorkMode, WorkOpened, WorkOps, WorkSpec,
 };
+use crate::presentation::faces::Faces;
 
 use crate::capabilities::llm::api::{ProbeOutcome, ReplayReport};
 use crate::capabilities::modules::api::{ModulesOps, Roster};
@@ -246,9 +248,9 @@ fn vocabulary() -> Vec<SessionEvent> {
         },
     ]
 }
-/// 目的：核心替身：运行报告由用例指定（覆盖报告各分区与报告失败）。
+/// 目的：工作面替身：运行报告由用例指定（覆盖报告各分区与报告失败），其余用例一律如实报没装。
 struct FakeCore(Result<RuntimeReport, String>);
-impl ConductorOps for FakeCore {
+impl WorkOps for FakeCore {
     fn runtime_report(&self, _: Tier) -> Result<RuntimeReport, String> {
         self.0.clone()
     }
@@ -257,6 +259,56 @@ impl ConductorOps for FakeCore {
     }
     fn suggest_models(&self, _: &str, _: WorkMode) -> Result<Vec<AgentSuggestion>, String> {
         Err("没装推荐".into())
+    }
+    fn create_work(&self, _: WorkSpec) -> Result<(WorkOpened, u64), String> {
+        Err("没装建工作".into())
+    }
+    fn config(&self, _: &str) -> Result<SessionConfig, String> {
+        Err("没装配置".into())
+    }
+    fn edit(&self, _: &str, _: SessionEdit) -> Result<(), String> {
+        Err("没装编辑".into())
+    }
+    fn upload(&self, _: &str, _: &str, _: &[u8], _: bool) -> Result<bool, String> {
+        Err("没装上传".into())
+    }
+    fn files(&self, _: &str) -> Result<FilesView, String> {
+        Err("没装文件".into())
+    }
+    fn work_log(
+        &self,
+        _: &str,
+        _: usize,
+        _: Option<u64>,
+    ) -> Result<crate::capabilities::workspace::api::WorkLog, String> {
+        Err("没装日志".into())
+    }
+    fn work_commit_view(
+        &self,
+        _: &str,
+        _: u64,
+    ) -> Result<crate::capabilities::workspace::api::CommitDetail, String> {
+        Err("没装提交".into())
+    }
+    fn work_commit_file(
+        &self,
+        _: &str,
+        _: u64,
+        _: &str,
+    ) -> Result<crate::capabilities::workspace::api::CommitFileView, String> {
+        Err("没装提交文件".into())
+    }
+    fn exists(&self, _: &str) -> Result<bool, String> {
+        Err("没装存在检查".into())
+    }
+    fn unique_work_name(&self, _: &str, _: &str) -> Result<String, String> {
+        Err("没装命名".into())
+    }
+    fn session_views(
+        &self,
+        _: &[crate::capabilities::session::api::HistoryView],
+    ) -> Result<Vec<SessionView>, String> {
+        Err("没装会话总览".into())
     }
 }
 /// 目的：模块公地替身：清单读取失败。
@@ -306,9 +358,9 @@ fn agent(modules: &[&str], model: Option<&str>) -> Agent {
 
 #[test]
 fn startup_lines_read_facts_off_the_registry() {
-    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
+    let (_h, faces) = ops_with(vec![module_of("a")], Vec::new());
     ui(false);
-    let facts = startup_facts(&ops);
+    let facts = startup_facts(&faces);
     assert_eq!(facts.len(), 4);
     assert!(facts[0].contains("agent 0"), "{}", facts[0]);
     assert!(facts[1].contains("模块 1") && facts[2].contains("档位 host"));
@@ -318,8 +370,8 @@ fn startup_lines_read_facts_off_the_registry() {
             .0
             .contains("终端转录中心 · v")
     );
-    assert!(startup_status(&ops).contains("● 就绪 · 模型 m · 档位 host"));
-    let models = ops.registry.models().expect("模型可读");
+    assert!(startup_status(&faces).contains("● 就绪 · 模型 m · 档位 host"));
+    let models = faces.registry.models().expect("模型可读");
     assert_eq!(
         model_line(&models[0], Some("m")),
         "m（核心默认）  M → m  [p]"
@@ -335,30 +387,30 @@ fn startup_lines_read_facts_off_the_registry() {
 }
 #[test]
 fn startup_facts_fall_back_when_reads_fail() {
-    let (_h, mut ops) = ops_with(vec![module_of("a")], Vec::new());
+    let (_h, mut faces) = ops_with(vec![module_of("a")], Vec::new());
     ui(false);
-    ops.modules = Arc::new(BrokenModules);
-    ops.registry = Arc::new(BrokenRegistry);
-    let facts = startup_facts(&ops);
+    faces.modules = Arc::new(BrokenModules);
+    faces.registry = Arc::new(BrokenRegistry);
+    let facts = startup_facts(&faces);
     assert!(facts[0].contains("agent 0") && facts[1].contains("模块 0"));
     assert!(facts[2].contains("档位 host") && facts[3].contains("（未设定）"));
-    assert!(startup_status(&ops).contains("（未设定）"));
+    assert!(startup_status(&faces).contains("（未设定）"));
 }
 #[test]
 fn print_roster_covers_discovery_and_report_sections() {
-    let (_h, ops) = ops_with(
+    let (_h, faces) = ops_with(
         vec![module_of("a"), module_with_runtimes("b", &["qemu"])],
         Vec::new(),
     );
     ui(false);
-    let lines = said(|| print_roster(&ops));
+    let lines = said(|| print_roster(&faces));
     let first = lines.first().expect("有发现行");
     assert!(first.starts_with("[发现]") && first.contains('a') && first.contains('b'));
     assert!(has(&lines, "a 的能力") && has(&lines, "运行能力 qemu"));
-    let (_h, mut ops) = ops_with(vec![module_of("a")], Vec::new());
+    let (_h, mut faces) = ops_with(vec![module_of("a")], Vec::new());
     ui(false);
-    ops.core = Arc::new(FakeCore(Ok(report())));
-    let rows = said(|| print_roster(&ops));
+    faces.work = Arc::new(FakeCore(Ok(report())));
+    let rows = said(|| print_roster(&faces));
     let needles = concat!(
         "[拒收] 坏的清单|",
         "[运行包] 档位 vm；包库：qemu 9.2/9.1|",
@@ -370,29 +422,29 @@ fn print_roster_covers_discovery_and_report_sections() {
         assert!(has(&rows, needle), "缺片段：{needle}");
     }
     assert!(!has(&rows, "包库里没有"), "缺包诊断由缺运行包分区说完");
-    let (_h, ops) = ops_with(Vec::new(), Vec::new());
+    let (_h, faces) = ops_with(Vec::new(), Vec::new());
     ui(false);
-    assert!(has(&said(|| print_roster(&ops)), "（无模块）"));
+    assert!(has(&said(|| print_roster(&faces)), "（无模块）"));
 }
 #[test]
 fn print_roster_and_menu_report_read_errors() {
-    let (_h, mut ops) = ops_with(vec![module_of("a")], Vec::new());
+    let (_h, mut faces) = ops_with(vec![module_of("a")], Vec::new());
     ui(false);
-    ops.modules = Arc::new(BrokenModules);
-    assert!(has(&said(|| print_roster(&ops)), "[错误] 模块坏了"));
-    let (_h, mut ops) = ops_with(vec![module_of("a")], Vec::new());
-    ops.core = Arc::new(FakeCore(Err("报告坏了".into())));
-    assert!(has(&said(|| print_roster(&ops)), "[错误] 报告坏了"));
-    let (_h, mut ops) = ops_with(vec![module_of("a")], Vec::new());
-    ops.registry = Arc::new(BrokenRegistry);
-    assert!(has(&said(|| print_roster(&ops)), "[错误] 登记处坏了"));
-    assert!(has(&said(|| print_menu(&ops)), "[错误] 登记处坏了"));
+    faces.modules = Arc::new(BrokenModules);
+    assert!(has(&said(|| print_roster(&faces)), "[错误] 模块坏了"));
+    let (_h, mut faces) = ops_with(vec![module_of("a")], Vec::new());
+    faces.work = Arc::new(FakeCore(Err("报告坏了".into())));
+    assert!(has(&said(|| print_roster(&faces)), "[错误] 报告坏了"));
+    let (_h, mut faces) = ops_with(vec![module_of("a")], Vec::new());
+    faces.registry = Arc::new(BrokenRegistry);
+    assert!(has(&said(|| print_roster(&faces)), "[错误] 登记处坏了"));
+    assert!(has(&said(|| print_menu(&faces)), "[错误] 登记处坏了"));
 }
 #[test]
 fn print_menu_lists_agents_or_says_there_are_none() {
-    let (_h, ops) = ops_with(Vec::new(), Vec::new());
+    let (_h, faces) = ops_with(Vec::new(), Vec::new());
     ui(false);
-    let lines = said(|| print_menu(&ops));
+    let lines = said(|| print_menu(&faces));
     assert!(has(&lines, "可唤起 agent") && has(&lines, "（登记处还没有 agent"));
     let store = InMemorySettings::new();
     {
@@ -401,10 +453,10 @@ fn print_menu_lists_agents_or_says_there_are_none() {
         s.agents.insert("乙".into(), agent(&["b"], None));
     }
     ui(false);
-    let h = ConductorHandle::spawn(core_with_settings_modules(store, vec![module_of("a")]))
-        .expect("起核心线程");
-    let ops = Ops::from_handle(&h);
-    let lines = said(|| print_menu(&ops));
+    let h =
+        Handle::spawn(core_with_settings_modules(store, vec![module_of("a")])).expect("起核心线程");
+    let faces = Faces::from_handle(&h);
+    let lines = said(|| print_menu(&faces));
     assert!(has(&lines, "a · 模型 m"), "agent 的模块与默认模型");
     assert!(has(&lines, "b · 模型 （核心默认）"), "没设模型用核心默认");
 }

@@ -359,7 +359,7 @@ pub(crate) fn repeated_delete_to_zero_keeps_derived_state_in_sync() {
 
 #[test]
 pub(crate) fn rebuilt_context_keeps_tool_result() {
-    // 同一份落盘历史 + 新的 Conductor 模拟「重启」：重建上下文时工具子轮不能丢。
+    // 同一份落盘历史 + 新的 Core 模拟「重启」：重建上下文时工具子轮不能丢。
     let hist = Arc::new(InMemoryHistory::new());
     let io = Arc::new(InMemorySysIo::new());
     let note = s(&["w", "a", "note.txt"]);

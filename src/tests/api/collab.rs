@@ -1,13 +1,13 @@
 //! 目的：协作讨论的可见性与停止——每句成员发言立刻可见，停下不丢会话。
 //! 管：讨论期间的读、停止语义、落盘时序。
 //! 不管：单人生成（`events.rs`）、协作回合内部（`src/tests/collab/`）。
-//! 联动：`src/capabilities/conductor/api/handle.rs`。
+//! 联动：`src/capabilities/runtime/api/handle.rs`。
 
 use super::super::builders::shown_contains;
 use super::super::doubles::{collab_work, module_of};
 use super::super::gated_ops;
-use crate::capabilities::conductor::api::Output;
-use crate::capabilities::conductor::api::SessionEvent;
+use crate::capabilities::runtime::api::Output;
+use crate::capabilities::runtime::api::SessionEvent;
 use crate::capabilities::session::api::OPT_BEGIN;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -15,26 +15,26 @@ use std::time::{Duration, Instant};
 
 #[test]
 fn reads_are_not_queued_behind_a_collab_discussion() {
-    let (_handle, ops, started, release) = gated_ops(vec![module_of("a"), module_of("b")]);
-    let sid = ops
-        .sessions
+    let (_handle, faces, started, release) = gated_ops(vec![module_of("a"), module_of("b")]);
+    let sid = faces
+        .work
         .create_work(collab_work("c", &["a", "b"], false, "把资料整理成报告"))
         .expect("建协作会话")
         .0
         .sid;
     // 回答当前那张卡（选项 id 是契约）：协作从这一答开始跑泵。
-    let card = ops
-        .sessions
+    let card = faces
+        .turn
         .open_queue(&sid)
         .expect("取卡")
         .expect("挂着一张卡")
         .card
         .id;
     let worker = {
-        let sessions = Arc::clone(&ops.sessions);
+        let turn = Arc::clone(&faces.turn);
         let sid = sid.clone();
         let card = card.clone();
-        std::thread::spawn(move || sessions.answer_card(&sid, &card, OPT_BEGIN, ""))
+        std::thread::spawn(move || turn.answer_card(&sid, &card, OPT_BEGIN, ""))
     };
     // 等讨论真的开始（通道已被调用并卡在那里）。
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -44,11 +44,11 @@ fn reads_are_not_queued_behind_a_collab_discussion() {
     }
     // 讨论进行中：只读命令必须立刻返回。
     let t0 = Instant::now();
-    let history = ops.history.list().expect("讨论期间读历史");
+    let history = faces.history.list().expect("讨论期间读历史");
     let read = t0.elapsed();
     let t1 = Instant::now();
-    let _ = ops
-        .sessions
+    let _ = faces
+        .work
         .session_views(&history)
         .expect("讨论期间读会话视图");
     let view = t1.elapsed();
@@ -63,7 +63,7 @@ fn reads_are_not_queued_behind_a_collab_discussion() {
         view
     );
     assert!(
-        ops.sessions.is_running(&sid),
+        faces.turn.is_running(&sid),
         "读完成时讨论必须仍在进行（否则读是被排队到讨论结束才返回的）"
     );
 
@@ -74,37 +74,37 @@ fn reads_are_not_queued_behind_a_collab_discussion() {
 
 #[test]
 fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
-    let (handle, ops, started, release) = gated_ops(vec![module_of("a"), module_of("b")]);
-    let sid = ops
-        .sessions
+    let (handle, faces, started, release) = gated_ops(vec![module_of("a"), module_of("b")]);
+    let sid = faces
+        .work
         .create_work(collab_work("c", &["a", "b"], false, "把资料整理成报告"))
         .expect("建协作会话")
         .0
         .sid;
     // 回答当前那张卡（选项 id 是契约）：协作从这一答开始跑泵。
-    let card = ops
-        .sessions
+    let card = faces
+        .turn
         .open_queue(&sid)
         .expect("取卡")
         .expect("挂着一张卡")
         .card
         .id;
     let worker = {
-        let sessions = Arc::clone(&ops.sessions);
+        let turn = Arc::clone(&faces.turn);
         let sid = sid.clone();
         let card = card.clone();
-        std::thread::spawn(move || sessions.answer_card(&sid, &card, OPT_BEGIN, ""))
+        std::thread::spawn(move || turn.answer_card(&sid, &card, OPT_BEGIN, ""))
     };
     let deadline = Instant::now() + Duration::from_secs(10);
     // 等到讨论真的进入**阻塞中的那次调用**（gated_ops 的第二次调用一直阻塞到放行/停止）；
     // 只等第一次会落在「第一次已返回、第二次还没开始」的窗口里，那时 stop 合理地看不到在跑的会话。
-    while started.load(Ordering::Relaxed) < 2 || !ops.sessions.is_running(&sid) {
+    while started.load(Ordering::Relaxed) < 2 || !faces.turn.is_running(&sid) {
         assert!(Instant::now() < deadline, "讨论没有进入可停止的状态");
         std::thread::sleep(Duration::from_millis(5));
     }
 
     let stopped = Instant::now();
-    assert!(!ops.sessions.stop(&sid).is_empty(), "在跑就该停得掉");
+    assert!(!faces.runtime.stop(&sid).is_empty(), "在跑就该停得掉");
     // 回答与「停止」同一条直路：这一答只负责**落定**，处置脱离调用方跑，所以这里等它收尾。
     worker
         .join()
@@ -175,8 +175,8 @@ fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
     // "可以继续了"。等会话视图里不再标记在跑（SessionView.running 由 put_collab 清掉）再「继续」。
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        let history = ops.history.list().expect("列历史");
-        let views = ops.sessions.session_views(&history).expect("会话视图");
+        let history = faces.history.list().expect("列历史");
+        let views = faces.work.session_views(&history).expect("会话视图");
         if views.iter().any(|v| v.sid == sid && !v.running) {
             break;
         }
@@ -188,7 +188,7 @@ fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
     }
     // 可继续：放行后再点「继续」，泵应接着推进（取消标志是每次派发新登记的，不会粘住）。
     release.store(true, Ordering::Relaxed);
-    let resumed = ops.sessions.continue_flow(&sid, Output::Final);
+    let resumed = faces.turn.continue_flow(&sid, Output::Final);
     assert!(
         resumed.is_ok(),
         "停止之后必须能「继续」：{:?}",
@@ -198,26 +198,26 @@ fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
 
 #[test]
 fn collab_transcript_lands_on_disk_while_the_discussion_runs() {
-    let (_handle, ops, started, release) = gated_ops(vec![module_of("a"), module_of("b")]);
-    let sid = ops
-        .sessions
+    let (_handle, faces, started, release) = gated_ops(vec![module_of("a"), module_of("b")]);
+    let sid = faces
+        .work
         .create_work(collab_work("c", &["a", "b"], false, "把资料整理成报告"))
         .expect("建协作会话")
         .0
         .sid;
     // 回答当前那张卡（选项 id 是契约）：协作从这一答开始跑泵。
-    let card = ops
-        .sessions
+    let card = faces
+        .turn
         .open_queue(&sid)
         .expect("取卡")
         .expect("挂着一张卡")
         .card
         .id;
     let worker = {
-        let sessions = Arc::clone(&ops.sessions);
+        let turn = Arc::clone(&faces.turn);
         let sid = sid.clone();
         let card = card.clone();
-        std::thread::spawn(move || sessions.answer_card(&sid, &card, OPT_BEGIN, ""))
+        std::thread::spawn(move || turn.answer_card(&sid, &card, OPT_BEGIN, ""))
     };
     // 等第二个成员卡在调用里：此时第一个成员的发言已经定稿。
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -226,11 +226,11 @@ fn collab_transcript_lands_on_disk_while_the_discussion_runs() {
         std::thread::sleep(Duration::from_millis(5));
     }
     assert!(
-        ops.sessions.is_running(&sid),
+        faces.turn.is_running(&sid),
         "讨论必须仍在进行，这条断言才有意义"
     );
     // 生成**还在跑**：盘上已经该有定稿的行（按轮增量落盘）。
-    let (_, events) = ops.history.open(&sid).expect("中途读转录");
+    let (_, events) = faces.history.open(&sid).expect("中途读转录");
     assert!(
         !events.is_empty(),
         "生成中途就该有落盘内容（中途刷新页面靠它）"
@@ -242,26 +242,26 @@ fn collab_transcript_lands_on_disk_while_the_discussion_runs() {
 
 #[test]
 fn collab_discussion_emits_each_member_line_as_it_speaks() {
-    let (handle, ops, started, release) = gated_ops(vec![module_of("a"), module_of("b")]);
-    let sid = ops
-        .sessions
+    let (handle, faces, started, release) = gated_ops(vec![module_of("a"), module_of("b")]);
+    let sid = faces
+        .work
         .create_work(collab_work("c", &["a", "b"], false, "把资料整理成报告"))
         .expect("建协作会话")
         .0
         .sid;
     // 回答当前那张卡（选项 id 是契约）：协作从这一答开始跑泵。
-    let card = ops
-        .sessions
+    let card = faces
+        .turn
         .open_queue(&sid)
         .expect("取卡")
         .expect("挂着一张卡")
         .card
         .id;
     let worker = {
-        let sessions = Arc::clone(&ops.sessions);
+        let turn = Arc::clone(&faces.turn);
         let sid = sid.clone();
         let card = card.clone();
-        std::thread::spawn(move || sessions.answer_card(&sid, &card, OPT_BEGIN, ""))
+        std::thread::spawn(move || turn.answer_card(&sid, &card, OPT_BEGIN, ""))
     };
     // 等第二个成员卡住：说明第一个成员已经说完，但**整轮还没结束**。
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -270,7 +270,7 @@ fn collab_discussion_emits_each_member_line_as_it_speaks() {
         std::thread::sleep(Duration::from_millis(5));
     }
     assert!(
-        ops.sessions.is_running(&sid),
+        faces.turn.is_running(&sid),
         "整轮必须还没结束，这条断言才有意义"
     );
     let (lines, _, _oldest) = handle.events().snapshot(Some(&sid), 0);

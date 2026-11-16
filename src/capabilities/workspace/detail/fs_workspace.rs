@@ -261,7 +261,7 @@ impl Workdirs for FsWorkspace {
     }
 
     fn write_work(&self, session: &str, name: &str, bytes: &[u8]) -> Result<(), String> {
-        // name 已由 conductor 净化（策略在 conductor）；这里只负责落盘。
+        // name 已由 runtime 净化（策略在 runtime）；这里只负责落盘。
         let shared = self.shared_root(session)?;
         if !self.is_external(session) {
             std::fs::create_dir_all(&shared).map_err(|e| e.to_string())?;

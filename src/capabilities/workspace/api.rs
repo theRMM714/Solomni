@@ -31,7 +31,7 @@ pub use crate::capabilities::workspace::domain::workstore::{
     SyncReport, VersionView,
 };
 
-/// 目的：外部工作区根的策略（判定 / 创建校验 / 加载复检）——`conductor` 建会话与重开时只经这里取。
+/// 目的：外部工作区根的策略（判定 / 创建校验 / 加载复检）——`runtime` 建会话与重开时只经这里取。
 #[allow(unused_imports)] // 入站面：策略函数给调用方与测试取用
 pub use crate::capabilities::workspace::service::roots::{policy, product_root, recheck, resolve};
 

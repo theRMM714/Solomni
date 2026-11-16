@@ -2,7 +2,7 @@
 //! 管：`sandboxes` / `permission_chain` / `permissions_for` / `workspace_grant` / `permission_for_agent` 的取数与派生，
 //!   `member_tools` 的入参收口，`context_budget` 的窗口与阈值。
 //! 不管：装配规则（`service/assemble.rs`）、登记处里有什么（`registry`）、会话怎么落盘（`service/admit.rs`）。
-//! 联动：`conductor/service/env.rs` 的薄入口转调这里；`service/rebuild.rs` 重建会话时也取这里的事实。
+//! 联动：`runtime/service/env.rs` 的薄入口转调这里；`service/rebuild.rs` 重建会话时也取这里的事实。
 
 use std::collections::BTreeMap;
 

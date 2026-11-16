@@ -95,7 +95,7 @@ pub struct CollabSession {
     pub(crate) task: String,
     /// 目的：代拟拟好的名单（已逐条校验），确认后落到 roster。
     pub(crate) slate_picks: Vec<AgentMeta>,
-    /// 目的：登记处快照：agent 的模型解析与核心通道在此进行（策略在 conductor）。
+    /// 目的：登记处快照：agent 的模型解析与核心通道在此进行（策略在 runtime）。
     pub(crate) settings: Settings,
     /// 目的：本会话的裁决通道（**与工具级确认共用同一条队**）：排队与校验归它，这里只管各关卡的处置。
     pub(crate) door: Arc<dyn Gates>,
@@ -146,7 +146,7 @@ pub struct CollabSession {
     /// 目的：工作区用例面（**不持它的端口**，R12）——写工具落地后按逐路径基线自动提交。
     pub(crate) workspace: Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync>,
     pub(crate) done: bool,
-    /// 目的：「停止」标志：由 ConductorHandle 在派发时把任务登记处的取消标志注入（见 set_cancel）。
+    /// 目的：「停止」标志：由 Handle 在派发时把任务登记处的取消标志注入（见 set_cancel）。
     pub(crate) cancel: Arc<std::sync::atomic::AtomicBool>,
     /// 目的：方案是否已过审（审查关卡）：没过审不开工。由转录里的 [用户:同意方案] 派生。
     pub(crate) plan_approved: bool,
@@ -228,7 +228,7 @@ impl CollabSession {
         self.gate_advice.clear(); // 这一关解除了，建议不再属于任何挂起的事
     }
 
-    /// 目的：接上「停止」：ConductorHandle 在派发时注入任务登记处的取消标志。
+    /// 目的：接上「停止」：Handle 在派发时注入任务登记处的取消标志。
     ///   注入后泵在每次模型调用前与**调用中途**都看它，所以「停止」能在一个调用内收尾。
     pub fn set_cancel(&mut self, cancel: Arc<std::sync::atomic::AtomicBool>) {
         if let Some(d) = self.disc.as_mut() {
@@ -525,7 +525,7 @@ impl CollabSession {
         }
     }
 
-    /// 目的：代拟确认后由 Conductor 补上沙箱清单（名单刚定下来时才有）。
+    /// 目的：代拟确认后由 Core 补上沙箱清单（名单刚定下来时才有）。
     pub fn set_sandboxes(&mut self, sandboxes: Sandboxes) {
         self.sandboxes = sandboxes;
     }
@@ -553,7 +553,7 @@ impl CollabSession {
     }
 
     /// 目的：只把新需求按本会话环境改写（@ 引用按沙箱清单翻译），不落行、不重开门。
-    /// 约束：行由 Conductor 统一替换/追加（改需求要连旧行一起清掉，见 `update_task_outcome`）。
+    /// 约束：行由 Core 统一替换/追加（改需求要连旧行一起清掉，见 `update_task_outcome`）。
     pub(crate) fn retask_text(&self, task: &str) -> String {
         let roots = self.sandboxes.ref_roots();
         crate::capabilities::prompt::api::rewrite(task, None, &roots)

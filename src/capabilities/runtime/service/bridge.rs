@@ -1,15 +1,10 @@
-//! 目的：代理工具的队列桥——把 `ProxyHost` 的每个方法交给核心线程，以及 `Conductor` 的 `proxy_*` 方法族。
-//! 管：`ProxyBridge`（队列宿主）；转录行 / 产物清单 / 清单 / 观察 / 倒查 / 生命周期控制 / 建代理会话。
-//! 不管：工具执行流程与幂等账（`proxy` 能力的 `service/proxy.rs`）；参数语义与授权判据（`proxy` 能力的 `domain/proxy.rs`）。
-//! 联动：入站契约与宿主契约见 `proxy::api`；装配在 `api/handle.rs` 的 `inject_proxy_handler`。
+//! 目的：代理入站桥：把 proxy::api 的 ProxyHost 六件事翻译成核心手柄的命令。
+//! 管：ProxyBridge（唯一出站端口的宿主实现）与装配点 inject_proxy_handler，以及核心侧的代理视图（目录 / 观察 / 消息 / 控制）。
+//! 不管：代理协议本身（在 proxy 能力）；本文件只做参数搬运与调用者身份（Caller::Role）的构造。
+//! 联动：proxy 的成员侧执行者经本桥回调；核心线程由 Handle::call 进入。
 
-use super::{Conductor, Turn};
-use crate::capabilities::conductor::api::ConductorHandle;
-use crate::capabilities::proxy::api as d;
-use crate::capabilities::proxy::api::ProxyHost;
-use crate::capabilities::session::api::subtree_of;
-use crate::capabilities::session::api::{RunState, SessionEvent};
-use crate::capabilities::turn::api::SPEAKER;
+use super::*;
+
 fn tool_mode_str(m: crate::capabilities::llm::api::ToolMode) -> String {
     match m {
         crate::capabilities::llm::api::ToolMode::Native => "native".to_string(),
@@ -17,7 +12,7 @@ fn tool_mode_str(m: crate::capabilities::llm::api::ToolMode) -> String {
     }
 }
 
-impl Conductor {
+impl Core {
     /// 一个会话的转录行（回放口径）：观察计数与消息倒查共用，避免两处各解析一遍。
     fn proxy_lines(
         &self,
@@ -241,9 +236,7 @@ impl Conductor {
         })
     }
 
-    /// 目的：建一个**代理会话**（`mode="proxy"` + 全权委托）：核心在这里跟用户对话，用代理工具代他决定。
-    ///  没有 agent、没有模块工具；这一回合的工具面是 `core_proxy`（六项代理工具 + 只读核实）。
-    ///  测试便捷入口：只要引用（产品入口经 `create_work(WorkMode::Proxy)`）。
+    /// 目的：测试专用：造一条代理父会话（不经动作表）。
     #[cfg(test)]
     pub fn create_proxy(&mut self, name: &str, granted_at: i64) -> Result<String, String> {
         self.work
@@ -269,11 +262,11 @@ impl Conductor {
 ///  状态所有权不变（只有核心线程写），这里只做“发一条命令并等回包”。
 ///  `mpsc::Sender` 不是 `Sync`，所以用一把锁串行化入队；入队本身不参与任何业务判定。
 pub struct ProxyBridge {
-    handle: std::sync::Mutex<ConductorHandle>,
+    handle: std::sync::Mutex<Handle>,
 }
 
 impl ProxyBridge {
-    pub fn new(handle: ConductorHandle) -> ProxyBridge {
+    pub fn new(handle: Handle) -> ProxyBridge {
         ProxyBridge {
             handle: std::sync::Mutex::new(handle),
         }
@@ -282,14 +275,14 @@ impl ProxyBridge {
     fn call<T, F>(&self, f: F) -> Result<T, String>
     where
         T: Send + 'static,
-        F: FnOnce(&mut Conductor) -> Result<T, String> + Send + 'static,
+        F: FnOnce(&mut Core) -> Result<T, String> + Send + 'static,
     {
         let handle = self.handle.lock().unwrap_or_else(|e| e.into_inner());
         handle.call(f)
     }
 }
 
-impl ProxyHost for ProxyBridge {
+impl crate::capabilities::proxy::api::ProxyHost for ProxyBridge {
     fn catalog(&self, scope: d::CatalogScope) -> Result<d::Catalog, String> {
         self.call(move |core| core.proxy_catalog(scope))
     }
@@ -297,7 +290,7 @@ impl ProxyHost for ProxyBridge {
     fn create_session(&self, spec: &d::NewSession) -> Result<d::Created, String> {
         let handle = self.handle.lock().unwrap_or_else(|e| e.into_inner());
         // 模型侧只是**适配器**：调用者身份 + 载荷交给唯一实现（建会话 + 建好就开工）。
-        let caller = crate::capabilities::conductor::api::Caller::Role {
+        let caller = crate::capabilities::runtime::api::Caller::Role {
             role: "core_proxy".to_string(),
             work: spec.parent.clone().unwrap_or_default(),
             agent: SPEAKER.to_string(),
@@ -372,7 +365,7 @@ impl ProxyHost for ProxyBridge {
     ) -> Result<d::ControlState, String> {
         let handle = self.handle.lock().unwrap_or_else(|e| e.into_inner());
         // 模型侧只是**适配器**：调用者身份 + 控制语义交给唯一实现。
-        let caller = crate::capabilities::conductor::api::Caller::Role {
+        let caller = crate::capabilities::runtime::api::Caller::Role {
             role: "core_proxy".to_string(),
             work: session.to_string(),
             agent: SPEAKER.to_string(),
@@ -393,5 +386,63 @@ impl ProxyHost for ProxyBridge {
     ) -> Result<d::MessagesPage, String> {
         let session = session.to_string();
         self.call(move |core| core.proxy_messages(&session, from, count))
+    }
+}
+
+impl Handle {
+    /// 目的：代理会话——把代理工具的成员侧执行面（`ProxyHandler`）装进这一回合的工具环境。
+    ///   执行经队列桥回到核心线程，核心状态的所有权不变；非代理会话、或已装过，原样交回。
+    pub(super) fn inject_proxy_handler(
+        &self,
+        mut session: crate::capabilities::session::api::AgentSession,
+        sid: &str,
+    ) -> Result<crate::capabilities::session::api::AgentSession, String> {
+        use crate::capabilities::proxy::api as dp;
+        let wanted = session.tools.as_ref().is_some_and(|tools| {
+            tools.handlers.is_empty() && tools.face.allowed.iter().any(|t| dp::is_proxy_tool(t))
+        });
+        if !wanted {
+            return Ok(session);
+        }
+        let face = match session.tools.as_ref() {
+            Some(tools) => tools.face.allowed.clone(),
+            None => Vec::new(),
+        };
+        let granted = {
+            let sid = sid.to_string();
+            self.call(move |core| {
+                Ok(core
+                    .lifecycle
+                    .history_open(&sid)?
+                    .0
+                    .delegation
+                    .map(|d| d.granted_at))
+            })?
+        };
+        let grant = granted.map(|_| dp::Grant {
+            tools: face,
+            ..Default::default()
+        });
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let host: std::sync::Arc<dyn crate::capabilities::proxy::api::ProxyHost + Send + Sync> =
+            std::sync::Arc::new(crate::capabilities::runtime::service::ProxyBridge::new(
+                self.clone(),
+            ));
+        let handler = crate::capabilities::proxy::api::ProxyHandler::new(
+            host,
+            self.book.clone(),
+            dp::ProxyCall {
+                grant,
+                parent: Some(sid.to_string()),
+                now,
+            },
+        );
+        if let Some(tools) = session.tools.as_mut() {
+            tools.handlers = vec![std::sync::Arc::new(handler)];
+        }
+        Ok(session)
     }
 }

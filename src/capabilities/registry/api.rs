@@ -1,21 +1,24 @@
-//! 目的：registry 能力的入站面——其它能力、conductor 与呈现层只准用这里。
+//! 目的：registry 能力的入站面——其它能力、runtime 与呈现层只准用这里。
 //! 管：DTO 重导出（供应商 / 模型 / agent / 设置）与 Registry / RegistryOps 能力面（视图 / 只读事实 / 写三类方法）。
 //! 不管：四份 yaml 的内存形态与写路径（在 domain 与 service.rs）；持久化机制（在 ports / detail）。
-//! 联动：conductor 只持 Box<dyn Registry>；实现见 service.rs；消费方是 conductor 与呈现层。
+//! 联动：runtime 只持 Box<dyn Registry>；实现见 service.rs；消费方是 runtime 与呈现层。
 
 pub use crate::capabilities::registry::domain::agents::{
-    AgentView, Agents, RosterPick, check_reserved, listing, model_listing, resolve_picks,
-    unique_instance_name, validate_name,
+    AgentDraft, AgentView, Agents, RosterPick, check_reserved, listing, model_listing,
+    resolve_picks, unique_instance_name, validate_name,
 };
 pub use crate::capabilities::registry::domain::providers::{
     AppSettings, ModelDraft, ModelEntry, ModelView, Provider, ProviderView, SandboxEnforceLevel,
     SandboxUnavailable, Settings, StorageSettings, ThinkingSpec,
 };
 
+#[allow(unused_imports)]
+pub use crate::capabilities::registry::service::{save_agent, save_model};
+
 use crate::capabilities::llm::api::{Channel, ProbeOutcome, ReplayReport, ToolMode};
 use crate::capabilities::modules::api::Roster;
 
-/// 目的：登记处的**队列面**：呈现层经 `ConductorHandle`（核心自己的线程 + 命令队列）调它。
+/// 目的：登记处的**队列面**：呈现层经 `Handle`（核心自己的线程 + 命令队列）调它。
 ///    与 `Registry`（能力面）的分工是**有意的不对称**，不是重复：
 ///    - `Registry` 的写方法取 `&mut self`——只有那样"单写者"才是**编译期事实**（R4/R5）；
 ///    - 本 trait 全取 `&self`——呈现层持有的是可克隆的句柄（多连接共用），队列独占在**线程那一侧**，
@@ -55,10 +58,10 @@ pub trait RegistryOps: Send + Sync {
 /// 目的：登记处能力面：供应商 / 模型 / agent / 基本设置，以及通道上的模型发现与探测。
 ///    两类方法对应两类调用方：
 ///    - **呈现层要的**（`provider_views` / `model_views` / `agent_views` / `app_settings` …）——
-///      它经 `RegistryOps`（本文件）走命令队列进来（见 `conductor/api.rs`）；
-///    - **其它能力与 conductor 要的只读事实**（`resolve` / `tool_mode` / `context_of` / `snapshot` …）——
+///      它经 `RegistryOps`（本文件）走命令队列进来（见 `runtime/api.rs`）；
+///    - **其它能力与 runtime 要的只读事实**（`resolve` / `tool_mode` / `context_of` / `snapshot` …）——
 ///      谁是登记处的主人就由谁答，调用方不自己维护一份镜像。
-///      实现者是 `service.rs` 的 `RegistryService`（**状态在它里面**，conductor 只持 `Box<dyn Registry>`）。
+///      实现者是 `service.rs` 的 `RegistryService`（**状态在它里面**，runtime 只持 `Box<dyn Registry>`）。
 pub trait Registry: Send + Sync {
     // ---- 视图：给呈现层与别的能力看的登记处（**永不携带密钥**） ----
     /// 供应商视图（不含密钥）。
@@ -69,7 +72,7 @@ pub trait Registry: Send + Sync {
     fn agent_views(&self) -> Vec<AgentView>;
     /// 点名：按名字取 agent 视图；不猜、不代选，名字不在册就如实报错。
     fn pick_agents(&self, names: &[String]) -> Result<Vec<AgentView>, String>;
-    /// 基本设置（**借用**：conductor 在自己进程里读设置项用它，不复制一份）。
+    /// 基本设置（**借用**：runtime 在自己进程里读设置项用它，不复制一份）。
     fn app(&self) -> &AppSettings;
     /// 基本设置（**自持一份**：经命令队列回给呈现层时必须拥有所有权）。
     fn app_settings(&self) -> AppSettings;
@@ -102,7 +105,7 @@ pub trait Registry: Send + Sync {
     /// 该模型（缺省用核心默认）是否登记了这一档（会话切换前的可用性判据）。
     fn thinking_supports(&self, model: Option<&str>, level: &str) -> bool;
     /// 目的：按 draft 的供应商 + api_model 实测原生工具调用（要真实网络；不落盘）。
-    /// 约束：保存闸门在 conductor 的模型保存用例里用它——原生态只有明确支持才允许落盘。
+    /// 约束：保存闸门在 runtime 的模型保存用例里用它——原生态只有明确支持才允许落盘。
     fn probe_channel_tools(&self, provider: &str, api_model: &str) -> Result<ProbeOutcome, String>;
     /// 目的：按 draft 的供应商 + api_model 实测回放形状（要真实网络；不落盘）。
     fn probe_channel_replay(&self, provider: &str, api_model: &str)

@@ -44,7 +44,7 @@ pub use crate::kernel::api::ExecSpec;
 pub use crate::capabilities::modules::ports::ModuleSource;
 pub use crate::capabilities::workspace::ports::Workdirs;
 
-pub use crate::capabilities::conductor::api::{DecisionCard, SessionEvent};
+pub use crate::capabilities::runtime::api::{DecisionCard, SessionEvent};
 pub use crate::capabilities::work::api::{
     AgentInstance, ConfigAgent, SessionEdit, WorkMode, WorkSpec,
 };
@@ -57,7 +57,7 @@ pub use crate::capabilities::session::api::{
     OPT_PLAN_START, OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM,
 };
 
-pub use crate::capabilities::conductor::service::Conductor;
+pub(crate) use crate::capabilities::runtime::service::Core;
 
 pub use crate::kernel::api::Tier;
 

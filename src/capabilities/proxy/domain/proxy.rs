@@ -2,7 +2,7 @@
 //! 管：工具 id 与角色面判定、任务级授权校验（`Grant`）、各工具的参数语义校验与规整载荷，
 //!   以及只读清单事实与回执的拼装（`Catalog` / `Snapshot` / `MessagesPage` / `ControlState`）。
 //! 不管：会话读写与外部动作（一律经 `api.rs` 的 `ProxyHost`，见 service/proxy.rs）；不碰端口、不认识会话。
-//! 联动：宿主实现（conductor 的 `ProxyBridge`）把事实填进这些结构，systools/tools.yaml 声明入参形状。
+//! 联动：宿主实现（runtime 的 `ProxyBridge`）把事实填进这些结构，systools/tools.yaml 声明入参形状。
 
 use serde::{Deserialize, Serialize};
 
