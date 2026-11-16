@@ -514,7 +514,7 @@ pub(crate) fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
         .create_work(WorkSpec {
             name: "w".to_string(),
             mode: WorkMode::Single,
-            agents: vec![AgentInstance {
+            agents: vec![AgentMeta {
                 name: "a".to_string(),
                 transient: true,
                 modules: vec!["a".to_string()],

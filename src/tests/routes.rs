@@ -117,7 +117,7 @@ impl crate::capabilities::storage::api::Storage for FakeStorage {
             crate::capabilities::storage::api::GcReport::default(),
         ))
     }
-    fn job(&self) -> crate::capabilities::storage::api::JobState {
+    fn job(&self) -> crate::kernel::api::JobState {
         Default::default()
     }
     fn set_policy(&self, _policy: crate::capabilities::storage::api::StoragePolicy) {}
@@ -154,7 +154,7 @@ impl crate::capabilities::provision::api::Provision for FakeProvision {
     fn processes(&self) -> Result<Vec<crate::capabilities::provision::api::ProcInfo>, String> {
         self.guard().map(|_| Vec::new())
     }
-    fn job(&self) -> crate::capabilities::provision::api::JobState {
+    fn job(&self) -> crate::kernel::api::JobState {
         Default::default()
     }
     fn start(&self, _ids: Vec<String>) -> Result<(), String> {

@@ -1,8 +1,9 @@
 //! 目的：存储空间的入站能力面——空间报告、回收、显式清理、作业与策略。
-//! 管：Storage trait 与 DTO（SpaceReport / GcReport / CleanRequest / JobState）、分类 id（CAT_*）、未接入的 NoStorage。
+//! 管：Storage trait 与 DTO（SpaceReport / GcReport / CleanRequest）、分类 id（CAT_*）、未接入的 NoStorage；作业快照 `JobState` 是共享形状，家在 `src/kernel/contracts/types.rs`。
 //! 不管：怎么扫描（service/detail）、怎么删（service）；工作对象回收仍在 workspace。
 //! 联动：`presentation::faces::Faces.storage` 持它；Web / CLI / builds 经这里拿事实与动作。
 
+use crate::kernel::api::JobState;
 use serde::{Deserialize, Serialize};
 
 /// 目的：空间分类 id——盘点产出、策略排序与删除三处共用的线格式。
@@ -203,16 +204,6 @@ impl Default for CleanRequest {
 pub enum CleanOutcome {
     Report(GcReport),
     Started(JobState),
-}
-
-/// 目的：空间作业进度（目前只有虚拟根还原；GC 是同步的）。
-#[derive(Debug, Clone, Serialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct JobState {
-    pub running: bool,
-    pub seq: u64,
-    pub lines: Vec<String>,
-    pub error: Option<String>,
 }
 
 /// 目的：存储空间的唯一入站面。

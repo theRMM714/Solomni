@@ -53,17 +53,7 @@ impl Core {
     /// 目的：代理工具：只读清单（agent / 模块 / 模型），只回公开事实，不碰密钥与私有路径。
     pub fn proxy_catalog(&self, scope: d::CatalogScope) -> Result<d::Catalog, String> {
         let agents = if scope.covers_agents() {
-            self.registry()
-                .agent_views()
-                .into_iter()
-                .map(|v| d::AgentFact {
-                    name: v.name,
-                    modules: v.modules,
-                    model: v.model,
-                    note: v.note,
-                    chara: v.chara,
-                })
-                .collect()
+            self.registry().agent_views()
         } else {
             Vec::new()
         };

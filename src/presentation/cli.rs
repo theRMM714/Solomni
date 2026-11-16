@@ -7,9 +7,9 @@ use crate::capabilities::registry::api::{ModelView, ProviderView};
 use crate::capabilities::runtime::api::Output;
 use crate::capabilities::runtime::api::{Acted, ActionCall, Caller};
 use crate::capabilities::runtime::api::{DecisionCard, DecisionWaiter, SessionEvent, Tier};
+use crate::capabilities::session::api::AgentMeta;
 use crate::capabilities::system::api::System;
 use crate::capabilities::tools::api::Command;
-use crate::capabilities::work::api::AgentInstance;
 use crate::presentation::faces::Faces;
 
 /// 目的：离开转录中心时的去向：退出，或转入 Web 转录中心（端口）。

@@ -104,7 +104,7 @@ pub(crate) fn agent_chara_enters_identity_only_when_set() {
         .create_work(WorkSpec {
             name: "chara-w".to_string(),
             mode: WorkMode::Single,
-            agents: vec![AgentInstance::from_view(&view)],
+            agents: vec![crate::capabilities::registry::api::agent_meta(&view)],
             task: None,
             delegate: false,
             permission: None,

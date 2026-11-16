@@ -7,7 +7,8 @@
 
 use super::builders::SilentRunner;
 use crate::capabilities::runtime::api::SessionEvent;
-use crate::capabilities::work::api::{AgentInstance, WorkMode, WorkSpec};
+use crate::capabilities::session::api::AgentMeta;
+use crate::capabilities::work::api::{WorkMode, WorkSpec};
 
 use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg};

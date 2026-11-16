@@ -3,7 +3,7 @@
 //! 不管：guest 镜像与文件系统权限位（见 `image.rs`）、端口实现（见 `ports.rs`）。
 //! 联动：被测实现是 `capabilities::provision::{service,domain}`。
 
-use crate::capabilities::provision::api::{JobState, Provision};
+use crate::capabilities::provision::api::Provision;
 use crate::capabilities::provision::detail::fetch::HttpFetch;
 use crate::capabilities::provision::detail::guest_image::*;
 use crate::capabilities::provision::detail::host::RealHost;
@@ -18,6 +18,7 @@ use crate::capabilities::provision::service::*;
 use crate::capabilities::provision::service::{
     run as run_pipeline, verify_cached as verify_cached_pinned,
 };
+use crate::kernel::api::JobState;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;

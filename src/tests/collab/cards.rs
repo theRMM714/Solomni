@@ -297,7 +297,7 @@ pub(crate) fn snapshot_pending_is_the_same_fact_as_the_pushed_card() {
     let spec = crate::capabilities::work::api::WorkSpec {
         name: "w-card".to_string(),
         mode: WorkMode::Collab,
-        agents: vec![AgentInstance {
+        agents: vec![AgentMeta {
             name: "a".to_string(),
             transient: true,
             modules: vec!["a".to_string()],
@@ -561,7 +561,7 @@ pub(crate) fn stopping_voids_the_whole_queue_and_persists_it() {
     let spec = crate::capabilities::work::api::WorkSpec {
         name: "w-void".to_string(),
         mode: WorkMode::Collab,
-        agents: vec![AgentInstance {
+        agents: vec![AgentMeta {
             name: "a".to_string(),
             transient: true,
             modules: vec!["a".to_string()],

@@ -23,7 +23,8 @@ use crate::capabilities::prompt::api::Prompt;
 use crate::capabilities::provision::api::Provision;
 use crate::capabilities::registry::api::Registry;
 use crate::capabilities::session::api::{
-    AgentMeta, Delegation, Gates, History, HistoryView, RunState, SessionEvent, SessionMeta,
+    AgentMeta, Delegation, Gates, History, HistoryView, OptionView, RunState, SessionEvent,
+    SessionMeta,
 };
 use crate::capabilities::tools::api::{ToolExec, Tools};
 use crate::capabilities::turn::api::{PROXY_PRIVATE_DIR, Session, Turn};
@@ -32,8 +33,8 @@ use crate::capabilities::work::api::{
     AgentSuggestion, ConfigAgent, ContinueView, EditGuest, FilesAgentRootView, FilesAgentView,
     FilesRootsView, FilesView, GuestBoot, PermissionDecisionsView, PermissionSharedView,
     PermissionView, PreparedActivation, ProxySeed, ReadyActivation, RuntimeDiagnosis,
-    RuntimeReport, SessionConfig, SessionEdit, SessionView, ThinkingOptionView, ThinkingView,
-    TierChoices, WorkMode, WorkOpened, WorkSpec,
+    RuntimeReport, SessionConfig, SessionEdit, SessionView, ThinkingView, TierChoices, WorkMode,
+    WorkOpened, WorkSpec,
 };
 use crate::capabilities::work::domain::{
     dedup_modules, merge_into_one, mode_str, session_started, validate_work_name,

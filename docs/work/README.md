@@ -20,7 +20,7 @@
 
 ## 入站契约与状态归属
 
-- 入站面：`api` 的 DTO（`WorkSpec` / `WorkOpened` / `SessionConfig` / `SessionEdit` / `SessionView` / `ContinueView` / `FilesView` / `RuntimeReport` / `TierChoices` / `PermissionView` / `ThinkingView` / `AgentSuggestion` / `ConfigAgent` / `AgentInstance` / `WorkMode`）与 guest 三类（`GuestBoot` / `GuestStop` / `EditGuest` / `GuestDiagnose`）；`work` 自己的 `WorkOps`、`turn` 的 `TurnOps` 与 `runtime` 的 `RuntimeOps` 签名直接用这些类型。
+- 入站面：`api` 的 DTO（`WorkSpec` / `WorkOpened` / `SessionConfig` / `SessionEdit` / `SessionView` / `ContinueView` / `FilesView` / `RuntimeReport` / `TierChoices` / `PermissionView` / `ThinkingView` / `AgentSuggestion` / `ConfigAgent` / `WorkMode`）与 guest 三类（`GuestBoot` / `GuestStop` / `EditGuest` / `GuestDiagnose`）；`work` 自己的 `WorkOps`、`turn` 的 `TurnOps` 与 `runtime` 的 `RuntimeOps` 签名直接用这些类型。
 - 状态归属：`Work` 只持能力面（`root` / `history` / `workspace` / `vm` / `packages` / `provision` / `modules` / `llm` / `tools` / `prompt` / `systools` / `log`），**不自持会话状态**：会话在世表、运行态与裁决队都在 `turn`，经形参 `&Turn` / `&mut Turn` 读写；`registry` / `probe` 同样按次传入。
 - 两段式的中间产物（`PreparedWork` / `PendingWork` / `PreparedEdit` / `PreparedActivation`）只在本能力内流转，不在 `api` 出现。
 

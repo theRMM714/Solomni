@@ -7,7 +7,8 @@ use super::super::doubles::{decl, model_draft, module_of, module_with_runtimes};
 use super::super::{ops_with, single_work, slow_ops};
 use super::support::spawn;
 use crate::capabilities::runtime::api::{Acted, ActionCall, Caller};
-use crate::capabilities::work::api::{AgentInstance, ConfigAgent, SessionEdit, WorkMode, WorkSpec};
+use crate::capabilities::session::api::AgentMeta;
+use crate::capabilities::work::api::{ConfigAgent, SessionEdit, WorkMode, WorkSpec};
 use crate::presentation::faces::Faces;
 
 use crate::capabilities::runtime::api::Output;
@@ -267,12 +268,12 @@ fn single_mode_merges_multiple_agents_into_one_transient() {
         .registry
         .upsert_agent("乙", &["b".to_string()], "", "", "")
         .expect("建 agent");
-    let picked: Vec<AgentInstance> = faces
+    let picked: Vec<AgentMeta> = faces
         .registry
         .agents()
         .expect("读登记处")
         .iter()
-        .map(AgentInstance::from_view)
+        .map(crate::capabilities::registry::api::agent_meta)
         .collect();
     let (opened, _) = faces
         .work

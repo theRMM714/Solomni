@@ -12,14 +12,13 @@ use crate::capabilities::builds::api::{Builds, Built, Target};
 use crate::capabilities::modules::api::Modules;
 use crate::capabilities::packages::api::BaseFacts;
 use crate::capabilities::provision::api::Provision;
-use crate::capabilities::storage::api::{
-    CleanKind, CleanOutcome, CleanRequest, GcReport, JobState, Storage,
-};
+use crate::capabilities::storage::api::{CleanKind, CleanOutcome, CleanRequest, GcReport, Storage};
 use crate::capabilities::system::api::{
     BuildRequest, EnsureRequest, Facts, Fault, FenceFacts, GcRequest, ResetRequest, SetupMode,
     SetupOps, System, WorkGcRequest,
 };
 use crate::capabilities::workspace::api::{GcReport as WorkspaceGc, Workspace, safe_file_name};
+use crate::kernel::api::JobState;
 
 /// 目的：系统维护能力的依赖面——全部由组合根注入（能力自己不构造别的能力的适配器）。
 pub struct SystemDeps {

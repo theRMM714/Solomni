@@ -20,7 +20,7 @@ pub(crate) fn same_named_tools_across_modules_are_no_longer_a_conflict() {
     let one_agent = WorkSpec {
         name: "w".to_string(),
         mode: WorkMode::Single,
-        agents: vec![AgentInstance {
+        agents: vec![AgentMeta {
             name: "组合".to_string(),
             transient: true,
             modules: vec!["a".to_string(), "b".to_string()],
@@ -44,14 +44,14 @@ pub(crate) fn same_named_tools_across_modules_are_no_longer_a_conflict() {
         name: "cross".to_string(),
         mode: WorkMode::Collab,
         agents: vec![
-            AgentInstance {
+            AgentMeta {
                 name: "甲".to_string(),
                 transient: true,
                 modules: vec!["a".to_string()],
                 model: None,
                 chara: String::new(),
             },
-            AgentInstance {
+            AgentMeta {
                 name: "乙".to_string(),
                 transient: true,
                 modules: vec!["a".to_string()],

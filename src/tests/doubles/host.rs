@@ -140,10 +140,10 @@ pub(crate) fn with_live<T>(f: impl FnOnce(&mut Live) -> T) -> T {
 }
 
 /// 目的：把模块包成"每模块一个临时 agent"（协作的成员语义）。
-pub(crate) fn agents_of(modules: &[&str]) -> Vec<AgentInstance> {
+pub(crate) fn agents_of(modules: &[&str]) -> Vec<AgentMeta> {
     modules
         .iter()
-        .map(|m| AgentInstance {
+        .map(|m| AgentMeta {
             name: m.to_string(),
             transient: true,
             modules: vec![m.to_string()],
@@ -163,7 +163,7 @@ pub(crate) fn work(name: &str, mode: WorkMode, modules: &[&str]) -> WorkSpec {
         } else {
             "组合"
         };
-        vec![AgentInstance {
+        vec![AgentMeta {
             name: agent_name.to_string(),
             transient: true,
             modules: modules.iter().map(|s| s.to_string()).collect(),
@@ -219,7 +219,7 @@ pub(crate) fn test_provision_with_root(
         fn processes(&self) -> Result<Vec<crate::capabilities::provision::api::ProcInfo>, String> {
             Ok(Vec::new())
         }
-        fn job(&self) -> crate::capabilities::provision::api::JobState {
+        fn job(&self) -> crate::kernel::api::JobState {
             Default::default()
         }
         fn start(&self, _ids: Vec<String>) -> Result<(), String> {

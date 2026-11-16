@@ -1,8 +1,9 @@
 //! 目的：依赖补齐能力的入站契约——状态、虚拟根清单、作业快照与两条动作；DTO 是呈现层序列化的形状。
-//! 管：Provision trait 与 DepStatus / GuestBase / JobState DTO、宿主工具取法的 HostTool 词表、未接入的 NoProvision。
+//! 管：Provision trait 与 DepStatus / GuestBase DTO、宿主工具取法的 HostTool 词表、未接入的 NoProvision；作业快照 `JobState` 是共享形状，家在 `src/kernel/contracts/types.rs`。
 //! 不管：清单怎么解析、怎么下载（在 service）。
 //! 联动：`presentation::faces::Faces.provision` 持它；Web 的 setup 路由与 CLI 探针都经它；runtime 的"选虚拟机"经 `guest_bases` 取候选。
 
+use crate::kernel::api::JobState;
 use serde::Serialize;
 
 /// 目的：一条长驻子进程（`--doctor` 与界面"现在在跑什么"）：它是产品亲手起的，还是上次留下的。
@@ -62,16 +63,6 @@ pub struct GuestBase {
     pub missing: Vec<String>,
     /// 目的：装到产品根下的哪一格（相对路径；诊断与日志用，界面按需显示）。
     pub install: String,
-}
-
-/// 目的：一次补齐作业的状态快照——进度只有一条通道（`seq` + `lines`），不另存一份"当前步骤"摘要。
-#[derive(Debug, Clone, Serialize, Default, PartialEq, Eq)]
-pub struct JobState {
-    pub running: bool,
-    /// 目的：进度行的**单调序号**（前端按它增量取；`lines` 只留最近若干行，序号不会回退）。
-    pub seq: u64,
-    pub lines: Vec<String>,
-    pub error: Option<String>,
 }
 
 /// 目的：要取路径的宿主工具词表——调用方只说"哪个工具"，前缀与兜底规则留在补齐面里。
