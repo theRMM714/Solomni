@@ -11,6 +11,7 @@
 > 它拥有的是**没有任何参与方拥有**的那部分不变式：命令队列与跨会话编排；会话在世表与运行态归 `turn`。
 > 「工作是什么样」的用例（建工作两段、改配、视图、运行报告、guest 生命周期、建议与激活）已下沉到 `work`（第 9 层），本单元只留应用编排与同名薄转发（见 [../work/unit-map.md](../work/unit-map.md)）。
 > 「历史生命周期」的用例（回档三模式、历史列表与只读打开、删除的报账与收尾）已下沉到 `lifecycle`（第 9 层，见 [../lifecycle/unit-map.md](../lifecycle/unit-map.md)），本单元只给时机。
+> 「核心代理工具」的工具面（六工具的载荷、授权判据、幂等账与 `ProxyHandler`）与宿主契约 `ProxyHost` 已下沉到 `proxy`（第 9 层，见 [../proxy/unit-map.md](../proxy/unit-map.md)），本单元只留队列桥 `ProxyBridge` 与它的装配。
 
 | 文件 | 职责 |
 | --- | --- |
@@ -32,7 +33,5 @@
 | `src/capabilities/conductor/service/env.rs` | 薄转发：guest 诊断准备与沙箱 / 权限 / 预算三个薄入口（事实在 `turn::service::facts`）；单会话装配（`Turn::build_single`）已归 `turn` |
 | `src/capabilities/conductor/service/history.rs` | 事件收编与增量落盘手柄（落盘策略、手柄与会话树派生归 `session`）；运行态改写 `set_subtree_run` 与派发目标也在这一处 |
 | `src/capabilities/conductor/service/ask_user.rs` | 工具层提问端口的会话侧实现：推一条问题并阻塞等一个选项 id |
-| `src/capabilities/conductor/ports.rs` | 出站端口：核心代理工具要做的外部动作（`ProxyHost`） |
 | `src/capabilities/conductor/domain/action.rs` | 动作回包的纯逻辑：探测结论 → 响应 JSON |
-| `src/capabilities/conductor/domain/proxy.rs` | 核心代理工具的纯逻辑：入参解析、授权校验、载荷规整与回执拼装 |
-| `src/capabilities/conductor/service/proxy.rs` | 代理工具执行面与队列桥 `ProxyBridge`（把动作交给核心线程）；代理会话的装配在 `turn::service::rebuild`（`build_proxy`） |
+| `src/capabilities/conductor/service/proxy.rs` | 队列桥 `ProxyBridge`：实现 `proxy` 的 `ProxyHost`，把宿主动作交回核心线程（工具面与幂等账在 `proxy`）；代理会话的装配在 `turn::service::rebuild`（`build_proxy`） |

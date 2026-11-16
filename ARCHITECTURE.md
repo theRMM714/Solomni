@@ -26,6 +26,7 @@
 | `capabilities/turn/` | **第 8 层业务**：回合状态的唯一持有者——会话本体与一席的装配、会话在世表、运行态与创建占位、每会话的裁决队与 shell 活进程槽 | 只向下依赖；不落盘、不发事件、不驱动生成——取放时机由调用方决定 |
 | `capabilities/work/` | **第 9 层业务**：工作用例（建工作两段、改配、档案与视图、模型视图、运行报告、guest 生命周期、建议与激活）——用户可见的工作是什么样，就在这里定 | 只向下依赖；不落盘、不发事件、不推进协作链——这些时机归 `conductor` 与各能力 |
 | `capabilities/lifecycle/` | **第 9 层业务**：会话历史生命周期——历史列表与只读打开、删除的报账与收尾、回档三模式（留档 / 删除 / 恢复） | 只向下依赖；不落盘、不发事件、不推进协作链——时机归 `conductor` |
+| `capabilities/proxy/` | **第 9 层业务**：核心代理工具的**工具面**——六工具的载荷与回执、授权判据、幂等账与成员侧执行者（`ProxyHandler`）；宿主契约 `ProxyHost` 由它声明 | 只向下依赖；不落盘、不发事件、不碰真实会话——真实动作由 `conductor` 的 `ProxyBridge` 实现，装配在 `conductor` 的 `inject_proxy_handler` |
 | `capabilities/conductor/` | **第 10 层（顶层）业务**：会话中心（在世表、命令队列、运行态）、生成驱动、跨能力用例编排 | 只向下依赖；不读文件、不发网络、不碰 stdin/stdout——机制下沉各能力的 `detail/` |
 | `kernel/` | **地基库（非层）**：无领域语义、无领域状态的机制（运行日志端口、宿主探测、取消表、跨层共享的形状、路径书写、外部进程执行与长驻子进程账、围栏机制）；形状与别的能力一致（`api` / `ports` / `domain` / `detail`） | **不依赖任何人**；不解释共享形状的业务语义，不构造业务决策与面向用户的文案 |
 
@@ -42,7 +43,7 @@
 | 6 | `env`、`slate`、`storage` | 0–5 |
 | 7 | `builds`、`collab` | 0–6 |
 | 8 | `system`、`turn` | 0–7 |
-| 9 | `work`、`lifecycle` | 0–8 |
+| 9 | `work`、`lifecycle`、`proxy` | 0–8 |
 | 10 | `conductor` | 0–9 |
 
 - 层号由现有依赖的最长路径算出；每消灭一批跨层边就重算一遍并收紧。**同层互用只有三种正当处置**：合并成一个能力、把被引的形状下沉到更低层、端口反转（下层声明、上层实现）。
@@ -60,7 +61,7 @@
 
 ## 二、端口：只画在 IO 与可替换点上
 
-- 端口 = 各能力 `ports.rs` 与 `src/kernel/ports.rs` 里的 trait（`Chat` 的定义在 `src/capabilities/llm/api.rs`，因为它同时是能力的入站面，列于本表以便对照）。判据只有一条：**这里有 IO，或者这里有可替换的实现**。
+- 端口 = 各能力 `ports.rs` 与 `src/kernel/ports.rs` 里的 trait（`Chat` 的定义在 `src/capabilities/llm/api.rs`、`ProxyHost` 的定义在 `src/capabilities/proxy/api.rs`，因为它们同时是能力的入站面，列于本表以便对照）。判据只有一条：**这里有 IO，或者这里有可替换的实现**。
 - 纯逻辑（信封解析、引擎循环、协作状态派生、提示词渲染）**刻意不抽象**。
 
 | 端口 | 职责 | 适配层实现 |
@@ -194,6 +195,7 @@
 
 - **归层是必填身份**：能力必须在 `layers.yaml` 里有一行，只能依赖**严格更低层**，**同层零引用**（`tests/gates/structure/layers.js`）。层号不回答「是不是业务」，它只回答「能依赖谁」。
 - **机制不因调用方多而升格**：日志、路径、进程、围栏、平台差异归一化这类没有领域词、没有用户可见后果的机制，留在 `kernel` 或所属能力的 `detail/`，不按第 2 条算作业务；第 2 条只用来判断「已有自己用例」的能力是否值得独立。
+- **已判例（代理工具族 → `proxy`，第 9 层）**：判据 1 成立——六工具有自有协议（`src/capabilities/proxy/domain/proxy.rs` 的载荷、授权判据与回执形状）与用户可见后果（代用户建会话、转达、控会话）。判据 2 目前只有 `conductor` 一个能力调用方，它成立的方式是**端口反转**：`proxy` 声明宿主契约 `ProxyHost`（`src/capabilities/proxy/api.rs`），由 `conductor` 的 `ProxyBridge` 实现（`src/capabilities/conductor/service/proxy.rs`）、只在 `src/capabilities/conductor/api/handle.rs` 的 `inject_proxy_handler` 装配——`conductor` 对它的依赖因此止于 `::api`，真实会话状态仍在 `conductor` / `turn` 一侧。
 - **状态不参与这条判据**——它只在 §九.2 回答「这块状态归谁」。
 
 ### 九.2 状态归属
@@ -220,7 +222,6 @@
 - **纯逻辑 / 派生**（解析器、状态派生、提示词渲染）→ 所属业务的 `domain/`，**不加 trait**；
 - **纯交付**（HTTP 路由、终端渲染）→ `presentation/{cli,web}/`，**不是能力**；
 - **只服务单一调用方的脚本 / 编排** → 它自己的 `service.rs`；
-- **代理方法族（`core_proxy`）** → 留在 `conductor`，不升格：没有自有落盘真相（幂等账在内存，授予读会话 `meta.delegation`，转录与工作区分别归 `session` / `workspace`），§九.1 第 2 条也不成立——唯一调用方是 `conductor` 自己；升格还会成环，代理工具的执行面必须回到核心线程改核心状态（`ProxyBridge` → `ConductorHandle::call`），而 `conductor` 又要调它建代理会话（判据见 `src/capabilities/conductor/ports.rs` 的 `ProxyHost` 与 `src/capabilities/conductor/service/proxy.rs`）；
 - **DTO 中转站**（把两个能力的类型拼一起的适配业务）→ 新的水平层，禁止（`node run-tests.js` 的 T0 结构审查）。
 - **把环境包当参数传**：把端口、状态与值拼成一个结构递给别的能力，等于传活对象；改成只传值 + 少量窄端口（`src/capabilities/session/domain/tools.rs`、R16）：该文件里的 `ToolFace` 是抽出来的值面，端口与活状态仍留在 `MemberTools`；核实用例只借一个窄端口 `CoreVerify`，不把 `MemberTools` 写进 api 签名。
 

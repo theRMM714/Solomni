@@ -29,6 +29,7 @@ mod ports;
 mod prelude;
 mod prompt;
 mod provision;
+mod proxy;
 mod registry;
 mod residents;
 mod routes;

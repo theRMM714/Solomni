@@ -1,8 +1,8 @@
 //! 目的：核心代理（core_proxy）工具的纯逻辑——入参解析、授权校验、载荷规整与回执拼装。
 //! 管：工具 id 与角色面判定、任务级授权校验（`Grant`）、各工具的参数语义校验与规整载荷，
 //!   以及只读清单事实与回执的拼装（`Catalog` / `Snapshot` / `MessagesPage` / `ControlState`）。
-//! 不管：会话读写与外部动作（一律经 `conductor::ports::ProxyHost`，见 service/proxy.rs）；不碰端口、不认识会话。
-//! 联动：service/proxy.rs 的 `ProxyBridge` 把宿主事实填进这些结构，systools/tools.yaml 声明入参形状。
+//! 不管：会话读写与外部动作（一律经 `api.rs` 的 `ProxyHost`，见 service/proxy.rs）；不碰端口、不认识会话。
+//! 联动：宿主实现（conductor 的 `ProxyBridge`）把事实填进这些结构，systools/tools.yaml 声明入参形状。
 
 use serde::{Deserialize, Serialize};
 
@@ -352,7 +352,7 @@ pub struct NewSession {
     pub mode: SessionMode,
     pub agents: Vec<NewAgent>,
     /// 目的：**这个会话的开头 / 本次需求**：single = 它的第一句（点火用的派发），collab = 本次需求。
-    ///   建好就开始——不是"给某个 agent 的任务"（见 `ProxyBridge::create_session`）。
+    ///   建好就开始——不是"给某个 agent 的任务"（见宿主实现的 `create_session`）。
     pub task: String,
     pub request_id: String,
     /// 目的：工作名——给了就用它，没给由宿主派生（代理建的子工作按 agent 名派生）。

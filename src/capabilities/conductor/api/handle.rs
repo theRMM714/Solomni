@@ -289,7 +289,7 @@ impl ConductorHandle {
         sid: &str,
         session: &mut crate::capabilities::session::api::AgentSession,
     ) -> Result<(), String> {
-        use crate::capabilities::conductor::domain::proxy as dp;
+        use crate::capabilities::proxy::api as dp;
         let Some(tools) = session.tools.as_mut() else {
             return Ok(());
         };
@@ -316,12 +316,11 @@ impl ConductorHandle {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
-        let host: std::sync::Arc<
-            dyn crate::capabilities::conductor::ports::ProxyHost + Send + Sync,
-        > = std::sync::Arc::new(
-            crate::capabilities::conductor::service::proxy::ProxyBridge::new(self.clone()),
-        );
-        let handler = crate::capabilities::conductor::service::proxy::ProxyHandler::new(
+        let host: std::sync::Arc<dyn crate::capabilities::proxy::api::ProxyHost + Send + Sync> =
+            std::sync::Arc::new(
+                crate::capabilities::conductor::service::proxy::ProxyBridge::new(self.clone()),
+            );
+        let handler = crate::capabilities::proxy::api::ProxyHandler::new(
             host,
             self.book.clone(),
             dp::ProxyCall {

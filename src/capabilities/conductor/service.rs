@@ -1,7 +1,7 @@
 //! 目的：conductor 的核心层——端口抽象、编排业务（会话 / 引擎 / 会话中心）与队列桥。
 //! 管：Conductor 门面与各 service 子模块的编排：会话在世表、命令队列、运行态、跨能力用例。
 //! 不管：文件读、网络请求、stdin/stdout（机制在各能力的 detail 与 kernel/detail）；装配（new 适配器）只在 main 组合根。
-//! 联动：api 层经 ConductorHandle 把命令与事件交给这里；出站动作经 ports::ProxyHost。
+//! 联动：api 层经 ConductorHandle 把命令与事件交给这里；出站动作经 `proxy::api` 的 `ProxyHost`。
 
 use crate::capabilities::builds::api::Builds;
 use crate::capabilities::lifecycle::api::RebuildDeps;
