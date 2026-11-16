@@ -411,7 +411,8 @@ pub(crate) fn conductor_base_roots_are_only_put_on_host_member_tools() {
         .with_base_roots(vec![abs(&["base"])]);
     let sb = test_sandbox("a", &[]);
     let plan = crate::capabilities::packages::api::PackagePlan::default();
-    let host = core.tools_env(
+    let host = core.turn.member_tools(
+        core.registry.as_ref(),
         &[],
         &sb,
         BTreeMap::new(),
@@ -426,7 +427,8 @@ pub(crate) fn conductor_base_roots_are_only_put_on_host_member_tools() {
         host.face.runtime_roots.contains(&abs(&["base"])),
         "基础工具链根要进宿主 shell 的只读根"
     );
-    let vm = core.tools_env(
+    let vm = core.turn.member_tools(
+        core.registry.as_ref(),
         &[],
         &sb,
         BTreeMap::new(),

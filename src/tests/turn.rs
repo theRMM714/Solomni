@@ -3,6 +3,7 @@
 //! 不管：会话本体与生成驱动（见 `src/tests/conductor.rs`）。
 //! 联动：`src/capabilities/turn/service/state.rs`、`src/capabilities/conductor/service.rs`。
 
+use super::prelude::*;
 use crate::capabilities::turn::api::TurnState;
 use crate::kernel::api::SessionId;
 
@@ -150,5 +151,48 @@ fn serviced_tools_merge_ops_into_table_and_render_lines() {
         param_lines[0].starts_with("- m.svc.run\n"),
         "服务参数行以 <模块>.<服务>.<操作> 开头：{}",
         param_lines[0]
+    );
+}
+
+/// 目的：验准入把会话既落盘又放进在世表——先抹掉落盘，准入后两处都要恢复。
+#[test]
+fn admit_puts_the_session_in_the_live_table_and_persists_identity() {
+    let mut core = core_with_settings_modules(InMemorySettings::new(), vec![module_of("a")]);
+    let sid = core
+        .create_work(work("w", WorkMode::Single, &["a"]))
+        .expect("建工作")
+        .sid;
+    let session = core.turn.take(&sid).expect("取出会话");
+    let (meta, _) = core.history_open(&sid).expect("读元数据");
+    core.history_delete(&sid).expect("先抹掉落盘");
+    assert!(!core.turn.holds(&sid), "抹掉后不在世");
+    core.turn.admit(&meta, session).expect("准入");
+    assert!(core.turn.holds(&sid), "准入后要进在世表");
+    assert!(
+        core.history_list().iter().any(|m| m.name == sid),
+        "准入要把会话身份落盘"
+    );
+}
+
+/// 目的：验派发闸只看运行态——停止与关闭都拒，没落盘的名字不拦。
+#[test]
+fn dispatch_gate_refuses_a_stopped_subtree() {
+    let mut core = core_with_settings_modules(InMemorySettings::new(), vec![module_of("a")]);
+    let sid = core
+        .create_work(work("w", WorkMode::Single, &["a"]))
+        .expect("建工作")
+        .sid;
+    assert!(core.turn.dispatch_gate(&sid).is_ok(), "活动会话照常派发");
+    core.set_subtree_run(&sid, RunState::Stopped)
+        .expect("停止子树");
+    let stopped = core.turn.dispatch_gate(&sid).expect_err("停掉的会话要拒");
+    assert!(stopped.contains("已停止"), "{}", stopped);
+    core.set_subtree_run(&sid, RunState::Closed)
+        .expect("关闭子树");
+    let closed = core.turn.dispatch_gate(&sid).expect_err("关掉的会话要拒");
+    assert!(closed.contains("已关闭"), "{}", closed);
+    assert!(
+        core.turn.dispatch_gate("no-such-session").is_ok(),
+        "没有落盘的会话不拦"
     );
 }

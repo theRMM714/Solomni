@@ -59,7 +59,8 @@ impl Conductor {
         want_stream: bool,
     ) -> Result<Prepared, String> {
         // 还没装进内存的会话先从落盘重建（"继续"可能先于"打开"到达；真没这个会话仍然报无此会话）。
-        self.ensure_session(sid)?;
+        self.turn
+            .ensure_session(sid, self.registry.as_ref(), self.probe.as_ref())?;
         if matches!(self.turn.session(sid), Some(Session::Collab(_))) {
             return Ok(Prepared::NotSingle);
         }
@@ -106,7 +107,8 @@ impl Conductor {
         child: &str,
         objective: &str,
     ) -> Result<Prepared, String> {
-        self.ensure_session(child)?;
+        self.turn
+            .ensure_session(child, self.registry.as_ref(), self.probe.as_ref())?;
         if matches!(self.turn.session(child), Some(Session::Collab(_))) {
             return Ok(Prepared::NotSingle);
         }
@@ -184,7 +186,8 @@ impl Conductor {
         sid: &str,
         live: &mut Live,
     ) -> Result<Vec<SessionEvent>, String> {
-        self.ensure_session(sid)?;
+        self.turn
+            .ensure_session(sid, self.registry.as_ref(), self.probe.as_ref())?;
         let mut events = {
             let s = self.turn.session_mut(sid).ok_or("无此活动会话")?;
             match s {

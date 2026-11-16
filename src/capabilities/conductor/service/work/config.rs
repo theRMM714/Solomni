@@ -99,7 +99,7 @@ impl Conductor {
         };
         for s in subtree_of(self.history.as_ref(), &guard) {
             if self.turn.is_running(&s) {
-                return Err(Self::running_refusal(&s));
+                return Err(Turn::running_refusal(&s));
             }
         }
         let (meta, events) = self.history_open(sid)?;
@@ -374,7 +374,7 @@ impl Conductor {
         let guard = work_root(self.history.as_ref(), sid).unwrap_or_else(|_| sid.to_string());
         for s in subtree_of(self.history.as_ref(), &guard) {
             if self.turn.is_running(&s) {
-                return Err(Self::running_refusal(&s));
+                return Err(Turn::running_refusal(&s));
             }
         }
         let mut layer = if meta.parent.is_none() {

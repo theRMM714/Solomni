@@ -267,7 +267,7 @@ pub(crate) fn workspace_grant_none_strips_shared_reach() {
     let sid = core.create_work(spec).expect("外部工作区可建").sid;
     let (meta, _) = core.history_open(&sid).expect("会话");
     assert_eq!(
-        core.workspace_grant(&meta).expect("授权粒度"),
+        core.turn.workspace_grant(&meta).expect("授权粒度"),
         WorkspaceGrant::Session,
         "没有绑定粒度就是缺省的逐会话"
     );
@@ -285,7 +285,7 @@ pub(crate) fn workspace_grant_none_strips_shared_reach() {
         grant: WorkspaceGrant::Workspace,
     });
     assert_eq!(
-        core.workspace_grant(&resident).expect("授权粒度"),
+        core.turn.workspace_grant(&resident).expect("授权粒度"),
         WorkspaceGrant::Workspace
     );
     let same = core.permissions_for(&resident).expect("算权限");
@@ -302,7 +302,7 @@ pub(crate) fn workspace_grant_none_strips_shared_reach() {
         grant: WorkspaceGrant::None,
     });
     assert_eq!(
-        core.workspace_grant(&none).expect("授权粒度"),
+        core.turn.workspace_grant(&none).expect("授权粒度"),
         WorkspaceGrant::None
     );
     let stripped = core.permissions_for(&none).expect("算权限");
@@ -327,8 +327,8 @@ pub(crate) fn workspace_grant_none_strips_shared_reach() {
 #[cfg(windows)]
 #[test]
 pub(crate) fn unc_external_workspace_round_trip_on_a_real_share() {
-    use crate::capabilities::conductor::service::workspace_root::{product_root, resolve};
     use crate::capabilities::workspace::api::{ChangeKind, Workspace};
+    use crate::capabilities::workspace::api::{product_root, resolve};
     use crate::capabilities::workspace::detail::{FsWorkStore, FsWorkspace};
     use crate::capabilities::workspace::service::WorkspaceService;
     use crate::kernel::api::{Tier, is_network_path, native};

@@ -112,7 +112,7 @@ impl Conductor {
         Ok((channels, core))
     }
 
-    /// 目的：解析本次创建的工作区绑定：只有顶层会话能指定，路径按档位策略校验（见 workspace_root）；
+    /// 目的：解析本次创建的工作区绑定：只有顶层会话能指定，路径按档位策略校验（见 `workspace::api::resolve`）；
     ///   子会话沿父链继承同一个根，不接受自选。
     fn resolve_workspace_binding(
         &self,
@@ -137,8 +137,8 @@ impl Conductor {
             return Ok(None);
         };
         let probe = self.probe.as_ref();
-        let product = super::workspace_root::product_root(&self.root, probe);
-        let root = super::workspace_root::resolve(raw, tier, &product, probe)?;
+        let product = crate::capabilities::workspace::api::product_root(&self.root, probe);
+        let root = crate::capabilities::workspace::api::resolve(raw, tier, &product, probe)?;
         Ok(Some(crate::capabilities::session::api::WorkspaceBinding {
             root,
             grant: grant.unwrap_or_default(),
@@ -580,14 +580,12 @@ impl Conductor {
             }
         };
         // 会话身份落盘：失败即失败（名字即目录，这是承诺，不假装已保存）。
-        self.turn.unmark_starting(&name);
-        if let Err(e) = self.history.create(&meta) {
+        if let Err(e) = self.turn.admit(&meta, session) {
             if let Some((session, agents)) = discard {
                 let _ = self.workspace.discard(&session, &agents);
             }
             return Err(e);
         }
-        self.turn.put(name.clone(), session);
         self.record_events(&name, &mut events);
         // 只有本机档 + workspace 粒度才付机器级只读授权（一次性成本）：会话已经落盘，甩到后台慢慢付，创建本身保持毫秒级。
         pay_workspace_grant(&self.root, &meta);

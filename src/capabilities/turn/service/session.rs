@@ -7,10 +7,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::capabilities::llm::api::Llm;
+use crate::capabilities::modules::api::Modules;
+use crate::capabilities::packages::api::Packages;
 use crate::capabilities::prompt::api::Prompt;
 use crate::capabilities::residents::api::ResidentOps;
 use crate::capabilities::secrets::api::SecretOps;
-use crate::capabilities::session::api::{CompactChatFactory, ShellLive, ShellSlot};
+use crate::capabilities::session::api::{CompactChatFactory, Gates, History, ShellLive, ShellSlot};
 use crate::capabilities::tools::api::{ToolExec, Tools};
 use crate::capabilities::turn::api::{Session, TurnState};
 use crate::capabilities::turn::service::assemble::SessionDeps;
@@ -23,29 +25,37 @@ use crate::kernel::ports::Log;
 /// 约束：只在核心线程上读写；能力面只经 `api` 取。
 pub struct Turn {
     /// 目的：在世会话表、运行态与创建占位、裁决队、每会话的 shell 活进程槽。
-    state: TurnState,
+    pub(super) state: TurnState,
     /// 目的：工作区用例面：一席的 `work_*` 工具执行者按它造。
-    workspace: Arc<dyn Workspace + Send + Sync>,
+    pub(super) workspace: Arc<dyn Workspace + Send + Sync>,
     /// 目的：虚拟机用例面：一席的 guest 事实随工具面交给机制层。
-    vm: Arc<dyn Vm + Send + Sync>,
+    pub(super) vm: Arc<dyn Vm + Send + Sync>,
     /// 目的：常驻服务管理面：已就绪服务的操作并入一席的工具面。
-    residents: Arc<dyn ResidentOps + Send + Sync>,
+    pub(super) residents: Arc<dyn ResidentOps + Send + Sync>,
     /// 目的：隐秘字段管理面：装配期按模块解析注入项。
-    secrets: Arc<dyn SecretOps + Send + Sync>,
+    pub(super) secrets: Arc<dyn SecretOps + Send + Sync>,
     /// 目的：工具执行面：一席的工具环境要它跑外部 / 内置工具。
-    tools: Arc<dyn ToolExec + Send + Sync>,
+    pub(super) tools: Arc<dyn ToolExec + Send + Sync>,
     /// 目的：工具总表与角色表：发放名单与内置工具表从它读。
-    systools: Arc<dyn Tools>,
+    pub(super) systools: Arc<dyn Tools>,
     /// 目的：提示词册：一席的工具说明与压缩提示从它取段。
-    prompt: Arc<dyn Prompt>,
+    pub(super) prompt: Arc<dyn Prompt>,
     /// 目的：llm 用例面：一席的收发句柄按它造。
-    llm: Arc<dyn Llm + Send + Sync>,
+    pub(super) llm: Arc<dyn Llm + Send + Sync>,
     /// 目的：日志面：装配时记一条「单 agent 工作」。
-    log: Arc<dyn Log + Send + Sync>,
+    pub(super) log: Arc<dyn Log + Send + Sync>,
     /// 目的：压缩通道工厂：新会话与重建会话共用同一份。
-    compact: Arc<dyn CompactChatFactory>,
+    pub(super) compact: Arc<dyn CompactChatFactory>,
     /// 目的：项目内基础工具链的只读安装根（python / node / cc），由组合根注入。
-    base_roots: Vec<PathBuf>,
+    pub(super) base_roots: Vec<PathBuf>,
+    /// 目的：产品根：外部工作区绑定校验与 guest 宿主翻译都以它为锚。
+    pub(super) root: PathBuf,
+    /// 目的：会话落盘与名录：重建会话、准入与派发闸从它读元数据与事件。
+    pub(super) history: Arc<dyn History + Send + Sync>,
+    /// 目的：模块登记：重建会话按清单复原一席的模块与目录。
+    pub(super) modules: Arc<dyn Modules + Send + Sync>,
+    /// 目的：包管理面：重建会话时按档位取库根与基础包根。
+    pub(super) packages: Arc<dyn Packages + Send + Sync>,
 }
 
 /// 目的：`Turn` 的构造与取用。
@@ -66,6 +76,10 @@ impl Turn {
         log: Arc<dyn Log + Send + Sync>,
         compact: Arc<dyn CompactChatFactory>,
         base_roots: Vec<PathBuf>,
+        root: PathBuf,
+        history: Arc<dyn History + Send + Sync>,
+        modules: Arc<dyn Modules + Send + Sync>,
+        packages: Arc<dyn Packages + Send + Sync>,
     ) -> Turn {
         Turn {
             state: TurnState::new(),
@@ -80,6 +94,10 @@ impl Turn {
             log,
             compact,
             base_roots,
+            root,
+            history,
+            modules,
+            packages,
         }
     }
 
@@ -182,6 +200,12 @@ impl Turn {
     /// 目的：全会话的裁决通道表。
     pub fn desk(&self) -> &Arc<dyn crate::capabilities::session::api::Decisions> {
         self.state.desk()
+    }
+
+    /// 目的：一份会话的裁决闸：已开队直接取，未开队按 `issued` 现开一条。
+    /// 参数：`issued` = 会话落盘里的裁决代号；同一条队重复取到的是同一把闸。
+    pub fn desk_for(&self, sid: &str, issued: u64) -> Arc<dyn Gates> {
+        self.state.desk_for(sid, issued)
     }
 
     /// 目的：这份会话的 shell 活进程槽（第一次用时建，之后共用）。

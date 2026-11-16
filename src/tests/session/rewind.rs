@@ -401,7 +401,11 @@ pub(crate) fn rebuild_restores_the_last_shell_snapshot_from_the_transcript() {
     )
     .unwrap();
     let (meta, events) = core.history_open(&sid).unwrap();
-    drop(core.rebuild_session(&meta, &events).expect("按转录重建"));
+    drop(
+        core.turn
+            .rebuild_session(&meta, &events, core.registry.as_ref(), core.probe.as_ref())
+            .expect("按转录重建"),
+    );
     let live = core
         .turn
         .shell_view(&sid)
@@ -451,7 +455,11 @@ pub(crate) fn rebuild_prefers_the_structured_shell_facts_over_the_receipt() {
     )
     .unwrap();
     let (meta, events) = core.history_open(&sid).unwrap();
-    drop(core.rebuild_session(&meta, &events).expect("按转录重建"));
+    drop(
+        core.turn
+            .rebuild_session(&meta, &events, core.registry.as_ref(), core.probe.as_ref())
+            .expect("按转录重建"),
+    );
     let live = core
         .turn
         .shell_view(&sid)

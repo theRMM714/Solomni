@@ -163,7 +163,7 @@ impl ConductorHandle {
                 Caller::Role { .. } => {
                     let resumed = self.call({
                         let s = sid.to_string();
-                        move |core| core.resume_subtree(&s)
+                        move |core| core.turn.resume_subtree(&s)
                     })?;
                     if resumed {
                         let mode = self.call({

@@ -22,6 +22,7 @@ use crate::capabilities::workspace::api::Workspace;
 use crate::capabilities::collab::api::AfterTurn;
 use crate::capabilities::collab::api::CollabSession;
 use crate::capabilities::llm::api::Channel;
+#[cfg(test)]
 use crate::capabilities::llm::api::Msg;
 use crate::capabilities::modules::api::{Module, Modules};
 use crate::capabilities::prompt::api::{Prompt, Segment};
@@ -110,8 +111,8 @@ pub(crate) struct ReadyActivation {
 pub struct Conductor {
     /// 产品根：虚拟根这类"装在项目内"的东西按它解析成绝对路径（`vm::resolve_guest`）。
     root: std::path::PathBuf,
-    /// 登记处能力：**四份 yaml 的状态在它里面**，conductor 只按 `Registry` 调用（看不见它的字段）。
-    registry: Box<dyn Registry>,
+    /// 目的：登记处能力（**四份 yaml 的状态在它里面**）——conductor 只按 `Registry` 调用，看不见它的字段。
+    pub(crate) registry: Box<dyn Registry>,
     /// 会话历史直连面（**不持它的端口**，R12）：造/读/写/删会话都走它。
     history: Arc<dyn History + Send + Sync>,
     /// 工作区用例面（**不持它的端口**，R12）：工作区目录与版本化走它。
@@ -133,8 +134,8 @@ pub struct Conductor {
     /// 工具执行面（**不持它的端口**，R12）：跑外部/内置工具、释放围栏授权都走它。
     tools: Arc<dyn ToolExec + Send + Sync>,
     log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
-    /// 宿主能力探测（读环境、查路径存在性都在它后面；conductor 因此不碰 std::env 与文件系统）。
-    probe: Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>,
+    /// 目的：宿主能力探测——读环境、查路径存在性都在它后面，conductor 因此不碰 std::env 与文件系统。
+    pub(crate) probe: Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>,
     /// 常驻服务的统一管理面（**不持它的端口**）：动作面与会话回收经它。
     residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
     /// 隐秘字段的统一管理面：工具 / 服务起进程时按它解析注入项并脱敏。
@@ -153,6 +154,8 @@ pub struct Conductor {
 
 /// 目的：在世会话形态（`turn` 的状态类型），本能力各用例只经它放取会话。
 pub(crate) use crate::capabilities::turn::api::Session;
+/// 目的：会话本体（`turn` 的 `Turn`）：准入、派发闸、重建与代理由这里转调。
+pub(crate) use crate::capabilities::turn::api::Turn;
 
 mod action;
 mod activation;
@@ -167,13 +170,10 @@ mod suggest;
 pub(crate) use history::{ReleaseByLease, SessionDelete};
 pub mod proxy;
 mod rewind;
-#[cfg(test)]
-pub(crate) use rewind::replay_dialogue;
 mod turn;
 mod work;
 #[cfg(test)]
 pub(crate) use work::needs_guest_packages_rebuild;
-pub(crate) mod workspace_root;
 impl Conductor {
     /// 组合根专用：main 负责创建适配器并注入；conductor 不自建任何具体实现。
     // 组合根注入的构造函数：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读。
@@ -212,6 +212,10 @@ impl Conductor {
             Arc::clone(&log),
             compact.clone(),
             Vec::new(),
+            root.clone(),
+            Arc::clone(&history),
+            Arc::clone(&modules),
+            Arc::clone(&packages),
         );
         let c = Conductor {
             root,
@@ -340,11 +344,6 @@ impl Conductor {
         Arc::clone(&self.systools)
     }
 
-    /// 生成期间"会话不在表里"的三种进入点共用这一句（错误文案要一致，别处不再各写一份）。
-    fn running_refusal(sid: &str) -> String {
-        crate::capabilities::turn::api::Turn::running_refusal(sid)
-    }
-
     /// 目的：把单 agent 会话**交给工作线程**（核心表里留"生成中"）。
     ///  取出的窗口内，核心队列是空的——读接口与其它会话的命令因此照常。
     pub(crate) fn take_single(
@@ -352,9 +351,9 @@ impl Conductor {
         sid: &str,
     ) -> Result<crate::capabilities::session::api::AgentSession, String> {
         // 运行态闸门：暂停 / 关闭的会话不启动任何生成（唤醒与派发都从这里过）。
-        self.dispatch_gate(sid)?;
+        self.turn.dispatch_gate(sid)?;
         if self.turn.is_running(sid) {
-            return Err(Self::running_refusal(sid));
+            return Err(Turn::running_refusal(sid));
         }
         match self.turn.take(sid) {
             Some(Session::Single(s)) => {
@@ -374,12 +373,13 @@ impl Conductor {
     ///  会话还没装进内存时先从落盘重建：协作的"继续"可能先于"打开"到达。
     pub(crate) fn take_collab(&mut self, sid: &str) -> Result<CollabSession, String> {
         // 同上：运行态闸门是第一道，先于"取出来"。
-        self.dispatch_gate(sid)?;
+        self.turn.dispatch_gate(sid)?;
         if self.turn.is_running(sid) {
-            return Err(Self::running_refusal(sid));
+            return Err(Turn::running_refusal(sid));
         }
         if !self.turn.holds(sid) {
-            self.ensure_session(sid)?;
+            self.turn
+                .ensure_session(sid, self.registry.as_ref(), self.probe.as_ref())?;
         }
         match self.turn.take(sid) {
             Some(Session::Collab(c)) => {
@@ -427,7 +427,7 @@ impl Conductor {
             .load(sid)
             .map(|(_, ev)| crate::capabilities::session::api::issued_in(&ev))
             .unwrap_or(0);
-        self.turn.desk().gate(sid, issued)
+        self.turn.desk_for(sid, issued)
     }
 
     /// 目的：会话没了，它的裁决队随会话一起消失（等待方与转录都不复存在）。

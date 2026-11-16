@@ -160,8 +160,8 @@ pub(crate) fn continue_hint_is_derived_from_the_session_state() {
 /// 约束：同一段转录加一条 notice，重建出的对话条数与角色序列与不加时完全一致。
 #[test]
 pub(crate) fn notice_lines_stay_out_of_the_model_dialogue() {
-    use crate::capabilities::conductor::service::replay_dialogue;
     use crate::capabilities::llm::api::ToolMode;
+    use crate::capabilities::turn::api::replay_dialogue;
     let events = |with_notice: bool| {
         let mut lines =
             vec![serde_json::json!({"id": 0, "kind": "user", "speaker": "用户", "line": "问一"})];
