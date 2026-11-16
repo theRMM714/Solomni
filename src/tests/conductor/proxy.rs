@@ -750,7 +750,7 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
     let notified = handle
         .call({
             let c = child.clone();
-            move |core| Ok(core.notify_proxy_of_child(&c))
+            move |core| Ok(core.turn.notify_proxy_of_child(&c))
         })
         .expect("通知");
     assert_eq!(notified.as_deref(), Some(proxy.as_str()));
@@ -809,7 +809,7 @@ pub(crate) fn run_state_gates_dispatch_and_survives_stop_close() {
     assert!(bridge.send(&sid, &msg).unwrap_err().contains("已停止"));
     let taken = handle.call({
         let s = sid.clone();
-        move |core| core.take_single(&s).map(|_| ())
+        move |core| core.turn.take_single(&s).map(|_| ())
     });
     assert!(
         taken.unwrap_err().contains("已停止"),

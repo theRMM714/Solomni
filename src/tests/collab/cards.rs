@@ -195,18 +195,38 @@ pub(crate) fn answers_are_validated_against_the_card_they_answered() {
         .unwrap()
         .sid;
     let card = core
-        .open_queue(&sid)
+        .turn
+        .open_queue(&sid, core.registry.as_ref(), core.probe.as_ref())
         .expect("取卡")
         .expect("挂着一张卡")
         .card;
     // 旧卡的答案放行不了新请求：卡号必须是**当时那张**。
-    let stale = core.collab_answer(&sid, "d404", OPT_BEGIN, "");
+    let stale = core.turn.collab_answer(
+        &sid,
+        "d404",
+        OPT_BEGIN,
+        "",
+        core.registry.as_ref(),
+        core.probe.as_ref(),
+    );
     assert!(stale.is_err(), "卡号对不上要拒：{:?}", stale);
     // 选项不在那张卡的选项集里：拒。
-    let foreign = core.collab_answer(&sid, &card.id, OPT_PLAN_START, "");
+    let foreign = core.turn.collab_answer(
+        &sid,
+        &card.id,
+        OPT_PLAN_START,
+        "",
+        core.registry.as_ref(),
+        core.probe.as_ref(),
+    );
     assert!(foreign.is_err(), "选项不在卡上要拒：{:?}", foreign);
     // 被拒的回答**不留痕**：这一关还挂着，卡号没变。
-    let still = core.open_queue(&sid).unwrap().expect("还挂着").card;
+    let still = core
+        .turn
+        .open_queue(&sid, core.registry.as_ref(), core.probe.as_ref())
+        .unwrap()
+        .expect("还挂着")
+        .card;
     assert_eq!(still.id, card.id);
     // 合法的回答：落一条"谁答的、选了哪个 id"的记录。
     let ev = answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
@@ -231,7 +251,12 @@ pub(crate) fn cards_and_answers_survive_a_rebuild() {
         .create_work(collab_work("w", &["a"], false, "做个东西"))
         .unwrap()
         .sid;
-    let first = core.open_queue(&sid).unwrap().expect("挂着一张卡").card;
+    let first = core
+        .turn
+        .open_queue(&sid, core.registry.as_ref(), core.probe.as_ref())
+        .unwrap()
+        .expect("挂着一张卡")
+        .card;
     // 重启 / 回档走同一条重建路：按**转录**重建，卡与选项都要回来（卡号稳定）。
     let (meta, events) = core.lifecycle.history_open("w").unwrap();
     let rebuilt_session = core
@@ -341,13 +366,22 @@ pub(crate) fn the_say_option_lets_the_core_judge_the_users_words() {
         .sid;
     answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
     let card = core
-        .open_queue(&sid)
+        .turn
+        .open_queue(&sid, core.registry.as_ref(), core.probe.as_ref())
         .unwrap()
         .expect("整理完停在方案待审")
         .card;
     // 附言为空 = 没有可判的话：如实拒绝，不拿空话当放行。
     assert!(
-        core.collab_answer(&sid, &card.id, OPT_PLAN_SAY, "  ")
+        core.turn
+            .collab_answer(
+                &sid,
+                &card.id,
+                OPT_PLAN_SAY,
+                "  ",
+                core.registry.as_ref(),
+                core.probe.as_ref()
+            )
             .is_err(),
         "先说一句必须有话说"
     );
@@ -406,12 +440,28 @@ pub(crate) fn a_second_gate_queues_behind_the_first() {
         .create_work(collab_work("w", &["a"], false, "做个东西"))
         .unwrap()
         .sid;
-    let first = core.open_queue(&sid).unwrap().expect("挂着一张卡");
+    let first = core
+        .turn
+        .open_queue(&sid, core.registry.as_ref(), core.probe.as_ref())
+        .unwrap()
+        .expect("挂着一张卡");
     assert_eq!(first.card.id, "d1", "开场那一关先问");
     assert!(first.waiting.is_empty(), "队首后面还没人等");
     // 第二个发起方（这里用「再写一次本次需求」这条真实入口）只能排到它后面。
-    let ev = core.collab_set_task(&sid, "第二个需求").unwrap();
-    let queued = core.open_queue(&sid).unwrap().expect("还挂着");
+    let ev = core
+        .turn
+        .collab_set_task(
+            &sid,
+            "第二个需求",
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
+        .unwrap();
+    let queued = core
+        .turn
+        .open_queue(&sid, core.registry.as_ref(), core.probe.as_ref())
+        .unwrap()
+        .expect("还挂着");
     assert_eq!(queued.card.id, "d1", "队首不变：先来的先问");
     assert_eq!(queued.waiting.len(), 1, "后来的如实排队");
     assert!(
@@ -466,7 +516,14 @@ pub(crate) fn a_second_gate_queues_behind_the_first() {
     assert_eq!(q.waiting.len(), 1, "后面还在等的那张也建回来了");
     assert_eq!(q.waiting[0].id, "d2", "等待者的卡号不乱");
     // 排在后面的那张还不能答（只有队首可见可答）。
-    let early = core.collab_answer(&sid, "d2", OPT_BEGIN, "");
+    let early = core.turn.collab_answer(
+        &sid,
+        "d2",
+        OPT_BEGIN,
+        "",
+        core.registry.as_ref(),
+        core.probe.as_ref(),
+    );
     assert!(early.is_err(), "排队里的卡还不能答：{:?}", early);
     // 答了队首：后面那张升为队首（卡号不变），并如实推出来。
     let ev = answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
@@ -476,7 +533,11 @@ pub(crate) fn a_second_gate_queues_behind_the_first() {
         "队首推进要如实推那张卡：{:?}",
         ev.iter().map(|e| e.to_json()).collect::<Vec<_>>()
     );
-    let next = core.open_queue(&sid).unwrap().expect("轮到它了");
+    let next = core
+        .turn
+        .open_queue(&sid, core.registry.as_ref(), core.probe.as_ref())
+        .unwrap()
+        .expect("轮到它了");
     assert_eq!(next.card.id, "d2", "先来后到：队首依次往前");
     assert!(next.waiting.is_empty(), "队列里只剩它一张");
     // **重建整队**（重启 / 回档走同一条路）：按转录重建出来的是**整条队**，不只是最后一张，顺序不乱。

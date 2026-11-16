@@ -129,7 +129,7 @@ session/<工作名>/
 
 - **讨论不由泵自己调模型，而是"泵只决定、核心驱动"**——与任务链的节点派发**同一套路**。
 
-- 理由是会话归属：生成期间协作会话被**移出核心表**（own-and-return），它碰不到表里的 agent 会话；而 agent 会话必须留在表里，用户才能随时进去发言。所以**驱动权归核心**（它同时看得到两边）（`src/capabilities/conductor/service/flow.rs`）。
+- 理由是会话归属：生成期间协作会话被**移出核心表**（own-and-return），它碰不到表里的 agent 会话；而 agent 会话必须留在表里，用户才能随时进去发言。所以**驱动权归核心**（它同时看得到两边）（`src/capabilities/turn/service/flow.rs`）。
 
 ### 看不见的回合：运行态与逐片外送
 
@@ -180,13 +180,13 @@ session/<工作名>/
 
 - **消息与选项由发起方（底层）给**：怎么问、几个选项、每个选项做什么都由发起方实现；通道不解释内容。
 - **选项行为靠稳定 id 映射**：文案可改、可本地化，id 是契约（回答按 id 分派，改文案不改行为）。
-- **没有"不可选"的选项**：**禁止置灰**（`src/presentation/web/assets/app/features/transcript/cards.js` 的 `renderCard`）——置灰会让会话卡在那里没人点得到东西。选项集里每一条都必须是真能执行的；构不出可用选项时**不发起裁决**，改为**停掉这个会话 + 落一条警告**（写清哪一环做不下去、要补什么）。卡片一旦推出，选项集**不可变**：要改只能作废这一条（界面如实标"已作废"）再推新的（`src/capabilities/conductor/service/ask_user.rs`），绝不静默改写用户已经看到的选项（`src/capabilities/conductor/service/ask_user.rs`）。
-- **必须阻塞**（`src/capabilities/conductor/service/ask_user.rs`）：发起方阻塞等回答，**不设超时**——不点不继续。终止只有三件：用户回答 / 用户按停止（解成**拒绝**，不是放行）/ 会话被删除；停会话时**整队作废**，等待方一律按"停止 = 拒绝"解开（`src/capabilities/conductor/service/ask_user.rs`）。
+- **没有"不可选"的选项**：**禁止置灰**（`src/presentation/web/assets/app/features/transcript/cards.js` 的 `renderCard`）——置灰会让会话卡在那里没人点得到东西。选项集里每一条都必须是真能执行的；构不出可用选项时**不发起裁决**，改为**停掉这个会话 + 落一条警告**（写清哪一环做不下去、要补什么）。卡片一旦推出，选项集**不可变**：要改只能作废这一条（界面如实标"已作废"）再推新的（`src/capabilities/turn/service/ask_user.rs`），绝不静默改写用户已经看到的选项（`src/capabilities/turn/service/ask_user.rs`）。
+- **必须阻塞**（`src/capabilities/turn/service/ask_user.rs`）：发起方阻塞等回答，**不设超时**——不点不继续。终止只有三件：用户回答 / 用户按停止（解成**拒绝**，不是放行）/ 会话被删除；停会话时**整队作废**，等待方一律按"停止 = 拒绝"解开（`src/capabilities/turn/service/ask_user.rs`）。
 - **队列**：同一会话同时只问一条——**多席并发按先来后到排队**，**只有队首那张可见、可答**（排在后面的还不能答：它的答案会被"卡号不是队首"挡下）。界面与快照都让"谁在等、前面还排着几条"可见：推的卡片事件与 `/api/state` 的 `pending` 里都带 `waiting`——队首之后还在等的那几张，按先来后到，每条带**自己的卡号与这一关的重建材料**（界面只看它的信封与标题，材料归机制）。
 - **回答只有一条命令**（动作 `answer_card`，带上卡片 id + 选项 id（可带附言））；回答要**校验选项 id 属于当时那张卡的选项集**（防旧卡的答案被用来放行新的请求）。
 - **落盘**：卡片（`DecisionCard`）、回答（`DecisionAnswer`：谁答的、选了哪个 id、附言）与**整队作废**（`DecisionVoid`：作废了哪几张、为什么）都按上表落盘。
 - `/api/state` 的 `pending` 是同一份事实的快照形态（重启后由转录重建）。
-- **已答过的不得重问**；作废过的也不复活（那一关还挂在状态上时，`继续` 才**续一张新卡**接着问）（`src/capabilities/conductor/service/ask_user.rs`）。
+- **已答过的不得重问**；作废过的也不复活（那一关还挂在状态上时，`继续` 才**续一张新卡**接着问）（`src/capabilities/turn/service/ask_user.rs`）。
 - 工具层那一类（`tool_ask`）与工具级确认一样**不重建**：它等在工作线程上，重启后那个等待方已经不在。
 - 会话被删除时整条队随会话一起没了——等待方与转录都不复存在，没有"留着作废记录"的地方。
 - **落地的形状**（线格式）：卡是 `{id, envelope{role,name}, message{title,body,detail}, options[{id,label}]}`；推的事件与快照的 `pending` 是**同一份 JSON**（多一个 `type: "decision_card"`、`gate`、机制载荷与 `waiting[{id,envelope,title,gate,payload}]`），回答是 `{type:"decision_answer", card, by, option, note}`，整队作废是 `{type:"decision_void", cards[], reason}`。选项 id 是契约（改文案不改行为）：

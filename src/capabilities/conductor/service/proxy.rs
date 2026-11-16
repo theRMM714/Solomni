@@ -312,7 +312,7 @@ impl ProxyHost for ProxyBridge {
         // 不给模型一个"发出去了其实没跑"的假回执）。
         let mode = handle.call({
             let t = target.clone();
-            move |core| core.dispatch_target(&t)
+            move |core| core.turn.dispatch_target(&t)
         })?;
         // 先记来源：这条不是用户原话这个事实要进目标会话的可回放记录（正文不伪装成用户发言）。
         handle.record_notice(&target, SessionEvent::Notice(d::relay_note(msg.kind)));
@@ -321,12 +321,17 @@ impl ProxyHost for ProxyBridge {
             // 没写选项 id 就没有答案——不替用户猜（见 docs/session/session-model.md 的「请用户裁决」）。
             let card = handle.call({
                 let t = target.clone();
-                move |core| core.open_queue(&t)
+                move |core| {
+                    core.turn
+                        .open_queue(&t, core.registry.as_ref(), core.probe.as_ref())
+                }
             })?;
             match (card, msg.reply.as_deref()) {
                 (Some(q), Some(reply)) => {
                     let option = d::relay_reply(&q.card.options, reply)?;
-                    handle.spawn_detached_collab_answer(&target, &q.card.id, &option, &msg.text);
+                    crate::capabilities::turn::api::spawn_detached_collab_answer(
+                        &*handle, &target, &q.card.id, &option, &msg.text,
+                    );
                 }
                 // 挂着卡但这次转达不是代答：只记来源、不替用户作答（那一问按它自己声明的收场走）。
                 (Some(q), None) => handle.record_notice(
@@ -336,13 +341,15 @@ impl ProxyHost for ProxyBridge {
                         q.card.id
                     )),
                 ),
-                (None, _) => handle.spawn_detached_collab(&target),
+                (None, _) => {
+                    crate::capabilities::turn::api::spawn_detached_collab(&*handle, &target)
+                }
             }
             return Ok(());
         }
         // 单 agent：以"核心派的活"注入（派发行是核心自己的行，**不冒充用户原话**），
         // 并**脱离调用方点火**——代理不等它跑完，靠 observe / messages 回头看。
-        handle.spawn_detached_node(&target, &msg.text);
+        crate::capabilities::turn::api::spawn_detached_node(&*handle, &target, &msg.text);
         Ok(())
     }
 

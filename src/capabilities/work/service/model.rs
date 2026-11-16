@@ -1,62 +1,13 @@
 //! 目的：一次模型调用的通道参数与思考档——流式与预算取值、思考片段、树上可用思考档与按根设置。
-//! 管：`llm_opts` / `llm_opts_for`、思考片段与思考档视图、`set_thinking`、`set_context_freshness`。
+//! 管：思考档视图、`set_thinking`、`set_context_freshness`；`llm_opts` / `llm_opts_for` / 思考片段转调 turn（判据只有一处）。
 //! 不管：通道本身（llm 能力）、会话配置落盘（`config.rs`）。
-//! 联动：turn / flow 每次调用模型前取参数；api 层的设置接口改思考档。
+//! 联动：api 层的设置接口改思考档；调用参数与会话档位的判据在 `turn::api`。
 //!   本方法族只碰 registry / history / running / sessions 这四个字段。
 
 use super::*;
 use crate::capabilities::session::api::{subtree_of, work_root};
 
 impl Work {
-    /// 目的：本次模型调用的通道参数：**预算与"能不能流式"都取全局设置**（讨论、执行、验收、单 agent 共用一份）。
-    ///  `want_stream` 是调用方这一次的意愿（呈现层按回包形状给）：**设置是上限，调用方可以在本次放弃流式**；
-    ///  设置关掉时一律非流式。两处各判一次迟早会打架，所以判据只在这里。
-    pub(crate) fn llm_opts(
-        &self,
-        registry: &dyn Registry,
-        want_stream: bool,
-    ) -> crate::capabilities::llm::api::LlmOpts {
-        let app = registry.app();
-        crate::capabilities::llm::api::LlmOpts {
-            stream: app.streaming && want_stream,
-            timeout_secs: app.llm_timeout_secs,
-            thinking: None,
-        }
-    }
-
-    /// 目的：这条会话这一次生成要用的调用参数：全局流式/预算 + **按模型解析的思考片段**。
-    /// 约束：只用于对话生成（单 agent / 代理 / 协作成员会话）；核心内部编排不走它。
-    pub(crate) fn llm_opts_for(
-        &self,
-        registry: &dyn Registry,
-        sid: &str,
-        want_stream: bool,
-    ) -> Result<crate::capabilities::llm::api::LlmOpts, String> {
-        let mut opts = self.llm_opts(registry, want_stream);
-        opts.thinking = self.thinking_fragment_for(registry, sid)?;
-        Ok(opts)
-    }
-
-    /// 目的：这条会话的模型在当前工作档位下要并入请求体的思考片段（None = 不发）。
-    /// 约束：档位取**工作根** meta 的 `thinking`；模型取这条会话第一个 agent 的模型，没有 agent（代理）就用核心默认；
-    ///  模型没登记该档 = 如实报错（不静默降级成供应商默认）。
-    pub(crate) fn thinking_fragment_for(
-        &self,
-        registry: &dyn Registry,
-        sid: &str,
-    ) -> Result<Option<std::sync::Arc<serde_json::Value>>, String> {
-        let root = work_root(self.history.as_ref(), sid)?;
-        let level = self.history.meta(&root)?.thinking;
-        let model = self
-            .history
-            .meta(sid)
-            .ok()
-            .and_then(|m| m.agents.first().and_then(|a| a.model.clone()));
-        Ok(registry
-            .thinking_fragment(model.as_deref(), level.as_deref())?
-            .map(std::sync::Arc::new))
-    }
-
     /// 目的：这条工作里思考档位要作用到哪些模型（每个 agent 的模型；没有 agent 的会话用核心默认）。
     /// 约束：去重；核心内部编排不跟会话档，因此在有 agent 名单的工作里不额外塞核心模型。
     pub(crate) fn thinking_models_in_tree(

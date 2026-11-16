@@ -22,7 +22,11 @@ pub(crate) fn create_work_persists_and_history_replays() {
         .unwrap()
         .sid;
     assert_eq!(sid, "工作一");
-    with_live(|l| core.single_say(&sid, "你好", l)).unwrap();
+    with_live(|l| {
+        core.turn
+            .single_say(&sid, "你好", l, core.registry.as_ref(), core.probe.as_ref())
+    })
+    .unwrap();
     let list = core.lifecycle.history_list();
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].name, "工作一");
@@ -78,7 +82,10 @@ pub(crate) fn history_delete_cascades_to_children_and_refuses_child_delete() {
         .create_work(collab_work("p", &["a"], false, "需求"))
         .unwrap()
         .sid;
-    let child = core.spawn_agent_session(&parent, "a").unwrap();
+    let child = core
+        .turn
+        .spawn_agent_session(&parent, "a", core.registry.as_ref(), core.probe.as_ref())
+        .unwrap();
     // 子会话不允许单独删，理由要明确，且拒绝后它仍在。
     let err = core
         .lifecycle
@@ -441,8 +448,14 @@ pub(crate) fn work_root_walks_to_the_top_across_nested_sub_sessions() {
         .create_work(collab_work("p", &["a"], false, "需求"))
         .unwrap()
         .sid;
-    let mid = core.spawn_agent_session(&top, "a").unwrap();
-    let low = core.spawn_agent_session(&mid, "a").unwrap();
+    let mid = core
+        .turn
+        .spawn_agent_session(&top, "a", core.registry.as_ref(), core.probe.as_ref())
+        .unwrap();
+    let low = core
+        .turn
+        .spawn_agent_session(&mid, "a", core.registry.as_ref(), core.probe.as_ref())
+        .unwrap();
     let history = core.history_handle();
     let root_of = |sid: &str| crate::capabilities::session::api::work_root(history.as_ref(), sid);
     assert_eq!(root_of(&top).unwrap(), top);
@@ -499,8 +512,12 @@ pub(crate) fn history_delete_refuses_when_any_node_in_the_subtree_is_running() {
         .create_work(collab_work("p", &["a"], false, "需求"))
         .unwrap()
         .sid;
-    let child = core.spawn_agent_session(&parent, "a").unwrap();
-    core.take_single(&child)
+    let child = core
+        .turn
+        .spawn_agent_session(&parent, "a", core.registry.as_ref(), core.probe.as_ref())
+        .unwrap();
+    core.turn
+        .take_single(&child)
         .expect("把子会话交给工作线程（标记生成中）");
     let err = core
         .lifecycle

@@ -79,7 +79,11 @@ pub(crate) fn core_direct_seeds_system_prompt() {
         core.single_history(&sid).unwrap().is_empty(),
         "对话里只有真正发生过的事（此刻还没有）"
     );
-    let events = with_live(|l| core.single_say(&sid, "在吗", l)).unwrap();
+    let events = with_live(|l| {
+        core.turn
+            .single_say(&sid, "在吗", l, core.registry.as_ref(), core.probe.as_ref())
+    })
+    .unwrap();
     // 用户发言必须入转录：只进历史不进转录的话，历史回放会丢用户消息。
     match &events[0] {
         SessionEvent::Transcript(lines) => {
@@ -128,7 +132,11 @@ pub(crate) fn single_mode_accepts_multi_module_agent_and_converses() {
         "身份块必须并入全部模块的能力与用法：{}",
         identity
     );
-    let events = with_live(|l| core.single_say(&sid, "在吗", l)).unwrap();
+    let events = with_live(|l| {
+        core.turn
+            .single_say(&sid, "在吗", l, core.registry.as_ref(), core.probe.as_ref())
+    })
+    .unwrap();
     assert!(
         events.iter().any(
             |e| matches!(e, SessionEvent::Transcript(l) if l.iter().any(|x| x.speaker == "组合"))
@@ -268,7 +276,16 @@ pub(crate) fn core_direct_tool_flow_injects_result_into_history() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| core.single_say(&sid, "核对一下", l)).unwrap();
+    let events = with_live(|l| {
+        core.turn.single_say(
+            &sid,
+            "核对一下",
+            l,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
+    })
+    .unwrap();
     // 一行 = 一轮模型调用：用户行 / tool 行 / 最终文本行，id 连续且 tool 行夹在中间。
     let rows = transcript_rows(&events);
     assert_eq!(rows.len(), 3, "一次工具循环应得到 3 条行：{:?}", rows);
@@ -322,9 +339,15 @@ pub(crate) fn node_task_is_a_system_line_but_a_user_message() {
         .unwrap()
         .sid;
     let prepared = core
-        .prepare_node(&sid, "== 你的任务 ==\n把事做完")
+        .turn
+        .prepare_node(
+            &sid,
+            "== 你的任务 ==\n把事做完",
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
         .expect("准备节点回合");
-    let crate::capabilities::conductor::service::Prepared::Run {
+    let crate::capabilities::turn::api::Prepared::Run {
         session,
         identity,
         prefix,
@@ -393,7 +416,7 @@ pub(crate) fn node_task_is_a_system_line_but_a_user_message() {
         msgs.iter().map(|m| m.role.clone()).collect::<Vec<_>>()
     );
     // 重建 = 实时：重启后从落盘流水重建，最后这条还得是同一条 user 消息。
-    core.put_single_recorded(&sid, *session, &events);
+    core.turn.put_single_recorded(&sid, *session, &events);
     drop(core);
     let mut core2 = core_with_all(
         vec![module_of("a")],

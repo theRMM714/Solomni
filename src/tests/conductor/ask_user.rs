@@ -3,10 +3,10 @@
 //! 不管：队列本体的排队与校验（session 的用例）、围栏自己怎么问（tools 的用例）。
 //! 联动：端口形状见 src/kernel/ports.rs；契约见 docs/session/session-model.md 的「请用户裁决」。
 
-use crate::capabilities::conductor::api::{ConductorHandle, Ops, Output};
-use crate::capabilities::conductor::service::ask_user::SessionAsk;
+use crate::capabilities::conductor::api::{ConductorHandle, Ops, Output, SessionOps};
 use crate::capabilities::session::api::SessionEvent;
 use crate::capabilities::tools::domain::fence::{OPT_FENCE_ABORT, OPT_FENCE_UNFENCED};
+use crate::capabilities::turn::service::ask_user::SessionAsk;
 use crate::kernel::api::{Ask, AskOutcome};
 use crate::kernel::ports::AskUser;
 use crate::tests::builders::SilentRunner;
@@ -42,8 +42,16 @@ fn door_of(
 ) -> Arc<dyn crate::capabilities::session::api::Gates> {
     let s = sid.to_string();
     handle
-        .call(move |core| Ok(core.desk_of(&s)))
+        .call(move |core| Ok(core.turn.desk_of(&s)))
         .expect("取这个会话的裁决队")
+}
+
+/// 停会话的回调（端口要它；与手柄上的「停止」同一条路）。
+fn stopper(handle: &ConductorHandle) -> Box<dyn Fn(&str) + Send + Sync> {
+    let h = handle.clone();
+    Box::new(move |sid: &str| {
+        let _ = SessionOps::stop(&h, sid);
+    })
 }
 
 /// 一条围栏式的提问（选项 id 就是围栏那两条契约）。
@@ -79,7 +87,7 @@ fn ask_pushes_a_card_and_blocks_until_the_answer_command_answers_it() {
             let seen = Arc::clone(&seen);
             move |ev: SessionEvent| seen.lock().expect("锁").push(ev)
         }),
-        handle.clone(),
+        stopper(&handle),
     ));
     // 发起方阻塞且不设超时：放工作线程上；主线程**等卡真的进队**再作答。
     // 反过来（用有上限的轮询线程去答）会在这格永久挂住——全量串行里偶发的死等就是这么来的。
@@ -143,7 +151,7 @@ fn no_options_means_halt_instead_of_asking() {
             let seen = Arc::clone(&seen);
             move |ev: SessionEvent| seen.lock().expect("锁").push(ev)
         }),
-        handle.clone(),
+        stopper(&handle),
     );
     let mut empty = request();
     empty.options.clear();
@@ -209,7 +217,7 @@ fn stopped_is_not_the_same_as_nobody_answered() {
         Arc::clone(&door),
         &sid,
         Box::new(|_ev: SessionEvent| {}),
-        handle.clone(),
+        stopper(&handle),
     ));
     let mut request = request();
     request.on_unanswered = Some(OPT_FENCE_UNFENCED.to_string());
@@ -254,7 +262,7 @@ fn port_applies_the_declared_default_and_says_it_was_not_the_user() {
             let seen = Arc::clone(&seen);
             move |ev: SessionEvent| seen.lock().expect("锁").push(ev)
         }),
-        handle.clone(),
+        stopper(&handle),
     ));
     let mut request = request();
     request.on_unanswered = Some(OPT_FENCE_UNFENCED.to_string());

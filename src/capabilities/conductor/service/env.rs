@@ -1,8 +1,10 @@
 //! 目的：conductor 侧的会话装配入口与沙箱 / 权限事实取用——工具环境与会话预算只在这里转调 turn。
 //! 管：guest 诊断准备，以及沙箱 / 权限 / 工作区授权 / 工具面 / 上下文预算五个薄入口（事实都在 `turn::service::facts`）。
 //! 不管：装配本体（在 `turn` 的 `service/assemble.rs`）、会话怎么落盘（history.rs）、协作链怎么推进（flow.rs）、建工作的两段（work/create.rs）。
-//! 联动：建工作、协作推进与回放经这里取沙箱与权限；`refresh_context_budget` 也在这里。
+//! 联动：建工作与回放经这里取沙箱与权限；回合推进的预算刷新在 `turn`。
 use super::*;
+#[cfg(test)]
+use crate::capabilities::session::api::SessionMeta;
 
 impl Conductor {
     /// 目的：一次 guest 只读诊断的准备（毫秒级）：定位这条会话的 guest 租约。
@@ -28,7 +30,8 @@ impl Conductor {
     }
 
     /// 目的：组装本次工作的沙箱清单：工作根来自 Workspace 端口，模块目录来自清单。
-    /// 约束：取数与逐席规则都在 `turn::service::facts`；这里只把端口拆成实参。
+    /// 约束：取数与逐席规则都在 `turn::service::facts`；这里只把端口拆成实参（测试访问器）。
+    #[cfg(test)]
     pub(crate) fn sandboxes(
         &self,
         meta: &SessionMeta,
@@ -45,27 +48,5 @@ impl Conductor {
         meta: &SessionMeta,
     ) -> Result<crate::capabilities::permission::api::PermissionSet, String> {
         self.turn.permissions_for(self.registry.as_ref(), meta)
-    }
-
-    /// 目的：一轮内对同一个成员最多提醒几次（用户可设，见 session-model.md 二）。
-    pub fn discuss_remind_cap(&self) -> u32 {
-        self.registry.app().discuss_remind_cap
-    }
-
-    /// 目的：本会话的上下文预算：窗口按模型现算（缺省用核心默认），阈值与保留百分比来自全局设置。
-    /// 约束：阈值 0% = 关自动压缩。见 docs/session/session-model.md 六。
-    pub(crate) fn context_budget(&self, model: Option<&str>) -> (u64, u8, u8) {
-        self.turn.context_budget(self.registry.as_ref(), model)
-    }
-
-    /// 目的：把当前设置与模型窗口刷到一条活会话（设置改了不用重建会话）。
-    /// 参数：`s` = 单 agent 会话；窗口按它自己的模型解析。
-    pub(crate) fn refresh_context_budget(
-        &self,
-        s: &mut crate::capabilities::session::api::AgentSession,
-    ) {
-        let model = s.model_id().map(str::to_string);
-        let (window, percent, keep) = self.context_budget(model.as_deref());
-        s.set_context_budget(window, percent, keep);
     }
 }

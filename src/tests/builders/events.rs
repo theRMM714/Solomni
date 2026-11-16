@@ -13,8 +13,18 @@ pub(crate) fn answer_card(
     option: &str,
     note: &str,
 ) -> Result<Vec<SessionEvent>, String> {
-    let queue = core.open_queue(sid)?.ok_or("现在没有挂着的裁决卡")?;
-    core.collab_answer(sid, &queue.card.id, option, note)
+    let queue = core
+        .turn
+        .open_queue(sid, core.registry.as_ref(), core.probe.as_ref())?
+        .ok_or("现在没有挂着的裁决卡")?;
+    core.turn.collab_answer(
+        sid,
+        &queue.card.id,
+        option,
+        note,
+        core.registry.as_ref(),
+        core.probe.as_ref(),
+    )
 }
 
 /// 目的：从事件流里抽出转录行并**渲染成文本**（行怎么变文本只有 LineView::render 一处）。

@@ -185,11 +185,13 @@ fn dispatch_gate_refuses_a_stopped_subtree() {
         .expect("建工作")
         .sid;
     assert!(core.turn.dispatch_gate(&sid).is_ok(), "活动会话照常派发");
-    core.set_subtree_run(&sid, RunState::Stopped)
+    core.turn
+        .set_subtree_run(&sid, RunState::Stopped)
         .expect("停止子树");
     let stopped = core.turn.dispatch_gate(&sid).expect_err("停掉的会话要拒");
     assert!(stopped.contains("已停止"), "{}", stopped);
-    core.set_subtree_run(&sid, RunState::Closed)
+    core.turn
+        .set_subtree_run(&sid, RunState::Closed)
         .expect("关闭子树");
     let closed = core.turn.dispatch_gate(&sid).expect_err("关掉的会话要拒");
     assert!(closed.contains("已关闭"), "{}", closed);

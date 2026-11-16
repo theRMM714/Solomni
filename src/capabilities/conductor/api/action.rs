@@ -8,6 +8,7 @@ use crate::capabilities::proxy::api as d;
 use crate::capabilities::registry::api::{AppSettings, RegistryOps, StorageSettings};
 use crate::capabilities::tools::api::{ToolSchema, arg_fault_text};
 use crate::capabilities::workspace::api::MAX_ASSET_BYTES;
+use std::collections::BTreeMap;
 
 /// 极简 base64 解码（上传动作的参数是 base64；标准字母表，容忍换行与缺失填充）。
 fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
@@ -115,12 +116,16 @@ impl ConductorHandle {
             );
             let mode = self.call({
                 let c = created.session.clone();
-                move |core| core.dispatch_target(&c)
+                move |core| core.turn.dispatch_target(&c)
             })?;
             if mode == "collab" {
-                self.start_child_collab(&created.session);
+                crate::capabilities::turn::api::start_child_collab(self, &created.session);
             } else {
-                self.spawn_detached_node(&created.session, &spec.task);
+                crate::capabilities::turn::api::spawn_detached_node(
+                    self,
+                    &created.session,
+                    &spec.task,
+                );
             }
         }
         let _ = caller;
@@ -171,9 +176,13 @@ impl ConductorHandle {
                             move |core| Ok(core.session_mode_str(&s))
                         })?;
                         match mode.as_str() {
-                            "collab" => self.spawn_detached_collab(sid),
-                            "proxy" => self.spawn_detached_proxy(sid),
-                            _ => self.spawn_detached_continue(sid),
+                            "collab" => {
+                                crate::capabilities::turn::api::spawn_detached_collab(self, sid)
+                            }
+                            "proxy" => {
+                                crate::capabilities::turn::api::spawn_detached_proxy(self, sid)
+                            }
+                            _ => crate::capabilities::turn::api::spawn_detached_continue(self, sid),
                         }
                     }
                     "active".to_string()

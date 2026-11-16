@@ -511,7 +511,11 @@ fn host_session_uses_package_bin_path() {
         .create_work(crate::tests::doubles::work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    crate::tests::doubles::with_live(|l| core.single_say(&sid, "干活", l)).unwrap();
+    crate::tests::doubles::with_live(|l| {
+        core.turn
+            .single_say(&sid, "干活", l, core.registry.as_ref(), core.probe.as_ref())
+    })
+    .unwrap();
     let paths = runner.paths.lock().expect("锁");
     assert_eq!(paths.len(), 1, "工具真的跑了一次");
     let path = paths[0].as_ref().expect("本机档要注入包 PATH");

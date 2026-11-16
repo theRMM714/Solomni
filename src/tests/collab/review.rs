@@ -381,7 +381,7 @@ pub(crate) fn total_review_rework_names_the_nodes_and_only_they_are_redispatched
         .sid;
     answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
     let first = answer_card(&mut core, &sid, OPT_PLAN_SAY, "同意开工").unwrap();
-    match core.collab_pending(&sid).unwrap() {
+    match core.turn.collab_pending(&sid).unwrap() {
         Some(Pending::NodeBlocked { nodes }) => {
             assert_eq!(nodes, vec!["n1-1".to_string()], "只退核心指名的那个节点")
         }
@@ -417,7 +417,10 @@ pub(crate) fn total_review_rework_names_the_nodes_and_only_they_are_redispatched
     );
     // **唤醒不能替用户点「继续」**：单纯再推一步（子会话完成叫醒走的就是这条）不该重派任何节点，
     // 否则"暂停等你定"形同虚设。
-    let wake = core.collab_advance(&sid).unwrap();
+    let wake = core
+        .turn
+        .collab_advance(&sid, core.registry.as_ref(), core.probe.as_ref())
+        .unwrap();
     assert!(
         !wake
             .iter()
@@ -443,7 +446,10 @@ pub(crate) fn total_review_rework_names_the_nodes_and_only_they_are_redispatched
                 .collect::<Vec<_>>()
         );
     }
-    let second = core.collab_resume(&sid).unwrap();
+    let second = core
+        .turn
+        .collab_resume(&sid, core.registry.as_ref(), core.probe.as_ref())
+        .unwrap();
     let redispatch: Vec<&String> = second
         .iter()
         .filter_map(|e| match e {
@@ -500,7 +506,7 @@ pub(crate) fn failed_node_acceptance_pauses_then_continue_redispatches() {
     let first = answer_card(&mut core, &sid, OPT_PLAN_SAY, "同意开工").unwrap();
     assert!(
         matches!(
-            core.collab_pending(&sid),
+            core.turn.collab_pending(&sid),
             Ok(Some(Pending::NodeBlocked { .. }))
         ),
         "节点没过该暂停并交用户：{:?}",
@@ -515,7 +521,10 @@ pub(crate) fn failed_node_acceptance_pauses_then_continue_redispatches() {
     );
 
     // 点「继续」：把没过的节点退回待办并重派，再验通过 → 交付。
-    let second = core.collab_resume(&sid).unwrap();
+    let second = core
+        .turn
+        .collab_resume(&sid, core.registry.as_ref(), core.probe.as_ref())
+        .unwrap();
     assert!(
         second
             .iter()
@@ -570,7 +579,10 @@ pub(crate) fn collab_pauses_for_plan_review_until_the_user_approves() {
         events
     );
     assert!(
-        matches!(core.collab_pending(&sid), Ok(Some(Pending::PlanReview))),
+        matches!(
+            core.turn.collab_pending(&sid),
+            Ok(Some(Pending::PlanReview))
+        ),
         "待审要挂起等用户"
     );
     // 链随方案一起交给用户审查：节点、负责人、目标都在（审查关卡看的就是这张图）。

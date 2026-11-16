@@ -31,7 +31,16 @@ pub(crate) fn patch_channel_writes_files_without_json_escaping() {
         .create_work(work("w", WorkMode::Single, &["m0"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| core.single_say(&sid, "改一下", l)).unwrap();
+    let events = with_live(|l| {
+        core.turn.single_say(
+            &sid,
+            "改一下",
+            l,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
+    })
+    .unwrap();
     let views = tool_views(&events);
     assert!(views[0].ok, "两块都该成功：{}", views[0].output);
     assert!(
@@ -87,7 +96,16 @@ pub(crate) fn a_failing_patch_block_writes_nothing_at_all() {
         .create_work(work("w", WorkMode::Single, &["m0"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| core.single_say(&sid, "改两处", l)).unwrap();
+    let events = with_live(|l| {
+        core.turn.single_say(
+            &sid,
+            "改两处",
+            l,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
+    })
+    .unwrap();
     let views = tool_views(&events);
     assert!(!views[0].ok, "{}", views[0].output);
     assert!(views[0].output.contains("第 2 块"), "{}", views[0].output);
@@ -132,7 +150,16 @@ pub(crate) fn a_patch_without_end_marker_is_refused_with_the_line() {
         .create_work(work("w", WorkMode::Single, &["m0"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| core.single_say(&sid, "加个文件", l)).unwrap();
+    let events = with_live(|l| {
+        core.turn.single_say(
+            &sid,
+            "加个文件",
+            l,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
+    })
+    .unwrap();
     let views = tool_views(&events);
     assert!(
         !views[0].ok && views[0].output.contains("*** End File"),
@@ -171,7 +198,11 @@ pub(crate) fn rewind_clears_the_read_ledger_so_overwrite_needs_a_fresh_read() {
         .unwrap()
         .sid;
     // 第一轮：新建，放行
-    let e1 = with_live(|l| core.single_say(&sid, "写", l)).unwrap();
+    let e1 = with_live(|l| {
+        core.turn
+            .single_say(&sid, "写", l, core.registry.as_ref(), core.probe.as_ref())
+    })
+    .unwrap();
     let v1 = tool_views(&e1);
     assert!(v1[0].ok, "新建文件不需要先读过：{}", v1[0].output);
     // 回档：证据作废
@@ -182,7 +213,11 @@ pub(crate) fn rewind_clears_the_read_ledger_so_overwrite_needs_a_fresh_read() {
     )
     .unwrap();
     // 第二轮：同一个路径已存在，而账本已被清空 → 拒绝并提示先读
-    let e2 = with_live(|l| core.single_say(&sid, "再写", l)).unwrap();
+    let e2 = with_live(|l| {
+        core.turn
+            .single_say(&sid, "再写", l, core.registry.as_ref(), core.probe.as_ref())
+    })
+    .unwrap();
     let v2 = tool_views(&e2);
     assert!(!v2[0].ok, "回档后旧的读取证据不再算数：{}", v2[0].output);
     assert!(

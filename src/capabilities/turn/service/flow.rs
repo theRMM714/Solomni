@@ -1,17 +1,33 @@
 //! 目的：协作流水线推进与协作动作——链推进（advance_chain）、节点派发（drive_node / spawn_ready_nodes / spawn_sub_session）、协作步（collab_advance / collab_resume）、裁决卡动作与改需求。
 //! 管：取对象、推进、放回（take_* / put_*）；协作的入口动作（写需求、取卡、处置推进、撤回同意、改需求、查挂起）。
-//! 不管：单 agent 的回合收发（turn.rs）、会话启用（activation.rs）、拟名单（suggest.rs）。
-//! 联动：api 层的协作接口直接转发到这里。
-//!   本方法族只碰 sessions / history / running / desk 这几个字段。
+//! 不管：单 agent 的回合收发（turn.rs）、会话启用与命令队列（宿主）；模型调用本身（collab / llm）。
+//! 联动：宿主的协作接口与工作线程转发到这里；登记处与主机探针按参数给（本层不持登记处）。
+//!   本方法族的取放与收尾判据都在 `Turn` 的会话表上。
 
-use super::*;
-use crate::capabilities::session::api::{flat_modules, work_root};
+use crate::capabilities::collab::api::AfterTurn;
+use crate::capabilities::collab::api::CollabSession;
+use crate::capabilities::prompt::api::Segment;
+use crate::capabilities::registry::api::Registry;
+use crate::capabilities::session::api::{
+    AgentMeta, Answered, DecisionQueue, GateTicket, RunState, SessionEvent, SessionMeta,
+    flat_modules, work_root,
+};
+use crate::capabilities::turn::api::{Prepared, RestoreRequest, Session};
+use crate::kernel::ports::HostProbe;
 
-impl Conductor {
-    /// 目的：**同步**跑一个节点的子会话（CLI 与测试走这条；Web 生产路径由 ConductorHandle 起工作线程）。
-    pub(crate) fn drive_node(&mut self, child: &str, objective: &str) -> Vec<SessionEvent> {
+use super::session::Turn;
+
+impl Turn {
+    /// 目的：**同步**跑一个节点的子会话（CLI 与测试走这条；Web 生产路径由宿主起工作线程）。
+    pub(crate) fn drive_node(
+        &mut self,
+        child: &str,
+        objective: &str,
+        registry: &dyn Registry,
+        probe: &dyn HostProbe,
+    ) -> Vec<SessionEvent> {
         self.bump_turn_of_child(child);
-        match self.prepare_single(child, Some(objective), true) {
+        match self.prepare_single(child, Some(objective), true, registry, probe) {
             Ok(Prepared::Run {
                 session,
                 prefix,
@@ -54,7 +70,12 @@ impl Conductor {
 
     /// 目的：推进协作（**核心驱动**）：泵只决定"该问谁"，核心取该 agent 的会话跑这一回合再交回。
     ///  契约见 docs/session/session-model.md 二之二。事件由调用方统一落档。
-    pub fn collab_advance(&mut self, sid: &str) -> Result<Vec<SessionEvent>, String> {
+    pub fn collab_advance(
+        &mut self,
+        sid: &str,
+        registry: &dyn Registry,
+        probe: &dyn HostProbe,
+    ) -> Result<Vec<SessionEvent>, String> {
         let mut out = Vec::new();
         // 安全网计数（见循环尾）：提醒/重问必须有终点，不能让驱动空转。
         let mut guard = 0usize;
@@ -71,7 +92,7 @@ impl Conductor {
                 let cancel = c.disc_cancel();
                 let opts = c.disc_opts();
                 let turn_id = if ask.is_some() { c.next_turn_id() } else { 0 };
-                self.turn.put(sid.to_string(), Session::Collab(c));
+                self.put(sid.to_string(), Session::Collab(c));
                 (ask, systools, cancel, opts, member, turn_id)
             };
             let (Some((i, identity, turn)), Some(agent), turn_id) = (ask, member, turn_id) else {
@@ -80,15 +101,15 @@ impl Conductor {
             // ② 该 agent 的会话：没有就按需建（名单确认时已建，这里兜底）。
             let child = format!("{}--{}", sid, agent);
             if self.history.load(&child).is_err() {
-                self.spawn_agent_session(sid, &agent)?;
+                self.spawn_agent_session(sid, &agent, registry, probe)?;
             }
             // ③ 跑这一回合：**与单 agent 同一条轮循环**（身份块 + 本回合工具面 + 对话 + 本回合提示 + 表态）。
             // 工具面由角色表发放（讨论席 = 动词 + 只读核实）；产出逐轮落进**它自己的会话**。
             let mut s = self.take_single(&child)?;
             // 思考强度是**工作根**的会话级事实：成员回合也按它解析（成员模型各自映射）。
-            let thinking = self.thinking_fragment_for(&child)?;
+            let thinking = self.thinking_fragment_for(registry, &child)?;
             s.set_thinking(thinking.clone());
-            let round = match self.turn.session(sid) {
+            let round = match self.session(sid) {
                 Some(Session::Collab(c)) => c.round(),
                 _ => 0,
             };
@@ -137,17 +158,17 @@ impl Conductor {
                     i,
                     turn.verb.is_some(),
                     user_stopped,
-                    self.registry.app().discuss_remind_cap,
+                    registry.app().discuss_remind_cap,
                 );
                 let text = c.reminder_text();
-                self.turn.put(sid.to_string(), Session::Collab(c));
+                self.put(sid.to_string(), Session::Collab(c));
                 (a, text)
             };
             match after {
                 AfterTurn::Done => {
                     let mut c = self.take_collab_raw(sid)?;
                     c.feed_with(i, turn, turn_id, &mut |e| out.push(e));
-                    self.turn.put(sid.to_string(), Session::Collab(c));
+                    self.put(sid.to_string(), Session::Collab(c));
                 }
                 AfterTurn::Remind => {
                     // 提醒注入**它自己的会话**（系统消息：用户看到的是系统行），然后**不 feed**——
@@ -165,7 +186,7 @@ impl Conductor {
                     // 提醒到顶：主会话记一行"未回应"（系统消息），本轮放过它，整轮继续。
                     let mut c = self.take_collab_raw(sid)?;
                     c.pass_over(i, &mut |e| out.push(e));
-                    self.turn.put(sid.to_string(), Session::Collab(c));
+                    self.put(sid.to_string(), Session::Collab(c));
                 }
             }
             // 安全网：提醒/重问必须有终点（计数有上限，这里再兜一层，防实现走偏时空转）。
@@ -183,10 +204,10 @@ impl Conductor {
 
     /// 目的：裸搬协作会话（不触发任务链派发那套副作用）：驱动循环每步都要搬一次。
     pub(crate) fn take_collab_raw(&mut self, sid: &str) -> Result<CollabSession, String> {
-        match self.turn.take(sid) {
+        match self.take(sid) {
             Some(Session::Collab(c)) => Ok(c),
             Some(other) => {
-                self.turn.put(sid.to_string(), other);
+                self.put(sid.to_string(), other);
                 Err("该会话不是协作模式".to_string())
             }
             None => Err("无此会话".to_string()),
@@ -196,34 +217,44 @@ impl Conductor {
     /// 目的：继续一次协作（同步版，CLI 与测试走这条）：**先让泵处理**（它可能把验收没过的节点退回待办），
     ///  再派发/跑完就绪节点，最后再让泵做节点验收与总验收。
     ///  生产路径是"工作线程跑泵 + put_collab 派发 + 子会话完成叫醒"，判定完全一致。
-    pub fn collab_resume(&mut self, sid: &str) -> Result<Vec<SessionEvent>, String> {
+    pub fn collab_resume(
+        &mut self,
+        sid: &str,
+        registry: &dyn Registry,
+        probe: &dyn HostProbe,
+    ) -> Result<Vec<SessionEvent>, String> {
         let mut out = Vec::new();
         // **用户那一步**先做：重派核心指名没过的节点（唤醒不会替用户做这个决定，见 pump_with 的闸）。
         {
             let mut c = self.take_collab_raw(sid)?;
             c.resume(&mut |e| out.push(e));
-            self.turn.put(sid.to_string(), Session::Collab(c));
+            self.put(sid.to_string(), Session::Collab(c));
         }
         // 泵（讨论回合 / 总验收）→ 派发并跑完就绪节点 → 再泵一步（总验收 → 交付）。
-        out.extend(self.collab_advance(sid)?);
-        out.extend(self.advance_chain(sid));
-        out.extend(self.collab_advance(sid)?);
+        out.extend(self.collab_advance(sid, registry, probe)?);
+        out.extend(self.advance_chain(sid, registry, probe));
+        out.extend(self.collab_advance(sid, registry, probe)?);
         self.record_events(sid, &mut out);
         Ok(out)
     }
 
     /// 目的：推进任务链：反复「派发就绪节点 → 同步跑完 → 标记完成」，直到没有可推进的。
-    ///  与 Web 生产路径（ConductorHandle 起工作线程）**同一套判定**，只是这里同步做（CLI 与测试走这条）。
-    pub(crate) fn advance_chain(&mut self, sid: &str) -> Vec<SessionEvent> {
+    ///  与 Web 生产路径（宿主起工作线程）**同一套判定**，只是这里同步做（CLI 与测试走这条）。
+    pub(crate) fn advance_chain(
+        &mut self,
+        sid: &str,
+        registry: &dyn Registry,
+        probe: &dyn HostProbe,
+    ) -> Vec<SessionEvent> {
         let mut out = Vec::new();
         loop {
-            let (events, todo) = self.spawn_ready_nodes(sid);
+            let (events, todo) = self.spawn_ready_nodes(sid, registry, probe);
             out.extend(events);
             if todo.is_empty() {
                 break;
             }
             for (node, child, objective) in todo {
-                out.extend(self.drive_node(&child, &objective));
+                out.extend(self.drive_node(&child, &objective, registry, probe));
                 let note = self.node_note(&child);
                 self.mark_node_done(sid, &node, &note);
             }
@@ -237,8 +268,10 @@ impl Conductor {
     pub(crate) fn spawn_ready_nodes(
         &mut self,
         sid: &str,
+        registry: &dyn Registry,
+        probe: &dyn HostProbe,
     ) -> (Vec<SessionEvent>, Vec<(String, String, String)>) {
-        let (ready, busy): (Vec<(String, String)>, Vec<String>) = match self.turn.session(sid) {
+        let (ready, busy): (Vec<(String, String)>, Vec<String>) = match self.session(sid) {
             Some(Session::Collab(c)) if c.plan_approved() => {
                 let chain = c.chain();
                 let busy = chain
@@ -280,12 +313,11 @@ impl Conductor {
                 continue;
             }
             taken.push(assignee.clone());
-            match self.spawn_sub_session(sid, &node) {
+            match self.spawn_sub_session(sid, &node, registry, probe) {
                 Ok(child) => {
                     // 派发文案用册子里的执行提示词模板渲染（objective 是核心 AI 写的那段任务提示词），
                     // 并附上上一次的验收结论（没有 = 首轮）：**返工必须知道上次错在哪**，否则只会原样重做。
                     let (raw, rework) = self
-                        .turn
                         .session(sid)
                         .and_then(|s| match s {
                             Session::Collab(c) => c.chain().and_then(|ch| {
@@ -312,7 +344,7 @@ impl Conductor {
                     let objective = self
                         .prompt
                         .render(Segment::ExecuteUser, &[("tasks", raw), ("rework", rework)]);
-                    if let Some(Session::Collab(c)) = self.turn.session_mut(sid) {
+                    if let Some(Session::Collab(c)) = self.session_mut(sid) {
                         c.mark_node_started(&node, &child);
                     }
                     out.push(SessionEvent::NodeStarted {
@@ -335,6 +367,8 @@ impl Conductor {
         &mut self,
         parent: &str,
         agent: &str,
+        registry: &dyn Registry,
+        probe: &dyn HostProbe,
     ) -> Result<String, String> {
         let (pmeta, _) = self.history.load(parent)?;
         let a = pmeta
@@ -374,16 +408,21 @@ impl Conductor {
         self.workspace
             .prepare(&work, std::slice::from_ref(&a.name))?;
         self.history.create(&meta)?;
-        self.turn
-            .ensure_session(&child, self.registry.as_ref(), self.probe.as_ref())?;
+        self.ensure_session(&child, registry, probe)?;
         Ok(child)
     }
 
     /// 目的：为任务链的一个节点建**子会话**：它就是该节点负责人的 agent 会话（一个 agent 一个会话）。
-    pub(crate) fn spawn_sub_session(&mut self, parent: &str, node: &str) -> Result<String, String> {
+    pub(crate) fn spawn_sub_session(
+        &mut self,
+        parent: &str,
+        node: &str,
+        registry: &dyn Registry,
+        probe: &dyn HostProbe,
+    ) -> Result<String, String> {
         let (pmeta, _) = self.history.load(parent)?;
         let assignee = {
-            let c = match self.turn.session(parent) {
+            let c = match self.session(parent) {
                 Some(Session::Collab(c)) => c,
                 _ => return Err("无此协作会话".to_string()),
             };
@@ -396,9 +435,8 @@ impl Conductor {
         // 节点的会话**就是它负责人的 agent 会话**（一个 agent 一个会话，讨论与执行不分家）。
         // 节点本身不再记在 meta 里——哪个节点正跑在这个会话里，由链的 sub_session 认。
         let _ = pmeta;
-        self.spawn_agent_session(parent, &assignee)
+        self.spawn_agent_session(parent, &assignee, registry, probe)
     }
-
     /// 目的：代理模式：一个子会话停下了 → 往**代理会话**写一条通知行（只写这一条，不转发子会话转录）。
     ///  返回被通知的代理会话名；父不是代理会话（协作节点等）就返回 None、什么都不做。
     pub(crate) fn notify_proxy_of_child(&mut self, child: &str) -> Option<String> {
@@ -443,14 +481,14 @@ impl Conductor {
         sid: &str,
         s: crate::capabilities::session::api::AgentSession,
     ) -> Option<String> {
-        self.turn.unmark_running(sid);
-        self.turn.put(sid.to_string(), Session::Single(s));
+        self.unmark_running(sid);
+        self.put(sid.to_string(), Session::Single(s));
         // 子会话完成 = 它的节点交付了：标记**正跑在这个会话里的那个节点**（产出即交付物），并交回父会话。
         // 一个 agent 一个会话（可能依次服务多个节点），所以按 sub_session 认节点，不靠 meta.node。
         let (meta, _) = self.history.load(sid).ok()?;
         let parent = meta.parent.clone()?;
         let note = self.node_note(sid);
-        let node = match self.turn.session_mut(&parent) {
+        let node = match self.session_mut(&parent) {
             Some(Session::Collab(c)) => c.running_node_of(sid),
             _ => None,
         };
@@ -470,8 +508,8 @@ impl Conductor {
         s: crate::capabilities::session::api::AgentSession,
         events: &[SessionEvent],
     ) {
-        self.turn.unmark_running(sid);
-        self.turn.put(sid.to_string(), Session::Single(s));
+        self.unmark_running(sid);
+        self.put(sid.to_string(), Session::Single(s));
         let mut ev = events.to_vec();
         self.record_events(sid, &mut ev);
     }
@@ -479,23 +517,29 @@ impl Conductor {
     /// 目的：生成线程崩溃：会话对象随线程一起没了，但**转录在盘上**。
     ///  只解除"生成中"，下次访问按落盘转录重建——绝不把会话卡在"生成中"。
     pub(crate) fn abort_running(&mut self, sid: &str) {
-        self.turn.unmark_running(sid);
+        self.unmark_running(sid);
     }
 }
 
-impl Conductor {
+impl Turn {
     /// 目的：写下本次需求（协作的起点）：需求入转录，代拟路径接着拟名单。返回期间产生的全部事件。
-    pub fn collab_set_task(&mut self, sid: &str, text: &str) -> Result<Vec<SessionEvent>, String> {
+    pub fn collab_set_task(
+        &mut self,
+        sid: &str,
+        text: &str,
+        registry: &dyn Registry,
+        probe: &dyn HostProbe,
+    ) -> Result<Vec<SessionEvent>, String> {
         let mut out = Vec::new();
         {
-            let s = self.turn.session_mut(sid).ok_or("无此会话")?;
+            let s = self.session_mut(sid).ok_or("无此会话")?;
             match s {
                 Session::Collab(c) => c.set_task(text, &mut |e| out.push(e)),
                 _ => return Err("该会话不是协作模式".to_string()),
             }
         }
-        out.extend(self.collab_advance(sid)?);
-        self.collab_tail(sid, out, None)
+        out.extend(self.collab_advance(sid, registry, probe)?);
+        self.collab_tail(sid, out, None, registry, probe)
     }
 
     /// 目的：**回答一张卡**（核心线程上同步走完的那一条）：校验与出队交给队（见 `take_card`），
@@ -510,13 +554,15 @@ impl Conductor {
         card: &str,
         option: &str,
         note: &str,
+        registry: &dyn Registry,
+        probe: &dyn HostProbe,
     ) -> Result<Vec<SessionEvent>, String> {
         let (answered, mut out) = self.take_card(sid, card, option, note)?;
         let Answered::Gate(ticket, _) = answered else {
             // 等在工作线程上的那一关（工具级确认）：回答已写进等待格，这里没有要推进的事。
             return Ok(out);
         };
-        out.extend(self.dispose_and_advance(sid, &ticket)?);
+        out.extend(self.dispose_and_advance(sid, &ticket, registry, probe)?);
         Ok(out)
     }
 
@@ -531,7 +577,7 @@ impl Conductor {
         option: &str,
         note: &str,
     ) -> Result<(Answered, Vec<SessionEvent>), String> {
-        let Some(door) = self.turn.desk().peek_gate(sid) else {
+        let Some(door) = self.desk().peek_gate(sid) else {
             return Err("[裁决] 现在没有等你定的事。".to_string());
         };
         let answered = door.answer(card, option, note)?;
@@ -548,9 +594,11 @@ impl Conductor {
         &mut self,
         sid: &str,
         ticket: &GateTicket,
+        registry: &dyn Registry,
+        probe: &dyn HostProbe,
     ) -> Result<Vec<SessionEvent>, String> {
         let mut out = Vec::new();
-        let collab = match self.turn.session_mut(sid) {
+        let collab = match self.session_mut(sid) {
             Some(Session::Collab(c)) => c,
             _ => return Err("该会话不是协作模式".to_string()),
         };
@@ -558,11 +606,11 @@ impl Conductor {
         // 放行类（开工 / 重派）：走**同步**那条（泵 + 派发并跑完就绪节点 + 验收）；
         // 其余（定名单 / 请教 / 继续讨论）只需推进一步泵。生产路径两条都在工作线程上跑。
         if go {
-            out.extend(self.collab_resume(sid)?);
+            out.extend(self.collab_resume(sid, registry, probe)?);
         } else {
-            out.extend(self.collab_advance(sid)?);
+            out.extend(self.collab_advance(sid, registry, probe)?);
         }
-        self.collab_tail(sid, out, confirmed)
+        self.collab_tail(sid, out, confirmed, registry, probe)
     }
 
     /// 目的：当前挂着的那一队裁决（没有挂起 = None）：呈现层按它渲染，回答按**队首**认卡。
@@ -570,14 +618,15 @@ impl Conductor {
     pub fn open_queue(
         &mut self,
         sid: &str,
-    ) -> Result<Option<crate::capabilities::session::api::DecisionQueue>, String> {
+        registry: &dyn Registry,
+        probe: &dyn HostProbe,
+    ) -> Result<Option<DecisionQueue>, String> {
         // 生成中的会话不在表里（对象在工作线程手里）：**队不跟着走**——工具级确认正是"生成中"问的，
         // 所以这一刻照样取得到（否则呈现层在生成中取不到卡，就答不了那一问）。
-        if !self.turn.is_running(sid) {
-            self.turn
-                .ensure_session(sid, self.registry.as_ref(), self.probe.as_ref())?;
+        if !self.is_running(sid) {
+            self.ensure_session(sid, registry, probe)?;
         }
-        Ok(self.turn.desk().peek_gate(sid).and_then(|d| d.queue()))
+        Ok(self.desk().peek_gate(sid).and_then(|d| d.queue()))
     }
 
     /// 这一步的收尾：名单刚落档就写回 meta + 建沙箱，链就绪就派节点，终结后移出中心。
@@ -586,6 +635,8 @@ impl Conductor {
         sid: &str,
         mut out: Vec<SessionEvent>,
         confirmed: Option<Vec<AgentMeta>>,
+        registry: &dyn Registry,
+        probe: &dyn HostProbe,
     ) -> Result<Vec<SessionEvent>, String> {
         if let Some(roster) = confirmed {
             let names: Vec<String> = roster.iter().map(|a| a.name.clone()).collect();
@@ -595,51 +646,46 @@ impl Conductor {
             meta.modules = flat_modules(&roster);
             self.history.create(&meta)?;
             let module_roster = self.modules.roster();
-            let sandboxes = self.sandboxes(&meta, &module_roster)?;
-            if let Some(Session::Collab(c)) = self.turn.session_mut(sid) {
+            let sandboxes = self.sandboxes(registry, probe, &meta, &module_roster)?;
+            if let Some(Session::Collab(c)) = self.session_mut(sid) {
                 c.set_sandboxes(sandboxes);
             }
         }
         // 方案过审后：就绪节点各建一个子会话——**与生产路径同一处置**，只在一边接会漏。
         // 必须在"终结后移出中心"之前做：会话一移出，链就找不到了。
-        let (spawned, _) = self.spawn_ready_nodes(sid);
+        let (spawned, _) = self.spawn_ready_nodes(sid, registry, probe);
         out.extend(spawned);
         // 会话终结后移出中心（前端据 Ended 回收）。
-        if let Some(Session::Collab(c)) = self.turn.session(sid)
+        if let Some(Session::Collab(c)) = self.session(sid)
             && c.is_done()
         {
-            self.turn.take(sid);
+            self.take(sid);
         }
         self.record_events(sid, &mut out);
         Ok(out)
     }
 
     /// 目的：协作中途改需求：只改需求那一行提示词——旧需求整行清掉，末尾追加一条「需求已修改」的新需求。
-    ///  返回重放后的完整事件流（前端整体重建，再吸收新产生的门事件）。
-    #[cfg(test)]
-    pub fn update_task(&mut self, sid: &str, text: &str) -> Result<Vec<serde_json::Value>, String> {
-        Ok(self.update_task_outcome(sid, text)?.main)
-    }
-
-    /// 目的：改需求的完整结果——主视图 + 受影响的子会话视图（改需求不再动子会话，children 恒空）。
+    ///  返回：需要重建的会话 + 已落盘的事件切片 + 下一个行号（**回档重建归宿主执行**，见 `RestoreRequest`）。
     /// 约束：不截断转录、不回退工作区；旧需求行删除后，新需求行追加在末尾，
     ///   这样讨论进行中的新需求也落在 [开始] 之后，成员下一轮看得到。
     pub(crate) fn update_task_outcome(
         &mut self,
         sid: &str,
         text: &str,
-    ) -> Result<crate::capabilities::lifecycle::api::RewindOutcome, String> {
+        registry: &dyn Registry,
+        probe: &dyn HostProbe,
+    ) -> Result<RestoreRequest, String> {
         let text = text.trim();
         if text.is_empty() {
             return Err("需求不能为空".to_string());
         }
-        if self.turn.is_running(sid) {
-            return Err(Turn::running_refusal(sid));
+        if self.is_running(sid) {
+            return Err(Self::running_refusal(sid));
         }
-        self.turn
-            .ensure_session(sid, self.registry.as_ref(), self.probe.as_ref())?;
+        self.ensure_session(sid, registry, probe)?;
         // @ 引用按本会话沙箱改写（与首次提交需求同一口径）。
-        let text = match self.turn.session(sid) {
+        let text = match self.session(sid) {
             Some(Session::Collab(c)) => c.retask_text(text),
             _ => return Err("只有协作会话有「本次需求」".to_string()),
         };
@@ -683,29 +729,27 @@ impl Conductor {
         self.history
             .replace(sid, &kept)
             .map_err(|e| format!("改需求落盘失败：{}", e))?;
-        let active = self.lifecycle.restore_session(
-            &mut self.turn,
-            RebuildDeps {
-                registry: self.registry.as_ref(),
-                probe: self.probe.as_ref(),
-            },
-            sid,
-            &meta,
-            &kept,
-            next + 1,
-        )?;
-        Ok(crate::capabilities::lifecycle::api::RewindOutcome {
-            main: active,
-            children: Vec::new(),
+        // 回档重建（行 id、标记顺序、事件顺序）只有宿主那条生命周期路径能做：
+        // 这里把「哪条会话 + 已落盘的事件切片 + 下一个行号」交出去，由调用方在同一个核心线程闭包里执行。
+        Ok(RestoreRequest {
+            sid: sid.to_string(),
+            meta,
+            events: kept,
+            next: next + 1,
         })
     }
 
     /// 目的：撤回某 agent 的「同意」：转录追加一条撤回行并提醒（模型/用户都看得到）。
-    pub fn withdraw_agree(&mut self, sid: &str, agent: &str) -> Result<Vec<SessionEvent>, String> {
-        self.turn
-            .ensure_session(sid, self.registry.as_ref(), self.probe.as_ref())?;
+    pub fn withdraw_agree(
+        &mut self,
+        sid: &str,
+        agent: &str,
+        registry: &dyn Registry,
+        probe: &dyn HostProbe,
+    ) -> Result<Vec<SessionEvent>, String> {
+        self.ensure_session(sid, registry, probe)?;
         let mut events = Vec::new();
-        match self.turn.session_mut(sid) {
+        match self.session_mut(sid) {
             Some(Session::Collab(c)) => c.withdraw_agree(agent, &mut |e| events.push(e)),
             Some(_) => return Err("只有协作会话有「同意」可撤回".to_string()),
             None => return Err("无此会话".to_string()),
@@ -715,7 +759,7 @@ impl Conductor {
     }
 }
 
-impl Conductor {
+impl Turn {
     /// 目的：这个会话此刻挂起的是哪一关（None = 没挂起）：**队首**那一关，排队里后面的还不能答。
     /// 约束：判据是队本身（同一条队）；会话不在中心 = 如实报无此会话。
     #[cfg(test)]
@@ -723,11 +767,10 @@ impl Conductor {
         &self,
         sid: &str,
     ) -> Result<Option<crate::capabilities::session::api::Pending>, String> {
-        if !self.turn.holds(sid) {
+        if !self.holds(sid) {
             return Err("无此会话".to_string());
         }
         Ok(self
-            .turn
             .desk()
             .peek_gate(sid)
             .and_then(|d| d.head())

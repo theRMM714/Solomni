@@ -127,7 +127,11 @@ pub(crate) fn same_named_tools_in_two_modules_run_in_their_own_root() {
         "系统提示里不许出现工具清单：{}",
         identity
     );
-    let events = with_live(|l| core.single_say(&sid, "干活", l)).unwrap();
+    let events = with_live(|l| {
+        core.turn
+            .single_say(&sid, "干活", l, core.registry.as_ref(), core.probe.as_ref())
+    })
+    .unwrap();
     // 信封写了 module → tool 行呈现成 模块.工具（用户一眼看出调的是谁的）。
     let tool_lines = tool_line_texts(&events);
     assert_eq!(
@@ -192,7 +196,11 @@ pub(crate) fn external_tool_without_module_is_refused_when_agent_has_many_module
         .create_work(work("w", WorkMode::Single, &["a", "b"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| core.single_say(&sid, "干活", l)).unwrap();
+    let events = with_live(|l| {
+        core.turn
+            .single_say(&sid, "干活", l, core.registry.as_ref(), core.probe.as_ref())
+    })
+    .unwrap();
     assert!(
         runner.calls.lock().expect("锁").is_empty(),
         "不猜模块，绝不落进程"
@@ -269,7 +277,15 @@ pub(crate) fn tool_call_event_is_emitted_before_the_next_round() {
             decisions: None,
             ask: None,
         };
-        core.single_say(&sid, "跑一下", &mut live).unwrap();
+        core.turn
+            .single_say(
+                &sid,
+                "跑一下",
+                &mut live,
+                core.registry.as_ref(),
+                core.probe.as_ref(),
+            )
+            .unwrap();
     }
     assert!(
         seen.contains(&"tool_call"),
@@ -290,7 +306,16 @@ pub(crate) fn tool_type_mention_in_plain_speech_is_not_misjudged() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| core.single_say(&sid, "怎么写", l)).unwrap();
+    let events = with_live(|l| {
+        core.turn.single_say(
+            &sid,
+            "怎么写",
+            l,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
+    })
+    .unwrap();
     assert!(
         tool_views(&events).is_empty(),
         "不该有工具行：{:?}",
@@ -313,7 +338,16 @@ pub(crate) fn tool_type_mention_in_plain_speech_is_not_misjudged() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| core.single_say(&sid, "再讲一次", l)).unwrap();
+    let events = with_live(|l| {
+        core.turn.single_say(
+            &sid,
+            "再讲一次",
+            l,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
+    })
+    .unwrap();
     assert!(
         tool_views(&events).is_empty(),
         "不以 JSON 为主体 → 不误判：{:?}",
@@ -337,7 +371,16 @@ pub(crate) fn tool_type_mention_in_plain_speech_is_not_misjudged() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| core.single_say(&sid, "再示范一次", l)).unwrap();
+    let events = with_live(|l| {
+        core.turn.single_say(
+            &sid,
+            "再示范一次",
+            l,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
+    })
+    .unwrap();
     assert!(
         tool_views(&events).is_empty(),
         "平衡对象不算坏信封：{:?}",

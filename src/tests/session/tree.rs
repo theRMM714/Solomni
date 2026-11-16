@@ -218,7 +218,10 @@ pub(crate) fn root_edit_keeps_child_narrowing_and_child_cannot_widen() {
         .create_work(collab_work("p", &["a"], false, "需求"))
         .unwrap()
         .sid;
-    let child = core.spawn_agent_session(&parent, "a").unwrap();
+    let child = core
+        .turn
+        .spawn_agent_session(&parent, "a", core.registry.as_ref(), core.probe.as_ref())
+        .unwrap();
     let with = |mut e: SessionEdit, p: PermissionLayer| {
         e.permission = Some(p);
         e
@@ -322,7 +325,10 @@ pub(crate) fn quick_profile_switch_updates_root_and_children_cannot_widen() {
         .create_work(collab_work("p", &["a"], false, "需求"))
         .unwrap()
         .sid;
-    let child = core.spawn_agent_session(&parent, "a").unwrap();
+    let child = core
+        .turn
+        .spawn_agent_session(&parent, "a", core.registry.as_ref(), core.probe.as_ref())
+        .unwrap();
     core.set_permission_profile(&parent, ProfileId::View)
         .expect("根快速切档");
     let (pm, _) = core.lifecycle.history_open(&parent).unwrap();

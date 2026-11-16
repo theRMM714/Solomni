@@ -58,7 +58,7 @@ pub(crate) fn collab_rewind_rebuilds_from_transcript_and_resume_waits_at_gate() 
         .unwrap()
         .sid;
     assert!(matches!(
-        core.collab_pending(&sid),
+        core.turn.collab_pending(&sid),
         Ok(Some(Pending::ConfirmBegin))
     ));
     // 回档到需求行之后（保留前 1 行 = 需求行）：协作走「按转录重建」
@@ -73,11 +73,18 @@ pub(crate) fn collab_rewind_rebuilds_from_transcript_and_resume_waits_at_gate() 
         vec!["[用户:需求] 做个东西".to_string()]
     );
     assert!(
-        matches!(core.collab_pending(&sid), Ok(Some(Pending::ConfirmBegin))),
+        matches!(
+            core.turn.collab_pending(&sid),
+            Ok(Some(Pending::ConfirmBegin))
+        ),
         "重建后仍等确认开始"
     );
     // 继续：未开始不由继续代劳，只提醒
-    let ev = with_live(|l| core.continue_flow(&sid, l)).unwrap();
+    let ev = with_live(|l| {
+        core.turn
+            .continue_flow(&sid, l, core.registry.as_ref(), core.probe.as_ref())
+    })
+    .unwrap();
     assert!(
         shown_contains(&ev, "裁决门"),
         "继续要如实提醒在裁决门等：{:?}",

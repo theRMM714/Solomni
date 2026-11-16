@@ -1,6 +1,6 @@
 # turn（回合状态）
 
-> 定位：回合状态的唯一持有者——会话在世表、运行态与创建占位、每会话的裁决队与 shell 活进程槽；会话本体、准入与重建、一席的装配材料也在这里收拢。
+> 定位：回合状态的唯一持有者——会话在世表、运行态与创建占位、每会话的裁决队与 shell 活进程槽；会话本体、准入与重建、一席的装配材料，以及回合推进、生成驱动、协作链、事件台与逐轮落盘也在这里收拢。
 > 效力：规范｜核对：2026-11-16｜依据：`src/capabilities/turn/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九，测试规范见 [TESTING.md](../../TESTING.md)。
 
@@ -16,12 +16,19 @@
 - 管：**一席事实的取用**——沙箱清单、权限面、外部工作区授权粒度、覆盖在 `Turn::member_tools` 上的工具面与上下文预算（`src/capabilities/turn/service/facts.rs`）；事实都经各能力的 `api` 取。
 - 管：**一席的装配**——`member_tools` 把取来的本席事实装配成 `MemberTools`（工具面 + 执行者 + 提示行 + 隐私注入项），`single_session` 造单 agent 会话对象，`Turn::build_single` 是 `work` 建工作两段的装配入口；纯派生在 `src/capabilities/turn/domain/assemble.rs`。
 - 不管：会话对象（`session` 的 `AgentSession`、`collab` 的 `CollabSession`）怎么长、怎么跑——本单元只放取、标记与重建。
-- 不管：生成驱动——谁在什么时候取走会话、生成完怎么放回，由调用方（`conductor` 的用例）决定；本单元不驱动生成、不发事件。
+- 管：**回合推进**——单 agent 与节点的生成准备（工具形态刷新、预算刷新、身份、前缀事件、`Prepared`）与同步生成入口、取放会话的两段（`take_single` / `take_collab` / `put_single` / `put_collab`）、裁决作废与派发目标、协作流水线推进与协作动作（链推进、节点派发、裁决卡动作、改需求）。
+- 管：**生成驱动**——单 agent / 节点、成员、协作泵、压缩五条生成链，以及七条点火器（节点执行、继续、代理回合、协作推进、裁决处置）；线程名 `solomni-*` 是行为契约的一部分，线程本身经宿主的 `TurnHost::spawn` 起。
+- 管：**事件台** `EventBus`——核心独占生产、按会话与序号增量取，回档后按会话重放；`seq` 单调，消费方只看增量。
+- 管：**逐轮落盘**——`Persister` / `persist_events` 手柄、事件收编（`record_events` / `notice_row`）与游标；落下的行 id、标记顺序与事件顺序是行为契约。
+- 不管：命令队列与时序编排——谁在什么时候调生成入口、命令怎么排队，由调用方（`conductor`）决定；本单元只在自己起的线程里推完一条链。
 - 不管：登记处本身（`registry`）——工具模式、上下文预算与核心默认模型经调用方传进来的 `&dyn Registry` 现取，`Turn` 不持有它。
 
 ## 入站契约与状态归属
 
 - 入站面：`api::TurnState`（`session` / `session_mut` / `holds` / `put` / `take` / `is_running` / `mark_running` / `unmark_running` / `running_iter` / `sessions_iter` / `is_starting` / `mark_starting` / `unmark_starting` / `desk` / `desk_for` / `shell_slot` / `shell_view`）、`api::Session`，以及 `api::Turn`（同样的访问器 + `set_base_roots` / `session_deps` / `compact_factory` / `running_refusal` / `admit` / `ensure_session` / `dispatch_gate` / `resume_subtree` / `rebuild_session` / `workspace_binding_of` / `build_proxy` / `sandboxes` / `permissions_for` / `workspace_grant` / `member_tools` / `context_budget`）；别的业务与测试只经 `api` 取用（R1）。
+- 入站面（回合推进）：`api::Turn` 的 `take_single` / `take_collab` / `put_single` / `put_collab` / `void_gates_of` / `void_gates_in_subtree` / `desk_of` / `note_system` / `bump_turn_of_child` / `compact_plan` / `refresh_tool_mode` / `prepare_single` / `prepare_node` / `open_queue` / `take_card` / `dispose_and_advance` / `update_task_outcome` / `cancelled_card` / `advance_chain` / `spawn_ready_nodes` / `notify_proxy_of_child` / `set_subtree_run` / `dispatch_target` / `record_events` / `notice_row` / `persister`。
+- 入站面（生成与事件台）：`api::single_generation` / `api::node_generation` / `api::collab_generation` / `api::compact`，七条点火器 `api::spawn_detached_*` / `api::start_child_collab`，`api::EventBus`（`push` / `push_rewound` / `head` / `snapshot` / `tail_excluding`）、`api::EventLine`，以及值类型 `Output` / `Advance` / `Prepared` / `CollabWork` / `AskReq` / `RestoreRequest`。
+- 入站面（宿主端口）：`api::TurnHost`——业务循环自己做不了、必须宿主在核心线程上代做的入口（取放状态、事件台、guest 起停、裁决队与提问端口、生成登记、线程点火、回答裁决卡）；`api::session_ask` 是提问端口的工厂。
 - 入站面（重建与代理）：`api::replay_dialogue(&[Value], ToolMode) -> (对话, 标记, 回复号, 行号, 压缩截至行, 压缩截至回复)`、`api::PROXY_PRIVATE_DIR` / `api::SPEAKER`（代理会话的私有目录名与说话人，只有一处）。
 - 入站面（装配）：`api::member_tools(&SessionDeps, &MemberSpec) -> MemberTools`、`api::single_session(&SessionDeps, &SingleSpec) -> (AgentSession, Vec<SessionEvent>)`，以及 `SessionDeps` / `MemberSpec` / `SingleSpec` 三个纯数据面；`conductor` 只负责取事实与转调。
 - 状态归属：**它自己写，别人只经 `api` 取**（R4）——在世表、运行态、创建占位、裁决队与 shell 槽只有这里增删；能力面是构造时注入的借用方，`Turn` 不拥有它们的内部状态。
@@ -29,12 +36,12 @@
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`session`（`AgentSession` / `ShellSlot` / `ShellLive` / `Decisions` / `decisions` / `GateTicket` / `Gates` / `ModuleTools` / `ServiceOp` / `ToolFace` / `MemberTools` / `SessionParams` / `SessionEvent` / `SessionMeta` / `AgentMeta` / `RunState` / `History` / `CompactChatFactory` / `ToolCallView` / `subtree_of` / `truncate_events` / `issued_in` / `role_of` / `session_kind_of` / `guest_lease_for` / `work_root` / `work_root_of` / `max_reply` / `reply_msgs` / `tool_result_body` / `last_usage` / `last_shell` / `last_compaction` / `service_ops_for_modules` / `tool_table`）、`collab`（`CollabSession`）、`kernel`（`SessionId` / `Tier` / `Log` / `HostProbe`）、`workspace`（`Workspace` / `Sandbox` / `ReadFact`）、`tools`（`Tools` / `ToolExec` / `ToolBook` / `tool_notes`）、`prompt`（`Prompt` / `Segment`）、`permission`（`PermissionSet`）、`env`（`member` / `MemberFacts` / `sandboxes` / `permissions` / `workspace_grant` / `network_allowed` / `host_read_roots`）、`modules`（`Module` / `Modules` / `Roster`）、`packages`（`PackagePlan` / `Packages`）、`registry`（`Registry`：模型通道、工具模式、核心默认模型、上下文窗口、应用设置与快照）、`residents`（`ResidentOps` / `ServiceView` / `ServiceState`）、`secrets`（`SecretOps`）、`vm`（`Vm` / `GuestOs` / `path_codec_of` / `guest_os_of` / `unavailable_modules` / `host_plan_for`）、`llm`（`Llm` / `Channel` / `Msg` / `ToolMode`）；登记处本体不归本单元，`Turn` 只经传入的 `&dyn Registry` 现取
-- 谁在用我：`conductor`（服务与命令门面都经 `self.turn.*`，装配经 `turn::api::member_tools` / `single_session`）、`src/tests/turn.rs`
+- 谁在用我：`conductor`（服务与命令门面都经 `self.turn.*`，装配经 `turn::api::member_tools` / `single_session`，生成与点火器经 `turn::api` 的入口，`ConductorHandle` 实现 `TurnHost`）、`presentation/web`（事件台增量取）、`src/tests/turn.rs` 与 `src/tests/{api,conductor,collab}` 里的事件与回合断言
 
 ## 一、取出与放回
 
 - 生成开始时取走会话对象（`take`）并标运行态：核心表里只留「它在跑」这个事实，长步骤因此不占队列。
-- 生成结束时放回（`put`）并撤运行态；**放回的时机与事件顺序由调用方决定**，本单元不落盘、不发事件。
+- 生成在工作线程上推进，事件经 `EventBus` 外送、逐轮经 `Persister` 落盘；结束时放回（`put`）并撤运行态。**取放的时机仍由调用方决定**，生成期间的取 / 交经 `TurnHost::core` 回核心线程，好让别的命令照常排队。
 - 会话进表前先落盘（`admit`）：名字即目录，落盘失败就不进表；再开时 `ensure_session` 从落盘重建，不保留进程内影子。
 - 运行态与创建占位是两套集合：前者挡改配 / 回档 / 删除，后者挡同名并发创建。
 
@@ -47,6 +54,9 @@
 - `src/capabilities/turn/service/rebuild.rs` → 重建与代理装配的行为契约（与实时逐条一致）：改一处必须同改 `src/tests/api/compaction.rs`、`src/tests/collab/cards.rs`、`src/tests/session/rewind.rs`、`src/tests/conductor/proxy.rs` 的断言。
 - `src/capabilities/turn/service/admit.rs` → 准入、按需重建、派发闸与子树续跑的唯一实现：`conductor` 的启用、派发与协作推进都经它，改语义必须同改 `src/tests/turn.rs` 的两条用例。
 - `src/capabilities/turn/service/state.rs` → 访问器是唯一写点；新增状态块要同时说明它属于谁、由谁写（R4）。
+- `src/capabilities/turn/service/turn.rs` / `flow.rs` → 回合推进与协作推进的行为契约（事件顺序、拒绝与提示文案）：改一处必须同改 `src/tests/conductor.rs`、`src/tests/collab/*` 的断言。
+- `src/capabilities/turn/service/generation*` → 五条生成链的线程名、事件外送与落盘时机是行为契约：改一处必须同改 `src/tests/api/events.rs`、`src/tests/conductor.rs`、`src/tests/api/compaction.rs` 的断言。
+- `src/capabilities/turn/api.rs` 的 `TurnHost` → 新加入口必须同改 `conductor` 的 `impl TurnHost for ConductorHandle`；它在 P5-9b 随命令队列手柄进 `src/entry/`。
 - `src/tests/turn.rs` → 五条用例钉住运行态与创建占位的相互独立、shell 槽按会话共用、准入的落盘与进表、派发闸按运行态拒绝：改语义必须同改断言。
 
 ## 本目录
