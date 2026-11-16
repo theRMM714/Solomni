@@ -67,7 +67,8 @@ function shapeProblems(tiers, dirs) {
   return problems;
 }
 
-/** 依赖边：能力 A 的文件引用了 crate::capabilities::B（剔除注释与测试模块），同一对只记一次。 */
+/** 依赖边：能力 A 的文件引用了 crate::capabilities::B（剔除注释与测试模块）。
+ *  同一对边只记一处首个命中文件与引用次数（次数给结构图当粗细，判据不看它）。 */
 function edgesOf(root, dirs) {
   const edges = new Map();
   for (const cap of dirs) {
@@ -79,7 +80,10 @@ function edgesOf(root, dirs) {
       for (const m of text.matchAll(/crate::capabilities::([a-z_][a-z0-9_]*)/g)) {
         const to = m[1];
         if (to === cap) continue;
-        if (!edges.has(cap + ">" + to)) edges.set(cap + ">" + to, f);
+        const key = cap + ">" + to;
+        const hit = edges.get(key);
+        if (hit) hit.refs++;
+        else edges.set(key, { file: f, refs: 1 });
       }
     }
   }
@@ -122,7 +126,8 @@ function layers(root) {
   const edges = edgesOf(root, dirs);
   const minimal = minimalLayers(tiers, edges);
   const fanout = new Map();
-  for (const [key, file] of [...edges].sort()) {
+  for (const [key, info] of [...edges].sort()) {
+    const file = info.file;
     const [from, to] = key.split(">");
     fanout.set(from, (fanout.get(from) || 0) + 1);
     const a = tiers.get(from);
@@ -142,7 +147,7 @@ function layers(root) {
   return { problems, notes };
 }
 
-module.exports = { layers, minimalLayers, parseLayers };
+module.exports = { layers, minimalLayers, parseLayers, edgesOf, dirsOf, rsFilesOf };
 
 /** 命令行：打印当前分层表与按依赖重算的最小层号，改表（合并 / 插入层）时看这一份。 */
 if (require.main === module) {
