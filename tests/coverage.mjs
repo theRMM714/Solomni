@@ -216,14 +216,18 @@ function print(result) {
 }
 
 /**
- * 搬运行识别：纯搬运（换文件、换路径限定、rustfmt 重排）不是新代码，不该被变更行门禁审判——
+ * 搬运行识别：纯搬运（换文件、换路径限定、统一改名、rustfmt 重排）不是新代码，不该被变更行门禁审判——
  * 它没有引入新逻辑，覆盖率也不会因为搬一次家就变。
- * 两层判据：函数级（fn 体抹掉注释与字符串、去掉路径限定后 token 相似度 ≥0.98 → 整函数算搬运）
- * 与行键兜底（归一化后逐字相同的行；给被改写了外壳的入口分派用）。
+ * 三层判据：函数级（fn 体抹掉注释与字符串、去掉路径限定后 token 相似度 ≥0.98 → 整函数算搬运）、
+ * 逻辑行键（先按续行并成一条语句，再把统一改名的标识符折回旧名，逐字相同即搬运；给改写了外壳的入口分派用）、
+ * 与整行键（同上，但不并续行）。
  * 兜底只从本次 PR 触及文件的基线版本里取行，且每个基线行只抵一次，避免一行抵掉无限新行。
  */
 const MOVE_KEY_MIN = 12;
 const MOVE_SIMILARITY = 0.98;
+// 改名票数门槛：一次改名要够多次、且占该旧名的绝大多数，才认成机械改名而不是新逻辑。
+const MOVE_RENAME_MIN = 5;
+const MOVE_RENAME_SHARE = 0.8;
 const MOVE_KEYWORDS = new Set(
   "as break const continue crate dyn else enum extern false fn for if impl in let loop match mod move mut pub ref return self Self static struct super trait true type unsafe use where while async await".split(" ")
 );
@@ -289,11 +293,14 @@ function blankSource(src) {
   return out.join("");
 }
 
-/** 归一化分词：丢掉路径限定（a::b::f 只剩 f）、Rust 关键字与 return，只留结构。 */
-function normTokens(text) {
+/**
+ * 归一化分词：丢掉路径限定（a::b::f 只剩 f）、Rust 关键字与 return，只留结构。
+ * ren 是把本次改动里统一改名的标识符折回旧名（见 renameMap），让「改名」不被算成新逻辑。 */
+function normTokens(text, ren) {
   const stripped = text.replace(/(?:[A-Za-z_][A-Za-z0-9_]*)::/g, "");
   const words = stripped.match(/[A-Za-z_][A-Za-z0-9_]*|\d+(?:\.\d+)?|[^\sA-Za-z0-9_]/g) || [];
-  return words.filter((w) => !MOVE_KEYWORDS.has(w));
+  const out = words.filter((w) => !MOVE_KEYWORDS.has(w));
+  return ren && ren.size ? out.map((w) => (ren.has(w) ? ren.get(w) : w)) : out;
 }
 
 function bagOf(tokens) {
@@ -317,7 +324,7 @@ function dice(a, b) {
 }
 
 /** 抽出所有带体的函数：名字、起止行号、归一化 token。 */
-function extractFunctions(blanked) {
+function extractFunctions(blanked, ren) {
   const lines = blanked.split(/\r?\n/);
   const starts = [];
   let off = 0;
@@ -374,17 +381,108 @@ function extractFunctions(blanked) {
       name: m[1],
       first: lineOf(m.index),
       last: lineOf(end),
-      bag: bagOf(normTokens(blanked.slice(open, end + 1)).filter((t) => !MOVE_NOISE.has(t))),
+      bag: bagOf(normTokens(blanked.slice(open, end + 1), ren).filter((t) => !MOVE_NOISE.has(t))),
     });
     re.lastIndex = end;
   }
   return out;
 }
 
-/** 行键：归一化后拼接；太短的行（只有一个花括号、else 之类）不参与兜底，免得满屏误判。 */
-function lineKey(text) {
-  const key = normTokens(text).join("");
+/** 行键：归一化后拼接；太短的（只有一个花括号、else 之类）不参与兜底，免得满屏误判。 */
+function lineKey(text, ren) {
+  const key = normTokens(text, ren).join("");
   return key.length >= MOVE_KEY_MIN ? key : null;
+}
+
+/** 括号净深度：负值也返回，用来判断一条链有没有写完。 */
+function depthOf(text) {
+  let d = 0;
+  for (const c of text) {
+    if (c === "(" || c === "[" || c === "{") d++;
+    else if (c === ")" || c === "]" || c === "}") d--;
+  }
+  return d;
+}
+
+/**
+ * 逻辑行：rustfmt 会把一条语句拆成多行（链式调用、长实参），逐行比会把拆出来的行当成新行。
+ * 把「还没写完」的行与以 . ) ] 起头的续行并成一条再取行键，命中时整段一起标搬运。
+ */
+function logicalLines(lines) {
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const first = lines[i].trim();
+    if (!first) continue;
+    let text = first;
+    let to = i;
+    while (to + 1 < lines.length) {
+      const next = lines[to + 1].trim();
+      if (!next) break;
+      const open = depthOf(text) > 0 || /[=,(\[.+*&|?:]$/.test(text) || /^=>$/.test(text);
+      const chain = /^[.)\]]/.test(next);
+      if (!open && !chain) break;
+      if (/\{$/.test(text)) break;
+      text += " " + next;
+      to++;
+    }
+    out.push({ from: i + 1, to: to + 1, key: lineKey(text) });
+    i = to;
+  }
+  return out;
+}
+
+/**
+ * 改名表：同一次改动里被整体改名的标识符（`ops` → `faces` 这类机械改名）。
+ * 只在等长的增删块里逐行配对投票，票数够（≥5 且占该旧名 ≥80%）才认，免得把新逻辑当成搬运。
+ */
+function renameMap(base) {
+  const r = spawnSync("git", ["diff", "--unified=0", "--no-color", base + "...HEAD", "--", "*.rs"], {
+    cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024,
+  });
+  const ren = new Map();
+  if (r.status !== 0) return ren;
+  const votes = new Map();
+  let minus = [];
+  let plus = [];
+  const flush = () => {
+    if (minus.length && minus.length === plus.length) {
+      for (let i = 0; i < minus.length; i++) {
+        const a = normTokens(minus[i]);
+        const b = normTokens(plus[i]);
+        if (a.length !== b.length) continue;
+        const diffs = [];
+        for (let k = 0; k < a.length; k++) if (a[k] !== b[k]) diffs.push([a[k], b[k]]);
+        if (diffs.length !== 1) continue;
+        const [o, w] = diffs[0];
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(o) || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(w)) continue;
+        const key = o + "->" + w;
+        votes.set(key, (votes.get(key) || 0) + 1);
+      }
+    }
+    minus = [];
+    plus = [];
+  };
+  for (const line of r.stdout.split(/\r?\n/)) {
+    if (line.startsWith("@@") || line.startsWith("diff ") || line.startsWith("---") || line.startsWith("+++")) {
+      flush();
+      continue;
+    }
+    if (line.startsWith("+")) plus.push(line.slice(1));
+    else if (line.startsWith("-")) minus.push(line.slice(1));
+  }
+  flush();
+  const byOld = new Map();
+  for (const [k, n] of votes) {
+    const [o, w] = k.split("->");
+    if (!byOld.has(o)) byOld.set(o, []);
+    byOld.get(o).push([w, n]);
+  }
+  for (const [o, list] of byOld) {
+    list.sort((x, y) => y[1] - x[1]);
+    const total = list.reduce((s, x) => s + x[1], 0);
+    if (list[0][1] >= MOVE_RENAME_MIN && list[0][1] / total >= MOVE_RENAME_SHARE) ren.set(o, list[0][0]);
+  }
+  return ren;
 }
 
 /** 本次 PR 触及的 Rust 文件与它们在基线的旧路径（重命名与修改给旧路径，新增没有）。 */
@@ -413,26 +511,37 @@ function baseSource(base, file) {
 /** 变更行里哪些是纯搬运：Map<文件, Set<行号>>。 */
 function movedLines(base, wanted, root = ROOT) {
   const pairs = changedPairs(base).filter((p) => p.new && wanted.has(p.new));
+  const ren = renameMap(base);
+  const keyOf = (text) => lineKey(text, ren);
   const baseByName = new Map();
   const keysLeft = new Map();
+  const addKey = (k) => {
+    if (k) keysLeft.set(k, (keysLeft.get(k) || 0) + 1);
+  };
   for (const p of pairs) {
     const src = p.old ? baseSource(base, p.old) : null;
     if (src == null) continue;
     const blanked = blankSource(src);
-    for (const f of extractFunctions(blanked)) {
+    for (const f of extractFunctions(blanked, ren)) {
       if (!baseByName.has(f.name)) baseByName.set(f.name, []);
       baseByName.get(f.name).push(f);
     }
-    for (const line of blanked.split(/\r?\n/)) {
-      const key = lineKey(line);
-      if (key) keysLeft.set(key, (keysLeft.get(key) || 0) + 1);
-    }
+    const lines = blanked.split(/\r?\n/);
+    for (const g of logicalLines(lines)) addKey(g.key);
+    for (const line of lines) addKey(keyOf(line));
   }
   const moved = new Map();
   const mark = (file, from, to) => {
     if (!moved.has(file)) moved.set(file, new Set());
     const set = moved.get(file);
     for (let l = from; l <= to; l++) set.add(l);
+  };
+  const take = (k, file, from, to) => {
+    if (!k) return;
+    const left = keysLeft.get(k) || 0;
+    if (!left) return;
+    keysLeft.set(k, left - 1);
+    mark(file, from, to);
   };
   for (const p of pairs) {
     let src;
@@ -442,7 +551,7 @@ function movedLines(base, wanted, root = ROOT) {
       continue;
     }
     const blanked = blankSource(src);
-    for (const f of extractFunctions(blanked)) {
+    for (const f of extractFunctions(blanked, ren)) {
       let best = 0;
       for (const c of baseByName.get(f.name) || []) {
         best = Math.max(best, dice(f.bag, c.bag));
@@ -451,14 +560,8 @@ function movedLines(base, wanted, root = ROOT) {
       if (best >= MOVE_SIMILARITY) mark(p.new, f.first, f.last);
     }
     const lines = blanked.split(/\r?\n/);
-    for (let i = 0; i < lines.length; i++) {
-      const key = lineKey(lines[i]);
-      if (!key) continue;
-      const left = keysLeft.get(key) || 0;
-      if (!left) continue;
-      keysLeft.set(key, left - 1);
-      mark(p.new, i + 1, i + 1);
-    }
+    for (const g of logicalLines(lines)) take(g.key, p.new, g.from, g.to);
+    for (let i = 0; i < lines.length; i++) take(keyOf(lines[i]), p.new, i + 1, i + 1);
   }
   return moved;
 }

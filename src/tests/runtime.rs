@@ -7,6 +7,8 @@ mod ask_user;
 mod proxy;
 use super::builders::*;
 use super::prelude::*;
+// 只有非 macOS 的用例用得到这个面（macOS 上其余用例整体 cfg 掉）。
+#[cfg(not(target_os = "macos"))]
 use crate::presentation::faces::Faces;
 
 /// 造一台"根在给定目录、补齐面报给定清单"的核心（只为验外部工具路径的取法）。
