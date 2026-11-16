@@ -136,6 +136,44 @@ function scanRustLines(text) {
   return { blockAt: blockAt, isComment: isComment, comments: comments, blockTexts: blockTexts };
 }
 
+/** 文件头四槽的原文与结构问题：`//!` 槽名行开一槽，缩进行并入上一槽，其余算槽外行。
+ *  注释契约与结构图共用这一个解析器——面板里看到的头就是门禁判的头。 */
+function headerOf(text) {
+  const lines = text.split(/\r?\n/);
+  let i = 0;
+  while (i < lines.length && (lines[i].trim() === "" || /^\s*#!\[/.test(lines[i]))) i++;
+  const slots = [];
+  const stray = [];
+  while (i < lines.length && lines[i].startsWith("//!")) {
+    const raw = lines[i].slice(3);
+    const body = raw.trim();
+    const hit = HEADER_SLOTS.find((s) => body.startsWith(s + "："));
+    if (hit) { slots.push({ name: hit, text: body.slice(hit.length + 1).trim() }); i++; continue; }
+    if (/^ {2,}/.test(raw) && slots.length) {
+      const last = slots[slots.length - 1];
+      if (body) last.text = (last.text ? last.text + " " : "") + body;
+      i++;
+      continue;
+    }
+    stray.push(i + 1);
+    i++;
+  }
+  return { slots, stray };
+}
+
+/** 一批文件的四槽原文（仓库相对路径 → 槽名到正文）；结构图的点击面板用这一份。 */
+function headers(rels) {
+  const out = {};
+  for (const rel of [...rels].sort()) {
+    const abs = path.join(ROOT, rel);
+    if (!fs.existsSync(abs)) continue;
+    const slots = {};
+    for (const s of headerOf(fs.readFileSync(abs, "utf8")).slots) slots[s.name] = s.text;
+    out[rel] = slots;
+  }
+  return out;
+}
+
 function scanCommentContract() {
   const findings = [];
   const files = rsFiles(path.join(ROOT, "src"), []).concat(rsFiles(path.join(ROOT, "tests"), []));
@@ -145,20 +183,11 @@ function scanCommentContract() {
     const lines = text.split(/\r?\n/);
     const at = (n, rule) => findings.push({ file: rel, line: n, rule });
     // ① 文件头
-    let i = 0;
-    while (i < lines.length && (lines[i].trim() === "" || /^\s*#!\[/.test(lines[i]))) i++;
-    const slots = [];
-    while (i < lines.length && lines[i].startsWith("//!")) {
-      const raw = lines[i].slice(3);
-      const body = raw.trim();
-      const hit = HEADER_SLOTS.find((s) => body.startsWith(s + "："));
-      if (hit) { slots.push(hit); i++; continue; }
-      if (/^ {2,}/.test(raw) && slots.length) { i++; continue; }
-      at(i + 1, RULES.headerStray);
-      i++;
-    }
-    if (!slots.length) at(1, RULES.headerMissing);
-    else if (slots.join("|") !== HEADER_SLOTS.join("|")) at(1, RULES.headerOrder);
+    const head = headerOf(text);
+    for (const ln of head.stray) at(ln, RULES.headerStray);
+    const names = head.slots.map((s) => s.name);
+    if (!names.length) at(1, RULES.headerMissing);
+    else if (names.join("|") !== HEADER_SLOTS.join("|")) at(1, RULES.headerOrder);
     const lex = scanRustLines(text);
     for (const ln of lex.blockAt) at(ln, RULES.inlineBlock);
     // ② 附着在 pub 项上的文档块
@@ -680,4 +709,4 @@ function main() {
 }
 
 if (require.main === module) process.exit(main());
-module.exports = { scanCommentContract, commentLexerSelfTest, semanticSelfTest, semanticFindings, semanticHits, deletedGapIds, contentFindings, RULES, LEDGERS };
+module.exports = { scanCommentContract, headerOf, headers, commentLexerSelfTest, semanticSelfTest, semanticFindings, semanticHits, deletedGapIds, contentFindings, RULES, LEDGERS };
