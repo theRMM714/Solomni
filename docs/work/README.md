@@ -28,7 +28,7 @@
 
 - 经 `::api` 用到：`collab`、`env`、`llm`、`modules`、`packages`、`permission`、`prompt`、`provision`、`registry`、`session`、`slate`、`tools`、`turn`、`vm`、`workspace`；`kernel` 的 `Tier` / `SessionId` / `Log` / `HostProbe` / `ExecSpec`。
 - 谁在用我：`runtime`（`WorkOps` / `TurnOps` / `RuntimeOps` 的薄转发与 `Faces` 装配）、`presentation`（视图类型与 `diagnose_text`）。
-- **不引用 `runtime`**：依赖只向下（`layers.yaml` 的 `work: 9`、`runtime: 10`）。
+- **不引用 `runtime`**：依赖只向下，`work` 在 `runtime` 之下（`layers.yaml`）。
 
 ## 一、两段式：准备与提交
 

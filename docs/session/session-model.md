@@ -329,7 +329,7 @@ session/<工作名>/
 - 跨会话同步：主会话回档时，**整棵子树**（子会话、孙会话……）按同一个**回合 id** 收窗——每个会话截到"最后一个 `turn ≤ T` 的行"，并写同一个 `mark` id（同一份 `shared` / `heads` / `label`）；恢复时按这个 id 在各会话里找到标记并一起截断、一起物化。
 - **删除不可恢复，但会先报账**：删除点之后还存在的留档引用（`refs/archive/<mark>`）会在同一次删除里作废；后端先拒绝并报出数量与标记，界面据此二次确认，确认后才带 `force` 重放。作废只删引用，文件已经落到删除点，未提交内容在 `lost` 里。
 
-- 实现位置：`src/capabilities/lifecycle/service/rewind.rs`（第 9 层的 `lifecycle` 单元，见 [docs/lifecycle/README.md](../lifecycle/README.md)）；本节的判据与顺序以那里为准。
+- 实现位置：`src/capabilities/lifecycle/service/rewind.rs`（`lifecycle` 单元，见 [docs/lifecycle/README.md](../lifecycle/README.md)）；本节的判据与顺序以那里为准。
 
 - **按行精确物化共享区**：每个提交记录带 `(agent, line)` 锚（用户投喂锚在主会话当时的行号，agent 提交锚在它自己会话的行号）。回档时按"各会话的保留行"逐个提交比对，取最后一个"所有锚都还没越过保留行"的提交点再物化；删除额外丢弃不再可达的提交并把各 agent 的基线对齐到该点，恢复一条不删（离开的线钉进 `refs/live`）。行锚由每席的 `MemberTools.line` 随转录推进（成员工具面由 `src/capabilities/session/service/assemble.rs` 装配，`line` 随会话持有）：显式 `work_commit` 经 `ToolCtx` 拿到它，写工具落地后的自动提交与批次末的沙箱采纳都读同一处（采纳的提交记 `source=external`、作者仍是该 agent，所以留档同样能把它退掉）。
 

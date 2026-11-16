@@ -97,3 +97,25 @@
     非 Windows 上 `--setup=path` 能生成可执行的 `bin/solomni` 并按用户确认写入或提示 rc；
     `--setup=status` 如实报告 shim 与 PATH 事实；`unset` / `undo` 幂等且可还原。
   blocked_by: 本批范围决定（POSIX 只打印指引，见 PR #80 的「明确不做」）
+
+- id: kernel.pwsh-alias
+  scope: global
+  level: T3
+  why: |
+    Windows 上 shell 工具默认挑 `pwsh`：`src/kernel/detail/process/windows.rs` 的解析只看
+    `crate::kernel::detail::host_probe::find_exe` 找得到文件就选它，不判它是不是**应用执行别名**。
+    Store 版 PowerShell 的 `pwsh.exe` 是重解析点（真身不在安装目录），围栏里的 cmd 起它失败：
+    回执只有一行系统文案（`The system cannot execute the specified program.`），表现为 shell 调用
+    一律退出码 1、耗时 0 秒，且**不回落**到 Windows PowerShell 5.1。
+    复现：`SOLOMNI_FENCE_LIVE=1 cargo test --bin solomni real_shell_uses_powershell_utf8_exit_code_and_cleans_its_script`
+    在本机（只有 Store 版 pwsh）失败；把程序换成 `powershell` 则通过。不是本批改动引入：
+    `git diff origin/main -- src/kernel/detail/process/windows.rs` 为空。
+  how: |
+    1) 解析期只认真身：`pwsh` 是重解析点（应用执行别名）时落 `powershell`；判据做成纯函数，
+       补三态用例（真文件 / 别名 / 缺失）；
+    2) 回执说人话：解释器起不来时明说「<program> 无法执行（疑似应用执行别名）」并给出实际用的程序；
+    3) 不做运行期换程序重试——会吞掉真错误，一次调用变两次。
+  accept: |
+    应用执行别名的 `pwsh` 不再被选中；真 `pwsh` 仍优先于 Windows PowerShell 5.1；
+    解释器起不来时回执能看出被回退到哪个程序；`node run-tests.js` 全绿。
+  blocked_by: 缺少实现（根因已定位，修法待做）

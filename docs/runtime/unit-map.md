@@ -8,9 +8,9 @@
 
 > 它与别的能力**平级**：只经各能力的 `api` 编排，**不持任何别人的端口**（R12）。
 > 它拥有的是**没有任何参与方拥有**的那部分不变式：命令队列、门面与动作分发、跨会话编排；会话在世表、运行态、回合推进、事件台与落盘归 `turn`。
-> 「工作是什么样」的用例（建工作两段、改配、视图、运行报告、guest 生命周期、建议与激活）在 `work`（第 9 层，见 [../work/unit-map.md](../work/unit-map.md)），本单元只留应用编排与同名薄转发。
-> 「历史生命周期」的用例（回档三模式、历史列表与只读打开、删除的报账与收尾）在 `lifecycle`（第 9 层，见 [../lifecycle/unit-map.md](../lifecycle/unit-map.md)），本单元只给时机。
-> 「核心代理工具」的工具面（六工具的载荷、授权判据、幂等账与 `ProxyHandler`）与宿主契约 `ProxyHost` 在 `proxy`（第 9 层，见 [../proxy/unit-map.md](../proxy/unit-map.md)），本单元只留队列桥 `ProxyBridge` 与它的装配。
+> 「工作是什么样」的用例（建工作两段、改配、视图、运行报告、guest 生命周期、建议与激活）在 `work`（见 [../work/unit-map.md](../work/unit-map.md)），本单元只留应用编排与同名薄转发。
+> 「历史生命周期」的用例（回档三模式、历史列表与只读打开、删除的报账与收尾）在 `lifecycle`（见 [../lifecycle/unit-map.md](../lifecycle/unit-map.md)），本单元只给时机。
+> 「核心代理工具」的工具面（六工具的载荷、授权判据、幂等账与 `ProxyHandler`）与宿主契约 `ProxyHost` 在 `proxy`（见 [../proxy/unit-map.md](../proxy/unit-map.md)），本单元只留队列桥 `ProxyBridge` 与它的装配。
 
 | 文件 | 职责 |
 | --- | --- |
