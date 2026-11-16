@@ -1,6 +1,6 @@
 # conductor（协调业务）
 
-> 定位：应用编排——命令队列、协作链推进、代理工具族、动作分发、历史生命周期的时机，以及把各能力组装成 `Ops`。
+> 定位：应用编排——命令队列、协作链推进、代理工具的宿主（队列桥）、动作分发、历史生命周期的时机，以及把各能力组装成 `Ops`。
 > 效力：规范｜核对：2026-11-16｜依据：`src/capabilities/conductor/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九，测试规范见 [TESTING.md](../../TESTING.md)。
 
@@ -8,7 +8,7 @@
 
 - 管：会话中心——命令队列与派发闸；会话在世表、运行态与创建占位在 `turn` 里，只经它的 `api` 读写。
 - 管：**协作链推进与协作动作**（`src/capabilities/conductor/service/flow.rs`）：链推进、节点派发与子会话、协作步与裁决卡动作。
-- 管：**代理工具族**（`src/capabilities/conductor/service/proxy.rs`、`src/capabilities/conductor/ports.rs`、`src/capabilities/conductor/domain/proxy.rs`）：代理工具的执行面、队列桥与授权校验；代理会话的装配在 `turn`（`build_proxy`），「建一个代理工作」的用例在 `work`。
+- 管：**代理工具的宿主与时序**（`src/capabilities/conductor/service/proxy.rs`）：队列桥 `ProxyBridge` 实现 `proxy` 的 `ProxyHost`（清单 / 建会话 / 转达 / 观察 / 控制 / 消息都回到核心线程），以及代理工具面在代理会话里的挂载（`src/capabilities/conductor/api/handle.rs` 的 `inject_proxy_handler`）；工具面、授权判据与幂等账已下沉到 `proxy`（第 9 层，见 [../proxy/README.md](../proxy/README.md)），代理会话的装配在 `turn`（`build_proxy`），「建一个代理工作」的用例在 `work`。
 - 管：生成驱动——**长步骤一律 own-and-return**（见「一、长步骤的边界」）：生成、协作泵、压缩、起 / 停 guest 都不在队列里跑，队列只占「取 / 交」两步；建会话 / 启用历史会话 / 改配 / 删会话的 guest 启停在调用方线程上（起停对象在 `src/capabilities/work/service/guest_job.rs`）。
 - 管：动作分发（`src/capabilities/conductor/api/action.rs`）与事件收编 / 增量落盘（`src/capabilities/conductor/service/history.rs`）。
 - 管：**历史生命周期的时机**——回档三模式、历史列表 / 只读打开与删除的调用点在这里（用例与顺序在 `lifecycle`，第 9 层，见 [../lifecycle/README.md](../lifecycle/README.md)）。
@@ -25,7 +25,7 @@
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`collab`、`env`、`kernel`、`lifecycle`、`llm`、`modules`、`permission`、`prompt`、`provision`、`registry`、`residents`、`secrets`、`session`、`slate`、`taskchain`、`tools`、`turn`、`vm`、`work`、`workspace`
+- 经 `::api` 用到：`collab`、`env`、`kernel`、`lifecycle`、`llm`、`modules`、`permission`、`prompt`、`proxy`、`provision`、`registry`、`residents`、`secrets`、`session`、`slate`、`taskchain`、`tools`、`turn`、`vm`、`work`、`workspace`
 - 谁在用我：`cli`、`web`
 
 ## 一、长步骤的边界

@@ -103,7 +103,7 @@ roles:
 
 ## 四、动作与分发（一张表，两条执行路径）
 
-- **动作表是参数契约与授权的唯一真相**：每条动作声明参数契约与 `callers`，校验按声明做、授权按 `callers` 判——这两步只有一套规则，不随调用方变。**执行**有两条实现，各在自己的能力里：呈现侧（人）走 `conductor` 的 `ActionOps::act`（`src/capabilities/conductor/api/action.rs`，校验 → 授权 → 执行 → 审计四步在一处），模型代理侧走 `ProxyTools::call`（`src/capabilities/conductor/service/proxy.rs`，同样是查表 → 校验 → 授权 → 交宿主，另有幂等账）。两条路径共用同一张表与同一份授权规则，但**不共用同一段执行代码**——把它们写成一处需要呈现层与模型回环互相依赖，会成环。
+- **动作表是参数契约与授权的唯一真相**：每条动作声明参数契约与 `callers`，校验按声明做、授权按 `callers` 判——这两步只有一套规则，不随调用方变。**执行**有两条实现，各在自己的能力里：呈现侧（人）走 `conductor` 的 `ActionOps::act`（`src/capabilities/conductor/api/action.rs`，校验 → 授权 → 执行 → 审计四步在一处），模型代理侧走 `ProxyTools::call`（`src/capabilities/proxy/service/proxy.rs`，同样是查表 → 校验 → 授权 → 交宿主，另有幂等账）。两条路径共用同一张表与同一份授权规则，但**不共用同一段执行代码**——把它们写成一处需要呈现层与模型回环互相依赖，会成环。
 
 - **两个适配器**：模型侧（`ToolHandler`，按名字认领）与呈现侧（`POST /api/actions/{id}`、`GET /api/actions` 动作目录）都只负责造一次 `ActionCall`（动作 id + 参数 + 调用者身份）并各按自己的媒介呈现结果——模型侧拿文本回执，呈现侧拿结构化结果。**同一份声明，两种呈现。**
 - **读取与视图不进动作表**：会话列表 / 配置 / 文件清单 / 历史是读接口，事实仍只有**事件台**一条来路。
@@ -155,7 +155,7 @@ roles:
 - **为什么**：这些载荷要驱动下一步（建会话、派发、推进或定向返工）；正文 JSON 既没有 schema 校验、也不进工具台账，写坏就整轮失败。
 - **普通说话仍可以是正文**：不驱动核心的发言（讨论意见、执行席的收尾话）不必包成工具——这就是"说话"与"操作"的分界。
 - **工具与载荷形状**在 `systools/tools.yaml`（`plan` / `node_verdict` / `checklist` / `slate` / `submit_report` …）。
-- **核心代理的工具面**（`core_proxy`，逐项见「角色与工具面」表）同样只从工具参数取载荷；外部动作经 `ports::ProxyHost`（生产宿主是 `src/capabilities/conductor/service/proxy.rs` 的队列桥，见「边界」）。子会话**不把整份转录推给核心**：门与意外停止由机制送达，正文经 `read_session_messages` 倒查。
+- **核心代理的工具面**（`core_proxy`，逐项见「角色与工具面」表）同样只从工具参数取载荷；外部动作经 `proxy::api` 的 `ProxyHost`（生产宿主是 `src/capabilities/conductor/service/proxy.rs` 的队列桥，见「边界」）。子会话**不把整份转录推给核心**：门与意外停止由机制送达，正文经 `read_session_messages` 倒查。
 - **载荷不合法 → 如实失败并中止这一步**（不猜、不回落正文 JSON）。
 - **核心可以先核实**：模型先请求 `read` / `search` 时，核心执行并把结果回灌，然后再要那一次核心操作调用；它用的是**只读**小环境（根 = 本次工作的共享区，只发声明里 `capability: fs-read` 的工具）。没有这条回路，模型一想核实就会被判"没有调用 X"而整步中断。
 

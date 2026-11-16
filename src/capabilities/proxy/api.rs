@@ -1,12 +1,12 @@
-//! 目的：协调业务的出站端口——核心代理工具要做的外部动作（清单 / 建会话 / 转达 / 观察 / 生命周期）。
-//! 管：ProxyHost trait 的方法契约：catalog / create_session / send / observe / control / messages。
-//! 不管：工具层参数解析与授权校验（domain/proxy.rs、service/proxy.rs）；会话机制与队列（见生产实现）。
-//! 联动：domain/proxy.rs 与 service/proxy.rs 只依赖这一面；ProxyBridge 把调用交给核心线程的 Conductor::proxy_*。
+//! 目的：proxy 的唯一入口——值类型、宿主契约（`ProxyHost`）与成员侧执行面（`ProxyHandler` / `ProxyTools`）。
+//! 管：domain 的值类型与纯规则经这里转出；`ProxyHost` 的方法契约。
+//! 不管：真实会话动作（宿主动手）；工具声明与角色面（`systools/`）。
+//! 联动：conductor 只经这里取用；宿主实现在 conductor 的 `ProxyBridge`。
 
-use crate::capabilities::conductor::domain::proxy::{
-    Catalog, CatalogScope, ControlAction, ControlState, Created, MessagesPage, NewSession,
-    ObserveView, Relayed, Snapshot,
-};
+pub use crate::capabilities::proxy::domain::proxy::*;
+/// 目的：成员侧执行面——`ProxyHandler` 挂进代理会话那一回合的工具表，`ProxyTools` 由测试直接驱动（不在生产路径上按名取）。
+#[allow(unused_imports)]
+pub(crate) use crate::capabilities::proxy::service::proxy::{ProxyHandler, ProxyTools};
 
 /// 目的：代理工具的宿主——把工具层的动作落到真实会话上。失败一律如实回报（不静默降级）。
 pub trait ProxyHost: Send + Sync {
@@ -30,7 +30,6 @@ pub trait ProxyHost: Send + Sync {
         action: ControlAction,
         reason: &str,
     ) -> Result<ControlState, String>;
-    /// 倒查一个会话的消息：`from` = 距最新多少条（0 = 最新一条），按新→旧取 `count` 条。
-    /// **只读**：不推进会话，也不把整份转录推给调用方。
+    /// 倒查一个会话的消息：`from` = 距最新多少条（0 = 最新一条），按新→旧取 `count` 条。**只读**。
     fn messages(&self, session: &str, from: usize, count: usize) -> Result<MessagesPage, String>;
 }

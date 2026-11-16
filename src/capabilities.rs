@@ -14,6 +14,7 @@ pub mod packages;
 pub mod permission;
 pub mod prompt;
 pub mod provision;
+pub mod proxy;
 pub mod registry;
 pub mod residents;
 pub mod secrets;

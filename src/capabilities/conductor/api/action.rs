@@ -4,7 +4,7 @@
 //! 联动：声明与 callers 在 `systools/tools.yaml`；角色面在 `systools/roles.yaml`；呈现层只造 `ActionCall`（见 docs/tools/tools-and-roles.md）。
 
 use super::*;
-use crate::capabilities::conductor::domain::proxy as d;
+use crate::capabilities::proxy::api as d;
 use crate::capabilities::registry::api::{AppSettings, RegistryOps, StorageSettings};
 use crate::capabilities::tools::api::{ToolSchema, arg_fault_text};
 use crate::capabilities::workspace::api::MAX_ASSET_BYTES;
