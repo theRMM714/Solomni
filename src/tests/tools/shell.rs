@@ -1,12 +1,12 @@
 //! 目的：shell 的权限与派发契约测试——scope 派生的围栏、档位决定、runtime roots 与 guest 派发。
 //! 管：workspace 拒绝 external、external 档 ask、all_reach 不问、view 不发放、按次 profile 与 guest 超时。
 //! 不管：真实进程 / 平台围栏（在 kernel 的 process 测试）与 VM 引擎实现。
-//! 联动：systools/tools.yaml 的 shell 声明、tools/domain/shell.rs、collab 的 tool_loop。
+//! 联动：systools/tools.yaml 的 shell 声明、tools/domain/shell.rs、session 的 engine/tools。
 use super::super::builders::*;
 use super::super::prelude::*;
-use crate::capabilities::collab::service::tool_loop::{ConfirmGate, ToolConfirm, run_batch};
 use crate::capabilities::permission::api::{Effect, PermissionDefaults, ProfileId};
 use crate::capabilities::session::api::{OPT_TOOL_ALLOW, SessionEvent};
+use crate::capabilities::session::service::engine::tools::{ConfirmGate, ToolConfirm, run_batch};
 use crate::capabilities::tools::api::ToolBook;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 
@@ -640,8 +640,8 @@ pub(crate) fn ask_without_a_confirming_frontend_is_refused() {
 /// 目的：闸门已解析过参数，执行入口的单点防御仍要如实拒绝坏参数（不起进程、不发明事实）。
 #[test]
 pub(crate) fn shell_entry_refuses_unparsable_args() {
-    use crate::capabilities::collab::service::tool_loop::{CallGrant, run_shell};
     use crate::capabilities::permission::api::{Decision, Reach, ReachSet};
+    use crate::capabilities::session::service::engine::tools::{CallGrant, run_shell};
     let runner = Arc::new(ShellRunner::new("ok", true));
     let mt = member(Arc::clone(&runner));
     let grant = CallGrant {
@@ -662,8 +662,8 @@ pub(crate) fn shell_entry_refuses_unparsable_args() {
 /// 目的：装配缺了 shell 声明时，执行入口如实说"工具不可用"，不起进程。
 #[test]
 pub(crate) fn shell_entry_refuses_when_the_declaration_is_missing() {
-    use crate::capabilities::collab::service::tool_loop::{CallGrant, run_shell};
     use crate::capabilities::permission::api::{Decision, Reach, ReachSet};
+    use crate::capabilities::session::service::engine::tools::{CallGrant, run_shell};
     let runner = Arc::new(ShellRunner::new("ok", true));
     let mut mt = member(Arc::clone(&runner));
     mt.face.builtin_tools.remove("shell");

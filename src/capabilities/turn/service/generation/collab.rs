@@ -45,7 +45,7 @@ pub(crate) fn collab_generation<H: TurnHost>(
     // 握手通道：泵 → 主线程（要一个成员回合）；主线程 → 泵（回合结果）。
     let (ask_tx, ask_rx) = std::sync::mpsc::channel::<AskReq>();
     let (turn_tx, turn_rx) =
-        std::sync::mpsc::channel::<Result<crate::capabilities::collab::api::MemberTurn, String>>();
+        std::sync::mpsc::channel::<Result<crate::capabilities::session::api::MemberTurn, String>>();
     let worker =
         {
             let sid = sid.to_string();

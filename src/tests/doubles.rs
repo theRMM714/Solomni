@@ -24,7 +24,7 @@ use crate::capabilities::prompt::ports::PromptSource;
 use crate::capabilities::registry::api::{ModelEntry, Provider, Settings};
 use crate::capabilities::registry::ports::SettingsStore;
 use crate::capabilities::runtime::service::Core;
-use crate::capabilities::session::api::Live;
+use crate::capabilities::session::api::TurnIo;
 use crate::capabilities::session::api::{HistoryView, SessionMeta};
 use crate::capabilities::session::ports::HistoryStore;
 use crate::capabilities::tools::ports::SystoolsSource;

@@ -8,6 +8,7 @@ use crate::capabilities::session::domain::persist::persist_policy_for;
 use crate::capabilities::session::ports::HistoryStore;
 use std::sync::Arc;
 
+pub mod engine;
 pub(crate) mod tree;
 
 /// 目的：会话能力：持历史落盘端口，按用例答话。
@@ -180,18 +181,19 @@ pub fn core_operation(
     let face_rows: Vec<(&str, &crate::capabilities::tools::api::ToolSchema)> =
         systools.tool_face(role).unwrap_or_default();
     let face_ids: Vec<String> = face_rows.iter().map(|(id, _)| id.to_string()).collect();
-    let mut opts = opts;
-    if let Some(c) = cancel {
-        opts.cancel = Some(crate::capabilities::llm::api::cancel_flag(
-            std::sync::Arc::clone(c),
-        ));
-    }
+    // 声明面先备好：它被 opts 借走，**必须先于 opts 声明**（否则借用活得比它长）。
     let decls: Vec<crate::capabilities::llm::api::ToolDecl> =
         if mode == crate::capabilities::llm::api::ToolMode::Native {
             face_rows.iter().map(|(id, s)| s.decl(id)).collect()
         } else {
             Vec::new()
         };
+    let mut opts = opts;
+    if let Some(c) = cancel {
+        opts.cancel = Some(crate::capabilities::llm::api::cancel_flag(
+            std::sync::Arc::clone(c),
+        ));
+    }
     if !decls.is_empty() {
         opts.tools = Some(&decls);
     }

@@ -25,7 +25,8 @@
   ],
   "capabilities": {
     "collab": [
-      "src/capabilities/collab/service/*.rs"
+      "src/capabilities/collab/service/*.rs",
+      "src/capabilities/session/service/engine/*.rs"
     ],
     "registry": [
       "src/capabilities/registry/**/*.rs"

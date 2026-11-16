@@ -1,7 +1,7 @@
 //! 目的：执行入口与虚拟机档的测试脚手架——逐成员跑一遍、按档位起执行。
 //! 管：`ExecLike` 的共享入口、`run_execution`、`vm_spec` 的档选型。
 //! 不管：通道（`chat.rs`）、进程 runner（`runners.rs`）。
-//! 联动：`src/capabilities/collab/service/` 的 `converse_with` 与 `src/capabilities/vm/api.rs`。
+//! 联动：`src/capabilities/session/service/engine/round.rs` 的 `converse_with` 与 `src/capabilities/vm/api.rs`。
 
 use super::*;
 
@@ -37,17 +37,17 @@ pub(crate) fn run_execution(
         let mut noop = |_c: crate::capabilities::llm::api::Chunk| true;
         let mut sink = |_e: crate::capabilities::session::api::SessionEvent| {};
         let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let rounds = crate::capabilities::collab::service::round::converse_with(
+        let rounds = crate::capabilities::session::service::engine::round::converse_with(
             m.chat.as_mut().expect("测试通道").as_mut(),
             m.tools.as_mut(),
             &identity,
             vec![crate::capabilities::llm::api::Msg::user(user)],
             Default::default(),
             &id,
-            cancel,
+            &cancel,
             &mut noop,
             &mut |v: &crate::capabilities::session::api::ToolCallView| views.push(v.clone()),
-            &mut |_r: &crate::capabilities::collab::service::round::Round,
+            &mut |_r: &crate::capabilities::session::service::engine::round::Round,
                   _s: &mut dyn FnMut(crate::capabilities::session::api::SessionEvent)| {},
             &mut sink,
             // 测试不接工具级确认：直接执行（确认路径由 permission 的用例单独钉）。

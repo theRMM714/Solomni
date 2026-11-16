@@ -240,28 +240,6 @@ pub fn idle() -> SessionEvent {
     SessionEvent::Working { agent: None }
 }
 
-/// 目的：实时输出通道：调用参数（流式与预算，来自全局设置）+ 中止开关 + 短暂事件出口
-///   （不落盘，仅活动会话实时刷新）。
-pub struct Live<'a> {
-    pub llm: crate::capabilities::llm::api::LlmOpts,
-    /// 目的：用户点「停止」时置位；会话与适配层据此立即中止生成。
-    pub cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    pub emit: &'a mut dyn FnMut(SessionEvent),
-    /// 目的：本会话的裁决队（工具级确认这类"等在工作线程上"的关进它）。
-    ///   `None` = 这一趟不接工具级确认（照常执行）——测试、讨论席与没有交互前端的生成都走它。
-    pub decisions: Option<std::sync::Arc<dyn super::decisions::Gates>>,
-    /// 目的：本会话的**提问端口**（工具执行层与围栏经它请用户裁决）：走同一条裁决队、**阻塞**等回答。
-    ///   `None` = 这一趟没有可回答的前端（CLI 非交互、端到端夹具、测试、讨论席）——按 fail-closed 拒绝。
-    pub ask: Option<std::sync::Arc<dyn crate::kernel::ports::AskUser>>,
-}
-
-impl Live<'_> {
-    /// 目的：是否已被要求中止。
-    pub fn cancelled(&self) -> bool {
-        self.cancel.load(std::sync::atomic::Ordering::Relaxed)
-    }
-}
-
 /// 目的：一次工具调用的转录视图：module 为空串 = 内置工具（read/write）。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ToolCallView {

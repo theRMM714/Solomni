@@ -2,7 +2,6 @@
 //! 管：Discussion 的推进步骤与回合处置（Adv / TurnOut / AfterTurn）；成员工具面与并发调度策略；讨论转录行外送。
 //! 不管：模型调用与工具执行机制（在 llm / tools 的端口后）；整理与验收（synthesis.rs）；会话状态机与关卡（collab.rs）；泵的装配（pump.rs）。
 //! 联动：工具循环联动 envelope::Verb::Tool 与 kernel::ports::ProcessRunner；文案经 capabilities/prompt 渲染自提示词册；约定见 docs/session/session-model.md。
-use super::round::*;
 #[cfg(test)]
 use crate::capabilities::llm::api::BoxedChat;
 use crate::capabilities::llm::api::Msg;
@@ -13,8 +12,10 @@ use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::session::api::MemberTools;
 #[cfg(test)]
 use crate::capabilities::session::api::ToolCallView;
+use crate::capabilities::session::api::{LineSink, MemberTurn, verb_tag};
 use crate::capabilities::session::api::{LineView, SessionEvent};
-use std::collections::BTreeMap;
+#[cfg(test)]
+use crate::capabilities::session::api::{Round, build_round_lines, converse_with};
 use std::sync::Arc;
 
 pub const MAX_ROUNDS: usize = 6;
@@ -31,20 +32,6 @@ pub enum AfterTurn {
     Remind,
     /// 没表态且提醒到顶：主会话记一行"未回应"，本轮放过它（**不阻塞整轮**）。
     Unanswered,
-}
-
-/// 目的：线上名 → (模块 id, 工具名)：原生协议里没有 module 字段，跨模块同名工具靠它消歧。
-pub type WireTools = BTreeMap<String, (Option<String>, String)>;
-
-/// 目的：一次请求要声明的工具表（给供应商的那一份）。
-pub type Decls = Vec<crate::capabilities::llm::api::ToolDecl>;
-
-/// 目的：本成员这次请求的**工具声明面**（原生通道用）：发给供应商的声明 + 线上名回译表 + 可并发的线上名。
-#[derive(Default)]
-pub(crate) struct ToolDecls {
-    pub(crate) list: Decls,
-    /// 目的：线上名 → (模块 id, 工具名)：原生协议里没有 module 字段，跨模块同名工具靠它消歧。
-    pub(crate) wire: WireTools,
 }
 
 pub struct Member {
@@ -175,41 +162,6 @@ pub(crate) enum Cursor {
     At(usize),
 }
 
-/// 目的：一个成员回合的结果：两套通道**统一形态**（上层不必再关心是哪条通道）。
-pub struct MemberTurn {
-    /// 目的：这一回合的表态；**None = 没表态**（散文 / 空回执 / 越权 / 到顶）。
-    ///   没表态**不投影主会话**：原文只落进它自己的会话；提醒由核心在边界注入。
-    pub verb: Option<Verb>,
-    pub text: String,
-    pub degraded: bool,
-    /// 目的：这一轮的输出被供应商按长度截断了（如实标注，不假装完整）。
-    pub truncated: bool,
-    /// 目的：这一回合里**核实**留下的行（只读工具调用）。
-    ///   内存通道把它并进讨论转录；核心驱动时由核心逐轮落进**该 agent 自己的会话**。
-    #[cfg(test)]
-    pub lines: Vec<LineView>,
-}
-
-impl MemberTurn {
-    /// 目的：一回合的**结论**：表态 / 正文 + 两个如实标记。
-    ///   思维链与核实行不在这里——它们随行落进**各自的会话**（内存测试通道另走它自己的构造点）。
-    pub fn verdict(
-        verb: Option<Verb>,
-        text: String,
-        degraded: bool,
-        truncated: bool,
-    ) -> MemberTurn {
-        MemberTurn {
-            verb,
-            text,
-            degraded,
-            truncated,
-            #[cfg(test)]
-            lines: Vec::new(),
-        }
-    }
-}
-
 impl Discussion {
     /// 目的：内存通道的成员回合（薄包装）：借用本席位自己的 chat/tools，把核实行并进讨论转录。
     ///   核心驱动那条路直接调 turn_with，把核实行落进该 agent 自己的会话。
@@ -335,7 +287,7 @@ impl Discussion {
             dialogue.to_vec(),
             llm,
             speaker,
-            std::sync::Arc::clone(cancel),
+            cancel.as_ref(),
             &mut on_chunk,
             &mut on_tool,
             &mut on_round,

@@ -158,15 +158,18 @@ impl Turn {
     /// 目的：测试用同步入口：与工作线程那条路**同一段语义**（准备 → 生成 → 交回落盘）。
     ///  生产路径的生成在工作线程上（见 `turn::api::generation`）。
     #[cfg(test)]
+    #[allow(clippy::too_many_arguments)]
     pub fn single_say(
         &mut self,
         sid: &str,
         text: &str,
-        live: &mut crate::capabilities::session::api::Live,
+        io: &crate::capabilities::session::api::TurnIo,
+        cancel: &std::sync::atomic::AtomicBool,
+        emit: &mut dyn FnMut(SessionEvent),
         registry: &dyn Registry,
         probe: &dyn HostProbe,
     ) -> Result<Vec<SessionEvent>, String> {
-        match self.prepare_single(sid, Some(text), live.llm.stream, registry, probe)? {
+        match self.prepare_single(sid, Some(text), io.llm.stream, registry, probe)? {
             Prepared::Immediate(events) => Ok(events),
             Prepared::NotSingle => Err("该会话不是单 agent 模式".to_string()),
             Prepared::Run {
@@ -179,15 +182,9 @@ impl Turn {
                 let mut events = prefix;
                 {
                     let mut sink = |ev: SessionEvent| events.push(ev);
-                    crate::capabilities::collab::api::say(
-                        &mut session,
-                        text,
-                        &identity,
-                        live,
-                        &mut sink,
-                    );
+                    session.say(text, &identity, io, cancel, emit, &mut sink);
                 }
-                if live.cancelled() {
+                if cancel.load(std::sync::atomic::Ordering::Relaxed) {
                     self.log.warn("turn::single_say", "生成被用户中止");
                 }
                 self.put_single_recorded(sid, session, &events);
@@ -203,7 +200,9 @@ impl Turn {
     pub fn continue_flow(
         &mut self,
         sid: &str,
-        live: &mut crate::capabilities::session::api::Live,
+        io: &crate::capabilities::session::api::TurnIo,
+        cancel: &std::sync::atomic::AtomicBool,
+        emit: &mut dyn FnMut(SessionEvent),
         registry: &dyn Registry,
         probe: &dyn HostProbe,
     ) -> Result<Vec<SessionEvent>, String> {
@@ -219,9 +218,7 @@ impl Turn {
                         {
                             let mut sink = |ev: SessionEvent| out.push(ev);
                             let identity = s.params().identity(&*prompt, s.tool_mode());
-                            crate::capabilities::collab::api::continue_reply(
-                                s, &identity, live, &mut sink,
-                            );
+                            s.continue_reply(&identity, io, cancel, emit, &mut sink);
                         }
                         out
                     } else {

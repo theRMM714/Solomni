@@ -3,13 +3,27 @@
 //! 不管：状态机（discussion.rs）；工具执行机制（在 tools 的端口后）。
 //! 联动：被 driver / discussion / collab 消费；状态机在 discussion.rs。
 
-use super::discussion::*;
-use crate::capabilities::collab::service::tool_loop::*;
+use super::tools::*;
 use crate::capabilities::llm::api::{self as envelope, Verb};
 use crate::capabilities::llm::api::{Chat, Chunk, CompleteOpts, Msg};
 use crate::capabilities::session::api::MemberTools;
 use crate::capabilities::session::api::{LineView, SessionEvent, ToolCallView, reply_msgs};
 use crate::kernel::api::ToolOutcome;
+use std::collections::BTreeMap;
+
+/// 目的：线上名 → (模块 id, 工具名)：原生协议里没有 module 字段，跨模块同名工具靠它消歧。
+pub type WireTools = BTreeMap<String, (Option<String>, String)>;
+
+/// 目的：一次请求要声明的工具表（给供应商的那一份）。
+pub type Decls = Vec<crate::capabilities::llm::api::ToolDecl>;
+
+/// 目的：本成员这次请求的**工具声明面**（原生通道用）：发给供应商的声明 + 线上名回译表 + 可并发的线上名。
+#[derive(Default)]
+pub struct ToolDecls {
+    pub list: Decls,
+    /// 目的：线上名 → (模块 id, 工具名)：原生协议里没有 module 字段，跨模块同名工具靠它消歧。
+    pub wire: WireTools,
+}
 
 /// 目的：一次工具调用的产出：调用视图 + 它压进历史的消息。
 pub struct ToolRun {
@@ -52,7 +66,7 @@ pub type RoundSink<'a> = dyn FnMut(&Round, &mut dyn FnMut(SessionEvent)) + 'a;
 pub type LineSink<'a> = dyn FnMut(&[LineView], &mut dyn FnMut(SessionEvent)) + 'a;
 
 /// 目的：表态动词的**行标签**：讨论转录行写成 `[谁:say] 内容`（行格式与回档解析同一处定义）。
-pub(crate) fn verb_tag(v: Verb) -> &'static str {
+pub fn verb_tag(v: Verb) -> &'static str {
     match v {
         Verb::Say => "say",
         Verb::Ask => "ask",
@@ -155,13 +169,13 @@ pub fn converse_with(
     dialogue: Vec<Msg>,
     llm: crate::capabilities::llm::api::LlmOpts,
     speaker: &str,
-    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    cancel: &std::sync::atomic::AtomicBool,
     on: &mut dyn FnMut(Chunk) -> bool,
     on_tool: &mut dyn FnMut(&ToolCallView),
     on_round: &mut RoundSink<'_>,
     sink: &mut dyn FnMut(SessionEvent),
     // 工具级确认：`ask` 表里的调用在执行前经它问用户（None = 这一回合不接确认）。
-    confirms: Option<crate::capabilities::collab::service::tool_loop::ConfirmGate<'_>>,
+    confirms: Option<crate::capabilities::session::service::engine::tools::ConfirmGate<'_>>,
     // 工具层提问端口：围栏这类"装不上就先问"的执行层经它请用户裁决（None = 没有可回答的前端）。
     ask: Option<&dyn crate::kernel::ports::AskUser>,
     // 本回合的提示（讨论席的开场/轮转词；执行席常为空——它的指令在派发行里）。
@@ -253,9 +267,7 @@ pub fn converse_with(
                 cancel: None,
                 thinking: llm.thinking.clone(),
             }
-            .with_cancel(crate::capabilities::llm::api::cancel_flag(
-                std::sync::Arc::clone(&cancel),
-            ));
+            .with_cancel(crate::capabilities::llm::api::cancel_flag_ref(cancel));
             chat.complete(&msgs, opts, &mut sink)
         };
         // 用户「停止」：请求已被取消关闭。停止优先于同一次调用的错误；
@@ -456,7 +468,7 @@ pub fn converse_with(
                 let done = if user_stopped {
                     refused_batch(&plan)
                 } else {
-                    run_batch(ctx, &plan, confirms.as_mut(), ask, cancel.as_ref(), sink)
+                    run_batch(ctx, &plan, confirms.as_mut(), ask, cancel, sink)
                 };
                 // 先按原序把工具行建好（执行已经做完），再让**唯一那处**构造函数产出这一回复的消息：
                 // 实时与重建走同一个函数，"重建上下文与实时一致"因此是结构保证的。
@@ -635,7 +647,7 @@ pub fn converse_with(
                 let done = if user_stopped {
                     refused_batch(&plan)
                 } else {
-                    run_batch(ctx, &plan, confirms.as_mut(), ask, cancel.as_ref(), sink)
+                    run_batch(ctx, &plan, confirms.as_mut(), ask, cancel, sink)
                 };
                 // 修过信封就如实标注在回执最前面（模型与用户都能看到核心没有瞎猜）
                 let annotate = |outcome: ToolOutcome| -> ToolOutcome {
@@ -759,10 +771,7 @@ pub fn build_round_lines(
     let turn = turn.unwrap_or(round.reply);
     // 说话人与动词是**结构化字段**（正文里不再带 [谁:动词] 标签）；渲染由 LineView::render 拼回。
     let speaker = id.to_string();
-    let verb = round
-        .verb
-        .map(crate::capabilities::collab::service::round::verb_tag)
-        .unwrap_or_default();
+    let verb = round.verb.map(verb_tag).unwrap_or_default();
     let make = |line: String,
                 verb: &str,
                 kind: &str,

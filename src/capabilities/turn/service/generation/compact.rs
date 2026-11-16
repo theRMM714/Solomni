@@ -22,7 +22,7 @@ pub(crate) fn compact<H: TurnHost>(host: &H, sid: &str) -> Result<Advance, Strin
         .name("solomni-compact".to_string())
         .spawn(move || {
             let mut s = session;
-            let made = crate::capabilities::collab::api::compact_session(&mut s, &identity, None);
+            let made = s.compact_session(&identity, None);
             (s, made)
         })
         .map_err(|e| format!("起压缩线程失败：{}", e))?

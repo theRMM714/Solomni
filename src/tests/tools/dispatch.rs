@@ -127,9 +127,16 @@ pub(crate) fn same_named_tools_in_two_modules_run_in_their_own_root() {
         "系统提示里不许出现工具清单：{}",
         identity
     );
-    let events = with_live(|l| {
-        core.turn
-            .single_say(&sid, "干活", l, core.registry.as_ref(), core.probe.as_ref())
+    let events = with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "干活",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .unwrap();
     // 信封写了 module → tool 行呈现成 模块.工具（用户一眼看出调的是谁的）。
@@ -196,9 +203,16 @@ pub(crate) fn external_tool_without_module_is_refused_when_agent_has_many_module
         .create_work(work("w", WorkMode::Single, &["a", "b"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| {
-        core.turn
-            .single_say(&sid, "干活", l, core.registry.as_ref(), core.probe.as_ref())
+    let events = with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "干活",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .unwrap();
     assert!(
@@ -270,18 +284,19 @@ pub(crate) fn tool_call_event_is_emitted_before_the_next_round() {
                 _ => "other",
             });
         };
-        let mut live = Live {
+        let io = crate::capabilities::session::api::TurnIo {
             llm: Default::default(),
-            cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            emit: &mut emit,
             decisions: None,
             ask: None,
         };
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
         core.turn
             .single_say(
                 &sid,
                 "跑一下",
-                &mut live,
+                &io,
+                &cancel,
+                &mut emit,
                 core.registry.as_ref(),
                 core.probe.as_ref(),
             )
@@ -306,11 +321,13 @@ pub(crate) fn tool_type_mention_in_plain_speech_is_not_misjudged() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| {
+    let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
             "怎么写",
-            l,
+            io,
+            cancel,
+            emit,
             core.registry.as_ref(),
             core.probe.as_ref(),
         )
@@ -338,11 +355,13 @@ pub(crate) fn tool_type_mention_in_plain_speech_is_not_misjudged() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| {
+    let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
             "再讲一次",
-            l,
+            io,
+            cancel,
+            emit,
             core.registry.as_ref(),
             core.probe.as_ref(),
         )
@@ -371,11 +390,13 @@ pub(crate) fn tool_type_mention_in_plain_speech_is_not_misjudged() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| {
+    let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
             "再示范一次",
-            l,
+            io,
+            cancel,
+            emit,
             core.registry.as_ref(),
             core.probe.as_ref(),
         )

@@ -126,17 +126,18 @@ pub(crate) fn module_with_runtimes(id: &str, caps: &[&str]) -> Module {
     m
 }
 
-/// 目的：测试用静默 Live（不流式、不派发短暂事件）。
-pub(crate) fn with_live<T>(f: impl FnOnce(&mut Live) -> T) -> T {
-    let mut noop = |_e: SessionEvent| {};
-    let mut live = Live {
+/// 目的：测试用静默回合 IO（不流式、不派发短暂事件）。
+pub(crate) fn with_turn_io<T>(
+    f: impl FnOnce(&TurnIo, &std::sync::atomic::AtomicBool, &mut dyn FnMut(SessionEvent)) -> T,
+) -> T {
+    let io = TurnIo {
         llm: Default::default(),
-        cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        emit: &mut noop,
         decisions: None,
         ask: None,
     };
-    f(&mut live)
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let mut noop = |_e: SessionEvent| {};
+    f(&io, &cancel, &mut noop)
 }
 
 /// 目的：把模块包成"每模块一个临时 agent"（协作的成员语义）。

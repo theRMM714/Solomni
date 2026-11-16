@@ -3,7 +3,7 @@
 //! 不管：命令分发、协作泵、压缩。
 //! 联动：`turn::api::TurnHost`、`generation/collab.rs`、`service/{turn,flow}`
 
-use crate::capabilities::session::api::{Live, SessionEvent};
+use crate::capabilities::session::api::{SessionEvent, TurnIo};
 use crate::capabilities::turn::api::{Advance, CollabWork, Output, Prepared, TurnHost};
 
 /// 目的：单 agent 生成：**核心队列只占两步短命令**（取出会话 / 交回会话），生成本身在工作线程上跑。 为什么必须这样：生成要跑几十秒到几分钟，它若占着唯一的命令队列， 读接口（历史列表 / 状态）与其它会话的命令全排在它后面——界面因此"假死"。 不变量：会话状态只被一个线程碰——生成期间由工作线程独占，核心表里只留"生成中"这一态。
@@ -103,10 +103,8 @@ pub(crate) fn run_prepared<H: TurnHost>(
                         bus.push(&sid, std::slice::from_ref(&ev));
                     }
                 };
-                let mut live = Live {
+                let io = TurnIo {
                     llm,
-                    cancel,
-                    emit: &mut emit,
                     decisions,
                     ask,
                 };
@@ -125,26 +123,15 @@ pub(crate) fn run_prepared<H: TurnHost>(
                 }
                 match (task.as_deref(), text.as_deref()) {
                     // 节点执行：工作线程先压缩本轮之前的上下文，再注入任务。
-                    (Some(t), _) => crate::capabilities::collab::api::dispatch_task(
-                        &mut session,
-                        t,
-                        &identity,
-                        &mut live,
-                        &mut sink,
-                    ),
-                    (None, Some(t)) => crate::capabilities::collab::api::say(
-                        &mut session,
-                        t,
-                        &identity,
-                        &mut live,
-                        &mut sink,
-                    ),
-                    (None, None) => crate::capabilities::collab::api::continue_reply(
-                        &mut session,
-                        &identity,
-                        &mut live,
-                        &mut sink,
-                    ),
+                    (Some(t), _) => {
+                        session.dispatch_task(t, &identity, &io, &cancel, &mut emit, &mut sink)
+                    }
+                    (None, Some(t)) => {
+                        session.say(t, &identity, &io, &cancel, &mut emit, &mut sink)
+                    }
+                    (None, None) => {
+                        session.continue_reply(&identity, &io, &cancel, &mut emit, &mut sink)
+                    }
                 }
                 (session, seq)
             })

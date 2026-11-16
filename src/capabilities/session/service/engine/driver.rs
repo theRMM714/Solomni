@@ -1,14 +1,17 @@
-//! 目的：回合驱动——在一条 AgentSession 上跑一个回合（单 agent 的话 / 子会话的任务 / 讨论席的发言 / 压缩）。
-//! 管：say / dispatch_task / discussion_turn / continue_reply / compact_session 五个自由函数，把会话当参数驱动。
-//! 不管：会话类型（归会话能力）与轮循环本体（在 round.rs）；不给别人的类型写 impl（会形成互相引入）。
-//! 联动：依赖 crate::capabilities::session::api::AgentSession 与 round::converse_with；契约见 docs/session/session-model.md。
+//! 目的：成员回合驱动——在一条 AgentSession 上跑一个回合（单 agent 的话 / 子会话的任务 / 讨论席的发言 / 压缩）。
+//! 管：say / dispatch_task / discussion_turn / continue_reply / compact_session 五个方法，以及它们用的私有装配（压缩、发送视图、轮循环接线）。
+//! 不管：会话类型与状态（归会话能力的 domain）；轮循环本体（在 round.rs）；工具循环（在 tools.rs）；裁决队与提问端口的形状（在 io.rs 与各自端口后）。
+//! 联动：turn 能力的生成流程取 AgentSession 后调这五个方法；契约见 docs/session/session-model.md。
 
-use super::discussion::*;
-use super::round::*;
+use super::io::{CompactedTurn, MemberTurn, TurnIo};
+use super::round::{Round, RoundSink, assemble, build_round_lines, converse_with};
+use super::tools::{ConfirmGate, ToolConfirm};
 use crate::capabilities::llm::api::{Chunk, Msg};
 use crate::capabilities::session::api::{
-    AgentSession, LineView, Live, SessionEvent, ToolCallView, TurnRun, delta_visible, stream_piece,
+    AgentSession, LineView, SessionEvent, ToolCallView, TurnRun, delta_visible, stream_piece,
 };
+use std::sync::atomic::AtomicBool;
+
 /// 目的：只把被总结的前缀发给模型、只声明 compact 工具，跑一次模型并返回摘要。
 /// 约束：两条通道都认：native 从结构化槽位取，信封通道从正文里的信封取（与讨论回合同口径）。
 pub fn compact_turn(
@@ -26,7 +29,7 @@ pub fn compact_turn(
     let thinking = if spec.is_some() { None } else { s.thinking() };
     let cut = plan.cut.min(s.dialogue.len());
     // 整条消息**只有这一处装配**：身份 + 本回合工具（只有 compact）+ 被总结前缀 + 压缩提示。
-    let msgs = crate::capabilities::collab::service::round::assemble(
+    let msgs = assemble(
         identity,
         s.tools.as_ref(),
         &["compact".to_string()],
@@ -85,36 +88,6 @@ pub fn compact_turn(
     Ok(summary)
 }
 
-/// 目的：一次压缩的完整结果（记录行 + 用量）。
-/// 约束：调用方负责推事件 / 落盘。
-pub struct CompactedTurn {
-    /// 目的：压缩记录行（摘要 + up_to）。
-    pub line: LineView,
-    /// 目的：压完后的发送视图估算用量。
-    pub usage: crate::capabilities::session::api::ContextUsage,
-}
-
-/// 目的：压一次：算切分点 → 只把被总结前缀交给模型 → 应用并落压缩记录行。
-/// 返回：没有可压缩内容时 `None`（调用方决定提示还是静默跳过）。
-/// 错误：模型调用失败 / 摘要为空时如实返回原因。
-pub fn compact_session(
-    s: &mut AgentSession,
-    identity: &str,
-    protect_from: Option<u64>,
-) -> Result<Option<CompactedTurn>, String> {
-    let Some(plan) = s.plan_compaction(protect_from) else {
-        return Ok(None);
-    };
-    let prompt = s.compact_prompt.clone();
-    let summary = compact_turn(s, &prompt, &plan, identity)?;
-    let Some(line) = s.apply_compaction(&plan, &summary) else {
-        return Ok(None);
-    };
-    let usage = s.estimate_usage();
-    s.set_last_usage(Some(usage));
-    Ok(Some(CompactedTurn { line, usage }))
-}
-
 /// 到点自动压一次：有供应商 usage 用精确 token；拿不到才按字符估算（≈ tokens × 4）。
 /// 压不动就**如实通知并继续用完整上下文**（不静默降级、不假装压过）。
 fn maybe_compact(
@@ -140,7 +113,7 @@ fn maybe_compact(
     if !exceeded {
         return;
     }
-    match compact_session(s, identity, protect_from) {
+    match s.compact_session(identity, protect_from) {
         Ok(Some(c)) => {
             sink(SessionEvent::Transcript(vec![c.line.clone()]));
             // 压完发送视图变小了：留一份估算用量，别让下一轮继续拿旧的大数字反复触发。
@@ -159,109 +132,140 @@ fn maybe_compact(
     }
 }
 
-/// 目的：发言：先把 @ 引用改写成寻址 → 压入用户消息 → 逐轮（文本行 / 工具行）落转录。
-///   改写在这一处完成，所以转录行与进上下文的消息是同一份文本（转录即内容）。
-pub fn say(
-    s: &mut AgentSession,
-    text: &str,
-    identity: &str,
-    live: &mut Live,
-    sink: &mut dyn FnMut(SessionEvent),
-) {
-    let text = crate::capabilities::prompt::api::rewrite(text, Some(&s.id), &s.roots());
-    s.dialogue.push(Msg::user(text.clone()));
-    // 用户行不属于任何模型回复：给它**自己的行号**当回复号（与重建时的规则一致），
-    // 否则它会继承上一轮的回复号，回档时与上一轮误并成一组。
-    s.cur_reply = s.next_line;
-    let user_line = s.line(text.to_string(), "user", "用户", "", None, None);
-    let user_line_id = user_line.id;
-    sink(SessionEvent::Transcript(vec![user_line]));
-    // 到点先压一次：本轮刚收到的用户消息必须原样保留，更早的内容才进摘要。
-    maybe_compact(s, identity, Some(user_line_id), sink);
-    rounds_events(s, identity, live, sink);
-}
+impl AgentSession {
+    /// 目的：发言：先把 @ 引用改写成寻址 → 压入用户消息 → 逐轮（文本行 / 工具行）落转录。
+    ///   改写在这一处完成，所以转录行与进上下文的消息是同一份文本（转录即内容）。
+    pub fn say(
+        &mut self,
+        text: &str,
+        identity: &str,
+        io: &TurnIo,
+        cancel: &AtomicBool,
+        emit: &mut dyn FnMut(SessionEvent),
+        sink: &mut dyn FnMut(SessionEvent),
+    ) {
+        let text = crate::capabilities::prompt::api::rewrite(text, Some(&self.id), &self.roots());
+        self.dialogue.push(Msg::user(text.clone()));
+        // 用户行不属于任何模型回复：给它**自己的行号**当回复号（与重建时的规则一致），
+        // 否则它会继承上一轮的回复号，回档时与上一轮误并成一组。
+        self.cur_reply = self.next_line;
+        let user_line = self.line(text.to_string(), "user", "用户", "", None, None);
+        let user_line_id = user_line.id;
+        sink(SessionEvent::Transcript(vec![user_line]));
+        // 到点先压一次：本轮刚收到的用户消息必须原样保留，更早的内容才进摘要。
+        maybe_compact(self, identity, Some(user_line_id), sink);
+        rounds_events(self, identity, io, cancel, emit, sink);
+    }
 
-/// 目的：**派发并跑这一回合**：注入任务（`note_task`）后正常问模型。
-///   节点派发只有这一条语义——CLI 与 Web 各自只是"点火"，不各写一套（见 session-model.md 四之二）。
-pub fn dispatch_task(
-    s: &mut AgentSession,
-    text: &str,
-    identity: &str,
-    live: &mut Live,
-    sink: &mut dyn FnMut(SessionEvent),
-) {
-    let mut task_line = 0u64;
-    for e in s.note_task(text) {
-        if let SessionEvent::Transcript(lines) = &e
-            && let Some(l) = lines.first()
-        {
-            task_line = l.id;
+    /// 目的：**派发并跑这一回合**：注入任务（`note_task`）后正常问模型。
+    ///   节点派发只有这一条语义——CLI 与 Web 各自只是"点火"，不各写一套（见 session-model.md 四之二）。
+    pub fn dispatch_task(
+        &mut self,
+        text: &str,
+        identity: &str,
+        io: &TurnIo,
+        cancel: &AtomicBool,
+        emit: &mut dyn FnMut(SessionEvent),
+        sink: &mut dyn FnMut(SessionEvent),
+    ) {
+        let mut task_line = 0u64;
+        for e in self.note_task(text) {
+            if let SessionEvent::Transcript(lines) = &e
+                && let Some(l) = lines.first()
+            {
+                task_line = l.id;
+            }
+            sink(e);
         }
-        sink(e);
+        // 本轮派发的任务必须原样保留，更早的内容才进摘要。
+        maybe_compact(
+            self,
+            identity,
+            if task_line > 0 { Some(task_line) } else { None },
+            sink,
+        );
+        rounds_events(self, identity, io, cancel, emit, sink);
     }
-    // 本轮派发的任务必须原样保留，更早的内容才进摘要。
-    maybe_compact(
-        s,
-        identity,
-        if task_line > 0 { Some(task_line) } else { None },
-        sink,
-    );
-    rounds_events(s, identity, live, sink);
-}
 
-/// 目的：讨论席的一个**成员回合**：与单 agent / 节点**同一条轮循环**（见 TurnRun），
-///   差别只有三样：身份块、这一回合的工具面（角色表发放）、本回合提示；外加认协作表态（动词）。
-///   产出落进**本会话**（这是它在这场工作里的经历）：回合标记（系统行）+ 逐轮的权威行；
-///   返回这一回合的结论（表态 / 正文 / 思维链）交主会话收下（核实行留在它自己的会话里）。
-#[allow(clippy::too_many_arguments)]
-pub fn discussion_turn(
-    s: &mut AgentSession,
-    identity: &str,
-    face: (Vec<String>, bool),
-    turn: Vec<Msg>,
-    turn_id: u64,
-    round: usize,
-    live: &mut Live,
-    sink: &mut dyn FnMut(SessionEvent),
-) -> Result<MemberTurn, String> {
-    maybe_compact(s, identity, None, sink);
-    // 回合标记是**系统消息**（不是谁说的）：进上下文与转录都按 system，回档按同一口径还原。
-    for e in s.note_system(&format!("[回合 t{}｜第 {} 轮]", turn_id, round)) {
-        sink(e);
+    /// 目的：讨论席的一个**成员回合**：与单 agent / 节点**同一条轮循环**（见 TurnRun），
+    ///   差别只有三样：身份块、这一回合的工具面（角色表发放）、本回合提示；外加认协作表态（动词）。
+    ///   产出落进**本会话**（这是它在这场工作里的经历）：回合标记（系统行）+ 逐轮的权威行；
+    ///   返回这一回合的结论（表态 / 正文 / 思维链）交主会话收下（核实行留在它自己的会话里）。
+    #[allow(clippy::too_many_arguments)]
+    pub fn discussion_turn(
+        &mut self,
+        identity: &str,
+        face: (Vec<String>, bool),
+        turn: Vec<Msg>,
+        turn_id: u64,
+        round: usize,
+        io: &TurnIo,
+        cancel: &AtomicBool,
+        emit: &mut dyn FnMut(SessionEvent),
+        sink: &mut dyn FnMut(SessionEvent),
+    ) -> Result<MemberTurn, String> {
+        maybe_compact(self, identity, None, sink);
+        // 回合标记是**系统消息**（不是谁说的）：进上下文与转录都按 system，回档按同一口径还原。
+        for e in self.note_system(&format!("[回合 t{}｜第 {} 轮]", turn_id, round)) {
+            sink(e);
+        }
+        let spec = TurnRun {
+            identity,
+            face: Some(face),
+            turn,
+            verbs: true,
+            turn_id: Some(turn_id),
+        };
+        let rounds = run_rounds(self, &spec, io, cancel, emit, sink);
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err("已停止".to_string());
+        }
+        // 末轮就是这一回合的结论（表态轮，或"没表态"的散文轮）；调用失败如实报错。
+        let last = rounds.last().ok_or_else(|| "已停止".to_string())?;
+        if let Some(err) = &last.error {
+            return Err(err.clone());
+        }
+        Ok(MemberTurn::verdict(
+            last.verb,
+            last.text.clone(),
+            last.degraded,
+            last.truncated(),
+        ))
     }
-    let spec = TurnRun {
-        identity,
-        face: Some(face),
-        turn,
-        verbs: true,
-        turn_id: Some(turn_id),
-    };
-    let rounds = run_rounds(s, &spec, live, sink);
-    if live.cancelled() {
-        return Err("已停止".to_string());
-    }
-    // 末轮就是这一回合的结论（表态轮，或"没表态"的散文轮）；调用失败如实报错。
-    let last = rounds.last().ok_or_else(|| "已停止".to_string())?;
-    if let Some(err) = &last.error {
-        return Err(err.clone());
-    }
-    Ok(MemberTurn::verdict(
-        last.verb,
-        last.text.clone(),
-        last.degraded,
-        last.truncated(),
-    ))
-}
 
-/// 目的：继续：末条已是用户发言，直接用现有对话问模型（不新增用户消息）。
-pub fn continue_reply(
-    s: &mut AgentSession,
-    identity: &str,
-    live: &mut Live,
-    sink: &mut dyn FnMut(SessionEvent),
-) {
-    maybe_compact(s, identity, None, sink);
-    rounds_events(s, identity, live, sink);
+    /// 目的：继续：末条已是用户发言，直接用现有对话问模型（不新增用户消息）。
+    pub fn continue_reply(
+        &mut self,
+        identity: &str,
+        io: &TurnIo,
+        cancel: &AtomicBool,
+        emit: &mut dyn FnMut(SessionEvent),
+        sink: &mut dyn FnMut(SessionEvent),
+    ) {
+        maybe_compact(self, identity, None, sink);
+        rounds_events(self, identity, io, cancel, emit, sink);
+    }
+
+    /// 目的：压一次：算切分点 → 只把被总结前缀交给模型 → 应用并落压缩记录行。
+    /// 返回：没有可压缩内容时 `None`（调用方决定提示还是静默跳过）。
+    /// 错误：模型调用失败 / 摘要为空时如实返回原因。
+    pub fn compact_session(
+        &mut self,
+        identity: &str,
+        protect_from: Option<u64>,
+    ) -> Result<Option<CompactedTurn>, String> {
+        let Some(plan) = self.plan_compaction(protect_from) else {
+            return Ok(None);
+        };
+        let prompt = self.compact_prompt.clone();
+        let summary = compact_turn(self, &prompt, &plan, identity)?;
+        let Some(line) = self.apply_compaction(&plan, &summary) else {
+            return Ok(None);
+        };
+        let usage = self.estimate_usage();
+        self.set_last_usage(Some(usage));
+        Ok(Some(CompactedTurn { line, usage }))
+    }
 }
 
 /// 单 agent / 节点的一回合：**同一条轮循环**（见 TurnRun），工具面用会话自己的（执行席）。
@@ -269,7 +273,9 @@ pub fn continue_reply(
 fn rounds_events(
     s: &mut AgentSession,
     identity: &str,
-    live: &mut Live,
+    io: &TurnIo,
+    cancel: &AtomicBool,
+    emit: &mut dyn FnMut(SessionEvent),
     sink: &mut dyn FnMut(SessionEvent),
 ) {
     let spec = TurnRun {
@@ -279,7 +285,7 @@ fn rounds_events(
         verbs: false,
         turn_id: None,
     };
-    run_rounds(s, &spec, live, sink);
+    run_rounds(s, &spec, io, cancel, emit, sink);
 }
 
 /// 把一次问询的逐轮产出落成转录行：一轮的正文/思维链出文本行，工具另占一条工具行。
@@ -291,12 +297,13 @@ fn rounds_events(
 fn run_rounds(
     s: &mut AgentSession,
     spec: &TurnRun<'_>,
-    live: &mut Live,
+    io: &TurnIo,
+    cancel: &AtomicBool,
+    emit: &mut dyn FnMut(SessionEvent),
     sink: &mut dyn FnMut(SessionEvent),
 ) -> Vec<Round> {
     let label = s.id.clone();
     // 取消位在整段回合里只读地观察：每一轮构造行/收尾时都重新读，不能用开始时的快照。
-    let cancel = std::sync::Arc::clone(&live.cancel);
     let next_line = std::cell::Cell::new(s.next_line);
     // 这次问询第一行会落在哪个 id：usage 事件跟着它，回档到它之前时用量一起失效。
     let usage_line = next_line.get();
@@ -319,7 +326,7 @@ fn run_rounds(
         }
         per_round.borrow_mut().push(views);
     };
-    let rounds = run(s, spec, live, &mut on_round, sink);
+    let rounds = run(s, spec, io, cancel, emit, &mut on_round, sink);
     s.next_line = next_line.get();
 
     // 只补记账（不构造行、不外送）：顺序与出账时序一致。
@@ -446,13 +453,14 @@ fn send_view(s: &AgentSession) -> Vec<crate::capabilities::llm::api::Msg> {
 fn run(
     s: &mut AgentSession,
     spec: &TurnRun<'_>,
-    live: &mut Live,
-    on_round: &mut crate::capabilities::collab::service::round::RoundSink<'_>,
+    io: &TurnIo,
+    cancel: &AtomicBool,
+    emit: &mut dyn FnMut(SessionEvent),
+    on_round: &mut RoundSink<'_>,
     sink: &mut dyn FnMut(SessionEvent),
 ) -> Vec<Round> {
     let label = s.id.clone();
-    let llm = live.llm.clone();
-    let cancel = std::sync::Arc::clone(&live.cancel);
+    let llm = io.llm.clone();
     // 本回合的工具面（角色表发放）：**按回合换**——同一个会话会用两种身份干活（说话 / 干活）。
     // 装进这一回合的环境（声明与执行都读它），跑完还原。
     let saved = match spec.face.as_ref().zip(s.tools.as_mut()) {
@@ -463,11 +471,9 @@ fn run(
         None => None,
     };
     // 工具级确认：这一回合的裁决队（与核心各关卡**共用同一条队**，没有就跟平时一样直接执行）。
-    let decisions = live.decisions.clone();
+    let decisions = io.decisions.clone();
     let agent = s.params().agent.clone();
-    let mut confirm = |req: &crate::capabilities::collab::service::tool_loop::ToolConfirm,
-                       sink: &mut dyn FnMut(SessionEvent)|
-     -> String {
+    let mut confirm = |req: &ToolConfirm, sink: &mut dyn FnMut(SessionEvent)| -> String {
         use crate::capabilities::session::api::{
             OPT_TOOL_ALLOW, OPT_TOOL_ALLOW_TURN, OPT_TOOL_DENY, Pending, SlotWake, qualify,
         };
@@ -506,28 +512,25 @@ fn run(
         answer
     };
     // 只有接上裁决队时才建确认通道；否则本回合不接确认（照常执行）。
-    let mut confirms =
-        decisions.as_ref().map(
-            |_| crate::capabilities::collab::service::tool_loop::ConfirmGate {
-                allow_turn: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                confirm: &mut confirm,
-            },
-        );
+    let mut confirms = decisions.as_ref().map(|_| ConfirmGate {
+        allow_turn: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        confirm: &mut confirm,
+    });
     // 两个回调（流式分片 / 工具完成）都要外送短暂事件：把 emit 借出来共享（顺序因此天然正确）。
-    let emit = std::cell::RefCell::new(&mut *live.emit);
+    let emit = std::cell::RefCell::new(emit);
     let mut acc = String::new();
     // 发给模型的对话视图：开着过期清理时，过期读取已换成占位符（见 send_view）。
     let view = send_view(s);
     let rounds = {
         let AgentSession { chat, tools, .. } = s;
-        crate::capabilities::collab::service::round::converse_with(
+        converse_with(
             chat.as_mut(),
             tools.as_mut(),
             spec.identity,
             view,
             llm,
             &label,
-            std::sync::Arc::clone(&cancel),
+            cancel,
             &mut |chunk| {
                 let mut kind = "text";
                 let mut piece = String::new();
@@ -563,7 +566,7 @@ fn run(
             sink,
             confirms.take(),
             // 工具层提问端口（围栏这类"装不上就先问"）：与工具级确认走**同一条队**。
-            live.ask.as_deref(),
+            io.ask.as_deref(),
             &spec.turn,
             spec.verbs,
         )

@@ -1,13 +1,13 @@
 # collab（协作会话）
 
 > 定位：从讨论走到交付的协作会话状态机。
-> 效力：规范｜核对：2026-11-04｜依据：`src/capabilities/collab/api.rs`
+> 效力：规范｜核对：2026-11-17｜依据：`src/capabilities/collab/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
 
-- 管：协作会话对象与状态（名单、方案、任务链、挂起）、讨论泵与轮转发言、成员回合（含工具循环）、整理出链、链驱动、节点与总验收及定向返工、断点续跑。
-- 不管：不落盘（经 `session::api`）、不建会话（`runtime` 建）、不选模型（`registry` 解析）、不画界面（`cli` / `web`）。
+- 管：协作会话对象与状态（名单、方案、任务链、挂起）、讨论泵与轮转发言、整理出链、链驱动、节点与总验收及定向返工、断点续跑。
+- 不管：不落盘（经 `session::api`）、不建会话（`runtime` 建）、不选模型（`registry` 解析）、不画界面（`cli` / `web`）；成员回合的驱动 / 轮循环 / 工具循环在 `session` 的 `service/engine/`（见 [`docs/session/unit-map.md`](../session/unit-map.md)）。
 
 ## 入站契约与状态归属
 
@@ -21,7 +21,7 @@
 
 ## 改动本单元时必须同步
 
-- 状态派生（`src/capabilities/collab/domain/`）与驱动（`src/capabilities/collab/service/driver.rs`）必须同改；同步 `src/tests/collab/` 五份用例、`docs/collab/task-chain.md`、`docs/session/session-model.md`、`docs/tools/tools-and-roles.md`。
+- 状态派生（`src/capabilities/collab/domain/`）与驱动（`src/capabilities/session/service/engine/driver.rs`）必须同改；同步 `src/tests/collab/` 五份用例、`docs/collab/task-chain.md`、`docs/session/session-model.md`、`docs/tools/tools-and-roles.md`。
 
 ## 本目录
 

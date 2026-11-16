@@ -317,11 +317,13 @@ pub(crate) fn builtin_file_tools_run_in_direct_session() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| {
+    let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
             "记一笔",
-            l,
+            io,
+            cancel,
+            emit,
             core.registry.as_ref(),
             core.probe.as_ref(),
         )
@@ -366,9 +368,16 @@ pub(crate) fn envelope_mode_native_calls_become_a_failed_tool_line() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| {
-        core.turn
-            .single_say(&sid, "继续", l, core.registry.as_ref(), core.probe.as_ref())
+    let events = with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "继续",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .unwrap();
     let views: Vec<_> = events

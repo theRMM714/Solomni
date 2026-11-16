@@ -3,7 +3,7 @@
 //! 不管：信封解析与回执装配（在 domain）；出站端口的定义（在 ports）；适配器装配（在组合根）。
 //! 联动：runtime、其它能力与呈现层都经这里会话；实现见 service.rs；出站端口只由 service 持有（R12）。
 
-pub use crate::capabilities::llm::domain::cancel::cancel_flag;
+pub use crate::capabilities::llm::domain::cancel::{cancel_flag, cancel_flag_ref};
 pub use crate::capabilities::llm::domain::envelope::{
     Malformed, Reply, Tail, ToolInvoke, Verb, parse,
 };
@@ -118,7 +118,7 @@ pub struct CompleteOpts<'a> {
     /// 约束：非流式调用把它当整次调用的上限（那时没有中间的"已收到"可重置）。
     pub timeout_secs: u64,
     /// 目的：用户「停止」的取消位；适配器等待数据块时轮询它，置位即关闭请求。
-    pub cancel: Option<std::sync::Arc<dyn Cancelled>>,
+    pub cancel: Option<std::sync::Arc<dyn Cancelled + 'a>>,
     /// 目的：本轮要合并进请求体的思考参数片段（None = 不发）。
     pub thinking: Option<std::sync::Arc<serde_json::Value>>,
 }
@@ -151,7 +151,7 @@ impl<'a> CompleteOpts<'a> {
     }
 
     /// 目的：接上这次生成的取消位；停止时适配器能立刻关闭在途请求。
-    pub fn with_cancel(mut self, cancel: std::sync::Arc<dyn Cancelled>) -> CompleteOpts<'a> {
+    pub fn with_cancel(mut self, cancel: std::sync::Arc<dyn Cancelled + 'a>) -> CompleteOpts<'a> {
         self.cancel = Some(cancel);
         self
     }
