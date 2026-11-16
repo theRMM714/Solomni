@@ -223,7 +223,7 @@ pub(crate) fn conductor_records_external_workspace_and_rejects_overlap() {
     let mut spec = work("wx", WorkMode::Single, &["a"]);
     spec.workspace = Some(external.clone());
     let sid = core.create_work(spec).expect("外部工作区可建").sid;
-    let (meta, _) = core.history_open(&sid).expect("会话");
+    let (meta, _) = core.lifecycle.history_open(&sid).expect("会话");
     assert_eq!(
         meta.workspace.as_ref().map(|b| b.root.clone()),
         Some(crate::kernel::api::native(
@@ -265,7 +265,7 @@ pub(crate) fn workspace_grant_none_strips_shared_reach() {
     let mut spec = work("wg", WorkMode::Single, &["a"]);
     spec.workspace = Some(external.clone());
     let sid = core.create_work(spec).expect("外部工作区可建").sid;
-    let (meta, _) = core.history_open(&sid).expect("会话");
+    let (meta, _) = core.lifecycle.history_open(&sid).expect("会话");
     assert_eq!(
         core.turn.workspace_grant(&meta).expect("授权粒度"),
         WorkspaceGrant::Session,

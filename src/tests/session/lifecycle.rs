@@ -23,11 +23,11 @@ pub(crate) fn create_work_persists_and_history_replays() {
         .sid;
     assert_eq!(sid, "工作一");
     with_live(|l| core.single_say(&sid, "你好", l)).unwrap();
-    let list = core.history_list();
+    let list = core.lifecycle.history_list();
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].name, "工作一");
     assert_eq!(list[0].mode, "single");
-    let (meta, events) = core.history_open("工作一").unwrap();
+    let (meta, events) = core.lifecycle.history_open("工作一").unwrap();
     assert_eq!(meta.mode, "single");
     assert!(
         events
@@ -42,8 +42,12 @@ pub(crate) fn create_work_persists_and_history_replays() {
             .contains("已存在")
     );
     // 删除会话：内存与磁盘一起删，之后名字可复用
-    assert!(core.history_delete("工作一").unwrap());
-    assert!(core.history_list().is_empty());
+    assert!(
+        core.lifecycle
+            .history_delete(&mut core.turn, "工作一")
+            .unwrap()
+    );
+    assert!(core.lifecycle.history_list().is_empty());
     assert!(
         core.create_work(work("工作一", WorkMode::Single, &["a"]))
             .is_ok()
@@ -64,7 +68,10 @@ pub(crate) fn history_delete_cascades_to_children_and_refuses_child_delete() {
     );
     // 不存在的会话：只清内存并如实回 false（非落盘会话没有围栏收尾段）。
     assert!(
-        !core.history_delete("does-not-exist").unwrap(),
+        !core
+            .lifecycle
+            .history_delete(&mut core.turn, "does-not-exist")
+            .unwrap(),
         "不存在的会话要回 false"
     );
     let parent = core
@@ -73,11 +80,18 @@ pub(crate) fn history_delete_cascades_to_children_and_refuses_child_delete() {
         .sid;
     let child = core.spawn_agent_session(&parent, "a").unwrap();
     // 子会话不允许单独删，理由要明确，且拒绝后它仍在。
-    let err = core.history_delete(&child).unwrap_err();
+    let err = core
+        .lifecycle
+        .history_delete(&mut core.turn, &child)
+        .unwrap_err();
     assert!(err.contains("子会话"), "{}", err);
     assert!(hist.load(&child).is_ok(), "拒绝删除后子会话仍在");
     // 删父会话：子会话随之消失。
-    assert!(core.history_delete(&parent).unwrap());
+    assert!(
+        core.lifecycle
+            .history_delete(&mut core.turn, &parent)
+            .unwrap()
+    );
     assert!(hist.load(&parent).is_err());
     assert!(hist.load(&child).is_err(), "子会话随父一起消失");
 }
@@ -85,10 +99,10 @@ pub(crate) fn history_delete_cascades_to_children_and_refuses_child_delete() {
 /// 目的：删除 VM 会话时**先停 guest，再删目录**——Windows 上 guest 还占着会话目录里的文件，反过来会 sharing violation。
 #[test]
 pub(crate) fn session_delete_stops_the_guest_before_removing_directories() {
-    use crate::capabilities::conductor::service::SessionDelete;
+    use crate::capabilities::lifecycle::api::SessionDelete;
+    use crate::capabilities::vm::api::GuestStop;
     use crate::capabilities::vm::api::Vm;
     use crate::capabilities::vm::domain::guest::{GuestRun, GuestSpec};
-    use crate::capabilities::work::api::GuestStop;
     use crate::kernel::api::FenceSpec;
 
     struct StopVm {
@@ -175,9 +189,9 @@ pub(crate) fn session_delete_stops_the_guest_before_removing_directories() {
 ///   回调被闸门挡住时 `run()` 仍要立刻返回；回调里能看到会话已经删掉（先删目录的快分支前提）。
 #[test]
 pub(crate) fn session_delete_releases_fences_in_background_after_directories() {
-    use crate::capabilities::conductor::service::SessionDelete;
+    use crate::capabilities::lifecycle::api::SessionDelete;
+    use crate::capabilities::vm::api::GuestStop;
     use crate::capabilities::vm::api::Vm;
-    use crate::capabilities::work::api::GuestStop;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
@@ -197,7 +211,7 @@ pub(crate) fn session_delete_releases_fences_in_background_after_directories() {
     let done = Arc::new(AtomicBool::new(false));
     let (gate_tx, gate_rx) = mpsc::channel::<()>();
     let gate_rx = Arc::new(Mutex::new(gate_rx));
-    let release: crate::capabilities::conductor::service::ReleaseByLease = {
+    let release: crate::capabilities::lifecycle::api::ReleaseByLease = {
         let gone = Arc::clone(&gone);
         let started = Arc::clone(&started);
         let done = Arc::clone(&done);
@@ -245,11 +259,11 @@ pub(crate) fn session_delete_releases_fences_in_background_after_directories() {
 /// 目的：删目录失败时撤权仍然执行（错误如实返回，不能把待办丢掉）。
 #[test]
 pub(crate) fn session_delete_releases_fences_even_when_directory_delete_fails() {
-    use crate::capabilities::conductor::service::SessionDelete;
+    use crate::capabilities::lifecycle::api::SessionDelete;
     use crate::capabilities::session::api::History;
     use crate::capabilities::session::domain::history::HistoryView;
+    use crate::capabilities::vm::api::GuestStop;
     use crate::capabilities::vm::api::Vm;
-    use crate::capabilities::work::api::GuestStop;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::{Duration, Instant};
 
@@ -295,7 +309,7 @@ pub(crate) fn session_delete_releases_fences_even_when_directory_delete_fails() 
     let hist: Arc<dyn History + Send + Sync> = Arc::new(FailingDelete { inner });
     let vm: Arc<dyn Vm + Send + Sync> = Arc::new(crate::tests::doubles::RecordingVm::default());
     let called = Arc::new(AtomicBool::new(false));
-    let release: crate::capabilities::conductor::service::ReleaseByLease = {
+    let release: crate::capabilities::lifecycle::api::ReleaseByLease = {
         let called = Arc::clone(&called);
         Arc::new(move |_lease: &str| {
             called.store(true, Ordering::SeqCst);
@@ -323,9 +337,9 @@ pub(crate) fn session_delete_releases_fences_even_when_directory_delete_fails() 
 /// 目的：没有租约时不起后台撤权线程（空清单直接返回）。
 #[test]
 pub(crate) fn session_delete_with_no_fence_leases_skips_release() {
-    use crate::capabilities::conductor::service::SessionDelete;
+    use crate::capabilities::lifecycle::api::SessionDelete;
+    use crate::capabilities::vm::api::GuestStop;
     use crate::capabilities::vm::api::Vm;
-    use crate::capabilities::work::api::GuestStop;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     let store = Arc::new(InMemoryHistory::new());
@@ -339,7 +353,7 @@ pub(crate) fn session_delete_with_no_fence_leases_skips_release() {
     let hist = test_history_of(Arc::clone(&store));
     let vm: Arc<dyn Vm + Send + Sync> = Arc::new(crate::tests::doubles::RecordingVm::default());
     let called = Arc::new(AtomicBool::new(false));
-    let release: crate::capabilities::conductor::service::ReleaseByLease = {
+    let release: crate::capabilities::lifecycle::api::ReleaseByLease = {
         let called = Arc::clone(&called);
         Arc::new(move |_lease: &str| {
             called.store(true, Ordering::SeqCst);
@@ -362,9 +376,9 @@ pub(crate) fn session_delete_with_no_fence_leases_skips_release() {
 /// 目的：后台撤权失败要如实记日志（失败条目留在台账，下次重试）。
 #[test]
 pub(crate) fn session_delete_logs_background_release_failures() {
-    use crate::capabilities::conductor::service::SessionDelete;
+    use crate::capabilities::lifecycle::api::SessionDelete;
+    use crate::capabilities::vm::api::GuestStop;
     use crate::capabilities::vm::api::Vm;
-    use crate::capabilities::work::api::GuestStop;
     use std::time::{Duration, Instant};
 
     let store = Arc::new(InMemoryHistory::new());
@@ -378,7 +392,7 @@ pub(crate) fn session_delete_logs_background_release_failures() {
     let hist = test_history_of(Arc::clone(&store));
     let vm: Arc<dyn Vm + Send + Sync> = Arc::new(crate::tests::doubles::RecordingVm::default());
     let called = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let release: crate::capabilities::conductor::service::ReleaseByLease = {
+    let release: crate::capabilities::lifecycle::api::ReleaseByLease = {
         let called = Arc::clone(&called);
         Arc::new(move |_lease: &str| {
             called.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -407,7 +421,7 @@ pub(crate) fn session_delete_logs_background_release_failures() {
     );
     assert!(
         log.has("模拟撤权失败"),
-        "撤权失败要进日志（位置 conductor::release_fences）"
+        "撤权失败要进日志（位置 lifecycle::release_fences）"
     );
 }
 
@@ -488,7 +502,10 @@ pub(crate) fn history_delete_refuses_when_any_node_in_the_subtree_is_running() {
     let child = core.spawn_agent_session(&parent, "a").unwrap();
     core.take_single(&child)
         .expect("把子会话交给工作线程（标记生成中）");
-    let err = core.history_delete(&parent).unwrap_err();
+    let err = core
+        .lifecycle
+        .history_delete(&mut core.turn, &parent)
+        .unwrap_err();
     assert!(err.contains("正在生成"), "{}", err);
     assert!(
         hist.load(&parent).is_ok() && hist.load(&child).is_ok(),
@@ -512,12 +529,18 @@ pub(crate) fn create_work_uses_chosen_tier_and_rejects_unavailable_vm() {
         .create_work(work("h", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    assert_eq!(core.history_open(&host).unwrap().0.exec.tier, Tier::Host);
+    assert_eq!(
+        core.lifecycle.history_open(&host).unwrap().0.exec.tier,
+        Tier::Host
+    );
     let mut vm = work("v", WorkMode::Single, &["a"]);
     vm.tier = Tier::Vm;
     let err = core.create_work(vm).unwrap_err();
     assert!(err.contains("虚拟机档现在不可用"), "{}", err);
-    assert!(core.history_open("v").is_err(), "拒绝就该什么都不留下");
+    assert!(
+        core.lifecycle.history_open("v").is_err(),
+        "拒绝就该什么都不留下"
+    );
 }
 
 #[test]
@@ -542,11 +565,15 @@ pub(crate) fn create_work_validates_user_choices() {
         .expect("零模块 agent 合法");
     assert_eq!(opened.agents.len(), 1);
     assert!(
-        core.history_open("零模块").expect("读 meta").0.agents[0]
+        core.lifecycle
+            .history_open("零模块")
+            .expect("读 meta")
+            .0
+            .agents[0]
             .modules
             .is_empty()
     );
-    let _ = core.history_delete("零模块");
+    let _ = core.lifecycle.history_delete(&mut core.turn, "零模块");
     // 单模式的**组合语义**：点名多个 = 并成一个临时组合（模块去重、保序；模型取核心默认）。
     let two_agents = WorkSpec {
         name: "x".to_string(),
@@ -579,13 +606,13 @@ pub(crate) fn create_work_validates_user_choices() {
         .create_work(two_agents)
         .expect("单模式点名多个应并成一个，不是报错");
     assert_eq!(opened.agents, vec!["x".to_string()], "并出来的组合用工作名");
-    let meta = core.history_open("x").expect("读 meta").0;
+    let meta = core.lifecycle.history_open("x").expect("读 meta").0;
     assert_eq!(
         meta.agents[0].modules,
         vec!["a".to_string(), "b".to_string()]
     );
     assert!(meta.agents[0].transient, "并出来的是临时 agent");
-    let _ = core.history_delete("x");
+    let _ = core.lifecycle.history_delete(&mut core.turn, "x");
     assert!(
         core.create_work(collab_work("x", &["a"], false, "  "))
             .unwrap_err()

@@ -14,7 +14,7 @@ use crate::kernel::ports::{HostProbe, Log};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::capabilities::work::api::{EditGuest, GuestBoot, GuestDiagnose, GuestStop};
+use crate::capabilities::work::api::{EditGuest, GuestBoot, GuestDiagnose};
 
 impl GuestBoot {
     /// 目的：组装备好的那一段（核心侧调用，毫秒级）。
@@ -256,20 +256,6 @@ fn common_ancestor(paths: &[PathBuf]) -> Option<PathBuf> {
     }
     acc.parent()?;
     Some(acc)
-}
-
-impl GuestStop {
-    /// 目的：按租约清单销毁（幂等）。
-    pub(crate) fn new(vm: Arc<dyn Vm + Send + Sync>, leases: Vec<String>) -> GuestStop {
-        GuestStop { vm, leases }
-    }
-
-    /// 目的：执行销毁——这里要等 guest 落盘，别在核心线程上跑。
-    pub fn run(self) {
-        for lease in &self.leases {
-            self.vm.guest_stop(lease);
-        }
-    }
 }
 
 impl EditGuest {

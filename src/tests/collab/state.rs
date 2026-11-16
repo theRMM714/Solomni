@@ -62,12 +62,12 @@ pub(crate) fn collab_rewind_rebuilds_from_transcript_and_resume_waits_at_gate() 
         Ok(Some(Pending::ConfirmBegin))
     ));
     // 回档到需求行之后（保留前 1 行 = 需求行）：协作走「按转录重建」
-    let replayed = core
-        .rewind(
-            &sid,
-            crate::capabilities::conductor::api::RewindTarget::Delete(1),
-        )
-        .unwrap();
+    let replayed = crate::tests::lifecycle::rewind(
+        &mut core,
+        &sid,
+        crate::capabilities::lifecycle::api::RewindTarget::Delete(1),
+    )
+    .unwrap();
     assert_eq!(
         replay_lines(&replayed),
         vec!["[用户:需求] 做个东西".to_string()]
@@ -102,7 +102,7 @@ pub(crate) fn collab_update_task_rewrites_the_requirement_without_rewinding() {
         ]
     );
     // 派生以最后一条需求为准
-    let (_, events) = core.history_open("c").unwrap();
+    let (_, events) = core.lifecycle.history_open("c").unwrap();
     let st = crate::capabilities::collab::domain::collab_state::derive(&events, &["a".to_string()]);
     assert_eq!(st.task.as_deref(), Some("需求已修改，以下是新需求：新需求"));
 }

@@ -264,7 +264,7 @@ pub(crate) fn discussion_member_turn_finalizes_by_round_and_rebuilds_the_same_di
     answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
     let child = format!("{}--a", sid);
     // ① 逐轮定稿：核实行与发言行是两条 Transcript，且同属一个回合号。
-    let (_, rows) = core.history_open(&child).unwrap();
+    let (_, rows) = core.lifecycle.history_open(&child).unwrap();
     let batches: Vec<Vec<serde_json::Value>> = rows
         .iter()
         .filter(|e| e.get("type").and_then(|t| t.as_str()) == Some("transcript"))

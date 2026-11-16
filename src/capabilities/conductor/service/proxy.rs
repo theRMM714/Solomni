@@ -284,7 +284,7 @@ impl Conductor {
         &self,
         sid: &str,
     ) -> Result<Vec<crate::capabilities::session::api::LineView>, String> {
-        let (_, events) = self.history_open(sid)?;
+        let (_, events) = self.lifecycle.history_open(sid)?;
         let mut out = Vec::new();
         for ev in &events {
             if ev.get("type").and_then(|t| t.as_str()) != Some("transcript") {
@@ -378,7 +378,7 @@ impl Conductor {
             .history
             .meta(sid)
             .map_err(|_| format!("无此会话：{}", sid))?;
-        let list = self.history_list();
+        let list = self.lifecycle.history_list();
         let sv = self.session_views(&list).into_iter().find(|v| v.sid == sid);
         let state = match meta.run {
             RunState::Active => match &sv {
@@ -456,7 +456,8 @@ impl Conductor {
 
     /// 目的：一个会话的形态（single / collab）：落盘 meta 是唯一真相；取不到就回空串。
     pub(crate) fn session_mode_str(&self, sid: &str) -> String {
-        self.history_open(sid)
+        self.lifecycle
+            .history_open(sid)
             .map(|(m, _)| m.mode)
             .unwrap_or_default()
     }

@@ -233,7 +233,7 @@ pub(crate) fn cards_and_answers_survive_a_rebuild() {
         .sid;
     let first = core.open_queue(&sid).unwrap().expect("挂着一张卡").card;
     // 重启 / 回档走同一条重建路：按**转录**重建，卡与选项都要回来（卡号稳定）。
-    let (meta, events) = core.history_open("w").unwrap();
+    let (meta, events) = core.lifecycle.history_open("w").unwrap();
     let rebuilt_session = core
         .turn
         .rebuild_session(&meta, &events, core.registry.as_ref(), core.probe.as_ref())
@@ -248,7 +248,7 @@ pub(crate) fn cards_and_answers_survive_a_rebuild() {
     assert_eq!(ids, was, "重建出来的选项集与原卡一致");
     // 答过它：转录里既有卡也有回答（重启后仍能重建"答过什么"）。
     answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
-    let (_, events) = core.history_open("w").unwrap();
+    let (_, events) = core.lifecycle.history_open("w").unwrap();
     let kinds: Vec<String> = events
         .iter()
         .filter_map(|e| e.get("type").and_then(|t| t.as_str()).map(String::from))
@@ -453,7 +453,7 @@ pub(crate) fn a_second_gate_queues_behind_the_first() {
         waiters[0]
     );
     // **整队重建**（重启走这条路）：还没答之前重建，队首与后面还在等的那张都在、顺序不乱。
-    let (meta, events) = core.history_open("w").unwrap();
+    let (meta, events) = core.lifecycle.history_open("w").unwrap();
     let rebuilt = core
         .turn
         .rebuild_session(&meta, &events, core.registry.as_ref(), core.probe.as_ref())
@@ -480,7 +480,7 @@ pub(crate) fn a_second_gate_queues_behind_the_first() {
     assert_eq!(next.card.id, "d2", "先来后到：队首依次往前");
     assert!(next.waiting.is_empty(), "队列里只剩它一张");
     // **重建整队**（重启 / 回档走同一条路）：按转录重建出来的是**整条队**，不只是最后一张，顺序不乱。
-    let (meta, events) = core.history_open("w").unwrap();
+    let (meta, events) = core.lifecycle.history_open("w").unwrap();
     let rebuilt = core
         .turn
         .rebuild_session(&meta, &events, core.registry.as_ref(), core.probe.as_ref())

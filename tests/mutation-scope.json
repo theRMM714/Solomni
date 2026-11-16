@@ -31,7 +31,7 @@
       "src/capabilities/registry/**/*.rs"
     ],
     "rewind": [
-      "src/capabilities/conductor/service/rewind.rs"
+      "src/capabilities/lifecycle/service/rewind.rs"
     ],
     "patch": [
       "src/capabilities/tools/domain/patch.rs"

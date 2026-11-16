@@ -13,6 +13,8 @@ use crate::capabilities::work::api::{
     AgentSuggestion, FilesView, RuntimeReport, SessionConfig, SessionEdit, SessionView,
     TierChoices, WorkMode, WorkOpened, WorkSpec,
 };
+// 回档目标与结果是层 10 的词汇：这里只取用（子模块经 `use super::*` 一并拿到），不定义、不转发。
+pub(crate) use crate::capabilities::lifecycle::api::{RebuildDeps, RewindOutcome, RewindTarget};
 use crate::kernel::api::JobRegistry;
 use crate::kernel::api::SessionId;
 pub use crate::kernel::api::Tier;
@@ -470,17 +472,6 @@ pub trait ActionOps: Send + Sync {
     fn act(&self, call: ActionCall) -> Result<Acted, String>;
 }
 
-/// 目的：回档目标：留档 / 删除按**行 id**，恢复按**留档标记 id**。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RewindTarget {
-    /// 目的：留档到某一行之前：标记 + 折叠，可恢复。
-    Archive(u64),
-    /// 目的：删除某一行及其后：真的截断，不可恢复。
-    Delete(u64),
-    /// 目的：恢复到某个留档标记之前：删掉该标记及其后的全部内容。
-    Restore(u64),
-}
-
 /// 目的：动作结果：生成类只回**事件台头部序号**（事实在事件台上，订阅者自己按 since 取）；
 ///   回档 / 改需求给完整重放（那是快照，不是增量事实）；其余给一份结构化结果（如 `{ok:true}`）。
 #[derive(Debug)]
@@ -488,12 +479,4 @@ pub enum Acted {
     Advanced(Advance),
     Replayed(Vec<serde_json::Value>),
     Done(serde_json::Value),
-}
-
-/// 目的：一次回档的完整结果——主会话活动视图 + 受影响的子会话活动视图。
-/// 约束：主视图回给调用方；每份视图同时作为一条 `rewound` 推上事件台，供刷新与多端重置。
-#[derive(Debug)]
-pub(crate) struct RewindOutcome {
-    pub main: Vec<serde_json::Value>,
-    pub children: Vec<(String, Vec<serde_json::Value>)>,
 }

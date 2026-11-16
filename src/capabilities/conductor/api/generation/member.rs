@@ -17,7 +17,7 @@ impl ConductorHandle {
         {
             let (parent, agent, name) = (sid.to_string(), req.agent.clone(), child.clone());
             self.call(move |core| {
-                if core.history_open(&name).is_err() {
+                if core.lifecycle.history_open(&name).is_err() {
                     core.spawn_agent_session(&parent, &agent)?;
                 }
                 Ok(())

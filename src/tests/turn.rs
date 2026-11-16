@@ -163,13 +163,15 @@ fn admit_puts_the_session_in_the_live_table_and_persists_identity() {
         .expect("建工作")
         .sid;
     let session = core.turn.take(&sid).expect("取出会话");
-    let (meta, _) = core.history_open(&sid).expect("读元数据");
-    core.history_delete(&sid).expect("先抹掉落盘");
+    let (meta, _) = core.lifecycle.history_open(&sid).expect("读元数据");
+    core.lifecycle
+        .history_delete(&mut core.turn, &sid)
+        .expect("先抹掉落盘");
     assert!(!core.turn.holds(&sid), "抹掉后不在世");
     core.turn.admit(&meta, session).expect("准入");
     assert!(core.turn.holds(&sid), "准入后要进在世表");
     assert!(
-        core.history_list().iter().any(|m| m.name == sid),
+        core.lifecycle.history_list().iter().any(|m| m.name == sid),
         "准入要把会话身份落盘"
     );
 }

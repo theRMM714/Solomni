@@ -38,12 +38,12 @@ pub(crate) fn direct_rewind_drops_tail_then_continue_allows_user_turn() {
     assert!(matches!(&blocked[0], SessionEvent::Notice(n) if n.contains("最后一条是 AI 发言")));
 
     // 回档到第 1 行：保留前 1 行（= 删第 1 行及其后），只留「用户·问一」
-    let replayed = core
-        .rewind(
-            &sid,
-            crate::capabilities::conductor::api::RewindTarget::Delete(1),
-        )
-        .unwrap();
+    let replayed = crate::tests::lifecycle::rewind(
+        &mut core,
+        &sid,
+        crate::capabilities::lifecycle::api::RewindTarget::Delete(1),
+    )
+    .unwrap();
     let lines = replay_lines(&replayed);
     assert_eq!(lines, vec!["[用户] 问一".to_string()]);
 
@@ -63,7 +63,7 @@ pub(crate) fn direct_rewind_drops_tail_then_continue_allows_user_turn() {
     );
 
     // 落盘历史也按回档截断回放
-    let (_, events) = core.history_open("w").unwrap();
+    let (_, events) = core.lifecycle.history_open("w").unwrap();
     assert_eq!(
         replay_lines(&events),
         vec!["[用户] 问一".to_string(), format!("[a] {}", "续答")]
@@ -73,7 +73,7 @@ pub(crate) fn direct_rewind_drops_tail_then_continue_allows_user_turn() {
 /// 目的：留档：只标记并折叠尾部，文件字节一个不少，新行从最大 id 续号；恢复把标记及其后真的删掉。
 #[test]
 pub(crate) fn archive_folds_the_tail_and_restore_brings_it_back() {
-    use crate::capabilities::conductor::api::RewindTarget;
+    use crate::capabilities::lifecycle::api::RewindTarget;
     use crate::capabilities::session::api::next_line_id;
     let say = |t: &str| serde_json::json!({"type": "say", "text": t}).to_string();
     let mut member = BTreeMap::new();
@@ -103,7 +103,8 @@ pub(crate) fn archive_folds_the_tail_and_restore_brings_it_back() {
     };
 
     // 留档到第 1 行：活动视图只剩「用户 问一」；文件里 2/3 仍在，标记写进流水。
-    let replayed = core.rewind(&sid, RewindTarget::Archive(1)).unwrap();
+    let replayed =
+        crate::tests::lifecycle::rewind(&mut core, &sid, RewindTarget::Archive(1)).unwrap();
     assert_eq!(replay_lines(&replayed), vec!["[用户] 问一".to_string()]);
     let (_, raw) = hist.load("w").unwrap();
     assert_eq!(rows(&raw), vec![0, 1, 2, 3], "留档不删字节");
@@ -139,7 +140,7 @@ pub(crate) fn archive_folds_the_tail_and_restore_brings_it_back() {
     );
 
     // 恢复标记 1：活动视图回到全部 4 行；标记与它之后的内容**真的**从文件里消失。
-    let back = core.rewind(&sid, RewindTarget::Restore(1)).unwrap();
+    let back = crate::tests::lifecycle::rewind(&mut core, &sid, RewindTarget::Restore(1)).unwrap();
     assert_eq!(
         replay_lines(&back),
         vec![
@@ -162,7 +163,7 @@ pub(crate) fn archive_folds_the_tail_and_restore_brings_it_back() {
 /// 目的：删除：真的把标记点之后的字节从文件里删掉（不是只截视图）。
 #[test]
 pub(crate) fn delete_rewrites_the_file_for_real() {
-    use crate::capabilities::conductor::api::RewindTarget;
+    use crate::capabilities::lifecycle::api::RewindTarget;
     let say = |t: &str| serde_json::json!({"type": "say", "text": t}).to_string();
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), vec![say("答一"), say("答二")]);
@@ -182,7 +183,7 @@ pub(crate) fn delete_rewrites_the_file_for_real() {
     with_live(|l| core.single_say(&sid, "问一", l)).unwrap();
     with_live(|l| core.single_say(&sid, "问二", l)).unwrap();
 
-    core.rewind(&sid, RewindTarget::Delete(2)).unwrap();
+    crate::tests::lifecycle::rewind(&mut core, &sid, RewindTarget::Delete(2)).unwrap();
     let (_, raw) = hist.load("w").unwrap();
     let ids: Vec<u64> = raw
         .iter()
@@ -217,12 +218,12 @@ pub(crate) fn rewind_keeps_only_lines_before_the_mark() {
     with_live(|l| core.single_say(&sid, "问二", l)).unwrap(); // 行 2 用户 / 3 AI
 
     // 回档到第 2 行 = 删第 2 行及其后 → 只留前 2 行，历史与 marks 同步截断
-    let replayed = core
-        .rewind(
-            &sid,
-            crate::capabilities::conductor::api::RewindTarget::Delete(2),
-        )
-        .unwrap();
+    let replayed = crate::tests::lifecycle::rewind(
+        &mut core,
+        &sid,
+        crate::capabilities::lifecycle::api::RewindTarget::Delete(2),
+    )
+    .unwrap();
     assert_eq!(
         replay_lines(&replayed),
         vec!["[用户] 问一".to_string(), "[a] 答一".to_string()]
@@ -234,12 +235,12 @@ pub(crate) fn rewind_keeps_only_lines_before_the_mark() {
     );
 
     // 回档到第 0 行 = 转录清空、对话也清空（身份由参数现渲染，不在对话里）
-    let replayed = core
-        .rewind(
-            &sid,
-            crate::capabilities::conductor::api::RewindTarget::Delete(0),
-        )
-        .unwrap();
+    let replayed = crate::tests::lifecycle::rewind(
+        &mut core,
+        &sid,
+        crate::capabilities::lifecycle::api::RewindTarget::Delete(0),
+    )
+    .unwrap();
     assert!(
         replay_lines(&replayed).is_empty(),
         "点第一行 → 转录清空：{:?}",
@@ -269,21 +270,22 @@ pub(crate) fn repeated_delete_to_zero_keeps_derived_state_in_sync() {
         .sid;
     with_live(|l| core.single_say(&sid, "问一", l)).unwrap(); // 行 0 用户 / 1 AI
 
-    core.rewind(
+    crate::tests::lifecycle::rewind(
+        &mut core,
         &sid,
-        crate::capabilities::conductor::api::RewindTarget::Delete(0),
+        crate::capabilities::lifecycle::api::RewindTarget::Delete(0),
     )
     .unwrap();
     assert!(core.single_history(&sid).unwrap().is_empty(), "对话清空");
 
     // marks 已清空、line_reply 仍保留 2 项时，第二次删除到 0 会走 align_keep 的 MAX 分支；
     // 这里钉住它不 panic。
-    let again = core
-        .rewind(
-            &sid,
-            crate::capabilities::conductor::api::RewindTarget::Delete(0),
-        )
-        .expect("重复删除到 0 不应 panic");
+    let again = crate::tests::lifecycle::rewind(
+        &mut core,
+        &sid,
+        crate::capabilities::lifecycle::api::RewindTarget::Delete(0),
+    )
+    .expect("重复删除到 0 不应 panic");
     assert!(again.is_empty(), "清空后重复回档仍是空视图");
     assert!(core.single_history(&sid).unwrap().is_empty(), "仍是空对话");
 
@@ -338,12 +340,12 @@ pub(crate) fn rebuilt_context_keeps_tool_result() {
         Arc::clone(&io),
     );
     // 内存里没有这个会话 → 走 rebuild_session（保留全部 3 行）
-    core2
-        .rewind(
-            &sid,
-            crate::capabilities::conductor::api::RewindTarget::Delete(3),
-        )
-        .unwrap();
+    crate::tests::lifecycle::rewind(
+        &mut core2,
+        &sid,
+        crate::capabilities::lifecycle::api::RewindTarget::Delete(3),
+    )
+    .unwrap();
     let h = core2.single_history(&sid).expect("重建后应在内存里");
     assert!(
         h.iter()
@@ -400,7 +402,7 @@ pub(crate) fn rebuild_restores_the_last_shell_snapshot_from_the_transcript() {
         })],
     )
     .unwrap();
-    let (meta, events) = core.history_open(&sid).unwrap();
+    let (meta, events) = core.lifecycle.history_open(&sid).unwrap();
     drop(
         core.turn
             .rebuild_session(&meta, &events, core.registry.as_ref(), core.probe.as_ref())
@@ -454,7 +456,7 @@ pub(crate) fn rebuild_prefers_the_structured_shell_facts_over_the_receipt() {
         })],
     )
     .unwrap();
-    let (meta, events) = core.history_open(&sid).unwrap();
+    let (meta, events) = core.lifecycle.history_open(&sid).unwrap();
     drop(
         core.turn
             .rebuild_session(&meta, &events, core.registry.as_ref(), core.probe.as_ref())
@@ -513,12 +515,12 @@ pub(crate) fn rewind_never_splits_a_reply() {
     with_live(|l| core.single_say(&sid, "读两个文件", l)).unwrap();
 
     // 行序：0 用户 / 1 工具 / 2 工具 / 3 答复。回档到第 2 行 = 落在回复内部 → 整条回复一起丢。
-    let replayed = core
-        .rewind(
-            &sid,
-            crate::capabilities::conductor::api::RewindTarget::Delete(2),
-        )
-        .unwrap();
+    let replayed = crate::tests::lifecycle::rewind(
+        &mut core,
+        &sid,
+        crate::capabilities::lifecycle::api::RewindTarget::Delete(2),
+    )
+    .unwrap();
     assert_eq!(
         replay_lines(&replayed),
         vec!["[用户] 读两个文件".to_string()],

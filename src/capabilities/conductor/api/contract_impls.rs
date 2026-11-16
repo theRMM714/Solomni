@@ -386,16 +386,17 @@ impl RegistryOps for ConductorHandle {
 // ---------- 归各能力自己的入站契约（本文件只实现队列转发） ----------
 impl crate::capabilities::session::api::HistoryOps for ConductorHandle {
     fn list(&self) -> Result<Vec<HistoryView>, String> {
-        self.call(|core| Ok(core.history_list()))
+        self.call(|core| Ok(core.lifecycle.history_list()))
     }
     fn open(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {
         let name = name.to_string();
-        self.call(move |core| core.history_open(&name))
+        self.call(move |core| core.lifecycle.history_open(&name))
     }
     fn delete(&self, name: &str) -> Result<bool, String> {
         let name = name.to_string();
         // 核心只做毫秒级的账；guest 销毁与目录删除在这一段（调用方线程）上按序执行。
-        let delete = self.call(move |core| core.delete_bookkeeping(&name))?;
+        let delete =
+            self.call(move |core| core.lifecycle.delete_bookkeeping(&mut core.turn, &name))?;
         delete.run()
     }
 }

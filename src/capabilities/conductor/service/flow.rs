@@ -628,7 +628,7 @@ impl Conductor {
         &mut self,
         sid: &str,
         text: &str,
-    ) -> Result<crate::capabilities::conductor::api::RewindOutcome, String> {
+    ) -> Result<crate::capabilities::lifecycle::api::RewindOutcome, String> {
         let text = text.trim();
         if text.is_empty() {
             return Err("需求不能为空".to_string());
@@ -683,8 +683,18 @@ impl Conductor {
         self.history
             .replace(sid, &kept)
             .map_err(|e| format!("改需求落盘失败：{}", e))?;
-        let active = self.restore_session(sid, &meta, &kept, next + 1)?;
-        Ok(crate::capabilities::conductor::api::RewindOutcome {
+        let active = self.lifecycle.restore_session(
+            &mut self.turn,
+            RebuildDeps {
+                registry: self.registry.as_ref(),
+                probe: self.probe.as_ref(),
+            },
+            sid,
+            &meta,
+            &kept,
+            next + 1,
+        )?;
+        Ok(crate::capabilities::lifecycle::api::RewindOutcome {
             main: active,
             children: Vec::new(),
         })

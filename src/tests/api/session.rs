@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 #[test]
 fn delete_past_an_archive_reports_the_casualties_and_needs_a_confirm() {
-    use crate::capabilities::conductor::api::RewindTarget;
+    use crate::capabilities::lifecycle::api::RewindTarget;
     let mut member = std::collections::BTreeMap::new();
     member.insert(
         "a".to_string(),

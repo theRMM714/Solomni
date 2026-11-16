@@ -58,9 +58,9 @@
       "reason": "Windows 专有的机器级 ACL 真写（预授与成本标定）：非 Windows 在上面的护栏就返回，守卫之后的路径在 Linux 覆盖率作业里永远执行不到；由 --setup=fence / --setup=fence-calibrate 真机冒烟与三平台探针验收"
     },
     {
-      "file": "src/capabilities/conductor/service/history.rs",
-      "from": 48,
-      "to": 59,
+      "file": "src/capabilities/lifecycle/service/history.rs",
+      "from": 47,
+      "to": 60,
       "reason": "后台撤权线程创建失败时的同步兜底：线程创建失败是环境性防御分支，测试进程无法稳定构造；成功路径与撤权失败日志都有用例覆盖"
     }
   ],

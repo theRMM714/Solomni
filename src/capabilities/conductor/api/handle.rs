@@ -180,7 +180,14 @@ impl ConductorHandle {
         }
         let outcome = self.call({
             let sid = sid.to_string();
-            move |core| core.rewind_outcome(&sid, target, force)
+            move |core| {
+                let deps = RebuildDeps {
+                    registry: core.registry.as_ref(),
+                    probe: core.probe.as_ref(),
+                };
+                core.lifecycle
+                    .rewind_outcome(&mut core.turn, deps, &target, &sid, force)
+            }
         })?;
         self.publish_rewound(sid, &outcome);
         Ok(outcome)
@@ -292,7 +299,14 @@ impl ConductorHandle {
         let face = tools.face.allowed.clone();
         let granted = {
             let sid = sid.to_string();
-            self.call(move |core| Ok(core.history_open(&sid)?.0.delegation.map(|d| d.granted_at)))?
+            self.call(move |core| {
+                Ok(core
+                    .lifecycle
+                    .history_open(&sid)?
+                    .0
+                    .delegation
+                    .map(|d| d.granted_at))
+            })?
         };
         let grant = granted.map(|_| dp::Grant {
             tools: face,

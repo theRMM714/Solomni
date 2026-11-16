@@ -4,7 +4,7 @@
 //! 联动：api 层经 ConductorHandle 把命令与事件交给这里；出站动作经 ports::ProxyHost。
 
 use crate::capabilities::builds::api::Builds;
-use crate::capabilities::conductor::api::RewindTarget;
+use crate::capabilities::lifecycle::api::RebuildDeps;
 use crate::capabilities::llm::api::Llm;
 use crate::capabilities::packages::api::Packages;
 use crate::capabilities::provision::api::Provision;
@@ -94,8 +94,11 @@ pub struct Conductor {
     /// 目的：回合状态与会话本体——在世会话表、运行态与创建占位、裁决队、每会话的 shell 活进程槽，以及一席的装配（在 `turn`）。
     pub(crate) turn: crate::capabilities::turn::api::Turn,
     /// 目的：工作与会话配置的用例面（层 9）——建工作 / 改配 / 视图 / 报告 / guest 起停都经它。
-    ///   本能力只做命令队列、协作链推进、回档与代理工具族；work 用例的方法原样转发。
+    ///   本能力只做命令队列、协作链推进与代理工具族；work 用例的方法原样转发。
     pub(crate) work: Work,
+    /// 目的：会话历史生命周期（层 10）——历史列出 / 只读打开 / 删除收尾 / 回档三模式都经它。
+    ///   会话本体按形参交过去（`&mut turn`），它不持第二份。
+    pub(crate) lifecycle: crate::capabilities::lifecycle::api::Lifecycle,
 }
 
 /// 目的：在世会话形态（`turn` 的状态类型），本能力各用例只经它放取会话。
@@ -109,10 +112,7 @@ mod compact;
 mod env;
 mod flow;
 mod history;
-#[cfg(test)]
-pub(crate) use history::{ReleaseByLease, SessionDelete};
 pub mod proxy;
-mod rewind;
 mod turn;
 impl Conductor {
     /// 组合根专用：main 负责创建适配器并注入；conductor 不自建任何具体实现。
@@ -172,6 +172,14 @@ impl Conductor {
             Arc::clone(&systools),
             Arc::clone(&log),
         );
+        let lifecycle = crate::capabilities::lifecycle::api::Lifecycle::new(
+            Arc::clone(&history),
+            Arc::clone(&workspace),
+            Arc::clone(&tools),
+            Arc::clone(&vm),
+            Arc::clone(&residents),
+            Arc::clone(&log),
+        );
         let c = Conductor {
             registry,
             history,
@@ -190,6 +198,7 @@ impl Conductor {
             systools,
             turn,
             work,
+            lifecycle,
         };
         c.sync_compact_choice();
         c
@@ -380,11 +389,6 @@ impl Conductor {
             .map(|(_, ev)| crate::capabilities::session::api::issued_in(&ev))
             .unwrap_or(0);
         self.turn.desk_for(sid, issued)
-    }
-
-    /// 目的：会话没了，它的裁决队随会话一起消失（等待方与转录都不复存在）。
-    pub(crate) fn forget_desk(&self, sid: &str) {
-        self.turn.desk().forget_gate(sid);
     }
 
     /// 目的：这些会话里是否有任何一个的回合还攥在生成线程手里（核心里"生成中"）。

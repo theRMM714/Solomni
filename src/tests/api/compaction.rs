@@ -585,7 +585,7 @@ fn deleting_the_compaction_line_restores_the_full_send_view() {
     ops.sessions
         .rewind(
             &sid,
-            crate::capabilities::conductor::api::RewindTarget::Delete(marker),
+            crate::capabilities::lifecycle::api::RewindTarget::Delete(marker),
         )
         .expect("删除压缩记录行");
     ops.sessions
@@ -682,7 +682,7 @@ fn compaction_survives_a_restart_and_rewinds_back_through_the_point() {
         .expect("建会话")
         .sid;
     // 与**真实流水**对齐起号：建会话时已经种了一条系统提示词行，不能重号。
-    let (_, existing) = core.history_open(&sid).expect("读流水");
+    let (_, existing) = core.lifecycle.history_open(&sid).expect("读流水");
     let next = existing
         .iter()
         .filter(|e| e.get("type").and_then(|t| t.as_str()) == Some("transcript"))
@@ -768,9 +768,10 @@ fn compaction_survives_a_restart_and_rewinds_back_through_the_point() {
     core.turn
         .ensure_session(&sid, core.registry.as_ref(), core.probe.as_ref())
         .expect("把重建结果装回表里");
-    core.rewind(
+    crate::tests::lifecycle::rewind(
+        &mut core,
         &sid,
-        crate::capabilities::conductor::api::RewindTarget::Delete(next),
+        crate::capabilities::lifecycle::api::RewindTarget::Delete(next),
     )
     .expect("回档到压缩点之前");
     let back = core.take_single(&sid).expect("取回回档后的会话");

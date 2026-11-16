@@ -1,13 +1,13 @@
 //! 目的：work 能力对外的契约面：一次工作的用户决定与结果（`WorkSpec` / `WorkOpened`）、
 //!   会话与配置的读模型（`SessionView` / `SessionConfig` / `FilesView` / `RuntimeReport` 等），
-//!   以及"要等 guest"的那几段自足任务（`GuestBoot` / `GuestStop` / `EditGuest` / `GuestDiagnose`）。
+//!   以及"要等 guest"的那几段自足任务（`GuestBoot` / `EditGuest` / `GuestDiagnose`；单次销毁 `GuestStop` 在 `vm`）。
 //! 管：类型的定义与文档（值的唯一家）。
 //! 不管：怎么建、怎么改、怎么报（在 service 里）；呈现层的 JSON 封装。
 //! 联动：conductor 与呈现层都从这里取类型；guest 任务的 `run()` 在调用方线程上跑。
 
 use crate::capabilities::registry::api::AgentView;
 use crate::capabilities::session::api::SessionEvent;
-use crate::capabilities::vm::api::{ExecPlan, Vm};
+use crate::capabilities::vm::api::{ExecPlan, GuestStop, Vm};
 use crate::capabilities::workspace::api::Sandboxes;
 use crate::kernel::api::{SessionId, Tier};
 use crate::kernel::ports::{HostProbe, Log};
@@ -424,12 +424,6 @@ pub struct GuestBoot {
     pub(crate) sandboxes: Sandboxes,
     /// 目的：拉起之前先停掉同一租约已有的 guest（改配要重建）。
     pub(crate) restart: bool,
-}
-
-/// 目的：一次 guest 销毁（慢：先请 guest 断电并等它落盘，超时才杀）——同样在调用方线程上跑。
-pub struct GuestStop {
-    pub(crate) vm: Arc<dyn Vm + Send + Sync>,
-    pub(crate) leases: Vec<String>,
 }
 
 /// 目的：改配时要等 guest 的那一段——切回本机档只停；切入或留在虚拟机档要起（可能先停旧的）。

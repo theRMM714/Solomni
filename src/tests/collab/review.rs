@@ -137,12 +137,12 @@ pub(crate) fn mode_vocabulary_is_single_or_collab_only() {
     })
     .unwrap();
     // 内存里没有这个会话 → 走 rebuild_session，对未知形态如实报错。
-    let err = core
-        .rewind(
-            "未知形态",
-            crate::capabilities::conductor::api::RewindTarget::Delete(0),
-        )
-        .unwrap_err();
+    let err = crate::tests::lifecycle::rewind(
+        &mut core,
+        "未知形态",
+        crate::capabilities::lifecycle::api::RewindTarget::Delete(0),
+    )
+    .unwrap_err();
     assert!(err.contains("未知会话形态"), "{}", err);
 }
 
@@ -198,7 +198,7 @@ pub(crate) fn approved_plan_spawns_a_sub_session_per_ready_node() {
     );
 
     // 子会话是**普通单 agent 会话**：meta 记着编排者与节点，沙箱锚在父会话上。
-    let (cmeta, _) = core.history_open(child).unwrap();
+    let (cmeta, _) = core.lifecycle.history_open(child).unwrap();
     assert_eq!(cmeta.parent.as_deref(), Some(sid.as_str()));
     assert!(
         cmeta.node.is_none(),
@@ -426,7 +426,7 @@ pub(crate) fn total_review_rework_names_the_nodes_and_only_they_are_redispatched
         wake
     );
     // **核心在干什么要落档**（它没有 agent 会话，所以它的行由协作会话接住并落盘）。
-    let (_, hist) = core.history_open("w").unwrap();
+    let (_, hist) = core.lifecycle.history_open("w").unwrap();
     let rows = replay_lines(&hist);
     for want in [
         "[核心:plan]",

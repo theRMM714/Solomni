@@ -1,6 +1,6 @@
 # conductor（协调业务）
 
-> 定位：应用编排——命令队列、协作链推进、回档、代理工具族、动作分发，以及把各能力组装成 `Ops`。
+> 定位：应用编排——命令队列、协作链推进、代理工具族、动作分发、历史生命周期的时机，以及把各能力组装成 `Ops`。
 > 效力：规范｜核对：2026-11-16｜依据：`src/capabilities/conductor/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九，测试规范见 [TESTING.md](../../TESTING.md)。
 
@@ -10,7 +10,8 @@
 - 管：**协作链推进与协作动作**（`src/capabilities/conductor/service/flow.rs`）：链推进、节点派发与子会话、协作步与裁决卡动作。
 - 管：**代理工具族**（`src/capabilities/conductor/service/proxy.rs`、`src/capabilities/conductor/ports.rs`、`src/capabilities/conductor/domain/proxy.rs`）：代理工具的执行面、队列桥与授权校验；代理会话的装配在 `turn`（`build_proxy`），「建一个代理工作」的用例在 `work`。
 - 管：生成驱动——**长步骤一律 own-and-return**（见「一、长步骤的边界」）：生成、协作泵、压缩、起 / 停 guest 都不在队列里跑，队列只占「取 / 交」两步；建会话 / 启用历史会话 / 改配 / 删会话的 guest 启停在调用方线程上（起停对象在 `src/capabilities/work/service/guest_job.rs`）。
-- 管：跨会话回档编排（`src/capabilities/conductor/service/rewind.rs`）、动作分发（`src/capabilities/conductor/api/action.rs`）与历史 / 删除（`src/capabilities/conductor/service/history.rs`）。
+- 管：动作分发（`src/capabilities/conductor/api/action.rs`）与事件收编 / 增量落盘（`src/capabilities/conductor/service/history.rs`）。
+- 管：**历史生命周期的时机**——回档三模式、历史列表 / 只读打开与删除的调用点在这里（用例与顺序在 `lifecycle`，第 9 层，见 [../lifecycle/README.md](../lifecycle/README.md)）。
 - 管：**同名薄转发**——工作用例（建工作两段、改配、视图、运行报告、建议、激活）的实现在 `work`，这里保留同名方法让队列、呈现层与测试的调用点不变。
 - 管：把各能力的能力接口组装成呈现层唯一入口 `Ops`。
 - 运行态分两层：**短暂**的「这一刻谁在干活」（`SessionEvent::Working`，不落盘）与**持久**的「还该不该被驱动」（`meta.run`：`active` / `stopped` / `closed`，派发前过 `dispatch_gate`）。
@@ -24,7 +25,7 @@
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`collab`、`env`、`kernel`、`llm`、`modules`、`permission`、`prompt`、`provision`、`registry`、`residents`、`secrets`、`session`、`slate`、`taskchain`、`tools`、`turn`、`vm`、`work`、`workspace`
+- 经 `::api` 用到：`collab`、`env`、`kernel`、`lifecycle`、`llm`、`modules`、`permission`、`prompt`、`provision`、`registry`、`residents`、`secrets`、`session`、`slate`、`taskchain`、`tools`、`turn`、`vm`、`work`、`workspace`
 - 谁在用我：`cli`、`web`
 
 ## 一、长步骤的边界
@@ -37,7 +38,7 @@
 
 ## 改动本单元时必须同步
 
-- 动 `Ops`（增删方法、事件、视图字段）必须同时改 `cli`、`web`、`src/tests/api/`、`docs/presentation/contracts.md`（路由表由 `src/tests/routes.rs` 机器比对）；跨会话回档的编排与 `session` 的纯行算术要一起改（见 [docs/session/session-model.md](../session/session-model.md) 的「回档：三种模式 + 工作级标记」）。
+- 动 `Ops`（增删方法、事件、视图字段）必须同时改 `cli`、`web`、`src/tests/api/`、`docs/presentation/contracts.md`（路由表由 `src/tests/routes.rs` 机器比对）；回档的时机与 `lifecycle` 的用例、`session` 的纯行算术要一起改（见 [docs/lifecycle/README.md](../lifecycle/README.md) 与 [docs/session/session-model.md](../session/session-model.md) 的「回档：三种模式 + 工作级标记」）。
 
 ## 本目录
 

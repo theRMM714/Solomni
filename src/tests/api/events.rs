@@ -125,7 +125,7 @@ fn rewind_pushes_a_reset_fact_and_history_merge_ignores_superseded_batches() {
         .sessions
         .rewind(
             &sid,
-            crate::capabilities::conductor::api::RewindTarget::Delete(0),
+            crate::capabilities::lifecycle::api::RewindTarget::Delete(0),
         )
         .expect("回档到第 0 行");
     assert!(replayed.is_empty(), "删除到 0 的活动视图应为空");
@@ -181,7 +181,7 @@ fn rewind_pushes_a_reset_fact_and_history_merge_ignores_superseded_batches() {
         .sessions
         .rewind(
             &sid2,
-            crate::capabilities::conductor::api::RewindTarget::Archive(0),
+            crate::capabilities::lifecycle::api::RewindTarget::Archive(0),
         )
         .expect("留档");
     assert!(
@@ -271,7 +271,7 @@ fn stop_takes_effect_while_generation_is_still_running() {
 
 #[test]
 fn archive_stops_a_running_turn_before_rewinding() {
-    use crate::capabilities::conductor::api::RewindTarget;
+    use crate::capabilities::lifecycle::api::RewindTarget;
     let (_handle, ops, ticks) = slow_ops(vec![module_of("a")]);
     let sid = ops
         .sessions

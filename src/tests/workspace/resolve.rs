@@ -682,7 +682,7 @@ pub(crate) fn agent_sandboxes_from_a_work_are_read_only_for_the_shared_area() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let meta = core.history_open(&sid).unwrap().0;
+    let meta = core.lifecycle.history_open(&sid).unwrap().0;
     let roster = core.modules_handle().roster();
     let sandboxes = core.sandboxes(&meta, &roster).unwrap();
     let sb = sandboxes.list.first().expect("至少一个 agent 沙箱");

@@ -8,6 +8,7 @@ use super::*;
 use crate::capabilities::session::api::{
     flat_modules, guest_lease_for, guest_scope, subtree_of, tree_meta, work_root,
 };
+use crate::capabilities::vm::api::GuestStop;
 
 /// 目的：这次创建要不要在宿主上付一次性的机器级只读授权。
 /// 约束：只有本机档写宿主 ACL；虚拟机档的隔离是挂载边界（`machine_ro_tree` 以只读挂载兑现），不写宿主 ACL。

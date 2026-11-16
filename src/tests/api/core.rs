@@ -124,7 +124,7 @@ fn missing_sessions_and_bad_inputs_come_back_as_errors() {
         ops.sessions
             .rewind(
                 "没这个会话",
-                crate::capabilities::conductor::api::RewindTarget::Archive(0)
+                crate::capabilities::lifecycle::api::RewindTarget::Archive(0)
             )
             .is_err()
     );
