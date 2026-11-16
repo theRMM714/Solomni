@@ -12,7 +12,7 @@
 - 管：**视图**——`SessionView`（在世会话 × 历史的并集与继续判据）、`FilesView`、工作日志与提交恢复（`restore_work_commit`）。
 - 管：**模型视图**——`llm_opts` / `llm_opts_for`、思考片段、树上可用思考档与按根设置。
 - 管：**运行报告**——包库可用版本、缺失清单、档位视图（`RuntimeReport` / `TierChoices`）与权限视图（`PermissionView`）。
-- 管：**guest 生命周期**——`GuestBoot` / `GuestStop` / `GuestDiagnose` 的起停诊断两段式，以及稳定根的判据（`stable_roots` / `check_stable_roots`）。
+- 管：**guest 生命周期**——`GuestBoot` / `EditGuest` / `GuestDiagnose` 的起停诊断两段式（单次销毁的 `GuestStop` 归 `vm`），以及稳定根的判据（`stable_roots` / `check_stable_roots`）。
 - 管：**建议与激活**——`suggest_models` 按需求拟名单、`activation_build_request` / `prepare_activation` / `commit_activation` 启用历史会话的两段。
 - 不管：命令队列与生成驱动——谁在什么时候取走会话、生成完怎么放回，由 `conductor` 决定（本单元只提供用例方法）。
 - 不管：会话本体、在世表与运行态（`turn`）、落盘与转录（`session`）、沙箱与工作区机制（`workspace`）、虚拟机实现与计划派生（`vm`）。

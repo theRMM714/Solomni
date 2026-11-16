@@ -243,7 +243,7 @@ pub(crate) fn agent_crud_and_work_with_agents() {
     };
     let opened = core.create_work(spec).unwrap();
     assert_eq!(opened.agents, vec!["调研".to_string()]);
-    let meta = core.history_open("w").unwrap().0;
+    let meta = core.lifecycle.history_open("w").unwrap().0;
     assert_eq!(meta.agents.len(), 1);
     assert_eq!(meta.agents[0].name, "调研");
     assert_eq!(
@@ -287,7 +287,7 @@ pub(crate) fn agent_crud_and_work_with_agents() {
     };
     let opened = core.create_work(cross).expect("同一模块可跨 agent 共用");
     assert_eq!(opened.agents, vec!["x".to_string(), "y".to_string()]);
-    let (meta, _) = core.history_open("cross").expect("打开会话");
+    let (meta, _) = core.lifecycle.history_open("cross").expect("打开会话");
     assert_eq!(meta.modules, vec!["a".to_string()], "meta.modules 去重");
 
     assert!(core.registry_mut().agent_remove("调研").unwrap());

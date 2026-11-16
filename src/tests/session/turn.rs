@@ -112,7 +112,7 @@ pub(crate) fn single_mode_accepts_multi_module_agent_and_converses() {
         .create_work(work("w", WorkMode::Single, &["a", "b"]))
         .unwrap()
         .sid;
-    let meta = core.history_open("w").unwrap().0;
+    let meta = core.lifecycle.history_open("w").unwrap().0;
     assert_eq!(meta.mode, "single");
     assert_eq!(meta.agents.len(), 1);
     assert_eq!(
@@ -404,12 +404,12 @@ pub(crate) fn node_task_is_a_system_line_but_a_user_message() {
         Arc::clone(&io),
     );
     // keep_id = MAX：不截断，只为触发"按落盘转录重建"。
-    core2
-        .rewind(
-            &sid,
-            crate::capabilities::conductor::api::RewindTarget::Delete(u64::MAX),
-        )
-        .expect("回档即重建");
+    crate::tests::lifecycle::rewind(
+        &mut core2,
+        &sid,
+        crate::capabilities::lifecycle::api::RewindTarget::Delete(u64::MAX),
+    )
+    .expect("回档即重建");
     let rebuilt = core2.single_history(&sid).expect("重建后应在内存里");
     let task_msg = rebuilt
         .iter()

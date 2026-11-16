@@ -30,7 +30,7 @@ use crate::capabilities::turn::api::{PROXY_PRIVATE_DIR, Session, Turn};
 use crate::capabilities::vm::api::Vm;
 use crate::capabilities::work::api::{
     AgentSuggestion, ConfigAgent, ContinueView, EditGuest, FilesAgentRootView, FilesAgentView,
-    FilesRootsView, FilesView, GuestBoot, GuestStop, PermissionDecisionsView, PermissionSharedView,
+    FilesRootsView, FilesView, GuestBoot, PermissionDecisionsView, PermissionSharedView,
     PermissionView, PreparedActivation, ProxySeed, ReadyActivation, RuntimeDiagnosis,
     RuntimeReport, SessionConfig, SessionEdit, SessionView, ThinkingOptionView, ThinkingView,
     TierChoices, WorkMode, WorkOpened, WorkSpec,

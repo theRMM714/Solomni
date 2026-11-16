@@ -257,7 +257,7 @@ pub(crate) fn external_workspace_vm_session_boots_with_two_stable_mounts() {
         .expect("外部工作区 + 虚拟机档可建")
         .sid;
     assert_eq!(sid, "wx");
-    let (meta, _) = core.history_open(&sid).expect("会话");
+    let (meta, _) = core.lifecycle.history_open(&sid).expect("会话");
     assert_eq!(
         meta.workspace.as_ref().map(|b| b.root.clone()),
         Some(crate::kernel::api::native(
@@ -404,7 +404,9 @@ pub(crate) fn external_workspace_vm_delete_stops_guest_and_keeps_external() {
     let sid = core.create_work(spec).expect("建会话").sid;
     let session = product.join("session").join("wx");
     assert!(session.is_dir(), "会话目录在");
-    core.history_delete(&sid).expect("删除会话");
+    core.lifecycle
+        .history_delete(&mut core.turn, &sid)
+        .expect("删除会话");
     let calls = engine.calls.lock().expect("锁").clone();
     assert!(calls.iter().any(|c| c == "start:wx"), "{:?}", calls);
     assert!(
@@ -442,7 +444,10 @@ pub(crate) fn failed_guest_boot_cleans_external_workspace_store() {
         "失败的准备不能让会话目录（含 .work）留下：{:?}",
         session
     );
-    assert!(core.history_list().is_empty(), "历史里不该留下这条会话");
+    assert!(
+        core.lifecycle.history_list().is_empty(),
+        "历史里不该留下这条会话"
+    );
     assert_eq!(
         std::fs::read(external.join("marker.txt")).expect("外部文件还在"),
         b"OUTSIDE",
@@ -663,14 +668,14 @@ pub(crate) fn rewinding_the_main_session_truncates_agent_sessions_by_turn() {
     let child = format!("{}--a", sid);
 
     // 主会话里第一条**带回合**的发言行（开场那次）——回档就保留到它。
-    let (_, main_evs) = core.history_open(&sid).unwrap();
+    let (_, main_evs) = core.lifecycle.history_open(&sid).unwrap();
     let (line_id, turn) = lines_of(&main_evs)
         .into_iter()
         .find(|(_, text, t)| text.contains("[a:say]") && *t > 0)
         .map(|(id, _, t)| (id, t))
         .expect("开场该有带回合的发言行");
 
-    let (_, before) = core.history_open(&child).unwrap();
+    let (_, before) = core.lifecycle.history_open(&child).unwrap();
     let max_before = lines_of(&before)
         .iter()
         .map(|(_, _, t)| *t)
@@ -681,13 +686,14 @@ pub(crate) fn rewinding_the_main_session_truncates_agent_sessions_by_turn() {
         "回档前 agent 会话该有更晚的回合：{before:?}"
     );
 
-    core.rewind(
+    crate::tests::lifecycle::rewind(
+        &mut core,
         &sid,
-        crate::capabilities::conductor::api::RewindTarget::Delete(line_id + 1),
+        crate::capabilities::lifecycle::api::RewindTarget::Delete(line_id + 1),
     )
     .unwrap();
 
-    let (_, after) = core.history_open(&child).unwrap();
+    let (_, after) = core.lifecycle.history_open(&child).unwrap();
     let max_after = lines_of(&after)
         .iter()
         .map(|(_, _, t)| *t)
@@ -873,12 +879,12 @@ pub(crate) fn prose_then_tool_envelope_keeps_prose_line_and_rebuilds_identically
         Arc::clone(&hist),
         Arc::clone(&io),
     );
-    core2
-        .rewind(
-            &sid,
-            crate::capabilities::conductor::api::RewindTarget::Delete(4),
-        )
-        .unwrap(); // 保留全部 4 行
+    crate::tests::lifecycle::rewind(
+        &mut core2,
+        &sid,
+        crate::capabilities::lifecycle::api::RewindTarget::Delete(4),
+    )
+    .unwrap(); // 保留全部 4 行
     let rebuilt = core2.single_history(&sid).expect("重建后应在内存里");
     let key = |h: &[Msg]| {
         h.iter()
@@ -1014,12 +1020,12 @@ pub(crate) fn native_multi_call_rebuilds_identically_to_live() {
     );
     core2.registry_mut().probe_model_tools("m").expect("探测");
     let rows = transcript_rows(&events).len() as u64;
-    core2
-        .rewind(
-            &sid,
-            crate::capabilities::conductor::api::RewindTarget::Delete(rows),
-        )
-        .unwrap();
+    crate::tests::lifecycle::rewind(
+        &mut core2,
+        &sid,
+        crate::capabilities::lifecycle::api::RewindTarget::Delete(rows),
+    )
+    .unwrap();
     let rebuilt = core2.single_history(&sid).unwrap();
     let key = |h: &[Msg]| {
         h.iter()
@@ -1106,7 +1112,10 @@ fn creating_a_session_without_any_model_is_refused_and_leaves_no_history() {
         .create_work(work("no-model", WorkMode::Single, &[]))
         .expect_err("没有模型必须拒绝");
     assert!(err.contains("还没有任何模型"), "{}", err);
-    assert!(core.history_list().is_empty(), "失败不应留下会话记录");
+    assert!(
+        core.lifecycle.history_list().is_empty(),
+        "失败不应留下会话记录"
+    );
 }
 
 /// 目的：模型在册但核心默认没设时，没显式模型的 agent 不能建会话；错误要指名缺什么。
@@ -1119,7 +1128,10 @@ fn creating_a_session_without_core_default_is_refused() {
         .expect_err("没有核心默认必须拒绝");
     assert!(err.contains("agent a 没有可用模型通道"), "{}", err);
     assert!(err.contains("核心 AI 未设定默认模型"), "{}", err);
-    assert!(core.history_list().is_empty(), "失败不应留下会话记录");
+    assert!(
+        core.lifecycle.history_list().is_empty(),
+        "失败不应留下会话记录"
+    );
 }
 
 /// 目的：代理会话跑在核心默认上；没设默认就不建。
@@ -1142,7 +1154,10 @@ fn creating_a_proxy_without_core_default_is_refused() {
         .create_work(spec)
         .expect_err("代理没有核心默认必须拒绝");
     assert!(err.contains("代理会话没有可用模型通道"), "{}", err);
-    assert!(core.history_list().is_empty(), "失败不应留下会话记录");
+    assert!(
+        core.lifecycle.history_list().is_empty(),
+        "失败不应留下会话记录"
+    );
 }
 
 /// 目的：协作的成员即使都显式指定了模型，核心自己还要通道（编排 / 整理 / 验收）。
@@ -1157,5 +1172,8 @@ fn creating_a_collab_without_core_default_is_refused_even_with_explicit_models()
         .create_work(spec)
         .expect_err("协作没有核心默认必须拒绝");
     assert!(err.contains("核心没有可用模型通道"), "{}", err);
-    assert!(core.history_list().is_empty(), "失败不应留下会话记录");
+    assert!(
+        core.lifecycle.history_list().is_empty(),
+        "失败不应留下会话记录"
+    );
 }

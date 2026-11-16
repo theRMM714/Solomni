@@ -71,7 +71,7 @@ pub(crate) fn same_named_tools_across_modules_are_no_longer_a_conflict() {
         .create_work(cross)
         .expect("同一模块可被多个 agent 共用");
     assert_eq!(opened.agents, vec!["甲".to_string(), "乙".to_string()]);
-    let (meta, _) = core.history_open("cross").expect("打开会话");
+    let (meta, _) = core.lifecycle.history_open("cross").expect("打开会话");
     assert_eq!(meta.agents.len(), 2);
     assert!(
         meta.agents

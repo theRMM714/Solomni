@@ -19,6 +19,7 @@ mod env;
 mod fakes;
 mod fence_reach;
 mod kernel;
+mod lifecycle;
 mod llm;
 mod mcp;
 mod modules;

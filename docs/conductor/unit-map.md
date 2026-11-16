@@ -10,6 +10,7 @@
 > 它与别的能力**平级**：只经各能力的 `api` 编排，**不持任何别人的端口**（R12）。
 > 它拥有的是**没有任何参与方拥有**的那部分不变式：命令队列与跨会话编排；会话在世表与运行态归 `turn`。
 > 「工作是什么样」的用例（建工作两段、改配、视图、运行报告、guest 生命周期、建议与激活）已下沉到 `work`（第 9 层），本单元只留应用编排与同名薄转发（见 [../work/unit-map.md](../work/unit-map.md)）。
+> 「历史生命周期」的用例（回档三模式、历史列表与只读打开、删除的报账与收尾）已下沉到 `lifecycle`（第 9 层，见 [../lifecycle/unit-map.md](../lifecycle/unit-map.md)），本单元只给时机。
 
 | 文件 | 职责 |
 | --- | --- |
@@ -28,9 +29,8 @@
 | `src/capabilities/conductor/service/turn.rs` | 单 agent 的回合收发：工具形态刷新、生成前准备、节点派发准备、同步生成入口、继续 |
 | `src/capabilities/conductor/service/compact.rs` | 压缩通道工厂：全局设置指向的压缩模型解析与更新 |
 | `src/capabilities/conductor/service/flow.rs` | 协作流水线推进与协作动作：链推进、节点派发与子会话、协作步（`take_*` / `put_*`）、裁决卡动作与改需求 |
-| `src/capabilities/conductor/service/rewind.rs` | 跨会话回档编排：按同一回合 id 收窗整棵子树、写回档标记与 `restore_session`；重建本体在 `turn::service::rebuild` |
 | `src/capabilities/conductor/service/env.rs` | 薄转发：guest 诊断准备与沙箱 / 权限 / 预算三个薄入口（事实在 `turn::service::facts`）；单会话装配（`Turn::build_single`）已归 `turn` |
-| `src/capabilities/conductor/service/history.rs` | 历史列出 / 打开 / 删除与事件收编（落盘策略、手柄与会话树派生归 `session`）；运行态改写（`set_subtree_run`）与删除钩子也在这里 |
+| `src/capabilities/conductor/service/history.rs` | 事件收编与增量落盘手柄（落盘策略、手柄与会话树派生归 `session`）；运行态改写 `set_subtree_run` 与派发目标也在这一处 |
 | `src/capabilities/conductor/service/ask_user.rs` | 工具层提问端口的会话侧实现：推一条问题并阻塞等一个选项 id |
 | `src/capabilities/conductor/ports.rs` | 出站端口：核心代理工具要做的外部动作（`ProxyHost`） |
 | `src/capabilities/conductor/domain/action.rs` | 动作回包的纯逻辑：探测结论 → 响应 JSON |

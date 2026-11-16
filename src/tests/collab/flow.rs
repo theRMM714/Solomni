@@ -143,11 +143,16 @@ pub(crate) fn collab_delegated_roster_written_back_and_rebuilt_from_meta() {
         .unwrap()
         .sid;
     assert!(
-        core.history_open("w").unwrap().0.agents.is_empty(),
+        core.lifecycle
+            .history_open("w")
+            .unwrap()
+            .0
+            .agents
+            .is_empty(),
         "确认名单之前不落档（名单只活在内存里）"
     );
     // CLI 的确认门要把这份表单逐行读出来——名单在**转录的 [代拟] 行**里（界面照那份显示）。
-    let (_, events) = core.history_open("w").unwrap();
+    let (_, events) = core.lifecycle.history_open("w").unwrap();
     let slate: Vec<String> = replay_lines(&events)
         .into_iter()
         .filter(|l| l.starts_with("[代拟] "))
@@ -161,7 +166,7 @@ pub(crate) fn collab_delegated_roster_written_back_and_rebuilt_from_meta() {
 
     answer_card(&mut core, &sid, OPT_SLATE_CONFIRM, "").unwrap();
     // 确认后名单写回 meta（重启/回档后的权威来源）。
-    let meta = core.history_open("w").unwrap().0;
+    let meta = core.lifecycle.history_open("w").unwrap().0;
     assert_eq!(meta.agents.len(), 1);
     assert_eq!(meta.agents[0].name, "调研员");
     assert_eq!(meta.agents[0].modules, vec!["a".to_string()]);
@@ -169,9 +174,10 @@ pub(crate) fn collab_delegated_roster_written_back_and_rebuilt_from_meta() {
     assert_eq!(meta.modules, vec!["a".to_string()]);
 
     // 回档（保留需求行）= 按 meta.agents 重建会话（协作走「按转录重建」这条路），再跑到交付。
-    core.rewind(
+    crate::tests::lifecycle::rewind(
+        &mut core,
         &sid,
-        crate::capabilities::conductor::api::RewindTarget::Delete(1),
+        crate::capabilities::lifecycle::api::RewindTarget::Delete(1),
     )
     .unwrap();
     assert!(

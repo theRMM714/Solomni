@@ -252,9 +252,9 @@ pub(crate) fn root_edit_keeps_child_narrowing_and_child_cannot_widen() {
         ),
     )
     .expect("根编辑");
-    let (cm, _) = core.history_open(&child).unwrap();
+    let (cm, _) = core.lifecycle.history_open(&child).unwrap();
     assert!(cm.sandbox.narrowing.is_some(), "根编辑不能清掉子收窄");
-    let (pm, _) = core.history_open(&parent).unwrap();
+    let (pm, _) = core.lifecycle.history_open(&parent).unwrap();
     assert!(pm.sandbox.ceiling.is_some(), "根 ceiling 落盘");
     let cfg = core.session_config(&child).unwrap();
     assert_eq!(
@@ -294,7 +294,7 @@ pub(crate) fn creation_writes_the_chosen_profile_into_the_root_ceiling() {
     let mut spec = work("wv", WorkMode::Single, &["a"]);
     spec.permission = Some(ProfileId::View);
     let sid = core.create_work(spec).unwrap().sid;
-    let (meta, _) = core.history_open(&sid).unwrap();
+    let (meta, _) = core.lifecycle.history_open(&sid).unwrap();
     assert_eq!(
         meta.sandbox.ceiling.as_ref().and_then(|l| l.profile),
         Some(ProfileId::View)
@@ -325,7 +325,7 @@ pub(crate) fn quick_profile_switch_updates_root_and_children_cannot_widen() {
     let child = core.spawn_agent_session(&parent, "a").unwrap();
     core.set_permission_profile(&parent, ProfileId::View)
         .expect("根快速切档");
-    let (pm, _) = core.history_open(&parent).unwrap();
+    let (pm, _) = core.lifecycle.history_open(&parent).unwrap();
     assert_eq!(
         pm.sandbox.ceiling.as_ref().and_then(|l| l.profile),
         Some(ProfileId::View)
