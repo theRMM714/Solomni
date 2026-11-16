@@ -5,9 +5,9 @@
 
 use crate::capabilities::runtime::api::DecisionQueue;
 use crate::capabilities::runtime::api::{
-    Acted, ActionCall, ActionOps, ActionView, Advance, Caller, EventBus, Output, RuntimeOps,
+    Acted, ActionCall, ActionOps, ActionView, Advance, Caller, Output, RuntimeOps,
 };
-use crate::capabilities::turn::api::TurnOps;
+use crate::capabilities::turn::api::{Events, TurnOps};
 use crate::capabilities::work::api::{
     AgentSuggestion, ConfigAgent, FilesAgentView, FilesRootsView, FilesView, RuntimeReport,
     SessionConfig, SessionEdit, SessionView, TierChoices, WorkMode, WorkOpened, WorkOps, WorkSpec,
@@ -192,6 +192,11 @@ impl crate::capabilities::provision::api::Provision for FakeProvision {
 }
 
 fn fake_ops(fail: Option<&str>) -> Faces {
+    fake_ops_on(fail, crate::capabilities::turn::api::event_bus())
+}
+
+/// 目的：同上，但用调用方给的写面事件台（测试要自己播种一条唤醒长轮询）。
+fn fake_ops_on(fail: Option<&str>, bus: Arc<dyn Events>) -> Faces {
     let f = Arc::new(FakeFaces::new(fail));
     Faces {
         work: f.clone(),
@@ -201,7 +206,7 @@ fn fake_ops(fail: Option<&str>) -> Faces {
         history: f.clone(),
         modules: f.clone(),
         actions: f.clone(),
-        events: EventBus::new(),
+        events: bus,
         log: Arc::new(super::doubles::NoopLogOps),
         residents: Arc::new(crate::capabilities::residents::api::NoResidents),
         secrets: Arc::new(crate::capabilities::secrets::api::NoSecrets),
@@ -876,9 +881,10 @@ fn sample_body(route: &routes::Route) -> &'static str {
 // ---------- 目录 ↔ 处理器 ----------
 #[test]
 fn every_catalogued_route_has_a_handler() {
-    let ops = fake_ops(None);
     // 长轮询要有事件才立刻返回（否则真等 20 秒），播种一条即可。
-    ops.events.seed_for_test("w1");
+    let bus = crate::capabilities::turn::api::event_bus();
+    bus.seed_for_test("w1");
+    let ops = fake_ops_on(None, bus);
     for route in ROUTES {
         let (code, text) = call(&ops, route.method, &sample_url(route), sample_body(route));
         assert_ne!(
@@ -1241,8 +1247,9 @@ fn session_action_boundaries_are_explicit() {
 /// 不解回来就永远匹配不到任何事件——长轮询只能干等到超时，客户端拿到空批。
 #[test]
 fn events_sid_filter_decodes_percent_escapes() {
-    let ops = fake_ops(None);
-    ops.events.seed_for_test("工作--甲");
+    let bus = crate::capabilities::turn::api::event_bus();
+    bus.seed_for_test("工作--甲");
+    let ops = fake_ops_on(None, bus);
     // 「工作--甲」的 encodeURIComponent 结果（前端就是这么发的）。
     let encoded = "%E5%B7%A5%E4%BD%9C--%E7%94%B2";
     let (code, text) = call(
@@ -1261,8 +1268,9 @@ fn events_sid_filter_decodes_percent_escapes() {
 
 #[test]
 fn success_shapes_are_pinned_per_route() {
-    let ops = fake_ops(None);
-    ops.events.seed_for_test("w1");
+    let bus = crate::capabilities::turn::api::event_bus();
+    bus.seed_for_test("w1");
+    let ops = fake_ops_on(None, bus);
     // 成本路由要一个真实存在的小目录（空目录也给 200，这里用带子目录的夹具盯计数）。
     let cost_root =
         std::env::temp_dir().join(format!("solomni-routes-cost-{}", std::process::id()));

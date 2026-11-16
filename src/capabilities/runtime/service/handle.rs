@@ -14,7 +14,7 @@ pub struct Handle {
     /// 目的：有没有"能作答"的交互前端（Web 在服务时打开）：打开才把工具级确认接进裁决队。
     ///  纯终端同步生成不打开，避免生成线程空等一个没人回答的问题。
     pub(super) interactive: Arc<std::sync::atomic::AtomicBool>,
-    pub(super) bus: Arc<EventBus>,
+    pub(super) bus: Arc<dyn Events>,
     /// 目的：日志句柄：呈现层经 LogOps 能力写日志，拿不到这个端口对象本身。
     pub(super) log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
     /// 目的：代理会话注入成员侧执行者要的两份装配材料（与核心共享同一份，不在桥这一侧重装）。
@@ -39,7 +39,7 @@ impl Handle {
         let worker_log = core.log_handle();
         let jobs = JobRegistry::new();
         let interactive = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let bus = EventBus::new();
+        let bus = crate::capabilities::turn::api::event_bus();
         let book = core.systools_handle().book();
         let tools = core.tools_handle();
         let residents = core.residents_handle();
@@ -86,7 +86,7 @@ impl Handle {
     }
 
     /// 目的：本核心的事件台（多端订阅）。
-    pub fn events(&self) -> Arc<EventBus> {
+    pub fn events(&self) -> Arc<dyn Events> {
         Arc::clone(&self.bus)
     }
 
@@ -96,7 +96,7 @@ impl Handle {
         &self,
         door: &Arc<dyn crate::capabilities::session::api::Gates>,
         sid: &str,
-        bus: Arc<EventBus>,
+        bus: Arc<dyn Events>,
         persister: crate::capabilities::session::api::Persister,
     ) -> Arc<dyn crate::kernel::ports::AskUser> {
         let owner = sid.to_string();
@@ -185,7 +185,7 @@ impl crate::capabilities::turn::api::TurnHost for Handle {
         self.call(move |core| f(&mut core.turn, core.registry.as_ref(), core.probe.as_ref()))
     }
 
-    fn events(&self) -> Arc<EventBus> {
+    fn events(&self) -> Arc<dyn Events> {
         Arc::clone(&self.bus)
     }
 
@@ -208,7 +208,7 @@ impl crate::capabilities::turn::api::TurnHost for Handle {
         &self,
         door: &Arc<dyn crate::capabilities::session::api::Gates>,
         sid: &str,
-        bus: Arc<EventBus>,
+        bus: Arc<dyn Events>,
         persister: crate::capabilities::session::api::Persister,
     ) -> Arc<dyn crate::kernel::ports::AskUser> {
         Handle::session_ask(self, door, sid, bus, persister)

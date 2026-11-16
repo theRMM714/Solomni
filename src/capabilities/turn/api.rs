@@ -4,9 +4,8 @@
 //! 不管：状态实现（`service/state.rs`）、推进规则（`service/{turn,flow}`）、谁在什么时候放取会话（宿主）。
 //! 联动：宿主（命令队列手柄）实现 `TurnHost`；呈现层与测试只经本模块取用。
 
-use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
 
 /// 目的：一席工具面与单 agent 会话对象的装配入口（宿主取完事实后转调这里）。
 pub use crate::capabilities::turn::service::assemble::member_tools;
@@ -76,154 +75,44 @@ pub struct EventLine {
     pub events: Vec<SessionEvent>,
 }
 
-/// 目的：事件上限与保留量：本地单机足够，防无界增长。
-const BUS_MAX: usize = 10_000;
-const BUS_KEEP: usize = 5_000;
-
-/// 目的：事件发布台：核心是唯一生产者（`push` 只由本能力调用）；
-///   任何数量的消费者按 `since` 增量取——多端并用、断线重连都不用额外机制。
-pub struct EventBus {
-    inner: Mutex<BusInner>,
-}
-
-#[derive(Default)]
-struct BusInner {
-    seq: u64,
-    lines: Vec<EventLine>,
-    /// 目的：每个会话最近一次回档的重置点（事件台序号）：该序号及之前的事实已被盘上转录取代，
-    /// 历史合流不得再把它当实时尾巴；客户端自己的 since 游标不受影响（它们仍需看到
-    /// 重置事件本身来清空视图，见 push_rewound）。
-    rewound: BTreeMap<String, u64>,
-}
-
-impl EventBus {
-    pub fn new() -> Arc<EventBus> {
-        Arc::new(EventBus {
-            inner: Mutex::new(BusInner::default()),
-        })
-    }
-
-    /// 目的：入箱一批事实并裁剪，返回它的全局序号（调用方已持锁）。
-    fn append_locked(g: &mut BusInner, sid: &str, events: &[SessionEvent]) -> u64 {
-        g.seq += 1;
-        let seq = g.seq;
-        g.lines.push(EventLine {
-            seq,
-            sid: sid.to_string(),
-            events: events.to_vec(),
-        });
-        if g.lines.len() > BUS_MAX {
-            let drop = g.lines.len() - BUS_KEEP;
-            g.lines.drain(..drop);
-        }
-        seq
-    }
-
-    /// 目的：入箱一批事实，返回它的全局序号。核心内部调用；锁中毒不算致命（拿回内层继续）。
-    pub(crate) fn push(&self, sid: &str, events: &[SessionEvent]) -> u64 {
-        let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        Self::append_locked(&mut g, sid, events)
-    }
-
-    /// 目的：回档成功后入箱一条 `rewound`（携带活动视图），并把该会话的重置水印推进到它的序号。
-    /// 约束：盘上转录已经被回档改写，事件台本身不能回退；没有这条事实，刷新/多端无法知道旧事件已作废。
-    pub fn push_rewound(&self, sid: &str, events: Vec<serde_json::Value>) -> u64 {
-        let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let ev = SessionEvent::Rewound { events };
-        let seq = Self::append_locked(&mut g, sid, std::slice::from_ref(&ev));
-        g.rewound.insert(sid.to_string(), seq);
-        seq
-    }
-
+/// 目的：事件台的**读面**：按序号增量取批、取历史合流窗口的实时尾巴。
+///   为什么只出读面：呈现层与测试只要看，写面（`Events`）只给核心与运行时。
+pub trait EventFeed: Send + Sync {
     /// 目的：事件台当前头部序号：命令回包只给这个，调用方拿它当**订阅起点**。
-    pub fn head(&self) -> u64 {
-        let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        g.seq
-    }
-
-    /// 目的：测试专用：往事件台放一条空事件批，让长轮询立刻返回（不真等 20 秒）。
-    #[cfg(test)]
-    pub(crate) fn seed_for_test(&self, sid: &str) -> u64 {
-        self.push(sid, &[])
-    }
+    fn head(&self) -> u64;
 
     /// 目的：取 `since` 之后的事件批 + 当前头部 + **最老还留着的序号**（同一把锁内）。
-    ///   为什么要把 oldest 给客户端：事件台会裁剪（BUS_MAX/BUS_KEEP），`since` 之后那一小段可能
-    ///   已经永久没了。客户端据此**重新对齐**（拉一次历史重放），而不是按 seq 干等——干等的结果
-    ///   是后续批次全部滞留，只有刷新页面才恢复。
-    pub fn snapshot(&self, sid: Option<&str>, since: u64) -> (Vec<EventLine>, u64, u64) {
-        let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let lines = g
-            .lines
-            .iter()
-            .filter(|l| l.seq > since && sid.is_none_or(|x| l.sid == x))
-            .cloned()
-            .collect();
-        let oldest = g.lines.first().map(|l| l.seq).unwrap_or(g.seq + 1);
-        (lines, g.seq, oldest)
-    }
+    ///   为什么要把 oldest 给客户端：事件台会裁剪，`since` 之后那一小段可能已经永久没了；
+    ///   客户端据此**重新对齐**（拉一次历史重放），而不是按 seq 干等。
+    fn snapshot(&self, sid: Option<&str>, since: u64) -> (Vec<EventLine>, u64, u64);
 
-    /// 目的：历史合流窗口：只取该会话**最近一次回档之后**的事件批 + 当前头部（同一把锁内）。
-    /// 回档水印之前的批次已被盘上转录取代，不能再拼回历史视图；客户端的长轮询仍用
-    /// `snapshot`（它需要看到重置事件本身来清空视图）。
-    fn snapshot_after_rewind(&self, sid: &str) -> (Vec<EventLine>, u64) {
-        let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let cut = g.rewound.get(sid).copied().unwrap_or(0);
-        let lines = g
-            .lines
-            .iter()
-            .filter(|l| l.sid == sid && l.seq > cut)
-            .cloned()
-            .collect();
-        (lines, g.seq)
-    }
-
-    /// 目的：盘上转录**之外**的实时尾巴 + 事件台当前头部：给「历史和实时一次给全」用（见呈现层的 history.open）。
-    ///   只取「**转录在事件台里的最后一个位置之后**」的事实：转录是事件台的**前缀**，
-    ///   它之前/之中的短暂事件（流式增量、开跑那条运行态）已经被盘上的定稿行取代了；
-    ///   把它们也塞进尾巴，前端会先画定稿行、再画一个永远填不上的空"谁正在说"块。
-    ///   判据是**结构化相等**（两边 JSON 出自同一套序列化器，就是同一个值），不是按行 id 猜：
-    ///   `notice`/`node_started` 这类行本来就没有 id，按 id 去重正是刷新后整段重复的来源。
-    ///   返回的尾巴按事件台顺序展开，前端因此**只按序 append**，不自己合并两个来源。
-    pub fn tail_excluding(
+    /// 目的：盘上转录**之外**的实时尾巴 + 事件台当前头部：给「历史和实时一次给全」用。
+    ///   判据是**结构化相等**（两边 JSON 出自同一套序列化器）：转录是事件台的前缀，
+    ///   它之前/之中的短暂事件已被盘上定稿行取代，塞进尾巴会让前端画出填不上的空块。
+    fn tail_excluding(
         &self,
         sid: &str,
         transcript: &[serde_json::Value],
-    ) -> (Vec<serde_json::Value>, u64) {
-        let mut left: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-        for ev in transcript {
-            if let Ok(k) = serde_json::to_string(ev) {
-                *left.entry(k).or_insert(0) += 1;
-            }
-        }
-        let (lines, head) = self.snapshot_after_rewind(sid);
-        let mut on_bus: Vec<serde_json::Value> = lines
-            .into_iter()
-            .flat_map(|l| l.events.into_iter().map(|e| e.to_json()))
-            .collect();
-        let mut start = 0usize;
-        for (i, v) in on_bus.iter().enumerate() {
-            if let Ok(k) = serde_json::to_string(v)
-                && let Some(n) = left.get_mut(&k)
-                && *n > 0
-            {
-                *n -= 1;
-                start = i + 1;
-            }
-        }
-        let mut tail = Vec::new();
-        for v in on_bus.drain(..).skip(start) {
-            if let Ok(k) = serde_json::to_string(&v)
-                && let Some(n) = left.get_mut(&k)
-                && *n > 0
-            {
-                *n -= 1;
-                continue;
-            }
-            tail.push(v);
-        }
-        (tail, head)
-    }
+    ) -> (Vec<serde_json::Value>, u64);
+}
+
+/// 目的：事件台的**写面**：核心是唯一生产者，回档成功后推一条重置事实。
+pub trait Events: EventFeed {
+    /// 目的：入箱一批事实，返回它的全局序号。
+    fn push(&self, sid: &str, events: &[SessionEvent]) -> u64;
+
+    /// 目的：回档成功后入箱一条 `rewound`（携带活动视图），并把该会话的重置水印推进到它的序号。
+    /// 约束：盘上转录已经被回档改写，事件台本身不能回退；没有这条事实，刷新/多端无法知道旧事件已作废。
+    fn push_rewound(&self, sid: &str, events: Vec<serde_json::Value>) -> u64;
+
+    /// 目的：测试专用：往事件台放一条空事件批，让长轮询立刻返回（不真等 20 秒）。
+    #[cfg(test)]
+    fn seed_for_test(&self, sid: &str) -> u64;
+}
+
+/// 目的：造一个事件台：组合根装配一次，写面给运行时与核心，读面给呈现层。
+pub fn event_bus() -> Arc<dyn Events> {
+    crate::capabilities::turn::service::bus::EventBus::shared()
 }
 
 /// 目的：协作在工作线程上要做的事：处置一张**已经出队**的回答（放行类要接着跑泵），或从断点继续。
@@ -309,7 +198,7 @@ pub trait TurnHost: Send + Sync + Clone + 'static {
         T: Send + 'static;
 
     /// 目的：本核心的事件台（多端订阅；生成线程按它外送短暂事件与定稿事件）。
-    fn events(&self) -> Arc<EventBus>;
+    fn events(&self) -> Arc<dyn Events>;
 
     /// 目的：确保这条会话的 guest 已经起来（单 agent 回合、节点、协作、成员回合共用的兜底）。
     /// 错误：准备启动失败、启动失败或同一台 guest 正在启动。
@@ -329,7 +218,7 @@ pub trait TurnHost: Send + Sync + Clone + 'static {
         &self,
         door: &Arc<dyn Gates>,
         sid: &str,
-        bus: Arc<EventBus>,
+        bus: Arc<dyn Events>,
         persister: Persister,
     ) -> Arc<dyn AskUser>;
 

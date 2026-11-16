@@ -5,8 +5,9 @@
 
 use crate::capabilities::modules::api::ModulesOps;
 use crate::capabilities::registry::api::RegistryOps;
-use crate::capabilities::runtime::api::{ActionOps, EventBus, Handle, LogOps, RuntimeOps};
+use crate::capabilities::runtime::api::{ActionOps, Handle, LogOps, RuntimeOps};
 use crate::capabilities::session::api::HistoryOps;
+use crate::capabilities::turn::api::EventFeed;
 use crate::capabilities::turn::api::TurnOps;
 use crate::capabilities::work::api::WorkOps;
 use std::sync::Arc;
@@ -25,7 +26,8 @@ pub struct Faces {
     pub history: Arc<dyn HistoryOps + Send + Sync>,
     /// 目的：模块公地的只读面（清单事实的上游是 `modules`）。
     pub modules: Arc<dyn ModulesOps + Send + Sync>,
-    pub events: Arc<EventBus>,
+    /// 目的：事件台的**只读**面：呈现层订阅事实，但写面（`Events`）不出本层。
+    pub events: Arc<dyn EventFeed>,
     /// 目的：动作能力：目录 + 分发（CLI 与 Web 共用同一份声明与同一处授权）。
     pub actions: Arc<dyn ActionOps + Send + Sync>,
     /// 目的：日志能力：呈现层只经它埋点（**不持有端口对象**）。
