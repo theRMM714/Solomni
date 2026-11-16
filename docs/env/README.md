@@ -9,25 +9,27 @@
 - 管：权限面——`api::permissions` 先套根会话 ceiling、再逐层 narrowing，最后并上全局硬黑名单；共享区授权为 `None` 时收掉共享读写的 reach。
 - 管：沙箱清单——`api::sandboxes` 按 agent 名单组装，每席只挂自己的模块目录，缺沙箱路径就地报错。
 - 管：一席的环境——`api::member` 派生围栏、模块变量、运行时可执行文件与工具链根。
+- 管：全局策略——`api::network_allowed` 读设置里的网络开关，`api::host_read_roots` 把用户填的宿主只读根逐条去空白、丢掉空项后转成路径；两处都只有这一个出处。
 - 不管：事实取得——`SessionMeta` / `WorkRoots` / `Roster` / `PackagePlan` / `AppSettings` 都由调用方先取好，本单元无端口、无 IO。
 - 不管：落盘与进程——不写文件、不启停 guest、不碰围栏授权台账（`tools` 的 `release_by_lease`）。
 - 不管：机制侧怎么用——围栏与模块变量由调用方装进工具面（`src/capabilities/conductor/service/env.rs` 的 `build_single`）。
 
 ## 入站契约与状态归属
 
-- 入站面：`api::member` / `api::sandboxes` / `api::permissions` / `api::workspace_grant`，以及事实结构 `api::MemberFacts` / `api::MemberEnv` / `api::SandboxesFacts`；别的业务与测试只经 `api` 取用（R1）。
+- 入站面：`api::member` / `api::sandboxes` / `api::permissions` / `api::workspace_grant` / `api::network_allowed` / `api::host_read_roots`，以及事实结构 `api::MemberFacts` / `api::MemberEnv` / `api::SandboxesFacts`；别的业务与测试只经 `api` 取用（R1）。
 - 状态归属：**不持任何状态**——历史、工作区根、模块名册、包计划与 registry 设置都是入参；派生结果随调用返回，本单元没有字段、没有缓存、没有后台任务。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`session`（`SessionMeta` / `AgentMeta` / `WorkspaceGrant`）、`workspace`（`Sandbox` / `Sandboxes` / `WorkRoots`）、`modules`（`Roster`）、`packages`（`PackagePlan`）、`permission`（`PermissionSet`）、`registry`（`AppSettings`）、`kernel`（`FenceSpec` / `Tier`、`ports::PathCodec`）
-- 谁在用我：`conductor`（`src/capabilities/conductor/service/env.rs` 取事实后转调五个派生函数）、`src/tests/env.rs`
+- 谁在用我：`conductor`（`src/capabilities/conductor/service/env.rs` 取事实后转调六个派生函数）、`collab`（`src/capabilities/collab/service/collab.rs` 的会话设置取网络开关与宿主只读根）、`cli` / `web`（入口装配取网络开关与宿主只读根条数）、`src/tests/env.rs`
 
 ## 一、事实进、结果出
 
 - 围栏只有一处算法：`FenceSpec::for_session` 先按沙箱与本席的宿主读根建底，再把包根并进 `ro_tree` 后排序去重；packages 侧不再各自拼围栏。
 - 工具链根按档位分流：只有 `Tier::Host` 才带 `base_roots`，`Tier::Vm` 只留包根，同样排序去重——`src/capabilities/env/domain/env.rs` 的 `member` 是唯一判定点。
 - 权限链的收口在顺序：根 ceiling → 逐层 narrowing → 硬黑名单 → 视需要 `without_shared`；换顺序就会放宽本该收紧的面。
+- 全局策略也只有一处算法：网络开关直接取 `sandbox.policy.network`；宿主只读根逐条 `trim`、丢掉空串、其余转 `PathBuf`——空白项与空串不算根，判定点只有 `src/capabilities/env/domain/env.rs` 的 `network_allowed` / `host_read_roots`。
 
 ## 改动本单元时必须同步
 

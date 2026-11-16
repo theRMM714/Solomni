@@ -25,10 +25,10 @@
 | `src/capabilities/conductor/service.rs` | 会话中心：命令队列、派发闸（`dispatch_gate`）与注入依赖；会话本体（`Turn`）、在世表 / 运行态 / 裁决队 / shell 槽都在 `turn` 里，本文件只有薄转发 |
 | `src/capabilities/conductor/service/action.rs` | 动作的核心实现：把规整后的建会话载荷变成一条会话 |
 | `src/capabilities/conductor/service/work.rs` | 工作方法族入口：建工作的两段结果、改配准备结果、模块声明的能力表、运行包重建判据 |
-| `src/capabilities/conductor/service/work/report.rs` | 运行包报告与档位视图：模块声明的能力、包库可用版本、缺失清单、平台与库、计划与权限视图 |
+| `src/capabilities/conductor/service/work/report.rs` | 运行包报告与档位视图：模块声明的能力、包库可用版本、缺失清单、权限视图；平台 / 库判定与计划派生已搬去 `src/capabilities/vm/service/plan.rs`，本文件只留 `plan_for_meta_with` 取会话与名册后转调 |
 | `src/capabilities/conductor/service/work/config.rs` | 会话配置读写：配置视图、改配两段、权限档提交、围栏撤权、配置记录落盘 |
 | `src/capabilities/conductor/service/work/model.rs` | 调用参数与思考档：流式与预算取值、思考片段、树上可用思考档、按根设置 |
-| `src/capabilities/conductor/service/work/host.rs` | 宿主工具与网络开关：QEMU / virtiofsd / smbd 路径、宿主只读根；共享工具选择用 kernel 平台事实 `IS_WINDOWS` |
+| `src/capabilities/conductor/service/work/host.rs` | 宿主工具路径：QEMU / virtiofsd / smbd 与共享工具选择（用 kernel 平台事实 `IS_WINDOWS`）；网络开关与宿主只读根已搬去 `env` 的 `api` |
 | `src/capabilities/conductor/service/work/views.rs` | 会话与文件视图：在世会话 × 历史的并集、继续判据、文件视图 / 上传 / 日志 / 提交恢复 |
 | `src/capabilities/conductor/service/work/create.rs` | 建工作两段与 guest 启动：占名、备工作区、装通道、起 guest、失败撤销 |
 | `src/capabilities/conductor/service/workspace_root.rs` | 外部工作区根的策略：按档位判网络路径 / 共享根 / 文件系统根 / UTF-8 与产品根的互包含（文本 + 落点身份），并做目录与可写探测；创建走 `resolve`，加载复检走 `recheck` |

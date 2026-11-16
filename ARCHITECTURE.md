@@ -23,7 +23,7 @@
 | **根**（`entry/` + `main.rs` + `guard/`） | **启动程序与组合根**：解析根、`new` 出所有适配器并注入（共用装配在 `src/entry/assembly.rs`）、跑启动对账、把入站面交给呈现层；机器可读探针（`entry/probes/`：`--doctor` / `--https-check` / `--print-routes` / `--print-fence-env` / `--fence-verify`）；围栏守门进程与台账处置（`--fence-run`；以及 `--fence-clean` / `--fence-reconcile` / `--fence-ledger` / `--fence-restore` / `--fence-revoke` / `--fence-profile-rm`）；长驻子进程守门进程（`--proc-watchdog`，macOS 的父死子亡） | 它依赖所有人，**任何人都不许依赖它**；除启动、装配、探针与守门外无业务 |
 | `presentation/{cli,web}/` | **呈现层（交付机制）**：各渠道一个子目录，完全分开——传输（argv/stdout vs HTTP）、路由、纯渲染。**不是业务能力** | 只依赖各能力的 `::api`；**拿不到端口对象，也拿不到 `Core`**；两者互不依赖 |
 | `capabilities/` | **业务层**：按业务功能垂直切分，内部再按 `layers.yaml` 分 9 层（见下）。每个能力有 `api`（入站契约：trait + DTO）/ `service`（本能力的状态与用例）/ `ports`（出站端口，只由定义它的能力持有）/ `domain`（纯逻辑）/ `detail`（只有组合根能构造） | **业务之间只经对方的 `api`**；**只依赖严格更低层，同层零引用**（`tests/gates/structure/layers.js`）；不反向依赖根 / 呈现层（T0 机器判定，见 §九.7） |
-| `capabilities/turn/` | **第 8 层业务**：回合状态的唯一持有者——会话在世表、运行态与创建占位、每会话的裁决队与 shell 活进程槽 | 只向下依赖；不落盘、不发事件、不驱动生成——取放时机由调用方决定 |
+| `capabilities/turn/` | **第 8 层业务**：回合状态的唯一持有者——会话本体与一席的装配、会话在世表、运行态与创建占位、每会话的裁决队与 shell 活进程槽 | 只向下依赖；不落盘、不发事件、不驱动生成——取放时机由调用方决定 |
 | `capabilities/conductor/` | **第 9 层（顶层）业务**：会话中心（在世表、命令队列、运行态）、生成驱动、跨能力用例与跨会话回档编排 | 只向下依赖；不读文件、不发网络、不碰 stdin/stdout——机制下沉各能力的 `detail/` |
 | `kernel/` | **地基库（非层）**：无领域语义、无领域状态的机制（运行日志端口、宿主探测、取消表、跨层共享的形状、路径书写、外部进程执行与长驻子进程账、围栏机制）；形状与别的能力一致（`api` / `ports` / `domain` / `detail`） | **不依赖任何人**；不解释共享形状的业务语义，不构造业务决策与面向用户的文案 |
 

@@ -1,5 +1,5 @@
-//! 目的：宿主侧工具与网络开关的取法——QEMU / virtiofsd / smbd 路径、宿主只读根。
-//! 管：取登记值并转填补齐面的 `tool_path`、网络开关、只读根解析。
+//! 目的：宿主侧外部工具路径的取法——QEMU / virtiofsd / smbd 与共享档要用的那一个。
+//! 管：取登记值并转填补齐面的 `tool_path`。
 //! 不管：guest 怎么起（`create.rs` / vm 能力）、依赖怎么装与宿主工具兜底（provision）。
 //! 联动：建工作与 guest 启动装配命令行时读这里。
 //!   本方法族只碰 registry / provision 这两个字段。
@@ -39,26 +39,5 @@ impl Conductor {
         } else {
             self.virtiofsd_path()
         }
-    }
-
-    /// 目的：全局网络开关（工具 / guest / 常驻服务 / 构建都看它）。
-    pub(crate) fn network_allowed(&self) -> bool {
-        self.registry.app().sandbox.policy.network
-    }
-
-    /// 目的：用户显式授权的主机只读根（`settings.yaml` 的 `sandbox.policy.host_read_roots`）。
-    ///  策略层只带事实：哪些目录只读可达由用户定，只读位怎么落由适配层定。
-    ///  空 = 一个都不放行（默认不动本机任何权限项）。
-    pub(crate) fn host_read_roots(&self) -> Vec<std::path::PathBuf> {
-        self.registry
-            .app()
-            .sandbox
-            .policy
-            .host_read_roots
-            .iter()
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .map(std::path::PathBuf::from)
-            .collect()
     }
 }

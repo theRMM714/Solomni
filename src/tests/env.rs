@@ -1,10 +1,11 @@
-//! 目的：钉环境事实的派生——权限链、共享区授权、guest 租约、一席的工具环境与沙箱清单。
-//! 管：`env::api` 五个派生函数的行为与错误文案；纯内存，不碰端口、不落盘。
+//! 目的：钉环境事实的派生——权限链、共享区授权、guest 租约、一席的工具环境与沙箱清单、全局策略（网络开关与宿主只读根）。
+//! 管：`env::api` 六个派生函数的行为与错误文案；纯内存，不碰端口、不落盘。
 //! 不管：取事实（`conductor` 的 history / workspace / registry）、机制侧怎么用围栏。
 //! 联动：`src/capabilities/env/domain/env.rs`；`conductor/service/env.rs` 取事实后转调。
 
 use crate::capabilities::env::api::{
-    MemberFacts, SandboxesFacts, member, permissions, sandboxes, workspace_grant,
+    MemberFacts, SandboxesFacts, host_read_roots, member, network_allowed, permissions, sandboxes,
+    workspace_grant,
 };
 use crate::capabilities::modules::api::Roster;
 use crate::capabilities::packages::api::PackagePlan;
@@ -173,6 +174,25 @@ fn member_env_merges_package_roots_once_and_only_host_tier_keeps_base_roots() {
         vm.runtime_roots,
         vec![PathBuf::from("rt/pkg-a"), PathBuf::from("rt/pkg-b")],
         "VM 档不带宿主工具链根"
+    );
+}
+
+/// 目的：网络开关与主机只读根只从全局策略派生——关掉就断网，路径逐条去空白、丢掉空项，顺序不变。
+#[test]
+fn network_switch_and_host_read_roots_come_from_the_policy() {
+    let mut app = AppSettings::default();
+    assert!(!network_allowed(&app), "缺省不放行出站");
+    app.sandbox.policy.network = true;
+    assert!(
+        network_allowed(&app),
+        "判据只有 settings 的 sandbox.policy.network，会话无权改"
+    );
+    assert!(host_read_roots(&app).is_empty(), "缺省一个只读根都不放行");
+    app.sandbox.policy.host_read_roots = vec!["  /tmp  ".to_string(), String::new()];
+    assert_eq!(
+        host_read_roots(&app),
+        vec![PathBuf::from("/tmp")],
+        "逐条去空白、丢掉空项，只回用户的非空根"
     );
 }
 

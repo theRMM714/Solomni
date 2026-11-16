@@ -13,6 +13,6 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/capabilities/env.rs` | 能力入口与公开面 |
-| `src/capabilities/env/api.rs` | 入站契约：四个派生函数与事实结构的重导出 |
+| `src/capabilities/env/api.rs` | 入站契约：六个派生函数与事实结构的重导出 |
 | `src/capabilities/env/domain.rs` | 纯派生分区声明 |
-| `src/capabilities/env/domain/env.rs` | 规则本身：权限链 / 沙箱清单 / 围栏 / 进程环境 / 工具链根 |
+| `src/capabilities/env/domain/env.rs` | 规则本身：权限链 / 沙箱清单 / 围栏 / 进程环境 / 工具链根 / 网络开关 / 宿主只读根 |

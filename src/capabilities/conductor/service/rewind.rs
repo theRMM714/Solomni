@@ -486,16 +486,30 @@ impl Conductor {
                     &role_of(self.history.as_ref(), meta)?,
                 )
                 .with_chara(a.chara.clone())
-                .with_guest(self.guest_os_of(&meta.exec));
+                .with_guest(crate::capabilities::vm::api::guest_os_of(
+                    &self.root,
+                    self.probe.as_ref(),
+                    &meta.exec,
+                ));
                 let chat = self.llm.member_channel(&channel, &a.name);
                 let (history, marks, line_reply, line_ids, compacted_upto, compacted_line) =
                     replay_dialogue(events, mode);
-                let unavailable = self.unavailable_modules(&meta.exec, &modules);
+                let unavailable = crate::capabilities::vm::api::unavailable_modules(
+                    &self.root,
+                    self.probe.as_ref(),
+                    &self.packages.library(),
+                    &self.packages.base(),
+                    &meta.exec,
+                    &modules,
+                );
                 // 身份与角色**同一把尺子**（重建与实时不能各写一份，见 Conductor::role_of）：
                 // 协作派生的成员 / 节点 = executor（拿得到回报工具）；其余单 agent 工作 = solo。
                 let role = role_of(self.history.as_ref(), meta)?;
                 let host_plan = if meta.exec.tier == crate::kernel::api::Tier::Host {
-                    self.host_plan_for(
+                    crate::capabilities::vm::api::host_plan_for(
+                        &self.packages.library(),
+                        &self.packages.base(),
+                        self.probe.as_ref(),
                         &meta.exec,
                         &modules,
                         crate::capabilities::packages::api::PinPolicy::Require,
@@ -507,7 +521,7 @@ impl Conductor {
                     &modules,
                     &sb,
                     unavailable,
-                    self.network_allowed(),
+                    crate::capabilities::env::api::network_allowed(self.registry.app()),
                     mode,
                     &role,
                     meta.exec.tier,

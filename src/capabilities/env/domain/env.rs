@@ -1,6 +1,7 @@
 //! 目的：环境事实的派生规则——把调用方已取好的事实算成权限面、沙箱清单、围栏、进程环境与工具链根。
 //! 管：`member`（一席的围栏 / 运行路径 / 工具链根 / 模块注入项）、`sandboxes`（每个 agent 的沙箱）、
-//!   `permissions`（权限链）、`workspace_grant`（共享区授权粒度）。
+//!   `permissions`（权限链）、`workspace_grant`（共享区授权粒度）、`network_allowed` 与
+//!   `host_read_roots`（全局策略派生的网络开关与主机只读根）。
 //! 不管：取事实（history / workspace / registry / 清单在 `conductor`）、落盘、启停 guest 与工具进程。
 //! 联动：`conductor/service/env.rs` 取好事实后转调这里；行为与错误文案必须逐字一致。
 
@@ -155,6 +156,25 @@ pub fn permissions(chain: &[SessionMeta], app: &AppSettings) -> Result<Permissio
         return Ok(out.without_shared());
     }
     Ok(out)
+}
+
+/// 目的：这条配置是否放行出站网络（工具 / guest / 常驻服务 / 构建都看它）。
+pub fn network_allowed(app: &AppSettings) -> bool {
+    app.sandbox.policy.network
+}
+
+/// 目的：用户显式授权的主机只读根（`settings.yaml` 的 `sandbox.policy.host_read_roots`）。
+/// 约束：逐条去空白、丢掉空项再转路径——空串不是"根"，一个都不放行时给空表
+///   （只读位怎么落由适配层定，这里只给事实）。
+pub fn host_read_roots(app: &AppSettings) -> Vec<PathBuf> {
+    app.sandbox
+        .policy
+        .host_read_roots
+        .iter()
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from)
+        .collect()
 }
 
 /// 目的：这条会话生效的外部工作区授权粒度：链上最近一份绑定说了算，没有绑定就是 `session` 缺省。

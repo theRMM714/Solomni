@@ -493,8 +493,8 @@ impl CollabSession {
             // 只读根来自用户显式授权（host_read_roots），默认空。
             let fence = crate::kernel::api::FenceSpec::for_session(
                 &sandbox,
-                &read_only_roots(&self.settings.app),
-                self.settings.app.sandbox.policy.network,
+                &crate::capabilities::env::api::host_read_roots(&self.settings.app),
+                crate::capabilities::env::api::network_allowed(&self.settings.app),
             );
             // 工具说明块的素材（patch 语法 / 模块工具 / 模块参数）：装配期按这个 agent 的沙箱与模块算一次。
             let tool_notes =

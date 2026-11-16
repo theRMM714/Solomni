@@ -1,5 +1,5 @@
 //! 目的：vm 能力的入站面——其它能力与呈现层只准用这里。
-//! 管：Vm 用例 trait（guest 生命周期）与档位、计划、入口诊断、就绪检测的重导出。
+//! 管：Vm 用例 trait（guest 生命周期）与档位、计划、入口诊断、就绪检测、运行计划派生（宿主/guest 包选型、模块可用性、路径翻译器）的重导出。
 //! 不管：纯逻辑实现（domain/）与端口（ports.rs）；运行包契约与选包在 packages 能力。
 //! 联动：被 conductor / collab / cli 与入口层消费。
 
@@ -18,6 +18,11 @@ pub use crate::capabilities::vm::domain::guest::{
     package_setup_scripts,
 };
 pub use crate::capabilities::vm::domain::paths::PathBridge;
+#[allow(unused_imports)] // 入站面：运行计划派生的唯一出口（能力外只经这里取用）
+pub use crate::capabilities::vm::service::plan::{
+    guest_image_of, guest_os_of, guest_platform_of, guest_runtimes_of, host_plan_for, library_for,
+    path_codec_of, plan_for_spec, unavailable_modules,
+};
 
 /// 目的：虚拟机档的**用例面**（`service.rs` 实现）——guest 生命周期走这里。
 /// 约束：出站端口 `VmEngine` / `ShareBackend` 只由 `service.rs` 持有（R12）；运行包库在 packages 能力。

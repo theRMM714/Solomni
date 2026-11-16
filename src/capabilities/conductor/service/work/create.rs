@@ -355,7 +355,11 @@ impl Conductor {
             .cloned()
             .collect();
         if meta.exec.tier == crate::kernel::api::Tier::Vm {
-            let guest_runtimes = self.guest_runtimes_of(&meta.exec);
+            let guest_runtimes = crate::capabilities::vm::api::guest_runtimes_of(
+                &self.root,
+                self.probe.as_ref(),
+                &meta.exec,
+            );
             for (id, caps) in pkgs::absent(&session_modules, &self.packages.library()) {
                 let caps: Vec<String> = caps
                     .into_iter()
@@ -372,7 +376,9 @@ impl Conductor {
         }
         // 执行选型完整性（「开始」即冻结）：选型不成立或**缺包**都如实拒绝（没有工具，用户完不成工作）。
         // 入口**按目标环境**判：虚拟机档按 guest 的 os 解析名字，跨平台还看文件形式（宿主编的产物跑不了）。
-        let guest = self.guest_os_of(&meta.exec).map(|g| g.as_str());
+        let guest =
+            crate::capabilities::vm::api::guest_os_of(&self.root, self.probe.as_ref(), &meta.exec)
+                .map(|g| g.as_str());
         let target_os = guest.unwrap_or(std::env::consts::OS);
         let missing: Vec<crate::capabilities::vm::api::MissingEntry> =
             crate::capabilities::vm::api::missing_entries_for(&session_modules, target_os, &|p| {
@@ -380,11 +386,15 @@ impl Conductor {
                     && (target_os == std::env::consts::OS
                         || crate::capabilities::vm::api::runs_on_target(p, target_os))
             });
-        let plan = self.plan_for_spec(
+        let plan = crate::capabilities::vm::api::plan_for_spec(
+            &self.root,
+            self.probe.as_ref(),
+            &self.packages.library(),
             &meta.exec,
             &session_modules,
             &missing,
             meta.exec.guest.as_deref(),
+            crate::capabilities::env::api::network_allowed(self.registry.app()),
         )?;
         self.log.info(
             "conductor::create_work",
@@ -499,10 +509,28 @@ impl Conductor {
                 let channel = channels
                     .remove(&a.name)
                     .ok_or_else(|| format!("缺少 agent {} 的模型通道", a.name))?;
-                let unavailable = self.unavailable_modules(&meta.exec, &chosen);
-                let guest = self.guest_os_of(&meta.exec);
+                let unavailable = crate::capabilities::vm::api::unavailable_modules(
+                    &self.root,
+                    self.probe.as_ref(),
+                    &self.packages.library(),
+                    &self.packages.base(),
+                    &meta.exec,
+                    &chosen,
+                );
+                let guest = crate::capabilities::vm::api::guest_os_of(
+                    &self.root,
+                    self.probe.as_ref(),
+                    &meta.exec,
+                );
                 let host_plan = if meta.exec.tier == crate::kernel::api::Tier::Host {
-                    self.host_plan_for(&meta.exec, &chosen, pkgs::PinPolicy::Require)
+                    crate::capabilities::vm::api::host_plan_for(
+                        &self.packages.library(),
+                        &self.packages.base(),
+                        self.probe.as_ref(),
+                        &meta.exec,
+                        &chosen,
+                        pkgs::PinPolicy::Require,
+                    )
                 } else {
                     pkgs::PackagePlan::default()
                 };
@@ -512,7 +540,7 @@ impl Conductor {
                     channel,
                     &sb,
                     unavailable,
-                    self.network_allowed(),
+                    crate::capabilities::env::api::network_allowed(self.registry.app()),
                     meta.exec.tier,
                     guest,
                     guest_lease_for(self.history.as_ref(), &meta)?,
@@ -643,12 +671,12 @@ impl Conductor {
             Arc::clone(&self.probe),
             Arc::clone(&self.log),
             self.registry.app().max_guests,
-            self.host_read_roots(),
+            crate::capabilities::env::api::host_read_roots(self.registry.app()),
             self.qemu_path(),
             share_tool,
             shares,
             lease.to_string(),
-            self.network_allowed(),
+            crate::capabilities::env::api::network_allowed(self.registry.app()),
             plan.clone(),
             sandboxes.clone(),
             restart,

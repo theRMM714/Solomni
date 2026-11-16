@@ -10,6 +10,7 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/capabilities/vm/api.rs` | 入站面：`Vm` 用例 trait（guest 生命周期与 `guest_diagnose` 只读诊断）与档位、计划、入口诊断、就绪检测的重导出 |
+| `src/capabilities/vm/service/plan.rs` | 运行计划派生：宿主 / guest 包选型、模块可用性与路径翻译器；纯函数，root / 宿主探针 / 包库 / 模块声明都走形参 |
 | `src/capabilities/vm/service.rs` | 用例与端口持有者：持 `VmEngine` / `ShareBackend`（R12），按租约管理 guest（每租约一把锁：跨租约并行、同一租约串行）；`guest_diagnose` 用只读系统允许集走 helper 诊断模式并如实区分失败原因 |
 | `src/capabilities/vm/ports.rs` | 出站端口：`VmEngine` / `GuestVm` / `GuestChannel`（起 / 跑 / 销毁 guest）与 `ShareBackend` / `SharePlan`（宿主↔guest 共享） |
 | `src/capabilities/vm/domain/diagnose.rs` | guest 只读诊断的纯逻辑：报告结构（键与 helper 输出一一对应）、`parse_report` 的合法性判定，以及失败原因文案（没有活 guest / 非 Linux guest / 通道不通 / helper 不可用 / 缺 python3 / 超时 / 执行失败 / 输出不可解析） |

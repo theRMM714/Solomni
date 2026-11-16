@@ -386,13 +386,8 @@ impl ConductorHandle {
         let (module, tool, decl) = self.module_action(id)?;
         // 直接动作跑在宿主：按宿主目标取包计划（没有会话定版，多版本取稳定序第一个）。
         let module_for_plan = module.clone();
-        let host_plan = self.call(move |core| {
-            Ok(core.host_plan_for(
-                &crate::kernel::api::ExecSpec::default(),
-                std::slice::from_ref(&module_for_plan),
-                crate::capabilities::packages::api::PinPolicy::First,
-            ))
-        })?;
+        let host_plan =
+            self.call(move |core| Ok(core.host_plan_now(std::slice::from_ref(&module_for_plan))))?;
         // 与成员循环同一把尺子：该能力在本机档不可用 = 该模块的工具不执行，并如实说明缺哪个能力。
         if let Some(caps) = host_plan.unusable.get(&module.manifest.id) {
             return Err(format!(

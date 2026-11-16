@@ -656,7 +656,7 @@ impl Conductor {
             &[],
             &sb,
             BTreeMap::new(),
-            self.network_allowed(),
+            crate::capabilities::env::api::network_allowed(self.registry.app()),
             tool_mode,
             "core_proxy",
             crate::kernel::api::Tier::Host,
