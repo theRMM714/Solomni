@@ -1,7 +1,7 @@
 //! 目的：会话装配的纯派生——角色工具面的过滤、已就绪服务操作的归组、模块工具行与服务参数行。
 //! 管：`face_tools` / `service_ops_of` / `serviced_tools` 三个纯函数（无 IO、无端口）。
-//! 不管：端口读取与最终对象拼装（在 `turn::service::assemble`）；工具总表与角色表本身（在 `tools`）。
-//! 联动：`turn::service::assemble` 装配一席工具面时调用；数据来自 `tools` / `residents` / `session` 的 api。
+//! 不管：端口读取与最终对象拼装（在 `session::service::assemble`）；工具总表与角色表本身（在 `tools`）。
+//! 联动：`session::service::assemble` 装配一席工具面时调用；数据来自 `tools` / `residents` / `session` 的 api。
 
 use std::collections::BTreeMap;
 

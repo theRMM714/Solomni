@@ -7,8 +7,8 @@ use super::decls::ToolDecls;
 use super::tools::*;
 use crate::capabilities::llm::api::{self as envelope, Verb};
 use crate::capabilities::llm::api::{Chat, Chunk, CompleteOpts, Msg};
-use crate::capabilities::session::api::MemberTools;
 use crate::capabilities::session::api::{LineView, SessionEvent, ToolCallView, reply_msgs};
+use crate::capabilities::session::domain::tools::MemberTools;
 use crate::kernel::api::ToolOutcome;
 
 /// 目的：一次工具调用的产出：调用视图 + 它压进历史的消息。

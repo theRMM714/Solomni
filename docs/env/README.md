@@ -12,7 +12,7 @@
 - 管：全局策略——`api::network_allowed` 读设置里的网络开关，`api::host_read_roots` 把用户填的宿主只读根逐条去空白、丢掉空项后转成路径；两处都只有这一个出处。
 - 不管：事实取得——`SessionMeta` / `WorkRoots` / `Roster` / `PackagePlan` / `AppSettings` 都由调用方先取好，本单元无端口、无 IO。
 - 不管：落盘与进程——不写文件、不启停 guest、不碰围栏授权台账（`tools` 的 `release_by_lease`）。
-- 不管：机制侧怎么用——围栏与模块变量由调用方装进工具面（`src/capabilities/turn/service/assemble.rs` 的 `build_single`）。
+- 不管：机制侧怎么用——围栏与模块变量由调用方逐字段拷成值（`MemberEnvParts`）后再由 `session` 装配进工具面（`src/capabilities/session/service/assemble.rs`）。
 
 ## 入站契约与状态归属
 

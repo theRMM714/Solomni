@@ -310,13 +310,13 @@ pub(crate) fn native_member(
     steps: Vec<NativeStep>,
     declared: DeclLog,
     seen: SeenLog,
-) -> Member {
+) -> WithTools {
     let chat: BoxedChat = Box::new(NativeChat {
         steps,
         declared,
         seen,
     });
-    let mut m = Member::new(
+    let m = Member::new(
         id,
         crate::tests::doubles::test_params(id),
         crate::capabilities::llm::api::ToolMode::Native,
@@ -334,42 +334,44 @@ pub(crate) fn native_member(
         },
     );
     let sb = test_sandbox(id, &[]);
-    m.tools = Some(MemberTools {
-        face: crate::capabilities::session::api::ToolFace {
-            mode: crate::capabilities::llm::api::ToolMode::Native,
-            role: "solo".to_string(),
-            modules,
-            tier: crate::kernel::api::Tier::Host,
-            guest_lease: String::new(),
-            sandbox: sb.clone(),
-            tools_this_turn: test_prompts()
-                .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
-                .to_string(),
-            builtin_tools: test_systools().tools,
-            unavailable: BTreeMap::new(),
-            fence: crate::kernel::api::FenceSpec::for_session(&sb, &[], false),
-            module_env: Default::default(),
-            runtime_path: None,
-            runtime_roots: Vec::new(),
-            // 测试替身按"执行席"发放全部内置工具（角色表的越权校验另有专门用例）。
-            allowed: crate::capabilities::tools::api::names(),
-            with_modules: true,
-            notes: crate::tests::doubles::test_notes(&sb, &[]),
-        },
-        llm: test_llm_demo(),
-        log: Arc::new(crate::kernel::ports::NoopLog),
-        tools: test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),
-        vm: test_vm(),
-        residents: Arc::new(crate::capabilities::residents::api::NoResidents),
-        // 这些用例只跑工具面：写工具落地后不自动提交（没有工作区）。
-        workspace: None,
-        observations: crate::capabilities::tools::api::Observations::default(),
-        shell_live: None,
-        reply_seq: 0,
-        line: Default::default(),
-        handlers: Vec::new(),
-    });
-    m
+    WithTools {
+        member: m,
+        tools: Some(MemberTools {
+            face: crate::capabilities::session::api::ToolFace {
+                mode: crate::capabilities::llm::api::ToolMode::Native,
+                role: "solo".to_string(),
+                modules,
+                tier: crate::kernel::api::Tier::Host,
+                guest_lease: String::new(),
+                sandbox: sb.clone(),
+                tools_this_turn: test_prompts()
+                    .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
+                    .to_string(),
+                builtin_tools: test_systools().tools,
+                unavailable: BTreeMap::new(),
+                fence: crate::kernel::api::FenceSpec::for_session(&sb, &[], false),
+                module_env: Default::default(),
+                runtime_path: None,
+                runtime_roots: Vec::new(),
+                // 测试替身按"执行席"发放全部内置工具（角色表的越权校验另有专门用例）。
+                allowed: crate::capabilities::tools::api::names(),
+                with_modules: true,
+                notes: crate::tests::doubles::test_notes(&sb, &[]),
+            },
+            llm: test_llm_demo(),
+            log: Arc::new(crate::kernel::ports::NoopLog),
+            tools: test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),
+            vm: test_vm(),
+            residents: Arc::new(crate::capabilities::residents::api::NoResidents),
+            // 这些用例只跑工具面：写工具落地后不自动提交（没有工作区）。
+            workspace: None,
+            observations: crate::capabilities::tools::api::Observations::default(),
+            shell_live: None,
+            reply_seq: 0,
+            line: Default::default(),
+            handlers: Vec::new(),
+        }),
+    }
 }
 
 /// 目的：原生形态的网关：每次要通道就弹出一份脚本（第一份给实时会话，第二份给重建）。

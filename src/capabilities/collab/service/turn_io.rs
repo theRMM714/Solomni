@@ -1,5 +1,5 @@
-//! 目的：回合收发——把成员的回复喂回状态机（feed_with）、取出待问的一步（take_ask）、把一张已出队的回答落到业务上（dispose）以及核心的核实工具面与通道参数（systools / disc_cancel / disc_opts）。
-//! 管：成员回合结果进状态机的入口；提问取出与回答落地；核实工具面与通道参数的取用。
+//! 目的：回合收发——把成员的回复喂回状态机（feed_with）、取出待问的一步（take_ask）、把一张已出队的回答落到业务上（dispose）以及核心的核实环境与通道参数（verify_env / disc_cancel / disc_opts）。
+//! 管：成员回合结果进状态机的入口；提问取出与回答落地；核实环境与通道参数的取用。
 //! 不管：状态机本体（discussion.rs / collab.rs）；模型调用与工具执行机制。
 //! 联动：被 CollabSession 消费；裁决通道见 docs/session/session-model.md 的「请用户裁决：一条通道，消息 + 选项」。
 
@@ -57,77 +57,32 @@ impl CollabSession {
         self.disc.as_ref()?.member_id(i).map(|s| s.to_string())
     }
 
-    /// 目的：核心核实用的小工具环境：**只读**、根是本次工作的共享区。
+    /// 目的：核实用的小工具环境（只读）：按角色现装一份，交给核心操作的 `verify` 形参。
     ///   为什么要它：核心操作（出方案 / 节点验收…）也常需要"先看看现场再下结论"，
     ///   而核心不是 member、手里没有工具环境——没有它，模型一想核实就被判"没调用 X"而整步中断。
-    ///   工具面只发**该角色的只读核实工具**（按声明里的 capability = fs-read 判定），写类一律不发。
-    pub(crate) fn core_verify_tools(
+    /// 约束：本能力不自己拼工具面——装配在 `session` 的 `verify_tools`（见 docs/session/session-model.md）。
+    pub(crate) fn verify_env(
         &self,
         role: &str,
-    ) -> Option<crate::capabilities::session::api::MemberTools> {
-        let mut sb = self.sandboxes.list.first()?.clone();
-        sb.agent = "核心".to_string();
-        sb.private = sb.shared.clone();
-        sb.modules.clear();
-        sb.modules_with_userdata.clear();
-        let book = self.systools.book();
-        let allowed: Vec<String> = self
-            .systools
-            .tool_face(role)
-            .map(|f| {
-                f.into_iter()
-                    .map(|(id, _)| id.to_string())
-                    .filter(|id| {
-                        book.get(id)
-                            .map(|s| {
-                                sb.permissions
-                                    .offers(id, s.effect(), &s.max_reach(), s.scope)
-                            })
-                            .unwrap_or(true)
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        Some(crate::capabilities::session::api::MemberTools {
-            face: crate::capabilities::session::api::ToolFace {
+    ) -> Option<Box<dyn crate::capabilities::session::api::CoreVerify>> {
+        let sb = self.sandboxes.list.first()?;
+        crate::capabilities::session::api::verify_tools(
+            &crate::capabilities::session::api::VerifySpec {
+                sandbox: sb,
+                role,
                 mode: self.core_mode,
-                role: role.to_string(),
-                modules: std::collections::BTreeMap::new(),
-                tier: crate::kernel::api::Tier::Host,
-                guest_lease: String::new(),
-                sandbox: sb.clone(),
+                net: self.settings.app.sandbox.policy.network,
+                book: self.systools.book(),
                 tools_this_turn: self
                     .prompts
-                    .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
-                    .to_string(),
-                builtin_tools: self.systools.book(),
-                unavailable: std::collections::BTreeMap::new(),
-                fence: crate::kernel::api::FenceSpec::for_session(
-                    &sb,
-                    &[],
-                    self.settings.app.sandbox.policy.network,
-                ),
-                // 核心核实用的是只读内置工具，没有模块工具进程，也就没有注入项。
-                module_env: Default::default(),
-                runtime_path: None,
-                runtime_roots: Vec::new(),
-                allowed,
-                with_modules: false,
-                notes: crate::capabilities::tools::api::ToolNotes::default(),
+                    .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn),
+                systools: Arc::clone(&self.systools),
+                llm: Arc::clone(&self.llm),
+                log: Arc::clone(&self.log),
+                tools: Arc::clone(&self.tools),
+                vm: Arc::clone(&self.vm),
             },
-            llm: Arc::clone(&self.llm),
-            log: Arc::clone(&self.log),
-            tools: Arc::clone(&self.tools),
-            vm: Arc::clone(&self.vm),
-            residents: Arc::new(crate::capabilities::residents::api::NoResidents),
-            // 核心核实的工具面只读：没有共享区提交这回事。
-            workspace: None,
-            observations: crate::capabilities::tools::api::Observations::default(),
-            shell_live: None,
-            reply_seq: 0,
-            line: Default::default(),
-            handlers: Vec::new(),
-        })
+        )
     }
 
     /// 目的：讨论回合的**工具面**（动词 + 只读核实）：核心驱动时交给 turn_with。
@@ -239,22 +194,25 @@ impl CollabSession {
         let kind = p.kind();
         let brief = self.decision_brief(p);
         let text = note.to_string();
-        let mut verify = self.core_verify_tools("planner");
         sink(crate::capabilities::session::api::working("核心"));
-        let judged = Self::judge_clear(
-            &*self.prompts,
-            &*self.systools,
-            &self.cancel,
-            crate::capabilities::llm::api::CompleteOpts::plain(self.settings.app.streaming)
-                .with_timeout(self.settings.app.llm_timeout_secs),
-            self.core_mode,
-            self.core_chat.as_mut(),
-            verify.as_mut(),
-            kind,
-            &brief,
-            &text,
-            sink,
-        );
+        let judged = {
+            let mut verify_box = self.verify_env("planner");
+            let verify = verify_box.as_deref_mut();
+            Self::judge_clear(
+                &*self.prompts,
+                &*self.systools,
+                &self.cancel,
+                crate::capabilities::llm::api::CompleteOpts::plain(self.settings.app.streaming)
+                    .with_timeout(self.settings.app.llm_timeout_secs),
+                self.core_mode,
+                self.core_chat.as_mut(),
+                verify,
+                kind,
+                &brief,
+                &text,
+                sink,
+            )
+        };
         sink(crate::capabilities::session::api::idle());
         self.note_user(note, sink);
         match judged {

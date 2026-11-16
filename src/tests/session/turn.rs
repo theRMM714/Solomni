@@ -29,15 +29,12 @@ pub(crate) fn discussion_turn_carries_the_agent_sessions_own_history() {
     };
     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let turn = crate::capabilities::collab::service::discussion::Discussion::turn_with(
-        &*test_tools_svc(),
-        "discussant",
         &cancel,
         crate::capabilities::llm::api::CompleteOpts::plain(false),
         "a",
         "（测试）身份",
         &[crate::capabilities::llm::api::Msg::user("只看第二份资料")],
         &mut chat,
-        None,
         vec![crate::capabilities::llm::api::Msg::user("讨论上下文")],
         &mut |_| {},
     )

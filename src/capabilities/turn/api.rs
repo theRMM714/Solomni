@@ -1,17 +1,12 @@
 //! 目的：turn 能力的入站契约：回合状态的类型与访问器、事件台、生成入口，以及宿主必须提供的入口（`TurnHost`）。
-//! 管：重导出 `service::state` 的 `Session`、`service::session` 的 `Turn`、装配入口与参数对象、
-//!   事件台与生成入口（`service::generation`），并定义宿主端口 `TurnHost`。
+//! 管：重导出 `service::state` 的 `Session`、`service::session` 的 `Turn`、事件台与生成入口（`service::generation`），
+//!   并定义宿主端口 `TurnHost`；会话装配（参数对象与整场入口）在 `session` 的面里，不在这里。
 //! 不管：状态实现（`service/state.rs`）、推进规则（`service/{turn,flow}`）、谁在什么时候放取会话（宿主）。
 //! 联动：宿主（命令队列手柄）实现 `TurnHost`；呈现层与测试只经本模块取用。
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-/// 目的：一席工具面与单 agent 会话对象的装配入口（宿主取完事实后转调这里）。
-pub use crate::capabilities::turn::service::assemble::member_tools;
-/// 目的：装配用的两类参数对象：一席事实（`MemberSpec`）、单 agent 一场事实（`SingleSpec`）。
-#[allow(unused_imports)]
-pub use crate::capabilities::turn::service::assemble::{MemberSpec, SingleSpec};
 /// 目的：生成入口（单 agent / 节点 / 协作 / 成员 / 压缩）与脱离调用方的点火器。
 pub(crate) use crate::capabilities::turn::service::generation::{
     collab_generation, compact, single_generation, spawn_detached_collab,
@@ -26,9 +21,6 @@ pub use crate::capabilities::turn::service::model::llm_opts;
 pub use crate::capabilities::turn::service::rebuild::replay_dialogue;
 /// 目的：代理会话的私有工作目录名与核心说话人名称（宿主建代理会话时要这两样）。
 pub use crate::capabilities::turn::service::rebuild::{PROXY_PRIVATE_DIR, SPEAKER};
-/// 目的：装配一席要用的能力面：由会话本体克隆出来，交给装配入口。
-#[allow(unused_imports)]
-pub use crate::capabilities::turn::service::session::SessionDeps;
 /// 目的：回合状态与会话本体的类型出口。
 pub use crate::capabilities::turn::service::session::Turn;
 

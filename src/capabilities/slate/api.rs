@@ -65,5 +65,5 @@ pub struct Request<'a> {
     /// 目的：这一次调用的通道参数（流式 / 预算）。
     pub opts: CompleteOpts<'static>,
     /// 目的：只读核实回路（协作会话有工具面；一次性推荐没有）。
-    pub verify: Option<&'a mut dyn CoreVerify>,
+    pub verify: Option<&'a mut (dyn CoreVerify + 'static)>,
 }

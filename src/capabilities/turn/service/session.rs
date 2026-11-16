@@ -1,7 +1,7 @@
 //! 目的：会话本体——回合状态（`TurnState`）加上装配一席所需的能力面，一处持有。
-//! 管：`Turn` 的字段与构造、会话在世的访问器转发、运行中文案、能力面的取用（`session_deps`）、压缩通道工厂。
-//! 不管：生成驱动、落盘与命令队列（在 `runtime`）；工具面与会话对象的拼装（在同级 `assemble`）；纯派生规则（在 `turn::domain`）。
-//! 联动：`runtime` 持一份 `Turn` 并经它放取会话；`assemble` 从 `session_deps` 取能力面。
+//! 管：`Turn` 的字段与构造、会话在世的访问器转发、运行中文案、装配端口的取用（`session_ports`）、压缩通道工厂。
+//! 不管：生成驱动、落盘与命令队列（在 `runtime`）；工具面与会话对象的拼装（在 `session::service::assemble`）；纯派生规则（在 `session::domain::assemble`）。
+//! 联动：`runtime` 持一份 `Turn` 并经它放取会话；取事实的一侧从 `session_ports` 取能力面，再交 `session` 装配。
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -20,30 +20,6 @@ use crate::capabilities::vm::api::Vm;
 use crate::capabilities::workspace::api::Workspace;
 use crate::kernel::api::SessionId;
 use crate::kernel::ports::Log;
-
-/// 目的：装配一席要用的能力面（与 `Turn` 持有的那几份同一批）。
-pub struct SessionDeps {
-    /// 目的：llm 用例面：一席的收发句柄按它造。
-    pub llm: Arc<dyn Llm + Send + Sync>,
-    /// 目的：日志面：装配时记一条「单 agent 工作」。
-    pub log: Arc<dyn Log + Send + Sync>,
-    /// 目的：提示词册：工具说明与压缩提示从它取段。
-    pub prompt: Arc<dyn Prompt>,
-    /// 目的：工具总表与角色表：发放名单与内置工具表从它读。
-    pub systools: Arc<dyn Tools>,
-    /// 目的：工具执行面：一席的工具环境要它跑外部 / 内置工具。
-    pub tools: Arc<dyn ToolExec + Send + Sync>,
-    /// 目的：虚拟机用例面：一席的 guest 事实随工具面交给机制层。
-    pub vm: Arc<dyn Vm + Send + Sync>,
-    /// 目的：常驻服务管理面：已就绪服务的操作并入一席的工具面。
-    pub residents: Arc<dyn ResidentOps + Send + Sync>,
-    /// 目的：工作区用例面：一席的 `work_*` 工具执行者按它造。
-    pub workspace: Arc<dyn Workspace + Send + Sync>,
-    /// 目的：隐秘字段管理面：装配期按模块解析注入项。
-    pub secrets: Arc<dyn SecretOps + Send + Sync>,
-    /// 目的：压缩通道工厂：新会话与重建会话共用同一份。
-    pub compact: Arc<dyn CompactChatFactory>,
-}
 
 /// 目的：会话本体：在世表与运行态（`TurnState`）连同装配一席要用的能力面，一处持有。
 /// 约束：只在核心线程上读写；能力面只经 `api` 取。
@@ -130,9 +106,9 @@ impl Turn {
         self.base_roots = roots;
     }
 
-    /// 目的：装配一席要用的能力面——按 `Turn` 现持的那几份克隆出来。
-    pub fn session_deps(&self) -> SessionDeps {
-        SessionDeps {
+    /// 目的：装配一席要用的能力面（端口对象）——按 `Turn` 现持的那几份克隆出来，交 `session` 的装配入口。
+    pub fn session_ports(&self) -> crate::capabilities::session::api::SessionPorts {
+        crate::capabilities::session::api::SessionPorts {
             llm: Arc::clone(&self.llm),
             log: Arc::clone(&self.log),
             prompt: Arc::clone(&self.prompt),
@@ -141,14 +117,8 @@ impl Turn {
             vm: Arc::clone(&self.vm),
             residents: Arc::clone(&self.residents),
             workspace: Arc::clone(&self.workspace),
-            secrets: Arc::clone(&self.secrets),
             compact: Arc::clone(&self.compact),
         }
-    }
-
-    /// 目的：注入给新会话 / 重建会话的压缩通道工厂。
-    pub fn compact_factory(&self) -> Arc<dyn CompactChatFactory> {
-        Arc::clone(&self.compact)
     }
 
     /// 目的：生成期间"会话不在表里"的三种进入点共用这一句（错误文案要一致，别处不再各写一份）。

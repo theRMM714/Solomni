@@ -8,9 +8,7 @@ use super::lines::*;
 use crate::capabilities::collab::service::discussion::{MAX_ROUNDS, Member, TurnOut};
 use crate::capabilities::collab::service::synthesis::Execution;
 use crate::capabilities::modules::api::Module;
-use crate::capabilities::session::api::MemberTools;
 use crate::capabilities::session::api::{Pending, SessionEvent};
-use std::sync::Arc;
 
 impl CollabSession {
     /// 目的：泵：推进讨论直至暂停（ask）或收敛并走完整理/执行/验收/交付；事件逐条经 sink 外送。
@@ -88,13 +86,16 @@ impl CollabSession {
         // 整理：只在还没有方案（或没有链）时做——回档/重启后沿用已记的，不重复花钱。
         if self.plan.is_none() || self.chain.is_none() {
             sink(crate::capabilities::session::api::working("核心"));
-            let mut verify = self.core_verify_tools("planner");
-            let made = self.disc.as_ref().expect("disc 存在").synthesize(
-                self.core_chat.as_mut(),
-                self.core_mode,
-                verify.as_mut(),
-                sink,
-            );
+            let made = {
+                let mut verify_box = self.verify_env("planner");
+                let verify = verify_box.as_deref_mut();
+                self.disc.as_ref().expect("disc 存在").synthesize(
+                    self.core_chat.as_mut(),
+                    self.core_mode,
+                    verify,
+                    sink,
+                )
+            };
             sink(crate::capabilities::session::api::idle());
             match made {
                 Ok((plan, chain, advice)) => {
@@ -224,20 +225,25 @@ impl CollabSession {
                     nodes: stage_nodes.clone(),
                 };
                 sink(crate::capabilities::session::api::working("核心"));
-                let mut verify = self.core_verify_tools("orchestrator");
-                let made = Self::review_nodes(
-                    &*self.prompts,
-                    &*self.systools,
-                    &self.cancel,
-                    Some(&reviewed),
-                    crate::capabilities::llm::api::CompleteOpts::plain(self.settings.app.streaming)
+                let made = {
+                    let mut verify_box = self.verify_env("orchestrator");
+                    let verify = verify_box.as_deref_mut();
+                    Self::review_nodes(
+                        &*self.prompts,
+                        &*self.systools,
+                        &self.cancel,
+                        Some(&reviewed),
+                        crate::capabilities::llm::api::CompleteOpts::plain(
+                            self.settings.app.streaming,
+                        )
                         .with_timeout(self.settings.app.llm_timeout_secs),
-                    self.core_mode,
-                    self.core_chat.as_mut(),
-                    verify.as_mut(),
-                    retry.as_deref(),
-                    sink,
-                );
+                        self.core_mode,
+                        self.core_chat.as_mut(),
+                        verify,
+                        retry.as_deref(),
+                        sink,
+                    )
+                };
                 sink(crate::capabilities::session::api::idle());
                 let (verdicts, advice) = match made {
                     Ok(v) => v,
@@ -361,19 +367,22 @@ impl CollabSession {
         let mut retry: Option<String> = None;
         loop {
             sink(crate::capabilities::session::api::working("核心"));
-            let mut verify = self.core_verify_tools("orchestrator");
-            exec.review(
-                self.core_chat.as_mut(),
-                &plan,
-                &table,
-                retry.as_deref(),
-                &*prompts,
-                &*self.systools,
-                llm.clone(),
-                self.core_mode,
-                verify.as_mut(),
-                sink,
-            );
+            {
+                let mut verify_box = self.verify_env("orchestrator");
+                let verify = verify_box.as_deref_mut();
+                exec.review(
+                    self.core_chat.as_mut(),
+                    &plan,
+                    &table,
+                    retry.as_deref(),
+                    &*prompts,
+                    &*self.systools,
+                    llm.clone(),
+                    self.core_mode,
+                    verify,
+                    sink,
+                )
+            };
             sink(crate::capabilities::session::api::idle());
             let failed = self.exec_note(&exec);
             if let Some(note) = failed {
@@ -440,7 +449,6 @@ impl CollabSession {
     /// 目的：从在组名单装配成员（策略在 runtime：该 agent 的模型 > 核心默认；缺了就如实报错）。
     ///   一个 agent = 一个成员：system 由它全部模块合成，工具 = 各模块外部工具的并集。
     pub(crate) fn assemble_members(&self) -> Result<Vec<Member>, String> {
-        let prompts = self.prompts.clone();
         let roster = self.modules.roster();
         let mut members = Vec::new();
         for a in &self.roster {
@@ -488,80 +496,7 @@ impl CollabSession {
                 "discussant",
             )
             .with_chara(a.chara.clone());
-            let mut member = Member::plain(&a.name, params, mode);
-            // 围栏：可达范围 + 断网，由该 agent 的生效权限与全局上限派生（机制在 adapters）；
-            // 只读根来自用户显式授权（host_read_roots），默认空。
-            let fence = crate::kernel::api::FenceSpec::for_session(
-                &sandbox,
-                &crate::capabilities::env::api::host_read_roots(&self.settings.app),
-                crate::capabilities::env::api::network_allowed(&self.settings.app),
-            );
-            // 工具说明块的素材（patch 语法 / 模块工具 / 模块参数）：装配期按这个 agent 的沙箱与模块算一次。
-            let tool_notes =
-                crate::capabilities::tools::api::tool_notes(&*prompts, &sandbox, &modules, &[]);
-            let allowed: Vec<String> = {
-                let book = self.systools.book();
-                self.systools
-                    .tool_face("discussant")
-                    .map(|f| {
-                        f.into_iter()
-                            .map(|(id, _)| id.to_string())
-                            .filter(|id| {
-                                book.get(id)
-                                    .map(|s| {
-                                        sandbox.permissions.offers(
-                                            id,
-                                            s.effect(),
-                                            &s.max_reach(),
-                                            s.scope,
-                                        )
-                                    })
-                                    .unwrap_or(true)
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            };
-            member.tools = Some(MemberTools {
-                face: crate::capabilities::session::api::ToolFace {
-                    mode,
-                    role: "discussant".to_string(),
-                    // 模块 id → 该模块的（目录, 工具表）：多模块 agent 靠信封里的 module 消歧。
-                    modules: crate::capabilities::session::api::tool_table(&modules),
-                    tier: self.spec.tier,
-                    guest_lease: self.guest_lease.clone(),
-                    sandbox,
-                    tools_this_turn: prompts
-                        .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
-                        .to_string(),
-                    builtin_tools: self.systools.book(),
-                    // 讨论席拿不到模块工具（with_modules = false），因此不需要包选择诊断；
-                    // 执行席的缺包判据在 runtime（与成员循环同一把尺子）。
-                    unavailable: std::collections::BTreeMap::new(),
-                    fence,
-                    // 讨论席不干活、拿不到模块工具，也就没有工具进程的注入项。
-                    module_env: Default::default(),
-                    runtime_path: None,
-                    runtime_roots: Vec::new(),
-                    // 讨论席的系统工具面由角色表发放，再按权限档位过滤。
-                    allowed,
-                    // 讨论席不干活：拿不到自己模块的工具（角色表的 module_tools）。
-                    with_modules: self.systools.allows_module_tools("discussant"),
-                    notes: tool_notes,
-                },
-                llm: Arc::clone(&self.llm),
-                log: Arc::clone(&self.log),
-                tools: Arc::clone(&self.tools),
-                vm: Arc::clone(&self.vm),
-                residents: Arc::new(crate::capabilities::residents::api::NoResidents),
-                // 讨论席也有沙箱与写工具：写后照样自动提交（基线过期时如实拒绝）。
-                workspace: Some(Arc::clone(&self.workspace)),
-                observations: crate::capabilities::tools::api::Observations::default(),
-                shell_live: None,
-                reply_seq: self.reply_seq,
-                line: Default::default(),
-                handlers: Vec::new(),
-            });
+            let member = Member::plain(&a.name, params, mode);
             members.push(member);
         }
         Ok(members)
