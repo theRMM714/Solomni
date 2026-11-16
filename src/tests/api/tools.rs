@@ -7,9 +7,9 @@ use super::super::doubles::InMemoryHistory;
 use super::super::doubles::{decl, model_draft, module_of, module_with_runtimes};
 use super::super::{ops_with, single_work};
 use super::support::spawn;
-use crate::capabilities::conductor::api::{
-    Acted, ActionCall, AgentInstance, Caller, SessionEvent, WorkMode,
-};
+use crate::capabilities::conductor::api::{Acted, ActionCall, Caller, SessionEvent};
+use crate::capabilities::work::api::{AgentInstance, WorkMode};
+
 use crate::capabilities::conductor::api::{ConductorHandle, Ops, Output};
 use std::sync::Arc;
 

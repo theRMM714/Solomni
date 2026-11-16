@@ -59,7 +59,7 @@
 
 | lint | 位置 | 为什么是取舍而不是缺陷 |
 | --- | --- | --- |
-| `too_many_arguments` | `src/capabilities/collab/service/collab.rs` 的 `start`、`src/capabilities/collab/service/slate.rs` 的 `restore`、`src/capabilities/session/domain/session.rs` 的 `new` / `restore`、`src/capabilities/conductor/service.rs` 的 `Conductor::new`、`src/capabilities/conductor/service/guest_job.rs` 的 `new` | 全是**组合根注入的构造函数**：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读 |
+| `too_many_arguments` | `src/capabilities/collab/service/collab.rs` 的 `start`、`src/capabilities/collab/service/slate.rs` 的 `restore`、`src/capabilities/session/domain/session.rs` 的 `new` / `restore`、`src/capabilities/conductor/service.rs` 的 `Conductor::new`、`src/capabilities/work/service/guest_job.rs` 的 `new` | 全是**组合根注入的构造函数**：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读 |
 | `too_many_arguments` | `src/capabilities/session/service.rs` 的 `core_operation`、`src/capabilities/collab/service/round.rs` 的 `converse_with`、`src/capabilities/collab/service/discussion.rs` 的 `turn_with`、`src/capabilities/collab/service/synthesis.rs` 的 `Execution::review`、`src/capabilities/collab/service/driver.rs` 的 `discussion_turn`、`src/capabilities/collab/service/collab.rs` 的 `judge_clear` / `review_nodes` | 同一组参数（身份 / 工具面 / 通道 / 消息 / 出口 / 对照表 / 重填说明）：它们必须一路透传，收口成参数对象只是把参数挪个地方（`turn_with` 只服务内存测试通道） |
 | `dead_code` | `src/capabilities/conductor/api.rs` 的 `SessionOps::create_work` / `exists` / `is_running` 与 `LogOps::warn` | **入站契约是发布给前端的接口面**：二进制 crate 里暂时没有生产调用点的接口方法会被 `dead_code` 误报（`is_running` 是运行态的**权威查询**——`SessionView.running` 只是事件台对账副本，最终一致；`warn` 供呈现层降级提示） |
 | `dead_code` | `src/capabilities/session/domain/events.rs` 的 `enum SessionEvent` | 事件词汇里的字段**不全在生产路径被读**（例如 `DiscussionDone` 的 `round` / `over_cap` 供呈现层做裁决确认页）；词汇就是线格式，字段随契约保留，删掉会让呈现侧拿不到事实 |

@@ -1,7 +1,8 @@
 //! 目的：一席工具面与单 agent 会话对象的装配——把能力面的事实拼成能跑的会话。
-//! 管：`SessionDeps` / `MemberSpec` / `SingleSpec` 三个参数对象，以及 `member_tools` / `single_session` 两个装配入口。
+//! 管：`SessionDeps` / `MemberSpec` / `SingleSpec` 三个参数对象，`member_tools` / `single_session` 两个装配入口，
+//!   以及 `Turn::build_single`（单 agent 会话的整场装配）。
 //! 不管：落盘（`session` 能力）、生成驱动（`conductor`）、纯派生规则（在 `turn::domain::assemble`）。
-//! 联动：`conductor` 的 `env` 取本席事实后转调这里；能力面与 shell 槽由 `Turn` 提供。
+//! 联动：`work` 的建工作两段经 `Turn::build_single` 装配会话；能力面与 shell 槽由 `Turn` 提供。
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -12,6 +13,7 @@ use crate::capabilities::llm::api::{Channel, Llm, ToolMode};
 use crate::capabilities::modules::api::Module;
 use crate::capabilities::packages::api::PackagePlan;
 use crate::capabilities::prompt::api::{Prompt, Segment};
+use crate::capabilities::registry::api::Registry;
 use crate::capabilities::residents::api::ResidentOps;
 use crate::capabilities::secrets::api::SecretOps;
 use crate::capabilities::session::api::{
@@ -20,6 +22,7 @@ use crate::capabilities::session::api::{
 };
 use crate::capabilities::tools::api::{ToolExec, Tools, tool_notes};
 use crate::capabilities::turn::domain::assemble::{face_tools, service_ops_of, serviced_tools};
+use crate::capabilities::turn::service::session::Turn;
 use crate::capabilities::vm::api::{GuestOs, Vm};
 use crate::capabilities::workspace::api::{Sandbox, Workspace};
 use crate::kernel::api::Tier;
@@ -233,4 +236,51 @@ pub fn single_session(
     s.set_model(a.model.clone().or_else(|| spec.core_model.clone()));
     s.set_compact_factory(Arc::clone(&deps.compact));
     (s, Vec::new())
+}
+
+/// 目的：单 agent 会话的整场装配——取本席事实、解析形态与预算，交给 `single_session`。
+/// 约束：不插入会话中心；插入与落盘由调用方（`work` 的提交段）统一做。
+impl Turn {
+    // 会话装配把这一场单 agent 会话一次说全；收口成参数对象只是把参数挪个地方。
+    // 这是有意的设计取舍（见 docs/testing/quality-isolation.md 的 allow 清单），不是没修。
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_single(
+        &self,
+        registry: &dyn Registry,
+        a: &AgentMeta,
+        modules: &[Module],
+        channel: Channel,
+        sb: &Sandbox,
+        unavailable: BTreeMap<String, Vec<String>>,
+        net: bool,
+        tier: Tier,
+        guest: Option<GuestOs>,
+        guest_lease: String,
+        host_plan: &PackagePlan,
+    ) -> (AgentSession, Vec<SessionEvent>) {
+        // 形态按登记处解析；通道已在前置判据里解析成功，这里不再有"没有通道"的分支。
+        let spec = SingleSpec {
+            agent: a,
+            member: MemberSpec {
+                modules,
+                sandbox: sb,
+                unavailable,
+                net,
+                mode: registry.tool_mode(a.model.as_deref()),
+                // 单 agent 工作：用户自己开的那场对话（不是任务链的节点）——身份是 solo。
+                role: "solo",
+                tier,
+                guest_lease,
+                plan: host_plan,
+                base_roots: &self.base_roots,
+                host_read_roots: crate::capabilities::env::api::host_read_roots(registry.app()),
+                shell: self.shell_slot(&sb.session),
+            },
+            channel,
+            guest,
+            context: self.context_budget(registry, a.model.as_deref()),
+            core_model: registry.core_model(),
+        };
+        single_session(&self.session_deps(), &spec)
+    }
 }

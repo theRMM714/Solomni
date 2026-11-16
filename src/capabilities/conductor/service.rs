@@ -4,11 +4,7 @@
 //! 联动：api 层经 ConductorHandle 把命令与事件交给这里；出站动作经 ports::ProxyHost。
 
 use crate::capabilities::builds::api::Builds;
-use crate::capabilities::conductor::api::{
-    AgentInstance, AgentSuggestion, ConfigAgent, ContinueView, FilesAgentRootView, FilesAgentView,
-    FilesRootsView, FilesView, RewindTarget, RuntimeReport, SessionConfig, SessionEdit,
-    SessionView, ThinkingOptionView, ThinkingView, TierChoices, WorkMode, WorkOpened, WorkSpec,
-};
+use crate::capabilities::conductor::api::RewindTarget;
 use crate::capabilities::llm::api::Llm;
 use crate::capabilities::packages::api::Packages;
 use crate::capabilities::provision::api::Provision;
@@ -29,40 +25,14 @@ use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::registry::api::Registry;
 use crate::capabilities::session::api::{AgentMeta, HistoryView, RunState, SessionMeta};
 use crate::capabilities::tools::api::{ToolExec, Tools};
+use crate::capabilities::work::api::{
+    AgentSuggestion, EditGuest, FilesView, GuestBoot, PreparedActivation, PreparedEdit,
+    PreparedWork, RuntimeReport, SessionConfig, SessionEdit, SessionView, TierChoices, Work,
+    WorkMode, WorkOpened, WorkSpec,
+};
 use compact::{CompactChoice, CompactRuntime};
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
-
-/// 目的：模块列表保序去重（一个 agent 内重复只留一份；跨 agent 的重叠是合法的共用）。
-pub(crate) fn dedup_modules(list: &[String]) -> Vec<String> {
-    let mut out: Vec<String> = Vec::with_capacity(list.len());
-    for m in list {
-        if !out.contains(m) {
-            out.push(m.clone());
-        }
-    }
-    out
-}
-
-/// 单模式的组合语义：多个 agent 的模块并成一个**临时组合**实例（去重、保序；模型取核心默认）。
-/// 人设取空：多份人设无法诚实合并，由用户在会话配置里补。
-fn merge_into_one(picked: &[AgentInstance], name: &str) -> AgentInstance {
-    let mut merged: Vec<String> = Vec::new();
-    for a in picked {
-        for id in &a.modules {
-            if !merged.contains(id) {
-                merged.push(id.clone());
-            }
-        }
-    }
-    AgentInstance {
-        name: name.to_string(),
-        transient: true,
-        modules: merged,
-        model: None,
-        chara: String::new(),
-    }
-}
 
 /// 目的：一次单 agent 生成的**准备结果**（核心线程上只算到这里，模型调用在工作线程上）。
 pub(crate) enum Prepared {
@@ -86,31 +56,10 @@ pub(crate) enum Prepared {
     NotSingle,
 }
 
-/// 目的：一次"启用会话"的两段——核心只判断与准备（可选的一段 guest 启动），慢的那一段在调用方线程上跑。
-/// 约束：两个变体都装箱——SessionView / GuestBoot 都比指针大得多，装箱让两个分支体量一致。
-pub(crate) enum PreparedActivation {
-    /// 会话正在生成：附着即可，不重建、不重启 guest。
-    Running(Box<SessionView>),
-    /// 可以启用：可选 guest 启动；提交时重建会话并解冻整棵子树。
-    Ready(Box<ReadyActivation>),
-}
-
-/// 目的：可启用会话的准备结果（装箱后仍要能逐个取字段）。
-pub(crate) struct ReadyActivation {
-    /// 目的：要启用的会话 id。
-    pub(crate) sid: String,
-    /// 目的：这一趟要跑的 guest 启动（没有 = 本机档）。
-    pub(crate) boot: Option<crate::capabilities::conductor::service::guest_job::GuestBoot>,
-    /// 目的：本次启动要占的租约（提交失败时据此收掉刚拉起的 guest）。
-    pub(crate) lease: Option<String>,
-}
-
 /// 目的：**应用服务**：持有注入的端口、能力面与会话中心；前端拿不到它（只拿 `conductor::api::Ops`）。
 ///  组合根在 `ConductorHandle::spawn` 里把它**移进核心自己的执行线程**——此后状态只被那一个线程碰，
 ///  所以这里不加任何锁（并发不变式见 ARCHITECTURE.md §一）。
 pub struct Conductor {
-    /// 产品根：虚拟根这类"装在项目内"的东西按它解析成绝对路径（`vm::resolve_guest`）。
-    root: std::path::PathBuf,
     /// 目的：登记处能力（**四份 yaml 的状态在它里面**）——conductor 只按 `Registry` 调用，看不见它的字段。
     pub(crate) registry: Box<dyn Registry>,
     /// 会话历史直连面（**不持它的端口**，R12）：造/读/写/删会话都走它。
@@ -119,16 +68,10 @@ pub struct Conductor {
     workspace: Arc<dyn Workspace + Send + Sync>,
     /// 虚拟机档用例面（**不持它的端口**，R12）：guest 生命周期与档位就绪检测走它。
     vm: Arc<dyn Vm + Send + Sync>,
-    /// 运行包能力（**不持它的端口**，R12）：包库、选型诊断与计划走它。
-    packages: Arc<dyn Packages + Send + Sync>,
-    /// 依赖补齐面（**不持它的端口**，R12）：虚拟根清单与装没装齐从它读。
-    provision: Arc<dyn Provision + Send + Sync>,
     /// 目的：模块能力（**不持它的端口**，R12）——模块清单事实的唯一上游。
     modules: Arc<dyn Modules + Send + Sync>,
     /// 目的：构建能力面（**不持它的端口**，R12）——创建会话前补编声明了 `build:` 的模块。
     builds: Arc<dyn Builds + Send + Sync>,
-    /// llm 用例面：按解析出来的通道造收发句柄 + 信封的无歧义修复（通道的**解析**在登记处能力）。
-    llm: Arc<dyn Llm + Send + Sync>,
     /// 压缩通道工厂：全局设置只在这里对账；会话在压缩触发时现取（不刷新会话）。
     compact: Arc<CompactRuntime>,
     /// 工具执行面（**不持它的端口**，R12）：跑外部/内置工具、释放围栏授权都走它。
@@ -150,6 +93,9 @@ pub struct Conductor {
     systools: Arc<dyn Tools>,
     /// 目的：回合状态与会话本体——在世会话表、运行态与创建占位、裁决队、每会话的 shell 活进程槽，以及一席的装配（在 `turn`）。
     pub(crate) turn: crate::capabilities::turn::api::Turn,
+    /// 目的：工作与会话配置的用例面（层 9）——建工作 / 改配 / 视图 / 报告 / guest 起停都经它。
+    ///   本能力只做命令队列、协作链推进、回档与代理工具族；work 用例的方法原样转发。
+    pub(crate) work: Work,
 }
 
 /// 目的：在世会话形态（`turn` 的状态类型），本能力各用例只经它放取会话。
@@ -158,22 +104,16 @@ pub(crate) use crate::capabilities::turn::api::Session;
 pub(crate) use crate::capabilities::turn::api::Turn;
 
 mod action;
-mod activation;
 pub(crate) mod ask_user;
 mod compact;
 mod env;
 mod flow;
-pub(crate) mod guest_job;
 mod history;
-mod suggest;
 #[cfg(test)]
 pub(crate) use history::{ReleaseByLease, SessionDelete};
 pub mod proxy;
 mod rewind;
 mod turn;
-mod work;
-#[cfg(test)]
-pub(crate) use work::needs_guest_packages_rebuild;
 impl Conductor {
     /// 组合根专用：main 负责创建适配器并注入；conductor 不自建任何具体实现。
     // 组合根注入的构造函数：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读。
@@ -217,17 +157,28 @@ impl Conductor {
             Arc::clone(&modules),
             Arc::clone(&packages),
         );
+        // work 用例面与 conductor 共享同一批能力面（Arc 克隆，不新建实现）。
+        let work = Work::new(
+            root.clone(),
+            Arc::clone(&history),
+            Arc::clone(&workspace),
+            Arc::clone(&vm),
+            Arc::clone(&packages),
+            Arc::clone(&provision),
+            Arc::clone(&modules),
+            Arc::clone(&llm),
+            Arc::clone(&tools),
+            Arc::clone(&prompt),
+            Arc::clone(&systools),
+            Arc::clone(&log),
+        );
         let c = Conductor {
-            root,
             registry,
             history,
             workspace,
             vm,
-            packages,
-            provision,
             modules,
             builds,
-            llm,
             compact,
             tools,
             log,
@@ -238,6 +189,7 @@ impl Conductor {
             prompt,
             systools,
             turn,
+            work,
         };
         c.sync_compact_choice();
         c
@@ -619,54 +571,300 @@ impl Conductor {
 /// 继续被拦下时的提醒（单 agent 会话：该轮到用户发言）。
 const NEED_USER: &str = "最后一条是 AI 发言：部分供应商不允许连续 AI 发言；请先发言再继续。";
 
-/// 会话是否「已经开过」（流水里有内容）：agent 名单与形态据此冻结。配置记录与回档记录不算内容。
-fn session_started(events: &[serde_json::Value]) -> bool {
-    events
-        .iter()
-        .any(|ev| match ev.get("type").and_then(|t| t.as_str()) {
-            Some("config") | Some("rewind") => false,
-            Some("transcript") => ev
-                .get("lines")
-                .and_then(|l| l.as_array())
-                .map(|l| !l.is_empty())
-                .unwrap_or(false),
-            Some(_) => true,
-            None => false,
-        })
-}
+/// 目的：把 `work` 的用例按原签名转发出去——呈现层、动作分发与测试只认 conductor 的入口。
+/// 管：字段搬运（turn / registry / probe）；不管：用例本身（在 `work`）。
+impl Conductor {
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub(crate) fn activation_build_request(
+        &self,
+        sid: &str,
+    ) -> Result<(Vec<String>, crate::kernel::api::Tier, Option<String>), String> {
+        self.work.activation_build_request(sid)
+    }
 
-/// 工作形态 → 会话元信息里的标识。
-fn mode_str(mode: WorkMode) -> &'static str {
-    match mode {
-        WorkMode::Single => "single",
-        WorkMode::Collab => "collab",
-        WorkMode::Proxy => "proxy",
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub(crate) fn prepare_activation(&self, sid: &str) -> Result<PreparedActivation, String> {
+        self.work
+            .prepare_activation(&self.turn, self.registry.as_ref(), &self.probe, sid)
     }
-}
 
-/// 工作名即将来的落盘目录名：非空、不含路径分隔符与 Windows 非法字符、不是保留名。
-fn validate_work_name(name: &str) -> Result<(), String> {
-    let n = name.trim();
-    if n.is_empty() {
-        return Err("工作名不能为空".to_string());
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub(crate) fn commit_activation(
+        &mut self,
+        prepared: PreparedActivation,
+    ) -> Result<SessionView, String> {
+        self.work.commit_activation(
+            &mut self.turn,
+            self.registry.as_ref(),
+            self.probe.as_ref(),
+            prepared,
+        )
     }
-    if name != n {
-        return Err("工作名首尾不能有空白".to_string());
+
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub fn session_config(&self, sid: &str) -> Result<SessionConfig, String> {
+        self.work
+            .session_config(&self.turn, self.registry.as_ref(), self.probe.as_ref(), sid)
     }
-    if n == "." || n == ".." {
-        return Err("工作名非法".to_string());
+
+    #[cfg(test)]
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub fn edit_session(&mut self, sid: &str, edit: SessionEdit) -> Result<(), String> {
+        self.work.edit_session(
+            &mut self.turn,
+            self.registry.as_ref(),
+            &self.probe,
+            sid,
+            edit,
+        )
     }
-    const BAD: [char; 9] = ['\\', '/', ':', '*', '?', '"', '<', '>', '|'];
-    if n.chars().any(|c| BAD.contains(&c) || c.is_control()) {
-        return Err("工作名不能包含 \\ / : * ? \" < > | 或控制字符".to_string());
+
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub(crate) fn prepare_edit(
+        &mut self,
+        sid: &str,
+        edit: SessionEdit,
+    ) -> Result<(PreparedEdit, Option<EditGuest>), String> {
+        self.work.prepare_edit(
+            &mut self.turn,
+            self.registry.as_ref(),
+            &self.probe,
+            sid,
+            edit,
+        )
     }
-    let upper = n.to_ascii_uppercase();
-    let reserved_device = ["CON", "PRN", "AUX", "NUL"].contains(&upper.as_str())
-        || (upper.len() == 4
-            && (upper.starts_with("COM") || upper.starts_with("LPT"))
-            && upper.as_bytes()[3].is_ascii_digit());
-    if reserved_device {
-        return Err("工作名是系统保留名".to_string());
+
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub(crate) fn set_permission_profile(
+        &mut self,
+        sid: &str,
+        profile: crate::capabilities::permission::api::ProfileId,
+    ) -> Result<(), String> {
+        self.work
+            .set_permission_profile(&mut self.turn, self.registry.as_ref(), sid, profile)
     }
-    Ok(())
+
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub(crate) fn commit_edit(&mut self, prepared: PreparedEdit) -> Result<(), String> {
+        self.work
+            .commit_edit(&mut self.turn, self.registry.as_ref(), prepared)
+    }
+
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub fn unique_work_name(&self, base: &str, fallback: &str) -> String {
+        self.work.unique_work_name(&self.turn, base, fallback)
+    }
+
+    #[cfg(test)]
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub fn create_work(&mut self, spec: WorkSpec) -> Result<WorkOpened, String> {
+        self.work
+            .create_work(&mut self.turn, self.registry.as_ref(), &self.probe, spec)
+    }
+
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub(crate) fn prepare_work(
+        &mut self,
+        spec: WorkSpec,
+        parent: Option<&str>,
+    ) -> Result<(PreparedWork, Option<GuestBoot>), String> {
+        self.work.prepare_work(
+            &mut self.turn,
+            self.registry.as_ref(),
+            &self.probe,
+            spec,
+            parent,
+        )
+    }
+
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub(crate) fn commit_work(&mut self, prepared: PreparedWork) -> Result<WorkOpened, String> {
+        self.work.commit_work(
+            &mut self.turn,
+            self.registry.as_ref(),
+            self.probe.as_ref(),
+            prepared,
+        )
+    }
+
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub(crate) fn abort_work(&mut self, prepared: PreparedWork) {
+        self.work.abort_work(&mut self.turn, prepared)
+    }
+
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub(crate) fn prepare_guest_boot(&self, sid: &str) -> Result<Option<GuestBoot>, String> {
+        self.work
+            .prepare_guest_boot(&self.turn, self.registry.as_ref(), &self.probe, sid)
+    }
+
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    #[cfg(test)]
+    pub(crate) fn llm_opts(&self, want_stream: bool) -> crate::capabilities::llm::api::LlmOpts {
+        self.work.llm_opts(self.registry.as_ref(), want_stream)
+    }
+
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub(crate) fn llm_opts_for(
+        &self,
+        sid: &str,
+        want_stream: bool,
+    ) -> Result<crate::capabilities::llm::api::LlmOpts, String> {
+        self.work
+            .llm_opts_for(self.registry.as_ref(), sid, want_stream)
+    }
+
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub(crate) fn thinking_fragment_for(
+        &self,
+        sid: &str,
+    ) -> Result<Option<std::sync::Arc<serde_json::Value>>, String> {
+        self.work.thinking_fragment_for(self.registry.as_ref(), sid)
+    }
+
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub(crate) fn set_thinking(&mut self, sid: &str, level: &str) -> Result<(), String> {
+        self.work
+            .set_thinking(&mut self.turn, self.registry.as_ref(), sid, level)
+    }
+
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub(crate) fn set_context_freshness(&mut self, sid: &str, on: bool) -> Result<(), String> {
+        self.work
+            .set_context_freshness(&mut self.turn, self.registry.as_ref(), sid, on)
+    }
+
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub fn runtime_report(&self, tier: crate::kernel::api::Tier) -> RuntimeReport {
+        self.work
+            .runtime_report(self.registry.as_ref(), self.probe.as_ref(), tier)
+    }
+
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub fn tier_choices(&self) -> TierChoices {
+        self.work
+            .tier_choices(self.registry.as_ref(), self.probe.as_ref())
+    }
+
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub(crate) fn host_plan_now(
+        &self,
+        modules: &[Module],
+    ) -> crate::capabilities::packages::api::PackagePlan {
+        self.work.host_plan_now(self.probe.as_ref(), modules)
+    }
+
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub fn unavailable_modules_now(&self) -> BTreeMap<String, Vec<String>> {
+        self.work.unavailable_modules_now(self.probe.as_ref())
+    }
+
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub fn suggest_models(
+        &self,
+        task: &str,
+        mode: WorkMode,
+    ) -> Result<(Vec<AgentSuggestion>, Vec<SessionEvent>), String> {
+        self.work.suggest_models(self.registry.as_ref(), task, mode)
+    }
+
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub fn session_views(&self, history: &[HistoryView]) -> Vec<SessionView> {
+        self.work.session_views(
+            &self.turn,
+            self.registry.as_ref(),
+            self.probe.as_ref(),
+            history,
+        )
+    }
+
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub fn session_exists(&self, name: &str) -> bool {
+        self.work.session_exists(&self.turn, name)
+    }
+
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub fn work_upload(
+        &mut self,
+        sid: &str,
+        name: &str,
+        bytes: &[u8],
+        overwrite: bool,
+    ) -> Result<bool, String> {
+        self.work
+            .work_upload(&self.turn, sid, name, bytes, overwrite)
+    }
+
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub fn files_view(&self, sid: &str) -> Result<FilesView, String> {
+        self.work
+            .files_view(&self.turn, self.registry.as_ref(), self.probe.as_ref(), sid)
+    }
+
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub fn work_log(
+        &self,
+        sid: &str,
+        limit: usize,
+        before: Option<u64>,
+    ) -> Result<crate::capabilities::workspace::api::WorkLog, String> {
+        self.work.work_log(sid, limit, before)
+    }
+
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub fn work_commit_view(
+        &self,
+        sid: &str,
+        commit: u64,
+    ) -> Result<crate::capabilities::workspace::api::CommitDetail, String> {
+        self.work.work_commit_view(sid, commit)
+    }
+
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub fn work_commit_file(
+        &self,
+        sid: &str,
+        commit: u64,
+        path: &str,
+    ) -> Result<crate::capabilities::workspace::api::CommitFileView, String> {
+        self.work.work_commit_file(sid, commit, path)
+    }
+
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    pub(crate) fn restore_work_commit(
+        &mut self,
+        sid: &str,
+        commit: u64,
+        expect_head: u64,
+        force: bool,
+    ) -> Result<(Option<u64>, Vec<SessionEvent>), String> {
+        self.work
+            .restore_work_commit(&mut self.turn, sid, commit, expect_head, force)
+    }
+
+    /// 目的：薄转发到 `work` 的同名方法（conductor 只做应用编排）。
+    #[cfg(test)]
+    pub(crate) fn create_proxy_with_facts(
+        &mut self,
+        name: &str,
+        granted_at: i64,
+        tier: crate::kernel::api::Tier,
+        guest: Option<&str>,
+        profile: crate::capabilities::permission::api::ProfileId,
+        workspace: Option<crate::capabilities::session::api::WorkspaceBinding>,
+    ) -> Result<(String, Vec<SessionEvent>), String> {
+        self.work.create_proxy_with_facts(
+            &mut self.turn,
+            self.registry.as_ref(),
+            self.probe.as_ref(),
+            crate::capabilities::work::api::ProxySeed {
+                name,
+                granted_at,
+                tier,
+                guest,
+                profile,
+                workspace,
+            },
+        )
+    }
 }

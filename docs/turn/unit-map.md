@@ -21,6 +21,6 @@
 | `src/capabilities/turn/service/admit.rs` | 会话准入：`admit`（落盘 + 进在世表）、`ensure_session`（不在世就重建再放入）、`dispatch_gate`（终态会话拒绝派发）、`resume_subtree`（把停掉的子树拉回运行态） |
 | `src/capabilities/turn/service/facts.rs` | 一席事实的取用：沙箱清单、权限面、外部工作区授权粒度、工具面（`member_tools`）与上下文预算；只经各能力 `api` 取，不持端口 |
 | `src/capabilities/turn/service/rebuild.rs` | 从落盘重建会话：外部工作区绑定复检（`workspace_binding_of`）、三形态重建（`rebuild_session`）、转录回放（`replay_reads` / `replay_dialogue`）与代理会话装配（`build_proxy`） |
-| `src/capabilities/turn/service/assemble.rs` | 一席的装配：`SessionDeps`（能力面）、`MemberSpec` / `SingleSpec`（取来的本席事实）、`member_tools`（工具面）与 `single_session`（单 agent 会话对象） |
+| `src/capabilities/turn/service/assemble.rs` | 一席的装配：`SessionDeps`（能力面）、`MemberSpec` / `SingleSpec`（取来的本席事实）、`member_tools`（工具面）、`single_session`（单 agent 会话对象）与 `Turn::build_single`（把一席事实装配成会话；`work` 的建工作两段经它） |
 | `src/capabilities/turn/domain.rs` | 纯派生分区声明 |
 | `src/capabilities/turn/domain/assemble.rs` | 装配的纯函数：`face_tools`（发放名单过滤）、`service_ops_of`（就绪服务 → 工具）、`serviced_tools`（服务工具与提示行注入模块表） |

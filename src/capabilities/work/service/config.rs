@@ -9,18 +9,24 @@ use crate::capabilities::session::api::{
     config_owner_of, flat_modules, guest_scope, subtree_of, tree_meta, tree_meta_with, work_root,
 };
 
-impl Conductor {
+impl Work {
     /// 目的：配置视图：把「能改什么、现在是什么、缺什么」如实给出（每次读取都重扫模块清单与包库）。
-    pub fn session_config(&self, sid: &str) -> Result<SessionConfig, String> {
+    pub fn session_config(
+        &self,
+        turn: &Turn,
+        registry: &dyn Registry,
+        probe: &dyn HostProbe,
+        sid: &str,
+    ) -> Result<SessionConfig, String> {
         let (meta, events) = self.history_open(sid)?;
         let tier = meta.exec.tier;
         // 机器能力（与某条会话无关）：界面据此决定虚拟机档能不能**选**；虚拟根是会话级，另行校验。
-        let qemu = self.qemu_path();
-        let share_tool = self.share_tool_path();
+        let qemu = self.qemu_path(registry);
+        let share_tool = self.share_tool_path(registry);
         let inputs = crate::capabilities::vm::api::VmInputs {
             qemu: qemu.as_deref(),
             share_tool: share_tool.as_deref(),
-            probe: self.probe.as_ref(),
+            probe,
         };
         let cap = crate::capabilities::vm::api::vm_capability(&inputs);
         let vm_available = cap.ready();
@@ -33,7 +39,7 @@ impl Conductor {
             &meta.exec,
             qemu.as_deref(),
             share_tool.as_deref(),
-            self.probe.as_ref(),
+            probe,
         );
         Ok(SessionConfig {
             sid: meta.name.clone(),
@@ -53,13 +59,14 @@ impl Conductor {
             tier_locked: meta.parent.is_some(),
             guest: meta.exec.guest.clone(),
             guests: self.provision.guest_bases()?,
-            net: crate::capabilities::env::api::network_allowed(self.registry.app()),
-            permission: self.permission_view(&meta)?,
+            net: crate::capabilities::env::api::network_allowed(registry.app()),
+            permission: self.permission_view(turn, registry, &meta)?,
             thinking: self.thinking_view_for_root(
+                registry,
                 &work_root(self.history.as_ref(), sid).unwrap_or_else(|_| sid.to_string()),
             ),
             pins: meta.exec.pins.clone(),
-            runtime: self.runtime_report_for(&meta.exec),
+            runtime: self.runtime_report_for(registry, probe, &meta.exec),
             runtimes_dir: crate::kernel::api::slash(&self.packages.runtimes_dir()),
             tier_ready: readiness.ready(),
             tier_missing: readiness.missing().iter().map(|s| s.to_string()).collect(),
@@ -74,22 +81,33 @@ impl Conductor {
     /// 目的：测试用的同步改配入口（准备 → 停/起 guest → 提交，全在当前线程）。
     /// 约束：生产走句柄的两段（`prepare_edit` / `commit_edit`）。
     #[cfg(test)]
-    pub fn edit_session(&mut self, sid: &str, edit: SessionEdit) -> Result<(), String> {
-        let (prepared, job) = self.prepare_edit(sid, edit)?;
+    pub fn edit_session(
+        &mut self,
+        turn: &mut Turn,
+        registry: &dyn Registry,
+        probe: &Arc<dyn HostProbe + Send + Sync>,
+        sid: &str,
+        edit: SessionEdit,
+    ) -> Result<(), String> {
+        let (prepared, job) = self.prepare_edit(turn, registry, probe, sid, edit)?;
         if let Some(job) = job {
             // 失败什么都不改：meta 还没落盘，现有会话原样还在。
             job.run()?;
         }
-        self.commit_edit(prepared)
+        self.commit_edit(turn, registry, prepared)
     }
 
     /// 目的：改配的第一段（核心，毫秒级）——全部校验 + 出计划，并给出"要等 guest"的那一段（可能没有）。
     /// 返回：准备结果 + 可选的那段活（切入 / 留在虚拟机档要起或重建；切回本机档要停旧的）。
     pub(crate) fn prepare_edit(
         &mut self,
+        turn: &mut Turn,
+        registry: &dyn Registry,
+        probe: &Arc<dyn HostProbe + Send + Sync>,
         sid: &str,
         edit: SessionEdit,
     ) -> Result<(PreparedEdit, Option<EditGuest>), String> {
+        let host: &dyn HostProbe = probe.as_ref();
         // 改配要重建整棵子树的档位/guest 关联：任一在跑都拒绝（先停再改）。
         // 权限是根级动作：切档要求整棵 work tree 空闲，避免子会话用旧快照继续跑。
         let guard = if edit.permission.is_some() {
@@ -98,7 +116,7 @@ impl Conductor {
             sid.to_string()
         };
         for s in subtree_of(self.history.as_ref(), &guard) {
-            if self.turn.is_running(&s) {
+            if turn.is_running(&s) {
                 return Err(Turn::running_refusal(&s));
             }
         }
@@ -147,14 +165,14 @@ impl Conductor {
                 }
             }
             if !a.model.is_empty() {
-                if !self.registry.has_model(&a.model) {
+                if !registry.has_model(&a.model) {
                     return Err(format!("无此模型：{}", a.model));
                 }
-                self.registry.resolve(&a.model)?;
+                registry.resolve(&a.model)?;
             }
             metas.push(AgentMeta {
                 name: a.name.clone(),
-                transient: !self.registry.has_agent(&a.name),
+                transient: !registry.has_agent(&a.name),
                 modules: dedup_modules(&a.modules),
                 model: if a.model.is_empty() {
                     None
@@ -202,14 +220,14 @@ impl Conductor {
         if staying_vm {
             // 留在 vm 档：只校验用户这次填的基础根（填错路径就是填错路径），
             // 不拿"本机能不能提供 vm 档"去拦一条已经存在的会话。
-            let qemu = self.qemu_path();
-            let share_tool = self.share_tool_path();
+            let qemu = self.qemu_path(registry);
+            let share_tool = self.share_tool_path(registry);
             let base_item = crate::capabilities::vm::api::tier_readiness(
                 &self.root,
                 &spec,
                 qemu.as_deref(),
                 share_tool.as_deref(),
-                self.probe.as_ref(),
+                host,
             )
             .requirements
             .into_iter()
@@ -222,9 +240,9 @@ impl Conductor {
         } else if let Some(why) = crate::capabilities::vm::api::tier_refusal(
             &self.root,
             &spec,
-            self.qemu_path().as_deref(),
-            self.share_tool_path().as_deref(),
-            self.probe.as_ref(),
+            self.qemu_path(registry).as_deref(),
+            self.share_tool_path(registry).as_deref(),
+            host,
         ) {
             return Err(why);
         }
@@ -238,24 +256,23 @@ impl Conductor {
         // 入口按**目标环境**判：虚拟机档在 guest 里跑（guest 的 os），本机档在宿主；
         // 跨平台时还要看文件形式——宿主编出来的产物（如 Windows 的 .exe）在 linux guest 里跑不了。
         let guest =
-            crate::capabilities::vm::api::guest_os_of(&self.root, self.probe.as_ref(), &spec)
-                .map(|g| g.as_str());
+            crate::capabilities::vm::api::guest_os_of(&self.root, host, &spec).map(|g| g.as_str());
         let target_os = guest.unwrap_or(std::env::consts::OS);
         let missing: Vec<crate::capabilities::vm::api::MissingEntry> =
             crate::capabilities::vm::api::missing_entries_for(&session_modules, target_os, &|p| {
-                self.probe.is_executable(p)
+                host.is_executable(p)
                     && (target_os == std::env::consts::OS
                         || crate::capabilities::vm::api::runs_on_target(p, target_os))
             });
         crate::capabilities::vm::api::plan_for_spec(
             &self.root,
-            self.probe.as_ref(),
+            host,
             &self.packages.library(),
             &spec,
             &session_modules,
             &missing,
             spec.guest.as_deref(),
-            crate::capabilities::env::api::network_allowed(self.registry.app()),
+            crate::capabilities::env::api::network_allowed(registry.app()),
         )?;
 
         let mut new_meta = meta.clone();
@@ -265,7 +282,7 @@ impl Conductor {
         if let Some(p) = &edit.permission {
             if meta.parent.is_none() {
                 // 根：只更新 ceiling；子会话的 narrowing 原样保留，出计划/装配时再求交。
-                self.permissions_for(&meta)?.apply_root(p)?;
+                turn.permissions_for(registry, &meta)?.apply_root(p)?;
                 new_meta.sandbox.ceiling = Some(p.clone());
                 new_meta.sandbox.narrowing = None;
             } else {
@@ -273,7 +290,8 @@ impl Conductor {
                 let parent = self
                     .history
                     .meta(meta.parent.as_deref().unwrap_or_default())?;
-                self.permissions_for(&parent)?.apply_narrowing(p)?;
+                turn.permissions_for(registry, &parent)?
+                    .apply_narrowing(p)?;
                 new_meta.sandbox.narrowing = Some(p.clone());
                 new_meta.sandbox.ceiling = None;
             }
@@ -314,9 +332,9 @@ impl Conductor {
             let mut extras: Vec<&SessionMeta> = vec![&new_meta];
             extras.extend(new_children.iter());
             let tree = tree_meta_with(self.history.as_ref(), &scope_meta, &extras)?;
-            let plan = self.plan_for_meta_with(&tree, &roster)?;
+            let plan = self.plan_for_meta_with(registry, host, &tree, &roster)?;
             self.log.info(
-                "conductor::edit_session",
+                "work::edit_session",
                 &format!(
                     "sid={}；{}",
                     sid,
@@ -336,9 +354,10 @@ impl Conductor {
         let job = if needs_guest {
             let tree = tree.as_ref().expect("is_vm 已准备 tree");
             let tree_plan = tree_plan.as_ref().expect("is_vm 已准备 plan");
-            let sandboxes = self.sandboxes(tree, &roster)?;
+            let sandboxes = turn.sandboxes(registry, host, tree, &roster)?;
             Some(EditGuest::Boot(Box::new(self.guest_boot(
-                tree,
+                registry,
+                probe,
                 tree_plan,
                 &sandboxes,
                 was_vm,
@@ -367,13 +386,15 @@ impl Conductor {
     /// 约束：根级动作；整棵 work tree 有会话在生成时拒绝；切换在下一次权限判定生效。
     pub(crate) fn set_permission_profile(
         &mut self,
+        turn: &mut Turn,
+        registry: &dyn Registry,
         sid: &str,
         profile: crate::capabilities::permission::api::ProfileId,
     ) -> Result<(), String> {
         let (meta, _) = self.history_open(sid)?;
         let guard = work_root(self.history.as_ref(), sid).unwrap_or_else(|_| sid.to_string());
         for s in subtree_of(self.history.as_ref(), &guard) {
-            if self.turn.is_running(&s) {
+            if turn.is_running(&s) {
                 return Err(Turn::running_refusal(&s));
             }
         }
@@ -388,12 +409,13 @@ impl Conductor {
         layer.decisions = None;
         layer.tools.clear();
         if meta.parent.is_none() {
-            self.permissions_for(&meta)?.apply_root(&layer)?;
+            turn.permissions_for(registry, &meta)?.apply_root(&layer)?;
         } else {
             let parent = self
                 .history
                 .meta(meta.parent.as_deref().unwrap_or_default())?;
-            self.permissions_for(&parent)?.apply_narrowing(&layer)?;
+            turn.permissions_for(registry, &parent)?
+                .apply_narrowing(&layer)?;
         }
         let mut new_meta = meta.clone();
         if meta.parent.is_none() {
@@ -405,18 +427,23 @@ impl Conductor {
         }
         let changed = subtree_of(self.history.as_ref(), sid);
         self.history.save_meta(&new_meta)?;
-        self.record_config(sid, &new_meta);
+        self.record_config(turn, registry, sid, &new_meta);
         for s in &changed {
             self.release_fences(s);
         }
         for s in changed {
-            self.turn.take(&s);
+            turn.take(&s);
         }
         Ok(())
     }
 
     /// 目的：改配的第二段（核心）——写回 meta、记旁路配置、丢掉内存会话。
-    pub(crate) fn commit_edit(&mut self, prepared: PreparedEdit) -> Result<(), String> {
+    pub(crate) fn commit_edit(
+        &mut self,
+        turn: &mut Turn,
+        registry: &dyn Registry,
+        prepared: PreparedEdit,
+    ) -> Result<(), String> {
         let PreparedEdit {
             sid,
             new_meta,
@@ -432,11 +459,11 @@ impl Conductor {
         for child in &new_children {
             self.release_fences(&child.name);
         }
-        self.record_config(&sid, &new_meta);
+        self.record_config(turn, registry, &sid, &new_meta);
         // 内存里那份是按旧配置装的：丢掉主会话与整棵子树，下一次访问按新配置从转录重建。
-        self.turn.take(&sid);
+        turn.take(&sid);
         for child in &new_children {
-            self.turn.take(&child.name);
+            turn.take(&child.name);
         }
         Ok(())
     }
@@ -446,26 +473,32 @@ impl Conductor {
     pub(crate) fn release_fences(&self, lease: &str) {
         if let Err(e) = self.tools.release_by_lease(lease) {
             self.log.warn(
-                "conductor::release_fences",
+                "work::release_fences",
                 &format!("按会话撤销围栏授权未完成（{}）：{}", lease, e),
             );
         }
     }
 
     /// 目的：追加一条旁路配置记录：只作呈现与审计（不进模型上下文，回放与状态派生都跳过它）。
-    pub(crate) fn record_config(&self, sid: &str, meta: &SessionMeta) {
+    pub(crate) fn record_config(
+        &self,
+        turn: &Turn,
+        registry: &dyn Registry,
+        sid: &str,
+        meta: &SessionMeta,
+    ) {
         let ev = serde_json::json!({
             "type": "config",
             "ts": crate::kernel::api::unix_seconds(),
             "mode": meta.mode,
             "tier": meta.exec.tier.as_str(),
             "guest": meta.exec.guest,
-            "net": crate::capabilities::env::api::network_allowed(self.registry.app()),
+            "net": crate::capabilities::env::api::network_allowed(registry.app()),
             "pins": meta.exec.pins,
             "thinking": meta.thinking,
             "context_freshness": meta.context_freshness,
             "permission": serde_json::to_value(&meta.sandbox).unwrap_or(serde_json::Value::Null),
-            "permission_effective": self.permissions_for(meta).ok().map(|p| serde_json::json!({
+            "permission_effective": turn.permissions_for(registry, meta).ok().map(|p| serde_json::json!({
                 "profile": p.profile,
                 "reach": p.reach,
                 "decisions": p.decisions,
@@ -479,10 +512,8 @@ impl Conductor {
             })).collect::<Vec<_>>(),
         });
         if let Err(e) = self.history.append(sid, &[ev]) {
-            self.log.warn(
-                "conductor::record_config",
-                &format!("配置记录落盘失败：{}", e),
-            );
+            self.log
+                .warn("work::record_config", &format!("配置记录落盘失败：{}", e));
         }
     }
 }

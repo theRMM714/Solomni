@@ -42,6 +42,7 @@ mod toolchains;
 mod tools;
 mod turn;
 mod vm;
+mod work;
 mod workspace;
 
 /// 目的：测试用的**产品根**——当前工作目录（测试在仓库根跑，虚拟根就解析到 `.vm/guest/<名>` 这条相对路径上）。
@@ -162,11 +163,11 @@ pub(crate) fn ops_with_vm(
 pub(crate) fn single_work(
     name: &str,
     modules: &[&str],
-) -> crate::capabilities::conductor::api::WorkSpec {
-    crate::capabilities::conductor::api::WorkSpec {
+) -> crate::capabilities::work::api::WorkSpec {
+    crate::capabilities::work::api::WorkSpec {
         name: name.to_string(),
-        mode: crate::capabilities::conductor::api::WorkMode::Single,
-        agents: vec![crate::capabilities::conductor::api::AgentInstance {
+        mode: crate::capabilities::work::api::WorkMode::Single,
+        agents: vec![crate::capabilities::work::api::AgentInstance {
             name: modules[0].to_string(),
             transient: true,
             modules: modules.iter().map(|s| s.to_string()).collect(),

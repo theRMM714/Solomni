@@ -14,7 +14,7 @@
 - 管：**准入与派发闸**——`admit` 先落盘再进在世表，`ensure_session` 不在世就按转录重建，`dispatch_gate` 按运行态拒绝派发，`resume_subtree` 把停掉的子树拉回运行态。
 - 管：**按需重建**——`rebuild_session` 按落盘的事件与元数据重建单 agent / 协作 / 代理三种形态，`workspace_binding_of` 做加载复检，`replay_dialogue` / `replay_reads` 还原对话与读事实，`build_proxy` 装配代理会话。
 - 管：**一席事实的取用**——沙箱清单、权限面、外部工作区授权粒度、覆盖在 `Turn::member_tools` 上的工具面与上下文预算（`src/capabilities/turn/service/facts.rs`）；事实都经各能力的 `api` 取。
-- 管：**一席的装配**——`member_tools` 把取来的本席事实装配成 `MemberTools`（工具面 + 执行者 + 提示行 + 隐私注入项），`single_session` 造单 agent 会话对象；纯派生在 `src/capabilities/turn/domain/assemble.rs`。
+- 管：**一席的装配**——`member_tools` 把取来的本席事实装配成 `MemberTools`（工具面 + 执行者 + 提示行 + 隐私注入项），`single_session` 造单 agent 会话对象，`Turn::build_single` 是 `work` 建工作两段的装配入口；纯派生在 `src/capabilities/turn/domain/assemble.rs`。
 - 不管：会话对象（`session` 的 `AgentSession`、`collab` 的 `CollabSession`）怎么长、怎么跑——本单元只放取、标记与重建。
 - 不管：生成驱动——谁在什么时候取走会话、生成完怎么放回，由调用方（`conductor` 的用例）决定；本单元不驱动生成、不发事件。
 - 不管：登记处本身（`registry`）——工具模式、上下文预算与核心默认模型经调用方传进来的 `&dyn Registry` 现取，`Turn` 不持有它。
@@ -42,7 +42,7 @@
 
 - `src/capabilities/conductor/service.rs` → `turn` 字段是唯一读写口（访问器在 `Turn` 上，conductor 只转调）：增删访问器必须同改调用点与 [`unit-map.md`](unit-map.md)。
 - `src/capabilities/turn/service.rs` / `session.rs` → `Turn::new` 的能力面与 `Conductor::new` 的注入列表一一对应：加一处必须同改另一处，且 `session_deps` 要一并给出。
-- `src/capabilities/turn/service/assemble.rs` → 装配顺序、条件与错误文案是行为契约（等价于原 `src/capabilities/conductor/service/env.rs`）：改判据必须同改 `env.rs` 的薄入口与 `src/tests/tools/shell.rs`、`src/tests/conductor.rs` 的断言。
+- `src/capabilities/turn/service/assemble.rs` → 装配顺序、条件与错误文案是行为契约（`build_single` 的形参变化必须同改 `src/capabilities/work/service/create.rs`）：改判据必须同改 `src/tests/tools/shell.rs`、`src/tests/conductor.rs` 的断言。
 - `src/capabilities/turn/service/facts.rs` → 沙箱 / 权限 / 工作区授权 / 工具面 / 预算的取数判据只有这一处：`src/capabilities/conductor/service/env.rs` 的三个薄入口与建会话、回档、代理三条调用链都跟着它；改取数必须同改 `src/tests/workspace/resolve.rs`、`src/tests/conductor.rs` 的断言。
 - `src/capabilities/turn/service/rebuild.rs` → 重建与代理装配的行为契约（与实时逐条一致）：改一处必须同改 `src/tests/api/compaction.rs`、`src/tests/collab/cards.rs`、`src/tests/session/rewind.rs`、`src/tests/conductor/proxy.rs` 的断言。
 - `src/capabilities/turn/service/admit.rs` → 准入、按需重建、派发闸与子树续跑的唯一实现：`conductor` 的启用、派发与协作推进都经它，改语义必须同改 `src/tests/turn.rs` 的两条用例。

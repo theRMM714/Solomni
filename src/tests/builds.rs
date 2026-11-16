@@ -422,7 +422,9 @@ fn scanned_modules(root: &std::path::Path) -> Vec<Module> {
 
 #[test]
 fn creating_a_session_builds_the_missing_entry_first() {
-    use crate::capabilities::conductor::api::{ConductorHandle, SessionOps, WorkMode};
+    use crate::capabilities::conductor::api::{ConductorHandle, SessionOps};
+    use crate::capabilities::work::api::WorkMode;
+
     use crate::kernel::detail::process::ProcTools;
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
@@ -464,7 +466,9 @@ fn creating_a_session_builds_the_missing_entry_first() {
 
 #[test]
 fn creating_a_session_reports_the_build_failure_and_creates_nothing() {
-    use crate::capabilities::conductor::api::{ConductorHandle, SessionOps, WorkMode};
+    use crate::capabilities::conductor::api::{ConductorHandle, SessionOps};
+    use crate::capabilities::work::api::WorkMode;
+
     use crate::kernel::detail::process::ProcTools;
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
@@ -567,7 +571,9 @@ fn ensure_rebuilds_when_the_target_changed() {
 #[test]
 fn activating_a_session_ensures_the_target_build() {
     use crate::capabilities::builds::api::{Builds, Built};
-    use crate::capabilities::conductor::api::{ConductorHandle, SessionOps, WorkMode};
+    use crate::capabilities::conductor::api::{ConductorHandle, SessionOps};
+    use crate::capabilities::work::api::WorkMode;
+
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
