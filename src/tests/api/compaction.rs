@@ -765,7 +765,9 @@ fn compaction_survives_a_restart_and_rewinds_back_through_the_point() {
     core.abort_running(&sid);
 
     // ② 回档跨越压缩点：会话在表里且压缩点 > 目标 → `rewind` 走重建，摘要不再生效。
-    core.ensure_session(&sid).expect("把重建结果装回表里");
+    core.turn
+        .ensure_session(&sid, core.registry.as_ref(), core.probe.as_ref())
+        .expect("把重建结果装回表里");
     core.rewind(
         &sid,
         crate::capabilities::conductor::api::RewindTarget::Delete(next),

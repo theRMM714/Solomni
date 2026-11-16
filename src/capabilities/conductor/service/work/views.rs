@@ -319,7 +319,7 @@ impl Conductor {
             .running_iter()
             .find(|s| tree.iter().any(|x| x == *s))
         {
-            return Err(Self::running_refusal(running));
+            return Err(Turn::running_refusal(running));
         }
         let current = self.workspace.work_head(&work)?.unwrap_or(0);
         if current != expect_head {

@@ -266,7 +266,8 @@ pub(crate) fn external_workspace_vm_session_boots_with_two_stable_mounts() {
         "绑定写进根会话 meta（规范化绝对路径）"
     );
     let binding = core
-        .workspace_binding_of(&meta)
+        .turn
+        .workspace_binding_of(&meta, core.probe.as_ref())
         .expect("加载复检要过（绑定没被手改）");
     assert_eq!(
         binding,
@@ -287,7 +288,7 @@ pub(crate) fn external_workspace_vm_session_boots_with_two_stable_mounts() {
 #[cfg(windows)]
 #[test]
 pub(crate) fn workspace_policy_splits_network_roots_by_tier() {
-    use crate::capabilities::conductor::service::workspace_root::policy;
+    use crate::capabilities::workspace::api::policy;
     use crate::kernel::api::Tier;
     use std::path::Path;
     use std::time::{Duration, Instant};
@@ -312,7 +313,7 @@ pub(crate) fn workspace_policy_splits_network_roots_by_tier() {
 /// 目的：加载复检在这台机器上也能跑：越界拒绝、产品外的目录放行、暂时不可达不挡（不因平台差异漏判）。
 #[test]
 pub(crate) fn workspace_recheck_rejects_bounds_and_allows_unreachable_roots() {
-    use crate::capabilities::conductor::service::workspace_root::{product_root, recheck};
+    use crate::capabilities::workspace::api::{product_root, recheck};
     use crate::kernel::api::Tier;
 
     let root = crate::tests::scratch("recheck-cross");
@@ -335,7 +336,7 @@ pub(crate) fn workspace_recheck_rejects_bounds_and_allows_unreachable_roots() {
 #[cfg(windows)]
 #[test]
 pub(crate) fn loaded_binding_is_rechecked_against_the_tier() {
-    use crate::capabilities::conductor::service::workspace_root::{product_root, recheck};
+    use crate::capabilities::workspace::api::{product_root, recheck};
     use crate::kernel::api::Tier;
     use std::path::Path;
 
@@ -1090,7 +1091,9 @@ pub(crate) fn read_facts_rebuild_identically_to_live() {
 
     // 开关打开会丢掉内存会话：下一次访问按转录重建（回放必须与实时同一份台账）。
     core.set_context_freshness(&sid, true).expect("开开关");
-    core.ensure_session(&sid).expect("重建");
+    core.turn
+        .ensure_session(&sid, core.registry.as_ref(), core.probe.as_ref())
+        .expect("重建");
     let rebuilt = core.single_reads(&sid).expect("重建后的单 agent 会话");
     assert_eq!(rebuilt, live, "回放的读事实必须与实时逐条一致");
 }

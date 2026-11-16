@@ -5,13 +5,9 @@
 
 use crate::capabilities::conductor::domain::proxy as d;
 use crate::capabilities::conductor::ports::ProxyHost;
-use crate::capabilities::llm::api::Channel;
 use crate::capabilities::tools::api::{ToolBook, ToolOutcome, arg_fault_text};
 use std::collections::BTreeMap;
 use std::sync::Arc;
-
-/// 目的：代理会话自己的私有沙箱目录名（与 work/、children/ 同级，写进保留名表）。
-pub(crate) const PROXY_PRIVATE_DIR: &str = ".proxy";
 
 /// 目的：代理工具的执行器：持有宿主端口、工具声明书、回执文案与幂等账本。
 pub struct ProxyTools {
@@ -269,13 +265,11 @@ fn json_ok<T: serde::Serialize>(v: &T) -> ToolOutcome {
     }
 }
 
-use super::{Conductor, Session, validate_work_name};
+use super::{Conductor, Session, Turn, validate_work_name};
 use crate::capabilities::conductor::api::ConductorHandle;
 use crate::capabilities::session::api::subtree_of;
-use crate::capabilities::session::api::{
-    AgentSession, Delegation, RunState, SessionEvent, SessionMeta, SessionParams,
-};
-use crate::capabilities::workspace::api::Sandbox;
+use crate::capabilities::session::api::{Delegation, RunState, SessionEvent, SessionMeta};
+use crate::capabilities::turn::api::{PROXY_PRIVATE_DIR, SPEAKER};
 use crate::kernel::api::ExecSpec;
 
 fn tool_mode_str(m: crate::capabilities::llm::api::ToolMode) -> String {
@@ -491,7 +485,7 @@ impl Conductor {
                 // 「关闭已完成或已停止的会话」：子树里还有在生成的就整条拒绝。
                 for s in subtree_of(self.history.as_ref(), sid) {
                     if self.turn.is_running(&s) {
-                        return Err(Self::running_refusal(&s));
+                        return Err(Turn::running_refusal(&s));
                     }
                 }
                 if meta.run != RunState::Closed {
@@ -559,7 +553,7 @@ impl Conductor {
             return Err(why);
         }
         // 先解析核心通道：没有模型就不建（工作区都还没有，失败什么都不留）。
-        let channel = self.registry.core_channel()?;
+        self.registry.core_channel()?;
         let meta = SessionMeta {
             context_freshness: false,
             name: name.to_string(),
@@ -598,7 +592,7 @@ impl Conductor {
                 &format!("工作区初始导入失败：{}", e),
             );
         }
-        let mut session = self.build_proxy_with(&meta, &channel)?;
+        let mut session = self.turn.build_proxy(&meta, self.registry.as_ref())?;
         let mut events = Vec::new();
         // 授予事实既是 meta 的 `delegation`（可重建），也留一条**可回放记录**：
         // 打开这条会话的人应当看得见"决定权是整块交出去的"，而不是只能去读 meta。
@@ -608,76 +602,6 @@ impl Conductor {
         self.turn.put(name.to_string(), Session::Single(session));
         self.record_events(name, &mut events);
         Ok((name.to_string(), events))
-    }
-
-    /// 目的：装配一个代理会话对象（创建与重建**共用同一处**，两处不各拼一遍）。
-    pub(crate) fn build_proxy(&self, meta: &SessionMeta) -> Result<AgentSession, String> {
-        let channel = self.registry.core_channel()?;
-        self.build_proxy_with(meta, &channel)
-    }
-
-    fn build_proxy_with(
-        &self,
-        meta: &SessionMeta,
-        channel: &Channel,
-    ) -> Result<AgentSession, String> {
-        self.workspace
-            .prepare(&meta.name, &[PROXY_PRIVATE_DIR.to_string()])?;
-        let roots = self
-            .workspace
-            .roots(&meta.name, &[PROXY_PRIVATE_DIR.to_string()])?;
-        let private = roots
-            .agents
-            .get(PROXY_PRIVATE_DIR)
-            .cloned()
-            .ok_or_else(|| "代理会话没有私有沙箱路径".to_string())?;
-        let shared_grant = self.workspace_grant(meta)?;
-        let sb = Sandbox {
-            work_name: meta.name.clone(),
-            session: meta.name.clone(),
-            agent: d::SPEAKER.to_string(),
-            shared: roots.shared.clone(),
-            private,
-            modules: BTreeMap::new(),
-            modules_with_userdata: std::collections::BTreeSet::new(),
-            permissions: self.permissions_for(meta)?,
-            // 代理发言席自己住在宿主上（文件工具也跑在宿主），不需要 guest 翻译；
-            // 但视图盘打开时仍要同一个视图写法，否则环境块渲染视图路径、寻址却按宿主根判越界。
-            path_codec: crate::kernel::api::view_codec(),
-            shared_grant,
-        };
-        let tool_mode = self.registry.tool_mode(None);
-        let chat = self.llm.core_channel(channel);
-        // 身份是**角色提示词**（core_proxy），不是某个 agent 的模块能力包：
-        // 机制 / 环境 / 调用约定仍与 agent 身份同一份口径（见 workspace 的 render_system）。
-        let mut params = SessionParams::from_workspace(d::SPEAKER, &sb, &[], "proxy", "core_proxy");
-        params.role_system = Some(crate::capabilities::prompt::api::Segment::ProxySystem);
-        let tools = self.tools_env(
-            &[],
-            &sb,
-            BTreeMap::new(),
-            crate::capabilities::env::api::network_allowed(self.registry.app()),
-            tool_mode,
-            "core_proxy",
-            crate::kernel::api::Tier::Host,
-            String::new(),
-            &crate::capabilities::packages::api::PackagePlan::default(),
-        );
-        let mut s = AgentSession::new(
-            d::SPEAKER,
-            params,
-            chat,
-            Some(tools),
-            self.prompt
-                .text(crate::capabilities::prompt::api::Segment::CompactPrompt)
-                .to_string(),
-        );
-        let (window, percent, keep_percent) = self.context_budget(None);
-        s.set_context_budget(window, percent, keep_percent);
-        s.set_context_freshness(meta.context_freshness);
-        s.set_model(self.registry.core_model());
-        s.set_compact_factory(self.turn.compact_factory());
-        Ok(s)
     }
 }
 
@@ -717,7 +641,7 @@ impl ProxyHost for ProxyBridge {
         let caller = crate::capabilities::conductor::api::Caller::Role {
             role: "core_proxy".to_string(),
             work: spec.parent.clone().unwrap_or_default(),
-            agent: d::SPEAKER.to_string(),
+            agent: SPEAKER.to_string(),
         };
         handle.create_session_call(&caller, spec)
     }
@@ -785,7 +709,7 @@ impl ProxyHost for ProxyBridge {
         let caller = crate::capabilities::conductor::api::Caller::Role {
             role: "core_proxy".to_string(),
             work: session.to_string(),
-            agent: d::SPEAKER.to_string(),
+            agent: SPEAKER.to_string(),
         };
         let state = handle.control_session_call(&caller, session, action, reason)?;
         Ok(d::ControlState {

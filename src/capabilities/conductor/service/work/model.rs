@@ -160,7 +160,7 @@ impl Conductor {
         let root = work_root(self.history.as_ref(), sid)?;
         for s in subtree_of(self.history.as_ref(), &root) {
             if self.turn.is_running(&s) {
-                return Err(Self::running_refusal(&s));
+                return Err(Turn::running_refusal(&s));
             }
         }
         if !level.is_empty() {
@@ -211,7 +211,7 @@ impl Conductor {
         let root = work_root(self.history.as_ref(), sid)?;
         for s in subtree_of(self.history.as_ref(), &root) {
             if self.turn.is_running(&s) {
-                return Err(Self::running_refusal(&s));
+                return Err(Turn::running_refusal(&s));
             }
         }
         let mut meta = self.history.meta(&root)?;

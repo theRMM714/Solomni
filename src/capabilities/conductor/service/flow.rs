@@ -374,7 +374,8 @@ impl Conductor {
         self.workspace
             .prepare(&work, std::slice::from_ref(&a.name))?;
         self.history.create(&meta)?;
-        self.ensure_session(&child)?;
+        self.turn
+            .ensure_session(&child, self.registry.as_ref(), self.probe.as_ref())?;
         Ok(child)
     }
 
@@ -573,7 +574,8 @@ impl Conductor {
         // 生成中的会话不在表里（对象在工作线程手里）：**队不跟着走**——工具级确认正是"生成中"问的，
         // 所以这一刻照样取得到（否则呈现层在生成中取不到卡，就答不了那一问）。
         if !self.turn.is_running(sid) {
-            self.ensure_session(sid)?;
+            self.turn
+                .ensure_session(sid, self.registry.as_ref(), self.probe.as_ref())?;
         }
         Ok(self.turn.desk().peek_gate(sid).and_then(|d| d.queue()))
     }
@@ -632,9 +634,10 @@ impl Conductor {
             return Err("需求不能为空".to_string());
         }
         if self.turn.is_running(sid) {
-            return Err(Self::running_refusal(sid));
+            return Err(Turn::running_refusal(sid));
         }
-        self.ensure_session(sid)?;
+        self.turn
+            .ensure_session(sid, self.registry.as_ref(), self.probe.as_ref())?;
         // @ 引用按本会话沙箱改写（与首次提交需求同一口径）。
         let text = match self.turn.session(sid) {
             Some(Session::Collab(c)) => c.retask_text(text),
@@ -689,7 +692,8 @@ impl Conductor {
 
     /// 目的：撤回某 agent 的「同意」：转录追加一条撤回行并提醒（模型/用户都看得到）。
     pub fn withdraw_agree(&mut self, sid: &str, agent: &str) -> Result<Vec<SessionEvent>, String> {
-        self.ensure_session(sid)?;
+        self.turn
+            .ensure_session(sid, self.registry.as_ref(), self.probe.as_ref())?;
         let mut events = Vec::new();
         match self.turn.session_mut(sid) {
             Some(Session::Collab(c)) => c.withdraw_agree(agent, &mut |e| events.push(e)),

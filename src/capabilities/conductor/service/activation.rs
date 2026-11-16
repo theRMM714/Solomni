@@ -7,21 +7,6 @@
 use super::*;
 
 impl Conductor {
-    /// 目的：历史会话转为活动会话（跨重启续跑/回档的前提）：按转录重建，状态全部派生。
-    pub(crate) fn ensure_session(&mut self, sid: &str) -> Result<(), String> {
-        if self.turn.holds(sid) {
-            return Ok(());
-        }
-        // 会话对象在工作线程上（生成中）：**不能**从盘上再建一份（会变成两个实例）。
-        if self.turn.is_running(sid) {
-            return Err(Self::running_refusal(sid));
-        }
-        let (meta, events) = self.history_open(sid)?;
-        let rebuilt = self.rebuild_session(&meta, &events)?;
-        self.turn.put(sid.to_string(), rebuilt);
-        Ok(())
-    }
-
     /// 目的：启用前补编所需的目标与模块清单（只读事实；构建在调用方线程上跑）。
     pub(crate) fn activation_build_request(
         &self,
@@ -73,7 +58,10 @@ impl Conductor {
                 let super::ReadyActivation { sid, boot, lease } = *ready;
                 // guest 启动已在调用方线程完成；这里只把它的句柄丢掉。
                 drop(boot);
-                if let Err(e) = self.ensure_session(&sid) {
+                if let Err(e) =
+                    self.turn
+                        .ensure_session(&sid, self.registry.as_ref(), self.probe.as_ref())
+                {
                     if let Some(l) = &lease
                         && !self.turn.is_running(&sid)
                     {
@@ -81,7 +69,7 @@ impl Conductor {
                     }
                     return Err(e);
                 }
-                if let Err(e) = self.resume_subtree(&sid) {
+                if let Err(e) = self.turn.resume_subtree(&sid) {
                     if let Some(l) = &lease {
                         self.vm.guest_stop(l);
                     }

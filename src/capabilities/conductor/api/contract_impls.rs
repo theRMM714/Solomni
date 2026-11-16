@@ -57,7 +57,7 @@ impl SessionOps for ConductorHandle {
         // 单 agent / 代理补一条「继续」用户行作为这一轮的起因；协作不需要用户发言，从断点推进。
         let resumed = self.call({
             let s = sid.to_string();
-            move |core| core.resume_subtree(&s)
+            move |core| core.turn.resume_subtree(&s)
         })?;
         if resumed {
             let mode = self

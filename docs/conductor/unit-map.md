@@ -22,7 +22,7 @@
 | `src/capabilities/conductor/api/generation/compact.rs` | 手动压缩：让模型自己压，队列只占「取 / 交」，压不动如实说 |
 | `src/capabilities/conductor/api/generation/collab.rs` | 协作泵：开始讨论 / 回答 / 继续，与主线程握手（`AskReq` / `MemberTurn`），事件边产边送 |
 | `src/capabilities/conductor/api/contract_impls.rs` | 各能力入站契约的队列代理：每个方法克隆入参 → 进命令队列 → 取回结果（呈现层因此只持 `Ops`，拿不到 `Conductor`） |
-| `src/capabilities/conductor/service.rs` | 会话中心：命令队列、派发闸（`dispatch_gate`）与注入依赖；会话本体（`Turn`）、在世表 / 运行态 / 裁决队 / shell 槽都在 `turn` 里，本文件只有薄转发 |
+| `src/capabilities/conductor/service.rs` | 会话中心：命令队列、取放会话的两段（`take_single` / `take_collab`）、裁决作废与注入依赖；会话本体（`Turn`）、在世表 / 运行态 / 裁决队 / shell 槽、派发闸与准入都在 `turn` 里，本文件只有薄转发 |
 | `src/capabilities/conductor/service/action.rs` | 动作的核心实现：把规整后的建会话载荷变成一条会话 |
 | `src/capabilities/conductor/service/work.rs` | 工作方法族入口：建工作的两段结果、改配准备结果、模块声明的能力表、运行包重建判据 |
 | `src/capabilities/conductor/service/work/report.rs` | 运行包报告与档位视图：模块声明的能力、包库可用版本、缺失清单、权限视图；平台 / 库判定与计划派生已搬去 `src/capabilities/vm/service/plan.rs`，本文件只留 `plan_for_meta_with` 取会话与名册后转调 |
@@ -31,18 +31,17 @@
 | `src/capabilities/conductor/service/work/host.rs` | 宿主工具路径：QEMU / virtiofsd / smbd 与共享工具选择（用 kernel 平台事实 `IS_WINDOWS`）；网络开关与宿主只读根已搬去 `env` 的 `api` |
 | `src/capabilities/conductor/service/work/views.rs` | 会话与文件视图：在世会话 × 历史的并集、继续判据、文件视图 / 上传 / 日志 / 提交恢复 |
 | `src/capabilities/conductor/service/work/create.rs` | 建工作两段与 guest 启动：占名、备工作区、装通道、起 guest、失败撤销 |
-| `src/capabilities/conductor/service/workspace_root.rs` | 外部工作区根的策略：按档位判网络路径 / 共享根 / 文件系统根 / UTF-8 与产品根的互包含（文本 + 落点身份），并做目录与可写探测；创建走 `resolve`，加载复检走 `recheck` |
 | `src/capabilities/conductor/service/turn.rs` | 单 agent 的回合收发：工具形态刷新、生成前准备、节点派发准备、同步生成入口、继续 |
 | `src/capabilities/conductor/service/suggest.rs` | 拟名单入口：按本次需求推荐 agent 名单（队列分发与行解析） |
-| `src/capabilities/conductor/service/activation.rs` | 会话启用与激活两段：按转录重建为活动会话、构建请求、准备与提交 |
+| `src/capabilities/conductor/service/activation.rs` | 会话启用与激活两段：构建请求、准备与提交；按转录重建与准入转调 `turn`（`ensure_session` / `resume_subtree`） |
 | `src/capabilities/conductor/service/compact.rs` | 压缩通道工厂：全局设置指向的压缩模型解析与更新 |
 | `src/capabilities/conductor/service/flow.rs` | 协作流水线推进与协作动作：链推进、节点派发与子会话、协作步（`take_*` / `put_*`）、裁决卡动作与改需求 |
-| `src/capabilities/conductor/service/rewind.rs` | 跨会话回档编排：按同一回合 id 收窗整棵子树 |
-| `src/capabilities/conductor/service/env.rs` | 取本席事实后转调 `turn` 装配：`env` 派生沙箱清单 / 权限面、`session` 取 guest 作用域与本席通道，再调 `turn::api::member_tools` / `single_session`；上下文预算与核心默认模型在这里算好放进 `SingleSpec`（不落盘） |
-| `src/capabilities/conductor/service/history.rs` | 历史列出 / 打开 / 删除与事件收编（落盘策略、手柄与会话树派生归 `session`）；会话加载时按 meta 的档位复检外部工作区绑定 |
+| `src/capabilities/conductor/service/rewind.rs` | 跨会话回档编排：按同一回合 id 收窗整棵子树、写回档标记与 `restore_session`；重建本体在 `turn::service::rebuild` |
+| `src/capabilities/conductor/service/env.rs` | 薄转发与单会话装配：guest 诊断准备、沙箱 / 权限 / 预算三个薄入口（事实在 `turn::service::facts`）、`build_single` 取 guest 作用域与本席通道后调 `turn::api::single_session`（不落盘） |
+| `src/capabilities/conductor/service/history.rs` | 历史列出 / 打开 / 删除与事件收编（落盘策略、手柄与会话树派生归 `session`）；运行态改写（`set_subtree_run`）与删除钩子也在这里 |
 | `src/capabilities/conductor/service/guest_job.rs` | 起停 guest 的两段式：核心准备参数（`GuestBoot` / `GuestStop`），调用方线程执行 |
 | `src/capabilities/conductor/service/ask_user.rs` | 工具层提问端口的会话侧实现：推一条问题并阻塞等一个选项 id |
 | `src/capabilities/conductor/ports.rs` | 出站端口：核心代理工具要做的外部动作（`ProxyHost`） |
 | `src/capabilities/conductor/domain/action.rs` | 动作回包的纯逻辑：探测结论 → 响应 JSON |
 | `src/capabilities/conductor/domain/proxy.rs` | 核心代理工具的纯逻辑：入参解析、授权校验、载荷规整与回执拼装 |
-| `src/capabilities/conductor/service/proxy.rs` | 代理工具执行面与队列桥 `ProxyBridge`（把动作交给核心线程） |
+| `src/capabilities/conductor/service/proxy.rs` | 代理工具执行面与队列桥 `ProxyBridge`（把动作交给核心线程）；代理会话的装配在 `turn::service::rebuild`（`build_proxy`） |

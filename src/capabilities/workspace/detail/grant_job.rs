@@ -1,6 +1,6 @@
 //! 目的：外部工作区绑定的一次性机器级只读授权——会话建好之后在后台付，不挡住创建。
 //! 管：后台线程的按根去重、进度行、状态文件 .home/workspace-grants.json 与成本样本回写。
-//! 不管：ACL 怎么读写（内核 confine）、绑定路径合法性（workspace_root）、成本簿格式（estimate）。
+//! 不管：ACL 怎么读写（内核 confine）、绑定路径合法性（`service/roots.rs`）、成本簿格式（estimate）。
 //! 联动：conductor 的提交段调 ensure_in_background；--fence-revoke 经内核撤这份授权。
 
 use std::collections::HashSet;

@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
 use crate::capabilities::collab::api::CollabSession;
-use crate::capabilities::session::api::{AgentSession, Decisions, ShellSlot, decisions};
+use crate::capabilities::session::api::{AgentSession, Decisions, Gates, ShellSlot, decisions};
 use crate::kernel::api::SessionId;
 
 /// 目的：一份在世会话的两种形态：单 agent（含代理会话与子会话）与协作会话。
@@ -122,6 +122,12 @@ impl TurnState {
     /// 目的：全会话的裁决通道表。
     pub fn desk(&self) -> &Arc<dyn Decisions> {
         &self.desk
+    }
+
+    /// 目的：一份会话的裁决闸：已开队直接取，未开队按 `issued` 现开一条。
+    /// 参数：`issued` = 会话落盘里的裁决代号；同一条队重复取到的是同一把闸。
+    pub fn desk_for(&self, sid: &str, issued: u64) -> Arc<dyn Gates> {
+        self.desk.gate(sid, issued)
     }
 
     /// 目的：读会话最近一次 shell 的快照；没跑过就是 None（状态栏据此决定要不要出 chip）。

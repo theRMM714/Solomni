@@ -25,6 +25,7 @@ mod facade;
 mod history;
 mod lifecycle;
 mod resolve;
+pub(crate) mod roots;
 mod sync;
 pub(crate) mod work_tools;
 

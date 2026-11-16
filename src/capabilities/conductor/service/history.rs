@@ -4,7 +4,7 @@
 //! 联动：所有方法族的事件都经 record_events 落盘。
 //!   本方法族只碰 history / log / sessions / vm 这几个字段。
 use super::*;
-use crate::capabilities::session::api::{guest_scope, subtree_of, tree_order, work_root};
+use crate::capabilities::session::api::{guest_scope, subtree_of, tree_order};
 
 /// 目的：按租约撤围栏授权的回调——由核心把 `ToolExec::release_by_lease` 包成闭包注入，测试可直接换成记录型替身。
 pub(crate) type ReleaseByLease = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
@@ -212,7 +212,7 @@ impl Conductor {
         let subtree = subtree_of(self.history.as_ref(), name);
         for sid in &subtree {
             if self.turn.is_running(sid) {
-                return Err(Self::running_refusal(sid));
+                return Err(Turn::running_refusal(sid));
             }
         }
         // 围栏授权按会话租约持有：撤权放到收尾层、删完目录之后在后台做（不占核心线程与用户等待路径）。
@@ -263,33 +263,6 @@ impl Conductor {
         })
     }
 
-    /// 目的：一个会话沿父链继承的工作区根（仅外部绑定；`None` = 产品内布局）。
-    /// 约束：与 `work_root_of` 同一走向：自己带绑定就用它，否则看工作根的 meta。
-    ///   取到根后按它所在会话的档位复检（见 workspace_root）——meta 是磁盘上的文本，手改也要过同一套策略。
-    pub(crate) fn workspace_binding_of(
-        &self,
-        meta: &SessionMeta,
-    ) -> Result<Option<std::path::PathBuf>, String> {
-        let (root, tier) = match &meta.workspace {
-            Some(binding) => (binding.root.clone(), meta.exec.tier),
-            None => match &meta.parent {
-                None => return Ok(None),
-                Some(p) => {
-                    let top = work_root(self.history.as_ref(), p)?;
-                    let top_meta = self.history.meta(&top)?;
-                    match top_meta.workspace {
-                        Some(binding) => (binding.root, top_meta.exec.tier),
-                        None => return Ok(None),
-                    }
-                }
-            },
-        };
-        let probe = self.probe.as_ref();
-        let product = super::workspace_root::product_root(&self.root, probe);
-        super::workspace_root::recheck(&root, tier, &product, probe)?;
-        Ok(Some(root))
-    }
-
     /// 目的：把整棵子树（含自己）的运行态落成同一个值：**停止**先整棵冻上，**继续**再整棵解开。
     ///  停止时顺序不能反——先冻态再取消生成，被停会话收尾写的那条"这一轮结束"才会被闸门拒掉。
     pub(crate) fn set_subtree_run(
@@ -306,41 +279,6 @@ impl Conductor {
             }
         }
         Ok(tree)
-    }
-
-    /// 目的：解除整棵子树的「已停止」（停止的逆操作）；返回是否确实解除了至少一个。
-    ///  子树里只要有**已关闭**的就整条拒绝——关闭是终态，不能被「继续」拉回来。
-    pub(crate) fn resume_subtree(&self, name: &str) -> Result<bool, String> {
-        use crate::capabilities::session::api::RunState;
-        let mut any = false;
-        for sid in subtree_of(self.history.as_ref(), name) {
-            let mut meta = self.history.meta(&sid)?;
-            match meta.run {
-                RunState::Closed => {
-                    return Err(format!("会话 {} 已关闭：终态，不能再继续", sid));
-                }
-                RunState::Stopped => {
-                    meta.run = RunState::Active;
-                    self.history.save_meta(&meta)?;
-                    any = true;
-                }
-                RunState::Active => {}
-            }
-        }
-        Ok(any)
-    }
-
-    /// 目的：**运行态闸门**：派发 / 唤醒前过它，停止与关闭都拒绝。
-    ///  拿不到 meta（系统会话等未落盘）就当正常运行——运行态是落盘事实，
-    ///  不存在的会话自有别的检查兜底（这里不替它报"无此会话"）。
-    pub(crate) fn dispatch_gate(&self, sid: &str) -> Result<(), String> {
-        match self.history.meta(sid) {
-            Ok(meta) => match meta.dispatch_refusal() {
-                Some(e) => Err(e),
-                None => Ok(()),
-            },
-            Err(_) => Ok(()),
-        }
     }
 
     /// 目的：派发目标的形态 + 这一次派发放不放行（放行 = Ok(mode)）。

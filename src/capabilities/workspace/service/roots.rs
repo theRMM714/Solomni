@@ -2,14 +2,15 @@
 //! 管：网络路径与档位的匹配（本机档拒绝网络工作区）、根的形态（不能是文件系统根 / UNC 共享根）、虚拟机档要求
 //!   UTF-8、与产品根的互包含（文本 + 落点身份），以及目录与可写性。
 //! 不管：会话 meta 的读写（在 session）；锁（在 workspace 能力）；挂载计划（在 guest_job）。
-//! 联动：创建走 resolve，加载复检走 recheck；两者共用一个 policy，手改 meta 也过不去；规范化、元数据与可写探测都走 `HostProbe`。
+//! 联动：`conductor` 建会话走 `resolve`、加载复检走 `recheck`（都经 `workspace::api`）；两者共用一个 `policy`，手改 meta
+//!   也过不去；规范化、元数据与可写探测都走 `HostProbe`。
 
 use crate::kernel::api::Tier;
 use crate::kernel::ports::HostProbe;
 use std::path::{Path, PathBuf};
 
 /// 目的：把产品根规范化成判定用的写法（规范化失败时退回原样）。
-pub(crate) fn product_root(root: &Path, probe: &dyn HostProbe) -> PathBuf {
+pub fn product_root(root: &Path, probe: &dyn HostProbe) -> PathBuf {
     crate::kernel::api::native(
         &probe
             .canonicalize(root)
@@ -20,7 +21,7 @@ pub(crate) fn product_root(root: &Path, probe: &dyn HostProbe) -> PathBuf {
 /// 目的：不需要 IO 的那部分策略——绝对路径、档位与网络路径、根的形态、虚拟机档的编码。
 /// 约束：本机档的网络路径在 canonicalize **之前**就拒绝——不为了报一条错去连一次共享。canonicalize 之后
 ///   再跑一遍：目录联接与映射盘的真身要到那时才露出来。
-pub(crate) fn policy(path: &Path, tier: Tier) -> Result<(), String> {
+pub fn policy(path: &Path, tier: Tier) -> Result<(), String> {
     if !path.is_absolute() {
         return Err(format!("工作区必须是绝对路径：{}", path.display()));
     }
@@ -51,7 +52,7 @@ pub(crate) fn policy(path: &Path, tier: Tier) -> Result<(), String> {
 
 /// 目的：创建时的完整校验——策略 → 存在且是目录 → 与产品根互不包含 → 可写。
 /// 返回：规范化后的根（native 写法，绑定与投影都按它存）。
-pub(crate) fn resolve(
+pub fn resolve(
     raw: &Path,
     tier: Tier,
     product: &Path,
@@ -81,7 +82,7 @@ pub(crate) fn resolve(
 /// 目的：加载复检——会话记录里的绑定按 meta 的档位重跑策略。
 /// 约束：目录暂时不可达不算策略违例（会话仍能打开，工作区操作按真实原因报错）；越界、网络路径进本机档、
 ///   共享根、非 UTF-8 都如实拒绝——否则手改 meta 就能绕过创建时的拦截。
-pub(crate) fn recheck(
+pub fn recheck(
     root: &Path,
     tier: Tier,
     product: &Path,
