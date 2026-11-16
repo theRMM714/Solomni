@@ -26,6 +26,12 @@ const die = (m) => {
   console.error("[突变] " + m);
   process.exit(2);
 };
+// 分片：k/n，把同一范围的变异体均分到 n 个 job 上并行（单个范围已超过 GitHub 的 6 小时 job 上限）。
+const shard = process.env.MUTATION_SHARD || "1/1";
+if (!/^\d+\/\d+$/.test(shard)) die("MUTATION_SHARD 只认 k/n 形式（如 2/4），收到：" + shard);
+const [shardIndex, shardCount] = shard.split("/").map(Number);
+if (!(shardCount >= 1 && shardIndex >= 1 && shardIndex <= shardCount)) die("MUTATION_SHARD 越界：" + shard);
+const sharded = shardCount > 1;
 if (!fs.existsSync(SCOPE_FILE)) die("缺范围文件：" + path.relative(ROOT, SCOPE_FILE));
 const def = JSON.parse(fs.readFileSync(SCOPE_FILE, "utf8"));
 let files;
@@ -44,12 +50,14 @@ if (!files.length) die("范围为空：" + scope + (capabilityName ? ":" + capab
 
 const args = ["mutants", "--in-place", "--timeout", timeout, "--build-timeout", String(Number(timeout) * 2)];
 for (const f of files) args.push("-f", f);
+if (sharded) args.push("--shard", shard);
 // 只跑 bin（不把 T3/T4 真进程用例拖进每个变异体）+ 串行（便于逐条变异单独复现）。
 args.push("--", "--bin", "solomni", "--", "--test-threads=1");
 
-const logFile = path.join(LOG_DIR, "mutation-" + scope + (capabilityName ? "-" + capabilityName : "") + ".log");
+const base = "mutation-" + scope + (capabilityName ? "-" + capabilityName : "");
+const logFile = path.join(LOG_DIR, base + (sharded ? "-shard-" + shardIndex + "-of-" + shardCount : "") + ".log");
 const fd = fs.openSync(logFile, "w");
-process.stdout.write("[突变] 范围 " + scope + (capabilityName ? ":" + capabilityName : "") + "，文件 " + files.length + " 个\n");
+process.stdout.write("[突变] 范围 " + scope + (capabilityName ? ":" + capabilityName : "") + "，分片 " + shard + "，文件 " + files.length + " 个\n");
 process.stdout.write("[突变] 命令：cargo " + args.join(" ") + "\n");
 const t0 = Date.now();
 // 与门禁同一份环境解析：借用系统工具链可以，但 CARGO_HOME/临时目录仍钉在项目内（不许写它的 home）。
@@ -70,6 +78,8 @@ const status =
 const report = {
   scope,
   capability: capabilityName || null,
+  shard,
+  shards: shardCount,
   files,
   timeoutSecs: Number(timeout),
   exitCode,

@@ -69,16 +69,26 @@ jobs:
           '
 
   mutation:
-    name: 突变测试
+    # 分片并行：weekly 单跑超过 GitHub 的 6 小时 job 上限（实测 6h 未完成、被取消），
+    # 按 cargo-mutants 的 --shard k/n 把同一批变异体均分。加片就加一行 include，四片各自独立给结论。
+    name: 突变测试（${{ matrix.shard }}）
     needs: preflight
     if: ${{ always() && !cancelled() && needs.preflight.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
-    # 单 job 上限 6 小时；weekly 14 个文件比 core 大，先给足，首次跑完再按实测决定是否拆 shard。
-    timeout-minutes: 360
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: "1/4"
+          - shard: "2/4"
+          - shard: "3/4"
+          - shard: "4/4"
     # 借用 runner 自带 Rust，但缓存/安装落项目内（见 docs/testing/execution-ci.md）。
     env:
       CARGO_HOME: ${{ github.workspace }}/platform/ci/cargo
       SOLOMNI_CARGO_HOME: ${{ github.workspace }}/platform/ci/cargo
+      MUTATION_SHARD: ${{ matrix.shard }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -132,11 +142,11 @@ jobs:
             target/debug
           key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
 
-      - name: 留产物（报告与 mutants.out；无论成败）
+      - name: 留产物（本片报告与 mutants.out；无论成败）
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: mutation-report
+          name: mutation-shard-${{ strategy.job-index }}
           path: |
             target/mutation-report.json
             target/logs/mutation-*.log
@@ -144,11 +154,46 @@ jobs:
             mutants.out.old/
           if-no-files-found: ignore
 
+  merge:
+    name: 合并分片报告
+    needs: [preflight, mutation]
+    # 分片本身已经给出红绿；这里只把片拼回一份，缺片也照发（如某片超时被取消）。
+    if: ${{ always() && !cancelled() && needs.mutation.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "lts/*"
+
+      - name: 取回各片产物
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: mutation-shard-*
+          path: target/shards
+
+      - name: 拼成一份报告
+        run: node tests/ci-mutation-merge.mjs
+
+      - name: 留合并后的产物
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mutation-report
+          path: |
+            target/mutation-report.json
+            target/shards/**/target/logs/mutation-*.log
+            mutants.out/
+          if-no-files-found: ignore
+
   publish:
     name: 发布到 ci-mutation
-    needs: [preflight, mutation]
-    # 只有突变步骤实际跑过才发布：同提交跳过时保留上一次 weekly 报告。
-    if: ${{ always() && !cancelled() && needs.mutation.result != 'skipped' }}
+    needs: [preflight, merge]
+    # 只有合并真的产出了报告才发布：同提交跳过、或某片被取消导致没得合并时，保留上一次 weekly 报告。
+    if: ${{ !cancelled() && needs.merge.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

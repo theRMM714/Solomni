@@ -191,7 +191,7 @@ node run-tests.js --coverage
 ```
 
 - 判据是 `tests/coverage-policy.json` 的三类风险区：产品 80%、平台/进程适配 60%、安全策略 100%；PR 另有变更行门禁：新增 Rust 行 90%，安全桶变更行 100%。覆盖率是风险下限，不是质量目标（[TESTING.md](../../TESTING.md) 一）。
-- 变更行用 `git diff <base>...HEAD -- "*.rs"` 的新侧新增行，只判报告里有执行面的行；测试文件、seam 与注释/空行不计。纯搬运（换文件、换路径限定、rustfmt 重排）另作识别，不计入分母：整函数在抹掉注释与字符串、去掉路径限定后 token 相似度 ≥0.98 判为搬运，其余行再按「归一化后逐字相同、且本次 PR 触及文件的基线版本里出现过」兜底（每个基线行只抵一次）；回执打印不计的行数（`tests/coverage.mjs` 的 `movedLines`）。搬运行不是新逻辑，但新写的行照旧要覆盖——兜底只认基线里已有同形内容的行。CI 的 `coverage` job 在 PR 上把 `github.event.pull_request.base.sha` 传给 `COVERAGE_DIFF_BASE`，并取全历史；main 推送与手动运行只判风险桶。
+- 变更行用 `git diff <base>...HEAD -- "*.rs"` 的新侧新增行，只判报告里有执行面的行；测试文件、seam 与注释/空行不计。纯搬运（换文件、换路径限定、rustfmt 重排、统一改名）另作识别，不计入分母，三层判据依次是：整函数在抹掉注释与字符串、去掉路径限定后 token 相似度 ≥0.98；把 rustfmt 拆开的续行并成一条语句、成员链取末段、再按本次 diff 的等长增删块投票得出改名表（票数 ≥5 且占比 ≥80%）后逐字相同；最后才按「归一化后逐字相同、且本次 PR 触及文件的基线版本里出现过」兜底（每个基线键只抵一次）；回执打印不计的行数（`tests/coverage.mjs` 的 `movedLines`）。搬运行不是新逻辑，但新写的行照旧要覆盖——兜底只认基线里已有同形内容的行。CI 的 `coverage` job 在 PR 上把 `github.event.pull_request.base.sha` 传给 `COVERAGE_DIFF_BASE`，并取全历史；main 推送与手动运行只判风险桶。
 - 统计前剔除 `src/tests/**`、`tests/**`、`*tests.rs` 与 `#[cfg(test)]` 到配对右花括号的整段；否则内联测试会把覆盖率抬高。`policy.excludes` 的显式 seam 豁免必须逐条写文件、行段与理由，评估时打印豁免行数。
 - Linux 同时采集测试进程与产品子进程：先 `cargo llvm-cov --workspace --all-targets --no-report`，再用同一份插桩环境 `cargo build --bin solomni`，然后以 `E2E_COVERAGE=1` 跑 L4（优雅停止让子进程写 profile），最后合并 `*.profraw` 出报告。测试失败、E2E 失败或任一桶不达标都非零退出。
 - Windows 不判定行覆盖：Node 的 `SIGINT` 在 Windows 是 `TerminateProcess`，产品子进程来不及写 profile；只靠进程内报告会让产品桶假性不达标。macOS 不在本门禁内，避免为同一结论再付一份 runner。平台专有行为由三平台 `quality` 的真机探针与安全行为矩阵承担，不靠行覆盖替代。
@@ -205,13 +205,15 @@ node run-tests.js --coverage
 - `weekly` 覆盖安全、底层、虚拟机、workspace 与 `core` 的高价值纯逻辑：安全 `src/capabilities/permission/domain/permission.rs`、`src/kernel/detail/confine/paths.rs`、`src/kernel/detail/confine/ledger.rs`、`src/kernel/detail/unpack.rs`；底层 `src/kernel/domain/path.rs`；虚拟机 `src/capabilities/vm/domain/guest.rs`、`src/capabilities/vm/domain/exec.rs`、`src/capabilities/vm/service.rs`；workspace `src/capabilities/workspace/domain/workstore.rs`、`src/capabilities/workspace/domain/workspace.rs`、`src/capabilities/workspace/service/commit.rs`；以及 `core` 的 `src/capabilities/llm/detail/repair.rs`、`src/capabilities/registry/detail/yaml_settings.rs`、`src/capabilities/slate/service.rs`。
 - 安全纯逻辑必须在范围内（`src/capabilities/permission/domain/permission.rs`、`src/kernel/detail/confine/paths.rs`）；安全面的突变存活率目标 **≥90%**，在阶段出口人工审计，不接 CI 门禁。
 - 定时：`.github/workflows/mutants.yml` 的 `schedule: cron "0 4 * * 1"`（UTC 04:00 = 北京时间周一 12:00）。GitHub 只在**默认分支最新提交**上跑定时；同一提交若已有 `weekly` 结论（`all-caught` 或 `missed`），preflight 读 ci-mutation 分支上一次 weekly 的 meta.json 后跳过；`404`、坏 JSON、`timeout`、`baseline-failed`、`error` 都照常重跑。手动派发永远执行。
-- 单 job 超时 360 分钟（GitHub 上限 6 小时）；手动与定时共用 `ci-mutation-run` 并发组，不取消正在跑的那次。首次跑完记录实际耗时；若接近上限，按安全 / 虚拟机 / workspace 拆 shard，而不是继续加时间。
+- 分片并行：`mutants.yml` 的 `mutation` job 是四片矩阵（`MUTATION_SHARD` = `1/4`…`4/4`，交给 cargo-mutants 的 `--shard`），每片 `timeout-minutes: 240`，`fail-fast: false` 让各片独立给结论；weekly 的 742 个变异体每片约 186 个。手动与定时共用 `ci-mutation-run` 并发组，不取消正在跑的那次。加片只改 `matrix.include`，不改脚本。
+- 分片报告由 `tests/ci-mutation-merge.mjs` 合并成一份（最坏状态优先：`baseline-failed` > `error` > `missed` > `timeout` > `all-caught`），跑在独立的 `merge` job，缺片（超时被取消）也照发并如实打印。
 
 ```text
 （本地，需自己装 cargo-mutants）
 MUTATION_SCOPE=core node tests/ci-mutation.mjs
 MUTATION_SCOPE=weekly node tests/ci-mutation.mjs
 MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
+MUTATION_SCOPE=weekly MUTATION_SHARD=2/4 node tests/ci-mutation.mjs
 （CI 用 .github/workflows/mutants.yml：手动派发，或每周一 12:00 北京时间自动跑 weekly）
 ```
 
@@ -231,7 +233,7 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 
 - **`ci-mutation` 滚动分支**（小文本，可 `git show`，无凭据也能读）：
 - `git fetch origin && git show origin/ci-mutation:weekly/missed.txt`；键是 `core`、`weekly` 或 `capability-<名字>`，**同一键每次覆盖、只留最近一次**，内容为 `report.json` / `meta.json` / `missed.txt` / `caught.txt` / `timeout.txt` / `unviable.txt` / `outcomes.json`。
-- **Actions 产物 `mutation-report`**（完整现场）：`target/` 下的 `mutation-report.json`、`target/logs/mutation-*.log`、`mutants.out/`；分支只留最近一次，历史看这里。
+- **Actions 产物 `mutation-report`**（完整现场，合并后的那一份）：`target/` 下的 `mutation-report.json`（含 `shardReports`）、`target/logs/mutation-*.log`（文件名带 `-shard-<i>-of-<n>`）、`mutants.out/`；各片的原始产物名为 `mutation-shard-<job-index>`。分支只留最近一次，历史看这里。
 
 - 三个范围都只作调查：全捕获 = `MUTATION-OK`，否则 `MUTATION-FOUND`；`weekly` 由定时触发，`capability` 按需派发。棘轮基线只在出现「已知容忍」的未捕获时再建。
 
