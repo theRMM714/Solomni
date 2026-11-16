@@ -3,27 +3,13 @@
 //! 不管：状态机（discussion.rs）；工具执行机制（在 tools 的端口后）。
 //! 联动：被 driver / discussion / collab 消费；状态机在 discussion.rs。
 
+use super::decls::ToolDecls;
 use super::tools::*;
 use crate::capabilities::llm::api::{self as envelope, Verb};
 use crate::capabilities::llm::api::{Chat, Chunk, CompleteOpts, Msg};
 use crate::capabilities::session::api::MemberTools;
 use crate::capabilities::session::api::{LineView, SessionEvent, ToolCallView, reply_msgs};
 use crate::kernel::api::ToolOutcome;
-use std::collections::BTreeMap;
-
-/// 目的：线上名 → (模块 id, 工具名)：原生协议里没有 module 字段，跨模块同名工具靠它消歧。
-pub type WireTools = BTreeMap<String, (Option<String>, String)>;
-
-/// 目的：一次请求要声明的工具表（给供应商的那一份）。
-pub type Decls = Vec<crate::capabilities::llm::api::ToolDecl>;
-
-/// 目的：本成员这次请求的**工具声明面**（原生通道用）：发给供应商的声明 + 线上名回译表 + 可并发的线上名。
-#[derive(Default)]
-pub struct ToolDecls {
-    pub list: Decls,
-    /// 目的：线上名 → (模块 id, 工具名)：原生协议里没有 module 字段，跨模块同名工具靠它消歧。
-    pub wire: WireTools,
-}
 
 /// 目的：一次工具调用的产出：调用视图 + 它压进历史的消息。
 pub struct ToolRun {

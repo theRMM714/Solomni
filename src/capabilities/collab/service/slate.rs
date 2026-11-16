@@ -16,7 +16,7 @@ use crate::capabilities::vm::api::Vm;
 use crate::capabilities::workspace::api::Sandboxes;
 use std::sync::Arc;
 
-use super::pump::*;
+use super::lines::*;
 impl CollabSession {
     /// 目的：委托代拟：核心拟发言名单（**拟名单业务**的用例，与「推荐模型」同一条 `slate` 协议），交用户确认。
     pub(crate) fn draft_slate(&mut self, sink: &mut dyn FnMut(SessionEvent)) {

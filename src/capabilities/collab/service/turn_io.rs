@@ -11,7 +11,7 @@ use crate::capabilities::session::api::{
 };
 use std::sync::Arc;
 
-use super::pump::*;
+use super::lines::*;
 impl CollabSession {
     /// 目的：核心把某个成员回合的结果**交回来**：吸收、外送、继续泵（驱动权在核心，见 session-model.md 二之二）。
     ///   调用前核心应把该回合的核实行落进**该 agent 自己的会话**（它们不属于主会话）。

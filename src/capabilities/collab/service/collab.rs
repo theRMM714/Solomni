@@ -6,7 +6,7 @@
 //! 联动：契约见 docs/session/session-model.md 的「请用户裁决：一条通道，消息 + 选项」与
 //!   docs/collab/task-chain.md；前端按快照的 pending 与推的裁决事件驱动，不做第二真相。
 
-use super::pump::*;
+use super::lines::push_delta;
 use crate::capabilities::collab::service::discussion::Discussion;
 use crate::capabilities::collab::service::synthesis::Execution;
 use crate::capabilities::llm::api::{Channel, Chat, Llm, Msg};

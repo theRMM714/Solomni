@@ -177,7 +177,7 @@ pub(crate) fn open_queue_rebuilds_every_unanswered_card_in_order() {
         "队首 + 后面还在等的：整队都在，顺序不乱"
     );
     assert_eq!(st4.cards, 2, "等待者也算发出去过的卡号（不复用）");
-    let gates = crate::capabilities::collab::service::pump::derive_gates(&st4);
+    let gates = crate::capabilities::collab::service::lines::derive_gates(&st4);
     assert_eq!(gates.len(), 2, "两关都要重建出来：{:?}", gates);
     assert_eq!(gates[1].0.as_deref(), Some("d2"), "第二关带自己的卡号");
     assert!(matches!(gates[1].1, Pending::ConfirmBegin));
