@@ -1,6 +1,7 @@
 /**
  * 结构审查·值边界门禁：跨能力只传值与端口，不传活对象（R15 / R16）。
- * 判据：① api*.rs 的公共函数与 trait 方法，参数里不得有 &mut（&mut self 与流式回调 &mut dyn FnMut 除外）——硬判；
+ * 判据：① api*.rs 的公共函数与 trait 方法，参数里不得有 &mut——按**完整签名**判（可跨行）；
+ *       豁免三条：&mut self、端口借用 &mut dyn Trait、泛型与回调边界里的 &mut（impl FnOnce(&mut T) 之类）——硬判；
  *       ② api*.rs 的值（pub struct）与它经 pub use 转出的同能力结构带内部可变（Mutex / RwLock / RefCell / Cell / UnsafeCell / Atomic），或字段是具名状态的可变借用 / 闭包（借端口 `&mut dyn Trait` 不算：那是把端口借进来）；
  *       ③ 跨能力的同形结构（字段名与类型全同）——②③ 只进 notes，等顶层编排定稿后转硬。
  */
@@ -10,7 +11,6 @@ const path = require("path");
 
 const MUTABLE = /(Mutex<|RwLock<|RefCell<|Cell<|UnsafeCell<|Atomic(Usize|U64|U32|I64|Bool|U8))/;
 const BORROW_OBJ = /(&'?\w*\s*mut\s|dyn Fn\b|Box<dyn Fn)/;
-const STREAM_CB = /&'?\w*\s*mut dyn FnMut/;
 // 端口借用（`&mut dyn Trait`）：R16 允许——借进来的是端口，不是别人的活对象；闭包不在此列。
 const PORT_BORROW = /&'?\w*\s*mut\s+(?:\(\s*)?dyn\s+[A-Z][A-Za-z0-9_]*/;
 
@@ -101,22 +101,61 @@ function reachMutable(index, name, depth, seen) {
   return null;
 }
 
-/** 公共签名里的可变借用：只判 api 面，trait 方法与 pub fn 都算。 */
+/** 参数表里第一个出境的可变借用；豁免 &mut self、端口借用、泛型与回调边界。 */
+function mutableParam(params) {
+  const re = /&mut\s+/g;
+  let m;
+  while ((m = re.exec(params))) {
+    const after = params.slice(m.index + m[0].length);
+    // &mut self：方法自己的可变接收者，不是出境的状态。
+    if (/^self\b/.test(after)) continue;
+    // &mut dyn Trait / &mut impl Trait：借进来的是端口（R16 允许窄端口）。
+    if (/^(dyn|impl)\s+([A-Z]|crate::)/.test(after)) continue;
+    // 泛型与回调边界：impl FnOnce(&mut T)、fn(&mut T)、Box<dyn Fn(&mut T)>。
+    if (/\b(FnOnce|FnMut|Fn|fn)\s*\(\s*$/.test(params.slice(0, m.index))) continue;
+    return shallow(params.slice(Math.max(0, m.index - 40), m.index + 60));
+  }
+  return null;
+}
+
+/** 公共签名里的可变借用：判 api 面**完整的**参数表（跨行也看得见），trait 方法与 pub fn 都算。 */
 function borrowedProblems(root, file) {
   const problems = [];
-  const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
+  const text = fs.readFileSync(file, "utf8");
+  const lines = text.split(/\r?\n/);
+  const starts = [];
+  let at = 0;
+  for (const line of lines) {
+    starts.push(at);
+    at += line.length + 1;
+  }
   let inPubTrait = false;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (/^pub trait /.test(line)) inPubTrait = true;
     else if (/^\}/.test(line)) inPubTrait = false;
-    const isFn = /^\s*(pub )?fn /.test(line);
-    if (!isFn) continue;
-    if (!/&mut /.test(line)) continue;
-    if (/&mut self\b/.test(line)) continue;
-    if (STREAM_CB.test(line)) continue;
+    if (!/^\s*(pub )?fn /.test(line)) continue;
     if (!inPubTrait && !/^\s*pub fn /.test(line)) continue;
-    problems.push("值边界：" + rel(root, file) + ":" + (i + 1) + " 的公共签名传了可变借用（R16）：" + shallow(line).slice(0, 80));
+    const fnAt = line.search(/\bfn\s+[A-Za-z_][A-Za-z0-9_]*/);
+    if (fnAt < 0) continue;
+    const open = text.indexOf("(", starts[i] + fnAt);
+    if (open < 0) continue;
+    let depth = 0;
+    let end = -1;
+    for (let k = open; k < text.length; k++) {
+      if (text[k] === "(") depth++;
+      else if (text[k] === ")") {
+        depth--;
+        if (depth === 0) {
+          end = k;
+          break;
+        }
+      }
+    }
+    if (end < 0) continue;
+    const hit = mutableParam(text.slice(open + 1, end));
+    if (!hit) continue;
+    problems.push("值边界：" + rel(root, file) + ":" + (i + 1) + " 的公共签名传了可变借用（R16）：" + hit.slice(0, 80));
   }
   return problems;
 }
