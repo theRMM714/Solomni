@@ -6,10 +6,11 @@
 pub use crate::capabilities::packages::domain::manifest::{
     KIND_SYSTEM, Library, Target, library_for_guest,
 };
+#[allow(unused_imports)] // 目的：ExecProbe 的实现在测试与组合根；能力内只经 Facts 传。
 pub use crate::capabilities::packages::domain::plan::{
-    BaseFacts, Facts, HostFallback, PackagePlan, PinPolicy, PlannedPackage, Problem, Provider,
-    absent, build_packages, diagnose_text, diagnoses, plan_guest, plan_host, plan_host_requests,
-    requests_for,
+    BaseFacts, ExecProbe, Facts, HostExec, HostFallback, PackagePlan, PinPolicy, PlannedPackage,
+    Problem, Provider, absent, build_packages, diagnose_text, diagnoses, plan_guest, plan_host,
+    plan_host_requests, requests_for,
 };
 
 /// 目的：运行包库的用例面（service.rs 实现）——包库快照与依赖文件夹路径走这里。

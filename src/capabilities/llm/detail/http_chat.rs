@@ -291,7 +291,7 @@ fn attempt_with_cancel(
     key: &str,
     body: &str,
     timeout_secs: u64,
-    cancel: Option<&std::sync::atomic::AtomicBool>,
+    cancel: Option<&dyn crate::capabilities::llm::api::Cancelled>,
 ) -> Attempt<Completion> {
     match super::http_stream::runtime() {
         Ok(rt) => rt.block_on(super::http_stream::attempt_async(

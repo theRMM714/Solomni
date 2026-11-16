@@ -129,12 +129,30 @@ pub enum PinPolicy {
     First,
 }
 
+/// 目的：选型要问宿主的两件事实（包库不读盘，宿主经这个端口交事实）。
+pub trait ExecProbe {
+    /// 目的：宿主生效 PATH 上有没有这个可执行名（基础工具链或宿主自装）。
+    fn has_exe(&self, name: &str) -> bool;
+    /// 目的：这个 `bin` 目录可用吗（本机档要求目录在场；虚拟机档不用）。
+    fn bin_ok(&self, dir: &Path) -> bool;
+}
+
+/// 目的：把宿主探测端口收窄成选型要的两件事实（`HostProbe` 的其余方法包库用不到）。
+pub struct HostExec<'a>(pub &'a dyn crate::kernel::ports::HostProbe);
+
+impl ExecProbe for HostExec<'_> {
+    fn has_exe(&self, name: &str) -> bool {
+        self.0.has_exe(name)
+    }
+    fn bin_ok(&self, dir: &Path) -> bool {
+        self.0.is_dir(dir)
+    }
+}
+
 /// 目的：一次选型要问宿主的事实（由调用方用 HostProbe / std::env 提供，domain 不读盘）。
 pub struct Facts<'a> {
-    /// 目的：宿主生效 PATH 上有没有这个可执行名（基础工具链或宿主自装）。
-    pub has_exe: &'a dyn Fn(&str) -> bool,
-    /// 目的：这个 `bin` 目录可用吗（本机档要求目录在场；虚拟机档不用）。
-    pub bin_ok: &'a dyn Fn(&Path) -> bool,
+    /// 目的：宿主探测端口（可执行名与 `bin` 目录两件事实）。
+    pub probe: &'a dyn ExecProbe,
     /// 目的：当前进程 PATH（合成生效 PATH 的尾部）。
     pub current_path: &'a OsStr,
     /// 目的：项目内基础 profile 已装上的工具（id, version）。
@@ -253,7 +271,7 @@ pub fn plan_host_requests(
                 }
                 continue;
             }
-            if has_host_executable(facts.has_exe, cap) {
+            if has_host_executable(facts.probe, cap) {
                 providers.insert(cap.clone(), Provider::Host);
                 continue;
             }
@@ -313,7 +331,7 @@ pub fn plan_host_requests(
             }
         };
         let Some(p) = picked else { continue };
-        if !(facts.bin_ok)(&p.source_dir.join("bin")) {
+        if !facts.probe.bin_ok(&p.source_dir.join("bin")) {
             problems.push(Problem::NoBin {
                 module: req.module.clone(),
                 capability: cap.clone(),
@@ -364,7 +382,7 @@ fn host_env(
     let mut roots: Vec<PathBuf> = Vec::new();
     for p in packages {
         let bin = p.source_dir.join("bin");
-        if (facts.bin_ok)(&bin) {
+        if facts.probe.bin_ok(&bin) {
             bins.push(bin);
         }
         roots.push(p.source_dir.clone());
@@ -405,15 +423,15 @@ fn compose_path(bins: &[PathBuf], current: &OsStr) -> Result<Option<OsString>, S
 }
 
 /// 目的：能力名 → 宿主上可能对应的可执行名；未知能力按同名查。
-pub fn has_host_executable(has: &dyn Fn(&str) -> bool, cap: &str) -> bool {
+pub fn has_host_executable(probe: &dyn ExecProbe, cap: &str) -> bool {
     let names: &[&str] = match cap {
         "python" => &["python", "python3"],
         "node" => &["node"],
         "cc" | "c-c++" => &["cc", "gcc", "g++", "clang", "clang++"],
         "bash" => &["bash"],
-        _ => return has(cap),
+        _ => return probe.has_exe(cap),
     };
-    names.iter().any(|n| has(n))
+    names.iter().any(|n| probe.has_exe(n))
 }
 
 /// 目的：包选择诊断（空 = 可以成立）：缺包 / 多版本歧义 / 定版不存在 / 系统路径冲突。

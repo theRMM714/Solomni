@@ -9,7 +9,7 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/capabilities/llm/api.rs` | 入站能力面：通道与协议词汇（`Chat` / `Msg` / `Completion` / `Channel` / `ToolMode` / `LlmOpts` …）与 `Llm` 用例面，并重导出信封解析与不合法信封的回执装配 |
+| `src/capabilities/llm/api.rs` | 入站能力面：通道与协议词汇（`Chat` / `Msg` / `Completion` / `Channel` / `ToolMode` / `LlmOpts` …）与 `Llm` 用例面，并重导出信封解析、不合法信封的回执装配与取消位适配入口 `cancel_flag` |
 | `src/capabilities/llm/service.rs` | 本能力的用例与端口持有者：持 `ChatGateway` / `ModelCatalog` / `EnvelopeRepair` 三个出站端口，按 `Llm` 用例答话 |
 | `src/capabilities/llm/ports.rs` | 出站端口：通道工厂 `ChatGateway`、模型目录 `ModelCatalog`、信封修复 `EnvelopeRepair`（只由 `service.rs` 持有） |
 | `src/capabilities/llm/detail/http_chat.rs` | 真实通道：OpenAI 兼容 `/chat/completions` 的 `HttpChat` 会话与 `HttpGateway` 工厂（端点回落、原生工具调用、思考片段合并、非流式调用）；流式读在 `http_stream`；只接收已解析通道，不回落假模型 |
@@ -26,5 +26,6 @@
 | `src/capabilities/llm/detail/endpoint.rs` | 端点候选、重试判定与尝试归类（纯逻辑，无 IO），外加进程内共享的端点记忆 |
 | `src/capabilities/llm/detail/model_catalog.rs` | `ModelCatalog` 的适配器：OpenAI 兼容 `GET {base_url}/models`，按候选补全与回落，错误先脱敏 |
 | `src/capabilities/llm/detail/fake_chat.rs` | 测试专用通道：脚本假模型（无网络、无密钥），兼作 `Chat` 与 `ChatGateway`，只给单元测试与测试替身回放 |
+| `src/capabilities/llm/domain/cancel.rs` | 取消位的只读端口适配：把调用方持有的停止位包成 `Cancelled`（唯一入口 `cancel_flag`）；置位仍在持有原子的一方 |
 | `src/capabilities/llm/domain/envelope.rs` | 发言信封的解析（纯逻辑）：认出最外层结构（发言 / 表态 / 工具调用），并给出不合法信封的判定类别与收尾状态 |
 | `src/capabilities/llm/domain/malformed.rs` | 不合法信封的回执装配：按判定类别给出对应修法；单数形态与 `calls` 数组形态都示范（文案归本模块，不经提示词册） |

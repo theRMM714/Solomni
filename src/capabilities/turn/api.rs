@@ -1,5 +1,5 @@
 //! 目的：turn 能力的入站契约：回合状态的类型与访问器、事件台、生成入口，以及宿主必须提供的入口（`TurnHost`）。
-//! 管：重导出 `service::state` 的 `Session` / `TurnState`、`service::session` 的 `Turn`、装配入口与参数对象、
+//! 管：重导出 `service::state` 的 `Session`、`service::session` 的 `Turn`、装配入口与参数对象、
 //!   事件台与生成入口（`service::generation`），并定义宿主端口 `TurnHost`。
 //! 不管：状态实现（`service/state.rs`）、推进规则（`service/{turn,flow}`）、谁在什么时候放取会话（宿主）。
 //! 联动：宿主（命令队列手柄）实现 `TurnHost`；呈现层与测试只经本模块取用。
@@ -41,8 +41,9 @@ pub fn session_ask(
 ) -> Arc<dyn AskUser> {
     Arc::new(crate::capabilities::turn::service::ask_user::SessionAsk::new(door, sid, emit, stop))
 }
-/// 目的：在世会话形态与回合状态本身（宿主与测试只经它取用）。
-pub use crate::capabilities::turn::service::state::{Session, TurnState};
+/// 目的：在世会话形态（宿主与测试只经它取用）。
+///   回合状态本身（`TurnState`）是本能力的内部结构：它只被 `Turn` 持有，不出单元。
+pub use crate::capabilities::turn::service::state::Session;
 
 use crate::capabilities::registry::api::Registry;
 use crate::capabilities::session::api::{

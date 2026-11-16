@@ -86,11 +86,8 @@ pub fn host_plan_for(
     policy: PinPolicy,
 ) -> PackagePlan {
     let current_path = std::env::var_os("PATH").unwrap_or_default();
-    let has_exe = |name: &str| probe.has_exe(name);
-    let bin_ok = |path: &std::path::Path| probe.is_dir(path);
     let facts = pkgs::Facts {
-        has_exe: &has_exe,
-        bin_ok: &bin_ok,
+        probe: &pkgs::HostExec(probe),
         current_path: &current_path,
         base: &base.active,
         host_fallback: &base.fallback,

@@ -416,7 +416,7 @@ fn http_stream_stop_cancels_without_waiting_for_the_next_chunk() {
             &[Msg::user("想很久")],
             CompleteOpts::plain(true)
                 .with_timeout(30)
-                .with_cancel(cancel_for_call),
+                .with_cancel(crate::capabilities::llm::api::cancel_flag(cancel_for_call)),
             &mut |_| true,
         )
     });

@@ -182,7 +182,9 @@ pub fn core_operation(
     let face_ids: Vec<String> = face_rows.iter().map(|(id, _)| id.to_string()).collect();
     let mut opts = opts;
     if let Some(c) = cancel {
-        opts.cancel = Some(std::sync::Arc::clone(c));
+        opts.cancel = Some(crate::capabilities::llm::api::cancel_flag(
+            std::sync::Arc::clone(c),
+        ));
     }
     let decls: Vec<crate::capabilities::llm::api::ToolDecl> =
         if mode == crate::capabilities::llm::api::ToolMode::Native {
