@@ -254,7 +254,7 @@ tools:
         desc: 要留下的摘要：结论、决定、待办、关键路径——丢掉细节，留下"以后还要用的"。
 
   # —— 核心代理（core_proxy）：核心代用户建会话、转达、观察与控制 ——
-  # 真实会话宿主已落地：外部动作经 conductor 的 ProxyHost 端口，生产实现是 service/proxy.rs 的队列桥
+  # 真实会话宿主已落地：外部动作经 proxy 的 ProxyHost 端口，生产实现是 runtime 的 ProxyBridge（src/capabilities/runtime/service/bridge.rs）
   catalog_agents:
     capability: none              # 不碰文件：只读登记处与模块清单
     callers: [core_proxy]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
