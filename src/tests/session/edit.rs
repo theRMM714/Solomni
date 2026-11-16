@@ -108,9 +108,15 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
     // 内存里的会话按旧配置装过：丢掉后下次访问按新配置从转录重建（内容不丢）。
     assert!(!core.session_exists(&sid));
     // 下一次访问按新配置从转录重建（单 agent 会话还没轮到用户：它只提醒，不硬发请求）。
-    with_live(|l| {
-        core.turn
-            .continue_flow(&sid, l, core.registry.as_ref(), core.probe.as_ref())
+    with_turn_io(|io, cancel, emit| {
+        core.turn.continue_flow(
+            &sid,
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .unwrap();
     assert!(core.session_exists(&sid), "访问会话即按新配置重建");

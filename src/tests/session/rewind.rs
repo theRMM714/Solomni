@@ -30,21 +30,41 @@ pub(crate) fn direct_rewind_drops_tail_then_continue_allows_user_turn() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    with_live(|l| {
-        core.turn
-            .single_say(&sid, "问一", l, core.registry.as_ref(), core.probe.as_ref())
+    with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "问一",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .unwrap(); // 行 0=用户, 1=AI
-    with_live(|l| {
-        core.turn
-            .single_say(&sid, "问二", l, core.registry.as_ref(), core.probe.as_ref())
+    with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "问二",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .unwrap(); // 行 2=用户, 3=AI
 
     // 末条是 AI → 继续被拦，只给提醒、不发请求
-    let blocked = with_live(|l| {
-        core.turn
-            .continue_flow(&sid, l, core.registry.as_ref(), core.probe.as_ref())
+    let blocked = with_turn_io(|io, cancel, emit| {
+        core.turn.continue_flow(
+            &sid,
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .unwrap();
     assert!(matches!(&blocked[0], SessionEvent::Notice(n) if n.contains("最后一条是 AI 发言")));
@@ -60,9 +80,15 @@ pub(crate) fn direct_rewind_drops_tail_then_continue_allows_user_turn() {
     assert_eq!(lines, vec!["[用户] 问一".to_string()]);
 
     // 末条是用户 → 继续直接续跑（不再需要用户发言）
-    let ev = with_live(|l| {
-        core.turn
-            .continue_flow(&sid, l, core.registry.as_ref(), core.probe.as_ref())
+    let ev = with_turn_io(|io, cancel, emit| {
+        core.turn.continue_flow(
+            &sid,
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .unwrap();
     let reply = ev
@@ -107,14 +133,28 @@ pub(crate) fn archive_folds_the_tail_and_restore_brings_it_back() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    with_live(|l| {
-        core.turn
-            .single_say(&sid, "问一", l, core.registry.as_ref(), core.probe.as_ref())
+    with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "问一",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .unwrap(); // 行 0 用户 / 1 AI
-    with_live(|l| {
-        core.turn
-            .single_say(&sid, "问二", l, core.registry.as_ref(), core.probe.as_ref())
+    with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "问二",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .unwrap(); // 行 2 用户 / 3 AI
 
@@ -204,14 +244,28 @@ pub(crate) fn delete_rewrites_the_file_for_real() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    with_live(|l| {
-        core.turn
-            .single_say(&sid, "问一", l, core.registry.as_ref(), core.probe.as_ref())
+    with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "问一",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .unwrap();
-    with_live(|l| {
-        core.turn
-            .single_say(&sid, "问二", l, core.registry.as_ref(), core.probe.as_ref())
+    with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "问二",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .unwrap();
 
@@ -246,14 +300,28 @@ pub(crate) fn rewind_keeps_only_lines_before_the_mark() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    with_live(|l| {
-        core.turn
-            .single_say(&sid, "问一", l, core.registry.as_ref(), core.probe.as_ref())
+    with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "问一",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .unwrap(); // 行 0 用户 / 1 AI
-    with_live(|l| {
-        core.turn
-            .single_say(&sid, "问二", l, core.registry.as_ref(), core.probe.as_ref())
+    with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "问二",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .unwrap(); // 行 2 用户 / 3 AI
 
@@ -290,9 +358,16 @@ pub(crate) fn rewind_keeps_only_lines_before_the_mark() {
     assert!(core.single_identity(&sid).is_some(), "身份块不受回档影响");
 
     // next_line 归零：下一条行 id 从 0 开始
-    let ev = with_live(|l| {
-        core.turn
-            .single_say(&sid, "再来", l, core.registry.as_ref(), core.probe.as_ref())
+    let ev = with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "再来",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .unwrap();
     let first = transcript_rows(&ev).first().cloned().expect("应有新行");
@@ -312,9 +387,16 @@ pub(crate) fn repeated_delete_to_zero_keeps_derived_state_in_sync() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    with_live(|l| {
-        core.turn
-            .single_say(&sid, "问一", l, core.registry.as_ref(), core.probe.as_ref())
+    with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "问一",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .unwrap(); // 行 0 用户 / 1 AI
 
@@ -338,9 +420,16 @@ pub(crate) fn repeated_delete_to_zero_keeps_derived_state_in_sync() {
     assert!(core.single_history(&sid).unwrap().is_empty(), "仍是空对话");
 
     // 回档后还能继续；行号从 0 重新计，不会被陈旧的 line_reply 拖到越界。
-    let ev = with_live(|l| {
-        core.turn
-            .single_say(&sid, "再来", l, core.registry.as_ref(), core.probe.as_ref())
+    let ev = with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "再来",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .unwrap();
     let rows = transcript_rows(&ev);
@@ -380,11 +469,13 @@ pub(crate) fn rebuilt_context_keeps_tool_result() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    with_live(|l| {
+    with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
             "记一笔",
-            l,
+            io,
+            cancel,
+            emit,
             core.registry.as_ref(),
             core.probe.as_ref(),
         )
@@ -573,11 +664,13 @@ pub(crate) fn rewind_never_splits_a_reply() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    with_live(|l| {
+    with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
             "读两个文件",
-            l,
+            io,
+            cancel,
+            emit,
             core.registry.as_ref(),
             core.probe.as_ref(),
         )

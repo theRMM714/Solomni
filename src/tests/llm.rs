@@ -91,11 +91,13 @@ pub(crate) fn malformed_tool_envelope_becomes_a_failed_tool_line() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| {
+    let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
             "写个 README",
-            l,
+            io,
+            cancel,
+            emit,
             core.registry.as_ref(),
             core.probe.as_ref(),
         )
@@ -188,11 +190,13 @@ pub(crate) fn malformed_tool_without_salvageable_name_still_records_a_line() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| {
+    let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
             "跑一下",
-            l,
+            io,
+            cancel,
+            emit,
             core.registry.as_ref(),
             core.probe.as_ref(),
         )
@@ -614,11 +618,13 @@ pub(crate) fn reasoning_is_kept_on_final_transcript_lines() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| {
+    let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
             "保留思维链",
-            l,
+            io,
+            cancel,
+            emit,
             core.registry.as_ref(),
             core.probe.as_ref(),
         )
@@ -668,11 +674,13 @@ pub(crate) fn envelope_only_round_produces_only_a_tool_line() {
         .unwrap()
         .sid;
     let rows = transcript_rows(
-        &with_live(|l| {
+        &with_turn_io(|io, cancel, emit| {
             core.turn.single_say(
                 &sid,
                 "跑一下",
-                l,
+                io,
+                cancel,
+                emit,
                 core.registry.as_ref(),
                 core.probe.as_ref(),
             )
@@ -709,20 +717,20 @@ pub(crate) fn an_aborted_generation_never_executes_a_repairable_envelope() {
     // 取消标志在生成开始前就已置位 = 用户按下了「停止」：引擎据此收尾，
     // 不再发起下一次调用（工具调用没有上限兜底，这条出口必须自己站住）。
     let events = {
-        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(true));
-        let mut noop = |_e: crate::capabilities::session::api::SessionEvent| {};
-        let mut live = crate::capabilities::session::api::Live {
+        let io = crate::capabilities::session::api::TurnIo {
             llm: Default::default(),
-            cancel,
-            emit: &mut noop,
             decisions: None,
             ask: None,
         };
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let mut noop = |_e: crate::capabilities::session::api::SessionEvent| {};
         core.turn
             .single_say(
                 &sid,
                 "写",
-                &mut live,
+                &io,
+                &cancel,
+                &mut noop,
                 core.registry.as_ref(),
                 core.probe.as_ref(),
             )
@@ -754,20 +762,20 @@ pub(crate) fn a_cancelled_generation_never_executes_a_valid_tool_envelope() {
         .unwrap()
         .sid;
     let events = {
-        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(true));
-        let mut noop = |_e: crate::capabilities::session::api::SessionEvent| {};
-        let mut live = crate::capabilities::session::api::Live {
+        let io = crate::capabilities::session::api::TurnIo {
             llm: Default::default(),
-            cancel,
-            emit: &mut noop,
             decisions: None,
             ask: None,
         };
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let mut noop = |_e: crate::capabilities::session::api::SessionEvent| {};
         core.turn
             .single_say(
                 &sid,
                 "写",
-                &mut live,
+                &io,
+                &cancel,
+                &mut noop,
                 core.registry.as_ref(),
                 core.probe.as_ref(),
             )
@@ -807,9 +815,16 @@ pub(crate) fn a_truncated_output_is_reported_as_truncation_not_as_a_bad_envelope
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| {
-        core.turn
-            .single_say(&sid, "写", l, core.registry.as_ref(), core.probe.as_ref())
+    let events = with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "写",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .unwrap();
     let views = tool_views(&events);
@@ -836,11 +851,13 @@ pub(crate) fn a_truncated_output_is_reported_as_truncation_not_as_a_bad_envelope
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events2 = with_live(|l| {
+    let events2 = with_turn_io(|io, cancel, emit| {
         core2.turn.single_say(
             &sid2,
             "说",
-            l,
+            io,
+            cancel,
+            emit,
             core2.registry.as_ref(),
             core2.probe.as_ref(),
         )
@@ -879,11 +896,13 @@ pub(crate) fn a_freeform_envelope_is_never_repaired() {
         .create_work(work("w", WorkMode::Single, &["m0"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| {
+    let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
             "打补丁",
-            l,
+            io,
+            cancel,
+            emit,
             core.registry.as_ref(),
             core.probe.as_ref(),
         )
@@ -938,11 +957,13 @@ pub(crate) fn envelope_multi_call_runs_every_call_and_rebuilds_identically() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| {
+    let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
             "读两个文件",
-            l,
+            io,
+            cancel,
+            emit,
             core.registry.as_ref(),
             core.probe.as_ref(),
         )
@@ -1037,9 +1058,16 @@ pub(crate) fn envelope_rejects_mixing_the_single_and_calls_shapes() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| {
-        core.turn
-            .single_say(&sid, "写", l, core.registry.as_ref(), core.probe.as_ref())
+    let events = with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "写",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .unwrap();
     let views = tool_views(&events);

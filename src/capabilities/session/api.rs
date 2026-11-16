@@ -7,11 +7,11 @@ pub use crate::capabilities::session::domain::decisions::{
     Answered, Decisions, GateTicket, Gates, SlotWake, decisions, issued_in,
 };
 pub use crate::capabilities::session::domain::events::{
-    CheckView, ContextUsage, DecisionCard, DecisionQueue, DecisionWaiter, LineView, Live,
-    OPT_ASK_REPLY, OPT_BEGIN, OPT_BEGIN_ALLOW, OPT_NODE_REWORK, OPT_NODE_SAY, OPT_PLAN_SAY,
-    OPT_PLAN_START, OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM, OPT_TOOL_ALLOW, OPT_TOOL_ALLOW_TURN,
-    OPT_TOOL_DENY, OptionView, Pending, SessionEvent, ToolCallView, idle, interrupted_note,
-    last_compaction, qualify, stopped_note, working,
+    CheckView, ContextUsage, DecisionCard, DecisionQueue, DecisionWaiter, LineView, OPT_ASK_REPLY,
+    OPT_BEGIN, OPT_BEGIN_ALLOW, OPT_NODE_REWORK, OPT_NODE_SAY, OPT_PLAN_SAY, OPT_PLAN_START,
+    OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM, OPT_TOOL_ALLOW, OPT_TOOL_ALLOW_TURN, OPT_TOOL_DENY,
+    OptionView, Pending, SessionEvent, ToolCallView, idle, interrupted_note, last_compaction,
+    qualify, stopped_note, working,
 };
 pub use crate::capabilities::session::domain::history::{
     AgentMeta, Delegation, HistoryView, RunState, SessionMeta, WorkspaceBinding,
@@ -36,6 +36,12 @@ pub use crate::capabilities::session::domain::tools::{
 /// 目的：工作区授权粒度的形状归工作区能力面，这里重导出，调用方不必跨能力拼路径。
 pub use crate::capabilities::workspace::api::WorkspaceGrant;
 
+// 回合引擎：TurnIo（一次回合的 IO 槽位）、两类回合结果与轮循环（由 `service/engine/` 实现）。
+pub use crate::capabilities::session::service::engine::io::{MemberTurn, TurnIo};
+#[allow(unused_imports)]
+pub use crate::capabilities::session::service::engine::round::{
+    LineSink, Round, build_round_lines, converse_with, verb_tag,
+};
 // 核心操作回路 + 原生回灌消息：`service.rs` 实现（它驱动 IO，不是纯派生）。
 #[allow(unused_imports)]
 pub use crate::capabilities::session::service::{

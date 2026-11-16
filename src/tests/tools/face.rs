@@ -31,9 +31,16 @@ pub(crate) fn tool_mode_change_needs_no_session_rebuild() {
         "建会话时是信封形态：{}",
         before
     );
-    with_live(|l| {
-        core.turn
-            .single_say(&sid, "问一", l, core.registry.as_ref(), core.probe.as_ref())
+    with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "问一",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .unwrap();
     let said = core.single_history(&sid).unwrap();
@@ -45,9 +52,16 @@ pub(crate) fn tool_mode_change_needs_no_session_rebuild() {
 
     // 登记处把模型判成原生（产品里就是「测工具调用」那一下）：形态不钉在会话里。
     core.registry_mut().probe_model_tools("m").expect("探测");
-    with_live(|l| {
-        core.turn
-            .single_say(&sid, "问二", l, core.registry.as_ref(), core.probe.as_ref())
+    with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "问二",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .unwrap();
     let after = core.single_identity(&sid).expect("身份块");
@@ -540,9 +554,16 @@ pub(crate) fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
             .collect()
     };
     // ① 没动登记处：不该有任何形态通知
-    let e1 = with_live(|l| {
-        core.turn
-            .single_say(&sid, "你好", l, core.registry.as_ref(), core.probe.as_ref())
+    let e1 = with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "你好",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .expect("发言");
     assert!(
@@ -555,9 +576,16 @@ pub(crate) fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
         detail: "支持".to_string(),
     };
     core.registry_mut().probe_model_tools("m").expect("探测");
-    let e2 = with_live(|l| {
-        core.turn
-            .single_say(&sid, "再问", l, core.registry.as_ref(), core.probe.as_ref())
+    let e2 = with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "再问",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .expect("发言");
     assert!(
@@ -566,9 +594,16 @@ pub(crate) fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
         notes(&e2)
     );
     // ③ 形态没再变：不重复通知（没动就不管）
-    let e3 = with_live(|l| {
-        core.turn
-            .single_say(&sid, "又问", l, core.registry.as_ref(), core.probe.as_ref())
+    let e3 = with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "又问",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .expect("发言");
     assert!(

@@ -22,9 +22,16 @@ pub(crate) fn create_work_persists_and_history_replays() {
         .unwrap()
         .sid;
     assert_eq!(sid, "工作一");
-    with_live(|l| {
-        core.turn
-            .single_say(&sid, "你好", l, core.registry.as_ref(), core.probe.as_ref())
+    with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "你好",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .unwrap();
     let list = core.lifecycle.history_list();

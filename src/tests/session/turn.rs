@@ -79,9 +79,16 @@ pub(crate) fn core_direct_seeds_system_prompt() {
         core.single_history(&sid).unwrap().is_empty(),
         "对话里只有真正发生过的事（此刻还没有）"
     );
-    let events = with_live(|l| {
-        core.turn
-            .single_say(&sid, "在吗", l, core.registry.as_ref(), core.probe.as_ref())
+    let events = with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "在吗",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .unwrap();
     // 用户发言必须入转录：只进历史不进转录的话，历史回放会丢用户消息。
@@ -132,9 +139,16 @@ pub(crate) fn single_mode_accepts_multi_module_agent_and_converses() {
         "身份块必须并入全部模块的能力与用法：{}",
         identity
     );
-    let events = with_live(|l| {
-        core.turn
-            .single_say(&sid, "在吗", l, core.registry.as_ref(), core.probe.as_ref())
+    let events = with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "在吗",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .unwrap();
     assert!(
@@ -276,11 +290,13 @@ pub(crate) fn core_direct_tool_flow_injects_result_into_history() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| {
+    let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
             "核对一下",
-            l,
+            io,
+            cancel,
+            emit,
             core.registry.as_ref(),
             core.probe.as_ref(),
         )
@@ -365,21 +381,16 @@ pub(crate) fn node_task_is_a_system_line_but_a_user_message() {
     let events = std::cell::RefCell::new(prefix);
     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
     {
-        let mut live = Live {
+        let io = crate::capabilities::session::api::TurnIo {
             llm,
-            cancel,
-            emit: &mut |ev| events.borrow_mut().push(ev),
             decisions: None,
             ask: None,
         };
-        let mut sink = |ev| events.borrow_mut().push(ev);
-        crate::capabilities::collab::api::dispatch_task(
-            &mut session,
-            &task,
-            &identity,
-            &mut live,
-            &mut sink,
-        );
+        let mut emit =
+            |ev: crate::capabilities::session::api::SessionEvent| events.borrow_mut().push(ev);
+        let mut sink =
+            |ev: crate::capabilities::session::api::SessionEvent| events.borrow_mut().push(ev);
+        session.dispatch_task(&task, &identity, &io, &cancel, &mut emit, &mut sink);
     }
     let events = events.into_inner();
     let dialogue = session.dialogue();
@@ -402,7 +413,7 @@ pub(crate) fn node_task_is_a_system_line_but_a_user_message() {
         "转录行要带 system + task 标记（界面是系统行，不是用户行）"
     );
     // 唯一装配点发出去的请求里至少有一条 user 消息（协议要求）。
-    let msgs = crate::capabilities::collab::service::round::assemble(
+    let msgs = crate::capabilities::session::service::engine::round::assemble(
         "身份",
         None,
         &[],

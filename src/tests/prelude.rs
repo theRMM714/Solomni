@@ -23,8 +23,6 @@ pub use crate::capabilities::prompt::domain::prompt::render;
 
 pub use crate::capabilities::registry::api::{ModelDraft, ModelEntry, Provider, Settings};
 
-pub use crate::capabilities::session::api::Live;
-
 pub use crate::capabilities::session::api::{AgentMeta, RunState, SessionMeta};
 
 pub use crate::capabilities::session::api::MemberTools;

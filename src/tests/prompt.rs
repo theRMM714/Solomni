@@ -445,11 +445,13 @@ pub(crate) fn user_at_reference_is_rewritten_in_transcript_and_history() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| {
+    let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
             "@work:a.txt 看一下",
-            l,
+            io,
+            cancel,
+            emit,
             core.registry.as_ref(),
             core.probe.as_ref(),
         )

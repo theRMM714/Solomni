@@ -80,9 +80,15 @@ pub(crate) fn collab_rewind_rebuilds_from_transcript_and_resume_waits_at_gate() 
         "重建后仍等确认开始"
     );
     // 继续：未开始不由继续代劳，只提醒
-    let ev = with_live(|l| {
-        core.turn
-            .continue_flow(&sid, l, core.registry.as_ref(), core.probe.as_ref())
+    let ev = with_turn_io(|io, cancel, emit| {
+        core.turn.continue_flow(
+            &sid,
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .unwrap();
     assert!(
@@ -236,8 +242,8 @@ pub(crate) fn collab_state_derives_the_task_chain_from_plan_review() {
 /// 目的：原生通道：供应商的结构化槽位 → 讨论动词；不认识的工具名 = 不认识（调用点据此**如实拒绝**）。
 #[test]
 pub(crate) fn native_tool_names_map_to_discussion_verbs() {
-    use crate::capabilities::collab::service::round::{arg_text, verb_of};
     use crate::capabilities::llm::api::Verb;
+    use crate::capabilities::session::service::engine::round::{arg_text, verb_of};
     assert_eq!(verb_of("say"), Some(Verb::Say));
     assert_eq!(verb_of("agree"), Some(Verb::Agree));
     assert_eq!(verb_of("leave"), Some(Verb::Leave));

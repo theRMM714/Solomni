@@ -373,11 +373,13 @@ pub(crate) fn module_without_runtime_is_denied_with_reason() {
         .create_work(work("w2", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    with_live(|l| {
+    with_turn_io(|io, cancel, emit| {
         core2.turn.single_say(
             &sid2,
             "干活",
-            l,
+            io,
+            cancel,
+            emit,
             core2.registry.as_ref(),
             core2.probe.as_ref(),
         )

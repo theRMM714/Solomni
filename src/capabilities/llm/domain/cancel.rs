@@ -20,3 +20,21 @@ pub fn cancel_flag(
 ) -> std::sync::Arc<dyn crate::capabilities::llm::api::Cancelled> {
     std::sync::Arc::new(CancelFlag(flag))
 }
+
+/// 目的：借来的停止位（不复制原子，只在本次调用期间读它）。
+struct CancelBorrow<'a>(&'a std::sync::atomic::AtomicBool);
+
+impl crate::capabilities::llm::api::Cancelled for CancelBorrow<'_> {
+    fn cancelled(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// 目的：包一个**借来的**停止位：调用方自己持有原子，包装的生命期随请求选项。
+/// 参数：`flag` —— 调用方持有的停止位。
+/// 返回：只读端口；存活期不长于那个原子。
+pub fn cancel_flag_ref(
+    flag: &std::sync::atomic::AtomicBool,
+) -> std::sync::Arc<dyn crate::capabilities::llm::api::Cancelled + '_> {
+    std::sync::Arc::new(CancelBorrow(flag))
+}

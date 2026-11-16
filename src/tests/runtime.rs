@@ -524,24 +524,26 @@ pub(crate) fn tool_round_reasoning_lands_on_the_tool_line() {
         read: None,
         shell: None,
     };
-    let round = crate::capabilities::collab::service::round::Round {
+    let round = crate::capabilities::session::service::engine::round::Round {
         reply: 1,
         // 工具轮没有正文：思维链不能另造一条空回答行，只能挂到工具行上。
         text: String::new(),
         reasoning: "先思考".to_string(),
         text_msgs: Vec::new(),
         raw: "原始回复".to_string(),
-        tool: Some(crate::capabilities::collab::service::round::ToolRun {
-            view: tool,
-            msgs: Vec::new(),
-        }),
+        tool: Some(
+            crate::capabilities::session::service::engine::round::ToolRun {
+                view: tool,
+                msgs: Vec::new(),
+            },
+        ),
         finish: String::new(),
         error: None,
         verb: None,
         degraded: false,
     };
     let next = std::cell::Cell::new(0u64);
-    let lines = crate::capabilities::collab::service::round::build_round_lines(
+    let lines = crate::capabilities::session::service::engine::round::build_round_lines(
         "a", &round, false, &next, None,
     );
     assert_eq!(lines.len(), 1, "工具轮没有正文时只出工具行：{lines:?}");
@@ -721,11 +723,13 @@ pub(crate) fn repeated_malformed_envelopes_each_get_a_failed_row() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| {
+    let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
             "一直错",
-            l,
+            io,
+            cancel,
+            emit,
             core.registry.as_ref(),
             core.probe.as_ref(),
         )
@@ -769,11 +773,13 @@ pub(crate) fn prose_then_unclosed_tool_envelope_is_malformed_and_keeps_prose() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| {
+    let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
             "写一下",
-            l,
+            io,
+            cancel,
+            emit,
             core.registry.as_ref(),
             core.probe.as_ref(),
         )
@@ -843,11 +849,13 @@ pub(crate) fn prose_then_tool_envelope_keeps_prose_line_and_rebuilds_identically
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| {
+    let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
             "记一笔",
-            l,
+            io,
+            cancel,
+            emit,
             core.registry.as_ref(),
             core.probe.as_ref(),
         )
@@ -956,9 +964,16 @@ pub(crate) fn tool_envelope_after_prose_runs_and_json_never_shows() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| {
-        core.turn
-            .single_say(&sid, "跑满", l, core.registry.as_ref(), core.probe.as_ref())
+    let events = with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "跑满",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .unwrap();
     assert_eq!(
@@ -1029,11 +1044,13 @@ pub(crate) fn native_multi_call_rebuilds_identically_to_live() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| {
+    let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
             "读两个文件",
-            l,
+            io,
+            cancel,
+            emit,
             core.registry.as_ref(),
             core.probe.as_ref(),
         )
@@ -1121,11 +1138,13 @@ pub(crate) fn read_facts_rebuild_identically_to_live() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| {
+    let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
             "读 a.txt",
-            l,
+            io,
+            cancel,
+            emit,
             core.registry.as_ref(),
             core.probe.as_ref(),
         )

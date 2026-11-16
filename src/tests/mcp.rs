@@ -3,10 +3,10 @@
 //! 不管：进程与围栏机制（在 kernel 的 SessionHost 实现里）；真实服务的端到端另有用例。
 //! 联动：适配器见 src/capabilities/residents/detail/mcp.rs；替身见 src/tests/doubles/。
 
-use crate::capabilities::collab::service::tool_loop::CallGrant;
 use crate::capabilities::permission::api::{Decision, Reach, ReachSet};
 use crate::capabilities::residents::detail::McpAdapter;
 use crate::capabilities::residents::ports::{LaunchSpec, ServiceAdapter};
+use crate::capabilities::session::service::engine::tools::CallGrant;
 use crate::kernel::api::FenceSpec;
 use crate::kernel::ports::SessionHost;
 use crate::tests::doubles::{RecordingLog, ScriptedHost};
@@ -148,14 +148,14 @@ fn mcp_adapter_talks_to_a_real_stdio_server() {
 /// 模型侧工具面：已就绪服务的操作进原生声明与可用清单，调用路由到常驻服务能力。
 #[test]
 fn model_tool_face_exposes_started_service_ops() {
-    use crate::capabilities::collab::service::tool_loop::{
-        available_tools, dispatch_external, tool_decls,
-    };
     use crate::capabilities::llm::api::ToolInvoke;
     use crate::capabilities::modules::api::ServiceDecl;
     use crate::capabilities::residents::api::ResidentOps;
     use crate::capabilities::residents::service::ResidentsService;
     use crate::capabilities::session::api::ServiceOp;
+    use crate::capabilities::session::service::engine::tools::{
+        available_tools, dispatch_external, tool_decls,
+    };
     use crate::tests::doubles::{
         FakeServiceAdapter, VecSource, member_with_service_tools, module_of, test_modules,
     };

@@ -18,7 +18,7 @@ impl CollabSession {
     pub fn feed_with(
         &mut self,
         i: usize,
-        turn: crate::capabilities::collab::service::discussion::MemberTurn,
+        turn: crate::capabilities::session::api::MemberTurn,
         turn_id: u64,
         sink: &mut dyn FnMut(SessionEvent),
     ) {

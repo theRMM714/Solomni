@@ -77,7 +77,7 @@ pub(crate) fn work_commit_auto_accepts_only_fresh_bases() {
 /// 目的：钉住写工具落地后的自动提交——路径取自这次调用写过的文件，锚是工具调用那一行；基线过期只上报不发布。
 #[test]
 pub(crate) fn write_tools_publish_to_shared_area_and_report_stale_bases() {
-    use crate::capabilities::collab::service::tool_loop::commit_writes;
+    use crate::capabilities::session::service::engine::tools::commit_writes;
     use crate::capabilities::tools::api::Observations;
     use crate::capabilities::tools::domain::systool::fnv1a;
     use crate::capabilities::workspace::ports::WorkStore;

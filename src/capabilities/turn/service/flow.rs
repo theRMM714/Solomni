@@ -9,7 +9,7 @@ use crate::capabilities::collab::api::CollabSession;
 use crate::capabilities::prompt::api::Segment;
 use crate::capabilities::registry::api::Registry;
 use crate::capabilities::session::api::{
-    AgentMeta, Answered, DecisionQueue, GateTicket, RunState, SessionEvent, SessionMeta,
+    AgentMeta, Answered, DecisionQueue, GateTicket, RunState, SessionEvent, SessionMeta, TurnIo,
     flat_modules, work_root,
 };
 use crate::capabilities::turn::api::{Prepared, RestoreRequest, Session};
@@ -39,26 +39,19 @@ impl Turn {
                 // 两个出口（流式短暂事件 / 定稿事件）都要收进同一份事件流：用 RefCell 共享。
                 let out = std::cell::RefCell::new(prefix);
                 {
-                    let mut live = crate::capabilities::session::api::Live {
+                    // 同步驱动、生成期间读不到键盘：这一趟不接工具级确认，也没有可回答的前端。
+                    let io = TurnIo {
                         llm,
-                        cancel,
-                        emit: &mut |ev: SessionEvent| out.borrow_mut().push(ev),
-                        // 同步驱动、生成期间读不到键盘：这一趟不接工具级确认，也没有可回答的前端。
                         decisions: None,
                         ask: None,
                     };
+                    let mut emit = |ev: SessionEvent| out.borrow_mut().push(ev);
                     let mut sink = |ev: SessionEvent| out.borrow_mut().push(ev);
                     // 执行提示词是**核心派的活**（派发行）：界面系统行、上下文 user 角色。
                     let identity = session
                         .params()
                         .identity(&*self.prompt, session.tool_mode());
-                    crate::capabilities::collab::api::dispatch_task(
-                        &mut session,
-                        objective,
-                        &identity,
-                        &mut live,
-                        &mut sink,
-                    );
+                    session.dispatch_task(objective, &identity, &io, &cancel, &mut emit, &mut sink);
                 }
                 let events = out.into_inner();
                 self.put_single_recorded(child, session, &events);
@@ -116,21 +109,20 @@ impl Turn {
             let (ran, notes) = {
                 // 两个出口（流式短暂事件 / 定稿事件）都收进同一份事件流。
                 let notes = std::cell::RefCell::new(Vec::new());
-                let mut live = crate::capabilities::session::api::Live {
+                let io = TurnIo {
                     llm: crate::capabilities::llm::api::LlmOpts {
                         stream: opts.stream,
                         timeout_secs: opts.timeout_secs,
                         thinking,
                     },
-                    cancel: std::sync::Arc::clone(&cancel),
-                    emit: &mut |e: SessionEvent| notes.borrow_mut().push(e),
                     decisions: None,
                     ask: None,
                 };
+                let mut emit = |e: SessionEvent| notes.borrow_mut().push(e);
                 let mut sink = |e: SessionEvent| notes.borrow_mut().push(e);
                 let face = systools.role_face("discussant");
-                let t = crate::capabilities::collab::api::discussion_turn(
-                    &mut s, &identity, face, turn, turn_id, round, &mut live, &mut sink,
+                let t = s.discussion_turn(
+                    &identity, face, turn, turn_id, round, &io, &cancel, &mut emit, &mut sink,
                 );
                 (t, notes.into_inner())
             };

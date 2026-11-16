@@ -531,9 +531,16 @@ fn host_session_uses_package_bin_path() {
         .create_work(crate::tests::doubles::work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    crate::tests::doubles::with_live(|l| {
-        core.turn
-            .single_say(&sid, "干活", l, core.registry.as_ref(), core.probe.as_ref())
+    crate::tests::doubles::with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "干活",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
     })
     .unwrap();
     let paths = runner.paths.lock().expect("锁");

@@ -3,7 +3,7 @@
 //! 不管：协作泵的推进策略、会话装配。
 //! 联动：`generation/collab.rs`、`turn::api::TurnHost`
 
-use crate::capabilities::session::api::{AgentSession, SessionEvent};
+use crate::capabilities::session::api::{AgentSession, MemberTurn, SessionEvent, TurnIo};
 use crate::capabilities::turn::api::{AskReq, TurnHost};
 
 /// 目的：主线程侧：为一个成员回合取该 agent 的会话，跑完把回合结果带回来（并落进它自己的会话）。
@@ -11,7 +11,7 @@ pub(crate) fn run_member_turn<H: TurnHost>(
     host: &H,
     sid: &str,
     req: &AskReq,
-) -> Result<crate::capabilities::collab::api::MemberTurn, String> {
+) -> Result<MemberTurn, String> {
     let child = format!("{}--{}", sid, req.agent);
     // 会话不存在就按需建（名单确认时已建，这里兜底）。
     {
@@ -71,10 +71,8 @@ pub(crate) fn run_member_turn<H: TurnHost>(
                     bus.push(&sid, std::slice::from_ref(&ev));
                 }
             };
-            let mut live = crate::capabilities::session::api::Live {
+            let io = TurnIo {
                 llm,
-                cancel: std::sync::Arc::clone(&cancel),
-                emit: &mut emit,
                 decisions,
                 ask,
             };
@@ -91,8 +89,8 @@ pub(crate) fn run_member_turn<H: TurnHost>(
             // 这一回合的工具面**由角色表发放**（讨论席：动词 + 只读核实工具）。
             let face = systools.role_face("discussant");
             // 这一回合：身份块（现渲染）+ 本回合工具面 + 该会话的**对话** + 开场/轮转词 + 表态。
-            let ran = crate::capabilities::collab::api::discussion_turn(
-                &mut s, &identity, face, turn, turn_id, round, &mut live, &mut sink,
+            let ran = s.discussion_turn(
+                &identity, face, turn, turn_id, round, &io, &cancel, &mut emit, &mut sink,
             );
             (s, ran)
         })
