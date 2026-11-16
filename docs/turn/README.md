@@ -14,7 +14,7 @@
 - 管：**准入与派发闸**——`admit` 先落盘再进在世表，`ensure_session` 不在世就按转录重建，`dispatch_gate` 按运行态拒绝派发，`resume_subtree` 把停掉的子树拉回运行态。
 - 管：**按需重建**——`rebuild_session` 按落盘的事件与元数据重建单 agent / 协作 / 代理三种形态，`workspace_binding_of` 做加载复检，`replay_dialogue` / `replay_reads` 还原对话与读事实，`build_proxy` 装配代理会话。
 - 管：**一席事实的取用**——沙箱清单、权限面、外部工作区授权粒度、`env::api::member` 算出的工具环境（`MemberEnvParts`）与上下文预算（`src/capabilities/turn/service/facts.rs`）；事实都经各能力的 `api` 取。
-- 不管：**一席的装配**——工具面与三种在世形态的构造归 `session`（第 4 层：`src/capabilities/session/service/assemble.rs` 的 `single_session` / `rebuild_single` / `proxy_session`）；本单元只取事实、组 `MemberSpec` 后转调。`Turn::build_single` 仍是 `work` 建工作两段的入口。
+- 不管：**一席的装配**——工具面与三种在世形态的构造归 `session`（`src/capabilities/session/service/assemble.rs` 的 `single_session` / `rebuild_single` / `proxy_session`）；本单元只取事实、组 `MemberSpec` 后转调。`Turn::build_single` 仍是 `work` 建工作两段的入口。
 - 不管：会话对象（`session` 的 `AgentSession`、`collab` 的 `CollabSession`）怎么长、怎么跑——本单元只放取、标记与重建。
 - 管：**回合推进**——单 agent 与节点的生成准备（工具形态刷新、预算刷新、身份、前缀事件、`Prepared`）与同步生成入口、取放会话的两段（`take_single` / `take_collab` / `put_single` / `put_collab`）、裁决作废与派发目标、协作流水线推进与协作动作（链推进、节点派发、裁决卡动作、改需求）。
 - 管：**生成驱动**——单 agent / 节点、成员、协作泵、压缩五条生成链，以及七条点火器（节点执行、继续、代理回合、协作推进、裁决处置）；线程名 `solomni-*` 是行为契约的一部分，线程本身经宿主的 `TurnHost::spawn` 起。

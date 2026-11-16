@@ -1,7 +1,7 @@
 # 架构与开发规则（ARCHITECTURE）
 
-> 定位：分层与机制归属的唯一权威：依赖方向、端口画在哪、机制落哪一层，以及状态落盘的归属规则与去向。
-> 效力：规范｜核对：2026-11-16｜依据：`src/main.rs`、`layers.yaml`
+> 定位：开放架构的唯一权威：依赖方向（SDP / 只走 api / DIP / 只传值）、分层与机制归属、端口画在哪、状态落盘的归属规则与去向。
+> 效力：规范｜核对：2026-11-17｜依据：`src/main.rs`、`layers.yaml`
 
 ## 适用与判据
 - 改代码前必须先读本文；分层判断以本文为准（`ARCHITECTURE.md`）。
@@ -13,7 +13,7 @@
 
 ```text
 根（main.rs + entry/ + guard/）
-  ├──▶ presentation/{cli,web} ──▶ capabilities（业务层内部分 10 层，只向下）──▶ kernel（地基库）
+  ├──▶ presentation/{cli,web} ──▶ capabilities（业务层内部分层，只向下）──▶ kernel（地基库）
   └──▶ capabilities / kernel（注入适配器、跑探针与守门模式）
 （根 = 启动 + 组合根 + 机器探针 + 守门进程；各能力的 `detail` 与 kernel 的实现只在这里被 new 出来）
 ```
@@ -22,16 +22,28 @@
 | --- | --- | --- |
 | **根**（`entry/` + `main.rs` + `guard/`） | **启动程序与组合根**：解析根、`new` 出所有适配器并注入（共用装配在 `src/entry/assembly.rs`）、跑启动对账、把入站面交给呈现层；机器可读探针（`entry/probes/`：`--doctor` / `--https-check` / `--print-routes` / `--print-fence-env` / `--fence-verify`）；围栏守门进程与台账处置（`--fence-run`；以及 `--fence-clean` / `--fence-reconcile` / `--fence-ledger` / `--fence-restore` / `--fence-revoke` / `--fence-profile-rm`）；长驻子进程守门进程（`--proc-watchdog`，macOS 的父死子亡） | 它依赖所有人，**任何人都不许依赖它**（`tests/gates/structure/dependency.js`）；除启动、装配、探针与守门外无业务 |
 | `presentation/` | **呈现层（交付机制）**：各渠道一个子目录——传输（argv/stdout vs HTTP）、路由、纯渲染；根级 `faces.rs` 是面袋（`Faces`，由组合根用核心手柄装出）。**不是业务能力** | 只依赖各能力的 `::api`；**拿不到端口对象，也拿不到 `Core`**；两个渠道互不依赖，只共享面袋 |
-| `capabilities/` | **业务层**：按业务功能垂直切分，内部再按 `layers.yaml` 分 10 层（见下）。每个能力有 `api`（入站契约：trait + DTO）/ `service`（本能力的状态与用例）/ `ports`（出站端口，只由定义它的能力持有）/ `domain`（纯逻辑）/ `detail`（只有组合根能构造） | **业务之间只经对方的 `api`**；**只依赖严格更低层，同层零引用**（`tests/gates/structure/layers.js`）；不反向依赖根 / 呈现层（T0 机器判定，见 §九.7） |
-| `capabilities/turn/` | **第 8 层业务**：回合状态的唯一持有者——会话本体与一席的装配、会话在世表、运行态与创建占位、每会话的裁决队与 shell 活进程槽；回合推进、生成驱动、协作链、事件台与逐轮落盘 | 只向下依赖；长步骤在调用方线程上 own-and-return（取放时机由调用方定），事件台与落盘是它自己的；命令队列、门面与动作分发在 `runtime` |
-| `capabilities/work/` | **第 9 层业务**：工作用例（建工作两段、改配、档案与视图、模型视图、运行报告、guest 生命周期、建议与激活）——用户可见的工作是什么样，就在这里定 | 只向下依赖；不落盘、不发事件、不推进协作链——这些时机归 `runtime` 与各能力 |
-| `capabilities/lifecycle/` | **第 9 层业务**：会话历史生命周期——历史列表与只读打开、删除的报账与收尾、回档三模式（留档 / 删除 / 恢复） | 只向下依赖；不落盘、不发事件、不推进协作链——时机归 `runtime` |
-| `capabilities/proxy/` | **第 9 层业务**：核心代理工具的**工具面**——六工具的载荷与回执、授权判据、幂等账与成员侧执行者（`ProxyHandler`）；宿主契约 `ProxyHost` 由它声明 | 只向下依赖；不落盘、不发事件、不碰真实会话——真实动作由 `runtime` 的 `ProxyBridge` 实现，装配在 `runtime` 的 `inject_proxy_handler` |
-| `capabilities/runtime/` | **第 10 层（顶层）业务**：命令队列与门面、动作分发、跨能力用例编排，以及 `TurnHost` 的宿主侧实现（回合推进与生成在 `turn`） | 只向下依赖；不读文件、不发网络、不碰 stdin/stdout——机制下沉各能力的 `detail/` |
+| `capabilities/` | **业务层**：按业务功能垂直切分，内部再按 `layers.yaml` 分层（见下）。每个能力有 `api`（入站契约：trait + DTO）/ `service`（本能力的状态与用例）/ `ports`（出站端口，只由定义它的能力持有）/ `domain`（纯逻辑）/ `detail`（只有组合根能构造） | **业务之间只经对方的 `api`**；**只依赖严格更低层，同层零引用**（`tests/gates/structure/layers.js`）；不反向依赖根 / 呈现层（T0 机器判定，见 §九.7） |
+| `capabilities/turn/` | **回合状态**：唯一持有者（会话本体与一席的装配、会话在世表、运行态与创建占位、每会话的裁决队与 shell 活进程槽）；回合推进、生成驱动、协作链、事件台与逐轮落盘 | 只向下依赖；长步骤在调用方线程上 own-and-return（取放时机由调用方定），事件台与落盘是它自己的；命令队列、门面与动作分发在 `runtime` |
+| `capabilities/work/` | **工作用例**：建工作两段、改配、档案与视图、模型视图、运行报告、guest 生命周期、建议与激活——用户可见的工作是什么样，就在这里定 | 只向下依赖；不落盘、不发事件、不推进协作链——这些时机归 `runtime` 与各能力 |
+| `capabilities/lifecycle/` | **会话历史生命周期**：历史列表与只读打开、删除的报账与收尾、回档三模式（留档 / 删除 / 恢复） | 只向下依赖；不落盘、不发事件、不推进协作链——时机归 `runtime` |
+| `capabilities/proxy/` | **核心代理工具面**：六工具的载荷与回执、授权判据、幂等账与成员侧执行者（`ProxyHandler`）；宿主契约 `ProxyHost` 由它声明 | 只向下依赖；不落盘、不发事件、不碰真实会话——真实动作由 `runtime` 的 `ProxyBridge` 实现，装配在 `runtime` 的 `inject_proxy_handler` |
+| `capabilities/runtime/` | **顶层编排**：命令队列与门面、动作分发、跨能力用例编排，以及 `TurnHost` 的宿主侧实现（回合推进与生成在 `turn`） | 只向下依赖；不读文件、不发网络、不碰 stdin/stdout——机制下沉各能力的 `detail/` |
 | `kernel/` | **地基库（非层）**：无领域语义、无领域状态的机制（运行日志端口、宿主探测、取消表、跨层共享的形状、路径书写、外部进程执行与长驻子进程账、围栏机制）；形状与别的能力一致（`api` / `ports` / `domain` / `detail`） | **不依赖任何人**；不解释共享形状的业务语义，不构造业务决策与面向用户的文案 |
 
-- 业务层的 10 层（唯一权威是 `layers.yaml`，门禁 `tests/gates/structure/layers.js`）：数字越小越底层，能力只能依赖**严格更低层**，**同层零引用**。
+### 开放架构五条
 
+> 依赖只写一个方向：越往下越稳定、编排越少、越靠近基础设施；能力之间只经对方 `api` 通话，只传值。五条各有一处机器判据，判红即失败。
+
+| 原则 | 依赖准则 | 机器判据 |
+| --- | --- | --- |
+| **SDP·单边向下** | 依赖边只有一个方向：上层编排、下层稳定；越往下编排越少、越靠近基础设施；同层零引用 | `tests/gates/structure/layers.js` |
+| **只走 api** | 能力之间的调用只经对方 `api` 的 trait 与值；不摸 `service` / `domain` / `detail`，也不反向依赖根与呈现层 | `tests/gates/structure/dependency.js` |
+| **DIP·跨能力** | 需要对方替它做事的点声明成端口，由实现方实现；声明方只经自己的 `api` 交出去 | `tests/gates/structure/dependency.js` |
+| **DIP·能力内部** | `service` 只认 `ports` / `api` 的抽象；具体实现只在组合根 `new` | `tests/gates/structure/capability.js` |
+| **DTD·只传值** | 跨边界只传不可变值（或无状态端口）；锁、原子、可变借用、闭包这类活对象不出境 | `tests/gates/structure/values.js` |
+
+- 分层表（唯一权威是 `layers.yaml`；下面这张由它生成，文档里不手写层号）：
+<!-- BEGIN:layer-table -->
 | 层 | 单元 | 可依赖 |
 | --- | --- | --- |
 | 0（地基库） | `kernel` | 无 |
@@ -43,12 +55,16 @@
 | 6 | `env`、`slate`、`storage` | 0–5 |
 | 7 | `builds`、`collab` | 0–6 |
 | 8 | `system`、`turn` | 0–7 |
-| 9 | `work`、`lifecycle`、`proxy` | 0–8 |
+| 9 | `lifecycle`、`proxy`、`work` | 0–8 |
 | 10 | `runtime` | 0–9 |
 
-- 层号由现有依赖的最长路径算出；每消灭一批跨层边就重算一遍并收紧。**同层互用只有三种正当处置**：合并成一个能力、把被引的形状下沉到更低层、端口反转（下层声明、上层实现）。
+> 10 层、25 个能力 + `kernel`：本表由 `layers.yaml` 生成（`node tests/docs-sync.mjs --write`），不手写。
+<!-- END:layer-table -->
 
-- 扇出预算是 5：超过就说明这个单元在替别人装配，或者它自己没拆完。门禁当前只回执不判红（迁移目标，见 PR 实施清单）。
+- 层号是**声明的意图**，不是从代码算出来的事实：改成「按当前依赖现算」，判据就恒真（每条边按构造都向下），门禁失去全部约束力。所以表由人维持、门禁比「意图 vs 现实」，越界时顺带报出「按现有依赖至少要第几层」。
+- 改表（合并 / 插入层）走同一条路：改 `layers.yaml` → `node tests/gates/structure/layers.js` 看重算结果与越界边 → 改代码或回表。层号连续、目录全覆盖由门禁判。
+- **同层互用只有三种正当处置**：合并成一个能力、把被引的形状下沉到更低层、端口反转（下层声明、上层实现）。
+- 扇出预算是 5：超过就说明这个单元在替别人装配，或者它自己没拆完。门禁当前只回执不判红（迁移目标）。
 
 - 推论：
 
@@ -107,7 +123,7 @@
 | `AskUser` | **请用户裁决的提问端口**：需要用户裁决的机制（工具执行层、围栏）推一条问题并**阻塞**等一个选项 id——走会话的**统一裁决通道**（不是第二条） | 会话侧实现（`turn` 的 `SessionAsk`：卡片进那一条队、`answer_card` 作答；构不出可用选项时停会话 + 落警告） |
 | `TurnHost` | **回合推进的宿主契约**：业务在自己的工作线程上需要宿主在核心线程代做的事——取放会话状态、事件台、guest 起停、裁决队与提问端口、生成登记、线程点火、回答裁决卡 | `Handle`（`src/capabilities/runtime/service/handle.rs`；随命令队列手柄一起演进） |
 
-- 端口只有一个持有者：**定义它的那个能力的 `service.rs`**（R12）。**例外**：`kernel` 的机制端口（`Log` / `HostProbe` / `ToolHandler` / `AskUser` / `ProcessRunner` / `FenceHost` / `PathCodec` / `ProcessTexts` / `SessionHost`）全项目共享；`TurnHost` 由 `turn` 声明（`src/capabilities/turn/api.rs`）、由 `runtime` 实现（`src/capabilities/runtime/service/handle.rs`）——业务声明它需要宿主代做什么，第 10 层来实现。
+- 端口只有一个持有者：**定义它的那个能力的 `service.rs`**（R12）。**例外**：`kernel` 的机制端口（`Log` / `HostProbe` / `ToolHandler` / `AskUser` / `ProcessRunner` / `FenceHost` / `PathCodec` / `ProcessTexts` / `SessionHost`）全项目共享；`TurnHost` 由 `turn` 声明（`src/capabilities/turn/api.rs`）、由 `runtime` 实现（`src/capabilities/runtime/service/handle.rs`）——业务声明它需要宿主代做什么，最顶层（`runtime`）来实现。
 - 新增端口前先问一句：**这是 IO 或可替换点吗**？不是就别加 trait。
 
 ## 三、单元地图与入站契约
@@ -196,8 +212,8 @@
 
 - **归层是必填身份**：能力必须在 `layers.yaml` 里有一行，只能依赖**严格更低层**，**同层零引用**（`tests/gates/structure/layers.js`）。层号不回答「是不是业务」，它只回答「能依赖谁」。
 - **机制不因调用方多而升格**：日志、路径、进程、围栏、平台差异归一化这类没有领域词、没有用户可见后果的机制，留在 `kernel` 或所属能力的 `detail/`，不按第 2 条算作业务；第 2 条只用来判断「已有自己用例」的能力是否值得独立。
-- **已判例（代理工具族 → `proxy`，第 9 层）**：判据 1 成立——六工具有自有协议（`src/capabilities/proxy/domain/proxy.rs` 的载荷、授权判据与回执形状）与用户可见后果（代用户建会话、转达、控会话）。判据 2 目前只有 `runtime` 一个能力调用方，它成立的方式是**端口反转**：`proxy` 声明宿主契约 `ProxyHost`（`src/capabilities/proxy/api.rs`），由 `runtime` 的 `ProxyBridge` 实现（`src/capabilities/runtime/service/bridge.rs`）、只在 `src/capabilities/runtime/service/handle.rs` 的 `inject_proxy_handler` 装配——`runtime` 对它的依赖因此止于 `::api`，真实会话状态仍在 `runtime` / `turn` 一侧。
-- **已判例（顶层编排 → `runtime`，第 10 层）**：判据 1 成立——编排有自己的领域词（启用工作、改需求、回档、停止、动作分发）、自有协议（`src/capabilities/runtime/api.rs` 的 `RuntimeOps` / `ActionOps` / `ActionCall` / `Acted`）与用户可见后果（一条命令把几个下层用例按序跑完）；判据 2 成立——入口（`src/main.rs` 的 `Handle::spawn`）与呈现层（`src/presentation/faces.rs` 的 `Faces`）是两个调用方，两个渠道共用同一份编排。它**不搬**下层用例的身体：方法体只是「按序调几个下层用例 + 状态聚合」。
+- **已判例（代理工具族 → `proxy`）**：判据 1 成立——六工具有自有协议（`src/capabilities/proxy/domain/proxy.rs` 的载荷、授权判据与回执形状）与用户可见后果（代用户建会话、转达、控会话）。判据 2 目前只有 `runtime` 一个能力调用方，它成立的方式是**端口反转**：`proxy` 声明宿主契约 `ProxyHost`（`src/capabilities/proxy/api.rs`），由 `runtime` 的 `ProxyBridge` 实现（`src/capabilities/runtime/service/bridge.rs`）、只在 `src/capabilities/runtime/service/handle.rs` 的 `inject_proxy_handler` 装配——`runtime` 对它的依赖因此止于 `::api`，真实会话状态仍在 `runtime` / `turn` 一侧。
+- **已判例（顶层编排 → `runtime`）**：判据 1 成立——编排有自己的领域词（启用工作、改需求、回档、停止、动作分发）、自有协议（`src/capabilities/runtime/api.rs` 的 `RuntimeOps` / `ActionOps` / `ActionCall` / `Acted`）与用户可见后果（一条命令把几个下层用例按序跑完）；判据 2 成立——入口（`src/main.rs` 的 `Handle::spawn`）与呈现层（`src/presentation/faces.rs` 的 `Faces`）是两个调用方，两个渠道共用同一份编排。它**不搬**下层用例的身体：方法体只是「按序调几个下层用例 + 状态聚合」。
 - **状态不参与这条判据**——它只在 §九.2 回答「这块状态归谁」。
 
 ### 九.2 状态归属
@@ -212,7 +228,7 @@
 
 | 类型 | 判据 | 归属与形态 |
 | --- | --- | --- |
-| **应用型业务** | 处在依赖图顶层、按自己的用例把下层能力编排起来：有自有协议 + 用户可见后果 + 领域词 API | 独立业务；**可持状态**；**只向下依赖、不横向**，参与方不得反向调它（`runtime` 在第 10 层） |
+| **应用型业务** | 处在依赖图顶层、按自己的用例把下层能力编排起来：有自有协议 + 用户可见后果 + 领域词 API | 独立业务；**可持状态**；**只向下依赖、不横向**，参与方不得反向调它（`runtime` 在最顶层） |
 | **领域型业务** | 说的是自己的数据 / 概念，规则与状态自成一体 | 独立业务；**只持自己的状态**；有 IO 或可替换点才有 `ports.rs` / `service.rs`（`taskchain` 就是没有端口、没有 `service` 的领域型） |
 | **地基库（`kernel`，非层）** | 没有领域语义 | `kernel/`：托管跨层共享的形状与机制；**领域词测试**——它不需要知道什么是回合 / 回复 / 工具执行；**不解释形状的业务语义、不构造业务决策与文案**；有机制状态与机制端口，只被依赖 |
 
@@ -264,7 +280,7 @@
 | **R11** | **测试入口 = 生产入口**：禁止 `#[cfg(test)]` 专用语义入口 |
 | **R12** | **端口只有一个持有者**：定义它的那个能力的 `service.rs`；别人只拿 `api` 面。**例外**：`kernel` 的机制端口是全项目共享的机制接口 |
 | **R13** | **跨能力的同形重复不许存在**：要么收进唯一所有者，要么独立成一个业务（见「判据」第 2 条） |
-| **R14** | **能力必须归层**：`layers.yaml` 是分层的唯一权威；能力只依赖严格更低层、同层零引用，新增能力先归层（`tests/gates/structure/layers.js`） |
+| **R14** | **能力必须归层**：`layers.yaml` 是分层的唯一权威，层号是声明的意图（§一）；能力只依赖严格更低层、同层零引用，新增能力先归层（`tests/gates/structure/layers.js`） |
 | **R15** | **值有唯一家**：跨边界传的值类型只在产生方能力定义一次（经 `api.rs` 导出），消费方直接 `use`，不许本地再造同形再转换（`tests/gates/structure/values.js`） |
 | **R16** | **边界只传值与端口**：跨能力 `api` 的参数与返回只能是值、端口（`dyn Trait`）或基本类型；活对象（带锁、带内部可变、带身份）与别人的 `&mut` 状态都不出境（`tests/gates/structure/values.js`） |
 
@@ -277,7 +293,7 @@
 - **foreignImpl**：不得给别的能力的类型写 `impl`（`node run-tests.js`）；
 - **coreCycles**：能力节点图无环；
 - **values**：api 面的公共签名（按完整签名判，跨行也算）不得有 `&mut` 参数，豁免 `&mut self`、端口借用 `&mut dyn Trait` 与泛型 / 回调边界里的 `&mut`；api 面声明或转出的值带内部可变、值里塞具名状态的可变借用或闭包（借端口不算）、跨能力同形结构只回执（`tests/gates/structure/values.js`）；
-- **layers**：能力必须在 `layers.yaml` 归层，依赖边只能指向**严格更低层**（向上与同层都失败），层号从 1 起连续（`tests/gates/structure/layers.js`）；
+- **layers**：能力必须在 `layers.yaml` 归层，依赖边只能指向**严格更低层**（向上与同层都失败），层号从 1 起连续（`tests/gates/structure/layers.js`）；越界回执顺带报「按现有依赖至少要第几层」，改表用 `node tests/gates/structure/layers.js` 看当前表与重算结果；
 - **internal**（能力内部）：`service` 不引本能力 `detail` 或 `kernel::detail`；`service` 不直接做 IO（`std::fs` / `Command` / 网络 / `canonicalize`）；同能力的方法族之间不成环；覆盖 `api`（含 `api.rs` 与 `api/` 子目录）/ `service` / `domain` / `detail` 四个分区；
 - **fileSize**（文件粒度）：按角色分档判行数（实现 / 测试用例 / 测试支撑）与内联测试块，软线只回执、硬线失败，无 `EXEMPT`（`tests/gates/structure/size.js`）；
 - **reverse** / **presentation**：能力不反向依赖根或呈现层；

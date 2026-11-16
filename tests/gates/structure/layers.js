@@ -4,7 +4,10 @@
  * 判据：① src/capabilities/<名字>/ 必须归层，表里的名字也必须有目录——归层不许留静默空洞；
  *       ② 依赖边的目标层必须严格小于来源层（向上与同层都失败）——这是「业务保持向下依赖」的机器判定；
  *       ③ 层号从 1 起连续、kernel 为 0，不许用 T37 这类号把单元藏到没人注意的位置。
- * 扇出只进 notes 不判红：预算 ≤5 是迁移目标，等 work / turn / collab 拆完再转硬。
+ * 层号是**意图**（声明下来的稳定序），不是从代码算出来的事实：按当前依赖重算的分层必然每条边都向下，
+ * 拿它当判据等于恒真。所以表由人维持，判据比的是「意图 vs 现实」；越界时顺带报出「按现有依赖至少要第几层」。
+ * 扇出只进 notes 不判红：预算 ≤5 是迁移目标，转硬前先让回执稳定。
+ * 改表（合并 / 插入层）时用 `node tests/gates/structure/layers.js` 看当前表、边与重算结果。
  */
 "use strict";
 const fs = require("fs");
@@ -83,6 +86,32 @@ function edgesOf(root, dirs) {
   return edges;
 }
 
+/** 按当前依赖重算的最小层号：A 依赖 B 则 A 至少比 B 高一层。只用于越界时给建议，不当判据。 */
+function minimalLayers(tiers, edges) {
+  const deps = new Map();
+  for (const key of edges.keys()) {
+    const [from, to] = key.split(">");
+    if (!deps.has(from)) deps.set(from, []);
+    deps.get(from).push(to);
+  }
+  const memo = new Map();
+  const open = new Set();
+  const of = (cap) => {
+    if (memo.has(cap)) return memo.get(cap);
+    if (!tiers.has(cap) || cap === "kernel") return 0;
+    if (open.has(cap)) return 0;
+    open.add(cap);
+    let top = 0;
+    for (const d of deps.get(cap) || []) top = Math.max(top, of(d));
+    open.delete(cap);
+    memo.set(cap, top + 1);
+    return top + 1;
+  };
+  const out = new Map();
+  for (const cap of tiers.keys()) if (cap !== "kernel") out.set(cap, of(cap));
+  return out;
+}
+
 /** 分层判据：返回 problems（失败）与 notes（只报不拦）。 */
 function layers(root) {
   const { tiers, problems: tableProblems } = parseLayers(root);
@@ -91,6 +120,7 @@ function layers(root) {
   if (problems.length) return { problems, notes: [] };
 
   const edges = edgesOf(root, dirs);
+  const minimal = minimalLayers(tiers, edges);
   const fanout = new Map();
   for (const [key, file] of [...edges].sort()) {
     const [from, to] = key.split(">");
@@ -99,7 +129,9 @@ function layers(root) {
     const b = tiers.get(to);
     if (b >= a) {
       const rel = b === a ? "同层互依赖" : "向上依赖";
-      problems.push("分层：能力 " + from + "（第 " + a + " 层）" + rel + " " + to + "（第 " + b + " 层），见 " + file.slice(root.length + 1).replace(/\\/g, "/"));
+      const need = minimal.get(from);
+      const hint = need > a ? "，按现有依赖 " + from + " 至少要第 " + need + " 层" : "";
+      problems.push("分层：能力 " + from + "（第 " + a + " 层）" + rel + " " + to + "（第 " + b + " 层）" + hint + "，见 " + file.slice(root.length + 1).replace(/\\/g, "/"));
     }
   }
 
@@ -110,4 +142,24 @@ function layers(root) {
   return { problems, notes };
 }
 
-module.exports = { layers, parseLayers };
+module.exports = { layers, minimalLayers, parseLayers };
+
+/** 命令行：打印当前分层表与按依赖重算的最小层号，改表（合并 / 插入层）时看这一份。 */
+if (require.main === module) {
+  const root = path.resolve(__dirname, "..", "..", "..");
+  const { tiers } = parseLayers(root);
+  const dirs = dirsOf(root);
+  const edges = edgesOf(root, dirs);
+  const minimal = minimalLayers(tiers, edges);
+  const rows = [...tiers].filter(([k]) => k !== "kernel").sort((x, y) => x[1] - y[1] || x[0].localeCompare(y[0]));
+  console.log("层号  单元          依赖数  最小可行层");
+  for (const [cap, tier] of rows) {
+    const n = [...edges.keys()].filter((k) => k.startsWith(cap + ">")).length;
+    const need = minimal.get(cap);
+    console.log(String(tier).padEnd(6) + cap.padEnd(14) + String(n).padEnd(8) + need + (need !== tier ? "  ← 表与重算不一致" : ""));
+  }
+  const r = layers(root);
+  for (const p of r.problems) console.log("失败：" + p);
+  for (const n of r.notes) console.log("回执：" + n);
+  process.exit(r.problems.length ? 1 : 0);
+}

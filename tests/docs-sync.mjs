@@ -4,7 +4,8 @@
  * 来源（唯一）：
  * - platform-status：src/capabilities/vm/domain/exec.rs 的 VERIFIED_HOSTS + tests/<平台>/gaps.yaml 的条目数；
  * - gate-steps：tests/gates/steps.js 的 listModel()（与 `node run-tests.js --list --json` 同源），取 "T0 " 前缀步骤；
- * - success-markers：tests/lib/markers.js 的 MARKERS（标记的唯一声明）。
+ * - success-markers：tests/lib/markers.js 的 MARKERS（标记的唯一声明）；
+ * - layer-table：layers.yaml 的分层表（能力分层的唯一权威，文档里的表不手写）。
  * 用法：node tests/docs-sync.mjs [--check|--write]；默认 --check（CI / --docs 用）。
  */
 import fs from "node:fs";
@@ -76,6 +77,34 @@ function renderSuccessMarkers() {
   ].join("\n");
 }
 
+/** 分层表：层 / 单元 / 可依赖，全部取自 layers.yaml；层数与单元数由它现算，不写死在文档里。 */
+function renderLayerTable() {
+  const { parseLayers } = require("./gates/structure/layers.js");
+  const { tiers, problems } = parseLayers(ROOT);
+  if (problems.length) throw new Error(problems.join("；"));
+  const byTier = new Map();
+  for (const [name, tier] of tiers) {
+    if (name === "kernel") continue;
+    if (!byTier.has(tier)) byTier.set(tier, []);
+    byTier.get(tier).push(name);
+  }
+  const top = [...byTier.keys()].sort((a, b) => a - b);
+  const rows = ["| 0（地基库） | `kernel` | 无 |"];
+  for (const t of top) {
+    rows.push("| " + t + " | " + byTier.get(t).sort().map((n) => "`" + n + "`").join("、") + " | " + (t === 1 ? "0" : "0–" + (t - 1)) + " |");
+  }
+  const caps = [...tiers.keys()].filter((k) => k !== "kernel").length;
+  return [
+    "<!-- BEGIN:layer-table -->",
+    "| 层 | 单元 | 可依赖 |",
+    "| --- | --- | --- |",
+    ...rows,
+    "",
+    "> " + top.length + " 层、" + caps + " 个能力 + `kernel`：本表由 `layers.yaml` 生成（`node tests/docs-sync.mjs --write`），不手写。",
+    "<!-- END:layer-table -->",
+  ].join("\n");
+}
+
 const TARGETS = [
   { file: "README.md", marker: "platform-status", source: "platform-status", lang: "zh" },
   { file: "README_EN.md", marker: "platform-status-en", source: "platform-status", lang: "en" },
@@ -83,6 +112,7 @@ const TARGETS = [
   { file: "docs/vm/README.md", marker: "platform-status", source: "platform-status", lang: "zh" },
   { file: "docs/testing/levels.md", marker: "gate-steps", source: "gate-steps" },
   { file: "docs/testing/execution-ci.md", marker: "success-markers", source: "success-markers" },
+  { file: "ARCHITECTURE.md", marker: "layer-table", source: "layer-table" },
 ];
 
 function render(target, payload) {
@@ -90,6 +120,7 @@ function render(target, payload) {
     const text = target.lang === "en" ? payload.en : payload.zh;
     return "<!-- BEGIN:" + target.marker + " -->\n> " + text + "\n<!-- END:" + target.marker + " -->";
   }
+  if (target.source === "layer-table") return payload;
   if (target.source === "gate-steps") return payload;
   if (target.source === "success-markers") return payload;
   throw new Error("未知来源：" + target.source);
@@ -101,6 +132,7 @@ function main() {
     "platform-status": platformStatus(),
     "gate-steps": renderGateSteps(),
     "success-markers": renderSuccessMarkers(),
+    "layer-table": renderLayerTable(),
   };
   const problems = [];
   let changed = 0;
