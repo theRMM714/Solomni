@@ -9,7 +9,7 @@ pub mod systool;
 
 use self::fence::ToolFenceGate;
 use crate::capabilities::tools::api::{
-    Observations, ToolBook, ToolExec, ToolOutcome, ToolSchema, Tools,
+    Observations, Recorded, ToolBook, ToolExec, ToolOutcome, ToolSchema, Tools,
 };
 use crate::capabilities::tools::domain::roles::SystemTools;
 use crate::capabilities::tools::ports::{SysIo, SystoolsSource};
@@ -154,18 +154,23 @@ impl ToolExec for ToolsService {
         &self,
         sb: &crate::capabilities::workspace::api::Sandbox,
         builtin_tools: &ToolBook,
-        observations: &mut Observations,
+        observations: Observations,
         name: &str,
         args_json: &str,
-    ) -> ToolOutcome {
-        within_budget(crate::capabilities::tools::service::systool::execute(
+    ) -> Recorded {
+        let mut observations = observations;
+        let outcome = within_budget(crate::capabilities::tools::service::systool::execute(
             sb,
             builtin_tools,
             self.io.as_ref(),
-            observations,
+            &mut observations,
             name,
             args_json,
-        ))
+        ));
+        Recorded {
+            outcome,
+            observations,
+        }
     }
 
     fn release_call(&self, spec: &crate::kernel::api::FenceSpec) -> Result<(), String> {

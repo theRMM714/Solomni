@@ -341,13 +341,15 @@ impl CoreVerify for MemberTools {
         name: &str,
         args: &str,
     ) -> crate::capabilities::tools::api::ToolOutcome {
-        self.tools.run_builtin(
+        let done = self.tools.run_builtin(
             &self.face.sandbox,
             &self.face.builtin_tools,
-            &mut self.observations,
+            std::mem::take(&mut self.observations),
             name,
             args,
-        )
+        );
+        self.observations = done.observations;
+        done.outcome
     }
 }
 

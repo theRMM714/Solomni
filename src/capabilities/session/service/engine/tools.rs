@@ -63,13 +63,15 @@ pub(crate) fn run_branch(
         // **按这一回合的工具面校验**：不在面里的调用一律如实拒绝（不静默执行、也不当表态）。
         (String::new(), crate::capabilities::tools::api::refuse(name))
     } else if crate::capabilities::tools::api::is_builtin(name) {
-        let mut outcome = ctx.tools.run_builtin(
+        let done = ctx.tools.run_builtin(
             &ctx.face.sandbox,
             &ctx.face.builtin_tools,
-            &mut branch,
+            branch,
             name,
             args_json,
         );
+        let mut outcome = done.outcome;
+        branch = done.observations;
         commit_writes(ctx, &mut branch, &mut outcome);
         // read 只产生一条事实（一次调用只读一个路径）；没读到整份原文时是 None。
         read = branch.take_reads().into_iter().next();

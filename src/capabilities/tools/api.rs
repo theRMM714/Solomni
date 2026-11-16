@@ -43,6 +43,16 @@ pub trait Tools: Send + Sync {
     fn problems(&self) -> Vec<String>;
 }
 
+/// 目的：一次内置工具调用的结果：结论与更新后的观察账本。
+/// 约束：账本属于会话，**按值进出**——调用方交一份，拿回更新后的那份；不把可变借用递给别的能力（R16）。
+#[derive(Debug, Clone)]
+pub struct Recorded {
+    /// 目的：这次调用的结论（回给模型的那一段文本）。
+    pub outcome: ToolOutcome,
+    /// 目的：更新后的观察账本（调用方原样接管）。
+    pub observations: Observations,
+}
+
 /// 目的：工具能力的**执行面**（`service.rs` 实现）：别的能力要执行工具、要释放围栏授权，走这里。
 /// 约束：出站端口 `SysIo` 由它持有（R12）；`ProcessRunner` / `FenceHost` 是 kernel 共享的机制端口。
 ///   为什么 `SysIo` 的读写不在这里：它只被本能力自己的 domain（内置工具实现）用，
@@ -72,14 +82,15 @@ pub trait ToolExec: Send + Sync {
     fn run_shell(&self, run: &crate::kernel::ports::ShellRun<'_>) -> ToolOutcome;
 
     /// 执行一次**内置工具**：放行、寻址、参数校验在本能力的 domain，机制在 `SysIo` 后面。
+    /// 参数：`observations` = 会话的观察账本（按值传入）；返回结论与更新后的账本（见 `Recorded`）。
     fn run_builtin(
         &self,
         sb: &crate::capabilities::workspace::api::Sandbox,
         builtin_tools: &ToolBook,
-        observations: &mut Observations,
+        observations: Observations,
         name: &str,
         args_json: &str,
-    ) -> ToolOutcome;
+    ) -> Recorded;
 
     /// 一次调用的收尾：撤它自己的 ACE、删按次容器 profile 与临时目录（调用方只提出请求，不碰任何 ACL）。
     fn release_call(&self, spec: &crate::kernel::api::FenceSpec) -> Result<(), String>;
