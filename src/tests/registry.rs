@@ -172,6 +172,19 @@ pub(crate) fn model_guards_core_default_and_discovery_uses_stored_provider() {
 }
 
 #[test]
+pub(crate) fn agent_meta_is_the_single_conversion_from_a_registry_view() {
+    let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]));
+    agent_upsert_chara(&mut core, "调研", &["a"], "m", "说明", " 严谨 ").unwrap();
+    let view = core.registry().agent_views().remove(0);
+    let meta = crate::capabilities::registry::api::agent_meta(&view);
+    assert_eq!(meta.name, view.name);
+    assert!(!meta.transient, "登记处来的 agent 不是临时 agent");
+    assert_eq!(meta.modules, view.modules);
+    assert_eq!(meta.model, view.model);
+    assert_eq!(meta.chara, view.chara);
+}
+
+#[test]
 pub(crate) fn agent_crud_and_work_with_agents() {
     let mut core = core_with(
         vec![module_of("a"), module_of("b")],
@@ -226,7 +239,7 @@ pub(crate) fn agent_crud_and_work_with_agents() {
     let spec = WorkSpec {
         name: "w".to_string(),
         mode: WorkMode::Single,
-        agents: vec![AgentInstance {
+        agents: vec![AgentMeta {
             name: "调研".to_string(),
             transient: false,
             modules: vec!["a".to_string(), "b".to_string()],
@@ -262,14 +275,14 @@ pub(crate) fn agent_crud_and_work_with_agents() {
         name: "cross".to_string(),
         mode: WorkMode::Collab,
         agents: vec![
-            AgentInstance {
+            AgentMeta {
                 name: "x".to_string(),
                 transient: true,
                 modules: vec!["a".to_string()],
                 model: None,
                 chara: String::new(),
             },
-            AgentInstance {
+            AgentMeta {
                 name: "y".to_string(),
                 transient: true,
                 modules: vec!["a".to_string()],

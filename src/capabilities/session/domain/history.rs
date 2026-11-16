@@ -132,8 +132,9 @@ impl SessionMeta {
     }
 }
 
-/// 目的：会话里的一个 agent 实例记录。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// 目的：会话里的一个 agent 实例记录——会话名单的唯一形状（R15）：登记处视图经
+///   `registry::api::agent_meta` 转换，代理建会话与核心点名都复用它。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentMeta {
     /// 目的：实例名（重名时已加 -2/-3；也是其沙箱目录名）。

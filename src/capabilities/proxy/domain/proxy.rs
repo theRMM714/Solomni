@@ -6,6 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::capabilities::session::api::AgentMeta;
+
 pub const CATALOG: &str = "catalog_agents";
 pub const CREATE: &str = "create_session";
 pub const SEND: &str = "send_session_message";
@@ -225,7 +227,7 @@ impl ControlAction {
 /// 约束：代理**只认选项 id**，不给任何"从一句话猜选项"的规则——猜会替用户做主
 ///   （围栏卡的第一项正是"无围栏跑一次"，猜出来就是把用户的权限授出去）。
 pub fn relay_reply(
-    options: &[crate::capabilities::session::api::DecisionOption],
+    options: &[crate::capabilities::session::api::OptionView],
     reply: &str,
 ) -> Result<String, String> {
     let id = reply.trim();
@@ -263,18 +265,9 @@ pub fn relay_note(kind: MessageKind) -> String {
 /// 目的：只读清单事实——只含公开信息（无密钥、无真实私有路径、无私有工作区内容）。
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct Catalog {
-    pub agents: Vec<AgentFact>,
+    pub agents: Vec<crate::capabilities::registry::api::AgentView>,
     pub modules: Vec<ModuleFact>,
     pub models: Vec<ModelFact>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct AgentFact {
-    pub name: String,
-    pub modules: Vec<String>,
-    pub model: Option<String>,
-    pub note: String,
-    pub chara: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -350,7 +343,7 @@ pub struct ControlState {
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewSession {
     pub mode: SessionMode,
-    pub agents: Vec<NewAgent>,
+    pub agents: Vec<AgentMeta>,
     /// 目的：**这个会话的开头 / 本次需求**：single = 它的第一句（点火用的派发），collab = 本次需求。
     ///   建好就开始——不是"给某个 agent 的任务"（见宿主实现的 `create_session`）。
     pub task: String,
@@ -371,17 +364,6 @@ pub struct NewSession {
     /// 目的：外部工作区的围栏授权粒度（仅人经呈现层，与 workspace 同生共死）；None = 缺省（逐会话授/撤）。
     /// 约束：与 workspace 一样不暴露给核心代理，子会话沿父会话继承。
     pub workspace_grant: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct NewAgent {
-    pub name: String,
-    /// 目的：临时 agent（不在登记处）：随本次会话落档，不写回 agents.yaml。
-    pub transient: bool,
-    pub modules: Vec<String>,
-    pub model: Option<String>,
-    /// 目的：人设 / 身份（复用项取登记处自己的；临时项取声明里的）。
-    pub chara: String,
 }
 
 /// 目的：一条要转达的消息（元信息 + 正文）——正文由工具层从参数取，宿主据此真正投递。
@@ -505,7 +487,7 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
         }
         _ => {}
     }
-    let mut resolved: Vec<NewAgent> = Vec::new();
+    let mut resolved: Vec<AgentMeta> = Vec::new();
     for (i, a) in agents.into_iter().enumerate() {
         let (name, mut modules, model, chara, transient) = if a.reuse {
             let fact = catalog
@@ -567,7 +549,7 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
                 unique.push(id);
             }
         }
-        resolved.push(NewAgent {
+        resolved.push(AgentMeta {
             name,
             transient,
             modules: unique,
@@ -799,7 +781,7 @@ mod tests {
 
     fn facts() -> Catalog {
         Catalog {
-            agents: vec![AgentFact {
+            agents: vec![crate::capabilities::registry::api::AgentView {
                 name: "a".to_string(),
                 modules: vec!["m1".to_string()],
                 model: Some("gpt".to_string()),
@@ -1087,9 +1069,9 @@ mod tests {
     #[test]
     fn relay_reply_only_accepts_an_option_id_from_that_card() {
         use crate::capabilities::session::api::{
-            DecisionOption, OPT_ASK_REPLY, OPT_BEGIN, OPT_SLATE_CANCEL,
+            OPT_ASK_REPLY, OPT_BEGIN, OPT_SLATE_CANCEL, OptionView,
         };
-        let o = |id: &str| DecisionOption {
+        let o = |id: &str| OptionView {
             id: id.to_string(),
             label: id.to_string(),
         };

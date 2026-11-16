@@ -4,7 +4,7 @@
 //! 联动：runtime 只持 Box<dyn Registry>；实现见 service.rs；消费方是 runtime 与呈现层。
 
 pub use crate::capabilities::registry::domain::agents::{
-    AgentDraft, AgentView, Agents, RosterPick, check_reserved, listing, model_listing,
+    AgentDraft, AgentView, Agents, RosterPick, agent_meta, check_reserved, listing, model_listing,
     resolve_picks, unique_instance_name, validate_name,
 };
 pub use crate::capabilities::registry::domain::providers::{

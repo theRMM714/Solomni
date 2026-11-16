@@ -13,7 +13,7 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/capabilities/work.rs` | 能力入口与公开面 |
-| `src/capabilities/work/api.rs` | 入站 DTO 与 guest 三类：`WorkSpec` / `WorkOpened` / `AgentInstance` / `WorkMode` / 视图与报告、`GuestBoot` / `EditGuest` / `GuestDiagnose`、两段式中间结果 `PreparedActivation` / `ReadyActivation` |
+| `src/capabilities/work/api.rs` | 入站 DTO 与 guest 三类：`WorkSpec` / `WorkOpened` / `WorkMode` / 视图与报告、`GuestBoot` / `EditGuest` / `GuestDiagnose`、两段式中间结果 `PreparedActivation` / `ReadyActivation` |
 | `src/capabilities/work/domain.rs` | 建工作的纯逻辑：工作名校验、模块去重、单会话合并、工作形态文案、开场事实判定 |
 | `src/capabilities/work/service.rs` | 工作方法族的入口：`Work` 的能力面与两段结果（`PreparedWork` / `PendingWork` / `PreparedEdit`）、模块声明的能力表、运行包重建判据 |
 | `src/capabilities/work/service/create.rs` | 建工作两段与 guest 启动：占名、备工作区、装通道、起 guest、失败撤销；代理会话的创建也在这一处 |

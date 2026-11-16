@@ -726,7 +726,7 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
         .call(|core| {
             let spec = d::NewSession {
                 mode: d::SessionMode::Single,
-                agents: vec![d::NewAgent {
+                agents: vec![AgentMeta {
                     name: "c1".to_string(),
                     transient: true,
                     modules: vec!["m1".to_string()],
@@ -1107,7 +1107,7 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
     // 与形态不符的载荷：整条拒绝，不留半成品。
     let mut bad = spec.clone();
     bad.name = "w-user-proxy-2".to_string();
-    bad.agents = vec![crate::capabilities::work::api::AgentInstance {
+    bad.agents = vec![crate::capabilities::session::api::AgentMeta {
         name: "a".to_string(),
         transient: true,
         modules: vec!["m1".to_string()],
@@ -1289,14 +1289,14 @@ pub(crate) fn the_proxy_created_child_publishes_its_opening_facts() {
     let spec = d::NewSession {
         mode: d::SessionMode::Collab,
         agents: vec![
-            d::NewAgent {
+            AgentMeta {
                 name: "c1".to_string(),
                 transient: true,
                 modules: vec!["m1".to_string()],
                 model: None,
                 chara: String::new(),
             },
-            d::NewAgent {
+            AgentMeta {
                 name: "c2".to_string(),
                 transient: true,
                 modules: vec!["m2".to_string()],
@@ -1440,7 +1440,7 @@ pub(crate) fn ai_created_child_inherits_the_proxy_environment() {
             move |core| {
                 let spec = d::NewSession {
                     mode: d::SessionMode::Single,
-                    agents: vec![d::NewAgent {
+                    agents: vec![AgentMeta {
                         name: "a".to_string(),
                         transient: true,
                         modules: vec!["m1".to_string()],

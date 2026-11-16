@@ -107,6 +107,21 @@ pub struct Ask {
     pub on_unanswered: Option<String>,
 }
 
+/// 目的：长任务的进度快照——补齐环境与还原本地空间共用同一条进度通道（`seq` + `lines`）。
+/// 约束：共享形状只属于 kernel（R6）——两个产生方各自持有作业，形状不各造一份（R15）。
+#[derive(Debug, Clone, Serialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct JobState {
+    /// 目的：是否还在跑。
+    pub running: bool,
+    /// 目的：进度行的**单调序号**（前端按它增量取；`lines` 只留最近若干行，序号不会回退）。
+    pub seq: u64,
+    /// 目的：最近的进度行（更早的被挤掉）。
+    pub lines: Vec<String>,
+    /// 目的：失败原因（在跑或成功时为空）。
+    pub error: Option<String>,
+}
+
 impl Ask {
     /// 目的：这个选项 id 是不是本卡选项集里的一条（声明与回答都按它校验，不静默改写）。
     pub fn has_option(&self, id: &str) -> bool {

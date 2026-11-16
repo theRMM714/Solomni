@@ -20,8 +20,9 @@ pub struct DecisionMessage {
 }
 
 /// 目的：一个选项——id 是行为契约（回答按 id 分派、改文案不改行为），label 只给渲染。
+///   裁决卡的选项与思考档的选项是同一形状，全项目只此一份。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DecisionOption {
+pub struct OptionView {
     pub id: String,
     pub label: String,
 }
@@ -33,7 +34,7 @@ pub struct DecisionCard {
     pub id: String,
     pub envelope: DecisionEnvelope,
     pub message: DecisionMessage,
-    pub options: Vec<DecisionOption>,
+    pub options: Vec<OptionView>,
 }
 
 impl DecisionCard {
@@ -733,8 +734,8 @@ impl Pending {
 
     /// 目的：这一关的选项集（有序）：id 是行为契约，label 只给渲染。
     /// 约束：每一条都必须是真能执行的——通道里没有"置灰"这一说（见 session-model.md「请用户裁决」）。
-    pub fn options(&self) -> Vec<DecisionOption> {
-        let o = |id: &str, label: &str| DecisionOption {
+    pub fn options(&self) -> Vec<OptionView> {
+        let o = |id: &str, label: &str| OptionView {
             id: id.to_string(),
             label: label.to_string(),
         };

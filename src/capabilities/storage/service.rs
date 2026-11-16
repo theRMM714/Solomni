@@ -6,11 +6,11 @@
 use crate::capabilities::provision::api::Provision;
 use crate::capabilities::storage::api::{
     CAT_BUILD, CAT_DOWNLOAD, CAT_LOGS, CAT_OVERLAYS, CleanKind, CleanOutcome, CleanRequest,
-    GcAction, GcReport, JobState, LastGc, SpaceCategory, SpaceItem, SpaceReport, Storage,
-    StoragePolicy,
+    GcAction, GcReport, LastGc, SpaceCategory, SpaceItem, SpaceReport, Storage, StoragePolicy,
 };
 use crate::capabilities::storage::domain::{self, safe_id};
 use crate::capabilities::storage::ports::{GuestLiveness, SpaceReclaim, SpaceSurvey};
+use crate::kernel::api::JobState;
 use crate::kernel::ports::Log;
 use std::sync::{Arc, Mutex};
 

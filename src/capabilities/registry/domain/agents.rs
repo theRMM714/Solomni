@@ -38,6 +38,18 @@ pub struct AgentView {
     pub chara: String,
 }
 
+/// 目的：登记处视图 → 会话里的 agent 实例（`transient=false`）。**唯一**的转换口径：
+///   点名建工作与「无参 = 全部」两条路都经这里，不在调用方各写一份同形转换（R15）。
+pub fn agent_meta(v: &AgentView) -> AgentMeta {
+    AgentMeta {
+        name: v.name.clone(),
+        transient: false,
+        modules: v.modules.clone(),
+        model: v.model.clone(),
+        chara: v.chara.clone(),
+    }
+}
+
 /// 目的：保存 agent 的入参（用户给的定义）。
 #[derive(Debug, Clone)]
 pub struct AgentDraft {

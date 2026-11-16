@@ -7,12 +7,13 @@ use serde_json::{Value, json};
 
 use crate::capabilities::builds::api::Built;
 use crate::capabilities::packages::api::BaseFacts;
-use crate::capabilities::storage::api::{CleanOutcome, GcAction, GcReport, JobState};
+use crate::capabilities::storage::api::{CleanOutcome, GcAction, GcReport};
 use crate::capabilities::system::api::{
     BuildRequest, EnsureRequest, Fault, FenceFacts, GcRequest, ResetRequest, System, WorkGcRequest,
     toolchain_json, toolchain_lines,
 };
 use crate::capabilities::workspace::api::GcReport as WorkspaceGc;
+use crate::kernel::api::JobState;
 use crate::presentation::cli::boot;
 
 /// 目的：合成一份系统维护面——每条命令要的分支由字段决定，用例不碰磁盘也不起进程。

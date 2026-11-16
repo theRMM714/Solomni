@@ -168,7 +168,7 @@ pub(crate) fn single_work(
     crate::capabilities::work::api::WorkSpec {
         name: name.to_string(),
         mode: crate::capabilities::work::api::WorkMode::Single,
-        agents: vec![crate::capabilities::work::api::AgentInstance {
+        agents: vec![crate::capabilities::session::api::AgentMeta {
             name: modules[0].to_string(),
             transient: true,
             modules: modules.iter().map(|s| s.to_string()).collect(),

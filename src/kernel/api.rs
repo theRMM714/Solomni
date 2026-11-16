@@ -8,7 +8,7 @@ pub use crate::kernel::contracts::fence::{
 };
 pub use crate::kernel::contracts::run::RunOutcome;
 pub use crate::kernel::contracts::types::{
-    Ask, AskOutcome, DEFAULT_LLM_TIMEOUT_SECS, ExecSpec, SessionId, Tier, ToolOutcome,
+    Ask, AskOutcome, DEFAULT_LLM_TIMEOUT_SECS, ExecSpec, JobState, SessionId, Tier, ToolOutcome,
     valid_capability,
 };
 pub use crate::kernel::detail::fs_meta::{

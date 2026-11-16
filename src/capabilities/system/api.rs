@@ -2,14 +2,16 @@
 //! 管：FenceFacts、各类请求、System 用例 trait 与工具链事实的渲染。
 //! 不管：怎么回收 / 怎么补齐（在 service 与各能力）；命令语法与回执文案（在呈现层）。
 //! 联动：presentation/cli/boot.rs 与 Web 的维护入口经它执行；事实来自 storage / provision / builds / workspace / vm。
+//!   作业进度快照 `JobState` 是 kernel 的共享形状，这里只转出给呈现层。
 
 use serde_json::Value;
 
 use crate::capabilities::builds::api::Built;
 use crate::capabilities::packages::api::BaseFacts;
 use crate::capabilities::provision::api::Provision;
-use crate::capabilities::storage::api::{CleanOutcome, GcReport, JobState, Storage};
+use crate::capabilities::storage::api::{CleanOutcome, GcReport, Storage};
 use crate::capabilities::workspace::api::GcReport as WorkspaceGc;
+pub use crate::kernel::api::JobState;
 
 /// 目的：基础工具链 profile——与清单 toolchain 条目同一组（自检与启动报告共用）。
 pub const TOOLCHAIN_PROFILE: [&str; 3] = ["python", "node", "cc"];

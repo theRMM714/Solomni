@@ -5,7 +5,8 @@
 
 use serde_json::{Value, json};
 
-use crate::capabilities::storage::api::{CleanOutcome, GcReport, JobState};
+use crate::capabilities::storage::api::{CleanOutcome, GcReport};
+use crate::capabilities::system::api::JobState;
 use crate::capabilities::system::api::{
     BuildRequest, EnsureRequest, Fault, GcRequest, ResetRequest, SetupMode, System, WorkGcRequest,
 };

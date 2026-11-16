@@ -3,7 +3,8 @@
 //! 不管：谁在什么时机调用它们（create.rs / config.rs / runtime 的代理入口）。
 //! 联动：create.rs、config.rs 与 runtime 的代理入口共用这里，避免同一规则两处实现。
 
-use crate::capabilities::work::api::{AgentInstance, WorkMode};
+use crate::capabilities::session::api::AgentMeta;
+use crate::capabilities::work::api::WorkMode;
 
 /// 目的：模块列表保序去重（一个 agent 内重复只留一份；跨 agent 的重叠是合法的共用）。
 pub(crate) fn dedup_modules(list: &[String]) -> Vec<String> {
@@ -18,7 +19,7 @@ pub(crate) fn dedup_modules(list: &[String]) -> Vec<String> {
 
 /// 目的：单模式的组合语义——多个 agent 的模块并成一个**临时组合**实例（去重、保序；模型取核心默认）。
 /// 约束：人设取空——多份人设无法诚实合并，由用户在会话配置里补。
-pub(crate) fn merge_into_one(picked: &[AgentInstance], name: &str) -> AgentInstance {
+pub(crate) fn merge_into_one(picked: &[AgentMeta], name: &str) -> AgentMeta {
     let mut merged: Vec<String> = Vec::new();
     for a in picked {
         for id in &a.modules {
@@ -27,7 +28,7 @@ pub(crate) fn merge_into_one(picked: &[AgentInstance], name: &str) -> AgentInsta
             }
         }
     }
-    AgentInstance {
+    AgentMeta {
         name: name.to_string(),
         transient: true,
         modules: merged,

@@ -352,12 +352,15 @@ pub(crate) fn split_names(arg: &str) -> Vec<String> {
 }
 
 /// 目的：点名：按名字取登记处存档 → 用例输入；空登记处给引导（文案见 `NO_AGENTS`）。
-pub(crate) fn pick_agents(faces: &Faces, names: &[String]) -> Result<Vec<AgentInstance>, String> {
+pub(crate) fn pick_agents(faces: &Faces, names: &[String]) -> Result<Vec<AgentMeta>, String> {
     if faces.registry.agents()?.is_empty() {
         return Err(NO_AGENTS.to_string());
     }
     let views = faces.registry.pick_agents(names)?;
-    Ok(views.iter().map(AgentInstance::from_view).collect())
+    Ok(views
+        .iter()
+        .map(crate::capabilities::registry::api::agent_meta)
+        .collect())
 }
 
 /// 目的：虚拟机档的虚拟根怎么选——本机只有一个装齐的就自动用它；多个（或一个都没装齐）返回 None，由调用方如实说明。
@@ -385,7 +388,7 @@ pub(crate) fn create_session_action(
     faces: &Faces,
     name: &str,
     mode: &str,
-    agents: &[AgentInstance],
+    agents: &[AgentMeta],
     task: Option<&str>,
     tier: Tier,
 ) -> Result<String, String> {

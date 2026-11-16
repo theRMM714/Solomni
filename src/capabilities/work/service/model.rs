@@ -78,7 +78,7 @@ impl Work {
                     .iter()
                     .all(|m| registry.thinking_supports(Some(m), &l.id))
                 {
-                    options.push(ThinkingOptionView {
+                    options.push(OptionView {
                         id: l.id.clone(),
                         label: l.id.clone(),
                     });

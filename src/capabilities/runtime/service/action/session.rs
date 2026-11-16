@@ -4,6 +4,7 @@
 //! 联动：execute_action 的建会话与控会话分支调它；调用者身份由动作表给出。
 
 use super::*;
+use crate::capabilities::session::api::AgentMeta;
 
 impl Handle {
     /// 目的：建会话的**唯一实现**——人经呈现层（没有父）与核心代理（有父）都走这条。
@@ -147,7 +148,7 @@ impl Handle {
         args: &serde_json::Value,
     ) -> Result<d::NewSession, String> {
         let mode = d::SessionMode::parse(args.get("mode").and_then(|v| v.as_str()).unwrap_or(""))?;
-        let mut agents: Vec<d::NewAgent> = Vec::new();
+        let mut agents: Vec<crate::capabilities::session::api::AgentMeta> = Vec::new();
         if let Some(arr) = args.get("agents").and_then(|v| v.as_array()) {
             for (i, a) in arr.iter().enumerate() {
                 let obj = a
@@ -161,7 +162,7 @@ impl Handle {
                         .into_iter()
                         .next()
                         .ok_or_else(|| format!("agents[{}]：agent {} 不在登记处", i, want))?;
-                    agents.push(d::NewAgent {
+                    agents.push(AgentMeta {
                         name: v.name,
                         transient: false,
                         modules: v.modules,
@@ -203,7 +204,7 @@ impl Handle {
                     .unwrap_or("")
                     .trim()
                     .to_string();
-                agents.push(d::NewAgent {
+                agents.push(AgentMeta {
                     name,
                     transient,
                     modules,

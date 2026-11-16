@@ -5,8 +5,7 @@
 //! 不管：怎么建、怎么改、怎么报（在 service 里）；呈现层的 JSON 封装。
 //! 联动：runtime 与呈现层都从这里取类型；guest 任务的 `run()` 在调用方线程上跑。
 
-use crate::capabilities::registry::api::AgentView;
-use crate::capabilities::session::api::{HistoryView, SessionEvent};
+use crate::capabilities::session::api::{AgentMeta, HistoryView, OptionView, SessionEvent};
 use crate::capabilities::vm::api::{ExecPlan, GuestStop, Vm};
 use crate::capabilities::workspace::api::Sandboxes;
 use crate::kernel::api::{SessionId, Tier};
@@ -28,39 +27,12 @@ pub enum WorkMode {
     Proxy,
 }
 
-/// 目的：一次工作里的一个 agent 实例（用户选定，或核心代拟的临时组合）。
-///   agent = 一个 AI 实例 + N 份模块能力 + 一个模型 + 一个沙箱。
-#[derive(Debug, Clone)]
-pub struct AgentInstance {
-    pub name: String,
-    /// 目的：是否临时 agent（不来自 .home/agents.yaml，只随本次工作落档）。
-    pub transient: bool,
-    pub modules: Vec<String>,
-    /// 目的：该 agent 的模型（模型 id）；None = 核心默认。
-    pub model: Option<String>,
-    /// 目的：人设 / 身份（空 = 不产生人设块）。
-    pub chara: String,
-}
-
-impl AgentInstance {
-    /// 目的：登记处视图 → 用例输入。**唯一**的转换口径（点名与「无参 = 全部」两条路共用）。
-    pub fn from_view(v: &AgentView) -> AgentInstance {
-        AgentInstance {
-            name: v.name.clone(),
-            transient: false,
-            modules: v.modules.clone(),
-            model: v.model.clone(),
-            chara: v.chara.clone(),
-        }
-    }
-}
-
 /// 目的：创建工作的全部用户决定（形态 + 参与的 agent；模型按 agent 指定）。
 #[derive(Debug, Clone)]
 pub struct WorkSpec {
     pub name: String,
     pub mode: WorkMode,
-    pub agents: Vec<AgentInstance>,
+    pub agents: Vec<AgentMeta>,
     /// 目的：协作：本次需求（必填）。
     pub task: Option<String>,
     /// 目的：保留：委托核心代拟名单（协作且未给 agent 时）。
@@ -360,18 +332,9 @@ pub struct ThinkingView {
     /// 目的：给人看的当前档（会话选择，否则共同默认；没有可显示的档时是「各模型默认 / 未设置」）。
     pub label: String,
     /// 目的：可选档（只列这组模型都登记了的档；按全局目录顺序）。
-    pub options: Vec<ThinkingOptionView>,
+    pub options: Vec<OptionView>,
     /// 目的：现在这组模型/目录有什么要注意的（空 = 正常）。
     pub note: String,
-}
-
-/// 目的：一个可选思考档：只列这组模型都登记了的档。
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct ThinkingOptionView {
-    /// 目的：档位 id。
-    pub id: String,
-    /// 目的：给人看的档位名。
-    pub label: String,
 }
 
 /// 目的：会话文件清单视图（前端 @ 菜单与「长路径缩写」用）：相对清单 + 真实根。

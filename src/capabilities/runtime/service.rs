@@ -30,9 +30,9 @@ use crate::capabilities::turn::api::{SPEAKER, TurnOps};
 use crate::capabilities::vm::api::Vm;
 use crate::capabilities::work::api::WorkOps;
 use crate::capabilities::work::api::{
-    AgentInstance, AgentSuggestion, EditGuest, FilesView, GuestBoot, PreparedActivation,
-    PreparedEdit, PreparedWork, RuntimeReport, SessionConfig, SessionEdit, SessionView,
-    TierChoices, Work, WorkMode, WorkOpened, WorkSpec,
+    AgentSuggestion, EditGuest, FilesView, GuestBoot, PreparedActivation, PreparedEdit,
+    PreparedWork, RuntimeReport, SessionConfig, SessionEdit, SessionView, TierChoices, Work,
+    WorkMode, WorkOpened, WorkSpec,
 };
 use crate::capabilities::workspace::api::{MAX_ASSET_BYTES, Workspace};
 use crate::kernel::api::{JobRegistry, Tier};

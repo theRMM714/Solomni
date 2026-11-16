@@ -596,14 +596,14 @@ pub(crate) fn create_work_validates_user_choices() {
         name: "x".to_string(),
         mode: WorkMode::Single,
         agents: vec![
-            AgentInstance {
+            AgentMeta {
                 name: "甲".to_string(),
                 transient: true,
                 modules: vec!["a".to_string()],
                 model: None,
                 chara: String::new(),
             },
-            AgentInstance {
+            AgentMeta {
                 name: "乙".to_string(),
                 transient: true,
                 modules: vec!["b".to_string()],

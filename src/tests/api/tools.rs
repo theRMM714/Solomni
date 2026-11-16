@@ -8,7 +8,7 @@ use super::super::doubles::{decl, model_draft, module_of, module_with_runtimes};
 use super::super::{ops_with, single_work};
 use super::support::spawn;
 use crate::capabilities::runtime::api::{Acted, ActionCall, Caller, SessionEvent};
-use crate::capabilities::work::api::{AgentInstance, WorkMode};
+use crate::capabilities::work::api::WorkMode;
 use crate::presentation::faces::Faces;
 
 use crate::capabilities::runtime::api::{Handle, Output};
@@ -146,7 +146,10 @@ fn pick_agents_names_the_unknown_and_lists_the_rest() {
     assert!(faces.registry.pick_agents(&[]).is_err(), "没点名 = 报错");
     let views = faces.registry.agents().expect("读登记处");
     assert_eq!(
-        views.iter().map(AgentInstance::from_view).count(),
+        views
+            .iter()
+            .map(crate::capabilities::registry::api::agent_meta)
+            .count(),
         1,
         "视图 → 实例不丢项"
     );

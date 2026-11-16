@@ -20,8 +20,11 @@ pub(super) fn single_flow(faces: &Faces, arg: &str) {
     }
     // 点名 1 个 = 直接用该 agent（模块数不限）；点名多个 / 无参 = 全部。
     // **「多个并成一个临时组合」的组合语义由核心在建工作时收口**（前端只交点名结果）。
-    let picked: Vec<AgentInstance> = if arg.trim().is_empty() {
-        views.iter().map(AgentInstance::from_view).collect()
+    let picked: Vec<AgentMeta> = if arg.trim().is_empty() {
+        views
+            .iter()
+            .map(crate::capabilities::registry::api::agent_meta)
+            .collect()
     } else {
         match pick_agents(faces, &split_names(arg)) {
             Ok(l) => l,
@@ -128,7 +131,7 @@ pub(super) fn collab_flow(faces: &Faces, arg: &str) {
     let delegate = trimmed.is_empty() || trimmed == "?";
     let task = prompt("需求>");
     // 代拟（无参或 ?）= 核心拟名单；点名 = 用登记处里的那几个 agent。
-    let agents: Vec<AgentInstance> = if delegate {
+    let agents: Vec<AgentMeta> = if delegate {
         Vec::new()
     } else {
         match pick_agents(faces, &split_names(trimmed)) {
