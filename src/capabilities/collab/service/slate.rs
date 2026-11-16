@@ -37,12 +37,12 @@ impl CollabSession {
                 chat: self.core_chat.as_mut(),
                 tool_mode: self.core_mode,
                 opts: CompleteOpts::plain(false),
-                cancel: None,
                 verify: verify
                     .as_mut()
                     .map(|v| v as &mut dyn crate::capabilities::session::api::CoreVerify),
-                sink,
             },
+            None,
+            sink,
         );
         // 核心这一次调用结束了：交回"谁在干活"——下一棒（泵的下一步 / 等用户）会再推。
         sink(crate::capabilities::session::api::idle());

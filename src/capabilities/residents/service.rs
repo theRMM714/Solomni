@@ -180,12 +180,9 @@ impl ResidentOps for ResidentsService {
         // 本机档的运行包：与模块工具同一把尺子（HostProbe 提供事实，packages 给计划）。
         let (path, roots) = if let Some((packages, probe)) = &self.host {
             let current_path = std::env::var_os("PATH").unwrap_or_default();
-            let has_exe = |n: &str| probe.has_exe(n);
-            let bin_ok = |p: &std::path::Path| probe.is_dir(p);
             let base = packages.base();
             let facts = pkgs::Facts {
-                has_exe: &has_exe,
-                bin_ok: &bin_ok,
+                probe: &pkgs::HostExec(&**probe),
                 current_path: &current_path,
                 base: &base.active,
                 host_fallback: &base.fallback,

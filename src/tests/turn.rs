@@ -4,7 +4,7 @@
 //! 联动：`src/capabilities/turn/service/state.rs`、`src/capabilities/runtime/service.rs`。
 
 use super::prelude::*;
-use crate::capabilities::turn::api::TurnState;
+use crate::capabilities::turn::service::state::TurnState;
 use crate::kernel::api::SessionId;
 
 /// 目的：验运行态按会话名记账，追加与撤销互不影响别的会话。

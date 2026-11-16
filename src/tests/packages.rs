@@ -16,6 +16,21 @@ use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
+/// 目的：测试用的宿主事实：两个闭包就够（选型只问可执行名与 bin 目录）。
+struct Probe2<'a> {
+    has: &'a dyn Fn(&str) -> bool,
+    bin: &'a dyn Fn(&Path) -> bool,
+}
+
+impl pkgs::ExecProbe for Probe2<'_> {
+    fn has_exe(&self, name: &str) -> bool {
+        (self.has)(name)
+    }
+    fn bin_ok(&self, dir: &Path) -> bool {
+        (self.bin)(dir)
+    }
+}
+
 #[test]
 pub(crate) fn base_capabilities_prefer_project_then_usable_host_fallback() {
     let modules = vec![module_with_runtimes("a", &["python", "gcc"])];
@@ -33,8 +48,10 @@ pub(crate) fn base_capabilities_prefer_project_then_usable_host_fallback() {
         },
     );
     let facts = Facts {
-        has_exe: &has,
-        bin_ok: &bin_ok,
+        probe: &Probe2 {
+            has: &has,
+            bin: &bin_ok,
+        },
         current_path: current,
         base: &base,
         host_fallback: &fallback,
@@ -74,8 +91,10 @@ pub(crate) fn base_capability_uses_host_fallback_even_when_fence_cannot_grant() 
         },
     );
     let facts = Facts {
-        has_exe: &has,
-        bin_ok: &bin_ok,
+        probe: &Probe2 {
+            has: &has,
+            bin: &bin_ok,
+        },
         current_path: current,
         base: &base,
         host_fallback: &fallback,
@@ -97,8 +116,10 @@ pub(crate) fn base_capability_uses_host_fallback_even_when_fence_cannot_grant() 
 
     let empty = BTreeMap::new();
     let facts = Facts {
-        has_exe: &has,
-        bin_ok: &bin_ok,
+        probe: &Probe2 {
+            has: &has,
+            bin: &bin_ok,
+        },
         current_path: current,
         base: &base,
         host_fallback: &empty,
@@ -602,8 +623,10 @@ pub(crate) fn host_plan_prefers_packages_and_falls_back_to_host_path() {
     let base: Vec<(String, String)> = Vec::new();
     let fallback = std::collections::BTreeMap::new();
     let facts = Facts {
-        has_exe: &has_any,
-        bin_ok: &bin_ok,
+        probe: &Probe2 {
+            has: &has_any,
+            bin: &bin_ok,
+        },
         current_path: current,
         base: &base,
         host_fallback: &fallback,
@@ -644,8 +667,10 @@ pub(crate) fn host_plan_requires_a_pin_for_multiple_versions() {
     let base: Vec<(String, String)> = Vec::new();
     let fallback = std::collections::BTreeMap::new();
     let facts = Facts {
-        has_exe: &has,
-        bin_ok: &bin_ok,
+        probe: &Probe2 {
+            has: &has,
+            bin: &bin_ok,
+        },
         current_path: OsStr::new(""),
         base: &base,
         host_fallback: &fallback,
@@ -676,8 +701,10 @@ pub(crate) fn host_plan_refuses_system_and_binless_packages() {
     let base: Vec<(String, String)> = Vec::new();
     let fallback = std::collections::BTreeMap::new();
     let facts = Facts {
-        has_exe: &has,
-        bin_ok: &bin_ok,
+        probe: &Probe2 {
+            has: &has,
+            bin: &bin_ok,
+        },
         current_path: OsStr::new(""),
         base: &base,
         host_fallback: &fallback,
@@ -706,8 +733,10 @@ pub(crate) fn host_plan_refuses_system_and_binless_packages() {
     let base: Vec<(String, String)> = Vec::new();
     let fallback = std::collections::BTreeMap::new();
     let facts = Facts {
-        has_exe: &has,
-        bin_ok: &bin_ok,
+        probe: &Probe2 {
+            has: &has,
+            bin: &bin_ok,
+        },
         current_path: OsStr::new(""),
         base: &base,
         host_fallback: &fallback,

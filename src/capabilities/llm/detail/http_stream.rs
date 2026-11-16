@@ -5,9 +5,10 @@
 
 use super::endpoint::{Attempt, retryable_status};
 use super::http_agent::redact;
-use crate::capabilities::llm::api::{Chunk, CompleteOpts, Completion, TokenUsage, ToolCall};
+use crate::capabilities::llm::api::{
+    Cancelled, Chunk, CompleteOpts, Completion, TokenUsage, ToolCall,
+};
 use futures_util::StreamExt;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -44,14 +45,14 @@ fn idle_budget(secs: u64) -> Duration {
     budget(secs.min(STREAM_IDLE_TIMEOUT_SECS))
 }
 
-fn is_cancelled(cancel: Option<&AtomicBool>) -> bool {
-    cancel.is_some_and(|c| c.load(Ordering::Relaxed))
+fn is_cancelled(cancel: Option<&dyn Cancelled>) -> bool {
+    cancel.is_some_and(|c| c.cancelled())
 }
 
-async fn wait_cancel(cancel: Option<&AtomicBool>) {
+async fn wait_cancel(cancel: Option<&dyn Cancelled>) {
     match cancel {
         Some(c) => {
-            while !c.load(Ordering::Relaxed) {
+            while !c.cancelled() {
                 tokio::time::sleep(CANCEL_POLL).await;
             }
         }
@@ -230,7 +231,7 @@ fn feed(
     buf: &mut Vec<u8>,
     state: &mut StreamState,
     on: &mut dyn FnMut(Chunk) -> bool,
-    cancel: Option<&AtomicBool>,
+    cancel: Option<&dyn Cancelled>,
 ) -> Feed {
     while !is_cancelled(cancel) {
         let Some(pos) = buf.iter().position(|b| *b == b'\n') else {
@@ -356,7 +357,7 @@ pub(crate) async fn attempt_async(
     key: &str,
     body: &str,
     timeout_secs: u64,
-    cancel: Option<&AtomicBool>,
+    cancel: Option<&dyn Cancelled>,
 ) -> Attempt<Completion> {
     if is_cancelled(cancel) {
         return cancelled();
@@ -419,7 +420,7 @@ pub(crate) async fn attempt_async(
 
 async fn read_text(
     resp: reqwest::Response,
-    cancel: Option<&AtomicBool>,
+    cancel: Option<&dyn Cancelled>,
     deadline: tokio::time::Instant,
     key: &str,
 ) -> Result<String, String> {

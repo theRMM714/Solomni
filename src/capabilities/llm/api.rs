@@ -3,6 +3,7 @@
 //! 不管：信封解析与回执装配（在 domain）；出站端口的定义（在 ports）；适配器装配（在组合根）。
 //! 联动：runtime、其它能力与呈现层都经这里会话；实现见 service.rs；出站端口只由 service 持有（R12）。
 
+pub use crate::capabilities::llm::domain::cancel::cancel_flag;
 pub use crate::capabilities::llm::domain::envelope::{
     Malformed, Reply, Tail, ToolInvoke, Verb, parse,
 };
@@ -100,6 +101,12 @@ impl Default for LlmOpts {
     }
 }
 
+/// 目的：一次调用的取消位——调用方置位，适配器只读（不拿原子本身）。
+pub trait Cancelled: Send + Sync {
+    /// 目的：这一位现在置位没有。
+    fn cancelled(&self) -> bool;
+}
+
 /// 目的：一次补全的请求选项——策略在 runtime，机制在适配器。
 /// 约束：每轮克隆一份；只换 tools / cancel 槽位，其余照旧。
 #[derive(Clone)]
@@ -111,7 +118,7 @@ pub struct CompleteOpts<'a> {
     /// 约束：非流式调用把它当整次调用的上限（那时没有中间的"已收到"可重置）。
     pub timeout_secs: u64,
     /// 目的：用户「停止」的取消位；适配器等待数据块时轮询它，置位即关闭请求。
-    pub cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    pub cancel: Option<std::sync::Arc<dyn Cancelled>>,
     /// 目的：本轮要合并进请求体的思考参数片段（None = 不发）。
     pub thinking: Option<std::sync::Arc<serde_json::Value>>,
 }
@@ -144,10 +151,7 @@ impl<'a> CompleteOpts<'a> {
     }
 
     /// 目的：接上这次生成的取消位；停止时适配器能立刻关闭在途请求。
-    pub fn with_cancel(
-        mut self,
-        cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    ) -> CompleteOpts<'a> {
+    pub fn with_cancel(mut self, cancel: std::sync::Arc<dyn Cancelled>) -> CompleteOpts<'a> {
         self.cancel = Some(cancel);
         self
     }

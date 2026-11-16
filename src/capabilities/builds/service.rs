@@ -7,8 +7,8 @@ use crate::capabilities::builds::api::{Builds, Built, Target};
 use crate::capabilities::builds::ports::{BuildCache, BuildStates, BuiltRecord, SourceDigest};
 use crate::capabilities::modules::api::{BuildDecl, Module};
 use crate::capabilities::packages::api::{
-    Facts, Library, Packages, PinPolicy, PlannedPackage, Provider, build_packages, diagnose_text,
-    plan_host_requests, requests_for,
+    Facts, HostExec, Library, Packages, PinPolicy, PlannedPackage, Provider, build_packages,
+    diagnose_text, plan_host_requests, requests_for,
 };
 use crate::capabilities::provision::api::Provision;
 use crate::capabilities::storage::api::Storage;
@@ -18,7 +18,7 @@ use crate::capabilities::vm::api::{
 use crate::kernel::api::{FenceSpec, Tier};
 use crate::kernel::ports::{FenceGate, FenceHost, HostProbe, Log, ProcessRunner};
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 /// 目的：构建能力——持包库、虚拟机、补齐与执行器，按 `build:` 在目标环境编出模块产物。
@@ -194,11 +194,8 @@ impl BuildsService {
     ) -> Result<Built, String> {
         let base = self.packages.base();
         let current_path = std::env::var_os("PATH").unwrap_or_default();
-        let has_exe = |name: &str| self.probe.has_exe(name);
-        let bin_ok = |path: &Path| self.probe.is_dir(path);
         let facts = Facts {
-            has_exe: &has_exe,
-            bin_ok: &bin_ok,
+            probe: &HostExec(&*self.probe),
             current_path: &current_path,
             base: &base.active,
             host_fallback: &base.fallback,

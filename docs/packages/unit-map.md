@@ -13,5 +13,5 @@
 | `src/capabilities/packages/service.rs` | 用例与端口持有者：持 `PackageSource`（R12），交出包库快照与目录 |
 | `src/capabilities/packages/ports.rs` | 出站端口：`PackageSource`（扫描 runtimes/ 包清单） |
 | `src/capabilities/packages/domain/manifest.rs` | 包契约（package.yaml）校验、去重、系统路径冲突预检与平台分包选择（纯逻辑） |
-| `src/capabilities/packages/domain/plan.rs` | 选型诊断、按能力选包、装载顺序、构建期包计划与不可用能力汇总（纯逻辑） |
+| `src/capabilities/packages/domain/plan.rs` | 选型诊断、按能力选包、装载顺序、构建期包计划与不可用能力汇总（纯逻辑）；宿主探测经只读端口 `ExecProbe`（适配器 `HostExec`） |
 | `src/capabilities/packages/detail/fs_packages.rs` | `PackageSource` 的磁盘实现：扫描 runtimes/ |

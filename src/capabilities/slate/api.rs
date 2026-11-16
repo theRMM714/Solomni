@@ -7,11 +7,9 @@ use crate::capabilities::llm::api::{Chat, CompleteOpts, ToolMode};
 use crate::capabilities::modules::api::Roster;
 use crate::capabilities::prompt::api::Prompt;
 use crate::capabilities::registry::api::{Agents, ModelEntry};
-use crate::capabilities::session::api::{AgentMeta, CoreVerify, SessionEvent};
+use crate::capabilities::session::api::{AgentMeta, CoreVerify};
 use crate::capabilities::tools::api::Tools;
 use std::collections::BTreeMap;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 
 pub use crate::capabilities::slate::service::propose;
 
@@ -66,10 +64,6 @@ pub struct Request<'a> {
     pub tool_mode: ToolMode,
     /// 目的：这一次调用的通道参数（流式 / 预算）。
     pub opts: CompleteOpts<'static>,
-    /// 目的：取消标志（`None` = 这一趟不听取消）。
-    pub cancel: Option<&'a Arc<AtomicBool>>,
     /// 目的：只读核实回路（协作会话有工具面；一次性推荐没有）。
     pub verify: Option<&'a mut dyn CoreVerify>,
-    /// 目的：核心这一轮的事实行推给谁（落不落盘由调用方按会话种类定）。
-    pub sink: &'a mut dyn FnMut(SessionEvent),
 }

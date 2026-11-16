@@ -253,7 +253,9 @@ pub fn converse_with(
                 cancel: None,
                 thinking: llm.thinking.clone(),
             }
-            .with_cancel(std::sync::Arc::clone(&cancel));
+            .with_cancel(crate::capabilities::llm::api::cancel_flag(
+                std::sync::Arc::clone(&cancel),
+            ));
             chat.complete(&msgs, opts, &mut sink)
         };
         // 用户「停止」：请求已被取消关闭。停止优先于同一次调用的错误；

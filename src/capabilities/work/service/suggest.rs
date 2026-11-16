@@ -50,11 +50,11 @@ impl Work {
                 chat: chat.as_mut(),
                 tool_mode: registry.tool_mode(None),
                 opts: crate::capabilities::llm::api::CompleteOpts::plain(false),
-                cancel: None,
                 // 推荐是**一次性建议**（用户点了才生成、没有工作区可核实）：不接核实回路。
                 verify: None,
-                sink: &mut |e: SessionEvent| rows.push(e),
             },
+            None,
+            &mut |e: SessionEvent| rows.push(e),
         )?;
         for r in &proposal.rejected {
             self.log

@@ -6,6 +6,7 @@
 use crate::capabilities::llm::api::Msg;
 use crate::capabilities::prompt::api::Segment;
 use crate::capabilities::registry::api::{RosterPick, model_listing, resolve_picks};
+use crate::capabilities::session::api::SessionEvent;
 use crate::capabilities::session::api::core_operation;
 use crate::capabilities::slate::api::{Mode, Parties, Pick, Proposal, Request};
 use crate::capabilities::slate::domain::proposal::collapse;
@@ -13,7 +14,12 @@ use crate::capabilities::slate::domain::proposal::collapse;
 /// 目的：拟一份可直接开工的名单——让核心按需求提候选，再按登记处与工作区现状核验。
 /// 约束：登记处有没有模型、核心默认设没设由调用方提示（怎么修），与名单合法性无关；
 ///   空登记处会让每个组装项因「模型不存在」被逐条拒收。
-pub fn propose(parties: &Parties<'_>, req: &mut Request<'_>) -> Result<Proposal, String> {
+pub fn propose(
+    parties: &Parties<'_>,
+    req: &mut Request<'_>,
+    cancel: Option<&std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    sink: &mut dyn FnMut(SessionEvent),
+) -> Result<Proposal, String> {
     // 形态描述文案在提示词册里（代码不硬编码给模型的说明）。
     let mode_text = match req.mode {
         Mode::Single => parties.prompt.text(Segment::SlateModeSingle).to_string(),
@@ -49,9 +55,9 @@ pub fn propose(parties: &Parties<'_>, req: &mut Request<'_>) -> Result<Proposal,
             Msg::user(user),
         ],
         req.opts.clone(),
-        req.cancel,
+        cancel,
         verify,
-        req.sink,
+        sink,
     )?;
     // 载荷里就是名单**数组**本身（工具参数 picks 的值）。
     let parsed: Vec<RosterPick> = payload
