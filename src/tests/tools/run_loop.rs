@@ -317,7 +317,16 @@ pub(crate) fn builtin_file_tools_run_in_direct_session() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| core.single_say(&sid, "记一笔", l)).unwrap();
+    let events = with_live(|l| {
+        core.turn.single_say(
+            &sid,
+            "记一笔",
+            l,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
+    })
+    .unwrap();
     // 落点 = session/<工作名>/<agent 实例名>/（测试里的临时 agent 名取模块名）
     assert_eq!(io.get(&["w", "a", "note.txt"]).as_deref(), Some("你好"));
     let tool_lines = tool_line_texts(&events);
@@ -357,7 +366,11 @@ pub(crate) fn envelope_mode_native_calls_become_a_failed_tool_line() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| core.single_say(&sid, "继续", l)).unwrap();
+    let events = with_live(|l| {
+        core.turn
+            .single_say(&sid, "继续", l, core.registry.as_ref(), core.probe.as_ref())
+    })
+    .unwrap();
     let views: Vec<_> = events
         .iter()
         .flat_map(|e| match e {

@@ -108,7 +108,11 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
     // 内存里的会话按旧配置装过：丢掉后下次访问按新配置从转录重建（内容不丢）。
     assert!(!core.session_exists(&sid));
     // 下一次访问按新配置从转录重建（单 agent 会话还没轮到用户：它只提醒，不硬发请求）。
-    with_live(|l| core.continue_flow(&sid, l)).unwrap();
+    with_live(|l| {
+        core.turn
+            .continue_flow(&sid, l, core.registry.as_ref(), core.probe.as_ref())
+    })
+    .unwrap();
     assert!(core.session_exists(&sid), "访问会话即按新配置重建");
     // 重建后：身份块照样现渲染（不在对话里），对话里的内容也还在。
     let identity = core.single_identity(&sid).expect("重建后身份块");

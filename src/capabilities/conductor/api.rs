@@ -1,14 +1,13 @@
 //! 目的：呈现层（CLI / Web）与核心之间的唯一通道（见 docs/presentation/contracts.md）：命令 + 事件。
-//! 管：`Ops` 的四个按角色切分的能力接口、核心唯一生产的事件台（`EventBus`，消费者按 `since` 增量读），
-//!   以及两端共用的入站读模型（`WorkSpec`、`SessionEdit`、`RuntimeReport`、`*View` 等）。
-//! 不管：HTTP / JSON 封装 / 路由（呈现层的传输事，见 presentation/routes.rs）；核心状态与并发归 service。
-//! 联动：命令经 `ConductorHandle` 在核心自己的线程上执行，回包只带事件台头部序号。
+//! 管：`Ops` 的四个按角色切分的能力接口，以及两端共用的入站读模型（`WorkSpec`、`SessionEdit`、`RuntimeReport`、`*View` 等）。
+//! 不管：HTTP / JSON 封装 / 路由（呈现层的传输事，见 presentation/routes.rs）；回合推进与事件台归 turn；核心状态与并发归 service。
+//! 联动：命令经 `ConductorHandle` 在核心自己的线程上执行，回包只带事件台头部序号（`turn::api::Advance`）。
 
 // 登记处的入站契约归登记处自己：这里只用它的面（实现队列代理），不定义。
 use crate::capabilities::conductor::service::Conductor;
 use crate::capabilities::session::api::HistoryView;
+pub use crate::capabilities::session::api::SessionEvent;
 pub use crate::capabilities::session::api::{DecisionCard, DecisionQueue, DecisionWaiter};
-pub use crate::capabilities::session::api::{GateTicket, SessionEvent};
 use crate::capabilities::work::api::{
     AgentSuggestion, FilesView, RuntimeReport, SessionConfig, SessionEdit, SessionView,
     TierChoices, WorkMode, WorkOpened, WorkSpec,
@@ -16,188 +15,16 @@ use crate::capabilities::work::api::{
 // 回档目标与结果是层 10 的词汇：这里只取用（子模块经 `use super::*` 一并拿到），不定义、不转发。
 pub(crate) use crate::capabilities::lifecycle::api::{RebuildDeps, RewindOutcome, RewindTarget};
 use crate::kernel::api::JobRegistry;
-use crate::kernel::api::SessionId;
 pub use crate::kernel::api::Tier;
-use std::collections::BTreeMap;
 
 // 入站契约返回的词汇：能力接口的返回类型在这里有一份**正式名字**。
 // 呈现层只认这里，不直接碰 ports / providers 的内部路径。
 pub use crate::capabilities::llm::api::ProbeOutcome;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-/// 目的：一次生成的输出方式：流式逐片，还是只要最终结果。
-///   「怎么呈现」是呈现层的决定，所以由调用方显式给出，核心不替它猜。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Output {
-    Stream,
-    Final,
-}
-
-/// 目的：一次会话推进的结果：**只回事件台的头部序号**。
-///   命令不携带事实——事实只有一条来路（事件台）：想看就按 `since` 订阅，
-///   谁发起的命令都一样（CLI / Web / 桌面 / 演示脚本）。
-#[derive(Debug, Clone)]
-pub struct Advance {
-    pub head: u64,
-}
-
-/// 目的：事件台上的一条：全局序号 + 会话 + 事实。
-#[derive(Debug, Clone)]
-pub struct EventLine {
-    pub seq: u64,
-    pub sid: SessionId,
-    pub events: Vec<SessionEvent>,
-}
-
-/// 目的：事件上限与保留量：本地单机足够，防无界增长。
-const BUS_MAX: usize = 10_000;
-const BUS_KEEP: usize = 5_000;
-
-/// 目的：事件发布台：核心是唯一生产者（`push` 只由本模块调用）；
-///   任何数量的消费者按 `since` 增量取——多端并用、断线重连都不用额外机制。
-pub struct EventBus {
-    inner: Mutex<BusInner>,
-}
-
-#[derive(Default)]
-struct BusInner {
-    seq: u64,
-    lines: Vec<EventLine>,
-    /// 目的：每个会话最近一次回档的重置点（事件台序号）：该序号及之前的事实已被盘上转录取代，
-    /// 历史合流不得再把它当实时尾巴；客户端自己的 since 游标不受影响（它们仍需看到
-    /// 重置事件本身来清空视图，见 push_rewound）。
-    rewound: std::collections::BTreeMap<String, u64>,
-}
-
-impl EventBus {
-    pub fn new() -> Arc<EventBus> {
-        Arc::new(EventBus {
-            inner: Mutex::new(BusInner::default()),
-        })
-    }
-
-    /// 目的：入箱一批事实并裁剪，返回它的全局序号（调用方已持锁）。
-    fn append_locked(g: &mut BusInner, sid: &str, events: &[SessionEvent]) -> u64 {
-        g.seq += 1;
-        let seq = g.seq;
-        g.lines.push(EventLine {
-            seq,
-            sid: sid.to_string(),
-            events: events.to_vec(),
-        });
-        if g.lines.len() > BUS_MAX {
-            let drop = g.lines.len() - BUS_KEEP;
-            g.lines.drain(..drop);
-        }
-        seq
-    }
-
-    /// 目的：入箱一批事实，返回它的全局序号。核心内部调用；锁中毒不算致命（拿回内层继续）。
-    fn push(&self, sid: &str, events: &[SessionEvent]) -> u64 {
-        let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        Self::append_locked(&mut g, sid, events)
-    }
-
-    /// 目的：回档成功后入箱一条 `rewound`（携带活动视图），并把该会话的重置水印推进到它的序号。
-    /// 约束：盘上转录已经被回档改写，事件台本身不能回退；没有这条事实，刷新/多端无法知道旧事件已作废。
-    pub fn push_rewound(&self, sid: &str, events: Vec<serde_json::Value>) -> u64 {
-        let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let ev = SessionEvent::Rewound { events };
-        let seq = Self::append_locked(&mut g, sid, std::slice::from_ref(&ev));
-        g.rewound.insert(sid.to_string(), seq);
-        seq
-    }
-
-    /// 目的：事件台当前头部序号：命令回包只给这个，调用方拿它当**订阅起点**。
-    pub fn head(&self) -> u64 {
-        let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        g.seq
-    }
-
-    /// 目的：测试专用：往事件台放一条空事件批，让长轮询立刻返回（不真等 20 秒）。
-    #[cfg(test)]
-    pub(crate) fn seed_for_test(&self, sid: &str) -> u64 {
-        self.push(sid, &[])
-    }
-
-    /// 目的：取 `since` 之后的事件批 + 当前头部 + **最老还留着的序号**（同一把锁内）。
-    ///   为什么要把 oldest 给客户端：事件台会裁剪（BUS_MAX/BUS_KEEP），`since` 之后那一小段可能
-    ///   已经永久没了。客户端据此**重新对齐**（拉一次历史重放），而不是按 seq 干等——干等的结果
-    ///   是后续批次全部滞留，只有刷新页面才恢复。
-    pub fn snapshot(&self, sid: Option<&str>, since: u64) -> (Vec<EventLine>, u64, u64) {
-        let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let lines = g
-            .lines
-            .iter()
-            .filter(|l| l.seq > since && sid.is_none_or(|x| l.sid == x))
-            .cloned()
-            .collect();
-        let oldest = g.lines.first().map(|l| l.seq).unwrap_or(g.seq + 1);
-        (lines, g.seq, oldest)
-    }
-
-    /// 目的：历史合流窗口：只取该会话**最近一次回档之后**的事件批 + 当前头部（同一把锁内）。
-    /// 回档水印之前的批次已被盘上转录取代，不能再拼回历史视图；客户端的长轮询仍用
-    /// `snapshot`（它需要看到重置事件本身来清空视图）。
-    fn snapshot_after_rewind(&self, sid: &str) -> (Vec<EventLine>, u64) {
-        let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let cut = g.rewound.get(sid).copied().unwrap_or(0);
-        let lines = g
-            .lines
-            .iter()
-            .filter(|l| l.sid == sid && l.seq > cut)
-            .cloned()
-            .collect();
-        (lines, g.seq)
-    }
-
-    /// 目的：盘上转录**之外**的实时尾巴 + 事件台当前头部：给「历史和实时一次给全」用（见呈现层的 history.open）。
-    ///   只取「**转录在事件台里的最后一个位置之后**」的事实：转录是事件台的**前缀**，
-    ///   它之前/之中的短暂事件（流式增量、开跑那条运行态）已经被盘上的定稿行取代了；
-    ///   把它们也塞进尾巴，前端会先画定稿行、再画一个永远填不上的空"谁正在说"块。
-    ///   判据是**结构化相等**（两边 JSON 出自同一套序列化器，就是同一个值），不是按行 id 猜：
-    ///   `notice`/`node_started` 这类行本来就没有 id，按 id 去重正是刷新后整段重复的来源。
-    ///   返回的尾巴按事件台顺序展开，前端因此**只按序 append**，不自己合并两个来源。
-    pub fn tail_excluding(
-        &self,
-        sid: &str,
-        transcript: &[serde_json::Value],
-    ) -> (Vec<serde_json::Value>, u64) {
-        let mut left: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-        for ev in transcript {
-            if let Ok(k) = serde_json::to_string(ev) {
-                *left.entry(k).or_insert(0) += 1;
-            }
-        }
-        let (lines, head) = self.snapshot_after_rewind(sid);
-        let mut on_bus: Vec<serde_json::Value> = lines
-            .into_iter()
-            .flat_map(|l| l.events.into_iter().map(|e| e.to_json()))
-            .collect();
-        let mut start = 0usize;
-        for (i, v) in on_bus.iter().enumerate() {
-            if let Ok(k) = serde_json::to_string(v)
-                && let Some(n) = left.get_mut(&k)
-                && *n > 0
-            {
-                *n -= 1;
-                start = i + 1;
-            }
-        }
-        let mut tail = Vec::new();
-        for v in on_bus.drain(..).skip(start) {
-            if let Ok(k) = serde_json::to_string(&v)
-                && let Some(n) = left.get_mut(&k)
-                && *n > 0
-            {
-                *n -= 1;
-                continue;
-            }
-            tail.push(v);
-        }
-        (tail, head)
-    }
-}
+// 回合推进自用的值类型与事件台归 turn：这里只做门面重导出，呈现层与测试的既有路径不必改。
+pub(crate) use crate::capabilities::turn::api::CollabWork;
+pub use crate::capabilities::turn::api::{Advance, EventBus, Output};
 
 /// 目的：会话能力：创建、推进、回档、编辑、停止。会话界面只需要这一个。
 pub trait SessionOps: Send + Sync {
@@ -301,15 +128,6 @@ pub trait LogOps: Send + Sync {
     fn error(&self, at: &str, msg: &str);
 }
 
-/// 目的：协作在工作线程上要做的事：处置一张**已经出队**的回答（放行类要接着跑泵），或从断点继续。
-///   为什么要分：回答的**落定**（校验 / 出队 / 记账）在核心线程上做完，长流程的处置才在这里跑；
-///   两者都不属于对外契约（前端只发"回答"，不问后端怎么推进）。
-pub(crate) enum CollabWork {
-    /// 目的：处置一张已经出队的回答（队列给的处置票）。
-    Dispose(GateTicket),
-    Resume,
-}
-
 /// 目的：核心手柄：呈现层用它发命令。克隆廉价（内部只是通道 + 两个共享句柄）。
 #[derive(Clone)]
 pub struct ConductorHandle {
@@ -338,25 +156,8 @@ pub struct ConductorHandle {
     booting: Arc<std::sync::Mutex<std::collections::BTreeSet<String>>>,
 }
 
-/// 目的：一次"要一个成员回合"的请求：泵在工作线程上让出，回头找主线程驱动（它才拿得到各 agent 的会话）。
-pub(crate) struct AskReq {
-    agent: String,
-    /// 目的：本回合的**身份块**（由泵按当前提示词册现渲染）。
-    identity: String,
-    /// 目的：本回合的提示（开场词 / 轮转词）。
-    turn: Vec<crate::capabilities::llm::api::Msg>,
-    /// 目的：工具总表与角色表的能力面（**共享一份**）：发放工具面与校验越权都用它。
-    systools: std::sync::Arc<dyn crate::capabilities::tools::api::Tools>,
-    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    opts: crate::capabilities::llm::api::CompleteOpts<'static>,
-    /// 目的：这一回合属于第几轮（写进 agent 会话的回合标记）。
-    round: usize,
-    /// 目的：回合 id（整场工作单调递增；两边对得上就靠它）。
-    turn_id: u64,
-}
 mod action;
 mod contract_impls;
-mod generation;
 mod handle;
 
 /// 目的：入站能力面：**各能力自己的契约**+ 核心自己的两个 + 事件台。

@@ -719,7 +719,16 @@ pub(crate) fn repeated_malformed_envelopes_each_get_a_failed_row() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| core.single_say(&sid, "一直错", l)).unwrap();
+    let events = with_live(|l| {
+        core.turn.single_say(
+            &sid,
+            "一直错",
+            l,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
+    })
+    .unwrap();
     let rows = transcript_rows(&events);
     assert_eq!(
         rows.iter().filter(|r| r.2).count(),
@@ -758,7 +767,16 @@ pub(crate) fn prose_then_unclosed_tool_envelope_is_malformed_and_keeps_prose() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| core.single_say(&sid, "写一下", l)).unwrap();
+    let events = with_live(|l| {
+        core.turn.single_say(
+            &sid,
+            "写一下",
+            l,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
+    })
+    .unwrap();
     let rows = transcript_rows(&events);
     assert_eq!(
         rows.iter().filter(|r| r.2).count(),
@@ -823,7 +841,16 @@ pub(crate) fn prose_then_tool_envelope_keeps_prose_line_and_rebuilds_identically
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| core.single_say(&sid, "记一笔", l)).unwrap();
+    let events = with_live(|l| {
+        core.turn.single_say(
+            &sid,
+            "记一笔",
+            l,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
+    })
+    .unwrap();
     let rows = transcript_rows(&events);
     assert_eq!(
         rows.len(),
@@ -927,7 +954,11 @@ pub(crate) fn tool_envelope_after_prose_runs_and_json_never_shows() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| core.single_say(&sid, "跑满", l)).unwrap();
+    let events = with_live(|l| {
+        core.turn
+            .single_say(&sid, "跑满", l, core.registry.as_ref(), core.probe.as_ref())
+    })
+    .unwrap();
     assert_eq!(
         runner.calls.lock().expect("锁").len(),
         N + 1,
@@ -996,7 +1027,16 @@ pub(crate) fn native_multi_call_rebuilds_identically_to_live() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| core.single_say(&sid, "读两个文件", l)).unwrap();
+    let events = with_live(|l| {
+        core.turn.single_say(
+            &sid,
+            "读两个文件",
+            l,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
+    })
+    .unwrap();
     let live = core.single_history(&sid).unwrap();
 
     // 转录行：两条工具行同属一次回复（回复号 = 该回复第一条工具行的 id）。
@@ -1079,7 +1119,16 @@ pub(crate) fn read_facts_rebuild_identically_to_live() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| core.single_say(&sid, "读 a.txt", l)).unwrap();
+    let events = with_live(|l| {
+        core.turn.single_say(
+            &sid,
+            "读 a.txt",
+            l,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
+    })
+    .unwrap();
     let live = core.single_reads(&sid).expect("单 agent 会话");
     assert_eq!(live.len(), 1, "整份读完要留下一条读事实");
     assert_eq!(

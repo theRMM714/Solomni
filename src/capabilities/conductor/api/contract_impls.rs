@@ -45,7 +45,7 @@ impl SessionOps for ConductorHandle {
     }
 
     fn say(&self, sid: &str, text: &str, out: Output) -> Result<Advance, String> {
-        self.single_generation(sid, Some(text.to_string()), out)
+        crate::capabilities::turn::api::single_generation(self, sid, Some(text.to_string()), out)
     }
 
     fn activate(&self, sid: &str) -> Result<SessionView, String> {
@@ -67,11 +67,20 @@ impl SessionOps for ConductorHandle {
                 })
                 .unwrap_or_default();
             if mode == "collab" {
-                return self.collab_generation(sid, CollabWork::Resume);
+                return crate::capabilities::turn::api::collab_generation(
+                    self,
+                    sid,
+                    CollabWork::Resume,
+                );
             }
-            return self.single_generation(sid, Some("继续。".to_string()), out);
+            return crate::capabilities::turn::api::single_generation(
+                self,
+                sid,
+                Some("继续。".to_string()),
+                out,
+            );
         }
-        self.single_generation(sid, None, out)
+        crate::capabilities::turn::api::single_generation(self, sid, None, out)
     }
 
     fn set_task(&self, sid: &str, text: &str) -> Result<Advance, String> {
@@ -79,7 +88,12 @@ impl SessionOps for ConductorHandle {
         let (sid, text) = (sid.to_string(), text.to_string());
         let bus = Arc::clone(&self.bus);
         self.call(move |core| {
-            let events = core.collab_set_task(&sid, &text)?;
+            let events = core.turn.collab_set_task(
+                &sid,
+                &text,
+                core.registry.as_ref(),
+                core.probe.as_ref(),
+            )?;
             let head = bus.push(&sid, &events);
             Ok(Advance { head })
         })
@@ -102,7 +116,7 @@ impl SessionOps for ConductorHandle {
                 option.to_string(),
                 note.to_string(),
             );
-            move |core| core.take_card(&sid, &card, &option, &note)
+            move |core| core.turn.take_card(&sid, &card, &option, &note)
         })?;
         let mut head = self.bus.push(sid, &events);
         match answered {
@@ -116,13 +130,20 @@ impl SessionOps for ConductorHandle {
                 ) {
                     let more = self.call({
                         let sid = sid.to_string();
-                        move |core| core.dispose_and_advance(&sid, &ticket)
+                        move |core| {
+                            core.turn.dispose_and_advance(
+                                &sid,
+                                &ticket,
+                                core.registry.as_ref(),
+                                core.probe.as_ref(),
+                            )
+                        }
                     })?;
                     head = self.bus.push(sid, &more);
                     return Ok(Advance { head });
                 }
                 // 放行 / 重派 / 请教 / 判明确性：长流程——脱离调用方点火（回答本身已经落定）。
-                self.spawn_detached_dispose(sid, ticket);
+                crate::capabilities::turn::api::spawn_detached_dispose(self, sid, ticket);
                 Ok(Advance { head })
             }
         }
@@ -132,7 +153,10 @@ impl SessionOps for ConductorHandle {
     /// 约束：判据只有这一处——核心各关卡与工具级确认共用同一条队。
     fn open_queue(&self, sid: &str) -> Result<Option<DecisionQueue>, String> {
         let sid = sid.to_string();
-        self.call(move |core| core.open_queue(&sid))
+        self.call(move |core| {
+            core.turn
+                .open_queue(&sid, core.registry.as_ref(), core.probe.as_ref())
+        })
     }
 
     fn withdraw_agree(&self, sid: &str, agent: &str) -> Result<Advance, String> {
@@ -140,14 +164,19 @@ impl SessionOps for ConductorHandle {
         let agent = agent.to_string();
         let bus = Arc::clone(&self.bus);
         self.call(move |core| {
-            let events = core.withdraw_agree(&sid, &agent)?;
+            let events = core.turn.withdraw_agree(
+                &sid,
+                &agent,
+                core.registry.as_ref(),
+                core.probe.as_ref(),
+            )?;
             let head = bus.push(&sid, &events);
             Ok(Advance { head })
         })
     }
 
     fn compact(&self, sid: &str) -> Result<Advance, String> {
-        ConductorHandle::compact(self, sid)
+        crate::capabilities::turn::api::compact(self, sid)
     }
 
     fn rewind(&self, sid: &str, target: RewindTarget) -> Result<Vec<serde_json::Value>, String> {
@@ -157,11 +186,33 @@ impl SessionOps for ConductorHandle {
     fn update_task(&self, sid: &str, text: &str) -> Result<Vec<serde_json::Value>, String> {
         let sid = sid.to_string();
         let text = text.to_string();
-        // 改需求改写盘上转录（旧需求行清掉、末尾追加新需求行），
-        // 所以要把最终活动视图作为重置快照推上事件台，刷新/多端才看到同一条需求。
+        // 改需求改写盘上转录并推重置快照上事件台，刷新/多端才看到同一条需求；
+        // 重建归这一层（生命周期能力是宿主的）：turn 只交回「哪条会话 + 事件切片 + 下一个行号」。
         let outcome = self.call({
             let sid = sid.clone();
-            move |core| core.update_task_outcome(&sid, &text)
+            move |core| {
+                let req = core.turn.update_task_outcome(
+                    &sid,
+                    &text,
+                    core.registry.as_ref(),
+                    core.probe.as_ref(),
+                )?;
+                let active = core.lifecycle.restore_session(
+                    &mut core.turn,
+                    RebuildDeps {
+                        registry: core.registry.as_ref(),
+                        probe: core.probe.as_ref(),
+                    },
+                    &req.sid,
+                    &req.meta,
+                    &req.events,
+                    req.next,
+                )?;
+                Ok(RewindOutcome {
+                    main: active,
+                    children: Vec::new(),
+                })
+            }
         })?;
         self.publish_rewound(&sid, &outcome);
         Ok(outcome.main)
@@ -244,7 +295,7 @@ impl SessionOps for ConductorHandle {
     /// 用户「继续」（`continue_flow`）是它的逆操作。
     fn stop(&self, sid: &str) -> Vec<String> {
         let sid_owned = sid.to_string();
-        let _ = self.call(move |core| core.set_subtree_run(&sid_owned, RunState::Stopped));
+        let _ = self.call(move |core| core.turn.set_subtree_run(&sid_owned, RunState::Stopped));
         // **停止 = 拒绝**：整棵子树里等用户裁决的队一律作废（落盘 + 如实外送），等待方因此解开。
         self.void_gates(sid);
         self.stop_tree(sid).unwrap_or_default()

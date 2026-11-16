@@ -32,7 +32,7 @@ pub(crate) fn core_collab_demo_runs_full_five_stages() {
         .unwrap()
         .sid;
     assert!(matches!(
-        core.collab_pending(&sid),
+        core.turn.collab_pending(&sid),
         Ok(Some(Pending::ConfirmBegin))
     ));
     let events = answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
@@ -49,7 +49,7 @@ pub(crate) fn core_collab_demo_runs_full_five_stages() {
             .any(|e| matches!(e, SessionEvent::Delivery { ok: true, .. }))
     );
     // 终结会话已被中心回收（再查询挂起状态应报无此会话）。
-    assert!(core.collab_pending(&sid).is_err());
+    assert!(core.turn.collab_pending(&sid).is_err());
 }
 
 #[test]
@@ -76,7 +76,7 @@ pub(crate) fn core_collab_delegated_slate_flow() {
     let sid = opened.sid;
     let ev = opened.facts;
     assert!(matches!(
-        core.collab_pending(&sid),
+        core.turn.collab_pending(&sid),
         Ok(Some(Pending::ConfirmSlate))
     ));
     assert!(ev.iter().any(
@@ -84,7 +84,7 @@ pub(crate) fn core_collab_delegated_slate_flow() {
     ));
     let _ = answer_card(&mut core, &sid, OPT_SLATE_CONFIRM, "").unwrap();
     assert!(matches!(
-        core.collab_pending(&sid),
+        core.turn.collab_pending(&sid),
         Ok(Some(Pending::ConfirmBegin))
     ));
     let events = answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
@@ -181,7 +181,10 @@ pub(crate) fn collab_delegated_roster_written_back_and_rebuilt_from_meta() {
     )
     .unwrap();
     assert!(
-        matches!(core.collab_pending(&sid), Ok(Some(Pending::ConfirmBegin))),
+        matches!(
+            core.turn.collab_pending(&sid),
+            Ok(Some(Pending::ConfirmBegin))
+        ),
         "重建后仍等确认开始"
     );
     let events = answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();

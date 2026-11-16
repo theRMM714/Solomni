@@ -1,14 +1,13 @@
-//! 目的：**工具层提问端口的会话侧实现**（`kernel::ports::AskUser`）——推一条问题并**阻塞**等一个选项 id。
+//! 目的：**工具层提问端口的回合侧实现**（`kernel::ports::AskUser`）——推一条问题并**阻塞**等一个选项 id。
 //! 管：进队与等回答、构不出可用选项时的收场（停会话 + 落警告）、停止 / 关闭时按"拒绝"解开。
 //! 不管：问什么、有几个选项（发起方给）、回答怎么落进业务（处置归发起方）、界面怎么画（呈现层）。
 //! 联动：走的是**同一条通道**（同一条队、同一张卡、同一条回答命令），契约见 docs/session/session-model.md 的
-//!   「请用户裁决」；队列本体在 `capabilities/session/domain/decisions.rs`，本实现由核心在生成线程上现造。
+//!   「请用户裁决」；队列本体在 `capabilities/session/domain/decisions.rs`，本实现由宿主在生成线程上现造。
 
-use crate::capabilities::conductor::api::{ConductorHandle, SessionOps};
 use crate::capabilities::session::api::{Gates, Pending, SessionEvent, SlotWake};
 use crate::kernel::api::{Ask, AskOutcome};
 use crate::kernel::ports::AskUser;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 /// 目的：工具执行层提问端口的实现：推一条卡给用户、**阻塞**等一个选项 id（不点不继续）。
 /// 约束：构不出可用选项（空选项集）时**不发起裁决**，改为停掉这个会话 + 落一条警告（契约禁止置灰）；
@@ -20,26 +19,26 @@ pub struct SessionAsk {
     sid: String,
     /// 卡片外送与落盘（与这一回合其余事件同一条路）。
     emit: Box<dyn Fn(SessionEvent) + Send + Sync>,
-    /// 停会话走核心手柄；`Mutex` 是因为 `mpsc::Sender` 不是 `Sync`（与 `ProxyBridge` 同一理由）。
-    handle: Mutex<ConductorHandle>,
+    /// 停会话：宿主的停止入口（命令队列手柄的回调），本层不认识宿主的类型。
+    stop: Box<dyn Fn(&str) + Send + Sync>,
     /// 这一趟已经因"做不下去"停过会话（`halt` 置位）。
     halted: std::sync::atomic::AtomicBool,
 }
 
 impl SessionAsk {
-    /// 目的：装配一个会话的提问端口（核心在生成线程上按该会话的裁决队与事件出口现造）。
-    /// 参数：`emit` = 卡片的外送 + 落盘；`handle` = 停会话用的核心手柄。
+    /// 目的：装配一个会话的提问端口（宿主在生成线程上按该会话的裁决队与事件出口现造）。
+    /// 参数：`emit` = 卡片的外送 + 落盘；`stop` = 停会话（归宿主的停止入口）。
     pub fn new(
         door: Arc<dyn Gates>,
         sid: &str,
         emit: Box<dyn Fn(SessionEvent) + Send + Sync>,
-        handle: ConductorHandle,
+        stop: Box<dyn Fn(&str) + Send + Sync>,
     ) -> SessionAsk {
         SessionAsk {
             door,
             sid: sid.to_string(),
             emit,
-            handle: Mutex::new(handle),
+            stop,
             halted: std::sync::atomic::AtomicBool::new(false),
         }
     }
@@ -113,7 +112,6 @@ impl AskUser for SessionAsk {
         )));
         self.halted
             .store(true, std::sync::atomic::Ordering::Relaxed);
-        let handle = self.handle.lock().unwrap_or_else(|e| e.into_inner());
-        let _ = handle.stop(&self.sid);
+        (self.stop)(&self.sid);
     }
 }

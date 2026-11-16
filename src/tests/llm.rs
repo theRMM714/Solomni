@@ -91,7 +91,16 @@ pub(crate) fn malformed_tool_envelope_becomes_a_failed_tool_line() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| core.single_say(&sid, "写个 README", l)).unwrap();
+    let events = with_live(|l| {
+        core.turn.single_say(
+            &sid,
+            "写个 README",
+            l,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
+    })
+    .unwrap();
     let rows = transcript_rows(&events);
     assert_eq!(
         rows.iter().filter(|r| r.2).count(),
@@ -179,7 +188,16 @@ pub(crate) fn malformed_tool_without_salvageable_name_still_records_a_line() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| core.single_say(&sid, "跑一下", l)).unwrap();
+    let events = with_live(|l| {
+        core.turn.single_say(
+            &sid,
+            "跑一下",
+            l,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
+    })
+    .unwrap();
     let views = tool_views(&events);
     assert_eq!(views.len(), 1, "仍要记一条：{:?}", transcript_rows(&events));
     assert!(
@@ -596,7 +614,16 @@ pub(crate) fn reasoning_is_kept_on_final_transcript_lines() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| core.single_say(&sid, "保留思维链", l)).unwrap();
+    let events = with_live(|l| {
+        core.turn.single_say(
+            &sid,
+            "保留思维链",
+            l,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
+    })
+    .unwrap();
     let lines: Vec<_> = events
         .iter()
         .filter_map(|e| match e {
@@ -640,7 +667,18 @@ pub(crate) fn envelope_only_round_produces_only_a_tool_line() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let rows = transcript_rows(&with_live(|l| core.single_say(&sid, "跑一下", l)).unwrap());
+    let rows = transcript_rows(
+        &with_live(|l| {
+            core.turn.single_say(
+                &sid,
+                "跑一下",
+                l,
+                core.registry.as_ref(),
+                core.probe.as_ref(),
+            )
+        })
+        .unwrap(),
+    );
     assert_eq!(rows.len(), 3, "用户行 / tool 行 / 答复行：{:?}", rows);
     assert_eq!(
         rows.iter().filter(|r| r.2).count(),
@@ -680,7 +718,15 @@ pub(crate) fn an_aborted_generation_never_executes_a_repairable_envelope() {
             decisions: None,
             ask: None,
         };
-        core.single_say(&sid, "写", &mut live).unwrap()
+        core.turn
+            .single_say(
+                &sid,
+                "写",
+                &mut live,
+                core.registry.as_ref(),
+                core.probe.as_ref(),
+            )
+            .unwrap()
     };
     let views = tool_views(&events);
     assert!(!views[0].ok, "被停止的生成不执行工具：{}", views[0].output);
@@ -717,7 +763,15 @@ pub(crate) fn a_cancelled_generation_never_executes_a_valid_tool_envelope() {
             decisions: None,
             ask: None,
         };
-        core.single_say(&sid, "写", &mut live).unwrap()
+        core.turn
+            .single_say(
+                &sid,
+                "写",
+                &mut live,
+                core.registry.as_ref(),
+                core.probe.as_ref(),
+            )
+            .unwrap()
     };
     assert_eq!(
         io.get(&["w", "a", "note.txt"]),
@@ -753,7 +807,11 @@ pub(crate) fn a_truncated_output_is_reported_as_truncation_not_as_a_bad_envelope
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| core.single_say(&sid, "写", l)).unwrap();
+    let events = with_live(|l| {
+        core.turn
+            .single_say(&sid, "写", l, core.registry.as_ref(), core.probe.as_ref())
+    })
+    .unwrap();
     let views = tool_views(&events);
     assert!(!views[0].ok);
     assert!(
@@ -778,7 +836,16 @@ pub(crate) fn a_truncated_output_is_reported_as_truncation_not_as_a_bad_envelope
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events2 = with_live(|l| core2.single_say(&sid2, "说", l)).unwrap();
+    let events2 = with_live(|l| {
+        core2.turn.single_say(
+            &sid2,
+            "说",
+            l,
+            core2.registry.as_ref(),
+            core2.probe.as_ref(),
+        )
+    })
+    .unwrap();
     let rows = transcript_rows(&events2);
     assert!(
         rows.iter()
@@ -812,7 +879,16 @@ pub(crate) fn a_freeform_envelope_is_never_repaired() {
         .create_work(work("w", WorkMode::Single, &["m0"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| core.single_say(&sid, "打补丁", l)).unwrap();
+    let events = with_live(|l| {
+        core.turn.single_say(
+            &sid,
+            "打补丁",
+            l,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
+    })
+    .unwrap();
     let views = tool_views(&events);
     assert!(!views[0].ok, "{}", views[0].output);
     assert!(
@@ -862,7 +938,16 @@ pub(crate) fn envelope_multi_call_runs_every_call_and_rebuilds_identically() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| core.single_say(&sid, "读两个文件", l)).unwrap();
+    let events = with_live(|l| {
+        core.turn.single_say(
+            &sid,
+            "读两个文件",
+            l,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
+    })
+    .unwrap();
     let views = tool_views(&events);
     assert_eq!(
         views.len(),
@@ -952,7 +1037,11 @@ pub(crate) fn envelope_rejects_mixing_the_single_and_calls_shapes() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| core.single_say(&sid, "写", l)).unwrap();
+    let events = with_live(|l| {
+        core.turn
+            .single_say(&sid, "写", l, core.registry.as_ref(), core.probe.as_ref())
+    })
+    .unwrap();
     let views = tool_views(&events);
     assert_eq!(views.len(), 1, "只记一条失败工具行");
     assert!(!views[0].ok, "混用两种形态必须失败");

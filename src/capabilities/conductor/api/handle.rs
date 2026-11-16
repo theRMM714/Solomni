@@ -134,14 +134,13 @@ impl ConductorHandle {
                 bus.push(&owner, std::slice::from_ref(&SessionEvent::Notice(warn)));
             }
         });
-        Arc::new(
-            crate::capabilities::conductor::service::ask_user::SessionAsk::new(
-                Arc::clone(door),
-                sid,
-                emit,
-                self.clone(),
-            ),
-        )
+        // 停会话仍走命令队列手柄（它是唯一能级联停的那一层）：闭包持它，本层类型不外泄。
+        let handle = Arc::new(std::sync::Mutex::new(self.clone()));
+        let stop: Box<dyn Fn(&str) + Send + Sync> = Box::new(move |sid: &str| {
+            let handle = handle.lock().unwrap_or_else(|e| e.into_inner());
+            crate::capabilities::turn::api::TurnHost::stop(&*handle, sid);
+        });
+        crate::capabilities::turn::api::session_ask(Arc::clone(door), sid, emit, stop)
     }
 
     /// 目的：这个会话的**裁决队**（工具级确认进它）：只有接了交互前端才给——否则这一趟不接确认。
@@ -154,7 +153,7 @@ impl ConductorHandle {
             return Ok(None);
         }
         let sid = sid.to_string();
-        self.call(move |core| Ok(core.desk_of(&sid))).map(Some)
+        self.call(move |core| Ok(core.turn.desk_of(&sid))).map(Some)
     }
 
     /// 目的：本核心的事件台（多端订阅）。
@@ -215,7 +214,7 @@ impl ConductorHandle {
         loop {
             let jobs_busy = tree.iter().any(|s| self.jobs.is_running(s));
             let ids = tree.clone();
-            let core_busy = self.call(move |core| Ok(core.running_any(&ids)))?;
+            let core_busy = self.call(move |core| Ok(core.turn.running_any(&ids)))?;
             if !jobs_busy && !core_busy {
                 return Ok(stopped);
             }
@@ -262,7 +261,8 @@ impl ConductorHandle {
     /// 约束：作废是会话的事实——与回答同一条路（落进转录），重启后按它重建，作废过的卡不再挂起。
     pub(crate) fn void_gates(&self, root: &str) {
         let root_owned = root.to_string();
-        let Ok(voids) = self.call(move |core| Ok(core.void_gates_in_subtree(&root_owned))) else {
+        let Ok(voids) = self.call(move |core| Ok(core.turn.void_gates_in_subtree(&root_owned)))
+        else {
             return;
         };
         for (sid, events) in voids {
@@ -270,7 +270,7 @@ impl ConductorHandle {
                 .call({
                     let sid = sid.clone();
                     let events = events.clone();
-                    move |core| Ok(core.persister(&sid).persist(&events))
+                    move |core| Ok(core.turn.persister(&sid).persist(&events))
                 })
                 .ok()
                 .flatten();
@@ -283,20 +283,23 @@ impl ConductorHandle {
     }
 
     /// 目的：代理会话——把代理工具的成员侧执行面（`ProxyHandler`）装进这一回合的工具环境。
-    ///   执行经队列桥回到核心线程，核心状态的所有权不变；非代理会话、或已装过，什么都不做。
+    ///   执行经队列桥回到核心线程，核心状态的所有权不变；非代理会话、或已装过，原样交回。
     pub(super) fn inject_proxy_handler(
         &self,
+        mut session: crate::capabilities::session::api::AgentSession,
         sid: &str,
-        session: &mut crate::capabilities::session::api::AgentSession,
-    ) -> Result<(), String> {
+    ) -> Result<crate::capabilities::session::api::AgentSession, String> {
         use crate::capabilities::proxy::api as dp;
-        let Some(tools) = session.tools.as_mut() else {
-            return Ok(());
-        };
-        if !tools.handlers.is_empty() || !tools.face.allowed.iter().any(|t| dp::is_proxy_tool(t)) {
-            return Ok(());
+        let wanted = session.tools.as_ref().is_some_and(|tools| {
+            tools.handlers.is_empty() && tools.face.allowed.iter().any(|t| dp::is_proxy_tool(t))
+        });
+        if !wanted {
+            return Ok(session);
         }
-        let face = tools.face.allowed.clone();
+        let face = match session.tools.as_ref() {
+            Some(tools) => tools.face.allowed.clone(),
+            None => Vec::new(),
+        };
         let granted = {
             let sid = sid.to_string();
             self.call(move |core| {
@@ -329,8 +332,10 @@ impl ConductorHandle {
                 now,
             },
         );
-        tools.handlers = vec![std::sync::Arc::new(handler)];
-        Ok(())
+        if let Some(tools) = session.tools.as_mut() {
+            tools.handlers = vec![std::sync::Arc::new(handler)];
+        }
+        Ok(session)
     }
     /// 目的：测试专用：注入一条必定 panic 的命令，验证「一条命令 panic 不带垮整个核心」。
     #[cfg(test)]
@@ -426,11 +431,97 @@ impl ConductorHandle {
         };
         let target = sid.to_string();
         if let Ok(events) = self.call(move |core| {
-            let mut events = core.notice_row(&target, &text);
-            core.record_events(&target, &mut events);
+            let mut events = core.turn.notice_row(&target, &text);
+            core.turn.record_events(&target, &mut events);
             Ok(events)
         }) {
             self.bus.push(sid, &events);
         }
+    }
+}
+
+/// 目的：宿主入口的实现：命令队列、事件台、任务表、guest 起停与代理注入——全部转发现有手柄方法（行为不变）。
+/// 约束：这层实现留在 conductor，等 P5-9b 随手柄一起进 src/entry/runtime/；turn 侧只认这个 trait。
+impl crate::capabilities::turn::api::TurnHost for ConductorHandle {
+    fn core<T>(
+        &self,
+        f: impl FnOnce(&mut crate::capabilities::turn::api::Turn) -> Result<T, String> + Send + 'static,
+    ) -> Result<T, String>
+    where
+        T: Send + 'static,
+    {
+        self.call(move |core| f(&mut core.turn))
+    }
+
+    fn core_env<T>(
+        &self,
+        f: impl FnOnce(
+            &mut crate::capabilities::turn::api::Turn,
+            &dyn crate::capabilities::registry::api::Registry,
+            &dyn crate::kernel::ports::HostProbe,
+        ) -> Result<T, String>
+        + Send
+        + 'static,
+    ) -> Result<T, String>
+    where
+        T: Send + 'static,
+    {
+        // 登记处与宿主探针留在核心字段上（回档重建要它们与 &mut turn 分开借用）。
+        self.call(move |core| f(&mut core.turn, core.registry.as_ref(), core.probe.as_ref()))
+    }
+
+    fn events(&self) -> Arc<EventBus> {
+        Arc::clone(&self.bus)
+    }
+
+    fn ensure_guest(&self, sid: &str) -> Result<(), String> {
+        ConductorHandle::ensure_guest(self, sid)
+    }
+
+    fn stop(&self, sid: &str) {
+        let _ = SessionOps::stop(self, sid);
+    }
+
+    fn decisions_of(
+        &self,
+        sid: &str,
+    ) -> Result<Option<Arc<dyn crate::capabilities::session::api::Gates>>, String> {
+        ConductorHandle::decisions_of(self, sid)
+    }
+
+    fn session_ask(
+        &self,
+        door: &Arc<dyn crate::capabilities::session::api::Gates>,
+        sid: &str,
+        bus: Arc<EventBus>,
+        persister: crate::capabilities::session::api::Persister,
+    ) -> Arc<dyn crate::kernel::ports::AskUser> {
+        ConductorHandle::session_ask(self, door, sid, bus, persister)
+    }
+
+    fn inject_proxy_handler(
+        &self,
+        session: crate::capabilities::session::api::AgentSession,
+        sid: &str,
+    ) -> Result<crate::capabilities::session::api::AgentSession, String> {
+        ConductorHandle::inject_proxy_handler(self, session, sid)
+    }
+
+    fn register_job(&self, sid: &str) -> Arc<std::sync::atomic::AtomicBool> {
+        self.jobs.register(sid)
+    }
+
+    fn unregister_job(&self, sid: &str, flag: &Arc<std::sync::atomic::AtomicBool>) {
+        self.jobs.unregister(sid, flag)
+    }
+
+    fn answer_card(
+        &self,
+        sid: &str,
+        card: &str,
+        option: &str,
+        note: &str,
+    ) -> Result<crate::capabilities::turn::api::Advance, String> {
+        SessionOps::answer_card(self, sid, card, option, note)
     }
 }
