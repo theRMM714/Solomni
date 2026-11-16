@@ -8,14 +8,15 @@
 > 分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九；单元划分与文档路由见 [AGENTS.md](../../AGENTS.md)。
 
 > 它是**回合状态的唯一持有者**：会话在世表、运行态与创建占位、每会话的裁决队与 shell 活进程槽都只有这里增删，
-> 别的业务经 `api` 取用。会话本体（`Turn`）、一席的装配材料、**回合推进与生成驱动**、协作链、事件台（`EventBus`）与逐轮落盘也在这里收拢：
+> 别的业务经 `api` 取用。会话本体（`Turn`）、一席的装配材料、**回合推进与生成驱动**、协作链、事件台与逐轮落盘也在这里收拢：
 > 准入与落盘、按需重建、派发闸、三形态重建、代理装配、单 agent / 节点 / 成员 / 协作 / 压缩五条生成链都归它；命令队列与动作分发在 `runtime`。
 
 | 文件 | 职责 |
 | --- | --- |
 | `src/capabilities/turn.rs` | 能力入口与公开面 |
-| `src/capabilities/turn/api.rs` | 入站契约：`Session`（两种在世形态）、`TurnState`（访问器）、`Turn`（会话本体）、装配材料（`SessionDeps` / `MemberSpec` / `SingleSpec` / `member_tools` / `single_session`）、转录回放（`replay_dialogue`）与代理会话常量（`PROXY_PRIVATE_DIR` / `SPEAKER`）的重导出；事件台（`EventBus` / `EventLine`）、回执与入参值类型（`Output` / `Advance` / `Prepared` / `CollabWork` / `AskReq` / `RestoreRequest`）、生成入口与点火器、宿主端口 `TurnHost` 与提问端口工厂 `session_ask` |
+| `src/capabilities/turn/api.rs` | 入站契约：`Session`（两种在世形态）、`Turn`（会话本体）、装配材料（`SessionDeps` / `MemberSpec` / `SingleSpec` / `member_tools` / `single_session`）、转录回放（`replay_dialogue`）与代理会话常量（`PROXY_PRIVATE_DIR` / `SPEAKER`）的重导出；事件台的读写两端（`EventLine` 与端口 `EventFeed` / `Events`、工厂 `event_bus`）、回执与入参值类型（`Output` / `Advance` / `Prepared` / `CollabWork` / `AskReq` / `RestoreRequest`）、生成入口与点火器、宿主端口 `TurnHost` 与提问端口工厂 `session_ask` |
 | `src/capabilities/turn/service.rs` | 服务分区声明 |
+| `src/capabilities/turn/service/bus.rs` | 事件发布台本体：入箱与裁剪（上限一万条、保留五千条）、回档重置水印、按序号取批与历史合流的实时尾巴；结构不出单元，只经 `EventFeed`（读）与 `Events`（写）两端 |
 | `src/capabilities/turn/service/state.rs` | 状态本体与访问器：在世表、运行态、创建占位、裁决队表、每会话 shell 槽 |
 | `src/capabilities/turn/service/session.rs` | 会话本体 `Turn`：持状态、装配要的能力面（`workspace` / `vm` / `residents` / `secrets` / `tools` / `systools` / `prompt` / `llm` / `log` / `compact` / `base_roots`）与重建要的四处事实（`root` / `history` / `modules` / `packages`），转发全部状态访问器，给 `running_refusal` 的唯一实现 |
 | `src/capabilities/turn/service/admit.rs` | 会话准入：`admit`（落盘 + 进在世表）、`ensure_session`（不在世就重建再放入）、`dispatch_gate`（终态会话拒绝派发）、`resume_subtree`（把停掉的子树拉回运行态） |

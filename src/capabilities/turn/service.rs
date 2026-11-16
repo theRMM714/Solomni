@@ -9,6 +9,7 @@
 pub mod admit;
 pub mod ask_user;
 pub mod assemble;
+pub mod bus;
 pub mod facts;
 pub mod flow;
 pub mod generation;

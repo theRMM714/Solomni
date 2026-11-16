@@ -18,8 +18,8 @@ use crate::capabilities::registry::api::{
     AgentView, AppSettings, ModelView, ProviderView, RegistryOps, StorageSettings,
 };
 use crate::capabilities::runtime::api::{
-    Acted, ActionCall, ActionOps, ActionParamView, ActionView, Advance, Caller, CollabWork,
-    EventBus, LogOps, Output, RebuildDeps, RewindOutcome, RewindTarget, RuntimeOps,
+    Acted, ActionCall, ActionOps, ActionParamView, ActionView, Advance, Caller, CollabWork, Events,
+    LogOps, Output, RebuildDeps, RewindOutcome, RewindTarget, RuntimeOps,
 };
 use crate::capabilities::session::api::subtree_of;
 use crate::capabilities::session::api::{
