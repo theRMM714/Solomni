@@ -1,7 +1,7 @@
 //! 目的：一席工具面与单 agent 会话对象的装配——把能力面的事实拼成能跑的会话。
 //! 管：`SessionDeps` / `MemberSpec` / `SingleSpec` 三个参数对象，`member_tools` / `single_session` 两个装配入口，
 //!   以及 `Turn::build_single`（单 agent 会话的整场装配）。
-//! 不管：落盘（`session` 能力）、生成驱动（`conductor`）、纯派生规则（在 `turn::domain::assemble`）。
+//! 不管：落盘（`session` 能力）、生成驱动（`runtime`）、纯派生规则（在 `turn::domain::assemble`）。
 //! 联动：`work` 的建工作两段经 `Turn::build_single` 装配会话；能力面与 shell 槽由 `Turn` 提供。
 
 use std::collections::BTreeMap;

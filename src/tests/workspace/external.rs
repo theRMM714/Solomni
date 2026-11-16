@@ -206,9 +206,9 @@ pub(crate) fn external_workspace_surfaces_disk_changes_and_sync_adopts_them() {
 
 /// 目的：建会话时把外部工作区绑定写进根 meta；产品根内的工作区在创建期如实拒绝。
 #[test]
-pub(crate) fn conductor_records_external_workspace_and_rejects_overlap() {
+pub(crate) fn runtime_records_external_workspace_and_rejects_overlap() {
     use crate::capabilities::workspace::detail::FsWorkspace;
-    let root = crate::tests::scratch("ws-conductor-external");
+    let root = crate::tests::scratch("ws-runtime-external");
     let product = root.join("product");
     let external = root.join("outside");
     std::fs::create_dir_all(&product).expect("建产品根");

@@ -8,7 +8,7 @@
 > 分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九；单元划分与文档路由见 [AGENTS.md](../../AGENTS.md)。
 
 > 它是**工作用例的唯一落点**：建工作的两段、改配、视图、模型视图、运行报告、guest 生命周期、建议与激活都只在这里实现。
-> 它**不持会话状态、不持端口**：会话在世表 / 运行态 / 裁决队归 `turn`，登记处与探针按次由 `conductor` 以形参传入。
+> 它**不持会话状态、不持端口**：会话在世表 / 运行态 / 裁决队归 `turn`，登记处与探针按次由 `runtime` 以形参传入。
 
 | 文件 | 职责 |
 | --- | --- |
@@ -23,5 +23,5 @@
 | `src/capabilities/work/service/report.rs` | 运行包报告与档位视图：模块声明的能力、包库可用版本、缺失清单、权限视图；平台 / 库判定与计划派生在 `vm` 的 `plan`，本文件只留 `plan_for_meta_with` 取会话与名册后转调 |
 | `src/capabilities/work/service/host.rs` | 宿主工具路径：QEMU / virtiofsd / smbd 与共享工具选择（用 kernel 平台事实 `IS_WINDOWS`） |
 | `src/capabilities/work/service/guest_job.rs` | 起停 guest 的两段式：核心准备参数（`GuestBoot` / `GuestDiagnose`），调用方线程执行；稳定根判据（`stable_roots` / `check_stable_roots`）也在这里 |
-| `src/capabilities/work/service/suggest.rs` | 拟名单入口：按本次需求推荐 agent 名单（队列分发与行解析在 `conductor`） |
+| `src/capabilities/work/service/suggest.rs` | 拟名单入口：按本次需求推荐 agent 名单（队列分发与行解析在 `runtime`） |
 | `src/capabilities/work/service/activation.rs` | 会话启用与激活两段：构建请求、准备与提交；按转录重建与准入转调 `turn`（`ensure_session` / `resume_subtree`） |

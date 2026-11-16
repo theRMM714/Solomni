@@ -31,12 +31,12 @@
 ## 入站契约与状态归属
 
 - 入站面：`src/presentation/web/routes.rs` 的 `ROUTES` 是 HTTP 入站契约的**唯一定义**，与 [contracts.md](../contracts.md) 的路由表机器比对（`src/tests/routes.rs`）。
-- 入口：`src/main.rs` 调 `presentation::web::serve(ops, port, fence)`；默认端口是 `presentation::web::DEFAULT_PORT`（`web` 与启动参数共用这一个来源）。
+- 入口：`src/main.rs` 调 `presentation::web::serve(faces, port, fence)`；默认端口是 `presentation::web::DEFAULT_PORT`（`web` 与启动参数共用这一个来源）。
 - 状态归属：不持状态、不落盘；页面偏好只记浏览器 `localStorage`（如侧栏的 `solomni.ui.sidebar`）。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`conductor`（`Ops` 字段里带 `provision` 面）
+- 经 `::api` 用到：`runtime`、`work`、`turn`（`Faces` 字段里带 `provision` / `storage` 面）
 - 谁在用我：（无）
 
 ## 一、前端分层

@@ -12,13 +12,13 @@
 ## 入站契约与状态归属
 
 - 入站面：`api`（`TaskChain` / `TaskNode` / `NodeStatus` / `Acceptance` + 阶段 / 就绪 / 验收判定）。
-- 消费者：`collab` 驱动、`conductor` 推进、`session` 线格式携带。
+- 消费者：`collab` 驱动、`runtime` 推进、`session` 线格式携带。
 - 状态归属：不持有状态；任务链是调用方传入的值，派生结果随返回值交回。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：（无——依赖图最底层或纯领域）
-- 谁在用我：`collab`、`conductor`、`session`
+- 谁在用我：`collab`、`runtime`、`session`
 
 ## 改动本单元时必须同步
 

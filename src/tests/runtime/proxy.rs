@@ -1,9 +1,10 @@
 //! 目的：钉 core_proxy 六工具的声明、授权、幂等、部分成功与游标契约。
 //! 管：六工具声明与授权、无授权不达宿主、授权范围过期与边界、create_session 幂等、send 部分成功、observe 无正文、分页、control 幂等、声明形态、真实 bridge。
 //! 不管：HTTP 路由（routes.rs）与讨论发言规则。
-//! 联动：`proxy::api` 的 `ProxyHost` / `ProxyTools` / `ProxyHandler`、FakeProxyHost、conductor 的 `service/proxy.rs`（`ProxyBridge`）。
+//! 联动：`proxy::api` 的 `ProxyHost` / `ProxyTools` / `ProxyHandler`、FakeProxyHost、runtime 的 `service/proxy.rs`（`ProxyBridge`）。
 
 use super::super::prelude::*;
+use crate::presentation::faces::Faces;
 
 use crate::capabilities::proxy::api as d;
 use crate::capabilities::proxy::api::ProxyTools;
@@ -437,9 +438,9 @@ pub(crate) fn declaration_shape_is_enforced_before_semantics() {
 ///   目标不存在 / 未实现的一律如实报错，不假装成功。
 #[test]
 pub(crate) fn the_real_bridge_reads_catalog_and_session_messages() {
-    use crate::capabilities::conductor::service::proxy::ProxyBridge;
     use crate::capabilities::modules::api::ModuleManifest;
     use crate::capabilities::proxy::api::ProxyHost;
+    use crate::capabilities::runtime::service::ProxyBridge;
 
     let module = Module {
         manifest: ModuleManifest {
@@ -456,9 +457,9 @@ pub(crate) fn the_real_bridge_reads_catalog_and_session_messages() {
         root: PathBuf::from("modules").join("m1"),
         has_userdata: false,
     };
-    let (handle, ops) = super::super::ops_with(vec![module], vec![]);
-    let (opened, _head) = ops
-        .sessions
+    let (handle, faces) = super::super::ops_with(vec![module], vec![]);
+    let (opened, _head) = faces
+        .work
         .create_work(super::super::single_work("w-real", &["m1"]))
         .expect("建工作");
     let sid = opened.sid.clone();
@@ -532,9 +533,9 @@ pub(crate) fn the_real_bridge_reads_catalog_and_session_messages() {
 /// 目的：真实宿主：建**子工作**——编排归属是父会话，落点在 `<父>/children/` 下，共用同一个 work/。
 #[test]
 pub(crate) fn the_real_bridge_creates_a_child_work() {
-    use crate::capabilities::conductor::service::proxy::ProxyBridge;
     use crate::capabilities::modules::api::ModuleManifest;
     use crate::capabilities::proxy::api::ProxyHost;
+    use crate::capabilities::runtime::service::ProxyBridge;
 
     let module = Module {
         manifest: ModuleManifest {
@@ -551,9 +552,9 @@ pub(crate) fn the_real_bridge_creates_a_child_work() {
         root: PathBuf::from("modules").join("m1"),
         has_userdata: false,
     };
-    let (handle, ops) = super::super::ops_with(vec![module], vec![]);
-    let (parent, _head) = ops
-        .sessions
+    let (handle, faces) = super::super::ops_with(vec![module], vec![]);
+    let (parent, _head) = faces
+        .work
         .create_work(super::super::single_work("w-parent", &["m1"]))
         .expect("建父工作");
     let parent_sid = parent.sid.clone();
@@ -572,7 +573,7 @@ pub(crate) fn the_real_bridge_creates_a_child_work() {
     let child = v["session"].as_str().expect("有会话引用").to_string();
     assert!(child.starts_with(&format!("{}--", parent_sid)), "{}", child);
 
-    let (meta, _) = ops.history.open(&child).expect("能打开子工作");
+    let (meta, _) = faces.history.open(&child).expect("能打开子工作");
     assert_eq!(meta.parent.as_deref(), Some(parent_sid.as_str()));
     assert_eq!(meta.mode, "single");
     // 子工作与父会话**共用顶层那一个 work/**（沿父链走到顶就是父会话）。
@@ -601,10 +602,10 @@ pub(crate) fn the_real_bridge_creates_a_child_work() {
 /// 目的：代理工具的执行者：按名字认领，执行经队列桥回核心线程——代理会话因此是普通成员会话。
 #[test]
 pub(crate) fn the_proxy_handler_owns_and_runs_proxy_tools() {
-    use crate::capabilities::conductor::service::proxy::ProxyBridge;
     use crate::capabilities::modules::api::ModuleManifest;
     use crate::capabilities::proxy::api::ProxyHandler;
     use crate::capabilities::proxy::api::ProxyHost;
+    use crate::capabilities::runtime::service::ProxyBridge;
     use crate::kernel::ports::ToolHandler;
 
     let module = Module {
@@ -646,9 +647,9 @@ pub(crate) fn the_proxy_handler_owns_and_runs_proxy_tools() {
 ///   工具行落进它自己的转录。这条钉住“代理会话就是普通成员会话 + 派发去特例”的整条链。
 #[test]
 pub(crate) fn the_proxy_session_runs_a_turn_through_the_generic_loop() {
-    use crate::capabilities::conductor::api::Output;
+    use crate::capabilities::runtime::api::Output;
 
-    let (handle, ops) = super::super::ops_with(
+    let (handle, faces) = super::super::ops_with(
         vec![],
         vec![
             r#"{"type":"tool","name":"catalog_agents","args":{"scope":"agents"}}"#,
@@ -658,11 +659,9 @@ pub(crate) fn the_proxy_session_runs_a_turn_through_the_generic_loop() {
     let sid = handle
         .call(|core| core.create_proxy("w-proxy", 7))
         .expect("建代理会话");
-    ops.sessions
-        .say(&sid, "开始", Output::Final)
-        .expect("跑一轮");
+    faces.turn.say(&sid, "开始", Output::Final).expect("跑一轮");
 
-    let (meta, events) = ops.history.open(&sid).expect("打开代理会话");
+    let (meta, events) = faces.history.open(&sid).expect("打开代理会话");
     assert_eq!(meta.mode, "proxy");
     assert!(meta.delegation.is_some(), "代理会话带全权委托");
     let text = serde_json::to_string(&events).expect("转录");
@@ -675,11 +674,11 @@ pub(crate) fn the_proxy_session_runs_a_turn_through_the_generic_loop() {
 /// 目的：代理会话能从落盘重建：`rebuild_session` 走 `mode="proxy"` 那一支，装回 core_proxy 面。
 #[test]
 pub(crate) fn the_proxy_session_rebuilds_from_disk() {
-    let (handle, ops) = super::super::ops_with(vec![], vec!["好"]);
+    let (handle, faces) = super::super::ops_with(vec![], vec!["好"]);
     let sid = handle
         .call(|core| core.create_proxy("w-rebuild", 3))
         .expect("建代理会话");
-    let (meta, events) = ops.history.open(&sid).expect("落盘");
+    let (meta, events) = faces.history.open(&sid).expect("落盘");
     assert_eq!(meta.mode, "proxy");
     let session = handle
         .call(move |core| {
@@ -688,7 +687,7 @@ pub(crate) fn the_proxy_session_rebuilds_from_disk() {
         })
         .expect("重建代理会话");
     match session {
-        crate::capabilities::conductor::service::Session::Single(s) => {
+        crate::capabilities::runtime::service::Session::Single(s) => {
             let tools = s.tools.as_ref().expect("有工具环境");
             assert!(
                 tools.face.allowed.iter().any(|t| t == d::CATALOG),
@@ -719,7 +718,7 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
         root: PathBuf::from("modules").join("m1"),
         has_userdata: false,
     };
-    let (handle, ops) = super::super::ops_with(vec![module], vec![]);
+    let (handle, faces) = super::super::ops_with(vec![module], vec![]);
     let proxy = handle
         .call(|core| core.create_proxy("w-notify", 1))
         .expect("建代理会话");
@@ -754,7 +753,7 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
         })
         .expect("通知");
     assert_eq!(notified.as_deref(), Some(proxy.as_str()));
-    let (_, events) = ops.history.open(&proxy).expect("代理转录");
+    let (_, events) = faces.history.open(&proxy).expect("代理转录");
     let text = serde_json::to_string(&events).expect("JSON");
     assert!(text.contains("子会话"), "通知行该落进代理会话：{}", text);
     assert!(!text.contains("做事"), "不得把子会话的转录灌进来：{}", text);
@@ -763,9 +762,9 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
 /// 目的：运行态是**落盘事实**：停止后派发与唤醒一律被拒，关闭是终态，继续解冻后放行。
 #[test]
 pub(crate) fn run_state_gates_dispatch_and_survives_stop_close() {
-    use crate::capabilities::conductor::service::proxy::ProxyBridge;
     use crate::capabilities::modules::api::ModuleManifest;
     use crate::capabilities::proxy::api::ProxyHost;
+    use crate::capabilities::runtime::service::ProxyBridge;
 
     let module = Module {
         manifest: ModuleManifest {
@@ -782,9 +781,9 @@ pub(crate) fn run_state_gates_dispatch_and_survives_stop_close() {
         root: PathBuf::from("modules").join("m1"),
         has_userdata: false,
     };
-    let (handle, ops) = super::super::ops_with(vec![module], vec![]);
-    let (work, _) = ops
-        .sessions
+    let (handle, faces) = super::super::ops_with(vec![module], vec![]);
+    let (work, _) = faces
+        .work
         .create_work(super::super::single_work("w-run", &["m1"]))
         .expect("建工作");
     let sid = work.sid.clone();
@@ -802,7 +801,7 @@ pub(crate) fn run_state_gates_dispatch_and_survives_stop_close() {
         .expect("停止");
     assert_eq!(st.state, "stopped:0");
     assert_eq!(
-        ops.history.open(&sid).expect("meta").0.run,
+        faces.history.open(&sid).expect("meta").0.run,
         RunState::Stopped,
         "停止是落盘事实，不是内存状态"
     );
@@ -822,7 +821,7 @@ pub(crate) fn run_state_gates_dispatch_and_survives_stop_close() {
             .state,
         "stopped"
     );
-    let replay = serde_json::to_string(&ops.history.open(&sid).expect("回放").1).expect("JSON");
+    let replay = serde_json::to_string(&faces.history.open(&sid).expect("回放").1).expect("JSON");
     assert!(
         replay.contains("先停一下"),
         "控制原因要进可回放记录：{}",
@@ -835,7 +834,7 @@ pub(crate) fn run_state_gates_dispatch_and_survives_stop_close() {
         .expect("关闭");
     assert_eq!(st.state, "closed");
     assert_eq!(
-        ops.history.open(&sid).expect("meta").0.run,
+        faces.history.open(&sid).expect("meta").0.run,
         RunState::Closed
     );
     assert!(bridge.send(&sid, &msg).unwrap_err().contains("已关闭"));
@@ -847,8 +846,8 @@ pub(crate) fn run_state_gates_dispatch_and_survives_stop_close() {
     );
 
     // 继续：解冻后派发放行（这条没在等门，接着走的是"继续"）。
-    let (w2, _) = ops
-        .sessions
+    let (w2, _) = faces
+        .work
         .create_work(super::super::single_work("w-run-2", &["m1"]))
         .expect("建工作");
     let sid2 = w2.sid.clone();
@@ -860,7 +859,7 @@ pub(crate) fn run_state_gates_dispatch_and_survives_stop_close() {
         .expect("继续");
     assert_eq!(st.state, "active");
     assert_eq!(
-        ops.history.open(&sid2).expect("meta").0.run,
+        faces.history.open(&sid2).expect("meta").0.run,
         RunState::Active
     );
 }
@@ -868,9 +867,9 @@ pub(crate) fn run_state_gates_dispatch_and_survives_stop_close() {
 /// 目的：转达的来源进目标会话的可回放记录：核心生成的内容不冒充用户原文。
 #[test]
 pub(crate) fn relay_records_its_source_on_the_target() {
-    use crate::capabilities::conductor::service::proxy::ProxyBridge;
     use crate::capabilities::modules::api::ModuleManifest;
     use crate::capabilities::proxy::api::ProxyHost;
+    use crate::capabilities::runtime::service::ProxyBridge;
 
     let module = Module {
         manifest: ModuleManifest {
@@ -887,9 +886,9 @@ pub(crate) fn relay_records_its_source_on_the_target() {
         root: PathBuf::from("modules").join("m1"),
         has_userdata: false,
     };
-    let (handle, ops) = super::super::ops_with(vec![module], vec![]);
-    let (work, _) = ops
-        .sessions
+    let (handle, faces) = super::super::ops_with(vec![module], vec![]);
+    let (work, _) = faces
+        .work
         .create_work(super::super::single_work("w-relay", &["m1"]))
         .expect("建工作");
     let sid = work.sid.clone();
@@ -901,7 +900,7 @@ pub(crate) fn relay_records_its_source_on_the_target() {
         reply: None,
     };
     bridge.send(&sid, &msg).expect("转达");
-    let replay = serde_json::to_string(&ops.history.open(&sid).expect("回放").1).expect("JSON");
+    let replay = serde_json::to_string(&faces.history.open(&sid).expect("回放").1).expect("JSON");
     assert!(replay.contains("核心代理转达"), "{}", replay);
     assert!(
         replay.contains("user_reply"),
@@ -913,9 +912,9 @@ pub(crate) fn relay_records_its_source_on_the_target() {
 /// 目的：真实宿主：mode=multi 建的是**协作子工作**（复用既有协作与节点会话机制，不另起一套）。
 #[test]
 pub(crate) fn the_real_bridge_creates_a_multi_agent_child_work() {
-    use crate::capabilities::conductor::service::proxy::ProxyBridge;
     use crate::capabilities::modules::api::ModuleManifest;
     use crate::capabilities::proxy::api::ProxyHost;
+    use crate::capabilities::runtime::service::ProxyBridge;
 
     let module = |id: &str| Module {
         manifest: ModuleManifest {
@@ -932,9 +931,9 @@ pub(crate) fn the_real_bridge_creates_a_multi_agent_child_work() {
         root: PathBuf::from("modules").join(id),
         has_userdata: false,
     };
-    let (handle, ops) = super::super::ops_with(vec![module("m1"), module("m2")], vec![]);
-    let (parent, _) = ops
-        .sessions
+    let (handle, faces) = super::super::ops_with(vec![module("m1"), module("m2")], vec![]);
+    let (parent, _) = faces
+        .work
         .create_work(super::super::single_work("w-parent-multi", &["m1"]))
         .expect("建父工作");
     let bridge: Arc<dyn ProxyHost + Send + Sync> = Arc::new(ProxyBridge::new(handle.clone()));
@@ -956,7 +955,7 @@ pub(crate) fn the_real_bridge_creates_a_multi_agent_child_work() {
         .filter_map(|a| a.as_str())
         .collect();
     assert_eq!(agents, vec!["c1", "c2"], "{}", out.output);
-    let (meta, _) = ops.history.open(&child).expect("能打开子工作");
+    let (meta, _) = faces.history.open(&child).expect("能打开子工作");
     assert_eq!(meta.mode, "collab", "multi 建的是协作工作");
     assert_eq!(meta.parent.as_deref(), Some(parent.sid.as_str()));
     let root = handle
@@ -976,7 +975,7 @@ pub(crate) fn the_real_bridge_creates_a_multi_agent_child_work() {
     assert!(out.ok, "{}", out.output);
     let v: serde_json::Value = serde_json::from_str(&out.output).expect("JSON");
     let child = v["session"].as_str().expect("有会话引用").to_string();
-    let (meta, _) = ops.history.open(&child).expect("能打开子工作");
+    let (meta, _) = faces.history.open(&child).expect("能打开子工作");
     assert_eq!(meta.modules, vec!["m1".to_string()], "meta.modules 去重");
     assert!(
         meta.agents
@@ -1007,7 +1006,7 @@ pub(crate) fn the_proxy_identity_is_the_role_prompt() {
         root: PathBuf::from("modules").join("m1"),
         has_userdata: false,
     };
-    let (handle, ops) = super::super::ops_with(vec![module], vec![]);
+    let (handle, faces) = super::super::ops_with(vec![module], vec![]);
     let proxy = handle
         .call(|core| core.create_proxy("w-role", 1))
         .expect("建代理会话");
@@ -1036,8 +1035,8 @@ pub(crate) fn the_proxy_identity_is_the_role_prompt() {
     );
 
     // 普通 agent 会话：环境与调用约定同一份口径，但不含代理角色的话。
-    let (work, _) = ops
-        .sessions
+    let (work, _) = faces
+        .work
         .create_work(super::super::single_work("w-role-plain", &["m1"]))
         .expect("建工作");
     let plain = handle
@@ -1063,7 +1062,7 @@ pub(crate) fn the_proxy_identity_is_the_role_prompt() {
 ///   没有名单、带全权委托、运行态正常；名单 / 需求与形态不符时整条拒绝、不留半成品。
 #[test]
 pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
-    let (handle, ops) = super::super::ops_with(vec![], vec![]);
+    let (handle, faces) = super::super::ops_with(vec![], vec![]);
     let spec = crate::capabilities::work::api::WorkSpec {
         name: "w-user-proxy".to_string(),
         mode: WorkMode::Proxy,
@@ -1076,9 +1075,9 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
         workspace: None,
         workspace_grant: None,
     };
-    let (opened, _head) = ops.sessions.create_work(spec.clone()).expect("建代理会话");
+    let (opened, _head) = faces.work.create_work(spec.clone()).expect("建代理会话");
     assert!(opened.agents.is_empty(), "代理会话没有名单");
-    let (meta, _) = ops.history.open(&opened.sid).expect("落盘");
+    let (meta, _) = faces.history.open(&opened.sid).expect("落盘");
     assert_eq!(meta.mode, "proxy");
     assert!(meta.delegation.is_some(), "选代理形态 = 授予全权");
     assert!(meta.agents.is_empty() && meta.parent.is_none());
@@ -1093,9 +1092,9 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
         .expect("代理会话在表里");
     assert!(identity.contains("你是核心代理"), "{}", identity);
     // 读模型：形态与运行态都如实给出（前端据此渲染代理会话、标出暂停 / 关闭）。
-    let views = ops
-        .sessions
-        .session_views(&ops.history.list().expect("列表"))
+    let views = faces
+        .work
+        .session_views(&faces.history.list().expect("列表"))
         .expect("视图");
     let v = views
         .iter()
@@ -1116,13 +1115,14 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
         chara: String::new(),
     }];
     assert!(
-        ops.sessions
+        faces
+            .work
             .create_work(bad)
             .unwrap_err()
             .contains("不接受 agent 名单")
     );
     assert!(
-        ops.history.open("w-user-proxy-2").is_err(),
+        faces.history.open("w-user-proxy-2").is_err(),
         "拒绝后不留半成品"
     );
 
@@ -1130,15 +1130,15 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
     let mut vm = spec;
     vm.name = "w-user-proxy-vm".to_string();
     vm.tier = Tier::Vm;
-    match ops.sessions.create_work(vm) {
+    match faces.work.create_work(vm) {
         Ok((o, _)) => {
-            let (m, _) = ops.history.open(&o.sid).expect("落盘");
+            let (m, _) = faces.history.open(&o.sid).expect("落盘");
             assert_eq!(m.exec.tier, Tier::Vm, "用户选的档位要落盘（子工作继承它）");
         }
         Err(e) => {
             assert!(!e.trim().is_empty(), "拒绝要把原因说清");
             assert!(
-                ops.history.open("w-user-proxy-vm").is_err(),
+                faces.history.open("w-user-proxy-vm").is_err(),
                 "拒绝后不留半成品"
             );
         }
@@ -1154,12 +1154,10 @@ pub(crate) fn proxy_session_exposes_context_usage() {
         vec!["{\"type\":\"say\",\"text\":\"代理在\"}".to_string()],
     )
     .with_usage(TokenUsage::new(700, 50, Some(750)));
-    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(core_with_gateway(
-        vec![],
-        gateway,
-    ))
-    .expect("起核心线程");
-    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let handle =
+        crate::capabilities::runtime::api::Handle::spawn(core_with_gateway(vec![], gateway))
+            .expect("起核心线程");
+    let faces = Faces::from_handle(&handle);
     let spec = crate::capabilities::work::api::WorkSpec {
         name: "w-proxy-ctx".to_string(),
         mode: WorkMode::Proxy,
@@ -1172,17 +1170,18 @@ pub(crate) fn proxy_session_exposes_context_usage() {
         workspace: None,
         workspace_grant: None,
     };
-    let sid = ops.sessions.create_work(spec).expect("建代理会话").0.sid;
-    ops.sessions
+    let sid = faces.work.create_work(spec).expect("建代理会话").0.sid;
+    faces
+        .turn
         .say(
             &sid,
             "开始",
-            crate::capabilities::conductor::api::Output::Final,
+            crate::capabilities::runtime::api::Output::Final,
         )
         .expect("代理一轮");
-    let views = ops
-        .sessions
-        .session_views(&ops.history.list().expect("列表"))
+    let views = faces
+        .work
+        .session_views(&faces.history.list().expect("列表"))
         .expect("视图");
     let view = views
         .iter()
@@ -1197,9 +1196,9 @@ pub(crate) fn proxy_session_exposes_context_usage() {
 /// 目的：观察的增量信号：`since` 给上次的游标就回「新增几条」；回执本身仍是幂等快照。
 #[test]
 pub(crate) fn observe_reports_new_messages_since_the_last_cursor() {
-    use crate::capabilities::conductor::service::proxy::ProxyBridge;
     use crate::capabilities::modules::api::ModuleManifest;
     use crate::capabilities::proxy::api::ProxyHost;
+    use crate::capabilities::runtime::service::ProxyBridge;
 
     let module = Module {
         manifest: ModuleManifest {
@@ -1216,9 +1215,9 @@ pub(crate) fn observe_reports_new_messages_since_the_last_cursor() {
         root: PathBuf::from("modules").join("m1"),
         has_userdata: false,
     };
-    let (handle, ops) = super::super::ops_with(vec![module], vec![]);
-    let (work, _) = ops
-        .sessions
+    let (handle, faces) = super::super::ops_with(vec![module], vec![]);
+    let (work, _) = faces
+        .work
         .create_work(super::super::single_work("w-cursor", &["m1"]))
         .expect("建工作");
     let sid = work.sid.clone();
@@ -1263,9 +1262,9 @@ pub(crate) fn observe_reports_new_messages_since_the_last_cursor() {
 /// 目的：代理建子工作：开场事实**当场**进它的事件台（在场的前端不用等刷新）。
 #[test]
 pub(crate) fn the_proxy_created_child_publishes_its_opening_facts() {
-    use crate::capabilities::conductor::service::proxy::ProxyBridge;
     use crate::capabilities::modules::api::ModuleManifest;
     use crate::capabilities::proxy::api::ProxyHost;
+    use crate::capabilities::runtime::service::ProxyBridge;
 
     let module = |id: &str| Module {
         manifest: ModuleManifest {
@@ -1339,9 +1338,9 @@ pub(crate) fn the_proxy_created_child_publishes_its_opening_facts() {
 /// 目的：协作子会话的落门：`send` 按它**此刻等的是哪一关**回答那张卡（选项 id 由代理通道的适配规则定）。
 #[test]
 pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
-    use crate::capabilities::conductor::service::proxy::ProxyBridge;
     use crate::capabilities::modules::api::ModuleManifest;
     use crate::capabilities::proxy::api::ProxyHost;
+    use crate::capabilities::runtime::service::ProxyBridge;
 
     let module = Module {
         manifest: ModuleManifest {
@@ -1358,7 +1357,7 @@ pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
         root: PathBuf::from("modules").join("m1"),
         has_userdata: false,
     };
-    let (handle, ops) = super::super::ops_with(
+    let (handle, faces) = super::super::ops_with(
         vec![module],
         vec![
             r#"{"type":"tool","name":"slate","args":{"picks":[{"name":"a","modules":["m1"],"model":"m","why":"对口"}]}}"#,
@@ -1368,8 +1367,8 @@ pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
             r#"{"type":"tool","name":"checklist","args":{"items":[{"item":"做 X","status":"pass"}]}}"#,
         ],
     );
-    let (work, _) = ops
-        .sessions
+    let (work, _) = faces
+        .work
         .create_work(crate::capabilities::work::api::WorkSpec {
             name: "w-gate".to_string(),
             mode: WorkMode::Collab,
@@ -1384,8 +1383,8 @@ pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
         })
         .expect("建协作工作（代拟）");
     let child = work.sid.clone();
-    let card = ops
-        .sessions
+    let card = faces
+        .turn
         .open_queue(&child)
         .expect("取卡")
         .expect("挂着一张卡")
@@ -1395,7 +1394,7 @@ pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
         ids,
         vec![OPT_SLATE_CONFIRM.to_string(), OPT_SLATE_CANCEL.to_string()],
         "代拟门要挂上「确认建组 / 取消」两个选项；回放：{}",
-        serde_json::to_string(&ops.history.open(&child).expect("回放").1).expect("JSON")
+        serde_json::to_string(&faces.history.open(&child).expect("回放").1).expect("JSON")
     );
     let bridge: Arc<dyn ProxyHost + Send + Sync> = Arc::new(ProxyBridge::new(handle));
     let msg = d::Relayed {
@@ -1411,7 +1410,7 @@ pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
     let want = vec![OPT_BEGIN.to_string(), OPT_BEGIN_ALLOW.to_string()];
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
-        let now = ops.sessions.open_queue(&child).expect("取卡");
+        let now = faces.turn.open_queue(&child).expect("取卡");
         let ids: Vec<String> = now
             .iter()
             .flat_map(|q| q.card.options.iter().map(|o| o.id.clone()))
@@ -1431,7 +1430,7 @@ pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
 /// 目的：核心代理建子会话时不能自选环境：给了 tier / guest 也整段继承主会话。
 #[test]
 pub(crate) fn ai_created_child_inherits_the_proxy_environment() {
-    let (handle, ops) = super::super::ops_with(vec![module_of("m1")], vec![]);
+    let (handle, faces) = super::super::ops_with(vec![module_of("m1")], vec![]);
     let proxy = handle
         .call(|core| core.create_proxy("p-env", 1))
         .expect("建代理");
@@ -1462,7 +1461,7 @@ pub(crate) fn ai_created_child_inherits_the_proxy_environment() {
             }
         })
         .expect("建子会话");
-    let (meta, _) = ops.history.open(&child).expect("子会话落盘");
+    let (meta, _) = faces.history.open(&child).expect("子会话落盘");
     assert_eq!(meta.exec.tier, Tier::Host, "子会话环境随代理主会话");
     assert_eq!(meta.exec.guest, None, "AI 不能给子会话选虚拟根");
 }
@@ -1470,9 +1469,9 @@ pub(crate) fn ai_created_child_inherits_the_proxy_environment() {
 /// 目的：代理档位显式落盘、配置可见；私有沙箱是真实目录，不再 private=shared。
 #[test]
 pub(crate) fn proxy_profile_is_explicit_and_uses_a_real_private_sandbox() {
-    use crate::capabilities::conductor::service::Session;
     use crate::capabilities::permission::api::ProfileId;
-    let (handle, ops) = super::super::ops_with(vec![], vec!["好"]);
+    use crate::capabilities::runtime::service::Session;
+    let (handle, faces) = super::super::ops_with(vec![], vec!["好"]);
     let sid = handle
         .call(|core| {
             core.create_proxy_with_facts(
@@ -1486,14 +1485,14 @@ pub(crate) fn proxy_profile_is_explicit_and_uses_a_real_private_sandbox() {
             .map(|(sid, _)| sid)
         })
         .expect("建代理会话");
-    let (meta, events) = ops.history.open(&sid).expect("落盘");
+    let (meta, events) = faces.history.open(&sid).expect("落盘");
     assert_eq!(
         meta.sandbox.ceiling.as_ref().and_then(|l| l.profile),
         Some(ProfileId::View),
         "代理档位要显式落盘"
     );
     assert!(meta.sandbox.narrowing.is_none());
-    let cfg = ops.sessions.config(&sid).expect("配置视图");
+    let cfg = faces.work.config(&sid).expect("配置视图");
     assert_eq!(cfg.permission.profile, ProfileId::View);
     assert_eq!(cfg.permission.label, "仅可查看");
     let session = handle
@@ -1520,7 +1519,7 @@ pub(crate) fn proxy_profile_is_explicit_and_uses_a_real_private_sandbox() {
 #[test]
 pub(crate) fn proxy_profile_can_be_quick_switched() {
     use crate::capabilities::permission::api::ProfileId;
-    let (handle, ops) = super::super::ops_with(vec![], vec!["好"]);
+    let (handle, faces) = super::super::ops_with(vec![], vec!["好"]);
     let sid = handle
         .call(|core| core.create_proxy("w-switch", 1))
         .expect("建代理");
@@ -1528,13 +1527,13 @@ pub(crate) fn proxy_profile_can_be_quick_switched() {
     handle
         .call(move |core| core.set_permission_profile(&target, ProfileId::View))
         .expect("代理快速切档");
-    let (meta, _) = ops.history.open(&sid).expect("落盘");
+    let (meta, _) = faces.history.open(&sid).expect("落盘");
     assert_eq!(
         meta.sandbox.ceiling.as_ref().and_then(|l| l.profile),
         Some(ProfileId::View)
     );
     assert_eq!(
-        ops.sessions.config(&sid).unwrap().permission.profile,
+        faces.work.config(&sid).unwrap().permission.profile,
         ProfileId::View
     );
 }

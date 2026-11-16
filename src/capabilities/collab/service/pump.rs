@@ -437,7 +437,7 @@ impl CollabSession {
         self.done = true;
     }
 
-    /// 目的：从在组名单装配成员（策略在 conductor：该 agent 的模型 > 核心默认；缺了就如实报错）。
+    /// 目的：从在组名单装配成员（策略在 runtime：该 agent 的模型 > 核心默认；缺了就如实报错）。
     ///   一个 agent = 一个成员：system 由它全部模块合成，工具 = 各模块外部工具的并集。
     pub(crate) fn assemble_members(&self) -> Result<Vec<Member>, String> {
         let prompts = self.prompts.clone();
@@ -536,7 +536,7 @@ impl CollabSession {
                         .to_string(),
                     builtin_tools: self.systools.book(),
                     // 讨论席拿不到模块工具（with_modules = false），因此不需要包选择诊断；
-                    // 执行席的缺包判据在 conductor（与成员循环同一把尺子）。
+                    // 执行席的缺包判据在 runtime（与成员循环同一把尺子）。
                     unavailable: std::collections::BTreeMap::new(),
                     fence,
                     // 讨论席不干活、拿不到模块工具，也就没有工具进程的注入项。

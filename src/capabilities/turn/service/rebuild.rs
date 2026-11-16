@@ -1,7 +1,7 @@
 //! 目的：turn 侧的会话重建——从落盘的事件与元数据重建出一条会话（单 agent / 协作 / 代理三种形态）。
 //! 管：外部工作区绑定的复检与绑定、`rebuild_session` 的三形态分支、转录还原（`replay_reads` / `replay_dialogue`）、代理会话的装配。
 //! 不管：准入与派发闸（`service/admit.rs`）、沙箱与权限事实（`service/facts.rs`）、会话怎么落盘（`session`）。
-//! 联动：`conductor` 的启用与回档只经这里重建会话；代理会话由 `conductor` 的代理用例经 `build_proxy` 取。
+//! 联动：`runtime` 的启用与回档只经这里重建会话；代理会话由 `runtime` 的代理用例经 `build_proxy` 取。
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -154,7 +154,7 @@ impl Turn {
                     &meta.exec,
                     &modules,
                 );
-                // 身份与角色**同一把尺子**（重建与实时不能各写一份，见 Conductor::role_of）：
+                // 身份与角色**同一把尺子**（重建与实时不能各写一份，见 Core::role_of）：
                 // 协作派生的成员 / 节点 = executor（拿得到回报工具）；其余单 agent 工作 = solo。
                 let role = role_of(self.history.as_ref(), meta)?;
                 let host_plan = if meta.exec.tier == crate::kernel::api::Tier::Host {

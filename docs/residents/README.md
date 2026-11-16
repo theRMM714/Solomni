@@ -25,7 +25,7 @@
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`kernel`（长驻进程机制）、`modules`（取模块清单事实）、`secrets`（起进程时解析隐秘字段）
-- 谁在用我：`collab`、`conductor`、`session`（`Ops` 字段与成员工具面，由组合根注入）
+- 谁在用我：`collab`、`runtime`、`session`（`Faces` 字段与成员工具面，由组合根注入）
 
 ## 一、当前能力与适配器约束
 

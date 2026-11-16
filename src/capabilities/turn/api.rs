@@ -46,7 +46,7 @@ pub use crate::capabilities::turn::service::state::{Session, TurnState};
 
 use crate::capabilities::registry::api::Registry;
 use crate::capabilities::session::api::{
-    AgentSession, Gates, Persister, SessionEvent, SessionMeta,
+    AgentSession, DecisionQueue, Gates, Persister, SessionEvent, SessionMeta,
 };
 use crate::kernel::api::SessionId;
 use crate::kernel::ports::{AskUser, HostProbe};
@@ -359,4 +359,33 @@ pub trait TurnHost: Send + Sync + Clone + 'static {
         option: &str,
         note: &str,
     ) -> Result<Advance, String>;
+}
+
+/// 目的：回合的入站契约：说一句、继续、写需求、回答裁决卡、看裁决队、撤回同意、压缩、在跑吗。
+///   宿主（runtime 的 `Handle`）实现它；呈现层按屏幕只取这一面。
+pub trait TurnOps: Send + Sync {
+    /// 目的：单 agent 会话里说一句（生成可被 `stop` 中止）。
+    fn say(&self, sid: &str, text: &str, out: Output) -> Result<Advance, String>;
+    /// 目的：继续一次会话：被停止过就先解冻整棵子树再接着走；协作从断点推进，单 agent / 代理补一轮「继续」。
+    fn continue_flow(&self, sid: &str, out: Output) -> Result<Advance, String>;
+    /// 目的：协作会话：写下本次需求（起点那一关）；其余推进一律走"回答一张卡"。
+    fn set_task(&self, sid: &str, text: &str) -> Result<Advance, String>;
+    /// 目的：**回答一张裁决卡**（唯一的回答口）：带卡片 id + 选项 id（+ 附言）。
+    /// 约束：校验选项 id 属于**当时那张卡**的选项集（防旧卡的答案放行新请求）；不合就如实拒绝。
+    /// 与「停止」同一条直路：这一答先落定（出队 + 记一条回答），处置再脱离调用方跑。
+    fn answer_card(
+        &self,
+        sid: &str,
+        card: &str,
+        option: &str,
+        note: &str,
+    ) -> Result<Advance, String>;
+    /// 目的：当前挂着的那一队裁决（None = 没有等你定的事）：队首卡按选项渲染，后面还在等的几张如实列出。
+    /// 约束：判据只有这一处——推的事件与快照的 pending 都从它派生（见 docs/session/session-model.md）。
+    fn open_queue(&self, sid: &str) -> Result<Option<DecisionQueue>, String>;
+    fn withdraw_agree(&self, sid: &str, agent: &str) -> Result<Advance, String>;
+    /// 目的：压缩这个会话的上下文（AI 自己压；压不动如实说）。
+    fn compact(&self, sid: &str) -> Result<Advance, String>;
+    #[allow(dead_code)]
+    fn is_running(&self, sid: &str) -> bool;
 }

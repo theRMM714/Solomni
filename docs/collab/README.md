@@ -7,7 +7,7 @@
 ## 管什么 / 不管什么
 
 - 管：协作会话对象与状态（名单、方案、任务链、挂起）、讨论泵与轮转发言、成员回合（含工具循环）、整理出链、链驱动、节点与总验收及定向返工、断点续跑。
-- 不管：不落盘（经 `session::api`）、不建会话（`conductor` 建）、不选模型（`registry` 解析）、不画界面（`cli` / `web`）。
+- 不管：不落盘（经 `session::api`）、不建会话（`runtime` 建）、不选模型（`registry` 解析）、不画界面（`cli` / `web`）。
 
 ## 入站契约与状态归属
 
@@ -17,7 +17,7 @@
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`kernel`、`llm`、`modules`、`prompt`、`registry`、`residents`、`session`、`slate`、`taskchain`、`tools`、`vm`、`workspace`
-- 谁在用我：`conductor`
+- 谁在用我：`runtime`
 
 ## 改动本单元时必须同步
 

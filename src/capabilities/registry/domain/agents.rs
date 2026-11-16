@@ -1,7 +1,7 @@
 //! 目的：agent 的存档形态与解析——用户配置的具名能力组合。
 //! 管：Agent / AgentView；名字校验与保留名检查；RosterPick 解析与唯一实例命名；列表文案。
 //! 不管：能力注册表（在 modules/ 公地）；落盘（在 detail/yaml_settings.rs）；登记处用例（在 service.rs）。
-//! 联动：被 registry/api.rs 重导出；service.rs 读写；conductor 按 agent 名取 Roster。
+//! 联动：被 registry/api.rs 重导出；service.rs 读写；runtime 按 agent 名取 Roster。
 
 use crate::capabilities::modules::api::Roster;
 use crate::capabilities::registry::domain::providers::ModelEntry;
@@ -34,6 +34,16 @@ pub struct AgentView {
     pub name: String,
     pub modules: Vec<String>,
     pub model: Option<String>,
+    pub note: String,
+    pub chara: String,
+}
+
+/// 目的：保存 agent 的入参（用户给的定义）。
+#[derive(Debug, Clone)]
+pub struct AgentDraft {
+    pub name: String,
+    pub modules: Vec<String>,
+    pub model: String,
     pub note: String,
     pub chara: String,
 }

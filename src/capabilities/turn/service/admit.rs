@@ -1,7 +1,7 @@
 //! 目的：turn 侧的会话准入——会话进在世表之前的落盘、按需重建、派发闸与子树续跑。
 //! 管：`admit`（落盘并进在世表）、`ensure_session`（不在世就重建再放入）、`dispatch_gate`（终态会话拒绝派发）、`resume_subtree`（把停掉的子树拉回运行态）。
-//! 不管：重建本体（见 `service/rebuild.rs`）、生成驱动与工作编排（见 `conductor`）。
-//! 联动：`conductor` 的启用、派发与协作推进都经这里；`ensure_session` 重建时按 `conductor` 传来的登记处与主机探针取事实。
+//! 不管：重建本体（见 `service/rebuild.rs`）、生成驱动与工作编排（见 `runtime`）。
+//! 联动：`runtime` 的启用、派发与协作推进都经这里；`ensure_session` 重建时按 `runtime` 传来的登记处与主机探针取事实。
 
 use crate::capabilities::registry::api::Registry;
 use crate::capabilities::session::api::{RunState, SessionMeta, subtree_of, truncate_events};

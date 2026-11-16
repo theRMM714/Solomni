@@ -1,7 +1,7 @@
 //! 目的：回合生成与视图：流式上限、讨论轮、单模块、文件视图与工具结果注入。
 //! 管：设置对流式的上限、agent 自身历史、核心系统提示、单模块对话、工作区/文件视图、工具结果进入历史。
 //! 不管：回档与编辑。
-//! 联动：`tests::builders`、`Ops`；契约见 docs/session/session-model.md。
+//! 联动：`tests::builders`、`Faces`；契约见 docs/session/session-model.md。
 
 use super::super::builders::*;
 use super::super::prelude::*;

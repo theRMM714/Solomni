@@ -1,7 +1,7 @@
 //! 目的：钉推荐名单与代拟名单共用同一条 slate 协议的契约。
 //! 管：suggest_models 推荐 agent、单模式保留唯一选择、复用已存 agent 不推模型。
 //! 不管：协作里的代拟确认路径（collab）。
-//! 联动：src/capabilities/slate/、Conductor::suggest_models、tests/doubles。
+//! 联动：src/capabilities/slate/、Core::suggest_models、tests/doubles。
 
 use super::prelude::*;
 

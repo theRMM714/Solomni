@@ -1,12 +1,13 @@
 //! 目的：Web 转录中心：tiny_http 服务器 + 长轮询增量事件推送。
 //! 管：HTTP 协议适配（请求分发、静态资源、长轮询与**入站能力面**之间的转译）、服务器生命周期；只绑 127.0.0.1，密钥永不进任何响应（能力面只给 id）。
 //! 不管：渲染（在浏览器 `src/presentation/web/assets/app/main.js` 起的分层模块）；路由目录与匹配（`src/presentation/web/routes.rs`）。
-//! 联动：核心状态在核心自己的线程上——这里拿不到它、也拿不到任何核心锁，「停止」直接说给核心听；请求经 `Ops`（`src/capabilities/*/api.rs`）进入。
+//! 联动：核心状态在核心自己的线程上——这里拿不到它、也拿不到任何核心锁，「停止」直接说给核心听；请求经 `Faces`（`src/capabilities/*/api.rs`）进入。
 
-use crate::capabilities::conductor::api::{Acted, ActionCall, Caller, SessionEvent};
-use crate::capabilities::conductor::api::{Ops, Output};
+use crate::capabilities::runtime::api::Output;
+use crate::capabilities::runtime::api::{Acted, ActionCall, Caller, SessionEvent};
 use crate::capabilities::work::api::WorkMode;
 use crate::capabilities::workspace::api::MAX_ASSET_BYTES;
+use crate::presentation::faces::Faces;
 pub(crate) mod assets;
 mod host_fs;
 pub mod routes;
@@ -52,12 +53,17 @@ pub struct FenceInfo {
 pub const RESTART_EXIT_CODE: i32 = 75;
 
 /// 目的：启动转录中心服务器：**可中断**——收到 Ctrl+C / SIGINT 就正常关闭回到 CLI（进程仍在）。
-/// 参数：`ops` 是入站能力面，`port` 默认 3081，`fence` 是本机围栏能力。
+/// 参数：`faces` 是入站能力面，`port` 默认 3081，`fence` 是本机围栏能力。
 /// 约束：只绑本机回环；进入前安装中断标志（Windows 控制台处理函数 / Unix SIGINT），返回前**恢复默认**，所以回到 CLI 提示符后 Ctrl+C 仍按"退出产品"的既有语义生效。
-pub fn serve(ops: Ops, port: u16, fence: FenceInfo, home: &std::path::Path) -> Result<(), String> {
+pub fn serve(
+    faces: Faces,
+    port: u16,
+    fence: FenceInfo,
+    home: &std::path::Path,
+) -> Result<(), String> {
     let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let guard = interrupt::install(Arc::clone(&stop))?;
-    let r = serve_until(&ops, port, &fence, home, &stop);
+    let r = serve_until(&faces, port, &fence, home, &stop);
     drop(guard);
     r
 }
@@ -65,14 +71,14 @@ pub fn serve(ops: Ops, port: u16, fence: FenceInfo, home: &std::path::Path) -> R
 /// 目的：服务器主循环（可注入中断判据，便于测试）：每次最多等 200ms 就回来看一次标志。
 /// 约束：每个请求仍是一线独立线程——长连接绝不阻塞其它请求（转录中心是多端并用的）。
 pub(crate) fn serve_until(
-    ops: &Ops,
+    faces: &Faces,
     port: u16,
     fence: &FenceInfo,
     home: &std::path::Path,
     stop: &std::sync::atomic::AtomicBool,
 ) -> Result<(), String> {
-    // 日志经**入站能力面**（ops.log）取——呈现层不持有端口对象。
-    let log = Arc::clone(&ops.log);
+    // 日志经**入站能力面**（faces.log）取——呈现层不持有端口对象。
+    let log = Arc::clone(&faces.log);
     log.info("web::serve", &format!("转录中心启动，端口 {}", port));
     let addr = format!("127.0.0.1:{}", port);
     let server = Server::http(addr.as_str()).map_err(|e| e.to_string())?;
@@ -84,7 +90,7 @@ pub(crate) fn serve_until(
             Ok(None) => continue,
             Err(e) => return Err(e.to_string()),
         };
-        let ops = ops.clone();
+        let faces = faces.clone();
         let fence = Arc::clone(&fence);
         let log = Arc::clone(&log);
         let home = home.to_path_buf();
@@ -100,7 +106,7 @@ pub(crate) fn serve_until(
             let reply = if !read_ok || body.len() > MAX_BODY_BYTES {
                 complaint(400, "请求体过大或不是 UTF-8")
             } else {
-                route(&ops, &fence, &log, &method, &url, &body, &home)
+                route(&faces, &fence, &log, &method, &url, &body, &home)
             };
             let (code, headers, text) = reply;
             let mut response = Response::from_string(text).with_status_code(code);
@@ -260,9 +266,9 @@ const POLL_TICK: Duration = Duration::from_millis(300);
 
 /// 目的：分发一次请求。**契约测试直接调它**（不经过 socket），逐条路由验成功/错误/空/边界。
 pub(crate) fn route(
-    ops: &Ops,
+    faces: &Faces,
     fence: &FenceInfo,
-    log: &Arc<dyn crate::capabilities::conductor::api::LogOps + Send + Sync>,
+    log: &Arc<dyn crate::capabilities::runtime::api::LogOps + Send + Sync>,
     method: &str,
     url: &str,
     body: &str,
@@ -300,7 +306,7 @@ pub(crate) fn route(
             let deadline = Instant::now() + POLL_WAIT;
             loop {
                 // 同一把锁里取「批 + 头部」：客户端据头部推进游标不会漏事件。
-                let (lines, head, oldest) = ops.events.snapshot(sid.as_deref(), since);
+                let (lines, head, oldest) = faces.events.snapshot(sid.as_deref(), since);
                 if !lines.is_empty() || Instant::now() >= deadline {
                     let snap: Vec<serde_json::Value> = lines
                         .iter()
@@ -315,7 +321,7 @@ pub(crate) fn route(
             }
         }
 
-        "state" => match state_json(ops, fence) {
+        "state" => match state_json(faces, fence) {
             Ok(v) => ok_json(v),
             Err(e) => complaint(400, e),
         },
@@ -331,7 +337,7 @@ pub(crate) fn route(
                 .find_map(|kv| kv.strip_prefix("sid="))
                 .map(routes::url_decode)
                 .filter(|s| !s.is_empty());
-            match ops.actions.catalog(&Caller::User, sid.as_deref()) {
+            match faces.actions.catalog(&Caller::User, sid.as_deref()) {
                 Ok(list) => ok_json(json!({ "actions": list })),
                 Err(e) => complaint(400, e),
             }
@@ -343,7 +349,7 @@ pub(crate) fn route(
                 Err(e) => return complaint(400, e),
             };
             // 流式与否是**显示**的选择，归呈现层（取自设置）。
-            let out = match ops.registry.settings() {
+            let out = match faces.registry.settings() {
                 Ok(s) if s.streaming => Output::Stream,
                 _ => Output::Final,
             };
@@ -353,7 +359,7 @@ pub(crate) fn route(
                 caller: Caller::User,
                 out,
             };
-            match ops.actions.act(call) {
+            match faces.actions.act(call) {
                 // 生成类只回**事件台头部序号**：事实由长轮询按 since 订阅。
                 Ok(Acted::Advanced(adv)) => ok_json(json!({ "head": adv.head })),
                 // 回档 / 改需求返回完整重放（前端整体重建）。
@@ -362,9 +368,9 @@ pub(crate) fn route(
                 Ok(Acted::Done(v)) => {
                     // 设置保存后把最新的 storage 策略推给存储面（不重启；下次构建/回收生效）。
                     if id == "set_settings"
-                        && let Ok(s) = ops.registry.settings()
+                        && let Ok(s) = faces.registry.settings()
                     {
-                        ops.storage.set_policy(
+                        faces.storage.set_policy(
                             crate::capabilities::storage::api::StoragePolicy::from(&s.storage),
                         );
                     }
@@ -385,12 +391,12 @@ pub(crate) fn route(
         }
 
         // 配置视图（会话界面之外）：能改什么、现在是什么、缺什么，一次性如实给出。
-        "session.config" => match ops.sessions.config(&sid) {
+        "session.config" => match faces.work.config(&sid) {
             Ok(config) => ok_json(json!({ "config": config })),
             Err(e) => complaint(400, e),
         },
         // 会话文件清单 + 真实根（前端 @ 菜单与长路径缩写）。
-        "session.files" => match ops.sessions.files(&sid) {
+        "session.files" => match faces.work.files(&sid) {
             Ok(v) => ok_json(
                 json!({ "work": v.work, "agents": v.agents, "roots": v.roots, "usage": v.usage }),
             ),
@@ -413,7 +419,7 @@ pub(crate) fn route(
                     _ => {}
                 }
             }
-            match ops.sessions.work_log(&sid, limit, before) {
+            match faces.work.work_log(&sid, limit, before) {
                 Ok(v) => ok_json(json!(v)),
                 Err(e) => complaint(404, e),
             }
@@ -433,11 +439,11 @@ pub(crate) fn route(
                 .map(routes::url_decode)
                 .filter(|p| !p.is_empty());
             match path {
-                Some(path) => match ops.sessions.work_commit_file(&sid, commit, &path) {
+                Some(path) => match faces.work.work_commit_file(&sid, commit, &path) {
                     Ok(v) => ok_json(json!(v)),
                     Err(e) => complaint(404, e),
                 },
-                None => match ops.sessions.work_commit_view(&sid, commit) {
+                None => match faces.work.work_commit_view(&sid, commit) {
                     Ok(v) => ok_json(json!(v)),
                     Err(e) => complaint(404, e),
                 },
@@ -445,20 +451,20 @@ pub(crate) fn route(
         }
 
         // ---- 基本设置 ----
-        "settings.get" => match ops.registry.settings() {
+        "settings.get" => match faces.registry.settings() {
             Ok(s) => ok_json(json!({ "settings": s })),
             Err(e) => complaint(400, e),
         },
         // ---- 会话历史 ----
-        "history.list" => match ops.history.list() {
+        "history.list" => match faces.history.list() {
             Ok(sessions) => ok_json(json!({ "sessions": sessions })),
             Err(e) => complaint(400, e),
         },
         // 历史与实时**一次给全**：盘上转录 + 事件台上**它之外**的实时尾巴 + 合流时的头部序号。
         // 前端因此只有一条带序号的流（只按序 append），不自己合并两个来源，避免重复与乱序。
-        "history.open" => match ops.history.open(&name) {
+        "history.open" => match faces.history.open(&name) {
             Ok((meta, events)) => {
-                let (live, head) = ops.events.tail_excluding(&name, &events);
+                let (live, head) = faces.events.tail_excluding(&name, &events);
                 // 状态栏的 shell 快照按转录派生：回放 / 重建 / 重启后前端不再"没有 chip 可画"。
                 let shell = crate::capabilities::session::api::last_shell(&events);
                 ok_json(
@@ -467,7 +473,7 @@ pub(crate) fn route(
             }
             Err(e) => complaint(404, e),
         },
-        "history.delete" => match ops.history.delete(&name) {
+        "history.delete" => match faces.history.delete(&name) {
             Ok(ok) => ok_json(json!({ "ok": ok })),
             Err(e) => complaint(400, e),
         },
@@ -539,13 +545,13 @@ pub(crate) fn route(
                 Err(e) => complaint(400, e),
             }
         }
-        "tiers" => match ops.core.tier_choices() {
+        "tiers" => match faces.work.tier_choices() {
             Ok(v) => ok_json(json!({ "tiers": v })),
             Err(e) => complaint(400, e),
         },
 
         // ---- 存储空间：盘点 / 回收 / 显式清理 ----
-        "storage" => match ops.storage.report() {
+        "storage" => match faces.storage.report() {
             Ok(report) => ok_json(json!({ "report": report })),
             Err(e) => complaint(400, e),
         },
@@ -555,7 +561,7 @@ pub(crate) fn route(
                 Err(e) => return complaint(400, e),
             };
             let apply = req.get("apply").and_then(|v| v.as_bool()).unwrap_or(false);
-            match ops.storage.gc(apply) {
+            match faces.storage.gc(apply) {
                 Ok(report) => ok_json(json!({ "ok": true, "report": report })),
                 Err(e) => complaint(400, e),
             }
@@ -593,14 +599,14 @@ pub(crate) fn route(
                 module,
                 confirm,
             };
-            match ops.storage.clean(&req) {
+            match faces.storage.clean(&req) {
                 Ok(outcome) => ok_json(json!({ "ok": true, "result": outcome })),
                 Err(e) => complaint(400, e),
             }
         }
 
         // ---- 现在在跑什么（长驻子进程的账：QEMU / 共享进程） ----
-        "processes" => match ops.provision.processes() {
+        "processes" => match faces.provision.processes() {
             Ok(procs) => ok_json(json!({ "procs": procs })),
             Err(e) => complaint(400, e),
         },
@@ -623,11 +629,11 @@ pub(crate) fn route(
             }
             if wait {
                 let deadline = Instant::now() + POLL_WAIT;
-                while ops.provision.job().seq <= since && Instant::now() < deadline {
+                while faces.provision.job().seq <= since && Instant::now() < deadline {
                     std::thread::sleep(POLL_TICK);
                 }
             }
-            match ops.provision.status() {
+            match faces.provision.status() {
                 Ok(deps) => {
                     // 缺哪几条**按 id 列出来**（不只给个数）：界面的"补齐"按钮据此决定装什么，不自己挑。
                     let pending: Vec<&str> = deps
@@ -637,7 +643,7 @@ pub(crate) fn route(
                         .collect();
                     ok_json(json!({
                         "deps": deps,
-                        "job": ops.provision.job(),
+                        "job": faces.provision.job(),
                         "missing": pending.len(),
                         "pending": pending,
                     }))
@@ -663,7 +669,7 @@ pub(crate) fn route(
                 .get("confirm")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            match ops.provision.status() {
+            match faces.provision.status() {
                 Ok(all) => {
                     // 没点名 = 补**现在缺的那几条**（不是全量）：已在场的不重下、不重解（清单里的条目不跳过在位项）。
                     let picked: Vec<_> = if ids.is_empty() {
@@ -690,7 +696,7 @@ pub(crate) fn route(
                     } else {
                         // 显式点名再起作业：逐条失败要硬报（不是全量补齐那种"跳过继续"）。
                         let picked: Vec<String> = picked.iter().map(|d| d.id.clone()).collect();
-                        match ops.provision.start(picked.clone()) {
+                        match faces.provision.start(picked.clone()) {
                             Ok(()) => ok_json(json!({ "ok": true, "deps": picked })),
                             Err(e) => complaint(400, e),
                         }
@@ -700,7 +706,7 @@ pub(crate) fn route(
             }
         }
         "setup.job" => {
-            ops.provision.cancel();
+            faces.provision.cancel();
             ok_json(json!({ "ok": true }))
         }
 
@@ -715,7 +721,7 @@ pub(crate) fn route(
                 Ok(m) => m,
                 Err(e) => return complaint(400, e),
             };
-            match ops.core.suggest_models(&task, mode) {
+            match faces.work.suggest_models(&task, mode) {
                 Ok(agents) => ok_json(json!({ "ok": true, "agents": agents })),
                 Err(e) => complaint(400, e),
             }
@@ -731,7 +737,7 @@ pub fn parse_mode(s: &str) -> Result<WorkMode, String> {
     match s {
         "single" => Ok(WorkMode::Single),
         "collab" => Ok(WorkMode::Collab),
-        // 代理形态：没有名单，用户选它就是**授予全权**（见 docs/conductor/README.md）。
+        // 代理形态：没有名单，用户选它就是**授予全权**（见 docs/runtime/README.md）。
         "proxy" => Ok(WorkMode::Proxy),
         other => Err(format!(
             "未知模式：{}（只接受 single / collab / proxy）",
@@ -741,13 +747,13 @@ pub fn parse_mode(s: &str) -> Result<WorkMode, String> {
 }
 
 /// 概览状态：模块清单 + 供应商/模型视图 + 核心默认 + 进行中会话（均无密钥）。
-fn state_json(ops: &Ops, fence: &FenceInfo) -> Result<serde_json::Value, String> {
-    let roster = ops.modules.roster()?;
+fn state_json(faces: &Faces, fence: &FenceInfo) -> Result<serde_json::Value, String> {
+    let roster = faces.modules.roster()?;
     // 会话形态取落盘 meta（单一真相）：只读一次盘，sessions 与 history 共用。
-    let history = ops.history.list()?;
+    let history = faces.history.list()?;
     // 会话快照带上"当前等用户裁决的那张卡"：它由核心的裁决队给（与推的 decision_card 同一份事实）。
-    let sessions: Vec<serde_json::Value> = ops
-        .sessions
+    let sessions: Vec<serde_json::Value> = faces
+        .work
         .session_views(&history)?
         .into_iter()
         .map(|v| serde_json::to_value(&v).unwrap_or_else(|_| json!({})))
@@ -758,14 +764,14 @@ fn state_json(ops: &Ops, fence: &FenceInfo) -> Result<serde_json::Value, String>
             "brief": m.manifest.brief,
             // 模块声明的运行能力：创建向导据此预判"这个虚拟根满足不了哪些模块"。
             "runtimes": m.manifest.runtimes,
-            "enabled": ops.modules.module_enabled(&m.manifest.id).unwrap_or(false),
+            "enabled": faces.modules.module_enabled(&m.manifest.id).unwrap_or(false),
             "services": m.manifest.services.keys().map(|n| json!({
                 "name": n,
-                "enabled": ops.modules.service_enabled(&m.manifest.id, n).unwrap_or(false),
+                "enabled": faces.modules.service_enabled(&m.manifest.id, n).unwrap_or(false),
             })).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
         // 常驻服务的**运行态**：模块下的服务开关要显示“在不在跑”（模块声明在 modules[].services）。
-        "services": ops.residents.services()?.iter().map(|s| json!({
+        "services": faces.residents.services()?.iter().map(|s| json!({
             "module": s.module.clone(),
             "name": s.name.clone(),
             "adapter": s.adapter.clone(),
@@ -777,12 +783,12 @@ fn state_json(ops: &Ops, fence: &FenceInfo) -> Result<serde_json::Value, String>
         // 本机工具围栏的实际能力（如实显示，不假装）：哪些维度真的被强制了。
         "fence": fence,
         // 基础工具链的启动事实：项目内 / 宿主回退 / 缺失；Web 横幅与 CLI 启动报告同一份。
-        "toolchains": ops.toolchains,
-        "providers": ops.registry.providers()?,
-        "models": ops.registry.models()?,
-        "core": ops.registry.core_model()?,
-        "agents": ops.registry.agents()?,
-        "settings": ops.registry.settings()?,
+        "toolchains": faces.toolchains,
+        "providers": faces.registry.providers()?,
+        "models": faces.registry.models()?,
+        "core": faces.registry.core_model()?,
+        "agents": faces.registry.agents()?,
+        "settings": faces.registry.settings()?,
         "sessions": sessions,
         "history": history,
     }))

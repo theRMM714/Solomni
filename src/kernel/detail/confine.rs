@@ -1,7 +1,7 @@
 //! 目的：守门进程——把围栏装进工具进程，然后才跑模块声明的命令（实现 tools 的围栏策略）。
 //! 管：按平台把围栏（可读可写的根、断网、进程树围栏、资源上限）装好，并给出「本机能力」与
 //!   「本次实际」（effective_paths）的同一份判据；平台实现分文件 linux.rs / macos.rs / windows/ / other.rs。
-//! 不管：策略（哪些根可达、放不放网）——由 conductor 派生后经命令行传入。
+//! 不管：策略（哪些根可达、放不放网）——由 runtime 派生后经命令行传入。
 //! 联动：能力不足时如实上报（capability），降级而非崩溃——绝不静默假装有围栏。
 
 use crate::kernel::api::FenceSpec;
@@ -77,7 +77,7 @@ pub fn verify(spec: &FenceSpec, command: &str) -> FenceVerdict {
     backend::verify(spec, command)
 }
 
-/// 目的：围栏授权释放的适配器（实现 kernel 共享的 FenceHost 端口）：conductor 只说「这个会话的围栏撤掉」。
+/// 目的：围栏授权释放的适配器（实现 kernel 共享的 FenceHost 端口）：runtime 只说「这个会话的围栏撤掉」。
 pub struct FenceHostAdapter {
     /// 产品私有区（.home/）：台账落点，也是产品根的锚（收尾还原要读它）。
     home: PathBuf,

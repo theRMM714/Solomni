@@ -2,7 +2,7 @@
  * 结构审查·值边界门禁：跨能力只传值与端口，不传活对象（R15 / R16）。
  * 判据：① api*.rs 的公共函数与 trait 方法，参数里不得有 &mut（&mut self 与流式回调 &mut dyn FnMut 除外）——硬判；
  *       ② api*.rs 的值（pub struct）与它经 pub use 转出的同能力结构带内部可变（Mutex / RwLock / RefCell / Cell / UnsafeCell / Atomic），或字段是具名状态的可变借用 / 闭包（借端口 `&mut dyn Trait` 不算：那是把端口借进来）；
- *       ③ 跨能力的同形结构（字段名与类型全同）——②③ 只进 notes，等 conductor 消失后转硬。
+ *       ③ 跨能力的同形结构（字段名与类型全同）——②③ 只进 notes，等顶层编排定稿后转硬。
  */
 "use strict";
 const fs = require("fs");

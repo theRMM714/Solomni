@@ -15,7 +15,7 @@
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 - 经 `::api` 用到：`kernel`、`llm`、`modules`、`permission`、`prompt`、`session`
-- 谁在用我：`cli`、`collab`、`conductor`、`slate`；`web` 经 `Ops.registry`（`RegistryOps`）调用
+- 谁在用我：`cli`、`collab`、`runtime`、`slate`；`web` 经 `Faces.registry`（`RegistryOps`）调用
 
 ## 一、工具调用探测（`--probe-tools`）
 - 把"支不支持 function calling"变成事实，而不是靠猜：命令行跑 `solomni --probe-tools <模型 id>`。
@@ -42,7 +42,7 @@
 
 ## 四、写回与写面
 - 探测写回只发生在 `--probe-tools`：`envelope` / `native` 都写回 `models.yaml` 的 `tools`；`--probe-replay` 永不写回。
-- 写面（登记 / 移除 / 设核心默认 / 探测 / 改设置）以用户动作暴露：声明在 `systools/tools.yaml`（`callers: [user]`），执行体在 `src/capabilities/conductor/api/action.rs` 的 `execute_registry`。
+- 写面（登记 / 移除 / 设核心默认 / 探测 / 改设置）以用户动作暴露：声明在 `systools/tools.yaml`（`callers: [user]`），执行体在 `src/capabilities/runtime/service/action.rs` 的 `execute_registry`。
 - 这些动作默认不开放给任何角色（供应商与密钥是产品级资源）。
 - 改一个写方法要同时改动作表、执行体与前端调用点。
 - 密钥回显边界：界面只呈现「供应商 id + 端点」与「模型 id + 展示名」，永不携带密钥；更新供应商时 `api_key` 留空 = 保留原值。
@@ -55,7 +55,7 @@
 
 ## 改动本单元时必须同步
 - `REGISTRY_SPEC.md` → 字段与拒收规则的唯一权威；`src/tests/registry.rs` → 用例。
-- `systools/tools.yaml` + `src/capabilities/conductor/api/action.rs` + `web` 的设置页 → 写方法三处同改。
+- `systools/tools.yaml` + `src/capabilities/runtime/service/action.rs` + `web` 的设置页 → 写方法三处同改。
 - `docs/permission/README.md` → 权限与围栏语义；密钥永不进入提示词 / 转录 / 日志 / 模块工作区。
 
 ## 本目录

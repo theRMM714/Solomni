@@ -1,19 +1,11 @@
-//! 目的：各能力入站契约在核心手柄上的实现——呈现层因此只持 `Ops`，拿不到 `Conductor`。
-//! 管：每个契约方法「克隆入参 → 进命令队列执行 → 取回结果」，转发给核心线程的 `Conductor`。
-//! 不管：业务判断（在 `service/`）；契约定义（在 `api.rs` 与各能力的 `api.rs`）。
-//! 联动：`Ops::from_handle` 按角色把这些实现装箱；核心线程与事件台由 `api/handle.rs` 持有。
+//! 目的：入站契约的实现：把每个窄契约的每个方法落到一次 call 或一次转发上。
+//! 管：WorkOps / TurnOps / RuntimeOps / RegistryOps / HistoryOps / ModulesOps / LogOps 七个实现。
+//! 不管：方法体里的业务判定（在下层能力）；长步骤编排（activation / rewind / action）。
+//! 联动：呈现层经 entry/faces.rs 拿到这里实现的窄契约；每个方法都进核心线程执行。
 
 use super::*;
-use crate::capabilities::llm::api::{ProbeOutcome, ToolMode};
-use crate::capabilities::modules::api::Roster;
-use crate::capabilities::registry::api::RegistryOps;
-use crate::capabilities::registry::api::{AgentView, AppSettings, ModelView, ProviderView};
-use crate::capabilities::session::api::Answered;
-use crate::capabilities::session::api::{HistoryView, RunState, SessionMeta};
-pub use crate::kernel::api::Tier;
-use std::sync::Arc;
 
-impl SessionOps for ConductorHandle {
+impl WorkOps for Handle {
     fn create_work(&self, spec: WorkSpec) -> Result<(WorkOpened, u64), String> {
         let bus = Arc::clone(&self.bus);
         // 先补编：名单里声明了 `build:` 的模块若在目标环境还没有入口，就在这一段（调用方线程）编好。
@@ -44,12 +36,106 @@ impl SessionOps for ConductorHandle {
         Ok((opened, head))
     }
 
-    fn say(&self, sid: &str, text: &str, out: Output) -> Result<Advance, String> {
-        crate::capabilities::turn::api::single_generation(self, sid, Some(text.to_string()), out)
+    fn config(&self, sid: &str) -> Result<SessionConfig, String> {
+        let sid = sid.to_string();
+        self.call(move |core| core.session_config(&sid))
     }
 
-    fn activate(&self, sid: &str) -> Result<SessionView, String> {
-        self.activate_session(sid)
+    fn edit(&self, sid: &str, edit: SessionEdit) -> Result<(), String> {
+        // 两段：核心校验 + 出计划；停旧 guest / 起新的要等（秒级到分钟级），在这一段上跑。
+        let (prepared, job) = self.call({
+            let sid = sid.to_string();
+            let edit = edit.clone();
+            move |core| core.prepare_edit(&sid, edit)
+        })?;
+        if let Some(job) = job {
+            // 失败什么都不改：meta 还没落盘。
+            job.run()?;
+        }
+        self.call(move |core| core.commit_edit(prepared))
+    }
+
+    fn upload(&self, sid: &str, name: &str, bytes: &[u8], overwrite: bool) -> Result<bool, String> {
+        let sid = sid.to_string();
+        let name = name.to_string();
+        let bytes = bytes.to_vec();
+        self.call(move |core| core.work_upload(&sid, &name, &bytes, overwrite))
+    }
+
+    fn files(&self, sid: &str) -> Result<FilesView, String> {
+        let sid = sid.to_string();
+        self.call(move |core| core.files_view(&sid))
+    }
+
+    fn work_log(
+        &self,
+        sid: &str,
+        limit: usize,
+        before: Option<u64>,
+    ) -> Result<crate::capabilities::workspace::api::WorkLog, String> {
+        let sid = sid.to_string();
+        self.call(move |core| core.work_log(&sid, limit, before))
+    }
+
+    fn work_commit_view(
+        &self,
+        sid: &str,
+        commit: u64,
+    ) -> Result<crate::capabilities::workspace::api::CommitDetail, String> {
+        let sid = sid.to_string();
+        self.call(move |core| core.work_commit_view(&sid, commit))
+    }
+
+    fn work_commit_file(
+        &self,
+        sid: &str,
+        commit: u64,
+        path: &str,
+    ) -> Result<crate::capabilities::workspace::api::CommitFileView, String> {
+        let sid = sid.to_string();
+        let path = path.to_string();
+        self.call(move |core| core.work_commit_file(&sid, commit, &path))
+    }
+
+    fn exists(&self, sid: &str) -> Result<bool, String> {
+        let sid = sid.to_string();
+        self.call(move |core| Ok(core.session_exists(&sid)))
+    }
+
+    fn unique_work_name(&self, base: &str, fallback: &str) -> Result<String, String> {
+        let (base, fallback) = (base.to_string(), fallback.to_string());
+        self.call(move |core| Ok(core.unique_work_name(&base, &fallback)))
+    }
+
+    fn session_views(&self, history: &[HistoryView]) -> Result<Vec<SessionView>, String> {
+        let history = history.to_vec();
+        self.call(move |core| Ok(core.session_views(&history)))
+    }
+
+    fn runtime_report(&self, tier: Tier) -> Result<RuntimeReport, String> {
+        self.call(move |core| Ok(core.runtime_report(tier)))
+    }
+
+    fn tier_choices(&self) -> Result<TierChoices, String> {
+        self.call(|core| Ok(core.tier_choices()))
+    }
+
+    fn suggest_models(&self, task: &str, mode: WorkMode) -> Result<Vec<AgentSuggestion>, String> {
+        let task = task.to_string();
+        let (agents, rows) = self.call(move |core| core.suggest_models(&task, mode))?;
+        // 核心的行**照推**（推是底层收发消息的统一定律，一次推荐也不例外），推到系统会话：
+        // 它不在任何会话表里，前端因此不会为它建标签页；落盘策略是 Drop（只推不留）。
+        if !rows.is_empty() {
+            self.bus
+                .push(crate::capabilities::session::api::SYSTEM_SID_SUGGEST, &rows);
+        }
+        Ok(agents)
+    }
+}
+
+impl TurnOps for Handle {
+    fn say(&self, sid: &str, text: &str, out: Output) -> Result<Advance, String> {
+        crate::capabilities::turn::api::single_generation(self, sid, Some(text.to_string()), out)
     }
 
     fn continue_flow(&self, sid: &str, out: Output) -> Result<Advance, String> {
@@ -179,8 +265,14 @@ impl SessionOps for ConductorHandle {
         crate::capabilities::turn::api::compact(self, sid)
     }
 
-    fn rewind(&self, sid: &str, target: RewindTarget) -> Result<Vec<serde_json::Value>, String> {
-        Ok(self.rewind_with_reset(sid, target, false)?.main)
+    fn is_running(&self, sid: &str) -> bool {
+        self.jobs.is_running(sid)
+    }
+}
+
+impl RuntimeOps for Handle {
+    fn activate(&self, sid: &str) -> Result<SessionView, String> {
+        self.activate_session(sid)
     }
 
     fn update_task(&self, sid: &str, text: &str) -> Result<Vec<serde_json::Value>, String> {
@@ -218,75 +310,8 @@ impl SessionOps for ConductorHandle {
         Ok(outcome.main)
     }
 
-    fn config(&self, sid: &str) -> Result<SessionConfig, String> {
-        let sid = sid.to_string();
-        self.call(move |core| core.session_config(&sid))
-    }
-
-    fn edit(&self, sid: &str, edit: SessionEdit) -> Result<(), String> {
-        // 两段：核心校验 + 出计划；停旧 guest / 起新的要等（秒级到分钟级），在这一段上跑。
-        let (prepared, job) = self.call({
-            let sid = sid.to_string();
-            let edit = edit.clone();
-            move |core| core.prepare_edit(&sid, edit)
-        })?;
-        if let Some(job) = job {
-            // 失败什么都不改：meta 还没落盘。
-            job.run()?;
-        }
-        self.call(move |core| core.commit_edit(prepared))
-    }
-
-    fn upload(&self, sid: &str, name: &str, bytes: &[u8], overwrite: bool) -> Result<bool, String> {
-        let sid = sid.to_string();
-        let name = name.to_string();
-        let bytes = bytes.to_vec();
-        self.call(move |core| core.work_upload(&sid, &name, &bytes, overwrite))
-    }
-
-    fn files(&self, sid: &str) -> Result<FilesView, String> {
-        let sid = sid.to_string();
-        self.call(move |core| core.files_view(&sid))
-    }
-
-    fn work_log(
-        &self,
-        sid: &str,
-        limit: usize,
-        before: Option<u64>,
-    ) -> Result<crate::capabilities::workspace::api::WorkLog, String> {
-        let sid = sid.to_string();
-        self.call(move |core| core.work_log(&sid, limit, before))
-    }
-
-    fn work_commit_view(
-        &self,
-        sid: &str,
-        commit: u64,
-    ) -> Result<crate::capabilities::workspace::api::CommitDetail, String> {
-        let sid = sid.to_string();
-        self.call(move |core| core.work_commit_view(&sid, commit))
-    }
-
-    fn work_commit_file(
-        &self,
-        sid: &str,
-        commit: u64,
-        path: &str,
-    ) -> Result<crate::capabilities::workspace::api::CommitFileView, String> {
-        let sid = sid.to_string();
-        let path = path.to_string();
-        self.call(move |core| core.work_commit_file(&sid, commit, &path))
-    }
-
-    fn exists(&self, sid: &str) -> Result<bool, String> {
-        let sid = sid.to_string();
-        self.call(move |core| Ok(core.session_exists(&sid)))
-    }
-
-    fn unique_work_name(&self, base: &str, fallback: &str) -> Result<String, String> {
-        let (base, fallback) = (base.to_string(), fallback.to_string());
-        self.call(move |core| Ok(core.unique_work_name(&base, &fallback)))
+    fn rewind(&self, sid: &str, target: RewindTarget) -> Result<Vec<serde_json::Value>, String> {
+        Ok(self.rewind_with_reset(sid, target, false)?.main)
     }
 
     /// 停止 = **把整棵子树落成「已停止」**（拦住之后的一切派发与唤醒），再取消正在跑的生成；
@@ -300,77 +325,51 @@ impl SessionOps for ConductorHandle {
         self.void_gates(sid);
         self.stop_tree(sid).unwrap_or_default()
     }
-
-    fn is_running(&self, sid: &str) -> bool {
-        self.jobs.is_running(sid)
-    }
-
-    fn session_views(&self, history: &[HistoryView]) -> Result<Vec<SessionView>, String> {
-        let history = history.to_vec();
-        self.call(move |core| Ok(core.session_views(&history)))
-    }
 }
 
-impl RegistryOps for ConductorHandle {
+impl RegistryOps for Handle {
     fn providers(&self) -> Result<Vec<ProviderView>, String> {
         self.call(|core| Ok(core.registry().provider_views()))
     }
+
     fn upsert_provider(&self, id: &str, base_url: &str, api_key: &str) -> Result<(), String> {
         let (id, base_url, api_key) = (id.to_string(), base_url.to_string(), api_key.to_string());
         self.call(move |core| core.registry_write(|r| r.provider_upsert(&id, &base_url, &api_key)))
     }
+
     fn remove_provider(&self, id: &str) -> Result<bool, String> {
         let id = id.to_string();
         self.call(move |core| core.registry_write(|r| r.provider_remove(&id)))
     }
+
     fn models(&self) -> Result<Vec<ModelView>, String> {
         self.call(|core| Ok(core.registry().model_views()))
     }
+
     fn core_model(&self) -> Result<Option<String>, String> {
         self.call(|core| Ok(core.registry().core_model()))
     }
+
     fn upsert_model(
         &self,
         draft: crate::capabilities::registry::api::ModelDraft,
     ) -> Result<(), String> {
-        // 原生形态：**保存前实测**（所有写入口都走这里，不只是 Web 表单）。
-        // 信封形态是用户显式选择，直接保存（不测试）。
-        if draft.tools == ToolMode::Native {
-            let (provider, api_model) = (draft.provider.clone(), draft.api_model.clone());
-            let outcome =
-                self.call(move |core| core.registry().probe_channel_tools(&provider, &api_model))?;
-            match &outcome {
-                ProbeOutcome::Supported { .. } => {}
-                ProbeOutcome::Unsupported { detail } => {
-                    return Err(format!(
-                        "供应商不支持原生工具调用：{}；模型未保存。",
-                        detail
-                    ));
-                }
-                ProbeOutcome::Unknown { detail } => {
-                    return Err(format!(
-                        "无法判定该通道是否支持原生工具调用：{}；模型未保存，请重试。",
-                        detail
-                    ));
-                }
-            }
-            let (provider, api_model) = (draft.provider.clone(), draft.api_model.clone());
-            let report =
-                self.call(move |core| core.registry().probe_channel_replay(&provider, &api_model))?;
-            if !report.shapes.iter().any(|s| s.accepted) {
-                return Err("该通道不接受任何工具调用回放形状；模型未保存。".to_string());
-            }
-        }
-        self.call(move |core| core.registry_write(|r| r.model_upsert(draft)))
+        // 保存前实测（原生工具与回放形状）与落盘判据都在 registry：本层只把它交到核心线程上跑。
+        self.call(move |core| {
+            core.registry_write(|r| crate::capabilities::registry::api::save_model(r, draft))
+        })
     }
+
     fn remove_model(&self, id: &str) -> Result<bool, String> {
         let id = id.to_string();
         self.call(move |core| core.registry_write(|r| r.model_remove(&id)))
     }
+
     fn set_core_model(&self, id: &str) -> Result<bool, String> {
         let id = id.to_string();
         self.call(move |core| core.registry_mut().core_set_model(&id))
     }
+
     fn agents(&self) -> Result<Vec<AgentView>, String> {
         self.call(|core| Ok(core.registry().agent_views()))
     }
@@ -379,6 +378,7 @@ impl RegistryOps for ConductorHandle {
         let names = names.to_vec();
         self.call(move |core| core.registry().pick_agents(&names))
     }
+
     fn upsert_agent(
         &self,
         name: &str,
@@ -394,30 +394,41 @@ impl RegistryOps for ConductorHandle {
             note.to_string(),
             chara.to_string(),
         );
-        // 模块存在性按**清单**校验：清单归 workspace，登记处只认事实，所以清单由这里取一份给它。
-        // 目录保留名（systools/names.yaml）也在这里收口：登记处不认识工作区布局，名单由 conductor 注入。
+        // 保留名与模块存在性都在 registry 的保存用例里；清单与保留名两样事实由这里取一份给它。
         self.call(move |core| {
             let roster = core.modules_handle().roster();
             let reserved = core.systools_handle().reserved_names();
-            crate::capabilities::registry::api::check_reserved(&name, &reserved)?;
-            core.registry_mut()
-                .agent_upsert(&name, &modules, &model, &note, &chara, &roster)
+            let draft = crate::capabilities::registry::api::AgentDraft {
+                name,
+                modules,
+                model,
+                note,
+                chara,
+            };
+            core.registry_write(|r| {
+                crate::capabilities::registry::api::save_agent(r, &draft, &roster, &reserved)
+            })
         })
     }
+
     fn remove_agent(&self, name: &str) -> Result<bool, String> {
         let name = name.to_string();
         self.call(move |core| core.registry_mut().agent_remove(&name))
     }
+
     fn settings(&self) -> Result<AppSettings, String> {
         self.call(|core| Ok(core.registry().app_settings()))
     }
+
     fn set_settings(&self, app: AppSettings) -> Result<(), String> {
         self.call(move |core| core.registry_write(|r| r.set_app_settings(app)))
     }
+
     fn discover_models(&self, provider_id: &str) -> Result<Vec<String>, String> {
         let provider_id = provider_id.to_string();
         self.call(move |core| core.registry().discover_models(&provider_id))
     }
+
     fn probe_model_tools(
         &self,
         id: &str,
@@ -425,6 +436,7 @@ impl RegistryOps for ConductorHandle {
         let id = id.to_string();
         self.call(move |core| core.registry_mut().probe_model_tools(&id))
     }
+
     fn probe_replay_shape(
         &self,
         id: &str,
@@ -434,15 +446,16 @@ impl RegistryOps for ConductorHandle {
     }
 }
 
-// ---------- 归各能力自己的入站契约（本文件只实现队列转发） ----------
-impl crate::capabilities::session::api::HistoryOps for ConductorHandle {
+impl crate::capabilities::session::api::HistoryOps for Handle {
     fn list(&self) -> Result<Vec<HistoryView>, String> {
         self.call(|core| Ok(core.lifecycle.history_list()))
     }
+
     fn open(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {
         let name = name.to_string();
         self.call(move |core| core.lifecycle.history_open(&name))
     }
+
     fn delete(&self, name: &str) -> Result<bool, String> {
         let name = name.to_string();
         // 核心只做毫秒级的账；guest 销毁与目录删除在这一段（调用方线程）上按序执行。
@@ -452,14 +465,16 @@ impl crate::capabilities::session::api::HistoryOps for ConductorHandle {
     }
 }
 
-impl crate::capabilities::modules::api::ModulesOps for ConductorHandle {
+impl crate::capabilities::modules::api::ModulesOps for Handle {
     fn roster(&self) -> Result<Roster, String> {
         self.call(|core| Ok(core.modules_handle().roster()))
     }
+
     fn module_enabled(&self, id: &str) -> Result<bool, String> {
         let id = id.to_string();
         self.call(move |core| Ok(core.module_enabled(&id)))
     }
+
     fn service_enabled(&self, module: &str, service: &str) -> Result<bool, String> {
         let module = module.to_string();
         let service = service.to_string();
@@ -467,35 +482,15 @@ impl crate::capabilities::modules::api::ModulesOps for ConductorHandle {
     }
 }
 
-impl ConductorOps for ConductorHandle {
-    fn runtime_report(&self, tier: Tier) -> Result<RuntimeReport, String> {
-        self.call(move |core| Ok(core.runtime_report(tier)))
-    }
-
-    fn tier_choices(&self) -> Result<TierChoices, String> {
-        self.call(|core| Ok(core.tier_choices()))
-    }
-    fn suggest_models(&self, task: &str, mode: WorkMode) -> Result<Vec<AgentSuggestion>, String> {
-        let task = task.to_string();
-        let (agents, rows) = self.call(move |core| core.suggest_models(&task, mode))?;
-        // 核心的行**照推**（推是底层收发消息的统一定律，一次推荐也不例外），推到系统会话：
-        // 它不在任何会话表里，前端因此不会为它建标签页；落盘策略是 Drop（只推不留）。
-        if !rows.is_empty() {
-            self.bus
-                .push(crate::capabilities::session::api::SYSTEM_SID_SUGGEST, &rows);
-        }
-        Ok(agents)
-    }
-}
-
-// ---------- 日志能力 ----------
-impl LogOps for ConductorHandle {
+impl LogOps for Handle {
     fn info(&self, at: &str, msg: &str) {
         self.log.info(at, msg)
     }
+
     fn warn(&self, at: &str, msg: &str) {
         self.log.warn(at, msg)
     }
+
     fn error(&self, at: &str, msg: &str) {
         self.log.error(at, msg)
     }

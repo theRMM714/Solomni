@@ -1,7 +1,7 @@
 //! 目的：vm 能力的入站面——其它能力与呈现层只准用这里。
 //! 管：Vm 用例 trait（guest 生命周期）与销毁任务 `GuestStop`，以及档位、计划、入口诊断、就绪检测、运行计划派生（宿主/guest 包选型、模块可用性、路径翻译器）的重导出。
 //! 不管：纯逻辑实现（domain/）与端口（ports.rs）；运行包契约与选包在 packages 能力。
-//! 联动：被 conductor / collab / cli 与入口层消费。
+//! 联动：被 runtime / collab / cli 与入口层消费。
 
 pub use crate::capabilities::vm::detail::qemu::create_disk;
 pub use crate::capabilities::vm::domain::diagnose::GuestDiagnosis;

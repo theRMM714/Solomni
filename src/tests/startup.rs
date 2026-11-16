@@ -32,7 +32,7 @@ fn all_required() -> SandboxRequirements {
     }
 }
 
-fn core() -> Conductor {
+fn core() -> Core {
     core_with(vec![module_of("a")], gw(BTreeMap::new(), Vec::new()))
 }
 

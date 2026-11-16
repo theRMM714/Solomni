@@ -1,12 +1,13 @@
 //! 目的：压缩与恢复——发送视图换成一篇滚动摘要，删掉压缩行即回到全量。
 //! 管：自动/手动触发、保留尾巴、预算与百分比、模型解析、重启与回档。
 //! 不管：会话编辑（`session.rs`）、历史合并（`events.rs`）。
-//! 联动：`src/capabilities/session/domain/session.rs` 与 `src/capabilities/conductor/api/handle.rs`。
+//! 联动：`src/capabilities/session/domain/session.rs` 与 `src/capabilities/runtime/api/handle.rs`。
 
 use super::super::doubles::{model_draft, module_of};
 use super::super::single_work;
-use crate::capabilities::conductor::api::Output;
-use crate::capabilities::conductor::api::{ActionCall, Caller, SessionEvent};
+use crate::capabilities::runtime::api::Output;
+use crate::capabilities::runtime::api::{ActionCall, Caller, SessionEvent};
+use crate::presentation::faces::Faces;
 use std::sync::Arc;
 
 #[test]
@@ -28,30 +29,31 @@ fn compacting_replaces_the_send_view_with_one_rolling_summary() {
         inner: super::super::doubles::ScriptGateway::new(member, vec![]),
         seen: Arc::clone(&seen),
     };
-    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+    let handle = crate::capabilities::runtime::api::Handle::spawn(
         super::super::doubles::core_with_gateway(vec![module_of("a")], gateway),
     )
     .expect("起核心线程");
-    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
-    let mut st = ops.registry.settings().expect("读设置");
+    let faces = Faces::from_handle(&handle);
+    let mut st = faces.registry.settings().expect("读设置");
     st.compact_keep_percent = 0;
     st.sandbox.policy.windows.write_acl = true;
-    ops.registry.set_settings(st).expect("写设置");
-    let sid = ops
-        .sessions
+    faces.registry.set_settings(st).expect("写设置");
+    let sid = faces
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
         .0
         .sid;
-    ops.sessions
+    faces
+        .turn
         .say(
             &sid,
             "先做第一件事",
-            crate::capabilities::conductor::api::Output::Final,
+            crate::capabilities::runtime::api::Output::Final,
         )
         .expect("说一句");
 
-    let first = ops.sessions.compact(&sid).expect("第一次压缩");
+    let first = faces.turn.compact(&sid).expect("第一次压缩");
     let (b1, head1, _o1) = handle.events().snapshot(Some(&sid), 0);
     let s1: Vec<&SessionEvent> = b1.iter().flat_map(|l| l.events.iter()).collect();
     assert!(
@@ -61,7 +63,7 @@ fn compacting_replaces_the_send_view_with_one_rolling_summary() {
         "第一次压缩该如实落一条压缩记录行（头部 {}）",
         first.head
     );
-    let second = ops.sessions.compact(&sid).expect("第二次压缩");
+    let second = faces.turn.compact(&sid).expect("第二次压缩");
     let (b2, _head2, _o2) = handle.events().snapshot(Some(&sid), head1);
     let s2: Vec<&SessionEvent> = b2.iter().flat_map(|l| l.events.iter()).collect();
     assert!(
@@ -84,11 +86,12 @@ fn compacting_replaces_the_send_view_with_one_rolling_summary() {
     );
 
     // 再走一轮：发送视图里**只剩一份摘要**（第二次那份），上一份已被取代。
-    ops.sessions
+    faces
+        .turn
         .say(
             &sid,
             "继续",
-            crate::capabilities::conductor::api::Output::Final,
+            crate::capabilities::runtime::api::Output::Final,
         )
         .expect("压完再走一轮");
     let after = seen.lock().expect("锁").clone();
@@ -121,36 +124,38 @@ fn auto_compaction_kicks_in_when_the_history_exceeds_the_budget() {
         inner: super::super::doubles::ScriptGateway::new(member, vec![]),
         seen: Arc::clone(&seen),
     };
-    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+    let handle = crate::capabilities::runtime::api::Handle::spawn(
         super::super::doubles::core_with_gateway(vec![module_of("a")], gateway),
     )
     .expect("起核心线程");
-    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let faces = Faces::from_handle(&handle);
     // 阈值调到 1%：预算 = 32000 × 1% × 4 ≈ 1280 字符，上面那条长回复会超。
-    let mut st = ops.registry.settings().expect("读设置");
+    let mut st = faces.registry.settings().expect("读设置");
     st.compact_at_percent = 1;
     st.compact_keep_percent = 0;
     // Windows 上 require + write_acl=false 是非法组合；这条只验压缩阈值，先给授权。
     st.sandbox.policy.windows.write_acl = true;
-    ops.registry.set_settings(st).expect("写设置");
-    let sid = ops
-        .sessions
+    faces.registry.set_settings(st).expect("写设置");
+    let sid = faces
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
         .0
         .sid;
-    ops.sessions
+    faces
+        .turn
         .say(
             &sid,
             "先做第一件事",
-            crate::capabilities::conductor::api::Output::Final,
+            crate::capabilities::runtime::api::Output::Final,
         )
         .expect("第一轮");
-    ops.sessions
+    faces
+        .turn
         .say(
             &sid,
             "接着做",
-            crate::capabilities::conductor::api::Output::Final,
+            crate::capabilities::runtime::api::Output::Final,
         )
         .expect("第二轮（开头该自动压一次）");
 
@@ -190,34 +195,36 @@ fn compaction_keeps_the_recent_tail_and_the_new_user_line() {
         inner: super::super::doubles::ScriptGateway::new(member, vec![]),
         seen: Arc::clone(&seen),
     };
-    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+    let handle = crate::capabilities::runtime::api::Handle::spawn(
         super::super::doubles::core_with_gateway(vec![module_of("a")], gateway),
     )
     .expect("起核心线程");
-    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
-    let mut st = ops.registry.settings().expect("读设置");
+    let faces = Faces::from_handle(&handle);
+    let mut st = faces.registry.settings().expect("读设置");
     st.compact_at_percent = 1;
     st.compact_keep_percent = 1;
     st.sandbox.policy.windows.write_acl = true;
-    ops.registry.set_settings(st).expect("写设置");
-    let sid = ops
-        .sessions
+    faces.registry.set_settings(st).expect("写设置");
+    let sid = faces
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
         .0
         .sid;
-    ops.sessions
+    faces
+        .turn
         .say(
             &sid,
             "第一句话",
-            crate::capabilities::conductor::api::Output::Final,
+            crate::capabilities::runtime::api::Output::Final,
         )
         .expect("第一轮");
-    ops.sessions
+    faces
+        .turn
         .say(
             &sid,
             "第二句话",
-            crate::capabilities::conductor::api::Output::Final,
+            crate::capabilities::runtime::api::Output::Final,
         )
         .expect("第二轮（开头该压一次）");
 
@@ -248,33 +255,33 @@ fn manual_compaction_reports_when_there_is_nothing_to_compact() {
         "a".to_string(),
         vec!["{\"type\":\"say\",\"text\":\"收到\"}".to_string()],
     );
-    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
-        super::super::doubles::core_with_gateway(
+    let handle =
+        crate::capabilities::runtime::api::Handle::spawn(super::super::doubles::core_with_gateway(
             vec![module_of("a")],
             super::super::doubles::ScriptGateway::new(member, vec![]),
-        ),
-    )
-    .expect("起核心线程");
-    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
-    let mut st = ops.registry.settings().expect("读设置");
+        ))
+        .expect("起核心线程");
+    let faces = Faces::from_handle(&handle);
+    let mut st = faces.registry.settings().expect("读设置");
     st.compact_at_percent = 0;
     st.compact_keep_percent = 15;
     st.sandbox.policy.windows.write_acl = true;
-    ops.registry.set_settings(st).expect("写设置");
-    let sid = ops
-        .sessions
+    faces.registry.set_settings(st).expect("写设置");
+    let sid = faces
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
         .0
         .sid;
-    ops.sessions
+    faces
+        .turn
         .say(
             &sid,
             "你好",
-            crate::capabilities::conductor::api::Output::Final,
+            crate::capabilities::runtime::api::Output::Final,
         )
         .expect("第一轮");
-    ops.sessions.compact(&sid).expect("手动压缩");
+    faces.turn.compact(&sid).expect("手动压缩");
     let (batches, _, _) = handle.events().snapshot(Some(&sid), 0);
     let events: Vec<&SessionEvent> = batches.iter().flat_map(|b| b.events.iter()).collect();
     assert!(
@@ -307,30 +314,31 @@ fn slash_compact_message_runs_the_command_instead_of_the_model() {
         inner: super::super::doubles::ScriptGateway::new(member, vec![]),
         seen: Arc::clone(&seen),
     };
-    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+    let handle = crate::capabilities::runtime::api::Handle::spawn(
         super::super::doubles::core_with_gateway(vec![module_of("a")], gateway),
     )
     .expect("起核心线程");
-    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
-    let mut st = ops.registry.settings().expect("读设置");
+    let faces = Faces::from_handle(&handle);
+    let mut st = faces.registry.settings().expect("读设置");
     st.compact_at_percent = 0;
     st.compact_keep_percent = 0;
     st.sandbox.policy.windows.write_acl = true;
-    ops.registry.set_settings(st).expect("写设置");
-    let sid = ops
-        .sessions
+    faces.registry.set_settings(st).expect("写设置");
+    let sid = faces
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
         .0
         .sid;
-    ops.sessions
+    faces
+        .turn
         .say(
             &sid,
             "先说一句",
-            crate::capabilities::conductor::api::Output::Final,
+            crate::capabilities::runtime::api::Output::Final,
         )
         .expect("第一轮");
-    let acted = ops
+    let acted = faces
         .actions
         .act(ActionCall {
             id: "send_message".to_string(),
@@ -341,7 +349,7 @@ fn slash_compact_message_runs_the_command_instead_of_the_model() {
         .expect("斜杠命令该走动作");
     assert!(matches!(
         acted,
-        crate::capabilities::conductor::api::Acted::Advanced(_)
+        crate::capabilities::runtime::api::Acted::Advanced(_)
     ));
 
     let (batches, _, _) = handle.events().snapshot(Some(&sid), 0);
@@ -371,33 +379,34 @@ fn compact_action_takes_only_session_id() {
             "{\"type\":\"tool\",\"name\":\"compact\",\"args\":{\"summary\":\"摘要\"}}".to_string(),
         ],
     );
-    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
-        super::super::doubles::core_with_gateway(
+    let handle =
+        crate::capabilities::runtime::api::Handle::spawn(super::super::doubles::core_with_gateway(
             vec![module_of("a")],
             super::super::doubles::ScriptGateway::new(member, vec![]),
-        ),
-    )
-    .expect("起核心线程");
-    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
-    let mut st = ops.registry.settings().expect("读设置");
+        ))
+        .expect("起核心线程");
+    let faces = Faces::from_handle(&handle);
+    let mut st = faces.registry.settings().expect("读设置");
     st.compact_at_percent = 0;
     st.compact_keep_percent = 0;
     st.sandbox.policy.windows.write_acl = true;
-    ops.registry.set_settings(st).expect("写设置");
-    let sid = ops
-        .sessions
+    faces.registry.set_settings(st).expect("写设置");
+    let sid = faces
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
         .0
         .sid;
-    ops.sessions
+    faces
+        .turn
         .say(
             &sid,
             "先说一句",
-            crate::capabilities::conductor::api::Output::Final,
+            crate::capabilities::runtime::api::Output::Final,
         )
         .expect("第一轮");
-    ops.actions
+    faces
+        .actions
         .act(ActionCall {
             id: "compact".to_string(),
             args: serde_json::json!({ "session_id": sid }),
@@ -426,37 +435,38 @@ fn lowering_keep_percent_applies_to_live_manual_compaction() {
             "{\"type\":\"tool\",\"name\":\"compact\",\"args\":{\"summary\":\"摘要\"}}".to_string(),
         ],
     );
-    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
-        super::super::doubles::core_with_gateway(
+    let handle =
+        crate::capabilities::runtime::api::Handle::spawn(super::super::doubles::core_with_gateway(
             vec![module_of("a")],
             super::super::doubles::ScriptGateway::new(member, vec![]),
-        ),
-    )
-    .expect("起核心线程");
-    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
-    let mut st = ops.registry.settings().expect("读设置");
+        ))
+        .expect("起核心线程");
+    let faces = Faces::from_handle(&handle);
+    let mut st = faces.registry.settings().expect("读设置");
     st.compact_at_percent = 0;
     st.compact_keep_percent = 15;
     st.sandbox.policy.windows.write_acl = true;
-    ops.registry.set_settings(st).expect("写设置");
-    let sid = ops
-        .sessions
+    faces.registry.set_settings(st).expect("写设置");
+    let sid = faces
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
         .0
         .sid;
-    ops.sessions
+    faces
+        .turn
         .say(
             &sid,
             "先说一句",
-            crate::capabilities::conductor::api::Output::Final,
+            crate::capabilities::runtime::api::Output::Final,
         )
         .expect("第一轮");
     // 活会话是在 keep=15 时建的；这里设为 0，手动压缩必须按新值重算。
-    let mut st = ops.registry.settings().expect("读设置");
+    let mut st = faces.registry.settings().expect("读设置");
     st.compact_keep_percent = 0;
-    ops.registry.set_settings(st).expect("改保留比例");
-    ops.actions
+    faces.registry.set_settings(st).expect("改保留比例");
+    faces
+        .actions
         .act(ActionCall {
             id: "compact".to_string(),
             args: serde_json::json!({ "session_id": sid }),
@@ -547,30 +557,31 @@ fn deleting_the_compaction_line_restores_the_full_send_view() {
         inner: super::super::doubles::ScriptGateway::new(member, vec![]),
         seen: Arc::clone(&seen),
     };
-    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+    let handle = crate::capabilities::runtime::api::Handle::spawn(
         super::super::doubles::core_with_gateway(vec![module_of("a")], gateway),
     )
     .expect("起核心线程");
-    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
-    let mut st = ops.registry.settings().expect("读设置");
+    let faces = Faces::from_handle(&handle);
+    let mut st = faces.registry.settings().expect("读设置");
     st.compact_at_percent = 0; // 只测手动压缩与删除
     st.compact_keep_percent = 0;
     st.sandbox.policy.windows.write_acl = true;
-    ops.registry.set_settings(st).expect("写设置");
-    let sid = ops
-        .sessions
+    faces.registry.set_settings(st).expect("写设置");
+    let sid = faces
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
         .0
         .sid;
-    ops.sessions
+    faces
+        .turn
         .say(
             &sid,
             "先说一句",
-            crate::capabilities::conductor::api::Output::Final,
+            crate::capabilities::runtime::api::Output::Final,
         )
         .expect("第一轮");
-    ops.sessions.compact(&sid).expect("手动压缩");
+    faces.turn.compact(&sid).expect("手动压缩");
     let (batches, _, _) = handle.events().snapshot(Some(&sid), 0);
     let marker = batches
         .iter()
@@ -582,17 +593,19 @@ fn deleting_the_compaction_line_restores_the_full_send_view() {
             _ => None,
         })
         .expect("压缩记录行");
-    ops.sessions
+    faces
+        .runtime
         .rewind(
             &sid,
             crate::capabilities::lifecycle::api::RewindTarget::Delete(marker),
         )
         .expect("删除压缩记录行");
-    ops.sessions
+    faces
+        .turn
         .say(
             &sid,
             "继续",
-            crate::capabilities::conductor::api::Output::Final,
+            crate::capabilities::runtime::api::Output::Final,
         )
         .expect("删除后再问一轮");
 
@@ -627,34 +640,36 @@ fn auto_compaction_uses_provider_usage_when_it_is_available() {
             .with_usage(TokenUsage::new(18_000, 2_000, Some(20_000))),
         seen: Arc::clone(&seen),
     };
-    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+    let handle = crate::capabilities::runtime::api::Handle::spawn(
         super::super::doubles::core_with_gateway(vec![module_of("a")], gateway),
     )
     .expect("起核心线程");
-    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
-    let mut st = ops.registry.settings().expect("读设置");
+    let faces = Faces::from_handle(&handle);
+    let mut st = faces.registry.settings().expect("读设置");
     st.compact_at_percent = 10; // 128K × 10% = 12.8K < 20K
     st.compact_keep_percent = 0;
     st.sandbox.policy.windows.write_acl = true;
-    ops.registry.set_settings(st).expect("写设置");
-    let sid = ops
-        .sessions
+    faces.registry.set_settings(st).expect("写设置");
+    let sid = faces
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
         .0
         .sid;
-    ops.sessions
+    faces
+        .turn
         .say(
             &sid,
             "第一句",
-            crate::capabilities::conductor::api::Output::Final,
+            crate::capabilities::runtime::api::Output::Final,
         )
         .expect("第一轮");
-    ops.sessions
+    faces
+        .turn
         .say(
             &sid,
             "第二句",
-            crate::capabilities::conductor::api::Output::Final,
+            crate::capabilities::runtime::api::Output::Final,
         )
         .expect("第二轮该先压一次");
 

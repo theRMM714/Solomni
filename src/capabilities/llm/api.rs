@@ -1,7 +1,7 @@
 //! 目的：llm 能力的入站面——其它能力与呈现层只准用这里（不许碰 domain / ports）。
 //! 管：重导出信封与回执类型，定义协议词汇（Chat / BoxedChat / Msg / Completion / Chunk / ToolCall / ToolDecl / Channel / ToolMode / LlmOpts / CompleteOpts / ProbeOutcome）与 Llm 用例面。
 //! 不管：信封解析与回执装配（在 domain）；出站端口的定义（在 ports）；适配器装配（在组合根）。
-//! 联动：conductor、其它能力与呈现层都经这里会话；实现见 service.rs；出站端口只由 service 持有（R12）。
+//! 联动：runtime、其它能力与呈现层都经这里会话；实现见 service.rs；出站端口只由 service 持有（R12）。
 
 pub use crate::capabilities::llm::domain::envelope::{
     Malformed, Reply, Tail, ToolInvoke, Verb, parse,
@@ -77,7 +77,7 @@ pub const REQUEST_RESERVED_KEYS: [&str; 6] = [
     "tool_choice",
 ];
 
-/// 目的：一次模型调用的通道参数：**策略在 conductor 定**（都来自全局设置），机制在适配器。
+/// 目的：一次模型调用的通道参数：**策略在 runtime 定**（都来自全局设置），机制在适配器。
 ///    一个值一路传下去，而不是把 stream / 预算分别塞进各个函数的参数表——两处各传一份迟早会漏。
 #[derive(Debug, Clone, PartialEq)]
 pub struct LlmOpts {
@@ -100,7 +100,7 @@ impl Default for LlmOpts {
     }
 }
 
-/// 目的：一次补全的请求选项——策略在 conductor，机制在适配器。
+/// 目的：一次补全的请求选项——策略在 runtime，机制在适配器。
 /// 约束：每轮克隆一份；只换 tools / cancel 槽位，其余照旧。
 #[derive(Clone)]
 pub struct CompleteOpts<'a> {

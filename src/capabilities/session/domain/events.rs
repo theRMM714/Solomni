@@ -1,7 +1,7 @@
 //! 目的：呈现侧契约——事件与介入请求的词汇与形状，前端按此渲染；呈现即上下文，转录行与核心记录完全一致。
 //! 管：`SessionEvent` / `LineView` / `ToolCallView` / `DecisionCard` 等类型，以及 `idle` / `working` / `qualify` 等构造。
 //! 不管：会话状态与派生（在 `session.rs`）、裁决排队与等待（在 `decisions.rs`）、前端渲染（在呈现层）。
-//! 联动：由 `session.rs` 与 conductor 产生，经 `api.rs` 导出；契约见 `docs/session/session-model.md`。
+//! 联动：由 `session.rs` 与 runtime 产生，经 `api.rs` 导出；契约见 `docs/session/session-model.md`。
 
 /// 目的：裁决卡的信封——谁在问。role = core（核心）/ member（某一席）/ tools（工具层）；name = 具体是谁。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -73,7 +73,7 @@ pub struct ContextUsage {
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
     pub total_tokens: u64,
-    /// 目的：这次调用时该模型的上下文窗口（缺省模型 = 128K 兜底，由 conductor 给）。
+    /// 目的：这次调用时该模型的上下文窗口（缺省模型 = 128K 兜底，由 runtime 给）。
     pub window: u64,
     /// 目的：true = 供应商回的 usage；false = 按对话字符估算（界面必须标注）。
     pub exact: bool,

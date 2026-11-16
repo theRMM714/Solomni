@@ -1,7 +1,7 @@
 //! 目的：会话与名单的测试脚手架——造成员、造名单、造会话与一次编辑提交。
 //! 管：工具声明样本、坏信封、成员装配、名单与 meta 落盘、编辑提交。
 //! 不管：事件视图（`events.rs`）、通道（`chat.rs`）。
-//! 联动：`src/capabilities/conductor/api.rs` 与 `src/capabilities/modules/api.rs`。
+//! 联动：`src/capabilities/runtime/api.rs` 与 `src/capabilities/modules/api.rs`。
 
 use super::*;
 

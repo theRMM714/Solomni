@@ -11,20 +11,20 @@
 - 管：**执行面与幂等账**（`src/capabilities/proxy/service/proxy.rs` 的 `ProxyTools::call`）：非代理工具与总表里没有的工具如实拒绝 → schema 校验与默认值 → 参数形状 → 幂等账（键 = 工具名 + `request_id`）→ 授权 → 交宿主；`create_session` / `send_session_message` / `control_session` 进幂等账，`observe_session` / `read_session_messages` 只读不进。
 - 管：**成员侧执行者** `ProxyHandler`（`kernel::ports::ToolHandler`）：代理会话那一回合把这六个工具接到 `ProxyTools` 上，其余工具不认领。
 - 管：**宿主契约** `ProxyHost`（`src/capabilities/proxy/api.rs`）：`catalog` / `create_session` / `send` / `observe` / `control` / `messages` 六个动作；方法注释即约束（只读动作不推进、建会话不留半成品、失败如实回报）。
-- 不管：真实会话动作、命令队列与生成——生产宿主是 `conductor` 的 `ProxyBridge`（`src/capabilities/conductor/service/proxy.rs`），装配在 `src/capabilities/conductor/api/handle.rs` 的 `inject_proxy_handler`。
+- 不管：真实会话动作、命令队列与生成——生产宿主是 `runtime` 的 `ProxyBridge`（`src/capabilities/runtime/service/bridge.rs`），装配在 `src/capabilities/runtime/service/handle.rs` 的 `inject_proxy_handler`。
 - 不管：会话本体与运行态（`turn`）、转录（`session`）、工作区（`workspace`）；授予读会话的 `meta.delegation`，本单元不另存一份。
 - 不管：工具声明、角色面与提示词——`systools/tools.yaml`、`systools/roles.yaml` 与 `prompts/roles/core_proxy.yaml` 是它们的唯一落点。
 
 ## 入站契约与状态归属
 
-- 入站面：`api` 转出的值类型（`ProxyCall` / `Grant` / `NewSession` / `Relayed` / `Snapshot` / `MessagesPage` / `ControlState` / `Catalog` …）、同名纯规则函数、执行面 `ProxyTools` 与 `ProxyHandler`，以及**端口反转**的 `ProxyHost`（本单元声明，`conductor` 实现）。
+- 入站面：`api` 转出的值类型（`ProxyCall` / `Grant` / `NewSession` / `Relayed` / `Snapshot` / `MessagesPage` / `ControlState` / `Catalog` …）、同名纯规则函数、执行面 `ProxyTools` 与 `ProxyHandler`，以及**端口反转**的 `ProxyHost`（本单元声明，`runtime` 实现）。
 - 状态归属：只有内存里的幂等账（`ProxyTools` 的 `done`，键 = 工具名 / `request_id`），随代理会话那一回合的 `ProxyHandler` 存在与消亡，**不落盘**；其它事实一律经 `ProxyHost` 取（`src/capabilities/proxy/api.rs` 的六个方法）。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`permission`（`ProfileId`）、`registry`（`validate_name`）、`session`（`DecisionOption`）；`tools` 的 `ToolBook` / `ToolOutcome` 与 `kernel::ports::ToolHandler`。
-- 谁在用我：`conductor`（`src/capabilities/conductor/api/handle.rs` 装配 `ProxyHandler`；`src/capabilities/conductor/api/action.rs` 与 `src/capabilities/conductor/service/{action,proxy}.rs` 用值类型与 `ProxyHost`）、测试。
-- **不引用 `conductor`**：依赖只向下（`layers.yaml` 的 `proxy: 9`、`conductor: 10`）。
+- 谁在用我：`runtime`（`src/capabilities/runtime/service/handle.rs` 装配 `ProxyHandler`；`src/capabilities/runtime/service/action.rs` 与 `src/capabilities/runtime/service/{action,bridge}.rs` 用值类型与 `ProxyHost`）、测试。
+- **不引用 `runtime`**：依赖只向下（`layers.yaml` 的 `proxy: 9`、`runtime: 10`）。
 
 ## 一、一次工具调用的顺序
 
@@ -36,9 +36,9 @@
 
 ## 改动本单元时必须同步
 
-- `src/capabilities/proxy/domain/proxy.rs` 的拒绝文案、回执形状与 `*Args` → `src/tests/conductor/proxy.rs`、`src/tests/proxy.rs` 一起改（前者锁执行面与桥，后者锁三个请求校验器）。
-- `src/capabilities/proxy/api.rs` 的 `ProxyHost` → 生产宿主 `ProxyBridge`（`src/capabilities/conductor/service/proxy.rs`）与替身 `FakeProxyHost`（`src/tests/doubles/proxy.rs`）一起改；端口矩阵在 [docs/testing/doubles.md](../testing/doubles.md)。
-- `ProxyHandler` 的形状 → 装配点 `src/capabilities/conductor/api/handle.rs` 的 `inject_proxy_handler` 一起改。
+- `src/capabilities/proxy/domain/proxy.rs` 的拒绝文案、回执形状与 `*Args` → `src/tests/runtime/proxy.rs`、`src/tests/proxy.rs` 一起改（前者锁执行面与桥，后者锁三个请求校验器）。
+- `src/capabilities/proxy/api.rs` 的 `ProxyHost` → 生产宿主 `ProxyBridge`（`src/capabilities/runtime/service/bridge.rs`）与替身 `FakeProxyHost`（`src/tests/doubles/proxy.rs`）一起改；端口矩阵在 [docs/testing/doubles.md](../testing/doubles.md)。
+- `ProxyHandler` 的形状 → 装配点 `src/capabilities/runtime/service/handle.rs` 的 `inject_proxy_handler` 一起改。
 - 工具名或角色面 → `systools/tools.yaml`、`systools/roles.yaml` 与 [docs/tools/tools-and-roles.md](../tools/tools-and-roles.md) 一起改。
 
 ## 本目录

@@ -10,7 +10,6 @@ mod builds;
 mod cli;
 mod collab;
 mod commands;
-mod conductor;
 mod detail;
 mod diagnostics;
 pub(crate) mod doubles;
@@ -33,6 +32,7 @@ mod proxy;
 mod registry;
 mod residents;
 mod routes;
+mod runtime;
 mod secrets;
 mod session;
 mod setup;
@@ -90,14 +90,14 @@ pub(crate) fn fence_acl_guard() -> std::sync::MutexGuard<'static, ()> {
     LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// 目的：起一个内存装配的核心手柄并把能力面拆成 `Ops`（契约测试共用）。
+/// 目的：起一个内存装配的核心手柄并把能力面拆成 `Faces`（契约测试共用）。
 ///   返回手柄是为了能观察事件台与测试注入；只用能力面的用例可以忽略它。
 pub(crate) fn ops_with(
     modules: Vec<crate::capabilities::modules::api::Module>,
     core_script: Vec<&str>,
 ) -> (
-    crate::capabilities::conductor::api::ConductorHandle,
-    crate::capabilities::conductor::api::Ops,
+    crate::capabilities::runtime::api::Handle,
+    crate::presentation::faces::Faces,
 ) {
     let mut member = std::collections::BTreeMap::new();
     member.insert(
@@ -105,12 +105,12 @@ pub(crate) fn ops_with(
         vec!["{\"type\":\"say\",\"text\":\"好\"}".to_string()],
     );
     let gateway = doubles::gw(member, core_script.into_iter().map(String::from).collect());
-    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
-        doubles::core_with_gateway(modules, gateway),
-    )
+    let handle = crate::capabilities::runtime::api::Handle::spawn(doubles::core_with_gateway(
+        modules, gateway,
+    ))
     .expect("起核心线程");
-    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
-    (handle, ops)
+    let faces = crate::presentation::faces::Faces::from_handle(&handle);
+    (handle, faces)
 }
 
 /// 目的：注入**指定 vm 能力面与会话历史**的内存装配（guest 诊断动作要断言"回包就是 guest 报的事实"）。
@@ -120,8 +120,8 @@ pub(crate) fn ops_with_vm(
     history: std::sync::Arc<doubles::InMemoryHistory>,
     vm: std::sync::Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync>,
 ) -> (
-    crate::capabilities::conductor::api::ConductorHandle,
-    crate::capabilities::conductor::api::Ops,
+    crate::capabilities::runtime::api::Handle,
+    crate::presentation::faces::Faces,
 ) {
     let gateway: std::sync::Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
         std::sync::Arc::new(doubles::gw(std::collections::BTreeMap::new(), Vec::new()));
@@ -129,7 +129,7 @@ pub(crate) fn ops_with_vm(
         std::sync::Arc::clone(&gateway),
         std::sync::Arc::new(doubles::FakeCatalog::new(vec!["m".to_string()])),
     );
-    let core = crate::capabilities::conductor::service::Conductor::new(
+    let core = crate::capabilities::runtime::service::Core::new(
         root_dir(),
         doubles::registry_service(
             doubles::InMemorySettings::new(),
@@ -155,10 +155,9 @@ pub(crate) fn ops_with_vm(
         std::sync::Arc::new(crate::capabilities::residents::api::NoResidents),
         std::sync::Arc::new(crate::capabilities::secrets::api::NoSecrets),
     );
-    let handle =
-        crate::capabilities::conductor::api::ConductorHandle::spawn(core).expect("起核心线程");
-    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
-    (handle, ops)
+    let handle = crate::capabilities::runtime::api::Handle::spawn(core).expect("起核心线程");
+    let faces = crate::presentation::faces::Faces::from_handle(&handle);
+    (handle, faces)
 }
 
 /// 目的：一次单 agent 工作的规格（契约测试共用）。
@@ -349,8 +348,8 @@ impl crate::capabilities::llm::ports::ChatGateway for GatedGateway {
 pub(crate) fn gated_ops(
     modules: Vec<crate::capabilities::modules::api::Module>,
 ) -> (
-    crate::capabilities::conductor::api::ConductorHandle,
-    crate::capabilities::conductor::api::Ops,
+    crate::capabilities::runtime::api::Handle,
+    crate::presentation::faces::Faces,
     std::sync::Arc<std::sync::atomic::AtomicUsize>,
     std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
@@ -360,12 +359,12 @@ pub(crate) fn gated_ops(
     };
     let started = std::sync::Arc::clone(&gateway.started);
     let release = std::sync::Arc::clone(&gateway.release);
-    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
-        doubles::core_with_gateway(modules, gateway),
-    )
+    let handle = crate::capabilities::runtime::api::Handle::spawn(doubles::core_with_gateway(
+        modules, gateway,
+    ))
     .expect("起核心线程");
-    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
-    (handle, ops, started, release)
+    let faces = crate::presentation::faces::Faces::from_handle(&handle);
+    (handle, faces, started, release)
 }
 
 /// 目的：一律发慢通道的网关（可选网关参数：慢通道要自定义时序，`ops_with` 覆盖不了）。
@@ -403,18 +402,18 @@ impl crate::capabilities::llm::ports::ChatGateway for SlowGateway {
 pub(crate) fn slow_ops(
     modules: Vec<crate::capabilities::modules::api::Module>,
 ) -> (
-    crate::capabilities::conductor::api::ConductorHandle,
-    crate::capabilities::conductor::api::Ops,
+    crate::capabilities::runtime::api::Handle,
+    crate::presentation::faces::Faces,
     std::sync::Arc<std::sync::atomic::AtomicUsize>,
 ) {
     let gateway = SlowGateway {
         ticks: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
     };
     let ticks = std::sync::Arc::clone(&gateway.ticks);
-    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
-        doubles::core_with_gateway(modules, gateway),
-    )
+    let handle = crate::capabilities::runtime::api::Handle::spawn(doubles::core_with_gateway(
+        modules, gateway,
+    ))
     .expect("起核心线程");
-    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
-    (handle, ops, ticks)
+    let faces = crate::presentation::faces::Faces::from_handle(&handle);
+    (handle, faces, ticks)
 }

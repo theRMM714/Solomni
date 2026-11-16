@@ -1,6 +1,6 @@
 //! 目的：`work` 的纯函数用例——工作名校验与 guest 运行包重建判据。
 //! 管：名字挡掉路径与保留名、重建只在缺包时发生。
-//! 不管：建工作、改配与视图（见 `src/tests/conductor.rs`、`src/tests/api/session.rs`）。
+//! 不管：建工作、改配与视图（见 `src/tests/runtime.rs`、`src/tests/api/session.rs`）。
 //! 联动：`src/capabilities/work/domain.rs`、`src/capabilities/work/service.rs`。
 
 use crate::capabilities::work::domain::validate_work_name;

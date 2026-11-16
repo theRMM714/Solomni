@@ -1,7 +1,7 @@
 //! 目的：隐秘字段的入站能力面——统一 API SecretOps。
 //! 管：字段视图、置值 / 清值、按模块解析注入项、按已知值脱敏；未注入时的空实现 NoSecrets。
 //! 不管：存储机制（在 ports/detail）；模块声明解析（在 workspace）；实际注入子进程（消费方按 resolve 取）。
-//! 联动：实现见 `service.rs`；由 `main.rs` 装配进 `Ops`。
+//! 联动：实现见 `service.rs`；由 `main.rs` 装配进 `presentation::faces::Faces`。
 
 /// 目的：一个隐秘字段的视图（给设置面看；**只有标识，没有值**）。
 #[derive(Debug, Clone)]

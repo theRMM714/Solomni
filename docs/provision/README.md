@@ -15,15 +15,15 @@
 
 - 入站契约：`src/capabilities/provision/api.rs` 的 `Provision`（`status` / `guest_bases` / `job` / `start` / `cancel` / `tool_path`）。
 - DTO：`DepStatus` / `GuestBase` / `JobState` / `HostTool`（要取哪件宿主工具：`Qemu` / `Virtiofsd` / `Smbd`，是工具 id 与台账前缀的唯一映射）；`NoProvision` 是未接入的默认实现（如实失败，不假装可用）。
-- **宿主工具路径**：`tool_path(tool, registered)` 是 `qemu_path` / `virtiofsd_path` / `smbd_path` 的唯一实现——`registered` 是设置里登记的值（trim 后非空即回它），否则按台账前缀 `vm.qemu.` / `vm.virtiofsd.` / `vm.smbd.` 找在场的那一条、回拼接产品根后的绝对路径；调用方（`conductor` 的 `src/capabilities/work/service/host.rs`）只负责取登记值并 trim。
-- **虚拟根清单**：`guest_bases` 把清单里带 `guest:` 的条目按虚拟根名归并（`ready` = 这一根的各条都按当前清单装好），一个虚拟根可由多条条目共同装；conductor 的创建向导与会话配置按它渲染下拉。
+- **宿主工具路径**：`tool_path(tool, registered)` 是 `qemu_path` / `virtiofsd_path` / `smbd_path` 的唯一实现——`registered` 是设置里登记的值（trim 后非空即回它），否则按台账前缀 `vm.qemu.` / `vm.virtiofsd.` / `vm.smbd.` 找在场的那一条、回拼接产品根后的绝对路径；调用方（`runtime` 的 `src/capabilities/work/service/host.rs`）只负责取登记值并 trim。
+- **虚拟根清单**：`guest_bases` 把清单里带 `guest:` 的条目按虚拟根名归并（`ready` = 这一根的各条都按当前清单装好），一个虚拟根可由多条条目共同装；runtime 的创建向导与会话配置按它渲染下拉。
 - **虚拟根名**是 guest 的身份，按「发行版-大版本」取（`debian-13`），不按宿主平台取：两个宿主装的是同一个 Debian 13，目录同叫 `.vm/guest/debian-13`，布局差异由 `guest.yaml` 与镜像类型表达。
 - 状态归属：清单与台账的唯一真相在仓库根 `dependencies.yaml` / `links.yaml`，产品里**编译期内嵌**；作业状态是**进程内**的（不落盘，进程重启即清空）。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`vm`（`guest-runtime` 的运行期编排要起 guest：`guest_start` / `guest_wait_agent` / `guest_run` / `guest_stop`）；另经 kernel 的机制 `outbound` / `unpack`。
-- 谁在用我：`conductor`（`Ops` 的 `provision` 字段与 `GuestBase` 等类型；宿主工具路径经 `tool_path` 取）、`presentation`（setup 路由）、`system`（`--provision`）。
+- 谁在用我：`runtime`（`Faces` 的 `provision` 字段与 `GuestBase` 等类型；宿主工具路径经 `tool_path` 取）、`presentation`（setup 路由）、`system`（`--provision`）。
 
 ## 一、安装方式（清单 `kind`）
 

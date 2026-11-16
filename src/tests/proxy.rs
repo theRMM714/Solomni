@@ -1,6 +1,6 @@
 //! 目的：钉 proxy 单元自己的纯判据——六工具入参的拒绝文案与默认值，全程不碰宿主、不碰会话。
 //! 管：`observe_request` / `control_request` / `messages_request` 的必填、取值范围与默认值。
-//! 不管：授权判据与幂等账（见 `tests/conductor/proxy.rs`）；宿主行为（`FakeProxyHost`）。
+//! 不管：授权判据与幂等账（见 `tests/runtime/proxy.rs`）；宿主行为（`FakeProxyHost`）。
 //! 联动：`proxy::api` 转出的纯函数，实现见 `src/capabilities/proxy/domain/proxy.rs`。
 
 use crate::capabilities::proxy::api as d;

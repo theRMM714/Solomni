@@ -6,10 +6,9 @@
 #![allow(dead_code)]
 
 use super::builders::SilentRunner;
-use crate::capabilities::conductor::api::SessionEvent;
+use crate::capabilities::runtime::api::SessionEvent;
 use crate::capabilities::work::api::{AgentInstance, WorkMode, WorkSpec};
 
-use crate::capabilities::conductor::service::Conductor;
 use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg};
 use crate::capabilities::llm::detail::fake_chat::FakeChat;
@@ -23,6 +22,7 @@ use crate::capabilities::prompt::domain::prompt::Prompts;
 use crate::capabilities::prompt::ports::PromptSource;
 use crate::capabilities::registry::api::{ModelEntry, Provider, Settings};
 use crate::capabilities::registry::ports::SettingsStore;
+use crate::capabilities::runtime::service::Core;
 use crate::capabilities::session::api::Live;
 use crate::capabilities::session::api::{HistoryView, SessionMeta};
 use crate::capabilities::session::ports::HistoryStore;

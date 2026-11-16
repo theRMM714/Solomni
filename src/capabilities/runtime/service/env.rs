@@ -1,12 +1,11 @@
-//! 目的：conductor 侧的会话装配入口与沙箱 / 权限事实取用——工具环境与会话预算只在这里转调 turn。
-//! 管：guest 诊断准备，以及沙箱 / 权限 / 工作区授权 / 工具面 / 上下文预算五个薄入口（事实都在 `turn::service::facts`）。
-//! 不管：装配本体（在 `turn` 的 `service/assemble.rs`）、会话怎么落盘（history.rs）、协作链怎么推进（flow.rs）、建工作的两段（work/create.rs）。
-//! 联动：建工作与回放经这里取沙箱与权限；回合推进的预算刷新在 `turn`。
-use super::*;
-#[cfg(test)]
-use crate::capabilities::session::api::SessionMeta;
+//! 目的：guest 诊断的编排：只做「哪条会话有 guest」的判定与任务交接。
+//! 管：prepare_guest_diagnose（诊断任务交给调用方线程跑）。
+//! 不管：诊断本身（`vm` 的 `GuestDiagnose`）；会话事实从哪来（history）。
+//! 联动：动作分发在 guest_diagnose 分支调它。
 
-impl Conductor {
+use super::*;
+
+impl Core {
     /// 目的：一次 guest 只读诊断的准备（毫秒级）：定位这条会话的 guest 租约。
     /// 约束：本机档没有 guest；代理父会话自己没有 guest，要诊断它下面的某个工作。
     pub(crate) fn prepare_guest_diagnose(
@@ -28,10 +27,10 @@ impl Conductor {
             None => Err("这条会话没有可诊断的 guest".to_string()),
         }
     }
-
-    /// 目的：组装本次工作的沙箱清单：工作根来自 Workspace 端口，模块目录来自清单。
-    /// 约束：取数与逐席规则都在 `turn::service::facts`；这里只把端口拆成实参（测试访问器）。
-    #[cfg(test)]
+}
+#[cfg(test)]
+impl Core {
+    /// 目的：一条会话的**沙箱清单**（测试专用）：把注册处与探针的事实取成清单。
     pub(crate) fn sandboxes(
         &self,
         meta: &SessionMeta,
@@ -42,7 +41,6 @@ impl Conductor {
     }
 
     /// 目的：一条会话的**生效权限**：全局默认 → 根 ceiling → 每层 narrowing → 全局硬黑名单。
-    #[cfg(test)]
     pub(crate) fn permissions_for(
         &self,
         meta: &SessionMeta,

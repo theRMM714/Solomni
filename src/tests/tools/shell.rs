@@ -406,7 +406,7 @@ fn vm_shell_receipt_uses_the_environment_path_form() {
 
 /// 目的：基础工具链根只进宿主成员工具面。
 #[test]
-pub(crate) fn conductor_base_roots_are_only_put_on_host_member_tools() {
+pub(crate) fn runtime_base_roots_are_only_put_on_host_member_tools() {
     let core = core_with(Vec::new(), gw(BTreeMap::new(), vec!["[]".into()]))
         .with_base_roots(vec![abs(&["base"])]);
     let sb = test_sandbox("a", &[]);

@@ -3,10 +3,10 @@
 //!   以及"要等 guest"的那几段自足任务（`GuestBoot` / `EditGuest` / `GuestDiagnose`；单次销毁 `GuestStop` 在 `vm`）。
 //! 管：类型的定义与文档（值的唯一家）。
 //! 不管：怎么建、怎么改、怎么报（在 service 里）；呈现层的 JSON 封装。
-//! 联动：conductor 与呈现层都从这里取类型；guest 任务的 `run()` 在调用方线程上跑。
+//! 联动：runtime 与呈现层都从这里取类型；guest 任务的 `run()` 在调用方线程上跑。
 
 use crate::capabilities::registry::api::AgentView;
-use crate::capabilities::session::api::SessionEvent;
+use crate::capabilities::session::api::{HistoryView, SessionEvent};
 use crate::capabilities::vm::api::{ExecPlan, GuestStop, Vm};
 use crate::capabilities::workspace::api::Sandboxes;
 use crate::kernel::api::{SessionId, Tier};
@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-// 定义在**能力面**：呈现层只认这里，不再经 `conductor::` 根转一手。
+// 定义在**能力面**：呈现层只认这里，不再经 `runtime::` 根转一手。
 // 队列代理：只把命令交给核心线程（依赖方向见 ARCHITECTURE.md §一）。
 /// 目的：工作形态：单 agent（模块数不限）/ 协作（多 agent 分权协商）/ 代理（决定权整块交给核心）。
 ///   形态只用于校验与界面标签：会话实现只有「单 agent」与「协作」两种——
@@ -478,4 +478,53 @@ pub(crate) struct ProxySeed<'a> {
     pub(crate) profile: crate::capabilities::permission::api::ProfileId,
     /// 目的：外部工作区绑定（已解析，不是原始路径）。
     pub(crate) workspace: Option<crate::capabilities::session::api::WorkspaceBinding>,
+}
+
+/// 目的：工作的入站契约：建工作、会话配置与编辑、文件与提交历史，以及运行报告与核心推荐。
+///   呈现层按屏幕只取这一面；启用 / 改需求 / 回档 / 停止在 `runtime::api::RuntimeOps`。
+pub trait WorkOps: Send + Sync {
+    /// 目的：建工作——回包是（会话与名单）+ **事件台头部**，开场事实只进事件台（命令不携带事实）。
+    /// 约束：呈现侧建会话统一走动作表（`create_session`）；这一格保留给契约测试与其它调用方，
+    /// 二进制 crate 里没有调用点会被 dead_code 误报（见 docs/testing/quality-isolation.md 的 allow 清单）。
+    #[allow(dead_code)]
+    fn create_work(&self, spec: WorkSpec) -> Result<(WorkOpened, u64), String>;
+    fn config(&self, sid: &str) -> Result<SessionConfig, String>;
+    fn edit(&self, sid: &str, edit: SessionEdit) -> Result<(), String>;
+    /// 目的：投喂文件进本次工作的 work/；返回 false = 同名已存在（由用户决定覆盖或改名）。
+    fn upload(&self, sid: &str, name: &str, bytes: &[u8], overwrite: bool) -> Result<bool, String>;
+    fn files(&self, sid: &str) -> Result<FilesView, String>;
+    /// 目的：提交历史（只读）：当前 head + 分页提交；`before` = 只取 id 更小的提交。
+    fn work_log(
+        &self,
+        sid: &str,
+        limit: usize,
+        before: Option<u64>,
+    ) -> Result<crate::capabilities::workspace::api::WorkLog, String>;
+    /// 目的：一条提交的详情（只读）。
+    fn work_commit_view(
+        &self,
+        sid: &str,
+        commit: u64,
+    ) -> Result<crate::capabilities::workspace::api::CommitDetail, String>;
+    /// 目的：一条提交里某个文件的内容预览（只读；路径必须在这条提交的树里）。
+    fn work_commit_file(
+        &self,
+        sid: &str,
+        commit: u64,
+        path: &str,
+    ) -> Result<crate::capabilities::workspace::api::CommitFileView, String>;
+    #[allow(dead_code)]
+    fn exists(&self, sid: &str) -> Result<bool, String>;
+    /// 目的：工作名的缺省与唯一化（命名策略归 `session`）：`base` 去空白、为空用 `fallback`、重名加尾号。
+    fn unique_work_name(&self, base: &str, fallback: &str) -> Result<String, String>;
+    /// 目的：**在世会话 × 历史的并集**（界面上的会话列表）：只有会话中心同时知道两边，所以归这里。
+    /// 落盘历史的列表 / 打开 / 删除归 `session::api::HistoryOps`。
+    fn session_views(&self, history: &[HistoryView]) -> Result<Vec<SessionView>, String>;
+    /// 目的：运行包与档位的运行报告（只报事实）。
+    fn runtime_report(&self, tier: Tier) -> Result<RuntimeReport, String>;
+    /// 目的：新建工作时的**档位选择**（默认档 + 虚拟机档可用性与逐项前置）。
+    /// 与「开始」的校验同源（同一把 `tier_readiness` 尺子），界面照抄，不自己编话。
+    fn tier_choices(&self) -> Result<TierChoices, String>;
+    /// 目的：核心按任务推荐的 agent 草案（带理由；用户可改）。
+    fn suggest_models(&self, task: &str, mode: WorkMode) -> Result<Vec<AgentSuggestion>, String>;
 }

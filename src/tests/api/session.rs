@@ -1,15 +1,16 @@
 //! 目的：会话视图与动作——会话创建、设置、权限档、思考档、工作名与配置快照。
 //! 管：动作入参校验、视图字段、会话编辑在生成中的拒绝、档位切换的落盘。
 //! 不管：压缩（`compaction.rs`）、动作目录本身（`tools.rs`）。
-//! 联动：`src/capabilities/conductor/api/action.rs` 与 `src/capabilities/session/api`。
+//! 联动：`src/capabilities/runtime/api/action.rs` 与 `src/capabilities/session/api`。
 
 use super::super::doubles::{decl, model_draft, module_of, module_with_runtimes};
 use super::super::{ops_with, single_work, slow_ops};
 use super::support::spawn;
-use crate::capabilities::conductor::api::{Acted, ActionCall, Caller};
+use crate::capabilities::runtime::api::{Acted, ActionCall, Caller};
 use crate::capabilities::work::api::{AgentInstance, ConfigAgent, SessionEdit, WorkMode, WorkSpec};
+use crate::presentation::faces::Faces;
 
-use crate::capabilities::conductor::api::{Ops, Output};
+use crate::capabilities::runtime::api::Output;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -25,44 +26,46 @@ fn delete_past_an_archive_reports_the_casualties_and_needs_a_confirm() {
             "第三句".to_string(),
         ],
     );
-    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
-        super::super::doubles::core_with_gateway(
+    let handle =
+        crate::capabilities::runtime::api::Handle::spawn(super::super::doubles::core_with_gateway(
             vec![module_of("a")],
             super::super::doubles::ScriptGateway::new(member, vec![]),
-        ),
-    )
-    .expect("起核心线程");
-    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
-    let mut st = ops.registry.settings().expect("读设置");
+        ))
+        .expect("起核心线程");
+    let faces = crate::presentation::faces::Faces::from_handle(&handle);
+    let mut st = faces.registry.settings().expect("读设置");
     st.compact_at_percent = 0;
     st.sandbox.policy.windows.write_acl = true;
-    ops.registry.set_settings(st).expect("写设置");
-    let sid = ops
-        .sessions
+    faces.registry.set_settings(st).expect("写设置");
+    let sid = faces
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
         .0
         .sid;
-    ops.sessions
+    faces
+        .turn
         .say(
             &sid,
             "先说一句",
-            crate::capabilities::conductor::api::Output::Final,
+            crate::capabilities::runtime::api::Output::Final,
         )
         .expect("第一轮");
-    ops.sessions
+    faces
+        .runtime
         .rewind(&sid, RewindTarget::Archive(1))
         .expect("留档一次");
-    ops.sessions
+    faces
+        .turn
         .say(
             &sid,
             "留档之后再说",
-            crate::capabilities::conductor::api::Output::Final,
+            crate::capabilities::runtime::api::Output::Final,
         )
         .expect("第二轮");
 
-    let err = ops
-        .sessions
+    let err = faces
+        .runtime
         .rewind(&sid, RewindTarget::Delete(1))
         .expect_err("删除点之后的留档要先确认");
     assert!(err.contains("作废后不可恢复"), "{err}");
@@ -71,11 +74,12 @@ fn delete_past_an_archive_reports_the_casualties_and_needs_a_confirm() {
     handle
         .rewind_with_reset(&sid, RewindTarget::Delete(1), true)
         .expect("确认后删除");
-    ops.sessions
+    faces
+        .turn
         .say(
             &sid,
             "删完继续",
-            crate::capabilities::conductor::api::Output::Final,
+            crate::capabilities::runtime::api::Output::Final,
         )
         .expect("删除后还能继续");
 }
@@ -90,28 +94,29 @@ fn provider_usage_is_exposed_in_session_view_and_persisted() {
     );
     let gateway = super::super::doubles::ScriptGateway::new(member, vec![])
         .with_usage(TokenUsage::new(900, 120, Some(1020)));
-    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+    let handle = crate::capabilities::runtime::api::Handle::spawn(
         super::super::doubles::core_with_gateway(vec![module_of("a")], gateway),
     )
     .expect("起核心线程");
-    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
-    let sid = ops
-        .sessions
+    let faces = crate::presentation::faces::Faces::from_handle(&handle);
+    let sid = faces
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
         .0
         .sid;
-    ops.sessions
+    faces
+        .turn
         .say(
             &sid,
             "做一下",
-            crate::capabilities::conductor::api::Output::Final,
+            crate::capabilities::runtime::api::Output::Final,
         )
         .expect("一轮");
 
-    let views = ops
-        .sessions
-        .session_views(&ops.history.list().expect("列表"))
+    let views = faces
+        .work
+        .session_views(&faces.history.list().expect("列表"))
         .expect("视图");
     let view = views.iter().find(|v| v.sid == sid).expect("会话在视图里");
     let ctx = view.context.expect("单 agent 会话有上下文用量");
@@ -121,7 +126,7 @@ fn provider_usage_is_exposed_in_session_view_and_persisted() {
     assert!(ctx.window > 0, "窗口来自登记处（缺省 128K）");
 
     // 落盘：刷新/重建读的是同一条 usage 事件，不靠内存里那份。
-    let (_, events) = ops.history.open(&sid).expect("读流水");
+    let (_, events) = faces.history.open(&sid).expect("读流水");
     assert!(
         events.iter().any(|e| {
             e.get("type").and_then(|t| t.as_str()) == Some("usage")
@@ -136,24 +141,26 @@ fn provider_usage_is_exposed_in_session_view_and_persisted() {
 #[test]
 fn restore_work_commit_is_non_destructive_and_records_a_notice() {
     let handle = spawn(vec![module_of("a")], Vec::new());
-    let ops = Ops::from_handle(&handle);
-    let sid = ops
-        .sessions
+    let faces = Faces::from_handle(&handle);
+    let sid = faces
+        .work
         .create_work(single_work("w-restore", &["a"]))
         .expect("建会话")
         .0
         .sid;
     assert!(
-        ops.sessions
+        faces
+            .work
             .upload(&sid, "a.txt", b"one", false)
             .expect("投喂一")
     );
     assert!(
-        ops.sessions
+        faces
+            .work
             .upload(&sid, "a.txt", b"two", true)
             .expect("投喂二")
     );
-    let log = ops.sessions.work_log(&sid, 10, None).expect("提交历史");
+    let log = faces.work.work_log(&sid, 10, None).expect("提交历史");
     let head = log.head.as_ref().expect("有 head").id;
     let older = log
         .commits
@@ -163,7 +170,7 @@ fn restore_work_commit_is_non_destructive_and_records_a_notice() {
         .expect("有更早的提交");
 
     // 陈旧 expect_head：拒绝并说清当前 head。
-    let err = ops
+    let err = faces
         .actions
         .act(ActionCall {
             id: "restore_work_commit".to_string(),
@@ -175,7 +182,7 @@ fn restore_work_commit_is_non_destructive_and_records_a_notice() {
     assert!(err.contains("已经变化"), "{}", err);
 
     // 正确 expect_head：回滚，目标之后的提交仍保留。
-    let done = ops
+    let done = faces
         .actions
         .act(ActionCall {
             id: "restore_work_commit".to_string(),
@@ -185,7 +192,7 @@ fn restore_work_commit_is_non_destructive_and_records_a_notice() {
         })
         .expect("回滚");
     assert!(matches!(done, Acted::Done(_)), "回滚是同步完成动作");
-    let back = ops.sessions.work_log(&sid, 10, None).expect("回滚后的历史");
+    let back = faces.work.work_log(&sid, 10, None).expect("回滚后的历史");
     assert_eq!(back.head.as_ref().map(|h| h.id), Some(older));
     assert_eq!(
         back.commits.iter().map(|c| c.id).collect::<Vec<_>>(),
@@ -199,7 +206,7 @@ fn restore_work_commit_is_non_destructive_and_records_a_notice() {
     );
 
     // 落一条 notice 行（有 id、可回放），内容点名 from/to 与"仍保留"。
-    let (_, events) = ops.history.open(&sid).expect("读流水");
+    let (_, events) = faces.history.open(&sid).expect("读流水");
     let notice = events
         .iter()
         .filter(|e| e.get("type").and_then(|t| t.as_str()) == Some("transcript"))
@@ -219,51 +226,56 @@ fn restore_work_commit_is_non_destructive_and_records_a_notice() {
 
 #[test]
 fn unique_work_name_falls_back_and_appends_a_suffix() {
-    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
+    let (_h, faces) = ops_with(vec![module_of("a")], Vec::new());
     assert_eq!(
-        ops.sessions.unique_work_name("", "single").expect("缺省名"),
+        faces.work.unique_work_name("", "single").expect("缺省名"),
         "single"
     );
     assert_eq!(
-        ops.sessions
+        faces
+            .work
             .unique_work_name("  取名  ", "single")
             .expect("去空白"),
         "取名"
     );
-    ops.sessions
+    faces
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话");
     assert_eq!(
-        ops.sessions.unique_work_name("w", "x").expect("重名加尾号"),
+        faces.work.unique_work_name("w", "x").expect("重名加尾号"),
         "w-2"
     );
-    ops.sessions
+    faces
+        .work
         .create_work(single_work("w-2", &["a"]))
         .expect("建会话");
     assert_eq!(
-        ops.sessions.unique_work_name("w", "x").expect("再重名"),
+        faces.work.unique_work_name("w", "x").expect("再重名"),
         "w-3"
     );
 }
 
 #[test]
 fn single_mode_merges_multiple_agents_into_one_transient() {
-    let (_h, ops) = ops_with(vec![module_of("a"), module_of("b")], Vec::new());
-    ops.registry
+    let (_h, faces) = ops_with(vec![module_of("a"), module_of("b")], Vec::new());
+    faces
+        .registry
         .upsert_agent("甲", &["a".to_string(), "b".to_string()], "", "", "")
         .expect("建 agent");
-    ops.registry
+    faces
+        .registry
         .upsert_agent("乙", &["b".to_string()], "", "", "")
         .expect("建 agent");
-    let picked: Vec<AgentInstance> = ops
+    let picked: Vec<AgentInstance> = faces
         .registry
         .agents()
         .expect("读登记处")
         .iter()
         .map(AgentInstance::from_view)
         .collect();
-    let (opened, _) = ops
-        .sessions
+    let (opened, _) = faces
+        .work
         .create_work(WorkSpec {
             name: "组合".to_string(),
             mode: WorkMode::Single,
@@ -282,7 +294,7 @@ fn single_mode_merges_multiple_agents_into_one_transient() {
         vec!["组合".to_string()],
         "多个点名并成一个临时组合"
     );
-    let (meta, _) = ops.history.open("组合").expect("读 meta");
+    let (meta, _) = faces.history.open("组合").expect("读 meta");
     let mut modules = meta.agents[0].modules.clone();
     modules.sort();
     assert_eq!(
@@ -295,15 +307,15 @@ fn single_mode_merges_multiple_agents_into_one_transient() {
 
 #[test]
 fn editing_is_refused_while_a_session_is_generating() {
-    let (_h, ops, _ticks) = slow_ops(vec![module_of("a")]);
-    let sid = ops
-        .sessions
+    let (_h, faces, _ticks) = slow_ops(vec![module_of("a")]);
+    let sid = faces
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
         .0
         .sid;
     // 编辑体照抄当前配置（空名单会被"至少要有一个 agent"挡掉，那是另一条规则）。
-    let cfg = ops.sessions.config(&sid).expect("读配置");
+    let cfg = faces.work.config(&sid).expect("读配置");
     let edit = || SessionEdit {
         agents: cfg.agents.clone(),
         tier: "host".to_string(),
@@ -311,40 +323,42 @@ fn editing_is_refused_while_a_session_is_generating() {
         pins: std::collections::BTreeMap::new(),
         permission: None,
     };
-    ops.sessions.edit(&sid, edit()).expect("没在生成时可以改");
+    faces.work.edit(&sid, edit()).expect("没在生成时可以改");
 
     let worker = {
-        let sessions = Arc::clone(&ops.sessions);
+        let turn = Arc::clone(&faces.turn);
         let sid = sid.clone();
-        std::thread::spawn(move || sessions.say(&sid, "慢慢来", Output::Stream))
+        std::thread::spawn(move || turn.say(&sid, "慢慢来", Output::Stream))
     };
     let deadline = Instant::now() + Duration::from_secs(10);
-    while !ops.sessions.is_running(&sid) {
+    while !faces.turn.is_running(&sid) {
         assert!(Instant::now() < deadline, "生成没有启动");
         std::thread::sleep(Duration::from_millis(5));
     }
-    let err = ops.sessions.edit(&sid, edit()).unwrap_err();
+    let err = faces.work.edit(&sid, edit()).unwrap_err();
     assert!(err.contains("正在生成中"), "生成中必须拒绝改配置：{err}");
 
-    assert!(!ops.sessions.stop(&sid).is_empty(), "停掉它");
+    assert!(!faces.runtime.stop(&sid).is_empty(), "停掉它");
     let _ = worker.join();
-    ops.sessions.edit(&sid, edit()).expect("收尾后可以改");
+    faces.work.edit(&sid, edit()).expect("收尾后可以改");
     assert!(
-        ops.sessions.edit("没这个会话", edit()).is_err(),
+        faces.work.edit("没这个会话", edit()).is_err(),
         "无此会话要如实报错"
     );
 }
 
 #[test]
 fn set_settings_action_accepts_max_guests() {
-    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
+    let (_h, faces) = ops_with(vec![module_of("a")], Vec::new());
     // Windows 上 require 围栏必须授权写 ACL，否则设置本身不合法；这条只验动作参数。
-    let mut st = ops.registry.settings().expect("读设置");
+    let mut st = faces.registry.settings().expect("读设置");
     st.sandbox.policy.windows.write_acl = true;
-    ops.registry
+    faces
+        .registry
         .set_settings(st)
         .expect("准备 Windows 合法的沙箱策略");
-    ops.actions
+    faces
+        .actions
         .act(ActionCall {
             id: "set_settings".to_string(),
             args: serde_json::json!({ "max_guests": 5 }),
@@ -352,18 +366,20 @@ fn set_settings_action_accepts_max_guests() {
             out: Output::Final,
         })
         .expect("set_settings 应接受 max_guests");
-    assert_eq!(ops.registry.settings().expect("读设置").max_guests, 5);
+    assert_eq!(faces.registry.settings().expect("读设置").max_guests, 5);
 }
 
 #[test]
 fn set_settings_action_accepts_storage() {
-    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
-    let mut st = ops.registry.settings().expect("读设置");
+    let (_h, faces) = ops_with(vec![module_of("a")], Vec::new());
+    let mut st = faces.registry.settings().expect("读设置");
     st.sandbox.policy.windows.write_acl = true;
-    ops.registry
+    faces
+        .registry
         .set_settings(st)
         .expect("准备 Windows 合法的沙箱策略");
-    ops.actions
+    faces
+        .actions
         .act(ActionCall {
             id: "set_settings".to_string(),
             args: serde_json::json!({ "storage": {
@@ -379,7 +395,7 @@ fn set_settings_action_accepts_storage() {
             out: Output::Final,
         })
         .expect("set_settings 应接受 storage");
-    let got = ops.registry.settings().expect("读设置").storage;
+    let got = faces.registry.settings().expect("读设置").storage;
     assert!(!got.periodic_gc);
     assert_eq!(got.gc_interval_minutes, 30);
     assert_eq!(got.cache_cap_gib, 7);
@@ -391,13 +407,15 @@ fn set_settings_action_accepts_storage() {
 
 #[test]
 fn set_settings_action_accepts_compact_options() {
-    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
-    let mut st = ops.registry.settings().expect("读设置");
+    let (_h, faces) = ops_with(vec![module_of("a")], Vec::new());
+    let mut st = faces.registry.settings().expect("读设置");
     st.sandbox.policy.windows.write_acl = true;
-    ops.registry
+    faces
+        .registry
         .set_settings(st)
         .expect("准备 Windows 合法的沙箱策略");
-    ops.actions
+    faces
+        .actions
         .act(ActionCall {
             id: "set_settings".to_string(),
             args: serde_json::json!({ "compact_keep_percent": 20, "compact_model": "m" }),
@@ -405,11 +423,11 @@ fn set_settings_action_accepts_compact_options() {
             out: Output::Final,
         })
         .expect("set_settings 应接受压缩选项");
-    let got = ops.registry.settings().expect("读设置");
+    let got = faces.registry.settings().expect("读设置");
     assert_eq!(got.compact_keep_percent, 20);
     assert_eq!(got.compact_model, "m");
 
-    let err = ops
+    let err = faces
         .actions
         .act(ActionCall {
             id: "set_settings".to_string(),
@@ -423,8 +441,8 @@ fn set_settings_action_accepts_compact_options() {
 
 #[test]
 fn create_session_and_config_carry_chara_as_a_snapshot() {
-    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
-    let done = ops
+    let (_h, faces) = ops_with(vec![module_of("a")], Vec::new());
+    let done = faces
         .actions
         .act(ActionCall {
             id: "create_session".to_string(),
@@ -447,10 +465,11 @@ fn create_session_and_config_carry_chara_as_a_snapshot() {
         panic!("建会话应同步完成");
     };
     let sid = v["sid"].as_str().expect("sid").to_string();
-    let (meta, _) = ops.history.open(&sid).expect("读 meta");
+    let (meta, _) = faces.history.open(&sid).expect("读 meta");
     assert_eq!(meta.agents[0].chara, "建会话时写的人设");
     // 会话配置里的人设是 copy：允许临时改，写回同一份快照。
-    ops.sessions
+    faces
+        .work
         .edit(
             &sid,
             SessionEdit {
@@ -467,7 +486,7 @@ fn create_session_and_config_carry_chara_as_a_snapshot() {
             },
         )
         .expect("改配置");
-    let (meta, _) = ops.history.open(&sid).expect("读回 meta");
+    let (meta, _) = faces.history.open(&sid).expect("读回 meta");
     assert_eq!(meta.agents[0].chara, "会话里临时改的人设");
 }
 
@@ -528,13 +547,14 @@ fn host_session_uses_package_bin_path() {
 fn set_permission_profile_action_switches_the_session_profile() {
     use crate::capabilities::permission::api::ProfileId;
     let handle = spawn(vec![module_of("a")], Vec::new());
-    let ops = Ops::from_handle(&handle);
-    let (opened, _) = ops
-        .sessions
+    let faces = Faces::from_handle(&handle);
+    let (opened, _) = faces
+        .work
         .create_work(single_work("w-profile", &["a"]))
         .expect("建会话");
     let sid = opened.sid;
-    ops.actions
+    faces
+        .actions
         .act(ActionCall {
             id: "set_permission_profile".to_string(),
             args: serde_json::json!({ "session_id": sid, "profile": "view" }),
@@ -543,11 +563,12 @@ fn set_permission_profile_action_switches_the_session_profile() {
         })
         .expect("快速切档");
     assert_eq!(
-        ops.sessions.config(&sid).unwrap().permission.profile,
+        faces.work.config(&sid).unwrap().permission.profile,
         ProfileId::View
     );
     assert!(
-        ops.actions
+        faces
+            .actions
             .act(ActionCall {
                 id: "set_permission_profile".to_string(),
                 args: serde_json::json!({ "session_id": sid, "profile": "nope" }),
@@ -564,8 +585,9 @@ fn set_thinking_action_switches_the_work_level_and_rejects_unmapped_levels() {
     use crate::capabilities::registry::api::ThinkingSpec;
     use std::collections::BTreeMap;
     let handle = spawn(vec![module_of("a")], Vec::new());
-    let ops = Ops::from_handle(&handle);
-    ops.registry
+    let faces = Faces::from_handle(&handle);
+    faces
+        .registry
         .upsert_model(crate::capabilities::registry::api::ModelDraft {
             thinking: ThinkingSpec {
                 default: None,
@@ -577,12 +599,13 @@ fn set_thinking_action_switches_the_work_level_and_rejects_unmapped_levels() {
             ..model_draft("m", "M", "m", "p", "", 32_000)
         })
         .unwrap();
-    let (opened, _) = ops
-        .sessions
+    let (opened, _) = faces
+        .work
         .create_work(single_work("w-thinking", &["a"]))
         .expect("建会话");
     let sid = opened.sid;
-    ops.actions
+    faces
+        .actions
         .act(ActionCall {
             id: "set_thinking".to_string(),
             args: serde_json::json!({ "session_id": sid, "level": "high" }),
@@ -590,7 +613,7 @@ fn set_thinking_action_switches_the_work_level_and_rejects_unmapped_levels() {
             out: Output::Final,
         })
         .expect("切思考档");
-    let cfg = ops.sessions.config(&sid).expect("读配置");
+    let cfg = faces.work.config(&sid).expect("读配置");
     assert_eq!(cfg.thinking.level.as_deref(), Some("high"));
     assert!(
         cfg.thinking.options.iter().any(|o| o.id == "high"),
@@ -607,7 +630,7 @@ fn set_thinking_action_switches_the_work_level_and_rejects_unmapped_levels() {
     );
     assert_eq!(cfg.thinking.label, "high", "有会话选择时显示标签");
     // 没登记的档：拒绝并列出缺映射的模型（不静默降级）
-    let err = ops
+    let err = faces
         .actions
         .act(ActionCall {
             id: "set_thinking".to_string(),
@@ -618,7 +641,8 @@ fn set_thinking_action_switches_the_work_level_and_rejects_unmapped_levels() {
         .unwrap_err();
     assert!(err.contains("模型 m") || err.contains("m"), "{}", err);
     // 空串 = 随模型默认
-    ops.actions
+    faces
+        .actions
         .act(ActionCall {
             id: "set_thinking".to_string(),
             args: serde_json::json!({ "session_id": sid, "level": "" }),
@@ -626,7 +650,7 @@ fn set_thinking_action_switches_the_work_level_and_rejects_unmapped_levels() {
             out: Output::Final,
         })
         .unwrap();
-    let after = ops.sessions.config(&sid).unwrap();
+    let after = faces.work.config(&sid).unwrap();
     assert_eq!(after.thinking.level.as_deref(), None, "空串回到跟随默认");
     assert_eq!(
         after.thinking.default_level.as_deref(),
@@ -639,26 +663,28 @@ fn set_thinking_action_switches_the_work_level_and_rejects_unmapped_levels() {
 #[test]
 fn set_context_freshness_action_flips_the_work_switch_and_reports_it() {
     let handle = spawn(vec![module_of("a")], Vec::new());
-    let ops = Ops::from_handle(&handle);
-    let (opened, _) = ops
-        .sessions
+    let faces = Faces::from_handle(&handle);
+    let (opened, _) = faces
+        .work
         .create_work(single_work("w-fresh", &["a"]))
         .expect("建会话");
     let sid = opened.sid;
-    let view = |ops: &Ops| {
-        ops.sessions
-            .session_views(&ops.history.list().expect("列历史"))
+    let view = |faces: &Faces| {
+        faces
+            .work
+            .session_views(&faces.history.list().expect("列历史"))
             .expect("会话视图")
             .into_iter()
             .find(|v| v.sid == sid)
             .expect("找到会话")
     };
     assert!(
-        !view(&ops).context_freshness,
+        !view(&faces).context_freshness,
         "默认关：只记读事实、不改发送视图"
     );
     for on in [true, false] {
-        ops.actions
+        faces
+            .actions
             .act(ActionCall {
                 id: "set_context_freshness".to_string(),
                 args: serde_json::json!({ "session_id": sid, "on": on }),
@@ -668,7 +694,12 @@ fn set_context_freshness_action_flips_the_work_switch_and_reports_it() {
             .expect("切开关");
         // 切开关会把子树会话从内存移除（与思考档一致），所以查**落盘事实**而不是视图。
         assert_eq!(
-            ops.history.open(&sid).expect("读 meta").0.context_freshness,
+            faces
+                .history
+                .open(&sid)
+                .expect("读 meta")
+                .0
+                .context_freshness,
             on,
             "开关写到工作根 meta 上"
         );
@@ -680,8 +711,9 @@ fn thinking_view_uses_the_common_default_and_hides_unmapped_levels() {
     use crate::capabilities::registry::api::ThinkingSpec;
     use std::collections::BTreeMap;
     let handle = spawn(vec![module_of("a")], Vec::new());
-    let ops = Ops::from_handle(&handle);
-    ops.registry
+    let faces = Faces::from_handle(&handle);
+    faces
+        .registry
         .upsert_model(crate::capabilities::registry::api::ModelDraft {
             thinking: ThinkingSpec {
                 default: Some("high".to_string()),
@@ -693,11 +725,11 @@ fn thinking_view_uses_the_common_default_and_hides_unmapped_levels() {
             ..model_draft("m", "M", "m", "p", "", 32_000)
         })
         .unwrap();
-    let (opened, _) = ops
-        .sessions
+    let (opened, _) = faces
+        .work
         .create_work(single_work("w-default", &["a"]))
         .expect("建会话");
-    let cfg = ops.sessions.config(&opened.sid).expect("读配置");
+    let cfg = faces.work.config(&opened.sid).expect("读配置");
     assert_eq!(cfg.thinking.level, None, "没选过档");
     assert_eq!(
         cfg.thinking.default_level.as_deref(),
@@ -740,9 +772,9 @@ fn workspace_grant_parses_defaults_and_requires_a_workspace() {
         "落盘写法与 serde 的 snake_case 同名"
     );
     // 没有外部工作区却给了非缺省粒度：拒绝，而不是静默忽略。
-    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
+    let (_h, faces) = ops_with(vec![module_of("a")], Vec::new());
     let mut spec = single_work("w-grant", &["a"]);
     spec.workspace_grant = Some(WorkspaceGrant::Workspace);
-    let err = ops.sessions.create_work(spec).expect_err("该拒绝");
+    let err = faces.work.create_work(spec).expect_err("该拒绝");
     assert!(err.contains("工作区授权粒度无意义"), "{}", err);
 }

@@ -1,14 +1,14 @@
-//! 目的：事件流视图助手——把 Conductor 吐出的事件流还原成「用户看到的那几行」。
+//! 目的：事件流视图助手——把 Core 吐出的事件流还原成「用户看到的那几行」。
 //! 管：裁决卡回答、转录行/工具行的视图与文本、某段文字的在场与否。
 //! 不管：造会话与名单（`session.rs`）、通道替身（`chat.rs`）。
-//! 联动：`src/capabilities/conductor/api.rs` 的 `SessionEvent` 与呈现层的 `LineView`。
+//! 联动：`src/capabilities/runtime/api.rs` 的 `SessionEvent` 与呈现层的 `LineView`。
 
 use super::*;
 
 /// 目的：测试里**回答当前那张裁决卡**（卡号从会话的挂起取）：返回这一答产生的事件。
 /// 约束：与呈现层同一条路——带选项 id（+ 附言），由 `collab_answer` 校验与落档。
 pub(crate) fn answer_card(
-    core: &mut Conductor,
+    core: &mut Core,
     sid: &str,
     option: &str,
     note: &str,

@@ -1,7 +1,7 @@
 //! 目的：发言信封的识别——讨论 / 执行回复的最外层结构（发言 / 表态 / 工具调用）。
 //! 管：从模型原文里提取信封；合法工具信封的执行入口；看起来想发工具信封但 JSON 非法的独立标记。
 //! 不管：工具的实际执行（在 kernel）；回执文案装配（在 domain/malformed.rs）；网络与通道适配。
-//! 联动：被 api.rs 重导出（Reply / parse / Malformed / Tail）；供 conductor 解析模型回复；malformed.rs 消费 Malformed / Tail。
+//! 联动：被 api.rs 重导出（Reply / parse / Malformed / Tail）；供 runtime 解析模型回复；malformed.rs 消费 Malformed / Tail。
 
 use serde::Deserialize;
 

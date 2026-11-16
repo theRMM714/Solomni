@@ -1,7 +1,7 @@
 //! 目的：钉环境事实的派生——权限链、共享区授权、guest 租约、一席的工具环境与沙箱清单、全局策略（网络开关与宿主只读根）。
 //! 管：`env::api` 六个派生函数的行为与错误文案；纯内存，不碰端口、不落盘。
-//! 不管：取事实（`conductor` 的 history / workspace / registry）、机制侧怎么用围栏。
-//! 联动：`src/capabilities/env/domain/env.rs`；`conductor/service/env.rs` 取事实后转调。
+//! 不管：取事实（`runtime` 的 history / workspace / registry）、机制侧怎么用围栏。
+//! 联动：`src/capabilities/env/domain/env.rs`；`runtime/service/env.rs` 取事实后转调。
 
 use crate::capabilities::env::api::{
     MemberFacts, SandboxesFacts, host_read_roots, member, network_allowed, permissions, sandboxes,

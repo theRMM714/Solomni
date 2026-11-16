@@ -1,13 +1,14 @@
 //! 目的：交互回合：跟随事件流、投降裁决卡、等安静与动作回显。
 //! 管：跟读游标、裁决卡的问与答、动作后的续读。
-//! 不管：生成本身（在 `conductor`）、渲染原语（`view`）。
-//! 联动：`cli/view.rs`、`cli/flows.rs`、`capabilities/conductor`
+//! 不管：生成本身（在 `runtime`）、渲染原语（`view`）。
+//! 联动：`cli/view.rs`、`cli/flows.rs`、`capabilities/runtime`
 
 use super::*;
+use crate::presentation::faces::Faces;
 
 /// 目的：**订阅事件台**：把 `from` 之后属于这条会话的批次渲染出来，返回新的游标；命令回包只给头部序号——事实一条不落都在事件台上，CLI 与 Web 前端读的是同一份。
-pub(super) fn drain(ops: &Ops, sid: &str, from: u64) -> u64 {
-    let (lines, head, _oldest) = ops.events.snapshot(Some(sid), from);
+pub(super) fn drain(faces: &Faces, sid: &str, from: u64) -> u64 {
+    let (lines, head, _oldest) = faces.events.snapshot(Some(sid), from);
     for l in &lines {
         render(&l.events);
     }
@@ -15,12 +16,12 @@ pub(super) fn drain(ops: &Ops, sid: &str, from: u64) -> u64 {
 }
 
 /// 目的：一次命令之后的订阅。回档/改需求给的是**重放快照**（不是增量事实）：终端不重复打， 只把游标推到当前头部（不重渲已有的行）。
-pub(super) fn follow(ops: &Ops, sid: &str, cursor: &mut u64, acted: Acted) {
+pub(super) fn follow(faces: &Faces, sid: &str, cursor: &mut u64, acted: Acted) {
     if matches!(acted, Acted::Replayed(_)) {
-        *cursor = ops.events.head();
+        *cursor = faces.events.head();
         return;
     }
-    *cursor = drain(ops, sid, *cursor);
+    *cursor = drain(faces, sid, *cursor);
 }
 
 /// 目的：CLI 侧的动作（拥有字符串）：生成要放后台线程，所以不能借用调用栈上的 `&str`。
@@ -196,9 +197,9 @@ pub(crate) fn pick_option(card: &DecisionCard, ans: &str) -> Option<String> {
 }
 
 /// 目的：裁决门：**按卡片上的选项作答**（回答回的是选项 id + 附言，不是自由文本）。 不点不继续：空输入 = 先不答（会话仍在等）。
-pub(super) fn answer_gates(ops: &Ops, sid: &str, cursor: &mut u64) {
+pub(super) fn answer_gates(faces: &Faces, sid: &str, cursor: &mut u64) {
     loop {
-        let queue = match ops.sessions.open_queue(sid) {
+        let queue = match faces.turn.open_queue(sid) {
             Ok(Some(q)) => q,
             Ok(None) => return,
             Err(e) => {
@@ -213,7 +214,7 @@ pub(super) fn answer_gates(ops: &Ops, sid: &str, cursor: &mut u64) {
         let Some(ans) = prompt_opt("选哪一项（序号 / 选项 id；回车 = 先不答）>")
         else {
             // 输入到尽头 = 前端答不了了：按**停止**（= 拒绝）收场，绝不把等待方永远吊在这里。
-            eof_stop(ops, sid);
+            eof_stop(faces, sid);
             return;
         };
         let ans = ans.trim();
@@ -230,10 +231,10 @@ pub(super) fn answer_gates(ops: &Ops, sid: &str, cursor: &mut u64) {
             option,
             note,
         };
-        match act_interactive(ops, sid, action, cursor, Output::Final) {
+        match act_interactive(faces, sid, action, cursor, Output::Final) {
             Ok(acted) => {
-                follow(ops, sid, cursor, acted);
-                wait_quiet(ops, sid, cursor);
+                follow(faces, sid, cursor, acted);
+                wait_quiet(faces, sid, cursor);
             }
             Err(e) => {
                 term::say(&format!("[错误] {}", e));
@@ -244,15 +245,15 @@ pub(super) fn answer_gates(ops: &Ops, sid: &str, cursor: &mut u64) {
 }
 
 /// 目的：回答之后**跟到这一段收尾**再回提示符：回答是直路（先落定、处置脱离调用方跑）， 不跟的话终端会在讨论还在跑的时候就回到提示符——用户既看不到后续，也等不到下一张卡。 判据：这条会话不在跑，且事件台连着几拍没有再长（等的是"脱离调用方那一段"，不是某一次生成）。
-pub(super) fn wait_quiet(ops: &Ops, sid: &str, cursor: &mut u64) {
+pub(super) fn wait_quiet(faces: &Faces, sid: &str, cursor: &mut u64) {
     let mut last = u64::MAX;
     let mut quiet = 0u32;
     let started = std::time::Instant::now();
     let mut tick = 0usize;
     loop {
-        *cursor = drain(ops, sid, *cursor);
-        let head = ops.events.head();
-        if !ops.sessions.is_running(sid) && head == last {
+        *cursor = drain(faces, sid, *cursor);
+        let head = faces.events.head();
+        if !faces.turn.is_running(sid) && head == last {
             quiet += 1;
             if quiet >= 3 {
                 term::live_clear();
@@ -276,14 +277,14 @@ pub(super) fn wait_quiet(ops: &Ops, sid: &str, cursor: &mut u64) {
 
 /// 目的：一次生成放**后台线程**；主线程一边渲染事件、一边就地按卡作答（工具级确认等在工作线程上）。 为什么：回答要在生成进行中读键盘，同步调用会把主线程堵在生成里，读不到输入。
 pub(super) fn act_interactive(
-    ops: &Ops,
+    faces: &Faces,
     sid: &str,
     action: CliAction,
     cursor: &mut u64,
     out: Output,
 ) -> Result<Acted, String> {
     let (tx, rx) = std::sync::mpsc::channel();
-    let (gen_ops, gen_sid) = (ops.clone(), sid.to_string());
+    let (gen_ops, gen_sid) = (faces.clone(), sid.to_string());
     std::thread::spawn(move || {
         let r = gen_ops.actions.act(action.call(&gen_sid, out));
         let _ = tx.send(r);
@@ -292,7 +293,7 @@ pub(super) fn act_interactive(
     let mut working: Option<String> = None;
     let mut tick = 0usize;
     loop {
-        let (lines, head, _oldest) = ops.events.snapshot(Some(sid), *cursor);
+        let (lines, head, _oldest) = faces.events.snapshot(Some(sid), *cursor);
         // 这一批里出现了裁决卡就就地作答（工具级确认发生在生成中，不能等这一次生成收尾）。
         let mut carded = false;
         for l in &lines {
@@ -310,7 +311,7 @@ pub(super) fn act_interactive(
         *cursor = head;
         if carded {
             term::live_clear();
-            answer_gates(ops, sid, cursor);
+            answer_gates(faces, sid, cursor);
         }
         match rx.try_recv() {
             Ok(r) => {
@@ -351,11 +352,11 @@ pub(crate) fn split_names(arg: &str) -> Vec<String> {
 }
 
 /// 目的：点名：按名字取登记处存档 → 用例输入；空登记处给引导（文案见 `NO_AGENTS`）。
-pub(crate) fn pick_agents(ops: &Ops, names: &[String]) -> Result<Vec<AgentInstance>, String> {
-    if ops.registry.agents()?.is_empty() {
+pub(crate) fn pick_agents(faces: &Faces, names: &[String]) -> Result<Vec<AgentInstance>, String> {
+    if faces.registry.agents()?.is_empty() {
         return Err(NO_AGENTS.to_string());
     }
-    let views = ops.registry.pick_agents(names)?;
+    let views = faces.registry.pick_agents(names)?;
     Ok(views.iter().map(AgentInstance::from_view).collect())
 }
 
@@ -381,7 +382,7 @@ pub(super) fn pick_guest(
 
 /// 目的：建会话走**动作表**——与 Web / agent 同一份声明、同一处授权，CLI 只把用户的选择变成参数。
 pub(crate) fn create_session_action(
-    ops: &Ops,
+    faces: &Faces,
     name: &str,
     mode: &str,
     agents: &[AgentInstance],
@@ -413,7 +414,7 @@ pub(crate) fn create_session_action(
     // 多个就如实说清有哪些（CLI 不代人挑），一个都没装就交给后端给"怎么补"。
     if tier == Tier::Vm {
         // 读不到清单（比如补齐面没接入）时不给 guest：交给后端按同一份清单如实拒绝。
-        if let Ok(t) = ops.core.tier_choices() {
+        if let Ok(t) = faces.work.tier_choices() {
             match pick_guest(&t.guests) {
                 Some(g) => args["guest"] = serde_json::json!(g),
                 None => {
@@ -425,7 +426,7 @@ pub(crate) fn create_session_action(
             }
         }
     }
-    match ops.actions.act(ActionCall {
+    match faces.actions.act(ActionCall {
         id: "create_session".to_string(),
         args,
         caller: Caller::User,
@@ -574,28 +575,28 @@ mod tests {
     /// 目的：没有生成在跑时，事件台连着三拍不再长就自己返回（tty 下顺带刷收尾活状态行）。
     #[test]
     fn wait_quiet_returns_after_three_quiet_ticks() {
-        let (_handle, ops) = crate::tests::ops_with(vec![], vec![]);
+        let (_handle, faces) = crate::tests::ops_with(vec![], vec![]);
         term::test_ui(true, 80, false, false, theme::Level::None);
         let started = std::time::Instant::now();
         let mut cursor = 0;
-        wait_quiet(&ops, "没有这个会话", &mut cursor);
+        wait_quiet(&faces, "没有这个会话", &mut cursor);
         term::reset_ui();
         assert!(
             started.elapsed() < std::time::Duration::from_secs(2),
             "要自己收尾返回"
         );
-        assert_eq!(cursor, ops.events.head(), "游标推到头部");
+        assert_eq!(cursor, faces.events.head(), "游标推到头部");
     }
 
     /// 目的：动作在工作线程上跑，回包（这里是最快的错）原样交回调用方；tty 下主线程刷活状态行。
     #[test]
     fn act_interactive_returns_worker_result() {
-        let (_handle, ops) = crate::tests::ops_with(vec![], vec![]);
+        let (_handle, faces) = crate::tests::ops_with(vec![], vec![]);
         term::test_ui(true, 80, false, false, theme::Level::None);
         let mut cursor = 0;
         let started = std::time::Instant::now();
         let r = act_interactive(
-            &ops,
+            &faces,
             "没有这个会话",
             CliAction::Say("你好".to_string()),
             &mut cursor,
@@ -612,10 +613,10 @@ mod tests {
     /// 目的：取不到裁决队（会话不存在）时如实提示后返回——这一步不碰输入。
     #[test]
     fn answer_gates_reports_unopenable_queue() {
-        let (_handle, ops) = crate::tests::ops_with(vec![], vec![]);
+        let (_handle, faces) = crate::tests::ops_with(vec![], vec![]);
         term::test_ui(false, 80, false, false, theme::Level::None);
         let mut cursor = 0;
-        let (_, lines) = term::capture(|| answer_gates(&ops, "没有这个会话", &mut cursor));
+        let (_, lines) = term::capture(|| answer_gates(&faces, "没有这个会话", &mut cursor));
         term::reset_ui();
         assert_eq!(lines.len(), 1, "{:?}", lines);
         assert!(

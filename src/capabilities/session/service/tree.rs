@@ -1,7 +1,7 @@
 //! 目的：会话树的派生——父子关系、工作根、配置归属、树级装配 meta 与 guest 作用域。
 //! 管：`subtree_of` / `work_root` / `work_root_of` / `config_owner_of` / `tree_meta` / `tree_meta_with` / `session_kind_of` / `role_of` / `guest_scope` / `guest_lease_for` / `guest_lease` / `tree_order` / `flat_modules`。
 //! 不管：谁在跑（`turn`）、目录怎么落盘（`detail/fs_history.rs`）、外部工作区的档位策略（`workspace`）。
-//! 联动：只经 `History` 端口读 meta 与列表；`conductor` 的建工作、改配、回档与历史列表都调这里。
+//! 联动：只经 `History` 端口读 meta 与列表；`runtime` 的建工作、改配、回档与历史列表都调这里。
 
 use crate::capabilities::session::api::{AgentMeta, History, HistoryView, SessionMeta};
 use crate::kernel::api::Tier;

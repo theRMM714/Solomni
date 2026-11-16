@@ -1,7 +1,7 @@
 //! 目的：回档的行 / 事件算术——纯函数，不碰 IO，也不碰会话实例。
 //! 管：回合归属、回复边界、行 id 推进、截断与保留（`turn_of_line` / `last_line_within` / `max_reply` / `align_keep` / `truncate_events`）。
-//! 不管：回档编排（撤子会话、截事件流水、重建会话在 `conductor`）；会话状态（在 `session.rs`）。
-//! 联动：`conductor` 的回档用例调用它；它读写的状态（转录行、`marks` / `line_reply` / `next_line`）归会话所有。
+//! 不管：回档编排（撤子会话、截事件流水、重建会话在 `runtime`）；会话状态（在 `session.rs`）。
+//! 联动：`runtime` 的回档用例调用它；它读写的状态（转录行、`marks` / `line_reply` / `next_line`）归会话所有。
 
 /// 目的：主会话第 keep_id 行所属的**回合**（没有 = 0）。
 pub fn turn_of_line(events: &[serde_json::Value], keep_id: u64) -> u64 {

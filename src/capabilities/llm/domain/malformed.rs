@@ -1,7 +1,7 @@
 //! 目的：信封不合法时的回执文案装配——协议形状到修法的映射。
 //! 管：认识 Malformed / Tail 的结构；按类别给出对应修法文案。
 //! 不管：信封解析本身（在 domain/envelope.rs）；文案模板的来源（不从提示词册取）。
-//! 联动：被 api.rs 重导出 malformed_report；conductor 在信封解析失败时用它回执给模型。
+//! 联动：被 api.rs 重导出 malformed_report；runtime 在信封解析失败时用它回执给模型。
 
 use crate::capabilities::llm::domain::envelope::{Malformed, Tail};
 

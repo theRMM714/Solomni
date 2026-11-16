@@ -1,7 +1,7 @@
 //! 目的：钉 CLI 前端（传输侧）的输入解析与点名包装契约。
 //! 管：动作 id 两种写法、会话创建走动作表、逗号与空白分名、空登记处点名引导、等待清单逐行、EOF 停卡。
-//! 不管：业务规则：点名归 registry、命名与生成中禁改归 session/conductor、组合语义与动作分发。
-//! 联动：`ActionOps::act`、`conductor::create_session`、src/tests/api/ 的对应测试。
+//! 不管：业务规则：点名归 registry、命名与生成中禁改归 session/runtime、组合语义与动作分发。
+//! 联动：`ActionOps::act`、`runtime::create_session`、src/tests/api/ 的对应测试。
 
 use super::doubles::module_of;
 use super::ops_with;
@@ -25,16 +25,17 @@ fn module_action_id_accepts_both_forms() {
 /// 建会话在 CLI 上走**动作表**：同一份声明、同一处授权（未知形态在分发处被拒）。
 #[test]
 fn cli_session_creation_goes_through_the_action_table() {
-    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
-    ops.registry
+    let (_h, faces) = ops_with(vec![module_of("a")], Vec::new());
+    faces
+        .registry
         .upsert_agent("甲", &["a".to_string()], "", "", "")
         .expect("建 agent");
-    let picked = cli::pick_agents(&ops, &["甲".to_string()]).expect("点名");
-    let sid = cli::create_session_action(&ops, "cli-1", "single", &picked, None, Tier::Host)
+    let picked = cli::pick_agents(&faces, &["甲".to_string()]).expect("点名");
+    let sid = cli::create_session_action(&faces, "cli-1", "single", &picked, None, Tier::Host)
         .expect("走动作表建会话");
     assert_eq!(sid, "cli-1");
     assert!(
-        cli::create_session_action(&ops, "cli-2", "乱来", &picked, None, Tier::Host).is_err(),
+        cli::create_session_action(&faces, "cli-2", "乱来", &picked, None, Tier::Host).is_err(),
         "未知形态在分发处如实拒绝"
     );
 }
@@ -50,30 +51,31 @@ fn split_names_accepts_commas_and_whitespace() {
 
 #[test]
 fn pick_agents_guides_on_empty_registry_and_names_the_unknown() {
-    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
+    let (_h, faces) = ops_with(vec![module_of("a")], Vec::new());
     assert_eq!(
-        cli::pick_agents(&ops, &["甲".to_string()]).unwrap_err(),
+        cli::pick_agents(&faces, &["甲".to_string()]).unwrap_err(),
         cli::NO_AGENTS,
         "空登记处给引导（文案是 CLI 自己的说法）"
     );
 
-    ops.registry
+    faces
+        .registry
         .upsert_agent("甲", &["a".to_string()], "", "", "")
         .expect("建 agent");
-    let picked = cli::pick_agents(&ops, &["甲".to_string()]).expect("点名成功");
+    let picked = cli::pick_agents(&faces, &["甲".to_string()]).expect("点名成功");
     assert_eq!(picked.len(), 1);
     assert_eq!(picked[0].name, "甲");
     assert!(!picked[0].transient, "点名已存 agent 不是临时的");
     assert_eq!(picked[0].modules, vec!["a".to_string()]);
 
-    let err = cli::pick_agents(&ops, &["乙".to_string()]).unwrap_err();
+    let err = cli::pick_agents(&faces, &["乙".to_string()]).unwrap_err();
     assert!(
         err.contains("无此 agent：乙") && err.contains("甲"),
         "报错要列出可选项：{}",
         err
     );
     assert!(
-        cli::pick_agents(&ops, &[])
+        cli::pick_agents(&faces, &[])
             .unwrap_err()
             .contains("没有点名")
     );
@@ -110,9 +112,10 @@ fn waiting_list_is_built_line_by_line() {
 fn eof_answers_a_pending_card_by_stopping_instead_of_hanging() {
     use crate::capabilities::session::api::{Pending, SlotWake};
 
-    let (handle, ops) = ops_with(vec![module_of("a")], Vec::new());
+    let (handle, faces) = ops_with(vec![module_of("a")], Vec::new());
     let sid = "cli-eof-1";
-    ops.sessions
+    faces
+        .work
         .create_work(work(sid, WorkMode::Single, &["a"]))
         .expect("建会话");
     let door = {
@@ -133,13 +136,13 @@ fn eof_answers_a_pending_card_by_stopping_instead_of_hanging() {
     }
     assert!(!door.is_empty(), "卡片要先进队，再按停止");
     // 输入到尽头：按停止收场，等待方被解开（而不是永远挂着）。
-    cli::eof_stop(&ops, sid);
+    cli::eof_stop(&faces, sid);
     assert_eq!(
         waiter.join().expect("等待线程"),
         SlotWake::Stopped,
         "EOF = 停止（拒绝），不是“没人答”"
     );
-    assert!(!ops.sessions.is_running(sid), "EOF 收场后这条会话不再在跑");
+    assert!(!faces.turn.is_running(sid), "EOF 收场后这条会话不再在跑");
 }
 /// 行编辑：插入、左移、再插入与退格都按光标位置生效。
 #[test]

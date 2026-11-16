@@ -1,7 +1,7 @@
 //! 目的：Solomni 组合根与进程入口。
-//! 管：启动序列——参数 / 根目录 / 工具链 / 日志 / 授权对账；唯一允许 new 具体适配器并装配各能力（含 conductor）的地方。
+//! 管：启动序列——参数 / 根目录 / 工具链 / 日志 / 授权对账；唯一允许 new 具体适配器并装配各能力（含 runtime）的地方。
 //! 不管：参数表与分派（entry::args）、各适配器与能力的内部实现、装配后的业务行为（在能力与呈现层）。
-//! 联动：装配结果交给呈现层（presentation::cli / presentation::web），conductor 不知道后两者存在；测试构建外露启动门助手（entry::startup）。
+//! 联动：装配结果交给呈现层（presentation::cli / presentation::web），runtime 不知道后两者存在；测试构建外露启动门助手（entry::startup）。
 
 mod capabilities;
 mod entry;
@@ -20,6 +20,7 @@ pub(crate) use entry::startup::{
     write_acl_setting,
 };
 
+use crate::presentation::faces::Faces;
 use capabilities::registry::api::Registry as _;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -224,7 +225,7 @@ fn main() {
             catalog,
             Arc::new(capabilities::llm::detail::UnambiguousRepair),
         ));
-    // **登记处能力**：四份 yaml 的状态与用例都在它里面（conductor 只按 `Registry` 用它，看不见字段）。
+    // **登记处能力**：四份 yaml 的状态与用例都在它里面（runtime 只按 `Registry` 用它，看不见字段）。
     let mut registry = match capabilities::registry::service::RegistryService::new(
         Arc::new(store),
         Arc::clone(&llm),
@@ -369,7 +370,7 @@ fn main() {
     }
     let prompt_source =
         capabilities::prompt::detail::yaml_prompts::YamlPrompts::new(root.join("prompts"));
-    // **提示词册能力**：册子只在这里装载一次、也只被它持有；conductor 与工具执行
+    // **提示词册能力**：册子只在这里装载一次、也只被它持有；runtime 与工具执行
     // （回执里的那些收尾标记）要的"段"都经它的能力面拿——不再各存一份拷贝。
     let prompt = match capabilities::prompt::service::load(&prompt_source) {
         Ok(p) => p,
@@ -532,7 +533,7 @@ fn main() {
         ),
     );
 
-    // 依赖补齐面先建出来：Conductor（选虚拟根要读清单）与呈现层（setup 路由）各持同一份。
+    // 依赖补齐面先建出来：runtime 的核心（选虚拟根要读清单）与呈现层（setup 路由）各持同一份。
     // vm 用**补齐面专用**的那份：运行期编排显式点名内部 none，不能拿会话 vm 顶替（那边只有用户档）。
     let provision: Arc<dyn capabilities::provision::api::Provision + Send + Sync> =
         Arc::new(entry::assembly::provision_with_guest_vm(&root));
@@ -608,7 +609,7 @@ fn main() {
     };
     // 启动时要按有效启停拉起常驻服务：留一份手柄（进程级租约，不属于任何会话）。
     let residents_boot = Arc::clone(&residents);
-    let mut conductor = capabilities::conductor::service::Conductor::new(
+    let mut core = capabilities::runtime::service::Core::new(
         root.clone(),
         Box::new(registry),
         Arc::new(capabilities::session::service::SessionService::new(
@@ -637,20 +638,20 @@ fn main() {
             eprintln!("用法：solomni --probe-tools <模型 id>");
             std::process::exit(2);
         };
-        match conductor.registry_mut().probe_model_tools(id) {
-            Ok(capabilities::conductor::api::ProbeOutcome::Supported { detail }) => {
+        match core.registry_mut().probe_model_tools(id) {
+            Ok(capabilities::runtime::api::ProbeOutcome::Supported { detail }) => {
                 println!("[探测] 模型 {}：支持原生工具调用（{}）", id, detail);
                 println!("[探测] 已把 models.yaml 的 tools 写成 native");
                 std::process::exit(0);
             }
-            Ok(capabilities::conductor::api::ProbeOutcome::Unsupported { detail }) => {
+            Ok(capabilities::runtime::api::ProbeOutcome::Unsupported { detail }) => {
                 println!("[探测] 模型 {}：**不支持**原生工具调用（{}）", id, detail);
                 println!(
                     "[探测] 已把 models.yaml 的 tools 写成 envelope（手写信封照旧可用，能力没有任何损失）"
                 );
                 std::process::exit(0);
             }
-            Ok(capabilities::conductor::api::ProbeOutcome::Unknown { detail }) => {
+            Ok(capabilities::runtime::api::ProbeOutcome::Unknown { detail }) => {
                 println!("[探测] 模型 {}：无法判定（{}）", id, detail);
                 println!("[探测] 登记处**没有改动**：请自行决定填 native 还是 envelope");
                 std::process::exit(0);
@@ -669,7 +670,7 @@ fn main() {
             eprintln!("用法：solomni --probe-replay <模型 id>");
             std::process::exit(2);
         };
-        match conductor.registry().probe_replay_shape(id) {
+        match core.registry().probe_replay_shape(id) {
             Ok(report) => {
                 println!("[回放形状] 模型 {}（只报事实，不改登记处）：", id);
                 for s in &report.shapes {
@@ -712,8 +713,8 @@ fn main() {
     // 视图盘唯一的分配点：维护旗、探针与启动期早退都已返回；`std::process::exit` 不走 Drop，早分配必然泄漏盘符。
     // 细节与逃生口见 `view_drive_begin` 的目的/约束。
     let view_drive = view_drive_begin(&root, &home);
-    // 核心搬到它自己的执行线程：此后呈现层只持有**入站能力面**——拿不到 Conductor，也拿不到任何核心锁。
-    let handle = match capabilities::conductor::api::ConductorHandle::spawn(conductor) {
+    // 核心搬到它自己的执行线程：此后呈现层只持有**入站能力面**——拿不到核心本体，也拿不到任何核心锁。
+    let handle = match capabilities::runtime::api::Handle::spawn(core) {
         Ok(h) => h,
         Err(e) => {
             eprintln!("[装配失败] {}", e);
@@ -723,13 +724,13 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let mut ops = capabilities::conductor::api::Ops::from_handle(&handle);
+    let mut faces = Faces::from_handle(&handle);
     // 依赖补齐面：组合根注入（能力面默认未接入，这里换成真实现）。
-    ops.provision = Arc::clone(&provision);
-    ops.storage = Arc::clone(&storage);
+    faces.provision = Arc::clone(&provision);
+    faces.storage = Arc::clone(&storage);
     storage_service.start_auto();
     // 基础工具链事实：Web 端横幅与 CLI 启动报告读同一份。
-    ops.toolchains = capabilities::system::api::toolchain_json(&base);
+    faces.toolchains = capabilities::system::api::toolchain_json(&base);
 
     // 启动拉起：把所有**已启用**的常驻服务拉起来（进程级租约，不属于任何会话）。
     for line in residents_boot.start_enabled() {
@@ -740,7 +741,7 @@ fn main() {
     handle.allow_tool_cards();
     if web {
         entry::web::serve_web(
-            ops,
+            faces,
             flags.port.unwrap_or(presentation::web::DEFAULT_PORT),
             &fence_report,
             &home,
@@ -750,7 +751,7 @@ fn main() {
         // 在 Web 里按 Ctrl+C = **回到 CLI**（web::serve 收到中断就正常返回）；在 CLI 提示符下再按 = 退出。
         loop {
             match presentation::cli::run(
-                ops.clone(),
+                faces.clone(),
                 presentation::web::DEFAULT_PORT,
                 flags.plain,
                 !flags.no_anim,
@@ -758,7 +759,7 @@ fn main() {
             ) {
                 presentation::cli::CliExit::Exit => break,
                 presentation::cli::CliExit::Web(port) => {
-                    entry::web::serve_web(ops.clone(), port, &fence_report, &home);
+                    entry::web::serve_web(faces.clone(), port, &fence_report, &home);
                 }
             }
         }

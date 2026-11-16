@@ -9,8 +9,8 @@ use crate::kernel::api::FenceSpec;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// 目的：守门进程的入参：conductor 的围栏策略 + **外层是否已把本机授权做完** + 产品私有区（台账落点）。
-///   授权是改本机目录 ACL 的动作（只有 Windows 的容器围栏需要），所以它不进 conductor 的 `FenceSpec`，
+/// 目的：守门进程的入参：runtime 的围栏策略 + **外层是否已把本机授权做完** + 产品私有区（台账落点）。
+///   授权是改本机目录 ACL 的动作（只有 Windows 的容器围栏需要），所以它不进 runtime 的 `FenceSpec`，
 ///   由适配层随这次执行一起交给守门进程。JSON 是**扁平**的：FenceSpec 的字段同层再加 `prepared` 与 `home`。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FenceJob {

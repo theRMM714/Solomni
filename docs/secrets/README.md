@@ -20,7 +20,7 @@
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`modules`（取模块清单事实）
-- 谁在用我：`conductor`（`Ops` 字段）、`residents`（起服务时解析注入项）；都由组合根注入。
+- 谁在用我：`runtime`（`Faces` 的 `secrets` 字段）、`residents`（起服务时解析注入项）；都由组合根注入。
 
 ## 改动本单元时必须同步
 
@@ -28,7 +28,7 @@
 - 模块的 `secrets:` 声明契约见 [MODULE_SPEC.md](../../MODULE_SPEC.md)。
 - 消费点：
   - `declared`：CLI 的 `secret` 命令（只列标识与配置了没有）。
-  - `resolve`：起进程的三条路径——agent 的模块工具进程（`conductor` 装配工具面时按模块解析一次）、常驻服务（`residents` 起服务时）、人直接跑的模块工具（`conductor` 的动作执行体）；只经环境变量注入，不进命令行。
+  - `resolve`：起进程的三条路径——agent 的模块工具进程（`runtime` 装配工具面时按模块解析一次）、常驻服务（`residents` 起服务时）、人直接跑的模块工具（`runtime` 的动作执行体）；只经环境变量注入，不进命令行。
   - `redact`：常驻服务的回执出口。
   - `set` / `clear`：动作面 `set_secret` / `clear_secret`（只给 user，值不回显）。
 

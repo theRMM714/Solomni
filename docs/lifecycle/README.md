@@ -12,7 +12,7 @@
 - 管：**删除的报账与收尾**（`delete_bookkeeping` / `SessionDelete::run`）：撤权的先后、常驻服务回收、移出内存与待删目录的收集；收尾段先停 guest、再删目录、最后后台撤围栏授权。
 - 管：**回档标记的续号**（`next_mark_id`）与**按 agent 收窗**（`keep_by_agent`）：留档 / 删除时各会话保留到哪一行。
 - 不管：行与事件的算术、留档标记的解析（`session` 的 `domain::rewind`）与落盘机制（`session` 的 `History` 端口）。
-- 不管：命令队列、生成驱动与事件台——谁在什么时候回档 / 删除、结果推给谁，由 `conductor` 决定。
+- 不管：命令队列、生成驱动与事件台——谁在什么时候回档 / 删除、结果推给谁，由 `runtime` 决定。
 - 不管：沙箱与版本化机制（`workspace`）、虚拟机的起停实现（`vm` 的 `GuestStop`）；本单元只按用例顺序调用它们。
 
 ## 入站契约与状态归属
@@ -24,8 +24,8 @@
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`registry`、`residents`、`session`、`tools`、`turn`、`vm`、`work`、`workspace`；`kernel` 的 `Log` / `HostProbe`。
-- 谁在用我：`conductor`（`RewindTarget` / `RewindOutcome` 进 `SessionOps` 签名，回档与删除的时机由它给）。
-- **不引用 `conductor`**：依赖只向下（`layers.yaml` 的 `lifecycle: 9`、`conductor: 10`）。
+- 谁在用我：`runtime`（`RewindTarget` / `RewindOutcome` 经 `runtime::api` 重导出（`RuntimeOps::rewind` 取前者），回档与删除的时机由它给）。
+- **不引用 `runtime`**：依赖只向下（`layers.yaml` 的 `lifecycle: 9`、`runtime: 10`）。
 
 ## 一、回档三模式的顺序
 
@@ -41,8 +41,8 @@
 
 ## 改动本单元时必须同步
 
-- `src/capabilities/lifecycle/api.rs` 的 `RewindTarget` / `RewindOutcome` → `conductor` 的 `api.rs`（`SessionOps::rewind`、`rewind_with_reset`）与 `src/tests/api/session.rs` 一起改。
-- `src/capabilities/lifecycle/service/rewind.rs` → 回档的行 id、标记顺序、拒绝文案与提示文案是行为契约：改一处必须同改 `src/tests/session/rewind.rs`、`src/tests/conductor.rs` 的断言。
+- `src/capabilities/lifecycle/api.rs` 的 `RewindTarget` / `RewindOutcome` → `runtime` 的 `api.rs`（`RuntimeOps::rewind`、`rewind_with_reset`）与 `src/tests/api/session.rs` 一起改。
+- `src/capabilities/lifecycle/service/rewind.rs` → 回档的行 id、标记顺序、拒绝文案与提示文案是行为契约：改一处必须同改 `src/tests/session/rewind.rs`、`src/tests/runtime.rs` 的断言。
 - `src/capabilities/lifecycle/service/history.rs` → 删除的顺序、日志 key（`lifecycle::history_delete` / `lifecycle::release_fences`）与拒绝文案是行为契约：同改 `src/tests/session/lifecycle.rs`。
 - `src/capabilities/turn/service/rebuild.rs` 的 `rebuild_session` → 本单元重建的唯一入口：改签名必须同改 `src/capabilities/lifecycle/api.rs` 的 `RebuildDeps` 与两处调用点。
 

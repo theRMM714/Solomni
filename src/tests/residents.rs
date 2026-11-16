@@ -7,6 +7,7 @@ use crate::capabilities::modules::api::{Module, ServiceDecl};
 use crate::capabilities::residents::api::{ResidentOps, ServiceState};
 use crate::capabilities::residents::ports::ServiceAdapter;
 use crate::capabilities::residents::service::ResidentsService;
+use crate::presentation::faces::Faces;
 use crate::tests::doubles::{FakeServiceAdapter, VecSource, module_of, test_modules};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -89,7 +90,7 @@ fn start_enabled_only_launches_services_that_are_on() {
 /// control_resident 的 enable / disable 与 set_module_enabled 都落盘到 modules（启停归它）。
 #[test]
 fn enable_disable_and_module_toggle_persist_to_modules() {
-    use crate::capabilities::conductor::api::{ActionCall, Caller, ConductorHandle, Ops, Output};
+    use crate::capabilities::runtime::api::{ActionCall, Caller, Handle, Output};
 
     let fake = Arc::new(FakeServiceAdapter::new());
     let modules = vec![module_with_service("m1", "fake", true)];
@@ -99,7 +100,7 @@ fn enable_disable_and_module_toggle_persist_to_modules() {
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     ));
     let gateway = crate::tests::doubles::gw(BTreeMap::new(), Vec::new());
-    let handle = ConductorHandle::spawn(crate::tests::doubles::core_with_services(
+    let handle = Handle::spawn(crate::tests::doubles::core_with_services(
         modules,
         gateway,
         Arc::new(crate::tests::builders::SilentRunner),
@@ -107,7 +108,7 @@ fn enable_disable_and_module_toggle_persist_to_modules() {
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     ))
     .expect("起核心线程");
-    let ops: Ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let faces: Faces = crate::presentation::faces::Faces::from_handle(&handle);
     let call = |id: &str, args: serde_json::Value| ActionCall {
         id: id.to_string(),
         args,
@@ -115,38 +116,41 @@ fn enable_disable_and_module_toggle_persist_to_modules() {
         out: Output::Final,
     };
 
-    ops.actions
+    faces
+        .actions
         .act(call(
             "control_resident",
             serde_json::json!({ "module": "m1", "name": "svc", "action": "disable" }),
         ))
         .expect("停用服务");
     assert!(
-        !ops.modules.service_enabled("m1", "svc").expect("读服务"),
+        !faces.modules.service_enabled("m1", "svc").expect("读服务"),
         "disable 要落盘"
     );
-    ops.actions
+    faces
+        .actions
         .act(call(
             "control_resident",
             serde_json::json!({ "module": "m1", "name": "svc", "action": "enable" }),
         ))
         .expect("启用服务");
     assert!(
-        ops.modules.service_enabled("m1", "svc").expect("读服务"),
+        faces.modules.service_enabled("m1", "svc").expect("读服务"),
         "enable 要落盘"
     );
-    ops.actions
+    faces
+        .actions
         .act(call(
             "set_module_enabled",
             serde_json::json!({ "module": "m1", "enabled": false }),
         ))
         .expect("停用模块");
     assert!(
-        !ops.modules.module_enabled("m1").expect("读模块"),
+        !faces.modules.module_enabled("m1").expect("读模块"),
         "模块停用要落盘"
     );
     assert!(
-        !ops.modules.service_enabled("m1", "svc").expect("读服务"),
+        !faces.modules.service_enabled("m1", "svc").expect("读服务"),
         "模块停用 ⇒ 服务有效停用"
     );
 }
@@ -159,9 +163,9 @@ fn residents_start_call_stop_and_reap() {
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].state, ServiceState::Stopped, "启用但未启动");
 
-    let ops = service.start("m1", "svc", "lease-1").expect("启动");
-    assert_eq!(ops.len(), 1);
-    assert_eq!(ops[0].name, "echo");
+    let faces = service.start("m1", "svc", "lease-1").expect("启动");
+    assert_eq!(faces.len(), 1);
+    assert_eq!(faces[0].name, "echo");
     assert_eq!(
         service.services().expect("列服务")[0].state,
         ServiceState::Ready
@@ -310,7 +314,7 @@ fn residents_mark_failed_when_service_process_dies() {
 /// `control_resident` 动作走统一动作面（参数校验 + 授权 + 分发）：start 返回发现的操作，stop 停实例。
 #[test]
 fn control_resident_action_starts_and_stops() {
-    use crate::capabilities::conductor::api::{ActionCall, Caller, ConductorHandle, Ops, Output};
+    use crate::capabilities::runtime::api::{ActionCall, Caller, Handle, Output};
 
     let fake = Arc::new(FakeServiceAdapter::new());
     let modules = vec![module_with_service("m1", "fake", true)];
@@ -321,7 +325,7 @@ fn control_resident_action_starts_and_stops() {
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     ));
     let gateway = crate::tests::doubles::gw(BTreeMap::new(), Vec::new());
-    let handle = ConductorHandle::spawn(crate::tests::doubles::core_with_services(
+    let handle = Handle::spawn(crate::tests::doubles::core_with_services(
         modules,
         gateway,
         Arc::new(crate::tests::builders::SilentRunner),
@@ -329,7 +333,7 @@ fn control_resident_action_starts_and_stops() {
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     ))
     .expect("起核心线程");
-    let ops: Ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let faces: Faces = crate::presentation::faces::Faces::from_handle(&handle);
     let call = |action: &str| ActionCall {
         id: "control_resident".to_string(),
         args: serde_json::json!({ "module": "m1", "name": "svc", "action": action }),
@@ -337,8 +341,8 @@ fn control_resident_action_starts_and_stops() {
         out: Output::Final,
     };
 
-    ops.actions.act(call("start")).expect("start 动作");
-    ops.actions.act(call("stop")).expect("stop 动作");
+    faces.actions.act(call("start")).expect("start 动作");
+    faces.actions.act(call("stop")).expect("stop 动作");
     assert!(
         fake.calls.lock().expect("锁").iter().any(|c| c == "stop"),
         "动作面 stop 要停实例"
@@ -348,9 +352,7 @@ fn control_resident_action_starts_and_stops() {
 /// 已启动服务的操作走 `module.<id>.<service>.<op>` 动作（静态模块工具优先，其次常驻服务操作）。
 #[test]
 fn service_operations_are_module_actions() {
-    use crate::capabilities::conductor::api::{
-        Acted, ActionCall, Caller, ConductorHandle, Ops, Output,
-    };
+    use crate::capabilities::runtime::api::{Acted, ActionCall, Caller, Handle, Output};
 
     let fake = Arc::new(FakeServiceAdapter::new());
     let modules = vec![module_with_service("m1", "fake", true)];
@@ -361,7 +363,7 @@ fn service_operations_are_module_actions() {
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     ));
     let gateway = crate::tests::doubles::gw(BTreeMap::new(), Vec::new());
-    let handle = ConductorHandle::spawn(crate::tests::doubles::core_with_services(
+    let handle = Handle::spawn(crate::tests::doubles::core_with_services(
         modules,
         gateway,
         Arc::new(crate::tests::builders::SilentRunner),
@@ -369,9 +371,10 @@ fn service_operations_are_module_actions() {
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     ))
     .expect("起核心线程");
-    let ops: Ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let faces: Faces = crate::presentation::faces::Faces::from_handle(&handle);
 
-    ops.actions
+    faces
+        .actions
         .act(ActionCall {
             id: "control_resident".to_string(),
             args: serde_json::json!({ "module": "m1", "name": "svc", "action": "start" }),
@@ -379,7 +382,7 @@ fn service_operations_are_module_actions() {
             out: Output::Final,
         })
         .expect("启动服务");
-    let acted = ops
+    let acted = faces
         .actions
         .act(ActionCall {
             id: "module.m1.svc.echo".to_string(),
@@ -396,7 +399,7 @@ fn service_operations_are_module_actions() {
         ),
         other => panic!("应为 Done，实际：{:?}", other),
     }
-    let err = ops
+    let err = faces
         .actions
         .act(ActionCall {
             id: "module.m1.svc.nope".to_string(),
@@ -411,7 +414,7 @@ fn service_operations_are_module_actions() {
 /// 动作目录：就绪服务的操作进目录（Web/CLI 的动作面板共用）；未启动不出现。
 #[test]
 fn action_catalog_lists_ready_service_operations() {
-    use crate::capabilities::conductor::api::{ActionCall, Caller, ConductorHandle, Ops, Output};
+    use crate::capabilities::runtime::api::{ActionCall, Caller, Handle, Output};
 
     let fake = Arc::new(FakeServiceAdapter::new());
     let modules = vec![module_with_service("m1", "fake", true)];
@@ -422,7 +425,7 @@ fn action_catalog_lists_ready_service_operations() {
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     ));
     let gateway = crate::tests::doubles::gw(BTreeMap::new(), Vec::new());
-    let handle = ConductorHandle::spawn(crate::tests::doubles::core_with_services(
+    let handle = Handle::spawn(crate::tests::doubles::core_with_services(
         modules,
         gateway,
         Arc::new(crate::tests::builders::SilentRunner),
@@ -430,9 +433,9 @@ fn action_catalog_lists_ready_service_operations() {
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     ))
     .expect("起核心线程");
-    let ops: Ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let faces: Faces = crate::presentation::faces::Faces::from_handle(&handle);
 
-    let before = ops.actions.catalog(&Caller::User, None).expect("目录");
+    let before = faces.actions.catalog(&Caller::User, None).expect("目录");
     assert!(
         !before.iter().any(|a| a.id == "module.m1.svc.echo"),
         "未启动的服务操作不该出现在目录里"
@@ -442,7 +445,8 @@ fn action_catalog_lists_ready_service_operations() {
         "生命周期动作应当在目录里"
     );
 
-    ops.actions
+    faces
+        .actions
         .act(ActionCall {
             id: "control_resident".to_string(),
             args: serde_json::json!({ "module": "m1", "name": "svc", "action": "start" }),
@@ -450,7 +454,7 @@ fn action_catalog_lists_ready_service_operations() {
             out: Output::Final,
         })
         .expect("启动服务");
-    let after = ops.actions.catalog(&Caller::User, None).expect("目录");
+    let after = faces.actions.catalog(&Caller::User, None).expect("目录");
     assert!(
         after.iter().any(|a| a.id == "module.m1.svc.echo"),
         "就绪服务的操作要进目录"

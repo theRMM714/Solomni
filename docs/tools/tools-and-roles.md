@@ -103,14 +103,14 @@ roles:
 
 ## 四、动作与分发（一张表，两条执行路径）
 
-- **动作表是参数契约与授权的唯一真相**：每条动作声明参数契约与 `callers`，校验按声明做、授权按 `callers` 判——这两步只有一套规则，不随调用方变。**执行**有两条实现，各在自己的能力里：呈现侧（人）走 `conductor` 的 `ActionOps::act`（`src/capabilities/conductor/api/action.rs`，校验 → 授权 → 执行 → 审计四步在一处），模型代理侧走 `ProxyTools::call`（`src/capabilities/proxy/service/proxy.rs`，同样是查表 → 校验 → 授权 → 交宿主，另有幂等账）。两条路径共用同一张表与同一份授权规则，但**不共用同一段执行代码**——把它们写成一处需要呈现层与模型回环互相依赖，会成环。
+- **动作表是参数契约与授权的唯一真相**：每条动作声明参数契约与 `callers`，校验按声明做、授权按 `callers` 判——这两步只有一套规则，不随调用方变。**执行**有两条实现，各在自己的能力里：呈现侧（人）走 `runtime` 的 `ActionOps::act`（`src/capabilities/runtime/service/action.rs`，校验 → 授权 → 执行 → 审计四步在一处），模型代理侧走 `ProxyTools::call`（`src/capabilities/proxy/service/proxy.rs`，同样是查表 → 校验 → 授权 → 交宿主，另有幂等账）。两条路径共用同一张表与同一份授权规则，但**不共用同一段执行代码**——把它们写成一处需要呈现层与模型回环互相依赖，会成环。
 
 - **两个适配器**：模型侧（`ToolHandler`，按名字认领）与呈现侧（`POST /api/actions/{id}`、`GET /api/actions` 动作目录）都只负责造一次 `ActionCall`（动作 id + 参数 + 调用者身份）并各按自己的媒介呈现结果——模型侧拿文本回执，呈现侧拿结构化结果。**同一份声明，两种呈现。**
 - **读取与视图不进动作表**：会话列表 / 配置 / 文件清单 / 历史是读接口，事实仍只有**事件台**一条来路。
 - **人经呈现层调用**（`caller = user`）与**模型经工具调用**（`caller = 角色 id`）用同一份参数声明与同一套授权判据；审计各自入账（呈现侧进运行日志，模型侧进可回放的转录工具行）。适配器不各自校验、也不各自判权。
 - **登记处动作只给 user**：供应商 / 密钥 / 模型 / agent / 设置的写面（`upsert_provider` / `remove_provider` / `discover_models` / `upsert_model` / `remove_model` / `set_core_model` / `probe_model_tools` / `probe_replay_shape` / `upsert_agent` / `remove_agent` / `set_settings`）的 `callers` 只有 `user`——产品级资源默认不开放给任何角色；`api_key` 只进登记处，不进动作目录、不进审计。读（`GET /api/settings`、`/api/state`）仍是独立读接口。
 - **工作区回滚动作也只给 user**：`restore_work_commit`（`session_id` / `commit` / `expect_head`）——非破坏性物化共享区，目标之后的提交仍保留；同一工作子树里有会话在生成时拒绝；成功后由核心落一条可回放的 `notice` 行。
-- 提交历史 / 详情 / 文件预览是**只读视图**（`SessionOps::work_log` / `work_commit_view` / `work_commit_file`），不进动作表。
+- 提交历史 / 详情 / 文件预览是**只读视图**（`WorkOps::work_log` / `work_commit_view` / `work_commit_file`），不进动作表。
 - **guest 只读诊断动作也只给 user**：`guest_diagnose`（`session_id` 必填非空）——诊断虚拟机档会话的 guest：进程表（pid / ppid / 状态 / CPU / 内存 / 运行时长 / 命令与参数）、CPU 汇总、内存、负载、挂载与内核 / 核数；只读、不写 guest 文件（沿用既有 fenced 执行的临时策略文件，helper 读取后即删）、不改会话状态，不是 agent 工具、不进角色面（`systools/tools.yaml`）。它在 guest 内走 helper 的只读诊断模式（不套 per-agent 围栏），宿主侧只用已持有的 QGA 通道、不新增外部端口（`src/capabilities/vm/service.rs` 的 `guest_diagnose`）。
 - **常驻服务的生命周期动作也只给 user**：`control_resident`（`start` / `stop` / `enable` / `disable`，参数 `module` / `name` / `action` / `lease`）——agent 用已启动的实例，不负责拉起；服务清单是独立只读视图（`ResidentOps::services`，CLI `resident`）。会话删除时按租约回收该会话拉起的实例。
 - **已启动常驻服务的操作也走模块动作**：id = `module.<模块id>.<服务名>.<操作名>`（静态模块工具优先，其次常驻服务操作）。
@@ -155,7 +155,7 @@ roles:
 - **为什么**：这些载荷要驱动下一步（建会话、派发、推进或定向返工）；正文 JSON 既没有 schema 校验、也不进工具台账，写坏就整轮失败。
 - **普通说话仍可以是正文**：不驱动核心的发言（讨论意见、执行席的收尾话）不必包成工具——这就是"说话"与"操作"的分界。
 - **工具与载荷形状**在 `systools/tools.yaml`（`plan` / `node_verdict` / `checklist` / `slate` / `submit_report` …）。
-- **核心代理的工具面**（`core_proxy`，逐项见「角色与工具面」表）同样只从工具参数取载荷；外部动作经 `proxy::api` 的 `ProxyHost`（生产宿主是 `src/capabilities/conductor/service/proxy.rs` 的队列桥，见「边界」）。子会话**不把整份转录推给核心**：门与意外停止由机制送达，正文经 `read_session_messages` 倒查。
+- **核心代理的工具面**（`core_proxy`，逐项见「角色与工具面」表）同样只从工具参数取载荷；外部动作经 `proxy::api` 的 `ProxyHost`（生产宿主是 `src/capabilities/runtime/service/bridge.rs` 的队列桥，见「边界」）。子会话**不把整份转录推给核心**：门与意外停止由机制送达，正文经 `read_session_messages` 倒查。
 - **载荷不合法 → 如实失败并中止这一步**（不猜、不回落正文 JSON）。
 - **核心可以先核实**：模型先请求 `read` / `search` 时，核心执行并把结果回灌，然后再要那一次核心操作调用；它用的是**只读**小环境（根 = 本次工作的共享区，只发声明里 `capability: fs-read` 的工具）。没有这条回路，模型一想核实就会被判"没有调用 X"而整步中断。
 

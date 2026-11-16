@@ -1,7 +1,7 @@
 //! 目的：端到端钉协作五阶段：整理派发、代拟确认、执行与验收、工具模块。
 //! 管：五阶段演示、代拟名单、名册回写重建、讨论逐片外送、工具模块执行、核心操作必须 tool_call、正文 JSON 如实报错。
 //! 不管：单元级讨论/审查细目（discussion.rs、review.rs）。
-//! 联动：src/capabilities/collab/、conductor 创建/继续、tests/doubles。
+//! 联动：src/capabilities/collab/、runtime 创建/继续、tests/doubles。
 
 use super::super::builders::*;
 use super::super::prelude::*;

@@ -100,6 +100,59 @@ impl RegistryService {
     }
 }
 
+/// 目的：保存模型草稿：原生工具模式先实测通道（支持原生工具调用 + 至少一种回放形状被接受）。
+/// 参数：`r` 登记处能力面；`draft` 待保存的模型草稿。
+/// 返回：写入并落盘成功返回 `()`；信封形态是用户显式选择，不实测、直接保存。
+/// 错误：通道不支持原生工具调用 / 无法判定 / 不接受任何回放形状——错误文案点明「模型未保存」。
+/// 约束：所有写入口共用这一处判据（不只是 Web 表单）。
+pub fn save_model(r: &mut dyn Registry, draft: ModelDraft) -> Result<(), String> {
+    if draft.tools == ToolMode::Native {
+        let (provider, api_model) = (draft.provider.clone(), draft.api_model.clone());
+        match r.probe_channel_tools(&provider, &api_model)? {
+            ProbeOutcome::Supported { .. } => {}
+            ProbeOutcome::Unsupported { detail } => {
+                return Err(format!(
+                    "供应商不支持原生工具调用：{}；模型未保存。",
+                    detail
+                ));
+            }
+            ProbeOutcome::Unknown { detail } => {
+                return Err(format!(
+                    "无法判定该通道是否支持原生工具调用：{}；模型未保存，请重试。",
+                    detail
+                ));
+            }
+        }
+        let report = r.probe_channel_replay(&provider, &api_model)?;
+        if !report.shapes.iter().any(|s| s.accepted) {
+            return Err("该通道不接受任何工具调用回放形状；模型未保存。".to_string());
+        }
+    }
+    r.model_upsert(draft)
+}
+
+/// 目的：保存 agent：目录保留名与模块存在性都在这一处校验，再交给登记处写。
+/// 参数：`r` 登记处能力面；`draft` 用户给的定义；`roster` 清单事实（模块校验用）；`reserved` 目录保留名。
+/// 返回：写入并落盘成功返回 `()`。
+/// 错误：名字是保留名、模块不在清单里、模型不存在——都不写入。
+/// 约束：清单归 `modules`、保留名归 `tools`，本函数只取调用方给的事实，不自己去找。
+pub fn save_agent(
+    r: &mut dyn Registry,
+    draft: &crate::capabilities::registry::api::AgentDraft,
+    roster: &Roster,
+    reserved: &[String],
+) -> Result<(), String> {
+    agents::check_reserved(&draft.name, reserved)?;
+    r.agent_upsert(
+        &draft.name,
+        &draft.modules,
+        &draft.model,
+        &draft.note,
+        &draft.chara,
+        roster,
+    )
+}
+
 impl Registry for RegistryService {
     // ---- 视图 ----
     fn provider_views(&self) -> Vec<ProviderView> {
@@ -242,7 +295,7 @@ impl Registry for RegistryService {
         if !self.settings.providers.contains_key(&provider) {
             return Err(format!("无此供应商：{}", provider));
         }
-        // 工具调用形态随 draft 一起进来（原生形态的实测闸门在 conductor 的保存用例里，落盘前已通过）。
+        // 工具调用形态随 draft 一起进来（原生形态的实测闸门在 runtime 的保存用例里，落盘前已通过）。
         // 思考强度：档位必须在全局目录里、默认档必须被支持、片段不得覆盖协议字段。
         providers::validate_thinking_spec(&thinking, &self.settings.app.thinking)
             .map_err(|e| format!("模型 {} 的思考强度非法：{}", id, e))?;

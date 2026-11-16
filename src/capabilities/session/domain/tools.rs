@@ -216,7 +216,7 @@ pub struct ModuleTools {
     /// 目的：声明了 parallel 的工具名（只读、无副作用；同一回复里的多个可并发调用会真的并发跑）。
     pub parallel: BTreeSet<String>,
     /// 目的：已启动常驻服务的操作——工具名（`<服务>.<操作>`）→ 它属于哪个服务的哪个操作；
-    ///   由 conductor 装配工具面时按**已就绪**的服务现填（清单里只有声明，跑起来才有操作）。
+    ///   由 runtime 装配工具面时按**已就绪**的服务现填（清单里只有声明，跑起来才有操作）。
     pub services: BTreeMap<String, ServiceOp>,
 }
 
@@ -249,7 +249,7 @@ pub struct ToolFace {
     /// 目的：虚拟机档要用的 **guest 租约**（空 = 本机档 / 没有 guest）：共享 guest 时它是作用域根工作名
     ///   （proxy 树 = 代理根名）；主机围栏仍用 `fence.lease`（子会话名）。
     pub guest_lease: String,
-    /// 目的：本成员的沙箱：内置文件工具的寻址与越界依据（权限收口在 conductor）。
+    /// 目的：本成员的沙箱：内置文件工具的寻址与越界依据（权限收口在 runtime）。
     pub sandbox: crate::capabilities::workspace::api::Sandbox,
     /// 目的：工具说明块的标题模板（来自提示词段 `tools_this_turn`；变量 `{{tools}}`）。
     /// 约束：只存指令模板；运行时回执由各自产生它们的代码返回。
@@ -259,7 +259,7 @@ pub struct ToolFace {
     pub builtin_tools: crate::capabilities::tools::api::ToolBook,
     /// 目的：模块 id → 它缺的运行包能力（本档位下该模块的工具不执行；空表 = 都能执行）。
     pub unavailable: BTreeMap<String, Vec<String>>,
-    /// 目的：本成员工具进程的围栏（可达范围 + 断网）：策略在 conductor 派生，机制在 ProcessRunner 适配层安装。
+    /// 目的：本成员工具进程的围栏（可达范围 + 断网）：策略在 runtime 派生，机制在 ProcessRunner 适配层安装。
     pub fence: crate::kernel::api::FenceSpec,
     /// 目的：模块 id → 该模块隐私字段的注入项（env 名 → 值）；起进程时只走环境，不进命令行。
     pub module_env: std::collections::BTreeMap<String, Vec<(String, String)>>,
@@ -446,7 +446,7 @@ pub fn tool_table(
                         .filter(|(_, decl)| decl.parallel)
                         .map(|(name, _)| name.clone())
                         .collect(),
-                    // 清单里只有声明；操作是服务跑起来才发现的，由 conductor 装配时填。
+                    // 清单里只有声明；操作是服务跑起来才发现的，由 runtime 装配时填。
                     services: BTreeMap::new(),
                 },
             )

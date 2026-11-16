@@ -1,6 +1,6 @@
 //! 目的：核心自带内置工具（read / write / edit / patch / delete / list / search）的纯规则——参数校验、取缺省值、拼回执、观察账本。
 //! 管：按 `systools/tools.yaml` 的声明校验参数、取缺省值与拼回执；**参数契约不在本文件里**（声明在工具表，本文件只按声明行事）。
-//! 不管：执行策略（名字固定、放行、寻址、根内校验、改动前的"读过"证据）在 conductor；读写机制在 `SysIo` 端口（适配层）。
+//! 不管：执行策略（名字固定、放行、寻址、根内校验、改动前的"读过"证据）在 runtime；读写机制在 `SysIo` 端口（适配层）。
 //! 联动：由 `service/systool.rs` 调用；路径一律真实绝对路径（根目录经提示词册如实告知），模块声明的外部工具与内置工具同一套路径。
 
 use crate::capabilities::prompt::api::{Prompt, Segment};

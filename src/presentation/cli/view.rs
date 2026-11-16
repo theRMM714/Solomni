@@ -4,6 +4,7 @@
 //! 联动：`cli.rs`、`cli/gate.rs`、`docs/presentation/contracts.md`
 
 use super::*;
+use crate::presentation::faces::Faces;
 
 /// 目的：启动页副行：终端转录中心、版本与根路径。
 pub(super) fn startup_tagline() -> String {
@@ -14,15 +15,15 @@ pub(super) fn startup_tagline() -> String {
 }
 
 /// 目的：启动页事实行：agent 数、模块数、档位与核心默认模型各一格。
-pub(super) fn startup_facts(ops: &Ops) -> Vec<String> {
-    let agents = ops.registry.agents().map(|a| a.len()).unwrap_or(0);
-    let modules = ops.modules.roster().map(|r| r.modules.len()).unwrap_or(0);
-    let tier = ops
+pub(super) fn startup_facts(faces: &Faces) -> Vec<String> {
+    let agents = faces.registry.agents().map(|a| a.len()).unwrap_or(0);
+    let modules = faces.modules.roster().map(|r| r.modules.len()).unwrap_or(0);
+    let tier = faces
         .registry
         .settings()
         .map(|s| s.tier.as_str())
         .unwrap_or("host");
-    let model = ops.registry.core_model().ok().flatten();
+    let model = faces.registry.core_model().ok().flatten();
     vec![
         fact("agent", &agents.to_string()),
         fact("模块", &modules.to_string()),
@@ -32,9 +33,9 @@ pub(super) fn startup_facts(ops: &Ops) -> Vec<String> {
 }
 
 /// 目的：状态行：就绪、核心默认模型与档位。
-pub(super) fn startup_status(ops: &Ops) -> String {
-    let model = ops.registry.core_model().ok().flatten();
-    let tier = ops
+pub(super) fn startup_status(faces: &Faces) -> String {
+    let model = faces.registry.core_model().ok().flatten();
+    let tier = faces
         .registry
         .settings()
         .map(|s| s.tier.as_str())
@@ -54,15 +55,15 @@ fn fact(label: &str, value: &str) -> String {
     )
 }
 
-pub(super) fn print_roster(ops: &Ops) {
-    let roster = match ops.modules.roster() {
+pub(super) fn print_roster(faces: &Faces) {
+    let roster = match faces.modules.roster() {
         Ok(r) => r,
         Err(e) => {
             term::say(&format!("[错误] {}", e));
             return;
         }
     };
-    let tier = match ops.registry.settings() {
+    let tier = match faces.registry.settings() {
         Ok(s) => s.tier,
         Err(e) => {
             term::say(&format!("[错误] {}", e));
@@ -70,7 +71,7 @@ pub(super) fn print_roster(ops: &Ops) {
         }
     };
     // 运行能力报告与模块清单同源：按默认执行档位如实报（缺包不是崩溃，工具按档位不可用）。
-    let report = match ops.core.runtime_report(tier) {
+    let report = match faces.work.runtime_report(tier) {
         Ok(r) => r,
         Err(e) => {
             term::say(&format!("[错误] {}", e));
@@ -144,8 +145,8 @@ pub(super) fn print_roster(ops: &Ops) {
     }
 }
 
-pub(super) fn print_menu(ops: &Ops) {
-    let agents = match ops.registry.agents() {
+pub(super) fn print_menu(faces: &Faces) {
+    let agents = match faces.registry.agents() {
         Ok(a) => a,
         Err(e) => {
             term::say(&format!("[错误] {}", e));
@@ -174,7 +175,7 @@ pub(super) fn model_label(model: Option<&str>) -> String {
         .unwrap_or_else(|| "（核心默认）".to_string())
 }
 
-/// 目的：展示文案归呈现层：conductor 只给结构化事实（视图），怎么排版是这里的事。
+/// 目的：展示文案归呈现层：runtime 只给结构化事实（视图），怎么排版是这里的事。
 pub(super) fn provider_line(p: &ProviderView) -> String {
     format!("{}  {}", p.id, p.base_url)
 }

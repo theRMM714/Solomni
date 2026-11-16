@@ -3,43 +3,41 @@
 //! 不管：队列本体的排队与校验（session 的用例）、围栏自己怎么问（tools 的用例）。
 //! 联动：端口形状见 src/kernel/ports.rs；契约见 docs/session/session-model.md 的「请用户裁决」。
 
-use crate::capabilities::conductor::api::{ConductorHandle, Ops, Output, SessionOps};
+use crate::capabilities::runtime::api::{Handle, Output, RuntimeOps};
 use crate::capabilities::session::api::SessionEvent;
 use crate::capabilities::tools::domain::fence::{OPT_FENCE_ABORT, OPT_FENCE_UNFENCED};
 use crate::capabilities::turn::service::ask_user::SessionAsk;
 use crate::kernel::api::{Ask, AskOutcome};
 use crate::kernel::ports::AskUser;
+use crate::presentation::faces::Faces;
 use crate::tests::builders::SilentRunner;
 use crate::tests::doubles::{abs, core_with_runner, gw, module_of};
 use crate::tests::prelude::*;
 use std::sync::{Arc, Mutex};
 
 /// 一个单 agent 会话 + 它的核心手柄与能力面（提问端口要现造，卡要走核心那条道）。
-fn session_case() -> (ConductorHandle, Ops, String) {
+fn session_case() -> (Handle, Faces, String) {
     let mut a = module_of("a");
     a.root = abs(&["mods", "a"]);
-    let handle = ConductorHandle::spawn(core_with_runner(
+    let handle = Handle::spawn(core_with_runner(
         vec![a],
         gw(BTreeMap::new(), vec!["[]".into()]),
         Arc::new(SilentRunner),
     ))
     .expect("起核心线程");
     handle.allow_tool_cards();
-    let ops = Ops::from_handle(&handle);
-    let sid = ops
-        .sessions
+    let faces = Faces::from_handle(&handle);
+    let sid = faces
+        .work
         .create_work(work("w", WorkMode::Single, &["a"]))
         .expect("建会话")
         .0
         .sid;
-    (handle, ops, sid)
+    (handle, faces, sid)
 }
 
 /// 会话自己的裁决队（与核心各关卡、工具级确认**同一份**）。
-fn door_of(
-    handle: &ConductorHandle,
-    sid: &str,
-) -> Arc<dyn crate::capabilities::session::api::Gates> {
+fn door_of(handle: &Handle, sid: &str) -> Arc<dyn crate::capabilities::session::api::Gates> {
     let s = sid.to_string();
     handle
         .call(move |core| Ok(core.turn.desk_of(&s)))
@@ -47,10 +45,10 @@ fn door_of(
 }
 
 /// 停会话的回调（端口要它；与手柄上的「停止」同一条路）。
-fn stopper(handle: &ConductorHandle) -> Box<dyn Fn(&str) + Send + Sync> {
+fn stopper(handle: &Handle) -> Box<dyn Fn(&str) + Send + Sync> {
     let h = handle.clone();
     Box::new(move |sid: &str| {
-        let _ = SessionOps::stop(&h, sid);
+        let _ = RuntimeOps::stop(&h, sid);
     })
 }
 
@@ -77,7 +75,7 @@ fn request() -> Ask {
 /// 端口把选中的**选项 id** 还给发起方（落盘由外送出口一起做，生产那条路由 permission 的用例钉）。
 #[test]
 fn ask_pushes_a_card_and_blocks_until_the_answer_command_answers_it() {
-    let (handle, ops, sid) = session_case();
+    let (handle, faces, sid) = session_case();
     let door = door_of(&handle, &sid);
     let seen: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
     let ask = Arc::new(SessionAsk::new(
@@ -102,7 +100,7 @@ fn ask_pushes_a_card_and_blocks_until_the_answer_command_answers_it() {
     };
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     let queued = loop {
-        if let Ok(Some(q)) = ops.sessions.open_queue(&sid) {
+        if let Ok(Some(q)) = faces.turn.open_queue(&sid) {
             break q;
         }
         assert!(std::time::Instant::now() < deadline, "卡要进这条会话的队");
@@ -115,7 +113,8 @@ fn ask_pushes_a_card_and_blocks_until_the_answer_command_answers_it() {
         "详情要写清缺什么前提：{}",
         queued.card.message.detail
     );
-    ops.sessions
+    faces
+        .turn
         .answer_card(&sid, &queued.card.id, OPT_FENCE_UNFENCED, "")
         .expect("按选项作答");
     while outcome.lock().expect("锁").is_none() {
@@ -141,7 +140,7 @@ fn ask_pushes_a_card_and_blocks_until_the_answer_command_answers_it() {
 /// （契约禁止置灰：没有一条真能执行的选项就不该推一张卡出来）。
 #[test]
 fn no_options_means_halt_instead_of_asking() {
-    let (handle, ops, sid) = session_case();
+    let (handle, faces, sid) = session_case();
     let door = door_of(&handle, &sid);
     let seen: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
     let ask = SessionAsk::new(
@@ -171,7 +170,7 @@ fn no_options_means_halt_instead_of_asking() {
     drop(pushed);
     // 会话被停：之后的派发被拒（用户「继续」才解冻——那之前不再往下走）。
     assert!(
-        ops.sessions.say(&sid, "再来", Output::Final).is_err(),
+        faces.turn.say(&sid, "再来", Output::Final).is_err(),
         "停下的会话不再派发"
     );
     // 停过一次之后不再推卡：会话已停，再推一张没人能做主的卡只会让人困惑。

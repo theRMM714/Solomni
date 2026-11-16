@@ -1,42 +1,45 @@
 //! 目的：动作目录与分发——模块工具、登记处动作、模型保存的人机边界。
 //! 管：调用者校验、目录可见性、两种结果形状、原生与信封模型保存。
 //! 不管：会话动作的字段（`session.rs`）、guest 诊断（`guest.rs`）。
-//! 联动：`src/capabilities/conductor/api/action.rs` 与 `src/capabilities/registry/api`。
+//! 联动：`src/capabilities/runtime/api/action.rs` 与 `src/capabilities/registry/api`。
 
 use super::super::doubles::InMemoryHistory;
 use super::super::doubles::{decl, model_draft, module_of, module_with_runtimes};
 use super::super::{ops_with, single_work};
 use super::support::spawn;
-use crate::capabilities::conductor::api::{Acted, ActionCall, Caller, SessionEvent};
+use crate::capabilities::runtime::api::{Acted, ActionCall, Caller, SessionEvent};
 use crate::capabilities::work::api::{AgentInstance, WorkMode};
+use crate::presentation::faces::Faces;
 
-use crate::capabilities::conductor::api::{ConductorHandle, Ops, Output};
+use crate::capabilities::runtime::api::{Handle, Output};
 use std::sync::Arc;
 
 #[test]
 fn native_model_save_is_gated_by_measurement_but_envelope_is_not() {
     let handle = spawn(vec![module_of("a")], Vec::new());
-    let ops = Ops::from_handle(&handle);
+    let faces = Faces::from_handle(&handle);
     let draft = |id: &str, tools| crate::capabilities::registry::api::ModelDraft {
         tools,
         ..model_draft(id, id, id, "p", "", 0)
     };
     // 信封：不测试，直接落盘。
-    ops.registry
+    faces
+        .registry
         .upsert_model(draft(
             "env-model",
             crate::capabilities::llm::api::ToolMode::Envelope,
         ))
         .expect("信封形态不需要实测");
     assert!(
-        ops.registry
+        faces
+            .registry
             .models()
             .expect("读模型")
             .iter()
             .any(|m| m.id == "env-model")
     );
     // 原生：替身没有真实供应商，实测不能给出明确结论 → 不保存。
-    let err = ops
+    let err = faces
         .registry
         .upsert_model(draft(
             "native-model",
@@ -45,7 +48,8 @@ fn native_model_save_is_gated_by_measurement_but_envelope_is_not() {
         .unwrap_err();
     assert!(!err.is_empty(), "实测没结论要如实报错");
     assert!(
-        !ops.registry
+        !faces
+            .registry
             .models()
             .expect("读模型")
             .iter()
@@ -61,8 +65,8 @@ fn native_model_save_is_gated_by_measurement_but_envelope_is_not() {
         Arc::new(InMemoryHistory::new()),
         Arc::new(crate::tests::doubles::InMemorySysIo::new()),
     );
-    let ok_handle = ConductorHandle::spawn(core).expect("起核心");
-    let ok_ops = Ops::from_handle(&ok_handle);
+    let ok_handle = Handle::spawn(core).expect("起核心");
+    let ok_ops = Faces::from_handle(&ok_handle);
     ok_ops
         .registry
         .upsert_model(draft(
@@ -91,9 +95,9 @@ fn suggest_models_pushes_on_a_system_session_and_leaves_no_trace() {
             "{\"type\":\"tool\",\"name\":\"slate\",\"args\":{\"picks\":[{\"name\":\"甲\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"}]}}",
         ],
     );
-    let ops = Ops::from_handle(&handle);
-    let agents = ops
-        .core
+    let faces = Faces::from_handle(&handle);
+    let agents = faces
+        .work
         .suggest_models("做个东西", WorkMode::Collab)
         .expect("核心推荐");
     assert_eq!(agents.len(), 1, "回包只给名单（渲染那一步的契约不变）");
@@ -107,11 +111,12 @@ fn suggest_models_pushes_on_a_system_session_and_leaves_no_trace() {
     );
     let _: Vec<&SessionEvent> = batches.iter().flat_map(|l| l.events.iter()).collect();
     assert!(
-        ops.history.list().expect("历史").is_empty(),
+        faces.history.list().expect("历史").is_empty(),
         "系统会话只推不留：推荐没有工作区，不该落盘"
     );
     assert!(
-        !ops.sessions
+        !faces
+            .work
             .session_views(&[])
             .expect("会话视图")
             .iter()
@@ -122,20 +127,24 @@ fn suggest_models_pushes_on_a_system_session_and_leaves_no_trace() {
 
 #[test]
 fn pick_agents_names_the_unknown_and_lists_the_rest() {
-    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
-    ops.registry
+    let (_h, faces) = ops_with(vec![module_of("a")], Vec::new());
+    faces
+        .registry
         .upsert_agent("甲", &["a".to_string()], "", "", "")
         .expect("建 agent");
-    let picked = ops.registry.pick_agents(&["甲".to_string()]).expect("点名");
+    let picked = faces
+        .registry
+        .pick_agents(&["甲".to_string()])
+        .expect("点名");
     assert_eq!(picked.len(), 1);
     assert_eq!(picked[0].name, "甲");
-    let err = ops.registry.pick_agents(&["乙".to_string()]).unwrap_err();
+    let err = faces.registry.pick_agents(&["乙".to_string()]).unwrap_err();
     assert!(
         err.contains("无此 agent：乙") && err.contains("甲"),
         "{err}"
     );
-    assert!(ops.registry.pick_agents(&[]).is_err(), "没点名 = 报错");
-    let views = ops.registry.agents().expect("读登记处");
+    assert!(faces.registry.pick_agents(&[]).is_err(), "没点名 = 报错");
+    let views = faces.registry.agents().expect("读登记处");
     assert_eq!(
         views.iter().map(AgentInstance::from_view).count(),
         1,
@@ -145,15 +154,15 @@ fn pick_agents_names_the_unknown_and_lists_the_rest() {
 
 #[test]
 fn act_dispatches_to_the_two_result_shapes() {
-    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
-    let sid = ops
-        .sessions
+    let (_h, faces) = ops_with(vec![module_of("a")], Vec::new());
+    let sid = faces
+        .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
         .0
         .sid;
 
-    match ops
+    match faces
         .actions
         .act(ActionCall {
             id: "send_message".to_string(),
@@ -166,7 +175,7 @@ fn act_dispatches_to_the_two_result_shapes() {
         Acted::Advanced(adv) => assert!(adv.head > 0, "生成类只回事件台头部序号"),
         _ => panic!("说一句不该给重放或结构化结果"),
     }
-    match ops
+    match faces
         .actions
         .act(ActionCall {
             id: "rewind".to_string(),
@@ -182,7 +191,8 @@ fn act_dispatches_to_the_two_result_shapes() {
         _ => panic!("回档不该给事件批或结构化结果"),
     }
     assert!(
-        ops.actions
+        faces
+            .actions
             .act(ActionCall {
                 id: "send_message".to_string(),
                 args: serde_json::json!({ "session_id": "没这个会话", "text": "x" }),
@@ -202,16 +212,19 @@ fn module_tools_are_actions_users_can_run_directly() {
         .tools
         .insert("read_txt".to_string(), decl("python tools/read_txt.py"));
     let runner = Arc::new(RecordingRunner::new("工具输出", true));
-    let handle = ConductorHandle::spawn(super::super::doubles::core_with_runner(
+    let handle = Handle::spawn(super::super::doubles::core_with_runner(
         vec![m],
         super::super::doubles::gw(std::collections::BTreeMap::new(), Vec::new()),
         runner,
     ))
     .expect("起核心线程");
-    let ops = Ops::from_handle(&handle);
+    let faces = Faces::from_handle(&handle);
 
     // 目录里列出模块工具动作（人可直接跑）；参数契约照抄 module.yaml，外加一个可选 workspace。
-    let catalog = ops.actions.catalog(&Caller::User, None).expect("动作目录");
+    let catalog = faces
+        .actions
+        .catalog(&Caller::User, None)
+        .expect("动作目录");
     let entry = catalog
         .iter()
         .find(|a| a.id == "module.toolbox.read_txt")
@@ -223,7 +236,7 @@ fn module_tools_are_actions_users_can_run_directly() {
     );
 
     // 直接跑一次（无会话）：给一份工作目录。
-    match ops
+    match faces
         .actions
         .act(ActionCall {
             id: "module.toolbox.read_txt".to_string(),
@@ -238,7 +251,7 @@ fn module_tools_are_actions_users_can_run_directly() {
     }
 
     // 角色不能从这个入口调：会话里的模块工具走成员循环（那条路由角色面授权）。
-    let err = ops
+    let err = faces
         .actions
         .act(ActionCall {
             id: "module.toolbox.read_txt".to_string(),
@@ -255,7 +268,8 @@ fn module_tools_are_actions_users_can_run_directly() {
 
     // 清单里没有的模块工具如实拒绝。
     assert!(
-        ops.actions
+        faces
+            .actions
             .act(ActionCall {
                 id: "module.nope.x".to_string(),
                 args: serde_json::json!({}),
@@ -268,9 +282,10 @@ fn module_tools_are_actions_users_can_run_directly() {
 
 #[test]
 fn registry_actions_are_user_only_and_go_through_the_dispatcher() {
-    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
+    let (_h, faces) = ops_with(vec![module_of("a")], Vec::new());
     // 人可以用：登记一个 agent，再从登记处读回来（走的是动作分发，不是传输层直调）。
-    ops.actions
+    faces
+        .actions
         .act(ActionCall {
             id: "upsert_agent".to_string(),
             args: serde_json::json!({ "name": "甲", "modules": ["a"], "chara": "登记处人设" }),
@@ -278,7 +293,7 @@ fn registry_actions_are_user_only_and_go_through_the_dispatcher() {
             out: Output::Final,
         })
         .expect("登记 agent");
-    let agents = ops.registry.agents().expect("读 agent");
+    let agents = faces.registry.agents().expect("读 agent");
     assert!(agents.iter().any(|a| a.name == "甲"), "{:?}", agents);
     assert_eq!(
         agents.iter().find(|a| a.name == "甲").unwrap().chara,
@@ -292,7 +307,7 @@ fn registry_actions_are_user_only_and_go_through_the_dispatcher() {
         work: "w".to_string(),
         agent: "a".to_string(),
     };
-    let err = ops
+    let err = faces
         .actions
         .act(ActionCall {
             id: "upsert_provider".to_string(),
@@ -303,7 +318,7 @@ fn registry_actions_are_user_only_and_go_through_the_dispatcher() {
         .unwrap_err();
     assert!(err.contains("不接受这个调用者"), "{}", err);
     // 目录里对角色也不列出它们。
-    let cat = ops.actions.catalog(&role, None).expect("动作目录");
+    let cat = faces.actions.catalog(&role, None).expect("动作目录");
     assert!(
         !cat.iter()
             .any(|a| a.id.starts_with("upsert_") || a.id == "set_settings")
@@ -318,15 +333,15 @@ fn module_action_on_host_tier_runs_even_without_runtime_packages() {
         .insert("scan".to_string(), decl("python tools/scan.py"));
     let runner = Arc::new(crate::tests::builders::RecordingRunner::new("跑了", true));
     let gateway = crate::tests::doubles::gw(std::collections::BTreeMap::new(), Vec::new());
-    let handle = ConductorHandle::spawn(crate::tests::doubles::core_with_runner(
+    let handle = Handle::spawn(crate::tests::doubles::core_with_runner(
         vec![m],
         gateway,
         Arc::clone(&runner),
     ))
     .expect("起核心线程");
-    let ops = Ops::from_handle(&handle);
+    let faces = Faces::from_handle(&handle);
 
-    let cat = ops.actions.catalog(&Caller::User, None).expect("目录");
+    let cat = faces.actions.catalog(&Caller::User, None).expect("目录");
     let e = cat
         .iter()
         .find(|a| a.id == "module.harvest.scan")
@@ -337,7 +352,8 @@ fn module_action_on_host_tier_runs_even_without_runtime_packages() {
         e.reason
     );
 
-    ops.actions
+    faces
+        .actions
         .act(ActionCall {
             id: "module.harvest.scan".to_string(),
             args: serde_json::json!({}),
@@ -354,7 +370,7 @@ fn module_action_on_host_tier_runs_even_without_runtime_packages() {
 
 #[test]
 fn action_table_rejects_unknown_id_value_and_caller() {
-    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
+    let (_h, faces) = ops_with(vec![module_of("a")], Vec::new());
     let call = |id: &str, args: serde_json::Value, caller: Caller| ActionCall {
         id: id.to_string(),
         args,
@@ -362,13 +378,13 @@ fn action_table_rejects_unknown_id_value_and_caller() {
         out: Output::Final,
     };
     // 未知动作 id：声明表里没有 ⇒ 不落到任何实现。
-    let err = ops
+    let err = faces
         .actions
         .act(call("乱来", serde_json::json!({}), Caller::User))
         .unwrap_err();
     assert!(err.contains("未知动作"), "{}", err);
     // 未知形态：参数声明过关，语义层如实拒绝。
-    let err = ops
+    let err = faces
         .actions
         .act(call(
             "create_session",
@@ -378,7 +394,7 @@ fn action_table_rejects_unknown_id_value_and_caller() {
         .unwrap_err();
     assert!(err.contains("mode"), "{}", err);
     // 授权：动作表说 user 不能调只给核心代理的动作。
-    let err = ops
+    let err = faces
         .actions
         .act(call(
             "catalog_agents",

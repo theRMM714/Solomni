@@ -1,7 +1,7 @@
 //! 目的：llm 能力的用例与端口持有者。
 //! 管：实现 api::Llm（造通道 / 探测 / 发现 / 修信封）；持有三个出站端口。
 //! 不管：适配器装配（在组合根）；协议类型定义（在 api）；域内纯逻辑（在 domain）。
-//! 联动：组合根 new 时注入适配器；其它能力与 conductor 经 api::Llm 消费（R12）。
+//! 联动：组合根 new 时注入适配器；其它能力与 runtime 经 api::Llm 消费（R12）。
 
 use crate::capabilities::llm::api::{
     BoxedChat, Channel, Llm, Malformed, ProbeOutcome, RepairOutcome, ReplayReport,
