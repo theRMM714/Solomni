@@ -11,7 +11,8 @@
 | --- | --- |
 | `src/capabilities/collab/api.rs` | 入站能力面：`CollabSession`（讨论与执行引擎、回合与验收词汇、状态派生的对外名字） |
 | `src/capabilities/collab/service/collab.rs` | 协作会话状态机：名单 / 讨论 / 链 / 裁决队句柄与各关卡登记、处置、快照 |
-| `src/capabilities/collab/service/pump.rs` | 讨论泵：把讨论推进一步、装配成员、行外送与增量（泵不自己调模型） |
+| `src/capabilities/collab/service/pump.rs` | 讨论泵：把讨论推进一步、装配成员（泵不自己调模型） |
+| `src/capabilities/collab/service/lines.rs` | 行外送与待裁决关的派生：行 → 带稳定 id 的事件、状态 → 整队待答的关、增量与审查事件 |
 | `src/capabilities/collab/service/turn_io.rs` | 回合收发：成员回复喂回状态机、取出待问一步、回答落到业务 |
 | `src/capabilities/collab/service/slate.rs` | 代拟名单与确认、开工、断点续跑与终结判定 |
 | `src/capabilities/collab/service/discussion.rs` | 讨论状态机：建组、轮转发言、表态判定与协议反应（`AfterTurn`）；轮循环与工具循环已迁 session（见 [`docs/session/unit-map.md`](../session/unit-map.md)） |

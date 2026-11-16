@@ -3,7 +3,7 @@
 //! 不管：模型调用（在 llm / session 端口后）；工具机制本身（在 tools 的端口后面）。
 //! 联动：执行经 tools 的 ToolExec 端口；回填顺序与转录行形状见 docs/session/session-model.md。
 
-use super::round::ToolDecls;
+use super::decls::ToolDecls;
 use crate::capabilities::llm::api::ToolInvoke;
 use crate::capabilities::permission::api::{CallScope, Decision, Effect, Reach, ReachSet};
 use crate::capabilities::session::api::{MemberTools, SessionEvent, ToolFace};

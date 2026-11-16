@@ -30,16 +30,34 @@ function scopeOf(f) {
   return null;
 }
 
-/** 同能力 service 下的方法族：它引用的兄弟模块（只看生产代码边）。 */
-function siblingEdges(f, text) {
-  const self = f.split("/").pop().replace(/\.rs$/, "");
-  const names = new Set();
-  for (const m of text.matchAll(/\bsuper::([a-z_][a-z0-9_]*)/g)) names.add(m[1]);
-  for (const m of text.matchAll(/crate::capabilities::[a-z_][a-z0-9_]*::service::([a-z_][a-z0-9_]*)/g)) names.add(m[1]);
-  names.delete(self);
-  names.delete("self");
-  names.delete("super");
-  return names;
+/** 一个 service 文件的模块路径：`capabilities/<cap>/service/<rest>`（rest 不含 .rs，可含子目录）。 */
+function modulePathOf(f) {
+  return "capabilities/" + f.split("/")[2] + "/" + f.split("/").slice(3).join("/").replace(/\.rs$/, "");
+}
+
+/** 同能力 service 下的方法族：它引用的兄弟模块（只看生产代码边，只留真实存在的模块）。 */
+function siblingEdges(mod, text, nodes) {
+  const cap = mod.split("/")[1];
+  const dir = mod.slice(0, mod.lastIndexOf("/"));
+  const out = new Set();
+  const pick = (candidate) => {
+    if (candidate !== mod && nodes.has(candidate)) out.add(candidate);
+  };
+  if (/\bsuper::\*/.test(text)) pick(dir);
+  for (const m of text.matchAll(/\bsuper::([a-z_][a-z0-9_]*)/g)) {
+    if (m[1] !== "self" && m[1] !== "super") pick(dir + "/" + m[1]);
+  }
+  const base = "capabilities/" + cap + "/service/";
+  for (const m of text.matchAll(/crate::capabilities::[a-z_][a-z0-9_]*::service::([A-Za-z0-9_:]+)/g)) {
+    const segs = m[1].split("::").filter((s) => s !== "self" && s !== "super");
+    let best = null;
+    for (let i = 1; i <= segs.length; i += 1) {
+      const cand = base + segs.slice(0, i).join("/");
+      if (nodes.has(cand)) best = cand;
+    }
+    if (best) pick(best);
+  }
+  return out;
 }
 
 function tarjanScc(graph) {
@@ -85,7 +103,12 @@ function scan(root) {
   const outsideDetailKernel = new Set();
   const serviceIo = new Set();
   const serviceGraph = {};
-  for (const f of walk(root)) {
+  const files = walk(root);
+  const nodes = new Set();
+  for (const f of files) {
+    if (scopeOf(f) === "service") nodes.add(modulePathOf(f));
+  }
+  for (const f of files) {
     const scope = scopeOf(f);
     if (!scope) continue;
     const raw = fs.readFileSync(path.join(root, f), "utf8");
@@ -106,11 +129,12 @@ function scan(root) {
       }
       const withoutPort = prod.replace(/\b(?:self\s*\.\s*)?probe\s*\.\s*canonicalize\s*\(/g, "");
       if (CANONICALIZE.test(withoutPort)) serviceIo.add(f + " -> Path::canonicalize");
-      const node = "capabilities/" + cap + "/service/" + f.split("/").pop();
-      serviceGraph[node] = siblingEdges(f, prod);
+      const node = modulePathOf(f);
+      serviceGraph[node] = siblingEdges(node, prod, nodes);
     }
   }
-  const cycles = tarjanScc(serviceGraph).map((c) => "capabilities/" + c.join(", "));
+  for (const n of nodes) serviceGraph[n] = serviceGraph[n] || new Set();
+  const cycles = tarjanScc(serviceGraph).map((c) => c.map((n) => "src/" + n + ".rs").join(" ↔ "));
   return { serviceToDetail: [...serviceToDetail].sort(), outsideDetailKernel: [...outsideDetailKernel].sort(), serviceIo: [...serviceIo].sort(), cycles };
 }
 

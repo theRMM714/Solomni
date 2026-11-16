@@ -14,6 +14,7 @@
 | `src/capabilities/session/service.rs` | 用例与端口持有者：历史落盘端口只在这里（R12）；核心操作回路 `core_operation`、增量落盘手柄 `Persister` 与事件收编 `record_events` |
 | `src/capabilities/session/service/engine.rs` | 回合引擎门面：声明 driver / io / round / tools 四个子模块 |
 | `src/capabilities/session/service/engine/driver.rs` | 单回合驱动：在一条 `AgentSession` 上跑发言 / 派发 / 讨论席回合 / 继续 / 压缩（五个 `&mut self` 方法，取消与短暂事件出口按形参传） |
+| `src/capabilities/session/service/engine/decls.rs` | 工具声明面的值类型：`WireTools` / `Decls` / `ToolDecls`（`round` 与 `tools` 共用一份） |
 | `src/capabilities/session/service/engine/io.rs` | 回合 IO 与结论：`TurnIo`（调用参数 / 裁决队 / 提问端口）与 `MemberTurn` / `CompactedTurn` |
 | `src/capabilities/session/service/engine/round.rs` | 轮循环与行构造：请求装配 `assemble`、`converse_with`、`build_round_lines`（唯一构造函数）、轮 / 回复词汇 |
 | `src/capabilities/session/service/engine/tools.rs` | 成员回合的工具循环：声明面 → 放行 → 并发调度 → 执行 → 回填 |

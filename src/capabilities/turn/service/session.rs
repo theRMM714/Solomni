@@ -15,12 +15,35 @@ use crate::capabilities::secrets::api::SecretOps;
 use crate::capabilities::session::api::{CompactChatFactory, Gates, History, ShellLive, ShellSlot};
 use crate::capabilities::tools::api::{ToolExec, Tools};
 use crate::capabilities::turn::api::Session;
-use crate::capabilities::turn::service::assemble::SessionDeps;
 use crate::capabilities::turn::service::state::TurnState;
 use crate::capabilities::vm::api::Vm;
 use crate::capabilities::workspace::api::Workspace;
 use crate::kernel::api::SessionId;
 use crate::kernel::ports::Log;
+
+/// 目的：装配一席要用的能力面（与 `Turn` 持有的那几份同一批）。
+pub struct SessionDeps {
+    /// 目的：llm 用例面：一席的收发句柄按它造。
+    pub llm: Arc<dyn Llm + Send + Sync>,
+    /// 目的：日志面：装配时记一条「单 agent 工作」。
+    pub log: Arc<dyn Log + Send + Sync>,
+    /// 目的：提示词册：工具说明与压缩提示从它取段。
+    pub prompt: Arc<dyn Prompt>,
+    /// 目的：工具总表与角色表：发放名单与内置工具表从它读。
+    pub systools: Arc<dyn Tools>,
+    /// 目的：工具执行面：一席的工具环境要它跑外部 / 内置工具。
+    pub tools: Arc<dyn ToolExec + Send + Sync>,
+    /// 目的：虚拟机用例面：一席的 guest 事实随工具面交给机制层。
+    pub vm: Arc<dyn Vm + Send + Sync>,
+    /// 目的：常驻服务管理面：已就绪服务的操作并入一席的工具面。
+    pub residents: Arc<dyn ResidentOps + Send + Sync>,
+    /// 目的：工作区用例面：一席的 `work_*` 工具执行者按它造。
+    pub workspace: Arc<dyn Workspace + Send + Sync>,
+    /// 目的：隐秘字段管理面：装配期按模块解析注入项。
+    pub secrets: Arc<dyn SecretOps + Send + Sync>,
+    /// 目的：压缩通道工厂：新会话与重建会话共用同一份。
+    pub compact: Arc<dyn CompactChatFactory>,
+}
 
 /// 目的：会话本体：在世表与运行态（`TurnState`）连同装配一席要用的能力面，一处持有。
 /// 约束：只在核心线程上读写；能力面只经 `api` 取。

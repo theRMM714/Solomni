@@ -1,5 +1,5 @@
 //! 目的：一席工具面与单 agent 会话对象的装配——把能力面的事实拼成能跑的会话。
-//! 管：`SessionDeps` / `MemberSpec` / `SingleSpec` 三个参数对象，`member_tools` / `single_session` 两个装配入口，
+//! 管：`MemberSpec` / `SingleSpec` 两个参数对象，`member_tools` / `single_session` 两个装配入口，
 //!   以及 `Turn::build_single`（单 agent 会话的整场装配）。
 //! 不管：落盘（`session` 能力）、生成驱动（`runtime`）、纯派生规则（在 `turn::domain::assemble`）。
 //! 联动：`work` 的建工作两段经 `Turn::build_single` 装配会话；能力面与 shell 槽由 `Turn` 提供。
@@ -9,48 +9,21 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::capabilities::env::api::{MemberFacts, member};
-use crate::capabilities::llm::api::{Channel, Llm, ToolMode};
+use crate::capabilities::llm::api::{Channel, ToolMode};
 use crate::capabilities::modules::api::Module;
 use crate::capabilities::packages::api::PackagePlan;
-use crate::capabilities::prompt::api::{Prompt, Segment};
+use crate::capabilities::prompt::api::Segment;
 use crate::capabilities::registry::api::Registry;
-use crate::capabilities::residents::api::ResidentOps;
-use crate::capabilities::secrets::api::SecretOps;
 use crate::capabilities::session::api::{
-    AgentMeta, AgentSession, CompactChatFactory, MemberTools, SessionEvent, SessionParams,
-    ShellSlot, ToolFace, service_ops_for_modules, tool_table,
+    AgentMeta, AgentSession, MemberTools, SessionEvent, SessionParams, ShellSlot, ToolFace,
+    service_ops_for_modules, tool_table,
 };
-use crate::capabilities::tools::api::{ToolExec, Tools, tool_notes};
+use crate::capabilities::tools::api::tool_notes;
 use crate::capabilities::turn::domain::assemble::{face_tools, service_ops_of, serviced_tools};
-use crate::capabilities::turn::service::session::Turn;
-use crate::capabilities::vm::api::{GuestOs, Vm};
-use crate::capabilities::workspace::api::{Sandbox, Workspace};
+use crate::capabilities::turn::service::session::{SessionDeps, Turn};
+use crate::capabilities::vm::api::GuestOs;
+use crate::capabilities::workspace::api::Sandbox;
 use crate::kernel::api::Tier;
-use crate::kernel::ports::Log;
-
-/// 目的：装配一席要用的能力面（与 `Turn` 持有的那几份同一批）。
-pub struct SessionDeps {
-    /// 目的：llm 用例面：一席的收发句柄按它造。
-    pub llm: Arc<dyn Llm + Send + Sync>,
-    /// 目的：日志面：装配时记一条「单 agent 工作」。
-    pub log: Arc<dyn Log + Send + Sync>,
-    /// 目的：提示词册：工具说明与压缩提示从它取段。
-    pub prompt: Arc<dyn Prompt>,
-    /// 目的：工具总表与角色表：发放名单与内置工具表从它读。
-    pub systools: Arc<dyn Tools>,
-    /// 目的：工具执行面：一席的工具环境要它跑外部 / 内置工具。
-    pub tools: Arc<dyn ToolExec + Send + Sync>,
-    /// 目的：虚拟机用例面：一席的 guest 事实随工具面交给机制层。
-    pub vm: Arc<dyn Vm + Send + Sync>,
-    /// 目的：常驻服务管理面：已就绪服务的操作并入一席的工具面。
-    pub residents: Arc<dyn ResidentOps + Send + Sync>,
-    /// 目的：工作区用例面：一席的 `work_*` 工具执行者按它造。
-    pub workspace: Arc<dyn Workspace + Send + Sync>,
-    /// 目的：隐秘字段管理面：装配期按模块解析注入项。
-    pub secrets: Arc<dyn SecretOps + Send + Sync>,
-    /// 目的：压缩通道工厂：新会话与重建会话共用同一份。
-    pub compact: Arc<dyn CompactChatFactory>,
-}
 
 /// 目的：装配一席工具面所需的全部事实（模块、沙箱、形态、档位、角色、围栏素材与 shell 槽）。
 pub struct MemberSpec<'a> {
