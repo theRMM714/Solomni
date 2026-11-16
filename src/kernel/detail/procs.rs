@@ -255,5 +255,11 @@ pub fn now_ts() -> u64 {
         .unwrap_or(0)
 }
 
+/// 目的：当前时间（unix 秒，有符号）——时间戳要写进转录、参与比较或序列化时用它。
+/// 返回：unix 秒；时钟早于纪元时回 0。
+pub fn unix_seconds() -> i64 {
+    now_ts() as i64
+}
+
 #[cfg(test)]
 mod tests;

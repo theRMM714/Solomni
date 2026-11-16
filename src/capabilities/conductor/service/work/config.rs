@@ -445,7 +445,7 @@ impl Conductor {
     pub(crate) fn record_config(&self, sid: &str, meta: &SessionMeta) {
         let ev = serde_json::json!({
             "type": "config",
-            "ts": now_ts(),
+            "ts": crate::kernel::api::unix_seconds(),
             "mode": meta.mode,
             "tier": meta.exec.tier.as_str(),
             "guest": meta.exec.guest,

@@ -191,11 +191,22 @@ pub(crate) fn test_provision()
     test_provision_with(Vec::new())
 }
 
-/// 目的：同上，但报一份给定的清单（验"设置里没登记时采用项目内已装的那一个"）。
+/// 目的：同上，但报一份给定的清单（不解析产品根：兜底路径原样回清单里的 probe）。
 pub(crate) fn test_provision_with(
     deps: Vec<crate::capabilities::provision::api::DepStatus>,
 ) -> Arc<dyn crate::capabilities::provision::api::Provision + Send + Sync> {
-    struct FixedProvision(Vec<crate::capabilities::provision::api::DepStatus>);
+    test_provision_with_root(deps, None)
+}
+
+/// 目的：同上，并给出产品根——验"设置里没登记时采用项目内已装的那一个"要把 probe 落成绝对路径。
+pub(crate) fn test_provision_with_root(
+    deps: Vec<crate::capabilities::provision::api::DepStatus>,
+    root: Option<&std::path::Path>,
+) -> Arc<dyn crate::capabilities::provision::api::Provision + Send + Sync> {
+    struct FixedProvision(
+        Vec<crate::capabilities::provision::api::DepStatus>,
+        Option<std::path::PathBuf>,
+    );
     impl crate::capabilities::provision::api::Provision for FixedProvision {
         fn status(&self) -> Result<Vec<crate::capabilities::provision::api::DepStatus>, String> {
             Ok(self.0.clone())
@@ -224,8 +235,31 @@ pub(crate) fn test_provision_with(
         fn ensure_spec(&self, _spec: &str, _on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
             Err("测试不跑补齐".to_string())
         }
+        fn tool_path(
+            &self,
+            tool: crate::capabilities::provision::api::HostTool,
+            registered: &str,
+        ) -> Option<String> {
+            let registered = registered.trim();
+            if !registered.is_empty() {
+                return Some(registered.to_string());
+            }
+            let prefix = match tool {
+                crate::capabilities::provision::api::HostTool::Qemu => "vm.qemu.",
+                crate::capabilities::provision::api::HostTool::Virtiofsd => "vm.virtiofsd.",
+                crate::capabilities::provision::api::HostTool::Smbd => "vm.smbd.",
+            };
+            let dep = self
+                .0
+                .iter()
+                .find(|d| d.present && d.id.starts_with(prefix))?;
+            Some(match &self.1 {
+                Some(root) => root.join(&dep.probe).to_string_lossy().into_owned(),
+                None => dep.probe.clone(),
+            })
+        }
     }
-    Arc::new(FixedProvision(deps))
+    Arc::new(FixedProvision(deps, root.map(std::path::Path::to_path_buf)))
 }
 
 /// 目的：一条"已装在项目内"的依赖（`probe` 是相对产品根的写法，与清单同构）。

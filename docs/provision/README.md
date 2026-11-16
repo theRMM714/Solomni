@@ -6,15 +6,16 @@
 
 ## 管什么 / 不管什么
 
-- 管：内嵌 `dependencies.yaml`（依赖清单）与 `links.yaml`（下载源台账）、本机状态（缺什么、装到哪、从哪来）、下载缓存（`.vm/cache`）、解包落盘（`kernel::detail::unpack`）、一次后台补齐作业（进度 / 取消），以及**本机有哪些长驻子进程在跑**（读 `kernel::detail::procs` 的账：用途、归属、起止）。
+- 管：内嵌 `dependencies.yaml`（依赖清单）与 `links.yaml`（下载源台账）、本机状态（缺什么、装到哪、从哪来）、下载缓存（`.vm/cache`）、解包落盘（`kernel::detail::unpack`）、一次后台补齐作业（进度 / 取消），**本机有哪些长驻子进程在跑**（读 `kernel::detail::procs` 的账：用途、归属、起止），以及**宿主工具路径的取法**（`tool_path`：qemu / virtiofsd / smbd 的登记值优先、装好的兜底）。
 - 不管：虚拟机档的能力语义与档位判定（在 `vm`）。
 - 不管：构建期工具链的引导（本机档由 `env.js` 在宿主 `cc` 不可用时按同一清单装项目内 Zig；虚拟机档由 guest 的运行能力提供——都不是本能力）。
 - 不管：界面怎么展示（在 `presentation`）。
 
 ## 入站契约与状态归属
 
-- 入站契约：`src/capabilities/provision/api.rs` 的 `Provision`（`status` / `guest_bases` / `job` / `start` / `cancel`）。
-- DTO：`DepStatus` / `GuestBase` / `JobState`；`NoProvision` 是未接入的默认实现（如实失败，不假装可用）。
+- 入站契约：`src/capabilities/provision/api.rs` 的 `Provision`（`status` / `guest_bases` / `job` / `start` / `cancel` / `tool_path`）。
+- DTO：`DepStatus` / `GuestBase` / `JobState` / `HostTool`（要取哪件宿主工具：`Qemu` / `Virtiofsd` / `Smbd`，是工具 id 与台账前缀的唯一映射）；`NoProvision` 是未接入的默认实现（如实失败，不假装可用）。
+- **宿主工具路径**：`tool_path(tool, registered)` 是 `qemu_path` / `virtiofsd_path` / `smbd_path` 的唯一实现——`registered` 是设置里登记的值（trim 后非空即回它），否则按台账前缀 `vm.qemu.` / `vm.virtiofsd.` / `vm.smbd.` 找在场的那一条、回拼接产品根后的绝对路径；调用方（`conductor` 的 `src/capabilities/conductor/service/work/host.rs`）只负责取登记值并 trim。
 - **虚拟根清单**：`guest_bases` 把清单里带 `guest:` 的条目按虚拟根名归并（`ready` = 这一根的各条都按当前清单装好），一个虚拟根可由多条条目共同装；conductor 的创建向导与会话配置按它渲染下拉。
 - **虚拟根名**是 guest 的身份，按「发行版-大版本」取（`debian-13`），不按宿主平台取：两个宿主装的是同一个 Debian 13，目录同叫 `.vm/guest/debian-13`，布局差异由 `guest.yaml` 与镜像类型表达。
 - 状态归属：清单与台账的唯一真相在仓库根 `dependencies.yaml` / `links.yaml`，产品里**编译期内嵌**；作业状态是**进程内**的（不落盘，进程重启即清空）。
@@ -22,7 +23,7 @@
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`vm`（`guest-runtime` 的运行期编排要起 guest：`guest_start` / `guest_wait_agent` / `guest_run` / `guest_stop`）；另经 kernel 的机制 `outbound` / `unpack`。
-- 谁在用我：`conductor`（`Ops` 的 `provision` 字段与 `GuestBase` 等类型）、`presentation`（setup 路由）、`system`（`--provision`）。
+- 谁在用我：`conductor`（`Ops` 的 `provision` 字段与 `GuestBase` 等类型；宿主工具路径经 `tool_path` 取）、`presentation`（setup 路由）、`system`（`--provision`）。
 
 ## 一、安装方式（清单 `kind`）
 
@@ -100,7 +101,7 @@
 
 ## 七、补齐后的生效方式
 
-- 主程序**每次判据取用时**自动采用项目内补齐的可执行文件（`qemu_path` / `virtiofsd_path` / `smbd_path` 未登记时；显式登记优先，取到的是拼接产品根后的绝对路径）——装完即生效，不需要重启进程。
+- 主程序**每次判据取用时**自动采用项目内补齐的可执行文件（`api::Provision::tool_path` 未登记时；显式登记优先，取到的是拼接产品根后的绝对路径）——装完即生效，不需要重启进程。
 - 共享后端全部在装配期持有，哪一档在起 guest 那一刻按候选挑（见 [docs/vm/README.md](../vm/README.md) 的「多平台组合」）。
 - 补齐面与会话面是**两份 vm 能力面**：补齐面只持内部 `none`（运行期编排只经 QGA，不挂载），会话面只持用户档；`none` 不进用户候选链——否则 `clients` 为空的 guest 会被静默当成无共享启动。
 

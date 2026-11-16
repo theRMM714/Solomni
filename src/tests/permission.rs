@@ -208,7 +208,7 @@ fn shared_grant_routes_to_session_machine_or_nothing() {
 /// 提交与拉取的作用域判定（工作区工具消费的那一份纯函数）：越界整条拒绝，不带半次提交。
 #[test]
 fn work_commit_and_pull_are_scoped() {
-    use crate::capabilities::conductor::service::work_tools::{check_readable, check_writable};
+    use crate::capabilities::workspace::service::work_tools::{check_readable, check_writable};
     let mut p = pset(ProfileId::Workspace);
     p.shared_read = ScopeMode::Paths(paths(&["docs"]));
     p.shared_write = ScopeMode::Paths(paths(&["docs"]));
@@ -230,8 +230,8 @@ fn work_commit_and_pull_are_scoped() {
 /// 目的：work_status 的路径清单按读作用域过滤，显式越界路径直接拒绝。
 #[test]
 fn work_status_filters_paths_outside_read_scope() {
-    use crate::capabilities::conductor::service::work_tools::WorkHandler;
     use crate::capabilities::workspace::api::CommitRequest;
+    use crate::capabilities::workspace::api::WorkHandler;
     use crate::kernel::ports::{ToolCtx, ToolHandler};
 
     let dirs = std::sync::Arc::new(InMemoryWorkspace::new());
@@ -296,7 +296,7 @@ fn work_status_filters_paths_outside_read_scope() {
 /// 目的：work_lost 的清单与恢复也按读作用域收口，不能拿备份绕过白名单。
 #[test]
 fn work_lost_is_scoped_by_read_permission() {
-    use crate::capabilities::conductor::service::work_tools::WorkHandler;
+    use crate::capabilities::workspace::api::WorkHandler;
     use crate::kernel::ports::{ToolCtx, ToolHandler};
 
     let dirs = std::sync::Arc::new(InMemoryWorkspace::new());
@@ -345,7 +345,7 @@ fn work_lost_is_scoped_by_read_permission() {
 /// 目的：work_versions / work_resolve 也按读作用域收口，不能拿它们绕过白名单。
 #[test]
 fn work_versions_and_resolve_are_scoped_by_read_permission() {
-    use crate::capabilities::conductor::service::work_tools::WorkHandler;
+    use crate::capabilities::workspace::api::WorkHandler;
     use crate::kernel::ports::{ToolCtx, ToolHandler};
     let ws = test_workspace(std::sync::Arc::new(InMemoryWorkspace::new()));
     let mut p = pset(ProfileId::Workspace);

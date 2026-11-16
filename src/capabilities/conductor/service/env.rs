@@ -1,8 +1,7 @@
-//! 目的：会话装配材料——成员通道、沙箱清单、工具环境、预算与角色工具面、单 agent 会话对象（build_single）。
-//! 管：把各能力的事实拼成一个能跑的会话；纯派生，不落盘。
-//! 不管：会话怎么落盘（history.rs）、协作链怎么推进（flow.rs）、建工作的两段（work/create.rs）。
-//! 联动：建工作与 turn 的准备工作经这里取会话对象。
-//!   本方法族只碰 registry / history / systools / workspace 这几个字段。
+//! 目的：conductor 侧的会话装配入口与沙箱 / 权限事实取用——工具环境与单 agent 会话对象只在这里转调 turn。
+//! 管：guest 诊断准备、沙箱清单、权限链与生效权限、外部工作区授权粒度、上下文预算，以及 `tools_env` / `build_single` 两个薄入口。
+//! 不管：装配本体（在 `turn` 的 `service/assemble.rs`）、会话怎么落盘（history.rs）、协作链怎么推进（flow.rs）、建工作的两段（work/create.rs）。
+//! 联动：建工作与 turn 的准备工作经这里取会话对象；`turn` 用本文件取到的一席事实装配工具面。
 use super::*;
 use crate::capabilities::packages::api as pkgs;
 use crate::capabilities::session::api::work_root_of;
@@ -133,182 +132,22 @@ impl Conductor {
         guest_lease: String,
         host_plan: &pkgs::PackagePlan,
     ) -> crate::capabilities::session::api::MemberTools {
-        // 角色表发放的系统工具 id 清单（工具面的名字部分），再按权限档位过滤：
-        // deny 的工具不发放（不是发放后再拒），ask 的照常发放。
-        let book = self.systools.book();
-        let allowed: Vec<String> = self
-            .role_tools(role)
-            .into_iter()
-            .filter(|id| {
-                book.get(id)
-                    .map(|s| {
-                        sb.permissions
-                            .offers(id, s.effect(), &s.max_reach(), s.scope)
-                    })
-                    .unwrap_or(true)
-            })
-            .collect();
-        let handlers = self.work_handlers(sb, &allowed);
-        // 工具面：静态模块工具 + **已就绪**常驻服务的操作（操作是服务跑起来才发现的，按模块现填）。
-        let with_modules = self.systools.allows_module_tools(role)
-            && !sb.permissions.decisions.exec_sandbox.is_deny();
-        let mut table = crate::capabilities::session::api::tool_table(modules);
-        // 服务清单是全局的：只把**这个 agent 工具面里**的模块服务写进提示词。
-        let started = if with_modules {
-            crate::capabilities::session::api::service_ops_for_modules(
-                self.started_service_ops(),
-                modules,
-            )
-        } else {
-            BTreeMap::new()
+        // 事实在这里取齐，装配规则在 turn（层 8 不依赖 conductor，所以入口留在这一侧）。
+        let spec = crate::capabilities::turn::api::MemberSpec {
+            modules,
+            sandbox: sb,
+            unavailable,
+            net,
+            mode,
+            role,
+            tier,
+            guest_lease,
+            plan: host_plan,
+            base_roots: &self.base_roots,
+            host_read_roots: self.host_read_roots(),
+            shell: self.turn.shell_slot(&sb.session),
         };
-        let mut module_tool_lines: Vec<String> = Vec::new();
-        // 这些操作**自带参数契约**（服务给的 JSON Schema 原样）：信封通道也要把参数说清，
-        // 否则模型只知道名字、只能瞎试参数（真实模型上真发生过）。
-        let mut service_param_lines: Vec<String> = Vec::new();
-        for (id, ops) in &started {
-            if let Some(mt) = table.get_mut(id) {
-                for op in ops {
-                    mt.services.insert(op.tool.clone(), op.clone());
-                }
-            }
-            let names = ops
-                .iter()
-                .map(|o| o.tool.clone())
-                .collect::<Vec<_>>()
-                .join("、");
-            module_tool_lines.push(format!("- {}：{}", id, names));
-            for op in ops {
-                let Some(schema) = &op.parameters else {
-                    continue;
-                };
-                let signature =
-                    crate::capabilities::tools::api::json_schema_lines(schema).join("\n");
-                if signature.is_empty() {
-                    continue;
-                }
-                service_param_lines.push(format!("- {}.{}\n{}", id, op.tool, signature));
-            }
-        }
-        let mut notes = crate::capabilities::tools::api::tool_notes(
-            &*self.prompt,
-            sb,
-            if with_modules { modules } else { &[] },
-            &service_param_lines,
-        );
-        if !module_tool_lines.is_empty() {
-            notes.module_tools =
-                format!("{}\n{}", notes.module_tools, module_tool_lines.join("\n"));
-        }
-        // 各模块隐私字段的注入项：装配期按模块解析一次，起工具进程时只走环境（解析失败 = 该模块没有可用值）。
-        let module_vars: BTreeMap<String, Vec<(String, String)>> = modules
-            .iter()
-            .map(|m| {
-                (
-                    m.manifest.id.clone(),
-                    self.secrets.resolve(&m.manifest.id).unwrap_or_default(),
-                )
-            })
-            .collect();
-        // 一席的工具环境事实（围栏 / 运行路径 / 工具链根 / 模块注入项）由 env 一处派生：
-        // 只读根 = 用户显式授权 + 本机运行包包根；工具链基础根只在宿主档放行。
-        let menv =
-            crate::capabilities::env::api::member(&crate::capabilities::env::api::MemberFacts {
-                sandbox: sb,
-                host_read_roots: &self.host_read_roots(),
-                net,
-                tier,
-                base_roots: &self.base_roots,
-                plan: host_plan,
-                module_vars: &module_vars,
-            });
-        crate::capabilities::session::api::MemberTools {
-            face: crate::capabilities::session::api::ToolFace {
-                mode,
-                modules: table,
-                tier,
-                guest_lease,
-                sandbox: sb.clone(),
-                tools_this_turn: self
-                    .prompt
-                    .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
-                    .to_string(),
-                builtin_tools: self.systools.book(),
-
-                unavailable,
-                // 围栏、模块注入项、运行路径与工具链根都由 env 从事实派生（本文件不给第二份）。
-                fence: menv.fence,
-                module_env: menv.module_env,
-                runtime_path: menv.runtime_path,
-                runtime_roots: menv.runtime_roots,
-                // 这一席的系统工具面**由角色表发放**（越权校验的唯一判据）：给什么写什么，代码里不留第二份名单。
-                allowed,
-                role: role.to_string(),
-                // 能不能用自己模块的工具由角色表发放；说明块素材在装配期算好（服务操作已在上面并进来）。
-                with_modules,
-                notes,
-            },
-            llm: Arc::clone(&self.llm),
-            log: Arc::clone(&self.log),
-            tools: Arc::clone(&self.tools),
-            vm: Arc::clone(&self.vm),
-            // 常驻服务的统一管理面：模块的 services 操作经它调用。
-            residents: Arc::clone(&self.residents),
-            workspace: Some(Arc::clone(&self.workspace)),
-            observations: crate::capabilities::tools::api::Observations::default(),
-            shell_live: Some(self.shell_slot(&sb.session)),
-            // 从零开始；按落盘转录重建时由调用方按转录里的最大值续号（见 rebuild_session）。
-            reply_seq: 0,
-            line: Default::default(),
-            handlers,
-        }
-    }
-
-    /// 目的：**已就绪**常驻服务的操作，按模块分组（模块 → 该模块的服务操作）。
-    /// 约束：只收已就绪的服务——没启动的没有操作可发现，不该出现在模型工具面里。
-    fn started_service_ops(
-        &self,
-    ) -> BTreeMap<String, Vec<crate::capabilities::session::api::ServiceOp>> {
-        let mut out: BTreeMap<String, Vec<crate::capabilities::session::api::ServiceOp>> =
-            BTreeMap::new();
-        for view in self.residents.services().unwrap_or_default() {
-            if view.state != crate::capabilities::residents::api::ServiceState::Ready {
-                continue;
-            }
-            for op in &view.operations {
-                out.entry(view.module.clone()).or_default().push(
-                    crate::capabilities::session::api::ServiceOp {
-                        tool: format!("{}.{}", view.name, op.name),
-                        service: view.name.clone(),
-                        op: op.name.clone(),
-                        description: op.description.clone(),
-                        parameters: op.parameters.clone(),
-                    },
-                );
-            }
-        }
-        out
-    }
-
-    /// 核心自有的**共享区版本化**工具执行者：只在角色面确实发到它们时才装。
-    /// 与代理工具同一套路：成员循环只问"谁认领这个名字"，核心自有工具不是循环里的特例。
-    fn work_handlers(
-        &self,
-        sb: &crate::capabilities::workspace::api::Sandbox,
-        allowed: &[String],
-    ) -> Vec<Arc<dyn crate::kernel::ports::ToolHandler>> {
-        use crate::capabilities::conductor::domain::work as dw;
-        if !allowed.iter().any(|t| dw::is_work_tool(t)) {
-            return Vec::new();
-        }
-        vec![Arc::new(
-            crate::capabilities::conductor::service::work_tools::WorkHandler::new(
-                Arc::clone(&self.workspace),
-                &sb.work_name,
-                &sb.agent,
-                sb.permissions.clone(),
-            ),
-        )]
+        crate::capabilities::turn::api::member_tools(&self.turn.session_deps(), &spec)
     }
 
     /// 目的：一轮内对同一个成员最多提醒几次（用户可设，见 session-model.md 二）。
@@ -338,15 +177,6 @@ impl Conductor {
         s.set_context_budget(window, percent, keep);
     }
 
-    /// 目的：角色表发放的系统工具 id 清单（工具面的名字部分）。
-    ///  为什么不留第二份名单：代码里出现"哪个角色能调哪个工具"必然与表漂。
-    pub(crate) fn role_tools(&self, role: &str) -> Vec<String> {
-        self.systools
-            .tool_face(role)
-            .map(|f| f.into_iter().map(|(id, _)| id.to_string()).collect())
-            .unwrap_or_default()
-    }
-
     /// 装配单 agent 会话（不插入会话中心；插入与落盘由 create_work 统一做）。
     // 会话装配把这一场单 agent 会话一次说全；收口成参数对象只是把参数挪个地方。
     // 这是有意的设计取舍（见 docs/testing/quality-isolation.md 的 allow 清单），不是没修。
@@ -367,50 +197,29 @@ impl Conductor {
         crate::capabilities::session::api::AgentSession,
         Vec<SessionEvent>,
     ) {
-        let chat = self.llm.member_channel(&channel, &a.name);
         // 形态按登记处解析；通道已在前置判据里解析成功，这里不再有"没有通道"的分支。
-        let mode = self.registry.tool_mode(a.model.as_deref());
-        self.log.info(
-            "conductor::build_single",
-            &format!(
-                "单 agent 工作：agent {}，模块 {}，模型 {}",
-                a.name,
-                a.modules.join("+"),
-                channel.model
-            ),
-        );
-        // **会话参数**：身份块每回合由它现渲染（不存进消息列表）。
-        let params = crate::capabilities::session::api::SessionParams::from_workspace(
-            &a.name, sb, modules, "single", "solo",
-        )
-        .with_chara(a.chara.clone())
-        .with_guest(guest);
-        // 单 agent 工作：用户自己开的那场对话（不是任务链的节点）——身份是 solo。
-        let tools = self.tools_env(
-            modules,
-            sb,
-            unavailable,
-            net,
-            mode,
-            "solo",
-            tier,
-            guest_lease,
-            host_plan,
-        );
-        let mut s = crate::capabilities::session::api::AgentSession::new(
-            &a.name,
-            params,
-            chat,
-            Some(tools),
-            self.prompt
-                .text(crate::capabilities::prompt::api::Segment::CompactPrompt)
-                .to_string(),
-        );
-        // 自动压缩的预算按**这个 agent 的模型**窗口算（见 session-model.md 六）。
-        let (window, percent, keep_percent) = self.context_budget(a.model.as_deref());
-        s.set_context_budget(window, percent, keep_percent);
-        s.set_model(a.model.clone().or_else(|| self.registry.core_model()));
-        s.set_compact_factory(self.compact_factory());
-        (s, Vec::new())
+        let spec = crate::capabilities::turn::api::SingleSpec {
+            agent: a,
+            member: crate::capabilities::turn::api::MemberSpec {
+                modules,
+                sandbox: sb,
+                unavailable,
+                net,
+                mode: self.registry.tool_mode(a.model.as_deref()),
+                // 单 agent 工作：用户自己开的那场对话（不是任务链的节点）——身份是 solo。
+                role: "solo",
+                tier,
+                guest_lease,
+                plan: host_plan,
+                base_roots: &self.base_roots,
+                host_read_roots: self.host_read_roots(),
+                shell: self.turn.shell_slot(&sb.session),
+            },
+            channel,
+            guest,
+            context: self.context_budget(a.model.as_deref()),
+            core_model: self.registry.core_model(),
+        };
+        crate::capabilities::turn::api::single_session(&self.turn.session_deps(), &spec)
     }
 }

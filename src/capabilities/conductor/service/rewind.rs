@@ -63,7 +63,7 @@ impl Conductor {
         if force {
             // 用户已确认覆盖：先把受管路径的外部改动采纳成提交，随后的回档就不会再撞上“被外部改动”。
             self.workspace
-                .work_sync_tracked(&work, crate::capabilities::conductor::service::now_ts())?;
+                .work_sync_tracked(&work, crate::kernel::api::unix_seconds())?;
         }
         let (mut active, children) = match target {
             RewindTarget::Archive(line) => {
@@ -168,7 +168,8 @@ impl Conductor {
                         s.set_last_usage(crate::capabilities::session::api::last_usage(&kept));
                     }
                     // 就地回退没重建对象：shell 快照也按截断后的转录重算（被截掉的 shell 不能继续显示）。
-                    self.shell_slot(sid)
+                    self.turn
+                        .shell_slot(sid)
                         .set(crate::capabilities::session::api::last_shell(&kept));
                     crate::capabilities::session::api::truncate_events(&kept)
                 } else {
@@ -415,7 +416,10 @@ impl Conductor {
         self.workspace.bind(&work, binding.as_deref())?;
         if binding.is_some() {
             // 旧会话首次启用：补一次初始导入（有 head 时无操作）。
-            if let Err(e) = self.workspace.work_import_root(&work, now_ts()) {
+            if let Err(e) = self
+                .workspace
+                .work_import_root(&work, crate::kernel::api::unix_seconds())
+            {
                 self.log.warn(
                     "conductor::rebuild_session",
                     &format!("工作区初始导入失败：{}", e),
@@ -531,7 +535,7 @@ impl Conductor {
                 let (window, percent, keep_percent) = self.context_budget(a.model.as_deref());
                 s.set_context_budget(window, percent, keep_percent);
                 s.set_model(a.model.clone().or_else(|| self.registry.core_model()));
-                s.set_compact_factory(self.compact_factory());
+                s.set_compact_factory(self.turn.compact_factory());
                 s.set_context_freshness(meta.context_freshness);
                 for (body, fact) in replay_reads(events) {
                     s.note_read_at(body, fact);
@@ -569,7 +573,8 @@ impl Conductor {
             }
         };
         // 状态栏的 shell 快照同样按转录派生：重启 / 启用 / 回档重建后不再"失忆"。
-        self.shell_slot(&meta.name)
+        self.turn
+            .shell_slot(&meta.name)
             .set(crate::capabilities::session::api::last_shell(events));
         Ok(built)
     }

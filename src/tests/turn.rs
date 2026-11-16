@@ -44,3 +44,111 @@ fn shell_slot_is_shared_per_session_and_absent_before_use() {
     assert!(std::sync::Arc::ptr_eq(&first, &again), "同一会话共用一份槽");
     assert!(!std::sync::Arc::ptr_eq(&first, &state.shell_slot("b")));
 }
+
+/// 目的：验角色工具面按权限档位过滤——deny 的（View 下的写工具）不发放，工具总表里没声明的照旧发放。
+#[test]
+fn face_tools_filters_denied_tools_and_keeps_undeclared_ones() {
+    use crate::capabilities::permission::api::{PermissionDefaults, ProfileId};
+    use crate::capabilities::tools::api::{ToolBook, ToolSchema};
+    use crate::capabilities::turn::domain::assemble::face_tools;
+
+    let schema = |capability: &str| ToolSchema {
+        desc: String::new(),
+        params: None,
+        parallel: false,
+        capability: capability.to_string(),
+        effect: None,
+        reach: None,
+        decision: None,
+        scope: false,
+        callers: Vec::new(),
+    };
+    let mut book = ToolBook::new();
+    book.insert("read".to_string(), schema("fs-read"));
+    book.insert("write".to_string(), schema("fs-write"));
+    let permissions = PermissionDefaults {
+        profile: ProfileId::View,
+        ..Default::default()
+    }
+    .to_permission_set();
+    let face = vec![
+        "read".to_string(),
+        "write".to_string(),
+        "missing".to_string(),
+    ];
+    assert_eq!(
+        face_tools(face, &book, &permissions),
+        vec!["read".to_string(), "missing".to_string()],
+        "写工具在 View 档位下 deny，未声明的 id 放行"
+    );
+}
+
+/// 目的：验只有已就绪的常驻服务进工具面，工具名按 `<服务>.<操作>` 拼。
+#[test]
+fn service_ops_take_only_ready_services_and_qualify_names() {
+    use crate::capabilities::residents::api::{Operation, ServiceState, ServiceView};
+    use crate::capabilities::turn::domain::assemble::service_ops_of;
+
+    let op = |name: &str| Operation {
+        name: name.to_string(),
+        description: format!("{} 的说明", name),
+        parameters: None,
+    };
+    let view = |name: &str, state: ServiceState| ServiceView {
+        module: "m".to_string(),
+        name: name.to_string(),
+        adapter: "a".to_string(),
+        state,
+        operations: vec![op("run")],
+        reason: String::new(),
+    };
+    let ops = service_ops_of(&[
+        view("svc", ServiceState::Ready),
+        view("off", ServiceState::Stopped),
+    ]);
+    assert_eq!(ops.len(), 1, "没启动的服务没有可发现的操作");
+    let got = &ops["m"];
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].tool, "svc.run");
+    assert_eq!(got[0].service, "svc");
+    assert_eq!(got[0].op, "run");
+}
+
+/// 目的：验服务操作并进模块工具表，同时拼出模块工具行与服务参数行。
+#[test]
+fn serviced_tools_merge_ops_into_table_and_render_lines() {
+    use crate::capabilities::session::api::{ModuleTools, ServiceOp};
+    use crate::capabilities::turn::domain::assemble::serviced_tools;
+
+    let mut table = std::collections::BTreeMap::new();
+    table.insert(
+        "m".to_string(),
+        ModuleTools {
+            root: std::path::PathBuf::new(),
+            commands: std::collections::BTreeMap::new(),
+            books: std::collections::BTreeMap::new(),
+            parallel: std::collections::BTreeSet::new(),
+            services: std::collections::BTreeMap::new(),
+        },
+    );
+    let op = ServiceOp {
+        tool: "svc.run".to_string(),
+        service: "svc".to_string(),
+        op: "run".to_string(),
+        description: "跑一次".to_string(),
+        parameters: Some(serde_json::json!({
+            "type": "object",
+            "properties": {"q": {"type": "string", "description": "查询"}}
+        })),
+    };
+    let started = std::collections::BTreeMap::from([("m".to_string(), vec![op])]);
+    let (tool_lines, param_lines) = serviced_tools(&started, &mut table);
+    assert_eq!(table["m"].services.len(), 1, "操作要并进模块工具表");
+    assert_eq!(tool_lines, vec!["- m：svc.run".to_string()]);
+    assert_eq!(param_lines.len(), 1);
+    assert!(
+        param_lines[0].starts_with("- m.svc.run\n"),
+        "服务参数行以 <模块>.<服务>.<操作> 开头：{}",
+        param_lines[0]
+    );
+}

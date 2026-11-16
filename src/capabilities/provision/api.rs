@@ -1,5 +1,5 @@
 //! 目的：依赖补齐能力的入站契约——状态、虚拟根清单、作业快照与两条动作；DTO 是呈现层序列化的形状。
-//! 管：Provision trait 与 DepStatus / GuestBase / JobState DTO、未接入的 NoProvision。
+//! 管：Provision trait 与 DepStatus / GuestBase / JobState DTO、宿主工具取法的 HostTool 词表、未接入的 NoProvision。
 //! 不管：清单怎么解析、怎么下载（在 service）。
 //! 联动：Ops.provision 持它；Web 的 setup 路由与 CLI 探针都经它；conductor 的"选虚拟机"经 `guest_bases` 取候选。
 
@@ -74,7 +74,18 @@ pub struct JobState {
     pub error: Option<String>,
 }
 
-/// 目的：依赖补齐的入站用例面——状态、虚拟根清单、作业快照、起作业、取消。
+/// 目的：要取路径的宿主工具词表——调用方只说"哪个工具"，前缀与兜底规则留在补齐面里。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostTool {
+    /// 目的：虚拟机监视器（qemu）。
+    Qemu,
+    /// 目的：共享目录守护进程（virtiofsd）。
+    Virtiofsd,
+    /// 目的：SMB helper（smbd）。
+    Smbd,
+}
+
+/// 目的：依赖补齐的入站用例面——状态、虚拟根清单、宿主工具取法、作业快照、起作业、取消。
 pub trait Provision: Send + Sync {
     /// 目的：本机依赖状态（缺什么、装到哪、从哪来）。
     fn status(&self) -> Result<Vec<DepStatus>, String>;
@@ -98,6 +109,10 @@ pub trait Provision: Send + Sync {
     fn ensure(&self, ids: &[String], on_line: &mut dyn FnMut(&str)) -> Result<(), String>;
     /// 目的：按 kind 组别名或 id 列表补齐（启动相命令的 `--ensure=<spec>` 写法）。
     fn ensure_spec(&self, spec: &str, on_line: &mut dyn FnMut(&str)) -> Result<(), String>;
+    /// 目的：一个宿主工具的**唯一**取法：登记值（`registered`，已 trim）非空就直接用它；
+    ///   否则用本机清单里**已装好**的那一条（探针相对产品根，回绝对路径）。
+    /// 约束：每次现算——补完立刻能被判据看见，没有"装完还得重启"这一步。
+    fn tool_path(&self, tool: HostTool, registered: &str) -> Option<String>;
 }
 
 /// 目的：未接入的补齐面——组合根未注入时的默认值；调用如实失败，不假装可用。
@@ -128,5 +143,8 @@ impl Provision for NoProvision {
     }
     fn ensure_spec(&self, _spec: &str, _on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
         Err("依赖补齐未接入".to_string())
+    }
+    fn tool_path(&self, _tool: HostTool, _registered: &str) -> Option<String> {
+        None
     }
 }

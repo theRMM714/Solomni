@@ -462,7 +462,8 @@ pub(crate) fn vm_tool_paths_follow_provisioned_packages_without_restart() {
         .join("qemu-system-x86_64");
     std::fs::create_dir_all(exe.parent().expect("父目录")).expect("建目录");
     std::fs::write(&exe, b"stub").expect("写占位可执行文件");
-    let provision = test_provision_with(vec![installed_dep("vm.qemu.linux", probe)]);
+    let provision =
+        test_provision_with_root(vec![installed_dep("vm.qemu.linux", probe)], Some(&root));
 
     // 没登记：按项目内补齐的那一个判 → 这一项成立，且文案说清是按哪条路找到的。
     let core = conductor_rooted(

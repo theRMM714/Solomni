@@ -147,8 +147,8 @@ pub struct Conductor {
     prompt: Arc<dyn Prompt>,
     /// 工具总表与角色表的能力面（授权两张表；名字表由组合根另取）：**表本体在工具能力里**，与册子互不依赖。
     systools: Arc<dyn Tools>,
-    /// 回合状态：在世会话表、运行态与创建占位、裁决队、每会话的 shell 活进程槽（在 `turn`）。
-    turn: crate::capabilities::turn::api::TurnState,
+    /// 目的：回合状态与会话本体——在世会话表、运行态与创建占位、裁决队、每会话的 shell 活进程槽，以及一席的装配（在 `turn`）。
+    pub(crate) turn: crate::capabilities::turn::api::Turn,
 }
 
 /// 目的：在世会话形态（`turn` 的状态类型），本能力各用例只经它放取会话。
@@ -173,7 +173,6 @@ mod turn;
 mod work;
 #[cfg(test)]
 pub(crate) use work::needs_guest_packages_rebuild;
-pub(crate) mod work_tools;
 pub(crate) mod workspace_root;
 impl Conductor {
     /// 组合根专用：main 负责创建适配器并注入；conductor 不自建任何具体实现。
@@ -200,6 +199,20 @@ impl Conductor {
         secrets: Arc<dyn crate::capabilities::secrets::api::SecretOps + Send + Sync>,
     ) -> Conductor {
         let compact = Arc::new(CompactRuntime::new(Arc::clone(&llm)));
+        // 会话本体收在 turn：它只认能力面与压缩工厂，不认 conductor 的端口（层 8 不得依赖层 9）。
+        let turn = crate::capabilities::turn::api::Turn::new(
+            Arc::clone(&workspace),
+            Arc::clone(&vm),
+            Arc::clone(&residents),
+            Arc::clone(&secrets),
+            Arc::clone(&tools),
+            Arc::clone(&systools),
+            Arc::clone(&prompt),
+            Arc::clone(&llm),
+            Arc::clone(&log),
+            compact.clone(),
+            Vec::new(),
+        );
         let c = Conductor {
             root,
             registry,
@@ -220,7 +233,7 @@ impl Conductor {
             base_roots: Vec::new(),
             prompt,
             systools,
-            turn: crate::capabilities::turn::api::TurnState::new(),
+            turn,
         };
         c.sync_compact_choice();
         c
@@ -246,33 +259,11 @@ impl Conductor {
         self.compact.set(choice);
     }
 
-    /// 目的：注入给新会话 / 重建会话的压缩通道工厂。
-    pub(crate) fn compact_factory(
-        &self,
-    ) -> Arc<dyn crate::capabilities::session::api::CompactChatFactory> {
-        self.compact.clone()
-    }
-
     /// 目的：注入项目内基础工具链的只读安装根；组合根读到 active.json 后调用。
     pub fn with_base_roots(mut self, roots: Vec<std::path::PathBuf>) -> Conductor {
-        self.base_roots = roots;
+        self.base_roots = roots.clone();
+        self.turn.set_base_roots(roots);
         self
-    }
-
-    /// 目的：取（必要时创建）一个会话的 shell 实时状态槽；成员工具面与状态栏共用同一份。
-    pub(crate) fn shell_slot(
-        &self,
-        sid: &str,
-    ) -> Arc<crate::capabilities::session::api::ShellSlot> {
-        self.turn.shell_slot(sid)
-    }
-
-    /// 目的：读会话最近一次 shell 的快照；没有运行过就是 None（状态栏据此决定要不要出 chip）。
-    pub(crate) fn shell_view(
-        &self,
-        sid: &str,
-    ) -> Option<crate::capabilities::session::api::ShellLive> {
-        self.turn.shell_view(sid)
     }
 
     /// 目的：模块的**有效**启用（用户覆盖 ?? 作者默认）。
@@ -351,7 +342,7 @@ impl Conductor {
 
     /// 生成期间"会话不在表里"的三种进入点共用这一句（错误文案要一致，别处不再各写一份）。
     fn running_refusal(sid: &str) -> String {
-        format!("会话 {} 正在生成中：先「停止」或等它结束，再做这一步", sid)
+        crate::capabilities::turn::api::Turn::running_refusal(sid)
     }
 
     /// 目的：把单 agent 会话**交给工作线程**（核心表里留"生成中"）。
@@ -651,14 +642,6 @@ fn mode_str(mode: WorkMode) -> &'static str {
         WorkMode::Collab => "collab",
         WorkMode::Proxy => "proxy",
     }
-}
-
-/// 当前时间戳（秒）。
-fn now_ts() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
 }
 
 /// 工作名即将来的落盘目录名：非空、不含路径分隔符与 Windows 非法字符、不是保留名。
