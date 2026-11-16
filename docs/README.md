@@ -7,7 +7,8 @@
 
 | 要找什么 | 读哪一份 |
 | --- | --- |
-| `conductor`（协调业务） | [README.md](conductor/README.md)、[unit-map.md](conductor/unit-map.md) |
+| `conductor`（应用编排） | [README.md](conductor/README.md)、[unit-map.md](conductor/unit-map.md) |
+| `work`（工作用例） | [README.md](work/README.md)、[unit-map.md](work/unit-map.md) |
 | `turn`（回合状态） | [README.md](turn/README.md)、[unit-map.md](turn/unit-map.md) |
 | `collab`（协作会话） | [README.md](collab/README.md)、[unit-map.md](collab/unit-map.md)、[task-chain.md](collab/task-chain.md) |
 | `session`（会话） | [README.md](session/README.md)、[unit-map.md](session/unit-map.md)、[session-model.md](session/session-model.md) |

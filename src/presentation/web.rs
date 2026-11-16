@@ -3,8 +3,9 @@
 //! 不管：渲染（在浏览器 `src/presentation/web/assets/app/main.js` 起的分层模块）；路由目录与匹配（`src/presentation/web/routes.rs`）。
 //! 联动：核心状态在核心自己的线程上——这里拿不到它、也拿不到任何核心锁，「停止」直接说给核心听；请求经 `Ops`（`src/capabilities/*/api.rs`）进入。
 
-use crate::capabilities::conductor::api::{Acted, ActionCall, Caller, SessionEvent, WorkMode};
+use crate::capabilities::conductor::api::{Acted, ActionCall, Caller, SessionEvent};
 use crate::capabilities::conductor::api::{Ops, Output};
+use crate::capabilities::work::api::WorkMode;
 use crate::capabilities::workspace::api::MAX_ASSET_BYTES;
 pub(crate) mod assets;
 mod host_fs;

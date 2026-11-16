@@ -6,7 +6,9 @@
 #![allow(dead_code)]
 
 use super::builders::SilentRunner;
-use crate::capabilities::conductor::api::{AgentInstance, SessionEvent, WorkMode, WorkSpec};
+use crate::capabilities::conductor::api::SessionEvent;
+use crate::capabilities::work::api::{AgentInstance, WorkMode, WorkSpec};
+
 use crate::capabilities::conductor::service::Conductor;
 use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg};

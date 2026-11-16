@@ -328,7 +328,7 @@ impl ConductorHandle {
     /// 目的：串行同一台 guest 的启动；离开作用域自动摘掉标记（即便启动失败/ panic）。
     fn run_guest_boot(
         &self,
-        boot: crate::capabilities::conductor::service::guest_job::GuestBoot,
+        boot: crate::capabilities::work::api::GuestBoot,
     ) -> Result<(), String> {
         struct Slot<'a> {
             set: &'a std::sync::Mutex<std::collections::BTreeSet<String>>,
@@ -381,14 +381,13 @@ impl ConductorHandle {
         self.ensure_built(&ids, tier, guest.as_deref())?;
         let prepared = self.call(move |core| core.prepare_activation(&sid))?;
         let prepared = match prepared {
-            crate::capabilities::conductor::service::PreparedActivation::Ready(ready) => {
-                let crate::capabilities::conductor::service::ReadyActivation { sid, boot, lease } =
-                    *ready;
+            crate::capabilities::work::api::PreparedActivation::Ready(ready) => {
+                let crate::capabilities::work::api::ReadyActivation { sid, boot, lease } = *ready;
                 if let Some(boot) = boot {
                     self.run_guest_boot(boot)?;
                 }
-                crate::capabilities::conductor::service::PreparedActivation::Ready(Box::new(
-                    crate::capabilities::conductor::service::ReadyActivation {
+                crate::capabilities::work::api::PreparedActivation::Ready(Box::new(
+                    crate::capabilities::work::api::ReadyActivation {
                         sid,
                         boot: None,
                         lease,

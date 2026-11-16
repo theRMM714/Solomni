@@ -14,28 +14,7 @@ use crate::kernel::ports::{HostProbe, Log};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-/// 目的：一次 guest 启动的全部参数（核心准备好，调用方线程执行）。
-/// 约束：字段全部是拥有所有权的数据或 `Arc`——它要跨线程，不能借用核心状态。
-pub struct GuestBoot {
-    vm: Arc<dyn Vm + Send + Sync>,
-    root: PathBuf,
-    probe: Arc<dyn HostProbe + Send + Sync>,
-    log: Arc<dyn Log + Send + Sync>,
-    /// 同时台上限（0 = 不限制）；到上限在 run 里如实拒绝。
-    max_guests: u32,
-    /// 目的：用户授权的主机只读根（进围栏规格，与工具执行那一份同源）。
-    host_read_roots: Vec<PathBuf>,
-    engine_path: Option<String>,
-    share_path: Option<String>,
-    shares: Vec<&'static str>,
-    lease: String,
-    /// 这条会话要拉起的 guest 规格里与"会话"有关的那几项。
-    net: bool,
-    plan: ExecPlan,
-    sandboxes: Sandboxes,
-    /// 拉起之前先停掉同一租约已有的 guest（改配要重建）。
-    restart: bool,
-}
+use crate::capabilities::work::api::{EditGuest, GuestBoot, GuestDiagnose, GuestStop};
 
 impl GuestBoot {
     /// 目的：组装备好的那一段（核心侧调用，毫秒级）。
@@ -178,7 +157,7 @@ impl GuestBoot {
             );
             if !out.ok {
                 log.warn(
-                    "conductor::guest_boot",
+                    "work::guest_boot",
                     &format!("运行包的 PATH 软链没建上：{}", out.output),
                 );
             }
@@ -279,12 +258,6 @@ fn common_ancestor(paths: &[PathBuf]) -> Option<PathBuf> {
     Some(acc)
 }
 
-/// 目的：一次 guest 销毁（慢：先请 guest 断电并等它落盘，超时才杀）——同样在调用方线程上跑。
-pub struct GuestStop {
-    vm: Arc<dyn Vm + Send + Sync>,
-    leases: Vec<String>,
-}
-
 impl GuestStop {
     /// 目的：按租约清单销毁（幂等）。
     pub(crate) fn new(vm: Arc<dyn Vm + Send + Sync>, leases: Vec<String>) -> GuestStop {
@@ -299,14 +272,6 @@ impl GuestStop {
     }
 }
 
-/// 目的：改配时要等 guest 的那一段——切回本机档只停；切入或留在虚拟机档要起（可能先停旧的）。
-pub enum EditGuest {
-    /// 起或重建 guest（`restart` = 先停同一租约的旧 guest）。
-    Boot(Box<GuestBoot>),
-    /// 切回本机档：把旧的 guest 销毁。
-    Stop(GuestStop),
-}
-
 impl EditGuest {
     /// 目的：执行那一段（慢：QEMU 启动 / 关机落盘），在调用方线程上跑。
     pub fn run(self) -> Result<(), String> {
@@ -318,14 +283,6 @@ impl EditGuest {
             }
         }
     }
-}
-
-/// 目的：一次 guest **只读诊断**（慢：要在 guest 里采两轮 /proc 快照）——同样在调用方线程上跑。
-/// 约束：只读——不写 guest、不改会话状态；采集与解析的细节在 vm 能力里。
-pub struct GuestDiagnose {
-    vm: Arc<dyn Vm + Send + Sync>,
-    /// 这条会话要诊断的那台 guest 的租约。
-    lease: String,
 }
 
 impl GuestDiagnose {

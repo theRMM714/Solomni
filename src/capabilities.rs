@@ -24,4 +24,5 @@ pub mod taskchain;
 pub mod tools;
 pub mod turn;
 pub mod vm;
+pub mod work;
 pub mod workspace;

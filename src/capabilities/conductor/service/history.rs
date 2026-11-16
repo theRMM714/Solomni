@@ -68,7 +68,7 @@ impl FenceRelease {
 /// 约束：在调用方线程上执行；Windows 上 guest / 共享进程可能还占着会话目录里的文件，顺序反过来会 sharing violation。
 ///   先删目录让产品根内的授权自动走「路径不在 → 只销账」快分支；外部根的递归撤权不占用户等待路径。
 pub(crate) struct SessionDelete {
-    stop: super::guest_job::GuestStop,
+    stop: crate::capabilities::work::api::GuestStop,
     history: Arc<dyn History + Send + Sync>,
     /// 待删目录（已按**先子后父**排好）。
     dirs: Vec<String>,
@@ -81,7 +81,7 @@ pub(crate) struct SessionDelete {
 impl SessionDelete {
     #[cfg(test)]
     pub(crate) fn for_test(
-        stop: super::guest_job::GuestStop,
+        stop: crate::capabilities::work::api::GuestStop,
         history: Arc<dyn History + Send + Sync>,
         dirs: Vec<String>,
         target: String,
@@ -98,7 +98,7 @@ impl SessionDelete {
     /// 目的：测试用构造：带一个可观察的撤权回调，钉住「后台执行、目录已删、失败也撤」三条契约。
     #[cfg(test)]
     pub(crate) fn for_test_with_fences(
-        stop: super::guest_job::GuestStop,
+        stop: crate::capabilities::work::api::GuestStop,
         history: Arc<dyn History + Send + Sync>,
         dirs: Vec<String>,
         target: String,
@@ -195,7 +195,10 @@ impl Conductor {
         let Ok((meta, _)) = self.history.load(name) else {
             self.turn.take(name);
             return Ok(SessionDelete {
-                stop: super::guest_job::GuestStop::new(Arc::clone(&self.vm), Vec::new()),
+                stop: crate::capabilities::work::api::GuestStop::new(
+                    Arc::clone(&self.vm),
+                    Vec::new(),
+                ),
                 history: Arc::clone(&self.history),
                 dirs: vec![name.to_string()],
                 target: name.to_string(),
@@ -238,7 +241,8 @@ impl Conductor {
                 guest_leases.push(lease);
             }
         }
-        let stop = super::guest_job::GuestStop::new(Arc::clone(&self.vm), guest_leases);
+        let stop =
+            crate::capabilities::work::api::GuestStop::new(Arc::clone(&self.vm), guest_leases);
         for sid in &subtree {
             self.turn.take(sid);
             // 会话没了，它的裁决队随会话一起消失（等待方与转录都不复存在）。

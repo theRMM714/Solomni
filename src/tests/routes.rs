@@ -3,15 +3,16 @@
 //! 不管：真实传输（L4 端到端）。
 //! 联动：web::route、路由目录、docs/、演示脚本、FakeOps。
 
+use crate::capabilities::conductor::api::DecisionQueue;
 use crate::capabilities::conductor::api::{
     Acted, ActionCall, ActionOps, ActionView, Advance, Caller, ConductorOps, EventBus, Ops, Output,
     SessionOps,
 };
-use crate::capabilities::conductor::api::{
-    AgentSuggestion, ConfigAgent, DecisionQueue, FilesAgentView, FilesRootsView, FilesView,
-    RuntimeReport, SessionConfig, SessionEdit, SessionView, TierChoices, WorkMode, WorkOpened,
-    WorkSpec,
+use crate::capabilities::work::api::{
+    AgentSuggestion, ConfigAgent, FilesAgentView, FilesRootsView, FilesView, RuntimeReport,
+    SessionConfig, SessionEdit, SessionView, TierChoices, WorkMode, WorkOpened, WorkSpec,
 };
+
 use crate::capabilities::modules::api::{ModulesOps, Roster};
 use crate::capabilities::registry::api::AgentView;
 use crate::capabilities::registry::api::RegistryOps;
@@ -293,7 +294,7 @@ impl SessionOps for FakeOps {
             permission_profile: "workspace".to_string(),
             permission_label: "工作区内修改".to_string(),
             context_freshness: false,
-            thinking: crate::capabilities::conductor::api::ThinkingView {
+            thinking: crate::capabilities::work::api::ThinkingView {
                 level: None,
                 default_level: None,
                 label: "未设置".to_string(),
@@ -382,14 +383,14 @@ impl SessionOps for FakeOps {
             guest: None,
             guests: Vec::new(),
             net: false,
-            thinking: crate::capabilities::conductor::api::ThinkingView {
+            thinking: crate::capabilities::work::api::ThinkingView {
                 level: None,
                 default_level: None,
                 label: "未设置".to_string(),
                 options: Vec::new(),
                 note: String::new(),
             },
-            permission: crate::capabilities::conductor::api::PermissionView {
+            permission: crate::capabilities::work::api::PermissionView {
                 profile: crate::capabilities::permission::api::ProfileId::Workspace,
                 label: "工作区内修改".to_string(),
                 summary: "测试".to_string(),
@@ -397,13 +398,13 @@ impl SessionOps for FakeOps {
                     .spec()
                     .reach
                     .to_vec(),
-                decisions: crate::capabilities::conductor::api::PermissionDecisionsView {
+                decisions: crate::capabilities::work::api::PermissionDecisionsView {
                     read: crate::capabilities::permission::api::Decision::Allow,
                     write: crate::capabilities::permission::api::Decision::Allow,
                     exec_sandbox: crate::capabilities::permission::api::Decision::Allow,
                     exec_external: crate::capabilities::permission::api::Decision::Deny,
                 },
-                shared: crate::capabilities::conductor::api::PermissionSharedView {
+                shared: crate::capabilities::work::api::PermissionSharedView {
                     read: crate::capabilities::permission::api::ScopeMode::All,
                     write: crate::capabilities::permission::api::ScopeMode::All,
                     deny: Vec::new(),
@@ -552,7 +553,7 @@ impl SessionOps for FakeOps {
                 permission_profile: "workspace".to_string(),
                 permission_label: "工作区内修改".to_string(),
                 context_freshness: false,
-                thinking: crate::capabilities::conductor::api::ThinkingView {
+                thinking: crate::capabilities::work::api::ThinkingView {
                     level: None,
                     default_level: None,
                     label: "未设置".to_string(),

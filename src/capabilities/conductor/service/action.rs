@@ -3,9 +3,9 @@
 //! 不管：会话装配本身（`work.rs` 的 `create_work_inner`）；生成怎么跑（在句柄的生成里）。
 //! 联动：载荷形状见 `conductor/domain/proxy.rs`；声明与 callers 在 `systools/tools.yaml`。
 
-use super::guest_job::GuestBoot;
 use super::*;
 use crate::capabilities::conductor::domain::proxy as d;
+use crate::capabilities::work::api::{AgentInstance, GuestBoot, WorkMode, WorkSpec};
 use crate::kernel::api::Tier;
 
 impl Conductor {
@@ -179,5 +179,5 @@ impl Conductor {
 
 /// 目的：一次建会话的准备结果（两段之间的交接物）。
 pub(crate) struct PreparedSession {
-    work: super::work::PreparedWork,
+    work: crate::capabilities::work::api::PreparedWork,
 }

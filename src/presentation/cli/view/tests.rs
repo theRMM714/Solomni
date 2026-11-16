@@ -4,10 +4,11 @@
 //! 联动：`cli/view.rs`、`cli/term.rs`、`cli/theme.rs`、`docs/presentation/cli/unit-map.md`
 
 use super::*;
-use crate::capabilities::conductor::api::{
-    AgentSuggestion, ConductorHandle, ConductorOps, RuntimeDiagnosis, RuntimeReport, TierChoices,
-    WorkMode,
+use crate::capabilities::conductor::api::{ConductorHandle, ConductorOps};
+use crate::capabilities::work::api::{
+    AgentSuggestion, RuntimeDiagnosis, RuntimeReport, TierChoices, WorkMode,
 };
+
 use crate::capabilities::llm::api::{ProbeOutcome, ReplayReport};
 use crate::capabilities::modules::api::{ModulesOps, Roster};
 use crate::capabilities::packages::api::Problem;

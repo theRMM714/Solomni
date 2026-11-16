@@ -86,9 +86,9 @@ pub(crate) fn history_delete_cascades_to_children_and_refuses_child_delete() {
 #[test]
 pub(crate) fn session_delete_stops_the_guest_before_removing_directories() {
     use crate::capabilities::conductor::service::SessionDelete;
-    use crate::capabilities::conductor::service::guest_job::GuestStop;
     use crate::capabilities::vm::api::Vm;
     use crate::capabilities::vm::domain::guest::{GuestRun, GuestSpec};
+    use crate::capabilities::work::api::GuestStop;
     use crate::kernel::api::FenceSpec;
 
     struct StopVm {
@@ -176,8 +176,8 @@ pub(crate) fn session_delete_stops_the_guest_before_removing_directories() {
 #[test]
 pub(crate) fn session_delete_releases_fences_in_background_after_directories() {
     use crate::capabilities::conductor::service::SessionDelete;
-    use crate::capabilities::conductor::service::guest_job::GuestStop;
     use crate::capabilities::vm::api::Vm;
+    use crate::capabilities::work::api::GuestStop;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
@@ -246,10 +246,10 @@ pub(crate) fn session_delete_releases_fences_in_background_after_directories() {
 #[test]
 pub(crate) fn session_delete_releases_fences_even_when_directory_delete_fails() {
     use crate::capabilities::conductor::service::SessionDelete;
-    use crate::capabilities::conductor::service::guest_job::GuestStop;
     use crate::capabilities::session::api::History;
     use crate::capabilities::session::domain::history::HistoryView;
     use crate::capabilities::vm::api::Vm;
+    use crate::capabilities::work::api::GuestStop;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::{Duration, Instant};
 
@@ -324,8 +324,8 @@ pub(crate) fn session_delete_releases_fences_even_when_directory_delete_fails() 
 #[test]
 pub(crate) fn session_delete_with_no_fence_leases_skips_release() {
     use crate::capabilities::conductor::service::SessionDelete;
-    use crate::capabilities::conductor::service::guest_job::GuestStop;
     use crate::capabilities::vm::api::Vm;
+    use crate::capabilities::work::api::GuestStop;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     let store = Arc::new(InMemoryHistory::new());
@@ -363,8 +363,8 @@ pub(crate) fn session_delete_with_no_fence_leases_skips_release() {
 #[test]
 pub(crate) fn session_delete_logs_background_release_failures() {
     use crate::capabilities::conductor::service::SessionDelete;
-    use crate::capabilities::conductor::service::guest_job::GuestStop;
     use crate::capabilities::vm::api::Vm;
+    use crate::capabilities::work::api::GuestStop;
     use std::time::{Duration, Instant};
 
     let store = Arc::new(InMemoryHistory::new());

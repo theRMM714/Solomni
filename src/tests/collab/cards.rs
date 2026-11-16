@@ -269,7 +269,7 @@ pub(crate) fn cards_and_answers_survive_a_rebuild() {
 #[test]
 pub(crate) fn snapshot_pending_is_the_same_fact_as_the_pushed_card() {
     let (handle, ops) = ops_with(vec![module_of("a")], Vec::new());
-    let spec = crate::capabilities::conductor::api::WorkSpec {
+    let spec = crate::capabilities::work::api::WorkSpec {
         name: "w-card".to_string(),
         mode: WorkMode::Collab,
         agents: vec![AgentInstance {
@@ -497,7 +497,7 @@ pub(crate) fn a_second_gate_queues_behind_the_first() {
 #[test]
 pub(crate) fn stopping_voids_the_whole_queue_and_persists_it() {
     let (handle, ops) = ops_with(vec![module_of("a")], Vec::new());
-    let spec = crate::capabilities::conductor::api::WorkSpec {
+    let spec = crate::capabilities::work::api::WorkSpec {
         name: "w-void".to_string(),
         mode: WorkMode::Collab,
         agents: vec![AgentInstance {

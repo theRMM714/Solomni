@@ -3,11 +3,11 @@
 //! 不管：状态实现（`service/state.rs`）；谁在什么时候放取会话（`conductor` 的用例）。
 //! 联动：`conductor` 与 `src/tests/turn.rs` 只经本模块取用。
 
+/// 目的：一席工具面与单 agent 会话对象的装配入口（`conductor` 取完事实后转调这里）。
+pub use crate::capabilities::turn::service::assemble::member_tools;
 /// 目的：装配用的三类参数对象：能力面（`SessionDeps`）、一席事实（`MemberSpec`）、单 agent 一场事实（`SingleSpec`）。
 #[allow(unused_imports)]
 pub use crate::capabilities::turn::service::assemble::{MemberSpec, SessionDeps, SingleSpec};
-/// 目的：一席工具面与单 agent 会话对象的装配入口（`conductor` 取完事实后转调这里）。
-pub use crate::capabilities::turn::service::assemble::{member_tools, single_session};
 /// 目的：回放一段转录得到对话与压缩边界（重建会话与回档都只经这里）。
 #[allow(unused_imports)]
 pub use crate::capabilities::turn::service::rebuild::replay_dialogue;

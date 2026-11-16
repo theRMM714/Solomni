@@ -9,7 +9,7 @@ use super::super::prelude::*;
 /// 目的：核心重启后启用一条 VM 历史会话——必须真的准备并拉起共享 guest，且不跑模型。
 #[test]
 pub(crate) fn activating_a_vm_history_session_boots_the_shared_guest() {
-    use crate::capabilities::conductor::service::{PreparedActivation, ReadyActivation};
+    use crate::capabilities::work::api::{PreparedActivation, ReadyActivation};
     let hist = Arc::new(InMemoryHistory::new());
     seed_session(
         &hist,
