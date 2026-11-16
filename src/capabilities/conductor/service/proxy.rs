@@ -269,7 +269,7 @@ fn json_ok<T: serde::Serialize>(v: &T) -> ToolOutcome {
     }
 }
 
-use super::{Conductor, Session, now_ts, validate_work_name};
+use super::{Conductor, Session, validate_work_name};
 use crate::capabilities::conductor::api::ConductorHandle;
 use crate::capabilities::session::api::subtree_of;
 use crate::capabilities::session::api::{
@@ -567,7 +567,7 @@ impl Conductor {
             delegate: false,
             modules: Vec::new(),
             task: None,
-            ts: now_ts(),
+            ts: crate::kernel::api::unix_seconds(),
             agents: Vec::new(),
             exec,
             sandbox: crate::capabilities::permission::api::SessionSandbox {
@@ -589,7 +589,9 @@ impl Conductor {
         self.workspace
             .prepare(name, &[PROXY_PRIVATE_DIR.to_string()])?;
         if workspace.is_some()
-            && let Err(e) = self.workspace.work_import_root(name, now_ts())
+            && let Err(e) = self
+                .workspace
+                .work_import_root(name, crate::kernel::api::unix_seconds())
         {
             self.log.warn(
                 "conductor::create_proxy",
@@ -674,7 +676,7 @@ impl Conductor {
         s.set_context_budget(window, percent, keep_percent);
         s.set_context_freshness(meta.context_freshness);
         s.set_model(self.registry.core_model());
-        s.set_compact_factory(self.compact_factory());
+        s.set_compact_factory(self.turn.compact_factory());
         Ok(s)
     }
 }

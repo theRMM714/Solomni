@@ -1,17 +1,19 @@
 //! 目的：共享区版本化工作区的**成员侧执行者**——把六个 work_* 调用接到 workspace 能力面上。
 //! 管：成员工具调用的参数解析、路径权限收口与回执转交。
 //! 不管：版本库写入、冲突与备份判定（在 workspace）；工具声明（`systools/tools.yaml`）。
-//! 联动：在会话工作线程上执行；成员循环只认"谁认领这个名字"；版本库写入由 workspace 的
+//! 联动：`turn` 装配工具面时按 allowed 现取本文件的 `work_handlers`；版本库写入由 workspace 的
 //!   service 串行化（它持版本库端口）。
 
-use super::now_ts;
-use crate::capabilities::conductor::domain::work as dw;
 use crate::capabilities::permission::api::{Decision, PermissionSet, Reach};
-use crate::capabilities::workspace::api::{CommitRequest, ResolveRequest, ResolveTake, Workspace};
+use crate::capabilities::workspace::api as dw;
+use crate::capabilities::workspace::api::{
+    CommitRequest, ResolveRequest, ResolveTake, Sandbox, Workspace,
+};
 use crate::kernel::api::ToolOutcome;
 use crate::kernel::ports::ToolHandler;
 use std::sync::Arc;
 
+/// 目的：本席的工作区工具执行者：六个 `work_*` 名字由它认领，参数解析与路径权限在这里收口。
 pub struct WorkHandler {
     workspace: Arc<dyn Workspace + Send + Sync>,
     /// 顶层工作名（共享区与版本库的归属）。
@@ -68,6 +70,7 @@ pub(crate) fn check_writable(
 }
 
 impl WorkHandler {
+    /// 目的：按一席的沙箱事实造执行者（工作名、agent 实例名与生效权限都从沙箱来）。
     pub fn new(
         workspace: Arc<dyn Workspace + Send + Sync>,
         work: &str,
@@ -93,7 +96,10 @@ impl WorkHandler {
         if let Err(e) = check_writable(&self.permissions, &paths, &[]) {
             return outcome(false, e);
         }
-        match self.workspace.work_sync(&self.work, &paths, now_ts()) {
+        match self
+            .workspace
+            .work_sync(&self.work, &paths, crate::kernel::api::unix_seconds())
+        {
             Ok(r) => outcome(true, dw::render_sync(&r)),
             Err(e) => outcome(false, e),
         }
@@ -136,7 +142,7 @@ impl WorkHandler {
             paths,
             deletes,
             message,
-            time: now_ts(),
+            time: crate::kernel::api::unix_seconds(),
             line,
         };
         match self.workspace.work_commit(&self.work, agent, session, &req) {
@@ -286,6 +292,24 @@ impl WorkHandler {
 
 fn outcome(ok: bool, output: String) -> ToolOutcome {
     ToolOutcome { ok, output }
+}
+
+/// 目的：本席要装的工作区工具执行者——角色面没发任何 `work_*` 就一个都不装。
+/// 参数：workspace = 共享区用例面；sb = 这一席的沙箱；allowed = 角色面发放的工具 id。
+pub fn work_handlers(
+    workspace: &Arc<dyn Workspace + Send + Sync>,
+    sb: &Sandbox,
+    allowed: &[String],
+) -> Vec<Arc<dyn ToolHandler>> {
+    if !allowed.iter().any(|t| dw::is_work_tool(t)) {
+        return Vec::new();
+    }
+    vec![Arc::new(WorkHandler::new(
+        Arc::clone(workspace),
+        &sb.work_name,
+        &sb.agent,
+        sb.permissions.clone(),
+    ))]
 }
 
 impl ToolHandler for WorkHandler {

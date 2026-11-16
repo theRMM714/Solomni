@@ -183,7 +183,7 @@ impl Conductor {
                 .map_err(|e| format!("代理会话没有可用模型通道：{}", e))?;
             let (sid, facts) = self.create_proxy_with_facts(
                 &spec.name,
-                now_ts(),
+                crate::kernel::api::unix_seconds(),
                 spec.tier,
                 spec.guest.as_deref(),
                 spec.permission
@@ -279,7 +279,7 @@ impl Conductor {
             delegate,
             modules: module_ids.clone(),
             task: spec.task.clone(),
-            ts: now_ts(),
+            ts: crate::kernel::api::unix_seconds(),
             agents: metas.clone(),
             // 编排归属（代理建的子工作 = Some(父)）；节点子会话由 spawn_sub_session 另建。
             parent: parent.map(|s| s.to_string()),
@@ -335,7 +335,10 @@ impl Conductor {
         self.workspace.prepare(&root, &agent_names)?;
         if workspace.is_some() {
             // 首次绑定：把工作区现有文件导入成初始提交，agent 立刻就能 pull；失败不挡建会话。
-            if let Err(e) = self.workspace.work_import_root(&root, now_ts()) {
+            if let Err(e) = self
+                .workspace
+                .work_import_root(&root, crate::kernel::api::unix_seconds())
+            {
                 self.log.warn(
                     "conductor::create_work",
                     &format!("工作区初始导入失败：{}", e),

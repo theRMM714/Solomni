@@ -1,17 +1,18 @@
 # workspace（工作区）
 
-> 定位：沙箱寻址与共享区版本化。
-> 效力：规范｜核对：2026-11-04｜依据：`src/capabilities/workspace/api.rs`
+> 定位：沙箱寻址、共享区版本化与成员侧工作工具的处理器。
+> 效力：规范｜核对：2026-11-16｜依据：`src/capabilities/workspace/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
 
 - 管：工作区与沙箱寻址（含越界判定）、建工作与上传、文件视图、根会话的外部工作区绑定投影，以及**共享区版本化工作区**（内容寻址的提交记录、各 agent 的拉取基线、文件级三方比较、三方视图与显式冲突解决、按提交点还原）。
+- 管：**成员侧工作工具处理器**——`work_pull` / `work_commit` / `work_sync` / `work_status` / `work_versions` / `work_resolve` / `work_lost` 七个工具名由 `src/capabilities/workspace/service/work_tools.rs` 的 `WorkHandler` 认领，回执文本由 `src/capabilities/workspace/domain/work_tools.rs` 渲染；`work_handlers` 按角色面发放的名单现取执行者。
 - 不管：模块清单与 `module.yaml`（在 `modules`，本能力只消费它给的模块事实）、不执行工具（`tools`）、不写会话流水（`session`）、不决定谁能用哪些工具（`tools` 的角色表）。
 
 ## 入站契约与状态归属
 
-- 入站面：`api::Workspace`。
+- 入站面：`api::Workspace`；装配侧另有 `api::work_handlers(&Arc<dyn Workspace + Send + Sync>, &Sandbox, &[String]) -> Vec<Arc<dyn ToolHandler>>` 与 `api::WorkHandler`（`turn` 装一席工具面时按 `allowed` 现取；工作名、agent 名与生效权限都从沙箱来）。
   - 目录与视图：**`bind`**（把根会话的工作区绑定刷成 `.work-root` 布局投影；`None` = 产品内布局）/ `prepare` / **`discard`**（撤销一次准备：只删本产品建出的东西——空沙箱 / 空 `work/`、布局投影与版本库 `.work`；建会话失败时用）/ `work_has` / `files` / `usage` / `roots`（共享区根、会话树根 `session_root` 与各 agent 私沙根）。`usage` 在内存里按 `session + agents` 缓存 2 秒（前端 `@` 菜单与删除确认会短时间重复取；写路径不做逐写失效），统计时**不跟随**目录链接 / 联接——链接本身按一个文件计，避免重复计数与成环（`src/capabilities/workspace/detail/fs_workspace.rs`）。
   - 共享区版本化：`work_pull` / `work_commit` / `work_sync` / `work_commit_user` / `work_status` / `work_versions` / `work_resolve` / `work_lost` / `work_restore_lost` / `work_recover` / `work_gc` / `work_restore` / `work_head` / `work_archive` / `work_restore_archive` / `work_delete` / `work_archives`。
   - **提交历史视图**：`work_log(work, limit, before?)` 给当前 head、新→旧的分页提交与每条 `on_head`（是否在当前 head 祖先链）；`work_commit_view` 给提交详情与改动清单（对象大小 / 媒体提示）；`work_commit_file` 给该提交里某个文件的受限预览（路径必须真在这条提交的树里，`src/capabilities/workspace/domain/workspace.rs`）。这些是只读视图，不进动作表。
@@ -46,7 +47,7 @@
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`kernel`、`permission`、`prompt`
-- 谁在用我：`collab`、`conductor`、`provision`（`guest-runtime` 的沙箱清单）、`session`、`tools`
+- 谁在用我：`collab`、`conductor`、`provision`（`guest-runtime` 的沙箱清单）、`session`、`tools`、`turn`（一席工具面装配时取 `work_handlers`）
 
 ## 改动本单元时必须同步
 

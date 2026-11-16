@@ -357,7 +357,7 @@ impl Conductor {
             modules: a.modules.clone(),
             // 会话跨整场工作，所以记**工作的需求**（节点目标由链记着，随回合下发）。
             task: pmeta.task.clone(),
-            ts: now_ts(),
+            ts: crate::kernel::api::unix_seconds(),
             agents: vec![a.clone()],
             exec: pmeta.exec.clone(),
             // 子会话只带自己的 narrowing；父的 ceiling 在判定时沿链求交，不复制。

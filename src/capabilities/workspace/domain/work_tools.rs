@@ -1,8 +1,8 @@
-//! 目的：共享区版本化工作区六个核心自有工具（`work_pull` / `work_commit` / `work_status` /
-//!   `work_versions` / `work_resolve` / `work_lost`）的纯逻辑——工具名、入参解析与回执拼装。
+//! 目的：共享区版本化工作区七个核心自有工具（`work_pull` / `work_commit` / `work_status` /
+//!   `work_versions` / `work_resolve` / `work_lost` / `work_sync`）的纯逻辑——工具名、入参解析与回执拼装。
 //! 管：工具名常量与 `is_work_tool`、取参（`str_list` / `str_arg`）、各工具回执的拼装。
-//! 不管：真正的拉取 / 提交 / 状态 / 三方视图 / 解决 / 备份恢复（走 `conductor::service::work_tools`
-//!   → `workspace::api::Workspace`）；冲突、状态与备份判定（在 `workspace`）。
+//! 不管：真正的拉取 / 提交 / 状态 / 三方视图 / 解决 / 备份恢复（走 `workspace::api::Workspace`）；
+//!   冲突、状态与备份判定（在 `workspace`）。
 //! 联动：由本能力的 `service/` 调用；工具名与 `systools/tools.yaml` 同一份名单。
 
 use crate::capabilities::workspace::api::{
@@ -10,12 +10,19 @@ use crate::capabilities::workspace::api::{
     RestoreLostReport, StatusReport, SyncReport, VERSION_TEXT_LIMIT, VersionView,
 };
 
+/// 目的：把主副本的更新拉进沙箱（`work_pull`）。
 pub const PULL: &str = "work_pull";
+/// 目的：把沙箱里的改动提交到主副本（`work_commit`）。
 pub const COMMIT: &str = "work_commit";
+/// 目的：看主副本与工作副本的当前状态（`work_status`）。
 pub const STATUS: &str = "work_status";
+/// 目的：看一条路径的基线 / 主副本 / 沙箱三方视图（`work_versions`）。
 pub const VERSIONS: &str = "work_versions";
+/// 目的：按 `take` 解决冲突之后再提交（`work_resolve`）。
 pub const RESOLVE: &str = "work_resolve";
+/// 目的：列被覆盖的本地版本备份（`work_lost`）。
 pub const LOST: &str = "work_lost";
+/// 目的：把沙箱里的改动并入主副本（`work_sync`）。
 pub const SYNC: &str = "work_sync";
 
 /// 目的：判定这个名字是不是共享区版本化的工具面（角色表 executor / solo 引用它们）。

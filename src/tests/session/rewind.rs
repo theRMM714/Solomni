@@ -402,7 +402,10 @@ pub(crate) fn rebuild_restores_the_last_shell_snapshot_from_the_transcript() {
     .unwrap();
     let (meta, events) = core.history_open(&sid).unwrap();
     drop(core.rebuild_session(&meta, &events).expect("按转录重建"));
-    let live = core.shell_view(&sid).expect("重建后状态栏要有 shell 快照");
+    let live = core
+        .turn
+        .shell_view(&sid)
+        .expect("重建后状态栏要有 shell 快照");
     assert_eq!(live.command, "npm test");
     assert_eq!(live.cwd, "/w/a");
     assert_eq!(live.elapsed_secs, Some(7));
@@ -449,7 +452,10 @@ pub(crate) fn rebuild_prefers_the_structured_shell_facts_over_the_receipt() {
     .unwrap();
     let (meta, events) = core.history_open(&sid).unwrap();
     drop(core.rebuild_session(&meta, &events).expect("按转录重建"));
-    let live = core.shell_view(&sid).expect("重建后状态栏要有 shell 快照");
+    let live = core
+        .turn
+        .shell_view(&sid)
+        .expect("重建后状态栏要有 shell 快照");
     assert_eq!(live.command, "npm test");
     assert_eq!(live.cwd, "/w/b", "读事实，不回落到解析");
     assert_eq!(live.elapsed_secs, Some(331));

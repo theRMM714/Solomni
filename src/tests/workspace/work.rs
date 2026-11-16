@@ -717,3 +717,25 @@ pub(crate) fn work_commits_store_roots_and_deltas_but_read_full_tree() {
         vec!["a.md".to_string(), "b.md".to_string(), "c.md".to_string()]
     );
 }
+
+/// 目的：验成员侧工作工具执行者按角色面发放的名单现取——没发任何 `work_*` 就一个都不装。
+#[test]
+pub(crate) fn work_handlers_are_taken_only_when_the_role_face_allows_them() {
+    use crate::capabilities::workspace::api::work_handlers;
+
+    let (ws, _dirs, _store) = work_ws();
+    let sb = test_sandbox("a", &[]);
+    assert!(
+        work_handlers(&ws, &sb, &[]).is_empty(),
+        "一个 work_* 都没发就不装执行者"
+    );
+    assert!(
+        work_handlers(&ws, &sb, &["read".to_string()]).is_empty(),
+        "只发别的工具也不装"
+    );
+    let allowed = vec!["read".to_string(), "work_pull".to_string()];
+    let handlers = work_handlers(&ws, &sb, &allowed);
+    assert_eq!(handlers.len(), 1, "发了一个 work_* 就装一个执行者");
+    assert!(handlers[0].owns("work_pull"));
+    assert!(!handlers[0].owns("read"), "执行者不认领非 work_* 的名字");
+}

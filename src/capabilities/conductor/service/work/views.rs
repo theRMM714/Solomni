@@ -138,7 +138,7 @@ impl Conductor {
                         }
                         Err(_) => (String::new(), String::new(), false, None),
                     };
-                let shell = self.shell_view(&sid);
+                let shell = self.turn.shell_view(&sid);
                 // 过期内容替换是**工作根**的会话级事实：子会话与工作根共享同一个开关。
                 let context_freshness = match work_root(self.history.as_ref(), &sid) {
                     Ok(root) => self
@@ -221,8 +221,13 @@ impl Conductor {
             Some(Session::Collab(c)) => c.next_line,
             None => 0,
         };
-        self.workspace
-            .work_commit_user(&work, &name, bytes, now_ts(), line)?;
+        self.workspace.work_commit_user(
+            &work,
+            &name,
+            bytes,
+            crate::kernel::api::unix_seconds(),
+            line,
+        )?;
         Ok(true)
     }
 

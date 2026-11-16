@@ -13,6 +13,13 @@ pub use crate::capabilities::workspace::domain::asset::{
 pub use crate::capabilities::workspace::domain::base::CommitRefusal;
 pub use crate::capabilities::workspace::domain::hash::content_hash;
 pub use crate::capabilities::workspace::domain::readfact::ReadFact;
+/// 目的：`work_*` 工具的名字、取参与回执拼装——`tools` 与 `turn` 只从这里取，不碰 domain。
+#[allow(unused_imports)]
+pub use crate::capabilities::workspace::domain::work_tools::{
+    COMMIT, LOST, PULL, RESOLVE, STATUS, SYNC, VERSIONS, is_work_tool, render_commit, render_lost,
+    render_pull, render_resolve, render_restore_lost, render_status, render_sync, render_versions,
+    str_arg, str_list,
+};
 pub use crate::capabilities::workspace::domain::workspace::{
     AreaUsage, Place, Sandbox, Sandboxes, WorkFiles, WorkRoots, WorkUsage, WorkspaceGrant,
     safe_file_name,
@@ -23,6 +30,10 @@ pub use crate::capabilities::workspace::domain::workstore::{
     ResolveTake, ResolveWarning, ResolveWarningKind, RestoreLostReport, StatusEntry, StatusReport,
     SyncReport, VersionView,
 };
+
+/// 目的：`work_*` 工具执行者——`turn` 装配工具面时按角色面发放的工具 id 现取。
+#[allow(unused_imports)]
+pub use crate::capabilities::workspace::service::work_tools::{WorkHandler, work_handlers};
 
 /// 目的：一条待判定的读取（一次 `read` 读到的行区间 + 当时的整份指纹）。
 #[derive(Debug, Clone, PartialEq, Eq)]

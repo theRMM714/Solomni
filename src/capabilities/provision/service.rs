@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::capabilities::provision::api::{DepStatus, GuestBase, JobState, ProcInfo, Provision};
+use crate::capabilities::provision::api::{
+    DepStatus, GuestBase, HostTool, JobState, ProcInfo, Provision,
+};
 use crate::capabilities::provision::domain::{
     Dep, deps, for_host, install_identity, is_toolchain, links, pinned_sha256, source_url, under,
 };
@@ -274,6 +276,24 @@ impl Provision for ProvisionService {
 
     fn ensure_spec(&self, spec: &str, on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
         ProvisionService::ensure_spec(self, spec, on_line)
+    }
+
+    fn tool_path(&self, tool: HostTool, registered: &str) -> Option<String> {
+        let registered = registered.trim();
+        if !registered.is_empty() {
+            return Some(registered.to_string());
+        }
+        // 没登记：按本机清单里在场的那一条取（**绝对路径**——清单里的 probe 是相对产品根的写法）。
+        let prefix = match tool {
+            HostTool::Qemu => "vm.qemu.",
+            HostTool::Virtiofsd => "vm.virtiofsd.",
+            HostTool::Smbd => "vm.smbd.",
+        };
+        self.status()
+            .ok()?
+            .iter()
+            .find(|d| d.present && d.id.starts_with(prefix))
+            .map(|d| self.root.join(&d.probe).to_string_lossy().into_owned())
     }
 }
 
