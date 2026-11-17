@@ -117,12 +117,16 @@ impl Handle {
                         })?;
                         match mode.as_str() {
                             "collab" => {
-                                crate::capabilities::turn::turn::api::spawn_detached_collab(self, sid)
+                                crate::capabilities::turn::turn::api::spawn_detached_collab(
+                                    self, sid,
+                                )
                             }
-                            "proxy" => {
-                                crate::capabilities::turn::turn::api::spawn_detached_proxy(self, sid)
-                            }
-                            _ => crate::capabilities::turn::turn::api::spawn_detached_continue(self, sid),
+                            "proxy" => crate::capabilities::turn::turn::api::spawn_detached_proxy(
+                                self, sid,
+                            ),
+                            _ => crate::capabilities::turn::turn::api::spawn_detached_continue(
+                                self, sid,
+                            ),
                         }
                     }
                     "active".to_string()

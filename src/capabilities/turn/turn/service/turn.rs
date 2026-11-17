@@ -7,9 +7,11 @@
 
 use std::sync::Arc;
 
-use crate::capabilities::conversation::collab::api::CollabSession;
 use crate::capabilities::catalog::registry::api::Registry;
-use crate::capabilities::conversation::session::api::{AgentSession, Gates, RunState, SessionEvent, subtree_of};
+use crate::capabilities::conversation::collab::api::CollabSession;
+use crate::capabilities::conversation::session::api::{
+    AgentSession, Gates, RunState, SessionEvent, subtree_of,
+};
 use crate::capabilities::turn::turn::api::{Prepared, Session};
 use crate::kernel::ports::HostProbe;
 

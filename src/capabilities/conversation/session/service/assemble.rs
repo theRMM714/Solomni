@@ -8,17 +8,19 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::capabilities::llm::api::{Channel, Llm, Msg, ToolMode};
 use crate::capabilities::catalog::modules::api::Module;
-use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::catalog::registry::api::AgentMeta;
-use crate::capabilities::residents::api::ResidentOps;
 use crate::capabilities::conversation::session::api::{
     AgentSession, CompactChatFactory, ContextUsage, SessionEvent, SessionParams, ShellSlot,
     ToolFace, service_ops_for_modules, tool_table,
 };
-use crate::capabilities::conversation::session::domain::assemble::{face_tools, service_ops_of, serviced_tools};
+use crate::capabilities::conversation::session::domain::assemble::{
+    face_tools, service_ops_of, serviced_tools,
+};
 use crate::capabilities::conversation::session::domain::tools::MemberTools;
+use crate::capabilities::llm::api::{Channel, Llm, Msg, ToolMode};
+use crate::capabilities::prompt::api::{Prompt, Segment};
+use crate::capabilities::residents::api::ResidentOps;
 use crate::capabilities::tools::api::{Observations, ToolExec, Tools, tool_notes};
 use crate::capabilities::vm::api::{GuestOs, Vm};
 use crate::capabilities::workspace::api::{ReadFact, Sandbox, Workspace};

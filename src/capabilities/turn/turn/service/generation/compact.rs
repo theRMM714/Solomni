@@ -50,9 +50,12 @@ pub(crate) fn compact<H: TurnHost>(host: &H, sid: &str) -> Result<Advance, Strin
                     Ok(())
                 }
             })?;
-            let note = SessionEvent::Notice(crate::capabilities::conversation::session::api::interrupted_note(
-                &format!("压缩没成功：{}", err),
-            ));
+            let note = SessionEvent::Notice(
+                crate::capabilities::conversation::session::api::interrupted_note(&format!(
+                    "压缩没成功：{}",
+                    err
+                )),
+            );
             let head = bus.push(sid, std::slice::from_ref(&note));
             return Ok(Advance { head });
         }

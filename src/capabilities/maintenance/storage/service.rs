@@ -3,13 +3,13 @@
 //! 不管：目录怎么扫（survey）、文件怎么删（reclaim）、guest 怎么起（vm）、下载怎么装（provision）。
 //! 联动：组合根构造并注入三个端口；builds 在起 guest 前问 ensure_headroom；口径见 docs/storage/README.md。
 
-use crate::capabilities::provision::api::Provision;
 use crate::capabilities::maintenance::storage::api::{
     CAT_BUILD, CAT_DOWNLOAD, CAT_LOGS, CAT_OVERLAYS, CleanKind, CleanOutcome, CleanRequest,
     GcAction, GcReport, LastGc, SpaceCategory, SpaceItem, SpaceReport, Storage, StoragePolicy,
 };
 use crate::capabilities::maintenance::storage::domain::{self, safe_id};
 use crate::capabilities::maintenance::storage::ports::{GuestLiveness, SpaceReclaim, SpaceSurvey};
+use crate::capabilities::provision::api::Provision;
 use crate::kernel::api::JobState;
 use crate::kernel::ports::Log;
 use std::sync::{Arc, Mutex};

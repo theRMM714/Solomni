@@ -6,14 +6,14 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use crate::capabilities::conversation::collab::api::CollabSession;
-use crate::capabilities::llm::api::{Channel, Msg};
 use crate::capabilities::catalog::modules::api::Module;
 use crate::capabilities::catalog::registry::api::Registry;
+use crate::capabilities::conversation::collab::api::CollabSession;
 use crate::capabilities::conversation::session::api::{
     AgentSession, SessionMeta, SessionParams, guest_lease_for, role_of, session_kind_of, work_root,
     work_root_of,
 };
+use crate::capabilities::llm::api::{Channel, Msg};
 use crate::capabilities::turn::turn::api::Session;
 use crate::capabilities::turn::turn::service::session::Turn;
 use crate::capabilities::workspace::api::Sandbox;
@@ -130,17 +130,18 @@ impl Turn {
                 // 重建时同样按登记处派生形态：系统提示与实际协议必须一致（回放才与实时一致）
                 let mode = registry.tool_mode(a.model.as_deref());
                 // **会话参数**：与建立时同一个口径（身份块每回合现渲染，不进消息列表）。
-                let params = crate::capabilities::conversation::session::api::SessionParams::from_workspace(
-                    &a.name,
-                    &sb,
-                    &modules,
-                    &session_kind_of(self.history.as_ref(), meta)?,
-                    &role_of(self.history.as_ref(), meta)?,
-                )
-                .with_chara(a.chara.clone())
-                .with_guest(crate::capabilities::vm::api::guest_os_of(
-                    &self.root, probe, &meta.exec,
-                ));
+                let params =
+                    crate::capabilities::conversation::session::api::SessionParams::from_workspace(
+                        &a.name,
+                        &sb,
+                        &modules,
+                        &session_kind_of(self.history.as_ref(), meta)?,
+                        &role_of(self.history.as_ref(), meta)?,
+                    )
+                    .with_chara(a.chara.clone())
+                    .with_guest(crate::capabilities::vm::api::guest_os_of(
+                        &self.root, probe, &meta.exec,
+                    ));
                 let (history, marks, line_reply, line_ids, compacted_upto, compacted_line) =
                     replay_dialogue(events, mode);
                 let unavailable = crate::capabilities::vm::api::unavailable_modules(
@@ -207,10 +208,12 @@ impl Turn {
                     reads: replay_reads(events),
                     usage: crate::capabilities::conversation::session::api::last_usage(events),
                 };
-                Session::Single(crate::capabilities::conversation::session::api::rebuild_single(
-                    &self.session_ports(),
-                    spec,
-                ))
+                Session::Single(
+                    crate::capabilities::conversation::session::api::rebuild_single(
+                        &self.session_ports(),
+                        spec,
+                    ),
+                )
             }
             // 代理会话：没有 agent（核心自己说话）；外壳由 build_proxy 装配，回放与单 agent 共用同一件。
             "proxy" => {
@@ -224,12 +227,16 @@ impl Turn {
                 s.compacted_upto = compacted_upto;
                 s.compacted_line = compacted_line;
                 s.next_line = s.marks.len() as u64;
-                s.set_reply_seq(crate::capabilities::conversation::session::api::max_reply(events));
+                s.set_reply_seq(crate::capabilities::conversation::session::api::max_reply(
+                    events,
+                ));
                 s.set_context_freshness(meta.context_freshness);
                 for (body, fact) in replay_reads(events) {
                     s.note_read_at(body, fact);
                 }
-                s.set_last_usage(crate::capabilities::conversation::session::api::last_usage(events));
+                s.set_last_usage(crate::capabilities::conversation::session::api::last_usage(
+                    events,
+                ));
                 Session::Single(s)
             }
             other => {
@@ -240,8 +247,9 @@ impl Turn {
             }
         };
         // 状态栏的 shell 快照同样按转录派生：重启 / 启用 / 回档重建后不再"失忆"。
-        self.shell_slot(&meta.name)
-            .set(crate::capabilities::conversation::session::api::last_shell(events));
+        self.shell_slot(&meta.name).set(
+            crate::capabilities::conversation::session::api::last_shell(events),
+        );
         Ok(built)
     }
 }
@@ -265,9 +273,9 @@ fn replay_reads(
             let Some(t) = l.get("tool") else {
                 continue;
             };
-            let Ok(c) = serde_json::from_value::<crate::capabilities::conversation::session::api::ToolCallView>(
-                t.clone(),
-            ) else {
+            let Ok(c) = serde_json::from_value::<
+                crate::capabilities::conversation::session::api::ToolCallView,
+            >(t.clone()) else {
                 continue;
             };
             if let Some(fact) = c.read.clone() {
@@ -312,7 +320,9 @@ pub fn replay_dialogue(
     // 对话里**只有**真正发生过的事；身份与环境由 params 现渲染。
     let mut history: Vec<Msg> = compacted
         .as_ref()
-        .map(|(_, summary, _)| crate::capabilities::conversation::session::api::summary_message(summary))
+        .map(|(_, summary, _)| {
+            crate::capabilities::conversation::session::api::summary_message(summary)
+        })
         .into_iter()
         .collect();
     let mut marks: Vec<usize> = Vec::new();
@@ -413,7 +423,8 @@ pub fn replay_dialogue(
                 .filter_map(|t| t.get("tool").cloned())
                 .filter_map(|t| serde_json::from_value(t).ok())
                 .collect();
-            for m in crate::capabilities::conversation::session::api::reply_msgs(mode, &raw, &views) {
+            for m in crate::capabilities::conversation::session::api::reply_msgs(mode, &raw, &views)
+            {
                 history.push(m);
             }
             for row in &group {
@@ -535,9 +546,11 @@ impl Turn {
             model: registry.core_model(),
             freshness: meta.context_freshness,
         };
-        Ok(crate::capabilities::conversation::session::api::proxy_session(
-            &self.session_ports(),
-            spec,
-        ))
+        Ok(
+            crate::capabilities::conversation::session::api::proxy_session(
+                &self.session_ports(),
+                spec,
+            ),
+        )
     }
 }

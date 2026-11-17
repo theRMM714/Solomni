@@ -3,7 +3,9 @@
 //! 不管：编什么、什么时候编（`service.rs`）、guest 与盘怎么起（`vm`）。
 //! 联动：端口见 `ports.rs`；口径见 docs/builds/README.md 的「目标环境」与单元地图。
 
-use crate::capabilities::maintenance::builds::ports::{BuildCache, CacheGuard, CacheMount, ModuleWorkspace};
+use crate::capabilities::maintenance::builds::ports::{
+    BuildCache, CacheGuard, CacheMount, ModuleWorkspace,
+};
 use crate::capabilities::vm::api::GuestImage;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

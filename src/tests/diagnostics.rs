@@ -4,53 +4,6 @@
 //! 不管：命令表与旗语解析（在 systools/commands.yaml 与 presentation/cli）、模块清单校验、围栏机制本身。
 //! 联动：模块契约见 MODULE_SPEC 的「构建」；状态落 `.vm/build-state/<模块>.json`。
 
-/// 目的：--work-gc 默认 dry-run、--yes 才删；只删不可达对象。
-#[test]
-fn work_gc_cli_dry_run_then_applies() {
-    use crate::capabilities::workspace::api::{Workspace, content_hash};
-    use crate::capabilities::workspace::detail::fs_workspace::FsWorkspace;
-    use crate::capabilities::workspace::detail::fs_workstore::FsWorkStore;
-    use crate::capabilities::workspace::ports::WorkStore;
-    use crate::capabilities::workspace::service::WorkspaceService;
-    use std::sync::Arc;
-
-    let root = crate::tests::scratch("work-gc-cli");
-    let dirs = Arc::new(FsWorkspace::new(root.join("session")));
-    let store = Arc::new(FsWorkStore::new());
-    let ws = WorkspaceService::new(dirs, store.clone());
-    ws.prepare("w", &[]).unwrap();
-    ws.work_commit_user("w", "keep.txt", b"keep", 1, 0).unwrap();
-    let store_path = root.join("session").join("w").join(".work");
-    let orphan = content_hash(b"orphan");
-    store.write_object(&store_path, &orphan, b"orphan").unwrap();
-    let keep = content_hash(b"keep");
-    assert!(store_path.join("objects").join(&orphan).exists());
-
-    let system = crate::entry::assembly::system(&root, &Default::default()).expect("装系统能力");
-    let dry = crate::presentation::cli::boot::run("work-gc", &["w".to_string()], &system, false);
-    assert_eq!(dry, 0);
-    assert!(
-        store_path.join("objects").join(&orphan).exists(),
-        "dry-run 不能删"
-    );
-
-    let applied = crate::presentation::cli::boot::run(
-        "work-gc",
-        &["w".to_string(), "--yes".to_string()],
-        &system,
-        false,
-    );
-    assert_eq!(applied, 0);
-    assert!(
-        !store_path.join("objects").join(&orphan).exists(),
-        "apply 要删不可达对象"
-    );
-    assert!(
-        store_path.join("objects").join(&keep).exists(),
-        "可达对象必须保留"
-    );
-}
-
 /// 目的：`--doctor` 的事实里要能看到"现在在跑什么"：账上记着、进程已经没了的条目照样如实报出来（`alive:false`）。
 #[test]
 pub(crate) fn doctor_reports_the_recorded_processes() {

@@ -3,8 +3,10 @@
 //! 不管：什么时候该重编（在 `service.rs`，按入口在场与目标比对）。
 //! 联动：端口见 `ports.rs`；落点与字段见 MODULE_SPEC 的「构建·缓存」。
 
-use crate::capabilities::maintenance::builds::ports::{BuildHome, BuildStates, BuiltRecord, SourceDigest};
 use crate::capabilities::catalog::modules::api::{BuildDecl, Module};
+use crate::capabilities::maintenance::builds::ports::{
+    BuildHome, BuildStates, BuiltRecord, SourceDigest,
+};
 use std::path::{Path, PathBuf};
 
 /// 目的：构建状态的落点（`.vm/build-state/<模块>.json`）——本机档与各虚拟根共用一份，靠 `target` 区分。

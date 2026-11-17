@@ -10,10 +10,10 @@ mod rewind;
 #[cfg(test)]
 pub(crate) use history::{ReleaseByLease, SessionDelete};
 
-use crate::capabilities::residents::api::ResidentOps;
 use crate::capabilities::conversation::session::api::{
     History, HistoryView, SessionMeta, guest_scope, subtree_of, tree_order,
 };
+use crate::capabilities::residents::api::ResidentOps;
 use crate::capabilities::tools::api::ToolExec;
 use crate::capabilities::turn::turn::api::{Session, Turn};
 use crate::capabilities::vm::api::Vm;

@@ -29,7 +29,8 @@ pub struct Core {
     /// 目的：常驻服务的统一管理面（**不持它的端口**）——动作面与会话回收经它。
     pub(super) residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
     /// 目的：隐秘字段的统一管理面——工具 / 服务起进程时按它解析注入项并脱敏。
-    pub(super) secrets: Arc<dyn crate::capabilities::catalog::secrets::api::SecretOps + Send + Sync>,
+    pub(super) secrets:
+        Arc<dyn crate::capabilities::catalog::secrets::api::SecretOps + Send + Sync>,
     /// 目的：项目内基础工具链的只读安装根（python / node / cc）——shell 的 sandbox 与 external 都放行它们。
     ///  来源是组合根读到的 active.json；不按 agent 的模块重复注入。
     pub(super) base_roots: Vec<std::path::PathBuf>,
@@ -522,31 +523,5 @@ impl Core {
     ) -> Result<(Option<u64>, Vec<SessionEvent>), String> {
         self.work
             .restore_work_commit(&mut self.turn, sid, commit, expect_head, force)
-    }
-
-    /// 目的：薄转发到 `work` 的同名方法（runtime 只做应用编排）。
-    #[cfg(test)]
-    pub(crate) fn create_proxy_with_facts(
-        &mut self,
-        name: &str,
-        granted_at: i64,
-        tier: crate::kernel::api::Tier,
-        guest: Option<&str>,
-        profile: crate::capabilities::permission::api::ProfileId,
-        workspace: Option<crate::capabilities::conversation::session::api::WorkspaceBinding>,
-    ) -> Result<(String, Vec<SessionEvent>), String> {
-        self.work.create_proxy_with_facts(
-            &mut self.turn,
-            self.registry.as_ref(),
-            self.probe.as_ref(),
-            crate::capabilities::work::api::ProxySeed {
-                name,
-                granted_at,
-                tier,
-                guest,
-                profile,
-                workspace,
-            },
-        )
     }
 }

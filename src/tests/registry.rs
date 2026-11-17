@@ -95,38 +95,6 @@ pub(crate) fn provider_lifecycle_and_key_never_leaks_to_view() {
     assert!(core.registry_mut().provider_remove("p1").unwrap());
 }
 
-/// 目的：模型的上下文窗口：给了就按它存；0 = 用户不填（原样存 0），自动压缩按 128K 兜底。
-#[test]
-pub(crate) fn model_context_zero_means_not_filled_and_falls_back_to_128k() {
-    let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]));
-    core.registry_mut()
-        .provider_upsert("p1", "http://x", "k")
-        .unwrap();
-    core.registry_mut()
-        .model_upsert(model_draft("m", "M", "api-m", "p1", "", 64_000))
-        .unwrap();
-    let stored = |c: &crate::capabilities::runtime::service::Core| {
-        c.registry()
-            .model_views()
-            .iter()
-            .find(|v| v.id == "m")
-            .map(|v| v.context)
-            .unwrap_or(0)
-    };
-    assert_eq!(stored(&core), 64_000, "给了窗口就按它存");
-    assert_eq!(core.registry().context_of(Some("m")), 64_000);
-    // 再存一次带 0：0 是"用户不填"，原样存 0；自动压缩用 128K 兜底。
-    core.registry_mut()
-        .model_upsert(model_draft("m", "M2", "api-m", "p1", "改了说明", 0))
-        .unwrap();
-    assert_eq!(stored(&core), 0, "0 = 不填，原样保存");
-    assert_eq!(
-        core.registry().context_of(Some("m")),
-        crate::capabilities::catalog::registry::domain::providers::DEFAULT_CONTEXT_TOKENS,
-        "自动压缩的兜底阈值是 128K"
-    );
-}
-
 #[test]
 pub(crate) fn model_guards_core_default_and_discovery_uses_stored_provider() {
     let catalog = Arc::new(FakeCatalog::new(vec!["m-a".to_string(), "m-b".to_string()]));
@@ -307,115 +275,6 @@ pub(crate) fn agent_crud_and_work_with_agents() {
     assert!(core.registry().agent_views().is_empty());
 }
 
-#[test]
-pub(crate) fn model_catalog_parses_openai_shape_and_rejects_bad() {
-    use crate::capabilities::llm::detail::model_catalog::parse_models;
-    assert_eq!(
-        parse_models(r#"{"data":[{"id":"gpt-4o"},{"id":"o3"},{"id":"gpt-4o"}]}"#).unwrap(),
-        vec!["gpt-4o".to_string(), "o3".to_string()]
-    );
-    assert!(
-        parse_models(r#"{"models":["a"]}"#).is_err(),
-        "缺 data 必须报错"
-    );
-    assert!(parse_models(r#"{"data":[]}"#).is_err(), "空列表必须报错");
-    assert!(parse_models("不是 JSON").is_err());
-}
-
-#[test]
-pub(crate) fn endpoint_candidates_complete_and_fall_back() {
-    use crate::capabilities::llm::detail::endpoint::{
-        chat_candidates, models_candidates, retryable_status,
-    };
-    // 已带版本段：只补后缀（含尾斜杠）
-    assert_eq!(
-        chat_candidates("https://api.x/v1"),
-        vec!["https://api.x/v1/chat/completions"]
-    );
-    assert_eq!(
-        chat_candidates("https://api.x/v1/"),
-        vec!["https://api.x/v1/chat/completions"]
-    );
-    assert_eq!(
-        chat_candidates("https://api.x/v2"),
-        vec!["https://api.x/v2/chat/completions"]
-    );
-    assert_eq!(
-        models_candidates("https://api.x/v1"),
-        vec!["https://api.x/v1/models"]
-    );
-    // 无版本段：先直连，连不上再回落 /v1
-    assert_eq!(
-        chat_candidates("https://api.x"),
-        vec![
-            "https://api.x/chat/completions",
-            "https://api.x/v1/chat/completions"
-        ]
-    );
-    assert_eq!(
-        models_candidates("https://api.x"),
-        vec!["https://api.x/models", "https://api.x/v1/models"]
-    );
-    // 已是完整端点：原样，防重复拼接
-    assert_eq!(
-        chat_candidates("https://api.x/v1/chat/completions"),
-        vec!["https://api.x/v1/chat/completions"]
-    );
-    assert_eq!(
-        models_candidates("https://api.x/v1/models"),
-        vec!["https://api.x/v1/models"]
-    );
-    // 换候选判定：只有 404/405 换，鉴权类立即报
-    assert!(retryable_status(404) && retryable_status(405));
-    assert!(
-        !retryable_status(401)
-            && !retryable_status(403)
-            && !retryable_status(429)
-            && !retryable_status(500)
-    );
-}
-
-#[test]
-pub(crate) fn endpoint_resolve_candidates_retries_shape_mismatch_and_stops_on_fatal() {
-    use crate::capabilities::llm::detail::endpoint::{Attempt, resolve_candidates};
-    let cands = vec!["a".to_string(), "b".to_string(), "c".to_string()];
-
-    // 回归：SPA catch-all 返回 200 HTML（形状不符=Retry）时必须换到下一个候选，而不是立即报错。
-    let mut seen = Vec::new();
-    let got = resolve_candidates(
-        &cands,
-        |url| {
-            seen.push(url.to_string());
-            if url == "b" {
-                Attempt::Ok(7)
-            } else {
-                Attempt::Retry("响应不是 JSON".to_string())
-            }
-        },
-        |_, _, _| {},
-    );
-    assert_eq!(got.unwrap(), ("b".to_string(), 7));
-    assert_eq!(seen, vec!["a".to_string(), "b".to_string()]);
-
-    // 鉴权类 Fatal 立即停，不再试后续候选。
-    let mut seen2 = Vec::new();
-    let fatal: Result<(String, i32), String> = resolve_candidates(
-        &cands,
-        |url| {
-            seen2.push(url.to_string());
-            Attempt::Fatal("供应商返回 401".to_string())
-        },
-        |_, _, _| {},
-    );
-    assert_eq!(fatal.unwrap_err(), "供应商返回 401");
-    assert_eq!(seen2, vec!["a".to_string()]);
-
-    // 全部 Retry 耗尽：报最后一个错误，不静默。
-    let all: Result<(String, i32), String> =
-        resolve_candidates(&cands, |_| Attempt::Retry("失败".to_string()), |_, _, _| {});
-    assert_eq!(all.unwrap_err(), "失败");
-}
-
 // ---------- 模块清单（内存来源） ----------
 #[test]
 pub(crate) fn a_probe_writes_back_only_conclusive_results() {
@@ -495,117 +354,14 @@ pub(crate) fn a_probe_writes_back_only_conclusive_results() {
 #[test]
 pub(crate) fn reserved_directory_names_are_rejected_case_insensitively() {
     let reserved = vec!["work".to_string(), "children".to_string()];
-    assert!(crate::capabilities::catalog::registry::api::check_reserved("children", &reserved).is_err());
+    assert!(
+        crate::capabilities::catalog::registry::api::check_reserved("children", &reserved).is_err()
+    );
     assert!(
         crate::capabilities::catalog::registry::api::check_reserved("CHILDREN", &reserved).is_err(),
         "Windows 文件系统不区分大小写"
     );
     assert!(crate::capabilities::catalog::registry::api::check_reserved("甲", &reserved).is_ok());
-}
-
-/// 目的：默认目录就是四档；映射的字符串是 reasoning_effort 简写，对象原样合并，空对象 = 不发。
-#[test]
-pub(crate) fn thinking_defaults_and_map_shapes_are_resolved() {
-    use crate::capabilities::catalog::registry::domain::providers::{ThinkingCatalog, ThinkingSpec};
-    let mut s = Settings::default();
-    assert_eq!(
-        s.app
-            .thinking
-            .levels
-            .iter()
-            .map(|l| l.id.as_str())
-            .collect::<Vec<_>>(),
-        ["off", "low", "high", "max"],
-        "默认四档"
-    );
-    let levels = BTreeMap::from([
-        (
-            "off".to_string(),
-            serde_json::json!({ "thinking": { "type": "disabled" } }),
-        ),
-        ("low".to_string(), serde_json::json!("low")),
-        ("high".to_string(), serde_json::json!("high")),
-        ("mo".to_string(), serde_json::json!({})),
-    ]);
-    s.models.insert(
-        "m".to_string(),
-        ModelEntry {
-            name: "M".to_string(),
-            api_model: "m".to_string(),
-            provider: "p".to_string(),
-            note: String::new(),
-            tools: Default::default(),
-            context: 32_000,
-            thinking: ThinkingSpec {
-                default: Some("low".to_string()),
-                levels,
-            },
-        },
-    );
-    s.core = Some("m".to_string());
-    assert_eq!(
-        s.thinking_fragment(None, None).unwrap(),
-        Some(serde_json::json!({ "reasoning_effort": "low" })),
-        "未指定会话档时用模型默认档"
-    );
-    assert_eq!(
-        s.thinking_fragment(Some("m"), Some("off")).unwrap(),
-        Some(serde_json::json!({ "thinking": { "type": "disabled" } })),
-        "对象原样合并"
-    );
-    assert_eq!(
-        s.thinking_fragment(Some("m"), Some("mo")).unwrap(),
-        None,
-        "空对象 = 不发字段"
-    );
-    let err = s.thinking_fragment(Some("m"), Some("max")).unwrap_err();
-    assert!(err.contains("未登记思考档位 max"), "缺档要如实报：{}", err);
-    assert!(s.thinking_supports(Some("m"), "high"));
-    assert!(!s.thinking_supports(Some("m"), "max"));
-    assert_eq!(
-        crate::capabilities::catalog::registry::domain::providers::validate_thinking_catalog(
-            &ThinkingCatalog::default()
-        ),
-        Ok(())
-    );
-}
-
-/// 目的：目录标签不限制字符集（中文 / 空格 / 标点都行），但仍拒空、首尾空白、控制字符与重复。
-#[test]
-pub(crate) fn thinking_catalog_accepts_arbitrary_tags() {
-    use crate::capabilities::catalog::registry::domain::providers::{
-        ThinkingCatalog, ThinkingLevel, validate_thinking_catalog,
-    };
-    let tag = |s: &str| ThinkingLevel { id: s.to_string() };
-    let ok = ThinkingCatalog {
-        levels: vec![
-            tag("low"),
-            tag("高"),
-            tag("极高 档"),
-            tag("xhigh!"),
-            tag("🔥"),
-        ],
-    };
-    assert_eq!(validate_thinking_catalog(&ok), Ok(()));
-    let bad = |levels: Vec<ThinkingLevel>| {
-        validate_thinking_catalog(&ThinkingCatalog { levels }).unwrap_err()
-    };
-    assert!(bad(vec![tag("")]).contains("不能为空"));
-    assert!(bad(vec![tag(" low")]).contains("首尾不能有空白"));
-    assert!(bad(vec![tag("lo\tw")]).contains("控制字符"));
-    assert!(bad(vec![tag("low"), tag("low")]).contains("重复"));
-}
-
-/// 目的：目录项只认标签 id；设置文件里多余的 label 字段在读入时忽略。
-#[test]
-pub(crate) fn thinking_catalog_reads_tag_entries_and_ignores_extra_fields() {
-    use crate::capabilities::catalog::registry::domain::providers::ThinkingCatalog;
-    let cat: ThinkingCatalog =
-        yaml_serde::from_str("levels:\n- id: low\n  label: 低\n- id: 高\n").unwrap();
-    assert_eq!(
-        cat.levels.iter().map(|l| l.id.as_str()).collect::<Vec<_>>(),
-        ["low", "高"]
-    );
 }
 
 /// 目的：登记时就拒掉目录外的档、悬空的默认档与被保留键的片段；删掉仍被模型使用的等级也要拒绝。

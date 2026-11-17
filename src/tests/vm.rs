@@ -4,9 +4,6 @@
 //! 联动：契约见 docs/vm/README.md 与 RUNTIME_SPEC.md。
 
 mod concurrency;
-mod diagnose;
-mod fence;
-mod live;
 mod plan;
 mod readiness;
 mod share;

@@ -8,15 +8,15 @@ pub use crate::capabilities::catalog::registry::domain::agents::{
     model_listing, resolve_picks, unique_instance_name, validate_name,
 };
 pub use crate::capabilities::catalog::registry::domain::providers::{
-    AppSettings, ModelDraft, ModelEntry, ModelView, Provider, ProviderView, SandboxEnforceLevel,
-    SandboxUnavailable, Settings, StorageSettings, ThinkingSpec,
+    AppSettings, ModelDraft, ModelEntry, ModelThinkingView, ModelView, Provider, ProviderView,
+    SandboxEnforceLevel, SandboxUnavailable, Settings, StorageSettings, ThinkingSpec,
 };
 
 #[allow(unused_imports)]
 pub use crate::capabilities::catalog::registry::service::{save_agent, save_model};
 
-use crate::capabilities::llm::api::{Channel, ProbeOutcome, ReplayReport, ToolMode};
 use crate::capabilities::catalog::modules::api::Roster;
+use crate::capabilities::llm::api::{Channel, ProbeOutcome, ReplayReport, ToolMode};
 
 /// 目的：登记处的**队列面**：呈现层经 `Handle`（核心自己的线程 + 命令队列）调它。
 ///    与 `Registry`（能力面）的分工是**有意的不对称**，不是重复：

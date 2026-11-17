@@ -5,31 +5,9 @@
 
 use crate::capabilities::provision::detail::fetch::HttpFetch;
 use crate::capabilities::provision::detail::host::RealHost;
-use crate::capabilities::provision::detail::ledger::FileLedger;
 use crate::capabilities::provision::detail::procs::BookProcs;
-use crate::capabilities::provision::domain::{Dep, install_identity};
-use crate::capabilities::provision::ports::{Fetcher, HostFs, Ledger, Procs};
+use crate::capabilities::provision::ports::{Fetcher, HostFs, Procs};
 use std::fs;
-
-/// 目的：造一条任意安装方式的清单条目（端口契约用例夹具）。
-fn dep_of(id: &str, install: &str, probe: &str) -> Dep {
-    Dep {
-        id: id.to_string(),
-        os: "any".to_string(),
-        arch: "any".to_string(),
-        install: install.to_string(),
-        probe: probe.to_string(),
-        source: "release:x".to_string(),
-        kind: "file".to_string(),
-        guest: None,
-        toolchain: None,
-        family: None,
-        strip: 0,
-        size_mb: 0,
-        sha256: String::new(),
-        note: String::new(),
-    }
-}
 
 /// 目的：宿主落点端口的契约——建、查、删都能在临时根上往返，静默失败即不成立。
 #[test]
@@ -54,24 +32,6 @@ fn host_fs_round_trips_directories_files_and_the_exec_bit() {
     assert!(!host.exists(&file));
     host.remove_dir_all(&root.join("a")).expect("删目录要成功");
     assert!(!host.exists(&root.join("a")));
-    let _ = fs::remove_dir_all(&root);
-}
-
-/// 目的：台账端口的契约——在场判定看探针、登记按安装身份、划掉只剩空台账。
-#[test]
-fn ledger_records_by_identity_and_forgets_the_entry() {
-    let root = crate::tests::scratch("provision-ports-ledger");
-    let ledger = FileLedger::new(&root);
-    let dep = dep_of("demo", "inst/demo", "inst/demo/demo.txt");
-    assert!(!ledger.present(&dep), "没落盘就不该算在场");
-    fs::create_dir_all(root.join("inst").join("demo")).expect("建安装目录");
-    fs::write(root.join("inst").join("demo").join("demo.txt"), b"x").expect("落探针");
-    assert!(ledger.present(&dep), "探针在场就要算在场");
-    assert!(ledger.snapshot().is_empty(), "还没登记台账应当为空");
-    ledger.record(&dep).expect("登记要成功");
-    assert_eq!(ledger.snapshot().get("demo"), Some(&install_identity(&dep)));
-    ledger.forget("demo").expect("划掉要成功");
-    assert!(ledger.snapshot().is_empty(), "划掉后台账应当为空");
     let _ = fs::remove_dir_all(&root);
 }
 

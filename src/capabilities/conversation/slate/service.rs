@@ -3,13 +3,13 @@
 //! 不管：提示词文案（在提示词册）；模式收束的纯规则（domain/proposal.rs）；前置判据提示（归调用方）。
 //! 联动：协议只有这一处——两个调用方（推荐 / 代拟）走同一条 slate 工具载荷；入口 slate::api::propose。
 
-use crate::capabilities::llm::api::Msg;
-use crate::capabilities::prompt::api::Segment;
 use crate::capabilities::catalog::registry::api::{RosterPick, model_listing, resolve_picks};
 use crate::capabilities::conversation::session::api::SessionEvent;
 use crate::capabilities::conversation::session::api::core_operation;
 use crate::capabilities::conversation::slate::api::{Mode, Parties, Pick, Proposal, Request};
 use crate::capabilities::conversation::slate::domain::proposal::collapse;
+use crate::capabilities::llm::api::Msg;
+use crate::capabilities::prompt::api::Segment;
 
 /// 目的：拟一份可直接开工的名单——让核心按需求提候选，再按登记处与工作区现状核验。
 /// 约束：登记处有没有模型、核心默认设没设由调用方提示（怎么修），与名单合法性无关；

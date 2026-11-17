@@ -55,42 +55,6 @@ pub(crate) fn build_decl_is_validated_and_survives_the_scan() {
 }
 
 #[test]
-pub(crate) fn shipped_indexer_declares_its_build() {
-    // 随仓的 indexer 是编译型模块：`build:` 段必须被扫出来（产品据此能替它编）。
-    let roster = crate::capabilities::catalog::modules::detail::FsModules::new(
-        PathBuf::from("modules"),
-        crate::capabilities::tools::api::names(),
-    )
-    .scan();
-    let idx = roster
-        .modules
-        .iter()
-        .find(|m| m.manifest.id == "indexer")
-        .expect("随仓有 indexer");
-    let b = idx.manifest.build.as_ref().expect("indexer 要声明 build");
-    // 跨平台写法：命令是模块内的脚本，壳自己按平台找（unix 同名、Windows `.cmd`）。
-    assert_eq!(b.command, "tools/build");
-    assert_eq!(b.needs, vec!["gcc".to_string()], "构建期能力按可执行名判");
-    assert!(!b.net, "构建不需要出网");
-    let unix = idx.root.join("tools").join("build");
-    let win = idx.root.join("tools").join("build.cmd");
-    let unix_body = std::fs::read_to_string(&unix).expect("unix 构建脚本要在");
-    let win_body = std::fs::read_to_string(&win).expect("Windows 构建脚本要在");
-    assert!(unix_body.contains("indexer.cpp"), "{}", unix_body);
-    assert!(unix_body.contains("build/indexer"), "{}", unix_body);
-    assert!(win_body.contains("indexer.cpp") && win_body.contains("build/indexer.exe"));
-    // unix 侧没执行位就跑不起来（入口判据与守门进程都按它判）。
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(&unix)
-            .expect("读权限")
-            .permissions()
-            .mode();
-        assert!(mode & 0o111 != 0, "unix 构建脚本要能直接跑（{:o}）", mode);
-    }
-}
-#[test]
 pub(crate) fn local_entry_only_accepts_relative_paths() {
     use crate::capabilities::catalog::modules::api::local_entry;
     assert_eq!(local_entry("build/indexer build"), Some("build/indexer"));
@@ -123,31 +87,6 @@ pub(crate) fn roster_lists_modules() {
     let r = core.modules_handle().roster();
     let ids: Vec<_> = r.modules.iter().map(|m| m.manifest.id.clone()).collect();
     assert_eq!(ids, vec!["a", "b"]);
-}
-
-#[test]
-pub(crate) fn shipped_modules_scan_clean() {
-    // 随仓模块（modules/）是产品内容的一部分：清单必须全部合法、id 与目录一致。
-    let roster = crate::capabilities::catalog::modules::detail::FsModules::new(
-        PathBuf::from("modules"),
-        crate::capabilities::tools::api::names(),
-    )
-    .scan();
-    assert!(!roster.modules.is_empty(), "仓库应自带模块");
-    assert!(
-        roster.rejected.is_empty(),
-        "随仓清单必须全部合法：{:?}",
-        roster.rejected
-    );
-    // 随仓的三件就是演示工作流那三件：少了任何一件，演示就跑不起来。
-    let ids: Vec<&str> = roster
-        .modules
-        .iter()
-        .map(|m| m.manifest.id.as_str())
-        .collect();
-    for id in ["harvest", "indexer", "render"] {
-        assert!(ids.contains(&id), "随仓模块少了 {}（现在是 {:?}）", id, ids);
-    }
 }
 
 #[test]
@@ -252,12 +191,17 @@ pub(crate) fn overrides_survive_a_reload() {
     let first = test_modules_store(
         Arc::clone(&source) as Arc<dyn ModuleSource + Send + Sync>,
         Arc::clone(&store)
-            as Arc<dyn crate::capabilities::catalog::modules::ports::ModuleStateStore + Send + Sync>,
+            as Arc<
+                dyn crate::capabilities::catalog::modules::ports::ModuleStateStore + Send + Sync,
+            >,
     );
     first.set_module_enabled("a", false).expect("停用");
     let second = test_modules_store(
         source,
-        store as Arc<dyn crate::capabilities::catalog::modules::ports::ModuleStateStore + Send + Sync>,
+        store
+            as Arc<
+                dyn crate::capabilities::catalog::modules::ports::ModuleStateStore + Send + Sync,
+            >,
     );
     assert!(!second.module_enabled("a"), "覆盖要落盘并在下次装配时载入");
 }

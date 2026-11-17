@@ -3,18 +3,18 @@
 //! 不管：模型调用与工具执行机制（在 llm / tools 的端口后）；整理与验收（synthesis.rs）；会话状态机与关卡（collab.rs）；泵的装配（pump.rs）。
 //! 联动：工具循环联动 envelope::Verb::Tool 与 kernel::ports::ProcessRunner；文案经 capabilities/prompt 渲染自提示词册；约定见 docs/session/session-model.md。
 #[cfg(test)]
+use crate::capabilities::conversation::session::api::ToolCallView;
+use crate::capabilities::conversation::session::api::{LineSink, MemberTurn, verb_tag};
+use crate::capabilities::conversation::session::api::{LineView, SessionEvent};
+#[cfg(test)]
+use crate::capabilities::conversation::session::api::{Round, build_round_lines, converse_with};
+#[cfg(test)]
 use crate::capabilities::llm::api::BoxedChat;
 use crate::capabilities::llm::api::Msg;
 use crate::capabilities::llm::api::Verb;
 #[cfg(test)]
 use crate::capabilities::llm::api::{Chat, Chunk};
 use crate::capabilities::prompt::api::{Prompt, Segment};
-#[cfg(test)]
-use crate::capabilities::conversation::session::api::ToolCallView;
-use crate::capabilities::conversation::session::api::{LineSink, MemberTurn, verb_tag};
-use crate::capabilities::conversation::session::api::{LineView, SessionEvent};
-#[cfg(test)]
-use crate::capabilities::conversation::session::api::{Round, build_round_lines, converse_with};
 use std::sync::Arc;
 
 pub const MAX_ROUNDS: usize = 6;
@@ -237,7 +237,8 @@ impl Discussion {
                     kind = "start";
                 }
                 Chunk::Text(t) => {
-                    let (send, next) = crate::capabilities::conversation::session::api::stream_piece(&acc, t);
+                    let (send, next) =
+                        crate::capabilities::conversation::session::api::stream_piece(&acc, t);
                     piece = send;
                     acc = next;
                 }

@@ -5,9 +5,9 @@
 
 use super::collab::CollabSession;
 use super::lines::*;
+use crate::capabilities::catalog::modules::api::Module;
 use crate::capabilities::conversation::collab::service::discussion::{MAX_ROUNDS, Member, TurnOut};
 use crate::capabilities::conversation::collab::service::synthesis::Execution;
-use crate::capabilities::catalog::modules::api::Module;
 use crate::capabilities::conversation::session::api::{Pending, SessionEvent};
 
 impl CollabSession {
@@ -64,7 +64,10 @@ impl CollabSession {
                     TurnOut::Stopped => {
                         // 用户点了「停止」：被中断的那条发言没有吸收（半截 say/agree 会把状态算歪），
                         // 讨论保持可继续——点「继续」从断点接着推进。
-                        self.notice(&crate::capabilities::conversation::session::api::stopped_note(), sink);
+                        self.notice(
+                            &crate::capabilities::conversation::session::api::stopped_note(),
+                            sink,
+                        );
                         return;
                     }
                     TurnOut::AskUser { member, question } => {
@@ -85,7 +88,9 @@ impl CollabSession {
         }
         // 整理：只在还没有方案（或没有链）时做——回档/重启后沿用已记的，不重复花钱。
         if self.plan.is_none() || self.chain.is_none() {
-            sink(crate::capabilities::conversation::session::api::working("核心"));
+            sink(crate::capabilities::conversation::session::api::working(
+                "核心",
+            ));
             let made = {
                 let mut verify_box = self.verify_env("planner");
                 let verify = verify_box.as_deref_mut();
@@ -224,7 +229,9 @@ impl CollabSession {
                 let reviewed = crate::capabilities::taskchain::api::TaskChain {
                     nodes: stage_nodes.clone(),
                 };
-                sink(crate::capabilities::conversation::session::api::working("核心"));
+                sink(crate::capabilities::conversation::session::api::working(
+                    "核心",
+                ));
                 let made = {
                     let mut verify_box = self.verify_env("orchestrator");
                     let verify = verify_box.as_deref_mut();
@@ -249,7 +256,9 @@ impl CollabSession {
                     Ok(v) => v,
                     Err(err) => {
                         self.notice(
-                            &crate::capabilities::conversation::session::api::interrupted_note(&err),
+                            &crate::capabilities::conversation::session::api::interrupted_note(
+                                &err,
+                            ),
                             sink,
                         );
                         return;
@@ -284,7 +293,10 @@ impl CollabSession {
                     sink,
                 );
                 if self.cancelled() {
-                    self.notice(&crate::capabilities::conversation::session::api::stopped_note(), sink);
+                    self.notice(
+                        &crate::capabilities::conversation::session::api::stopped_note(),
+                        sink,
+                    );
                     return;
                 }
                 retry = Some(format!(
@@ -366,7 +378,9 @@ impl CollabSession {
         // 要返工的节点，且只能取上面那张表里的 id——退错了节点等于让错的人白跑一遍。
         let mut retry: Option<String> = None;
         loop {
-            sink(crate::capabilities::conversation::session::api::working("核心"));
+            sink(crate::capabilities::conversation::session::api::working(
+                "核心",
+            ));
             {
                 let mut verify_box = self.verify_env("orchestrator");
                 let verify = verify_box.as_deref_mut();
@@ -401,7 +415,10 @@ impl CollabSession {
                 sink,
             );
             if self.cancelled() {
-                self.notice(&crate::capabilities::conversation::session::api::stopped_note(), sink);
+                self.notice(
+                    &crate::capabilities::conversation::session::api::stopped_note(),
+                    sink,
+                );
                 return;
             }
             retry = Some(format!(
@@ -488,14 +505,15 @@ impl CollabSession {
             // 形态按该 agent 的模型（或核心默认）解析：身份块里的调用约定与实际协议必须一致
             let mode = self.settings.tool_mode_for(a.model.as_deref());
             // **会话参数**：身份块每回合由它现渲染，不存进任何人的消息列表。
-            let params = crate::capabilities::conversation::session::api::SessionParams::from_workspace(
-                &a.name,
-                &sandbox,
-                &modules,
-                "collab",
-                "discussant",
-            )
-            .with_chara(a.chara.clone());
+            let params =
+                crate::capabilities::conversation::session::api::SessionParams::from_workspace(
+                    &a.name,
+                    &sandbox,
+                    &modules,
+                    "collab",
+                    "discussant",
+                )
+                .with_chara(a.chara.clone());
             let member = Member::plain(&a.name, params, mode);
             members.push(member);
         }

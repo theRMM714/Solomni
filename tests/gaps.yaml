@@ -119,3 +119,41 @@
     应用执行别名的 `pwsh` 不再被选中；真 `pwsh` 仍优先于 Windows PowerShell 5.1；
     解释器起不来时回执能看出被回退到哪个程序；`node run-tests.js` 全绿。
   blocked_by: 缺少实现（根因已定位，修法待做）
+
+- id: test.capability-behavior-coverage
+  scope: global
+  level: T3
+  why: |
+    按新测试口径（[TESTING.md](../TESTING.md) 二.4：不做实现耦合测试）删掉了一批直接构造
+    `service|domain|detail` 的用例，这些能力现在只有 api 面或 e2e 面的部分覆盖：
+    `builds`（本机构建、缓存卷、失败回滚、创建前补编）、`secrets`（声明视图、置值、回执脱敏）、
+    `residents`（常驻服务起停与崩溃重拉）、`packages`（清单非法形态、版本去重、冲突预检）、
+    `turn`（提问卡片等待回答）。它们的对外行为还在，只是没有按期验的自动用例。
+  how: |
+    1) 只经 `capabilities/<单元>/<子业务>/api.rs` 的公开面重写行为用例，装配用 `src/tests/doubles` 与
+       `crate::entry::assembly`；api 面缺构造入口时，先补 api（不要开 `#[cfg(test)]` 专用入口）。
+    2) 属于用户可见旅程的部分（建工作与构建、常驻服务、提问裁决）补进 `tests/cross-platform/e2e/`。
+    3) 结构性差集用 `tests/gates/structure/tests-api.js` 与 `docs/testing/doubles.md` 的端口矩阵对齐：
+       每个端口至少有一条只经 api 的行为用例。
+  accept: |
+    上列能力各至少有一条只经 `::api` 的行为用例或 T5 旅程；`node run-tests.js` 全绿；
+    `tests/gaps.yaml` 删掉本条目。
+  blocked_by: 用例已按新口径删除，补齐工作未排期
+
+- id: test.real-machine-behavior
+  scope: global
+  level: T4
+  why: |
+    原先 `SOLOMNI_VM_LIVE` 的真机探针（`src/tests/vm/`、`src/tests/workspace/`、`src/tests/provision/`）
+    直接构造实现分区并断言内部回执，随实现耦合用例一并移除。这些场景只有真机能验：
+    取消与超时无孤儿进程、guest 诊断列出忙进程、外部工作区往返（SMB / virtiofs / 9p 三变体）、
+    UNC 共享根往返、guest-rootfs 属性保留与 4K 块镜像、出包编排。
+  how: |
+    1) 能走用户旅程的（起 guest、进会话、取消、外部工作区绑定、共享根）写成 `tests/cross-platform/e2e/`
+       的 vm 档场景，按 `SOLOMNI_VM_QEMU` / `SOLOMNI_VM_GUEST` / `SOLOMNI_VM_SMBD` / `SOLOMNI_UNC_ROOT` 判环境。
+    2) 只能在进程内观察的（出包编排、rootfs 属性）写成只经 `::api` 的用例，用真实例、真镜像。
+    3) 缺环境一律记 `env-skip`，不写成通过（`docs/testing/execution-ci.md` 的「虚拟机档与真机行为」）。
+  accept: |
+    上列场景各有一条可手工重跑的真机证据，记在 PR 或 `tests/gaps.yaml` 的平台账里；
+    `node run-tests.js --audit=structure` 与 `--docs` 全绿。
+  blocked_by: 需 KVM / WHPX 真机，CI 不具备

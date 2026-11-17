@@ -4,9 +4,9 @@
 //! 联动：载荷来自 tools 的工具调用；任务链形状在 src/kernel/chain.rs。
 
 use super::discussion::*;
+use crate::capabilities::conversation::session::api::SessionEvent;
 use crate::capabilities::llm::api::{Chat, Msg};
 use crate::capabilities::prompt::api::{Prompt, Segment};
-use crate::capabilities::conversation::session::api::SessionEvent;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
@@ -18,7 +18,9 @@ impl Discussion {
         &self,
         core_chat: &mut dyn Chat,
         mode: crate::capabilities::llm::api::ToolMode,
-        verify: Option<&mut (dyn crate::capabilities::conversation::session::api::CoreVerify + 'static)>,
+        verify: Option<
+            &mut (dyn crate::capabilities::conversation::session::api::CoreVerify + 'static),
+        >,
         // 核心这一轮的行（工具行 + 思维链 + 正文）推给谁：落不落由那个会话模块定。
         sink: &mut dyn FnMut(SessionEvent),
     ) -> Result<
@@ -185,7 +187,9 @@ impl Execution {
         systools: &dyn crate::capabilities::tools::api::Tools,
         llm: crate::capabilities::llm::api::LlmOpts,
         mode: crate::capabilities::llm::api::ToolMode,
-        verify: Option<&mut (dyn crate::capabilities::conversation::session::api::CoreVerify + 'static)>,
+        verify: Option<
+            &mut (dyn crate::capabilities::conversation::session::api::CoreVerify + 'static),
+        >,
         // 核心这一轮的行推给谁（总验收也要能看到它在核对什么）。
         sink: &mut dyn FnMut(SessionEvent),
     ) {

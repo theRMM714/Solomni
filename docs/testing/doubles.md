@@ -56,9 +56,9 @@
 
 ### 1.3 Mock
 
-- Mock 表达预先声明的交互期望，适用于"必须调用一次""必须先调用 A 再调用 B""失败后禁止继续调用"等契约（`src/tests/ports.rs`）。
-
-- 本项目不要求引入第三方 mocking 框架。优先使用手写记录型 Fake/Spy，以减少依赖和跨平台不确定性。只有当交互期望本身是被测行为时，才使用 Mock 语义。
+- **Mock 只写在边界**：模拟网络、第三方 API、不可控的外部服务（HTTP / 进程 / 协议）。那里的请求形状与错误回执是必须钉死的外部契约——`src/tests/detail/http.rs` 的本地假供应商与 `tests/cross-platform/e2e/mock.js` 就是这一类。
+- **内部协作不用 Mock**：能力之间、能力与端口之间一律用 fake 的内存实现（`src/tests/doubles/`），不断言内部调用次数、调用顺序或私有方法。耦合实现的期望在重构时只会制造假失败，也正是「实现耦合测试」的来源（门禁 `structure/tests-api`）。
+- 本项目不要求引入第三方 mocking 框架：边界假供应商用手写的最小 HTTP / 进程服务即可，减少依赖与跨平台不确定性。
 
 ### 1.4 Spy
 
@@ -127,16 +127,16 @@
 | `ModuleSource`（modules） | `VecSource`（经 `test_modules` 装进 `ModulesService`） | 不适用 | 不适用（错误进 `rejected`） | 不适用 | `detail::FsModules` | 已验收 |
 | `ModuleStateStore`（modules） | `InMemoryModuleState`（经 `test_modules_store`） | 覆盖落盘可观察 | 不适用 | 不适用 | `detail::YamlModuleState` | 已验收 |
 | `PackageSource` | `InMemoryPackages` | 不适用 | 不适用（错误进 `rejected`） | 不适用 | `FsPackages` | 已验收；**持有者只有 `packages::service.rs`**（R12） |
-| `SourceDigest`（builds） | 不适用（用真实 `BuildStore` + 临时产品根） | 指纹可观察（同一份源稳定 / 加一个源文件就变 / 构建期能力集变了也变） | 不适用 | 不适用 | `builds/detail::fingerprint::BuildStore` | 契约测试已验收（`src/tests/builds.rs`） |
-| `BuildStates`（builds） | 同上 | 状态往返（写进去能原样读回）、按次家目录落点 | 不适用 | 不适用 | 同上 | 契约测试已验收（`src/tests/builds.rs`） |
-| `BuildCache`（builds） | 同上 | 卷 / 锁 / 待清理账 / 用量元数据 / 脚本文本可观察 | 不适用 | 不适用 | `builds/detail::cache::CacheOnDisk` | 契约测试已验收（`src/tests/builds.rs`） |
+| `SourceDigest`（builds） | 不适用（用真实 `BuildStore` + 临时产品根） | 指纹可观察（同一份源稳定 / 加一个源文件就变 / 构建期能力集变了也变） | 不适用 | 不适用 | `builds/detail::fingerprint::BuildStore` | 行为由本机构建验证与 T5 旅程覆盖（实现用例已移除，缺口 `test.capability-coverage-after-impl-test-removal`） |
+| `BuildStates`（builds） | 同上 | 状态往返（写进去能原样读回）、按次家目录落点 | 不适用 | 不适用 | 同上 | 同上（实现用例已移除） |
+| `BuildCache`（builds） | 同上 | 卷 / 锁 / 待清理账 / 用量元数据 / 脚本文本可观察 | 不适用 | 不适用 | `builds/detail::cache::CacheOnDisk` | 同上（实现用例已移除） |
 | `VmEngine`（vm） | `FakeEngine`（返回的 `GuestVm` 替身是 `FakeVm`，通道是 `FakeChannel`） | `calls`（start / stop / run / fenced；`specs` 记每次 boot 的 `GuestSpec`，含 `mounts`——挂载根 / 数量 / 只读位可断言；`RecordingVm` 记 `guest_run` 与租约的包集合；`stage_exec` 替身按声明入口原样返回（真实实现把入口落进 guest 本地副本）） | `boot_error` 注入启动失败、`boot_delay` 注入慢启动 | 不适用 | `QemuEngine`（真机验：`vm_live_guest_runs_command_inside_guest` 在 KVM / WHPX 下真起 guest、按平台同步或挂载额外共享、验宿主路径不可达；`vm_live_guest_runs_command_inside_guest` 另验"共享区脚本落进 guest 本地副本后能直接执行"；`vm_live_two_guests_share_one_base_without_writing_it` 同一基础镜像并发起两台、各写自己的可写层、验基础镜像 mtime 不变；e2e 的 vm 档会话场景（虚拟根默认 `debian-13`，`SOLOMNI_VM_GUEST` 可换）真跑模块工具并验删会话销毁 guest（Windows 的会话级验收已通过）；环境由 provision 能力（`--provision`）装入 `.vm/`，默认 `[探针]` 跳过） | 契约测试与执行分派已验收；真机探针与产品级会话验收都已跑通（Linux KVM / Windows WHPX） |
 | `GuestChannel`（vm） | `FakeChannel`（经 `FakeEngine`；围栏执行可预设输出 `fenced_output`，诊断用例用它回一份 JSON 报告） | `calls`（run / fenced + agent / guest cwd / rw / diagnose） | 不适用；**未实现 `exec_fenced` 的通道默认 fail-closed** | 不适用 | `QemuHandle`（QGA 通道，随 `QemuEngine.boot` 起；会话 guest 装 Linux helper，按 `GuestAccess` 走 Landlock；`diagnose: true` 时 helper 在 Landlock 后走诊断模式，不 spawn 命令、只输出一份只读诊断 JSON） | 契约测试与 Linux 真机验收已通过 |
 | `ShareBackend`（vm） | `FakeShare`、`NamedShare`（可标 emergency）；资源句柄 `FakeGuard` / `FakeGuard2` | `calls`（prepare / sync_in / sync_out / release）、共享计划可观察（恒空） | 不适用 | 不适用 | 用户档 `NinePShare` / `VirtioFsShare` / `SmbShare`；`CopyShare`（仅开发/应急，空候选不自动选）；`NoneShare`（内部无共享，供给编排）。`src/tests/vm/share.rs` 钉住各自的引擎参数、netdev 选项与 guest 端命令；virtiofsd 与 smbd 的起停、超时与清理用假可执行文件验；真机验同 vm 探针；`ShareGuard` 的真实实现是 `VirtioFsGuard` / `SmbGuard` / `NoShareGuard` | 契约测试已验收；Linux 真机（virtiofs）与 Windows 真机（SMB 实时共享）都已跑通；copy 不作验收路径 |
 | `ProxyHost`（runtime） | `FakeProxyHost` | `calls`（catalog / create / send / observe / control / messages）、`created`、`relayed` | `fail_create` / `fail_send` / `fail_control` | 不适用 | `ProxyBridge`（把动作交给核心线程） | 已验收（`src/tests/runtime/proxy.rs`） |
 | `Workdirs` | `InMemoryWorkspace` | 内存布局可观察 | `fail_with` | 不适用 | `FsWorkspace` | 已验收 |
 | `WorkStore` | `InMemoryWorkStore` | 内存文件 / 提交 / 基线可观察；资产路径的 `stat` / `scan` / `ingest` / `copy` 与跨根备份 `copy_under_to_under` 同契约 | `fail_with`、`fail_times`、`fail_on`（按方法 + 键子串，例如只让某条路径的 copy 失败；含整文件 `read_under` / `read_object`） | 不适用 | `FsWorkStore`（含符号链接逃逸拒绝、流式临时文件清理、超限 / 指纹不符拒绝、跨根复制建目标根） | 已验收；**持有者只有 `workspace::service.rs`**（R12） |
-| `PathCodec`（kernel 共享） | 不适用（用真实 `PathBridge`） | 不适用 | 不适用 | 不适用 | `PathBridge`（本机档恒等；虚拟机档两种路径方言互转） | 已验收（`src/tests/prompt.rs`；虚拟机档的路径方言由 e2e 的 vm 档会话场景与 `src/tests/vm/live.rs` 真机探针覆盖） |
+| `PathCodec`（kernel 共享） | 不适用（用真实 `PathBridge`） | 不适用 | 不适用 | 不适用 | `PathBridge`（本机档恒等；虚拟机档两种路径方言互转） | 已验收（`src/tests/prompt.rs`；虚拟机档的路径方言由 e2e 的 vm 档会话场景覆盖） |
 | `ProcessTexts`（kernel 共享） | 不适用（用真实 `CodeProcessTexts`） | 不适用 | 不适用 | 不适用 | `kernel::detail::process::CodeProcessTexts`（文案由机制代码返回） | 已验收（进程机制用例直接注入真实实现） |
 | `ToolHandler`（kernel 共享） | 不适用（真实处理器直接测） | 不适用 | 不适用 | 不适用 | `WorkHandler` / `ProxyHandler` | 已验收（`src/tests/tools/`、`src/tests/runtime/proxy.rs`） |
 | `SysIo` | `InMemorySysIo`（含并发峰值与按文件延时） | 内存内容 + 同时在读的峰值 | `fail_with` | 不适用 | `FsSysIo`（含 lossy / cut） | 已验收；**持有者只有 `tools::service.rs`**（R12） |
@@ -144,12 +144,12 @@
 | `PromptSource` | `TestPrompts` | 不适用 | `fail_with` | 不适用 | `YamlPrompts` | 已验收 |
 | `SystoolsSource` | 不适用（**直接用真实加载器**：读的就是仓库自己的三份 yaml（工具 / 角色 / 名字表），确定性足够） | 不适用 | 缺文件 / 缺键由真实加载器如实报错（`src/tests/detail/prompt.rs`） | 不适用 | `YamlSystools` | 已验收 |
 | `ProcessRunner`（kernel 共享） | `RecordingRunner`、`SilentRunner`、`ParallelRunner`、`AskingRunner`（跑之前先经提问端口问一次）、`EnvRecordingRunner`（记每次调用的注入项）、`ShellRunner`（记 `run_shell` 的脚本 / 围栏 / 超时 / 取消 / PATH） | `calls`（cwd / 命令 / 参数）、并发峰值、`envs`（注入项）、`ShellRunner.calls`；`AskingRunner` 另记"问过几次、真跑了几次" | `ok = false` 回执 | 真进程超时 / 取消杀树、head+tail 截断；按会话/一次性调用的撤权与 profile 删除在 `FenceHostAdapter`；隐秘字段只经环境变量注入 | `ProcTools` | 已验收 |
-| `AskUser` | `RecordingAsk`（按脚本作答，记下每次问到的选项 id）、`AskingRunner` 内部的同形替身 | 问到的选项 id / 是否停过会话 | 不适用（作答脚本给 `None` = 拒绝 / 没人答） | 阻塞等回答（不设超时；整队作废解开） | 会话侧实现 `runtime::service::SessionAsk`（卡片进那一条队、`answer_card` 作答；空选项集停会话 + 落警告） | 已验收（`src/tests/runtime/ask_user.rs`、`src/tests/permission.rs` 的端到端一条） |
+| `AskUser` | `RecordingAsk`（按脚本作答，记下每次问到的选项 id）、`AskingRunner` 内部的同形替身 | 问到的选项 id / 是否停过会话 | 不适用（作答脚本给 `None` = 拒绝 / 没人答） | 阻塞等回答（不设超时；整队作废解开） | 会话侧实现 `runtime::service::SessionAsk`（卡片进那一条队、`answer_card` 作答；空选项集停会话 + 落警告） | 已验收（`src/tests/permission.rs` 的端到端一条、`src/tests/api/session.rs`） |
 | `EnvelopeRepair` | `NoRepair` | 不适用 | 不适用（修复器遇不确定一律不修） | 不适用 | `UnambiguousRepair`（转义裸控制字符 + 补上缺的收尾括号；断在字符串中间、起了两段信封一律不修） | 已验收 |
 | `FenceHost`（kernel 共享） | `RecordingFence`、`NoFenceHost` | `release_by_lease`（默认空操作）、`released` / `leases` / `lease_releases` / `release_call` | `fail_with` | 不适用 | `confine::FenceHostAdapter`（真机撤权在 `tests/windows/`；Windows 的 `release_by_lease` 按会话撤 ACE+删 profile，`release_call` 服务一次性调用） | 已验收 |
-| `ServiceAdapter`（residents） | `FakeServiceAdapter`、`DyingServiceAdapter`（一启动就"死"：调用恒失败且 `is_alive=false`，崩溃检测用）；返回的 `ServiceInstance` 替身是 `FakeServiceInstance` / `DyingServiceInstance` | `calls`（start / call / stop） | 由替身注入启动失败 | 不适用 | `detail::McpAdapter`（MCP stdio；真实服务端到端见 `src/tests/mcp.rs`）；ACP 未接入 | 已验收（`src/tests/residents.rs`、`src/tests/mcp.rs`） |
+| `ServiceAdapter`（residents） | `FakeServiceAdapter`、`DyingServiceAdapter`（一启动就"死"：调用恒失败且 `is_alive=false`，崩溃检测用）；返回的 `ServiceInstance` 替身是 `FakeServiceInstance` / `DyingServiceInstance` | `calls`（start / call / stop） | 由替身注入启动失败 | 不适用 | `detail::McpAdapter`（MCP stdio；真实服务端到端见 `src/tests/mcp.rs`）；ACP 未接入 | 已验收（`src/tests/mcp.rs`；常驻服务起停行为由 T5 旅程覆盖） |
 | `SessionHost`（kernel 共享） | `ScriptedHost`（按脚本逐行应答；可演 `list_changed` 通知与 EOF）；返回的 `Session` 替身是 `ScriptedSession` | `sent`（发出的每一行与关闭） | 脚本用尽 = 如实报错 | EOF / 读错误 = `alive()` 转 false（崩溃检测） | `ProcessSessions`（返回 `FencedSession`；真实 MCP 服务端到端见 `src/tests/mcp.rs`，非 unix 或缺 python 时如实跳过） | 已验收 |
-| `SecretStore`（secrets） | `InMemorySecretStore` | `values`、写入次数 | 由替身注入失败 | 不适用 | `detail::YamlSecrets`（`.home/` 的 `secrets.yaml`，unix 0600） | 契约测试已验收（`src/tests/secrets.rs`）；生产消费点已接入（CLI `secret`、常驻服务与一次性模块工具的 env 注入、常驻服务回执脱敏） |
+| `SecretStore`（secrets） | `InMemorySecretStore` | `values`、写入次数 | 由替身注入失败 | 不适用 | `detail::YamlSecrets`（`.home/` 的 `secrets.yaml`，unix 0600） | 生产消费点已接入（CLI `secret`、常驻服务与一次性模块工具的 env 注入、常驻服务回执脱敏） |
 | `SpaceSurvey`（storage） | 不适用（用真实 `DiskSurvey` + 临时产品根） | `SpaceFacts` 可观察（时间戳、宿主余量、分类与条目；非 full 不扫用户数据） | 不适用（读不到按 0 计） | 不适用 | `storage/detail::survey::DiskSurvey` | 契约测试已验收（`src/tests/storage.rs`） |
 | `SpaceReclaim`（storage） | 同上 | 锁独占与 drop 释放、删除后现场、排队标记内容、上次摘要往返、构建占用拒绝 | 构建锁在场时拒绝删除 | 不适用 | `storage/detail::reclaim::DiskReclaim` | 契约测试已验收（`src/tests/storage.rs`） |
 | `GuestLiveness`（storage） | 同上 | 无台账时如实说没有 | 不适用 | 不适用 | `storage/detail::guests::ProcessGuests` | 契约测试已验收（`src/tests/storage.rs`） |

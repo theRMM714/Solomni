@@ -16,7 +16,10 @@ impl Core {
         if meta.exec.tier != crate::kernel::api::Tier::Vm {
             return Err("这条会话是本机档，没有 guest 可诊断".to_string());
         }
-        match crate::capabilities::conversation::session::api::guest_scope(self.history.as_ref(), &meta)? {
+        match crate::capabilities::conversation::session::api::guest_scope(
+            self.history.as_ref(),
+            &meta,
+        )? {
             Some((lease, _)) => Ok(crate::capabilities::work::api::GuestDiagnose::new(
                 Arc::clone(&self.vm),
                 lease,
@@ -38,13 +41,5 @@ impl Core {
     ) -> Result<crate::capabilities::workspace::api::Sandboxes, String> {
         self.turn
             .sandboxes(self.registry.as_ref(), self.probe.as_ref(), meta, roster)
-    }
-
-    /// 目的：一条会话的**生效权限**：全局默认 → 根 ceiling → 每层 narrowing → 全局硬黑名单。
-    pub(crate) fn permissions_for(
-        &self,
-        meta: &SessionMeta,
-    ) -> Result<crate::capabilities::permission::api::PermissionSet, String> {
-        self.turn.permissions_for(self.registry.as_ref(), meta)
     }
 }

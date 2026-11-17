@@ -3,27 +3,27 @@
 //! 不管：任何用例的身体（在下层能力）；装配清单（组合根 main.rs）；呈现层的形状（api 与 presentation）。
 //! 联动：api 经 Handle 把命令交给这里；子模块一律 `use super::*` 取共用面。
 
-use crate::capabilities::maintenance::builds::api::Builds;
-use crate::capabilities::llm::api::Channel;
-#[cfg(test)]
-use crate::capabilities::llm::api::Msg;
-use crate::capabilities::llm::api::{Llm, ProbeOutcome, ToolMode};
 use crate::capabilities::catalog::modules::api::{Module, Modules, Roster};
 use crate::capabilities::catalog::packages::api::Packages;
-use crate::capabilities::prompt::api::Prompt;
-use crate::capabilities::provision::api::Provision;
-use crate::capabilities::conversation::proxy::api as d;
 use crate::capabilities::catalog::registry::api::Registry;
 use crate::capabilities::catalog::registry::api::{
     AgentView, AppSettings, ModelView, ProviderView, RegistryOps, StorageSettings,
 };
-use crate::capabilities::runtime::api::{
-    Acted, ActionCall, ActionOps, ActionParamView, ActionView, Advance, Caller, CollabWork, Events,
-    LogOps, Output, RebuildDeps, RewindOutcome, RewindTarget, RuntimeOps,
-};
+use crate::capabilities::conversation::proxy::api as d;
 use crate::capabilities::conversation::session::api::subtree_of;
 use crate::capabilities::conversation::session::api::{
     Answered, DecisionQueue, History, HistoryView, RunState, SessionEvent, SessionMeta,
+};
+use crate::capabilities::llm::api::Channel;
+#[cfg(test)]
+use crate::capabilities::llm::api::Msg;
+use crate::capabilities::llm::api::{Llm, ProbeOutcome, ToolMode};
+use crate::capabilities::maintenance::builds::api::Builds;
+use crate::capabilities::prompt::api::Prompt;
+use crate::capabilities::provision::api::Provision;
+use crate::capabilities::runtime::api::{
+    Acted, ActionCall, ActionOps, ActionParamView, ActionView, Advance, Caller, CollabWork, Events,
+    LogOps, Output, RebuildDeps, RewindOutcome, RewindTarget, RuntimeOps,
 };
 use crate::capabilities::tools::api::{ToolExec, ToolSchema, Tools, arg_fault_text};
 use crate::capabilities::turn::turn::api::{SPEAKER, TurnOps};
@@ -45,9 +45,6 @@ pub(crate) use self::bridge::ProxyBridge;
 use self::compact::{CompactChoice, CompactRuntime};
 /// 目的：核心本体（`core::Core`）：状态只在核心线程上被碰，测试装配点用它。
 pub(crate) use self::core::Core;
-/// 目的：在世会话形态（`turn` 的状态类型）：契约测试读会话内容。
-#[cfg(test)]
-pub(crate) use self::core::Session;
 /// 目的：会话本体（`turn` 的 `Turn`）：代理控制要问运行态。
 pub(crate) use self::core::Turn;
 /// 目的：核心手柄（`handle::Handle`）：`api` 与装配点只经它发命令。

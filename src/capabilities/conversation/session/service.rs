@@ -3,7 +3,9 @@
 //! 不管：文件机制（在 `detail/fs_history.rs`）、状态派生与回档算术（在 `domain/`）、队列代理（在 runtime）。
 //! 联动：别的能力走 `api::History`；呈现层走 `api::HistoryOps`（由队列代理实现）；装配在组合根，这里只收注入的端口。
 
-use crate::capabilities::conversation::session::api::{History, HistoryView, SessionEvent, SessionMeta};
+use crate::capabilities::conversation::session::api::{
+    History, HistoryView, SessionEvent, SessionMeta,
+};
 use crate::capabilities::conversation::session::domain::persist::persist_policy_for;
 use crate::capabilities::conversation::session::ports::HistoryStore;
 use std::sync::Arc;
@@ -108,7 +110,9 @@ fn core_rows(
 }
 
 /// 目的：一条工具结果消息的**正文**（回放与实时唯一来源；发送视图按它定位读过的那条消息）。
-pub fn tool_result_body(c: &crate::capabilities::conversation::session::api::ToolCallView) -> String {
+pub fn tool_result_body(
+    c: &crate::capabilities::conversation::session::api::ToolCallView,
+) -> String {
     format!("[工具结果] {}\n{}", c.label(), c.output)
 }
 
@@ -175,7 +179,9 @@ pub fn core_operation(
     msgs: &[crate::capabilities::llm::api::Msg],
     opts: crate::capabilities::llm::api::CompleteOpts<'static>,
     cancel: Option<&std::sync::Arc<std::sync::atomic::AtomicBool>>,
-    verify: Option<&mut (dyn crate::capabilities::conversation::session::api::CoreVerify + 'static)>,
+    verify: Option<
+        &mut (dyn crate::capabilities::conversation::session::api::CoreVerify + 'static),
+    >,
     // 核心这一轮的**事实出口**（推；落盘与否由会话模块决定）。
     sink: &mut dyn FnMut(crate::capabilities::conversation::session::api::SessionEvent),
 ) -> Result<serde_json::Value, String> {
@@ -217,7 +223,8 @@ pub fn core_operation(
                         kind = "start";
                     }
                     crate::capabilities::llm::api::Chunk::Text(t) => {
-                        let (send, next) = crate::capabilities::conversation::session::api::stream_piece(&acc, t);
+                        let (send, next) =
+                            crate::capabilities::conversation::session::api::stream_piece(&acc, t);
                         piece = send;
                         acc = next;
                     }
@@ -228,11 +235,13 @@ pub fn core_operation(
                 }
                 // 空片段不刷事件流（信封被抑制 / 重复快照合并掉的片都不外送）。
                 if crate::capabilities::conversation::session::api::delta_visible(kind, &piece) {
-                    sink(crate::capabilities::conversation::session::api::SessionEvent::Delta {
-                        speaker: "核心".to_string(),
-                        kind: kind.to_string(),
-                        text: piece,
-                    });
+                    sink(
+                        crate::capabilities::conversation::session::api::SessionEvent::Delta {
+                            speaker: "核心".to_string(),
+                            kind: kind.to_string(),
+                            text: piece,
+                        },
+                    );
                 }
                 match cancel {
                     Some(c) => !c.load(std::sync::atomic::Ordering::Relaxed),
@@ -272,9 +281,11 @@ pub fn core_operation(
                 &done.reasoning,
                 &parsed.text,
             ) {
-                sink(crate::capabilities::conversation::session::api::SessionEvent::Transcript(
-                    vec![row],
-                ));
+                sink(
+                    crate::capabilities::conversation::session::api::SessionEvent::Transcript(
+                        vec![row],
+                    ),
+                );
             }
             return Ok(payload);
         }
@@ -300,9 +311,11 @@ pub fn core_operation(
                 &done.reasoning,
                 &parsed.text,
             ) {
-                sink(crate::capabilities::conversation::session::api::SessionEvent::Transcript(
-                    vec![row],
-                ));
+                sink(
+                    crate::capabilities::conversation::session::api::SessionEvent::Transcript(
+                        vec![row],
+                    ),
+                );
             }
             return Ok(payload);
         }
@@ -341,7 +354,8 @@ pub fn core_operation(
                 head_chars(&done.raw, 200)
             ));
         }
-        let mut views: Vec<crate::capabilities::conversation::session::api::ToolCallView> = Vec::new();
+        let mut views: Vec<crate::capabilities::conversation::session::api::ToolCallView> =
+            Vec::new();
         for (call_id, name, args) in readonly {
             let out = ctx.run_readonly(&name, &args);
             let view = crate::capabilities::conversation::session::api::ToolCallView {
@@ -358,9 +372,11 @@ pub fn core_operation(
             };
             // 核心"先核实"这一步也如实推出去（用户看得到它在读什么、查什么）。
             for row in core_rows(&view.name, view.clone(), &done.raw, "", "") {
-                sink(crate::capabilities::conversation::session::api::SessionEvent::Transcript(
-                    vec![row],
-                ));
+                sink(
+                    crate::capabilities::conversation::session::api::SessionEvent::Transcript(
+                        vec![row],
+                    ),
+                );
             }
             views.push(view);
         }

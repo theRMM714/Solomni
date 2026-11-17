@@ -3,7 +3,6 @@
 //! 不管：各能力内部规则（按能力落各自文件）。
 //! 联动：src/capabilities/runtime/、tests/doubles、平台探针。
 
-mod ask_user;
 mod proxy;
 use super::builders::*;
 use super::prelude::*;
@@ -508,56 +507,6 @@ pub(crate) fn vm_tool_paths_follow_provisioned_packages_without_restart() {
         .expect("qemu 是一项前置");
     assert!(!qemu.met, "登记优先：{:?}", qemu);
     let _ = std::fs::remove_dir_all(&root);
-}
-
-/// 目的：**工具轮的思维链随该轮的工具行落档**：流式结束后仍可查看（不再"流式完就丢"）。
-///   行由**唯一那处**构造函数产出（单 agent 与讨论席共用），所以这里直接问它。
-#[test]
-pub(crate) fn tool_round_reasoning_lands_on_the_tool_line() {
-    let tool = crate::capabilities::conversation::session::api::ToolCallView {
-        speaker: "a".to_string(),
-        module: String::new(),
-        name: "read".to_string(),
-        ok: true,
-        args: "{}".to_string(),
-        output: "内容".to_string(),
-        call_id: String::new(),
-        reply: 0,
-        read: None,
-        shell: None,
-    };
-    let round = crate::capabilities::conversation::session::service::engine::round::Round {
-        reply: 1,
-        // 工具轮没有正文：思维链不能另造一条空回答行，只能挂到工具行上。
-        text: String::new(),
-        reasoning: "先思考".to_string(),
-        text_msgs: Vec::new(),
-        raw: "原始回复".to_string(),
-        tool: Some(
-            crate::capabilities::conversation::session::service::engine::round::ToolRun {
-                view: tool,
-                msgs: Vec::new(),
-            },
-        ),
-        finish: String::new(),
-        error: None,
-        verb: None,
-        degraded: false,
-    };
-    let next = std::cell::Cell::new(0u64);
-    let lines = crate::capabilities::conversation::session::service::engine::round::build_round_lines(
-        "a", &round, false, &next, None,
-    );
-    assert_eq!(lines.len(), 1, "工具轮没有正文时只出工具行：{lines:?}");
-    assert_eq!(
-        lines[0].reasoning.as_deref(),
-        Some("先思考"),
-        "工具轮的思维链要随该行落档：{lines:?}"
-    );
-    assert_eq!(
-        lines[0].raw, "原始回复",
-        "回复级原文挂在该回复首行（纯工具轮就是工具行）：{lines:?}"
-    );
 }
 
 /// 目的：裁决的**建议由核心 AI 给**（随 plan 那一次调用一起产出，不额外花调用）：

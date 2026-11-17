@@ -28,8 +28,9 @@ impl Core {
                 continue;
             };
             for l in arr {
-                if let Ok(v) =
-                    serde_json::from_value::<crate::capabilities::conversation::session::api::LineView>(l.clone())
+                if let Ok(v) = serde_json::from_value::<
+                    crate::capabilities::conversation::session::api::LineView,
+                >(l.clone())
                 {
                     out.push(v);
                 }
@@ -417,10 +418,11 @@ impl Handle {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
-        let host: std::sync::Arc<dyn crate::capabilities::conversation::proxy::api::ProxyHost + Send + Sync> =
-            std::sync::Arc::new(crate::capabilities::runtime::service::ProxyBridge::new(
-                self.clone(),
-            ));
+        let host: std::sync::Arc<
+            dyn crate::capabilities::conversation::proxy::api::ProxyHost + Send + Sync,
+        > = std::sync::Arc::new(crate::capabilities::runtime::service::ProxyBridge::new(
+            self.clone(),
+        ));
         let handler = crate::capabilities::conversation::proxy::api::ProxyHandler::new(
             host,
             self.book.clone(),

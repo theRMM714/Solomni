@@ -6,7 +6,6 @@
 mod api;
 pub(crate) mod boot;
 mod builders;
-mod builds;
 mod cli;
 mod collab;
 mod commands;
@@ -30,10 +29,8 @@ mod prompt;
 mod provision;
 mod proxy;
 mod registry;
-mod residents;
 mod routes;
 mod runtime;
-mod secrets;
 mod session;
 mod setup;
 mod slate;

@@ -8,11 +8,13 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
-use crate::capabilities::maintenance::builds::api::{Builds, Built, Target};
 use crate::capabilities::catalog::modules::api::Modules;
 use crate::capabilities::catalog::packages::api::BaseFacts;
+use crate::capabilities::maintenance::builds::api::{Builds, Built, Target};
+use crate::capabilities::maintenance::storage::api::{
+    CleanKind, CleanOutcome, CleanRequest, GcReport, Storage,
+};
 use crate::capabilities::provision::api::Provision;
-use crate::capabilities::maintenance::storage::api::{CleanKind, CleanOutcome, CleanRequest, GcReport, Storage};
 use crate::capabilities::system::api::{
     BuildRequest, EnsureRequest, Facts, Fault, FenceFacts, GcRequest, ResetRequest, SetupMode,
     SetupOps, System, WorkGcRequest,

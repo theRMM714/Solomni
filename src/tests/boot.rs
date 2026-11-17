@@ -5,8 +5,8 @@
 
 use serde_json::{Value, json};
 
-use crate::capabilities::maintenance::builds::api::Built;
 use crate::capabilities::catalog::packages::api::BaseFacts;
+use crate::capabilities::maintenance::builds::api::Built;
 use crate::capabilities::maintenance::storage::api::{CleanOutcome, GcAction, GcReport};
 use crate::capabilities::system::api::{
     BuildRequest, EnsureRequest, Fault, FenceFacts, GcRequest, ResetRequest, System, WorkGcRequest,

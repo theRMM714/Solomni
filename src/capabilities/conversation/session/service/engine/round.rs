@@ -5,10 +5,12 @@
 
 use super::decls::ToolDecls;
 use super::tools::*;
+use crate::capabilities::conversation::session::api::{
+    LineView, SessionEvent, ToolCallView, reply_msgs,
+};
+use crate::capabilities::conversation::session::domain::tools::MemberTools;
 use crate::capabilities::llm::api::{self as envelope, Verb};
 use crate::capabilities::llm::api::{Chat, Chunk, CompleteOpts, Msg};
-use crate::capabilities::conversation::session::api::{LineView, SessionEvent, ToolCallView, reply_msgs};
-use crate::capabilities::conversation::session::domain::tools::MemberTools;
 use crate::kernel::api::ToolOutcome;
 
 /// 目的：一次工具调用的产出：调用视图 + 它压进历史的消息。
@@ -161,7 +163,9 @@ pub fn converse_with(
     on_round: &mut RoundSink<'_>,
     sink: &mut dyn FnMut(SessionEvent),
     // 工具级确认：`ask` 表里的调用在执行前经它问用户（None = 这一回合不接确认）。
-    confirms: Option<crate::capabilities::conversation::session::service::engine::tools::ConfirmGate<'_>>,
+    confirms: Option<
+        crate::capabilities::conversation::session::service::engine::tools::ConfirmGate<'_>,
+    >,
     // 工具层提问端口：围栏这类"装不上就先问"的执行层经它请用户裁决（None = 没有可回答的前端）。
     ask: Option<&dyn crate::kernel::ports::AskUser>,
     // 本回合的提示（讨论席的开场/轮转词；执行席常为空——它的指令在派发行里）。

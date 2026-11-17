@@ -6,8 +6,10 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::capabilities::maintenance::builds::service::BuildsService;
 use crate::capabilities::catalog::packages::api::BaseFacts;
+use crate::capabilities::maintenance::builds::service::BuildsService;
+use crate::capabilities::maintenance::storage::api::StoragePolicy;
+use crate::capabilities::maintenance::storage::service::StorageService;
 use crate::capabilities::provision::api::Provision;
 use crate::capabilities::provision::detail::fetch::HttpFetch;
 use crate::capabilities::provision::detail::guest_image::Ext4Images;
@@ -17,8 +19,6 @@ use crate::capabilities::provision::detail::ledger::FileLedger;
 use crate::capabilities::provision::detail::procs::BookProcs;
 use crate::capabilities::provision::ports::Fetcher;
 use crate::capabilities::provision::service::{ProvisionDeps, ProvisionService};
-use crate::capabilities::maintenance::storage::api::StoragePolicy;
-use crate::capabilities::maintenance::storage::service::StorageService;
 use crate::capabilities::system::service::{SystemDeps, SystemService};
 use crate::capabilities::vm::api::Vm;
 
@@ -86,10 +86,23 @@ fn storage_policy(root: &Path) -> StoragePolicy {
     std::fs::read_to_string(root.join(".home").join("settings.yaml"))
         .ok()
         .and_then(|t| {
-            yaml_serde::from_str::<crate::capabilities::catalog::registry::api::AppSettings>(&t).ok()
+            yaml_serde::from_str::<crate::capabilities::catalog::registry::api::AppSettings>(&t)
+                .ok()
         })
         .map(|a| StoragePolicy::from(&a.storage))
         .unwrap_or_default()
+}
+
+/// 目的：四份登记处 yaml 的读取面——组合根按产品根装，启动与排障都走这一份。
+pub(crate) fn settings_store(
+    root: &Path,
+) -> crate::capabilities::catalog::registry::detail::yaml_settings::YamlSettingsStore {
+    crate::capabilities::catalog::registry::detail::yaml_settings::YamlSettingsStore::new(
+        root.join(".home").join("providers.yaml"),
+        root.join(".home").join("models.yaml"),
+        root.join(".home").join("settings.yaml"),
+        root.join(".home").join("agents.yaml"),
+    )
 }
 
 /// 目的：用给定补齐面装一份存储能力（不另装核心）。
@@ -100,11 +113,19 @@ pub(crate) fn storage(
 ) -> StorageService {
     StorageService::new(
         provision,
-        Arc::new(crate::capabilities::maintenance::storage::detail::survey::DiskSurvey::new(root.to_path_buf())),
         Arc::new(
-            crate::capabilities::maintenance::storage::detail::reclaim::DiskReclaim::new(root.to_path_buf()),
+            crate::capabilities::maintenance::storage::detail::survey::DiskSurvey::new(
+                root.to_path_buf(),
+            ),
         ),
-        Arc::new(crate::capabilities::maintenance::storage::detail::guests::ProcessGuests::new(root)),
+        Arc::new(
+            crate::capabilities::maintenance::storage::detail::reclaim::DiskReclaim::new(
+                root.to_path_buf(),
+            ),
+        ),
+        Arc::new(
+            crate::capabilities::maintenance::storage::detail::guests::ProcessGuests::new(root),
+        ),
         Arc::new(crate::kernel::ports::NoopLog),
         policy,
     )
@@ -150,22 +171,30 @@ pub(crate) fn build_runner(
 
 /// 目的：命令行构建用的能力面——包库、虚拟机、补齐、执行器与基础工具链安装根按产品根现场装配。
 pub(crate) fn build_service(root: &Path) -> Result<BuildsService, String> {
-    let packages: Arc<dyn crate::capabilities::catalog::packages::api::Packages + Send + Sync> = Arc::new(
-        crate::capabilities::catalog::packages::service::PackagesService::with_base(
-            Arc::new(crate::capabilities::catalog::packages::detail::FsPackages::new(
-                root.join("runtimes"),
-            )),
-            crate::entry::toolchains::base_facts(root),
-        ),
-    );
+    let packages: Arc<dyn crate::capabilities::catalog::packages::api::Packages + Send + Sync> =
+        Arc::new(
+            crate::capabilities::catalog::packages::service::PackagesService::with_base(
+                Arc::new(
+                    crate::capabilities::catalog::packages::detail::FsPackages::new(
+                        root.join("runtimes"),
+                    ),
+                ),
+                crate::entry::toolchains::base_facts(root),
+            ),
+        );
     let provision: Arc<dyn Provision + Send + Sync> = Arc::new(provision(root));
-    let storage: Arc<dyn crate::capabilities::maintenance::storage::api::Storage + Send + Sync> = Arc::new(
-        storage(root, Arc::clone(&provision), StoragePolicy::default()),
-    );
+    let storage: Arc<dyn crate::capabilities::maintenance::storage::api::Storage + Send + Sync> =
+        Arc::new(storage(
+            root,
+            Arc::clone(&provision),
+            StoragePolicy::default(),
+        ));
     let runner: Arc<dyn crate::kernel::ports::ProcessRunner + Send + Sync> =
         Arc::new(build_runner(root)?);
     let store = Arc::new(
-        crate::capabilities::maintenance::builds::detail::fingerprint::BuildStore::new(root.to_path_buf()),
+        crate::capabilities::maintenance::builds::detail::fingerprint::BuildStore::new(
+            root.to_path_buf(),
+        ),
     );
     Ok(BuildsService::new(
         root.to_path_buf(),
@@ -175,7 +204,11 @@ pub(crate) fn build_service(root: &Path) -> Result<BuildsService, String> {
         storage,
         store.clone(),
         store,
-        Arc::new(crate::capabilities::maintenance::builds::detail::cache::CacheOnDisk::new(root.to_path_buf())),
+        Arc::new(
+            crate::capabilities::maintenance::builds::detail::cache::CacheOnDisk::new(
+                root.to_path_buf(),
+            ),
+        ),
         runner,
         Arc::new(crate::capabilities::tools::service::fence::ToolFenceGate),
         Arc::new(crate::kernel::detail::confine::FenceHostAdapter::new(
@@ -214,18 +247,23 @@ pub(crate) fn system(root: &Path, base: &BaseFacts) -> Result<SystemService, Str
             Arc::new(crate::capabilities::workspace::detail::fs_workstore::FsWorkStore::new()),
         ),
     );
-    let modules: Arc<dyn crate::capabilities::catalog::modules::api::Modules + Send + Sync> = Arc::new(
-        crate::capabilities::catalog::modules::service::ModulesService::new(
-            Arc::new(crate::capabilities::catalog::modules::detail::FsModules::new(
-                root.join("modules"),
-                crate::capabilities::tools::api::names(),
-            )),
-            Arc::new(crate::capabilities::catalog::modules::detail::YamlModuleState::new(
-                root.join(".home").join("modules.yaml"),
-            )),
-        )
-        .map_err(|e| format!("模块能力装配失败：{}", e))?,
-    );
+    let modules: Arc<dyn crate::capabilities::catalog::modules::api::Modules + Send + Sync> =
+        Arc::new(
+            crate::capabilities::catalog::modules::service::ModulesService::new(
+                Arc::new(
+                    crate::capabilities::catalog::modules::detail::FsModules::new(
+                        root.join("modules"),
+                        crate::capabilities::tools::api::names(),
+                    ),
+                ),
+                Arc::new(
+                    crate::capabilities::catalog::modules::detail::YamlModuleState::new(
+                        root.join(".home").join("modules.yaml"),
+                    ),
+                ),
+            )
+            .map_err(|e| format!("模块能力装配失败：{}", e))?,
+        );
     system_with(
         root,
         base,
@@ -273,7 +311,8 @@ fn network_allowed(root: &Path) -> bool {
     std::fs::read_to_string(root.join(".home").join("settings.yaml"))
         .ok()
         .and_then(|t| {
-            yaml_serde::from_str::<crate::capabilities::catalog::registry::api::AppSettings>(&t).ok()
+            yaml_serde::from_str::<crate::capabilities::catalog::registry::api::AppSettings>(&t)
+                .ok()
         })
         .map(|a| crate::capabilities::turn::env::api::network_allowed(&a))
         .unwrap_or(false)

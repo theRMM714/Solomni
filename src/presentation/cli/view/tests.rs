@@ -11,15 +11,19 @@ use crate::capabilities::work::api::{
 };
 use crate::presentation::faces::Faces;
 
-use crate::capabilities::llm::api::{ProbeOutcome, ReplayReport};
 use crate::capabilities::catalog::modules::api::{ModulesOps, Roster};
 use crate::capabilities::catalog::packages::api::Problem;
-use crate::capabilities::catalog::registry::api::{AgentView, AppSettings, ModelDraft, RegistryOps};
+use crate::capabilities::catalog::registry::api::{
+    AgentView, AppSettings, ModelDraft, RegistryOps,
+};
 use crate::capabilities::catalog::registry::domain::agents::Agent;
-use crate::capabilities::conversation::session::api::{CheckView, ContextUsage, LineView, ToolCallView};
+use crate::capabilities::conversation::session::api::{
+    CheckView, ContextUsage, LineView, ToolCallView,
+};
 use crate::capabilities::conversation::session::domain::events::{
     DecisionAnswer, DecisionEnvelope, DecisionMessage,
 };
+use crate::capabilities::llm::api::{ProbeOutcome, ReplayReport};
 use crate::capabilities::taskchain::api::{NodeStatus, TaskChain, TaskNode};
 use crate::tests::doubles::{
     InMemorySettings, core_with_settings_modules, module_of, module_with_runtimes,

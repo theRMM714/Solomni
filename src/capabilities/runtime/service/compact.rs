@@ -44,7 +44,8 @@ impl crate::capabilities::conversation::session::api::CompactChatFactory for Com
         &self,
         module: &str,
         session_model: Option<&str>,
-    ) -> Result<Option<crate::capabilities::conversation::session::api::CompactChatSpec>, String> {
+    ) -> Result<Option<crate::capabilities::conversation::session::api::CompactChatSpec>, String>
+    {
         let guard = self.choice.read().unwrap_or_else(|e| e.into_inner());
         match &*guard {
             CompactChoice::Session => Ok(None),
@@ -57,11 +58,13 @@ impl crate::capabilities::conversation::session::api::CompactChatFactory for Com
                 if session_model == Some(id.as_str()) {
                     return Ok(None);
                 }
-                Ok(Some(crate::capabilities::conversation::session::api::CompactChatSpec {
-                    chat: self.llm.member_channel(channel, module),
-                    model: id.clone(),
-                    window: *window,
-                }))
+                Ok(Some(
+                    crate::capabilities::conversation::session::api::CompactChatSpec {
+                        chat: self.llm.member_channel(channel, module),
+                        model: id.clone(),
+                        window: *window,
+                    },
+                ))
             }
         }
     }

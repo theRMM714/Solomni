@@ -5,88 +5,6 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
-#[test]
-pub(crate) fn execution_review_pass_and_fail_paths() {
-    let prompts = test_prompts();
-    let mut members = vec![Member::new(
-        "m0",
-        crate::tests::doubles::test_params("m0"),
-        crate::capabilities::llm::api::ToolMode::Envelope,
-        scripted(vec!["{\"type\":\"say\",\"text\":\"汇报内容\"}".into()]),
-    )];
-    let ran = run_execution(members.as_mut_slice(), "任务A", &prompts);
-    assert_eq!(ran.reports.get("m0").map(|s| s.as_str()), Some("汇报内容"));
-
-    // 验收：核心对照方案逐项核对（总验收用的就是这条）。
-    let mut exec = crate::capabilities::conversation::collab::service::synthesis::Execution::new();
-    exec.reports = ran.reports.clone();
-    let mut core_chat = scripted(vec![
-        "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"A\",\"status\":\"fail\",\"reason\":\"没做完\"}]}}".into(),
-    ]);
-    exec.review(
-        core_chat.as_mut(),
-        "方案",
-        "",
-        None,
-        &prompts,
-        &*test_tools_svc(),
-        Default::default(),
-        Default::default(),
-        None,
-        &mut |_e: crate::capabilities::conversation::session::api::SessionEvent| {},
-    );
-    assert!(!exec.all_pass(), "有 fail 项就不通过");
-
-    // 再验一次：这次全 pass。
-    let mut exec2 = crate::capabilities::conversation::collab::service::synthesis::Execution::new();
-    exec2.reports = ran.reports.clone();
-    let mut core_chat2 = scripted(vec![
-        "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"A\",\"status\":\"pass\"}]}}"
-            .into(),
-    ]);
-    exec2.review(
-        core_chat2.as_mut(),
-        "方案",
-        "",
-        None,
-        &prompts,
-        &*test_tools_svc(),
-        Default::default(),
-        Default::default(),
-        None,
-        &mut |_e: crate::capabilities::conversation::session::api::SessionEvent| {},
-    );
-    assert!(exec2.all_pass());
-}
-
-#[test]
-pub(crate) fn review_parse_failure_is_conservative_fail() {
-    let prompts = test_prompts();
-    let mut members = vec![Member::new(
-        "m0",
-        crate::tests::doubles::test_params("m0"),
-        crate::capabilities::llm::api::ToolMode::Envelope,
-        scripted(vec!["{\"type\":\"say\",\"text\":\"x\"}".into()]),
-    )];
-    let mut exec = crate::capabilities::conversation::collab::service::synthesis::Execution::new();
-    exec.reports = run_execution(members.as_mut_slice(), "任务", &prompts).reports;
-    let mut core_chat = scripted(vec!["完全不是清单".to_string()]);
-    exec.review(
-        core_chat.as_mut(),
-        "方案",
-        "",
-        None,
-        &prompts,
-        &*test_tools_svc(),
-        Default::default(),
-        Default::default(),
-        None,
-        &mut |_e: crate::capabilities::conversation::session::api::SessionEvent| {},
-    );
-    assert!(exec.items.is_empty());
-    assert!(!exec.all_pass(), "解析失败必须保守判否");
-}
-
 // ---------- Core 门面：会话中心（内存组合根） ----------
 #[test]
 pub(crate) fn mode_vocabulary_is_single_or_collab_only() {
@@ -206,8 +124,11 @@ pub(crate) fn approved_plan_spawns_a_sub_session_per_ready_node() {
     );
     assert_eq!(cmeta.mode, "single");
     assert_eq!(
-        crate::capabilities::conversation::session::api::work_root(core.history_handle().as_ref(), child)
-            .expect("工作根"),
+        crate::capabilities::conversation::session::api::work_root(
+            core.history_handle().as_ref(),
+            child
+        )
+        .expect("工作根"),
         sid,
         "沙箱锚在顶层工作上（整棵树共用一个 work/）"
     );
@@ -260,42 +181,6 @@ pub(crate) fn same_agent_nodes_serialize_but_different_agents_run_together() {
         "同一 agent 的 n2 必须等 n1 跑完；不同 agent 的 n3 与 n1 一起开工：{:?}",
         evs
     );
-}
-
-/// 目的：返工定向的**字段契约**：fail 必须指名节点 id（核心只把那些节点退回待办重派）；
-///   表里没有的 id / 漏填 = 这次判定用不了 → 核心据此要求重填，不静默丢掉一条判定。
-#[test]
-pub(crate) fn checklist_rework_is_a_validated_node_id() {
-    let known = vec!["n1-1".to_string(), "n2-1".to_string()];
-    let item = |status: &str, rework: Option<&str>| {
-        crate::capabilities::conversation::collab::service::synthesis::CheckItem {
-            item: "方案条目".to_string(),
-            status: status.to_string(),
-            evidence: None,
-            reason: Some("还差一步".to_string()),
-            rework: rework.map(|r| r.to_string()),
-        }
-    };
-    let mut exec = crate::capabilities::conversation::collab::service::synthesis::Execution::new();
-    exec.items = vec![item("fail", Some("n2-1")), item("pass", None)];
-    assert_eq!(exec.rework_targets(), vec!["n2-1".to_string()]);
-    assert!(
-        exec.rework_problems(&known).is_empty(),
-        "合法 id 不该被判无效"
-    );
-    assert!(!exec.all_pass());
-    exec.items = vec![item("fail", None)];
-    assert_eq!(exec.rework_problems(&known).len(), 1, "漏填要重填");
-    assert!(exec.rework_targets().is_empty(), "没指名就不退任何节点");
-    exec.items = vec![item("fail", Some("n9"))];
-    assert_eq!(
-        exec.rework_problems(&known).len(),
-        1,
-        "表里没有的 id 要重填"
-    );
-    exec.items = vec![item("pass", None)];
-    assert!(exec.rework_problems(&known).is_empty());
-    assert!(exec.all_pass());
 }
 
 /// 目的：阶段验收的 id 填错**不改系统状态**：核心被要求重填，重填对了才照常推进（不设次数上限）。

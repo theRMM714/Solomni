@@ -8,7 +8,8 @@ use super::*;
 /// 目的：测试用的"逐成员跑一遍"：内部走**共享的 converse_with**（工具循环本身仍在生产里， 只是执行阶段的入口从平铺的 Execution::run 换成了链驱动）。
 pub(crate) struct ExecLike {
     pub reports: BTreeMap<String, String>,
-    pub traces: BTreeMap<String, Vec<crate::capabilities::conversation::session::api::ToolCallView>>,
+    pub traces:
+        BTreeMap<String, Vec<crate::capabilities::conversation::session::api::ToolCallView>>,
     /// 目的：每个成员的各回复原文（每条回复一份）。
     pub raws: BTreeMap<String, Vec<String>>,
 }

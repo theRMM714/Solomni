@@ -183,21 +183,23 @@ pub fn last_usage(
         if folded(&marks, line) {
             return None;
         }
-        Some(crate::capabilities::conversation::session::api::ContextUsage {
-            prompt_tokens: ev
-                .get("prompt_tokens")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0),
-            completion_tokens: ev
-                .get("completion_tokens")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0),
-            total_tokens: ev.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
-            window: ev.get("window").and_then(|v| v.as_u64()).unwrap_or(0),
-            exact: ev.get("exact").and_then(|v| v.as_bool()).unwrap_or(false),
-            cache_read: ev.get("cache_read").and_then(|v| v.as_u64()),
-            cache_creation: ev.get("cache_creation").and_then(|v| v.as_u64()),
-        })
+        Some(
+            crate::capabilities::conversation::session::api::ContextUsage {
+                prompt_tokens: ev
+                    .get("prompt_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
+                completion_tokens: ev
+                    .get("completion_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
+                total_tokens: ev.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+                window: ev.get("window").and_then(|v| v.as_u64()).unwrap_or(0),
+                exact: ev.get("exact").and_then(|v| v.as_bool()).unwrap_or(false),
+                cache_read: ev.get("cache_read").and_then(|v| v.as_u64()),
+                cache_creation: ev.get("cache_creation").and_then(|v| v.as_u64()),
+            },
+        )
     })
 }
 
@@ -276,7 +278,8 @@ pub fn align_keep(events: &[serde_json::Value], keep: u64) -> u64 {
         })
         .unwrap_or(rows.len());
     let replies: Vec<u64> = rows.iter().map(|l| line_reply_of(l)).collect();
-    let aligned = crate::capabilities::conversation::session::api::keep_whole_replies(&replies, idx);
+    let aligned =
+        crate::capabilities::conversation::session::api::keep_whole_replies(&replies, idx);
     rows.get(aligned)
         .and_then(|l| l.get("id").and_then(|i| i.as_u64()))
         .unwrap_or(u64::MAX)

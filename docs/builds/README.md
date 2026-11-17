@@ -69,7 +69,7 @@
 
 ## 改动本单元时必须同步
 - `MODULE_SPEC.md` → `build:` 字段契约；`RUNTIME_SPEC.md` → 运行包契约与 `kind` 装配。
-- `src/tests/builds.rs` → 构建用例；`src/tests/diagnostics.rs` → `--build` 与体检。
+- `src/tests/diagnostics.rs` → `--build` 与体检；构建行为本身由 e2e 旅程与本机构建验证覆盖，具体实现的用例已移除（缺口 `test.capability-coverage-after-impl-test-removal`）。
 - `docs/vm/README.md` → guest 起停、缓存卷挂载与共享档；`docs/storage/README.md` → 缓存回收与预算。
 - `docs/kernel/README.md` → 容器临时区与长驻子进程的账。
 

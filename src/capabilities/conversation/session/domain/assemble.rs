@@ -5,9 +5,9 @@
 
 use std::collections::BTreeMap;
 
+use crate::capabilities::conversation::session::api::{ModuleTools, ServiceOp};
 use crate::capabilities::permission::api::PermissionSet;
 use crate::capabilities::residents::api::{ServiceState, ServiceView};
-use crate::capabilities::conversation::session::api::{ModuleTools, ServiceOp};
 use crate::capabilities::tools::api::ToolBook;
 
 /// 目的：角色面发放的工具 id 再按权限档位过滤——deny 的不发放（不是发放后再拒），ask 的照常发放。

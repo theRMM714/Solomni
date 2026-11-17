@@ -3,8 +3,8 @@
 //! 不管：会话状态（在 `domain/`）；模型调用与工具执行机制（在 `llm` / `tools` 的端口后）；取消开关与短暂事件出口（按调用形参传，不进结构）。
 //! 联动：`driver` / `round` / `tools` 读 `TurnIo`；协作能力与 turn 的生成流程消费 `MemberTurn`；`CompactedTurn` 由 `driver::compact_session` 产出。
 
-use crate::capabilities::llm::api::{LlmOpts, Verb};
 use crate::capabilities::conversation::session::api::{ContextUsage, LineView};
+use crate::capabilities::llm::api::{LlmOpts, Verb};
 use crate::kernel::ports::AskUser;
 use std::sync::Arc;
 
