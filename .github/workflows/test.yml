@@ -433,7 +433,7 @@ jobs:
           key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
 
   coverage:
-    name: 覆盖率门禁（Linux）
+    name: 覆盖率报告（Linux）
     needs: changes
     # 有代码变更才跑；覆盖率要跑单元/平台测试 + 插桩构建 + L4，成本高于 quality，不放进矩阵。
     if: ${{ always() && !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (needs.changes.result != 'success' || needs.changes.outputs.code_changed != 'false') }}
@@ -485,9 +485,10 @@ jobs:
       - name: 安装 LLVM 覆盖率运行时
         run: rustup component add llvm-tools-preview
 
-      # 四步：测试进程内 profile → 插桩构建产品 → L4 子进程 profile → 合并报告并按风险区判 80/60/100。
-      # 测试或 e2e 失败也判失败；缺工具直接非零，不记 env-skip 冒充通过。
-      - name: 采集并判定覆盖率
+      # 四步：测试进程内 profile → 插桩构建产品 → L4 子进程 profile → 合并报告并按风险区统计 80/60/100。
+      # 只报不拦（tests/coverage-policy.json 的 reportOnly）：桶与变更行不达标只打回执，本 job 变红不阻塞合并，
+      # gate 对它只出 ::warning。测试或 e2e 坏跑仍非零；缺工具直接非零，不记 env-skip 冒充通过。
+      - name: 采集并报告覆盖率
         env:
           # PR 才有基线；main 推送与手动运行只判风险桶。
           COVERAGE_DIFF_BASE: ${{ github.event.pull_request.base.sha }}

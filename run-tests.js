@@ -185,11 +185,12 @@ function runAudit(scope) {
   console.log("[audit] 本次只跑" + what + "：代码门禁、三平台与 L4 未运行；CI 报告统一写 ci-report。");
 }
 
-// ---------- 覆盖率门禁（手动） ----------
+// ---------- 覆盖率报告（手动） ----------
 
 /**
- * 覆盖率门禁（node run-tests.js --coverage）：委托 tests/coverage.mjs --collect。
- * 四步：测试进程内 profile → 插桩构建产品 → L4 子进程 profile → 合并报告，按风险区判 80/60/100。
+ * 覆盖率报告（node run-tests.js --coverage）：委托 tests/coverage.mjs --collect。
+ * 四步：测试进程内 profile → 插桩构建产品 → L4 子进程 profile → 合并报告，按风险区统计 80/60/100。
+ * 只报不拦：桶或变更行不达标只打回执（tests/coverage-policy.json 的 reportOnly），要卡线用 --strict。
  * 只在 Linux 上采集：Windows 的 child.kill('SIGINT') 是 TerminateProcess，产品进程来不及在 atexit
  * 写出 profile，子进程覆盖率会凭空缺失；三平台的安全行为矩阵与平台探针仍由 quality job 每 PR 跑。
  * 缺工具直接失败（不再 env-skip），否则门禁会被"没装工具"冒充通过。
@@ -197,7 +198,7 @@ function runAudit(scope) {
 function runCoverage() {
   if (process.platform !== "linux") {
     console.log("[覆盖率] 只在 Linux 上采集（子进程 profile 依赖 POSIX 信号正常退出）。");
-    console.log("  Windows / macOS 用 CI 的 coverage-report 产物，或把报告路径交给 node tests/coverage.mjs --report <txt> --check。");
+    console.log("  Windows / macOS 用 CI 的 coverage-report 产物，或把报告路径交给 node tests/coverage.mjs --report <txt> --check（外加 --strict 才判失败）。");
     process.exit(1);
   }
   if (!proc.toolAvailable("llvm-cov")) {
