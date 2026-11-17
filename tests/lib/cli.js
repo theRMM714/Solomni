@@ -74,7 +74,7 @@ function usage() {
     "用法：node run-tests.js [开关]",
     "",
     "模式（优先级从高到低）：",
-    "  --coverage           覆盖率发现（手动，不写报告）",
+    "  --coverage           覆盖率报告（手动，只报不拦）",
     "  --docs               文档审查 + 结构审查（写报告）",
     "  --audit=docs         只跑文档审查（写报告）",
     "  --audit=structure    只跑结构审查（写报告）",

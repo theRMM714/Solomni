@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 /**
- * 覆盖率门禁：把 llvm-cov 文本报告折算成风险区指标，并剔除测试代码。
+ * 覆盖率报告（只报不拦）：把 llvm-cov 文本报告折算成风险区指标，并剔除测试代码。
  *
  * 用法：
  *   node tests/coverage.mjs --report target/coverage/coverage.txt [--json target/coverage/summary.json] [--check]
  *   node tests/coverage.mjs --collect [--check]     # 跑测试 + 插桩构建 + e2e + 报告
  *   node tests/coverage.mjs --report ... --diff-base origin/main   # 加判变更行
+ *
+ * 口径：policy.reportOnly 为 true 时只报不拦——阈值与变更行不达标打印回执、退出码仍为 0，
+ * 传 --strict 才恢复硬判定（本地要卡线时用）。测试或 e2e 失败始终非零：那是坏跑，不是覆盖率口径。
  *
  * 为什么要剔除测试代码：内联 #[cfg(test)] 和 src/tests/** 本身就是测试，
  * 把它们算进产品行覆盖率只会让数字好看，不能说明产品行为被测到。
@@ -19,6 +22,8 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = path.join(ROOT, "target", "coverage");
 const POLICY = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "coverage-policy.json"), "utf8"));
+// 只报不拦：阈值不达标只打回执，不阻塞合并；--strict 临时转回硬门禁。
+const REPORT_ONLY = POLICY.reportOnly === true && !process.argv.includes("--strict");
 
 function arg(name) {
   const hit = process.argv.find((a) => a === name || a.startsWith(name + "="));
@@ -727,9 +732,12 @@ function collect() {
   if (result.diff) printDiff(result.diff);
   const thresholdBad = result.buckets.some((b) => b.pct < b.min);
   const diffBad = !!(result.diff && result.diff.buckets.some((b) => b.total && b.pct < (b.min === 100 ? 100 : result.diff.min)));
-  if (thresholdBad || diffBad || testFailed || e2eFailed) {
-    console.log("[覆盖率] 失败：阈值=" + (thresholdBad ? "未达标" : "达标") + "，变更行=" + (diffBad ? "未达标" : "达标") + "，测试=" + result.gates.tests + "，e2e=" + result.gates.e2e);
-    return 1;
+  const coverageBad = thresholdBad || diffBad;
+  // 坏跑（测试 / e2e 非零）始终失败；覆盖率口径本身按 policy 决定是回执还是硬判定。
+  const hard = (coverageBad && !REPORT_ONLY) || testFailed || e2eFailed;
+  if (coverageBad || testFailed || e2eFailed) {
+    console.log("[覆盖率] " + (hard ? "失败" : "回执（只报不拦）") + "：阈值=" + (thresholdBad ? "未达标" : "达标") + "，变更行=" + (diffBad ? "未达标" : "达标") + "，测试=" + result.gates.tests + "，e2e=" + result.gates.e2e);
+    return hard ? 1 : 0;
   }
   console.log("[覆盖率] 通过。报告：target/coverage/coverage.txt；摘要：target/coverage/summary.json");
   return 0;
@@ -747,7 +755,9 @@ function main() {
     if (arg("--json")) fs.writeFileSync(String(arg("--json")), JSON.stringify(result, null, 2));
     const bad = result.buckets.some((b) => b.pct < b.min) ||
       !!(result.diff && result.diff.buckets.some((b) => b.total && b.pct < (b.min === 100 ? 100 : result.diff.min)));
-    return arg("--check") && bad ? 1 : 0;
+    if (!arg("--check")) return 0;
+    if (bad && REPORT_ONLY) console.log("[覆盖率] 回执（只报不拦）：阈值未达标不判失败；--strict 可转硬门禁。");
+    return bad && !REPORT_ONLY ? 1 : 0;
   }
   return collect();
 }

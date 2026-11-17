@@ -44,7 +44,7 @@ node run-tests.js --skip-e2e
 
 - 注意：`node dev.js test` 与 `node dev.js fmt`、`node dev.js clippy` **都预期全绿**——T0 九项的步骤、可行状态与环境跳过口径见 [levels.md](levels.md) 的 T0 生成段；`env-skip` 不算通过，没有容差基线。
 - `--strict-env`：必装工具（rustfmt / clippy / cargo-audit / cargo-deny）缺失或取不到 advisory 数据时，这几步记失败而不是 `env-skip`；交叉 target 属可选项，不受影响。CI 的 `quality` job 固定带它，本地开发默认不带（离线机器仍能跑其余项，缺项如实体现在报告里）。
-- 用例默认**并行**跑；排查并发 / 隔离问题时用 `node run-tests.js --serial`。覆盖率是独立门禁：`node run-tests.js --coverage`（见下文「覆盖率门禁（Linux）」，不达标即失败）。
+- 用例默认**并行**跑；排查并发 / 隔离问题时用 `node run-tests.js --serial`。覆盖率是独立的报告步骤：`node run-tests.js --coverage`（见下文「覆盖率报告（Linux）」，只报不拦——不达标出回执，`--strict` 才判失败）。
 
 ### 完整本地入口
 
@@ -183,17 +183,18 @@ node run-tests.js --fence-live
 - **Linux 的 ext4 工具链用例按环境判据跳过**：`unshare -r` / `mke2fs` / `debugfs` 不可用（Linux CI 就是这样）时，`packed_guest_image_uses_4k_blocks` 与 `guest_rootfs_restores_privilege_bits_and_ownership` 打印 `[探针]` 并跳过。
 - 跳过 = `env-skip`，不是通过。补装 e2fsprogs 并允许非特权用户命名空间后才真跑。
 
-### 覆盖率门禁（Linux）
+### 覆盖率报告（Linux）
 
 ```text
 node run-tests.js --coverage
 # 等价于 node tests/coverage.mjs --collect
 ```
 
-- 判据是 `tests/coverage-policy.json` 的三类风险区：产品 80%、平台/进程适配 60%、安全策略 100%；PR 另有变更行门禁：新增 Rust 行 90%，安全桶变更行 100%。覆盖率是风险下限，不是质量目标（[TESTING.md](../../TESTING.md) 一）。
+- 统计口径是 `tests/coverage-policy.json` 的三类风险区：产品 80%、平台/进程适配 60%、安全策略 100%；PR 另算变更行：新增 Rust 行 90%，安全桶变更行 100%。这些数字只用于报告回执，不是合并判据——覆盖率是风险下限，不是质量目标（[TESTING.md](../../TESTING.md) 一）。
+- 只报不拦：`policy.reportOnly` 为 true 时，任一桶或变更行不达标只打印回执、退出码 0，CI 的 `coverage` job 变红也不阻塞合并（`gate` 只出 `::warning::`）。要卡线时加 `--strict`（`node tests/coverage.mjs --collect --strict` / `--report <txt> --check --strict`）。
 - 变更行用 `git diff <base>...HEAD -- "*.rs"` 的新侧新增行，只判报告里有执行面的行；测试文件、seam 与注释/空行不计。纯搬运（换文件、换路径限定、rustfmt 重排、统一改名）另作识别，不计入分母，三层判据依次是：整函数在抹掉注释与字符串、去掉路径限定后 token 相似度 ≥0.98；把 rustfmt 拆开的续行并成一条语句、成员链取末段、再按本次 diff 的等长增删块投票得出改名表（票数 ≥5 且占比 ≥80%）后逐字相同；最后才按「归一化后逐字相同、且本次 PR 触及文件的基线版本里出现过」兜底（每个基线键只抵一次）；回执打印不计的行数（`tests/coverage.mjs` 的 `movedLines`）。搬运行不是新逻辑，但新写的行照旧要覆盖——兜底只认基线里已有同形内容的行。CI 的 `coverage` job 在 PR 上把 `github.event.pull_request.base.sha` 传给 `COVERAGE_DIFF_BASE`，并取全历史；main 推送与手动运行只判风险桶。
 - 统计前剔除 `src/tests/**`、`tests/**`、`*tests.rs` 与 `#[cfg(test)]` 到配对右花括号的整段；否则内联测试会把覆盖率抬高。`policy.excludes` 的显式 seam 豁免必须逐条写文件、行段与理由，评估时打印豁免行数。
-- Linux 同时采集测试进程与产品子进程：先 `cargo llvm-cov --workspace --all-targets --no-report`，再用同一份插桩环境 `cargo build --bin solomni`，然后以 `E2E_COVERAGE=1` 跑 L4（优雅停止让子进程写 profile），最后合并 `*.profraw` 出报告。测试失败、E2E 失败或任一桶不达标都非零退出。
+- Linux 同时采集测试进程与产品子进程：先 `cargo llvm-cov --workspace --all-targets --no-report`，再用同一份插桩环境 `cargo build --bin solomni`，然后以 `E2E_COVERAGE=1` 跑 L4（优雅停止让子进程写 profile），最后合并 `*.profraw` 出报告。测试或 E2E 失败（坏跑）非零退出；桶与变更行不达标只打回执、退出 0。
 - Windows 不判定行覆盖：Node 的 `SIGINT` 在 Windows 是 `TerminateProcess`，产品子进程来不及写 profile；只靠进程内报告会让产品桶假性不达标。macOS 不在本门禁内，避免为同一结论再付一份 runner。平台专有行为由三平台 `quality` 的真机探针与安全行为矩阵承担，不靠行覆盖替代。
 - 工具缺失（`cargo-llvm-cov` 或 `llvm-tools-preview`）直接失败并打印安装命令，不再记 env-skip；CI 的 `coverage` job 用 `taiki-e/install-action` 固定版本安装。
 - 报告落 `target/coverage/`；未覆盖的生产路径在本次内补测或给出显式 seam，不留缺口条目。
@@ -250,7 +251,7 @@ MUTATION_SCOPE=weekly MUTATION_SHARD=2/4 node tests/ci-mutation.mjs
 | --- | --- | --- |
 | `quality` | 平台门禁 + 供应链 + L1 单元 + 平台探针 + 前端冒烟 + 前端类型检查（tsc） + 开发回路 / 变更分流 / 环境引导自检（**跳过 L4 与结构审查**） | `node run-tests.js --fence-live --skip-e2e --skip-audit --strict-env` |
 | `e2e` | L4 端到端 HTTP 与浏览器两条（自己构建产品，与 `quality` 并行） | `node tests/ci-e2e.mjs`（CI 专用；本地整跑用 `node run-tests.js --fence-live`） |
-| `coverage` | 覆盖率门禁（Linux，含测试进程与 L4 子进程） | `node tests/coverage.mjs --collect` |
+| `coverage` | 覆盖率报告（Linux，含测试进程与 L4 子进程；只报不拦，`gate` 只告警） | `node tests/coverage.mjs --collect` |
 | `changes` | 判定 `code_changed` / `docs_changed`；从 base 取分类器副本，自测 + `include_str!/include_bytes!` 文档消费自检 | `node tests/ci-changes.mjs`（副本） |
 | `docs` | 有文档变更：文档审查（门户 / 链接 / 根文档路由） | `node run-tests.js --audit=docs` |
 | `structure` | 始终跑：结构审查（代码↔文档结构；文档与真相源比对 + 纯文本检查） | `node run-tests.js --audit=structure` |
@@ -416,7 +417,7 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 | `E2E-FAILED` | L4 端到端编排失败（失败证据在 e2e 日志） | `tests/cross-platform/e2e/orchestrator.js` |
 | `MUTATION-OK` | 突变测试全捕获（手动 / 每周工作流，不参与验收） | `tests/ci-mutation.mjs` |
 | `MUTATION-FOUND` | 突变测试有漏网（手动 / 每周工作流，不参与验收） | `tests/ci-mutation.mjs` |
-| `GATE-OK` | CI 验收闸门按变更分类核对六个 lane（docs / structure / workflow / quality / coverage / e2e）全部通过 | `tests/ci-gate.mjs` |
+| `GATE-OK` | CI 验收闸门按变更分类核对六个 lane（docs / structure / workflow / quality / coverage / e2e）：前五个阻塞，coverage 只告警 | `tests/ci-gate.mjs` |
 <!-- END:success-markers -->
 
 - 固定标记不能替代质量门禁，也不能覆盖 `env-skip`、`gap` 或 `quality-fail`。测试入口必须以非零退出码暴露失败（`run-tests.js`）。
