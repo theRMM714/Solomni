@@ -34,7 +34,9 @@ const JOURNEYS = [
   { id: "run-module", unit: "tools", title: "不经 AI 直跑模块工具（含运行包 PATH）", deps: ["registry"] },
   { id: "native-tools", unit: "llm", title: "原生工具调用：一次回复两个调用，协议形状由假供应商核对", deps: ["registry"] },
   { id: "proxy", unit: "conversation", title: "代理模式：自己挑人、建子工作、停止即全停", deps: ["registry"] },
-  { id: "vm", unit: "vm", title: "虚拟机档：guest 内工具与 shell、外部工作区、删除即销毁", deps: ["registry"], requires: ["SOLOMNI_VM_LIVE 或 SOLOMNI_VM_QEMU"] },
+  // 依赖 native-tools：vm 段的假供应商按**原生槽位**回话（见 mock.js 的虚拟机档分支），
+  // 而 m1 的通道要由 native-tools 的探测改写成 native——少了这条前置，工具调用会被核心按信封通道拒掉。
+  { id: "vm", unit: "vm", title: "虚拟机档：guest 内工具与 shell、外部工作区、删除即销毁", deps: ["registry", "native-tools"], requires: ["SOLOMNI_VM_LIVE 或 SOLOMNI_VM_QEMU"] },
   { id: "parent-death", unit: "residents", title: "父死子亡：核心被强杀后常驻服务进程跟着消失", deps: ["registry", "mcp"] },
 ];
 
