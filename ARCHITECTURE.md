@@ -280,6 +280,10 @@
 | **R14** | **能力必须归层**：`layers.yaml` 是分层的唯一权威，声明层号必须等于按现有依赖重算的层号（§一）；能力只依赖严格更低层、同层零引用，新增能力先归层并重算全表（`node tests/gates/structure/layers.js --write`） |
 | **R15** | **值有唯一家**：跨边界传的值类型只在产生方能力定义一次（经 `api.rs` 导出），消费方直接 `use`，不许本地再造同形再转换（`tests/gates/structure/values.js`） |
 | **R16** | **边界只传值与端口**：跨能力 `api` 的参数与返回只能是值、端口（`dyn Trait`）或基本类型；活对象（带锁、带内部可变、带身份）与别人的 `&mut` 状态都不出境（`tests/gates/structure/values.js`） |
+| **R17** | **权限判定只有一套**：`PermissionSet` 的 `reach` / `decisions` 只在 `permission` 单元内读，外面一律问谓词（`may_read` / `may_write` / `may_read_shared` / `may_write_private` / `may_write_granted` / `may_exec` / `allows_network`）；直接读字段即失败（`tests/gates/structure/permission-values.js`） |
+| **R18** | **同名类型不许同居一文件**：同一个文件里 `use` 进两个同名类型即失败，改名让名字自证身份，不用 `as` 遮歧义（`tests/gates/structure/import-names.js`） |
+| **R19** | **死参只回执**：`impl` 里有函数体的 fn，形参带下划线前缀且体内没用到，就是"传进来被丢掉"，T0 结构审查回执（`tests/gates/structure/dead-params.js`） |
+| **R20** | **相似函数只回执**：token 3-gram 包含度跨文件 ≥ 0.72 / 同文件 ≥ 0.88 的函数对进回执，判定权在评审——形状像不等于语义同（`tests/gates/structure/similar-functions.js`） |
 
 ### 九.7 依赖方向与能力内部判据
 
@@ -296,6 +300,8 @@
 - **reverse** / **presentation**：能力不反向依赖根或呈现层；
 - **channelCross**：呈现层的两个渠道（`cli` 与 `web`）互不依赖；
 - **unitMap**：各单元的 `unit-map.md` 合起来与磁盘**双向一致**（结构审查）；**文档链接**：代码注释里的 `docs/**.md` 引用由结构审查判，文档之间的 md 链接与根 `*.md` 路由表由**文档审查**判（本地全量入口的「T0 结构审查」步骤跑全部门禁、含文档审查；CI 拆成 `docs` / `structure` 两个 job，`node run-tests.js --audit=docs` / `--audit=structure`）；
+- **permissionValues** / **importNames**：权限判定不出 `permission` 单元、同名类型不并存在同一个文件里（`tests/gates/structure/permission-values.js`、`import-names.js`），两者都判红；
+- **deadParams** / **similarFunctions**：死参与相似函数只回执、不进失败集（`tests/gates/structure/dead-params.js`、`similar-functions.js`）——它们是「该不该合」的候选清单，判定要人读；
 - **commentContract**：全仓 `.rs` 的文件头四槽（目的 / 管 / 不管 / 联动）、`pub` 项的条目槽（目的 / 参数 / 返回 / 错误 / 约束）与行内注释限量；零存量：任何一处违规都直接失败（见 §十）。
 
 - **零豁免**：任一判据不成立即报错；不存在基线文件、豁免条目或过期销账流程。

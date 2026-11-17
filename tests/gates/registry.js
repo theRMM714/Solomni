@@ -27,6 +27,10 @@ const S = {
   webLayers: require("./structure/webLayers.js"),
   size: require("./structure/size.js"),
   moduleFiles: require("./structure/module-files.js"),
+  permissionValues: require("./structure/permission-values.js"),
+  importNames: require("./structure/import-names.js"),
+  deadParams: require("./structure/dead-params.js"),
+  similar: require("./structure/similar-functions.js"),
 };
 const D = {
   portals: require("./docs/portals.js"),
@@ -131,6 +135,30 @@ const GATES = [
       return r.problems;
     },
   },
+  { id: "structure/permission-values", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["src/**/*.rs"], run: (root) => S.permissionValues.permissionValues(root) },
+  { id: "structure/import-names", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["src/**/*.rs"], run: (root) => S.importNames.importNames(root) },
+  {
+    id: "structure/dead-params",
+    lane: "structure",
+    step: "T0 结构审查",
+    kind: "text",
+    inputs: ["src/**/*.rs"],
+    run: (root, ctx) => {
+      ctx.stats.notes = (ctx.stats.notes || []).concat(S.deadParams.deadParamsNotes(root));
+      return [];
+    },
+  },
+  {
+    id: "structure/similar-functions",
+    lane: "structure",
+    step: "T0 结构审查",
+    kind: "text",
+    inputs: ["src/**/*.rs"],
+    run: (root, ctx) => {
+      ctx.stats.notes = (ctx.stats.notes || []).concat(S.similar.similarNotes(root));
+      return [];
+    },
+  },
   { id: "docs/portals", lane: "docs", step: "T0 文档审查", kind: "text", inputs: ["*.md", "docs/**/*.md"], run: (root) => D.portals.portals(root) },
   { id: "docs/root-router", lane: "docs", step: "T0 文档审查", kind: "text", inputs: ["*.md", "AGENTS.md"], run: (root) => D.rootRouter.rootRouter(root) },
   { id: "docs/templates", lane: "docs", step: "T0 文档审查", kind: "spawn", inputs: ["docs/templates/**", "docs/**/*.md"], run: (root) => D.templates.templates(root) },
@@ -167,6 +195,10 @@ const LANE_ORDER = {
     "structure/web-layers",
     "structure/file-size",
     "structure/capability-internal",
+    "structure/permission-values",
+    "structure/import-names",
+    "structure/dead-params",
+    "structure/similar-functions",
   ],
 };
 
