@@ -8,13 +8,15 @@
 # 真机围栏、TLS 出站）；文档/结构审查在 CI 里跑是为了合并闸门，不是补平台结论。inputs.clean=true 跳过缓存，用于「干净机器」验收。契约见 docs/testing/execution-ci.md。
 #
 # job 结构：平台相关的是 quality（平台门禁 + 单元 + 探针 + 前端冒烟）与 e2e（L4 端到端）；
-# 覆盖率门禁 coverage 只在 Linux 判定（子进程 profile 依赖 POSIX 信号正常退出，Windows 的 TerminateProcess
-# 会丢掉产品进程 atexit 写出的 profile；平台专有代码由三平台 quality 的行为测试覆盖）；
+# 覆盖率报告 coverage 只在 Linux 采集（子进程 profile 依赖 POSIX 信号正常退出，Windows 的 TerminateProcess
+# 会丢掉产品进程 atexit 写出的 profile；平台专有代码由三平台 quality 的行为测试覆盖）。
+# 覆盖率不是验收闸门：它不进 gate 的判定（tests/ci-gate.mjs 不读它），job 级 continue-on-error 让它红了也不改
+# workflow 结论——报告只作为观察指标留档。
 # 平台无关的是 changes（分流）、docs（文档审查）、structure（结构审查）、workflow（工作流静态检查）、
 # gate（验收闸门）与 publish-report（汇总发布）。
 # 有代码变更 → quality / coverage / e2e；有文档变更 → docs；structure / workflow 始终跑（结构代码和文档两边都能破坏；
 # workflow 改坏会让必填检查不上报，所以不按变更类型跳过）。
-# gate 汇总六个 job 的结果，是规则集里唯一代表代码/文档验收的必填检查：quality / e2e 是矩阵 job，被 job 级 if 跳过时
+# gate 汇总五个 lane 的结果，是规则集里唯一代表代码/文档验收的必填检查：quality / e2e 是矩阵 job，被 job 级 if 跳过时
 # 矩阵不展开，只报一条名字带字面量 ${{ matrix.os }} 的 skipped，永远对不上按平台名配置的 required context。
 # gate 的判定逻辑在 tests/ci-gate.mjs（--self-test 覆盖跳过合法性），本文件只把 needs.*.result 传进去。
 # 报告统一到 ci-report：runs/structure、runs/docs、runs/<os>；gate 只做闸门，不产报告。
@@ -177,7 +179,7 @@ jobs:
         with:
           node-version: "lts/*"
 
-      # 闸门判定脚本自身的自测：要合并进去的 gate 逻辑必须在这一步就验过（8 个跳过合法性样例）。
+      # 闸门判定脚本自身的自测：要合并进去的 gate 逻辑必须在这一步就验过（9 个样例，含「覆盖率不参与判定」）。
       - name: 闸门判定自测
         run: node tests/ci-gate.mjs --self-test
 
@@ -434,6 +436,9 @@ jobs:
 
   coverage:
     name: 覆盖率报告（Linux）
+    # 只报不拦：不达标按 policy.reportOnly 退出 0；坏跑（测试/e2e 挂）仍非零，但只是这份报告红，
+    # 既不进 gate 的判定，也不把 workflow 判成失败（job 级 continue-on-error）。
+    continue-on-error: true
     needs: changes
     # 有代码变更才跑；覆盖率要跑单元/平台测试 + 插桩构建 + L4，成本高于 quality，不放进矩阵。
     if: ${{ always() && !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (needs.changes.result != 'success' || needs.changes.outputs.code_changed != 'false') }}
@@ -516,7 +521,8 @@ jobs:
     # 只报一条名字带字面量 ${{ matrix.os }} 的 skipped，按平台名配置的 required context 永远不会上报。
     # 这里用固定名字汇总：跳过是否合法按变更分类判，不按「有没有跑」猜；判定逻辑在 tests/ci-gate.mjs（可自测）。
     # always()：依赖失败或被跳过也要给出结论；取消的 job 结果不是 success，同样判失败，不让 skipped 冒充通过。
-    needs: [changes, docs, structure, workflow, quality, coverage, e2e]
+    # coverage 不在 needs 里：覆盖率报告不是验收闸门，等它只会让合并多一个无关的等待。
+    needs: [changes, docs, structure, workflow, quality, e2e]
     if: ${{ always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -542,7 +548,6 @@ jobs:
           STRUCTURE: ${{ needs.structure.result }}
           WORKFLOW: ${{ needs.workflow.result }}
           QUALITY: ${{ needs.quality.result }}
-          COVERAGE: ${{ needs.coverage.result }}
           E2E: ${{ needs.e2e.result }}
         run: node tests/ci-gate.mjs
 

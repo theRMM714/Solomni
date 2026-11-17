@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
  * 验收闸门判定（CI 的 gate job 唯一逻辑；--self-test 覆盖所有分支）。
- * 管：读 CHANGES / CODE_CHANGED / DOCS_CHANGED / DOCS / STRUCTURE / WORKFLOW / QUALITY / E2E / COVERAGE 环境变量，
+ * 管：读 CHANGES / CODE_CHANGED / DOCS_CHANGED / DOCS / STRUCTURE / WORKFLOW / QUALITY / E2E 环境变量，
  *     写 step summary 与 ::error:: / ::warning::，给出合并判定；--self-test 用纯输入跑 CASES 里的全部样例。
+ * 覆盖率的立场：覆盖率报告不是验收闸门——它不进本判定（连告警都不出），红了也不改变 workflow 结论（test.yml 的 coverage job 是 continue-on-error）。
  * 不管：跑测试、产报告（run-tests.js / ci-merge.mjs）与规则集本身（仓库外事实，见 docs/testing/execution-ci.md）。
  * 约束：只读环境变量与（可选）GITHUB_STEP_SUMMARY；不联网、不写仓库文件；lane 名必须与 test.yml 的 job 名一一对应。
  */
@@ -17,8 +18,6 @@ const LANES = [
   { key: "structure", name: "结构审查" },
   { key: "workflow", name: "工作流静态检查" },
   { key: "quality", name: "质量与单元" },
-  // 覆盖率只报不拦：不达标只出 ::warning，不参与合并判定（口径在 tests/coverage-policy.json 的 reportOnly）。
-  { key: "coverage", name: "覆盖率报告", advisory: true },
   { key: "e2e", name: "端到端" },
 ];
 
@@ -31,17 +30,15 @@ export function decide(input) {
   const env = input || {};
   const allowDocs = env.docsChanged === "false";
   const allowCode = env.codeChanged === "false";
-  const allow = { docs: allowDocs, structure: false, workflow: false, quality: allowCode, coverage: allowCode, e2e: allowCode };
+  const allow = { docs: allowDocs, structure: false, workflow: false, quality: allowCode, e2e: allowCode };
   const lanes = LANES.map((l) => Object.assign({}, l, { result: env[l.key] || "", allowSkip: allow[l.key] }));
-  const failed = lanes.filter((l) => !l.advisory && l.result !== "success" && !(l.result === "skipped" && l.allowSkip));
-  // advisory lane 只出告警：它红了不改变合并判定，但报告里要留下回执；合法跳过不算告警。
-  const advisory = lanes.filter((l) => l.advisory && l.result !== "success" && !(l.result === "skipped" && l.allowSkip));
-  return { changes: env.changes || "", changesOk: env.changes === "success", lanes, failed, advisory, ok: failed.length === 0 };
+  const failed = lanes.filter((l) => l.result !== "success" && !(l.result === "skipped" && l.allowSkip));
+  return { changes: env.changes || "", changesOk: env.changes === "success", lanes, failed, ok: failed.length === 0 };
 }
 
 /** 与旧内联脚本同格式的一行 step summary。 */
 function summaryLine(l) {
-  return "- " + l.name + "：" + (l.result || "（缺失）") + "（允许跳过：" + (l.allowSkip ? "yes" : "no") + (l.advisory ? "，仅报告" : "") + "）";
+  return "- " + l.name + "：" + (l.result || "（缺失）") + "（允许跳过：" + (l.allowSkip ? "yes" : "no") + "）";
 }
 
 function main() {
@@ -53,7 +50,6 @@ function main() {
     structure: process.env.STRUCTURE,
     workflow: process.env.WORKFLOW,
     quality: process.env.QUALITY,
-    coverage: process.env.COVERAGE,
     e2e: process.env.E2E,
   });
   if (process.env.GITHUB_STEP_SUMMARY) {
@@ -62,7 +58,6 @@ function main() {
   // changes 只是路由：它失败时下游各 job 已按全量兜底（取不到 diff 也是），所以这里只告警不算失败。
   if (!d.changesOk) console.log("::warning title=验收闸门::变更分流未成功，按全量兜底核对");
   for (const l of d.failed) console.log("::error::" + l.name + " 未通过：result=" + (l.result || "（缺失）"));
-  for (const l of d.advisory) console.log("::warning title=" + l.name + "::仅报告，不阻塞合并：result=" + (l.result || "（缺失）"));
   if (!d.ok) process.exit(1);
   console.log("GATE-OK");
 }
@@ -76,7 +71,6 @@ const full = {
   structure: OK,
   workflow: OK,
   quality: OK,
-  coverage: OK,
   e2e: OK,
 };
 // changes 失败 / 取不到 diff：两个分类字段都是空串，下游两路都跑，跳过一律不合法。
@@ -88,19 +82,18 @@ const changesFailed = {
   structure: OK,
   workflow: OK,
   quality: OK,
-  coverage: OK,
   e2e: OK,
 };
 const CASES = [
   {
     name: "纯文档：docs 跑、平台 job 跳过合法",
-    input: { changes: OK, codeChanged: "false", docsChanged: "true", docs: OK, structure: OK, workflow: OK, quality: "skipped", coverage: "skipped", e2e: "skipped" },
+    input: { changes: OK, codeChanged: "false", docsChanged: "true", docs: OK, structure: OK, workflow: OK, quality: "skipped", e2e: "skipped" },
     ok: true,
     failed: [],
   },
   {
     name: "纯代码：docs 跳过合法、平台 job 必须跑",
-    input: { changes: OK, codeChanged: "true", docsChanged: "false", docs: "skipped", structure: OK, workflow: OK, quality: OK, coverage: OK, e2e: OK },
+    input: { changes: OK, codeChanged: "true", docsChanged: "false", docs: "skipped", structure: OK, workflow: OK, quality: OK, e2e: OK },
     ok: true,
     failed: [],
   },
@@ -111,18 +104,17 @@ const CASES = [
     failed: [],
   },
   {
-    name: "有代码变更时 quality 必须跑（workflow 恒跑，跳过同样拦）；coverage 跳过只告警",
-    input: Object.assign({}, full, { workflow: "skipped", quality: "skipped", coverage: "skipped" }),
+    name: "有代码变更时 quality 必须跑（workflow 恒跑，跳过同样拦）",
+    input: Object.assign({}, full, { workflow: "skipped", quality: "skipped" }),
     ok: false,
     failed: ["workflow", "quality"],
-    advisory: ["coverage"],
   },
   {
-    name: "coverage 失败、其余全绿：只告警，仍 GATE-OK",
+    // 覆盖率报告不是验收闸门：传进来的 coverage 结论不进判定（连告警都不出）。
+    name: "coverage 失败不参与判定：仍 GATE-OK",
     input: Object.assign({}, full, { coverage: "failure" }),
     ok: true,
     failed: [],
-    advisory: ["coverage"],
   },
   {
     name: "structure 恒跑：跳过即失败",
@@ -132,7 +124,7 @@ const CASES = [
   },
   {
     name: "有文档变更时 docs 必须跑：跳过即失败",
-    input: { changes: OK, codeChanged: "false", docsChanged: "true", docs: "skipped", structure: OK, workflow: OK, quality: "skipped", coverage: "skipped", e2e: "skipped" },
+    input: { changes: OK, codeChanged: "false", docsChanged: "true", docs: "skipped", structure: OK, workflow: OK, quality: "skipped", e2e: "skipped" },
     ok: false,
     failed: ["docs"],
   },
@@ -149,10 +141,9 @@ const CASES = [
   },
   {
     name: "cancelled：任何 lane 被判 cancelled 都不算通过",
-    input: { changes: "cancelled", codeChanged: "", docsChanged: "", docs: "cancelled", structure: "cancelled", workflow: "cancelled", quality: "cancelled", coverage: "cancelled", e2e: "cancelled" },
+    input: { changes: "cancelled", codeChanged: "", docsChanged: "", docs: "cancelled", structure: "cancelled", workflow: "cancelled", quality: "cancelled", e2e: "cancelled" },
     ok: false,
     failed: ["docs", "structure", "workflow", "quality", "e2e"],
-    advisory: ["coverage"],
   },
 ];
 
@@ -163,7 +154,6 @@ function selfTest() {
       const got = decide(c.input);
       assert.equal(got.ok, c.ok, c.name + "：ok 期望 " + c.ok + "，实际 " + got.ok);
       assert.deepEqual(got.failed.map((l) => l.key), c.failed, c.name + "：失败 lane 不符");
-      assert.deepEqual(got.advisory.map((l) => l.key), c.advisory || [], c.name + "：告警 lane 不符");
       if (c.extra) c.extra(got);
     } catch (e) {
       bad.push(e.message);

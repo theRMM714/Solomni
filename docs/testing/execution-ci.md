@@ -179,7 +179,7 @@ node run-tests.js --coverage
 ```
 
 - 统计口径是 `tests/coverage-policy.json` 的三类风险区：产品 80%、平台/进程适配 60%、安全策略 100%；PR 另算变更行：新增 Rust 行 90%，安全桶变更行 100%。这些数字只用于报告回执，不是合并判据——覆盖率是风险下限，不是质量目标（[TESTING.md](../../TESTING.md) 一）。
-- 只报不拦：`policy.reportOnly` 为 true 时，任一桶或变更行不达标只打印回执、退出码 0，CI 的 `coverage` job 变红也不阻塞合并（`gate` 只出 `::warning::`）。要卡线时加 `--strict`（`node tests/coverage.mjs --collect --strict` / `--report <txt> --check --strict`）。
+- 只报不拦：`policy.reportOnly` 为 true 时，任一桶或变更行不达标只打印回执、退出码 0。它**不是验收闸门**：`gate` 不读 `coverage` 的结论（`tests/ci-gate.mjs` 的 lane 表里没有它），job 级 `continue-on-error` 让这份报告红了也不改变 workflow 结论（`.github/workflows/test.yml`）。要卡线时本地加 `--strict`（`node tests/coverage.mjs --collect --strict` / `--report <txt> --check --strict`），那是一次性的本地判定，不改 CI 口径。
 - 变更行用 `git diff <base>...HEAD -- "*.rs"` 的新侧新增行，只判报告里有执行面的行；测试文件、seam 与注释/空行不计。纯搬运（换文件、换路径限定、rustfmt 重排、统一改名）另作识别，不计入分母，三层判据依次是：整函数在抹掉注释与字符串、去掉路径限定后 token 相似度 ≥0.98；把 rustfmt 拆开的续行并成一条语句、成员链取末段、再按本次 diff 的等长增删块投票得出改名表（票数 ≥5 且占比 ≥80%）后逐字相同；最后才按「归一化后逐字相同、且本次 PR 触及文件的基线版本里出现过」兜底（每个基线键只抵一次）；回执打印不计的行数（`tests/coverage.mjs` 的 `movedLines`）。搬运行不是新逻辑，但新写的行照旧要覆盖——兜底只认基线里已有同形内容的行。CI 的 `coverage` job 在 PR 上把 `github.event.pull_request.base.sha` 传给 `COVERAGE_DIFF_BASE`，并取全历史；main 推送与手动运行只判风险桶。
 - 统计前剔除 `src/tests/**`、`tests/**`、`*tests.rs` 与 `#[cfg(test)]` 到配对右花括号的整段；否则内联测试会把覆盖率抬高。`policy.excludes` 的显式 seam 豁免必须逐条写文件、行段与理由，评估时打印豁免行数。
 - Linux 同时采集测试进程与产品子进程：先 `cargo llvm-cov --workspace --all-targets --no-report`，再用同一份插桩环境 `cargo build --bin solomni`，然后以 `E2E_COVERAGE=1` 跑 L4（优雅停止让子进程写 profile），最后合并 `*.profraw` 出报告。测试或 E2E 失败（坏跑）非零退出；桶与变更行不达标只打回执、退出 0。
@@ -233,18 +233,18 @@ MUTATION_SCOPE=weekly MUTATION_SHARD=2/4 node tests/ci-mutation.mjs
 - 矩阵 `windows-latest / ubuntu-latest / macos-latest`（`fail-fast: false`，一个平台失败不影响另外两个出结论）。
 - 来自 fork 的 PR 照跑测试，但不发布 `ci-report`（token 只读）。
 
-- 平台相关的 job 是 `quality` 与 `e2e`；`coverage` 固定在 Linux 单平台；`changes` / `docs` / `structure` / `workflow` / `gate` / `publish-report` 是平台无关的 job：
+- 平台相关的 job 是 `quality` 与 `e2e`；`coverage` 固定在 Linux 单平台且不进验收闸门；`changes` / `docs` / `structure` / `workflow` / `gate` / `publish-report` 是平台无关的 job：
 
 | job | 跑什么 | 对应入口 |
 | --- | --- | --- |
 | `quality` | 平台门禁 + 供应链 + L1 单元 + 平台探针 + 前端冒烟 + 前端类型检查（tsc） + 开发回路 / 变更分流 / 环境引导自检（**跳过 L4 与结构审查**） | `node run-tests.js --fence-live --skip-e2e --skip-audit --strict-env` |
 | `e2e` | L4 端到端 HTTP 与浏览器两条（自己构建产品，与 `quality` 并行） | `node tests/ci-e2e.mjs`（CI 专用；本地整跑用 `node run-tests.js --fence-live`） |
-| `coverage` | 覆盖率报告（Linux，含测试进程与 L4 子进程；只报不拦，`gate` 只告警） | `node tests/coverage.mjs --collect` |
+| `coverage` | 覆盖率报告（Linux，含测试进程与 L4 子进程；只报不拦：不进 `gate` 判定，`continue-on-error` 让它红了也不改 workflow 结论） | `node tests/coverage.mjs --collect` |
 | `changes` | 判定 `code_changed` / `docs_changed`；从 base 取分类器副本，自测 + `include_str!/include_bytes!` 文档消费自检 | `node tests/ci-changes.mjs`（副本） |
 | `docs` | 有文档变更：文档审查（门户 / 链接 / 根文档路由） | `node run-tests.js --audit=docs` |
 | `structure` | 始终跑：结构审查（代码↔文档结构；文档与真相源比对 + 纯文本检查） | `node run-tests.js --audit=structure` |
 | `workflow` | 始终跑：工作流静态检查（闸门判定自测 + actionlint 阻断 + zizmor 固定 1.32.0 阻断，findings 即失败；9 个只读 checkout 关凭据，2 个发布 job 有行内豁免） | `node tests/ci-gate.mjs --self-test`；`actionlint -no-color`（阻断）；`zizmor@1.32.0 --persona=regular --format=plain .github/workflows`（findings 即失败） |
-| `gate` | 汇总六个 job 的结果（`changes` 的分类 + `docs` / `structure` / `workflow` / `quality` / `coverage` / `e2e`），规则集里唯一代表代码/文档验收的必填检查；不产报告 | `node tests/ci-gate.mjs` |
+| `gate` | 汇总五个 lane 的结果（`changes` 的分类 + `docs` / `structure` / `workflow` / `quality` / `e2e`；`coverage` 不在其中），规则集里唯一代表代码/文档验收的必填检查；不产报告 | `node tests/ci-gate.mjs` |
 | `publish-report` | 汇总三条 lane 的报告并发布 `ci-report` | `tests/ci-merge.mjs` + `tests/ci-publish.mjs` |
 
 - **三路分流**：`changes` 输出两个谓词：
@@ -266,8 +266,8 @@ MUTATION_SCOPE=weekly MUTATION_SHARD=2/4 node tests/ci-mutation.mjs
 - **规则集只要求固定名字的 `gate` 一项**，`docs` / `structure` / `workflow` 也不是 required context，它们的结论经 `gate` 进入合并判定。
 - **不要改成 workflow 级 `paths-ignore`**：workflow 不启动时 required context 根本不会上报，会永远停在 pending。
 
-- `gate`（检查名 `验收闸门`）在非 Draft 的 run 里始终运行，汇总六个 lane（`docs` / `structure` / `workflow` / `quality` / `coverage` / `e2e`）的 `needs.*.result`，按 `changes` 的分类结果判「跳过是否合法」（判定逻辑在 `tests/ci-gate.mjs`，自测 8 个样例；`changes` 只提供分类输入，失败只告警、不单独判失败）：
-- `code_changed=false` 时 `quality` / `coverage` / `e2e` 可以 skipped，`docs_changed=false` 时 `docs` 可以 skipped，`structure` 与 `workflow` 必须 success（`.github/workflows/test.yml`、`tests/ci-gate.mjs`）；其余任何 skipped / failure / cancelled 都判失败。`changes` 自身不参与判定（它只是路由；失败时下游已按全量兜底），所以分类器故障不会单独阻塞合并，但真跑挂了的 job 一定会被闸门拦下。`gate` 不写 `ci-report`，结论只在 PR 检查项里。
+- `gate`（检查名 `验收闸门`）在非 Draft 的 run 里始终运行，汇总五个 lane（`docs` / `structure` / `workflow` / `quality` / `e2e`）的 `needs.*.result`，按 `changes` 的分类结果判「跳过是否合法」（判定逻辑在 `tests/ci-gate.mjs`，自测 9 个样例，含「coverage 失败不参与判定」；`changes` 只提供分类输入，失败只告警、不单独判失败）：
+- `code_changed=false` 时 `quality` / `e2e` 可以 skipped（`coverage` 同样会跳过，但它不在判定内），`docs_changed=false` 时 `docs` 可以 skipped，`structure` 与 `workflow` 必须 success（`.github/workflows/test.yml`、`tests/ci-gate.mjs`）；其余任何 skipped / failure / cancelled 都判失败。`changes` 自身不参与判定（它只是路由；失败时下游已按全量兜底），所以分类器故障不会单独阻塞合并，但真跑挂了的 job 一定会被闸门拦下。`gate` 不写 `ci-report`，结论只在 PR 检查项里。
 
 - `changes` 先跑分类器自测；全量入口的「变更分流自检」步骤也会跑同一个 `--self-test`。分类器**从 base 取副本**（`git show base:tests/ci-changes.mjs`）再执行——PR 改自己的分类脚本不能把自己判成全文档；base 还没有该文件时两路都跑。取不到 diff、空 diff 或未知路径时同样落回全量。
 - 新分类器写 `code_changed` / `docs_changed`；分类字段缺失（例如 base 的分类器还没有该键）时，下游条件按 `!= 'false'` 兜底为全量跑，不会出现启动期全跳过。
@@ -405,7 +405,7 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 | `E2E-FAILED` | L4 端到端编排失败（失败证据在 e2e 日志） | `tests/cross-platform/e2e/orchestrator.js` |
 | `MUTATION-OK` | 突变测试全捕获（手动 / 每周工作流，不参与验收） | `tests/ci-mutation.mjs` |
 | `MUTATION-FOUND` | 突变测试有漏网（手动 / 每周工作流，不参与验收） | `tests/ci-mutation.mjs` |
-| `GATE-OK` | CI 验收闸门按变更分类核对六个 lane（docs / structure / workflow / quality / coverage / e2e）：前五个阻塞，coverage 只告警 | `tests/ci-gate.mjs` |
+| `GATE-OK` | CI 验收闸门按变更分类核对五个 lane（docs / structure / workflow / quality / e2e）；覆盖率报告不在判定内 | `tests/ci-gate.mjs` |
 <!-- END:success-markers -->
 
 - 固定标记不能替代质量门禁，也不能覆盖 `env-skip`、`gap` 或 `quality-fail`。测试入口必须以非零退出码暴露失败（`run-tests.js`）。
