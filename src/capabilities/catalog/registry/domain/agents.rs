@@ -78,30 +78,9 @@ pub struct AgentDraft {
 }
 
 /// 目的：agent 名即将成为（session 内）目录名：非空、不含路径分隔符与 Windows 非法字符、不是保留名。
+///   规则本身是内核的名字契约（`kernel::api::validate_dir_name`），这里只补主语。
 pub fn validate_name(name: &str) -> Result<(), String> {
-    let n = name.trim();
-    if n.is_empty() {
-        return Err("agent 名不能为空".to_string());
-    }
-    if name != n {
-        return Err("agent 名首尾不能有空白".to_string());
-    }
-    if n == "." || n == ".." {
-        return Err("agent 名非法".to_string());
-    }
-    const BAD: [char; 9] = ['\\', '/', ':', '*', '?', '"', '<', '>', '|'];
-    if n.chars().any(|c| BAD.contains(&c) || c.is_control()) {
-        return Err("agent 名不能包含 \\ / : * ? \" < > | 或控制字符".to_string());
-    }
-    let upper = n.to_ascii_uppercase();
-    let reserved = ["CON", "PRN", "AUX", "NUL"].contains(&upper.as_str())
-        || (upper.len() == 4
-            && (upper.starts_with("COM") || upper.starts_with("LPT"))
-            && upper.as_bytes()[3].is_ascii_digit());
-    if reserved {
-        return Err("agent 名是系统保留名".to_string());
-    }
-    Ok(())
+    crate::kernel::api::validate_dir_name(name, "agent 名")
 }
 
 /// 目的：目录保留名校验：这些名字由工作区布局固定占用（`session/<工作>/work`、`session/<工作>/children`），
@@ -306,18 +285,9 @@ pub fn resolve_picks(
 }
 
 /// 目的：同一工作内 agent 名去重：重名时依次追加 -2、-3（用户不改名时的兜底）。
+///   后缀探测是内核的名字契约（`kernel::api::dedup_suffix`），这里只把 `taken` 变成本次已占集合。
 pub fn unique_instance_name(base: &str, taken: &[String]) -> String {
-    if !taken.iter().any(|t| t == base) {
-        return base.to_string();
-    }
-    let mut n = 2;
-    loop {
-        let cand = format!("{}-{}", base, n);
-        if !taken.iter().any(|t| t == &cand) {
-            return cand;
-        }
-        n += 1;
-    }
+    crate::kernel::api::dedup_suffix(base, |c| taken.iter().any(|t| t == c))
 }
 /// 目的：登记处全部 agent 的视图（空登记处不是错误——调用方据此给引导）。
 pub fn views(agents: &Agents) -> Vec<AgentView> {

@@ -63,28 +63,7 @@ pub(crate) fn mode_str(mode: WorkMode) -> &'static str {
 }
 
 /// 目的：工作名即将来的落盘目录名——非空、不含路径分隔符与 Windows 非法字符、不是保留名。
+///   规则本身是内核的名字契约（`kernel::api::validate_dir_name`），这里只补主语。
 pub(crate) fn validate_work_name(name: &str) -> Result<(), String> {
-    let n = name.trim();
-    if n.is_empty() {
-        return Err("工作名不能为空".to_string());
-    }
-    if name != n {
-        return Err("工作名首尾不能有空白".to_string());
-    }
-    if n == "." || n == ".." {
-        return Err("工作名非法".to_string());
-    }
-    const BAD: [char; 9] = ['\\', '/', ':', '*', '?', '"', '<', '>', '|'];
-    if n.chars().any(|c| BAD.contains(&c) || c.is_control()) {
-        return Err("工作名不能包含 \\ / : * ? \" < > | 或控制字符".to_string());
-    }
-    let upper = n.to_ascii_uppercase();
-    let reserved_device = ["CON", "PRN", "AUX", "NUL"].contains(&upper.as_str())
-        || (upper.len() == 4
-            && (upper.starts_with("COM") || upper.starts_with("LPT"))
-            && upper.as_bytes()[3].is_ascii_digit());
-    if reserved_device {
-        return Err("工作名是系统保留名".to_string());
-    }
-    Ok(())
+    crate::kernel::api::validate_dir_name(name, "工作名")
 }

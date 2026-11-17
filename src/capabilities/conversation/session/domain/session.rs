@@ -709,23 +709,14 @@ pub fn delta_visible(kind: &str, text: &str) -> bool {
 /// 目的：工作名的缺省与唯一化：`base` 去空白；为空用 `fallback`；重名追加 `-2` / `-3`（进程内唯一即可）。
 ///   **纯策略**：`exists` 由调用方给——会话存在性归存储，本函数不关心它从哪来。
 ///   归属：命名是**会话自己的策略**（它拥有会话身份），不是前端的便利函数。
+/// 约束：缺省与去空白是本函数的事；后缀探测是内核的名字契约（`kernel::api::dedup_suffix`）。
 pub fn unique_work_name(base: &str, fallback: &str, exists: impl Fn(&str) -> bool) -> String {
     let seed = if base.trim().is_empty() {
         fallback
     } else {
         base.trim()
     };
-    if !exists(seed) {
-        return seed.to_string();
-    }
-    let mut n = 2;
-    loop {
-        let cand = format!("{}-{}", seed, n);
-        if !exists(&cand) {
-            return cand;
-        }
-        n += 1;
-    }
+    crate::kernel::api::dedup_suffix(seed, exists)
 }
 
 #[cfg(test)]

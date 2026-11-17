@@ -230,6 +230,24 @@ use flows::*;
 use gate::*;
 use view::*;
 
+/// 目的：两个词的编辑距离（只用于旗语与名字的建议，长度都短）。
+///   共用方：旗语建议（`src/presentation/cli/argv.rs`）与名字建议（`src/presentation/cli/catalog.rs`）。
+pub(crate) fn distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut cur = vec![0usize; b.len() + 1];
+    for (i, ca) in a.iter().enumerate() {
+        cur[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let cost = usize::from(ca != cb);
+            cur[j + 1] = (prev[j + 1] + 1).min(cur[j] + 1).min(prev[j] + cost);
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    prev[b.len()]
+}
+
 // 测试直接点名的助手：只在测试构建里外露，源码内部按子模块取。
 #[cfg(test)]
 pub(crate) use flows::eof_stop;

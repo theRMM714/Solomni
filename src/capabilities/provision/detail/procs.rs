@@ -43,9 +43,6 @@ impl Procs for BookProcs {
     }
 
     fn guest_running(&self) -> bool {
-        self.book()
-            .list()
-            .iter()
-            .any(|e| e.purpose == "guest" && crate::kernel::detail::procs::alive(e.pid))
+        self.book().has_live("guest")
     }
 }

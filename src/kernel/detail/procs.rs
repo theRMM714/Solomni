@@ -119,6 +119,14 @@ impl ProcessBook {
         out
     }
 
+    /// 目的：账上有没有某一用途下仍在活的进程（用途只是标签，语义归调用方）。
+    /// 约束：只看"账上记着且 pid 还活着"，不证明进程身份——认身份的程度是 `reconcile` 的事。
+    pub fn has_live(&self, purpose: &str) -> bool {
+        self.list()
+            .iter()
+            .any(|e| e.purpose == purpose && alive(e.pid))
+    }
+
     /// 目的：启动时对账——已经不在的删掉；还在的确认身份后收掉，认不出来就如实报出来。
     /// 约束：误杀别人的进程是硬伤，所以先证明"这个 pid 还是我们那一个"：Unix 看命令行里的标记，
     ///   Windows 看进程创建时间；两者都证明不了（账上没记身份）就只报不动手。

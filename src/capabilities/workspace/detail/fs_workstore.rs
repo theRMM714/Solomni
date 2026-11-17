@@ -15,7 +15,6 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
 
 pub struct FsWorkStore;
 
@@ -170,31 +169,14 @@ fn read_json<T: DeserializeOwned>(path: &Path, what: &str) -> Result<Option<T>, 
 }
 
 /// 目的：拿住该工作的跨进程文件锁；有界等待，拿不到就如实报错。
+/// 联动：协议是内核的文件锁契约（`kernel::api::lock_within`），这里只定路径与等待上限。
 fn lock_store(store: &Path) -> Result<File, String> {
     std::fs::create_dir_all(store).map_err(|e| format!("建版本库目录失败：{}", e))?;
-    let path = store.join("lock");
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(&path)
-        .map_err(|e| format!("打开版本库锁失败（{}）：{}", path.display(), e))?;
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        match file.try_lock() {
-            Ok(()) => return Ok(file),
-            Err(std::fs::TryLockError::WouldBlock) => {
-                if Instant::now() >= deadline {
-                    return Err(
-                        "版本库被另一个进程占用，等待超时（稍后重试或关闭另一个核心）".to_string(),
-                    );
-                }
-                std::thread::sleep(Duration::from_millis(25));
-            }
-            Err(std::fs::TryLockError::Error(e)) => return Err(format!("版本库加锁失败：{}", e)),
-        }
-    }
+    crate::kernel::api::lock_within(
+        &store.join("lock"),
+        std::time::Duration::from_secs(10),
+        "版本库",
+    )
 }
 
 /// 递归列文件（只列文件），相对路径用 / 分隔，稳定排序。

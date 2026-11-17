@@ -166,28 +166,9 @@ impl Workdirs for FsWorkspace {
         std::fs::create_dir_all(&dir).map_err(|e| format!("建工作区锁目录失败：{}", e))?;
         let hash = crate::capabilities::workspace::domain::hash::content_hash(key.as_bytes());
         let path = dir.join(format!("workspace-{}.lock", hash));
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(&path)
-            .map_err(|e| format!("打开工作区锁失败（{}）：{}", path.display(), e))?;
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        loop {
-            match file.try_lock() {
-                Ok(()) => return Ok(Some(file)),
-                Err(std::fs::TryLockError::WouldBlock) => {
-                    if std::time::Instant::now() >= deadline {
-                        return Err("工作区正被另一个会话写入，等待超时（稍后重试）".to_string());
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(25));
-                }
-                Err(std::fs::TryLockError::Error(e)) => {
-                    return Err(format!("工作区加锁失败：{}", e));
-                }
-            }
-        }
+        let file =
+            crate::kernel::api::lock_within(&path, std::time::Duration::from_secs(10), "工作区")?;
+        Ok(Some(file))
     }
 
     fn bind(&self, session: &str, root: Option<&Path>) -> Result<(), String> {
