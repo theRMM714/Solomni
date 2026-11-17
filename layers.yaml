@@ -13,10 +13,9 @@ tools: 3
 vm: 3
 conversation: 4
 provision: 4
-storage: 5
+maintenance: 5
 turn: 5
-builds: 6
 lifecycle: 6
+system: 6
 work: 6
 runtime: 7
-system: 7

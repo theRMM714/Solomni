@@ -139,7 +139,7 @@ pub(crate) fn ops_with_vm(
         doubles::test_packages(std::sync::Arc::new(doubles::InMemoryPackages::empty())),
         doubles::test_provision(),
         doubles::test_modules(std::sync::Arc::new(doubles::VecSource(modules))),
-        std::sync::Arc::new(crate::capabilities::builds::api::NoBuilds),
+        std::sync::Arc::new(crate::capabilities::maintenance::builds::api::NoBuilds),
         llm,
         doubles::test_tools_svc_with(
             std::sync::Arc::new(builders::SilentRunner),

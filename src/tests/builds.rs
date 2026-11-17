@@ -4,8 +4,8 @@
 //! 不管：CLI 参数解析与退出码（`entry::probes::build` 是薄壳）、模块清单校验（在 `modules.rs`）。
 //! 联动：契约见 docs/builds/README.md 与 MODULE_SPEC 的「构建」；端口定义在 `builds/ports.rs`；状态落 `.vm/build-state/<模块>.json`。
 
-use crate::capabilities::builds::api::{Builds, Target};
-use crate::capabilities::builds::service::BuildsService;
+use crate::capabilities::maintenance::builds::api::{Builds, Target};
+use crate::capabilities::maintenance::builds::service::BuildsService;
 use crate::capabilities::catalog::modules::api::Module;
 use crate::capabilities::catalog::modules::ports::ModuleSource;
 
@@ -27,17 +27,17 @@ fn builds_service(
         ),
     );
     let store = Arc::new(
-        crate::capabilities::builds::detail::fingerprint::BuildStore::new(root.to_path_buf()),
+        crate::capabilities::maintenance::builds::detail::fingerprint::BuildStore::new(root.to_path_buf()),
     );
     BuildsService::new(
         root.to_path_buf(),
         packages,
         crate::entry::assembly::build_vm(root),
         Arc::new(crate::entry::assembly::provision(root)),
-        Arc::new(crate::capabilities::storage::api::NoStorage),
+        Arc::new(crate::capabilities::maintenance::storage::api::NoStorage),
         store.clone(),
         store,
-        Arc::new(crate::capabilities::builds::detail::cache::CacheOnDisk::new(root.to_path_buf())),
+        Arc::new(crate::capabilities::maintenance::builds::detail::cache::CacheOnDisk::new(root.to_path_buf())),
         Arc::new(runner),
         Arc::new(crate::capabilities::tools::service::fence::ToolFenceGate),
         Arc::new(crate::tests::doubles::NoFenceHost),
@@ -570,7 +570,7 @@ fn ensure_rebuilds_when_the_target_changed() {
 /// 目的：启用历史会话也要确保目标产物（老会话可能带着宿主产物）。
 #[test]
 fn activating_a_session_ensures_the_target_build() {
-    use crate::capabilities::builds::api::{Builds, Built};
+    use crate::capabilities::maintenance::builds::api::{Builds, Built};
     use crate::capabilities::runtime::api::{Handle, RuntimeOps};
     use crate::capabilities::work::api::{WorkMode, WorkOps};
 
@@ -638,8 +638,8 @@ fn activating_a_session_ensures_the_target_build() {
 
 #[test]
 fn source_digest_tracks_sources_and_round_trips_state() {
-    use crate::capabilities::builds::detail::fingerprint::BuildStore;
-    use crate::capabilities::builds::ports::{BuildStates, BuiltRecord, SourceDigest};
+    use crate::capabilities::maintenance::builds::detail::fingerprint::BuildStore;
+    use crate::capabilities::maintenance::builds::ports::{BuildStates, BuiltRecord, SourceDigest};
 
     let root = crate::tests::scratch("builds-port-digest");
     let module_dir = root.join("modules").join("hello");
@@ -689,8 +689,8 @@ fn source_digest_tracks_sources_and_round_trips_state() {
 
 #[test]
 fn build_states_prepare_a_private_home_per_build() {
-    use crate::capabilities::builds::detail::fingerprint::BuildStore;
-    use crate::capabilities::builds::ports::BuildStates;
+    use crate::capabilities::maintenance::builds::detail::fingerprint::BuildStore;
+    use crate::capabilities::maintenance::builds::ports::BuildStates;
 
     let root = crate::tests::scratch("builds-port-home");
     let store = BuildStore::new(root.clone());
@@ -710,8 +710,8 @@ fn build_states_prepare_a_private_home_per_build() {
 
 #[test]
 fn cache_adapter_lands_volume_lock_and_usage_under_build_cache() {
-    use crate::capabilities::builds::detail::cache::CacheOnDisk;
-    use crate::capabilities::builds::ports::BuildCache;
+    use crate::capabilities::maintenance::builds::detail::cache::CacheOnDisk;
+    use crate::capabilities::maintenance::builds::ports::BuildCache;
     use std::collections::BTreeMap;
 
     let root = crate::tests::scratch("builds-port-cache");
@@ -743,8 +743,8 @@ fn cache_adapter_lands_volume_lock_and_usage_under_build_cache() {
 
 #[test]
 fn cache_workspace_speaks_guest_paths_and_carries_the_environment() {
-    use crate::capabilities::builds::detail::cache::CacheOnDisk;
-    use crate::capabilities::builds::ports::BuildCache;
+    use crate::capabilities::maintenance::builds::detail::cache::CacheOnDisk;
+    use crate::capabilities::maintenance::builds::ports::BuildCache;
 
     let root = crate::tests::scratch("builds-port-ws");
     let cache = CacheOnDisk::new(root.clone());

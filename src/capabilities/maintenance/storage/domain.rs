@@ -3,7 +3,7 @@
 //! 不管：扫描、删除、锁（在 detail/service）。
 //! 联动：service 调 plan 得到候选；测试直接钉策略。
 
-use crate::capabilities::storage::api::{
+use crate::capabilities::maintenance::storage::api::{
     CAT_BUILD, CAT_DOWNLOAD, CAT_LOGS, CAT_OVERLAYS, SpaceCategory, SpaceReport, StoragePolicy,
 };
 use std::collections::BTreeSet;
@@ -98,7 +98,7 @@ pub fn plan(
         let mut rest: Vec<(
             String,
             &SpaceCategory,
-            &crate::capabilities::storage::api::SpaceItem,
+            &crate::capabilities::maintenance::storage::api::SpaceItem,
         )> = Vec::new();
         for cat in &report.categories {
             if !cat.auto_evictable {
@@ -140,7 +140,7 @@ fn add(
     out: &mut Vec<Candidate>,
     seen: &mut BTreeSet<(String, String)>,
     cat: &SpaceCategory,
-    item: &crate::capabilities::storage::api::SpaceItem,
+    item: &crate::capabilities::maintenance::storage::api::SpaceItem,
     reason: &str,
 ) -> bool {
     if !item.cleanable || item.active {

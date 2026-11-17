@@ -92,37 +92,37 @@ impl FakeStorage {
     }
 }
 
-impl crate::capabilities::storage::api::Storage for FakeStorage {
-    fn report(&self) -> Result<crate::capabilities::storage::api::SpaceReport, String> {
+impl crate::capabilities::maintenance::storage::api::Storage for FakeStorage {
+    fn report(&self) -> Result<crate::capabilities::maintenance::storage::api::SpaceReport, String> {
         self.guard()?;
-        Ok(crate::capabilities::storage::api::SpaceReport::default())
+        Ok(crate::capabilities::maintenance::storage::api::SpaceReport::default())
     }
-    fn gc(&self, _apply: bool) -> Result<crate::capabilities::storage::api::GcReport, String> {
+    fn gc(&self, _apply: bool) -> Result<crate::capabilities::maintenance::storage::api::GcReport, String> {
         self.guard()?;
-        Ok(crate::capabilities::storage::api::GcReport::default())
+        Ok(crate::capabilities::maintenance::storage::api::GcReport::default())
     }
     fn ensure_headroom(
         &self,
         _protect: Option<&str>,
-    ) -> Result<crate::capabilities::storage::api::GcReport, String> {
+    ) -> Result<crate::capabilities::maintenance::storage::api::GcReport, String> {
         self.guard()?;
-        Ok(crate::capabilities::storage::api::GcReport::default())
+        Ok(crate::capabilities::maintenance::storage::api::GcReport::default())
     }
     fn clean(
         &self,
-        _req: &crate::capabilities::storage::api::CleanRequest,
-    ) -> Result<crate::capabilities::storage::api::CleanOutcome, String> {
+        _req: &crate::capabilities::maintenance::storage::api::CleanRequest,
+    ) -> Result<crate::capabilities::maintenance::storage::api::CleanOutcome, String> {
         self.guard()?;
-        Ok(crate::capabilities::storage::api::CleanOutcome::Report(
-            crate::capabilities::storage::api::GcReport::default(),
+        Ok(crate::capabilities::maintenance::storage::api::CleanOutcome::Report(
+            crate::capabilities::maintenance::storage::api::GcReport::default(),
         ))
     }
     fn job(&self) -> crate::kernel::api::JobState {
         Default::default()
     }
-    fn set_policy(&self, _policy: crate::capabilities::storage::api::StoragePolicy) {}
-    fn policy(&self) -> crate::capabilities::storage::api::StoragePolicy {
-        crate::capabilities::storage::api::StoragePolicy::default()
+    fn set_policy(&self, _policy: crate::capabilities::maintenance::storage::api::StoragePolicy) {}
+    fn policy(&self) -> crate::capabilities::maintenance::storage::api::StoragePolicy {
+        crate::capabilities::maintenance::storage::api::StoragePolicy::default()
     }
 }
 

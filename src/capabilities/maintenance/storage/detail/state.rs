@@ -3,7 +3,7 @@
 //! 不管：策略（settings.yaml）与业务决策。
 //! 联动：storage::service 每次 GC 后写；报告与 doctor 读。
 
-use crate::capabilities::storage::api::LastGc;
+use crate::capabilities::maintenance::storage::api::LastGc;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 

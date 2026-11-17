@@ -9,7 +9,7 @@
 ## 一、模块布局
 
 - 模块入口一律用与目录同名的文件，不得再出现 `mod.rs`（`tests/gates/structure/module-files.js`）。
-- 入口与子模块目录并列，入口只做子模块声明与重导出，实现留在子模块里（`src/capabilities/builds.rs`）：
+- 入口与子模块目录并列，入口只做子模块声明与重导出，实现留在子模块里（`src/capabilities/maintenance/builds.rs`）：
 
 ```text
 capabilities/

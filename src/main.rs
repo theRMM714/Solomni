@@ -539,21 +539,21 @@ fn main() {
         Arc::new(entry::assembly::provision_with_guest_vm(&root));
     // **存储空间**：回收策略来自 settings；构建与呈现层共用同一份。
     // 存储的三个端口各一个适配器：盘点（只读）、回收（锁与删除）、guest 存活（进程台账）。
-    let storage_service = Arc::new(capabilities::storage::service::StorageService::new(
+    let storage_service = Arc::new(capabilities::maintenance::storage::service::StorageService::new(
         Arc::clone(&provision),
-        Arc::new(capabilities::storage::detail::survey::DiskSurvey::new(
+        Arc::new(capabilities::maintenance::storage::detail::survey::DiskSurvey::new(
             root.clone(),
         )),
-        Arc::new(capabilities::storage::detail::reclaim::DiskReclaim::new(
+        Arc::new(capabilities::maintenance::storage::detail::reclaim::DiskReclaim::new(
             root.clone(),
         )),
-        Arc::new(capabilities::storage::detail::guests::ProcessGuests::new(
+        Arc::new(capabilities::maintenance::storage::detail::guests::ProcessGuests::new(
             &root,
         )),
         std::sync::Arc::clone(&log),
-        capabilities::storage::api::StoragePolicy::from(&registry.app_settings().storage),
+        capabilities::maintenance::storage::api::StoragePolicy::from(&registry.app_settings().storage),
     ));
-    let storage: Arc<dyn capabilities::storage::api::Storage + Send + Sync> =
+    let storage: Arc<dyn capabilities::maintenance::storage::api::Storage + Send + Sync> =
         storage_service.clone();
     // **构建能力**：创建会话前补编模块产物（本机档宿主、虚拟机档 guest）；执行器与 `--build` 同一条路——
     // **不申请容器身份**（构建是系统动作）：AppContainer 的临时目录写不了文件；可达范围仍由围栏规格给出。
@@ -566,11 +566,11 @@ fn main() {
     // 项目内基础工具链的只读安装根：构建与 shell 共用同一份（不按 agent 重复注入）。
     let base_roots = entry::toolchains::active_roots(&root);
     // 构建的三个端口各一个适配器：源指纹与构建状态共用一份本机档（BuildStore），缓存卷落盘（CacheOnDisk）。
-    let build_store = Arc::new(capabilities::builds::detail::fingerprint::BuildStore::new(
+    let build_store = Arc::new(capabilities::maintenance::builds::detail::fingerprint::BuildStore::new(
         root.clone(),
     ));
-    let builds: Arc<dyn capabilities::builds::api::Builds + Send + Sync> =
-        Arc::new(capabilities::builds::service::BuildsService::new(
+    let builds: Arc<dyn capabilities::maintenance::builds::api::Builds + Send + Sync> =
+        Arc::new(capabilities::maintenance::builds::service::BuildsService::new(
             root.clone(),
             Arc::clone(&packages),
             Arc::clone(&vm),
@@ -578,7 +578,7 @@ fn main() {
             Arc::clone(&storage),
             build_store.clone(),
             build_store.clone(),
-            Arc::new(capabilities::builds::detail::cache::CacheOnDisk::new(
+            Arc::new(capabilities::maintenance::builds::detail::cache::CacheOnDisk::new(
                 root.clone(),
             )),
             Arc::new(build_runner),

@@ -3,7 +3,7 @@
 //! 不管：什么该删、按什么顺序删（在 `domain`）；目录怎么扫、文件怎么删（在 `detail/`）。
 //! 联动：由 `service.rs` 持有（R12）；实现是 `detail/survey.rs`、`detail/reclaim.rs`、`detail/guests.rs`。
 
-use crate::capabilities::storage::api::{LastGc, SpaceCategory};
+use crate::capabilities::maintenance::storage::api::{LastGc, SpaceCategory};
 
 /// 目的：一次盘点的原始事实——不含预算、作业与策略（那是 service 的口径）。
 pub struct SpaceFacts {

@@ -164,7 +164,7 @@ pub(crate) fn core_with_services(
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
-        Arc::new(crate::capabilities::builds::api::NoBuilds),
+        Arc::new(crate::capabilities::maintenance::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(
             runner,
@@ -205,7 +205,7 @@ pub(crate) fn core_with_workspace(
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
-        Arc::new(crate::capabilities::builds::api::NoBuilds),
+        Arc::new(crate::capabilities::maintenance::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),
@@ -243,7 +243,7 @@ pub(crate) fn core_with_workdirs(
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
-        Arc::new(crate::capabilities::builds::api::NoBuilds),
+        Arc::new(crate::capabilities::maintenance::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),
@@ -303,7 +303,7 @@ pub(crate) fn core_with_workdirs_vm(
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
-        Arc::new(crate::capabilities::builds::api::NoBuilds),
+        Arc::new(crate::capabilities::maintenance::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),
@@ -339,7 +339,7 @@ pub(crate) fn core_with_io(
 /// 参数：`modules` = 清单事实；`builds` = 构建能力面（用例给真实现或替身）。
 pub(crate) fn core_with_builds(
     modules: Vec<Module>,
-    builds: Arc<dyn crate::capabilities::builds::api::Builds + Send + Sync>,
+    builds: Arc<dyn crate::capabilities::maintenance::builds::api::Builds + Send + Sync>,
 ) -> Core {
     let gateway: Arc<dyn ChatGateway + Send + Sync> = Arc::new(gw(BTreeMap::new(), Vec::new()));
     let llm = test_llm(
@@ -488,7 +488,7 @@ pub(crate) fn core_with_pkgs_probe(
         test_packages_with_base(packages, base),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
-        Arc::new(crate::capabilities::builds::api::NoBuilds),
+        Arc::new(crate::capabilities::maintenance::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(runner, io, Arc::new(NoFenceHost)),
         test_prompt(),
@@ -522,7 +522,7 @@ pub(crate) fn core_with_settings_modules(store: InMemorySettings, modules: Vec<M
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
-        Arc::new(crate::capabilities::builds::api::NoBuilds),
+        Arc::new(crate::capabilities::maintenance::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),
@@ -567,7 +567,7 @@ pub(crate) fn core_with_io_gateway(
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
-        Arc::new(crate::capabilities::builds::api::NoBuilds),
+        Arc::new(crate::capabilities::maintenance::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),
         test_prompt(),
@@ -608,7 +608,7 @@ pub(crate) fn core_with_gateway_probe(
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
-        Arc::new(crate::capabilities::builds::api::NoBuilds),
+        Arc::new(crate::capabilities::maintenance::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),
