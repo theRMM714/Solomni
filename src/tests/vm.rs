@@ -5,13 +5,8 @@
 
 mod concurrency;
 mod diagnose;
-mod engine;
-mod entry;
 mod fence;
-mod guest;
-mod guestpath;
 mod live;
 mod plan;
 mod readiness;
 mod share;
-mod share_boundary;

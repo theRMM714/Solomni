@@ -267,28 +267,6 @@ impl Core {
         self.history.append(sid, events)
     }
 
-    /// 目的：测试用的同步「改需求」：turn 交回重建描述，回档重建由这一层（生命周期）执行。
-    /// 返回：重放后的活动视图（与 `RuntimeOps::update_task` 同一条路径）。
-    pub fn update_task(&mut self, sid: &str, text: &str) -> Result<Vec<serde_json::Value>, String> {
-        let req = self.turn.update_task_outcome(
-            sid,
-            text,
-            self.registry.as_ref(),
-            self.probe.as_ref(),
-        )?;
-        self.lifecycle.restore_session(
-            &mut self.turn,
-            crate::capabilities::lifecycle::api::RebuildDeps {
-                registry: self.registry.as_ref(),
-                probe: self.probe.as_ref(),
-            },
-            &req.sid,
-            &req.meta,
-            &req.events,
-            req.next,
-        )
-    }
-
     /// 目的：该会话此刻的**身份块**（按当前提示词册与形态现渲染）：测试用它断言"它被告诉了什么"。
     pub fn single_identity(&self, sid: &str) -> Option<String> {
         self.turn.identity_block(sid)

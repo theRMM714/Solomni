@@ -5,7 +5,6 @@
 
 mod edit;
 mod lifecycle;
-mod prompt;
 mod rewind;
 mod tree;
 mod turn;

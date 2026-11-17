@@ -110,7 +110,3 @@ pub(crate) fn sandbox_of(ws: &WorkFace, work: &str, agent: &str) -> PathBuf {
 pub(crate) fn shared_of(ws: &WorkFace, work: &str) -> PathBuf {
     ws.roots(work, &[]).unwrap().shared
 }
-
-pub(crate) fn store_of(ws: &WorkFace, work: &str) -> PathBuf {
-    ws.roots(work, &[]).unwrap().store
-}

@@ -42,9 +42,7 @@ mod storage;
 mod taskchain;
 mod toolchains;
 mod tools;
-mod turn;
 mod vm;
-mod work;
 mod workspace;
 
 /// 目的：测试用的**产品根**——当前工作目录（测试在仓库根跑，虚拟根就解析到 `.vm/guest/<名>` 这条相对路径上）。

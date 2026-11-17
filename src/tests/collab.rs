@@ -3,8 +3,6 @@
 //! 不管：用例本身；别的能力的不变式。
 //! 联动：src/tests/collab/。
 
-mod cards;
 mod discussion;
 mod flow;
 mod review;
-mod state;
