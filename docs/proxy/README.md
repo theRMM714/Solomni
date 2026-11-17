@@ -2,7 +2,7 @@
 
 > 定位：核心代理（`core_proxy`）的工具面——六个代理工具的载荷与回执、授权判据、幂等账与成员侧执行者；宿主契约 `ProxyHost` 由它声明。
 > 效力：规范｜核对：2026-11-16｜依据：`src/capabilities/conversation/proxy/api.rs`
-> 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九，测试规范见 [TESTING.md](../../TESTING.md)。
+> 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
 

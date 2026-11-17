@@ -1,7 +1,7 @@
 //! 目的：内置工具的**执行编排**——驱动 `SysIo` 读写盘上的文件（read / write / edit / patch / delete / list / search）。
 //! 管：解析 JSON → 认工具 → 按声明校验参数 → 补缺省 → 寻址 → 调用 `domain` 的纯规则。
 //! 不管：纯规则（参数校验、回执文案、观察账本、`ToolOutcome`）在 `domain/systool.rs`。
-//! 联动：引 `ports` 的 `SysIo` 做 IO；`domain/` 不引 `ports`（见 ARCHITECTURE.md §九.3）。
+//! 联动：引 `ports` 的 `SysIo` 做 IO；`domain/` 不引 `ports`（见 docs/architecture/boundaries.md 的「三分法」）。
 
 use crate::capabilities::tools::domain::systool::*;
 use crate::capabilities::tools::ports::SysIo;

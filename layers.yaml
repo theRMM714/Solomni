@@ -1,4 +1,4 @@
-# 能力分层表：唯一权威。数字越小越底层，能力只能依赖严格更低层（ARCHITECTURE.md §九.1）。
+# 能力分层表：唯一权威。数字越小越底层，能力只能依赖严格更低层（docs/architecture/boundaries.md 的「业务边界判据」）。
 # 层号由现有依赖的最长路径算出，门禁要求「声明 == 重算」：动过依赖就 node tests/gates/structure/layers.js --write 重算写回。
 # 门禁：tests/gates/structure/layers.js（T0 结构审查）。新增能力必须先在这里归层，否则失败。
 kernel: 0

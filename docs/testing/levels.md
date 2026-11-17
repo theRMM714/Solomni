@@ -35,7 +35,7 @@ cargo deny check
 - 报告 JSON 是否符合约定；
 - `gaps.yaml` 是否可解析、字段完整；
 - **依赖方向是否仍然成立**：层间不反向、`presentation` 只经入站能力面驱动、业务层内部不成环。
-- 依赖方向门禁零豁免：层间反向、`presentation` 越界、业务层成环任一命中即失败——规则与口径见 [../../ARCHITECTURE.md](../../ARCHITECTURE.md) §九.7。
+- 依赖方向门禁零豁免：层间反向、`presentation` 越界、业务层成环任一命中即失败——规则与口径见 [../architecture/boundaries.md](../architecture/boundaries.md) 的「T0 判据与零豁免」。
 - **能力内部**同样机器判定（`service` 不引本能力 `detail` / `kernel::detail`、`service` 不直接做 IO、同能力方法族不成环），零豁免，实际命中即失败。
 - **文件粒度按角色分档**：软线只回执（实现 800 行、用例 1500 行、支撑 800 行、内联测试 200 行）；硬线是实现文件生产超 1200 或总行超 1500、用例超 2000、支撑超 1200、内联测试超 400 即失败（`tests/gates/structure/size.js`）。
 - 测试是否写入项目外绝对路径或真实用户目录；

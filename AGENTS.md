@@ -36,7 +36,7 @@
 
 - 遵守 DIP，高内聚低耦合，按业务功能垂直切分；业务之间通过 API 契约协作，不依赖其它业务内部实现。
 - 任意行为与实现必须通过 `TESTING.md` 规定的适用测试；不可测试的行为记为设计或测试缺口。
-- 注释只描述当前功能、约束和联动模块；文件头与行内注释按 `ARCHITECTURE.md` 的「注释契约」写（格式由 T0 判，内容卫生另报）。
+- 注释只描述当前功能、约束和联动模块；文件头与行内注释按 `docs/architecture/comments.md` 的注释契约写（格式由 T0 判，内容卫生另报）。
 - 长期文档只写当前状态，不写过程、旧实现复盘或变更历史；历史归 Git、PR、issue、CI。<!-- hygiene-ignore -->
 - 根门户只做路由，细则在 `docs/`；`AGENTS.md` 例外：承载始终生效的约束与任务受理流程。一个事实只有一处权威。改文档必须同次同步相关门户、引用与机器比对段，细则见 `docs/conventions.md`。
 - 术语以 `docs/conventions.md` 为唯一口径；常用：agent、模块、单元、能力、共享区、转录。
@@ -126,7 +126,7 @@
 | --- | --- |
 | 项目概括和快速开始 | `README.md` |
 | 项目概括和快速开始（English） | `README_EN.md` |
-| 架构、分层、业务边界判据（§九）、硬要求（R1–R13）、日志、提示词或落盘 | `ARCHITECTURE.md` |
+| 架构、分层、端口、状态与落盘、业务边界判据、硬要求（R1–R20）、注释契约、Rust 规范 | `ARCHITECTURE.md`（细则在 `docs/architecture/`） |
 | 产品行为、运行流程与用户旅程 | `PRODUCT.md` |
 | 项目方向、承诺与判据 | `PHILOSOPHY.md` |
 | 模块开发或修改 | `MODULE_SPEC.md` |
@@ -142,7 +142,7 @@
 | 多 agent 流程细则 | `docs/workflow/multi-agent.md` |
 | 用户启动文档审计 / 治理 | `docs/workflow/docs-audit.md` |
 | 文档分层 / 术语 / 引用 | `docs/conventions.md` |
-| Rust 源码布局 / 格式 / 静态检查 / unsafe / 依赖 | `docs/rust-dev.md` |
+| Rust 源码布局 / 格式 / 静态检查 / unsafe / 跨平台机制 / 依赖 | `docs/architecture/rust-dev.md` |
 | 全部单元与横向细则 | `docs/README.md` |
 
 新增根 `*.md` 必须进本表；临时工作清单按 `tests/gates/docs/root-router.js` 的白名单处理。

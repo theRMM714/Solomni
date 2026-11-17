@@ -270,7 +270,7 @@ prompts/
 ## 十二、联动
 
 - 模块工具的声明与执行见 [MODULE_SPEC.md](../../MODULE_SPEC.md)；
-- 会话、围栏与并发模型见 [ARCHITECTURE.md](../../ARCHITECTURE.md)；
+- 会话、围栏与并发模型见 [architecture/README.md](../architecture/README.md)；
 - 呈现层入站契约见 [contracts.md](../presentation/contracts.md)；
 - 产品行为（讨论 / 审查关卡 / 任务链）见 [PRODUCT.md](../../PRODUCT.md)；
 - 测试层级与缺口账见 [TESTING.md](../../TESTING.md)。
@@ -297,7 +297,7 @@ prompts/
 - 系统工具门户：[../../SYSTOOL.md](../../SYSTOOL.md)
 - 模块契约：[../../MODULE_SPEC.md](../../MODULE_SPEC.md)
 - 会话模型：[../session/session-model.md](../session/session-model.md)
-- 架构约束：[../../ARCHITECTURE.md](../../ARCHITECTURE.md)
+- 架构约束：[architecture/README.md](../architecture/README.md)
 - 呈现层契约：[../presentation/contracts.md](../presentation/contracts.md)
 - 产品行为：[../../PRODUCT.md](../../PRODUCT.md)
 - 测试规范：[../../TESTING.md](../../TESTING.md)

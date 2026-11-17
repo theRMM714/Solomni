@@ -27,7 +27,7 @@ use crate::capabilities::llm::api::{Channel, ProbeOutcome, ReplayReport, ToolMod
 ///    - `Registry` 的写方法取 `&mut self`——只有那样"单写者"才是**编译期事实**（R4/R5）；
 ///    - 本 trait 全取 `&self`——呈现层持有的是可克隆的句柄（多连接共用），队列独占在**线程那一侧**，
 ///      不是靠类型系统在调用点表达。
-///      两者因此**不能收成一个 trait**（接收者不同）；收口判据见 ARCHITECTURE.md §九.6 R12。
+///      两者因此**不能收成一个 trait**（接收者不同）；收口判据见 docs/architecture/boundaries.md 的 R12。
 pub trait RegistryOps: Send + Sync {
     fn providers(&self) -> Result<Vec<ProviderView>, String>;
     fn upsert_provider(&self, id: &str, base_url: &str, api_key: &str) -> Result<(), String>;

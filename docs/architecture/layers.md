@@ -1,0 +1,79 @@
+<!-- docs-template: spec -->
+# 分层与依赖方向
+> 定位：依赖方向的唯一权威：三层 + 地基库怎么分、开放架构五条、层号怎么算、单元与子业务怎么分工。
+> 效力：规范｜核对：2026-11-17｜依据：`layers.yaml`、`tests/gates/structure/layers.js`
+
+## 适用与判据
+- 改代码前先读本文；归层与依赖方向以本文为准，违规由 T0 结构审查判定（`tests/gates/structure/layers.js`、`dependency.js`），零豁免。
+
+## 一、三层与地基库
+- 对外表述是**三层 + 一块地基库**：**根**（启动程序与组合根）、**呈现层**、**业务层**；`kernel/` 是**地基库，不是层**；测试层横切，不参与运行时分层。依赖箭头只有一种画法（外层指向内层）：
+
+```text
+根（main.rs + entry/ + guard/）
+  ├──▶ presentation/{cli,web} ──▶ capabilities（业务层内部分层，只向下）──▶ kernel（地基库）
+  └──▶ capabilities / kernel（注入适配器、跑探针与守门模式）
+（根 = 启动 + 组合根 + 机器探针 + 守门进程；各能力的 `detail` 与 kernel 的实现只在这里被 new 出来）
+```
+
+- 每层里谁干什么、别在哪个文件里写，逐单元写在各自的 `docs/<单元>/README.md` 与 `docs/<单元>/unit-map.md`（单元清单见 [docs/README.md](../README.md) 的单元表）。本文只说层与边，不复述单元职责。
+- 业务层是**两级切分**：17 个**业务单元**（`capabilities/<单元>/`，归层与门禁的单位）下各有若干**子业务**（`<单元>/<子业务>/`，按业务功能垂直切分）。子业务内部是 `api`（入站契约：trait + DTO）/ `service`（本子业务的状态与用例）/ `ports`（出站端口，只由定义它的子业务持有）/ `domain`（纯逻辑）/ `detail`（只有组合根能构造）；单元自己的 `capabilities/<单元>.rs` 只声明子业务，不写实现。
+- **业务之间与子业务之间都只经对方的 `api`**（R1）；**只依赖严格更低层，同层零引用**（`tests/gates/structure/layers.js`）；不反向依赖根 / 呈现层（T0 机器判定，见 [boundaries.md](boundaries.md) 的判据清单）。
+
+## 二、开放架构五条
+> 依赖只写一个方向：越往下越稳定、编排越少、越靠近基础设施；能力之间只经对方 `api` 通话，只传值。五条各有一处机器判据，判红即失败。
+
+| 原则 | 依赖准则 | 机器判据 |
+| --- | --- | --- |
+| **SDP·单边向下** | 依赖边只有一个方向：上层编排、下层稳定；越往下编排越少、越靠近基础设施；同层零引用 | `tests/gates/structure/layers.js` |
+| **只走 api** | 能力之间的调用只经对方 `api` 的 trait 与值；不摸 `service` / `domain` / `detail`，也不反向依赖根与呈现层 | `tests/gates/structure/dependency.js` |
+| **DIP·跨能力** | 需要对方替它做事的点声明成端口，由实现方实现；声明方只经自己的 `api` 交出去 | `tests/gates/structure/dependency.js` |
+| **DIP·能力内部** | `service` 只认 `ports` / `api` 的抽象；具体实现只在组合根 `new` | `tests/gates/structure/capability.js` |
+| **DTD·只传值** | 跨边界只传不可变值（或无状态端口）；锁、原子、可变借用、闭包这类活对象不出境 | `tests/gates/structure/values.js` |
+
+- 出站依赖由**各能力定义端口**、**各能力的 `detail` 实现**；入站依赖由**各能力定义 `api`**；`Faces`（`src/presentation/faces.rs`）只把它们**装配**给呈现层。
+- **能力不定义"前端接口让别人实现"**；呈现层拿到的是 `Faces`（各能力自己的窄 trait 对象 + 事件台 + 根填的值），不是 `Core`，也不是任何锁；`Faces` 只做装配，不得长判定（`src/presentation/faces.rs`）。
+- **根不是业务层**：它只做启动、装配、探针与守门；业务用例不得写进 `main.rs` / `entry/`。
+- **机制不升格为业务**：日志、路径、进程、围栏、平台差异归一化没有领域词、没有用户可见后果，留在 `kernel` 或所属能力的 `detail/`；调用方多不等于业务（判据见 [boundaries.md](boundaries.md)）。
+- 「用哪个供应商 / 模型」是**策略**（`registry` 的解析链决定）；「怎么建通道」是**机制**（llm 的 `detail`）。两者不互换。
+
+## 三、层号：依赖的事实，不是可写宽的意图
+- 分层表（唯一权威是 `layers.yaml`；下面这张由它生成，文档里不手写层号）：
+<!-- BEGIN:layer-table -->
+| 层 | 单元 | 可依赖 |
+| --- | --- | --- |
+| 0（地基库） | `kernel` | 无 |
+| 1 | `llm`、`permission`、`prompt`、`taskchain` | 0 |
+| 2 | `catalog`、`workspace` | 0–1 |
+| 3 | `residents`、`tools`、`vm` | 0–2 |
+| 4 | `conversation`、`provision` | 0–3 |
+| 5 | `maintenance`、`turn` | 0–4 |
+| 6 | `lifecycle`、`system`、`work` | 0–5 |
+| 7 | `runtime` | 0–6 |
+
+> 7 层、17 个能力 + `kernel`：本表由 `layers.yaml` 生成（`node tests/docs-sync.mjs --write`），不手写。
+<!-- END:layer-table -->
+
+- 门禁要求 `layers.yaml` 里声明的层号**等于**按现有依赖重算的层号（`tests/gates/structure/layers.js`）；写宽一层就等于让门禁放水。
+- 动过一条边就重算全表：`node tests/gates/structure/layers.js --write` 按现有依赖重算写回，把「哪一层为什么抬高」留在 diff 里；不想抬层就消掉那条边。
+- 只回执不判红的两类：纯转发边（只 `pub use` 再导出，不算真依赖）与扇出（不设预算，数字说明这个单元在替多少个单元装配）。
+- **同层互用只有三种正当处置**：合并成一个能力、把被引的形状下沉到更低层、端口反转（下层声明、上层实现）。
+
+## 四、单元与子业务的分工
+- 单元是**归层与门禁的单位**（`layers.yaml` 一行一个，扇出与层号按它算，`src/capabilities/<单元>/` 与 `src/capabilities/<单元>.rs` 成对出现）。
+- 子业务是**业务功能的垂直切分**：`<单元>/<子业务>/`、`docs/<子业务>/`、`src/tests/<子业务>.rs` 都按它走（R10）。
+- 合并单元只搬目录、不改子业务内部的分区与 `super::` 语义；单元不写实现，只声明子业务。
+- **状态不参与归层**：层号只回答「能依赖谁」，状态归谁见 [state.md](state.md)。
+
+## 检查
+- 分层与依赖方向 → T0 结构审查的 apiOnly / apiPorts / domainPorts / foreignImpl / coreCycles / reverse / presentation / layers 判据（`tests/gates/structure/dependency.js`、`tests/gates/structure/layers.js`；清单 `node run-tests.js --list`）。
+- 声明层号 == 重算层号、层号连续、目录全覆盖 → `node tests/gates/structure/layers.js`。
+- 结构图与层表渲染 → `node tests/gates/structure/graph.js`、`node tests/docs-sync.mjs`。
+
+## 路由
+- 业务边界判据、硬要求 R1–R20 与 T0 判据清单：[boundaries.md](boundaries.md)
+- 端口画在哪：[ports.md](ports.md)
+- 状态与落盘契约、日志、提示词册：[state.md](state.md)
+- 注释契约：[comments.md](comments.md)
+- Rust 源码布局、格式、静态检查与跨平台机制：[rust-dev.md](rust-dev.md)
+- 单元清单与职责：[docs/README.md](../README.md) 的单元表

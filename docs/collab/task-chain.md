@@ -90,7 +90,7 @@ TaskNode { id, title, objective, assignee, deps, status, sub_session, acceptance
 ## 八、联动
 
 - 工具与角色（planner 建链、orchestrator 推进）：[tools-and-roles.md](../tools/tools-and-roles.md)
-- 产品行为：[PRODUCT.md](../../PRODUCT.md)；会话与并发模型：[ARCHITECTURE.md](../../ARCHITECTURE.md)
+- 产品行为：[PRODUCT.md](../../PRODUCT.md)；会话与并发模型：[architecture/README.md](../architecture/README.md)
 - 呈现层入站契约：[contracts.md](../presentation/contracts.md)
 
 ## 检查
