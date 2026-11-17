@@ -26,6 +26,36 @@ pub struct AgentMeta {
     #[serde(default)]
     pub chara: String,
 }
+impl AgentMeta {
+    /// 目的：会话名单里一个 agent 实例的**唯一**构造口径：名字与身份去首尾空白、模块保序去重、空模型归一成 `None`。
+    /// 参数：`transient` 由调用方定——它表达"这份名单来自 agents.yaml 还是本次临时声明"，本函数不猜。
+    /// 约束：只做规整；名字合法性见 `validate_name`，模型在不在册归登记处判定。
+    pub fn normalized(
+        name: impl Into<String>,
+        modules: Vec<String>,
+        model: Option<String>,
+        chara: impl Into<String>,
+        transient: bool,
+    ) -> AgentMeta {
+        let mut unique: Vec<String> = Vec::with_capacity(modules.len());
+        for m in modules {
+            let id = m.trim().to_string();
+            if !id.is_empty() && !unique.contains(&id) {
+                unique.push(id);
+            }
+        }
+        AgentMeta {
+            name: name.into().trim().to_string(),
+            transient,
+            modules: unique,
+            model: model
+                .map(|m| m.trim().to_string())
+                .filter(|m| !m.is_empty()),
+            chara: chara.into().trim().to_string(),
+        }
+    }
+}
+
 /// 目的：一个具名 agent。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Agent {
@@ -58,13 +88,13 @@ pub struct AgentView {
 /// 目的：登记处视图 → 会话里的 agent 实例（`transient=false`）。**唯一**的转换口径：
 ///   点名建工作与「无参 = 全部」两条路都经这里，不在调用方各写一份同形转换（R15）。
 pub fn agent_meta(v: &AgentView) -> AgentMeta {
-    AgentMeta {
-        name: v.name.clone(),
-        transient: false,
-        modules: v.modules.clone(),
-        model: v.model.clone(),
-        chara: v.chara.clone(),
-    }
+    AgentMeta::normalized(
+        v.name.clone(),
+        v.modules.clone(),
+        v.model.clone(),
+        v.chara.clone(),
+        false,
+    )
 }
 
 /// 目的：保存 agent 的入参（用户给的定义）。
@@ -271,13 +301,7 @@ pub fn resolve_picks(
         let name = unique_instance_name(&name, &names);
         names.push(name.clone());
         out.push((
-            AgentMeta {
-                name,
-                transient,
-                modules: local,
-                model,
-                chara,
-            },
+            AgentMeta::normalized(name, local, model, chara, transient),
             why,
         ));
     }

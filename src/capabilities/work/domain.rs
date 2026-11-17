@@ -6,17 +6,6 @@
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::work::api::WorkMode;
 
-/// 目的：模块列表保序去重（一个 agent 内重复只留一份；跨 agent 的重叠是合法的共用）。
-pub(crate) fn dedup_modules(list: &[String]) -> Vec<String> {
-    let mut out: Vec<String> = Vec::with_capacity(list.len());
-    for m in list {
-        if !out.contains(m) {
-            out.push(m.clone());
-        }
-    }
-    out
-}
-
 /// 目的：单模式的组合语义——多个 agent 的模块并成一个**临时组合**实例（去重、保序；模型取核心默认）。
 /// 约束：人设取空——多份人设无法诚实合并，由用户在会话配置里补。
 pub(crate) fn merge_into_one(picked: &[AgentMeta], name: &str) -> AgentMeta {
@@ -28,13 +17,7 @@ pub(crate) fn merge_into_one(picked: &[AgentMeta], name: &str) -> AgentMeta {
             }
         }
     }
-    AgentMeta {
-        name: name.to_string(),
-        transient: true,
-        modules: merged,
-        model: None,
-        chara: String::new(),
-    }
+    AgentMeta::normalized(name.to_string(), merged, None, String::new(), true)
 }
 
 /// 目的：会话是否「已经开过」（流水里有内容）——agent 名单与形态据此冻结；配置记录与回档记录不算内容。

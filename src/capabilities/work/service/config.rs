@@ -170,17 +170,13 @@ impl Work {
                 }
                 registry.resolve(&a.model)?;
             }
-            metas.push(AgentMeta {
-                name: a.name.clone(),
-                transient: !registry.has_agent(&a.name),
-                modules: dedup_modules(&a.modules),
-                model: if a.model.is_empty() {
-                    None
-                } else {
-                    Some(a.model.clone())
-                },
-                chara: a.chara.trim().to_string(),
-            });
+            metas.push(AgentMeta::normalized(
+                a.name.clone(),
+                a.modules.clone(),
+                Some(a.model.clone()),
+                a.chara.clone(),
+                !registry.has_agent(&a.name),
+            ));
         }
         if metas.is_empty() {
             return Err("至少要有一个 agent".to_string());

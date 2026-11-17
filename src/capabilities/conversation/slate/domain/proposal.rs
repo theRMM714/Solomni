@@ -40,14 +40,8 @@ fn merged(picks: Vec<Pick>) -> Pick {
         }
     }
     Pick {
-        agent: AgentMeta {
-            name: "组合".to_string(),
-            // 并过的不是任何单个已存 agent：它是这次临时组装出来的。
-            transient: true,
-            modules,
-            model,
-            chara: String::new(),
-        },
+        // 并过的不是任何单个已存 agent：它是这次临时组装出来的（transient = true）。
+        agent: AgentMeta::normalized("组合", modules, model, String::new(), true),
         why: why.join("；"),
     }
 }

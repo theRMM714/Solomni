@@ -37,7 +37,7 @@ use crate::capabilities::work::api::{
     WorkOpened, WorkSpec,
 };
 use crate::capabilities::work::domain::{
-    dedup_modules, merge_into_one, mode_str, session_started, validate_work_name,
+    merge_into_one, mode_str, session_started, validate_work_name,
 };
 use crate::capabilities::workspace::api::Workspace;
 use crate::kernel::api::ExecSpec;

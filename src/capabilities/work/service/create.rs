@@ -279,13 +279,13 @@ impl Work {
             let name =
                 crate::capabilities::catalog::registry::api::unique_instance_name(&a.name, &taken);
             taken.push(name.clone());
-            metas.push(AgentMeta {
+            metas.push(AgentMeta::normalized(
                 name,
-                transient: a.transient,
-                modules: dedup_modules(&a.modules),
-                model: a.model.clone(),
-                chara: a.chara.trim().to_string(),
-            });
+                a.modules.clone(),
+                a.model.clone(),
+                a.chara.clone(),
+                a.transient,
+            ));
         }
         // **模型通道前置判据**：合并后的名单里每个 agent 都要有确定通道；协作还要求核心通道。
         // 放在建工作区 / 起 guest 之前——失败就不留下任何半成品。
