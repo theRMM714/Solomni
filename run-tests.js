@@ -81,6 +81,8 @@ function listModel() {
       { id: "full", write: true, note: "整跑：质量门禁 + 单元 + 平台目标 + L4（写报告、打 TEST-REPORT-*）" },
       { id: "docs", write: true, note: "--docs：文档审查 + 结构审查（写报告）" },
       { id: "structure", write: true, note: "--audit=structure：只跑结构审查（写报告）" },
+      { id: "plan", write: false, note: "--plan：按 tests/specs 打印计划（可叠加 --unit/--tier/--journey）" },
+      { id: "filtered", write: false, note: "--unit/--tier/--journey：只跑选中的子集（不写报告）" },
       { id: "selftest", write: false, note: "--only=selftest：只跑门禁自测（不写报告）" },
     ],
     lanes: [
@@ -345,7 +347,7 @@ function runSelection(names) {
     if (gates.find(n)) gateIds.push(n);
     else if (stepsLib.STEPS.some((s) => s.id === n)) stepIds.push(n);
     else {
-      console.error("未知 gate 或步骤：" + n + "（用 --list 看清单，--only=车道名 跑整条车道）");
+      console.error("未知 gate 或步骤：" + n + "（用 --list 看清单；--only=车道名 跑整条车道；按单元跑用 --unit=" + n + "）");
       process.exit(2);
     }
   }
@@ -389,6 +391,91 @@ function runSelection(names) {
       } else {
         console.log("[step] " + rec.step + " " + rec.status);
       }
+    }
+  }
+  process.exitCode = bad ? 1 : 0;
+}
+
+// ---------- 测试计划（--plan / --unit / --tier / --journey） ----------
+
+const planLib = require("./tests/lib/plan.js");
+const parsers = require("./tests/lib/parsers.js");
+
+/** 声明有问题就停下：计划写错时跑出来的绿没有意义。 */
+function planFail(title, problems) {
+  console.error(title);
+  for (const p of problems) console.error("  " + p);
+  process.exit(2);
+}
+
+/** 收集 → 过滤 → 校验（声明能否落地）。 */
+function resolvePlan() {
+  const { entries, problems } = planLib.collect(ROOT);
+  if (problems.length) planFail("测试声明解析失败（tests/specs/*.yaml）：", problems);
+  const filters = planLib.parseFilters(opts);
+  const selected = planLib.select(entries, filters);
+  const mismatched = planLib.verify(ROOT, selected);
+  if (mismatched.length) planFail("测试声明与实现对不上：", mismatched);
+  if (!selected.length) planFail("没有选中任何用例——检查 --unit / --tier / --journey 的取值（--plan 不带过滤器可看全量）：", []);
+  return { entries, filters, selected };
+}
+
+/** --plan：只打印会跑什么，不跑。 */
+function printPlan(p) {
+  const s = planLib.summary(p.selected);
+  console.log("[plan] 共 " + s.total + " 条声明：" + s.tiers.map((x) => x.tier + " " + x.count).join(" / "));
+  console.log("[plan] 派发：" + planLib.cargoFilters(p.selected).length + " 个 cargo 测试模块、" + planLib.platformTargets(p.selected).length + " 个平台目标、" + planLib.journeyIds(p.selected).length + " 段旅程");
+  const byUnit = new Map();
+  for (const e of p.selected) {
+    if (!byUnit.has(e.unit)) byUnit.set(e.unit, []);
+    byUnit.get(e.unit).push(e);
+  }
+  for (const [unit, list] of byUnit) {
+    console.log("");
+    console.log(unit + "（" + list.length + "）");
+    for (const e of list) console.log("  " + e.tier + "  " + e.id + (e.note ? "  — " + e.note : ""));
+  }
+}
+
+/** 带过滤器的子集执行：cargo 按模块前缀、平台按 --test、旅程按 E2E_JOURNEY。 */
+function runFiltered(p) {
+  console.log("[plan] 子集运行：不写 target/test-report.json、不打印 TEST-REPORT-*；验收请整跑（node run-tests.js）");
+  const ctx = makeCtx();
+  let bad = 0;
+  const serial = opts.serial ? ["--test-threads=1"] : [];
+  const cargo = planLib.cargoFilters(p.selected);
+  for (const f of cargo) {
+    const r = ctx.proc.sh("cargo", ["test", "--color", "never", "--bin", "solomni", f, "--", "--nocapture"].concat(serial));
+    const counts = parsers.cargoCounts(r.out);
+    // 过滤器写错时 cargo 也退 0（只是 0 个用例）——那种绿必须判红，否则子集运行会假过。
+    if (r.code === 0 && counts.passed > 0) console.log("  ok   " + f + "（" + counts.passed + " passed）");
+    else {
+      bad++;
+      console.log("  FAIL " + f + (r.code === 0 ? "（0 个用例命中——过滤器或模块路径写错了）" : "（日志 " + r.log + "）"));
+      console.log(r.out.trim().split(/\r?\n/).slice(-15).join("\n"));
+    }
+  }
+  for (const t of planLib.platformTargets(p.selected)) {
+    const r = ctx.proc.sh("cargo", ["test", "--color", "never", "--test", t, "--", "--nocapture"].concat(serial));
+    const counts = parsers.cargoCounts(r.out);
+    if (r.code === 0 && counts.passed > 0) console.log("  ok   目标 " + t + "（" + counts.passed + " passed）");
+    else {
+      bad++;
+      console.log("  FAIL 目标 " + t + (r.code === 0 ? "（0 个用例命中）" : "（日志 " + r.log + "）"));
+      console.log(r.out.trim().split(/\r?\n/).slice(-15).join("\n"));
+    }
+  }
+  const js = planLib.journeyIds(p.selected);
+  if (js.length) {
+    const e2e = path.join(ROOT, "tests", "cross-platform", "e2e", "orchestrator.js");
+    // 段选择走环境变量：编排器只负责起夹具与真二进制，不关心选哪几段。
+    process.env.E2E_JOURNEY = js.join(",");
+    const r = ctx.proc.sh(process.execPath, [e2e], stepsLib.E2E_TIMEOUT_MS);
+    if (r.code === 0 && r.out.includes(markers.TEXT.E2E_OK)) console.log("  ok   旅程 " + js.join(","));
+    else {
+      bad++;
+      console.log("  FAIL 旅程 " + js.join(",") + "（日志 " + r.log + "）");
+      console.log(r.out.trim().split(/\r?\n/).slice(-20).join("\n"));
     }
   }
   process.exitCode = bad ? 1 : 0;
@@ -467,6 +554,8 @@ function main() {
     return;
   }
   const mode = cli.mode(opts);
+  if (mode === "plan") return printPlan(resolvePlan());
+  if (mode === "filtered") return runFiltered(resolvePlan());
   if (mode === "coverage") return runCoverage();
   if (mode === "docs-all") return runAudit("all");
   if (mode === "audit-docs") return runAudit("docs");

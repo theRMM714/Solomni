@@ -15,6 +15,8 @@
 
 - 测试只钉**可观察行为**：能力面（`capabilities/<单元>/<子业务>/api.rs` 的入站对象）、端口契约、内核真实实例与 E2E 旅程。`service` / `domain` / `detail` 的自由函数、内部结构与状态机**不单独写用例**——实现会频繁搬迁，钉住它的用例最先腐烂；这些行为改由驱动能力面或旅程的用例覆盖。
 - **不做内部实现测试**：`src/tests/**` 只能经 `capabilities/<单元>/<子业务>::api`、`::ports` 或组合根 `crate::entry::assembly` 取实现，出现 `::service` / `::domain` / `::detail` 即失败（门禁 `structure/tests-api`，豁免只有替身层 `doubles` / `fakes` / `prelude` / `builders` / `detail` / `helpers`）。这条用机器判，不靠评审记忆。
+- 测试清单只有一处声明：`tests/specs/<单元>.yaml`（一条用例一行：`id` / `tier` / `note`）。`src/tests` 下每个带 `#[test]` 的模块、`tests/journeys/index.js` 的每段旅程都必须被声明，反向声明也必须落到实现——任一处对不上即失败（门禁 `structure/specs`）。`node run-tests.js --plan` 看会跑什么，`--unit` / `--tier` / `--journey` 选子集。
+
 - 内核（`src/kernel/**`）的内联测试用**真实实例**（临时目录、真实进程、真文件系统），不引用 `crate::tests` 的业务替身（门禁 `structure/kernel-tests`）：底层稳定，替身只会把"替身的行为"当成内核的事实。
 - 测试替身优先 **fake**（端口的内存实现，内部协作用它，不写 Mock）。**Mock 只写在边界**：模拟网络、第三方 API、不可控的外部服务（例如 `src/tests/detail/http.rs` 的本地假供应商）——那里的协议形状是必须钉死的外部契约。内部调用次数、调用顺序、私有方法都不许断言：耦合实现的断言在重构时只会制造假失败。
 - 测试记录事实：通过、失败、环境跳过、缺口必须分开（`run-tests.js`）。
@@ -33,7 +35,7 @@
 ## 二、当前状态
 
 - 测试分区：`src/tests/` 与 `capabilities/` 的子业务同构（一个子业务一个文件，用例多的按域分子模块；`doubles.rs` 端口替身、`builders.rs` 装配脚手架），**只收能力面、端口契约与内核用例**；具体实现的用例已移除，行为由能力面用例与 E2E 旅程覆盖，跨平台集成与 L4 在 `tests/cross-platform/`，平台探针 `tests/<平台>/`，前端冒烟 `src/presentation/web/assets/*.smoke.cjs` 与前端类型检查（`frontend-typecheck` 步骤，根 `tsconfig.json` + `package-lock.json` 固定 TypeScript）（索引见 [docs/testing/README.md](docs/testing/README.md)）。
-- 入口：`node run-tests.js`（`node start.js -test` 是备好环境后的同一入口）；纯叙述型文档改动用 `--docs`；`--coverage`、突变工作流、真机 `--fence-live` 等手动模式见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md)；机器契约 `docs/presentation/contracts.md`（ROUTES 表由 Rust 测试消费）仍走全量。
+- 入口：`node run-tests.js`（`node start.js -test` 是备好环境后的同一入口；`--plan` 打印测试计划，`--unit` / `--tier` / `--journey` 跑子集）；纯叙述型文档改动用 `--docs`；`--coverage`、突变工作流、真机 `--fence-live` 等手动模式见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md)；机器契约 `docs/presentation/contracts.md`（ROUTES 表由 Rust 测试消费）仍走全量。
 - T0 九项已并入同一入口（`run-tests.js`）：步骤、可行状态与环境跳过口径以 [docs/testing/levels.md](docs/testing/levels.md) 的 T0 生成段为准（`env-skip` 不算通过）；查清单用 `node run-tests.js --list`。
 - 缺口账：全局 `tests/gaps.yaml`、跨平台 `tests/cross-platform/gaps.yaml`、平台 `tests/<平台>/gaps.yaml`；条目、数量与状态一律以账本为准（门户不复述，也不保留完成历史），`TEST-REPORT-ACCEPTED` 只看平台与跨平台账（`run-tests.js`）；格式与验收见 [docs/testing/gaps-acceptance.md](docs/testing/gaps-acceptance.md)。
 - 判「环境不允许」只看被测试进程自己的令牌与行为，不拿二手字符串特征当判据；Windows 容器与写沙箱的判据、后果与处置见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md) 的「真机入口」。

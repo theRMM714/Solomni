@@ -5,6 +5,9 @@
 "use strict";
 
 const LANES = ["full", "docs", "structure", "selftest"];
+// 计划过滤器：维度间「与」、维度内「或」（语义在 tests/lib/plan.js 的 select）。
+const LIST_FLAGS = ["--unit", "--tier", "--journey"];
+const TIERS = ["T1", "T2", "T3", "T4", "T5"];
 
 /**
  * 解析 argv（不含 node 与脚本名）。
@@ -25,6 +28,10 @@ function parse(argv) {
     strictEnv: false,
     only: [],
     changed: false,
+    plan: false,
+    unit: [],
+    tier: [],
+    journey: [],
     run: false,
     help: false,
     invalid: null,
@@ -50,15 +57,31 @@ function parse(argv) {
       for (const x of v.split(",")) if (x.trim()) o.only.push(x.trim());
     }
     else if (a === "--changed") o.changed = true;
+    else if (a === "--plan") o.plan = true;
+    else if (LIST_FLAGS.some((f) => a.startsWith(f + "="))) {
+      const f = LIST_FLAGS.find((x) => a.startsWith(x + "="));
+      const vals = a.slice(f.length + 1).split(",").map((x) => x.trim()).filter(Boolean);
+      if (!vals.length) { o.invalid = "用法：" + f + "=<值>（多个用逗号分隔）"; return o; }
+      if (f === "--unit") o.unit.push(...vals);
+      else if (f === "--tier") o.tier.push(...vals);
+      else o.journey.push(...vals);
+    }
     else if (a === "--run") o.run = true;
     else if (a === "--help" || a === "-h") o.help = true;
   }
   o.fenceLive = o.fenceLive || process.env.SOLOMNI_FENCE_LIVE === "1";
+  const badTier = o.tier.find((t) => !TIERS.includes(t));
+  if (badTier) {
+    o.invalid = "未知测试层级：" + badTier + "（只能是 " + TIERS.join(" / ") + "）";
+    return o;
+  }
   return o;
 }
 
-/** 模式梯子：--coverage > --docs > --audit=… > 全量。顺序即优先级，这里和 main 只有一处判定。 */
+/** 模式梯子：--plan > 过滤器 > --coverage > --docs > --audit=… > 全量。顺序即优先级，这里和 main 只有一处判定。 */
 function mode(opts) {
+  if (opts.plan) return "plan";
+  if (opts.unit.length || opts.tier.length || opts.journey.length) return "filtered";
   if (opts.coverage) return "coverage";
   if (opts.docs) return "docs-all";
   if (opts.auditScope) return "audit-" + opts.auditScope;
@@ -80,6 +103,12 @@ function usage() {
     "  --audit=structure    只跑结构审查（写报告）",
     "  （无模式开关）        整跑：质量门禁 + 单元 + 平台目标 + L4（写报告）",
     "",
+    "测试计划（清单声明在 tests/specs/*.yaml；子集不写报告、不打 TEST-REPORT-*）：",
+    "  --plan               打印按声明解析出的计划（结合下面三个过滤器看会跑什么）",
+    "  --unit=<单元>        只跑这些单元（逗号分隔；17 个业务单元与 kernel）",
+    "  --tier=<T1..T5>      只跑这些层级（T1 单元 / T2 契约 / T3 行为 / T4 平台 / T5 旅程）",
+    "  --journey=<id>       只跑这些旅程（自动带上前置段，见 tests/journeys/index.js）",
+    "",
     "选择（本地排查用；任意子集不写报告、不打 TEST-REPORT-*）：",
     "  --list [--json]      列出车道 / gate / 步骤（机器可读）",
     "  --only=<id>          跑单个 gate 或步骤（逗号分隔，可重复；车道名=对应车道）",
@@ -92,4 +121,4 @@ function usage() {
   ].join("\n");
 }
 
-module.exports = { LANES, parse, mode, isLane, usage };
+module.exports = { LANES, LIST_FLAGS, TIERS, parse, mode, isLane, usage };

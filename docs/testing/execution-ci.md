@@ -84,6 +84,14 @@ node run-tests.js
 - `--changed [--run]`：按工作树与 HEAD 的差异反查受影响的 gate、步骤与建议车道（默认只打印，`--run` 才执行；门禁引擎自身改动按全量处理）。
 - **报告只由车道级运行产出**：`full` / `docs` / `structure` / `--only=<车道>` 才写 `target/test-report.json`、才打 `TEST-REPORT-*`；任意 gate 或步骤子集不写报告、不能当验收。
 
+### 测试计划（`--plan` / `--unit` / `--tier` / `--journey`）
+
+- 测试清单的唯一声明处是 `tests/specs/<单元>.yaml`（一条用例一行：`id` / `tier` / `note`）；`node run-tests.js --plan` 打印按声明解析出的计划（单元、层级、派发的 cargo 模块 / 平台目标 / 旅程段），与下面三个过滤器叠加就是"看子集会跑什么"。
+- `--unit=<单元>[,…]` / `--tier=<T1..T5>[,…]` / `--journey=<id>[,…]` 是**子集执行**：维度间"与"、维度内"或"；旅程自动带上前置段（`tests/journeys/index.js` 的 `deps`）。cargo 用例按模块路径前缀成组跑，平台目标按 `--test <name>`，旅程经 `E2E_JOURNEY` 传给编排器。
+- 过滤器命中 0 个用例判失败：cargo 对匹配不到的过滤器同样退 0，那种绿是假绿（`run-tests.js` 的 `plan.lib` 派发检查 `passed > 0`）。
+- 子集不写 `target/test-report.json`、不打 `TEST-REPORT-*`，因此不能当验收；验收仍是车道级整跑。
+- 声明与实现对不上（模块文件被搬走、旅程没登记进清单、`tier` 写错、有 `#[test]` 的模块没声明）由门禁 `structure/specs` 判红，不会静默少跑。
+
 - 每一步都有墙钟上限（默认 15 分钟；L4 20 分钟，环境引导自检 5 分钟）：超时即硬失败，证据记进报告的 `timeouts`，不会把本地入口或 CI job 拖到外层超时。每步用时记在报告的 `ms`，超预算的标 `[slow]`（只报不拦）。
 
 - 报告里的 `L1` / `L4` 是入口的步骤名：`L1` = T1 单元，`L4` = T5 端到端；四个测试目标按目标名逐步记录。

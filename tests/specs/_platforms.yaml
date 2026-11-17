@@ -1,0 +1,18 @@
+# T4 平台目标：按宿主/目标平台跑的 crate 测试目标（tests/<name>/main.rs）。
+# 平台档缺环境时如实记 env-skip，不算通过。
+
+unit: _platforms
+title: 平台目标
+cases:
+  - id: platform/cross-platform
+    tier: T4
+    note: 跨平台公共行为
+  - id: platform/windows
+    tier: T4
+    note: Windows 专有行为
+  - id: platform/linux
+    tier: T4
+    note: Linux 专有行为
+  - id: platform/macos
+    tier: T4
+    note: macOS 专有行为

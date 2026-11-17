@@ -1,0 +1,12 @@
+# 端口契约（T2）的声明处：一个端口一份 suite，同一份 suite 跑所有实现。
+# 这里只钉端口承诺，不写"谁实现了端口"——那是各单元的事。
+
+unit: _contracts
+title: 端口契约与边界桩
+cases:
+  - id: cargo/tests::ports
+    tier: T2
+    note: 端口契约总表（每个端口至少一条）
+  - id: cargo/tests::detail::http
+    tier: T2
+    note: 供应商 HTTP 边界桩（唯一允许的 mock 处）

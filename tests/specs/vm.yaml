@@ -1,0 +1,28 @@
+# 虚拟机档 的用例声明（一个单元一份；文件名 = 单元名）。
+# 文件级条目：一个 Rust 测试模块 = 一条；搬实现只改适配层，这里仍指向行为。
+# 格式：- id: cargo/tests::<模块路径> | e2e/<旅程 id>，紧跟 tier 与一句 note。
+
+unit: vm
+title: 虚拟机档
+cases:
+  - id: cargo/tests::api::guest
+    tier: T3
+    note: 跨单元 api 面：guest 工具与 shell
+  - id: cargo/tests::session::vm
+    tier: T1
+    note: 虚拟机档会话
+  - id: cargo/tests::vm::concurrency
+    tier: T1
+    note: 并发预算
+  - id: cargo/tests::vm::plan
+    tier: T1
+    note: 虚拟根规划
+  - id: cargo/tests::vm::readiness
+    tier: T1
+    note: 就绪探测
+  - id: cargo/tests::vm::share
+    tier: T1
+    note: 共享目录
+  - id: e2e/vm
+    tier: T5
+    note: 虚拟机档：guest 内工具与 shell、外部工作区、删除即销毁
