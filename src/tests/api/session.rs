@@ -6,8 +6,8 @@
 use super::super::doubles::{decl, model_draft, module_of, module_with_runtimes};
 use super::super::{ops_with, single_work, slow_ops};
 use super::support::spawn;
+use crate::capabilities::registry::api::AgentMeta;
 use crate::capabilities::runtime::api::{Acted, ActionCall, Caller};
-use crate::capabilities::session::api::AgentMeta;
 use crate::capabilities::work::api::{ConfigAgent, SessionEdit, WorkMode, WorkSpec};
 use crate::presentation::faces::Faces;
 

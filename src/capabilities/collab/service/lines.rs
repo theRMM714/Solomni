@@ -6,7 +6,7 @@
 use crate::capabilities::collab::domain::collab_state::CollabState;
 use crate::capabilities::collab::service::discussion::Discussion;
 use crate::capabilities::collab::service::synthesis::Execution;
-use crate::capabilities::session::api::AgentMeta;
+use crate::capabilities::registry::api::AgentMeta;
 use crate::capabilities::session::api::{CheckView, LineView, Pending, SessionEvent};
 /// 目的：代拟行里的一项（只给人看）：复用项标出来，组装项带上模块与模型。
 pub(crate) fn slate_item(a: &AgentMeta, why: &str) -> String {

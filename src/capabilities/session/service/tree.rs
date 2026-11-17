@@ -3,7 +3,8 @@
 //! 不管：谁在跑（`turn`）、目录怎么落盘（`detail/fs_history.rs`）、外部工作区的档位策略（`workspace`）。
 //! 联动：只经 `History` 端口读 meta 与列表；`runtime` 的建工作、改配、回档与历史列表都调这里。
 
-use crate::capabilities::session::api::{AgentMeta, History, HistoryView, SessionMeta};
+use crate::capabilities::registry::api::AgentMeta;
+use crate::capabilities::session::api::{History, HistoryView, SessionMeta};
 use crate::kernel::api::Tier;
 
 /// 目的：整张名单的扁平模块清单（保序去重）：同一模块被多个 agent 共用时只出现一次。

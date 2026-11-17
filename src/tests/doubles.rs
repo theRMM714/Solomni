@@ -6,8 +6,8 @@
 #![allow(dead_code)]
 
 use super::builders::SilentRunner;
+use crate::capabilities::registry::api::AgentMeta;
 use crate::capabilities::runtime::api::SessionEvent;
-use crate::capabilities::session::api::AgentMeta;
 use crate::capabilities::work::api::{WorkMode, WorkSpec};
 
 use crate::capabilities::llm::api::Channel;

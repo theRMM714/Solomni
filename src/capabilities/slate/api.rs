@@ -6,8 +6,9 @@
 use crate::capabilities::llm::api::{Chat, CompleteOpts, ToolMode};
 use crate::capabilities::modules::api::Roster;
 use crate::capabilities::prompt::api::Prompt;
+use crate::capabilities::registry::api::AgentMeta;
 use crate::capabilities::registry::api::{Agents, ModelEntry};
-use crate::capabilities::session::api::{AgentMeta, CoreVerify};
+use crate::capabilities::session::api::CoreVerify;
 use crate::capabilities::tools::api::Tools;
 use std::collections::BTreeMap;
 

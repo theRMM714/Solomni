@@ -5,8 +5,9 @@
 
 use super::collab::*;
 use crate::capabilities::collab::service::discussion::TurnOut;
+use crate::capabilities::registry::api::AgentMeta;
 use crate::capabilities::session::api::{
-    AgentMeta, LineView, OPT_ASK_REPLY, OPT_BEGIN, OPT_BEGIN_ALLOW, OPT_NODE_REWORK, OPT_NODE_SAY,
+    LineView, OPT_ASK_REPLY, OPT_BEGIN, OPT_BEGIN_ALLOW, OPT_NODE_REWORK, OPT_NODE_SAY,
     OPT_PLAN_SAY, OPT_PLAN_START, OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM, Pending, SessionEvent,
 };
 use std::sync::Arc;

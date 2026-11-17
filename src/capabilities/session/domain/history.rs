@@ -1,8 +1,10 @@
 //! 目的：会话历史的内存形态——会话元信息与历史视图。
-//! 管：`SessionMeta` / `AgentMeta` / `HistoryView` / `Delegation` / `RunState` / `WorkspaceBinding` 等落盘事实的类型。
+//! 管：`SessionMeta` / `HistoryView` / `Delegation` / `RunState` / `WorkspaceBinding` 等落盘事实的类型；
+//!   agent 实例（`AgentMeta`）归登记处（`registry::api`），这里只持有快照。
 //! 不管：落盘机制（在 `detail/fs_history.rs` 的 `HistoryStore` 实现）；会话状态派生（在 `session.rs`）。
 //! 联动：由 `service.rs` 与 `ports.rs` 使用，`api.rs` 对外重导出。
 
+use crate::capabilities::registry::api::AgentMeta;
 use crate::capabilities::workspace::api::WorkspaceGrant;
 use serde::{Deserialize, Serialize};
 
@@ -130,24 +132,6 @@ impl SessionMeta {
             )),
         }
     }
-}
-
-/// 目的：会话里的一个 agent 实例记录——会话名单的唯一形状（R15）：登记处视图经
-///   `registry::api::agent_meta` 转换，代理建会话与核心点名都复用它。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AgentMeta {
-    /// 目的：实例名（重名时已加 -2/-3；也是其沙箱目录名）。
-    pub name: String,
-    /// 目的：是否临时 agent（不来自 agents.yaml）。
-    #[serde(default)]
-    pub transient: bool,
-    pub modules: Vec<String>,
-    #[serde(default)]
-    pub model: Option<String>,
-    /// 目的：人设 / 身份（建会话时从登记处或临时声明里快照；之后与会话一起走）。
-    #[serde(default)]
-    pub chara: String,
 }
 
 /// 目的：历史列表条目。

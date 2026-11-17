@@ -12,10 +12,10 @@ use crate::capabilities::llm::api::ToolMode;
 use crate::capabilities::modules::api::{Module, Roster};
 use crate::capabilities::packages::api::PackagePlan;
 use crate::capabilities::permission::api::PermissionSet;
+use crate::capabilities::registry::api::AgentMeta;
 use crate::capabilities::registry::api::Registry;
 use crate::capabilities::session::api::{
-    AgentMeta, AgentSession, MemberSpec, SessionEvent, SessionMeta, SingleSpec, WorkspaceGrant,
-    work_root_of,
+    AgentSession, MemberSpec, SessionEvent, SessionMeta, SingleSpec, WorkspaceGrant, work_root_of,
 };
 use crate::capabilities::turn::service::session::Turn;
 use crate::capabilities::vm::api::GuestOs;

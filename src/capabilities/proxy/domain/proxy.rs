@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::capabilities::session::api::AgentMeta;
+use crate::capabilities::registry::api::AgentMeta;
 
 pub const CATALOG: &str = "catalog_agents";
 pub const CREATE: &str = "create_session";
