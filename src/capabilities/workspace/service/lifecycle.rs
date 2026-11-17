@@ -5,7 +5,7 @@
 
 use super::*;
 use crate::capabilities::workspace::api::{
-    ArchiveReport, DeleteReport, GcReport, LostEntry, LostReport, RestoreLostReport,
+    ArchiveReport, DeleteReport, LostEntry, LostReport, RestoreLostReport, WorkGcReport,
 };
 
 impl WorkspaceService {
@@ -109,7 +109,7 @@ impl WorkspaceService {
         self.recover_locked(work, &shared, &store)
     }
 
-    pub(super) fn work_gc(&self, work: &str, apply: bool) -> Result<GcReport, String> {
+    pub(super) fn work_gc(&self, work: &str, apply: bool) -> Result<WorkGcReport, String> {
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
         let (shared, store) = self.work_roots(work)?;
@@ -151,9 +151,9 @@ impl WorkspaceService {
             reachable.extend(index.values().cloned());
         }
 
-        let mut report = GcReport {
+        let mut report = WorkGcReport {
             applied: apply,
-            ..GcReport::default()
+            ..WorkGcReport::default()
         };
         for object in self.store.list_objects(&store)? {
             if !is_content_hash(&object.hash) {

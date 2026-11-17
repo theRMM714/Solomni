@@ -25,10 +25,10 @@ pub use crate::capabilities::workspace::domain::workspace::{
     safe_file_name,
 };
 pub use crate::capabilities::workspace::domain::workstore::{
-    Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, GcReport, LostEntry,
-    LostReport, PullReport, ResolveAction, ResolveEntry, ResolveReport, ResolveRequest,
-    ResolveTake, ResolveWarning, ResolveWarningKind, RestoreLostReport, StatusEntry, StatusReport,
-    SyncReport, VersionView,
+    Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, LostEntry, LostReport,
+    PullReport, ResolveAction, ResolveEntry, ResolveReport, ResolveRequest, ResolveTake,
+    ResolveWarning, ResolveWarningKind, RestoreLostReport, StatusEntry, StatusReport, SyncReport,
+    VersionView, WorkGcReport,
 };
 
 /// 目的：外部工作区根的策略（判定 / 创建校验 / 加载复检）——`runtime` 建会话与重开时只经这里取。
@@ -211,7 +211,7 @@ pub trait Workspace: Send + Sync {
     /// 目的：把该工作未完成的版本库事务重放到一致状态；没有待恢复事务 = 无操作。
     fn work_recover(&self, work: &str) -> Result<(), String>;
     /// 目的：回收该工作中不再可达的内容对象；apply=false 只统计不删除。
-    fn work_gc(&self, work: &str, apply: bool) -> Result<GcReport, String>;
+    fn work_gc(&self, work: &str, apply: bool) -> Result<WorkGcReport, String>;
     /// **用户投喂**：一次权威提交（作者 = user），不做冲突拦截；返回提交号。
     fn work_commit_user(
         &self,
