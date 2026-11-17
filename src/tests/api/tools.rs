@@ -102,7 +102,7 @@ fn suggest_models_pushes_on_a_system_session_and_leaves_no_trace() {
         .expect("核心推荐");
     assert_eq!(agents.len(), 1, "回包只给名单（渲染那一步的契约不变）");
     let (batches, _head, _oldest) = handle.events().snapshot(
-        Some(crate::capabilities::session::api::SYSTEM_SID_SUGGEST),
+        Some(crate::capabilities::conversation::session::api::SYSTEM_SID_SUGGEST),
         0,
     );
     assert!(
@@ -120,7 +120,7 @@ fn suggest_models_pushes_on_a_system_session_and_leaves_no_trace() {
             .session_views(&[])
             .expect("会话视图")
             .iter()
-            .any(|v| v.sid == crate::capabilities::session::api::SYSTEM_SID_SUGGEST),
+            .any(|v| v.sid == crate::capabilities::conversation::session::api::SYSTEM_SID_SUGGEST),
         "系统会话不进会话列表（前端因此不会为它建标签页）"
     );
 }

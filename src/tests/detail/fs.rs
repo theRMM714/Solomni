@@ -27,7 +27,7 @@ fn meta(name: &str) -> SessionMeta {
         node: None,
         delegation: None,
         thinking: None,
-        run: crate::capabilities::session::api::RunState::Active,
+        run: crate::capabilities::conversation::session::api::RunState::Active,
         workspace: None,
     }
 }

@@ -3,7 +3,7 @@
 //! 不管：历史列出 / 打开 / 删除与回档（在 lifecycle）；会话对象怎么建（在 assemble 与 rebuild）。
 //! 联动：回合推进的所有方法族的事件都经 `record_events` 落盘（见 docs/session/session-model.md）。
 
-use crate::capabilities::session::api::{Persister, RunState, SessionEvent, subtree_of};
+use crate::capabilities::conversation::session::api::{Persister, RunState, SessionEvent, subtree_of};
 
 use super::session::Turn;
 
@@ -34,7 +34,7 @@ impl Turn {
 
     /// 目的：事件落盘；失败如实告知（追加一条警告事件），不静默丢历史。
     pub(crate) fn record_events(&self, sid: &str, events: &mut Vec<SessionEvent>) {
-        crate::capabilities::session::api::record_events(
+        crate::capabilities::conversation::session::api::record_events(
             self.history.as_ref(),
             self.log.as_ref(),
             sid,

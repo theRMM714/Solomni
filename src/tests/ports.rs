@@ -17,8 +17,8 @@ use crate::capabilities::prompt::ports::PromptSource;
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::catalog::registry::api::{Provider, Settings};
 use crate::capabilities::catalog::registry::ports::SettingsStore;
-use crate::capabilities::session::api::SessionMeta;
-use crate::capabilities::session::ports::HistoryStore;
+use crate::capabilities::conversation::session::api::SessionMeta;
+use crate::capabilities::conversation::session::ports::HistoryStore;
 use crate::capabilities::tools::ports::SysIo;
 use crate::capabilities::workspace::ports::Workdirs;
 use crate::kernel::api::ExecSpec;
@@ -72,7 +72,7 @@ fn meta(name: &str) -> SessionMeta {
         node: None,
         delegation: None,
         thinking: None,
-        run: crate::capabilities::session::api::RunState::Active,
+        run: crate::capabilities::conversation::session::api::RunState::Active,
         workspace: None,
     }
 }

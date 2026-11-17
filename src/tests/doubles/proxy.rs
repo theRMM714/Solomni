@@ -5,9 +5,9 @@
 
 use super::*;
 
-use crate::capabilities::proxy::api as dproxy;
+use crate::capabilities::conversation::proxy::api as dproxy;
 
-use crate::capabilities::proxy::api::ProxyHost;
+use crate::capabilities::conversation::proxy::api::ProxyHost;
 
 /// 目的：代理工具的宿主替身：只按用例给的答案回答，并把每次动作记进日志（用户可见的“未授权 = 根本没碰宿主”就靠这份日志钉住）。
 pub(crate) struct FakeProxyHost {

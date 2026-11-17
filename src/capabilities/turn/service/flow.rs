@@ -4,12 +4,12 @@
 //! 联动：宿主的协作接口与工作线程转发到这里；登记处与主机探针按参数给（本层不持登记处）。
 //!   本方法族的取放与收尾判据都在 `Turn` 的会话表上。
 
-use crate::capabilities::collab::api::AfterTurn;
-use crate::capabilities::collab::api::CollabSession;
+use crate::capabilities::conversation::collab::api::AfterTurn;
+use crate::capabilities::conversation::collab::api::CollabSession;
 use crate::capabilities::prompt::api::Segment;
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::catalog::registry::api::Registry;
-use crate::capabilities::session::api::{
+use crate::capabilities::conversation::session::api::{
     Answered, DecisionQueue, GateTicket, RunState, SessionEvent, SessionMeta, TurnIo, flat_modules,
     work_root,
 };
@@ -135,9 +135,9 @@ impl Turn {
                 Ok(t) => t,
                 Err(err) => {
                     let note = if cancel.load(std::sync::atomic::Ordering::Relaxed) {
-                        crate::capabilities::session::api::stopped_note()
+                        crate::capabilities::conversation::session::api::stopped_note()
                     } else {
-                        crate::capabilities::session::api::interrupted_note(&err)
+                        crate::capabilities::conversation::session::api::interrupted_note(&err)
                     };
                     out.extend(self.notice_row(sid, &note));
                     break;
@@ -472,7 +472,7 @@ impl Turn {
     pub(crate) fn put_single(
         &mut self,
         sid: &str,
-        s: crate::capabilities::session::api::AgentSession,
+        s: crate::capabilities::conversation::session::api::AgentSession,
     ) -> Option<String> {
         self.unmark_running(sid);
         self.put(sid.to_string(), Session::Single(s));
@@ -498,7 +498,7 @@ impl Turn {
     pub(crate) fn put_single_recorded(
         &mut self,
         sid: &str,
-        s: crate::capabilities::session::api::AgentSession,
+        s: crate::capabilities::conversation::session::api::AgentSession,
         events: &[SessionEvent],
     ) {
         self.unmark_running(sid);
@@ -683,7 +683,7 @@ impl Turn {
             _ => return Err("只有协作会话有「本次需求」".to_string()),
         };
         let (meta, raw) = self.history.load(sid)?;
-        let next = crate::capabilities::session::api::next_line_id(&raw);
+        let next = crate::capabilities::conversation::session::api::next_line_id(&raw);
         let mut kept = Vec::with_capacity(raw.len() + 1);
         for ev in &raw {
             if ev.get("type").and_then(|t| t.as_str()) != Some("transcript") {
@@ -710,14 +710,14 @@ impl Turn {
             e2["lines"] = serde_json::Value::Array(lines);
             kept.push(e2);
         }
-        let mut line = crate::capabilities::session::api::LineView::user(
+        let mut line = crate::capabilities::conversation::session::api::LineView::user(
             "需求",
             format!("需求已修改，以下是新需求：{}", text),
         );
         line.id = next;
         line.reply = next;
         kept.push(
-            crate::capabilities::session::api::SessionEvent::Transcript(vec![line]).to_json(),
+            crate::capabilities::conversation::session::api::SessionEvent::Transcript(vec![line]).to_json(),
         );
         self.history
             .replace(sid, &kept)
@@ -759,7 +759,7 @@ impl Turn {
     pub fn collab_pending(
         &self,
         sid: &str,
-    ) -> Result<Option<crate::capabilities::session::api::Pending>, String> {
+    ) -> Result<Option<crate::capabilities::conversation::session::api::Pending>, String> {
         if !self.holds(sid) {
             return Err("无此会话".to_string());
         }

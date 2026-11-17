@@ -6,8 +6,8 @@
 use super::super::prelude::*;
 use crate::presentation::faces::Faces;
 
-use crate::capabilities::proxy::api as d;
-use crate::capabilities::proxy::api::ProxyTools;
+use crate::capabilities::conversation::proxy::api as d;
+use crate::capabilities::conversation::proxy::api::ProxyTools;
 
 fn rig() -> (Arc<FakeProxyHost>, ProxyTools) {
     let host = Arc::new(FakeProxyHost::new());
@@ -439,7 +439,7 @@ pub(crate) fn declaration_shape_is_enforced_before_semantics() {
 #[test]
 pub(crate) fn the_real_bridge_reads_catalog_and_session_messages() {
     use crate::capabilities::catalog::modules::api::ModuleManifest;
-    use crate::capabilities::proxy::api::ProxyHost;
+    use crate::capabilities::conversation::proxy::api::ProxyHost;
     use crate::capabilities::runtime::service::ProxyBridge;
 
     let module = Module {
@@ -534,7 +534,7 @@ pub(crate) fn the_real_bridge_reads_catalog_and_session_messages() {
 #[test]
 pub(crate) fn the_real_bridge_creates_a_child_work() {
     use crate::capabilities::catalog::modules::api::ModuleManifest;
-    use crate::capabilities::proxy::api::ProxyHost;
+    use crate::capabilities::conversation::proxy::api::ProxyHost;
     use crate::capabilities::runtime::service::ProxyBridge;
 
     let module = Module {
@@ -582,7 +582,7 @@ pub(crate) fn the_real_bridge_creates_a_child_work() {
             let c = child.clone();
             move |core| {
                 let history = core.history_handle();
-                crate::capabilities::session::api::work_root(history.as_ref(), &c)
+                crate::capabilities::conversation::session::api::work_root(history.as_ref(), &c)
             }
         })
         .expect("工作根");
@@ -603,8 +603,8 @@ pub(crate) fn the_real_bridge_creates_a_child_work() {
 #[test]
 pub(crate) fn the_proxy_handler_owns_and_runs_proxy_tools() {
     use crate::capabilities::catalog::modules::api::ModuleManifest;
-    use crate::capabilities::proxy::api::ProxyHandler;
-    use crate::capabilities::proxy::api::ProxyHost;
+    use crate::capabilities::conversation::proxy::api::ProxyHandler;
+    use crate::capabilities::conversation::proxy::api::ProxyHost;
     use crate::capabilities::runtime::service::ProxyBridge;
     use crate::kernel::ports::ToolHandler;
 
@@ -763,7 +763,7 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
 #[test]
 pub(crate) fn run_state_gates_dispatch_and_survives_stop_close() {
     use crate::capabilities::catalog::modules::api::ModuleManifest;
-    use crate::capabilities::proxy::api::ProxyHost;
+    use crate::capabilities::conversation::proxy::api::ProxyHost;
     use crate::capabilities::runtime::service::ProxyBridge;
 
     let module = Module {
@@ -868,7 +868,7 @@ pub(crate) fn run_state_gates_dispatch_and_survives_stop_close() {
 #[test]
 pub(crate) fn relay_records_its_source_on_the_target() {
     use crate::capabilities::catalog::modules::api::ModuleManifest;
-    use crate::capabilities::proxy::api::ProxyHost;
+    use crate::capabilities::conversation::proxy::api::ProxyHost;
     use crate::capabilities::runtime::service::ProxyBridge;
 
     let module = Module {
@@ -913,7 +913,7 @@ pub(crate) fn relay_records_its_source_on_the_target() {
 #[test]
 pub(crate) fn the_real_bridge_creates_a_multi_agent_child_work() {
     use crate::capabilities::catalog::modules::api::ModuleManifest;
-    use crate::capabilities::proxy::api::ProxyHost;
+    use crate::capabilities::conversation::proxy::api::ProxyHost;
     use crate::capabilities::runtime::service::ProxyBridge;
 
     let module = |id: &str| Module {
@@ -963,7 +963,7 @@ pub(crate) fn the_real_bridge_creates_a_multi_agent_child_work() {
             let c = child.clone();
             move |core| {
                 let history = core.history_handle();
-                crate::capabilities::session::api::work_root(history.as_ref(), &c)
+                crate::capabilities::conversation::session::api::work_root(history.as_ref(), &c)
             }
         })
         .expect("工作根");
@@ -1197,7 +1197,7 @@ pub(crate) fn proxy_session_exposes_context_usage() {
 #[test]
 pub(crate) fn observe_reports_new_messages_since_the_last_cursor() {
     use crate::capabilities::catalog::modules::api::ModuleManifest;
-    use crate::capabilities::proxy::api::ProxyHost;
+    use crate::capabilities::conversation::proxy::api::ProxyHost;
     use crate::capabilities::runtime::service::ProxyBridge;
 
     let module = Module {
@@ -1263,7 +1263,7 @@ pub(crate) fn observe_reports_new_messages_since_the_last_cursor() {
 #[test]
 pub(crate) fn the_proxy_created_child_publishes_its_opening_facts() {
     use crate::capabilities::catalog::modules::api::ModuleManifest;
-    use crate::capabilities::proxy::api::ProxyHost;
+    use crate::capabilities::conversation::proxy::api::ProxyHost;
     use crate::capabilities::runtime::service::ProxyBridge;
 
     let module = |id: &str| Module {
@@ -1339,7 +1339,7 @@ pub(crate) fn the_proxy_created_child_publishes_its_opening_facts() {
 #[test]
 pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
     use crate::capabilities::catalog::modules::api::ModuleManifest;
-    use crate::capabilities::proxy::api::ProxyHost;
+    use crate::capabilities::conversation::proxy::api::ProxyHost;
     use crate::capabilities::runtime::service::ProxyBridge;
 
     let module = Module {

@@ -274,8 +274,8 @@ pub(crate) fn session_delete_releases_fences_in_background_after_directories() {
 #[test]
 pub(crate) fn session_delete_releases_fences_even_when_directory_delete_fails() {
     use crate::capabilities::lifecycle::api::SessionDelete;
-    use crate::capabilities::session::api::History;
-    use crate::capabilities::session::domain::history::HistoryView;
+    use crate::capabilities::conversation::session::api::History;
+    use crate::capabilities::conversation::session::domain::history::HistoryView;
     use crate::capabilities::vm::api::GuestStop;
     use crate::capabilities::vm::api::Vm;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -464,7 +464,7 @@ pub(crate) fn work_root_walks_to_the_top_across_nested_sub_sessions() {
         .spawn_agent_session(&mid, "a", core.registry.as_ref(), core.probe.as_ref())
         .unwrap();
     let history = core.history_handle();
-    let root_of = |sid: &str| crate::capabilities::session::api::work_root(history.as_ref(), sid);
+    let root_of = |sid: &str| crate::capabilities::conversation::session::api::work_root(history.as_ref(), sid);
     assert_eq!(root_of(&top).unwrap(), top);
     assert_eq!(root_of(&mid).unwrap(), top, "第二层锚在顶");
     assert_eq!(root_of(&low).unwrap(), top, "第三层也锚在顶");

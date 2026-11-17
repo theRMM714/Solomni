@@ -94,10 +94,10 @@ impl Handle {
     /// 参数：`door` = 该会话的裁决通道（与核心各关卡共用）；`bus` / `persister` = 卡的外送与落盘。
     pub(super) fn session_ask(
         &self,
-        door: &Arc<dyn crate::capabilities::session::api::Gates>,
+        door: &Arc<dyn crate::capabilities::conversation::session::api::Gates>,
         sid: &str,
         bus: Arc<dyn Events>,
-        persister: crate::capabilities::session::api::Persister,
+        persister: crate::capabilities::conversation::session::api::Persister,
     ) -> Arc<dyn crate::kernel::ports::AskUser> {
         let owner = sid.to_string();
         let emit: Box<dyn Fn(SessionEvent) + Send + Sync> = Box::new(move |ev: SessionEvent| {
@@ -120,7 +120,7 @@ impl Handle {
     pub(super) fn decisions_of(
         &self,
         sid: &str,
-    ) -> Result<Option<Arc<dyn crate::capabilities::session::api::Gates>>, String> {
+    ) -> Result<Option<Arc<dyn crate::capabilities::conversation::session::api::Gates>>, String> {
         if !self.interactive.load(std::sync::atomic::Ordering::Relaxed) {
             return Ok(None);
         }
@@ -200,25 +200,25 @@ impl crate::capabilities::turn::api::TurnHost for Handle {
     fn decisions_of(
         &self,
         sid: &str,
-    ) -> Result<Option<Arc<dyn crate::capabilities::session::api::Gates>>, String> {
+    ) -> Result<Option<Arc<dyn crate::capabilities::conversation::session::api::Gates>>, String> {
         Handle::decisions_of(self, sid)
     }
 
     fn session_ask(
         &self,
-        door: &Arc<dyn crate::capabilities::session::api::Gates>,
+        door: &Arc<dyn crate::capabilities::conversation::session::api::Gates>,
         sid: &str,
         bus: Arc<dyn Events>,
-        persister: crate::capabilities::session::api::Persister,
+        persister: crate::capabilities::conversation::session::api::Persister,
     ) -> Arc<dyn crate::kernel::ports::AskUser> {
         Handle::session_ask(self, door, sid, bus, persister)
     }
 
     fn inject_proxy_handler(
         &self,
-        session: crate::capabilities::session::api::AgentSession,
+        session: crate::capabilities::conversation::session::api::AgentSession,
         sid: &str,
-    ) -> Result<crate::capabilities::session::api::AgentSession, String> {
+    ) -> Result<crate::capabilities::conversation::session::api::AgentSession, String> {
         Handle::inject_proxy_handler(self, session, sid)
     }
 

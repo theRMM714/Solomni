@@ -3,7 +3,7 @@
 //! 不管：授权判据与幂等账（见 `tests/runtime/proxy.rs`）；宿主行为（`FakeProxyHost`）。
 //! 联动：`proxy::api` 转出的纯函数，实现见 `src/capabilities/proxy/domain/proxy.rs`。
 
-use crate::capabilities::proxy::api as d;
+use crate::capabilities::conversation::proxy::api as d;
 
 /// 目的：三个请求校验器在**任何宿主动作之前**就拒绝——文案逐字可断言，默认值与去空白规则固定。
 #[test]

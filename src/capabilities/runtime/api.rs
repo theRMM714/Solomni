@@ -12,12 +12,12 @@ pub(crate) use crate::capabilities::lifecycle::api::{RebuildDeps, RewindOutcome,
 pub use crate::capabilities::llm::api::ProbeOutcome;
 /// 目的：落盘历史的只读视图（会话列表是「在世会话 × 历史」的并集）。
 #[allow(unused_imports)]
-pub use crate::capabilities::session::api::HistoryView;
+pub use crate::capabilities::conversation::session::api::HistoryView;
 /// 目的：会话事件（开场事实 / 回合事件 / 通知）的线格式。
-pub use crate::capabilities::session::api::SessionEvent;
+pub use crate::capabilities::conversation::session::api::SessionEvent;
 /// 目的：裁决卡、裁决队与等待者：界面与 CLI 按它们渲染「等你定的事」。
 #[allow(unused_imports)]
-pub use crate::capabilities::session::api::{DecisionCard, DecisionQueue, DecisionWaiter};
+pub use crate::capabilities::conversation::session::api::{DecisionCard, DecisionQueue, DecisionWaiter};
 /// 目的：回合推进自用的协作态：门面重导出，契约测试的既有路径不必改。
 pub(crate) use crate::capabilities::turn::api::CollabWork;
 /// 目的：命令回包（事件台头部序号）、事件台与生成输出方式。

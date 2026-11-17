@@ -364,7 +364,7 @@ fn check_mark(status: &str) -> (&'static str, theme::Ink) {
     }
 }
 
-fn render_lines(lines: &[crate::capabilities::session::api::LineView]) {
+fn render_lines(lines: &[crate::capabilities::conversation::session::api::LineView]) {
     for l in lines {
         if l.kind == "compacted" {
             let up_to = l
@@ -431,7 +431,7 @@ fn render_lines(lines: &[crate::capabilities::session::api::LineView]) {
     }
 }
 
-fn print_tool(t: &crate::capabilities::session::api::ToolCallView) {
+fn print_tool(t: &crate::capabilities::conversation::session::api::ToolCallView) {
     let (glyph, ink) = if t.ok {
         ("✓", theme::Ink::Green)
     } else {

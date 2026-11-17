@@ -576,7 +576,7 @@ pub(crate) fn envelope_tool_parses_name_and_args() {
 #[test]
 pub(crate) fn streaming_stops_at_the_envelope_brace() {
     // 正文开头照常流；一旦出现 "{"（信封开始）就不再外送后续片段。
-    use crate::capabilities::session::api::stream_piece;
+    use crate::capabilities::conversation::session::api::stream_piece;
     let (send, acc) = stream_piece("", "我先看看。");
     assert_eq!(send, "我先看看。");
     let (send, acc) = stream_piece(&acc, "{\"type\":\"tool\"}");
@@ -596,7 +596,7 @@ pub(crate) fn streaming_stops_at_the_envelope_brace() {
 
 #[test]
 pub(crate) fn suppressed_stream_pieces_do_not_emit_delta_events() {
-    use crate::capabilities::session::api::delta_visible;
+    use crate::capabilities::conversation::session::api::delta_visible;
     assert!(delta_visible("start", ""), "start 用来重置本轮流，必须外送");
     assert!(delta_visible("text", "正文"));
     assert!(delta_visible("reasoning", "想一想"));
@@ -717,13 +717,13 @@ pub(crate) fn an_aborted_generation_never_executes_a_repairable_envelope() {
     // 取消标志在生成开始前就已置位 = 用户按下了「停止」：引擎据此收尾，
     // 不再发起下一次调用（工具调用没有上限兜底，这条出口必须自己站住）。
     let events = {
-        let io = crate::capabilities::session::api::TurnIo {
+        let io = crate::capabilities::conversation::session::api::TurnIo {
             llm: Default::default(),
             decisions: None,
             ask: None,
         };
         let cancel = Arc::new(std::sync::atomic::AtomicBool::new(true));
-        let mut noop = |_e: crate::capabilities::session::api::SessionEvent| {};
+        let mut noop = |_e: crate::capabilities::conversation::session::api::SessionEvent| {};
         core.turn
             .single_say(
                 &sid,
@@ -762,13 +762,13 @@ pub(crate) fn a_cancelled_generation_never_executes_a_valid_tool_envelope() {
         .unwrap()
         .sid;
     let events = {
-        let io = crate::capabilities::session::api::TurnIo {
+        let io = crate::capabilities::conversation::session::api::TurnIo {
             llm: Default::default(),
             decisions: None,
             ask: None,
         };
         let cancel = Arc::new(std::sync::atomic::AtomicBool::new(true));
-        let mut noop = |_e: crate::capabilities::session::api::SessionEvent| {};
+        let mut noop = |_e: crate::capabilities::conversation::session::api::SessionEvent| {};
         core.turn
             .single_say(
                 &sid,
@@ -789,7 +789,7 @@ pub(crate) fn a_cancelled_generation_never_executes_a_valid_tool_envelope() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            crate::capabilities::session::api::SessionEvent::Transcript(lines)
+            crate::capabilities::conversation::session::api::SessionEvent::Transcript(lines)
                 if lines.iter().any(|l| l.kind == "notice" && l.line.contains("[停止]"))
         )),
         "取消要留下可回档的 [停止] 行：{:?}",

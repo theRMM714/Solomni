@@ -44,7 +44,7 @@ impl Handle {
         let root_owned = root.to_string();
         let tree: Vec<String> = self.call(move |core| {
             let history = core.history_handle();
-            Ok(crate::capabilities::session::api::subtree_of(
+            Ok(crate::capabilities::conversation::session::api::subtree_of(
                 history.as_ref(),
                 &root_owned,
             ))
@@ -87,7 +87,7 @@ impl Handle {
         let root_owned = root.to_string();
         let tree = self.call(move |core| {
             let history = core.history_handle();
-            Ok(crate::capabilities::session::api::subtree_of(
+            Ok(crate::capabilities::conversation::session::api::subtree_of(
                 history.as_ref(),
                 &root_owned,
             ))

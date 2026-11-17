@@ -6,7 +6,7 @@
 use crate::capabilities::permission::api::{Decision, Reach, ReachSet};
 use crate::capabilities::residents::detail::McpAdapter;
 use crate::capabilities::residents::ports::{LaunchSpec, ServiceAdapter};
-use crate::capabilities::session::service::engine::tools::CallGrant;
+use crate::capabilities::conversation::session::service::engine::tools::CallGrant;
 use crate::kernel::api::FenceSpec;
 use crate::kernel::ports::SessionHost;
 use crate::tests::doubles::{RecordingLog, ScriptedHost};
@@ -152,8 +152,8 @@ fn model_tool_face_exposes_started_service_ops() {
     use crate::capabilities::catalog::modules::api::ServiceDecl;
     use crate::capabilities::residents::api::ResidentOps;
     use crate::capabilities::residents::service::ResidentsService;
-    use crate::capabilities::session::api::ServiceOp;
-    use crate::capabilities::session::service::engine::tools::{
+    use crate::capabilities::conversation::session::api::ServiceOp;
+    use crate::capabilities::conversation::session::service::engine::tools::{
         available_tools, dispatch_external, tool_decls,
     };
     use crate::tests::doubles::{

@@ -163,7 +163,7 @@ fn fence_spec_scopes_module_dirs_and_userdata() {
 /// 共享区授权粒度三态：会话级走按次只读、工作区级走机器级一次性只读、无权限完全不授。
 #[test]
 fn shared_grant_routes_to_session_machine_or_nothing() {
-    use crate::capabilities::session::api::WorkspaceGrant;
+    use crate::capabilities::conversation::session::api::WorkspaceGrant;
     use crate::kernel::api::FenceSpec;
 
     let mut sb = test_sandbox("a1", &[]);
@@ -564,7 +564,7 @@ fn call_grant_checks_scope_and_reach() {
 #[test]
 fn tool_layer_ask_rides_the_decision_channel() {
     use crate::capabilities::runtime::api::{Handle, Output};
-    use crate::capabilities::session::api::SessionEvent;
+    use crate::capabilities::conversation::session::api::SessionEvent;
     use crate::capabilities::tools::domain::fence::{OPT_FENCE_ABORT, OPT_FENCE_UNFENCED};
     use crate::tests::builders::AskingRunner;
     use crate::tests::doubles::{abs, core_with_runner, decl, gw, module_of};
@@ -750,7 +750,7 @@ fn tool_layer_ask_rides_the_decision_channel() {
 /// 裁决队：先来后到（只有队首可答）、答案校验（旧卡 / 卡上没有的选项都挡下）、整队作废解开等待方。
 #[test]
 fn decision_door_queues_only_the_head_and_voids_waiters() {
-    use crate::capabilities::session::api::{
+    use crate::capabilities::conversation::session::api::{
         Answered, OPT_BEGIN, OPT_TOOL_ALLOW, Pending, SessionEvent, decisions,
     };
     use std::sync::Arc;
@@ -796,7 +796,7 @@ fn decision_door_queues_only_the_head_and_voids_waiters() {
     let (wake, evs) = h.join().expect("线程");
     assert_eq!(
         wake,
-        crate::capabilities::session::api::SlotWake::Answer(OPT_TOOL_ALLOW.to_string()),
+        crate::capabilities::conversation::session::api::SlotWake::Answer(OPT_TOOL_ALLOW.to_string()),
         "回答要唤醒等待方"
     );
     assert!(
@@ -834,7 +834,7 @@ fn decision_door_queues_only_the_head_and_voids_waiters() {
     assert_eq!(door.void(), vec!["d2".to_string(), "d3".to_string()]);
     assert_eq!(
         h2.join().expect("线程"),
-        crate::capabilities::session::api::SlotWake::Stopped,
+        crate::capabilities::conversation::session::api::SlotWake::Stopped,
         "整队作废 = 用户停止（发起方按拒绝处置，不套用默认项）"
     );
     assert!(door.is_empty(), "作废之后不再挂着");
@@ -846,7 +846,7 @@ fn decision_door_queues_only_the_head_and_voids_waiters() {
 #[test]
 fn tool_confirmation_rides_the_decision_channel() {
     use crate::capabilities::runtime::api::{Handle, Output};
-    use crate::capabilities::session::api::{
+    use crate::capabilities::conversation::session::api::{
         OPT_TOOL_ALLOW, OPT_TOOL_ALLOW_TURN, OPT_TOOL_DENY, SessionEvent,
     };
     use crate::tests::builders::{RecordingRunner, tool_line_texts};

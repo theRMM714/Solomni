@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use crate::capabilities::session::api::SessionEvent;
+use crate::capabilities::conversation::session::api::SessionEvent;
 use crate::capabilities::turn::api::{EventFeed, EventLine, Events};
 
 /// 目的：事件上限与保留量：本地单机足够，防无界增长。

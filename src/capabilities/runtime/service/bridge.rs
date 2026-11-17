@@ -17,7 +17,7 @@ impl Core {
     fn proxy_lines(
         &self,
         sid: &str,
-    ) -> Result<Vec<crate::capabilities::session::api::LineView>, String> {
+    ) -> Result<Vec<crate::capabilities::conversation::session::api::LineView>, String> {
         let (_, events) = self.lifecycle.history_open(sid)?;
         let mut out = Vec::new();
         for ev in &events {
@@ -29,7 +29,7 @@ impl Core {
             };
             for l in arr {
                 if let Ok(v) =
-                    serde_json::from_value::<crate::capabilities::session::api::LineView>(l.clone())
+                    serde_json::from_value::<crate::capabilities::conversation::session::api::LineView>(l.clone())
                 {
                     out.push(v);
                 }
@@ -272,7 +272,7 @@ impl ProxyBridge {
     }
 }
 
-impl crate::capabilities::proxy::api::ProxyHost for ProxyBridge {
+impl crate::capabilities::conversation::proxy::api::ProxyHost for ProxyBridge {
     fn catalog(&self, scope: d::CatalogScope) -> Result<d::Catalog, String> {
         self.call(move |core| core.proxy_catalog(scope))
     }
@@ -384,10 +384,10 @@ impl Handle {
     ///   执行经队列桥回到核心线程，核心状态的所有权不变；非代理会话、或已装过，原样交回。
     pub(super) fn inject_proxy_handler(
         &self,
-        mut session: crate::capabilities::session::api::AgentSession,
+        mut session: crate::capabilities::conversation::session::api::AgentSession,
         sid: &str,
-    ) -> Result<crate::capabilities::session::api::AgentSession, String> {
-        use crate::capabilities::proxy::api as dp;
+    ) -> Result<crate::capabilities::conversation::session::api::AgentSession, String> {
+        use crate::capabilities::conversation::proxy::api as dp;
         let wanted = session.tools.as_ref().is_some_and(|tools| {
             tools.handlers.is_empty() && tools.face.allowed.iter().any(|t| dp::is_proxy_tool(t))
         });
@@ -417,11 +417,11 @@ impl Handle {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
-        let host: std::sync::Arc<dyn crate::capabilities::proxy::api::ProxyHost + Send + Sync> =
+        let host: std::sync::Arc<dyn crate::capabilities::conversation::proxy::api::ProxyHost + Send + Sync> =
             std::sync::Arc::new(crate::capabilities::runtime::service::ProxyBridge::new(
                 self.clone(),
             ));
-        let handler = crate::capabilities::proxy::api::ProxyHandler::new(
+        let handler = crate::capabilities::conversation::proxy::api::ProxyHandler::new(
             host,
             self.book.clone(),
             dp::ProxyCall {

@@ -5,7 +5,7 @@
 //!   本方法族只碰 probe / history / sessions / log 这四个字段。
 
 use super::*;
-use crate::capabilities::session::api::{
+use crate::capabilities::conversation::session::api::{
     config_owner_of, flat_modules, guest_scope, subtree_of, tree_meta, tree_meta_with, work_root,
 };
 

@@ -27,19 +27,19 @@ impl Work {
         // 核心这一趟的行（工具行、发言行、思维链）**一律外送**：核心没有会话、写不了盘，
         // 它只把行交出来；推到哪个 sid、落不落盘由调用方按会话种类定（这里给系统会话）。
         let mut rows: Vec<SessionEvent> = Vec::new();
-        let proposal = crate::capabilities::slate::api::propose(
-            &crate::capabilities::slate::api::Parties {
+        let proposal = crate::capabilities::conversation::slate::api::propose(
+            &crate::capabilities::conversation::slate::api::Parties {
                 prompt: &*self.prompt,
                 tools: &*self.systools,
                 roster: &roster,
                 agents: &facts.agents,
                 models: &facts.models,
             },
-            &mut crate::capabilities::slate::api::Request {
+            &mut crate::capabilities::conversation::slate::api::Request {
                 task,
                 mode: match mode {
-                    WorkMode::Single => crate::capabilities::slate::api::Mode::Single,
-                    WorkMode::Collab => crate::capabilities::slate::api::Mode::Collab,
+                    WorkMode::Single => crate::capabilities::conversation::slate::api::Mode::Single,
+                    WorkMode::Collab => crate::capabilities::conversation::slate::api::Mode::Collab,
                     // 代理形态没有名单可拟（核心自己挑人）；如实拒绝，不拿单模式的清单糊弄。
                     WorkMode::Proxy => {
                         return Err(

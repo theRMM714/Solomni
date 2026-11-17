@@ -12,7 +12,7 @@
 - 管：全局策略——`api::network_allowed` 读设置里的网络开关，`api::host_read_roots` 把用户填的宿主只读根逐条去空白、丢掉空项后转成路径；两处都只有这一个出处。
 - 不管：事实取得——`SessionMeta` / `WorkRoots` / `Roster` / `PackagePlan` / `AppSettings` 都由调用方先取好，本单元无端口、无 IO。
 - 不管：落盘与进程——不写文件、不启停 guest、不碰围栏授权台账（`tools` 的 `release_by_lease`）。
-- 不管：机制侧怎么用——围栏与模块变量由调用方逐字段拷成值（`MemberEnvParts`）后再由 `session` 装配进工具面（`src/capabilities/session/service/assemble.rs`）。
+- 不管：机制侧怎么用——围栏与模块变量由调用方逐字段拷成值（`MemberEnvParts`）后再由 `session` 装配进工具面（`src/capabilities/conversation/session/service/assemble.rs`）。
 
 ## 入站契约与状态归属
 
@@ -22,7 +22,7 @@
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`session`（`SessionMeta` / `WorkspaceGrant`）、`workspace`（`Sandbox` / `Sandboxes` / `WorkRoots`）、`modules`（`Roster`）、`packages`（`PackagePlan`）、`permission`（`PermissionSet`）、`registry`（`AppSettings` / `AgentMeta`）、`kernel`（`FenceSpec` / `Tier`、`ports::PathCodec`）
-- 谁在用我：`runtime`（`src/capabilities/runtime/service/env.rs` 的三条薄入口：guest 诊断准备与两席沙箱 / 权限）、`turn`（`src/capabilities/turn/service/facts.rs` 取事实后转调派生函数）、`collab`（`src/capabilities/collab/service/collab.rs` 的会话设置取网络开关与宿主只读根）、`cli` / `web`（入口装配取网络开关与宿主只读根条数）、`src/tests/env.rs`
+- 谁在用我：`runtime`（`src/capabilities/runtime/service/env.rs` 的三条薄入口：guest 诊断准备与两席沙箱 / 权限）、`turn`（`src/capabilities/turn/service/facts.rs` 取事实后转调派生函数）、`collab`（`src/capabilities/conversation/collab/service/collab.rs` 的会话设置取网络开关与宿主只读根）、`cli` / `web`（入口装配取网络开关与宿主只读根条数）、`src/tests/env.rs`
 
 ## 一、事实进、结果出
 

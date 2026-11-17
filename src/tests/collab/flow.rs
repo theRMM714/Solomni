@@ -215,9 +215,9 @@ pub(crate) fn discussion_turn_streams_deltas_and_never_leaks_the_envelope() {
         ]),
         seen: Arc::clone(&seen),
     };
-    let mut events: Vec<crate::capabilities::session::api::SessionEvent> = Vec::new();
+    let mut events: Vec<crate::capabilities::conversation::session::api::SessionEvent> = Vec::new();
     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let _ = crate::capabilities::collab::service::discussion::Discussion::turn_with(
+    let _ = crate::capabilities::conversation::collab::service::discussion::Discussion::turn_with(
         &cancel,
         crate::capabilities::llm::api::CompleteOpts::plain(true), // 开流式
         "a",
@@ -231,7 +231,7 @@ pub(crate) fn discussion_turn_streams_deltas_and_never_leaks_the_envelope() {
     let kinds: Vec<String> = events
         .iter()
         .filter_map(|e| match e {
-            crate::capabilities::session::api::SessionEvent::Delta { kind, .. } => {
+            crate::capabilities::conversation::session::api::SessionEvent::Delta { kind, .. } => {
                 Some(kind.clone())
             }
             _ => None,
@@ -246,7 +246,7 @@ pub(crate) fn discussion_turn_streams_deltas_and_never_leaks_the_envelope() {
     let text: String = events
         .iter()
         .filter_map(|e| match e {
-            crate::capabilities::session::api::SessionEvent::Delta { kind, text, .. }
+            crate::capabilities::conversation::session::api::SessionEvent::Delta { kind, text, .. }
                 if kind == "text" =>
             {
                 Some(text.clone())
@@ -374,7 +374,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
     io.seed(&["demo", "work", "note.txt"], "现场：一切正常\n");
     let sb = test_sandbox("核心", &[]);
     let mut verify = MemberTools {
-        face: crate::capabilities::session::api::ToolFace {
+        face: crate::capabilities::conversation::session::api::ToolFace {
             mode: crate::capabilities::llm::api::ToolMode::Envelope,
             role: "orchestrator".to_string(),
             modules: BTreeMap::new(),
@@ -420,7 +420,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         ]),
         seen: Arc::clone(&seen),
     };
-    let out = crate::capabilities::session::api::core_operation(
+    let out = crate::capabilities::conversation::session::api::core_operation(
         &*test_tools_svc(),
         "planner",
         "plan",
@@ -429,8 +429,8 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         &[crate::capabilities::llm::api::Msg::user("出方案")],
         crate::capabilities::llm::api::CompleteOpts::plain(false),
         None,
-        Some(&mut verify as &mut dyn crate::capabilities::session::api::CoreVerify),
-        &mut |_e: crate::capabilities::session::api::SessionEvent| {},
+        Some(&mut verify as &mut dyn crate::capabilities::conversation::session::api::CoreVerify),
+        &mut |_e: crate::capabilities::conversation::session::api::SessionEvent| {},
     )
     .expect("核实之后要能交出方案");
     assert_eq!(out["plan"], "方案");
@@ -455,7 +455,7 @@ pub(crate) fn body_json_is_not_a_core_operation() {
         "{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}"
             .to_string(),
     ]);
-    let out = crate::capabilities::session::api::core_operation(
+    let out = crate::capabilities::conversation::session::api::core_operation(
         &*test_tools_svc(),
         "planner",
         "plan",
@@ -465,7 +465,7 @@ pub(crate) fn body_json_is_not_a_core_operation() {
         crate::capabilities::llm::api::CompleteOpts::plain(false),
         None,
         None,
-        &mut |_e: crate::capabilities::session::api::SessionEvent| {},
+        &mut |_e: crate::capabilities::conversation::session::api::SessionEvent| {},
     );
     let err = out.expect_err("正文 JSON 不是工具调用，该如实报错");
     assert!(err.contains("没有调用 plan"), "{}", err);
@@ -501,7 +501,7 @@ pub(crate) fn core_operation_takes_a_native_structured_call() {
     };
     let rows = Arc::new(Mutex::new(Vec::new()));
     let seen = Arc::clone(&rows);
-    let out = crate::capabilities::session::api::core_operation(
+    let out = crate::capabilities::conversation::session::api::core_operation(
         &*test_tools_svc(),
         "planner",
         "plan",
@@ -511,7 +511,7 @@ pub(crate) fn core_operation_takes_a_native_structured_call() {
         crate::capabilities::llm::api::CompleteOpts::plain(false),
         None,
         None,
-        &mut |e: crate::capabilities::session::api::SessionEvent| {
+        &mut |e: crate::capabilities::conversation::session::api::SessionEvent| {
             seen.lock().expect("锁").push(e);
         },
     )
@@ -521,7 +521,7 @@ pub(crate) fn core_operation_takes_a_native_structured_call() {
     assert!(
         rows.iter().any(|e| matches!(
             e,
-            crate::capabilities::session::api::SessionEvent::Transcript(_)
+            crate::capabilities::conversation::session::api::SessionEvent::Transcript(_)
         )),
         "这一轮的事实要推出去"
     );

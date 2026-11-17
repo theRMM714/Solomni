@@ -55,14 +55,14 @@
 
 ## 三、设计取舍的窄 allow 清单
 
-- 有些 lint 指出的是**有意的设计取舍**，不是没修。这些一律**就近窄 allow + 写清理由**，不允许宽范围放行（`src/capabilities/collab/service/collab.rs`）。下表只列设计取舍类 allow；测试装配用的空实现、字段级 `dead_code` 等不在此列：
+- 有些 lint 指出的是**有意的设计取舍**，不是没修。这些一律**就近窄 allow + 写清理由**，不允许宽范围放行（`src/capabilities/conversation/collab/service/collab.rs`）。下表只列设计取舍类 allow；测试装配用的空实现、字段级 `dead_code` 等不在此列：
 
 | lint | 位置 | 为什么是取舍而不是缺陷 |
 | --- | --- | --- |
-| `too_many_arguments` | `src/capabilities/collab/service/collab.rs` 的 `start`、`src/capabilities/collab/service/slate.rs` 的 `restore`、`src/capabilities/session/domain/session.rs` 的 `new` / `restore`、`src/capabilities/runtime/service/core.rs` 的 `Core::new`、`src/capabilities/work/service/guest_job.rs` 的 `new` | 全是**组合根注入的构造函数**：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读 |
-| `too_many_arguments` | `src/capabilities/session/service.rs` 的 `core_operation`、`src/capabilities/session/service/engine/round.rs` 的 `converse_with`、`src/capabilities/collab/service/discussion.rs` 的 `turn_with`、`src/capabilities/collab/service/synthesis.rs` 的 `Execution::review`、`src/capabilities/session/service/engine/driver.rs` 的 `discussion_turn`、`src/capabilities/collab/service/collab.rs` 的 `judge_clear` / `review_nodes` | 同一组参数（身份 / 工具面 / 通道 / 消息 / 出口 / 对照表 / 重填说明）：它们必须一路透传，收口成参数对象只是把参数挪个地方（`turn_with` 只服务内存测试通道） |
+| `too_many_arguments` | `src/capabilities/conversation/collab/service/collab.rs` 的 `start`、`src/capabilities/conversation/collab/service/slate.rs` 的 `restore`、`src/capabilities/conversation/session/domain/session.rs` 的 `new` / `restore`、`src/capabilities/runtime/service/core.rs` 的 `Core::new`、`src/capabilities/work/service/guest_job.rs` 的 `new` | 全是**组合根注入的构造函数**：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读 |
+| `too_many_arguments` | `src/capabilities/conversation/session/service.rs` 的 `core_operation`、`src/capabilities/conversation/session/service/engine/round.rs` 的 `converse_with`、`src/capabilities/conversation/collab/service/discussion.rs` 的 `turn_with`、`src/capabilities/conversation/collab/service/synthesis.rs` 的 `Execution::review`、`src/capabilities/conversation/session/service/engine/driver.rs` 的 `discussion_turn`、`src/capabilities/conversation/collab/service/collab.rs` 的 `judge_clear` / `review_nodes` | 同一组参数（身份 / 工具面 / 通道 / 消息 / 出口 / 对照表 / 重填说明）：它们必须一路透传，收口成参数对象只是把参数挪个地方（`turn_with` 只服务内存测试通道） |
 | `dead_code` | `src/capabilities/runtime/api.rs` 的 `WorkOps::create_work` / `exists` 与 `TurnOps::is_running` 与 `LogOps::warn` | **入站契约是发布给前端的接口面**：二进制 crate 里暂时没有生产调用点的接口方法会被 `dead_code` 误报（`is_running` 是运行态的**权威查询**——`SessionView.running` 只是事件台对账副本，最终一致；`warn` 供呈现层降级提示） |
-| `dead_code` | `src/capabilities/session/domain/events.rs` 的 `enum SessionEvent` | 事件词汇里的字段**不全在生产路径被读**（例如 `DiscussionDone` 的 `round` / `over_cap` 供呈现层做裁决确认页）；词汇就是线格式，字段随契约保留，删掉会让呈现侧拿不到事实 |
+| `dead_code` | `src/capabilities/conversation/session/domain/events.rs` 的 `enum SessionEvent` | 事件词汇里的字段**不全在生产路径被读**（例如 `DiscussionDone` 的 `round` / `over_cap` 供呈现层做裁决确认页）；词汇就是线格式，字段随契约保留，删掉会让呈现侧拿不到事实 |
 | `dead_code` | `src/kernel/ports.rs` 的 `FenceCase` / `FenceVerdict` / `FenceGate::decide`，`src/capabilities/tools/service/fence.rs` 的 `ToolFenceGate::decide` / `strict_refusal` / `unfenced_note` | 围栏裁决只在 Windows 生效；非 Windows 保留同一执行端口形状（`ProcessRunner::run` 的 `gate` 参数），调用方才不用处处按平台分叉。这些项在 Windows 生产路径使用，只在非 Windows 的 bin 目标没有调用点，`dead_code` 是误报 |
 | `too_many_arguments` | `src/capabilities/turn/service/session.rs` 的 `Turn::new`、`src/capabilities/runtime/service/env.rs` 的 `tools_env` / `build_single` | 会话装配把"这一席的工具面 / 这一场单 agent 会话"一次说全（模块 / 沙箱 / 缺包 / 网络 / 形态 / 角色 / 档位）：`Turn::new` 是组合根注入的构造函数，`env.rs` 两个薄入口签名留原样（调用点零改动、取事实后转调 `turn`）；收口成参数对象只是把参数挪个地方 |
 | `too_many_arguments` | `src/capabilities/turn/service/turn.rs` 的 `single_say` | **测试用同步入口**（`#[cfg(test)]`）：会话 / 文本 / 回合 IO / 取消 / 短暂事件出口 / 登记处 / 探针是同一段语义的同一批输入，收口成参数对象只是把它们挪个位置（同 `continue_flow` 的取舍） |
@@ -78,15 +78,15 @@
 
 | 位置 | 处数 | 为什么必然成立 |
 | --- | --- | --- |
-| `src/capabilities/collab/service/{collab,pump,turn_io}.rs`、`src/capabilities/session/service/engine/round.rs`、`src/capabilities/lifecycle/service/rewind.rs` | 14 | 协作状态机的 `disc` / 任务链 / 工具上下文：进入这段之前刚判过存在，`expect("disc 已确认存在")` 与其后的 `expect("上臂已判存在")` 是同一判断的延续；`rewind.rs` 的两处（`l.get("tool")` 与其后跳过被总结行的同一判断）同理 |
+| `src/capabilities/conversation/collab/service/{collab,pump,turn_io}.rs`、`src/capabilities/conversation/session/service/engine/round.rs`、`src/capabilities/lifecycle/service/rewind.rs` | 14 | 协作状态机的 `disc` / 任务链 / 工具上下文：进入这段之前刚判过存在，`expect("disc 已确认存在")` 与其后的 `expect("上臂已判存在")` 是同一判断的延续；`rewind.rs` 的两处（`l.get("tool")` 与其后跳过被总结行的同一判断）同理 |
 | `src/capabilities/prompt/{domain/prompt.rs,domain/refs.rs,service.rs}` | 4 | 模板变量缺失 = **装配错误**（`prompts/` 或调用方写错），不在用户输入路径上；启动即炸好过渲染出半截文案 |
 | `src/kernel/detail/process.rs` | 3 | `Command` 已声明 `Stdio::piped()`，`child.stdin` / `stdout` / `stderr` 的 `take()` 必为 `Some` |
 | `src/kernel/detail/confine/macos.rs` | 2 | `CString::new` 的两个入参是不含 NUL 的字面量与临时路径 |
 | `src/capabilities/tools/service/systool.rs` | 1 | `pending.get(path)` 的键由上一行同一函数算出 |
-| `src/capabilities/session/service/engine/tools.rs` | 2 | 每个工具调用在上一行都被配对写入了执行结果 |
+| `src/capabilities/conversation/session/service/engine/tools.rs` | 2 | 每个工具调用在上一行都被配对写入了执行结果 |
 | `src/capabilities/residents/service.rs` | 1 | `running.get_mut(&k)` 的键在同一函数内刚查过存在 |
 | `src/capabilities/provision/service.rs` | 3 | 三个待写路径都由同一函数 `join` 出来，必带父目录 |
-| `src/capabilities/session/domain/decisions.rs` | 1 | `queue.pop_front()` 前刚取过队首 |
+| `src/capabilities/conversation/session/domain/decisions.rs` | 1 | `queue.pop_front()` 前刚取过队首 |
 | `src/capabilities/vm/detail/share_virtiofs.rs` | 1 | `children.last_mut()` 前刚 `push` 过 |
 | `src/kernel/detail/procs.rs` | 1 | 起进程启动线程失败即无法继续（进程级不可恢复错误） |
 

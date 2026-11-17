@@ -28,7 +28,7 @@ pub(crate) fn discussion_turn_carries_the_agent_sessions_own_history() {
         seen: Arc::clone(&seen),
     };
     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let turn = crate::capabilities::collab::service::discussion::Discussion::turn_with(
+    let turn = crate::capabilities::conversation::collab::service::discussion::Discussion::turn_with(
         &cancel,
         crate::capabilities::llm::api::CompleteOpts::plain(false),
         "a",
@@ -160,9 +160,9 @@ pub(crate) fn single_mode_accepts_multi_module_agent_and_converses() {
 /// 目的：**落盘策略由会话种类定、判定只有一处**：短暂事件任何会话都不留；系统会话（`#` 开头）一条都不留。
 #[test]
 pub(crate) fn persist_policy_is_decided_by_the_session_kind() {
-    use crate::capabilities::session::api::SessionEvent;
-    use crate::capabilities::session::api::{PersistPolicy, is_system_session};
-    let line = SessionEvent::Transcript(vec![crate::capabilities::session::api::LineView::system(
+    use crate::capabilities::conversation::session::api::SessionEvent;
+    use crate::capabilities::conversation::session::api::{PersistPolicy, is_system_session};
+    let line = SessionEvent::Transcript(vec![crate::capabilities::conversation::session::api::LineView::system(
         "",
         "x".to_string(),
     )]);
@@ -378,15 +378,15 @@ pub(crate) fn node_task_is_a_system_line_but_a_user_message() {
     let events = std::cell::RefCell::new(prefix);
     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
     {
-        let io = crate::capabilities::session::api::TurnIo {
+        let io = crate::capabilities::conversation::session::api::TurnIo {
             llm,
             decisions: None,
             ask: None,
         };
         let mut emit =
-            |ev: crate::capabilities::session::api::SessionEvent| events.borrow_mut().push(ev);
+            |ev: crate::capabilities::conversation::session::api::SessionEvent| events.borrow_mut().push(ev);
         let mut sink =
-            |ev: crate::capabilities::session::api::SessionEvent| events.borrow_mut().push(ev);
+            |ev: crate::capabilities::conversation::session::api::SessionEvent| events.borrow_mut().push(ev);
         session.dispatch_task(&task, &identity, &io, &cancel, &mut emit, &mut sink);
     }
     let events = events.into_inner();
@@ -404,13 +404,13 @@ pub(crate) fn node_task_is_a_system_line_but_a_user_message() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            crate::capabilities::session::api::SessionEvent::Transcript(lines)
+            crate::capabilities::conversation::session::api::SessionEvent::Transcript(lines)
                 if lines.iter().any(|l| l.system && l.task && l.line.contains("把事做完"))
         )),
         "转录行要带 system + task 标记（界面是系统行，不是用户行）"
     );
     // 唯一装配点发出去的请求里至少有一条 user 消息（协议要求）。
-    let msgs = crate::capabilities::session::service::engine::round::assemble(
+    let msgs = crate::capabilities::conversation::session::service::engine::round::assemble(
         "身份",
         None,
         &[],

@@ -5,8 +5,8 @@
 use super::super::builders::*;
 use super::super::prelude::*;
 use crate::capabilities::permission::api::{Effect, PermissionDefaults, ProfileId};
-use crate::capabilities::session::api::{OPT_TOOL_ALLOW, SessionEvent};
-use crate::capabilities::session::service::engine::tools::{ConfirmGate, ToolConfirm, run_batch};
+use crate::capabilities::conversation::session::api::{OPT_TOOL_ALLOW, SessionEvent};
+use crate::capabilities::conversation::session::service::engine::tools::{ConfirmGate, ToolConfirm, run_batch};
 use crate::capabilities::tools::api::ToolBook;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 
@@ -35,7 +35,7 @@ pub(crate) fn sandbox_shell_only_gets_the_private_sandbox_and_runtime_roots() {
     let runner = Arc::new(ShellRunner::new("ok", true));
     let mut mt = member(Arc::clone(&runner));
     mt.face.runtime_roots = vec![abs(&["tc"])];
-    let slot = Arc::new(crate::capabilities::session::api::ShellSlot::default());
+    let slot = Arc::new(crate::capabilities::conversation::session::api::ShellSlot::default());
     mt.shell_live = Some(Arc::clone(&slot));
     let cancel = AtomicBool::new(false);
     let mut sink = |_: SessionEvent| {};
@@ -307,7 +307,7 @@ fn vm_timeout_receipt_gets_cwd_and_elapsed_trailer() {
     let mut mt = member(Arc::clone(&runner));
     mt.face.tier = crate::kernel::api::Tier::Vm;
     mt.face.guest_lease = "lease".to_string();
-    let slot = Arc::new(crate::capabilities::session::api::ShellSlot::default());
+    let slot = Arc::new(crate::capabilities::conversation::session::api::ShellSlot::default());
     mt.shell_live = Some(Arc::clone(&slot));
     let vm = Arc::new(crate::tests::doubles::RecordingVm::default());
     *vm.fenced_result.lock().expect("锁") = Some(ToolOutcome {
@@ -641,7 +641,7 @@ pub(crate) fn ask_without_a_confirming_frontend_is_refused() {
 #[test]
 pub(crate) fn shell_entry_refuses_unparsable_args() {
     use crate::capabilities::permission::api::{Decision, Reach, ReachSet};
-    use crate::capabilities::session::service::engine::tools::{CallGrant, run_shell};
+    use crate::capabilities::conversation::session::service::engine::tools::{CallGrant, run_shell};
     let runner = Arc::new(ShellRunner::new("ok", true));
     let mt = member(Arc::clone(&runner));
     let grant = CallGrant {
@@ -663,7 +663,7 @@ pub(crate) fn shell_entry_refuses_unparsable_args() {
 #[test]
 pub(crate) fn shell_entry_refuses_when_the_declaration_is_missing() {
     use crate::capabilities::permission::api::{Decision, Reach, ReachSet};
-    use crate::capabilities::session::service::engine::tools::{CallGrant, run_shell};
+    use crate::capabilities::conversation::session::service::engine::tools::{CallGrant, run_shell};
     let runner = Arc::new(ShellRunner::new("ok", true));
     let mut mt = member(Arc::clone(&runner));
     mt.face.builtin_tools.remove("shell");

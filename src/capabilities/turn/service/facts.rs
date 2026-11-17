@@ -14,7 +14,7 @@ use crate::capabilities::catalog::packages::api::PackagePlan;
 use crate::capabilities::permission::api::PermissionSet;
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::catalog::registry::api::Registry;
-use crate::capabilities::session::api::{
+use crate::capabilities::conversation::session::api::{
     AgentSession, MemberSpec, SessionEvent, SessionMeta, SingleSpec, WorkspaceGrant, work_root_of,
 };
 use crate::capabilities::turn::service::session::Turn;
@@ -121,7 +121,7 @@ impl Turn {
         net: bool,
         tier: Tier,
         host_plan: &PackagePlan,
-    ) -> crate::capabilities::session::api::MemberEnvParts {
+    ) -> crate::capabilities::conversation::session::api::MemberEnvParts {
         let module_vars: BTreeMap<String, Vec<(String, String)>> = modules
             .iter()
             .map(|m| {
@@ -142,7 +142,7 @@ impl Turn {
                 plan: host_plan,
                 module_vars: &module_vars,
             });
-        crate::capabilities::session::api::MemberEnvParts {
+        crate::capabilities::conversation::session::api::MemberEnvParts {
             fence: menv.fence,
             module_env: menv.module_env,
             runtime_path: menv.runtime_path,
@@ -167,8 +167,8 @@ impl Turn {
         tier: Tier,
         guest_lease: String,
         host_plan: &PackagePlan,
-    ) -> crate::capabilities::session::api::ToolFace {
-        let spec = crate::capabilities::session::api::MemberSpec {
+    ) -> crate::capabilities::conversation::session::api::ToolFace {
+        let spec = crate::capabilities::conversation::session::api::MemberSpec {
             modules,
             sandbox: sb,
             unavailable,
@@ -179,7 +179,7 @@ impl Turn {
             shell: self.shell_slot(&sb.session),
             env: self.member_env(registry, modules, sb, net, tier, host_plan),
         };
-        crate::capabilities::session::api::member_face(&self.session_ports(), &spec)
+        crate::capabilities::conversation::session::api::member_face(&self.session_ports(), &spec)
     }
 
     /// 目的：单 agent 会话的整场装配——取本席事实（含 `env` 派生）、解析形态与预算，交给 `session` 装配。
@@ -221,7 +221,7 @@ impl Turn {
             context: self.context_budget(registry, a.model.as_deref()),
             core_model: registry.core_model(),
         };
-        crate::capabilities::session::api::single_session(&self.session_ports(), &spec)
+        crate::capabilities::conversation::session::api::single_session(&self.session_ports(), &spec)
     }
 
     /// 目的：本会话的上下文预算：窗口按模型现算（缺省用核心默认），阈值与保留百分比来自全局设置。

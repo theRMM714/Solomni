@@ -192,7 +192,7 @@ fn main() {
         root.join(".home").join("settings.yaml"),
         root.join(".home").join("agents.yaml"),
     );
-    let history = capabilities::session::detail::fs_history::FsHistory::new(root.join("session"));
+    let history = capabilities::conversation::session::detail::fs_history::FsHistory::new(root.join("session"));
     let workspace = capabilities::workspace::detail::FsWorkspace::new(root.join("session"));
     let workstore = capabilities::workspace::detail::FsWorkStore::new();
     // 保留名表（内置工具名）由**组合根**问一次工具能力后交进去：清单校验归 workspace，
@@ -612,7 +612,7 @@ fn main() {
     let mut core = capabilities::runtime::service::Core::new(
         root.clone(),
         Box::new(registry),
-        Arc::new(capabilities::session::service::SessionService::new(
+        Arc::new(capabilities::conversation::session::service::SessionService::new(
             Arc::new(history),
         )),
         workspace,

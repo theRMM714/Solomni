@@ -172,7 +172,7 @@ impl Lifecycle {
         let (meta, events) = self.history.load(name)?;
         Ok((
             meta,
-            crate::capabilities::session::api::truncate_events(&events),
+            crate::capabilities::conversation::session::api::truncate_events(&events),
         ))
     }
 

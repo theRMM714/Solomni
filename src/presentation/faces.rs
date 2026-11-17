@@ -6,7 +6,7 @@
 use crate::capabilities::catalog::modules::api::ModulesOps;
 use crate::capabilities::catalog::registry::api::RegistryOps;
 use crate::capabilities::runtime::api::{ActionOps, Handle, LogOps, RuntimeOps};
-use crate::capabilities::session::api::HistoryOps;
+use crate::capabilities::conversation::session::api::HistoryOps;
 use crate::capabilities::turn::api::EventFeed;
 use crate::capabilities::turn::api::TurnOps;
 use crate::capabilities::work::api::WorkOps;

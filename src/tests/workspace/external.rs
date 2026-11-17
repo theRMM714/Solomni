@@ -249,7 +249,7 @@ pub(crate) fn runtime_records_external_workspace_and_rejects_overlap() {
 #[test]
 pub(crate) fn workspace_grant_none_strips_shared_reach() {
     use crate::capabilities::permission::api::{Reach, ScopeMode};
-    use crate::capabilities::session::api::{WorkspaceBinding, WorkspaceGrant};
+    use crate::capabilities::conversation::session::api::{WorkspaceBinding, WorkspaceGrant};
     use crate::capabilities::workspace::detail::FsWorkspace;
     let root = crate::tests::scratch("ws-grant-none");
     let product = root.join("product");
@@ -732,7 +732,7 @@ pub(crate) fn sandboxes_lookup_is_by_agent() {
 /// 目的：授权粒度的落盘写法与解析互逆；不认识的值如实拒绝，不静默落缺省。
 #[test]
 pub(crate) fn workspace_grant_names_round_trip() {
-    use crate::capabilities::session::api::WorkspaceGrant;
+    use crate::capabilities::conversation::session::api::WorkspaceGrant;
     for grant in [
         WorkspaceGrant::None,
         WorkspaceGrant::Session,

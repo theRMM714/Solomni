@@ -97,7 +97,7 @@ pub(crate) fn test_sandbox(
         modules_with_userdata: std::collections::BTreeSet::new(),
         permissions: Default::default(),
         path_codec: None,
-        shared_grant: crate::capabilities::session::api::WorkspaceGrant::Session,
+        shared_grant: crate::capabilities::conversation::session::api::WorkspaceGrant::Session,
     }
 }
 
@@ -110,8 +110,8 @@ pub(crate) fn test_sandbox_readonly(
 }
 
 /// 目的：测试用会话参数：agent 名 + 该 agent 的沙箱（无模块）。身份块由它现渲染。
-pub(crate) fn test_params(agent: &str) -> crate::capabilities::session::api::SessionParams {
-    crate::capabilities::session::api::SessionParams::from_workspace(
+pub(crate) fn test_params(agent: &str) -> crate::capabilities::conversation::session::api::SessionParams {
+    crate::capabilities::conversation::session::api::SessionParams::from_workspace(
         agent,
         &test_sandbox(agent, &[]),
         &[],

@@ -6,7 +6,7 @@
 //! 联动：runtime 与呈现层都从这里取类型；guest 任务的 `run()` 在调用方线程上跑。
 
 use crate::capabilities::catalog::registry::api::AgentMeta;
-use crate::capabilities::session::api::{HistoryView, OptionView, SessionEvent};
+use crate::capabilities::conversation::session::api::{HistoryView, OptionView, SessionEvent};
 use crate::capabilities::vm::api::{ExecPlan, GuestStop, Vm};
 use crate::capabilities::workspace::api::Sandboxes;
 use crate::kernel::api::{SessionId, Tier};
@@ -48,7 +48,7 @@ pub struct WorkSpec {
     /// 约束：只有顶层会话能指定；子会话沿父链继承同一个根。
     pub workspace: Option<std::path::PathBuf>,
     /// 目的：外部工作区的围栏授权粒度（仅顶层且给了 workspace 时有效；缺省 = 逐会话授/撤）。
-    pub workspace_grant: Option<crate::capabilities::session::api::WorkspaceGrant>,
+    pub workspace_grant: Option<crate::capabilities::conversation::session::api::WorkspaceGrant>,
 }
 
 /// 目的：创建工作后的结果：最终实例名（重名已加尾号）、名单，以及**开场事实**。
@@ -311,10 +311,10 @@ pub struct SessionView {
     /// 目的：最近一次模型调用的上下文用量（只对 `Session::Single` 有：single / proxy / agent 子会话）。
     /// 约束：协作主会话没有一条持续发给模型的对话，因此没有这个字段。
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub context: Option<crate::capabilities::session::api::ContextUsage>,
+    pub context: Option<crate::capabilities::conversation::session::api::ContextUsage>,
     /// 目的：最近一次 shell 的运行状态（状态栏卡片）；没跑过 shell 就是 null。
     /// 约束：总是出现（null = 没有）——前端据此清掉回档已经截掉的旧快照。
-    pub shell: Option<crate::capabilities::session::api::ShellLive>,
+    pub shell: Option<crate::capabilities::conversation::session::api::ShellLive>,
     /// 目的：外部工作区根；None = 产品内布局。界面据此显示“删除只删记录”、工作区标记。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<String>,
@@ -441,7 +441,7 @@ pub(crate) struct ProxySeed<'a> {
     /// 目的：权威档的授权粒度。
     pub(crate) profile: crate::capabilities::permission::api::ProfileId,
     /// 目的：外部工作区绑定（已解析，不是原始路径）。
-    pub(crate) workspace: Option<crate::capabilities::session::api::WorkspaceBinding>,
+    pub(crate) workspace: Option<crate::capabilities::conversation::session::api::WorkspaceBinding>,
 }
 
 /// 目的：工作的入站契约：建工作、会话配置与编辑、文件与提交历史，以及运行报告与核心推荐。

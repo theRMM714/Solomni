@@ -8,7 +8,7 @@ use super::super::doubles::{collab_work, module_of};
 use super::super::gated_ops;
 use crate::capabilities::runtime::api::Output;
 use crate::capabilities::runtime::api::SessionEvent;
-use crate::capabilities::session::api::OPT_BEGIN;
+use crate::capabilities::conversation::session::api::OPT_BEGIN;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
