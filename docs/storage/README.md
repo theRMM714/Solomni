@@ -2,7 +2,7 @@
 
 > 定位：可回收缓存的盘点、预算、自动 / 手动回收与显式清理；虚拟根还原入口。
 > 效力：规范｜核对：2026-11-04｜依据：`src/capabilities/maintenance/storage/api.rs`
-> 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九；设置字段见 [REGISTRY_SPEC.md](../../REGISTRY_SPEC.md)。
+> 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)；设置字段见 [REGISTRY_SPEC.md](../../REGISTRY_SPEC.md)。
 
 ## 管什么 / 不管什么
 

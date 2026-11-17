@@ -2,7 +2,7 @@
 
 > 定位：argv → 入站能力面 → 渲染事件流。
 > 效力：规范｜核对：2026-11-15｜依据：`src/presentation/cli.rs`
-> 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [ARCHITECTURE.md](../../../ARCHITECTURE.md) §一，业务边界判据见 §九，测试规范见 [TESTING.md](../../../TESTING.md)。
+> 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../../architecture/layers.md)，业务边界判据见 [boundaries.md](../../architecture/boundaries.md)，测试规范见 [TESTING.md](../../../TESTING.md)。
 
 ## 管什么 / 不管什么
 

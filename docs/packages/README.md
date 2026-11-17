@@ -2,7 +2,7 @@
 
 > 定位：运行包契约、包库扫描、目标筛选与选包计划。
 > 效力：规范｜核对：2026-11-04｜依据：`src/capabilities/catalog/packages/api.rs`
-> 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；作者契约见 [RUNTIME_SPEC.md](../../RUNTIME_SPEC.md)，分层与业务边界见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §九。
+> 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；作者契约见 [RUNTIME_SPEC.md](../../RUNTIME_SPEC.md)，分层与业务边界见 [boundaries.md](../architecture/boundaries.md)。
 
 ## 管什么 / 不管什么
 

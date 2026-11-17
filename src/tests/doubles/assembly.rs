@@ -117,7 +117,7 @@ pub(crate) fn test_modules_store(
     )
 }
 
-/// 目的：登记一个 agent（测试装配用）：**校验用的模块清单由调用方取一份**交给登记处——清单归 modules，登记处只认事实（见 ARCHITECTURE.md §九.3）。
+/// 目的：登记一个 agent（测试装配用）：**校验用的模块清单由调用方取一份**交给登记处——清单归 modules，登记处只认事实（见 docs/architecture/boundaries.md 的「三分法」）。
 pub(crate) fn agent_upsert(
     core: &mut Core,
     name: &str,

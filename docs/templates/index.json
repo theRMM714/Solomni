@@ -4,15 +4,16 @@
     "portal": {
       "file": "portal.md",
       "globs": [
+        "ARCHITECTURE.md",
         "SYSTOOL.md",
         "docs/README.md",
-        "docs/testing/README.md"
+        "docs/testing/README.md",
+        "docs/architecture/README.md"
       ]
     },
     "spec": {
       "file": "spec.md",
       "globs": [
-        "ARCHITECTURE.md",
         "PRODUCT.md",
         "PHILOSOPHY.md",
         "TESTING.md",
@@ -29,7 +30,12 @@
         "docs/session/session-model.md",
         "docs/tools/tools-and-roles.md",
         "docs/workflow/docs-audit.md",
-        "docs/rust-dev.md"
+        "docs/architecture/layers.md",
+        "docs/architecture/ports.md",
+        "docs/architecture/state.md",
+        "docs/architecture/boundaries.md",
+        "docs/architecture/comments.md",
+        "docs/architecture/rust-dev.md"
       ]
     },
     "reference": {

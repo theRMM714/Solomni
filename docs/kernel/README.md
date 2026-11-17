@@ -2,7 +2,7 @@
 
 > 定位：没有领域语义的机制库；不是层，是依赖图最底层的地基。
 > 效力：规范｜核对：2026-11-13｜依据：`src/kernel/api.rs`
-> 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九，测试规范见 [TESTING.md](../../TESTING.md)。
+> 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
 
@@ -147,7 +147,7 @@
 
 ## 改动本单元时必须同步
 
-- 共享形状（R6）一改，所有使用者同改；路径拼接规则见 `ARCHITECTURE.md` §八（禁止把分隔符写进字符串）。
+- 共享形状（R6）一改，所有使用者同改；路径拼接规则见 `docs/architecture/rust-dev.md` 的「跨平台机制」（禁止把分隔符写进字符串）。
 - 平台专属代码本地不编译——`FenceSpec` 字面量必须写全字段（跨平台字面量门禁，`src/kernel/contracts/fence.rs`）；改围栏 → `tests/<平台>/` 探针。
 - 围栏的写后核对、回滚与台账在 `src/kernel/detail/confine/windows/`：改落点形状（`GrantTarget`）或台账字段时，`prepare_fence` / `release_fence` / `clean` / `clean_all` / `sweep_orphan_aces` 与按条处置（`catalog` / `restore_one` / `revoke_grant` / `remove_profile_one`）要一起改。
 - `clean` 与 `clean_all` 的分工：前者默认只撤按次 / 会话授权与 profile，保留 `scope=machine` 条目（测试每轮收尾不重写祖先 ACE）；后者连机器级一起撤，是 `--fence-clean` 的入口。带机器级授权的路径不能按快照整体还原（会把机器级 ACE 一起抹掉），这些路径上的按次 ACE 走逐条精确撤销。

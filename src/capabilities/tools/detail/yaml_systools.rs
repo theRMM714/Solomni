@@ -1,7 +1,7 @@
 //! 目的：系统工具、角色与布局保留名的装配输入——`systools/tools.yaml`（工具是什么）+ `systools/roles.yaml`（身份有什么）+ `systools/names.yaml`（布局保留名）。
 //! 管：从目录读三份 yaml 并反序列化成 `ToolBook` / `RoleTable` / 保留名；缺目录 / 缺文件如实报错，不静默造默认。
 //! 不管：表本体与校验规则（在 `domain`）；装配（在入口层组合根）。
-//! 联动：实现 `ports::SystoolsSource`；它属于工具能力（放提示词能力会让 `prompt → tools` 成环，见 ARCHITECTURE.md §一）。
+//! 联动：实现 `ports::SystoolsSource`；它属于工具能力（放提示词能力会让 `prompt → tools` 成环，见 docs/architecture/layers.md）。
 
 use crate::capabilities::tools::api::{RoleTable, SystemTools, ToolBook};
 use crate::capabilities::tools::ports::SystoolsSource;

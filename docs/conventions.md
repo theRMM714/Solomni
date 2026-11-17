@@ -10,8 +10,8 @@
 ## 一、两层文档
 
 - **根门户**（`README.md`、`ARCHITECTURE.md` 等）只写「这份文档管什么、要做事时读哪一份」，不复述细则正文；例外是 `AGENTS.md`，它承载始终生效的约束与任务受理流程，本身即权威。
-- **细则**在 `docs/<子业务>/`：每个业务子业务与机制单元各一个目录（业务单元本身不另建目录，由 `ARCHITECTURE.md` 的分层表与 `docs/README.md` 索引归纳），目录里的 `README.md` 是唯一入口，`unit-map.md` 是逐文件职责（T0 机器比对）。
-- 不属任何单元的横向内容按事项分：测试与质量在 `docs/testing/`，任务受理与开工在 [../AGENTS.md](../AGENTS.md) 的「六、请求受理」，单 / 多 agent 与文档审计细则在 `workflow/` 目录，文档约定与术语在本文，Rust 源码规范在 [rust-dev.md](rust-dev.md)。
+- **细则**在 `docs/<子业务>/`：每个业务子业务与机制单元各一个目录（业务单元本身不另建目录，由 `docs/architecture/layers.md` 的分层表与 `docs/README.md` 索引归纳），目录里的 `README.md` 是唯一入口，`unit-map.md` 是逐文件职责（T0 机器比对）。
+- 不属任何单元的横向内容按事项分：测试与质量在 `docs/testing/`，任务受理与开工在 [../AGENTS.md](../AGENTS.md) 的「六、请求受理」，单 / 多 agent 与文档审计细则在 `workflow/` 目录，文档约定与术语在本文，Rust 源码规范在 [architecture/rust-dev.md](architecture/rust-dev.md)。
 - 只有任务引入新的长期领域且现有文档无法承载时，才建新专项文档；不为单次任务创建无长期价值的文档。
 - 细则之间用相对路径互引；门户用 `docs/<领域>/<文件>.md` 引用细则。同一个事实只有一份权威。
 
@@ -40,7 +40,7 @@
 | 发言与行动的主体 | **agent** | 智能体、AI、模型（模型是 agent 用到的东西） |
 | 能力的载体（一个文件夹 = 提示词 + 工具 + 工作区） | **模块**（方向性叙述里可以说"应用 / app"） | 插件、技能、skill |
 | 代码里按边界切分的一块（业务单元、地基库、根（入口层）、呈现层各算一个；业务单元即 `src/capabilities/<单元>/`，与 `layers.yaml` 一行对应） | **单元**（unit） | 模块、组件 |
-| 业务边界（`src/capabilities/<单元>/<子业务>/`；独立业务的判据见 `ARCHITECTURE.md` §九） | **子业务**（能力 / capability） | 业务模块、模块 |
+| 业务边界（`src/capabilities/<单元>/<子业务>/`；独立业务的判据见 `docs/architecture/boundaries.md`） | **子业务**（能力 / capability） | 业务模块、模块 |
 | 一次任务里"用谁、怎么组合、谁拍板" | **形态**（single / collab / proxy） | 模式、架构、拓扑 |
 | 一次运行与它的落盘单元 | **会话**（session） | 对话、聊天 |
 | 挂在父会话 `children/` 下的会话 | **子会话**（强调"它是一场完整工作"时可写**子工作**） | 子 agent、子任务 |
@@ -59,7 +59,7 @@
 ## 四、引用格式
 
 - 引用一律用**文件 + 标题**（例如 `docs/session/session-model.md` 的「会话参数与对话分开」），不写深层节号（`§三之二` 这类会随节序失效）。
-- 顶层节号（`ARCHITECTURE.md` 的 §一 / §九）是稳定锚点，允许。
+- 引用写「文件 + 标题」；`docs/architecture/` 各细则的顶层节号（「一、…」这类）也可作锚点，不写深层节号。
 - 链接按所在文件解析：根门户写 `docs/<...>`，`docs/` 内部写同级或 `../` 相对路径。
 
 ## 五、文档模板与效力行

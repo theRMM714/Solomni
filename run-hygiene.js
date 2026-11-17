@@ -4,7 +4,7 @@
  * 卫生回答"仓库里还欠多少、挂在谁身上"。存量是历史累积，必然存在，所以它只报，不拦；本工具只读，不写任何文件。
  *
  * 三类：
- * - 注释契约（ARCHITECTURE.md 十）：按 文件 × 规则报告；门禁另跑同一判定并零容忍。
+ * - 注释契约（docs/architecture/comments.md）：按 文件 × 规则报告；门禁另跑同一判定并零容忍。
  * - 内容卫生（只报）：悬挂的缺口 id（已删 id 从 git 历史取）、文档里指向不存在的 src 路径、引用的根文档不存在。
  * - 语义卫生（只报）：全仓 Markdown 正文与源码 / 配置 / 脚本注释里的历史或待办措辞；不进 T0，
  *   只把可疑行列出来让人判断。`hygiene-ignore` 可显式跳过确认过的行。
@@ -54,7 +54,7 @@ function rsFiles(dir, out) {
   return out;
 }
 
-/** 注释契约（ARCHITECTURE.md 十）：返回 { findings: [{file, line, rule}], byFileRule: {file: [rule]} }。
+/** 注释契约（docs/architecture/comments.md）：返回 { findings: [{file, line, rule}], byFileRule: {file: [rule]} }。
  *  门禁与卫生工具共用这一份判定——判定只有一处。 */
 /** 目的：按行扫 Rust 源码的「字面量 / 注释」状态，供注释契约判定用。
  *  管：真块注释出现在哪一行、哪些行是真正的行注释（行首 // 且不在多行字面量里）。
@@ -677,7 +677,7 @@ function main() {
     cur.files.add(f.file);
     byRule.set(f.rule, cur);
   }
-  lines.push("== 注释契约（ARCHITECTURE.md 十，门禁零容忍）" + scope + " ==");
+  lines.push("== 注释契约（docs/architecture/comments.md，门禁零容忍）" + scope + " ==");
   lines.push("合计 " + findings.length + " 处，涉及 " + Object.keys(by).length + " 个文件：");
   for (const [rule, v] of [...byRule.entries()].sort((a, b) => b[1].count - a[1].count)) {
     lines.push("  " + String(v.count).padStart(5) + " 处  " + String(v.files.size).padStart(4) + " 个文件  " + rule);

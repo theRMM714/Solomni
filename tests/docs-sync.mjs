@@ -112,7 +112,7 @@ const TARGETS = [
   { file: "docs/vm/README.md", marker: "platform-status", source: "platform-status", lang: "zh" },
   { file: "docs/testing/levels.md", marker: "gate-steps", source: "gate-steps" },
   { file: "docs/testing/execution-ci.md", marker: "success-markers", source: "success-markers" },
-  { file: "ARCHITECTURE.md", marker: "layer-table", source: "layer-table" },
+  { file: "docs/architecture/layers.md", marker: "layer-table", source: "layer-table" },
 ];
 
 function render(target, payload) {

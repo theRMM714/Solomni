@@ -1,7 +1,7 @@
 //! 目的：业务能力清单——按业务功能垂直切分的一等公民模块声明。
 //! 管：各能力模块根的声明；每个能力自带 api / ports / domain / detail 四分区。
 //! 不管：能力内部实现与跨能力契约（在各能力 api / domain）；依赖方向由 T0 结构审查判定（零豁免：实际违规即失败）。
-//! 联动：src/main.rs 组合根装配这些能力；runtime 与其它能力平级、只经各能力 api 编排（ARCHITECTURE.md §九）。
+//! 联动：src/main.rs 组合根装配这些能力；runtime 与其它能力平级、只经各能力 api 编排（docs/architecture/boundaries.md）。
 
 pub mod catalog;
 pub mod conversation;

@@ -1,11 +1,11 @@
 # 文档索引
 
 > 定位：`docs/` 的细则索引：业务子业务与机制单元各一个目录（`README.md` 是入口、`unit-map.md` 是逐文件职责），业务单元按分层表归并到子业务，根门户是 `AGENTS.md`。
-> 效力：索引｜核对：2026-11-14
+> 效力：索引｜核对：2026-11-17
 
 ## 单元
 
-业务层两级：**单元**（归层与门禁的单位，见 [ARCHITECTURE.md](../ARCHITECTURE.md) 分层表）与单元内的**子业务**（细则目录与测试文件按子业务走）。第一列写成「单元：子业务」。
+业务层两级：**单元**（归层与门禁的单位，见 [architecture/layers.md](architecture/layers.md) 的分层表）与单元内的**子业务**（细则目录与测试文件按子业务走）。第一列写成「单元：子业务」。
 
 | 要找什么 | 读哪一份 |
 | --- | --- |
@@ -59,7 +59,7 @@
 | 多 agent：开工、派发、worktree、逐片 squash 集成、收口 | [workflow/multi-agent.md](workflow/multi-agent.md) |
 | 用户启动文档审计 / 治理（检查、修改、验收） | [workflow/docs-audit.md](workflow/docs-audit.md) |
 | 文档分层、同步表、术语、引用格式 | [conventions.md](conventions.md) |
-| Rust 源码布局、格式与静态检查、unsafe、依赖 | [rust-dev.md](rust-dev.md) |
+| Rust 源码布局、格式与静态检查、unsafe、依赖 | [architecture/rust-dev.md](architecture/rust-dev.md) |
 
 ## 改动时必须同步
 

@@ -7,7 +7,7 @@ use super::*;
 
 /// 目的：**应用服务**：持有注入的端口、能力面与会话中心；入口与呈现层拿不到它（只拿 `presentation::faces::Faces`）。
 ///  组合根在 `Handle::spawn` 里把它**移进核心自己的执行线程**——此后状态只被那一个线程碰，
-///  所以这里不加任何锁（并发不变式见 ARCHITECTURE.md §一）。
+///  所以这里不加任何锁（并发不变式见 docs/architecture/layers.md）。
 pub struct Core {
     /// 目的：登记处能力（**四份 yaml 的状态在它里面**）——runtime 只按 `Registry` 调用，看不见它的字段。
     pub(crate) registry: Box<dyn Registry>,

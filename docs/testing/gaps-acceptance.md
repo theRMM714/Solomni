@@ -105,7 +105,7 @@ tests/
 
 ## 三、给开发者与 agent 的工作方法
 
-1. 先阅读 [TESTING.md](../../TESTING.md)（门户与路由）、[ARCHITECTURE.md](../../ARCHITECTURE.md) 和相关模块契约。
+1. 先阅读 [TESTING.md](../../TESTING.md)（门户与路由）、[architecture/README.md](../architecture/README.md) 和相关模块契约。
 2. 先判断测试属于 T0-T5 哪一类，不要把质量检查写成业务测试。
 3. 优先用工具取得事实：运行入口、查看报告、检查日志和 `gaps.yaml`。
 4. 纯逻辑先写 T1；端口替身和真实适配器补 T2；真实边界补 T3；平台机制补 T4；完整旅程补 T5。

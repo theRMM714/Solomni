@@ -5,7 +5,7 @@
 
 > 本文是 **entry** 逐文件职责的唯一权威；由 `node run-tests.js` 的 T0 结构审查与磁盘**双向比对**
 > （表里每个路径必须存在；`src/` 下每个 `.rs` 都必须出现在某一张单元地图里）。
-> 分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九；单元划分与文档路由见 [AGENTS.md](../../AGENTS.md)。
+> 分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)；单元划分与文档路由见 [AGENTS.md](../../AGENTS.md)。
 
 > 根（组合根 / 内部协议探针 / 守门进程）+ 根共用机制。只有程序入口能用它，**任何能力都不许依赖它**（门禁判定）；
 > 它依赖所有人，**任何人都不许依赖它**。启动、探针、守门三个入口各司其职，互不借用；共用装配只在 `src/entry/assembly.rs`。

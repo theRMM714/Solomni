@@ -5,7 +5,7 @@
 
 > 本文是 **turn** 逐文件职责的唯一权威；由 `node run-tests.js` 的 T0 结构审查与磁盘**双向比对**
 > （表里每个路径必须存在；`src/` 下每个 `.rs` 都必须出现在某一张单元地图里）。
-> 分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九；单元划分与文档路由见 [AGENTS.md](../../AGENTS.md)。
+> 分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)；单元划分与文档路由见 [AGENTS.md](../../AGENTS.md)。
 
 > 它是**回合状态的唯一持有者**：会话在世表、运行态与创建占位、每会话的裁决队与 shell 活进程槽都只有这里增删，
 > 别的业务经 `api` 取用。会话本体（`Turn`）、一席的装配材料、**回合推进与生成驱动**、协作链、事件台与逐轮落盘也在这里收拢：

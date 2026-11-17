@@ -5,7 +5,7 @@
 
 ## 适用与判据
 - 写或验收测试替身、新增端口时以本文为准（`docs/testing/doubles.md`）。
-- 本文不复述架构与模块契约：`ARCHITECTURE.md` 只规定端口必须可注入，`MODULE_SPEC.md` 只规定模块作者要交付什么。
+- 本文不复述架构与模块契约：[../architecture/ports.md](../architecture/ports.md) 只规定端口必须可注入，`MODULE_SPEC.md` 只规定模块作者要交付什么。
 - 违反由 `src/tests/ports.rs` / `src/tests/fakes.rs` 的契约测试判定。
 
 ## 一、测试替身规范
@@ -176,6 +176,6 @@
 ## 路由
 - 测试层级与判定：[levels.md](levels.md)
 - 测试门户：[../../TESTING.md](../../TESTING.md)
-- 架构约束：[../../ARCHITECTURE.md](../../ARCHITECTURE.md)
+- 架构约束：[../architecture/README.md](../architecture/README.md)
 - 模块契约：[../../MODULE_SPEC.md](../../MODULE_SPEC.md)
 - 内核单元地图：[../kernel/unit-map.md](../kernel/unit-map.md)

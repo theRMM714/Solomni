@@ -47,7 +47,7 @@ pub trait RuntimeOps: Send + Sync {
 }
 
 /// 目的：日志能力：呈现层与 CLI 的埋点入口（**只转发，不做任何判定**）。
-///   呈现层因此拿不到端口对象、也不依赖 kernel（见 ARCHITECTURE.md §一）。
+///   呈现层因此拿不到端口对象、也不依赖 kernel（见 docs/architecture/layers.md）。
 pub trait LogOps: Send + Sync {
     fn info(&self, at: &str, msg: &str);
     // 入口契约发布给前端的三个级别；warn 暂无调用点（呈现层的降级提示走它），先留着这一格。

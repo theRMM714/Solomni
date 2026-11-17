@@ -2,7 +2,7 @@
 
 > 定位：回合状态的唯一持有者——会话在世表、运行态与创建占位、每会话的裁决队与 shell 活进程槽；会话本体、准入与重建、一席的装配材料，以及回合推进、生成驱动、协作链、事件台与逐轮落盘也在这里收拢。
 > 效力：规范｜核对：2026-11-16｜依据：`src/capabilities/turn/turn/api.rs`
-> 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九，测试规范见 [TESTING.md](../../TESTING.md)。
+> 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
 

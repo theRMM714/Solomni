@@ -4,7 +4,7 @@
 > 效力：契约｜核对：2026-11-16｜依据：`src/presentation.rs`
 
 > 本文是 **presentation** 根级文件的逐文件职责；两个渠道内部的逐文件职责见 [`docs/presentation/cli/unit-map.md`](cli/unit-map.md) 与 [`docs/presentation/web/unit-map.md`](web/unit-map.md)。
-> 分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九；文档路由见 [AGENTS.md](../../AGENTS.md)。
+> 分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)；文档路由见 [AGENTS.md](../../AGENTS.md)。
 
 | 文件 | 职责 |
 | --- | --- |

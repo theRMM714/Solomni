@@ -20,7 +20,7 @@
 
 - 经 `::api` 用到：`runtime`（`RuntimeOps` / `ActionOps` / `LogOps`）、`work`（`WorkOps`）、`turn`（`TurnOps`）、`modules` / `registry` / `vm`（经 `Faces` 字段）。
 - 谁在用我：（无——流程终点，没有下游业务依赖本层）
-- 分层依据：见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一（`cli/` + `web/` 一行）。
+- 分层依据：见 [layers.md](../architecture/layers.md)（`cli/` + `web/` 一行）。
 
 ## 一、它不是业务能力
 
