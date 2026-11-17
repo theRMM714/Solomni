@@ -166,13 +166,9 @@ impl Handle {
                         .into_iter()
                         .next()
                         .ok_or_else(|| format!("agents[{}]：agent {} 不在登记处", i, want))?;
-                    agents.push(AgentMeta {
-                        name: v.name,
-                        transient: false,
-                        modules: v.modules,
-                        model: v.model,
-                        chara: v.chara,
-                    });
+                    agents.push(AgentMeta::normalized(
+                        v.name, v.modules, v.model, v.chara, false,
+                    ));
                     continue;
                 }
                 let name = obj
@@ -208,13 +204,9 @@ impl Handle {
                     .unwrap_or("")
                     .trim()
                     .to_string();
-                agents.push(AgentMeta {
-                    name,
-                    transient,
-                    modules,
-                    model,
-                    chara,
-                });
+                agents.push(AgentMeta::normalized(
+                    name, modules, model, chara, transient,
+                ));
             }
         }
         Ok(d::NewSession {

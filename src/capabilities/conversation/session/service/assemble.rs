@@ -273,10 +273,13 @@ pub fn single_session(
         ports.prompt.text(Segment::CompactPrompt).to_string(),
     );
     // 自动压缩的预算按**这个 agent 的模型**窗口算（见 session/session-model.md 六）。
-    let (window, percent, keep_percent) = spec.context;
-    s.set_context_budget(window, percent, keep_percent);
-    s.set_model(a.model.clone().or_else(|| spec.core_model.clone()));
-    s.set_compact_factory(Arc::clone(&ports.compact));
+    apply_knobs(
+        &mut s,
+        spec.context,
+        a.model.clone().or_else(|| spec.core_model.clone()),
+        &ports.compact,
+        None,
+    );
     (s, Vec::new())
 }
 
@@ -301,11 +304,13 @@ pub fn rebuild_single(ports: &SessionPorts, spec: RebuildSpec<'_>) -> AgentSessi
         ports.prompt.text(Segment::CompactPrompt).to_string(),
     );
     // 重建也要恢复上下文预算与最近一次用量：否则重启后自动压缩与状态栏都失忆。
-    let (window, percent, keep_percent) = spec.context;
-    s.set_context_budget(window, percent, keep_percent);
-    s.set_model(spec.model);
-    s.set_compact_factory(Arc::clone(&ports.compact));
-    s.set_context_freshness(spec.freshness);
+    apply_knobs(
+        &mut s,
+        spec.context,
+        spec.model,
+        &ports.compact,
+        Some(spec.freshness),
+    );
     for (body, fact) in spec.reads {
         s.note_read_at(body, fact);
     }
@@ -325,10 +330,30 @@ pub fn proxy_session(ports: &SessionPorts, spec: ProxySpec<'_>) -> AgentSession 
         Some(tools),
         ports.prompt.text(Segment::CompactPrompt).to_string(),
     );
-    let (window, percent, keep_percent) = spec.context;
-    s.set_context_budget(window, percent, keep_percent);
-    s.set_context_freshness(spec.freshness);
-    s.set_model(spec.model);
-    s.set_compact_factory(Arc::clone(&ports.compact));
+    apply_knobs(
+        &mut s,
+        spec.context,
+        spec.model,
+        &ports.compact,
+        Some(spec.freshness),
+    );
     s
+}
+
+/// 目的：三处整场装配共用的会话参数尾巴：上下文预算、模型、压缩工厂（新鲜度只有重建与代理要恢复）。
+/// 约束：只设参数，不碰转录；顺序保持"先预算、后模型"——预算的上限由模型决定。
+fn apply_knobs(
+    s: &mut AgentSession,
+    context: (u64, u8, u8),
+    model: Option<String>,
+    compact: &Arc<dyn CompactChatFactory>,
+    freshness: Option<bool>,
+) {
+    let (window, percent, keep_percent) = context;
+    s.set_context_budget(window, percent, keep_percent);
+    s.set_model(model);
+    s.set_compact_factory(Arc::clone(compact));
+    if let Some(on) = freshness {
+        s.set_context_freshness(on);
+    }
 }

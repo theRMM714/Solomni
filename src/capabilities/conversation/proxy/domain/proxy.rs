@@ -489,7 +489,7 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
     }
     let mut resolved: Vec<AgentMeta> = Vec::new();
     for (i, a) in agents.into_iter().enumerate() {
-        let (name, mut modules, model, chara, transient) = if a.reuse {
+        let (name, modules, model, chara, transient) = if a.reuse {
             let fact = catalog
                 .agents
                 .iter()
@@ -543,19 +543,9 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
         };
         crate::capabilities::catalog::registry::api::validate_name(&name)
             .map_err(|e| format!("agents[{}] 的名字不合法：{}", i, e))?;
-        let mut unique: Vec<String> = Vec::new();
-        for id in modules.drain(..) {
-            if !unique.contains(&id) {
-                unique.push(id);
-            }
-        }
-        resolved.push(AgentMeta {
-            name,
-            transient,
-            modules: unique,
-            model,
-            chara,
-        });
+        resolved.push(AgentMeta::normalized(
+            name, modules, model, chara, transient,
+        ));
     }
     let permission = args
         .permission
