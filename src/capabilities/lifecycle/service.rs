@@ -15,7 +15,7 @@ use crate::capabilities::conversation::session::api::{
     History, HistoryView, SessionMeta, guest_scope, subtree_of, tree_order,
 };
 use crate::capabilities::tools::api::ToolExec;
-use crate::capabilities::turn::api::{Session, Turn};
+use crate::capabilities::turn::turn::api::{Session, Turn};
 use crate::capabilities::vm::api::Vm;
 use crate::capabilities::workspace::api::Workspace;
 use crate::kernel::ports::Log;

@@ -19,9 +19,9 @@ pub use crate::capabilities::conversation::session::api::SessionEvent;
 #[allow(unused_imports)]
 pub use crate::capabilities::conversation::session::api::{DecisionCard, DecisionQueue, DecisionWaiter};
 /// 目的：回合推进自用的协作态：门面重导出，契约测试的既有路径不必改。
-pub(crate) use crate::capabilities::turn::api::CollabWork;
+pub(crate) use crate::capabilities::turn::turn::api::CollabWork;
 /// 目的：命令回包（事件台头部序号）、事件台与生成输出方式。
-pub use crate::capabilities::turn::api::{Advance, Events, Output};
+pub use crate::capabilities::turn::turn::api::{Advance, Events, Output};
 /// 目的：会话视图：启用后要交给界面的那一份（工作与会话配置的词汇归 `work::api`）。
 pub use crate::capabilities::work::api::SessionView;
 /// 目的：运行档（本机档 / 虚拟机档）的词汇。

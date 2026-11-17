@@ -5,7 +5,7 @@
 
 use crate::capabilities::conversation::collab::api::AfterTurn;
 use crate::capabilities::conversation::session::api::SessionEvent;
-use crate::capabilities::turn::api::{Advance, AskReq, CollabWork, TurnHost};
+use crate::capabilities::turn::turn::api::{Advance, AskReq, CollabWork, TurnHost};
 
 /// 目的：协作的长步骤（开始讨论 / 回答 / 继续）：与单 agent 同一条 own-and-return—— 队列只占"取/交"两步，泵在工作线程上跑；事件**边产边送**事件台，界面因此能看着讨论推进。  **核心驱动**（见 docs/session/session-model.md 二之二）：泵只决定"该问谁"， 成员回合由主线程取该 agent 的会话去跑（它才拿得到那些会话）。所以泵线程与主线程**握手**： 泵让出 → 发 AskReq → 主线程跑完回 MemberTurn → 泵继续。
 pub(crate) fn collab_generation<H: TurnHost>(

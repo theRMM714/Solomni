@@ -59,7 +59,7 @@ impl Work {
             tier_locked: meta.parent.is_some(),
             guest: meta.exec.guest.clone(),
             guests: self.provision.guest_bases()?,
-            net: crate::capabilities::env::api::network_allowed(registry.app()),
+            net: crate::capabilities::turn::env::api::network_allowed(registry.app()),
             permission: self.permission_view(turn, registry, &meta)?,
             thinking: self.thinking_view_for_root(
                 registry,
@@ -272,7 +272,7 @@ impl Work {
             &session_modules,
             &missing,
             spec.guest.as_deref(),
-            crate::capabilities::env::api::network_allowed(registry.app()),
+            crate::capabilities::turn::env::api::network_allowed(registry.app()),
         )?;
 
         let mut new_meta = meta.clone();
@@ -493,7 +493,7 @@ impl Work {
             "mode": meta.mode,
             "tier": meta.exec.tier.as_str(),
             "guest": meta.exec.guest,
-            "net": crate::capabilities::env::api::network_allowed(registry.app()),
+            "net": crate::capabilities::turn::env::api::network_allowed(registry.app()),
             "pins": meta.exec.pins,
             "thinking": meta.thinking,
             "context_freshness": meta.context_freshness,

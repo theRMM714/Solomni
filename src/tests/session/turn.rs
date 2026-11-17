@@ -360,7 +360,7 @@ pub(crate) fn node_task_is_a_system_line_but_a_user_message() {
             core.probe.as_ref(),
         )
         .expect("准备节点回合");
-    let crate::capabilities::turn::api::Prepared::Run {
+    let crate::capabilities::turn::turn::api::Prepared::Run {
         session,
         identity,
         prefix,

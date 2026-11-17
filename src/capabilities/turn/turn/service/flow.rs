@@ -13,7 +13,7 @@ use crate::capabilities::conversation::session::api::{
     Answered, DecisionQueue, GateTicket, RunState, SessionEvent, SessionMeta, TurnIo, flat_modules,
     work_root,
 };
-use crate::capabilities::turn::api::{Prepared, RestoreRequest, Session};
+use crate::capabilities::turn::turn::api::{Prepared, RestoreRequest, Session};
 use crate::kernel::ports::HostProbe;
 
 use super::session::Turn;

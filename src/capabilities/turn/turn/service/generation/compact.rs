@@ -4,7 +4,7 @@
 //! 联动：`turn::api::TurnHost`、capabilities/collab
 
 use crate::capabilities::conversation::session::api::SessionEvent;
-use crate::capabilities::turn::api::{Advance, TurnHost};
+use crate::capabilities::turn::turn::api::{Advance, TurnHost};
 
 /// 目的：手动压缩（`/compact`）：**让 AI 自己压**——核心只给 compact 工具，不是系统替它总结。 与单 agent 同一条 own-and-return：队列只占"取/交"，模型调用在工作线程上（界面不被阻塞）。 压不动就**如实说**（通知 + 继续用完整上下文），不静默降级、不假装压过。
 pub(crate) fn compact<H: TurnHost>(host: &H, sid: &str) -> Result<Advance, String> {

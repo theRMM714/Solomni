@@ -5,8 +5,8 @@
 
 use crate::capabilities::catalog::registry::api::Registry;
 use crate::capabilities::conversation::session::api::{RunState, SessionMeta, subtree_of, truncate_events};
-use crate::capabilities::turn::api::Session;
-use crate::capabilities::turn::service::session::Turn;
+use crate::capabilities::turn::turn::api::Session;
+use crate::capabilities::turn::turn::service::session::Turn;
 use crate::kernel::ports::HostProbe;
 
 impl Turn {

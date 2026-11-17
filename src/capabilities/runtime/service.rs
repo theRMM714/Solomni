@@ -26,7 +26,7 @@ use crate::capabilities::conversation::session::api::{
     Answered, DecisionQueue, History, HistoryView, RunState, SessionEvent, SessionMeta,
 };
 use crate::capabilities::tools::api::{ToolExec, ToolSchema, Tools, arg_fault_text};
-use crate::capabilities::turn::api::{SPEAKER, TurnOps};
+use crate::capabilities::turn::turn::api::{SPEAKER, TurnOps};
 use crate::capabilities::vm::api::Vm;
 use crate::capabilities::work::api::WorkOps;
 use crate::capabilities::work::api::{

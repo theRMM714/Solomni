@@ -48,10 +48,10 @@ impl Turn {
     pub(crate) fn notice_row(&mut self, sid: &str, text: &str) -> Vec<SessionEvent> {
         let mut out = Vec::new();
         match self.session_mut(sid) {
-            Some(crate::capabilities::turn::api::Session::Single(s)) => {
+            Some(crate::capabilities::turn::turn::api::Session::Single(s)) => {
                 out.extend(s.note_notice(text))
             }
-            Some(crate::capabilities::turn::api::Session::Collab(c)) => {
+            Some(crate::capabilities::turn::turn::api::Session::Collab(c)) => {
                 c.notice(text, &mut |e| out.push(e))
             }
             None => out.push(SessionEvent::Notice(text.to_string())),

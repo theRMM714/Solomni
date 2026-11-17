@@ -14,8 +14,8 @@ use crate::capabilities::conversation::session::api::{
     AgentSession, SessionMeta, SessionParams, guest_lease_for, role_of, session_kind_of, work_root,
     work_root_of,
 };
-use crate::capabilities::turn::api::Session;
-use crate::capabilities::turn::service::session::Turn;
+use crate::capabilities::turn::turn::api::Session;
+use crate::capabilities::turn::turn::service::session::Turn;
 use crate::capabilities::workspace::api::Sandbox;
 use crate::kernel::ports::HostProbe;
 
@@ -62,7 +62,7 @@ impl Turn {
         events: &[serde_json::Value],
         registry: &dyn Registry,
         probe: &dyn HostProbe,
-    ) -> Result<crate::capabilities::turn::api::Session, String> {
+    ) -> Result<crate::capabilities::turn::turn::api::Session, String> {
         let roster = self.modules.roster();
         // 打开 / 重建时按 meta 刷新布局投影（会话目录可能被复制或迁移；meta 是权威）。
         let work = work_root_of(self.history.as_ref(), meta)?;
@@ -181,7 +181,7 @@ impl Turn {
                         registry,
                         &modules,
                         &sb,
-                        crate::capabilities::env::api::network_allowed(registry.app()),
+                        crate::capabilities::turn::env::api::network_allowed(registry.app()),
                         meta.exec.tier,
                         &host_plan,
                     ),
@@ -521,7 +521,7 @@ impl Turn {
                 registry,
                 &[],
                 &sb,
-                crate::capabilities::env::api::network_allowed(registry.app()),
+                crate::capabilities::turn::env::api::network_allowed(registry.app()),
                 crate::kernel::api::Tier::Host,
                 &crate::capabilities::catalog::packages::api::PackagePlan::default(),
             ),

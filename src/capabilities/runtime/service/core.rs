@@ -36,7 +36,7 @@ pub struct Core {
     /// 目的：工具总表与角色表的能力面（授权两张表；名字表由组合根另取）——**表本体在工具能力里**，与册子互不依赖。
     pub(super) systools: Arc<dyn Tools>,
     /// 目的：回合状态与会话本体——在世会话表、运行态与创建占位、裁决队、每会话的 shell 活进程槽，以及一席的装配（在 `turn`）。
-    pub(crate) turn: crate::capabilities::turn::api::Turn,
+    pub(crate) turn: crate::capabilities::turn::turn::api::Turn,
     /// 目的：工作与会话配置的用例面（层 9）——建工作 / 改配 / 视图 / 报告 / guest 起停都经它。
     ///   本能力只做命令队列、协作链推进与代理工具族；work 用例的方法原样转发。
     pub(crate) work: Work,
@@ -47,10 +47,10 @@ pub struct Core {
 
 /// 目的：在世会话形态（`turn` 的状态类型）：测试访问器用它读会话内容。
 #[cfg(test)]
-pub(crate) use crate::capabilities::turn::api::Session;
+pub(crate) use crate::capabilities::turn::turn::api::Session;
 
 /// 目的：会话本体（`turn` 的 `Turn`）：准入、派发闸、重建与代理由这里转调。
-pub(crate) use crate::capabilities::turn::api::Turn;
+pub(crate) use crate::capabilities::turn::turn::api::Turn;
 
 impl Core {
     #[allow(clippy::too_many_arguments)]
@@ -75,7 +75,7 @@ impl Core {
     ) -> Core {
         let compact = Arc::new(CompactRuntime::new(Arc::clone(&llm)));
         // 会话本体收在 turn：它只认能力面与压缩工厂，不认 runtime 的端口（层 8 不得依赖层 9）。
-        let turn = crate::capabilities::turn::api::Turn::new(
+        let turn = crate::capabilities::turn::turn::api::Turn::new(
             Arc::clone(&workspace),
             Arc::clone(&vm),
             Arc::clone(&residents),
@@ -401,7 +401,7 @@ impl Core {
     /// 目的：测试访问器：本次模型调用的通道参数（判据在 turn，与生产同一条）。
     #[cfg(test)]
     pub(crate) fn llm_opts(&self, want_stream: bool) -> crate::capabilities::llm::api::LlmOpts {
-        crate::capabilities::turn::api::llm_opts(self.registry.as_ref(), want_stream)
+        crate::capabilities::turn::turn::api::llm_opts(self.registry.as_ref(), want_stream)
     }
 
     /// 目的：薄转发到 `work` 的同名方法（runtime 只做应用编排）。

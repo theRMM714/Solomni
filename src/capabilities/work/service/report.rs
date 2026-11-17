@@ -157,7 +157,7 @@ impl Work {
             &session_modules,
             &missing,
             meta.exec.guest.as_deref(),
-            crate::capabilities::env::api::network_allowed(registry.app()),
+            crate::capabilities::turn::env::api::network_allowed(registry.app()),
         )
     }
 

@@ -39,7 +39,7 @@ impl Handle {
         let worker_log = core.log_handle();
         let jobs = JobRegistry::new();
         let interactive = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let bus = crate::capabilities::turn::api::event_bus();
+        let bus = crate::capabilities::turn::turn::api::event_bus();
         let book = core.systools_handle().book();
         let tools = core.tools_handle();
         let residents = core.residents_handle();
@@ -110,9 +110,9 @@ impl Handle {
         let handle = Arc::new(std::sync::Mutex::new(self.clone()));
         let stop: Box<dyn Fn(&str) + Send + Sync> = Box::new(move |sid: &str| {
             let handle = handle.lock().unwrap_or_else(|e| e.into_inner());
-            crate::capabilities::turn::api::TurnHost::stop(&*handle, sid);
+            crate::capabilities::turn::turn::api::TurnHost::stop(&*handle, sid);
         });
-        crate::capabilities::turn::api::session_ask(Arc::clone(door), sid, emit, stop)
+        crate::capabilities::turn::turn::api::session_ask(Arc::clone(door), sid, emit, stop)
     }
 
     /// 目的：这个会话的**裁决队**（工具级确认进它）：只有接了交互前端才给——否则这一趟不接确认。
@@ -157,10 +157,10 @@ impl Handle {
     }
 }
 
-impl crate::capabilities::turn::api::TurnHost for Handle {
+impl crate::capabilities::turn::turn::api::TurnHost for Handle {
     fn core<T>(
         &self,
-        f: impl FnOnce(&mut crate::capabilities::turn::api::Turn) -> Result<T, String> + Send + 'static,
+        f: impl FnOnce(&mut crate::capabilities::turn::turn::api::Turn) -> Result<T, String> + Send + 'static,
     ) -> Result<T, String>
     where
         T: Send + 'static,
@@ -171,7 +171,7 @@ impl crate::capabilities::turn::api::TurnHost for Handle {
     fn core_env<T>(
         &self,
         f: impl FnOnce(
-            &mut crate::capabilities::turn::api::Turn,
+            &mut crate::capabilities::turn::turn::api::Turn,
             &dyn crate::capabilities::catalog::registry::api::Registry,
             &dyn crate::kernel::ports::HostProbe,
         ) -> Result<T, String>
@@ -236,7 +236,7 @@ impl crate::capabilities::turn::api::TurnHost for Handle {
         card: &str,
         option: &str,
         note: &str,
-    ) -> Result<crate::capabilities::turn::api::Advance, String> {
+    ) -> Result<crate::capabilities::turn::turn::api::Advance, String> {
         TurnOps::answer_card(self, sid, card, option, note)
     }
 }

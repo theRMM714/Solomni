@@ -760,7 +760,7 @@ fn compaction_survives_a_restart_and_rewinds_back_through_the_point() {
         core.registry.as_ref(),
         core.probe.as_ref(),
     ) {
-        Ok(crate::capabilities::turn::api::Prepared::Run { session, .. }) => session,
+        Ok(crate::capabilities::turn::turn::api::Prepared::Run { session, .. }) => session,
         Ok(_) => panic!("重建后该是可直接跑的一轮"),
         Err(e) => panic!("重建失败：{e}"),
     };
