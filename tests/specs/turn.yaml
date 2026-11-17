@@ -11,3 +11,6 @@ cases:
   - id: cargo/tests::session::turn
     tier: T1
     note: 一轮对话推进
+  - id: e2e/tool-ask
+    tier: T5
+    note: 提问卡片：等待回答与整轮批准（turn 的提问面）

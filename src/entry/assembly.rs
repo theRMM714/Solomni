@@ -220,6 +220,42 @@ pub(crate) fn build_service(root: &Path) -> Result<BuildsService, String> {
         crate::entry::toolchains::active_roots(root),
     ))
 }
+/// 目的：隐秘字段能力面的装配：清单事实 + 值存储端口；加载失败如实拒绝（不静默空表）。
+/// 约束：值只经存储端口落盘；本函数不读环境变量、不碰命令行、不拼错误文案。
+pub(crate) fn secrets_with(
+    modules: Arc<dyn crate::capabilities::catalog::modules::api::Modules + Send + Sync>,
+    store: Arc<dyn crate::capabilities::catalog::secrets::ports::SecretStore + Send + Sync>,
+) -> Result<Arc<dyn crate::capabilities::catalog::secrets::api::SecretOps + Send + Sync>, String> {
+    Ok(Arc::new(
+        crate::capabilities::catalog::secrets::service::SecretsService::new(modules, store)?,
+    ))
+}
+
+/// 目的：隐秘字段能力面（值落 `.home/secrets.yaml`）——主程序用它，路径选型只在这里定一次。
+pub(crate) fn secrets(
+    root: &Path,
+    modules: Arc<dyn crate::capabilities::catalog::modules::api::Modules + Send + Sync>,
+) -> Result<Arc<dyn crate::capabilities::catalog::secrets::api::SecretOps + Send + Sync>, String> {
+    secrets_with(
+        modules,
+        Arc::new(
+            crate::capabilities::catalog::secrets::detail::YamlSecrets::new(
+                layout::home(root).join("secrets.yaml"),
+            ),
+        ),
+    )
+}
+
+/// 目的：常驻服务能力面的装配：适配器注册表 + 模块清单 + 隐秘字段面；生命周期与协议全在能力内。
+/// 约束：协议适配器只由组合根构造（核心不认识任何协议）；网络开关与运行包事实由调用方用它的 `with_*` 补。
+pub(crate) fn residents(
+    adapters: Vec<Arc<dyn crate::capabilities::residents::ports::ServiceAdapter + Send + Sync>>,
+    modules: Arc<dyn crate::capabilities::catalog::modules::api::Modules + Send + Sync>,
+    secrets: Arc<dyn crate::capabilities::catalog::secrets::api::SecretOps + Send + Sync>,
+) -> crate::capabilities::residents::service::ResidentsService {
+    crate::capabilities::residents::service::ResidentsService::new(adapters, modules, secrets)
+}
+
 /// 目的：系统维护能力面的端口：组合根里已经装好的同一份实例，启动相命令直接复用。
 /// 约束：一处进程只要一套存储 / 补齐 / 构建——另装一套会让后台作业与日志互相看不见。
 pub(crate) struct SystemPorts {

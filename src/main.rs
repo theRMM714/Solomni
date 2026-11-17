@@ -490,23 +490,17 @@ fn main() {
         ));
 
     // **隐秘字段能力**：值只落 .home/secrets.yaml；加载失败 = 装配失败（不静默空表）。
-    let secrets: Arc<dyn capabilities::catalog::secrets::api::SecretOps + Send + Sync> =
-        match capabilities::catalog::secrets::service::SecretsService::new(
-            Arc::clone(&modules),
-            Arc::new(capabilities::catalog::secrets::detail::YamlSecrets::new(
-                home.join("secrets.yaml"),
-            )),
-        ) {
-            Ok(s) => Arc::new(s),
-            Err(e) => {
-                eprintln!("[装配失败] {}", e);
-                std::process::exit(1);
-            }
-        };
+    let secrets = match entry::assembly::secrets(&root, Arc::clone(&modules)) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[装配失败] {}", e);
+            std::process::exit(1);
+        }
+    };
 
     // **常驻服务能力**：真实协议适配器（MCP stdio 走守门进程的长驻会话）+ 模块能力面 + 隐秘字段面。
     let residents: Arc<dyn capabilities::residents::api::ResidentOps + Send + Sync> = Arc::new(
-        capabilities::residents::service::ResidentsService::new(
+        entry::assembly::residents(
             vec![Arc::new(capabilities::residents::detail::McpAdapter::new(
                 Arc::new(
                     kernel::detail::ProcessSessions::new(

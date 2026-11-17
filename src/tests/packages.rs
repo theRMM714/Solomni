@@ -325,3 +325,60 @@ pub(crate) fn build_packages_take_guest_or_library() {
         vec!["usr/bin".to_string(), "usr/lib".to_string()]
     );
 }
+
+#[test]
+pub(crate) fn library_rejects_invalid_manifests_and_duplicate_versions() {
+    let lib = Library::build(
+        vec![
+            pkg_yaml("id: Bad/UPPER\nversion: 1\nprefix: opt/x"),
+            pkg("a", "1"),
+            pkg("a", "1"),
+        ],
+        vec!["目录里有一份读不了的文件".to_string()],
+    );
+    assert_eq!(lib.packages.len(), 1, "只留下先出现的 a@1");
+    assert_eq!(lib.packages[0].id, "a");
+    assert_eq!(
+        lib.rejected.len(),
+        3,
+        "三类拒收都如实留下：{:?}",
+        lib.rejected
+    );
+    assert!(
+        lib.rejected.iter().any(|r| r.contains("id 不合法")),
+        "{:?}",
+        lib.rejected
+    );
+    assert!(
+        lib.rejected
+            .iter()
+            .any(|r| r.contains("同一 id 与版本出现两次")),
+        "{:?}",
+        lib.rejected
+    );
+    assert!(
+        lib.rejected.iter().any(|r| r.contains("读不了的文件")),
+        "适配层带入的拒收不能丢：{:?}",
+        lib.rejected
+    );
+}
+
+#[test]
+pub(crate) fn overlapping_system_paths_are_diagnosed_before_assembly() {
+    let modules = vec![module_with_runtimes("m", &["a", "b"])];
+    let lib = Library::build(
+        vec![
+            pkg("a", "1"),
+            pkg_yaml("id: b\nversion: 1\nkind: system\nprovides_paths: [opt/rt/a-1/lib]"),
+        ],
+        Vec::new(),
+    );
+    let diags = pkgs::diagnoses(&modules, &lib, &vm_spec(), &[]);
+    let clash = diags
+        .iter()
+        .find(|d| matches!(d, Problem::Conflict { .. }))
+        .unwrap_or_else(|| panic!("前后缀重叠必须复现冲突：{:?}", diags));
+    let text = pkgs::diagnose_text(std::slice::from_ref(clash));
+    assert!(text.contains("都要写进 opt/rt/a-1"), "{}", text);
+    assert!(text.contains("a@1") && text.contains("b@1"), "{}", text);
+}

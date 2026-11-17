@@ -11,3 +11,6 @@ cases:
   - id: cargo/tests::storage
     tier: T1
     note: 存储回收
+  - id: cargo/tests::builds
+    tier: T1
+    note: 构建入口判据与拒收说辞
