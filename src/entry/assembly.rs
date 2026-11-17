@@ -3,6 +3,7 @@
 //! 不管：业务用例、参数解析、回执打印（在 main / presentation/cli/boot.rs）；任何业务语义。
 //! 联动：消费者是 `src/main.rs`、`src/presentation/cli/boot.rs` 与测试；契约见 ARCHITECTURE.md 的「根」。
 
+use crate::kernel::api::layout;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -56,7 +57,7 @@ pub(crate) fn provision_with_guest_vm(root: &Path) -> ProvisionService {
     provision_with_vm(
         root,
         provision_vm(crate::kernel::detail::procs::ProcessBook::open(
-            &root.join(".home"),
+            &layout::home(root),
         )),
     )
 }
@@ -83,7 +84,7 @@ pub(crate) fn provision_vm_with(
 
 /// 目的：按 settings.yaml 取存储策略；读不到用默认。
 fn storage_policy(root: &Path) -> StoragePolicy {
-    std::fs::read_to_string(root.join(".home").join("settings.yaml"))
+    std::fs::read_to_string(layout::home(root).join("settings.yaml"))
         .ok()
         .and_then(|t| {
             yaml_serde::from_str::<crate::capabilities::catalog::registry::api::AppSettings>(&t)
@@ -98,10 +99,10 @@ pub(crate) fn settings_store(
     root: &Path,
 ) -> crate::capabilities::catalog::registry::detail::yaml_settings::YamlSettingsStore {
     crate::capabilities::catalog::registry::detail::yaml_settings::YamlSettingsStore::new(
-        root.join(".home").join("providers.yaml"),
-        root.join(".home").join("models.yaml"),
-        root.join(".home").join("settings.yaml"),
-        root.join(".home").join("agents.yaml"),
+        layout::home(root).join("providers.yaml"),
+        layout::home(root).join("models.yaml"),
+        layout::home(root).join("settings.yaml"),
+        layout::home(root).join("agents.yaml"),
     )
 }
 
@@ -136,7 +137,7 @@ pub(crate) fn storage(
 ///   `copy` 是开发/应急通道，不装配；`none` 只给供给编排。
 pub(crate) fn build_vm(root: &Path) -> Arc<dyn Vm + Send + Sync> {
     let shares: Vec<Arc<dyn crate::capabilities::vm::ports::ShareBackend + Send + Sync>> = {
-        let book = crate::kernel::detail::procs::ProcessBook::open(&root.join(".home"));
+        let book = crate::kernel::detail::procs::ProcessBook::open(&layout::home(root));
         vec![
             Arc::new(
                 crate::capabilities::vm::detail::VirtioFsShare::new().with_book(Arc::clone(&book)),
@@ -148,7 +149,7 @@ pub(crate) fn build_vm(root: &Path) -> Arc<dyn Vm + Send + Sync> {
     Arc::new(crate::capabilities::vm::service::VmService::new(
         Arc::new(
             crate::capabilities::vm::detail::QemuEngine::with_overlay_dir(
-                root.join(".vm").join("overlays"),
+                layout::vm(root).join("overlays"),
             ),
         ),
         shares,
@@ -164,7 +165,7 @@ pub(crate) fn build_runner(
     Ok(crate::kernel::detail::process::ProcTools::new(
         std::env::current_exe().unwrap_or_default(),
         texts,
-        root.join(".home"),
+        layout::home(root),
         Arc::new(std::sync::atomic::AtomicBool::new(false)),
     ))
 }
@@ -176,7 +177,7 @@ pub(crate) fn build_service(root: &Path) -> Result<BuildsService, String> {
             crate::capabilities::catalog::packages::service::PackagesService::with_base(
                 Arc::new(
                     crate::capabilities::catalog::packages::detail::FsPackages::new(
-                        root.join("runtimes"),
+                        layout::runtimes(root),
                     ),
                 ),
                 crate::entry::toolchains::base_facts(root),
@@ -212,7 +213,7 @@ pub(crate) fn build_service(root: &Path) -> Result<BuildsService, String> {
         runner,
         Arc::new(crate::capabilities::tools::service::fence::ToolFenceGate),
         Arc::new(crate::kernel::detail::confine::FenceHostAdapter::new(
-            root.join(".home"),
+            layout::home(root),
         )),
         Arc::new(crate::kernel::detail::host_probe::HostProbeAdapter),
         Arc::new(crate::kernel::ports::NoopLog),
@@ -258,7 +259,7 @@ pub(crate) fn system(root: &Path, base: &BaseFacts) -> Result<SystemService, Str
                 ),
                 Arc::new(
                     crate::capabilities::catalog::modules::detail::YamlModuleState::new(
-                        root.join(".home").join("modules.yaml"),
+                        layout::home(root).join("modules.yaml"),
                     ),
                 ),
             )
@@ -308,7 +309,7 @@ pub(crate) fn system_with(
 
 /// 目的：构建期的全局网络开关（与主程序同一份 settings.yaml；读不到 / 非法按拒绝）。
 fn network_allowed(root: &Path) -> bool {
-    std::fs::read_to_string(root.join(".home").join("settings.yaml"))
+    std::fs::read_to_string(layout::home(root).join("settings.yaml"))
         .ok()
         .and_then(|t| {
             yaml_serde::from_str::<crate::capabilities::catalog::registry::api::AppSettings>(&t)

@@ -7,6 +7,7 @@ pub(crate) mod fence;
 pub(crate) mod path;
 pub(crate) mod shim;
 
+use crate::kernel::api::layout;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
@@ -26,7 +27,7 @@ impl SetupHost {
     }
 
     fn home(&self) -> PathBuf {
-        self.root.join(".home")
+        layout::home(&self.root)
     }
 }
 

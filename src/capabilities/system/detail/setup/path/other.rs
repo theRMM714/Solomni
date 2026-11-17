@@ -4,6 +4,7 @@
 //! 联动：由 `setup/path.rs` 在非 Windows 目标选中。
 
 use super::*;
+use crate::kernel::api::layout;
 
 /// 目的：状态段（只读；非 Windows 如实标 unsupported）。
 pub(crate) fn info(root: &Path) -> PathInfo {
@@ -14,7 +15,7 @@ pub(crate) fn info(root: &Path) -> PathInfo {
         shim: String::new(),
         shim_present: false,
         shim_current: false,
-        backup_present: backup_path(&root.join(".home")).exists(),
+        backup_present: backup_path(&layout::home(&root)).exists(),
     }
 }
 

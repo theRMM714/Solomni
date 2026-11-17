@@ -3,6 +3,7 @@
 //! 不管：起停进程（在 vm / tool 执行）；对账与清理（在各自的编排里）。
 //! 联动：组合根构造 `BookProcs` 注入 service；`processes` 与 `reset_guest` 经它看进程事实。
 
+use crate::kernel::api::layout;
 use std::path::{Path, PathBuf};
 
 use crate::capabilities::provision::api::ProcInfo;
@@ -16,7 +17,7 @@ pub struct BookProcs {
 impl BookProcs {
     pub fn new(root: &Path) -> BookProcs {
         BookProcs {
-            home: root.join(".home"),
+            home: layout::home(root),
         }
     }
 

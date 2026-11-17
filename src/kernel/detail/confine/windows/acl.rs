@@ -4,6 +4,7 @@
 //! 联动：授权台账与收尾在 record/、容器身份在 container.rs、外层调用在 confine::prepare_fence。
 
 use crate::kernel::api::FenceSpec;
+use crate::kernel::api::layout;
 use std::ffi::c_void;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
@@ -570,7 +571,7 @@ pub(crate) fn grant_targets(
 ///   授给 baseline 一次即可，不参与按 reach 的容器身份与授权。
 pub(crate) fn is_trusted_base(path: &Path, product_root: &Path) -> bool {
     let under = |base: &Path| path == base || path.starts_with(base);
-    under(&product_root.join(".tools")) || under(&product_root.join("runtimes"))
+    under(&product_root.join(".tools")) || under(&layout::runtimes(product_root))
 }
 
 /// 目的：**系统自带**只读基线的主体：ALL APPLICATION PACKAGES（S-1-15-2-1）。

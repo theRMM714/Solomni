@@ -7,6 +7,7 @@ use super::domain::{Dep, deps, links, source_url, under};
 use crate::capabilities::vm::api::{
     GuestArch, GuestClients, GuestImage, GuestRun, GuestSpec, SeedDocs, Vm, classify_base,
 };
+use crate::kernel::api::layout;
 use crate::kernel::ports::HostProbe;
 use std::path::Path;
 use std::time::Duration;
@@ -103,7 +104,7 @@ pub(crate) fn write_guest_yaml(
         arch = arch,
         os = image.os.as_str()
     );
-    std::fs::write(base.join("guest.yaml"), text).map_err(|e| format!("写 guest.yaml 失败：{}", e))
+    std::fs::write(layout::guest_spec(base), text).map_err(|e| format!("写 guest.yaml 失败：{}", e))
 }
 
 /// 目的：找清单里**本机** QEMU 的真实落点（运行期编排要用它起 guest）。

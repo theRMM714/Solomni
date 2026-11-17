@@ -4,6 +4,7 @@
 //! 联动：storage::service 每次 GC 后写；报告与 doctor 读。
 
 use crate::capabilities::maintenance::storage::api::LastGc;
+use crate::kernel::api::layout;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -16,7 +17,7 @@ struct StateFile {
 
 /// 目的：状态文件路径。
 pub fn path(root: &Path) -> std::path::PathBuf {
-    root.join(".vm").join("storage.json")
+    layout::vm(root).join("storage.json")
 }
 
 /// 目的：读上次回收；没有或坏文件给 None。

@@ -8,6 +8,7 @@
 //! 联动：system 能力的便携维护（detail/setup/fence.rs）与启动首次授权共用 machine_ensure；状态查询与 --setup=status 共用 machine_missing。
 
 use super::*;
+use crate::kernel::api::layout;
 use std::time::Instant;
 
 /// 目的：合成树的形状——50 个目录 × 40 个文件 = 2050 个对象，足够让整树写 ACL 的耗时稳定。
@@ -108,7 +109,7 @@ pub(crate) fn machine_plan(root: &Path) -> Vec<MachineStep> {
     });
     for (label, dir) in [
         ("工具链只读（递归）", root.join(".tools")),
-        ("运行包只读（递归）", root.join("runtimes")),
+        ("运行包只读（递归）", layout::runtimes(root)),
     ] {
         // 目录不存在就跳过：装好之后下一次 ensure 会补上（重复执行只写缺的那几条）。
         if dir.is_dir() {

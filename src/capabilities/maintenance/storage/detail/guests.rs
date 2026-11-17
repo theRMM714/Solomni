@@ -4,6 +4,7 @@
 //! 联动：service 在回收与还原前经 GuestLiveness 端口问它；survey 判可写层保护时用同一个函数。
 
 use crate::capabilities::maintenance::storage::ports::GuestLiveness;
+use crate::kernel::api::layout;
 use std::path::{Path, PathBuf};
 
 /// 目的：按进程台账判 guest 存活。
@@ -15,7 +16,7 @@ impl ProcessGuests {
     /// 目的：组合根专用——取产品根（台账在 `<root>/.home`）。
     pub fn new(root: &Path) -> ProcessGuests {
         ProcessGuests {
-            home: root.join(".home"),
+            home: layout::home(root),
         }
     }
 }

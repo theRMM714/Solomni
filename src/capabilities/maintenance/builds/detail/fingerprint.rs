@@ -7,13 +7,14 @@ use crate::capabilities::catalog::modules::api::{BuildDecl, Module};
 use crate::capabilities::maintenance::builds::ports::{
     BuildHome, BuildStates, BuiltRecord, SourceDigest,
 };
+use crate::kernel::api::layout;
 use std::path::{Path, PathBuf};
 
 /// 目的：构建状态的落点（`.vm/build-state/<模块>.json`）——本机档与各虚拟根共用一份，靠 `target` 区分。
 /// 参数：`root` = 产品根；`id` = 模块 id。
 /// 返回：状态文件路径。
 pub(crate) fn state_path(root: &Path, id: &str) -> PathBuf {
-    root.join(".vm")
+    layout::vm(root)
         .join("build-state")
         .join(format!("{}.json", id))
 }
@@ -118,7 +119,7 @@ impl BuildStates for BuildStore {
     }
 
     fn prepare_home(&self, id: &str) -> Result<BuildHome, String> {
-        let state = self.root.join(".vm").join("build-state").join(id);
+        let state = layout::vm(&self.root).join("build-state").join(id);
         let home = state.join("home");
         std::fs::create_dir_all(&home).map_err(|e| format!("建状态目录失败：{}", e))?;
         Ok(BuildHome { state, home })

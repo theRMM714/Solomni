@@ -3,6 +3,7 @@
 //! 不管：围栏与进程账的机制本身（在 `src/kernel/detail/confine` 与 `src/kernel/detail/procs.rs`）；启动形态。
 //! 联动：由工具进程按 `--fence-run` 拉起、由 `procs::watch` 按 `--proc-watchdog` 拉起；`src/main.rs` 负责分发。
 
+use crate::kernel::api::layout;
 /// 目的：`--fence-revoke` 的两行用法（单参路径 / 双参 SID+路径）；返回 2 让调用方直接收场。
 fn revoke_usage() -> i32 {
     eprintln!("用法：solomni --fence-revoke <路径>（撤该外部工作区的机器级只读授权）");
@@ -49,7 +50,7 @@ pub fn proc_watch(args: &[String], flag: usize) -> i32 {
 ///   remove_profile_one）；**未指定的条目一概不动**。
 pub fn fence_grant(args: &[String], root: &std::path::Path) -> Option<i32> {
     use crate::kernel::detail::confine;
-    let home = root.join(".home");
+    let home = layout::home(root);
     let after = |flag: &str| -> Option<String> {
         args.iter()
             .position(|a| a == flag)
@@ -245,7 +246,7 @@ pub(crate) fn revoke_machine_report(done: Result<usize, String>, path: &std::pat
 /// 目的：--fence-clean 的整体收尾——按台账回收陈旧授权（隐藏模式，用户经文档知道它）。
 /// 约束：台账可能不存在（探针、夹具的台账被删、进程被杀）；回收结果如实报告。
 pub fn fence_clean(root: &std::path::Path) -> i32 {
-    let home = root.join(".home");
+    let home = layout::home(root);
     let mut lines: Vec<String> = Vec::new();
     let mut failed = false;
     match crate::kernel::detail::confine::clean_all(&home) {
