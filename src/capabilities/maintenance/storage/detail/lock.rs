@@ -3,6 +3,7 @@
 //! 不管：构建卷自己的锁（在 builds）。
 //! 联动：storage::service 的 gc 与显式清理共用这一把闸。
 
+use crate::kernel::api::layout;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -13,7 +14,7 @@ pub struct GcLock {
 
 /// 目的：锁文件路径。
 pub fn path(root: &Path) -> PathBuf {
-    root.join(".vm").join("storage.lock")
+    layout::vm(root).join("storage.lock")
 }
 
 /// 目的：尝试拿锁；已有另一个回收在跑给 None。

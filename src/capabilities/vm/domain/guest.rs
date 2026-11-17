@@ -7,6 +7,7 @@ use crate::capabilities::catalog::packages::api::{KIND_SYSTEM, PlannedPackage};
 use crate::capabilities::vm::domain::exec::ExecPlan;
 use crate::capabilities::vm::domain::paths::{PathBridge, PathDialect};
 use crate::kernel::api::FenceSpec;
+use crate::kernel::api::layout;
 use crate::kernel::ports::HostProbe;
 use serde::Deserialize;
 use std::collections::BTreeSet;
@@ -380,7 +381,7 @@ struct GuestManifest {
 
 /// 目的：读基础根目录里的 guest.yaml（可选）。
 fn read_manifest(base: &Path, probe: &dyn HostProbe) -> Result<Option<GuestManifest>, String> {
-    let path = base.join("guest.yaml");
+    let path = layout::guest_spec(base);
     if !probe.is_file(&path) {
         return Ok(None);
     }

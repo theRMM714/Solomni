@@ -8,6 +8,7 @@ use crate::capabilities::maintenance::storage::api::{
     SpaceCategory, SpaceItem,
 };
 use crate::capabilities::maintenance::storage::ports::{SpaceFacts, SpaceSurvey};
+use crate::kernel::api::layout;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -141,7 +142,7 @@ fn download(root: &Path) -> SpaceCategory {
 }
 
 fn overlays(root: &Path, qemu: Option<&Path>, now: u64) -> SpaceCategory {
-    let live = guests::live_in(&root.join(".home"));
+    let live = guests::live_in(&layout::home(root));
     let items = scan::files_with_ext(&paths::overlay_dir(root), "qcow2")
         .into_iter()
         .map(|p| {
@@ -198,7 +199,7 @@ fn logs(root: &Path) -> SpaceCategory {
 }
 
 fn guest_bases(root: &Path) -> SpaceCategory {
-    let items = scan::children(&root.join(".vm").join("guest"))
+    let items = scan::children(&layout::vm(root).join("guest"))
         .into_iter()
         .filter(|p| p.is_dir())
         .map(|p| {

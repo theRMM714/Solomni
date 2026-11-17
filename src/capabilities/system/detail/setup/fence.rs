@@ -4,6 +4,7 @@
 //! 不管：落点怎么选（kernel 的 confine/windows/machine.rs）、ACE 怎么写（acl.rs）。
 //! 联动：setup 的模式分派；entry 的启动对账调 missing / ensure。
 
+use crate::kernel::api::layout;
 use std::path::Path;
 
 /// 目的：一次性预授：没能力就如实说缺口（不算失败），有能力就逐条写并退役旧授权。
@@ -12,7 +13,7 @@ pub(crate) fn grant(root: &Path, on_line: &mut dyn FnMut(&str)) -> Result<(), St
         on_line("本平台没有机器级 ACL 预授（已登记缺口）：围栏的权限模型不写 ACL");
         return Ok(());
     }
-    let home = root.join(".home");
+    let home = layout::home(root);
     on_line("围栏机器级预授：只需成功一次；之后新会话不再重写这批 ACL");
     ensure(root, &home, on_line)?;
     on_line("围栏机器级预授完成");
@@ -25,7 +26,7 @@ pub(crate) fn calibrate(root: &Path, on_line: &mut dyn FnMut(&str)) -> Result<()
     if !crate::kernel::api::HAS_EXTERNAL_ACL_STEP {
         return Err("本平台没有机器级 ACL 标定（已登记缺口）：围栏的权限模型不写 ACL".to_string());
     }
-    let home = root.join(".home");
+    let home = layout::home(root);
     on_line("围栏授权成本标定：自建合成树，真写一次机器级只读 ACL（用后清理）");
     let cal = crate::kernel::detail::confine::calibrate_machine_grant(&home)?;
     crate::capabilities::workspace::api::record_grant_cost(&home, &cal.path, cal.objects, cal.ms);

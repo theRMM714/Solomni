@@ -42,6 +42,7 @@ pub use crate::kernel::detail::view_drive_lifecycle::{
 pub use crate::kernel::domain::actor::Actor;
 pub use crate::kernel::domain::fence::{SandboxMode, SandboxRequirements, call_lease};
 pub use crate::kernel::domain::jobs::JobRegistry;
+pub use crate::kernel::domain::layout;
 pub use crate::kernel::domain::name::{dedup_suffix, validate_dir_name};
 pub use crate::kernel::domain::path::{is_unc, native, slash, unc_parts};
 pub use crate::kernel::domain::platform::{

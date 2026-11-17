@@ -11,6 +11,7 @@ pub(crate) use deb::*;
 pub(crate) use image::*;
 pub(crate) use initrd::*;
 
+use crate::kernel::api::layout;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -76,7 +77,7 @@ pub(crate) fn install_guest_rootfs(
 ) -> Result<(), String> {
     let family = family_of(dep)?;
     let base = under(root, &dep.install);
-    let cache = root.join(".vm").join("cache");
+    let cache = layout::vm(root).join("cache");
     fs::create_dir_all(&base).map_err(|e| format!("建 {} 失败：{}", base.display(), e))?;
     let disk = cache.join("disk.raw");
     if !disk.is_file() {
@@ -142,7 +143,7 @@ pub(crate) fn install_guest_rootfs(
         let _ = symlink("python3", &py);
     }
     // 画像：虚拟根对世界的自我介绍（列表显示名与 os 从这里读）；运行能力由运行期编排另写。
-    let yaml = base.join("guest.yaml");
+    let yaml = layout::guest_spec(&base);
     if !yaml.is_file() {
         fs::write(
             &yaml,

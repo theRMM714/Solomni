@@ -3,6 +3,7 @@
 //! 不管：什么时候重装、装什么（在 service 的编排里）；下载与解包（在 fetch / install）。
 //! 联动：组合根构造 `FileLedger` 注入 service；本文件只经 domain 的纯规则算身份。
 
+use crate::kernel::api::layout;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -28,7 +29,7 @@ impl FileLedger {
 /// 目的：读虚拟根画像里的 `id` / `os` / `arch` / `runtimes`（`guest.yaml`；不在场 = 空画像）。
 /// 约束：只读几个扁平标量与一个内联列表，不引 YAML 依赖。
 pub(crate) fn read_guest_profile(base: &Path) -> GuestProfile {
-    let Ok(text) = fs::read_to_string(base.join("guest.yaml")) else {
+    let Ok(text) = fs::read_to_string(layout::guest_spec(base)) else {
         return GuestProfile::default();
     };
     let mut p = GuestProfile::default();
@@ -71,7 +72,7 @@ pub(crate) fn probe_present(root: &Path, dep: &Dep) -> bool {
 
 /// 目的：台账落点——产品根下 `.vm/state/deps.json`。
 pub(crate) fn ledger_path(root: &Path) -> PathBuf {
-    root.join(".vm").join("state").join("deps.json")
+    layout::vm(root).join("state").join("deps.json")
 }
 
 /// 目的：读台账；不在场或坏 JSON 都按空台账（首次安装的常态）。

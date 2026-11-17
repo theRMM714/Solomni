@@ -7,6 +7,7 @@ use crate::capabilities::maintenance::builds::ports::{
     BuildCache, CacheGuard, CacheMount, ModuleWorkspace,
 };
 use crate::capabilities::vm::api::GuestImage;
+use crate::kernel::api::layout;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -24,7 +25,7 @@ const LOCK_STALE: Duration = Duration::from_secs(3 * 3600);
 
 /// 目的：缓存卷目录（`<产品根>/.vm/build-cache`）。
 pub(crate) fn dir(root: &Path) -> PathBuf {
-    root.join(".vm").join("build-cache")
+    layout::vm(root).join("build-cache")
 }
 
 /// 目的：缓存卷落点——每个虚拟根一块（同一模块在不同虚拟根里的工具链不同，缓存不能混）。

@@ -9,6 +9,7 @@ use crate::capabilities::conversation::session::api::{
     flat_modules, guest_lease_for, guest_scope, subtree_of, tree_meta, work_root,
 };
 use crate::capabilities::vm::api::GuestStop;
+use crate::kernel::api::layout;
 
 /// 目的：这次创建要不要在宿主上付一次性的机器级只读授权。
 /// 约束：只有本机档写宿主 ACL；虚拟机档的隔离是挂载边界（`machine_ro_tree` 以只读挂载兑现），不写宿主 ACL。
@@ -28,7 +29,7 @@ fn pay_workspace_grant(root: &std::path::Path, meta: &SessionMeta) {
     }
     if let Some(binding) = meta.workspace.as_ref() {
         crate::capabilities::workspace::api::ensure_in_background(
-            &root.join(".home"),
+            &layout::home(root),
             &binding.root,
         );
     }
@@ -881,12 +882,12 @@ mod tests {
         let mut detached = meta(Tier::Host, WorkspaceGrant::Workspace);
         detached.workspace = None;
         pay_workspace_grant(&root, &detached);
-        assert!(!root.join(".home").exists(), "不该付的组合不留痕迹");
+        assert!(!layout::home(root).exists(), "不该付的组合不留痕迹");
         // 该付的一种：状态文件由后台线程写出来（内核桩：0 写、0 复用）。
         let mut pay = meta(Tier::Host, WorkspaceGrant::Workspace);
         pay.workspace.as_mut().expect("有绑定").root = ws.clone();
         pay_workspace_grant(&root, &pay);
-        let state = root.join(".home").join("workspace-grants.json");
+        let state = layout::home(root).join("workspace-grants.json");
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while !state.is_file() && std::time::Instant::now() < deadline {
             std::thread::sleep(std::time::Duration::from_millis(10));

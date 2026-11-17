@@ -20,6 +20,7 @@ pub(crate) use entry::startup::{
     write_acl_setting,
 };
 
+use crate::kernel::api::layout;
 use crate::presentation::faces::Faces;
 use capabilities::catalog::registry::api::Registry as _;
 use std::io::IsTerminal;
@@ -86,7 +87,7 @@ fn main() {
         .unwrap_or_else(|| PathBuf::from("."));
     // 产品根规范化成**干净的绝对路径**：提示词里给 AI 的、以及各适配器给出的根都是它。
     let (root, root_note) = entry::root::resolve_root(&raw_root);
-    let home = root.join(".home");
+    let home = layout::home(&root);
     // 基础工具链：只写项目内 .tools；先应用 PATH，再跑诊断 / 构建 / 会话，模块工具与 build 因此都优先项目版本。
     let toolchains = entry::toolchains::apply(&root);
     // 这些是人读的启动事实；--doctor / --provision 的 stdout 是机器可读 JSON，所以走 stderr。
@@ -202,7 +203,7 @@ fn main() {
     let packages: Arc<dyn capabilities::catalog::packages::api::Packages + Send + Sync> = Arc::new(
         capabilities::catalog::packages::service::PackagesService::with_base(
             Arc::new(capabilities::catalog::packages::detail::FsPackages::new(
-                root.join("runtimes"),
+                layout::runtimes(&root),
             )),
             base.clone(),
         ),
@@ -472,7 +473,7 @@ fn main() {
         Arc::new(capabilities::vm::service::VmService::new(
             Arc::new(
                 capabilities::vm::detail::QemuEngine::with_overlay_dir(
-                    root.join(".vm").join("overlays"),
+                    layout::vm(&root).join("overlays"),
                 )
                 .with_book(std::sync::Arc::clone(&book))
                 .with_log(log.clone())

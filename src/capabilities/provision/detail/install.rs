@@ -3,6 +3,7 @@
 //! 不管：下载与校验（在 fetch / service）、镜像内部构造（在 guest_image）、台账（在 ledger）。
 //! 联动：service 按清单的 kind 选一个方法调用；本文件直接碰宿主文件系统与外部工具。
 
+use crate::kernel::api::layout;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -232,7 +233,7 @@ pub(crate) fn install_guest_disk(
     } else {
         install_file(cached, dest, probe)?;
     }
-    let yaml = dest.join("guest.yaml");
+    let yaml = layout::guest_spec(dest);
     if !yaml.is_file() {
         fs::write(
             &yaml,

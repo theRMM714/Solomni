@@ -3,11 +3,12 @@
 //! 不管：怎么扫（survey）、怎么删（reclaim）、回收锁（lock）。
 //! 联动：detail::survey 与 detail::reclaim 都经它取路径，扫与删不会各写一份。
 
+use crate::kernel::api::layout;
 use std::path::{Path, PathBuf};
 
 /// 目的：构建缓存卷的目录。
 pub fn build_dir(root: &Path) -> PathBuf {
-    root.join(".vm").join("build-cache")
+    layout::vm(root).join("build-cache")
 }
 
 /// 目的：一个虚拟根的构建缓存卷。
@@ -32,12 +33,12 @@ pub fn build_purge(root: &Path, guest: &str) -> PathBuf {
 
 /// 目的：依赖补齐的下载缓存目录。
 pub fn download_dir(root: &Path) -> PathBuf {
-    root.join(".vm").join("cache")
+    layout::vm(root).join("cache")
 }
 
 /// 目的：会话可写层目录。
 pub fn overlay_dir(root: &Path) -> PathBuf {
-    root.join(".vm").join("overlays")
+    layout::vm(root).join("overlays")
 }
 
 /// 目的：运行日志目录。
