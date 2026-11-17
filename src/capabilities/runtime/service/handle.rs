@@ -28,7 +28,7 @@ pub struct Handle {
     /// 目的：模块公地能力面（与核心共享同一份）：模块事实与启停写面由它转发。
     pub(super) modules: Arc<dyn crate::capabilities::catalog::modules::api::Modules + Send + Sync>,
     /// 目的：构建能力面（与核心共享同一份）：创建会话前在**调用方线程**补编模块产物。
-    pub(super) builds: Arc<dyn crate::capabilities::builds::api::Builds + Send + Sync>,
+    pub(super) builds: Arc<dyn crate::capabilities::maintenance::builds::api::Builds + Send + Sync>,
     /// 目的：正在启动的 guest 租约：同一台 guest 的并发启用/生成只能有一个在拉，别互相替换。
     pub(super) booting: Arc<std::sync::Mutex<std::collections::BTreeSet<String>>>,
 }

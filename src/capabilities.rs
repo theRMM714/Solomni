@@ -3,7 +3,7 @@
 //! 不管：能力内部实现与跨能力契约（在各能力 api / domain）；依赖方向由 T0 结构审查判定（零豁免：实际违规即失败）。
 //! 联动：src/main.rs 组合根装配这些能力；runtime 与其它能力平级、只经各能力 api 编排（ARCHITECTURE.md §九）。
 
-pub mod builds;
+pub mod maintenance;
 pub mod conversation;
 pub mod lifecycle;
 pub mod llm;
@@ -13,7 +13,6 @@ pub mod prompt;
 pub mod provision;
 pub mod residents;
 pub mod runtime;
-pub mod storage;
 pub mod system;
 pub mod taskchain;
 pub mod tools;

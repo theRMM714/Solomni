@@ -51,11 +51,11 @@
 | 2 | `catalog`、`workspace` | 0–1 |
 | 3 | `residents`、`tools`、`vm` | 0–2 |
 | 4 | `conversation`、`provision` | 0–3 |
-| 5 | `storage`、`turn` | 0–4 |
-| 6 | `builds`、`lifecycle`、`work` | 0–5 |
-| 7 | `runtime`、`system` | 0–6 |
+| 5 | `maintenance`、`turn` | 0–4 |
+| 6 | `lifecycle`、`system`、`work` | 0–5 |
+| 7 | `runtime` | 0–6 |
 
-> 7 层、18 个能力 + `kernel`：本表由 `layers.yaml` 生成（`node tests/docs-sync.mjs --write`），不手写。
+> 7 层、17 个能力 + `kernel`：本表由 `layers.yaml` 生成（`node tests/docs-sync.mjs --write`），不手写。
 <!-- END:layer-table -->
 
 - 层号是**声明的意图**，不是从代码算出来的事实：改成「按当前依赖现算」，判据就恒真（每条边按构造都向下），门禁失去全部约束力。所以表由人维持、门禁比「意图 vs 现实」，越界时顺带报出「按现有依赖至少要第几层」。
@@ -155,7 +155,7 @@
 - **跨层共享的形状由 `kernel` 托管**（R6）：`kernel` 只存放与搬运 DTO，不解释业务语义、不构造业务决策与面向用户的文案；业务自己的入参 / 出参留在本能力 `api`。
 - **转录即状态**：会话内容 = 按 `rewind` 标记回放出的活动窗口；内存与落盘不一致时**以流水为准**。
 - **能重建的不落盘**：视图、索引、账本缓存与执行计划是派生物，重启后由真相重建；写盘只写派生不出来的事实。
-- **落盘路径相对根派生**：一律用 `PathBuf` 组件拼接、不写机器绝对路径（R9，例见 `src/capabilities/builds/detail/cache.rs`）；含机器路径的内容不进仓库。
+- **落盘路径相对根派生**：一律用 `PathBuf` 组件拼接、不写机器绝对路径（R9，例见 `src/capabilities/maintenance/builds/detail/cache.rs`）；含机器路径的内容不进仓库。
 - **改布局同次改三处**：`docs/<单元>/unit-map.md`、本文对应节与 [AGENTS.md](AGENTS.md) 的「文档路由」（R8）。
 - **权限与围栏**：策略在 `src/capabilities/tools/domain/fence.rs`，机制与落点在 `src/kernel/detail/confine/`；规则见 [docs/permission/README.md](docs/permission/README.md)，平台差异见 [docs/kernel/README.md](docs/kernel/README.md) 的「围栏落点：必要与可选」。
 

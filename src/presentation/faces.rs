@@ -39,7 +39,7 @@ pub struct Faces {
     /// 目的：依赖补齐的统一面（组合根注入；默认未接入，如实失败不假装可用）。
     pub provision: Arc<dyn crate::capabilities::provision::api::Provision + Send + Sync>,
     /// 目的：存储空间的统一面（组合根注入；默认空实现，测试可替换）。
-    pub storage: Arc<dyn crate::capabilities::storage::api::Storage + Send + Sync>,
+    pub storage: Arc<dyn crate::capabilities::maintenance::storage::api::Storage + Send + Sync>,
     /// 目的：基础工具链的启动事实（组合根注入；测试替身为 null）。
     pub toolchains: serde_json::Value,
 }
@@ -60,7 +60,7 @@ impl Faces {
             residents: Arc::clone(&h.residents),
             secrets: Arc::clone(&h.secrets),
             provision: Arc::new(crate::capabilities::provision::api::NoProvision),
-            storage: Arc::new(crate::capabilities::storage::api::NoStorage),
+            storage: Arc::new(crate::capabilities::maintenance::storage::api::NoStorage),
             toolchains: serde_json::Value::Null,
         }
     }

@@ -4,12 +4,12 @@
 //! 联动：组合根构造并注入三个端口；builds 在起 guest 前问 ensure_headroom；口径见 docs/storage/README.md。
 
 use crate::capabilities::provision::api::Provision;
-use crate::capabilities::storage::api::{
+use crate::capabilities::maintenance::storage::api::{
     CAT_BUILD, CAT_DOWNLOAD, CAT_LOGS, CAT_OVERLAYS, CleanKind, CleanOutcome, CleanRequest,
     GcAction, GcReport, LastGc, SpaceCategory, SpaceItem, SpaceReport, Storage, StoragePolicy,
 };
-use crate::capabilities::storage::domain::{self, safe_id};
-use crate::capabilities::storage::ports::{GuestLiveness, SpaceReclaim, SpaceSurvey};
+use crate::capabilities::maintenance::storage::domain::{self, safe_id};
+use crate::capabilities::maintenance::storage::ports::{GuestLiveness, SpaceReclaim, SpaceSurvey};
 use crate::kernel::api::JobState;
 use crate::kernel::ports::Log;
 use std::sync::{Arc, Mutex};

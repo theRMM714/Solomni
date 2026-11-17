@@ -371,7 +371,7 @@ pub(crate) fn route(
                         && let Ok(s) = faces.registry.settings()
                     {
                         faces.storage.set_policy(
-                            crate::capabilities::storage::api::StoragePolicy::from(&s.storage),
+                            crate::capabilities::maintenance::storage::api::StoragePolicy::from(&s.storage),
                         );
                     }
                     // 全局沙箱策略变了：先把回包发出去，再整体重启（启动器按退出码拉起）。
@@ -572,7 +572,7 @@ pub(crate) fn route(
                 Err(e) => return complaint(400, e),
             };
             let kind =
-                match crate::capabilities::storage::api::CleanKind::parse(&str_field(&req, "kind"))
+                match crate::capabilities::maintenance::storage::api::CleanKind::parse(&str_field(&req, "kind"))
                 {
                     Ok(k) => k,
                     Err(e) => return complaint(400, e),
@@ -593,7 +593,7 @@ pub(crate) fn route(
                 .get("confirm")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            let req = crate::capabilities::storage::api::CleanRequest {
+            let req = crate::capabilities::maintenance::storage::api::CleanRequest {
                 kind,
                 id,
                 module,

@@ -3,11 +3,11 @@
 //! 不管：预算与候选排序（domain/service）、回收锁与删除（reclaim）。
 //! 联动：service 经 SpaceSurvey 端口消费；路径约定见 detail/paths.rs。
 
-use crate::capabilities::storage::api::{
+use crate::capabilities::maintenance::storage::api::{
     CAT_BUILD, CAT_DOWNLOAD, CAT_GUESTS, CAT_LOGS, CAT_OUTPUTS, CAT_OVERLAYS, CAT_SESSIONS,
     SpaceCategory, SpaceItem,
 };
-use crate::capabilities::storage::ports::{SpaceFacts, SpaceSurvey};
+use crate::capabilities::maintenance::storage::ports::{SpaceFacts, SpaceSurvey};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

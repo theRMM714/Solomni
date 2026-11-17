@@ -16,7 +16,7 @@ impl Handle {
         tier: crate::kernel::api::Tier,
         guest: Option<&str>,
     ) -> Result<(), String> {
-        use crate::capabilities::builds::api::Target;
+        use crate::capabilities::maintenance::builds::api::Target;
         if ids.is_empty() {
             return Ok(());
         }

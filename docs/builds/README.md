@@ -1,6 +1,6 @@
 # builds（模块构建）
 > 定位：模块 `build:` 声明在目标环境里的执行、产物复验、构建缓存与失败归因。
-> 效力：规范｜核对：2026-11-04｜依据：`src/capabilities/builds/api.rs`
+> 效力：规范｜核对：2026-11-04｜依据：`src/capabilities/maintenance/builds/api.rs`
 
 ## 管什么 / 不管什么
 - 管：一次"确保产物可用"的用例（入口在场即跳过、缺失才编、编完复验）、构建期能力选包、源指纹缓存与 `.vm/build-state/` 落点、构建缓存卷与目标环境。

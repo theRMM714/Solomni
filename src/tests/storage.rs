@@ -3,18 +3,18 @@
 //! 不管：构建怎么跑（builds.rs）、guest 生命周期（vm.rs）。
 //! 联动：契约见 docs/storage/README.md；入口 node run-tests.js。
 
-use crate::capabilities::storage::api::{
+use crate::capabilities::maintenance::storage::api::{
     CleanKind, CleanOutcome, CleanRequest, LastGc, SpaceCategory, SpaceItem, SpaceReport,
     StoragePolicy,
 };
-use crate::capabilities::storage::domain;
-use crate::capabilities::storage::service::StorageService;
+use crate::capabilities::maintenance::storage::domain;
+use crate::capabilities::maintenance::storage::service::StorageService;
 
 /// 目的：用真实适配器装一个存储能力（隔离根；假补齐面与无声日志）。
 fn service(root: &std::path::Path) -> StorageService {
-    use crate::capabilities::storage::detail::guests::ProcessGuests;
-    use crate::capabilities::storage::detail::reclaim::DiskReclaim;
-    use crate::capabilities::storage::detail::survey::DiskSurvey;
+    use crate::capabilities::maintenance::storage::detail::guests::ProcessGuests;
+    use crate::capabilities::maintenance::storage::detail::reclaim::DiskReclaim;
+    use crate::capabilities::maintenance::storage::detail::survey::DiskSurvey;
     StorageService::new(
         crate::tests::doubles::test_provision(),
         std::sync::Arc::new(DiskSurvey::new(root.to_path_buf())),
@@ -111,14 +111,14 @@ fn clean_requires_confirmation_and_real_service() {
         confirm: false,
     };
     let svc = service(&crate::tests::scratch("storage-confirm"));
-    assert!(crate::capabilities::storage::api::Storage::clean(&svc, &req).is_err());
+    assert!(crate::capabilities::maintenance::storage::api::Storage::clean(&svc, &req).is_err());
     let _ = CleanOutcome::Report(Default::default());
 }
 
 /// 目的：盘点能读出卷的实际大小与模块元数据；到上限回收删除最旧卷。
 #[test]
 fn report_and_gc_delete_the_oldest_volume_in_a_scratch_root() {
-    use crate::capabilities::storage::api::Storage;
+    use crate::capabilities::maintenance::storage::api::Storage;
     let root = crate::tests::scratch("storage-gc");
     let cache = root.join(".vm").join("build-cache");
     std::fs::create_dir_all(&cache).unwrap();
@@ -164,7 +164,7 @@ fn report_and_gc_delete_the_oldest_volume_in_a_scratch_root() {
 /// 目的：有构建锁的卷不进候选；按模块清理只写排队标记。
 #[test]
 fn active_volume_is_protected_and_module_cleanup_is_queued() {
-    use crate::capabilities::storage::api::Storage;
+    use crate::capabilities::maintenance::storage::api::Storage;
     let root = crate::tests::scratch("storage-active");
     let cache = root.join(".vm").join("build-cache");
     std::fs::create_dir_all(&cache).unwrap();
@@ -233,8 +233,8 @@ fn gc_interval_is_at_least_fifteen_minutes() {
 /// 目的：盘点端口给时间、分类与宿主余量；非 full 不扫用户数据。
 #[test]
 fn survey_reports_time_categories_and_host_room() {
-    use crate::capabilities::storage::detail::survey::DiskSurvey;
-    use crate::capabilities::storage::ports::SpaceSurvey;
+    use crate::capabilities::maintenance::storage::detail::survey::DiskSurvey;
+    use crate::capabilities::maintenance::storage::ports::SpaceSurvey;
     let root = crate::tests::scratch("storage-survey");
     let cache = root.join(".vm").join("build-cache");
     std::fs::create_dir_all(&cache).unwrap();
@@ -258,8 +258,8 @@ fn survey_reports_time_categories_and_host_room() {
 /// 目的：回收锁同一时刻只给一个人；凭据 drop 后放行。
 #[test]
 fn reclaim_lock_is_exclusive_and_released_on_drop() {
-    use crate::capabilities::storage::detail::reclaim::DiskReclaim;
-    use crate::capabilities::storage::ports::SpaceReclaim;
+    use crate::capabilities::maintenance::storage::detail::reclaim::DiskReclaim;
+    use crate::capabilities::maintenance::storage::ports::SpaceReclaim;
     let root = crate::tests::scratch("storage-lease");
     let held = DiskReclaim::new(root.clone())
         .lock()
@@ -280,8 +280,8 @@ fn reclaim_lock_is_exclusive_and_released_on_drop() {
 /// 目的：有构建锁的卷不许删；删失败的现场要留着。
 #[test]
 fn reclaim_refuses_a_volume_that_a_build_is_using() {
-    use crate::capabilities::storage::detail::reclaim::DiskReclaim;
-    use crate::capabilities::storage::ports::SpaceReclaim;
+    use crate::capabilities::maintenance::storage::detail::reclaim::DiskReclaim;
+    use crate::capabilities::maintenance::storage::ports::SpaceReclaim;
     let root = crate::tests::scratch("storage-reclaim-locked");
     let cache = root.join(".vm").join("build-cache");
     std::fs::create_dir_all(&cache).unwrap();
@@ -302,8 +302,8 @@ fn reclaim_refuses_a_volume_that_a_build_is_using() {
 /// 目的：按模块清理写成 虚拟根.purge 标记；名字不安全一律拒绝。
 #[test]
 fn reclaim_queues_a_module_purge_marker() {
-    use crate::capabilities::storage::detail::reclaim::DiskReclaim;
-    use crate::capabilities::storage::ports::SpaceReclaim;
+    use crate::capabilities::maintenance::storage::detail::reclaim::DiskReclaim;
+    use crate::capabilities::maintenance::storage::ports::SpaceReclaim;
     let root = crate::tests::scratch("storage-purge");
     std::fs::create_dir_all(root.join(".vm").join("build-cache")).unwrap();
     let r = DiskReclaim::new(root.clone());
@@ -321,8 +321,8 @@ fn reclaim_queues_a_module_purge_marker() {
 /// 目的：上次回收的摘要能落盘并原样读回。
 #[test]
 fn reclaim_round_trips_the_last_gc_summary() {
-    use crate::capabilities::storage::detail::reclaim::DiskReclaim;
-    use crate::capabilities::storage::ports::SpaceReclaim;
+    use crate::capabilities::maintenance::storage::detail::reclaim::DiskReclaim;
+    use crate::capabilities::maintenance::storage::ports::SpaceReclaim;
     let root = crate::tests::scratch("storage-last-gc");
     let r = DiskReclaim::new(root.clone());
     assert!(r.last_gc().is_none());
@@ -342,8 +342,8 @@ fn reclaim_round_trips_the_last_gc_summary() {
 /// 目的：没有进程台账时不算有 guest 在跑。
 #[test]
 fn guests_are_absent_without_a_process_ledger() {
-    use crate::capabilities::storage::detail::guests::ProcessGuests;
-    use crate::capabilities::storage::ports::GuestLiveness;
+    use crate::capabilities::maintenance::storage::detail::guests::ProcessGuests;
+    use crate::capabilities::maintenance::storage::ports::GuestLiveness;
     let root = crate::tests::scratch("storage-guests");
     assert!(!ProcessGuests::new(&root).any_running());
     let _ = std::fs::remove_dir_all(&root);
@@ -354,12 +354,12 @@ fn guests_are_absent_without_a_process_ledger() {
 #[test]
 fn host_disk_space_is_readable() {
     let (total, free) =
-        crate::capabilities::storage::detail::space::total_free(std::path::Path::new("/"))
+        crate::capabilities::maintenance::storage::detail::space::total_free(std::path::Path::new("/"))
             .expect("statvfs 应可读");
     assert!(total > 0, "总量应为正");
     assert!(free <= total, "可用量不应超过总量");
     assert!(
-        crate::capabilities::storage::detail::space::total_free(std::path::Path::new(
+        crate::capabilities::maintenance::storage::detail::space::total_free(std::path::Path::new(
             "/definitely-not-a-real-volume"
         ))
         .is_none(),

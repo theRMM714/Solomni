@@ -295,7 +295,7 @@ pub(crate) fn deleting_a_session_releases_its_fence_lease() {
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(vec![module_of("a")]))),
-        Arc::new(crate::capabilities::builds::api::NoBuilds),
+        Arc::new(crate::capabilities::maintenance::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),

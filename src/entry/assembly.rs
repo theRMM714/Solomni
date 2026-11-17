@@ -6,7 +6,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::capabilities::builds::service::BuildsService;
+use crate::capabilities::maintenance::builds::service::BuildsService;
 use crate::capabilities::catalog::packages::api::BaseFacts;
 use crate::capabilities::provision::api::Provision;
 use crate::capabilities::provision::detail::fetch::HttpFetch;
@@ -17,8 +17,8 @@ use crate::capabilities::provision::detail::ledger::FileLedger;
 use crate::capabilities::provision::detail::procs::BookProcs;
 use crate::capabilities::provision::ports::Fetcher;
 use crate::capabilities::provision::service::{ProvisionDeps, ProvisionService};
-use crate::capabilities::storage::api::StoragePolicy;
-use crate::capabilities::storage::service::StorageService;
+use crate::capabilities::maintenance::storage::api::StoragePolicy;
+use crate::capabilities::maintenance::storage::service::StorageService;
 use crate::capabilities::system::service::{SystemDeps, SystemService};
 use crate::capabilities::vm::api::Vm;
 
@@ -100,11 +100,11 @@ pub(crate) fn storage(
 ) -> StorageService {
     StorageService::new(
         provision,
-        Arc::new(crate::capabilities::storage::detail::survey::DiskSurvey::new(root.to_path_buf())),
+        Arc::new(crate::capabilities::maintenance::storage::detail::survey::DiskSurvey::new(root.to_path_buf())),
         Arc::new(
-            crate::capabilities::storage::detail::reclaim::DiskReclaim::new(root.to_path_buf()),
+            crate::capabilities::maintenance::storage::detail::reclaim::DiskReclaim::new(root.to_path_buf()),
         ),
-        Arc::new(crate::capabilities::storage::detail::guests::ProcessGuests::new(root)),
+        Arc::new(crate::capabilities::maintenance::storage::detail::guests::ProcessGuests::new(root)),
         Arc::new(crate::kernel::ports::NoopLog),
         policy,
     )
@@ -159,13 +159,13 @@ pub(crate) fn build_service(root: &Path) -> Result<BuildsService, String> {
         ),
     );
     let provision: Arc<dyn Provision + Send + Sync> = Arc::new(provision(root));
-    let storage: Arc<dyn crate::capabilities::storage::api::Storage + Send + Sync> = Arc::new(
+    let storage: Arc<dyn crate::capabilities::maintenance::storage::api::Storage + Send + Sync> = Arc::new(
         storage(root, Arc::clone(&provision), StoragePolicy::default()),
     );
     let runner: Arc<dyn crate::kernel::ports::ProcessRunner + Send + Sync> =
         Arc::new(build_runner(root)?);
     let store = Arc::new(
-        crate::capabilities::builds::detail::fingerprint::BuildStore::new(root.to_path_buf()),
+        crate::capabilities::maintenance::builds::detail::fingerprint::BuildStore::new(root.to_path_buf()),
     );
     Ok(BuildsService::new(
         root.to_path_buf(),
@@ -175,7 +175,7 @@ pub(crate) fn build_service(root: &Path) -> Result<BuildsService, String> {
         storage,
         store.clone(),
         store,
-        Arc::new(crate::capabilities::builds::detail::cache::CacheOnDisk::new(root.to_path_buf())),
+        Arc::new(crate::capabilities::maintenance::builds::detail::cache::CacheOnDisk::new(root.to_path_buf())),
         runner,
         Arc::new(crate::capabilities::tools::service::fence::ToolFenceGate),
         Arc::new(crate::kernel::detail::confine::FenceHostAdapter::new(
@@ -189,9 +189,9 @@ pub(crate) fn build_service(root: &Path) -> Result<BuildsService, String> {
 /// 目的：系统维护能力面的端口：组合根里已经装好的同一份实例，启动相命令直接复用。
 /// 约束：一处进程只要一套存储 / 补齐 / 构建——另装一套会让后台作业与日志互相看不见。
 pub(crate) struct SystemPorts {
-    pub storage: Arc<dyn crate::capabilities::storage::api::Storage + Send + Sync>,
+    pub storage: Arc<dyn crate::capabilities::maintenance::storage::api::Storage + Send + Sync>,
     pub provision: Arc<dyn Provision + Send + Sync>,
-    pub builds: Arc<dyn crate::capabilities::builds::api::Builds + Send + Sync>,
+    pub builds: Arc<dyn crate::capabilities::maintenance::builds::api::Builds + Send + Sync>,
     pub workspace: Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync>,
     pub modules: Arc<dyn crate::capabilities::catalog::modules::api::Modules + Send + Sync>,
 }
@@ -200,9 +200,9 @@ pub(crate) struct SystemPorts {
 /// 约束：只在这里装一次；能力自己不构造别的能力的适配器（依赖由本函数注入）。
 pub(crate) fn system(root: &Path, base: &BaseFacts) -> Result<SystemService, String> {
     let provision: Arc<dyn Provision + Send + Sync> = Arc::new(provision_with_guest_vm(root));
-    let storage: Arc<dyn crate::capabilities::storage::api::Storage + Send + Sync> =
+    let storage: Arc<dyn crate::capabilities::maintenance::storage::api::Storage + Send + Sync> =
         Arc::new(storage(root, Arc::clone(&provision), storage_policy(root)));
-    let builds: Arc<dyn crate::capabilities::builds::api::Builds + Send + Sync> =
+    let builds: Arc<dyn crate::capabilities::maintenance::builds::api::Builds + Send + Sync> =
         Arc::new(build_service(root)?);
     let workspace: Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync> = Arc::new(
         crate::capabilities::workspace::service::WorkspaceService::new(

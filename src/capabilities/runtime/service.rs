@@ -3,7 +3,7 @@
 //! 不管：任何用例的身体（在下层能力）；装配清单（组合根 main.rs）；呈现层的形状（api 与 presentation）。
 //! 联动：api 经 Handle 把命令交给这里；子模块一律 `use super::*` 取共用面。
 
-use crate::capabilities::builds::api::Builds;
+use crate::capabilities::maintenance::builds::api::Builds;
 use crate::capabilities::llm::api::Channel;
 #[cfg(test)]
 use crate::capabilities::llm::api::Msg;

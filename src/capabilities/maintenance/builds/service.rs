@@ -3,15 +3,15 @@
 //! 不管：源指纹、构建状态与缓存卷的机制（`ports.rs` 定接口，`detail/` 实现）、包库与引擎的机制（`packages` / `vm` / `provision`）、CLI 文案（`entry::probes`）。
 //! 联动：`ProcessRunner` / `HostProbe` / `Log` 是 kernel 的共享机制；`SourceDigest` / `BuildStates` / `BuildCache` 是本能力的端口，实现只在组合根注入。
 
-use crate::capabilities::builds::api::{Builds, Built, Target};
-use crate::capabilities::builds::ports::{BuildCache, BuildStates, BuiltRecord, SourceDigest};
+use crate::capabilities::maintenance::builds::api::{Builds, Built, Target};
+use crate::capabilities::maintenance::builds::ports::{BuildCache, BuildStates, BuiltRecord, SourceDigest};
 use crate::capabilities::catalog::modules::api::{BuildDecl, Module};
 use crate::capabilities::catalog::packages::api::{
     Facts, HostExec, Library, Packages, PinPolicy, PlannedPackage, Provider, build_packages,
     diagnose_text, plan_host_requests, requests_for,
 };
 use crate::capabilities::provision::api::Provision;
-use crate::capabilities::storage::api::Storage;
+use crate::capabilities::maintenance::storage::api::Storage;
 use crate::capabilities::vm::api::{
     self as vm, ExecPlan, GuestOs, GuestRun, GuestSpec, MissingEntry, Vm,
 };
