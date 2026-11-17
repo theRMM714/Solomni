@@ -113,7 +113,6 @@ tools:
     capability: exec
     effect: exec
     reach: [private, shared-read, module-read, host-read, network]
-    decision: ask              # 默认说明；四档 profile 的 exec_sandbox / exec_external 决定实际处置
     scope: true                # 接受模型给的 per-call scope：sandbox / external；省略 = sandbox
     callers: [executor, solo, core_proxy]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: |

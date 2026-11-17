@@ -3,25 +3,22 @@
 //! 不管：描述符自身的形状（在 kernel::contracts::fence）、裁决与回执文案（在 service/fence.rs）、平台机制（在 kernel::detail::confine）。
 //! 联动：经 tools::api 给成员循环与协调业务用；kernel 不反向依赖本模块。
 
-use crate::capabilities::permission::api::{Decision, Reach, ReachSet, ScopeMode};
+use crate::capabilities::permission::api::{Reach, ReachSet};
 use crate::capabilities::workspace::api::Sandbox;
 use crate::capabilities::workspace::api::WorkspaceGrant;
 use crate::kernel::api::{Ask, FenceBlocked, FenceSpec};
 use std::path::{Path, PathBuf};
 
 /// 目的：把共享区按会话的**工作区授权粒度**派生成围栏落点（三态）。
-/// 约束：这次调用没有 shared-read reach、读决定不是 Allow、或共享区范围是"显式无权限"时**完全不派生**；
+/// 约束：`read_shared` 为假（读决定 / reach / 路径范围任一不放行）时**完全不派生**；
 ///   白名单范围（Paths）仍要挂根——允许的子树要能读，具体能读哪棵仍由权限集在工具层判。
 fn push_shared(
     sb: &Sandbox,
-    reach: &ReachSet,
+    read_shared: bool,
     ro_tree: &mut Vec<PathBuf>,
     machine_ro_tree: &mut Vec<PathBuf>,
 ) {
-    if !reach.contains(Reach::SharedRead)
-        || sb.permissions.decisions.read != Decision::Allow
-        || matches!(sb.permissions.shared_read, ScopeMode::None)
-    {
+    if !read_shared {
         return;
     }
     match sb.shared_grant {
@@ -44,21 +41,26 @@ impl FenceSpec {
         let mut ro_tree: Vec<PathBuf> = Vec::new();
         let mut machine_ro_tree: Vec<PathBuf> = Vec::new();
         let mut ro: Vec<PathBuf> = Vec::new();
-        if reach.contains(Reach::Private) {
+        if sb.permissions.may_write_granted(reach, Reach::Private) {
             rw.push(sb.private.clone());
         }
-        if reach.contains(Reach::ModuleWrite)
+        if sb.permissions.may_write_granted(reach, Reach::ModuleWrite)
             && let Some(id) = module
             && sb.modules_with_userdata.contains(id)
             && let Some(root) = sb.modules.get(id)
         {
             rw.push(root.join("userdata"));
         }
-        push_shared(sb, reach, &mut ro_tree, &mut machine_ro_tree);
-        if reach.contains(Reach::ModuleRead) {
+        push_shared(
+            sb,
+            sb.permissions.may_read_shared() && reach.contains(Reach::SharedRead),
+            &mut ro_tree,
+            &mut machine_ro_tree,
+        );
+        if sb.permissions.may_read(Reach::ModuleRead) && reach.contains(Reach::ModuleRead) {
             ro_tree.extend(sb.modules.values().cloned());
         }
-        if reach.contains(Reach::HostRead) {
+        if sb.permissions.may_read(Reach::HostRead) && reach.contains(Reach::HostRead) {
             ro.extend(base.ro.iter().cloned());
         }
         rw.sort();
@@ -73,7 +75,7 @@ impl FenceSpec {
             agent: sb.agent.clone(),
             lease: sb.session.clone(),
             rw,
-            ro: { ro },
+            ro,
             ro_tree,
             machine_ro_tree,
             private: sb.private.clone(),
@@ -89,21 +91,26 @@ impl FenceSpec {
         let mut ro_tree: Vec<PathBuf> = Vec::new();
         let mut machine_ro_tree: Vec<PathBuf> = Vec::new();
         let mut ro: Vec<PathBuf> = Vec::new();
-        if reach.contains(Reach::Private) {
+        if sb.permissions.may_write(Reach::Private) {
             rw.push(sb.private.clone());
         }
-        if reach.contains(Reach::ModuleWrite) {
+        if sb.permissions.may_write(Reach::ModuleWrite) {
             for id in &sb.modules_with_userdata {
                 if let Some(root) = sb.modules.get(id) {
                     rw.push(root.join("userdata"));
                 }
             }
         }
-        push_shared(sb, reach, &mut ro_tree, &mut machine_ro_tree);
-        if reach.contains(Reach::ModuleRead) {
+        push_shared(
+            sb,
+            sb.permissions.may_read_shared(),
+            &mut ro_tree,
+            &mut machine_ro_tree,
+        );
+        if sb.permissions.may_read(Reach::ModuleRead) {
             ro_tree.extend(sb.modules.values().cloned());
         }
-        if reach.contains(Reach::HostRead) {
+        if sb.permissions.may_read(Reach::HostRead) {
             ro.extend(host_roots.iter().cloned());
         }
         rw.sort();
@@ -118,7 +125,7 @@ impl FenceSpec {
             agent: sb.agent.clone(),
             lease: sb.session.clone(),
             rw,
-            ro: { ro },
+            ro,
             ro_tree,
             machine_ro_tree,
             private: sb.private.clone(),

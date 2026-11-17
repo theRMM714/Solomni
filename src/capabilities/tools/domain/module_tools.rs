@@ -21,7 +21,6 @@ impl ToolDecl {
                 capability: String::new(),
                 effect: None,
                 reach: None,
-                decision: None,
                 scope: false,
                 // 模块工具的调用者由**成员归属**决定（装了它的角色 + 用户直跑），不在这一层声明。
                 callers: Vec::new(),

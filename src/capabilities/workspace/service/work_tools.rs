@@ -4,7 +4,7 @@
 //! 联动：`turn` 装配工具面时按 allowed 现取本文件的 `work_handlers`；版本库写入由 workspace 的
 //!   service 串行化（它持版本库端口）。
 
-use crate::capabilities::permission::api::{Decision, PermissionSet, Reach};
+use crate::capabilities::permission::api::{PermissionSet, Reach};
 use crate::capabilities::workspace::api as dw;
 use crate::capabilities::workspace::api::{
     CommitRequest, ResolveRequest, ResolveTake, Sandbox, Workspace,
@@ -27,7 +27,7 @@ pub struct WorkHandler {
 /// 目的：逐条路径过读权限：拉不进来的东西，读了也没有，所以在这里就拒绝（不作为提交/冲突问题）。
 ///  纯判定（输入只有生效权限与路径），便于 T1 直接钉规则。
 pub(crate) fn check_readable(permissions: &PermissionSet, paths: &[String]) -> Result<(), String> {
-    if !permissions.reach.contains(Reach::SharedRead) {
+    if !permissions.may_read_shared() {
         return Err(format!(
             "读取被拒：当前档位「{}」没有共享区读取权限",
             permissions.profile.label()
@@ -51,7 +51,7 @@ pub(crate) fn check_writable(
     paths: &[String],
     deletes: &[String],
 ) -> Result<(), String> {
-    if !permissions.reach.contains(Reach::SharedWrite) {
+    if !permissions.may_write(Reach::SharedWrite) {
         return Err(format!(
             "提交被拒：当前档位「{}」没有共享区提交权限",
             permissions.profile.label()
@@ -253,9 +253,7 @@ impl WorkHandler {
             if let Err(e) = check_readable(&self.permissions, std::slice::from_ref(&path)) {
                 return outcome(false, e);
             }
-            if self.permissions.decisions.write != Decision::Allow
-                || !self.permissions.reach.contains(Reach::Private)
-            {
+            if !self.permissions.may_write_private() {
                 return outcome(
                     false,
                     format!(

@@ -268,7 +268,6 @@ fn module_schema() -> ToolSchema {
             Reach::HostRead,
             Reach::Network,
         ])),
-        decision: Some(Decision::Allow),
         scope: false,
         callers: Vec::new(),
     }
@@ -354,11 +353,11 @@ fn grant_for(
     let qualified = owner
         .map(|m| format!("{}.{}", m, tool))
         .unwrap_or_else(|| tool.to_string());
-    let decision =
-        ctx.face
-            .sandbox
-            .permissions
-            .decision_for(&qualified, effect, scope, schema.decision());
+    let decision = ctx
+        .face
+        .sandbox
+        .permissions
+        .decision_for(&qualified, effect, scope);
     Ok(CallGrant { reach, decision })
 }
 
@@ -811,12 +810,11 @@ pub(crate) fn run_shell(
             fence_prep.as_ref().map(|timing| timing.as_secs()),
         ));
     }
-    let external = ctx.face.sandbox.permissions.decision_for(
-        name,
-        Effect::Exec,
-        CallScope::External,
-        Decision::Allow,
-    );
+    let external =
+        ctx.face
+            .sandbox
+            .permissions
+            .decision_for(name, Effect::Exec, CallScope::External);
     let outcome = api::with_scope_hint(outcome, call.scope, external);
     // 事实只从这一次执行产出：实况槽与会话回放读同一份，呈现层不再解析回执。
     let facts = ran.then(|| {

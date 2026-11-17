@@ -58,11 +58,11 @@
 
 ## 三、单次调用判定
 
-- 输入：会话生效权限（profile 的 reach / decision）、工具声明（effect / 最大 reach / 默认 decision / 是否接 scope）、本次参数。
+- 输入：会话生效权限（profile 的 reach / decision）、工具声明（effect / 最大 reach / 是否接 scope）、本次参数。
 
 1. granted = 会话 reach ∩ 工具最大 reach；
 2. 工具声明 scope 时：requested = sandbox（只有 private）或 external（private + shared-read + module-read + host-read + network）；若 requested 不是 granted 的子集 → 拒绝（不是问）；granted = granted ∩ requested；
-3. decision = 会话逐工具覆盖 → profile 的 effect/scope 决定（四档都显式给出；工具声明里的默认只作缺省说明，不压过用户选的 profile）；
+3. decision = 会话逐工具覆盖 → profile 的 effect/scope 决定（四档都显式给出；工具声明没有「默认处置」这一层，判定只有一个来源）；
 4. deny 不执行；ask 有前端进裁决队、无前端拒绝；allow 执行；
 5. 执行层按 granted 派生围栏 / 做路径判定。
 
@@ -104,6 +104,7 @@
 ## 七、安全验收
 
 - 行为矩阵：四档 profile × 七个 reach × 四种 effect × 三种 call scope 的处置逐格穷举（`decision_matrix_is_total_across_profile_effect_scope_and_reach`，`src/tests/permission.rs`）。
+- 写决策被拒时，围栏与工作区判据同源地不授私有写（`deny_write_decision_withholds_private_rw`，`src/tests/permission.rs`）。
 - 代数性质：`Decision` 取严的交换 / 结合 / 幂等 / 吸收，`ReachSet` 求交的交换 / 结合 / 幂等与子集等价，共享区三态的子集蕴含与交集逐路径等价（`decision_and_reach_algebra_hold_for_every_combination`、`shared_scope_intersection_and_subset_agree_on_every_path`）。
 - 收窄不放大：子会话的档位、reach、共享区、decision、拒绝名单与逐工具决定逐维断言（`narrowing_never_widens_profile_reach_scope_or_decision`）。
 - CI 的 `--fence-live` 门禁把安全探针的环境跳过记 `quality-fail`，不许当成通过（`tests/gates/steps.js` 的 `securitySkipsIn`）；`--strict-env` 没带 `--fence-live` 同样失败。
