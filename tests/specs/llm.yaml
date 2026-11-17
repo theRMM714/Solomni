@@ -1,0 +1,19 @@
+# 供应商与模型 的用例声明（一个单元一份；文件名 = 单元名）。
+# 文件级条目：一个 Rust 测试模块 = 一条；搬实现只改适配层，这里仍指向行为。
+# 格式：- id: cargo/tests::<模块路径> | e2e/<旅程 id>，紧跟 tier 与一句 note。
+
+unit: llm
+title: 供应商与模型
+cases:
+  - id: cargo/tests::detail::http
+    tier: T2
+    note: 供应商 HTTP 契约（边界桩）
+  - id: cargo/tests::fakes
+    tier: T1
+    note: 替身自检（假聊天端）
+  - id: cargo/tests::llm
+    tier: T1
+    note: 供应商与模型调用
+  - id: e2e/native-tools
+    tier: T5
+    note: 原生工具调用：一次回复两个调用，协议形状由假供应商核对

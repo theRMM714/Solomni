@@ -236,449 +236,7 @@ async function lines(sid) {
   return out;
 }
 
-(async () => {
-  for (let i = 0; i < 60; i++) {
-    try { const s = await stateOk(); if (s.status === 200) break; } catch {}
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  const st = await stateOk();
-  assert(st.status === 200 && Array.isArray(st.json.agents), 'GET /api/state 带 agents', st.text.slice(0, 120));
-
-  // 登记处：一个供应商 + 两个模型
-  assert((await reg('upsert_provider', { id: 'mock', base_url: MOCK_BASE + '/v1', api_key: 'k' })).status === 200, '登记供应商');
-  // 假供应商按**手写信封**回话（见 mock.js）：这里显式选信封，别用缺省 native。
-  assert((await reg('upsert_model', { id: 'm1', name: 'M1', api_model: 'm1', provider: 'mock', note: '', tools: 'envelope' })).status === 200, '登记模型 m1');
-  assert((await reg('upsert_model', { id: 'm2', name: 'M2', api_model: 'm2', provider: 'mock', note: '', tools: 'envelope' })).status === 200, '登记模型 m2');
-  assert((await reg('set_core_model', { id: 'm1' })).status === 200, '设核心默认 m1');
-  assert((await reg('upsert_agent', { name: '单兵', modules: ['summarizer'], model: 'm1', note: 'e2e' })).status === 200, '登记 agent 单兵');
-  assert((await reg('upsert_agent', { name: '双子', modules: ['research', 'reviewer'], model: 'm2', note: 'e2e 多模块' })).status === 200, '登记 agent 双子（2 模块 / m2）');
-
-  // 推荐：核心优先复用登记处里的 agent（不代拟模型）
-  const sug = await api('POST', '/api/suggest-models', { task: '调研并总结', mode: 'single' });
-  assert(sug.status === 200, 'POST /api/suggest-models(mode=single)', sug.text.slice(0, 160));
-  const rec = (sug.json && sug.json.agents && sug.json.agents[0]) || {};
-  assert(rec.reuse === true, '复用项带 reuse=true', JSON.stringify(rec));
-  assert(rec.name === '双子' && rec.model === 'm2', '复用沿用登记处的模型（不代拟）', JSON.stringify(rec));
-  assert((rec.modules || []).join() === 'research,reviewer', '复用带全部模块（不截断）', JSON.stringify(rec.modules));
-
-  // 单 agent（模块无外部工具）：内置 write 落在该 agent 私沙箱
-  const name1 = 'e2e-single-' + Date.now();
-  const c1 = await api('POST', '/api/actions/create_session', {
-    name: name1, mode: 'single',
-    agents: [{ name: '专属', transient: true, modules: ['research'], model: 'm1' }],
-  });
-  assert(c1.status === 200, '建单 agent 工作', c1.text.slice(0, 200));
-  const meta1 = fs.readFileSync(path.join(dir(name1), 'meta.yaml'), 'utf8');
-  assert(/mode: single/.test(meta1), 'meta.mode = single', meta1.split('\n').slice(0, 6).join(' | '));
-
-  const said = await act(name1, 'send_message', { text: '记一笔' });
-  assert(said.status === 200, '单 agent 发言', said.text.slice(0, 200));
-  const note = path.join(dir(name1), '专属', 'mock-note.txt');
-  assert(fs.existsSync(note) && fs.readFileSync(note, 'utf8') === '来自内置工具', '内置 write 落在该 agent 私沙箱', note);
-
-  // 转录结构：一轮模型调用 = 一行，工具调用自成一条 tool 行
-  const l1 = await lines(name1);
-  assert(l1.map((x) => x.id).join() === '0,1,2', '一次工具循环 = 用户行 + 工具行 + 文本行（id 连续）', JSON.stringify(l1.map((x) => x.id)));
-  const t1 = (l1[1] || {}).tool || {};
-  assert(t1.name === 'write' && t1.ok === true && t1.module === '', '工具调用是一条 tool 行（内置工具 module 为空）', JSON.stringify(t1).slice(0, 200));
-  assert(l1[2] && !l1[2].tool, '最后一行是纯文本行', JSON.stringify(l1[2] || {}).slice(0, 160));
-  // 回档：删除该行及其后（点第一行 → 转录清空）；删除也把沙箱一起退回该点，成品进 lost。
-  assert((await act(name1, 'rewind', { id: 0, mode: 'delete' })).status === 200, '回档到第一行');
-  const l1r = await lines(name1);
-  assert(l1r.length === 0, '删除第一行后转录清空', JSON.stringify(l1r).slice(0, 160));
-  assert(!fs.existsSync(note), '删除把沙箱里的成品一起退回删除点', note);
-  const lostRoot = path.join(dir(name1), '.work', 'lost', '专属');
-  const lostFiles = fs.existsSync(lostRoot) ? fs.readdirSync(lostRoot, { recursive: true }).map(String) : [];
-  assert(lostFiles.some((p) => p.endsWith('mock-note.txt')), '删除前的沙箱成品进了 lost 备份', JSON.stringify(lostFiles));
-  // 后面的文件清单场景还要看沙箱成品：再跑一轮把它写回来。
-  assert((await act(name1, 'send_message', { text: '再记一笔' })).status === 200, '删除后再记一笔');
-  assert(fs.existsSync(note) && fs.readFileSync(note, 'utf8') === '来自内置工具', '新的一轮重新写出成品', note);
-
-  // 留档回档（archive）+ 恢复：把 [0, before) 折叠进档案并**留一条可恢复的标记**；
-  // 恢复按标记把转录与共享区一起展回来（删除模式不写标记，这条是新的一档）。
-  const nameArc = 'e2e-archive-' + Date.now();
-  const cArc = await api('POST', '/api/actions/create_session', {
-    name: nameArc, mode: 'single',
-    agents: [{ name: '专属', transient: true, modules: ['research'], model: 'm1' }],
-  });
-  assert(cArc.status === 200, '建留档回档工作', cArc.text.slice(0, 200));
-  assert((await act(nameArc, 'send_message', { text: '留档一笔' })).status === 200, '留档回档前发言');
-  const arcNote = path.join(dir(nameArc), '专属', 'mock-note.txt');
-  const arcBefore = await lines(nameArc);
-  assert(
-    arcBefore.map((x) => x.id).join() === '0,1,2' && fs.existsSync(arcNote),
-    '留档前：三行转录 + 沙箱成品',
-    JSON.stringify(arcBefore.map((x) => x.id))
-  );
-  assert((await act(nameArc, 'rewind', { id: 0, mode: 'archive' })).status === 200, '留档回档到第一行');
-  assert((await lines(nameArc)).length === 0, '留档回档后转录清空');
-  assert(!fs.existsSync(arcNote), '留档回档把沙箱成品一起折叠进档案', arcNote);
-  const arcHist = await api('GET', '/api/history/' + encodeURIComponent(nameArc));
-  const arcMark = ((arcHist.json && arcHist.json.events) || [])
-    .filter((e) => e.type === 'rewind' && e.mode === 'archive')
-    .pop();
-  assert(
-    arcMark && typeof arcMark.mark === 'number' && arcMark.before === 0,
-    '留档留了一条可恢复的标记（before=0）',
-    JSON.stringify(arcMark)
-  );
-  assert((await act(nameArc, 'rewind', { id: arcMark.mark, mode: 'restore' })).status === 200, '按标记恢复留档');
-  const arcBack = await lines(nameArc);
-  assert(
-    arcBack.map((x) => x.id).join() === arcBefore.map((x) => x.id).join(),
-    '恢复后转录逐行回到留档前',
-    JSON.stringify(arcBack.map((x) => x.id))
-  );
-  assert(
-    fs.existsSync(arcNote) && fs.readFileSync(arcNote, 'utf8') === '来自内置工具',
-    '恢复把沙箱成品一起展回来',
-    arcNote
-  );
-
-  // 零模块 agent 的 shell：sandbox 只碰私有沙箱；成功与退出码两条都落成 tool 行。
-  // 容器围栏对 shell 是**严格**的（不允许降级）：安全模式（不写 ACL）下这条必然被拒，
-  // 所以只有真机围栏（--fence-live / CI 的 e2e job）才跑它，其余模式如实记一条 [探针]。
-  if (process.env.E2E_FENCE_LIVE !== '1') {
-    console.log('[探针] 未开启真机围栏（--fence-live）：跳过容器 shell 场景（安全模式下严格围栏必然拒绝）');
-  } else {
-    const nameShell = 'e2e-shell-' + Date.now();
-    const cShell = await api('POST', '/api/actions/create_session', {
-      name: nameShell, mode: 'single',
-      agents: [{ name: '执行手', transient: true, modules: [], model: 'm1' }],
-    });
-    assert(cShell.status === 200, '建零模块单 agent 工作（shell）', cShell.text.slice(0, 200));
-    const sShell = await act(nameShell, 'send_message', { text: '跑 shell' });
-    assert(sShell.status === 200, '零模块 agent 跑 shell', sShell.text.slice(0, 200));
-    const lShell = await lines(nameShell);
-    const shells = lShell.map((x) => x.tool).filter((t) => t && t.name === 'shell');
-    assert(shells.length === 2, '一次回复的两条 shell 调用都落成 tool 行', JSON.stringify(shells).slice(0, 300));
-    assert(
-      shells[0] && shells[0].ok === true && String(shells[0].output).includes('SHELL-OK-中文'),
-      'sandbox shell 成功且中文原样回执',
-      JSON.stringify(shells[0] || {}).slice(0, 300)
-    );
-    assert(
-      shells[1] && shells[1].ok === false && String(shells[1].output).includes('退出码 7'),
-      '非零退出如实回执退出码',
-      JSON.stringify(shells[1] || {}).slice(0, 300)
-    );
-    const shellCwd = pwdLine((shells[0] || {}).output);
-    const shellPrivate = path.join(dir(nameShell), '执行手');
-    assert(
-      sameSandboxCwd(shellCwd, shellPrivate),
-      'shell 回执的 cwd 是私有沙箱（宿主真实路径或视图写法，盘符按实例分配）',
-      shellCwd + ' vs ' + shellPrivate + ' / ' + JSON.stringify(shells[0] || {}).slice(0, 800)
-    );
-    const shellFile = path.join(dir(nameShell), '执行手', 'shell-ok.txt');
-    assert(
-      fs.existsSync(shellFile) && fs.readFileSync(shellFile, 'utf8').includes('SHELL-OK-中文'),
-      'shell 在 cwd 里写的文件，宿主能在真实私有沙箱读到（视图写法翻译正确）',
-      shellFile + ' / ' + JSON.stringify(shells[0] || {}).slice(0, 1200)
-    );
-  }
-
-  // 单 agent 带 2 个模块，且外部工具属于「第二个」模块：必须在它自己模块的目录里跑
-  fs.mkdirSync(path.join(ROOT, 'modules', 'toolbox', 'userdata'), { recursive: true });
-  fs.writeFileSync(path.join(ROOT, 'modules', 'toolbox', 'userdata', 'e2e.txt'), '第一行内容\n第二行内容\n');
-  const name1b = 'e2e-multi-' + Date.now();
-  const c1b = await api('POST', '/api/actions/create_session', {
-    name: name1b, mode: 'single',
-    agents: [{ name: '双子形', transient: true, modules: ['research', 'toolbox'], model: 'm1' }],
-  });
-  assert(c1b.status === 200, '建单 agent 工作（1 个 agent 带 2 个模块）', c1b.text.slice(0, 200));
-  const meta1b = fs.readFileSync(path.join(dir(name1b), 'meta.yaml'), 'utf8');
-  assert((meta1b.match(/- research|- toolbox/g) || []).length >= 2, 'meta 记录了该 agent 的两个模块');
-  const said1b = await act(name1b, 'send_message', { text: '读一下' });
-  assert(said1b.status === 200, '多模块 agent 发言', said1b.text.slice(0, 200));
-  const lb = await lines(name1b);
-  const tb = (lb[1] || {}).tool || {};
-  assert(tb.module === 'toolbox' && tb.name === 'read_txt' && tb.ok === true, '外部工具用它自己模块的目录当 cwd 并成功（落成 tool 行）', JSON.stringify(tb).slice(0, 240));
-  assert(String(tb.output || '').includes('第二行内容'), '工具结果原文进了转录（重启/回档后仍可回放）', String(tb.output).slice(0, 160));
-
-  // 多模块 agent 漏写 module：核心如实报错并列出可用的 模块.工具（不猜）
-  const said1c = await act(name1b, 'send_message', { text: '不要写模块，直接读' });
-  assert(said1c.status === 200, '漏写 module 时仍能发言（不崩）', said1c.text.slice(0, 200));
-  const lc = await lines(name1b);
-  const fail = lc.filter((x) => x.tool).pop() || {};
-  const ft = fail.tool || {};
-  assert(ft.ok === false && /module/i.test(String(ft.output || '')), '漏写 module → tool 行记为失败并如实说明', JSON.stringify(ft).slice(0, 240));
-  assert(String(ft.output || '').includes('toolbox.read_txt'), '报错里列出可用的 模块.工具', String(ft.output).slice(0, 240));
-
-  // 上传（同名不覆盖）＋ 文件清单 ＋ @ 引用改写
-  const b64 = Buffer.from('用户投喂').toString('base64');
-  const up1 = await act(name1, 'upload', { name: 'f.txt', data_base64: b64 });
-  const up2 = await act(name1, 'upload', { name: 'f.txt', data_base64: b64 });
-  assert(up1.status === 200 && up2.status === 200 && up2.json && up2.json.uploaded === false, '上传同名如实报出、不静默覆盖', up1.status + '/' + up2.status + ' ' + up2.text.slice(0, 120));
-  assert(fs.existsSync(path.join(dir(name1), 'work', 'f.txt')), '投喂落在 work/');
-  const files = await api('GET', '/api/sessions/' + encodeURIComponent(name1) + '/files');
-  assert(files.status === 200 && (files.json.work || []).includes('f.txt'), 'GET /files 列出共享区文件', files.text.slice(0, 200));
-  const af = (files.json.agents || [])[0] || {};
-  assert((af.files || []).includes('mock-note.txt'), '/files 列出该 agent 沙箱里的成品', JSON.stringify(af).slice(0, 200));
-  const rr = files.json.roots || {};
-  assert(typeof rr.work === 'string' && /\/work$/.test(rr.work), '/files 返回共享区真实根（/ 分隔）', JSON.stringify(rr).slice(0, 220));
-  const ra = (rr.agents || [])[0] || {};
-  assert(String(ra.name || '') !== '' && String(ra.root || '').endsWith('/' + ra.name), '/files 返回 agent 沙箱真实根（与 agents 同序同名）', JSON.stringify(ra).slice(0, 220));
-  const saidRef = await act(name1, 'send_message', { text: '@work:f.txt 看一下' });
-  assert(saidRef.status === 200, '@ 引用发言', saidRef.text.slice(0, 200));
-  const lr = await lines(name1);
-  const ul = lr.filter((x) => x.speaker === '用户').pop() || {};
-  assert(!/@work:/.test(String(ul.line)) && /work[\\/]+f\.txt/.test(String(ul.line)), '核心把 @work:… 改写成真实绝对路径', String(ul.line).slice(0, 200));
-
-  // 句读标点不进路径：@work:f.txt，看一下 → work:/f.txt，看一下
-  const saidPunct = await act(name1, 'send_message', { text: '@work:f.txt，看一下' });
-  assert(saidPunct.status === 200, '带句读的引用发言', saidPunct.text.slice(0, 200));
-  const lp = await lines(name1);
-  const upl = lp.filter((x) => x.speaker === '用户').pop() || {};
-  assert(/work[\\/]+f\.txt，看一下/.test(String(upl.line)), '句读标点不入路径（留在正文里）', String(upl.line).slice(0, 200));
-
-  // 文件名含空格：引用用引号包住路径 → 仍能改写成正确路径
-  const spaced = '项目 说明.md';
-  const upSpace = await act(name1, 'upload', { name: spaced, data_base64: b64 });
-  assert(upSpace.status === 200, '上传含空格文件名的文件', upSpace.text.slice(0, 160));
-  const saidSpace = await act(name1, 'send_message', { text: '@work:"' + spaced + '" 看一下' });
-  assert(saidSpace.status === 200, '引用含空格文件名', saidSpace.text.slice(0, 200));
-  const ls = await lines(name1);
-  const usl = ls.filter((x) => x.speaker === '用户').pop() || {};
-  assert(new RegExp('项目 说明\\.md').test(String(usl.line)) && !/@work:/.test(String(usl.line)), '引号内的空格路径被完整改写（真实路径）', String(usl.line).slice(0, 240));
-
-  // 工具级确认（逐工具 ask）：真生成 → 真停下 → 真回答；allow / deny / allow_turn 三态都走一遍。
-  const nameAsk = 'e2e-ask-' + Date.now();
-  const cAsk = await api('POST', '/api/actions/create_session', {
-    name: nameAsk, mode: 'single',
-    agents: [{ name: '确认兵', transient: true, modules: ['research'], model: 'm1' }],
-  });
-  assert(cAsk.status === 200, '建"工具确认"会话', cAsk.text.slice(0, 200));
-  const edAsk = await act(nameAsk, 'edit_session', {
-    agents: [{ name: '确认兵', modules: ['research'], model: 'm1' }],
-    permission: { tools: { write: 'ask' } },
-    tier: 'host',
-  });
-  assert(edAsk.status === 200, '把 write 的逐工具决定设成 ask', edAsk.text.slice(0, 240));
-  const sandbox = path.join(dir(nameAsk), '确认兵');
-  const fDeny = path.join(sandbox, 'ask-deny.txt');
-  const fAllow = path.join(sandbox, 'ask-allow.txt');
-  const fFull1 = path.join(sandbox, 'ask-full-1.txt');
-  const fFull2 = path.join(sandbox, 'ask-full-2.txt');
-  // 工具确认与核心各关卡**同一条通道**：同一张卡形状、同一条回答命令（卡号 + 选项 id）。
-  const answerAsk = (card, option) => act(nameAsk, 'answer_card', { card: card.id, option: option, note: '' });
-  const sayAsk = (text) => act(nameAsk, 'send_message', { text });
-
-  // ① 拒绝：生成停下来等回答（快照里能看到那张卡），答 deny → 工具不执行。
-  const pDeny = sayAsk('工具确认：拒绝');
-  const pendDeny = await waitPending(nameAsk, 'tool_approval', 20000);
-  assert(pendDeny && (pendDeny.payload || {}).tool === 'write', '等待中的确认出现在 /api/state 快照里（刷新也能重建卡片）', JSON.stringify(pendDeny || {}).slice(0, 200));
-  assert((pendDeny.options || []).map((o) => o.id).join() === 'allow,deny,allow_turn', '工具卡的选项 id 是 allow / deny / allow_turn', JSON.stringify((pendDeny || {}).options));
-  assert((await answerAsk(pendDeny, 'deny')).status === 200, '答 deny（拒绝）');
-  await settle(pDeny, 30000, '拒绝场景');
-  assert(!fs.existsSync(fDeny), '拒绝 → 工具没执行（文件不存在）', fDeny);
-
-  // ② 放行：答 allow → 工具执行。
-  const pAllow = sayAsk('工具确认：放行');
-  const pendAllow = await waitPending(nameAsk, 'tool_approval', 20000);
-  assert(pendAllow, '第二次确认也停下等回答');
-  await answerAsk(pendAllow, 'allow');
-  await settle(pAllow, 30000, '放行场景');
-  assert(fs.existsSync(fAllow), '放行 → 工具执行（文件存在）', fAllow);
-
-  // ③ 本轮不再问：一次回复给两个 write，第一个答 allow_turn → 第二个不再问、两个都执行。
-  const pFull = sayAsk('工具确认：两个，本轮不再问');
-  const pendFull = await waitPending(nameAsk, 'tool_approval', 20000);
-  assert(pendFull, 'allow_turn 场景的第一批确认出现');
-  await answerAsk(pendFull, 'allow_turn');
-  // 若 allow_turn 没生效会出现第二个确认——自动答掉以免挂住整个驱动，并把"多问了一次"记为失败。
-  let second = null;
-  for (let i = 0; i < 200; i++) {
-    const s = await stateOk();
-    const v = ((s.json && s.json.sessions) || []).find((x) => x.sid === nameAsk);
-    if (v && v.pending && v.pending.gate === 'tool_approval') { second = v.pending; break; }
-    if (!v || !v.running) break; // 生成已结束
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  if (second) await answerAsk(second, 'allow');
-  await settle(pFull, 30000, 'allow_turn 场景');
-  assert(!second, '答 allow_turn 后本轮不再弹第二次确认', JSON.stringify(second || {}).slice(0, 160));
-  assert(fs.existsSync(fFull1) && fs.existsSync(fFull2), '答 allow_turn → 本轮两个调用都执行', fFull1 + ' / ' + fFull2);
-  // [待确认] 是瞬时 Notice（不落盘），但事件台仍保留它；按 sid 从事件台数。
-  // 不能从历史取：历史只给「最后一条转录之后」的尾巴，早于转录的瞬时事件会被跳过。
-  const evAsk = await api(
-    'GET',
-    '/api/events?sid=' + encodeURIComponent(nameAsk) + '&since=0',
-  );
-  const askedTimes = ((evAsk.json && evAsk.json.lines) || [])
-    .flatMap((l) => l.events || [])
-    .filter((e) => e.type === 'notice' && String(e.text || '').includes('[待确认]')).length;
-  assert(askedTimes === 3, '全程只停三次（allow_turn 那轮只停一次；若变成 4 = allow_turn 没生效）', 'asked=' + askedTimes);
-
-  // 非法工具信封：必须记成一条失败的工具行，且 JSON 绝不上屏（真实 bug 的回归）
-  const name1f = 'e2e-badenv-' + Date.now();
-  const c1f = await api('POST', '/api/actions/create_session', {
-    name: name1f, mode: 'single',
-    agents: [{ name: '坏信封手', transient: true, modules: ['toolbox'], model: 'm1' }],
-  });
-  assert(c1f.status === 200, '建「坏信封」工作', c1f.text.slice(0, 200));
-  const s1f = await act(name1f, 'send_message', { text: '坏信封' });
-  assert(s1f.status === 200, '非法信封发言', s1f.text.slice(0, 200));
-  const lf = await lines(name1f);
-  const tf = lf.filter((x) => x.tool).pop() || {};
-  assert(tf.tool && tf.tool.ok === false && tf.tool.name === 'write', '非法信封 → 一条 ok=false 的工具行（名字打捞为 write）', JSON.stringify(tf.tool || {}).slice(0, 200));
-  assert(lf.every((x) => !String(x.line || '').includes('"type"')), '非法信封的 JSON 没有上屏', JSON.stringify(lf.map((x) => String(x.line || '').slice(0, 40))));
-  assert(!fs.existsSync(path.join(dir(name1f), '坏信封手', 'a.md')), '非法信封没有被执行（沙箱里没有 a.md）');
-
-  // 正文在前、坏信封在后且未闭合：正文保留，坏 JSON 不上屏
-  const name1g = 'e2e-unclosed-' + Date.now();
-  const c1g = await api('POST', '/api/actions/create_session', {
-    name: name1g, mode: 'single',
-    agents: [{ name: '半截手', transient: true, modules: ['toolbox'], model: 'm1' }],
-  });
-  assert(c1g.status === 200, '建「半截信封」工作', c1g.text.slice(0, 200));
-  const s1g = await act(name1g, 'send_message', { text: '半截信封' });
-  assert(s1g.status === 200, '半截信封发言', s1g.text.slice(0, 200));
-  const lu = await lines(name1g);
-  const tu = lu.filter((x) => x.tool).pop() || {};
-  assert(tu.tool && tu.tool.ok === false && tu.tool.name === 'write', '未闭合信封也记成失败的工具行', JSON.stringify(tu.tool || {}).slice(0, 200));
-  assert(lu.some((x) => String(x.line || '').includes('好的。') && !String(x.line || '').includes('{')), '正文被保留下来（未闭合的坏 JSON 没有混进去）', JSON.stringify(lu.map((x) => String(x.line || '').slice(0, 40))));
-  assert(lu.every((x) => !String(x.line || '').includes('"type"')), '未闭合信封的 JSON 没有上屏', JSON.stringify(lu.map((x) => String(x.line || '').slice(0, 40))));
-
-  // 外部工具 + 真实绝对路径读用户投喂的文件（最初那个"read_txt 不认识路径"的场景，现在必须是绿的）
-  const name1h = 'e2e-abspath-' + Date.now();
-  const c1h = await api('POST', '/api/actions/create_session', {
-    name: name1h, mode: 'single',
-    agents: [{ name: '工具手', transient: true, modules: ['toolbox'], model: 'm1' }],
-  });
-  assert(c1h.status === 200, '建「绝对路径」工作', c1h.text.slice(0, 200));
-  const upH = await act(name1h, 'upload', {
-    name: 'g.txt', data_base64: Buffer.from('绝对路径能读到').toString('base64'),
-  });
-  assert(upH.status === 200, '投喂 g.txt', upH.text.slice(0, 160));
-  const s1h = await act(name1h, 'send_message', { text: '绝对路径读一下' });
-  assert(s1h.status === 200, '绝对路径发言', s1h.text.slice(0, 200));
-  const lh = await lines(name1h);
-  const th = lh.filter((x) => x.tool).pop() || {};
-  assert(th.tool && th.tool.module === 'toolbox' && th.tool.name === 'read_txt' && th.tool.ok === true, '模块的外部工具用真实绝对路径读到了用户投喂的文件', JSON.stringify(th.tool || {}).slice(0, 260));
-  assert(String((th.tool || {}).output || '').includes('绝对路径能读到'), '工具真的读到了内容（cwd 与路径都对）', String((th.tool || {}).output).slice(0, 200));
-
-  // 自由格式补丁：信封 + 之后原样跟补丁正文（不转义）——这条新路径必须在真实二进制上通
-  const name1p = 'e2e-patch-' + Date.now();
-  const c1p = await api('POST', '/api/actions/create_session', {
-    name: name1p, mode: 'single',
-    agents: [{ name: '补丁手', transient: true, modules: ['research'], model: 'm1' }],
-  });
-  assert(c1p.status === 200, '建「补丁」工作', c1p.text.slice(0, 200));
-  const s1p = await act(name1p, 'send_message', { text: '打补丁' });
-  assert(s1p.status === 200, '补丁发言', s1p.text.slice(0, 200));
-  const lpatch = await lines(name1p);
-  const tpatch = lpatch.filter((x) => x.tool).pop() || {};
-  assert(tpatch.tool && tpatch.tool.name === 'patch' && tpatch.tool.ok === true, '自由格式补丁落成一条成功的工具行', JSON.stringify(tpatch.tool || {}).slice(0, 260));
-  const patched = path.join(dir(name1p), '补丁手', 'mock-patch.txt');
-  assert(fs.existsSync(patched), '补丁真的写下了文件');
-  assert(
-    fs.readFileSync(patched, 'utf8') === '补丁第一行\n补丁第二行「引号、换行、冒号：都不用转义」',
-    '补丁内容原样落盘（引号/换行/中文都没被转义）',
-    JSON.stringify(fs.readFileSync(patched, 'utf8').slice(0, 200)),
-  );
-  assert(
-    lpatch.every((x) => !String(x.line || '').includes('*** Add File') && !String(x.line || '').includes('补丁已经给出')),
-    '补丁正文与它后面的散话都没有上屏（它是工具输入，不是发言）',
-    JSON.stringify(lpatch.map((x) => String(x.line || '').slice(0, 40))),
-  );
-
-  // 协作里引用某个 agent 的私沙：如实说明只有那个 agent 能读（speaker = None）
-  const name1e = 'e2e-refcollab-' + Date.now();
-  const c1e = await api('POST', '/api/actions/create_session', {
-    name: name1e, mode: 'collab', task: '@sandbox:甲/秘密.md 只看这个',
-    agents: [{ name: '甲', transient: true, modules: ['summarizer'], model: 'm1' }],
-  });
-  assert(c1e.status === 200, '建引用私沙的协作工作', c1e.text.slice(0, 200));
-  const le = await lines(name1e);
-  const demand = le.filter((x) => x.speaker === '用户' && x.verb === '需求').pop() || {};
-  assert(String(demand.line).includes('秘密.md') && String(demand.line).includes('能读') && !/@sandbox:/.test(String(demand.line)), '协作里引用私沙 → 改写并如实说明只有该 agent 能读', String(demand.line).slice(0, 200));
-  assert(!String(demand.line).includes('）.md') && !String(demand.line).includes(') .md'), '改写后不残留路径尾巴（扩展名没被句读切断）', String(demand.line).slice(0, 200));
-
-  // 同一轮"先写正文再发工具信封"：正文进转录，信封 JSON 不出现在任何行里
-  const name1d = 'e2e-prose-' + Date.now();
-  const c1d = await api('POST', '/api/actions/create_session', {
-    name: name1d, mode: 'single',
-    agents: [{ name: '双子形2', transient: true, modules: ['research', 'toolbox'], model: 'm1' }],
-  });
-  assert(c1d.status === 200, '建「正文+工具」工作', c1d.text.slice(0, 200));
-  const sd = await act(name1d, 'send_message', { text: '顺便读一下' });
-  assert(sd.status === 200, '「正文+工具」发言', sd.text.slice(0, 200));
-  const ld = await lines(name1d);
-  assert(ld.map((x) => x.id).join() === '0,1,2,3', '正文行 + tool 行 + 答复行（4 条，id 连续）', JSON.stringify(ld.map((x) => x.id)));
-  assert(ld[1] && String(ld[1].line).includes('我先看一下这个文件。') && !String(ld[1].line).includes('{'), '工具轮的正文进了转录且不含 JSON', JSON.stringify(ld[1] || {}).slice(0, 200));
-  assert(ld[2] && ld[2].tool && ld[2].tool.name === 'read_txt', '正文之后紧跟工具卡片', JSON.stringify(ld[2] || {}).slice(0, 200));
-  assert(ld.every((x) => !String(x.line || '').includes('"type"')), '整条转录里没有信封 JSON', JSON.stringify(ld.map((x) => String(x.line || '').slice(0, 40))));
-
-  // 协作（非代拟）：两个 agent 跑完五阶段并交付
-  const name2 = 'e2e-collab-' + Date.now();
-  const c2 = await api('POST', '/api/actions/create_session', {
-    name: name2, mode: 'collab', task: '一起把事情做完',
-    agents: [
-      { name: '甲', transient: true, modules: ['summarizer'], model: 'm1' },
-      { name: '乙', transient: true, modules: ['reviewer'], model: 'm1' },
-    ],
-  });
-  assert(c2.status === 200, '建协作工作（2 个 agent）', c2.text.slice(0, 200));
-  const begin = await answer(name2, 'begin_allow');
-  assert(begin.status === 200, '确认开始讨论', begin.text.slice(0, 200));
-  // 子会话的**事件台**要有它自己的权威行与运行态（不能只落在盘上）：否则打开它的标签页，
-  // 流式块永远等不到替换它的那一行——光标一直挂着、按钮永远停在「停止」（真机反馈过）。
-  const childBus = await api('GET', '/api/events?sid=' + encodeURIComponent(name2 + '--甲') + '&since=0');
-  const childJson = JSON.stringify((childBus.json && childBus.json.lines) || []);
-  assert(
-    childJson.includes('"speaker":"甲"') && childJson.includes('"verb":"say"'),
-    '子会话事件台带它自己的权威发言行（说话人与动词是结构化字段）',
-    childJson.slice(0, 200)
-  );
-  assert(childJson.includes('"working"'), '子会话事件台带运行态（在跑/收尾）', childJson.slice(0, 200));
-  // 裁决卡上的**建议由核心 AI 给**（随 plan 那一次调用一起产出，不额外花调用）。
-  const stPlan = await stateOk();
-  const viewPlan = ((stPlan.json && stPlan.json.sessions) || []).find((v) => v.sid === name2);
-  const pendPlan = (viewPlan && viewPlan.pending) || null;
-  // 待裁决是**快照字段**（与推的 Decision 同源）：刷新页面照样画得出那张卡。
-  // 卡片里的"建议"由核心 AI 随 plan 那一次调用一起给（契约见单测 plan_review_carries_the_core_advice）。
-  // 卡片上那句"建议"**由核心 AI 给**（随 plan 那一次调用一起产出），快照里必须带上它。
-  assert(
-    pendPlan && pendPlan.type === 'decision_card'
-      && (pendPlan.options || []).some((o) => o.id === 'plan_start')
-      && String((pendPlan.message || {}).detail || '').length > 0,
-    '方案待审：快照里带核心 AI 的建议',
-    JSON.stringify(pendPlan).slice(0, 260),
-  );
-  // 整理完停在**待审**：用户回一句明确的开工才推进；开工后节点在子会话里跑，交付是异步产生的。
-  await approvePlan(name2);
-  // 命令回包不再携带事实：协作的转录与交付从**落盘重放**取（快照）。
-  const ev2 = JSON.stringify(await waitForDelivery(name2));
-  // 用户回一句之后，**由核心 AI 判"明确了吗"**：明确才开工（这句是判定通过后核心说的话）。
-  assert(ev2.includes('照你说的开工'), '用户回应后由核心 AI 判定"明确"并开工', ev2.slice(-300));
-  assert(ev2.includes('甲') && ev2.includes('乙'), '协作转录以 agent 名为说话人', ev2.slice(0, 240));
-  assert(ev2.includes('delivery') || ev2.includes('交付'), '协作跑完并交付', ev2.slice(-240));
-  assert(fs.existsSync(path.join(dir(name2), '甲')) && fs.existsSync(path.join(dir(name2), '乙')), '两个 agent 各自沙箱目录已建');
-
-  // 代拟：核心优先复用（单兵）+ 组装（新助手），确认后名单写回 meta
-  const name3 = 'e2e-delegate-' + Date.now();
-  // 协作且不给名单 = 委托核心代拟（delegate 由核心按形态派生，不再是参数）。
-  const c3 = await api('POST', '/api/actions/create_session', { name: name3, mode: 'collab', agents: [], task: '调研一下再总结' });
-  assert(c3.status === 200, '建代拟工作（无名单）', c3.text.slice(0, 200));
-  // 开场事实在**事件台**上（回包只给 head）：按会话过滤取它自己的流。
-  const c3Bus = JSON.stringify(
-    ((await api('GET', '/api/events?sid=' + encodeURIComponent(name3) + '&since=0')).json || {}).lines || [],
-  );
-  assert(c3Bus.includes('代拟'), '核心已代拟名单', c3Bus.slice(0, 240));
-  const slate = await answer(name3, 'slate_confirm');
-  assert(slate.status === 200, '确认代拟名单', slate.text.slice(0, 200));
-  const meta3 = fs.readFileSync(path.join(dir(name3), 'meta.yaml'), 'utf8');
-  assert(meta3.includes('单兵') && meta3.includes('新助手'), '名单写回 meta.yaml（复用项 + 组装项）', meta3.split('\n').slice(0, 20).join(' | '));
-  assert(/transient: false/.test(meta3), '复用项记为非常驻（transient: false）');
-  assert(/transient: true/.test(meta3), '组装项记为临时（transient: true）');
-  assert(fs.existsSync(path.join(dir(name3), '单兵')) && fs.existsSync(path.join(dir(name3), '新助手')), '确认名单后按 agent 名建出沙箱目录');
-  const begun3 = await answer(name3, 'begin_allow');
-  assert(begun3.status === 200, '代拟名单后开始讨论', begun3.text.slice(0, 200));
-  await approvePlan(name3);
-  const ev3 = JSON.stringify(await waitForDelivery(name3));
-  assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slice(0, 240));
-
-
+/** 段间共用：走完审查关卡（协作的必经一步：整理完停在待审，用户明确开工才推进）。 */
   /** 走完审查关卡：整理完停在待审，用户回一句**明确的开工**才推进（协作的必经一步）。 */
 async function approvePlan(name) {
   const r = await answer(name, 'plan_say', '同意开工，按方案推进。');
@@ -686,53 +244,583 @@ async function approvePlan(name) {
   return [];
 }
 
+/* ---------- 段间共用：把转录行读成"人看到的文本"，并等裁决/交付 ----------
+ * 只读事实、不含断言，所以放在旅程外面；段里只写"这一段承诺什么"。
+ */
+const all = (sid) => lines(sid);
+/** 一行 → 文本：**行身份在结构化字段里**（speaker / verb / kind），正文里没有标签——
+ * 与 core 的 LineView::render 同一拼法（断言因此读"人看到的文本"）。 */
+function renderLine(l) {
+  const text = String(l.line || '');
+  const speaker = String(l.speaker || '');
+  const verb = String(l.verb || '');
+  if (l.kind === 'round') return '[' + speaker + ' ' + text + ']';
+  const label = speaker ? (verb ? speaker + ':' + verb : speaker) : '';
+  if (!label) return text;
+  return text ? '[' + label + '] ' + text : '[' + label + ']';
+}
+const joined = (ls) => ls.map(renderLine).join('\n');
+/** 全部事件（notice / delivery / ended 这些不是转录行，得从这里看）。 */
+async function eventsOf(sid) {
+  const r = await api('GET', '/api/history/' + encodeURIComponent(sid));
+  return (r.json && r.json.events) || [];
+}
+
+/** 等一张**推来**的裁决（Decision：短暂事件，只在**事件台**上、不落盘）：驱动据此点「继续」。 */
+async function waitForDecision(sid, kind, ms = 60000) {
+  const until = Date.now() + ms;
+  for (;;) {
+    const r = await api('GET', '/api/events?sid=' + encodeURIComponent(sid) + '&since=0');
+    const ev = JSON.stringify((r.json && r.json.lines) || []);
+    if (ev.includes('"kind":"' + kind + '"')) return ev;
+    if (Date.now() > until) return ev;
+    await new Promise((res) => setTimeout(res, 500));
+  }
+}
+
+/** 等链驱动跑完：节点在**自己的子会话**里跑，父会话的交付是异步产生的。 */
+async function waitForDelivery(sid, ms = 90000) {
+  const until = Date.now() + ms;
+  for (;;) {
+    const ev = await eventsOf(sid);
+    if (JSON.stringify(ev).includes('delivery')) return ev;
+    if (Date.now() > until) return ev;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+}
+
+
+/* ---------- 旅程选择（E2E_JOURNEY）：按 tests/journeys/index.js 的声明一段一段跑 ----------
+ * 空 = 全跑（CI 的默认形态）。给 id 就以 deps 把前置段一起带出来——
+ * e2e 共用一份夹具与一串会话状态，只跑后面一段会缺前面留下的工作。
+ */
+const { BY_ID: JOURNEY_BY_ID, withDeps, selfCheck: journeysSelfCheck } = require('../../journeys/index.js');
+const wantJourneys = String(process.env.E2E_JOURNEY || '').split(',').map((s) => s.trim()).filter(Boolean);
+const journeysBad = journeysSelfCheck();
+if (journeysBad.length) { console.log('FAIL ' + journeysBad.join('；')); process.exit(2); }
+for (const id of wantJourneys) {
+if (!JOURNEY_BY_ID.has(id)) {
+  console.log('FAIL 未知旅程：' + id + '（可选：' + [...JOURNEY_BY_ID.keys()].join(' ') + '）');
+  process.exit(2);
+}
+}
+const selectedJourneys = wantJourneys.length ? withDeps(wantJourneys) : null;
+if (selectedJourneys) {
+console.log('[journey] 选中 ' + wantJourneys.join(',') + '（带上前置共 ' + selectedJourneys.size + ' 段）');
+}
+
+/** 跨段共享：单 agent 那段建的工作，上传那段继续用（依赖关系写在 journeys 的 deps 里）。 */
+let name1;
+
+/** 一个旅程一段：没选中就显式跳过——静默跳过会让"跑了"与"没跑"看起来一样。 */
+async function journey(id, fn) {
+if (selectedJourneys && !selectedJourneys.has(id)) {
+  const title = (JOURNEY_BY_ID.get(id) || {}).title || '';
+  console.log('[journey] 跳过 ' + id + '（' + title + '）');
+  return;
+}
+await fn();
+}
+
+(async () => {
+for (let i = 0; i < 60; i++) {
+  try { const s = await stateOk(); if (s.status === 200) break; } catch {}
+  await new Promise((r) => setTimeout(r, 250));
+}
+const st = await stateOk();
+assert(st.status === 200 && Array.isArray(st.json.agents), 'GET /api/state 带 agents', st.text.slice(0, 120));
+
+await journey('registry', async () => {
+// 登记处：一个供应商 + 两个模型
+assert((await reg('upsert_provider', { id: 'mock', base_url: MOCK_BASE + '/v1', api_key: 'k' })).status === 200, '登记供应商');
+// 假供应商按**手写信封**回话（见 mock.js）：这里显式选信封，别用缺省 native。
+assert((await reg('upsert_model', { id: 'm1', name: 'M1', api_model: 'm1', provider: 'mock', note: '', tools: 'envelope' })).status === 200, '登记模型 m1');
+assert((await reg('upsert_model', { id: 'm2', name: 'M2', api_model: 'm2', provider: 'mock', note: '', tools: 'envelope' })).status === 200, '登记模型 m2');
+assert((await reg('set_core_model', { id: 'm1' })).status === 200, '设核心默认 m1');
+assert((await reg('upsert_agent', { name: '单兵', modules: ['summarizer'], model: 'm1', note: 'e2e' })).status === 200, '登记 agent 单兵');
+assert((await reg('upsert_agent', { name: '双子', modules: ['research', 'reviewer'], model: 'm2', note: 'e2e 多模块' })).status === 200, '登记 agent 双子（2 模块 / m2）');
+
+});
+
+await journey('suggest', async () => {
+// 推荐：核心优先复用登记处里的 agent（不代拟模型）
+const sug = await api('POST', '/api/suggest-models', { task: '调研并总结', mode: 'single' });
+assert(sug.status === 200, 'POST /api/suggest-models(mode=single)', sug.text.slice(0, 160));
+const rec = (sug.json && sug.json.agents && sug.json.agents[0]) || {};
+assert(rec.reuse === true, '复用项带 reuse=true', JSON.stringify(rec));
+assert(rec.name === '双子' && rec.model === 'm2', '复用沿用登记处的模型（不代拟）', JSON.stringify(rec));
+assert((rec.modules || []).join() === 'research,reviewer', '复用带全部模块（不截断）', JSON.stringify(rec.modules));
+
+});
+
+await journey('single-write', async () => {
+// 单 agent（模块无外部工具）：内置 write 落在该 agent 私沙箱
+name1 = 'e2e-single-' + Date.now();
+const c1 = await api('POST', '/api/actions/create_session', {
+  name: name1, mode: 'single',
+  agents: [{ name: '专属', transient: true, modules: ['research'], model: 'm1' }],
+});
+assert(c1.status === 200, '建单 agent 工作', c1.text.slice(0, 200));
+const meta1 = fs.readFileSync(path.join(dir(name1), 'meta.yaml'), 'utf8');
+assert(/mode: single/.test(meta1), 'meta.mode = single', meta1.split('\n').slice(0, 6).join(' | '));
+
+const said = await act(name1, 'send_message', { text: '记一笔' });
+assert(said.status === 200, '单 agent 发言', said.text.slice(0, 200));
+const note = path.join(dir(name1), '专属', 'mock-note.txt');
+assert(fs.existsSync(note) && fs.readFileSync(note, 'utf8') === '来自内置工具', '内置 write 落在该 agent 私沙箱', note);
+
+// 转录结构：一轮模型调用 = 一行，工具调用自成一条 tool 行
+const l1 = await lines(name1);
+assert(l1.map((x) => x.id).join() === '0,1,2', '一次工具循环 = 用户行 + 工具行 + 文本行（id 连续）', JSON.stringify(l1.map((x) => x.id)));
+const t1 = (l1[1] || {}).tool || {};
+assert(t1.name === 'write' && t1.ok === true && t1.module === '', '工具调用是一条 tool 行（内置工具 module 为空）', JSON.stringify(t1).slice(0, 200));
+assert(l1[2] && !l1[2].tool, '最后一行是纯文本行', JSON.stringify(l1[2] || {}).slice(0, 160));
+// 回档：删除该行及其后（点第一行 → 转录清空）；删除也把沙箱一起退回该点，成品进 lost。
+assert((await act(name1, 'rewind', { id: 0, mode: 'delete' })).status === 200, '回档到第一行');
+const l1r = await lines(name1);
+assert(l1r.length === 0, '删除第一行后转录清空', JSON.stringify(l1r).slice(0, 160));
+assert(!fs.existsSync(note), '删除把沙箱里的成品一起退回删除点', note);
+const lostRoot = path.join(dir(name1), '.work', 'lost', '专属');
+const lostFiles = fs.existsSync(lostRoot) ? fs.readdirSync(lostRoot, { recursive: true }).map(String) : [];
+assert(lostFiles.some((p) => p.endsWith('mock-note.txt')), '删除前的沙箱成品进了 lost 备份', JSON.stringify(lostFiles));
+// 后面的文件清单场景还要看沙箱成品：再跑一轮把它写回来。
+assert((await act(name1, 'send_message', { text: '再记一笔' })).status === 200, '删除后再记一笔');
+assert(fs.existsSync(note) && fs.readFileSync(note, 'utf8') === '来自内置工具', '新的一轮重新写出成品', note);
+
+});
+
+await journey('rewind-archive', async () => {
+// 留档回档（archive）+ 恢复：把 [0, before) 折叠进档案并**留一条可恢复的标记**；
+// 恢复按标记把转录与共享区一起展回来（删除模式不写标记，这条是新的一档）。
+const nameArc = 'e2e-archive-' + Date.now();
+const cArc = await api('POST', '/api/actions/create_session', {
+  name: nameArc, mode: 'single',
+  agents: [{ name: '专属', transient: true, modules: ['research'], model: 'm1' }],
+});
+assert(cArc.status === 200, '建留档回档工作', cArc.text.slice(0, 200));
+assert((await act(nameArc, 'send_message', { text: '留档一笔' })).status === 200, '留档回档前发言');
+const arcNote = path.join(dir(nameArc), '专属', 'mock-note.txt');
+const arcBefore = await lines(nameArc);
+assert(
+  arcBefore.map((x) => x.id).join() === '0,1,2' && fs.existsSync(arcNote),
+  '留档前：三行转录 + 沙箱成品',
+  JSON.stringify(arcBefore.map((x) => x.id))
+);
+assert((await act(nameArc, 'rewind', { id: 0, mode: 'archive' })).status === 200, '留档回档到第一行');
+assert((await lines(nameArc)).length === 0, '留档回档后转录清空');
+assert(!fs.existsSync(arcNote), '留档回档把沙箱成品一起折叠进档案', arcNote);
+const arcHist = await api('GET', '/api/history/' + encodeURIComponent(nameArc));
+const arcMark = ((arcHist.json && arcHist.json.events) || [])
+  .filter((e) => e.type === 'rewind' && e.mode === 'archive')
+  .pop();
+assert(
+  arcMark && typeof arcMark.mark === 'number' && arcMark.before === 0,
+  '留档留了一条可恢复的标记（before=0）',
+  JSON.stringify(arcMark)
+);
+assert((await act(nameArc, 'rewind', { id: arcMark.mark, mode: 'restore' })).status === 200, '按标记恢复留档');
+const arcBack = await lines(nameArc);
+assert(
+  arcBack.map((x) => x.id).join() === arcBefore.map((x) => x.id).join(),
+  '恢复后转录逐行回到留档前',
+  JSON.stringify(arcBack.map((x) => x.id))
+);
+assert(
+  fs.existsSync(arcNote) && fs.readFileSync(arcNote, 'utf8') === '来自内置工具',
+  '恢复把沙箱成品一起展回来',
+  arcNote
+);
+
+});
+
+await journey('shell', async () => {
+// 零模块 agent 的 shell：sandbox 只碰私有沙箱；成功与退出码两条都落成 tool 行。
+// 容器围栏对 shell 是**严格**的（不允许降级）：安全模式（不写 ACL）下这条必然被拒，
+// 所以只有真机围栏（--fence-live / CI 的 e2e job）才跑它，其余模式如实记一条 [探针]。
+if (process.env.E2E_FENCE_LIVE !== '1') {
+  console.log('[探针] 未开启真机围栏（--fence-live）：跳过容器 shell 场景（安全模式下严格围栏必然拒绝）');
+} else {
+  const nameShell = 'e2e-shell-' + Date.now();
+  const cShell = await api('POST', '/api/actions/create_session', {
+    name: nameShell, mode: 'single',
+    agents: [{ name: '执行手', transient: true, modules: [], model: 'm1' }],
+  });
+  assert(cShell.status === 200, '建零模块单 agent 工作（shell）', cShell.text.slice(0, 200));
+  const sShell = await act(nameShell, 'send_message', { text: '跑 shell' });
+  assert(sShell.status === 200, '零模块 agent 跑 shell', sShell.text.slice(0, 200));
+  const lShell = await lines(nameShell);
+  const shells = lShell.map((x) => x.tool).filter((t) => t && t.name === 'shell');
+  assert(shells.length === 2, '一次回复的两条 shell 调用都落成 tool 行', JSON.stringify(shells).slice(0, 300));
+  assert(
+    shells[0] && shells[0].ok === true && String(shells[0].output).includes('SHELL-OK-中文'),
+    'sandbox shell 成功且中文原样回执',
+    JSON.stringify(shells[0] || {}).slice(0, 300)
+  );
+  assert(
+    shells[1] && shells[1].ok === false && String(shells[1].output).includes('退出码 7'),
+    '非零退出如实回执退出码',
+    JSON.stringify(shells[1] || {}).slice(0, 300)
+  );
+  const shellCwd = pwdLine((shells[0] || {}).output);
+  const shellPrivate = path.join(dir(nameShell), '执行手');
+  assert(
+    sameSandboxCwd(shellCwd, shellPrivate),
+    'shell 回执的 cwd 是私有沙箱（宿主真实路径或视图写法，盘符按实例分配）',
+    shellCwd + ' vs ' + shellPrivate + ' / ' + JSON.stringify(shells[0] || {}).slice(0, 800)
+  );
+  const shellFile = path.join(dir(nameShell), '执行手', 'shell-ok.txt');
+  assert(
+    fs.existsSync(shellFile) && fs.readFileSync(shellFile, 'utf8').includes('SHELL-OK-中文'),
+    'shell 在 cwd 里写的文件，宿主能在真实私有沙箱读到（视图写法翻译正确）',
+    shellFile + ' / ' + JSON.stringify(shells[0] || {}).slice(0, 1200)
+  );
+}
+
+});
+
+await journey('modules', async () => {
+// 单 agent 带 2 个模块，且外部工具属于「第二个」模块：必须在它自己模块的目录里跑
+fs.mkdirSync(path.join(ROOT, 'modules', 'toolbox', 'userdata'), { recursive: true });
+fs.writeFileSync(path.join(ROOT, 'modules', 'toolbox', 'userdata', 'e2e.txt'), '第一行内容\n第二行内容\n');
+const name1b = 'e2e-multi-' + Date.now();
+const c1b = await api('POST', '/api/actions/create_session', {
+  name: name1b, mode: 'single',
+  agents: [{ name: '双子形', transient: true, modules: ['research', 'toolbox'], model: 'm1' }],
+});
+assert(c1b.status === 200, '建单 agent 工作（1 个 agent 带 2 个模块）', c1b.text.slice(0, 200));
+const meta1b = fs.readFileSync(path.join(dir(name1b), 'meta.yaml'), 'utf8');
+assert((meta1b.match(/- research|- toolbox/g) || []).length >= 2, 'meta 记录了该 agent 的两个模块');
+const said1b = await act(name1b, 'send_message', { text: '读一下' });
+assert(said1b.status === 200, '多模块 agent 发言', said1b.text.slice(0, 200));
+const lb = await lines(name1b);
+const tb = (lb[1] || {}).tool || {};
+assert(tb.module === 'toolbox' && tb.name === 'read_txt' && tb.ok === true, '外部工具用它自己模块的目录当 cwd 并成功（落成 tool 行）', JSON.stringify(tb).slice(0, 240));
+assert(String(tb.output || '').includes('第二行内容'), '工具结果原文进了转录（重启/回档后仍可回放）', String(tb.output).slice(0, 160));
+
+// 多模块 agent 漏写 module：核心如实报错并列出可用的 模块.工具（不猜）
+const said1c = await act(name1b, 'send_message', { text: '不要写模块，直接读' });
+assert(said1c.status === 200, '漏写 module 时仍能发言（不崩）', said1c.text.slice(0, 200));
+const lc = await lines(name1b);
+const fail = lc.filter((x) => x.tool).pop() || {};
+const ft = fail.tool || {};
+assert(ft.ok === false && /module/i.test(String(ft.output || '')), '漏写 module → tool 行记为失败并如实说明', JSON.stringify(ft).slice(0, 240));
+assert(String(ft.output || '').includes('toolbox.read_txt'), '报错里列出可用的 模块.工具', String(ft.output).slice(0, 240));
+
+});
+
+await journey('files', async () => {
+// 上传（同名不覆盖）＋ 文件清单 ＋ @ 引用改写
+const b64 = Buffer.from('用户投喂').toString('base64');
+const up1 = await act(name1, 'upload', { name: 'f.txt', data_base64: b64 });
+const up2 = await act(name1, 'upload', { name: 'f.txt', data_base64: b64 });
+assert(up1.status === 200 && up2.status === 200 && up2.json && up2.json.uploaded === false, '上传同名如实报出、不静默覆盖', up1.status + '/' + up2.status + ' ' + up2.text.slice(0, 120));
+assert(fs.existsSync(path.join(dir(name1), 'work', 'f.txt')), '投喂落在 work/');
+const files = await api('GET', '/api/sessions/' + encodeURIComponent(name1) + '/files');
+assert(files.status === 200 && (files.json.work || []).includes('f.txt'), 'GET /files 列出共享区文件', files.text.slice(0, 200));
+const af = (files.json.agents || [])[0] || {};
+assert((af.files || []).includes('mock-note.txt'), '/files 列出该 agent 沙箱里的成品', JSON.stringify(af).slice(0, 200));
+const rr = files.json.roots || {};
+assert(typeof rr.work === 'string' && /\/work$/.test(rr.work), '/files 返回共享区真实根（/ 分隔）', JSON.stringify(rr).slice(0, 220));
+const ra = (rr.agents || [])[0] || {};
+assert(String(ra.name || '') !== '' && String(ra.root || '').endsWith('/' + ra.name), '/files 返回 agent 沙箱真实根（与 agents 同序同名）', JSON.stringify(ra).slice(0, 220));
+const saidRef = await act(name1, 'send_message', { text: '@work:f.txt 看一下' });
+assert(saidRef.status === 200, '@ 引用发言', saidRef.text.slice(0, 200));
+const lr = await lines(name1);
+const ul = lr.filter((x) => x.speaker === '用户').pop() || {};
+assert(!/@work:/.test(String(ul.line)) && /work[\\/]+f\.txt/.test(String(ul.line)), '核心把 @work:… 改写成真实绝对路径', String(ul.line).slice(0, 200));
+
+// 句读标点不进路径：@work:f.txt，看一下 → work:/f.txt，看一下
+const saidPunct = await act(name1, 'send_message', { text: '@work:f.txt，看一下' });
+assert(saidPunct.status === 200, '带句读的引用发言', saidPunct.text.slice(0, 200));
+const lp = await lines(name1);
+const upl = lp.filter((x) => x.speaker === '用户').pop() || {};
+assert(/work[\\/]+f\.txt，看一下/.test(String(upl.line)), '句读标点不入路径（留在正文里）', String(upl.line).slice(0, 200));
+
+// 文件名含空格：引用用引号包住路径 → 仍能改写成正确路径
+const spaced = '项目 说明.md';
+const upSpace = await act(name1, 'upload', { name: spaced, data_base64: b64 });
+assert(upSpace.status === 200, '上传含空格文件名的文件', upSpace.text.slice(0, 160));
+const saidSpace = await act(name1, 'send_message', { text: '@work:"' + spaced + '" 看一下' });
+assert(saidSpace.status === 200, '引用含空格文件名', saidSpace.text.slice(0, 200));
+const ls = await lines(name1);
+const usl = ls.filter((x) => x.speaker === '用户').pop() || {};
+assert(new RegExp('项目 说明\\.md').test(String(usl.line)) && !/@work:/.test(String(usl.line)), '引号内的空格路径被完整改写（真实路径）', String(usl.line).slice(0, 240));
+
+});
+
+await journey('tool-ask', async () => {
+// 工具级确认（逐工具 ask）：真生成 → 真停下 → 真回答；allow / deny / allow_turn 三态都走一遍。
+const nameAsk = 'e2e-ask-' + Date.now();
+const cAsk = await api('POST', '/api/actions/create_session', {
+  name: nameAsk, mode: 'single',
+  agents: [{ name: '确认兵', transient: true, modules: ['research'], model: 'm1' }],
+});
+assert(cAsk.status === 200, '建"工具确认"会话', cAsk.text.slice(0, 200));
+const edAsk = await act(nameAsk, 'edit_session', {
+  agents: [{ name: '确认兵', modules: ['research'], model: 'm1' }],
+  permission: { tools: { write: 'ask' } },
+  tier: 'host',
+});
+assert(edAsk.status === 200, '把 write 的逐工具决定设成 ask', edAsk.text.slice(0, 240));
+const sandbox = path.join(dir(nameAsk), '确认兵');
+const fDeny = path.join(sandbox, 'ask-deny.txt');
+const fAllow = path.join(sandbox, 'ask-allow.txt');
+const fFull1 = path.join(sandbox, 'ask-full-1.txt');
+const fFull2 = path.join(sandbox, 'ask-full-2.txt');
+// 工具确认与核心各关卡**同一条通道**：同一张卡形状、同一条回答命令（卡号 + 选项 id）。
+const answerAsk = (card, option) => act(nameAsk, 'answer_card', { card: card.id, option: option, note: '' });
+const sayAsk = (text) => act(nameAsk, 'send_message', { text });
+
+// ① 拒绝：生成停下来等回答（快照里能看到那张卡），答 deny → 工具不执行。
+const pDeny = sayAsk('工具确认：拒绝');
+const pendDeny = await waitPending(nameAsk, 'tool_approval', 20000);
+assert(pendDeny && (pendDeny.payload || {}).tool === 'write', '等待中的确认出现在 /api/state 快照里（刷新也能重建卡片）', JSON.stringify(pendDeny || {}).slice(0, 200));
+assert((pendDeny.options || []).map((o) => o.id).join() === 'allow,deny,allow_turn', '工具卡的选项 id 是 allow / deny / allow_turn', JSON.stringify((pendDeny || {}).options));
+assert((await answerAsk(pendDeny, 'deny')).status === 200, '答 deny（拒绝）');
+await settle(pDeny, 30000, '拒绝场景');
+assert(!fs.existsSync(fDeny), '拒绝 → 工具没执行（文件不存在）', fDeny);
+
+// ② 放行：答 allow → 工具执行。
+const pAllow = sayAsk('工具确认：放行');
+const pendAllow = await waitPending(nameAsk, 'tool_approval', 20000);
+assert(pendAllow, '第二次确认也停下等回答');
+await answerAsk(pendAllow, 'allow');
+await settle(pAllow, 30000, '放行场景');
+assert(fs.existsSync(fAllow), '放行 → 工具执行（文件存在）', fAllow);
+
+// ③ 本轮不再问：一次回复给两个 write，第一个答 allow_turn → 第二个不再问、两个都执行。
+const pFull = sayAsk('工具确认：两个，本轮不再问');
+const pendFull = await waitPending(nameAsk, 'tool_approval', 20000);
+assert(pendFull, 'allow_turn 场景的第一批确认出现');
+await answerAsk(pendFull, 'allow_turn');
+// 若 allow_turn 没生效会出现第二个确认——自动答掉以免挂住整个驱动，并把"多问了一次"记为失败。
+let second = null;
+for (let i = 0; i < 200; i++) {
+  const s = await stateOk();
+  const v = ((s.json && s.json.sessions) || []).find((x) => x.sid === nameAsk);
+  if (v && v.pending && v.pending.gate === 'tool_approval') { second = v.pending; break; }
+  if (!v || !v.running) break; // 生成已结束
+  await new Promise((r) => setTimeout(r, 100));
+}
+if (second) await answerAsk(second, 'allow');
+await settle(pFull, 30000, 'allow_turn 场景');
+assert(!second, '答 allow_turn 后本轮不再弹第二次确认', JSON.stringify(second || {}).slice(0, 160));
+assert(fs.existsSync(fFull1) && fs.existsSync(fFull2), '答 allow_turn → 本轮两个调用都执行', fFull1 + ' / ' + fFull2);
+// [待确认] 是瞬时 Notice（不落盘），但事件台仍保留它；按 sid 从事件台数。
+// 不能从历史取：历史只给「最后一条转录之后」的尾巴，早于转录的瞬时事件会被跳过。
+const evAsk = await api(
+  'GET',
+  '/api/events?sid=' + encodeURIComponent(nameAsk) + '&since=0',
+);
+const askedTimes = ((evAsk.json && evAsk.json.lines) || [])
+  .flatMap((l) => l.events || [])
+  .filter((e) => e.type === 'notice' && String(e.text || '').includes('[待确认]')).length;
+assert(askedTimes === 3, '全程只停三次（allow_turn 那轮只停一次；若变成 4 = allow_turn 没生效）', 'asked=' + askedTimes);
+
+});
+
+await journey('bad-envelope', async () => {
+// 非法工具信封：必须记成一条失败的工具行，且 JSON 绝不上屏（真实 bug 的回归）
+const name1f = 'e2e-badenv-' + Date.now();
+const c1f = await api('POST', '/api/actions/create_session', {
+  name: name1f, mode: 'single',
+  agents: [{ name: '坏信封手', transient: true, modules: ['toolbox'], model: 'm1' }],
+});
+assert(c1f.status === 200, '建「坏信封」工作', c1f.text.slice(0, 200));
+const s1f = await act(name1f, 'send_message', { text: '坏信封' });
+assert(s1f.status === 200, '非法信封发言', s1f.text.slice(0, 200));
+const lf = await lines(name1f);
+const tf = lf.filter((x) => x.tool).pop() || {};
+assert(tf.tool && tf.tool.ok === false && tf.tool.name === 'write', '非法信封 → 一条 ok=false 的工具行（名字打捞为 write）', JSON.stringify(tf.tool || {}).slice(0, 200));
+assert(lf.every((x) => !String(x.line || '').includes('"type"')), '非法信封的 JSON 没有上屏', JSON.stringify(lf.map((x) => String(x.line || '').slice(0, 40))));
+assert(!fs.existsSync(path.join(dir(name1f), '坏信封手', 'a.md')), '非法信封没有被执行（沙箱里没有 a.md）');
+
+});
+
+await journey('unclosed-envelope', async () => {
+// 正文在前、坏信封在后且未闭合：正文保留，坏 JSON 不上屏
+const name1g = 'e2e-unclosed-' + Date.now();
+const c1g = await api('POST', '/api/actions/create_session', {
+  name: name1g, mode: 'single',
+  agents: [{ name: '半截手', transient: true, modules: ['toolbox'], model: 'm1' }],
+});
+assert(c1g.status === 200, '建「半截信封」工作', c1g.text.slice(0, 200));
+const s1g = await act(name1g, 'send_message', { text: '半截信封' });
+assert(s1g.status === 200, '半截信封发言', s1g.text.slice(0, 200));
+const lu = await lines(name1g);
+const tu = lu.filter((x) => x.tool).pop() || {};
+assert(tu.tool && tu.tool.ok === false && tu.tool.name === 'write', '未闭合信封也记成失败的工具行', JSON.stringify(tu.tool || {}).slice(0, 200));
+assert(lu.some((x) => String(x.line || '').includes('好的。') && !String(x.line || '').includes('{')), '正文被保留下来（未闭合的坏 JSON 没有混进去）', JSON.stringify(lu.map((x) => String(x.line || '').slice(0, 40))));
+assert(lu.every((x) => !String(x.line || '').includes('"type"')), '未闭合信封的 JSON 没有上屏', JSON.stringify(lu.map((x) => String(x.line || '').slice(0, 40))));
+
+});
+
+await journey('abs-path', async () => {
+// 外部工具 + 真实绝对路径读用户投喂的文件（最初那个"read_txt 不认识路径"的场景，现在必须是绿的）
+const name1h = 'e2e-abspath-' + Date.now();
+const c1h = await api('POST', '/api/actions/create_session', {
+  name: name1h, mode: 'single',
+  agents: [{ name: '工具手', transient: true, modules: ['toolbox'], model: 'm1' }],
+});
+assert(c1h.status === 200, '建「绝对路径」工作', c1h.text.slice(0, 200));
+const upH = await act(name1h, 'upload', {
+  name: 'g.txt', data_base64: Buffer.from('绝对路径能读到').toString('base64'),
+});
+assert(upH.status === 200, '投喂 g.txt', upH.text.slice(0, 160));
+const s1h = await act(name1h, 'send_message', { text: '绝对路径读一下' });
+assert(s1h.status === 200, '绝对路径发言', s1h.text.slice(0, 200));
+const lh = await lines(name1h);
+const th = lh.filter((x) => x.tool).pop() || {};
+assert(th.tool && th.tool.module === 'toolbox' && th.tool.name === 'read_txt' && th.tool.ok === true, '模块的外部工具用真实绝对路径读到了用户投喂的文件', JSON.stringify(th.tool || {}).slice(0, 260));
+assert(String((th.tool || {}).output || '').includes('绝对路径能读到'), '工具真的读到了内容（cwd 与路径都对）', String((th.tool || {}).output).slice(0, 200));
+
+});
+
+await journey('patch', async () => {
+// 自由格式补丁：信封 + 之后原样跟补丁正文（不转义）——这条新路径必须在真实二进制上通
+const name1p = 'e2e-patch-' + Date.now();
+const c1p = await api('POST', '/api/actions/create_session', {
+  name: name1p, mode: 'single',
+  agents: [{ name: '补丁手', transient: true, modules: ['research'], model: 'm1' }],
+});
+assert(c1p.status === 200, '建「补丁」工作', c1p.text.slice(0, 200));
+const s1p = await act(name1p, 'send_message', { text: '打补丁' });
+assert(s1p.status === 200, '补丁发言', s1p.text.slice(0, 200));
+const lpatch = await lines(name1p);
+const tpatch = lpatch.filter((x) => x.tool).pop() || {};
+assert(tpatch.tool && tpatch.tool.name === 'patch' && tpatch.tool.ok === true, '自由格式补丁落成一条成功的工具行', JSON.stringify(tpatch.tool || {}).slice(0, 260));
+const patched = path.join(dir(name1p), '补丁手', 'mock-patch.txt');
+assert(fs.existsSync(patched), '补丁真的写下了文件');
+assert(
+  fs.readFileSync(patched, 'utf8') === '补丁第一行\n补丁第二行「引号、换行、冒号：都不用转义」',
+  '补丁内容原样落盘（引号/换行/中文都没被转义）',
+  JSON.stringify(fs.readFileSync(patched, 'utf8').slice(0, 200)),
+);
+assert(
+  lpatch.every((x) => !String(x.line || '').includes('*** Add File') && !String(x.line || '').includes('补丁已经给出')),
+  '补丁正文与它后面的散话都没有上屏（它是工具输入，不是发言）',
+  JSON.stringify(lpatch.map((x) => String(x.line || '').slice(0, 40))),
+);
+
+});
+
+await journey('ref-collab', async () => {
+// 协作里引用某个 agent 的私沙：如实说明只有那个 agent 能读（speaker = None）
+const name1e = 'e2e-refcollab-' + Date.now();
+const c1e = await api('POST', '/api/actions/create_session', {
+  name: name1e, mode: 'collab', task: '@sandbox:甲/秘密.md 只看这个',
+  agents: [{ name: '甲', transient: true, modules: ['summarizer'], model: 'm1' }],
+});
+assert(c1e.status === 200, '建引用私沙的协作工作', c1e.text.slice(0, 200));
+const le = await lines(name1e);
+const demand = le.filter((x) => x.speaker === '用户' && x.verb === '需求').pop() || {};
+assert(String(demand.line).includes('秘密.md') && String(demand.line).includes('能读') && !/@sandbox:/.test(String(demand.line)), '协作里引用私沙 → 改写并如实说明只有该 agent 能读', String(demand.line).slice(0, 200));
+assert(!String(demand.line).includes('）.md') && !String(demand.line).includes(') .md'), '改写后不残留路径尾巴（扩展名没被句读切断）', String(demand.line).slice(0, 200));
+
+});
+
+await journey('prose', async () => {
+// 同一轮"先写正文再发工具信封"：正文进转录，信封 JSON 不出现在任何行里
+const name1d = 'e2e-prose-' + Date.now();
+const c1d = await api('POST', '/api/actions/create_session', {
+  name: name1d, mode: 'single',
+  agents: [{ name: '双子形2', transient: true, modules: ['research', 'toolbox'], model: 'm1' }],
+});
+assert(c1d.status === 200, '建「正文+工具」工作', c1d.text.slice(0, 200));
+const sd = await act(name1d, 'send_message', { text: '顺便读一下' });
+assert(sd.status === 200, '「正文+工具」发言', sd.text.slice(0, 200));
+const ld = await lines(name1d);
+assert(ld.map((x) => x.id).join() === '0,1,2,3', '正文行 + tool 行 + 答复行（4 条，id 连续）', JSON.stringify(ld.map((x) => x.id)));
+assert(ld[1] && String(ld[1].line).includes('我先看一下这个文件。') && !String(ld[1].line).includes('{'), '工具轮的正文进了转录且不含 JSON', JSON.stringify(ld[1] || {}).slice(0, 200));
+assert(ld[2] && ld[2].tool && ld[2].tool.name === 'read_txt', '正文之后紧跟工具卡片', JSON.stringify(ld[2] || {}).slice(0, 200));
+assert(ld.every((x) => !String(x.line || '').includes('"type"')), '整条转录里没有信封 JSON', JSON.stringify(ld.map((x) => String(x.line || '').slice(0, 40))));
+
+});
+
+await journey('collab', async () => {
+// 协作（非代拟）：两个 agent 跑完五阶段并交付
+const name2 = 'e2e-collab-' + Date.now();
+const c2 = await api('POST', '/api/actions/create_session', {
+  name: name2, mode: 'collab', task: '一起把事情做完',
+  agents: [
+    { name: '甲', transient: true, modules: ['summarizer'], model: 'm1' },
+    { name: '乙', transient: true, modules: ['reviewer'], model: 'm1' },
+  ],
+});
+assert(c2.status === 200, '建协作工作（2 个 agent）', c2.text.slice(0, 200));
+const begin = await answer(name2, 'begin_allow');
+assert(begin.status === 200, '确认开始讨论', begin.text.slice(0, 200));
+// 子会话的**事件台**要有它自己的权威行与运行态（不能只落在盘上）：否则打开它的标签页，
+// 流式块永远等不到替换它的那一行——光标一直挂着、按钮永远停在「停止」（真机反馈过）。
+const childBus = await api('GET', '/api/events?sid=' + encodeURIComponent(name2 + '--甲') + '&since=0');
+const childJson = JSON.stringify((childBus.json && childBus.json.lines) || []);
+assert(
+  childJson.includes('"speaker":"甲"') && childJson.includes('"verb":"say"'),
+  '子会话事件台带它自己的权威发言行（说话人与动词是结构化字段）',
+  childJson.slice(0, 200)
+);
+assert(childJson.includes('"working"'), '子会话事件台带运行态（在跑/收尾）', childJson.slice(0, 200));
+// 裁决卡上的**建议由核心 AI 给**（随 plan 那一次调用一起产出，不额外花调用）。
+const stPlan = await stateOk();
+const viewPlan = ((stPlan.json && stPlan.json.sessions) || []).find((v) => v.sid === name2);
+const pendPlan = (viewPlan && viewPlan.pending) || null;
+// 待裁决是**快照字段**（与推的 Decision 同源）：刷新页面照样画得出那张卡。
+// 卡片里的"建议"由核心 AI 随 plan 那一次调用一起给（契约见单测 plan_review_carries_the_core_advice）。
+// 卡片上那句"建议"**由核心 AI 给**（随 plan 那一次调用一起产出），快照里必须带上它。
+assert(
+  pendPlan && pendPlan.type === 'decision_card'
+    && (pendPlan.options || []).some((o) => o.id === 'plan_start')
+    && String((pendPlan.message || {}).detail || '').length > 0,
+  '方案待审：快照里带核心 AI 的建议',
+  JSON.stringify(pendPlan).slice(0, 260),
+);
+// 整理完停在**待审**：用户回一句明确的开工才推进；开工后节点在子会话里跑，交付是异步产生的。
+await approvePlan(name2);
+// 命令回包不再携带事实：协作的转录与交付从**落盘重放**取（快照）。
+const ev2 = JSON.stringify(await waitForDelivery(name2));
+// 用户回一句之后，**由核心 AI 判"明确了吗"**：明确才开工（这句是判定通过后核心说的话）。
+assert(ev2.includes('照你说的开工'), '用户回应后由核心 AI 判定"明确"并开工', ev2.slice(-300));
+assert(ev2.includes('甲') && ev2.includes('乙'), '协作转录以 agent 名为说话人', ev2.slice(0, 240));
+assert(ev2.includes('delivery') || ev2.includes('交付'), '协作跑完并交付', ev2.slice(-240));
+assert(fs.existsSync(path.join(dir(name2), '甲')) && fs.existsSync(path.join(dir(name2), '乙')), '两个 agent 各自沙箱目录已建');
+
+});
+
+await journey('delegate', async () => {
+// 代拟：核心优先复用（单兵）+ 组装（新助手），确认后名单写回 meta
+const name3 = 'e2e-delegate-' + Date.now();
+// 协作且不给名单 = 委托核心代拟（delegate 由核心按形态派生，不再是参数）。
+const c3 = await api('POST', '/api/actions/create_session', { name: name3, mode: 'collab', agents: [], task: '调研一下再总结' });
+assert(c3.status === 200, '建代拟工作（无名单）', c3.text.slice(0, 200));
+// 开场事实在**事件台**上（回包只给 head）：按会话过滤取它自己的流。
+const c3Bus = JSON.stringify(
+  ((await api('GET', '/api/events?sid=' + encodeURIComponent(name3) + '&since=0')).json || {}).lines || [],
+);
+assert(c3Bus.includes('代拟'), '核心已代拟名单', c3Bus.slice(0, 240));
+const slate = await answer(name3, 'slate_confirm');
+assert(slate.status === 200, '确认代拟名单', slate.text.slice(0, 200));
+const meta3 = fs.readFileSync(path.join(dir(name3), 'meta.yaml'), 'utf8');
+assert(meta3.includes('单兵') && meta3.includes('新助手'), '名单写回 meta.yaml（复用项 + 组装项）', meta3.split('\n').slice(0, 20).join(' | '));
+assert(/transient: false/.test(meta3), '复用项记为非常驻（transient: false）');
+assert(/transient: true/.test(meta3), '组装项记为临时（transient: true）');
+assert(fs.existsSync(path.join(dir(name3), '单兵')) && fs.existsSync(path.join(dir(name3), '新助手')), '确认名单后按 agent 名建出沙箱目录');
+const begun3 = await answer(name3, 'begin_allow');
+assert(begun3.status === 200, '代拟名单后开始讨论', begun3.text.slice(0, 200));
+await approvePlan(name3);
+const ev3 = JSON.stringify(await waitForDelivery(name3));
+assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slice(0, 240));
+
+
+
 /* ---------- 协作状态机的六条判据（L4） ----------
-   * 现有用例只断言"跑完并交付"；这里把状态机的承诺逐条钉住：
-   * agree 收敛 / leave 不可逆 / 轮次上限 / 返工闭环 / 撤回同意 / ask 中止。
-   * 信封走向由 mock.js 按转录事实路由（夹具不改产品行为）。
-   */
-  const all = (sid) => lines(sid);
-  /** 一行 → 文本：**行身份在结构化字段里**（speaker / verb / kind），正文里没有标签——
-   * 与 core 的 LineView::render 同一拼法（断言因此读"人看到的文本"）。 */
-  function renderLine(l) {
-    const text = String(l.line || '');
-    const speaker = String(l.speaker || '');
-    const verb = String(l.verb || '');
-    if (l.kind === 'round') return '[' + speaker + ' ' + text + ']';
-    const label = speaker ? (verb ? speaker + ':' + verb : speaker) : '';
-    if (!label) return text;
-    return text ? '[' + label + '] ' + text : '[' + label + ']';
-  }
-  const joined = (ls) => ls.map(renderLine).join('\n');
-  /** 全部事件（notice / delivery / ended 这些不是转录行，得从这里看）。 */
-  async function eventsOf(sid) {
-    const r = await api('GET', '/api/history/' + encodeURIComponent(sid));
-    return (r.json && r.json.events) || [];
-  }
+ * 现有用例只断言"跑完并交付"；这里把状态机的承诺逐条钉住：
+ * agree 收敛 / leave 不可逆 / 轮次上限 / 返工闭环 / 撤回同意 / ask 中止。
+ * 信封走向由 mock.js 按转录事实路由（夹具不改产品行为）。
+ */
 
-  /** 等一张**推来**的裁决（Decision：短暂事件，只在**事件台**上、不落盘）：驱动据此点「继续」。 */
-  async function waitForDecision(sid, kind, ms = 60000) {
-    const until = Date.now() + ms;
-    for (;;) {
-      const r = await api('GET', '/api/events?sid=' + encodeURIComponent(sid) + '&since=0');
-      const ev = JSON.stringify((r.json && r.json.lines) || []);
-      if (ev.includes('"kind":"' + kind + '"')) return ev;
-      if (Date.now() > until) return ev;
-      await new Promise((res) => setTimeout(res, 500));
-    }
-  }
+});
 
-  /** 等链驱动跑完：节点在**自己的子会话**里跑，父会话的交付是异步产生的。 */
-  async function waitForDelivery(sid, ms = 90000) {
-    const until = Date.now() + ms;
-    for (;;) {
-      const ev = await eventsOf(sid);
-      if (JSON.stringify(ev).includes('delivery')) return ev;
-      if (Date.now() > until) return ev;
-      await new Promise((r) => setTimeout(r, 500));
-    }
-  }
-
+  await journey('collab-state-machine', async () => {
   // ① agree 收敛：只有一个人同意时不该收敛（要出现下一轮），两人都同意才收敛。
   const nA = 'e2e-collab-noconv-' + Date.now();
   assert((await api('POST', '/api/actions/create_session', {
@@ -854,6 +942,9 @@ async function approvePlan(name) {
   const tF = joined(await all(nF));
   assert(tF.includes('用第一个方案'), '用户回答并入转录（进上下文）', tF.slice(-300));
 
+  });
+
+  await journey('mcp', async () => {
   /* ---------- MCP 常驻服务（L4）：模块声明的服务操作进模型工具面，经真进程被调用 ----------
    * 顺序是**产品约束**：单 agent 会话的工具面在建工作时装配一次，所以服务必须先启动、再建工作。
    * 夹具模块（mcp-toolbox）的命令由编排器按本机解释器名写入；服务本体就是仓库里的 tools/server.py。
@@ -894,6 +985,9 @@ async function approvePlan(name) {
   }
 
 
+  });
+
+  await journey('real-tools', async () => {
   /* ---------- 真工具链路（L4）：三个真模块三个语言，真的在真进程里跑 ----------
    * harvest（python）扫夹具共享区 → corpus.jsonl；render（node）把语料渲染成自包含 HTML；
    * indexer（C++，CI 里现编）建索引 → 检索有命中。
@@ -962,6 +1056,9 @@ async function approvePlan(name) {
   const q = rowsR.filter((r) => r.name === 'query').pop();
   assert(q && /检索/.test(String(q.output || '')), 'query 有命中（不是空结果兜底）', String((q && q.output) || '').slice(0, 300));
 
+  });
+
+  await journey('run-module', async () => {
   // 不经 AI 直接跑模块（模块的独立入口 = 它声明的 tools）：同一份动作目录，**不建会话**。
   // 本机档按宿主目标装载运行包：pkgprobe 的 bin/ 进本次 PATH，直跑真的用上它。
   const pkgDirect = await reg('module.pkgprobe.echo', {});
@@ -981,6 +1078,9 @@ async function approvePlan(name) {
   assert(direct.json && direct.json.ok === true, '直跑的回执 ok=true', JSON.stringify(direct.json).slice(0, 300));
   assert(fs.existsSync(directOut), '直跑的产物落在用户指定目录', directOut);
 
+  });
+
+  await journey('native-tools', async () => {
   // 原生工具调用（真实二进制 + 真 HTTP）：先实测这条通道支持（探测把 tools 写回 native），
   // 再跑一次"一次回复两个调用"，并核对**发给供应商的历史就是协议形状**。
   // 放在最后：把 m1 判成 native 之后，前面那些信封场景的预期就不再成立。
@@ -1026,6 +1126,9 @@ async function approvePlan(name) {
   assert((await reg('set_settings', { streaming: true })).status === 200, '恢复流式');
 
 
+  });
+
+  await journey('proxy', async () => {
   // ---- 代理模式（第三人形态）：核心代用户挑人 → 建子工作 → 转达 → 停止即全停 ----
   {
     await reg('upsert_agent', { name: '代甲', modules: ['render'], model: 'm1' });
@@ -1056,6 +1159,9 @@ async function approvePlan(name) {
     const running = ((st2.json && st2.json.sessions) || []).filter((s) => s.running).map((s) => s.sid);
     assert(running.length === 0, '停止即全停：相关会话都不再跑', JSON.stringify(running));
   }
+  });
+
+  await journey('vm', async () => {
   // 虚拟机档真机会话（opt-in）：工具真在 guest 里跑，删会话后 guest 销毁。
   // 本段另含「外部工作区 + 虚拟机档」：会话树与外部根各挂一条稳定根（guest 内读外部根、写外部根被拒、写私沙落回宿主）。
   // 虚拟根名默认 debian（清单里的默认项）；装了别的再设 SOLOMNI_VM_GUEST 指定。
@@ -1182,6 +1288,9 @@ async function approvePlan(name) {
       }
     }
   }
+  });
+
+  await journey('parent-death', async () => {
   /* ---------- 父死子亡（L4）：核心被强杀，常驻服务进程必须跟着没 ----------
    * 前面 MCP 场景是**正常停止**服务；这里再起一次，让编排器把核心 SIGKILL 掉，
    * 按服务自己记下的 pid 断言它已消失。放在最后：核心一死，后面没有任何 HTTP 场景还能跑。
@@ -1208,6 +1317,8 @@ async function approvePlan(name) {
       assert(gone, '核心被强杀后，常驻服务进程跟着没了（父死子亡）', 'pid=' + svcPid);
     }
   }
+  });
+
   console.log((failed ? 'E2E-FAILED failed=' + failed : 'E2E-DONE exitCode=0'));
   // 强制退出：fetch / 定时器 / 假供应商的 keep-alive 都可能把事件循环吊住；
   // 异常路径若不退出，编排器会一直等 driver，job 只能等 30 分钟超时。

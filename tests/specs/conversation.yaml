@@ -1,0 +1,67 @@
+# 会话、协作、代理、代拟 的用例声明（一个单元一份；文件名 = 单元名）。
+# 文件级条目：一个 Rust 测试模块 = 一条；搬实现只改适配层，这里仍指向行为。
+# 格式：- id: cargo/tests::<模块路径> | e2e/<旅程 id>，紧跟 tier 与一句 note。
+
+unit: conversation
+title: 会话、协作、代理、代拟
+cases:
+  - id: cargo/tests::api::collab
+    tier: T3
+    note: 跨单元 api 面：协作会话
+  - id: cargo/tests::api::compaction
+    tier: T3
+    note: 跨单元 api 面：压缩与上下文预算
+  - id: cargo/tests::api::core
+    tier: T3
+    note: 跨单元 api 面：核心动作
+  - id: cargo/tests::api::events
+    tier: T3
+    note: 跨单元 api 面：事件台（也覆盖 lifecycle 的状态推送）
+  - id: cargo/tests::api::session
+    tier: T3
+    note: 跨单元 api 面：会话生命周期
+  - id: cargo/tests::collab::discussion
+    tier: T1
+    note: 协作：讨论阶段
+  - id: cargo/tests::collab::flow
+    tier: T1
+    note: 协作：流程推进
+  - id: cargo/tests::collab::review
+    tier: T1
+    note: 协作：审查关卡
+  - id: cargo/tests::proxy
+    tier: T1
+    note: 代理形态会话
+  - id: cargo/tests::session::edit
+    tier: T1
+    note: 会话编辑（也覆盖 permission 的编辑裁决）
+  - id: cargo/tests::session::tree
+    tier: T1
+    note: 会话树
+  - id: cargo/tests::slate
+    tier: T1
+    note: 代拟与名单
+  - id: e2e/single-write
+    tier: T5
+    note: 单 agent：内置 write 落私沙箱 + 转录结构 + 删除回档
+  - id: e2e/rewind-archive
+    tier: T5
+    note: 留档回档：标记可恢复，转录与沙箱一起展回
+  - id: e2e/files
+    tier: T5
+    note: 上传不覆盖 + 文件清单 + @ 引用改写（含空格与句读）
+  - id: e2e/ref-collab
+    tier: T5
+    note: 协作里引用私沙：如实说明只有该 agent 能读
+  - id: e2e/collab
+    tier: T5
+    note: 协作五阶段：待审 → 开工 → 交付
+  - id: e2e/delegate
+    tier: T5
+    note: 代拟：复用 + 组装，确认后名单写回 meta
+  - id: e2e/collab-state-machine
+    tier: T5
+    note: 协作状态机六条判据：收敛 / 退场 / 上限 / 返工 / 撤回 / ask 中止
+  - id: e2e/proxy
+    tier: T5
+    note: 代理模式：自己挑人、建子工作、停止即全停

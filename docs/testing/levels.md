@@ -76,7 +76,7 @@ cargo deny check
 
 ### T1：单元测试
 
-- 位置：`src/tests/` 下**按业务分文件**的用例（一个子业务一个文件，用例多的按域分子目录，见 [gaps-acceptance.md](gaps-acceptance.md) 的目录与命名），以及实现文件内部的 `#[cfg(test)] mod tests`。同一目录里还有真实适配器契约（`detail/` / `mcp.rs`）与入口 / 围栏契约用例（`diagnostics.rs` / `fence_reach.rs`）：前者按 T2 判定，后者按真实进程边界判定。
+- 位置：`src/tests/` 下**按业务分文件**的用例（一个子业务一个文件，用例多的按域分子目录，见 [gaps-acceptance.md](gaps-acceptance.md) 的目录与命名），以及实现文件内部的 `#[cfg(test)] mod tests`。用例清单声明在 `tests/specs/<单元>.yaml`（一条用例一行：`id` / `tier` / `note`），`src/tests` 下每个带 `#[test]` 的模块都必须被声明（门禁 `structure/specs`）——搬运文件只改这一行，删掉的用例不会静默消失。同一目录里还有真实适配器契约（`detail/` / `mcp.rs`）与入口 / 围栏契约用例（`diagnostics.rs` / `fence_reach.rs`）：前者按 T2 判定，后者按真实进程边界判定。
 
 - **只测能力面与内核**：T1 的被测对象是能力面入站对象（`capabilities/<单元>/<子业务>/api.rs`）、端口契约与内核真实实例。`service` / `domain` / `detail` 的自由函数、内部结构与状态机不单独写用例——实现会频繁搬迁，钉住它的用例最先腐烂；这些行为经能力面用例或 T5 旅程覆盖（判据见 [../../TESTING.md](../../TESTING.md) 的「测试只钉可观察行为」与「不做内部实现测试」）。机器判据：`src/tests/**` 出现 `::service` / `::domain` / `::detail` 即失败（门禁 `structure/tests-api`，豁免只有替身与装配层）。
 
@@ -112,6 +112,7 @@ cargo deny check
 ### T2：端口与适配器契约测试
 
 - T2 验证同一个端口的不同实现是否遵守同一份契约；端口 × 替身 × 真实适配器的现状见 [doubles.md](doubles.md) 的「端口测试矩阵」。
+- 端口契约的声明处是 `tests/specs/_contracts.yaml`（T2 条目）。
 - 位置：`src/tests/` 的 `ports.rs`（替身语义）、`fakes.rs`（`FakeChat` / `DemoGateway` 契约）、`detail.rs`（真实文件系统与环回 HTTP 适配器）与 `mcp.rs`（MCP stdio 真实子进程）。`diagnostics.rs` / `fence_reach.rs` 不是端口契约：它们是入口与围栏的真实进程用例，只是同样跑在 L1 目标里。
 
 - 每个端口至少需要明确：
@@ -154,7 +155,7 @@ cargo deny check
 
 ### T4：平台探针
 
-- 位置：`tests/windows/`、`tests/linux/`、`tests/macos/`。
+- 位置：`tests/windows/`、`tests/linux/`、`tests/macos/`（四个目标在 `tests/specs/_platforms.yaml` 里声明为 T4 条目）。
 
 - 只验证平台机制本身，例如：
 
@@ -189,6 +190,8 @@ cargo deny check
 ### T5：端到端测试
 
 - 位置：`tests/cross-platform/e2e/`。
+
+- 旅程清单声明在 `tests/journeys/index.js`（id、前置段 `deps`、所需环境 `requires`），T5 条目在对应单元的 `tests/specs/<单元>.yaml`；驱动里 `await journey('<id>'` 的段必须与清单一致，否则门禁 `structure/specs` 判红。只跑其中几段：`node run-tests.js --journey=<id>[,<id>]`（自动带上前置段）。
 
 - 使用本地假供应商、隔离根和可重复夹具，验证完整用户旅程：
 

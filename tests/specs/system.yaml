@@ -1,0 +1,19 @@
+# 系统工具与命令行 的用例声明（一个单元一份；文件名 = 单元名）。
+# 文件级条目：一个 Rust 测试模块 = 一条；搬实现只改适配层，这里仍指向行为。
+# 格式：- id: cargo/tests::<模块路径> | e2e/<旅程 id>，紧跟 tier 与一句 note。
+
+unit: system
+title: 系统工具与命令行
+cases:
+  - id: cargo/tests::cli
+    tier: T1
+    note: 命令行面：角色与路径模型
+  - id: cargo/tests::commands
+    tier: T1
+    note: 系统工具命令
+  - id: cargo/tests::diagnostics
+    tier: T1
+    note: 诊断报告
+  - id: cargo/tests::setup
+    tier: T1
+    note: 系统工具装配

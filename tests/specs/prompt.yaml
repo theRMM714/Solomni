@@ -1,0 +1,13 @@
+# 提示词册 的用例声明（一个单元一份；文件名 = 单元名）。
+# 文件级条目：一个 Rust 测试模块 = 一条；搬实现只改适配层，这里仍指向行为。
+# 格式：- id: cargo/tests::<模块路径> | e2e/<旅程 id>，紧跟 tier 与一句 note。
+
+unit: prompt
+title: 提示词册
+cases:
+  - id: cargo/tests::detail::prompt
+    tier: T1
+    note: 提示词落盘适配
+  - id: cargo/tests::prompt
+    tier: T1
+    note: 提示词册与引用

@@ -1,0 +1,58 @@
+# 工具面与派发 的用例声明（一个单元一份；文件名 = 单元名）。
+# 文件级条目：一个 Rust 测试模块 = 一条；搬实现只改适配层，这里仍指向行为。
+# 格式：- id: cargo/tests::<模块路径> | e2e/<旅程 id>，紧跟 tier 与一句 note。
+
+unit: tools
+title: 工具面与派发
+cases:
+  - id: cargo/tests::api::tools
+    tier: T3
+    note: 跨单元 api 面：工具派发
+  - id: cargo/tests::tools::dispatch
+    tier: T1
+    note: 工具派发
+  - id: cargo/tests::tools::face
+    tier: T1
+    note: 工具面装配
+  - id: cargo/tests::tools::patch
+    tier: T1
+    note: 补丁工具
+  - id: cargo/tests::tools::run_loop
+    tier: T1
+    note: 工具循环
+  - id: cargo/tests::tools::shell
+    tier: T1
+    note: shell 工具
+  - id: e2e/shell
+    tier: T5
+    note: 零模块 shell：成功与退出码都落成工具行（真机围栏档）
+  - id: e2e/modules
+    tier: T5
+    note: 多模块 cwd + 漏写 module 如实报错
+  - id: e2e/tool-ask
+    tier: T5
+    note: 工具级确认：allow / deny / allow_turn 三态
+  - id: e2e/bad-envelope
+    tier: T5
+    note: 非法工具信封：失败工具行且 JSON 不上屏
+  - id: e2e/unclosed-envelope
+    tier: T5
+    note: 未闭合信封：正文保留、坏 JSON 不上屏
+  - id: e2e/abs-path
+    tier: T5
+    note: 外部工具用真实绝对路径读投喂文件
+  - id: e2e/patch
+    tier: T5
+    note: 自由格式补丁：原文落盘、不上屏
+  - id: e2e/prose
+    tier: T5
+    note: 正文 + 工具信封同一轮：正文进转录，信封不上屏
+  - id: e2e/mcp
+    tier: T5
+    note: MCP 常驻服务：真进程调用，回执与本地摘要对账
+  - id: e2e/real-tools
+    tier: T5
+    note: 三语言真模块链路 + 资产契约（PNG / MP4）
+  - id: e2e/run-module
+    tier: T5
+    note: 不经 AI 直跑模块工具（含运行包 PATH）

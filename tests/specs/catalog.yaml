@@ -1,0 +1,31 @@
+# 登记处、模块、运行包、密钥 的用例声明（一个单元一份；文件名 = 单元名）。
+# 文件级条目：一个 Rust 测试模块 = 一条；搬实现只改适配层，这里仍指向行为。
+# 格式：- id: cargo/tests::<模块路径> | e2e/<旅程 id>，紧跟 tier 与一句 note。
+
+unit: catalog
+title: 登记处、模块、运行包、密钥
+cases:
+  - id: cargo/tests::detail::modules
+    tier: T1
+    note: 模块清单适配
+  - id: cargo/tests::detail::yaml
+    tier: T1
+    note: 登记处 YAML 适配
+  - id: cargo/tests::modules
+    tier: T1
+    note: 模块登记与清单
+  - id: cargo/tests::packages
+    tier: T1
+    note: 运行包登记
+  - id: cargo/tests::registry
+    tier: T1
+    note: 登记处读写（也覆盖 llm 的模型条目）
+  - id: cargo/tests::startup
+    tier: T1
+    note: 登记处启动装载
+  - id: e2e/registry
+    tier: T5
+    note: 登记处：供应商 + 模型 + 两个 agent
+  - id: e2e/suggest
+    tier: T5
+    note: 推荐：复用登记处的 agent，不代拟模型
