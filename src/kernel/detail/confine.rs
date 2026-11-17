@@ -142,7 +142,7 @@ pub use paths::{fence_env, shell_command};
 pub(crate) use windows::release_fence;
 // 一次围栏准备里真写 ACL 的分步耗时条目：Windows 产生，回执交棒跨平台读。
 pub(crate) use admin::{calibrate_machine_grant, remove_calibration_tree};
-#[cfg(any(windows, test))]
+#[cfg(windows)]
 pub use prep::FencePrep;
 pub use prep::FenceStep;
 #[cfg(all(test, windows))]

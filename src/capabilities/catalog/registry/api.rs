@@ -8,9 +8,13 @@ pub use crate::capabilities::catalog::registry::domain::agents::{
     model_listing, resolve_picks, unique_instance_name, validate_name,
 };
 pub use crate::capabilities::catalog::registry::domain::providers::{
-    AppSettings, ModelDraft, ModelEntry, ModelThinkingView, ModelView, Provider, ProviderView,
-    SandboxEnforceLevel, SandboxUnavailable, Settings, StorageSettings, ThinkingSpec,
+    AppSettings, ModelDraft, ModelEntry, ModelView, Provider, ProviderView, SandboxEnforceLevel,
+    SandboxUnavailable, Settings, StorageSettings, ThinkingSpec,
 };
+
+// 视图 DTO 的字段类型：生产在 domain 内构造，api 面只给呈现侧与装配替身命名（二进制 crate 没有外部消费者，rustc 报 unused）。
+#[allow(unused_imports)]
+pub use crate::capabilities::catalog::registry::domain::providers::ModelThinkingView;
 
 #[allow(unused_imports)]
 pub use crate::capabilities::catalog::registry::service::{save_agent, save_model};
