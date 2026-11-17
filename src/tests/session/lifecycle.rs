@@ -37,9 +37,9 @@ pub(crate) fn create_work_persists_and_history_replays() {
     let list = core.lifecycle.history_list();
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].name, "工作一");
-    assert_eq!(list[0].mode, "single");
+    assert_eq!(list[0].mode, Mode::Single);
     let (meta, events) = core.lifecycle.history_open("工作一").unwrap();
-    assert_eq!(meta.mode, "single");
+    assert_eq!(meta.mode, Mode::Single);
     assert!(
         events
             .iter()
@@ -125,7 +125,7 @@ pub(crate) fn session_delete_releases_fences_in_background_after_directories() {
     seed_session(
         &store,
         "w",
-        "single",
+        Mode::Single,
         vec![agent_meta("a", &[], None)],
         ExecSpec::default(),
     );
@@ -193,7 +193,7 @@ pub(crate) fn session_delete_with_no_fence_leases_skips_release() {
     seed_session(
         &store,
         "w",
-        "single",
+        Mode::Single,
         vec![agent_meta("a", &[], None)],
         ExecSpec::default(),
     );
@@ -232,7 +232,7 @@ pub(crate) fn session_delete_logs_background_release_failures() {
     seed_session(
         &store,
         "w",
-        "single",
+        Mode::Single,
         vec![agent_meta("a", &[], None)],
         ExecSpec::default(),
     );

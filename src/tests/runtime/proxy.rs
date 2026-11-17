@@ -453,7 +453,7 @@ pub(crate) fn the_proxy_session_runs_a_turn_through_the_generic_loop() {
     faces.turn.say(&sid, "开始", Output::Final).expect("跑一轮");
 
     let (meta, events) = faces.history.open(&sid).expect("打开代理会话");
-    assert_eq!(meta.mode, "proxy");
+    assert_eq!(meta.mode, Mode::Proxy);
     assert!(meta.delegation.is_some(), "代理会话带全权委托");
     let text = serde_json::to_string(&events).expect("转录");
     assert!(
@@ -615,7 +615,7 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
     let (opened, _head) = faces.work.create_work(spec.clone()).expect("建代理会话");
     assert!(opened.agents.is_empty(), "代理会话没有名单");
     let (meta, _) = faces.history.open(&opened.sid).expect("落盘");
-    assert_eq!(meta.mode, "proxy");
+    assert_eq!(meta.mode, Mode::Proxy);
     assert!(meta.delegation.is_some(), "选代理形态 = 授予全权");
     assert!(meta.agents.is_empty() && meta.parent.is_none());
     assert_eq!(meta.run, RunState::Active);
@@ -637,7 +637,7 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
         .iter()
         .find(|v| v.sid == opened.sid)
         .expect("代理会话在列表里");
-    assert_eq!(v.mode, "proxy");
+    assert_eq!(v.mode, Mode::Proxy);
     assert_eq!(v.run, "active");
     assert!(!v.can_update_task, "代理会话没有本次需求");
 

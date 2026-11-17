@@ -179,12 +179,12 @@ impl Core {
         })
     }
 
-    /// 目的：一个会话的形态（single / collab）：落盘 meta 是唯一真相；取不到就回空串。
-    pub(crate) fn session_mode_str(&self, sid: &str) -> String {
-        self.lifecycle
-            .history_open(sid)
-            .map(|(m, _)| m.mode)
-            .unwrap_or_default()
+    /// 目的：一个会话的形态：落盘 meta 是唯一真相；取不到（无此会话）就是 None。
+    pub(crate) fn session_mode(
+        &self,
+        sid: &str,
+    ) -> Option<crate::capabilities::conversation::session::api::Mode> {
+        self.lifecycle.history_open(sid).ok().map(|(m, _)| m.mode)
     }
 
     /// 目的：代理工具：控制里的**终态关闭**（只做运行态的状态转移，不启动也不停止生成——
@@ -300,7 +300,7 @@ impl crate::capabilities::conversation::proxy::api::ProxyHost for ProxyBridge {
         })?;
         // 先记来源：这条不是用户原话这个事实要进目标会话的可回放记录（正文不伪装成用户发言）。
         handle.record_notice(&target, SessionEvent::Notice(d::relay_note(msg.kind)));
-        if mode == "collab" {
+        if mode == crate::capabilities::conversation::session::api::Mode::Collab {
             // 协作子会话：它此刻挂着哪张卡时，**只有当这次转达明确写了选项 id 才代答**（附言 = 转达的话）；
             // 没写选项 id 就没有答案——不替用户猜（见 docs/session/session-model.md 的「请用户裁决」）。
             let card = handle.call({

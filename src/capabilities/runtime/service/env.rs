@@ -24,7 +24,9 @@ impl Core {
                 Arc::clone(&self.vm),
                 lease,
             )),
-            None if meta.mode == "proxy" && meta.parent.is_none() => {
+            None if meta.mode == crate::capabilities::conversation::session::api::Mode::Proxy
+                && meta.parent.is_none() =>
+            {
                 Err("代理父会话本身没有 guest，请对它下面某个工作诊断".to_string())
             }
             None => Err("这条会话没有可诊断的 guest".to_string()),

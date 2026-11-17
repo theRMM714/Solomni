@@ -4,7 +4,6 @@
 //! 联动：create.rs、config.rs 与 runtime 的代理入口共用这里，避免同一规则两处实现。
 
 use crate::capabilities::catalog::registry::api::AgentMeta;
-use crate::capabilities::work::api::WorkMode;
 
 /// 目的：单模式的组合语义——多个 agent 的模块并成一个**临时组合**实例（去重、保序；模型取核心默认）。
 /// 约束：人设取空——多份人设无法诚实合并，由用户在会话配置里补。
@@ -34,15 +33,6 @@ pub(crate) fn session_started(events: &[serde_json::Value]) -> bool {
             Some(_) => true,
             None => false,
         })
-}
-
-/// 目的：工作形态 → 会话元信息里的标识。
-pub(crate) fn mode_str(mode: WorkMode) -> &'static str {
-    match mode {
-        WorkMode::Single => "single",
-        WorkMode::Collab => "collab",
-        WorkMode::Proxy => "proxy",
-    }
 }
 
 /// 目的：工作名即将来的落盘目录名——非空、不含路径分隔符与 Windows 非法字符、不是保留名。

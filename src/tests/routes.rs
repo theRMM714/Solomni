@@ -18,7 +18,7 @@ use crate::capabilities::catalog::modules::api::{ModulesOps, Roster};
 use crate::capabilities::catalog::registry::api::AgentView;
 use crate::capabilities::catalog::registry::api::RegistryOps;
 use crate::capabilities::catalog::registry::api::{AppSettings, ModelView, ProviderView};
-use crate::capabilities::conversation::session::api::{HistoryOps, HistoryView, SessionMeta};
+use crate::capabilities::conversation::session::api::{HistoryOps, HistoryView, Mode, SessionMeta};
 use crate::kernel::api::Tier;
 use crate::presentation::web::routes::{self, ROUTES};
 use crate::presentation::web::{self, FenceInfo};
@@ -260,7 +260,7 @@ fn meta(name: &str) -> SessionMeta {
     SessionMeta {
         context_freshness: false,
         name: name.to_string(),
-        mode: "direct".to_string(),
+        mode: Mode::Single,
         delegate: false,
         modules: vec!["m".to_string()],
         task: None,
@@ -295,7 +295,7 @@ impl WorkOps for FakeFaces {
         self.guard()?;
         Ok(SessionConfig {
             sid: "w1".to_string(),
-            mode: "direct".to_string(),
+            mode: Mode::Single,
             started: true,
             agents: vec![ConfigAgent {
                 name: "甲".to_string(),
@@ -461,7 +461,7 @@ impl WorkOps for FakeFaces {
             .iter()
             .map(|h| SessionView {
                 sid: h.name.clone(),
-                mode: h.mode.clone(),
+                mode: h.mode,
                 done: h.done,
                 tier: h.exec.tier.as_str().to_string(),
                 tier_ready: true,
@@ -479,7 +479,7 @@ impl WorkOps for FakeFaces {
                 permission_narrowed: false,
                 permission_parent: None,
                 running: false,
-                can_update_task: h.mode == "collab",
+                can_update_task: h.mode == Mode::Collab,
                 run: h.run.as_str().to_string(),
                 pending: None,
                 continue_action: None,
@@ -573,7 +573,7 @@ impl RuntimeOps for FakeFaces {
         self.guard()?;
         Ok(SessionView {
             sid: "w1".to_string(),
-            mode: "single".to_string(),
+            mode: Mode::Single,
             done: false,
             tier: "host".to_string(),
             tier_ready: true,
@@ -755,7 +755,7 @@ impl HistoryOps for FakeFaces {
         self.guard()?;
         Ok(vec![HistoryView {
             name: "w1".to_string(),
-            mode: "direct".to_string(),
+            mode: Mode::Single,
             ts: 1,
             done: false,
             exec: Default::default(),

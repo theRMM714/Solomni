@@ -80,7 +80,7 @@ impl HistoryStore for InMemoryHistory {
             .values()
             .map(|m| HistoryView {
                 name: m.name.clone(),
-                mode: m.mode.clone(),
+                mode: m.mode,
                 ts: m.ts,
                 done: events
                     .get(&m.name)

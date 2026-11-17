@@ -43,7 +43,7 @@ impl Work {
         );
         Ok(SessionConfig {
             sid: meta.name.clone(),
-            mode: meta.mode.clone(),
+            mode: meta.mode,
             started: session_started(&events),
             agents: meta
                 .agents
@@ -121,15 +121,11 @@ impl Work {
             }
         }
         let (meta, events) = self.history_open(sid)?;
-        match meta.mode.as_str() {
-            "single" | "collab" => {}
-            // 代理会话没有名单可编辑（决定权整块交给核心）：如实说明，不报"未知形态"。
-            "proxy" => return Err("代理会话没有可编辑的名单：它不是一个 agent 工作".to_string()),
-            other => {
-                return Err(format!(
-                    "未知会话形态：{}（只认 single / collab / proxy）",
-                    other
-                ));
+        match meta.mode {
+            WorkMode::Single | WorkMode::Collab => {}
+            // 代理会话没有名单可编辑（决定权整块交给核心）：如实说明。
+            WorkMode::Proxy => {
+                return Err("代理会话没有可编辑的名单：它不是一个 agent 工作".to_string());
             }
         }
         // 共享 guest 的子会话也可以编辑：写回该 agent 的唯一配置，保存后重新加入同一台 guest。
@@ -181,7 +177,7 @@ impl Work {
         if metas.is_empty() {
             return Err("至少要有一个 agent".to_string());
         }
-        if meta.mode == "single" && metas.len() != 1 {
+        if meta.mode == WorkMode::Single && metas.len() != 1 {
             return Err("单 agent 形态只接受一个 agent（模块数不限）".to_string());
         }
         // 子会话的名单是主名单的一份视图：只能改这一席的模块 / 模型 / 权限，不能在子会话里增删或改名。

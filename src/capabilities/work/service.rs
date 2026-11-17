@@ -36,9 +36,7 @@ use crate::capabilities::work::api::{
     RuntimeReport, SessionConfig, SessionEdit, SessionView, ThinkingView, TierChoices, WorkMode,
     WorkOpened, WorkSpec,
 };
-use crate::capabilities::work::domain::{
-    merge_into_one, mode_str, session_started, validate_work_name,
-};
+use crate::capabilities::work::domain::{merge_into_one, session_started, validate_work_name};
 use crate::capabilities::workspace::api::Workspace;
 use crate::kernel::api::ExecSpec;
 use crate::kernel::ports::{HostProbe, Log};

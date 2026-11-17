@@ -83,7 +83,7 @@ pub(crate) fn single_mode_accepts_multi_module_agent_and_converses() {
         .unwrap()
         .sid;
     let meta = core.lifecycle.history_open("w").unwrap().0;
-    assert_eq!(meta.mode, "single");
+    assert_eq!(meta.mode, Mode::Single);
     assert_eq!(meta.agents.len(), 1);
     assert_eq!(
         meta.agents[0].modules,

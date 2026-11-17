@@ -8,7 +8,7 @@ use crate::capabilities::catalog::packages::api::PackagePlan;
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::catalog::registry::api::AppSettings;
 use crate::capabilities::conversation::session::api::{
-    RunState, SessionMeta, WorkspaceBinding, WorkspaceGrant,
+    Mode, RunState, SessionMeta, WorkspaceBinding, WorkspaceGrant,
 };
 use crate::capabilities::permission::api::{
     PermissionDefaults, PermissionLayer, ProfileId, Reach, ReachSet, ScopeMode, SessionSandbox,
@@ -25,11 +25,11 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 /// 一条最小会话 meta：权限段与工作区绑定由调用方按需覆盖。
-fn meta(name: &str, parent: Option<&str>, tier: Tier, mode: &str) -> SessionMeta {
+fn meta(name: &str, parent: Option<&str>, tier: Tier, mode: Mode) -> SessionMeta {
     SessionMeta {
         context_freshness: false,
         name: name.to_string(),
-        mode: mode.to_string(),
+        mode,
         delegate: false,
         modules: Vec::new(),
         task: None,
@@ -70,7 +70,7 @@ fn permissions_narrow_with_the_chain_and_keep_the_hard_deny() {
     let mut app = AppSettings::default();
     app.sandbox.defaults.profile = ProfileId::External;
     app.sandbox.policy.deny = vec!["secret/".to_string()];
-    let mut root = meta("root", None, Tier::Host, "solo");
+    let mut root = meta("root", None, Tier::Host, Mode::Single);
     root.sandbox = SessionSandbox {
         ceiling: Some(PermissionLayer {
             profile: Some(ProfileId::Workspace),
@@ -78,7 +78,7 @@ fn permissions_narrow_with_the_chain_and_keep_the_hard_deny() {
         }),
         narrowing: None,
     };
-    let mut child = meta("root--a", Some("root"), Tier::Host, "collab");
+    let mut child = meta("root--a", Some("root"), Tier::Host, Mode::Collab);
     child.sandbox = SessionSandbox {
         ceiling: None,
         narrowing: Some(PermissionLayer {
@@ -101,12 +101,12 @@ fn permissions_narrow_with_the_chain_and_keep_the_hard_deny() {
 
 #[test]
 fn a_workspace_grant_of_none_closes_the_shared_root() {
-    let mut root = meta("root", None, Tier::Host, "solo");
+    let mut root = meta("root", None, Tier::Host, Mode::Single);
     root.workspace = Some(WorkspaceBinding {
         root: PathBuf::from("shared"),
         grant: WorkspaceGrant::None,
     });
-    let child = meta("root--a", Some("root"), Tier::Host, "collab");
+    let child = meta("root--a", Some("root"), Tier::Host, Mode::Collab);
     let chain = vec![root, child];
     assert_eq!(workspace_grant(&chain), WorkspaceGrant::None);
     let out = permissions(&chain, &AppSettings::default()).expect("权限链应能求值");

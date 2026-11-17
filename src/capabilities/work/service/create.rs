@@ -300,7 +300,7 @@ impl Work {
         let meta = SessionMeta {
             context_freshness: false,
             name: name.clone(),
-            mode: mode_str(spec.mode).to_string(),
+            mode: spec.mode,
             delegate,
             modules: module_ids.clone(),
             task: spec.task.clone(),
@@ -760,7 +760,7 @@ impl Work {
         let meta = SessionMeta {
             context_freshness: false,
             name: name.to_string(),
-            mode: "proxy".to_string(),
+            mode: WorkMode::Proxy,
             delegate: false,
             modules: Vec::new(),
             task: None,
@@ -816,7 +816,7 @@ mod tests {
     ) -> SessionMeta {
         SessionMeta {
             name: "w".to_string(),
-            mode: "single".to_string(),
+            mode: WorkMode::Single,
             delegate: false,
             modules: Vec::new(),
             task: None,

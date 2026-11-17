@@ -710,7 +710,7 @@ pub(crate) fn history_list_is_ordered_as_a_tree() {
     let hv = |name: &str, parent: Option<&str>, ts: i64| {
         crate::capabilities::conversation::session::api::HistoryView {
             name: name.to_string(),
-            mode: "collab".to_string(),
+            mode: Mode::Collab,
             ts,
             done: false,
             exec: Default::default(),

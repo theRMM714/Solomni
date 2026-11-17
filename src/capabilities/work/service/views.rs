@@ -15,15 +15,15 @@ impl Work {
         turn: &Turn,
         sid: &str,
         running: bool,
-        mode: &str,
+        mode: WorkMode,
         run: &str,
         has_pending: bool,
     ) -> Option<ContinueView> {
-        if running || run == "closed" || mode == "proxy" {
+        if running || run == "closed" || mode == WorkMode::Proxy {
             return None;
         }
         match mode {
-            "single" => {
+            WorkMode::Single => {
                 let user_last =
                     matches!(turn.session(sid), Some(Session::Single(s)) if s.last_is_user());
                 if user_last {
@@ -36,7 +36,7 @@ impl Work {
                     None
                 }
             }
-            "collab" if !has_pending => Some(ContinueView {
+            WorkMode::Collab if !has_pending => Some(ContinueView {
                 kind: "collab".to_string(),
                 label: "恢复协作".to_string(),
                 reason: "协作泵没有在跑".to_string(),
@@ -92,7 +92,7 @@ impl Work {
             .into_iter()
             .map(|(sid, done)| {
                 let entry = history.iter().find(|h| h.name == sid);
-                let mode = entry.map(|h| h.mode.clone()).unwrap_or_default();
+                let mode = entry.map(|h| h.mode).unwrap_or(WorkMode::Single);
                 // 运行态取落盘事实（不在内存里留影子状态）；拿不到（生成中 / 未落盘）按正常运行。
                 let run = entry
                     .map(|h| h.run.as_str())
@@ -114,14 +114,14 @@ impl Work {
                 let can_update_task = match turn.session(&sid) {
                     Some(Session::Collab(_)) => true,
                     Some(Session::Single(_)) => false,
-                    None => mode == "collab",
+                    None => mode == WorkMode::Collab,
                 };
                 // 待裁决：**判据只有队本身**（核心各关卡与工具级确认排在同一条队上）——
                 // 正在生成的会话（对象在工作线程手里）照样取得到；推的卡片事件与它是同一份。
                 let pending = turn.desk().peek_gate(&sid).and_then(|d| d.json());
                 let running = running_now.contains(&sid);
                 let continue_action =
-                    self.continue_action(turn, &sid, running, &mode, &run, pending.is_some());
+                    self.continue_action(turn, &sid, running, mode, &run, pending.is_some());
                 // 只有持续对话的会话才有单一上下文；协作主会话由核心按次组上下文，不伪造数字。
                 let context = match turn.session(&sid) {
                     Some(Session::Single(s)) => s.context_usage(),

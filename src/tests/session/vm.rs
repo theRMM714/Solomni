@@ -14,7 +14,7 @@ pub(crate) fn activating_a_vm_history_session_boots_the_shared_guest() {
     seed_session(
         &hist,
         "w",
-        "single",
+        Mode::Single,
         vec![agent_meta("a", &["a"], None)],
         vm_spec(),
     );
@@ -57,14 +57,14 @@ pub(crate) fn child_sessions_share_the_main_guest_and_follow_its_tier() {
     seed_session(
         &hist,
         "w",
-        "collab",
+        Mode::Collab,
         vec![agent_meta("a", &["a"], None), agent_meta("b", &["b"], None)],
         vm_spec(),
     );
     let child = SessionMeta {
         context_freshness: false,
         name: "w--a".to_string(),
-        mode: "single".to_string(),
+        mode: Mode::Single,
         delegate: false,
         modules: vec!["a".to_string()],
         task: None,
@@ -130,11 +130,11 @@ pub(crate) fn child_sessions_share_the_main_guest_and_follow_its_tier() {
 #[test]
 pub(crate) fn proxy_children_share_the_proxy_tree_guest() {
     let hist = Arc::new(InMemoryHistory::new());
-    seed_session(&hist, "p", "proxy", Vec::new(), vm_spec());
+    seed_session(&hist, "p", Mode::Proxy, Vec::new(), vm_spec());
     let child = SessionMeta {
         context_freshness: false,
         name: "p--a".to_string(),
-        mode: "single".to_string(),
+        mode: Mode::Single,
         delegate: false,
         modules: vec!["a".to_string()],
         task: None,

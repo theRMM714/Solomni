@@ -4,7 +4,7 @@
 //! 联动：runtime 的回档入口与改需求经这里；`Turn` / `RebuildDeps` 都是方法形参、不是字段。
 
 use super::*;
-use crate::capabilities::conversation::session::api::{subtree_of, work_root};
+use crate::capabilities::conversation::session::api::{Mode, subtree_of, work_root};
 use crate::capabilities::lifecycle::api::{RebuildDeps, RewindOutcome, RewindTarget};
 
 /// 目的：子会话回档结果——`agent 名 → 该会话的保留行` + `子会话 → 回档后的活动视图`。
@@ -272,7 +272,7 @@ impl Lifecycle {
     ) -> std::collections::BTreeMap<String, u64> {
         let mut keep = std::collections::BTreeMap::new();
         keep.insert(String::new(), before);
-        if meta.mode == "single" {
+        if meta.mode == Mode::Single {
             for a in &meta.agents {
                 keep.insert(a.name.clone(), before);
             }

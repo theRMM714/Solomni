@@ -58,7 +58,7 @@ impl Handle {
                 let c = created.session.clone();
                 move |core| core.turn.dispatch_target(&c)
             })?;
-            if mode == "collab" {
+            if mode == crate::capabilities::conversation::session::api::Mode::Collab {
                 crate::capabilities::turn::turn::api::start_child_collab(self, &created.session);
             } else {
                 crate::capabilities::turn::turn::api::spawn_detached_node(
@@ -113,17 +113,19 @@ impl Handle {
                     if resumed {
                         let mode = self.call({
                             let s = sid.to_string();
-                            move |core| Ok(core.session_mode_str(&s))
+                            move |core| Ok(core.session_mode(&s))
                         })?;
-                        match mode.as_str() {
-                            "collab" => {
+                        match mode {
+                            Some(crate::capabilities::conversation::session::api::Mode::Collab) => {
                                 crate::capabilities::turn::turn::api::spawn_detached_collab(
                                     self, sid,
                                 )
                             }
-                            "proxy" => crate::capabilities::turn::turn::api::spawn_detached_proxy(
-                                self, sid,
-                            ),
+                            Some(crate::capabilities::conversation::session::api::Mode::Proxy) => {
+                                crate::capabilities::turn::turn::api::spawn_detached_proxy(
+                                    self, sid,
+                                )
+                            }
                             _ => crate::capabilities::turn::turn::api::spawn_detached_continue(
                                 self, sid,
                             ),
