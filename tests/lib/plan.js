@@ -99,6 +99,27 @@ function journeyIds(entries) {
   return out;
 }
 
+/** 派发形态：cargo 模块在同进程里跑，平台目标是独立测试二进制，旅程经 HTTP 驱动真二进制。 */
+const ADAPTER_OF = { cargo: "inproc", platform: "cli", e2e: "http" };
+
+/** 一条用例由哪种适配器派发（id 解析不出时给 null，由 verify 报错）。 */
+function adapterOf(id) {
+  const { kind } = splitCaseId(id);
+  return ADAPTER_OF[kind] || null;
+}
+
+/** 按派发形态分组：每种形态只调一次适配器，目标去重后按声明顺序给。 */
+function groups(entries) {
+  const out = { inproc: [], cli: [], http: [] };
+  for (const e of entries) {
+    const a = adapterOf(e.id);
+    if (!a) continue;
+    const { target } = splitCaseId(e.id);
+    if (!out[a].includes(target)) out[a].push(target);
+  }
+  return out;
+}
+
 /** 一行摘要（--plan / --list 打印用）。 */
 function summary(entries) {
   const byTier = new Map();
@@ -114,4 +135,16 @@ function summary(entries) {
   };
 }
 
-module.exports = { collect, parseFilters, isEmpty, select, verify, cargoFilters, platformTargets, journeyIds, summary };
+module.exports = {
+  collect,
+  parseFilters,
+  isEmpty,
+  select,
+  verify,
+  cargoFilters,
+  platformTargets,
+  journeyIds,
+  adapterOf,
+  groups,
+  summary,
+};

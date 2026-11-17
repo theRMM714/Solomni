@@ -399,7 +399,7 @@ function runSelection(names) {
 // ---------- 测试计划（--plan / --unit / --tier / --journey） ----------
 
 const planLib = require("./tests/lib/plan.js");
-const parsers = require("./tests/lib/parsers.js");
+const adapters = require("./tests/adapters");
 
 /** 声明有问题就停下：计划写错时跑出来的绿没有意义。 */
 function planFail(title, problems) {
@@ -420,9 +420,35 @@ function resolvePlan() {
   return { entries, filters, selected };
 }
 
-/** --plan：只打印会跑什么，不跑。 */
+/** --plan：只打印会跑什么，不跑。`--json` 给机器读（每条带派发形态）。 */
 function printPlan(p) {
   const s = planLib.summary(p.selected);
+  if (opts.json) {
+    console.log(
+      JSON.stringify(
+        {
+          total: s.total,
+          tiers: s.tiers,
+          units: s.units,
+          dispatch: {
+            cargo: planLib.cargoFilters(p.selected).length,
+            platforms: planLib.platformTargets(p.selected).length,
+            journeys: planLib.journeyIds(p.selected).length,
+          },
+          entries: p.selected.map((e) => ({
+            unit: e.unit,
+            id: e.id,
+            tier: e.tier,
+            note: e.note,
+            adapter: planLib.adapterOf(e.id),
+          })),
+        },
+        null,
+        2
+      )
+    );
+    return;
+  }
   console.log("[plan] 共 " + s.total + " 条声明：" + s.tiers.map((x) => x.tier + " " + x.count).join(" / "));
   console.log("[plan] 派发：" + planLib.cargoFilters(p.selected).length + " 个 cargo 测试模块、" + planLib.platformTargets(p.selected).length + " 个平台目标、" + planLib.journeyIds(p.selected).length + " 段旅程");
   const byUnit = new Map();
@@ -437,45 +463,24 @@ function printPlan(p) {
   }
 }
 
-/** 带过滤器的子集执行：cargo 按模块前缀、平台按 --test、旅程按 E2E_JOURNEY。 */
+/** 带过滤器的子集执行：分组看 tests/lib/plan.js，具体怎么跑交给 tests/adapters。 */
 function runFiltered(p) {
   console.log("[plan] 子集运行：不写 target/test-report.json、不打印 TEST-REPORT-*；验收请整跑（node run-tests.js）");
   const ctx = makeCtx();
-  let bad = 0;
   const serial = opts.serial ? ["--test-threads=1"] : [];
-  const cargo = planLib.cargoFilters(p.selected);
-  for (const f of cargo) {
-    const r = ctx.proc.sh("cargo", ["test", "--color", "never", "--bin", "solomni", f, "--", "--nocapture"].concat(serial));
-    const counts = parsers.cargoCounts(r.out);
-    // 过滤器写错时 cargo 也退 0（只是 0 个用例）——那种绿必须判红，否则子集运行会假过。
-    if (r.code === 0 && counts.passed > 0) console.log("  ok   " + f + "（" + counts.passed + " passed）");
-    else {
-      bad++;
-      console.log("  FAIL " + f + (r.code === 0 ? "（0 个用例命中——过滤器或模块路径写错了）" : "（日志 " + r.log + "）"));
-      console.log(r.out.trim().split(/\r?\n/).slice(-15).join("\n"));
-    }
-  }
-  for (const t of planLib.platformTargets(p.selected)) {
-    const r = ctx.proc.sh("cargo", ["test", "--color", "never", "--test", t, "--", "--nocapture"].concat(serial));
-    const counts = parsers.cargoCounts(r.out);
-    if (r.code === 0 && counts.passed > 0) console.log("  ok   目标 " + t + "（" + counts.passed + " passed）");
-    else {
-      bad++;
-      console.log("  FAIL 目标 " + t + (r.code === 0 ? "（0 个用例命中）" : "（日志 " + r.log + "）"));
-      console.log(r.out.trim().split(/\r?\n/).slice(-15).join("\n"));
-    }
-  }
-  const js = planLib.journeyIds(p.selected);
-  if (js.length) {
-    const e2e = path.join(ROOT, "tests", "cross-platform", "e2e", "orchestrator.js");
-    // 段选择走环境变量：编排器只负责起夹具与真二进制，不关心选哪几段。
-    process.env.E2E_JOURNEY = js.join(",");
-    const r = ctx.proc.sh(process.execPath, [e2e], stepsLib.E2E_TIMEOUT_MS);
-    if (r.code === 0 && r.out.includes(markers.TEXT.E2E_OK)) console.log("  ok   旅程 " + js.join(","));
-    else {
-      bad++;
-      console.log("  FAIL 旅程 " + js.join(",") + "（日志 " + r.log + "）");
-      console.log(r.out.trim().split(/\r?\n/).slice(-20).join("\n"));
+  const groups = planLib.groups(p.selected);
+  let bad = 0;
+  for (const a of adapters.ALL) {
+    const targets = groups[a.name] || [];
+    if (!targets.length) continue;
+    console.log("[plan] " + a.title);
+    for (const r of a.run(targets, ctx, serial, ROOT)) {
+      if (r.ok) console.log("  ok   " + r.label + "（" + r.detail + "）");
+      else {
+        bad++;
+        console.log("  FAIL " + r.label + "（" + r.detail + "）");
+        console.log(r.tail.trim().split(/\r?\n/).slice(-15).join("\n"));
+      }
     }
   }
   process.exitCode = bad ? 1 : 0;

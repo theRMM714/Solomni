@@ -91,6 +91,7 @@ node run-tests.js
 - 过滤器命中 0 个用例判失败：cargo 对匹配不到的过滤器同样退 0，那种绿是假绿（`run-tests.js` 的 `plan.lib` 派发检查 `passed > 0`）。
 - 子集不写 `target/test-report.json`、不打 `TEST-REPORT-*`，因此不能当验收；验收仍是车道级整跑。
 - 声明与实现对不上（模块文件被搬走、旅程没登记进清单、`tier` 写错、有 `#[test]` 的模块没声明）由门禁 `structure/specs` 判红，不会静默少跑。
+- 派发形态收在 `tests/adapters/`（`inproc` = cargo 测试模块、`cli` = 独立测试二进制、`http` = 经 HTTP 驱动真二进制的旅程）；新增或替换一种形态只加一个适配器，并在 `tests/lib/plan.js` 的 `ADAPTER_OF` 登记，编排器与 spec 声明都不用改。
 
 - 每一步都有墙钟上限（默认 15 分钟；L4 20 分钟，环境引导自检 5 分钟）：超时即硬失败，证据记进报告的 `timeouts`，不会把本地入口或 CI job 拖到外层超时。每步用时记在报告的 `ms`，超预算的标 `[slow]`（只报不拦）。
 
