@@ -1,41 +1,42 @@
 # 文档索引
 
-> 定位：`docs/` 的细则索引：每个业务与机制单元一个目录（`README.md` 是入口、`unit-map.md` 是逐文件职责），根门户是 `AGENTS.md`。
+> 定位：`docs/` 的细则索引：业务子业务与机制单元各一个目录（`README.md` 是入口、`unit-map.md` 是逐文件职责），业务单元按分层表归并到子业务，根门户是 `AGENTS.md`。
 > 效力：索引｜核对：2026-11-14
 
 ## 单元
+
+业务层两级：**单元**（归层与门禁的单位，见 [ARCHITECTURE.md](../ARCHITECTURE.md) 分层表）与单元内的**子业务**（细则目录与测试文件按子业务走）。第一列写成「单元：子业务」。
 
 | 要找什么 | 读哪一份 |
 | --- | --- |
 | `runtime`（顶层编排） | [README.md](runtime/README.md)、[unit-map.md](runtime/unit-map.md) |
 | `work`（工作用例） | [README.md](work/README.md)、[unit-map.md](work/unit-map.md) |
 | `lifecycle`（会话历史生命周期） | [README.md](lifecycle/README.md)、[unit-map.md](lifecycle/unit-map.md) |
-| `proxy`（核心代理工具） | [README.md](proxy/README.md)、[unit-map.md](proxy/unit-map.md) |
-| `turn`（回合状态） | [README.md](turn/README.md)、[unit-map.md](turn/unit-map.md) |
-| `collab`（协作会话） | [README.md](collab/README.md)、[unit-map.md](collab/unit-map.md)、[task-chain.md](collab/task-chain.md) |
-| `session`（会话） | [README.md](session/README.md)、[unit-map.md](session/unit-map.md)、[session-model.md](session/session-model.md) |
+| `conversation`：`session`（会话） | [README.md](session/README.md)、[unit-map.md](session/unit-map.md)、[session-model.md](session/session-model.md) |
+| `conversation`：`collab`（协作会话） | [README.md](collab/README.md)、[unit-map.md](collab/unit-map.md)、[task-chain.md](collab/task-chain.md) |
+| `conversation`：`proxy`（核心代理工具） | [README.md](proxy/README.md)、[unit-map.md](proxy/unit-map.md) |
+| `conversation`：`slate`（名单） | [README.md](slate/README.md)、[unit-map.md](slate/unit-map.md) |
+| `turn`：`turn`（回合状态） | [README.md](turn/README.md)、[unit-map.md](turn/unit-map.md) |
+| `turn`：`env`（环境事实） | [README.md](env/README.md)、[unit-map.md](env/unit-map.md) |
+| `maintenance`：`builds`（模块构建） | [README.md](builds/README.md)、[unit-map.md](builds/unit-map.md) |
+| `maintenance`：`storage`（存储空间） | [README.md](storage/README.md)、[unit-map.md](storage/unit-map.md) |
+| `catalog`：`registry`（登记处） | [README.md](registry/README.md)、[unit-map.md](registry/unit-map.md) |
+| `catalog`：`modules`（模块公地） | [README.md](modules/README.md)、[unit-map.md](modules/unit-map.md) |
+| `catalog`：`packages`（运行包） | [README.md](packages/README.md)、[unit-map.md](packages/unit-map.md) |
+| `catalog`：`secrets`（隐秘字段） | [README.md](secrets/README.md)、[unit-map.md](secrets/unit-map.md) |
 | `tools`（工具与围栏） | [README.md](tools/README.md)、[unit-map.md](tools/unit-map.md)、[tools-and-roles.md](tools/tools-and-roles.md) |
 | `permission`（权限） | [README.md](permission/README.md)、[unit-map.md](permission/unit-map.md) |
 | `llm`（模型通道与协议） | [README.md](llm/README.md)、[unit-map.md](llm/unit-map.md) |
-| `registry`（登记处） | [README.md](registry/README.md)、[unit-map.md](registry/unit-map.md) |
-| `modules`（模块公地） | [README.md](modules/README.md)、[unit-map.md](modules/unit-map.md) |
-| `packages`（运行包） | [README.md](packages/README.md)、[unit-map.md](packages/unit-map.md) |
-| `builds`（模块构建） | [README.md](builds/README.md)、[unit-map.md](builds/unit-map.md) |
 | `vm`（虚拟机档） | [README.md](vm/README.md)、[unit-map.md](vm/unit-map.md) |
 | `workspace`（工作区） | [README.md](workspace/README.md)、[unit-map.md](workspace/unit-map.md) |
 | `provision`（依赖补齐） | [README.md](provision/README.md)、[unit-map.md](provision/unit-map.md) |
-| `env`（环境事实） | [README.md](env/README.md)、[unit-map.md](env/unit-map.md) |
-| `storage`（存储空间） | [README.md](storage/README.md)、[unit-map.md](storage/unit-map.md) |
 | `system`（系统维护与自检） | [README.md](system/README.md)、[unit-map.md](system/unit-map.md) |
 | `prompt`（提示词册） | [README.md](prompt/README.md)、[unit-map.md](prompt/unit-map.md)、[prompts.md](prompt/prompts.md) |
-| `slate`（名单） | [README.md](slate/README.md)、[unit-map.md](slate/unit-map.md) |
 | `residents`（常驻服务） | [README.md](residents/README.md)、[unit-map.md](residents/unit-map.md) |
-| `secrets`（隐秘字段） | [README.md](secrets/README.md)、[unit-map.md](secrets/unit-map.md) |
 | `taskchain`（任务链） | [README.md](taskchain/README.md)、[unit-map.md](taskchain/unit-map.md) |
 | `kernel`（地基库，非层） | [README.md](kernel/README.md)、[unit-map.md](kernel/unit-map.md) |
 | 根（启动 / 组合根 / 探针 / 守门进程） | [README.md](entry/README.md)、[unit-map.md](entry/unit-map.md) |
 | 前端 / 交付机制（`cli` 与 `web`） | [README.md](presentation/README.md)、[contracts.md](presentation/contracts.md)、`cli/`、`web/` |
-
 ## 横向：测试与质量
 
 | 要找什么 | 读哪一份 |
