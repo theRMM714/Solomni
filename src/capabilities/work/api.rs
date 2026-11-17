@@ -5,7 +5,8 @@
 //! 不管：怎么建、怎么改、怎么报（在 service 里）；呈现层的 JSON 封装。
 //! 联动：runtime 与呈现层都从这里取类型；guest 任务的 `run()` 在调用方线程上跑。
 
-use crate::capabilities::session::api::{AgentMeta, HistoryView, OptionView, SessionEvent};
+use crate::capabilities::registry::api::AgentMeta;
+use crate::capabilities::session::api::{HistoryView, OptionView, SessionEvent};
 use crate::capabilities::vm::api::{ExecPlan, GuestStop, Vm};
 use crate::capabilities::workspace::api::Sandboxes;
 use crate::kernel::api::{SessionId, Tier};

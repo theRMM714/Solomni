@@ -21,10 +21,10 @@ use crate::capabilities::packages::api as pkgs;
 use crate::capabilities::packages::api::Packages;
 use crate::capabilities::prompt::api::Prompt;
 use crate::capabilities::provision::api::Provision;
+use crate::capabilities::registry::api::AgentMeta;
 use crate::capabilities::registry::api::Registry;
 use crate::capabilities::session::api::{
-    AgentMeta, Delegation, Gates, History, HistoryView, OptionView, RunState, SessionEvent,
-    SessionMeta,
+    Delegation, Gates, History, HistoryView, OptionView, RunState, SessionEvent, SessionMeta,
 };
 use crate::capabilities::tools::api::{ToolExec, Tools};
 use crate::capabilities::turn::api::{PROXY_PRIVATE_DIR, Session, Turn};

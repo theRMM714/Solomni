@@ -48,17 +48,16 @@
 | --- | --- | --- |
 | 0（地基库） | `kernel` | 无 |
 | 1 | `llm`、`modules`、`permission`、`prompt`、`taskchain` | 0 |
-| 2 | `packages`、`secrets`、`workspace` | 0–1 |
+| 2 | `packages`、`registry`、`secrets`、`workspace` | 0–1 |
 | 3 | `residents`、`tools`、`vm` | 0–2 |
 | 4 | `provision`、`session` | 0–3 |
-| 5 | `registry` | 0–4 |
-| 6 | `env`、`slate`、`storage` | 0–5 |
-| 7 | `builds`、`collab` | 0–6 |
-| 8 | `system`、`turn` | 0–7 |
-| 9 | `lifecycle`、`proxy`、`work` | 0–8 |
-| 10 | `runtime` | 0–9 |
+| 5 | `env`、`slate`、`storage` | 0–4 |
+| 6 | `builds`、`collab` | 0–5 |
+| 7 | `system`、`turn` | 0–6 |
+| 8 | `lifecycle`、`proxy`、`work` | 0–7 |
+| 9 | `runtime` | 0–8 |
 
-> 10 层、25 个能力 + `kernel`：本表由 `layers.yaml` 生成（`node tests/docs-sync.mjs --write`），不手写。
+> 9 层、25 个能力 + `kernel`：本表由 `layers.yaml` 生成（`node tests/docs-sync.mjs --write`），不手写。
 <!-- END:layer-table -->
 
 - 层号是**声明的意图**，不是从代码算出来的事实：改成「按当前依赖现算」，判据就恒真（每条边按构造都向下），门禁失去全部约束力。所以表由人维持、门禁比「意图 vs 现实」，越界时顺带报出「按现有依赖至少要第几层」。

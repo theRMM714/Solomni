@@ -14,7 +14,7 @@ pub use crate::capabilities::session::domain::events::{
     qualify, stopped_note, working,
 };
 pub use crate::capabilities::session::domain::history::{
-    AgentMeta, Delegation, HistoryView, RunState, SessionMeta, WorkspaceBinding,
+    Delegation, HistoryView, RunState, SessionMeta, WorkspaceBinding,
 };
 #[allow(unused_imports)]
 pub use crate::capabilities::session::domain::persist::{

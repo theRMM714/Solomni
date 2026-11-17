@@ -5,10 +5,27 @@
 
 use crate::capabilities::modules::api::Roster;
 use crate::capabilities::registry::domain::providers::ModelEntry;
-use crate::capabilities::session::api::AgentMeta;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+/// 目的：会话里的一个 agent 实例记录——会话名单的唯一形状（R15）：登记处视图经
+///   `agent_meta` 转换，代理建会话与核心点名都复用它。归登记处所有：agent 的身份来自登记处，
+///   会话只持有快照并与会话一起走（方向是 session → registry，不是反过来）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentMeta {
+    /// 目的：实例名（重名时已加 -2/-3；也是其沙箱目录名）。
+    pub name: String,
+    /// 目的：是否临时 agent（不来自 agents.yaml）。
+    #[serde(default)]
+    pub transient: bool,
+    pub modules: Vec<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    /// 目的：人设 / 身份（建会话时从登记处或临时声明里快照；之后与会话一起走）。
+    #[serde(default)]
+    pub chara: String,
+}
 /// 目的：一个具名 agent。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Agent {

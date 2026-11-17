@@ -12,10 +12,9 @@ use crate::capabilities::packages::api::PackagePlan;
 use crate::capabilities::permission::api::{
     PermissionDefaults, PermissionLayer, ProfileId, Reach, ReachSet, ScopeMode, SessionSandbox,
 };
+use crate::capabilities::registry::api::AgentMeta;
 use crate::capabilities::registry::api::AppSettings;
-use crate::capabilities::session::api::{
-    AgentMeta, RunState, SessionMeta, WorkspaceBinding, WorkspaceGrant,
-};
+use crate::capabilities::session::api::{RunState, SessionMeta, WorkspaceBinding, WorkspaceGrant};
 use crate::capabilities::workspace::api::{Sandbox, WorkRoots};
 use crate::kernel::api::{ExecSpec, Tier};
 use crate::tests::doubles::module_of;

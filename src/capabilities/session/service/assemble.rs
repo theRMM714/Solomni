@@ -11,10 +11,11 @@ use std::sync::Arc;
 use crate::capabilities::llm::api::{Channel, Llm, Msg, ToolMode};
 use crate::capabilities::modules::api::Module;
 use crate::capabilities::prompt::api::{Prompt, Segment};
+use crate::capabilities::registry::api::AgentMeta;
 use crate::capabilities::residents::api::ResidentOps;
 use crate::capabilities::session::api::{
-    AgentMeta, AgentSession, CompactChatFactory, ContextUsage, SessionEvent, SessionParams,
-    ShellSlot, ToolFace, service_ops_for_modules, tool_table,
+    AgentSession, CompactChatFactory, ContextUsage, SessionEvent, SessionParams, ShellSlot,
+    ToolFace, service_ops_for_modules, tool_table,
 };
 use crate::capabilities::session::domain::assemble::{face_tools, service_ops_of, serviced_tools};
 use crate::capabilities::session::domain::tools::MemberTools;

@@ -7,10 +7,11 @@
 use crate::capabilities::collab::api::AfterTurn;
 use crate::capabilities::collab::api::CollabSession;
 use crate::capabilities::prompt::api::Segment;
+use crate::capabilities::registry::api::AgentMeta;
 use crate::capabilities::registry::api::Registry;
 use crate::capabilities::session::api::{
-    AgentMeta, Answered, DecisionQueue, GateTicket, RunState, SessionEvent, SessionMeta, TurnIo,
-    flat_modules, work_root,
+    Answered, DecisionQueue, GateTicket, RunState, SessionEvent, SessionMeta, TurnIo, flat_modules,
+    work_root,
 };
 use crate::capabilities::turn::api::{Prepared, RestoreRequest, Session};
 use crate::kernel::ports::HostProbe;
