@@ -11,3 +11,6 @@ cases:
   - id: e2e/parent-death
     tier: T5
     note: 父死子亡：核心被强杀后常驻服务进程跟着消失
+  - id: cargo/tests::residents
+    tier: T1
+    note: 常驻服务：起停、崩溃标记、按租约回收

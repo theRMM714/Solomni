@@ -29,3 +29,6 @@ cases:
   - id: e2e/suggest
     tier: T5
     note: 推荐：复用登记处的 agent，不代拟模型
+  - id: cargo/tests::secrets
+    tier: T1
+    note: 隐秘字段：声明视图、置值、注入项与回执脱敏
