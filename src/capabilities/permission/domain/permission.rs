@@ -788,6 +788,11 @@ impl PermissionSet {
         self.may_write(reach) && granted.contains(reach)
     }
 
+    /// 目的：这一席的网络面是否开放（围栏的 net 开关问这一条）。
+    pub fn allows_network(&self) -> bool {
+        self.reach.contains(Reach::Network)
+    }
+
     /// 目的：这个 scope 的执行处置是不是放行（不看逐工具覆盖：判定"这一档能不能跑"）。
     pub fn may_exec(&self, scope: CallScope) -> bool {
         match scope {
