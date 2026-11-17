@@ -5,8 +5,8 @@
 
 use crate::capabilities::builds::api::{Builds, Built, Target};
 use crate::capabilities::builds::ports::{BuildCache, BuildStates, BuiltRecord, SourceDigest};
-use crate::capabilities::modules::api::{BuildDecl, Module};
-use crate::capabilities::packages::api::{
+use crate::capabilities::catalog::modules::api::{BuildDecl, Module};
+use crate::capabilities::catalog::packages::api::{
     Facts, HostExec, Library, Packages, PinPolicy, PlannedPackage, Provider, build_packages,
     diagnose_text, plan_host_requests, requests_for,
 };
@@ -309,7 +309,7 @@ impl BuildsService {
         let platform = vm::guest_platform(image.os, image.arch);
         let eligible = Library::for_target(
             &self.packages.library(),
-            &crate::capabilities::packages::api::Target::guest(&platform),
+            &crate::capabilities::catalog::packages::api::Target::guest(&platform),
         );
         // 逐个定包、算指纹、判缓存：命中的模块不进这次 guest，结果照样按入参顺序给回。
         let mut plans: Vec<GuestPlan> = Vec::new();
@@ -494,7 +494,7 @@ impl BuildsService {
     ) -> Result<Built, String> {
         let id = job.module.manifest.id.clone();
         let src = image.bridge().to_guest(&job.module.root);
-        let entry = crate::capabilities::modules::api::local_entry(&job.decl.command);
+        let entry = crate::capabilities::catalog::modules::api::local_entry(&job.decl.command);
         let ws = self.cache.workspace(
             &id,
             &job.decl.needs,
@@ -693,7 +693,7 @@ fn merged_packages<'a>(plans: impl Iterator<Item = &'a GuestPlan>) -> Vec<Planne
 fn product_entries(module: &Module) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for tool in module.manifest.tools.values() {
-        if let Some(entry) = crate::capabilities::modules::api::local_entry(&tool.command)
+        if let Some(entry) = crate::capabilities::catalog::modules::api::local_entry(&tool.command)
             && !out.iter().any(|x| x == entry)
         {
             out.push(entry.to_string());
@@ -712,7 +712,7 @@ fn module_why(id: &str, total: usize, why: String) -> String {
 }
 
 /// 目的：选型结果 → 指纹用的提供者清单（`能力=提供者`）。
-fn providers_of(plan: &crate::capabilities::packages::api::PackagePlan) -> Vec<String> {
+fn providers_of(plan: &crate::capabilities::catalog::packages::api::PackagePlan) -> Vec<String> {
     plan.providers
         .iter()
         .map(|(cap, p)| match p {

@@ -149,7 +149,7 @@ fn mcp_adapter_talks_to_a_real_stdio_server() {
 #[test]
 fn model_tool_face_exposes_started_service_ops() {
     use crate::capabilities::llm::api::ToolInvoke;
-    use crate::capabilities::modules::api::ServiceDecl;
+    use crate::capabilities::catalog::modules::api::ServiceDecl;
     use crate::capabilities::residents::api::ResidentOps;
     use crate::capabilities::residents::service::ResidentsService;
     use crate::capabilities::session::api::ServiceOp;
@@ -176,7 +176,7 @@ fn model_tool_face_exposes_started_service_ops() {
     let residents: Arc<dyn ResidentOps + Send + Sync> = Arc::new(ResidentsService::new(
         vec![Arc::clone(&fake) as Arc<dyn ServiceAdapter + Send + Sync>],
         test_modules(Arc::new(VecSource(vec![m]))),
-        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+        Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
     ));
     let faces = residents.start("m0", "svc", "").expect("启动服务");
     let op_name = faces[0].name.clone();
@@ -346,7 +346,7 @@ fn mcp_error_response_is_reported() {
 #[cfg(unix)]
 #[test]
 fn residents_mcp_service_end_to_end() {
-    use crate::capabilities::modules::api::ServiceDecl;
+    use crate::capabilities::catalog::modules::api::ServiceDecl;
     use crate::capabilities::residents::api::ResidentOps;
     use crate::capabilities::residents::service::ResidentsService;
     use crate::kernel::detail::ProcessSessions;
@@ -385,7 +385,7 @@ fn residents_mcp_service_end_to_end() {
             Arc::new(crate::kernel::ports::NoopLog),
         )) as Arc<dyn ServiceAdapter + Send + Sync>],
         test_modules(Arc::new(VecSource(vec![m]))),
-        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+        Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
     ));
 
     let faces = residents.start("m1", "echo", "s1").expect("启动 MCP 服务");

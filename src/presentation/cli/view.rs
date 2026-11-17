@@ -128,7 +128,7 @@ pub(super) fn print_roster(faces: &Faces) {
             !matches!(
                 d,
                 crate::capabilities::work::api::RuntimeDiagnosis::Package(
-                    crate::capabilities::packages::api::Problem::Missing { .. }
+                    crate::capabilities::catalog::packages::api::Problem::Missing { .. }
                 )
             )
         })

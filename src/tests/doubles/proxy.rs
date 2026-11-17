@@ -37,7 +37,7 @@ impl FakeProxyHost {
 
     fn facts() -> dproxy::Catalog {
         dproxy::Catalog {
-            agents: vec![crate::capabilities::registry::api::AgentView {
+            agents: vec![crate::capabilities::catalog::registry::api::AgentView {
                 name: "a".to_string(),
                 modules: vec!["m1".to_string()],
                 model: Some("gpt".to_string()),

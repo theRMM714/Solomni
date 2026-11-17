@@ -7,7 +7,7 @@ use super::collab::CollabSession;
 use super::lines::*;
 use crate::capabilities::collab::service::discussion::{MAX_ROUNDS, Member, TurnOut};
 use crate::capabilities::collab::service::synthesis::Execution;
-use crate::capabilities::modules::api::Module;
+use crate::capabilities::catalog::modules::api::Module;
 use crate::capabilities::session::api::{Pending, SessionEvent};
 
 impl CollabSession {

@@ -5,13 +5,13 @@
 
 use super::builders::*;
 use super::prelude::*;
-use crate::capabilities::packages::api as pkgs;
-use crate::capabilities::packages::api::{Facts, Library, PinPolicy, Problem, Target};
-use crate::capabilities::packages::detail::FsPackages;
-use crate::capabilities::packages::domain::manifest::{
+use crate::capabilities::catalog::packages::api as pkgs;
+use crate::capabilities::catalog::packages::api::{Facts, Library, PinPolicy, Problem, Target};
+use crate::capabilities::catalog::packages::detail::FsPackages;
+use crate::capabilities::catalog::packages::domain::manifest::{
     PackageManifest, check_manifest, conflicts, host_platform, is_platform_dir_name,
 };
-use crate::capabilities::packages::ports::PackageSource;
+use crate::capabilities::catalog::packages::ports::PackageSource;
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};

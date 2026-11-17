@@ -7,8 +7,8 @@
 use crate::capabilities::collab::api::AfterTurn;
 use crate::capabilities::collab::api::CollabSession;
 use crate::capabilities::prompt::api::Segment;
-use crate::capabilities::registry::api::AgentMeta;
-use crate::capabilities::registry::api::Registry;
+use crate::capabilities::catalog::registry::api::AgentMeta;
+use crate::capabilities::catalog::registry::api::Registry;
 use crate::capabilities::session::api::{
     Answered, DecisionQueue, GateTicket, RunState, SessionEvent, SessionMeta, TurnIo, flat_modules,
     work_root,

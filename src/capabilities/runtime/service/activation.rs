@@ -35,7 +35,7 @@ impl Handle {
             ))
         })?;
         // 一批一起交给构建能力：虚拟机档只起一台 guest、一块缓存卷，不按模块反复起停。
-        let modules: Vec<&crate::capabilities::modules::api::Module> = ids
+        let modules: Vec<&crate::capabilities::catalog::modules::api::Module> = ids
             .iter()
             .filter_map(|id| roster.modules.iter().find(|m| &m.manifest.id == id))
             .collect();

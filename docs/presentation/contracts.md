@@ -11,7 +11,7 @@
 
 | 东西 | 定义在 | 形态 |
 | --- | --- | --- |
-| 能力接口 | **各能力自己的 `api.rs`** | `Faces` 的字段：`WorkOps` 在 `src/capabilities/work/api.rs`（工作用例与核心推荐）、`TurnOps` 在 `src/capabilities/turn/api.rs`（回合推进）、`RuntimeOps` / `ActionOps` / `LogOps` 在 `src/capabilities/runtime/api.rs`（启用 / 改需求 / 回档 / 停止、动作目录与分发、埋点门面），`RegistryOps` 在 `src/capabilities/registry/api.rs`，`HistoryOps` 在 `src/capabilities/session/api.rs`，`ModulesOps` 在 `src/capabilities/modules/api.rs`，`ResidentOps` / `SecretOps` / `Provision` 各在 `src/capabilities/<能力>/api.rs`。**全 `&self`、可替换成假实现**；实现都是 `src/capabilities/runtime/service/contracts.rs` 里 `Handle` 的队列代理（`impl` 在核心线程上执行）|
+| 能力接口 | **各能力自己的 `api.rs`** | `Faces` 的字段：`WorkOps` 在 `src/capabilities/work/api.rs`（工作用例与核心推荐）、`TurnOps` 在 `src/capabilities/turn/api.rs`（回合推进）、`RuntimeOps` / `ActionOps` / `LogOps` 在 `src/capabilities/runtime/api.rs`（启用 / 改需求 / 回档 / 停止、动作目录与分发、埋点门面），`RegistryOps` 在 `src/capabilities/catalog/registry/api.rs`，`HistoryOps` 在 `src/capabilities/session/api.rs`，`ModulesOps` 在 `src/capabilities/catalog/modules/api.rs`，`ResidentOps` / `SecretOps` / `Provision` 各在 `src/capabilities/<能力>/api.rs`。**全 `&self`、可替换成假实现**；实现都是 `src/capabilities/runtime/service/contracts.rs` 里 `Handle` 的队列代理（`impl` 在核心线程上执行）|
 | 事件台 | `src/capabilities/turn/api.rs` | `EventBus`：核心独占生产，任意数量的消费者按序号增量取 |
 
 规则：

@@ -4,13 +4,13 @@
 //!   启停开关（归 modules：用户覆盖 ?? 作者默认）；本能力只按有效值跑。
 //! 联动：api 见 `api.rs`，端口见 `ports.rs`；由 `main.rs` 装配。
 
-use crate::capabilities::modules::api::{Module, Modules, Roster, ServiceDecl};
-use crate::capabilities::packages::api as pkgs;
+use crate::capabilities::catalog::modules::api::{Module, Modules, Roster, ServiceDecl};
+use crate::capabilities::catalog::packages::api as pkgs;
 use crate::capabilities::residents::api::{
     Operation, Receipt, ResidentOps, ServiceState, ServiceView,
 };
 use crate::capabilities::residents::ports::{LaunchSpec, ServiceAdapter, ServiceInstance};
-use crate::capabilities::secrets::api::SecretOps;
+use crate::capabilities::catalog::secrets::api::SecretOps;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 

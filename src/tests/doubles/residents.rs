@@ -197,7 +197,7 @@ impl InMemorySecretStore {
     }
 }
 
-impl crate::capabilities::secrets::ports::SecretStore for InMemorySecretStore {
+impl crate::capabilities::catalog::secrets::ports::SecretStore for InMemorySecretStore {
     fn load(&self) -> Result<BTreeMap<String, String>, String> {
         Ok(self.values.lock().expect("锁").clone())
     }

@@ -6,7 +6,7 @@
 use serde_json::{Value, json};
 
 use crate::capabilities::builds::api::Built;
-use crate::capabilities::packages::api::BaseFacts;
+use crate::capabilities::catalog::packages::api::BaseFacts;
 use crate::capabilities::storage::api::{CleanOutcome, GcAction, GcReport};
 use crate::capabilities::system::api::{
     BuildRequest, EnsureRequest, Fault, FenceFacts, GcRequest, ResetRequest, System, WorkGcRequest,
@@ -543,7 +543,7 @@ fn toolchain_facts_render_for_both_audiences() {
     };
     facts.fallback.insert(
         "python".to_string(),
-        crate::capabilities::packages::api::HostFallback {
+        crate::capabilities::catalog::packages::api::HostFallback {
             path: std::path::PathBuf::from("/usr/bin/python3"),
             fenced: true,
             why: String::new(),
@@ -551,7 +551,7 @@ fn toolchain_facts_render_for_both_audiences() {
     );
     facts.fallback.insert(
         "cc".to_string(),
-        crate::capabilities::packages::api::HostFallback {
+        crate::capabilities::catalog::packages::api::HostFallback {
             path: std::path::PathBuf::from("/usr/bin/cc"),
             fenced: false,
             why: "没有写 ACL 的权限".to_string(),

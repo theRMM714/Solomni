@@ -6,7 +6,7 @@
 #![allow(dead_code)]
 
 use super::builders::SilentRunner;
-use crate::capabilities::registry::api::AgentMeta;
+use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::runtime::api::SessionEvent;
 use crate::capabilities::work::api::{WorkMode, WorkSpec};
 
@@ -14,15 +14,15 @@ use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg};
 use crate::capabilities::llm::detail::fake_chat::FakeChat;
 use crate::capabilities::llm::ports::{ChatGateway, ModelCatalog};
-use crate::capabilities::modules::api::{Module, ModuleManifest};
-use crate::capabilities::modules::ports::ModuleSource;
-use crate::capabilities::packages::domain::manifest::{Library, PackageManifest};
-use crate::capabilities::packages::ports::PackageSource;
+use crate::capabilities::catalog::modules::api::{Module, ModuleManifest};
+use crate::capabilities::catalog::modules::ports::ModuleSource;
+use crate::capabilities::catalog::packages::domain::manifest::{Library, PackageManifest};
+use crate::capabilities::catalog::packages::ports::PackageSource;
 use crate::capabilities::prompt::api::Prompt;
 use crate::capabilities::prompt::domain::prompt::Prompts;
 use crate::capabilities::prompt::ports::PromptSource;
-use crate::capabilities::registry::api::{ModelEntry, Provider, Settings};
-use crate::capabilities::registry::ports::SettingsStore;
+use crate::capabilities::catalog::registry::api::{ModelEntry, Provider, Settings};
+use crate::capabilities::catalog::registry::ports::SettingsStore;
 use crate::capabilities::runtime::service::Core;
 use crate::capabilities::session::api::TurnIo;
 use crate::capabilities::session::api::{HistoryView, SessionMeta};

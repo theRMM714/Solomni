@@ -14,10 +14,10 @@ use crate::capabilities::work::api::{
 };
 use crate::presentation::faces::Faces;
 
-use crate::capabilities::modules::api::{ModulesOps, Roster};
-use crate::capabilities::registry::api::AgentView;
-use crate::capabilities::registry::api::RegistryOps;
-use crate::capabilities::registry::api::{AppSettings, ModelView, ProviderView};
+use crate::capabilities::catalog::modules::api::{ModulesOps, Roster};
+use crate::capabilities::catalog::registry::api::AgentView;
+use crate::capabilities::catalog::registry::api::RegistryOps;
+use crate::capabilities::catalog::registry::api::{AppSettings, ModelView, ProviderView};
 use crate::capabilities::session::api::{HistoryOps, HistoryView, SessionMeta};
 use crate::kernel::api::Tier;
 use crate::presentation::web::routes::{self, ROUTES};
@@ -209,7 +209,7 @@ fn fake_ops_on(fail: Option<&str>, bus: Arc<dyn Events>) -> Faces {
         events: bus,
         log: Arc::new(super::doubles::NoopLogOps),
         residents: Arc::new(crate::capabilities::residents::api::NoResidents),
-        secrets: Arc::new(crate::capabilities::secrets::api::NoSecrets),
+        secrets: Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
         provision: Arc::new(FakeProvision::new(fail)),
         storage: Arc::new(FakeStorage::new(fail)),
         toolchains: serde_json::Value::Null,
@@ -650,7 +650,7 @@ impl RegistryOps for FakeFaces {
             note: String::new(),
             tools: crate::capabilities::llm::api::ToolMode::Envelope,
             context: 32_000,
-            thinking: crate::capabilities::registry::domain::providers::ModelThinkingView {
+            thinking: crate::capabilities::catalog::registry::domain::providers::ModelThinkingView {
                 default: None,
                 levels: Default::default(),
             },
@@ -663,7 +663,7 @@ impl RegistryOps for FakeFaces {
     }
     fn upsert_model(
         &self,
-        _draft: crate::capabilities::registry::api::ModelDraft,
+        _draft: crate::capabilities::catalog::registry::api::ModelDraft,
     ) -> Result<(), String> {
         self.guard()
     }

@@ -125,7 +125,7 @@ impl Work {
         registry: &dyn Registry,
         probe: &dyn HostProbe,
         meta: &SessionMeta,
-        roster: &crate::capabilities::modules::api::Roster,
+        roster: &crate::capabilities::catalog::modules::api::Roster,
     ) -> Result<crate::capabilities::vm::api::ExecPlan, String> {
         let mut ids: Vec<&str> = meta
             .agents

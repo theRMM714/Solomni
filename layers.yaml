@@ -3,13 +3,10 @@
 # 门禁：tests/gates/structure/layers.js（T0 结构审查）。新增能力必须先在这里归层，否则失败。
 kernel: 0
 llm: 1
-modules: 1
 permission: 1
 prompt: 1
 taskchain: 1
-packages: 2
-registry: 2
-secrets: 2
+catalog: 2
 workspace: 2
 residents: 3
 tools: 3
@@ -17,6 +14,7 @@ vm: 3
 provision: 4
 session: 4
 env: 5
+proxy: 5
 slate: 5
 storage: 5
 builds: 6
@@ -24,6 +22,5 @@ collab: 6
 system: 7
 turn: 7
 lifecycle: 8
-proxy: 8
 work: 8
 runtime: 9

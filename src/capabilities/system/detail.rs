@@ -8,7 +8,7 @@ pub(crate) mod setup;
 
 use serde_json::Value;
 
-use crate::capabilities::packages::api::BaseFacts;
+use crate::capabilities::catalog::packages::api::BaseFacts;
 use crate::capabilities::provision::api::Provision;
 use crate::capabilities::storage::api::Storage;
 use crate::capabilities::system::api::{Facts, FenceFacts};

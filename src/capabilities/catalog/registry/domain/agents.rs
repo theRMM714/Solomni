@@ -3,8 +3,8 @@
 //! 不管：能力注册表（在 modules/ 公地）；落盘（在 detail/yaml_settings.rs）；登记处用例（在 service.rs）。
 //! 联动：被 registry/api.rs 重导出；service.rs 读写；runtime 按 agent 名取 Roster。
 
-use crate::capabilities::modules::api::Roster;
-use crate::capabilities::registry::domain::providers::ModelEntry;
+use crate::capabilities::catalog::modules::api::Roster;
+use crate::capabilities::catalog::registry::domain::providers::ModelEntry;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 

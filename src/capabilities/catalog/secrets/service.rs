@@ -3,9 +3,9 @@
 //! 不管：实际注入（消费方按 resolve 取）；通道密钥（registry）；字段声明解析（workspace）。
 //! 联动：api 见 `api.rs`，端口见 `ports.rs`；由 `main.rs` 装配。
 
-use crate::capabilities::modules::api::{Modules, Roster, SecretDecl};
-use crate::capabilities::secrets::api::{SecretOps, SecretView};
-use crate::capabilities::secrets::ports::SecretStore;
+use crate::capabilities::catalog::modules::api::{Modules, Roster, SecretDecl};
+use crate::capabilities::catalog::secrets::api::{SecretOps, SecretView};
+use crate::capabilities::catalog::secrets::ports::SecretStore;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 

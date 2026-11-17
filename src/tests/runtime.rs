@@ -43,7 +43,7 @@ fn runtime_rooted(
         Arc::new(crate::kernel::ports::NoopLog),
         crate::tests::doubles::test_host_probe(),
         Arc::new(crate::capabilities::residents::api::NoResidents),
-        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+        Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
     )
 }
 
@@ -81,7 +81,7 @@ fn runtime_for_vm(
         Arc::new(crate::kernel::ports::NoopLog),
         probe,
         Arc::new(crate::capabilities::residents::api::NoResidents),
-        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+        Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
     )
 }
 

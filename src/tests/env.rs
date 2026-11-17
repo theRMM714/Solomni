@@ -7,13 +7,13 @@ use crate::capabilities::env::api::{
     MemberFacts, SandboxesFacts, host_read_roots, member, network_allowed, permissions, sandboxes,
     workspace_grant,
 };
-use crate::capabilities::modules::api::Roster;
-use crate::capabilities::packages::api::PackagePlan;
+use crate::capabilities::catalog::modules::api::Roster;
+use crate::capabilities::catalog::packages::api::PackagePlan;
 use crate::capabilities::permission::api::{
     PermissionDefaults, PermissionLayer, ProfileId, Reach, ReachSet, ScopeMode, SessionSandbox,
 };
-use crate::capabilities::registry::api::AgentMeta;
-use crate::capabilities::registry::api::AppSettings;
+use crate::capabilities::catalog::registry::api::AgentMeta;
+use crate::capabilities::catalog::registry::api::AppSettings;
 use crate::capabilities::session::api::{RunState, SessionMeta, WorkspaceBinding, WorkspaceGrant};
 use crate::capabilities::workspace::api::{Sandbox, WorkRoots};
 use crate::kernel::api::{ExecSpec, Tier};

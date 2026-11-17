@@ -3,7 +3,7 @@
 //! 不管：谁在什么时机调用它们（create.rs / config.rs / runtime 的代理入口）。
 //! 联动：create.rs、config.rs 与 runtime 的代理入口共用这里，避免同一规则两处实现。
 
-use crate::capabilities::registry::api::AgentMeta;
+use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::work::api::WorkMode;
 
 /// 目的：模块列表保序去重（一个 agent 内重复只留一份；跨 agent 的重叠是合法的共用）。

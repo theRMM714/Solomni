@@ -444,6 +444,6 @@ pub(crate) fn native_core(
         Arc::new(crate::kernel::ports::NoopLog),
         crate::tests::doubles::test_host_probe(),
         Arc::new(crate::capabilities::residents::api::NoResidents),
-        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+        Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
     )
 }

@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use crate::capabilities::collab::api::CollabSession;
 use crate::capabilities::llm::api::{Channel, Msg};
-use crate::capabilities::modules::api::Module;
-use crate::capabilities::registry::api::Registry;
+use crate::capabilities::catalog::modules::api::Module;
+use crate::capabilities::catalog::registry::api::Registry;
 use crate::capabilities::session::api::{
     AgentSession, SessionMeta, SessionParams, guest_lease_for, role_of, session_kind_of, work_root,
     work_root_of,
@@ -161,10 +161,10 @@ impl Turn {
                         probe,
                         &meta.exec,
                         &modules,
-                        crate::capabilities::packages::api::PinPolicy::Require,
+                        crate::capabilities::catalog::packages::api::PinPolicy::Require,
                     )
                 } else {
-                    crate::capabilities::packages::api::PackagePlan::default()
+                    crate::capabilities::catalog::packages::api::PackagePlan::default()
                 };
                 // 工具环境事实（围栏 / 注入项 / 运行路径 / 工具链根）由这里经 `env` 派生后按值拷进 `session`。
                 let member = crate::capabilities::session::api::MemberSpec {
@@ -523,7 +523,7 @@ impl Turn {
                 &sb,
                 crate::capabilities::env::api::network_allowed(registry.app()),
                 crate::kernel::api::Tier::Host,
-                &crate::capabilities::packages::api::PackagePlan::default(),
+                &crate::capabilities::catalog::packages::api::PackagePlan::default(),
             ),
         };
         let (window, percent, keep_percent) = self.context_budget(registry, None);

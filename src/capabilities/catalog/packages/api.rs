@@ -3,11 +3,11 @@
 //! 不管：纯逻辑实现（domain/）与端口（ports.rs）。
 //! 联动：被 vm / runtime / entry::probes / residents 消费；契约见 RUNTIME_SPEC.md。
 
-pub use crate::capabilities::packages::domain::manifest::{
+pub use crate::capabilities::catalog::packages::domain::manifest::{
     KIND_SYSTEM, Library, Target, library_for_guest,
 };
 #[allow(unused_imports)] // 目的：ExecProbe 的实现在测试与组合根；能力内只经 Facts 传。
-pub use crate::capabilities::packages::domain::plan::{
+pub use crate::capabilities::catalog::packages::domain::plan::{
     BaseFacts, ExecProbe, Facts, HostExec, HostFallback, PackagePlan, PinPolicy, PlannedPackage,
     Problem, Provider, absent, build_packages, diagnose_text, diagnoses, plan_guest, plan_host,
     plan_host_requests, requests_for,

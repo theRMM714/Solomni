@@ -9,11 +9,11 @@ use std::collections::BTreeMap;
 use crate::capabilities::llm::api::Channel;
 #[cfg(test)]
 use crate::capabilities::llm::api::ToolMode;
-use crate::capabilities::modules::api::{Module, Roster};
-use crate::capabilities::packages::api::PackagePlan;
+use crate::capabilities::catalog::modules::api::{Module, Roster};
+use crate::capabilities::catalog::packages::api::PackagePlan;
 use crate::capabilities::permission::api::PermissionSet;
-use crate::capabilities::registry::api::AgentMeta;
-use crate::capabilities::registry::api::Registry;
+use crate::capabilities::catalog::registry::api::AgentMeta;
+use crate::capabilities::catalog::registry::api::Registry;
 use crate::capabilities::session::api::{
     AgentSession, MemberSpec, SessionEvent, SessionMeta, SingleSpec, WorkspaceGrant, work_root_of,
 };

@@ -3,8 +3,8 @@
 //! 不管：纯逻辑（domain/）；适配器（detail/）由组合根构造。
 //! 联动：端口在 ports.rs；被 api::Packages 的调用方消费。
 
-use crate::capabilities::packages::api::{BaseFacts, Library, Packages};
-use crate::capabilities::packages::ports::PackageSource;
+use crate::capabilities::catalog::packages::api::{BaseFacts, Library, Packages};
+use crate::capabilities::catalog::packages::ports::PackageSource;
 use std::path::PathBuf;
 use std::sync::Arc;
 

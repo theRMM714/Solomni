@@ -21,7 +21,7 @@ pub(crate) use entry::startup::{
 };
 
 use crate::presentation::faces::Faces;
-use capabilities::registry::api::Registry as _;
+use capabilities::catalog::registry::api::Registry as _;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -186,7 +186,7 @@ fn main() {
         ),
     );
     println!("[围栏] {}", fence_cap.note);
-    let store = capabilities::registry::detail::yaml_settings::YamlSettingsStore::new(
+    let store = capabilities::catalog::registry::detail::yaml_settings::YamlSettingsStore::new(
         root.join(".home").join("providers.yaml"),
         root.join(".home").join("models.yaml"),
         root.join(".home").join("settings.yaml"),
@@ -197,14 +197,14 @@ fn main() {
     let workstore = capabilities::workspace::detail::FsWorkStore::new();
     // 保留名表（内置工具名）由**组合根**问一次工具能力后交进去：清单校验归 workspace，
     // 名字空间归 tools，两边不互相依赖。
-    let source = capabilities::modules::detail::FsModules::new(
+    let source = capabilities::catalog::modules::detail::FsModules::new(
         root.join("modules"),
         capabilities::tools::api::names(),
     );
     // 运行包能力：依赖文件夹 runtimes/（一个包 = 一个文件夹 + package.yaml）。
-    let packages: Arc<dyn capabilities::packages::api::Packages + Send + Sync> =
-        Arc::new(capabilities::packages::service::PackagesService::with_base(
-            Arc::new(capabilities::packages::detail::FsPackages::new(
+    let packages: Arc<dyn capabilities::catalog::packages::api::Packages + Send + Sync> =
+        Arc::new(capabilities::catalog::packages::service::PackagesService::with_base(
+            Arc::new(capabilities::catalog::packages::detail::FsPackages::new(
                 root.join("runtimes"),
             )),
             base.clone(),
@@ -226,7 +226,7 @@ fn main() {
             Arc::new(capabilities::llm::detail::UnambiguousRepair),
         ));
     // **登记处能力**：四份 yaml 的状态与用例都在它里面（runtime 只按 `Registry` 用它，看不见字段）。
-    let mut registry = match capabilities::registry::service::RegistryService::new(
+    let mut registry = match capabilities::catalog::registry::service::RegistryService::new(
         Arc::new(store),
         Arc::clone(&llm),
         Arc::clone(&log),
@@ -266,14 +266,14 @@ fn main() {
     );
     let requirements = kernel::api::SandboxRequirements {
         filesystem: sandbox_cfg.policy.enforce.filesystem
-            == capabilities::registry::api::SandboxEnforceLevel::Require,
+            == capabilities::catalog::registry::api::SandboxEnforceLevel::Require,
         network: sandbox_cfg.policy.enforce.network
-            == capabilities::registry::api::SandboxEnforceLevel::Require
+            == capabilities::catalog::registry::api::SandboxEnforceLevel::Require
             && !sandbox_cfg.policy.network,
         process_tree: sandbox_cfg.policy.enforce.process_tree
-            == capabilities::registry::api::SandboxEnforceLevel::Require,
+            == capabilities::catalog::registry::api::SandboxEnforceLevel::Require,
         env_whitelist: sandbox_cfg.policy.enforce.env_whitelist
-            == capabilities::registry::api::SandboxEnforceLevel::Require,
+            == capabilities::catalog::registry::api::SandboxEnforceLevel::Require,
     };
     let sandbox_mode = Arc::new(kernel::api::SandboxMode::new(
         requirements,
@@ -281,7 +281,7 @@ fn main() {
         fence_cap.net && (!kernel::api::HAS_EXTERNAL_ACL_STEP || authorized),
         fence_cap.tree,
         true,
-        sandbox_cfg.policy.on_unavailable == capabilities::registry::api::SandboxUnavailable::Ask,
+        sandbox_cfg.policy.on_unavailable == capabilities::catalog::registry::api::SandboxUnavailable::Ask,
     ));
     // 授权开关：工具进程与启动报告共用这一份（环境变量只在这里生效一次）。
     let write_allowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(authorized));
@@ -425,9 +425,9 @@ fn main() {
 
     // **模块能力**：清单来源与启停覆盖落盘只由它的 service 持有（R12）；它是模块事实的唯一上游。
     let module_state =
-        capabilities::modules::detail::YamlModuleState::new(home.join("modules.yaml"));
-    let modules: Arc<dyn capabilities::modules::api::Modules + Send + Sync> =
-        match capabilities::modules::service::ModulesService::new(
+        capabilities::catalog::modules::detail::YamlModuleState::new(home.join("modules.yaml"));
+    let modules: Arc<dyn capabilities::catalog::modules::api::Modules + Send + Sync> =
+        match capabilities::catalog::modules::service::ModulesService::new(
             Arc::new(source),
             Arc::new(module_state),
         ) {
@@ -490,10 +490,10 @@ fn main() {
         ));
 
     // **隐秘字段能力**：值只落 .home/secrets.yaml；加载失败 = 装配失败（不静默空表）。
-    let secrets: Arc<dyn capabilities::secrets::api::SecretOps + Send + Sync> =
-        match capabilities::secrets::service::SecretsService::new(
+    let secrets: Arc<dyn capabilities::catalog::secrets::api::SecretOps + Send + Sync> =
+        match capabilities::catalog::secrets::service::SecretsService::new(
             Arc::clone(&modules),
-            Arc::new(capabilities::secrets::detail::YamlSecrets::new(
+            Arc::new(capabilities::catalog::secrets::detail::YamlSecrets::new(
                 home.join("secrets.yaml"),
             )),
         ) {

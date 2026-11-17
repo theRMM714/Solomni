@@ -24,9 +24,9 @@ pub struct Handle {
     /// 目的：常驻服务面（与核心共享同一份）：ResidentOps 由它转发。
     pub(crate) residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
     /// 目的：隐秘字段面（与核心共享同一份）：SecretOps 由它转发。
-    pub(crate) secrets: Arc<dyn crate::capabilities::secrets::api::SecretOps + Send + Sync>,
+    pub(crate) secrets: Arc<dyn crate::capabilities::catalog::secrets::api::SecretOps + Send + Sync>,
     /// 目的：模块公地能力面（与核心共享同一份）：模块事实与启停写面由它转发。
-    pub(super) modules: Arc<dyn crate::capabilities::modules::api::Modules + Send + Sync>,
+    pub(super) modules: Arc<dyn crate::capabilities::catalog::modules::api::Modules + Send + Sync>,
     /// 目的：构建能力面（与核心共享同一份）：创建会话前在**调用方线程**补编模块产物。
     pub(super) builds: Arc<dyn crate::capabilities::builds::api::Builds + Send + Sync>,
     /// 目的：正在启动的 guest 租约：同一台 guest 的并发启用/生成只能有一个在拉，别互相替换。
@@ -172,7 +172,7 @@ impl crate::capabilities::turn::api::TurnHost for Handle {
         &self,
         f: impl FnOnce(
             &mut crate::capabilities::turn::api::Turn,
-            &dyn crate::capabilities::registry::api::Registry,
+            &dyn crate::capabilities::catalog::registry::api::Registry,
             &dyn crate::kernel::ports::HostProbe,
         ) -> Result<T, String>
         + Send

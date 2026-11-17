@@ -8,12 +8,12 @@ use super::prelude::*;
 pub(crate) fn entry_candidates_follow_the_shell_resolution_of_the_target() {
     // unix：没有扩展名解析，只有字面那个。
     assert_eq!(
-        crate::capabilities::modules::api::entry_candidates("build/indexer", "linux"),
+        crate::capabilities::catalog::modules::api::entry_candidates("build/indexer", "linux"),
         vec!["build/indexer".to_string()]
     );
     // Windows：cmd 按 PATHEXT 补扩展名（清单只写不带扩展名的那个）。
     assert_eq!(
-        crate::capabilities::modules::api::entry_candidates("build/indexer", "windows"),
+        crate::capabilities::catalog::modules::api::entry_candidates("build/indexer", "windows"),
         vec![
             "build/indexer".to_string(),
             "build/indexer.exe".to_string(),
@@ -25,7 +25,7 @@ pub(crate) fn entry_candidates_follow_the_shell_resolution_of_the_target() {
 }
 #[test]
 pub(crate) fn build_decl_is_validated_and_survives_the_scan() {
-    use crate::capabilities::modules::api::{BuildDecl, check_build};
+    use crate::capabilities::catalog::modules::api::{BuildDecl, check_build};
     let mut m = module_of("idx").manifest;
     assert!(check_build(&m).is_ok(), "没写 build 段是合法的");
     m.build = Some(BuildDecl {
@@ -57,7 +57,7 @@ pub(crate) fn build_decl_is_validated_and_survives_the_scan() {
 #[test]
 pub(crate) fn shipped_indexer_declares_its_build() {
     // 随仓的 indexer 是编译型模块：`build:` 段必须被扫出来（产品据此能替它编）。
-    let roster = crate::capabilities::modules::detail::FsModules::new(
+    let roster = crate::capabilities::catalog::modules::detail::FsModules::new(
         PathBuf::from("modules"),
         crate::capabilities::tools::api::names(),
     )
@@ -92,7 +92,7 @@ pub(crate) fn shipped_indexer_declares_its_build() {
 }
 #[test]
 pub(crate) fn local_entry_only_accepts_relative_paths() {
-    use crate::capabilities::modules::api::local_entry;
+    use crate::capabilities::catalog::modules::api::local_entry;
     assert_eq!(local_entry("build/indexer build"), Some("build/indexer"));
     assert_eq!(local_entry("./tools/run.sh"), Some("./tools/run.sh"));
     // Windows 写法也认（相对路径用反斜杠）。
@@ -128,7 +128,7 @@ pub(crate) fn roster_lists_modules() {
 #[test]
 pub(crate) fn shipped_modules_scan_clean() {
     // 随仓模块（modules/）是产品内容的一部分：清单必须全部合法、id 与目录一致。
-    let roster = crate::capabilities::modules::detail::FsModules::new(
+    let roster = crate::capabilities::catalog::modules::detail::FsModules::new(
         PathBuf::from("modules"),
         crate::capabilities::tools::api::names(),
     )
@@ -154,15 +154,15 @@ pub(crate) fn shipped_modules_scan_clean() {
 pub(crate) fn module_runtimes_are_validated() {
     let mut m = module_of("a");
     m.manifest.runtimes = vec!["python".to_string(), "cc".to_string()];
-    assert!(crate::capabilities::modules::api::check_runtimes(&m.manifest).is_ok());
+    assert!(crate::capabilities::catalog::modules::api::check_runtimes(&m.manifest).is_ok());
     m.manifest.runtimes = vec!["Python".to_string()];
     assert!(
-        crate::capabilities::modules::api::check_runtimes(&m.manifest).is_err(),
+        crate::capabilities::catalog::modules::api::check_runtimes(&m.manifest).is_err(),
         "大写不合法"
     );
     m.manifest.runtimes = vec!["python".to_string(), "python".to_string()];
     assert!(
-        crate::capabilities::modules::api::check_runtimes(&m.manifest)
+        crate::capabilities::catalog::modules::api::check_runtimes(&m.manifest)
             .unwrap_err()
             .contains("重复"),
         "重复声明要拒收"
@@ -176,7 +176,7 @@ pub(crate) fn module_tools_may_not_take_builtin_names() {
         .tools
         .insert("read_txt".to_string(), decl("python tools/read_txt.py"));
     assert!(
-        crate::capabilities::modules::api::check_tools(
+        crate::capabilities::catalog::modules::api::check_tools(
             &m.manifest,
             &crate::capabilities::tools::api::names(),
         )
@@ -187,7 +187,7 @@ pub(crate) fn module_tools_may_not_take_builtin_names() {
         m.manifest
             .tools
             .insert(name.to_string(), decl("python tools/x.py"));
-        let why = crate::capabilities::modules::api::check_tools(
+        let why = crate::capabilities::catalog::modules::api::check_tools(
             &m.manifest,
             &crate::capabilities::tools::api::names(),
         )
@@ -201,7 +201,7 @@ pub(crate) fn effective_enablement_is_override_then_author_default() {
     let mut m = module_of("a");
     m.manifest.services.insert(
         "s".to_string(),
-        crate::capabilities::modules::api::ServiceDecl {
+        crate::capabilities::catalog::modules::api::ServiceDecl {
             adapter: "fake".to_string(),
             command: "run".to_string(),
             desc: String::new(),
@@ -252,12 +252,12 @@ pub(crate) fn overrides_survive_a_reload() {
     let first = test_modules_store(
         Arc::clone(&source) as Arc<dyn ModuleSource + Send + Sync>,
         Arc::clone(&store)
-            as Arc<dyn crate::capabilities::modules::ports::ModuleStateStore + Send + Sync>,
+            as Arc<dyn crate::capabilities::catalog::modules::ports::ModuleStateStore + Send + Sync>,
     );
     first.set_module_enabled("a", false).expect("停用");
     let second = test_modules_store(
         source,
-        store as Arc<dyn crate::capabilities::modules::ports::ModuleStateStore + Send + Sync>,
+        store as Arc<dyn crate::capabilities::catalog::modules::ports::ModuleStateStore + Send + Sync>,
     );
     assert!(!second.module_enabled("a"), "覆盖要落盘并在下次装配时载入");
 }

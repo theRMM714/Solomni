@@ -122,7 +122,7 @@ pub(crate) fn model_context_zero_means_not_filled_and_falls_back_to_128k() {
     assert_eq!(stored(&core), 0, "0 = 不填，原样保存");
     assert_eq!(
         core.registry().context_of(Some("m")),
-        crate::capabilities::registry::domain::providers::DEFAULT_CONTEXT_TOKENS,
+        crate::capabilities::catalog::registry::domain::providers::DEFAULT_CONTEXT_TOKENS,
         "自动压缩的兜底阈值是 128K"
     );
 }
@@ -176,7 +176,7 @@ pub(crate) fn agent_meta_is_the_single_conversion_from_a_registry_view() {
     let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]));
     agent_upsert_chara(&mut core, "调研", &["a"], "m", "说明", " 严谨 ").unwrap();
     let view = core.registry().agent_views().remove(0);
-    let meta = crate::capabilities::registry::api::agent_meta(&view);
+    let meta = crate::capabilities::catalog::registry::api::agent_meta(&view);
     assert_eq!(meta.name, view.name);
     assert!(!meta.transient, "登记处来的 agent 不是临时 agent");
     assert_eq!(meta.modules, view.modules);
@@ -495,18 +495,18 @@ pub(crate) fn a_probe_writes_back_only_conclusive_results() {
 #[test]
 pub(crate) fn reserved_directory_names_are_rejected_case_insensitively() {
     let reserved = vec!["work".to_string(), "children".to_string()];
-    assert!(crate::capabilities::registry::api::check_reserved("children", &reserved).is_err());
+    assert!(crate::capabilities::catalog::registry::api::check_reserved("children", &reserved).is_err());
     assert!(
-        crate::capabilities::registry::api::check_reserved("CHILDREN", &reserved).is_err(),
+        crate::capabilities::catalog::registry::api::check_reserved("CHILDREN", &reserved).is_err(),
         "Windows 文件系统不区分大小写"
     );
-    assert!(crate::capabilities::registry::api::check_reserved("甲", &reserved).is_ok());
+    assert!(crate::capabilities::catalog::registry::api::check_reserved("甲", &reserved).is_ok());
 }
 
 /// 目的：默认目录就是四档；映射的字符串是 reasoning_effort 简写，对象原样合并，空对象 = 不发。
 #[test]
 pub(crate) fn thinking_defaults_and_map_shapes_are_resolved() {
-    use crate::capabilities::registry::domain::providers::{ThinkingCatalog, ThinkingSpec};
+    use crate::capabilities::catalog::registry::domain::providers::{ThinkingCatalog, ThinkingSpec};
     let mut s = Settings::default();
     assert_eq!(
         s.app
@@ -563,7 +563,7 @@ pub(crate) fn thinking_defaults_and_map_shapes_are_resolved() {
     assert!(s.thinking_supports(Some("m"), "high"));
     assert!(!s.thinking_supports(Some("m"), "max"));
     assert_eq!(
-        crate::capabilities::registry::domain::providers::validate_thinking_catalog(
+        crate::capabilities::catalog::registry::domain::providers::validate_thinking_catalog(
             &ThinkingCatalog::default()
         ),
         Ok(())
@@ -573,7 +573,7 @@ pub(crate) fn thinking_defaults_and_map_shapes_are_resolved() {
 /// 目的：目录标签不限制字符集（中文 / 空格 / 标点都行），但仍拒空、首尾空白、控制字符与重复。
 #[test]
 pub(crate) fn thinking_catalog_accepts_arbitrary_tags() {
-    use crate::capabilities::registry::domain::providers::{
+    use crate::capabilities::catalog::registry::domain::providers::{
         ThinkingCatalog, ThinkingLevel, validate_thinking_catalog,
     };
     let tag = |s: &str| ThinkingLevel { id: s.to_string() };
@@ -599,7 +599,7 @@ pub(crate) fn thinking_catalog_accepts_arbitrary_tags() {
 /// 目的：目录项只认标签 id；设置文件里多余的 label 字段在读入时忽略。
 #[test]
 pub(crate) fn thinking_catalog_reads_tag_entries_and_ignores_extra_fields() {
-    use crate::capabilities::registry::domain::providers::ThinkingCatalog;
+    use crate::capabilities::catalog::registry::domain::providers::ThinkingCatalog;
     let cat: ThinkingCatalog =
         yaml_serde::from_str("levels:\n- id: low\n  label: 低\n- id: 高\n").unwrap();
     assert_eq!(
@@ -611,7 +611,7 @@ pub(crate) fn thinking_catalog_reads_tag_entries_and_ignores_extra_fields() {
 /// 目的：登记时就拒掉目录外的档、悬空的默认档与被保留键的片段；删掉仍被模型使用的等级也要拒绝。
 #[test]
 pub(crate) fn thinking_registration_rejects_unknown_levels_defaults_and_reserved_keys() {
-    use crate::capabilities::registry::api::ThinkingSpec;
+    use crate::capabilities::catalog::registry::api::ThinkingSpec;
     let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]));
     core.registry_mut()
         .provider_upsert("p1", "http://x", "k")

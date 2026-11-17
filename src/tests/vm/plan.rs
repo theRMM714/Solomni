@@ -5,7 +5,7 @@
 
 use super::super::prelude::*;
 
-use crate::capabilities::packages::api::{BaseFacts, Library, PinPolicy, Problem};
+use crate::capabilities::catalog::packages::api::{BaseFacts, Library, PinPolicy, Problem};
 use crate::capabilities::vm::api::{
     MissingEntry, host_plan_for, plan_for_spec, unavailable_modules,
 };

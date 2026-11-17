@@ -3,7 +3,7 @@
 //! 不管：重建本体（见 `service/rebuild.rs`）、生成驱动与工作编排（见 `runtime`）。
 //! 联动：`runtime` 的启用、派发与协作推进都经这里；`ensure_session` 重建时按 `runtime` 传来的登记处与主机探针取事实。
 
-use crate::capabilities::registry::api::Registry;
+use crate::capabilities::catalog::registry::api::Registry;
 use crate::capabilities::session::api::{RunState, SessionMeta, subtree_of, truncate_events};
 use crate::capabilities::turn::api::Session;
 use crate::capabilities::turn::service::session::Turn;

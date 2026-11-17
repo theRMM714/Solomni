@@ -157,8 +157,8 @@ impl Work {
             crate::capabilities::permission::api::validate_layer(p)?;
         }
         for a in &edit.agents {
-            crate::capabilities::registry::api::validate_name(&a.name)?;
-            crate::capabilities::registry::api::check_reserved(&a.name, &reserved)?;
+            crate::capabilities::catalog::registry::api::validate_name(&a.name)?;
+            crate::capabilities::catalog::registry::api::check_reserved(&a.name, &reserved)?;
             for id in &a.modules {
                 if !roster.modules.iter().any(|m| &m.manifest.id == id) {
                     return Err(format!("无此模块：{}", id));

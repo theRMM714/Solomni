@@ -11,12 +11,12 @@ use super::doubles::{
 };
 use crate::capabilities::llm::api::{Channel, Chat, CompleteOpts, Msg};
 use crate::capabilities::llm::ports::{ChatGateway, ModelCatalog};
-use crate::capabilities::modules::ports::ModuleSource;
-use crate::capabilities::packages::ports::PackageSource;
+use crate::capabilities::catalog::modules::ports::ModuleSource;
+use crate::capabilities::catalog::packages::ports::PackageSource;
 use crate::capabilities::prompt::ports::PromptSource;
-use crate::capabilities::registry::api::AgentMeta;
-use crate::capabilities::registry::api::{Provider, Settings};
-use crate::capabilities::registry::ports::SettingsStore;
+use crate::capabilities::catalog::registry::api::AgentMeta;
+use crate::capabilities::catalog::registry::api::{Provider, Settings};
+use crate::capabilities::catalog::registry::ports::SettingsStore;
 use crate::capabilities::session::api::SessionMeta;
 use crate::capabilities::session::ports::HistoryStore;
 use crate::capabilities::tools::ports::SysIo;

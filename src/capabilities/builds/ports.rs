@@ -3,7 +3,7 @@
 //! 不管：什么时候重编、走本机档还是虚拟机档（在 `service.rs`）；状态文件与脚本的文本（在 `detail/`）。
 //! 联动：由 `service.rs` 持有（R12）；实现是 `detail/fingerprint.rs` 的 `BuildStore` 与 `detail/cache.rs` 的 `CacheOnDisk`。
 
-use crate::capabilities::modules::api::{BuildDecl, Module};
+use crate::capabilities::catalog::modules::api::{BuildDecl, Module};
 use crate::capabilities::vm::api::GuestImage;
 use std::collections::BTreeMap;
 use std::path::PathBuf;

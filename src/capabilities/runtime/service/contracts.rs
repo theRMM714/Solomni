@@ -352,11 +352,11 @@ impl RegistryOps for Handle {
 
     fn upsert_model(
         &self,
-        draft: crate::capabilities::registry::api::ModelDraft,
+        draft: crate::capabilities::catalog::registry::api::ModelDraft,
     ) -> Result<(), String> {
         // 保存前实测（原生工具与回放形状）与落盘判据都在 registry：本层只把它交到核心线程上跑。
         self.call(move |core| {
-            core.registry_write(|r| crate::capabilities::registry::api::save_model(r, draft))
+            core.registry_write(|r| crate::capabilities::catalog::registry::api::save_model(r, draft))
         })
     }
 
@@ -398,7 +398,7 @@ impl RegistryOps for Handle {
         self.call(move |core| {
             let roster = core.modules_handle().roster();
             let reserved = core.systools_handle().reserved_names();
-            let draft = crate::capabilities::registry::api::AgentDraft {
+            let draft = crate::capabilities::catalog::registry::api::AgentDraft {
                 name,
                 modules,
                 model,
@@ -406,7 +406,7 @@ impl RegistryOps for Handle {
                 chara,
             };
             core.registry_write(|r| {
-                crate::capabilities::registry::api::save_agent(r, &draft, &roster, &reserved)
+                crate::capabilities::catalog::registry::api::save_agent(r, &draft, &roster, &reserved)
             })
         })
     }
@@ -465,7 +465,7 @@ impl crate::capabilities::session::api::HistoryOps for Handle {
     }
 }
 
-impl crate::capabilities::modules::api::ModulesOps for Handle {
+impl crate::capabilities::catalog::modules::api::ModulesOps for Handle {
     fn roster(&self) -> Result<Roster, String> {
         self.call(|core| Ok(core.modules_handle().roster()))
     }

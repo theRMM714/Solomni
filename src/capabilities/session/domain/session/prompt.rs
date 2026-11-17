@@ -158,7 +158,7 @@ impl SessionParams {
     pub fn from_workspace(
         agent: &str,
         sb: &crate::capabilities::workspace::api::Sandbox,
-        modules: &[crate::capabilities::modules::api::Module],
+        modules: &[crate::capabilities::catalog::modules::api::Module],
         session_kind: &str,
         role: &str,
     ) -> SessionParams {

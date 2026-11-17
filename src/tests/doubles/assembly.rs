@@ -9,9 +9,9 @@ use super::*;
 pub(crate) fn registry_service(
     store: InMemorySettings,
     llm: Arc<dyn crate::capabilities::llm::api::Llm + Send + Sync>,
-) -> Box<dyn crate::capabilities::registry::api::Registry> {
+) -> Box<dyn crate::capabilities::catalog::registry::api::Registry> {
     Box::new(
-        crate::capabilities::registry::service::RegistryService::new(
+        crate::capabilities::catalog::registry::service::RegistryService::new(
             Arc::new(store),
             llm,
             Arc::new(crate::kernel::ports::NoopLog),
@@ -84,13 +84,13 @@ impl InMemoryModuleState {
     }
 }
 
-impl crate::capabilities::modules::ports::ModuleStateStore for InMemoryModuleState {
-    fn load(&self) -> Result<crate::capabilities::modules::domain::state::EnabledState, String> {
+impl crate::capabilities::catalog::modules::ports::ModuleStateStore for InMemoryModuleState {
+    fn load(&self) -> Result<crate::capabilities::catalog::modules::domain::state::EnabledState, String> {
         Ok(self.state.lock().expect("锁").clone())
     }
     fn save(
         &self,
-        state: &crate::capabilities::modules::domain::state::EnabledState,
+        state: &crate::capabilities::catalog::modules::domain::state::EnabledState,
     ) -> Result<(), String> {
         *self.state.lock().expect("锁") = state.clone();
         Ok(())
@@ -100,17 +100,17 @@ impl crate::capabilities::modules::ports::ModuleStateStore for InMemoryModuleSta
 /// 目的：测试用的**模块能力面**——把清单来源与覆盖存储装进 `ModulesService`（与生产同一条路，R12）。
 pub(crate) fn test_modules(
     source: Arc<dyn ModuleSource + Send + Sync>,
-) -> Arc<dyn crate::capabilities::modules::api::Modules + Send + Sync> {
+) -> Arc<dyn crate::capabilities::catalog::modules::api::Modules + Send + Sync> {
     test_modules_store(source, Arc::new(InMemoryModuleState::new()))
 }
 
 /// 目的：测试用的模块能力面（指定覆盖存储；断言落盘/有效值的用例用它）。
 pub(crate) fn test_modules_store(
     source: Arc<dyn ModuleSource + Send + Sync>,
-    store: Arc<dyn crate::capabilities::modules::ports::ModuleStateStore + Send + Sync>,
-) -> Arc<dyn crate::capabilities::modules::api::Modules + Send + Sync> {
+    store: Arc<dyn crate::capabilities::catalog::modules::ports::ModuleStateStore + Send + Sync>,
+) -> Arc<dyn crate::capabilities::catalog::modules::api::Modules + Send + Sync> {
     Arc::new(
-        crate::capabilities::modules::service::ModulesService::new(source, store)
+        crate::capabilities::catalog::modules::service::ModulesService::new(source, store)
             .expect("装模块能力"),
     )
 }
@@ -147,7 +147,7 @@ pub(crate) fn core_with_services(
     gateway: ScriptGateway,
     runner: Arc<dyn crate::kernel::ports::ProcessRunner>,
     residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
-    secrets: Arc<dyn crate::capabilities::secrets::api::SecretOps + Send + Sync>,
+    secrets: Arc<dyn crate::capabilities::catalog::secrets::api::SecretOps + Send + Sync>,
 ) -> Core {
     let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
         Arc::new(gateway);
@@ -217,7 +217,7 @@ pub(crate) fn core_with_workspace(
         Arc::new(crate::kernel::ports::NoopLog),
         test_host_probe(),
         Arc::new(crate::capabilities::residents::api::NoResidents),
-        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+        Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
     )
 }
 
@@ -255,7 +255,7 @@ pub(crate) fn core_with_workdirs(
         Arc::new(crate::kernel::ports::NoopLog),
         test_host_probe(),
         Arc::new(crate::capabilities::residents::api::NoResidents),
-        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+        Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
     )
 }
 
@@ -315,7 +315,7 @@ pub(crate) fn core_with_workdirs_vm(
         Arc::new(crate::kernel::ports::NoopLog),
         vm_capable_host_probe(),
         Arc::new(crate::capabilities::residents::api::NoResidents),
-        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+        Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
     )
 }
 
@@ -367,7 +367,7 @@ pub(crate) fn core_with_builds(
         Arc::new(crate::kernel::ports::NoopLog),
         test_host_probe(),
         Arc::new(crate::capabilities::residents::api::NoResidents),
-        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+        Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
     )
 }
 
@@ -460,7 +460,7 @@ pub(crate) fn core_with_pkgs_probe(
         Arc::new(gateway);
     let llm = test_llm(Arc::clone(&gateway), catalog);
     // 测试里的宿主回退：probe 说有的基础能力就当作"围栏可用"，与生产里组合根给的事实同形。
-    let mut base = crate::capabilities::packages::api::BaseFacts::default();
+    let mut base = crate::capabilities::catalog::packages::api::BaseFacts::default();
     for id in ["python", "node", "cc"] {
         let names: &[&str] = match id {
             "python" => &["python", "python3"],
@@ -471,7 +471,7 @@ pub(crate) fn core_with_pkgs_probe(
         if names.iter().any(|n| probe.has_exe(n)) {
             base.fallback.insert(
                 id.to_string(),
-                crate::capabilities::packages::api::HostFallback {
+                crate::capabilities::catalog::packages::api::HostFallback {
                     path: std::path::PathBuf::from(id),
                     fenced: true,
                     why: String::new(),
@@ -496,7 +496,7 @@ pub(crate) fn core_with_pkgs_probe(
         Arc::new(crate::kernel::ports::NoopLog),
         probe,
         Arc::new(crate::capabilities::residents::api::NoResidents),
-        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+        Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
     )
 }
 
@@ -534,7 +534,7 @@ pub(crate) fn core_with_settings_modules(store: InMemorySettings, modules: Vec<M
         Arc::new(crate::kernel::ports::NoopLog),
         test_host_probe(),
         Arc::new(crate::capabilities::residents::api::NoResidents),
-        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+        Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
     )
 }
 
@@ -575,7 +575,7 @@ pub(crate) fn core_with_io_gateway(
         Arc::new(crate::kernel::ports::NoopLog),
         test_host_probe(),
         Arc::new(crate::capabilities::residents::api::NoResidents),
-        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+        Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
     )
 }
 
@@ -620,6 +620,6 @@ pub(crate) fn core_with_gateway_probe(
         Arc::new(crate::kernel::ports::NoopLog),
         probe,
         Arc::new(crate::capabilities::residents::api::NoResidents),
-        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+        Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
     )
 }

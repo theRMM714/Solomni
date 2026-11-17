@@ -464,11 +464,11 @@ pub(crate) fn test_vm_with_engine(
 /// 目的：测试用的 **packages 能力面**——把内存包库装进 `PackagesService`（与生产同一条路，R12）。
 pub(crate) fn test_packages(
     packages: Arc<dyn PackageSource + Send + Sync>,
-) -> Arc<dyn crate::capabilities::packages::api::Packages + Send + Sync> {
+) -> Arc<dyn crate::capabilities::catalog::packages::api::Packages + Send + Sync> {
     Arc::new(
-        crate::capabilities::packages::service::PackagesService::with_base(
+        crate::capabilities::catalog::packages::service::PackagesService::with_base(
             packages,
-            crate::capabilities::packages::api::BaseFacts::default(),
+            crate::capabilities::catalog::packages::api::BaseFacts::default(),
         ),
     )
 }
@@ -476,13 +476,13 @@ pub(crate) fn test_packages(
 /// 目的：测试用的 packages 能力面，带"宿主回退可用"的事实（由测试 probe 声明它有什么）。
 pub(crate) fn test_packages_with_base(
     packages: Arc<dyn PackageSource + Send + Sync>,
-    base: crate::capabilities::packages::api::BaseFacts,
-) -> Arc<dyn crate::capabilities::packages::api::Packages + Send + Sync> {
-    Arc::new(crate::capabilities::packages::service::PackagesService::with_base(packages, base))
+    base: crate::capabilities::catalog::packages::api::BaseFacts,
+) -> Arc<dyn crate::capabilities::catalog::packages::api::Packages + Send + Sync> {
+    Arc::new(crate::capabilities::catalog::packages::service::PackagesService::with_base(packages, base))
 }
 
 /// 目的：模块启停覆盖的内存存储（测试用；与 yaml 实现同一条端口）。
 #[derive(Default)]
 pub(crate) struct InMemoryModuleState {
-    pub(crate) state: Mutex<crate::capabilities::modules::domain::state::EnabledState>,
+    pub(crate) state: Mutex<crate::capabilities::catalog::modules::domain::state::EnabledState>,
 }

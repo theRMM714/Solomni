@@ -3,9 +3,9 @@
 //! 不管：目录遍历机制（在 `detail/fs_modules.rs`）；契约与校验（在 `domain/module.rs`）。
 //! 联动：装配（new 出适配器）在组合根；端口只在这里（R12）。
 
-use crate::capabilities::modules::api::{Modules, Roster};
-use crate::capabilities::modules::domain::state::EnabledState;
-use crate::capabilities::modules::ports::{ModuleSource, ModuleStateStore};
+use crate::capabilities::catalog::modules::api::{Modules, Roster};
+use crate::capabilities::catalog::modules::domain::state::EnabledState;
+use crate::capabilities::catalog::modules::ports::{ModuleSource, ModuleStateStore};
 use std::sync::{Arc, Mutex};
 
 /// 目的：模块能力——持清单来源与状态落盘两个端口，按用例答话。
@@ -31,7 +31,7 @@ impl ModulesService {
     }
 
     /// 目的：在清单里按 id 找模块。
-    fn find(&self, id: &str) -> Option<crate::capabilities::modules::api::Module> {
+    fn find(&self, id: &str) -> Option<crate::capabilities::catalog::modules::api::Module> {
         self.source
             .scan()
             .modules

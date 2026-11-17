@@ -3,8 +3,8 @@
 //! 不管：目录遍历（detail/）、guest 挂载与叠写（vm 能力）、实际工具进程（tools）。
 //! 联动：被 api.rs 重导出；由 runtime / entry::probes / residents 消费。
 
-use crate::capabilities::modules::api::Module;
-use crate::capabilities::packages::domain::manifest::{
+use crate::capabilities::catalog::modules::api::Module;
+use crate::capabilities::catalog::packages::domain::manifest::{
     KIND_SYSTEM, Library, PackageManifest, Target, conflicts,
 };
 use crate::kernel::api::ExecSpec;

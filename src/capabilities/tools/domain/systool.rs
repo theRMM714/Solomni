@@ -107,7 +107,7 @@ pub struct ToolNotes {
 pub fn tool_notes(
     prompt: &dyn Prompt,
     sb: &Sandbox,
-    modules: &[crate::capabilities::modules::api::Module],
+    modules: &[crate::capabilities::catalog::modules::api::Module],
     service_param_sections: &[String],
 ) -> ToolNotes {
     // 示例路径必须与【工作环境】同一种写法：虚拟机档给 guest 写法，宿主盘符在 guest 里不存在。

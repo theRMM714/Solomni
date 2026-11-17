@@ -12,10 +12,10 @@ use crate::capabilities::work::api::{
 use crate::presentation::faces::Faces;
 
 use crate::capabilities::llm::api::{ProbeOutcome, ReplayReport};
-use crate::capabilities::modules::api::{ModulesOps, Roster};
-use crate::capabilities::packages::api::Problem;
-use crate::capabilities::registry::api::{AgentView, AppSettings, ModelDraft, RegistryOps};
-use crate::capabilities::registry::domain::agents::Agent;
+use crate::capabilities::catalog::modules::api::{ModulesOps, Roster};
+use crate::capabilities::catalog::packages::api::Problem;
+use crate::capabilities::catalog::registry::api::{AgentView, AppSettings, ModelDraft, RegistryOps};
+use crate::capabilities::catalog::registry::domain::agents::Agent;
 use crate::capabilities::session::api::{CheckView, ContextUsage, LineView, ToolCallView};
 use crate::capabilities::session::domain::events::{
     DecisionAnswer, DecisionEnvelope, DecisionMessage,

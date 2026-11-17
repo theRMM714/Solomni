@@ -6,9 +6,9 @@
 use super::collab::*;
 use crate::capabilities::collab::service::discussion::Discussion;
 use crate::capabilities::llm::api::{CompleteOpts, Llm};
-use crate::capabilities::modules::api::Modules;
+use crate::capabilities::catalog::modules::api::Modules;
 use crate::capabilities::prompt::api::{Prompt, Segment};
-use crate::capabilities::registry::api::Settings;
+use crate::capabilities::catalog::registry::api::Settings;
 use crate::capabilities::session::api::SessionMeta;
 use crate::capabilities::session::api::{Gates, LineView, Pending, SessionEvent};
 use crate::capabilities::tools::api::ToolExec;

@@ -175,8 +175,8 @@ impl ModelCatalog for FakeCatalog {
 pub(crate) struct VecSource(pub(crate) Vec<Module>);
 
 impl ModuleSource for VecSource {
-    fn scan(&self) -> crate::capabilities::modules::api::Roster {
-        crate::capabilities::modules::api::Roster {
+    fn scan(&self) -> crate::capabilities::catalog::modules::api::Roster {
+        crate::capabilities::catalog::modules::api::Roster {
             modules: self.0.clone(),
             rejected: Vec::new(),
         }

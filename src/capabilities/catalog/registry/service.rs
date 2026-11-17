@@ -4,13 +4,13 @@
 //! 联动：组合根 new 时注入 SettingsStore 与 llm::api::Llm；对外只经 registry::api::Registry。
 
 use crate::capabilities::llm::api::{Channel, Llm, ProbeOutcome, ReplayReport, ToolMode};
-use crate::capabilities::modules::api::Roster;
-use crate::capabilities::registry::api::{AgentView, ModelView, ProviderView, Registry};
-use crate::capabilities::registry::domain::agents;
-use crate::capabilities::registry::domain::providers::{
+use crate::capabilities::catalog::modules::api::Roster;
+use crate::capabilities::catalog::registry::api::{AgentView, ModelView, ProviderView, Registry};
+use crate::capabilities::catalog::registry::domain::agents;
+use crate::capabilities::catalog::registry::domain::providers::{
     self, AppSettings, ModelDraft, ModelEntry, Provider, Settings,
 };
-use crate::capabilities::registry::ports::SettingsStore;
+use crate::capabilities::catalog::registry::ports::SettingsStore;
 use crate::kernel::ports::Log;
 use std::sync::Arc;
 
@@ -59,7 +59,7 @@ impl RegistryService {
         log: Arc<dyn Log + Send + Sync>,
     ) -> Result<RegistryService, String> {
         let settings = store.load()?;
-        crate::capabilities::registry::domain::providers::validate_sandbox_settings(
+        crate::capabilities::catalog::registry::domain::providers::validate_sandbox_settings(
             &settings.app.sandbox,
         )
         .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
@@ -138,7 +138,7 @@ pub fn save_model(r: &mut dyn Registry, draft: ModelDraft) -> Result<(), String>
 /// 约束：清单归 `modules`、保留名归 `tools`，本函数只取调用方给的事实，不自己去找。
 pub fn save_agent(
     r: &mut dyn Registry,
-    draft: &crate::capabilities::registry::api::AgentDraft,
+    draft: &crate::capabilities::catalog::registry::api::AgentDraft,
     roster: &Roster,
     reserved: &[String],
 ) -> Result<(), String> {
@@ -388,13 +388,13 @@ impl Registry for RegistryService {
 
     fn set_app_settings(&mut self, app: AppSettings) -> Result<(), String> {
         // 不合法就如实拒绝，不把坏的策略（绝对路径 / .. / 未知字段）落进登记处。
-        crate::capabilities::registry::domain::providers::validate_sandbox_settings(&app.sandbox)
+        crate::capabilities::catalog::registry::domain::providers::validate_sandbox_settings(&app.sandbox)
             .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
         providers::validate_compact_settings(&app, &self.settings.models)
             .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
         providers::validate_storage_settings(&app)
             .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
-        crate::capabilities::registry::domain::providers::validate_sandbox_authorization(
+        crate::capabilities::catalog::registry::domain::providers::validate_sandbox_authorization(
             &app.sandbox.policy,
         )
         .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;

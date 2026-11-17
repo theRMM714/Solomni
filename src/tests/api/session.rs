@@ -6,7 +6,7 @@
 use super::super::doubles::{decl, model_draft, module_of, module_with_runtimes};
 use super::super::{ops_with, single_work, slow_ops};
 use super::support::spawn;
-use crate::capabilities::registry::api::AgentMeta;
+use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::runtime::api::{Acted, ActionCall, Caller};
 use crate::capabilities::work::api::{ConfigAgent, SessionEdit, WorkMode, WorkSpec};
 use crate::presentation::faces::Faces;
@@ -273,7 +273,7 @@ fn single_mode_merges_multiple_agents_into_one_transient() {
         .agents()
         .expect("读登记处")
         .iter()
-        .map(crate::capabilities::registry::api::agent_meta)
+        .map(crate::capabilities::catalog::registry::api::agent_meta)
         .collect();
     let (opened, _) = faces
         .work
@@ -590,13 +590,13 @@ fn set_permission_profile_action_switches_the_session_profile() {
 
 #[test]
 fn set_thinking_action_switches_the_work_level_and_rejects_unmapped_levels() {
-    use crate::capabilities::registry::api::ThinkingSpec;
+    use crate::capabilities::catalog::registry::api::ThinkingSpec;
     use std::collections::BTreeMap;
     let handle = spawn(vec![module_of("a")], Vec::new());
     let faces = Faces::from_handle(&handle);
     faces
         .registry
-        .upsert_model(crate::capabilities::registry::api::ModelDraft {
+        .upsert_model(crate::capabilities::catalog::registry::api::ModelDraft {
             thinking: ThinkingSpec {
                 default: None,
                 levels: BTreeMap::from([
@@ -716,13 +716,13 @@ fn set_context_freshness_action_flips_the_work_switch_and_reports_it() {
 
 #[test]
 fn thinking_view_uses_the_common_default_and_hides_unmapped_levels() {
-    use crate::capabilities::registry::api::ThinkingSpec;
+    use crate::capabilities::catalog::registry::api::ThinkingSpec;
     use std::collections::BTreeMap;
     let handle = spawn(vec![module_of("a")], Vec::new());
     let faces = Faces::from_handle(&handle);
     faces
         .registry
-        .upsert_model(crate::capabilities::registry::api::ModelDraft {
+        .upsert_model(crate::capabilities::catalog::registry::api::ModelDraft {
             thinking: ThinkingSpec {
                 default: Some("high".to_string()),
                 levels: BTreeMap::from([

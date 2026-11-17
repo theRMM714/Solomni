@@ -3,10 +3,10 @@
 //! 不管：文件落盘的真实实现（在 detail/yaml_secrets.rs，随后续真实消费点补契约）；实际注入子进程。
 //! 联动：能力见 src/capabilities/secrets/；替身见 src/tests/doubles/。
 
-use crate::capabilities::modules::api::{Module, SecretDecl};
-use crate::capabilities::secrets::api::SecretOps;
-use crate::capabilities::secrets::ports::SecretStore;
-use crate::capabilities::secrets::service::SecretsService;
+use crate::capabilities::catalog::modules::api::{Module, SecretDecl};
+use crate::capabilities::catalog::secrets::api::SecretOps;
+use crate::capabilities::catalog::secrets::ports::SecretStore;
+use crate::capabilities::catalog::secrets::service::SecretsService;
 use crate::presentation::faces::Faces;
 use crate::tests::doubles::{InMemorySecretStore, VecSource, module_of, test_modules};
 use std::collections::BTreeMap;

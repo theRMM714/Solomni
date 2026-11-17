@@ -10,11 +10,11 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::capabilities::modules::api::Roster;
-use crate::capabilities::packages::api::PackagePlan;
+use crate::capabilities::catalog::modules::api::Roster;
+use crate::capabilities::catalog::packages::api::PackagePlan;
 use crate::capabilities::permission::api::PermissionSet;
-use crate::capabilities::registry::api::AgentMeta;
-use crate::capabilities::registry::api::AppSettings;
+use crate::capabilities::catalog::registry::api::AgentMeta;
+use crate::capabilities::catalog::registry::api::AppSettings;
 use crate::capabilities::session::api::{SessionMeta, WorkspaceGrant};
 use crate::capabilities::workspace::api::{Sandbox, Sandboxes, WorkRoots};
 use crate::kernel::api::{FenceSpec, Tier};

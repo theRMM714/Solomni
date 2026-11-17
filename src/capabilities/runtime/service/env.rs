@@ -34,7 +34,7 @@ impl Core {
     pub(crate) fn sandboxes(
         &self,
         meta: &SessionMeta,
-        roster: &crate::capabilities::modules::api::Roster,
+        roster: &crate::capabilities::catalog::modules::api::Roster,
     ) -> Result<crate::capabilities::workspace::api::Sandboxes, String> {
         self.turn
             .sandboxes(self.registry.as_ref(), self.probe.as_ref(), meta, roster)

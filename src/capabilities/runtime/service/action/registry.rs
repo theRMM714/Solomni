@@ -43,7 +43,7 @@ impl Handle {
                     None => RegistryOps::models(self)?
                         .into_iter()
                         .find(|m| m.id == s("id"))
-                        .map(|m| crate::capabilities::registry::api::ThinkingSpec {
+                        .map(|m| crate::capabilities::catalog::registry::api::ThinkingSpec {
                             default: m.thinking.default,
                             levels: m.thinking.levels,
                         })
@@ -62,7 +62,7 @@ impl Handle {
                         .map(|m| m.tools)
                         .unwrap_or_default(),
                 };
-                let draft = crate::capabilities::registry::api::ModelDraft {
+                let draft = crate::capabilities::catalog::registry::api::ModelDraft {
                     id: s("id"),
                     name: s("name"),
                     api_model: s("api_model"),

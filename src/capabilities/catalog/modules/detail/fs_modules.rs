@@ -3,8 +3,8 @@
 //! 不管：清单契约与校验（在 `domain/module.rs`）；重扫策略（在 `service.rs`）。
 //! 联动：由本能力 `service.rs` 持有；见 docs/modules/README.md。
 
-use crate::capabilities::modules::api::{Module, ModuleManifest, Roster};
-use crate::capabilities::modules::ports::ModuleSource;
+use crate::capabilities::catalog::modules::api::{Module, ModuleManifest, Roster};
+use crate::capabilities::catalog::modules::ports::ModuleSource;
 use std::path::{Path, PathBuf};
 
 pub struct FsModules {
@@ -62,23 +62,23 @@ fn scan_dir(modules_dir: &Path, reserved: &[String]) -> Roster {
                     rejected.push(format!("{}: id '{}' 与文件夹名不一致", dir_name, m.id));
                     continue;
                 }
-                if let Err(why) = crate::capabilities::modules::api::check_runtimes(&m) {
+                if let Err(why) = crate::capabilities::catalog::modules::api::check_runtimes(&m) {
                     rejected.push(format!("{}: {}", dir_name, why));
                     continue;
                 }
-                if let Err(why) = crate::capabilities::modules::api::check_build(&m) {
+                if let Err(why) = crate::capabilities::catalog::modules::api::check_build(&m) {
                     rejected.push(format!("{}: {}", dir_name, why));
                     continue;
                 }
-                if let Err(why) = crate::capabilities::modules::api::check_tools(&m, reserved) {
+                if let Err(why) = crate::capabilities::catalog::modules::api::check_tools(&m, reserved) {
                     rejected.push(format!("{}: {}", dir_name, why));
                     continue;
                 }
-                if let Err(why) = crate::capabilities::modules::api::check_services(&m) {
+                if let Err(why) = crate::capabilities::catalog::modules::api::check_services(&m) {
                     rejected.push(format!("{}: {}", dir_name, why));
                     continue;
                 }
-                if let Err(why) = crate::capabilities::modules::api::check_secrets(&m) {
+                if let Err(why) = crate::capabilities::catalog::modules::api::check_secrets(&m) {
                     rejected.push(format!("{}: {}", dir_name, why));
                     continue;
                 }

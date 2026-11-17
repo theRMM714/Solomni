@@ -6,8 +6,8 @@
 
 use crate::capabilities::builds::api::{Builds, Target};
 use crate::capabilities::builds::service::BuildsService;
-use crate::capabilities::modules::api::Module;
-use crate::capabilities::modules::ports::ModuleSource;
+use crate::capabilities::catalog::modules::api::Module;
+use crate::capabilities::catalog::modules::ports::ModuleSource;
 
 /// 目的：测试用的构建能力面——包库指向夹具的 `runtimes/`、工具链事实为空；本机档用例不碰 vm。
 /// 参数：`root` = 夹具产品根；`runner` = 外部进程执行（守门进程就是本程序）。
@@ -16,11 +16,11 @@ fn builds_service(
     root: &std::path::Path,
     runner: crate::kernel::detail::process::ProcTools,
 ) -> BuildsService {
-    use crate::capabilities::packages::api::BaseFacts;
+    use crate::capabilities::catalog::packages::api::BaseFacts;
     use std::sync::Arc;
-    let packages: Arc<dyn crate::capabilities::packages::api::Packages + Send + Sync> = Arc::new(
-        crate::capabilities::packages::service::PackagesService::with_base(
-            Arc::new(crate::capabilities::packages::detail::FsPackages::new(
+    let packages: Arc<dyn crate::capabilities::catalog::packages::api::Packages + Send + Sync> = Arc::new(
+        crate::capabilities::catalog::packages::service::PackagesService::with_base(
+            Arc::new(crate::capabilities::catalog::packages::detail::FsPackages::new(
                 root.join("runtimes"),
             )),
             BaseFacts::default(),
@@ -52,7 +52,7 @@ fn builds_service(
 /// 返回：那个模块。
 /// 约束：扫不到就 panic——夹具写错了要立刻看见。
 fn module_of(root: &std::path::Path, id: &str) -> Module {
-    crate::capabilities::modules::detail::FsModules::new(
+    crate::capabilities::catalog::modules::detail::FsModules::new(
         root.join("modules"),
         crate::capabilities::tools::api::names(),
     )
@@ -177,7 +177,7 @@ fn host_build_makes_the_entry_and_hits_the_cache() {
     assert!(state.is_file(), "状态要落盘：{}", state.display());
     // 会话语义：这条入口此时应当放行（入口判据真在、真能跑）。
     let probe = crate::kernel::detail::host_probe::HostProbeAdapter;
-    let scanned = crate::capabilities::modules::detail::FsModules::new(
+    let scanned = crate::capabilities::catalog::modules::detail::FsModules::new(
         root.join("modules"),
         crate::capabilities::tools::api::names(),
     )
@@ -412,7 +412,7 @@ fn unlink_vm(link: &std::path::Path) {
 /// 参数：`root` = 夹具产品根。
 /// 返回：合法模块清单。
 fn scanned_modules(root: &std::path::Path) -> Vec<Module> {
-    crate::capabilities::modules::detail::FsModules::new(
+    crate::capabilities::catalog::modules::detail::FsModules::new(
         root.join("modules"),
         crate::capabilities::tools::api::names(),
     )

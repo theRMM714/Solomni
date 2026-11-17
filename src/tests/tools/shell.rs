@@ -410,7 +410,7 @@ pub(crate) fn runtime_base_roots_are_only_put_on_host_member_tools() {
     let core = core_with(Vec::new(), gw(BTreeMap::new(), vec!["[]".into()]))
         .with_base_roots(vec![abs(&["base"])]);
     let sb = test_sandbox("a", &[]);
-    let plan = crate::capabilities::packages::api::PackagePlan::default();
+    let plan = crate::capabilities::catalog::packages::api::PackagePlan::default();
     let host = core.turn.member_face(
         core.registry.as_ref(),
         &[],
