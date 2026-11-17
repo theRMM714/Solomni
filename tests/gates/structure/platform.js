@@ -9,7 +9,8 @@ const path = require("path");
 const { rel } = require("../../lib/fsutil.js");
 const { normPath, batchNonAscii } = require("../../lib/parsers.js");
 
-/** FenceSpec 字面量完整性：每个字面量都要写全字段（ro 与 rw 同层）；只认字面量，排除 struct/impl/fn。 */
+/** FenceSpec 字面量完整性：每个字面量都要写全字段（ro 与 rw 同层）；只认字面量，排除 struct/impl/fn。
+ *  字段简写（`ro,`）算写了：门禁看的是字段在不在，不是写法。 */
 function fenceLiterals(root) {
   const problems = [];
   const walk = (d) => {
@@ -26,7 +27,7 @@ function fenceLiterals(root) {
         let end = i + 1;
         while (end < lines.length && !/^\s*\};?\s*$/.test(lines[end])) end++;
         const body = lines.slice(i + 1, end).join("\n");
-        if (!/\bro:/.test(body)) {
+        if (!/^\s*ro\s*[:,]/m.test(body)) {
           problems.push(rel(root, p) + ":" + (i + 1) + " 的 FenceSpec 字面量缺 ro（平台专属代码本地不编译，CI 才会炸）");
         }
       });

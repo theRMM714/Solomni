@@ -20,7 +20,6 @@ tools:
     capability: fs-read   # 标签：说明与“核心先核实”筛选用；真正授权看 effect / reach
     effect: read          # read / write / exec / none
     reach: [private, shared-read, module-read]   # 工具最大 reach；可省略，按 effect 给默认
-    decision: allow       # 默认处置；profile 的 effect/scope 决定可覆盖
     callers: [user, discussant, executor, solo, core_proxy, planner, orchestrator]   # 谁能调它：user（经呈现层）/ 角色 id
     desc: 读取文本文件（UTF-8）。
     parallel: true        # 同一回复里的多个调用能否真的并发跑
@@ -33,7 +32,7 @@ tools:
 
 - **`effect` / `reach` 决定收口，不按“系统 / 模块”一刀切**：`read` / `list` / `search` / `write` / `edit` / `patch` 虽都是系统工具，但碰文件系统，照样受权限档位与围栏约束；`say` / `agree` 这类 effect=none，不碰文件。
 - **`scope`**：执行类工具可声明 per-call scope（sandbox / external）；当前只有 shell 声明它。
-- **工具卡**：`decision=ask` 时进统一裁决队；选项 id 是 `allow` / `deny` / `allow_turn`。`allow_turn` 只对本轮后续 ask 生效，不改 reach、不落盘。
+- **工具卡**：本次判定为 `ask` 时进统一裁决队；选项 id 是 `allow` / `deny` / `allow_turn`。`allow_turn` 只对本轮后续 ask 生效，不改 reach、不落盘。
 - **`callers` 是授权判据**：`user` = 人经呈现层调用，其余是角色 id。它与角色表的（这个身份有什么）是**同一关系的两面**，由 `SystemTools::problems` 双向锁死——任何一边漏写 / 多写都是装配错误。
 - **列目录是"核实"的前提**：`read` 只读文件、`search` 要关键词，**没有 `list` 就确认不了"资料齐不齐"**；`read` 遇到目录会如实引导到 `list`。
 - 参数不合法 → **如实拒绝并落工具行**。

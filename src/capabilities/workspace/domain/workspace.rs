@@ -4,7 +4,7 @@
 //! 不管：路径拼接与目录创建（机制在适配层）；给 AI 的路径由适配层给出**真实绝对路径**。
 //! 联动：可达范围用 `permission` 的 `PermissionSet` / `Reach` 与 `prompt` 的 `RefRoots` 表达，路径组件用 kernel 的 `slash`。
 
-use crate::capabilities::permission::api::{Decision, PermissionSet, Reach};
+use crate::capabilities::permission::api::{PermissionSet, Reach};
 use crate::capabilities::prompt::api::RefRoots;
 use crate::kernel::api::slash;
 use serde::{Deserialize, Serialize};
@@ -183,34 +183,28 @@ impl Sandbox {
     /// 目的：该落点这一席能不能写：内置文件工具永远不直接写共享主副本（写入走 work_commit）；
     ///    私有沙箱不受路径范围约束，但仍要 profile 的写决定允许；模块目录对内置文件工具永久只读。
     pub fn can_write(&self, place: &Place, _path: &Path) -> bool {
-        if self.permissions.decisions.write != Decision::Allow {
-            return false;
-        }
         match place {
             Place::Shared => false,
-            Place::Private => self.permissions.reach.contains(Reach::Private),
+            Place::Private => self.permissions.may_write_private(),
             Place::Module(_) => false,
         }
     }
 
     /// 目的：该落点这一席能不能读：共享区按 reach 与路径范围；私有沙箱与模块目录只看 reach 与读决定。
     pub fn can_read(&self, place: &Place, path: &Path) -> bool {
-        if self.permissions.decisions.read != Decision::Allow {
-            return false;
-        }
         match place {
             Place::Shared => {
-                self.permissions.reach.contains(Reach::SharedRead)
+                self.permissions.may_read_shared()
                     && self.permissions.read_ok(&self.rel_to(&self.shared, path))
             }
-            Place::Private => self.permissions.reach.contains(Reach::Private),
-            Place::Module(_) => self.permissions.reach.contains(Reach::ModuleRead),
+            Place::Private => self.permissions.may_read(Reach::Private),
+            Place::Module(_) => self.permissions.may_read(Reach::ModuleRead),
         }
     }
 
     /// 目的：写被拒时的如实说明（按落点给不同原因）。
     pub fn write_refusal(&self, place: &Place, path: &Path) -> String {
-        if self.permissions.decisions.write != Decision::Allow {
+        if !self.permissions.write_allowed() {
             return format!(
                 "当前档位「{}」不允许写入；要写入请把会话档位切到「工作区内修改」或更高。",
                 self.permissions.profile.label()
@@ -218,7 +212,7 @@ impl Sandbox {
         }
         match place {
             Place::Shared => {
-                if !self.permissions.reach.contains(Reach::SharedWrite) {
+                if !self.permissions.may_write(Reach::SharedWrite) {
                     format!(
                         "当前档位「{}」没有共享区提交权限；要提交请把会话档位切到「工作区内修改」或更高。",
                         self.permissions.profile.label()

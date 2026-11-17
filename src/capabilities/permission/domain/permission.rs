@@ -751,14 +751,53 @@ impl PermissionSet {
         self.shared_write.listing()
     }
 
+    /// 目的：读决定是否放行（不看 reach：判定"这一档读不读"）。
+    pub fn read_allowed(&self) -> bool {
+        self.decisions.read == Decision::Allow
+    }
+
+    /// 目的：写决定是否放行（不看 reach：判定"这一档写不写"）。
+    pub fn write_allowed(&self) -> bool {
+        self.decisions.write == Decision::Allow
+    }
+
+    /// 目的：这个 reach 的读是否开放：读决定允许，且这一项在 reach 里。
+    pub fn may_read(&self, reach: Reach) -> bool {
+        self.read_allowed() && self.reach.contains(reach)
+    }
+
+    /// 目的：这个 reach 的写是否开放：写决定允许，且这一项在 reach 里。
+    /// 约束：共享区提交还要逐路径过 `write_ok`；这里只回答"这一席有没有这个写面"。
+    pub fn may_write(&self, reach: Reach) -> bool {
+        self.write_allowed() && self.reach.contains(reach)
+    }
+
+    /// 目的：共享区读是否开放：读决定允许、reach 含 shared-read，且范围不是显式无权限。
+    pub fn may_read_shared(&self) -> bool {
+        self.may_read(Reach::SharedRead) && !matches!(self.shared_read, ScopeMode::None)
+    }
+
+    /// 目的：写私有沙箱是否开放（内置文件工具与 `work_lost` 恢复共用这一条判定）。
+    pub fn may_write_private(&self) -> bool {
+        self.may_write(Reach::Private)
+    }
+
+    /// 目的：这一次调用（`granted` = 档位 reach 与工具最大 reach 求交后的结果）能不能写这个 reach。
+    /// 约束：围栏按**本次授予**的 reach 派生，所以档位判定与本次判定必须同时成立。
+    pub fn may_write_granted(&self, granted: &ReachSet, reach: Reach) -> bool {
+        self.may_write(reach) && granted.contains(reach)
+    }
+
+    /// 目的：这个 scope 的执行处置是不是放行（不看逐工具覆盖：判定"这一档能不能跑"）。
+    pub fn may_exec(&self, scope: CallScope) -> bool {
+        match scope {
+            CallScope::External => !self.decisions.exec_external.is_deny(),
+            _ => !self.decisions.exec_sandbox.is_deny(),
+        }
+    }
+
     /// 目的：这次调用该用哪个 decision（逐工具覆盖 > profile 的 effect/scope 决定）。
-    pub fn decision_for(
-        &self,
-        tool: &str,
-        effect: Effect,
-        scope: CallScope,
-        _default: Decision,
-    ) -> Decision {
+    pub fn decision_for(&self, tool: &str, effect: Effect, scope: CallScope) -> Decision {
         if let Some(d) = self.tools.get(tool) {
             return *d;
         }
@@ -789,13 +828,11 @@ impl PermissionSet {
             return false;
         }
         if has_scope {
-            let sandbox = self.decision_for(tool, effect, CallScope::Sandbox, Decision::Allow);
-            let external = self.decision_for(tool, effect, CallScope::External, Decision::Allow);
+            let sandbox = self.decision_for(tool, effect, CallScope::Sandbox);
+            let external = self.decision_for(tool, effect, CallScope::External);
             !(sandbox.is_deny() && external.is_deny())
         } else {
-            !self
-                .decision_for(tool, effect, CallScope::None, Decision::Allow)
-                .is_deny()
+            !self.decision_for(tool, effect, CallScope::None).is_deny()
         }
     }
 

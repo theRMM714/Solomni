@@ -33,9 +33,6 @@ pub struct ToolSchema {
     /// 目的：工具可用的最大 reach；缺省按 effect 推导。
     #[serde(default)]
     pub reach: Option<crate::capabilities::permission::api::ReachSet>,
-    /// 目的：工具默认处置；profile 的 effect/scope 决定可以覆盖它。
-    #[serde(default)]
-    pub decision: Option<crate::capabilities::permission::api::Decision>,
     /// 目的：这个执行类工具接不接受模型给的 per-call scope 参数。
     #[serde(default)]
     pub scope: bool,
@@ -58,12 +55,6 @@ impl ToolSchema {
         self.reach
             .clone()
             .unwrap_or_else(|| self.effect().default_reach())
-    }
-
-    /// 目的：这个工具的默认处置。
-    pub fn decision(&self) -> crate::capabilities::permission::api::Decision {
-        self.decision
-            .unwrap_or(crate::capabilities::permission::api::Decision::Allow)
     }
 
     /// 声明了的参数表；没声明 = 调用方不做校验。

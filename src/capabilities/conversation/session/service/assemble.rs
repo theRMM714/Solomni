@@ -19,6 +19,7 @@ use crate::capabilities::conversation::session::domain::assemble::{
 };
 use crate::capabilities::conversation::session::domain::tools::MemberTools;
 use crate::capabilities::llm::api::{Channel, Llm, Msg, ToolMode};
+use crate::capabilities::permission::api::CallScope;
 use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::residents::api::ResidentOps;
 use crate::capabilities::tools::api::{Observations, ToolExec, Tools, tool_notes};
@@ -170,7 +171,7 @@ pub fn member_tools(ports: &SessionPorts, spec: &MemberSpec<'_>) -> MemberTools 
         crate::capabilities::workspace::api::work_handlers(&ports.workspace, sb, &allowed);
     // 工具面：静态模块工具 + **已就绪**常驻服务的操作（操作是服务跑起来才发现的，按模块现填）。
     let with_modules = ports.systools.allows_module_tools(spec.role)
-        && !sb.permissions.decisions.exec_sandbox.is_deny();
+        && sb.permissions.may_exec(CallScope::Sandbox);
     let mut table = tool_table(spec.modules);
     // 服务清单是全局的：只把**这个 agent 工具面里**的模块服务写进提示词。
     let started = if with_modules {

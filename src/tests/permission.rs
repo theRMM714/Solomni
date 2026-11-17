@@ -160,6 +160,29 @@ fn fence_spec_scopes_module_dirs_and_userdata() {
     assert!(!call.net, "workspace 没有 network reach");
 }
 
+/// 写决策被拒时，即使 reach 里有私有区也不授写：围栏与工作区判据同源，不各自组合。
+#[test]
+fn deny_write_decision_withholds_private_rw() {
+    use crate::kernel::api::FenceSpec;
+    let mut sb = test_sandbox("a1", &[]);
+    sb.permissions = pset(ProfileId::View);
+    assert!(
+        sb.permissions.reach.contains(Reach::Private),
+        "View 档 reach 仍含私有区"
+    );
+    assert!(sb.permissions.decisions.write.is_deny());
+    assert!(!sb.permissions.may_write_private());
+
+    let session = FenceSpec::for_session(&sb, &[], false);
+    assert!(!session.rw.contains(&sb.private), "写被拒时私有区不进 rw");
+    let call = FenceSpec::for_call(&sb, &ReachSet::from([Reach::Private]), None, &session);
+    assert!(
+        !call.rw.contains(&sb.private),
+        "写被拒时调用围栏也不给私有写"
+    );
+    assert!(!sb.can_write(&Place::Private, &sb.private.join("x")));
+}
+
 /// 共享区授权粒度三态：会话级走按次只读、工作区级走机器级一次性只读、无权限完全不授。
 #[test]
 fn shared_grant_routes_to_session_machine_or_nothing() {
@@ -482,22 +505,22 @@ fn entries_must_be_clean_relative_paths() {
     assert!(validate_entry("../escape").is_err());
 }
 
-/// 工具声明的默认 decision 不压过 profile：shell 默认 ask，但工作区内修改的 sandbox scope 仍是 allow。
+/// 处置只由档位（effect / scope）与逐工具覆盖决定：工具声明没有"默认处置"这一层。
 #[test]
-fn profile_decision_overrides_tool_default() {
+fn profile_decisions_govern_effect_and_scope() {
     let p = pset(ProfileId::Workspace);
     assert_eq!(
-        p.decision_for("shell", Effect::Exec, CallScope::Sandbox, Decision::Ask),
+        p.decision_for("shell", Effect::Exec, CallScope::Sandbox),
         Decision::Allow
     );
     let all = pset(ProfileId::AllReach);
     assert_eq!(
-        all.decision_for("shell", Effect::Exec, CallScope::External, Decision::Ask),
+        all.decision_for("shell", Effect::Exec, CallScope::External),
         Decision::Allow
     );
     let external = pset(ProfileId::External);
     assert_eq!(
-        external.decision_for("shell", Effect::Exec, CallScope::External, Decision::Allow),
+        external.decision_for("shell", Effect::Exec, CallScope::External),
         Decision::Ask
     );
 }
@@ -866,8 +889,7 @@ fn scope_modes() -> Vec<ScopeMode> {
     ]
 }
 
-/// 安全矩阵：每个 profile × reach × effect × scope 的处置都必须由表决定，逐工具覆盖优先，
-/// 且默认参数不参与决策（调用方传什么都不改变结果）。
+/// 安全矩阵：每个 profile × reach × effect × scope 的处置都必须由表决定，逐工具覆盖优先。
 #[test]
 fn decision_matrix_is_total_across_profile_effect_scope_and_reach() {
     let mut cases = 0usize;
@@ -891,23 +913,20 @@ fn decision_matrix_is_total_across_profile_effect_scope_and_reach() {
                         Effect::Exec => spec.decisions.exec_sandbox,
                         Effect::None => Decision::Allow,
                     };
-                    for default in all_decisions() {
-                        assert_eq!(
-                            p.decision_for("plain", effect, scope, default),
-                            want,
-                            "profile={:?} reach={:?} effect={:?} scope={:?} default={:?}",
-                            profile,
-                            reach,
-                            effect,
-                            scope,
-                            default
-                        );
-                        cases += 1;
-                    }
+                    assert_eq!(
+                        p.decision_for("plain", effect, scope),
+                        want,
+                        "profile={:?} reach={:?} effect={:?} scope={:?}",
+                        profile,
+                        reach,
+                        effect,
+                        scope
+                    );
+                    cases += 1;
                     for override_with in all_decisions() {
                         p.tools.insert("overridden".to_string(), override_with);
                         assert_eq!(
-                            p.decision_for("overridden", effect, scope, Decision::Ask),
+                            p.decision_for("overridden", effect, scope),
                             override_with,
                             "逐工具覆盖必须优先：profile={:?} effect={:?} scope={:?}",
                             profile,
@@ -921,7 +940,11 @@ fn decision_matrix_is_total_across_profile_effect_scope_and_reach() {
             }
         }
     }
-    assert_eq!(cases, 4 * 7 * 4 * 3 * 6, "矩阵必须逐格走到");
+    assert_eq!(
+        cases,
+        4 * 7 * 4 * 3 * (1 + all_decisions().len()),
+        "矩阵必须逐格走到"
+    );
 }
 
 /// Decision 的取严是格运算；ReachSet 的求交是幂集上的交。两条都要满足代数性质，
