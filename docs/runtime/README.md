@@ -27,7 +27,7 @@
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`collab`、`env`、`kernel`、`lifecycle`、`llm`、`modules`、`permission`、`prompt`、`proxy`、`provision`、`registry`、`residents`、`secrets`、`session`、`slate`、`taskchain`、`tools`、`turn`、`vm`、`work`、`workspace`
-- 谁在用我：`cli`、`web`（都经 `src/presentation/faces.rs` 取面）、`src/main.rs`（装配）、`src/tests/runtime.rs` 与 `src/tests/runtime/proxy.rs`、`src/tests/runtime/ask_user.rs`
+- 谁在用我：`cli`、`web`（都经 `src/presentation/faces.rs` 取面）、`src/main.rs`（装配）、`src/tests/runtime.rs`、`src/tests/runtime/proxy.rs`、`src/tests/api/session.rs`（提问与裁决卡片）
 
 ## 一、长步骤的边界
 

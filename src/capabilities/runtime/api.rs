@@ -6,10 +6,6 @@
 /// 目的：核心手柄（`service::handle::Handle`）：呈现层只经 `entry/faces.rs` 的 `Faces` 拆面用它发命令。
 pub(crate) use crate::capabilities::runtime::service::Handle;
 
-/// 目的：回档目标与结果（层 9 的词汇）：这里只取用，不定义。
-pub(crate) use crate::capabilities::lifecycle::api::{RebuildDeps, RewindOutcome, RewindTarget};
-/// 目的：工具通道探测的三态结论。
-pub use crate::capabilities::llm::api::ProbeOutcome;
 /// 目的：落盘历史的只读视图（会话列表是「在世会话 × 历史」的并集）。
 #[allow(unused_imports)]
 pub use crate::capabilities::conversation::session::api::HistoryView;
@@ -17,7 +13,13 @@ pub use crate::capabilities::conversation::session::api::HistoryView;
 pub use crate::capabilities::conversation::session::api::SessionEvent;
 /// 目的：裁决卡、裁决队与等待者：界面与 CLI 按它们渲染「等你定的事」。
 #[allow(unused_imports)]
-pub use crate::capabilities::conversation::session::api::{DecisionCard, DecisionQueue, DecisionWaiter};
+pub use crate::capabilities::conversation::session::api::{
+    DecisionCard, DecisionQueue, DecisionWaiter,
+};
+/// 目的：回档目标与结果（层 9 的词汇）：这里只取用，不定义。
+pub(crate) use crate::capabilities::lifecycle::api::{RebuildDeps, RewindOutcome, RewindTarget};
+/// 目的：工具通道探测的三态结论。
+pub use crate::capabilities::llm::api::ProbeOutcome;
 /// 目的：回合推进自用的协作态：门面重导出，契约测试的既有路径不必改。
 pub(crate) use crate::capabilities::turn::turn::api::CollabWork;
 /// 目的：命令回包（事件台头部序号）、事件台与生成输出方式。

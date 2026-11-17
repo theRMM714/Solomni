@@ -6,10 +6,10 @@
 
 use serde_json::Value;
 
-use crate::capabilities::maintenance::builds::api::Built;
 use crate::capabilities::catalog::packages::api::BaseFacts;
-use crate::capabilities::provision::api::Provision;
+use crate::capabilities::maintenance::builds::api::Built;
 use crate::capabilities::maintenance::storage::api::{CleanOutcome, GcReport, Storage};
+use crate::capabilities::provision::api::Provision;
 use crate::capabilities::workspace::api::GcReport as WorkspaceGc;
 pub use crate::kernel::api::JobState;
 

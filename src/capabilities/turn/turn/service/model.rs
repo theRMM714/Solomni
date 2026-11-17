@@ -5,9 +5,9 @@
 
 use std::sync::Arc;
 
-use crate::capabilities::llm::api::LlmOpts;
 use crate::capabilities::catalog::registry::api::Registry;
 use crate::capabilities::conversation::session::api::{History, work_root};
+use crate::capabilities::llm::api::LlmOpts;
 
 use super::session::Turn;
 

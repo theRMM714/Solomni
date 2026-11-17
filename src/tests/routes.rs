@@ -93,11 +93,16 @@ impl FakeStorage {
 }
 
 impl crate::capabilities::maintenance::storage::api::Storage for FakeStorage {
-    fn report(&self) -> Result<crate::capabilities::maintenance::storage::api::SpaceReport, String> {
+    fn report(
+        &self,
+    ) -> Result<crate::capabilities::maintenance::storage::api::SpaceReport, String> {
         self.guard()?;
         Ok(crate::capabilities::maintenance::storage::api::SpaceReport::default())
     }
-    fn gc(&self, _apply: bool) -> Result<crate::capabilities::maintenance::storage::api::GcReport, String> {
+    fn gc(
+        &self,
+        _apply: bool,
+    ) -> Result<crate::capabilities::maintenance::storage::api::GcReport, String> {
         self.guard()?;
         Ok(crate::capabilities::maintenance::storage::api::GcReport::default())
     }
@@ -113,9 +118,11 @@ impl crate::capabilities::maintenance::storage::api::Storage for FakeStorage {
         _req: &crate::capabilities::maintenance::storage::api::CleanRequest,
     ) -> Result<crate::capabilities::maintenance::storage::api::CleanOutcome, String> {
         self.guard()?;
-        Ok(crate::capabilities::maintenance::storage::api::CleanOutcome::Report(
-            crate::capabilities::maintenance::storage::api::GcReport::default(),
-        ))
+        Ok(
+            crate::capabilities::maintenance::storage::api::CleanOutcome::Report(
+                crate::capabilities::maintenance::storage::api::GcReport::default(),
+            ),
+        )
     }
     fn job(&self) -> crate::kernel::api::JobState {
         Default::default()
@@ -650,7 +657,7 @@ impl RegistryOps for FakeFaces {
             note: String::new(),
             tools: crate::capabilities::llm::api::ToolMode::Envelope,
             context: 32_000,
-            thinking: crate::capabilities::catalog::registry::domain::providers::ModelThinkingView {
+            thinking: crate::capabilities::catalog::registry::api::ModelThinkingView {
                 default: None,
                 levels: Default::default(),
             },

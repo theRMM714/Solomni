@@ -7,50 +7,6 @@ use super::super::prelude::*;
 
 pub(crate) type WorkFace = Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync>;
 
-/// 目的：从一个 UNC 目录取出它的共享根（\\server\share）——用来断言"共享根不能当工作区"。
-#[cfg(windows)]
-pub(crate) fn share_root_of(unc: &std::path::Path) -> Option<std::path::PathBuf> {
-    let (server, share, _) = crate::kernel::api::unc_parts(unc)?;
-    Some(std::path::PathBuf::from(format!(
-        r"\\{}\{}",
-        server.to_string_lossy(),
-        share.to_string_lossy()
-    )))
-}
-
-/// 目的：把本机盘符路径换成同一个盘符共享（X$）下的 UNC 写法——用来造"产品根的 UNC 别名"。
-/// 返回：共享名不是 <字母>$ 或盘符对不上时为 None（调用方如实跳过这条断言）。
-#[cfg(windows)]
-pub(crate) fn drive_share_alias(
-    unc: &std::path::Path,
-    local: &std::path::Path,
-) -> Option<std::path::PathBuf> {
-    let (_, share, rest) = crate::kernel::api::unc_parts(unc)?;
-    if !rest.as_os_str().is_empty() {
-        return None;
-    }
-    let share = share.to_string_lossy().into_owned();
-    let letter = share.strip_suffix('$')?;
-    let mut letter_chars = letter.chars();
-    let drive = letter_chars.next()?.to_ascii_uppercase();
-    if letter_chars.next().is_some() {
-        return None;
-    }
-    let local_text = local.to_str()?;
-    let mut chars = local_text.chars();
-    if chars.next()?.to_ascii_uppercase() != drive || chars.next()? != ':' {
-        return None;
-    }
-    let tail = chars.as_str().trim_start_matches(std::path::MAIN_SEPARATOR);
-    let mut alias = unc.to_path_buf();
-    for part in tail.split(std::path::MAIN_SEPARATOR) {
-        if !part.is_empty() {
-            alias.push(part);
-        }
-    }
-    Some(alias)
-}
-
 /// 目的：装配一个只用内存端口的工作区能力面：目录布局 + 版本库都是内存替身。
 pub(crate) fn work_ws() -> (WorkFace, Arc<InMemoryWorkspace>, Arc<InMemoryWorkStore>) {
     let dirs = Arc::new(InMemoryWorkspace::new());

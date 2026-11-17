@@ -115,8 +115,8 @@ pub(crate) fn direct_rewind_drops_tail_then_continue_allows_user_turn() {
 /// 目的：留档：只标记并折叠尾部，文件字节一个不少，新行从最大 id 续号；恢复把标记及其后真的删掉。
 #[test]
 pub(crate) fn archive_folds_the_tail_and_restore_brings_it_back() {
-    use crate::capabilities::lifecycle::api::RewindTarget;
     use crate::capabilities::conversation::session::api::next_line_id;
+    use crate::capabilities::lifecycle::api::RewindTarget;
     let say = |t: &str| serde_json::json!({"type": "say", "text": t}).to_string();
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), vec![say("答一"), say("答二")]);

@@ -6,17 +6,17 @@
 
 use std::collections::BTreeMap;
 
-use crate::capabilities::llm::api::Channel;
-#[cfg(test)]
-use crate::capabilities::llm::api::ToolMode;
 use crate::capabilities::catalog::modules::api::{Module, Roster};
 use crate::capabilities::catalog::packages::api::PackagePlan;
-use crate::capabilities::permission::api::PermissionSet;
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::catalog::registry::api::Registry;
 use crate::capabilities::conversation::session::api::{
     AgentSession, MemberSpec, SessionEvent, SessionMeta, SingleSpec, WorkspaceGrant, work_root_of,
 };
+use crate::capabilities::llm::api::Channel;
+#[cfg(test)]
+use crate::capabilities::llm::api::ToolMode;
+use crate::capabilities::permission::api::PermissionSet;
 use crate::capabilities::turn::turn::service::session::Turn;
 use crate::capabilities::vm::api::GuestOs;
 use crate::capabilities::workspace::api::{Sandbox, Sandboxes};
@@ -132,8 +132,8 @@ impl Turn {
             })
             .collect();
         let host_read_roots = crate::capabilities::turn::env::api::host_read_roots(registry.app());
-        let menv =
-            crate::capabilities::turn::env::api::member(&crate::capabilities::turn::env::api::MemberFacts {
+        let menv = crate::capabilities::turn::env::api::member(
+            &crate::capabilities::turn::env::api::MemberFacts {
                 sandbox: sb,
                 host_read_roots: &host_read_roots,
                 net,
@@ -141,7 +141,8 @@ impl Turn {
                 base_roots: &self.base_roots,
                 plan: host_plan,
                 module_vars: &module_vars,
-            });
+            },
+        );
         crate::capabilities::conversation::session::api::MemberEnvParts {
             fence: menv.fence,
             module_env: menv.module_env,
@@ -221,7 +222,10 @@ impl Turn {
             context: self.context_budget(registry, a.model.as_deref()),
             core_model: registry.core_model(),
         };
-        crate::capabilities::conversation::session::api::single_session(&self.session_ports(), &spec)
+        crate::capabilities::conversation::session::api::single_session(
+            &self.session_ports(),
+            &spec,
+        )
     }
 
     /// 目的：本会话的上下文预算：窗口按模型现算（缺省用核心默认），阈值与保留百分比来自全局设置。

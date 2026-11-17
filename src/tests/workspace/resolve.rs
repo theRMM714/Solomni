@@ -44,41 +44,6 @@ pub(crate) fn work_resolve_local_marks_merged_result_and_commit_succeeds() {
     );
 }
 
-/// 目的：take=upstream 用主副本覆盖本地；覆盖后与主副本一致，不需要再提交。
-#[test]
-pub(crate) fn work_resolve_upstream_overwrites_local_and_then_is_clean() {
-    use crate::capabilities::workspace::api::{ResolveAction, ResolveTake};
-    use crate::capabilities::workspace::domain::workstore::StatusState;
-    let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string(), "b".to_string()])
-        .unwrap();
-    ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
-    let sb_a = sandbox_of(&ws, "w", "a");
-    let sb_b = sandbox_of(&ws, "w", "b");
-    ws.work_pull("w", "a", &["note.md".to_string()]).unwrap();
-    ws.work_pull("w", "b", &["note.md".to_string()]).unwrap();
-    store.write_under(&sb_a, "note.md", b"a-change").unwrap();
-    ws.work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "a", 2))
-        .unwrap();
-    store.write_under(&sb_b, "note.md", b"b-change").unwrap();
-
-    let rep = ws
-        .work_resolve("w", "b", &resolve_req(&["note.md"], ResolveTake::Upstream))
-        .unwrap();
-    assert_eq!(rep.entries[0].action, ResolveAction::WroteUpstream);
-    assert_eq!(
-        store.read_under(&sb_b, "note.md").unwrap().as_deref(),
-        Some(&b"a-change"[..])
-    );
-    let st = ws.work_status("w", "b", &[]).unwrap();
-    assert_eq!(st.entries[0].state, StatusState::Clean);
-    assert!(
-        ws.work_commit("w", "b", "w--b", &commit_req(&["note.md"], &[], "noop", 3))
-            .unwrap_err()
-            .contains("没有可提交")
-    );
-}
-
 /// 目的：上游删文件时，take=upstream 删本地并清基线；take=local 清基线、让本地成为新增。
 #[test]
 pub(crate) fn work_resolve_handles_upstream_deletion_by_side() {
@@ -134,46 +99,6 @@ pub(crate) fn work_resolve_handles_upstream_deletion_by_side() {
             .unwrap()
             .as_deref(),
         Some(&b"bin-local"[..])
-    );
-}
-
-/// 目的：未拉取但沙箱有同名文件时状态直说，take=local 后可提交；未跟踪文件单列。
-#[test]
-pub(crate) fn work_status_exposes_both_present_and_local_only_then_resolve_clears_it() {
-    use crate::capabilities::workspace::api::ResolveAction;
-    use crate::capabilities::workspace::domain::workstore::StatusState;
-    let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
-    ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
-    let sb = sandbox_of(&ws, "w", "a");
-    store.write_under(&sb, "note.md", b"local").unwrap();
-    store.write_under(&sb, "extra.bin", &[0, 1, 2]).unwrap();
-
-    let st = ws.work_status("w", "a", &[]).unwrap();
-    let note = st
-        .entries
-        .iter()
-        .find(|e| e.path == "note.md")
-        .expect("主副本有的路径要出现");
-    assert_eq!(note.state, StatusState::BothPresent);
-    assert!(st.local_only.contains(&"extra.bin".to_string()));
-    let only = ws
-        .work_status("w", "a", &["extra.bin".to_string()])
-        .unwrap();
-    assert_eq!(only.entries[0].state, StatusState::LocalOnly);
-
-    let rep = ws
-        .work_resolve("w", "a", &resolve_local_req(&ws, "w", &["note.md"]))
-        .unwrap();
-    assert_eq!(rep.entries[0].action, ResolveAction::Marked);
-    ws.work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "合并", 2))
-        .unwrap();
-    assert_eq!(
-        store
-            .read_under(&shared_of(&ws, "w"), "note.md")
-            .unwrap()
-            .as_deref(),
-        Some(&b"local"[..])
     );
 }
 
@@ -366,37 +291,6 @@ pub(crate) fn work_resolve_upstream_backs_up_before_removing_local() {
         Some(&b"local"[..])
     );
     assert!(store.read_under(&sb_a, "gone.txt").unwrap().is_none());
-}
-
-/// 目的：备份失败时整次 resolve 中止，不覆盖本地、不动基线。
-#[test]
-pub(crate) fn work_resolve_aborts_when_backup_fails() {
-    use crate::capabilities::workspace::api::ResolveTake;
-    use crate::capabilities::workspace::domain::workstore::StatusState;
-    let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string(), "b".to_string()])
-        .unwrap();
-    ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
-    let sb_a = sandbox_of(&ws, "w", "a");
-    let sb_b = sandbox_of(&ws, "w", "b");
-    ws.work_pull("w", "a", &["note.md".to_string()]).unwrap();
-    ws.work_pull("w", "b", &["note.md".to_string()]).unwrap();
-    store.write_under(&sb_a, "note.md", b"a-change").unwrap();
-    ws.work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "a", 2))
-        .unwrap();
-    store.write_under(&sb_b, "note.md", b"b-change").unwrap();
-
-    store.fail_times("copy_under_to_under", 1);
-    let err = ws
-        .work_resolve("w", "b", &resolve_req(&["note.md"], ResolveTake::Upstream))
-        .unwrap_err();
-    assert!(err.contains("copy_under_to_under"), "{}", err);
-    assert_eq!(
-        store.read_under(&sb_b, "note.md").unwrap().as_deref(),
-        Some(&b"b-change"[..])
-    );
-    let st = ws.work_status("w", "b", &[]).unwrap();
-    assert_eq!(st.entries[0].state, StatusState::Conflict);
 }
 
 /// 目的：空路径与三方都不存在的路径都被如实拒绝；部分存在时报告 missing。

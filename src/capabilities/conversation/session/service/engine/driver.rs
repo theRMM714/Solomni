@@ -6,10 +6,10 @@
 use super::io::{CompactedTurn, MemberTurn, TurnIo};
 use super::round::{Round, RoundSink, assemble, build_round_lines, converse_with};
 use super::tools::{ConfirmGate, ToolConfirm};
-use crate::capabilities::llm::api::{Chunk, Msg};
 use crate::capabilities::conversation::session::api::{
     AgentSession, LineView, SessionEvent, ToolCallView, TurnRun, delta_visible, stream_piece,
 };
+use crate::capabilities::llm::api::{Chunk, Msg};
 use std::sync::atomic::AtomicBool;
 
 /// 目的：只把被总结的前缀发给模型、只声明 compact 工具，跑一次模型并返回摘要。
@@ -340,7 +340,10 @@ fn run_rounds(
             if let Some(c) = v.tool.as_ref()
                 && let Some(fact) = c.read.clone()
             {
-                s.note_read_at(crate::capabilities::conversation::session::api::tool_result_body(c), fact);
+                s.note_read_at(
+                    crate::capabilities::conversation::session::api::tool_result_body(c),
+                    fact,
+                );
             }
         }
         let has_line = !round.text.trim().is_empty() || !round.reasoning.trim().is_empty();
@@ -384,7 +387,10 @@ fn run_rounds(
             .chat
             .last_usage()
             .map(|t| {
-                crate::capabilities::conversation::session::api::ContextUsage::from_tokens(t, s.context_window)
+                crate::capabilities::conversation::session::api::ContextUsage::from_tokens(
+                    t,
+                    s.context_window,
+                )
             })
             .unwrap_or_else(|| s.estimate_usage());
         s.set_last_usage(Some(usage));
@@ -400,7 +406,9 @@ fn run_rounds(
             sink(ev);
         }
     } else if let Some(err) = error.borrow().as_ref() {
-        for ev in s.note_notice(&crate::capabilities::conversation::session::api::interrupted_note(err)) {
+        for ev in
+            s.note_notice(&crate::capabilities::conversation::session::api::interrupted_note(err))
+        {
             sink(ev);
         }
     }
@@ -442,8 +450,10 @@ fn send_view(s: &AgentSession) -> Vec<crate::capabilities::llm::api::Msg> {
     let Ok(stale) = ws.work_stale_reads(&tools.face.sandbox.work_name, &queries) else {
         return msgs;
     };
-    let judged: Vec<(&crate::capabilities::conversation::session::api::ReadAt, bool)> =
-        reads.into_iter().zip(stale).collect();
+    let judged: Vec<(
+        &crate::capabilities::conversation::session::api::ReadAt,
+        bool,
+    )> = reads.into_iter().zip(stale).collect();
     msgs = crate::capabilities::conversation::session::api::freshness_view(&msgs, &judged);
     msgs
 }

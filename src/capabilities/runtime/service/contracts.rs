@@ -126,8 +126,10 @@ impl WorkOps for Handle {
         // 核心的行**照推**（推是底层收发消息的统一定律，一次推荐也不例外），推到系统会话：
         // 它不在任何会话表里，前端因此不会为它建标签页；落盘策略是 Drop（只推不留）。
         if !rows.is_empty() {
-            self.bus
-                .push(crate::capabilities::conversation::session::api::SYSTEM_SID_SUGGEST, &rows);
+            self.bus.push(
+                crate::capabilities::conversation::session::api::SYSTEM_SID_SUGGEST,
+                &rows,
+            );
         }
         Ok(agents)
     }
@@ -135,7 +137,12 @@ impl WorkOps for Handle {
 
 impl TurnOps for Handle {
     fn say(&self, sid: &str, text: &str, out: Output) -> Result<Advance, String> {
-        crate::capabilities::turn::turn::api::single_generation(self, sid, Some(text.to_string()), out)
+        crate::capabilities::turn::turn::api::single_generation(
+            self,
+            sid,
+            Some(text.to_string()),
+            out,
+        )
     }
 
     fn continue_flow(&self, sid: &str, out: Output) -> Result<Advance, String> {
@@ -356,7 +363,9 @@ impl RegistryOps for Handle {
     ) -> Result<(), String> {
         // 保存前实测（原生工具与回放形状）与落盘判据都在 registry：本层只把它交到核心线程上跑。
         self.call(move |core| {
-            core.registry_write(|r| crate::capabilities::catalog::registry::api::save_model(r, draft))
+            core.registry_write(|r| {
+                crate::capabilities::catalog::registry::api::save_model(r, draft)
+            })
         })
     }
 
@@ -406,7 +415,9 @@ impl RegistryOps for Handle {
                 chara,
             };
             core.registry_write(|r| {
-                crate::capabilities::catalog::registry::api::save_agent(r, &draft, &roster, &reserved)
+                crate::capabilities::catalog::registry::api::save_agent(
+                    r, &draft, &roster, &reserved,
+                )
             })
         })
     }

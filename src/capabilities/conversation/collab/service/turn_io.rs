@@ -4,8 +4,8 @@
 //! 联动：被 CollabSession 消费；裁决通道见 docs/session/session-model.md 的「请用户裁决：一条通道，消息 + 选项」。
 
 use super::collab::*;
-use crate::capabilities::conversation::collab::service::discussion::TurnOut;
 use crate::capabilities::catalog::registry::api::AgentMeta;
+use crate::capabilities::conversation::collab::service::discussion::TurnOut;
 use crate::capabilities::conversation::session::api::{
     LineView, OPT_ASK_REPLY, OPT_BEGIN, OPT_BEGIN_ALLOW, OPT_NODE_REWORK, OPT_NODE_SAY,
     OPT_PLAN_SAY, OPT_PLAN_START, OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM, Pending, SessionEvent,
@@ -195,7 +195,9 @@ impl CollabSession {
         let kind = p.kind();
         let brief = self.decision_brief(p);
         let text = note.to_string();
-        sink(crate::capabilities::conversation::session::api::working("核心"));
+        sink(crate::capabilities::conversation::session::api::working(
+            "核心",
+        ));
         let judged = {
             let mut verify_box = self.verify_env("planner");
             let verify = verify_box.as_deref_mut();

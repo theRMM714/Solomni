@@ -5,9 +5,9 @@
 
 use std::sync::Arc;
 
-use crate::capabilities::llm::api::{Llm, ToolMode};
 use crate::capabilities::conversation::session::api::{CoreVerify, ToolFace};
 use crate::capabilities::conversation::session::domain::tools::MemberTools;
+use crate::capabilities::llm::api::{Llm, ToolMode};
 use crate::capabilities::tools::api::{Observations, ToolBook, ToolExec, ToolNotes, Tools};
 use crate::capabilities::vm::api::Vm;
 use crate::capabilities::workspace::api::Sandbox;

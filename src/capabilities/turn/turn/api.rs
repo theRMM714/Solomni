@@ -33,7 +33,9 @@ pub fn session_ask(
     emit: Box<dyn Fn(SessionEvent) + Send + Sync>,
     stop: Box<dyn Fn(&str) + Send + Sync>,
 ) -> Arc<dyn AskUser> {
-    Arc::new(crate::capabilities::turn::turn::service::ask_user::SessionAsk::new(door, sid, emit, stop))
+    Arc::new(
+        crate::capabilities::turn::turn::service::ask_user::SessionAsk::new(door, sid, emit, stop),
+    )
 }
 /// 目的：在世会话形态（宿主与测试只经它取用）。
 ///   回合状态本身（`TurnState`）是本能力的内部结构：它只被 `Turn` 持有，不出单元。

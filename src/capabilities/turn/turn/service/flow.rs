@@ -4,15 +4,15 @@
 //! 联动：宿主的协作接口与工作线程转发到这里；登记处与主机探针按参数给（本层不持登记处）。
 //!   本方法族的取放与收尾判据都在 `Turn` 的会话表上。
 
-use crate::capabilities::conversation::collab::api::AfterTurn;
-use crate::capabilities::conversation::collab::api::CollabSession;
-use crate::capabilities::prompt::api::Segment;
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::catalog::registry::api::Registry;
+use crate::capabilities::conversation::collab::api::AfterTurn;
+use crate::capabilities::conversation::collab::api::CollabSession;
 use crate::capabilities::conversation::session::api::{
     Answered, DecisionQueue, GateTicket, RunState, SessionEvent, SessionMeta, TurnIo, flat_modules,
     work_root,
 };
+use crate::capabilities::prompt::api::Segment;
 use crate::capabilities::turn::turn::api::{Prepared, RestoreRequest, Session};
 use crate::kernel::ports::HostProbe;
 
@@ -717,7 +717,8 @@ impl Turn {
         line.id = next;
         line.reply = next;
         kept.push(
-            crate::capabilities::conversation::session::api::SessionEvent::Transcript(vec![line]).to_json(),
+            crate::capabilities::conversation::session::api::SessionEvent::Transcript(vec![line])
+                .to_json(),
         );
         self.history
             .replace(sid, &kept)

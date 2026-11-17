@@ -31,7 +31,7 @@ pub use crate::capabilities::conversation::session::domain::tools::ModuleTools;
 
 pub use crate::capabilities::conversation::session::ports::HistoryStore;
 
-pub use crate::capabilities::tools::api::{ToolExec, ToolOutcome};
+pub use crate::capabilities::tools::api::ToolExec;
 pub use crate::kernel::ports::ProcessRunner;
 
 pub use crate::capabilities::catalog::modules::api::Module;
@@ -49,7 +49,7 @@ pub use crate::capabilities::conversation::session::api::Pending;
 
 /// 目的：裁决卡的选项 id（契约）：测试按它作答，不按文案。
 pub use crate::capabilities::conversation::session::api::{
-    OPT_BEGIN, OPT_BEGIN_ALLOW, OPT_PLAN_SAY, OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM,
+    OPT_BEGIN, OPT_PLAN_SAY, OPT_SLATE_CONFIRM,
 };
 
 pub(crate) use crate::capabilities::runtime::service::Core;

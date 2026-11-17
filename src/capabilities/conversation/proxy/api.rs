@@ -6,7 +6,9 @@
 pub use crate::capabilities::conversation::proxy::domain::proxy::*;
 /// 目的：成员侧执行面——`ProxyHandler` 挂进代理会话那一回合的工具表，`ProxyTools` 由测试直接驱动（不在生产路径上按名取）。
 #[allow(unused_imports)]
-pub(crate) use crate::capabilities::conversation::proxy::service::proxy::{ProxyHandler, ProxyTools};
+pub(crate) use crate::capabilities::conversation::proxy::service::proxy::{
+    ProxyHandler, ProxyTools,
+};
 
 /// 目的：代理工具的宿主——把工具层的动作落到真实会话上。失败一律如实回报（不静默降级）。
 pub trait ProxyHost: Send + Sync {

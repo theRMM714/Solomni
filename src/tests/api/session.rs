@@ -135,7 +135,8 @@ fn provider_usage_is_exposed_in_session_view_and_persisted() {
         }),
         "流水里要有 usage 事件"
     );
-    let last = crate::capabilities::conversation::session::api::last_usage(&events).expect("读回用量");
+    let last =
+        crate::capabilities::conversation::session::api::last_usage(&events).expect("读回用量");
     assert_eq!(last.total_tokens, 1020);
 }
 

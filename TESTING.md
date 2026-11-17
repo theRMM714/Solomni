@@ -13,9 +13,10 @@
 - 覆盖率只报不拦：不达标打印回执，不使 CI 变红、不阻塞合并（`tests/coverage-policy.json` 的 `reportOnly`；要卡线用 `--strict`）。项目频繁重构，阈值是观察指标，不是合并闸门。
 - 风险区按代码划分，不按测试层：产品代码 80%、平台/进程适配 60%、安全策略 100%；PR 新增 Rust 行 90%、安全变更行 100%（`tests/coverage-policy.json`、`tests/coverage.mjs`）；这些数字只用于报告回执，不是合并判据。安全的行为矩阵必须 100%（`src/tests/permission.rs`、`src/kernel/detail/confine/tests.rs`）；OS 强制后端归平台桶，由三平台真机探针（`tests/<平台>/`）与突变审计（`tests/mutation-scope.json`）把关。E2E 不设行覆盖率，旅程清单必须全过（`tests/cross-platform/e2e/browser.cjs`）。
 
-- 测试只钉**可观察行为**：能力面（`capabilities/<cap>/api.rs` 的入站对象）、端口契约、内核真实实例与 E2E 旅程。`service` / `domain` / `detail` 的自由函数、内部结构与状态机**不单独写用例**——实现会频繁搬迁，钉住它的用例最先腐烂；这些行为改由驱动能力面或旅程的用例覆盖。
+- 测试只钉**可观察行为**：能力面（`capabilities/<单元>/<子业务>/api.rs` 的入站对象）、端口契约、内核真实实例与 E2E 旅程。`service` / `domain` / `detail` 的自由函数、内部结构与状态机**不单独写用例**——实现会频繁搬迁，钉住它的用例最先腐烂；这些行为改由驱动能力面或旅程的用例覆盖。
+- **不做内部实现测试**：`src/tests/**` 只能经 `capabilities/<单元>/<子业务>::api`、`::ports` 或组合根 `crate::entry::assembly` 取实现，出现 `::service` / `::domain` / `::detail` 即失败（门禁 `structure/tests-api`，豁免只有替身层 `doubles` / `fakes` / `prelude` / `builders` / `detail` / `helpers`）。这条用机器判，不靠评审记忆。
 - 内核（`src/kernel/**`）的内联测试用**真实实例**（临时目录、真实进程、真文件系统），不引用 `crate::tests` 的业务替身（门禁 `structure/kernel-tests`）：底层稳定，替身只会把"替身的行为"当成内核的事实。
-- 测试替身优先 **fake**（端口的内存实现）；要断言"发出去的是什么"时只钉外部协议边界（假供应商收到的 HTTP 形状），不钉内部调用次数。
+- 测试替身优先 **fake**（端口的内存实现，内部协作用它，不写 Mock）。**Mock 只写在边界**：模拟网络、第三方 API、不可控的外部服务（例如 `src/tests/detail/http.rs` 的本地假供应商）——那里的协议形状是必须钉死的外部契约。内部调用次数、调用顺序、私有方法都不许断言：耦合实现的断言在重构时只会制造假失败。
 - 测试记录事实：通过、失败、环境跳过、缺口必须分开（`run-tests.js`）。
 - 环境不允许执行不等于通过；必须记录 `env-skip` 与原因（`run-tests.js`）。
 - 尚未实现测试不等于通过；必须进入缺口账（`tests/gaps.yaml`）。

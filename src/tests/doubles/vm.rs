@@ -478,7 +478,9 @@ pub(crate) fn test_packages_with_base(
     packages: Arc<dyn PackageSource + Send + Sync>,
     base: crate::capabilities::catalog::packages::api::BaseFacts,
 ) -> Arc<dyn crate::capabilities::catalog::packages::api::Packages + Send + Sync> {
-    Arc::new(crate::capabilities::catalog::packages::service::PackagesService::with_base(packages, base))
+    Arc::new(
+        crate::capabilities::catalog::packages::service::PackagesService::with_base(packages, base),
+    )
 }
 
 /// 目的：模块启停覆盖的内存存储（测试用；与 yaml 实现同一条端口）。

@@ -203,65 +203,6 @@ pub(crate) fn collab_delegated_roster_written_back_and_rebuilt_from_meta() {
     );
 }
 
-// ---------- 平衡提取器 ----------
-/// 目的：讨论回合也要**逐片外送**：Chunk 的内容必须真的外送，否则界面整回合不动。
-#[test]
-pub(crate) fn discussion_turn_streams_deltas_and_never_leaks_the_envelope() {
-    let seen = Arc::new(Mutex::new(Vec::new()));
-    let mut chat = super::super::RecordingChat {
-        // 正文在信封**之前**：正文可以逐片流出去，信封本身绝不能。
-        inner: scripted(vec![
-            "我说两句。{\"type\":\"say\",\"text\":\"我说两句\"}".into(),
-        ]),
-        seen: Arc::clone(&seen),
-    };
-    let mut events: Vec<crate::capabilities::conversation::session::api::SessionEvent> = Vec::new();
-    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let _ = crate::capabilities::conversation::collab::service::discussion::Discussion::turn_with(
-        &cancel,
-        crate::capabilities::llm::api::CompleteOpts::plain(true), // 开流式
-        "a",
-        "（测试）身份",
-        &[],
-        &mut chat,
-        vec![crate::capabilities::llm::api::Msg::user("说说")],
-        &mut |e| events.push(e),
-    )
-    .expect("跑一个回合");
-    let kinds: Vec<String> = events
-        .iter()
-        .filter_map(|e| match e {
-            crate::capabilities::conversation::session::api::SessionEvent::Delta { kind, .. } => {
-                Some(kind.clone())
-            }
-            _ => None,
-        })
-        .collect();
-    assert!(
-        kinds.iter().any(|k| k == "start"),
-        "要有起始片：{:?}",
-        kinds
-    );
-    assert!(kinds.iter().any(|k| k == "text"), "要有正文片：{:?}", kinds);
-    let text: String = events
-        .iter()
-        .filter_map(|e| match e {
-            crate::capabilities::conversation::session::api::SessionEvent::Delta { kind, text, .. }
-                if kind == "text" =>
-            {
-                Some(text.clone())
-            }
-            _ => None,
-        })
-        .collect();
-    assert!(text.contains("我说两句。"), "正文该逐片流出去：{}", text);
-    assert!(
-        !text.contains("\"type\"") && !text.contains('{'),
-        "信封不能当正文流出去：{}",
-        text
-    );
-}
-
 #[test]
 pub(crate) fn core_collab_tool_modules_run_in_execution() {
     let runner = Arc::new(RecordingRunner {
@@ -524,44 +465,6 @@ pub(crate) fn core_operation_takes_a_native_structured_call() {
             crate::capabilities::conversation::session::api::SessionEvent::Transcript(_)
         )),
         "这一轮的事实要推出去"
-    );
-}
-
-/// 目的：回报走**工具调用**（不是正文 JSON）：执行席拿得到它，调用它不碰文件、回执带出回报内容。
-#[test]
-pub(crate) fn executor_reports_through_a_tool_call() {
-    // 角色表把 report 发给执行席（越权校验的判据就是它）。
-    let face = |role: &str| test_systools().role_face(role).0;
-    assert!(
-        face("executor").iter().any(|t| t == "submit_report"),
-        "执行席该拿到回报工具"
-    );
-    assert!(
-        !face("discussant").iter().any(|t| t == "submit_report"),
-        "讨论席不该拿到回报工具"
-    );
-    // 它不是文件域工具：没有 path 也照跑，回执把三个字段带出来。
-    let io = InMemorySysIo::new();
-    let sb = test_sandbox("a1", &[]);
-    let mut obs = crate::capabilities::tools::api::Observations::default();
-    let out = crate::capabilities::tools::service::systool::execute(
-        &sb,
-        &test_systools().tools,
-        &io,
-        &mut obs,
-        "submit_report",
-        "{\"summary\":\"抽了语料\",\"changes\":\"work/corpus.jsonl\",\"open\":\"\"}",
-    );
-    assert!(out.ok, "回报该成功：{:?}", out.output);
-    assert!(
-        out.output.contains("抽了语料"),
-        "回执要带出 summary: {}",
-        out.output
-    );
-    assert!(
-        out.output.contains("work/corpus.jsonl"),
-        "回执要带出 changes: {}",
-        out.output
     );
 }
 

@@ -3,9 +3,11 @@
 //! 不管：事件词汇与裁决队列（在 `events.rs` / `decisions.rs`）、历史落盘（在 `detail/`）。
 //! 联动：由 engine 驱动（`engine::converse_with`）；回档算术在 `rewind.rs`，历史视图在 `history.rs`。
 
-use crate::capabilities::llm::api::{BoxedChat, Msg};
-use crate::capabilities::conversation::session::domain::events::{LineView, SessionEvent, ToolCallView};
+use crate::capabilities::conversation::session::domain::events::{
+    LineView, SessionEvent, ToolCallView,
+};
 use crate::capabilities::conversation::session::domain::tools::MemberTools;
+use crate::capabilities::llm::api::{BoxedChat, Msg};
 
 /// 目的：把"保留前 keep 行"对齐到**回复边界**：keep 落在某次回复内部时，退到该回复的第一行之前。
 ///   为什么必须对齐：一次回复的消息是「一条助手消息 + N 条结果」，截在中间会留下孤儿结果
@@ -440,7 +442,9 @@ impl AgentSession {
     }
 
     /// 目的：最近一次调用的用量（状态栏与压缩判定读它）。
-    pub fn context_usage(&self) -> Option<crate::capabilities::conversation::session::api::ContextUsage> {
+    pub fn context_usage(
+        &self,
+    ) -> Option<crate::capabilities::conversation::session::api::ContextUsage> {
         self.last_usage
     }
 

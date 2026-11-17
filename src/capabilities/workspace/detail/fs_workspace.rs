@@ -105,13 +105,6 @@ impl FsWorkspace {
         }
     }
 
-    /// 目的：测试专用：缩短用量缓存时长，避免用例为了过期等满 2 秒。
-    #[cfg(test)]
-    pub(crate) fn with_usage_ttl(mut self, ttl: Duration) -> FsWorkspace {
-        self.usage_ttl = ttl;
-        self
-    }
-
     fn session_dir(&self, session: &str) -> PathBuf {
         self.sessions.join(session)
     }

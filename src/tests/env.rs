@@ -3,18 +3,20 @@
 //! 不管：取事实（`runtime` 的 history / workspace / registry）、机制侧怎么用围栏。
 //! 联动：`src/capabilities/env/domain/env.rs`；`runtime/service/env.rs` 取事实后转调。
 
+use crate::capabilities::catalog::modules::api::Roster;
+use crate::capabilities::catalog::packages::api::PackagePlan;
+use crate::capabilities::catalog::registry::api::AgentMeta;
+use crate::capabilities::catalog::registry::api::AppSettings;
+use crate::capabilities::conversation::session::api::{
+    RunState, SessionMeta, WorkspaceBinding, WorkspaceGrant,
+};
+use crate::capabilities::permission::api::{
+    PermissionDefaults, PermissionLayer, ProfileId, Reach, ReachSet, ScopeMode, SessionSandbox,
+};
 use crate::capabilities::turn::env::api::{
     MemberFacts, SandboxesFacts, host_read_roots, member, network_allowed, permissions, sandboxes,
     workspace_grant,
 };
-use crate::capabilities::catalog::modules::api::Roster;
-use crate::capabilities::catalog::packages::api::PackagePlan;
-use crate::capabilities::permission::api::{
-    PermissionDefaults, PermissionLayer, ProfileId, Reach, ReachSet, ScopeMode, SessionSandbox,
-};
-use crate::capabilities::catalog::registry::api::AgentMeta;
-use crate::capabilities::catalog::registry::api::AppSettings;
-use crate::capabilities::conversation::session::api::{RunState, SessionMeta, WorkspaceBinding, WorkspaceGrant};
 use crate::capabilities::workspace::api::{Sandbox, WorkRoots};
 use crate::kernel::api::{ExecSpec, Tier};
 use crate::tests::doubles::module_of;

@@ -48,7 +48,9 @@ pub fn missing_entries_for(
     let mut out = Vec::new();
     for m in modules {
         for (tool, decl) in &m.manifest.tools {
-            let Some(entry) = crate::capabilities::catalog::modules::api::local_entry(&decl.command) else {
+            let Some(entry) =
+                crate::capabilities::catalog::modules::api::local_entry(&decl.command)
+            else {
                 continue;
             };
             // 壳怎么解析这个名字，就按它的候选去验（Windows 上 `build/indexer` 实际落在 `.exe`）。

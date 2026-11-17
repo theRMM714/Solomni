@@ -4,10 +4,10 @@
 //! 联动：执行经 tools 的 ToolExec 端口；回填顺序与转录行形状见 docs/session/session-model.md。
 
 use super::decls::ToolDecls;
-use crate::capabilities::llm::api::ToolInvoke;
-use crate::capabilities::permission::api::{CallScope, Decision, Effect, Reach, ReachSet};
 use crate::capabilities::conversation::session::api::{SessionEvent, ToolFace};
 use crate::capabilities::conversation::session::domain::tools::MemberTools;
+use crate::capabilities::llm::api::ToolInvoke;
+use crate::capabilities::permission::api::{CallScope, Decision, Effect, Reach, ReachSet};
 use crate::capabilities::tools::api::{Observations, ShellFacts, ToolSchema};
 use crate::capabilities::workspace::api::ReadFact;
 use crate::kernel::api::ToolOutcome;
@@ -430,13 +430,14 @@ pub(crate) fn run_batch(
                 args: args.clone(),
             };
             let decision = (gate.confirm)(&req, sink);
-            let allow_turn = decision == crate::capabilities::conversation::session::api::OPT_TOOL_ALLOW_TURN;
+            let allow_turn =
+                decision == crate::capabilities::conversation::session::api::OPT_TOOL_ALLOW_TURN;
             if allow_turn {
                 gate.allow_turn
                     .store(true, std::sync::atomic::Ordering::Relaxed);
             }
-            let allowed =
-                allow_turn || decision == crate::capabilities::conversation::session::api::OPT_TOOL_ALLOW;
+            let allowed = allow_turn
+                || decision == crate::capabilities::conversation::session::api::OPT_TOOL_ALLOW;
             done[i] = Some(if allowed {
                 run_one(ctx, module.as_deref(), tool, args, ask, &grant, cancel)
             } else {
@@ -934,22 +935,23 @@ pub(crate) fn dispatch_external(
                 // 共享盘不承载执行位：模块声明的相对入口先落进 guest 本地副本，再把首 token 换成它
                 // （cwd 仍是共享的模块根，数据与 userdata 不动）。
                 let declared = command.trim_start();
-                let dispatched = match crate::capabilities::catalog::modules::api::local_entry(declared) {
-                    Some(entry) => {
-                        match ctx.vm.stage_exec(
-                            &ctx.face.guest_lease,
-                            &module,
-                            &mt.root.join(entry),
-                            entry,
-                        ) {
-                            Ok(staged) => {
-                                format!("{}{}", staged, &declared[entry.len()..])
+                let dispatched =
+                    match crate::capabilities::catalog::modules::api::local_entry(declared) {
+                        Some(entry) => {
+                            match ctx.vm.stage_exec(
+                                &ctx.face.guest_lease,
+                                &module,
+                                &mt.root.join(entry),
+                                entry,
+                            ) {
+                                Ok(staged) => {
+                                    format!("{}{}", staged, &declared[entry.len()..])
+                                }
+                                Err(why) => return (module, deny(&ctx.face, why)),
                             }
-                            Err(why) => return (module, deny(&ctx.face, why)),
                         }
-                    }
-                    None => declared.to_string(),
-                };
+                        None => declared.to_string(),
+                    };
                 ctx.vm.guest_run_fenced(
                     &ctx.face.guest_lease,
                     &crate::capabilities::vm::api::GuestRun {

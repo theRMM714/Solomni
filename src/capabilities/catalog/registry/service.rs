@@ -3,7 +3,6 @@
 //! 不管：yaml 解析与落盘（在 detail/yaml_settings.rs）；DTO 与校验规则（在 domain）；适配器装配（在组合根）。
 //! 联动：组合根 new 时注入 SettingsStore 与 llm::api::Llm；对外只经 registry::api::Registry。
 
-use crate::capabilities::llm::api::{Channel, Llm, ProbeOutcome, ReplayReport, ToolMode};
 use crate::capabilities::catalog::modules::api::Roster;
 use crate::capabilities::catalog::registry::api::{AgentView, ModelView, ProviderView, Registry};
 use crate::capabilities::catalog::registry::domain::agents;
@@ -11,6 +10,7 @@ use crate::capabilities::catalog::registry::domain::providers::{
     self, AppSettings, ModelDraft, ModelEntry, Provider, Settings,
 };
 use crate::capabilities::catalog::registry::ports::SettingsStore;
+use crate::capabilities::llm::api::{Channel, Llm, ProbeOutcome, ReplayReport, ToolMode};
 use crate::kernel::ports::Log;
 use std::sync::Arc;
 
@@ -388,8 +388,10 @@ impl Registry for RegistryService {
 
     fn set_app_settings(&mut self, app: AppSettings) -> Result<(), String> {
         // 不合法就如实拒绝，不把坏的策略（绝对路径 / .. / 未知字段）落进登记处。
-        crate::capabilities::catalog::registry::domain::providers::validate_sandbox_settings(&app.sandbox)
-            .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
+        crate::capabilities::catalog::registry::domain::providers::validate_sandbox_settings(
+            &app.sandbox,
+        )
+        .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
         providers::validate_compact_settings(&app, &self.settings.models)
             .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
         providers::validate_storage_settings(&app)

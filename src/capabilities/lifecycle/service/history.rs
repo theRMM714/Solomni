@@ -77,22 +77,6 @@ pub(crate) struct SessionDelete {
 }
 
 impl SessionDelete {
-    #[cfg(test)]
-    pub(crate) fn for_test(
-        stop: crate::capabilities::vm::api::GuestStop,
-        history: Arc<dyn History + Send + Sync>,
-        dirs: Vec<String>,
-        target: String,
-    ) -> SessionDelete {
-        SessionDelete {
-            stop,
-            history,
-            dirs,
-            target,
-            fences: None,
-        }
-    }
-
     /// 目的：测试用构造：带一个可观察的撤权回调，钉住「后台执行、目录已删、失败也撤」三条契约。
     #[cfg(test)]
     pub(crate) fn for_test_with_fences(

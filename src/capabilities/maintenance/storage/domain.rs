@@ -158,3 +158,85 @@ fn add(
     });
     true
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::capabilities::maintenance::storage::api::SpaceItem;
+
+    fn report(categories: Vec<SpaceCategory>) -> SpaceReport {
+        let managed_bytes = categories
+            .iter()
+            .filter(|c| c.auto_evictable)
+            .map(|c| c.bytes)
+            .sum();
+        SpaceReport {
+            managed_bytes,
+            cap_bytes: 50,
+            categories,
+            ..SpaceReport::default()
+        }
+    }
+
+    fn item(id: &str, bytes: u64, last: u64, active: bool) -> SpaceItem {
+        SpaceItem {
+            id: id.to_string(),
+            label: id.to_string(),
+            bytes,
+            last_used: Some(last),
+            active,
+            modules: Vec::new(),
+            cleanable: true,
+            ..SpaceItem::default()
+        }
+    }
+
+    /// 目的：超上限时先删最久未用的构建卷；活跃卷不进入候选。
+    #[test]
+    fn plan_prefers_oldest_build_volume_and_skips_active() {
+        let cat = SpaceCategory {
+            id: "build-cache".to_string(),
+            label: "构建缓存".to_string(),
+            bytes: 30,
+            items: vec![
+                item("old", 10, 1, false),
+                item("new", 20, 100, false),
+                item("busy", 30, 0, true),
+            ],
+            auto_evictable: true,
+            note: String::new(),
+        };
+        let r = report(vec![cat]);
+        let policy = StoragePolicy {
+            cache_cap_gib: 1,
+            cap_bytes: 25,
+            cache_keep_days: 30,
+            ..StoragePolicy::default()
+        };
+        let plan = plan(&r, policy, 200, None);
+        assert_eq!(plan.first().map(|c| c.id.as_str()), Some("old"));
+        assert!(!plan.iter().any(|c| c.id == "busy"));
+    }
+
+    /// 目的：按龄回收日志/下载缓存，不把未超龄的项带上。
+    #[test]
+    fn plan_reclaims_aged_download_cache() {
+        let cat = SpaceCategory {
+            id: "download-cache".to_string(),
+            label: "下载缓存".to_string(),
+            bytes: 10,
+            items: vec![item("old.bin", 10, 1, false)],
+            auto_evictable: true,
+            note: String::new(),
+        };
+        let r = report(vec![cat]);
+        let policy = StoragePolicy {
+            cache_keep_days: 1,
+            cap_bytes: 100,
+            ..StoragePolicy::default()
+        };
+        let plan = plan(&r, policy, 200_000, None);
+        assert_eq!(plan.len(), 1);
+        assert_eq!(plan[0].category, "download-cache");
+    }
+}

@@ -6,11 +6,11 @@
 
 use crate::capabilities::catalog::modules::api::{Module, Modules, Roster, ServiceDecl};
 use crate::capabilities::catalog::packages::api as pkgs;
+use crate::capabilities::catalog::secrets::api::SecretOps;
 use crate::capabilities::residents::api::{
     Operation, Receipt, ResidentOps, ServiceState, ServiceView,
 };
 use crate::capabilities::residents::ports::{LaunchSpec, ServiceAdapter, ServiceInstance};
-use crate::capabilities::catalog::secrets::api::SecretOps;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 

@@ -8,7 +8,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
 use crate::capabilities::conversation::collab::api::CollabSession;
-use crate::capabilities::conversation::session::api::{AgentSession, Decisions, Gates, ShellSlot, decisions};
+use crate::capabilities::conversation::session::api::{
+    AgentSession, Decisions, Gates, ShellSlot, decisions,
+};
 use crate::kernel::api::SessionId;
 
 /// 目的：一份在世会话的两种形态：单 agent（含代理会话与子会话）与协作会话。
@@ -131,7 +133,10 @@ impl TurnState {
     }
 
     /// 目的：读会话最近一次 shell 的快照；没跑过就是 None（状态栏据此决定要不要出 chip）。
-    pub fn shell_view(&self, sid: &str) -> Option<crate::capabilities::conversation::session::api::ShellLive> {
+    pub fn shell_view(
+        &self,
+        sid: &str,
+    ) -> Option<crate::capabilities::conversation::session::api::ShellLive> {
         self.shell_slots
             .lock()
             .unwrap_or_else(|e| e.into_inner())

@@ -9,8 +9,8 @@ pub(crate) mod setup;
 use serde_json::Value;
 
 use crate::capabilities::catalog::packages::api::BaseFacts;
-use crate::capabilities::provision::api::Provision;
 use crate::capabilities::maintenance::storage::api::Storage;
+use crate::capabilities::provision::api::Provision;
 use crate::capabilities::system::api::{Facts, FenceFacts};
 
 /// 目的：本机围栏能力（自检用；生产路径只取一次）。

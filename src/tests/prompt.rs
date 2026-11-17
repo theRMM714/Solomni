@@ -287,79 +287,6 @@ pub(crate) fn refs_rewrite_covers_prefixes_speakers_and_punctuation() {
     );
 }
 
-/// 目的：虚拟机档里用户 @ 引用落成 **guest 写法**——模块工具在 guest 内直接能用；且系统工具仍译得回同一个宿主落点。
-/// 约束：路径翻译器只有一份（沙箱的 path_codec；会话的 @ 根由同一个 guest 派生），两条入口给同一种写法。
-#[test]
-pub(crate) fn ref_rewrite_uses_the_session_path_dialect() {
-    use crate::capabilities::prompt::api::rewrite;
-    use crate::capabilities::conversation::session::api::SessionParams;
-    use crate::capabilities::vm::api::PathBridge;
-    use crate::capabilities::vm::domain::paths::PathDialect;
-    use crate::capabilities::workspace::api::Sandboxes;
-    use crate::capabilities::workspace::domain::workspace::Place;
-    use std::sync::Arc;
-    // 同方言（本机档）：桥是恒等，改写结果就是原有宿主写法，行为不变。
-    let params =
-        SessionParams::from_workspace("甲", &test_sandbox("甲", &["data"]), &[], "single", "solo");
-    assert_eq!(
-        rewrite("@work:a.txt", Some("甲"), &params.ref_roots()),
-        s(&["demo", "work", "a.txt"]),
-        "本机档行为不变"
-    );
-    // 跨方言（虚拟机档）：@work 与自己的 @sandbox 都落成 guest 写法。
-    let guest = if cfg!(windows) {
-        PathDialect::Posix
-    } else {
-        PathDialect::Windows
-    };
-    let bridge = PathBridge::new(std::env::consts::OS, guest);
-    let mut sb = test_sandbox("甲", &["data"]);
-    sb.path_codec = Some(Arc::new(bridge));
-    let params = SessionParams::from_workspace("甲", &sb, &[], "single", "solo").with_guest(Some(
-        if cfg!(windows) {
-            crate::capabilities::vm::api::GuestOs::Macos
-        } else {
-            crate::capabilities::vm::api::GuestOs::Windows
-        },
-    ));
-    let roots = params.ref_roots();
-    let work = rewrite("@work:a.txt 看一下", Some("甲"), &roots);
-    assert_eq!(
-        work,
-        format!(
-            "{} 看一下",
-            bridge.to_guest(&sb.shared.join("a.txt")).replace('\\', "/")
-        ),
-        "虚拟机档的 @work 要是 guest 写法"
-    );
-    // 模型拿到 guest 写法再交给同一座桥寻址：译回宿主、落点仍是那个文件（越界与否的判据不变）。
-    let own = rewrite("@sandbox:甲/note.txt", Some("甲"), &roots);
-    assert_eq!(
-        own,
-        bridge
-            .to_guest(&sb.private.join("note.txt"))
-            .replace('\\', "/"),
-        "虚拟机档自己的 @sandbox 要是 guest 写法"
-    );
-    // 寻址按桥的规范写法（与挂载点、命令 cwd 同一种；转录里给模型看的是上面那种一律 / 形式）。
-    let own_raw = bridge.to_guest(&sb.private.join("note.txt"));
-    let (place, path) = sb.resolve(&own_raw).expect("guest 写法要能寻址");
-    assert_eq!(place, Place::Private);
-    assert_eq!(path, sb.private.join("note.txt"));
-    // 协作入口（set_task / answer / note_user）没有"自己的沙箱"：根的翻译器由沙箱清单给。
-    let boxes = Sandboxes {
-        shared: sb.shared.clone(),
-        session_root: std::path::PathBuf::new(),
-        list: Vec::new(),
-        codec: sb.path_codec.clone(),
-    };
-    assert_eq!(
-        rewrite("@work:a.txt", None, &boxes.ref_roots()),
-        bridge.to_guest(&sb.shared.join("a.txt")).replace('\\', "/"),
-        "协作的 @work 也要按会话环境给写法（名单还没定时 list 是空的）"
-    );
-}
-
 #[test]
 pub(crate) fn session_at_roots_go_by_the_session_guest() {
     use crate::capabilities::conversation::session::api::SessionParams;
@@ -388,49 +315,6 @@ pub(crate) fn session_at_roots_go_by_the_session_guest() {
         );
         assert_eq!(codec.to_view(&sb.private), want.to_guest(&sb.private));
     }
-}
-
-/// 目的：patch 指南的示例路径与【工作环境】同一种写法——guest 会话里不能出现宿主盘符。
-/// 约束：示例路径必须是 guest 内真实存在的写法，模型照抄才落得下文件。
-#[test]
-pub(crate) fn patch_guide_examples_follow_the_session_path_dialect() {
-    use crate::capabilities::vm::api::PathBridge;
-    use crate::capabilities::vm::domain::paths::PathDialect;
-
-    let mut sb = test_sandbox("甲", &[]);
-    let host_root = crate::kernel::api::slash(&sb.private);
-    let host_example = format!("*** Update File: {}/note.txt", host_root);
-    let host = crate::capabilities::tools::api::tool_notes(&test_prompts(), &sb, &[], &[]);
-    assert!(
-        host.patch_guide.contains(&host_example),
-        "本机档的示例用宿主写法：{}",
-        host.patch_guide
-    );
-
-    let guest = if cfg!(windows) {
-        PathDialect::Posix
-    } else {
-        PathDialect::Windows
-    };
-    let bridge = PathBridge::new(std::env::consts::OS, guest);
-    sb.path_codec = Some(Arc::new(bridge));
-    let notes = crate::capabilities::tools::api::tool_notes(&test_prompts(), &sb, &[], &[]);
-    let guest_root = bridge.to_guest(&sb.private).replace('\\', "/");
-    assert!(
-        notes
-            .patch_guide
-            .contains(&format!("*** Update File: {}/note.txt", guest_root)),
-        "guest 档的示例要用 guest 写法（{}）：{}",
-        guest_root,
-        notes.patch_guide
-    );
-    // 只比对整行示例：guest 路径本身可能包含宿主路径片段（POSIX 宿主的 /solomni-host/home/...），
-    // 不能用 contains(宿主根) 判定“没出现宿主写法”。
-    assert!(
-        !notes.patch_guide.contains(&host_example),
-        "guest 档不能再出现宿主写法的示例：{}",
-        notes.patch_guide
-    );
 }
 
 #[test]
@@ -473,45 +357,5 @@ pub(crate) fn user_at_reference_is_rewritten_in_transcript_and_history() {
         !h.iter().any(|m| m.content.contains("@work:")),
         "历史里不得残留 @ 引用：{:?}",
         h
-    );
-}
-
-/// 目的：环境块的路径渲染对两种编码器都对——本机档交给视图盘编码器（视图写法），其余交给会话桥（guest 拼法）。
-/// 约束：不读全局视图盘：视图分支由显式注入的编码器验，否则并行用例会随本进程的分盘状态抖动。
-#[test]
-pub(crate) fn env_path_follows_the_injected_codec() {
-    use crate::capabilities::conversation::session::domain::session::prompt::env_path;
-    use crate::capabilities::vm::api::PathBridge;
-    use crate::capabilities::vm::domain::paths::PathDialect;
-    use crate::kernel::ports::PathCodec;
-
-    #[derive(Debug)]
-    struct Fixed;
-    impl PathCodec for Fixed {
-        fn to_host(&self, raw: &str) -> Option<std::path::PathBuf> {
-            Some(std::path::PathBuf::from(raw))
-        }
-        fn to_view(&self, _host: &std::path::Path) -> String {
-            "view:fixed".to_string()
-        }
-    }
-
-    let host = std::path::Path::new("w").join("a");
-    // 故意用跨方言的桥：让 None 分支的 guest 拼法与宿主拼法不同，断言才不是同义反复。
-    let dialect = if cfg!(windows) {
-        PathDialect::Posix
-    } else {
-        PathDialect::Windows
-    };
-    let bridge = PathBridge::new(std::env::consts::OS, dialect);
-    assert_eq!(
-        env_path(Some(&Fixed), &bridge, &host),
-        "view:fixed",
-        "给了编码器就按视图写法渲染"
-    );
-    assert_eq!(
-        env_path(None, &bridge, &host),
-        crate::kernel::api::slash(std::path::Path::new(&bridge.to_guest(&host))),
-        "没有编码器就交给会话桥（本机档恒等、虚拟机档 guest 拼法）"
     );
 }

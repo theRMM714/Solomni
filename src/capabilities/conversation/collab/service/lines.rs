@@ -3,10 +3,10 @@
 //! 不管：讨论推进（`pump.rs`）、状态机步骤（`discussion.rs`）、裁决队的排队与校验（`session` 的 `Gates`）。
 //! 联动：`pump` / `collab` / `slate` / `turn_io` 取同一份；会话内行 id 只在这里分配。
 
+use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::conversation::collab::domain::collab_state::CollabState;
 use crate::capabilities::conversation::collab::service::discussion::Discussion;
 use crate::capabilities::conversation::collab::service::synthesis::Execution;
-use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::conversation::session::api::{CheckView, LineView, Pending, SessionEvent};
 /// 目的：代拟行里的一项（只给人看）：复用项标出来，组装项带上模块与模型。
 pub(crate) fn slate_item(a: &AgentMeta, why: &str) -> String {

@@ -186,13 +186,10 @@ fn main() {
         ),
     );
     println!("[围栏] {}", fence_cap.note);
-    let store = capabilities::catalog::registry::detail::yaml_settings::YamlSettingsStore::new(
-        root.join(".home").join("providers.yaml"),
-        root.join(".home").join("models.yaml"),
-        root.join(".home").join("settings.yaml"),
-        root.join(".home").join("agents.yaml"),
+    let store = entry::assembly::settings_store(&root);
+    let history = capabilities::conversation::session::detail::fs_history::FsHistory::new(
+        root.join("session"),
     );
-    let history = capabilities::conversation::session::detail::fs_history::FsHistory::new(root.join("session"));
     let workspace = capabilities::workspace::detail::FsWorkspace::new(root.join("session"));
     let workstore = capabilities::workspace::detail::FsWorkStore::new();
     // 保留名表（内置工具名）由**组合根**问一次工具能力后交进去：清单校验归 workspace，
@@ -202,13 +199,14 @@ fn main() {
         capabilities::tools::api::names(),
     );
     // 运行包能力：依赖文件夹 runtimes/（一个包 = 一个文件夹 + package.yaml）。
-    let packages: Arc<dyn capabilities::catalog::packages::api::Packages + Send + Sync> =
-        Arc::new(capabilities::catalog::packages::service::PackagesService::with_base(
+    let packages: Arc<dyn capabilities::catalog::packages::api::Packages + Send + Sync> = Arc::new(
+        capabilities::catalog::packages::service::PackagesService::with_base(
             Arc::new(capabilities::catalog::packages::detail::FsPackages::new(
                 root.join("runtimes"),
             )),
             base.clone(),
-        ));
+        ),
+    );
     // 端点记忆：谁先通了就固定谁，后续会话不再反复探测候选。
     let memo = capabilities::llm::detail::endpoint::memo_new();
     // **llm 能力**：三个出站端口（通道工厂 / 模型目录 / 信封修复）只由它的 service 持有（R12）；
@@ -281,7 +279,8 @@ fn main() {
         fence_cap.net && (!kernel::api::HAS_EXTERNAL_ACL_STEP || authorized),
         fence_cap.tree,
         true,
-        sandbox_cfg.policy.on_unavailable == capabilities::catalog::registry::api::SandboxUnavailable::Ask,
+        sandbox_cfg.policy.on_unavailable
+            == capabilities::catalog::registry::api::SandboxUnavailable::Ask,
     ));
     // 授权开关：工具进程与启动报告共用这一份（环境变量只在这里生效一次）。
     let write_allowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(authorized));
@@ -539,20 +538,22 @@ fn main() {
         Arc::new(entry::assembly::provision_with_guest_vm(&root));
     // **存储空间**：回收策略来自 settings；构建与呈现层共用同一份。
     // 存储的三个端口各一个适配器：盘点（只读）、回收（锁与删除）、guest 存活（进程台账）。
-    let storage_service = Arc::new(capabilities::maintenance::storage::service::StorageService::new(
-        Arc::clone(&provision),
-        Arc::new(capabilities::maintenance::storage::detail::survey::DiskSurvey::new(
-            root.clone(),
-        )),
-        Arc::new(capabilities::maintenance::storage::detail::reclaim::DiskReclaim::new(
-            root.clone(),
-        )),
-        Arc::new(capabilities::maintenance::storage::detail::guests::ProcessGuests::new(
-            &root,
-        )),
-        std::sync::Arc::clone(&log),
-        capabilities::maintenance::storage::api::StoragePolicy::from(&registry.app_settings().storage),
-    ));
+    let storage_service = Arc::new(
+        capabilities::maintenance::storage::service::StorageService::new(
+            Arc::clone(&provision),
+            Arc::new(
+                capabilities::maintenance::storage::detail::survey::DiskSurvey::new(root.clone()),
+            ),
+            Arc::new(
+                capabilities::maintenance::storage::detail::reclaim::DiskReclaim::new(root.clone()),
+            ),
+            Arc::new(capabilities::maintenance::storage::detail::guests::ProcessGuests::new(&root)),
+            std::sync::Arc::clone(&log),
+            capabilities::maintenance::storage::api::StoragePolicy::from(
+                &registry.app_settings().storage,
+            ),
+        ),
+    );
     let storage: Arc<dyn capabilities::maintenance::storage::api::Storage + Send + Sync> =
         storage_service.clone();
     // **构建能力**：创建会话前补编模块产物（本机档宿主、虚拟机档 guest）；执行器与 `--build` 同一条路——
@@ -566,11 +567,11 @@ fn main() {
     // 项目内基础工具链的只读安装根：构建与 shell 共用同一份（不按 agent 重复注入）。
     let base_roots = entry::toolchains::active_roots(&root);
     // 构建的三个端口各一个适配器：源指纹与构建状态共用一份本机档（BuildStore），缓存卷落盘（CacheOnDisk）。
-    let build_store = Arc::new(capabilities::maintenance::builds::detail::fingerprint::BuildStore::new(
-        root.clone(),
-    ));
-    let builds: Arc<dyn capabilities::maintenance::builds::api::Builds + Send + Sync> =
-        Arc::new(capabilities::maintenance::builds::service::BuildsService::new(
+    let build_store = Arc::new(
+        capabilities::maintenance::builds::detail::fingerprint::BuildStore::new(root.clone()),
+    );
+    let builds: Arc<dyn capabilities::maintenance::builds::api::Builds + Send + Sync> = Arc::new(
+        capabilities::maintenance::builds::service::BuildsService::new(
             root.clone(),
             Arc::clone(&packages),
             Arc::clone(&vm),
@@ -578,16 +579,17 @@ fn main() {
             Arc::clone(&storage),
             build_store.clone(),
             build_store.clone(),
-            Arc::new(capabilities::maintenance::builds::detail::cache::CacheOnDisk::new(
-                root.clone(),
-            )),
+            Arc::new(
+                capabilities::maintenance::builds::detail::cache::CacheOnDisk::new(root.clone()),
+            ),
             Arc::new(build_runner),
             Arc::new(capabilities::tools::service::fence::ToolFenceGate),
             Arc::clone(&fence_host),
             Arc::new(kernel::detail::HostProbeAdapter),
             std::sync::Arc::clone(&log),
             base_roots.clone(),
-        ));
+        ),
+    );
     // **系统维护面**：启动相命令（`--doctor` / `--gc` / `--provision` …）在转录中心里也跑同一条执行路径——
     // 复用这里已经装好的端口：存储的后台作业状态在实例里，另装一套会让两边互相看不见。
     let system = match entry::assembly::system_with(
@@ -612,9 +614,9 @@ fn main() {
     let mut core = capabilities::runtime::service::Core::new(
         root.clone(),
         Box::new(registry),
-        Arc::new(capabilities::conversation::session::service::SessionService::new(
-            Arc::new(history),
-        )),
+        Arc::new(
+            capabilities::conversation::session::service::SessionService::new(Arc::new(history)),
+        ),
         workspace,
         Arc::clone(&vm),
         Arc::clone(&packages),

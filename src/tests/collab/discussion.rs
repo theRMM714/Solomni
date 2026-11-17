@@ -368,21 +368,25 @@ pub(crate) fn prose_without_an_envelope_is_not_a_statement() {
     );
 
     // 线格式：只在为真时写出这两个字段
-    let yes = SessionEvent::Transcript(vec![crate::capabilities::conversation::session::api::LineView {
-        id: 0,
-        line: "x".into(),
-        system: true,
-        degraded: true,
-        ..Default::default()
-    }])
+    let yes = SessionEvent::Transcript(vec![
+        crate::capabilities::conversation::session::api::LineView {
+            id: 0,
+            line: "x".into(),
+            system: true,
+            degraded: true,
+            ..Default::default()
+        },
+    ])
     .to_json();
     assert_eq!(yes["lines"][0]["system"], serde_json::Value::Bool(true));
     assert_eq!(yes["lines"][0]["degraded"], serde_json::Value::Bool(true));
-    let no = SessionEvent::Transcript(vec![crate::capabilities::conversation::session::api::LineView {
-        id: 0,
-        line: "x".into(),
-        ..Default::default()
-    }])
+    let no = SessionEvent::Transcript(vec![
+        crate::capabilities::conversation::session::api::LineView {
+            id: 0,
+            line: "x".into(),
+            ..Default::default()
+        },
+    ])
     .to_json();
     assert!(
         no["lines"][0].get("system").is_none() && no["lines"][0].get("degraded").is_none(),

@@ -110,7 +110,9 @@ pub(crate) fn test_sandbox_readonly(
 }
 
 /// 目的：测试用会话参数：agent 名 + 该 agent 的沙箱（无模块）。身份块由它现渲染。
-pub(crate) fn test_params(agent: &str) -> crate::capabilities::conversation::session::api::SessionParams {
+pub(crate) fn test_params(
+    agent: &str,
+) -> crate::capabilities::conversation::session::api::SessionParams {
     crate::capabilities::conversation::session::api::SessionParams::from_workspace(
         agent,
         &test_sandbox(agent, &[]),

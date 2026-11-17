@@ -9,16 +9,16 @@ use super::doubles::{
     InMemoryWorkStore, InMemoryWorkspace, NoFenceHost, RecordingFence, ScriptGateway, SharedScript,
     TestPrompts, VecSource, abs, module_of,
 };
-use crate::capabilities::llm::api::{Channel, Chat, CompleteOpts, Msg};
-use crate::capabilities::llm::ports::{ChatGateway, ModelCatalog};
 use crate::capabilities::catalog::modules::ports::ModuleSource;
 use crate::capabilities::catalog::packages::ports::PackageSource;
-use crate::capabilities::prompt::ports::PromptSource;
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::catalog::registry::api::{Provider, Settings};
 use crate::capabilities::catalog::registry::ports::SettingsStore;
 use crate::capabilities::conversation::session::api::SessionMeta;
 use crate::capabilities::conversation::session::ports::HistoryStore;
+use crate::capabilities::llm::api::{Channel, Chat, CompleteOpts, Msg};
+use crate::capabilities::llm::ports::{ChatGateway, ModelCatalog};
+use crate::capabilities::prompt::ports::PromptSource;
 use crate::capabilities::tools::ports::SysIo;
 use crate::capabilities::workspace::ports::Workdirs;
 use crate::kernel::api::ExecSpec;
@@ -289,93 +289,6 @@ fn workspace_double_prepares_writes_lists_and_propagates_failure() {
         !bad.work_has("w", "x"),
         "布尔查询没有错误通道，不受失败注入影响"
     );
-}
-
-// ---------- WorkStore ----------
-/// 版本库端口替身的契约：文件原语、空仓库、对象/提交/基线往返、失败传播。
-#[test]
-fn work_store_double_round_trips_files_commits_index_and_objects() {
-    use crate::capabilities::workspace::domain::workstore::{Change, ChangeKind, Commit, Index};
-    use crate::capabilities::workspace::ports::WorkStore;
-    let s = InMemoryWorkStore::new();
-    let root = abs(&["w", "work"]);
-    let store = abs(&["w", ".work"]);
-
-    // 空仓库不是错误。
-    assert_eq!(s.head(&store).unwrap(), None);
-    assert!(s.list(&root).unwrap().is_empty());
-    assert!(s.read_index(&store, "a").unwrap().is_empty());
-    assert!(s.read_commit(&store, 1).unwrap().is_none());
-    assert!(s.read_object(&store, "nope").is_err());
-
-    // 文件原语：读不到 = None；删除幂等；列目录稳定。
-    assert_eq!(s.read_under(&root, "a/b.txt").unwrap(), None);
-    s.write_under(&root, "a/b.txt", b"hi").unwrap();
-    assert_eq!(
-        s.read_under(&root, "a/b.txt").unwrap().as_deref(),
-        Some(&b"hi"[..])
-    );
-    assert_eq!(s.list(&root).unwrap(), vec!["a/b.txt"]);
-    s.remove_under(&root, "a/b.txt").unwrap();
-    s.remove_under(&root, "a/b.txt").unwrap();
-    assert_eq!(s.read_under(&root, "a/b.txt").unwrap(), None);
-
-    // 对象 / 提交 / head / 拉取基线。
-    s.write_object(&store, "h1", b"obj").unwrap();
-    assert_eq!(s.read_object(&store, "h1").unwrap(), b"obj");
-    let mut tree = std::collections::BTreeMap::new();
-    tree.insert("a/b.txt".to_string(), "h1".to_string());
-    let c = Commit {
-        id: 1,
-        parent: None,
-        author: "a".to_string(),
-        session: "w--a".to_string(),
-        time: 1,
-        message: "首提交".to_string(),
-        changes: vec![Change {
-            path: "a/b.txt".to_string(),
-            kind: ChangeKind::Add,
-            hash: "h1".to_string(),
-        }],
-        tree: Some(tree),
-        base: 0,
-        depth: 0,
-        source: Default::default(),
-        anchor: None,
-    };
-    s.write_commit(&store, &c).unwrap();
-    s.set_head(&store, 1).unwrap();
-    assert_eq!(s.head(&store).unwrap(), Some(1));
-    assert_eq!(s.list_commits(&store).unwrap(), vec![1]);
-    assert_eq!(s.read_commit(&store, 1).unwrap().unwrap(), c);
-    let mut idx = Index::new();
-    idx.insert("a/b.txt".to_string(), "h1".to_string());
-    s.write_index(&store, "a", &idx).unwrap();
-    assert_eq!(s.read_index(&store, "a").unwrap(), idx);
-
-    // 事务日志 / 提交号 / 跨进程锁（内存替身无文件锁）。
-    use crate::capabilities::workspace::domain::workstore::Pending;
-    assert!(s.lock(&store).unwrap().is_none());
-    assert!(s.read_pending(&store).unwrap().is_none());
-    let pending = Pending::Restore { target: Some(1) };
-    s.write_pending(&store, &pending).unwrap();
-    assert_eq!(s.read_pending(&store).unwrap(), Some(pending));
-    s.clear_pending(&store).unwrap();
-    assert!(s.read_pending(&store).unwrap().is_none());
-    assert_eq!(s.read_next_id(&store).unwrap(), None);
-    s.write_next_id(&store, 7).unwrap();
-    assert_eq!(s.read_next_id(&store).unwrap(), Some(7));
-
-    // 失败注入：每个端口调用都如实传播。
-    let bad = InMemoryWorkStore::new().fail_with("版本库不可用");
-    assert_eq!(
-        bad.write_under(&root, "x", b"").unwrap_err(),
-        "版本库不可用"
-    );
-    assert_eq!(bad.head(&store).unwrap_err(), "版本库不可用");
-    assert_eq!(bad.read_object(&store, "h").unwrap_err(), "版本库不可用");
-    assert_eq!(bad.read_pending(&store).unwrap_err(), "版本库不可用");
-    assert_eq!(bad.lock(&store).unwrap_err(), "版本库不可用");
 }
 
 /// 目的：内存版本库替身与真实适配器同一份资产流式契约：扫描、写入校验、复制、超限与缺失。

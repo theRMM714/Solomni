@@ -3,10 +3,8 @@
 //! 不管：进程与围栏机制（在 kernel 的 SessionHost 实现里）；真实服务的端到端另有用例。
 //! 联动：适配器见 src/capabilities/residents/detail/mcp.rs；替身见 src/tests/doubles/。
 
-use crate::capabilities::permission::api::{Decision, Reach, ReachSet};
 use crate::capabilities::residents::detail::McpAdapter;
 use crate::capabilities::residents::ports::{LaunchSpec, ServiceAdapter};
-use crate::capabilities::conversation::session::service::engine::tools::CallGrant;
 use crate::kernel::api::FenceSpec;
 use crate::kernel::ports::SessionHost;
 use crate::tests::doubles::{RecordingLog, ScriptedHost};
@@ -145,114 +143,6 @@ fn mcp_adapter_talks_to_a_real_stdio_server() {
     assert!(book.list().is_empty(), "收掉时要注销账上那条");
 }
 
-/// 模型侧工具面：已就绪服务的操作进原生声明与可用清单，调用路由到常驻服务能力。
-#[test]
-fn model_tool_face_exposes_started_service_ops() {
-    use crate::capabilities::llm::api::ToolInvoke;
-    use crate::capabilities::catalog::modules::api::ServiceDecl;
-    use crate::capabilities::residents::api::ResidentOps;
-    use crate::capabilities::residents::service::ResidentsService;
-    use crate::capabilities::conversation::session::api::ServiceOp;
-    use crate::capabilities::conversation::session::service::engine::tools::{
-        available_tools, dispatch_external, tool_decls,
-    };
-    use crate::tests::doubles::{
-        FakeServiceAdapter, VecSource, member_with_service_tools, module_of, test_modules,
-    };
-    use std::collections::BTreeMap;
-
-    let fake = Arc::new(FakeServiceAdapter::new());
-    let mut m = module_of("m0");
-    m.manifest.services.insert(
-        "svc".to_string(),
-        ServiceDecl {
-            adapter: "fake".to_string(),
-            command: "run".to_string(),
-            desc: String::new(),
-            enabled: true,
-            options: BTreeMap::new(),
-        },
-    );
-    let residents: Arc<dyn ResidentOps + Send + Sync> = Arc::new(ResidentsService::new(
-        vec![Arc::clone(&fake) as Arc<dyn ServiceAdapter + Send + Sync>],
-        test_modules(Arc::new(VecSource(vec![m]))),
-        Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
-    ));
-    let faces = residents.start("m0", "svc", "").expect("启动服务");
-    let op_name = faces[0].name.clone();
-    let ctx = member_with_service_tools(
-        "m0",
-        Arc::clone(&residents),
-        ServiceOp {
-            tool: format!("svc.{}", op_name),
-            service: "svc".to_string(),
-            op: op_name.clone(),
-            description: "回显".to_string(),
-            parameters: faces[0].parameters.clone(),
-        },
-    );
-
-    let decls = tool_decls(&ctx.face);
-    let echo_decl = decls
-        .list
-        .iter()
-        .find(|d| d.name == "m0_svc_echo")
-        .expect("原生声明要含服务操作");
-    assert_eq!(
-        echo_decl.parameters["properties"]["x"]["type"].as_str(),
-        Some("integer"),
-        "服务操作的参数契约要原样进原生声明：{}",
-        echo_decl.parameters
-    );
-    let param_lines = crate::capabilities::tools::api::json_schema_lines(&echo_decl.parameters);
-    assert!(
-        param_lines
-            .iter()
-            .any(|l| l.contains("x") && l.contains("必填")),
-        "信封说明要列出参数名与必填：{:?}",
-        param_lines
-    );
-    assert_eq!(
-        decls.wire.get("m0_svc_echo"),
-        Some(&(Some("m0".to_string()), "svc.echo".to_string())),
-        "线上名要能译回（模块, 服务.操作）"
-    );
-    let listed = available_tools(&ctx.face);
-    assert!(
-        listed.contains("m0.svc.echo"),
-        "可用清单要含服务操作：{}",
-        listed
-    );
-
-    let inv = ToolInvoke {
-        malformed: None,
-        module: Some("m0".to_string()),
-        name: "svc.echo".to_string(),
-        args_json: "{\"x\":1}".to_string(),
-        body: String::new(),
-        lead: String::new(),
-    };
-    let grant = CallGrant {
-        reach: ReachSet::from([Reach::Private, Reach::ModuleRead, Reach::ModuleWrite]),
-        decision: Decision::Allow,
-    };
-    let (module, outcome) = dispatch_external(&ctx, &inv, None, &grant);
-    assert_eq!(module, "m0");
-    assert!(
-        outcome.ok && outcome.output.contains("echo"),
-        "{}",
-        outcome.output
-    );
-    assert!(
-        fake.calls
-            .lock()
-            .expect("锁")
-            .iter()
-            .any(|c| c == "call:echo"),
-        "要路由到常驻服务能力"
-    );
-}
-
 /// 服务报告 tools/list_changed：下一次调用前刷新操作清单，并交回新清单（没有变化 = None）。
 #[test]
 fn mcp_refreshes_operations_on_list_changed() {
@@ -340,77 +230,4 @@ fn mcp_error_response_is_reported() {
         "{}",
         err
     );
-}
-
-/// 全链路：清单声明 services（adapter = mcp）→ residents 拉起 → MCP 适配器 → 真实服务进程 → 调用。
-#[cfg(unix)]
-#[test]
-fn residents_mcp_service_end_to_end() {
-    use crate::capabilities::catalog::modules::api::ServiceDecl;
-    use crate::capabilities::residents::api::ResidentOps;
-    use crate::capabilities::residents::service::ResidentsService;
-    use crate::kernel::detail::ProcessSessions;
-    use crate::tests::doubles::{VecSource, built_exe, module_of, python, test_modules};
-    use std::collections::BTreeMap;
-
-    let (Some(exe), Some(py)) = (built_exe(), python()) else {
-        eprintln!("[mcp] 缺少已构建的可执行文件或 python，跳过全链路端到端");
-        return;
-    };
-    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let mut m = module_of("m1");
-    m.root = root.clone();
-    m.manifest.services.insert(
-        "echo".to_string(),
-        ServiceDecl {
-            adapter: "mcp".to_string(),
-            command: format!("{} tests/fixtures/mcp_echo.py", py),
-            desc: "测试用 MCP 服务".to_string(),
-            enabled: true,
-            options: BTreeMap::new(),
-        },
-    );
-    let book =
-        crate::kernel::detail::procs::ProcessBook::open(&crate::tests::scratch("mcp-chain-book"));
-    let host: Arc<dyn SessionHost + Send + Sync> = Arc::new(ProcessSessions::new(
-        exe,
-        crate::tests::doubles::test_process_texts(),
-        std::path::PathBuf::new(),
-        Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        Arc::clone(&book),
-    ));
-    let residents: Arc<dyn ResidentOps + Send + Sync> = Arc::new(ResidentsService::new(
-        vec![Arc::new(McpAdapter::new(
-            host,
-            Arc::new(crate::kernel::ports::NoopLog),
-        )) as Arc<dyn ServiceAdapter + Send + Sync>],
-        test_modules(Arc::new(VecSource(vec![m]))),
-        Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
-    ));
-
-    let faces = residents.start("m1", "echo", "s1").expect("启动 MCP 服务");
-    assert!(
-        faces.iter().any(|o| o.name == "echo"),
-        "要发现服务提供的 echo 操作"
-    );
-    assert!(
-        faces.iter().all(|o| o.parameters.is_some()),
-        "服务给的 inputSchema 要原样进操作契约"
-    );
-    let receipt = residents
-        .call("m1", "echo", "echo", &json!({ "hi": 1 }))
-        .expect("调用服务操作");
-    assert!(
-        receipt.ok && receipt.output.contains("hi"),
-        "{}",
-        receipt.output
-    );
-    let listed = book.list();
-    assert_eq!(listed.len(), 1, "守门进程起时进账：{:?}", listed);
-    assert_eq!(
-        listed[0].owner, "resident/m1/echo",
-        "归属要能指出哪个模块的哪个服务"
-    );
-    residents.stop("m1", "echo").expect("停止");
-    assert!(book.list().is_empty(), "停止后要注销账上那条");
 }

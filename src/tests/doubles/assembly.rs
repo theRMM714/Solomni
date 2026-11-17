@@ -85,7 +85,9 @@ impl InMemoryModuleState {
 }
 
 impl crate::capabilities::catalog::modules::ports::ModuleStateStore for InMemoryModuleState {
-    fn load(&self) -> Result<crate::capabilities::catalog::modules::domain::state::EnabledState, String> {
+    fn load(
+        &self,
+    ) -> Result<crate::capabilities::catalog::modules::domain::state::EnabledState, String> {
         Ok(self.state.lock().expect("锁").clone())
     }
     fn save(
@@ -289,11 +291,14 @@ pub(crate) fn core_with_workdirs_vm(
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
-    let history: Arc<dyn crate::capabilities::conversation::session::api::History + Send + Sync> = Arc::new(
-        crate::capabilities::conversation::session::service::SessionService::new(Arc::new(
-            crate::capabilities::conversation::session::detail::fs_history::FsHistory::new(root.join("session")),
-        )),
-    );
+    let history: Arc<dyn crate::capabilities::conversation::session::api::History + Send + Sync> =
+        Arc::new(
+            crate::capabilities::conversation::session::service::SessionService::new(Arc::new(
+                crate::capabilities::conversation::session::detail::fs_history::FsHistory::new(
+                    root.join("session"),
+                ),
+            )),
+        );
     Core::new(
         root,
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),

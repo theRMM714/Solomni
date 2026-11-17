@@ -7,6 +7,5 @@ mod archive;
 mod config;
 mod external;
 mod resolve;
-mod sandbox;
 mod support;
 mod work;

@@ -7,14 +7,14 @@
 //!   docs/collab/task-chain.md；前端按快照的 pending 与推的裁决事件驱动，不做第二真相。
 
 use super::lines::push_delta;
-use crate::capabilities::conversation::collab::service::discussion::Discussion;
-use crate::capabilities::conversation::collab::service::synthesis::Execution;
-use crate::capabilities::llm::api::{Channel, Chat, Llm, Msg};
 use crate::capabilities::catalog::modules::api::Modules;
-use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::catalog::registry::api::Settings;
+use crate::capabilities::conversation::collab::service::discussion::Discussion;
+use crate::capabilities::conversation::collab::service::synthesis::Execution;
 use crate::capabilities::conversation::session::api::{Gates, LineView, Pending, SessionEvent};
+use crate::capabilities::llm::api::{Channel, Chat, Llm, Msg};
+use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::tools::api::ToolExec;
 use crate::capabilities::vm::api::Vm;
 use crate::capabilities::workspace::api::Sandboxes;
@@ -269,7 +269,9 @@ impl CollabSession {
         opts: crate::capabilities::llm::api::CompleteOpts<'static>,
         mode: crate::capabilities::llm::api::ToolMode,
         core_chat: &mut dyn Chat,
-        verify: Option<&mut (dyn crate::capabilities::conversation::session::api::CoreVerify + 'static)>,
+        verify: Option<
+            &mut (dyn crate::capabilities::conversation::session::api::CoreVerify + 'static),
+        >,
         kind: &str,
         payload: &str,
         text: &str,
@@ -329,7 +331,9 @@ impl CollabSession {
         opts: crate::capabilities::llm::api::CompleteOpts<'static>,
         mode: crate::capabilities::llm::api::ToolMode,
         core_chat: &mut dyn Chat,
-        verify: Option<&mut (dyn crate::capabilities::conversation::session::api::CoreVerify + 'static)>,
+        verify: Option<
+            &mut (dyn crate::capabilities::conversation::session::api::CoreVerify + 'static),
+        >,
         // 上一次填错了要它重填的话（核心据此**一直重填**到合法，不设次数上限）。
         retry: Option<&str>,
         // 核心这一轮的行推给谁。

@@ -70,7 +70,9 @@ fn scan_dir(modules_dir: &Path, reserved: &[String]) -> Roster {
                     rejected.push(format!("{}: {}", dir_name, why));
                     continue;
                 }
-                if let Err(why) = crate::capabilities::catalog::modules::api::check_tools(&m, reserved) {
+                if let Err(why) =
+                    crate::capabilities::catalog::modules::api::check_tools(&m, reserved)
+                {
                     rejected.push(format!("{}: {}", dir_name, why));
                     continue;
                 }

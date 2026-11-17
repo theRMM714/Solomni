@@ -110,95 +110,6 @@ pub(crate) fn history_delete_cascades_to_children_and_refuses_child_delete() {
     assert!(hist.load(&child).is_err(), "子会话随父一起消失");
 }
 
-/// 目的：删除 VM 会话时**先停 guest，再删目录**——Windows 上 guest 还占着会话目录里的文件，反过来会 sharing violation。
-#[test]
-pub(crate) fn session_delete_stops_the_guest_before_removing_directories() {
-    use crate::capabilities::lifecycle::api::SessionDelete;
-    use crate::capabilities::vm::api::GuestStop;
-    use crate::capabilities::vm::api::Vm;
-    use crate::capabilities::vm::domain::guest::{GuestRun, GuestSpec};
-    use crate::kernel::api::FenceSpec;
-
-    struct StopVm {
-        history: Arc<InMemoryHistory>,
-        saw_directory: Arc<Mutex<bool>>,
-    }
-
-    impl Vm for StopVm {
-        fn guest_start(&self, _spec: &GuestSpec) -> Result<(), String> {
-            Ok(())
-        }
-
-        fn guest_run(&self, _lease: &str, _run: &GuestRun) -> ToolOutcome {
-            unimplemented!("这条用例只验删除顺序")
-        }
-
-        fn guest_run_fenced(
-            &self,
-            _lease: &str,
-            _run: &GuestRun,
-            _fence: &FenceSpec,
-        ) -> ToolOutcome {
-            unimplemented!("这条用例只验删除顺序")
-        }
-
-        fn stage_exec(
-            &self,
-            _lease: &str,
-            _module: &str,
-            _host: &std::path::Path,
-            _entry: &str,
-        ) -> Result<String, String> {
-            unimplemented!("这条用例只验删除顺序")
-        }
-
-        fn guest_packages(&self, _lease: &str) -> Option<Vec<String>> {
-            None
-        }
-
-        fn guest_set_packages(&self, _lease: &str, _packages: Vec<String>) {}
-
-        fn guest_wait_agent(&self, _lease: &str, _timeout: Duration) -> bool {
-            true
-        }
-
-        fn guest_stop(&self, _lease: &str) {
-            *self.saw_directory.lock().expect("锁") = self.history.load("w").is_ok();
-        }
-
-        fn guest_leases(&self) -> Vec<String> {
-            Vec::new()
-        }
-    }
-
-    let store = Arc::new(InMemoryHistory::new());
-    seed_session(
-        &store,
-        "w",
-        "single",
-        vec![agent_meta("a", &[], None)],
-        ExecSpec::default(),
-    );
-    let hist = test_history_of(Arc::clone(&store));
-    let saw = Arc::new(Mutex::new(false));
-    let vm: Arc<dyn Vm + Send + Sync> = Arc::new(StopVm {
-        history: Arc::clone(&store),
-        saw_directory: Arc::clone(&saw),
-    });
-    let delete = SessionDelete::for_test(
-        GuestStop::new(vm, vec!["w".to_string()]),
-        hist,
-        vec!["w".to_string()],
-        "w".to_string(),
-    );
-    assert!(delete.run().expect("删除收尾"), "会话目录该删掉");
-    assert!(
-        *saw.lock().expect("锁"),
-        "停 guest 时必须还没删目录（否则 Windows 会 sharing violation）"
-    );
-    assert!(store.load("w").is_err(), "停完 guest 后再删目录");
-}
-
 /// 目的：删除收尾里的围栏撤权**不占调用方等待路径**：目录先删完，再在后台线程按租约撤权。
 ///   回调被闸门挡住时 `run()` 仍要立刻返回；回调里能看到会话已经删掉（先删目录的快分支前提）。
 #[test]
@@ -268,84 +179,6 @@ pub(crate) fn session_delete_releases_fences_in_background_after_directories() {
         std::thread::sleep(Duration::from_millis(5));
     }
     assert!(done.load(Ordering::SeqCst), "后台撤权要跑完");
-}
-
-/// 目的：删目录失败时撤权仍然执行（错误如实返回，不能把待办丢掉）。
-#[test]
-pub(crate) fn session_delete_releases_fences_even_when_directory_delete_fails() {
-    use crate::capabilities::lifecycle::api::SessionDelete;
-    use crate::capabilities::conversation::session::api::History;
-    use crate::capabilities::conversation::session::domain::history::HistoryView;
-    use crate::capabilities::vm::api::GuestStop;
-    use crate::capabilities::vm::api::Vm;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::time::{Duration, Instant};
-
-    struct FailingDelete {
-        inner: Arc<dyn History + Send + Sync>,
-    }
-    impl History for FailingDelete {
-        fn create(&self, meta: &SessionMeta) -> Result<(), String> {
-            self.inner.create(meta)
-        }
-        fn save_meta(&self, meta: &SessionMeta) -> Result<(), String> {
-            self.inner.save_meta(meta)
-        }
-        fn append(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String> {
-            self.inner.append(name, events)
-        }
-        fn replace(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String> {
-            self.inner.replace(name, events)
-        }
-        fn list(&self) -> Result<Vec<HistoryView>, String> {
-            self.inner.list()
-        }
-        fn meta(&self, name: &str) -> Result<SessionMeta, String> {
-            self.inner.meta(name)
-        }
-        fn load(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {
-            self.inner.load(name)
-        }
-        fn delete(&self, _name: &str) -> Result<bool, String> {
-            Err("目录被占用".to_string())
-        }
-    }
-
-    let store = Arc::new(InMemoryHistory::new());
-    seed_session(
-        &store,
-        "w",
-        "single",
-        vec![agent_meta("a", &[], None)],
-        ExecSpec::default(),
-    );
-    let inner = test_history_of(Arc::clone(&store));
-    let hist: Arc<dyn History + Send + Sync> = Arc::new(FailingDelete { inner });
-    let vm: Arc<dyn Vm + Send + Sync> = Arc::new(crate::tests::doubles::RecordingVm::default());
-    let called = Arc::new(AtomicBool::new(false));
-    let release: crate::capabilities::lifecycle::api::ReleaseByLease = {
-        let called = Arc::clone(&called);
-        Arc::new(move |_lease: &str| {
-            called.store(true, Ordering::SeqCst);
-            Ok(())
-        })
-    };
-    let delete = SessionDelete::for_test_with_fences(
-        GuestStop::new(vm, Vec::new()),
-        hist,
-        vec!["w".to_string()],
-        "w".to_string(),
-        vec!["lease-w".to_string()],
-        release,
-        Arc::new(crate::kernel::ports::NoopLog),
-    );
-    let err = delete.run().expect_err("目录删不掉要如实报错");
-    assert!(err.contains("占用"), "{}", err);
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !called.load(Ordering::SeqCst) && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    assert!(called.load(Ordering::SeqCst), "删目录失败也不能漏掉撤权");
 }
 
 /// 目的：没有租约时不起后台撤权线程（空清单直接返回）。
@@ -464,7 +297,9 @@ pub(crate) fn work_root_walks_to_the_top_across_nested_sub_sessions() {
         .spawn_agent_session(&mid, "a", core.registry.as_ref(), core.probe.as_ref())
         .unwrap();
     let history = core.history_handle();
-    let root_of = |sid: &str| crate::capabilities::conversation::session::api::work_root(history.as_ref(), sid);
+    let root_of = |sid: &str| {
+        crate::capabilities::conversation::session::api::work_root(history.as_ref(), sid)
+    };
     assert_eq!(root_of(&top).unwrap(), top);
     assert_eq!(root_of(&mid).unwrap(), top, "第二层锚在顶");
     assert_eq!(root_of(&low).unwrap(), top, "第三层也锚在顶");

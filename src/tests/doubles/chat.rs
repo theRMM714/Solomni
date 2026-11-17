@@ -177,7 +177,8 @@ pub(crate) fn test_prompts() -> Prompts {
 }
 
 /// 目的：测试用工具总表与角色表（走**与产品同一条**装配路径）。它与提示词册**分开**装配：两者互不依赖（见 capabilities/prompt 的 Prompts）。测试用的**会话历史面**（与生产同一条路：端口装进 `SessionService`）。
-pub(crate) fn test_history() -> Arc<dyn crate::capabilities::conversation::session::api::History + Send + Sync> {
+pub(crate) fn test_history()
+-> Arc<dyn crate::capabilities::conversation::session::api::History + Send + Sync> {
     test_history_of(Arc::new(InMemoryHistory::new()))
 }
 
@@ -185,9 +186,7 @@ pub(crate) fn test_history() -> Arc<dyn crate::capabilities::conversation::sessi
 pub(crate) fn test_history_of(
     store: Arc<InMemoryHistory>,
 ) -> Arc<dyn crate::capabilities::conversation::session::api::History + Send + Sync> {
-    Arc::new(crate::capabilities::conversation::session::service::SessionService::new(
-        store,
-    ))
+    Arc::new(crate::capabilities::conversation::session::service::SessionService::new(store))
 }
 
 /// 目的：测试用的 **tools 能力**：三张表 + 三个替身端口（与生产同一条路，R12）。两个面都从这里出：`Arc<dyn Tools>`（表）与 `Arc<dyn ToolExec>`（执行）。

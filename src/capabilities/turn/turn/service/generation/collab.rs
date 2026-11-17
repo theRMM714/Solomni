@@ -44,13 +44,13 @@ pub(crate) fn collab_generation<H: TurnHost>(
     let handle = host.clone();
     // 握手通道：泵 → 主线程（要一个成员回合）；主线程 → 泵（回合结果）。
     let (ask_tx, ask_rx) = std::sync::mpsc::channel::<AskReq>();
-    let (turn_tx, turn_rx) =
-        std::sync::mpsc::channel::<Result<crate::capabilities::conversation::session::api::MemberTurn, String>>();
-    let worker =
-        {
-            let sid = sid.to_string();
-            let bus = std::sync::Arc::clone(&bus);
-            std::thread::Builder::new()
+    let (turn_tx, turn_rx) = std::sync::mpsc::channel::<
+        Result<crate::capabilities::conversation::session::api::MemberTurn, String>,
+    >();
+    let worker = {
+        let sid = sid.to_string();
+        let bus = std::sync::Arc::clone(&bus);
+        std::thread::Builder::new()
                 .name("solomni-collab".to_string())
                 .spawn(move || {
                     let mut c = session;
@@ -182,7 +182,7 @@ pub(crate) fn collab_generation<H: TurnHost>(
                     (c, seq)
                 })
                 .map_err(|e| format!("起协作线程失败：{}", e))?
-        };
+    };
     // 主线程驱动每个请求：取该 agent 的会话、跑这一回合、把结果发回泵。
     // 模型调用在成员线程上（own-and-return），核心队列只占"取/交"两步——界面因此不被阻塞。
     while let Ok(req) = ask_rx.recv() {
