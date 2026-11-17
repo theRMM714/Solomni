@@ -86,7 +86,6 @@ impl FenceSpec {
 
     /// 目的：为一个会话派生**并集围栏**——覆盖它可能签发过的全部 reach，用于撤销持久授权与生命周期。
     pub fn for_session(sb: &Sandbox, host_roots: &[PathBuf], global_net: bool) -> FenceSpec {
-        let reach = &sb.permissions.reach;
         let mut rw: Vec<PathBuf> = Vec::new();
         let mut ro_tree: Vec<PathBuf> = Vec::new();
         let mut machine_ro_tree: Vec<PathBuf> = Vec::new();
@@ -130,7 +129,7 @@ impl FenceSpec {
             machine_ro_tree,
             private: sb.private.clone(),
             cwd: PathBuf::new(),
-            net: global_net && reach.contains(Reach::Network),
+            net: global_net && sb.permissions.allows_network(),
         }
     }
 
