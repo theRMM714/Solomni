@@ -13,14 +13,14 @@ pub(crate) fn child_edit_writes_back_to_the_agent_roster() {
     seed_session(
         &hist,
         "w",
-        "collab",
+        Mode::Collab,
         vec![agent_meta("a", &["a"], None), agent_meta("b", &["b"], None)],
         Default::default(),
     );
     let child = SessionMeta {
         context_freshness: false,
         name: "w--a".to_string(),
-        mode: "single".to_string(),
+        mode: Mode::Single,
         delegate: false,
         modules: vec!["a".to_string()],
         task: None,
@@ -78,14 +78,14 @@ pub(crate) fn tree_wide_module_overlap_is_allowed_on_child_edit() {
     seed_session(
         &hist,
         "w",
-        "collab",
+        Mode::Collab,
         vec![agent_meta("a", &["a"], None), agent_meta("b", &["b"], None)],
         Default::default(),
     );
     let child = SessionMeta {
         context_freshness: false,
         name: "w--a".to_string(),
-        mode: "single".to_string(),
+        mode: Mode::Single,
         delegate: false,
         modules: vec!["a".to_string()],
         task: None,
@@ -128,7 +128,7 @@ pub(crate) fn continue_hint_is_derived_from_the_session_state() {
     seed_session(
         &hist,
         "w",
-        "single",
+        Mode::Single,
         vec![agent_meta("a", &["a"], None)],
         Default::default(),
     );
@@ -352,10 +352,10 @@ pub(crate) fn quick_profile_switch_updates_root_and_children_cannot_widen() {
 pub(crate) fn guest_lease_follows_the_tier_and_the_proxy_root() {
     use crate::capabilities::conversation::session::api::guest_lease;
     use crate::kernel::api::{ExecSpec, Tier};
-    let meta = |name: &str, parent: Option<&str>, tier: Tier, mode: &str| SessionMeta {
+    let meta = |name: &str, parent: Option<&str>, tier: Tier, mode: Mode| SessionMeta {
         context_freshness: false,
         name: name.to_string(),
-        mode: mode.to_string(),
+        mode,
         delegate: false,
         modules: Vec::new(),
         task: None,
@@ -373,16 +373,16 @@ pub(crate) fn guest_lease_follows_the_tier_and_the_proxy_root() {
         run: RunState::Active,
         workspace: None,
     };
-    let proxy = meta("proxy-root", None, Tier::Vm, "proxy");
+    let proxy = meta("proxy-root", None, Tier::Vm, Mode::Proxy);
     assert_eq!(guest_lease(&proxy, &proxy), None, "代理根自己没有 guest");
-    let child = meta("proxy-root--a", Some("proxy-root"), Tier::Vm, "collab");
+    let child = meta("proxy-root--a", Some("proxy-root"), Tier::Vm, Mode::Collab);
     assert_eq!(
         guest_lease(&child, &proxy),
         Some("proxy-root".to_string()),
         "子工作共用代理根那一台"
     );
-    let solo = meta("solo", None, Tier::Vm, "solo");
+    let solo = meta("solo", None, Tier::Vm, Mode::Single);
     assert_eq!(guest_lease(&solo, &solo), Some("solo".to_string()));
-    let host = meta("host", None, Tier::Host, "solo");
+    let host = meta("host", None, Tier::Host, Mode::Single);
     assert_eq!(guest_lease(&host, &host), None, "本机档没有 guest");
 }

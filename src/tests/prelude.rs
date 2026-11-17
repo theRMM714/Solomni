@@ -24,7 +24,7 @@ pub use crate::capabilities::prompt::domain::prompt::render;
 pub use crate::capabilities::catalog::registry::api::{ModelDraft, ModelEntry, Provider, Settings};
 
 pub use crate::capabilities::catalog::registry::api::AgentMeta;
-pub use crate::capabilities::conversation::session::api::{RunState, SessionMeta};
+pub use crate::capabilities::conversation::session::api::{Mode, RunState, SessionMeta};
 
 pub use crate::capabilities::conversation::session::domain::tools::MemberTools;
 pub use crate::capabilities::conversation::session::domain::tools::ModuleTools;

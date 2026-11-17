@@ -179,7 +179,10 @@ pub(crate) fn run_prepared<H: TurnHost>(
         let is_proxy = host
             .core({
                 let p = parent.clone();
-                move |turn| Ok(turn.session_mode(&p) == "proxy")
+                move |turn| {
+                    use crate::capabilities::conversation::session::api::Mode;
+                    Ok(turn.session_mode(&p) == Some(Mode::Proxy))
+                }
             })
             .unwrap_or(false);
         if is_proxy {

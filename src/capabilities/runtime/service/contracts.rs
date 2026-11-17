@@ -156,10 +156,10 @@ impl TurnOps for Handle {
             let mode = self
                 .call({
                     let s = sid.to_string();
-                    move |core| Ok(core.session_mode_str(&s))
+                    move |core| Ok(core.session_mode(&s))
                 })
                 .unwrap_or_default();
-            if mode == "collab" {
+            if mode == Some(crate::capabilities::conversation::session::api::Mode::Collab) {
                 return crate::capabilities::turn::turn::api::collab_generation(
                     self,
                     sid,

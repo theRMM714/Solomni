@@ -4,12 +4,13 @@
 //! 联动：隔离根 `tests::scratch`；会话元数据夹具 `meta` 在文件内。
 
 use super::*;
+use crate::capabilities::conversation::session::api::Mode;
 
 fn meta(name: &str) -> SessionMeta {
     SessionMeta {
         context_freshness: false,
         name: name.to_string(),
-        mode: "direct".to_string(),
+        mode: Mode::Single,
         delegate: false,
         modules: vec!["a".to_string()],
         task: None,
@@ -285,11 +286,11 @@ fn fs_history_roundtrips_lists_deletes_and_rejects_broken_meta() {
     assert!(listed[0].done, "ended 之后 done = true");
 
     let mut renamed = meta("w1");
-    renamed.mode = "collab".to_string();
+    renamed.mode = Mode::Collab;
     h.save_meta(&renamed).expect("写回元信息");
     assert_eq!(
         h.load("w1").expect("读回").0.mode,
-        "collab",
+        Mode::Collab,
         "meta.yaml 是会话身份的唯一真相"
     );
 
@@ -314,7 +315,7 @@ fn fs_history_nests_children_inside_their_parent_dir() {
     let root = scratch("fs-history-children");
     let h = FsHistory::new(root.clone());
     let mut parent = meta("p");
-    parent.mode = "collab".to_string();
+    parent.mode = Mode::Collab;
     h.create(&parent).expect("建父会话");
     let mut child = meta("p--甲");
     child.parent = Some("p".to_string());

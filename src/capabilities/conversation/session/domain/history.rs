@@ -5,6 +5,7 @@
 //! 联动：由 `service.rs` 与 `ports.rs` 使用，`api.rs` 对外重导出。
 
 use crate::capabilities::catalog::registry::api::AgentMeta;
+use crate::capabilities::conversation::session::domain::mode::Mode;
 use crate::capabilities::workspace::api::WorkspaceGrant;
 use serde::{Deserialize, Serialize};
 
@@ -15,9 +16,9 @@ use serde::{Deserialize, Serialize};
 #[serde(deny_unknown_fields)]
 pub struct SessionMeta {
     pub name: String,
-    /// 目的：工作形态：`single` / `collab` / `proxy`（界面标签与 `rebuild_session` 的装配依据同源）。
+    /// 目的：工作形态（界面标签与 `rebuild_session` 的装配依据同源；词汇归 `mode::Mode`）。
     ///   它是落盘事实（**不在内存里留影子状态**）：拿不到它就无法判断怎么重建这条会话。
-    pub mode: String,
+    pub mode: Mode,
     /// 目的：代拟（协作）时为 true：创建时没有名单，确认名单后才写回 agents。
     #[serde(default)]
     pub delegate: bool,
@@ -138,7 +139,7 @@ impl SessionMeta {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct HistoryView {
     pub name: String,
-    pub mode: String,
+    pub mode: Mode,
     pub ts: i64,
     pub done: bool,
     /// 目的：这条会话记的执行档位与选型（meta.yaml 的 exec 段；缺字段按默认 = 本机档读回）。

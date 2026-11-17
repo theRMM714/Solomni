@@ -116,24 +116,8 @@ impl CatalogScope {
     }
 }
 
-/// 目的：create_session 的形态——与 `WorkMode` 同词（single / collab / proxy）；代理不能往代理里套。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SessionMode {
-    Single,
-    Collab,
-    Proxy,
-}
-
-impl SessionMode {
-    pub fn parse(s: &str) -> Result<Self, String> {
-        match s {
-            "single" => Ok(Self::Single),
-            "collab" => Ok(Self::Collab),
-            "proxy" => Ok(Self::Proxy),
-            other => Err(format!("mode 只能是 single / collab / proxy：{}", other)),
-        }
-    }
-}
+/// 目的：create_session 的形态——就是会话落盘那一套词（`session::api::Mode`）；代理不能往代理里套。
+pub use crate::capabilities::conversation::session::api::Mode as SessionMode;
 
 /// 目的：send_session_message 的消息种类。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

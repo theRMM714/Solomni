@@ -486,11 +486,8 @@ impl Core {
         &mut self,
         spec: &d::NewSession,
     ) -> Result<(PreparedSession, Option<GuestBoot>), String> {
-        let mode = match spec.mode {
-            d::SessionMode::Single => WorkMode::Single,
-            d::SessionMode::Collab => WorkMode::Collab,
-            d::SessionMode::Proxy => WorkMode::Proxy,
-        };
+        // 形态词汇只有一套：代理协议的入参解析结果就是落盘形态。
+        let mode = spec.mode;
         let parent = spec.parent.clone();
         if mode == WorkMode::Proxy && parent.is_some() {
             return Err("代理不能往里套代理".to_string());

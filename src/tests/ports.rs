@@ -14,7 +14,7 @@ use crate::capabilities::catalog::packages::ports::PackageSource;
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::catalog::registry::api::{Provider, Settings};
 use crate::capabilities::catalog::registry::ports::SettingsStore;
-use crate::capabilities::conversation::session::api::SessionMeta;
+use crate::capabilities::conversation::session::api::{Mode, SessionMeta};
 use crate::capabilities::conversation::session::ports::HistoryStore;
 use crate::capabilities::llm::api::{Channel, Chat, CompleteOpts, Msg};
 use crate::capabilities::llm::ports::{ChatGateway, ModelCatalog};
@@ -54,7 +54,7 @@ fn meta(name: &str) -> SessionMeta {
     SessionMeta {
         context_freshness: false,
         name: name.to_string(),
-        mode: "direct".to_string(),
+        mode: Mode::Single,
         delegate: false,
         modules: vec!["a".to_string()],
         task: None,
@@ -418,11 +418,11 @@ fn history_store_double_roundtrips_lists_deletes_and_propagates_failure() {
     assert_eq!(listed.len(), 1);
     assert!(listed[0].done, "ended 之后 done = true");
     let mut renamed = meta("w1");
-    renamed.mode = "collab".to_string();
+    renamed.mode = Mode::Collab;
     h.save_meta(&renamed).expect("写回元信息");
     assert_eq!(
         h.load("w1").expect("读回").0.mode,
-        "collab",
+        Mode::Collab,
         "meta 是会话身份的唯一真相"
     );
     assert!(h.delete("w1").expect("删除成功"), "删除已存在的会话 = true");

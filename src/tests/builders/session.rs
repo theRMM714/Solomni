@@ -130,14 +130,14 @@ pub(crate) fn agent_meta(name: &str, modules: &[&str], model: Option<&str>) -> A
 pub(crate) fn seed_session(
     hist: &Arc<InMemoryHistory>,
     name: &str,
-    mode: &str,
+    mode: Mode,
     agents: Vec<AgentMeta>,
     exec: ExecSpec,
 ) {
     hist.create(&SessionMeta {
         context_freshness: false,
         name: name.to_string(),
-        mode: mode.to_string(),
+        mode,
         delegate: false,
         modules: agents.iter().flat_map(|a| a.modules.clone()).collect(),
         task: None,

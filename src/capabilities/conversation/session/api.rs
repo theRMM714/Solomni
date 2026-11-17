@@ -16,6 +16,7 @@ pub use crate::capabilities::conversation::session::domain::events::{
 pub use crate::capabilities::conversation::session::domain::history::{
     Delegation, HistoryView, RunState, SessionMeta, WorkspaceBinding,
 };
+pub use crate::capabilities::conversation::session::domain::mode::Mode;
 #[allow(unused_imports)]
 pub use crate::capabilities::conversation::session::domain::persist::{
     PersistPolicy, SYSTEM_SID_SUGGEST, is_system_session, persist_policy_for,

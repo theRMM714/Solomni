@@ -7,6 +7,7 @@ use super::super::builders::{agent_meta, seed_session, vm_spec};
 use super::super::doubles::InMemoryHistory;
 use super::super::doubles::module_of;
 use super::super::{ops_with, ops_with_vm};
+use crate::capabilities::conversation::session::api::Mode;
 use crate::capabilities::runtime::api::Output;
 use crate::capabilities::runtime::api::{Acted, ActionCall, Caller};
 use std::sync::Arc;
@@ -182,18 +183,18 @@ fn guest_diagnose_returns_the_guest_report_and_names_missing_guests() {
     seed_session(
         &hist,
         "vmw",
-        "single",
+        Mode::Single,
         vec![agent_meta("a", &["a"], None)],
         vm_spec(),
     );
     seed_session(
         &hist,
         "hostw",
-        "single",
+        Mode::Single,
         vec![agent_meta("a", &["a"], None)],
         Default::default(),
     );
-    seed_session(&hist, "p", "proxy", Vec::new(), vm_spec());
+    seed_session(&hist, "p", Mode::Proxy, Vec::new(), vm_spec());
     let vm: Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync> = Arc::new(DiagnosingVm {
         report: sample_diagnosis("vmw"),
     });

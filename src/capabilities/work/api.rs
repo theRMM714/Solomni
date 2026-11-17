@@ -15,18 +15,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-// 定义在**能力面**：呈现层只认这里，不再经 `runtime::` 根转一手。
-// 队列代理：只把命令交给核心线程（依赖方向见 ARCHITECTURE.md §一）。
-/// 目的：工作形态：单 agent（模块数不限）/ 协作（多 agent 分权协商）/ 代理（决定权整块交给核心）。
-///   形态只用于校验与界面标签：会话实现只有「单 agent」与「协作」两种——
-///   代理会话在实现上就是一个单会话（`mode="proxy"`），只是身份换成 `core_proxy` 角色。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WorkMode {
-    Single,
-    Collab,
-    /// 目的：代理：**没有名单**；用户选这一形态就是在授予全权（见 `SessionMeta::delegation`）。
-    Proxy,
-}
+// 定义在**能力面**：呈现层只认这里，不再经 `runtime::` 根转一手；形态词汇只有一套——**会话**拥有它（落盘在 `SessionMeta::mode`），工作侧用这个名字读它。
+pub use crate::capabilities::conversation::session::api::Mode as WorkMode;
 
 /// 目的：创建工作的全部用户决定（形态 + 参与的 agent；模型按 agent 指定）。
 #[derive(Debug, Clone)]
@@ -204,7 +194,7 @@ pub struct PermissionSharedView {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SessionConfig {
     pub sid: String,
-    pub mode: String,
+    pub mode: WorkMode,
     /// 目的：会话已经开过（流水里有内容）= agent 名单与形态冻结。
     pub started: bool,
     pub agents: Vec<ConfigAgent>,
@@ -269,7 +259,7 @@ pub struct ContinueView {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SessionView {
     pub sid: String,
-    pub mode: String,
+    pub mode: WorkMode,
     pub done: bool,
     /// 目的：这条会话记的执行档位（`host` / `vm`）：打开时据此提示"环境已变"。
     pub tier: String,

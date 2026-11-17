@@ -19,49 +19,6 @@ pub(crate) fn mode_vocabulary_is_single_or_collab_only() {
         let e = parse_mode(bad).unwrap_err();
         assert!(e.contains("未知模式"), "web 必须 400 并说明：{}", e);
     }
-    // 落盘 meta 里出现未知形态：重建会话时明确报错（不静默当单 agent）。
-    let hist = Arc::new(InMemoryHistory::new());
-    let mut core = core_with_all(
-        vec![module_of("a")],
-        gw(BTreeMap::new(), vec!["[]".into()]),
-        Arc::new(SilentRunner),
-        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
-        Arc::clone(&hist),
-        Arc::new(InMemorySysIo::new()),
-    );
-    hist.create(&SessionMeta {
-        context_freshness: false,
-        name: "未知形态".to_string(),
-        mode: "unknown_mode".to_string(),
-        delegate: false,
-        modules: vec!["a".to_string()],
-        task: None,
-        ts: 1,
-        agents: vec![AgentMeta {
-            name: "a".to_string(),
-            transient: true,
-            modules: vec!["a".to_string()],
-            model: None,
-            chara: String::new(),
-        }],
-        exec: ExecSpec::default(),
-        sandbox: Default::default(),
-        parent: None,
-        node: None,
-        delegation: None,
-        thinking: None,
-        run: RunState::Active,
-        workspace: None,
-    })
-    .unwrap();
-    // 内存里没有这个会话 → 走 rebuild_session，对未知形态如实报错。
-    let err = crate::tests::lifecycle::rewind(
-        &mut core,
-        "未知形态",
-        crate::capabilities::lifecycle::api::RewindTarget::Delete(0),
-    )
-    .unwrap_err();
-    assert!(err.contains("未知会话形态"), "{}", err);
 }
 
 /// 目的：方案过审后：就绪节点各建一个**子会话**（普通单 agent 会话，沙箱锚在父会话上）。
@@ -122,7 +79,7 @@ pub(crate) fn approved_plan_spawns_a_sub_session_per_ready_node() {
         cmeta.node.is_none(),
         "节点不再记在会话 meta 里：一个 agent 一个会话，哪个节点正跑在它里面由链的 sub_session 认"
     );
-    assert_eq!(cmeta.mode, "single");
+    assert_eq!(cmeta.mode, Mode::Single);
     assert_eq!(
         crate::capabilities::conversation::session::api::work_root(
             core.history_handle().as_ref(),

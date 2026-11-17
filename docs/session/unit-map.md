@@ -29,5 +29,6 @@
 | `src/capabilities/conversation/session/domain/tools.rs` | 成员工具面：本回合可调的工具、观察账本与沙箱；只含值的 `ToolFace` 与核实用例端口 `CoreVerify`；shell 状态槽与按转录派生最近一次 shell（`last_shell`） |
 | `src/capabilities/conversation/session/domain/persist.rs` | 落盘策略：哪种会话留档、哪些事件算定稿（`PersistPolicy`）、系统会话的识别与拟名单会话号 |
 | `src/capabilities/conversation/session/domain/history.rs` | 会话元信息、运行态（`RunState`）与历史视图的内存形态 |
+| `src/capabilities/conversation/session/domain/mode.rs` | 工作形态的词汇（`Mode`）：三个取值、与外部词的互转、落盘小写形态 |
 | `src/capabilities/conversation/session/domain/events.rs` | 呈现侧事件与裁决卡信封等线格式词汇（`SessionEvent` / `LineView` 等） |
 | `src/capabilities/conversation/session/domain/rewind.rs` | 回档的行 / 事件算术（纯函数，不碰 IO） |

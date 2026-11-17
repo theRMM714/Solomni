@@ -10,8 +10,8 @@ use crate::capabilities::catalog::modules::api::Module;
 use crate::capabilities::catalog::registry::api::Registry;
 use crate::capabilities::conversation::collab::api::CollabSession;
 use crate::capabilities::conversation::session::api::{
-    AgentSession, SessionMeta, SessionParams, guest_lease_for, role_of, session_kind_of, work_root,
-    work_root_of,
+    AgentSession, Mode, SessionMeta, SessionParams, guest_lease_for, role_of, session_kind_of,
+    work_root, work_root_of,
 };
 use crate::capabilities::llm::api::{Channel, Msg};
 use crate::capabilities::turn::turn::api::Session;
@@ -85,8 +85,8 @@ impl Turn {
         let issued = crate::capabilities::conversation::session::api::issued_in(events);
         let desk = self.desk_for(&meta.name, issued);
         desk.rebuild(issued);
-        let built = match meta.mode.as_str() {
-            "collab" => Session::Collab(CollabSession::restore(
+        let built = match meta.mode {
+            Mode::Collab => Session::Collab(CollabSession::restore(
                 Arc::clone(&self.llm),
                 Arc::clone(&self.vm),
                 Arc::clone(&self.modules),
@@ -102,7 +102,7 @@ impl Turn {
                 Arc::clone(&desk),
             )?),
             // 单 agent：按 meta.agents[0] 重建（名单是唯一真相；模块数不限）。
-            "single" => {
+            Mode::Single => {
                 let a = meta
                     .agents
                     .first()
@@ -216,7 +216,7 @@ impl Turn {
                 )
             }
             // 代理会话：没有 agent（核心自己说话）；外壳由 build_proxy 装配，回放与单 agent 共用同一件。
-            "proxy" => {
+            Mode::Proxy => {
                 let mut s = self.build_proxy(meta, registry)?;
                 let (history, marks, line_reply, line_ids, compacted_upto, compacted_line) =
                     replay_dialogue(events, s.tool_mode());
@@ -238,12 +238,6 @@ impl Turn {
                     events,
                 ));
                 Session::Single(s)
-            }
-            other => {
-                return Err(format!(
-                    "未知会话形态：{}（只认 single / collab / proxy）",
-                    other
-                ));
             }
         };
         // 状态栏的 shell 快照同样按转录派生：重启 / 启用 / 回档重建后不再"失忆"。

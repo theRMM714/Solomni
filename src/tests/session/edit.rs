@@ -132,7 +132,7 @@ pub(crate) fn edit_session_freezes_names_only_after_content() {
     seed_session(
         &hist,
         "raw",
-        "single",
+        Mode::Single,
         vec![agent_meta("a", &["a"], None)],
         ExecSpec::default(),
     );
@@ -173,14 +173,14 @@ pub(crate) fn edit_session_enforces_the_same_rules_as_creation() {
     seed_session(
         &hist,
         "w",
-        "single",
+        Mode::Single,
         vec![agent_meta("a", &["a"], None)],
         ExecSpec::default(),
     );
     seed_session(
         &hist,
         "c",
-        "collab",
+        Mode::Collab,
         vec![agent_meta("a", &["a"], None), agent_meta("b", &["b"], None)],
         ExecSpec::default(),
     );
@@ -229,7 +229,7 @@ pub(crate) fn edit_session_enforces_the_same_rules_as_creation() {
     seed_session(
         &hist2,
         "c",
-        "collab",
+        Mode::Collab,
         vec![agent_meta("x", &["a"], None)],
         ExecSpec {
             tier: Tier::Vm,
@@ -276,7 +276,7 @@ pub(crate) fn deleting_a_session_releases_its_fence_lease() {
     seed_session(
         &hist,
         "w",
-        "single",
+        Mode::Single,
         vec![agent_meta("甲", &["a"], None)],
         ExecSpec::default(),
     );
@@ -341,7 +341,7 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_defaults_to_host() {
     let meta = SessionMeta {
         context_freshness: false,
         name: "w".to_string(),
-        mode: "single".to_string(),
+        mode: Mode::Single,
         delegate: false,
         modules: vec!["a".to_string()],
         task: None,
