@@ -68,6 +68,8 @@
 | `too_many_arguments` | `src/capabilities/turn/turn/service/turn.rs` 的 `single_say` | **测试用同步入口**（`#[cfg(test)]`）：会话 / 文本 / 回合 IO / 取消 / 短暂事件出口 / 登记处 / 探针是同一段语义的同一批输入，收口成参数对象只是把它们挪个位置（同 `continue_flow` 的取舍） |
 | `too_many_arguments` | `src/tests/doubles/` 的 `core_with_pkgs_probe` | 测试装配要逐项控制端口（模块 / 通道 / 执行器 / 目录 / 历史 / IO / 包库 / 宿主探测）；收口成参数对象只会把同一批替身挪个位置，读起来更绕 |
 | `large_enum_variant` | `src/capabilities/turn/turn/service/state.rs` 的 `enum Session` | 两变体大小差得远，但装箱只换来一次间接寻址，却把"会话本体可直接移动"这个形状改掉 |
+| `module_inception` | `src/capabilities/turn.rs` 的 `pub mod turn` | 单元与子业务是**两级归层结构**（`src/capabilities/turn/turn/`）：单元是归层单位、子业务是能力单位，同名不是重复嵌套；改子业务名要连带动 `docs/turn/README.md` 与全仓 66 处 `turn::turn` 路径，只改名不减语义 |
+| `unused_imports` | `src/capabilities/catalog/registry/api.rs` 的 `pub use …domain::providers::ModelThinkingView` | 视图 DTO 的字段类型：生产在 domain 内构造，`api` 面是给呈现侧与装配替身（`src/tests/routes.rs`）命名的发布面；二进制 crate 没有外部消费者，rustc 把它误报成未用导入，删掉就得让用例绕过 `api` 去碰 `domain` |
 
 - 新增 allow 必须同时更新本表；理由说不清的就不该 allow（`run-tests.js`）。
 
