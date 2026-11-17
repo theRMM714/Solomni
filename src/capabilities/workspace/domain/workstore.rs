@@ -673,7 +673,7 @@ pub struct ObjectInfo {
 
 /// 目的：一次对象回收的报告；apply=false 时只统计不删除。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct GcReport {
+pub struct WorkGcReport {
     /// 目的：是否真的执行了删除。
     pub applied: bool,
     /// 目的：对象总数。

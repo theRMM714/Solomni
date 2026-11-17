@@ -19,7 +19,7 @@ use crate::capabilities::system::api::{
     BuildRequest, EnsureRequest, Facts, Fault, FenceFacts, GcRequest, ResetRequest, SetupMode,
     SetupOps, System, WorkGcRequest,
 };
-use crate::capabilities::workspace::api::{GcReport as WorkspaceGc, Workspace, safe_file_name};
+use crate::capabilities::workspace::api::{WorkGcReport, Workspace, safe_file_name};
 use crate::kernel::api::JobState;
 
 /// 目的：系统维护能力的依赖面——全部由组合根注入（能力自己不构造别的能力的适配器）。
@@ -163,7 +163,7 @@ impl System for SystemService {
         }
     }
 
-    fn work_gc(&self, req: WorkGcRequest) -> Result<WorkspaceGc, Fault> {
+    fn work_gc(&self, req: WorkGcRequest) -> Result<WorkGcReport, Fault> {
         let work = safe_file_name(&req.work).map_err(Fault::usage)?;
         if !self.deps.root.join("session").join(&work).is_dir() {
             return Err(Fault::usage(format!("没有这个工作：{}", work)));

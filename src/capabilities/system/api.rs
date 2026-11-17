@@ -10,7 +10,7 @@ use crate::capabilities::catalog::packages::api::BaseFacts;
 use crate::capabilities::maintenance::builds::api::Built;
 use crate::capabilities::maintenance::storage::api::{CleanOutcome, GcReport, Storage};
 use crate::capabilities::provision::api::Provision;
-use crate::capabilities::workspace::api::GcReport as WorkspaceGc;
+use crate::capabilities::workspace::api::WorkGcReport;
 pub use crate::kernel::api::JobState;
 
 /// 目的：基础工具链 profile——与清单 toolchain 条目同一组（自检与启动报告共用）。
@@ -196,7 +196,7 @@ pub trait System: Send + Sync {
     /// 目的：还原一个由清单构造的虚拟根，并清掉它的构建缓存（写操作）。
     fn reset(&self, req: ResetRequest, on_line: &mut dyn FnMut(&str)) -> Result<GcReport, Fault>;
     /// 目的：回收一个工作区里不再可达的对象。
-    fn work_gc(&self, req: WorkGcRequest) -> Result<WorkspaceGc, Fault>;
+    fn work_gc(&self, req: WorkGcRequest) -> Result<WorkGcReport, Fault>;
     /// 目的：在目标环境里构建一个模块声明的产物。
     fn build(&self, req: BuildRequest) -> Result<Built, Fault>;
     /// 目的：清理作业的状态快照（回收起了后台作业时，CLI 靠它等结束）。

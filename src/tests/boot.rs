@@ -12,7 +12,7 @@ use crate::capabilities::system::api::{
     BuildRequest, EnsureRequest, Fault, FenceFacts, GcRequest, ResetRequest, System, WorkGcRequest,
     toolchain_json, toolchain_lines,
 };
-use crate::capabilities::workspace::api::GcReport as WorkspaceGc;
+use crate::capabilities::workspace::api::WorkGcReport;
 use crate::kernel::api::JobState;
 use crate::presentation::cli::boot;
 
@@ -28,7 +28,7 @@ pub(crate) struct Fake {
     /// 目的：构建结果；None = 失败。
     build: Option<Built>,
     /// 目的：工作区回收的报告。
-    work: Option<WorkspaceGc>,
+    work: Option<WorkGcReport>,
 }
 
 impl Default for Fake {
@@ -43,7 +43,7 @@ impl Default for Fake {
                 skipped: false,
                 output: "ok\n".to_string(),
             }),
-            work: Some(WorkspaceGc::default()),
+            work: Some(WorkGcReport::default()),
         }
     }
 }
@@ -124,7 +124,7 @@ impl System for Fake {
         on_line("已还原");
         Ok(GcReport::default())
     }
-    fn work_gc(&self, _req: WorkGcRequest) -> Result<WorkspaceGc, Fault> {
+    fn work_gc(&self, _req: WorkGcRequest) -> Result<WorkGcReport, Fault> {
         if self.fault == Some("work_gc") {
             return self.usage("work_gc");
         }
@@ -301,7 +301,7 @@ fn gc_without_confirmation_previews() {
 
 #[test]
 fn work_gc_covers_preview_and_apply() {
-    let applied = WorkspaceGc {
+    let applied = WorkGcReport {
         applied: true,
         objects: 3,
         bytes: 30,
@@ -313,10 +313,10 @@ fn work_gc_covers_preview_and_apply() {
         removed_objects: 1,
         removed_bytes: 10,
         removed_ignored: 1,
-        ..WorkspaceGc::default()
+        ..WorkGcReport::default()
     };
     let dry = Fake {
-        work: Some(WorkspaceGc::default()),
+        work: Some(WorkGcReport::default()),
         ..Fake::default()
     };
     for json in [false, true] {
