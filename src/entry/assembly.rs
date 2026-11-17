@@ -275,6 +275,6 @@ fn network_allowed(root: &Path) -> bool {
         .and_then(|t| {
             yaml_serde::from_str::<crate::capabilities::catalog::registry::api::AppSettings>(&t).ok()
         })
-        .map(|a| crate::capabilities::env::api::network_allowed(&a))
+        .map(|a| crate::capabilities::turn::env::api::network_allowed(&a))
         .unwrap_or(false)
 }

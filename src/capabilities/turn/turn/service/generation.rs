@@ -14,7 +14,7 @@ pub(crate) use member::run_member_turn;
 pub(crate) use single::{node_generation, single_generation};
 
 use crate::capabilities::conversation::session::api::GateTicket;
-use crate::capabilities::turn::api::{CollabWork, Output, TurnHost};
+use crate::capabilities::turn::turn::api::{CollabWork, Output, TurnHost};
 
 /// 目的：起一轮**脱离调用方**的节点执行：核心注入任务 + 不等它跑完。 完成后由叫醒逻辑推进父会话——所以这里只是"点火"。
 pub(crate) fn spawn_detached_node<H: TurnHost>(host: &H, sid: &str, objective: &str) {

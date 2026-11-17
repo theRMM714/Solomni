@@ -3,7 +3,7 @@
 //! 不管：取事实（`runtime` 的 history / workspace / registry）、机制侧怎么用围栏。
 //! 联动：`src/capabilities/env/domain/env.rs`；`runtime/service/env.rs` 取事实后转调。
 
-use crate::capabilities::env::api::{
+use crate::capabilities::turn::env::api::{
     MemberFacts, SandboxesFacts, host_read_roots, member, network_allowed, permissions, sandboxes,
     workspace_grant,
 };

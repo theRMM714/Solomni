@@ -27,7 +27,7 @@ use crate::capabilities::conversation::session::api::{
     Delegation, Gates, History, HistoryView, OptionView, RunState, SessionEvent, SessionMeta,
 };
 use crate::capabilities::tools::api::{ToolExec, Tools};
-use crate::capabilities::turn::api::{PROXY_PRIVATE_DIR, Session, Turn};
+use crate::capabilities::turn::turn::api::{PROXY_PRIVATE_DIR, Session, Turn};
 use crate::capabilities::vm::api::Vm;
 use crate::capabilities::work::api::{
     AgentSuggestion, ConfigAgent, ContinueView, EditGuest, FilesAgentRootView, FilesAgentView,

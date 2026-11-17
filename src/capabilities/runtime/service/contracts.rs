@@ -135,7 +135,7 @@ impl WorkOps for Handle {
 
 impl TurnOps for Handle {
     fn say(&self, sid: &str, text: &str, out: Output) -> Result<Advance, String> {
-        crate::capabilities::turn::api::single_generation(self, sid, Some(text.to_string()), out)
+        crate::capabilities::turn::turn::api::single_generation(self, sid, Some(text.to_string()), out)
     }
 
     fn continue_flow(&self, sid: &str, out: Output) -> Result<Advance, String> {
@@ -153,20 +153,20 @@ impl TurnOps for Handle {
                 })
                 .unwrap_or_default();
             if mode == "collab" {
-                return crate::capabilities::turn::api::collab_generation(
+                return crate::capabilities::turn::turn::api::collab_generation(
                     self,
                     sid,
                     CollabWork::Resume,
                 );
             }
-            return crate::capabilities::turn::api::single_generation(
+            return crate::capabilities::turn::turn::api::single_generation(
                 self,
                 sid,
                 Some("继续。".to_string()),
                 out,
             );
         }
-        crate::capabilities::turn::api::single_generation(self, sid, None, out)
+        crate::capabilities::turn::turn::api::single_generation(self, sid, None, out)
     }
 
     fn set_task(&self, sid: &str, text: &str) -> Result<Advance, String> {
@@ -229,7 +229,7 @@ impl TurnOps for Handle {
                     return Ok(Advance { head });
                 }
                 // 放行 / 重派 / 请教 / 判明确性：长流程——脱离调用方点火（回答本身已经落定）。
-                crate::capabilities::turn::api::spawn_detached_dispose(self, sid, ticket);
+                crate::capabilities::turn::turn::api::spawn_detached_dispose(self, sid, ticket);
                 Ok(Advance { head })
             }
         }
@@ -262,7 +262,7 @@ impl TurnOps for Handle {
     }
 
     fn compact(&self, sid: &str) -> Result<Advance, String> {
-        crate::capabilities::turn::api::compact(self, sid)
+        crate::capabilities::turn::turn::api::compact(self, sid)
     }
 
     fn is_running(&self, sid: &str) -> bool {

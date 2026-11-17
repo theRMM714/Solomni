@@ -1,7 +1,7 @@
 # env（环境事实）
 
 > 定位：环境事实的唯一派生者——权限面、沙箱清单、一席的围栏 / 进程环境 / 工具链根与 guest 租约，全部由入参算出。
-> 效力：规范｜核对：2026-11-16｜依据：`src/capabilities/env/api.rs`
+> 效力：规范｜核对：2026-11-16｜依据：`src/capabilities/turn/env/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -22,19 +22,19 @@
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`session`（`SessionMeta` / `WorkspaceGrant`）、`workspace`（`Sandbox` / `Sandboxes` / `WorkRoots`）、`modules`（`Roster`）、`packages`（`PackagePlan`）、`permission`（`PermissionSet`）、`registry`（`AppSettings` / `AgentMeta`）、`kernel`（`FenceSpec` / `Tier`、`ports::PathCodec`）
-- 谁在用我：`runtime`（`src/capabilities/runtime/service/env.rs` 的三条薄入口：guest 诊断准备与两席沙箱 / 权限）、`turn`（`src/capabilities/turn/service/facts.rs` 取事实后转调派生函数）、`collab`（`src/capabilities/conversation/collab/service/collab.rs` 的会话设置取网络开关与宿主只读根）、`cli` / `web`（入口装配取网络开关与宿主只读根条数）、`src/tests/env.rs`
+- 谁在用我：`runtime`（`src/capabilities/runtime/service/env.rs` 的三条薄入口：guest 诊断准备与两席沙箱 / 权限）、`turn`（`src/capabilities/turn/turn/service/facts.rs` 取事实后转调派生函数）、`collab`（`src/capabilities/conversation/collab/service/collab.rs` 的会话设置取网络开关与宿主只读根）、`cli` / `web`（入口装配取网络开关与宿主只读根条数）、`src/tests/env.rs`
 
 ## 一、事实进、结果出
 
 - 围栏只有一处算法：`FenceSpec::for_session` 先按沙箱与本席的宿主读根建底，再把包根并进 `ro_tree` 后排序去重；packages 侧不再各自拼围栏。
-- 工具链根按档位分流：只有 `Tier::Host` 才带 `base_roots`，`Tier::Vm` 只留包根，同样排序去重——`src/capabilities/env/domain/env.rs` 的 `member` 是唯一判定点。
+- 工具链根按档位分流：只有 `Tier::Host` 才带 `base_roots`，`Tier::Vm` 只留包根，同样排序去重——`src/capabilities/turn/env/domain/env.rs` 的 `member` 是唯一判定点。
 - 权限链的收口在顺序：根 ceiling → 逐层 narrowing → 硬黑名单 → 视需要 `without_shared`；换顺序就会放宽本该收紧的面。
-- 全局策略也只有一处算法：网络开关直接取 `sandbox.policy.network`；宿主只读根逐条 `trim`、丢掉空串、其余转 `PathBuf`——空白项与空串不算根，判定点只有 `src/capabilities/env/domain/env.rs` 的 `network_allowed` / `host_read_roots`。
+- 全局策略也只有一处算法：网络开关直接取 `sandbox.policy.network`；宿主只读根逐条 `trim`、丢掉空串、其余转 `PathBuf`——空白项与空串不算根，判定点只有 `src/capabilities/turn/env/domain/env.rs` 的 `network_allowed` / `host_read_roots`。
 
 ## 改动本单元时必须同步
 
-- `src/capabilities/turn/service/facts.rs` → 取事实与转调都在这里（`guest_scope` / 沙箱 / 权限 / 一席环境）：事实从哪来变了必须同改，`env` 的入站签名保持不变；`src/capabilities/runtime/service/env.rs` 只留三条薄入口（guest 诊断准备与测试用的沙箱 / 权限）。
-- `src/capabilities/env/api.rs` → 新增入站项要同步 [`unit-map.md`](unit-map.md) 与本页「入站契约」。
+- `src/capabilities/turn/turn/service/facts.rs` → 取事实与转调都在这里（`guest_scope` / 沙箱 / 权限 / 一席环境）：事实从哪来变了必须同改，`env` 的入站签名保持不变；`src/capabilities/runtime/service/env.rs` 只留三条薄入口（guest 诊断准备与测试用的沙箱 / 权限）。
+- `src/capabilities/turn/env/api.rs` → 新增入站项要同步 [`unit-map.md`](unit-map.md) 与本页「入站契约」。
 - `src/tests/env.rs` → 五条用例钉住权限链、共享区、租约、一席环境与模块挂载：改派生规则必须同改断言。
 
 ## 本目录

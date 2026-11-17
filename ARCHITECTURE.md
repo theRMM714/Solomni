@@ -51,12 +51,11 @@
 | 2 | `catalog`、`workspace` | 0–1 |
 | 3 | `residents`、`tools`、`vm` | 0–2 |
 | 4 | `conversation`、`provision` | 0–3 |
-| 5 | `env`、`storage` | 0–4 |
-| 6 | `builds`、`turn` | 0–5 |
-| 7 | `lifecycle`、`system`、`work` | 0–6 |
-| 8 | `runtime` | 0–7 |
+| 5 | `storage`、`turn` | 0–4 |
+| 6 | `builds`、`lifecycle`、`work` | 0–5 |
+| 7 | `runtime`、`system` | 0–6 |
 
-> 8 层、19 个能力 + `kernel`：本表由 `layers.yaml` 生成（`node tests/docs-sync.mjs --write`），不手写。
+> 7 层、18 个能力 + `kernel`：本表由 `layers.yaml` 生成（`node tests/docs-sync.mjs --write`），不手写。
 <!-- END:layer-table -->
 
 - 层号是**声明的意图**，不是从代码算出来的事实：改成「按当前依赖现算」，判据就恒真（每条边按构造都向下），门禁失去全部约束力。所以表由人维持、门禁比「意图 vs 现实」，越界时顺带报出「按现有依赖至少要第几层」。
@@ -121,7 +120,7 @@
 | `AskUser` | **请用户裁决的提问端口**：需要用户裁决的机制（工具执行层、围栏）推一条问题并**阻塞**等一个选项 id——走会话的**统一裁决通道**（不是第二条） | 会话侧实现（`turn` 的 `SessionAsk`：卡片进那一条队、`answer_card` 作答；构不出可用选项时停会话 + 落警告） |
 | `TurnHost` | **回合推进的宿主契约**：业务在自己的工作线程上需要宿主在核心线程代做的事——取放会话状态、事件台、guest 起停、裁决队与提问端口、生成登记、线程点火、回答裁决卡 | `Handle`（`src/capabilities/runtime/service/handle.rs`；随命令队列手柄一起演进） |
 
-- 端口只有一个持有者：**定义它的那个能力的 `service.rs`**（R12）。**例外**：`kernel` 的机制端口（`Log` / `HostProbe` / `ToolHandler` / `AskUser` / `ProcessRunner` / `FenceHost` / `PathCodec` / `ProcessTexts` / `SessionHost`）全项目共享；`TurnHost` 由 `turn` 声明（`src/capabilities/turn/api.rs`）、由 `runtime` 实现（`src/capabilities/runtime/service/handle.rs`）——业务声明它需要宿主代做什么，最顶层（`runtime`）来实现。
+- 端口只有一个持有者：**定义它的那个能力的 `service.rs`**（R12）。**例外**：`kernel` 的机制端口（`Log` / `HostProbe` / `ToolHandler` / `AskUser` / `ProcessRunner` / `FenceHost` / `PathCodec` / `ProcessTexts` / `SessionHost`）全项目共享；`TurnHost` 由 `turn` 声明（`src/capabilities/turn/turn/api.rs`）、由 `runtime` 实现（`src/capabilities/runtime/service/handle.rs`）——业务声明它需要宿主代做什么，最顶层（`runtime`）来实现。
 - 新增端口前先问一句：**这是 IO 或可替换点吗**？不是就别加 trait。
 
 ## 三、单元地图与入站契约

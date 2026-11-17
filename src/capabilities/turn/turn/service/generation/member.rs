@@ -4,7 +4,7 @@
 //! 联动：`generation/collab.rs`、`turn::api::TurnHost`
 
 use crate::capabilities::conversation::session::api::{AgentSession, MemberTurn, SessionEvent, TurnIo};
-use crate::capabilities::turn::api::{AskReq, TurnHost};
+use crate::capabilities::turn::turn::api::{AskReq, TurnHost};
 
 /// 目的：主线程侧：为一个成员回合取该 agent 的会话，跑完把回合结果带回来（并落进它自己的会话）。
 pub(crate) fn run_member_turn<H: TurnHost>(

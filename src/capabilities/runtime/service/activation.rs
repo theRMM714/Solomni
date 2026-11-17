@@ -30,7 +30,7 @@ impl Handle {
         };
         let roster = self.modules.roster();
         let net = self.call(|core| {
-            Ok(crate::capabilities::env::api::network_allowed(
+            Ok(crate::capabilities::turn::env::api::network_allowed(
                 core.registry().app(),
             ))
         })?;

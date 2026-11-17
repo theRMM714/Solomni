@@ -5,7 +5,6 @@
 
 pub mod builds;
 pub mod conversation;
-pub mod env;
 pub mod lifecycle;
 pub mod llm;
 pub mod catalog;

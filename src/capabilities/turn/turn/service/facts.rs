@@ -17,7 +17,7 @@ use crate::capabilities::catalog::registry::api::Registry;
 use crate::capabilities::conversation::session::api::{
     AgentSession, MemberSpec, SessionEvent, SessionMeta, SingleSpec, WorkspaceGrant, work_root_of,
 };
-use crate::capabilities::turn::service::session::Turn;
+use crate::capabilities::turn::turn::service::session::Turn;
 use crate::capabilities::vm::api::GuestOs;
 use crate::capabilities::workspace::api::{Sandbox, Sandboxes};
 use crate::kernel::api::Tier;
@@ -45,8 +45,8 @@ impl Turn {
         // 外部工作区的授权粒度：只影响围栏派生（共享区是否要每会话重授），不改权限面。
         let shared_grant = self.workspace_grant(meta)?;
         // 逐席组装的规则在 env：模块目录只对使用它的 agent 可达，私有根缺一份就如实报缺哪个 agent。
-        crate::capabilities::env::api::sandboxes(
-            &crate::capabilities::env::api::SandboxesFacts {
+        crate::capabilities::turn::env::api::sandboxes(
+            &crate::capabilities::turn::env::api::SandboxesFacts {
                 work: &work,
                 session: &meta.name,
                 agents: &meta.agents,
@@ -81,14 +81,14 @@ impl Turn {
         let chain = self.permission_chain(meta)?;
         // 合成规则（默认 → 根 ceiling → 每层 narrowing → 硬黑名单 → 无共享区授权就收紧）在 env。
         let app = registry.app();
-        crate::capabilities::env::api::permissions(&chain, app)
+        crate::capabilities::turn::env::api::permissions(&chain, app)
     }
 
     /// 目的：这条会话生效的外部工作区授权粒度：沿权限链找最近一份绑定（创建时只写在根），
     ///   没有绑定就是 `session` 缺省。
     pub(crate) fn workspace_grant(&self, meta: &SessionMeta) -> Result<WorkspaceGrant, String> {
         let chain = self.permission_chain(meta)?;
-        Ok(crate::capabilities::env::api::workspace_grant(&chain))
+        Ok(crate::capabilities::turn::env::api::workspace_grant(&chain))
     }
 
     /// 目的：某个 agent 的生效权限：协作主会话里的发言席优先取它自己的子会话 narrowing。
@@ -131,9 +131,9 @@ impl Turn {
                 )
             })
             .collect();
-        let host_read_roots = crate::capabilities::env::api::host_read_roots(registry.app());
+        let host_read_roots = crate::capabilities::turn::env::api::host_read_roots(registry.app());
         let menv =
-            crate::capabilities::env::api::member(&crate::capabilities::env::api::MemberFacts {
+            crate::capabilities::turn::env::api::member(&crate::capabilities::turn::env::api::MemberFacts {
                 sandbox: sb,
                 host_read_roots: &host_read_roots,
                 net,

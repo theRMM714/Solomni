@@ -59,9 +59,9 @@ impl Handle {
                 move |core| core.turn.dispatch_target(&c)
             })?;
             if mode == "collab" {
-                crate::capabilities::turn::api::start_child_collab(self, &created.session);
+                crate::capabilities::turn::turn::api::start_child_collab(self, &created.session);
             } else {
-                crate::capabilities::turn::api::spawn_detached_node(
+                crate::capabilities::turn::turn::api::spawn_detached_node(
                     self,
                     &created.session,
                     &spec.task,
@@ -117,12 +117,12 @@ impl Handle {
                         })?;
                         match mode.as_str() {
                             "collab" => {
-                                crate::capabilities::turn::api::spawn_detached_collab(self, sid)
+                                crate::capabilities::turn::turn::api::spawn_detached_collab(self, sid)
                             }
                             "proxy" => {
-                                crate::capabilities::turn::api::spawn_detached_proxy(self, sid)
+                                crate::capabilities::turn::turn::api::spawn_detached_proxy(self, sid)
                             }
-                            _ => crate::capabilities::turn::api::spawn_detached_continue(self, sid),
+                            _ => crate::capabilities::turn::turn::api::spawn_detached_continue(self, sid),
                         }
                     }
                     "active".to_string()

@@ -8,21 +8,21 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 /// 目的：生成入口（单 agent / 节点 / 协作 / 成员 / 压缩）与脱离调用方的点火器。
-pub(crate) use crate::capabilities::turn::service::generation::{
+pub(crate) use crate::capabilities::turn::turn::service::generation::{
     collab_generation, compact, single_generation, spawn_detached_collab,
     spawn_detached_collab_answer, spawn_detached_continue, spawn_detached_dispose,
     spawn_detached_node, spawn_detached_proxy, start_child_collab,
 };
 /// 目的：一次模型调用的通道参数（测试访问器与生产共用这一份判据）。
 #[cfg(test)]
-pub use crate::capabilities::turn::service::model::llm_opts;
+pub use crate::capabilities::turn::turn::service::model::llm_opts;
 /// 目的：回放一段转录得到对话与压缩边界（重建会话与回档都只经这里）。
 #[allow(unused_imports)]
-pub use crate::capabilities::turn::service::rebuild::replay_dialogue;
+pub use crate::capabilities::turn::turn::service::rebuild::replay_dialogue;
 /// 目的：代理会话的私有工作目录名与核心说话人名称（宿主建代理会话时要这两样）。
-pub use crate::capabilities::turn::service::rebuild::{PROXY_PRIVATE_DIR, SPEAKER};
+pub use crate::capabilities::turn::turn::service::rebuild::{PROXY_PRIVATE_DIR, SPEAKER};
 /// 目的：回合状态与会话本体的类型出口。
-pub use crate::capabilities::turn::service::session::Turn;
+pub use crate::capabilities::turn::turn::service::session::Turn;
 
 /// 目的：造这个会话的**工具层提问端口**（登记一张卡、外送并落盘、停会话都走同一会话那条道）。
 /// 参数：`door` = 该会话的裁决通道；`sid` = 会话名；`emit` = 推一条事件；`stop` = 停这个会话。
@@ -33,11 +33,11 @@ pub fn session_ask(
     emit: Box<dyn Fn(SessionEvent) + Send + Sync>,
     stop: Box<dyn Fn(&str) + Send + Sync>,
 ) -> Arc<dyn AskUser> {
-    Arc::new(crate::capabilities::turn::service::ask_user::SessionAsk::new(door, sid, emit, stop))
+    Arc::new(crate::capabilities::turn::turn::service::ask_user::SessionAsk::new(door, sid, emit, stop))
 }
 /// 目的：在世会话形态（宿主与测试只经它取用）。
 ///   回合状态本身（`TurnState`）是本能力的内部结构：它只被 `Turn` 持有，不出单元。
-pub use crate::capabilities::turn::service::state::Session;
+pub use crate::capabilities::turn::turn::service::state::Session;
 
 use crate::capabilities::catalog::registry::api::Registry;
 use crate::capabilities::conversation::session::api::{
@@ -107,7 +107,7 @@ pub trait Events: EventFeed {
 
 /// 目的：造一个事件台：组合根装配一次，写面给运行时与核心，读面给呈现层。
 pub fn event_bus() -> Arc<dyn Events> {
-    crate::capabilities::turn::service::bus::EventBus::shared()
+    crate::capabilities::turn::turn::service::bus::EventBus::shared()
 }
 
 /// 目的：协作在工作线程上要做的事：处置一张**已经出队**的回答（放行类要接着跑泵），或从断点继续。

@@ -312,7 +312,7 @@ impl crate::capabilities::conversation::proxy::api::ProxyHost for ProxyBridge {
             match (card, msg.reply.as_deref()) {
                 (Some(q), Some(reply)) => {
                     let option = d::relay_reply(&q.card.options, reply)?;
-                    crate::capabilities::turn::api::spawn_detached_collab_answer(
+                    crate::capabilities::turn::turn::api::spawn_detached_collab_answer(
                         &*handle, &target, &q.card.id, &option, &msg.text,
                     );
                 }
@@ -325,14 +325,14 @@ impl crate::capabilities::conversation::proxy::api::ProxyHost for ProxyBridge {
                     )),
                 ),
                 (None, _) => {
-                    crate::capabilities::turn::api::spawn_detached_collab(&*handle, &target)
+                    crate::capabilities::turn::turn::api::spawn_detached_collab(&*handle, &target)
                 }
             }
             return Ok(());
         }
         // 单 agent：以"核心派的活"注入（派发行是核心自己的行，**不冒充用户原话**），
         // 并**脱离调用方点火**——代理不等它跑完，靠 observe / messages 回头看。
-        crate::capabilities::turn::api::spawn_detached_node(&*handle, &target, &msg.text);
+        crate::capabilities::turn::turn::api::spawn_detached_node(&*handle, &target, &msg.text);
         Ok(())
     }
 
