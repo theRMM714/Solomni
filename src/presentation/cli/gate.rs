@@ -447,7 +447,7 @@ pub(crate) fn create_session_action(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capabilities::session::api::Pending;
+    use crate::capabilities::conversation::session::api::Pending;
     use crate::kernel::api::Ask;
 
     /// 目的：用生产那一条派生造卡（工具层那一类：三段话与选项原样来自发起方）。

@@ -116,7 +116,7 @@ pub(crate) fn direct_rewind_drops_tail_then_continue_allows_user_turn() {
 #[test]
 pub(crate) fn archive_folds_the_tail_and_restore_brings_it_back() {
     use crate::capabilities::lifecycle::api::RewindTarget;
-    use crate::capabilities::session::api::next_line_id;
+    use crate::capabilities::conversation::session::api::next_line_id;
     let say = |t: &str| serde_json::json!({"type": "say", "text": t}).to_string();
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), vec![say("答一"), say("答二")]);
@@ -194,7 +194,7 @@ pub(crate) fn archive_folds_the_tail_and_restore_brings_it_back() {
         "标签取折叠区间里最后一条内容行"
     );
     assert_eq!(
-        crate::capabilities::session::api::truncate_events(&raw)
+        crate::capabilities::conversation::session::api::truncate_events(&raw)
             .iter()
             .filter_map(|e| e.get("lines").and_then(|l| l.as_array()))
             .flatten()
@@ -708,7 +708,7 @@ pub(crate) fn rewind_never_splits_a_reply() {
 #[test]
 pub(crate) fn history_list_is_ordered_as_a_tree() {
     let hv = |name: &str, parent: Option<&str>, ts: i64| {
-        crate::capabilities::session::api::HistoryView {
+        crate::capabilities::conversation::session::api::HistoryView {
             name: name.to_string(),
             mode: "collab".to_string(),
             ts,
@@ -721,7 +721,7 @@ pub(crate) fn history_list_is_ordered_as_a_tree() {
         }
     };
     // 顶层 A(10) 比 B(5) 新；A 下两个子会话（甲=9 比 乙=8 新）。
-    let got = crate::capabilities::session::api::tree_order(vec![
+    let got = crate::capabilities::conversation::session::api::tree_order(vec![
         hv("A", None, 10),
         hv("B", None, 5),
         hv("A--甲", Some("A"), 9),

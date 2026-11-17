@@ -4,7 +4,7 @@
 //! 联动：src/main.rs 组合根装配这些能力；runtime 与其它能力平级、只经各能力 api 编排（ARCHITECTURE.md §九）。
 
 pub mod builds;
-pub mod collab;
+pub mod conversation;
 pub mod env;
 pub mod lifecycle;
 pub mod llm;
@@ -12,11 +12,8 @@ pub mod catalog;
 pub mod permission;
 pub mod prompt;
 pub mod provision;
-pub mod proxy;
 pub mod residents;
 pub mod runtime;
-pub mod session;
-pub mod slate;
 pub mod storage;
 pub mod system;
 pub mod taskchain;

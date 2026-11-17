@@ -12,7 +12,7 @@ use crate::capabilities::catalog::modules::api::{Module, Modules, Roster};
 use crate::capabilities::catalog::packages::api::Packages;
 use crate::capabilities::prompt::api::Prompt;
 use crate::capabilities::provision::api::Provision;
-use crate::capabilities::proxy::api as d;
+use crate::capabilities::conversation::proxy::api as d;
 use crate::capabilities::catalog::registry::api::Registry;
 use crate::capabilities::catalog::registry::api::{
     AgentView, AppSettings, ModelView, ProviderView, RegistryOps, StorageSettings,
@@ -21,8 +21,8 @@ use crate::capabilities::runtime::api::{
     Acted, ActionCall, ActionOps, ActionParamView, ActionView, Advance, Caller, CollabWork, Events,
     LogOps, Output, RebuildDeps, RewindOutcome, RewindTarget, RuntimeOps,
 };
-use crate::capabilities::session::api::subtree_of;
-use crate::capabilities::session::api::{
+use crate::capabilities::conversation::session::api::subtree_of;
+use crate::capabilities::conversation::session::api::{
     Answered, DecisionQueue, History, HistoryView, RunState, SessionEvent, SessionMeta,
 };
 use crate::capabilities::tools::api::{ToolExec, ToolSchema, Tools, arg_fault_text};

@@ -127,7 +127,7 @@ impl WorkOps for Handle {
         // 它不在任何会话表里，前端因此不会为它建标签页；落盘策略是 Drop（只推不留）。
         if !rows.is_empty() {
             self.bus
-                .push(crate::capabilities::session::api::SYSTEM_SID_SUGGEST, &rows);
+                .push(crate::capabilities::conversation::session::api::SYSTEM_SID_SUGGEST, &rows);
         }
         Ok(agents)
     }
@@ -212,7 +212,7 @@ impl TurnOps for Handle {
                 // 代拟名单这一关要写回 meta 并建沙箱：短步骤，留在核心线程上收尾。
                 if matches!(
                     ticket.pending,
-                    crate::capabilities::session::api::Pending::ConfirmSlate
+                    crate::capabilities::conversation::session::api::Pending::ConfirmSlate
                 ) {
                     let more = self.call({
                         let sid = sid.to_string();
@@ -446,7 +446,7 @@ impl RegistryOps for Handle {
     }
 }
 
-impl crate::capabilities::session::api::HistoryOps for Handle {
+impl crate::capabilities::conversation::session::api::HistoryOps for Handle {
     fn list(&self) -> Result<Vec<HistoryView>, String> {
         self.call(|core| Ok(core.lifecycle.history_list()))
     }

@@ -240,13 +240,13 @@ pub(crate) fn python() -> Option<&'static str> {
 pub(crate) fn member_with_service_tools(
     module: &str,
     residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
-    op: crate::capabilities::session::api::ServiceOp,
-) -> crate::capabilities::session::domain::tools::MemberTools {
+    op: crate::capabilities::conversation::session::api::ServiceOp,
+) -> crate::capabilities::conversation::session::domain::tools::MemberTools {
     let sb = test_sandbox(module, &[]);
     let mut modules = BTreeMap::new();
     modules.insert(
         module.to_string(),
-        crate::capabilities::session::domain::tools::ModuleTools {
+        crate::capabilities::conversation::session::domain::tools::ModuleTools {
             root: abs(&["mods", module]),
             commands: BTreeMap::new(),
             books: BTreeMap::new(),
@@ -254,8 +254,8 @@ pub(crate) fn member_with_service_tools(
             services: [(op.tool.clone(), op)].into_iter().collect(),
         },
     );
-    crate::capabilities::session::domain::tools::MemberTools {
-        face: crate::capabilities::session::api::ToolFace {
+    crate::capabilities::conversation::session::domain::tools::MemberTools {
+        face: crate::capabilities::conversation::session::api::ToolFace {
             mode: crate::capabilities::llm::api::ToolMode::Envelope,
             modules,
             tier: crate::kernel::api::Tier::Host,

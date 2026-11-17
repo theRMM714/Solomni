@@ -16,8 +16,8 @@ use crate::capabilities::catalog::modules::api::{ModulesOps, Roster};
 use crate::capabilities::catalog::packages::api::Problem;
 use crate::capabilities::catalog::registry::api::{AgentView, AppSettings, ModelDraft, RegistryOps};
 use crate::capabilities::catalog::registry::domain::agents::Agent;
-use crate::capabilities::session::api::{CheckView, ContextUsage, LineView, ToolCallView};
-use crate::capabilities::session::domain::events::{
+use crate::capabilities::conversation::session::api::{CheckView, ContextUsage, LineView, ToolCallView};
+use crate::capabilities::conversation::session::domain::events::{
     DecisionAnswer, DecisionEnvelope, DecisionMessage,
 };
 use crate::capabilities::taskchain::api::{NodeStatus, TaskChain, TaskNode};
@@ -306,7 +306,7 @@ impl WorkOps for FakeCore {
     }
     fn session_views(
         &self,
-        _: &[crate::capabilities::session::api::HistoryView],
+        _: &[crate::capabilities::conversation::session::api::HistoryView],
     ) -> Result<Vec<SessionView>, String> {
         Err("没装会话总览".into())
     }

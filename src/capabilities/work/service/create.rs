@@ -5,7 +5,7 @@
 //!   本方法族只碰 history / registry / workspace / vm 这四个字段。
 
 use super::*;
-use crate::capabilities::session::api::{
+use crate::capabilities::conversation::session::api::{
     flat_modules, guest_lease_for, guest_scope, subtree_of, tree_meta, work_root,
 };
 use crate::capabilities::vm::api::GuestStop;
@@ -37,7 +37,7 @@ fn pay_workspace_grant(root: &std::path::Path, meta: &SessionMeta) {
 impl Work {
     /// 目的：工作名的缺省与唯一化（命名策略在 `session`；这里只提供"存在吗"）。
     pub fn unique_work_name(&self, turn: &Turn, base: &str, fallback: &str) -> String {
-        crate::capabilities::session::api::unique_work_name(base, fallback, |n| {
+        crate::capabilities::conversation::session::api::unique_work_name(base, fallback, |n| {
             turn.holds(n) || self.history.load(n).is_ok()
         })
     }
@@ -128,10 +128,10 @@ impl Work {
         &self,
         probe: &dyn HostProbe,
         raw: Option<&std::path::Path>,
-        grant: Option<crate::capabilities::session::api::WorkspaceGrant>,
+        grant: Option<crate::capabilities::conversation::session::api::WorkspaceGrant>,
         tier: crate::kernel::api::Tier,
         parent: Option<&str>,
-    ) -> Result<Option<crate::capabilities::session::api::WorkspaceBinding>, String> {
+    ) -> Result<Option<crate::capabilities::conversation::session::api::WorkspaceBinding>, String> {
         if let Some(p) = parent {
             if raw.is_some() || grant.is_some() {
                 return Err("子会话不能自选工作区或授权粒度：沿父会话继承".to_string());
@@ -141,7 +141,7 @@ impl Work {
         }
         let Some(raw) = raw else {
             if grant
-                .is_some_and(|g| g != crate::capabilities::session::api::WorkspaceGrant::Session)
+                .is_some_and(|g| g != crate::capabilities::conversation::session::api::WorkspaceGrant::Session)
             {
                 return Err("没有指定外部工作区时，工作区授权粒度无意义".to_string());
             }
@@ -149,7 +149,7 @@ impl Work {
         };
         let product = crate::capabilities::workspace::api::product_root(&self.root, probe);
         let root = crate::capabilities::workspace::api::resolve(raw, tier, &product, probe)?;
-        Ok(Some(crate::capabilities::session::api::WorkspaceBinding {
+        Ok(Some(crate::capabilities::conversation::session::api::WorkspaceBinding {
             root,
             grant: grant.unwrap_or_default(),
         }))
@@ -822,7 +822,7 @@ mod tests {
                 tier,
                 ..Default::default()
             },
-            workspace: Some(crate::capabilities::session::api::WorkspaceBinding {
+            workspace: Some(crate::capabilities::conversation::session::api::WorkspaceBinding {
                 root: std::path::PathBuf::from("C:\\ws"),
                 grant,
             }),

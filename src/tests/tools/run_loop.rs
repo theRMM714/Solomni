@@ -17,12 +17,12 @@ pub(crate) fn module_tool_params_are_declared_in_the_manifest_and_enforced_by_co
         ),
     );
     let prompts = test_prompts();
-    let system = crate::capabilities::session::domain::session::prompt::agent_system(
+    let system = crate::capabilities::conversation::session::domain::session::prompt::agent_system(
         &prompts,
         "m0",
         "",
         &[
-            crate::capabilities::session::domain::session::prompt::ModulePrompt {
+            crate::capabilities::conversation::session::domain::session::prompt::ModulePrompt {
                 id: mod_m0.manifest.id.clone(),
                 brief: mod_m0.manifest.brief.clone(),
                 system: mod_m0.manifest.system.clone(),
@@ -73,7 +73,7 @@ pub(crate) fn module_tool_params_are_declared_in_the_manifest_and_enforced_by_co
         pair.module_tools
     );
 
-    let table = crate::capabilities::session::api::tool_table(std::slice::from_ref(&mod_m0));
+    let table = crate::capabilities::conversation::session::api::tool_table(std::slice::from_ref(&mod_m0));
     let books = table.get("m0").expect("放行表").books.clone();
     assert_eq!(books.len(), 1, "只给声明了参数的工具建契约");
 
@@ -146,7 +146,7 @@ pub(crate) fn module_tool_params_are_declared_in_the_manifest_and_enforced_by_co
 
     // 没声明参数的工具照旧不校验（不给模块开发者添门槛）。
     let plain = module_of("m0");
-    let plain_table = crate::capabilities::session::api::tool_table(std::slice::from_ref(&plain));
+    let plain_table = crate::capabilities::conversation::session::api::tool_table(std::slice::from_ref(&plain));
     assert!(
         plain_table.get("m0").expect("放行表").books.is_empty(),
         "没声明参数 = 没有契约"
@@ -746,7 +746,7 @@ pub(crate) fn module_and_service_params_share_one_header() {
 
 #[test]
 pub(crate) fn service_ops_are_scoped_to_the_agent_module_face() {
-    use crate::capabilities::session::api::{ServiceOp, service_ops_for_modules};
+    use crate::capabilities::conversation::session::api::{ServiceOp, service_ops_for_modules};
     let op = |tool: &str| ServiceOp {
         tool: tool.to_string(),
         service: "svc".to_string(),

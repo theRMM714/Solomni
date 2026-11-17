@@ -11,7 +11,7 @@ mod rewind;
 pub(crate) use history::{ReleaseByLease, SessionDelete};
 
 use crate::capabilities::residents::api::ResidentOps;
-use crate::capabilities::session::api::{
+use crate::capabilities::conversation::session::api::{
     History, HistoryView, SessionMeta, guest_scope, subtree_of, tree_order,
 };
 use crate::capabilities::tools::api::ToolExec;

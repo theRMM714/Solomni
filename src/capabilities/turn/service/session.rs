@@ -12,7 +12,7 @@ use crate::capabilities::catalog::packages::api::Packages;
 use crate::capabilities::prompt::api::Prompt;
 use crate::capabilities::residents::api::ResidentOps;
 use crate::capabilities::catalog::secrets::api::SecretOps;
-use crate::capabilities::session::api::{CompactChatFactory, Gates, History, ShellLive, ShellSlot};
+use crate::capabilities::conversation::session::api::{CompactChatFactory, Gates, History, ShellLive, ShellSlot};
 use crate::capabilities::tools::api::{ToolExec, Tools};
 use crate::capabilities::turn::api::Session;
 use crate::capabilities::turn::service::state::TurnState;
@@ -107,8 +107,8 @@ impl Turn {
     }
 
     /// 目的：装配一席要用的能力面（端口对象）——按 `Turn` 现持的那几份克隆出来，交 `session` 的装配入口。
-    pub fn session_ports(&self) -> crate::capabilities::session::api::SessionPorts {
-        crate::capabilities::session::api::SessionPorts {
+    pub fn session_ports(&self) -> crate::capabilities::conversation::session::api::SessionPorts {
+        crate::capabilities::conversation::session::api::SessionPorts {
             llm: Arc::clone(&self.llm),
             log: Arc::clone(&self.log),
             prompt: Arc::clone(&self.prompt),
@@ -192,7 +192,7 @@ impl Turn {
     }
 
     /// 目的：全会话的裁决通道表。
-    pub fn desk(&self) -> &Arc<dyn crate::capabilities::session::api::Decisions> {
+    pub fn desk(&self) -> &Arc<dyn crate::capabilities::conversation::session::api::Decisions> {
         self.state.desk()
     }
 

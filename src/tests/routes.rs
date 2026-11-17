@@ -18,7 +18,7 @@ use crate::capabilities::catalog::modules::api::{ModulesOps, Roster};
 use crate::capabilities::catalog::registry::api::AgentView;
 use crate::capabilities::catalog::registry::api::RegistryOps;
 use crate::capabilities::catalog::registry::api::{AppSettings, ModelView, ProviderView};
-use crate::capabilities::session::api::{HistoryOps, HistoryView, SessionMeta};
+use crate::capabilities::conversation::session::api::{HistoryOps, HistoryView, SessionMeta};
 use crate::kernel::api::Tier;
 use crate::presentation::web::routes::{self, ROUTES};
 use crate::presentation::web::{self, FenceInfo};
@@ -265,7 +265,7 @@ fn meta(name: &str) -> SessionMeta {
         node: None,
         delegation: None,
         thinking: None,
-        run: crate::capabilities::session::api::RunState::Active,
+        run: crate::capabilities::conversation::session::api::RunState::Active,
         workspace: None,
     }
 }
@@ -755,7 +755,7 @@ impl HistoryOps for FakeFaces {
             parent: None,
             workspace: None,
             workspace_missing: false,
-            run: crate::capabilities::session::api::RunState::Active,
+            run: crate::capabilities::conversation::session::api::RunState::Active,
         }])
     }
     fn open(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {
@@ -1505,7 +1505,7 @@ fn web_serve_returns_when_interrupted() {
 /// CLI 的选项选择：序号与选项 id 原文都认——两者都是那张卡上**用户看得见**的东西。
 #[test]
 fn cli_picks_an_option_by_index_or_id() {
-    use crate::capabilities::session::api::DecisionCard;
+    use crate::capabilities::conversation::session::api::DecisionCard;
     let card: DecisionCard = serde_json::from_value(json!({
         "id": "d1",
         "envelope": { "role": "tools", "name": "甲" },

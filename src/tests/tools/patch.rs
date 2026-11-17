@@ -619,9 +619,9 @@ pub(crate) fn builtin_tool_book_is_the_one_source_of_names_and_paths() {
     }
     // 工作环境块：**只有路径与规矩，没有工具清单**（总表只留在核心手里当判据）。
     let sb = test_sandbox("a1", &[]);
-    let env = crate::capabilities::session::domain::session::prompt::env_block(
+    let env = crate::capabilities::conversation::session::domain::session::prompt::env_block(
         &prompts,
-        &crate::capabilities::session::api::SessionParams::from_workspace(
+        &crate::capabilities::conversation::session::api::SessionParams::from_workspace(
             "a1",
             &sb,
             &[],

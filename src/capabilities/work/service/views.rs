@@ -5,7 +5,7 @@
 //!   本方法族只碰 workspace / sessions / history / running 这四个字段。
 
 use super::*;
-use crate::capabilities::session::api::{subtree_of, work_root};
+use crate::capabilities::conversation::session::api::{subtree_of, work_root};
 
 impl Work {
     /// 目的：上下文「继续」是否该出现——判据只在后端（前端不按末条/模式猜）。
@@ -371,7 +371,7 @@ impl Work {
     ///  读盘失败如实记日志，返回空表。
     pub(super) fn history_list(&self) -> Vec<HistoryView> {
         match self.history.list() {
-            Ok(v) => crate::capabilities::session::api::tree_order(v),
+            Ok(v) => crate::capabilities::conversation::session::api::tree_order(v),
             Err(e) => {
                 self.log
                     .error("work::history_list", &format!("会话列表失败：{}", e));
@@ -382,7 +382,7 @@ impl Work {
 
     /// 目的：事件落盘；失败如实告知（追加一条警告事件），不静默丢历史。
     pub(super) fn record_events(&self, sid: &str, events: &mut Vec<SessionEvent>) {
-        crate::capabilities::session::api::record_events(
+        crate::capabilities::conversation::session::api::record_events(
             self.history.as_ref(),
             self.log.as_ref(),
             sid,
@@ -417,7 +417,7 @@ impl Work {
         let (meta, events) = self.history.load(sid)?;
         Ok((
             meta,
-            crate::capabilities::session::api::truncate_events(&events),
+            crate::capabilities::conversation::session::api::truncate_events(&events),
         ))
     }
 
@@ -430,7 +430,7 @@ impl Work {
         let issued = self
             .history
             .load(sid)
-            .map(|(_, ev)| crate::capabilities::session::api::issued_in(&ev))
+            .map(|(_, ev)| crate::capabilities::conversation::session::api::issued_in(&ev))
             .unwrap_or(0);
         turn.desk_for(sid, issued)
     }

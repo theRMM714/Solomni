@@ -350,7 +350,7 @@ pub(crate) fn quick_profile_switch_updates_root_and_children_cannot_widen() {
 /// 目的：guest 租约按档位与代理根派生：虚拟机档的子树共用顶层租约，代理根自己没有 guest。
 #[test]
 pub(crate) fn guest_lease_follows_the_tier_and_the_proxy_root() {
-    use crate::capabilities::session::api::guest_lease;
+    use crate::capabilities::conversation::session::api::guest_lease;
     use crate::kernel::api::{ExecSpec, Tier};
     let meta = |name: &str, parent: Option<&str>, tier: Tier, mode: &str| SessionMeta {
         context_freshness: false,

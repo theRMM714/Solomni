@@ -5,7 +5,7 @@
 //!   本方法族只碰 registry / history / running / sessions 这四个字段。
 
 use super::*;
-use crate::capabilities::session::api::{subtree_of, work_root};
+use crate::capabilities::conversation::session::api::{subtree_of, work_root};
 
 impl Work {
     /// 目的：这条工作里思考档位要作用到哪些模型（每个 agent 的模型；没有 agent 的会话用核心默认）。

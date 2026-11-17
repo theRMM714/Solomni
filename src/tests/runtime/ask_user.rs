@@ -4,7 +4,7 @@
 //! 联动：端口形状见 src/kernel/ports.rs；契约见 docs/session/session-model.md 的「请用户裁决」。
 
 use crate::capabilities::runtime::api::{Handle, Output, RuntimeOps};
-use crate::capabilities::session::api::SessionEvent;
+use crate::capabilities::conversation::session::api::SessionEvent;
 use crate::capabilities::tools::domain::fence::{OPT_FENCE_ABORT, OPT_FENCE_UNFENCED};
 use crate::capabilities::turn::service::ask_user::SessionAsk;
 use crate::kernel::api::{Ask, AskOutcome};
@@ -37,7 +37,7 @@ fn session_case() -> (Handle, Faces, String) {
 }
 
 /// 会话自己的裁决队（与核心各关卡、工具级确认**同一份**）。
-fn door_of(handle: &Handle, sid: &str) -> Arc<dyn crate::capabilities::session::api::Gates> {
+fn door_of(handle: &Handle, sid: &str) -> Arc<dyn crate::capabilities::conversation::session::api::Gates> {
     let s = sid.to_string();
     handle
         .call(move |core| Ok(core.turn.desk_of(&s)))

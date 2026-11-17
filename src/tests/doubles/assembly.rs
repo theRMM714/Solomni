@@ -289,9 +289,9 @@ pub(crate) fn core_with_workdirs_vm(
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
-    let history: Arc<dyn crate::capabilities::session::api::History + Send + Sync> = Arc::new(
-        crate::capabilities::session::service::SessionService::new(Arc::new(
-            crate::capabilities::session::detail::fs_history::FsHistory::new(root.join("session")),
+    let history: Arc<dyn crate::capabilities::conversation::session::api::History + Send + Sync> = Arc::new(
+        crate::capabilities::conversation::session::service::SessionService::new(Arc::new(
+            crate::capabilities::conversation::session::detail::fs_history::FsHistory::new(root.join("session")),
         )),
     );
     Core::new(

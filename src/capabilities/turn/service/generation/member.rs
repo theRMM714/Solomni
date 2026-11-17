@@ -3,7 +3,7 @@
 //! 不管：协作泵的推进策略、会话装配。
 //! 联动：`generation/collab.rs`、`turn::api::TurnHost`
 
-use crate::capabilities::session::api::{AgentSession, MemberTurn, SessionEvent, TurnIo};
+use crate::capabilities::conversation::session::api::{AgentSession, MemberTurn, SessionEvent, TurnIo};
 use crate::capabilities::turn::api::{AskReq, TurnHost};
 
 /// 目的：主线程侧：为一个成员回合取该 agent 的会话，跑完把回合结果带回来（并落进它自己的会话）。
@@ -67,7 +67,7 @@ pub(crate) fn run_member_turn<H: TurnHost>(
             let mut emit = {
                 let bus = std::sync::Arc::clone(&bus);
                 let sid = child_sid.clone();
-                move |ev: crate::capabilities::session::api::SessionEvent| {
+                move |ev: crate::capabilities::conversation::session::api::SessionEvent| {
                     bus.push(&sid, std::slice::from_ref(&ev));
                 }
             };
@@ -77,7 +77,7 @@ pub(crate) fn run_member_turn<H: TurnHost>(
                 ask,
             };
             // 权威行与通知也进它自己的台，并在产出的当下落盘（重建与实时同源）。
-            let mut sink = |ev: crate::capabilities::session::api::SessionEvent| {
+            let mut sink = |ev: crate::capabilities::conversation::session::api::SessionEvent| {
                 bus.push(&child_sid, std::slice::from_ref(&ev));
                 if let Some(warn) = persister.persist(std::slice::from_ref(&ev)) {
                     bus.push(
@@ -111,7 +111,7 @@ pub(crate) fn run_member_turn<H: TurnHost>(
             child_bus.push(
                 &child,
                 &[SessionEvent::Notice(
-                    crate::capabilities::session::api::interrupted_note("成员线程崩溃"),
+                    crate::capabilities::conversation::session::api::interrupted_note("成员线程崩溃"),
                 )],
             );
             return Err("成员线程崩溃：该会话已按落盘转录保留".to_string());
@@ -131,9 +131,9 @@ pub(crate) fn run_member_turn<H: TurnHost>(
             // 否则那个标签页的光标一直挂着、按钮一直停在「停止」。
             let stopped = req.cancel.load(std::sync::atomic::Ordering::Relaxed);
             let why = if stopped {
-                crate::capabilities::session::api::stopped_note()
+                crate::capabilities::conversation::session::api::stopped_note()
             } else {
-                crate::capabilities::session::api::interrupted_note(&err)
+                crate::capabilities::conversation::session::api::interrupted_note(&err)
             };
             child_bus.push(&child, &[SessionEvent::Working { agent: None }]);
             child_bus.push(&child, &[SessionEvent::Notice(why)]);
@@ -144,7 +144,7 @@ pub(crate) fn run_member_turn<H: TurnHost>(
     // 这里只做运行态收尾：主会话有 working{None}，子会话也要有——否则那个标签页一直显示"正在工作"、按钮一直停在「停止」。
     child_bus.push(
         &child,
-        &[crate::capabilities::session::api::SessionEvent::Working { agent: None }],
+        &[crate::capabilities::conversation::session::api::SessionEvent::Working { agent: None }],
     );
     host.core({
         let name = child.clone();

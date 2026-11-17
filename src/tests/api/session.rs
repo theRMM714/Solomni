@@ -135,7 +135,7 @@ fn provider_usage_is_exposed_in_session_view_and_persisted() {
         }),
         "流水里要有 usage 事件"
     );
-    let last = crate::capabilities::session::api::last_usage(&events).expect("读回用量");
+    let last = crate::capabilities::conversation::session::api::last_usage(&events).expect("读回用量");
     assert_eq!(last.total_tokens, 1020);
 }
 
@@ -755,7 +755,7 @@ fn thinking_view_uses_the_common_default_and_hides_unmapped_levels() {
 
 #[test]
 fn workspace_grant_parses_defaults_and_requires_a_workspace() {
-    use crate::capabilities::session::api::{WorkspaceBinding, WorkspaceGrant};
+    use crate::capabilities::conversation::session::api::{WorkspaceBinding, WorkspaceGrant};
     assert_eq!(WorkspaceGrant::parse("none").unwrap(), WorkspaceGrant::None);
     assert_eq!(
         WorkspaceGrant::parse(" Session ").unwrap(),

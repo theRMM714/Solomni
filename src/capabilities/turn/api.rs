@@ -40,7 +40,7 @@ pub fn session_ask(
 pub use crate::capabilities::turn::service::state::Session;
 
 use crate::capabilities::catalog::registry::api::Registry;
-use crate::capabilities::session::api::{
+use crate::capabilities::conversation::session::api::{
     AgentSession, DecisionQueue, Gates, Persister, SessionEvent, SessionMeta,
 };
 use crate::kernel::api::SessionId;
@@ -115,7 +115,7 @@ pub fn event_bus() -> Arc<dyn Events> {
 ///   两者都不属于对外契约（前端只发"回答"，不问后端怎么推进）。
 pub(crate) enum CollabWork {
     /// 目的：处置一张已经出队的回答（队列给的处置票）。
-    Dispose(crate::capabilities::session::api::GateTicket),
+    Dispose(crate::capabilities::conversation::session::api::GateTicket),
     Resume,
 }
 

@@ -50,14 +50,13 @@
 | 1 | `llm`、`permission`、`prompt`、`taskchain` | 0 |
 | 2 | `catalog`、`workspace` | 0–1 |
 | 3 | `residents`、`tools`、`vm` | 0–2 |
-| 4 | `provision`、`session` | 0–3 |
-| 5 | `env`、`proxy`、`slate`、`storage` | 0–4 |
-| 6 | `builds`、`collab` | 0–5 |
-| 7 | `system`、`turn` | 0–6 |
-| 8 | `lifecycle`、`work` | 0–7 |
-| 9 | `runtime` | 0–8 |
+| 4 | `conversation`、`provision` | 0–3 |
+| 5 | `env`、`storage` | 0–4 |
+| 6 | `builds`、`turn` | 0–5 |
+| 7 | `lifecycle`、`system`、`work` | 0–6 |
+| 8 | `runtime` | 0–7 |
 
-> 9 层、22 个能力 + `kernel`：本表由 `layers.yaml` 生成（`node tests/docs-sync.mjs --write`），不手写。
+> 8 层、19 个能力 + `kernel`：本表由 `layers.yaml` 生成（`node tests/docs-sync.mjs --write`），不手写。
 <!-- END:layer-table -->
 
 - 层号是**声明的意图**，不是从代码算出来的事实：改成「按当前依赖现算」，判据就恒真（每条边按构造都向下），门禁失去全部约束力。所以表由人维持、门禁比「意图 vs 现实」，越界时顺带报出「按现有依赖至少要第几层」。
@@ -76,7 +75,7 @@
 
 ## 二、端口：只画在 IO 与可替换点上
 
-- 端口 = 各能力 `ports.rs` 与 `src/kernel/ports.rs` 里的 trait（`Chat` 的定义在 `src/capabilities/llm/api.rs`、`ProxyHost` 的定义在 `src/capabilities/proxy/api.rs`，因为它们同时是能力的入站面，列于本表以便对照）。判据只有一条：**这里有 IO，或者这里有可替换的实现**。
+- 端口 = 各能力 `ports.rs` 与 `src/kernel/ports.rs` 里的 trait（`Chat` 的定义在 `src/capabilities/llm/api.rs`、`ProxyHost` 的定义在 `src/capabilities/conversation/proxy/api.rs`，因为它们同时是能力的入站面，列于本表以便对照）。判据只有一条：**这里有 IO，或者这里有可替换的实现**。
 - 纯逻辑（信封解析、引擎循环、协作状态派生、提示词渲染）**刻意不抽象**。
 
 | 端口 | 职责 | 适配层实现 |
@@ -211,7 +210,7 @@
 
 - **归层是必填身份**：能力必须在 `layers.yaml` 里有一行，只能依赖**严格更低层**，**同层零引用**（`tests/gates/structure/layers.js`）。层号不回答「是不是业务」，它只回答「能依赖谁」。
 - **机制不因调用方多而升格**：日志、路径、进程、围栏、平台差异归一化这类没有领域词、没有用户可见后果的机制，留在 `kernel` 或所属能力的 `detail/`，不按第 2 条算作业务；第 2 条只用来判断「已有自己用例」的能力是否值得独立。
-- **已判例（代理工具族 → `proxy`）**：判据 1 成立——六工具有自有协议（`src/capabilities/proxy/domain/proxy.rs` 的载荷、授权判据与回执形状）与用户可见后果（代用户建会话、转达、控会话）。判据 2 目前只有 `runtime` 一个能力调用方，它成立的方式是**端口反转**：`proxy` 声明宿主契约 `ProxyHost`（`src/capabilities/proxy/api.rs`），由 `runtime` 的 `ProxyBridge` 实现（`src/capabilities/runtime/service/bridge.rs`）、只在 `src/capabilities/runtime/service/handle.rs` 的 `inject_proxy_handler` 装配——`runtime` 对它的依赖因此止于 `::api`，真实会话状态仍在 `runtime` / `turn` 一侧。
+- **已判例（代理工具族 → `proxy`）**：判据 1 成立——六工具有自有协议（`src/capabilities/conversation/proxy/domain/proxy.rs` 的载荷、授权判据与回执形状）与用户可见后果（代用户建会话、转达、控会话）。判据 2 目前只有 `runtime` 一个能力调用方，它成立的方式是**端口反转**：`proxy` 声明宿主契约 `ProxyHost`（`src/capabilities/conversation/proxy/api.rs`），由 `runtime` 的 `ProxyBridge` 实现（`src/capabilities/runtime/service/bridge.rs`）、只在 `src/capabilities/runtime/service/handle.rs` 的 `inject_proxy_handler` 装配——`runtime` 对它的依赖因此止于 `::api`，真实会话状态仍在 `runtime` / `turn` 一侧。
 - **已判例（顶层编排 → `runtime`）**：判据 1 成立——编排有自己的领域词（启用工作、改需求、回档、停止、动作分发）、自有协议（`src/capabilities/runtime/api.rs` 的 `RuntimeOps` / `ActionOps` / `ActionCall` / `Acted`）与用户可见后果（一条命令把几个下层用例按序跑完）；判据 2 成立——入口（`src/main.rs` 的 `Handle::spawn`）与呈现层（`src/presentation/faces.rs` 的 `Faces`）是两个调用方，两个渠道共用同一份编排。它**不搬**下层用例的身体：方法体只是「按序调几个下层用例 + 状态聚合」。
 - **状态不参与这条判据**——它只在 §九.2 回答「这块状态归谁」。
 
@@ -243,7 +242,7 @@
 - **动作表不等于分发器**：`runtime` 的 `ActionOps::act` 是**入口分发**（查表 → 校验 → 授权 → 审计，`src/capabilities/runtime/service/action.rs`），执行体仍在各能力的用例里；把它写成什么都干的「万能分发器」等于把下层用例搬进顶层。
 - **聚合面不是业务**：`Faces`（`src/presentation/faces.rs`）只做装配——回答「这块屏幕取哪几个面」，不得长判定；判定与编排留在 `runtime`，机制留在各能力的 `detail/`。
 - **把可变借用当参数传**：账本这类纯值按值进出——交一份、拿回更新后的那份，不借别人的 `&mut`（`src/capabilities/tools/api.rs` 的 `Recorded`；R16）。
-- **把环境包当参数传**：把端口、状态与值拼成一个结构递给别的能力，等于传活对象；改成只传值 + 少量窄端口（`src/capabilities/session/domain/tools.rs`、R16）：该文件里的 `ToolFace` 是抽出来的值面，端口与活状态仍留在 `MemberTools`；核实用例只借一个窄端口 `CoreVerify`，不把 `MemberTools` 写进 api 签名。`session` 的 `api` 不转出 `MemberTools`：装配入口（`src/capabilities/session/service/assemble.rs` 的 `single_session` / `rebuild_single` / `proxy_session`）只收端口与值，核实环境经 `verify_tools(&VerifySpec)`（`src/capabilities/session/service/verify.rs`）取。
+- **把环境包当参数传**：把端口、状态与值拼成一个结构递给别的能力，等于传活对象；改成只传值 + 少量窄端口（`src/capabilities/conversation/session/domain/tools.rs`、R16）：该文件里的 `ToolFace` 是抽出来的值面，端口与活状态仍留在 `MemberTools`；核实用例只借一个窄端口 `CoreVerify`，不把 `MemberTools` 写进 api 签名。`session` 的 `api` 不转出 `MemberTools`：装配入口（`src/capabilities/conversation/session/service/assemble.rs` 的 `single_session` / `rebuild_single` / `proxy_session`）只收端口与值，核实环境经 `verify_tools(&VerifySpec)`（`src/capabilities/conversation/session/service/verify.rs`）取。
 
 ### 九.5 粒度上限
 

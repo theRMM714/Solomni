@@ -298,7 +298,7 @@ pub(crate) fn discussion_member_turn_finalizes_by_round_and_rebuilds_the_same_di
     );
     assert_eq!(tool_turn, said_turn, "同一个回合的行带同一个回合号");
     // ② 实时与重建同口径：把会话从表里丢掉，再取一次 = 按落盘转录重建。
-    let shown = |s: &crate::capabilities::session::api::AgentSession| {
+    let shown = |s: &crate::capabilities::conversation::session::api::AgentSession| {
         s.dialogue()
             .iter()
             .map(|m| format!("{}:{}", m.role, m.content))
@@ -368,7 +368,7 @@ pub(crate) fn prose_without_an_envelope_is_not_a_statement() {
     );
 
     // 线格式：只在为真时写出这两个字段
-    let yes = SessionEvent::Transcript(vec![crate::capabilities::session::api::LineView {
+    let yes = SessionEvent::Transcript(vec![crate::capabilities::conversation::session::api::LineView {
         id: 0,
         line: "x".into(),
         system: true,
@@ -378,7 +378,7 @@ pub(crate) fn prose_without_an_envelope_is_not_a_statement() {
     .to_json();
     assert_eq!(yes["lines"][0]["system"], serde_json::Value::Bool(true));
     assert_eq!(yes["lines"][0]["degraded"], serde_json::Value::Bool(true));
-    let no = SessionEvent::Transcript(vec![crate::capabilities::session::api::LineView {
+    let no = SessionEvent::Transcript(vec![crate::capabilities::conversation::session::api::LineView {
         id: 0,
         line: "x".into(),
         ..Default::default()

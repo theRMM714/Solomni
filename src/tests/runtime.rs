@@ -514,7 +514,7 @@ pub(crate) fn vm_tool_paths_follow_provisioned_packages_without_restart() {
 ///   行由**唯一那处**构造函数产出（单 agent 与讨论席共用），所以这里直接问它。
 #[test]
 pub(crate) fn tool_round_reasoning_lands_on_the_tool_line() {
-    let tool = crate::capabilities::session::api::ToolCallView {
+    let tool = crate::capabilities::conversation::session::api::ToolCallView {
         speaker: "a".to_string(),
         module: String::new(),
         name: "read".to_string(),
@@ -526,7 +526,7 @@ pub(crate) fn tool_round_reasoning_lands_on_the_tool_line() {
         read: None,
         shell: None,
     };
-    let round = crate::capabilities::session::service::engine::round::Round {
+    let round = crate::capabilities::conversation::session::service::engine::round::Round {
         reply: 1,
         // 工具轮没有正文：思维链不能另造一条空回答行，只能挂到工具行上。
         text: String::new(),
@@ -534,7 +534,7 @@ pub(crate) fn tool_round_reasoning_lands_on_the_tool_line() {
         text_msgs: Vec::new(),
         raw: "原始回复".to_string(),
         tool: Some(
-            crate::capabilities::session::service::engine::round::ToolRun {
+            crate::capabilities::conversation::session::service::engine::round::ToolRun {
                 view: tool,
                 msgs: Vec::new(),
             },
@@ -545,7 +545,7 @@ pub(crate) fn tool_round_reasoning_lands_on_the_tool_line() {
         degraded: false,
     };
     let next = std::cell::Cell::new(0u64);
-    let lines = crate::capabilities::session::service::engine::round::build_round_lines(
+    let lines = crate::capabilities::conversation::session::service::engine::round::build_round_lines(
         "a", &round, false, &next, None,
     );
     assert_eq!(lines.len(), 1, "工具轮没有正文时只出工具行：{lines:?}");
@@ -635,7 +635,7 @@ pub(crate) fn rewinding_the_main_session_truncates_agent_sessions_by_turn() {
             if let Some(ls) = ev.get("lines").and_then(|l| l.as_array()) {
                 for l in ls {
                     if let Ok(v) = serde_json::from_value::<
-                        crate::capabilities::session::api::LineView,
+                        crate::capabilities::conversation::session::api::LineView,
                     >(l.clone())
                     {
                         out.push((v.id, v.render(), v.turn));

@@ -18,7 +18,7 @@ pub(crate) fn execution_review_pass_and_fail_paths() {
     assert_eq!(ran.reports.get("m0").map(|s| s.as_str()), Some("汇报内容"));
 
     // 验收：核心对照方案逐项核对（总验收用的就是这条）。
-    let mut exec = crate::capabilities::collab::service::synthesis::Execution::new();
+    let mut exec = crate::capabilities::conversation::collab::service::synthesis::Execution::new();
     exec.reports = ran.reports.clone();
     let mut core_chat = scripted(vec![
         "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"A\",\"status\":\"fail\",\"reason\":\"没做完\"}]}}".into(),
@@ -33,12 +33,12 @@ pub(crate) fn execution_review_pass_and_fail_paths() {
         Default::default(),
         Default::default(),
         None,
-        &mut |_e: crate::capabilities::session::api::SessionEvent| {},
+        &mut |_e: crate::capabilities::conversation::session::api::SessionEvent| {},
     );
     assert!(!exec.all_pass(), "有 fail 项就不通过");
 
     // 再验一次：这次全 pass。
-    let mut exec2 = crate::capabilities::collab::service::synthesis::Execution::new();
+    let mut exec2 = crate::capabilities::conversation::collab::service::synthesis::Execution::new();
     exec2.reports = ran.reports.clone();
     let mut core_chat2 = scripted(vec![
         "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"A\",\"status\":\"pass\"}]}}"
@@ -54,7 +54,7 @@ pub(crate) fn execution_review_pass_and_fail_paths() {
         Default::default(),
         Default::default(),
         None,
-        &mut |_e: crate::capabilities::session::api::SessionEvent| {},
+        &mut |_e: crate::capabilities::conversation::session::api::SessionEvent| {},
     );
     assert!(exec2.all_pass());
 }
@@ -68,7 +68,7 @@ pub(crate) fn review_parse_failure_is_conservative_fail() {
         crate::capabilities::llm::api::ToolMode::Envelope,
         scripted(vec!["{\"type\":\"say\",\"text\":\"x\"}".into()]),
     )];
-    let mut exec = crate::capabilities::collab::service::synthesis::Execution::new();
+    let mut exec = crate::capabilities::conversation::collab::service::synthesis::Execution::new();
     exec.reports = run_execution(members.as_mut_slice(), "任务", &prompts).reports;
     let mut core_chat = scripted(vec!["完全不是清单".to_string()]);
     exec.review(
@@ -81,7 +81,7 @@ pub(crate) fn review_parse_failure_is_conservative_fail() {
         Default::default(),
         Default::default(),
         None,
-        &mut |_e: crate::capabilities::session::api::SessionEvent| {},
+        &mut |_e: crate::capabilities::conversation::session::api::SessionEvent| {},
     );
     assert!(exec.items.is_empty());
     assert!(!exec.all_pass(), "解析失败必须保守判否");
@@ -206,7 +206,7 @@ pub(crate) fn approved_plan_spawns_a_sub_session_per_ready_node() {
     );
     assert_eq!(cmeta.mode, "single");
     assert_eq!(
-        crate::capabilities::session::api::work_root(core.history_handle().as_ref(), child)
+        crate::capabilities::conversation::session::api::work_root(core.history_handle().as_ref(), child)
             .expect("工作根"),
         sid,
         "沙箱锚在顶层工作上（整棵树共用一个 work/）"
@@ -268,7 +268,7 @@ pub(crate) fn same_agent_nodes_serialize_but_different_agents_run_together() {
 pub(crate) fn checklist_rework_is_a_validated_node_id() {
     let known = vec!["n1-1".to_string(), "n2-1".to_string()];
     let item = |status: &str, rework: Option<&str>| {
-        crate::capabilities::collab::service::synthesis::CheckItem {
+        crate::capabilities::conversation::collab::service::synthesis::CheckItem {
             item: "方案条目".to_string(),
             status: status.to_string(),
             evidence: None,
@@ -276,7 +276,7 @@ pub(crate) fn checklist_rework_is_a_validated_node_id() {
             rework: rework.map(|r| r.to_string()),
         }
     };
-    let mut exec = crate::capabilities::collab::service::synthesis::Execution::new();
+    let mut exec = crate::capabilities::conversation::collab::service::synthesis::Execution::new();
     exec.items = vec![item("fail", Some("n2-1")), item("pass", None)];
     assert_eq!(exec.rework_targets(), vec!["n2-1".to_string()]);
     assert!(

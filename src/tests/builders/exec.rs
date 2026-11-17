@@ -8,7 +8,7 @@ use super::*;
 /// 目的：测试用的"逐成员跑一遍"：内部走**共享的 converse_with**（工具循环本身仍在生产里， 只是执行阶段的入口从平铺的 Execution::run 换成了链驱动）。
 pub(crate) struct ExecLike {
     pub reports: BTreeMap<String, String>,
-    pub traces: BTreeMap<String, Vec<crate::capabilities::session::api::ToolCallView>>,
+    pub traces: BTreeMap<String, Vec<crate::capabilities::conversation::session::api::ToolCallView>>,
     /// 目的：每个成员的各回复原文（每条回复一份）。
     pub raws: BTreeMap<String, Vec<String>>,
 }
@@ -18,16 +18,16 @@ pub(crate) trait Seat {
     fn parts_mut(
         &mut self,
     ) -> (
-        &mut crate::capabilities::collab::service::discussion::Member,
+        &mut crate::capabilities::conversation::collab::service::discussion::Member,
         Option<&mut MemberTools>,
     );
 }
 
-impl Seat for crate::capabilities::collab::service::discussion::Member {
+impl Seat for crate::capabilities::conversation::collab::service::discussion::Member {
     fn parts_mut(
         &mut self,
     ) -> (
-        &mut crate::capabilities::collab::service::discussion::Member,
+        &mut crate::capabilities::conversation::collab::service::discussion::Member,
         Option<&mut MemberTools>,
     ) {
         (self, None)
@@ -38,7 +38,7 @@ impl Seat for WithTools {
     fn parts_mut(
         &mut self,
     ) -> (
-        &mut crate::capabilities::collab::service::discussion::Member,
+        &mut crate::capabilities::conversation::collab::service::discussion::Member,
         Option<&mut MemberTools>,
     ) {
         (&mut self.member, self.tools.as_mut())
@@ -68,9 +68,9 @@ pub(crate) fn run_execution<S: Seat>(
         );
         let mut views = Vec::new();
         let mut noop = |_c: crate::capabilities::llm::api::Chunk| true;
-        let mut sink = |_e: crate::capabilities::session::api::SessionEvent| {};
+        let mut sink = |_e: crate::capabilities::conversation::session::api::SessionEvent| {};
         let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let rounds = crate::capabilities::session::service::engine::round::converse_with(
+        let rounds = crate::capabilities::conversation::session::service::engine::round::converse_with(
             member.chat.as_mut().expect("测试通道").as_mut(),
             tools,
             &identity,
@@ -79,9 +79,9 @@ pub(crate) fn run_execution<S: Seat>(
             &id,
             &cancel,
             &mut noop,
-            &mut |v: &crate::capabilities::session::api::ToolCallView| views.push(v.clone()),
-            &mut |_r: &crate::capabilities::session::service::engine::round::Round,
-                  _s: &mut dyn FnMut(crate::capabilities::session::api::SessionEvent)| {},
+            &mut |v: &crate::capabilities::conversation::session::api::ToolCallView| views.push(v.clone()),
+            &mut |_r: &crate::capabilities::conversation::session::service::engine::round::Round,
+                  _s: &mut dyn FnMut(crate::capabilities::conversation::session::api::SessionEvent)| {},
             &mut sink,
             // 测试不接工具级确认：直接执行（确认路径由 permission 的用例单独钉）。
             None,

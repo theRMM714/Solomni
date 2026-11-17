@@ -292,7 +292,7 @@ pub(crate) fn refs_rewrite_covers_prefixes_speakers_and_punctuation() {
 #[test]
 pub(crate) fn ref_rewrite_uses_the_session_path_dialect() {
     use crate::capabilities::prompt::api::rewrite;
-    use crate::capabilities::session::api::SessionParams;
+    use crate::capabilities::conversation::session::api::SessionParams;
     use crate::capabilities::vm::api::PathBridge;
     use crate::capabilities::vm::domain::paths::PathDialect;
     use crate::capabilities::workspace::api::Sandboxes;
@@ -362,7 +362,7 @@ pub(crate) fn ref_rewrite_uses_the_session_path_dialect() {
 
 #[test]
 pub(crate) fn session_at_roots_go_by_the_session_guest() {
-    use crate::capabilities::session::api::SessionParams;
+    use crate::capabilities::conversation::session::api::SessionParams;
     // 会话的 @ 根由参数派生：没有 guest（本机档）就恒等，有 guest 就与同一 guest 造的桥给同一种写法。
     let sb = test_sandbox("甲", &["data"]);
     let host = SessionParams::from_workspace("甲", &sb, &[], "single", "solo");
@@ -480,7 +480,7 @@ pub(crate) fn user_at_reference_is_rewritten_in_transcript_and_history() {
 /// 约束：不读全局视图盘：视图分支由显式注入的编码器验，否则并行用例会随本进程的分盘状态抖动。
 #[test]
 pub(crate) fn env_path_follows_the_injected_codec() {
-    use crate::capabilities::session::domain::session::prompt::env_path;
+    use crate::capabilities::conversation::session::domain::session::prompt::env_path;
     use crate::capabilities::vm::api::PathBridge;
     use crate::capabilities::vm::domain::paths::PathDialect;
     use crate::kernel::ports::PathCodec;

@@ -14,7 +14,7 @@ use crate::capabilities::permission::api::{
 };
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::catalog::registry::api::AppSettings;
-use crate::capabilities::session::api::{RunState, SessionMeta, WorkspaceBinding, WorkspaceGrant};
+use crate::capabilities::conversation::session::api::{RunState, SessionMeta, WorkspaceBinding, WorkspaceGrant};
 use crate::capabilities::workspace::api::{Sandbox, WorkRoots};
 use crate::kernel::api::{ExecSpec, Tier};
 use crate::tests::doubles::module_of;

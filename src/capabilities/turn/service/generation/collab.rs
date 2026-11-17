@@ -3,8 +3,8 @@
 //! 不管：单个成员回合的实现、会话装配。
 //! 联动：`generation/member.rs`、`turn::api::TurnHost`、docs/session/session-model.md
 
-use crate::capabilities::collab::api::AfterTurn;
-use crate::capabilities::session::api::SessionEvent;
+use crate::capabilities::conversation::collab::api::AfterTurn;
+use crate::capabilities::conversation::session::api::SessionEvent;
 use crate::capabilities::turn::api::{Advance, AskReq, CollabWork, TurnHost};
 
 /// 目的：协作的长步骤（开始讨论 / 回答 / 继续）：与单 agent 同一条 own-and-return—— 队列只占"取/交"两步，泵在工作线程上跑；事件**边产边送**事件台，界面因此能看着讨论推进。  **核心驱动**（见 docs/session/session-model.md 二之二）：泵只决定"该问谁"， 成员回合由主线程取该 agent 的会话去跑（它才拿得到那些会话）。所以泵线程与主线程**握手**： 泵让出 → 发 AskReq → 主线程跑完回 MemberTurn → 泵继续。
@@ -45,7 +45,7 @@ pub(crate) fn collab_generation<H: TurnHost>(
     // 握手通道：泵 → 主线程（要一个成员回合）；主线程 → 泵（回合结果）。
     let (ask_tx, ask_rx) = std::sync::mpsc::channel::<AskReq>();
     let (turn_tx, turn_rx) =
-        std::sync::mpsc::channel::<Result<crate::capabilities::session::api::MemberTurn, String>>();
+        std::sync::mpsc::channel::<Result<crate::capabilities::conversation::session::api::MemberTurn, String>>();
     let worker =
         {
             let sid = sid.to_string();
@@ -95,7 +95,7 @@ pub(crate) fn collab_generation<H: TurnHost>(
                             // 主会话据此显示"某某正在工作"（按钮切换与占位动画都读它）。
                             bus.push(
                                 &sid,
-                                &[crate::capabilities::session::api::SessionEvent::Working {
+                                &[crate::capabilities::conversation::session::api::SessionEvent::Working {
                                     agent: Some(agent_name.clone()),
                                 }],
                             );
@@ -103,7 +103,7 @@ pub(crate) fn collab_generation<H: TurnHost>(
                             // （或者按钮一直停在「停止」）。收尾那条在成员回合的收尾处推。
                             bus.push(
                                 &format!("{}--{}", sid, agent_name),
-                                &[crate::capabilities::session::api::SessionEvent::Working {
+                                &[crate::capabilities::conversation::session::api::SessionEvent::Working {
                                     agent: Some(agent_name.clone()),
                                 }],
                             );
@@ -174,7 +174,7 @@ pub(crate) fn collab_generation<H: TurnHost>(
                         // 下一次问谁时会再推一条带名字的，所以这里只需要收尾这一条。
                         bus.push(
                             &sid,
-                            &[crate::capabilities::session::api::SessionEvent::Working {
+                            &[crate::capabilities::conversation::session::api::SessionEvent::Working {
                                 agent: None,
                             }],
                         );

@@ -5,7 +5,7 @@
 
 pub(crate) use super::doubles::*;
 
-pub use crate::capabilities::collab::service::discussion::{
+pub use crate::capabilities::conversation::collab::service::discussion::{
     Discussion, MAX_ROUNDS, Member, TurnOut,
 };
 
@@ -24,12 +24,12 @@ pub use crate::capabilities::prompt::domain::prompt::render;
 pub use crate::capabilities::catalog::registry::api::{ModelDraft, ModelEntry, Provider, Settings};
 
 pub use crate::capabilities::catalog::registry::api::AgentMeta;
-pub use crate::capabilities::session::api::{RunState, SessionMeta};
+pub use crate::capabilities::conversation::session::api::{RunState, SessionMeta};
 
-pub use crate::capabilities::session::domain::tools::MemberTools;
-pub use crate::capabilities::session::domain::tools::ModuleTools;
+pub use crate::capabilities::conversation::session::domain::tools::MemberTools;
+pub use crate::capabilities::conversation::session::domain::tools::ModuleTools;
 
-pub use crate::capabilities::session::ports::HistoryStore;
+pub use crate::capabilities::conversation::session::ports::HistoryStore;
 
 pub use crate::capabilities::tools::api::{ToolExec, ToolOutcome};
 pub use crate::kernel::ports::ProcessRunner;
@@ -45,10 +45,10 @@ pub use crate::capabilities::workspace::ports::Workdirs;
 pub use crate::capabilities::runtime::api::SessionEvent;
 pub use crate::capabilities::work::api::{ConfigAgent, SessionEdit, WorkMode, WorkSpec};
 
-pub use crate::capabilities::session::api::Pending;
+pub use crate::capabilities::conversation::session::api::Pending;
 
 /// 目的：裁决卡的选项 id（契约）：测试按它作答，不按文案。
-pub use crate::capabilities::session::api::{
+pub use crate::capabilities::conversation::session::api::{
     OPT_BEGIN, OPT_BEGIN_ALLOW, OPT_PLAN_SAY, OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM,
 };
 

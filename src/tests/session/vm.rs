@@ -91,7 +91,7 @@ pub(crate) fn child_sessions_share_the_main_guest_and_follow_its_tier() {
     );
     let child_meta = hist.meta("w--a").expect("读子会话");
     assert_eq!(
-        crate::capabilities::session::api::guest_lease_for(
+        crate::capabilities::conversation::session::api::guest_lease_for(
             core.history_handle().as_ref(),
             &child_meta
         )
@@ -161,7 +161,7 @@ pub(crate) fn proxy_children_share_the_proxy_tree_guest() {
     );
     let child_meta = hist.meta("p--a").expect("读子工作");
     assert_eq!(
-        crate::capabilities::session::api::guest_lease_for(
+        crate::capabilities::conversation::session::api::guest_lease_for(
             core.history_handle().as_ref(),
             &child_meta
         )
@@ -170,7 +170,7 @@ pub(crate) fn proxy_children_share_the_proxy_tree_guest() {
         "proxy 子工作要加入代理根那一台 guest"
     );
     assert_eq!(
-        crate::capabilities::session::api::guest_lease_for(
+        crate::capabilities::conversation::session::api::guest_lease_for(
             core.history_handle().as_ref(),
             &hist.meta("p").expect("代理根"),
         )

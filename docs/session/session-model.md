@@ -1,7 +1,7 @@
 # 会话模型与上下文压缩
 
 > 定位：一次工作里有哪些会话、它们怎么对话、怎么同步、上下文怎么压的唯一权威。
-> 效力：规范｜核对：2026-11-13｜依据：`src/capabilities/session/domain/session.rs`
+> 效力：规范｜核对：2026-11-13｜依据：`src/capabilities/conversation/session/domain/session.rs`
 
 ## 适用与判据
 - 会话形态、回合、派发、回档与压缩以本文为准（`docs/session/session-model.md`）。
@@ -42,7 +42,7 @@ session/<工作名>/
 - **落盘在主会话目录内部**：`session/<工作>/children/<工作>--<名字>/`——位置与 `meta.parent` 同源（看位置就知道归属）；`session/` 下不出现与主会话并列的子会话目录，**删主会话就是删一个目录**。
 - **可以再往下嵌套**：子会话自己还能有子会话（代理建的协作子工作会派生节点子会话），每一层都是父会话目录下的 `children/<名字>/`；查找、列清单、级联删除都按**任意深度**走整棵 children/ 树。
 - **整棵树只有一个共享区根**：不论嵌套多少层，共享区始终是**顶层**那一个（工作根 = 沿 `meta.parent` 走到顶；默认是顶层 `work/`，根会话绑定外部工作区时是 `meta.yaml` 的 `workspace.root`），各 agent 沙箱也建在工作根下；实例名因此在**整棵子树**里唯一（重名自动带尾号，见 registry 的命名策略）。
-- **外部工作区绑定**：根会话可在创建时把共享区主副本绑定到产品目录之外的绝对路径；绑定写进 `meta.yaml` 的 `workspace` 段，整棵子树只读继承，**创建后不可改**。`.work/` 与各 agent 沙箱永远留在会话目录内，外部目录里不出现本产品的状态；`.work-root` 只是布局投影，打开 / 重建时按 meta 刷新。授权粒度记在 `workspace.grant`（`none` / `session` / `workspace`；缺字段与旧 meta 都按 `session` 读回，类型与解析见 `src/capabilities/workspace/domain/workspace.rs`，绑定本身仍在 `src/capabilities/session/domain/history.rs`）：子会话沿父继承、不能自选，没有外部工作区时非 `session` 粒度创建被拒（`src/capabilities/work/service/create.rs` 的 `resolve_workspace_binding`）。虚拟机档的隔离是挂载边界（`machine_ro_tree` 以只读挂载兑现），宿主不写 ACL，因此 `workspace` 粒度在虚拟机档不产生一次性授权成本、等同于 `session` 的零成本。
+- **外部工作区绑定**：根会话可在创建时把共享区主副本绑定到产品目录之外的绝对路径；绑定写进 `meta.yaml` 的 `workspace` 段，整棵子树只读继承，**创建后不可改**。`.work/` 与各 agent 沙箱永远留在会话目录内，外部目录里不出现本产品的状态；`.work-root` 只是布局投影，打开 / 重建时按 meta 刷新。授权粒度记在 `workspace.grant`（`none` / `session` / `workspace`；缺字段与旧 meta 都按 `session` 读回，类型与解析见 `src/capabilities/workspace/domain/workspace.rs`，绑定本身仍在 `src/capabilities/conversation/session/domain/history.rs`）：子会话沿父继承、不能自选，没有外部工作区时非 `session` 粒度创建被拒（`src/capabilities/work/service/create.rs` 的 `resolve_workspace_binding`）。虚拟机档的隔离是挂载边界（`machine_ro_tree` 以只读挂载兑现），宿主不写 ACL，因此 `workspace` 粒度在虚拟机档不产生一次性授权成本、等同于 `session` 的零成本。
 - **虚拟机档的挂载布局**：起 guest 时把**会话树根**（`session/<工作名>`，各 agent 私沙与 `.work` 的父目录）与**外部工作区根**（仅外部绑定时）各挂一条稳定挂载，另加模块树根——三根互不包含，guest 内的路径写法由同一座路径桥给出；外部根是 UNC / 网络路径时只有虚拟机档支持（guest 内写成 `/solomni-host/unc/<server>/<share>/…`；本机档因容器围栏拒绝网络工作区）。
 - **环境属于顶层工作**：`exec`（档位 / 虚拟根 / 定版）由人建主会话时决定，整棵子树只读继承；核心代理建子会话时不能自选环境。**同一 agent 全树只有一份名单**：子会话编辑模块 / 模型时写回这份名单，guest 装配按整棵树重新聚合；只改模型 / 权限不重建 guest，改模块 / 环境才重建。
 - 会话权限是**根 ceiling + 子会话逐层 narrowing**：根写 sandbox.ceiling，子写 sandbox.narrowing；子只能换更低档、只能收窄，父编辑只改 ceiling 并与子 narrowing 求交，不覆盖子收窄（`src/capabilities/permission/domain/permission.rs`）。
@@ -66,7 +66,7 @@ session/<工作名>/
 ### 计数与提醒（讨论阶段）
 
 - **模型调用次数没有上限**：子会话继续核实就继续跑，直到模型不再发起调用、或用户点「停止」。
-- 不上"到顶直接收尾"这类天花板——它会把"还想接着核实"误判成"必须收尾"，执行席因此干到一半被掐断（`src/capabilities/session/service/engine/round.rs`）。
+- 不上"到顶直接收尾"这类天花板——它会把"还想接着核实"误判成"必须收尾"，执行席因此干到一半被掐断（`src/capabilities/conversation/session/service/engine/round.rs`）。
 
 - 留下的只有**提醒次数**：这一轮对它提醒过几次（默认 3，可设置）。
 
@@ -78,7 +78,7 @@ session/<工作名>/
 
 ### 系统消息
 
-- 系统注入的东西（提醒、压缩边界、工具围栏降级这类**不是用户说的、也不是模型说的**内容）必须有**系统消息**这一种转录行（`src/capabilities/session/domain/events.rs`），不能在转录与前端里长得像"用户发的"。
+- 系统注入的东西（提醒、压缩边界、工具围栏降级这类**不是用户说的、也不是模型说的**内容）必须有**系统消息**这一种转录行（`src/capabilities/conversation/session/domain/events.rs`），不能在转录与前端里长得像"用户发的"。
 
 - 结构化信号随行落档（`system: true`），呈现层据此换样式，**不靠匹配文本**；进上下文时按它该有的角色进去（提醒是给模型的指令），但**用户看到的是系统行**。
 
@@ -90,7 +90,7 @@ session/<工作名>/
 
 - **派发行**是系统行里的一种（`system: true` + `task: true`）：核心给某个 agent 派的活。
 
-- 界面上它和别的系统行一样是核心说的话——**不得显示成"用户"**（`src/capabilities/session/domain/events.rs`）；上下文里它以 **user 角色**转发：派活是一次**回合**，而会话协议要求请求里至少有一条 user 消息，一条 user 都没有的请求会被供应商**整条拒收**（全 system 的请求返回 400）。
+- 界面上它和别的系统行一样是核心说的话——**不得显示成"用户"**（`src/capabilities/conversation/session/domain/events.rs`）；上下文里它以 **user 角色**转发：派活是一次**回合**，而会话协议要求请求里至少有一条 user 消息，一条 user 都没有的请求会被供应商**整条拒收**（全 system 的请求返回 400）。
 - 讨论席同理——它每次都用一条 user 回合（opener / step）开场。
 - 两处口径都随行落档，所以**重建/回放产出发出去的那同一条消息**（见 [六](#六节点执行只有一条管道)）。
 
@@ -271,7 +271,7 @@ session/<工作名>/
 - **流式增量是短暂事件**：`delta` / `tool_call` 不落盘，历史只记定稿后的行；行上的判定走结构化字段（如降级的 `degraded: true`），呈现层不匹配行文本。
 - **工具调用形态**（`ToolMode`：`envelope` 手写信封 / `native` 原生调用）是**登记处的事实**（`models.yaml` 的 `tools`），**不钉在会话里**：每次生成前重新解析，变了就就地刷新系统提示并给用户一句通知；**两套形态互斥**。
 - 一次回复在上下文里是「一条助手消息 + N 条结果」，两种形状由唯一的构造函数 `session::api::reply_msgs` 按当前形态产出——"重建与实时逐条一致"因此是结构保证。
-- **工具声明里的 `parallel` 决定并发**（缺省 false = 独占）：一次回复里**连续**的可并发调用合成一批并发跑，其余各自独占；工具行、结果消息与账本合并**一律按原始调用顺序**——并发只影响执行，不影响上下文里的顺序（`src/capabilities/session/domain/session.rs`）。
+- **工具声明里的 `parallel` 决定并发**（缺省 false = 独占）：一次回复里**连续**的可并发调用合成一批并发跑，其余各自独占；工具行、结果消息与账本合并**一律按原始调用顺序**——并发只影响执行，不影响上下文里的顺序（`src/capabilities/conversation/session/domain/session.rs`）。
 - **观察账本**（`systool::Observations`）是**进程内状态，不落盘**：记"本次会话完整读过 / 由核心写过哪些文件、当时的内容指纹"，只用于决定整份覆盖要不要放行；回档时清空，按落盘重建的会话从空账本开始。
 - 会话的旁路配置记录（`{"type":"config"}`）只在编辑提交时追加：供呈现与审计，**不进模型上下文**，回放与状态派生跳过它。
 - 执行计划本身**从不落盘**（含真实路径，只在运行时派生）；网络与围栏要求是全局策略，不在会话里。
@@ -331,7 +331,7 @@ session/<工作名>/
 
 - 实现位置：`src/capabilities/lifecycle/service/rewind.rs`（`lifecycle` 单元，见 [docs/lifecycle/README.md](../lifecycle/README.md)）；本节的判据与顺序以那里为准。
 
-- **按行精确物化共享区**：每个提交记录带 `(agent, line)` 锚（用户投喂锚在主会话当时的行号，agent 提交锚在它自己会话的行号）。回档时按"各会话的保留行"逐个提交比对，取最后一个"所有锚都还没越过保留行"的提交点再物化；删除额外丢弃不再可达的提交并把各 agent 的基线对齐到该点，恢复一条不删（离开的线钉进 `refs/live`）。行锚由每席的 `MemberTools.line` 随转录推进（成员工具面由 `src/capabilities/session/service/assemble.rs` 装配，`line` 随会话持有）：显式 `work_commit` 经 `ToolCtx` 拿到它，写工具落地后的自动提交与批次末的沙箱采纳都读同一处（采纳的提交记 `source=external`、作者仍是该 agent，所以留档同样能把它退掉）。
+- **按行精确物化共享区**：每个提交记录带 `(agent, line)` 锚（用户投喂锚在主会话当时的行号，agent 提交锚在它自己会话的行号）。回档时按"各会话的保留行"逐个提交比对，取最后一个"所有锚都还没越过保留行"的提交点再物化；删除额外丢弃不再可达的提交并把各 agent 的基线对齐到该点，恢复一条不删（离开的线钉进 `refs/live`）。行锚由每席的 `MemberTools.line` 随转录推进（成员工具面由 `src/capabilities/conversation/session/service/assemble.rs` 装配，`line` 随会话持有）：显式 `work_commit` 经 `ToolCtx` 拿到它，写工具落地后的自动提交与批次末的沙箱采纳都读同一处（采纳的提交记 `source=external`、作者仍是该 agent，所以留档同样能把它退掉）。
 
 - 被折叠 / 被截断的行不进发送视图，也不进压缩摘要的输入；`truncate_events` 是"活动窗口"的唯一算术，界面按 `rewind` 事件画折叠分界（见「上下文压缩」）。
 

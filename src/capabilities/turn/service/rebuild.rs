@@ -6,11 +6,11 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use crate::capabilities::collab::api::CollabSession;
+use crate::capabilities::conversation::collab::api::CollabSession;
 use crate::capabilities::llm::api::{Channel, Msg};
 use crate::capabilities::catalog::modules::api::Module;
 use crate::capabilities::catalog::registry::api::Registry;
-use crate::capabilities::session::api::{
+use crate::capabilities::conversation::session::api::{
     AgentSession, SessionMeta, SessionParams, guest_lease_for, role_of, session_kind_of, work_root,
     work_root_of,
 };
@@ -82,7 +82,7 @@ impl Turn {
         }
         let sandboxes = self.sandboxes(registry, probe, meta, &roster)?;
         // 整队的权威是**转录**：重建之前先把队清空并按已发出的卡号续号（内存里那一份不作数）。
-        let issued = crate::capabilities::session::api::issued_in(events);
+        let issued = crate::capabilities::conversation::session::api::issued_in(events);
         let desk = self.desk_for(&meta.name, issued);
         desk.rebuild(issued);
         let built = match meta.mode.as_str() {
@@ -130,7 +130,7 @@ impl Turn {
                 // 重建时同样按登记处派生形态：系统提示与实际协议必须一致（回放才与实时一致）
                 let mode = registry.tool_mode(a.model.as_deref());
                 // **会话参数**：与建立时同一个口径（身份块每回合现渲染，不进消息列表）。
-                let params = crate::capabilities::session::api::SessionParams::from_workspace(
+                let params = crate::capabilities::conversation::session::api::SessionParams::from_workspace(
                     &a.name,
                     &sb,
                     &modules,
@@ -167,7 +167,7 @@ impl Turn {
                     crate::capabilities::catalog::packages::api::PackagePlan::default()
                 };
                 // 工具环境事实（围栏 / 注入项 / 运行路径 / 工具链根）由这里经 `env` 派生后按值拷进 `session`。
-                let member = crate::capabilities::session::api::MemberSpec {
+                let member = crate::capabilities::conversation::session::api::MemberSpec {
                     modules: &modules,
                     sandbox: &sb,
                     unavailable,
@@ -190,7 +190,7 @@ impl Turn {
                 let (window, percent, keep_percent) =
                     self.context_budget(registry, a.model.as_deref());
                 // 回复 id 跨重启单调：从转录里的最大值续号，否则新回复会与旧回复并成一组。
-                let spec = crate::capabilities::session::api::RebuildSpec {
+                let spec = crate::capabilities::conversation::session::api::RebuildSpec {
                     params,
                     member,
                     channel,
@@ -200,14 +200,14 @@ impl Turn {
                     line_ids,
                     compacted_upto,
                     compacted_line,
-                    reply_seq: crate::capabilities::session::api::max_reply(events),
+                    reply_seq: crate::capabilities::conversation::session::api::max_reply(events),
                     context: (window, percent, keep_percent),
                     model: a.model.clone().or_else(|| registry.core_model()),
                     freshness: meta.context_freshness,
                     reads: replay_reads(events),
-                    usage: crate::capabilities::session::api::last_usage(events),
+                    usage: crate::capabilities::conversation::session::api::last_usage(events),
                 };
-                Session::Single(crate::capabilities::session::api::rebuild_single(
+                Session::Single(crate::capabilities::conversation::session::api::rebuild_single(
                     &self.session_ports(),
                     spec,
                 ))
@@ -224,12 +224,12 @@ impl Turn {
                 s.compacted_upto = compacted_upto;
                 s.compacted_line = compacted_line;
                 s.next_line = s.marks.len() as u64;
-                s.set_reply_seq(crate::capabilities::session::api::max_reply(events));
+                s.set_reply_seq(crate::capabilities::conversation::session::api::max_reply(events));
                 s.set_context_freshness(meta.context_freshness);
                 for (body, fact) in replay_reads(events) {
                     s.note_read_at(body, fact);
                 }
-                s.set_last_usage(crate::capabilities::session::api::last_usage(events));
+                s.set_last_usage(crate::capabilities::conversation::session::api::last_usage(events));
                 Session::Single(s)
             }
             other => {
@@ -241,7 +241,7 @@ impl Turn {
         };
         // 状态栏的 shell 快照同样按转录派生：重启 / 启用 / 回档重建后不再"失忆"。
         self.shell_slot(&meta.name)
-            .set(crate::capabilities::session::api::last_shell(events));
+            .set(crate::capabilities::conversation::session::api::last_shell(events));
         Ok(built)
     }
 }
@@ -265,14 +265,14 @@ fn replay_reads(
             let Some(t) = l.get("tool") else {
                 continue;
             };
-            let Ok(c) = serde_json::from_value::<crate::capabilities::session::api::ToolCallView>(
+            let Ok(c) = serde_json::from_value::<crate::capabilities::conversation::session::api::ToolCallView>(
                 t.clone(),
             ) else {
                 continue;
             };
             if let Some(fact) = c.read.clone() {
                 out.push((
-                    crate::capabilities::session::api::tool_result_body(&c),
+                    crate::capabilities::conversation::session::api::tool_result_body(&c),
                     fact,
                 ));
             }
@@ -306,13 +306,13 @@ pub fn replay_dialogue(
     }
     // **压缩过**的会话按最后一条压缩行重建发送视图（见 session-model.md 六）：`up_to` 之前的行由摘要代替，
     // 转录本身完整保留；回档到压缩行之前时它已随转录被截掉，所以「没有它」就是「回到压缩前」。
-    let compacted = crate::capabilities::session::api::last_compaction(events);
+    let compacted = crate::capabilities::conversation::session::api::last_compaction(events);
     let compacted_upto = compacted.as_ref().map(|(up_to, _, _)| *up_to).unwrap_or(0);
     let compacted_line = compacted.as_ref().map(|(_, _, id)| *id).unwrap_or(0);
     // 对话里**只有**真正发生过的事；身份与环境由 params 现渲染。
     let mut history: Vec<Msg> = compacted
         .as_ref()
-        .map(|(_, summary, _)| crate::capabilities::session::api::summary_message(summary))
+        .map(|(_, summary, _)| crate::capabilities::conversation::session::api::summary_message(summary))
         .into_iter()
         .collect();
     let mut marks: Vec<usize> = Vec::new();
@@ -408,12 +408,12 @@ pub fn replay_dialogue(
             } else {
                 std::mem::take(&mut pending_raw)
             };
-            let views: Vec<crate::capabilities::session::api::ToolCallView> = group
+            let views: Vec<crate::capabilities::conversation::session::api::ToolCallView> = group
                 .iter()
                 .filter_map(|t| t.get("tool").cloned())
                 .filter_map(|t| serde_json::from_value(t).ok())
                 .collect();
-            for m in crate::capabilities::session::api::reply_msgs(mode, &raw, &views) {
+            for m in crate::capabilities::conversation::session::api::reply_msgs(mode, &raw, &views) {
                 history.push(m);
             }
             for row in &group {
@@ -508,7 +508,7 @@ impl Turn {
         // 机制 / 环境 / 调用约定仍与 agent 身份同一份口径（见 workspace 的 render_system）。
         let mut params = SessionParams::from_workspace(SPEAKER, &sb, &[], "proxy", "core_proxy");
         params.role_system = Some(crate::capabilities::prompt::api::Segment::ProxySystem);
-        let member = crate::capabilities::session::api::MemberSpec {
+        let member = crate::capabilities::conversation::session::api::MemberSpec {
             modules: &[],
             sandbox: &sb,
             unavailable: BTreeMap::new(),
@@ -527,7 +527,7 @@ impl Turn {
             ),
         };
         let (window, percent, keep_percent) = self.context_budget(registry, None);
-        let spec = crate::capabilities::session::api::ProxySpec {
+        let spec = crate::capabilities::conversation::session::api::ProxySpec {
             params,
             member,
             channel: channel.clone(),
@@ -535,7 +535,7 @@ impl Turn {
             model: registry.core_model(),
             freshness: meta.context_freshness,
         };
-        Ok(crate::capabilities::session::api::proxy_session(
+        Ok(crate::capabilities::conversation::session::api::proxy_session(
             &self.session_ports(),
             spec,
         ))

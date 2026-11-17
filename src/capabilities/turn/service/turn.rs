@@ -7,9 +7,9 @@
 
 use std::sync::Arc;
 
-use crate::capabilities::collab::api::CollabSession;
+use crate::capabilities::conversation::collab::api::CollabSession;
 use crate::capabilities::catalog::registry::api::Registry;
-use crate::capabilities::session::api::{AgentSession, Gates, RunState, SessionEvent, subtree_of};
+use crate::capabilities::conversation::session::api::{AgentSession, Gates, RunState, SessionEvent, subtree_of};
 use crate::capabilities::turn::api::{Prepared, Session};
 use crate::kernel::ports::HostProbe;
 
@@ -163,7 +163,7 @@ impl Turn {
         &mut self,
         sid: &str,
         text: &str,
-        io: &crate::capabilities::session::api::TurnIo,
+        io: &crate::capabilities::conversation::session::api::TurnIo,
         cancel: &std::sync::atomic::AtomicBool,
         emit: &mut dyn FnMut(SessionEvent),
         registry: &dyn Registry,
@@ -200,7 +200,7 @@ impl Turn {
     pub fn continue_flow(
         &mut self,
         sid: &str,
-        io: &crate::capabilities::session::api::TurnIo,
+        io: &crate::capabilities::conversation::session::api::TurnIo,
         cancel: &std::sync::atomic::AtomicBool,
         emit: &mut dyn FnMut(SessionEvent),
         registry: &dyn Registry,
@@ -342,7 +342,7 @@ impl Turn {
         let issued = self
             .history
             .load(sid)
-            .map(|(_, ev)| crate::capabilities::session::api::issued_in(&ev))
+            .map(|(_, ev)| crate::capabilities::conversation::session::api::issued_in(&ev))
             .unwrap_or(0);
         self.desk_for(sid, issued)
     }

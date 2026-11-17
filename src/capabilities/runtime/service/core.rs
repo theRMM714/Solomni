@@ -251,7 +251,7 @@ impl Core {
     pub fn single_reads(
         &self,
         sid: &str,
-    ) -> Option<Vec<crate::capabilities::session::api::ReadAt>> {
+    ) -> Option<Vec<crate::capabilities::conversation::session::api::ReadAt>> {
         match self.turn.session(sid) {
             Some(Session::Single(s)) => Some(s.reads().to_vec()),
             _ => None,
@@ -533,7 +533,7 @@ impl Core {
         tier: crate::kernel::api::Tier,
         guest: Option<&str>,
         profile: crate::capabilities::permission::api::ProfileId,
-        workspace: Option<crate::capabilities::session::api::WorkspaceBinding>,
+        workspace: Option<crate::capabilities::conversation::session::api::WorkspaceBinding>,
     ) -> Result<(String, Vec<SessionEvent>), String> {
         self.work.create_proxy_with_facts(
             &mut self.turn,
