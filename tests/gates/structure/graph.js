@@ -24,7 +24,7 @@ const GAP_X = 14;
 const BAND_GAP = 26;
 /** 面板初始与回主视图时的说明；左右两处共用这一份，改文案只改这里。 */
 const HINT =
-  "<h2>怎么看</h2><p class=hint>边是能力之间的引用（数字为引用处数，粗细按它放大）；红色边是门禁会拦的向上/同层依赖。虚线框是扇出超过 5 的能力（只回执，不拦）。点节点下钻，点文件看目的 / 管 / 不管 / 联动。</p>";
+  "<h2>怎么看</h2><p class=hint>边是能力之间的引用（数字为引用处数，粗细按它放大）；红色边是门禁会拦的向上/同层依赖。虚线框是扇出最大的三个单元（只回执，不设预算）。点节点下钻，点文件看目的 / 管 / 不管 / 联动。</p>";
 
 /** 仓库相对路径（正斜杠）。 */
 const relOf = (root, f) => f.slice(root.length + 1).replace(/\\/g, "/");
@@ -162,8 +162,12 @@ function collect(root) {
   const issueOf = (f) => problems.filter((p) => p.file && p.file === f).map((p) => p.text);
   for (const cap of caps) for (const f of cap.files) f.issues = issueOf(f.path);
 
+  // 扇出不设预算：只把出边最多的三个单元标出来给人看，不进判据。
+  const wide = caps.slice().sort((a, b) => b.out - a.out || a.name.localeCompare(b.name)).slice(0, 3).map((c) => c.name);
+
   return {
     meta: {
+      wide: wide,
       caps: caps.length,
       edges: edges.length,
       files: caps.reduce((n, c) => n + c.files.length, 0),
@@ -237,7 +241,7 @@ function capSvg(data) {
   for (const c of data.caps) {
     const p = lay.pos.get(c.name);
     const bad = c.issues.length > 0 || data.edges.some((e) => e.violation && (e.from === c.name || e.to === c.name));
-    const wide = c.out > 5;
+    const wide = data.meta.wide.indexOf(c.name) >= 0;
     const stroke = bad ? "#dc2626" : wide ? "#f59e0b" : "#cbd5e1";
     const dash = !bad && wide ? ' stroke-dasharray="5 4"' : "";
     out.push('<g class="cap" data-cap="' + esc(c.name) + '" transform="translate(' + p.x + "," + p.y + ')"><title>' + esc(c.name + " · 第 " + c.layer + " 层 · 出 " + c.out + " / 入 " + c.inn + " · " + c.files.length + " 个文件" + (c.issues.length ? " · " + c.issues.length + " 处命中" : "")) + '</title>');
@@ -337,7 +341,7 @@ function page(data) {
     '<span class="n">能力 <b>' + m.caps + "</b> · 依赖边 <b>" + m.edges + "</b> · 源文件 <b>" + m.files + "</b> · 命中 <b>" + m.issues + "</b></span>",
     '<span class="n">由门禁 <b>structure/graph</b> 每次覆盖；层级以 layers.yaml 为准</span></header>',
     "<main><section><div id=crumbs></div><div id=stage>" + capSvgText + "</div>",
-    '<div class="legend"><span><i style="background:#fff;border:1px solid #cbd5e1"></i>常规</span><span><i style="background:#fff;border:1px dashed #f59e0b"></i>扇出超过 5</span><span><i style="background:#fff;border:1px solid #dc2626"></i>门禁命中</span><span><i style="background:#dc2626;height:2px"></i>越界依赖</span><span>点能力下钻 · 点文件看四槽</span></div></section>',
+    '<div class="legend"><span><i style="background:#fff;border:1px solid #cbd5e1"></i>常规</span><span><i style="background:#fff;border:1px dashed #f59e0b"></i>扇出最大的三个</span><span><i style="background:#fff;border:1px solid #dc2626"></i>门禁命中</span><span><i style="background:#dc2626;height:2px"></i>越界依赖</span><span>点能力下钻 · 点文件看四槽</span></div></section>',
     "<aside id=panel>" + HINT + "</aside></main>",
     '<script id="graph-data" type="application/json">' + json + "</script>",
     "<script>" + java + "</script>",

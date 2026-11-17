@@ -1,21 +1,35 @@
 # 能力分层表：唯一权威。数字越小越底层，能力只能依赖严格更低层（ARCHITECTURE.md §九.1）。
-# 层号由现有依赖的最长路径算出——这是当前代码能做到的最小可行层数；每消灭一批跨层边就重算并收紧。
+# 层号由现有依赖的最长路径算出，门禁要求「声明 == 重算」：动过依赖就 node tests/gates/structure/layers.js --write 重算写回。
 # 门禁：tests/gates/structure/layers.js（T0 结构审查）。新增能力必须先在这里归层，否则失败。
 kernel: 0
+
+# 第 1 层
 llm: 1
 permission: 1
 prompt: 1
 taskchain: 1
+
+# 第 2 层
 catalog: 2
 workspace: 2
+
+# 第 3 层
 residents: 3
 tools: 3
 vm: 3
+
+# 第 4 层
 conversation: 4
 provision: 4
+
+# 第 5 层
 maintenance: 5
 turn: 5
+
+# 第 6 层
 lifecycle: 6
 system: 6
 work: 6
+
+# 第 7 层
 runtime: 7
