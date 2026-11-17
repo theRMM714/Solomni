@@ -7,7 +7,7 @@
 use super::super::super::Owner;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// 目的：台账里一条快照（路径 + 记录时刻 + 原始安全描述符）。
 /// 约束：时间戳在**新增时**记一次，之后只读——它是“这条是什么时候挂上的”这一事实。
@@ -136,37 +136,12 @@ pub(crate) fn lock_ledger(home: &Path) -> Result<LedgerGuard, String> {
         .lock()
         .map_err(|_| "台账进程内锁已被毒化".to_string())?;
     std::fs::create_dir_all(home).map_err(|e| format!("建私有区失败：{}", e))?;
-    let path = lock_path(home);
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(&path)
-        .map_err(|e| format!("打开台账锁失败（{}）：{}", path.display(), e))?;
-    let deadline = Instant::now() + Duration::from_secs(60);
-    loop {
-        match file.try_lock() {
-            Ok(()) => {
-                return Ok(LedgerGuard {
-                    _proc: proc,
-                    _file: file,
-                });
-            }
-            Err(std::fs::TryLockError::WouldBlock) => {
-                if Instant::now() >= deadline {
-                    return Err(
-                        "台账被另一个进程占用，等待超时（稍后重试或跑 --fence-reconcile）"
-                            .to_string(),
-                    );
-                }
-                std::thread::sleep(Duration::from_millis(25));
-            }
-            Err(std::fs::TryLockError::Error(e)) => {
-                return Err(format!("台账加锁失败：{}", e));
-            }
-        }
-    }
+    // 跨进程那半是内核的文件锁契约；等多久是台账自己的策略。
+    let file = crate::kernel::api::lock_within(&lock_path(home), Duration::from_secs(60), "台账")?;
+    Ok(LedgerGuard {
+        _proc: proc,
+        _file: file,
+    })
 }
 
 /// 目的：一次台账写事务：**只**把「读—改—写」罩在锁里，返回即释放——慢的 ACL 写不占锁。

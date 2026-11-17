@@ -293,7 +293,7 @@ fn nearest(name: &str) -> Option<&'static str> {
     let mut best: Option<(&'static str, usize)> = None;
     for flag in FLAGS {
         for candidate in std::iter::once(flag.long).chain(flag.short) {
-            let d = distance(name, candidate);
+            let d = super::distance(name, candidate);
             if d <= 2 && best.is_none_or(|(_, bd)| d < bd) {
                 best = Some((candidate, d));
             }
@@ -328,23 +328,6 @@ fn no_value(inline: &Option<String>, name: &str) -> Result<(), String> {
         Some(_) => Err(format!("旗语 {} 不带值（布尔开关直接写它本身）", name)),
         None => Ok(()),
     }
-}
-
-/// 目的：两个词的编辑距离（只用于旗语建议，长度都短）。
-fn distance(a: &str, b: &str) -> usize {
-    let a: Vec<char> = a.chars().collect();
-    let b: Vec<char> = b.chars().collect();
-    let mut prev: Vec<usize> = (0..=b.len()).collect();
-    let mut cur = vec![0usize; b.len() + 1];
-    for (i, ca) in a.iter().enumerate() {
-        cur[0] = i + 1;
-        for (j, cb) in b.iter().enumerate() {
-            let cost = usize::from(ca != cb);
-            cur[j + 1] = (prev[j + 1] + 1).min(cur[j] + 1).min(prev[j] + cost);
-        }
-        std::mem::swap(&mut prev, &mut cur);
-    }
-    prev[b.len()]
 }
 
 #[cfg(test)]

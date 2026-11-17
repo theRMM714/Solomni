@@ -28,6 +28,7 @@ pub use crate::kernel::detail::confine::{
 };
 // 视图盘是内核对外契约的一部分：装配层与守门进程按需取用，bin crate 内暂时不会每个都调用到。
 // 对未用到的重导出显式放行，不把它们从出口删掉——出口少一个，契约就悄悄漂了。
+pub use crate::kernel::detail::lock::lock_within;
 #[cfg(windows)]
 #[allow(unused_imports)]
 pub use crate::kernel::detail::view_drive::{
@@ -41,6 +42,7 @@ pub use crate::kernel::detail::view_drive_lifecycle::{
 pub use crate::kernel::domain::actor::Actor;
 pub use crate::kernel::domain::fence::{SandboxMode, SandboxRequirements, call_lease};
 pub use crate::kernel::domain::jobs::JobRegistry;
+pub use crate::kernel::domain::name::{dedup_suffix, validate_dir_name};
 pub use crate::kernel::domain::path::{is_unc, native, slash, unc_parts};
 pub use crate::kernel::domain::platform::{
     EXE_SUFFIX, HAS_EXTERNAL_ACL_STEP, HOST_ARCH, IS_LINUX, IS_MACOS, IS_WINDOWS, host_path_eq,

@@ -212,36 +212,16 @@ fn lock_view(home: &Path) -> Result<ViewGuard, String> {
         .lock()
         .map_err(|_| "视图盘记录进程内锁已被毒化".to_string())?;
     std::fs::create_dir_all(home).map_err(|e| format!("建私有区失败：{}", e))?;
-    let path = lock_path(home);
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(&path)
-        .map_err(|e| format!("打开视图盘记录锁失败（{}）：{}", path.display(), e))?;
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-    loop {
-        match file.try_lock() {
-            Ok(()) => {
-                return Ok(ViewGuard {
-                    _proc: proc,
-                    _file: file,
-                });
-            }
-            Err(std::fs::TryLockError::WouldBlock) => {
-                if std::time::Instant::now() >= deadline {
-                    return Err(
-                        "视图盘记录被另一个进程占用，等待超时（稍后重试或重启应用）".to_string()
-                    );
-                }
-                std::thread::sleep(std::time::Duration::from_millis(25));
-            }
-            Err(std::fs::TryLockError::Error(e)) => {
-                return Err(format!("视图盘记录加锁失败：{}", e));
-            }
-        }
-    }
+    // 跨进程那半是内核的文件锁契约；等多久是本模块自己的策略。
+    let file = crate::kernel::api::lock_within(
+        &lock_path(home),
+        std::time::Duration::from_secs(60),
+        "视图盘记录",
+    )?;
+    Ok(ViewGuard {
+        _proc: proc,
+        _file: file,
+    })
 }
 
 fn load_entries(home: &Path) -> Vec<ViewEntry> {

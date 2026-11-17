@@ -28,8 +28,5 @@ impl GuestLiveness for ProcessGuests {
 
 /// 目的：这个家目录的进程台账里有没有活着的 guest。
 pub fn live_in(home: &Path) -> bool {
-    crate::kernel::detail::procs::ProcessBook::open(home)
-        .list()
-        .iter()
-        .any(|e| e.purpose == "guest" && crate::kernel::detail::procs::alive(e.pid))
+    crate::kernel::detail::procs::ProcessBook::open(home).has_live("guest")
 }

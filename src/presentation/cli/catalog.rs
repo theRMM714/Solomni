@@ -191,7 +191,7 @@ pub(crate) fn suggest(word: &str) -> Option<String> {
 
 /// 目的：比一条候选：编辑距离 ≤2 且比当前最近更近，才替换。
 fn consider(word: &str, name: &str, best: &mut Option<(String, usize)>) {
-    let d = distance(word, name);
+    let d = super::distance(word, name);
     if d <= 2 && best.as_ref().is_none_or(|(_, bd)| d < *bd) {
         *best = Some((name.to_string(), d));
     }
@@ -205,20 +205,4 @@ pub(crate) fn version_text() -> String {
         "release"
     };
     format!("solomni {} （{} 构建）", env!("CARGO_PKG_VERSION"), build)
-}
-
-fn distance(a: &str, b: &str) -> usize {
-    let a: Vec<char> = a.chars().collect();
-    let b: Vec<char> = b.chars().collect();
-    let mut prev: Vec<usize> = (0..=b.len()).collect();
-    let mut cur = vec![0usize; b.len() + 1];
-    for (i, ca) in a.iter().enumerate() {
-        cur[0] = i + 1;
-        for (j, cb) in b.iter().enumerate() {
-            let cost = usize::from(ca != cb);
-            cur[j + 1] = (prev[j + 1] + 1).min(cur[j] + 1).min(prev[j] + cost);
-        }
-        std::mem::swap(&mut prev, &mut cur);
-    }
-    prev[b.len()]
 }

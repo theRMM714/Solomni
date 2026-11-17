@@ -26,6 +26,7 @@
 | `src/kernel/domain/path/unix.rs` | `path` 的非 Windows 后端：没有扩展前缀，原样返回 |
 | `src/kernel/domain/platform.rs` | 平台事实：可执行文件后缀、PATH 列表分隔符、宿主路径大小写语义、Windows 授权事实、宿主 OS / 架构与卷键 / UNC 纯判断 |
 | `src/kernel/domain/jobs.rs` | 生成中作业的取消表（`JobRegistry`）：同一会话每次生成各持一面旗，停止置位全部、摘旗按身份 |
+| `src/kernel/domain/name.rs` | 会成为目录名的名字的两条纯规则：`validate_dir_name`（非空、无首尾空白、不含 Windows 非法字符与控制字符、不是设备保留名，主语只进报错）与 `dedup_suffix`（占用时依次试 `-2` / `-3`） |
 | `src/kernel/domain/receipt.rs` | host/guest 共用的 shell 回执装配（stdout + `[stderr]` 区 + head+tail 截断（按完整行取整）+ 状态行；词表来自 `ProcessTexts`） |
 | `src/kernel/detail/file_log.rs` | `Log` 端口的文件实现：每次运行在 `logs/` 下按时间戳建文件并逐行追加（写经 `Mutex` 串行） |
 | `src/kernel/detail/host_probe.rs` | `HostProbe` 端口的机制实现（门面）：查环境变量与 `PATH` 里的可执行文件、路径存在性；可执行位与虚拟化事实在 `src/kernel/detail/host_probe/{windows,linux,macos,other}.rs` |
@@ -37,6 +38,8 @@
 | `src/kernel/detail/fs_meta/windows.rs` | `fs_meta` 的 Windows 后端：可执行性按文件、权限位空操作、重解析点判定、占用按长度 |
 | `src/kernel/detail/fs_meta/unix.rs` | `fs_meta` 的 Unix 后端：模式位、软链、0600、块占用、0755 脚本 |
 | `src/kernel/detail/fs_meta/other.rs` | `fs_meta` 的兜底后端：没有模式位与软链，如实降级 |
+| `src/kernel/detail/lock.rs` | 跨进程文件锁的获取协议（门面）：`lock_within` 打开锁文件、25ms 轮询 `try_lock`、有界等待，超时与打开失败都报原因 |
+| `src/kernel/detail/lock/tests.rs` | 文件锁协议的契约用例：真文件真句柄，拿到后第二次在等待上限内超时、放掉后可再拿（`#[cfg(test)] mod tests;` 指向） |
 | `src/kernel/detail/locus.rs` | 落点身份（门面）：按卷 + 文件 id 判同一物理对象与物理包含；平台实现在 `src/kernel/detail/locus/windows.rs` / `src/kernel/detail/locus/unix.rs` |
 | `src/kernel/detail/locus/windows.rs` | `locus` 的 Windows 后端：卷序列号 + 文件 id、UNC 与映射盘判定 |
 | `src/kernel/detail/locus/unix.rs` | `locus` 的非 Windows 后端：设备号 + inode、网络路径恒 false |
