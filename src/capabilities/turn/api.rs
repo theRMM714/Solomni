@@ -39,7 +39,7 @@ pub fn session_ask(
 ///   回合状态本身（`TurnState`）是本能力的内部结构：它只被 `Turn` 持有，不出单元。
 pub use crate::capabilities::turn::service::state::Session;
 
-use crate::capabilities::registry::api::Registry;
+use crate::capabilities::catalog::registry::api::Registry;
 use crate::capabilities::session::api::{
     AgentSession, DecisionQueue, Gates, Persister, SessionEvent, SessionMeta,
 };

@@ -4,10 +4,10 @@
 //! 联动：service::propose 经本面被两个调用方（推荐 / 代拟）使用；依赖 llm / prompt / registry / session / tools 的 api。
 
 use crate::capabilities::llm::api::{Chat, CompleteOpts, ToolMode};
-use crate::capabilities::modules::api::Roster;
+use crate::capabilities::catalog::modules::api::Roster;
 use crate::capabilities::prompt::api::Prompt;
-use crate::capabilities::registry::api::AgentMeta;
-use crate::capabilities::registry::api::{Agents, ModelEntry};
+use crate::capabilities::catalog::registry::api::AgentMeta;
+use crate::capabilities::catalog::registry::api::{Agents, ModelEntry};
 use crate::capabilities::session::api::CoreVerify;
 use crate::capabilities::tools::api::Tools;
 use std::collections::BTreeMap;

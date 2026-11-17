@@ -47,7 +47,7 @@ fn yaml_settings_store_defaults_saves_and_reports_malformed_files() {
     );
     want.models.insert(
         "m".to_string(),
-        crate::capabilities::registry::api::ModelEntry {
+        crate::capabilities::catalog::registry::api::ModelEntry {
             name: "M".to_string(),
             api_model: "m".to_string(),
             provider: "p".to_string(),
@@ -63,7 +63,7 @@ fn yaml_settings_store_defaults_saves_and_reports_malformed_files() {
     want.app.sandbox.policy.windows.write_acl = true;
     want.agents.insert(
         "甲".to_string(),
-        crate::capabilities::registry::domain::agents::Agent {
+        crate::capabilities::catalog::registry::domain::agents::Agent {
             modules: vec!["a".to_string()],
             model: None,
             note: "n".to_string(),

@@ -438,7 +438,7 @@ pub(crate) fn declaration_shape_is_enforced_before_semantics() {
 ///   目标不存在 / 未实现的一律如实报错，不假装成功。
 #[test]
 pub(crate) fn the_real_bridge_reads_catalog_and_session_messages() {
-    use crate::capabilities::modules::api::ModuleManifest;
+    use crate::capabilities::catalog::modules::api::ModuleManifest;
     use crate::capabilities::proxy::api::ProxyHost;
     use crate::capabilities::runtime::service::ProxyBridge;
 
@@ -533,7 +533,7 @@ pub(crate) fn the_real_bridge_reads_catalog_and_session_messages() {
 /// 目的：真实宿主：建**子工作**——编排归属是父会话，落点在 `<父>/children/` 下，共用同一个 work/。
 #[test]
 pub(crate) fn the_real_bridge_creates_a_child_work() {
-    use crate::capabilities::modules::api::ModuleManifest;
+    use crate::capabilities::catalog::modules::api::ModuleManifest;
     use crate::capabilities::proxy::api::ProxyHost;
     use crate::capabilities::runtime::service::ProxyBridge;
 
@@ -602,7 +602,7 @@ pub(crate) fn the_real_bridge_creates_a_child_work() {
 /// 目的：代理工具的执行者：按名字认领，执行经队列桥回核心线程——代理会话因此是普通成员会话。
 #[test]
 pub(crate) fn the_proxy_handler_owns_and_runs_proxy_tools() {
-    use crate::capabilities::modules::api::ModuleManifest;
+    use crate::capabilities::catalog::modules::api::ModuleManifest;
     use crate::capabilities::proxy::api::ProxyHandler;
     use crate::capabilities::proxy::api::ProxyHost;
     use crate::capabilities::runtime::service::ProxyBridge;
@@ -702,7 +702,7 @@ pub(crate) fn the_proxy_session_rebuilds_from_disk() {
 /// 目的：子会话停下 → 通知代理（只写一条通知行，**不转发子会话转录**）。
 #[test]
 pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript() {
-    use crate::capabilities::modules::api::ModuleManifest;
+    use crate::capabilities::catalog::modules::api::ModuleManifest;
     let module = Module {
         manifest: ModuleManifest {
             build: None,
@@ -762,7 +762,7 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
 /// 目的：运行态是**落盘事实**：停止后派发与唤醒一律被拒，关闭是终态，继续解冻后放行。
 #[test]
 pub(crate) fn run_state_gates_dispatch_and_survives_stop_close() {
-    use crate::capabilities::modules::api::ModuleManifest;
+    use crate::capabilities::catalog::modules::api::ModuleManifest;
     use crate::capabilities::proxy::api::ProxyHost;
     use crate::capabilities::runtime::service::ProxyBridge;
 
@@ -867,7 +867,7 @@ pub(crate) fn run_state_gates_dispatch_and_survives_stop_close() {
 /// 目的：转达的来源进目标会话的可回放记录：核心生成的内容不冒充用户原文。
 #[test]
 pub(crate) fn relay_records_its_source_on_the_target() {
-    use crate::capabilities::modules::api::ModuleManifest;
+    use crate::capabilities::catalog::modules::api::ModuleManifest;
     use crate::capabilities::proxy::api::ProxyHost;
     use crate::capabilities::runtime::service::ProxyBridge;
 
@@ -912,7 +912,7 @@ pub(crate) fn relay_records_its_source_on_the_target() {
 /// 目的：真实宿主：mode=multi 建的是**协作子工作**（复用既有协作与节点会话机制，不另起一套）。
 #[test]
 pub(crate) fn the_real_bridge_creates_a_multi_agent_child_work() {
-    use crate::capabilities::modules::api::ModuleManifest;
+    use crate::capabilities::catalog::modules::api::ModuleManifest;
     use crate::capabilities::proxy::api::ProxyHost;
     use crate::capabilities::runtime::service::ProxyBridge;
 
@@ -989,7 +989,7 @@ pub(crate) fn the_real_bridge_creates_a_multi_agent_child_work() {
 ///   反过来，普通 agent 会话也不会沾上代理角色的话。
 #[test]
 pub(crate) fn the_proxy_identity_is_the_role_prompt() {
-    use crate::capabilities::modules::api::ModuleManifest;
+    use crate::capabilities::catalog::modules::api::ModuleManifest;
 
     let module = Module {
         manifest: ModuleManifest {
@@ -1107,7 +1107,7 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
     // 与形态不符的载荷：整条拒绝，不留半成品。
     let mut bad = spec.clone();
     bad.name = "w-user-proxy-2".to_string();
-    bad.agents = vec![crate::capabilities::registry::api::AgentMeta {
+    bad.agents = vec![crate::capabilities::catalog::registry::api::AgentMeta {
         name: "a".to_string(),
         transient: true,
         modules: vec!["m1".to_string()],
@@ -1196,7 +1196,7 @@ pub(crate) fn proxy_session_exposes_context_usage() {
 /// 目的：观察的增量信号：`since` 给上次的游标就回「新增几条」；回执本身仍是幂等快照。
 #[test]
 pub(crate) fn observe_reports_new_messages_since_the_last_cursor() {
-    use crate::capabilities::modules::api::ModuleManifest;
+    use crate::capabilities::catalog::modules::api::ModuleManifest;
     use crate::capabilities::proxy::api::ProxyHost;
     use crate::capabilities::runtime::service::ProxyBridge;
 
@@ -1262,7 +1262,7 @@ pub(crate) fn observe_reports_new_messages_since_the_last_cursor() {
 /// 目的：代理建子工作：开场事实**当场**进它的事件台（在场的前端不用等刷新）。
 #[test]
 pub(crate) fn the_proxy_created_child_publishes_its_opening_facts() {
-    use crate::capabilities::modules::api::ModuleManifest;
+    use crate::capabilities::catalog::modules::api::ModuleManifest;
     use crate::capabilities::proxy::api::ProxyHost;
     use crate::capabilities::runtime::service::ProxyBridge;
 
@@ -1338,7 +1338,7 @@ pub(crate) fn the_proxy_created_child_publishes_its_opening_facts() {
 /// 目的：协作子会话的落门：`send` 按它**此刻等的是哪一关**回答那张卡（选项 id 由代理通道的适配规则定）。
 #[test]
 pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
-    use crate::capabilities::modules::api::ModuleManifest;
+    use crate::capabilities::catalog::modules::api::ModuleManifest;
     use crate::capabilities::proxy::api::ProxyHost;
     use crate::capabilities::runtime::service::ProxyBridge;
 

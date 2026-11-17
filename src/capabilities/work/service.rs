@@ -16,13 +16,13 @@ mod views;
 
 use crate::capabilities::collab::api::CollabSession;
 use crate::capabilities::llm::api::{Channel, Llm};
-use crate::capabilities::modules::api::{Module, Modules};
-use crate::capabilities::packages::api as pkgs;
-use crate::capabilities::packages::api::Packages;
+use crate::capabilities::catalog::modules::api::{Module, Modules};
+use crate::capabilities::catalog::packages::api as pkgs;
+use crate::capabilities::catalog::packages::api::Packages;
 use crate::capabilities::prompt::api::Prompt;
 use crate::capabilities::provision::api::Provision;
-use crate::capabilities::registry::api::AgentMeta;
-use crate::capabilities::registry::api::Registry;
+use crate::capabilities::catalog::registry::api::AgentMeta;
+use crate::capabilities::catalog::registry::api::Registry;
 use crate::capabilities::session::api::{
     Delegation, Gates, History, HistoryView, OptionView, RunState, SessionEvent, SessionMeta,
 };

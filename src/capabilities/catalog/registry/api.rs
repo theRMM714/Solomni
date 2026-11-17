@@ -3,20 +3,20 @@
 //! 不管：四份 yaml 的内存形态与写路径（在 domain 与 service.rs）；持久化机制（在 ports / detail）。
 //! 联动：runtime 只持 Box<dyn Registry>；实现见 service.rs；消费方是 runtime 与呈现层。
 
-pub use crate::capabilities::registry::domain::agents::{
+pub use crate::capabilities::catalog::registry::domain::agents::{
     AgentDraft, AgentMeta, AgentView, Agents, RosterPick, agent_meta, check_reserved, listing,
     model_listing, resolve_picks, unique_instance_name, validate_name,
 };
-pub use crate::capabilities::registry::domain::providers::{
+pub use crate::capabilities::catalog::registry::domain::providers::{
     AppSettings, ModelDraft, ModelEntry, ModelView, Provider, ProviderView, SandboxEnforceLevel,
     SandboxUnavailable, Settings, StorageSettings, ThinkingSpec,
 };
 
 #[allow(unused_imports)]
-pub use crate::capabilities::registry::service::{save_agent, save_model};
+pub use crate::capabilities::catalog::registry::service::{save_agent, save_model};
 
 use crate::capabilities::llm::api::{Channel, ProbeOutcome, ReplayReport, ToolMode};
-use crate::capabilities::modules::api::Roster;
+use crate::capabilities::catalog::modules::api::Roster;
 
 /// 目的：登记处的**队列面**：呈现层经 `Handle`（核心自己的线程 + 命令队列）调它。
 ///    与 `Registry`（能力面）的分工是**有意的不对称**，不是重复：

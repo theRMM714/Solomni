@@ -29,7 +29,7 @@ pub struct Core {
     /// 目的：常驻服务的统一管理面（**不持它的端口**）——动作面与会话回收经它。
     pub(super) residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
     /// 目的：隐秘字段的统一管理面——工具 / 服务起进程时按它解析注入项并脱敏。
-    pub(super) secrets: Arc<dyn crate::capabilities::secrets::api::SecretOps + Send + Sync>,
+    pub(super) secrets: Arc<dyn crate::capabilities::catalog::secrets::api::SecretOps + Send + Sync>,
     /// 目的：项目内基础工具链的只读安装根（python / node / cc）——shell 的 sandbox 与 external 都放行它们。
     ///  来源是组合根读到的 active.json；不按 agent 的模块重复注入。
     pub(super) base_roots: Vec<std::path::PathBuf>,
@@ -71,7 +71,7 @@ impl Core {
         log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
         probe: Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>,
         residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
-        secrets: Arc<dyn crate::capabilities::secrets::api::SecretOps + Send + Sync>,
+        secrets: Arc<dyn crate::capabilities::catalog::secrets::api::SecretOps + Send + Sync>,
     ) -> Core {
         let compact = Arc::new(CompactRuntime::new(Arc::clone(&llm)));
         // 会话本体收在 turn：它只认能力面与压缩工厂，不认 runtime 的端口（层 8 不得依赖层 9）。
@@ -199,7 +199,7 @@ impl Core {
     /// 目的：隐秘字段面（手柄与核心共享同一份）。
     pub(crate) fn secrets_handle(
         &self,
-    ) -> Arc<dyn crate::capabilities::secrets::api::SecretOps + Send + Sync> {
+    ) -> Arc<dyn crate::capabilities::catalog::secrets::api::SecretOps + Send + Sync> {
         Arc::clone(&self.secrets)
     }
 
@@ -432,7 +432,7 @@ impl Core {
     pub(crate) fn host_plan_now(
         &self,
         modules: &[Module],
-    ) -> crate::capabilities::packages::api::PackagePlan {
+    ) -> crate::capabilities::catalog::packages::api::PackagePlan {
         self.work.host_plan_now(self.probe.as_ref(), modules)
     }
 

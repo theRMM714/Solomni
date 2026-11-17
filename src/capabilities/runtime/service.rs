@@ -8,13 +8,13 @@ use crate::capabilities::llm::api::Channel;
 #[cfg(test)]
 use crate::capabilities::llm::api::Msg;
 use crate::capabilities::llm::api::{Llm, ProbeOutcome, ToolMode};
-use crate::capabilities::modules::api::{Module, Modules, Roster};
-use crate::capabilities::packages::api::Packages;
+use crate::capabilities::catalog::modules::api::{Module, Modules, Roster};
+use crate::capabilities::catalog::packages::api::Packages;
 use crate::capabilities::prompt::api::Prompt;
 use crate::capabilities::provision::api::Provision;
 use crate::capabilities::proxy::api as d;
-use crate::capabilities::registry::api::Registry;
-use crate::capabilities::registry::api::{
+use crate::capabilities::catalog::registry::api::Registry;
+use crate::capabilities::catalog::registry::api::{
     AgentView, AppSettings, ModelView, ProviderView, RegistryOps, StorageSettings,
 };
 use crate::capabilities::runtime::api::{

@@ -3,7 +3,7 @@
 //! 不管：下载 / 解包 / 版本选择（provision 能力的 `kind: toolchain`）；guest 内工具链；模块工具协议与围栏。
 //! 联动：由 main 在根解析后调用；环境随后由 fence_env / interpreter_dirs / HostProbe 共用。
 
-use crate::capabilities::packages::api::{BaseFacts, HostFallback};
+use crate::capabilities::catalog::packages::api::{BaseFacts, HostFallback};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{OsStr, OsString};
 use std::path::{Component, Path, PathBuf};

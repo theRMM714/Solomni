@@ -4,7 +4,7 @@
 //! 联动：端口见 `ports.rs`；落点与字段见 MODULE_SPEC 的「构建·缓存」。
 
 use crate::capabilities::builds::ports::{BuildHome, BuildStates, BuiltRecord, SourceDigest};
-use crate::capabilities::modules::api::{BuildDecl, Module};
+use crate::capabilities::catalog::modules::api::{BuildDecl, Module};
 use std::path::{Path, PathBuf};
 
 /// 目的：构建状态的落点（`.vm/build-state/<模块>.json`）——本机档与各虚拟根共用一份，靠 `target` 区分。

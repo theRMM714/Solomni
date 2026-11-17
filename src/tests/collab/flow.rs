@@ -359,7 +359,7 @@ pub(crate) fn core_operations_require_a_tool_call_not_body_json() {
     let schema = systools.tools.get("plan").expect("plan 该在工具总表里");
     assert_eq!(
         schema.params.as_ref().expect("有参数")["nodes"].ty,
-        crate::capabilities::modules::api::ParamType::Array,
+        crate::capabilities::catalog::modules::api::ParamType::Array,
         "任务链节点表是数组载荷"
     );
 }

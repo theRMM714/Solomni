@@ -32,10 +32,14 @@ function stripTestModules(text) {
 function direction(root) {
   const problems = [];
 
-  // 归一深度：能力取「层 + 能力 + 子模块」三级——要能区分 ::api（唯一合法入口）与 ::domain / ::ports（内部）。
+  // 归一：能力路径截到「分区段」为止——::api / ::service / ::domain / ::detail / ::ports 是唯一合法入口与内部的判据段，
+  // 分区段之前可以有任意层子业务（如 capabilities/conversation/session/domain）。截断到分区段才能既认出 ::api，又认出 ::ports。
+  const PARTITIONS = ["api", "service", "domain", "detail", "ports"];
   const normTarget = (full) => {
     const parts = full.split("::");
-    const depth = parts[0] === "capabilities" ? 3 : 2;
+    if (parts[0] !== "capabilities") return "crate::" + parts.slice(0, 2).join("::");
+    const at = parts.findIndex((p, i) => i >= 2 && PARTITIONS.includes(p));
+    const depth = at >= 0 ? at + 1 : 3;
     return "crate::" + parts.slice(0, Math.min(depth, parts.length)).join("::");
   };
   const LAYER_OF = (r) => {

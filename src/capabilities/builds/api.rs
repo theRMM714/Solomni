@@ -3,7 +3,7 @@
 //! 不管：怎么选包、怎么装围栏、怎么起 guest（在 `service.rs` 与各能力的 api）。
 //! 联动：`runtime` 在创建会话前调它补编；`--build` 探针（`entry::probes`）是它的薄壳；契约见 docs/builds/README.md。
 
-use crate::capabilities::modules::api::Module;
+use crate::capabilities::catalog::modules::api::Module;
 
 /// 目的：构建的目标环境——本机档在宿主上编，虚拟机档在指定的虚拟根里编（产物形态随目标平台）。
 #[derive(Debug, Clone, PartialEq, Eq)]

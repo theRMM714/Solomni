@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::capabilities::builds::service::BuildsService;
-use crate::capabilities::packages::api::BaseFacts;
+use crate::capabilities::catalog::packages::api::BaseFacts;
 use crate::capabilities::provision::api::Provision;
 use crate::capabilities::provision::detail::fetch::HttpFetch;
 use crate::capabilities::provision::detail::guest_image::Ext4Images;
@@ -86,7 +86,7 @@ fn storage_policy(root: &Path) -> StoragePolicy {
     std::fs::read_to_string(root.join(".home").join("settings.yaml"))
         .ok()
         .and_then(|t| {
-            yaml_serde::from_str::<crate::capabilities::registry::api::AppSettings>(&t).ok()
+            yaml_serde::from_str::<crate::capabilities::catalog::registry::api::AppSettings>(&t).ok()
         })
         .map(|a| StoragePolicy::from(&a.storage))
         .unwrap_or_default()
@@ -150,9 +150,9 @@ pub(crate) fn build_runner(
 
 /// 目的：命令行构建用的能力面——包库、虚拟机、补齐、执行器与基础工具链安装根按产品根现场装配。
 pub(crate) fn build_service(root: &Path) -> Result<BuildsService, String> {
-    let packages: Arc<dyn crate::capabilities::packages::api::Packages + Send + Sync> = Arc::new(
-        crate::capabilities::packages::service::PackagesService::with_base(
-            Arc::new(crate::capabilities::packages::detail::FsPackages::new(
+    let packages: Arc<dyn crate::capabilities::catalog::packages::api::Packages + Send + Sync> = Arc::new(
+        crate::capabilities::catalog::packages::service::PackagesService::with_base(
+            Arc::new(crate::capabilities::catalog::packages::detail::FsPackages::new(
                 root.join("runtimes"),
             )),
             crate::entry::toolchains::base_facts(root),
@@ -193,7 +193,7 @@ pub(crate) struct SystemPorts {
     pub provision: Arc<dyn Provision + Send + Sync>,
     pub builds: Arc<dyn crate::capabilities::builds::api::Builds + Send + Sync>,
     pub workspace: Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync>,
-    pub modules: Arc<dyn crate::capabilities::modules::api::Modules + Send + Sync>,
+    pub modules: Arc<dyn crate::capabilities::catalog::modules::api::Modules + Send + Sync>,
 }
 
 /// 目的：启动相命令用的系统维护能力面——存储 / 补齐 / 构建 / 工作区 / 模块与工具链事实按产品根现场装。
@@ -214,13 +214,13 @@ pub(crate) fn system(root: &Path, base: &BaseFacts) -> Result<SystemService, Str
             Arc::new(crate::capabilities::workspace::detail::fs_workstore::FsWorkStore::new()),
         ),
     );
-    let modules: Arc<dyn crate::capabilities::modules::api::Modules + Send + Sync> = Arc::new(
-        crate::capabilities::modules::service::ModulesService::new(
-            Arc::new(crate::capabilities::modules::detail::FsModules::new(
+    let modules: Arc<dyn crate::capabilities::catalog::modules::api::Modules + Send + Sync> = Arc::new(
+        crate::capabilities::catalog::modules::service::ModulesService::new(
+            Arc::new(crate::capabilities::catalog::modules::detail::FsModules::new(
                 root.join("modules"),
                 crate::capabilities::tools::api::names(),
             )),
-            Arc::new(crate::capabilities::modules::detail::YamlModuleState::new(
+            Arc::new(crate::capabilities::catalog::modules::detail::YamlModuleState::new(
                 root.join(".home").join("modules.yaml"),
             )),
         )
@@ -273,7 +273,7 @@ fn network_allowed(root: &Path) -> bool {
     std::fs::read_to_string(root.join(".home").join("settings.yaml"))
         .ok()
         .and_then(|t| {
-            yaml_serde::from_str::<crate::capabilities::registry::api::AppSettings>(&t).ok()
+            yaml_serde::from_str::<crate::capabilities::catalog::registry::api::AppSettings>(&t).ok()
         })
         .map(|a| crate::capabilities::env::api::network_allowed(&a))
         .unwrap_or(false)

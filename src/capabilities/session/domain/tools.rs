@@ -407,7 +407,7 @@ impl MemberTools {
 ///   未分配给它的模块服务不该出现在提示词里（写了也调不动，只会把模型带偏）。
 pub fn service_ops_for_modules(
     started: BTreeMap<String, Vec<ServiceOp>>,
-    modules: &[crate::capabilities::modules::api::Module],
+    modules: &[crate::capabilities::catalog::modules::api::Module],
 ) -> BTreeMap<String, Vec<ServiceOp>> {
     let allowed: BTreeSet<&str> = modules.iter().map(|m| m.manifest.id.as_str()).collect();
     started
@@ -420,7 +420,7 @@ pub fn service_ops_for_modules(
 ///   **包含没有声明任何工具的模块**（命令表为空）——这样报错能区分「没有这个模块」与「这个模块没有这个工具」。
 ///   跨模块同名工具不再冲突：模块内名字唯一由 map 保证，跨模块由信封里的 module 消歧。
 pub fn tool_table(
-    modules: &[crate::capabilities::modules::api::Module],
+    modules: &[crate::capabilities::catalog::modules::api::Module],
 ) -> BTreeMap<String, ModuleTools> {
     modules
         .iter()

@@ -242,8 +242,8 @@ pub(crate) fn model_draft(
     provider: &str,
     note: &str,
     context: u64,
-) -> crate::capabilities::registry::api::ModelDraft {
-    crate::capabilities::registry::api::ModelDraft {
+) -> crate::capabilities::catalog::registry::api::ModelDraft {
+    crate::capabilities::catalog::registry::api::ModelDraft {
         id: id.to_string(),
         name: name.to_string(),
         api_model: api_model.to_string(),

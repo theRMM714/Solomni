@@ -5,7 +5,7 @@
 //! 不管：怎么建、怎么改、怎么报（在 service 里）；呈现层的 JSON 封装。
 //! 联动：runtime 与呈现层都从这里取类型；guest 任务的 `run()` 在调用方线程上跑。
 
-use crate::capabilities::registry::api::AgentMeta;
+use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::session::api::{HistoryView, OptionView, SessionEvent};
 use crate::capabilities::vm::api::{ExecPlan, GuestStop, Vm};
 use crate::capabilities::workspace::api::Sandboxes;
@@ -79,7 +79,7 @@ pub struct AgentSuggestion {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(untagged)]
 pub enum RuntimeDiagnosis {
-    Package(crate::capabilities::packages::api::Problem),
+    Package(crate::capabilities::catalog::packages::api::Problem),
 }
 
 /// 目的：组合诊断的可读说法（CLI / 日志用）。
@@ -88,7 +88,7 @@ pub fn diagnose_text(diags: &[RuntimeDiagnosis]) -> String {
         .iter()
         .map(|d| match d {
             RuntimeDiagnosis::Package(p) => {
-                crate::capabilities::packages::api::diagnose_text(std::slice::from_ref(p))
+                crate::capabilities::catalog::packages::api::diagnose_text(std::slice::from_ref(p))
             }
         })
         .collect::<Vec<_>>()

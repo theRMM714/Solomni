@@ -4,7 +4,7 @@
 //! 联动：会话类动作转 session 子模块，模块工具类转 module 子模块，登记处类转 registry 子模块。
 
 use super::*;
-use crate::capabilities::registry::api::AgentMeta;
+use crate::capabilities::catalog::registry::api::AgentMeta;
 
 // 三个子模块各管一类动作：建会话 / 模块工具 / 登记处。
 mod module;

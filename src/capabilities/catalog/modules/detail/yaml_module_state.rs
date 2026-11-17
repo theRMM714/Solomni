@@ -3,8 +3,8 @@
 //! 不管：有效值判定（在 `service.rs`）；模块清单与契约（在 `domain/module.rs`）。
 //! 联动：实现 ports::ModuleStateStore；路径由组合根给。
 
-use crate::capabilities::modules::domain::state::EnabledState;
-use crate::capabilities::modules::ports::ModuleStateStore;
+use crate::capabilities::catalog::modules::domain::state::EnabledState;
+use crate::capabilities::catalog::modules::ports::ModuleStateStore;
 use std::path::{Path, PathBuf};
 
 /// 目的：启停覆盖的文件存储（组合根构造）。

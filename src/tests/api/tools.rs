@@ -18,7 +18,7 @@ use std::sync::Arc;
 fn native_model_save_is_gated_by_measurement_but_envelope_is_not() {
     let handle = spawn(vec![module_of("a")], Vec::new());
     let faces = Faces::from_handle(&handle);
-    let draft = |id: &str, tools| crate::capabilities::registry::api::ModelDraft {
+    let draft = |id: &str, tools| crate::capabilities::catalog::registry::api::ModelDraft {
         tools,
         ..model_draft(id, id, id, "p", "", 0)
     };
@@ -148,7 +148,7 @@ fn pick_agents_names_the_unknown_and_lists_the_rest() {
     assert_eq!(
         views
             .iter()
-            .map(crate::capabilities::registry::api::agent_meta)
+            .map(crate::capabilities::catalog::registry::api::agent_meta)
             .count(),
         1,
         "视图 → 实例不丢项"

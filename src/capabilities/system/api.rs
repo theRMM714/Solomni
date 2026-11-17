@@ -7,7 +7,7 @@
 use serde_json::Value;
 
 use crate::capabilities::builds::api::Built;
-use crate::capabilities::packages::api::BaseFacts;
+use crate::capabilities::catalog::packages::api::BaseFacts;
 use crate::capabilities::provision::api::Provision;
 use crate::capabilities::storage::api::{CleanOutcome, GcReport, Storage};
 use crate::capabilities::workspace::api::GcReport as WorkspaceGc;

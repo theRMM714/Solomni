@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::capabilities::registry::api::AgentMeta;
+use crate::capabilities::catalog::registry::api::AgentMeta;
 
 pub const CATALOG: &str = "catalog_agents";
 pub const CREATE: &str = "create_session";
@@ -265,7 +265,7 @@ pub fn relay_note(kind: MessageKind) -> String {
 /// 目的：只读清单事实——只含公开信息（无密钥、无真实私有路径、无私有工作区内容）。
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct Catalog {
-    pub agents: Vec<crate::capabilities::registry::api::AgentView>,
+    pub agents: Vec<crate::capabilities::catalog::registry::api::AgentView>,
     pub modules: Vec<ModuleFact>,
     pub models: Vec<ModelFact>,
 }
@@ -541,7 +541,7 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
                 true,
             )
         };
-        crate::capabilities::registry::api::validate_name(&name)
+        crate::capabilities::catalog::registry::api::validate_name(&name)
             .map_err(|e| format!("agents[{}] 的名字不合法：{}", i, e))?;
         let mut unique: Vec<String> = Vec::new();
         for id in modules.drain(..) {
@@ -781,7 +781,7 @@ mod tests {
 
     fn facts() -> Catalog {
         Catalog {
-            agents: vec![crate::capabilities::registry::api::AgentView {
+            agents: vec![crate::capabilities::catalog::registry::api::AgentView {
                 name: "a".to_string(),
                 modules: vec!["m1".to_string()],
                 model: Some("gpt".to_string()),

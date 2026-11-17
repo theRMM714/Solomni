@@ -934,7 +934,7 @@ pub(crate) fn dispatch_external(
                 // 共享盘不承载执行位：模块声明的相对入口先落进 guest 本地副本，再把首 token 换成它
                 // （cwd 仍是共享的模块根，数据与 userdata 不动）。
                 let declared = command.trim_start();
-                let dispatched = match crate::capabilities::modules::api::local_entry(declared) {
+                let dispatched = match crate::capabilities::catalog::modules::api::local_entry(declared) {
                     Some(entry) => {
                         match ctx.vm.stage_exec(
                             &ctx.face.guest_lease,

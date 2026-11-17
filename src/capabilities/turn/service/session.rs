@@ -7,11 +7,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::capabilities::llm::api::Llm;
-use crate::capabilities::modules::api::Modules;
-use crate::capabilities::packages::api::Packages;
+use crate::capabilities::catalog::modules::api::Modules;
+use crate::capabilities::catalog::packages::api::Packages;
 use crate::capabilities::prompt::api::Prompt;
 use crate::capabilities::residents::api::ResidentOps;
-use crate::capabilities::secrets::api::SecretOps;
+use crate::capabilities::catalog::secrets::api::SecretOps;
 use crate::capabilities::session::api::{CompactChatFactory, Gates, History, ShellLive, ShellSlot};
 use crate::capabilities::tools::api::{ToolExec, Tools};
 use crate::capabilities::turn::api::Session;

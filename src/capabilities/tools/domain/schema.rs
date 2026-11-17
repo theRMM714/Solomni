@@ -4,7 +4,7 @@
 //! 不管：参数 schema 的硬编码——它是**模块与产品对模型的承诺**，要能像文案一样被看到、被修改、被复核。
 //! 联动：由 `detail/yaml_systools.rs` 与模块清单读入，`service/` 使用。
 
-use crate::capabilities::modules::api::{Param, ParamType};
+use crate::capabilities::catalog::modules::api::{Param, ParamType};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 

@@ -21,9 +21,9 @@ pub use crate::capabilities::prompt::api::{Prompt, Segment};
 
 pub use crate::capabilities::prompt::domain::prompt::render;
 
-pub use crate::capabilities::registry::api::{ModelDraft, ModelEntry, Provider, Settings};
+pub use crate::capabilities::catalog::registry::api::{ModelDraft, ModelEntry, Provider, Settings};
 
-pub use crate::capabilities::registry::api::AgentMeta;
+pub use crate::capabilities::catalog::registry::api::AgentMeta;
 pub use crate::capabilities::session::api::{RunState, SessionMeta};
 
 pub use crate::capabilities::session::domain::tools::MemberTools;
@@ -34,12 +34,12 @@ pub use crate::capabilities::session::ports::HistoryStore;
 pub use crate::capabilities::tools::api::{ToolExec, ToolOutcome};
 pub use crate::kernel::ports::ProcessRunner;
 
-pub use crate::capabilities::modules::api::Module;
+pub use crate::capabilities::catalog::modules::api::Module;
 
 pub use crate::capabilities::vm::api::{self as exec};
 pub use crate::kernel::api::ExecSpec;
 
-pub use crate::capabilities::modules::ports::ModuleSource;
+pub use crate::capabilities::catalog::modules::ports::ModuleSource;
 pub use crate::capabilities::workspace::ports::Workdirs;
 
 pub use crate::capabilities::runtime::api::SessionEvent;

@@ -3,7 +3,7 @@
 //! 不管：字段声明；实际注入子进程。
 //! 联动：实现 ports::SecretStore；路径由组合根给（.home/secrets.yaml）。
 
-use crate::capabilities::secrets::ports::SecretStore;
+use crate::capabilities::catalog::secrets::ports::SecretStore;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

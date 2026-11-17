@@ -3,9 +3,9 @@
 //! 不管：内存形态与校验（在 domain）；状态与用例（在 service.rs）；通道与模型发现（在 llm）。
 //! 联动：实现 registry/ports.rs 的 SettingsStore，由组合根装配给 service。
 
-use crate::capabilities::registry::api::Agents;
-use crate::capabilities::registry::api::{AppSettings, ModelEntry, Provider, Settings};
-use crate::capabilities::registry::ports::SettingsStore;
+use crate::capabilities::catalog::registry::api::Agents;
+use crate::capabilities::catalog::registry::api::{AppSettings, ModelEntry, Provider, Settings};
+use crate::capabilities::catalog::registry::ports::SettingsStore;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -91,7 +91,7 @@ impl SettingsStore for YamlSettingsStore {
                 let app = yaml_serde::from_str::<AppSettings>(&t)
                     .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
                 // 首启没有文件时上面的 NotFound 分支不拦（交给引导决定）；已存在的文件必须自洽。
-                crate::capabilities::registry::domain::providers::validate_sandbox_authorization(
+                crate::capabilities::catalog::registry::domain::providers::validate_sandbox_authorization(
                     &app.sandbox.policy,
                 )
                 .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;

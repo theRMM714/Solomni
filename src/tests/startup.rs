@@ -4,10 +4,10 @@
 //! 联动：启动报告与 `src/main.rs` 的 `FenceReport`；语义见 `docs/kernel/README.md`。
 
 use super::prelude::*;
-use crate::capabilities::registry::api::AppSettings;
-use crate::capabilities::registry::api::SandboxEnforceLevel::{BestEffort, Require};
-use crate::capabilities::registry::detail::yaml_settings::YamlSettingsStore;
-use crate::capabilities::registry::ports::SettingsStore;
+use crate::capabilities::catalog::registry::api::AppSettings;
+use crate::capabilities::catalog::registry::api::SandboxEnforceLevel::{BestEffort, Require};
+use crate::capabilities::catalog::registry::detail::yaml_settings::YamlSettingsStore;
+use crate::capabilities::catalog::registry::ports::SettingsStore;
 use crate::kernel::api::SandboxRequirements;
 use crate::kernel::detail::confine::Capability;
 use crate::{GateOutcome, MissingCause, MissingPart};
@@ -182,7 +182,7 @@ fn first_run_decline_does_not_write_best_effort() {
     assert!(!app.sandbox.policy.windows.write_acl);
     assert_eq!(
         app.sandbox.policy.enforce.filesystem,
-        crate::capabilities::registry::api::SandboxEnforceLevel::Require,
+        crate::capabilities::catalog::registry::api::SandboxEnforceLevel::Require,
         "选不启用不能偷偷把强制等级降掉"
     );
 }
@@ -236,7 +236,7 @@ fn gate_degrade_is_per_process_and_does_not_write_settings() {
     assert!(!app.sandbox.policy.windows.write_acl, "本次降级不许落盘");
     assert_eq!(
         app.sandbox.policy.enforce.filesystem,
-        crate::capabilities::registry::api::SandboxEnforceLevel::Require,
+        crate::capabilities::catalog::registry::api::SandboxEnforceLevel::Require,
         "本次降级不改设置里的强制等级"
     );
 }
@@ -371,7 +371,7 @@ fn require_without_write_acl_is_rejected_on_windows() {
     app.sandbox.policy.windows.write_acl = false;
     #[cfg(windows)]
     assert!(
-        crate::capabilities::registry::domain::providers::validate_sandbox_authorization(
+        crate::capabilities::catalog::registry::domain::providers::validate_sandbox_authorization(
             &app.sandbox.policy
         )
         .is_err(),
@@ -379,7 +379,7 @@ fn require_without_write_acl_is_rejected_on_windows() {
     );
     #[cfg(not(windows))]
     assert!(
-        crate::capabilities::registry::domain::providers::validate_sandbox_authorization(
+        crate::capabilities::catalog::registry::domain::providers::validate_sandbox_authorization(
             &app.sandbox.policy
         )
         .is_ok(),
@@ -390,7 +390,7 @@ fn require_without_write_acl_is_rejected_on_windows() {
     app.sandbox.policy.enforce.filesystem = BestEffort;
     app.sandbox.policy.enforce.network = BestEffort;
     assert!(
-        crate::capabilities::registry::domain::providers::validate_sandbox_authorization(
+        crate::capabilities::catalog::registry::domain::providers::validate_sandbox_authorization(
             &app.sandbox.policy
         )
         .is_ok()
@@ -399,7 +399,7 @@ fn require_without_write_acl_is_rejected_on_windows() {
     app.sandbox.policy.enforce.filesystem = Require;
     app.sandbox.policy.windows.write_acl = true;
     assert!(
-        crate::capabilities::registry::domain::providers::validate_sandbox_authorization(
+        crate::capabilities::catalog::registry::domain::providers::validate_sandbox_authorization(
             &app.sandbox.policy
         )
         .is_ok()
@@ -410,7 +410,7 @@ fn require_without_write_acl_is_rejected_on_windows() {
     app.sandbox.policy.network = true;
     app.sandbox.policy.windows.write_acl = false;
     assert!(
-        crate::capabilities::registry::domain::providers::validate_sandbox_authorization(
+        crate::capabilities::catalog::registry::domain::providers::validate_sandbox_authorization(
             &app.sandbox.policy
         )
         .is_ok()

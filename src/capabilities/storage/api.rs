@@ -32,8 +32,8 @@ pub struct StoragePolicy {
     pub cap_bytes: u64,
 }
 
-impl From<&crate::capabilities::registry::api::StorageSettings> for StoragePolicy {
-    fn from(s: &crate::capabilities::registry::api::StorageSettings) -> Self {
+impl From<&crate::capabilities::catalog::registry::api::StorageSettings> for StoragePolicy {
+    fn from(s: &crate::capabilities::catalog::registry::api::StorageSettings) -> Self {
         StoragePolicy {
             periodic_gc: s.periodic_gc,
             gc_interval_minutes: s.gc_interval_minutes,

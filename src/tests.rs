@@ -91,7 +91,7 @@ pub(crate) fn fence_acl_guard() -> std::sync::MutexGuard<'static, ()> {
 /// 目的：起一个内存装配的核心手柄并把能力面拆成 `Faces`（契约测试共用）。
 ///   返回手柄是为了能观察事件台与测试注入；只用能力面的用例可以忽略它。
 pub(crate) fn ops_with(
-    modules: Vec<crate::capabilities::modules::api::Module>,
+    modules: Vec<crate::capabilities::catalog::modules::api::Module>,
     core_script: Vec<&str>,
 ) -> (
     crate::capabilities::runtime::api::Handle,
@@ -114,7 +114,7 @@ pub(crate) fn ops_with(
 /// 目的：注入**指定 vm 能力面与会话历史**的内存装配（guest 诊断动作要断言"回包就是 guest 报的事实"）。
 /// 约束：与 `core_with_gateway` 同形，只把 vm 与历史换成本次用例给的替身。
 pub(crate) fn ops_with_vm(
-    modules: Vec<crate::capabilities::modules::api::Module>,
+    modules: Vec<crate::capabilities::catalog::modules::api::Module>,
     history: std::sync::Arc<doubles::InMemoryHistory>,
     vm: std::sync::Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync>,
 ) -> (
@@ -151,7 +151,7 @@ pub(crate) fn ops_with_vm(
         std::sync::Arc::new(crate::kernel::ports::NoopLog),
         doubles::test_host_probe(),
         std::sync::Arc::new(crate::capabilities::residents::api::NoResidents),
-        std::sync::Arc::new(crate::capabilities::secrets::api::NoSecrets),
+        std::sync::Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
     );
     let handle = crate::capabilities::runtime::api::Handle::spawn(core).expect("起核心线程");
     let faces = crate::presentation::faces::Faces::from_handle(&handle);
@@ -166,7 +166,7 @@ pub(crate) fn single_work(
     crate::capabilities::work::api::WorkSpec {
         name: name.to_string(),
         mode: crate::capabilities::work::api::WorkMode::Single,
-        agents: vec![crate::capabilities::registry::api::AgentMeta {
+        agents: vec![crate::capabilities::catalog::registry::api::AgentMeta {
             name: modules[0].to_string(),
             transient: true,
             modules: modules.iter().map(|s| s.to_string()).collect(),
@@ -344,7 +344,7 @@ impl crate::capabilities::llm::ports::ChatGateway for GatedGateway {
 
 /// 目的：装配一个「生成阻塞到放行」的核心（观察"生成期间读接口不排队"）。
 pub(crate) fn gated_ops(
-    modules: Vec<crate::capabilities::modules::api::Module>,
+    modules: Vec<crate::capabilities::catalog::modules::api::Module>,
 ) -> (
     crate::capabilities::runtime::api::Handle,
     crate::presentation::faces::Faces,
@@ -398,7 +398,7 @@ impl crate::capabilities::llm::ports::ChatGateway for SlowGateway {
 
 /// 目的：装配一个「生成会一直跑到被停止」的核心（观察 is_running / stop / 编辑禁令）。
 pub(crate) fn slow_ops(
-    modules: Vec<crate::capabilities::modules::api::Module>,
+    modules: Vec<crate::capabilities::catalog::modules::api::Module>,
 ) -> (
     crate::capabilities::runtime::api::Handle,
     crate::presentation::faces::Faces,

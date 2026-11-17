@@ -18,26 +18,25 @@ const IO_CALLS = ["std::fs", "std::process::Command", "ureq", "reqwest", "std::n
 /** 端口方法之外的 canonicalize 调用也是直接 IO：`probe.canonicalize` 走端口，`path.canonicalize` 直接碰盘。 */
 const CANONICALIZE = /canonicalize\s*\(/;
 
-/** 能力内的实现分区：api / service / domain / detail；其余（能力根 X.rs、guest.rs 这类）不归这些判据管。 */
+/** 能力内的实现分区：api / service / domain / detail；其余（能力根 X.rs、guest.rs 这类）不归这些判据管。
+ *  单元与子业务之间可以多一层目录（如 capabilities/conversation/session/domain），判据取路径里第一个分区段。 */
 function scopeOf(f) {
   const parts = f.split("/");
   if (parts[0] !== "src" || parts[1] !== "capabilities" || parts.length < 4) return null;
-  const rest = parts.slice(3).join("/");
-  if (rest === "api.rs" || rest.startsWith("api/")) return "api";
-  for (const name of ["service", "domain", "detail"]) {
-    if (rest === name + ".rs" || rest.startsWith(name + "/")) return name;
+  for (let i = 3; i < parts.length; i += 1) {
+    const seg = parts[i].replace(/\.rs$/, "");
+    if (["api", "service", "domain", "detail"].includes(seg)) return seg;
   }
   return null;
 }
 
-/** 一个 service 文件的模块路径：`capabilities/<cap>/service/<rest>`（rest 不含 .rs，可含子目录）。 */
+/** 一个 service 文件的模块路径：`capabilities/<单元>/<子业务…>/service/<rest>`（rest 不含 .rs，可含子目录）。 */
 function modulePathOf(f) {
-  return "capabilities/" + f.split("/")[2] + "/" + f.split("/").slice(3).join("/").replace(/\.rs$/, "");
+  return "capabilities/" + f.split("/").slice(2).join("/").replace(/\.rs$/, "");
 }
 
 /** 同能力 service 下的方法族：它引用的兄弟模块（只看生产代码边，只留真实存在的模块）。 */
 function siblingEdges(mod, text, nodes) {
-  const cap = mod.split("/")[1];
   const dir = mod.slice(0, mod.lastIndexOf("/"));
   const out = new Set();
   const pick = (candidate) => {
@@ -47,8 +46,10 @@ function siblingEdges(mod, text, nodes) {
   for (const m of text.matchAll(/\bsuper::([a-z_][a-z0-9_]*)/g)) {
     if (m[1] !== "self" && m[1] !== "super") pick(dir + "/" + m[1]);
   }
-  const base = "capabilities/" + cap + "/service/";
-  for (const m of text.matchAll(/crate::capabilities::[a-z_][a-z0-9_]*::service::([A-Za-z0-9_:]+)/g)) {
+  const at = mod.indexOf("/service/");
+  if (at < 0) return out;
+  const base = mod.slice(0, at + "/service/".length);
+  for (const m of text.matchAll(/crate::capabilities::(?:[a-z_][a-z0-9_]*::)+service::([A-Za-z0-9_:]+)/g)) {
     const segs = m[1].split("::").filter((s) => s !== "self" && s !== "super");
     let best = null;
     for (let i = 1; i <= segs.length; i += 1) {
@@ -120,8 +121,8 @@ function scan(root) {
     }
 
     if (scope === "service") {
-      if (prod.includes("crate::capabilities::" + cap + "::detail")) {
-        serviceToDetail.add(f + " -> crate::capabilities::" + cap + "::detail");
+      if (/crate::capabilities::(?:[a-z_][a-z0-9_]*::)*detail\b/.test(prod)) {
+        serviceToDetail.add(f + " -> ::detail");
       }
       if (prod.includes("crate::kernel::detail")) serviceToDetail.add(f + " -> crate::kernel::detail");
       for (const call of IO_CALLS) {

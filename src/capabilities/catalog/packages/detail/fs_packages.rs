@@ -3,8 +3,8 @@
 //! 不管：清单校验、去重与冲突预检（在 domain/manifest.rs）。
 //! 联动：端口在 ports.rs；只由组合根构造。
 
-use crate::capabilities::packages::domain::manifest::{Library, PackageManifest};
-use crate::capabilities::packages::ports::PackageSource;
+use crate::capabilities::catalog::packages::domain::manifest::{Library, PackageManifest};
+use crate::capabilities::catalog::packages::ports::PackageSource;
 use std::path::PathBuf;
 
 pub struct FsPackages {
@@ -58,7 +58,7 @@ impl PackageSource for FsPackages {
                                 continue;
                             }
                             let name = sub.file_name().to_string_lossy().to_string();
-                            if crate::capabilities::packages::domain::manifest::is_platform_dir_name(
+                            if crate::capabilities::catalog::packages::domain::manifest::is_platform_dir_name(
                                 &name,
                             ) {
                                 m.platform_dirs.insert(name, sub_path);

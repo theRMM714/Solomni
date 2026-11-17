@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use crate::capabilities::collab::api::CollabSession;
-use crate::capabilities::registry::api::Registry;
+use crate::capabilities::catalog::registry::api::Registry;
 use crate::capabilities::session::api::{AgentSession, Gates, RunState, SessionEvent, subtree_of};
 use crate::capabilities::turn::api::{Prepared, Session};
 use crate::kernel::ports::HostProbe;

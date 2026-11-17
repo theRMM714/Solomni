@@ -23,7 +23,7 @@ pub(super) fn single_flow(faces: &Faces, arg: &str) {
     let picked: Vec<AgentMeta> = if arg.trim().is_empty() {
         views
             .iter()
-            .map(crate::capabilities::registry::api::agent_meta)
+            .map(crate::capabilities::catalog::registry::api::agent_meta)
             .collect()
     } else {
         match pick_agents(faces, &split_names(arg)) {
@@ -249,7 +249,7 @@ pub(super) fn model_flow(faces: &Faces, arg: &str) {
                 return;
             }
             let note = w.get(4).copied().unwrap_or("");
-            let draft = crate::capabilities::registry::api::ModelDraft {
+            let draft = crate::capabilities::catalog::registry::api::ModelDraft {
                 id: w[0].to_string(),
                 name: w[1].to_string(),
                 api_model: w[2].to_string(),

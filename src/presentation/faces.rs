@@ -3,8 +3,8 @@
 //! 不管：任何判定与编排（在 `runtime` 与各能力）；字段之外的装配顺序（在 `src/main.rs`）。
 //! 联动：`src/main.rs` 造出手柄后调 `Faces::from_handle`，再补上 `provision` / `storage` / `toolchains`；`src/presentation/{cli,web}` 各屏只取需要的字段。
 
-use crate::capabilities::modules::api::ModulesOps;
-use crate::capabilities::registry::api::RegistryOps;
+use crate::capabilities::catalog::modules::api::ModulesOps;
+use crate::capabilities::catalog::registry::api::RegistryOps;
 use crate::capabilities::runtime::api::{ActionOps, Handle, LogOps, RuntimeOps};
 use crate::capabilities::session::api::HistoryOps;
 use crate::capabilities::turn::api::EventFeed;
@@ -35,7 +35,7 @@ pub struct Faces {
     /// 目的：常驻服务的统一管理面（组合根注入的同一份，经核心手柄转发）。
     pub residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
     /// 目的：隐秘字段的统一管理面（组合根注入的同一份，经核心手柄转发）。
-    pub secrets: Arc<dyn crate::capabilities::secrets::api::SecretOps + Send + Sync>,
+    pub secrets: Arc<dyn crate::capabilities::catalog::secrets::api::SecretOps + Send + Sync>,
     /// 目的：依赖补齐的统一面（组合根注入；默认未接入，如实失败不假装可用）。
     pub provision: Arc<dyn crate::capabilities::provision::api::Provision + Send + Sync>,
     /// 目的：存储空间的统一面（组合根注入；默认空实现，测试可替换）。

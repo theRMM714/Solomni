@@ -3,7 +3,7 @@
 //! 不管：进程的启停与命令通道（detail/ 的引擎与通道）、引擎参数（detail/ 的适配器）。
 //! 联动：被 service.rs 与 detail/ 消费；契约见 docs/vm/README.md 与 RUNTIME_SPEC.md。
 
-use crate::capabilities::packages::api::{KIND_SYSTEM, PlannedPackage};
+use crate::capabilities::catalog::packages::api::{KIND_SYSTEM, PlannedPackage};
 use crate::capabilities::vm::domain::exec::ExecPlan;
 use crate::capabilities::vm::domain::paths::{PathBridge, PathDialect};
 use crate::kernel::api::FenceSpec;

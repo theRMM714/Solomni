@@ -9,9 +9,9 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::capabilities::modules::api::Module;
-use crate::capabilities::packages::api as pkgs;
-use crate::capabilities::packages::api::{BaseFacts, Library, PackagePlan, PinPolicy};
+use crate::capabilities::catalog::modules::api::Module;
+use crate::capabilities::catalog::packages::api as pkgs;
+use crate::capabilities::catalog::packages::api::{BaseFacts, Library, PackagePlan, PinPolicy};
 use crate::kernel::api::{ExecSpec, Tier};
 use crate::kernel::ports::{HostProbe, PathCodec};
 

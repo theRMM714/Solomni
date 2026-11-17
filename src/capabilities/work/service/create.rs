@@ -234,8 +234,8 @@ impl Work {
         let reserved = self.systools.reserved_names();
         // 校验 agent：名字合法、模块与模型真实存在；模块可跨 agent 共用（各自独立沙箱与工具面）
         for a in &spec.agents {
-            crate::capabilities::registry::api::validate_name(&a.name)?;
-            crate::capabilities::registry::api::check_reserved(&a.name, &reserved)?;
+            crate::capabilities::catalog::registry::api::validate_name(&a.name)?;
+            crate::capabilities::catalog::registry::api::check_reserved(&a.name, &reserved)?;
             for id in &a.modules {
                 if !roster.modules.iter().any(|m| &m.manifest.id == id) {
                     return Err(format!("无此模块：{}", id));
@@ -273,7 +273,7 @@ impl Work {
         let mut taken: Vec<String> = self.subtree_agent_names(&root);
         let mut metas: Vec<AgentMeta> = Vec::new();
         for a in &spec.agents {
-            let name = crate::capabilities::registry::api::unique_instance_name(&a.name, &taken);
+            let name = crate::capabilities::catalog::registry::api::unique_instance_name(&a.name, &taken);
             taken.push(name.clone());
             metas.push(AgentMeta {
                 name,

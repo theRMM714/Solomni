@@ -5,7 +5,7 @@
 
 use crate::capabilities::llm::api::Msg;
 use crate::capabilities::prompt::api::Segment;
-use crate::capabilities::registry::api::{RosterPick, model_listing, resolve_picks};
+use crate::capabilities::catalog::registry::api::{RosterPick, model_listing, resolve_picks};
 use crate::capabilities::session::api::SessionEvent;
 use crate::capabilities::session::api::core_operation;
 use crate::capabilities::slate::api::{Mode, Parties, Pick, Proposal, Request};
@@ -31,11 +31,11 @@ pub fn propose(
             ("mode", mode_text),
             (
                 "agents",
-                crate::capabilities::registry::api::listing(parties.agents),
+                crate::capabilities::catalog::registry::api::listing(parties.agents),
             ),
             (
                 "modules",
-                crate::capabilities::modules::api::listing(parties.roster),
+                crate::capabilities::catalog::modules::api::listing(parties.roster),
             ),
             ("models", model_listing(parties.models)),
             ("task", req.task.to_string()),

@@ -31,9 +31,9 @@ impl Handle {
         id: &str,
     ) -> Result<
         (
-            crate::capabilities::modules::api::Module,
+            crate::capabilities::catalog::modules::api::Module,
             String,
-            crate::capabilities::modules::api::ToolDecl,
+            crate::capabilities::catalog::modules::api::ToolDecl,
         ),
         String,
     > {

@@ -9,9 +9,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::capabilities::llm::api::{Channel, Llm, Msg, ToolMode};
-use crate::capabilities::modules::api::Module;
+use crate::capabilities::catalog::modules::api::Module;
 use crate::capabilities::prompt::api::{Prompt, Segment};
-use crate::capabilities::registry::api::AgentMeta;
+use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::residents::api::ResidentOps;
 use crate::capabilities::session::api::{
     AgentSession, CompactChatFactory, ContextUsage, SessionEvent, SessionParams, ShellSlot,

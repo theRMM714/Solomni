@@ -59,8 +59,8 @@ pub(crate) fn run_builtin(
 }
 
 /// 目的：测试用模块工具声明：只给启动命令（参数契约在需要的用例里另行声明）。
-pub(crate) fn decl(command: &str) -> crate::capabilities::modules::api::ToolDecl {
-    crate::capabilities::modules::api::ToolDecl {
+pub(crate) fn decl(command: &str) -> crate::capabilities::catalog::modules::api::ToolDecl {
+    crate::capabilities::catalog::modules::api::ToolDecl {
         command: command.to_string(),
         desc: String::new(),
         params: None,
@@ -72,7 +72,7 @@ pub(crate) fn decl(command: &str) -> crate::capabilities::modules::api::ToolDecl
 pub(crate) fn decl_with(
     command: &str,
     params_yaml: &str,
-) -> crate::capabilities::modules::api::ToolDecl {
+) -> crate::capabilities::catalog::modules::api::ToolDecl {
     let mut d = decl(command);
     d.params = Some(yaml_serde::from_str(params_yaml).expect("测试参数声明要能解析"));
     d
@@ -123,7 +123,7 @@ pub(crate) fn test_params(agent: &str) -> crate::capabilities::session::api::Ses
 /// 目的：测试用工具说明块素材（patch 语法 + 给定的模块工具）。
 pub(crate) fn test_notes(
     sb: &crate::capabilities::workspace::api::Sandbox,
-    modules: &[crate::capabilities::modules::api::Module],
+    modules: &[crate::capabilities::catalog::modules::api::Module],
 ) -> crate::capabilities::tools::api::ToolNotes {
     crate::capabilities::tools::api::tool_notes(&test_prompts(), sb, modules, &[])
 }

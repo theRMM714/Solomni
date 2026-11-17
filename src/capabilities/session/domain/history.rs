@@ -4,7 +4,7 @@
 //! 不管：落盘机制（在 `detail/fs_history.rs` 的 `HistoryStore` 实现）；会话状态派生（在 `session.rs`）。
 //! 联动：由 `service.rs` 与 `ports.rs` 使用，`api.rs` 对外重导出。
 
-use crate::capabilities::registry::api::AgentMeta;
+use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::workspace::api::WorkspaceGrant;
 use serde::{Deserialize, Serialize};
 
