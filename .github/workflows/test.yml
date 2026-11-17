@@ -539,7 +539,7 @@ jobs:
         with:
           node-version: "lts/*"
 
-      - name: 按变更类型核对六个 job
+      - name: 按变更类型核对五个 lane
         env:
           CHANGES: ${{ needs.changes.result }}
           CODE_CHANGED: ${{ needs.changes.outputs.code_changed }}
