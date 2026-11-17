@@ -36,21 +36,19 @@ pub use crate::kernel::ports::ProcessRunner;
 pub use crate::capabilities::modules::api::Module;
 
 pub use crate::capabilities::vm::api::{self as exec};
-pub use crate::capabilities::vm::domain::exec::EntryProblem as Diagnosis;
 pub use crate::kernel::api::ExecSpec;
 
 pub use crate::capabilities::modules::ports::ModuleSource;
 pub use crate::capabilities::workspace::ports::Workdirs;
 
-pub use crate::capabilities::runtime::api::{DecisionCard, SessionEvent};
+pub use crate::capabilities::runtime::api::SessionEvent;
 pub use crate::capabilities::work::api::{ConfigAgent, SessionEdit, WorkMode, WorkSpec};
 
 pub use crate::capabilities::session::api::Pending;
 
 /// 目的：裁决卡的选项 id（契约）：测试按它作答，不按文案。
 pub use crate::capabilities::session::api::{
-    OPT_ASK_REPLY, OPT_BEGIN, OPT_BEGIN_ALLOW, OPT_NODE_REWORK, OPT_NODE_SAY, OPT_PLAN_SAY,
-    OPT_PLAN_START, OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM,
+    OPT_BEGIN, OPT_BEGIN_ALLOW, OPT_PLAN_SAY, OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM,
 };
 
 pub(crate) use crate::capabilities::runtime::service::Core;

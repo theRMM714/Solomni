@@ -1,5 +1,6 @@
 // e2e 驱动（L4，由 orchestrator.js 调起）：隔离根内跑，绝不动真实 .home/ 与 session/。
 // 覆盖：agent 登记处 → 推荐复用 → 单 agent（1 个 agent 带多模块）+ 内置 write 落私沙箱
+//       → 回档两档：删除（不写标记，沙箱退回该点）与留档+恢复（写标记，按标记展开转录与沙箱）
 //       → 协作（非代拟）跑完交付 → 代拟（复用+组装）确认后名单写回 meta 并建出沙箱
 //       → 外部工具 cwd / 绝对路径 / 自由格式补丁 / 正文+信封 / 原生多调用（协议形状由假供应商核对）
 //       → 工具级确认（与本通道同形）：生成中停下等 allow / deny / allow_turn；快照带那张卡（刷新能重建）；full 本轮不再问
@@ -292,6 +293,47 @@ async function lines(sid) {
   // 后面的文件清单场景还要看沙箱成品：再跑一轮把它写回来。
   assert((await act(name1, 'send_message', { text: '再记一笔' })).status === 200, '删除后再记一笔');
   assert(fs.existsSync(note) && fs.readFileSync(note, 'utf8') === '来自内置工具', '新的一轮重新写出成品', note);
+
+  // 留档回档（archive）+ 恢复：把 [0, before) 折叠进档案并**留一条可恢复的标记**；
+  // 恢复按标记把转录与共享区一起展回来（删除模式不写标记，这条是新的一档）。
+  const nameArc = 'e2e-archive-' + Date.now();
+  const cArc = await api('POST', '/api/actions/create_session', {
+    name: nameArc, mode: 'single',
+    agents: [{ name: '专属', transient: true, modules: ['research'], model: 'm1' }],
+  });
+  assert(cArc.status === 200, '建留档回档工作', cArc.text.slice(0, 200));
+  assert((await act(nameArc, 'send_message', { text: '留档一笔' })).status === 200, '留档回档前发言');
+  const arcNote = path.join(dir(nameArc), '专属', 'mock-note.txt');
+  const arcBefore = await lines(nameArc);
+  assert(
+    arcBefore.map((x) => x.id).join() === '0,1,2' && fs.existsSync(arcNote),
+    '留档前：三行转录 + 沙箱成品',
+    JSON.stringify(arcBefore.map((x) => x.id))
+  );
+  assert((await act(nameArc, 'rewind', { id: 0, mode: 'archive' })).status === 200, '留档回档到第一行');
+  assert((await lines(nameArc)).length === 0, '留档回档后转录清空');
+  assert(!fs.existsSync(arcNote), '留档回档把沙箱成品一起折叠进档案', arcNote);
+  const arcHist = await api('GET', '/api/history/' + encodeURIComponent(nameArc));
+  const arcMark = ((arcHist.json && arcHist.json.events) || [])
+    .filter((e) => e.type === 'rewind' && e.mode === 'archive')
+    .pop();
+  assert(
+    arcMark && typeof arcMark.mark === 'number' && arcMark.before === 0,
+    '留档留了一条可恢复的标记（before=0）',
+    JSON.stringify(arcMark)
+  );
+  assert((await act(nameArc, 'rewind', { id: arcMark.mark, mode: 'restore' })).status === 200, '按标记恢复留档');
+  const arcBack = await lines(nameArc);
+  assert(
+    arcBack.map((x) => x.id).join() === arcBefore.map((x) => x.id).join(),
+    '恢复后转录逐行回到留档前',
+    JSON.stringify(arcBack.map((x) => x.id))
+  );
+  assert(
+    fs.existsSync(arcNote) && fs.readFileSync(arcNote, 'utf8') === '来自内置工具',
+    '恢复把沙箱成品一起展回来',
+    arcNote
+  );
 
   // 零模块 agent 的 shell：sandbox 只碰私有沙箱；成功与退出码两条都落成 tool 行。
   // 容器围栏对 shell 是**严格**的（不允许降级）：安全模式（不写 ACL）下这条必然被拒，

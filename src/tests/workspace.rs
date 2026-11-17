@@ -4,11 +4,9 @@
 //! 联动：`docs/storage/README.md` 与 `ARCHITECTURE.md`。
 
 mod archive;
-mod auto;
 mod config;
 mod external;
 mod resolve;
 mod sandbox;
 mod support;
-mod tier;
 mod work;
