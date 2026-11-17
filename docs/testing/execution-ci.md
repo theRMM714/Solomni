@@ -176,8 +176,8 @@ node run-tests.js --fence-live
 ### 虚拟机档与真机行为（本地 opt-in）
 
 - 现状：按 [TESTING.md](../../TESTING.md) 的新口径（不做实现耦合测试），原先位于 `src/tests/vm/`、`src/tests/workspace/`、`src/tests/provision/` 的 `SOLOMNI_VM_LIVE` 探针已全部移除——它们直接构造 `vm` / `provision` 的实现分区并断言内部回执，实现一搬就整片失效。
-- 虚拟机档的**对外行为**改由 T5 旅程在真机上验：`tests/cross-platform/e2e/orchestrator.js` 的 vm 档会话场景（真虚拟根 + KVM / WHPX，按需给 `SOLOMNI_VM_QEMU` / `SOLOMNI_VM_GUEST` / `SOLOMNI_VM_SMBD` / `SOLOMNI_UNC_ROOT`）。
-- 尚未回到自动化覆盖的真机项记在缺口 `test.real-machine-behavior`（`tests/gaps.yaml`）：取消与超时无孤儿进程、guest 诊断列出忙进程、外部工作区往返（SMB / virtiofs / 9p 三变体）、UNC 共享根往返、guest-rootfs 属性保留与 4K 块镜像、出包编排。补齐时只能写成**经 `::api` 的行为用例**或 e2e 旅程：`tests/gates/structure/tests-api.js` 机器判 `src/tests/**` 是否碰 `service|domain|detail`。
+- 虚拟机档的**对外行为**改由 T5 旅程在真机上验：`tests/cross-platform/e2e/orchestrator.js` 的 vm 档会话场景（真虚拟根 + KVM / WHPX，按需给 `SOLOMNI_VM_QEMU` / `SOLOMNI_VM_GUEST` / `SOLOMNI_VM_SMBD` / `SOLOMNI_UNC_ROOT`）。Windows 宿主上已验：guest 内工具与 shell、外部工作区往返（含 UNC 共享根）、`guest_diagnose` 列出 guest 里的后台进程、按「停止」后 guest 不留残留进程、删会话销毁 guest 不动外部根。
+- 只剩 Linux 宿主能验的三项记在缺口 `test.real-machine-behavior`（`tests/gaps.yaml`）：4K 块镜像、特权位与属主回填、virtiofs / 9p 挂载变体——Windows 落的是 `rootfs.qcow2`，看不到 `rootfs.ext4`。补齐时只能写成**经 `::api` 的行为用例**或 e2e 旅程：`tests/gates/structure/tests-api.js` 机器判 `src/tests/**` 是否碰 `service|domain|detail`。
 - 缺省宿主机跑不了虚拟机档：入口按 `env-skip` 记进报告（`node run-tests.js` 的口径：env-skip 不是通过）。真机证据只能在有 KVM / WHPX 的机器上手工产出，报告里如实记 env-skip。
 
 ### 覆盖率报告（Linux）

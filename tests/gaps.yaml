@@ -124,18 +124,19 @@
   scope: global
   level: T4
   why: |
-    原先 `SOLOMNI_VM_LIVE` 的真机探针（`src/tests/vm/`、`src/tests/workspace/`、`src/tests/provision/`）
-    直接构造实现分区并断言内部回执，随实现耦合用例一并移除。这些场景只有真机能验：
-    取消与超时无孤儿进程、guest 诊断列出忙进程、外部工作区往返（SMB / virtiofs / 9p 三变体）、
-    UNC 共享根往返、guest-rootfs 属性保留与 4K 块镜像、出包编排。
-    本轮已把 vm 档收进旅程清单（`tests/journeys/index.js` 的 `vm` 与 `parent-death` 两段，
-    `node run-tests.js --journey=vm,parent-death` 可单跑），缺的只剩真机上的重跑证据本身。
+    Windows 宿主的真机面已收进旅程：`vm` 段覆盖 guest 内工具与 shell、外部工作区往返（含 UNC 共享根）、
+    guest 诊断列出 guest 里的后台进程、按「停止」后 guest 不留残留进程、删会话销毁 guest 不动外部根；
+    `parent-death` 段覆盖核心被强杀后常驻服务跟着消失。
+    剩下三件只有 Linux 宿主能验，Windows 侧落的是 `rootfs.qcow2`，看不到 `rootfs.ext4`：
+    4K 块镜像、特权位与属主回填、virtiofs / 9p 两种挂载变体。
   how: |
-    1) 能走用户旅程的（起 guest、进会话、取消、外部工作区绑定、共享根）写成 `tests/cross-platform/e2e/`
-       的 vm 档场景，按 `SOLOMNI_VM_QEMU` / `SOLOMNI_VM_GUEST` / `SOLOMNI_VM_SMBD` / `SOLOMNI_UNC_ROOT` 判环境。
-    2) 只能在进程内观察的（出包编排、rootfs 属性）写成只经 `::api` 的用例，用真实例、真镜像。
-    3) 缺环境一律记 `env-skip`，不写成通过（`docs/testing/execution-ci.md` 的「虚拟机档与真机行为」）。
+    1) 4K 块与属性：Linux 上先 `reset_guest`，再读 `rootfs.ext4` 的超级块
+       （magic `0xEF53` 在 1024+0x38，块大小 `1024 << log_block_size` 在 0x18，必须 == 4096），
+       用 `debugfs` 查 `mode/uid/gid`（`/usr/bin/sudo` 4755、`/usr/bin/ssh-agent` 2755、
+       `/etc/shadow` 640 gid 42、`/tmp` 1777、`/var/mail` 2775 gid 8）。
+    2) 挂载变体：Linux 宿主上带 `SOLOMNI_VM_VIRTIOFSD` 与 9p 共享根各跑一次 `--journey=vm`。
+    3) 缺环境一律记 `env-skip`，不写成通过（`docs/testing/execution-ci.md` 的「虚拟机档与真机行为（本地 opt-in）」）。
   accept: |
-    上列场景各有一条可手工重跑的真机证据，记在 PR 或 `tests/gaps.yaml` 的平台账里；
+    上述三件各有一条 Linux 宿主上的可重跑证据（记在 PR 或平台账里）；
     `node run-tests.js --audit=structure` 与 `--docs` 全绿。
-  blocked_by: 需 KVM / WHPX 真机，CI 不具备
+  blocked_by: 需 Linux 宿主的 KVM 与 e2fsprogs（debugfs），CI 不具备

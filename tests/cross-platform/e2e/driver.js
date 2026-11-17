@@ -226,6 +226,50 @@ async function settle(p, ms, label) {
   return r;
 }
 
+/** guest 诊断里的进程表（只读诊断；虚拟机档才有内容，别的档如实报错）。 */
+let lastDiag = '';
+async function guestProcesses(sid) {
+  const d = await act(sid, 'guest_diagnose', {});
+  lastDiag = d.status + ' ' + String(d.text).slice(0, 240);
+  return (d.json && d.json.processes) || [];
+}
+/** 等 guest 里出现（或消失）匹配 re 的进程：命中返回进程数组/true，到点返回 null/false。 */
+async function waitGuestProcess(sid, re, ms, absent) {
+  const until = Date.now() + (ms || 20000);
+  for (;;) {
+    const ps = await guestProcesses(sid);
+    const hit = ps.filter((x) => re.test(String(x.args || '') + ' ' + String(x.comm || '')));
+    if (absent) {
+      if (hit.length === 0) return true;
+    } else if (hit.length > 0) {
+      return hit;
+    }
+    if (Date.now() > until) return absent ? false : null;
+    await new Promise((r) => setTimeout(r, 400));
+  }
+}
+/** 等某会话落出一条名为 name 的工具行（工具真跑完才落盘）。 */
+async function waitToolRow(sid, name, ms) {
+  const until = Date.now() + (ms || 60000);
+  for (;;) {
+    const ls = await lines(sid);
+    const hit = ls.filter((l) => l.tool && l.tool.name === name).pop();
+    if (hit) return hit;
+    if (Date.now() > until) return null;
+    await new Promise((r) => setTimeout(r, 300));
+  }
+}
+/** 等某会话的运行态变成 want（运行态是推的短事件，快照里是对账副本）。 */
+async function waitRunning(sid, want, ms) {
+  const until = Date.now() + (ms || 60000);
+  for (;;) {
+    const s = await stateOk();
+    const v = ((s.json && s.json.sessions) || []).find((x) => x.sid === sid);
+    if (!!(v && v.running) === !!want) return true;
+    if (Date.now() > until) return false;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}
 /** 该工作的转录行（从落盘流水取，已应用回档截断）。 */
 async function lines(sid) {
   const r = await api('GET', '/api/history/' + encodeURIComponent(sid));
@@ -1210,6 +1254,32 @@ assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slic
       const vfAlive = (vfp.stdout || '').split('\n').filter((l) => l.includes('--socket-path') && l.includes('solomni-virtiofs-'));
       assert(vfAlive.length > 0, 'virtiofs 档下会话期 virtiofsd 要在跑', vfAlive.join(' | ').slice(0, 240));
     }
+    // 诊断（真机）：让 guest 里留一个后台进程（工具本身立刻返回，核心空着），诊断要把它列出来。
+    // 放在取消之前：按过停止的会话要先「继续」才接受派发。
+    const saidBg = await act(nameVm, 'send_message', { text: '虚拟机档后台进程' });
+    assert(saidBg.status === 200, '虚拟机档后台进程发言', saidBg.text.slice(0, 200));
+    const bgRow = await waitToolRow(nameVm, 'shell', 60000);
+    assert(!!bgRow, '后台进程那条工具行落盘', JSON.stringify(bgRow || {}).slice(0, 240));
+    const bg = await waitGuestProcess(nameVm, /sleep 311/, 60000);
+    assert(!!bg, 'guest 诊断列出 guest 里的后台进程', JSON.stringify(bg || []).slice(0, 300) + ' :: 诊断=' + lastDiag);
+    assert(await waitRunning(nameVm, false, 60000), '后台进程那一段自己结束（工具不挂在后台进程上）');
+
+    // 取消（真机）：一条要跑很久的 shell，跑着的时候按「停止」，guest 里不能留下这条进程。
+    // 这条发言本身要等回合走到让出点才回包（工具跑 300 秒，远超 120 秒的请求上限），
+    // 所以不 await：发出去就开始跑，下面靠运行态确认它真在跑，再按停止。
+    act(nameVm, 'send_message', { text: '虚拟机档取消' }).catch((e) => {
+      console.log('    [诊断] 取消发言的回包迟到：' + e.message);
+    });
+    const running = await waitRunning(nameVm, true, 60000);
+    assert(running, '长命令让这一段真的在跑');
+    const stop = await settle(act(nameVm, 'control_session', { action: 'stop' }), 30000, '跑着的时候按「停止」');
+    assert(stop && stop.status === 200, '跑着的时候按「停止」', stop ? stop.text.slice(0, 240) : '限时内没有返回');
+    if (stop) {
+      assert(await waitRunning(nameVm, false, 60000), '停止之后这一段不再跑');
+      const gone = await waitGuestProcess(nameVm, /sleep 300/, 30000, true);
+      assert(gone, '取消后 guest 里没有残留的 sleep 进程');
+    }
+
     // 删除会话：核心销毁该租约的 guest。
     const del = await api('POST', '/api/history/' + encodeURIComponent(nameVm) + '/delete', {});
     assert(del.status === 200, '删除会话', del.text.slice(0, 200));

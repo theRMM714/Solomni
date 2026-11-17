@@ -250,6 +250,33 @@ http.createServer((req, res) => {
       } else {
         content = JSON.stringify({ type: 'say', text: '外部工作区与私沙都验完了' });
       }
+    } else if (user.includes('虚拟机档后台进程') || user.includes('虚拟机档取消')) {
+      // 虚拟机档的真机两段（通道是原生 tool_calls）：
+      //   后台进程：留一个存活很久的进程就返回，核心随即空闲——诊断这才读得到它；
+      //   取消：一条要跑很久的 shell，驱动在它跑着的时候按「停止」，看 guest 里会不会留孤儿。
+      // 按本段已收到的工具结果数决定发哪一步：不能拿 sawToolResult 当门——同段对话里前面几轮的工具结果会让它为真。
+      let boundary = -1;
+      for (let i = 0; i < msgs.length; i++) {
+        if (msgs[i].role === 'user' && !String(msgs[i].content || '').includes('[工具结果]')) boundary = i;
+      }
+      const ran = msgs.slice(boundary + 1).filter((m) => m.role === 'tool').length;
+      const bg = user.includes('虚拟机档后台进程');
+      if (ran === 0) {
+        calls = [{
+          id: bg ? 'call_vm_bg' : 'call_vm_sleep',
+          type: 'function',
+          function: {
+            name: 'shell',
+            arguments: JSON.stringify(
+              bg
+                ? { command: '(sleep 311 >/dev/null 2>&1 </dev/null &) ; echo BG-STARTED', timeout_secs: 30 }
+                : { command: "sleep 300; printf 'CANCEL-DONE\\n'", timeout_secs: 600 },
+            ),
+          },
+        }];
+      } else {
+        content = JSON.stringify({ type: 'say', text: bg ? '后台进程起好了。' : '命令被停止了。' });
+      }
     } else if (sawToolResult && allUser.includes('跑 shell')) {
       // shell 的第二轮：两次调用都拿到结果后收尾（第一条成功、第二条非零退出）。
       content = JSON.stringify({ type: 'say', text: 'shell 跑完了' });
