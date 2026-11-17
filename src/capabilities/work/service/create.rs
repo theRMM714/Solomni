@@ -882,12 +882,12 @@ mod tests {
         let mut detached = meta(Tier::Host, WorkspaceGrant::Workspace);
         detached.workspace = None;
         pay_workspace_grant(&root, &detached);
-        assert!(!layout::home(root).exists(), "不该付的组合不留痕迹");
+        assert!(!layout::home(&root).exists(), "不该付的组合不留痕迹");
         // 该付的一种：状态文件由后台线程写出来（内核桩：0 写、0 复用）。
         let mut pay = meta(Tier::Host, WorkspaceGrant::Workspace);
         pay.workspace.as_mut().expect("有绑定").root = ws.clone();
         pay_workspace_grant(&root, &pay);
-        let state = layout::home(root).join("workspace-grants.json");
+        let state = layout::home(&root).join("workspace-grants.json");
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while !state.is_file() && std::time::Instant::now() < deadline {
             std::thread::sleep(std::time::Duration::from_millis(10));
