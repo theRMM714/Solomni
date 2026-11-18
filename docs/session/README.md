@@ -12,7 +12,7 @@
 ## 入站契约与状态归属
 
 - 入站面：`api::HistoryOps`（呈现层队列面）+ `api::History`（别的能力的直连面：造会话 / 写元信息 / **只读元信息** / 追流水 / 读回 / 删除）。
-- 事件与运行态：行与事件词汇；**运行态** `RunState`（`active` / `stopped` / `closed`）落盘在 `meta.run`。
+- 事件与运行态：行与事件词汇；**运行态** `RunState`（`active` / `stopped` / `archived`）落盘在 `meta.run`。
 - 出站端口：`HistoryStore` **只由 `service.rs` 持有**（R12）。
 - 状态归属：会话状态、回合簿记与会话历史由本单元唯一持有。
 
