@@ -715,16 +715,16 @@ fn real_shell_reports_chinese_and_exit_code() {
 
 #[cfg(unix)]
 #[test]
-fn real_shell_keeps_head_and_tail_when_output_is_long() {
+fn real_shell_returns_the_whole_body_because_the_budget_truncates() {
     let Some(exe) = built_exe() else {
-        eprintln!("[探针] 未找到已构建的产品可执行文件，跳过 shell 截断契约");
+        eprintln!("[探针] 未找到已构建的产品可执行文件，跳过 shell 长输出契约");
         return;
     };
     if !shell_fence_ready() {
-        eprintln!("[探针] 本机围栏不可用（环境结论），跳过 shell 截断契约");
+        eprintln!("[探针] 本机围栏不可用（环境结论），跳过 shell 长输出契约");
         return;
     }
-    let dir = crate::tests::scratch("proc-shell-truncate");
+    let dir = crate::tests::scratch("proc-shell-long");
     let tools = real_runner(exe, &dir, 30);
     let out = tools.run_shell(&crate::kernel::ports::ShellRun {
         fence: &spec_for(&dir),
@@ -738,8 +738,13 @@ fn real_shell_keeps_head_and_tail_when_output_is_long() {
     assert!(out.ok, "{}", out.output);
     assert!(out.output.contains("TAIL"), "结尾要保留：{}", out.output);
     assert!(
-        out.output.contains("开头") && out.output.contains("结尾"),
-        "截断标记要如实说清：{}",
+        out.output.len() > 20_000,
+        "内核只装配、不裁正文（截断统一由回执预算做）：{} 字符",
+        out.output.len()
+    );
+    assert!(
+        !out.output.contains("[结果截断]") && !out.output.contains("[截断] 输出共"),
+        "内核不得自带截断标记：{}",
         out.output
     );
     let _ = std::fs::remove_dir_all(&dir);
