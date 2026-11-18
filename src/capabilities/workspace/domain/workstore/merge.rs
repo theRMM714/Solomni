@@ -109,7 +109,10 @@ pub fn plan_commit(
             None => {
                 // 显式删除：必须有基线，且上游没在拉取之后动过。
                 match (base, head) {
-                    (None, _) => conflicts.push((path.clone(), Conflict::DeleteWithoutBase)),
+                    // 三方都没有：上游已经删了、本地也没有基线——如实报「已经没有了」，不是「不知道删哪一版」。
+                    // 沙箱里删掉一个已自动提交过的文件后，基线会随那次 Delete 提交一起消失，走的就是这条。
+                    (None, None) => unchanged.push((path.clone(), Unchanged::AlreadyDeleted)),
+                    (None, Some(_)) => conflicts.push((path.clone(), Conflict::DeleteWithoutBase)),
                     (Some(_), None) => unchanged.push((path.clone(), Unchanged::AlreadyDeleted)),
                     (Some(b), Some(h)) if b == h => changes.push(Change {
                         path: path.clone(),
