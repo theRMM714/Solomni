@@ -47,10 +47,6 @@ pub trait ProcessTexts: Send + Sync {
     fn timeout(&self) -> String;
     /// 围栏没装上（守门进程用固定退出码报明，命令没被执行）。
     fn fence_failed(&self) -> String;
-    /// 输出截断的尾部说明（chars = 原字符数，limit = 上限）。
-    fn truncated(&self, chars: &str, limit: &str) -> String;
-    /// 目的：shell 输出 head+tail 截断的尾部说明（chars = 原字符数，head / tail = **实际保留**的字符数）。
-    fn truncated_middle(&self, chars: &str, head: &str, tail: &str) -> String;
     /// 目的：shell 的退出码回执（None = 被信号结束，拿不到退出码）。
     fn shell_exit(&self, code: Option<i32>) -> String;
     /// 目的：shell 到点被杀的说明（secs = 本次上限）。

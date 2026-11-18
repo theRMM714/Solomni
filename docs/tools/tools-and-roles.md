@@ -57,7 +57,7 @@ roles:
 - 越权防线分两段：**角色表**决定这个身份有哪些工具，**权限档位**决定其中哪些还能用（deny 的工具不发放，ask 的照常发放）；模块工具查**该成员有没有这个模块**（module 消歧）。两段缺一不可。
 
 - **注入口径（唯一）**：**总表不进提示词**。每回合由核心查"这一回合的身份能用的工具"：信封通道把说明与参数作为一条系统消息注入；原生通道由**声明槽**下发（名字 / 说明 / JSON Schema），不再重复文字清单，只保留 patch 这类声明表达不了的写法。
-- **回执预算（唯一）**：所有工具回执（read / search / list / shell / 模块工具 / 核心操作的只读核实）送回模型前统一 head+tail 截断到 16k 字符（开头约 1/4、结尾约 3/4），超出时带「共多少字符、怎么继续取」的标记；read 的续读 offset、shell 的状态行 / 末行都在尾部，因此保留。
+- **回执预算（唯一）**：所有工具回执（read / search / list / shell / 模块工具 / 核心操作的只读核实）送回模型前统一 head+tail 截断到 16k 字符（开头约 1/4、结尾约 3/4），超出时只加一条标记——报原始字符数、实际保留的开头 / 结尾字符数，并按工具给出续读办法（文件类给 read 的 offset/limit；执行类给「缩小命令输出 / 写到文件再 read」）；read 的续读 offset、shell 的状态行 / 末行都在尾部，因此保留。实现唯一在 `src/capabilities/tools/domain/budget.rs`，本机与虚拟机档都经过它，回执只被切一次。
 
 | 回合 | 这一份是什么 |
 | --- | --- |
@@ -126,12 +126,12 @@ roles:
 
 - `systools/tools.yaml` 的 `shell` 是唯一声明 per-call `scope` 的系统工具；它不新建执行机制：host 走 kernel 的 `ProcessRunner`，VM 走 guest helper。
 
-- 参数：`command`（必填）、`scope`（sandbox / external，缺省 sandbox）、`timeout_secs`（缺省 120，最大 600；只约束命令子进程，从启动命令起算——Windows 首次为会话准备围栏（建容器、写 ACL）不计入，可能额外耗时，截止时间在 spawn 之后才起算，见 `src/kernel/detail/process.rs`）。cwd 固定私有沙箱；无交互 stdin / TTY；输出上限 16k（约 4k 开头 + 约 12k 结尾，按完整行取整；单行超长时按字符切）；命令上限 8000 字符。
+- 参数：`command`（必填）、`scope`（sandbox / external，缺省 sandbox）、`timeout_secs`（缺省 120，最大 600；只约束命令子进程，从启动命令起算——Windows 首次为会话准备围栏（建容器、写 ACL）不计入，可能额外耗时，截止时间在 spawn 之后才起算，见 `src/kernel/detail/process.rs`）。cwd 固定私有沙箱；无交互 stdin / TTY；输出超限由回执预算统一收口（16k：约 4k 开头 + 约 12k 结尾，按完整行取整；单行超长时按字符切，见 `src/capabilities/tools/domain/budget.rs`）；命令上限 8000 字符。
 - **回执形状**（正文与状态行装配见 `src/kernel/domain/receipt.rs`，末行由工具层追加）：正文（stdout；有 stderr 时折成 `[stderr]` 段）/ 空行 / 状态行 / 末行，末行是 `[shell] cwd <本环境写法> · 耗时 <N> 秒`（围栏准备 ≥1 秒时在末尾追加 `（其中围栏准备 <M> 秒）`；`N` 是整次调用墙钟，含围栏准备）：
   - 状态行四种：`[shell] 退出码 N`、`[shell] 超时（N 秒）：工具进程与它拉起的整棵进程树已被终止`、`[shell] 用户停止：工具进程与它拉起的整棵进程树已被终止`、`[shell] 退出码未知（被信号结束）`。
   - 末行恒为 cwd·耗时、上一行恒为状态行：两条都在 = 这次调用真的跑过；都没有 = 没跑（围栏拒绝 / 无租约 / helper 起不来 / 共享同步失败），此时不补尾行（`src/capabilities/tools/domain/shell.rs` 的 `did_run`）。
-  - 截断只作用在正文，尾行永远保留（`src/kernel/domain/receipt.rs`）；开头 / 结尾**按完整行取整**（单行超长时退化为按字符切），标记报的是实际保留字符数。
-  - 退出码是**整条脚本**的退出状态（最后一条命令或显式 exit），不是每条命令的；要看单条命令的退出码按平台写：POSIX（Linux / macOS 宿主与 VM guest 的 /bin/sh）用 `cmd; echo exit=$?` 或 `cmd || exit $?`；Windows 宿主跑 PowerShell，`$?` 是**布尔**（上一条命令成功与否）不是退出码，退出码看 `$LASTEXITCODE`，写 `cmd /c exit 3; echo exit=$LASTEXITCODE`（原生命令结束时才更新）。
+  - 截断由唯一的回执预算在送回模型前施加（`src/capabilities/tools/domain/budget.rs`）：只切一次、只留一条标记；状态行与 cwd·耗时末行都在尾部，不会被劈开（`src/kernel/domain/receipt.rs` 只装配、不截断）。开头 / 结尾**按完整行取整**（单行超长时退化为按字符切），标记报的是实际保留字符数。
+  - 退出码是**整条脚本**的收尾状态：脚本显式 `exit N` 时就是 N；Windows 宿主上否则取**最后一次原生命令**的 `$LASTEXITCODE`（`src/kernel/detail/process/windows.rs` 的 `PS_TAIL`），脚本中间失败、后面又跑成功的内置命令不会把它清零——所以 `cmd /c exit 3; echo done` 的退出码仍是 3（PowerShell 自身不传播原生进程码，这条尾行是让中间失败可见的唯一机制）；POSIX 取脚本最后一条命令的退出码。要看单条命令的退出码按平台写：POSIX（Linux / macOS 宿主与 VM guest 的 /bin/sh）用 `cmd; echo exit=$?`；Windows 宿主跑 PowerShell，`$?` 是**布尔**（上一条命令成功与否）不是退出码，退出码看 `$LASTEXITCODE`，写 `cmd /c exit 3; echo exit=$LASTEXITCODE`（原生命令结束时才更新）。要让「任一关键步骤失败就整体失败」，在关键命令后显式判：`if (-not $?) { exit 1 }` 或 `exit $LASTEXITCODE`（`cmd || exit $?` 这种 bash 写法在 PowerShell 里不成立——`exit` 是语句不是管道命令）。
   - 超时与用户停止没有命令退出码（`src/capabilities/tools/domain/shell.rs` 的 `exit_code` 返回 None），只用状态行表达，不伪造 124 / 143。
   - cwd 用本环境写法：本机档 = 视图盘打开时的视图写法（**视图写法目前只用于 shell（cwd == 私有沙箱）的容器 cwd 与程序名；模块工具沿用宿主 cwd，不参与视图盘收敛**）（如 `S:\session\<工作>\<agent>`，盘符按实例分配，别假设恒为 Z:；宿主路径由路径码翻译；`SOLOMNI_VIEW_DRIVE=0` 或视图盘不可用时回退宿主路径）；虚拟机档 = guest 内路径（路径桥，宿主 `D:\a\b` → `/solomni-host/d/a/b`，见 `src/capabilities/vm/domain/paths.rs`；UNC 外部根在 guest 里是 `/solomni-host/unc/<server>/<share>/…`，模型照此写法给路径即可）。
 - 回放优先读结构化事实：`src/capabilities/conversation/session/domain/tools.rs` 的 `last_shell` 取最后一条带命令的 shell 工具行的 cwd 与耗时——工具行带 `shell` 事实（cwd / 耗时毫秒 / 围栏准备 / 退出码 / 状态 / 是否截断）时直接读，旧转录才从末行派生，标 `historical`。

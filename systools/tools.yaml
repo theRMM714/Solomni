@@ -118,9 +118,11 @@ tools:
     desc: |
       在本环境跑一条一次性命令（构建 / 测试 / 跑脚本）：cwd 固定是你的私有沙箱，无交互 stdin / TTY；
       输出超限保留开头与结尾（按完整行取整）；回执末行是 cwd 与本次耗时、上一行是状态行（退出码 / 超时 / 用户停止），
-      尾行不随输出截断；cwd 用本环境的写法（虚拟机档是 guest 内路径）。退出码是**整条脚本**的退出状态
-      （最后一条命令或显式 exit），不是每条命令的：要看单条命令的退出码，用 `cmd; echo exit=$?` 或
-      `cmd || exit $?`。返回值非 0 就是这条命令失败（Windows 上 PowerShell 的未处理错误也会让命令中止
+      尾行不随输出截断；cwd 用本环境的写法（虚拟机档是 guest 内路径）。退出码是**整条脚本**的收尾状态：
+      显式 `exit N` 时就是 N；否则 Windows 取**最后一次原生命令**的 `$LASTEXITCODE`（中间失败、后面又跑成功的
+      内置命令不会清零它；`$?` 只是布尔），POSIX 取脚本最后一条命令的退出码。要看单条命令的退出码，Windows 用
+      `cmd /c exit 3; echo exit=$LASTEXITCODE`、POSIX 用 `cmd; echo exit=$?`；要让「关键步骤失败就整体失败」，在
+      关键命令后写 `if (-not $?) { exit 1 }`。返回值非 0 就是这条命令失败（Windows 上 PowerShell 的未处理错误也会让命令中止
       并返回非 0；要容错请显式 -ErrorAction SilentlyContinue 或 try/catch）。
       scope=sandbox（默认）：只能读写你的私有沙箱，另可只读系统与项目内基础工具链（python / node / cc 等）；
       不碰共享区 / 模块目录 / 主机只读根，不联网。工作区内修改及以上档位直接执行；仅可查看档不发放。

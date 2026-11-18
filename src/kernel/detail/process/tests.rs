@@ -106,13 +106,11 @@ fn receipt_markers_are_code_owned() {
         fenced.output
     );
 
+    // 装配层不做截断：超限只由送回模型前的工具预算统一收口（capabilities::tools::domain::budget）。
     let long = "字".repeat(20_000);
-    let cut = tools.assemble(long, String::new(), false, Some(0));
-    assert!(
-        cut.output.contains("20000"),
-        "截断要如实报字符数：{}",
-        &cut.output[cut.output.len() - 80..]
-    );
+    let whole = tools.assemble(long, String::new(), false, Some(0));
+    assert_eq!(whole.output.chars().count(), 20_000, "装配层原样交出");
+    assert!(!whole.output.contains("[截断]"), "装配层不许自己加截断标记");
 }
 
 /// 全局沙箱要求：机制不可用且未同意降级时拒绝；同意降级后放行；"允许联网"不需要网络围栏。

@@ -11,6 +11,7 @@ use crate::capabilities::conversation::session::api::{
 use crate::capabilities::conversation::session::domain::tools::MemberTools;
 use crate::capabilities::llm::api::{self as envelope, Verb};
 use crate::capabilities::llm::api::{Chat, Chunk, CompleteOpts, Msg};
+use crate::capabilities::tools::api::{cap_result, continuation_for};
 use crate::kernel::api::ToolOutcome;
 
 /// 目的：一次工具调用的产出：调用视图 + 它压进历史的消息。
@@ -467,7 +468,10 @@ pub fn converse_with(
                     .iter()
                     .enumerate()
                     .map(|(i, c)| {
-                        let (label, outcome, read, shell) = done[i].clone();
+                        let (label, mut outcome, read, shell) = done[i].clone();
+                        // 模型可见的最末一处：虚拟机档回执与核心自有工具不经过本机执行端口，预算在这里补齐。
+                        outcome.output =
+                            cap_result(outcome.output, continuation_for(&label, &plan[i].1));
                         ToolCallView {
                             speaker: speaker.to_string(),
                             module: label,
@@ -660,7 +664,10 @@ pub fn converse_with(
                     .enumerate()
                     .map(|(i, (_module, tool, _args))| {
                         let (label, outcome, read, shell) = done[i].clone();
-                        let outcome = annotate(outcome);
+                        let mut outcome = annotate(outcome);
+                        // 与原生通道同一处预算：信封通道的回执也要收进 16k（read / 模块工具的续读提示各按能力给）。
+                        outcome.output =
+                            cap_result(outcome.output, continuation_for(&label, tool));
                         ToolCallView {
                             speaker: speaker.to_string(),
                             module: label,

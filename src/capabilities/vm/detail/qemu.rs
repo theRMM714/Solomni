@@ -876,7 +876,6 @@ mod tests {
             "hello\n",
             "",
             ShellEnd::Exit(Some(0)),
-            GUEST_SHELL_MAX_CHARS,
         );
         let guest = shell_outcome(&texts, &run, "hello\n", "", 0, false);
         assert_eq!(guest.output, host, "正常回执要同形");
@@ -887,7 +886,6 @@ mod tests {
             "",
             "",
             ShellEnd::TimedOut { secs: 3 },
-            GUEST_SHELL_MAX_CHARS,
         );
         let guest_timeout = shell_outcome(
             &texts,

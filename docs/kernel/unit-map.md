@@ -28,7 +28,7 @@
 | `src/kernel/domain/jobs.rs` | 生成中作业的取消表（`JobRegistry`）：同一会话每次生成各持一面旗，停止置位全部、摘旗按身份 |
 | `src/kernel/domain/name.rs` | 会成为目录名的名字的两条纯规则：`validate_dir_name`（非空、无首尾空白、不含 Windows 非法字符与控制字符、不是设备保留名，主语只进报错）与 `dedup_suffix`（占用时依次试 `-2` / `-3`） |
 | `src/kernel/domain/layout.rs` | 产品根的布局名字（`.home` / `.vm` / `runtimes` / `guest.yaml`）与由根派生的四处路径：`home` / `vm` / `runtimes` / `guest_spec`，调用点不再各自拼字面量 |
-| `src/kernel/domain/receipt.rs` | host/guest 共用的 shell 回执装配（stdout + `[stderr]` 区 + head+tail 截断（按完整行取整）+ 状态行；词表来自 `ProcessTexts`） |
+| `src/kernel/domain/receipt.rs` | host/guest 共用的 shell 回执装配（stdout + `[stderr]` 区 + 状态行；只装配不截断，预算在 `src/capabilities/tools/domain/budget.rs`；词表来自 `ProcessTexts`） |
 | `src/kernel/detail/file_log.rs` | `Log` 端口的文件实现：每次运行在 `logs/` 下按时间戳建文件并逐行追加（写经 `Mutex` 串行） |
 | `src/kernel/detail/host_probe.rs` | `HostProbe` 端口的机制实现（门面）：查环境变量与 `PATH` 里的可执行文件、路径存在性；可执行位与虚拟化事实在 `src/kernel/detail/host_probe/{windows,linux,macos,other}.rs` |
 | `src/kernel/detail/host_probe/windows.rs` | `HostProbe` 的 Windows 虚拟化事实：系统目录有 `WinHvPlatform.dll` |
@@ -54,6 +54,7 @@
 | `src/kernel/detail/unpack/unix.rs` | `unpack` 的非 Windows 后端：还原归档权限位与 Unix 软链 |
 | `src/kernel/detail/process.rs` | 外部进程执行机制（门面）：守门进程、stdin 送参、隐秘字段 env 注入、超时/取消杀树、截断与一次性 shell；平台实现在 `src/kernel/detail/process/{windows,unix}.rs` |
 | `src/kernel/detail/process/windows.rs` | `process` 的 Windows 后端：容器围栏准备、Job Object 收树与 PowerShell shell |
+| `src/kernel/detail/process/windows/tests.rs` | Windows 解释器解析的纯用例：真 pwsh / 应用执行别名 / 缺失三态，以及显式覆盖优先（`#[cfg(test)] mod tests;` 指向） |
 | `src/kernel/detail/process/unix.rs` | `process` 的非 Windows 后端：进程组收树与 `sh -c` shell |
 | `src/kernel/detail/process/tests.rs` | 进程适配器的真实契约用例：真起进程、真收输出、真判退出码与平台分支（`#[cfg(test)] mod tests;` 指向） |
 | `src/kernel/detail/procs/tests.rs` | 进程账与回收的契约用例：登记/注销、存活探测、父死子亡的分平台接线（`#[cfg(test)] mod tests;` 指向） |
