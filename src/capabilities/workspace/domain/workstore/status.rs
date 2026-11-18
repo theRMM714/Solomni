@@ -1,5 +1,5 @@
 //! 目的：一条路径在"基线 / 上游 / 本地"下的状态，以及状态、拉取、提交、同步的回执形状。
-//! 管：`StatusState` / `status_of` / `StatusEntry` / `PullReport` / `CommitRequest` / `CommitReport` / `SyncReport` / `StatusReport`。
+//! 管：`StatusState`（同步面）/ `WorkState`（工作面）/ `status_of` / `work_state_of` / `StatusEntry` / `PullReport` / `CommitRequest` / `CommitReport` / `SyncReport` / `StatusReport`。
 //! 不管：判定本身（提交侧在 `merge.rs`、解决侧在 `resolve.rs`）；回执渲染在呈现层。
 //! 联动：`work_status` / `work_pull` / `work_commit` / `work_sync` 的入参与回执（docs/workspace/README.md）。
 
@@ -28,19 +28,61 @@ pub enum StatusState {
     Conflict,
 }
 
-impl StatusState {
+/// 目的：work_status 逐条状态的五态（外加「与主线一致」与「主线有、还没拉取」两种展示态）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkState {
+    /// 目的：工作线里有这条路径，且主线头与工作线头一致。
+    Committed,
+    /// 目的：工作线里有，但主线还没有这一版（`work_push` 之后才会进共享区）。
+    Unpushed,
+    /// 目的：工作线里有，沙箱里的内容又不是那一版（提交后又改了）。
+    Modified,
+    /// 目的：工作线与主线都没有，沙箱里新写了。
+    Untracked,
+    /// 目的：工作线里有，沙箱里被删了（还没提交删除）。
+    Deleted,
+    /// 目的：主线有、沙箱里还没有（没拉取）。
+    NotPulled,
+    /// 目的：沙箱内容就是主线这一版，工作线上没有它（拉过没改、也没提交过）。
+    Synced,
+}
+
+impl WorkState {
     pub fn as_str(&self) -> &'static str {
         match self {
-            StatusState::NotPulled => "未拉取",
-            StatusState::BothPresent => "未拉取（沙箱有同名且内容不同）",
-            StatusState::Clean => "一致",
-            StatusState::LocalOnly => "本地新增（未跟踪）",
-            StatusState::LocalModified => "本地有修改",
-            StatusState::LocalDeleted => "本地已删除",
-            StatusState::UpstreamMoved => "上游有更新",
-            StatusState::UpstreamDeleted => "上游已删除",
-            StatusState::Conflict => "冲突",
+            WorkState::Committed => "已提交（与主线一致）",
+            WorkState::Unpushed => "已提交（未推送）",
+            WorkState::Modified => "提交后又改了",
+            WorkState::Untracked => "未提交新增",
+            WorkState::Deleted => "未提交删除",
+            WorkState::NotPulled => "主线有、还没拉取",
+            WorkState::Synced => "与主线一致（没改）",
         }
+    }
+}
+
+/// 目的：一条路径相对「我的工作线头 / 主线头 / 沙箱」的状态；只用于展示，不参与提交判定。
+pub fn work_state_of(work: Option<&str>, main: Option<&str>, local: Option<&str>) -> WorkState {
+    match (work, local) {
+        (Some(_), None) => WorkState::Deleted,
+        (Some(w), Some(l)) => {
+            if l != w {
+                WorkState::Modified
+            } else if main == Some(w) {
+                WorkState::Committed
+            } else {
+                WorkState::Unpushed
+            }
+        }
+        (None, Some(l)) => match main {
+            Some(m) if m == l => WorkState::Synced,
+            Some(_) => WorkState::Modified,
+            None => WorkState::Untracked,
+        },
+        (None, None) => match main {
+            Some(_) => WorkState::NotPulled,
+            None => WorkState::Synced,
+        },
     }
 }
 
@@ -48,7 +90,7 @@ impl StatusState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusEntry {
     pub path: String,
-    pub state: StatusState,
+    pub state: WorkState,
 }
 
 /// 目的：一条路径在"基线 / 上游 / 本地"下的状态（只读展示用，与提交判定分开）。
@@ -170,16 +212,16 @@ pub struct SyncReport {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StatusReport {
     pub head: Option<CommitSummary>,
+    /// 目的：该 agent 工作线当前的提交（与主线不同就是有未推送的内容）。
+    pub work_head: Option<CommitSummary>,
+    /// 目的：工作线上还没有进主线的提交条数。
+    pub unpushed: usize,
     /// 目的：主副本在 head 上的路径清单（有上限；tree_truncated = 如实标注是否截断）。
     pub tree: Vec<String>,
     pub tree_truncated: bool,
     pub entries: Vec<StatusEntry>,
     /// 目的：显式给了 paths 但基线、主副本与沙箱里都没有的路径。
     pub missing: Vec<String>,
-    /// 目的：沙箱里有、基线与主副本都没有的路径（下一次提交会成为新增；有上限）。
-    pub local_only: Vec<String>,
-    /// 目的：`local_only` 是否被截断（如实标注，不假装列全）。
-    pub local_only_truncated: bool,
     /// 目的：工作区磁盘与 head 不一致的路径（外部改动 / 删除；先 work_sync）。
     pub external: Vec<String>,
     /// 目的：最近几条提交（新→旧）。

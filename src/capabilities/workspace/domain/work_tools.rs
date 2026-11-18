@@ -330,15 +330,32 @@ pub fn render_sync(r: &SyncReport) -> String {
 }
 
 /// 目的：把 work_status 的结果说成人能读的几行。
-/// 返回：主副本当前提交与路径、你的工作副本状态、最近提交。
+/// 返回：主线当前提交、你的工作线头与未推送条数、逐条五态、最近主线提交。
 pub fn render_status(r: &StatusReport) -> String {
     let mut out = String::new();
     match &r.head {
         Some(h) => out.push_str(&format!(
-            "主副本当前提交 {}（{}，{}）：{}",
+            "共享区（主线）当前提交 {}（{}，{}）：{}",
             h.id, h.author, h.time, h.message
         )),
-        None => out.push_str("主副本还没有任何提交"),
+        None => out.push_str("共享区（主线）还没有任何提交"),
+    }
+    match &r.work_head {
+        Some(w) => {
+            out.push_str(&format!(
+                "\n你的工作线：提交 {}（{}）：{}",
+                w.id, w.time, w.message
+            ));
+            if r.unpushed == 0 {
+                out.push_str("· 已全部推送");
+            } else {
+                out.push_str(&format!(
+                    "· 未推送 {} 条（要进共享区用 work_push）",
+                    r.unpushed
+                ));
+            }
+        }
+        None => out.push_str("\n你的工作线：还没有提交（与主线一致）"),
     }
     if !r.tree.is_empty() {
         out.push_str(&format!("\n主副本路径：{}", paths(&r.tree)));
@@ -347,7 +364,7 @@ pub fn render_status(r: &StatusReport) -> String {
         }
     }
     if !r.entries.is_empty() {
-        out.push_str("\n你的工作副本状态：");
+        out.push_str("\n你的沙箱（相对你的工作线）：");
         for e in &r.entries {
             out.push_str(&format!("\n- {}：{}", e.path, e.state.as_str()));
         }
@@ -357,15 +374,6 @@ pub fn render_status(r: &StatusReport) -> String {
             "\n这些路径在基线、主副本与沙箱里都没有：{}",
             paths(&r.missing)
         ));
-    }
-    if !r.local_only.is_empty() {
-        out.push_str(&format!(
-            "\n沙箱里未跟踪（还没拉取、也没提交）的文件：{}",
-            paths(&r.local_only)
-        ));
-        if r.local_only_truncated {
-            out.push_str("…（已截断，只列了一部分）");
-        }
     }
     if !r.external.is_empty() {
         out.push_str(&format!(

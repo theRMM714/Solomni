@@ -70,8 +70,6 @@ fn import_ignored(rel: &str) -> bool {
 const MAX_STATUS_TREE: usize = 200;
 /// status 里附带的最近提交条数。
 const RECENT_COMMITS: usize = 5;
-/// status 里列出的“沙箱未跟踪文件”上限（超出如实标注截断）。
-const MAX_LOCAL_ONLY: usize = 50;
 /// work_lost 一次最多列出的备份数（超出如实标注截断）。
 const MAX_LOST: usize = 50;
 /// 提交历史一页的上限（界面分页；不让一次读把整段历史塞进内存）。

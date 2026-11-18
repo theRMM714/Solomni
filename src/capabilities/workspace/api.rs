@@ -24,12 +24,15 @@ pub use crate::capabilities::workspace::domain::workspace::{
     AreaUsage, Place, Sandbox, Sandboxes, WorkFiles, WorkRoots, WorkUsage, WorkspaceGrant,
     safe_file_name,
 };
+/// 目的：版本库共享类型（提交 / 拉取 / 推送 / 状态 / 差异 / 回退）——`tools`、呈现层与测试只从这里取。
+/// 约束：`WorkState` 等类型只在测试与呈现层命名，本 crate 的实现不直接用，故整组允许未使用告警。
+#[allow(unused_imports)]
 pub use crate::capabilities::workspace::domain::workstore::{
     Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, DiffReport, DiffRequest,
     DiffSign, LostEntry, LostReport, PullReport, PushReport, PushRequest, ResetReport,
     ResetRequest, ResolveAction, ResolveEntry, ResolveReport, ResolveRequest, ResolveTake,
     ResolveWarning, ResolveWarningKind, RestoreLostReport, StatusEntry, StatusReport, SyncReport,
-    VersionView, WorkGcReport,
+    VersionView, WorkGcReport, WorkState,
 };
 
 /// 目的：外部工作区根的策略（判定 / 创建校验 / 加载复检）——`runtime` 建会话与重开时只经这里取。
@@ -110,6 +113,8 @@ pub struct WorkLogEntry {
     pub changes: usize,
     /// 目的：这条提交在**当前 head 的祖先链**上吗？用户回滚离开过的提交仍保留，但会标 false。
     pub on_head: bool,
+    /// 目的：这条提交已经在主线里了吗（工作线提交未推送时 false）。
+    pub pushed: bool,
 }
 
 /// 目的：某个工作的提交历史视图（分页；当前 head 单独给出）。
@@ -117,6 +122,8 @@ pub struct WorkLogEntry {
 pub struct WorkLog {
     pub head: Option<CommitSummary>,
     pub commits: Vec<WorkLogEntry>,
+    /// 目的：各 agent 工作线上的本地提交（新→旧，带 pushed 标记）：回答「我提交了什么、推了没有」。
+    pub work: Vec<WorkLogEntry>,
     /// 目的：该工作现存提交总数（含已离开当前线的）。
     pub total: usize,
     /// 目的：还有更早的提交没放进这一页。

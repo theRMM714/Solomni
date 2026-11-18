@@ -402,7 +402,9 @@ impl WorkOps for FakeFaces {
                 message: "初始".to_string(),
                 changes: 1,
                 on_head: true,
+                pushed: true,
             }],
+            work: Vec::new(),
             total: 1,
             truncated: false,
         })

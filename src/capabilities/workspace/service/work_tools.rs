@@ -255,7 +255,6 @@ impl WorkHandler {
                 // 路径清单也受读作用域约束：不能靠 work_status 看到读不到的路径名。
                 r.tree.retain(|p| self.permissions.read_ok(p));
                 r.entries.retain(|e| self.permissions.read_ok(&e.path));
-                r.local_only.retain(|p| self.permissions.read_ok(p));
                 outcome(true, dw::render_status(&r))
             }
             Err(e) => outcome(false, e),
