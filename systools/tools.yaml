@@ -545,6 +545,29 @@ tools:
         required: true
         non_empty: true
         desc: 共享区内的相对路径（/ 分隔的单个文件；文件夹请逐个看）
+  work_diff:
+    capability: none              # 只读：读工作线对象与沙箱文件，不写任何东西
+    effect: read
+    reach: [private, shared-read]
+    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    parallel: true                # 只读、无副作用：同一回复里的多个读取可以并发跑
+    desc: |
+      同 git diff：逐行比较两边内容，带 3 行上下文，默认比较**工作线头**与**沙箱当前内容**。
+      from / to 可给提交号：给 to 时比较 from（省略 = 工作线头）与 to；不给 to 时比较 from 与沙箱。
+      只列出真有差异的路径；二进制与超过单文件上限的文件只报路径、类型与大小，不冒充文本。
+      回执受统一预算截断（按完整行取整），要接着看用 paths 缩小范围。
+    params:
+      from:
+        type: integer
+        min: 0
+        desc: 左边提交号（省略 = 你工作线的头）
+      to:
+        type: integer
+        min: 0
+        desc: 右边提交号（省略 = 沙箱当前内容）
+      paths:
+        type: array
+        desc: 只看这些路径（相对共享区、/ 分隔；省略 = 全部）
   work_resolve:
     capability: none              # 改基线（take=upstream 还会改沙箱文件）；共享主副本不动
     effect: write
@@ -570,6 +593,29 @@ tools:
         type: integer
         min: 0
         desc: take=local 必填：调用方看到的主副本提交 id（work_status / work_versions 返回）；与当前 head 不符会被拒绝
+  work_reset:
+    capability: none              # 改工作线引用与私有沙箱；共享主副本不动
+    effect: write
+    reach: [private]
+    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    desc: |
+      同 git restore / git reset：在**你自己**的工作线上回退，共享区不受影响。
+      paths 形态：把这些沙箱路径恢复成基线版本（工作线头优先，没提交过的取拉取基线）；覆盖前备份进 lost/reset-paths/，
+      基线里也没有的从沙箱删掉。要发布回退结果得重新 work_commit + work_push。
+      to 形态：把工作线移回某个更早的**自己的**提交（必须在祖先链上）；keep_changes=true 只移引用、沙箱不动（soft），
+      否则按目标提交重铺工作线跟踪的路径并删掉目标里没有的（hard）；拉过但没提交的文件原样保留，覆盖前备份进 lost/reset-<目标>/。
+      paths 与 to 互斥，必须给一个。
+    params:
+      paths:
+        type: array
+        desc: 要恢复的路径数组（相对共享区、/ 分隔；与 to 互斥）
+      to:
+        type: integer
+        min: 0
+        desc: 工作线要移回的提交号（必须是当前头的祖先；与 paths 互斥）
+      keep_changes:
+        type: boolean
+        desc: to 形态专用：true = 只移工作线引用、不改沙箱文件；缺省 false（重铺沙箱）
   work_lost:
     capability: none              # 列备份只读；restore 只写自己的沙箱，不碰共享主副本
     effect: read

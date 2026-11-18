@@ -286,3 +286,36 @@ fn lost_rel_is_one_clean_agent_component_plus_a_clean_rel() {
     assert!(lost_rel("a\\b", "x").is_err());
     assert!(lost_rel("a", "../x").is_err());
 }
+
+#[test]
+fn line_diff_keeps_context_and_reports_both_sides() {
+    let hunks = diff_text("a\nb\nc\n", "a\nB\nc\nd\n");
+    assert_eq!(hunks.len(), 1, "改动挨得近要并成一段：{:?}", hunks);
+    let signs: Vec<DiffSign> = hunks[0].lines.iter().map(|l| l.sign).collect();
+    assert!(signs.contains(&DiffSign::Remove), "{:?}", hunks);
+    assert!(signs.contains(&DiffSign::Add), "{:?}", hunks);
+    assert!(
+        hunks[0]
+            .lines
+            .iter()
+            .any(|l| l.sign == DiffSign::Context && l.text == "a"),
+        "上下文行要带上：{:?}",
+        hunks
+    );
+    assert_eq!(hunks[0].old_start, 1, "从 1 数：{:?}", hunks);
+}
+
+#[test]
+fn identical_text_has_no_hunks_and_pure_insert_starts_at_zero() {
+    assert!(diff_text("", "").is_empty());
+    assert!(diff_text("x\n", "x\n").is_empty());
+    let added = diff_text("", "x\n");
+    assert_eq!(added.len(), 1);
+    assert_eq!(added[0].old_len, 0);
+    assert_eq!(added[0].old_start, 0);
+    assert_eq!(added[0].new_len, 1);
+    assert_eq!(added[0].new_start, 1);
+    let removed = diff_text("x\n", "");
+    assert_eq!(removed[0].new_len, 0);
+    assert_eq!(removed[0].new_start, 0);
+}

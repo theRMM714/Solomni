@@ -794,3 +794,142 @@ pub(crate) fn work_push_squashes_local_commits_and_fast_forwards_the_sandbox() {
     );
     assert!(store.stat_under(&sb, "dirty.md").unwrap().is_some());
 }
+/// 目的：work_diff 默认比「工作线头 ↔ 沙箱」：文本给行级 hunk，二进制只报类型不冒充文本。
+/// 约束：只读；显式 from/to 与路径过滤都生效。
+#[test]
+pub(crate) fn work_diff_shows_line_changes_and_never_pretends_binary_is_text() {
+    use crate::capabilities::workspace::api::{ChangeKind, DiffRequest, DiffSign};
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    let sb = sandbox_of(&ws, "w", "a");
+    store
+        .write_under(&sb, "note.md", b"one\ntwo\nthree\n")
+        .unwrap();
+    ws.work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "v1", 1))
+        .unwrap();
+    store
+        .write_under(&sb, "note.md", b"one\nTWO\nthree\nfour\n")
+        .unwrap();
+    store.write_under(&sb, "clip.bin", &[0u8, 1, 2]).unwrap();
+
+    let req = DiffRequest {
+        from: None,
+        to: None,
+        paths: Vec::new(),
+    };
+    let rep = ws.work_diff("w", "a", &req).unwrap();
+    assert_eq!(rep.entries.len(), 2, "两条路径不同：{:?}", rep.entries);
+    let note = rep.entries.iter().find(|e| e.path == "note.md").unwrap();
+    assert_eq!(note.kind, ChangeKind::Modify);
+    assert!(!note.binary && !note.too_large, "{:?}", note);
+    let signs: Vec<DiffSign> = note
+        .hunks
+        .iter()
+        .flat_map(|h| h.lines.iter().map(|l| l.sign))
+        .collect();
+    assert!(
+        signs.contains(&DiffSign::Remove) && signs.contains(&DiffSign::Add),
+        "行级差异要有删有增：{:?}",
+        note.hunks
+    );
+    let clip = rep.entries.iter().find(|e| e.path == "clip.bin").unwrap();
+    assert!(clip.binary, "含 0 字节按二进制处理：{:?}", clip);
+    assert!(clip.hunks.is_empty(), "二进制不展开 hunk：{:?}", clip);
+
+    let only = DiffRequest {
+        from: None,
+        to: None,
+        paths: vec!["clip.bin".to_string()],
+    };
+    let filtered = ws.work_diff("w", "a", &only).unwrap();
+    assert_eq!(filtered.entries.len(), 1, "{:?}", filtered.entries);
+}
+
+/// 目的：work_reset 两种形态——paths 把沙箱恢复成工作线头，to 把工作线移回去并重铺沙箱。
+/// 约束：只能退到自己工作线的祖先；覆盖前备份进 lost/。
+#[test]
+pub(crate) fn work_reset_restores_paths_and_moves_the_work_line() {
+    use crate::capabilities::workspace::api::ResetRequest;
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string(), "b".to_string()])
+        .unwrap();
+    let sb = sandbox_of(&ws, "w", "a");
+    store.write_under(&sb, "note.md", b"v1\n").unwrap();
+    let id1 = ws
+        .work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "v1", 1))
+        .unwrap()
+        .id;
+    store.write_under(&sb, "note.md", b"v2\n").unwrap();
+    let id2 = ws
+        .work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "v2", 2))
+        .unwrap()
+        .id;
+
+    // a 拉过、但没在自己工作线提交过的路径：hard 回退不该动它。
+    let sb_b = sandbox_of(&ws, "w", "b");
+    store.write_under(&sb_b, "pulled.md", b"from-b\n").unwrap();
+    ws.work_commit("w", "b", "w--b", &commit_req(&["pulled.md"], &[], "b", 1))
+        .unwrap();
+    push(&ws, "w", "b", "b", 1, 1).unwrap();
+    ws.work_pull("w", "a", &["pulled.md".to_string()]).unwrap();
+
+    // paths：沙箱里的草稿被换回工作线头（v2），旧内容备份进 lost/。
+    store.write_under(&sb, "note.md", b"draft\n").unwrap();
+    let rep = ws
+        .work_reset(
+            "w",
+            "a",
+            &ResetRequest {
+                paths: vec!["note.md".to_string()],
+                to: None,
+                keep_changes: false,
+            },
+        )
+        .unwrap();
+    assert_eq!(rep.restored, vec!["note.md".to_string()]);
+    assert!(rep.backed_up >= 1, "覆盖草稿要先备份：{:?}", rep);
+    assert_eq!(
+        store.read_under(&sb, "note.md").unwrap().as_deref(),
+        Some(&b"v2\n"[..]),
+        "paths 形态把沙箱恢复成工作线头的版本"
+    );
+
+    // to：工作线移回 v1，沙箱按 v1 重铺。
+    let rep = ws
+        .work_reset(
+            "w",
+            "a",
+            &ResetRequest {
+                paths: Vec::new(),
+                to: Some(id1),
+                keep_changes: false,
+            },
+        )
+        .unwrap();
+    assert_eq!(rep.moved_to, Some(id1));
+    assert_eq!(
+        store.read_under(&sb, "note.md").unwrap().as_deref(),
+        Some(&b"v1\n"[..]),
+        "移回提交后沙箱按它重铺"
+    );
+    assert_eq!(
+        store.read_under(&sb, "pulled.md").unwrap().as_deref(),
+        Some(&b"from-b\n"[..]),
+        "拉过但没提交的文件不在工作线树里，hard 回退不该删它"
+    );
+
+    // 现在 v2 不在祖先链上了：再想移过去要拒绝（否则那条提交的来路就断了）。
+    assert!(
+        ws.work_reset(
+            "w",
+            "a",
+            &ResetRequest {
+                paths: Vec::new(),
+                to: Some(id2),
+                keep_changes: false,
+            },
+        )
+        .is_err(),
+        "只能退到自己的工作线祖先"
+    );
+}

@@ -13,25 +13,29 @@
 | `src/capabilities/workspace/service.rs` | 门面与底座：`Workdirs` / `WorkStore` 只在这里（R12）；`WorkspaceService` 的构造、实例级 gate、树回溯、恢复事务、提交号预留、待恢复事务与外部工作区冲突核校 |
 | `src/capabilities/workspace/service/roots.rs` | 外部工作区根的策略：按档位判网络路径 / 共享根 / 文件系统根 / UTF-8 与产品根的互包含（文本 + 落点身份），并做目录与可写探测；创建走 `resolve`，加载复检走 `recheck`，两种用法共用同一份 `policy` |
 | `src/capabilities/workspace/service/commit.rs` | 提交族：`commit_locked` 的两条线分派与对象落盘、`refs/agents/<agent>`（发布线）与 `refs/agents/<agent>/saves`（存档线）的读写、归档点、树铺设、归档清理、存档提交与用户提交 |
+| `src/capabilities/workspace/service/diff.rs` | 差异族：`work_diff` 取两侧树（工作线头 / 指定提交 / 沙箱扫描）、按对象与沙箱文件取文本、组装 `DiffReport` |
 | `src/capabilities/workspace/service/sync.rs` | 同步族：pull、沙箱采纳、过期读取、双向同步、导入根、跟踪同步 |
 | `src/capabilities/workspace/service/history.rs` | 历史族：状态盘点、日志、单次提交视图、单文件差异、版本列表 |
 | `src/capabilities/workspace/service/resolve.rs` | 冲突解决族：`ResolvePlan`、拒绝对话渲染、`work_resolve` 的选边、备份与未合并守卫 |
+| `src/capabilities/workspace/service/reset.rs` | 回退族：`work_reset` 的祖先链校验、`paths` 形态按基线铺回 / 删除、`to` 形态移线与重铺工作线跟踪的路径、覆盖前备份进 `lost/` |
 | `src/capabilities/workspace/service/lifecycle.rs` | 生命周期族：丢失文件、恢复、回收、回滚、归档、删除、归档恢复、还原点、提交后丢弃 |
 | `src/capabilities/workspace/service/facade.rs` | `Workspace` 的唯一 trait 实现：七个基础用例直接委托 `Workdirs`，其余方法逐条转发到同级子模块（Rust 不允许 trait impl 分块） |
 | `src/capabilities/workspace/ports.rs` | 出站端口：`Workdirs`（目录布局）与 `WorkStore`（流式资产原语 + 跨根复制 + 内容寻址对象 + 提交记录 + 拉取基线 + 待恢复事务 + 提交号 + 跨进程锁 + 对象枚举 / 删除） |
-| `src/capabilities/workspace/service/work_tools.rs` | 成员侧工作工具执行者：`WorkHandler` 认领 `work_pull` / `work_commit` / `work_push` / `work_sync` / `work_status` / `work_versions` / `work_resolve` / `work_lost`，参数解析与路径权限在这里收口；`work_handlers` 按角色面发放的 `allowed` 现取执行者 |
+| `src/capabilities/workspace/service/work_tools.rs` | 成员侧工作工具执行者：`WorkHandler` 认领 `work_pull` / `work_commit` / `work_push` / `work_sync` / `work_status` / `work_versions` / `work_diff` / `work_resolve` / `work_reset` / `work_lost`，参数解析与路径权限在这里收口；`work_handlers` 按角色面发放的 `allowed` 现取执行者 |
 | `src/capabilities/workspace/domain/workspace.rs` | 工作区与沙箱的纯数据与寻址（含越界判定） |
 | `src/capabilities/workspace/domain/asset.rs` | 通用资产纯逻辑：分块扫描（指纹 / 大小 / NUL 与 UTF-8 判定 / 受限预览）、`FileVersion`、扩展名媒体类型提示与单文件上限 |
 | `src/capabilities/workspace/domain/freshness.rs` | 读取过期纯逻辑：读过的行在新版本里是否原样还在（按内容找连续行窗口，不看行号与时间） |
 | `src/capabilities/workspace/domain/hash.rs` | 内容指纹 SHA-256：增量实现，共享区内容寻址的唯一键（纯逻辑） |
 | `src/capabilities/workspace/domain/readfact.rs` | 读取事实 `ReadFact`：哪个工作树、哪个路径、读到哪几行、当时的整份指纹（随工具行落盘，过期由它派生） |
-| `src/capabilities/workspace/domain/work_tools.rs` | 成员侧工作工具的回执渲染纯逻辑：工具名清单（`is_work_tool`）、拉取 / 提交 / 同步 / 状态 / 三方视图 / 解决 / 备份恢复的回执文本 |
-| `src/capabilities/workspace/domain/workstore.rs` | 版本化工作区纯逻辑的入口：`record` / `path` / `merge` / `resolve` / `status` 五个职责子模块与内联单测 `tests` 的声明，并向 `api.rs` / `service` 重导出同一个调用面 |
+| `src/capabilities/workspace/domain/work_tools.rs` | 成员侧工作工具的回执渲染纯逻辑：工具名清单（`is_work_tool`）、拉取 / 提交 / 推送 / 同步 / 状态 / 三方视图 / 差异 / 解决 / 回退 / 备份恢复的回执文本 |
+| `src/capabilities/workspace/domain/workstore.rs` | 版本化工作区纯逻辑的入口：`record` / `path` / `merge` / `resolve` / `status` / `diff` / `reset` 七个职责子模块与内联单测 `tests` 的声明，并向 `api.rs` / `service` 重导出同一个调用面 |
 | `src/capabilities/workspace/domain/workstore/record.rs` | 版本库记录形态：`Index` / `Tree` / `Change` / `Commit` / `Ref` 与待提交、对象信息、GC 报告 |
 | `src/capabilities/workspace/domain/workstore/path.rs` | 路径纯逻辑：相对路径清理、批量校验、拼接、展开与丢失条目判定 |
 | `src/capabilities/workspace/domain/workstore/merge.rs` | 三方比较与冲突：`Conflict` / `PullVerdict` / `Unchanged` / `CommitPlan`、`plan_commit` / `pull_verdict` |
 | `src/capabilities/workspace/domain/workstore/resolve.rs` | 版本预览与解决判定：`VersionView` 族、`local_take_verdict`、备份与丢失报告 |
 | `src/capabilities/workspace/domain/workstore/status.rs` | 状态与回执：`StatusState` / `status_of`、拉取 / 提交 / 同步 / 状态报告 |
+| `src/capabilities/workspace/domain/workstore/diff.rs` | 文本差异纯逻辑：Myers 行级差分、带上下文的 hunk 归并、单文件上限与 `DiffRequest` / `DiffReport` 形态 |
+| `src/capabilities/workspace/domain/workstore/reset.rs` | 回退请求与报告形态：`ResetRequest` / `ResetReport` |
 | `src/capabilities/workspace/domain/workstore/tests.rs` | workstore 纯逻辑单测：路径清理、提交规则、拉取不覆盖本地、解决判定、丢失与备份 |
 | `src/capabilities/workspace/detail/fs_workspace.rs` | `Workdirs` 的落盘实现：`session/<工作名>/` 下的 `work/` 与各 agent 沙箱；外部工作区绑定投影 `.work-root` 与共享区根解析；跨会话写锁按落点身份做键；用量统计带 2 秒内存缓存且不跟随目录链接 |
 | `src/capabilities/workspace/detail/fs_workstore.rs` | `WorkStore` 的落盘实现：流式扫描 / 写入 / 复制（含跨根备份复制）、原子写、跨进程锁、版本库对象与对象枚举 / 删除、提交记录、基线、待恢复事务与提交号计数器；目录刷新经 `fs_meta::sync_dir` |

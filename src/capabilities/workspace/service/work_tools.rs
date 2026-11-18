@@ -1,4 +1,4 @@
-//! 目的：共享区版本化工作区的**成员侧执行者**——把六个 work_* 调用接到 workspace 能力面上。
+//! 目的：共享区版本化工作区的**成员侧执行者**——把十个 work_* 调用接到 workspace 能力面上。
 //! 管：成员工具调用的参数解析、路径权限收口与回执转交。
 //! 不管：版本库写入、冲突与备份判定（在 workspace）；工具声明（`systools/tools.yaml`）。
 //! 联动：`turn` 装配工具面时按 allowed 现取本文件的 `work_handlers`；版本库写入由 workspace 的
@@ -7,13 +7,13 @@
 use crate::capabilities::permission::api::{PermissionSet, Reach};
 use crate::capabilities::workspace::api as dw;
 use crate::capabilities::workspace::api::{
-    CommitRequest, ResolveRequest, ResolveTake, Sandbox, Workspace,
+    CommitRequest, DiffRequest, ResetRequest, ResolveRequest, ResolveTake, Sandbox, Workspace,
 };
 use crate::kernel::api::ToolOutcome;
 use crate::kernel::ports::ToolHandler;
 use std::sync::Arc;
 
-/// 目的：本席的工作区工具执行者：六个 `work_*` 名字由它认领，参数解析与路径权限在这里收口。
+/// 目的：本席的工作区工具执行者：十个 `work_*` 名字由它认领，参数解析与路径权限在这里收口。
 pub struct WorkHandler {
     workspace: Arc<dyn Workspace + Send + Sync>,
     /// 顶层工作名（共享区与版本库的归属）。
@@ -174,6 +174,74 @@ impl WorkHandler {
         }
     }
 
+    /// 目的：比两个版本的行级差异（缺省工作线头 ↔ 沙箱）。
+    /// 约束：只读；不在读作用域内的路径不出现（与 work_status 同一收口）。
+    fn diff(&self, args: &serde_json::Value) -> ToolOutcome {
+        let paths = match dw::str_list(args, "paths") {
+            Ok(p) => p,
+            Err(e) => return outcome(false, e),
+        };
+        if let Err(e) = check_readable(&self.permissions, &paths) {
+            return outcome(false, e);
+        }
+        let from = match commit_id(args, "from") {
+            Ok(v) => v,
+            Err(e) => return outcome(false, e),
+        };
+        let to = match commit_id(args, "to") {
+            Ok(v) => v,
+            Err(e) => return outcome(false, e),
+        };
+        let req = DiffRequest { from, to, paths };
+        match self.workspace.work_diff(&self.work, &self.agent, &req) {
+            Ok(mut r) => {
+                r.entries.retain(|e| self.permissions.read_ok(&e.path));
+                outcome(true, dw::render_diff(&r))
+            }
+            Err(e) => outcome(false, e),
+        }
+    }
+
+    /// 目的：把沙箱按工作线头恢复（`paths`），或把工作线移回某个提交（`to`）。
+    /// 约束：两种形态都只动这一席的沙箱与工作线，因此只要求“能写私有沙箱”；
+    ///   路径仍要过读作用域（看不见的路径不能借 reset 覆盖）。
+    fn reset(&self, args: &serde_json::Value) -> ToolOutcome {
+        let paths = match dw::str_list(args, "paths") {
+            Ok(p) => p,
+            Err(e) => return outcome(false, e),
+        };
+        let to = match commit_id(args, "to") {
+            Ok(v) => v,
+            Err(e) => return outcome(false, e),
+        };
+        let keep_changes = match args.get("keep_changes") {
+            None | Some(serde_json::Value::Null) => false,
+            Some(serde_json::Value::Bool(b)) => *b,
+            Some(_) => return outcome(false, "keep_changes 必须是布尔值".to_string()),
+        };
+        if let Err(e) = check_readable(&self.permissions, &paths) {
+            return outcome(false, e);
+        }
+        if !self.permissions.may_write_private() {
+            return outcome(
+                false,
+                format!(
+                    "恢复被拒：当前档位「{}」不允许写入私有沙箱",
+                    self.permissions.profile.label()
+                ),
+            );
+        }
+        let req = ResetRequest {
+            paths,
+            to,
+            keep_changes,
+        };
+        match self.workspace.work_reset(&self.work, &self.agent, &req) {
+            Ok(r) => outcome(true, dw::render_reset(&r)),
+            Err(e) => outcome(false, e),
+        }
+    }
+
     fn status(&self, args: &serde_json::Value) -> ToolOutcome {
         let paths = match dw::str_list(args, "paths") {
             Ok(p) => p,
@@ -315,6 +383,18 @@ fn outcome(ok: bool, output: String) -> ToolOutcome {
     ToolOutcome { ok, output }
 }
 
+/// 目的：从参数里取一个可选提交号（`work_diff` 的 from / to、`work_reset` 的 to）。
+fn commit_id(args: &serde_json::Value, key: &str) -> Result<Option<u64>, String> {
+    match args.get(key) {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::Number(n)) => match n.as_u64() {
+            Some(id) => Ok(Some(id)),
+            None => Err(format!("{} 必须是非负整数（提交号）", key)),
+        },
+        Some(_) => Err(format!("{} 必须是非负整数（提交号）", key)),
+    }
+}
+
 /// 目的：本席要装的工作区工具执行者——角色面没发任何 `work_*` 就一个都不装。
 /// 参数：workspace = 共享区用例面；sb = 这一席的沙箱；allowed = 角色面发放的工具 id。
 pub fn work_handlers(
@@ -350,6 +430,8 @@ impl ToolHandler for WorkHandler {
             dw::SYNC => self.sync(&args),
             dw::STATUS => self.status(&args),
             dw::VERSIONS => self.versions(&args),
+            dw::DIFF => self.diff(&args),
+            dw::RESET => self.reset(&args),
             dw::RESOLVE => self.resolve(&args),
             dw::LOST => self.lost(&args),
             other => outcome(false, format!("未知的工作区工具：{}", other)),

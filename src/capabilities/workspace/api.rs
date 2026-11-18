@@ -15,19 +15,21 @@ pub use crate::capabilities::workspace::domain::readfact::ReadFact;
 /// 目的：`work_*` 工具的名字、取参与回执拼装——`tools` 与 `turn` 只从这里取，不碰 domain。
 #[allow(unused_imports)]
 pub use crate::capabilities::workspace::domain::work_tools::{
-    COMMIT, LOST, PULL, PUSH, RESOLVE, STATUS, SYNC, VERSIONS, is_work_tool, render_commit,
-    render_lost, render_pull, render_push, render_resolve, render_restore_lost, render_status,
-    render_sync, render_versions, str_arg, str_list,
+    COMMIT, DIFF, LOST, PULL, PUSH, RESET, RESOLVE, STATUS, SYNC, VERSIONS, is_work_tool,
+    render_commit, render_diff, render_lost, render_pull, render_push, render_reset,
+    render_resolve, render_restore_lost, render_status, render_sync, render_versions, str_arg,
+    str_list,
 };
 pub use crate::capabilities::workspace::domain::workspace::{
     AreaUsage, Place, Sandbox, Sandboxes, WorkFiles, WorkRoots, WorkUsage, WorkspaceGrant,
     safe_file_name,
 };
 pub use crate::capabilities::workspace::domain::workstore::{
-    Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, LostEntry, LostReport,
-    PullReport, PushReport, PushRequest, ResolveAction, ResolveEntry, ResolveReport,
-    ResolveRequest, ResolveTake, ResolveWarning, ResolveWarningKind, RestoreLostReport,
-    StatusEntry, StatusReport, SyncReport, VersionView, WorkGcReport,
+    Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, DiffReport, DiffRequest,
+    DiffSign, LostEntry, LostReport, PullReport, PushReport, PushRequest, ResetReport,
+    ResetRequest, ResolveAction, ResolveEntry, ResolveReport, ResolveRequest, ResolveTake,
+    ResolveWarning, ResolveWarningKind, RestoreLostReport, StatusEntry, StatusReport, SyncReport,
+    VersionView, WorkGcReport,
 };
 
 /// 目的：外部工作区根的策略（判定 / 创建校验 / 加载复检）——`runtime` 建会话与重开时只经这里取。
@@ -237,6 +239,18 @@ pub trait Workspace: Send + Sync {
         agent: &str,
         paths: &[String],
     ) -> Result<StatusReport, String>;
+    /// **差异**：两个版本的行级差异（`from` 缺省 = 工作线头，`to` 缺省 = 沙箱当前内容）。
+    /// 约束：二进制与超过 `DIFF_MAX_BYTES` 的文件只报变更类型，不展开 hunk；只读。
+    fn work_diff(&self, work: &str, agent: &str, req: &DiffRequest) -> Result<DiffReport, String>;
+    /// **回退**：`paths` = 把沙箱这些路径恢复成工作线头的版本（同 `git restore`）；
+    ///   `to` = 把工作线移回那条提交（同 `git reset`），`keep_changes` 时沙箱不动。
+    /// 约束：`to` 必须在这条工作线的祖先链上；覆盖 / 删除前把旧内容备份进该 agent 的 lost/。
+    fn work_reset(
+        &self,
+        work: &str,
+        agent: &str,
+        req: &ResetRequest,
+    ) -> Result<ResetReport, String>;
     /// 目的：一条路径的三方版本（基线 / 主副本 / 沙箱内容或指纹）+ 主副本提交 id。
     /// 约束：文本有上限预览；二进制只给指纹与大小；truncated 时不能据此合并。
     fn work_versions(&self, work: &str, agent: &str, path: &str) -> Result<VersionView, String>;
