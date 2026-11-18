@@ -10,4 +10,10 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/capabilities/permission/api.rs` | 入站能力面：重导出权限类型、四档预设与校验入口 |
-| `src/capabilities/permission/domain/permission.rs` | 纯规则：reach / effect / decision、四档 profile、共享区三态、根 ceiling / 子 narrowing 求交与条目校验 |
+| `src/capabilities/permission/domain/permission.rs` | 纯规则的入口：`base` / `profile` / `scope` / `layer` / `set` / `path` 六个职责子模块的声明，并向 `api.rs` 重导出同一个调用面 |
+| `src/capabilities/permission/domain/permission/base.rs` | reach / effect / decision 代数：`Reach` / `ReachSet` / `Effect` / `Decision` 与等级比较 |
+| `src/capabilities/permission/domain/permission/profile.rs` | 四档预设：`ProfileId` / `ProfileSpec` / `Decisions` 与编辑入口 |
+| `src/capabilities/permission/domain/permission/scope.rs` | 共享区三态与手写序列化：`ScopeMode` / `SharedScope` / `SharedEdit` / `DecisionEdit` |
+| `src/capabilities/permission/domain/permission/layer.rs` | 层与调用范围：`CallScope` / `PermissionDefaults` / `PermissionLayer` / `SessionSandbox` |
+| `src/capabilities/permission/domain/permission/set.rs` | 权限集合运算：`PermissionSet`、按路径求交与追加拒绝 |
+| `src/capabilities/permission/domain/permission/path.rs` | 路径判据与条目校验：`hit` / `normalize` / `validate_entry` / `validate_defaults` / `validate_layer`、包含与收窄关系 |

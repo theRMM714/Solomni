@@ -87,7 +87,14 @@
 | `src/kernel/detail/confine/windows/` | Windows 围栏后端目录：入口与策略派发在 `windows.rs`（容器 cwd 走 `src/kernel/detail/view_drive.rs` 的视图盘写法，祖先授权不再需要），DACL 授权在 `acl.rs`、机器级一次性预授在 `machine.rs`、授权台账与撤权在 `record/`、容器身份与作业对象在 `container.rs`、真机探针在 `tests.rs` |
 | `src/kernel/detail/confine/windows.rs` | Windows 围栏后端入口：按 agent 派生 AppContainer SID、逐条授权可达范围，再用 `STARTUPINFOEX` 在容器与作业对象里起工具（`net` 决定是否授 internetClient） |
 | `src/kernel/detail/confine/windows/machine.rs` | Windows 机器级一次性预授：落点清单（产品根 `(OI)(CI)` 读属性、`.tools` / `runtimes` 递归只读）、只读缺项与幂等执行，逐条计时；外部工作区一次性只读的授/撤，以及旧全应用包机器级授权的退役（先授后撤、浅路径先撤、逐条台账事务） |
-| `src/kernel/detail/confine/windows/acl.rs` | Windows 安全描述符操作：逐路径改 DACL（授予 / 撤销）、解析 ACE 与 SID、展开泛型掩码、`AccessCheck` 判写 DACL 权限 |
+| `src/kernel/detail/confine/windows/acl.rs` | Windows 安全描述符操作的入口：`ace` / `grant` / `target` / `scan` / `verify` / `access` 六个职责子模块与内联单测 `tests` 的声明，并向 `windows.rs` 重导出同一个调用面 |
+| `src/kernel/detail/confine/windows/acl/ace.rs` | ACE 布局与身份：类型常量、`AceParts` / `AceView` / `DaclScan` / `AceEntry`、`ace_parts` 偏移算法、GUID 文本、`expand_generics` / `rights_covered` |
+| `src/kernel/detail/confine/windows/acl/grant.rs` | 授权写入与撤销：`grant_one` / `grant_one_object_ace` / `write_ace` / `revoke_one` |
+| `src/kernel/detail/confine/windows/acl/target.rs` | 授权落点清单：`GrantTarget` / `rw_part` / `grant_targets`、可信执行基座与系统基线 SID |
+| `src/kernel/detail/confine/windows/acl/scan.rs` | 读 DACL 与还原：`acl_scan` / `acl_entries` / `permission_entries` / `lost_entries` / `sd_bytes` / `restore_sd` / `orphan_package_aces` |
+| `src/kernel/detail/confine/windows/acl/verify.rs` | 写后核对与在场判断：`grant_verified` / `restore_after_failed_write` / `has_*_ace_for` / `inheritable_flags_ok` |
+| `src/kernel/detail/confine/windows/acl/access.rs` | 写 DACL 的资格预检：`owner_is_current_user` / `can_write_dacl` / `current_user_sid` 与模拟令牌、句柄与内存收尾 |
+| `src/kernel/detail/confine/windows/acl/tests.rs` | ACL 纯逻辑单测：ACE 布局解析、身份判等、继承位、通用位展开与覆盖 |
 | `src/kernel/detail/confine/windows/ledger_tests.rs` | 台账一族真机用例：快照先落盘、写后核对、按条处置、启动对账与孤儿回收（`#[cfg(test)] mod ledger_tests;` 指向） |
 | `src/kernel/detail/confine/windows/record.rs` | Windows 授权台账的入口：`store` / `liveness` / `journal` / `sweep` / `release` / `catalog` / `reconcile` / `paths` / `sid` 九个职责的子模块声明，并向 Windows 后端入口 `windows.rs` 重导出同一个调用面 |
 | `src/kernel/detail/confine/windows/record/store.rs` | 台账的盘上格式与互斥：`GrantRecord` / `SnapshotEntry` / `GrantEntry` / `ProfileEntry`、单一锁文件与进程内 `LEDGER_MUTEX`、锁内 `load_record` / `save_record` 与备份轮转 |

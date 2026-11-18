@@ -27,7 +27,13 @@
 | `src/capabilities/workspace/domain/hash.rs` | 内容指纹 SHA-256：增量实现，共享区内容寻址的唯一键（纯逻辑） |
 | `src/capabilities/workspace/domain/readfact.rs` | 读取事实 `ReadFact`：哪个工作树、哪个路径、读到哪几行、当时的整份指纹（随工具行落盘，过期由它派生） |
 | `src/capabilities/workspace/domain/work_tools.rs` | 成员侧工作工具的回执渲染纯逻辑：工具名清单（`is_work_tool`）、拉取 / 提交 / 同步 / 状态 / 三方视图 / 解决 / 备份恢复的回执文本 |
-| `src/capabilities/workspace/domain/workstore.rs` | 版本化工作区纯逻辑：内容寻址、提交记录、拉取基线、文件级三方比较、三方版本预览、冲突解决判定（含 take=local 守卫 / 备份判定）与路径校验 |
+| `src/capabilities/workspace/domain/workstore.rs` | 版本化工作区纯逻辑的入口：`record` / `path` / `merge` / `resolve` / `status` 五个职责子模块与内联单测 `tests` 的声明，并向 `api.rs` / `service` 重导出同一个调用面 |
+| `src/capabilities/workspace/domain/workstore/record.rs` | 版本库记录形态：`Index` / `Tree` / `Change` / `Commit` / `Ref` 与待提交、对象信息、GC 报告 |
+| `src/capabilities/workspace/domain/workstore/path.rs` | 路径纯逻辑：相对路径清理、批量校验、拼接、展开与丢失条目判定 |
+| `src/capabilities/workspace/domain/workstore/merge.rs` | 三方比较与冲突：`Conflict` / `PullVerdict` / `Unchanged` / `CommitPlan`、`plan_commit` / `pull_verdict` |
+| `src/capabilities/workspace/domain/workstore/resolve.rs` | 版本预览与解决判定：`VersionView` 族、`local_take_verdict`、备份与丢失报告 |
+| `src/capabilities/workspace/domain/workstore/status.rs` | 状态与回执：`StatusState` / `status_of`、拉取 / 提交 / 同步 / 状态报告 |
+| `src/capabilities/workspace/domain/workstore/tests.rs` | workstore 纯逻辑单测：路径清理、提交规则、拉取不覆盖本地、解决判定、丢失与备份 |
 | `src/capabilities/workspace/detail/fs_workspace.rs` | `Workdirs` 的落盘实现：`session/<工作名>/` 下的 `work/` 与各 agent 沙箱；外部工作区绑定投影 `.work-root` 与共享区根解析；跨会话写锁按落点身份做键；用量统计带 2 秒内存缓存且不跟随目录链接 |
 | `src/capabilities/workspace/detail/fs_workstore.rs` | `WorkStore` 的落盘实现：流式扫描 / 写入 / 复制（含跨根备份复制）、原子写、跨进程锁、版本库对象与对象枚举 / 删除、提交记录、基线、待恢复事务与提交号计数器；目录刷新经 `fs_meta::sync_dir` |
 | `src/capabilities/workspace/detail/estimate.rs` | 外部工作区成本预估：有界计数（250 ms / 5 万条目，超限标 `truncated`，数字是下界）、按卷速率样本（`.home/fence-costs.json`，卷键经 kernel 平台事实归一；真实授权与 `--setup/fence-calibrate` 的合成树样本都走 `record_grant_cost`）与按取整点值算的乐观 / 保守区间 |
