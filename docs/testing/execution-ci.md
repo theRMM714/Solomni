@@ -234,7 +234,7 @@ node run-tests.js --coverage
 （本地，需自己装 cargo-mutants）
 node tests/ci-mutation.mjs                        # weekly（从 spec 收集）
 node tests/ci-mutation.mjs --scope=unit --unit=permission
-node tests/mutation-plan.mjs                      # 只看这次会切几片
+node tests/mutation-plan.mjs                      # 只看这次会切几片（--json 打纯 JSON）
 MUTATION_SHARD=2/4 node tests/ci-mutation.mjs     # 只跑第 2 片
 （CI 用 .github/workflows/mutants.yml：手动派发，或每周一 12:00 北京时间自动跑 weekly）
 ```
