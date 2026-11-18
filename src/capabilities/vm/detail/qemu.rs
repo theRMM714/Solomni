@@ -310,10 +310,7 @@ impl VmEngine for QemuEngine {
 
     /// 约束：架构要匹配；根是磁盘镜像，三平台通用。
     fn supports(&self, guest: &GuestImage) -> bool {
-        if guest.arch != GuestArch::host() {
-            return false;
-        }
-        true
+        guest.arch == GuestArch::host()
     }
 
     fn boot(&self, spec: &GuestSpec, share: &SharePlan) -> Result<Box<dyn GuestVm>, String> {
