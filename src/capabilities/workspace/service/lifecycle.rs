@@ -336,12 +336,25 @@ impl WorkspaceService {
             }
         }
         // 引用先落：它记着留档前的主线与各 agent 的存档头；此时文件还没动，失败可以整次撤销。
+        // heads = 各 agent 自己的工作线头，saves = 存档线头，since = 留档时刻的下一个提交号。
         let mut heads: BTreeMap<String, Option<u64>> = BTreeMap::new();
         let mut saves: BTreeMap<String, Option<u64>> = BTreeMap::new();
         for agent in &uniq {
-            heads.insert(agent.clone(), head);
+            heads.insert(agent.clone(), self.work_line_head(&store, agent)?);
             saves.insert(agent.clone(), self.save_head(&store, agent)?);
         }
+        // 存档端口没写过下一个号时从现有提交推：`since` 必须是真正「下一条」的号。
+        let since = match self.store.read_next_id(&store)? {
+            Some(next) => next,
+            None => {
+                self.store
+                    .list_commits(&store)?
+                    .last()
+                    .copied()
+                    .unwrap_or(0)
+                    + 1
+            }
+        };
         self.store.write_ref(
             &store,
             &name,
@@ -350,6 +363,7 @@ impl WorkspaceService {
                 target: head,
                 heads: heads.clone(),
                 saves: saves.clone(),
+                since,
             },
         )?;
         let mut backed_up: BTreeMap<String, usize> = BTreeMap::new();
@@ -513,6 +527,13 @@ impl WorkspaceService {
         {
             return Err(format!("档案 {} 指向的提交 {} 不在了", mark, id));
         }
+        if reference.since == 0 {
+            // 留档时间点缺失 = 不知道这份档案之后长出了什么，恢复会留下一条分叉。
+            return Err(format!(
+                "档案 {} 没有记下留档时间点，无法确定留档之后新增了哪些提交；请重新留档后再恢复",
+                mark
+            ));
+        }
         let conflicts = self.external_materialize_conflicts(work, &shared, &store, target)?;
         if !conflicts.is_empty() {
             return Err(format!(
@@ -520,8 +541,7 @@ impl WorkspaceService {
                 conflicts.join("、")
             ));
         }
-        // 先把当前线钉住，再动文件：剪叉不靠"删提交"保证可恢复。
-        self.pin_head(&store)?;
+        // 不钉当前线：恢复要丢掉留档之后的分叉，钉住的线会立刻变成悬空引用。
         let base = match target {
             Some(id) => Self::tree_of(self.store.as_ref(), &store, id)?,
             None => Tree::new(),
@@ -535,12 +555,16 @@ impl WorkspaceService {
                 None => base.clone(),
             };
             self.lay_down_tree(&store, &sandbox, &sandbox_tree, agent, Some(&prefix))?;
-            self.reset_agent_point(&store, agent, target, save, &base)?;
+            // 工作线回到留档时它自己的头：不是主线头（那会把没推送的本地提交一并丢掉）。
+            let work_point = reference.heads.get(agent).copied().flatten();
+            self.reset_agent_point(&store, agent, work_point, save, &base)?;
         }
         let pending = Pending::Restore { target };
         self.store.write_pending(&store, &pending)?;
         let result = WorkspaceService::materialize(self.store.as_ref(), &shared, &store, target);
         self.settle(work, &shared, &store, result)?;
+        // 恢复 = 回到留档操作前：留档之后长出来的提交整条作废（含更晚的档案指向的提交）。
+        self.discard_since_locked(&store, reference.since)?;
         self.store.remove_ref(&store, &name)?;
         Ok(target)
     }

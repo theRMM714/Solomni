@@ -289,7 +289,7 @@ fn work_status_filters_paths_outside_read_scope() {
     p.shared_read = ScopeMode::Paths(paths(&["public.txt"]));
     let h = WorkHandler::new(ws, "w", "a", p);
     let ctx = ToolCtx {
-        work: "w",
+        session: "s",
         agent: "a",
         line: 1,
     };
@@ -329,7 +329,7 @@ fn work_lost_is_scoped_by_read_permission() {
     p.shared_read = ScopeMode::Paths(paths(&["public"]));
     let h = WorkHandler::new(ws, "w", "a", p);
     let ctx = ToolCtx {
-        work: "w",
+        session: "s",
         agent: "a",
         line: 1,
     };
@@ -366,7 +366,7 @@ fn work_versions_and_resolve_are_scoped_by_read_permission() {
     p.shared_read = ScopeMode::Paths(paths(&["docs"]));
     let h = WorkHandler::new(ws, "w", "a", p);
     let ctx = ToolCtx {
-        work: "w",
+        session: "s",
         agent: "a",
         line: 1,
     };

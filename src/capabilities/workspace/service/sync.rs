@@ -329,11 +329,15 @@ impl WorkspaceService {
         Ok(out)
     }
 
+    /// 目的：把工作区磁盘与 head 的差异采纳成一条 `author=external` 的主线提交。
+    /// 约束：`anchor` 是这次同步在转录上的位置——回档 / 留档按它判定这条提交在不在点之前
+    ///   （没给锚的提交一律不参与选点）。
     pub(super) fn work_sync(
         &self,
         work: &str,
         paths: &[String],
         time: i64,
+        anchor: CommitAnchor,
     ) -> Result<SyncReport, String> {
         if paths.is_empty() {
             return Err("work_sync 要给出要同步的路径（文件或文件夹）".to_string());
@@ -420,7 +424,7 @@ impl WorkspaceService {
             source: Source::External,
             line: CommitLine::Main,
             sources: Vec::new(),
-            anchor: None,
+            anchor: Some(anchor),
         };
         let pending = Pending::Commit {
             commit: Box::new(commit.clone()),
@@ -466,17 +470,32 @@ impl WorkspaceService {
         if paths.is_empty() {
             return Ok(SyncReport::default());
         }
-        self.work_sync(work, &paths, time)
+        // 首次导入发生在任何转录之前：行锚 0 让它永远算在回档点之前。
+        self.work_sync(
+            work,
+            &paths,
+            time,
+            CommitAnchor {
+                agent: String::new(),
+                session: String::new(),
+                line: 0,
+            },
+        )
     }
 
-    pub(super) fn work_sync_tracked(&self, work: &str, time: i64) -> Result<SyncReport, String> {
+    pub(super) fn work_sync_tracked(
+        &self,
+        work: &str,
+        time: i64,
+        anchor: CommitAnchor,
+    ) -> Result<SyncReport, String> {
         let (_, store) = self.work_roots(work)?;
         let (_, tree) = self.head_tree(&store)?;
         let paths: Vec<String> = tree.keys().cloned().collect();
         if paths.is_empty() {
             return Ok(SyncReport::default());
         }
-        self.work_sync(work, &paths, time)
+        self.work_sync(work, &paths, time, anchor)
     }
 }
 

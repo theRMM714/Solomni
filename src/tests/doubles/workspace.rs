@@ -479,6 +479,7 @@ impl WorkStore for InMemoryWorkStore {
                 target: None,
                 heads: BTreeMap::new(),
                 saves: BTreeMap::new(),
+                since: 0,
             },
         );
         r.target = Some(id);

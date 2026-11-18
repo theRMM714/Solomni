@@ -82,9 +82,9 @@ pub(crate) fn work_archive_moves_every_sandbox_to_one_point_and_keeps_uncommitte
     );
 }
 
-/// 目的：恢复档案让主副本与所有沙箱一起回到留档点；离开的那条线钉进 refs/live，仍可再回滚。
+/// 目的：恢复档案让主副本与所有沙箱一起回到留档点，并把留档之后长出来的分叉整条丢弃。
 #[test]
-pub(crate) fn work_restore_archive_rewinds_every_sandbox_and_pins_the_line_it_left() {
+pub(crate) fn work_restore_archive_rewinds_every_sandbox_and_drops_the_fork() {
     use crate::capabilities::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     let agents = ["a".to_string(), "b".to_string()];
@@ -135,24 +135,26 @@ pub(crate) fn work_restore_archive_rewinds_every_sandbox_and_pins_the_line_it_le
         "恢复前的沙箱内容要进 lost"
     );
 
-    // 离开的那条线被钉住（提交不删、可再回滚）；档案引用用完即移除。
-    assert_eq!(
+    // 恢复 = 回到留档操作前：留档之后的推送被丢弃，那条线不再可达，也回滚不回去。
+    assert!(
+        store.read_commit(&root, id2).unwrap().is_none(),
+        "留档之后的推送要被丢弃"
+    );
+    assert!(
         store
             .read_ref(&root, &format!("live/{}", id2))
             .unwrap()
-            .and_then(|r| r.target),
-        Some(id2)
+            .is_none(),
+        "丢弃的分叉不留下悬空的 live 引用"
+    );
+    assert!(
+        ws.work_restore("w", id2).is_err(),
+        "被丢弃的分叉不能回滚过去"
     );
     assert!(store.read_ref(&root, "archive/1").unwrap().is_none());
     assert!(
         ws.work_restore_archive("w", 1).is_err(),
         "恢复过的档案不能再恢复一次"
-    );
-    ws.work_restore("w", id2).unwrap();
-    assert_eq!(ws.work_head("w").unwrap(), Some(id2));
-    assert_eq!(
-        store.read_under(&shared, "note.md").unwrap().as_deref(),
-        Some(&b"v2"[..])
     );
 }
 

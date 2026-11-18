@@ -64,8 +64,16 @@ impl Lifecycle {
         let work = work_root(self.history.as_ref(), sid)?;
         if force {
             // 用户已确认覆盖：先把受管路径的外部改动采纳成提交，随后的回档就不会再撞上“被外部改动”。
-            self.workspace
-                .work_sync_tracked(&work, crate::kernel::api::unix_seconds())?;
+            // 行锚取“下一条转录行”：这条同步发生在这次回档之后，回档点不该停在它上面。
+            self.workspace.work_sync_tracked(
+                &work,
+                crate::kernel::api::unix_seconds(),
+                crate::capabilities::workspace::api::CommitAnchor {
+                    agent: String::new(),
+                    session: sid.to_string(),
+                    line: next_line,
+                },
+            )?;
         }
         let (mut active, children) = match *target {
             RewindTarget::Archive(line) => {

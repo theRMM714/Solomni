@@ -212,6 +212,7 @@ impl WorkspaceService {
                 target: Some(id),
                 heads: BTreeMap::new(),
                 saves: BTreeMap::new(),
+                since: 0,
             },
         )
     }
@@ -454,6 +455,35 @@ impl WorkspaceService {
             }
         }
         Ok(())
+    }
+
+    /// 目的：丢掉 since 及之后产生的全部提交（恢复留档时用：留档之后长出的那条分叉一并作废）。
+    /// 约束：调用方已物化到留档目标并写回 head/工作线头；指向被删提交的引用（含后来那些档案）一起清掉。
+    fn discard_since_locked(&self, store: &Path, since: u64) -> Result<(), String> {
+        for id in self.store.list_commits(store)? {
+            if id >= since {
+                self.store.remove_commit(store, id)?;
+            }
+        }
+        for (name, r) in self.store.list_refs(store)? {
+            if self.ref_mentions_missing(store, &r)? {
+                self.store.remove_ref(store, &name)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// 目的：这条引用的目标（含各 agent 的工作线头与存档点）是否指向已不存在的提交。
+    fn ref_mentions_missing(&self, store: &Path, r: &Ref) -> Result<bool, String> {
+        let mut ids: Vec<Option<u64>> = vec![r.target];
+        ids.extend(r.heads.values().copied());
+        ids.extend(r.saves.values().copied());
+        for id in ids.into_iter().flatten() {
+            if self.store.read_commit(store, id)?.is_none() {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// 目的：重放该工作尚未完成的版本库事务；没有 = 无操作。
