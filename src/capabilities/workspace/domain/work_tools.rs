@@ -61,14 +61,16 @@ fn paths(list: &[String]) -> String {
 }
 
 /// 目的：把 work_pull 的结果说成人能读的几行。
-/// 返回：写入 / 跳过 / 冲突 / 主副本没有 各若干行（路径截断规则见 `MAX_LISTED`）。
+/// 返回：写入 / 本地改动 / 跳过 / 冲突 / 主副本没有 各若干行（路径截断规则见 `MAX_LISTED`）。
 pub fn render_pull(r: &PullReport) -> String {
     let mut out = format!(
-        "已对准主副本提交 {}。写入沙箱 {} 个，已是最新 {} 个，无变化 {} 个，跳过（沙箱已有同名文件）{} 个，冲突 {} 个，主副本没有 {} 个，工作区有外部修改 {} 个。",
+        "已对准主副本提交 {}。写入沙箱 {} 个，已是最新 {} 个，无变化 {} 个，本地有未提交改动 {} 个，本地已删除 {} 个，跳过（沙箱已有同名文件）{} 个，冲突 {} 个，主副本没有 {} 个，工作区有外部修改 {} 个。",
         r.commit,
         r.updated.len(),
         r.already.len(),
         r.no_change.len(),
+        r.local_modified.len(),
+        r.local_deleted.len(),
         r.occupied.len(),
         r.conflicts.len(),
         r.missing.len(),
@@ -76,6 +78,18 @@ pub fn render_pull(r: &PullReport) -> String {
     );
     if !r.updated.is_empty() {
         out.push_str(&format!("\n写入：{}", paths(&r.updated)));
+    }
+    if !r.local_modified.is_empty() {
+        out.push_str(&format!(
+            "\n本地有未提交改动、没被覆盖：{}——上游这些路径没动，沙箱是你的版本；要发布先 work_commit 再 work_push。",
+            paths(&r.local_modified)
+        ));
+    }
+    if !r.local_deleted.is_empty() {
+        out.push_str(&format!(
+            "\n本地已删除、保持删除：{}——上游没动；要发布这次删除先 work_commit deletes=[…] 再 work_push。",
+            paths(&r.local_deleted)
+        ));
     }
     if !r.occupied.is_empty() {
         out.push_str(&format!(
@@ -272,7 +286,7 @@ pub fn render_reset(r: &ResetReport) -> String {
     }
     if r.backed_up > 0 {
         out.push_str(&format!(
-            "\n覆盖前备份了 {} 份旧内容到 lost/reset-*（可用 work_lost 找回）。",
+            "\n覆盖前备份了 {} 份旧内容（备份位置 lost/@reset-*；work_lost 列出原路径与备份位置）。",
             r.backed_up
         ));
     }
@@ -504,7 +518,9 @@ pub fn render_resolve(r: &ResolveReport) -> String {
     }
     let backups: Vec<&ResolveEntry> = r.entries.iter().filter(|e| e.backup.is_some()).collect();
     if !backups.is_empty() {
-        out.push_str("\n已备份被覆盖/删除的本地版本（可用 work_lost 找回）：");
+        out.push_str(
+            "\n已备份被覆盖/删除的本地版本（位置在版本库 lost/<agent>/ 下，可用 work_lost 找回）：",
+        );
         for e in backups.iter().take(MAX_LISTED) {
             out.push_str(&format!(
                 "\n- {} → {}",
@@ -528,10 +544,10 @@ pub fn render_resolve(r: &ResolveReport) -> String {
     out
 }
 
-/// 目的：把 work_lost 的清单说成人能读的几行：备份路径、指纹、当前沙箱指纹与恢复方式。
+/// 目的：把 work_lost 的清单说成人能读的几行：原路径、备份位置与来源、指纹、当前沙箱指纹与恢复方式。
 pub fn render_lost(r: &LostReport) -> String {
     if r.entries.is_empty() {
-        return "没有找到被覆盖的本地版本。只有 work_resolve take=upstream 覆盖/删除本地文件时才会产生备份。"
+        return "没有找到被覆盖的本地版本。覆盖 / 删除 / 回退 / 留档还原前被顶掉的沙箱版本都会备份在 lost/ 下。"
             .to_string();
     }
     let mut out = format!("被覆盖的本地版本（agent {}）：共 {} 份", r.agent, r.total);
@@ -540,8 +556,10 @@ pub fn render_lost(r: &LostReport) -> String {
     }
     for e in r.entries.iter().take(MAX_LISTED) {
         out.push_str(&format!(
-            "\n- {}：备份 hash={}，大小={} 字节；当前沙箱={}",
+            "\n- {}：备份位置 {}，来源 {}；hash={}，大小={} 字节；当前沙箱={}",
             e.path,
+            e.backup,
+            e.origin.as_deref().unwrap_or("未标记（旧备份）"),
             e.hash,
             e.size,
             match &e.current_hash {
@@ -554,7 +572,7 @@ pub fn render_lost(r: &LostReport) -> String {
         out.push_str(&format!("\n…（共 {} 条）", r.entries.len()));
     }
     out.push_str(
-        "\n恢复：work_lost path=<路径> restore=true expect_current=<当前沙箱 hash；不存在传空串>；恢复会覆盖当前沙箱同路径，先确认新内容已另存/提交。",
+        "\n恢复：work_lost path=<路径> restore=true expect_current=<当前沙箱 hash；不存在传空串>；恢复会覆盖当前沙箱同路径，先确认新内容已另存/提交。\n同一路径有多份备份时，把 path 传成备份位置（@<来源>/<路径>）指明一份。",
     );
     out
 }
@@ -562,8 +580,9 @@ pub fn render_lost(r: &LostReport) -> String {
 /// 目的：把 work_restore_lost 的结果说成人能读的几行。
 pub fn render_restore_lost(r: &RestoreLostReport) -> String {
     format!(
-        "已恢复 {}：备份 hash={}，大小={} 字节；覆盖前沙箱={}。备份仍保留在 lost/ 下，可再次恢复。恢复后请 work_versions 看三方，合并后再提交。",
+        "已恢复 {}（用备份 {}）：hash={}，大小={} 字节；覆盖前沙箱={}。备份仍保留在 lost/ 下，可再次恢复。恢复后请 work_versions 看三方，合并后再提交。",
         r.path,
+        r.backup,
         r.hash,
         r.size,
         match &r.previous {
@@ -692,7 +711,7 @@ mod tests {
                 ResolveEntry {
                     path: "cover.png".to_string(),
                     action: ResolveAction::WroteUpstream,
-                    backup: Some("lost/a/cover.png".to_string()),
+                    backup: Some("@resolve/cover.png".to_string()),
                 },
             ],
             missing: Vec::new(),
@@ -708,7 +727,7 @@ mod tests {
             "{}",
             text
         );
-        assert!(text.contains("lost/a/cover.png"), "{}", text);
+        assert!(text.contains("@resolve/cover.png"), "{}", text);
         assert!(text.contains("work_lost"), "{}", text);
     }
 
@@ -721,6 +740,8 @@ mod tests {
             total: 1,
             entries: vec![LostEntry {
                 path: "note.md".to_string(),
+                backup: "@reset-paths/note.md".to_string(),
+                origin: Some("reset-paths".to_string()),
                 hash: "hb".to_string(),
                 size: 3,
                 current_hash: Some("hc".to_string()),
@@ -729,9 +750,11 @@ mod tests {
         };
         let text = render_lost(&r);
         assert!(text.contains("note.md") && text.contains("hb") && text.contains("hc"));
+        assert!(text.contains("@reset-paths/note.md"), "{}", text);
         assert!(text.contains("work_lost"), "{}", text);
         let rr = RestoreLostReport {
             path: "note.md".to_string(),
+            backup: "@reset-paths/note.md".to_string(),
             hash: "hb".to_string(),
             size: 3,
             previous: Some("hc".to_string()),

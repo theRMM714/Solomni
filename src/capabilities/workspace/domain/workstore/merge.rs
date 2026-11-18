@@ -54,8 +54,12 @@ pub enum PullVerdict {
     Conflict,
     /// 主副本没有这个路径。
     Missing,
-    /// 什么都没变（上游没动）。
+    /// 什么都没变（上游没动、本地也没动）。
     NoChange,
+    /// 上游没动、本地改了：不动本地，也不覆盖基线（要发布得 work_commit + work_push）。
+    LocalModified,
+    /// 上游没动、本地删了：保持删除，等本地提交后发布。
+    LocalDeleted,
 }
 
 /// 目的：一条路径没有可提交改动的原因（`work_commit` 的空提交回执按它给下一步）。
@@ -192,7 +196,7 @@ pub fn pull_verdict(base: Option<&str>, head: Option<&str>, local: Option<&str>)
             // 本地删了自己的副本：上游没动就保持删除，上游动了就没法自动合。
             None => {
                 if b == head {
-                    PullVerdict::NoChange
+                    PullVerdict::LocalDeleted
                 } else {
                     PullVerdict::Conflict
                 }
@@ -207,8 +211,8 @@ pub fn pull_verdict(base: Option<&str>, head: Option<&str>, local: Option<&str>)
                 } else if l == head {
                     PullVerdict::AlreadySame
                 } else if b == head {
-                    // 上游没动、本地改了：不动本地
-                    PullVerdict::NoChange
+                    // 上游没动、本地改了：不动本地，也不能算「无变化」（要发布得提交后推送）
+                    PullVerdict::LocalModified
                 } else {
                     PullVerdict::Conflict
                 }

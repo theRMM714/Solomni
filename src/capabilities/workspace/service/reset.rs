@@ -1,5 +1,5 @@
 //! 目的：`work_reset` 用例——把沙箱路径恢复成基线版本（`paths`），或把工作线移回某个提交（`to`）。
-//! 管：祖先链校验、铺盘、覆盖前备份进 `lost/reset-<目标>/`。
+//! 管：祖先链校验、铺盘、覆盖前备份进 `lost/<agent>/@reset-<目标>/`。
 //! 不管：参数解析与权限（`service/work_tools.rs`）、文案（`domain/work_tools.rs`）。
 //! 联动：`copy_object_to_under` / `remove_under`（铺盘与备份）、`Workspace` trait。
 
@@ -156,7 +156,7 @@ impl WorkspaceService {
             return Ok(0);
         };
         let lost = lost_root(store, agent)?;
-        let dest = format!("{}/{}", dir, rel);
+        let dest = backup_rel(dir, rel);
         self.store
             .copy_under_to_under(root, rel, &lost, &dest, &f.hash)?;
         Ok(1)

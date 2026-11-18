@@ -98,7 +98,7 @@ impl WorkspaceService {
             let backup = if matches!(req.take, ResolveTake::Upstream)
                 && needs_backup(head_hash.as_deref(), local_hash.as_deref())
             {
-                Some(lost_rel(agent, &rel)?)
+                Some(backup_rel("resolve", &rel))
             } else {
                 None
             };
@@ -134,18 +134,13 @@ impl WorkspaceService {
         // 先把所有要覆盖/删除的本地版本备份完，再做任何改动；备份失败就整次拒绝。
         let backup_root = lost_root(&store, agent)?;
         for plan in &plans {
-            if plan.backup.is_some() {
+            if let Some(dest) = &plan.backup {
                 let hash = plan
                     .local_hash
                     .as_deref()
                     .ok_or_else(|| format!("内部错误：{} 需要备份但没有本地指纹", plan.path))?;
-                self.store.copy_under_to_under(
-                    &sandbox,
-                    &plan.path,
-                    &backup_root,
-                    &plan.path,
-                    hash,
-                )?;
+                self.store
+                    .copy_under_to_under(&sandbox, &plan.path, &backup_root, dest, hash)?;
             }
         }
         let mut entries: Vec<ResolveEntry> = Vec::new();

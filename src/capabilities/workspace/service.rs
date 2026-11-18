@@ -10,9 +10,9 @@ use crate::capabilities::workspace::domain::freshness::lines_changed;
 use crate::capabilities::workspace::domain::hash::{content_hash, is_content_hash};
 use crate::capabilities::workspace::domain::workstore::{
     Commit, CommitAnchor, CommitLine, Conflict, ConflictAt, Index, LocalTakeVerdict, Pending,
-    PendingIndex, PullVerdict, Ref, RefKind, Source, StatusState, Tree, Unchanged, clean_rel,
-    expand_paths, local_take_verdict, lost_rel, needs_backup, plan_commit, plan_merge,
-    pull_verdict, status_of, validate_paths,
+    PendingIndex, PullVerdict, Ref, RefKind, Source, StatusState, Tree, Unchanged, backup_rel,
+    clean_rel, expand_paths, local_take_verdict, needs_backup, plan_commit, plan_merge,
+    pull_verdict, split_backup, status_of, validate_paths,
 };
 use crate::capabilities::workspace::ports::{WorkStore, Workdirs};
 use std::collections::{BTreeMap, BTreeSet};

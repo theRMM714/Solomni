@@ -375,7 +375,7 @@ impl WorkspaceService {
             }
             if let Some(prefix) = backup {
                 let lost = lost_root(store, agent)?;
-                let dest = format!("{}/{}", prefix, rel);
+                let dest = backup_rel(prefix, &rel);
                 self.store
                     .copy_under_to_under(root, &rel, &lost, &dest, &current.hash)?;
                 backed += 1;
@@ -516,6 +516,62 @@ impl WorkspaceService {
         )
     }
 
+    /// 目的：推送的合并基准——我的工作线与主线的分叉点树，再补「分叉点里没有、但我拉过」的路径。
+    /// 约束：补录只用于「我提交过、或我曾删除过」的路径；其余路径的基线留空，合并时按「我这边没动」处理，
+    ///   绝不把主线上别人写的路径当成删除。
+    pub(super) fn push_base(
+        &self,
+        store: &Path,
+        agent: &str,
+        mine_id: Option<u64>,
+        mine: &Tree,
+        theirs_id: Option<u64>,
+    ) -> Result<Tree, String> {
+        let mut base = match self.merge_base(store, mine_id, theirs_id)? {
+            Some(id) => Self::tree_of(self.store.as_ref(), store, id)?,
+            None => Tree::new(),
+        };
+        let index: Index = self.store.read_index(store, agent)?;
+        let mut known: BTreeSet<String> = mine.keys().cloned().collect();
+        for id in self.head_ancestors(store, mine_id)? {
+            let Some(c) = self.store.read_commit(store, id)? else {
+                continue;
+            };
+            for ch in &c.changes {
+                if matches!(ch.kind, ChangeKind::Delete) {
+                    known.insert(ch.path.clone());
+                }
+            }
+        }
+        for path in known {
+            if !base.contains_key(&path)
+                && let Some(hash) = index.get(&path)
+            {
+                base.insert(path, hash.clone());
+            }
+        }
+        Ok(base)
+    }
+
+    /// 目的：两条线最近的分叉提交（主的祖先链上、我的祖先链里离我最近的那个）。
+    /// 返回：None = 没有共同祖先，分叉点按空树算。
+    pub(super) fn merge_base(
+        &self,
+        store: &Path,
+        mine: Option<u64>,
+        theirs: Option<u64>,
+    ) -> Result<Option<u64>, String> {
+        let theirs_ancestors = self.head_ancestors(store, theirs)?;
+        let mut cur = mine;
+        while let Some(id) = cur {
+            if theirs_ancestors.contains(&id) {
+                return Ok(Some(id));
+            }
+            cur = self.store.read_commit(store, id)?.and_then(|c| c.parent);
+        }
+        Ok(None)
+    }
+
     /// 目的：把工作线上已提交的改动推送进主线：三方合并 → 一条 squash 提交 → 物化共享区 → 两条线快进。
     /// 约束：冲突整次拒绝（不自动合并）；成功后沙箱里没被本地改过的路径一起快进到合并结果。
     pub(super) fn work_push(
@@ -537,8 +593,9 @@ impl WorkspaceService {
         self.recover_locked(work, &shared, &store)?;
         let (head, theirs) = self.head_tree(&store)?;
         let (work_id, mine) = self.work_tree(&store, agent)?;
-        // 基线 = 我拉取过的主线内容：没拉过的路径基线为空，合并时按「我新增」处理。
-        let base: Tree = self.store.read_index(&store, agent)?;
+        // 基线 = 分叉点（不是 index）：index 在每次推送后会被写成整棵合并树，拿它当 base 会把
+        // 别人刚投喂、我从未提交过的路径当成「我这边删掉了」。
+        let base = self.push_base(&store, agent, work_id, &mine, head)?;
         let plan = match plan_merge(&base, &mine, &theirs) {
             Ok(p) => p,
             Err(conflicts) => return Err(render_push_conflicts(&conflicts)),

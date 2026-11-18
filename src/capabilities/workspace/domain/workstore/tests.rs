@@ -1,5 +1,5 @@
 //! 目的：workstore 的纯判定用例——路径校验、三方比较、解决判定与状态映射。
-//! 管：`clean_rel` / `expand_paths` / `plan_commit` / `pull_verdict` / `local_take_verdict` / `status_of` / `work_state_of` / `lost_rel` 的边界。
+//! 管：`clean_rel` / `expand_paths` / `plan_commit` / `plan_merge` / `pull_verdict` / `local_take_verdict` / `status_of` / `work_state_of` / `backup_rel` / `split_backup` 的边界。
 //! 不管：落盘与 IO（由 `workspace::detail` 与能力面用例覆盖）。
 //! 联动：只经 `super::*` 用纯函数；起作用的源码见同目录 `record.rs` / `path.rs` / `merge.rs` / `resolve.rs` / `status.rs`。
 
@@ -185,6 +185,15 @@ fn pull_rules_never_clobber_local_work() {
         pull_verdict(Some("h1"), Some("h2"), Some("h3")),
         PullVerdict::Conflict
     );
+    // 上游没动、本地改了/删了：不动本地，但要如实分类，不能算「无变化」。
+    assert_eq!(
+        pull_verdict(Some("h1"), Some("h1"), Some("h9")),
+        PullVerdict::LocalModified
+    );
+    assert_eq!(
+        pull_verdict(Some("h1"), Some("h1"), None),
+        PullVerdict::LocalDeleted
+    );
     assert_eq!(
         pull_verdict(Some("h1"), None, Some("h1")),
         PullVerdict::Missing
@@ -297,13 +306,24 @@ fn backup_only_when_local_exists_and_differs_from_head() {
 }
 
 #[test]
-fn lost_rel_is_one_clean_agent_component_plus_a_clean_rel() {
-    assert_eq!(lost_rel("a", "dir/x.md").unwrap(), "lost/a/dir/x.md");
-    assert!(lost_rel("", "x").is_err());
-    assert!(lost_rel("..", "x").is_err());
-    assert!(lost_rel("a/b", "x").is_err());
-    assert!(lost_rel("a\\b", "x").is_err());
-    assert!(lost_rel("a", "../x").is_err());
+fn backup_location_carries_its_origin_and_split_recognises_old_data() {
+    assert_eq!(backup_rel("resolve", "dir/x.md"), "@resolve/dir/x.md");
+    assert_eq!(backup_rel("@reset-3", "x.md"), "@reset-3/x.md");
+    assert_eq!(
+        split_backup("@reset-3/dir/x.md"),
+        (Some("reset-3"), "dir/x.md")
+    );
+    // 旧布局没有标记段：能认出产点前缀的按前缀拆，认不出的整条就是原路径（旧 resolve 备份）。
+    assert_eq!(
+        split_backup("reset-paths/dir/x.md"),
+        (Some("reset-paths"), "dir/x.md")
+    );
+    assert_eq!(
+        split_backup("rewind-delete-4/dir/x.md"),
+        (Some("rewind-delete-4"), "dir/x.md")
+    );
+    assert_eq!(split_backup("docs/b.txt"), (None, "docs/b.txt"));
+    assert_eq!(split_backup("@lonely"), (None, "@lonely"));
 }
 
 #[test]

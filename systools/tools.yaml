@@ -489,7 +489,8 @@ tools:
     callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: |
       同 git push：把你工作线上已提交的改动推送进共享区主线，落一条 squash 提交（不是你的每一条本地提交）。
-      逐路径三方合并（你的拉取基线 / 你的工作线 / 主线当前）：有一边没动就取另一边；两边都动且结果不同 → **整次推送被拒**并逐条点名。
+      逐路径三方合并（两条线的**分叉点** / 你的工作线 / 主线当前）：有一边没动就取另一边；两边都动且结果不同 → **整次推送被拒**并逐条点名。
+      分叉点之后你拉过、却没在工作线提交过的路径（例如用户投喂的数据）按你的拉取基线算，不会被当成「你删掉了它」。
       冲突不会自动合并：先 work_pull 取回主线版本，在沙箱里合并（或用 work_resolve 选边），重新 work_commit 后再推送；工作线提交不会因为被拒丢失。
       推送成功后共享区物化到合并结果，沙箱里**没被本地改过**的路径一起快进（有未提交改动的路径不动）。
       没有可推送内容（工作线与主线一致）时如实回执，不算失败。
@@ -602,10 +603,10 @@ tools:
     callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: |
       同 git restore / git reset：在**你自己**的工作线上回退，共享区不受影响。
-      paths 形态：把这些沙箱路径恢复成基线版本（工作线头优先，没提交过的取拉取基线）；覆盖前备份进 lost/reset-paths/，
+      paths 形态：把这些沙箱路径恢复成基线版本（工作线头优先，没提交过的取拉取基线）；覆盖前备份进 lost/@reset-paths/，
       基线里也没有的从沙箱删掉。要发布回退结果得重新 work_commit + work_push。
       to 形态：把工作线移回某个更早的**自己的**提交（必须在祖先链上）；keep_changes=true 只移引用、沙箱不动（soft），
-      否则按目标提交重铺工作线跟踪的路径并删掉目标里没有的（hard）；拉过但没提交的文件原样保留，覆盖前备份进 lost/reset-<目标>/。
+      否则按目标提交重铺工作线跟踪的路径并删掉目标里没有的（hard）；拉过但没提交的文件原样保留，覆盖前备份进 lost/@reset-<目标>/。
       paths 与 to 互斥，必须给一个。
     params:
       paths:
@@ -624,14 +625,15 @@ tools:
     reach: [private, shared-read]
     callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: |
-      列出 / 恢复 work_resolve take=upstream 覆盖或删除前备份的**本地版本**（版本库 lost/ 下，按 agent 隔离）。
-      省略 path = 列出本 agent 的全部备份：路径、备份 hash/大小、当前沙箱 hash。
-      path + restore=true 时把该备份复制回沙箱同路径；必须带 expect_current（当前沙箱文件的 hash，文件不存在传空串），
+      列出 / 恢复覆盖或删除前备份的**本地版本**（版本库 lost/ 下，按 agent 隔离）；来源是 work_resolve take=upstream、work_reset、回档 / 删除 / 留档。
+      省略 path = 列出本 agent 的全部备份：**原路径**、备份位置（`@<来源>/<原路径>`）、来源、备份 hash/大小、当前沙箱 hash。
+      path 可以传原路径，也可以传备份位置；同一路径有多份备份时**必须**传备份位置点名一份，否则拒绝并列候选。
+      path + restore=true 时把该备份复制回**原路径**；必须带 expect_current（当前沙箱文件的 hash，文件不存在传空串），
       不匹配就拒绝，避免覆盖你后来写的新内容。恢复不消费备份，可再次恢复；恢复后先 work_versions 看三方、合并再提交。
     params:
       path:
         type: string
-        desc: 要查看 / 恢复的共享区相对路径；列表时省略 = 全部，给了 = 只看这一条或它下面的
+        desc: 要查看 / 恢复的原路径（相对共享区、/ 分隔），或备份位置 `@<来源>/<原路径>`；列表时省略 = 全部，给了 = 只看这一条或它下面的
       restore:
         type: boolean
         desc: true = 把 path 的备份恢复回沙箱；缺省 false（只看）
