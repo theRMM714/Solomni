@@ -32,6 +32,7 @@ const S = {
   deadParams: require("./structure/dead-params.js"),
   similar: require("./structure/similar-functions.js"),
   specs: require("./structure/specs.js"),
+  mutation: require("./structure/mutation.js"),
 };
 const D = {
   portals: require("./docs/portals.js"),
@@ -59,6 +60,7 @@ const GATES = [
   { id: "structure/kernel-tests", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["src/kernel/**/*.rs"], run: (root) => S.kernelTests.kernelTests(root) },
   { id: "structure/tests-api", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["src/tests/**/*.rs"], run: (root) => S.testsApi.testsApiOnly(root) },
   { id: "structure/specs", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["tests/specs/**/*.yaml", "tests/journeys/**/*.js", "tests/cross-platform/e2e/driver.js", "src/tests/**/*.rs"], run: (root) => S.specs.specsGate(root) },
+  { id: "structure/mutation", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["tests/specs/**/*.yaml", "src/**/*.rs"], run: (root) => S.mutation.mutationGate(root) },
   { id: "structure/prompt-keys", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["docs/prompt/prompts.md", "prompts/**/*.yaml"], run: (root) => S.docsTruth.promptKeys(root) },
   { id: "structure/systools", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["systools/**/*.yaml", "SYSTOOL.md", "docs/tools/tools-and-roles.md"], run: (root) => S.docsTruth.systools(root) },
   { id: "structure/links", lane: "structure", step: "T0 结构审查", kind: "text", inputs: ["links.yaml", "dependencies.yaml", "env.js", "src/**/*.rs"], run: (root) => S.ledgers.links(root) },
@@ -204,6 +206,7 @@ const LANE_ORDER = {
     "structure/kernel-tests",
     "structure/tests-api",
     "structure/specs",
+    "structure/mutation",
   ],
 };
 

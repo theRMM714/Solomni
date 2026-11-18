@@ -4,6 +4,11 @@
 
 unit: tools
 title: 工具面与派发
+
+mutation:
+  schedule: none
+  files:
+    - src/capabilities/tools/domain/patch.rs
 cases:
   - id: cargo/tests::api::tools
     tier: T3

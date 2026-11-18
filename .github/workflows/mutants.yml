@@ -11,17 +11,16 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: "范围：weekly（定时审计集）/ core（小而精，先跑这个）/ capability（单能力抽查）"
+        description: "范围：weekly（定时审计集）/ unit（单单元抽查）"
         type: choice
         options:
           - weekly
-          - core
-          - capability
-        default: core
-      capability:
-        description: "scope=capability 时测哪个能力（可选值见 tests/mutation-scope.json 的 capabilities；其它范围忽略）"
+          - unit
+        default: weekly
+      unit:
+        description: "scope=unit 时测哪个单元（取 tests/specs/ 的文件名；其它范围忽略）"
         type: string
-        default: repair
+        default: ""
 
 permissions:
   contents: read
@@ -68,22 +67,57 @@ jobs:
             console.log("[突变] 同提交跳过=" + skip);
           '
 
-  mutation:
-    # 分片并行：weekly 单跑超过 GitHub 的 6 小时 job 上限（实测 6h 未完成、被取消），
-    # 按 cargo-mutants 的 --shard k/n 把同一批变异体均分。加片就加一行 include，四片各自独立给结论。
-    name: 突变测试（${{ matrix.shard }}）
+  plan:
+    # 先数变异体再定片数：片数由总数现算（约 350 个/片），范围变大自动加片、变小不浪费 job。
+    # 为什么不能写死：weekly 单跑超过 GitHub 的 6 小时 job 上限（实测 6h 未完成、被取消），
+    # 而 `--shard k/n` 要求所有片共用同一个 n——n 只能在开跑前算出来。
+    name: 数与分片
     needs: preflight
+    if: ${{ always() && !cancelled() && needs.preflight.outputs.skip != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      mutants: ${{ steps.plan.outputs.mutants }}
+      shards: ${{ steps.plan.outputs.shards }}
+    env:
+      CARGO_HOME: ${{ github.workspace }}/platform/ci/cargo
+      SOLOMNI_CARGO_HOME: ${{ github.workspace }}/platform/ci/cargo
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "lts/*"
+      - name: 准备 Rust 与项目内 CARGO_HOME
+        run: |
+          rustc --version
+          cargo --version
+          mkdir -p platform/ci/cargo
+      - name: 装 cargo-mutants（预编译，一次性环境）
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: cargo-mutants
+      - name: 数变异体、算分片
+        id: plan
+        env:
+          MUTATION_SCOPE: ${{ github.event_name == 'workflow_dispatch' && inputs.scope || 'weekly' }}
+          MUTATION_UNIT: ${{ github.event_name == 'workflow_dispatch' && inputs.unit || '' }}
+        run: |
+          node tests/mutation-plan.mjs
+          node -e "const p = require('./target/mutation-plan.json'); require('node:fs').appendFileSync(process.env.GITHUB_OUTPUT, 'matrix=' + JSON.stringify(p.include) + '\nshards=' + p.shards.length + '\nmutants=' + (p.mutants || 0) + '\n')"
+
+  mutation:
+    # 分片并行：每片跑同一批变异体的 1/n，各自独立给结论（merge 再拼回一份）。
+    name: 突变测试（${{ matrix.shard }}）
+    needs: [preflight, plan]
     if: ${{ always() && !cancelled() && needs.preflight.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 240
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - shard: "1/4"
-          - shard: "2/4"
-          - shard: "3/4"
-          - shard: "4/4"
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     # 借用 runner 自带 Rust，但缓存/安装落项目内（见 docs/testing/execution-ci.md）。
     env:
       CARGO_HOME: ${{ github.workspace }}/platform/ci/cargo
@@ -126,9 +160,9 @@ jobs:
 
       - name: 跑突变测试
         env:
-          # 定时默认 weekly；手动按输入。
+          # 定时默认 weekly；手动按输入。范围从 tests/specs 的 mutation 块收集（tests/lib/mutation.js）。
           MUTATION_SCOPE: ${{ github.event_name == 'workflow_dispatch' && inputs.scope || 'weekly' }}
-          MUTATION_CAPABILITY: ${{ github.event_name == 'workflow_dispatch' && inputs.capability || 'repair' }}
+          MUTATION_UNIT: ${{ github.event_name == 'workflow_dispatch' && inputs.unit || '' }}
         run: node tests/ci-mutation.mjs
 
       # 保存只在 main：手动派发在 main 上跑一次才写缓存；save 失败不挡突变测试结论。

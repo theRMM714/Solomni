@@ -4,6 +4,11 @@
 
 unit: conversation
 title: 会话、协作、代理、代拟
+
+mutation:
+  schedule: weekly
+  files:
+    - src/capabilities/conversation/slate/service.rs
 cases:
   - id: cargo/tests::api::collab
     tier: T3

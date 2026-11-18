@@ -5,7 +5,8 @@
  * - platform-status：src/capabilities/vm/domain/exec.rs 的 VERIFIED_HOSTS + tests/<平台>/gaps.yaml 的条目数；
  * - gate-steps：tests/gates/steps.js 的 listModel()（与 `node run-tests.js --list --json` 同源），取 "T0 " 前缀步骤；
  * - success-markers：tests/lib/markers.js 的 MARKERS（标记的唯一声明）；
- * - layer-table：layers.yaml 的分层表（能力分层的唯一权威，文档里的表不手写）。
+ * - layer-table：layers.yaml 的分层表（能力分层的唯一权威，文档里的表不手写）；
+ * - mutation-scope：各单元 `tests/specs/<unit>.yaml` 的 `mutation` 块（突变范围的唯一声明处）。
  * 用法：node tests/docs-sync.mjs [--check|--write]；默认 --check（CI / --docs 用）。
  */
 import fs from "node:fs";
@@ -105,6 +106,29 @@ function renderLayerTable() {
   ].join("\n");
 }
 
+/** 突变范围表：单元 / 文件 / 调度，全部取自各单元 spec 的 mutation 块；单元数与文件数现算。 */
+function renderMutationScope() {
+  const { loadSpecs } = require("./lib/spec.js");
+  const { specs, problems } = loadSpecs(ROOT);
+  if (problems.length) throw new Error(problems.join("；"));
+  const declared = specs.filter((s) => s.mutation);
+  const rows = [];
+  for (const s of declared) {
+    for (const f of s.mutation.files) rows.push("| `" + s.unit + "` | `" + f + "` | " + s.mutation.schedule + " |");
+  }
+  const weekly = declared.filter((s) => s.mutation.schedule === "weekly");
+  const weeklyFiles = weekly.reduce((n, s) => n + s.mutation.files.length, 0);
+  return [
+    "<!-- BEGIN:mutation-scope -->",
+    "| 单元 | 文件 | 调度 |",
+    "| --- | --- | --- |",
+    ...rows,
+    "",
+    "> " + weekly.length + " 个单元、周检 " + weeklyFiles + " 个文件；本表由 `tests/specs/*.yaml` 的 `mutation` 块生成（`node tests/docs-sync.mjs --write`），不手写。",
+    "<!-- END:mutation-scope -->",
+  ].join("\n");
+}
+
 const TARGETS = [
   { file: "README.md", marker: "platform-status", source: "platform-status", lang: "zh" },
   { file: "README_EN.md", marker: "platform-status-en", source: "platform-status", lang: "en" },
@@ -112,6 +136,7 @@ const TARGETS = [
   { file: "docs/vm/README.md", marker: "platform-status", source: "platform-status", lang: "zh" },
   { file: "docs/testing/levels.md", marker: "gate-steps", source: "gate-steps" },
   { file: "docs/testing/execution-ci.md", marker: "success-markers", source: "success-markers" },
+  { file: "docs/testing/execution-ci.md", marker: "mutation-scope", source: "mutation-scope" },
   { file: "docs/architecture/layers.md", marker: "layer-table", source: "layer-table" },
 ];
 
@@ -123,6 +148,7 @@ function render(target, payload) {
   if (target.source === "layer-table") return payload;
   if (target.source === "gate-steps") return payload;
   if (target.source === "success-markers") return payload;
+  if (target.source === "mutation-scope") return payload;
   throw new Error("未知来源：" + target.source);
 }
 
@@ -132,6 +158,7 @@ function main() {
     "platform-status": platformStatus(),
     "gate-steps": renderGateSteps(),
     "success-markers": renderSuccessMarkers(),
+    "mutation-scope": renderMutationScope(),
     "layer-table": renderLayerTable(),
   };
   const problems = [];

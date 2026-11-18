@@ -4,6 +4,11 @@
 
 unit: catalog
 title: 登记处、模块、运行包、密钥
+
+mutation:
+  schedule: weekly
+  files:
+    - src/capabilities/catalog/registry/detail/yaml_settings.rs
 cases:
   - id: cargo/tests::detail::modules
     tier: T1
