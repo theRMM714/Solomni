@@ -184,6 +184,7 @@ impl ObserveView {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ControlAction {
+    Interrupt,
     Stop,
     Continue,
     Close,
@@ -192,14 +193,19 @@ pub enum ControlAction {
 impl ControlAction {
     pub fn parse(s: &str) -> Result<Self, String> {
         match s {
+            "interrupt" => Ok(Self::Interrupt),
             "stop" => Ok(Self::Stop),
             "continue" => Ok(Self::Continue),
             "close" => Ok(Self::Close),
-            other => Err(format!("action 只能是 stop / continue / close：{}", other)),
+            other => Err(format!(
+                "action 只能是 interrupt / stop / continue / close：{}",
+                other
+            )),
         }
     }
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Interrupt => "interrupt",
             Self::Stop => "stop",
             Self::Continue => "continue",
             Self::Close => "close",

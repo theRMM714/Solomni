@@ -1,6 +1,6 @@
-/* 目的：输入区——发送、停止、斜杠命令、@ 文件引用与自动增高。
+/* 目的：输入区——发送、中断、斜杠命令、@ 文件引用与自动增高。
  * 管：onSend / stopGeneration / cmdSync / at* 系列与 autoGrow / syncComposer / syncSendButton。
- * 不管：不渲染转录、不改会话状态；发送与停止都走统一动作分发。
+ * 不管：不渲染转录、不改会话状态；发送与中断都走统一动作分发。
  * 联动：会话读法来自 app/stores/sessions.js；动作走 app.act。 */
 
 import { activeSession, isBusy } from '../../stores/sessions.js';
@@ -41,9 +41,10 @@ function syncComposer(s) {
 function syncSendButton(s) {
   const sendBtn = $('#btn-send');
   if (!sendBtn) return;
-  // 忙碌时只留一个「停止」：用户一眼就知道这个会话在跑，而不是拿「发送」去试探。
+  // 忙碌时只留一个「中断」：用户一眼就知道这个会话在跑，而不是拿「发送」去试探。
+  // 这里是**中断**（只取消这一轮生成，会话照常派发）；「停止会话」在侧栏铅笔菜单里。
   const busy = isBusy(s);
-  sendBtn.textContent = busy ? '停止' : '发送';
+  sendBtn.textContent = busy ? '中断' : '发送';
   sendBtn.className = busy ? 'btn btn-danger' : 'btn btn-primary';
   // 只读视图整块隐藏输入区；这里只处理正常会话的发送/停止。
   sendBtn.disabled = false;
@@ -314,15 +315,16 @@ function autoGrow() {
   const t = $('#input'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 200) + 'px';
 }
 
-/* 停止生成：只置位服务端的中止开关；in-flight 的 say/continue 会立刻收尾返回。 */
+/* 中断生成：只置位服务端的中止开关；in-flight 的 say/continue 会立刻收尾返回。
+ * 运行态不动——中断后照常派发与唤醒，「继续」从断点重开一轮。 */
 async function stopGeneration() {
   const s = activeSession();
   if (!s || !isBusy(s)) return;
   try {
-    await api('POST', actionUrl('control_session'), { session_id: s.sid, action: 'stop' });
-    ui.toast('ok', '已请求停止');
+    await api('POST', actionUrl('control_session'), { session_id: s.sid, action: 'interrupt' });
+    ui.toast('ok', '已请求中断');
   } catch (e) {
-    ui.toast('err', '停止失败：' + e.message);
+    ui.toast('err', '中断失败：' + e.message);
   }
 }
 
@@ -330,7 +332,7 @@ function onSend() {
   const s = activeSession();
   if (!s) return;
   if (s.readonly) { ui.notice('历史回放为只读', '点「启用会话」后才能发送消息。', 'info'); return; }
-  if (isBusy(s)) { stopGeneration(); return; } // 生成中：同一个键变成「停止」
+  if (isBusy(s)) { stopGeneration(); return; } // 生成中：同一个键变成「中断」
   // 整段输入恰好是命令：`/compact` 走动作，不把命令本身发给模型。
   if (String($('#input').value || '').trim() === '/compact') {
     takeInput();

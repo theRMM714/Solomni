@@ -398,7 +398,7 @@ tools:
   control_session:
     capability: none              # 不碰文件：改的是会话生命周期
     callers: [user, core_proxy]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
-    desc: 控制一个代理子会话：stop（停止：整棵子树落成已停止，拦住派发与唤醒，并中断在跑的生成）/ continue（继续：解冻并按形态唤醒接着走）/ close（关闭已完成或已停止的会话，终态）。
+    desc: 控制一个代理子会话：interrupt（中断：只取消在跑的生成，运行态不变，之后照常派发与唤醒）/ stop（停止会话：整棵子树落成已停止，拦住派发与唤醒，并中断在跑的生成）/ continue（继续：解冻并按形态唤醒接着走）/ close（关闭已完成或已停止的会话，终态）。
     params:
       session_id:
         type: string
@@ -409,7 +409,7 @@ tools:
         type: string
         required: true
         non_empty: true
-        desc: stop / continue / close
+        desc: interrupt / stop / continue / close
       reason:
         type: string
         desc: 为什么做这个控制（会进可回放记录）；省略 = 由核心按调用者补一条通用记录

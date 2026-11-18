@@ -48,7 +48,7 @@ fn request_validators_reject_before_any_host_contact() {
     };
     assert_eq!(
         d::control_request(&base("pause", "为什么", "req-1")).unwrap_err(),
-        "action 只能是 stop / continue / close：pause"
+        "action 只能是 interrupt / stop / continue / close：pause"
     );
     assert_eq!(
         d::control_request(&base("close", "   ", "req-1")).unwrap_err(),

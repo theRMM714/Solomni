@@ -615,9 +615,12 @@ impl RuntimeOps for FakeFaces {
         self.guard()?;
         Ok(vec![json!({ "type": "line", "line": "重放" })])
     }
-    fn stop(&self, _sid: &str) -> Vec<String> {
+    fn interrupt(&self, _sid: &str) -> Vec<String> {
         self.running.swap(false, Ordering::Relaxed);
         Vec::new()
+    }
+    fn stop(&self, sid: &str) -> Vec<String> {
+        self.interrupt(sid)
     }
 }
 impl RegistryOps for FakeFaces {

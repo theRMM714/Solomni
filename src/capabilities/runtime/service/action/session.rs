@@ -93,6 +93,11 @@ impl Handle {
             self.record_notice(sid, SessionEvent::Notice(note.clone()));
         }
         let state = match action {
+            d::ControlAction::Interrupt => {
+                // 中断只取消在跑的生成：运行态不动，派发与唤醒照常（回执给实际停下的会话数）。
+                let stopped = RuntimeOps::interrupt(self, sid);
+                format!("interrupted:{}", stopped.len())
+            }
             d::ControlAction::Stop => {
                 // 走会话能力的停止：冻结整棵子树 + 级联中断在跑的生成（回执给实际停下的会话数）。
                 let stopped = RuntimeOps::stop(self, sid);

@@ -41,8 +41,11 @@ pub trait RuntimeOps: Send + Sync {
     /// 契约测试与其它调用方，同时确保回档的同步收尾只有一条实现。
     #[allow(dead_code)]
     fn rewind(&self, sid: &str, target: RewindTarget) -> Result<Vec<serde_json::Value>, String>;
-    /// 目的：停止——把整棵子树落成 `stopped`（拦住后续派发与唤醒）并中断正在跑的生成。
-    /// 返回：**实际停下的会话**（空 = 本来就没在跑）；「继续」（`TurnOps::continue_flow`）是它的逆操作。
+    /// 目的：中断——取消整棵子树里正在跑的生成、作废等裁决的队；**不动运行态**（派发与唤醒照常）。
+    /// 返回：**实际停下的会话**（空 = 本来就没在跑）。
+    fn interrupt(&self, sid: &str) -> Vec<String>;
+    /// 目的：停止会话——先把整棵子树落成 `stopped`（拦住后续派发与唤醒），再中断正在跑的生成。
+    /// 返回：**实际停下的会话**；「继续」（`TurnOps::continue_flow`）是它的逆操作。
     fn stop(&self, sid: &str) -> Vec<String>;
 }
 
