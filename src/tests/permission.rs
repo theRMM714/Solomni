@@ -824,6 +824,11 @@ fn tool_confirmation_rides_the_decision_channel() {
         "拒绝的理由要如实回给模型：{:?}",
         outs
     );
+    assert!(
+        outs.iter().all(|o| !o.contains("可用：")),
+        "放不放行是用户的决定，与换哪个工具无关：拒绝回执不该附工具清单：{:?}",
+        outs
+    );
 
     // ③ 本轮不再问：一次回复里两次调用，答 full → 只问一次、两次都执行（且**不落盘**成策略）。
     let (_ev, lines, outs, cards, ran) = ask_case(OPT_TOOL_ALLOW_TURN, 2);

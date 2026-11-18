@@ -394,7 +394,7 @@ pub(crate) fn run_batch(
                 "当前档位「{}」不允许这次调用。",
                 ctx.face.sandbox.permissions.profile.label()
             );
-            done[i] = Some((label, deny(&ctx.face, why), None, None));
+            done[i] = Some((label, refuse(why), None, None));
             i += 1;
             continue;
         }
@@ -419,7 +419,7 @@ pub(crate) fn run_batch(
             let Some(gate) = confirms.as_deref_mut() else {
                 let why = "这次调用需要用户确认，但当前没有可回答的前端；按拒绝处理，未执行。"
                     .to_string();
-                done[i] = Some((label, deny(&ctx.face, why), None, None));
+                done[i] = Some((label, refuse(why), None, None));
                 i += 1;
                 continue;
             };
@@ -443,7 +443,7 @@ pub(crate) fn run_batch(
                 let why =
                     "用户没有放行这次工具调用：它没有执行。请换一种做法，或请用户调整会话权限。"
                         .to_string();
-                (label, deny(&ctx.face, why), None, None)
+                (label, refuse(why), None, None)
             });
             i += 1;
             continue;
@@ -686,10 +686,21 @@ pub(crate) fn available_tools(face: &ToolFace) -> String {
     list.join("、")
 }
 
+/// 目的：拒绝回执，**不**附工具清单——档位、确认、放行、参数这类拒绝与「换个工具」无关，清单只会扰民。
+pub(crate) fn refuse(why: String) -> ToolOutcome {
+    ToolOutcome { ok: false, output: why }
+}
+
+/// 目的：发现类拒绝（没指明模块 / 没有这个模块 / 模块没声明这个工具）：把可选范围说回去。
+/// 约束：`why` 自带的句号先去掉，别拼出「。。」。
 pub(crate) fn deny(face: &ToolFace, why: String) -> ToolOutcome {
     ToolOutcome {
         ok: false,
-        output: format!("{}。可用：{}", why, available_tools(face)),
+        output: format!(
+            "{}\n可用：{}",
+            why.trim_end_matches('。'),
+            available_tools(face)
+        ),
     }
 }
 
@@ -871,7 +882,7 @@ pub(crate) fn dispatch_external(
             Ok(a) => a,
             Err(e) => {
                 let why = format!("参数不是合法 JSON：{}", e);
-                return (module.clone(), deny(&ctx.face, why));
+                return (module.clone(), refuse(why));
             }
         };
         let outcome = match ctx.residents.call(&module, &op.service, &op.op, &args) {
@@ -898,12 +909,12 @@ pub(crate) fn dispatch_external(
                             let why = crate::capabilities::tools::api::arg_fault_text(
                                 &full, book, &fault,
                             );
-                            return (module.clone(), deny(&ctx.face, why));
+                            return (module.clone(), refuse(why));
                         }
                     }
                     Err(e) => {
                         let why = format!("参数不是合法 JSON：{}", e);
-                        return (module.clone(), deny(&ctx.face, why));
+                        return (module.clone(), refuse(why));
                     }
                 }
             }
@@ -927,7 +938,7 @@ pub(crate) fn dispatch_external(
                 if ctx.face.guest_lease.is_empty() {
                     return (
                         module,
-                        deny(&ctx.face, "这条虚拟机档会话没有 guest 租约".to_string()),
+                        refuse("这条虚拟机档会话没有 guest 租约，工具没有执行。".to_string()),
                     );
                 }
                 // 共享盘不承载执行位：模块声明的相对入口先落进 guest 本地副本，再把首 token 换成它
@@ -945,7 +956,7 @@ pub(crate) fn dispatch_external(
                                 Ok(staged) => {
                                     format!("{}{}", staged, &declared[entry.len()..])
                                 }
-                                Err(why) => return (module, deny(&ctx.face, why)),
+                                Err(why) => return (module, refuse(why)),
                             }
                         }
                         None => declared.to_string(),
