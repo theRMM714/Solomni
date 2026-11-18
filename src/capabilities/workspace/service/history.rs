@@ -131,11 +131,19 @@ impl WorkspaceService {
             None => None,
         };
         let on_head = self.head_ancestors(&store, head_id)?;
-        let all = self.store.list_commits(&store)?;
-        let total = all.len();
+        // 只列主线提交：工作线提交与存档快照是各自的本地历史，进不了共享区历史。
+        let mut main_ids: Vec<u64> = Vec::new();
+        for id in self.store.list_commits(&store)? {
+            if let Some(c) = self.store.read_commit(&store, id)?
+                && c.line == CommitLine::Main
+            {
+                main_ids.push(id);
+            }
+        }
+        let total = main_ids.len();
         let mut commits: Vec<WorkLogEntry> = Vec::new();
         let mut truncated = false;
-        for id in all.into_iter().rev() {
+        for id in main_ids.into_iter().rev() {
             if before.is_some_and(|b| id >= b) {
                 continue;
             }

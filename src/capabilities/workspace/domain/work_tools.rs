@@ -1,4 +1,4 @@
-//! 目的：共享区版本化工作区七个核心自有工具（`work_pull` / `work_commit` / `work_status` /
+//! 目的：共享区版本化工作区八个核心自有工具（`work_pull` / `work_commit` / `work_push` / `work_status` /
 //!   `work_versions` / `work_resolve` / `work_lost` / `work_sync`）的纯逻辑——工具名、入参解析与回执拼装。
 //! 管：工具名常量与 `is_work_tool`、取参（`str_list` / `str_arg`）、各工具回执的拼装。
 //! 不管：真正的拉取 / 提交 / 状态 / 三方视图 / 解决 / 备份恢复（走 `workspace::api::Workspace`）；
@@ -6,14 +6,16 @@
 //! 联动：由本能力的 `service/` 调用；工具名与 `systools/tools.yaml` 同一份名单。
 
 use crate::capabilities::workspace::api::{
-    ChangeKind, CommitReport, LostReport, PullReport, ResolveAction, ResolveEntry, ResolveReport,
-    RestoreLostReport, StatusReport, SyncReport, VERSION_TEXT_LIMIT, VersionView,
+    ChangeKind, CommitReport, LostReport, PullReport, PushReport, ResolveAction, ResolveEntry,
+    ResolveReport, RestoreLostReport, StatusReport, SyncReport, VERSION_TEXT_LIMIT, VersionView,
 };
 
 /// 目的：把主副本的更新拉进沙箱（`work_pull`）。
 pub const PULL: &str = "work_pull";
-/// 目的：把沙箱里的改动提交到主副本（`work_commit`）。
+/// 目的：把沙箱里的改动记进自己的工作线（`work_commit`，同 git commit）。
 pub const COMMIT: &str = "work_commit";
+/// 目的：把工作线上已提交的改动推送进主线（`work_push`，同 git push）。
+pub const PUSH: &str = "work_push";
 /// 目的：看主副本与工作副本的当前状态（`work_status`）。
 pub const STATUS: &str = "work_status";
 /// 目的：看一条路径的基线 / 主副本 / 沙箱三方视图（`work_versions`）。
@@ -29,7 +31,7 @@ pub const SYNC: &str = "work_sync";
 pub fn is_work_tool(name: &str) -> bool {
     matches!(
         name,
-        PULL | COMMIT | STATUS | VERSIONS | RESOLVE | LOST | SYNC
+        PULL | COMMIT | PUSH | STATUS | VERSIONS | RESOLVE | LOST | SYNC
     )
 }
 
@@ -103,6 +105,42 @@ pub fn render_pull(r: &PullReport) -> String {
     out
 }
 
+/// 目的：把 work_push 的结果说成人能读的几行。
+/// 返回：`None` = 与主线一致（没有可推送内容）；`Some` = 主线新提交号与改动清单。
+pub fn render_push(r: &PushReport) -> String {
+    let Some(id) = r.commit else {
+        return "没有可推送的内容：你的工作线与主线一致。\n先 work_commit 把沙箱改动记进工作线，再 work_push 发布。"
+            .to_string();
+    };
+    let mut adds = Vec::new();
+    let mut mods = Vec::new();
+    let mut dels = Vec::new();
+    for c in &r.changes {
+        match c.kind {
+            ChangeKind::Add => adds.push(c.path.clone()),
+            ChangeKind::Modify => mods.push(c.path.clone()),
+            ChangeKind::Delete => dels.push(c.path.clone()),
+        }
+    }
+    let mut out = format!(
+        "推送完成：主线提交 {}（新增 {}，修改 {}，删除 {}）。共享区已更新到这个版本，沙箱里没被本地改过的路径也跟着快进了。",
+        id,
+        adds.len(),
+        mods.len(),
+        dels.len()
+    );
+    if !adds.is_empty() {
+        out.push_str(&format!("\n新增：{}", paths(&adds)));
+    }
+    if !mods.is_empty() {
+        out.push_str(&format!("\n修改：{}", paths(&mods)));
+    }
+    if !dels.is_empty() {
+        out.push_str(&format!("\n删除：{}", paths(&dels)));
+    }
+    out
+}
+
 /// 目的：把 work_commit 的结果说成人能读的几行。
 /// 返回：提交 id 与新增 / 修改 / 删除 各若干行。
 pub fn render_commit(r: &CommitReport) -> String {
@@ -117,7 +155,7 @@ pub fn render_commit(r: &CommitReport) -> String {
         }
     }
     let mut out = format!(
-        "提交 {} 已落盘：新增 {}，修改 {}，删除 {}。",
+        "提交 {} 已记进你的工作线（共享区还没变）：新增 {}，修改 {}，删除 {}。",
         r.id,
         adds.len(),
         mods.len(),
@@ -130,14 +168,12 @@ pub fn render_commit(r: &CommitReport) -> String {
         out.push_str(&format!("\n修改：{}", paths(&mods)));
     }
     if !dels.is_empty() {
-        out.push_str(&format!(
-            "\n删除（只删共享区；沙箱副本未动）：{}",
-            paths(&dels)
-        ));
+        out.push_str(&format!("\n删除（推送后才从共享区去掉）：{}", paths(&dels)));
         out.push_str(
             "\n沙箱里的同名文件如果还在，用 delete 工具清理；工作副本的删除不会自动跟着提交。",
         );
     }
+    out.push_str("\n要让它出现在共享区给别的 agent 看，用 work_push 推送（主线落一条提交）。");
     out
 }
 

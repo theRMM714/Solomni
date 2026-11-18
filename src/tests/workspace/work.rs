@@ -93,6 +93,8 @@ pub(crate) fn work_stale_reads_judges_by_content_not_by_clock() {
         .unwrap();
     ws.work_commit("w", "a", "s", &commit_req(&[], &["gone.md"], "删", 6))
         .unwrap();
+    // 工作线提交只是本地提交：共享区要到推送后才真的没有这个文件。
+    push(&ws, "w", "a", "删", 6, 6).unwrap();
     assert_eq!(
         ws.work_stale_reads(
             "w",
@@ -131,29 +133,31 @@ pub(crate) fn work_commit_reports_conflicts_and_restore_returns_a_commit_point()
         vec!["note.md"]
     );
 
-    // a 改并提交 → 提交点 2。
+    // a 改、提交、推送 → 共享区到 v2。
     let sb_a = sandbox_of(&ws, "w", "a");
     store.write_under(&sb_a, "note.md", b"v2").unwrap();
-    let rep = ws
-        .work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "a 改", 2))
+    ws.work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "a 改", 2))
         .expect("a 的提交");
-    assert_eq!(rep.id, 2);
+    let published = push(&ws, "w", "a", "a 改", 2, 2)
+        .expect("a 的推送")
+        .commit
+        .expect("推送要落主线提交");
 
-    // b 基于 v1 改写为 v3：上游已变 → 冲突，整个提交被拒。
+    // b 基于 v1 改写为 v3：本地提交照收（还没碰共享区），推送时三方比较才发现冲突。
     let sb_b = sandbox_of(&ws, "w", "b");
     store.write_under(&sb_b, "note.md", b"v3").unwrap();
-    let err = ws
-        .work_commit("w", "b", "w--b", &commit_req(&["note.md"], &[], "b 改", 3))
-        .unwrap_err();
+    ws.work_commit("w", "b", "w--b", &commit_req(&["note.md"], &[], "b 改", 3))
+        .expect("本地提交不看别人");
+    let err = push(&ws, "w", "b", "b 改", 3, 3).unwrap_err();
     assert!(
         err.contains("note.md") && err.contains("冲突"),
         "要逐条点名冲突：{}",
         err
     );
-    // 冲突没有留下半个提交：head 仍在 2。
+    // 冲突没有动共享区：head 仍是 a 推送的那个点。
     assert_eq!(
         store.head(&ws.roots("w", &[]).unwrap().store).unwrap(),
-        Some(2)
+        Some(published)
     );
 
     // 还原到提交点 1：共享区内容回到 v1。
@@ -250,18 +254,26 @@ pub(crate) fn work_rewind_to_materializes_by_line_anchor_and_discards_later_comm
     let shared = shared_of(&ws, "w");
     let root = ws.roots("w", &[]).unwrap().store;
 
-    // 第 1 行：a 提交 v1。
+    // 第 1 行：a 提交 v1 并推送，主线落一个锚在第 1 行的提交。
     store.write_under(&sb, "note.md", b"v1").unwrap();
     let mut r1 = commit_req(&["note.md"], &[], "v1", 1);
     r1.line = 1;
-    let id1 = ws.work_commit("w", "a", "w--a", &r1).unwrap().id;
+    ws.work_commit("w", "a", "w--a", &r1).unwrap();
+    let id1 = push(&ws, "w", "a", "v1", 1, 1)
+        .unwrap()
+        .commit
+        .expect("推送要落主线提交");
 
-    // 第 3 行：a 再提交 v3。
+    // 第 3 行：a 再提交 v3 并推送。
     store.write_under(&sb, "note.md", b"v3").unwrap();
     let mut r3 = commit_req(&["note.md"], &[], "v3", 3);
     r3.line = 3;
-    let id3 = ws.work_commit("w", "a", "w--a", &r3).unwrap().id;
-    assert_eq!((id1, id3), (1, 2));
+    ws.work_commit("w", "a", "w--a", &r3).unwrap();
+    let id3 = push(&ws, "w", "a", "v3", 3, 3)
+        .unwrap()
+        .commit
+        .expect("推送要落主线提交");
+    assert!(id3 > id1);
 
     // 回档到第 1 行（保留行 = 1）：只保留锚 ≤ 1 的提交 → v1。
     let mut keep = std::collections::BTreeMap::new();
@@ -322,20 +334,23 @@ pub(crate) fn work_rewind_to_ignores_commits_off_the_current_head() {
     store.write_under(&sb, "a.txt", b"one").unwrap();
     let mut r1 = commit_req(&["a.txt"], &[], "一", 1);
     r1.line = 1;
-    let id1 = ws.work_commit("w", "a", "w--a", &r1).unwrap().id;
+    ws.work_commit("w", "a", "w--a", &r1).unwrap();
+    let id1 = push(&ws, "w", "a", "一", 1, 1).unwrap().commit.unwrap();
 
     store.write_under(&sb, "a.txt", b"two").unwrap();
     let mut r2 = commit_req(&["a.txt"], &[], "二", 2);
     r2.line = 3;
-    let id2 = ws.work_commit("w", "a", "w--a", &r2).unwrap().id;
+    ws.work_commit("w", "a", "w--a", &r2).unwrap();
+    let id2 = push(&ws, "w", "a", "二", 2, 3).unwrap().commit.unwrap();
 
-    // 回到 id1，再从当前线继续提交（先拉齐沙箱，否则会被三方比较判冲突）。
+    // 回到 id1，再从当前线继续提交、推送：id2 就离开了当前线。
     ws.work_restore("w", id1).unwrap();
     ws.work_pull("w", "a", &["a.txt".to_string()]).unwrap();
     store.write_under(&sb, "a.txt", b"three").unwrap();
     let mut r3 = commit_req(&["a.txt"], &[], "三", 3);
     r3.line = 5;
-    let id3 = ws.work_commit("w", "a", "w--a", &r3).unwrap().id;
+    ws.work_commit("w", "a", "w--a", &r3).unwrap();
+    let id3 = push(&ws, "w", "a", "三", 3, 5).unwrap().commit.unwrap();
 
     // 保留行 4：id2 的锚 3 会通过，但它已离开当前线；当前线上 id1(1) 通过、id3(5) 不过。
     let mut keep = std::collections::BTreeMap::new();
@@ -483,6 +498,7 @@ pub(crate) fn work_delete_is_explicit_in_the_commit_request() {
     ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
     ws.work_pull("w", "a", &["note.md".to_string()]).unwrap();
 
+    // 本地提交只记「我要删」；共享区要到推送后才真的没有它。
     let rep = ws
         .work_commit("w", "a", "w--a", &commit_req(&[], &["note.md"], "删掉", 2))
         .unwrap();
@@ -491,6 +507,8 @@ pub(crate) fn work_delete_is_explicit_in_the_commit_request() {
         rep.changes[0].kind,
         crate::capabilities::workspace::api::ChangeKind::Delete
     );
+    assert!(ws.work_has("w", "note.md"), "没推送之前共享区里还在");
+    push(&ws, "w", "a", "删掉", 2, 2).unwrap();
     let st = ws.work_status("w", "a", &[]).unwrap();
     assert!(!st.tree.contains(&"note.md".to_string()));
 }
@@ -585,9 +603,10 @@ pub(crate) fn work_media_conflict_requires_explicit_side() {
     store.write_under(&sb_b, "clip.mp4", &[4, 5, 6]).unwrap();
     ws.work_commit("w", "a", "w--a", &commit_req(&["clip.mp4"], &[], "a", 2))
         .unwrap();
-    let err = ws
-        .work_commit("w", "b", "w--b", &commit_req(&["clip.mp4"], &[], "b", 3))
-        .unwrap_err();
+    push(&ws, "w", "a", "a", 2, 2).unwrap();
+    ws.work_commit("w", "b", "w--b", &commit_req(&["clip.mp4"], &[], "b", 3))
+        .expect("本地提交不看别人");
+    let err = push(&ws, "w", "b", "b", 3, 3).unwrap_err();
     assert!(err.contains("clip.mp4") && err.contains("冲突"), "{}", err);
 
     let v = ws.work_versions("w", "b", "clip.mp4").unwrap();
@@ -716,12 +735,62 @@ pub(crate) fn work_commit_auto_saves_the_sandbox_without_touching_the_shared_are
         "存档提交带整棵树，回档才铺得出沙箱快照"
     );
 
-    // 显式提交才发布：这时主线才前进，共享区才出现这个文件。
+    // 显式提交只进工作线；推送之后主线才前进，共享区才出现这个文件。
     ws.work_commit("w", "a", "w--a", &commit_req(&["draft.md"], &[], "发布", 3))
         .unwrap();
+    assert!(
+        store.stat_under(&shared, "draft.md").unwrap().is_none(),
+        "工作线提交也不写共享区"
+    );
+    push(&ws, "w", "a", "发布", 3, 3).unwrap();
     assert!(
         store.stat_under(&shared, "draft.md").unwrap().is_some(),
         "发布才写共享区"
     );
     assert!(store.head(&sd).unwrap().unwrap() > head_before.unwrap());
+}
+/// 目的：推送的合并承诺——本地多条提交在主线只落一条，推送后工作线快进，沙箱里没被本地改过的路径一起前进。
+/// 约束：沙箱里没提交的改动不随推送前进；主线历史只多一条发布提交。
+#[test]
+pub(crate) fn work_push_squashes_local_commits_and_fast_forwards_the_sandbox() {
+    use crate::capabilities::workspace::ports::WorkStore;
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    let base = ws.work_commit_user("w", "base.md", b"b", 1, 0).unwrap();
+    let sd = ws.roots("w", &[]).unwrap().store;
+
+    let sb = sandbox_of(&ws, "w", "a");
+    store.write_under(&sb, "one.md", b"1").unwrap();
+    ws.work_commit("w", "a", "w--a", &commit_req(&["one.md"], &[], "一", 2))
+        .unwrap();
+    store.write_under(&sb, "two.md", b"2").unwrap();
+    ws.work_commit("w", "a", "w--a", &commit_req(&["two.md"], &[], "二", 3))
+        .unwrap();
+    store.write_under(&sb, "dirty.md", b"dirty").unwrap();
+
+    let rep = push(&ws, "w", "a", "发布两个文件", 4, 4).unwrap();
+    let published = rep.commit.expect("推送要落主线提交");
+    assert_eq!(
+        rep.changes.len(),
+        2,
+        "推送报告只列它带上去的路径：{:?}",
+        rep.changes
+    );
+    let c = store.read_commit(&sd, published).unwrap().unwrap();
+    assert_eq!(c.parent, Some(base), "主线只在发布点之后加一条提交");
+    let tree = c.tree.clone().expect("发布提交带整棵树");
+    assert!(tree.contains_key("one.md") && tree.contains_key("two.md"));
+    assert!(!tree.contains_key("dirty.md"), "没提交的改动不上主线");
+    assert_eq!(
+        ws.work_head("w").unwrap(),
+        Some(published),
+        "推送后工作线快进到发布点，下次推送才不会把主线内容当成删除"
+    );
+
+    // 沙箱两个已发布的文件都还在；未提交的 dirty.md 原样保留。
+    assert_eq!(
+        store.read_under(&sb, "one.md").unwrap().as_deref(),
+        Some(&b"1"[..])
+    );
+    assert!(store.stat_under(&sb, "dirty.md").unwrap().is_some());
 }

@@ -1,10 +1,12 @@
-//! 目的：工作区的提交用例——把沙箱改写落成提交、落整棵树或增量、维护两条线各自的头与归档标记。
-//! 管：commit_locked 与 work_commit / work_commit_auto / work_commit_user 三个用例、`refs/agents/<agent>`（发布线）与 `refs/agents/<agent>/saves`（存档线）的读写、归档标记的写入与修剪。
+//! 目的：工作区的提交用例——把沙箱改写落成提交、落整棵树或增量、维护三条线各自的头、推送与归档标记。
+//! 管：commit_locked 与 work_commit / work_commit_auto / work_commit_user / work_push 四个用例、`refs/agents/<agent>`（工作线）与 `refs/agents/<agent>/saves`（存档线）的读写、归档标记的写入与修剪。
 //! 不管：三方比较的纯规则（domain::workstore）、目录布局与共享区落盘（ports::WorkStore）。
 //! 联动：service.rs 提供锁、工作根与树物化；sync 与 lifecycle 会调用本文件的提交与锚点方法。
 
 use super::*;
-use crate::capabilities::workspace::api::{Change, ChangeKind, CommitReport, CommitRequest};
+use crate::capabilities::workspace::api::{
+    Change, ChangeKind, CommitReport, CommitRequest, PushReport, PushRequest,
+};
 
 impl WorkspaceService {
     /// 目的：提交的唯一实现（调用方已持 gate、shared、store 锁并已恢复事务）。
@@ -33,18 +35,19 @@ impl WorkspaceService {
         let sandbox = sandbox.to_path_buf();
         let (parent, tree) = match line {
             CommitLine::Main => self.head_tree(&store)?,
+            CommitLine::Work => self.work_tree(&store, agent)?,
             CommitLine::Save => self.save_tree(&store, agent)?,
         };
         let index: Index = match line {
             CommitLine::Main => self.store.read_index(&store, agent)?,
-            // 存档线的基线是它自己上一次快照：只记「沙箱相对上次存档改了什么」。
-            CommitLine::Save => tree.clone(),
+            // 工作线与存档线的基线都是它自己头上那一版：本地提交不做准入比较，只按点名路径落改动。
+            CommitLine::Work | CommitLine::Save => tree.clone(),
         };
         // 沙箱里的文件全集（paths 里的文件夹据此展开）。
         let sandbox_files: BTreeSet<String> = self.store.list(&sandbox)?.into_iter().collect();
         // 存档线记的是**整棵沙箱快照**：回档要把沙箱铺回它当时的样子，只记调用方点名的路径会漏。
         let (want, missing) = match line {
-            CommitLine::Main => expand_paths(&req.paths, &sandbox_files),
+            CommitLine::Main | CommitLine::Work => expand_paths(&req.paths, &sandbox_files),
             CommitLine::Save => (sandbox_files.iter().cloned().collect(), Vec::new()),
         };
         if !missing.is_empty() {
@@ -73,7 +76,7 @@ impl WorkspaceService {
         if !oversize.is_empty() {
             return Err(render_oversize(&oversize, self.max_asset_bytes));
         }
-        if line == CommitLine::Main {
+        if line != CommitLine::Save {
             for raw in &req.deletes {
                 let rel = clean_rel(raw)?;
                 if locals.contains_key(&rel) {
@@ -82,9 +85,30 @@ impl WorkspaceService {
                 locals.insert(rel, None);
             }
         }
-        if locals.is_empty() {
+        // 工作线上「删掉一个拉过、却没在自己的线上提交过」的路径：我的树里本来就没有它，plan_commit 只会说
+        // 「已经没有了」。补一条按拉取基线指纹的删除记录，推送时的三方比较才认得出这条删除。
+        let mut carried: Vec<Change> = Vec::new();
+        if line == CommitLine::Work {
+            let pulled = self.store.read_index(&store, agent)?;
+            for raw in &req.deletes {
+                let rel = clean_rel(raw)?;
+                if tree.contains_key(&rel) || locals.get(&rel).is_some_and(Option::is_some) {
+                    continue;
+                }
+                if let Some(hash) = pulled.get(&rel) {
+                    locals.remove(&rel);
+                    carried.push(Change {
+                        path: rel,
+                        kind: ChangeKind::Delete,
+                        hash: hash.clone(),
+                    });
+                }
+            }
+        }
+        if locals.is_empty() && carried.is_empty() {
             return Err("没有可提交的改动：paths 与 deletes 都是空的".to_string());
         }
+        // 外部工作区的磁盘是真相：写共享区前要核对外部改动（存档线不碰共享区）。
         if line == CommitLine::Main && self.dirs.is_external(work) {
             self.reject_external_changes(&shared, &tree, &locals)?;
         }
@@ -92,10 +116,12 @@ impl WorkspaceService {
             Ok(p) => p,
             Err(conflicts) => return Err(render_conflicts(&conflicts)),
         };
-        if plan.changes.is_empty() {
+        let mut changes = plan.changes;
+        if changes.is_empty() && carried.is_empty() {
             return Err(render_unchanged(&plan.unchanged));
         }
-        let changes = plan.changes;
+        changes.extend(carried);
+        changes.sort_by(|a, b| a.path.cmp(&b.path));
         // 先落对象，再写事务日志；主副本与元数据由事务统一应用/恢复。
         let id = self.reserve_id(&store)?;
         for ch in &changes {
@@ -127,8 +153,8 @@ impl WorkspaceService {
                     index: new_index,
                 })
             }
-            // 存档线不改「从主副本拉过什么」的基线：它只记沙箱自己的快照。
-            CommitLine::Save => None,
+            // 工作线与存档线都不改「从主副本拉过什么」的基线：本地提交与快照不等于拉取。
+            CommitLine::Work | CommitLine::Save => None,
         };
         let depth = self.next_depth(&store, parent)?;
         let commit = Commit {
@@ -143,6 +169,7 @@ impl WorkspaceService {
             tree: deltas_tree(&tree, &changes, depth),
             depth,
             source,
+            line,
             anchor,
         };
         let pending = Pending::Commit {
@@ -212,6 +239,49 @@ impl WorkspaceService {
             return Ok((None, Tree::new()));
         };
         Ok((Some(id), Self::tree_of(self.store.as_ref(), store, id)?))
+    }
+
+    /// 目的：该 agent 工作线的头与整棵树（空线 = `(None, 空树)`）。
+    fn work_tree(&self, store: &Path, agent: &str) -> Result<(Option<u64>, Tree), String> {
+        let Some(r) = self.store.read_ref(store, &Self::work_ref(agent))? else {
+            return Ok((None, Tree::new()));
+        };
+        match r.target {
+            Some(id) => Ok((Some(id), Self::tree_of(self.store.as_ref(), store, id)?)),
+            None => Ok((None, Tree::new())),
+        }
+    }
+
+    /// 目的：推送成功后把沙箱里**没被本地改过**的路径快进到合并结果（与 git 的 checkout 同一语义）。
+    /// 约束：沙箱与我的工作线头不一致的路径有未提交改动，一律不动，如实留给调用方。
+    fn fast_forward_sandbox(
+        &self,
+        store: &Path,
+        sandbox: &Path,
+        mine: &Tree,
+        merged: &Tree,
+    ) -> Result<(), String> {
+        for (rel, hash) in merged {
+            let local = self.store.scan_under(sandbox, rel, None)?.map(|v| v.hash);
+            if local.as_deref() == Some(hash.as_str()) {
+                continue;
+            }
+            if local.as_deref() != mine.get(rel).map(String::as_str) {
+                continue;
+            }
+            self.store.copy_object_to_under(store, hash, sandbox, rel)?;
+        }
+        for (rel, hash) in mine {
+            if merged.contains_key(rel) {
+                continue;
+            }
+            let local = self.store.scan_under(sandbox, rel, None)?.map(|v| v.hash);
+            if local.as_deref() != Some(hash.as_str()) {
+                continue;
+            }
+            self.store.remove_under(sandbox, rel)?;
+        }
+        Ok(())
     }
 
     /// 目的：存档线推进到一条新的存档提交（只前进，不倒推——倒推会把沙箱快照接回旧内容）。
@@ -436,8 +506,108 @@ impl WorkspaceService {
             req,
             Source::Tool,
             Some(anchor),
-            CommitLine::Main,
+            CommitLine::Work,
         )
+    }
+
+    /// 目的：把工作线上已提交的改动推送进主线：三方合并 → 一条 squash 提交 → 物化共享区 → 两条线快进。
+    /// 约束：冲突整次拒绝（不自动合并）；成功后沙箱里没被本地改过的路径一起快进到合并结果。
+    pub(super) fn work_push(
+        &self,
+        work: &str,
+        agent: &str,
+        session: &str,
+        req: &PushRequest,
+    ) -> Result<PushReport, String> {
+        let msg = req.message.trim();
+        if msg.is_empty() {
+            return Err("提交说明不能为空（推送要一条主线提交的说明）".to_string());
+        }
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let _shared = self.dirs.lock_shared(work)?;
+        let (shared, store, sandbox) = self.agent_roots(work, agent)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)?;
+        let (head, theirs) = self.head_tree(&store)?;
+        let (_, mine) = self.work_tree(&store, agent)?;
+        // 基线 = 我拉取过的主线内容：没拉过的路径基线为空，合并时按「我新增」处理。
+        let base: Tree = self.store.read_index(&store, agent)?;
+        let plan = match plan_merge(&base, &mine, &theirs) {
+            Ok(p) => p,
+            Err(conflicts) => return Err(render_push_conflicts(&conflicts)),
+        };
+        if plan.changes.is_empty() {
+            return Ok(PushReport {
+                commit: None,
+                changes: Vec::new(),
+            });
+        }
+        let mut locals: BTreeMap<String, Option<String>> = BTreeMap::new();
+        for ch in &plan.changes {
+            let value = match ch.kind {
+                ChangeKind::Delete => None,
+                ChangeKind::Add | ChangeKind::Modify => Some(ch.hash.clone()),
+            };
+            locals.insert(ch.path.clone(), value);
+        }
+        // 外部工作区的磁盘是真相：合并要写共享区，先核对外部改动。
+        if self.dirs.is_external(work) {
+            self.reject_external_changes(&shared, &theirs, &locals)?;
+        }
+        // 对象：工作线提交时已把内容灌进版本库，这里只核对对象还在（缺了就是版本库损坏）。
+        for ch in &plan.changes {
+            if matches!(ch.kind, ChangeKind::Add | ChangeKind::Modify) {
+                self.store.stat_object(&store, &ch.hash).map_err(|e| {
+                    format!("推送被拒：{} 的内容对象不在版本库里（{}）", ch.path, e)
+                })?;
+            }
+        }
+        let id = self.reserve_id(&store)?;
+        let commit = Commit {
+            id,
+            parent: head,
+            base: head.unwrap_or(0),
+            author: agent.to_string(),
+            session: session.to_string(),
+            time: req.time,
+            message: msg.to_string(),
+            changes: plan.changes.clone(),
+            // 主线提交直接带整棵树：推送次数少、回档要按它铺共享区，不必回溯。
+            tree: Some(plan.tree.clone()),
+            depth: 0,
+            source: Source::Tool,
+            line: CommitLine::Main,
+            anchor: Some(CommitAnchor {
+                agent: agent.to_string(),
+                session: session.to_string(),
+                line: req.line,
+            }),
+        };
+        let index = PendingIndex {
+            agent: agent.to_string(),
+            index: plan.tree.clone(),
+        };
+        let pending = Pending::Commit {
+            commit: Box::new(commit.clone()),
+            index: Some(index.clone()),
+            line: CommitLine::Main,
+        };
+        self.store.write_pending(&store, &pending)?;
+        let result = self.apply_commit_pending(
+            work,
+            &shared,
+            &store,
+            &commit,
+            Some(&index),
+            CommitLine::Main,
+        );
+        self.settle(work, &shared, &store, result)?;
+        self.fast_forward_sandbox(&store, &sandbox, &mine, &plan.tree)?;
+        Ok(PushReport {
+            commit: Some(id),
+            changes: plan.changes,
+        })
     }
 
     /// 目的：把沙箱这次的改写记进该 agent 的存档线（`refs/agents/<agent>/saves`），共享区一个字都不动。
@@ -530,6 +700,7 @@ impl WorkspaceService {
             tree: deltas_tree(&tree, &changes, depth),
             depth,
             source: Source::User,
+            line: CommitLine::Main,
             anchor: Some(CommitAnchor {
                 agent: String::new(),
                 session: String::new(),

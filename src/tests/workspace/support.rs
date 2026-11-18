@@ -41,6 +41,36 @@ pub(crate) fn resolve_req(
     }
 }
 
+/// 目的：推送请求——`line` 是这条推送的锚行，回档按它选点。
+pub(crate) fn push_req(
+    message: &str,
+    time: i64,
+    line: u64,
+) -> crate::capabilities::workspace::api::PushRequest {
+    crate::capabilities::workspace::api::PushRequest {
+        message: message.to_string(),
+        time,
+        line,
+    }
+}
+
+/// 目的：把 agent 的工作线推送进共享区（三方合并 + 主线落一条提交）；"提交即发布"的用例用它收口。
+pub(crate) fn push(
+    ws: &WorkFace,
+    work: &str,
+    agent: &str,
+    message: &str,
+    time: i64,
+    line: u64,
+) -> Result<crate::capabilities::workspace::api::PushReport, String> {
+    ws.work_push(
+        work,
+        agent,
+        &format!("w--{}", agent),
+        &push_req(message, time, line),
+    )
+}
+
 /// 目的：take=local 的请求要带当前主副本提交 id（并发窗口守卫）；测试统一从 work_head 取。
 pub(crate) fn resolve_local_req(
     ws: &WorkFace,

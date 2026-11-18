@@ -11,7 +11,7 @@ Solomni 是一个**跑在自己机器上的 agent 运行环境（AgentOS）**：
   适配只落在模块自己那边，不引 SDK、不动本仓代码结构。**契约之外双方互不依赖**：拿掉本产品，模块照原样跑；移走模块，产品照常运行。
   同一个能力，人走界面用、agent 走契约用，共用同一份声明（契约见 [MODULE_SPEC.md](MODULE_SPEC.md)）。
 - **多个 agent 一起干一件活。** 每个 agent 有自己的沙箱（`session/<工作名>/<agent 实例名>/`），它同时是共享区的**工作副本**；
-  共享区 `work/` 是**主副本、对 agent 只读**。要用的内容先 `work_pull` 拉进沙箱，改完 `work_commit` 提交回共享区。
+  共享区 `work/` 是**主副本、对 agent 只读**。要用的内容先 `work_pull` 拉进沙箱，改完 `work_commit` 记进自己的工作线、`work_push` 发布到共享区。
   提交按**文件级三方比较**判定：冲突整个拒绝并逐条点名，不会静默覆盖；冲突后用 `work_versions` 看三方、`work_resolve` 显式选边——文本可人工合并后用 `take=local`，图片 / 视频 / 二进制只能选边，不做自动合并。
   文本、图片、视频与其它二进制都按字节处理；任一提交点都能还原。
   跨 agent 流动只有共享区与进入上下文的转录两条明路；"谁只写哪一块"由**会话权限**落实（见 [docs/permission/README.md](docs/permission/README.md)）。
@@ -33,7 +33,7 @@ Solomni 是一个**跑在自己机器上的 agent 运行环境（AgentOS）**：
 
 - **三种形态**：单 agent / 小组协作 / 代理（决定权整块交给核心）。形态、流程与用户旅程见 [PRODUCT.md](PRODUCT.md)。
 - **模块即插即用**：`modules/` 里放一个带合法 `module.yaml` 的文件夹就出现，移走就消失——不注册、不编译、不重启（契约见 [MODULE_SPEC.md](MODULE_SPEC.md)）。
-- **会话与历史**：一个工作一个目录 `session/<工作名>/`；回档 / 留档 / 删除 / 恢复、转录回放、上下文压缩、共享区版本化（`work_pull` / `work_commit` / `work_status` / `work_versions` / `work_resolve` / `work_lost`），以及用户侧的提交历史 / 非破坏性回滚。
+- **会话与历史**：一个工作一个目录 `session/<工作名>/`；回档 / 留档 / 删除 / 恢复、转录回放、上下文压缩、共享区版本化（`work_pull` / `work_commit` / `work_push` / `work_status` / `work_versions` / `work_resolve` / `work_lost`），以及用户侧的提交历史 / 非破坏性回滚。
 - **三重隔离**：内置文件工具越界拒绝（shell 的边界是围栏）→ 工具进程 / shell 走守门进程（环境白名单 / 进程树 / 超时或取消杀整棵树）→ 平台围栏（Windows AppContainer、Linux Landlock、macOS seatbelt）；装不上就如实报告能力等级。
 - **两档执行**：本机档（默认）与虚拟机档（模块工具在 guest 里跑）。虚拟机档按宿主 × 引擎 × guest × 通道 × 共享五轴可插。
 - 组合、前提与缺口细节见 [docs/vm/README.md](docs/vm/README.md)：Windows 缺 `smbd` 时虚拟机档不可用（先补齐，不降级），copy 只是开发/应急通道、不参与用户档；虚拟机档在 Linux / Windows 上不可用时，网页与命令行按同一份清单补齐依赖（见下）；运行包契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)。
@@ -114,7 +114,7 @@ tools:                       # 可选：模块工具表
 ```
 
 - 模块工具只有一条调用约定：**启动命令 + 参数 + stdin/stdout 回执**；长驻 MCP 服务写进 `services`。
-- 工具进程可达该 agent 的私有沙箱与它使用的模块目录；共享区主副本要先 `work_pull` / `work_commit`（冲突用 `work_versions` / `work_resolve`）。模块目录（含 `userdata/`）对 agent 的文件工具只读：agent 只有模块使用权，模块数据由模块自己的工具 / 服务进程维护。
+- 工具进程可达该 agent 的私有沙箱与它使用的模块目录；共享区主副本要先 `work_pull`，发布用 `work_commit` + `work_push`（冲突用 `work_versions` / `work_resolve`）。模块目录（含 `userdata/`）对 agent 的文件工具只读：agent 只有模块使用权，模块数据由模块自己的工具 / 服务进程维护。
 - `shell` 默认 `scope=sandbox`：只碰私有沙箱 + 只读基础 / 项目工具链；要读共享区 / 模块目录 / 主机只读根或联网用 `scope=external`，按会话档位 ask / allow。共享区永远只读，模块 userdata 不可写，不注入模块 secrets。
 - 能跑通就是合法模块；跑不通时核心如实报错，不猜、不兜底。
 

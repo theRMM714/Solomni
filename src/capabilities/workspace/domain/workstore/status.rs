@@ -135,6 +135,24 @@ pub struct CommitReport {
     pub changes: Vec<Change>,
 }
 
+/// 目的：work_push 的请求：squash 进主线的那条提交的说明与转录行。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PushRequest {
+    pub message: String,
+    /// 目的：提交时间（由调用方给：本能力不持时钟）。
+    pub time: i64,
+    /// 目的：提交锚的行号（这一席下一条转录行的 id）。
+    pub line: u64,
+}
+
+/// 目的：work_push 的结果：`commit` 为空 = 与主线一致（没有可推送的内容）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PushReport {
+    pub commit: Option<u64>,
+    /// 目的：这次落到主线的改动。
+    pub changes: Vec<Change>,
+}
+
 /// 目的：`work_sync` 的结果——把工作区当前内容采纳成一条 author=external 的提交。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SyncReport {

@@ -26,14 +26,14 @@
 - **Reach（能到哪）**
   - private：自己的私有沙箱；
   - shared-read：读共享区主副本；
-  - shared-write：写共享区（只有 work_commit 与写工具后的自动提交这条路径使用，外部工具进程永远不直接写主副本）；
+  - shared-write：写共享区（只有 work_push 使用；`work_commit` 只写自己的工作线，写工具后的自动提交只进存档线，外部工具进程永远不直接写主副本）；
   - module-read：读成员模块目录；
   - module-write：写模块自己的 userdata（只给模块工具进程）；
   - host-read：用户显式授权的主机只读根；
   - network：出站网络。
 - **Effect（这次操作属于哪类）**
   - read：read / list / search / work_pull / work_status / work_versions；
-  - write：write / edit / patch / delete / work_commit / work_resolve / work_lost 的恢复；
+  - write：write / edit / patch / delete / work_commit / work_push / work_resolve / work_lost 的恢复；
   - exec：模块工具 / shell；
   - none：不碰文件、不需要权限闸门的动作。
 - **Decision（怎么处置）**
@@ -51,7 +51,7 @@
 | external | 外部可达（逐次确认） | workspace + host-read + network | allow | allow | allow | ask |
 | all_reach | 全可达（自动放行） | 同 external | allow | allow | allow | allow |
 
-- shared-write 只给 work_commit（含写工具落地后的自动提交）；它不会把共享区放进任何外部进程的 rw。
+- shared-write 只给 work_push（连同 `work_commit` 的发布前自检）；写工具落地后的自动提交只进存档线，不需要它。它不会把共享区放进任何外部进程的 rw。
 - module-write 只给模块工具写自己的 userdata；shell 不声明它，所以全可达也写不进模块 userdata。
 - 私有沙箱不受共享区路径范围约束，但 profile 的 write decision 仍然作用于它（仅可查看档禁写）。
 - 最高档按 reach 命名，不叫「完全权限」；它仍受全局 network / host_read_roots / deny / 围栏强制等级上限。
@@ -86,7 +86,7 @@
 - 根会话持有 ceiling：profile、reach 子集、共享区范围、逐工具决定。
 - 每个子会话只有一层 narrowing；effective = 全局默认 ∩ 根 ceiling ∩ 沿祖先链的每一层 narrowing。
 - 子只能换更低档，reach / 共享区范围 / decision 只能更窄更严；要放宽必须改根 ceiling（`src/capabilities/permission/domain/permission.rs`）。
-- 路径范围只作用于共享区：work_pull / work_commit / 读共享；私有沙箱永远不受它的路径范围限制。
+- 路径范围只作用于共享区：work_pull / work_commit / work_push / 读共享；私有沙箱永远不受它的路径范围限制。
 - 共享区范围用三态：all / none / 路径数组。字段 None = 不覆盖，Some(none) = 显式无权限，两者必须分开（`src/capabilities/permission/domain/permission.rs`）。
 - 父级编辑只更新 ceiling，再与子 narrowing 求交，不覆盖子收窄；父级收窄到无交集时子会话无权限，并如实提示。
 - 档位切换是根级动作：整棵 work tree 有会话在生成时拒绝（先停再切）；切换在下一次权限判定生效，已经在执行的调用不追溯。

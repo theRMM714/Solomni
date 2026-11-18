@@ -6,9 +6,9 @@
 use super::*;
 use crate::capabilities::workspace::api::{
     AdoptReport, ArchiveReport, CommitDetail, CommitFileView, CommitReport, CommitRequest,
-    DeleteReport, LostReport, PullReport, ReadQuery, ResolveReport, ResolveRequest,
-    RestoreLostReport, StatusReport, SyncReport, VersionView, WorkFiles, WorkGcReport, WorkLog,
-    WorkRoots, WorkUsage, Workspace,
+    DeleteReport, LostReport, PullReport, PushReport, PushRequest, ReadQuery, ResolveReport,
+    ResolveRequest, RestoreLostReport, StatusReport, SyncReport, VersionView, WorkFiles,
+    WorkGcReport, WorkLog, WorkRoots, WorkUsage, Workspace,
 };
 
 impl Workspace for WorkspaceService {
@@ -48,6 +48,15 @@ impl Workspace for WorkspaceService {
         req: &CommitRequest,
     ) -> Result<CommitReport, String> {
         WorkspaceService::work_commit(self, work, agent, session, req)
+    }
+    fn work_push(
+        &self,
+        work: &str,
+        agent: &str,
+        session: &str,
+        req: &PushRequest,
+    ) -> Result<PushReport, String> {
+        WorkspaceService::work_push(self, work, agent, session, req)
     }
     fn work_commit_auto(
         &self,

@@ -379,6 +379,7 @@ impl WorkspaceService {
             tree: deltas_tree(&tree, &changes, depth),
             depth,
             source: Source::External,
+            line: CommitLine::Main,
             anchor: None,
         };
         let pending = Pending::Commit {

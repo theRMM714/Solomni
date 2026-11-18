@@ -15,9 +15,9 @@ pub use crate::capabilities::workspace::domain::readfact::ReadFact;
 /// 目的：`work_*` 工具的名字、取参与回执拼装——`tools` 与 `turn` 只从这里取，不碰 domain。
 #[allow(unused_imports)]
 pub use crate::capabilities::workspace::domain::work_tools::{
-    COMMIT, LOST, PULL, RESOLVE, STATUS, SYNC, VERSIONS, is_work_tool, render_commit, render_lost,
-    render_pull, render_resolve, render_restore_lost, render_status, render_sync, render_versions,
-    str_arg, str_list,
+    COMMIT, LOST, PULL, PUSH, RESOLVE, STATUS, SYNC, VERSIONS, is_work_tool, render_commit,
+    render_lost, render_pull, render_push, render_resolve, render_restore_lost, render_status,
+    render_sync, render_versions, str_arg, str_list,
 };
 pub use crate::capabilities::workspace::domain::workspace::{
     AreaUsage, Place, Sandbox, Sandboxes, WorkFiles, WorkRoots, WorkUsage, WorkspaceGrant,
@@ -25,9 +25,9 @@ pub use crate::capabilities::workspace::domain::workspace::{
 };
 pub use crate::capabilities::workspace::domain::workstore::{
     Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, LostEntry, LostReport,
-    PullReport, ResolveAction, ResolveEntry, ResolveReport, ResolveRequest, ResolveTake,
-    ResolveWarning, ResolveWarningKind, RestoreLostReport, StatusEntry, StatusReport, SyncReport,
-    VersionView, WorkGcReport,
+    PullReport, PushReport, PushRequest, ResolveAction, ResolveEntry, ResolveReport,
+    ResolveRequest, ResolveTake, ResolveWarning, ResolveWarningKind, RestoreLostReport,
+    StatusEntry, StatusReport, SyncReport, VersionView, WorkGcReport,
 };
 
 /// 目的：外部工作区根的策略（判定 / 创建校验 / 加载复检）——`runtime` 建会话与重开时只经这里取。
@@ -188,6 +188,16 @@ pub trait Workspace: Send + Sync {
         session: &str,
         req: &CommitRequest,
     ) -> Result<CommitReport, String>;
+    /// **推送**：把工作线上已提交的改动三方合并进主线（`base` = 我的拉取基线，`mine` = 我的工作线头，
+    ///   `theirs` = 主线头），干净就把结果 squash 成主线一条提交、物化共享区、把工作线快进过去。
+    /// 约束：不重写工作线历史；冲突整次拒绝并逐条点名（先 work_pull 再合并重推）。
+    fn work_push(
+        &self,
+        work: &str,
+        agent: &str,
+        session: &str,
+        req: &PushRequest,
+    ) -> Result<PushReport, String>;
     /// **存档**：工具写完之后把沙箱改动记进该 agent 的存档线（`refs/agents/<agent>/saves`）。
     /// 约束：这不是发布——共享区与 `refs/main` 一个字都不动，改动要进主线必须再 work_commit；
     ///   存档无准入门槛（不进主线就不会覆盖别人的内容）。`Ok(None)` = 与上次存档一致（不算失败）。

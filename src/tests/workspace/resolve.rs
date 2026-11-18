@@ -21,20 +21,22 @@ pub(crate) fn work_resolve_local_marks_merged_result_and_commit_succeeds() {
     store.write_under(&sb_a, "note.md", b"a-change").unwrap();
     ws.work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "a", 2))
         .unwrap();
+    push(&ws, "w", "a", "a", 2, 2).unwrap();
     store.write_under(&sb_b, "note.md", b"merged").unwrap();
-    assert!(
-        ws.work_commit("w", "b", "w--b", &commit_req(&["note.md"], &[], "b", 3))
-            .is_err()
-    );
+    // 本地提交照收（还没碰共享区），冲突留给推送时的三方比较。
+    ws.work_commit("w", "b", "w--b", &commit_req(&["note.md"], &[], "b", 3))
+        .expect("本地提交不看别人");
 
+    // take=local 把基线推进到主副本那版；工作线里已经是合并结果，直接推送即可。
     let rep = ws
         .work_resolve("w", "b", &resolve_local_req(&ws, "w", &["note.md"]))
         .unwrap();
     assert_eq!(rep.entries[0].action, ResolveAction::Marked);
-    let commit = ws
-        .work_commit("w", "b", "w--b", &commit_req(&["note.md"], &[], "合并", 4))
-        .unwrap();
-    assert_eq!(commit.changes[0].path, "note.md");
+    let pushed = push(&ws, "w", "b", "合并", 4, 4)
+        .unwrap()
+        .commit
+        .expect("推送要落主线提交");
+    assert_eq!(ws.work_head("w").unwrap(), Some(pushed));
     assert_eq!(
         store
             .read_under(&shared_of(&ws, "w"), "note.md")
@@ -66,6 +68,7 @@ pub(crate) fn work_resolve_handles_upstream_deletion_by_side() {
         &commit_req(&[], &["gone.txt", "keep.bin"], "上游删", 3),
     )
     .unwrap();
+    push(&ws, "w", "b", "上游删", 3, 3).unwrap();
     let pulled = ws.work_pull("w", "a", &both).unwrap();
     assert_eq!(pulled.missing, both.to_vec());
 
@@ -93,6 +96,7 @@ pub(crate) fn work_resolve_handles_upstream_deletion_by_side() {
         )
         .unwrap();
     assert_eq!(commit.changes[0].path, "keep.bin");
+    push(&ws, "w", "a", "保留为新增", 4, 4).unwrap();
     assert_eq!(
         store
             .read_under(&shared_of(&ws, "w"), "keep.bin")
@@ -117,6 +121,7 @@ pub(crate) fn work_resolve_local_rejects_unmerged_and_stale_head() {
     store.write_under(&sb_a, "note.md", b"a-change").unwrap();
     ws.work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "a", 2))
         .unwrap();
+    let head = push(&ws, "w", "a", "a", 2, 2).unwrap().commit.unwrap();
 
     // b 本地仍是 v1：take=local 只会用旧内容覆盖上游，整次拒绝。
     let before = store.read_under(&sb_b, "note.md").unwrap();
@@ -125,7 +130,7 @@ pub(crate) fn work_resolve_local_rejects_unmerged_and_stale_head() {
         .unwrap_err();
     assert!(err.contains("没有改过"), "{}", err);
     assert_eq!(store.read_under(&sb_b, "note.md").unwrap(), before);
-    assert_eq!(ws.work_head("w").unwrap(), Some(2));
+    assert_eq!(ws.work_head("w").unwrap(), Some(head));
 
     // 带过期 head 的 resolve 同样拒绝：不能把基于上一版的合并登记到新版。
     let stale = ResolveRequest {
@@ -135,7 +140,7 @@ pub(crate) fn work_resolve_local_rejects_unmerged_and_stale_head() {
     };
     let err = ws.work_resolve("w", "b", &stale).unwrap_err();
     assert!(
-        err.contains("主副本已从提交") && err.contains("2"),
+        err.contains("主副本已从提交") && err.contains(&head.to_string()),
         "{}",
         err
     );
@@ -146,7 +151,7 @@ pub(crate) fn work_resolve_local_rejects_unmerged_and_stale_head() {
         .work_resolve("w", "b", &resolve_local_req(&ws, "w", &["note.md"]))
         .unwrap();
     assert_eq!(rep.entries[0].action, ResolveAction::Marked);
-    assert_eq!(rep.head, Some(2));
+    assert_eq!(rep.head, Some(head));
 }
 
 /// 目的：take=local 在“本地缺失 / 没有基线”时给出显式警告，但仍按既有契约执行。
@@ -197,6 +202,7 @@ pub(crate) fn work_resolve_upstream_backs_up_and_work_lost_restores() {
     store.write_under(&sb_a, "note.md", b"a-change").unwrap();
     ws.work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "a", 2))
         .unwrap();
+    push(&ws, "w", "a", "a", 2, 2).unwrap();
     store.write_under(&sb_b, "note.md", b"b-change").unwrap();
 
     let rep = ws
@@ -275,6 +281,7 @@ pub(crate) fn work_resolve_upstream_backs_up_before_removing_local() {
         &commit_req(&[], &["gone.txt"], "上游删", 2),
     )
     .unwrap();
+    push(&ws, "w", "b", "上游删", 2, 2).unwrap();
 
     let rep = ws
         .work_resolve("w", "a", &resolve_req(&["gone.txt"], ResolveTake::Upstream))
@@ -356,14 +363,15 @@ pub(crate) fn abandoned_commit_pending_is_recovered_by_next_status() {
     ws.work_pull("w", "a", &["note.md".to_string()]).unwrap();
     store.write_under(&sb, "note.md", b"v2").unwrap();
 
+    // 本地提交不碰共享区；会留下 pending 的是推送（它才改主线与主副本）。
+    ws.work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "v2", 2))
+        .unwrap();
     store.fail_times("write_commit", 2);
-    let err = ws
-        .work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "v2", 2))
-        .unwrap_err();
+    let err = push(&ws, "w", "a", "v2", 3, 3).unwrap_err();
     assert!(err.contains("恢复"), "{}", err);
 
     let st = ws.work_status("w", "a", &[]).unwrap();
-    assert_eq!(st.head.unwrap().id, 2, "status 要先恢复 pending 再读 head");
+    assert_eq!(st.head.unwrap().id, 3, "status 要先恢复 pending 再读 head");
     assert_eq!(
         store
             .read_under(&shared_of(&ws, "w"), "note.md")
@@ -373,7 +381,7 @@ pub(crate) fn abandoned_commit_pending_is_recovered_by_next_status() {
     );
     assert_eq!(
         store.head(&ws.roots("w", &[]).unwrap().store).unwrap(),
-        Some(2)
+        Some(3)
     );
 }
 
@@ -388,14 +396,21 @@ pub(crate) fn commit_pending_recovers_immediately_when_the_failure_clears() {
     ws.work_pull("w", "a", &["note.md".to_string()]).unwrap();
     store.write_under(&sb, "note.md", b"v2").unwrap();
 
+    ws.work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "v2", 2))
+        .unwrap();
     store.fail_times("write_commit", 1);
-    let rep = ws
-        .work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "v2", 2))
-        .expect("一次失败后应立即重放成功");
-    assert_eq!(rep.id, 2);
+    let rep = push(&ws, "w", "a", "v2", 3, 3).expect("一次失败后应立即重放成功");
+    assert_eq!(rep.commit, Some(3));
     assert_eq!(
         store.head(&ws.roots("w", &[]).unwrap().store).unwrap(),
-        Some(2)
+        Some(3)
+    );
+    assert_eq!(
+        store
+            .read_under(&shared_of(&ws, "w"), "note.md")
+            .unwrap()
+            .as_deref(),
+        Some(&b"v2"[..])
     );
 }
 
