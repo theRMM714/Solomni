@@ -127,6 +127,7 @@ roles:
 - `systools/tools.yaml` 的 `shell` 是唯一声明 per-call `scope` 的系统工具；它不新建执行机制：host 走 kernel 的 `ProcessRunner`，VM 走 guest helper。
 
 - 参数：`command`（必填）、`scope`（sandbox / external，缺省 sandbox）、`timeout_secs`（缺省 120，最大 600；只约束命令子进程，从启动命令起算——Windows 首次为会话准备围栏（建容器、写 ACL）不计入，可能额外耗时，截止时间在 spawn 之后才起算，见 `src/kernel/detail/process.rs`）。cwd 固定私有沙箱；无交互 stdin / TTY；输出超限由回执预算统一收口（16k：约 4k 开头 + 约 12k 结尾，按完整行取整；单行超长时按字符切，见 `src/capabilities/tools/domain/budget.rs`）；命令上限 8000 字符。
+- **别用 Unix 重定向惯用法**：Windows 宿主的 shell 是 PowerShell，`1>/dev/null` 会把 `/dev/null` 当成路径（实测报 `Could not find a part of the path ...`，其中盘符是视图盘）；丢弃输出写 `| Out-Null` 或 `1>$null` / `2>$null`。POSIX 宿主与 VM guest（`/bin/sh`）照旧可用 `>/dev/null`（围栏基线对该节点例外给写权，见本条末）。
 - **回执形状**（正文与状态行装配见 `src/kernel/domain/receipt.rs`，末行由工具层追加）：正文（stdout；有 stderr 时折成 `[stderr]` 段）/ 空行 / 状态行 / 末行，末行是 `[shell] cwd <本环境写法> · 耗时 <N> 秒`（围栏准备 ≥1 秒时在末尾追加 `（其中围栏准备 <M> 秒）`；`N` 是整次调用墙钟，含围栏准备）：
   - 状态行四种：`[shell] 退出码 N`、`[shell] 超时（N 秒）：工具进程与它拉起的整棵进程树已被终止`、`[shell] 用户停止：工具进程与它拉起的整棵进程树已被终止`、`[shell] 退出码未知（被信号结束）`。
   - 末行恒为 cwd·耗时、上一行恒为状态行：两条都在 = 这次调用真的跑过；都没有 = 没跑（围栏拒绝 / 无租约 / helper 起不来 / 共享同步失败），此时不补尾行（`src/capabilities/tools/domain/shell.rs` 的 `did_run`）。
