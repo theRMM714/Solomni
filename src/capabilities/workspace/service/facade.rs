@@ -91,8 +91,13 @@ impl Workspace for WorkspaceService {
     ) -> Result<AdoptReport, String> {
         WorkspaceService::work_adopt_sandbox(self, work, agent, session, time, line)
     }
-    fn work_stale_reads(&self, work: &str, queries: &[ReadQuery]) -> Result<Vec<bool>, String> {
-        WorkspaceService::work_stale_reads(self, work, queries)
+    fn work_stale_reads(
+        &self,
+        work: &str,
+        agent: &str,
+        queries: &[ReadQuery],
+    ) -> Result<Vec<bool>, String> {
+        WorkspaceService::work_stale_reads(self, work, agent, queries)
     }
     fn work_sync(&self, work: &str, paths: &[String], time: i64) -> Result<SyncReport, String> {
         WorkspaceService::work_sync(self, work, paths, time)

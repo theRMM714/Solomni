@@ -314,7 +314,7 @@ fn read(
             worktree: if matches!(place, Place::Shared) {
                 String::new()
             } else {
-                sb.work_name.clone()
+                sb.agent.clone()
             },
             path: crate::kernel::api::slash(rel),
             from: offset as u64,

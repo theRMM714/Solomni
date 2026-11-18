@@ -19,12 +19,14 @@ pub(crate) fn work_stale_reads_judges_by_content_not_by_clock() {
         blob,
         from,
         to,
+        sandbox: false,
     };
     let old = content_hash(v1);
 
     // 内容与读的时候完全一样：不过期。
     assert_eq!(
-        ws.work_stale_reads("w", &[q(1, 3, old.clone())]).unwrap(),
+        ws.work_stale_reads("w", "a", &[q(1, 3, old.clone())])
+            .unwrap(),
         vec![false]
     );
 
@@ -34,6 +36,7 @@ pub(crate) fn work_stale_reads_judges_by_content_not_by_clock() {
     assert_eq!(
         ws.work_stale_reads(
             "w",
+            "a",
             &[
                 q(1, 2, old.clone()),
                 q(3, 3, old.clone()),
@@ -49,7 +52,8 @@ pub(crate) fn work_stale_reads_judges_by_content_not_by_clock() {
     ws.work_commit_user("w", "note.md", b"zero\na\nb\nC\n", 3, 0)
         .unwrap();
     assert_eq!(
-        ws.work_stale_reads("w", &[q(1, 2, old.clone())]).unwrap(),
+        ws.work_stale_reads("w", "a", &[q(1, 2, old.clone())])
+            .unwrap(),
         vec![false]
     );
 
@@ -58,11 +62,13 @@ pub(crate) fn work_stale_reads_judges_by_content_not_by_clock() {
     assert_eq!(
         ws.work_stale_reads(
             "w",
+            "a",
             &[ReadQuery {
                 path: "gone.md".to_string(),
                 blob: content_hash(b"x\n"),
                 from: 1,
                 to: 1,
+                sandbox: false,
             }]
         )
         .unwrap(),
@@ -78,11 +84,13 @@ pub(crate) fn work_stale_reads_judges_by_content_not_by_clock() {
     assert_eq!(
         ws.work_stale_reads(
             "w",
+            "a",
             &[ReadQuery {
                 path: "gone.md".to_string(),
                 blob: content_hash(b"x\n"),
                 from: 1,
                 to: 1,
+                sandbox: false,
             }]
         )
         .unwrap(),
@@ -98,14 +106,65 @@ pub(crate) fn work_stale_reads_judges_by_content_not_by_clock() {
     assert_eq!(
         ws.work_stale_reads(
             "w",
+            "a",
             &[ReadQuery {
                 path: "gone.md".to_string(),
                 blob: content_hash(b"x\n"),
                 from: 1,
                 to: 1,
+                sandbox: false,
             }]
         )
         .unwrap(),
+        vec![true]
+    );
+}
+
+/// 目的：沙箱里的读按沙箱当前内容判——主副本改了不影响它，沙箱自己改了才过期。
+#[test]
+pub(crate) fn work_stale_reads_follows_the_sandbox_copy() {
+    use crate::capabilities::workspace::api::{ReadQuery, content_hash};
+    use crate::capabilities::workspace::ports::WorkStore;
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    let sb = sandbox_of(&ws, "w", "a");
+    let v1 = b"one\ntwo\nthree\n";
+    store.write_under(&sb, "draft.md", v1).unwrap();
+    // 先记一次存档：正文进对象库，行区间才有得比（读工具读到的就是这类已入库内容）。
+    ws.work_commit_auto("w", "a", "s", &commit_req(&["draft.md"], &[], "草稿", 1))
+        .unwrap()
+        .expect("应当记一次存档");
+    let q = |from: u64, to: u64| ReadQuery {
+        path: "draft.md".to_string(),
+        blob: content_hash(v1),
+        from,
+        to,
+        sandbox: true,
+    };
+    assert_eq!(
+        ws.work_stale_reads("w", "a", &[q(1, 3)]).unwrap(),
+        vec![false]
+    );
+    // 主副本里另有一份同名文件、内容不同：沙箱的读不该被它影响。
+    ws.work_commit_user("w", "draft.md", b"main\n", 1, 0)
+        .unwrap();
+    assert_eq!(
+        ws.work_stale_reads("w", "a", &[q(1, 3)]).unwrap(),
+        vec![false],
+        "主副本变了不代表沙箱里的读过期"
+    );
+    // 沙箱里只改第 2 行：读 1-1 不受影响，读 2-2 过期。
+    store
+        .write_under(&sb, "draft.md", b"one\nTWO\nthree\n")
+        .unwrap();
+    assert_eq!(
+        ws.work_stale_reads("w", "a", &[q(1, 1), q(2, 2)]).unwrap(),
+        vec![false, true]
+    );
+    // 沙箱里删掉：读过的东西不在了。
+    store.remove_under(&sb, "draft.md").unwrap();
+    assert_eq!(
+        ws.work_stale_reads("w", "a", &[q(1, 3)]).unwrap(),
         vec![true]
     );
 }
@@ -998,4 +1057,72 @@ pub(crate) fn work_reset_restores_paths_and_moves_the_work_line() {
         .is_err(),
         "只能退到自己的工作线祖先"
     );
+}
+
+/// 目的：`work_sync` 把用户在产品之外改的磁盘内容记成一条主线提交，不给 external 建工作线。
+#[test]
+pub(crate) fn work_sync_records_external_edits_on_the_main_line() {
+    use crate::capabilities::workspace::api::WorkState;
+    use crate::capabilities::workspace::ports::WorkStore;
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string(), "b".to_string()])
+        .unwrap();
+    let shared = shared_of(&ws, "w");
+    let sandbox_a = sandbox_of(&ws, "w", "a");
+    let store_dir = ws.roots("w", &[]).unwrap().store;
+
+    // 用户在共享区目录里直接建了文件（产品之外的动作）。
+    store.write_under(&shared, "note.md", b"v1\n").unwrap();
+    let first = ws
+        .work_sync("w", &["note.md".to_string()], 1)
+        .unwrap()
+        .commit
+        .expect("新增内容要落成一条提交");
+    assert_eq!(ws.work_head("w").unwrap(), Some(first), "同步推进主线");
+    assert!(
+        store
+            .read_ref(&store_dir, "agents/external")
+            .unwrap()
+            .is_none(),
+        "external 不是 agent，不该给它建工作线"
+    );
+    let log = ws.work_log("w", 10, None).unwrap();
+    let synced = log
+        .commits
+        .iter()
+        .find(|c| c.id == first)
+        .expect("同步提交进主线历史");
+    assert_eq!(synced.author, "external");
+    assert!(synced.on_head);
+    assert!(log.work.is_empty(), "同步不产生工作线提交");
+
+    // 外部又改了同一份文件：再同步一次，主线上多一条修改提交。
+    store.write_under(&shared, "note.md", b"v2\n").unwrap();
+    let second = ws
+        .work_sync("w", &["note.md".to_string()], 2)
+        .unwrap()
+        .commit
+        .expect("外部修改要落成提交");
+    assert_eq!(ws.work_head("w").unwrap(), Some(second));
+    assert!(second > first);
+    assert!(
+        store
+            .read_ref(&store_dir, "agents/external")
+            .unwrap()
+            .is_none(),
+        "重复同步也不建工作线"
+    );
+
+    // 同步只改主线：沙箱里没有这个文件；没拉过的 agent 看到「主线有、还没拉取」。
+    assert!(
+        store.read_under(&sandbox_a, "note.md").unwrap().is_none(),
+        "同步不改任何沙箱"
+    );
+    let st = ws.work_status("w", "a", &[]).unwrap();
+    let entry = st
+        .entries
+        .iter()
+        .find(|e| e.path == "note.md")
+        .expect("同步进来的路径要在状态里");
+    assert_eq!(entry.state, WorkState::NotPulled);
 }

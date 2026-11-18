@@ -418,7 +418,7 @@ fn run_rounds(
 /// 目的：发给模型的对话视图——过期读取换成占位符，其余原样。
 ///
 /// 约束：只改**派生视图**，不动 `dialogue` 与转录。开关关、没有工作区、判定失败三者都原样返回——
-///   判定失败宁可供旧内容，也不悄悄丢内容。只判主副本（`worktree` 为空的读）；私有沙箱里的读判不了就不动。
+///   判定失败宁可供旧内容，也不悄悄丢内容。主副本的读对照主线树，私有沙箱的读对照沙箱当前内容。
 fn send_view(s: &AgentSession) -> Vec<crate::capabilities::llm::api::Msg> {
     let mut msgs = s.dialogue.clone();
     if !s.context_freshness() || s.reads().is_empty() {
@@ -430,11 +430,8 @@ fn send_view(s: &AgentSession) -> Vec<crate::capabilities::llm::api::Msg> {
     let Some(ws) = tools.workspace.as_ref() else {
         return msgs;
     };
-    let reads: Vec<&crate::capabilities::conversation::session::api::ReadAt> = s
-        .reads()
-        .iter()
-        .filter(|r| r.fact.worktree.is_empty())
-        .collect();
+    let reads: Vec<&crate::capabilities::conversation::session::api::ReadAt> =
+        s.reads().iter().collect();
     let queries: Vec<crate::capabilities::workspace::api::ReadQuery> = reads
         .iter()
         .map(|r| crate::capabilities::workspace::api::ReadQuery {
@@ -442,12 +439,18 @@ fn send_view(s: &AgentSession) -> Vec<crate::capabilities::llm::api::Msg> {
             blob: r.fact.blob.clone(),
             from: r.fact.from,
             to: r.fact.to,
+            // `worktree` 记的是读发生在哪个沙箱（空 = 主副本）。
+            sandbox: !r.fact.worktree.is_empty(),
         })
         .collect();
     if queries.is_empty() {
         return msgs;
     }
-    let Ok(stale) = ws.work_stale_reads(&tools.face.sandbox.work_name, &queries) else {
+    let Ok(stale) = ws.work_stale_reads(
+        &tools.face.sandbox.work_name,
+        &tools.face.sandbox.agent,
+        &queries,
+    ) else {
         return msgs;
     };
     let judged: Vec<(
