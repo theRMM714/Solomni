@@ -23,6 +23,7 @@ const scope = (argOf("scope") || process.env.MUTATION_SCOPE || "weekly").trim();
 const unit = scope === "unit" ? (argOf("unit") || process.env.MUTATION_UNIT || "").trim() : "";
 const perShard = Math.max(1, Number(argOf("max-per-shard") || process.env.MUTATION_MAX_PER_SHARD || 350));
 const fallback = Number(argOf("fallback") || 4);
+const asJson = process.argv.slice(2).includes("--json");
 
 const warn = (m) => process.stderr.write("[突变计划] " + m + "\n");
 
@@ -109,8 +110,12 @@ const out = {
 };
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.writeFileSync(OUT, JSON.stringify(out, null, 2));
-console.log("[突变计划] 范围 " + scope + (unit ? ":" + unit : "") + "，文件 " + plan.files.length + " 个，变异体 " + (total || "未知") + "，分 " + shards.length + " 片");
-console.log("[突变计划] 分片：" + shards.join(" "));
-console.log("PLAN-MUTANTS=" + (total || 0));
-console.log("PLAN-SHARDS=" + shards.length);
-console.log("[突变计划] 计划写 " + path.relative(ROOT, OUT));
+if (asJson) {
+  console.log(JSON.stringify(out, null, 2));
+} else {
+  console.log("[突变计划] 范围 " + scope + (unit ? ":" + unit : "") + "，文件 " + plan.files.length + " 个，变异体 " + (total || "未知") + "，分 " + shards.length + " 片");
+  console.log("[突变计划] 分片：" + shards.join(" "));
+  console.log("PLAN-MUTANTS=" + (total || 0));
+  console.log("PLAN-SHARDS=" + shards.length);
+  console.log("[突变计划] 计划写 " + path.relative(ROOT, OUT));
+}
