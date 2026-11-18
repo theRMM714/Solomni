@@ -226,3 +226,65 @@ pub(crate) fn work_delete_rolls_every_sandbox_back_and_prunes_archives() {
     assert!(store.read_ref(&root, "archive/1").unwrap().is_none());
     assert!(ws.work_archives("w").unwrap().is_empty());
 }
+/// 目的：留档把沙箱铺回它自己存档线上的快照，而不是主线树；主线树只决定共享区。
+#[test]
+pub(crate) fn work_archive_puts_each_sandbox_on_its_own_save_snapshot() {
+    let (ws, _dirs, store) = work_ws();
+    let agents = ["a".to_string()];
+    ws.prepare("w", &agents).unwrap();
+    let shared = shared_of(&ws, "w");
+    let sa = sandbox_of(&ws, "w", "a");
+
+    store.write_under(&sa, "note.md", b"v1").unwrap();
+    let mut r = commit_req(&["note.md"], &[], "v1", 1);
+    r.line = 2;
+    ws.work_commit("w", "a", "w--a", &r).unwrap();
+
+    // 沙箱存档：草稿只在存档线，主线没有它。
+    store.write_under(&sa, "draft.md", b"draft").unwrap();
+    ws.work_commit_auto("w", "a", "w--a", &commit_req(&["draft.md"], &[], "草稿", 4))
+        .unwrap()
+        .expect("应当记一次存档");
+    // 留档前又写了一份没存档的内容：它会进 lost。
+    store.write_under(&sa, "later.md", b"later").unwrap();
+
+    let mut keep = std::collections::BTreeMap::new();
+    keep.insert(String::new(), 2u64);
+    keep.insert("a".to_string(), 4u64);
+    ws.work_archive("w", &keep, &agents, 1).unwrap();
+
+    assert_eq!(
+        store.read_under(&shared, "note.md").unwrap().as_deref(),
+        Some(&b"v1"[..]),
+        "共享区落在主线树上"
+    );
+    assert!(
+        store.read_under(&shared, "draft.md").unwrap().is_none(),
+        "存档草稿不进共享区"
+    );
+    assert_eq!(
+        store.read_under(&sa, "draft.md").unwrap().as_deref(),
+        Some(&b"draft"[..]),
+        "沙箱回到自己的存档快照"
+    );
+    assert!(store.read_under(&sa, "later.md").unwrap().is_none());
+    assert!(
+        ws.work_lost("w", "a", None)
+            .unwrap()
+            .entries
+            .iter()
+            .any(|e| e.path == "archive-1/later.md"),
+        "留档前的未存档内容进 lost"
+    );
+
+    // 恢复：带回来的仍是存档快照里的内容，而不是主线树。
+    ws.work_restore_archive("w", 1).unwrap();
+    assert_eq!(
+        store.read_under(&sa, "draft.md").unwrap().as_deref(),
+        Some(&b"draft"[..])
+    );
+    assert_eq!(
+        store.read_under(&shared, "note.md").unwrap().as_deref(),
+        Some(&b"v1"[..])
+    );
+}

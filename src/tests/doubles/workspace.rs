@@ -478,6 +478,7 @@ impl WorkStore for InMemoryWorkStore {
                 kind: crate::capabilities::workspace::domain::workstore::RefKind::Main,
                 target: None,
                 heads: BTreeMap::new(),
+                saves: BTreeMap::new(),
             },
         );
         r.target = Some(id);

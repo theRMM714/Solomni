@@ -70,11 +70,29 @@ pub(crate) fn work_stale_reads_judges_by_content_not_by_clock() {
     );
     ws.work_pull("w", "a", &["gone.md".to_string()]).unwrap();
     let sb = sandbox_of(&ws, "w", "a");
+    _store.write_under(&sb, "draft.md", b"d").unwrap();
+    // 存档只记沙箱快照：共享区里这个文件还在，所以读过它的内容还不算过期。
+    ws.work_commit_auto("w", "a", "s", &commit_req(&["draft.md"], &[], "草稿", 5))
+        .unwrap()
+        .expect("应当记一次存档");
+    assert_eq!(
+        ws.work_stale_reads(
+            "w",
+            &[ReadQuery {
+                path: "gone.md".to_string(),
+                blob: content_hash(b"x\n"),
+                from: 1,
+                to: 1,
+            }]
+        )
+        .unwrap(),
+        vec![false]
+    );
+    // 发布之后共享区才真的没有这个文件——读过它内容的上下文立刻过期。
     crate::capabilities::workspace::ports::WorkStore::remove_under(&*_store, &sb, "gone.md")
         .unwrap();
-    ws.work_commit_auto("w", "a", "s", &commit_req(&[], &["gone.md"], "删", 5))
-        .unwrap()
-        .expect("应当发布一次删除");
+    ws.work_commit("w", "a", "s", &commit_req(&[], &["gone.md"], "删", 6))
+        .unwrap();
     assert_eq!(
         ws.work_stale_reads(
             "w",
@@ -664,4 +682,46 @@ pub(crate) fn work_handlers_are_taken_only_when_the_role_face_allows_them() {
     assert_eq!(handlers.len(), 1, "发了一个 work_* 就装一个执行者");
     assert!(handlers[0].owns("work_pull"));
     assert!(!handlers[0].owns("read"), "执行者不认领非 work_* 的名字");
+}
+/// 目的：自动提交是**存档**——它把沙箱改动记进该 agent 的存档线，共享区与主线一个字都不动。
+/// 约束：存档线是 `refs/agents/<agent>/saves`；要进共享区仍得显式 work_commit。
+#[test]
+pub(crate) fn work_commit_auto_saves_the_sandbox_without_touching_the_shared_area() {
+    use crate::capabilities::workspace::ports::WorkStore;
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.work_commit_user("w", "base.md", b"b", 1, 0).unwrap();
+    let shared = shared_of(&ws, "w");
+    let sd = ws.roots("w", &[]).unwrap().store;
+    let head_before = store.head(&sd).unwrap();
+
+    let sb = sandbox_of(&ws, "w", "a");
+    store.write_under(&sb, "draft.md", b"draft").unwrap();
+    let saved = ws
+        .work_commit_auto("w", "a", "w--a", &commit_req(&["draft.md"], &[], "草稿", 2))
+        .unwrap()
+        .expect("应当记一次存档");
+
+    assert_eq!(store.head(&sd).unwrap(), head_before, "存档不推进主线");
+    assert!(
+        store.stat_under(&shared, "draft.md").unwrap().is_none(),
+        "存档不写共享区"
+    );
+    let saves = store.read_ref(&sd, "agents/a/saves").unwrap().unwrap();
+    assert_eq!(saves.target, Some(saved.id), "存档线头指向这条提交");
+    let c = store.read_commit(&sd, saved.id).unwrap().unwrap();
+    assert_eq!((c.author.as_str(), c.session.as_str()), ("a", "w--a"));
+    assert!(
+        c.tree.as_ref().is_some_and(|t| t.contains_key("draft.md")),
+        "存档提交带整棵树，回档才铺得出沙箱快照"
+    );
+
+    // 显式提交才发布：这时主线才前进，共享区才出现这个文件。
+    ws.work_commit("w", "a", "w--a", &commit_req(&["draft.md"], &[], "发布", 3))
+        .unwrap();
+    assert!(
+        store.stat_under(&shared, "draft.md").unwrap().is_some(),
+        "发布才写共享区"
+    );
+    assert!(store.head(&sd).unwrap().unwrap() > head_before.unwrap());
 }

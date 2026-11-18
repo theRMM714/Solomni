@@ -1,5 +1,5 @@
-//! 目的：工作区的提交用例——把沙箱改写落成提交、落整棵树或增量、刷新 base 锚点与归档标记。
-//! 管：commit_locked 与 commit / commit_auto / commit_user 三个用例、agent base 记录、归档标记的写入与修剪。
+//! 目的：工作区的提交用例——把沙箱改写落成提交、落整棵树或增量、维护两条线各自的头与归档标记。
+//! 管：commit_locked 与 work_commit / work_commit_auto / work_commit_user 三个用例、`refs/agents/<agent>`（发布线）与 `refs/agents/<agent>/saves`（存档线）的读写、归档标记的写入与修剪。
 //! 不管：三方比较的纯规则（domain::workstore）、目录布局与共享区落盘（ports::WorkStore）。
 //! 联动：service.rs 提供锁、工作根与树物化；sync 与 lifecycle 会调用本文件的提交与锚点方法。
 
@@ -8,7 +8,7 @@ use crate::capabilities::workspace::api::{Change, ChangeKind, CommitReport, Comm
 
 impl WorkspaceService {
     /// 目的：提交的唯一实现（调用方已持 gate、shared、store 锁并已恢复事务）。
-    /// 约束：不做基线准入——自动提交的准入由 `work_commit_auto` 在调用前做。
+    /// 约束：`line` 决定提交落到哪条线——主线会改共享区与 `refs/main`，存档线只写提交与 `refs/agents/<agent>/saves`。
     #[allow(clippy::too_many_arguments)]
     pub(super) fn commit_locked(
         &self,
@@ -21,6 +21,7 @@ impl WorkspaceService {
         req: &CommitRequest,
         source: Source,
         anchor: Option<CommitAnchor>,
+        line: CommitLine,
     ) -> Result<CommitReport, String> {
         let msg = req.message.trim();
         if msg.is_empty() {
@@ -30,11 +31,22 @@ impl WorkspaceService {
         let shared = shared.to_path_buf();
         let store = store.to_path_buf();
         let sandbox = sandbox.to_path_buf();
-        let (head_id, tree) = self.head_tree(&store)?;
-        let index: Index = self.store.read_index(&store, agent)?;
+        let (parent, tree) = match line {
+            CommitLine::Main => self.head_tree(&store)?,
+            CommitLine::Save => self.save_tree(&store, agent)?,
+        };
+        let index: Index = match line {
+            CommitLine::Main => self.store.read_index(&store, agent)?,
+            // 存档线的基线是它自己上一次快照：只记「沙箱相对上次存档改了什么」。
+            CommitLine::Save => tree.clone(),
+        };
         // 沙箱里的文件全集（paths 里的文件夹据此展开）。
         let sandbox_files: BTreeSet<String> = self.store.list(&sandbox)?.into_iter().collect();
-        let (want, missing) = expand_paths(&req.paths, &sandbox_files);
+        // 存档线记的是**整棵沙箱快照**：回档要把沙箱铺回它当时的样子，只记调用方点名的路径会漏。
+        let (want, missing) = match line {
+            CommitLine::Main => expand_paths(&req.paths, &sandbox_files),
+            CommitLine::Save => (sandbox_files.iter().cloned().collect(), Vec::new()),
+        };
         if !missing.is_empty() {
             return Err(format!(
                 "沙箱里没有这些路径（要删除共享区的文件请放进 deletes）：{}",
@@ -61,17 +73,19 @@ impl WorkspaceService {
         if !oversize.is_empty() {
             return Err(render_oversize(&oversize, self.max_asset_bytes));
         }
-        for raw in &req.deletes {
-            let rel = clean_rel(raw)?;
-            if locals.contains_key(&rel) {
-                return Err(format!("{} 同时出现在 paths 与 deletes 里", rel));
+        if line == CommitLine::Main {
+            for raw in &req.deletes {
+                let rel = clean_rel(raw)?;
+                if locals.contains_key(&rel) {
+                    return Err(format!("{} 同时出现在 paths 与 deletes 里", rel));
+                }
+                locals.insert(rel, None);
             }
-            locals.insert(rel, None);
         }
         if locals.is_empty() {
             return Err("没有可提交的改动：paths 与 deletes 都是空的".to_string());
         }
-        if self.dirs.is_external(work) {
+        if line == CommitLine::Main && self.dirs.is_external(work) {
             self.reject_external_changes(&shared, &tree, &locals)?;
         }
         let plan = match plan_commit(&index, &tree, &locals) {
@@ -95,22 +109,32 @@ impl WorkspaceService {
                 )?;
             }
         }
-        let mut new_index = index;
-        for ch in &changes {
-            match ch.kind {
-                ChangeKind::Delete => {
-                    new_index.remove(&ch.path);
+        let pending_index = match line {
+            CommitLine::Main => {
+                let mut new_index = index;
+                for ch in &changes {
+                    match ch.kind {
+                        ChangeKind::Delete => {
+                            new_index.remove(&ch.path);
+                        }
+                        _ => {
+                            new_index.insert(ch.path.clone(), ch.hash.clone());
+                        }
+                    }
                 }
-                _ => {
-                    new_index.insert(ch.path.clone(), ch.hash.clone());
-                }
+                Some(PendingIndex {
+                    agent: agent.to_string(),
+                    index: new_index,
+                })
             }
-        }
-        let depth = self.next_depth(&store, head_id)?;
+            // 存档线不改「从主副本拉过什么」的基线：它只记沙箱自己的快照。
+            CommitLine::Save => None,
+        };
+        let depth = self.next_depth(&store, parent)?;
         let commit = Commit {
             id,
-            parent: head_id,
-            base: head_id.unwrap_or(0),
+            parent,
+            base: parent.unwrap_or(0),
             author: agent.to_string(),
             session: session.to_string(),
             time: req.time,
@@ -121,96 +145,106 @@ impl WorkspaceService {
             source,
             anchor,
         };
-        let pending_index = PendingIndex {
-            agent: agent.to_string(),
-            index: new_index,
-        };
         let pending = Pending::Commit {
             commit: Box::new(commit.clone()),
-            index: Some(pending_index.clone()),
+            index: pending_index.clone(),
+            line,
         };
         self.store.write_pending(&store, &pending)?;
         let result =
-            self.apply_commit_pending(work, &shared, &store, &commit, Some(&pending_index));
+            self.apply_commit_pending(work, &shared, &store, &commit, pending_index.as_ref(), line);
         self.settle(work, &shared, &store, result)?;
         Ok(CommitReport { id, changes })
     }
 
-    /// 目的：读该 agent 的逐路径基线（`refs/agents/<agent>`）：路径 → 拉取时的提交号。
-    /// 约束：没有记录 = 空表；不伪造历史，第一次 pull / commit 自然写实。
-    pub(super) fn agent_bases(
+    /// 目的：该 agent 发布线的引用名——它只跟着主线走（发布成功 = 快进到这里）。
+    pub(super) fn work_ref(agent: &str) -> String {
+        format!("agents/{}", agent)
+    }
+
+    /// 目的：该 agent 存档线的引用名——沙箱快照只落在它上面，永不进共享区。
+    pub(super) fn save_ref(agent: &str) -> String {
+        format!("agents/{}/saves", agent)
+    }
+
+    /// 目的：把一条线的头挪到 `target`；引用不存在就建。
+    /// 约束：只改 `target`，不动 `heads`（归档引用用该字段记各 agent 的回退点）。
+    fn set_line_head(
         &self,
         store: &Path,
-        agent: &str,
-    ) -> Result<BTreeMap<String, u64>, String> {
-        let name = format!("agents/{}", agent);
-        let Some(reference) = self.store.read_ref(store, &name)? else {
-            return Ok(BTreeMap::new());
+        name: &str,
+        kind: RefKind,
+        target: Option<u64>,
+    ) -> Result<(), String> {
+        let mut r = self.store.read_ref(store, name)?.unwrap_or(Ref {
+            kind,
+            target: None,
+            heads: BTreeMap::new(),
+            saves: BTreeMap::new(),
+        });
+        r.kind = kind;
+        r.target = target;
+        self.store.write_ref(store, name, &r)
+    }
+
+    /// 目的：该 agent 存档线的头；旧布局（`agents/<agent>` 同时记逐路径基线）读到就升级成两条线。
+    /// 约束：升级只在「存档线还不存在、旧引用里有基线」时发生一次；旧目标当存档起点，基线本身不再参与任何判定。
+    pub(super) fn save_head(&self, store: &Path, agent: &str) -> Result<Option<u64>, String> {
+        let name = Self::save_ref(agent);
+        if let Some(r) = self.store.read_ref(store, &name)? {
+            return Ok(r.target);
+        }
+        let work = Self::work_ref(agent);
+        let Some(old) = self.store.read_ref(store, &work)? else {
+            return Ok(None);
         };
-        Ok(reference
-            .heads
-            .into_iter()
-            .filter_map(|(path, oid)| oid.map(|oid| (path, oid)))
-            .collect())
+        if old.kind != RefKind::Agent || old.heads.is_empty() {
+            return Ok(None);
+        }
+        self.set_line_head(store, &name, RefKind::Agent, old.target)?;
+        self.set_line_head(store, &work, RefKind::Agent, old.target)?;
+        Ok(old.target)
     }
 
-    /// 目的：写回该 agent 的逐路径基线；`main` 记成这次写入时的主线头。
-    pub(super) fn write_agent_bases(
+    /// 目的：该 agent 存档线的头与整棵树（空线 = `(None, 空树)`）。
+    fn save_tree(&self, store: &Path, agent: &str) -> Result<(Option<u64>, Tree), String> {
+        let Some(id) = self.save_head(store, agent)? else {
+            return Ok((None, Tree::new()));
+        };
+        Ok((Some(id), Self::tree_of(self.store.as_ref(), store, id)?))
+    }
+
+    /// 目的：存档线推进到一条新的存档提交（只前进，不倒推——倒推会把沙箱快照接回旧内容）。
+    pub(super) fn advance_save_line(
         &self,
         store: &Path,
         agent: &str,
-        main: u64,
-        bases: &BTreeMap<String, u64>,
+        id: u64,
     ) -> Result<(), String> {
-        self.store.write_ref(
-            store,
-            &format!("agents/{}", agent),
-            &Ref {
-                kind: RefKind::Agent,
-                target: Some(main),
-                heads: bases
-                    .iter()
-                    .map(|(path, oid)| (path.clone(), Some(*oid)))
-                    .collect(),
-            },
-        )
+        if let Some(head) = self.save_head(store, agent)?
+            && head > id
+        {
+            return Err(format!(
+                "待恢复存档 {} 小于当前存档头 {}，拒绝倒推存档线",
+                id, head
+            ));
+        }
+        self.set_line_head(store, &Self::save_ref(agent), RefKind::Agent, Some(id))
     }
 
-    /// 目的：提交成功后把这些路径的基线推进到新提交号：下一次自动提交才是快进。
-    pub(super) fn record_committed_bases(
+    /// 目的：把该 agent 的发布线快进到一条主线提交（发布成功 / 回退之后）。
+    pub(super) fn fast_forward_work(
         &self,
         store: &Path,
         agent: &str,
-        report: &CommitReport,
+        commit: Option<u64>,
     ) -> Result<(), String> {
-        let mut bases = self.agent_bases(store, agent)?;
-        for change in &report.changes {
-            match change.kind {
-                ChangeKind::Delete => {
-                    bases.remove(&change.path);
-                }
-                _ => {
-                    bases.insert(change.path.clone(), report.id);
-                }
-            }
-        }
-        self.write_agent_bases(store, agent, report.id, &bases)
+        self.set_line_head(store, &Self::work_ref(agent), RefKind::Agent, commit)
     }
 
-    /// 目的：这次提交会碰到的**全部**路径（`paths` 里的文件夹展开 + `deletes`）——基线准入的对象。
-    pub(super) fn commit_paths(
-        &self,
-        sandbox: &Path,
-        req: &CommitRequest,
-    ) -> Result<Vec<String>, String> {
-        let files: BTreeSet<String> = self.store.list(sandbox)?.into_iter().collect();
-        let (mut paths, _missing) = expand_paths(&req.paths, &files);
-        for raw in &req.deletes {
-            paths.push(clean_rel(raw)?);
-        }
-        paths.sort();
-        paths.dedup();
-        Ok(paths)
+    /// 目的：清掉该 agent 的存档线头（沙箱被整体重铺后，旧快照不再描述沙箱内容）。
+    pub(super) fn drop_save_line(&self, store: &Path, agent: &str) -> Result<(), String> {
+        self.store.remove_ref(store, &Self::save_ref(agent))
     }
 
     /// 目的：留档点：head 祖先链上「各会话都还没越过自己保留行」的最后一个提交。
@@ -286,23 +320,53 @@ impl WorkspaceService {
         Ok(backed)
     }
 
-    /// 目的：把某个 agent 的基线、内容索引与逐路径基线一起对齐到一个提交点（None = 清空）。
+    /// 目的：把一个 agent 的发布线与存档线一起对齐到一个提交点（None = 清空两条线）。
+    /// 约束：沙箱被整体重铺后，旧存档快照不再描述沙箱内容，所以存档线跟着落点重建：
+    ///   `work` 是主线落点，`save` 是沙箱铺的那份快照（None = 铺主线树），
+    ///   `tree` 是索引/基线（三方比较的 base），始终取主线落点树。
     pub(super) fn reset_agent_point(
         &self,
         store: &Path,
         agent: &str,
-        point: Option<u64>,
+        work: Option<u64>,
+        save: Option<u64>,
         tree: &Tree,
     ) -> Result<(), String> {
         self.store.write_index(store, agent, tree)?;
-        match point {
-            Some(id) => {
-                let bases: BTreeMap<String, u64> =
-                    tree.keys().map(|path| (path.clone(), id)).collect();
-                self.write_agent_bases(store, agent, id, &bases)
-            }
-            None => self.store.remove_ref(store, &format!("agents/{}", agent)),
+        self.fast_forward_work(store, agent, work)?;
+        match save {
+            Some(id) => self.set_line_head(store, &Self::save_ref(agent), RefKind::Agent, Some(id)),
+            None => self.drop_save_line(store, agent),
         }
+    }
+
+    /// 目的：该 agent 存档线上「转录行还没越过 keep」的最后一个快照（None = 沙箱那时还是空的）。
+    /// 约束：只沿存档线自己的祖先链找；没有锚的存档保守地算在回档点之前。
+    pub(super) fn save_point_at(
+        &self,
+        store: &Path,
+        agent: &str,
+        keep: u64,
+    ) -> Result<Option<u64>, String> {
+        let mut cur = self.save_head(store, agent)?;
+        let mut seen: BTreeSet<u64> = BTreeSet::new();
+        while let Some(id) = cur {
+            if !seen.insert(id) {
+                break;
+            }
+            let Some(c) = self.store.read_commit(store, id)? else {
+                break;
+            };
+            let within = match &c.anchor {
+                None => true,
+                Some(a) => a.agent == agent && a.line <= keep,
+            };
+            if within {
+                return Ok(Some(id));
+            }
+            cur = c.parent;
+        }
+        Ok(None)
     }
 
     /// 目的：删除硬回退时备份进 lost/ 的目录前缀（按落点区分，便于用户认领）。
@@ -359,9 +423,10 @@ impl WorkspaceService {
         self.recover_locked(work, &shared, &store)?;
         let anchor = CommitAnchor {
             agent: agent.to_string(),
+            session: session.to_string(),
             line: req.line,
         };
-        let report = self.commit_locked(
+        self.commit_locked(
             work,
             &shared,
             &store,
@@ -371,52 +436,32 @@ impl WorkspaceService {
             req,
             Source::Tool,
             Some(anchor),
-        )?;
-        self.record_committed_bases(&store, agent, &report)?;
-        Ok(report)
+            CommitLine::Main,
+        )
     }
 
+    /// 目的：把沙箱这次的改写记进该 agent 的存档线（`refs/agents/<agent>/saves`），共享区一个字都不动。
+    /// 约束：存档不是发布——它只给回档/删除/恢复提供「沙箱在这次调用之后长什么样」的还原点，进不了主线；
+    ///   要进主线得显式提交并发布（work_commit + work_push）。
     pub(super) fn work_commit_auto(
         &self,
         work: &str,
         agent: &str,
         session: &str,
         req: &CommitRequest,
-    ) -> Result<Option<CommitReport>, CommitRefusal> {
+    ) -> Result<Option<CommitReport>, String> {
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
-        let _shared = self.dirs.lock_shared(work).map_err(CommitRefusal::Broken)?;
-        let (shared, store, sandbox) = self
-            .agent_roots(work, agent)
-            .map_err(CommitRefusal::Broken)?;
-        let _lock = self.store.lock(&store).map_err(CommitRefusal::Broken)?;
-        self.recover_locked(work, &shared, &store)
-            .map_err(CommitRefusal::Broken)?;
-        // 基线准入在写共享区之前：过期就一条 pending 都不留。
-        if let Some(main) = self.store.head(&store).map_err(CommitRefusal::Broken)? {
-            let tree =
-                Self::tree_of(self.store.as_ref(), &store, main).map_err(CommitRefusal::Broken)?;
-            let paths = self
-                .commit_paths(&sandbox, req)
-                .map_err(CommitRefusal::Broken)?;
-            let bases = self
-                .agent_bases(&store, agent)
-                .map_err(CommitRefusal::Broken)?;
-            let stale = stale_paths(BaseRef { oid: main }, &bases, &paths, |path| {
-                tree.contains_key(path)
-            });
-            if !stale.is_empty() {
-                return Err(CommitRefusal::Stale {
-                    main: BaseRef { oid: main },
-                    paths: stale,
-                });
-            }
-        }
+        let _shared = self.dirs.lock_shared(work)?;
+        let (shared, store, sandbox) = self.agent_roots(work, agent)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)?;
         let anchor = CommitAnchor {
             agent: agent.to_string(),
+            session: session.to_string(),
             line: req.line,
         };
-        let report = match self.commit_locked(
+        match self.commit_locked(
             work,
             &shared,
             &store,
@@ -426,17 +471,14 @@ impl WorkspaceService {
             req,
             Source::Tool,
             Some(anchor),
+            CommitLine::Save,
         ) {
-            Ok(r) => r,
-            // 内容与主线一致（如把同样内容再写一遍）：没有可发布的改动，不算失败。
-            Err(e) if e.starts_with("没有可提交的改动") => return Ok(None),
-            Err(e) => return Err(CommitRefusal::Broken(e)),
-        };
-        self.record_committed_bases(&store, agent, &report)
-            .map_err(CommitRefusal::Broken)?;
-        Ok(Some(report))
+            Ok(r) => Ok(Some(r)),
+            // 与上次存档完全一致（如只读了一次文件）：没有可记的改动，不算失败。
+            Err(e) if e.starts_with("没有可提交的改动") => Ok(None),
+            Err(e) => Err(e),
+        }
     }
-
     pub(super) fn work_commit_user(
         &self,
         work: &str,
@@ -490,15 +532,18 @@ impl WorkspaceService {
             source: Source::User,
             anchor: Some(CommitAnchor {
                 agent: String::new(),
+                session: String::new(),
                 line,
             }),
         };
         let pending = Pending::Commit {
             commit: Box::new(commit.clone()),
             index: None,
+            line: CommitLine::Main,
         };
         self.store.write_pending(&store, &pending)?;
-        let result = self.apply_commit_pending(work, &shared, &store, &commit, None);
+        let result =
+            self.apply_commit_pending(work, &shared, &store, &commit, None, CommitLine::Main);
         self.settle(work, &shared, &store, result)?;
         Ok(id)
     }

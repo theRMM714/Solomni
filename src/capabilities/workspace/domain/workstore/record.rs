@@ -32,12 +32,26 @@ pub struct Change {
 
 /// 目的：提交锚：这个提交点是**哪个会话（agent 实例名）的哪一行**触发的。
 ///    **空 agent = 主会话/用户投喂**。回档按它把共享区物化回某一行那一刻。
+/// 约束：会话名必须一起记——同名 agent 在不同会话里的行号各自从 1 数，只按 agent 比会把两条转录串起来。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommitAnchor {
     #[serde(default)]
     pub agent: String,
     #[serde(default)]
+    pub session: String,
+    #[serde(default)]
     pub line: u64,
+}
+
+/// 目的：这条提交落在哪条线上——主线只收发布，存档线只收沙箱快照（不进共享区）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommitLine {
+    /// 目的：主线（共享区的唯一更新途径）。
+    #[default]
+    Main,
+    /// 目的：该 agent 的存档线 `refs/agents/<agent>/saves`。
+    Save,
 }
 
 /// 目的：标记这条提交是谁、因为什么写下的。
@@ -108,7 +122,8 @@ pub enum RefKind {
     Other,
 }
 
-/// 目的：一条命名引用——`refs/main`、`refs/agents/<agent>`、`refs/archive/<id>`、`refs/live/<id>`。
+/// 目的：一条命名引用——`refs/main`（主线）、`refs/agents/<agent>`（该 agent 的发布线）、
+///   `refs/agents/<agent>/saves`（该 agent 的存档线）、`refs/archive/<id>`、`refs/live/<id>`。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ref {
     #[serde(default)]
@@ -119,6 +134,9 @@ pub struct Ref {
     /// 目的：每条线上各 agent 的 head（提交线分叉时用）。
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub heads: BTreeMap<String, Option<u64>>,
+    /// 目的：留档时各 agent 存档线的头（`refs/archive/<id>` 专用）——恢复要把它连同共享区一起展回来。
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub saves: BTreeMap<String, Option<u64>>,
 }
 
 /// 目的：一个 agent 的基线与 agent 名的配对，供待恢复事务写回。
@@ -139,8 +157,11 @@ pub enum Pending {
     Commit {
         /// 目的：已经算好的提交记录（box 住，避免 pending 枚举被整棵提交树撑大）。
         commit: Box<Commit>,
-        /// 目的：提交后的 agent 基线；用户投喂为 None。
+        /// 目的：提交后的 agent 基线；用户投喂与存档提交为 None。
         index: Option<PendingIndex>,
+        /// 目的：这条提交落在哪条线上（旧日志没有该字段 —— 那时只有主线）。
+        #[serde(default)]
+        line: CommitLine,
     },
     /// 目的：把主副本物化到某个提交点（None = 清空）。
     Restore {
@@ -154,6 +175,9 @@ pub enum Pending {
         /// 目的：要一起回退的 agent 沙箱（空 = 只动主副本，测试用的低层语义）。
         #[serde(default)]
         agents: Vec<String>,
+        /// 目的：这些沙箱各自要落到哪条存档提交（None = 空沙箱）。
+        #[serde(default)]
+        saves: BTreeMap<String, Option<u64>>,
     },
 }
 

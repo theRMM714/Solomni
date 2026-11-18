@@ -140,12 +140,6 @@ impl WorkspaceService {
                 e
             ));
         }
-        // 逐路径基线 = 这次拉到的提交号；之后自动提交据此判快进。
-        let mut bases = self.agent_bases(&store, agent)?;
-        for rel in report.updated.iter().chain(report.already.iter()) {
-            bases.insert(rel.clone(), head);
-        }
-        self.write_agent_bases(&store, agent, head, &bases)?;
         Ok(report)
     }
 
@@ -229,8 +223,10 @@ impl WorkspaceService {
         };
         let anchor = CommitAnchor {
             agent: agent.to_string(),
+            session: session.to_string(),
             line,
         };
+        // 沙箱扫描是「存档」，不是发布：候选路径的取舍仍按主副本核对，但结果只进存档线。
         let report = self.commit_locked(
             work,
             &shared,
@@ -241,8 +237,8 @@ impl WorkspaceService {
             &req,
             Source::External,
             Some(anchor),
+            CommitLine::Save,
         )?;
-        self.record_committed_bases(&store, agent, &report)?;
         Ok(AdoptReport {
             commit: Some(report.id),
             changed: report.changes.iter().map(|c| c.path.clone()).collect(),
@@ -388,9 +384,11 @@ impl WorkspaceService {
         let pending = Pending::Commit {
             commit: Box::new(commit.clone()),
             index: None,
+            line: CommitLine::Main,
         };
         self.store.write_pending(&store, &pending)?;
-        let result = self.apply_commit_pending(work, &shared, &store, &commit, None);
+        let result =
+            self.apply_commit_pending(work, &shared, &store, &commit, None, CommitLine::Main);
         self.settle(work, &shared, &store, result)?;
         Ok(SyncReport {
             commit: Some(id),
