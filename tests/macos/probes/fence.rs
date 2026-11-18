@@ -277,7 +277,7 @@ fn read_only_roots_are_readable_but_not_writable() {
 }
 
 /// **共享区产品契约**：agent 的围栏只放行它自己的沙箱，共享主副本在 rw 之外——
-/// 模块工具进程因此绕不过 work_pull / work_commit 直接读写共享区（工具层那一半由 workspace 的用例钉住）。
+/// 模块工具进程因此绕不过 work_pull / work_push 直接读写共享区（工具层那一半由 workspace 的用例钉住）。
 /// seatbelt 的 profile 排障开关与既有探针一致。
 #[test]
 fn shared_area_is_outside_the_agent_fence() {

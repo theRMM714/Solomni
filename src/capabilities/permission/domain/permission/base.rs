@@ -14,7 +14,7 @@ pub enum Reach {
     Private,
     /// 目的：读共享区主副本。
     SharedRead,
-    /// 目的：写共享区（只有 work_commit 这条路径使用）。
+    /// 目的：写共享区（只有 work_push 与 work_sync 这条路径使用）。
     SharedWrite,
     /// 目的：读成员模块目录。
     ModuleRead,

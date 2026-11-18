@@ -5,7 +5,7 @@ system: >-
   scan 用法：args 的 root（要扫描的目录）与 out（corpus.jsonl 输出路径）必填；
   include 是可选扩展名白名单，缺省 md,markdown,htm,txt,html,json（.markdown 归 md，.htm 归 html）。
   路径按【工作环境】给出的写法；root 用 work_pull 拉到自己的沙箱副本，
-  out 写沙箱，收尾用 work_commit 提交回共享区；userdata/ 是模块自己的跨任务私有区（模块进程可写），不是本次成品区，不要把任务成果放进去。
+  out 写沙箱，收尾用 work_commit 记进工作线、再用 work_push 推送进共享区；userdata/ 是模块自己的跨任务私有区（模块进程可写），不是本次成品区，不要把任务成果放进去。
   scan 递归扫 root，跳过隐藏目录、userdata/、符号链接、扩展名不支持 / 不在白名单、超过 8 MB 或读不了的文件；
   回执只给统计与产物路径，不回显正文。
   失败是非零退出码 + stderr；没命中任何资料不是错误。
@@ -24,7 +24,7 @@ tools:
         type: string
         required: true
         non_empty: true
-        desc: 语料清单写到哪个文件（用【工作环境】的写法；写在你的沙箱里，收尾用 work_commit 提交回共享区）
+        desc: 语料清单写到哪个文件（用【工作环境】的写法；写在你的沙箱里，收尾用 work_commit 记进工作线、再用 work_push 推送）
       include:
         type: string
         desc: 逗号分隔的扩展名白名单，缺省 md,markdown,htm,txt,html,json

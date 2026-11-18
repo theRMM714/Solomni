@@ -21,7 +21,7 @@
  * 为什么这个脚本**不进 CI**：它要真实供应商与核心默认模型（CI 上没有 .home/，会回落到内置假模型，
  * 那样验的就不是代理能力而是假脚本）。代理状态机的机器判据在 tests/cross-platform/e2e/driver.js。
  * 只走产品自己的 HTTP 能力面（与前端同一条路），**不改任何登记处**；子会话把产物写进**自己的沙箱**，
- * 需要共享时再用 work_commit 提交回**顶层那一个共享区** work/——整棵树（含任意深度的子会话）共用它
+ * 需要共享时再用 work_commit 记进工作线、由 work_push 推送进**顶层那一个共享区** work/——整棵树（含任意深度的子会话）共用它
  * （见 docs/session；共享区对 agent 只读）。
  */
 import { existsSync, readdirSync, statSync } from "node:fs";
@@ -43,7 +43,7 @@ const QUIET_POLLS = 5;
 /** 说给代理听的目标（第一幕）：只给结果与约束，怎么挑人、怎么分工由它自己定。 */
 const GOAL = [
   "把这件事办完：人怎么挑、活怎么分你自己定，不用问我；这是件小事，人手不用多。",
-  "① 挑合适的人建子工作，让他在自己的沙箱里写一份 notes.md（Markdown，正文不少于 300 字，说清「本地优先」的三条理由），再用 work_commit 提交回共享区；",
+  "① 挑合适的人建子工作，让他在自己的沙箱里写一份 notes.md（Markdown，正文不少于 300 字，说清「本地优先」的三条理由），再用 work_commit 记进工作线、用 work_push 推送进共享区；",
   "② 再让他基于这份笔记产出一份 card.html——自包含、能离线打开（内联样式，不许引用任何外部资源）；",
   "③ 两件产物都落盘之后，用 read_session_messages 把他的话看一遍，确认产物真的存在；",
   "④ 最后告诉我：你派了谁、建了哪些子会话、两件产物的真实绝对路径。",
@@ -297,9 +297,13 @@ async function main() {
   }
   ok(worked === kids.length && kids.length > 0, "每个子工作都真的跑过（有工具行或发言）", worked + "/" + kids.length);
   ok(seeded === kids.length && kids.length > 0, "每个子会话都写进了开头（核心派的活 / 本次需求）", seeded + "/" + kids.length);
-  // 共享区对 agent 只读：子会话的产物经 work_commit 才进主副本。
+  // 共享区对 agent 只读：子会话的产物经 work_commit + work_push 才进主副本。
   const kidRows = [...kidsLines.values()].flatMap((kl) => toolRows(kl));
-  ok(kidRows.some((r) => r.name === "work_commit" && r.ok), "子会话产物经 work_commit 提交回共享区", JSON.stringify(kidRows.map((r) => [r.name, r.ok])));
+  ok(
+    kidRows.some((r) => r.name === "work_push" && r.ok),
+    "子会话产物经 work_push 推送进共享区（推送前必须先 work_commit 记进工作线）",
+    JSON.stringify(kidRows.map((r) => [r.name, r.ok])),
+  );
 
   // 关卡不落到用户头上：代理会话自己不待裁，子会话的门由核心代答（没人等用户点头）。
   const nameSet = new Set([sid, ...kids.map((k) => k.name)]);

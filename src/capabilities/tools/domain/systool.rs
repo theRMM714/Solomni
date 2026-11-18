@@ -142,7 +142,7 @@ pub fn tool_notes(
 #[derive(Debug, Clone, Default)]
 pub struct Observations {
     seen: BTreeMap<PathBuf, Seen>,
-    /// 目的：本次调用里由核心**写过**的路径（自动提交据此知道该发布哪些文件）。
+    /// 目的：本次调用里由核心**写过**的路径（批次末的存档快照与 work_commit 据此知道该收哪些文件）。
     /// 约束：只活在一次调用的分支副本里——循环在调用前清空、调用后取走；不参与 absorb。
     written: std::collections::BTreeSet<PathBuf>,
     /// 目的：本次调用里由核心**删掉**的路径（自动提交的 `deletes` 由此而来）。
@@ -189,7 +189,7 @@ impl Observations {
         self.reads.push(fact);
     }
 
-    /// 目的：记一次删除——自动提交要把它写成 `deletes`，否则沙箱删了、共享区还留着。
+    /// 目的：记一次删除——work_commit 要把它写成 `deletes`，否则沙箱删了、工作线里还留着。
     pub(crate) fn note_removed(&mut self, path: &Path) {
         self.removed.insert(path.to_path_buf());
     }
