@@ -1,13 +1,15 @@
-//! 目的：共享区版本化工作区八个核心自有工具（`work_pull` / `work_commit` / `work_push` / `work_status` /
-//!   `work_versions` / `work_resolve` / `work_lost` / `work_sync`）的纯逻辑——工具名、入参解析与回执拼装。
+//! 目的：共享区版本化工作区的核心自有工具（`work_pull` / `work_commit` / `work_push` / `work_status` /
+//!   `work_versions` / `work_diff` / `work_reset` / `work_resolve` / `work_lost` / `work_sync`）的纯逻辑——
+//!   工具名、入参解析与回执拼装。
 //! 管：工具名常量与 `is_work_tool`、取参（`str_list` / `str_arg`）、各工具回执的拼装。
 //! 不管：真正的拉取 / 提交 / 状态 / 三方视图 / 解决 / 备份恢复（走 `workspace::api::Workspace`）；
 //!   冲突、状态与备份判定（在 `workspace`）。
 //! 联动：由本能力的 `service/` 调用；工具名与 `systools/tools.yaml` 同一份名单。
 
 use crate::capabilities::workspace::api::{
-    ChangeKind, CommitReport, LostReport, PullReport, PushReport, ResolveAction, ResolveEntry,
-    ResolveReport, RestoreLostReport, StatusReport, SyncReport, VERSION_TEXT_LIMIT, VersionView,
+    ChangeKind, CommitReport, DiffReport, DiffSign, LostReport, PullReport, PushReport,
+    ResetReport, ResolveAction, ResolveEntry, ResolveReport, RestoreLostReport, StatusReport,
+    SyncReport, VERSION_TEXT_LIMIT, VersionView,
 };
 
 /// 目的：把主副本的更新拉进沙箱（`work_pull`）。
@@ -20,6 +22,10 @@ pub const PUSH: &str = "work_push";
 pub const STATUS: &str = "work_status";
 /// 目的：看一条路径的基线 / 主副本 / 沙箱三方视图（`work_versions`）。
 pub const VERSIONS: &str = "work_versions";
+/// 目的：比两个版本的行级差异（`work_diff`，缺省工作线头 ↔ 沙箱）。
+pub const DIFF: &str = "work_diff";
+/// 目的：把沙箱按工作线头恢复，或把工作线移回某个提交（`work_reset`）。
+pub const RESET: &str = "work_reset";
 /// 目的：按 `take` 解决冲突之后再提交（`work_resolve`）。
 pub const RESOLVE: &str = "work_resolve";
 /// 目的：列被覆盖的本地版本备份（`work_lost`）。
@@ -31,7 +37,7 @@ pub const SYNC: &str = "work_sync";
 pub fn is_work_tool(name: &str) -> bool {
     matches!(
         name,
-        PULL | COMMIT | PUSH | STATUS | VERSIONS | RESOLVE | LOST | SYNC
+        PULL | COMMIT | PUSH | STATUS | VERSIONS | DIFF | RESET | RESOLVE | LOST | SYNC
     )
 }
 
@@ -174,6 +180,102 @@ pub fn render_commit(r: &CommitReport) -> String {
         );
     }
     out.push_str("\n要让它出现在共享区给别的 agent 看，用 work_push 推送（主线落一条提交）。");
+    out
+}
+
+/// 目的：把 work_diff 的结果渲染成 unified 格式（`---` / `+++` / `@@`），二进制与过大只说明一句。
+/// 返回：两侧标签、逐路径 hunk；没有差异时一句话。
+pub fn render_diff(r: &DiffReport) -> String {
+    if r.entries.is_empty() {
+        return format!("{} → {} 没有差异。", r.from, r.to);
+    }
+    let mut out = format!("{} → {}（{} 个路径）", r.from, r.to, r.entries.len());
+    if r.truncated {
+        out.push_str("\n（内容超出预算，只显示了前面一部分）");
+    }
+    for e in &r.entries {
+        let path = &e.path;
+        match e.kind {
+            ChangeKind::Add => {
+                out.push_str(&format!("\n--- /dev/null\n+++ b/{}", path));
+            }
+            ChangeKind::Delete => {
+                out.push_str(&format!("\n--- a/{}\n+++ /dev/null", path));
+            }
+            ChangeKind::Modify => {
+                out.push_str(&format!("\n--- a/{path}\n+++ b/{path}"));
+            }
+        }
+        if e.binary {
+            out.push_str("\n（二进制文件，只报变更类型与指纹，不展开行差异）");
+            continue;
+        }
+        if e.too_large {
+            out.push_str(
+                "\n（超过单文件上限，不展开行差异；用 read 看沙箱版本，或 work_versions 看三方）",
+            );
+            continue;
+        }
+        for h in &e.hunks {
+            out.push_str(&format!(
+                "\n@@ -{},{} +{},{} @@",
+                h.old_start, h.old_len, h.new_start, h.new_len
+            ));
+            for line in &h.lines {
+                let sign = match line.sign {
+                    DiffSign::Context => ' ',
+                    DiffSign::Remove => '-',
+                    DiffSign::Add => '+',
+                };
+                out.push_str(&format!("\n{}{}", sign, line.text));
+            }
+        }
+    }
+    out
+}
+
+/// 目的：把 work_reset 的结果说成人能读的几行：工作线移到哪、沙箱改了什么、备份了几份。
+pub fn render_reset(r: &ResetReport) -> String {
+    let mut out = String::new();
+    match r.moved_to {
+        Some(id) if r.restored.is_empty() && r.removed.is_empty() => {
+            out.push_str(&format!(
+                "工作线已移到提交 {}；沙箱没动（keep_changes=true）。",
+                id
+            ));
+            out.push_str("\n要连沙箱一起回到那个版本，去掉 keep_changes 再 work_reset 一次。");
+        }
+        Some(id) => {
+            out.push_str(&format!("工作线已移到提交 {}，沙箱按它重铺。", id));
+            if !r.restored.is_empty() {
+                out.push_str(&format!("\n铺回 {} 个文件。", r.restored.len()));
+            }
+            if !r.removed.is_empty() {
+                out.push_str(&format!(
+                    "\n删除 {} 个文件（那个版本里没有）。",
+                    r.removed.len()
+                ));
+            }
+        }
+        None => {
+            out.push_str("已把沙箱按工作线头恢复。");
+            if !r.restored.is_empty() {
+                out.push_str(&format!("\n铺回：{}", paths(&r.restored)));
+            }
+            if !r.removed.is_empty() {
+                out.push_str(&format!("\n删除（工作线里没有）：{}", paths(&r.removed)));
+            }
+            if r.restored.is_empty() && r.removed.is_empty() {
+                out.push_str("\n这些路径本来就与工作线头一致，没有改动。");
+            }
+        }
+    }
+    if r.backed_up > 0 {
+        out.push_str(&format!(
+            "\n覆盖前备份了 {} 份旧内容到 lost/reset-*（可用 work_lost 找回）。",
+            r.backed_up
+        ));
+    }
     out
 }
 

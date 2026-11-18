@@ -20,9 +20,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 mod commit;
+mod diff;
 mod facade;
 mod history;
 mod lifecycle;
+mod reset;
 mod resolve;
 pub(crate) mod roots;
 mod sync;

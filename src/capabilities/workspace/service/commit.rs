@@ -196,7 +196,7 @@ impl WorkspaceService {
 
     /// 目的：把一条线的头挪到 `target`；引用不存在就建。
     /// 约束：只改 `target`，不动 `heads`（归档引用用该字段记各 agent 的回退点）。
-    fn set_line_head(
+    pub(super) fn set_line_head(
         &self,
         store: &Path,
         name: &str,
@@ -242,7 +242,11 @@ impl WorkspaceService {
     }
 
     /// 目的：该 agent 工作线的头与整棵树（空线 = `(None, 空树)`）。
-    fn work_tree(&self, store: &Path, agent: &str) -> Result<(Option<u64>, Tree), String> {
+    pub(super) fn work_tree(
+        &self,
+        store: &Path,
+        agent: &str,
+    ) -> Result<(Option<u64>, Tree), String> {
         let Some(r) = self.store.read_ref(store, &Self::work_ref(agent))? else {
             return Ok((None, Tree::new()));
         };
