@@ -688,7 +688,10 @@ pub(crate) fn available_tools(face: &ToolFace) -> String {
 
 /// 目的：拒绝回执，**不**附工具清单——档位、确认、放行、参数这类拒绝与「换个工具」无关，清单只会扰民。
 pub(crate) fn refuse(why: String) -> ToolOutcome {
-    ToolOutcome { ok: false, output: why }
+    ToolOutcome {
+        ok: false,
+        output: why,
+    }
 }
 
 /// 目的：发现类拒绝（没指明模块 / 没有这个模块 / 模块没声明这个工具）：把可选范围说回去。

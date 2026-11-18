@@ -871,22 +871,12 @@ mod tests {
             output_limit: OutputLimit::Shell,
         };
         let texts = CodeProcessTexts;
-        let host = shell_receipt(
-            &texts,
-            "hello\n",
-            "",
-            ShellEnd::Exit(Some(0)),
-        );
+        let host = shell_receipt(&texts, "hello\n", "", ShellEnd::Exit(Some(0)));
         let guest = shell_outcome(&texts, &run, "hello\n", "", 0, false);
         assert_eq!(guest.output, host, "正常回执要同形");
         assert!(guest.ok);
 
-        let host_timeout = shell_receipt(
-            &texts,
-            "",
-            "",
-            ShellEnd::TimedOut { secs: 3 },
-        );
+        let host_timeout = shell_receipt(&texts, "", "", ShellEnd::TimedOut { secs: 3 });
         let guest_timeout = shell_outcome(
             &texts,
             &run,

@@ -441,7 +441,9 @@ params:
 
     #[test]
     fn truncated_recognises_both_truncation_markers() {
-        assert!(truncated("[结果截断] 输出共 20000 字符；保留开头 3964 与结尾 11990 字符"));
+        assert!(truncated(
+            "[结果截断] 输出共 20000 字符；保留开头 3964 与结尾 11990 字符"
+        ));
         assert!(truncated(
             "  [截断] 输出共 20000 字符；保留开头 4000 与结尾 12000 字符"
         ));

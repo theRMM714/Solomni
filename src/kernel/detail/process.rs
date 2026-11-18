@@ -360,12 +360,8 @@ impl ProcTools {
         } else {
             crate::kernel::domain::receipt::ShellEnd::Exit(code)
         };
-        let mut output = crate::kernel::domain::receipt::shell_receipt(
-            self.texts.as_ref(),
-            &out,
-            &err,
-            end,
-        );
+        let mut output =
+            crate::kernel::domain::receipt::shell_receipt(self.texts.as_ref(), &out, &err, end);
         if code == Some(confine::FENCE_FAILED) {
             output.push('\n');
             output.push_str(&self.texts.fence_failed());

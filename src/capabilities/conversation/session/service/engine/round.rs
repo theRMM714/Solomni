@@ -666,8 +666,7 @@ pub fn converse_with(
                         let (label, outcome, read, shell) = done[i].clone();
                         let mut outcome = annotate(outcome);
                         // 与原生通道同一处预算：信封通道的回执也要收进 16k（read / 模块工具的续读提示各按能力给）。
-                        outcome.output =
-                            cap_result(outcome.output, continuation_for(&label, tool));
+                        outcome.output = cap_result(outcome.output, continuation_for(&label, tool));
                         ToolCallView {
                             speaker: speaker.to_string(),
                             module: label,
