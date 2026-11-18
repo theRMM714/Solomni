@@ -168,4 +168,4 @@
 | 测试入口参数 / 模式 / 车道 / 步骤 / 标记 | `node run-tests.js --list [--json]`（`tests/gates/registry.js`、`tests/gates/steps.js`、`tests/lib/markers.js`） |
 | 平台支持与验收状态 | `tests/gaps.yaml`、`tests/<平台>/gaps.yaml`、代码里的 `VERIFIED_HOSTS` |
 | 外部链接与工具链版本 | `links.yaml`、`dev-tools.js` |
-| 文档与真相源的机器比对 | `tests/gates/structure/`（8 文件）、`tests/gates/docs/`（4 文件）、`node tests/docs-sync.mjs` |
+| 文档与真相源的机器比对 | `tests/gates/structure/`、`tests/gates/docs/`、`node tests/docs-sync.mjs`；门禁清单以 `node run-tests.js --list` 为准 |

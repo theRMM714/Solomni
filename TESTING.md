@@ -11,7 +11,7 @@
 
 - 测试要回答的是"当前实现是否满足可观察的行为契约"，不是"测试数量是否很多"或"代码覆盖率是否好看"；覆盖率在这里是风险下限与回归护栏，不是质量目标。
 - 覆盖率只报不拦：不达标打印回执，不使 CI 变红、不阻塞合并（`tests/coverage-policy.json` 的 `reportOnly`；要卡线用 `--strict`）。项目频繁重构，阈值是观察指标，不是合并闸门。
-- 风险区按代码划分，不按测试层：产品代码 80%、平台/进程适配 60%、安全策略 100%；PR 新增 Rust 行 90%、安全变更行 100%（`tests/coverage-policy.json`、`tests/coverage.mjs`）；这些数字只用于报告回执，不是合并判据。安全的行为矩阵必须 100%（`src/tests/permission.rs`、`src/kernel/detail/confine/tests.rs`）；OS 强制后端归平台桶，由三平台真机探针（`tests/<平台>/`）与突变审计（`tests/mutation-scope.json`）把关。E2E 不设行覆盖率，旅程清单必须全过（`tests/cross-platform/e2e/browser.cjs`）。
+- 风险区按代码划分，不按测试层：产品代码 80%、平台/进程适配 60%、安全策略 100%；PR 新增 Rust 行 90%、安全变更行 100%（`tests/coverage-policy.json`、`tests/coverage.mjs`）；这些数字只用于报告回执，不是合并判据。安全的行为矩阵必须 100%（`src/tests/permission.rs`、`src/kernel/detail/confine/tests.rs`）；OS 强制后端归平台桶，由三平台真机探针（`tests/<平台>/`）与定期突变审计调查覆盖；两者都不参与验收判定。E2E 不设行覆盖率，旅程清单必须全过（`tests/cross-platform/e2e/browser.cjs`）。
 
 - 测试只钉**可观察行为**：能力面（`capabilities/<单元>/<子业务>/api.rs` 的入站对象）、端口契约、内核真实实例与 E2E 旅程。`service` / `domain` / `detail` 的自由函数、内部结构与状态机**不单独写用例**——实现会频繁搬迁，钉住它的用例最先腐烂；这些行为改由驱动能力面或旅程的用例覆盖。
 - **不做内部实现测试**：`src/tests/**` 只能经 `capabilities/<单元>/<子业务>::api`、`::ports` 或组合根 `crate::entry::assembly` 取实现，出现 `::service` / `::domain` / `::detail` 即失败（门禁 `structure/tests-api`，豁免只有替身层 `doubles` / `fakes` / `prelude` / `builders` / `detail` / `helpers`）。这条用机器判，不靠评审记忆。

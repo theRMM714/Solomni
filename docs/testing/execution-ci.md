@@ -57,7 +57,7 @@ node run-tests.js
 1. `cargo build`（并打印安全模式 / 真机围栏模式说明）；
 2. 运行 `solomni --doctor`，记录当前平台和围栏能力；
 3. `T0 编译（--all-targets）`（硬失败）；
-4. `T0 结构审查`（文档审查 + 结构审查；硬失败；判据实现只有两处——`tests/gates/structure/` 9 个文件与 `tests/gates/docs/` 4 个文件，逐条清单以 `node run-tests.js --list` 为准，判定口径见 [levels.md](levels.md) 的 T0）；
+4. `T0 结构审查`（文档审查 + 结构审查；硬失败；判据实现在 `tests/gates/structure/` 与 `tests/gates/docs/`，逐条清单以 `node run-tests.js --list` 为准，判定口径见 [levels.md](levels.md) 的 T0）；
 5. `T0 格式（fmt --check）`（硬失败）；
 6. `T0 静态检查（clippy）`（硬失败）；
 7. `T0 编译告警`（硬失败）；
@@ -203,7 +203,7 @@ node run-tests.js --coverage
 - `weekly` 覆盖安全、底层、虚拟机、workspace 与 `core` 的高价值纯逻辑：安全 `src/capabilities/permission/domain/permission.rs`、`src/kernel/detail/confine/paths.rs`、`src/kernel/detail/confine/ledger.rs`、`src/kernel/detail/unpack.rs`；底层 `src/kernel/domain/path.rs`；虚拟机 `src/capabilities/vm/domain/guest.rs`、`src/capabilities/vm/domain/exec.rs`、`src/capabilities/vm/service.rs`；workspace `src/capabilities/workspace/domain/workstore.rs`、`src/capabilities/workspace/domain/workspace.rs`、`src/capabilities/workspace/service/commit.rs`；以及 `core` 的 `src/capabilities/llm/detail/repair.rs`、`src/capabilities/catalog/registry/detail/yaml_settings.rs`、`src/capabilities/conversation/slate/service.rs`。
 - 安全纯逻辑必须在范围内（`src/capabilities/permission/domain/permission.rs`、`src/kernel/detail/confine/paths.rs`）；安全面的突变存活率目标 **≥90%**，在阶段出口人工审计，不接 CI 门禁。
 - 定时：`.github/workflows/mutants.yml` 的 `schedule: cron "0 4 * * 1"`（UTC 04:00 = 北京时间周一 12:00）。GitHub 只在**默认分支最新提交**上跑定时；同一提交若已有 `weekly` 结论（`all-caught` 或 `missed`），preflight 读 ci-mutation 分支上一次 weekly 的 meta.json 后跳过；`404`、坏 JSON、`timeout`、`baseline-failed`、`error` 都照常重跑。手动派发永远执行。
-- 分片并行：`mutants.yml` 的 `mutation` job 是四片矩阵（`MUTATION_SHARD` = `1/4`…`4/4`，交给 cargo-mutants 的 `--shard`），每片 `timeout-minutes: 240`，`fail-fast: false` 让各片独立给结论；weekly 的 742 个变异体每片约 186 个。手动与定时共用 `ci-mutation-run` 并发组，不取消正在跑的那次。加片只改 `matrix.include`，不改脚本。
+- 分片并行：`mutants.yml` 的 `mutation` job 是四片矩阵（`MUTATION_SHARD` = `1/4`…`4/4`，交给 cargo-mutants 的 `--shard`），每片 `timeout-minutes: 240`，`fail-fast: false` 让各片独立给结论。片数按变异体总数现算，不写死。手动与定时共用 `ci-mutation-run` 并发组，不取消正在跑的那次。加片只改 `matrix.include`，不改脚本。
 - 分片报告由 `tests/ci-mutation-merge.mjs` 合并成一份（最坏状态优先：`baseline-failed` > `error` > `missed` > `timeout` > `all-caught`），跑在独立的 `merge` job，缺片（超时被取消）也照发并如实打印。
 
 ```text
