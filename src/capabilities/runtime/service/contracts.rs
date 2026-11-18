@@ -321,16 +321,21 @@ impl RuntimeOps for Handle {
         Ok(self.rewind_with_reset(sid, target, false)?.main)
     }
 
-    /// 停止 = **把整棵子树落成「已停止」**（拦住之后的一切派发与唤醒），再取消正在跑的生成；
-    /// 这两步都不走命令队列里的长操作，生成期间照样立刻生效。
+    /// 中断 = 取消正在跑的生成；这两步都不走命令队列里的长操作，生成期间照样立刻生效。
+    /// 运行态不动：中断后派发与唤醒照常，「继续」从断点重开一轮。
+    fn interrupt(&self, sid: &str) -> Vec<String> {
+        // 等用户裁决的队一律作废（落盘 + 如实外送），等待方因此解开。
+        self.void_gates(sid);
+        self.stop_tree(sid).unwrap_or_default()
+    }
+
+    /// 停止会话 = **把整棵子树落成「已停止」**（拦住之后的一切派发与唤醒），再中断正在跑的生成。
     /// **顺序不能反**：先冻态再取消——否则被停会话收尾写的那条"这一轮结束"会先把父会话叫醒。
     /// 用户「继续」（`continue_flow`）是它的逆操作。
     fn stop(&self, sid: &str) -> Vec<String> {
         let sid_owned = sid.to_string();
         let _ = self.call(move |core| core.turn.set_subtree_run(&sid_owned, RunState::Stopped));
-        // **停止 = 拒绝**：整棵子树里等用户裁决的队一律作废（落盘 + 如实外送），等待方因此解开。
-        self.void_gates(sid);
-        self.stop_tree(sid).unwrap_or_default()
+        self.interrupt(sid)
     }
 }
 

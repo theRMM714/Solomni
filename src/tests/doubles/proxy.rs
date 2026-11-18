@@ -232,6 +232,7 @@ impl ProxyHost for FakeProxyHost {
             session: session.to_string(),
             action,
             state: match action {
+                dproxy::ControlAction::Interrupt => "active",
                 dproxy::ControlAction::Stop => "stopped",
                 dproxy::ControlAction::Continue => "active",
                 dproxy::ControlAction::Close => "closed",

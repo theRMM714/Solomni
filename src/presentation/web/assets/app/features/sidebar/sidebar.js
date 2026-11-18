@@ -9,6 +9,7 @@ import { sidebarCopy } from './copy.js';
 let g, doc, state, api, ui, app;
 let fold, h, icon;
 const absorb = (...a) => app.absorb(...a);
+const actionUrl = (...a) => app.actionUrl(...a);
 const absorbEvents = (...a) => app.absorbEvents(...a);
 const eventError = (...a) => app.eventError(...a);
 const openConfig = (...a) => app.openConfig(...a);
@@ -20,9 +21,11 @@ const setActive = (...a) => app.setActive(...a);
 /// 选择器简写：模块内的 DOM 查找一律走注入的 doc。
 const $ = (sel) => doc.querySelector(sel);
 
-/// 行尾铅笔菜单：打开 / 编辑配置 / 删除（子会话多一项「打开父会话」，不给删除）。
+/// 行尾铅笔菜单：打开 / 编辑配置 / 停止会话（或对已停止的「继续」）/ 删除
+/// （子会话多一项「打开父会话」，不给删除）。
 function historyMenu(h) {
   const busy = generating(h.name);
+  const stopped = h.run === 'stopped';
   /** @type {Array<{label?: string, icon?: string, disabled?: boolean, reason?: string, sep?: boolean, danger?: boolean, onClick?: () => void}>} */
   const items = [
     { label: '打开', icon: 'folder', onClick: () => openHistory(h.name) },
@@ -30,11 +33,14 @@ function historyMenu(h) {
       label: '编辑配置',
       icon: 'pencil',
       disabled: busy,
-      reason: busy ? '该会话正在生成中：先「停止」或等它结束，再改配置' : '',
+      reason: busy ? '该会话正在生成中：先「中断」或等它结束，再改配置' : '',
       onClick: () => openConfig(h.name),
     },
   ];
   if (h.parent) items.splice(1, 0, { label: '打开父会话', icon: 'chevron', onClick: () => openHistory(h.parent) });
+  // 停止会话 = 冻结整棵子树（派发与唤醒都拒），与输入键的「中断」不是一回事。
+  if (stopped) items.push({ label: '继续', icon: 'play', onClick: () => continueHistory(h.name) });
+  else items.push({ label: '停止会话', icon: 'pause', onClick: () => stopHistory(h.name) });
   if (!h.parent) {
     items.push({ sep: true });
     items.push({ label: '删除', icon: 'close', danger: true, onClick: () => deleteHistory(h.name) });
@@ -197,6 +203,32 @@ async function openHistory(name) {
     warnIfTierUnavailable(name);
     // 窄屏是抽屉：选完会话就收起来，否则正文被挤成一条窄缝。
     if (isNarrow()) closeDrawer();
+  } catch (err) { ui.notice('操作失败', err.message, 'err'); }
+}
+
+/// 停止会话：先二次确认——停掉后这条会话（含子会话）不再接受派发与唤醒，要「继续」才回到工作。
+async function stopHistory(name) {
+  const ok = await ui.confirmBox(
+    '停止会话',
+    '停止「' + name + '」（含它的子会话）？停止后不再接受派发与唤醒；之后点「继续」可以接着走。',
+    '停止会话'
+  );
+  if (!ok) return;
+  try {
+    await api('POST', actionUrl('control_session'), { session_id: name, action: 'stop' });
+    await refreshState();
+    renderAll();
+    ui.toast('ok', '已停止会话：' + name);
+  } catch (err) { ui.notice('操作失败', err.message, 'err'); }
+}
+
+/// 继续：解冻运行态并接着走（已停止的会话回到工作；不新增用户发言）。
+async function continueHistory(name) {
+  try {
+    await api('POST', actionUrl('control_session'), { session_id: name, action: 'continue' });
+    await refreshState();
+    renderAll();
+    ui.toast('ok', '已继续会话：' + name);
   } catch (err) { ui.notice('操作失败', err.message, 'err'); }
 }
 

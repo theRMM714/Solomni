@@ -200,7 +200,9 @@ impl Core {
         let meta = self.history.meta(sid)?;
         let target = meta.name.clone();
         match action {
-            d::ControlAction::Stop | d::ControlAction::Continue => {
+            d::ControlAction::Interrupt
+            | d::ControlAction::Stop
+            | d::ControlAction::Continue => {
                 return Err(format!(
                     "{} 不走这条：运行态与生成由句柄承担",
                     action.as_str()
