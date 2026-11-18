@@ -16,11 +16,12 @@ pub(crate) fn work_archive_moves_every_sandbox_to_one_point_and_keeps_uncommitte
     let sb = sandbox_of(&ws, "w", "b");
     let sc = sandbox_of(&ws, "w", "c");
 
-    // 第 2 行：a 提交 v1，成为唯一主线提交。
+    // 第 2 行：a 提交 v1 并推送，成为唯一主线提交。
     store.write_under(&sa, "note.md", b"v1").unwrap();
     let mut r = commit_req(&["note.md"], &[], "v1", 1);
     r.line = 2;
-    let id1 = ws.work_commit("w", "a", "w--a", &r).unwrap().id;
+    ws.work_commit("w", "a", "w--a", &r).unwrap();
+    let id1 = push(&ws, "w", "a", "v1", 2, 2).unwrap().commit.unwrap();
 
     // 三个沙箱各有未提交内容：a 改已提交文件，b / c 各写一份草稿。
     store.write_under(&sa, "note.md", b"a-local").unwrap();
@@ -100,7 +101,8 @@ pub(crate) fn work_restore_archive_rewinds_every_sandbox_and_pins_the_line_it_le
     store.write_under(&sa, "note.md", b"v1").unwrap();
     let mut r = commit_req(&["note.md"], &[], "v1", 1);
     r.line = 2;
-    let id1 = ws.work_commit("w", "a", "w--a", &r).unwrap().id;
+    ws.work_commit("w", "a", "w--a", &r).unwrap();
+    let id1 = push(&ws, "w", "a", "v1", 2, 2).unwrap().commit.unwrap();
 
     let mut keep = std::collections::BTreeMap::new();
     for name in ["", "a", "b"] {
@@ -108,11 +110,12 @@ pub(crate) fn work_restore_archive_rewinds_every_sandbox_and_pins_the_line_it_le
     }
     ws.work_archive("w", &keep, &agents, 1).unwrap();
 
-    // 留档之后继续走：a 在第 6 行提交 v2，b 的沙箱也跟着写成 v2（未提交）。
+    // 留档之后继续走：a 在第 6 行提交 v2 并推送，b 的沙箱也跟着写成 v2（未提交）。
     store.write_under(&sa, "note.md", b"v2").unwrap();
     let mut r2 = commit_req(&["note.md"], &[], "v2", 2);
     r2.line = 6;
-    let id2 = ws.work_commit("w", "a", "w--a", &r2).unwrap().id;
+    ws.work_commit("w", "a", "w--a", &r2).unwrap();
+    let id2 = push(&ws, "w", "a", "v2", 3, 6).unwrap().commit.unwrap();
     store.write_under(&sb, "note.md", b"v2").unwrap();
     assert_eq!(ws.work_head("w").unwrap(), Some(id2));
 
@@ -139,7 +142,7 @@ pub(crate) fn work_restore_archive_rewinds_every_sandbox_and_pins_the_line_it_le
     // 离开的那条线被钉住（提交不删、可再回滚）；档案引用用完即移除。
     assert_eq!(
         store
-            .read_ref(&root, "live/2")
+            .read_ref(&root, &format!("live/{}", id2))
             .unwrap()
             .and_then(|r| r.target),
         Some(id2)
@@ -169,22 +172,24 @@ pub(crate) fn work_delete_rolls_every_sandbox_back_and_prunes_archives() {
     let sb = sandbox_of(&ws, "w", "b");
     let root = ws.roots("w", &[]).unwrap().store;
 
-    // 第 2 行：a 提交 v1，并在这一点留档。
+    // 第 2 行：a 提交 v1 并推送，并在这一点留档。
     store.write_under(&sa, "note.md", b"v1").unwrap();
     let mut r = commit_req(&["note.md"], &[], "v1", 1);
     r.line = 2;
-    let id1 = ws.work_commit("w", "a", "w--a", &r).unwrap().id;
+    ws.work_commit("w", "a", "w--a", &r).unwrap();
+    let id1 = push(&ws, "w", "a", "v1", 2, 2).unwrap().commit.unwrap();
     let mut keep = std::collections::BTreeMap::new();
     for name in ["", "a", "b"] {
         keep.insert(name.to_string(), 2u64);
     }
     ws.work_archive("w", &keep, &agents, 1).unwrap();
 
-    // 留档之后继续走：第 6 行提交 v2；两个沙箱各留一份未提交内容。
+    // 留档之后继续走：第 6 行提交 v2 并推送；两个沙箱各留一份未提交内容。
     store.write_under(&sa, "note.md", b"v2").unwrap();
     let mut r2 = commit_req(&["note.md"], &[], "v2", 2);
     r2.line = 6;
-    let id2 = ws.work_commit("w", "a", "w--a", &r2).unwrap().id;
+    ws.work_commit("w", "a", "w--a", &r2).unwrap();
+    let id2 = push(&ws, "w", "a", "v2", 3, 6).unwrap().commit.unwrap();
     store.write_under(&sa, "note.md", b"a-local").unwrap();
     store.write_under(&sb, "b-draft.md", b"b-draft").unwrap();
     assert_eq!(ws.work_head("w").unwrap(), Some(id2));
@@ -210,7 +215,7 @@ pub(crate) fn work_delete_rolls_every_sandbox_back_and_prunes_archives() {
             .unwrap()
             .entries
             .iter()
-            .any(|e| e.path == "delete-1/note.md"),
+            .any(|e| e.path == format!("delete-{}/note.md", id1)),
         "删除前的沙箱内容要进 lost"
     );
     assert!(
@@ -218,7 +223,7 @@ pub(crate) fn work_delete_rolls_every_sandbox_back_and_prunes_archives() {
             .unwrap()
             .entries
             .iter()
-            .any(|e| e.path == "delete-1/b-draft.md"),
+            .any(|e| e.path == format!("delete-{}/b-draft.md", id1)),
         "删除前的草稿要进 lost"
     );
 
@@ -239,6 +244,7 @@ pub(crate) fn work_archive_puts_each_sandbox_on_its_own_save_snapshot() {
     let mut r = commit_req(&["note.md"], &[], "v1", 1);
     r.line = 2;
     ws.work_commit("w", "a", "w--a", &r).unwrap();
+    push(&ws, "w", "a", "v1", 2, 2).unwrap();
 
     // 沙箱存档：草稿只在存档线，主线没有它。
     store.write_under(&sa, "draft.md", b"draft").unwrap();

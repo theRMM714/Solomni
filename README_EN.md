@@ -12,7 +12,7 @@ Solomni is an **agent runtime environment (AgentOS) that runs on your own machin
   take the product away and the module still runs; take the module away and the product keeps running.
   People use it through the UI and agents through the contract, from one declaration (contract in [MODULE_SPEC.md](MODULE_SPEC.md)).
 - **Several agents working on one job.** Every agent has its own sandbox (`session/<name>/<agent-instance>/`), which is also its **working copy** of the shared area;
-  the shared area `work/` is the **main copy and read-only for agents**. Pull what you need with `work_pull`, edit in the sandbox, then commit with `work_commit`.
+  the shared area `work/` is the **main copy and read-only for agents**. Pull what you need with `work_pull`, edit in the sandbox, then record with `work_commit` and publish with `work_push`.
   Commits use a file-level three-way comparison: a conflict rejects the whole commit and names each path instead of silently overwriting; merge text by hand, inspect all three sides with `work_versions`, and resolve explicitly with `work_resolve` — images / video / binary can only choose a side; no automatic merge.
   Text, images, video and other binaries are handled as bytes; any commit point can be restored.
   The only two roads across agents are the shared area and the transcript that enters the context; "who may write which part" is enforced by session permissions
@@ -37,7 +37,7 @@ Solomni is an **agent runtime environment (AgentOS) that runs on your own machin
 - **Modules are drop-in**: a folder with a valid `module.yaml` under `modules/` appears; remove it and it is gone — no registration, no build, no restart
   (contract in [MODULE_SPEC.md](MODULE_SPEC.md)).
 - **Sessions and history**: one directory per piece of work (`session/<name>/`); rewind / archive / delete / restore, transcript replay, context compaction,
-  versioned shared area (`work_pull` / `work_commit` / `work_status` / `work_versions` / `work_resolve` / `work_lost`), plus a user-facing commit history with non-destructive rollback.
+  versioned shared area (`work_pull` / `work_commit` / `work_push` / `work_status` / `work_versions` / `work_resolve` / `work_lost`), plus a user-facing commit history with non-destructive rollback.
 - **Shell**: a one-shot `shell` for build / test / scripts (executor, solo and the core proxy for verification). Default `scope=sandbox` touches only the private sandbox plus read-only base / project toolchains; `scope=external` also reads the shared area, module dirs and authorized host roots and may use the network, with the session profile deciding ask / allow. The shared area stays read-only and module secrets are never injected.
 - **Three isolation layers**: path checks inside the built-in file tools (shell's boundary is the fence) → every tool process and shell runs behind the gate process (environment allowlist / process tree / timeout or cancel kills the whole tree)
   → platform fences (Windows AppContainer, Linux Landlock, macOS seatbelt); if a mechanism cannot be installed, the capability grade is reported honestly.
@@ -162,7 +162,7 @@ tools:                       # optional: external tool table
 ```
 
 - External tools have one calling convention: **start command + arguments + a stdin/stdout receipt**; a long-running MCP service goes under `services`.
-- A tool process can reach that agent's private sandbox and the module directories it uses; the shared main copy needs `work_pull` / `work_commit` (conflicts: `work_versions` / `work_resolve`). Module directories (including `userdata/`) are read-only to the agent's file tools: agents have use rights only, and module data is maintained by the module's own tools and services.
+- A tool process can reach that agent's private sandbox and the module directories it uses; the shared main copy needs `work_pull`, publishing needs `work_commit` + `work_push` (conflicts: `work_versions` / `work_resolve`). Module directories (including `userdata/`) are read-only to the agent's file tools: agents have use rights only, and module data is maintained by the module's own tools and services.
 - If it runs, it is a valid module; if it does not, the core reports the reason plainly — no guessing, no fallback.
 
 ### Run the demo

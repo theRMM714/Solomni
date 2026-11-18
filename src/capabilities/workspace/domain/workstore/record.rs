@@ -50,6 +50,8 @@ pub enum CommitLine {
     /// 目的：主线（共享区的唯一更新途径）。
     #[default]
     Main,
+    /// 目的：该 agent 的工作线 `refs/agents/<agent>`（只由 work_commit 推进，不进主线和共享区）。
+    Work,
     /// 目的：该 agent 的存档线 `refs/agents/<agent>/saves`。
     Save,
 }
@@ -100,6 +102,9 @@ pub struct Commit {
     /// 目的：写下这条提交的来源。
     #[serde(default)]
     pub source: Source,
+    /// 目的：这条提交属于哪条线——只有主线提交进共享区与共享区历史。
+    #[serde(default)]
+    pub line: CommitLine,
     /// 目的：转录行锚（没有锚 = None，按"总在回档点之前"保守处理）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anchor: Option<CommitAnchor>,

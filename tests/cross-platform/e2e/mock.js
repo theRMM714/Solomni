@@ -156,7 +156,7 @@ http.createServer((req, res) => {
     : env('plan', { plan: '方案：一次把事情做完', advice: '我建议现在开工：三件产物都能一次做完。', nodes: [{ id: 'n1', title: '做完', objective: '把事做完', assignee: who, deps: [] }] });
     } else if (sys.includes('harvest') && allUser.includes('真工具链路')) {
       // 真工具链路：按**整段对话里**已经收到的工具结果条数决定下一个调用（真进程、真三语言模块）。
-      // 新模型：共享区对 agent 只读——先把投喂的文件 pull 进沙箱，产物写沙箱，最后 commit 回共享区。
+      // 新模型：共享区对 agent 只读——先把投喂的文件 pull 进沙箱，产物写沙箱，最后 commit 进工作线再 push 发布。
       const s = sandboxRoot || '';
       const n = (allUser.match(/\[工具结果\]/g) || []).length;
       if (n === 0) {
@@ -178,6 +178,8 @@ http.createServer((req, res) => {
       } else if (n === 7) {
         content = env('work_commit', { paths: ['corpus.jsonl', 'report.html', 'index.bin'], message: '语料、报告与索引' });
       } else if (n === 8) {
+        content = env('work_push', { message: '语料、报告与索引' });
+      } else if (n === 9) {
         content = env('submit_report', { summary: '语料、报告与索引都做好了', changes: 'corpus.jsonl、report.html 与 index.bin', open: '' });
       } else {
         content = '回报已经交了。';

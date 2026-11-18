@@ -69,7 +69,7 @@ tools:
     callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: |
       删除**你自己沙箱里**的文件；默认只删文件，目录必须显式 recursive=true。
-      共享区不在这里删（用 work_commit 的 deletes）；模块目录（含 userdata）由模块自己的工具 / 服务进程维护。
+      共享区不在这里删（用 work_commit 的 deletes 记进工作线，work_push 后才从共享区去掉）；模块目录（含 userdata）由模块自己的工具 / 服务进程维护。
       不跟随符号链接 / junction：删除链接只删链接本身。
     params:
       paths:
@@ -440,7 +440,7 @@ tools:
         non_empty: true
         desc: 要诊断的会话 id（虚拟机档）
 
-  # —— 共享区版本化工作区：agent 只写自己的沙箱，用 pull / commit / resolve 与主副本同步 ——
+  # —— 共享区版本化工作区：agent 只写自己的沙箱，用 pull / commit / push 与主副本同步 ——
   work_pull:
     capability: none              # 由 workspace 能力执行（经核心自有工具的派发路径），不经 SysIo
     effect: write                 # 写私有沙箱；读共享区取副本
@@ -460,29 +460,45 @@ tools:
         required: true
         desc: 要拉取的路径数组（相对共享区、/ 分隔的字符串；文件夹会整棵展开）
   work_commit:
-    capability: none              # 由 workspace 能力执行；共享区只有提交这一条写路径
+    capability: none              # 由 workspace 能力执行；只写自己的工作线，共享区一个字都不动
     effect: write
-    reach: [private, shared-write]
+    reach: [private]
     callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: |
-      把沙箱里选中的文件**显式**提交回共享区（write / edit / patch 落地后只记进你的存档线，这里是发布到共享区）。
-      逐个路径做三方比较（你拉取时的基线 / 沙箱当前 / 共享区当前）：
-      任一条冲突 → **整个提交被拒**并逐条点名，绝不静默覆盖别的 agent 的改动。
+      同 git commit：把沙箱里点名的文件记成**你自己工作线**上的一条提交，共享区与主线都不变。
+      write / edit / patch 落地后核心已自动记进你的存档线（回档用），工作线只记你显式提交的路径。
+      本地提交不做冲突判定：读的是一个不会变的树，写的是沙箱当前内容；冲突在 work_push 三方合并时才判。
       文本、图片、视频与其它二进制都按字节提交；单文件有上限，超过会**整次拒绝**并点名路径、大小与替代路径。
-      内容流式读取与校验，不整份进上下文；二进制冲突只能显式选边，不做自动合并。
-      要删除共享区里的文件，用 deletes 显式列出（不会因为沙箱里文件不见了就删）。
+      要删除共享区里的文件，用 deletes 显式列出（不会因为沙箱里文件不见了就删）；推送后才从共享区去掉。
     params:
       paths:
         type: array
         desc: 要提交的路径数组（相对共享区、/ 分隔；文件夹会整棵展开为沙箱里的文件）
       deletes:
         type: array
-        desc: 要删除的共享区路径数组（相对共享区、/ 分隔）；删除必须显式列出
+        desc: 要删除的路径数组（相对共享区、/ 分隔）；删除必须显式列出
       message:
         type: string
         required: true
         non_empty: true
         desc: 提交说明（一句话说清这次改了什么）
+  work_push:
+    capability: none              # 由 workspace 能力执行；共享区只由它（和 work_sync / 用户投喂）推进
+    effect: write
+    reach: [shared-read, shared-write]
+    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    desc: |
+      同 git push：把你工作线上已提交的改动推送进共享区主线，落一条 squash 提交（不是你的每一条本地提交）。
+      逐路径三方合并（你的拉取基线 / 你的工作线 / 主线当前）：有一边没动就取另一边；两边都动且结果不同 → **整次推送被拒**并逐条点名。
+      冲突不会自动合并：先 work_pull 取回主线版本，在沙箱里合并（或用 work_resolve 选边），重新 work_commit 后再推送；工作线提交不会因为被拒丢失。
+      推送成功后共享区物化到合并结果，沙箱里**没被本地改过**的路径一起快进（有未提交改动的路径不动）。
+      没有可推送内容（工作线与主线一致）时如实回执，不算失败。
+    params:
+      message:
+        type: string
+        required: true
+        non_empty: true
+        desc: 主线提交说明（一句话说清这次推送的内容）
   work_status:
     capability: none              # 只读：不碰文件，读版本库与拉取基线
     effect: read

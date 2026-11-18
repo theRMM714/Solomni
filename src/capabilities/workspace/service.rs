@@ -11,8 +11,8 @@ use crate::capabilities::workspace::domain::hash::{content_hash, is_content_hash
 use crate::capabilities::workspace::domain::workstore::{
     Commit, CommitAnchor, CommitLine, Conflict, ConflictAt, Index, LocalTakeVerdict, Pending,
     PendingIndex, PullVerdict, Ref, RefKind, Source, StatusState, Tree, Unchanged, clean_rel,
-    expand_paths, local_take_verdict, lost_rel, needs_backup, plan_commit, pull_verdict, status_of,
-    validate_paths,
+    expand_paths, local_take_verdict, lost_rel, needs_backup, plan_commit, plan_merge,
+    pull_verdict, status_of, validate_paths,
 };
 use crate::capabilities::workspace::ports::{WorkStore, Workdirs};
 use std::collections::{BTreeMap, BTreeSet};
@@ -406,6 +406,11 @@ impl WorkspaceService {
                     self.fast_forward_work(store, &commit.author, Some(commit.id))?;
                 }
             }
+            // 工作线：只写提交并推进自己的头；共享区、`refs/main` 与拉取基线都不动。
+            CommitLine::Work => {
+                self.store.write_commit(store, commit)?;
+                self.fast_forward_work(store, &commit.author, Some(commit.id))?;
+            }
             CommitLine::Save => {
                 self.store.write_commit(store, commit)?;
                 self.advance_save_line(store, &commit.author, commit.id)?;
@@ -611,6 +616,18 @@ fn render_conflicts(conflicts: &[ConflictAt]) -> String {
     }
     out.push_str(
         "\n先用 work_versions 看基线 / 主副本 / 沙箱三方：文本可人工合并后用 work_resolve（take=local）声明已解决，要放弃本地改动用 take=upstream；\n图片 / 视频 / 二进制不能合并，只能选边（take=upstream 取主副本，take=local 保留本地），不做自动合并。",
+    );
+    out
+}
+
+/// 推送冲突渲染成模型侧回执：冲突是「我提交之后主线也动过」，解决路径与本地提交冲突不同。
+fn render_push_conflicts(conflicts: &[ConflictAt]) -> String {
+    let mut out = String::from("推送被拒：以下路径有冲突——你提交之后主线也动过（不做自动合并）：");
+    for c in conflicts {
+        out.push_str(&format!("\n- {}（{}）", c.path, c.kind.reason()));
+    }
+    out.push_str(
+        "\n先用 work_versions 看基线 / 主副本 / 沙箱三方，再用 work_pull 取回主线版本，在沙箱里合并（或用 work_resolve 选边），重新 work_commit 之后再 work_push；\n你的工作线提交不会因为这次拒绝丢失。",
     );
     out
 }

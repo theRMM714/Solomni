@@ -151,6 +151,29 @@ impl WorkHandler {
         }
     }
 
+    /// 目的：把已提交的改动推送进主线。
+    /// 约束：推送写共享区，所以只过「共享区提交权限」这一道闸；逐条路径的写范围在 work_commit 已经卡过。
+    fn push(&self, session: &str, agent: &str, line: u64, args: &serde_json::Value) -> ToolOutcome {
+        if !self.permissions.may_write(Reach::SharedWrite) {
+            return outcome(
+                false,
+                format!(
+                    "推送被拒：当前档位「{}」没有共享区提交权限",
+                    self.permissions.profile.label()
+                ),
+            );
+        }
+        let req = dw::PushRequest {
+            message: dw::str_arg(args, "message").unwrap_or_default(),
+            time: crate::kernel::api::unix_seconds(),
+            line,
+        };
+        match self.workspace.work_push(&self.work, agent, session, &req) {
+            Ok(r) => outcome(true, dw::render_push(&r)),
+            Err(e) => outcome(false, e),
+        }
+    }
+
     fn status(&self, args: &serde_json::Value) -> ToolOutcome {
         let paths = match dw::str_list(args, "paths") {
             Ok(p) => p,
@@ -323,6 +346,7 @@ impl ToolHandler for WorkHandler {
         match name {
             dw::PULL => self.pull(&args),
             dw::COMMIT => self.commit(ctx.work, ctx.agent, ctx.line, &args),
+            dw::PUSH => self.push(ctx.work, ctx.agent, ctx.line, &args),
             dw::SYNC => self.sync(&args),
             dw::STATUS => self.status(&args),
             dw::VERSIONS => self.versions(&args),

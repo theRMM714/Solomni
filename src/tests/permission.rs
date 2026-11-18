@@ -233,6 +233,7 @@ fn shared_grant_routes_to_session_machine_or_nothing() {
 #[test]
 fn work_status_filters_paths_outside_read_scope() {
     use crate::capabilities::workspace::api::CommitRequest;
+    use crate::capabilities::workspace::api::PushRequest;
     use crate::capabilities::workspace::api::WorkHandler;
     use crate::kernel::ports::{ToolCtx, ToolHandler};
 
@@ -258,6 +259,17 @@ fn work_status_filters_paths_outside_read_scope() {
         line: 1,
     };
     ws.work_commit("w", "b", "w--b", &req).unwrap();
+    ws.work_push(
+        "w",
+        "b",
+        "w--b",
+        &PushRequest {
+            message: "发布".to_string(),
+            time: 1,
+            line: 1,
+        },
+    )
+    .unwrap();
     ws.work_pull(
         "w",
         "a",

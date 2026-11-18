@@ -49,7 +49,7 @@ modules/<模块 id>/
 - `runtimes` 只声明能力名（`python` / `node` / `bash` / `cc`……），格式不合法或重复 = 拒收并说明原因；两档的就绪判据见 `docs/vm/README.md`。
 - 声明不构成保证：命令仍是模块作者的自由文本，能力没装载、命令跑不起来都如实报错，不静默兜底；唯一的例外是相对路径入口——它是模块内产物，建会话前会先查它到底在不在。
 - `userdata/` 是模块私有的跨任务状态区（缓存 / 记忆 / 配置）：git 忽略、数据不出工作区；载入模块时确保它存在（产品唯一的自动写盘，幂等；建不了不阻断加载、如实标注）。
-- 一次工作的产物写该 agent 的沙箱（工作副本），再用 `work_commit` 提交回共享区；文本、图片、视频与二进制都按字节处理（内容流式读写、不整份进上下文；单文件有上限，超限会明确拒绝）；冲突用 `work_versions` 看三方、`work_resolve` 选边；产物不要塞进 `userdata/`。
+- 一次工作的产物写该 agent 的沙箱（工作副本），再用 `work_commit` 记进工作线、`work_push` 发布到共享区；文本、图片、视频与二进制都按字节处理（内容流式读写、不整份进上下文；单文件有上限，超限会明确拒绝）；冲突用 `work_versions` 看三方、`work_resolve` 选边；产物不要塞进 `userdata/`。
 - 模块损坏或 yaml 非法 → 不进清单，菜单少一项，永不崩溃。
 
 ## 二、模块工具（`tools`）
@@ -78,7 +78,7 @@ modules/<模块 id>/
 - 直接调用仍按本模块 `params` 校验；可选 `workspace` 给一份工作目录（缺省 = 模块自己的 `userdata/`），围栏与 agent 会话同一口径。
 - 只写 `system`、不声明任何入口的模块在列表里如实标注「只能经 agent 使用」；没有额外的独立入口声明节——声明了哪个工具，就是能直跑哪个（动作表见 `docs/tools/tools-and-roles.md`）。
 - 模块工具的入参若会落到 `userdata/`，语义由模块作者校验；围栏只保证不越出 `userdata/`。
-- 工具看到的路径：可读写的是该 agent 的私有沙箱（工作副本，永远全权）；模块目录（含 `userdata/`）对 agent 的内置文件工具永久只读——agent 只有模块的使用权；模块工具 / 服务进程可写自己的 `userdata/`；共享区主副本对 agent 只读，要改先 `work_pull` 拉进沙箱、改完 `work_commit`，冲突用 `work_versions` / `work_resolve`。
+- 工具看到的路径：可读写的是该 agent 的私有沙箱（工作副本，永远全权）；模块目录（含 `userdata/`）对 agent 的内置文件工具永久只读——agent 只有模块的使用权；模块工具 / 服务进程可写自己的 `userdata/`；共享区主副本对 agent 只读，要改先 `work_pull` 拉进沙箱、改完 `work_commit` + `work_push`，冲突用 `work_versions` / `work_resolve`。
 
 ## 三、工具参数（`params`）
 | 字段 | 类型 | 必填 | 默认 | 说明 |

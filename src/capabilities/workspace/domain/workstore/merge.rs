@@ -216,3 +216,80 @@ pub fn pull_verdict(base: Option<&str>, head: Option<&str>, local: Option<&str>)
         },
     }
 }
+
+/// 目的：一次推送三方合并的结果：合并后的整棵树 + 主线相对它自己这一版要落的改动。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MergePlan {
+    /// 目的：合并后的整棵树（= 主线这一版 + 我这边不冲突的改动）。
+    pub tree: Tree,
+    /// 目的：要写进主线的变化（相对主线当前树；空 = 与主线一致，没有可推送内容）。
+    pub changes: Vec<Change>,
+}
+
+/// 目的：推送的三方合并（`base` = 我拉取时的基线树，`mine` = 我的工作线头，`theirs` = 主线头）。
+///   逐路径按 git 的规则判：有一边没动就直接取另一边，两边都动且结果不同 = 冲突。
+/// 返回：Ok(合并计划)；Err = 冲突清单（整次推送拒绝，逐条点名）。
+pub fn plan_merge(base: &Tree, mine: &Tree, theirs: &Tree) -> Result<MergePlan, Vec<ConflictAt>> {
+    let mut paths: std::collections::BTreeSet<&String> = std::collections::BTreeSet::new();
+    paths.extend(base.keys());
+    paths.extend(mine.keys());
+    paths.extend(theirs.keys());
+    let mut tree = theirs.clone();
+    let mut changes: Vec<Change> = Vec::new();
+    let mut conflicts: Vec<ConflictAt> = Vec::new();
+    for path in paths {
+        let b = base.get(path).map(String::as_str);
+        let m = mine.get(path).map(String::as_str);
+        let t = theirs.get(path).map(String::as_str);
+        // 合并结果：有一边没动就取另一边；两边一样就一样；都动且不同 = 冲突。
+        let merged = if m == t {
+            m
+        } else if m == b {
+            t
+        } else if t == b {
+            m
+        } else {
+            conflicts.push(ConflictAt {
+                path: path.clone(),
+                kind: match (b, m, t) {
+                    (None, Some(_), Some(_)) => Conflict::BothAdded,
+                    (Some(_), None, Some(_)) => Conflict::DeleteVsModify,
+                    (Some(_), Some(_), None) => Conflict::ModifyVsDelete,
+                    _ => Conflict::BothModified,
+                },
+            });
+            continue;
+        };
+        match merged {
+            Some(hash) => {
+                if t != Some(hash) {
+                    tree.insert(path.clone(), hash.to_string());
+                    changes.push(Change {
+                        path: path.clone(),
+                        kind: if t.is_none() {
+                            ChangeKind::Add
+                        } else {
+                            ChangeKind::Modify
+                        },
+                        hash: hash.to_string(),
+                    });
+                }
+            }
+            None => {
+                if t.is_some() {
+                    tree.remove(path);
+                    changes.push(Change {
+                        path: path.clone(),
+                        kind: ChangeKind::Delete,
+                        hash: String::new(),
+                    });
+                }
+            }
+        }
+    }
+    if conflicts.is_empty() {
+        Ok(MergePlan { tree, changes })
+    } else {
+        Err(conflicts)
+    }
+}

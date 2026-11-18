@@ -143,7 +143,7 @@ roles:
 - 平台：Linux / macOS 用 sh；Windows 用 PowerShell（pwsh 7 优先、5.1 回退；`pwsh` 是 Microsoft Store 的应用执行别名——0 字节重解析点——时不选它，那种文件在围栏里起不来，判据在 `src/kernel/detail/process/windows.rs` 的 `exe_fact`；`-File` 临时 .ps1，UTF-8 BOM；脚本先设 `$ErrorActionPreference = 'Stop'`，未处理的 cmdlet 错误中止并以非 0 结束，要容错就在脚本里显式 `-ErrorAction SilentlyContinue` 或 try/catch）；VM Linux guest 用 /bin/sh，helper 按 `timeout_secs` 杀树；host 停止经 QGA 给 helper 发 SIGTERM，立即杀整棵进程树。guest 通道产出与本机同形的正文与状态行：超时 / 信号由 `src/capabilities/vm/detail/guest_helper.rs` 的机器标记（`solomni-guest-fence: timeout` / `solomni-guest-fence: signal`）表达、用户停止按宿主取消旗判定，由通道翻译成状态行；cwd·耗时尾行由工具层在通道返回后统一追加（`src/capabilities/conversation/session/service/engine/tools.rs`）。围栏拒绝（helper 的 `solomni-guest-fence:` 诊断）没有 `[shell]` 收尾行——命令没有执行。
 - 围栏基线：本机 Linux / macOS 的只读运行基线**只对 `/dev/null` 例外给写权**（标准重定向要能丢弃输出，`>/dev/null` / `2>/dev/null` 不能用 EACCES 把脚本带偏）；guest helper 同一口径。其余 `/dev` 节点不放行（`src/kernel/detail/confine/linux.rs` 的 `WRITABLE_BASELINE`、`src/kernel/detail/confine/macos.rs` 的 profile、`src/capabilities/vm/detail/guest_helper.rs` 的基线）。
 - 状态：最近一次 shell 在会话状态栏出 chip（运行中；结束后按 `ShellLive.status` 分退出码 / 超时 / 停止 / 信号 + 耗时），点开看命令、scope、cwd、状态、退出码、耗时与回执预览；数据来自 `SessionView.shell`，不替代转录里的工具行。重建 / 回放的会话按转录派生（`historical`）：cwd 与耗时优先读工具行的结构化事实、旧转录回落读回执，起止时间不伪造。
-- 角色：executor / solo / core_proxy。代理的 shell 只做验收性核对，不替执行席产出；共享区只读，仍没有 work_pull / work_commit / work_sync / 模块工具。
+- 角色：executor / solo / core_proxy。代理的 shell 只做验收性核对，不替执行席产出；共享区只读，仍没有 work_pull / work_commit / work_push / work_sync / 模块工具。
 - 路径：shell 不接受模型给的 path 参数，**不适用** §七 的路径寻址表；边界是围栏。共享区内容先 work_pull 进沙箱；external 只额外读主副本，不写。
 - 隐私：shell 不注入模块 secrets，不声明 module-write；模块 userdata 不可写。
 
@@ -169,11 +169,11 @@ roles:
   - 规矩只在提示词册的 `path_rules` 里说一次（见 [prompts.md](../prompt/prompts.md)）。
   - 虚拟机档的 guest 写法由核心在**寻址前**译回宿主路径（`kernel::ports::PathCodec`），再过下面的允许根校验。
   - **翻译不改变安全边界**：越界、`..`、相对路径照样拒；拒绝时按本环境写法列出允许的根。
-  - 两档同一口径：共享区对 agent 只读，写共享区走 `work_commit`；虚拟机档只是把同一个只读范围翻成 guest 写法再交给 guest helper。
+  - 两档同一口径：共享区对 agent 只读，发布到共享区走 `work_commit`（记进工作线）+ `work_push`；虚拟机档只是把同一个只读范围翻成 guest 写法再交给 guest helper。
 
 | 占位符 | 运行时替换为 | 可达范围 |
 | --- | --- | --- |
-| `{{work_root}}` | 本次工作共享区根：默认 `session/<工作名>/work/`，根会话绑定外部工作区时是该目录的绝对路径（**主副本**）；虚拟机档由路径桥渲染成 guest 内写法（内部布局落在会话树挂载点下，外部绑定时落在外部工作区挂载点下） | 本工作内的 agent（**只读**：agent 会话里写它会被工具层拒绝，写入走 `work_commit`） |
+| `{{work_root}}` | 本次工作共享区根：默认 `session/<工作名>/work/`，根会话绑定外部工作区时是该目录的绝对路径（**主副本**）；虚拟机档由路径桥渲染成 guest 内写法（内部布局落在会话树挂载点下，外部绑定时落在外部工作区挂载点下） | 本工作内的 agent（**只读**：agent 会话里写它会被工具层拒绝，写入走 `work_commit` + `work_push`） |
 | `{{sandbox_root}}` | 该 agent 私有沙箱 `session/<工作名>/<agent实例名>/` 的绝对路径 | 只有它自己（**永远全权**） |
 | `{{module_roots}}` | 该 agent 使用的模块目录的绝对路径（一行一个） | 只有使用该模块的 agent（**对 agent 的内置文件工具永久只读，含 `userdata/`**：agent 只有使用权；模块工具 / 服务进程可写自己的 `userdata/`） |
 
@@ -185,14 +185,14 @@ roles:
 - **Windows 下路径仍统一写 `/`**：守门进程只把**程序名**里的 `/` 换成 `\` 再交 `cmd` 解释；参数里的路径不动。
 - **会话权限叠加在落点之上**：
   - 共享区读写受**该会话**的权限档位与共享区范围约束（范围三态 all / none / 路径数组；黑名单只做减法；全局黑名单是硬底线）。
-  - `work_commit` / `work_sync` 只接受允许范围内的相对路径（越界**整条拒绝**）；`work_pull` 只拉允许范围内的路径。
+  - `work_commit` / `work_push` / `work_sync` 只接受允许范围内的相对路径（越界**整条拒绝**）；`work_pull` 只拉允许范围内的路径。
   - 私有沙箱不受共享区路径范围限制；模块目录对内置文件工具永久只读。
-  - `work_versions` / `work_resolve` / `work_lost` 走读作用域（它们不写共享主副本，提交仍由 `work_commit` 收口；`work_lost` 的 restore 只写自己的沙箱）；`work_sync` 走写作用域（它推进共享区 head，但不改工作区内容）。
+  - `work_versions` / `work_resolve` / `work_lost` 走读作用域（它们不写共享主副本，发布仍由 `work_push` 收口；`work_lost` 的 restore 只写自己的沙箱）；`work_sync` 走写作用域（它推进共享区 head，但不改工作区内容）。
   - 语义见 [docs/permission/README.md](../permission/README.md)。
 - **编码**：内置 `read` / `write` 读严格 UTF-8（非法字节按替换字符呈现并如实标注——**本程序不猜编码**），写一律 UTF-8（`src/capabilities/tools/detail/sys_io.rs`）；
-- `work_pull` / `work_commit` / `work_sync` / `work_versions` / `work_resolve` 按**字节**处理，图片、视频与其它二进制不走 UTF-8 假设。
+- `work_pull` / `work_commit` / `work_push` / `work_sync` / `work_versions` / `work_resolve` 按**字节**处理，图片、视频与其它二进制不走 UTF-8 假设。
 - 内容按块流式读写、不整份进上下文；单文件有上限（`MAX_ASSET_BYTES`，见 [workspace](../workspace/README.md)），超限提交 / 上传整次拒绝。
-- **二进制内容由模块工具或用户投喂产出**，内置 `write` 不是二进制通道；产出后用 `work_commit` 提交。
+- **二进制内容由模块工具或用户投喂产出**，内置 `write` 不是二进制通道；产出后用 `work_commit` 记进工作线、`work_push` 发布。
 - **用户也能引用**：
   - 输入框里用 `@` 挑文件：`@work:相对路径` / `@sandbox:<agent>/相对路径`（**给人用**）。
   - 核心按**本环境的写法**渲染成绝对路径之后才进转录与上下文：本机档 = 宿主真实路径；虚拟机档 = guest 写法（同一座路径桥，模块工具在 guest 里直接能用）。
@@ -220,8 +220,8 @@ prompts/
 | 角色 | 何时 | 工具面（`systools/roles.yaml`） |
 | --- | --- | --- |
 | `discussant` | 讨论阶段 | `say` `agree` `leave` `ask` `read` `list` `search` |
-| `executor` | 任务链节点（agent 子会话） | `read` `list` `write` `edit` `patch` `delete` `search` `shell` `work_pull` `work_commit` `work_sync` `work_status` `work_versions` `work_resolve` `work_lost` `submit_report` + 该 agent 的模块工具 |
-| `solo` | 用户建的单 agent 工作 | `read` `list` `write` `edit` `patch` `delete` `search` `shell` `work_pull` `work_commit` `work_sync` `work_status` `work_versions` `work_resolve` `work_lost` + 该 agent 的模块工具（**不发** `submit_report`） |
+| `executor` | 任务链节点（agent 子会话） | `read` `list` `write` `edit` `patch` `delete` `search` `shell` `work_pull` `work_commit` `work_push` `work_sync` `work_status` `work_versions` `work_resolve` `work_lost` `submit_report` + 该 agent 的模块工具 |
+| `solo` | 用户建的单 agent 工作 | `read` `list` `write` `edit` `patch` `delete` `search` `shell` `work_pull` `work_commit` `work_push` `work_sync` `work_status` `work_versions` `work_resolve` `work_lost` + 该 agent 的模块工具（**不发** `submit_report`） |
 | `planner` | 核心整理派发 | `read` `search` `plan` `slate` `verdict` |
 | `orchestrator` | 核心链中推进 | `read` `search` `node_verdict` `checklist` |
 | `core_proxy` | 核心代理（用户把决定权整块交给它，代用户决定） | `catalog_agents` `create_session` `send_session_message` `observe_session` `read_session_messages` `control_session` `read` `list` `search` `shell`（**不发**模块工具） |
@@ -239,7 +239,7 @@ prompts/
 
 | 场景 | 约定 |
 | --- | --- |
-| 代理工具 | 当前：六个工具 + `shell` + `core_proxy` 角色 + 队列桥宿主（真实会话）。代理档位由用户建会话时显式选择并落盘（预设全可达，不再硬编码 full），代理有真实私有沙箱 `.proxy`；权限语义见 [docs/permission/README.md](../permission/README.md)。代理的 `shell` 只做验收性核对（跑测试 / 看产物），不替执行席产出；共享区只读，仍没有 `work_pull` / `work_commit` / 模块工具；`net` 跟随全局 `sandbox.policy.network`。命中 ask 的调用经统一裁决通道让用户选 `allow` / `deny` / `allow_turn`；没有可回答前端一律拒绝。孩子不把转录推给代理：门的通知、意外停止通知 + `read_session_messages` 主动倒查 |
+| 代理工具 | 当前：六个工具 + `shell` + `core_proxy` 角色 + 队列桥宿主（真实会话）。代理档位由用户建会话时显式选择并落盘（预设全可达，不再硬编码 full），代理有真实私有沙箱 `.proxy`；权限语义见 [docs/permission/README.md](../permission/README.md)。代理的 `shell` 只做验收性核对（跑测试 / 看产物），不替执行席产出；共享区只读，仍没有 `work_pull` / `work_commit` / `work_push` / 模块工具；`net` 跟随全局 `sandbox.policy.network`。命中 ask 的调用经统一裁决通道让用户选 `allow` / `deny` / `allow_turn`；没有可回答前端一律拒绝。孩子不把转录推给代理：门的通知、意外停止通知 + `read_session_messages` 主动倒查 |
 | 建会话 = 建 + 写开头 + 开工 | `create_session` 一份声明两处调用：**人经呈现层**给 `name` / `mode` / `agents`（可省 `tier`；虚拟机档时给 `guest`（虚拟根名））先建出会话，后续用 `send_message` 发言推进；**核心代理**给 `mode`（single / collab）+ `agents`（只写身份：`ref` 或 `name`+`modules`+`model`+`chara`；`chara` 可选，复用项取登记处自己的）+ `task`，**建好就开工**（single 以 task 为第一句，collab 以它当本次需求）。后续补充 / 返工 / 代答门仍走 `send_session_message`（**代答要显式给 `reply` = 那张卡上的选项 id**；给不出就不作代答，不替用户猜） |
 | 历史会话的启用 / 继续 | 只读历史只显示「启用会话」：`activate_session` 从盘上重建、确保 guest、解冻整棵子树，**不跑模型**。启用后 `SessionView.continue` 说有断点时才显示上下文动作（单 agent「继续上一轮」/ 协作「恢复协作」），走 `control_session` 的 `continue`；代理不显示。 |
 | 代理工具的生命周期 | `stop` = 把整棵子树落成 `stopped`（拦住派发与唤醒）再**级联中断**在跑的生成，会话上的停止按钮就是这一下；`continue` = 解冻并按形态唤醒接着走；`close` 是终态。停止 / 继续是一对逆操作，没有单独的暂停；都不改写历史 |
@@ -255,7 +255,7 @@ prompts/
 - **共享区是版本化工作区**：
 
 - 主副本 `work/` 对 agent 只读，agent 只写自己的沙箱（工作副本）。
-- `work_pull` / `work_commit` / `work_sync` / `work_status` / `work_versions` / `work_resolve` / `work_lost` 七个**核心自有工具**做同步、查看、三方比较、显式解决冲突、外部改动采纳与备份恢复。
+- `work_pull` / `work_commit` / `work_push` / `work_sync` / `work_status` / `work_versions` / `work_resolve` / `work_lost` 八个**核心自有工具**做同步、查看、三方比较、显式解决冲突、外部改动采纳与备份恢复。
 - 冲突按文件级三方比较判定，**整体拒绝并逐条点名**，不做自动合并；文本可人工合并后用 `take=local`（带 `head`），图片 / 视频 / 二进制只能显式选边（细则见 [workspace](../workspace/README.md) 与 [PRODUCT.md](../../PRODUCT.md)）。
 - `take=local` 在本地与基线一致时拒绝、主副本提交变化时拒绝；`take=upstream` 覆盖/删除前备份到 `lost/`，`work_lost` 可按当前 hash 恢复。
 - 文本、图片、视频与其它二进制都按字节处理；`work_versions` 给 hash、大小与扩展名媒体类型提示，文本预览最多 16 KiB；单文件超过 64 MiB 时提交 / 上传明确拒绝。

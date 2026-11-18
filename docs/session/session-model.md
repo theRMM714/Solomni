@@ -47,7 +47,7 @@ session/<工作名>/
 - **虚拟机档的挂载布局**：起 guest 时把**会话树根**（`session/<工作名>`，各 agent 私沙与 `.work` 的父目录）与**外部工作区根**（仅外部绑定时）各挂一条稳定挂载，另加模块树根——三根互不包含，guest 内的路径写法由同一座路径桥给出；外部根是 UNC / 网络路径时只有虚拟机档支持（guest 内写成 `/solomni-host/unc/<server>/<share>/…`；本机档因容器围栏拒绝网络工作区）。
 - **环境属于顶层工作**：`exec`（档位 / 虚拟根 / 定版）由人建主会话时决定，整棵子树只读继承；核心代理建子会话时不能自选环境。**同一 agent 全树只有一份名单**：子会话编辑模块 / 模型时写回这份名单，guest 装配按整棵树重新聚合；只改模型 / 权限不重建 guest，改模块 / 环境才重建。
 - 会话权限是**根 ceiling + 子会话逐层 narrowing**：根写 sandbox.ceiling，子写 sandbox.narrowing；子只能换更低档、只能收窄，父编辑只改 ceiling 并与子 narrowing 求交，不覆盖子收窄（`src/capabilities/permission/domain/permission.rs`）。
-- **共享区是版本化工作区**：共享区根（默认 `work/`，或外部工作区）与版本库 `.work/` 都锚在顶层工作上；agent 只写自己的沙箱，`work_pull` 拉取；写工具落地后由核心按**逐路径基线快进**自动提交回主副本（基线过期即拒绝、只留在沙箱）；shell / 模块工具这类不经过写工具的改动，在同一工具批次结束时由核心扫一遍沙箱采纳（只收快进，基线过期 / 冲突的路径不采纳并逐条点名；Windows 本机档容器自己的运行缓存——`AppData/Local/Packages/<容器名>/` 与 `Packages/<容器名>/`，容器名以 `Solomni.Agent.` 开头——不是产物，扫描时跳过，`src/capabilities/workspace/service/sync.rs`），显式补提交用 `work_commit`（文件级三方比较）；`work_versions` 看三方，`work_resolve` 显式选边，`work_status` 看状态。
+- **共享区是版本化工作区**：共享区根（默认 `work/`，或外部工作区）与版本库 `.work/` 都锚在顶层工作上；agent 只写自己的沙箱，`work_pull` 拉取；写工具落地后由核心把整棵沙箱自动记进该 agent 的**存档线**（`refs/agents/<agent>/saves`，不动共享区，只服务回档 / 删除 / 留档 / 恢复）；shell / 模块工具这类不经过写工具的改动，在同一工具批次结束时由核心扫一遍沙箱采纳进同一条存档线（逐条点名没采纳的路径；Windows 本机档容器自己的运行缓存——`AppData/Local/Packages/<容器名>/` 与 `Packages/<容器名>/`，容器名以 `Solomni.Agent.` 开头——不是产物，扫描时跳过，`src/capabilities/workspace/service/sync.rs`），要发布时先用 `work_commit` 把显式路径记进**工作线**（`refs/agents/<agent>`，本地提交、不判别人的基线），再用 `work_push` 与主线三方合并（干净则主线落一条提交并物化共享区，冲突整次拒绝并点名路径）；`work_versions` 看三方，`work_resolve` 显式选边，`work_status` 看状态。
 - 文本、图片、视频与其它二进制都按字节处理（内容流式读写、不整份进上下文；单文件有上限）；`work_versions` 给 hash、大小与扩展名媒体类型提示；文本可人工合并后用 `take=local`，图片 / 视频 / 二进制只能选边，不做自动合并（`src/capabilities/workspace/service.rs`）。
 - **会话权限层**写在 meta.yaml 的 sandbox.ceiling（根）与 sandbox.narrowing（子）：四档 profile + 共享区三态 + 逐工具决定；缺省继承 settings.yaml 的 sandbox.defaults；sandbox.policy.deny 是硬底线，会话只能追加、不能清空。语义见 [docs/permission/README.md](../permission/README.md)。
 - **出站网络是全局开关**（`sandbox.policy.network`）：会话工具、直接模块工具、常驻服务、模块构建共用；虚拟机档决定 guest 网卡；本机档 Windows 授 `internetClient`、macOS 放行 `network-outbound`、Linux `net=false` 用 seccomp 拒绝非本地 socket（`net=true` 不装网络过滤器，不限制入站/绑定）。
@@ -332,7 +332,7 @@ session/<工作名>/
 
 - 实现位置：`src/capabilities/lifecycle/service/rewind.rs`（`lifecycle` 单元，见 [docs/lifecycle/README.md](../lifecycle/README.md)）；本节的判据与顺序以那里为准。
 
-- **按行精确物化共享区**：每个提交记录带 `(agent, line)` 锚（用户投喂锚在主会话当时的行号，agent 提交锚在它自己会话的行号）。回档时按"各会话的保留行"逐个提交比对，取最后一个"所有锚都还没越过保留行"的提交点再物化；删除额外丢弃不再可达的提交并把各 agent 的基线对齐到该点，恢复一条不删（离开的线钉进 `refs/live`）。行锚由每席的 `MemberTools.line` 随转录推进（成员工具面由 `src/capabilities/conversation/session/service/assemble.rs` 装配，`line` 随会话持有）：显式 `work_commit` 经 `ToolCtx` 拿到它，写工具落地后的自动提交与批次末的沙箱采纳都读同一处（采纳的提交记 `source=external`、作者仍是该 agent，所以留档同样能把它退掉）。
+- **按行精确物化共享区**：每个提交记录带 `(agent, line)` 锚（用户投喂锚在主会话当时的行号，agent 提交锚在它自己会话的行号）。回档时按"各会话的保留行"逐个提交比对，取最后一个"所有锚都还没越过保留行"的提交点再物化；删除额外丢弃不再可达的提交并把各 agent 的基线对齐到该点，恢复一条不删（离开的线钉进 `refs/live`）。行锚由每席的 `MemberTools.line` 随转录推进（成员工具面由 `src/capabilities/conversation/session/service/assemble.rs` 装配，`line` 随会话持有）：显式 `work_commit` / `work_push` 经 `ToolCtx` 拿到它，写工具落地后的自动快照与批次末的沙箱采纳都读同一处（采纳的提交记 `source=external`、作者仍是该 agent，所以留档同样能把它退掉）。
 
 - 被折叠 / 被截断的行不进发送视图，也不进压缩摘要的输入；`truncate_events` 是"活动窗口"的唯一算术，界面按 `rewind` 事件画折叠分界（见「上下文压缩」）。
 
