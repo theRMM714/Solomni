@@ -32,6 +32,14 @@ impl Work {
                         label: "继续上一轮".to_string(),
                         reason: "上一轮还没有回答".to_string(),
                     })
+                } else if run == RunState::Stopped.as_str() {
+                    // 停止不是终态：「继续」就是它的逆操作（先解冻整棵子树，再接着走）。
+                    // 判据**不能**依赖"会话还在内存里"：停过的会话常常已被收走，否则界面就没有入口。
+                    Some(ContinueView {
+                        kind: "turn".to_string(),
+                        label: "继续".to_string(),
+                        reason: "会话已停止：继续会解冻并接着走".to_string(),
+                    })
                 } else {
                     None
                 }
