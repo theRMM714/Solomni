@@ -47,7 +47,7 @@
 | `PromptSource` | 提示词册加载（`prompts/`） |
 | `SystoolsSource` | 工具总表、角色表与保留名表的加载（`systools/`） |
 | `ProxyHost` | 核心代理工具的外部动作（清单 / 建会话 / 转达 / 观察 / 消息倒查 / 生命周期） |
-| `ProcessRunner` | 外部进程执行（围栏安装、拉起、stdin 送参、超时/取消杀树、head/head+tail 截断、一次性 shell）；**kernel 共享机制端口** |
+| `ProcessRunner` | 外部进程执行（围栏安装、拉起、stdin 送参、超时/取消杀树、一次性 shell）；**kernel 共享机制端口** |
 | `SessionHost`（产出 `Session`） | 起一条**外部进程会话**（一次性子进程 / 常驻服务的按行协议）：给规格拿一个可收发、可杀、可判活的会话；**kernel 共享机制端口** |
 | `EnvelopeRepair` | 手写信封不合法时的**无歧义**补救（改了字段含义就是错；拿不准就不修） |
 | `ServiceAdapter` | 一个常驻服务的协议适配器：拉起、发现操作、调用、关闭（按行协议走 kernel 的 `SessionHost`） |

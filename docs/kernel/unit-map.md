@@ -52,7 +52,7 @@
 | `src/kernel/detail/unpack.rs` | 归档解包机制（门面）：tar / tar.gz / tar.zst / tar.xz / zip 解到目录，支持 strip 与宽容链接；权限位与软链在 `src/kernel/detail/unpack/{windows,unix}.rs` |
 | `src/kernel/detail/unpack/windows.rs` | `unpack` 的 Windows 后端：不设 Unix 权限位；软链按目录 / 文件分开建 |
 | `src/kernel/detail/unpack/unix.rs` | `unpack` 的非 Windows 后端：还原归档权限位与 Unix 软链 |
-| `src/kernel/detail/process.rs` | 外部进程执行机制（门面）：守门进程、stdin 送参、隐秘字段 env 注入、超时/取消杀树、截断与一次性 shell；平台实现在 `src/kernel/detail/process/{windows,unix}.rs` |
+| `src/kernel/detail/process.rs` | 外部进程执行机制（门面）：守门进程、stdin 送参、隐秘字段 env 注入、超时/取消杀树与一次性 shell；平台实现在 `src/kernel/detail/process/{windows,unix}.rs` |
 | `src/kernel/detail/process/windows.rs` | `process` 的 Windows 后端：容器围栏准备、Job Object 收树与 PowerShell shell |
 | `src/kernel/detail/process/windows/tests.rs` | Windows 解释器解析的纯用例：真 pwsh / 应用执行别名 / 缺失三态，以及显式覆盖优先（`#[cfg(test)] mod tests;` 指向） |
 | `src/kernel/detail/process/unix.rs` | `process` 的非 Windows 后端：进程组收树与 `sh -c` shell |

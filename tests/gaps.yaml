@@ -118,3 +118,27 @@
     上述三件各有一条 Linux 宿主上的可重跑证据（记在 PR 或平台账里）；
     `node run-tests.js --audit=structure` 与 `--docs` 全绿。
   blocked_by: 需 Linux 宿主的 KVM 与 e2fsprogs（debugfs），CI 不具备
+
+- id: tools.fence-boundary-note-trigger
+  scope: global
+  level: T3
+  why: |
+    shell 回执末尾那段围栏边界说明（「工具进程只可达 …；范围外的访问被围栏拒绝」，
+    `src/kernel/detail/confine/texts.rs` 的 `fence_boundary_note`）按「子进程非零退出」出现，
+    而不是按「这次确有越界拒绝」：`Get-Content` 读一个不存在的文件也会在 stderr 末尾粘一段
+    与本命令无关的说明，读起来像这次的报错。
+    要改成「只在确有拒绝时追加」，就得在守门进程或回执里认「Access is denied」「拒绝访问」
+    这类**人读文案**——宿主语言一变判据就失效；本轮按「文案相关的先不动」的范围决定不修。
+  how: |
+    1) 让守门进程把「越界拒绝」表达成机器标记（与 `FENCE_FAILED` 同一族：固定退出码或 stderr
+       上的固定 ASCII 前缀），不靠匹配人读句子；
+    2) 外层装配回执时按标记追加说明，`src/kernel/contracts/fence.rs` 的 `FENCE_BOUNDARY_MARK` 与
+       `src/capabilities/tools/domain/shell.rs` 的 `with_scope_hint` 触发条件同步改成认标记；
+    3) 补两条用例：普通非零退出不带说明、真越界拒绝带说明；
+    4) 同步 `docs/tools/tools-and-roles.md` 与 `docs/kernel/README.md` 的围栏说明口径。
+  accept: |
+    `Get-Content <不存在的文件>` 的回执里没有围栏边界说明；一次真实的范围外读写被拒时仍带说明；
+    `cargo test --bin solomni` 全绿。
+  blocked_by: 本轮范围决定（文案相关的先不做，见 PR #95 的「明确不做」）
+
+
