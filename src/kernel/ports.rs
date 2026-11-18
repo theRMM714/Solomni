@@ -97,11 +97,11 @@ pub trait ToolHandler: Send + Sync {
     fn run(&self, ctx: &ToolCtx, name: &str, args_json: &str) -> ToolOutcome;
 }
 
-/// 目的：核心自有工具的执行上下文——这一席是谁、属于哪个工作、**提交锚在哪一行**。
+/// 目的：核心自有工具的执行上下文——这一席是谁（会话与 agent）、**提交锚在哪一行**。
 /// 约束：行锚让共享区提交能按转录行精确定位，回档才能把共享区物化回那一刻。
 pub struct ToolCtx<'a> {
-    /// 目的：顶层工作名（共享区与版本库的归属）。
-    pub work: &'a str,
+    /// 目的：这一席所属会话的 id（同名 agent 的多个会话靠它区分提交归属）。
+    pub session: &'a str,
     /// 目的：这一席的 agent 实例名。
     pub agent: &'a str,
     /// 目的：下一条转录行的 id。

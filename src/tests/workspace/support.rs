@@ -54,6 +54,27 @@ pub(crate) fn push_req(
     }
 }
 
+/// 目的：外部改动的同步——`line` 是这次同步的锚行：回档 / 留档按它判这条提交在不在点之前。
+pub(crate) fn sync_at(
+    ws: &WorkFace,
+    work: &str,
+    paths: &[&str],
+    time: i64,
+    line: u64,
+) -> Result<crate::capabilities::workspace::api::SyncReport, String> {
+    let paths: Vec<String> = paths.iter().map(|s| s.to_string()).collect();
+    ws.work_sync(
+        work,
+        &paths,
+        time,
+        crate::capabilities::workspace::api::CommitAnchor {
+            agent: String::new(),
+            session: String::new(),
+            line,
+        },
+    )
+}
+
 /// 目的：把 agent 的工作线推送进共享区（三方合并 + 主线落一条提交）；"提交即发布"的用例用它收口。
 pub(crate) fn push(
     ws: &WorkFace,

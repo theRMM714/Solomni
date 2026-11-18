@@ -139,12 +139,22 @@ pub struct Ref {
     /// 目的：这条线当前指向的提交；空 = 线已建但还没有提交。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<u64>,
-    /// 目的：每条线上各 agent 的 head（提交线分叉时用）。
+    /// 目的：留档时各 agent **自己的工作线头**（`refs/archive/<id>` 专用）——恢复要把工作线放回这里，
+    ///   不是放回主线头（那会丢掉没推送的本地提交）。
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub heads: BTreeMap<String, Option<u64>>,
     /// 目的：留档时各 agent 存档线的头（`refs/archive/<id>` 专用）——恢复要把它连同共享区一起展回来。
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub saves: BTreeMap<String, Option<u64>>,
+    /// 目的：留档时刻的下一个提交号（`refs/archive/<id>` 专用）——恢复会丢掉这个号之后的提交，
+    ///   即留档之后才长出来的那条分叉。
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub since: u64,
+}
+
+/// 目的：serde 的「零值不落盘」判据（`since` 在非留档引用上没有意义）。
+fn is_zero(v: &u64) -> bool {
+    *v == 0
 }
 
 /// 目的：一个 agent 的基线与 agent 名的配对，供待恢复事务写回。

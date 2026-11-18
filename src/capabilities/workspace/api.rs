@@ -28,8 +28,8 @@ pub use crate::capabilities::workspace::domain::workspace::{
 /// 约束：`WorkState` 等类型只在测试与呈现层命名，本 crate 的实现不直接用，故整组允许未使用告警。
 #[allow(unused_imports)]
 pub use crate::capabilities::workspace::domain::workstore::{
-    Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, DiffReport, DiffRequest,
-    DiffSign, LostEntry, LostReport, PullReport, PushReport, PushRequest, ResetReport,
+    Change, ChangeKind, CommitAnchor, CommitReport, CommitRequest, CommitSummary, DiffReport,
+    DiffRequest, DiffSign, LostEntry, LostReport, PullReport, PushReport, PushRequest, ResetReport,
     ResetRequest, ResolveAction, ResolveEntry, ResolveReport, ResolveRequest, ResolveTake,
     ResolveWarning, ResolveWarningKind, RestoreLostReport, StatusEntry, StatusReport, SyncReport,
     VersionView, WorkGcReport, WorkState,
@@ -223,10 +223,22 @@ pub trait Workspace: Send + Sync {
     ) -> Result<Option<CommitReport>, String>;
     /// **外部同步**：读工作区磁盘，把与 head 不同的路径采纳成一条 `author=external` 的提交。
     /// 约束：不改任何沙箱与工作区内容；同路径沙箱里有未提交改动时留给后续提交判冲突。
-    fn work_sync(&self, work: &str, paths: &[String], time: i64) -> Result<SyncReport, String>;
+    ///   `anchor` 是这次同步的转录行位置——回档/留档按它决定这条同步在不在回档点之前。
+    fn work_sync(
+        &self,
+        work: &str,
+        paths: &[String],
+        time: i64,
+        anchor: CommitAnchor,
+    ) -> Result<SyncReport, String>;
     /// 目的：把当前 head 树里所有受管路径的外部改动一次性采纳（确认覆盖前的保护动作）。
     /// 约束：无受管路径 = 无操作；不碰未跟踪文件。
-    fn work_sync_tracked(&self, work: &str, time: i64) -> Result<SyncReport, String>;
+    fn work_sync_tracked(
+        &self,
+        work: &str,
+        time: i64,
+        anchor: CommitAnchor,
+    ) -> Result<SyncReport, String>;
     /// 目的：首次绑定外部工作区时把工作区现有文件导入成初始提交（有上限、忽略 VCS / 依赖目录）。
     /// 约束：已有 head 时无操作；单文件超限 / 总上限截断时只导入可导入的部分。
     fn work_import_root(&self, work: &str, time: i64) -> Result<SyncReport, String>;
@@ -346,9 +358,11 @@ pub trait Workspace: Send + Sync {
         agents: &[String],
         mark: u64,
     ) -> Result<ArchiveReport, String>;
-    /// **恢复档案**：先把当前主线钉成 `refs/live/<id>`，再把主副本与档案里的工作树一起物化回档案头。
+    /// **恢复档案**：主副本与档案里的工作树一起物化回档案头，各 agent 的工作线放回档案记的头，
+    ///   再丢弃留档时刻（`since`）及之后产生的全部提交——恢复 = 回到留档操作前，长出来的分叉作废。
     /// 返回：恢复到的提交点（None = 清空）。
-    /// 约束：提交一条不删；档案引用用完即移除（当前线由 live 钉住，仍可达）。
+    /// 约束：档案缺 `since` 或目标提交已不在时整次拒绝；被丢弃提交的引用（含更晚的档案）一并清掉；
+    ///   档案引用用完即移除。
     fn work_restore_archive(&self, work: &str, mark: u64) -> Result<Option<u64>, String>;
     /// **删除的硬回退**：主副本与列出的全部沙箱一起落到删除点，再丢掉该点之后的提交。
     /// 约束：沙箱里与删除点不一致的内容先备份进 lost/；凡是提交记录被丢掉的留档引用

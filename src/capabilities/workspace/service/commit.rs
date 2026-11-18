@@ -210,6 +210,7 @@ impl WorkspaceService {
             target: None,
             heads: BTreeMap::new(),
             saves: BTreeMap::new(),
+            since: 0,
         });
         r.kind = kind;
         r.target = target;
@@ -308,6 +309,14 @@ impl WorkspaceService {
         self.set_line_head(store, &Self::save_ref(agent), RefKind::Agent, Some(id))
     }
 
+    /// 目的：该 agent 工作线（发布线）的头；空线 = None。
+    pub(super) fn work_line_head(&self, store: &Path, agent: &str) -> Result<Option<u64>, String> {
+        Ok(self
+            .store
+            .read_ref(store, &Self::work_ref(agent))?
+            .and_then(|r| r.target))
+    }
+
     /// 目的：把该 agent 的发布线快进到一条主线提交（发布成功 / 回退之后）。
     pub(super) fn fast_forward_work(
         &self,
@@ -324,7 +333,8 @@ impl WorkspaceService {
     }
 
     /// 目的：留档点：head 祖先链上「各会话都还没越过自己保留行」的最后一个提交。
-    /// 约束：只沿当前 head 的祖先链选点；没有锚的提交保守地算在回档点之前。
+    /// 约束：只沿当前 head 的祖先链选点；**没有锚的提交不参与选点**（它不在转录时间线上，
+    ///   算「之前」会让回档/留档永远停在外来提交上，正是留档不回退共享区的成因）。
     pub(super) fn archive_point(
         &self,
         store: &Path,
@@ -341,7 +351,7 @@ impl WorkspaceService {
                 continue;
             };
             let within = match &c.anchor {
-                None => true,
+                None => false,
                 Some(a) => keep_by_agent
                     .get(&a.agent)
                     .map(|k| a.line <= *k)
@@ -417,7 +427,7 @@ impl WorkspaceService {
     }
 
     /// 目的：该 agent 存档线上「转录行还没越过 keep」的最后一个快照（None = 沙箱那时还是空的）。
-    /// 约束：只沿存档线自己的祖先链找；没有锚的存档保守地算在回档点之前。
+    /// 约束：只沿存档线自己的祖先链找；没有锚的存档不参与选点（无从判定它在哪一行之后）。
     pub(super) fn save_point_at(
         &self,
         store: &Path,
@@ -434,7 +444,7 @@ impl WorkspaceService {
                 break;
             };
             let within = match &c.anchor {
-                None => true,
+                None => false,
                 Some(a) => a.agent == agent && a.line <= keep,
             };
             if within {

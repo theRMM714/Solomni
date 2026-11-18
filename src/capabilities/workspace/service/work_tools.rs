@@ -85,7 +85,7 @@ impl WorkHandler {
         }
     }
 
-    fn sync(&self, args: &serde_json::Value) -> ToolOutcome {
+    fn sync(&self, session: &str, line: u64, args: &serde_json::Value) -> ToolOutcome {
         let paths = match dw::str_list(args, "paths") {
             Ok(p) => p,
             Err(e) => return outcome(false, e),
@@ -96,10 +96,18 @@ impl WorkHandler {
         if let Err(e) = check_writable(&self.permissions, &paths, &[]) {
             return outcome(false, e);
         }
-        match self
-            .workspace
-            .work_sync(&self.work, &paths, crate::kernel::api::unix_seconds())
-        {
+        // 同步是这一席在当行做的动作：锚落在这里，回档到更早的行才能越过它。
+        let anchor = crate::capabilities::workspace::api::CommitAnchor {
+            agent: self.agent.clone(),
+            session: session.to_string(),
+            line,
+        };
+        match self.workspace.work_sync(
+            &self.work,
+            &paths,
+            crate::kernel::api::unix_seconds(),
+            anchor,
+        ) {
             Ok(r) => outcome(true, dw::render_sync(&r)),
             Err(e) => outcome(false, e),
         }
@@ -424,9 +432,9 @@ impl ToolHandler for WorkHandler {
         };
         match name {
             dw::PULL => self.pull(&args),
-            dw::COMMIT => self.commit(ctx.work, ctx.agent, ctx.line, &args),
-            dw::PUSH => self.push(ctx.work, ctx.agent, ctx.line, &args),
-            dw::SYNC => self.sync(&args),
+            dw::COMMIT => self.commit(ctx.session, ctx.agent, ctx.line, &args),
+            dw::PUSH => self.push(ctx.session, ctx.agent, ctx.line, &args),
+            dw::SYNC => self.sync(ctx.session, ctx.line, &args),
             dw::STATUS => self.status(&args),
             dw::VERSIONS => self.versions(&args),
             dw::DIFF => self.diff(&args),

@@ -40,7 +40,7 @@
   - **拉取进度**：`work_pull` 逐条写入沙箱与内存基线，最后原子写回 index；中途失败会先落盘已完成部分的基线，并在错误里点名失败路径与已更新数量。进程在 copy 与 index 写之间被杀仍有窗口，重拉会收敛；严格崩溃一致性走后续 pending 日志。
   - **备份与恢复**：`work_lost(work, agent, path?)` 只列该 agent 的 `lost/`（存储形态 `lost/<agent>/@<来源>/<原路径>`，来源是 `resolve` / `reset-paths` / `reset-<目标>` / `delete-<点>` / `delete-empty` / `archive-<存档号>` / `rewind-<点>` / `restore-<存档号>`；没有 `@` 段的旧备份整条当原路径）；`work_restore_lost(work, agent, path, expect_current)` 按当前沙箱 hash 做 compare-and-swap 后把备份复制回**原路径**。两者都只读写本 agent 的沙箱与版本库，不碰共享主副本。
   - **对象回收**：`work_gc(work, apply)` 以「所有提交树 + 所有 agent 基线」为可达集合；`apply=false` 只报数量和字节，`apply=true` 才删不可达对象并清对象目录里的临时文件。入口是隐藏维护命令 `solomni --work-gc <工作名>`（默认 dry-run，`--yes` 才删）；不做后台静默清理。
-  - 提交记录带 `CommitAnchor(agent, session, line)`（会话不可省：同名 agent 在不同会话里行号都从 1 数，缺会话会串），回档据此按行精确定位。留档引用 `refs/archive/<id>` 除各 agent 的主线头外还记 `saves`（各 agent 存档线头），恢复才展得回留档前的沙箱。
+  - 提交记录带 `CommitAnchor(agent, session, line)`（会话不可省：同名 agent 在不同会话里行号都从 1 数，缺会话会串），回档据此按行精确定位；**没有锚的提交不参与选点**（外部同步与用户投喂都带锚，无锚 = 来历不明，不能被当成"留档点之前"）。留档引用 `refs/archive/<id>` 记 `target`（留档前的主线头）、`heads`（各 agent 自己的工作线头）、`saves`（各 agent 存档线头）与 `since`（留档时刻的下一个提交号）：恢复到档案头、工作线与存档线各回各的头，然后丢弃 `since` 及之后的提交，留档之后长出来的分叉一并作废。
   - 出站端口 `Workdirs` / **`WorkStore`**（版本库落盘：流式资产原语 + 跨根复制（备份 / 恢复）+ 内容寻址对象 + 提交记录 + 拉取基线 + 待恢复事务 + 提交号 + 跨进程锁 + 对象回收）**只由 `service.rs` 持有**（R12）。
 - 模块事实（含 `has_userdata`）由 `modules` 提供：沙箱把它收成 `modules_with_userdata` 一起注入，围栏派生据此决定派不派这条落点——domain 层不读盘。
 - 沙箱还带**会话 id**（`Sandbox.session`）：围栏把它当容器身份里的会话租约，配合 agent 与受保护根集合派生 SID（见 [docs/kernel/README.md](../kernel/README.md) 的「身份按 reach、生命周期按会话」）；授权按会话持有，会话结束统一回收。

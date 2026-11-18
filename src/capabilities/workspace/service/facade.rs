@@ -99,14 +99,25 @@ impl Workspace for WorkspaceService {
     ) -> Result<Vec<bool>, String> {
         WorkspaceService::work_stale_reads(self, work, agent, queries)
     }
-    fn work_sync(&self, work: &str, paths: &[String], time: i64) -> Result<SyncReport, String> {
-        WorkspaceService::work_sync(self, work, paths, time)
+    fn work_sync(
+        &self,
+        work: &str,
+        paths: &[String],
+        time: i64,
+        anchor: crate::capabilities::workspace::api::CommitAnchor,
+    ) -> Result<SyncReport, String> {
+        WorkspaceService::work_sync(self, work, paths, time, anchor)
     }
     fn work_import_root(&self, work: &str, time: i64) -> Result<SyncReport, String> {
         WorkspaceService::work_import_root(self, work, time)
     }
-    fn work_sync_tracked(&self, work: &str, time: i64) -> Result<SyncReport, String> {
-        WorkspaceService::work_sync_tracked(self, work, time)
+    fn work_sync_tracked(
+        &self,
+        work: &str,
+        time: i64,
+        anchor: crate::capabilities::workspace::api::CommitAnchor,
+    ) -> Result<SyncReport, String> {
+        WorkspaceService::work_sync_tracked(self, work, time, anchor)
     }
     fn work_status(
         &self,
