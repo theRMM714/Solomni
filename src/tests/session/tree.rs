@@ -136,7 +136,10 @@ pub(crate) fn continue_hint_is_derived_from_the_session_state() {
         "w",
         &[serde_json::json!({
             "type": "transcript",
-            "lines": [{ "id": 0, "kind": "user", "speaker": "用户", "line": "做一下" }],
+            "lines": [
+                { "id": 0, "kind": "user", "speaker": "用户", "line": "做一下" },
+                { "id": 1, "kind": "msg", "speaker": "a", "line": "做完了，还剩一点" },
+            ],
         })],
     )
     .expect("写入用户行");
@@ -154,6 +157,60 @@ pub(crate) fn continue_hint_is_derived_from_the_session_state() {
     let hint = view.continue_action.expect("末条是用户：要有继续上一轮");
     assert_eq!(hint.kind, "turn");
     assert!(hint.label.contains("继续"));
+
+}
+
+/// 目的：已停止的会话仍然给「继续」——停止不是终态，继续是它的逆操作（解冻整棵子树再接着走）。
+/// 约束：判据不能依赖「会话还在内存里」：停过的会话常已被收走，否则界面就没有恢复入口。
+#[test]
+pub(crate) fn stopped_session_still_offers_continue() {
+    let hist = Arc::new(InMemoryHistory::new());
+    seed_session(
+        &hist,
+        "w",
+        Mode::Single,
+        vec![agent_meta("a", &["a"], None)],
+        Default::default(),
+    );
+    hist.append(
+        "w",
+        &[serde_json::json!({
+            "type": "transcript",
+            "lines": [
+                { "id": 0, "kind": "user", "speaker": "用户", "line": "做一下" },
+                { "id": 1, "kind": "msg", "speaker": "a", "line": "做完了，还剩一点" },
+            ],
+        })],
+    )
+    .expect("写入用户行");
+    let mut core = core_with_pkgs(
+        vec![module_of("a")],
+        gw(BTreeMap::new(), Vec::new()),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::new(InMemorySysIo::new()),
+        Arc::new(InMemoryPackages::empty()),
+    );
+    let prepared = core.prepare_activation("w").expect("准备启用");
+    core.commit_activation(prepared).expect("提交启用");
+    core.turn
+        .set_subtree_run("w", RunState::Stopped)
+        .expect("用户按了「停止会话」");
+    let history = core.lifecycle.history_list();
+    let view = core
+        .session_views(&history)
+        .into_iter()
+        .find(|v| v.sid == "w")
+        .expect("会话还在列表里");
+    assert_eq!(view.run, "stopped", "停的是会话本身");
+    let hint = view.continue_action.expect("已停止也要给继续");
+    assert_eq!(hint.kind, "turn");
+    assert!(
+        hint.reason.contains("解冻"),
+        "要说清继续会解冻：{}",
+        hint.reason
+    );
 }
 
 /// 目的：内容类系统提示（notice）占一行、自己成一条回复，但**不进模型上下文**。
