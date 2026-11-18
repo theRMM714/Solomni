@@ -8,6 +8,7 @@ use crate::capabilities::workspace::api::{
     ChangeKind, ChangeView, CommitDetail, CommitFileView, CommitSummary, StatusEntry, StatusReport,
     VERSION_TEXT_LIMIT, VersionView, WorkLog, WorkLogEntry, media_hint,
 };
+use crate::capabilities::workspace::domain::workstore::work_state_of;
 
 impl WorkspaceService {
     pub(super) fn work_status(
@@ -32,9 +33,24 @@ impl WorkspaceService {
                 .map(|c| CommitSummary::from(&c)),
             None => None,
         };
+        let (work_id, work_tree) = self.work_tree(&store, agent)?;
+        let work_head = match work_id {
+            Some(id) => self
+                .store
+                .read_commit(&store, id)?
+                .map(|c| CommitSummary::from(&c)),
+            None => None,
+        };
         let index: Index = self.store.read_index(&store, agent)?;
         let sandbox_files: BTreeSet<String> = self.store.list(&sandbox)?.into_iter().collect();
-        let all: BTreeSet<String> = index.keys().chain(tree.keys()).cloned().collect();
+        // 候选路径：拉取基线、我的工作线、主线与沙箱的并集；状态只看「工作线 / 主线 / 沙箱」三方。
+        let all: BTreeSet<String> = index
+            .keys()
+            .chain(work_tree.keys())
+            .chain(tree.keys())
+            .chain(sandbox_files.iter())
+            .cloned()
+            .collect();
         // 显式给路径时，把沙箱里未跟踪的文件也算进候选（能如实报“本地新增”）。
         let available: BTreeSet<String> = all.iter().chain(sandbox_files.iter()).cloned().collect();
         let (want, missing): (Vec<String>, Vec<String>) = if paths.is_empty() {
@@ -58,31 +74,26 @@ impl WorkspaceService {
         for rel in want {
             let local = self.store.scan_under(&sandbox, &rel, None)?;
             let local_hash = local.as_ref().map(|v| v.hash.clone());
-            let state = status_of(
-                index.get(&rel).map(String::as_str),
+            let state = work_state_of(
+                work_tree.get(&rel).map(String::as_str),
                 tree.get(&rel).map(String::as_str),
                 local_hash.as_deref(),
             );
             entries.push(StatusEntry { path: rel, state });
         }
-        // 沙箱里未跟踪的文件：只在不带 paths 时列出，避免把一次筛选变成整盘清单。
-        let mut local_only: Vec<String> = if paths.is_empty() {
-            sandbox_files
-                .iter()
-                .filter(|p| !index.contains_key(*p) && !tree.contains_key(*p))
-                .cloned()
-                .collect()
-        } else {
-            Vec::new()
-        };
-        let local_only_truncated = local_only.len() > MAX_LOCAL_ONLY;
-        local_only.truncate(MAX_LOCAL_ONLY);
         // 主副本路径清单：截断如实标注。
         let mut all_tree: Vec<String> = tree.keys().cloned().collect();
         let truncated = all_tree.len() > MAX_STATUS_TREE;
         all_tree.truncate(MAX_STATUS_TREE);
+        // 未推送条数：工作线上不在主线祖先链里的提交。
+        let main_ancestors = self.head_ancestors(&store, head_id)?;
+        let unpushed = self
+            .head_ancestors(&store, work_id)?
+            .into_iter()
+            .filter(|id| !main_ancestors.contains(id))
+            .count();
         // 最近提交（新→旧，只沿当前 head 的祖先链：已回滚离开的提交不算"最近"）。
-        let ancestors = self.head_ancestors(&store, head_id)?;
+        let ancestors = main_ancestors;
         let mut ids = self.store.list_commits(&store)?;
         ids.reverse();
         let mut recent = Vec::new();
@@ -97,12 +108,12 @@ impl WorkspaceService {
         }
         Ok(StatusReport {
             head,
+            work_head,
+            unpushed,
             tree: all_tree,
             tree_truncated: truncated,
             entries,
             missing,
-            local_only,
-            local_only_truncated,
             external,
             recent,
         })
@@ -133,14 +144,50 @@ impl WorkspaceService {
         let on_head = self.head_ancestors(&store, head_id)?;
         // 只列主线提交：工作线提交与存档快照是各自的本地历史，进不了共享区历史。
         let mut main_ids: Vec<u64> = Vec::new();
+        // 已被推送的工作线提交：squash 之后原提交不再是主线祖先，只能靠主线提交记下的来源判。
+        let mut published: BTreeSet<u64> = BTreeSet::new();
         for id in self.store.list_commits(&store)? {
             if let Some(c) = self.store.read_commit(&store, id)?
                 && c.line == CommitLine::Main
             {
+                published.extend(c.sources.iter().copied());
                 main_ids.push(id);
             }
         }
         let total = main_ids.len();
+        // 各 agent 工作线的祖先集：工作线提交散布在各自的线上，on_head 只能按自己那条线判。
+        let mut lines: BTreeMap<String, BTreeSet<u64>> = BTreeMap::new();
+        for (name, r) in self.store.list_refs(&store)? {
+            let Some(agent) = name.strip_prefix("agents/") else {
+                continue;
+            };
+            if agent.contains('/') {
+                continue;
+            }
+            lines.insert(agent.to_string(), self.head_ancestors(&store, r.target)?);
+        }
+        // 工作线本地提交：各 agent 各一条线，放在同一页里按 id 新→旧，pushed 标是否已进主线。
+        let mut work: Vec<WorkLogEntry> = Vec::new();
+        for id in self.store.list_commits(&store)?.into_iter().rev() {
+            let Some(c) = self.store.read_commit(&store, id)? else {
+                continue;
+            };
+            if c.line != CommitLine::Work {
+                continue;
+            }
+            let on_line = lines.get(&c.author).is_some_and(|s| s.contains(&id));
+            work.push(WorkLogEntry {
+                id: c.id,
+                parent: c.parent,
+                author: c.author,
+                session: c.session,
+                time: c.time,
+                message: c.message,
+                changes: c.changes.len(),
+                on_head: on_line,
+                pushed: published.contains(&id) || on_head.contains(&id),
+            });
+        }
         let mut commits: Vec<WorkLogEntry> = Vec::new();
         let mut truncated = false;
         for id in main_ids.into_iter().rev() {
@@ -163,11 +210,13 @@ impl WorkspaceService {
                 message: c.message,
                 changes: c.changes.len(),
                 on_head: on_head.contains(&id),
+                pushed: true,
             });
         }
         Ok(WorkLog {
             head,
             commits,
+            work,
             total,
             truncated,
         })

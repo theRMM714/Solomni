@@ -513,6 +513,72 @@ pub(crate) fn work_delete_is_explicit_in_the_commit_request() {
     assert!(!st.tree.contains(&"note.md".to_string()));
 }
 
+/// 目的：work_status 按「工作线 / 主线 / 沙箱」报五态：未提交新增 → 未推送 → 已提交 → 提交后又改 → 未提交删除；主线有、没拉取单独标。
+#[test]
+pub(crate) fn work_status_reports_the_work_line_five_states() {
+    use crate::capabilities::workspace::api::{StatusReport, WorkState};
+    use crate::capabilities::workspace::ports::WorkStore;
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string(), "b".to_string()])
+        .unwrap();
+    let find =
+        |st: &StatusReport, path: &str| st.entries.iter().find(|e| e.path == path).map(|e| e.state);
+    let sb = sandbox_of(&ws, "w", "a");
+    store.write_under(&sb, "draft.md", b"v1").unwrap();
+    let st = ws.work_status("w", "a", &[]).unwrap();
+    assert_eq!(find(&st, "draft.md"), Some(WorkState::Untracked));
+    assert!(st.work_head.is_none() && st.unpushed == 0);
+
+    let c1 = ws
+        .work_commit(
+            "w",
+            "a",
+            "w--a",
+            &commit_req(&["draft.md"], &[], "第一版", 1),
+        )
+        .unwrap();
+    let st = ws.work_status("w", "a", &[]).unwrap();
+    assert_eq!(find(&st, "draft.md"), Some(WorkState::Unpushed));
+    assert_eq!(st.unpushed, 1);
+    assert_eq!(st.work_head.as_ref().map(|c| c.id), Some(c1.id));
+
+    let published = push(&ws, "w", "a", "第一版", 1, 1)
+        .unwrap()
+        .commit
+        .expect("有内容可推送");
+    let st = ws.work_status("w", "a", &[]).unwrap();
+    assert_eq!(find(&st, "draft.md"), Some(WorkState::Committed));
+    assert_eq!(st.unpushed, 0);
+    assert_eq!(st.head.as_ref().map(|c| c.id), Some(published));
+    assert_eq!(st.work_head.as_ref().map(|c| c.id), Some(published));
+
+    store.write_under(&sb, "draft.md", b"v2").unwrap();
+    let st = ws.work_status("w", "a", &[]).unwrap();
+    assert_eq!(find(&st, "draft.md"), Some(WorkState::Modified));
+    store.remove_under(&sb, "draft.md").unwrap();
+    let st = ws.work_status("w", "a", &[]).unwrap();
+    assert_eq!(find(&st, "draft.md"), Some(WorkState::Deleted));
+
+    // b 推送另一条路径：a 还没拉取，状态应说「主线有、还没拉取」而不是「未提交新增」。
+    let sb_b = sandbox_of(&ws, "w", "b");
+    store.write_under(&sb_b, "another.md", b"x").unwrap();
+    ws.work_commit("w", "b", "w--b", &commit_req(&["another.md"], &[], "b", 2))
+        .unwrap();
+    push(&ws, "w", "b", "b", 2, 2).unwrap();
+    let st = ws.work_status("w", "a", &[]).unwrap();
+    assert_eq!(find(&st, "another.md"), Some(WorkState::NotPulled));
+
+    // work_log 另列各 agent 工作线的提交，并标是否已推送。
+    let log = ws.work_log("w", 10, None).unwrap();
+    let mine = log
+        .work
+        .iter()
+        .find(|e| e.id == c1.id)
+        .expect("工作线提交在列");
+    assert_eq!(mine.author, "a");
+    assert!(mine.pushed, "已推送过");
+}
+
 /// 目的：work_versions 给文本预览、二进制只给指纹与大小；不把二进制冒充文本。
 #[test]
 pub(crate) fn work_versions_reports_text_and_binary_without_guessing() {

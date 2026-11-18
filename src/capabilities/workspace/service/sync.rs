@@ -380,6 +380,7 @@ impl WorkspaceService {
             depth,
             source: Source::External,
             line: CommitLine::Main,
+            sources: Vec::new(),
             anchor: None,
         };
         let pending = Pending::Commit {

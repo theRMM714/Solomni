@@ -105,6 +105,9 @@ pub struct Commit {
     /// 目的：这条提交属于哪条线——只有主线提交进共享区与共享区历史。
     #[serde(default)]
     pub line: CommitLine,
+    /// 目的：这条主线提交 squash 了工作线的哪些提交；work_log 据此判定「已推送」。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<u64>,
     /// 目的：转录行锚（没有锚 = None，按"总在回档点之前"保守处理）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anchor: Option<CommitAnchor>,

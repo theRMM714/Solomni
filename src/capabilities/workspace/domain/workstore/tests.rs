@@ -1,5 +1,5 @@
 //! 目的：workstore 的纯判定用例——路径校验、三方比较、解决判定与状态映射。
-//! 管：`clean_rel` / `expand_paths` / `plan_commit` / `pull_verdict` / `local_take_verdict` / `status_of` / `lost_rel` 的边界。
+//! 管：`clean_rel` / `expand_paths` / `plan_commit` / `pull_verdict` / `local_take_verdict` / `status_of` / `work_state_of` / `lost_rel` 的边界。
 //! 不管：落盘与 IO（由 `workspace::detail` 与能力面用例覆盖）。
 //! 联动：只经 `super::*` 用纯函数；起作用的源码见同目录 `record.rs` / `path.rs` / `merge.rs` / `resolve.rs` / `status.rs`。
 
@@ -235,6 +235,25 @@ fn status_separates_local_change_from_upstream_change() {
         status_of(Some("h1"), None, Some("h2")),
         StatusState::Conflict
     );
+}
+
+/// 目的：工作面五态——工作线头 vs 主线头 vs 沙箱；推送前后分别是未推送与已提交。
+#[test]
+fn work_state_follows_the_work_line_not_the_main_line() {
+    use WorkState::*;
+    // 工作线有、沙箱同版：主线同版才是已提交，否则是未推送。
+    assert_eq!(work_state_of(Some("w1"), Some("w1"), Some("w1")), Committed);
+    assert_eq!(work_state_of(Some("w1"), Some("m1"), Some("w1")), Unpushed);
+    assert_eq!(work_state_of(Some("w1"), None, Some("w1")), Unpushed);
+    // 提交后又改 / 沙箱删掉。
+    assert_eq!(work_state_of(Some("w1"), Some("w1"), Some("w2")), Modified);
+    assert_eq!(work_state_of(Some("w1"), Some("w1"), None), Deleted);
+    // 没提交过：主线有同版 = 一致；主线有别的版 = 本地改过；主线没有 = 未提交新增。
+    assert_eq!(work_state_of(None, Some("m1"), Some("m1")), Synced);
+    assert_eq!(work_state_of(None, Some("m1"), Some("m2")), Modified);
+    assert_eq!(work_state_of(None, None, Some("l1")), Untracked);
+    // 主线有、沙箱没有：还没拉取。
+    assert_eq!(work_state_of(None, Some("m1"), None), NotPulled);
 }
 
 #[test]

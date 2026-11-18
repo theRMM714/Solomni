@@ -170,6 +170,8 @@ impl WorkspaceService {
             depth,
             source,
             line,
+            // 主线提交才 squash 工作线；本地提交与快照没有来源集合。
+            sources: Vec::new(),
             anchor,
         };
         let pending = Pending::Commit {
@@ -534,7 +536,7 @@ impl WorkspaceService {
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;
         let (head, theirs) = self.head_tree(&store)?;
-        let (_, mine) = self.work_tree(&store, agent)?;
+        let (work_id, mine) = self.work_tree(&store, agent)?;
         // 基线 = 我拉取过的主线内容：没拉过的路径基线为空，合并时按「我新增」处理。
         let base: Tree = self.store.read_index(&store, agent)?;
         let plan = match plan_merge(&base, &mine, &theirs) {
@@ -567,6 +569,13 @@ impl WorkspaceService {
                 })?;
             }
         }
+        // 这次 squash 吸收了哪些本地提交：work_log 据此把已发布的提交标成「已推送」。
+        let main_ancestors = self.head_ancestors(&store, head)?;
+        let sources: Vec<u64> = self
+            .head_ancestors(&store, work_id)?
+            .into_iter()
+            .filter(|id| !main_ancestors.contains(id))
+            .collect();
         let id = self.reserve_id(&store)?;
         let commit = Commit {
             id,
@@ -582,6 +591,7 @@ impl WorkspaceService {
             depth: 0,
             source: Source::Tool,
             line: CommitLine::Main,
+            sources,
             anchor: Some(CommitAnchor {
                 agent: agent.to_string(),
                 session: session.to_string(),
@@ -705,6 +715,7 @@ impl WorkspaceService {
             depth,
             source: Source::User,
             line: CommitLine::Main,
+            sources: Vec::new(),
             anchor: Some(CommitAnchor {
                 agent: String::new(),
                 session: String::new(),
