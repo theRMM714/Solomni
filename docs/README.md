@@ -36,7 +36,7 @@
 | `taskchain`（任务链） | [README.md](taskchain/README.md)、[unit-map.md](taskchain/unit-map.md) |
 | `kernel`（地基库，非层） | [README.md](kernel/README.md)、[unit-map.md](kernel/unit-map.md) |
 | 根（启动 / 组合根 / 探针 / 守门进程） | [README.md](entry/README.md)、[unit-map.md](entry/unit-map.md) |
-| 前端 / 交付机制（`cli` 与 `web`） | [README.md](presentation/README.md)、[contracts.md](presentation/contracts.md)、`cli/`、`web/` |
+| 前端 / 交付机制（`cli` 与 `web`） | [README.md](presentation/README.md)、[contracts.md](presentation/contracts.md)、[cli/README.md](presentation/cli/README.md)、[web/README.md](presentation/web/README.md) |
 ## 横向：测试与质量
 
 | 要找什么 | 读哪一份 |
@@ -58,6 +58,7 @@
 | 单 agent：实施、本机回路、收口 | [workflow/single-agent.md](workflow/single-agent.md) |
 | 多 agent：开工、派发、worktree、逐片 squash 集成、收口 | [workflow/multi-agent.md](workflow/multi-agent.md) |
 | 用户启动文档审计 / 治理（检查、修改、验收） | [workflow/docs-audit.md](workflow/docs-audit.md) |
+| 架构细则入口（分层、端口、状态、边界判据、注释契约、Rust 规范） | [architecture/README.md](architecture/README.md) |
 | 文档分层、同步表、术语、引用格式 | [conventions.md](conventions.md) |
 | Rust 源码布局、格式与静态检查、unsafe、依赖 | [architecture/rust-dev.md](architecture/rust-dev.md) |
 

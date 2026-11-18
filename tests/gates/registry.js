@@ -37,6 +37,7 @@ const S = {
 const D = {
   portals: require("./docs/portals.js"),
   rootRouter: require("./docs/root-router.js"),
+  unitIndex: require("./docs/unit-index.js"),
   templates: require("./docs/templates.js"),
   generated: require("./docs/generated.js"),
 };
@@ -165,13 +166,14 @@ const GATES = [
   },
   { id: "docs/portals", lane: "docs", step: "T0 文档审查", kind: "text", inputs: ["*.md", "docs/**/*.md"], run: (root) => D.portals.portals(root) },
   { id: "docs/root-router", lane: "docs", step: "T0 文档审查", kind: "text", inputs: ["*.md", "AGENTS.md"], run: (root) => D.rootRouter.rootRouter(root) },
+  { id: "docs/index", lane: "docs", step: "T0 文档审查", kind: "text", inputs: ["docs/**/README.md", "docs/README.md"], run: (root) => D.unitIndex.unitIndex(root) },
   { id: "docs/templates", lane: "docs", step: "T0 文档审查", kind: "spawn", inputs: ["docs/templates/**", "docs/**/*.md"], run: (root) => D.templates.templates(root) },
   { id: "docs/generated", lane: "docs", step: "T0 文档审查", kind: "spawn", inputs: ["docs/**/*.md", "src/capabilities/vm/domain/exec.rs", "tests/**/gaps.yaml"], run: (root) => D.generated.generated(root) },
 ];
 
 /** 车道 = 有序 id 列表（顺序即报告里问题的顺序；改动顺序会让 detail 字符串变化）。 */
 const LANE_ORDER = {
-  docs: ["docs/portals", "docs/root-router", "docs/templates", "docs/generated"],
+  docs: ["docs/portals", "docs/root-router", "docs/index", "docs/templates", "docs/generated"],
   structure: [
     "structure/targets",
     "structure/orphans",

@@ -24,7 +24,7 @@
 | 细则正文（`docs/**`） | 该领域的门户、[`AGENTS.md`](../AGENTS.md) 文档路由表、其它文档里指向该节的引用 |
 | 门户的节标题或结构 | 该领域细则里的回引、[`AGENTS.md`](../AGENTS.md) 文档路由表、[`README.md`](../README.md) 文档表 |
 | 新增 / 删除 / 改名文档 | [`AGENTS.md`](../AGENTS.md) 文档路由表、[`README.md`](../README.md) 文档表、所有引用它的文档与代码注释 |
-| 代码里被文档机器比对的段落 | 该文档与比对它的测试（路由表 ↔ `src/tests/routes.rs`、提示词键表 ↔ `prompts/**`、`unit-map.md` ↔ 磁盘、根 `*.md` ↔ 文档路由表） |
+| 代码里被文档机器比对的段落 | 该文档与比对它的测试（路由表 ↔ `src/tests/routes.rs`、提示词键表 ↔ `prompts/**`、`unit-map.md` ↔ 磁盘、根 `*.md` ↔ 文档路由表的表行、`docs/*/README.md` ↔ `docs/README.md` 索引表） |
 | `tests/gaps.yaml` 的条目 | [`TESTING.md`](../TESTING.md) 门户与 [`gaps-acceptance.md`](testing/gaps-acceptance.md) 的现状描述 |
 
 - 引用一律用**相对仓库根的路径**（`docs/testing/levels.md`），不写机器路径、不写绝对路径。
